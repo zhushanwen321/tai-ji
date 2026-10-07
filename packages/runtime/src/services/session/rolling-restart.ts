@@ -108,19 +108,26 @@ const PERCENT_SCALE = 100
  * closeLogger 之前（台账尾部行——server.stop→destroyAll 触发的 shutdown/deleted 行经
  * 异步缓冲——必须等落盘后才能 process.exit，且台账 close 自身的降级日志仍能经 logger
  * 落盘）。中间步骤与 index.ts 既有链逐行同序（只加打点，不重排）。
+ *
+ * 终端 PTY 清理（terminal-multi-instance u4）挂 server-stop 紧随其后：与
+ * server.stop→destroyAll 同一语义（先关入口再杀子进程——server.stop 之后不再有
+ * terminal.spawn 请求，注册表冻结，清理后不会被新建实例回填；先杀后关则关停窗口内
+ * spawn 的新 PTY 逃逸）。位置在 server-stop 与 engine-pool-dispose 之间，不改 u7c
+ * 钉死的 engine-pool-dispose 相对约束。
  */
 export const SHUTDOWN_STEP_SEQUENCE = [
   'cancel-rolling-restart',
   'stop-memory-watermark-timer',
   'stop-watchdog',
   'cancel-pending-respawns',
-  'stop-idle-reaper',
   'flush-stores',
   'dispose-skill-registry',
   'dispose-git-head-watcher',
   'dispose-claim-ledger',
+  'dispose-terminal-ptys',
   'deinit-relay-server',
   'server-stop',
+  'dispose-terminal-pties',
   'engine-pool-dispose',
   'close-crash-journal',
   'close-logger',

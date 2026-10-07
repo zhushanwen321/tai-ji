@@ -1,3 +1,13 @@
+<script lang="ts">
+/** 实例级注册键的模块级递增器（script setup 变量是每实例的，计数器必须模块级） */
+let formOverlaySurfaceSeq = 0
+
+/** 取下一个实例注册键（split 多 Panel 可各挂一个表单 overlay，各报各的开态） */
+function nextFormOverlaySurfaceKey(): string {
+  return `form-overlay-${++formOverlaySurfaceSeq}`
+}
+</script>
+
 <script setup lang="ts">
 /**
  * FormOverlay —— 统一提问表单壳（AskUserOverlay 泛化，设计 D5）。
@@ -21,7 +31,7 @@
  * testid 正名（有意变更，非回归）：ask-user-\* → form-\*、schedule-create-overlay →
  * form-overlay（壳根）。
  */
-import { computed, ref, shallowReactive, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, shallowReactive, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Button } from '@/components/ui/button'
 import type { ComponentPublicInstance } from 'vue'
@@ -30,6 +40,7 @@ import ChoiceQuestion from './ChoiceQuestion.vue'
 import TextQuestion from './TextQuestion.vue'
 import ScheduleForm from './ScheduleForm.vue'
 import { OTHER_VALUE, initialQuestionState, type QuestionState } from './question-state'
+import { registerModalSurface } from '@/composables/features/app/modal-surface-registry'
 
 const props = withDefaults(defineProps<{
   /** form 源问题集（新 form 帧 / legacy askUser 归一后）；提供时优先于 draft */
@@ -48,6 +59,16 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
+
+// 模态表面聚合注册（§6.7）：本组件挂载⇔表单 overlay 开（Panel.vue 以 overlayBandActive
+// v-if 门控挂载），开合态恒 true（卸载即注销——成员表版本号承担翻转信号）；实例级 key
+// 取模块级递增（split 多 Panel 可各挂一个表单 overlay，各报各的开态）。旗标组由登记表按 id 读取。
+const disposeSurfaceRegistration = registerModalSurface({
+  surface: 'form-overlay',
+  key: nextFormOverlaySurfaceKey(),
+  isOpen: () => true,
+})
+onBeforeUnmount(disposeSurfaceRegistration)
 
 /** legacy draft 直挂标记（表头只余脉冲点——legacy 帧不携带问题文本） */
 const draftMount = computed(() => props.questions === undefined && props.draft !== undefined)

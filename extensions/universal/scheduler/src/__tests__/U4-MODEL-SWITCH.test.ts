@@ -1,5 +1,5 @@
 /**
- * U4_MODEL_SWITCH：dispatch 模型切换（设计 D3 修订版 + D1 归属简化 + ADR-0112
+ * U4_MODEL_SWITCH：dispatch 模型切换（设计 D3 修订版 + D1 归属简化 + ADR-0122
  * 事实查询翻转）验收
  *
  * 覆盖五块机制（D1 终态：agent_settled + isIdle 复核拆 turnIndex 归属状态机——原
@@ -12,7 +12,7 @@
  * - 互斥：切换在途时其他需切模型任务 skip + pending 留待下 tick 重试
  * - 串行化（MF-2）：settled 恢复在途 / 切换 setModel 在途未建记录窗口内，后继需切模型
  *   任务的 setModel 排队等前序模型 op 完成（任意两个 setModel 不并发、双记录不叠写）
- * - tick 事实查询兜正确性（原 2-tick 计数对账已按 ADR-0112 删除）：严格先于同 tick
+ * - tick 事实查询兜正确性（原 2-tick 计数对账已按 ADR-0122 删除）：严格先于同 tick
  *   dispatch 循环；记录存在 + idle 即恢复（agent_settled 丢失时由查询收敛——拉保证
  *   正确、事件只优化延迟）；未决记录守卫（无记录时模型漂移 = 用户自主行为不动作）
  * - 降级与接管副作用：setModel false 不阻塞 dispatch；sendMessage 抛错 catch 先恢复；
@@ -217,7 +217,7 @@ describe('U4_MODEL_SWITCH: dispatch 模型切换', () => {
       // setModel(目标) 与之并发、完成顺序不定（恢复后完成则 B 的 turn 用错模型）。修复后
       // 互斥分支 await 结算——锁定「恢复(原)记账并完成前，新切换不得发起」的顺序契约。
       //
-      // 状态构造说明：公开行为下「记录存在 + idle」即结算（ADR-0112 事实查询，无窗口
+      // 状态构造说明：公开行为下「记录存在 + idle」即结算（ADR-0122 事实查询，无窗口
       // 计数），互斥分支命中的未决记录直接可用——此处只断言记录存在
       //（extensions 测试目录豁免 unsafe-cast 规则，ask-user 等先例）。
       const taskA = await addModelTask('job-a', TASK_M)

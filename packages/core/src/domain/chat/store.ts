@@ -5,7 +5,7 @@
  * 本文件仅保留与代码行为直接绑定的短契约注释。
  */
 import { computed, ref, shallowRef, type ComputedRef, type ShallowRef } from 'vue'
-import { commitMessages, truncateMessagesFrom, prependHistory as prependHistoryMut } from './mutations'
+import { commitMessages, truncateMessagesFrom, prependHistory as prependHistoryMut, createAssistantErrorMessage } from './mutations'
 import { truncateToolOutputBatch, truncateToolOutputBatchCached } from './truncate-tool-output'
 import { dispatchMessageEvent } from './effects/registry'
 import {
@@ -41,6 +41,7 @@ import { segmentsToText, SUBAGENT_DIRECTIVE_CUSTOM_TYPE, PI_RESPAWN_NOTICE_CUSTO
 import type { PiRespawnNoticeVariant } from '@taiji/shared'
 import type { RetryState, FinalizeReason } from './store-types'
 import { isDevMode } from '../../platform/dev-mode'
+import { randomUuid } from '../../utils/random-uuid'
 // [btw-question D5/AU1] 查看态豁免源：drawer 域公开 barrel（AC10 包名单层放行；drawer
 // 域不回指 chat，无域间环）。装配进 LruEvictDeps.viewedVids——evictIfNeeded 入口对
 // viewed 中非虚拟成员（正在查看的 btw 线）刷新 recency，查看中不落阈值驱逐。
@@ -69,7 +70,7 @@ function attachRunningToolCall(prev: Message[], form: PiToolCallEntryForm): Mess
   const idx = findLastAssistantIndex(prev)
   if (idx < 0) return prev
   const host = prev[idx]!
-  const callId = typeof form.toolCallId === 'string' ? form.toolCallId : `tc-${crypto.randomUUID()}`
+  const callId = typeof form.toolCallId === 'string' ? form.toolCallId : `tc-${randomUuid()}`
   const existing = host.toolCalls?.find((t) => t.id === callId)
   if (existing && (existing.output !== undefined || existing.status === 'error')) return prev
   const toolCalls = existing
@@ -668,7 +669,7 @@ export function createChatStore(options: ChatStoreOptions = {}) {
   function appendUser(sessionId: string, segments: Segment[], id?: string): string {
     const entry: PiMessageEntry = {
       type: 'message',
-      id: id ?? `u-${crypto.randomUUID()}`,
+      id: id ?? `u-${randomUuid()}`,
       parentId: null,
       timestamp: new Date().toISOString(),
       message: { role: 'user', content: segments, timestamp: Date.now() },
@@ -832,7 +833,7 @@ export function createChatStore(options: ChatStoreOptions = {}) {
     clearPendingSend(sessionId)
     // 收口日志（D5）：异常 reason 维持 dev 门（dev 留痕）；normal/aborted 正常路径不打
     //（去长对话噪音）。（原 reason === 'timeout' 常驻 warn 分支随 pendingSend 30s 空窗
-    // timer 退役——ADR-0112 时间平抑红线，收口全事件驱动。）
+    // timer 退役——ADR-0122 时间平抑红线，收口全事件驱动。）
     if (isDevMode() && reason !== 'normal' && reason !== 'aborted') {
       console.warn(`[chat] finalizeSession sid=${sessionId} reason=${reason}`)
     }
@@ -869,7 +870,7 @@ export function createChatStore(options: ChatStoreOptions = {}) {
   }
 
   // ── pendingSend 生命周期（useChat/effects 经 ctx/port 调）──
-  // [ADR-0112 时间平抑红线] 原 pendingSend 30s 空窗 timer（PENDING_SEND_TIMEOUT_MS +
+  // [ADR-0122 时间平抑红线] 原 pendingSend 30s 空窗 timer（PENDING_SEND_TIMEOUT_MS +
   // pendingSendTimers + disarmPendingSendTimer 命令豁免）已整体退役：pendingSend 的收口
   // 全事件驱动——message_start（正常）/ finalizeSession（complete/error/disconnect 等）/
   // session.deliveryHandled（命令终局 U2①）/ session.delivery morph / occupancy 三维全
@@ -908,13 +909,8 @@ export function createChatStore(options: ChatStoreOptions = {}) {
       finalizeSession(sessionId, 'error', errorText)
       return
     }
-    // 无 streaming entity → 直接追加 error 消息。
-    // [M2 形态统一] 错误文本只住 error 字段，content 恒为崩溃前正文（此处无正文=空）——
-    // 渲染端只有追加形态一种 error 形态（正文原色 + error 独立 danger 行）。
-    commitMessages(messages, sessionId, [
-      ...prev,
-      { id: `a-${crypto.randomUUID()}`, role: 'assistant', content: '', error: errorText, status: 'error', timestamp: Date.now() },
-    ])
+    // 无 streaming entity → 直接追加 error 消息（条目构造单源 createAssistantErrorMessage）。
+    commitMessages(messages, sessionId, [...prev, createAssistantErrorMessage(errorText)])
     clearPendingSend(sessionId)
   }
 
@@ -981,7 +977,7 @@ export function createChatStore(options: ChatStoreOptions = {}) {
     commitMessages(messages, sessionId, [
       ...prev,
       {
-        id: `sys-${crypto.randomUUID()}`,
+        id: `sys-${randomUuid()}`,
         role: 'system',
         content: text,
         status: 'complete',
@@ -1003,7 +999,7 @@ export function createChatStore(options: ChatStoreOptions = {}) {
     commitMessages(messages, sessionId, [
       ...prev,
       {
-        id: `sys-${crypto.randomUUID()}`,
+        id: `sys-${randomUuid()}`,
         role: 'system',
         customType: PI_RESPAWN_NOTICE_CUSTOM_TYPE,
         content: fallbackText,
@@ -1054,7 +1050,7 @@ export function createChatStore(options: ChatStoreOptions = {}) {
     commitMessages(messages, sessionId, [
       ...prev,
       {
-        id: `cm-${crypto.randomUUID()}`,
+        id: `cm-${randomUuid()}`,
         role: 'system',
         customType: SUBAGENT_DIRECTIVE_CUSTOM_TYPE,
         content: data.text,

@@ -988,7 +988,7 @@ describe('恢复窗口过渡态的 message_start 收口 gate（crash-resilience 
 // pendingSend（受理上屏时置位、正常由 message_start 清）永久在挂 → isActive 并集判定
 // 恒 true（steer placeholder + abort 按钮卡死）。修复：handleSessionOccupancy 收到三维
 // 全 idle 权威帧时清 pendingSend（权威帧兜底乐观态；与 defer flush 判据同形）。
-// [ADR-0112 受理回执后上屏] idle 帧的收口对象 = 受理确认后置位的 pendingSend（reply 先于
+// [ADR-0122 受理回执后上屏] idle 帧的收口对象 = 受理确认后置位的 pendingSend（reply 先于
 // idle 帧到达的正常时序）；idle 帧先于 reply 的极端时序下置位尚未发生（帧 no-op），命令
 // 条目的收口归 session.deliveryHandled 终局（U2① 用例锁定）——全事件驱动，无墙钟兜底。
 

@@ -55,7 +55,7 @@ export default function (pi: ExtensionAPI): void {
   // 落锚文件尾两步，dist/core/agent-session.js:2464）。
   // 写法契约（D1 硬要求）：handler 必须把 navigateTree 的 promise 纳入自身返回链——
   // pi `await command.handler(...)` 接住返回值是「revokeMessage reply 前树变更+落盘
-  // 完成」的保证链。取 D1 许可形态「显式 await」而非「直接 return」：SDK 0.84.4
+  // 完成」的保证链。取 D1 许可形态「显式 await」而非「直接 return」：SDK（1.0.0 复核）
   // RegisteredCommand.handler 钉死 `(args, ctx) => Promise<void>`，直接 return
   // navigateTree 的 `Promise<{cancelled}>` 编译不过（TS2322，as 断言亦被拒/禁）。
   // fire-and-forget（去掉 await）会使 reply 先于树变更，产生偶发假阴性 nav-failed——

@@ -28,6 +28,7 @@ import {
 } from '../../coordination/subscription-state'
 import type { ChatStoreInstance } from './store'
 import { historyWindowFromReply } from './truncated-window'
+import { isVirtualKey } from './lru'
 import { disposeImageCacheForSession } from './image-cache'
 import { toErrorMessage } from '../../utils/error-message'
 import type { EnsureStreamSubDeps, SessionStoreLike, UseChatDeps } from './use-chat-types'
@@ -304,8 +305,8 @@ export function resetChatModuleStateForTest(): void {
  *
  * 与下方 morph 循环是同函数相邻分支（impl-plan U2 检查点）：对账只清登记在册的命令条目、
  * morph 只处理非 direct 车道的活跃条目，操作域互斥不重叠。
- * 清除动作 = finalizeHandledEntry（handled 同形态静默清除：移除乐观气泡 + 清空窗计时器 +
- * 递减在途计数，无错误提示 D1④）。
+ * 清除动作 = finalizeHandledEntry（handled 同形态静默清除：移除乐观气泡 + 清 dispatching
+ * 占位（clearPendingSend，纯 Set 操作）+ 递减在途计数，无错误提示 D1④）。
  */
 function reconcileHandledOrphans(
   sid: string,
@@ -345,7 +346,8 @@ function markHandledTargetsSeenInProjection(sid: string, entries: DeliveryFrameE
 /**
  * [pi1-disposition-chat-flow U2① / D1③④] session.deliveryHandled 终局通知消费：命令条目
  * 被 pi 接管（handled disposition）后内核一对一通知，前端按 handled 同形态静默清除——
- * 回滚三件套（移除乐观气泡 + 清空窗计时器 + 递减在途计数），**无错误提示**（handled =
+ * 回滚三件套（移除乐观气泡 + 清 dispatching 占位（clearPendingSend，纯 Set 操作）+ 递减
+ * 在途计数），**无错误提示**（handled =
  * 命令已执行，非失败形态；执行结果经 pi 回合事件正常入流）。
  * 只对登记在册成员动作：外来命令条目（plugin send_to_session / 收养等无本地乐观面的提交）
  * 无气泡可移除、无挂账可回收，误动 clearPendingSend/decrementInflight 会误伤同 session
@@ -977,7 +979,7 @@ export function createUseChat(deps: UseChatDeps) {
    * （无乐观副作用可回滚——气泡/占位在受理确认前不存在），由通路各自分型
    * （send toast 不 throw / followUp 转 false；输入恢复走调用方 restoreSegments 契约）。
    *
-   * [ADR-0112 ⑨ UI 跟随事实 / defense-mechanism-cleanup 遗留 5] 受理回执前不上屏等待态
+   * [ADR-0122 ⑨ UI 跟随事实 / defense-mechanism-cleanup 遗留 5] 受理回执前不上屏等待态
    * 气泡：runtime 确认受理（delivery.submit reply 同步受理确认）才出现气泡——UI 不预测、
    * 不假造中间态。RPC 飞行窗口的用户反馈由 Composer 层 isSending 承担（非消息气泡）。
    *
@@ -1003,13 +1005,13 @@ export function createUseChat(deps: UseChatDeps) {
     // dispatching 空窗占位（填 isGenerating 空窗，让停止按钮/输入可用性立即翻转）：
     // message_start 到达自动清；非 direct 车道由 session.delivery 帧的 morph 编排回收；
     // 命令挂起（handled disposition 交互挂起等）由 session.deliveryHandled 终局清
-    //（U2①）——事件驱动收口，无墙钟兜底（ADR-0112）。
+    //（U2①）——事件驱动收口，无墙钟兜底（ADR-0122）。
     chat.addPendingSend(sid)
     // [pi1-disposition-chat-flow U2⑤] 命令条目登记（受理回执 isCommand，内核 D2 识别结果）：
     // handled 通知/孤儿对账的操作域（命令条目 = 永无 message_end 回执的唯一条目族，见
     // handledDeliveryTargets 注）；收尾凭据 = session.deliveryHandled 终局通知（U2①）或
     // 命令失败 toast（U2③）。isCommand 缺省（旧 runtime）= 普通消息，链路零变化。
-    // （原 U2⑤ 30s 空窗计时器豁免随计时器整体退役——ADR-0112 时间平抑红线，收口全事件驱动。）
+    // （原 U2⑤ 30s 空窗计时器豁免随计时器整体退役——ADR-0122 时间平抑红线，收口全事件驱动。）
     if (reply.isCommand === true) {
       registerHandledDeliveryTarget(sid, clientUuid)
     }
@@ -1527,4 +1529,65 @@ export function invalidateStreamSubscription(sessionId: string): void {
   // invalidateSubscription（非 clearSubscription）：额外清 in-flight 去重条目，防 respawn 后
   // 首次 ensureStreamSubscription 复用死 Promise 而不重发 subscribe RPC
   invalidateSubscription(sessionId)
+}
+
+/**
+ * 驱逐退订复合入口的 RPC 通道（remote-use D2/U5）：壳侧注入 session.unsubscribe
+ * transport 函数（双壳注入同一实现——core domain 层零 transport 值级依赖，订阅 RPC
+ * 同款注入形态先例 = coordination/subscription-state 的 setSubscriptionPorts）。
+ */
+export interface LruUnsubscribeDeps {
+  /** session.unsubscribe RPC（ack 型，reply void，renderer 不消费 payload） */
+  unsubscribe(sessionId: string): Promise<void> | void
+}
+
+/**
+ * 读 chat store 消息分区 keys（factory / pinia 双形态归一，D2 双壳共接同一入口）。
+ * core factory 产物 messages = ShallowRef<Map>；桌面 pinia setup store 解包产物 = Map
+ * 本体（ADR-0059 类型鸿沟）。instanceof 运行时判定是双形态的唯一归一点。
+ */
+function readPartitionKeys(chat: ChatStoreInstance): Set<string> {
+  const carrier: unknown = chat.messages
+  const map = carrier instanceof Map
+    ? carrier
+    : (carrier as { value: Map<string, unknown> }).value
+  return new Set(map.keys())
+}
+
+/**
+ * LRU 驱逐 + 连带退订复合入口（remote-use D2/U5）——sessionEntry.evictLru 的统一实现，
+ * 双壳共接（桌面 useSidebar 与移动壳 app-runtime.ts 均接此函数，防双壳分叉）。
+ *
+ * 编排 = chat.evictIfNeeded()（驱逐本体，语义不变）+ 对被驱逐会话：
+ * ① invalidateStreamSubscription——本地两层簿记失效（events handler 退订 + subscribe 幂等
+ *   标记失效）。不退订的后果（D2 采用段）：被驱逐会话订阅仍在，后续消息经 commitMessages
+ *   重建分区——驱逐白做；且订阅数量随打开会话数线性增长（LAN 流量 + 锁屏探活电量同增）。
+ * ② session.unsubscribe RPC（fire-and-forget）——服务端停发该会话 live push。
+ * 切回被驱逐会话重走 12 步切入链（步 5 订阅 + 步 9 基线合并清洗），既有重复防御就位。
+ *
+ * 「谁被驱逐」的观测 = 驱逐前后分区 keys 差集：evictIfNeeded 是同步函数（阈值判定 +
+ * 逐个删除全同步），单线程同步执行内无并发窗口，差集即被驱逐集合（含联动驱逐的派生键）。
+ * 派生键（subagent:/agentcall: 前缀）无订阅簿记（ensureStreamSubscription 只以真实 sid
+ * 调用），跳过——簿记失效是 no-op，退订是纯冗余 RPC。
+ *
+ * 与 disposeSession（删除路径）的分工：disposeSession 走 clearSubscription 全清（session
+ * 永久消失）；本入口走 invalidateStreamSubscription（session 仍存在，重切时订阅须可重建）。
+ */
+export function evictLruWithUnsubscribe(
+  chat: ChatStoreInstance,
+  deps: LruUnsubscribeDeps,
+): void {
+  const before = readPartitionKeys(chat)
+  chat.evictIfNeeded()
+  const after = readPartitionKeys(chat)
+  for (const sid of before) {
+    if (after.has(sid)) continue
+    if (isVirtualKey(sid)) continue
+    invalidateStreamSubscription(sid)
+    // fire-and-forget：ack 型 RPC，停发副作用由 runtime 侧体现；失败仅 warn——
+    // 簿记失效已同步完成（先于 RPC），RPC 失败不回滚驱逐（下次驱逐再试，幂等）
+    void Promise.resolve(deps.unsubscribe(sid)).catch((e) => {
+      console.warn(`[useChat] unsubscribe evicted session ${sid} failed:`, e)
+    })
+  }
 }

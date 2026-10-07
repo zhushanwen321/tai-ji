@@ -9,7 +9,7 @@
  *   探测（pi 收尾挂死时 3 次失败触发 onSilentAbort），settled 处理后停（防 B1 永续）。
  * - SC3 未知 kind（类型外运行时构造）落 handleMetaEvent default warn，不静默丢弃。
  *
- * （原 RT-4#2③ UserStoppedGate 收敛环代数上限组已随 ADR-0112 时间窗收敛环删除一并
+ * （原 RT-4#2③ UserStoppedGate 收敛环代数上限组已随 ADR-0122 时间窗收敛环删除一并
  * 移除——「settled 永不到达」场景归 PingProbe → onSilentAbort → forceQuit 显式上报链，
  * 锁定用例见下方 settling 期 pi 真死组。）
  *

@@ -259,7 +259,7 @@ export function computeActiveElapsedMs(events: readonly WorkflowRunEvent[]): num
  * 持锁段（资格校验→条目→落 record→活体注册，秒级 IO）远小于窗口，且
  * proper-lockfile 持锁期间每 stale/2 自动 touch mtime（长持有不被夺）；进程崩溃
  * 后锁残留 30s 可被 stale 夺取（待验证检查点 2 已核实实装语义）。
- * [ADR-0112] 获取重试已删（原 retries 2 次/100-400ms）：锁被占 = 另一 resume 在途，
+ * [ADR-0122] 获取重试已删（原 retries 2 次/100-400ms）：锁被占 = 另一 resume 在途，
  * 立即显式拒绝（ELOCKED → ResumeRejectionError）而非退避等待。
  */
 const RESUME_LOCK_STALE_MS = 30_000;
@@ -571,7 +571,7 @@ function adoptResumedRun(
   now: () => number,
 ): void {
   // 生效预算（summary.budgetTimeMs/budgetTokens 与首次挂表同源）随 spec 落定。
-  // [ADR-0112] 原进程内 D10 预算账本（noteRunResumedBudget）随重试矩阵删除——
+  // [ADR-0122] 原进程内 D10 预算账本（noteRunResumedBudget）随重试矩阵删除——
   // 账本唯一读方是已删的 rebuild 重试路径；resume 挂表用本函数下方局部折算。
   const run = rebuildRunFromRecord(
     runId,
@@ -807,6 +807,11 @@ function appendResumeRegisteredEntry(
   const entry = buildWorkflowRecordRegisteredEntryData({
     runId,
     scriptName: created.workflowName,
+    // scriptPath 与 scriptName 同源取自 run-created 帧（写侧 dispatchRunCreated
+    // 条件式恒带）；旧格式帧缺载荷时回落空串（读侧与投影链按缺省处理）。不可写死
+    // 空串：同 id 后到的 resume 条目在 events-projection 的 last-writer-wins 下
+    // 会遮蔽原始注册条目，GUI 全路径退化短名。
+    scriptPath: created.scriptPath ?? "",
     startedAt: created.ts,
     recordPath: recordPath,
   });

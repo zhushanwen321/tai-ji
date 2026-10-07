@@ -132,7 +132,7 @@
                   class="size-[13px] shrink-0 animate-spin text-accent" />
                 <span v-else class="size-2 shrink-0 rounded-full" :class="subagentDotClass(record)" />
                 <span class="min-w-0 flex-1 truncate text-[length:var(--text-xs)] font-medium leading-[1.35] text-neutral-fg">
-                  {{ record.agent }}
+                  {{ displayAgentName(record.agent) }}
                 </span>
                 <span v-if="record.slug" data-testid="tray-subagent-slug"
                   class="shrink-0 font-mono text-[length:var(--text-3xs)] text-neutral-mid">{{ record.slug }}</span>
@@ -270,7 +270,7 @@ import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { cn } from '@/lib/utils'
 import { getState } from '@taiji/core/transport/ws-client'
-import { getDrawerControlState, openDrawerTab, openSubagent, openWorkflow } from '@taiji/core/domain/drawer'
+import { selectBackgroundTask, openSubagent, openWorkflow } from '@taiji/core/domain/drawer'
 import { subagentVirtualId, useSubagentStore } from '@/stores/subagent'
 import { useToast } from '@/composables/useToast'
 import { useSessionScopedState } from '@/composables/useSessionScopedState'
@@ -286,6 +286,7 @@ import type { BackgroundTaskEntry, BackgroundTaskIconState, BackgroundTaskStatus
 import { formatTokens as formatTokensK } from '@/lib/token-format'
 import { formatClockDuration, formatCompactDuration, MS_PER_SECOND } from '@/lib/duration-format'
 import { resolveEngineIcon } from '@/constants/engine-icons'
+import { displayAgentName } from '@taiji/shared'
 import { toErrorMessage } from '@taiji/core'
 import * as backgroundTaskApi from '@taiji/core/transport/api/domains/background-task'
 import type { SubagentRecord, WorkflowRunRecord } from '@taiji/shared'
@@ -508,8 +509,8 @@ function openSubagentRow(record: SubagentRecord): void {
   openSubagent({ virtualId: subagentVirtualId(props.sessionId, record.subagentId), enteredFrom: 'chat' })
 }
 function openBashTask(entry: BackgroundTaskEntry): void {
-  getDrawerControlState().selectedBackgroundTaskId = entry.taskId
-  openDrawerTab('bashTask')
+  // 选中态落 bashTask 内容域分区（selection/bash-task.ts，§6.6①）+ 切 tab + 开 drawer
+  selectBackgroundTask(entry.taskId)
 }
 /** workflow 行传 runId（drawer WorkflowTab 先按 runId 精确匹配，后回退 scriptName 取最新） */
 function openWorkflowRow(record: WorkflowRunRecord): void {

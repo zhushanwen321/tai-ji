@@ -7,7 +7,7 @@
  * 本文件是【回归基线测试】——restart-policy 已有实现，这里只验证：
  * - MAX_RESTARTS=5 + 退避序列 1/2/4/8/16s（W5 后必须保持不变）
  * - clearForManualRestart 清零后给新 5 次配额（W5 后必须保持不变）
- * - recordSuccess 无时间窗清零（ADR-0112：计数清零唯一入口 = 用户显式重试）
+ * - recordSuccess 无时间窗清零（ADR-0122：计数清零唯一入口 = 用户显式重试）
  *
  * 注意：W5 新增的存活探针（checkHealthEndpoint / forceRestartForLiveness）
  * 属于 supervisor-health-liveness.test.ts 的范畴，此处不涉及。
@@ -92,8 +92,8 @@ describe('W5 回归基线：clearForManualRestart 清零后给新 5 次配额', 
   })
 })
 
-// 回归基线：无时间窗清零（ADR-0112：recordSuccess 只记录事实，计数清零唯一入口 = 用户显式重试）
-describe('recordSuccess 无时间窗清零（ADR-0112）', () => {
+// 回归基线：无时间窗清零（ADR-0122：recordSuccess 只记录事实，计数清零唯一入口 = 用户显式重试）
+describe('recordSuccess 无时间窗清零（ADR-0122）', () => {
   beforeEach(() => {
     vi.useFakeTimers()
   })

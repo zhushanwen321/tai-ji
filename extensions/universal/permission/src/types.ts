@@ -102,7 +102,7 @@ export interface ClassifierConfig {
 	model: string;
 	/**
 	 * 超时秒数（仅用户显式配置时生效的 C2 业务超时；0 = 不限时）。
-	 * 包内默认 0（ADR-0112：无包内挂死兜底，LLM 挂死由上层失败直报，不设时间窗猜测）。
+	 * 包内默认 0（ADR-0122：无包内挂死兜底，LLM 挂死由上层失败直报，不设时间窗猜测）。
 	 */
 	timeout: number;
 	/** 低风险是否自动放行 */

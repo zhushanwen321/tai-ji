@@ -105,7 +105,7 @@ export function createBashKillToolDefinition() {
 			//  - 无字段（spawn 时 ps 不可用平台）→ 放行：登记原进程在 spawn 时刻存活，
 			//    复用窗口毫秒级；registry 终态条目不会走到这里（上面 already exited）
 			if (!isPidAlive(fromStore.pid)) {
-				return killedFalse("already exited (process no longer alive; final state pending poll)");
+				return killedFalse("already exited (process no longer alive; final state will be written on task exit)");
 			}
 			if (fromStore.pidStartTime !== undefined) {
 				const actualStartSec = getProcessStartTimeSec(fromStore.pid);
@@ -113,7 +113,7 @@ export function createBashKillToolDefinition() {
 					return killedFalse(
 						"cannot verify process start time; refusing to kill (better safe than sorry)",
 						`pid ${fromStore.pid} is alive but its start time is unreadable, so pid reuse cannot be ruled out; ` +
-							"poll bash_output for the poll edge, or kill the process group manually if certain",
+							"poll bash_output for the final state, or kill the process group manually if certain",
 					);
 				}
 				if (actualStartSec !== fromStore.pidStartTime) {

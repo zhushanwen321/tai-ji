@@ -202,7 +202,7 @@ describe("组合根接线：初始上报时点（u7a 验收）", () => {
   });
 });
 
-describe("createInFlightReporter：失败无 timer 重试（ADR-0112，事件驱动重推）", () => {
+describe("createInFlightReporter：失败无 timer 重试（ADR-0122，事件驱动重推）", () => {
   // select 为 stub 立即 resolve——fake timers 确定性驱动，验证「时间推进零自动重试」。
   beforeEach(() => {
     vi.useFakeTimers();

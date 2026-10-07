@@ -165,7 +165,7 @@ describe('GitService.getStatus per-file 行数（W1 文件树 +N −M 角标）'
     expect(r.files.map((f) => f.path)).toEqual(['redis-learn/a.py', 'redis-learn/b.md'])
     expect(r.files.every((f) => f.status === 'untracked')).toBe(true)
     // 验证 status 命令确实带了 --untracked-files=all（perf W17 收编后经 GitStateService
-    // 执行（D3-1 的 8000ms 墙钟已随 ADR-0112 退役，回退 executor 默认档）
+    // 执行（D3-1 的 8000ms 墙钟已随 ADR-0122 退役，回退 executor 默认档）
     expect(executor.exec).toHaveBeenNthCalledWith(1, '/repo', 'status', [
       '--porcelain=v1', '-z', '-b', '--untracked-files=all',
     ])

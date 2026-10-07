@@ -149,7 +149,7 @@ describe('D1 申报制：批次粒度（per-entry 申报）', () => {
   })
 })
 
-describe('D1 申报制：首败即停语义（P0-20 锁，ADR-0112）', () => {
+describe('D1 申报制：首败即停语义（P0-20 锁，ADR-0122）', () => {
   it('首拍受理失败首败即停：整批条目 rejected 逐条回调（acceptance 与 marker 对齐），无重试', () => {
     const port = makePort()
     // 覆写 send：恒显式拒绝（accepted:false）

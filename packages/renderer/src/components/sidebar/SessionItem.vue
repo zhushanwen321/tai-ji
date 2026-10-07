@@ -41,7 +41,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, inject, ref, watch, type Ref } from 'vue'
+import { computed, inject, onBeforeUnmount, ref, watch, type Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { onClickOutside } from '@vueuse/core'
 import { isMarkedDone } from '@/composables/useSessionMarkers'
@@ -133,6 +133,12 @@ const escCount = inject<Ref<number>>('sessionItemEsc', ref(0))
 watch(escCount, () => {
   if (confirming.value) confirming.value = false
 })
+
+/** 确认态上供祖先聚合（§6.7 后行档：SessionList 聚合谓词读本 ref——绑定「确认态本体」）：
+ *  注入集合缺省空集（脱离 SessionList 直挂时零副作用），卸载即撤（防泄漏幽灵读点）。 */
+const itemConfirmingSet = inject<Set<Ref<boolean>>>('sessionItemConfirmingSet', new Set<Ref<boolean>>())
+itemConfirmingSet.add(confirming)
+onBeforeUnmount(() => itemConfirmingSet.delete(confirming))
 
 /** 点击外部取消：点该 item 外部时清掉确认态 */
 onClickOutside(rootEl, () => {

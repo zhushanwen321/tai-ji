@@ -7,7 +7,8 @@
  *     IExtensionSettings port、skills 投影经 pi-skill-paths）
  *   - pi 子进程（rpc 面落盘写点仅 set_auto_retry 无条件 persist；set_model /
  *     set_thinking_level 是会话级切换不落盘——persist 是 options 条件分支且 rpc 入口
- *     不传，pi 0.84.4 rpc-mode.js:367-374/:390、agent-session.js:1252-1261/:1358-1366）
+ *     不传，pi 1.0.0 rpc-mode.js case "set_model"/"set_thinking_level" 均不带 options、
+ *     agent-session.js setModel/setThinkingLevel 仅 options.persist 为真才写全局默认）
  *
  * 本模块是 settings.json 的**单一所有者**：
  *   - 唯一读写点：read() / write() / updateSettingsFields()，模块外不直接碰文件。

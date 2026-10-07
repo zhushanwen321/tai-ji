@@ -30,6 +30,7 @@ import { type Static, Type } from "typebox";
 
 import { SLUG_MAX_LENGTH } from "@zhushanwen/subagent-core";
 import { THINKING_ORDER } from "@zhushanwen/subagent-core";
+import { displayWorkflowName } from "@zhushanwen/subagent-core";
 import type { LauncherDeps } from "@zhushanwen/subagent-core";
 import { abortRun, resumeRun, runWorkflow } from "@zhushanwen/subagent-core";
 import type { ResumeRunOptions } from "@zhushanwen/subagent-core";
@@ -86,7 +87,7 @@ const WORKFLOW_ACTIONS: readonly WorkflowAction[] = [
 const WorkflowParams = Type.Object({
   action: StringEnum(WORKFLOW_ACTIONS, { description: "Workflow action to execute" }),
   name: Type.Optional(
-    Type.String({ description: "Workflow ref: absolute path to the .js script — use the <location> value from <available_workflows> (bare names are rejected; run action)" }),
+    Type.String({ description: "Workflow ref: absolute path to a .js script — normally the <location> of a workflow from <available_workflows>, but ANY absolute .js path works if the file declares `@pi-meta kind: \"workflow\"` (the list is not required). Relative paths and bare names are rejected (run action)" }),
   ),
   slug: Type.Optional(
     Type.String({
@@ -228,7 +229,7 @@ export function registerWorkflowTool(
       "<available_workflows> (injected each turn). For parameter details, read the <location> " +
       "script file (script header has @pi-meta parameters + usage + phases). Do NOT use " +
       "workflow-script generate for patterns already covered by available workflows.",
-      "run: pass the workflow ref as name — ALWAYS the <location> absolute .js path from <available_workflows> (bare names are rejected with a not-found error listing locations).",
+      "run: pass the workflow ref as name — normally the <location> absolute .js path from <available_workflows>, but any absolute .js path with a valid @pi-meta also works (the list is not required). Bare names and relative paths are rejected with a not-found error listing locations.",
       "DO NOT bash sleep or poll status after starting — results appear automatically via notifyDone.",
       "Runs are one-shot: there is no pause — to stop a run early use abort; for a fresh result start a new run. " +
       "resume is ONLY for runs whose status is interrupted (crash or session-switch during execution): it replays " +
@@ -252,7 +253,7 @@ export function registerWorkflowTool(
       "check for an active user override (run journal model-override frame) before assuming a resolution bug.",
       "Anti-patterns: Flattening args sub-fields (task/items/...) to the top level — they belong inside args. Calling {\"action\":\"run\"} without name.",
       "CRITICAL: For orchestration patterns, ALWAYS use action:run with the <location> absolute " +
-      "path of a listed workflow — NEVER use workflow-script action:generate to recreate patterns " +
+      "path of the matching listed workflow — NEVER use workflow-script action:generate to recreate patterns " +
       "already covered by available workflows. workflow-script generate is ONLY for novel patterns.",
     ],
     parameters: WorkflowParams,
@@ -307,7 +308,9 @@ export function registerWorkflowTool(
 
     renderCall(args: Record<string, unknown>, theme: Theme, _context?: unknown) {
       const action = String(args.action ?? "");
-      const name = args.name ? ` ${String(args.name)}` : "";
+      // workflow ref 是绝对路径，标题行显示取 basename 短名（displayWorkflowName，
+      // 与 subagent 标题行的 displayAgentName 对称）；runId/slug 不受影响。
+      const name = args.name ? ` ${displayWorkflowName(String(args.name))}` : "";
       // run action 可选 slug：在 name 后追加 · slug（accent 色）
       const slug = optionSlugSuffix(args.slug, theme);
       const runId = args.runId ? ` ${String(args.runId).slice(0, ID_PREVIEW_LENGTH)}` : "";
@@ -336,7 +339,7 @@ export async function actionRun(
   const name = params.name;
   if (!name) {
     throw new Error(
-      "run requires 'name' parameter (absolute .js path from <available_workflows> <location>). Correct: {\"action\":\"run\",\"name\":\"<ref>\"}",
+      "run requires 'name' parameter (an absolute .js path, e.g. a <location> from <available_workflows>). Correct: {\"action\":\"run\",\"name\":\"<ref>\"}",
     );
   }
   // 弱模型常见误用（P0 静默失败）：把 task/items 等 args 子字段平铺到 workflow params

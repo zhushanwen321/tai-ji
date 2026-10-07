@@ -6,7 +6,7 @@
  *        广播 session.exited{code:null, reason:用户指引文案} → removeEntry（与 abort 超时路径同构）
  * - FQ2: forceQuit 不在活跃进程表（pm.getClient 返回 undefined）→ 幂等成功：
  *        不调 destroy/persist/removeEntry、不广播（竞态兜底，菜单渲染后 session 恰好退出）
- * - FQ3: [ADR-0112 退役] abort RPC 超时三级阶梯（W7，含真冻结判据）已随 RPC 墙钟整体
+ * - FQ3: [ADR-0122 退役] abort RPC 超时三级阶梯（W7，含真冻结判据）已随 RPC 墙钟整体
  *        删除，对应用例退役
  * - FQ4（code-harden RT-4#1）: 编排中段抛错 → 终态三步（full-reset / session.exited /
  *        removeEntry）finally 必达，异常不上抛

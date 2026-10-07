@@ -11,7 +11,7 @@
  *   WORKER_EXITED_WITHOUT_RESULT_MSG 归因 + pending:unregister + onRunDone
  * - exit(0) 但已收到终态消息 → no-op（正常收尾）
  * - handleWorkerMessage 的 return/error 分支必须标记 receivedTerminalMessage（判定的依据）
- * - 非零 exit → 委托 handleWorkerError 一次即 failed（[ADR-0112] 原重试矩阵已删）
+ * - 非零 exit → 委托 handleWorkerError 一次即 failed（[ADR-0122] 原重试矩阵已删）
  *
  * SW-DATA-3 背景：handleReturn / handleWorkerError / handleScriptError 的
  * `await deps.store.save(run)` 未捕获——ENOSPC 等落盘失败时 rejection 经 worker-host 的
@@ -181,7 +181,7 @@ describe("handleWorkerExit — [F1] exit(0) 无终态消息", () => {
     expect(deps.onRunDone).not.toHaveBeenCalled();
   });
 
-  it("非零 exit：委托 handleWorkerError → 一次即 done,failed（ADR-0112，无自动重建）", async () => {
+  it("非零 exit：委托 handleWorkerError → 一次即 done,failed（ADR-0122，无自动重建）", async () => {
     const run = makeRunningRun();
     await seedRunCreated(run);
     const deps = makeDeps();
@@ -201,7 +201,7 @@ describe("handleWorkerExit — [F1] exit(0) 无终态消息", () => {
 describe("handleWorkerError — [R4-F1] 同代际双事件幂等", () => {
   it("worker 崩溃：error 事件先到 → 一次即 done,failed；exit(1) 委托后到 → settled 守卫丢弃", async () => {
     // 真实时序：worker 崩溃 → onError 与 exit 几乎同时触发。第一个事件直接终态化
-    // （ADR-0112 无退避窗口），第二个事件被 stale 守卫丢弃——onRunDone 恰一次。
+    // （ADR-0122 无退避窗口），第二个事件被 stale 守卫丢弃——onRunDone 恰一次。
     const run = makeRunningRun();
     await seedRunCreated(run);
     const deps = makeDeps();

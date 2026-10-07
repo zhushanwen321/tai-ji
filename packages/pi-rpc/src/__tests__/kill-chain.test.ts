@@ -3,7 +3,7 @@
 // 杀链测试：SIGKILL 直杀 + 立即 resolve（exit 收尾钩子异步执行）。
 // fake child 记录信号序列（KillableChild 结构子集注入）。
 //
-// 退役登记（ADR-0112 防御机制清查）：grace 优雅退出等待窗（SIGCONT → SIGTERM →
+// 退役登记（ADR-0122 防御机制清查）：grace 优雅退出等待窗（SIGCONT → SIGTERM →
 // grace → SIGKILL 阶梯）已删除——用例随机制退役，现契约 = SIGKILL 直杀。
 
 import { describe, expect, it, vi } from 'vitest'

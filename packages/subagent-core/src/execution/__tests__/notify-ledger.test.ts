@@ -29,7 +29,7 @@
 //   - logger 基建统一 dev 侧 configureCore sink（core logger facade 经
 //     host-services 动态解析宿主实现，见 agents-assembly.test.ts 同款）——
 //     移除 u-5c 期的 vi.mock(core/logger)，日志断言用例自行注入 logCalls sink。
-//   - 看门狗重投 / abandoned 放弃终态族已随 ADR-0112 清查删除（sent 后无回执
+//   - 看门狗重投 / abandoned 放弃终态族已随 ADR-0122 清查删除（sent 后无回执
 //     不重投，通知可能丢失是已接受代价）——对应用例一并移除。
 
 import { readFileSync } from "node:fs";

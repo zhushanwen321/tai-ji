@@ -7,7 +7,7 @@
  *
  * 职责：
  * - 单次执行：runner.run 一次，结果（成功或失败）直接终态化
- * - [ADR-0112] 失败显式上报：不自动重试（原 3 次指数退避重试已删——自动重试
+ * - [ADR-0122] 失败显式上报：不自动重试（原 3 次指数退避重试已删——自动重试
  *   属无效防御；失败经 finalizeCall failed + agent-settled(failed) 落账显式上报，
  *   修复由用户重新发起 run 承接）
  * - 成功：consume usage + incrementCallCount + markDone + trace.update(completed)
@@ -48,7 +48,7 @@ import type { AgentResult } from "./models/types.ts";
  * 旧代际 finalize 的 update 会命中新代际同 stepIndex 节点，TUI/中间快照短暂
  * 可见错误终态。正确性论证：运行期 calls Map 写点为 dispatchAgentCall 的 set
  * （[HISTORICAL] 原另一写点 discardInFlightCalls 的 delete 随重试矩阵删除，
- * ADR-0112），实例不等 ⟺ 本 finalize 属于被替换的旧代际——与 dispatch 层
+ * ADR-0122），实例不等 ⟺ 本 finalize 属于被替换的旧代际——与 dispatch 层
  * .then/.catch 守卫（S7-second 修复，8353f6b60）同一判定语义，本守卫只是把它
  * 前移到 trace.update 之前。markDone 与 sessionId/sessionFile 同步保留（markDone
  * 在孤儿实例上无害，dispatch 层 catch 路径依赖 call.status 语义）。跳过时不记
@@ -79,7 +79,7 @@ function finalizeCall(
 // ── executeAgentCall ─────────────────────────────────────────
 
 /**
- * 执行单次 agent 调用（无自动重试，ADR-0112）。
+ * 执行单次 agent 调用（无自动重试，ADR-0122）。
  *
  * 流程：
  * 1. markRunning（attempts++，恒 1——无重试）
@@ -117,7 +117,7 @@ export async function executeAgentCall(
     budget.consume(result.usage);
   }
 
-  // 终态（成功或失败，无自动重试——ADR-0112：失败显式上报）
+  // 终态（成功或失败，无自动重试——ADR-0122：失败显式上报）
   finalizeCall(call, result, trace, isOrphaned);
   budget.incrementCallCount();
 }

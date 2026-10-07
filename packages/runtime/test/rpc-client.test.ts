@@ -8,7 +8,7 @@
  * - U4: sendExtensionUiResponse 走 sendRaw，pending 不增长
  * - U5: sendExtensionUiResponse 三种 payload 格式（cancelled/confirmed/value）
  *
- * 退役登记（ADR-0112 防御机制清查）：W3 超时语义（U8/U8b 迟到响应丢弃 / D3a
+ * 退役登记（ADR-0122 防御机制清查）：W3 超时语义（U8/U8b 迟到响应丢弃 / D3a
  * RpcTimeoutError 判别）随 RPC 墙钟超时机制整体删除。
  *
  * 测试策略：mock node:child_process 的 spawn，捕获 stdin 写入，并提供一个

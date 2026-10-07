@@ -41,7 +41,7 @@ const GOAL_INIT_SLOT_KEY = Symbol.for("@zhushanwen/pi-goal.goalInit");
 
 /**
  * goal 桥的单一断言点：goal 扩展挂在 globalThis slot 上的编程式接口（发现 7——
- * 桥通道从 pi API 对象挂载迁到 slot：pi 0.84.4 per-extension API 隔离使
+ * 桥通道从 pi API 对象挂载迁到 slot：pi per-extension API 隔离（1.0.0 复核）使
  * pi.__goalInit 形态跨扩展恒不可见，slot 是 C-ext-06 惯例的进程级共享形态）。
  */
 function getGoalInit(): GoalInitFn | undefined {

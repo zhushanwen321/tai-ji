@@ -74,7 +74,7 @@ describe('合批 per-message settled（P1）', () => {
     handle.dispose()
   })
 
-  it('合批 2 条 port.send 失败 → 首败即停，onSettled 每条恰一次 rejected（ADR-0112）', () => {
+  it('合批 2 条 port.send 失败 → 首败即停，onSettled 每条恰一次 rejected（ADR-0122）', () => {
     let idle = false
     let settledCb: (() => void) | undefined
     const onSettled = vi.fn()

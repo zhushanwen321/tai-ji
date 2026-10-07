@@ -58,6 +58,17 @@ function runBoth(events: readonly AgentEvent[]): { core: ExecutionRecord; sdk: R
   return { core, sdk };
 }
 
+// 两侧 reducer 都对 toolCall 盖墙钟戳（事件载荷不带 ts，各自 Date.now() 采点）；
+// 真实时钟下两次采点跨毫秒边界 → startedTs 差 1ms → 等价断言假红（负载下偶发，
+// 2026-10-02 质量门禁实锤）。fake timers 钉死时钟：两侧采点恒等，等价性判定
+// 回到 reducer 逻辑本身（时钟不是被测语义）。
+beforeEach(() => {
+  vi.useFakeTimers({ now: 1_000 });
+});
+afterEach(() => {
+  vi.useRealTimers();
+});
+
 /** 断言两侧 reducer 的状态面等价（turns 全文 + 计数 + usage + 末次错误）。 */
 function expectParity(core: ExecutionRecord, sdk: ReplayRecordView): void {
   expect(sdk.turns).toEqual(core.turns);

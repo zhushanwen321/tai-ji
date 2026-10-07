@@ -1,7 +1,8 @@
 /**
  * WorkflowVizOverlay 壳 + D10 Guard 测试（workflow-visualization U4；三视角）。
  *
- * - 使用者黑盒：三通道关闭（ESC / 右上关闭按钮 / 点遮罩统一走 close）、header
+ * - 使用者黑盒：关闭通道（右上关闭按钮 / 点遮罩统一走 close；ESC 已归栈序编排器——
+   *   拆除自带监听的负向锚）、header
  *   状态 pill 文案（running / interrupted / 终局 outcome + errorCode）、DAG 不可得
  *   降级形态（原因码 + parse_failed 重试入口 + 按 phase 分组列表）——每条用例至少
  *   一个用户可见 DOM 断言；
@@ -20,6 +21,7 @@ import { defineComponent, h } from 'vue'
 import type { WorkflowDag, WorkflowRunRecord } from '@taiji/shared'
 import WorkflowVizOverlay from '../WorkflowVizOverlay.vue'
 import WorkflowVizOverlayGuard from '../WorkflowVizOverlayGuard.vue'
+import { getOverlayFocusTrapPanel } from '@/composables/features/app/key-orchestrator'
 import type { WorkflowUnmatchedInstance } from '../../blueprint-match'
 import type { WorkflowVizDagLoadError } from '../../overlay/types'
 
@@ -115,22 +117,25 @@ describe('WorkflowVizOverlay 壳（黑盒 DOM）', () => {
     expect(without.find('[data-testid="wfvz-overlay-elapsed"]').exists()).toBe(false)
   })
 
-  it('三通道①：ESC 关闭（window keydown）', async () => {
+  it('关闭通道①：ESC 不由壳消费（display-containers §6.7 唯一属主 = 栈序编排器，双监听防回归）', async () => {
     const wrapper = mountOverlay()
-    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    const e = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })
+    window.dispatchEvent(e)
     await wrapper.vm.$nextTick()
-    expect(wrapper.emitted('close')).toHaveLength(1)
+    // 负向锚：壳不再挂 window keydown（旧实现此处发 close——双监听会一次 Esc 连剥两层）
+    expect(wrapper.emitted('close')).toBeUndefined()
+    expect(e.defaultPrevented, '壳不消费 Esc（连 preventDefault 约定也不置位）').toBe(false)
   })
 
-  it('三通道①守卫：IME 组合态 ESC 不关闭', async () => {
+  it('IME 守卫已随迁编排器：壳不再自行判定 isComposing（组合态 Esc 也不发 close）', async () => {
     const wrapper = mountOverlay()
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', isComposing: true, bubbles: true }))
     await wrapper.vm.$nextTick()
     expect(wrapper.emitted('close')).toBeUndefined()
   })
 
-  it('Tab 焦点陷阱（DESIGN §5.12 三要素之三）：末元素 Tab 回首元素、首元素 Shift+Tab 到末元素', async () => {
-    // attach 到真实 document——document.activeElement 的首末循环断言依赖面板在文档树内
+  it('Tab 焦点陷阱随迁编排器：面板 ref 注册给陷阱目标（open→注册 / close→注销），壳不再监听 Tab', async () => {
+    // attach 到真实 document——注册读点断言依赖面板在文档树内
     const host = document.createElement('div')
     document.body.appendChild(host)
     const wrapper = mount(WorkflowVizOverlay, {
@@ -138,36 +143,47 @@ describe('WorkflowVizOverlay 壳（黑盒 DOM）', () => {
       attachTo: host,
     })
     try {
-      // 先冲掉组件打开时的 nextTick focus(panel)（安全默认焦点），再驱动 Tab 断言
       await wrapper.vm.$nextTick()
       const panel = wrapper.find('[data-testid="wfvz-overlay-panel"]').element as HTMLElement
-      const focusables = Array.from(panel.querySelectorAll<HTMLElement>('button:not([disabled])'))
-      expect(focusables.length).toBeGreaterThan(0)
-      const first = focusables[0]
-      const last = focusables[focusables.length - 1]
-      // 末元素上按 Tab → 焦点拉回首元素（不逃逸到背景）
-      last.focus()
-      expect(document.activeElement).toBe(last)
-      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true }))
+      expect(getOverlayFocusTrapPanel(), 'open 后面板注册给编排器浮层分支').toBe(panel)
+      // Tab 不再由壳消费（陷阱逻辑在编排器，本壳只供面板 ref）
+      const e = new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true })
+      window.dispatchEvent(e)
+      expect(e.defaultPrevented).toBe(false)
+
+      await wrapper.setProps({ open: false })
       await wrapper.vm.$nextTick()
-      expect(document.activeElement).toBe(first)
-      // 首元素上按 Shift+Tab → 焦点跳到末元素
-      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true }))
-      await wrapper.vm.$nextTick()
-      expect(document.activeElement).toBe(last)
+      expect(getOverlayFocusTrapPanel(), 'close 后注销陷阱目标').toBe(null)
     } finally {
       wrapper.unmount()
       host.remove()
     }
   })
 
-  it('三通道②：右上关闭按钮点击 → close', async () => {
+  it('焦点契约（display-containers §6.7）：关闭后焦点回 composer（焦点锚归还放弃）', async () => {
+    const box = document.createElement('div')
+    box.className = 'composer-box'
+    box.setAttribute('data-testid', 'composer-box')
+    const input = document.createElement('div')
+    input.setAttribute('contenteditable', 'true')
+    box.appendChild(input)
+    document.body.appendChild(box)
+
+    const wrapper = mountOverlay()
+    await wrapper.vm.$nextTick()
+    await wrapper.setProps({ open: false })
+    await wrapper.vm.$nextTick()
+    expect(document.activeElement, '关闭后焦点回 composer 而非旧焦点锚').toBe(input)
+    box.remove()
+  })
+
+  it('关闭通道②：右上关闭按钮点击 → close', async () => {
     const wrapper = mountOverlay()
     await wrapper.find('[data-testid="wfvz-overlay-close"]').trigger('click')
     expect(wrapper.emitted('close')).toHaveLength(1)
   })
 
-  it('三通道③：点遮罩（面板外区域）→ close；面板内点击不关', async () => {
+  it('关闭通道③：点遮罩（面板外区域）→ close；面板内点击不关', async () => {
     const wrapper = mountOverlay()
     await wrapper.find('[data-testid="wfvz-overlay"]').trigger('click')
     expect(wrapper.emitted('close')).toHaveLength(1)

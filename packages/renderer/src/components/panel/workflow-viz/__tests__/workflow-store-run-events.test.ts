@@ -325,7 +325,7 @@ describe('workflowStore：triggerWorkflowReload 活跃 run 事件流联动（§3
     await store.loadWorkflowRunEvents(SID, RUN_A)
     expect(mockGetRunEvents).toHaveBeenCalledTimes(1)
     mockGetWorkflowsResolved()
-    store.triggerWorkflowReload(SID, 'running')
+    store.triggerWorkflowReload(SID)
     await vi.waitFor(() => expect(mockGetRunEvents).toHaveBeenCalledTimes(2))
     expect(mockGetRunEvents).toHaveBeenLastCalledWith(SID, RUN_A)
   })
@@ -335,7 +335,7 @@ describe('workflowStore：triggerWorkflowReload 活跃 run 事件流联动（§3
     store.setActiveWorkflowRun(SID, RUN_A)
     await store.loadWorkflowRunEvents(SID, RUN_A)
     mockGetWorkflowsResolved()
-    store.triggerWorkflowReload('s-other', 'running')
+    store.triggerWorkflowReload('s-other')
     // 等待微任务排空确认无新增调用
     await new Promise((resolve) => setTimeout(resolve, 0))
     expect(mockGetRunEvents).toHaveBeenCalledTimes(1)

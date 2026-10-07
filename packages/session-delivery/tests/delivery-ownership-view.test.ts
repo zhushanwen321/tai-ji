@@ -38,7 +38,6 @@ describe('u1-view 双视图投影（D9②/D5③）', () => {
       payload: { kind: 'text', content: 'pending' },
       createdAt: expect.any(Number),
       updatedAt: expect.any(Number),
-      sendAttempts: 0,
     })
     expect(full.tombstones.map((t) => t.id)).toEqual(['u-1', 'u-2', 'u-3'])
 
@@ -307,7 +306,7 @@ describe('u1-view v1 机制保持抽查（busy gate / dispose）', () => {
   })
 
   // [已不可达用例删除登记] 原「30s watchdog：settled 丢失时复核投递」随 watchdog 定时
-  // 复核腿退役（ADR-0112——busy 留守归 settled 边沿与外部触发，不建定时兜底）而不可达，
+  // 复核腿退役（ADR-0122——busy 留守归 settled 边沿与外部触发，不建定时兜底）而不可达，
   // 2026-10-05 投递域清理批次删除。
 
   it('dispose 语义保持：清条目集（含 tombstone），不触发 onSettled，checked reject', async () => {

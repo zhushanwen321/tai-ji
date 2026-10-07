@@ -333,7 +333,7 @@ export class PluginHost implements PluginHostContract {
   /**
    * 向指定 Worker 发送 load 指令，等待 loaded/error 响应。
    * pluginId 显式传入（loadedModules 分区键，见 PluginHostContract.loadPlugin 注释）。
-   * loadPlugin 墙钟超时（loadTimeoutMs 10s + terminate 回收链）已随 ADR-0112 防御机制
+   * loadPlugin 墙钟超时（loadTimeoutMs 10s + terminate 回收链）已随 ADR-0122 防御机制
    * 清查退役（C-proc-19 控制面单请求粒度条款一并收窄）——插件顶层死循环 = loaded/error
    * 永不到达 = 本 Promise 悬挂，处置归用户（插件管理界面停用/卸载）。
    */
@@ -643,7 +643,7 @@ export class PluginHost implements PluginHostContract {
     this.removeIndexEntries(workerId, pluginIds)
 
     if (trustLevel === 'trusted') {
-      // ADR-0112：原「冷却后自动 rebuild + crash 计数上限/衰减」编排已退役——崩溃经
+      // ADR-0122：原「冷却后自动 rebuild + crash 计数上限/衰减」编排已退役——崩溃经
       // onCrash 显式上报（PluginService 置 CRASHED 态，前端可见），恢复决策归用户
       // （管理界面重新启用）。
       this.workerInstances.delete(workerId)

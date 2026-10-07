@@ -662,7 +662,7 @@ describe('回收语义（V9/V11）：cancel/drain 不广播 message.error', () =
 // 唯一入口）+ flush；其余 active 条目（queued/in-flight）行为不变。
 
 describe('delivery.resync 用户重试（§3.4 重试钮）：failed → queued 并重投', () => {
-  it('failed 条目经 resync 单条重报 → 重投受理闭环 delivered（断连终局后用户重试，ADR-0112）', async () => {
+  it('failed 条目经 resync 单条重报 → 重投受理闭环 delivered（断连终局后用户重试，ADR-0122）', async () => {
     const h = makeHarness()
     const id = 'u-20000001-0000-4000-8000-000000000001'
     // failed 唯一产生方 = 断连终局（failInFlight）：submit → 受理 in-flight → 断连转
@@ -825,7 +825,7 @@ describe('S1 死锁复现（D1 申报制）：无标记合批受理即落地 + g
 // 收回、无 transcript 校验，pi 槽位文本随后被消费即假撤销成功）；sweep/requeue 清撤销
 // 标记把待收回条目重投复活。修复 = registry 持 per-session pendingRevoke 意图集：再入
 // cancel 重复完整「收回 + 校验」流程；sweep/rebuild/disposeCleared 查集不重投，文本确认
-// 离场（收回/蒸发）即兑现终态。[ADR-0112 退役登记] 蒸发兑现挂点已由 sweepInFlight 的
+// 离场（收回/蒸发）即兑现终态。[ADR-0122 退役登记] 蒸发兑现挂点已由 sweepInFlight 的
 // slotCleared 门禁迁至 pi 断连事件（onPiDisconnected 就地兑现）——时间窗门禁随 sweep
 // 退役，断连信号是「文本已离场」的确定性事实。
 
@@ -859,7 +859,7 @@ describe('in-flight 撤销二段式归宿（dmg-r1-2）：意图集持有至兑�
     expect(h.promptCalls).toHaveLength(1) // 全程无重投
   })
 
-  it('待收回条目蒸发兑现：pi 断连（文本随进程离场）→ 撤销意图就地兑现 cancelled（ADR-0112）', async () => {
+  it('待收回条目蒸发兑现：pi 断连（文本随进程离场）→ 撤销意图就地兑现 cancelled（ADR-0122）', async () => {
     const h = makeHarness()
     const id = 'u-d2000002-0000-4000-8000-000000000002'
     await SUBMIT_AND_ACCEPT(h, id, '蒸发兑现')

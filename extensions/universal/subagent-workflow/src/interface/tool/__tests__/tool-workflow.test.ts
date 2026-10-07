@@ -906,3 +906,66 @@ describe("TC3i: 宿主 TOOL_TOP_LEVEL reservedKeys 接线锚（M-3 回归）", (
     expect(argKeysFromMeta(rflParams(), OPT).exact.has("name")).toBe(false);
   });
 });
+
+// ══════════════════════════════════════════════════════════════
+// renderCall 标题行（displayWorkflowName 短名 + runId/slug 不受影响）
+// ══════════════════════════════════════════════════════════════
+//
+// 锁 2026-09 display 分层：name 是绝对 .js 路径，标题行只出 basename 短名
+// （displayWorkflowName）；runId 截断预览与 slug 后缀形态不变。
+
+/** 最小 theme stub（fg/bold 直包文本——断言不依赖真实着色映射）。 */
+function makeRenderTheme(): Record<string, (color: string | ((t: string) => string), text?: string) => string> {
+  return {
+    fg: (_color, text) => (typeof text === "string" ? `<${_color}>${text}</${_color}>` : ""),
+    bold: (text) => (typeof text === "string" ? `<b>${text}</b>` : ""),
+  } as never;
+}
+
+/** pi-tui Text 反射取构造串（tool-render.test.ts 同款 helper——本文件独立内联）。 */
+function textOf(component: unknown): string {
+  const obj = component as Record<string, unknown>;
+  for (const key of Object.keys(obj)) {
+    const v = obj[key];
+    if (typeof v === "string" && v.length > 0) return v;
+  }
+  return "";
+}
+
+describe("renderCall 标题行：displayWorkflowName 短名 + runId/slug 不受影响", () => {
+  const tool = captureWorkflowTool(makeDeps(stubRegistry()), { isProcessing: false });
+  const theme = makeRenderTheme();
+
+  it("绝对路径 name → basename 短名（去 .js、去目录）", () => {
+    const out = textOf(
+      (tool as unknown as { renderCall: (args: Record<string, unknown>, theme: unknown) => unknown })
+        .renderCall({ action: "run", name: "/home/u/wf/batch-report.js" }, theme),
+    );
+    expect(out).toMatch(/batch-report<\/accent>/); // name 落在 accent 段收口前（前缀空格也在段内）
+    expect(out).not.toContain("/home/u/wf/");
+    expect(out).not.toContain(".js");
+  });
+
+  it("runId / slug 后缀不受短名影响（runId 截断预览 + slug 全文）", () => {
+    const out = textOf(
+      (tool as unknown as { renderCall: (args: Record<string, unknown>, theme: unknown) => unknown })
+        .renderCall(
+          { action: "run", name: "/home/u/wf/batch-report.js", slug: "nightly", runId: "wf-run-0123456789" },
+          theme,
+        ),
+    );
+    // 短名 + slug 全文在位
+    expect(out).toContain("batch-report");
+    expect(out).toContain("nightly");
+    // runId 只出截断预览（ID_PREVIEW_LENGTH = 8 → "wf-run-0"），不泄漏全文
+    expect(out).toContain("wf-run-0");
+    expect(out).not.toContain("wf-run-0123456789");
+  });
+
+  it("缺 name（status 等无参 action）不崩、不出短名", () => {
+    expect(() =>
+      (tool as unknown as { renderCall: (args: Record<string, unknown>, theme: unknown) => unknown })
+        .renderCall({ action: "status" }, theme),
+    ).not.toThrow();
+  });
+});

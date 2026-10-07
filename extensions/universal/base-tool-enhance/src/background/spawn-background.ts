@@ -166,7 +166,7 @@ export function spawnBackgroundTask(opts: SpawnBackgroundOptions): SpawnBackgrou
 		});
 		// no-op error listener 防 spawn 异步失败 emit error 无监听导致进程崩溃
 		//（EventEmitter 语义），不做任何状态推进——exit 感知归 exit 事件边沿
-		//（attachExitCollector，ADR-0112 改造：原 2s 轮询器已删）。
+		//（attachExitCollector，ADR-0122 改造：原 2s 轮询器已删）。
 		child.on("error", () => {});
 		child.unref();
 	} catch (err) {
@@ -222,7 +222,7 @@ export function spawnBackgroundTask(opts: SpawnBackgroundOptions): SpawnBackgrou
 	registerSpawnedTask(task);
 	writeRegistryEntry(registryPath, taskToRegistryEntry(task));
 	emitPendingRegister(task);
-	// exit 事件边沿挂接（事件驱动感知，ADR-0112 改造后无轮询器）
+	// exit 事件边沿挂接（事件驱动感知，ADR-0122 改造后无轮询器）
 	attachExitCollector(task);
 	return { ok: true, task };
 }

@@ -67,7 +67,7 @@ export interface UpdateErrorInfo {
  */
 export const UPDATE_ERROR_MESSAGES: Record<UpdateErrorCode, Omit<UpdateErrorInfo, 'code'>> = {
   UPDATE_NETWORK_TIMEOUT: {
-    // 成因多形态（design-code-sync F1；原 undici 侧 30s 停滞检测已随 ADR-0112 删除）：
+    // 成因多形态（design-code-sync F1；原 undici 侧 30s 停滞检测已随 ADR-0122 删除）：
     // ① curl --connect-timeout 10s 连接未建立（exit 28 双成因之一，英文诊断串
     // 'curl connection timeout (...)'）② curl --speed-time 传输停滞（exit 28 另一成因，
     // 诊断串 'curl download stalled (...)'——curl 进程参数属外部引擎，不在删除范围）

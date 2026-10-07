@@ -119,7 +119,7 @@ export class PluginHotReloader {
 
     const oldStatus = 'active'
 
-    // 1. Deactivate（墙钟已随 ADR-0112 退役：deactivate 抛错走热重载失败路径）
+    // 1. Deactivate（墙钟已随 ADR-0122 退役：deactivate 抛错走热重载失败路径）
     await hooks.deactivate(pluginId)
 
     // 2. Re-activate

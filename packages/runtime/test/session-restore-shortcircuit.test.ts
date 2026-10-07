@@ -246,7 +246,7 @@ describe('D4：restore-abort（标记检测）', () => {
 
     // D4 核心：restore 返回前 abort（掐 session_start 钩子补投的 replay turn）
     expect(freshClient.abort).toHaveBeenCalledTimes(1)
-    // 标记保留：拦截存续到用户下一次显式投递（ADR-0112 事件顺序契约，原静默窗自动
+    // 标记保留：拦截存续到用户下一次显式投递（ADR-0122 事件顺序契约，原静默窗自动
     // 收敛已删）
     expect(userStoppedMarkStore.hasUserStoppedMark(id)).toBe(true)
   })

@@ -1,5 +1,11 @@
 # @zhushanwen/pi-system-prompt-trace
 
+## 0.2.2
+
+### Patch Changes
+
+- 802af968f: Pin the pi peer dependency range to ^1.0.0 and refresh pi implementation anchors in comments; no behavior change.
+
 ## 0.2.1
 
 ### Patch Changes

@@ -12,6 +12,7 @@
  * 不含：contenteditable 事件处理（contenteditable.ts）、模板结构、props/emits 声明。
  */
 import { type Ref } from 'vue'
+import { randomUuid } from '@taiji/core'
 import { removeChipNode, isSpacerNode, placeCursorAfter } from './input-dom'
 import type { ChipCallbacks } from './types'
 
@@ -195,7 +196,8 @@ export function useComposerChipCommands(
     chip.className = 'mention-chip mention-file image-chip'
     chip.contentEditable = 'false'
     chip.dataset.chipType = 'image'
-    chip.dataset.chipId = crypto.randomUUID()
+    // randomUuid 而非 crypto.randomUUID：非安全上下文（LAN http）下为 undefined，见 contenteditable 同款注释
+    chip.dataset.chipId = randomUuid()
     chip.dataset.chipPath = path
     chip.dataset.chipFileName = fileName
     chip.dataset.chipDisplayName = displayName

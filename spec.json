@@ -305,7 +305,7 @@
         "packages/renderer/src/composables/useAppUpdate.ts",
         "packages/renderer/src/components/sidebar/UpdateButton.vue",
         "packages/renderer/src/components/settings/update/UpdatePage.vue",
-        "packages/renderer/src/i18n/locales/zh-CN/settings.ts",
+        "packages/ui/src/locale/zh-CN/settings.ts",
         "packages/renderer/src/i18n/locales/en/settings.ts",
         "packages/renderer/src/i18n/locales/zh-CN/sidebar.ts",
         "packages/renderer/src/i18n/locales/en/sidebar.ts"

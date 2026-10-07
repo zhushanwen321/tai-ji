@@ -20,13 +20,17 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { getSettingsStore } from '@taiji/core'
 
-// ── drawer control：三段式虚拟 id 固定选中（chat 域 record 视图）─────────────
+// ── drawer：三段式虚拟 id 固定选中（chat 域 record 视图）────────────────────
+// useSubagentSelection = main 合并后 SubagentTab 的选中态读取面（core selection 域，
+// enteredFrom 词表 'chat' | 'workflow' | null）；useDrawerControl 为旧读取面保留 mock
+// （组件已不消费，防挂载树其他子组件引用）。
 const drawerState = {
   selectedSubagentId: ref<string>('subagent:main-1:sa-1'),
-  enteredFrom: ref<string>('drawer'),
+  enteredFrom: ref<'chat' | 'workflow' | null>('chat'),
 }
 vi.mock('@taiji/core/domain/drawer', () => ({
   useDrawerControl: () => drawerState,
+  useSubagentSelection: () => drawerState,
   openWorkflowInDrawer: vi.fn(),
 }))
 

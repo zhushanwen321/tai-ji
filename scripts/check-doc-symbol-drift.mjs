@@ -26,6 +26,12 @@
  *      体一起消失而登记表未同步（taste-lint 只查反向：注解→条目号存在），无任何
  *      机器信号；此检查把「登记表声称有注解」变成可机检的失败。注解采集走
  *      `git grep`（索引级，毫秒级），无 git 上下文时降级跳过。
+ *   6. ADR 编号唯一占用与引用存在性：decisions.md 内 `### ADR-XXXX` 标题编号
+ *      不得重复占用（同号两条 = 引用无法消歧）；引用域（根 AGENTS.md + docs/
+ *      递归 .md）内的 `ADR-XXXX` 引用必须命中现行标题编号 ∪ 已否谱系编号
+ *      （`- **ADR-XXXX**` 行——被推翻决策的合法历史引用面）。decisions.md 自身
+ *      正文引用同查（定义行与已否行除外）；合条标题（`### ADR-0001 / ADR-0002`）
+ *      收全部编号。源码注释内 ADR 引用不在本面（文档面检查，与第二检查同构）。
  *
  * 退出码契约：0=全部通过；1=存在违规；2=检查器配置故障（DOC_MODULE_MAP 登记路径
  * 缺失/不可访问——守卫自身输入坏了，恢复动作指向映射表，与「检查不通过」可区分）。
@@ -693,6 +699,35 @@ function reportDataOwnerAnchors(dataOwner) {
   return ownerMissing.length > 0 || ownerUnknown.length > 0
 }
 
+/** 报告段 5：ADR 编号唯一占用与引用存在性（无违规返回 false） */
+function reportAdrRegistry(adr) {
+  if (!adr.available) {
+    console.error(`[adr-registry] 登记处缺失：${ADR_REGISTRY_REL} 不存在——ADR 引用面无从判定（登记处被删时引用须同批清理）`)
+    return true
+  }
+  let printed = false
+  if (adr.duplicates.length > 0) {
+    printed = true
+    console.error(`[adr-registry] 发现 ${adr.duplicates.length} 个 ADR 编号被多条决策重复占用：`)
+    for (const d of adr.duplicates) {
+      console.error(`  ✗ ${ADR_REGISTRY_REL}:${d.lines.join(',')}  ${d.num} 重复占用——重编后者（现有最大编号顺延），并同步修正全部引用`)
+    }
+  }
+  if (adr.dangling.length > 0) {
+    printed = true
+    console.error(`[adr-registry] 发现 ${adr.dangling.length} 处 ADR 编号引用在登记处无命中（现行标题与已否谱系均无该编号）：`)
+    for (const v of adr.dangling) {
+      console.error(`  ✗ ${v.doc}:${v.line}  ${v.num} 未登记——改为现行编号、补登记，或属已推翻决策时登记进已否谱系`)
+    }
+  }
+  if (printed) {
+    console.error('')
+    console.error(`恢复动作：以 ${ADR_REGISTRY_REL} 为唯一登记处对齐——引用写错编号的改指现行编号；决策被删除的清理引用；`)
+    console.error('新决策编号取现有最大编号顺延，禁止重占既有编号。')
+  }
+  return printed
+}
+
 /** skipped 台账收尾显形（0 时静默）：计数为 0 即无输出，不打扰正常通过流 */
 function reportSkipped(skipped) {
   const n = skipped.files + skipped.dirs
@@ -704,12 +739,13 @@ function reportSkipped(skipped) {
  * 四段违规报告编排：任一段有违规则全量打印（各段自带内部 footer），最后统一 footer
  * + skipped 显形行 + exit 1（pre-commit/CI 只吃退出码与 stderr 文本）。段顺序与文案逐字保留。
  */
-function reportFailures({ drifts, missingPaths, commentScan, dataOwner, skipped }) {
+function reportFailures({ drifts, missingPaths, commentScan, dataOwner, adr, skipped }) {
   const anyPrinted = [
     reportSymbolDrifts(drifts),
     reportMissingPaths(missingPaths),
     reportCommentRefs(commentScan),
     reportDataOwnerAnchors(dataOwner),
+    reportAdrRegistry(adr),
   ].some(Boolean)
   if (!anyPrinted) {
     reportSkipped(skipped)
@@ -723,14 +759,17 @@ function reportFailures({ drifts, missingPaths, commentScan, dataOwner, skipped 
 }
 
 /** 零违规收尾行（注释面扫描模式随 staged 上下文变化） */
-function reportOk(commentScan, dataOwner, pathRefDocs, skipped) {
+function reportOk(commentScan, dataOwner, adr, pathRefDocs, skipped) {
   const commentPart = commentScan.available
     ? `注释 docs 引用（${commentScan.fullScan ? '全仓' : 'staged'} ${commentScan.fileCount} 文件）零悬空`
     : '注释 docs 引用（无 git staged 上下文，跳过）'
   const ownerPart = dataOwner.available
     ? `数据源登记锚点（${dataOwner.claims.length} 条「声明处」声明 × 源码 ${dataOwner.annotationCount} 个注解）零悬空`
     : '数据源登记锚点（无 git 上下文，跳过）'
-  console.log(`[doc-symbol-drift] OK：${Object.keys(DOC_MODULE_MAP).length} 个映射文档 × 源码导出表，零悬空符号；${pathRefDocs.length} 个活跃测试文档 × 路径存在性，零悬空引用；${commentPart}；${ownerPart}`)
+  const adrPart = adr.available
+    ? `ADR 编号（${adr.defined.size} 个现行 + ${adr.deprecated.size} 个已否，唯一占用；引用域 ${adr.refDocCount} 文档）零悬空`
+    : 'ADR 编号（登记处缺失）'
+  console.log(`[doc-symbol-drift] OK：${Object.keys(DOC_MODULE_MAP).length} 个映射文档 × 源码导出表，零悬空符号；${pathRefDocs.length} 个活跃测试文档 × 路径存在性，零悬空引用；${commentPart}；${ownerPart}；${adrPart}`)
   reportSkipped(skipped)
 }
 
@@ -797,6 +836,134 @@ function checkDataOwnerAnchors() {
   }
 }
 
+// ── 检查面 6：ADR 编号唯一占用与引用存在性───────────────────────────
+// 起因 2026-10-04：ADR-0074/0075/0076 三个编号被 2026-10-01 窗口条目重占（同号
+// 两条存活多日无机器信号），AGENTS.md/DESIGN.md 多处引用语义错位（拉为主义写成
+// 0075、exec-skills 写成 0074、symlink 白名单写成 0076），靠审计人工发现后重编
+// 窗口三条为 ADR-0115/0116/0117。本面把两条判定变成可机检的失败：
+//   1. 唯一占用：decisions.md 内 `### ADR-XXXX` 标题编号不得重复占用——重复 =
+//      两条决策共享一个编号，任何引用都无法消歧（本次事故形态）；
+//   2. 引用存在：引用域内 `ADR-XXXX` 必须命中现行标题编号 ∪ 已否谱系编号
+//      （`- **ADR-XXXX**` 行——被推翻决策的合法历史引用面）。
+// 检查域 = 根 AGENTS.md + docs/ 递归 .md（文档面，与第二检查同构）；decisions.md
+// 自身正文引用同查（定义行与已否行本身不算引用）；合条标题与合条已否行收全部
+// 编号（`### ADR-0001 / ADR-0002（digest）` → 0001、0002 都算已定义）。
+// 源码注释内的 ADR 引用不在本面（注释面已有 G5 管 docs 路径引用；源码侧 ADR
+// 引用面未来按需另立）。constraints.json 的 adrRef 锚点不在本面（结构校验归
+// validate-constraints.mjs）。
+
+const ADR_REGISTRY_REL = 'docs/adr/decisions.md'
+const ADR_REF_FILES = ['AGENTS.md']
+const ADR_REF_DIRS = ['docs']
+
+/** decisions.md 条目标题行的编号段（标题开头，支持合条 `### ADR-0001 / ADR-0002`；
+ *  标题正文提及的其他编号——「承 ADR-0094 同款裁决」式——是引用不是定义，不收） */
+const ADR_TITLE_LINE_RE = /^#{2,4}\s+(ADR-\d{4}(?:\s*\/\s*ADR-\d{4})*)/
+/** 已否谱系行（`- **ADR-0008** ...`，加粗段内编号；正文提及的其他编号不收） */
+const ADR_DEPRECATED_LINE_RE = /^- \*\*(ADR-\d{4}(?:\s*\/\s*ADR-\d{4})*)\*\*/
+const ADR_NUM_RE = /ADR-(\d{4})/g
+
+/**
+ * 纯函数：从 decisions.md 文本提取 ADR 登记面。
+ * @returns {{ defined: Map<string, number[]>, deprecated: Set<string> }}
+ *   defined：编号 → 标题行行号列表（>1 条 = 重复占用）；deprecated：已否谱系编号集
+ */
+export function extractAdrRegistry(mdText) {
+  const defined = new Map()
+  const deprecated = new Set()
+  mdText.split('\n').forEach((line, i) => {
+    const title = ADR_TITLE_LINE_RE.exec(line)
+    if (title) {
+      for (const m of title[1].matchAll(ADR_NUM_RE)) {
+        const num = `ADR-${m[1]}`
+        if (!defined.has(num)) defined.set(num, [])
+        defined.get(num).push(i + 1)
+      }
+      return
+    }
+    const dep = ADR_DEPRECATED_LINE_RE.exec(line)
+    if (dep) {
+      for (const m of dep[1].matchAll(ADR_NUM_RE)) deprecated.add(`ADR-${m[1]}`)
+    }
+  })
+  return { defined, deprecated }
+}
+
+/**
+ * 纯函数：单文档文本内的 ADR 编号引用悬空判定（标题行/已否行是登记本体不算引用）。
+ * @returns {Array<{line: number, num: string}>} 悬空引用（line 为 1-based 文档行号）
+ */
+export function checkAdrRefsInText(mdText, registry) {
+  const dangling = []
+  mdText.split('\n').forEach((line, i) => {
+    if (ADR_TITLE_LINE_RE.test(line) || ADR_DEPRECATED_LINE_RE.test(line)) return
+    for (const m of line.matchAll(ADR_NUM_RE)) {
+      const num = `ADR-${m[1]}`
+      if (!registry.defined.has(num) && !registry.deprecated.has(num)) {
+        dangling.push({ line: i + 1, num })
+      }
+    }
+  })
+  return dangling
+}
+
+/**
+ * 引用域悬空扫描：逐文档读盘后走 checkAdrRefsInText。
+ * 文档读失败计入 skipped 不静默。
+ * @param {Array<{rel: string}>} docs
+ * @param {{ defined: Map<string, unknown>, deprecated: Set<string> }} registry
+ * @param {{files: number, dirs: number}} [skipped]
+ */
+export function checkAdrRefs(docs, registry, skipped) {
+  const dangling = []
+  for (const { rel } of docs) {
+    let mdText
+    try {
+      mdText = readFileSync(path.join(PROJECT_ROOT, rel), 'utf-8')
+    } catch {
+      if (skipped) skipped.files++
+      continue
+    }
+    for (const hit of checkAdrRefsInText(mdText, registry)) dangling.push({ doc: rel, ...hit })
+  }
+  return dangling
+}
+
+/** 引用域文档收集（AGENTS.md + docs/ 递归 .md；不可读目录计入 skipped） */
+function collectAdrRefDocs(skipped) {
+  const docs = ADR_REF_FILES.map((rel) => ({ rel }))
+  for (const dirRel of ADR_REF_DIRS) {
+    const absDir = path.join(PROJECT_ROOT, dirRel)
+    const walk = (abs) => {
+      let entries
+      try { entries = readdirSync(abs) } catch { if (skipped) skipped.dirs++; return }
+      for (const name of entries) {
+        const full = path.join(abs, name)
+        let st
+        try { st = statSync(full) } catch { if (skipped) skipped.files++; continue }
+        if (st.isDirectory()) walk(full)
+        else if (name.endsWith('.md')) docs.push({ rel: path.relative(PROJECT_ROOT, full) })
+      }
+    }
+    walk(absDir)
+  }
+  return docs
+}
+
+/** 检查面 6：登记面唯一占用 + 引用域悬空扫描（decisions.md 缺失 = 登记处被删，
+ *  引用面无从判定，显形提示而非静默通过）。 */
+function checkAdrRegistry(skipped) {
+  const docAbs = path.join(PROJECT_ROOT, ADR_REGISTRY_REL)
+  if (!existsSync(docAbs)) return { available: false, defined: new Map(), deprecated: new Set(), refDocCount: 0, duplicates: [], dangling: [] }
+  const registry = extractAdrRegistry(readFileSync(docAbs, 'utf-8'))
+  const refDocs = collectAdrRefDocs(skipped)
+  const duplicates = [...registry.defined.entries()]
+    .filter(([, lines]) => lines.length > 1)
+    .map(([num, lines]) => ({ num, lines }))
+  const dangling = checkAdrRefs(refDocs, registry, skipped)
+  return { available: true, ...registry, refDocCount: refDocs.length, duplicates, dangling }
+}
+
 function main() {
   const skipped = { files: 0, dirs: 0 }
   const pathRefDocs = collectPathRefDocs(skipped)
@@ -804,8 +971,9 @@ function main() {
   const missingPaths = checkPathRefs(pathRefDocs, skipped)
   const commentScan = checkStagedCommentDocRefs(skipped)
   const dataOwner = checkDataOwnerAnchors()
-  reportFailures({ drifts, missingPaths, commentScan, dataOwner, skipped })
-  reportOk(commentScan, dataOwner, pathRefDocs, skipped)
+  const adr = checkAdrRegistry(skipped)
+  reportFailures({ drifts, missingPaths, commentScan, dataOwner, adr, skipped })
+  reportOk(commentScan, dataOwner, adr, pathRefDocs, skipped)
 }
 
 // 缺省 CLI 形态：全量符号/路径检查 + staged 注释 docs 引用检查（不依赖 cwd）。

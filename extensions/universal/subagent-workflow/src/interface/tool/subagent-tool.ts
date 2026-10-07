@@ -92,11 +92,12 @@ function isModelOverrideObj(a: unknown): a is { model?: unknown; thinkingLevel?:
 /**
  * start 路径类参数（skillPath / cwd）运行时守卫：绝对路径 + 禁 `..` 穿越。
  *
- * 校验链事实（pi 0.84.4 实装，登记 PS-20）：pi agent-loop 对注册 typebox schema
- * 有运行时强校验——agent-loop.js:403-404 在 beforeToolCall / execute 之前调
- * validateToolArguments（pi-ai validation.js:247：Value.Convert :249 + Compile :210
- * + Check :265，失败 throw `Validation failed for tool` :272-273）→ catch 走
- * immediate error（agent-loop.js:445-451），execute 不被调用。schema 的
+ * 校验链事实（语义登记 PS-20，verifiedWith 以 pi-semantics.json 为准，逐 claim 行号见该条目
+ * piAnchor）：pi agent-loop 对注册 typebox schema
+ * 有运行时强校验——在 beforeToolCall / execute 之前调
+ * validateToolArguments（pi-ai validation.js：Value.Convert + Compile
+ * + Check，失败 throw `Validation failed for tool`）→ catch 走
+ * immediate error，execute 不被调用。schema 的
  * pattern（skillPath/cwd `^/`）/ maxLength（slug 35）是运行时强制而非仅模型可见
  * 契约；tool-definition-wrapper.js:11 只原样透传 params，校验发生在上游 agent-loop 层。
  *
@@ -149,7 +150,7 @@ export function registerSubagentTool(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "subagent",
     label: "Subagent",
-    promptSnippet: "Delegate to specialized subagents (agentRef = absolute .md path from <available_subagents>)",
+    promptSnippet: "Delegate to specialized subagents (agentRef = absolute .md path, e.g. a <location> from <available_subagents>)",
     description: `Delegate a task to a specialized subagent — when to delegate rather than do it yourself.
 
 CRITICAL — executionMode "sequential": multiple \`subagent\` calls in the SAME message run one-after-another. For concurrency, start runs in background and tasks run concurrently in the pool (default maxConcurrent=6).

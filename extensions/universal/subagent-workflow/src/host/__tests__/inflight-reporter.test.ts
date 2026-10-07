@@ -4,7 +4,7 @@
 //   ①使用者（runtime event-adapter 视角）——帧形状：title=SUBAGENT_INFLIGHT_MARKER、
 //     options=[JSON 帧]（inFlight/sessionId/emittedAt）、控制面级 timeout 在场；
 //   ②构建者——初始上报（attachSession 触发，无需任何 subagent 调用）；失败折叠 +
-//     置脏（无 timer 自动重试，ADR-0112）；推送在途期间多次迁移合并为单帧且携带
+//     置脏（无 timer 自动重试，ADR-0122）；推送在途期间多次迁移合并为单帧且携带
 //     最新绝对计数；
 //   ③观察者——onInFlightChanged 同步返回（不 await select，不进生命周期链）；
 //     detachSession 后通道静默，session 死后不推帧。
@@ -158,7 +158,7 @@ describe("绝对计数语义（每帧携带当下值，非增量）", () => {
   });
 });
 
-describe("失败折叠（ADR-0112：无 timer 自动重试，事件驱动重推）", () => {
+describe("失败折叠（ADR-0122：无 timer 自动重试，事件驱动重推）", () => {
   it("select resolve undefined（超时/旧版 runtime）→ 置脏不重试；下次迁移事件重推最新快照", async () => {
     const channel = makeSelectChannel();
     const reporter = createInFlightReporter({ selectTimeoutMs: SELECT_TIMEOUT_MS });
@@ -169,7 +169,7 @@ describe("失败折叠（ADR-0112：无 timer 自动重试，事件驱动重推�
     // 首帧无人 ack，select 以 undefined 落定（超时形态）→ 折叠置脏
     channel.settle(0, undefined);
     await advance(0);
-    // 推进远超原重试周期的时间：无 timer 自动重试（ADR-0112），零新帧
+    // 推进远超原重试周期的时间：无 timer 自动重试（ADR-0122），零新帧
     await advance(60_000);
     expect(channel.calls).toHaveLength(1);
 

@@ -2,7 +2,7 @@
 //
 // [U2] D10 时间预算活跃段算式（纯函数）测试 +
 // [ADR-0092]「恢复不补收未提交结果」的回归锁（原 D8 三档判据已随该条删除）。
-// [ADR-0112] 原「D10 pump 账本消费」describe 随重试矩阵删除（账本 + rebuildRuntime 已删）。
+// [ADR-0122] 原「D10 pump 账本消费」describe 随重试矩阵删除（账本 + rebuildRuntime 已删）。
 //
 // 文件名保留历史名（原为「tier 判据 + 预算」双主题）；档位真实性冒烟归场景 22。
 import * as fs from "node:fs";

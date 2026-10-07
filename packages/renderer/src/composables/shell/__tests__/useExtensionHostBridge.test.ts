@@ -1,32 +1,33 @@
 // @vitest-environment node
 
 /**
- * useExtensionHostBridge.test.ts —— createWsPluginMessageSource 过滤条件单测（FR1/AC1）。
+ * useExtensionHostBridge.test.ts —— ExtensionHost renderer 接线装配单测。
+ *
+ * createWsPluginMessageSource 过滤条件与 CompanionBand dialog 适配（source/transport
+ * 工厂）的用例已随实现下沉 @taiji/ui/extension-host shell-adapters.test.ts（双壳共享件，
+ * remote-use 架构审查裁决）；本文件聚焦壳侧装配：provide 契约 + MF-2 响应式桥 +
+ * MF-1 挂载点上报时序。
  *
  * 链路：events.dispatchCrossSession（模拟 route-inbound crossSession 通道分发）→ source →
  * MessageBusBridge → bus。经 events 正规通道全链路验证（ADR-0060：source 双订阅 onGlobal +
  * onCrossSession，crossSession 通道注入可触发 source adapt，与 global 等价）。
- *
- * 覆盖：TC1 plugin:uiRequest 前缀放行 / TC2 extension.dialog 白名单放行（归一 kind=ui-request）/
- * TC3 extension.error 非白名单拒绝 / TC4 plugin:statusBarUpdate 前缀回归 /
- * TC5 白名单字面量 + 行为级验证（防与 core EXTENSION_HANDLERS 漂移；含 requestsInvalidated
- * 与 extension.dialog 共 6 项）。
  * M17 追加：TC7 VIEW_HOST_SOURCE_KEY provide 值的 getViewIds 纯透传
  * （extension:widgetGui 帧 → ViewHostStore → provide 枚举一致）。
  * M17 wave2 追加（D5：废弃 sidebar 动态 view 发现，getViews 纯静态）：
  * M17w2-TC1 widget 推送不进 L2 tab 清单（getViewIds 对照仍含）/
  * M17w2-TC2 静态声明 view 经 registerContribution 出现在 getViews。
+ * R2-2 追加：TC13 重复 init 后重放器上报新实例快照（dispose-and-rebuild 防回归）；全部
+ * describe 的 afterEach 经 __testing.lastInitHandles.dispose 统一回收（bridge + 两个重放器
+ * watcher），消除旧实现「watcher 永绑首次 init 实例」的跨用例残留耦合。
  * u4b 追加（test-coverage SG-2 补防线）：E13 四态判定 resolveHeaderActionAvailability
  * 纯函数直测（store 命中 / registry 命中 / unregistered / unknown 四态）+
  * E3 executeCommand 语义 wiring 测试（缺失命令 → execute 出声 + 返 false 供置灰）。
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { computed, nextTick } from 'vue'
-import { EXTENSION_BRIDGE_TYPES, InternalEventBus, MessageBusBridge, providePlatform, registerMountPoints, scanContributions, type ContributionRegistry, ActivationManager, CommandRegistry } from '@taiji/core'
-import type { InternalEvent } from '@taiji/core'
+import { InternalEventBus, MessageBusBridge, providePlatform, registerMountPoints, scanContributions, type ContributionRegistry, ActivationManager, CommandRegistry } from '@taiji/core'
 import { dispatchCrossSession, dispatchGlobal } from '@taiji/core/transport/api'
 import {
-  createWsPluginMessageSource,
   getExtensionBus,
   initExtensionHostBridge,
   resolveHeaderActionAvailability,
@@ -64,9 +65,9 @@ vi.mock('@taiji/core/transport/ws-client', async (importOriginal) => {
 /**
  * 模拟 bootstrap step 4+5（u6 注册收敛）：bridge 装配后不再自行触发注册，生产由 App.vue
  * onMounted 的 bootstrap 第 4/5 步执行；测试显式调用补齐该前置。两者均读
- * setExtensionRegistries 最新注入的实例（幂等）；ensureMountPointsSync 的模块级守卫使
- * watch 闭包引用首次装配的 mountPoints 实例——各装配点统一补注册，watch 无论引用哪个
- * 实例 list() 均为全量挂载点。step 5 scanContributions（registerBuiltin）在 D4① 后必须补：
+ * setExtensionRegistries 最新注入的实例（幂等）；重放器 watcher 随 init dispose-and-rebuild
+ * （R2-2）闭包绑定当次装配的实例——各装配点补注册后 list() 即为全量挂载点，用例间无跨实例
+ * 残留依赖。step 5 scanContributions（registerBuiltin）在 D4① 后必须补：
  * viewsSource.getViews 消费 builtin 的 sidebar.tab view 声明（该 native 视图退役后
  * builtin 零 view 声明——本组用例经 external 注册路径覆盖 getViews 映射，见 M17w2-TC2）。
  * 两步骤实现体均为纯同步（async 仅是 bootstrap 编排签名，体内无 await）——调用即完成
@@ -76,156 +77,14 @@ async function simulateBootstrapRegistration(): Promise<void> {
   await Promise.all([registerMountPoints(), scanContributions()])
 }
 
-function makeBridge() {
-  const bus = new InternalEventBus()
-  const source = createWsPluginMessageSource()
-  const bridge = new MessageBusBridge({ source, bus })
-  return { bus, bridge }
+/** afterEach 统一回收最近一次装配（bridge + 两个重放器 watcher；R2-2 消除跨用例残留耦合） */
+function disposeLastInit(): void {
+  __testing.lastInitHandles?.dispose()
+  __testing.lastInitHandles = null
 }
-
-/** emit 后收集 bus 上所有事件（对齐 core message-bus-bridge.test.ts 范式）。 */
-function spyEmit(bus: InternalEventBus) {
-  const emitted: InternalEvent[] = []
-  const spy = vi.spyOn(bus, 'emit')
-  spy.mockImplementation((e) => {
-    emitted.push(e)
-    return
-  })
-  return { emitted, spy }
-}
-
-describe('createWsPluginMessageSource 过滤条件（FR1/AC1）', () => {
-  let bridge: MessageBusBridge | null = null
-
-  beforeEach(() => {
-    vi.restoreAllMocks()
-  })
-
-  afterEach(() => {
-    bridge?.dispose()
-    bridge = null
-  })
-
-  it('TC1: plugin:uiRequest 前缀放行 → bus 收到 kind=ui-request（sessionId 透传）', () => {
-    const { bus, bridge: b } = makeBridge()
-    bridge = b
-    const { emitted } = spyEmit(bus)
-
-    dispatchCrossSession({
-      type: 'plugin:uiRequest',
-      payload: { sessionId: 's1', requestId: 'r1', method: 'select', options: ['a', 'b'] },
-    })
-
-    expect(emitted).toHaveLength(1)
-    expect(emitted[0]).toMatchObject({ kind: 'ui-request', sessionId: 's1' })
-    expect(emitted[0]).not.toMatchObject({ kind: 'error' })
-  })
-
-  it('TC1b: plugin:viewUpdate 前缀放行 → bus 收到 kind=extension-widget（MF-1 链路）', () => {
-    const { bus, bridge: b } = makeBridge()
-    bridge = b
-    const { emitted } = spyEmit(bus)
-
-    dispatchCrossSession({
-      type: 'plugin:viewUpdate',
-      payload: { sessionId: 's1', viewId: 'sidebar.tab', pluginId: 'p1', guiTree: [{ type: 'ansi-text', props: { lines: ['hi'] } }], updatedAt: 1 },
-    })
-
-    expect(emitted).toHaveLength(1)
-    expect(emitted[0]).toMatchObject({
-      kind: 'extension-widget',
-      sessionId: 's1',
-      widget: { viewId: 'sidebar.tab', pluginId: 'p1', guiTree: [{ type: 'ansi-text', props: { lines: ['hi'] } }] },
-    })
-    expect(emitted[0]).not.toMatchObject({ kind: 'error' })
-  })
-
-  it('TC2: extension.dialog 白名单放行 → bus 收到 kind=ui-request（与 plugin:uiRequest 归一）', () => {
-    const { bus, bridge: b } = makeBridge()
-    bridge = b
-    const { emitted } = spyEmit(bus)
-
-    dispatchCrossSession({
-      type: 'extension.dialog',
-      payload: { sessionId: 's1', requestId: 'r1', dialogKind: 'confirm', title: '确认?' },
-    })
-
-    expect(emitted).toHaveLength(1)
-    expect(emitted[0]).toMatchObject({ kind: 'ui-request', sessionId: 's1' })
-    expect(emitted[0]).not.toMatchObject({ kind: 'error' })
-  })
-
-  it('TC3: extension.error 非白名单 → bridge 零感知（bus 零事件）', () => {
-    const { bus, bridge: b } = makeBridge()
-    bridge = b
-    const { emitted } = spyEmit(bus)
-
-    dispatchCrossSession({ type: 'extension.error', payload: { sessionId: 's1', code: 'boom' } })
-
-    expect(emitted).toHaveLength(0)
-  })
-
-  it('TC4: plugin:statusBarUpdate 前缀放行不回归', () => {
-    const { bus, bridge: b } = makeBridge()
-    bridge = b
-    const { emitted } = spyEmit(bus)
-
-    dispatchCrossSession({
-      type: 'plugin:statusBarUpdate',
-      payload: {
-        items: [{ id: 'sb1', pluginId: 'tasks', text: 'ready', priority: 100, scope: 'per-session', sessionId: 's1' }],
-      },
-    })
-
-    expect(emitted).toHaveLength(1)
-    // 事件级 sessionId 来自 payload 顶层（statusBarUpdate 无，故 undefined）；item 级 sessionId 保留在 items 内
-    expect(emitted[0]).toMatchObject({ kind: 'plugin-status-bar-update', items: [{ id: 'sb1', sessionId: 's1' }] })
-  })
-
-  it('TC5: EXTENSION_BRIDGE_TYPES 字面量 6 项 + 每项行为级验证（进 bridge 产出非 error 事件）', () => {
-    // 字面量锁：EXTENSION_BRIDGE_TYPES 已是 core SSOT（派生自 EXTENSION_HANDLERS keys），
-    // 锁项数防 handlers 增删时白名单悄悄漂移（消费方 source filter 行为随之变化无信号）。
-    // 第 5 项 extension:requestsInvalidated 为 P2-2 失效链（runtime 非 respond 终结挂起的广播）；
-    // 第 6 项 extension.dialog 为 pi1-disposition-chat-flow D6 对话框族帧（取代原
-    // extension.ui_request，载荷判别字段 dialogKind）
-    expect(EXTENSION_BRIDGE_TYPES).toEqual([
-      'extension:widget',
-      'extension:widgetGui',
-      'extension:status',
-      'extension:notify',
-      'extension:requestsInvalidated',
-      'extension.dialog',
-    ])
-
-    // 行为级一致性：白名单每项经全链路都产出对应 kind 事件（非 kind=error）。
-    // samples 的 type 是宽泛 string，无法静态收窄到 ServerMessage union 成员，做受控擦除
-    // （运行时 tap emit 只按 type 路由 + 透传 payload，形状正确性由 core parser 校验）。
-    const samples: Array<{ type: string; payload: Record<string, unknown> }> = [
-      { type: 'extension:widget', payload: { sessionId: 's1', widgetKey: 'w1', lines: ['line'] } },
-      { type: 'extension:widgetGui', payload: { sessionId: 's1', widgetKey: 'w1', gui: ['g'] } },
-      { type: 'extension:status', payload: { sessionId: 's1', statusKey: 'k', text: 'ready' } },
-      { type: 'extension:notify', payload: { sessionId: 's1', message: 'hi', level: 'info' } },
-      { type: 'extension:requestsInvalidated', payload: { sessionId: 's1', requestIds: ['r9'], reason: 'turn-aborted' } },
-      { type: 'extension.dialog', payload: { sessionId: 's1', requestId: 'r1', dialogKind: 'select' } },
-    ]
-    for (const s of samples) {
-      const { bus, bridge: b } = makeBridge()
-      bridge = b
-      const { emitted } = spyEmit(bus)
-      dispatchCrossSession({ type: s.type, payload: s.payload } as never)
-      expect(emitted).toHaveLength(1)
-      expect(emitted[0].kind).not.toBe('error')
-    }
-  })
-})
 
 describe('initExtensionHostBridge provide CompanionBand 契约（FR2/FR7，TC10）', () => {
-  let bridge: MessageBusBridge | null = null
-
-  afterEach(() => {
-    bridge?.dispose()
-    bridge = null
-  })
+  afterEach(disposeLastInit)
 
   it('TC10: provide DIALOG_REQUEST_SOURCE_KEY + UI_RESPONSE_TRANSPORT_KEY（形状正确）', () => {
     const provided: Array<{ key: unknown; value: unknown }> = []
@@ -237,9 +96,7 @@ describe('initExtensionHostBridge provide CompanionBand 契约（FR2/FR7，TC10�
     }
 
     initExtensionHostBridge(app as never)
-    const result = __testing.lastInitHandles
-    if (!result) throw new Error('initExtensionHostBridge 未写入 __testing.lastInitHandles')
-    bridge = result.bridge
+    if (!__testing.lastInitHandles) throw new Error('initExtensionHostBridge 未写入 __testing.lastInitHandles')
     void simulateBootstrapRegistration()
 
     const sourceProvided = provided.find((p) => p.key === DIALOG_REQUEST_SOURCE_KEY)
@@ -258,12 +115,7 @@ describe('initExtensionHostBridge provide CompanionBand 契约（FR2/FR7，TC10�
 })
 
 describe('MF-2 响应式桥（分区后建时序 + global scope）', () => {
-  let bridge: MessageBusBridge | null = null
-
-  afterEach(() => {
-    bridge?.dispose()
-    bridge = null
-  })
+  afterEach(disposeLastInit)
 
   /** 装配真实 bridge 链（events → source → bus → store → provide），返回注入的数据源。 */
   function initBridgeSources(): {
@@ -282,7 +134,6 @@ describe('MF-2 响应式桥（分区后建时序 + global scope）', () => {
     initExtensionHostBridge(app as never)
     const handles = __testing.lastInitHandles
     if (!handles) throw new Error('initExtensionHostBridge 未写入 __testing.lastInitHandles')
-    bridge = handles.bridge
     void simulateBootstrapRegistration()
     const viewHostSource = provided.find((p) => p.key === VIEW_HOST_SOURCE_KEY)?.value as ViewHostSource
     const statusBarSource = provided.find((p) => p.key === STATUS_BAR_SOURCE_KEY)?.value as StatusBarSource
@@ -418,8 +269,6 @@ describe('MF-2 响应式桥（分区后建时序 + global scope）', () => {
 })
 
 describe('MF-1 挂载点上报时序（mountPoints.sync 连接就绪后发送）', () => {
-  let bridge: MessageBusBridge | null = null
-
   beforeEach(() => {
     vi.useFakeTimers()
     transportSendSpy.mockClear()
@@ -427,13 +276,12 @@ describe('MF-1 挂载点上报时序（mountPoints.sync 连接就绪后发送）
   })
 
   afterEach(() => {
-    bridge?.dispose()
-    bridge = null
+    disposeLastInit()
     disconnect() // 复位 ws-client 状态（防泄漏到后续用例）
     vi.useRealTimers()
   })
 
-  function initBridge() {
+  function initBridge(options?: { register?: boolean }) {
     const provided: Array<{ key: unknown; value: unknown }> = []
     const app = {
       provide(key: unknown, value: unknown) {
@@ -442,13 +290,11 @@ describe('MF-1 挂载点上报时序（mountPoints.sync 连接就绪后发送）
       },
     }
     initExtensionHostBridge(app as never)
-    const handles = __testing.lastInitHandles
-    if (!handles) throw new Error('initExtensionHostBridge 未写入 __testing.lastInitHandles')
-    bridge = handles.bridge
+    if (!__testing.lastInitHandles) throw new Error('initExtensionHostBridge 未写入 __testing.lastInitHandles')
     // 装配后补 bootstrap step 4 前置（见 simulateBootstrapRegistration 注释）——本组用例
     // 焦点是「已注册挂载点在 connected 时补发」的上报时序，非注册本身。注册不发 send，
-    // 不影响「未连接不发送」断言。
-    void simulateBootstrapRegistration()
+    // 不影响「未连接不发送」断言。register:false 供 TC13 区分新旧实例快照（新实例空表）。
+    if (options?.register !== false) void simulateBootstrapRegistration()
   }
 
   it('TC11: 初始未连接不发送；首次建连进入 connected 后补发全量挂载点', async () => {
@@ -458,7 +304,7 @@ describe('MF-1 挂载点上报时序（mountPoints.sync 连接就绪后发送）
     // （旧实现此处 send 被 ws-client 非 OPEN return false 静默丢弃）
     expect(transportSendSpy).not.toHaveBeenCalled()
 
-    connect('mock://extension-host-test')
+    connect('mock://extension-host-test', { auth: 'skip' })
     await vi.advanceTimersByTimeAsync(200) // mock WS connecting→connected（200ms）
 
     expect(transportSendSpy).toHaveBeenCalledTimes(1)
@@ -471,17 +317,47 @@ describe('MF-1 挂载点上报时序（mountPoints.sync 连接就绪后发送）
   it('TC12: runtime 重启重连（断开→重连）→ connected 再次补发（overwrite 幂等）', async () => {
     initBridge()
 
-    connect('mock://extension-host-test')
+    connect('mock://extension-host-test', { auth: 'skip' })
     await vi.advanceTimersByTimeAsync(200)
     expect(transportSendSpy).toHaveBeenCalledTimes(1)
 
     // runtime 重启：旧 WS 断开 → 重连 → 再次 connected → 补发（syncMountPoints overwrite 幂等）
     disconnect()
     expect(transportSendSpy).toHaveBeenCalledTimes(1)
-    connect('mock://extension-host-test')
+    connect('mock://extension-host-test', { auth: 'skip' })
     await vi.advanceTimersByTimeAsync(200)
 
     expect(transportSendSpy).toHaveBeenCalledTimes(2)
+    expect(transportSendSpy).toHaveBeenLastCalledWith({
+      type: 'plugin.mountPoints.sync',
+      payload: { mountPoints: ['sidebar.tab', 'panel.header', 'composer.toolbar', 'statusbar', 'modal'] },
+    })
+  })
+
+  it('TC13 (R2-2): 重复 init 后重放器上报新实例快照（dispose-and-rebuild 防回归）', async () => {
+    // 第一次 init（含注册）→ 建连 → watcher 上报实例 1 全量快照
+    initBridge()
+    connect('mock://extension-host-test', { auth: 'skip' })
+    await vi.advanceTimersByTimeAsync(200)
+    expect(transportSendSpy).toHaveBeenCalledTimes(1)
+
+    // 重复 init：dispose-and-rebuild 使新 watcher 绑定新 registry 实例（setExtensionRegistries
+    // 已换新）。register:false 使新实例快照为空表——若退回模块级布尔守卫（watcher 永久闭包
+    // 绑定第一次 init 的实例），此处上报的是实例 1 残留快照（5 个挂载点），空表断言即红。
+    initBridge({ register: false })
+    // 已 connected → 新 watcher immediate 同步补发（无需推进 timer）
+    expect(transportSendSpy).toHaveBeenCalledTimes(2)
+    expect(transportSendSpy).toHaveBeenLastCalledWith({
+      type: 'plugin.mountPoints.sync',
+      payload: { mountPoints: [] },
+    })
+
+    // 新实例补注册后重连 → 重放器对新实例照常工作（上报其全量快照）
+    await simulateBootstrapRegistration()
+    disconnect()
+    connect('mock://extension-host-test', { auth: 'skip' })
+    await vi.advanceTimersByTimeAsync(200)
+    expect(transportSendSpy).toHaveBeenCalledTimes(3)
     expect(transportSendSpy).toHaveBeenLastCalledWith({
       type: 'plugin.mountPoints.sync',
       payload: { mountPoints: ['sidebar.tab', 'panel.header', 'composer.toolbar', 'statusbar', 'modal'] },

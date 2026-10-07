@@ -31,7 +31,7 @@
  *   全部 pi session 写流 end 并等 flush 完成）后再 process.exit(0)；硬崩溃（SIGKILL/断电）
  *   丢缓冲窗口内尾部几行已声明为取证能力削弱
  * - 轮转窗口 pendingLines 有 10_000 行容量上限（超限丢弃、合并记一次 warn，审查 W30
- *   Fix-1）：fs 挂起拉长轮转窗口时防无界入队内存膨胀。endAndAwait 无墙钟超时（ADR-0112），
+ *   Fix-1）：fs 挂起拉长轮转窗口时防无界入队内存膨胀。endAndAwait 无墙钟超时（ADR-0122），
  *   挂死兜底在进程级（supervisor SIGTERM→SIGKILL 升级线）
  *
  * 用法（组合根 index.ts 初始化）：

@@ -5,7 +5,7 @@
 // （index.ts / pi-engine.ts / __tests__ 均从 spawn-runner 导入）。
 //
 // [U1 归并] dispose 收割切 pi-rpc killPiProcess（与 spawn-runner killChild /
-// runtime 主链路同源）；原「SIGTERM → 30s grace → SIGKILL 升级链」随 ADR-0112
+// runtime 主链路同源）；原「SIGTERM → 30s grace → SIGKILL 升级链」随 ADR-0122
 // 防御清理退役——killPiProcess 现为 SIGKILL 直杀 + 立即 resolve。
 
 import type { ChildProcess } from "node:child_process";

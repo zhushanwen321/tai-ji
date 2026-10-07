@@ -140,10 +140,10 @@ export const PROVIDER_CREDENTIAL_MISSING = 'PROVIDER_CREDENTIAL_MISSING'
 export const ENGINE_MODEL_MISSING = 'ENGINE_MODEL_MISSING'
 
 /**
- * pi `set_model` RPC 的「模型未找到」错误文本前缀（pi 0.84.4 实装唯一可用判据）。
+ * pi `set_model` RPC 的「模型未找到」错误文本前缀（pi 实装唯一可用判据，1.0.0 复核）。
  *
- * 权威源：`node_modules/@earendil-works/pi-coding-agent/dist/modes/rpc/rpc-mode.js:371`
- * `return error(id, "set_model", `Model not found: ${provider}/${modelId}`)`；RpcClient 对
+ * 权威源：`node_modules/@earendil-works/pi-coding-agent/dist/modes/rpc/rpc-mode.js`
+ * case "set_model" 的 `return error(id, "set_model", `Model not found: ${provider}/${modelId}`)`；RpcClient 对
  * `success:false` 帧 `reject(new Error(res.error))`（`infra/pi/rpc-client.ts:624`）——即错误
  * **无 code 字段**，只能按文本前缀分类（分类结果再经 taiji 注册表/凭据两判，见 U2）。
  * pi 版本升级后此文本变更即分类失守，受 C-proc-08 探针守卫（docs/pi-semantics.json PS-xx）。

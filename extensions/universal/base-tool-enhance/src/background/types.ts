@@ -46,7 +46,7 @@ export interface KillingIntent {
  * 单例任务表条目（运行时权威，D17 根基）。
  *
  * child 引用**只用于读 exitCode/signalCode 与 exit-collector 的 exit 监听挂接**
- * （attachExitCollector，ADR-0112 改造：exit 感知归事件边沿——回调链全模块级，
+ * （attachExitCollector，ADR-0122 改造：exit 感知归事件边沿——回调链全模块级，
  * 无实例级 bus/pi 引用，session 替换不产生 stale）。child.on("error") 是另一处
  * 监听（spawn-background 内的 no-op，防进程崩溃，不做任何状态推进）。
  */

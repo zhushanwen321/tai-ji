@@ -102,7 +102,7 @@ export interface DeliveryPort {
    *
    * settle 契约：返回 promise 时实现必须 settle（resolve 或 reject）——悬挂的
    * promise 会让内核 in-flight 防重永久占位、通路停摆。信任边界内不设防
-   * （ADR-0112 范围纪律）：本机操作无响应 = 底层已挂，内核不建墙钟兜底，
+   * （ADR-0122 范围纪律）：本机操作无响应 = 底层已挂，内核不建墙钟兜底，
    * 处置 = 用户显式失败 + 重启应用。
    */
   send(msg: DeliveryMessage, intent: DeliveryIntent): Promise<SendReceipt | void> | SendReceipt | void
@@ -139,7 +139,7 @@ export interface DeliveryConfig {
    * 锚定在受理时点，后移到送达会让 agent 工具调用阻塞至目标 session 当前 turn 结束
    * （steer 类车道可达数十秒）。本注释即接口口径权威声明。
    *
-   * outcome 'rejected' = 失败终局通知（ADR-0112 首败即停：send 失败一次即移除条目并
+   * outcome 'rejected' = 失败终局通知（ADR-0122 首败即停：send 失败一次即移除条目并
    * 逐条回调；断连事件 failInFlight 转 failed 终态同样逐条回调）。重试决策归消费方，
    * 内核不建自动重试。
    *
@@ -180,7 +180,7 @@ export type DeliveryLane = 'direct' | 'steer' | 'queued'
  * - in-flight → delivered：送达回执到达（message_end 标记命中 / 适配器确认，D2）
  * - in-flight → queued：对账回收重投（滞留收回，D3；cancel 部分收回的其余条目同路径）
  * - in-flight/queued → cancelled：用户撤销（delivery.cancel）
- * - in-flight → failed：断连事件驱动的未确认终局（failInFlight，ADR-0112——pi 连接
+ * - in-flight → failed：断连事件驱动的未确认终局（failInFlight，ADR-0122——pi 连接
  *   断开时结果未知，显式失败交用户处置）
  * - failed → queued：用户重试（resync 单条重报）；failed → cancelled：用户移除
  * 帧投影四态差异：cancelled 不进 session.delivery 帧（D5③），协议侧帧 state 无此值。
@@ -204,8 +204,6 @@ export interface DeliveryEntry {
   createdAt: number
   /** 最近一次状态迁移时间（epoch ms）。 */
   updatedAt: number
-  /** 已尝试投递次数（诊断用：首败即停语义下不再驱动重试判定，ADR-0112）。 */
-  sendAttempts: number
   /** 终态落定时间（epoch ms；delivered/failed/cancelled 时有值，tombstone 提取源）。 */
   settledAt?: number
 }

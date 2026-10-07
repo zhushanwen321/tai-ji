@@ -181,7 +181,7 @@ describe('杀链决策日志（D6-⑥：谁触发/杀谁/为什么，u5b 同形�
   })
 
   it('重启用尽：abandon 决策行（attempts=MAX_RESTARTS，reason 指向手动重试）', async () => {
-    // 构造约束：recordSuccess 不清零计数（ADR-0112 无时间窗），崩溃计数单调累计
+    // 构造约束：recordSuccess 不清零计数（ADR-0122 无时间窗），崩溃计数单调累计
     // ——按真实 delay 序列（1/2/4/8s）推进 4 轮把计数推到 4，第 5 轮让 start 失败
     // （waitForHealth reject → handleRestartFailure，不经 recordSuccess）使计数触顶
     // 5 → abandon 分支。

@@ -49,7 +49,7 @@ export const DEFAULT_SUBAGENT_ENGINE = 'pi'
 
 // ── 协议客户端管理面 ───────────────────────────────────────────
 
-// ADR-0112 退役登记（2026-10-05）：协议引擎 idle 回收（ENGINE_IDLE_REUSE_MS 5min →
+// ADR-0122 退役登记（2026-10-05）：协议引擎 idle 回收（ENGINE_IDLE_REUSE_MS 5min →
 // dispose）已删——引擎实例进程级自持直至 shutdown dispose（退出钩子仍收口）。shutdown
 // 聚合上界（DISPOSE_AGGREGATE_CAP_MS 3s）随杀链 grace 退役一并删除。
 

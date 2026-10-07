@@ -35,7 +35,7 @@
  * - 序号守卫：异步高亮完成时若 code 已变，丢弃旧结果（防覆盖）。
  */
 import { ref, watch } from 'vue'
-import { highlightCode } from '@/composables/logic/markdown'
+import { highlightCode } from '@taiji/ui/features/chat/markdown'
 
 const props = defineProps<{
   /** 代码文本（UTF-8，由 file.read 返回） */

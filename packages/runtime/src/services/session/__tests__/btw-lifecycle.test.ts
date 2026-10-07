@@ -60,7 +60,7 @@ describe('reattach spawn 形态（自建附着编排；restore 离线腿不通�
 
   it('重附着后续问：spawn → switch_session(线文件) → 一致性守卫 → rekey → hidden 注册', async () => {
     const { vid, file } = await createNoForkLine('sid-r1')
-    // 进程引用摘除（原「闲置回收后」形态；回收机制已随 ADR-0112 退役，重附着由
+    // 进程引用摘除（原「闲置回收后」形态；回收机制已随 ADR-0122 退役，重附着由
     // 进程死亡/重启场景触发）——直接置 rec.client = undefined 造重附着入口。
     svc.getLine(vid)!.client = undefined
 

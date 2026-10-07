@@ -54,6 +54,7 @@
        level 变化（升级）经 watch 重显。fixed 顶部居中，零布局侵入。 -->
   <div
     v-if="memoryLevel !== 'normal' && !memoryBarDismissed"
+    ref="memoryBarRef"
     data-testid="memory-pressure-bar"
     class="fixed left-1/2 top-3 z-[9999] flex max-w-[min(520px,calc(100vw-6rem))] -translate-x-1/2 items-center gap-2 rounded-[var(--radius)] border border-border bg-surface py-2 pl-3 pr-2 shadow-lg"
   >
@@ -71,12 +72,12 @@
     </Button>
   </div>
   <!-- 权限请求弹窗（全局，session 无关）：bridge bus plugin-permission-request 驱动 pending；
-       transport 经 PERMISSION_TRANSPORT_KEY inject 调 WS approve/revoke（main.ts provide）。 -->
-  <PermissionRequestDialog :plugin-id="perm.pluginId" :permissions="perm.permissions" :pending="perm.pending" />
+       transport 经 PERMISSION_TRANSPORT_KEY inject 调 WS approve/deny（main.ts provide）。 -->
+  <PermissionRequestDialog :plugin-id="perm.pluginId" :permissions="perm.permissions" :pending="perm.pending" :error="perm.error" />
 </template>
 
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { onBeforeUnmount, onMounted, provide, ref, watch } from 'vue'
 import { Loader2, AlertCircle, AlertTriangle, X } from '@lucide/vue'
 import { useI18n } from 'vue-i18n'
 import TaijiLogo from '@/components/icons/TaijiLogo.vue'
@@ -85,6 +86,8 @@ import AppShell from '@/components/shell/AppShell.vue'
 import ToastContainer from '@/components/ui/ToastContainer.vue'
 import { Button } from '@/components/ui/button'
 import { useConnection } from '@/composables/useConnection'
+import { registerModalSurface, isModalSurfaceId } from '@/composables/features/app/modal-surface-registry'
+import { MODAL_SURFACE_REGISTRAR_KEY, type UiModalSurfaceRegistration } from '@taiji/ui'
 import { useSidebar } from '@/composables/features/sidebar/useSidebar'
 import { bootstrapSettingsCore } from '@/composables/shell/useSettingsShell'
 import { usePermissionRequest } from '@/composables/shell/usePermissionRequest'
@@ -166,7 +169,7 @@ bindSessionStreamSync()
 // ADR-0049）；App 层不挂任何队列单例。
 // 内存压力降级消费（crash-forensics-and-watchdog §3.3 D4，u7d / 偏差 #28② 的 renderer 半边）：
 // 窗口级单例挂载（refCount 订阅，onScopeDispose 随 App 卸载退订）——订阅 watchdog:memoryPressure，
-// warn 持续拍压窗 LRU 8→4 + evictIfNeeded 驱逐。Gate W 默认 off 时 runtime 不广播、零成本待命。
+// warn 持续拍压窗 LRU 8→4 + 复合入口驱逐退订（evictLruWithUnsubscribe，remote-use D2——被驱逐会话连带退订）。Gate W 默认 off 时 runtime 不广播、零成本待命。
 // 【oe-audit C2】此前全链零装配（hook 零调用方 = 双重休眠，impl-plan u7d「经 useRollingRestartStatus
 // 引用链生产挂载」登记失实——该文件仅注释引用范式）；本挂载补齐生产消费方。
 // 【RD-3#11】捕获 level 供上方提示条消费（此前返回值丢弃、level 无 UI 消费方——内存压力 warn 阶段
@@ -175,6 +178,36 @@ const { level: memoryLevel } = useMemoryPressure()
 const memoryBarDismissed = ref(false)
 // level 变化（normal→warn→critical 升级）时重显提示条：dismiss 只对当前 level 生效，不跨级别持久。
 watch(memoryLevel, () => { memoryBarDismissed.value = false })
+
+// 模态表面聚合注册（§6.7 横幅族）：内存压力提示条（App.vue 内联块，z-[9999]）非阻塞
+// 不入让位族，只入 view 遮蔽族（shieldsView intersecting——与 view 矩形几何相交才隐藏）。
+// 开合态绑「level 非正常 ∧ 未 dismiss」状态本体（与模板 v-if 同一谓词）；rect 读提示条
+// 根元素实测（warn/critical 文案切换的几何在重渲染后由上报链重测）。旗标组由登记表按 id 读取。
+const memoryBarRef = ref<HTMLElement | null>(null)
+function memoryBarRect(): { x: number; y: number; width: number; height: number } | null {
+  if (!memoryBarRef.value) return null
+  const r = memoryBarRef.value.getBoundingClientRect()
+  return { x: r.x, y: r.y, width: r.width, height: r.height }
+}
+const disposeMemoryBarSurface = registerModalSurface({
+  surface: 'memory-pressure-bar',
+  key: 'memory-pressure-bar',
+  isOpen: () => memoryLevel.value !== 'normal' && !memoryBarDismissed.value,
+  rect: memoryBarRect,
+})
+onBeforeUnmount(disposeMemoryBarSurface)
+
+// 模态表面注册桥装配（§6.7）：@taiji/ui 包内表面宿主（SearchModal / CompanionBand /
+// primitives 弹层族）不能反向依赖 renderer 注册表——根组件 provide 注册函数，ui 侧
+// inject 自注册（层级方向与未装配降级语义见 @taiji/ui modal-surface-registrar.ts）。
+// 未登记 id 抛错（与 registerModalSurface 登记红线同源，fail-fast 暴露漏登记）。
+provide(MODAL_SURFACE_REGISTRAR_KEY, (registration: UiModalSurfaceRegistration): (() => void) => {
+  const { surface, key, isOpen, rect } = registration
+  if (!isModalSurfaceId(surface)) {
+    throw new Error(`modal-surface-registry: 未登记的表面 id '${surface}'——先在 manifest.ts 登记（§6.7 完备性判据）`)
+  }
+  return registerModalSurface({ surface, key, isOpen, rect })
+})
 // 入站超界帧守卫消费编排（crash-forensics-and-watchdog §3.3 D8）：模块级单例（状态源在
 // core ws-client），幂等安装一次——丢帧上报 + 终止阀静态提示态投影 + 切走切回重试订阅。
 // App setup 顶层装配（与 bindForkNoticeEffect 同区），teardown 在 onBeforeUnmount 配对；
@@ -210,7 +243,7 @@ watch(connectionState, (s) => {
     bootstrapError.value = null
     void onConnected()
     // 兜底：连接后主动拉一次 models（对齐 refreshProviders 范式，防订阅时序竞态未来回归）。
-    // mock 模式 WS 不回 model.list reply（mockSend 仅 ping/pong）→ pending 65s 超时，跳过避免 boot 卡顿。
+    // mock 平台 WS 桩仅 ping/pong 不回 model.list reply → pending 65s 超时，跳过避免 boot 卡顿。
     if (import.meta.env.VITE_MOCK !== 'true') {
       void refreshModels()
     }

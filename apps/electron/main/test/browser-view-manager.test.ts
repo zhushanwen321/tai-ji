@@ -200,26 +200,25 @@ describe('BrowserViewManager', () => {
       expect(win.contentView.addChildView).toHaveBeenCalledTimes(1)
     })
 
-    it('windowId 不存在时记录日志且不创建（不抛错）', () => {
+    it('windowId 不存在时 create 失败 reject（§7.4 错误通道）且不创建 view', () => {
       const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
       const mgr = new BrowserViewManager(makeWindowManager('win-1', makeWindow()))
-      mgr.create('sess-1', 'nonexistent')
 
+      expect(() => mgr.create('sess-1', 'nonexistent')).toThrow(/create failed: window not found/)
       expect(createdViews).toHaveLength(0)
       expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('window not found'))
       warnSpy.mockRestore()
     })
 
-    it('窗口已销毁时跳过 addChildView', () => {
+    it('窗口已销毁时 create 失败 reject（§7.4 错误通道：失联窗口不再静默降级）', () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
       const win = makeWindow({ destroyed: true })
-      const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
       const mgr = new BrowserViewManager(makeWindowManager('win-1', win))
-      mgr.create('sess-1', 'win-1')
 
+      expect(() => mgr.create('sess-1', 'win-1')).toThrow(/create failed: window already destroyed/)
       expect(win.contentView.addChildView).not.toHaveBeenCalled()
-      // 但 view 仍被创建并跟踪（getState 可读）
-      expect(mgr.getState('sess-1')).not.toBeNull()
-      errSpy.mockRestore()
+      expect(mgr.getState('sess-1')).toBeNull()
+      warnSpy.mockRestore()
     })
   })
 
@@ -314,10 +313,12 @@ describe('BrowserViewManager', () => {
   })
 
   describe('hide / show', () => {
-    it('hide 从 contentView 移除 view 并 setBounds 隐藏；show 重新挂载并恢复 rect', () => {
+    it('hide 从 contentView 移除 view 并 setBounds 隐藏；show 重新挂载并恢复 rect（谓词为真时）', () => {
       const win = makeWindow()
       const mgr = new BrowserViewManager(makeWindowManager('win-1', win))
       mgr.create('sess-1', 'win-1')
+      // 显示收口谓词（§7.4）：show 仅在「浮层开 ∧ 内容 browser ∧ 无错误 ∧ 无相交 shieldsView」时生效
+      mgr.setOverlayState({ open: true, content: 'browser', sessionId: 'sess-1' })
       // 通过 setRect 设置 lastRect（由 setRect 正确维护，hide 不再覆盖）
       mgr.setRect('sess-1', { x: 10, y: 10, width: 200, height: 300 })
 
@@ -329,7 +330,7 @@ describe('BrowserViewManager', () => {
       expect(win.contentView.removeChildView).toHaveBeenCalledTimes(1)
 
       mgr.show('sess-1')
-      // show 时重新挂载到 contentView + 恢复 lastRect
+      // show 时重新挂载到 contentView + 恢复 lastRect（谓词为真）
       const showBoundsCall = createdViews[0].setBounds.mock.calls.at(-1)![0]
       expect(showBoundsCall).toEqual({ x: 10, y: 10, width: 200, height: 300 })
       // 验证 view 重新挂载到 contentView
@@ -380,19 +381,19 @@ describe('BrowserViewManager', () => {
   })
 
   describe('setRect + isVisible（Wave 3）', () => {
-    it('create 后 isVisible=false；show 后 isVisible=true；hide 后=false', () => {
+    it('create 后 isVisible=false；浮层开（谓词真）后 isVisible=true；关浮层后=false', () => {
       const win = makeWindow()
       const mgr = new BrowserViewManager(makeWindowManager('win-1', win))
       mgr.create('sess-1', 'win-1')
       // 模拟 view 当前真实 rect（show 后 getBounds 返回此值）
       createdViews[0].getBounds.mockReturnValue({ x: 10, y: 10, width: 200, height: 300 })
 
-      // 初始隐藏：setRect 仅更新 lastRect，不 setBounds（isVisible=false）
+      // 初始隐藏：setRect 仅更新 lastRect，不 setBounds（谓词假）
       mgr.setRect('sess-1', { x: 5, y: 5, width: 100, height: 100 })
       const setBoundsCountAfterSetRect = createdViews[0].setBounds.mock.calls.length
 
-      // show：isVisible=true，setBounds(lastRect=刚推的 rect)
-      mgr.show('sess-1')
+      // 开浮层 browser 内容（显示收口谓词为真）→ isVisible=true，setBounds(lastRect=刚推的 rect)
+      mgr.setOverlayState({ open: true, content: 'browser', sessionId: 'sess-1' })
       const showBoundsCall = createdViews[0].setBounds.mock.calls.at(-1)![0]
       expect(showBoundsCall).toEqual({ x: 5, y: 5, width: 100, height: 100 })
 
@@ -402,18 +403,18 @@ describe('BrowserViewManager', () => {
       const lastBoundsCall = createdViews[0].setBounds.mock.calls.at(-1)![0]
       expect(lastBoundsCall).toEqual({ x: 20, y: 20, width: 300, height: 400 })
 
-      // hide：isVisible=false，setBounds(HIDDEN_RECT)
-      mgr.hide('sess-1')
+      // 关浮层（谓词假）：isVisible=false，setBounds(HIDDEN_RECT)
+      mgr.setOverlayState({ open: false, content: null, sessionId: null })
       const hideBoundsCall = createdViews[0].setBounds.mock.calls.at(-1)![0]
       expect(hideBoundsCall).toEqual({ x: 0, y: 0, width: 0, height: 0 })
 
-      // 隐藏态 setRect：仅更新 lastRect，不 setBounds（防 hide 中 resize 意外重显）
+      // 隐藏态 setRect：仅更新 lastRect，不 setBounds（谓词假 → resize 不会把 view 意外重显）
       const countBeforeHiddenSetRect = createdViews[0].setBounds.mock.calls.length
       mgr.setRect('sess-1', { x: 50, y: 50, width: 500, height: 600 })
       expect(createdViews[0].setBounds.mock.calls.length).toBe(countBeforeHiddenSetRect)
 
-      // 再次 show：setBounds(lastRect=隐藏态推的最新 rect)
-      mgr.show('sess-1')
+      // 重开浮层：setBounds(lastRect=隐藏态推的最新 rect)
+      mgr.setOverlayState({ open: true, content: 'browser', sessionId: 'sess-1' })
       const reShowBoundsCall = createdViews[0].setBounds.mock.calls.at(-1)![0]
       expect(reShowBoundsCall).toEqual({ x: 50, y: 50, width: 500, height: 600 })
     })
@@ -423,14 +424,15 @@ describe('BrowserViewManager', () => {
       expect(() => mgr.setRect('nope', { x: 0, y: 0, width: 10, height: 10 })).not.toThrow()
     })
 
-    it('show 前未推 rect 时 setBounds(HIDDEN_RECT)（create 默认 lastRect）', () => {
+    it('浮层未开（谓词假）时 setRect 不 setBounds（create 默认 lastRect）', () => {
       const win = makeWindow()
       const mgr = new BrowserViewManager(makeWindowManager('win-1', win))
       mgr.create('sess-1', 'win-1')
-      // 不调 setRect 直接 show：lastRect 仍是 HIDDEN_RECT
+      // 不调 setRect 直接 show：谓词假（浮层未开）→ 保持隐藏，无 setBounds
       mgr.show('sess-1')
-      const showBoundsCall = createdViews[0].setBounds.mock.calls.at(-1)![0]
-      expect(showBoundsCall).toEqual({ x: 0, y: 0, width: 0, height: 0 })
+      expect(createdViews[0].setBounds.mock.calls.length).toBe(1) // 仅 create 的初始隐藏
+      const boundsCall = createdViews[0].setBounds.mock.calls[0][0]
+      expect(boundsCall).toEqual({ x: 0, y: 0, width: 0, height: 0 })
     })
 
     it('PR #100 W2：create 调 addChildView 1 次，setRect 不重复 addChildView（仅 setBounds）', () => {
@@ -441,8 +443,8 @@ describe('BrowserViewManager', () => {
       // create 调一次 addChildView
       expect(win.contentView.addChildView).toHaveBeenCalledTimes(1)
 
-      // 推多次 setRect：visible 态只 setBounds，不重复 addChildView
-      mgr.show('sess-1') // visible=true
+      // 开浮层（谓词真）→ visible=true；推多次 setRect：visible 态只 setBounds，不重复 addChildView
+      mgr.setOverlayState({ open: true, content: 'browser', sessionId: 'sess-1' })
       mgr.setRect('sess-1', { x: 5, y: 5, width: 100, height: 100 })
       mgr.setRect('sess-1', { x: 10, y: 10, width: 200, height: 200 })
       mgr.setRect('sess-1', { x: 20, y: 20, width: 300, height: 300 })

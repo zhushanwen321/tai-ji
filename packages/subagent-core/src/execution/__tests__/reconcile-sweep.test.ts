@@ -17,6 +17,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { runReconcileSweep, type SupervisedRecordState } from "../registry-reconcile/reconcile-sweep.ts";
 
+// [teardown 竞态修复] 被测链（reconcile-sweep 差集补发路径）传递性 logger 输出经 console
+// 落 stderr——同步用例的刷写落在文件结束的 teardown 窗口，与 worker rpc 关闭竞态 → vitest
+// EnvironmentTeardownError（onUserConsoleLog pending）→ run 退出码 1。本文件对 logger 零
+// 断言依赖，mock 静默（rebuild-indexes.test.ts 同款先例）。
+const { loggerMock } = vi.hoisted(() => ({
+  loggerMock: { debug: vi.fn(), warn: vi.fn(), error: vi.fn() },
+}));
+vi.mock("../../core/logger.ts", () => ({
+  getLogger: () => loggerMock,
+}));
+
 let tmpDir: string;
 let sessionFile: string;
 

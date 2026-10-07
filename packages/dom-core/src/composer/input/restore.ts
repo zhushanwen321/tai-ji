@@ -10,7 +10,64 @@
  * 纯逻辑编排，零 DOM 直连，零 renderer import。
  */
 import type { Segment } from '@taiji/shared'
-import type { ComposerRestoreDeps } from './types'
+import type { ComposerInputInstance, ComposerRestoreDeps } from './types'
+
+/**
+ * segments 回填输入实例的最小目标面（ComposerInputInstance 的 Pick）。
+ * restoreSegmentsIntoInput 只消费这 7 个成员；ui ComposerInput.setSegments（移动壳 D6
+ * 草稿回填）以自身同名方法构造此结构调用，不必扮演完整实例契约。
+ */
+export type SegmentsRestoreTarget = Pick<
+  ComposerInputInstance,
+  | 'setText'
+  | 'insertImageBadge'
+  | 'insertSlashChip'
+  | 'insertFileChip'
+  | 'insertSessionChip'
+  | 'insertSubagentChip'
+  | 'insertSkillChip'
+>
+
+/**
+ * segments 快照回填输入实例的唯一实现（W8 方案 A）：text 段 setText 重建纯文本，
+ * 非 text 段按类型经 insert* 还原真 chip。
+ *
+ * 单一定义点：useComposerRestore.restoreSegments（桌面发送失败恢复）与 ui
+ * ComposerInput.setSegments（移动壳 D6 发送失败草稿回填）共用——新增 chip 类型只改
+ * 此处，双消费端同步获得回填能力（防第二定义点的静默缺口：桌面恢复了某类 chip、
+ * 移动壳 setSegments 静默丢弃）。session/subagent/skill 三类经 ?. 调用（可选契约——
+ * 低配实现缺省时静默跳过该类 chip，文字部分仍恢复，不崩溃）。
+ */
+export function restoreSegmentsIntoInput(input: SegmentsRestoreTarget, segments: Segment[]): void {
+  const textOnly = segments
+    .filter((s): s is Extract<Segment, { type: 'text' }> => s.type === 'text')
+    .map((s) => s.text)
+    .join('')
+  input.setText(textOnly)
+  for (const seg of segments) {
+    if (seg.type === 'image') {
+      input.insertImageBadge(seg.path, seg.fileName, seg.displayName, seg.needsMigrate ?? false)
+    } else if (seg.type === 'slash') {
+      // 命令 chip 形态恢复（设计 D4/D6）：insertSlashChip(name) 重建命令 chip（name 不含
+      // '/' 前缀，insertSlashChip 内部归一化补回），内部仅替换已有命令 chip 不误删 skill
+      // chip；回滚位置近似=尾部、不保序（D6 登记边界，与其他 chip 类同）
+      input.insertSlashChip(seg.name)
+    } else if (seg.type === 'skill') {
+      // skill chip 恢复走 insertSkillChip 通路（设计 D3 同修）：光标处追加 + location 透传，
+      // 不再走 insertSlashChip（其会误删其他 slash-chip、强制最前、且丢 location）。
+      input.insertSkillChip?.(seg.name, seg.location)
+    } else if (seg.type === 'file') {
+      input.insertFileChip(seg.path, seg.lineRange)
+    } else if (seg.type === 'session') {
+      // session 引用 chip 恢复（# session，U1）：label 展示 + sessionId 落 dataset（getSegments 重建 segment 用）
+      input.insertSessionChip?.(seg.sessionId, seg.label)
+    } else if (seg.type === 'subagent') {
+      // subagent 定向 chip 恢复（@ subagent，U2b）：subagentId/slug 原样回填（占位新建
+      // chip subagentId 为空串，回填后再次发送仍走 start 分流，语义不变）
+      input.insertSubagentChip?.(seg.subagentId, seg.slug)
+    }
+  }
+}
 
 /**
  * @param deps draft / inputRef / drafts / sessionId 四项依赖（Composer.vue 内定义后注入）
@@ -34,42 +91,18 @@ export function useComposerRestore(deps: ComposerRestoreDeps) {
   /**
    * 发送失败后恢复 text + 各类 chip（W8 修复；U2b 补 session/subagent 两类）。
    *
-   * 方案 A（无重复）：先从 segments 中只取 type==='text' 段重建纯文本，restoreInput 恢复文字；
-   * 再调 insertImageBadge/insertSkillChip/insertFileChip/insertSessionChip/insertSubagentChip
-   * 把非 text 段还原成真 chip。session/subagent 两类经 ?. 调用（ComposerInputInstance 可选
-   * 契约——低配壳层缺省时静默跳过该类 chip，文字部分仍恢复，不崩溃）。
+   * draft ref 同步（原 restoreInput 前半）+ restoreSegmentsIntoInput 统一实现
+   * （text 重建 + chip 还原——与 ui ComposerInput.setSegments 共用的单一定义点）。
+   * inputRef 为 null 时 draft 仍同步、DOM 写入跳过（原语义保持）。
    */
   function restoreSegments(segments: Segment[]): void {
-    const textOnly = segments
+    deps.draft.value = segments
       .filter((s): s is Extract<Segment, { type: 'text' }> => s.type === 'text')
       .map((s) => s.text)
       .join('')
-    restoreInput(textOnly)
-    for (const seg of segments) {
-      if (seg.type === 'image') {
-        deps.inputRef.value?.insertImageBadge(seg.path, seg.fileName, seg.displayName, seg.needsMigrate ?? false)
-      } else if (seg.type === 'slash') {
-        // 命令 chip 形态恢复（设计 D4/D6）：insertSlashChip(name) 重建命令 chip（name 不含
-        // '/' 前缀，insertSlashChip 内部归一化补回），内部仅替换已有命令 chip 不误删 skill
-        // chip；回滚位置近似=尾部、不保序（D6 登记边界，与其他 chip 类同）
-        deps.inputRef.value?.insertSlashChip(seg.name)
-      } else if (seg.type === 'skill') {
-        // skill chip 恢复走 insertSkillChip 通路（设计 D3 同修）：光标处追加 + location 透传，
-        // 不再走 insertSlashChip（其会误删其他 slash-chip、强制最前、且丢 location）。
-        // insertSkillChip 已声明为 ComposerInputInstance 可选成员（同 session/subagent 形态），
-        // ?. 调用——低配实现缺省时静默跳过该类 chip。
-        deps.inputRef.value?.insertSkillChip?.(seg.name, seg.location)
-      } else if (seg.type === 'file') {
-        deps.inputRef.value?.insertFileChip(seg.path, seg.lineRange)
-      } else if (seg.type === 'session') {
-        // session 引用 chip 恢复（# session，U1）：label 展示 + sessionId 落 dataset（getSegments 重建 segment 用）
-        deps.inputRef.value?.insertSessionChip?.(seg.sessionId, seg.label)
-      } else if (seg.type === 'subagent') {
-        // subagent 定向 chip 恢复（@ subagent，U2b）：subagentId/slug 原样回填（占位新建
-        // chip subagentId 为空串，回填后再次发送仍走 start 分流，语义不变）
-        deps.inputRef.value?.insertSubagentChip?.(seg.subagentId, seg.slug)
-      }
-    }
+    const input = deps.inputRef.value
+    if (!input) return
+    restoreSegmentsIntoInput(input, segments)
   }
 
   return { clearInput, restoreInput, restoreSegments }

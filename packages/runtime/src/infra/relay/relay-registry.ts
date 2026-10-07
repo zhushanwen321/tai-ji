@@ -174,7 +174,7 @@ function endConn(conn: Socket): void {
  * 的 child 直接 resolve（killPiProcess 前置 exitCode/signalCode 短路即覆盖，本函数
  * 不重复实现）。
  *
- * ADR-0112 防御清理：原 SIGCONT/SIGTERM/grace 等待阶梯已随 pi-rpc kill-chain 的
+ * ADR-0122 防御清理：原 SIGCONT/SIGTERM/grace 等待阶梯已随 pi-rpc kill-chain 的
  * grace 退役收敛为直杀形态，graceMs 消费参数随之消失；「杀链必 resolve、永不
  * reject」契约维持——close 路径 `void killRelayChild(...)` fire-and-forget 无 catch，
  * killPiProcess 内 kill 已收口 safeKill 吞错（kill 尽力而为语义），promise 结构性
@@ -750,7 +750,7 @@ export class RelayRegistry {
       if (procStart !== null && procStart > oldSpawnedAt + PID_REUSE_TOLERANCE_MS) return
       if (!isPidAlive(oldPid)) return
       console.warn(`[relay] superseded registration: reaping stale pid ${String(oldPid)} before overwriting pid file recordId=${recordId}`)
-      // SIGKILL 直杀（ADR-0112：SIGTERM grace 等待已退役）。杀不动（EPERM 等）不阻塞
+      // SIGKILL 直杀（ADR-0122：SIGTERM grace 等待已退役）。杀不动（EPERM 等）不阻塞
       // 新注册，残留交 orphan sweep。
       try {
         process.kill(oldPid, 'SIGKILL')
@@ -778,7 +778,7 @@ export class RelayRegistry {
     )
   }
 
-  /** 孤儿收割执行：SIGKILL 直杀 + 删 pid 文件（ADR-0112：SIGCONT/SIGTERM/grace 已退役）。 */
+  /** 孤儿收割执行：SIGKILL 直杀 + 删 pid 文件（ADR-0122：SIGCONT/SIGTERM/grace 已退役）。 */
   private reapOrphanPid(pidFile: string, recordId: string, pid: number, reason: string): void {
     console.warn(`[relay] reaping orphan relay child recordId=${recordId} pid=${String(pid)} (${reason})`)
     {

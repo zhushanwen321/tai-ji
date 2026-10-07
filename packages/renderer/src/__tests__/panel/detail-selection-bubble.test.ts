@@ -27,7 +27,12 @@ const detailState = ref({
 vi.mock('@/composables/features/file-tree/useDetailPane', () => ({
   useDetailPane: () => ({
     state: detailState,
+    tabs: ref([]),
+    activePath: ref(null),
     toggleView: vi.fn(),
+    activateTab: vi.fn(),
+    closeTab: vi.fn(),
+    saveScroll: vi.fn(),
     sessionCwd: () => '/cwd',
   }),
 }))

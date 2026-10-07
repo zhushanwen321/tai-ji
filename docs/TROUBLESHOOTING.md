@@ -46,6 +46,16 @@ Resources/
 
 **开发模式差异**：数据目录 `~/.taiji-dev/`，端口 +100（3310-3320），Electron userData 隔离。
 
+### 浏览器浮层诊断信号（display-containers W2，2026-10-03 登记）
+
+浮层浏览器三类失败/回执信号（renderer 经 preload `browser` 通道可达）：
+
+| 信号 | 形态 | 含义与处置 |
+|---|---|---|
+| create 失败 reject | `browserCreate` IPC reject（原「主进程 warn 后静默 return」已消灭） | view 创建失败（window 失联等）→ 浮层 `browser-create-error` 占位 + 重试。**池满不是失败**（LRU 自动淘汰） |
+| render-process-gone | 页面进程崩溃信号 → 错误态占位 | 占位文案区分「创建失败 vs 页面加载失败」两类；重试 = create+show+navigate 整链重发 |
+| forward-keys rejected 回执 | 转发键清单双端匹配失败的拒收回执 | 键矩阵漂移信号——核对 `apps/electron/main/browser/gateway/forward-keys.ts` 与 renderer 注册处上报清单是否同源；settings 改键 / 窗口重载后的重报窗口期属已知可接受（毫秒级） |
+
 ## 常见问题排查清单
 
 ### 1. pi 启动失败："Failed to start bundled pi process"
@@ -525,13 +535,22 @@ pi 升级（`PI_VERSION` bump）或触碰相关模块时逐条重验；锚点均
 - **机制**：provider 上游渠道对超窗口请求返回**不含 usage 字段**的错误响应，pi openai-completions 适配层解析时未对 usage 缺失做防御。凭据/通路无问题（同 provider 小上下文请求成功）。
 - **处置建议**：先排除渠道窗口限制（换小会话/先 compact 压缩再续聊）；根治需 pi 适配层对缺 usage 错误响应健壮降级——pi 上游问题按项目规则不改 pi 源码，待上游修复或由 taiji 侧降级链吸收。
 
-### 21. e2e smoke 全灭 `electron.launch: Process failed to launch`（宿主会话 ELECTRON_RUN_AS_NODE 泄漏，2026-10-01）
+### 18. 终端多实例（一会话多终端）四类症状定位（2026-10-04 交付）
+
+终端实例标识为 `term:<会话id>:<序号>`，注册表与序号分配的**唯一事实源在 runtime**（重键 `ptyMap` + 会话级计数器），界面经 `terminal.list` 对账恢复。按症状分路：
+
+- **「开第二个终端返回的还是第一个」**：先看是**反向混跑**还是缺陷——dev 工作流里 renderer 走 Vite HMR、runtime 是 tsx **非 watch**，所以「新界面 × 旧 runtime」可真实共存；旧 runtime 会按会话幂等复用单 PTY（静默复用、无报错）。处置：重启 `pnpm dev`（runtime 侧改动不重启不生效）；打包形态无混跑窗口（界面与后台成对原子更新）。
+- **「活着的死实例」**（切换条有条目、输入必得 `unknown_terminal_id`）：`spawn` 完成到界面建档之间的窗口内实例就已死亡（`terminal.exit` 帧无归属可投递）→ 残留条目。**自动回收双通道**：首次对该条目的 `write` / `kill` / `attach` 收到否定回执（`unknown_terminal_id`）即执行三腿清理；或下一次 `terminal.list` 对账（清单外条目）回收。若**反复出现且不自动消失**，取证 `<数据目录>/logs/runtime-*.log` 的 `[terminal]` 行与 `terminal.list` 返回，按缺陷报（回收通道应幂等）。
+- **runtime 重启后旧终端输出消失 / 编号从「终端 1」重算**：**既定语义**（世代变更：注册表纯内存，重启即清空、序号重算；界面经世代重置清输出分区与写队列）。判据 = auth token 变化（**端口值不可靠**——重启常落回原端口）。反向异常：**同世代 WS 闪断却丢了历史** = 世代判据误判，查 `getCurrentToken()` 读取面与连接态保存的旧值。
+- **应用退出后仍有终端子进程**：正常退出路径由 shutdown 序的 `dispose-terminal-pties`（`destroyAllPties`）全量清理；**异常死亡**（SIGKILL / 崩溃）下 `nohup`/disown 类子进程可能残留（已登记的前提 P5，属 OS 层行为）——按系统进程表定位后手动清理。
+
+### 19. e2e smoke 全灭 `electron.launch: Process failed to launch`（宿主会话 ELECTRON_RUN_AS_NODE 泄漏，2026-10-01）
 
 - **症状**：`npx playwright test --project=electron-smoke` 全部用例秒级失败（40-60ms），报 `electron.launch: Process failed to launch!` + `bad option: --remote-debugging-port=0`（或 `--inspect=0`）+ 清理期 `kill EPERM`；同窗口内 `--project=visual-chromium`（纯 chromium，不经 electron.launch）正常。
 - **根因**：执行环境泄漏 `ELECTRON_RUN_AS_NODE=1`（taiji 桌面宿主 spawn 的 agent 会话可见）。该变量使 Electron 主二进制按纯 Node 运行——chromium/Electron 专属旗标全部不识别（`bad option`）即退出。**误诊陷阱**：此形态下 `Electron --version` 打印的是内嵌 Node 版本（42.x 内嵌 Node 24.15.0）而非 Electron 版本；且 Electron 42 mac 主二进制本就是 ~50KB 薄启动器（重量在 Frameworks）——「二进制只有 33KB/版本号不对 = dist 坏了」是泄漏导致的误诊，勿据此重装缓存（本次误删 @electron/get 缓存 zip 一份，无害但浪费一轮下载）。
 - **处置**：e2e/验收执行环境 `unset ELECTRON_RUN_AS_NODE` 再跑（Gate A 脚本与 A6 剧本已内建防御）；排查入口 `env | grep ELECTRON`。
 
-### 28. dev-merge 自动创建的 worktree 解析成 bare repo（config.worktree 缺失，2026-10-01）
+### 20. dev-merge 自动创建的 worktree 解析成 bare repo（config.worktree 缺失，2026-10-01）
 
 - **症状**：dev-merge.sh 自动创建目标 dev worktree 后，merge 预检报 `致命错误：该操作必须在一个工作区中运行`，且被误报成「有未提交改动（tracked）」；`git -C <dev> rev-parse --is-bare-repository` 返回 `true`。
 - **根因**：共享 config `core.bare=true`（bare repo + worktree 布局）下，worktree 依赖 per-worktree `config.worktree`（`core.bare=false` + `core.hooksPath`）覆盖。该补写是 git-cwt 包装层（`~/.shell/07-git-ws.sh`，[2026-09-11] 同族注释）的职责，`create-worktree.sh` 与 `setup-worktree.sh` 都不做——dev-merge.sh 绕过包装层直调创建脚本即漏。已修（auto-create 后补写 worktree 级 config；check_clean 区分 git 失败 exit≥2 与真脏）。
@@ -541,7 +560,7 @@ pi 升级（`PI_VERSION` bump）或触碰相关模块时逐条重验；锚点均
 ### 29. workflow 脚本 / agent frontmatter 显式指定的模型没生效（被用户覆盖压过——合法行为，非解析回归）
 
 - **症状**：workflow 脚本的 run 级 `model` 参数、`agent()` 调用参数或 agent frontmatter 显式写了模型，实际执行却用了另一个模型（面板/命令切换过的模型）。
-- **机制**：subagent/workflow 执行域的模型解析链有第 0 层「用户覆盖」——用户经面板模型选择器或 `/subagent-model` 命令对某 subagent 会话 / workflow run 下达过实时切换后，覆盖值优先级最高（压过 frontmatter 与脚本/调用参数显式指定，用户覆盖赢）；覆盖作用域 = 该会话/run 的剩余执行（含中断后 resume 与主 agent 重启后重开）。机制 SSOT：ADR-0113；术语见 docs/CONTEXT.md「模型覆盖」词条。
+- **机制**：subagent/workflow 执行域的模型解析链有第 0 层「用户覆盖」——用户经面板模型选择器或 `/subagent-model` 命令对某 subagent 会话 / workflow run 下达过实时切换后，覆盖值优先级最高（压过 frontmatter 与脚本/调用参数显式指定，用户覆盖赢）；覆盖作用域 = 该会话/run 的剩余执行（含中断后 resume 与主 agent 重启后重开）。机制 SSOT：ADR-0128；术语见 docs/CONTEXT.md「模型覆盖」词条。
 - **三步排查**：
   1. **查覆盖记账在场**：workflow run → run 事件 journal（`<数据目录>` 下 workflow-state 的 `<runId>.record.jsonl` 文件）grep `model-override` 帧；chat 域 subagent → record 事件文件 grep `record-model-override` 帧。覆盖帧在场 = 用户覆盖赢生效，属预期行为而非 bug。
   2. **resume 场景查生效值**：journal 的 `run-resumed` 事件携带生效模型——三档回落：resume 显式参数（协议预留）> 持久化覆盖记录 > run 创建时模型。

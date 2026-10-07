@@ -1,5 +1,5 @@
 /**
- * A6-inflight: in-flight 防重 + sendChecked + onSettled + 首败即停（ADR-0112，
+ * A6-inflight: in-flight 防重 + sendChecked + onSettled + 首败即停（ADR-0122，
  * 原 D4 错误重试链已退役——重试决策归消费方）。
  */
 import { describe, expect, it, vi } from 'vitest'
@@ -195,7 +195,7 @@ describe('A6-inflight sendChecked', () => {
   })
 })
 
-describe('A6-inflight port.send 首败即停（ADR-0112：失败不静默、不重试）', () => {
+describe('A6-inflight port.send 首败即停（ADR-0122：失败不静默、不重试）', () => {
   it('#2 同步抛错 → 首败即 rejected + 条目移除（无重试）', () => {
     const settled: string[] = []
     const port = makeMockPort({
@@ -258,7 +258,7 @@ describe('A6-inflight onSettled 终态信号', () => {
     handle.dispose()
   })
 
-  it('port.send 抛错 → 回调 rejected（首败即停，ADR-0112）', () => {
+  it('port.send 抛错 → 回调 rejected（首败即停，ADR-0122）', () => {
     const settledCalls: { msg: DeliveryMessage; outcome: string }[] = []
     const port = makeMockPort({
       send: () => { throw new Error('fail') },
@@ -302,7 +302,7 @@ describe('A6-inflight onSettled 终态信号', () => {
     handle.dispose()
   })
 
-  it('async port.send reject → 回调 rejected（首败即停，ADR-0112）', async () => {
+  it('async port.send reject → 回调 rejected（首败即停，ADR-0122）', async () => {
     let sendReject: ((err: Error) => void) | undefined
     const settledCalls: { msg: DeliveryMessage; outcome: string }[] = []
     const port = makeMockPort({

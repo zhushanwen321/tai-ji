@@ -8,7 +8,7 @@
  * 采用「工厂模块」而非 defineStore——工厂闭包内聚更干净。
  * chat store 经 createHandoffController() 组合后原样透出公共 API，行为零变化。
  *
- * [ADR-0112] 无墙钟兜底 timer：复位完全依赖事件（session.handoffComplete / handoffAborted
+ * [ADR-0122] 无墙钟兜底 timer：复位完全依赖事件（session.handoffComplete / handoffAborted
  * 广播、RPC reject catch、abort 编排）。广播丢失（断连窗口）时源 session 卡「正在交接」=
  * 悬挂显式可见，不自愈不补偿；用户出口 = composer stop 按钮（abortHandoff 乐观清态）/ 重试。
  */

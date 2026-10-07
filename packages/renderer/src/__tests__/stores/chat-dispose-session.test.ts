@@ -10,7 +10,7 @@
  * - disposeSession 清理 messages / hydrated / pendingSend / compactingSessions /
  *   retryStates / failedHistory 全部 per-session ref（[u5a] queueStates 分区已退役删除）
  * - disposeSession 清理 streamingTimers 模块级 timer（pendingSend 空窗 timer 已按
- *   ADR-0112 时间平抑红线整体退役，见 core chat store 退役登记）
+ *   ADR-0122 时间平抑红线整体退役，见 core chat store 退役登记）
  *
  * 运行：npx vitest run src/__tests__/stores/chat-dispose-session.test.ts
  */

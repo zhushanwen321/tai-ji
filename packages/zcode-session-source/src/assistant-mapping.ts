@@ -25,9 +25,9 @@ function mapStopReason(zcodeFinish: unknown): string {
 /**
  * 未收口段（无 step-finish 闭合）的 stopReason：消息级 data.error 优先（T3c 事故补强，
  * 2026-09-21 毒消息事故——取消轮无 step-finish，finish 兜底把它伪装成 'stop'，而 pi
- * 0.84.4 读面对「非 aborted/error 的 assistant」裸读 usage：stats 聚合 agent-session.js
- * :2678（reading 'input'）、turn 前上下文扫描 :2721（reading 'totalTokens'）、overflow
- * 检查 usage.input——伪 stop + 无 usage 导入后续聊即崩）。turnResult cancelled →
+ * 读面对「非 aborted/error 的 assistant」裸读 usage（语义登记 PS-44，verifiedWith 以
+ * pi-semantics.json 为准，逐 claim 行号见该条目 piAnchor）——伪 stop + 无 usage 导入
+ * 后续聊即崩）。turnResult cancelled →
  * 'aborted'（pi 语义 = 用户中止），其余 error 家族 → 'error'；两态 pi 守卫均跳过。
  * 段自身有 step-finish 收口时不走本函数（见 converter closeSegment）。
  */

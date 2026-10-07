@@ -144,7 +144,7 @@ export async function deinitRelayServer(): Promise<void> {
     console.warn('[relay] registry destroyAll failed during deinit:', e)
   }
   // server.close 等全部连接断开（回调即真值；destroyAll 已 conn.destroy，无悬挂等待）。
-  // 关停盲等（SERVER_CLOSE_SETTLE_MS 500ms）已随 ADR-0112 退役。
+  // 关停盲等（SERVER_CLOSE_SETTLE_MS 500ms）已随 ADR-0122 退役。
   await new Promise<void>((resolve) => {
     s.server.close(() => resolve())
   })

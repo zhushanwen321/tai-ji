@@ -242,7 +242,7 @@ describe("executeCwAction", () => {
 		if (!details.ok) expect(details.error).toContain("cw spawn 失败");
 	});
 
-	it("显式传 timeoutMs 到点判超时（包内无默认超时；不传=不限时，ADR-0112 失败直报）", async () => {
+	it("显式传 timeoutMs 到点判超时（包内无默认超时；不传=不限时，ADR-0122 失败直报）", async () => {
 		const hangingSpawner: CwSpawner = (_args, _input, _cwd, signal) =>
 			new Promise<CwSpawnResult>((resolve) => {
 				signal?.addEventListener("abort", () => resolve({ stdout: "", stderr: "", exitCode: null }), {

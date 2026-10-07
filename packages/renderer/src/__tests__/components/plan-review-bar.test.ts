@@ -5,7 +5,7 @@
  * - D4 分支公式单源化（derivePlanReviewBarMode）逐分支 DOM 断言：
  *   ① ready ⇔ 挂起注册表（presence 语义——ready 恒优先渲染，revising+挂起共存出 ready）；
  *   ② revising ⇔ state=revising（无挂起）；③ degraded ⇔ state=reviewing ∧ 无挂起 ∧ 组合
- *   放行（[ADR-0112] 帧到达即时评估）；④ isActive=false / dispatching·approved / 其余 → 不渲染
+ *   放行（[ADR-0122] 帧到达即时评估）；④ isActive=false / dispatching·approved / 其余 → 不渲染
  * - D3 搁置（decision:'dismiss' respond 通道，取代「忽略 = 杀 turn」）：payload 形状、
  *   不经 message.abort、文案含「暂存待办」提示、草稿保留
  * - D4「已应答抑制标记」断言：压制零渲染（事件驱动解除）+ 悬挂无时间自愈 + P2-2 失效帧
@@ -357,7 +357,7 @@ describe('三键 respond payload（PlanReviewResponse 判别联合，D3 dismiss 
   })
 })
 
-describe('已应答抑制标记 + degraded 组合判定（D4，[ADR-0112] 帧到达即时评估）', () => {
+describe('已应答抑制标记 + degraded 组合判定（D4，[ADR-0122] 帧到达即时评估）', () => {
   it('degraded 即时放行：组合成立（reviewing ∧ 无挂起 ∧ 无标记）帧到达即渲染，无时间窗', async () => {
     const wrapper = await mountBar(viewOf({ state: 'reviewing' }))
     await flushAsync()
@@ -411,7 +411,7 @@ describe('已应答抑制标记 + degraded 组合判定（D4，[ADR-0112] 帧到
     expect(wrapper.find('[data-testid="plan-review-degraded"]').exists()).toBe(true)
   })
 
-  it('抑制标记悬挂无时间自愈：搁置后标记压制零渲染，时间流逝不解悬挂（[ADR-0112] 无兜底定时器）', async () => {
+  it('抑制标记悬挂无时间自愈：搁置后标记压制零渲染，时间流逝不解悬挂（[ADR-0122] 无兜底定时器）', async () => {
     vi.useFakeTimers()
     const wrapper = await mountBar(viewOf({ state: 'reviewing' }))
     emitPlanReviewRequest('pr-1')

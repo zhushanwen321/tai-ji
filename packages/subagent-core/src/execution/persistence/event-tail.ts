@@ -12,7 +12,7 @@
 //    fold（record 域 seq 单调守卫构造性保证；run 域 seq 由 W1 补齐）。
 //
 // [event-push-channel W-P3 退役登记] watch 族三原语（目录级 fs.watch / 30s 周期复查
-// 兜底 / 5s 失败重挂 + 200ms 合并）已整体删除——ADR-0112「活状态走订阅推送，存储只
+// 兜底 / 5s 失败重挂 + 200ms 合并）已整体删除——ADR-0122「活状态走订阅推送，存储只
 // 做恢复源；禁止用监视存储模拟实时」的清拆对象。头注原声明的「extension 与 runtime
 // 各自 tail 同一批 journal 文件」拓扑前提自 W1 起即已漂移（extension 侧全部是按需
 // 全量读，无任何 tail/watch），随退役一并清理。

@@ -4,7 +4,7 @@
  *
  * 覆盖（验收：render-process-gone oom 与普通 crash reason 可区分）：
  * - 崩溃 → crash 行，reason 透传 Electron 枚举（'oom' 与 'crashed' 在台账可区分）
- *   [ADR-0112] 原 reload/熔断(circuit-breaker) 事件随自动 reload 熔断链删除
+ *   [ADR-0122] 原 reload/熔断(circuit-breaker) 事件随自动 reload 熔断链删除
  * - destroyed 窗口 → 无台账行（错误页链在 isDestroyed 守卫后，台账挂同守卫之后）
  * - webContents 'unresponsive' → unresponsive/renderer-unresponsive 行（D1 renderer 行
  *   第三事件）：同一次持续卡死防重复记行，responsive 恢复复位后卡死↔恢复循环各记一行

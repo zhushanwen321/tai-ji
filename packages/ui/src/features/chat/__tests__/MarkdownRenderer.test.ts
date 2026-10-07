@@ -59,8 +59,40 @@ function seg(type: MarkdownSegment['type'], content: string, segId: number, extr
 function emptyCache(nextSegId: number): IncrementalMarkdownCache {
   return { boundary: 0, prefixText: '', prefixSegments: [], nextSegId }
 }
-function incResult(prefix: MarkdownSegment[], tail: MarkdownSegment[], cache: IncrementalMarkdownCache): IncrementalMarkdownResult & { cache: IncrementalMarkdownCache } {
+type IncResult = IncrementalMarkdownResult & { cache: IncrementalMarkdownCache }
+function incResult(prefix: MarkdownSegment[], tail: MarkdownSegment[], cache: IncrementalMarkdownCache): IncResult {
   return { prefixSegments: prefix, tailSegments: tail, stableBoundary: 0, mode: 'incremental', cache }
+}
+
+/**
+ * finalize 感知 mock 骨架（各 fence 语言分流用例共用）：记录每帧 finalize 标志（`record`），
+ * 段产出策略由 `segmentFor` 给定（finalize / 非 finalize 两分支）。
+ */
+function makeFinalizeAwareMock(
+  record: (source: string, finalize: boolean) => void,
+  segmentFor: (source: string, finalize: boolean) => IncResult,
+) {
+  return vi.fn(
+    async (source: string, _cache: IncrementalMarkdownCache | null, _sid?: string, opts?: { finalizeOpenFence?: boolean }): Promise<IncResult> => {
+      const finalize = opts?.finalizeOpenFence === true
+      record(source, finalize)
+      return segmentFor(source, finalize)
+    },
+  )
+}
+
+/** 流式占位用例挂载骨架：mountMd（streaming + 静默阈值）→ flushRaf，返回 wrapper。 */
+async function mountStreamingFence(
+  content: string,
+  renderMarkdownIncremental: ChatViewDeps['renderMarkdownIncremental'],
+  streamingFenceSilenceMs = 200,
+) {
+  const wrapper = mountMd(
+    { content, streaming: true },
+    { renderMarkdownIncremental, streamingFenceSilenceMs },
+  )
+  await flushRaf()
+  return wrapper
 }
 
 function mountMd(props: Record<string, unknown>, depsOverrides: Partial<ChatViewDeps> = {}) {
@@ -85,13 +117,12 @@ function mountMd(props: Record<string, unknown>, depsOverrides: Partial<ChatView
 /** finalize 感知 mock：记录每次调用的 finalize 标志；finalize=true 出完整代码块，否则出占位段 */
 function finalizeAwareMock() {
   const calls: { source: string; finalize: boolean }[] = []
-  const renderMarkdownIncremental = vi.fn(
-    async (source: string, _cache: IncrementalMarkdownCache | null, _sid?: string, opts?: { finalizeOpenFence?: boolean }): Promise<IncrementalMarkdownResult & { cache: IncrementalMarkdownCache }> => {
-      const finalize = opts?.finalizeOpenFence === true
-      calls.push({ source, finalize })
-      if (finalize) return incResult([], [seg('text', '<div class="md-codeblock">code</div>', 0)], emptyCache(1))
-      return incResult([], [seg('streaming-fence', 'code', 0, { lang: 'ts' })], emptyCache(1))
-    },
+  const renderMarkdownIncremental = makeFinalizeAwareMock(
+    (source, finalize) => calls.push({ source, finalize }),
+    (source, finalize) =>
+      finalize
+        ? incResult([], [seg('text', '<div class="md-codeblock">code</div>', 0)], emptyCache(1))
+        : incResult([], [seg('streaming-fence', 'code', 0, { lang: 'ts' })], emptyCache(1)),
   )
   return { calls, renderMarkdownIncremental }
 }
@@ -550,6 +581,70 @@ describe('D4 ④路: 相对链接分流（preventDefault + resolve + openDrawer 
   })
 })
 
+// ── ⑤路浮层浏览器分流（display-containers §7.4 URL 注入链，u-w2-browser-mount）──
+// http(s) localhost/127.0.0.1 链接点击 → deps.openBrowser（浮层 BrowserPane）；
+// 其余链接维持系统浏览器（默认冒泡 → setWindowOpenHandler，§11-3 判定规则）。
+describe('⑤路: 浮层浏览器分流（localhost 链接 → openBrowser，其余维持系统浏览器）', () => {
+  /** 挂载含单个 <a href> 文档的 MarkdownRenderer，收集冒泡 click 事件供 defaultPrevented 断言
+   *  （桥接形态同 ④路 mountWithAnchor：renderMarkdownIncremental 必填，单帧增量返回）。
+   *  注意 href 含 :// 时不能用属性插值裸插（避免模板解析歧义），用转义 attr 形态。 */
+  async function mountWithLink(href: string, props: Record<string, unknown> = {}, depsOverrides: Partial<ChatViewDeps> = {}) {
+    const renderMarkdown = vi.fn().mockResolvedValue([
+      { type: 'text', content: `<p><a href="${href}">dev server</a></p>` },
+    ])
+    const renderMarkdownIncremental = vi.fn(
+      async (source: string, cache: IncrementalMarkdownCache | null): Promise<IncrementalMarkdownResult & { cache: IncrementalMarkdownCache }> => {
+        const tailSegments = (await renderMarkdown(source)) as MarkdownSegment[]
+        return { prefixSegments: [], tailSegments, stableBoundary: 0, mode: 'incremental', cache: cache ?? emptyCache(0) }
+      },
+    )
+    const wrapper = mountMd({ content: 'x', ...props }, { renderMarkdown, renderMarkdownIncremental, ...depsOverrides })
+    await flushRaf()
+    const clicks: Event[] = []
+    wrapper.element.addEventListener('click', (e: Event) => clicks.push(e))
+    await wrapper.find('a').trigger('click')
+    return { wrapper, clicks }
+  }
+
+  it('localhost 链接 + 发起会话 → preventDefault + openBrowser(url, sessionId)（URL 注入链，用户可见：浮层开浏览器页）', async () => {
+    const openBrowser = vi.fn()
+    const { clicks } = await mountWithLink('http://localhost:1420/', { sessionId: 's1' }, { openBrowser })
+    expect(clicks[0]?.defaultPrevented).toBe(true)
+    expect(openBrowser).toHaveBeenCalledTimes(1)
+    expect(openBrowser).toHaveBeenCalledWith('http://localhost:1420/', 's1')
+  })
+
+  it('127.0.0.1 链接同进浮层（白名单双主机，§11-3）', async () => {
+    const openBrowser = vi.fn()
+    const { clicks } = await mountWithLink('http://127.0.0.1:5173/dev', { sessionId: 's1' }, { openBrowser })
+    expect(clicks[0]?.defaultPrevented).toBe(true)
+    expect(openBrowser).toHaveBeenCalledWith('http://127.0.0.1:5173/dev', 's1')
+  })
+
+  it('非 localhost http(s) 链接不进浮层（维持系统浏览器：不 preventDefault、不调 openBrowser）', async () => {
+    const openBrowser = vi.fn()
+    const { clicks } = await mountWithLink('https://example.com/docs', { sessionId: 's1' }, { openBrowser })
+    expect(clicks[0]?.defaultPrevented).toBe(false)
+    expect(openBrowser).not.toHaveBeenCalled()
+  })
+
+  it('localhost 链接但无发起会话（sessionId 缺省宿主）→ 回落系统浏览器（不进浮层）', async () => {
+    const openBrowser = vi.fn()
+    const { clicks } = await mountWithLink('http://localhost:1420/', {}, { openBrowser })
+    expect(clicks[0]?.defaultPrevented).toBe(false)
+    expect(openBrowser).not.toHaveBeenCalled()
+  })
+
+  it('相对链接仍走 ④路 openDrawer，不误入浮层（④⑤路分流共存回归锚）', async () => {
+    const openBrowser = vi.fn()
+    const openDrawer = vi.fn()
+    const { clicks } = await mountWithLink('docs/x.md', { sessionId: 's1', resourceBaseDir: '/home/proj' }, { openBrowser, openDrawer })
+    expect(clicks[0]?.defaultPrevented).toBe(true)
+    expect(openBrowser).not.toHaveBeenCalled()
+    expect(openDrawer).toHaveBeenCalledWith('detail', { filePath: '/home/proj/docs/x.md' })
+  })
+})
+
 // ── ①②③路事件委托路由（复制按钮 / 文件路径 / 歧义 basename——D4 ④路之外的三路
 //    存量行为；因 onClick 重构拆具名函数而成为本 diff 新增行，此处钉住用户可见行为）──
 describe('①②③路: v-html 点击委托路由（copy / filepath / ambiguous）', () => {
@@ -647,5 +742,78 @@ describe('①②③路: v-html 点击委托路由（copy / filepath / ambiguous�
     expect(onFileClick).toHaveBeenCalledWith('a/foo.ts')
     expect(openDrawer).toHaveBeenCalledWith('detail', { filePath: 'a/foo.ts' })
     expect(wrapper.findComponent({ name: 'AmbiguousFilePopover' }).props('open')).toBe(false)
+  })
+})
+
+describe('chat-html-support §6.3 D3: html-preview 段 finalize 分流（静默不提前 finalize）', () => {
+  /** html-preview 感知 mock：finalize 或 fence 已收尾（content 尾行为闭行）→ html-preview 段；
+   *  否则 streaming-fence 占位（lang=html-preview）。记录每帧 finalize 标志。 */
+  function htmlPreviewMock() {
+    const calls: boolean[] = []
+    const isClosed = (s: string): boolean => s.trimEnd().endsWith('```')
+    const renderMarkdownIncremental = makeFinalizeAwareMock(
+      (_source, finalize) => calls.push(finalize),
+      (source, finalize) => {
+        if (finalize || isClosed(source)) {
+          return incResult([], [seg('html-preview', '/abs/report.html', 0)], emptyCache(1))
+        }
+        return incResult([], [seg('streaming-fence', '/abs/report.html', 0, { lang: 'html-preview' })], emptyCache(1))
+      },
+    )
+    return { calls, renderMarkdownIncremental }
+  }
+
+  it('静默 ≥200ms 不提前 finalize（不挂静默定时器），fence 收尾后一次成型', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    const { calls, renderMarkdownIncremental } = htmlPreviewMock()
+    const wrapper = await mountStreamingFence('```html-preview\n/abs/report.html', renderMarkdownIncremental)
+    // 首帧：占位（lang=html-preview）、无卡片
+    expect(calls).toEqual([false])
+    expect(wrapper.find('[data-testid="md-streaming-fence"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="html-preview-inline"]').exists()).toBe(false)
+
+    // 静默远超阈值：不挂定时器 → 无第二次渲染、占位保持（半截路径不产假降级卡片）
+    await vi.advanceTimersByTimeAsync(1000)
+    await nextTick()
+    expect(calls).toEqual([false])
+    expect(wrapper.find('[data-testid="md-streaming-fence"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="html-preview-inline"]').exists()).toBe(false)
+
+    // fence 收尾标记到达 → 一次成型成卡片
+    await wrapper.setProps({ content: '```html-preview\n/abs/report.html\n```' } as never)
+    await flushRaf()
+    expect(wrapper.find('[data-testid="md-streaming-fence"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="html-preview-inline"]').exists()).toBe(true)
+  })
+
+  it('mermaid fence 静默提前 finalize 保留不变（部分图形提前渲染有价值）', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    const calls: boolean[] = []
+    const renderMarkdownIncremental = makeFinalizeAwareMock(
+      (_source, finalize) => calls.push(finalize),
+      (_source, finalize) =>
+        finalize
+          ? incResult([], [seg('mermaid', 'graph LR', 0)], emptyCache(1))
+          : incResult([], [seg('streaming-fence', 'graph LR', 0, { lang: 'mermaid' })], emptyCache(1)),
+    )
+    const wrapper = await mountStreamingFence('```mermaid\ngraph LR', renderMarkdownIncremental)
+    expect(calls).toEqual([false])
+    expect(wrapper.find('[data-testid="md-streaming-fence"]').exists()).toBe(true)
+
+    await vi.advanceTimersByTimeAsync(250)
+    await nextTick()
+    await nextTick()
+    expect(calls[calls.length - 1]).toBe(true)
+    expect(wrapper.find('[data-testid="md-streaming-fence"]').exists()).toBe(false)
+  })
+
+  it('首现竞态兜底：静默条件在 html-preview fence 新开帧命中 → 撤回 finalize 重渲染为占位', async () => {
+    // 阈值 0 强制静默条件恒真，模拟「本轮才新开的 fence + 上一帧 openFenceLang 未知」的误 finalize 帧
+    const { calls, renderMarkdownIncremental } = htmlPreviewMock()
+    const wrapper = await mountStreamingFence('```html-preview\n/abs/report.html', renderMarkdownIncremental, 0)
+    // 首帧 finalize=true 落了 html-preview 段 → 检出后撤回重渲染为占位（calls=[true,false]）
+    expect(calls).toEqual([true, false])
+    expect(wrapper.find('[data-testid="html-preview-inline"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="md-streaming-fence"]').exists()).toBe(true)
   })
 })

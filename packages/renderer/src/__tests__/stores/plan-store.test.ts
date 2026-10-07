@@ -10,7 +10,7 @@
  *   垃圾落 idle——批次 3 条目 1 删除混装兜底后的声明例外锚；resolveResumeHint：直读）
  * - D4 分支公式单源（derivePlanReviewBarMode）：presence 语义 / 抑制标记 / degraded 组合输入面
  * - 审批窗口机件：已应答标记两路事件驱动解除（预期后态帧值判定 / 新 pending）、迟到旧帧
- *   不解标记、degraded 组合即时评估（[ADR-0112] 时间窗已删）、双源冷拉对账（显式拉取：
+ *   不解标记、degraded 组合即时评估（[ADR-0122] 时间窗已删）、双源冷拉对账（显式拉取：
  *   失败 → 标记悬挂 + loadError（R7）；成功 → 真值解除 + sink 再入店）
  * - D8 检测窗相位机（dmg-r1-2）：send resolve 只进 armed（前置在途 turn 终态不判定）、
  *   nudge 轮 message_start 才开 watching、send.rejected 不受起点标记门
@@ -348,7 +348,7 @@ describe('审批窗口机件（D4）', () => {
     expect(planReviewNudgeError.value).toBe('no-response')
   })
 
-  it('degraded 组合即时评估（[ADR-0112] 2s 稳定窗已删）：组合成立帧到达即放行；变假即复位', () => {
+  it('degraded 组合即时评估（[ADR-0122] 2s 稳定窗已删）：组合成立帧到达即放行；变假即复位', () => {
     const { store, planReviewDegradedGate } = mountStore()
     store.applyFrame('A', { ...BASE_VIEW, state: 'reviewing' })
     // 组合成立（reviewing ∧ 无挂起 ∧ 无标记）→ 即时放行，不等时间窗

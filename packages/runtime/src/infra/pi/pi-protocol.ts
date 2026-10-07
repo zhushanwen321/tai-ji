@@ -306,7 +306,7 @@ export interface PiToolcallEndSubEvent {
 
 /**
  * 流式错误/中止终结事件（code-harden RT-2#2）：wire 实发 `{type:'error', reason, error}`，
- * 权威源 = @earendil-works/pi-ai 0.84.4 dist/types.d.ts AssistantMessageEvent 的 error 变体
+ * 权威源 = @earendil-works/pi-ai 1.0.0 dist/types.d.ts AssistantMessageEvent 的 error 变体
  * （`reason: 'aborted'|'error'`，`error` 是终态 AssistantMessage，人类可读文本在其
  * `errorMessage` 字段）。RPC wire 的 toJsonEvent 只剥 `partial`，error 变体无 partial
  * 不受影响。wire 上没有 `content` 字段——旧本地声明 `content?: string` 使恒 undefined
@@ -464,7 +464,7 @@ export interface PiAutoRetryEndEvent extends PiBaseMessage {
 
 /**
  * 压缩/分支摘要重试排定事件（pi1-disposition-chat-flow U3⑤，D12 登记三事件之一）。
- * pi 0.84.4 dist/core/agent-session.js `_summarizationRetryCallbacks`（:2952-2971）实发：
+ * pi 1.0.0 dist/core/agent-session.js `_summarizationRetryCallbacks` 实发：
  * onRetryScheduled → { type, attempt, maxAttempts, delayMs, errorMessage }。
  */
 export interface PiSummarizationRetryScheduledEvent extends PiBaseMessage {
@@ -476,8 +476,8 @@ export interface PiSummarizationRetryScheduledEvent extends PiBaseMessage {
 }
 
 /**
- * 压缩/分支摘要重试单次尝试开始事件（D12 三事件之二）。pi 0.84.4 实发两变体
- * （agent-session.d.ts:96-102）：`{ source: 'branchSummary' }` 与
+ * 压缩/分支摘要重试单次尝试开始事件（D12 三事件之二）。pi 1.0.0 实发两变体
+ * （agent-session.d.ts）：`{ source: 'branchSummary' }` 与
  * `{ source: 'compaction', reason }`——reason 仅 compaction 源携带，故可选。
  */
 export interface PiSummarizationRetryAttemptStartEvent extends PiBaseMessage {
@@ -488,8 +488,8 @@ export interface PiSummarizationRetryAttemptStartEvent extends PiBaseMessage {
 }
 
 /**
- * 压缩/分支摘要重试收尾事件（D12 三事件之三）。pi 0.84.4 onRetryFinished →
- * `{ type }`（agent-session.js:2970），无载荷字段。
+ * 压缩/分支摘要重试收尾事件（D12 三事件之三）。pi 1.0.0 onRetryFinished →
+ * `{ type }`（_summarizationRetryCallbacks 内），无载荷字段。
  */
 export interface PiSummarizationRetryFinishedEvent extends PiBaseMessage {
   type: 'summarization_retry_finished'

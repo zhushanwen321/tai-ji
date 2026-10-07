@@ -22,7 +22,7 @@
  * - install/download 内 onProgress 转发为 'update:progress' 事件（win.isDestroyed 守卫）
  * - 错误转发为 'update:error' 事件（区分 UpdateError.stage / UpdateUnsupportedError.errorCode）
  * - orchestrator 是纯逻辑（不调 app.quit）；quit 由本 handler 在 triggerRestart=true 后调
- * - quit 用 setImmediate（ADR-0112：不猜「响应送达」时间窗——原 500ms 延迟已删；
+ * - quit 用 setImmediate（ADR-0122：不猜「响应送达」时间窗——原 500ms 延迟已删；
  *   setImmediate 只保证 handler return 落定后退出，renderer 可能来不及显示「重启中」
  *   态，属可接受的显示损失，升级安装流程不受影响）
  * - releaseChecker / updateOrchestrator 未注入时降级（check 返回 null / download、install 抛错）
@@ -534,7 +534,7 @@ export function registerUpdateHandlers(deps: IpcHandlerDeps): void {
       // state.latestRelease，UI 与实装归一（类型 SSOT = shared UpdateInstallResult）。
       const response: UpdateInstallResult = { ...result, version: release.version }
       if (response.triggerRestart) {
-        // ADR-0112：不猜「响应 500ms 内送达」的时间窗——setImmediate 只保证 handler
+        // ADR-0122：不猜「响应 500ms 内送达」的时间窗——setImmediate 只保证 handler
         // return 落定后进入退出流程；renderer 可能来不及显示「重启中」态（显示损失可接受）
         setImmediate(() => app.quit())
       }

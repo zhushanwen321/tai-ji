@@ -1,6 +1,14 @@
 // coverage-file-gate-exempt: 组合根装配接线面——决策逻辑在注入工厂（btw-line-spawn-options.ts 等，各有直测），本文件新增行是构造注入与回调接线，单测不可达（入口装配）；行为由 validate-runtime-bundle 与 runtime e2e 承载
 import { RuntimeServer } from './transport/server.js'
 import { createSubagentModelSwitchGateway } from './transport/subagent-model-gateway.js'
+// remote-access U0.1（D2/D9）：remote token 热读函数——仅 --remote-access 开态装配为
+// ConnectionManager 的 remoteTokenProvider（每次 auth 握手调用）；关态不装配零 IO。
+// 层位：文件 IO 居 infra（runtime-layering.md §2 transport 层不碰 node:fs）。
+import { readRemoteAccessToken } from './infra/remote-access.js'
+// remote-access D3/E5（S3 拆分）：移动壳静态托管——开态判定（remoteAccess 判据 → dist
+// 探测 → handler 构造）收敛在组合根（见 main() Transport layer 装配段），实现与穿越
+// 防护（E4）在 infra/mobile-static.ts。
+import { createMobileStaticHandler, resolveMobileStaticRoot } from './infra/mobile-static.js'
 import { SessionService } from './services/session/session-service.js'
 import { REVOKED_SIGNAL_CUSTOM_TYPE } from './services/session/revoke-orchestrator.js'
 // BtwService 组合根接线（btw-question M2-b，B2 授权）：依赖六项按其 docstring 归位本文件。
@@ -47,7 +55,7 @@ import type { IProviderCredentialResolver } from './services/ports/provider-cred
 import { PresetService } from './services/preset-service.js'
 import { ModelService } from './services/model-service.js'
 
-import { BASE_PORT, MAX_PORT, mandatoryExtensions, isBtwVirtualId } from '@taiji/shared'
+import { mandatoryExtensions, isBtwVirtualId } from '@taiji/shared'
 import type { ImportSourceKind } from '@taiji/shared'
 import { getDataDir } from '@taiji/shared/paths'
 // startupSweep：启动收编扫描 core 装配单点（挂点见 main() 内 registerRuntimeInstance
@@ -104,6 +112,7 @@ import { GitInfoReader } from './infra/system/git-info-reader.js'
 import { ShellRunner } from './infra/shell-runner.js'
 import { WorktreeService } from './services/worktree/worktree-service.js'
 import { TerminalService } from './services/terminal/terminal-service.js'
+import { disposeTerminalPtysStep } from './services/terminal/dispose-terminal-ptys-step.js'
 import { QuotaService } from './services/quota-service.js'
 import { TtsService } from './services/tts-service.js'
 // 三家 TTS driver 工厂与表单投影（ai-voice-tts u2，infra/tts 唯一装配出口）——组合根 import
@@ -125,6 +134,9 @@ import { ProjectStore } from './services/project/project-store.js'
 import { ImportService } from './services/session/import-service.js'
 import { ExternalFileImportSource } from './services/session/import-source-external-file.js'
 import { ZcodeImportSource } from './services/session/import-source-zcode.js'
+// chat-html-support（§6.7 D7 回收②）：产物目录保留期扫描（启动扫 + 每日复扫）装配入口——
+// 经后台初始化序列 ⑪（startArtifactRetention dep）触发一次。
+import { startArtifactRetention } from './services/session/artifact-retention.js'
 import type { SessionImportSource } from './services/session/import-source.js'
 // zcode 源默认库 = 宿主 HOME 下 zcode 会话库动态推导（zcode-session-source 与引擎包
 // db-path.ts 同源 SDK 常量，session-reader-shared-core U10 起唯一承载）
@@ -165,39 +177,18 @@ import { spawnDataDirContractViolation } from './utils/runtime-env.js'
 // 回收面之外，进程退出的兜底回收——设计 §3.6 退出钩子落点）。
 import { disposeRuntimeEngineClients } from './services/session/subagent-engine-history.js'
 
-function parseArgs(): { port: number; projectRoot?: string; builtinPluginsDir?: string } {
-  // eslint-disable-next-line no-magic-numbers -- argv[0] is node, argv[1] is script
-  const args = process.argv.slice(2)
-  const portOffset = Math.max(0, Math.min(parseInt(process.env.TAIJI_AGENT_PORT_OFFSET ?? '0', 10) || 0, MAX_PORT - BASE_PORT))
-  let port = BASE_PORT + portOffset
-  let projectRoot: string | undefined
-  let builtinPluginsDir: string | undefined
-  for (let i = 0; i < args.length; i++) {
-    if (args[i] === '--port' && i + 1 < args.length) {
-      const parsed = parseInt(args[i + 1], 10)
-      if (isNaN(parsed)) {
-        console.error(`[runtime] invalid --port value: ${args[i + 1]}`)
-        process.exit(1)
-      }
-      port = parsed
-    } else if (args[i].startsWith('--port=')) {
-      const parsed = parseInt(args[i].split('=')[1], 10)
-      if (isNaN(parsed)) {
-        console.error(`[runtime] invalid --port value: ${args[i].split('=')[1]}`)
-        process.exit(1)
-      }
-      port = parsed
-    } else if (args[i] === '--project-root' && i + 1 < args.length) {
-      projectRoot = args[i + 1]
-    } else if (args[i].startsWith('--project-root=')) {
-      projectRoot = args[i].split('=')[1]
-    } else if (args[i] === '--builtin-plugins-dir' && i + 1 < args.length) {
-      builtinPluginsDir = args[i + 1]
-    } else if (args[i].startsWith('--builtin-plugins-dir=')) {
-      builtinPluginsDir = args[i].split('=')[1]
-    }
+// 组合根 argv 解析（remote-access D9）：解析逻辑与单测在 utils/runtime-args.ts（本文件
+// import 即执行 main() 不可直测，故提取；`=` 形态取值按首个 = 切分防路径含 = 截断）。
+import { parseRuntimeArgs } from './utils/runtime-args.js'
+
+function parseArgs(): ReturnType<typeof parseRuntimeArgs> {
+  try {
+    // eslint-disable-next-line no-magic-numbers -- argv[0] is node, argv[1] is script
+    return parseRuntimeArgs(process.argv.slice(2))
+  } catch (error) {
+    console.error(toErrorMessage(error))
+    process.exit(1)
   }
-  return { port, projectRoot, builtinPluginsDir }
 }
 
 /**
@@ -409,7 +400,7 @@ async function initRelayServerOrExit(projectRoot: string, messageBus: MessageBus
 }
 
 async function main(): Promise<void> {
-  const { port, projectRoot, builtinPluginsDir } = parseArgs()
+  const { port, projectRoot, builtinPluginsDir, remoteAccess, mobileDist } = parseArgs()
   const effectiveRoot = projectRoot ?? process.cwd()
 
   // spawn 数据目录契约校验（缺省反转护栏）：必须在任何 getDataDir() 消费（含下方
@@ -444,7 +435,7 @@ async function main(): Promise<void> {
   // [MANDATORY] 时序硬声明（决策 1，登记见 docs/adr/decisions.md 启动扫描条目）：
   // startup sweep 必须先于任何 pi spawn：本时点无新 pi（启动段不 spawn）、单实例
   // 锁已确立——判读 running 的 run 其执行者只可能是上一生命周期的孤儿 pi，孤儿
-  // pi 正常收尾时收编被三面证据幂等让位（创建顺序契约，ADR-0112 判定层；原
+  // pi 正常收尾时收编被三面证据幂等让位（创建顺序契约，ADR-0122 判定层；原
   // graceWindowMs 宽限窗已删）。挪动此调用序前必读设计 §3.3 决策 1。扫描是旁路
   // 维护：startupSweep 结构性不 reject（内部失败只 warn/error 留痕），await 返回
   // 后启动主路径照常继续。
@@ -467,7 +458,24 @@ async function main(): Promise<void> {
   const pm = new ProcessManager(effectiveRoot)
 
   // Transport layer
-  const server = new RuntimeServer(port, projectRoot, runtimeToken)
+  // remote-access U0.1 装配（D1/D2/D3/D9）：
+  // - host：开态绑 0.0.0.0（LAN 可达，桌面 localhost 天然被覆盖）；关态 undefined =
+  //   ConnectionManager 默认 127.0.0.1（与现状逐字节一致）。
+  // - remoteTokenProvider：仅开态装配——每次 auth 握手热读 remote-access.json（轮换
+  //   文件即生效）；关态不装配，ConnectionManager 不持有读取通道（零文件 IO，且不读
+  //   任何 env——D9 ambient 免疫，本设计新增 env 键 = 0）。
+  // - mobileStaticHandler（S3 挂载裁决上移组合根）：remoteAccess 开态才探测 dist
+  //   （E5 时序等价：启动期一次 statSync，现状在 ConnectionManager 构造器内执行、
+  //   上移后在本行执行，同为 index 装配期）、探测通过才构造 handler 注入；关态
+  //   resolveMobileStaticRoot 首行短路（零探测副作用零日志）——mobileDist 单独出现
+  //   （手工只传 --mobile-dist 不开 flag）不构成开态。静态实现/穿越防护（E4）在
+  //   mobile-static.ts，ConnectionManager 只按「是否注入 handler」分派。
+  const mobileStaticRoot = resolveMobileStaticRoot({ remoteAccess, mobileDist })
+  const server = new RuntimeServer(port, projectRoot, runtimeToken, {
+    host: remoteAccess ? '0.0.0.0' : undefined,
+    remoteTokenProvider: remoteAccess ? readRemoteAccessToken : undefined,
+    mobileStaticHandler: mobileStaticRoot !== null ? createMobileStaticHandler(mobileStaticRoot) : undefined,
+  })
 
   // MessageBus 单例（wave:runtime-wiring）：per-session 消息广播核心。
   // 在 server 构造后、setServices 前创建并注入——server 的 ConnectionManager.onDisconnect
@@ -815,7 +823,7 @@ async function main(): Promise<void> {
   })
 
   // 崩溃上报终态裁决（D5）：recovered = 复活（静默，丢弃退出现场）；terminal = 崩溃发声
-  // （携 stash；ADR-0112——原自动恢复 retry-pending 静默期已退役，崩溃即上报）。
+  // （携 stash；ADR-0122——原自动恢复 retry-pending 静默期已退役，崩溃即上报）。
   onRespawnFate((e) => {
     if (e.fate === 'terminal') {
       speakSessionDeath(e.sessionId, 'exit', pendingExitDeaths.get(e.sessionId) ?? {})
@@ -1279,9 +1287,11 @@ async function main(): Promise<void> {
   skillRegistry.onChange((event) => {
     server.broadcastSkillCacheInvalidated(event.scope, event.cwd)
   })
-  // Terminal：同步销毁该 session 绑定的 PTY（kill 进程 + 清 ptyMap）。
+  // Terminal：同步销毁该 session 绑定的**全部** PTY 实例（多实例语义：kill 进程 +
+  // 清该会话前缀的全部 ptyMap 键；无法回溯到 u4 之前的「单实例」态——
+  // terminal-multi-instance u4，设计 §2.3 不变量③）。
   sessionService.setOnSessionDelete((sid) => {
-    terminalService.destroyPty(sid)
+    terminalService.destroySessionPties(sid)
   })
 
   // D8-2（perf W29）：appInfo 惰性——piVersion 先 'unknown'（同步 getAppVersion），
@@ -1515,11 +1525,11 @@ async function main(): Promise<void> {
     shutdownStep('stop-watchdog')
     stopWatchdog()
     // u8（crash-resilience D7-②）收口沿用：核销崩溃登记（原 pending 自动恢复 timer
-    // 已随 ADR-0112 退役）。
+    // 已随 ADR-0122 退役）。
     shutdownStep('cancel-pending-respawns')
     sessionService.cancelAllPendingRespawns()
     // [M4-a / M2-b 备忘清偿] btw 闲置扫描定时器收口（timer 已 unref 不阻塞退出，此处显式
-    // stop 是与上方 idle-reaper 同款的收口双保险；shutdown 后不再有回收拍）。线会话文件
+    // dispose 是收口双保险；shutdown 后不再有回收拍）。线会话文件
     // **不删**（退出不删，D5 裁决⑧）；线进程由下方 server.stop → destroyAll 统一杀（同一 pm）。
     btwService.dispose()
     console.log(`\n[runtime] received ${signal}, shutting down...`)
@@ -1545,6 +1555,12 @@ async function main(): Promise<void> {
         )
       }
       claimLedger.dispose()
+      // 孤儿 shell 加固③：显式销毁全部终端 PTY（kill → 5s → SIGKILL 升级链），不再
+      // 仅靠「进程死亡 → master 关闭 → 内核 SIGHUP」的隐式孝底——显式链可观测（日志
+      // 留痕）且不依赖内核行为。挂点在 server.stop（传输层关停）之前：先收自己受托的
+      // 资源再关门。空表 no-op，双信号重入安全。步骤本体提取在
+      // dispose-terminal-ptys-step（本文件 import 即执行 main() 不可直测，单步语义经其单测锁定）。
+      disposeTerminalPtysStep(terminalService, shutdownStep)
       // E-2 + W8：relay 优雅关停与引擎协议客户端 dispose **并行**——deinitRelayServer
       // 内部有 3s grace，串行（先 relay 后 dispose）会把引擎进程消失时间拖到 3s 之后，
       // 违反 A11「dispose 发起起算 1s 内引擎进程消失」；并行发起后 dispose 单侧上界
@@ -1559,6 +1575,13 @@ async function main(): Promise<void> {
       await engineClientsDisposed
       shutdownStep('server-stop')
       await server.stop()
+      // terminal-multi-instance u4（设计 §0.5 P5 正常退出清理）：全量杀终端 PTY——与上方
+      // server.stop→destroyAll 同语义（先关入口再杀子进程），挂点紧随 server-stop：此刻
+      // 不再有 terminal.spawn 请求进入，注册表冻结，清理后不会被新建实例回填。
+      // destroyAllPties 幂等（无实例时直接返回，重复调用不报错）；kill 的 SIGKILL 升级
+      // timer 不参与退出等待（与 server.stop 内 destroyAll 同款）。
+      shutdownStep('dispose-terminal-pties')
+      terminalService.destroyAllPties()
       // u7c（D5 退出链新增步骤）：引擎池 dispose——zcode appserver 杀链，挂点钉死在
       // server.stop 之后、closeLogger 之前（杀链期间的日志与 stderr tee 要经 logger
       // 落盘，closeLogger 先行则现场丢失）。引擎池的物理宿主在 pi 进程内（registry
@@ -1712,6 +1735,10 @@ async function main(): Promise<void> {
     broadcastAppInfo: () => server.broadcastAppInfo(),
     skillRegistry,
     pluginService,
+
+    // chat-html-support（§6.7 D7 回收②）：产物目录保留期扫描启动（启动扫 + 每日复扫）——
+    // 经后台序列 ⑪ 触发一次；实现落 runtime 会话服务，无需组合根装配。
+    startArtifactRetention,
     // u5（crash-forensics D3）：收割完成 promise 交付（reattach 编排的唯一消费方）。
     onOrphanReapChainScheduled: (completion) => {
       orphanReapChain = completion

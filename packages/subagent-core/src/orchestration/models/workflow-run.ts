@@ -18,7 +18,7 @@
  *
  * replaceRuntime(newRt)（G5-001）: 原子释放前一个 runtime + 绑定新 runtime。
  * [HISTORICAL] 唯一生产调用方 worker-error-retry（scheduleRebuild → rebuildRuntime）
- * 随重试矩阵删除（ADR-0112）——方法保留为聚合 API（终态 run 的重建拒绝 G6-001
+ * 随重试矩阵删除（ADR-0122）——方法保留为聚合 API（终态 run 的重建拒绝 G6-001
  * 仍由调用方 isRunSettled 前置承载），现仅供恢复/接管形态与测试使用。
  */
 
@@ -35,7 +35,7 @@ import type { WorkflowModelOverride } from "../run-events.ts";
  * 聚合根级 meta（非 RunExecutionSnapshot 的一部分，不随 trace 持久化到 worker JSONL）。
  *
  * workerErrorCount/scriptErrorCount（C.5）：[HISTORICAL] 原 worker-message-pump 重试
- * 计数载体（retry 会 replaceRuntime，计数 run 级而非 runtime 级）。[ADR-0112] 重试
+ * 计数载体（retry 会 replaceRuntime，计数 run 级而非 runtime 级）。[ADR-0122] 重试
  * 矩阵删除后无生产写入方，字段保留为旧 record 兼容读。
  */
 export interface WorkflowRunMeta {
@@ -63,9 +63,9 @@ export interface WorkflowRunMeta {
    * 本字段不回写事件流。
    */
   modelOverride?: WorkflowModelOverride;
- /** Worker 线程错误计数（C.5；[ADR-0112] 后无生产写入方，旧 record 兼容读）。 */
+  /** Worker 线程错误计数（C.5；[ADR-0122] 后无生产写入方，旧 record 兼容读）。 */
   workerErrorCount?: number;
- /** 脚本错误计数（C.5；[ADR-0112] 后无生产写入方，旧 record 兼容读）。 */
+ /** 脚本错误计数（C.5；[ADR-0122] 后无生产写入方，旧 record 兼容读）。 */
   scriptErrorCount?: number;
 }
 
@@ -144,7 +144,7 @@ export class WorkflowRun {
    * 原子地：释放旧 runtime（worker.terminate + abort）+ 绑定新 runtime。
    * 终态 run 的重建拒绝（G6-001）由调用方前置承载（isRunSettled 门，见类注释
    * 守卫面）。[HISTORICAL] 唯一生产调用链 scheduleRebuild → rebuildRuntime 已随
-   * 重试矩阵删除（ADR-0112）。
+   * 重试矩阵删除（ADR-0122）。
    */
   replaceRuntime(rt: RunRuntime): void {
     // 原子替换：旧 runtime 释放（terminate+abort），新 runtime 绑定。

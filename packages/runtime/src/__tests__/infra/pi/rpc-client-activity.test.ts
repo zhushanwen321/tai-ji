@@ -7,7 +7,7 @@
  * - 入站 handleMessage 是唯一入站咽喉：任何 stdout 帧（response / 事件）刷新
  * - sendRaw 是内部调试旁路，不刷新
  *
- * 退役登记（ADR-0112 防御机制清查）：空闲回收判定消费（idle-pi-reclamation D1/D6-1）、
+ * 退役登记（ADR-0122 防御机制清查）：空闲回收判定消费（idle-pi-reclamation D1/D6-1）、
  * maintenance 维护通道双腿排除、touchActivity 手动刷新已随空闲回收机制整体删除；
  * 活动时钟保留为观测面（crash 取证「死前最后活动时刻」等）。
  *

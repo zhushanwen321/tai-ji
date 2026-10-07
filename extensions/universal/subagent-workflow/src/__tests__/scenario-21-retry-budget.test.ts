@@ -1,7 +1,7 @@
 // src/__tests__/scenario-21-retry-budget.test.ts
 //
 // 场景 21（修订设计 §4，L-02 扩展 / D10）：跨天 resume 后剩余预算按累计活跃段
-// 折算（非 startedAt 墙钟）。场景 16 续跑后注入一次派发错误（[ADR-0112] 单次
+// 折算（非 startedAt 墙钟）。场景 16 续跑后注入一次派发错误（[ADR-0122] 单次
 // 终态显式上报，无自动重试）→ run 仍按账本折算的剩余预算正常推进。
 //
 // 判别构造：40min 活跃 + 2 天搁置 + 50min 预算——若预算折算误用 startedAt 墙钟
@@ -36,7 +36,7 @@ describe("场景 21：跨天 resume 预算按累计活跃段折算（非 started
       ]);
 
       const sd = makeScenarioDeps(env, makeFauxRunner());
-      // 派发错误注入（result.error 在场）→ [ADR-0112] 单次 finalizeCall failed 显式
+      // 派发错误注入（result.error 在场）→ [ADR-0122] 单次 finalizeCall failed 显式
       // 上报，无自动重试；脚本侧 agent() 失败 resolve 回退，run 继续推进 C
       sd.faux.steps.push({ kind: "error", message: "injected transient failure" });
 

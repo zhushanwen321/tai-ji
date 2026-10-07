@@ -27,7 +27,7 @@ export type ExtensionMode = 'all' | 'allowlist' | 'denylist' | 'none'
 /**
  * pi thinking 值域全集 SSOT —— **前端侧唯一档位词表来源（集合 + 顺序）**。
  *
- * 锚点（pi 0.84.4 实装版，两处同集同序，均为 7 值含 xhigh/max）：
+ * 锚点（pi 1.0.0 实装版，两处同集同序，均为 7 值含 xhigh/max）：
  * - `node_modules/@earendil-works/pi-ai/dist/types.d.ts:24-25`
  *   `ThinkingLevel = "minimal" | "low" | "medium" | "high" | "xhigh" | "max"`，
  *   `ModelThinkingLevel = "off" | ThinkingLevel`；

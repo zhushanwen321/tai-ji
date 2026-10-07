@@ -8,9 +8,21 @@
  * - 节点 = 脚本字面中的 `agent(...)` 调用点（含 parallel 实参子树内、函数体内、
  *   map 回调内的形态）；kind 恒 'agent'（'script-step' 为协议预留值，脚本门禁
  *   步骤无独立调用语法，v1 不产）。
+ * - helper 投影：全程序恰含 1 个 `agent()` 调用的**具名**函数（FunctionDeclaration
+ *   或 const/let/var 绑定的函数表达式/箭头，参数 ≥1）登记为 agent-helper；其调用点
+ *   投影为虚拟 agent 调用点——显示名取第一实参（对象字面量形态优先 description/label
+ *   属性表达式，串/模板形态直取），phase 取调用点词法 currentPhase；helper 体内的
+ *   agent() 实现点不再按词法位置收口。动因：平台适配层脚本（zsw-skills 单源拼接产物
+ *   的 wfAgent/askAgent——zcode 公共体 `agent(name, persona).ask<T>()` 转 pi 签名的
+ *   桥接函数）把唯一实现点藏在声明处（词法上先于全部 phase()），旧规则下 DAG 退化为
+ *   「唯一节点落缺省分区 + 全部实例未匹配」；投影后每个派发点恢复为带名节点、落对
+ *   分区，与运行时实例经 D2 判据正常挂接。
  * - phase 分区 = `phase(name)` 调用序列（首现序）；字面量实参才登记分区，动态
  *   实参（拼接/函数调用）不造伪名——其后的调用点归缺省分区（与 worker 侧
  *   `opts.phase || _currentPhase` 的归属快照语义对齐：静态不可得名即缺省）。
+ *   phase 上下文按函数边界作用域化：进入函数继承外层，体内 phase() 只影响体内
+ *   节点、退出恢复外层——延迟调用的具名函数（如 retireClosure）体内的 phase()
+ *   不得污染声明位置之后的顶层归属（纯词法遍历不模拟执行时刻）。
  * - 模板名（§3.3-D2-①）：调用点 description（或 label）表达式的模板形态——
  *   字面段原样、变量段记 `${…}` 通配段，编译为「字面段精确 + 变量段通配」的
  *   锚定正则（matchPattern，字面段按正则字面量转义）；description 为非静态
@@ -28,11 +40,20 @@
  *   execute-full-workflow 的 `subWave.map(...)` → `parallel(subCalls)`）脚本字面
  *   无 agent() 调用点，解析为零调用点；运行时实例经事件流「未匹配实例」分组
  *   兜底（设计 D2 ⑥），不静默丢失。
- * - 函数声明体内的调用点按词法序收口（pr-lifecycle 的 askAgent 助手函数形态），
- *   phase 归属取词法位置上的 currentPhase（非调用时刻），归属漂移由挂接侧
- *   「未匹配实例」分组兜底。
+ * - helper 投影的边界：多 agent() 调用的 helper、零参数 helper（名字无实参入口）、
+ *   匿名回调（map 等实参位置的函数——批量回调内的调用点语义保持现状）、子树内
+ *   直接调用其他 helper 候选（复合调用链，命运迭代结算：被调者录取则 caller 让位，
+ *   被调者注定落选则无碍）、嵌套声明其他候选（内层录取、外层让位）、同名多候选
+ *   声明（全部不投影——hoisting 末者胜与词法序错位属静态不可裁决）均不投影——
+ *   相关调用点保持词法位置收口，归属漂移由挂接侧「未匹配实例」分组兜底；helper
+ *   体内对显示名的后处理（replace 等）不在投影语义内，模板取自调用点第一实参原文。
+ *   helper 调用匹配为名字级（裸 callee Identifier ∈ 注册表，shadow 不分析——与
+ *   dataflow/conditional 名字级匹配同族）。
  * - dataflow/conditional 判定为名字级匹配，不做作用域 shadow 分析（同名词法
  *   槽极罕见；误连边的代价是图上多一条提示边，不产生错误结构）。
+ * - dataflow 只认 `await agent(...)` / `await parallel(...)` 的直接绑定；helper
+ *   返回的 ask 闭包经 `.ask()` 二跳才产生实例，跨跳数据流不追踪（投影节点仍按
+ *   词法序连 sequence 边）。
  * - parallel 实参子树内的嵌套 parallel() 调用不展开（collectParallelMembers
  *   短路 return，主遍历亦不进入）：嵌套组成员的调用点不产节点，运行时实例经
  *   事件流「未匹配实例」分组兜底（设计 D2 ⑥），不静默丢失。
@@ -294,6 +315,10 @@ interface ParseCtx { // oe-exempt:20261002:framework:workflow-viz 解析器 AST 
   loopBackEdges: LoopBackEdgeCandidate[];
   nodeSeq: number;
   loopSeq: number;
+  /** 具名单 agent 调用 helper 注册表（name → 函数体与内部实现调用点）。 */
+  agentHelpers: Map<string, AgentHelperEntry>;
+  /** 已登记 helper 体内的 agent() 实现点（主遍历跳过——投影由 helper 调用点承载）。 */
+  helperInternalCalls: Set<AstNode>;
 }
 
 function registerPhase(ctx: ParseCtx, name: string): void {
@@ -302,6 +327,13 @@ function registerPhase(ctx: ParseCtx, name: string): void {
 
 function newId(prefix: string, seq: number): string {
   return `${prefix}-${seq}`;
+}
+
+/** agent-helper 登记（恰含 1 个 agent() 调用的具名函数——调用点投影为虚拟 agent 调用点）。 */
+interface AgentHelperEntry { // oe-exempt:20261002:framework:workflow-viz 解析器 AST 帧类型——判别联合成员数据形状，非抽象接口
+  fn: AstNode;
+  /** 体内唯一 agent() 调用节点（主遍历跳过的实现点）。 */
+  internalCall: AstNode;
 }
 
 /** 调用点实参子树的 Identifier 引用扫描（排除 non-computed 成员属性与对象 key）。 */
@@ -352,13 +384,15 @@ function extractAgentDescription(callNode: AstNode): { descExpr: AstNode | undef
   return { descExpr: undefined, explicitPhaseExpr: undefined };
 }
 
-/** 收口单个 agent 调用点：建节点 + 数据流扫描。返回节点 id。 */
-function emitAgentCallSite(ctx: ParseCtx, callNode: AstNode): string {
-  const { descExpr, explicitPhaseExpr } = extractAgentDescription(callNode);
-  const { template, pattern } = extractNameTemplate(ctx.source, descExpr);
-  const explicitPhase = literalStringOf(explicitPhaseExpr);
-  // worker 侧归属快照 = opts.phase || _currentPhase；静态侧同序回落，均不可得归缺省分区
-  const phaseName = explicitPhase ?? ctx.currentPhase ?? WORKFLOW_DAG_DEFAULT_PHASE;
+/** 建节点 + 数据流扫描（模板/phase/实参集由调用方解析——直接调用点与 helper 投影共用）。返回节点 id。 */
+function pushAgentNode(
+  ctx: ParseCtx,
+  callNode: AstNode,
+  template: string,
+  pattern: string,
+  phaseName: string,
+  argNodes: readonly AstNode[],
+): string {
   registerPhase(ctx, phaseName);
 
   const id = `agent-L${callNode.loc?.start.line ?? 0}-N${ctx.nodeSeq++}`;
@@ -373,7 +407,7 @@ function emitAgentCallSite(ctx: ParseCtx, callNode: AstNode): string {
 
   // 数据流：实参子树引用的上游绑定变量 → dataflow 候选边
   const refs = new Set<string>();
-  for (const arg of callNode.arguments as AstNode[]) collectIdentifierRefs(arg, refs);
+  for (const arg of argNodes) collectIdentifierRefs(arg, refs);
   for (const name of refs) {
     const fromIds = ctx.bindings.get(name);
     if (fromIds !== undefined) {
@@ -381,6 +415,34 @@ function emitAgentCallSite(ctx: ParseCtx, callNode: AstNode): string {
     }
   }
   return id;
+}
+
+/** 收口单个 agent 调用点：建节点 + 数据流扫描。返回节点 id。 */
+function emitAgentCallSite(ctx: ParseCtx, callNode: AstNode): string {
+  const { descExpr, explicitPhaseExpr } = extractAgentDescription(callNode);
+  const { template, pattern } = extractNameTemplate(ctx.source, descExpr);
+  const explicitPhase = literalStringOf(explicitPhaseExpr);
+  // worker 侧归属快照 = opts.phase || _currentPhase；静态侧同序回落，均不可得归缺省分区
+  const phaseName = explicitPhase ?? ctx.currentPhase ?? WORKFLOW_DAG_DEFAULT_PHASE;
+  return pushAgentNode(ctx, callNode, template, pattern, phaseName, callNode.arguments as AstNode[]);
+}
+
+/**
+ * helper 调用点投影：虚拟 agent 调用点。显示名取第一实参（对象字面量形态优先
+ * description/label 属性表达式——对齐 agent 自身 opts 契约，askAgent(callSpec) 形态
+ * 据此保留模板名；串/模板形态直取——wfAgent(name) 形态）；phase 取调用点词法
+ * currentPhase（helper 调用不携带 phase opts）。
+ */
+function emitHelperCallSite(ctx: ParseCtx, callNode: AstNode): string {
+  const args = callNode.arguments as AstNode[];
+  const first = args[0];
+  const descExpr =
+    first != null && first.type === "ObjectExpression"
+      ? (objectPropValue(first, "description") ?? objectPropValue(first, "label"))
+      : first;
+  const { template, pattern } = extractNameTemplate(ctx.source, descExpr);
+  const phaseName = ctx.currentPhase ?? WORKFLOW_DAG_DEFAULT_PHASE;
+  return pushAgentNode(ctx, callNode, template, pattern, phaseName, args);
 }
 
 /** 收口一个执行单元（单节点或并行组）：条件/顺序边推进 + 循环体记录。 */
@@ -433,10 +495,14 @@ function declaratorNames(idNode: AstNode | undefined): { kind: "single"; name: s
   return undefined;
 }
 
-/** parallel 实参子树的成员收集（短路：嵌套 parallel 不深入）。 */
+/** parallel 实参子树的成员收集（短路：嵌套 parallel 不深入；helper 调用点投影为成员）。 */
 function collectParallelMembers(ctx: ParseCtx, node: AstNode, memberIds: string[]): void {
   if (isGlobalCall(node, "agent")) {
-    memberIds.push(emitAgentCallSite(ctx, node));
+    if (!ctx.helperInternalCalls.has(node)) memberIds.push(emitAgentCallSite(ctx, node));
+    return;
+  }
+  if (helperCallName(ctx, node) !== undefined) {
+    memberIds.push(emitHelperCallSite(ctx, node));
     return;
   }
   if (isGlobalCall(node, "phase")) {
@@ -482,10 +548,23 @@ function visit(ctx: ParseCtx, node: AstNode): void {
     case "ForInStatement":
       visitLoop(ctx, node);
       return;
+    case "FunctionDeclaration":
+    case "FunctionExpression":
+    case "ArrowFunctionExpression":
+      visitPhaseScopedFunction(ctx, node);
+      return;
     default:
       break;
   }
   for (const child of childNodes(node)) visit(ctx, child);
+}
+
+/** CallExpression 是否为已登记 agent-helper 的调用（callee 裸 Identifier 且在注册表）。 */
+function helperCallName(ctx: ParseCtx, node: AstNode): string | undefined {
+  if (node.type !== "CallExpression") return undefined;
+  const callee = node.callee as AstNode;
+  const name = callee.type === "Identifier" && typeof callee.name === "string" ? callee.name : undefined;
+  return name !== undefined && ctx.agentHelpers.has(name) ? name : undefined;
 }
 
 /** 编排全局调用短路收口：返回 true = 已收口（调用方不再通用遍历实参子树）。 */
@@ -495,6 +574,9 @@ function handleOrchestrationCall(ctx: ParseCtx, node: AstNode): boolean {
     return true;
   }
   if (isGlobalCall(node, "agent")) {
+    // helper 体内的实现点：投影由 helper 调用点承载，不再按词法位置收口——
+    // 消除「adapter 声明在全部 phase 之前 → 唯一节点落缺省分区」的假象
+    if (ctx.helperInternalCalls.has(node)) return true;
     closeUnit(ctx, [emitAgentCallSite(ctx, node)]);
     return true;
   }
@@ -502,7 +584,187 @@ function handleOrchestrationCall(ctx: ParseCtx, node: AstNode): boolean {
     closeUnit(ctx, collectParallelGroup(ctx, node));
     return true;
   }
+  if (helperCallName(ctx, node) !== undefined) {
+    closeUnit(ctx, [emitHelperCallSite(ctx, node)]);
+    return true;
+  }
   return false;
+}
+
+// ── agent-helper 收集（恰含 1 个 agent() 调用的具名函数）──────────────────
+
+interface HelperCandidate { // oe-exempt:20261002:framework:workflow-viz 解析器 AST 帧类型——判别联合成员数据形状，非抽象接口
+  name: string;
+  fn: AstNode;
+  /** 子树内全部 bare `agent()` 调用（含嵌套函数体内——wfAgent 形态的调用在返回对象的方法箭头里）。 */
+  calls: AstNode[];
+}
+
+/** 函数子树内全部 bare `agent()` 调用收集。 */
+function collectSubtreeAgentCalls(node: AstNode, out: AstNode[]): void {
+  for (const child of childNodes(node)) {
+    if (isGlobalCall(child, "agent")) out.push(child);
+    collectSubtreeAgentCalls(child, out);
+  }
+}
+
+/** 函数子树内对指定名集的 bare 调用收集（复合 helper 检测——内部调其他 helper 者不投影）。 */
+function collectCallsToNames(node: AstNode, names: ReadonlySet<string>, out: AstNode[]): void {
+  for (const child of childNodes(node)) {
+    if (child.type === "CallExpression") {
+      const callee = child.callee as AstNode;
+      if (callee.type === "Identifier" && typeof callee.name === "string" && names.has(callee.name)) out.push(child);
+    }
+    collectCallsToNames(child, names, out);
+  }
+}
+
+/**
+ * 具名函数候选收集：FunctionDeclaration / const·let·var 绑定的函数表达式与箭头。
+ * 匿名实参位置函数（map 回调等）不是候选——批量回调内的调用点语义保持现状。
+ */
+function collectHelperCandidates(node: AstNode, out: HelperCandidate[]): void {
+  if (node.type === "FunctionDeclaration") {
+    const id = node.id as AstNode | undefined;
+    if (id != null && id.type === "Identifier" && typeof id.name === "string") {
+      const calls: AstNode[] = [];
+      collectSubtreeAgentCalls(node, calls);
+      out.push({ name: id.name, fn: node, calls });
+    }
+  } else if (node.type === "VariableDeclarator") {
+    const id = node.id as AstNode | undefined;
+    const init = node.init as AstNode | undefined;
+    if (
+      id != null && id.type === "Identifier" && typeof id.name === "string" && init != null &&
+      (init.type === "FunctionExpression" || init.type === "ArrowFunctionExpression")
+    ) {
+      const calls: AstNode[] = [];
+      collectSubtreeAgentCalls(init, calls);
+      out.push({ name: id.name, fn: init, calls });
+    }
+  }
+  for (const child of childNodes(node)) collectHelperCandidates(child, out);
+}
+
+/**
+ * helper 注册表构建（预计算 + 迭代结算）：先收集全部具名候选，平凡不合格者（多/
+ * 零 agent 调用、零参、同名多候选）先结算为拒；其余按依赖命运逐轮结算——依赖 =
+ * 子树内直接调用的候选 + 嵌套声明的候选，依赖已录取 → 复合形态拒（双层投影失真：
+ * 外层第一实参 ≠ 内层实现实际收到的名字），依赖全部落选 → 录取，存在未结算 →
+ * 延到下轮（跨度升序仅为评估序；「单行 caller 先于多行 callee 评估」的次序漏洞
+ * 由依赖命运结算消除，不依赖评估顺序），循环停滞（互调环）→ 剩余全拒。
+ * 让位归属：被拒 caller 的调用点不产节点；其体内对已录取 helper 的调用点仍按
+ * helper 投影（phase 取该处词法位置）。
+ */
+function collectAgentHelpers(program: AstNode): Map<string, AgentHelperEntry> {
+  const candidates: HelperCandidate[] = [];
+  collectHelperCandidates(program, candidates);
+  const info = buildCandidateDependencyInfo(candidates);
+  const status = rejectTrivialCandidates(candidates);
+  settleByDependencyFate(info, status);
+  // 停滞残留（无结算状态）= 候选间互调/嵌套环 → 全部不投影；录取者登记注册表
+  const byName = new Map<string, AgentHelperEntry>();
+  for (const cand of candidates) {
+    if (status.get(cand) === "accepted") {
+      byName.set(cand.name, { fn: cand.fn, internalCall: cand.calls[0] as AstNode });
+    }
+  }
+  return byName;
+}
+
+/** 候选间依赖信息（预计算共享面：直接调用名集 + 词法嵌套集 + 同名索引 + 评估序）。 */
+interface CandidateDependencyInfo {
+  /** 候选子树内直接调用的候选名（原始名集，含自调——结算时按 byName 归一并剔除）。 */
+  directCalls: Map<HelperCandidate, Set<string>>;
+  /** 词法嵌套在该候选体内的其他候选（复合形态检测位）。 */
+  contains: Map<HelperCandidate, HelperCandidate[]>;
+  /** 名字 → 候选索引（同名多候选已在平凡阶段全拒，此处任取其一即可）。 */
+  byName: Map<string, HelperCandidate>;
+  /** 跨度升序评估序（结算正确性不依赖评估顺序，见 collectAgentHelpers 注释）。 */
+  order: HelperCandidate[];
+}
+
+/** 候选间依赖信息预计算（单遍：直接调用名集 + 词法嵌套集 + 索引 + 跨度升序评估序）。 */
+function buildCandidateDependencyInfo(candidates: HelperCandidate[]): CandidateDependencyInfo {
+  const candidateNames = new Set(candidates.map((c) => c.name));
+  const directCalls = new Map<HelperCandidate, Set<string>>();
+  const contains = new Map<HelperCandidate, HelperCandidate[]>();
+  for (const cand of candidates) {
+    const called: AstNode[] = [];
+    collectCallsToNames(cand.fn, candidateNames, called);
+    directCalls.set(cand, new Set(called.map((call) => (call.callee as AstNode).name as string)));
+    contains.set(
+      cand,
+      candidates.filter((other) => other !== cand && other.fn.start >= cand.fn.start && other.fn.end <= cand.fn.end),
+    );
+  }
+  const byName = new Map<string, HelperCandidate>();
+  for (const cand of candidates) byName.set(cand.name, cand);
+  const order = [...candidates].sort((a, b) => a.fn.end - a.fn.start - (b.fn.end - b.fn.start));
+  return { directCalls, contains, byName, order };
+}
+
+/** 候选结算状态（在册 = 命运已定；缺席 = 未结算）。 */
+type HelperSettlement = "accepted" | "rejected";
+
+/**
+ * 平凡不合格预结算（命运已定，对调用方无碍——调用注定落选的 helper 只是普通函数调用）：
+ * 多/零 agent 调用、零参、同名多候选 → 拒。
+ */
+function rejectTrivialCandidates(candidates: HelperCandidate[]): Map<HelperCandidate, HelperSettlement> {
+  const status = new Map<HelperCandidate, HelperSettlement>();
+  for (const cand of candidates) {
+    if (cand.calls.length !== 1 || (cand.fn.params as AstNode[]).length === 0) status.set(cand, "rejected");
+  }
+  const nameCounts = new Map<string, number>();
+  for (const cand of candidates) nameCounts.set(cand.name, (nameCounts.get(cand.name) ?? 0) + 1);
+  for (const cand of candidates) {
+    if ((nameCounts.get(cand.name) ?? 0) > 1) status.set(cand, "rejected");
+  }
+  return status;
+}
+
+/** 候选依赖集 = 子树内直接调用的其他候选（不含自调）+ 词法嵌套声明的候选。 */
+function candidateDependencies(cand: HelperCandidate, info: CandidateDependencyInfo): Set<HelperCandidate> {
+  const deps = new Set<HelperCandidate>();
+  for (const name of info.directCalls.get(cand) ?? []) {
+    const dep = info.byName.get(name);
+    if (dep !== undefined && dep !== cand) deps.add(dep);
+  }
+  for (const inner of info.contains.get(cand) ?? []) deps.add(inner);
+  return deps;
+}
+
+/** 依赖命运分类：任一依赖已录取 → 复合形态拒；存在未结算 → 延到下轮；其余 → 可录取。 */
+function classifyDependencyFate(
+  deps: ReadonlySet<HelperCandidate>,
+  status: ReadonlyMap<HelperCandidate, HelperSettlement>,
+): "composed" | "pending" | "settle" {
+  let pending = false;
+  for (const dep of deps) {
+    if (status.get(dep) === "accepted") return "composed";
+    if (!status.has(dep)) pending = true;
+  }
+  return pending ? "pending" : "settle";
+}
+
+/** 依赖命运迭代结算（不动点）：每轮至少一候选定命运才继续；停滞残留留给调用方全拒。 */
+function settleByDependencyFate(info: CandidateDependencyInfo, status: Map<HelperCandidate, HelperSettlement>): void {
+  let progress = true;
+  while (progress) {
+    progress = false;
+    for (const cand of info.order) {
+      if (status.has(cand)) continue;
+      const fate = classifyDependencyFate(candidateDependencies(cand, info), status);
+      if (fate === "composed") {
+        status.set(cand, "rejected");
+        progress = true;
+      } else if (fate === "settle") {
+        status.set(cand, "accepted");
+        progress = true;
+      }
+    }
+  }
 }
 
 /** parallel 实参成员收集 + 并行组登记（成员非空时）；返回成员 id 供 closeUnit 收口。空组（变量形态）对顺序链不可见——prevBatch 不变。 */
@@ -589,6 +851,17 @@ function visitLoop(ctx: ParseCtx, node: AstNode): void {
   ctx.lastUnitIds = frame.bodyNodes;
 }
 
+/**
+ * 函数体遍历（phase 上下文函数边界作用域化）：进入时继承外层 currentPhase（同步
+ * 实参位置的回调——map/parallel 成员——归属语义不变），体内 phase() 只影响体内
+ * 节点，退出恢复外层。若无体内 phase() 则行为与旧纯词法遍历完全一致。
+ */
+function visitPhaseScopedFunction(ctx: ParseCtx, node: AstNode): void {
+  const saved = ctx.currentPhase;
+  for (const child of childNodes(node)) visit(ctx, child);
+  ctx.currentPhase = saved;
+}
+
 /** 候选边去重：同一 (from,to) 优先级 dataflow > conditional > sequence。边 id 由调用方统一编号。 */
 function dedupeEdges(sequence: EdgeCandidate[], conditional: EdgeCandidate[], dataflow: EdgeCandidate[]): EdgeCandidate[] {
   const byPair = new Map<string, EdgeCandidate>();
@@ -606,6 +879,8 @@ function dedupeEdges(sequence: EdgeCandidate[], conditional: EdgeCandidate[], da
 
 /** 解析产物的循环回边 id 重写（回边按 loopId 配对——edge id 定序后 loops.backEdgeId 指向本 loop 自有边）。 */
 function buildDag(source: string, program: AstNode): WorkflowDag {
+  // helper 注册先于主遍历（函数声明 hoisting：调用点可先于声明出现）
+  const agentHelpers = collectAgentHelpers(program);
   const ctx: ParseCtx = {
     source,
     currentPhase: undefined,
@@ -623,6 +898,8 @@ function buildDag(source: string, program: AstNode): WorkflowDag {
     loopBackEdges: [],
     nodeSeq: 0,
     loopSeq: 0,
+    agentHelpers,
+    helperInternalCalls: new Set([...agentHelpers.values()].map((entry) => entry.internalCall)),
   };
   visit(ctx, program);
 

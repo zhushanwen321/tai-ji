@@ -306,6 +306,27 @@ export function createUseSession(deps: UseSessionDeps) {
   }
 
   /**
+   * 刷新已 hydrate 会话的历史到最新（remote-use U9 / A6，connected 边沿重连对账入口）。
+   *
+   * 编排 = getHistory + reconcileFromReply（窗口归一 + 图片落盘随行）——与切入链步 9
+   * 已 hydrate 分支共用同一入口（单一编排定义点）。未 hydrate 会话 no-op：首次回填属
+   * 切入链步 9 hydrate 分支职责，重连对账不承担（否则断连恢复会对无历史分区的会话
+   * 触发整段拉取，超出「当前已 hydrate 会话对账」的射程）。失败静默不抛（对齐步 9
+   * 已 hydrate 分支语义——旧数据仍在，下次切入/重连重试），不 markHistoryFailed
+   * （失败态语义属未 hydrate 通路的 landing 重试出口）。
+   */
+  async function refreshHistory(sessionId: string): Promise<void> {
+    if (!chat.isHydrated(sessionId)) return
+    try {
+      const reply = await chat.getHistory(sessionId)
+      reconcileFromReply(sessionId, reply)
+    } catch (e) {
+      // 已 hydrate 对账失败不阻断——旧数据仍在，下次切入/重连重试；warn 留排查痕迹
+      console.warn(`[use-session] background reconcile refresh failed for ${sessionId}:`, e)
+    }
+  }
+
+  /**
    * 切入链主体（原壳 useSidebar.postLoadSession，D3 入 core）：统一链步 4-12。
    * 前置：switchSession 已成功 + activeId 已置——ensureStreamSubscription /
    * syncSessionToPanel 依赖当前 activeId 路由到正确 session 分区（ADR-0049 + 架构约定 #7）。
@@ -334,14 +355,8 @@ export function createUseSession(deps: UseSessionDeps) {
         chat.markHistoryFailed(id)
       }
     } else {
-      // 已 hydrate：静默刷新（失败不阻断——旧数据仍在，下次切入重试）
-      try {
-        const reply = await chat.getHistory(id)
-        reconcileFromReply(id, reply)
-      } catch (e) {
-        // 已 hydrate 刷新失败不阻断切入——旧数据仍在，下次切入重试；warn 留排查痕迹
-        console.warn(`[use-session] background reconcile refresh failed for ${id}:`, e)
-      }
+      // 已 hydrate：静默刷新（refreshHistory 统一编排——connected 边沿对账同入口）
+      await refreshHistory(id)
     }
     // 10. 文件树预加载：切 session 即拉取，侧栏「文件」tab 计数立即更新。fire-and-forget 失败不阻断
     entry.preloadFileTree(id)
@@ -580,6 +595,7 @@ export function createUseSession(deps: UseSessionDeps) {
     syncSessionToPanel,
     selectSession,
     retryHistory,
+    refreshHistory,
     newSession,
     renameSession,
     deleteSession,

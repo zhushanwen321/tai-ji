@@ -49,7 +49,7 @@ describe("场景 15：同进程双 resume——恰一次生效", () => {
       expect(events.filter((e) => e.type === "run-resumed")).toHaveLength(1);
 
       // 生效侧可继续跑完（释放挂起）。release 前必须等重派集 C 真实派发落地：
-      // 第二条 resume 的锁拒绝是立即返回（[ADR-0112] retries=0，无旧重试退避窗），
+      // 第二条 resume 的锁拒绝是立即返回（[ADR-0122] retries=0，无旧重试退避窗），
       // allSettled 返回时生效侧 worker 的重派可能尚未走到 faux runner——此刻
       // release(1) 会 miss 挂起门（gates 未注册），hang 永不释放，run 永不终局
       await vi.waitFor(() => {

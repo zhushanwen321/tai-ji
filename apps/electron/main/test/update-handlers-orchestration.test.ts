@@ -156,7 +156,7 @@ function mockOrchestrator(overrides: Partial<MockOrchestrator> = {}): MockOrches
   }
 }
 
-// [ADR-0112] 原「setTimeout 500ms 延迟 quit」改为 setImmediate（不猜响应送达窗）；
+// [ADR-0122] 原「setTimeout 500ms 延迟 quit」改为 setImmediate（不猜响应送达窗）；
 // quit 调度断言改为捕获 setImmediate 回调。
 let capturedQuitCallback: (() => void) | null = null
 

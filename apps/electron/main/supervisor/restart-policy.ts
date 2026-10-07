@@ -12,7 +12,7 @@
  *
  * [HISTORICAL] 不变量：
  * 1. shouldRestart 检查顺序：stopping（短路）→ 计数上限。主动退出绝不重启
- * 2. 崩溃计数不按时间窗清零（原 STABLE_MS=10s 稳定窗已删，ADR-0112：时间窗
+ * 2. 崩溃计数不按时间窗清零（原 STABLE_MS=10s 稳定窗已删，ADR-0122：时间窗
  *    猜测属无效防御）——recordSuccess 只记录事实，计数清零唯一入口是
  *    clearForManualRestart（用户显式重启服务的事件）
  * 3. 退避序列：2^(n-1) * BASE，clamp MAX，n=1..MAX_RESTARTS → 1s/2s/4s/8s/16s
@@ -116,7 +116,7 @@ export class RestartPolicy {
 
   /**
    * 记录重启成功（只记录事实，不改计数）。
-   * 崩溃计数无时间窗清零（ADR-0112：时间窗猜测属无效防御）——清零唯一入口
+   * 崩溃计数无时间窗清零（ADR-0122：时间窗猜测属无效防御）——清零唯一入口
    * 是 clearForManualRestart（用户显式重试）。
    */
   recordSuccess(): void {

@@ -7,7 +7,7 @@
  *    窗口未受理气泡不清除）+ 操作域收窄（普通消息条目不进对账——回执链管）；
  * 3. U2③ extension.error 命令来源 toast（D10③：仅 errorEvent === 'command' 放行 + 同 key
  *    去重 + 60s 限频窗两分支；风暴上限反向 = 同 key 3 连触发 toast 恰一次）；
- * 4. U2⑤ 受理回执前不上屏（ADR-0112 ⑨ UI 跟随事实 / defense-mechanism-cleanup 遗留 5）：
+ * 4. U2⑤ 受理回执前不上屏（ADR-0122 ⑨ UI 跟随事实 / defense-mechanism-cleanup 遗留 5）：
  *    delivery.submit 受理回执（RPC reply）到达前消息列表无该条目气泡、无等待态占位；
  *    回执到达才上屏；RPC 失败零乐观残留；送达回执先于 reply 的极端时序守卫。
  *    （原「pendingSend 30s 空窗计时器命令豁免」组随 timer 退役改写为本组——收口全事件驱动。）
@@ -130,7 +130,7 @@ describe('pi1-disposition-chat-flow U2：handled 终局通知静默回滚三件�
 
     // 三件套：① 气泡移除（用户可见 DOM 断言——命令不进 transcript，气泡即刻消失）
     expect(f.chatStore.getMessages('s1').some((m) => m.id === bubbleId)).toBe(false)
-    // ② 清空窗计时器 + dispatching 占位；③ 在途计数归零
+    // ② 清 dispatching 占位（clearPendingSend，纯 Set 操作）；③ 在途计数归零
     expect(f.chatStore.isPendingSend('s1')).toBe(false)
     expect(f.chatStore.getInflight('s1')).toBe(0)
     // 无错误提示：零 toast（handled = 命令已执行的正常终局）且无 error 气泡
@@ -321,7 +321,7 @@ describe('pi1-disposition-chat-flow U2：extension.error 命令反馈矩阵（U2
   })
 })
 
-describe('pi1-disposition-chat-flow U2⑤：受理回执前不上屏（ADR-0112 ⑨ UI 跟随事实）', () => {
+describe('pi1-disposition-chat-flow U2⑤：受理回执前不上屏（ADR-0122 ⑨ UI 跟随事实）', () => {
   beforeEach(() => {
     resetChatModuleStateForTest()
     resetDeliveryProjectionForTest()

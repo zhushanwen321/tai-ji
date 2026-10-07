@@ -827,7 +827,7 @@ describe('createChatStore factory', () => {
       return allLines.filter((s) => s.includes('finalizeSession'))
     }
 
-    // [ADR-0112] 原 timeout reason「非 dev 去门 warn」两用例随 pendingSend 30s 空窗 timer
+    // [ADR-0122] 原 timeout reason「非 dev 去门 warn」两用例随 pendingSend 30s 空窗 timer
     // 退役：'timeout' 已从 FinalizeReason 删除，无生产者即无用例形态。
 
     it('非 dev → 其余异常 reason（error/disconnect）零 warn（其余 reason dev 门保留）', () => {
@@ -977,7 +977,7 @@ describe('createChatStore factory', () => {
       expect(sut.store.isActive('s1')).toBe(false)
     })
 
-    // [ADR-0112] 原「addPendingSend 挂 30s 超时 timer / clearPendingSend 取消 timer」两用例
+    // [ADR-0122] 原「addPendingSend 挂 30s 超时 timer / clearPendingSend 取消 timer」两用例
     // 随 timer 退役删除：pendingSend 收口全事件驱动（message_start/finalizeSession/
     // deliveryHandled/delivery morph/occupancy idle 帧/断连收口），无墙钟兜底可推演。
 

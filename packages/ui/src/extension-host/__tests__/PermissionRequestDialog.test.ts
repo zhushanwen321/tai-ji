@@ -4,18 +4,38 @@
  * 覆盖用例（design-review TC-7~TC-10，IF4 契约）：
  *  - TC-7 权限列表渲染（权限项 DOM）（AC4）
  *  - TC-8 部分批准回传：emit approve(selected) + transport.approve(pluginId, selected)（AC4）
- *  - TC-9 拒绝回传：emit revoke + transport.revoke(pluginId)（AC4）
+ *  - TC-9 拒绝回传：emit deny + transport.deny(pluginId)（AC4；deny=拒绝本次申请，
+ *    对齐 WS 命令 plugin.denyPermissions，不回收已授权限）
  *  - TC-10 全选切换 + pending=false 不弹浮层
+ *  - BM3 错误态：error=true 渲染 role=alert 错误行（permission-dialog-error），
+ *    error=false / 缺省不渲染
  *
- * Mock 策略：MockPermissionTransport（approve/revoke vi.fn）经 PERMISSION_TRANSPORT_KEY provide；
+ * Mock 策略：MockPermissionTransport（approve/deny vi.fn）经 PERMISSION_TRANSPORT_KEY provide；
  * Dialog 原语经 stub 内联渲染（reka-ui DialogContent 在 happy-dom 下 Teleport 到 body 且时序不稳定
  * —— ProviderEditModal.test.ts 先例，故 stub 掉 Dialog 家族让内容渲染在 wrapper 内，测试确定性）。
  * Dialog stub 尊重 open prop（pending=false 时内容不渲染）。
+ * i18n：组件文案走 useI18n（extensionUI 域权限审批 key），vi.mock 注入 i18nMock 字典
+ * （zh-CN 口径，值与 locale/zh-CN/extensionUI.ts 一致——Turn.test.ts 同款先例），
+ * BM3 错误行文案断言按真实 locale 文案进行。
  *
  * 运行：cd packages/ui && npx vitest run src/extension-host/
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount } from '@vue/test-utils'
+
+// mock vue-i18n 的 useI18n：自包含 t（覆盖 vitest.setup.ts 的返回 key 默认口径，供文案断言）。
+// 字典直接 import 真实 zh-CN extensionUI 域并加前缀展开——文案演进时测试机械联动，无手抄漂移面
+// （共享 mock 口径见 helpers/i18n-mock，g9-F5）。
+vi.mock('vue-i18n', async () => {
+  const { i18nMock } = await import('../../__tests__/helpers/i18n-mock')
+  const extensionUI: Record<string, string> = (await import('../../locale/zh-CN/extensionUI')).default
+  const messages: Record<string, string> = {}
+  for (const [key, value] of Object.entries(extensionUI)) {
+    messages[`extensionUI.${key}`] = value
+  }
+  return i18nMock(messages)
+})
+
 import PermissionRequestDialog from '../PermissionRequestDialog.vue'
 import { PERMISSION_TRANSPORT_KEY } from '../permission-transport'
 import type { PermissionTransport } from '../permission-transport'
@@ -32,10 +52,10 @@ const dialogStubs = {
 }
 
 function makeTransport(): PermissionTransport {
-  return { approve: vi.fn(), revoke: vi.fn() }
+  return { approve: vi.fn(), deny: vi.fn() }
 }
 
-function mountDialog(overrides: Partial<{ pluginId: string; permissions: string[]; pending: boolean }> = {}, transport?: PermissionTransport) {
+function mountDialog(overrides: Partial<{ pluginId: string; permissions: string[]; pending: boolean; error: boolean }> = {}, transport?: PermissionTransport) {
   const wrapper = mount(PermissionRequestDialog, {
     props: { pluginId: 'p1', permissions: PERMISSIONS, pending: true, ...overrides },
     global: {
@@ -59,6 +79,12 @@ describe('PermissionRequestDialog', () => {
     expect(items).toHaveLength(2)
     expect(items[0]!.text()).toBe('fs.read')
     expect(items[1]!.text()).toBe('net.http')
+
+    // 文案走 i18n key（zh-CN 口径）：描述句 / 全选 / 拒绝 / 批准（key 拼错会渲染裸 key，在此抓）
+    expect(wrapper.text()).toContain('插件申请了以下权限，批准后即可使用')
+    expect(wrapper.find('[data-testid="permission-dialog-toggle-all"]').text()).toBe('全选')
+    expect(wrapper.find('[data-testid="permission-reject"]').text()).toBe('拒绝')
+    expect(wrapper.find('[data-testid="permission-approve"]').text()).toBe('批准')
   })
 
   it('TC-8 部分批准：勾选 fs.read → 点批准 → emit approve(["fs.read"]) + transport.approve("p1", ["fs.read"])（AC4）', async () => {
@@ -97,15 +123,29 @@ describe('PermissionRequestDialog', () => {
     expect(wrapper.find('[data-testid="permission-approve"]').attributes('disabled')).toBeDefined()
   })
 
-  it('TC-9 拒绝：emit revoke + transport.revoke("p1")（AC4）', async () => {
+  it('TC-9 拒绝：emit deny + transport.deny("p1")（AC4，拒绝本次申请）', async () => {
     const transport = makeTransport()
     const wrapper = mountDialog({}, transport)
 
     await wrapper.find('[data-testid="permission-reject"]').trigger('click')
 
-    expect(wrapper.emitted('revoke')).toHaveLength(1)
-    expect(transport.revoke).toHaveBeenCalledTimes(1)
-    expect(transport.revoke).toHaveBeenCalledWith('p1')
+    expect(wrapper.emitted('deny')).toHaveLength(1)
+    expect(transport.deny).toHaveBeenCalledTimes(1)
+    expect(transport.deny).toHaveBeenCalledWith('p1')
+  })
+
+  it('BM3 错误态：error=true 渲染 role=alert 错误行（permission-dialog-error）；error=false / 缺省不渲染', () => {
+    const withError = mountDialog({ error: true })
+    const errorLine = withError.find('[data-testid="permission-dialog-error"]')
+    expect(errorLine.exists()).toBe(true)
+    expect(errorLine.attributes('role')).toBe('alert')
+    expect(errorLine.text()).toBe('审批提交失败，请检查连接后重试')
+
+    const withoutError = mountDialog({ error: false })
+    expect(withoutError.find('[data-testid="permission-dialog-error"]').exists()).toBe(false)
+
+    const defaultNoError = mountDialog()
+    expect(defaultNoError.find('[data-testid="permission-dialog-error"]').exists()).toBe(false)
   })
 
   it('TC-10b pending=false → Dialog open=false，权限内容不渲染', () => {

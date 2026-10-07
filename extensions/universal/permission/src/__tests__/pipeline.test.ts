@@ -846,7 +846,7 @@ describe("m3: bash 工具收到非字符串 command 时 logger.warn（不静默�
 
 // ──────────────────────── M3: AI-ask 分支等待用户决策（无包内超时） ────────────────────────
 
-describe("M3: runLayer3WithRacing AI-ask 分支（ADR-0112：无包内超时兜底）", () => {
+describe("M3: runLayer3WithRacing AI-ask 分支（ADR-0122：无包内超时兜底）", () => {
 	it("AI ask → 无超时兜底等待；远超原 5min 后用户决策照常生效", async () => {
 		vi.useFakeTimers();
 		try {

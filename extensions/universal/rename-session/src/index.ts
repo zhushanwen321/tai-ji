@@ -65,8 +65,10 @@ const RENAME_TOOL_SUBAGENT_GUARD_MESSAGE =
  *   子会话是临时产物不参与 rename 体系，与 message_end / turn_end 两入口同语义。
  * - execute 内 live 读 config 守卫：mode !== "agent-tool"（mode 切走后本工具残留在
  *   已存活 session 的工具清单——pi 无 unregisterTool）→ throw isError（pi 1.0.0 实装：
- *   execute 正常返回的 isError 字段被丢弃，isError 状态只能经 throw 产生，
- *   agent-loop.js executePreparedToolCall catch → createErrorToolResult(message)）。
+ *   execute 抛出经 pi-agent-core agent-loop.js executePreparedToolCall 外层 catch 统一转
+ *   isError:true 的 error tool result〔:581-588 createErrorToolResult(message)〕；统一
+ *   throw 为纪律选择（单一错误路径），非「返回值 isError 失效」——1.0.0 起返回值上的
+ *   isError 标记同样被尊重〔:579〕）。
  * - cleanTitle 空值同样 throw isError（空白/纯标点标题不可落库）。
  * - 非空直接 pi.setSessionName，不走 getSessionName() 防覆盖守卫——agent 显式调用
  *   是「代表用户的意图」，语义等同 GUI 手动 rename，允许覆盖任何既有名（含自动名/语义名）。

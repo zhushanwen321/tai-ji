@@ -60,7 +60,7 @@ session-manager extension 与 taiji runtime 之间的长挂应答事件通道（
 ### Session 切入链
 用户在侧栏点选一个 session 后，前端按固定顺序执行的 12 步动作序列：`cancelActiveFlow → switchSession RPC → setActiveId → clearUnread → ensureStreamSubscription → touchRecency → syncSessionToPanel → navigation.push → hydrate/reconcile → preloadFileTree → touchRecency(panel 绑定 session) → evictLru`。
 
-**代码映射**（renderer-deepening D3/D4，2026-09-03 u5.1/u5.2 落地）：链的唯一载体 = `packages/core/src/domain/session/use-session.ts` 的 `selectSession`（12 步顺序有接口级断言，改时序只改这一处）；跨域步骤（取消新建任务流 / 清未读 / 流订阅 / chat LRU / 文件树预加载）经 `SessionEntryPort` 端口束注入（全成员可选、缺省 no-op），桌面壳 `useSidebar.selectSession` 为一行代理 + 端口接线（原 `useSidebarNew` 已于 2026-08-31 改名回 `useSidebar`、旧轨删除——chat-stream-perf §3.3 D-D3；现桌面壳编排 = `packages/renderer/src/composables/features/sidebar/useSidebar.ts`），headless/mobile 未接线环境零新增步骤执行完整链。时序采 panel-first（panel/导航先于历史回填，链尾两步保护 panel 绑定 session 不被 LRU 驱逐——[lru-panel-exempt-fix]）；「订阅先于 panel 载入」前提（C-W3-4，2026-07-29 handoff 回复丢失事故）由链本体步 5→7 顺序保证，不再依赖注释跨文件同步。
+**代码映射**（renderer-deepening D3/D4，2026-09-03 u5.1/u5.2 落地）：链的唯一载体 = `packages/core/src/domain/session/use-session.ts` 的 `selectSession`（12 步顺序有接口级断言，改时序只改这一处）；跨域步骤（取消新建任务流 / 清未读 / 流订阅 / chat LRU / 文件树预加载）经 `SessionEntryPort` 端口束注入（全成员可选、缺省 no-op），桌面壳 `useSidebar.selectSession` 为一行代理 + 端口接线（原 `useSidebarNew` 已于 2026-08-31 改名回 `useSidebar`、旧轨删除——chat-stream-perf §3.3 D-D3；现桌面壳编排 = `packages/renderer/src/composables/features/sidebar/useSidebar.ts`），headless 未接线环境零新增步骤执行完整链；移动壳已接线 sessionEntry（remote-use D2，`packages/mobile-renderer/src/shell/app-runtime.ts`）。时序采 panel-first（panel/导航先于历史回填，链尾两步保护 panel 绑定 session 不被 LRU 驱逐——[lru-panel-exempt-fix]）；「订阅先于 panel 载入」前提（C-W3-4，2026-07-29 handoff 回复丢失事故）由链本体步 5→7 顺序保证，不再依赖注释跨文件同步。
 
 ### 导入源（Import Source）
 session 导入统一入口的多 coding-agent 抽象：一个导入源负责「定位外部会话 → 校验 → 转换为合法 pi session JSONL」，实现 runtime 的 SessionImportSource SPI（`listCandidates` + `prepareImport`）；公共编排（互斥/去重/原子落盘/sidecar）由 ImportService 统一承担，导入完成广播由 handler 层在 reply 后发出。现役源：pi（外部 pi JSONL 原样复制）、zcode（宿主 SQLite 库转换）。导入产物落太极 sessions 目录后完全复用现有会话消费链（渲染/续聊/搜索），导入后续聊由 pi 引擎接管。**幂等键 = 产物 header.id**；**文件名不变量**：文件名剥 `.jsonl` 后最后 `_` 尾段 === header.id（源 id 含 `_` 须归一化）。扩展指南（新增源的步骤清单与不变量全集）：[docs/architecture/session-import-sources.md](architecture/session-import-sources.md)。
@@ -148,7 +148,7 @@ subagent 运行状态的内存单源（`packages/subagent-core/src/execution/per
 
 ### 模型覆盖（modelOverride）
 
-用户对执行中/已中断的 subagent 或 workflow run 实时下达的模型意图，作用域 = 该会话/run 的剩余执行（含中断后 resume 与进程重启后重开），优先级最高（用户覆盖赢，压过 agent frontmatter 与脚本显式参数）。载体 = record 事件文件 `record-model-override` 帧（chat 域）/ run journal `model-override` 帧（workflow 域），fold 取最新、替换不叠加（至多一个生效覆盖值）。配套术语：**生效模型** = pi 子进程当前实际使用的模型（审计权威 = pi session `model_change` 条目，热切后可与本轮盖章值不同）；**覆盖记账** = 覆盖意图的持久化半场（管未派发步骤/resume/重开），与**热切**半场（管在跑成员立即生效）构成同一意图的两半——只热切不记账会被下一轮 spawn 的旧 `--model` argv 压回。resume 生效模型三档回落：resume 显式参数 > 持久化覆盖记录 > run 创建时模型。**模型意图 / 历史事实（持久化二分）**：切换只写「意图」类载体（override 帧），永不修改「历史事实」类持久化（record.model 盖章、run-created.model、pi session model_change 条目）。机制 SSOT：[ADR-0113](adr/decisions.md)；用户通道 = 面板模型选择器 / `/subagent-model` 命令（runtime 经 prompt 斜杠命令出站点触达 pi extension，守卫 `.githooks/check_prompt_outposts.py` 白名单）。
+用户对执行中/已中断的 subagent 或 workflow run 实时下达的模型意图，作用域 = 该会话/run 的剩余执行（含中断后 resume 与进程重启后重开），优先级最高（用户覆盖赢，压过 agent frontmatter 与脚本显式参数）。载体 = record 事件文件 `record-model-override` 帧（chat 域）/ run journal `model-override` 帧（workflow 域），fold 取最新、替换不叠加（至多一个生效覆盖值）。配套术语：**生效模型** = pi 子进程当前实际使用的模型（审计权威 = pi session `model_change` 条目，热切后可与本轮盖章值不同）；**覆盖记账** = 覆盖意图的持久化半场（管未派发步骤/resume/重开），与**热切**半场（管在跑成员立即生效）构成同一意图的两半——只热切不记账会被下一轮 spawn 的旧 `--model` argv 压回。resume 生效模型三档回落：resume 显式参数 > 持久化覆盖记录 > run 创建时模型。**模型意图 / 历史事实（持久化二分）**：切换只写「意图」类载体（override 帧），永不修改「历史事实」类持久化（record.model 盖章、run-created.model、pi session model_change 条目）。机制 SSOT：[ADR-0128](adr/decisions.md)；用户通道 = 面板模型选择器 / `/subagent-model` 命令（runtime 经 prompt 斜杠命令出站点触达 pi extension，守卫 `.githooks/check_prompt_outposts.py` 白名单）。
 
 ### ToolCall
 
@@ -185,6 +185,25 @@ session 的语义内容——对话历史、项目知识（AGENTS.md 等）、sk
 **代码映射**: 现行符号 `SystemNotice`（`packages/ui/src/features/chat/SystemNotice.vue` 唯一渲染点；core 写入点 `appendSystemNotice` / `appendSubagentDirective`，`packages/core/src/domain/chat/store.ts`）。
 
 > **术语演进**：历史名 `SystemNotification`（terminology R3 统一产物）已随 v3 重构消亡，现行符号为 `SystemNotice`，内联系统提示行已重新落地聊天流。
+
+### HTML 预览块
+info string 为 `html-preview` 的 fenced code block，内容是被预览 HTML 文件的路径（单行）。agent 交付 HTML 产物的引用语法（fence 首词匹配，尾随 token 忽略；空 / 多行 → 降级态「路径非法」）。
+
+**代码映射**: 段切分 `packages/renderer/src/composables/logic/markdown-incremental.ts`（`'html-preview'` 段类型）→ 分发 `packages/ui/src/features/chat/MarkdownRenderer.vue` → 内联预览容器 `HtmlPreviewInline.vue`（v16）。
+
+### 预览卡片（v16 后：内联预览容器的降级占位存续形态）
+HTML 预览块在对话流中的渲染载体为**内联预览容器**（v16，ADR-0119）：头部条（文件名/大小 + 源码-预览切换 + 刷新 + 收起/展开）+ sandbox iframe 原位嵌入消息流，脚本可执行、原位渲染、免点击跳转。「卡片」概念（v16 前形态：消息内单按钮卡片，点击后抽屉渲染）仅存续于降级占位——预检不过时容器退化为降级占位（文件名 + 原因两行，无操作区）。走 Vue 段组件产出 DOM，不经 v-html / DOMPurify 通道（用户 HTML 白名单契约不受影响）。
+
+**代码映射**: `packages/ui/src/features/chat/HtmlPreviewInline.vue`；预检能力经 `chat-view-deps.ts` 的 `probeArtifact?` 注入（未 provide → 跳过预检、不显示大小）；源码态读取经 `readArtifact?`（`localFile:read` 通道）。
+
+### 渲染态（v16 退役词条）
+DetailPane 对 HTML 文件的 iframe 预览形态（v16 前与「源码态」相对、可切换）——v16 已退役（ADR-0119）：DetailPane 对 `.html` 恢复 shiki 源码高亮，机制规格（`sandbox="allow-scripts"` iframe、无 `allow-same-origin` 落 opaque origin、servable 预检、URL 百分号编码、`?r=n` 刷新）整体平移至内联预览容器承载。现役「源码态」= 容器头部切换（iframe 卸载、内容经 `localFile:read` 读取走 shiki 高亮）与 DetailPane 源码高亮。
+
+### 会话产物目录
+`<dataDir>/artifacts/<sessionId>/`——HTML 产物落点。它在 local-file 白名单内（`<dataDir>` 前缀成员），因此预览无需任何白名单放宽。随会话删除级联删除，超龄（默认 7 天，`TAIJI_ARTIFACTS_KEEP_DAYS` 可覆盖）由保留期扫描按文件系统级判据回收（ADR-0118）。
+
+**代码映射**: `packages/shared/src/paths.ts` 的 `getSessionArtifactsDir`（公式单点，含 sessionId 穿越校验）；system-prompt 扩展侧以镜像推导（不 import shared——包边界 + 运行时门禁）。
+
 ### Thinking
 模型的内部推理过程，在回答生成前产生。属于单条 Message（挂在 `Message.thinking[]` 上），不属于整个 Session。UI 中默认折叠展示。
 
@@ -307,9 +326,25 @@ Session 级状态，表示 pi 进程正在工作（从用户发送消息到 agen
 
 > **术语演进**：原 `Side Inspector`（terminology R4 计划改 `SideInspector`）在 v3 重构中收敛为 **Side Drawer**。v3 版更通用：不再限于运行时状态面板，而是 header 多 tab 通用容器。
 
-Panel 联动的浮层抽屉。一个 header + 多 tab 容器，tab 承载不同实体：terminal（终端）/ browser（浏览器）/ git（变更集）/ doc（命令文档）/ detail（文件详情）/ subagent（子代理只读对话流）/ workflow（workflow agent call 列表）/ bashTask（后台命令详情）。tab 枚举与状态 SSOT = `packages/core/src/domain/drawer/types.ts`。与 Panel 数据强耦合，从触发它的 Panel 内浮起，固定挂该 Panel，v1 不跨 Panel 覆盖对侧。
+Panel 联动的浮层抽屉。一个 header + 多 tab 容器，tab 承载不同实体：git（变更集）/ doc（命令文档）/ detail（文件详情）/ subagent（子代理只读对话流）/ bashTask（后台命令详情）/ plan（计划文档）/ btw（旁路线）/ workflow（workflow agent call 列表，回落载体——主入口浮层）。tab 枚举与状态 SSOT = `packages/core/src/domain/drawer/types.ts`。与 Panel 数据强耦合，从触发它的 Panel 内浮起，固定挂该 Panel，v1 不跨 Panel 覆盖对侧。
+
+**容器归属规则**：内容按形状分家——竖长阅读型归右抽屉、横宽输出流归 Bottom Drawer（底抽屉）、全画布内容（网页 / workflow 图）归 Overlay（内容浮层）；归属声明唯一权威 = 容器注册表（`packages/core/src/domain/drawer/registry.ts`）。
 
 **与旧 Side Inspector 的差异**：旧版三 Tab 是运行时状态面板；v3 版是通用容器，旧三 Tab 的运行时状态能力由 subagent/workflow tab + Flow-3 进度聚合承接。
+
+### Bottom Drawer（底抽屉）
+
+split 行（对话区 + 右抽屉）之下、StatusBar 之上的全宽横向容器，横宽内容的家。唯一内容 = terminal（终端；终端面板内**多实例**——实例切换条可新建/切换/关闭，实例编号形如 `term:<会话id>:<序号>`，会话内序号单调递增且不复用。多实例是**终端面板内部维度**，容器仍不预设 tab 枚举——第二种横向内容出现时才加维度）。开关双入口：`` ⌃` ``（before-input-event 窗口级）+ PanelHeader 顶栏终端按钮（三卡化 2026-10-04 起；原 StatusBar 底栏落点退役），终端面板头部另有收起按钮（收起语义非销毁，实例保留）；默认高 35%、拖上沿可调（clamp 15%–70%）。开合态按会话分区不持久化，高度为全局布局值单键持久化。域模块 = `packages/core/src/domain/bottom-drawer/`，内容归属同读容器注册表。
+
+### 终端实例（Terminal Instance）
+
+一个会话内可并行运行的多个终端（各自独立 PTY 与输出缓冲）。标识 = **实例编号** `term:<会话id>:<序号>`：序号由后台（runtime）按会话维度分配、单调递增、实例关闭后**不复用**（防旧输出串进新终端）；枚举/归属校验一律取**精确前缀 `term:<sid>:` + 序号段数字校验（`^\d+$`）**，禁按冒号切分取段；由编号反解 sid / 序号则取最后一个冒号前的余段 + 数字校验（sid 域不含冒号由格式保证）。实例注册表与序号分配的**唯一事实源 = runtime**（重键后的 `ptyMap` 派生视图 + 会话级计数器），界面经 `terminal.list` 在三个触发点（⌘R 刷新 / 会话激活 / 世代变更重连）对账恢复。生命周期：主动关闭与自然退出（exit/崩溃）同语义（切换条移除 + 输出分区/写队列/模块级订阅三腿清理）；最后实例的关闭按钮为 UI 供养规则（可自然退出归零至空态）；会话删除与 runtime shutdown 均级联全量杀链。
+
+**世代变更**：runtime 重启即注册表清空、序号从 1 重算（「全新世界」作用域 = runtime 进程生命周期）。界面判据 = **auth token 是否变化**（端口值不可靠——重启常落回原端口）；世代变更时终端域显式失效重置（清输出分区与切换条、清写队列状态机、模块级订阅先退订再清空），**同世代 WS 闪断不重置**。
+
+### Overlay（内容浮层）
+
+盖住全窗口的内容浮层，全画布内容的家（网页、workflow 图）。统一壳 = OverlayShell（AppShell 层挂载、`--z-modal`，88%×92% 圆角面板 + 遮罩 + 点遮罩/按钮两通道关闭；Esc 不在壳内——由键盘栈序编排器统一路由）。双内容 = browser（网页）/ workflow（工作流图），单例换内容（开新内容替换旧内容，不并开）；workflow 另在右抽屉保留回落 tab（固定家 + 显式双入口）。开合态 SSOT = `packages/core/src/domain/overlay/`（单例 `{ kind, payload }`）。
 
 ### Session Tree
 pi session 文件（JSONL）中通过 `parentId` 构建的逻辑树结构。同一文件内可存在多个分支（fork 点），唯一的可变状态是内存中的 `leafId` 指针。taiji 通过 runtime 直接读取 JSONL 文件构建树，不依赖 pi RPC。
@@ -331,6 +366,18 @@ pi session 文件（JSONL）中通过 `parentId` 构建的逻辑树结构。同�
 操作系统级 Electron BrowserWindow。v3 拓扑：窗口 (bg-base 平铺) 内含 `.app-shell`（flex + p-3），由持久 **Sidebar**（透明融合）+ 可切换的 **main** 区（float-panel 浮起）组成。main 区在 chat / settings 两 view 间互斥切换。支持多窗口。
 
 **命名约定**: "Panel" 统一指 Session 的视口（即代码中的 `Panel` / `PanelLeaf` / `PanelTree`，`packages/renderer/src/stores/panel.ts`），不用于其他含义。
+
+### 远程访问（Remote Access）
+手机浏览器经局域网直连 runtime 的可选能力，默认关闭（纯回环监听，与既有形态一致）。开启后 runtime 改绑 `0.0.0.0`，同一端口同源托管移动壳构建产物（HTTP 静态面 + WS）；WS 鉴权集合 = {per-spawn token} ∪ {remote token}。配置面 = 设置 → 远程访问面板（开关 / token 轮换 / LAN 地址+二维码 / Tailscale 指引），配置持久化 `<dataDir>/remote-access.json`（0600，main 原子写，关态留存）。开启信号 = argv `--remote-access`（无 env 通道，脚本直跑 / e2e 池等非 supervisor 路径不传 flag 即天然关态）；`--mobile-dist=<path>` 是移动壳 dist 的唯一来源（main 按运行环境解析：dev 仓库 dist / prod 打包资源）。**代码映射**：runtime `packages/runtime/src/transport/connection-manager.ts`（绑定地址 / token 集合 / 静态托管白名单）、组合根 `packages/runtime/src/index.ts`、main 配置面 `apps/electron/main/remote-access/`、supervisor 拼参 `apps/electron/main/supervisor/process-control.ts`、面板 `packages/renderer/src/components/settings/remote-access/`、契约 `packages/shared/src/remote-access.ts`。
+
+### 移动壳（mobile shell）
+`@taiji/mobile-renderer` 构建出的手机 web 客户端（浏览器运行、触控交互），与桌面 renderer 并列的双壳成员（拓扑见 [renderer-package-topology.md](architecture/renderer-package-topology.md)）。连接装配：WS URL 从 `location.host` 同源派生、凭据经 PlatformPort.storage（localStorage）持久、storage/webSocket 为真实实现。UI 主体 = session 列表 / 消息流 / 新建任务表单 / token 输入视图 + 底部 tab + 根级权限审批弹窗（ui PermissionRequestDialog，PermissionTransport 经 plugin.approvePermissions/revokePermissions 回传）；业务逻辑复用 core 业务域，展示复用 ui 共享组件（markdown 渲染链模块与被 ui 组件消费的 locale 域文件已下沉 ui 包，双壳共享单源）。v1 能力边界：slash 命令 bar / plugin view 全集 / terminal / 文件树 / git 面板不在移动壳（挂载点子集 = message-stream / slash(隐藏保留) / companion）；图片粘贴降级为文本占位（`[图片粘贴：需桌面环境]`）、mermaid 图表占位呈现、hover 类消息操作不可用。壳间禁止互相 import。
+
+### remote token
+远程访问的持久凭据：64 位 hex 小写字符串（32 字节随机值的 hex 编码）。main 生成与轮换——重写 `remote-access.json` 即生效（runtime 每次 WS auth 握手热读文件，轮换不重启 runtime、不中断在途 turn）；文件缺失/损坏 → remote 集合为空退化为仅 spawn token（fail-closed）。存量已认证连接不随轮换踢除（auth 只门禁握手）——「怀疑泄漏」的完整处置 = 面板轮换（断新接入）+ 关开开关（重启 runtime 踢全部存量连接）。移动壳侧 token 经验身成功才写 localStorage（key `taiji.remote-access.token`）；URL query 携带的 token 验身失败**不动**既有 storage（坏链接不毁好凭据），storage 来源验身失败才清空（落 token 输入视图重扫恢复）。
+
+### profile 连接策略（connection profile）
+连接发现三分支中的远程形态，形态判定收口在 `packages/core/src/transport/use-connection.ts` 的 resolveConnectionMode() 薄谓词（init 首连 / HMR 重连 / retryRuntime 三处消费；连接目标解析留在各分支原地）：**本地 = IPC** 端口发现（electronAPI 有值）、**远程 = profile**（移动壳）、**mock = VITE_MOCK**。profile 的注入实现 = `packages/mobile-renderer/src/platform/connection-profile.ts`：凭据采纳顺序 = URL query `?token=`（显式携带的新凭据 = 用户新意图，验身成功落 storage 并 `history.replaceState` 抹地址栏）→ storage（验身过的持久凭据，跨 runtime 重启免重扫）→ 皆无（不带凭据发起连接，runtime fail-closed 拒绝 → `onAuthRejected` 信号 → token 输入视图）。auth 被拒时移动壳抑制全部自动重连触发点（退避重连 + visibility 切前台主动重连）；连接失败（非凭据失败）维持重连等待态，不落 token 视图。
 
 ### Run record 事件流（workflow 域）
 workflow run 的唯一持久化：`<sessionDir>/workflow-state/<runId>.record.jsonl`（workspace 有活跃 session 时落 `sessions/<slug>/workflow-state/`），append-only JSONL 逐行记录 run 生命周期事件（[ADR-0082](adr/decisions.md) 对齐 pi 后 9 事件：`run-created / phase-started / agent-started / agent-retrying / agent-settled / phase-settled / run-interrupted / run-resumed / run-settled`，事件行携带单调 seq；`run-created` 带 scriptSource 全文、`agent-settled` 带 result 全文与 sessionFile）。`agent-started` 载荷携带 `phase?`（call 归属快照——fold 推导无需回溯转移事件）与 `memberRecordId?`（[D6] 绑定字段——同名续写路由）；`phase-started`/`phase-settled` 是 phase 状态机转移事件（[D3]——worker 模板 `phase()` 经 postMessage 写入 record，异步丢失窗口由 fold 自愈规则承接）。run 生命周期四态 + interrupted 暂停态（`created → running → settling → terminal`；`running/settling → interrupted → resume → running`）——interrupted 非终局（run-interrupted 转移帧，可续跑）；终局 outcome 四值 `done/failed/cancelled/time_limited`。manifest（`<runId>.json`）降格为 run-settled 终局事件的派生缓存。判读 = record fold 唯一权威（注册表投影 / 终局诊断引用 / resume 资格全部折叠）。由显式状态机单点写入（terminal-actions.ts 的 dispatchRunTrigger 单写者链），引擎不直接写。无主 run 的磁盘清理走对账清理（裁决点 7：引用集三代解析 + 宽限窗——run 数据生命周期跟随 session 归属）。

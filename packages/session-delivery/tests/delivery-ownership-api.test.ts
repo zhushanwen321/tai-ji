@@ -328,7 +328,7 @@ describe('u1-api drain', () => {
     idle = false
     handle.send(textMsg('B'), { id: 'u-b' }) // busy 留队 queued
     handle.send(textMsg('C'), { id: 'u-c' })
-    // 断连终局：A 在途转 failed（failed 唯一产生方 = failInFlight，ADR-0112）；
+    // 断连终局：A 在途转 failed（failed 唯一产生方 = failInFlight，ADR-0122）；
     // queued 条目不触碰（B/C 留守队列）
     expect(handle.failInFlight('pi connection lost')).toBe(1)
     expect(handle.entriesFull().active.map((e) => e.state)).toEqual(['failed', 'queued', 'queued'])
@@ -366,7 +366,7 @@ describe('u1-api drain', () => {
     // drain 后占用方消失（idle 翻转 + settled 边沿）也不投
     ;(port as { idle: boolean }).idle = true
     handle.flush()
-    vi.advanceTimersByTime(60_000) // 无任何定时触发（ADR-0112 退役后零周期 timer）
+    vi.advanceTimersByTime(60_000) // 无任何定时触发（ADR-0122 退役后零周期 timer）
     expect(port.sendCalls).toHaveLength(callsAfterDrain)
 
     // resync 重报同 id：cancelled tombstone 去重

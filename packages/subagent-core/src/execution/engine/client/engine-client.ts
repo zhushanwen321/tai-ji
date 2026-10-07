@@ -239,7 +239,7 @@ export class EngineClient {
   }
 
   /**
-   * 确保引擎 CLI 已连接（spawn + initialize 握手）。幂等；[ADR-0112] 失败显式上报：
+   * 确保引擎 CLI 已连接（spawn + initialize 握手）。幂等；[ADR-0122] 失败显式上报：
    * 初建失败一次即标记不可用（unavailable 恒 throw，错误附恢复指引），修复由用户
    * 排查后重启宿主承接。[HISTORICAL] 原退避 1s/2s/4s × 3 次自动重建已删。
    * 版本协商越界 → engine_protocol_mismatch + 直接标记不可用。
@@ -293,7 +293,7 @@ export class EngineClient {
       this.state = "ready";
     } catch (err) {
       this.teardownProcess("handshake failed");
-      // [ADR-0112] 单次失败即显式上报 + 标记不可用（无自动重建）。
+      // [ADR-0122] 单次失败即显式上报 + 标记不可用（无自动重建）。
       const failure = err instanceof Error ? err : new Error(String(err));
       const unavailable =
         err instanceof EngineSdkError && err.code === "engine_protocol_mismatch"

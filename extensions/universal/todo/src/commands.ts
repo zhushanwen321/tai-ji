@@ -25,7 +25,7 @@ export function registerTodosCommand(pi: ExtensionAPI, state: TodoSessionState, 
 			}
 
 			// widget 通道：强推清单面板（含 setStatus 状态行，空清单时清面板）
-			refreshDisplay(ctx as Parameters<RefreshDisplayFn>[0]);
+			refreshDisplay(ctx);
 			// notify 通道：清单摘要 toast（空清单给显式空态文案，不弹空串）
 			const summary = formatTodoList(state.todos);
 			ctx.ui.notify(summary === "" ? "No todos for the current session" : summary, "info");

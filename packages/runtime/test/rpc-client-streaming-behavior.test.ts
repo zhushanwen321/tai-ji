@@ -182,7 +182,7 @@ describe('RpcClient.prompt streamingBehavior 透传（U1: session-delivery）', 
   it('U2: 端口签名 arity——prompt 接受 3 个参数（content, images?, streamingBehavior?）', () => {
     // 编译期类型测试：IPiEngine.prompt 的参数数量由 TypeScript 保证，
     // 运行期断言 RpcClient.prompt 的 length（3 = content + images + streamingBehavior）。
-    // 第 4/5 参（SendCommandOptions maintenance / timeoutMs 不限时档）已随 ADR-0112
+    // 第 4/5 参（SendCommandOptions maintenance / timeoutMs 不限时档）已随 ADR-0122
     // 防御机制清查退役（空闲回收与 RPC 墙钟整体删除），arity 由 5 回落为 3。
     const client = new RpcClient({ cwd: '/tmp', sessionId: 'arity-check' })
     expect(client.prompt.length).toBe(3)

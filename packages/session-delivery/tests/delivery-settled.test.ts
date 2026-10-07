@@ -95,13 +95,13 @@ describe('A3-settled subscribeSettled 事件驱动路径', () => {
   })
 })
 
-describe('A3-settled 事件丢失形态（ADR-0112：无定时复核，留守归边沿/外部触发）', () => {
+describe('A3-settled 事件丢失形态（ADR-0122：无定时复核，留守归边沿/外部触发）', () => {
   beforeEach(() => { vi.useFakeTimers() })
   afterEach(() => { vi.useRealTimers() })
 
   // [已不可达用例删除登记] 原「settled 事件丢失后 watch-dog 30s 复核 flush」与
   // 「无 subscribeSettled 装配时纯退避轮询」两用例随 watchdog 定时复核腿与无订阅装配
-  // 退避轮询分支退役（ADR-0112——时间平抑机制不建）而不可达，2026-10-05 投递域清理
+  // 退避轮询分支退役（ADR-0122——时间平抑机制不建）而不可达，2026-10-05 投递域清理
   // 批次删除。事件丢失后的恢复形态由下列用例锁定：留守至外部触发，不自动强发。
 
   it('settled 事件丢失 + busy 翻转：留守不投，外部 flush 驱动投递', () => {

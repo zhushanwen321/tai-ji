@@ -4,7 +4,7 @@
  * 覆盖（spec §3.2 五个不变量）：
  * - shouldRestart：stopping 短路 / 计数上限
  * - recordCrashAndGetDelay：指数退避序列 1s/2s/4s/8s/16s
- * - recordSuccess：无时间窗清零（ADR-0112：计数清零唯一入口 = 用户显式重试）
+ * - recordSuccess：无时间窗清零（ADR-0122：计数清零唯一入口 = 用户显式重试）
  * - markStopping / reset：主动停止生命周期
  *
  * 运行：pnpm --filter @taiji/electron run test:main -- main/test/restart-policy.test.ts
@@ -84,7 +84,7 @@ describe('RestartPolicy.recordCrashAndGetDelay（指数退避）', () => {
   })
 })
 
-describe('RestartPolicy.recordSuccess（无时间窗清零，ADR-0112）', () => {
+describe('RestartPolicy.recordSuccess（无时间窗清零，ADR-0122）', () => {
   beforeEach(() => {
     vi.useFakeTimers()
   })

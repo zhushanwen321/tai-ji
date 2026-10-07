@@ -5,7 +5,7 @@
 # 1. 产物存在性（dmg/exe/AppImage）
 # 2. macOS/Windows unpacked app 结构（main executable, asar, runtime, native resources）
 # 3. asar 内容正确性
-# 4. renderer WASM chunk 检查（CSP 能力防线：产物级拦截依赖暗藏的可执行 WASM）
+# 4. renderer/mobile WASM chunk 检查（CSP 能力防线：产物级拦截依赖暗藏的可执行 WASM）
 # 5. 产物大小合理性
 #
 # 用法: ./scripts/postbuild-validate.sh [--ci] [--dir-only]（参数顺序无关）
@@ -77,6 +77,125 @@ check_staged_engines() {
     fi
     if [ "$failed" -ne 0 ]; then return 1; fi
     echo -e "  ${GREEN}✓${NC} staged engines 完整性校验通过（$count engines: ${engines_dir}）"
+    return 0
+}
+
+# renderer/mobile WASM chunk 扫描（CSP 能力防线，产物级，桌面与移动壳共用）。
+# 用法: check_wasm_chunks <产物 assets 目录> <对应 index.html> <产物标签> <构建命令提示>
+# CSP script-src 放行 eval/wasm 时该能力合法，跳过；否则白名单外含 WebAssembly
+# 的 chunk 即失败（防「依赖暗藏 WASM → CSP CompileError → 功能静默降级」）。
+check_wasm_chunks() {
+    local dist_assets="$1" index_html="$2" label="$3" build_hint="$4"
+    if [ ! -d "$dist_assets" ]; then
+        echo -e "  ${RED}✗ ${label} 产物缺失: ${dist_assets}（先 ${build_hint}）"
+        return 1
+    fi
+    # 判定基准 = CSP meta 的 content 值（不能 grep 全文件——index.html 注释里出现
+    # 'wasm-unsafe-eval' 字样会被误判成放行，防线恒跳过；与
+    # .githooks/check_csp_compatibility.py 的 parse_csp_script_sources 同语义）
+    local csp_content
+    csp_content="$(node -e '
+        const html = require("fs").readFileSync(process.argv[1], "utf8");
+        const tag = html.match(/<meta\b[^>]*Content-Security-Policy[^>]*>/i);
+        const c = tag && tag[0].match(/content=(["\x27])(.*?)\1/i);
+        process.stdout.write(c ? c[2] : "");
+    ' "$index_html")"
+    if [[ "$csp_content" == *"wasm-unsafe-eval"* || "$csp_content" == *"unsafe-eval"* ]]; then
+        echo -e "  ${YELLOW}⚠ ${label} CSP 已放行 eval/wasm，WASM 是被允许的能力，跳过本检查${NC}"
+        return 0
+    fi
+    # 基名 = chunk 文件名去掉末段 8 位 hash（如 shiki-DeyQNefO → shiki）
+    local allowlist='^(shiki|wasm|wit|onig|markdown)$'
+    local violations="" total=0 base js
+    for js in "$dist_assets"/*.js; do
+        [ -e "$js" ] || continue
+        grep -q "WebAssembly" "$js" 2>/dev/null || continue
+        total=$((total + 1))
+        base="$(basename "$js" .js | sed -E 's/-[A-Za-z0-9_-]{8}$//')"
+        echo "$base" | grep -qE "$allowlist" && continue
+        violations="$violations $base($(basename "$js"))"
+    done
+    if [ -n "$violations" ]; then
+        echo -e "  ${RED}✗ ${label} 产物新增含 WebAssembly 的 chunk（不在白名单）:$violations"
+        echo -e "        CSP script-src 'self' 下 WebAssembly.instantiate 运行时抛 CompileError → 功能静默降级"
+        echo -e "        修复：改用无 WASM 实现（参考 markdown.ts 的 createJavaScriptRegexEngine）；"
+        echo -e "        或确认必需后改对应 index.html CSP 加 'wasm-unsafe-eval' 并同步更新本函数白名单"
+        return 1
+    fi
+    echo -e "  ${GREEN}✓${NC} ${label} WASM chunk 检查通过（$total 个白名单 chunk 含 WebAssembly dead-code 残留）"
+    return 0
+}
+
+# 内置 pi 扩展资产存活 + 发现面完整性（2026-10-03 B′ 事故护栏，三平台共用）
+#
+# 背景：打包态扩展是 esbuild 自包含 bundle（@zhushanwen/subagent-core 被 inline），
+# staged 布局无 node_modules ⇒ `require.resolve` 锚点必败。修复路径 = 回退到 staged
+# scope 根（`<Resources>/extensions/@zhushanwen`）作 npm 槽根，靠约定目录扫描命中
+# `pi-subagent-workflow/{workflows,agents}`（见 pi-host.stagedScopeRootFromModuleUrl）。
+# 因此产物里这两个目录必须真实存在，且不得被 electron-builder 滤镜静默剪掉任何文件
+# ——历史上 `!**/README.md` 的**递归**语义删掉了 workflows/README.md（当时是解析锚点
+# 本体），且“文件在包里=完整”的错觉让该失效静默一个版本。
+#
+# 断言三层：① 两目录存在；② 数量与源（packages/subagent-core）一致（不写死数字）；
+# ③ 存活 diff——pre-package staged 与 post-package 产物文件集做差，任何删除必须落在
+# 白名单（精确模式；包根文档严格限于 `./<scope>/<pkg>/README.md` 两级，不得写成递归），
+# 否则红。
+check_builtin_ext_assets() {
+    local staged_root="$1" packaged_root="$2"
+    local core_src="packages/subagent-core"
+    local failed=0
+
+    if [ ! -d "$staged_root" ]; then
+        echo -e "  ${YELLOW}⚠${NC} 跳过内置扩展资产校验（pre-package staged 目录不存在: ${staged_root}）"
+        return 0
+    fi
+    if [ ! -d "$packaged_root" ]; then
+        echo -e "  ${RED}✗${NC} 产物内置扩展目录缺失: ${packaged_root}"
+        return 1
+    fi
+
+    local sw="$packaged_root/pi-subagent-workflow"
+    local wf_src wf_pkg ag_src ag_pkg
+    wf_src=$(find "$core_src/workflows" -maxdepth 1 -name '*.js' ! -name '_*' 2>/dev/null | wc -l | tr -d ' ')
+    wf_pkg=$(find "$sw/workflows" -maxdepth 1 -name '*.js' ! -name '_*' 2>/dev/null | wc -l | tr -d ' ')
+    ag_src=$(find "$core_src/agents" -maxdepth 1 -name '*.md' 2>/dev/null | wc -l | tr -d ' ')
+    ag_pkg=$(find "$sw/agents" -maxdepth 1 -name '*.md' 2>/dev/null | wc -l | tr -d ' ')
+
+    # ① + ② 发现面资产存在且与源同量（口径：workflows 只算 .js 且排除 `_` 前缀；agents 算 .md）
+    if [ "$wf_src" -gt 0 ] && [ "$wf_pkg" = "$wf_src" ]; then
+        echo -e "  ${GREEN}✓${NC} 内置 workflow 资产齐备（$wf_pkg 个，与源同量）"
+    else
+        echo -e "  ${RED}✗${NC} 内置 workflow 资产缺量: 产物 ${wf_pkg} / 源 ${wf_src}（→ subagents 批量工具将报 'fan-out is not available'）"
+        failed=1
+    fi
+    if [ "$ag_src" -gt 0 ] && [ "$ag_pkg" = "$ag_src" ]; then
+        echo -e "  ${GREEN}✓${NC} 内置 agent 资产齐备（$ag_pkg 个，与源同量）"
+    else
+        echo -e "  ${RED}✗${NC} 内置 agent 资产缺量: 产物 ${ag_pkg} / 源 ${ag_src}（→ <available_subagents> 缺内置角色）"
+        failed=1
+    fi
+
+    # ③ 存活 diff：任何非白名单删除都是滤镜/拷贝回归
+    local tmp_pre tmp_post deleted
+    tmp_pre="$(mktemp)"
+    tmp_post="$(mktemp)"
+    (cd "$staged_root" && find . -type f) | sort > "$tmp_pre"
+    (cd "$packaged_root" && find . -type f) | sort > "$tmp_post"
+    # 白名单（精确模式）：包根文档仅 `./<pkg>/README.md|ARCHITECTURE.md` 一级（传入根已为
+    # scope 目录；**非递归**，不得写成 `**/`）+ sourcemap / 类型声明 / 测试基建 /
+    # tree-sitter 源码与 debug wasm（与 electron-builder.yml 排除面一致）
+    local allowed='^\./[^/]+/(README|ARCHITECTURE)\.md$|\.map$|\.d\.ts$|/__tests__/|\.test\.|/tree-sitter-bash/src/|/tree-sitter-bash/grammar\.js$|/web-tree-sitter/debug/'
+    deleted=$(comm -23 "$tmp_pre" "$tmp_post" | grep -vE "$allowed" || true)
+    rm -f "$tmp_pre" "$tmp_post"
+    if [ -n "$deleted" ]; then
+        echo -e "  ${RED}✗${NC} 产物删除了非白名单文件（滤镜/拷贝回归）:"
+        echo "$deleted" | sed 's/^/      /' >&2
+        failed=1
+    else
+        echo -e "  ${GREEN}✓${NC} 资产存活 diff 通过（无白名单外删除）"
+    fi
+
+    if [ "$failed" -ne 0 ]; then return 1; fi
     return 0
 }
 
@@ -293,6 +412,24 @@ if [ -d "$OUTPUT_DIR/mac-arm64" ]; then
         if ! check_staged_engines "$APP_PATH/Contents/Resources/engines"; then
             FAILED=1
         fi
+        # 内置 pi 扩展资产存活 + 发现面完整性（B′ 事故护栏）
+        if ! check_builtin_ext_assets "apps/electron/resources/extensions/@zhushanwen" "$BUILTIN_EXT_DIR"; then
+            FAILED=1
+        fi
+        # 移动壳 dist（remote-access 静态托管资源）：packages/mobile-renderer 的 vite
+        # web 构建（build 编排 build:mobile 先行产出）+ electron-builder extraResources
+        # 复制 → <Resources>/mobile-dist。index.html 是 runtime 同源静态托管入口，
+        # 缺失 = 构建编排漏跑 build:mobile 或 extraResources 漏配（supervisor prod 分支
+        # 拼 --mobile-dist 时 runtime 启动会报 E5 静态面禁用，这里在产物级提前拦截）。
+        MOBILE_DIST_DIR="$APP_PATH/Contents/Resources/mobile-dist"
+        if [ -f "$MOBILE_DIST_DIR/index.html" ]; then
+            grep -q "Content-Security-Policy" "$MOBILE_DIST_DIR/index.html" \
+                && echo -e "  ${GREEN}✓${NC} mobile-dist/index.html in Resources（含 CSP meta）" \
+                || { echo -e "  ${RED}✗${NC} mobile-dist/index.html 缺 CSP meta（packages/mobile-renderer/index.html 回归）"; FAILED=1; }
+        else
+            echo -e "  ${RED}✗${NC} mobile-dist/index.html 缺失: ${MOBILE_DIST_DIR}（检查 build 编排 build:mobile + electron-builder.yml extraResources）"
+            FAILED=1
+        fi
         # builtin taiji plugins 完整性校验（resources/plugins/<name>，如 statusline）
         # prepare-builtin-plugins.sh 预编译 index.js + electron-builder extraResources 拷贝。
         # registry 打包后扫描 <cwd>/resources/plugins；缺入口文件则插件静默不被发现或
@@ -342,7 +479,8 @@ if [ -d "$OUTPUT_DIR/win-unpacked" ]; then
         "$WIN_UNPACKED/dist/runtime/plugin-bootstrap-process.cjs" \
         "$WIN_UNPACKED/dist/runtime/plugin-esm-loader.cjs" \
         "$WIN_RESOURCES/pi/pi-windows-x64.exe" \
-        "$WIN_RESOURCES/bin/taiji-settings"; do
+        "$WIN_RESOURCES/bin/taiji-settings" \
+        "$WIN_RESOURCES/mobile-dist/index.html"; do
         if [ -f "$required" ]; then
             echo -e "  ${GREEN}✓${NC} ${required#$WIN_ROOT/}"
         else
@@ -366,6 +504,10 @@ if [ -d "$OUTPUT_DIR/win-unpacked" ]; then
     fi
     # staged subagent 引擎 CLI（W9，三平台共用 check_staged_engines）
     if ! check_staged_engines "$WIN_RESOURCES/engines"; then
+        FAILED=1
+    fi
+    # 内置 pi 扩展资产存活 + 发现面完整性（B′ 事故护栏）
+    if ! check_builtin_ext_assets "apps/electron/resources/extensions/@zhushanwen" "$WIN_BUILTIN"; then
         FAILED=1
     fi
     # builtin taiji plugins（Windows 同 mac 校验：每插件 manifest main 入口存在）
@@ -432,7 +574,8 @@ if [ -d "$OUTPUT_DIR/linux-unpacked" ]; then
             "$LINUX_UNPACKED/dist/runtime/index.cjs" \
             "$LINUX_UNPACKED/dist/runtime/plugin-bootstrap.cjs" \
             "$LINUX_RESOURCES/pi/pi-linux-x64" \
-            "$LINUX_RESOURCES/bin/taiji-settings"; do
+            "$LINUX_RESOURCES/bin/taiji-settings" \
+            "$LINUX_RESOURCES/mobile-dist/index.html"; do
             if [ -f "$required" ]; then
                 echo -e "  ${GREEN}✓${NC} ${required#$LINUX_ROOT/}"
             else
@@ -461,46 +604,40 @@ if [ -d "$OUTPUT_DIR/linux-unpacked" ]; then
     if ! check_staged_engines "$LINUX_RESOURCES/engines"; then
         FAILED=1
     fi
+    # 内置 pi 扩展资产存活 + 发现面完整性（B′ 事故护栏）
+    if ! check_builtin_ext_assets "apps/electron/resources/extensions/@zhushanwen" "${LINUX_BUILTIN}"; then
+        FAILED=1
+    fi
 fi
-# ── 3. renderer WASM chunk 检查（CSP 能力防线，产物级）───────────────
-# 背景：renderer CSP script-src 'self' 不放行 WASM。shiki 已换 createJavaScriptRegexEngine
-# （markdown.ts），但 bundle-full 入口仍静态携带 oniguruma loader（dead code，tree-shake
-# 边界）——白名单放行其 chunk 基名。新增依赖若把可执行 WASM 带进 renderer 产物（基名
-# 不在白名单），在此拦截，防止「依赖暗藏 WASM → CSP CompileError → 功能静默降级」复发
-# （2026-08 v0.9.3+ 事故：全部 markdown 渲染退化为纯文本、换行丢失）。
+# ── 3. renderer/mobile WASM chunk 检查（CSP 能力防线，产物级）────────
+# 背景：桌面 renderer 与移动壳 CSP script-src 均为 'self' 不放行 WASM。shiki 已换
+# createJavaScriptRegexEngine（markdown.ts），但 bundle-full 入口仍静态携带 oniguruma
+# loader（dead code，tree-shake 边界）——白名单放行其 chunk 基名。新增依赖若把可执行
+# WASM 带进任一壳产物（基名不在白名单），在此拦截，防止「依赖暗藏 WASM → CSP
+# CompileError → 功能静默降级」复发（2026-08 v0.9.3+ 事故：全部 markdown 渲染退化为
+# 纯文本、换行丢失；mobile-dist 产物同形态曾无机器拦截）。
 # 白名单维护原则：确认该 chunk 的 WASM 路径运行时不可达（如显式传入 JS engine 后的
-# dead loader）才可加入；真正需要 WASM 时改 index.html CSP（加 'wasm-unsafe-eval'）并
+# dead loader）才可加入；真正需要 WASM 时改对应 index.html CSP（加 'wasm-unsafe-eval'）并
 # 同步本检查与 .githooks/check_csp_compatibility.py（源码级防线）。
 echo ""
-echo -e "${BLUE}[3/6] renderer WASM chunk check (CSP guard)...${NC}"
-RENDERER_DIST_ASSETS="$PROJECT_ROOT/apps/electron/renderer/dist/assets"
-INDEX_HTML_CSP="$PROJECT_ROOT/packages/renderer/index.html"
-if [ ! -d "$RENDERER_DIST_ASSETS" ]; then
-    echo -e "  ${RED}✗${NC} renderer 产物缺失: ${RENDERER_DIST_ASSETS}（先 pnpm --filter @taiji/frontend run build）"
+echo -e "${BLUE}[3/6] renderer/mobile WASM chunk check (CSP guard)...${NC}"
+# 桌面产物 = apps/electron/renderer/dist（electron 加载链源头）；移动壳产物源头 =
+# packages/mobile-renderer/dist（vite outDir）＝ Resources/mobile-dist 的
+# extraResources 复制源（electron-builder.yml from: ../../packages/mobile-renderer/dist），
+# 扫描源头即覆盖打包产物内容；mobile-dist 落位存在性已在 [2/6] 平台段校验。
+if ! check_wasm_chunks \
+    "$PROJECT_ROOT/apps/electron/renderer/dist/assets" \
+    "$PROJECT_ROOT/packages/renderer/index.html" \
+    "renderer" \
+    "pnpm --filter @taiji/frontend run build"; then
     FAILED=1
-elif grep -q "wasm-unsafe-eval\|unsafe-eval" "$INDEX_HTML_CSP"; then
-    echo -e "  ${YELLOW}⚠ CSP 已放行 eval/wasm，WASM 是被允许的能力，跳过本检查${NC}"
-else
-    # 基名 = chunk 文件名去掉末段 8 位 hash（如 shiki-DeyQNefO → shiki）
-    WASM_CHUNK_ALLOWLIST='^(shiki|wasm|wit|onig|markdown)$'
-    WASM_VIOLATIONS=""
-    WASM_TOTAL=0
-    for js in "$RENDERER_DIST_ASSETS"/*.js; do
-        grep -q "WebAssembly" "$js" 2>/dev/null || continue
-        WASM_TOTAL=$((WASM_TOTAL + 1))
-        base=$(basename "$js" .js | sed -E 's/-[A-Za-z0-9_-]{8}$//')
-        echo "$base" | grep -qE "$WASM_CHUNK_ALLOWLIST" && continue
-        WASM_VIOLATIONS="$WASM_VIOLATIONS $base($(basename "$js"))"
-    done
-    if [ -n "$WASM_VIOLATIONS" ]; then
-        echo -e "  ${RED}✗${NC} renderer 产物新增含 WebAssembly 的 chunk（不在白名单）:$WASM_VIOLATIONS"
-        echo -e "        CSP script-src 'self' 下 WebAssembly.instantiate 运行时抛 CompileError → 功能静默降级"
-        echo -e "        修复：改用无 WASM 实现（参考 markdown.ts 的 createJavaScriptRegexEngine）；"
-        echo -e "        或确认必需后改 index.html CSP 加 'wasm-unsafe-eval' 并同步更新本脚本白名单"
-        FAILED=1
-    else
-        echo -e "  ${GREEN}✓${NC} renderer WASM chunk 检查通过（$WASM_TOTAL 个白名单 chunk 含 WebAssembly dead-code 残留）"
-    fi
+fi
+if ! check_wasm_chunks \
+    "$PROJECT_ROOT/packages/mobile-renderer/dist/assets" \
+    "$PROJECT_ROOT/packages/mobile-renderer/index.html" \
+    "mobile-renderer" \
+    "pnpm --filter @taiji/mobile-renderer run build（或编排 build:mobile）"; then
+    FAILED=1
 fi
 
 echo -e "${BLUE}[4/6] Artifact sizes...${NC}"

@@ -128,7 +128,7 @@ function validHandshake(overrides: Record<string, unknown> = {}): Record<string,
 }
 
 describe('relay server + registry（真 socket 环回 + 假 pi）', () => {
-  // 本文件全部用例涉及真实子进程 + 杀链（pi-rpc killPiProcess SIGKILL 直杀，ADR-0112
+  // 本文件全部用例涉及真实子进程 + 杀链（pi-rpc killPiProcess SIGKILL 直杀，ADR-0122
   // grace 退役），满并行下 5s 默认 testTimeout 不够（全量 347 文件满并行时杀链用例曾超
   // 时）——统一放宽。60s：waitFor 内部预算 30s（见 waitFor 注释），用例超时必须大于
   // 其最长等待。
@@ -150,7 +150,7 @@ describe('relay server + registry（真 socket 环回 + 假 pi）', () => {
     fakePi = join(workDir, 'fake-pi.mjs')
     // 假 pi：dump argv/cwd/relay-env 剥离结果；events 模式输出事件流；echo 模式回显
     // stdin；exit7 模式即退。挂住模式（hang/events/stream）无信号 handler——收割全靠
-    // 杀链 SIGKILL 直杀（killPiProcess，ADR-0112：原 SIGTERM marker 断言已随 grace
+    // 杀链 SIGKILL 直杀（killPiProcess，ADR-0122：原 SIGTERM marker 断言已随 grace
     // 退役删除），「child 被杀」统一以进程退出 / pid 文件清理为断言信号。
     await writeFile(fakePi, [
       "import { writeFileSync } from 'node:fs'",
@@ -449,7 +449,7 @@ describe('relay server + registry（真 socket 环回 + 假 pi）', () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     try {
       agent.destroy()
-      // SIGKILL 直杀（ADR-0112）下断言「child 被杀」= pid 文件清理（child exit →
+      // SIGKILL 直杀（ADR-0122）下断言「child 被杀」= pid 文件清理（child exit →
       // cleanupEntry 的既有事件链；hang 模式 child 挂 60s，只会因被杀退出）
       await waitFor(() => !existsSync(getRelayPidFilePath('rec-1', dataDir)), 30_000, 'pid file cleaned after kill')
       // 决策行：动作 / 主 session（哪个主 session 死）/ recordId + 子进程 pid（连带杀谁）/ 原因
@@ -482,7 +482,7 @@ describe('relay server + registry（真 socket 环回 + 假 pi）', () => {
     try {
       agent.send({ v: 1, kind: 'goodbye' })
       agent.destroy()
-      // 收割完成信号 = pid 文件删除（SIGKILL 直杀后 child exit → cleanupEntry，ADR-0112）
+      // 收割完成信号 = pid 文件删除（SIGKILL 直杀后 child exit → cleanupEntry，ADR-0122）
       await waitFor(() => !existsSync(getRelayPidFilePath('rec-1', dataDir)), 30_000, 'pid file cleaned after reap')
       // 无 warn 级断连告警与 kill decision 决策行（正常收割不产生故障噪声）
       expect(warnSpy.mock.calls.some(([msg]) => String(msg).includes('kill-on-disconnect'))).toBe(false)
@@ -511,7 +511,7 @@ describe('relay server + registry（真 socket 环回 + 假 pi）', () => {
     try {
       await getActiveRelayRegistry()!.destroyAll()
       // 收割完成信号 = pid 文件删除（destroyAll → killRelayChild SIGKILL 直杀 →
-      // cleanupEntry，ADR-0112；hang 模式 child 挂 60s，只会因被杀退出）
+      // cleanupEntry，ADR-0122；hang 模式 child 挂 60s，只会因被杀退出）
       await waitFor(() => !existsSync(getRelayPidFilePath('rec-1', dataDir)), 30_000, 'pid file cleaned (child reaped by destroyAll)')
       // close handler 对同一 child 不重复杀链（无 kill decision / kill-on-disconnect warn）
       expect(warnSpy.mock.calls.some(([msg]) => msg === '[relay] kill decision')).toBe(false)
@@ -578,7 +578,7 @@ describe('relay server + registry（真 socket 环回 + 假 pi）', () => {
     await waitFor(() => existsSync(getRelayPidFilePath('rec-1', dataDir)), 30_000, 'pid file written')
     await deinitRelayServer()
     // 收割完成信号 = pid 文件删除（deinit → destroyAll → killRelayChild SIGKILL 直杀
-    // → cleanupEntry，ADR-0112；hang 模式 child 挂 60s，只会因被杀退出）
+    // → cleanupEntry，ADR-0122；hang 模式 child 挂 60s，只会因被杀退出）
     await waitFor(() => !existsSync(getRelayPidFilePath('rec-1', dataDir)), 30_000, 'pid file cleaned (deinit kill chain)')
   })
 
@@ -623,7 +623,7 @@ describe('relay server + registry（真 socket 环回 + 假 pi）', () => {
 
   // idle pi reclamation D3 第 5 步尾扫读面（u3a）：listTargetsByMainSessionId 真值表。
   // kill 可调且有效 = kill 返回后 child 被杀（pid 文件删除 = child 'exit' → cleanupEntry
-  // 的既有事件链；SIGKILL 直杀 ADR-0112，hang 模式 child 挂 60s 只会因被杀退出）；
+  // 的既有事件链；SIGKILL 直杀 ADR-0122，hang 模式 child 挂 60s 只会因被杀退出）；
   // 「杀完走注册表清理」断言同源，不探测私有 Map。
   t('listTargetsByMainSessionId 真值表：无条目空数组 → 注册后含目标且 kill 可调 → 清理后空', async () => {
     await startServer()
@@ -638,7 +638,7 @@ describe('relay server + registry（真 socket 环回 + 假 pi）', () => {
     expect(targets).toHaveLength(1)
     // per-sid 精度：其他 mainSessionId 仍为空
     expect(registry.listTargetsByMainSessionId('main-other')).toEqual([])
-    // kill 可调且有效：kill 链 SIGKILL 直杀（ADR-0112），child 被杀退出
+    // kill 可调且有效：kill 链 SIGKILL 直杀（ADR-0122），child 被杀退出
     await targets[0]!.kill()
     // 杀完无需手工注销：child 'exit' handler 自动 cleanupEntry（pid 文件删除为完成信号）
     await waitFor(() => !existsSync(getRelayPidFilePath('rec-1', dataDir)), 30_000, 'entry cleaned after kill')
@@ -697,7 +697,7 @@ describe('relay server + registry（真 socket 环回 + 假 pi）', () => {
       // 孤儿形态：spawn 在「现在」（进程已启动后写记录），runtime 已死（无注册表）
       const pidFile = getRelayPidFilePath('rec-orphan', dataDir)
       await writeFileAsync(pidFile, JSON.stringify({ pid: child.pid, spawnedAt: Date.now() }))
-      // 收割为 SIGKILL 直杀（ADR-0112 grace 退役）：用例锁「收割完成 + pid 文件删除」
+      // 收割为 SIGKILL 直杀（ADR-0122 grace 退役）：用例锁「收割完成 + pid 文件删除」
       // 语义——child 被杀 = signalCode 置位（SIGKILL 不可捕获，无 handler 依赖）
       await startServer()
       await waitFor(() => child.signalCode === 'SIGKILL', 30_000, 'orphan reaped by sweep')
@@ -741,7 +741,7 @@ describe('relay server + registry（真 socket 环回 + 假 pi）', () => {
       } finally {
         warnSpy.mockRestore()
       }
-      // tee 静默到期（mtime 回拨到 10 分钟前）→ 再次 sweep 补杀（SIGKILL 直杀，ADR-0112：
+      // tee 静默到期（mtime 回拨到 10 分钟前）→ 再次 sweep 补杀（SIGKILL 直杀，ADR-0122：
       // child 被杀 = signalCode 置位，无 handler 依赖）
       const stale = new Date(Date.now() - 10 * 60_000)
       utimesSync(teeFile, stale, stale)

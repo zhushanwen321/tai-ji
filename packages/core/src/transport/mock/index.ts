@@ -640,9 +640,10 @@ const sessionImpl = {
    * 让 E2E 能验证「切 session 后列表刷新」（切到无数据 session 看空态，切回 s3 看列表）。
    * [RT-4#8] 形态对齐 real（getSubagents 结构化返回；mock 恒非 oversize）。
    */
-  async getSubagents(sessionId: string): Promise<{ subagents: SubagentRecord[]; oversize?: boolean }> {
+  async getSubagents(sessionId: string): Promise<{ subagents: SubagentRecord[]; oversize?: boolean; found?: boolean }> {
     await sleep(TIMING.ack)
-    return { subagents: sessionId === 's3' ? fixtureSubagents.map((s) => ({ ...s })) : [] }
+    // found: true = mock 的 session 恒在册（fixture session 无「不在册」形态）
+    return { subagents: sessionId === 's3' ? fixtureSubagents.map((s) => ({ ...s })) : [], found: true }
   },
 
   /** Mock subagent 对话流历史（返回空数组，agent call 对话流由 getAgentCallHistory 覆盖） */
@@ -656,9 +657,10 @@ const sessionImpl = {
    * s3 返回 fixture，其他 session 返回空——同 getSubagents 的区分逻辑。
    * [RT-4#8] 形态对齐 real（结构化返回；mock 恒非 oversize）。
    */
-  async getWorkflows(sessionId: string): Promise<{ workflows: WorkflowRunRecord[]; oversize?: boolean }> {
+  async getWorkflows(sessionId: string): Promise<{ workflows: WorkflowRunRecord[]; oversize?: boolean; found?: boolean }> {
     await sleep(TIMING.ack)
-    return { workflows: sessionId === 's3' ? fixtureWorkflows.map((w) => ({ ...w })) : [] }
+    // found: true = mock 的 session 恒在册（同 getSubagents）
+    return { workflows: sessionId === 's3' ? fixtureWorkflows.map((w) => ({ ...w })) : [], found: true }
   },
 
   /**
@@ -1033,23 +1035,30 @@ const chatImpl = {
     // 登记在飞条目（abort 终态帧依据）：流序列 settle（complete 或 cancelled 退出）即清，
     // 避免流走完后 session 再 abort 被误补 failed 帧。
     inflightDeliveryEntries.set(sessionId, { clientUuid, preview: text.slice(0, DELIVERY_PREVIEW_MAX_CHARS) })
-    // fire-and-forget 补 .catch 留痕（红线 1）：内部异常不落成无痕 unhandled rejection
-    void runSendStream(sessionId, text, {
-      nextId,
-      emit,
-      sleep,
-      pushSession,
-      isCancelled: (s) => cancelled.has(s),
-      TIMING,
-    })
-      .catch((e) => {
-        console.error('[mock] send stream failed:', e)
+    // [受理先于执行] 流启动推迟到 reply 之后（宏任务）：真实通道里 runtime 回受理 ack 后
+    // pi 才开跑（受理事实先于执行事实）；mock 的同步 fire-and-forget 曾让 assistant 首事件
+    // 抢在 reply 前落 chat store——appendUser（reply 后上屏）被排到 assistant 之后，分组
+    // 拆成两个 turn（user 气泡挂尾，P0 smoke TC-MSGSTREAM-TURN 实测）。宏任务保证 renderer
+    // 侧 reply-resolve 微任务链（含 appendUser）全部走完后再开流。
+    setTimeout(() => {
+      // fire-and-forget 补 .catch 留痕（红线 1）：内部异常不落成无痕 unhandled rejection
+      void runSendStream(sessionId, text, {
+        nextId,
+        emit,
+        sleep,
+        pushSession,
+        isCancelled: (s) => cancelled.has(s),
+        TIMING,
       })
-      .finally(() => {
-        if (inflightDeliveryEntries.get(sessionId)?.clientUuid === clientUuid) {
-          inflightDeliveryEntries.delete(sessionId)
-        }
-      })
+        .catch((e) => {
+          console.error('[mock] send stream failed:', e)
+        })
+        .finally(() => {
+          if (inflightDeliveryEntries.get(sessionId)?.clientUuid === clientUuid) {
+            inflightDeliveryEntries.delete(sessionId)
+          }
+        })
+    }, 0)
     return { clientUuid, state: 'in-flight', lane: 'direct' }
   },
 
@@ -1651,13 +1660,16 @@ const pluginsSub = makeMockSubscription((): PluginInfo[] => [])
 
 const pluginImpl = {
   onPlugins: (h: (plugins: PluginInfo[]) => void) => pluginsSub.subscribe(h),
-  // 插件权限审批/回收（[G4 锚定补齐]：锚定前 mock 缺此二成员，门面三元下不可达）。
-  // mock 无插件运行时，ack 型 stub resolve 即可。revokePermissions 与 real 同为单参
-  // （回收即撤销插件全部授权，无 permissions 参数——锚定曾抓出 stub 多参，已对齐）。
+  // 插件权限审批/回收/拒绝（[G4 锚定补齐]：锚定前 mock 缺此族成员，门面三元下不可达）。
+  // mock 无插件运行时，ack 型 stub resolve 即可。revokePermissions / denyPermissions
+  // 与 real 同为单参（锚定曾抓出 stub 多参，已对齐）。
   async approvePermissions(_pluginId: string, _permissions: string[]): Promise<void> {
     await sleep(TIMING.ack)
   },
   async revokePermissions(_pluginId: string): Promise<void> {
+    await sleep(TIMING.ack)
+  },
+  async denyPermissions(_pluginId: string): Promise<void> {
     await sleep(TIMING.ack)
   },
 }

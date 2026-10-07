@@ -213,21 +213,34 @@ describe("resumeRun — 复活主链（方案 A 同 runId 复活）", () => {
     expect(run!.state.calls.has(1)).toBe(false);
     // v2 注册条目（裁决点 7：锁段内、先于复活事件）
     expect(appendEntry).toHaveBeenCalledTimes(1);
-    const [customType, entry] = appendEntry.mock.calls[0] as [string, { kind: string; runId: string }];
+    const [customType, entry] = appendEntry.mock.calls[0] as [
+      string,
+      { kind: string; runId: string; scriptPath: string },
+    ];
     expect(customType).toBe("workflow-record");
     expect(entry.kind).toBe("registered");
     expect(entry.runId).toBe("wf-main");
+    // scriptPath 真值回归：注册条目携带 run-created 帧的 scriptPath 原文（同源
+    // scriptName）——last-writer-wins 投影下 resume 条目遮蔽原始条目时不丢全路径
+    expect(entry.scriptPath).toBe("/abs/workflows/fan-out.js");
     // pending 信号（复活 = 对当前 session 重新可见）
     expect(emit).toHaveBeenCalledWith("pending:register", expect.objectContaining({ id: "wf-main" }));
   });
 
   it("旧格式帧（无 scriptPath 载荷）：重建回落空串（现状行为不劣化，inline 脚本不受影响）", async () => {
     await seedInterruptedRecord("wf-legacy"); // 不传 scriptPath = scriptPath 载荷落地前的旧格式帧
-    const { deps, runs } = makeDeps();
+    const { deps, runs, appendEntry } = makeDeps();
 
     await resumeRun("wf-legacy", deps, { now: () => T0 + 100_000 });
 
     expect(runs.get("wf-legacy")!.spec.scriptPath).toBe("");
+    // 注册条目同款回落：旧格式帧缺 scriptPath 载荷 → 条目空串（读侧按缺省处理）
+    const [, entry] = appendEntry.mock.calls[0] as unknown as [
+      string,
+      { kind: string; scriptPath: string },
+    ];
+    expect(entry.kind).toBe("registered");
+    expect(entry.scriptPath).toBe("");
   });
 
   it("D8 档 3（会话文件不可知/不存在）：重派集成员不补收、不建条目——worker 重放时真实派发", async () => {
@@ -248,7 +261,7 @@ describe("resumeRun — 复活主链（方案 A 同 runId 复活）", () => {
 //
 // 修复 已归档设计档案 §1.1：resume 重建 spec 曾结构性不含 budgetTimeMs。
 // 修复后 run-created 帧是预算单源：resume 显式 options 覆盖 / 未提供则继承该帧，
-// 生效值写入 spec。[ADR-0112] 原用例中「错误重试 → rebuildRuntime 重排」附加断言
+// 生效值写入 spec。[ADR-0122] 原用例中「错误重试 → rebuildRuntime 重排」附加断言
 // 随重试矩阵删除（rebuildRuntime 已删）。
 
 describe("resume 预算单源（run-created 载荷继承/覆盖）", () => {

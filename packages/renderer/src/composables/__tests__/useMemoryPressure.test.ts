@@ -9,7 +9,8 @@
  * - 防重复注册（AGENTS 规则 2 / refCount）：多实例共享单条物理订阅——两次 useMemoryPressure()
  *   后单次 dispatch 只触发一次收紧动作。
  * - 卸载退订：effectScope stop（最后一个消费者卸载）后 dispatch 不再触发。
- * - 默认收紧动作：真实 chat store 上 evictIfNeeded 被调用（领地登记的领地内最大安全动作）。
+ * - 默认收紧动作：真实 chat store 上 evictIfNeeded 被调用（spy 断言点 = 复合入口
+ *   evictLruWithUnsubscribe 内含的驱逐半边；领地登记的领地内最大安全动作）。
  * - 动作抛错不逃逸（best-effort：降级动作失败不影响订阅链与状态更新）。
  *
  * 驱动方式：直接 dispatchGlobal（core events 层单例注册表，route-inbound 对无 sid 消息

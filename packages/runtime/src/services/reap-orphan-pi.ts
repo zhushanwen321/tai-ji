@@ -65,7 +65,7 @@
  * 返回 null 即触发本降级。写侧每次 spawn 全量覆盖写、mandatory builtin 恒传保证清单常态
  * 存在且非空（§11.11）；本降级只覆盖异常态（首启前 / 磁盘故障 / 人为删除）。
  *
- * 处置：SIGTERM → 宽限（默认 2s，对齐 destroy 链 KILL_TIMEOUT_MS 惯例）→ 仍活则
+ * 处置：SIGKILL 直杀（ADR-0122：kill 族 grace 优雅退出窗退役，含 lstart 复用复验）——原
  * SIGKILL；每条记日志，失败仅记日志 + 崩溃台账 reap-failed 事件不抛（收殓是 best-effort
  * 兜底，不允许阻塞或击穿启动）。幂等：重复执行只是再扫一遍进程表。
  */
@@ -267,7 +267,7 @@ export interface ReapOrphanOptions {
 export interface ReapOrphanResult {
   /** 扫描到的进程行数（诊断用）。 */
   scanned: number
-  /** 成功回收（SIGTERM 退出 / 已自行退出 / SIGKILL 兜底）的孤儿 pid。 */
+  /** 成功回收（SIGKILL 命中 / 已自行退出 / ESRCH 幂等）的孤儿 pid。 */
   reaped: number[]
   /** 处置失败的孤儿 pid（仅日志，不抛）。 */
   failed: number[]
@@ -332,7 +332,7 @@ function defaultReadProcessStartTime(pid: number): Promise<number | null> {
 }
 
 /**
- * 执行一次孤儿收殓：枚举 → 读清单 → 筛选 → 逐个 SIGTERM → 宽限 → 仍活则 SIGKILL。
+ * 执行一次孤儿收殓：枚举 → 读清单 → 筛选 → 逐个 SIGKILL 直杀（lstart 复用复验前置）。
  * 清单缺失/坏（readSpawnMarkers 返回 null）→ 跳过本轮（fail-safe，宁漏不误杀）。
  * 本函数不抛（全路径 catch 或降级返回），调用方可安全 fire-and-forget。
  */

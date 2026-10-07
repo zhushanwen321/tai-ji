@@ -35,7 +35,7 @@
  *     写日志（stderr + appendEntry 双通道，含 §5.2 形态 b 恢复指引）后
  *     ctx.abort()（停当前 turn，截断 token 燃烧窗口）+ ctx.shutdown() 优雅终止
  *     子进程（RPC mode 在 agent_settled 后 exit）——副作用序列见 runTerminalTeardown，
- *     装配层在 newlyTerminal 时调用。无兜底硬退 timer（ADR-0112 信任边界内不设防：
+ *     装配层在 newlyTerminal 时调用。无兜底硬退 timer（ADR-0122 信任边界内不设防：
  *     pi 挂死不 settle 的处置 = 父进程既有失败路径 + 用户重启应用，不建墙钟兜底）。
  *   - 成功调用清零（模型走通即无循环）。
  *
@@ -501,7 +501,7 @@ function writeTerminatedLog(pi: PiAPI, gate: WorkflowGate): void {
  * agent 操作——截断「shutdown 请求后当前 turn 的 bash/read/流式继续跑、模型继续烧
  * token」的窗口）→ ctx.shutdown()（RPC mode 置 shutdownRequested，agent_settled 后
  * 进程 exit(0)，父进程走「子进程结束但未产出 structured-output」的既有失败路径）。
- * 无兜底硬退 timer（ADR-0112 信任边界内不设防）：pi 挂死不 settle 时 shutdown 不返回
+ * 无兜底硬退 timer（ADR-0122 信任边界内不设防）：pi 挂死不 settle 时 shutdown 不返回
  * 的处置 = 父进程既有失败路径 + 用户重启应用，不建墙钟兜底。
  */
 export function runTerminalTeardown(pi: PiAPI, gate: WorkflowGate, ctx: ExtensionContext): void {

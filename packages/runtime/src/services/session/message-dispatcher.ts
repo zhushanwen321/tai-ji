@@ -48,7 +48,7 @@ import { BashDispatcher, type InternalBashDispatchReceipt } from './bash-dispatc
  * abort 发起方分型（U2 修复）：userStopped 拦截链复用 abort 完整链时区分「用户操作」
  * 与「runtime 自动拦截」的终态语义。默认 'user'（全部既有调用方零改动保持用户语义）；
  * 'convergence' 仅由 session-service 的 userStoppedGate.configure 接线传入（userStopped
- * 标记存活期 agent_start 挂点的 re-abort 通路）。[ADR-0112] 原定义在 abort-liveness.ts
+ * 标记存活期 agent_start 挂点的 re-abort 通路）。[ADR-0122] 原定义在 abort-liveness.ts
  *（三级阶梯），该编排链随 RPC 墙钟超时退役后类型迁入本文件。
  */
 export type AbortSource = 'user' | 'convergence'
@@ -191,7 +191,7 @@ export class MessageDispatcher {
     // ── requireCommand 原子校验（plugin-header-action-modal-points D6/u5a）──
     // 插件写路径前置校验：未命中 → 拒发回执（reason='command-missing'），不广播
     // message.error——回执机制（E14）就是它的反馈面，命令串不进模型、对话流无新消息。
-    // 校验位置 = hook 之后、内核提交之前。单次探测（ADR-0112：原 500ms×6 就绪轮询已删，
+    // 校验位置 = hook 之后、内核提交之前。单次探测（ADR-0122：原 500ms×6 就绪轮询已删，
     // 拒发 = 显式上报，重发决策归调用方）。
     if (requireCommand !== undefined) {
       const available = await this.ensureCommandAvailable(sessionId, requireCommand)
@@ -210,7 +210,7 @@ export class MessageDispatcher {
   /**
    * requireCommand 探测（plugin-header-action-modal-points D6/u5a）：直连
    * client.getCommands()（不走 sessionService.getCommands 的 markDirty 查询语义——那是
-   * UI 状态查询面路径）。单次探测（ADR-0112：500ms×6 就绪轮询已删）；client 未附着 =
+   * UI 状态查询面路径）。单次探测（ADR-0122：500ms×6 就绪轮询已删）；client 未附着 =
    * 未命中（拒发由调用方收口）；探测 RPC 失败视同未命中，warn 留排查线索（非静默吞）。
    */
   private async ensureCommandAvailable(sessionId: string, requireCommand: string): Promise<boolean> {
@@ -347,7 +347,7 @@ export class MessageDispatcher {
    * 中止 session 当前 turn（协作式 abort RPC）：成功 → occupancy #9 idle 复位 + stopped 终态
    * 写入 + message.complete{aborted} 收口广播；失败 → 显式上报收口（occupancy 复位 + stopped
    * 终态 + error 广播）。
-   * [ADR-0112 退役登记] abort RPC 超时三级阶梯（chat-domain-v1x-liveness-governance W7/D3，
+   * [ADR-0122 退役登记] abort RPC 超时三级阶梯（chat-domain-v1x-liveness-governance W7/D3，
    * 含 FROZEN_EVENT_SILENCE_MS 10min 保守窗——推翻 crash-forensics 附录 E 对 abort 阶梯
    * 兜底的背书）已随 RPC 墙钟超时整体删除：abort() 不再有超时失败形态（pi 卡死时该
    * Promise 悬挂，处置归用户「强制退出」）。
@@ -362,17 +362,19 @@ export class MessageDispatcher {
     try {
       await client.abort()
     } catch (e) {
-      // [HISTORICAL] abort 失败也必须广播终态（规则 #3）：否则前端 isStreaming / runtime
-      // isGenerating 永不复位，UI 卡在「思考中」。pi 卡死时 client.abort() 无响应，靠这条兜底。
+      // [HISTORICAL] abort await 失败也必须广播终态（规则 #3）：否则前端 isStreaming / runtime
+      // isGenerating 永不复位，UI 卡在「思考中」。失败信号来源 = pi 进程退出/流错误经 exit/error
+      // 事件链 rejectAll（rpc-client.ts），靠这条收尾；卡死悬挂不经此路径（无墙钟超时，
+      // 归用户强制退出，C-proc-13⑤）。
       const errMsg = toErrorMessage(e)
       console.error(`[message-dispatcher] abort failed (source=${source}): sessionId=${sessionId}`, errMsg)
       // 先取 active 再 destroy——destroySession 会删 processes/clientToId 条目，
       // 之后再经 getSessionByClient 反查会拿 undefined。
       const active = this.svc.getSessionByClient(client)
       if (active) {
-        // occupancy #9（D2 迁移）：abort RPC 失败兜底 → 'idle' 行（pi 卡死时 agent_settled
-        // 永不到达，turn 不能停留在 dispatching/generating/settling）。isGenerating=false 由
-        // 原语 flags 派生。
+        // occupancy #9（D2 迁移）：abort await 失败收口 → 'idle' 行（进入此分支的都是 pi 已
+        // 退出/流错误等显式失败，agent_settled 不会再到达，turn 不能停留在
+        // dispatching/generating/settling）。isGenerating=false 由原语 flags 派生。
         applySessionOccupancyTransition(active, this.messageBus, 'idle')
       }
 
@@ -589,8 +591,8 @@ export class MessageDispatcher {
     // [RT-4#10] 预检与置位原子化：预检通过后立即写 'compacting-start'（原语义 = 只在 pi
     // compaction_start 事件回流后由 interpreter 置位，事件往返窗内第二个 compact 的预检
     // 仍读 false → 两连发双双通过 → 双 compaction 事件流）。事件回流时 interpreter 的
-    // 'compacting-start' 经原语全等去重幂等（不双写）。RPC 为同步等待压缩完成（pi 0.84.4
-    // agent-session.js:1468 compact() await 全程），finally 的 'compacting-end' 复位与
+    // 'compacting-start' 经原语全等去重幂等（不双写）。RPC 为同步等待压缩完成（pi 1.0.0
+    // agent-session.js compact() await 全程），finally 的 'compacting-end' 复位与
     // compaction_end 事件三路对称复位语义保持。
     if (active) {
       applySessionOccupancyTransition(active, this.messageBus, 'compacting-start')

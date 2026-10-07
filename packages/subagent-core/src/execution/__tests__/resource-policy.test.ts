@@ -14,6 +14,17 @@ import {
   hasIdleTimer,
 } from "../lifecycle/lifecycle-manager.ts";
 
+// [teardown 竞态修复] 被测链（lifecycle-manager 非法 env 回落 warn）传递性 logger 输出经
+// console 落 stderr——同步用例的刷写落在文件结束的 teardown 窗口，与 worker rpc 关闭
+// 竞态 → vitest EnvironmentTeardownError（onUserConsoleLog pending）→ run 退出码 1。
+// 本文件对 logger 零断言依赖，mock 静默（rebuild-indexes.test.ts 同款先例）。
+const { loggerMock } = vi.hoisted(() => ({
+  loggerMock: { debug: vi.fn(), warn: vi.fn(), error: vi.fn() },
+}));
+vi.mock("../../core/logger.ts", () => ({
+  getLogger: () => loggerMock,
+}));
+
 describe("resource-policy — SP-6 idleTimeoutMs 配置化", () => {
   const ENV_KEY = "TAIJI_SUBAGENT_IDLE_TIMEOUT_MS";
 

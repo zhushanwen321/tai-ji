@@ -1,5 +1,5 @@
 /**
- * exit 边沿收尾（ADR-0112 改造：原 2s kill(pid,0) 轮询器已删，感知归 ChildProcess
+ * exit 边沿收尾（ADR-0122 改造：原 2s kill(pid,0) 轮询器已删，感知归 ChildProcess
  * exit 事件——事件驱动，无时间驱动成分）。
  *
  * 为什么事件可用（原 D17 轮询的根因已消解）：同进程 session 替换（fork/switch/new）

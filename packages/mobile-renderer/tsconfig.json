@@ -6,7 +6,6 @@
     "moduleResolution": "bundler",
     "strict": true,
     "noEmit": true,
-    "declaration": true,
     "skipLibCheck": true,
     "jsx": "preserve",
     "isolatedModules": true,

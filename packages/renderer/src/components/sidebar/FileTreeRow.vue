@@ -119,7 +119,7 @@ const { t } = useI18n()
 const props = defineProps<{
   /** 可见行（投影产物，depth/expanded/徽章/角标已预计算） */
   row: VisibleRow
-  /** 选中态（store.selectedPath === row.path，由 FileView 传入——本组件零 store 依赖） */
+  /** 选中态（store.getSelectedPath(sessionId) === row.path，由 FileView 传入——本组件零 store 依赖） */
   selected?: boolean
 }>()
 

@@ -18,7 +18,7 @@ describe('A1-migration 搬迁: gate 拒绝→留守→边沿/外部触发重投'
     expect(port.sendCalls).toHaveLength(0)
 
     vi.advanceTimersByTime(10_000)
-    expect(port.sendCalls).toHaveLength(0) // busy 留守：无退避轮询强发（ADR-0112）
+    expect(port.sendCalls).toHaveLength(0) // busy 留守：无退避轮询强发（ADR-0122）
 
     port.idle = true
     handle.flush() // 外部触发复核（真实链 = settled 边沿驱动）
@@ -28,7 +28,7 @@ describe('A1-migration 搬迁: gate 拒绝→留守→边沿/外部触发重投'
     handle.dispose()
   })
 
-  it('主 agent 持续 busy 留守不发送（无订阅装配也不强发——ADR-0112 退避轮询退役）', () => {
+  it('主 agent 持续 busy 留守不发送（无订阅装配也不强发——ADR-0122 退避轮询退役）', () => {
     const port = makeMockPort()
     port.idle = false
     const handle = createDelivery(port)
@@ -114,7 +114,7 @@ describe('A1-migration 搬迁: dispose 短路', () => {
     expect(handle.depth()).toBe(0)
   })
 
-  it('dispose 后 flush 不再触发发送（调度面全部短路；ADR-0112 退役后已无退避 timer）', () => {
+  it('dispose 后 flush 不再触发发送（调度面全部短路；ADR-0122 退役后已无退避 timer）', () => {
     vi.useFakeTimers()
     const port = makeMockPort()
     port.idle = false

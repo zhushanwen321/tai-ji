@@ -1,5 +1,25 @@
 # @zhushanwen/subagent-core
 
+## 1.3.0
+
+### Minor Changes
+
+- 802af968f: pi 1.0.0 adaptation batch: extension-protocol adds the subagent journal push-channel wire types (marker/report/ack); pi-rpc, subagent-core, session-delivery and zcode-subagent-cli retire the defensive timeout/backoff/retry timer families (finality is now event-driven per ADR-0112/ADR-0122, and session-delivery drops the dead sendAttempts field); pi-subagent-cli passes images and output text through to the subagent drawer projection; subagent-engine-sdk removes the crash-rebuild backoff defense from its surface; session-core accepts pi 1.0.0's four-value message roles so system messages are no longer silently dropped.
+
+## 1.2.1
+
+### Patch Changes
+
+- 492e02447: Export isTargetFile from the resource-discovery module so downstream test suites can derive their expectation sets from the same discovery-layer criterion instead of duplicating the filter logic.
+
+## 1.2.0
+
+### Minor Changes
+
+- b44f1316b: The workflow DAG parser now registers named functions whose body contains exactly one `agent()` call as agent-helpers and projects each helper call site as a virtual agent node (display name from the first argument, phase from the call site's lexical context), so platform-adapter scripts that wrap dispatches in helpers no longer degenerate to a single default-phase node with every runtime instance unmatched. Phase context is scoped at function boundaries (a `phase()` inside a deferred named function no longer pollutes attribution of later call sites), and helper acceptance is resolved by iterative dependency fate instead of evaluation order (multi-agent-call helpers, zero-arg helpers, anonymous callbacks, helper-to-helper chains, mutual-call cycles and duplicate names stay on the lexical fallback path).
+
+- b44f1316b: Add `displayWorkflowName` to the barrel export for basename display of workflow script paths. `WorkflowRecordRegisteredEntryData` gains an optional `scriptPath` field and `buildWorkflowRecordRegisteredEntryData` accepts an optional `scriptPath` param (both fall back to an empty string at runtime, so entry shape is unchanged); resume-rebuilt entries now carry the real `scriptPath` from the run-created frame instead of a hardcoded empty one.
+
 ## 1.1.0
 
 ### Minor Changes

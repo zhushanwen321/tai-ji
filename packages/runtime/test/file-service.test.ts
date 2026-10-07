@@ -1,6 +1,6 @@
 /**
  * file-service.test.ts — searchFilesInCwd cwd 路用例（u2-runtime，landing `$` 候选数据通路）。
- * [ADR-0112 退役登记] F6 文件操作超时直测 describe 已随 fs 读取墙钟（READ_TIMEOUT_MS /
+ * [ADR-0122 退役登记] F6 文件操作超时直测 describe 已随 fs 读取墙钟（READ_TIMEOUT_MS /
  * withTimeout 原语）删除。
  *
  * mock 策略照 file-service-ignore-cache.test.ts 范式（IFileExecutor + ISessionService

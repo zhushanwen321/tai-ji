@@ -334,7 +334,7 @@ describe('活动补拉：首拉早于 entry 落盘 + 帧不可靠窗口的丢帧
     expect(commandMock).toHaveBeenCalledTimes(2)
   })
 
-  it('[ADR-0112] 无冷却门：紧随的后续活动信号同样按门条件触发补拉（时间节流已删）', async () => {
+  it('[ADR-0122] 无冷却门：紧随的后续活动信号同样按门条件触发补拉（时间节流已删）', async () => {
     const host = mountHost('A')
     await settle()
     resolveLatestForSid('A', { sessionId: 'A', planState: planStateOf('A', { isActive: false }) })

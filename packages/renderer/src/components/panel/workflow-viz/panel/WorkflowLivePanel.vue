@@ -2,7 +2,7 @@
   <!--
     WorkflowLivePanel —— workflow overlay 右栏实况面板（workflow-visualization 设计 §3.1-2
     两级 tab）：header（run 状态 pill + 已用时长停走 + args 摘要）+ L2TabBar（一级 tab：
-    workflow 固定 + phase/agent 动态 tab，close/pin 复用 @taiji/ui L2TabBar）+ 内容分发。
+    workflow 固定 + phase/agent 动态 tab，close 复用 @taiji/ui L2TabBar）+ 内容分发。
     tab 关闭激活左侧相邻 tab，无左侧相邻回 workflow 固定 tab（panel-tabs.ts 纯逻辑）。
     D11③ 切换 run = overlay 容器按 runId 重挂载本面板（:key），tab 随挂载态消亡构造性
     达成；本组件对 props.run.runId 变化仍做防御性重置（容器未 keyed 时 tab 不串 run）。
@@ -29,7 +29,7 @@
       >{{ run.argsSummary }}</span>
     </div>
 
-    <!-- 一级 tab 栏（L2TabBar 复用——close/pin 事件现成；固定 tab builtin 不渲染 close） -->
+    <!-- 一级 tab 栏（L2TabBar 复用——close 事件现成；固定 tab builtin 不渲染 close） -->
     <div class="shrink-0 px-2 py-1.5">
       <L2TabBar
         :tabs="tabItems"
@@ -37,7 +37,6 @@
         data-testid="wf-viz-tabbar"
         @update:model-value="activeKey = $event"
         @close="onCloseTab"
-        @pin="onPinTab"
       />
     </div>
 
@@ -114,7 +113,6 @@ watch(
     if (runId === prevRunId) return
     tabs.value = []
     activeKey.value = WORKFLOW_FIXED_TAB_KEY
-    pinnedKeys.value.clear()
     store.setActiveWorkflowRun(props.sessionId, runId)
     void store.loadWorkflowRunEvents(props.sessionId, runId)
   },
@@ -127,11 +125,10 @@ onUnmounted(() => {
 
 const tabs = ref<WorkflowLiveTab[]>([])
 const activeKey = ref<string>(WORKFLOW_FIXED_TAB_KEY)
-const pinnedKeys = ref(new Set<string>())
 
 const tabItems = computed<L2TabItem[]>(() => [
   { viewId: WORKFLOW_FIXED_TAB_KEY, title: props.run.scriptName, builtin: true },
-  ...tabs.value.map((tab) => ({ viewId: tab.key, title: tab.title, pinned: pinnedKeys.value.has(tab.key) })),
+  ...tabs.value.map((tab) => ({ viewId: tab.key, title: tab.title })),
 ])
 
 const activeTab = computed<WorkflowLiveTab | undefined>(() =>
@@ -150,14 +147,6 @@ function onCloseTab(viewId: string): void {
   const next = closeLiveTab(tabs.value, activeKey.value, viewId)
   tabs.value = next.tabs
   activeKey.value = next.activeKey
-}
-
-function onPinTab(viewId: string): void {
-  // pin = 本地视觉态（pinned 常显 accent，PluginViewContainer 同款语义；不持久化、不改
-  // 关闭行为——D11③ 切换 run 时 tab 随挂载态一并消亡）
-  if (pinnedKeys.value.has(viewId)) pinnedKeys.value.delete(viewId)
-  else pinnedKeys.value.add(viewId)
-  pinnedKeys.value = new Set(pinnedKeys.value)
 }
 
 /** 打开 phase tab（点 DAG phase 分区由 u4 容器经 expose 调用；已存在则仅激活）。 */

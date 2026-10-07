@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, useAttrs } from "vue"
+import { computed, getCurrentInstance, onBeforeUnmount, useAttrs } from "vue"
 import type { DialogContentEmits, DialogContentProps } from "reka-ui"
 import type { HTMLAttributes } from "vue"
 import { reactiveOmit } from "@vueuse/core"
@@ -9,9 +9,11 @@ import {
   DialogContent,
   DialogOverlay,
   DialogPortal,
+  injectDialogRootContext,
   useForwardPropsEmits,
 } from "reka-ui"
 import { cn } from "../../lib/utils"
+import { registerUiModalSurface } from "../../modal-surface-registrar"
 
 // 禁用自动继承：模板根元素是 DialogPortal（reka-ui），它内部用 <Teleport> 渲染，
 // Vue 无法在 Teleport 上继承 non-prop attrs（如 data-testid），会触发 warn。
@@ -28,6 +30,18 @@ const delegatedProps = reactiveOmit(props, "class")
 const forwarded = useForwardPropsEmits(delegatedProps, emits)
 /** 合并 forwarded props + fallthrough attrs（如 data-testid），一次性绑到内层 reka-ui DialogContent */
 const mergedAttrs = computed(() => ({ ...forwarded, ...attrs }))
+
+// 模态表面聚合注册（§6.7 modal-dialog 族，经 renderer 注册桥——层级方向见
+// modal-surface-registrar.ts 文件头）：本原语常驻挂载（消费方模板恒含），开合态绑 reka
+// DialogRoot context 的 open ref 状态本体（动作时刻直读，§6.7 R4 时序前提）；未在
+// DialogRoot 内使用时 context 为 null。实例级 key = Vue 实例 uid。未装配桥静默跳过。
+const dialogRootContext = injectDialogRootContext(null)
+const disposeSurfaceRegistration = registerUiModalSurface({
+  surface: 'dialog-confirm',
+  key: `dialog-content-${getCurrentInstance()?.uid ?? 0}`,
+  isOpen: () => dialogRootContext?.open.value ?? false,
+})
+onBeforeUnmount(disposeSurfaceRegistration)
 </script>
 
 <template>

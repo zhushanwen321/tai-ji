@@ -71,6 +71,14 @@
    "types": "./src/domain/drawer/index.ts",
    "import": "./src/domain/drawer/index.ts"
   },
+  "./domain/bottom-drawer": {
+   "types": "./src/domain/bottom-drawer/index.ts",
+   "import": "./src/domain/bottom-drawer/index.ts"
+  },
+  "./domain/overlay": {
+   "types": "./src/domain/overlay/index.ts",
+   "import": "./src/domain/overlay/index.ts"
+  },
   "./domain/session": {
    "types": "./src/domain/session/index.ts",
    "import": "./src/domain/session/index.ts"
@@ -118,6 +126,10 @@
   "./transport/ws-client": {
    "types": "./src/transport/ws-client.ts",
    "import": "./src/transport/ws-client.ts"
+  },
+  "./utils/random-uuid": {
+   "types": "./src/utils/random-uuid.ts",
+   "import": "./src/utils/random-uuid.ts"
   }
  },
  "scripts": {

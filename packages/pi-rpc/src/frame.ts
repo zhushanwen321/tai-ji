@@ -8,7 +8,7 @@
 //     ← runtime packages/runtime/src/infra/pi/rpc-client.ts（D10 分帧防御 /
 //     early-frame-buffer 设计）
 //
-// 退役登记（ADR-0112 防御机制清查）：pending 表墙钟超时（L6 超时分级 CMD/FAST/SLOW）
+// 退役登记（ADR-0122 防御机制清查）：pending 表墙钟超时（L6 超时分级 CMD/FAST/SLOW）
 // 与 timedOutIds 迟到响应丢弃（S6，TTL 5s）已整体删除——pi 对 RPC 永不响应时调用方
 // promise 悬挂，处置归 pi 进程 exit 事件链（rejectAll）而非墙钟猜测。
 //   - tryWriteStdinLine / isBrokenPipeError ← pi-subagent-cli stdin-writer.ts 的
@@ -99,7 +99,7 @@ export interface PendingRegistry<TMsg = PiMessage> {
 /**
  * RPC pending 表：请求-响应配对。
  *
- * 无墙钟超时（ADR-0112 防御机制清查退役）：pi 对某 RPC 永不响应时 pending 悬挂，
+ * 无墙钟超时（ADR-0122 防御机制清查退役）：pi 对某 RPC 永不响应时 pending 悬挂，
  * 失败信号由 pi 进程 exit 事件链经 rejectAll 统一收口，不做时间窗猜测。
  */
 export function createPendingRegistry<TMsg = PiMessage>(): PendingRegistry<TMsg> {

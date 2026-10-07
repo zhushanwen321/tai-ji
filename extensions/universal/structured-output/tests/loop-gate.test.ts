@@ -663,7 +663,7 @@ describe("setupWorkflowHook assembly (via mock pi)", () => {
 // ── terminal teardown（abort 停当前 turn + shutdown 优雅终止；无兜底硬退 timer）──────
 
 // （原 R3 F-2 bounded teardown 组——15s 兜底硬退 timer 的常量锁定 / 到点硬退 /
-// 幂等武装三用例——已随 ADR-0112 清查删除：墙钟兜底不建，pi 挂死不 settle 的
+// 幂等武装三用例——已随 ADR-0122 清查删除：墙钟兜底不建，pi 挂死不 settle 的
 // 处置 = 父进程既有失败路径 + 用户重启应用。）
 
 // ── D2 双闸门合一等价断言（单状态机交互时序锁）─────────────────
@@ -761,7 +761,7 @@ describe("index assembly: gate wired into workflow mode", () => {
 //   ① stale（文案分诊）→ 跳过优雅退出（shutdown 不被调）+ stderr 降级日志
 //   ② 非 stale → 优雅退出照常（abort 先行 + shutdown）（正常路径回归）
 //   ③ 非 stale 真实错误 → 原样上抛（守卫不吞 bug）
-// （原三态各自的 force-exit timer 武装断言随 ADR-0112 墙钟兜底删除一并移除。）
+// （原三态各自的 force-exit timer 武装断言随 ADR-0122 墙钟兜底删除一并移除。）
 describe("terminal teardown stale ctx 守卫（crash-resilience D1）", () => {
 	/** 三次同签名失败驱动 gate 到 newlyTerminal（每次 emit 后 handler 同步完成）。 */
 	const GATE_ERROR = paramLayerErrorText("  - magic: must be equal to constant", "{}");

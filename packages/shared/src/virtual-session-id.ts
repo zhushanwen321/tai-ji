@@ -157,3 +157,31 @@ export function isBtwVirtualId(sessionId: string): boolean {
 export function extractBtwPiSessionId(virtualId: string): string {
   return virtualId.slice(BTW_PREFIX.length)
 }
+
+// ── 虚拟 id → 底层真实 session id 解析（renderer 数据链进 runtime RPC 前的规整）──
+
+/**
+ * 解析虚拟 session id 为底层真实 pi session id。
+ *
+ * 背景（fileSearch vid 修复，方案 A）：runtime file.search 等服务只登记真实 pi session
+ * （sessionService.getSummary 查 lifecycle 注册表），vid 直传必 session_not_found。
+ * 「vid 只做前端路由 key，需要真实 id 的 RPC 由调用方先解析」是现行契约（agentcall D4
+ * 先例：历史拉取走 getAgentCallHistory(mainSid, acsId) 显式双参数）——本函数是该解析的
+ * 跨层单一实现（renderer useChatViewDeps / sessionCwdOf 等数据链消费）。
+ *
+ * 规则：
+ * - 真实 id（无冒号）→ 原样返回（直通）
+ * - `subagent:<mainSid>:<subId>` → mainSid（三段式自带归属命名空间，ownerSessionId 不消费）
+ * - `btw:<piSid>` → piSid（两段式映射即 extract——线自身就是真实 pi session，runtime
+ *   hidden 注册；线 cwd = 主会话 cwd，链接解析语义一致）
+ * - `agentcall:<acsId>` → ownerSessionId（两段式无归属命名空间，挂载链显式传入；
+ *   acsId 是 agent call 自身的 subagent session id，不在 runtime session 注册表）
+ * - 其余带冒号的未知形态 → undefined（fail-safe：不把未知 vid 传给 runtime RPC）
+ */
+export function resolveVirtualSessionId(virtualId: string, ownerSessionId?: string): string | undefined {
+  if (!virtualId.includes(':')) return virtualId
+  if (isSubagentVirtualId(virtualId)) return extractMainSessionId(virtualId)
+  if (isBtwVirtualId(virtualId)) return extractBtwPiSessionId(virtualId)
+  if (isAgentCallVirtualId(virtualId)) return ownerSessionId || undefined
+  return undefined
+}

@@ -1,6 +1,6 @@
 {
   "name": "@taiji/electron",
-  "version": "0.10.10",
+  "version": "0.10.14",
   "private": true,
   "description": "AI Agent Desktop Workstation",
   "author": {
@@ -18,11 +18,12 @@
     "build:runtime": "pnpm --filter @zhushanwen/subagent-core run build && pnpm --filter @taiji/runtime run build",
     "build:main": "vite build --config vite.config.main.ts",
     "build:preload": "vite build --config vite.config.preload.ts",
-    "build": "pnpm run prepare-builtin-extensions && node ../../scripts/verify-staged-extensions.mjs && pnpm run prepare-builtin-plugins && pnpm run build:runtime && pnpm run build:vite && pnpm run build:main && pnpm run build:preload && electron-builder --publish never",
+    "build": "pnpm run prepare-builtin-extensions && node ../../scripts/verify-staged-extensions.mjs && pnpm run prepare-builtin-plugins && pnpm run build:runtime && pnpm run build:vite && pnpm run build:mobile && pnpm run build:main && pnpm run build:preload && electron-builder --publish never",
     "prepare-builtin-extensions": "bash ../../scripts/prepare-builtin-extensions.sh",
     "prepare-builtin-plugins": "bash ../../scripts/prepare-builtin-plugins.sh",
-    "build:dir": "pnpm run prepare-builtin-extensions && node ../../scripts/verify-staged-extensions.mjs && pnpm run prepare-builtin-plugins && pnpm run build:runtime && pnpm run build:vite && pnpm run build:main && pnpm run build:preload && electron-builder --publish never --dir",
+    "build:dir": "pnpm run prepare-builtin-extensions && node ../../scripts/verify-staged-extensions.mjs && pnpm run prepare-builtin-plugins && pnpm run build:runtime && pnpm run build:vite && pnpm run build:mobile && pnpm run build:main && pnpm run build:preload && electron-builder --publish never --dir",
     "build:vite": "pnpm --filter @taiji/frontend run build",
+    "build:mobile": "pnpm --filter @taiji/mobile-renderer run build",
     "build:e2e": "pnpm run build:main && pnpm run build:preload && pnpm run build:vite",
     "typecheck:preload": "tsc -p tsconfig.preload.json",
     "test": "pnpm run test:main",

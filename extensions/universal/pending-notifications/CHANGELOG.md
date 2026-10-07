@@ -1,5 +1,11 @@
 # @zhushanwen/pi-pending-notifications
 
+## 0.8.2
+
+### Patch Changes
+
+- 802af968f: (no changeset body; patch version bump)
+
 ## 0.8.1
 
 ### Patch Changes

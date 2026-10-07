@@ -485,13 +485,15 @@ const runFlow = async () => {
     step('SEC-A5 前置 路径注入插件激活 (e2e-evil-d，sessionData 探针已随 activate 发出)', evilD?.status === 'active', `status=${evilD?.status}`)
 
     // ── E: 运行时权限批准唤醒（boot 挂起 → approvePermissions → 毫秒级激活）──
-    // e2e-perm 未预批准，boot 激活挂起等审批。批准 RPC reply 返回即 approvePermissions
-    // 完成（内部 await 了被唤醒的激活）——修复前该链路断裂，挂起只能等 30s 超时
-    // （实测 plugins=30007.5ms），故耗时阈值 10s 是宽松上限（实测 ~100ms）。
+    // e2e-perm 未预批准，boot 激活挂起等审批。批准 RPC reply 为 pong ack（权限命令
+    // 不回插件列表）——RPC resolve 即 approvePermissions 完成（内部 await 了被唤醒的
+    // 激活），激活后的列表状态经 plugin.list 查询断言；修复前该链路断裂，挂起只能等
+    // 30s 超时（实测 plugins=30007.5ms），故耗时阈值 10s 是宽松上限（实测 ~100ms）。
     const tApprove = Date.now()
-    const approveReply = await send('plugin.approvePermissions', { pluginId: 'e2e-perm', permissions: ['plugin.hooks.register'] })
+    await send('plugin.approvePermissions', { pluginId: 'e2e-perm', permissions: ['plugin.hooks.register'] })
     const approveElapsed = Date.now() - tApprove
-    const permPlugin = approveReply.payload.plugins.find((p) => p.pluginId === 'e2e-perm')
+    const permPlugins = await listPlugins()
+    const permPlugin = permPlugins.find((p) => p.pluginId === 'e2e-perm')
     step('E1 运行时批准后立即激活 (e2e-perm)', permPlugin?.status === 'active', `status=${permPlugin?.status} elapsed=${approveElapsed}ms`)
     step('E2 批准唤醒毫秒级完成（< 10s，非 30s 超时路径）', approveElapsed < 10000, `${approveElapsed}ms`)
 

@@ -1,7 +1,7 @@
 /**
  * RespawnOrchestrator 单测（崩溃上报 + 惰性恢复 join；发布判别 msg-pipeline-debloat D3）。
  *
- * [ADR-0112 退役登记] 原「5s 延迟自动恢复 + 连续失败熔断」机制（schedule 重试链 /
+ * [ADR-0122 退役登记] 原「5s 延迟自动恢复 + 连续失败熔断」机制（schedule 重试链 /
  * RESPAWN_DELAY_MS / RESPAWN_MAX_CONSECUTIVE_FAILURES / 熔断计数）已删除，对应用例随
  * 机制退役。现覆盖：
  * - crashExit：崩溃显式上报（fate terminal 发声）+ 守卫（isActive 防御位 / in-flight
@@ -77,7 +77,7 @@ describe('RespawnOrchestrator（崩溃上报 + 惰性恢复 join）', () => {
     const orchestrator = new RespawnOrchestrator(deps)
     wireFacadeContract(deps, orchestrator)
     orchestrator.crashExit('s1')
-    // ADR-0112：不再自动恢复——restore 不被调用
+    // ADR-0122：不再自动恢复——restore 不被调用
     expect(deps.restore).not.toHaveBeenCalled()
     // 崩溃发声（显式上报）
     expect(fatesOf('s1')).toEqual(['terminal'])

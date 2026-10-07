@@ -11,6 +11,7 @@
   <Transition name="rolling-restart-banner">
     <div
       v-if="visible"
+      ref="bannerRef"
       data-testid="rolling-restart-banner"
       :data-phase="phase.kind"
       role="alert"
@@ -34,16 +35,34 @@
 </template>
 
 <script setup lang="ts">
-import { computed, type Component } from 'vue'
+import { computed, onBeforeUnmount, ref, type Component } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { AlertCircle, CheckCircle2, Hourglass, TriangleAlert, X } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
+import { registerModalSurface } from '@/composables/features/app/modal-surface-registry'
 import { useRollingRestartStatus } from '@/composables/useRollingRestartStatus'
 
 const { t } = useI18n()
 const { phase, dismiss } = useRollingRestartStatus()
 
 const visible = computed(() => phase.value.kind !== 'idle')
+
+// 模态表面聚合注册（§6.7 横幅族）：非阻塞横幅不入让位族，只入 view 遮蔽族（shieldsView
+// intersecting——与 view 矩形几何相交才隐藏）。开合态绑 visible 状态本体（phase 广播驱动）；
+// rect 读横幅根元素实测（四态文案/图标切换的几何在重渲染后由上报链重测）。旗标组由登记表按 id 读取。
+const bannerRef = ref<HTMLElement | null>(null)
+function bannerRect(): { x: number; y: number; width: number; height: number } | null {
+  if (!bannerRef.value) return null
+  const r = bannerRef.value.getBoundingClientRect()
+  return { x: r.x, y: r.y, width: r.width, height: r.height }
+}
+const disposeSurfaceRegistration = registerModalSurface({
+  surface: 'rolling-restart-banner',
+  key: 'rolling-restart-banner',
+  isOpen: () => visible.value,
+  rect: bannerRect,
+})
+onBeforeUnmount(disposeSurfaceRegistration)
 
 /** 分档色调：推迟/预告 = warn、红牌 = danger、已恢复 = info（token 色，不硬编码）。 */
 const toneClass = computed(() => {

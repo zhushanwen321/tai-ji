@@ -66,7 +66,7 @@ const AbortSessionParams = Type.Object({
  * 本工具失败恒走 throw，两版语义等价（语义登记 PS-56）。
  * 通道异常与非 JSON 回包的留痕由原语经注入的 log 承担。
  *
- * 不传 timeout（ADR-0112：无包内挂死兜底，handler 不回包时工具调用长挂、失败直报；
+ * 不传 timeout（ADR-0122：无包内挂死兜底，handler 不回包时工具调用长挂、失败直报；
  * 原 SELECT_TIMEOUT_MS per-action 表已删——原 watch 通道 D2/P1 的无 timer 长挂形态
  * 现为全部 action 统一形态：任意晚的 respond 按 id 精确 resolve）。
  */
@@ -88,7 +88,7 @@ function callSessionManager(
 		ui: { select: ctx.ui.select.bind(ctx.ui) },
 	};
 	return callMarkerRpc(guiCtx, SESSION_MANAGER_MARKER, payload, {
-		// 全 action 不传 timeout（ADR-0112：无包内挂死兜底；无 timer 长挂，任意晚的 respond 按 id 精确 resolve）
+		// 全 action 不传 timeout（ADR-0122：无包内挂死兜底；无 timer 长挂，任意晚的 respond 按 id 精确 resolve）
 		log: (msg, detail) => logger.error(`[session-manager] ${msg}`, detail),
 	});
 }
@@ -109,10 +109,13 @@ function asResultRecord(v: unknown): Record<string, unknown> | undefined {
 /**
  * 统一的 execute 包装：调用 select 通道并解析结果。
  * 返回标准 AgentToolResult 形状；select 取消/超时/异常/非 JSON 回包是错误路径，
- * 必须 throw（extension-conventions「禁止错误成功模式」——pi 契约里 execute 只有
- * throw 才被置 isError:true，返回值携带 isError 字段会被 agent-loop 丢弃
- * （agent-loop.js:453-483，PS-56），ask-user/scheduler/session-reader 的 W4 throw
- * 范式同款；调用方 agent 需能区分成功与失败以决定重试/放弃）。
+ * 必须 throw（extension-conventions「禁止错误成功模式」——execute throw → pi
+ * agent-loop catch 置 isError:true（pi-agent-core dist/agent-loop.js
+ * executePreparedToolCall，1.0.0 实读 catch :581-588）；1.0.0 起返回值 isError:true
+ * 也被尊重（同文件 :579 `isError: result.isError === true`，0.84.4 时返回值会被
+ * 丢弃）——本工具失败恒走 throw，两版语义等价（语义登记 PS-56）；
+ * ask-user/scheduler/session-reader 的 W4 throw 范式同款，调用方 agent 需能区分
+ * 成功与失败以决定重试/放弃）。
  */
 async function executeTool(
 	ctx: ExtensionContext,

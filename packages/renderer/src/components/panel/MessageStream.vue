@@ -173,12 +173,12 @@
     </Transition>
 
     <!-- TurnRail（w4 wave IF4）：右侧导航 rail，hover 弹出 turn 列表 + viewport indicator。
-         纯展示组件，展开态/activeTurnIndex/事件全路由到此层（useTurnExpansion 与 Turn.vue 共享）。 -->
+         纯展示组件，展开态/activeTurnIndex/事件全路由到此层（useTurnExpansion 与 Turn.vue 共享）。
+         三卡化后 rail absolute 于本容器右缘（容器 overflow 由对话流卡裁剪），不再传视口坐标。 -->
     <TurnRail
       :turns="railTurns"
       :active-turn-index="activeTurnIndex"
       :session-active="isSessionActive"
-      :panel-right-edge="panelRightEdge"
       :expanded-turns="expandedTurns"
       @jump="onJump"
       @toggle="onToggle"
@@ -239,6 +239,11 @@ import {
 
 const props = defineProps<{
   sessionId: string
+  /** 虚拟 id 的归属主 session（agentcall 快照视图挂载链显式传入——两段式 vid 无 mainSid
+   *  命名空间；subagent:/btw: vid 自带归属，本 prop 不消费。经 useChatViewDeps 用于
+   *  file.search 白名单与 markdown 路径点击的 cwd 解析——runtime RPC 只认真实 session id，
+   *  vid 直传必 session_not_found，fileSearch vid 修复） */
+  mainSessionId?: string
 }>()
 
 // [u5] 安装 preset 首次 connected 自动加载（幂等；detached 单例 watch，不随本组件卸载停止）。
@@ -323,7 +328,7 @@ const vlistRef = shallowRef<VirtualizerHandle | null>(null)
 
 /** [cw wave w3] 滚动容器 el（::-webkit-scrollbar 自定义 + pt-5 留白）。消费方：
  *  <Virtualizer :scroll-ref>（D3）/ useMessageStreamFollowTriggers 视口 RO /
- *  useMessageStreamRail（closest('section') 算 panelRightEdge）。 */
+ *  useMessageStreamRail（rail 事件路由）。 */
 const scrollEl = ref<HTMLElement | null>(null)
 
 /** B2 dev-only 常量漂移检测：ResizeObserver 实测 vs 像素常量，不匹配 console.warn。生产裁剪零开销。 */
@@ -428,16 +433,19 @@ const rail = useMessageStreamRail({
   sessionId,
   // [u5] streamItems 基准（rail jump/active 的 virtua 下标空间 = :data，见 streamItems 注释）
   renderItems: streamItems,
-  scrollEl,
   vlistRef,
 })
-const { railTurns, activeTurnIndex, panelRightEdge, expandedTurns, onJump, onToggle } = rail
+const { railTurns, activeTurnIndex, expandedTurns, onJump, onToggle } = rail
 
 // [w6 T6] ui 包 chat 展示组件经 inject token 消费壳层依赖：ChatViewDepsKey（~20 字段：
 //   store 数据 / RPC 回调 / 文件加载 / 重库渲染），useChatViewDeps 装配器把 renderer
 //   store/composable/纯函数绑定到各字段。（trace 折叠 stick-guard 通路已随 <Transition>
 //   删除退役；guarded 回归结构上不可能：INVAR-M4-2′ 复合判据下写入回声永不翻 false。）
-provide(ChatViewDepsKey, useChatViewDeps(sessionId))
+provide(
+  ChatViewDepsKey,
+  // mainSessionId 透传（agentcall 快照视图归属解析；真实 session 视图不传，解析直通不受影响）
+  useChatViewDeps(sessionId, { mainSessionId: computed(() => props.mainSessionId) }),
+)
 
 /**
  * [cw wave w3] virta scroll 事件聚合 handler（IF7 @scrollEnd 用于 showJumpButton 稳定判定）。

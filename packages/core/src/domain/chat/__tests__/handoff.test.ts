@@ -7,7 +7,7 @@
  * - handingOffSessions Set 置位/复位（不可变写、per-session 隔离）
  * - ref 响应性形态
  *
- * [ADR-0112] 无墙钟兜底 timer（原 700s 超时兜底已删）：复位完全依赖事件
+ * [ADR-0122] 无墙钟兜底 timer（原 700s 超时兜底已删）：复位完全依赖事件
  * （handoffComplete / handoffAborted 广播、RPC reject catch、abort 编排），无定时器可测。
  */
 import { describe, it, expect } from 'vitest'

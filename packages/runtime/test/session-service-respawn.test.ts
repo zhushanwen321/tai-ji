@@ -3,7 +3,7 @@
  * SessionService 构造器接线（onSessionExit 链尾部 crashExit / removeSessionEntry 汇聚点
  * cancel / ensureActive join）。
  *
- * [ADR-0112 退役登记] 原「5s 延迟自动恢复 + 熔断 + restoreFailed 推送」机制的组装级
+ * [ADR-0122 退役登记] 原「5s 延迟自动恢复 + 熔断 + restoreFailed 推送」机制的组装级
  * 用例（①/③c/⑨/D3-①b/①c/⑥ 的 timer 维度）随机制退役。现覆盖：
  * - 崩溃上报集成：非主动退出（triggerExit）→ crashExit 显式上报（不做自动 restore）；
  * - ②反向（A7）：forceQuit 不触发崩溃上报——事实核验（只读确认）：forceQuitSession 在
@@ -235,7 +235,7 @@ describe('u8 组装级（SessionService 接线：崩溃上报 + 惰性恢复 joi
     setup.triggerExit('s1', 1, 'boom')
     // 进程退出链：session.exited 照常发布（既有行为不回归）
     expect(setup.messageBus.publish).toHaveBeenCalledWith('s1', expect.objectContaining({ type: 'session.exited' }))
-    // ADR-0112：不再自动恢复——restore 不被调用
+    // ADR-0122：不再自动恢复——restore 不被调用
     expect(restoreSpy).not.toHaveBeenCalled()
 
     // 用户手动恢复：facade 尾部出口发布恰好一条（崩溃登记命中）

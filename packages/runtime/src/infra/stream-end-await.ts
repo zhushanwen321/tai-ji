@@ -8,7 +8,7 @@
  *   终止进程、rename 前必须有「无在途写」保证——都要求等待落盘完成，否则缓冲窗口内的
  *   尾部日志在退出时丢失 / 轮转边界在途写被 orphaning（审查 m-6）。
  * - **永不 reject**（best-effort）：'error' 也 resolve，避免日志类设施阻塞进程退出。
- * - **无墙钟超时（ADR-0112）**：fs 挂起时 'close' 永不触发、本 Promise 永不 settle——
+ * - **无墙钟超时（ADR-0122）**：fs 挂起时 'close' 永不触发、本 Promise 永不 settle——
  *   挂死兜底在进程级：supervisor 对 runtime 的 SIGTERM→SIGKILL 升级线终止整棵进程树，
  *   日志设施自身不做时间兜底（原 END_AWAIT_TIMEOUT_MS 超时降级已退役，git 可追溯）。
  * - **once 链清理**（审查 W30 Fix-9）：'close' 先触发时 'error' 监听器仍挂残留，完成后

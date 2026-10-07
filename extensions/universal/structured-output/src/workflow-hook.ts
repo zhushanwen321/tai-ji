@@ -206,7 +206,7 @@ export function setupWorkflowHook(pi: PiAPI, schemaJson: string): void {
 		// 审查项#8：await 发送结果——发送失败（如 compaction 中开轮抛错 / 扩展已
 		// 被 assertActive 拒绝）不扣减重试预算（不调 onTurnEnd），否则 fire-and-forget
 		// 丢一份 steer + 白扣一次预算，两次即永久哑火。
-		// pi 0.84.4 实装（loader.js）：extension 侧 sendMessage 同步转发且吞掉异步
+		// pi 实装（loader.js，1.0.0 复核同构）：extension 侧 sendMessage 同步转发且吞掉异步
 		// rejection（bindCore .catch(emitError) 转事件）返回 void——await 对 undefined
 		// 立即解析；此处的 try/catch 兜住同步 throw（assertActive）与未来 pi 返回真
 		// Promise 的形态。

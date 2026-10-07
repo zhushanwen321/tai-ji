@@ -225,7 +225,7 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
   private modelCapabilityReconciler: ((sessionId: string) => Promise<unknown>) | null = null
 
   /**
-   * session 删除回调（组合根注入 terminalService.destroyPty）。
+   * session 删除回调（组合根注入 terminalService.destroySessionPties）。
    * 主动 delete（lifecycle.delete）和进程异常退出（onSessionExit）均经 removeSessionEntry
    * 汇聚触发，同步销毁该 session 绑定的 PTY。
    */
@@ -602,7 +602,7 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
    *   编排 + exit 事件双层守卫拦截）与 intentional destroy（process-manager 拦截）——
    *   用户手动强杀的 session 结构性不触发崩溃上报（crash-resilience D7，A7 反向验收）；
    *   上报前守卫（active / in-flight restore）在 crashExit 内。
-   *   （原 5s 延迟自动恢复调度已随 ADR-0112 防御机制清查退役——崩溃显式上报，恢复
+   *   （原 5s 延迟自动恢复调度已随 ADR-0122 防御机制清查退役——崩溃显式上报，恢复
    *   决策归用户。）
    */
   private registerSessionExitHandler(): void {
@@ -638,7 +638,7 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
       runDestroyStepIsolated('adapter.detach', sessionId, () => {
         session.adapter.detach()
       })
-      // pi 断连事件 → 投递域收口（ADR-0112 命令终局事件化断连腿）：挂起的在途投递批量
+      // pi 断连事件 → 投递域收口（ADR-0122 命令终局事件化断连腿）：挂起的在途投递批量
       // 转显式失败（用户可见「执行结果未确认」上报），不留 in-flight 悬挂。挂点约束 =
       // 先于 removeSessionEntry——销毁链扇出 delivery dispose（静默清队）与
       // bus.clearSession（通知不可达），晚于此链点的失败上报送不到前端。
@@ -699,7 +699,7 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
         // 前端据此标记 session dead 态 + 插入 error 消息 + toast 提示。
         //（wave:perf-w09：exitedMsg 的 broadcast 腿已删——session 级单通道，上方 publish 唯一出口。）
 
-        // u8（crash-resilience D7-①）挂点沿用：非主动退出 → 崩溃显式上报（ADR-0112——
+        // u8（crash-resilience D7-①）挂点沿用：非主动退出 → 崩溃显式上报（ADR-0122——
         // 原 5s 延迟自动恢复已退役）。挂在本链（而非 session.exited 消息生产点）是设计
         // 裁决：本链天然不含 forceQuitSession（dispatcher 手工编排 + exit 事件双层守卫
         // 拦截）与 intentional destroy（process-manager 按 processes.has 拦截）——用户
@@ -740,7 +740,7 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
     this.btwService = btwService
   }
 
-  /** session 删除回调注入（组合根绑 terminalService.destroyPty）。 */
+  /** session 删除回调注入（组合根绑 terminalService.destroySessionPties）。 */
   setOnSessionDelete(handler: (sessionId: string) => void): void {
     this.onSessionDelete = handler
   }
@@ -1180,9 +1180,9 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
    * 的窗口一步到位，不要求用户先发消息；恢复失败向上抛，由 handler 转 error envelope，
    * 前端呈现 E9 恢复指引）。② client.prompt('/plan abort') 直发：`/` 前缀 prompt 被
    * pi 先行执行为 extension command、不产用户消息、streaming 中可用（主审 R2 复核实证）；
-   * pi 实装锚点（0.84.4）：dist/core/agent-session.js:826-833——prompt 对 `/` 前缀先行
-   * 尝试 extension command（源码注释明言 execute immediately, even during streaming），
-   * handled 即 return 不产用户消息；命令解析 _tryExecuteExtensionCommand :954。本断言
+   * pi 实装锚点（语义登记 PS-49，verifiedWith 以 pi-semantics.json 为准）：prompt 对 `/`
+   * 前缀先行尝试 extension command（源码注释明言 execute immediately, even during
+   * streaming），handled 即 return 不产用户消息；命令解析 _tryExecuteExtensionCommand。本断言
    * 双承重：此写入路径 + .githooks/check_prompt_outposts.py 豁免条目的依据。刻意绕过
    * dispatcher busy 预检——照 workflowAction（session-records.ts workflowAction）先例，
    * 审批挂起期 busy defer 会吞掉退出命令（E10 卡死链的入口），直发让 extension 侧
@@ -1494,16 +1494,16 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
    * background 任务完成通知补投的 runtime 触发（bg-task-notify-durability 第二触发面）。
    *
    * 背景：桌面「切走会话再切回」是同进程重新挂接——pi 进程存活、不重发 session_start
-   * （真机实证；pi 0.84.4 实装锚点：session_start 事件 per AgentSession 只发一次——
-   * dist/core/agent-session.js:152 构造时赋值、:1919 bindExtensions 内唯一 emit、
-   * :2230 reload 场景显式 reason="reload"；切回 = runtime 重新挂接同一存活进程，
+   * （真机实证；pi 1.0.0 实装锚点：session_start 事件 per AgentSession 只发一次——
+   * dist/core/agent-session.js 构造时赋值 _sessionStartEvent、bindExtensions 内唯一正常
+   * emit、reload 场景显式 reason="reload"；切回 = runtime 重新挂接同一存活进程，
    * 不经 AgentSession 构造），扩展侧挂在 session_start 上的维护链在「投递失败但
    * 进程存活」场景（设计 G2 核心场景）永不触发。getCommands 是切回后 renderer
    * 主动拉取的必经查询（broadcast 与订阅时序竞争的既有补偿点），在此按节流补触发。
    *
    * 执行形态：fire-and-forget——不 await（getCommands 延迟敏感，补投结果不阻塞查询）、
    * 失败只 console.warn（补投失败无害：扩展侧三判据幂等，下次触发重查）。
-   * maintenance 维护豁免口（SendCommandOptions）已随 ADR-0112 防御机制清查退役；
+   * maintenance 维护豁免口（SendCommandOptions）已随 ADR-0122 防御机制清查退役；
    * 60s 触发节流（BG_RECONCILE_TRIGGER_THROTTLE_MS 抑制窗）同批退役——无待补任务时
    * 扩展侧三判据早退，零输出零 turn。
    */

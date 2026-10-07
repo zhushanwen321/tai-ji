@@ -104,7 +104,7 @@ export interface DeliveryCancelOutcome {
   reason?: string
 }
 
-/** 对账触发点（设计 D3；watchdog 定时触发点已随 ADR-0112 防御机制清查退役，全事件驱动） */
+/** 对账触发点（设计 D3；watchdog 定时触发点已随 ADR-0122 防御机制清查退役，全事件驱动） */
 export type ReconcileTrigger =
   | 'agent-settled'
   | 'compaction-end'
@@ -149,7 +149,7 @@ export interface SessionDeliveryRegistry {
   /** 对账器入口（五触发点共用；内部自行节流与幂等） */
   reconcile(sessionId: string, trigger: ReconcileTrigger): Promise<void>
   /**
-   * pi 断连事件输入（ADR-0112 命令终局事件化的断连腿，command-pi-restart-response-loss）：
+   * pi 断连事件输入（ADR-0122 命令终局事件化的断连腿，command-pi-restart-response-loss）：
    * pi 进程退出/断连时由 onSessionExit 链调用（removeSessionEntry 与 MessageBus 清理之前，
    * 通知必须仍可达订阅者）。挂起的在途投递批量转显式失败终局：撤销待收回条目按撤销意图
    * 兑现（文本随进程死亡离场）；其余 in-flight 条目转 failed + message.error 逐条显式
@@ -189,16 +189,13 @@ export interface SessionDeliveryRegistry {
  * 文本（用户粘贴的字面 `<!--taiji:msg:...-->` 等）不构成投递身份（B2：不进 rebuild/
  * 回执/收养分派——原 BARE_MARKER_RE 手写体 `[^>]*` 宽松放行任意内容，假标记可经
  * rebuild 路径重复投递）：
- * ① shared SSOT `MSG_ID_TAG_RE`（source 派生，uuid 段禁手写）：协议层 clientUuid 形态
- *    （`u-<uuid>` 原文 / 裸 `<uuid>`，捕获组 2 = 恒裸 uuid）；
- * ② 本地生成条目 id 形态（捕获组 3）：`m-<base36 时间戳>-<序号>`，格式唯一定义点 =
- *    本文件 genLocalId（agent 通路收养条目 id 非 uuid，出站标记同为投递身份，判据必须
- *    同收——否则 message_end 回执 miss，条目永挂 in-flight）。
+ * shared SSOT `MSG_ID_TAG_RE`（source 派生，身份段禁手写）：协议层 clientUuid 形态
+ * （`u-<uuid>` 原文 / 裸 `<uuid>`）与本地收养条目 id 形态（`m-<base36 时间戳>-<序号>`，
+ * 格式唯一定义点 = 本文件 genLocalId）——收养形态 2026-10-04 起由 shared 身份段
+ * （MSG_ID_ADOPTED_SEGMENT）收编，此前双侧各写一半（runtime 认 m- / shared 不认）曾致
+ * 消费端回执 miss（D3 验收 A8 归因）。捕获组 2 = 恒为裸身份段（uuid 或收养 id）。
  */
-const DELIVERY_MARKER_ID_RE = new RegExp(
-  `${MSG_ID_TAG_RE.source}|<!--taiji:msg:(m-[0-9a-z]+-[0-9a-z]+)-->`,
-  `${MSG_ID_TAG_RE.flags}g`,
-)
+const DELIVERY_MARKER_ID_RE = new RegExp(MSG_ID_TAG_RE.source, `${MSG_ID_TAG_RE.flags}g`)
 /** 协议层 clientUuid 前缀（renderer 乐观气泡 id 形态 `u-<uuid>`；裸标记取其后段）。 */
 const CLIENT_UUID_PREFIX = 'u-'
 /** 内核合批拼接分隔符（@zhushanwen/session-delivery buildBatchPayload "\n\n---\n\n"）。 */
@@ -232,14 +229,13 @@ export function withDeliveryMarker(text: string, id: string): string {
 }
 
 /**
- * 提取文本中的全部投递标记 id（裸 id 形态，MF-1-1 判据收敛）：uuid 形态经捕获组 2 恒
- * 归一为裸 uuid（双形态原文对账兼容），本地 `m-` 形态经捕获组 3；其余形态不返回（B2）。
+ * 提取文本中的全部投递标记 id（裸 id 形态，MF-1-1 判据收敛）：捕获组 2 恒为裸身份段
+ * （uuid 或内核收养 `m-` 形态，shared MSG_ID_TAG_RE 单源）；其余形态不返回（B2）。
  */
 export function extractMarkerIds(text: string): string[] {
   const out: string[] = []
   for (const m of text.matchAll(DELIVERY_MARKER_ID_RE)) {
     if (m[2]) out.push(m[2])
-    else if (m[3]) out.push(m[3])
   }
   return out
 }
@@ -631,7 +627,7 @@ export function createSessionDeliveryRegistry(
    * [D3③] CP6 回落窗已退役（pi1-disposition-chat-flow）：空闲发命令后 occupancy 的
    * 回落改由 pi 权威事实驱动——handled 响应即回落（deliverOne D3②）；started/queued
    * 形态下回合事件按 pi 正常事件流到达（事件异常不可达 = 进程死亡，由 onSessionExit
-   * 链的 occupancy full-reset 与断连失败上报收口，ADR-0112——原 sweepInFlight
+   * 链的 occupancy full-reset 与断连失败上报收口，ADR-0122——原 sweepInFlight
    * transcript 比对收口属时间窗扫描，已随命令终局事件化退役）。
    */
 
@@ -649,7 +645,7 @@ export function createSessionDeliveryRegistry(
    * - revoking：endRevokeHold（编排 try/finally 必达）；
    * - view 维度（bash / compacting 投影）：转移执行方（dispatcher bash-end / compacting-end
    *   转移后）经 notifyHoldRelease 端口驱动。
-   * （watchdog 30s 周期兜底唤醒已随 ADR-0112 防御机制清查退役——等待者唤醒归事件边沿。）
+   * （watchdog 30s 周期兜底唤醒已随 ADR-0122 防御机制清查退役——等待者唤醒归事件边沿。）
    */
   function waitForHoldEdge(state: RuntimeState): Promise<void> {
     return new Promise<void>((resolve) => {
@@ -694,14 +690,14 @@ export function createSessionDeliveryRegistry(
    * - 'compacting'（TOCTOU：压缩已开始但事件未落，view 读不到）→ 'reject-other' 复位 turn +
    *   置 `piCompactingBlocked`（pi 侧权威事实），**按 compaction_end 事件释放**（事件驱动，
    *   不按挂钟轮询——规则 19：等边沿，不烧预算；也防事件丢失时死循环）。
-   * - 其余错误原样抛（内核按受理失败首败即停收口，ADR-0112）。
+   * - 其余错误原样抛（内核按受理失败首败即停收口，ADR-0122）。
    *
    * 返回值（pi1-disposition-chat-flow D1①）：响应 `data.disposition`（pi 1.0 权威去向
    * 判定：handled=被扩展命令接管 / queued=排队 / started=即将开跑；pi < 1.0 或 mock 无
    * 字段 → undefined，调用方行为与升级前一致）。无标记条目的终局消费在 deliverOne
    *（handled/queued/started 三值同为「pi 已受理输入」的确定性事实）；带标记条目仅
    * handled 即终局（D2③ 兜底），queued/started 等待 message_end 标记回执。
-   * （命令档 prompt 不限时豁免已随 ADR-0112 防御机制清查退役——RPC 墙钟整体删除，
+   * （命令档 prompt 不限时豁免已随 ADR-0122 防御机制清查退役——RPC 墙钟整体删除，
    * 命令与普通消息同参调用。）
    */
   async function promptWithBusyRetry(
@@ -717,7 +713,7 @@ export function createSessionDeliveryRegistry(
         // PiMessage = unknown（端口层宽类型，pi-engine.ts 头注「类型系统对 pi 动态响应
         // 认输」）：disposition 已在 rpc-client 出口经 parseInputDisposition 归一（值域
         // 校验 + 非法值 undefined + warn），此处窄形状断言只读已归一字段。
-        // 命令档墙钟豁免（D14③① timeoutMs=0 不限时档）已随 ADR-0112 防御机制清查退役
+        // 命令档墙钟豁免（D14③① timeoutMs=0 不限时档）已随 ADR-0122 防御机制清查退役
         //（RPC 墙钟整体删除），命令与普通消息同参调用。
         const res = (await client.prompt(text, opts.images, opts.behavior)) as { disposition?: InputDisposition } | undefined
         return res?.disposition
@@ -971,7 +967,7 @@ export function createSessionDeliveryRegistry(
           await disposeCleared(sessionId, rt, texts)
         }
       }
-      // [ADR-0112 退役登记] 原第二段「在途未确认扫描（sweepInFlight：10s 宽限 + transcript
+      // [ADR-0122 退役登记] 原第二段「在途未确认扫描（sweepInFlight：10s 宽限 + transcript
       // 比对 + 命令条目静默终局）」已随命令终局事件化整体退役——在途条目的终局只由确定
       // 性事件驱动：prompt 响应 disposition（deliverOne 受理终局）、message_end 标记回执、
       // pi 断连事件（onPiDisconnected 批量显式失败）。「没收到回执」在连接正常时无现实
@@ -1417,7 +1413,7 @@ export function createSessionDeliveryRegistry(
       rt.submitted.set(bareMarkerId(id), { id, text })
       // 受理口径（D9⑤ 锁定）：submit 同步返回受理回执（lane + 条目态），不等底层受理——
       // 内核 sendChecked 的 settle 时点与送达正交（受理 ≠ 送达，调用方不被投递阻塞）。
-      // 失败（受理失败，首败即停）经 fail-fast 出口广播 + 日志（条目由内核移除，ADR-0112）。
+      // 失败（受理失败，首败即停）经 fail-fast 出口广播 + 日志（条目由内核移除，ADR-0122）。
       // 回执锚恒申报 'marker'（D1 申报制）：普通消息出站文本尾附裸标记，送达以 message_end
       // 回执命中为准；无标记条目（message_end 永不命中），终局 = deliverOne 的 disposition
       // 受理终局或断连事件——不申报 'acceptance'（受理 ≠ 终局，命令可能尚未执行）。

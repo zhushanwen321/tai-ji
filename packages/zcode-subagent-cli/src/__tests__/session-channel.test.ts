@@ -906,7 +906,7 @@ describe("resolve 时序（不变量 2）", () => {
 
 describe("连接崩溃收割（R4 onClose 面）", () => {
   it("进程崩溃（test/suicide）→ 在途 turn 立即 reject（崩溃 reason 含 stderr 尾）——不等终态事件", async () => {
-    // 挂起场景（无终态）：终局唯一来源 = 崩溃收割（无时间兜底，ADR-0112）
+    // 挂起场景（无终态）：终局唯一来源 = 崩溃收割（无时间兜底，ADR-0122）
     const onlyRunning = [ZCODE_APPSERVER_GOLDEN.pushStream[0]];
     const { ch, conn, stateFile, workspacePath } = makeChannel({ replaceSendPushes: onlyRunning });
     const turn = ch.runTurn({ workspacePath, mode: "yolo" }, "做点什么");

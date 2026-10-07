@@ -32,7 +32,7 @@
 // 0.4.0 = 首个公开发布的收敛收口面（0.3.0 为 2026-08-30 裁决的跳号占位，永不单独
 // 发布；+ minor changeset 收口面落本号）；与 package.json version 的一致性由
 // src/__tests__/smoke.test.ts 动态守护，改版本须两处同步。
-export const CORE_PACKAGE_VERSION = "1.1.0";
+export const CORE_PACKAGE_VERSION = "1.3.0";
 
 // ── 宿主端口接线面（core/）────────────────────────────────────
 // HostServices：dataRoot / log / discoveryRoots 端口 + configureCore 注入；
@@ -703,7 +703,7 @@ export {
 // ── 共享原语（shared/）───────────────────────────────────────
 // agent 展示名归一（渲染层 7 处消费的 SSOT）+ meta 解析 / XML 注入 / 资源发现 /
 // thinking 档位序（THINKING_ORDER 定义源 shared/model-ref，model-resolver 为转发）。
-export { displayAgentName } from "./shared/agent-ref.ts";
+export { displayAgentName, displayWorkflowName } from "./shared/agent-ref.ts";
 export {
   parseResourceMeta,
   parseResourceMetaDetailed,
@@ -737,6 +737,7 @@ export {
   findWorkspaceRoot,
   getCachedFileContent,
   getCachedParsed,
+  isTargetFile,
 } from "./shared/resource-discovery.ts";
 export type {
   DiscoveredResource,

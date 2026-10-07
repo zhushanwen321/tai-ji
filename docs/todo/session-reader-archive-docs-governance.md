@@ -11,7 +11,7 @@
 
 ## 张力
 
-`docs/extensions/extension-conventions.md`「决策记录与设计文档归属 [MANDATORY]」规定包内历史档案族「不再新建、不再回填；已失效的删除」——「已失效」判定从未对这两份文档执行过；是否追溯执行属纪律解释（日期命名调研快照是否属「docs/adr/、docs/design/ 一类」）。ADR-0095 保留项清理清单未覆盖它们。
+`docs/extensions/extension-conventions.md`「决策记录与设计文档归属 [MANDATORY]」规定包内历史档案族「不再新建、不再回填；已失效的删除」——「已失效」判定从未对这两份文档执行过；是否追溯执行属纪律解释（日期命名调研快照是否属「docs/adr/、docs/design/ 一类」）。ADR-0102 保留项清理清单未覆盖它们。
 
 ## 候选
 

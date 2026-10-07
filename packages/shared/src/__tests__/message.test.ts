@@ -166,6 +166,18 @@ describe('MSG_ID_TAG_RE 双形态匹配（投递身份标记 SSOT）', () => {
     expect(MSG_ID_TAG_RE.test(`<!--taiji:msg:${bare.toUpperCase()}-->`)).toBe(true)
   })
 
+  it('内核收养条目 m- 形态：命中且组 2 = 完整收养 id（2026-10-03 D3 A8 归因补齐——外部 message.send 无 clientUuid 提交的回执标记，消费端此前构造性 miss 致观看端 live 不入流）', () => {
+    const adopted = 'm-mustgqln-3'
+    const m = MSG_ID_TAG_RE.exec(`text\n<!--taiji:msg:${adopted}-->`)
+    expect(m).not.toBeNull()
+    expect(m![1]).toBeUndefined()
+    expect(m![2]).toBe(adopted)
+  })
+
+  it('m- 形态结构性不与 u- 前缀分支混淆（收养 id 无 u- 前缀，组 1 恒缺省）', () => {
+    expect(MSG_ID_TAG_RE.exec('<!--taiji:msg:m-musrei5r-1-->')?.[1]).toBeUndefined()
+  })
+
   it('非标记文本 / 非 uuid 形状 → 不命中', () => {
     expect(MSG_ID_TAG_RE.test('plain text without marker')).toBe(false)
     expect(MSG_ID_TAG_RE.test('<!--taiji:msg:not-a-uuid-->')).toBe(false)

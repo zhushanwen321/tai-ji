@@ -23,8 +23,8 @@
  *   ① `--fork` + `--session-dir` 双旗标组合成立：forkFrom 落点吃 sessionDir 参数，
  *      实测 fork 文件落 --session-dir 目录、全树（含分支）逐字节等价、
  *      header.parentSession = 源绝对路径（P-fork-equivalence 实证，206ms）。
- *      forkFrom 写序/守卫断言已机器登记 docs/pi-semantics.json PS-51（锚点 pi@0.84.4
- *      dist/core/session-manager.js forkFrom :1237，逐 claim 行号见该条目 piAnchor）。
+ *      forkFrom 写序/守卫断言已机器登记 docs/pi-semantics.json PS-51（锚点
+ *      dist/core/session-manager.js forkFrom，逐 claim 行号与 verifiedWith 见该条目）。
  *   ② 单旗标与 RPC new 组合成立：`PI_CODING_AGENT_SESSION_DIR` env（main.js 与
  *      --session-dir 同优先级的等价通道）启动 → get_state/new_session 落点均在该目录
  *      （agent-session-runtime newSession 继承 getSessionDir）。
@@ -57,6 +57,8 @@
 import { existsSync, readdirSync, rmSync, statSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import { btwVirtualId } from '@taiji/shared'
+// 临时 key 生成走 core 唯一入口（禁直调 crypto.randomUUID，secure context/Node 版本防御）
+import { randomUuid } from '@taiji/core/utils/random-uuid'
 import { assertPiSessionFile } from '../../infra/pi/session-attach-assert.js'
 import { getBtwSessionsRoot, getBtwThreadDir, isPiSessionId } from '../../infra/pi/pi-paths.js'
 import type { IPiEngine, IProcessManager } from '../ports/pi-engine.js'
@@ -79,7 +81,7 @@ export type { BtwErrorCode } from './btw-error.js'
 // 常量（闲置回收节拍；D9⑤ 行为契约文本已迁 btw-contract-inject.ts、fork 常量迁 btw-fork-exec.ts）
 // ─────────────────────────────────────────────────────────────────────────────
 
-// ADR-0112 退役登记（2026-10-05）：btw 线闲置回收（BTW_IDLE_RECLAIM_MS 30min 阈值 +
+// ADR-0122 退役登记（2026-10-05）：btw 线闲置回收（BTW_IDLE_RECLAIM_MS 30min 阈值 +
 // BTW_IDLE_TICK_MS 1min 扫描节拍 + reclaimImminent 回收前提醒）已整体删除——线进程
 // 存续至显式关线（closeLine）或 runtime shutdown destroyAll。协议字段
 // BtwThreadInfo.reclaimImminent 保留（恒 false，wire 形状不变），提醒 UI 沉默退化。
@@ -479,7 +481,7 @@ export class BtwService {
     options: BtwLineSpawnOptions,
   ): Promise<BtwCreateResult> {
     const { mainSid, cwd, snapshotKind } = ctx
-    const tempKey = `btw-create-${crypto.randomUUID()}`
+    const tempKey = `btw-create-${randomUuid()}`
     let registeredKey = tempKey
     try {
       const client = await this.deps.processes.createSession(tempKey, cwd, options)
@@ -550,7 +552,7 @@ export class BtwService {
     }
     const ctx: BtwLineSpawnContext = { mainSid: rec.mainSid, cwd: rec.cwd, threadDir: rec.threadDir, snapshotKind: rec.snapshotKind === 'unknown' ? 'forked' : rec.snapshotKind }
     const options = await this.buildEstablishOptions(ctx)
-    const tempKey = `btw-attach-${crypto.randomUUID()}`
+    const tempKey = `btw-attach-${randomUuid()}`
     try {
       const client = await this.deps.processes.createSession(tempKey, rec.cwd, options)
       await client.switchSession(rec.sessionFilePath)
@@ -664,7 +666,7 @@ export class BtwService {
   }
 
   /**
-   * 收尾口（shutdown / 测试收尾调用）。闲置扫描定时器已随 ADR-0112 退役，现为 no-op
+   * 收尾口（shutdown / 测试收尾调用）。闲置扫描定时器已随 ADR-0122 退役，现为 no-op
    * 形态保留（公共收尾调用面不破坏）。
    */
   dispose(): void {}

@@ -39,6 +39,13 @@ export interface SessionApiPort {
   rename(id: string, label: string): Promise<void>
   /** 删除单个 session（deleteSession 用） */
   remove(id: string): Promise<void>
+  /**
+   * 显式重开 dead session（重新 spawn pi；session.restore RPC）。
+   * remote-use A3/U12：恢复三步编排（restore RPC → selectSession → revive）落壳层、
+   * 编排不上收 core，本成员只承载壳侧透传面——可选成员，core 链内不消费（use-session
+   * 无恢复编排），桌面壳经自身 api 层调用不受影响。
+   */
+  restoreSession?(id: string): Promise<SessionSummary>
   /** 按 cwd 批量删除（deleteFolder 用；返回 deleted/failed 列表） */
   removeByCwd(cwd: string): Promise<BatchDeleteResult>
   /**

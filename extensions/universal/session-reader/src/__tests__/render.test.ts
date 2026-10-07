@@ -282,7 +282,7 @@ describe('renderOutline', () => {
     expect(result.turns[0]?.userBrief).toBe('a')
   })
 
-  it('12. D9② branch_summary 归纯记录折叠：前置 turn 成 turn 不产行（pi 1.0 第十类）', () => {
+  it('12. D9② branch_summary 归纯记录折叠：前置 turn 成 turn 不产行（pi 1.0 纯记录类）', () => {
     // pi 1.0 dist branchWithSummary 落盘形态：{type:'branch_summary', id, parentId, fromId,
     // summary, details, usage, fromHook}，无 message 字段。归类 = 纯记录（分叉操作痕迹，
     // 非当前路径对话内容；taiji 无消息编辑入口不产生该形态）

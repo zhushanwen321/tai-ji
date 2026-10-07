@@ -1,8 +1,8 @@
 /**
- * window-factory render-process-gone 崩溃处理单测（ADR-0112：失败显式上报）。
+ * window-factory render-process-gone 崩溃处理单测（ADR-0122：失败显式上报）。
  *
  * [HISTORICAL] 原 u3-renderer-recovery「60s 滑窗 ≤3 次自动 reload + 熔断转静态页」
- * 已删（ADR-0112：自动重试属无效防御）。现行语义：一次崩溃即加载静态错误页，
+ * 已删（ADR-0122：自动重试属无效防御）。现行语义：一次崩溃即加载静态错误页，
  * 手动重试是唯一恢复通道。
  *
  * 覆盖（验收：详情落盘 + 崩溃台账 + 一次崩溃即静态错误页 + 手动重试日志）：
@@ -212,7 +212,7 @@ describe('window-factory render-process-gone：详情落盘', () => {
   })
 })
 
-describe('window-factory render-process-gone：一次崩溃即显式失败（ADR-0112）', () => {
+describe('window-factory render-process-gone：一次崩溃即显式失败（ADR-0122）', () => {
   beforeEach(() => {
     vi.resetModules()
     FakeBrowserWindow.instances.length = 0

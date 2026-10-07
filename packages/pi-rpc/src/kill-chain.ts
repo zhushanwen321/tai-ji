@@ -4,7 +4,7 @@
 //
 // 来源（行为提取自 runtime rpc-client.ts RpcClient.kill()）。原形态为
 // SIGCONT → SIGTERM → grace 等待 → SIGKILL 阶梯（D3a integrity-hardening）；
-// grace 优雅退出等待窗经 ADR-0112 防御机制清查退役（2026-10-05 用户裁决，
+// grace 优雅退出等待窗经 ADR-0122 防御机制清查退役（2026-10-05 用户裁决，
 // 推翻 crash-forensics 附录 E「回收层统一有界兜底」对 kill 族 grace 的背书）：
 // SIGTERM 优雅退出窗口删除后 SIGCONT/SIGTERM 成死信号，杀链收敛为 SIGKILL 直杀。
 //

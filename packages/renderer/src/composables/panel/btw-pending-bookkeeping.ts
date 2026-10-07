@@ -9,7 +9,7 @@
  *
  * 依赖边界（层级约束：本模块必须保持在 useBtwTabData 之下、可被 store 层直接消费）：
  * 只 import vue / shared·ui 类型 + stores/extension-ui——不 import bus 订阅
- * （getExtensionBus）、dialog 转换（extension-host-dialog 的 convertToDialogRequest /
+ * （getExtensionBus）、dialog 转换（@taiji/ui shell-adapters 的 convertToDialogRequest /
  * createUiResponseTransport）与 stores/chat，上述任何一条依赖都会构成
  * store → composable/壳层 → stores/chat 的环。
  * 订阅壳（bus 事件 → 入账）与 transport 应答（respondBtwDialog——送达才出队）在

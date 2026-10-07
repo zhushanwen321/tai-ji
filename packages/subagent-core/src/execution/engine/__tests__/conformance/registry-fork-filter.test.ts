@@ -26,7 +26,7 @@
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // 相对路径源码消费（7 层上溯到仓库根）：state.ts 是零依赖纯函数（不触 Pi 运行时），
 // 无需为探针/契约测试给 subagent-core 添加 workspace 依赖声明。
@@ -35,6 +35,17 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { countActiveFromEntries } from "../../../../../../../extensions/universal/pending-notifications/src/state.ts";
 
 import { runReconcileSweep } from "../../../registry-reconcile/index.ts";
+
+// [teardown 竞态修复] 探针驱动的 core sweep 链传递性 logger 输出经 console 落 stderr——
+// 同步用例的刷写落在文件结束的 teardown 窗口，与 worker rpc 关闭竞态 → vitest
+// EnvironmentTeardownError（onUserConsoleLog pending）→ run 退出码 1。本文件对 logger 零
+// 断言依赖，mock 静默（rebuild-indexes.test.ts 同款先例）。
+const { loggerMock } = vi.hoisted(() => ({
+  loggerMock: { debug: vi.fn(), warn: vi.fn(), error: vi.fn() },
+}));
+vi.mock("../../../../core/logger.ts", () => ({
+  getLogger: () => loggerMock,
+}));
 
 /** pending:register entry 的落盘形态（对齐 pending-notifications 写入侧契约）。 */
 function registerEntry(

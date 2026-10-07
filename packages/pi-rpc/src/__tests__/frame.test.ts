@@ -4,7 +4,7 @@
 // 早期帧缓冲 / 裸写原语。
 //
 // 分帧断言移植自 runtime rpc-client-lf-framing.test.ts（D10 构造帧验证范式）。
-// 退役登记（ADR-0112 防御机制清查）：超时分级 / timedOutIds 迟到丢弃 / TTL 清理 /
+// 退役登记（ADR-0122 防御机制清查）：超时分级 / timedOutIds 迟到丢弃 / TTL 清理 /
 // maintenance 豁免判定用例随机制删除，失败信号归 pi exit 事件链 rejectAll。
 
 import { describe, expect, it, vi } from 'vitest'

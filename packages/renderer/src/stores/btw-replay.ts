@@ -8,8 +8,9 @@
  * live ≡ reload 由共用同一 applyEntry reducer 构造性成立（等价性断言见本目录测试
  * btw-replay.test.ts + core apply-entry-equivalence 家族）。
  *
- * 触发面 = core drawer 控制态复合条件「drawer 开 + btw tab + 选中线」（selectedBtwVid 唯一
- * 源 = BtwPanel setBtwView，M3-a；与 getViewedVids 的 D5 豁免读同字段，不设第二副本）：
+ * 触发面 = 复合谓词单一源「drawer 开 + btw tab + 选中线」（selection/predicates.ts 的
+ * useViewedBtwVid，display-containers §7.1 迁出不变量——与 getViewedVids 的 D5 豁免、
+ * useBtwTabData 视口命中同源；selectedBtwVid 唯一源 = BtwPanel setBtwView，M3-a；不设第二副本）：
  * - 重开线（重启后自动选中 / 点 chip / 关 drawer 再开 / 切回焦点会话分区）→ 源值翻转即回放；
  * - 已 hydrate → 早退（幂等，关开 drawer 不重复拉取）；被 LRU 驱逐 → hydrated 标记随驱逐
  *   清除 → 再开触发重新回放（文件持久可回填，D5 chat-lru 语义的 renderer 半边）。
@@ -23,7 +24,7 @@
  * useBtwTabData 领地（数据编排下沉 composable 归 M3-b，本文件是 chatStore 自身的回放接线）。
  */
 import { watch } from 'vue'
-import { useDrawerControl } from '@taiji/core/domain/drawer'
+import { useViewedBtwVid } from '@taiji/core/domain/drawer'
 import { isBtwVirtualId } from '@taiji/shared'
 import {
   collectImagesFromMessages,
@@ -45,10 +46,10 @@ export type BtwReplayTarget = Pick<
 /**
  * 安装重开线回放 watch（stores/chat.ts defineStore setup 内调用一次）。
  *
- * 源 = 复合条件（isOpen ∧ activeTab==='btw' ∧ selectedBtwVid）：关 drawer / 切走 tab /
- * 清选中折叠为 null，重开/切回/选中翻出 vid——恰好覆盖「重开线」全部形态（含驱逐后
- * 重开：选中值在 drawer 分区内持久，靠 isOpen 翻转重新触发）。watch 跑在 store 的
- * effect scope 内，$dispose 即停。
+ * 源 = 复合谓词 useViewedBtwVid（isOpen ∧ activeTab==='btw' ∧ selectedBtwVid，单一拼装点）：
+ * 关 drawer / 切走 tab / 清选中折叠为 null，重开/切回/选中翻出 vid——恰好覆盖「重开线」
+ * 全部形态（含驱逐后重开：选中值在内容域分区内持久，靠 isOpen 翻转重新触发）。watch 跑在
+ * store 的 effect scope 内，$dispose 即停。
  *
  * 在途回放去重 = 本闭包内 Set（复合源在 drawer 状态抖动窗口内可连续翻转，同 vid 只放行
  * 一次 getHistory——hydrate 幂等，但重复 RPC 是纯浪费；finally 必清，失败也重试可达）：
@@ -87,11 +88,7 @@ export function setupBtwReplayWatch(store: BtwReplayTarget): void {
     }
   }
 
-  const { isOpen, activeTab, selectedBtwVid } = useDrawerControl()
-  watch(
-    () => (isOpen.value && activeTab.value === 'btw' ? (selectedBtwVid.value ?? null) : null),
-    (vid) => {
-      if (vid) void replay(vid)
-    },
-  )
+  watch(useViewedBtwVid(), (vid) => {
+    if (vid) void replay(vid)
+  })
 }

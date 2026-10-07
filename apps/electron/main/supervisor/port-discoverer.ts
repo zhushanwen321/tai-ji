@@ -228,7 +228,7 @@ function describePortOccupant(port: number, platform: NodeJS.Platform): string {
  *
  * 清杀语义：扫描前先按身份门禁收割本实例残留 runtime；扫描中遇到的占用者一律跳过
  * 不清杀——它们要么是端口段碰撞的其他实例活 runtime，要么是无关进程。收割后不等待
- * 端口释放（ADR-0112：不猜时间窗）——isPortInUse 逐端口探测本身就是验证式判定，
+ * 端口释放（ADR-0122：不猜时间窗）——isPortInUse 逐端口探测本身就是验证式判定，
  * 未释放的端口被跳过后由段内下一槽位承接；全段占用时抛错并列出占用者与恢复动作
  * （错误信息必须可操作）。
  */

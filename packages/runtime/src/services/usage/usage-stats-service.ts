@@ -92,8 +92,8 @@ export class UsageStatsService {
    * 聚合全部 session 文件的用量数据。
    *
    * 两层扫描（方案 B 布局）：pi 默认布局把 session jsonl 写入
-   * `<sessionsDir>/<encodeCwd>/` 子目录（锚点 pi@0.84.4 dist/core/session-manager.js:242-246
-   * getDefaultSessionDirPath：`join(agentDir, "sessions", "--<encoded-cwd>--")`，
+ * `<sessionsDir>/<encodeCwd>/` 子目录（锚点 pi 1.0.0 dist/core/session-manager.js
+ * getDefaultSessionDirPath：`join(agentDir, "sessions", "--<encoded-cwd>--")`，
    * SessionManager.create 无显式 sessionDir 时走 getDefaultSessionDir 同源），单层 readdir
    * 会漏掉全部子目录文件 → 统计归零，故根层 + 一层子目录都统计（§11.12：两层即够——pi 只写一层
    * encodeCwd，`_migrated-no-cwd/` 与 fork 产物也都是一层）。

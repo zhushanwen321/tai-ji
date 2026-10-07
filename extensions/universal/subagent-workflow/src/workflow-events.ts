@@ -451,8 +451,9 @@ export function setupWorkflowDomain(
   //  开头一致）+ 装配结果写入 per-session sessionState。
   // ════════════════════════════════════════════════════════════
   pi.on("session_start", async (event: SessionStartEvent, ctx: ExtensionContext) => {
-    // 装配链异常不向 pi 事件分发逃逸（pi 0.84.4 extension handler 未捕获的 rejection
-    // 直接炸进程——E1 同机制）：围栏 error 留痕（含 sessionId）后保持 handler 不抛。
+    // 装配链异常不向 pi 事件分发逃逸（0.84.4 的 extension handler 未捕获 rejection
+    // 直接炸进程——E1 同机制；1.0.0 起 runner.emit 以 try/catch 吸收转 emitError 上报，
+    // 围栏仍保留——handler 不依赖 pi 侧异常处理语义）：error 留痕（含 sessionId）后保持 handler 不抛。
     // lsRef 在 try 内先行赋值：getSessionId 自身抛错时 catch 里拿到的是上一 session
     // 的 id（留痕仍可检索）。
     try {

@@ -1,5 +1,5 @@
 /**
- * 断连未确认终局的用户可见呈现（ADR-0112 事实驱动 / defense-mechanism-cleanup 遗留 5，
+ * 断连未确认终局的用户可见呈现（ADR-0122 事实驱动 / defense-mechanism-cleanup 遗留 5，
  * command-pi-restart-response-loss 终局③ 的渲染面锁定）。
  *
  * 链路分工（两段测试拼合出完整证据链，本文件锁第二段的真实 DOM 跳）：

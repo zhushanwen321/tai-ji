@@ -14,7 +14,7 @@
  */
 import type { InjectionKey } from 'vue'
 import type { OverlayState } from '@taiji/core'
-import type { DialogRequestSource, UiResponseTransport } from './dialog-request-queue'
+import type { DialogRequestQueue, DialogRequestSource, UiResponseTransport } from './dialog-request-queue'
 
 /** dialog 请求事件源（S2 bridge 适配入口）。 */
 export const DIALOG_REQUEST_SOURCE_KEY: InjectionKey<DialogRequestSource> = Symbol('dialog-request-source')
@@ -40,5 +40,22 @@ export interface OverlayLifecycleSource {
 /** OverlayLifecycle 注入键（壳 provide 真实实例）。 */
 export const OVERLAY_LIFECYCLE_KEY: InjectionKey<OverlayLifecycleSource> = Symbol('overlay-lifecycle')
 
+/**
+ * exited 分通道重置的 queue 句柄登记回调（remote-use U6 / D5 exited 分区清理段）。
+ *
+ * DialogRequestQueue 实例是 CompanionBand setup 内创建的组件私有对象（MF-5：queue 必须在
+ * setup 顶层创建——内部 onScopeDispose 依赖 active effect scope），壳的 session.exited 编排
+ * 无现成通道拿到实例。壳 provide 本回调；CompanionBand 创建 queue 后调用它把句柄回传，
+ * 壳侧模块级持句柄、exited 时经其出口调 resetFor（dialog 通道具名重置）。
+ *
+ * 桌面壳不 provide（桌面 exited 清理走壳侧 store 单点，无 resetFor 需求）→ inject 缺失
+ * 静默跳过，对齐 StatusBar/ViewHost 静默空态先例；ui 不得依赖壳，登记通道必须
+ * provide/inject 形态。
+ */
+export type DialogQueueHandleRegistrar = (queue: DialogRequestQueue) => void
+
+/** queue 句柄登记回调注入键（壳 provide、CompanionBand 消费；缺省静默跳过）。 */
+export const DIALOG_QUEUE_HANDLE_KEY: InjectionKey<DialogQueueHandleRegistrar> = Symbol('dialog-queue-handle')
+
 export type { OverlayState } from '@taiji/core'
-export type { DialogRequest, DialogRequestOption, DialogRequestSource, UiResponseTransport } from './dialog-request-queue'
+export type { DialogRequest, DialogRequestOption, DialogRequestQueue, DialogRequestSource, UiResponseTransport } from './dialog-request-queue'

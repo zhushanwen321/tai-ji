@@ -77,7 +77,7 @@ describe('envelope additive meta（notifyId 穿 envelope）', () => {
     handle.dispose()
   })
 
-  it('首败即停 rejected → meta 随原消息到达回调（失败腿可定位债权，ADR-0112）', () => {
+  it('首败即停 rejected → meta 随原消息到达回调（失败腿可定位债权，ADR-0122）', () => {
     const onSettled = vi.fn()
     const port = makePort({ send: () => ({ accepted: false as const, reason: 'closed' }) })
     const handle = createDelivery(port, { onSettled })

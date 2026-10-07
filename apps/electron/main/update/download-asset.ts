@@ -26,7 +26,7 @@
  * [HISTORICAL] 不变量：
  * - 用全局 fetch（不用 electron.net，与 release-checker 一致，便于测试 mock）
  * - 流式下载：response.body.getReader() 累加 chunk 算进度 + pipe 到 writeStream（避免 100MB 一次进内存）
- * - 下载链路无时间防御（ADR-0112 追加裁决）：总墙钟与 idle 停滞检测均已删除——
+ * - 下载链路无时间防御（ADR-0122 追加裁决）：总墙钟与 idle 停滞检测均已删除——
  *   只要传输在推进就持续等待；极端挂死由 undici 层自身超时（headers/body timeout）
  *   兜出网络错误，不建应用层时间兜底
  * - 校验失败必须删除半下载文件，避免下次误用残文件
@@ -475,7 +475,7 @@ interface ISingleStreamContext {
  * 从 downloadAsset 抽出为独立函数（u4）：既服务原单段路径，也作为 D10 第三步
  * 「curl 缺失回退 undici 直连」的执行体（proxyConfig=undefined 即无 dispatcher 直连）。
  *
- *    fetch + 流式传输全程无应用层时间防御（ADR-0112 追加裁决：idle 停滞检测与
+ *    fetch + 流式传输全程无应用层时间防御（ADR-0122 追加裁决：idle 停滞检测与
  *    总墙钟均已删除）——传输推进即持续等待；极端挂死由 undici 层自身超时兜出
  *    网络错误。
  *
@@ -942,7 +942,7 @@ function logUndiciEngineFallback(err: unknown, proxyUrl: string | undefined): vo
 /**
  * 构造 fetch 选项（User-Agent + 代理 + 可选 signal + 可选 Range 头）。
  * 与 release-checker 保持一致的 User-Agent，避免部分 CDN 因空 UA 拒绝/限速。
- * signal 缺省 = 单段路径（无应用层中断源，ADR-0112：时间防御已删）；
+ * signal 缺省 = 单段路径（无应用层中断源，ADR-0122：时间防御已删）；
  * 多段路径传共享 abort signal（任一段失败中断整批）。
  */
 function buildFetchOptions(
@@ -1186,7 +1186,7 @@ async function downloadPart(
  * 5. [RM3] 任一段检测到服务器未遵守 Range（非 206 / 段长不符）→ 清理全部段文件，
  *    返回 degradedToSingle=true，由调用方降级单段完整下载，绝不合并错位内容。
  *
- * 段级无时间防御（ADR-0112：idle 停滞检测已删，与单段路径同口径）——任一段失败
+ * 段级无时间防御（ADR-0122：idle 停滞检测已删，与单段路径同口径）——任一段失败
  * 经共享 abortController 中断整批（失败传播，非时间机制）。
  */
 async function downloadMultiPart(

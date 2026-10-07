@@ -33,7 +33,6 @@ describe('u1-state 合法迁移路径', () => {
     expect(active.map((e) => e.state)).toEqual(['queued', 'queued'])
     expect(active.map((e) => e.lane)).toEqual<DeliveryLane[]>(['queued', 'direct'])
     expect(active[0]!.id).toBe('u-1')
-    expect(active[0]!.sendAttempts).toBe(0)
 
     handle.dispose()
   })
@@ -86,7 +85,6 @@ describe('u1-state 合法迁移路径', () => {
     expect(port.sendCalls[1]!.msg.payload.content).toBe('m1')
     const entry = handle.entriesFull().active[0]!
     expect(entry.state).toBe('in-flight') // 重投已受理
-    expect(entry.sendAttempts).toBe(0) // 回收重置
     expect(handle.entriesFull().tombstones).toHaveLength(0) // 中间态不产 tombstone
 
     handle.dispose()
@@ -134,7 +132,7 @@ describe('u1-state 合法迁移路径', () => {
     handle.dispose()
   })
 
-  it('in-flight → failed：failInFlight 断连终局（ADR-0112），条目留守 failed 至处置', () => {
+  it('in-flight → failed：failInFlight 断连终局（ADR-0122），条目留守 failed 至处置', () => {
     const port = makeMockPort()
     const handle = createDelivery(port)
 
@@ -145,7 +143,6 @@ describe('u1-state 合法迁移路径', () => {
 
     const entry = handle.entriesFull().active[0]!
     expect(entry.state).toBe('failed')
-    expect(entry.sendAttempts).toBe(1)
     expect(entry.settledAt).toBeTypeOf('number')
     expect(handle.entriesFull().tombstones).toHaveLength(0) // failed 是活跃态，不产 tombstone
 
@@ -167,7 +164,6 @@ describe('u1-state 合法迁移路径', () => {
     expect(port.sendCalls).toHaveLength(2) // 重投发生
     const entry = handle.entriesFull().active[0]!
     expect(entry.state).toBe('in-flight') // 重投已受理
-    expect(entry.sendAttempts).toBe(0)
     expect(entry.settledAt).toBeUndefined()
 
     warnSpy.mockRestore()

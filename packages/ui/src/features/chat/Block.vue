@@ -105,7 +105,7 @@
           <span v-if="isRunning" class="inline-flex size-[13px] shrink-0 items-center justify-center text-accent animate-loader-spin" v-html="RUNNING_LOADER_SVG" /> <!-- eslint-disable-line vue/no-v-html -- hardcoded constant from block-icon.ts -->
           <component :is="BLOCK_ICON_LUCIDE.workflow" v-else :class="[BLOCK_ICON_CLASS, isFailed ? 'hover:text-warn' : '']" />
           <span :class="BLOCK_LABEL_CLASS">{{ t('panel.message.workflow') }}</span>
-          <span v-if="workflowFields.name" class="shrink-0 whitespace-nowrap font-mono text-[length:var(--text-sm)] text-accent">{{ workflowFields.name }}</span>
+          <span v-if="workflowFields.nameShort" class="shrink-0 whitespace-nowrap font-mono text-[length:var(--text-sm)] text-accent" :title="workflowFields.name">{{ workflowFields.nameShort }}</span>
           <template v-if="workflowFields.slug">
             <span class="text-neutral-faint">·</span>
             <span class="min-w-0 shrink-0 truncate font-mono text-[length:var(--text-sm)] text-accent">{{ workflowFields.slug }}</span>
@@ -254,7 +254,7 @@ import { AlertCircle, Check, Copy as CopyIcon } from '@lucide/vue'
 import type { GuiComponent } from '@zhushanwen/extension-protocol'
 import { extractGui } from '@zhushanwen/extension-protocol'
 import type { MessageStatus, ToolCall } from '@taiji/shared'
-import { SUBAGENT_TOOL_NAMES, WORKFLOW_TOOL_NAMES } from '@taiji/shared'
+import { SUBAGENT_TOOL_NAMES, WORKFLOW_TOOL_NAMES, displayWorkflowName } from '@taiji/shared'
 import { lookupWorkflowRun, openWorkflow } from '@taiji/core/domain/drawer'
 import { AnsiText, GuiComponentRenderer } from '../../rendering-protocol'
 import MarkdownRenderer from './MarkdownRenderer.vue'
@@ -439,12 +439,16 @@ const workflowInputObj = computed(() => {
   return input && typeof input === 'object' ? input : {}
 })
 
-/** workflow 标题行字段：name / slug（collapsed only，spec §11） */
+/** workflow 标题行字段：name / slug（collapsed only，spec §11）。
+ *  nameShort：ref 是绝对路径（input.name），标题行展示 basename 去 .js 短名
+ *  （`/a/b/batch.js` → `batch`）——全路径太长挤占单行；drawer 选中仍用全路径 name。
+ *  短名派生单点 = shared displayWorkflowName（与 tray 行同源）。 */
 const workflowFields = computed(() => {
   const input = workflowInputObj.value
   const name = typeof input.name === 'string' ? input.name : ''
   const slug = typeof input.slug === 'string' ? input.slug : ''
-  return { name, slug }
+  const nameShort = displayWorkflowName(name)
+  return { name, nameShort, slug }
 })
 
 /**

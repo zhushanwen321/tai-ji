@@ -197,9 +197,9 @@ export function applySessionOccupancyTransition(
   updateSessionOccupancy(session, publish, row.patch)
 }
 
-// ── userStopped 标记门面（ADR-0112 事件顺序契约）──
+// ── userStopped 标记门面（ADR-0122 事件顺序契约）──
 
-// [历史形态] 原 D4 收敛环（3s 静默观察窗 + pendingSettled 代数上限）已随 ADR-0112
+// [历史形态] 原 D4 收敛环（3s 静默观察窗 + pendingSettled 代数上限）已随 ADR-0122
 // 事实驱动清查删除：窗满清标记 = 用时间猜「补发腿流完」，属补偿猜测。
 
 /**
@@ -210,7 +210,7 @@ export function applySessionOccupancyTransition(
  * 本门面是子模块（dispatcher/lifecycle/interpreter 挂点）与宿主 Map 之间唯一的无环通路：
  * SessionService 构造时经 configure 注入宿主存取 + abort 能力，挂点/调用方用模块级单例。
  *
- * 事件顺序契约（ADR-0112 判定层）：标记存活期 = 旁路 turn 拦截存续期；标记清除只由
+ * 事件顺序契约（ADR-0122 判定层）：标记存活期 = 旁路 turn 拦截存续期；标记清除只由
  * 显式意图事件驱动——用户显式投递（consumeForExplicitDelivery）、会话删除
  * （disposeForDelete）、shutdown（disposeAll）。不做任何自动收敛：
  * 「settled 到达即清标记」会被同边沿的补投击穿——被掐 turn 的 settled 边沿正是
@@ -315,7 +315,7 @@ export const userStoppedGate = new UserStoppedGate()
 // OccupancySettleWindow / occupancySettleWindow）已整体退役：空闲发命令后 occupancy 的
 // 回落改由 pi 权威事实驱动——handled 响应即回落（session-delivery-registry deliverOne）；
 // started/queued 形态下回合事件按 pi 事件流推进，进程死亡由 onSessionExit 链
-// full-reset 与断连失败上报收口（ADR-0112——原 sweepInFlight 承接腿已随终局事件化退役）。
+// full-reset 与断连失败上报收口（ADR-0122——原 sweepInFlight 承接腿已随终局事件化退役）。
 // 时间平抑类机制净减一（D3④ ADR 登记）。
 
 /** plain object 判定（type-safety review：plugin hook 返回值是不可信边界——Worker/

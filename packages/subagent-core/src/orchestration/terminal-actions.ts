@@ -1268,6 +1268,12 @@ export function buildWorkflowRecordRegisteredEntryData(params: {
   runId: string;
   scriptName: string;
   slug?: string;
+  /**
+   * workflow 脚本绝对路径（RunSpec.scriptPath 原文）。可选 = 调用方无来源时不传
+   * （resume 重建条目在旧格式帧缺载荷时），运行时恒落字符串（缺省回落空串，
+   * entry.scriptPath 契约不变）；npm dist 消费者不受必填参数收窄的编译期破坏。
+   */
+  scriptPath?: string;
   startedAt: number;
   recordPath: string;
 }): WorkflowRecordRegisteredEntryData {
@@ -1278,6 +1284,7 @@ export function buildWorkflowRecordRegisteredEntryData(params: {
     workflowName: params.scriptName,
     scriptName: params.scriptName,
     slug: params.slug ?? params.scriptName,
+    scriptPath: params.scriptPath ?? "",
     startedAt: params.startedAt,
     recordPath: params.recordPath,
   };
@@ -1374,6 +1381,7 @@ export function appendWorkflowRecordRegisteredEntry(run: WorkflowRun, deps: Life
   const entry = buildWorkflowRecordRegisteredEntryData({
     runId: run.runId,
     scriptName: run.spec.scriptName,
+    scriptPath: run.spec.scriptPath,
     ...(run.spec.slug !== undefined ? { slug: run.spec.slug } : {}),
     startedAt: Number.isFinite(startedAtMs) ? startedAtMs : Date.now(),
     recordPath,

@@ -161,7 +161,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ArrowUp, Loader2, CheckCircle2, AlertCircle } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
@@ -174,15 +174,17 @@ import {
 } from '@/components/ui/dialog'
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/ui/hover-card'
 import { useAppUpdate } from '@/composables/features/settings/useAppUpdate'
+import { useUpdateInstallActions } from '@/composables/features/settings/useUpdateInstallActions'
 
 const { t } = useI18n()
 const { state, performDownload, performInstall, openFallbackUrl } = useAppUpdate()
 
+/** 确认重启安装 Dialog 三路编排（showConfirmDialog/onInstallClick/onConfirmInstall/onLater） */
+const { showConfirmDialog, onInstallClick, onConfirmInstall, onLater } =
+  useUpdateInstallActions(performInstall)
+
 /** 当前应用版本（vite define 注入，全局声明见 env.d.ts） */
 const appVersion = __APP_VERSION__
-
-/** 确认重启安装 Dialog 开关 */
-const showConfirmDialog = ref(false)
 
 /** idle/checking 不渲染（无可展示信息） */
 const visible = computed(
@@ -197,22 +199,6 @@ async function onPerformUpdate(): Promise<void> {
 /** unsupported click：打开备用下载页 */
 async function onOpenFallbackUrl(): Promise<void> {
   await openFallbackUrl()
-}
-
-/** downloaded click：打开确认 Dialog（不直接执行 install） */
-function onInstallClick(): void {
-  showConfirmDialog.value = true
-}
-
-/** 确认安装：调 performInstall + 关闭 Dialog */
-async function onConfirmInstall(): Promise<void> {
-  showConfirmDialog.value = false
-  await performInstall()
-}
-
-/** 稍后：仅关闭 Dialog */
-function onLater(): void {
-  showConfirmDialog.value = false
 }
 
 /** error 态重试：回 available 态（让用户重新走下载流程） */

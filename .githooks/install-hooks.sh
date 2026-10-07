@@ -1452,14 +1452,39 @@ else
 fi
 
 # ============================================================================
+# 路径引用漂移检查（staged 删除/移动的旧路径 → 全仓残留引用拦截）
+#   场景：文件迁移/删除后，守卫触发正则、测试 fixture、钩子脚本里内嵌的旧路径
+#   不随更新 = 防线静默失效（v0.10.14 轮 markdown-sanitize.ts 迁移实例）。
+#   豁免登记处 = .githooks/check_path_ref_drift.py 的 PATH_REF_EXEMPT。
+# ============================================================================
+
+PATH_REF_DRIFT_CHECKER=".githooks/check_path_ref_drift.py"
+
+if [ "$SKIP_ALL_CHECKS" != "1" ] && [ "$SKIP_PATH_REF_DRIFT_CHECK" != "1" ]; then
+    if [ ! -f "$PATH_REF_DRIFT_CHECKER" ]; then
+        echo -e "${YELLOW}[WARN] 找不到检查脚本 $PATH_REF_DRIFT_CHECKER${NC}"
+    elif python3 "$PATH_REF_DRIFT_CHECKER"; then
+        :
+    else
+        echo ""
+        echo -e "${RED}[ERROR] 路径引用漂移检查失败${NC}"
+        echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
+        exit 1
+    fi
+else
+    echo -e "${YELLOW}[SKIP] 路径引用漂移检查已跳过${NC}"
+fi
+
+# ============================================================================
 # i18n CJK 残留检测（.vue 模板不得含硬编码中文）
 # ============================================================================
 
 I18N_CJK_CHECKER=".githooks/check_i18n_cjk.py"
 
 if [ "$SKIP_ALL_CHECKS" != "1" ] && [ "$SKIP_I18N_CJK_CHECK" != "1" ]; then
-    # 仅当 staged 含 .vue 文件时检查
-    STAGED_VUE=$(echo "$STAGED_FILES" | grep -E "^packages/renderer/src/.*\.vue$" || true)
+    # 仅当 staged 含 .vue 文件时检查（双根与 check_i18n_cjk.py 的 SCAN_ROOTS 对齐；
+    # mobile-renderer 根缺席曾致其下 .vue 不触发守卫）
+    STAGED_VUE=$(echo "$STAGED_FILES" | grep -E "^packages/(renderer/src|mobile-renderer/src)/.*\.vue$" || true)
     if [ -n "$STAGED_VUE" ]; then
         echo -e "${BLUE}[INFO] 运行 i18n CJK 残留检测...${NC}"
 
@@ -1598,6 +1623,76 @@ ${STAGED_DELETED}"
         fi
     else
         echo -e "${GREEN}[OK] 无 thinking 档位词表文件变更，跳过档位词表比对检查${NC}"
+    fi
+
+    # capability 清单 ↔ 渲染管线白名单对拍检查（chat-html-support §6.1 D1 / §10 u1，
+    # 按路径触发）：system prompt 的能力清单常量（CAPABILITY_INLINE_TAG_FAMILIES /
+    # CAPABILITY_PRESENTATION_ATTRS / CAPABILITY_FORBIDDEN）与 markdown-sanitize.ts 的
+    # ALLOWED_TAGS / ALLOWED_ATTR 源文件字面量集合对拍（零散文解析）——正面清单双向一致 +
+    # 负面清单与剥除语义一致（含 data-* 通配 ↔ ALLOW_DATA_ATTR=false 锚点）。渲染白名单改了
+    # 而能力文案忘跟 = agent 被教会的能力与实际渲染行为漂移，仅此检查红灯。
+    # 与 thinking 档位检查同型（读双侧源文件字面量对拍），触发面：检查脚本自身 /
+    # system-prompt 源 / 渲染净化源（文件被删除也必须触发，脚本对文件缺失自带 fail 分支）。
+    # 不设独立 SKIP_* 开关（R1 后惯例，总开关 SKIP_ALL_CHECKS 兜底）。
+    if echo "$PI_SYNC_TRIGGER_FILES" | grep -qE "^scripts/check-capability-allowlist-sync\.mjs$|^extensions/taiji/system-prompt/src/index\.ts$|^packages/ui/src/features/chat/markdown-sanitize\.ts$"; then
+        echo -e "${BLUE}[INFO] capability 清单/渲染白名单文件有变更，运行清单对拍检查...${NC}"
+        if [ ! -f "scripts/check-capability-allowlist-sync.mjs" ]; then
+            echo -e "${RED}[ERROR] 找不到 scripts/check-capability-allowlist-sync.mjs（D1 对拍机器检查交付物缺失）${NC}"
+            exit 1
+        fi
+        if ! node scripts/check-capability-allowlist-sync.mjs; then
+            echo -e "${RED}[ERROR] capability 清单对拍检查未通过——按上方 ✗ 明细逐条恢复（每条自带动作）后重试${NC}"
+            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
+            exit 1
+        fi
+    else
+        echo -e "${GREEN}[OK] 无 capability 清单/渲染白名单文件变更，跳过清单对拍检查${NC}"
+    fi
+
+    # 产物目录公式双实现对拍检查（chat-html-support §6.7 D7 / §11 检查点 8 / §10 u-artifacts，
+    # 按路径触发）：shared getSessionArtifactsDir 与 system-prompt 包内镜像推导（
+    # SESSION_ARTIFACTS_DIR_SEGMENT + resolveSessionArtifactsDir）的**段名字面量与 sessionId
+    # 校验正则字面量**对拍（读双侧源文件文本，零散文解析；与 u1 的 capability 清单对拍同型）。
+    # 两侧任一漂移 = agent 收到的路径与实际目录不符（写偏或预览 404），仅此检查红灯。
+    # 触发面：检查脚本自身 / shared paths 源 / system-prompt 源（文件被删除也必须触发，脚本对
+    # 文件缺失自带 fail 分支）。不设独立 SKIP_* 开关（R1 后惯例，总开关 SKIP_ALL_CHECKS 兜底）。
+    if echo "$PI_SYNC_TRIGGER_FILES" | grep -qE "^scripts/check-artifact-dir-formula-sync\.mjs$|^packages/shared/src/paths\.ts$|^extensions/taiji/system-prompt/src/index\.ts$"; then
+        echo -e "${BLUE}[INFO] 产物目录公式文件有变更，运行公式对拍检查...${NC}"
+        if [ ! -f "scripts/check-artifact-dir-formula-sync.mjs" ]; then
+            echo -e "${RED}[ERROR] 找不到 scripts/check-artifact-dir-formula-sync.mjs（D7 对拍机器检查交付物缺失）${NC}"
+            exit 1
+        fi
+        if ! node scripts/check-artifact-dir-formula-sync.mjs; then
+            echo -e "${RED}[ERROR] 产物目录公式对拍检查未通过——按上方 ✗ 明细逐条恢复（每条自带动作）后重试${NC}"
+            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
+            exit 1
+        fi
+    else
+        echo -e "${GREEN}[OK] 无产物目录公式文件变更，跳过公式对拍检查${NC}"
+    fi
+
+    # POSIX resolve 折叠实现三份镜像对拍检查（chat-html-support v16 内联容器 / markdown
+    # sanitize D4 镜像纪律机检补强，按路径触发）：ui html-preview-path.ts resolvePosixPath /
+    # ui markdown-sanitize.ts（renderer 迁入）resolveResourcePath / ui MarkdownRenderer.vue
+    # resolveHrefPath 三份逐字同款折叠实现（跨包不可 import 的镜像纪律）——任一份漂移 =
+    # 两侧对同一相对路径解析出不同绝对路径（iframe src 与 markdown 链接点击落点不一致）。
+    # 读三侧源文件文本，剥签名行后函数体逐字对拍 + 折叠语义锚点在场断言（防三份一致退化）。
+    # renderer lib/path-utils.resolvePreviewPath 非本族镜像（相对路径仅前缀拼接不折叠 `..`），
+    # 不参与对拍。触发面：检查脚本自身 / 三份源文件（文件被删除也必须触发，脚本对文件缺失
+    # 自带 fail 分支）。不设独立 SKIP_* 开关（R1 后惯例，总开关 SKIP_ALL_CHECKS 兜底）。
+    if echo "$PI_SYNC_TRIGGER_FILES" | grep -qE "^scripts/check-posix-resolve-mirror-sync\.mjs$|^packages/ui/src/features/chat/html-preview-path\.ts$|^packages/ui/src/features/chat/markdown-sanitize\.ts$|^packages/ui/src/features/chat/MarkdownRenderer\.vue$"; then
+        echo -e "${BLUE}[INFO] POSIX resolve 镜像文件有变更，运行三份折叠实现对拍检查...${NC}"
+        if [ ! -f "scripts/check-posix-resolve-mirror-sync.mjs" ]; then
+            echo -e "${RED}[ERROR] 找不到 scripts/check-posix-resolve-mirror-sync.mjs（镜像对拍机器检查交付物缺失）${NC}"
+            exit 1
+        fi
+        if ! node scripts/check-posix-resolve-mirror-sync.mjs; then
+            echo -e "${RED}[ERROR] POSIX resolve 镜像对拍检查未通过——按上方 ✗ 明细逐条恢复（每条自带动作）后重试${NC}"
+            echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
+            exit 1
+        fi
+    else
+        echo -e "${GREEN}[OK] 无 POSIX resolve 镜像文件变更，跳过三份折叠实现对拍检查${NC}"
     fi
 
     # G3：registry vs pi-ai 差分探针（触发文件：档位链路四文件任一 staged，basename 匹配。
@@ -2438,6 +2533,9 @@ echo -e "  ${GREEN}[+]${NC} i18n CJK 残留检测（.vue 模板不得含硬编�
 echo -e "  ${GREEN}[+]${NC} i18n locale 双侧 key 对齐检查（zh-CN === en-US）"
 echo -e "  ${GREEN}[+]${NC} pi 边界可靠性护栏（G1 语义登记检查 / G3 档位差分探针 / G4 subagent 通道禁则）"
 echo -e "  ${GREEN}[+]${NC} thinking 档位词表比对检查（ext-simplify-17 D5：pi-ai ModelThinkingLevel ↔ llm-shared / pi-rpc 副本）"
+echo -e "  ${GREEN}[+]${NC} capability 清单 ↔ 渲染白名单对拍检查（chat-html-support D1：ALLOWED_TAGS/ATTR ↔ 能力段清单常量）"
+echo -e "  ${GREEN}[+]${NC} 产物目录公式双实现对拍检查（chat-html-support D7：shared getSessionArtifactsDir ↔ system-prompt 镜像常量/正则）"
+echo -e "  ${GREEN}[+]${NC} POSIX resolve 折叠实现三份镜像对拍检查（html-preview-path ↔ MarkdownRenderer ↔ markdown-sanitize 函数体逐字一致 + 折叠语义锚点）"
 echo -e "  ${GREEN}[+]${NC} subagent-core 依赖闭包检查（D9-① 闭包 + 检查点 5 worker 零宿主服务）"
 echo -e "  ${GREEN}[+]${NC} subagent-service 聚合边界检查（H3/R5：聚合间 import 清单 + 聚合→壳禁则 + 私有互调门）"
 echo -e "  ${GREEN}[+]${NC} 文档-代码符号漂移检查（C-proc-10：①符号漂移 ②测试文档路径存在性 ③[G5] 源码注释悬空 docs 引用，含检查单测）"

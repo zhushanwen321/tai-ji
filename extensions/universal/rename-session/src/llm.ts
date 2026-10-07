@@ -308,7 +308,7 @@ export async function callRenameLLM(
 		// 2048 = 实测最大总输出 843 tokens 的 2.4x 余量。截断发生时空标题 warn 带 stopReason=length 留痕，
 		// 该 warn 累积出现即上调本常量的数据信号。maxTokens 是截断上限非预扣额度，按实际用量计费。
 		maxTokens: 2048,
-		// 不传 timeoutMs（ADR-0112：不设包内超时兜底，LLM 挂死由上层失败直报；调用方显式超时走 llm-shared C2 通道）
+		// 不传 timeoutMs（ADR-0122：不设包内超时兜底，LLM 挂死由上层失败直报；调用方显式超时走 llm-shared C2 通道）
 		// 档位按「该模型自己的 supportedLevels」判定（pi-ai 数据驱动，本层不自持词表）：
 		// 配置写了该模型不支持的档位 → 留痕并按「不传档位」处理（不静默换成别的档）。
 		// llm-shared 内部会把 "off" 映射为不传 reasoning（provider 默认）。

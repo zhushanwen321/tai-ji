@@ -1,9 +1,11 @@
 /**
  * drawer coordination 协同层单测（TC2）。
  *
- * 覆盖：瞬时参数（selectedCommandName/detailFilePath 设置）/ 公开 API 薄封装。
+ * 覆盖：瞬时参数（selectedCommandName/detailFilePath 设置 + 按会话分区，
+ * display-containers §6.6② 跨会话劫持消除）/ 公开 API 薄封装。
  * [P4 s5 drawer-widget-removal] pendingOpen 置/读/消费、openTasksDrawerOnFirstData 守卫分发、
  * cleanup 注册（清 pendingOpenMap）用例已删——pendingOpen 机制随 tasks 域移除（PluginViewContainer 承接）。
+ * [display-containers §6.6③ W0] toggleDock 用例已删（docked 死状态全链删除）。
  *
  * 运行：cd packages/core && npx vitest run src/domain/drawer/__tests__/coordination.test.ts
  * 测试框架 vitest（禁止 node:test / tsx --test）。
@@ -24,12 +26,10 @@ import {
   openWorkflow,
   openWorkflowInDrawer,
   setDrawerTab,
-  selectedCommandName,
-  detailFilePath,
   toggleDrawer,
-  toggleDrawerDock,
   _resetDrawerForTest,
 } from '../coordination'
+import { selectedCommandName, detailFilePath, useWorkflowSelection } from '../selection'
 
 /** 当前测试分区键（每用例新建绑定） */
 let sid: Ref<string | null>
@@ -66,10 +66,48 @@ describe('瞬时参数：设置 + 消费后清空', () => {
   })
 })
 
-describe('公开 API 薄封装（close/toggle/setTab/toggleDock）', () => {
-  it('close 关闭当前分区；toggle 从关到开可指定 tab、从开到关关闭；setTab 切 tab；toggleDock 切换钉住态', () => {
+// ── display-containers §6.6② 瞬时参数按会话分区：跨会话劫持消除（W0 还债）──
+// 改前全局单例：A 会话的链接点击会被 B 会话的旧参数污染（B 首开 doc/detail tab 显 A 的旧值）。
+describe('瞬时参数按会话分区（跨会话劫持消除，display-containers §6.6②）', () => {
+  it('A 设置的 commandName 不劫持 B 的首次打开（B 分区独立为 null）', () => {
     focusSession('A')
-    const { isOpen, activeTab, docked } = useDrawerControl()
+    openDrawerTab('doc', { commandName: '/commit' })
+    expect(selectedCommandName.value).toBe('/commit')
+
+    // 切到 B 首开 doc tab：不得看到 A 的旧参数（改前全局单例 → 劫持）
+    focusSession('B')
+    expect(selectedCommandName.value).toBe(null)
+    openDrawerTab('doc')
+    expect(selectedCommandName.value).toBe(null)
+
+    // B 自己的参数独立写入，不回灌 A 分区
+    openDrawerTab('doc', { commandName: '/fix' })
+    expect(selectedCommandName.value).toBe('/fix')
+    focusSession('A')
+    expect(selectedCommandName.value).toBe('/commit')
+  })
+
+  it('A 设置的 detailFilePath 不劫持 B 的首次打开；B 消费后清空不影响 A', () => {
+    focusSession('A')
+    openDrawerTab('detail', { filePath: 'src/a.ts' })
+
+    focusSession('B')
+    expect(detailFilePath.value).toBe(null) // B 首开不被 A 旧值劫持
+    openDrawerTab('detail', { filePath: 'src/b.ts' })
+    expect(detailFilePath.value).toBe('src/b.ts')
+
+    // 消费后清空（useDetailPane 语义）：只清 B 分区
+    detailFilePath.value = null
+    expect(detailFilePath.value).toBe(null)
+    focusSession('A')
+    expect(detailFilePath.value).toBe('src/a.ts') // A 分区保留（切回恢复展示链归 W3）
+  })
+})
+
+describe('公开 API 薄封装（close/toggle/setTab）', () => {
+  it('close 关闭当前分区；toggle 从关到开可指定 tab、从开到关关闭；setTab 切 tab', () => {
+    focusSession('A')
+    const { isOpen, activeTab } = useDrawerControl()
 
     toggleDrawer('git') // 关 → 开（git tab）
     expect(isOpen.value).toBe(true)
@@ -78,14 +116,9 @@ describe('公开 API 薄封装（close/toggle/setTab/toggleDock）', () => {
     toggleDrawer() // 开 → 关
     expect(isOpen.value).toBe(false)
 
-    setDrawerTab('browser') // 抽屉关闭时仅改 activeTab
-    expect(activeTab.value).toBe('browser')
+    setDrawerTab('doc') // 抽屉关闭时仅改 activeTab
+    expect(activeTab.value).toBe('doc')
     expect(isOpen.value).toBe(false)
-
-    toggleDrawerDock() // false → true
-    expect(docked.value).toBe(true)
-    toggleDrawerDock() // true → false
-    expect(docked.value).toBe(false)
 
     closeDrawer()
     expect(isOpen.value).toBe(false)
@@ -134,7 +167,8 @@ describe('workflow 入口语义分立（workflow-visualization U6/D1）', () => 
 
   it('openWorkflowInDrawer = setWorkflowView 三步（切 workflow tab + 记录选中名 + 开 drawer）', () => {
     focusSession('A')
-    const { isOpen, activeTab, selectedWorkflowName } = useDrawerControl()
+    const { isOpen, activeTab } = useDrawerControl()
+    const { selectedWorkflowName } = useWorkflowSelection()
 
     // runId 形参（D10 回落链传 runId，精确命中）
     openWorkflowInDrawer('wf-run-1')

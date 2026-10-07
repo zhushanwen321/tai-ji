@@ -10,7 +10,7 @@
  * 覆盖：
  * - normal/aborted → message:complete, toolCall:end_not_received
  * - error/stream_error/disconnect/restart → message:error, toolCall:error
- *   （[ADR-0112] 原 timeout reason 随 pendingSend 30s 空窗 timer 退役，已从 FinalizeReason 删除）
+ *   （[ADR-0122] 原 timeout reason 随 pendingSend 30s 空窗 timer 退役，已从 FinalizeReason 删除）
  * - errorText 合并到 streaming assistant content（D-013）
  * - 非 streaming entity 不受影响
  * - running toolCall 级联终态（D-011 诚实态）
@@ -108,7 +108,7 @@ describe('finalizeSession reason→终态映射', () => {
     expect(msgs[0].toolCalls![0].status).toBe('error')
   })
 
-  // [ADR-0112] 原 timeout 映射用例随 pendingSend 30s 空窗 timer 退役删除（FinalizeReason 已无该成员）。
+  // [ADR-0122] 原 timeout 映射用例随 pendingSend 30s 空窗 timer 退役删除（FinalizeReason 已无该成员）。
 
   it('disconnect: streaming assistant → error，running toolCall → error', () => {
     const store = useChatStore()

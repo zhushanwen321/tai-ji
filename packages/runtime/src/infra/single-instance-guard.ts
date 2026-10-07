@@ -145,7 +145,7 @@ export function registerRuntimeInstance(dataDir: string, port: number): void {
 
 /**
  * 默认探活：127.0.0.1 TCP connect，连接建立即可达（不发送数据——对 runtime WS 端口
- * 无副作用）。探活墙钟（INSTANCE_PROBE_TIMEOUT_MS 500ms）已随 ADR-0112 退役——
+ * 无副作用）。探活墙钟（INSTANCE_PROBE_TIMEOUT_MS 500ms）已随 ADR-0122 退役——
  * connect 挂住时本 promise 悬挂（error 事件覆盖连接失败形态）。
  */
 async function defaultIsPortReachable(port: number): Promise<boolean> {

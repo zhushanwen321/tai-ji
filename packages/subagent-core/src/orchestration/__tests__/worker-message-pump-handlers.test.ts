@@ -1,7 +1,7 @@
 /**
  * worker-message-pump handlers — handleWorkerExit/Error/ScriptError + postBudgetUpdate 测试。
  *
- * 参考 worker-message-pump-workflow-call.test.ts 的 mock 构建。[ADR-0112] 后错误
+ * 参考 worker-message-pump-workflow-call.test.ts 的 mock 构建。[ADR-0122] 后错误
  * 一次即终态（原 scheduleRebuild 指数退避重试矩阵已删），无需 fake timers 压缩退避。
  *
  * 覆盖：
@@ -187,7 +187,7 @@ describe("handleWorkerExit", () => {
     expect(deps.onRunDone).toHaveBeenCalledTimes(1);
   });
 
-  it("code!=0 异常退出：委托 handleWorkerError → 一次即 transition done,failed（ADR-0112）", async () => {
+  it("code!=0 异常退出：委托 handleWorkerError → 一次即 transition done,failed（ADR-0122）", async () => {
     const run = makeRunningRun();
     await seedRunCreated(run);
     const deps = makeDeps();
@@ -235,7 +235,7 @@ describe("handleWorkerExit", () => {
 // ── handleWorkerError ────────────────────────────────────────
 
 describe("handleWorkerError", () => {
-  it("worker error → 一次即 transition done,failed + save + 直落 pending:unregister（ADR-0112）", async () => {
+  it("worker error → 一次即 transition done,failed + save + 直落 pending:unregister（ADR-0122）", async () => {
     const run = makeRunningRun();
     await seedRunCreated(run);
     const deps = makeDeps();
@@ -283,7 +283,7 @@ describe("handleWorkerError", () => {
 // ── handleScriptError ────────────────────────────────────────
 
 describe("handleScriptError", () => {
-  it("script error → 一次即 transition done,failed + 捕获 workerLogs（ADR-0112）", async () => {
+  it("script error → 一次即 transition done,failed + 捕获 workerLogs（ADR-0122）", async () => {
     const run = makeRunningRun();
     await seedRunCreated(run);
     const deps = makeDeps();
@@ -348,7 +348,7 @@ describe("postBudgetUpdate", () => {
 // promise 以失败/成功 resolve → 迟到的旧代际结果不得经 postAgentResult 投给**重跑
 // dispatch 的同 callId pending**（否则重跑中的 agent() 被旧结果劫持 resolve 为空串
 // → 脚本假成功）。[HISTORICAL] 原用例经 rebuildRuntime 的 discardInFlightCalls 构造
-// discard——该机制随重试矩阵删除（ADR-0112），本组用例改为「直接重跑 dispatch 替换」
+// discard——该机制随重试矩阵删除（ADR-0122），本组用例改为「直接重跑 dispatch 替换」
 // 形态，守卫谓词（isOrphanedCall）的判定语义不变。
 //
 // 用真实 WorkflowRun/RunRuntime/Trace/Budget（而非 makeRunningRun 的简化 mock）。
@@ -423,7 +423,7 @@ function findAgentResultPost(
 
 describe("orphan call guard（非孤儿路径不误伤）", () => {
   // [HISTORICAL] 原「rebuild discard + 重跑替换」形态的孤儿守卫用例随重试矩阵删除
-  // （ADR-0112）——该形态现网不可达（同 run 内同 callId 重跑 dispatch 只发生在已删的
+  // （ADR-0122）——该形态现网不可达（同 run 内同 callId 重跑 dispatch 只发生在已删的
   // rebuild 重跑场景）；谓词本体（isOrphanedCall / executeAgentCall isOrphaned 注入）
   // 保留为接管形态的防御面，行为由 execute-agent-call.test.ts 的谓词直测覆盖。
 

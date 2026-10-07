@@ -25,6 +25,11 @@ import { createPinia, setActivePinia } from 'pinia'
 import {
   bindDrawerSessionId,
   drawerControl,
+  setBtwView,
+  bindViewedVidPanels,
+  getViewedVids,
+  isViewingBtwVid,
+  useViewedBtwVid,
   _resetDrawerForTest,
 } from '@taiji/core/domain/drawer'
 import { replayEntries } from '@taiji/core'
@@ -72,7 +77,7 @@ async function settle(): Promise<void> {
 /** 打开 btw tab 并选中线（生产链 = BtwPanel autoSelect / chip 点击 → setBtwView）。 */
 async function openThread(vid: string): Promise<void> {
   drawerControl.open('btw')
-  drawerControl.setBtwView(vid)
+  setBtwView(vid)
   await settle()
 }
 
@@ -114,7 +119,7 @@ describe('重开线回放接线（D5 重载链：文件 → chatStore 分区）'
 
     // 门控①：drawer 开在其他 tab、selectedBtwVid 在场（切走残留）→ 不回放
     drawerControl.open('git')
-    drawerControl.setBtwView('btw:pi-1')
+    setBtwView('btw:pi-1')
     await settle()
     expect(getHistoryMock).not.toHaveBeenCalled()
 
@@ -229,5 +234,57 @@ describe('live ≡ reload 等价口径（btw 分区纳入 applyEntry 等价性�
     expect(assistant.toolCalls).toHaveLength(1)
     expect(assistant.toolCalls![0]!.status).toBe('completed')
     expect(assistant.toolCalls![0]!.output).toBeUndefined()
+  })
+})
+
+describe('三消费方复合谓词不变量（真实事件序对账，display-containers §7.1 迁出不变量）', () => {
+  // 回放触发面（本文件消费方②）必须与 getViewedVids（①chat LRU 豁免）、
+  // isViewingBtwVid（③useBtwTabData 视口命中）同值同变（读取单一源 selection/predicates.ts）。
+  // 真实事件序 = 真实响应式写入逐步推进（开/切 tab/切 session），每步对账三读数一致。
+  it('开 btw → 选线 → 切 tab → 切 session：回放触发与①③读数每步一致', async () => {
+    const V = 'btw:pi-1'
+    getHistoryMock.mockResolvedValue(reply([msgOf('r1', '线内历史')]))
+    bindViewedVidPanels(ref<Array<string | null>>([MAIN]))
+
+    // 开 btw tab + 选线 → 复合谓词翻出：三读数同变，回放恰一次
+    drawerControl.open('btw')
+    setBtwView(V)
+    await settle()
+    expect(useViewedBtwVid().value).toBe(V)
+    expect(isViewingBtwVid(V)).toBe(true)
+    expect(getViewedVids()).toEqual(new Set([V]))
+    expect(getHistoryMock).toHaveBeenCalledTimes(1)
+
+    // 切走 tab → 三读数同落；回放不追加
+    drawerControl.setTab('git')
+    await settle()
+    expect(useViewedBtwVid().value).toBe(null)
+    expect(isViewingBtwVid(V)).toBe(false)
+    expect(getViewedVids()).toEqual(new Set())
+    expect(getHistoryMock).toHaveBeenCalledTimes(1)
+
+    // 切回 btw tab → 三读数同恢复；已 hydrate 幂等不重拉
+    drawerControl.setTab('btw')
+    await settle()
+    expect(useViewedBtwVid().value).toBe(V)
+    expect(isViewingBtwVid(V)).toBe(true)
+    expect(getViewedVids()).toEqual(new Set([V]))
+    expect(getHistoryMock).toHaveBeenCalledTimes(1)
+
+    // 切 session（焦点换分区）→ 消费方②③读当前分区即落；①per-sid 读 MAIN 分区仍豁免
+    // （panel 枚举含 MAIN——LRU 保护不随焦点丢失，查看中不驱逐的数据丢失防线）
+    boundSid.value = 's-other'
+    await settle()
+    expect(useViewedBtwVid().value).toBe(null)
+    expect(isViewingBtwVid(V)).toBe(false)
+    expect(getViewedVids()).toEqual(new Set([V]))
+
+    // 切回 MAIN：三读数同恢复
+    boundSid.value = MAIN
+    await settle()
+    expect(useViewedBtwVid().value).toBe(V)
+    expect(isViewingBtwVid(V)).toBe(true)
+    expect(getViewedVids()).toEqual(new Set([V]))
+    expect(getHistoryMock).toHaveBeenCalledTimes(1)
   })
 })

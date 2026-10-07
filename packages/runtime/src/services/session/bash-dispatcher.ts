@@ -267,7 +267,7 @@ export class BashDispatcher {
    * ① abort 抢收口竞态守卫（跳过重复报错，已执行已收口 → 'settled'）；
    * ② 通用错误兜底（错误 bashResult + message.error，S2 对称收口 → 'settled'）。
    * 失败原因随回执 error 携带（消费方 toast 用）。
-   * [ADR-0112 退役登记] bash RPC 超时诚实文案分支（timeout-slow-flow-wallclock D2，
+   * [ADR-0122 退役登记] bash RPC 超时诚实文案分支（timeout-slow-flow-wallclock D2，
    * RpcTimeoutError 合成终态 + orphanBashRunning 标记）随 RPC 墙钟整体删除。
    */
   private handleBashFailure(

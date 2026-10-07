@@ -11,7 +11,7 @@
  *
  * 一次性生命周期（G3-001）：runtime 释放后不再复用——AbortController 一次性
  * 语义决定 controller 无法跨释放复用，所以整个 RunRuntime 重建。唯一注入路径：
- * assignRuntime（runWorkflow 创建）与 replaceRuntime（[ADR-0112] 后无生产调用方，聚合 API 保留）。
+ * assignRuntime（runWorkflow 创建）与 replaceRuntime（[ADR-0122] 后无生产调用方，聚合 API 保留）。
  */
 
 import { WorkerHandle } from "../worker-handle.ts";
@@ -73,7 +73,7 @@ export class RunRuntime {
  *
  * 幂等——重复调用安全（第二次起 no-op，released flag 守卫）。
  * 调用后此 RunRuntime 应被调用方丢弃（WorkflowRun.runtime = undefined），
- * [HISTORICAL] 原由 replaceRuntime 在崩溃重试时注入新实例（G3-001）——该链路已删（ADR-0112）。
+ * [HISTORICAL] 原由 replaceRuntime 在崩溃重试时注入新实例（G3-001）——该链路已删（ADR-0122）。
  *
  * worker.terminate 本身幂等，controller.abort 本身幂等
  * （重复 abort 无副作用），但 released flag 让本方法语义更明确：

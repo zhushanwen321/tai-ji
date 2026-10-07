@@ -121,7 +121,7 @@ export const SET_MODEL_STAGE_TIMEOUT_MS = 3_000;
 export const SET_MODEL_REQUEST_TIMEOUT_MS = 10_000;
 
 // [HISTORICAL] 原 engine_crashed 重建上限/退避常量族（CRASH_REBUILD_MAX_ATTEMPTS /
-// CRASH_REBUILD_BACKOFF_MS）随自动重建删除（ADR-0112：初建失败一次即 unavailable 显式上报）。
+// CRASH_REBUILD_BACKOFF_MS）随自动重建删除（ADR-0122：初建失败一次即 unavailable 显式上报）。
 
 /** stderr 内存环形缓冲保留的尾部字符数（engine_crashed 帧携带崩溃现场）。 */
 export const STDERR_TAIL_CHARS = 400;

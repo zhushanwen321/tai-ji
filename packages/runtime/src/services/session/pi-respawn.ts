@@ -1,7 +1,7 @@
 /**
  * RespawnOrchestrator —— pi 崩溃上报 + 惰性恢复 join 编排。
  *
- * [ADR-0112 防御机制清查退役登记（2026-10-05 用户裁决）] 原「崩溃 → 5s 延迟自动恢复 +
+ * [ADR-0122 防御机制清查退役登记（2026-10-05 用户裁决）] 原「崩溃 → 5s 延迟自动恢复 +
  * 连续失败熔断」编排（crash-resilience §3.3 D7 的 A 重试机制，含 RESPAWN_DELAY_MS /
  * RESPAWN_MAX_CONSECUTIVE_FAILURES / attemptRespawn 重试链）已整体删除——崩溃处置改为
  * 显式上报（RespawnFate 'terminal' → 死亡发声），恢复决策归用户（手动重试 / 惰性恢复）。
@@ -39,7 +39,7 @@ export interface RespawnDeps {
  * 进程死亡是否发声——
  * - 'recovered'：session 活跃/恢复中（惰性恢复在跑将复活）——静默，丢弃退出现场 stash；
  * - 'terminal'：崩溃上报——按不可恢复 crash 发声（携原 crash 的 exitCode/stderrTail
- *   stash，同 deathSeq 递增）。恢复决策归用户（ADR-0112：自动重试退役）。
+ *   stash，同 deathSeq 递增）。恢复决策归用户（ADR-0122：自动重试退役）。
  * 模块级订阅（组合根单消费方）；无订阅者时零开销，测试构造的 orchestrator 实例不受扰。
  */
 export type RespawnFate = 'recovered' | 'terminal'
@@ -86,7 +86,7 @@ export class RespawnOrchestrator {
   }
 
   /**
-   * 崩溃挂点入口（onSessionExit 链尾部调用）：显式上报崩溃（ADR-0112——原 5s 延迟自动
+   * 崩溃挂点入口（onSessionExit 链尾部调用）：显式上报崩溃（ADR-0122——原 5s 延迟自动
    * 恢复调度已退役），恢复决策归用户。
    *
    * 上报前守卫：

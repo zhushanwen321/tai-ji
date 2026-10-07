@@ -12,7 +12,7 @@ import type { Entry } from '@zhushanwen/session-core'
  * 分段与折叠分工：本函数把全部非 header/compaction/user 条目归入 turn（纯记录条目
  * 也成 turn）；outline 是否渲染行由 render.ts isConversationEntry 二次裁决——纯记录
  * 条目（无 message 字段，含 branch_summary）的 turn 不产 outline 行。两处对条目形态
- * 的认知以 pi dist 实装为同一事实源（entry 全集十类，见 render.ts 注释枚举）。
+ * 的认知以 pi dist 实装为同一事实源（entry 全集十一类，见 render.ts 注释枚举）。
  */
 export interface Turn {
   index: number

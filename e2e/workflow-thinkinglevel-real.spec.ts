@@ -200,10 +200,9 @@ function readSessionEntries(file: string): any[] | null {
  *
  * pi 侧落盘形状（workflow-record-entry.ts v2 schema）：主 session 每 run 两条小
  * 条目——registered（`{v:2, kind:"registered", runId, recordPath, ...}`，含 record
- * 流绝对路径锚点；ADR-0078 改名前旧键名 journalPath）与 settled（`{v:2, kind:"settled",
- * runId, status, ...}`）。唯一事实源 = recordPath 指向的 record 事件流
- * （`<sessionDir>/workflow-state/<runId>.record.jsonl`，jsonl-run-store.ts 头注），
- * 条目本身可随时从 record 重建。
+ * 流绝对路径锚点）与 settled（`{v:2, kind:"settled", runId, status, ...}`）。唯一
+ * 事实源 = recordPath 指向的 record 事件流（`<sessionDir>/workflow-state/
+ * <runId>.record.jsonl`，jsonl-run-store.ts 头注），条目本身可随时从 record 重建。
  *
  * 返回 null = 主 session 文件不可读；内层字段 null = 文件可读但对应条目缺失
  * （两者区分诊断）。
@@ -416,7 +415,7 @@ test('TC1: record 流 agent-started 帧 input 含 thinkingLevel/model（脚本�
     // 全文落账）——脚本 agent({model, thinkingLevel}) 的请求值在此可观测。
     const recordEvents = readRecordEvents(rec!.registered!.recordPath)
     if (!recordEvents) {
-      writeDiag('tc1', ctx.dataDir, ctx.events, { journalPath: rec!.registered!.recordPath })
+      writeDiag('tc1', ctx.dataDir, ctx.events, { recordPath: rec!.registered!.recordPath })
     }
     expect(recordEvents, `record 事件流应可读（${rec!.registered!.recordPath}）——[D1] 后唯一事实源`).toBeTruthy()
     expect(recordEvents!.some((e) => e.type === 'run-created'), 'record 流应含 run-created 首帧').toBe(true)
@@ -424,7 +423,7 @@ test('TC1: record 流 agent-started 帧 input 含 thinkingLevel/model（脚本�
     const startedInput = agentStartedInputOf(recordEvents!)
     if (!startedInput) {
       writeDiag('tc1', ctx.dataDir, ctx.events, {
-        journalPath: rec!.registered!.recordPath,
+        recordPath: rec!.registered!.recordPath,
         recordEventTypes: recordEvents!.map((e) => e.type),
       })
     }

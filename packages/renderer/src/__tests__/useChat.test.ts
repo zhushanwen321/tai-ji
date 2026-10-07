@@ -208,7 +208,7 @@ describe('useChat pendingSend 合并态（空窗期）', () => {
     const { send } = useChat()
     // [W2] send 失败不再 throw（toast + false，不 throw）；
     // [R2-A5] send 契约 Promise<boolean>——失败返回 false，dispatch 侧按 false 恢复草稿。
-    // [ADR-0112 受理回执后上屏] 失败时气泡/占位从未置位（无回滚面，结构性零残留）。
+    // [ADR-0122 受理回执后上屏] 失败时气泡/占位从未置位（无回滚面，结构性零残留）。
     await expect(send('s-fail', textToSegments('hi'))).resolves.toBe(false)
     expect(chat.getMessages('s-fail')).toHaveLength(0)
     expect(chat.pendingSend.has('s-fail')).toBe(false)
@@ -242,7 +242,7 @@ describe('useChat pendingSend 合并态（空窗期）', () => {
     expect(chat.isActive('s-abort')).toBe(false)
   })
 
-  // [ADR-0112] 原「pendingSend 30s 超时兜底（W3）」用例随 30s 空窗 timer 退役删除：
+  // [ADR-0122] 原「pendingSend 30s 超时兜底（W3）」用例随 30s 空窗 timer 退役删除：
   // pendingSend 收口全事件驱动（message_start / finalizeSession 各 reason / deliveryHandled /
   // delivery morph / occupancy idle 帧 / 断连 finalizeAllStreaming），无墙钟兜底可推演。
   // 「message_start 永不到」的现实成因（pi 死亡）由断连链收口——finalizeAllStreaming 用例覆盖。
@@ -259,7 +259,7 @@ describe('useChat pendingSend 合并态（空窗期）', () => {
     expect(chat.isActive('s-crash')).toBe(false)
   })
 
-  // [ADR-0112] 原「正常流转清除 pendingSend 超时 timer」用例随 timer 退役删除：
+  // [ADR-0122] 原「正常流转清除 pendingSend 超时 timer」用例随 timer 退役删除：
   // message_start 到达清 pendingSend 的语义由「message_start 到达 → 清 pendingSend +
   // 设 isGenerating」用例覆盖，无 timer 残留断言面。
 

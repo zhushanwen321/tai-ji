@@ -23,13 +23,13 @@ const RATE_LIMIT_PER_MINUTE = 6
 export const TICK_INTERVAL_MS = 30_000
 const DEFAULT_EXPIRY_DAYS = 7
 const DEFAULT_EXPIRY_MS = DEFAULT_EXPIRY_DAYS * MS_PER_DAY // 7 days
-// U4 dispatch 模型切换（设计 D3 修订版 + D1 归属简化 + ADR-0112 事实查询翻转）：
+// U4 dispatch 模型切换（设计 D3 修订版 + D1 归属简化 + ADR-0122 事实查询翻转）：
 // - dispatch 注入消息的 customType 标记前缀（sendMessage 的消息标记，供运维从 session 流
 //   识别 scheduler dispatch 注入；与 ack 触发器前缀 pi-scheduler-ack: 避让）
 // - 恢复判定锚点 = isIdle() 同步事实查询（判定层级最高）：agent_settled 确定性事件是
 //   提前触发的加速器（事件到达即查询并兑现）；每 tick 开头对未决记录做一次同步事实
 //   查询兜正确性（事件丢失时由查询收敛——拉保证正确、事件只优化延迟）。原 2-tick
-//   计数对账（时间窗猜测事件丢失）已按 ADR-0112 删除。
+//   计数对账（时间窗猜测事件丢失）已按 ADR-0122 删除。
 const DISPATCH_CUSTOM_TYPE_PREFIX = 'pi-scheduler:'
 
 /**
@@ -55,7 +55,7 @@ export interface SchedulerModelOps {
  * 未决模型切换记录（纯内存态）。模型语义异常不进持久化词表
  * （replay 守卫对 advance.status 硬校验 'success'，旁路字段会炸重放推进）。
  *
- * 生命周期（ADR-0112 事实查询翻转后）：dispatch 受理 → 记录创建（in-flight 等价语义：
+ * 生命周期（ADR-0122 事实查询翻转后）：dispatch 受理 → 记录创建（in-flight 等价语义：
  * 等 run 落定）；恢复兑现锚点 = isIdle() 同步事实查询（agent_settled 事件提前触发 +
  * tick 每轮查询兜正确性）→ 恢复成功 / restore-failed（setModel(原) false）→ 记录清除
  * （终态只留日志）。记录存在 + idle 即恢复，无 phase 区分、无时间窗计数。
@@ -379,8 +379,8 @@ export class SchedulerRuntime {
    * 按序执行「互斥校验 → setModel(task.model) → 记未决切换记录 → sendMessage」，切换段
    * 整体入模型 op 串行队列（modelOpChain——与恢复 setModel 互斥，MF-2）。busy 亦照常 setModel
    * （P-MODEL-② 证伪「busy 切换不生效」——steer 消息消费时在同一 run 内开新 turn，turn
-   * 开始从 ctx.model 取当前模型，setModel 对 steer turn 生效。pi 实装锚点（0.84.4）：
-   * dist/core/agent-session.js:1258 setModel 同步写 agent.state.model + :304 每个 turn
+   * 开始从 ctx.model 取当前模型，setModel 对 steer turn 生效。pi 实装锚点（1.0.0 复核）：
+   * dist/core/agent-session.js setModel 同步写 agent.state.model + 每个 turn
    * 准备时从 agent.state.model 取模型快照——setModel 先于下一 turn 准备即生效）。
    * 失败降级（分级，不阻塞核心
    * 调度）：modelOps 缺省 / 会话无当前模型 / setModel false → 日志 + 放弃切换，照常 dispatch。
@@ -540,7 +540,7 @@ export class SchedulerRuntime {
   }
 
   // ── 模型切换：agent_settled 恢复与 tick 事实查询（U4，D3 修订版 + D1 归属简化
-  //    + ADR-0112 事实查询翻转）──
+  //    + ADR-0122 事实查询翻转）──
 
   /**
    * 未决模型切换记录的事实查询结算：记录存在 + 会话 idle（isIdle() 同步查询，

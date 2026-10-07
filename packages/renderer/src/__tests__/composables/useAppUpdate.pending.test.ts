@@ -19,6 +19,7 @@
  * Mock 策略：族级共享 harness（../helpers/app-update-mount.ts）——ipc 七键默认值 +
  * markdown 桩 '<h2>新特性</h2>'（getPreloaded 默认 null → initAutoCheck 先
  * restorePreloadedUpdate 无果，再走 restorePendingUpdate 路径）。
+ * markdown 桩挂 '@taiji/ui/features/chat/markdown'（渲染链下沉后 SUT 实际 import 的模块）。
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/composables/useAppUpdate.pending.test.ts
  */
@@ -35,7 +36,7 @@ import {
   type AppUpdateControllerInternal,
 } from '../helpers/app-update-mount'
 
-vi.mock('@/composables/logic/markdown', () => markdownStubModule())
+vi.mock('@taiji/ui/features/chat/markdown', () => markdownStubModule())
 
 setupAppUpdateLifecycle({ primeIpc: true, markdownHtml: '<h2>新特性</h2>' })
 

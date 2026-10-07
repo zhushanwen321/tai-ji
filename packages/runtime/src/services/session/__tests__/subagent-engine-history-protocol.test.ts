@@ -5,7 +5,7 @@
 // ② read 走协议（native reader 覆盖后 core 链①级 = 协议 read，投影复用）；
 // ③ 协议失败降②级 journal / 引擎未发现降③级 outcome-only（GUI source 标注的
 //    数据源契约 = SessionView.source，降级事实 warn 留痕）；
-// [ADR-0112 退役登记] ④ idle 5min 复用窗口与 ⑤ dispose 聚合上界用例已随机制删除
+// [ADR-0122 退役登记] ④ idle 5min 复用窗口与 ⑤ dispose 聚合上界用例已随机制删除
 // （引擎实例进程级自持，复用语义改为「同实例恒复用直至 shutdown dispose」）。
 
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'

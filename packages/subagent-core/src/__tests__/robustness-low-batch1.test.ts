@@ -172,7 +172,7 @@ describe("L9: errorLogs 追加（非覆盖）", () => {
     const deps = makeDeps();
     await dispatchRunCreated(run); // [W2/V1] 六态机引导（run-created 首帧——终局裁决前置）
 
-    // 预置 2 条既有诊断日志（[ADR-0112] 原「scriptError 重试不终态化累积」形态已删，
+    // 预置 2 条既有诊断日志（[ADR-0122] 原「scriptError 重试不终态化累积」形态已删，
     // scriptError 一次即终态——改用预置构造追加前提）
     run.state.errorLogs.push({ level: "error", message: "diag-1" });
     run.state.errorLogs.push({ level: "warn", message: "diag-2" });
@@ -214,7 +214,7 @@ describe("L9: errorLogs 截断到 MAX_ERROR_LOGS（500）", () => {
     }
     expect(run.state.errorLogs).toHaveLength(499);
 
-    // handleScriptError 内部 push 3 条 + 截断（终态路径，ADR-0112 一次即 failed）。
+    // handleScriptError 内部 push 3 条 + 截断（终态路径，ADR-0122 一次即 failed）。
     await handleScriptError(
       run,
       "boom",

@@ -9,10 +9,10 @@
 // thinking 档位在本层是**宿主入口层已校验的字符串透传**：合法性由上游入口层
 // （runtime launch-params resolveEffectiveThinking，词表 = shared PI_THINKING_LEVELS）
 // 校验保证，本层不做白名单收窄。不可把「pi 会拒绝非法档位」当兜底依赖——pi 实装
-// （0.84.4）对非法 --thinking 不报错：仅 push type:"warning" diagnostic 且不设置档位、
+// （1.0.0 复核）对非法 --thinking 不报错：仅 push type:"warning" diagnostic 且不设置档位、
 // 进程照常以缺省档启动（node_modules/@earendil-works/pi-coding-agent
-// dist/cli/args.js:112-121；diagnostics 处理仅 type==="error" 才 exit(1)：
-// dist/main.js:476-478）。
+// dist/cli/args.js `--thinking` 分支 isValidThinkingLevel 未命中仅 push warning；
+// diagnostics 处理仅 type==="error" 才 exit(1)：dist/main.js）。
 
 /**
  * Generic shape of a message received from pi's JSONL stdout.

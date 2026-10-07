@@ -72,7 +72,7 @@ describe('P-contract-inject：线会话建立时注入一次', () => {
 
   it('重附着轮再注入一次（每会话建立一次，含重附着轮——D9⑤）', async () => {
     const { vid } = await createLine()
-    // 进程引用摘除（闲置回收已随 ADR-0112 退役；重附着由进程死亡/重启场景触发）
+    // 进程引用摘除（闲置回收已随 ADR-0122 退役；重附着由进程死亡/重启场景触发）
     const rec = svc.getLine(vid)!
     rec.client = undefined
 

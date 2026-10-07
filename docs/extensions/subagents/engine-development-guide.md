@@ -126,7 +126,7 @@ data-plane 10s 未答 = 引擎故障 → 杀进程 + 在途 run 失败（`REVERS
 | `engine_model_unknown` | validateModel 未命中且 `dynamic:false` | 同步拒（record 不创建） |
 | `engine_model_mismatch` | `dynamic:true` 运行期引擎拒绝 | run 失败 + record 标 failed |
 | `engine_handshake_timeout` | initialize 超时（10s） | 引擎不可用 |
-| `engine_crashed` | 进程意外退出 / 引擎起不来 | 在途 run 失败（附 stderr 尾 400 字）；引擎初建失败一次即标记不可用至宿主重启（ADR-0112：失败显式上报，无自动重建） |
+| `engine_crashed` | 进程意外退出 / 引擎起不来 | 在途 run 失败（附 stderr 尾 400 字）；引擎初建失败一次即标记不可用至宿主重启（ADR-0122：失败显式上报，无自动重建） |
 | `engine_probe_failed` | probe 失败 | 结构化失败（逐项 check 摘要 + 恢复指引），**不自动切换引擎**；要换引擎只能由调用方显式传 `engine:'<id>'` |
 
 **conformance 锁定面**：协议一致性由 `packages/subagent-core/src/execution/engine/__tests__/conformance/engine-conformance.live.test.ts` 套件锁定（引擎 manifest、relay 常量镜像、run 帧映射）；SDK 侧封闭断言在 `subagent-engine-sdk/src/__tests__/protocol.test.ts`（方法集/通道集同源互证）与 `contract-closure.test.ts`（core↔SDK 双向可赋值）；两引擎各有 bin 级协议 e2e（如 `zcode-subagent-cli/src/__tests__/protocol-e2e.test.ts`：握手/反向请求/event seq 单调/终态/dispose 幂等 + 进程随 stdin 关闭退出，五断言）。chat 域独立协议面已退役：续聊轮 = 新 run + `RunParams.resume` 锚点（约束 C-proc-13；`engine-protocol.ts:14-17`）。
@@ -234,7 +234,7 @@ data-plane 10s 未答 = 引擎故障 → 杀进程 + 在途 run 失败（`REVERS
 
 **abort/取消链**（zcode 实装锚）：`ctx.signal` abort → `onAbort` → `appServerAbortChain`（`zcode-engine.ts:506-512`）；链体（:595-667）：stop 帧（`ZCODE_APPSERVER_STOP_TIMEOUT_MS` = 3s）→ grace 窗（`ZCODE_APPSERVER_ABORT_GRACE_MS` = 3s，`constants.ts:160`）内 turn 落定即止（共享进程不杀）→ 超窗 `killChain` 收割共享进程（**接受连坐**——协议已不可信，在途其他任务走崩溃路径，:611-616）；abort 与 create 竞态（signal 先到、session 未建）→ 等会话建立（带上限）再发 stop。引擎义务：cancel 受理 3s 内收敛（§2.1）；用户取消不得被任何续跑机制强制续烧 token。
 
-**timer 语义**：引擎侧无 turn 级 timer（原 idle/总上界双 timer 已按 ADR-0112 删除——任务级正常路径无墙钟，§2.1；turn 终局 = 终态事件或连接死亡收割两确定性事实，无终态且连接存活 = 挂起显式暴露，用户 abort 链或重启处置）。保留的 timer 仅控制面单请求超时（`ZCODE_APPSERVER_REQUEST_TIMEOUT_MS` / stop / read / close，秒级粒度）与 abort 链 grace（回收层，见上行）。
+**timer 语义**：引擎侧无 turn 级 timer（原 idle/总上界双 timer 已按 ADR-0122 删除——任务级正常路径无墙钟，§2.1；turn 终局 = 终态事件或连接死亡收割两确定性事实，无终态且连接存活 = 挂起显式暴露，用户 abort 链或重启处置）。保留的 timer 仅控制面单请求超时（`ZCODE_APPSERVER_REQUEST_TIMEOUT_MS` / stop / read / close，秒级粒度）与 abort 链 grace（回收层，见上行）。
 
 **接管点副作用复刻义务**：`onSessionCreated`（`zcode-engine.ts:486-495`）承载两个宿主侧副作用——`rt.activeSessions.add(sessionId)`（TTL sweep 豁免集 + dispose close-fire 目标集；`rt.activeSessions` 全仓唯一调用点即此，:720-729 sweep 消费）与 `ctx.onHandleReady` 回传（sessionRef 同源 `zcodeSessionDbPath`）。**任何「会话确立」的新形态（resume 装载确认等）必须在装载确认时点复刻两者**——漏登记的竞态后果（设计 3（native resume，已裁决未实施）实装推演）：超 30 天高龄会话整轮在途期间不在豁免集，TTL sweep（运行时建立 +50ms defer 触发，`ZCODE_SESSION_SWEEP_DEFER_MS`，`constants.ts:241`）可删其库条目，`persistence:"immediate"` 下对已删行续写行为上游未定义。
 

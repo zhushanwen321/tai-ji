@@ -191,7 +191,7 @@ export class PluginHostProcess implements PluginHostProcessContract {
    * loadedModules 的分区键，activate 消息按真实 pluginId 查找。旧实现从
    * pluginPath 末段推导（目录时代假设），pluginPath 改为入口文件后 pop 出
    * 'index.js' 之类文件名 → loadedModules 键失配 → activate 报 Module not loaded。
-   * loadPlugin 墙钟超时（loadTimeoutMs + 宿主清理）已随 ADR-0112 防御机制清查退役——
+   * loadPlugin 墙钟超时（loadTimeoutMs + 宿主清理）已随 ADR-0122 防御机制清查退役——
    * 子进程顶层死循环 = loaded/error 永不到达 = 本 Promise 悬挂，处置归用户。
    */
   async loadPlugin(processId: string, pluginId: string, pluginPath: string, trustLevel?: 'trusted' | 'sandbox'): Promise<void> {
@@ -305,7 +305,7 @@ export class PluginHostProcess implements PluginHostProcessContract {
    * 终止子进程：SIGKILL 直杀 + 立即 resolve（exit 收尾由进程生命周期接手）。
    *
    * terminateProcess 与 shutdown 共用（MF-3 单实现）。SIGTERM → grace 等待 → SIGKILL
-   * 升级链已随 ADR-0112 防御机制清查退役（优雅退出窗删除后 SIGTERM 成死信号）。
+   * 升级链已随 ADR-0122 防御机制清查退役（优雅退出窗删除后 SIGTERM 成死信号）。
    */
   private killChildGracefully(child: ChildProcess): Promise<void> {
     return new Promise<void>((resolve) => {

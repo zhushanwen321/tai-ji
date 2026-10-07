@@ -36,6 +36,7 @@
 import { readFileSync, existsSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { fail, guardExit, reportSetCompare, setDiff } from './lib/guard-report.mjs'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const PI_AI = '@earendil-works/pi-ai'
@@ -43,12 +44,7 @@ const SUBAGENT_CORE_MODEL_REF = join(ROOT, 'packages', 'subagent-core', 'src', '
 const SHARED_PI_PRESET = join(ROOT, 'packages', 'shared', 'src', 'pi-preset.ts')
 const DESIGN_DOC_18 = 'docs/architecture/ext-simplify-18-shared-adoption.md'
 
-let failed = 0
-const fail = (msg) => {
-  console.error(`  ✗ ${msg}`)
-  failed = 1
-}
-const ok = (msg) => console.log(`  ✓ ${msg}`)
+// 呈报骨架（✓/✗ 行 + 失败旗标 + 对拍呈报/汇总出口）与 scripts 家族共享：scripts/lib/guard-report.mjs
 
 // ── 纯函数（--self-test 覆盖）────────────────────────────────────────
 
@@ -96,16 +92,6 @@ export function extractConstListMembers(text, constName) {
   const values = [...m[1].matchAll(/["']([^"']+)["']/g)].map((x) => x[1])
   if (values.length === 0) return { error: `const ${constName} 列表中提取不到任何字符串字面量` }
   return { values }
-}
-
-/** 求集合差异：extra = a 有 b 无；missing = b 有 a 无。 */
-export function setDiff(a, b) {
-  const bs = new Set(b)
-  const as = new Set(a)
-  return {
-    extra: [...as].filter((x) => !bs.has(x)),
-    missing: [...bs].filter((x) => !as.has(x)),
-  }
 }
 
 // ── --self-test：纯函数轻量自检（不触真实仓库文件）────────────────────
@@ -222,15 +208,13 @@ function main() {
   const T4_RECOVERY_SUFFIX = `——恢复动作：人工核对 ${dtsPath} 的 ModelThinkingLevel 定义后同步 PI_THINKING_LEVELS（前端派生源，core/renderer 都从它派生）与 packages/shared/src/pi-preset.ts 头部锚点注释（pi 升级新增/移除档位即红灯），重跑 node scripts/check-thinking-levels.mjs`
 
   const compareCopy = (label, filePath, values, recoverySuffix) => {
-    const { extra, missing } = setDiff(values, piMembers)
-    if (extra.length === 0 && missing.length === 0) {
-      ok(`${label} 与 pi-ai ${piAiVersion} ModelThinkingLevel 一致（${values.length} 值）`)
-      return
-    }
-    const parts = []
-    if (extra.length > 0) parts.push(`副本多出: ${extra.join(', ')}`)
-    if (missing.length > 0) parts.push(`副本缺失: ${missing.join(', ')}`)
-    fail(`${label} 与 pi-ai ${piAiVersion} ModelThinkingLevel 漂移: ${parts.join('；')}${recoverySuffix}`)
+    reportSetCompare(values, piMembers, {
+      okMsg: `${label} 与 pi-ai ${piAiVersion} ModelThinkingLevel 一致（${values.length} 值）`,
+      extraPart: (xs) => `副本多出: ${xs.join(', ')}`,
+      missingPart: (xs) => `副本缺失: ${xs.join(', ')}`,
+      failHeader: `${label} 与 pi-ai ${piAiVersion} ModelThinkingLevel 漂移: `,
+      failSuffix: recoverySuffix,
+    })
   }
 
   // T3：subagent-core THINKING_ORDER（宿主侧唯一副本，ext-simplify-18 D6 纳入比对面）。
@@ -266,12 +250,10 @@ function main() {
   }
 
   // 汇总
-  if (failed === 0) {
-    console.log(`✓ thinking-levels 守卫通过（pi-ai ${piAiVersion} 权威源 ↔ 宿主侧 core 与前端派生源 shared 两份词表一致）`)
-    process.exit(0)
-  }
-  console.error('thinking-levels 守卫未通过，按上方 ✗ 明细修复后重跑（每条报错自带恢复动作）')
-  process.exit(1)
+  guardExit(
+    `✓ thinking-levels 守卫通过（pi-ai ${piAiVersion} 权威源 ↔ 宿主侧 core 与前端派生源 shared 两份词表一致）`,
+    'thinking-levels 守卫未通过，按上方 ✗ 明细修复后重跑（每条报错自带恢复动作）',
+  )
 }
 
 const isMain = process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href

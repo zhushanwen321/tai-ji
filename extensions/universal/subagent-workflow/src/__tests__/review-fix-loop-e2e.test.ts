@@ -20,7 +20,7 @@
  * 已知限制：批内 review 调用顺序不保证——剧本不依赖具体 agent 顺序
  * （E2E-2 只断言调用总数，R1 中先到者 dirty 后到者 clean 均可）。
  *
- * [ADR-0112] 已删除原用例 A1「engine rebuild 后同 _runId 残留 state 被重置」：
+ * [ADR-0122] 已删除原用例 A1「engine rebuild 后同 _runId 残留 state 被重置」：
  * 脚本错误自动重建（rebuildRuntime）已删，脚本错误一次即 done,failed 显式上报，
  * rebuild 后残留 state 重置 / meta.previousAttempts 留痕机制（及其工作流源码实现）
  * 一并移除——该用例主题不可达。「脚本错误 → run failed + error 透传」契约由
@@ -935,7 +935,7 @@ describe("review-fix-loop E2E（真实 worker + 场景化 mock runner）", () =>
       );
 
       // 脚本顶层白名单校验 fail() 抛错 → worker type:"error" → 一次即 done,failed
-      // 显式上报（[ADR-0112] 无脚本错误重试）
+      // 显式上报（[ADR-0122] 无脚本错误重试）
       expect(result.reason).toBe("failed");
       expect(result.error).toContain("未知参数: batchl");
       // 校验发生在任何 agent 调用之前（参数校验在脚本最顶部）

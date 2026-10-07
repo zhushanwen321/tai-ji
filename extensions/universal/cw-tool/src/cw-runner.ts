@@ -143,7 +143,7 @@ function tryParseJson(text: string): unknown | undefined {
  * @param spawner  spawn 实现（默认走真实 cw，测试注入 fake）。
  * @param cwd      子进程工作目录（cw 2.0 以 cwd 定位 `~/.cw/<encoded-cwd>/` 账本）。
  * @param signal   可选 SDK abort signal；与超时合并后透传给 spawner，abort 时 spawner kill 子进程。
- * @param timeoutMs 可选 spawn 超时（ms），仅调用方显式传入时武装（包内无默认超时，ADR-0112：失败直报不设挂死兜底）；0 表示不限时。超时返回 ok:false "cw 超时"。
+ * @param timeoutMs 可选 spawn 超时（ms），仅调用方显式传入时武装（包内无默认超时，ADR-0122：失败直报不设挂死兜底）；0 表示不限时。超时返回 ok:false "cw 超时"。
  */
 export async function executeCwAction(
 	action: string,

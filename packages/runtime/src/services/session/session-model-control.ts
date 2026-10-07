@@ -95,7 +95,7 @@ export class SessionModelControl {
    * 激活 + 守卫（U2）：`ensureActive` 前置（停止态/回收态 / client 已死两态都能拉活），
    * 做错误分型；返回的 client 必须**未退出**（`exited` 过滤是
    * 「不把死 client 交给 set RPC」的守卫面）。
-   * [ADR-0112 退役登记] 激活等待上界（raceActivateTimeout，原 15s 墙钟）已删——激活慢时
+   * [ADR-0122 退役登记] 激活等待上界（raceActivateTimeout，原 15s 墙钟）已删——激活慢时
    * 调用方 RPC 悬挂等待真实完成（ensureActive 内部 join 语义不变）。
    */
   private async activate(sessionId: string): Promise<IPiEngine> {

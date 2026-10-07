@@ -43,7 +43,7 @@ import { createResourceListInjector } from "./resource-list-injector.ts";
  * 动态指引经 task 文本 / appendSystemPrompt 参数承载。
  */
 export const SUBAGENT_LIST_GUIDE =
-	"The following subagents are available. PRIORITY: when a task involves reading 3+ files, writing 100+ lines, parallel research, or specialized review, delegate to a matching subagent FIRST instead of doing it yourself — this keeps your context focused on orchestration. Do NOT call list to discover available subagents; use list only for running state. When using the subagent tool, ONLY use agents from this list — pass the <location> path (absolute .md path) as the agent param. If no agent matches your task, omit agent (a general-purpose agent is used) and put all role-specific instructions in the task text.";
+	"The following subagents are available. PRIORITY: when a task involves reading 3+ files, writing 100+ lines, parallel research, or specialized review, delegate to a matching subagent FIRST instead of doing it yourself — this keeps your context focused on orchestration. Do NOT call list to discover available subagents; use list only for running state. When using the subagent tool, pass the <location> path from this list as the agent param (usually the right choice); an absolute .md path outside this list also works if the file is a readable agent definition. If no agent matches your task, omit agent (a general-purpose agent is used) and put all role-specific instructions in the task text.";
 
 /**
  * agent 清单实例：缓存生命周期 / 三 handler 经工厂骨架；装配循环经 assemble 覆写

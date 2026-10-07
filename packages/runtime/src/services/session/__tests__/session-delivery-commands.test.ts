@@ -1,18 +1,18 @@
 /**
- * 无标记条目链路内核测试（pi1-disposition-chat-flow U1 起源；ADR-0112 命令终局事件化 +
+ * 无标记条目链路内核测试（pi1-disposition-chat-flow U1 起源；ADR-0122 命令终局事件化 +
  * skill-input-marker-pollution started 基终局后的现行契约）：
  * - D2① 命令识别与不注标出站（清单缓存 + 识别 + 裸命令文本）；手打 skill / prompt 模板
  *   与 `<taiji-skill>` 芯片标记同判（无标记条目统一识别集）
  * - G3③ 受理回执标志（isCommand 随 submit 回执返回，前端空窗豁免契约）
  * - D1② handled → delivered tombstone 终局 + D1③ 终局通知 + resync 判重防线继承
- * - 断连终局事件化（ADR-0112）：handled/queued/started disposition = 无标记条目的受理
+ * - 断连终局事件化（ADR-0122）：handled/queued/started disposition = 无标记条目的受理
  *   终局（prompt 响应即受理回执，零时间窗零扫描）；pi 断连 → 在途条目批量显式失败
  *   （message.error 逐条上报）+ 撤销待收回条目就地兑现
  * - D2 清单新鲜度：get_commands 失败 → 全量按普通消息出站（分支 c 兜底）
  *
  * [已不可达用例删除登记] 原「D14①b（G2）无标记条目宽限后静默终局」「D3③ sweep
  * occupancy 收尾」两 describe 随 sweepInFlight（10s 宽限 + transcript 比对）整体退役
- * （ADR-0112 命令终局事件化：回执长时间不到的唯一现实成因 = 进程死亡，由断连事件
+ * （ADR-0122 命令终局事件化：回执长时间不到的唯一现实成因 = 进程死亡，由断连事件
  * 收口）而不可达，2026-10-05 投递域清理批次删除。
  *
  * 运行：cd packages/runtime && npx vitest run src/services/session/__tests__/session-delivery-commands.test.ts
@@ -177,7 +177,7 @@ describe('D1①②③：handled 终局 + 通知 + 判重防线继承', () => {
     expect(h.client.prompt).toHaveBeenCalledTimes(1) // 无第二次出站
   })
 
-  it('queued / started 响应 = 无标记条目受理终局：delivered tombstone + 通知（ADR-0112 终局事件化）', async () => {
+  it('queued / started 响应 = 无标记条目受理终局：delivered tombstone + 通知（ADR-0122 终局事件化）', async () => {
     for (const disposition of ['queued', 'started']) {
       const h = makeHarness({ commands: [{ name: 'plan', source: 'extension' }], promptResult: { disposition } })
       await attachWithCommandList(h)
@@ -236,7 +236,7 @@ describe('芯片通路识别（skill-input-marker-pollution：统一切 started 
   })
 })
 
-describe('断连终局事件（ADR-0112：pi 进程死亡 → 挂起投递批量显式失败）', () => {
+describe('断连终局事件（ADR-0122：pi 进程死亡 → 挂起投递批量显式失败）', () => {
   beforeEach(() => {
     vi.useFakeTimers()
   })
@@ -311,7 +311,7 @@ describe('D14③①（G3 闸①）：命令档 prompt 不限时', () => {
     vi.useRealTimers()
   })
 
-  it('命令条目与普通消息同参出站（命令档墙钟豁免已随 ADR-0112 退役）', async () => {
+  it('命令条目与普通消息同参出站（命令档墙钟豁免已随 ADR-0122 退役）', async () => {
     const h = makeHarness({ commands: [{ name: 'plan', source: 'extension' }] })
     await attachWithCommandList(h)
     h.registry.submit('s1', { content: '/plan', clientUuid: CLIENT_UUID })

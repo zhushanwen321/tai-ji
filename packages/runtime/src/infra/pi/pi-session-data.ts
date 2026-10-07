@@ -78,7 +78,9 @@ export interface PiHistoryToolResult extends PiHistoryMessage { // oe-exempt:202
   toolName: string
   isError?: boolean
   /** pi 持久化了 details（ToolResultMessage.details），含 __gui__ 结构化渲染数据。
-   *  类型声明补齐——pi JSONL 和 get_messages 都返回此字段。 */
+   *  类型声明补齐——pi JSONL 和 get_messages 都返回此字段。
+   *  锚：pi 1.0.0 dist（agent-session.js:346 tool result 构造带 details: result.details；
+   *  session-manager.js appendMessage :827-836 整 message 对象随 entry 落盘）。 */
   details?: Record<string, unknown>
 }
 

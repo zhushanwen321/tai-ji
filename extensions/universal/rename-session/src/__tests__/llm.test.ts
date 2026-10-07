@@ -490,7 +490,7 @@ describe("callRenameLLM", () => {
 		expect(callOpts.systemPrompt.length).toBeLessThan(200);
 		// 输出预算覆盖 thinking+标题（reasoning 模型 thinking 600-1500 tokens 计入预算，64 必截断）
 		expect(callOpts.maxTokens).toBe(2048);
-		// 不传超时（ADR-0112：无包内超时兜底，失败直报）
+		// 不传超时（ADR-0122：无包内超时兜底，失败直报）
 		expect(callOpts.timeoutMs).toBeUndefined();
 		expect(callOpts.signal).toBeInstanceOf(AbortSignal);
 		expect(callOpts.sessionId).toBe("test-session-id");

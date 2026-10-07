@@ -188,7 +188,7 @@ describe('A5-merge 非合批 timer 纪律（busy 停车形态）', () => {
   it('非合批 send 只清残留合批 timer，不重设（无孤儿 flush timer 被武装）', () => {
     // busy 停车形态：subscribeSettled 订阅成立但回调从不触发 + busy 滞留 →
     // 消息滞留 queue，唯一出站通道是真正的外部触发（idle + flush）。
-    //（无定时复核兜底——ADR-0112 退役后孤儿 timer 观测不受任何周期触发干扰。）
+    //（无定时复核兜底——ADR-0122 退役后孤儿 timer 观测不受任何周期触发干扰。）
     const port = makeMockPort({ subscribeSettled: () => () => {} })
     port.idle = false
     const handle = createDelivery(port, {

@@ -427,10 +427,10 @@ describe("finalizeRun 的 run-settled errorCode 构造（DoneReason → RunError
   });
 });
 
-// ── 5. dispatchAgentCall 落账（[ADR-0112] 无重试轨迹） ──
+// ── 5. dispatchAgentCall 落账（[ADR-0122] 无重试轨迹） ──
 //
 // [HISTORICAL] 原「两次失败后成功 → dispatched→retrying×2→settled{attempt:3}」用例
-// 随重试矩阵删除（ADR-0112）——agent-retrying 帧不再产生（事件类型保留为 journal
+// 随重试矩阵删除（ADR-0122）——agent-retrying 帧不再产生（事件类型保留为 journal
 // 词表兼容，仅历史 record 含此帧）。「非重试终局零假帧」用例保留：失败单次终态化，
 // journal 恰三帧（run-created / agent-started / agent-settled）。
 

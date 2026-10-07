@@ -1,7 +1,7 @@
 /**
- * 无标记条目内核契约测试（pi1-disposition-chat-flow D2②/D14⑥ 起源；ADR-0112 首败即停
+ * 无标记条目内核契约测试（pi1-disposition-chat-flow D2②/D14⑥ 起源；ADR-0122 首败即停
  * 统一语义 + skill-input-marker-pollution 技能通路并入后为「无标记条目」统一契约）：
- * - 首败即停（ADR-0112）：port.send 失败一次即收口，全条目统一（无 backoff 重试链）——
+ * - 首败即停（ADR-0122）：port.send 失败一次即收口，全条目统一（无 backoff 重试链）——
  *   unmarked 条目从内核移除（无 tombstone）、checked 条目 reject、普通 send() 条目
  *   onSettled('rejected') 逐条上报后移除
  * - failInFlight：断连事件驱动的显式失败终局——in-flight 条目批量转 failed（留守活跃集
@@ -12,7 +12,7 @@
  * - F1-11：handled 终局路径 checked waiter 受理口径 settle
  *
  * [已不可达用例删除登记] 原「G3 闸②：settle 兜底按命令条目豁免 + 普通条目 60s 兜底」
- * 两用例随 port.send settle 挂死兜底整体退役（ADR-0112 范围纪律：信任边界内不设防，
+ * 两用例随 port.send settle 挂死兜底整体退役（ADR-0122 范围纪律：信任边界内不设防，
  * 挂死处置 = 用户重启）而不可达，2026-10-05 投递域清理批次删除。
  *
  * 运行：cd packages/session-delivery && npx vitest run tests/delivery-command-lane.test.ts
@@ -33,7 +33,7 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
-describe('首败即停（ADR-0112 统一语义，backoff 自动重试链退役）', () => {
+describe('首败即停（ADR-0122 统一语义，backoff 自动重试链退役）', () => {
   it('send() 通路 unmarked 条目：首败从内核移除，不重试（port.send 恰一次）', async () => {
     let calls = 0
     const port = makeMockPort({
@@ -88,7 +88,7 @@ describe('首败即停（ADR-0112 统一语义，backoff 自动重试链退役�
   })
 })
 
-describe('failInFlight：断连事件驱动的显式失败终局（ADR-0112）', () => {
+describe('failInFlight：断连事件驱动的显式失败终局（ADR-0122）', () => {
   it('in-flight 条目转 failed（留守活跃集）+ onSettled rejected；queued 条目不触碰', async () => {
     let sendResolve: (() => void) | undefined
     const port = makeMockPort({

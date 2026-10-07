@@ -39,10 +39,9 @@ import {
 } from '@taiji/ui/extension-host'
 import BtwPanel from '@/components/panel/BtwPanel.vue'
 import {
-  createDialogRequestSource,
+  createCompanionDialogAdapters,
   createUiResponseTransport,
-  __resetDialogRequestIdSessionsForTest,
-} from '@/composables/shell/extension-host-dialog'
+} from '@taiji/ui/extension-host'
 import { __resetExtensionBusSubscriptionForTesting, useExtensionUI } from '@/composables/useExtensionUI'
 import { setBtwReclaimReminder } from '@/composables/panel/btw-pending-bookkeeping'
 import { __resetBtwPendingBookkeepingForTest } from '@/composables/panel/useBtwTabData'
@@ -105,7 +104,7 @@ function mountMainBand(sessionId: string) {
     props: { sessionId },
     global: {
       provide: {
-        [DIALOG_REQUEST_SOURCE_KEY as symbol]: createDialogRequestSource(mockBus),
+        [DIALOG_REQUEST_SOURCE_KEY as symbol]: createCompanionDialogAdapters(mockBus).source,
         [UI_RESPONSE_TRANSPORT_KEY as symbol]: createUiResponseTransport(),
       },
     },
@@ -164,7 +163,6 @@ beforeEach(() => {
   _resetDrawerForTest()
   __clearSessionCleanupRegistryForTest()
   __resetExtensionBusSubscriptionForTesting()
-  __resetDialogRequestIdSessionsForTest()
   __resetBtwPendingBookkeepingForTest()
   extMock.sendExtensionUIResponse.mockReturnValue(true)
   // 快照镜像 store 现态（真实 runtime 缓存 pending 并在快照回填——切走切回不被僵尸修剪误伤）

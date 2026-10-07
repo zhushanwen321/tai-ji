@@ -21,9 +21,11 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it } from "vitest";
 
 import { ENGINE_PROTOCOL_VERSION } from "@zhushanwen/subagent-engine-sdk";
+
+import { assertDistFresh } from "./dist-fresh.ts";
 
 const PKG_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const BIN = path.join(PKG_ROOT, "bin", "pi-subagent-cli.mjs");
@@ -143,6 +145,9 @@ async function awaitReaped(host: FakeHost, recordId: string): Promise<void> {
 }
 
 describe("pi-subagent-cli chat 轮 run 派发形态 e2e（bin 真机 NDJSON 往返）", () => {
+  // bin 加载 dist-first：stale dist 会让本套件验证旧引擎代码（假红），先过时效门
+  beforeAll(assertDistFresh);
+
   let dataDir: string | undefined;
   let host: FakeHost | undefined;
 

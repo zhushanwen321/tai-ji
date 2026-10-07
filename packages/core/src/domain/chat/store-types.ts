@@ -23,7 +23,7 @@ export interface RetryState {
  *   error        → message:error,     toolCall:error
  *   disconnect   → message:error,     toolCall:end_not_received
  *   restart      → message:error,     toolCall:end_not_received
- * （原 'timeout' 成员随 pendingSend 30s 空窗 timer 退役——ADR-0112 时间平抑红线，
+ * （原 'timeout' 成员随 pendingSend 30s 空窗 timer 退役——ADR-0122 时间平抑红线，
  * pendingSend/streaming 的收口全事件驱动，无墙钟兜底生产者。）
  */
 export type FinalizeReason =

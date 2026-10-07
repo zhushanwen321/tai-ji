@@ -4,7 +4,7 @@
  *
  * [HISTORICAL] 原重试矩阵常量族（MAX_WORKER_RETRIES / RETRY_BACKOFF_BASE_MS /
  * EXPONENTIAL_BACKOFF_BASE / RETRY_BACKOFF_BASE_ENV / REBUILD_FAILURE_INJECT_ENV）
- * 随重试矩阵删除（ADR-0112：失败显式上报，无自动重试/重建）。
+ * 随重试矩阵删除（ADR-0122：失败显式上报，无自动重试/重建）。
  */
 
 /** errorLogs 最大保留条数（防止超长 session 中日志无界增长）。 */

@@ -246,7 +246,7 @@ export class ReplicatedState<T> {
       // 关闭窗口引发 EnvironmentTeardownError（unhandled rejection → 覆盖率门禁 flake）。
       if (this.disposed) return
       // 快照失败（含 wire 协议异常）：保留 dirty + 保留上次快照，不再自动重试
-      //（ADR-0112：1s/5s/15s 退避序列已删）。失败显式上报（warn），恢复 = 下一失效边沿
+      //（ADR-0122：1s/5s/15s 退避序列已删）。失败显式上报（warn），恢复 = 下一失效边沿
       //（markDirty）/ refetch / 周期拉取。
       const kind = e instanceof WireSnapshotSchemaError ? 'wire-schema' : 'rpc'
       console.warn(

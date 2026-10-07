@@ -195,7 +195,7 @@ export type ClientMessageType =
   | 'auth'
   | 'plugin.list' | 'plugin.toggle'
   | 'plugin.install' | 'plugin.uninstall'
-  | 'plugin.approvePermissions' | 'plugin.revokePermissions'
+  | 'plugin.approvePermissions' | 'plugin.revokePermissions' | 'plugin.denyPermissions'
   | 'plugin.executeCommand'
   | 'plugin.config.get' | 'plugin.config.set'
   | 'plugin.uiResponse'
@@ -214,6 +214,7 @@ export type ClientMessageType =
   | 'project.load' | 'project.save'
   | 'worktree.create' | 'worktree.listBranches' | 'worktree.list'
   | 'terminal.spawn' | 'terminal.write' | 'terminal.resize' | 'terminal.kill' | 'terminal.attach'
+  | 'terminal.list'
   | 'config.getTerminalConfig' | 'config.setTerminalConfig'
   | 'config.getRetryConfig' | 'config.setRetryConfig'
   | 'quota.fetch' | 'quota.getCached' | 'quota.configure' | 'quota.refresh'
@@ -393,12 +394,51 @@ export interface TerminalConfig {
   bell: boolean
 }
 
-/** 终端错误码（TerminalService 主动抛出）。 */
+/**
+ * 终端实例清单条目（`terminal.list` 对账 reply 的元素，terminal-multi-instance 设计 §3.3）。
+ * runtime 侧 = 被查询会话在实例注册表（ptyMap 派生视图）上的存活全集。
+ * - `terminalId`：实例编号 `term:<会话id>:<序号>`——序号会话内单调递增、单次 runtime 生命周期内永不复用；
+ * - `alive`：存活态（清单来自注册表派生，当前恒 true；保留字段供 renderer 建档时置 ptyAlive 镜像）。
+ */
+export interface TerminalInstanceSummary {
+  terminalId: string
+  alive: boolean
+}
+
+/**
+ * 终端实例路由错误码（terminal-multi-instance 设计 §3.3「网络消息」末条）。
+ * 三码语义**互斥**：只有 `unknown_terminal_id` 是「注册成员资格的否定回执」，是 renderer 关闭沿
+ * 三腿回收的**唯一**判据（平行守卫只按 code 分档）——同码会把「仍在注册表内、进程仍活」的实例
+ * 误判为幽灵并回收（条目消失、输出此后无人接收而进程继续跑）：
+ * - `unknown_terminal_id`：对不存在实例的操作（write/resize/kill/attach 及 spawn 指定形态）——
+ *   即「该 terminalId 不在 runtime 注册表」的否定回执，renderer 据此执行关闭沿三腿清理；
+ * - `terminal_id_session_mismatch`：terminalId 的会话段与请求 sessionId 不一致（交叉校验拒绝）——
+ *   走普通错误通道，**不触发回收**（实例仍活）；
+ * - `terminal_id_required`：编号缺失（既有实例操作帧 write/resize/kill/attach）**或编号类型非法**
+ *   （非字符串——数字 / null / 布尔 / 对象，含 `terminal.spawn` 指定形态）的**畸形帧拒绝**（设计 §3.3
+ *   「缺 terminalId 即拒」防御 + 类型维度 fail-fast，由 runtime handler 发出）——不静默归一为「新建」、
+ *   不是注册成员资格裁决，走普通错误通道，**不触发回收**。
+ * 命名口径：仓库惯例 snake_case（对齐既有 `terminal_failed` / `record_not_found`）；设计文档已按
+ * 实现回写为 snake_case（impl-plan §5 偏差表 D1），实现不得改写为 camelCase。
+ */
+export type TerminalRoutingErrorCode =
+  | 'unknown_terminal_id'
+  | 'terminal_id_session_mismatch'
+  | 'terminal_id_required'
+
+/**
+ * 终端错误码联合（TerminalService 抛出 + handler 路由拒绝码）。
+ * 其中 `terminal_id_required` 由协议入口 TerminalMessageHandler 在畸形帧拒绝时发出
+ *（非 TerminalService 抛出）；其余由 TerminalService 以扁平错误抛出。
+ * `resize_failed` / `kill_failed` / `not_found` 为存量保留码：**当前无抛出点**（保留 union 供消费侧
+ * 穷尽，勿据以设计错误处理分支——实装语义以 `services/ports/terminal-service.ts` 头注为准）。
+ */
 export type TerminalErrorCode =
   | 'spawn_failed'     // pty.spawn 失败（shell 不存在/无执行权限）
-  | 'not_found'        // 操作的 sessionId 无对应 PTY
-  | 'resize_failed'    // pty.resize 失败
-  | 'kill_failed'      // pty.kill 失败
+  | 'not_found'        // 操作的 sessionId 无对应 PTY（存量保留、当前无抛出点；实例路由否定回执改用 unknown_terminal_id）
+  | 'resize_failed'    // 存量保留、当前无抛出点（pty.resize best-effort：失败仅记 console、下次 fit 重试；见 services/ports/terminal-service.ts）
+  | 'kill_failed'      // 存量保留、当前无抛出点（pty.kill 失败靠 onExit 幂等清理；见 services/ports/terminal-service.ts）
+  | TerminalRoutingErrorCode
 /** handler 对未知错误归一的兜底字面量（非 TerminalService 主动抛出，单列让 renderer switch 可穷尽） */
 export type TerminalUnknownErrorCode = 'terminal_failed'
 /** envelope code 字段的完整联合（业务码 + 兜底） */
@@ -760,6 +800,7 @@ export interface ClientMessageMap {
   'plugin.uninstall': { pluginId: string }
   'plugin.approvePermissions': { pluginId: string; permissions: string[] }
   'plugin.revokePermissions': { pluginId: string }
+  'plugin.denyPermissions': { pluginId: string }
   'plugin.executeCommand': { pluginId: string; commandId: string; args?: Record<string, unknown> }
   'plugin.config.get': { pluginId: string; key?: string }
   'plugin.config.set': { pluginId: string; key: string; value: unknown }
@@ -820,13 +861,20 @@ export interface ClientMessageMap {
     workspaceHint?: string
   }
   // terminal.*：drawer 集成终端的 PTY 控制（Phase 2 runtime service）。
+  // 多实例（terminal-multi-instance 设计 §3.3）：全部对既有实例操作的帧带 `terminalId`
+  //（实例编号 `term:<会话id>:<序号>`）；缺编号属畸形请求、由 runtime 拒绝（唯一豁免 = spawn 新建形态）。
   // spawn 是 lazy 的（首次打开 terminal tab 才调），cwd 省略则用 session.cwd。
   // write 的 data 是原始字节字符串（含 ANSI/控制字符），不带换行则 shell 不提交（联动 2 填命令）。
-  'terminal.spawn': { sessionId: string; cwd?: string; cols: number; rows: number }
-  'terminal.write': { sessionId: string; data: string }
-  'terminal.resize': { sessionId: string; cols: number; rows: number }
-  'terminal.kill': { sessionId: string }
-  'terminal.attach': { sessionId: string }
+  // spawn 双形态：不带 terminalId = 新建（编号由 runtime 分配，经 terminal.ack 回传）；
+  // 带 terminalId = 指定形态（实例存活则幂等 no-op；不存在则 unknown_terminal_id）。
+  'terminal.spawn': { sessionId: string; terminalId?: string; cwd?: string; cols: number; rows: number }
+  'terminal.write': { sessionId: string; terminalId: string; data: string }
+  'terminal.resize': { sessionId: string; terminalId: string; cols: number; rows: number }
+  'terminal.kill': { sessionId: string; terminalId: string }
+  'terminal.attach': { sessionId: string; terminalId: string }
+  // terminal.list：查询帧（按会话返回实例清单含存活态），reply 'terminal.ack' 携 TerminalInstanceSummary[]。
+  // 触发点：⌘R 界面刷新 / 会话激活 / runtime 世代变更重连；对账范围 = 本次查询所属会话（他会话条目不参与）。
+  'terminal.list': { sessionId: string }
   'config.getTerminalConfig': Record<string, never>
   'config.setTerminalConfig': { config: TerminalConfig }
   'config.getRetryConfig': Record<string, never>
@@ -1088,7 +1136,7 @@ export type ServerMessageType =
   // disposition）的终局通知——一次性事件消息，非 last-value 快照（不登记 message-bus
   // STATE_TYPE_KEY_MAP，无 stateSnapshot 重连回放；缺席即丢失，丢失后的收敛由孤儿对账
   // 承接 D1⑤）。内核一对一通知前端，前端按 handled 同形态静默清除（移除乐观气泡 +
-  // 清空窗计时器 + 递减在途计数，无错误提示 U2①）。
+  // 清 dispatching 占位（clearPendingSend，纯 Set 操作）+ 递减在途计数，无错误提示 U2①）。
   | 'session.deliveryHandled'
   // session.revokeMessage（消息撤回设计 D2/D8）：revokeMessage RPC 的 reply type（与 request
   // 同名——delivery.* / session.subscribe 同款 payload 消费型同名模式）。
@@ -1187,6 +1235,12 @@ export type ServerMessageType =
   // 重触发 activation event 重新激活 + 重新弹审批）。前端收到后撤回该插件的审批弹窗；
   // 迟到批准对已删 pending noop 幂等（旧版前端未消费此帧时无异常回退，P-11）。
   | 'plugin:permissionRequestExpired'
+  // plugin:permissionRequestResolved：权限审批终局下行（runtime PluginActivator
+  // resolvePermissionApproval 命中挂起审批时生产——用户在任一连接端批准/拒绝后广播，
+  // 其余端据此撤回同一审批的弹窗）。approved=false 含显式拒绝与挂起期清理唤醒（终局
+  // 语义统一为「弹窗撤回」）；广播幂等（pending 命中即删，同一 requestId 至多一次）；
+  // 迟到审批对已删 pending miss noop 不产生本帧（该请求终局已由 expired 覆盖）。
+  | 'plugin:permissionRequestResolved'
   | 'plugin:viewUpdate'
   // plugin:modalState：plugin modal 开合帧（plugin-header-action-modal-points AP-2）。
   // runtime showModal/hideModal/dismissModal 仲裁后全局广播（槽与层都是全局单例，
@@ -2037,11 +2091,21 @@ export interface ServerMessageMapBase {
   // miss 须 noop 幂等，P-11：旧版前端未消费此帧时无异常回退）。
   'plugin:uiRequestExpired': { requestId: string; pluginId: string; sessionId?: string } & Record<string, unknown>
   // plugin:permissionRequestExpired：权限审批到期取消下行（timeout-plugin-service D3，
-  // runtime PluginActivator 审批等待超时生产）。pluginId 必带（前端按插件定位撤窗）。
+  // runtime PluginActivator 审批等待超时生产）。pluginId 必带；requestId 必带且与
+  // 本次审批 plugin:permissionRequest 广播同源（每次审批新生成）——前端按 requestId
+  // 精确撤回审批弹窗，同 pluginId 陈旧 expired 广播不误撤后到的新弹窗；payload 缺
+  // requestId（旧版 runtime 广播）时前端回退按 pluginId 匹配。
   // 与 D2 的 plugin:uiRequestExpired 同为「取消非替答」语义——插件置 UNLOADED（未装载
   // 态）而非「被拒」，重触发 activation event 即可重新激活 + 重新弹审批；前端撤窗
   // miss noop 幂等（P-11：旧版前端未消费此帧时无异常回退）。
-  'plugin:permissionRequestExpired': { pluginId: string } & Record<string, unknown>
+  'plugin:permissionRequestExpired': { pluginId: string; requestId: string } & Record<string, unknown>
+  // plugin:permissionRequestResolved：权限审批终局下行（runtime PluginActivator
+  // resolvePermissionApproval 生产）。pluginId 必带；requestId 与本次审批
+  // plugin:permissionRequest 广播同源（每次审批新生成）——前端按 requestId 精确撤回
+  // 对应弹窗，同 pluginId 陈旧 resolved 广播不误撤后到的新弹窗；payload 缺 requestId
+  // （旧版广播）时前端回退按 pluginId 匹配。approved=true 批准 / false 拒绝（含挂起期
+  // 清理唤醒）——撤窗语义两值一致，approved 供消费端审计/展示，不参与匹配。
+  'plugin:permissionRequestResolved': { pluginId: string; requestId: string; approved: boolean } & Record<string, unknown>
   'model.list': { models: ModelInfo[] }
   'config.sessions': { groups: SessionGroup[] }
   /** config.systemPrompt：reply + broadcast + 初始推送三用。corrupted=true 表示磁盘配置损坏已回退默认（SR5）。 */
@@ -2203,7 +2267,11 @@ export interface ServerMessageMapBase {
   //   true 让「列表不可用」与「无 subagent」显式分形，面板据此显示降级提示；缺省 false
   //   （mock / 旧 runtime / 广播帧不带，消费方按 false 处理）。协议先例 = traceEntries 的
   //   source='oversize'。
-  'session.subagents': { sessionId: string; subagents: SubagentRecord[]; oversize?: boolean }
+  // found（待裁决项 4）：RPC reply 专用会话存在性标志——false = 主会话文件不在册（pi 首条
+  //   消息前延迟落盘窗口 / 扫描竞态），「读不到会话」与「会话存在但列表为空」显式分形，
+  //   消费方（store）拿 false 保留既有分区不覆盖、true 的空列表是真实空（直接覆盖）；缺省
+  //   true（广播帧不带 = 权威数据帧 / mock / 旧 runtime）。
+  'session.subagents': { sessionId: string; subagents: SubagentRecord[]; oversize?: boolean; found?: boolean }
   // session.planState：plan 模式状态投影（runtime 读 session JSONL 最后一条 plan-state entry
   // 派生，冷热两路径共用同一份派生代码）。live 腿 = 投影链 stateSnapshot('plan') 广播；
   // 冷腿 = session.getPlanState RPC reply 复用本 payload。docs 缺省 = 旧 schema entry（D4 降级）。
@@ -2236,7 +2304,8 @@ export interface ServerMessageMapBase {
   //   注册/终态两条小条目（W17 前旧指针 / W17~W1 v1 快照为兼容读层）。信号形态不动（W3 领地）。
   // oversize（RT-4#8）：与 session.subagents 同款降级标志——W1 起仅旧格式惰性兼容读路径可产生
   //   （32MB 预检保留在兼容层），恒空数组语义不变。
-  'session.workflows': { sessionId: string; workflows: WorkflowRunRecord[]; oversize?: boolean }
+  // found（待裁决项 4）：与 session.subagents 同款会话存在性标志（RPC reply 专用，缺省 true）。
+  'session.workflows': { sessionId: string; workflows: WorkflowRunRecord[]; oversize?: boolean; found?: boolean }
   // session.agentCallHistory：workflow 内 agent call 的对话流消息（runtime 按 trace[].sessionId 查找 JSONL）。
   // truncated：u4b（D5①）巨型 JSONL 超预检阈值后逆序窗口降级标志（optional，消费方按 false 处理）。
   'session.agentCallHistory': { sessionId: string; agentCallSessionId: string; messages: import('./message').Message[]; truncated?: boolean }
@@ -2419,17 +2488,19 @@ export interface ServerMessageMapBase {
    *  usedBaseRef：实际用作创建基线的 ref（RT-8#8）。请求的 baseBranch 校验失败时
    *  runtime 会 fallback 到本地 main——可选字段存在即「实际 ref ≠ 请求 ref」，前端可提示。 */
   'worktree.created': { cwd: string; branch: string; usedBaseRef?: string }
-  // terminal.data：PTY 输出流（高频广播，按 sessionId 路由到对应 panel 的 scrollback buffer）。
-  'terminal.data': { sessionId: string; data: string }
-  // terminal.exit：PTY 进程退出（exitCode 来自 node-pty onExit）。PTY 销毁后 ptyMap 移除。
-  'terminal.exit': { sessionId: string; exitCode: number }
+  // terminal.data：PTY 输出流（高频广播，按 sessionId + terminalId 路由到对应实例的 scrollback buffer）。
+  'terminal.data': { sessionId: string; terminalId: string; data: string }
+  // terminal.exit：PTY 进程退出（exitCode 来自 node-pty onExit）。实例销毁后从注册表（ptyMap）移除。
+  'terminal.exit': { sessionId: string; terminalId: string; exitCode: number }
   // terminal.alive：PTY 就绪信号（spawn 成功后发，renderer flush 写队列——联动 2 异步写时序）。
-  'terminal.alive': { sessionId: string }
+  'terminal.alive': { sessionId: string; terminalId: string }
   // terminal.writeFailed：PTY 写入失败（进程已退出/管道关闭，RT-8#10）。低频错误信号
-  //（每 PTY 生命周期至多一次，防击键流刷屏），renderer 收到后 toast 提示输入可能丢失。
-  'terminal.writeFailed': { sessionId: string; message: string }
-  // terminal.ack：spawn/write/resize/kill/attach 的通用 ack reply（空 payload，前端按 id 匹配）。
-  'terminal.ack': Record<string, never>
+  //（每 PTY 生命周期至多一次，防击键流刷屏），renderer 收到后按实例 toast 提示输入可能丢失。
+  'terminal.writeFailed': { sessionId: string; terminalId: string; message: string }
+  // terminal.ack：terminal.* RPC 的通用 ack reply（前端按 msg.id 匹配请求，故**不加** terminalId 路由字段，
+  // 设计 §3.3）。按请求分形态：spawn 回包携分配/复用的 terminalId（renderer 以 ack 为唯一编号来源建档）；
+  // list 回包携被查询会话的实例清单；write/resize/kill/attach 回包为空 payload。
+  'terminal.ack': { terminalId?: string; instances?: TerminalInstanceSummary[] }
   // config.terminalConfig：reply + broadcast + sendInitialState 三用（复刻 config.systemPrompt 范式）。
   'config.terminalConfig': { config: TerminalConfig; corrupted?: boolean }
   // config.retryConfig：reply + broadcast 多窗口同步（同 terminal 范式）；configured 区分「显式配置」与「未配置（显示默认）」。
@@ -3010,16 +3081,20 @@ export interface ReplyPayloadMap {
   'session.importCandidates': ServerMessageMap['session.importCandidates']
   'session.import': ServerMessageMap['session.import']
   // plugin.* RPC reply 映射（plugin-message-handler.ts 全部发 reply）：
-  //  - plugin.list / toggle / uninstall / install / approvePermissions / revokePermissions
-  //    → reply 'config.plugins' { plugins }（前端读 plugins 列表刷新 UI）
+  //  - plugin.list / toggle / uninstall / install → reply 'config.plugins' { plugins }（前端读 plugins 列表刷新 UI）
+  //  - 权限命令（approvePermissions / revokePermissions / denyPermissions）→ reply 'pong' {}
+  //    （ack 型，前端不读 payload）；插件列表刷新经 config.plugins 广播——approve 触发
+  //    activate（status discovered→active 真实变化）时由 plugin-service 广播；deny/revoke
+  //    不改 PluginInfo 任何字段，不广播
   //  - plugin.executeCommand → reply 'pong' {}（fire-and-forget ack，前端不读 payload）
   //  - plugin.config.get / set → reply 'plugin:config' { pluginId, config }（前端读 config 应用到设置面板）
   'plugin.list': ServerMessageMap['config.plugins']
   'plugin.toggle': ServerMessageMap['config.plugins']
   'plugin.uninstall': ServerMessageMap['config.plugins']
   'plugin.install': ServerMessageMap['config.plugins']
-  'plugin.approvePermissions': ServerMessageMap['config.plugins']
-  'plugin.revokePermissions': ServerMessageMap['config.plugins']
+  'plugin.approvePermissions': ServerMessageMap['pong']
+  'plugin.revokePermissions': ServerMessageMap['pong']
+  'plugin.denyPermissions': ServerMessageMap['pong']
   'plugin.executeCommand': ServerMessageMap['pong']
   'plugin.config.get': ServerMessageMap['plugin:config']
   'plugin.config.set': ServerMessageMap['plugin:config']
@@ -3200,9 +3275,11 @@ export interface ReplyPayloadMap {
   //（payload 消费型；与 request 同名——session.subscribe / backgroundTask.list 同款模式）。
   'rollingRestart.status': ServerMessageMap['rollingRestart.status']
 
-  // terminal.* 都是 ack 型，统一 reply 'terminal.ack'（空 payload，前端 command() 按 id 匹配 resolve）
+  // terminal.* 都是 ack 型，统一 reply 'terminal.ack'（前端 command() 按 id 匹配 resolve；
+  // spawn 回包携 terminalId、list 回包携 instances，见 ServerMessageMap['terminal.ack']）
   'terminal.attach': ServerMessageMap['terminal.ack']
   'terminal.kill': ServerMessageMap['terminal.ack']
+  'terminal.list': ServerMessageMap['terminal.ack']
   'terminal.resize': ServerMessageMap['terminal.ack']
   'terminal.spawn': ServerMessageMap['terminal.ack']
   'terminal.write': ServerMessageMap['terminal.ack']

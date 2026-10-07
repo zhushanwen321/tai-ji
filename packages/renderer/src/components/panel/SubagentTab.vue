@@ -136,8 +136,15 @@
       </div>
 
       <!-- 对话流：复用 MessageStream（D3 硬约束，禁止重建任何 turn/block/thinking/markdown 渲染）。
-           MessageStream 按 :session-id 读 chatStore.messages 虚拟分区，对虚拟 id 完全透明。 -->
-      <MessageStream v-else :session-id="selectedSubagentId" />
+           MessageStream 按 :session-id 读 chatStore.messages 虚拟分区，对虚拟 id 完全透明。
+           mainSessionId = panelStore.focusedSessionId（头部注释同源约定）——agentcall 两段式
+           vid 的归属解析（file 白名单/markdown 路径 cwd 回真实 session）依赖它；subagent:
+           三段式自带 mainSid 不消费。 -->
+      <MessageStream
+        v-else
+        :session-id="selectedSubagentId"
+        :main-session-id="panelStore.focusedSessionId ?? undefined"
+      />
 
       <!-- 底部只读提示条（差异化层：subagent 为 background 任务，无 composer） -->
       <div class="flex shrink-0 items-center gap-1.5 border-t border-hairline px-3 py-1.5 text-[length:var(--text-3xs)] text-neutral-dim">
@@ -153,7 +160,7 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { AlertCircle, Bot, ChevronDown, ChevronLeft, Clock, Lock } from '@lucide/vue'
 import { Button } from '@taiji/ui'
-import { useDrawerControl, openWorkflowInDrawer } from '@taiji/core/domain/drawer'
+import { useSubagentSelection, openWorkflowInDrawer } from '@taiji/core/domain/drawer'
 import { usePanelStore } from '@/stores/panel'
 import {
   useSubagentStore,
@@ -187,7 +194,7 @@ const panelStore = usePanelStore()
 const subagentStore = useSubagentStore()
 const workflowStore = useWorkflowStore()
 
-const { selectedSubagentId, enteredFrom } = useDrawerControl()
+const { selectedSubagentId, enteredFrom } = useSubagentSelection()
 
 // 切换编排（回执写状态在 composable；displayOf 供 thinking 槽与 modelDisplay 消费）
 const { setSubagentModel, displayOf } = useSubagentModel()

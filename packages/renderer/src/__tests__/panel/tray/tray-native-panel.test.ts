@@ -38,7 +38,7 @@ import { useWorkflowStore } from '@/stores/workflow'
 import { useToast } from '@/composables/useToast'
 import { clearToasts } from '../../helpers/toast-queue'
 import { __clearSessionCleanupRegistryForTest } from '@/composables/useSessionScopedState'
-import { bindDrawerSessionId, bindWorkflowOverlayOpener, getDrawerControlState, _resetDrawerForTest } from '@taiji/core/domain/drawer'
+import { bindDrawerSessionId, bindWorkflowOverlayOpener, getDrawerControlState, useBashTaskSelection, useSubagentSelection, useWorkflowSelection, _resetDrawerForTest } from '@taiji/core/domain/drawer'
 import { subagentVirtualId } from '@taiji/shared'
 import TrayNativePanel from '@/components/panel/tray/TrayNativePanel.vue'
 import { TRAY_COUNTS_KEY, useTrayCounts } from '@/components/panel/tray/useTrayCounts'
@@ -368,6 +368,22 @@ describe('TrayNativePanel 分桶 tab 与行渲染（使用者黑盒）', () => {
     expect(row.text()).toContain('1m5s')
   })
 
+  it('subagent：agent 绝对路径时行内显示 basename 去 .md，title 保留全路径', async () => {
+    const fullPath = '/Users/x/.agents/skills/explorer/agent.md'
+    trayState.subagentRunning = [
+      makeSubagent({ subagentId: 'sub-1', status: 'running', engine: 'pi', agent: fullPath }),
+    ]
+    wrapper = mountPanel('subagent')
+    await flushPromises()
+
+    const row = wrapper.find('[data-testid="tray-subagent-row"]')
+    // 行内短名（窄列 truncate 优先）
+    expect(row.text()).toContain('agent')
+    expect(row.text()).not.toContain(fullPath)
+    // title hover 保留全路径
+    expect(row.attributes('title')).toBe(`${fullPath} · review-changes`)
+  })
+
   it('workflow：行渲染 scriptName/slug/进度 N-M/耗时（done 行无 spinner，状态点替代）', async () => {
     trayState.workflowRunning = [
       makeWorkflow({ runId: 'wf-1', status: 'running' }),
@@ -634,7 +650,7 @@ describe('TrayNativePanel 行点击归宿矩阵（D2）', () => {
     await wrapper.find('[data-testid="tray-bash-row"]').trigger('click')
     await flushPromises()
     const control = getDrawerControlState()
-    expect(control.selectedBackgroundTaskId).toBe('bt-1')
+    expect(useBashTaskSelection().selectedBackgroundTaskId.value).toBe('bt-1')
     expect(control.activeTab).toBe('bashTask')
     expect(control.isOpen).toBe(true)
   })
@@ -647,9 +663,10 @@ describe('TrayNativePanel 行点击归宿矩阵（D2）', () => {
     await wrapper.find('[data-testid="tray-subagent-row"]').trigger('click')
     await flushPromises()
     const control = getDrawerControlState()
-    expect(control.selectedSubagentId).toBe(subagentVirtualId(SID, 'sub-1'))
+    const subagentSelection = useSubagentSelection()
+    expect(subagentSelection.selectedSubagentId.value).toBe(subagentVirtualId(SID, 'sub-1'))
     expect(control.activeTab).toBe('subagent')
-    expect(control.enteredFrom).toBe('chat')
+    expect(subagentSelection.enteredFrom.value).toBe('chat')
     expect(control.isOpen).toBe(true)
   })
 
@@ -664,8 +681,7 @@ describe('TrayNativePanel 行点击归宿矩阵（D2）', () => {
     await flushPromises()
     // 托盘行零改动（仍传 runId）；改向后 openWorkflow 转发 overlay opener，不触达 drawer
     expect(overlayOpener).toHaveBeenCalledWith('wf-1', undefined, undefined)
-    const control = getDrawerControlState()
-    expect(control.selectedWorkflowName).not.toBe('wf-1')
+    expect(useWorkflowSelection().selectedWorkflowName.value).not.toBe('wf-1')
   })
 })
 

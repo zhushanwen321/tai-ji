@@ -26,7 +26,7 @@
 // （session_start 是 pi 启动序列里最早带 ctx 的钩子 = 「session 就绪」，即设计所指
 // 加载完成时点；不挂任何懒触发（无 subagent 的 session 也必上报）。
 //
-// 失败语义（ADR-0112 收紧，原 D5 缺席语义②的 timer 重试已删）：select 失败
+// 失败语义（ADR-0122 收紧，原 D5 缺席语义②的 timer 重试已删）：select 失败
 // （超时/通道异常/非确认回包）→ 首败 warn 显式留痕 + 置脏——**不设 setTimeout
 // 自动重试**，等下一个 onInFlightChanged 事件驱动重推（绝对计数语义下任何一帧
 // 成功即整镜恢复）。session_start 首帧早于 runtime adapter attach 的竞态（R2 实证）
@@ -42,7 +42,7 @@ import { getLogger } from "@zhushanwen/pi-extension-logger";
 import { toErrorMessage } from "@zhushanwen/pi-ext-guards";
 
 /** select 通道级超时（控制面单请求，秒级校准——超时默认原则规则 19）；fire-and-forget
- *  帧不留 pending 挂死面。失败不重试（ADR-0112），置脏等下一个事件。 */
+ *  帧不留 pending 挂死面。失败不重试（ADR-0122），置脏等下一个事件。 */
 const SELECT_TIMEOUT_MS = 2_000;
 
 /** 在途上报器（组合根 index.ts 持有；per-factory 实例，session_start/shutdown 驱动）。 */
@@ -137,7 +137,7 @@ export function createInFlightReporter(opts: InFlightReporterOpts = {}): InFligh
       return;
     }
     // 失败折叠（resolve undefined = 超时/取消/无路由 / 回包非 ack / 通道异常）：
-    // 显式留痕 + 置脏（ADR-0112：无 timer 自动重试）——等下一个 onInFlightChanged
+    // 显式留痕 + 置脏（ADR-0122：无 timer 自动重试）——等下一个 onInFlightChanged
     // 事件驱动重推；attach 竞态丢失的首帧由后续事件自然补推，无后续事件的 session
     // 镜像按 absent-report 走 errs 推迟（30min 有界，errs-safe 兜底不丢）。
     logFailure(

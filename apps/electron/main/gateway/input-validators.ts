@@ -12,10 +12,17 @@
  *
  * 这是纯函数文件——签名即设计，不深化骨架。
  *
- * 依赖方向：无下游（纯函数，import node:path + node:url）
+ * 依赖方向：无下游（纯函数，import node:path + node:url）。
+ *
+ * [HISTORICAL] isPathInAllowedPrefixes（local-file 白名单前缀判定）已下沉
+ * utils/local-file-prefixes——它与 computeLocalFilePrefixes 是同一白名单域的「判定/构造」
+ * 两半，且原位置造成 utils→gateway→utils 模块环；此处 re-export 保持既有消费面
+ * （input-validators 单测等）不改 import 路径。
  */
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+
+export { isPathInAllowedPrefixes } from '../utils/local-file-prefixes.js'
 
 /**
  * 校验 URL 是否允许 openExternal。
@@ -29,30 +36,20 @@ export function isValidExternalUrl(url: string): boolean {
 }
 
 /**
- * 校验路径是否在允许的前缀目录内（防目录穿越）。
- * 用于 local-file:// 协议 handler。
- *
- * 两次匹配：resolved.startsWith(prefix) 或精确等于（resolved + sep === prefix）。
- *
- * @param filePath 待校验路径
- * @param allowedPrefixes 允许的根目录列表（调用方负责追加 path.sep 后缀）
- * @returns true=在白名单内 / false=越界
- */
-export function isPathInAllowedPrefixes(filePath: string, allowedPrefixes: readonly string[]): boolean {
-  const sep = path.sep
-  const resolved = path.resolve(filePath)
-  // 前缀匹配（allowedPrefixes 已带 trailing sep）+ 精确匹配（resolved 本身就是允许目录）
-  return allowedPrefixes.some(p => resolved.startsWith(p))
-    || allowedPrefixes.some(p => resolved + sep === p)
-}
-
-/**
  * 校验 reveal-in-folder 输入是否为绝对路径（IPC 边界无类型保障，防御非 string 输入）。
  * 来源是 runtime 快照透传的 session JSONL 绝对路径；相对路径在 main 进程 cwd 下解析
  * 有歧义，直接拒绝（handler 返回 false，renderer 侧降级）。
  */
 export function isValidAbsolutePath(filePath: unknown): filePath is string {
   return typeof filePath === 'string' && filePath.length > 0 && path.isAbsolute(filePath)
+}
+
+/**
+ * 校验 remote-access 开关切换 IPC 的 enabled 输入（IPC 边界无类型保障，防御非 boolean）。
+ * 来源是 renderer 设置面板的开关状态；非 boolean 直接拒绝（handler 抛错，renderer 降级）。
+ */
+export function isValidRemoteAccessEnabled(value: unknown): value is boolean {
+  return typeof value === 'boolean'
 }
 
 /**

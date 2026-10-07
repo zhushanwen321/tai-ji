@@ -303,7 +303,7 @@ describe('u6 D1: update:getPreloaded miss 后认领', () => {
 // D2 交错缓解：update:install 响应增加实装 version 字段
 // ════════════════════════════════════════════════════════════════
 describe('u6 D2: update:install 响应含实装 version', () => {
-  // [ADR-0112] 原「500ms 延迟 quit」改为 setImmediate；断言改为捕获 quit 回调。
+  // [ADR-0122] 原「500ms 延迟 quit」改为 setImmediate；断言改为捕获 quit 回调。
   let capturedQuitCallback: (() => void) | null = null
 
   beforeEach(() => {

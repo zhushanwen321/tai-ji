@@ -729,7 +729,7 @@ function findLatestSubagentFile(dir: string, files: string[]): string | null {
 }
 
 /** 有 startedAt：匹配文件名 ISO 时间戳最近邻的文件（事实最近匹配，无时间窗猜测——
- *  ADR-0112：原 60s 窗口阈值已删，最近邻即裁决）。无可解析时间戳文件返回 null。 */
+ *  ADR-0122：原 60s 窗口阈值已删，最近邻即裁决）。无可解析时间戳文件返回 null。 */
 function findTimestampMatchedSubagentFile(dir: string, files: string[], startedAt: number): string | null {
   const targetTime = startedAt
   let best: { file: string; diff: number } | null = null

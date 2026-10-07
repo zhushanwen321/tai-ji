@@ -123,9 +123,9 @@ export interface PiSessionOptions {
   /**
    * 档位字符串透传（非空即发）；合法性由上游入口层校验（launch-params
    * resolveEffectiveThinking，词表 = shared PI_THINKING_LEVELS），本层不重复校验。
-   * 不可把「pi 会拒绝非法档位」当兜底依赖——pi（0.84.4）对非法 --thinking 仅 push
+   * 不可把「pi 会拒绝非法档位」当兜底依赖——pi（1.0.0 复核）对非法 --thinking 仅 push
    * warning diagnostic 并丢弃档位、进程照常以缺省档启动（pi-coding-agent
-   * dist/cli/args.js:112-121；仅 type==="error" 才 exit：dist/main.js:476-478）。
+   * dist/cli/args.js `--thinking` 分支；仅 diagnostics 含 type==="error" 才 exit：dist/main.js）。
    */
   thinkingLevel?: string
 }
@@ -140,7 +140,7 @@ export interface PiSessionOptions {
  * 调用方消费语义方法（switchSession/getState/sendExtensionUiResponse 等），不再有「发任意 pi 命令」的能力。
  *
  * RPC 墙钟超时（sendCommand timeout 档位 / prompt timeoutMs 不限时档 /
- * SendCommandOptions maintenance 维护豁免）已随 ADR-0112 防御机制清查退役——
+ * SendCommandOptions maintenance 维护豁免）已随 ADR-0122 防御机制清查退役——
  * pi 对 RPC 永不响应时调用方 promise 悬挂，失败信号归 pi exit/error 事件链。
  */
 export interface IPiEngine {
@@ -213,7 +213,7 @@ export interface IPiEngine {
   // ── 进程生命周期（本进程自身） ──
   /** 启动 pi 子进程。由 ProcessManager.createSession 内部调用，service 一般不直接调。 */
   start(): Promise<void>
-  /** 终止 pi 子进程（SIGKILL 直杀，grace 等待窗已随 ADR-0112 退役）。 */
+  /** 终止 pi 子进程（SIGKILL 直杀，grace 等待窗已随 ADR-0122 退役）。 */
   kill(): Promise<void>
   /** 注册本进程退出回调。多播（可多订阅者），返回 unsubscribe（与 onEvent 对称）。 */
   onExit(callback: PiProcessExitCallback): () => void
@@ -225,7 +225,7 @@ export interface IPiEngine {
    * 最近一次 pi 双向活动时刻（ms epoch）。
    * 写点（RpcClient 内部）：出站 sendCommand / 入站 handleMessage 全帧。初值 = spawn 时刻。
    * 消费方为观测面（crash 取证「死前最后活动时刻」等）。原空闲回收判定消费
-   * （idle-pi-reclamation reaper + touchActivity 手动刷新）已随 ADR-0112 退役。
+   * （idle-pi-reclamation reaper + touchActivity 手动刷新）已随 ADR-0122 退役。
    */
   readonly lastActivityAt: number
 }

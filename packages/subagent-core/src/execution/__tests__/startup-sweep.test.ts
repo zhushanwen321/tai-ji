@@ -15,7 +15,7 @@
 //   声明注释在位。
 // - 检查点 8 三形态（[D16⑥] 枚举换源实测）：坏链 / 空 record 流 / v1 旧形态
 //   目录——前两形态候选照进但收编判定拦下（零写入），v1 目录不进候选。
-// - 新鲜末帧直收（ADR-0112 清查：事件流静止宽限窗已删，判僵尸依据 = 创建顺序
+// - 新鲜末帧直收（ADR-0122 清查：事件流静止宽限窗已删，判僵尸依据 = 创建顺序
 //   契约——单实例锁 + 扫描先于任何 pi spawn）：末帧距今 10s 的 running run
 //   照常收编，无任何时间窗跳过。
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";

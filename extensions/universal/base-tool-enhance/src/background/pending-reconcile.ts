@@ -85,9 +85,9 @@ const logger = getLogger("base-tool-enhance");
 /**
  * 对账依赖的最小 pi 面（结构兼容 ExtensionAPI 的子集；测试注入不造完整 pi）。
  *
- * sendMessage 返回类型 `void | Promise<void>` 是 pi 0.84.4 实装的适配登记
- * （bg-task-notify-durability 实装核实）：ExtensionAPI.sendMessage 的类型声明与
- * loader.js:296 / agent-session.js:2004 两级桥接均不返回 promise（bindCore 包装层
+ * sendMessage 返回类型 `void | Promise<void>` 是 pi 实装的适配登记
+ * （bg-task-notify-durability 实装核实，1.0.0 复核同构）：ExtensionAPI.sendMessage 的类型声明与
+ * loader.js / agent-session.js bindCore 两级桥接均不返回 promise（bindCore 包装层
  * 以 .catch 吞 rejection 转 runner emitError），真实 pi 注入时恒返回 undefined——
  * 「await resolve 即已落盘」在实装通道上拿不到。await 两者皆合法：
  *  - 同步 throw（assertActive 失败 / 旧 bus）在调用点抛出，可捕；

@@ -11,7 +11,7 @@
  * - in-flight → delivered：confirmDelivered（送达回执，D2）
  * - in-flight → queued：requeue（对账回收重投，D3）
  * - queued/failed → cancelled：cancel（本地移除 + tombstone / 用户 × 移除）
- * - in-flight → failed：断连事件驱动的未确认终局（failInFlight，ADR-0112）
+ * - in-flight → failed：断连事件驱动的未确认终局（failInFlight，ADR-0122）
  * - failed → queued：requeue（用户重试/resync 单条重报）
  * - [扩展①] queued → delivered：confirmDelivered 也接受 queued 态——服务 reattach
  *   场景 rebuild 直确认重建（D3②：适配器扫描 transcript 判 delivered 后 send 重建
@@ -26,7 +26,7 @@
  *   已由底层通道受理——queued → in-flight + 出批 + checked waiter 受理口径 resolve。
  *   合批分段中途失败时已登记段留守 in-flight（等回执/对账），仅未受理段走失败面。
  *
- * 失败语义（ADR-0112 首败即停，2026-10-05 用户裁决，backoff 自动重试链退役）：
+ * 失败语义（ADR-0122 首败即停，2026-10-05 用户裁决，backoff 自动重试链退役）：
  * port.send 失败（含 accepted:false）一次即收口——checked 条目 reject + 从内核移除；
  * 非 checked 条目 onSettled('rejected') 逐条显式上报 + 从内核移除。重试决策归消费方
  * （人看页面通知、agent 收失败回执），内核只做忠实投递与事实上报。
@@ -60,7 +60,7 @@
  * 其余 v1 机制逐条保持：busy gate（isIdle + 内核在途内查双条件——hasPendingMessages
  * 自镜像四件套已按 msg-pipeline-debloat D2 拆除，busy 判定内查 active 表）、合批窗口、
  * settled 边沿驱动、dedupe LRU、dispose 语义（丢弃不触发 onSettled、checked 挂账
- * reject）。[ADR-0112 退役登记] backoff 自动重试链、port.send settle 挂死兜底
+ * reject）。[ADR-0122 退役登记] backoff 自动重试链、port.send settle 挂死兜底
  * （60s）、watchdog 30s 定时复核、无订阅装配 busy 退避轮询——时间平抑/补偿类机制
  * 全部删除，busy 等待归 settled 边沿与外部触发。depth() 口径保持 v1 = 尚未受理的
  * 消息数（受理转 in-flight 后不计；「在途未确认」数经 entriesFull() 全量视图消费）。
@@ -134,7 +134,7 @@ export interface DeliverySubmitOptions {
    * - 组批隔离：与普通条目合批会被 buildBatchPayload 以 BATCH_SEP 拼接，pi 命令解析
    *   与适配器全文身份匹配对拼接文本必然失效——批内含无标记条目时只取队首一条单独
    *   成批（isolateUnmarkedEntry）。
-   * - 首败即停（ADR-0112 统一语义后不再差异化，全条目同形态）。
+   * - 首败即停（ADR-0122 统一语义后不再差异化，全条目同形态）。
    * 'acceptance' 锚条目（agent 通路）出站同样无标记但走合批、以受理即终态，不置
    * 本标志。
    */
@@ -188,7 +188,7 @@ export interface DeliveryHandleV2 extends DeliveryHandle {
    */
   confirmAccepted(id: string): boolean
   /**
-   * 断连事件驱动的显式失败终局（ADR-0112 命令终局事件化的断连腿）：把全部 in-flight
+   * 断连事件驱动的显式失败终局（ADR-0122 命令终局事件化的断连腿）：把全部 in-flight
    * 条目批量转 failed 终态（留守活跃集等用户处置：resync 重试 / cancel 移除），
    * 逐条 onSettled('rejected') 显式上报。queued 条目不触碰（未触达底层通道，随队列
    * 存活，重连后照常投递）。幂等：无 in-flight 条目返回 0。@returns 终态化条数。
@@ -412,7 +412,7 @@ export function createDelivery(
   /**
    * 出站批次：doSend/checked 直投从 active 锁定后、终态前持有引用。条目 state
    * 保持 queued（受理才转 in-flight，D2 两阶段）；port.send 失败按首败即停收口
-   * （ADR-0112，批次成员从内核移除）。
+   * （ADR-0122，批次成员从内核移除）。
    */
   let inflightBatch: KernelEntry[] = []
   let inFlight = false // in-flight 防重：至多一个 port.send 在途
@@ -447,7 +447,6 @@ export function createDelivery(
       payload: e.payload,
       createdAt: e.createdAt,
       updatedAt: e.updatedAt,
-      sendAttempts: e.sendAttempts,
       ...(e.settledAt !== undefined ? { settledAt: e.settledAt } : {}),
     }
   }
@@ -692,7 +691,7 @@ export function createDelivery(
   }
 
   /**
-   * 发送失败收口（ADR-0112 首败即停，2026-10-05 用户裁决）：port.send 失败（含
+   * 发送失败收口（ADR-0122 首败即停，2026-10-05 用户裁决）：port.send 失败（含
    * accepted:false）一次即终——重试是补偿决策，前提是知道「重试是否安全」，该语义
    * 知识在消费方手里不在内核手里，内核只做事实上报：
    * - checked 条目：waiter reject（失败同步交调用方，agent 工具调用收到失败回执）；
@@ -747,7 +746,7 @@ export function createDelivery(
       scheduleFlush()
       return
     }
-    // 全空闲：无待收尾面（watchdog 定时复核腿已随 ADR-0112 退役）
+    // 全空闲：无待收尾面（watchdog 定时复核腿已随 ADR-0122 退役）
   }
 
   // ─── doSend：普通队列出站 ─────────────────────────────────
@@ -774,7 +773,7 @@ export function createDelivery(
 
     // busy gate（isIdle + 内核在途内查双条件，D2）：busy 即留守——settled 边沿
     // （agent 回合结束）驱动重投，无订阅装配由外部 flush/send 触发重投。
-    // [ADR-0112 退役登记] 原「无订阅装配退避轮询 + 达上限强发」「watchdog 30s 定时
+    // [ADR-0122 退役登记] 原「无订阅装配退避轮询 + 达上限强发」「watchdog 30s 定时
     // 复核」两条时间平抑腿已删除：本机链路边沿信号足够，轮询是补偿性猜测。
     if (isBusySafe()) return
 
@@ -822,7 +821,6 @@ export function createDelivery(
       payload: msg.payload,
       createdAt: ts,
       updatedAt: ts,
-      sendAttempts: 0,
       msg,
       cancelRequested: false,
       receiptAnchor: opts?.receiptAnchor ?? 'marker',
@@ -1015,7 +1013,6 @@ export function createDelivery(
       const idx = active.indexOf(e)
       if (idx !== -1) active.splice(idx, 1)
       e.state = 'queued'
-      e.sendAttempts = 0
       e.updatedAt = now()
       e.settledAt = undefined
     }
@@ -1059,7 +1056,7 @@ export function createDelivery(
   }
 
   /**
-   * 断连事件驱动的显式失败终局（failInFlight，ADR-0112）：in-flight 条目批量转
+   * 断连事件驱动的显式失败终局（failInFlight，ADR-0122）：in-flight 条目批量转
    * failed（留守活跃集等用户处置：resync 重试 / cancel 移除），逐条 onSettled
    * ('rejected')。queued 条目不触碰；终态/未知条目跳过（幂等）。在途出站批次引用
    * 同步摘除终态成员（dmg-r1-1 同口径）。
@@ -1075,7 +1072,6 @@ export function createDelivery(
       e.state = 'failed'
       e.updatedAt = ts
       e.settledAt = ts
-      e.sendAttempts = 1
       count++
       callOnSettled(e.msg, 'rejected')
     }
@@ -1088,7 +1084,7 @@ export function createDelivery(
 
   function drain(): DrainResult {
     if (disposed) return []
-    // 清合批 timer（重试/gate 退避/悬挂兜底 timer 已随 ADR-0112 退役）
+    // 清合批 timer（重试/gate 退避/悬挂兜底 timer 已随 ADR-0122 退役）
     clearMergeTimer()
     const drained = active.slice()
     active.length = 0
@@ -1119,7 +1115,7 @@ export function createDelivery(
     disposed = true
 
     // 清所有 timer（合批窗口为唯一存量 timer；重试/gate 退避/悬挂兜底/watchdog
-    // 均已随 ADR-0112 退役）
+    // 均已随 ADR-0122 退役）
     clearMergeTimer()
     teardownSettledSub()
 

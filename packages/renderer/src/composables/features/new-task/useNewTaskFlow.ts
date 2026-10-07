@@ -178,7 +178,9 @@ export function useNewTaskFlow() {
       },
       fileTree: {
         loadTree: (sid) => useFileTree().loadTree(sid),
-        selectFile: (path) => useFileTreeStore().selectFile(path),
+        // 注入目标会话 = focusedSessionId（drawer 分区键同源——search-jump 返回 drawerTab:'detail'
+        // 后打开的抽屉即它，注入分区与展示分区必然同区；W3 detail 展示态 per-session 化）
+        selectFile: (path) => useFileTreeStore().selectFile(usePanelStore().focusedSessionId, path),
       },
       t,
       migrateImage: {

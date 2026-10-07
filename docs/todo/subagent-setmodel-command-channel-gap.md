@@ -1,6 +1,6 @@
 # subagent.setModel 命令链路生产适配器未接线（跨端通道缺口）
 
-状态：已解决（2026-10-07 关闭——用户裁决候选 A 落地，通道实装并经 5 轮真机验收全场景可达；机制权威 = [ADR-0113](../adr/decisions.md) 与设计 §7.1.1，下方盘点内容作通道裁决依据存档）。
+状态：已解决（2026-10-07 关闭——用户裁决候选 A 落地，通道实装并经 5 轮真机验收全场景可达；机制权威 = [ADR-0128](../adr/decisions.md) 与设计 §7.1.1，下方盘点内容作通道裁决依据存档）。
 
 **解决记录**：候选 A 实装 = U6 收尾单元（extension `/subagent-model` 命令 + runtime `SubagentModelSwitchGateway` 适配器 + 组合根注入 + prompt 出站点守卫白名单登记），requestId 结果文件回执 + 60s 超时。验收：D3 五轮真机（chat 轮内热切 / workflow 全切聚合 / 持久化延续全场景实测，终局 degraded 无阻塞缺陷，见 `.tmp/dev-flow/subagent-model-switch.acceptance/verdict.json`）。登记条款中「待设计裁决项」的落定：命令载荷 = `/subagent-model <单行 JSON>`；请求关联键 = requestId；超时 = 60s（65s backstop）；回执载体 = 结果文件（非 custom entry——jsonl 事件词表四点同步纪律只管状态机事件，覆盖记账走 `model-override` 事件帧，模型切换应答属请求-应答语义走文件通道）。
 

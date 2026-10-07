@@ -47,7 +47,7 @@ export class PluginRpcClient {
       { code: PluginRpcErrorCodes.RPC_TIMEOUT },
     )
 
-    // 先登记 pending（缺省无墙钟——ADR-0112；timeoutMs 显式传入 = 交互等待 C2 语义，
+    // 先登记 pending（缺省无墙钟——ADR-0122；timeoutMs 显式传入 = 交互等待 C2 语义，
     // 如 ui dialog 人填表粒度），再 postMessage。
     const promise = this.pending.register(id, timeoutError, timeoutMs)
 

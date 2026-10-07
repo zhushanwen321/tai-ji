@@ -1,7 +1,7 @@
 // src/orchestration/__tests__/execute-agent-call.test.ts
 //
 // U2: executeAgentCall 透传 stream 给 runner.run
-// [ADR-0112] 失败显式上报：单次执行、失败直接终态化（原 3 次指数退避重试矩阵已删）。
+// [ADR-0122] 失败显式上报：单次执行、失败直接终态化（原 3 次指数退避重试矩阵已删）。
 
 import { describe, expect, it, vi } from "vitest";
 
@@ -157,9 +157,9 @@ describe("U1: finalizeCall sessionFile → trace 节点", () => {
   });
 });
 
-// ── [ADR-0112] 失败单次终态：无自动重试 ──
+// ── [ADR-0122] 失败单次终态：无自动重试 ──
 
-describe("ADR-0112: 失败单次终态（无自动重试）", () => {
+describe("ADR-0122: 失败单次终态（无自动重试）", () => {
   it("首次 runner.run 返回 error → 不重试（恰 1 次调用）+ 终态 failed", async () => {
     const runner = createMockRunner(
       vi.fn().mockResolvedValue(makeMockResult({ error: "transient error", failureKind: "unknown" })),
@@ -262,7 +262,7 @@ describe("isOrphaned 守卫", () => {
 //  a captured pi or command ctx after ctx.newSession(), ..."
 // 旧 patterns（"stale context"/"stalecontext"）与该文案零匹配（词序相反）——
 // W4b 词序修正 + 对齐 scheduler 已验证 marker 'stale after session replacement'
-// （runtime.ts STALE_CTX_MARKER）。[ADR-0112] 后分诊结果只影响 failureKind 分类
+// （runtime.ts STALE_CTX_MARKER）。[ADR-0122] 后分诊结果只影响 failureKind 分类
 // 展示，不再有重试语义差异。
 
 /** pi 真实 stale 文案前半（含 marker 全文前缀，锚定真实串而非自造缩写）。 */
@@ -305,7 +305,7 @@ describe("W4b: stale 分诊对齐 pi 真实文案", () => {
 // ── MF-1: 确定性 schema 失败单次终态 ──
 //
 // [HISTORICAL] 回归背景（第五轮实测）：gate 终止子进程后归因 error 曾循环重试至
-// MAX_ATTEMPTS=3（实测 attempts=3、4 子进程、235s）。ADR-0112 后一切失败单次终态，
+// MAX_ATTEMPTS=3（实测 attempts=3、4 子进程、235s）。ADR-0122 后一切失败单次终态，
 // 分诊结果（failureKind）仅随 result 透传供分类展示。
 //
 // 三态矩阵（完整锁定在 output-collector.test 的 MF-1 describe）：
@@ -394,7 +394,7 @@ describe("MF-1: 确定性 schema 失败单次终态", () => {
     expect(call.result?.error).toBe(attribution);
   });
 
-  it("态③（no details，无标记）→ 同样单次终态（ADR-0112：失败显式上报）", async () => {
+  it("态③（no details，无标记）→ 同样单次终态（ADR-0122：失败显式上报）", async () => {
     // 态③真实文案（不带确定性标记）
     const msg = describeMissingParsedOutput([
       { toolName: "structured-output", result: { content: [] } },
@@ -426,7 +426,7 @@ describe("MF-1: 确定性 schema 失败单次终态", () => {
 
 // ── D5-③: failureKind 结构化分诊（词表在产出侧 output-collector.classifyFailureKind）──
 //
-// [ADR-0112] 分诊不再绑定重试语义——任何 failureKind 均单次终态；分诊结果随
+// [ADR-0122] 分诊不再绑定重试语义——任何 failureKind 均单次终态；分诊结果随
 // result 透传进 trace 节点，供消费方分类展示。
 
 describe("D5-③: failureKind 分诊字段透传", () => {
@@ -499,7 +499,7 @@ describe("D5-③: failureKind 分诊字段透传", () => {
 
   it("词表漂移失效模式：未知错误文案 → classifyFailureKind=unknown → 仍单次终态（分类降级不影响执行面）", async () => {
     // pi 升级改写 stale 文案后，旧词表对新文案零命中——分诊降级 unknown 只影响
-    // 分类展示，执行面恒为单次终态（ADR-0112）
+    // 分类展示，执行面恒为单次终态（ADR-0122）
     const futurePiError = "extension runtime was superseded by a newer orchestration epoch";
     expect(classifyFailureKind(futurePiError)).toBe("unknown");
 

@@ -418,7 +418,7 @@
         "pkg": "pi-coding-agent",
         "distPath": "dist/core/agent-session.js",
         "symbol": "prompt(text, options)",
-        "note": "if (this._compactionAbortController !== undefined) throw ...（0.84.4 实测，紧邻检查块内）；taiji 消费点 packages/runtime/src/services/session/message-dispatcher.ts 的 PI_REJECTION_COMPACTING / classifyPromptRejection"
+        "note": "if (this._compactionAbortController !== undefined) throw ...（0.84.4 实测，紧邻检查块内）；taiji 消费点 packages/runtime/src/services/session/session-delivery-registry.ts 的 promptWithBusyRetry catch 面（classifyPromptRejection 调用；PI_REJECTION_COMPACTING / classifyPromptRejection 定义驻 infra/pi/pi-rejection.ts）"
       }
     ],
     "guard": {
@@ -435,7 +435,7 @@
         "pkg": "pi-coding-agent",
         "distPath": "dist/core/agent-session.js",
         "symbol": "prompt(text, options)",
-        "note": "if (this.isStreaming) { if (!options?.streamingBehavior) throw ...（0.84.4 实测，位于 PS-22 分支之后）；isStreaming getter = _isAgentRunActive（含 post-run）；taiji 消费点 packages/runtime/src/services/session/message-dispatcher.ts 的 PI_REJECTION_PROCESSING / classifyPromptRejection"
+        "note": "if (this.isStreaming) { if (!options?.streamingBehavior) throw ...（0.84.4 实测，位于 PS-22 分支之后）；isStreaming getter = _isAgentRunActive（含 post-run）；taiji 消费点 packages/runtime/src/services/session/session-delivery-registry.ts 的 promptWithBusyRetry catch 面（classifyPromptRejection 调用；PI_REJECTION_PROCESSING / classifyPromptRejection 定义驻 infra/pi/pi-rejection.ts）"
       }
     ],
     "guard": {

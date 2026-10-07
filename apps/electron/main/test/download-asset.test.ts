@@ -1181,7 +1181,7 @@ describe('probe 四出口归类（GET Range 0-0 + Content-Range 判定）', () =
 // UPDATE_NETWORK_TIMEOUT 用户可见文案闭环（G1 失败路径）：main 推送 update:error 前
 // 经 toUserFriendly() 映射（reportUpdateDownloadError 组 UpdateErrorPayload），
 // toast/设置页展示超时语义中文文案 + 断点续传指引；英文技术 message 只走落盘
-// 诊断通道，不直达用户。（原 D1 idle 停滞检测行为用例随该机制删除——ADR-0112）
+// 诊断通道，不直达用户。（原 D1 idle 停滞检测行为用例随该机制删除——ADR-0122）
 // ════════════════════════════════════════════════════════════════
 describe('UPDATE_NETWORK_TIMEOUT 用户可见文案（toUserFriendly 映射闭环）', () => {
   it('UPDATE_NETWORK_TIMEOUT 用户可见文案为超时语义 + 续传指引', () => {

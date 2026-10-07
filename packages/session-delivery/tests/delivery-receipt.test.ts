@@ -37,7 +37,7 @@ describe('port.send receipt（U2 回执口径）', () => {
     vi.useRealTimers()
   })
 
-  it('accepted:false（同步返回）→ 首败即停 onSettled rejected（不吞受理失败，ADR-0112）', () => {
+  it('accepted:false（同步返回）→ 首败即停 onSettled rejected（不吞受理失败，ADR-0122）', () => {
     const onSettled = vi.fn()
     const port = makePort({
       send: (): SendReceipt => ({ accepted: false, reason: 'channel closed' }),

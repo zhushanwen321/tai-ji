@@ -5,13 +5,82 @@
  * 迁移约束（IF1）：不依赖 pinia；状态/操作函数语义逐条等价；消费方自行 .value（无 pinia unwrap）。
  * renderer 旧 store 保留，待消费方迁移（strangler 逐域绞杀 §11.2）完成后删除。
  *
- * 依赖方向：无（domain 间禁止互相 import；跨域协调由上层编排）。
+ * 依赖方向：session→chat 单向（derive-status 纯函数，remote-use U20 A14 状态派生谓词下沉；
+ * chat 域不 import session 域，无环——同 use-session.ts 的 historyWindowFromReply 先例）。
+ * 响应式包装（读双 store 的派生 computed）仍属壳层 composable（桌面 useSessionDerivations /
+ * 移动 MobileSessionList），core 只承载纯判定谓词。
  *
- * 注：session 的派生 5 态（D6 derivedStatus）不在此 store，由 useSidebar 派生
- * （它需同时读 chat store 的消息分区 + 全局 isStreaming，跨 store 协调属 composable 职责）。
+ * 注：session 派生状态的「纯判定谓词」自 U20 起在此导出（deriveSessionStatus，A14 参数化
+ * 输入下沉——桌面全量投影 / 移动 occupancy + subagent 运行态子集，blockingOverlay 移动
+ * 恒 false 见 D9② 白名单）；跨 store 协调（chat 分区 + session 元数据的读取编排）仍是
+ * 壳层职责，不在本 store factory 内。
  */
 import { computed, ref } from 'vue'
 import type { SessionGroup, SessionSummary, SessionViewSnapshot } from '@taiji/shared'
+import { deriveStatus } from '@taiji/core/domain/chat'
+import type { DerivedStatus, DeriveStatusChat } from '@taiji/core/domain/chat'
+
+/**
+ * 列表排序谓词（remote-use A13/U20 统一裁决：runtime 组序胜出——服务端权威序）。
+ *
+ * 唯一定义点：输出与输入展平原序恒等（组间序 + 组内序都不重排）——桌面 SessionList
+ * 旧行为即 groups 直渲染零排序，本谓词是该语义的显式固化；移动壳曾有的 lastActiveAt
+ * 客户端重排已随 U12 删除。未来任何壳想改列表顺序，必须改本谓词（单点改动双壳同源），
+ * 禁止壳内自写排序。
+ */
+export function sessionsInRuntimeGroupOrder(groups: readonly SessionGroup[]): SessionSummary[] {
+  return groups.flatMap((g) => g.sessions)
+}
+
+/**
+ * 状态派生谓词的参数化输入契约（remote-use A14/U20，同 D2 端口束「按形态可选」设计）：
+ * 谓词本体（9 态判定）双壳同源，输入按壳形态收集——
+ * - 桌面全量投影：isActive/isCompacting（chat 分区）+ hasBackgroundWork（subagent/workflow
+ *   store 聚合，useBackgroundWork）+ hasBlockingOverlay（extensionUI store，form/planReview
+ *   键）+ metaStatus（session 元数据）；
+ * - 移动子集：isActive/isCompacting（core chat store）+ hasBackgroundWork（A9 subagent
+ *   运行态分区）+ metaStatus；**hasBlockingOverlay 缺省 false**——移动壳无 extensionUI
+ *   store（面板族裁剪），该输入源不存在，等待态只由 toolCall 分支达成。语义损失 =
+ *   富交互表单 pending 在列表不显 waiting（移动表单呈现是页面级 MobileFormCard，列表
+ *   状态点不承载该信号），已登记 D9② 白名单（docs/todo，随本单元交付同 commit）。
+ */
+export interface SessionStatusInputs {
+  /** pendingSend ∨ isGenerating（提交后到 message_start 空窗 + 流式占用的 UI 层 SSOT） */
+  isActive: boolean
+  /** compact 互斥态（occupancy 投影 compacting 维） */
+  isCompacting: boolean
+  /** 主 turn 已结束但 background subagent/workflow 仍在 running（working 态判定源） */
+  hasBackgroundWork: boolean
+  /** 阻塞型交互 overlay 请求 pending（waiting 态判定源；桌面 extensionUI store，移动缺省 false） */
+  hasBlockingOverlay?: boolean
+  /** runtime session 元数据 status（未 hydrate 分区的终态兜底，W6） */
+  metaStatus?: SessionSummary['status']
+}
+
+/**
+ * 派生 session 9 态（A14/U20 参数化下沉入口）。
+ *
+ * 与桌面旧谓词（useSessionDerivations 包装层对 deriveStatus 的位置参数调用）行为等价：
+ * 本函数是同一判定的对象参数形态（输入契约见 SessionStatusInputs），内部委托 chat 域
+ * deriveStatus 纯函数（判定语义 SSOT 不变，derive-status.ts 注释承载 9 态优先级表）。
+ * 响应式包装仍归壳层：桌面 useSessionDerivations（pinia store 收集）改引本导出，
+ * 移动 MobileSessionList（core chat store + subagent 分区收集）同源消费。
+ */
+export function deriveSessionStatus(
+  sessionId: string,
+  chat: DeriveStatusChat,
+  inputs: SessionStatusInputs,
+): DerivedStatus {
+  return deriveStatus(
+    sessionId,
+    chat,
+    inputs.isActive,
+    inputs.isCompacting,
+    inputs.hasBackgroundWork,
+    inputs.metaStatus,
+    inputs.hasBlockingOverlay ?? false,
+  )
+}
 
 /**
  * 创建 session 列表 store（纯 factory，无 pinia 依赖）。
@@ -27,11 +96,13 @@ export function createSessionStore() {
   const groups = ref<SessionGroup[]>([])
 
   /**
-   * 扁平索引（groups.flatMap 展平），供 active/applySnapshot 等按 id 查找。
+   * 扁平索引，供 active/applySnapshot 等按 id 查找。
    * 派生自 groups：单一真源（groups）→ 扁平视图（list），避免两处分别维护导致漂移。
+   * 展平序经 sessionsInRuntimeGroupOrder 谓词（A13/U20 排序唯一定义点——组序恒等，
+   * 防壳层各自重排漂移）。
    */
   const list = computed<SessionSummary[]>(() =>
-    groups.value.flatMap((g) => g.sessions),
+    sessionsInRuntimeGroupOrder(groups.value),
   )
 
   /**

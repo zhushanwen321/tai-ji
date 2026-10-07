@@ -37,7 +37,7 @@ import type { SessionDeliveryRegistry } from '../services/session/session-delive
 import type { ClaimLedger } from '../services/session/notify-claims.js'
 import { ExtensionTimeoutManager } from '../services/extension-timeout-manager.js'
 import type { PendingUIRequest, PendingUIRequestResolved } from '../services/extension-timeout-manager.js'
-import { ConnectionManager } from './connection-manager.js'
+import { ConnectionManager, type ConnectionManagerOptions } from './connection-manager.js'
 import { ServerMessageBroker } from './message-broker.js'
 import { SettingsMessageHandler } from './settings-message-handler.js'
 import { SessionMessageHandler } from './session-message-handler.js'
@@ -150,9 +150,25 @@ export interface RuntimeServerOptionalServices {
   subagentModelSwitchGateway?: SubagentModelSwitchGateway
 }
 
+/**
+ * 远程访问服务形态选项（remote-access U0.1，D1/D2/D3/D9）：组合根经 parseArgs 解析
+ * argv 并做完开态判定后注入（S3 拆分：mobileStaticHandler 的挂载裁决在组合根
+ * index.ts），全部可选——缺省即现状形态（纯回环 + 单 spawn token + 零静态挂载）。
+ *
+ * 字段声明 SSOT = ConnectionManagerOptions（S3 收敛：不再逐字段双份声明，本接口
+ * extends 后原样透传给 ConnectionManager）；host 是 server 独有字段（start 时传
+ * ConnectionManager.start，CM 不在构造期消费）。
+ */
+export interface RuntimeServerOptions extends ConnectionManagerOptions {
+  /** 监听绑定地址（D1）：undefined = ConnectionManager 默认 127.0.0.1；远程开态传 '0.0.0.0'。 */
+  host?: string
+}
+
 export class RuntimeServer implements IMessageBroker {
   private projectRoot: string
   private conn: ConnectionManager
+  /** 监听绑定地址（remote-access D1）：undefined = ConnectionManager 默认（start 时兜底）。 */
+  private listenHost: string | undefined
   private broker!: ServerMessageBroker
 
   private sessionService!: ISessionService
@@ -219,8 +235,14 @@ export class RuntimeServer implements IMessageBroker {
    */
   private routes!: Map<ClientMessageType, (msg: ClientMessage, ws: WsType) => Promise<unknown> | unknown>
 
-  constructor(port: number, projectRoot?: string, authToken: string | null = null) {
+  constructor(port: number, projectRoot?: string, authToken: string | null = null, options: RuntimeServerOptions = {}) {
     this.projectRoot = projectRoot ?? process.cwd()
+    // 远程访问服务形态（remote-access U0.1）：host 存字段供 start() 传入 ConnectionManager
+    //（undefined = 其默认 127.0.0.1，与参数化前现状逐字节一致）；其余选项（S3 收敛：
+    // remoteTokenProvider / mobileStaticHandler）解构剩余后原样透传——字段声明与语义
+    // SSOT 在 ConnectionManagerOptions，本层不逐字段复制。
+    const { host, ...cmOptions } = options
+    this.listenHost = host
     // ConnectionManager 注入回调：连接通过 auth → broker 推送 initial state；
     // 消息到达（必然 authed）→ server.handleMessage 路由；解析/兜底错误 → broker.sendError；
     // 连接关闭 → bus.unsubscribeAll(ws) 清理该 ws 的所有 session 订阅（wave:runtime-wiring）。
@@ -231,7 +253,7 @@ export class RuntimeServer implements IMessageBroker {
       onMessage: (msg, ws) => this.handleMessage(msg, ws),
       sendError: (ws, code, message, id, details) => this.broker.sendError(ws, code, message, id, details),
       onDisconnect: (ws) => this.messageBus?.unsubscribeAll(ws as unknown as import('../services/message-bus/types.js').BusClient),
-    }, authToken)
+    }, authToken, cmOptions)
   }
 
   /**
@@ -780,7 +802,8 @@ export class RuntimeServer implements IMessageBroker {
   // ── Lifecycle ──────────────────────────────────────────────────
 
   start(): Promise<void> {
-    return this.conn.start()
+    // host 参数化（remote-access D1）：undefined 时 ConnectionManager 默认 127.0.0.1。
+    return this.conn.start(this.listenHost)
   }
 
   async stop(): Promise<void> {

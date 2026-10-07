@@ -6,7 +6,7 @@
  * 1. 消息路由：handleWorkerMessage 分发 agent-call / return / error / log / phase
  * 2. IPC 序列化防御：postMessage 的 DataCloneError 拦截 + fallback 回发（W2）
  *
- * [ADR-0112] 失败显式上报：原「worker/script 错误指数退避重试 + rebuildRuntime
+ * [ADR-0122] 失败显式上报：原「worker/script 错误指数退避重试 + rebuildRuntime
  * 整重建」重试矩阵已删——worker/script 错误一次即 finalizeRun done,failed 显式
  * 上报，修复由用户重新发起 run 承接（resume 通道按 record replay 已完成 call，
  * 不重复耗 token）。[HISTORICAL] 原 G3-001 整重建 / OR-2 回灌 / 退避测试通道
@@ -118,7 +118,7 @@ type WorkerMsg = AgentCallMsg | ReturnMsg | ErrorMsg | LogMsg | PhaseMsg;
  * 故实例不等 ⟺ 本 completion 属于被替换的旧代际（S7-second 竞态：旧失败结果经
  * postAgentResult 投给新 worker 的同 callId pending，劫持重跑调用为假失败/空串
  * 假成功）。[HISTORICAL] 原另一写点 discardInFlightCalls 的 delete 随重试矩阵删除
- * （ADR-0112），谓词保留为接管形态的防御面。
+ * （ADR-0122），谓词保留为接管形态的防御面。
  *
  * 运行期 calls Map 写点为 dispatchAgentCall 的 set（jsonl-run-store 的 set 在离线
  * 重水合路径，无在飞 promise），正常（非孤儿）路径下实例恒等，无误判。
@@ -515,7 +515,7 @@ function dispatchAgentCall(
   const innerRunner: AgentRunner = dispatch
     ? { run: (rOpts, rSignal) => dispatch(rOpts, run.runId, rSignal, msg.callId) }
     : deps.runner;
-  // [ADR-0112] 无重试——runner 直用 innerRunner（原 agent-retrying 落账包装随
+  // [ADR-0122] 无重试——runner 直用 innerRunner（原 agent-retrying 落账包装随
   // 重试矩阵删除；agent-retrying 事件类型保留为 journal 词表兼容，仅历史记录含此帧）。
   const runner: AgentRunner = innerRunner;
   // 原 gate.withSlot(fn, signal) 语义内联：pre-aborted 时 reject AbortError。
@@ -727,7 +727,7 @@ async function handleReturn(
 // ── handleWorkerError ────────────────────────────────────────
 
 /**
- * 处理 worker 线程 uncaught error（ADR-0112：一次即终态，无自动重建）。
+ * 处理 worker 线程 uncaught error（ADR-0122：一次即终态，无自动重建）。
  *
  * worker 崩溃 → finalizeRun done,failed 显式上报（错误信息含 err.message）；
  * 修复由用户重新发起 run 承接（resume 通道按 record replay 已完成 call）。
@@ -771,7 +771,7 @@ export async function handleWorkerError(
  * code === 0：
  * - 本代际已收到终态消息（return/error）→ no-op（正常收尾退出）
  * - 本代际未收到任何终态消息 → [F1] 转 done,failed（WORKER_EXITED_WITHOUT_RESULT_MSG）。
- * code !== 0 → 委托 handleWorkerError（非零 exit 视为崩溃，一次即 done,failed，ADR-0112）
+ * code !== 0 → 委托 handleWorkerError（非零 exit 视为崩溃，一次即 done,failed，ADR-0122）
  *
  * **G-025 竞态防护**：检查 handle.isCurrent——stale exit 事件（已 terminate 的旧
  * worker 的 exit）直接丢弃，不影响当前 runtime 的新 worker。
@@ -824,7 +824,7 @@ export async function handleWorkerExit(
 /**
  * 处理脚本主动抛出的 error（type:"error" from worker）。
  *
- * ADR-0112：一次即 finalizeRun done,failed 显式上报（脚本错误重跑同输入同结果，
+ * ADR-0122：一次即 finalizeRun done,failed 显式上报（脚本错误重跑同输入同结果，
  * 无自动重建）；修复由用户改脚本后重新发起 run 承接。
  *
  * @param workerLogs worker console.* 捕获（P2-2，存 run.state.errorLogs 供 TUI 展示）

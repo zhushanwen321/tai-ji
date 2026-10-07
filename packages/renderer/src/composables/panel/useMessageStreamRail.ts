@@ -4,7 +4,6 @@
  * 职责：
  * - railTurns：派生 renderItems 中所有 turn（rail 节点列表数据源）。
  * - activeTurnIndex：按 virta scrollOffset 精确定位当前激活 turn 下标（viewport indicator 跟随滚动）。
- * - panelRightEdge：ResizeObserver 跟踪 panel 根 section 右边缘（rail 横向定位贴面板左侧）。
  * - 事件路由：onJump（滚动定位）/ onToggle / onExpandAll / onCollapseAll，全部经 useTurnExpansion
  *   与 Turn.vue 共享同一 session 展开态（同一 session Map key）。
  *
@@ -14,7 +13,7 @@
  *
  * 提取至此（composables/panel 既有范式）：MessageStream.vue script setup ≤300 行规范 + rail 关注点单一可复用。
  */
-import { computed, onMounted, onScopeDispose, ref, type ComputedRef, type Ref } from 'vue'
+import { computed, ref, type ComputedRef, type Ref } from 'vue'
 import type { VirtualizerHandle } from 'virtua/vue'
 import type { MessageTurn } from '@/composables/logic/messageTurns'
 import type { SkillNoticeStreamItem } from '@/composables/panel/useSkillNoticeStream'
@@ -38,8 +37,6 @@ export interface UseMessageStreamRailDeps {
    *  rail 的 jump/active 下标空间必须与 Virtualizer :data 一致；本模块只消费 turn 项
    *  （kind==='turn' 窄化），notice 项自然跳过。 */
   renderItems: ComputedRef<ReadonlyArray<SkillNoticeStreamItem>>
-  /** 滚动容器 el（closest('section') 算 panelRightEdge + ResizeObserver 横向重定位）。 */
-  scrollEl: Ref<HTMLElement | null>
   /** [cw wave w4] virtua VirtualizerHandle ref（单一 virtua 路径：rail jump/active 都走 virta API）。
    *  vlistRef 必填：onJump 调 scrollToIndex，updateActiveTurnIndex 调 findItemIndex。 */
   vlistRef: Ref<VirtualizerHandle | null>
@@ -48,7 +45,6 @@ export interface UseMessageStreamRailDeps {
 export function useMessageStreamRail(deps: UseMessageStreamRailDeps): {
   railTurns: ComputedRef<MessageTurn[]>
   activeTurnIndex: Ref<number>
-  panelRightEdge: Ref<number>
   /** 当前 session 已展开的 turn 稳定 key 集合（TurnRail toggle 图标方向依据）。
    *  ReadonlySet：消费方只读（TurnRail 用 .has 查询），空态复用 EMPTY_SET 单例（W3）。 */
   expandedTurns: ComputedRef<ReadonlySet<string>>
@@ -56,7 +52,7 @@ export function useMessageStreamRail(deps: UseMessageStreamRailDeps): {
   onJump: (idx: number) => void
   onToggle: (idx: number) => void
 } {
-  const { sessionId, renderItems, scrollEl } = deps
+  const { sessionId, renderItems } = deps
 
   /** rail 状态接入 useTurnExpansion（与 Turn.vue 共享同一 session Map）。 */
   const { toggle } = useTurnExpansion(sessionId)
@@ -129,9 +125,6 @@ export function useMessageStreamRail(deps: UseMessageStreamRailDeps): {
   /** 当前激活 turn 在 railTurns 中的下标（viewport indicator 位置 + active 节点高亮）。 */
   const activeTurnIndex = ref(0)
 
-  /** 面板右边缘 px（rail 横向定位：贴面板左侧 8px，避免压住 composer/侧栏）。 */
-  const panelRightEdge = ref(0)
-
   /**
    * 按 virtua scrollOffset 精确定位当前激活 turn 下标（viewport indicator 跟随滚动）。
    * [cw wave w4] 单一 virtua 路径：vlistRef.findItemIndex(scrollOffset) 反查当前可见首项。
@@ -183,33 +176,14 @@ export function useMessageStreamRail(deps: UseMessageStreamRailDeps): {
   }
 
   /**
-   * panelRightEdge 跟踪：ResizeObserver 监听 panel 根 section 宽度变化 + window resize 兜底。
-   * rail 用此值横向定位（贴面板左侧），窗口缩放时 rail 跟随重定位。onScopeDispose 清理防泄漏。
+   * rail 横向定位已随三卡化（2026-10-04）简化为 TurnRail 组件内 absolute right-2——
+   * 原 panelRightEdge（ResizeObserver 跟踪 panel 根 section 右缘 + 视口坐标换算）整链删除，
+   * 跨区缺陷（fixed 垂直居中不感知底抽屉高度）随定位方式切换构造性消除。
    */
-  let resizeObserver: ResizeObserver | null = null
-  function refreshPanelRightEdge(): void {
-    const section = scrollEl.value?.closest('section')
-    if (section) panelRightEdge.value = section.getBoundingClientRect().right
-  }
-  onMounted(() => {
-    refreshPanelRightEdge()
-    const section = scrollEl.value?.closest('section')
-    if (section && typeof ResizeObserver !== 'undefined') {
-      resizeObserver = new ResizeObserver(refreshPanelRightEdge)
-      resizeObserver.observe(section)
-    }
-    window.addEventListener('resize', refreshPanelRightEdge)
-  })
-  onScopeDispose(() => {
-    resizeObserver?.disconnect()
-    resizeObserver = null
-    window.removeEventListener('resize', refreshPanelRightEdge)
-  })
 
   return {
     railTurns,
     activeTurnIndex,
-    panelRightEdge,
     expandedTurns,
     updateActiveTurnIndex,
     onJump,

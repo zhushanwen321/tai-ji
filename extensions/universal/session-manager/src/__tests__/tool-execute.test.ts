@@ -53,7 +53,7 @@ describe("U5-A2 tool-execute", () => {
 		expect(options).toHaveLength(1);
 		const payload = JSON.parse(options[0]);
 		expect(payload.action).toBe(expectedAction);
-		// third arg: timeout 不传（ADR-0112 无包内挂死兜底，全 action 无 timer 长挂）
+		// third arg: timeout 不传（ADR-0122 无包内挂死兜底，全 action 无 timer 长挂）
 		expect(opts).toHaveProperty("timeout", undefined);
 	});
 

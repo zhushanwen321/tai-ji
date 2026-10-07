@@ -153,7 +153,7 @@ export class SessionEntryRemovalOrchestrator {
     // userStopped 标记不在本汇聚点清理：forceQuit（K1/K2）尾步经过本链，标记必须存活到
     // 后续 restore（标记宿主独立于 ManagedSession 生命周期的原因，见 session-service.ts
     // 模块级 Map 注释）；delete 路径的标记清理由 lifecycle.delete 显式调 gate.disposeForDelete。
-    // （原 D4 收敛环定时器清理已随 ADR-0112 时间窗删除移除。）
+    // （原 D4 收敛环定时器清理已随 ADR-0122 时间窗删除移除。）
 
     // ── 第 5-9 步：Map 条目删除与删除回调扇出 ──
     // S3-W2：删除前缓存 summary（插件 didDestroy 通知需要 SessionInfo；删除后 Map 查不到）。
@@ -183,7 +183,7 @@ export class SessionEntryRemovalOrchestrator {
     })
     // R4（idle-pi-reclamation D2 #6）：真删除是 lastViewedAt 条目的清理挂点——本汇聚链是
     // 「该 session 已不存在」的精确时点（与 respawn.cancel 同因同挂点）。空闲回收机制
-    // 已删除（ADR-0112）：无「回收态保留条目」分支，本清理仅在真删除路径触发。
+    // 已删除（ADR-0122）：无「回收态保留条目」分支，本清理仅在真删除路径触发。
     runDestroyStepIsolated('clearSessionViewed', sessionId, () => {
       this.deps.clearSessionViewed(sessionId)
     })

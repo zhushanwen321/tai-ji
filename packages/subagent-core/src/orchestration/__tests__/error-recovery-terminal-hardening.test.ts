@@ -215,7 +215,7 @@ describe("[OR-4] 终态收尾 直落/onRunDone 围栏（不产 unhandledRejectio
     expect(deps.store.save).toHaveBeenCalledTimes(1);
   });
 
-  it("failed 路径（script error 一次即终态，ADR-0112）：直落抛错 → resolve", async () => {
+  it("failed 路径（script error 一次即终态，ADR-0122）：直落抛错 → resolve", async () => {
     const run = makeRealRun("wf-fence-6");
     await seedRunCreated(run);
     const deps = makeDeps({ appendThrows: true });

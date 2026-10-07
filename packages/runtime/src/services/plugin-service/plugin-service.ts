@@ -189,6 +189,10 @@ export class PluginService implements IPluginService {
       // 审批弹窗（迟到批准对已删 pending noop 幂等；旧版前端未消费此帧无异常，P-11）。
       onPermissionRequestExpired: (payload) =>
         this.broadcastOrBroker('plugin:permissionRequestExpired', `permExpired_${payload.pluginId}`, payload),
+      // 审批终局（remote-use-mobile S5-V3）：任一端批准/拒绝后广播，其余连接端按
+      // requestId 撤回同一审批的弹窗（activator 保证同一 requestId 至多广播一次）。
+      onPermissionRequestResolved: (payload) =>
+        this.broadcastOrBroker('plugin:permissionRequestResolved', `permResolved_${payload.pluginId}`, payload),
       // permissionTimeoutMs 转正（D3）：env 逃生门接线，undefined（缺失/非法已 warn）
       // 由 Activator 构造函数回落 PERMISSION_TIMEOUT_MS。
       permissionTimeoutMs: readEnvPermissionTimeoutMs(),
@@ -298,7 +302,7 @@ export class PluginService implements IPluginService {
       }
       // D6/W4 贡献清理：崩溃插件的 statusBar/hook/tool/command 贡献不残留——对齐
       // togglePlugin(false) 的清理集（僵尸 statusbar 条目/仍可被路由的 tool/command
-      // 都指向已死 Worker，调用必超时）。重新启用由用户在管理界面显式触发（ADR-0112：
+      // 都指向已死 Worker，调用必超时）。重新启用由用户在管理界面显式触发（ADR-0122：
       // 原自动 rebuild 重激活链已退役）。
       for (const pluginId of pluginIds) {
         this.statusBarRegistry.clearForPlugin(pluginId)
@@ -595,6 +599,8 @@ export class PluginService implements IPluginService {
     // - UNLOADED（等待早已超时回落 / 从未激活）→ 权限已 grant，新起激活不再挂起。
     await this.activator.activatePlugin(pluginId, { type: 'onStartupFinished' }, this.host)
     this.watchExternalIfActive(descriptor)
+    // approve 触发 activate（status 真实变化）→ 广播列表刷新（reply 是 pong ack；deny/revoke 不改 PluginInfo 字段，不广播）
+    this.broadcastPluginList()
   }
 
   async revokePermissions(pluginId: string): Promise<void> {
@@ -608,6 +614,16 @@ export class PluginService implements IPluginService {
     // 拒绝语义：该插件正挂在权限审批等待时唤醒为「拒绝」——挂起中的激活走既有
     // 失败路径（UNLOADED、不分配 Worker），而非干等 30s 超时。无 pending 时 no-op
     // （仅撤销已授权限，不主动停用已激活插件）。
+    this.activator.resolvePermissionApproval(pluginId, false)
+  }
+
+  /**
+   * 拒绝插件本次权限申请（不回收已授权限）。对齐 WS 命令 plugin.denyPermissions。
+   * 与 revokePermissions（撤销全部已授权限并持久化，基线协议面保留）的语义分界：
+   * deny 只 resolve 挂起中的审批等待（无 pending 幂等 no-op），已授权限与持久化不动。
+   */
+  async denyPermissions(pluginId: string): Promise<void> {
+    if (!this.registry.getDescriptor(pluginId)) throw new Error(`Plugin not found: ${pluginId}`)
     this.activator.resolvePermissionApproval(pluginId, false)
   }
 
@@ -787,11 +803,10 @@ export class PluginService implements IPluginService {
   }
 
   private broadcastPluginList(): void {
-    const plugins = this.getDiscoveredPlugins()
     this.broker.broadcast({
       type: 'config.plugins',
       id: `plugins_${Date.now()}`,
-      payload: { plugins },
+      payload: { plugins: this.getDiscoveredPlugins() },
     })
   }
 

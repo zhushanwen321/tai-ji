@@ -2,7 +2,7 @@
 //
 // performGetStateHandshake 单测（FR-4）：spawn 期 get_state 握手（单次 2s 超时 +
 // 加速路径；fake timers 驱动）。
-// [ADR-0112] 原重试节奏用例（3 次 × 2s + 500ms 间隔）随重试删除——单次超时即
+// [ADR-0122] 原重试节奏用例（3 次 × 2s + 500ms 间隔）随重试删除——单次超时即
 // settle 已收集字段，调用方走兜底反查（LC-4）。
 // [modeless 波2] 原第一个 describe（requestGetStateOnce——agent_end 惰性回补单次
 // 请求）已随 one-shot 回补机械删除（git 可追溯）。
@@ -103,7 +103,7 @@ describe("performGetStateHandshake（FR-4 单次握手）", () => {
       await vi.advanceTimersByTimeAsync(0);
       expect(settled).toBe(false);
 
-      // 2s 超时 → settle 已收集字段；不再发起新请求（[ADR-0112] 无重试）
+      // 2s 超时 → settle 已收集字段；不再发起新请求（[ADR-0122] 无重试）
       await vi.advanceTimersByTimeAsync(2_000);
       await expect(promise).resolves.toEqual({ sessionId: "only-id" });
       expect(settled).toBe(true);

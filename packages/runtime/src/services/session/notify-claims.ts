@@ -4,7 +4,7 @@
  * 职责边界：
  * - **零 I/O 纯状态机**：不发日志、不执行 respond、不碰文件系统；一切方法返回「素材/信号」，
  *   由 u-bridge（组合根桥接层）负责实际 respond、warn 落盘与协议词形组装。
- *   无内部定时器（TTL 清扫 setInterval 已随 ADR-0112 防御机制清查退役）。
+ *   无内部定时器（TTL 清扫 setInterval 已随 ADR-0122 防御机制清查退役）。
  * - **架构约束（并行度复审 F3 裁定，L0 grep 锚）**：本模块禁 import 扩展协议包——内部态
  *   与 outcome 快照 runtime 自持（词汇 = session_end outcome 等 runtime 既有词形）；
  *   state→协议 reason/payload 的词形映射归 u-bridge（协议 SSOT 由桥接与扩展双侧 import 承载）。

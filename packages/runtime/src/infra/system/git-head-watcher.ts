@@ -1,7 +1,7 @@
 /**
  * GitHeadWatcher —— git HEAD 的 fs.watch 事件驱动挂载 + 两层恢复链（缓存治理批 4 U11）。
  *
- * 对齐 pi tui 的 fs-watch 形态（@earendil-works/pi-coding-agent 0.84.4 实装锚点：
+ * 对齐 pi tui 的 fs-watch 形态（@earendil-works/pi-coding-agent 1.0.0 实装锚点：
  * dist/utils/fs-watch.js + dist/core/footer-data-provider.js setupGitWatcher/clearGitWatchers/
  * scheduleGitWatcherRetry）：
  * - **watch HEAD 所在目录而非 HEAD 文件**——git 原子写（tmp + rename 覆盖）会换 inode，对文件
@@ -231,7 +231,7 @@ export class GitHeadWatcher {
     }
     console.warn(
       `[git-head-watcher] fs.watch error${extractErrno(err)} — cleared ${failedDir !== undefined ? `watcher for ${failedDir}` : 'all git watchers'}` +
-        '（自动补挂重试已随 ADR-0112 退役：watch 失效显式上报，恢复归下一次 mount 触发）',
+        '（自动补挂重试已随 ADR-0122 退役：watch 失效显式上报，恢复归下一次 mount 触发）',
     )
   }
 

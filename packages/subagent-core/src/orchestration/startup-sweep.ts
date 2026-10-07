@@ -13,7 +13,7 @@
 // 判读 running 的 run 逐个收编（adoptInterruptedRun → [D15] interruptRun 中断
 // 编排入口，run-interrupted 转移帧一件直落）。
 //
-// 判僵尸依据 = 创建顺序契约（ADR-0112 判定层，原事件流静止宽限窗已删）：扫描
+// 判僵尸依据 = 创建顺序契约（ADR-0122 判定层，原事件流静止宽限窗已删）：扫描
 // 时点先于任何新 pi spawn（runtime 启动段不 spawn，挂点注释为时序硬声明）+
 // 单实例锁确立（同数据目录无并存 runtime）——此刻判读 running 的 run 其执行者
 // 只可能是上一生命周期的孤儿 pi。孤儿 pi 若正常收尾，其 run-settled 帧与终态

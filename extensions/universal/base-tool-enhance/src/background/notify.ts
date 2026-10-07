@@ -11,7 +11,7 @@
  * （/fork、选择器切换、RPC session.*）会重建 eventBus 并重新 load extension，本
  * 模块引用由新实例 load 时 refreshPiReference 刷新，完成通知投递新 session。
  * （exit-collector 的收尾回调链同样全模块级，exit 事件边沿由此跨替换可达——
- * ADR-0112 改造：原 2s 轮询器已删。）
+ * ADR-0122 改造：原 2s 轮询器已删。）
  *
  * 已知竞态（设计 §3.5 原样登记，不修）：dispose → 新实例 load 间毫秒窗口任务恰好
  * 完成时，sendMessage/emit 落旧 bus 丢一条——对账在该 session 重开时补 unregister，
@@ -155,7 +155,7 @@ function sendTaskFinishedMessage(task: BackgroundTask): void {
 		);
 	} catch (err) {
 		// 旧 bus 已 dispose（session 替换毫秒窗口）——降级日志，不中断后续收尾（文件头已知竞态）
-		logger.warn("background task notify sendMessage failed; poll continues", {
+		logger.warn("background task notify sendMessage failed (stale bus?); notification skipped, later tasks unaffected", {
 			detail: {
 				taskId: task.taskId,
 				err: toErrorMessage(err),

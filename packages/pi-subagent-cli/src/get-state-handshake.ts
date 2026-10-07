@@ -5,7 +5,7 @@
 // performGetStateHandshake 的停表分支——修复仅限本文件）。
 //
 // 通过 get_state RPC 查询子进程 sessionFile/sessionId（单次、有界）。
-// [ADR-0112] 握手重试已删（原 3 次 × 2s 超时 + 500ms 间隔）：单次超时即 settle，
+// [ADR-0122] 握手重试已删（原 3 次 × 2s 超时 + 500ms 间隔）：单次超时即 settle，
 // 调用方走兜底反查（LC-4 按 sessionId 后缀匹配，行为仍收敛）——不猜「慢启动下轮
 // 就绪」。加速路径保留：sessionFile 一旦拿到立即 resolve。
 //   - 应答不完整（缺 sessionFile）：单次超时照常 settle 已收集字段（契约：一次
@@ -54,7 +54,7 @@ export function extractGetStateFields(data: unknown, into: GetStateResult): void
 
 /**
  * FR-4: 通过 get_state RPC 查询子进程获取 sessionFile/sessionId（单次尝试，
- * 超时 GET_STATE_TIMEOUT_MS 后 settle 已收集字段——[ADR-0112] 无重试）。
+ * 超时 GET_STATE_TIMEOUT_MS 后 settle 已收集字段——[ADR-0122] 无重试）。
  */
 export function performGetStateHandshake(
   child: ChildProcess,

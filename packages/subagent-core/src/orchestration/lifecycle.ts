@@ -19,7 +19,7 @@
  *
  * 私有 makeHandlers(run, deps) → WorkerHandlers：
  * - onMessage → handleWorkerMessage(run, raw, deps, handlers)
- * - onError → handleWorkerError(run, err, deps, handlers)（一次即 done,failed，ADR-0112）
+ * - onError → handleWorkerError(run, err, deps, handlers)（一次即 done,failed，ADR-0122）
  * - onExit(code, handle) → handleWorkerExit(run, code, handle, deps, handlers)
  * （G-025：handle.isCurrent 检查内化在 handleWorkerExit 内）
  *
@@ -153,7 +153,7 @@ function broadcastAbortToWorker(run: WorkflowRun, reason: string): void {
  * **onExit G-025**：handleWorkerExit 内部检查 handle.isCurrent（stale exit 丢弃）。
  * 本函数不在 onExit 里重复检查——worker-message-pump.handleWorkerExit 是单一守卫点。
  *
- * **workerErrorCount**：[HISTORICAL] 原重试计数载体（C.5）——[ADR-0112] 重试矩阵
+ * **workerErrorCount**：[HISTORICAL] 原重试计数载体（C.5）——[ADR-0122] 重试矩阵
  * 删除后无生产写入方，字段保留为旧 record 兼容读。
  * 注意 handleWorkerError 内部也会递增——这里 onError 递增是 worker 事件层面的
  * 「error 事件到达」计数，handleWorkerError 内的是「错误处理决策」计数。
@@ -208,7 +208,7 @@ export function makeHandlers(run: WorkflowRun, deps: LifecycleDeps): WorkerHandl
     async onExit(code: number, handle: WorkerHandle): Promise<void> {
       // H-2：用 worker-host 传入的 handle（即真正触发 exit 的那个 handle），而非
       // run.runtime?.worker——[HISTORICAL] 原 rebuild 重试竞态注释（replaceRuntime
-      // 生产调用方已删，ADR-0112）；运行期 runtime 恒为 start 时绑定实例
+      // 生产调用方已删，ADR-0122）；运行期 runtime 恒为 start 时绑定实例
       // 为新 handle，导致 handleWorkerExit 内的 isCurrent 检查误判（漏判 stale exit 或
       // 误杀新 worker）。G-025 检查仍在 handleWorkerExit 内（handle.isCurrent）。
       await handleWorkerExit(run, code, handle, depsWithTerminalCleanup, handlers);

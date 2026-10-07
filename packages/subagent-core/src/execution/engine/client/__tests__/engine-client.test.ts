@@ -482,7 +482,7 @@ describe("引擎崩溃与重建（A8①③）", () => {
       args: [FAKE_ENGINE, "--mode", "crash"],
     });
     // crash 模式：spawn 即死（stderr 写 600+ 字符样本）→ initialize 无应答 →
-    // 一次即标记不可用 reject engine_crashed（ADR-0112：无自动重建）。
+    // 一次即标记不可用 reject engine_crashed（ADR-0122：无自动重建）。
     await expect(client.ensureConnected()).rejects.toMatchObject({ code: "engine_crashed" });
     expect(client.stderrTailText.length).toBeLessThanOrEqual(401);
     expect(client.stderrTailText).toContain("x"); // 尾部内容保留（头部被截）
@@ -490,7 +490,7 @@ describe("引擎崩溃与重建（A8①③）", () => {
     await cleanup();
   }, 30_000);
 
-  it("初建失败：一次即标记不可用（恒 throw，含恢复指引；ADR-0112 无自动重建）", async () => {
+  it("初建失败：一次即标记不可用（恒 throw，含恢复指引；ADR-0122 无自动重建）", async () => {
     const { client, cleanup } = makeClient({
       args: [FAKE_ENGINE, "--mode", "crash"],
     });
