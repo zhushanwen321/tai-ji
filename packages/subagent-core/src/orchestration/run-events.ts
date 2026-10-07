@@ -472,7 +472,6 @@ export interface RunResumedEvent extends EventEnvelope { // oe-exempt:20260929:f
   model?: string;
 }
 
-/** `run-settled`——run 终局（一个 run 恰好一帧；终局通知的单点判定源，防多处各判漏分支）。 */
 /**
  * 模型覆盖记账值（subagent-model-switch §6.2 记账形状 + §7.4 持久化 bullet）。
  *
@@ -531,6 +530,7 @@ export interface WorkerLogEvent extends EventEnvelope { // oe-exempt:20260930:fr
   entry: WorkerLogEntry;
 }
 
+/** `run-settled`——run 终局（一个 run 恰好一帧；终局通知的单点判定源，防多处各判漏分支）。 */
 export interface RunSettledEvent extends EventEnvelope { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   type: "run-settled";
   outcome: RunOutcome;
