@@ -20,6 +20,117 @@ get_current_branch() {
     git rev-parse --abbrev-ref HEAD 2>/dev/null
 }
 
+# 列出进程 pid 及其全部后代（按真实父子关系逐层展开，不做名字模式匹配）
+_collect_process_tree() {
+    local root="$1"
+    local all="$root" frontier="$root" next p children pid
+    while [[ -n "${frontier// /}" ]]; do
+        next=""
+        for pid in $frontier; do
+            children=$(pgrep -P "$pid" 2>/dev/null || true)
+            if [[ -n "$children" ]]; then
+                next="${next:+$next }$children"
+                all="${all:+$all }$children"
+            fi
+        done
+        frontier="$next"
+    done
+    echo "$all"
+}
+
+# 删除前驻留进程预检：扫描持有 worktree 树内文件句柄的全部进程，按句柄类型分两档。
+# 检测手段 = lsof +D 权威枚举（树内打开文件的进程一份不漏），不做命令行模式匹配——
+# macOS pgrep -f 对含路径的模式有实测不可靠形态（argv 中段子串能中、含路径模式不中），
+# 不能作为删除拦截的依据。
+#   阻塞档（cwd 以外任何句柄：读写文件 / 执行树内二进制 / mmap）：会在 rm 扫描间隙
+#     继续回写该树（vite 回写 .vite/deps 致 rm: Directory not empty 的实测形态），
+#     必须先终止。终止时按进程树整树 TERM→KILL（concurrently 类父进程死后
+#     vite/Electron 孤儿不会自行退出，只杀根会留残留）。
+#   提示档（仅 cwd 挂靠：编辑器 / AI 会话 bash）：不阻塞删除，但删除后其命令将失效。
+# 返回值：0 = 可删（无阻塞进程，或 force=true 且阻塞进程已全部终止）；
+#         1 = 存在未终止的阻塞进程，调用方应拒绝删除。
+check_resident_processes() {
+    local wt_path="$1"
+    local force="${2:-false}"
+
+    [[ -z "$wt_path" ]] && return 1
+    echo "  扫描持有该目录树内文件句柄的进程（含 node_modules 时约需数秒）..."
+    local blocked="" cwd_only="" pid="" fd="" line=""
+    while IFS= read -r line; do
+        case "$line" in
+            p*) pid="${line#p}" ;;
+            f*)
+                fd="${line#f}"
+                case "$fd" in
+                    cwd)
+                        case " $cwd_only " in *" $pid "*) ;; *) cwd_only="$cwd_only $pid" ;; esac
+                        ;;
+                    *)
+                        case " $blocked " in *" $pid "*) ;; *) blocked="$blocked $pid" ;; esac
+                        ;;
+                esac
+                ;;
+        esac
+    done < <(lsof -F pf +D "$wt_path" 2>/dev/null)
+
+    local p
+    for p in $blocked; do
+        echo "  阻塞删除: PID $p — $(ps -p "$p" -o command= 2>/dev/null | cut -c1-100)"
+    done
+    for p in $cwd_only; do
+        case " $blocked " in *" $p "*) continue ;; esac
+        echo "  仅 cwd 挂靠（不阻塞）: PID $p — $(ps -p "$p" -o command= 2>/dev/null | cut -c1-100)"
+    done
+    if [[ -n "$cwd_only" ]]; then
+        echo "  注意: 有进程以该目录为工作目录（AI 会话 / 编辑器），删除后其命令将失效，请先收尾。"
+    fi
+
+    if [[ -z "$blocked" ]]; then
+        return 0
+    fi
+
+    if [[ "$force" != "true" ]]; then
+        echo "  处理: 终止上述进程后重跑；或确认清单无误后加 --force（自动终止阻塞进程整树）。"
+        return 1
+    fi
+
+    echo "  --force: 自动终止阻塞进程（整树 TERM → KILL）..."
+    local tree victim alive="" stat
+    for p in $blocked; do
+        tree=$(_collect_process_tree "$p")
+        for victim in $tree; do
+            kill "$victim" 2>/dev/null || true
+        done
+    done
+    sleep 1
+    for p in $blocked; do
+        tree=$(_collect_process_tree "$p")
+        for victim in $tree; do
+            if kill -0 "$victim" 2>/dev/null; then
+                stat=$(ps -p "$victim" -o stat= 2>/dev/null | awk '{print $1}')
+                [[ "$stat" == Z* ]] && continue  # 僵尸 = 已死待 reap，不算存活
+                kill -9 "$victim" 2>/dev/null || true
+            fi
+        done
+    done
+    sleep 0.5
+    for p in $blocked; do
+        tree=$(_collect_process_tree "$p")
+        for victim in $tree; do
+            stat=$(ps -p "$victim" -o stat= 2>/dev/null | awk '{print $1}')
+            if [[ -n "$stat" && "$stat" != Z* ]] && kill -0 "$victim" 2>/dev/null; then
+                alive="$alive $victim"
+            fi
+        done
+    done
+    if [[ -n "$alive" ]]; then
+        echo "Error: 以下进程 SIGKILL 后仍存活，请手动处理:${alive}"
+        return 1
+    fi
+    echo "  已终止全部阻塞进程"
+    return 0
+}
+
 # 清理 worktree + 可选删除分支
 # Usage: remove_worktree <workspace_root> <branch_name> [delete_branch=false] [force=false]
 #   delete_branch: 是否删除本地分支

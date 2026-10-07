@@ -544,6 +544,8 @@ curl -sL -o /dev/null -w '%{http_code}\n' -r 0-1048575 --max-time 60 \
 
 调用本 skill 的 remove-worktree.sh 清理 feature worktree 和本地分支（命令全文见下方「自动化执行」代码块，本阶段只此一个命令版本，避免出现不一致的两个副本）。`--force` 跳过已合并检查并强制删除（含未提交/未跟踪内容，删除前会列出将销毁的清单）——分支已删除（远程 delete-branch）时本地 `git branch --merged` 检查会误判，故恒用 `--force`。**同步其他 worktree 的默认行为**：不带 `--skip-sync` 时，脚本会对 workspace 内其他非 main worktree 逐个执行 `git merge --no-ff github/main`；发生冲突时不自动 abort，冲突态保留在该 worktree 待人工处理（脚本结束报告列出冲突 worktree 与处理命令）。`--skip-sync` 跳过整个同步段——阶段 7 恒带该参数，因为 pr-merge.sh 已 sync 过 main，且发布收尾阶段不应顺带改动其他 worktree 的工作区。
 
+删除目录前脚本自动执行**驻留进程预检**：命令行引用该 worktree 的进程按是否持有其内文件句柄分两档——阻塞档（如残留的 `pnpm dev` 进程树回写 vite 缓存，会与 `rm` 竞态致删除失败）被拦截，非 force 时拒绝删除并列出精确 kill 清单，`--force` 时自动整树终止（TERM → KILL）；仅 cwd 挂靠档（编辑器 / AI 会话 bash）只提示不拦截——若主 agent 自身 bash cwd 在该 worktree 内，删除后 bash 失效属预期（见下方 [HISTORICAL] 节）。
+
 脚本内含**远端分支卫生段**（在删除 worktree 目录前执行）：对 `refs/remotes/github/*` 做确定性清扫——排除 `main`、现行 dev 集成线（版本号最大的 dev-* 分支，动态识别）、`dependabot/**`（活 PR）后，已合并进 main 的远端分支自动删除（纯祖先判定，main 已含全部工作，删除零损失）；未合并的报告分支名与领先 commit 数，留人工裁决。单条删除失败记 warning 不阻断主流程。判定基于段内自 fetch 的新鲜视图（`--force` 路径同样覆盖）。
 
 门禁 [MANDATORY]：阶段 7 启动前**必须**确认**全流程零未决失败**——阶段 0 到 6.5 每一个已执行的阶段/子步骤（含 4N 各子步、6.5.1-6.5.4）都已 exit 0 或已明确闭环。**任一中间环节失败/被拒/未验证完成，绝对禁止执行本阶段清理**：必须停下向用户汇报失败详情（现象、已尝试的处置、候选方案），与用户讨论解决路径——修复后重跑失败阶段，或用户明确表态「带病收尾/放弃该环节」后才可继续。worktree 删除不可逆，带着未决失败清理 = 永久失去修复现场（修复所需上下文、复现环境、未推产物清单全部丢失）。

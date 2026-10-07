@@ -199,6 +199,17 @@ if [[ $HYGIENE_DELETED -gt 0 || $HYGIENE_KEPT -gt 0 ]]; then
     echo "  卫生结果: 自动删除 ${HYGIENE_DELETED} 个 / 需人工裁决 ${HYGIENE_KEPT} 个"
 fi
 
+# --- 驻留进程预检（删除前） ---
+# 阻塞语义：持有 worktree 内文件句柄的进程会在 rm 扫描间隙回写文件（vite 缓存回写
+# 实测致 rm 失败），必须先终止；仅 cwd 挂靠的进程只提示不拦截。
+echo ""
+echo "=== 驻留进程预检 ==="
+if ! check_resident_processes "$WT_PATH" "$FORCE"; then
+    echo ""
+    echo "Error: 检测到阻塞删除的驻留进程，已拒绝删除（git 登记与分支均未动）。"
+    exit 1
+fi
+
 # --- 删除目标 worktree（最后执行） ---
 echo ""
 echo "=== 清理 worktree $BRANCH_NAME ==="
