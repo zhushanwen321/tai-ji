@@ -140,7 +140,8 @@ function errorTextOr(error: string | undefined, fallback: string): string {
  * `No API key for <p>/<id>`——两错误经 rpc-mode 外层 catch 以 response success:false
  * + error 文本到达）按设计 §7.5 映射；快照查找与 checkAuth 之外的残余消息 = pi
  * 内部异常，生效状态不可信——按回读失败形态收口（三型词表封闭映射：宿主处置 =
- * 错误应答 + 重试恢复，不虚构生效值）。
+ * 错误应答 + 重试恢复，不虚构生效值）。checkAuth 词形是本分型的承重前提，已登记
+ * docs/pi-semantics.json PS-75（pi bump 门禁重验集——pi 词形漂移时先同步本分型前缀）。
  */
 function classifySetModelFailure(error: string | undefined): SetModelForwardOutcome {
   const detail = errorTextOr(error, "set_model failed without an error message");
