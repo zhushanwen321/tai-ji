@@ -445,6 +445,102 @@ describe("lazyDeps.getSessionRootId 转发成员（[dmg-r2-5] 缺失 = run-creat
   });
 });
 
+// ── ①c [dmg-r1-1] lazyDeps.onResumeModelOverrideCommitted 转发成员 ─────────────
+//
+// 同族第三例（workflowAgentDispatch [A1 R3] / getSessionRootId [dmg-r2-5] 先例）：
+// lazyDeps 漏本成员时，resume with model 的落账点（resume-run appendResumeModelOverride）
+// 落完 journal B 帧后调 deps.onResumeModelOverrideCommitted 可选链静默短路——宿主
+// 两个派生投影（覆盖内存表 + workflow 域负缓存）stale 不失效，重派被旧投影遮蔽
+// （旧 model 命中或覆盖丢失按 run-created.model 解析），pi 仍 notify「resuming with
+// model B」成功文案（假成功）。守卫同源与转发契约锁定（同款先例）。
+
+describe("lazyDeps.onResumeModelOverrideCommitted 转发成员（[dmg-r1-1] 缺失 = resume model 宿主投影同步恒不触发）", () => {
+  afterEach(() => {
+    Reflect.deleteProperty(globalThis, SERVICE_SLOT_KEY);
+  });
+
+  it("守卫同源：session 未初始化时属性访问 throw 'Session not initialized'（与 store 等成员同消息）", async () => {
+    const { pi } = makePi();
+    const handle = setupWorkflowDomain(pi, { inflightReporter: makeReporter() }); // 无 session_start
+    expect(() => handle.lazyDeps.onResumeModelOverrideCommitted).toThrowError("Session not initialized");
+  });
+
+  it("转发契约：调用即透传 (runId, override) 到 SubagentService.applyRunOverrideProjection；service 缺席 throw 带恢复动作（resume 侧回滚围栏承接）", async () => {
+    const { handle } = await mountWithSession("sess-override-forward");
+    const applyRunOverrideProjection = vi.fn();
+    // service 进程单例槽（service-bootstrap.ts Symbol.for 槽，{ current } 形态）注入
+    // fake——生产 session_start 后真实单例在位，此处只验证闭包转发面。
+    Reflect.set(globalThis, SERVICE_SLOT_KEY, {
+      current: { applyRunOverrideProjection, dispose: vi.fn() },
+    });
+
+    const commit = handle.lazyDeps.onResumeModelOverrideCommitted;
+    if (!commit) throw new Error("lazyDeps.onResumeModelOverrideCommitted missing (regression to lazyDeps forwarding gap)");
+    const override = { provider: "prov-a", modelId: "model-b", thinkingLevel: "high", ts: 42 };
+    commit("wf-override-run", override);
+
+    expect(applyRunOverrideProjection).toHaveBeenCalledTimes(1);
+    expect(applyRunOverrideProjection).toHaveBeenCalledWith("wf-override-run", override);
+
+    // service 缺席：makeDeps 侧错误契约——journal B 帧已落（重试 resume 幂等补帧），
+    // throw 走 resume 调用点回滚围栏（run 回 interrupted 可重试），消息带恢复动作。
+    Reflect.set(globalThis, SERVICE_SLOT_KEY, { current: undefined });
+    expect(() => commit("wf-override-run", override)).toThrowError(
+      "resume model override projection unavailable",
+    );
+  });
+});
+
+// ── ①d lazyDeps 转发清单对账：LifecycleDeps 可选成员全集（防第四处漏转发） ─────
+//
+// 三例同族漏转发（A1 R3 / dmg-r2-5 / dmg-r1-1）的公共根因 = 可选成员缺 lazyDeps
+// 转发只有运行期暴露（可选链静默短路 / 静默回退）——lazyDeps 声明类型 LauncherDeps
+// 下可选成员缺省合法，且本包测试文件不做 tsc 类型检查（extensions/tsconfig.json
+// exclude **/__tests__），类型层防线在此不可依赖。对账改为运行时双向锁定：
+// - 正向：清单逐成员断言存在于 lazyDeps 可枚举键——LifecycleDeps 新增可选成员而
+//   忘转发 = 此处红；
+// - 反向：lazyDeps 键逐一断言属于必选成员 ∪ 清单——新增可选成员并转发了 lazyDeps
+//   而忘更新清单 = 此处红（清单与 lazyDeps 键集合双向闭环，清单是唯一维护点）。
+// 唯一逃逸形态 = 新增可选成员且既不转发也不更新清单（无消费点时无运行期信号，
+// 与必选成员缺赋值同属类型层义务）。
+// 注意：getter 均为对象字面量自有可枚举属性，Object.keys 不触发求值，无需 session 装配。
+
+/** LifecycleDeps 可选成员全集清单（唯一维护点）：core ports.ts LifecycleDeps 新增
+ *  可选成员时必须同步——漏收/漏转发由双向断言拦截。 */
+const LIFECYCLE_OPTIONAL_KEYS = [
+  "onRunDone",
+  "eventBus",
+  "appendEntry",
+  "log",
+  "scheduleTimeBudget",
+  "workflowAgentDispatch",
+  "onResumeModelOverrideCommitted",
+  "getSessionRootId",
+] as const;
+
+/** LauncherDeps 必选成员键（LifecycleDeps 四必选 + LauncherDeps 自有 registry）：
+ *  反向断言的另一半全集——必选成员缺转发由声明类型 lazyDeps: LauncherDeps 编译期
+ *  拦截，运行时只做反向对账的封闭集。 */
+const LAZY_REQUIRED_KEYS = ["store", "workerHost", "runner", "runs", "registry"] as const;
+
+describe("lazyDeps 转发清单对账：LifecycleDeps 可选成员全集（防第四处漏转发）", () => {
+  it("正向：清单逐成员存在于 lazyDeps 可枚举键（含本修复的 onResumeModelOverrideCommitted）", () => {
+    const { handle } = mount();
+    const lazyKeys = Object.keys(handle.lazyDeps);
+    for (const key of LIFECYCLE_OPTIONAL_KEYS) {
+      expect(lazyKeys).toContain(key);
+    }
+  });
+
+  it("反向：lazyDeps 可枚举键全部属于必选成员 ∪ 可选清单（防清单腐化漏更新）", () => {
+    const { handle } = mount();
+    const allowed = new Set<string>([...LAZY_REQUIRED_KEYS, ...LIFECYCLE_OPTIONAL_KEYS]);
+    for (const key of Object.keys(handle.lazyDeps)) {
+      expect(allowed.has(key)).toBe(true);
+    }
+  });
+});
+
 // ── ② D1：reload 分支 ─────────────────────────────────────────────────────────
 
 describe("D1 session_shutdown reason=reload：破坏性动作全跳过，adoption 前提保全", () => {

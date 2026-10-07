@@ -729,6 +729,15 @@ export function setupWorkflowDomain(
     // 成员则 run-created 帧不落 rootSessionId（可选成员静默放行）——同 cwd 多会话下
     // runtime 网关 runId 路由恒回落目录存在性弱锚，精确归属形同虚设。
     get getSessionRootId() { return createLazy(resolveDeps, "getSessionRootId"); },
+    // [dmg-r1-1] resume 显式 model 落账回调必须随 lazyDeps 转发（getSessionRootId
+    // 同款先例，同族第三例）：三个生产入口（registerWorkflowTool / registerSubagentsTool /
+    // registerWorkflowsCommand）都以 lazyDeps 为 deps 启动 run，resume with model 的
+    // 落账点（resume-run appendResumeModelOverride）落完 journal B 帧后经本回调同步
+    // 宿主投影——漏本成员则可选链静默短路（可选成员静默放行）：覆盖内存表 /
+    // 负缓存 stale 不失效，重派被旧投影遮蔽（旧 model 命中或覆盖丢失按 run-created.model
+    // 解析），pi 仍 notify「resuming with model B」成功文案。转发清单对账测试防第四处
+    // 漏转发（workflow-events.test.ts lazyDeps 转发清单对账 describe）。
+    get onResumeModelOverrideCommitted() { return createLazy(resolveDeps, "onResumeModelOverrideCommitted"); },
     // scheduleTimeBudget / appendEntry 不可缺席（ports.ts D-12 regression fix 同族）：
     // rebuildRuntime 重排 run 级墙钟预算计时器、finalizeRun 的 pending:unregister
     // 直落都经这两个成员消费——lazyDeps 缺席会让消费点拿到 undefined（可选属性
