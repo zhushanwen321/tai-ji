@@ -154,7 +154,7 @@ OUTPOST_CALLSITES = [
         "编排区），豁免条目随调用点迁移",
     ),
     (
-        "transport/subagent-model-gateway.ts",
+        "infra/subagent-model-gateway.ts",
         "client.prompt(`/subagent-model ${payload}`)",
         "exempt",
         "[subagent-model-switch U6] 模型切换宿主触达命令（设计 §7.1.1 通道）："

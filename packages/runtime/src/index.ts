@@ -1,6 +1,6 @@
 // coverage-file-gate-exempt: 组合根装配接线面——决策逻辑在注入工厂（btw-line-spawn-options.ts 等，各有直测），本文件新增行是构造注入与回调接线，单测不可达（入口装配）；行为由 validate-runtime-bundle 与 runtime e2e 承载
 import { RuntimeServer } from './transport/server.js'
-import { createSubagentModelSwitchGateway } from './transport/subagent-model-gateway.js'
+import { createSubagentModelSwitchGateway } from './infra/subagent-model-gateway.js'
 // remote-access U0.1（D2/D9）：remote token 热读函数——仅 --remote-access 开态装配为
 // ConnectionManager 的 remoteTokenProvider（每次 auth 握手调用）；关态不装配零 IO。
 // 层位：文件 IO 居 infra（runtime-layering.md §2 transport 层不碰 node:fs）。

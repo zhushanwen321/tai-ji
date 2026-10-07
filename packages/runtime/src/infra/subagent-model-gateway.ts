@@ -30,7 +30,7 @@ import {
 
 import type { SubagentModelSwitchGateway } from '../interfaces.js'
 import type { ScannedSessionMeta } from '../services/ports/session.js'
-import { getPiAgentDir } from '../infra/pi/pi-paths.js'
+import { getPiAgentDir } from './pi/pi-paths.js'
 import { toErrorMessage } from '../utils/errors.js'
 
 /**
