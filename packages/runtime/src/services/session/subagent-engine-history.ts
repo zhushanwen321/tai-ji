@@ -31,7 +31,6 @@
  */
 import type { SubagentRecord, Message } from '@taiji/shared'
 import { getDataDir } from '@taiji/shared/paths'
-import { closeSync, openSync, readSync, statSync } from 'node:fs'
 import {
   readSubagentHistoryMessages,
   resolveEngineRouteId,
@@ -41,6 +40,7 @@ import {
   type SessionView,
 } from '@zhushanwen/subagent-core'
 import { discoverAndRegisterEngines } from '@zhushanwen/subagent-core/engine/engine-discovery-scan'
+import { extractLatestModelChangeFromJsonl } from '../../infra/pi/session-model-tail-read.js'
 import { getPiAgentDir } from '../../infra/pi/pi-paths.js'
 import { toErrorMessage } from '../../utils/errors.js'
 
@@ -251,72 +251,21 @@ export interface SessionModelChangeEntry {
 }
 
 /**
- * 单条 JSONL 行的 model_change 投影（非命中返回 null；行解析失败静默跳过——
- * 尾部半写行是 pi 延迟落盘的常态形态，不构成错误）。
- */
-function projectModelChangeLine(line: string): SessionModelChangeEntry | null {
-  const trimmed = line.trim()
-  if (!trimmed.startsWith('{')) return null
-  try {
-    const parsed = JSON.parse(trimmed) as { type?: unknown; provider?: unknown; modelId?: unknown }
-    if (parsed.type !== 'model_change') return null
-    if (typeof parsed.provider !== 'string' || typeof parsed.modelId !== 'string') return null
-    if (parsed.provider === '' || parsed.modelId === '') return null
-    return { provider: parsed.provider, modelId: parsed.modelId }
-  } catch {
-    return null
-  }
-}
-
-/**
- * 尾块倒序扫描的块大小与块数上界（subagent-model-switch §6.4 分叉态重载消费）。
- *
- * model_change 在该成员 session 里的位置 = 最近一次热切换时点——分叉态重载场景
- * （切换后不久重开面板）它必然在文件尾部近邻；窗口上限只防极端大流量场景的
- * 全文件扫描成本，扫完未命中按无值处理（= 切换流量已把条目推出窗口，标签由
- * 覆盖状态通道承接——分支②的显示，不虚构生效值）。
- */
-// eslint-disable-next-line no-magic-numbers -- 尾读窗口常数（64KB 块 × 4 块 = 256KB 上限，语义见上注）
-const MODEL_CHANGE_TAIL_CHUNK_BYTES = 64 * 1024
-const MODEL_CHANGE_TAIL_MAX_CHUNKS = 4
-
-/**
  * pi session JSONL 的 `model_change` 尾条目派生（实际执行事实权威——§7.2 审计口径，
  * 详情载荷组装时派生读取，零新增持久化载体）。
  *
+ * 实现下沉 infra/pi 单点（`extractLatestModelChangeFromJsonl`，session-model-tail-read）：
+ * JSONL 尾读/解析原语与 pi entry 类型词汇（C-comm-02 持有点纪律——services 层不持
+ * pi 词汇）收敛在 infra，活跃路径裁剪随既有骨架统一（分支文件下物理尾逆读会命中
+ * 被撤子树的 model_change，与该 session 真实生效值漂移）；census §6 N16 登记读者
+ * 归类。本函数只保留消费面契约（导出名/签名/返回形状不变，session-records 与
+ * 直测零改动）。
+ *
  * 仅 pi 引擎成员调用（非 pi 成员无 pi session 文件，调用方以 extractRecordEngine 判定）。
- * 读不到（文件不存在 / 尾窗口无条目 / 条目字段畸形）按无值处理（undefined）——未发生
- * 热切 = 无分叉态，字段本无消费场景。读失败 warn 一次不抛（详情载荷增强是展示域，
- * 不因它阻断列表返回）。
+ * 读不到（文件不存在 / 扫描窗无条目 / 条目字段畸形）按无值处理（undefined）——未发生
+ * 热切 = 无分叉态，字段本无消费场景；读失败按无值降级不抛（详情载荷增强是展示域，
+ * 不因它阻断列表返回，INVAR-tail-7 错误对等）。
  */
 export function readPiSessionLatestModelChange(sessionFile: string): SessionModelChangeEntry | undefined {
-  let size: number
-  try {
-    size = statSync(sessionFile).size
-  } catch {
-    return undefined // 文件不存在（pi 首次 flush 前延迟写入）= 无值
-  }
-  const readLen = Math.min(size, MODEL_CHANGE_TAIL_CHUNK_BYTES * MODEL_CHANGE_TAIL_MAX_CHUNKS)
-  const start = size - readLen
-  let text: string
-  try {
-    const buf = Buffer.alloc(readLen)
-    const fd = openSync(sessionFile, 'r')
-    try {
-      readSync(fd, buf, 0, readLen, start)
-    } finally {
-      closeSync(fd)
-    }
-    text = buf.toString('utf8')
-  } catch (e) {
-    console.warn(`[subagent-engine-history] model_change tail read failed (${toErrorMessage(e)}): ${sessionFile}`)
-    return undefined
-  }
-  // 首行按窗口起点截齐（窗口切在行中间时残行不可解析，跳过）。
-  const lines = text.split('\n')
-  for (let i = lines.length - 1; i >= 0; i--) {
-    const change = projectModelChangeLine(lines[i] ?? '')
-    if (change !== null) return change
-  }
-  return undefined
+  return extractLatestModelChangeFromJsonl(sessionFile)
 }

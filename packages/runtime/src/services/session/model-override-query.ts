@@ -12,8 +12,12 @@
  * （record-events.ts applyRecordEvent 的 modelOverride case / run-events.ts
  * latestModelOverride 单点注释）——最新一条覆盖帧 ≡ fold 槽位终值，构造性等价。
  *
- * 读取形态 = 尾块倒序（readPiSessionLatestModelChange 同款范式，U1 成本口径：详情载荷
- * 组装路径的同步尾读；live 帧发布受水位 diff 门控非高频）。登记限制：覆盖帧小载荷
+ * 读取形态 = 尾块倒序（subagent-model-switch U1 确立的成本口径：详情载荷
+ * 组装路径的同步尾读；live 帧发布受水位 diff 门控非高频）。pi session 侧的同款
+ * 尾读已下沉 infra/pi 单点（extractLatestModelChangeFromJsonl 骨架）；本文件读
+ * record 域独立文件（覆盖帧文件 / run journal，非 pi session `.jsonl`，无树结构
+ * 无活跃路径需求）且定位链需 sessionStore 注入，保留 services 层手写尾读形态
+ * （runtime-layering §3④ 基线债登记）。登记限制：覆盖帧小载荷
  * （~200B），尾部被海量 worker-log 堆积淹没且覆盖帧早于窗口起点时漏读 = 载荷按无覆盖
  * 显示（字段缺席 = 无覆盖语义，不虚报）。
  *
@@ -26,7 +30,7 @@
  *   头注已登记，根治属 core 布局单源）——run 域查询同受此限。
  *
  * 错误形态：查询是详情载荷组装路径的内嵌步骤，任何 IO/解析失败降级返回 undefined
- * + warn 留痕（readPiSessionLatestModelChange 同款 best-effort 语义）——载荷查询
+ * + warn 留痕（best-effort 语义，与同族尾读派生一致）——载荷查询
  * 故障不得炸掉面板列表读 RPC；undefined = 字段缺席 = 无覆盖语义，不虚构。
  */
 import { openSync, readSync, closeSync, statSync } from 'node:fs'
@@ -45,7 +49,7 @@ import { getPiAgentDir } from '../../infra/pi/pi-paths.js'
 import { toErrorMessage } from '../../utils/errors.js'
 import { parseWorkflowRunEventFileLine } from './events-projection.js'
 
-/** 覆盖帧尾读窗口。同量级参照：U1 readPiSessionLatestModelChange 64KB×4。 */
+/** 覆盖帧尾读窗口（subagent-model-switch U1 尾读窗口成本口径）。 */
 const OVERRIDE_TAIL_WINDOW_KB = 256
 const BYTES_PER_KB = 1024
 const OVERRIDE_TAIL_WINDOW_BYTES = OVERRIDE_TAIL_WINDOW_KB * BYTES_PER_KB
@@ -65,7 +69,7 @@ export interface ModelOverrideQueryDeps { // oe-exempt:20261006:framework:查询
 }
 
 /**
- * 尾块倒序读出首条命中帧（readPiSessionLatestModelChange 同款骨架）：
+ * 尾块倒序读出首条命中帧：
  * 窗口起点切在行中间时残行不可解析，解析器按坏行跳过（两域 parse 均宽容语义）。
  */
 function readTailFrame<T>(
