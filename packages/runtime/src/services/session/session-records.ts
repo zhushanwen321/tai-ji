@@ -564,14 +564,20 @@ export class SessionRecords {
    * journal-report-router → 本方法）：报告送达该 session 的事件投影（同步应用 =
    * 域校验 + seq 缺口判定 + 缺口补读 + fold）→ 派生缓存同步 → 水位发布。
    *
-   * 投影未就绪（缓存/投影未建）→ 返回 false（不回 ack，写侧按 D5 失败折叠）——
-   * 事件不丢：投影创建时 attach() 全目录冷读从磁盘收敛（推送丢弃窗口被冷读覆盖）。
-   * 同步应用（fold 与补读均为同步文件读）= 生效回执（D7）的前提。
+   * 投影未就绪（缓存/投影未建）→ **就地建投影后应用**（D3 顺带发现 5 修复——原形态
+   * 丢报等待投影创建时的冷读收敛，收敛点全在轮边界，轮内实时事件（round-started 等）
+   * 全程到不了订阅方，托盘「进行中」计数停留旧态）。会话 meta 不可得（pi 延迟写入）
+   * 时 ensureProjection 落 entry-only 降级投影，报告应用失败仍返回 false（不回 ack，
+   * 行为与原形态一致）。同步应用（fold 与补读均为同步文件读）= 生效回执（D7）的前提。
    */
   private applyJournalReport(sessionId: string, report: SubagentJournalReport): boolean {
-    const cache = this.recordEntriesCaches.get(sessionId)
-    const projection = cache?.projection
-    if (!cache || projection === null || projection === undefined) return false
+    let cache = this.recordEntriesCaches.get(sessionId)
+    if (!cache || cache.projection === null || cache.projection === undefined) {
+      cache = this.ensureRecordEntriesCache(sessionId)
+      this.ensureProjection(sessionId, cache)
+    }
+    const projection = cache.projection
+    if (projection === null || projection === undefined) return false
     if (!projection.applyJournalReport(report)) return false
     this.syncCacheFromProjection(cache, projection)
     if (!this.deps.hasSession(sessionId)) return true // 已销毁：fold 已应用但不 publish（与 entry 路径同守卫）
