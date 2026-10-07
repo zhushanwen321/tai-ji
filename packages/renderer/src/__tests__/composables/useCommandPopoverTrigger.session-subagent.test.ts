@@ -131,6 +131,16 @@ describe('useCommandPopoverTrigger session/subagent 触发（# / @ 符号路径�
     expect(result.cmdOpen.value).toBe(false)
   })
 
+  it('onCmdSelect(type=subagent) 缺 slug record（顺带发现 2 收口）→ 显示名回落 subagentId，不吃「新任务」占位', () => {
+    const { result, inputMock } = setup()
+
+    result.onCmdSelect({ type: 'subagent', name: 'x', subagentId: 'sa-direct-9', slug: '' })
+
+    // 与候选行显示口径一致（slug || subagentId）——chip 定向语义按 subagentId 引用，
+    // 「新任务」占位是新建项专属，不得顶替既有 record 的显示
+    expect(inputMock.insertSubagentChip).toHaveBeenCalledWith('sa-direct-9', 'sa-direct-9')
+  })
+
   it('onCmdSelect(type=file) → 清 $ 过滤文本 + 插文件 chip', () => {
     const { result, inputMock } = setup()
 
