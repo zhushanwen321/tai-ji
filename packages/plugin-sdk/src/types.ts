@@ -770,7 +770,17 @@ export interface Phase2AgentAPI extends Phase1AgentAPI {
      * 回执 {updated}：true = 广播帧已发出；false = 渲染端未收到（宿主装配缺陷被丢弃）——
      * 插件可据此告警，不应把 false 当成功。
      */
-    updateHeaderAction(id: string, opts: { sessionId: string; badge?: string; tooltip?: string; disabled?: boolean }): Promise<{ updated: boolean }>
+    updateHeaderAction(
+      id: string,
+      opts: {
+        sessionId: string
+        badge?: string
+        tooltip?: string
+        disabled?: boolean
+        /** true = 入口整体不渲染，与 disabled 灰置正交（wire 契约 HeaderActionUpdatePayload.hidden） */
+        hidden?: boolean
+      },
+    ): Promise<{ updated: boolean }>
   }
   readonly agent: {
     /** U6 回执：resolve 生效模型复合串（pi pattern 换模时 ≠ 请求值；降级路径空串） */
