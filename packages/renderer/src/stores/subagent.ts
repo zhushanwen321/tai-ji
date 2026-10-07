@@ -335,28 +335,13 @@ export const useSubagentStore = defineStore('subagent', () => {
     chunkOps?: SubagentStreamChunkOps,
   ): void {
     stopStream(scope)
-    // ── [stream-probe 临时探针]（subagent-stream-chunk-design §6 基线测量；
-    // 拆除 = 设计 impl-plan 阶段 5 收尾步骤）──
-    // 订阅段闭包级累计：apply 段耗时（chunk 分派 / W 路径 chatApplyDelta 调用段）+ 内容
-    // 消息条数 + Σ 字符量，每条 assistant 定稿清除帧（chatFinalizeStream 调用点）输出一次
-    // 汇总并重置。chunk 通道改增量后量的是 chunk 条数与 delta 字符量，同标识符输出保证
-    // 基线/改后对比口径机械可查。
-    let probeDeltaCount = 0
-    let probeApplyMsTotal = 0
-    let probeLinesTotalChars = 0
     const handler = (msg: { type?: string; payload?: unknown }): void => {
       // ── R 路径增量 chunk（唯一内容推送通道）──
       if (msg.type === 'subagent.stream_chunk') {
         if (!chunkOps) return // chunk 通道未接线（旧调用方兼容窗口）：忽略
         const payload = msg.payload as { recordId?: string; msgSeq?: number; deltaSeq?: number; delta?: string }
         if (payload.recordId !== recordId) return
-        const delta = payload.delta ?? ''
-        // [stream-probe 临时探针] apply 段计时包裹（chunk 分派调用段）
-        const applyStart = performance.now()
-        chunkOps.applyChunk(virtualId, recordId, payload.msgSeq ?? 0, payload.deltaSeq ?? 0, delta)
-        probeApplyMsTotal += performance.now() - applyStart
-        probeDeltaCount += 1
-        probeLinesTotalChars += delta.length
+        chunkOps.applyChunk(virtualId, recordId, payload.msgSeq ?? 0, payload.deltaSeq ?? 0, payload.delta ?? '')
         return
       }
       if (msg.type !== 'subagent.stream_delta') return
@@ -371,26 +356,11 @@ export const useSubagentStore = defineStore('subagent', () => {
         }
         // 只收口 streaming 实体。订阅保留（续聊轮的后续 chunk 仍可达，R1 构造性消解）；
         // 定稿内容由 entry 帧投影链覆盖。
-        const finalizeStart = performance.now()
         chatFinalizeStream(virtualId)
-        // [stream-probe 临时探针] 定稿时点一次性汇总（每条 assistant 消息一段，输出后重置）
-        console.info(
-          `[stream-probe] renderer-subagent recordId=${recordId} deltaMessages=${probeDeltaCount} ` +
-            `applyMsTotal=${probeApplyMsTotal.toFixed(1)} linesTotalChars=${probeLinesTotalChars} ` +
-            `finalizeMs=${(performance.now() - finalizeStart).toFixed(1)}`,
-        )
-        probeDeltaCount = 0
-        probeApplyMsTotal = 0
-        probeLinesTotalChars = 0
         return
       }
       // W 路径全量形态（余留）：累积全文替换原样
-      // [stream-probe 临时探针] apply 段计时包裹（调用时序不变）
-      const applyStart = performance.now()
       chatApplyDelta(virtualId, payload.lines)
-      probeApplyMsTotal += performance.now() - applyStart
-      probeDeltaCount += 1
-      probeLinesTotalChars += payload.lines.join('').length
     }
     // 双键：旧 widget 通道（payload.sessionId=主 sid）与 tee（payload.sessionId=虚拟分区 id）
     const unsubs = [events.on(mainSessionId, handler), events.on(virtualId, handler)]
