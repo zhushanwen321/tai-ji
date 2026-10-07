@@ -2,7 +2,7 @@
 
 状态：**已解决（2026-10-07 收尾轮接线，commit f24bcee1c）**——三入口透传 + core 统一覆盖记账落盘，端到端贯通。
 
-- 语义裁决（收尾轮，F1-26 两候选的第三形态落定）：**显式 resume 参数本身就是用户覆盖意图的一次表达**，经与 setModel 补切相同的 model-override 记账通道落盘——「resume 带模型」与已真机证真的「补切 + 无参 resume」两步构造性等价。覆盖记账仍是唯一意图源（不新增第二意图源，派发侧消费走既有 rebuildRunOverride 表 miss → journal 折叠 → 内存回填通道，零新增消费面）；不变量 2 由 fold replace-not-stack 构造性满足（resume 时刻的覆盖替换此前值，与补切时序语义一致），无语义边界冲击。
+- 语义裁决（收尾轮，F1-26 两候选的第三形态落定）：**显式 resume 参数本身就是用户覆盖意图的一次表达**，经与 setModel 补切相同的 model-override 记账通道落盘——「resume 带模型」与已真机证真的「补切 + 无参 resume」两步构造性等价。覆盖记账仍是唯一意图源（不新增第二意图源，派发侧使用方走既有 rebuildRunOverride 表 miss → journal 折叠 → 内存回填通道，零新增接入面）；不变量 2 由 fold replace-not-stack 构造性满足（resume 时刻的覆盖替换此前值，与补切时序语义一致），无语义边界冲击。
 - 落地面：① core resumeRun——锁段内格式闸（malformed ref 干净拒绝，先于一切写动作）→ run-resumed 转移落盘后、接管前直写 model-override 帧（journal 第三合法写点，三处登记注释同步；失败走接管失败同款回滚围栏，run 回 interrupted 可重试，不留半截覆盖的 running 态）；② 三入口——tool actionResume 透传（含 run-action 同款目录预检）、`/workflows resume <runId> [model]` TUI verb、RPC action model 字段；参数描述与 resume 文案同步（F1-26 收窄措辞撤位）。
 - 用户路径（接线后形态）：中断后单步 `resume + model B` = 覆盖记账落盘 + 重派全部吃 B + 后续无参 resume 沿用 B（跨 resume 存续，与「补切」形态语义一致）。
 
