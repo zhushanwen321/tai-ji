@@ -28,7 +28,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const { loggerMock } = vi.hoisted(() => ({
   loggerMock: { debug: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
-vi.mock("../../core/logger.ts", () => ({ getLogger: () => loggerMock }));
+vi.mock("../core/logger.ts", () => ({ getLogger: () => loggerMock }));
 
 // [F1-18] scanRunEvents 调用计数（透传包装，行为零变化）——负缓存用例的观测面：
 // 派发链上该模块路径的全部消费者（覆盖重建 / 成员复用绑定）共享同一计数，按

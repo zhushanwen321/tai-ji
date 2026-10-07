@@ -140,7 +140,7 @@ import {
   identityFromFold,
   isFreshCache,
   manifestToSubagent,
-  receiptStatisticsFromFold,
+  projectFoldToLight,
   recordToSubagent,
   sameNullableStamp,
   sameStamp,
@@ -1712,31 +1712,11 @@ export class RecordStore {
     const fold = this.eventStreamFace?.foldOf(base.id);
     const state = stateMarkerFromFold(fold);
     const entry = buildFileCacheEntry(base, file, stamps, state, this.eventsStampOfId(base.id));
-    // [U7 / §3.2.7 统计口径单基准] 统计域换源折叠（原 binding 快照补投影的接替）：
-    // light 重建从收条事件恢复 round/turns/tokens/endedAt 终值——「冷复活前后计数
-    // 一致」的读侧半边（写侧 = settle/轮终事件 + markResurrected 水合）。快照可滞后
-    // 于在飞轮（settle 后 jsonl 续写），此时 record 在内存由 mergedRecords 内存源
-    // 覆盖（内存增量覆盖磁盘终值），详情走 getFullRecord 从 jsonl 全量重放——三面
-    // 优先级衔接无跳变。
-    const stats = receiptStatisticsFromFold(fold);
-    if (stats.round !== undefined) entry.light.round = stats.round;
-    if (stats.totalTokens !== undefined) entry.light.totalTokens = stats.totalTokens;
-    if (stats.turns !== undefined) entry.light.turns = stats.turns;
-    if (stats.endedAt !== undefined) entry.light.endedAt = stats.endedAt;
-    // [subagent-model-switch §6.2] 覆盖记账补投影（与统计域换源同构——身份基底
-    // （identity entry / 索引）不承载运行态意图，事件流折叠补齐）：fold 有覆盖帧时
-    // light 补带 modelOverride，冷复活水合（resurrectColdRecord）与内存表重建
-    // （覆盖表 miss → 记录链重建）据此恢复。索引命中腿不投影——覆盖帧追加必改
-    // events 戳（缓存键第四维）→ 索引条目过期 → 落回本探测分支，构造性无丢失窗口。
-    if (fold?.modelOverride !== undefined) {
-      entry.light.modelOverride = {
-        ref: fold.modelOverride.ref,
-        ...(fold.modelOverride.thinkingLevel !== undefined
-          ? { thinkingLevel: fold.modelOverride.thinkingLevel }
-          : {}),
-        setAt: fold.modelOverride.setAt,
-      };
-    }
+    // [U7 / §3.2.7 统计口径单基准] 统计域换源折叠 + [subagent-model-switch §6.2]
+    // 覆盖记账补投影——投影单规则收拢在 projectFoldToLight（rebuild 轴），快照可滞后
+    // 于在飞轮时 record 在内存由 mergedRecords 内存源覆盖（内存增量覆盖磁盘终值），
+    // 详情走 getFullRecord 从 jsonl 全量重放——三面优先级衔接无跳变。
+    projectFoldToLight(entry.light, fold);
     this.fileCache.set(file, entry);
     this.idToFile.set(base.id, file);
     return entry;

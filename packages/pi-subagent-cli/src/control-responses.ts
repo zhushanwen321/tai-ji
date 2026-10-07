@@ -129,6 +129,11 @@ function isChildAlive(child: ChildProcess): boolean {
   return child.pid !== undefined && child.exitCode === null && child.signalCode === null;
 }
 
+/** 错误文本归一（空/缺省 → fallback 文案；两阶段失败 detail 共用）。 */
+function errorTextOr(error: string | undefined, fallback: string): string {
+  return error !== undefined && error !== "" ? error : fallback;
+}
+
 /**
  * set_model 错误应答 → 转发结局分派。pi 实装的两条已知失败路径（1.0.0 实装探针
  * P1-②：快照查找 `Model not found: <p>/<id>`；session.setModel checkAuth
@@ -138,10 +143,44 @@ function isChildAlive(child: ChildProcess): boolean {
  * 错误应答 + 重试恢复，不虚构生效值）。
  */
 function classifySetModelFailure(error: string | undefined): SetModelForwardOutcome {
-  const detail = error !== undefined && error !== "" ? error : "set_model failed without an error message";
+  const detail = errorTextOr(error, "set_model failed without an error message");
   if (detail.startsWith("Model not found")) return { kind: "model-not-in-snapshot", detail };
   if (detail.startsWith("No API key")) return { kind: "credential-missing", detail };
   return { kind: "readback-failed", stage: "set-model-response", detail };
+}
+
+/**
+ * 单阶段等待结局（等待窗三分诊后的收敛形态：无活进程 / 回读失败 / 应答在手——
+ * 前两支即 SetModelForwardOutcome 的同形成员，调用方原样上浮）。
+ */
+type StageAckOutcome =
+  | { kind: "not-active" }
+  | { kind: "readback-failed"; stage: "set-model-response" | "state-readback"; detail: string }
+  | { kind: "response"; success: boolean; data: unknown; error: string | undefined };
+
+/**
+ * 单阶段控制应答等待 + 退出/超时三分诊（③ 读应答窗与 ⑤ 回读窗共用）：子进程退出 →
+ * 无活进程；超时且仍存活 → 回读失败（stage + commandLabel 定语区分两阶段文案）；
+ * 超时窗内已退出 → 无活进程。「退出」与「超时」两种结局严格互斥，不混淆。
+ */
+async function awaitStageAck(
+  child: ChildProcess,
+  requestId: string,
+  stage: "set-model-response" | "state-readback",
+  commandLabel: string,
+): Promise<StageAckOutcome> {
+  const ack = await awaitControlResponse(child, requestId, SET_MODEL_STAGE_TIMEOUT_MS);
+  if (ack.kind === "child-exited") return { kind: "not-active" };
+  if (ack.kind === "timeout") {
+    return isChildAlive(child)
+      ? {
+        kind: "readback-failed",
+        stage,
+        detail: `${commandLabel} not received within ${SET_MODEL_STAGE_TIMEOUT_MS}ms (child alive)`,
+      }
+      : { kind: "not-active" };
+  }
+  return { kind: "response", success: ack.success, data: ack.data, error: ack.error };
 }
 
 /**
@@ -185,58 +224,25 @@ function extractPiStateSnapshot(data: unknown): {
  * §6.4——热切档位以联动值为生效事实，生效值经 get_state 回读应答宿主；用户显式
  * 档位经覆盖记账在下一轮 spawn 由解析链裁决，跨轮边界档位以解析链为准）。
  */
-export async function setModelOnActiveChild(
-  runId: string,
-  model: ModelRef,
-): Promise<SetModelForwardOutcome> {
-  // ① 定位（定位时已退出 → 无活进程）
-  const child = getActiveChild(runId);
-  if (child === undefined || !isChildAlive(child)) return { kind: "not-active" };
-
-  // ② 命令写入（写入窗口退出——stdin 缺失/已毁/EPIPE 均为无活形态）
-  const sent = sendSetModelCommand(child, { provider: model.provider, modelId: model.modelId });
-  if (!sent.delivered) return { kind: "not-active" };
-
-  // ③ 读应答（读应答窗口：退出 → 无活进程；超时且仍存活 → 回读失败——两结局互斥）
-  const ack = await awaitControlResponse(child, sent.requestId, SET_MODEL_STAGE_TIMEOUT_MS);
-  if (ack.kind === "child-exited") return { kind: "not-active" };
-  if (ack.kind === "timeout") {
-    return isChildAlive(child)
-      ? {
-        kind: "readback-failed",
-        stage: "set-model-response",
-        detail: `set_model response not received within ${SET_MODEL_STAGE_TIMEOUT_MS}ms (child alive)`,
-      }
-      : { kind: "not-active" };
-  }
-  if (!ack.success) return classifySetModelFailure(ack.error);
-
+/**
+ * ⑤ get_state 回读生效状态（回读前复检 + 回读窗 + 快照完整性检查；set_model 成功后
+ * 的回读段独立成段——与读应答窗共用 awaitStageAck 三分诊）。
+ */
+async function readbackEffectiveState(child: ChildProcess): Promise<SetModelForwardOutcome> {
   // ④ 回读前复检（set_model 成功后、get_state 写入前的间隙退出 = 回读期间退出窗口）
-  if (!isChildAlive(child)) return { kind: "not-active" };
-  if (child.stdin === null || child.stdin === undefined || child.stdin.destroyed) {
+  if (!isChildAlive(child) || child.stdin === null || child.stdin === undefined || child.stdin.destroyed) {
     return { kind: "not-active" };
   }
 
   // ⑤ get_state 回读（回读窗口；get_state 投递失败路径由 close 收敛或超时存活复检兜住）
   const stateRequestId = sendGetStateCommand(child);
-  const stateAck = await awaitControlResponse(child, stateRequestId, SET_MODEL_STAGE_TIMEOUT_MS);
-  if (stateAck.kind === "child-exited") return { kind: "not-active" };
-  if (stateAck.kind === "timeout") {
-    return isChildAlive(child)
-      ? {
-        kind: "readback-failed",
-        stage: "state-readback",
-        detail: `get_state readback not received within ${SET_MODEL_STAGE_TIMEOUT_MS}ms (child alive)`,
-      }
-      : { kind: "not-active" };
-  }
+  const stateAck = await awaitStageAck(child, stateRequestId, "state-readback", "get_state readback");
+  if (stateAck.kind !== "response") return stateAck;
   if (!stateAck.success) {
     return {
       kind: "readback-failed",
       stage: "state-readback",
-      detail: stateAck.error !== undefined && stateAck.error !== ""
-        ? stateAck.error
-        : "get_state failed without an error message",
+      detail: errorTextOr(stateAck.error, "get_state failed without an error message"),
     };
   }
   const snapshot = extractPiStateSnapshot(stateAck.data);
@@ -256,4 +262,25 @@ export async function setModelOnActiveChild(
     effectiveModel: { provider: snapshot.modelProvider, modelId: snapshot.modelId },
     effectiveThinkingLevel: snapshot.thinkingLevel,
   };
+}
+
+export async function setModelOnActiveChild(
+  runId: string,
+  model: ModelRef,
+): Promise<SetModelForwardOutcome> {
+  // ① 定位（定位时已退出 → 无活进程）
+  const child = getActiveChild(runId);
+  if (child === undefined || !isChildAlive(child)) return { kind: "not-active" };
+
+  // ② 命令写入（写入窗口退出——stdin 缺失/已毁/EPIPE 均为无活形态）
+  const sent = sendSetModelCommand(child, { provider: model.provider, modelId: model.modelId });
+  if (!sent.delivered) return { kind: "not-active" };
+
+  // ③ 读应答（读应答窗口：退出 → 无活进程；超时且仍存活 → 回读失败——两结局互斥）
+  const ack = await awaitStageAck(child, sent.requestId, "set-model-response", "set_model response");
+  if (ack.kind !== "response") return ack;
+  if (!ack.success) return classifySetModelFailure(ack.error);
+
+  // ④⑤ 回读前复检 + get_state 回读（readbackEffectiveState）
+  return readbackEffectiveState(child);
 }

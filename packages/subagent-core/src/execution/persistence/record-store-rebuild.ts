@@ -31,7 +31,7 @@ import type {
   SubagentRecordRegisteredEntryData,
   SubagentRecordSettledEntryData,
 } from "./record-entry.ts";
-import type { RecordBoundEvent, RecordEventFoldState } from "./record-events.ts";
+import type { RecordBoundEvent, RecordEventFoldState, RecordModelOverrideEvent } from "./record-events.ts";
 import type { ManifestRecord } from "./manifest-store.ts";
 // [U7 / §3.2.6 引擎中立锚] transcriptAnchorOf（cold-lookup 导出接口）：record →
 // transcript 锚的派生单点（显式 transcriptRef 优先 / zcode engineHandle.sessionRef
@@ -523,6 +523,33 @@ export function receiptStatisticsFromFold(fold: RecordEventFoldState | undefined
     totalTokens: idleReceipt.totalTokens,
     endedAt: settled !== undefined ? settled.endedAt : idleReceipt.ts,
   };
+}
+
+/**
+ * [U7 / §3.2.7 统计口径单基准 + subagent-model-switch §6.2] fold → light 补投影
+ * （store 扫描探测腿装配后调用）：统计域换源折叠（round/totalTokens/turns/endedAt
+ * 在场即投影）+ 覆盖记账补投影（fold 有覆盖帧时 light 补带 modelOverride，冷复活
+ * 水合与内存表重建据此恢复）。索引命中腿不投影——覆盖帧追加必改 events 戳（缓存键
+ * 第四维）→ 索引条目过期 → 落回探测分支，构造性无丢失窗口。
+ */
+export function projectFoldToLight(
+  light: SubagentRecord,
+  fold: RecordEventFoldState | undefined,
+): void {
+  const stats = receiptStatisticsFromFold(fold);
+  if (stats.round !== undefined) light.round = stats.round;
+  if (stats.totalTokens !== undefined) light.totalTokens = stats.totalTokens;
+  if (stats.turns !== undefined) light.turns = stats.turns;
+  if (stats.endedAt !== undefined) light.endedAt = stats.endedAt;
+  if (fold?.modelOverride !== undefined) {
+    light.modelOverride = {
+      ref: fold.modelOverride.ref,
+      ...(fold.modelOverride.thinkingLevel !== undefined
+        ? { thinkingLevel: fold.modelOverride.thinkingLevel }
+        : {}),
+      setAt: fold.modelOverride.setAt,
+    };
+  }
 }
 
 /**
@@ -1028,6 +1055,27 @@ export function recordToSubagent(r: ExecutionRecord): SubagentRecord {
  * fold 来源 = TerminalCtx.foldOf 注入位（调用时读事件面——事件面未接线的纯内存
  * 形态返回 undefined，本函数整体 no-op）。
  */
+/**
+ * [subagent-model-switch §6.2/P7] 用户覆盖记账水合（缺省回填，非空不覆盖——与
+ * transcriptRef 同构）：事件流 record-model-override 帧的折叠产物是跨重启后解析
+ * 第 0 层的恢复源（主 agent 重启 → 冷复活 → record.modelOverride 在场 → 续聊轮
+ * 解析命中覆盖）。折叠缺席（从未覆盖）时保持 undefined 零影响。
+ */
+function hydrateModelOverride(
+  record: ExecutionRecord,
+  override: RecordModelOverrideEvent | undefined,
+): void {
+  if (record.modelOverride !== undefined || override === undefined) return;
+  type MutableOverrideRecord = { -readonly [K in keyof ExecutionRecord]: ExecutionRecord[K] };
+  (record as MutableOverrideRecord).modelOverride = {
+    ref: override.ref,
+    ...(override.thinkingLevel !== undefined
+      ? { thinkingLevel: override.thinkingLevel }
+      : {}),
+    setAt: override.setAt,
+  };
+}
+
 export function hydrateReviveBaseline(record: ExecutionRecord, fold: RecordEventFoldState | undefined): void {
   if (fold === undefined) return;
   const stats = baselineStatisticsFromFold(fold);
@@ -1043,18 +1091,5 @@ export function hydrateReviveBaseline(record: ExecutionRecord, fold: RecordEvent
   if (record.transcriptRef === undefined && reopenedRef !== undefined) {
     record.transcriptRef = reopenedRef;
   }
-  // [subagent-model-switch §6.2/P7] 用户覆盖记账水合（缺省回填，非空不覆盖——与
-  // transcriptRef 同构）：事件流 record-model-override 帧的折叠产物是跨重启后解析
-  // 第 0 层的恢复源（主 agent 重启 → 冷复活 → record.modelOverride 在场 → 续聊轮
-  // 解析命中覆盖）。折叠缺席（从未覆盖）时保持 undefined 零影响。
-  if (record.modelOverride === undefined && fold.modelOverride !== undefined) {
-    type MutableOverrideRecord = { -readonly [K in keyof ExecutionRecord]: ExecutionRecord[K] };
-    (record as MutableOverrideRecord).modelOverride = {
-      ref: fold.modelOverride.ref,
-      ...(fold.modelOverride.thinkingLevel !== undefined
-        ? { thinkingLevel: fold.modelOverride.thinkingLevel }
-        : {}),
-      setAt: fold.modelOverride.setAt,
-    };
-  }
+  hydrateModelOverride(record, fold.modelOverride);
 }

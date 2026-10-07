@@ -533,6 +533,61 @@ export class WorkflowDispatch {
   }
 
   /**
+   * RunContext 组装（[D4] 身份信封 + [H2 W3] stream 缺省继承 + 会话根/run resume
+   * 可选键——条件展开收拢单点，执行核只管编排）。
+   */
+  private buildRunContext(
+    record: ExecutionRecord,
+    runSignal: MergedRunSignalHandle,
+    effectiveResolved: ResolvedIdentity["resolved"],
+    observedEvent: (event: AgentEvent) => void,
+    effectiveStream: AgentStreamSink | undefined,
+    resume: RunContext["resume"] | undefined,
+  ): RunContext {
+    return {
+      taskId: record.id,
+      // [D4] record 身份信封（引擎写进任务子进程身份 env；构造单点 = identityEnvelopeOf）
+      identity: identityEnvelopeOf(record),
+      signal: runSignal.signal,
+      ctxModel: effectiveResolved.model,
+      onEvent: observedEvent,
+      ...(effectiveStream !== undefined ? { stream: effectiveStream } : {}),
+      ...(this.sessionRootId !== null && this.sessionRootId !== ""
+        ? { sessionRootId: this.sessionRootId }
+        : {}),
+      // [U4 成员复用] 会话形态 resume 键（命中路径携带锚点续写原 session；现状
+      // 路径 undefined 不上 wire——一次性轮契约保形）。
+      ...(resume !== undefined ? { resume } : {}),
+    };
+  }
+
+  /**
+   * 任务声明组装：opts 直传（D6 合流——AgentCallOpts 即 EnginePort 任务形状，SAR 同款
+   * 零映射），model 覆写为 record 留痕词形（resolveIdentity 解析产物，与
+   * runAndFinalize 的 taskSpecWithModel 同源权威；二次咨询命中时 = 重盖章后的
+   * 覆盖词形）。[F1-17] pi 路径同步携带解析链最终产物档位（§6.2「跨轮档位以
+   * 解析链为准」的执行通道落地——此前档位只进盖章留痕，argv 无档位 = 执行用
+   * 引擎自身缺省，与「用户覆盖赢」总则相悖）：调用参数未显式带档位时用解析产物
+   * 值，显式档位优先（候选链最高层语义保持）。zcode 路径不动（引擎自治）。
+   */
+  private buildTaskSpec(
+    opts: AgentCallOpts,
+    engine: EnginePort,
+    record: ExecutionRecord,
+    effectiveResolved: ResolvedIdentity["resolved"],
+  ): AgentCallOpts {
+    return {
+      ...opts,
+      ...(record.model !== undefined ? { model: record.model } : {}),
+      ...(engine.id === DEFAULT_ENGINE_ID &&
+      effectiveResolved.thinkingLevel !== undefined &&
+      opts.thinkingLevel === undefined
+        ? { thinkingLevel: effectiveResolved.thinkingLevel }
+        : {}),
+    };
+  }
+
+  /**
    * executeWorkflowAgent 的执行核（acquire 后主体 + finally 回收）。八步迁移 ④⑤⑥⑦
    * 的落点：
    *   ④ journal 接线（wireEventJournal 单点；taskId = record.id——真实 record 在
@@ -612,37 +667,15 @@ export class WorkflowDispatch {
       // record.model / thinkingLevel（盖章时点定界：「本轮启动前最后取值点定值，
       // 启动后不变」），ctxModel 与 taskSpec.model 随盖章值同源。
       const effectiveResolved = this.consultOverrideAtTaskSpec(record, identity, opts, engine);
-      const runCtx: RunContext = {
-        taskId: record.id,
-        // [D4] record 身份信封（引擎写进任务子进程身份 env；构造单点 = identityEnvelopeOf）
-        identity: identityEnvelopeOf(record),
-        signal: runSignal.signal,
-        ctxModel: effectiveResolved.model,
-        onEvent: observedEvent,
-        ...(effectiveStream !== undefined ? { stream: effectiveStream } : {}),
-        ...(this.sessionRootId !== null && this.sessionRootId !== ""
-          ? { sessionRootId: this.sessionRootId }
-          : {}),
-        // [U4 成员复用] 会话形态 resume 键（命中路径携带锚点续写原 session；现状
-        // 路径 undefined 不上 wire——一次性轮契约保形）。
-        ...(resume !== undefined ? { resume } : {}),
-      };
-      // 任务声明：opts 直传（D6 合流——AgentCallOpts 即 EnginePort 任务形状，SAR 同款
-      // 零映射），model 覆写为 record 留痕词形（resolveIdentity 解析产物，与
-      // runAndFinalize 的 taskSpecWithModel 同源权威；二次咨询命中时 = 重盖章后的
-      // 覆盖词形）。[F1-17] pi 路径同步携带解析链最终产物档位（§6.2「跨轮档位以
-      // 解析链为准」的执行通道落地——此前档位只进盖章留痕，argv 无档位 = 执行用
-      // 引擎自身缺省，与「用户覆盖赢」总则相悖）：调用参数未显式带档位时用解析产物
-      // 值，显式档位优先（候选链最高层语义保持）。zcode 路径不动（引擎自治）。
-      const taskSpec: AgentCallOpts = {
-        ...opts,
-        ...(record.model !== undefined ? { model: record.model } : {}),
-        ...(engine.id === DEFAULT_ENGINE_ID &&
-        effectiveResolved.thinkingLevel !== undefined &&
-        opts.thinkingLevel === undefined
-          ? { thinkingLevel: effectiveResolved.thinkingLevel }
-          : {}),
-      };
+      const runCtx = this.buildRunContext(
+        record,
+        runSignal,
+        effectiveResolved,
+        observedEvent,
+        effectiveStream,
+        resume,
+      );
+      const taskSpec = this.buildTaskSpec(opts, engine, record, effectiveResolved);
       const { handle, outcome } = await engine.run(taskSpec, runCtx);
       journal.backfillHandle(handle);
       record.engineHandle = {

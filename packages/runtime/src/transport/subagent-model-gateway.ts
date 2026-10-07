@@ -135,8 +135,59 @@ function rejectFromChatError(reply: Record<string, unknown>): never {
 }
 
 /**
+ * scope:error 信封 → 分型 reject（真实 code/message 透传）。
+ */
+function rejectFromErrorScope(file: { error?: unknown; message?: unknown }): never {
+  // 校验型失败（ref 非法 / 目录无此模型 / 凭据预检 / thinking 档位 / run 已终局）+
+  // handler 域内失败（D3-A4 缺陷修复：信封带 scope:error，真实 code/message 透传——
+  // 不再笼统折算 subagent_model_switch_failed）。message 携带宿主编排的恢复指引。
+  const err = isObject(file.error) ? (file.error as { code?: unknown; message?: unknown }) : undefined
+  const code = typeof err?.code === 'string' && err.code !== '' ? err.code : 'subagent_model_switch_failed'
+  const message =
+    (typeof err?.message === 'string' && err.message !== '' && err.message) ||
+    (typeof file.message === 'string' && file.message !== '' && file.message) ||
+    'model switch rejected (no message)'
+  throw new SubagentModelSwitchError(code, message)
+}
+
+/**
+ * chat 域 reply → wire 应答映射（kind 三态分派；recorded.notice → wire note 是唯一改名位；
+ * 未知 kind = 形状损坏）。
+ */
+function mapChatReplyToWireReply(reply: Record<string, unknown>): SubagentSetModelReply {
+  if (reply.kind === 'effective') {
+    return {
+      kind: 'effective',
+      effectiveModel: reply.effectiveModel as { provider: string; modelId: string },
+      effectiveThinkingLevel: reply.effectiveThinkingLevel as string,
+    }
+  }
+  if (reply.kind === 'recorded') {
+    // 唯一改名位：core notice → wire note（§7.1 应答两型定形时的字段名分歧）。
+    return { kind: 'recorded', note: reply.notice as string }
+  }
+  if (reply.kind === 'error') {
+    rejectFromChatError(reply)
+  }
+  throw corruptReplyError(`chat reply.kind 未知（${String(reply.kind)}）`)
+}
+
+/**
+ * scope:workflow-run aggregate → wire 聚合应答（结构等价投影：core
+ * RunSwitchAggregateResult ≡ wire SubagentSetModelAggregateReply，形状 SSOT 注释在
+ * core types.ts；「两处漂移由 U1 接线测试对账」的映射点即此处）。
+ */
+function mapAggregateToWireReply(aggregate: Record<string, unknown>): SubagentSetModelAggregateReply {
+  return {
+    members: aggregate.members as SubagentSetModelAggregateReply['members'],
+    failures: aggregate.failures as SubagentSetModelAggregateReply['failures'],
+    summary: aggregate.summary as string,
+  }
+}
+
+/**
  * 结果文件内容 → wire 应答三形态映射（§7.1.1：extension 落 core SetModelReply 形状，
- * 本侧是 core → shared 的唯一映射点；recorded.notice → wire note 是唯一改名位）。
+ * 本侧是 core → shared 的唯一映射点）。
  */
 function mapResultFileToWireReply(raw: string): SubagentSetModelReply {
   let parsed: unknown
@@ -156,49 +207,19 @@ function mapResultFileToWireReply(raw: string): SubagentSetModelReply {
   }
 
   if (file.scope === 'error') {
-    // 校验型失败（ref 非法 / 目录无此模型 / 凭据预检 / thinking 档位 / run 已终局）+
-    // handler 域内失败（D3-A4 缺陷修复：信封带 scope:error，真实 code/message 透传——
-    // 不再笼统折算 subagent_model_switch_failed）。message 携带宿主编排的恢复指引。
-    const err = isObject(file.error) ? (file.error as { code?: unknown; message?: unknown }) : undefined
-    const code = typeof err?.code === 'string' && err.code !== '' ? err.code : 'subagent_model_switch_failed'
-    const message =
-      (typeof err?.message === 'string' && err.message !== '' && err.message) ||
-      (typeof file.message === 'string' && file.message !== '' && file.message) ||
-      'model switch rejected (no message)'
-    throw new SubagentModelSwitchError(code, message)
+    rejectFromErrorScope(file)
   }
 
   if (file.scope === 'chat') {
     const reply = file.reply
     if (!isObject(reply)) throw corruptReplyError('chat 域缺 reply')
-    if (reply.kind === 'effective') {
-      return {
-        kind: 'effective',
-        effectiveModel: reply.effectiveModel as { provider: string; modelId: string },
-        effectiveThinkingLevel: reply.effectiveThinkingLevel as string,
-      }
-    }
-    if (reply.kind === 'recorded') {
-      // 唯一改名位：core notice → wire note（§7.1 应答两型定形时的字段名分歧）。
-      return { kind: 'recorded', note: reply.notice as string }
-    }
-    if (reply.kind === 'error') {
-      rejectFromChatError(reply)
-    }
-    throw corruptReplyError(`chat reply.kind 未知（${String(reply.kind)}）`)
+    return mapChatReplyToWireReply(reply)
   }
 
   if (file.scope === 'workflow-run') {
     const aggregate = file.aggregate
     if (!isObject(aggregate)) throw corruptReplyError('run 级缺 aggregate')
-    // 结构等价投影（core RunSwitchAggregateResult ≡ wire SubagentSetModelAggregateReply，
-    // 形状 SSOT 注释在 core types.ts；「两处漂移由 U1 接线测试对账」的映射点即此处）。
-    const wire: SubagentSetModelAggregateReply = {
-      members: aggregate.members as SubagentSetModelAggregateReply['members'],
-      failures: aggregate.failures as SubagentSetModelAggregateReply['failures'],
-      summary: aggregate.summary as string,
-    }
-    return wire
+    return mapAggregateToWireReply(aggregate)
   }
 
   throw corruptReplyError(`scope 未知（${String(file.scope)}）`)
