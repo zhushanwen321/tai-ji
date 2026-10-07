@@ -2256,7 +2256,9 @@ export interface ServerMessageMapBase {
   // subagent.stream_delta：running subagent 的逐字 streaming（路径 A-1）。
   // pi 扩展层合并 text_delta 后经 ctx.ui.setWidget("subagent-stream-<recordId>", lines) 转发，
   // runtime EventAdapter 捕获后转为此 WS 帧。lines 是累积全文（split('\n')），undefined = 终态清除。
-  'subagent.stream_delta': { sessionId: string; recordId: string; lines: string[] | undefined }
+  // B2 起 R 路径（chunk 化，§4.2）不再经此通道发内容，仅收尾清除帧经此发送；清除帧 additive
+  // 携带 msgSeq（= 被清除消息的序号，供消费端封口水位，§4.1），内容帧不再出现。
+  'subagent.stream_delta': { sessionId: string; recordId: string; lines: string[] | undefined; msgSeq?: number }
   // subagent.stream_chunk（B2 subagent-stream-chunk §4.1）：running subagent 的增量内容推送，
   // 唯一的内容推送通道。transient 主题（与 subagent.stream_delta 同族：不分配 seq、不入 ring、
   // 不写快照，直传订阅者，断连即丢，无回放；topic 登记在 runtime message-bus TOPIC_TABLE）。
