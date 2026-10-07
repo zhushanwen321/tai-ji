@@ -1733,7 +1733,7 @@ export interface SubagentSetModelMemberFailure {
  * 失败（生效状态未知或未写）。机制权威 = subagent-core model-switch.ts catch 分支
  * 处置表（core 侧登记载体 = ACCOUNTED_SET_MODEL_ERROR_CODES 导出常量）；本词表扩位
  * 须与该表同批（词表登记注释同款纪律），**对账测试锚** =
- * packages/runtime/src/transport/__tests__/subagent-model-gateway.test.ts 的
+ * packages/runtime/src/infra/subagent-model-gateway.test.ts 的
  * 「core ↔ shared setModel 对账」（词表值级等值断言——core 扩码本词表漏跟即红）。
  */
 export const SUBAGENT_SET_MODEL_ACCOUNTED_ERROR_CODES = [
@@ -3217,9 +3217,9 @@ export interface ReplyPayloadMap {
             // model.switch case 消费 switchModel 返回的生效值（session-service 读回 get_state 生效模型）
             // 拆解回填 provider/modelId，对齐 C-pi-13 改状态 RPC 一律回生效值）
   // subagent.setModel：reply subagent.modelSet（payload 消费型——chat 两型按 kind 判别，
-  // run 级聚合三组件；应答值写显示态禁乐观写，§7.1。subagent 域不在 MUTATION_DOMAINS
-  // 检查范围（ADR-0065 五域边界：session/model/preset/config/mcp），无登记义务——
-  // 照登记反而触发 mutation-reply-contract「登记失效」红）。
+  // run 级聚合三组件；应答值写显示态禁乐观写，§7.1。已登记 mutation 守卫清单
+  // mutation-reply-contract.test.ts 的 MUTATION_RPC_REGISTRY（分支一 effective-value，
+  // 生效值断言锚 effective 分支）——subagent 域新增 mutation 须同批登记，漏登记即红）。
   'subagent.setModel': ServerMessageMap['subagent.modelSet']
   'session.compact': void         // reply session.compacted
   'session.delete': void          // reply session.deleted
