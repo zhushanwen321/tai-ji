@@ -89,7 +89,7 @@ describe("/workflows TUI resume", () => {
     const { ctx, notifies } = makeCtx("tui");
     await cmd.handler("resume", ctx);
     expect(vi.mocked(resumeRun)).not.toHaveBeenCalled();
-    expect(notifies[0]).toMatchObject({ msg: "Usage: /workflows resume <runId>", level: "warning" });
+    expect(notifies[0]).toMatchObject({ msg: "Usage: /workflows resume <runId> [model]", level: "warning" });
   });
 
   it("resumeRun 拒绝 → warning notify（TUI 同款透出）", async () => {

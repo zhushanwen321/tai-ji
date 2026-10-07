@@ -564,13 +564,16 @@ type DistributiveOmit<T, K extends keyof never> = T extends unknown ? Omit<T, K>
 /**
  * run 事件 journal 的接口形态（append / scan）。
  *
- * 单写者约束（D5；[F1-17] 裁决后按双写点现实登记）：append 的合法写点共两处，
+ * 单写者约束（D5；[F1-17] 裁决后按多写点现实登记）：append 的合法写点共三处，
  * 除此之外引擎/读侧一律不写——
  *   1. terminal-actions：dispatchRunTrigger 唯一投递入口（转移事件经
  *      appendTransition 的 journal.append 落账）+ 同模块 appendRunDiagnosticEvent
  *      的 worker-log 诊断直写（best-effort 非转移诊断事件）；
  *   2. execution 层 subagent-service.ts persistRunOverride 的 model-override
- *      记账直写（非转移事件进不了转移裁决链，登记理由见 append 方法级注释）。
+ *      记账直写（非转移事件进不了转移裁决链，登记理由见 append 方法级注释）；
+ *   3. orchestration 层 resume-run.ts appendResumeModelOverride 的 model-override
+ *      记账直写（resume 显式 model 参数的统一覆盖记账——F1-26 后续项；同款非转移
+ *      直写理由，写序 = run-resumed 转移之后、接管之前，失败走接管回滚围栏）。
  * 引擎侧事件经既有 run 事件通道上报后由写点落账，引擎不直接写 journal。类型层
  * 无法约束调用方，该约束由实装与守卫共同保证。写点登记三处保持一致：本接口
  * append 方法级注释 + run-event-journal.ts scanRunEvents 读面注释。
@@ -583,13 +586,16 @@ export interface RunEventJournal {
    * 在 journal 实装内，构造性单调）；runId 显式传参而非从事件取——仅 run-created
    * 携带 runId，目标文件定位不依赖事件形态。
    *
-   * 单写者约束（[F1-17] 裁决后形态——合法写点两处，与接口头注 / run-event-journal
-   * .ts scanRunEvents 读面注释三处一致）：合法调用方 = terminal-actions 的
-   * dispatchRunTrigger（唯一投递入口——活体链与经 interruptRun /
-   * settleRunAccounting 的收编冷路径都经它；resume 的复活转移由 resume-run 在锁
-   * 段内经同一入口投递）+ terminal-actions.appendTransition 的 journal.append
-   * 单写点 + execution 层 model-override 记账直写（subagent-service.ts
-   * persistRunOverride，第二合法写点）。直写登记理由：model-override 是非转移
+ * 单写者约束（[F1-17] 裁决后形态——合法写点三处，与接口头注 / run-event-journal
+ * .ts scanRunEvents 读面注释三处一致）：合法调用方 = terminal-actions 的
+ * dispatchRunTrigger（唯一投递入口——活体链与经 interruptRun /
+ * settleRunAccounting 的收编冷路径都经它；resume 的复活转移由 resume-run 在锁
+ * 段内经同一入口投递）+ terminal-actions.appendTransition 的 journal.append
+ * 单写点 + execution 层 model-override 记账直写（subagent-service.ts
+ * persistRunOverride，第二合法写点）+ orchestration 层 resume 显式 model 参数的
+ * model-override 记账直写（resume-run.ts appendResumeModelOverride，第三合法写点
+ * ——F1-26 后续项「补切 + 无参 resume 合一步」的统一记账通道）。直写登记理由：
+ * model-override 是非转移
    * 记账事件（不占 RUN_TRANSITIONS 表行），appendTransition 首行 transition()
    * 对无转移表行事件必抛 IllegalTransitionError——结构上进不了转移裁决链
    * （RunDispatchSource = { runId, journalDir? } 对 interrupted 态 run 本可达，

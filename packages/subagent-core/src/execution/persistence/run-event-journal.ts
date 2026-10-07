@@ -369,8 +369,9 @@ export function runEventJournalDirOf(journalDir?: string): string | undefined {
 /** [U4] run record 事件流只读访问器（成员复用绑定 fold 重建的读通道，决策 9 →
  *  [D6] 绑定字段查询辅助）——池侧不自建 journal 实例，读面统一走本模块解析，防绕过
  *  terminal-actions 的单写者纪律（写面唯一 = terminal-actions 转移写点 + U4b 宿主
- *  切换编排的 model-override 记账直写两处合法写点，登记见 run-events.ts
- *  RunEventJournal.append 单写者约束）与 no-op 测试防线。`journalDir` = per-call
+ *  切换编排的 model-override 记账直写 + resume 显式 model 参数的 model-override
+ *  记账直写（resume-run.ts appendResumeModelOverride）三处合法写点，登记见
+ *  run-events.ts RunEventJournal.append 单写者约束）与 no-op 测试防线。`journalDir` = per-call
  *  目录（runtime 侧收编扫描注入，缺省模块锚）。
  *
  *  [D1 拆边 Class C] execution 侧读面（`service/workflow-dispatch` 的成员复用绑定

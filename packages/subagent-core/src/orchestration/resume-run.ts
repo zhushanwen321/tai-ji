@@ -42,7 +42,9 @@ import {
   runEventJournalPathIn,
   runEventJournalPathOf,
 } from "./terminal-actions.ts";
+import { resolveRunEventJournal } from "../execution/persistence/run-event-journal.ts";
 import { RUN_EVENTS_SUFFIX } from "../shared/run-vocabulary.ts";
+import { isModelRef, parseModelSelector } from "../shared/model-ref.ts";
 import {
   foldRunEventFrames,
   latestModelOverride,
@@ -301,6 +303,13 @@ export interface ResumeRunOptions { // oe-exempt:20260929:framework:resumeRun pu
    * 模型；三处都没有 = 继承主 agent 模型（现状语义）。生效值随本次 run-resumed 帧
    * 落盘（观测面 + 跨崩溃存续）；派发侧消费走宿主覆盖通道（决策六②，U4b 接线），
    * 不改重建 spec 的 run 级模型（决策七不采用①：改 spec 会击穿回放比对）。
+   *
+   * 显式参数同时落统一覆盖记账（resume-run 锁段内直写 model-override 帧，F1-26
+   * 后续项裁决）：语义 = 「setModel 补切 + 无参 resume」两步的合一步构造性等价——
+   * 显式参数本身就是用户覆盖意图的一次表达，经同一记账通道落盘（覆盖表唯一意图源
+   * 语义保持，不新增第二意图源；不变量 2 由 fold replace-not-stack 构造性满足——
+   * resume 时刻的覆盖替换此前值，与补切时序语义一致）。派发侧消费经既有
+   * rebuildRunOverride 通道（表 miss → journal 折叠 → 内存回填），零新增消费面。
    */
   model?: string;
   /** 时钟注入（epoch ms）；缺省 Date.now()——run-resumed 帧 ts 与预算算式的确定性测试通道。 */
@@ -699,6 +708,15 @@ async function resumeRunLocked(
         `${WORKER_IIFE_HOST_DECLARED_NAMES.join(", ")}) and start a new run.`,
     );
   }
+  // 显式 model 参数的格式闸（先于段 4/5/6 一切写动作——干净拒绝，状态无损）。
+  // malformed ref 落进覆盖记账会毒化后续派发（覆盖是派发期模型输入源），入口 fail-fast。
+  if (options?.model !== undefined && !isModelRef(options.model)) {
+    throw new ResumeRejectionError(
+      `Resume rejected: run ${runId} resume model '${options.model}' is not a valid canonical ref. ` +
+        "Correct syntax: 'provider/modelId' or 'provider/modelId:thinkingLevel'. " +
+        "Recovery: retry the resume with a well-formed model ref.",
+    );
+  }
 
   // ── 3. 恢复计划计数（[ADR-0092]：已提交结果回放 / 未完成调用重派）──
   const plan = countResumePlan(events);
@@ -732,6 +750,14 @@ async function resumeRunLocked(
   // resume 的暂停态；回滚自身失败（journal IO error）仅 error 留痕——兜底收敛 =
   // 下次 session_start 的 recoverCrashedRuns 收编。原异常照常上抛（调用方报错给用户）。
   try {
+    // 显式 model 参数 → 统一覆盖记账（F1-26 后续项裁决——「补切 + 无参 resume」的
+    // 合一步：显式参数即用户覆盖意图表达，经同一 model-override 通道落盘，派发侧
+    // 经既有 rebuildRunOverride 通道消费）。写序 = run-resumed 转移之后、接管之前；
+    // 失败走接管失败同款回滚围栏（run 回 interrupted 可重试——覆盖未落 = 意图未
+    // 受理，带半截覆盖的 running 态才是坏状态）。
+    if (options?.model !== undefined) {
+      await appendResumeModelOverride(runId, options.model, now(), options?.journalDir);
+    }
     adoptResumedRun(runId, deps, created, recordPath, {
       events, activeElapsedMs, budgetTimeMs, budgetTokens, resumedAt, plan,
     }, now);
@@ -740,6 +766,29 @@ async function resumeRunLocked(
     throw err;
   }
   return runId;
+}
+
+/**
+ * resume 显式 model 参数的统一覆盖记账直写（F1-26 后续项；journal append 第三合法
+ * 写点——登记见 RunEventJournal.append 单写者约束）。canonical ref 在锁段内格式闸
+ * 已验（resumeRunLocked 段 2b），此处只做拆装落账；`[:thinkingLevel]` 后缀随
+ * parseModelSelector 拆出进记账 thinkingLevel（与 setModel 编排的 ModelOverride
+ * 形状同构）。失败语义 = 接管失败同款回滚围栏（调用点 try 域内）。
+ */
+async function appendResumeModelOverride(
+  runId: string,
+  modelRef: string,
+  ts: number,
+  journalDir: string | undefined,
+): Promise<void> {
+  const parsed = parseModelSelector(modelRef);
+  const { journal } = resolveRunEventJournal(journalDir);
+  await journal.append(runId, {
+    type: "model-override",
+    model: { provider: parsed.provider, modelId: parsed.id },
+    ...(parsed.thinkingLevel !== undefined ? { thinkingLevel: parsed.thinkingLevel } : {}),
+    ts,
+  });
 }
 
 /**

@@ -130,13 +130,16 @@ export function registerWorkflowsCommand(
       if (verb === "resume") {
         const runId = rest[0];
         if (!runId) {
-          ctx.ui.notify("Usage: /workflows resume <runId>", "warning");
+          ctx.ui.notify("Usage: /workflows resume <runId> [model]", "warning");
           return;
         }
+        // 可选第二参数 = 显式模型 canonical ref（'provider/modelId[:thinkingLevel]'）——
+        // 落统一覆盖记账（F1-26 后续项：与 setModel 补切同通道，resume 合一步表达）。
+        const model = rest[1];
         try {
-          await resumeRun(runId, deps);
+          await resumeRun(runId, deps, ...(model !== undefined ? [{ model }] : []));
           ctx.ui.notify(
-            `Workflow ${runId}: resuming — completed calls replay at zero token cost, unfinished calls re-dispatched`,
+            `Workflow ${runId}: resuming${model !== undefined ? ` with model ${model}` : ""} — completed calls replay at zero token cost, unfinished calls re-dispatched`,
             "info",
           );
         } catch (err) {
@@ -192,9 +195,9 @@ async function handleRpcMode(
     }
     case "resume": {
       try {
-        await resumeRun(parsed.runId, deps);
+        await resumeRun(parsed.runId, deps, ...(parsed.model !== undefined ? [{ model: parsed.model }] : []));
         ctx.ui.notify(
-          `Workflow ${parsed.runId}: resuming — completed calls replay at zero token cost, unfinished calls re-dispatched`,
+          `Workflow ${parsed.runId}: resuming${parsed.model !== undefined ? ` with model ${parsed.model}` : ""} — completed calls replay at zero token cost, unfinished calls re-dispatched`,
           "info",
         );
       } catch (err) {

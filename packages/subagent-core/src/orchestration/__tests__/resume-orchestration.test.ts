@@ -1016,3 +1016,70 @@ describe("resume 生效模型三档回落（决策七，与预算双轴同构）
     expect("model" in noneResumed).toBe(false);
   });
 });
+
+// ── [F1-26 后续项] resume 显式 model 参数 → 统一覆盖记账 ──────────────────
+
+describe("resumeRun 显式 model 参数 — 统一覆盖记账（补切 + 无参 resume 合一步）", () => {
+  async function resumedEventOf(runId: string): Promise<Extract<WorkflowRunEvent, { type: "run-resumed" }>> {
+    const events = await scanEvents(runId);
+    const frame = events.find((e) => e.type === "run-resumed");
+    expect(frame).toBeDefined();
+    return frame! as Extract<WorkflowRunEvent, { type: "run-resumed" }>;
+  }
+
+  it("显式 model → run-resumed 帧生效值 + model-override 记账帧落盘（同锁段、转移之后）", async () => {
+    await seedInterruptedRecord("wf-resume-model-1", { createdModel: "origin/o1" });
+    const { deps } = makeDeps();
+
+    await resumeRun("wf-resume-model-1", deps, {
+      model: "p-explicit/m9:high",
+      now: () => T0 + 100_000,
+    });
+
+    const events = await scanEvents("wf-resume-model-1");
+    const overrideFrames = events.filter((e) => e.type === "model-override");
+    expect(overrideFrames).toHaveLength(1);
+    const override = overrideFrames[0]! as Extract<WorkflowRunEvent, { type: "model-override" }>;
+    expect(override.model).toEqual({ provider: "p-explicit", modelId: "m9" });
+    expect(override.thinkingLevel).toBe("high");
+    // 写序：转移事件之后（记账在复活落定后追加，不前置）
+    const resumedIdx = events.findIndex((e) => e.type === "run-resumed");
+    const overrideIdx = events.findIndex((e) => e.type === "model-override");
+    expect(overrideIdx).toBeGreaterThan(resumedIdx);
+    // 生效值三档回落：显式参数为档 1（帧落 canonical ref 原串——run-created.model
+    // 同构，`[:thinkingLevel]` 后缀随串携带；记账帧的 thinkingLevel 是拆装字段）
+    const resumed = await resumedEventOf("wf-resume-model-1");
+    expect(resumed.model).toBe("p-explicit/m9:high");
+  });
+
+  it("无参二次 resume 吃显式参数留下的覆盖（跨 resume 存续——档 2 消费新写帧）", async () => {
+    await seedInterruptedRecord("wf-resume-model-2", { createdModel: "origin/o1" });
+    const { deps } = makeDeps();
+
+    await resumeRun("wf-resume-model-2", deps, { model: "p2/m2", now: () => T0 + 100_000 });
+    // 中断后再次无参 resume——第一次显式参数写的覆盖记账帧已在流内（running →
+    // interrupted 表内合法转移，rollbackFailedAdoption 同款通道）
+    await interruptRun("wf-resume-model-2", { errorCode: "crashed", reason: "test re-interrupt" });
+    await resumeRun("wf-resume-model-2", deps, { now: () => T0 + 200_000 });
+
+    const resumed = await resumedEventOf("wf-resume-model-2");
+    expect(resumed.model).toBe("p2/m2");
+    // 覆盖帧恒一条（无参 resume 不重复写记账）
+    const events = await scanEvents("wf-resume-model-2");
+    expect(events.filter((e) => e.type === "model-override")).toHaveLength(1);
+  });
+
+  it("malformed ref → 干净拒绝（状态无损：无 run-resumed 无覆盖帧），文案含恢复指引", async () => {
+    await seedInterruptedRecord("wf-resume-model-3");
+    const { deps } = makeDeps();
+
+    await expectRejection(
+      resumeRun("wf-resume-model-3", deps, { model: "no-slash", now: () => T0 + 100_000 }),
+      "not a valid canonical ref",
+    );
+
+    const events = await scanEvents("wf-resume-model-3");
+    expect(events.some((e) => e.type === "run-resumed")).toBe(false);
+    expect(events.some((e) => e.type === "model-override")).toBe(false);
+  });
+});

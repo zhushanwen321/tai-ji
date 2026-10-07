@@ -292,6 +292,14 @@ describe("parseWorkflowRpcCommand", () => {
     });
   });
 
+  it("resume + runId + model → { action: 'resume', runId, model }（F1-26 后续项：显式模型第三通道入参）", () => {
+    expect(parseWorkflowRpcCommand("resume run-def p2/m2:high")).toEqual({
+      action: "resume",
+      runId: "run-def",
+      model: "p2/m2:high",
+    });
+  });
+
   it("abort + runId → { action: 'abort', runId }", () => {
     expect(parseWorkflowRpcCommand("abort run-ghi")).toEqual({
       action: "abort",

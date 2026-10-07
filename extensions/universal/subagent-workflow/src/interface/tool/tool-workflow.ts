@@ -115,6 +115,7 @@ const WorkflowParams = Type.Object({
   model: Type.Optional(Type.String({
     description:
       "Run-level model override in 'provider/modelId' format. When set, all agents spawned by this run inherit it by default (unless a per-call agent() opts.model is set). " +
+      "Also accepted on action:\"resume\" — recorded as the run's user override (same channel as a panel switch) and drives all re-dispatched steps. " +
       "A user-issued runtime model override (panel model switch / /subagent-model command) takes precedence over this parameter — user override wins over any explicitly scripted model. " +
       "Omit to inherit the main agent's model.",
   })),
@@ -235,13 +236,15 @@ export function registerWorkflowTool(
       "Do NOT resume a settled (done/failed/cancelled) run — start a new run instead.",
       "resume: pass the SAME args as the original run (they are verified field-by-field; a mismatch is rejected " +
       "with the differing fields listed). Omit args to reuse the original ones. Changed args = different intent = new run. " +
-      "To resume with a different model: switch the run's model first (panel model selector or /subagent-model on that run), " +
-      "then resume without model arguments — the persisted user override drives all re-dispatched steps.",
+      "To resume with a specific model: pass model ('provider/modelId') on the resume itself — it is recorded as the " +
+      "run's user override (same channel as a panel switch), drives all re-dispatched steps, and persists for later " +
+      "resumes without the parameter. Alternatively switch the run's model first (panel selector or /subagent-model) " +
+      "then resume without model — both are the same override channel.",
       "Call shapes (JSON): " +
       "- run: {\"action\":\"run\",\"name\":\"<script>\",\"args\":{...},\"tokens\":N,\"time\":N,\"model\":\"<provider/modelId>\",\"thinkingLevel\":\"<level>\"}. " +
       "- status: {\"action\":\"status\"}. " +
       "- abort: {\"action\":\"abort\",\"runId\":\"<id>\"} (optional: {\"error\":\"<reason>\"}). " +
-      "- resume: {\"action\":\"resume\",\"runId\":\"<id>\",\"args\":{...},\"tokens\":N,\"time\":N} — args/tokens/time optional.",
+      "- resume: {\"action\":\"resume\",\"runId\":\"<id>\",\"args\":{...},\"tokens\":N,\"time\":N,\"model\":\"<provider/modelId>\"} — args/tokens/time/model optional.",
       "Budget: Do NOT set tokens/time unless the user explicitly requests a limit. Built-in workflows run unlimited by default.",
       "Model/thinkingLevel: omit by default (inherit main agent's model). Only set model/thinkingLevel when the user explicitly requests a specific model or thinking depth for this run. " +
       "Note: a user-issued runtime model override (panel switch / /subagent-model) takes precedence over the model parameter — an explicitly scripted thinkingLevel still applies " +
@@ -570,10 +573,28 @@ export async function actionResume(
   assertEntryTimeBudget(params.time);
   assertEntryTokenBudget(params.tokens);
 
+  // 显式 model 参数的目录预检（run action 同款 D8 拒单语义——查无同步 throw 零写，
+  // 单例缺席降级跳过 + warn，派发期 identity 解析仍是权威裁决）。
+  if (params.model !== undefined) {
+    const modelService = getModelConfigService();
+    if (modelService === null) {
+      logger.warn(
+        "[tool-workflow] model catalog unavailable (model service not initialized) — resume model catalog check skipped; dispatch-time identity resolution remains authoritative",
+      );
+    } else {
+      assertModelInCatalog(params.model, modelService.getModelRegistry(), {
+        source: "resume model override",
+      });
+    }
+  }
+
   const options: ResumeRunOptions = {
     ...(params.time !== undefined ? { budgetTimeMs: params.time } : {}),
     // token 预算显式覆盖（与 time 同款通道；三档回落与落盘归 core 单点）
     ...(params.tokens !== undefined ? { budgetTokens: params.tokens } : {}),
+    // [F1-26 后续项] 显式 model 透传（core 落统一覆盖记账——「补切 + 无参 resume」
+    // 的合一步；格式与目录已在本入口预检，记账落盘归 core 锁段单点）
+    ...(params.model !== undefined ? { model: params.model } : {}),
     // [§2.5] args 原样下传由 core 判定（D14 单源）；journalDir 传壳的 store 同源目录，
     // 否则 core 会按模块锚解析 record 路径——多 session 场景会静默读成「无记录」
     //（D14 静默放行 = 安全语义反转；core 锚点与壳 store 锚点必须同源）。
