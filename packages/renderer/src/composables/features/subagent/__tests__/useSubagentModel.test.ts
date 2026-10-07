@@ -5,9 +5,10 @@
  *
  * 覆盖（mock 宿主应答回执范式 + 标签读取规则四分支 + thinking 槽取值）：
  * - **禁乐观写**：api promise 未 resolve 前显示态零写入（应答到达才写状态）；
- * - 回执分流：chat 两型（effective → 生效值 / recorded → 覆盖意图）+ run 级聚合
- *   （switched → 成员生效值 / not-active·not-applicable → 成员覆盖意图 / 失败名单
- *   全量补写覆盖意图——宿主 run 级意图恒写 + toast 分项）；
+ * - 回执分流：chat 两型（effective → 生效值 + 覆盖意图 / recorded → 覆盖意图）+ run 级聚合
+ *   （switched → 成员生效值 + 覆盖意图（dmg-r3-4：宿主 run 级意图恒写，switched 成员
+ *   重派同样吃覆盖——badge 与同批失败成员同屏一致）/ not-active·not-applicable → 成员
+ *   覆盖意图 / 失败名单全量补写覆盖意图——宿主 run 级意图恒写 + toast 分项）；
  * - thinking 档位同步（§6.4）：回执带 effectiveThinkingLevel → 展示态字段更新且面板
  *   取值跟随；回执缺省该字段（聚合成员 optional）→ 字段不动、面板回退盖章值；
  * - 失败路径：RPC reject → 显示态零写入（标签读取规则分支③的构造性成立载体）+
@@ -247,10 +248,15 @@ describe('useSubagentModel — 回执写状态（禁乐观写）', () => {
     const reply = await setSubagentModel({ runId: 'wf-1', provider: 'p', modelId: 'target' })
 
     expect(reply).toBeDefined()
-    // switched：成员生效值（引擎回读）+ 生效档位（成员携带时随行）——聚合成员不写
-    // overrideIntent（F1-31 裁决范围 = chat 域 effective 型回执；聚合成员 badge 依赖
-    // run 级意图通道与载荷重推，边界经本断言固化）
-    expect(memberDisplayOf('wf-1', 'sa-a')).toEqual({ effectiveModel: 'p/m-a', thinkingLevel: 'high' })
+    // switched：成员生效值（引擎回读）+ 生效档位（成员携带时随行）+ overrideIntent
+    // （意图受理凭证，dmg-r3-4：宿主 run 级意图恒写——聚合返回后不分成败码统一
+    // setModelOverride + persistRunOverride，switched 成员后续重派同样吃 run 级覆盖，
+    // badge 与同批失败成员同屏一致，不等 model-override 帧落 journal 后的载荷重推）
+    expect(memberDisplayOf('wf-1', 'sa-a')).toEqual({
+      effectiveModel: 'p/m-a',
+      overrideIntent: 'p/target',
+      thinkingLevel: 'high',
+    })
     // not-active / not-applicable：覆盖意图（记账路径，重派生效）
     expect(memberDisplayOf('wf-1', 'sa-b')).toEqual({ overrideIntent: 'p/target' })
     expect(memberDisplayOf('wf-1', 'sa-c')).toEqual({ overrideIntent: 'p/target' })
@@ -281,8 +287,9 @@ describe('useSubagentModel — 回执写状态（禁乐观写）', () => {
 
     // 面板读取键构造（WorkflowTab.runModelDisplay 同款）：agentCall.memberRecordId =
     // 详情载荷透出的成员 record id（workflow-record-projection 圈定权威成员透出），与
-    // 聚合应答 member.runId 同值域——同键命中即两端口径对齐
-    expect(memberDisplayOf('wf-1', 'rec-member-1')).toEqual({ effectiveModel: 'p/m-a' })
+    // 聚合应答 member.runId 同值域——同键命中即两端口径对齐（switched 成员写面含
+    // overrideIntent，dmg-r3-4 同上）
+    expect(memberDisplayOf('wf-1', 'rec-member-1')).toEqual({ effectiveModel: 'p/m-a', overrideIntent: 'p/target' })
     // 键域反向锁：pi session uuidv7（修复前的误用读键）与 taskIndex 数字串都读不到——
     // 成员键漂移回旧通道时此处红
     expect(memberDisplayOf('wf-1', '018f6a2b-7c1d-7ef3-9abc-def012345678')).toBeUndefined()
@@ -318,8 +325,9 @@ describe('useSubagentModel — thinking 档位同步（§6.4）', () => {
 
     await setSubagentModel({ runId: 'wf-1', provider: 'p', modelId: 'target' })
 
-    // 回执缺省 effectiveThinkingLevel → 展示态无该字段（不虚构档位）
-    expect(memberDisplayOf('wf-1', 'sa-a')).toEqual({ effectiveModel: 'p/m-a' })
+    // 回执缺省 effectiveThinkingLevel → 展示态无该字段（不虚构档位）；switched 分支
+    // 的 overrideIntent 照写（意图受理凭证与档位回读成败无关，dmg-r3-4）
+    expect(memberDisplayOf('wf-1', 'sa-a')).toEqual({ effectiveModel: 'p/m-a', overrideIntent: 'p/target' })
     // 面板取值回退启动盖章值（record.thinkingLevel）
     expect(resolveSubagentThinkingLevel(memberDisplayOf('wf-1', 'sa-a'), 'high')).toBe('high')
   })

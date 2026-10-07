@@ -9,8 +9,9 @@
  * 构造性成立），例外分域：chat 域走 catch 通道，按「记账已写」型错误码亮灯
  * （SUBAGENT_SET_MODEL_ACCOUNTED_ERROR_CODES，D3 缺陷七：宿主先写覆盖记账再回错误，
  * 错误即意图受理凭证；词表外码如 credential_missing 在该域宿主不写，badge 不亮）；run 级
- * 聚合不设分型门——宿主 run 级意图恒写（聚合返回后统一写，不分成败码），聚合应答失败名单
- * （reply.failures）成员按成员键全量补写 overrideIntent 亮 badge（重派一律吃覆盖）。
+ * 聚合不设分型门——宿主 run 级意图恒写（聚合返回后统一写，不分成败码），switched 成员与
+ * 聚合应答失败名单（reply.failures）成员均按成员键补写 overrideIntent 亮 badge
+ * （switched 成员重派同样吃 run 级覆盖——badge 不等载荷重推，dmg-r3-4 同屏一致）。
  *
  * 显示态（回执态）的归属与生命周期：renderer 会话期内存（模块级 reactive Map，跨组件
  * 实例共享——SubagentTab / WorkflowTab 各自调本 composable 读同一份）；**不写
@@ -192,10 +193,12 @@ export function useSubagentModel() {
    * - chat 两型：effective → 写 effectiveModel（回读生效值）+ overrideIntent（意图受理
    *   凭证——F1-31 裁决候选 A）；recorded → 写 overrideIntent
    *   （本次目标——「已记录，下次执行生效」的标签承接）；
-   * - run 级聚合：按成员键写——switched 成员写生效值；not-active / not-applicable 成员写
-   *   overrideIntent（记账路径，重派生效）；失败名单成员不写生效值（分支③），但一律补写
-   *   overrideIntent 亮 badge（宿主 run 级意图恒写——聚合返回后统一写、不分成败码，失败
-   *   成员重派吃覆盖），toast 分项呈现照常（成员标识 + 失败分型）。
+   * - run 级聚合：按成员键写——switched 成员写生效值 + overrideIntent（意图受理凭证，
+   *   dmg-r3-4：宿主 run 级意图恒写，switched 成员后续重派同样吃 run 级覆盖，badge
+   *   不等载荷重推）；not-active / not-applicable 成员写 overrideIntent（记账路径，
+   *   重派生效）；失败名单成员不写生效值（分支③），但一律补写 overrideIntent 亮 badge
+   *   （宿主 run 级意图恒写——聚合返回后统一写、不分成败码，失败成员重派吃覆盖），
+   *   toast 分项呈现照常（成员标识 + 失败分型）。
    *
    * @returns 应答（成功）；失败返回 undefined（toast 已报，显示态未动）。
    */
@@ -253,6 +256,12 @@ export function useSubagentModel() {
       if (member.state === 'switched' && member.effectiveModel !== undefined) {
         displayStates.set(key, {
           effectiveModel: toModelRef(member.effectiveModel.provider, member.effectiveModel.modelId),
+          // 意图受理凭证（chat 域 effective 分支 F1-31 同款；dmg-r3-4）：宿主 run 级意图
+          // 恒写（model-switch workflow-run 分支聚合返回后不分成败码 setModelOverride +
+          // persistRunOverride），switched 成员后续重派同样吃 run 级覆盖——badge 事实依据
+          // = 意图已受理，补写意图 ref 不等 model-override 帧落 journal 后的下次载荷重推
+          // （消除与同批失败成员 badge 同屏不一致的窗口内空窗）
+          overrideIntent: intentRef,
           // 成员生效档位为 optional（wire 契约：仅回读成功成员携带）：缺省不写，
           // 同上「UI 跟随事实」——档位未知时不虚构，读取端回退盖章值
           ...(member.effectiveThinkingLevel !== undefined ? { thinkingLevel: member.effectiveThinkingLevel } : {}),
