@@ -36,6 +36,7 @@ import type {
 import { SET_MODEL_ERROR_CODES } from "@zhushanwen/subagent-engine-sdk";
 
 import { toErrorMessage } from "../../core/error-message.ts";
+import { getLogger } from "../../core/logger.ts";
 import { assertModelInCatalog } from "../../shared/model-catalog.ts";
 
 import type { ModelConfigService } from "../assembly/model-config-service.ts";
@@ -110,12 +111,13 @@ export interface ModelSwitchModelService { // oe-exempt:20261006:framework:类�
 export interface ModelSwitchDeps { // oe-exempt:20261006:framework:setModel 编排依赖注入面（U3/U5/U4 接线点，端口先立单实现常态）
   /** 模型服务（步骤①校验 + 步骤③内存记账表写入）。 */
   readonly getModelService: () => ModelSwitchModelService;
-  /**
-   * chat 域覆盖落账原语（store.markModelOverride——内存 record 字段 + record 事件
-   * 文件帧，持久化权威）。调用方保证 record 来自 store 内存表（原语内的同实例校验
-   * 防御重复登记）。
-   */
-  readonly markModelOverride: (record: ExecutionRecord, override: ModelOverride) => void;
+/**
+ * chat 域覆盖落账原语（store.markModelOverride——内存 record 字段 + record 事件
+ * 文件帧，持久化权威）。返回 false = record 非内存实例（未注册 / 已回收 / 重建
+ * 对象），两面都未写——调用方（writeChatOverride）必须同步跳过内存记账表，禁止
+ * 「持久化缺失而内存生效」的双介质状态（dmg-r1-10）。
+ */
+readonly markModelOverride: (record: ExecutionRecord, override: ModelOverride) => boolean;
   /** chat 域目标引擎解析（与派发链同一路由裁决——resolveRoundEnginePort 同款形态）。 */
   readonly resolveEnginePort: (record: Pick<ExecutionRecord, "engine" | "engineHandle" | "id">) => EnginePort;
   /**
@@ -184,6 +186,20 @@ export function engineSetModelErrorCode(err: unknown): SetModelErrorCode | undef
 const NOT_ACTIVE_NOTICE = "已记录，下次执行生效。";
 const ENGINE_UNSUPPORTED_NOTICE = "该引擎暂不支持执行中热切换，已记录，下次执行生效。";
 const RACE_EXIT_NOTICE = "子进程在切换期间已退出，已记录，下次执行生效。";
+
+/**
+ * 处置表「写记账后回错误应答」分型词表（行 3 快照型 / 行 7 回读失败型——catch 分支
+ * 除 credential_missing 特判外的写面分型登记）。词表外引擎错误码 / 无码错误走同一
+ * 写面兜底（「命令已送达、意图已表达」的保守归属，catch 实装按 credential_missing
+ * 特判组织——特判 = SDK 词表全集减本词表）；shared 的 SUBAGENT_SET_MODEL_ACCOUNTED_
+ * ERROR_CODES 是本词表的前端显示面投影（badge 亮灯依据，词表外码不亮 badge）。
+ * **对账锚**：packages/runtime/src/transport/__tests__/subagent-model-gateway.test.ts
+ * 「core ↔ shared setModel 对账」——本词表扩位漏同步 shared 时该测试红。
+ */
+export const ACCOUNTED_SET_MODEL_ERROR_CODES = [
+  "engine_model_not_in_snapshot",
+  "engine_state_readback_failed",
+] as const satisfies readonly SetModelErrorCode[];
 
 /**
  * setModel 宿主编排（单一时序三步，§7.2）。校验型失败返回 error 应答（不写——
@@ -307,14 +323,29 @@ export async function setModel(
   }
 }
 
+const logger = getLogger("subagents");
+
 /** chat 域覆盖落账（步骤③写面）：持久化（store 原语——record 字段 + 事件帧）+
- *  内存记账表。切换不改写 record.model 盖章值（不变量 5 由 store 原语保证）。 */
+ *  内存记账表。切换不改写 record.model 盖章值（不变量 5 由 store 原语保证）。
+ *
+ *  落账返回值门（dmg-r1-10）：false = record 非内存实例，持久化两面（事件帧 +
+ *  record 字段）都未写——内存记账表同步跳过，只 warn 上浮（消除「内存覆盖生效 /
+ *  重启丢失、详情载荷查询无覆盖」的双介质劈叉）；该形态 = 调用方传入重建 record
+ *  的集成缺陷信号（正常链 record 来自内存表），warn 后应答形态不变（引擎已实际
+ *  切换的行 1 场景转报失败反而虚构），缺陷由 warn 日志暴露给排障链。 */
 function writeChatOverride(
   deps: ModelSwitchDeps,
   record: ExecutionRecord,
   override: ModelOverride,
 ): void {
-  deps.markModelOverride(record, override);
+  if (!deps.markModelOverride(record, override)) {
+    logger.warn(
+      `[model-switch] markModelOverride skipped (record not the in-memory instance) — ` +
+        `override NOT persisted and NOT applied to in-memory table (id=${record.id}); ` +
+        `caller should pass the store-resident record`,
+    );
+    return;
+  }
   deps.getModelService().setModelOverride(record.id, override);
 }
 

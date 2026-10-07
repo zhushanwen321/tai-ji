@@ -227,6 +227,10 @@ export function projectV2Workflow(
  * 透传——run 详情侧按成员标识逐成员携带、聚合面不取单一值）：
  * - **覆盖状态**：run 级覆盖（query.getRunOverride）分发到该 run 全部 agentCall 条目
  *   （run 级全切是 run 作用域意图，各成员条目携带同值；无覆盖不造键）；
+ * - **成员标识**：权威成员的 record id 透传到 agentCall.memberRecordId——run 级模型
+ *   切换聚合应答的成员标识（listAcceptedMemberRunIdsForSwitch 的 record id）与前端
+ *   成员回执显示态键（subagentMemberDisplayKey(runId, memberRecordId)）的单源对齐锚，
+ *   读端造键只认本字段（成员回执态键域 = 成员 record id，非 pi session uuid）；
  * - **最近生效值**：成员 SubagentRecord 的增强产物（调用方先经 enhanceSubagentDetails
  *   派生——含 pi session model_change 尾条目读取与「仅 pi 成员」判定）按
  *   (parentRunId, stepIndex) 圈定后透传到对应 agentCall。同族替换可只发生在部分成员，
@@ -275,13 +279,28 @@ export function projectSubagentModelDetailIntoRuns(
       const member = byStep?.get(call.id)
       const override = runOverride ?? member?.modelOverride
       const recent = member?.recentEffectiveModel
-      if (override === undefined && recent === undefined) return call
+      // 成员标识恒透出（member 在场即携带，不等覆盖/生效值在场）——它是回执显示态的
+      // 读取键，切换发生时面板数据源可能尚无任何覆盖载荷（首次切换前两者恒缺席）。
+      // subagentId = record 创建事件 identity.id（projectV2Subagent 身份域），与聚合
+      // 应答成员标识（listAcceptedMemberRunIdsForSwitch 的 ExecutionRecord.id）同源。
+      // 代价：getWorkflows 每次读 RPC 对有成员的 run 重建 agentCalls 数组（零拷贝
+      // 快路径仅在成员圈定全 miss 时保留）——成员增强产物本就每次读 RPC 重派生，
+      // 重建为浅展开小对象，量级可忽略。
+      const memberRecordId = member?.subagentId
+      if (override === undefined && recent === undefined && memberRecordId === undefined) return call
       // 引用相等短路（返回值直进 RPC reply 不缓存，无跨轮幂等消费位；形状级比较
       // 不必——成员增强产物每次读 RPC 重派生）。
-      if (call.modelOverride === override && call.recentEffectiveModel === recent) return call
+      if (
+        call.modelOverride === override &&
+        call.recentEffectiveModel === recent &&
+        call.memberRecordId === memberRecordId
+      ) {
+        return call
+      }
       changed = true
       return {
         ...call,
+        ...(memberRecordId !== undefined ? { memberRecordId } : {}),
         ...(override !== undefined ? { modelOverride: override } : {}),
         ...(recent !== undefined ? { recentEffectiveModel: recent } : {}),
       }

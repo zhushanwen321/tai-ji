@@ -229,14 +229,16 @@ const switching = ref(false)
 /**
  * run 级模型标签显示态：显示权威成员 = 首个非 pending 成员（run 级覆盖分发全成员同值，
  * 聚合面不取单一值——标签取权威成员的面字段合成，避免「部分成员同族替换」时显示不存在的
- * 单一值；成员回执态经 memberDisplayOf 按 (runId, call.sessionId) 键读取）。
+ * 单一值；成员回执态经 memberDisplayOf 按 (runId, memberRecordId) 键读取——键域 = 成员
+ * record id，与聚合应答 member.runId 同源（详情载荷 memberRecordId 透出，单源锚）；
+ * session id（pi uuidv7）与 call.id（taskIndex）都不在该键域，仅作缺省兜底）。
  */
 const runModelDisplay = computed(() => {
   const wf = workflow.value
   if (wf === null) return { label: undefined as string | undefined, overridden: false }
   const authoritative = wf.agentCalls.find((c) => c.status !== 'pending') ?? wf.agentCalls[0]
   if (authoritative === undefined) return { label: undefined as string | undefined, overridden: false }
-  const memberRunId = authoritative.sessionId ?? String(authoritative.id)
+  const memberRunId = authoritative.memberRecordId ?? authoritative.sessionId ?? String(authoritative.id)
   return resolveSubagentModelDisplay({
     display: memberDisplayOf(wf.runId, memberRunId),
     stampedModel: authoritative.model,

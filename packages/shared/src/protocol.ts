@@ -1731,7 +1731,10 @@ export interface SubagentSetModelMemberFailure {
  * 据此亮「用户覆盖中」badge（覆盖意图已受理的事实依据）。词表外错误码一律不得亮
  * badge：`engine_credential_missing`（切换整体未生效，不写）与全部校验型/通道型
  * 失败（生效状态未知或未写）。机制权威 = subagent-core model-switch.ts catch 分支
- * 处置表；本词表扩位须与该表同批（词表登记注释同款纪律）。
+ * 处置表（core 侧登记载体 = ACCOUNTED_SET_MODEL_ERROR_CODES 导出常量）；本词表扩位
+ * 须与该表同批（词表登记注释同款纪律），**对账测试锚** =
+ * packages/runtime/src/transport/__tests__/subagent-model-gateway.test.ts 的
+ * 「core ↔ shared setModel 对账」（词表值级等值断言——core 扩码本词表漏跟即红）。
  */
 export const SUBAGENT_SET_MODEL_ACCOUNTED_ERROR_CODES = [
   'engine_model_not_in_snapshot',

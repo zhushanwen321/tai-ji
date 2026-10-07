@@ -210,7 +210,10 @@ export class SubagentService {
    * 从未被切换过的 run 内存恒 miss，负缓存短路重复的 journal 全量重扫（派发热路径
    * 常态开销），形态先例 = member-reuse-pool loadedRuns（每 run 至多一次 scan 含
    * 空载登记）。只短路 journal 重扫、不遮蔽 setModelOverride 内存写——内存命中查询
-   * 在前（getModelOverride 先查内存表），切换后内存表有值、负缓存永不触发。 */
+   * 在前（getModelOverride 先查内存表），切换后内存表有值、负缓存永不触发。
+   * 失效通道：journal model-override 帧落盘使「已扫无覆盖」登记为假——resume 写点
+   * 经 applyRunOverrideProjection 落账后作废（F1-18 修复；修复前零失效点，resume
+   * 显式 model 被 stale 登记遮蔽至进程重启）。 */
   private readonly overrideRebuildNegativeCache = new Set<string>();
 
   /**
@@ -823,9 +826,7 @@ export class SubagentService {
     return setModel(
       {
         getModelService: () => this.modelService,
-        markModelOverride: (record, override) => {
-          this.store.markModelOverride(record, override);
-        },
+        markModelOverride: (record, override) => this.store.markModelOverride(record, override),
         resolveEnginePort: (record) => this.chatRounds.resolveEnginePortForSwitch(record),
         engineSetModel: (port, params) => {
           if (port.setModel === undefined) {
@@ -916,6 +917,34 @@ export class SubagentService {
     stepIndex?: number,
   ): Promise<WorkflowAgentResult> {
     return this.workflowDispatch.executeWorkflowAgent(opts, parentRunId, signal, onEvent, stream, stepIndex);
+  }
+
+  /**
+   * [F1-18 修复] workflow run 覆盖记账的宿主投影同步（resume 写点的落账后半边）。
+   *
+   * journal model-override 帧落盘后宿主两个派生投影必须同步，否则进程存活期内
+   * 重派被旧投影遮蔽（resume 显式 model 静默丢失）：
+   * ① 覆盖记账内存表写值——若该 run 曾有覆盖，getModelOverride 内存命中旧值；
+   *    写入后重派走内存命中（与 setModel 写点的双写形态对齐）。
+   * ② 重建负缓存作废——「已扫无覆盖」登记在 journal append 后为假（stale 登记
+   *    会短路 rebuildRunOverride 的 journal 重扫，空载 run 首派即登记）。
+   *
+   * 生产调用链 = extension makeDeps 注入 LifecycleDeps.onResumeModelOverrideCommitted
+   * （resume-run appendResumeModelOverride 落账后回调）→ 本方法。载荷结构类型与
+   * ports.RunOverrideProjection 同构（orchestration → execution 经回调参数传递，
+   * 不反向 import）。
+   */
+  applyRunOverrideProjection(
+    runId: string,
+    override: { provider: string; modelId: string; thinkingLevel?: string; ts: number },
+  ): void {
+    const projected: ModelOverride = {
+      ref: { provider: override.provider, modelId: override.modelId },
+      ...(override.thinkingLevel !== undefined ? { thinkingLevel: override.thinkingLevel } : {}),
+      setAt: override.ts,
+    };
+    this.modelService.setModelOverride(runId, projected);
+    this.overrideRebuildNegativeCache.delete(runId);
   }
 
   /**

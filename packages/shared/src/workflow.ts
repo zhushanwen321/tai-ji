@@ -93,6 +93,14 @@ export interface WorkflowAgentCall {
    */
   lastRetry?: { attempt: number; backoffMs: number; reason: string }
   /**
+   * 成员 subagent record id（详情载荷增强按 (parentRunId, stepIndex) 圈定权威成员后
+   * 透出，源 = SubagentRecord.id——run 级模型切换聚合应答的成员标识与其同源：前端
+   * 成员回执显示态键 = subagentMemberDisplayKey(runId, memberRecordId)，写端聚合应答
+   * member.runId 与读端本字段对齐（两值域都是成员 record id）。缺席 = 该 call 无已
+   * 创建成员 record 或载荷未经详情增强通道（live 帧投影）。
+   */
+  memberRecordId?: string
+  /**
    * 用户覆盖状态（subagent-model-switch §9 transport 行，run 详情侧按成员标识逐成员
    * 携带——run 级覆盖意图经 runtime 详情载荷组装分发到各成员条目；缺席 = 该 run 无
    * 用户覆盖。与 SubagentRecord.modelOverride 同构，语义见该字段注释）。

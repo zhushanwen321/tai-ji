@@ -133,11 +133,7 @@ function makeHarness(opts: {
 
   const deps: ModelSwitchDeps = {
     getModelService: () => service,
-    markModelOverride: (rec, override) => {
-      if (!store.markModelOverride(rec, override)) {
-        throw new Error(`markModelOverride rejected (record not in store): ${rec.id}`);
-      }
-    },
+    markModelOverride: (rec, override) => store.markModelOverride(rec, override),
     resolveEnginePort: () => engineStub as never,
     engineSetModel:
       opts.engineSetModel ??
@@ -297,6 +293,26 @@ describe("model-switch — 分型处置表（§7.2 七行）", () => {
     // 持久化帧已落（下一轮 spawn 现取目录即可用的机制依据）。
     const events = await createRecordEventStream(h.recordsDir).scan(h.record.id);
     expect(events.filter((e) => e.type === "record-model-override")).toHaveLength(1);
+  });
+
+  it("落账返回值门（dmg-r1-10）：record 非内存实例（落账 false）→ 内存记账表同步跳过（无双介质劈叉），应答形态不变", async () => {
+    const h = makeHarness({
+      registry: makeRegistry([makeModel({ id: "glm-5.3-flash" })]),
+      capabilitiesSetModel: "native",
+      engineSetModel: () => Promise.reject(engineError("engine_state_readback_failed", "readback failed")),
+    });
+    live.value = true;
+    // 同 id 重建对象（gateway manifest 兜底链可能产出的形态——store.getMutable 同 id 但非同实例）
+    const ghost: typeof h.record = { ...h.record };
+    const reply = await setModel(h.deps, { domain: "chat", record: ghost }, TARGET_MODEL);
+    // 应答形态不变（错误应答照常——生效状态未知如实报，不因落账跳过虚构校验失败）
+    expect(reply).toMatchObject({ scope: "chat", reply: { kind: "error", errorCode: "engine_state_readback_failed" } });
+    // 双介质劈叉消除：内存记账表未写（持久化两面 store 原语内跳过——重建对象 record 字段本就不落内存表）
+    expect(h.service.getModelOverride(ghost.id)).toBeUndefined();
+    expect(ghost.modelOverride).toBeUndefined();
+    // 事件帧同样未写（store 原语 false 两面都跳过）
+    const events = await createRecordEventStream(h.recordsDir).scan(ghost.id);
+    expect(events.filter((e) => e.type === "record-model-override")).toHaveLength(0);
   });
 
   it("行 4 run 级聚合个别成员转发失败 → run 级意图恒写（内存表 + U4a 载体桩）", async () => {

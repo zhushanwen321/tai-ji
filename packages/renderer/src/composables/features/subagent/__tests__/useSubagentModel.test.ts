@@ -229,14 +229,17 @@ describe('useSubagentModel — 回执写状态（禁乐观写）', () => {
     expect(displayOf('sa-2')).toBeUndefined()
   })
 
-  it('run 级聚合：switched 成员写生效值、not-active 写覆盖意图、失败名单成员不写并 toast 分项', async () => {
+  it('run 级聚合：switched 成员写生效值、not-active 写覆盖意图、失败名单按记账分型分流写 badge 并 toast 分项', async () => {
     apiMocks.setModel.mockResolvedValue({
       members: [
         { runId: 'sa-a', state: 'switched', effectiveModel: { provider: 'p', modelId: 'm-a' }, effectiveThinkingLevel: 'high' },
         { runId: 'sa-b', state: 'not-active' },
         { runId: 'sa-c', state: 'not-applicable' },
       ],
-      failures: [{ runId: 'sa-d', reason: 'engine_state_readback_failed' }],
+      failures: [
+        { runId: 'sa-d', reason: 'engine_state_readback_failed' },
+        { runId: 'sa-e', reason: 'engine_credential_missing' },
+      ],
       summary: '部分成员已切换',
     })
     const { setSubagentModel, memberDisplayOf } = useSubagentModel()
@@ -251,11 +254,37 @@ describe('useSubagentModel — 回执写状态（禁乐观写）', () => {
     // not-active / not-applicable：覆盖意图（记账路径，重派生效）
     expect(memberDisplayOf('wf-1', 'sa-b')).toEqual({ overrideIntent: 'p/target' })
     expect(memberDisplayOf('wf-1', 'sa-c')).toEqual({ overrideIntent: 'p/target' })
-    // 失败名单成员：不写显示态（生效值未知），toast 分项呈现（成员标识 + 失败分型）
-    expect(memberDisplayOf('wf-1', 'sa-d')).toBeUndefined()
-    expect(toastMocks.error).toHaveBeenCalledTimes(1)
+    // 失败名单「记账已写」分型（快照/回读失败——宿主已写 run 级意图，重派吃覆盖）：
+    // 生效值不虚构（无 effectiveModel），overrideIntent 亮 badge（与 chat 域同权责）
+    expect(memberDisplayOf('wf-1', 'sa-d')).toEqual({ overrideIntent: 'p/target' })
+    // 失败名单未写分型（credential_missing = 切换整体未生效）：不亮 badge
+    expect(memberDisplayOf('wf-1', 'sa-e')).toBeUndefined()
+    // toast 分项呈现照常（错误事实必须可见，显示态补写不吞错误）
+    expect(toastMocks.error).toHaveBeenCalledTimes(2)
     expect(toastMocks.error.mock.calls[0]?.[0]).toContain('sa-d')
     expect(toastMocks.error.mock.calls[0]?.[0]).toContain('engine_state_readback_failed')
+  })
+
+  it('跨端键对齐：成员显示键域 = 成员 record id（聚合应答 member.runId ≡ 面板 agentCall.memberRecordId），session id / taskIndex 不在键域', async () => {
+    apiMocks.setModel.mockResolvedValue({
+      members: [
+        { runId: 'rec-member-1', state: 'switched', effectiveModel: { provider: 'p', modelId: 'm-a' } },
+      ],
+      failures: [],
+      summary: '已切换',
+    })
+    const { setSubagentModel, memberDisplayOf } = useSubagentModel()
+
+    await setSubagentModel({ runId: 'wf-1', provider: 'p', modelId: 'target' })
+
+    // 面板读取键构造（WorkflowTab.runModelDisplay 同款）：agentCall.memberRecordId =
+    // 详情载荷透出的成员 record id（workflow-record-projection 圈定权威成员透出），与
+    // 聚合应答 member.runId 同值域——同键命中即两端口径对齐
+    expect(memberDisplayOf('wf-1', 'rec-member-1')).toEqual({ effectiveModel: 'p/m-a' })
+    // 键域反向锁：pi session uuidv7（修复前的误用读键）与 taskIndex 数字串都读不到——
+    // 成员键漂移回旧通道时此处红
+    expect(memberDisplayOf('wf-1', '018f6a2b-7c1d-7ef3-9abc-def012345678')).toBeUndefined()
+    expect(memberDisplayOf('wf-1', '0')).toBeUndefined()
   })
 })
 

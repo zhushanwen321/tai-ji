@@ -208,6 +208,10 @@ export type {
   ModelSwitchTarget,
   SetModelReply,
 } from "./execution/service/model-switch.ts";
+// [subagent-model-switch] 处置表「写记账后回错误应答」分型词表（值导出）：runtime 对账
+// 测试消费（与 shared SUBAGENT_SET_MODEL_ACCOUNTED_ERROR_CODES 值级等值断言——词表
+// 扩位漏跟即红），语义见 service/model-switch.ts 常量注释。
+export { ACCOUNTED_SET_MODEL_ERROR_CODES } from "./execution/service/model-switch.ts";
 // [subagent-model-switch] 模型切换 run 级聚合契约（u-foundation 定形，U5 实装）。
 export type {
   RunModelSwitchAggregateInput,
