@@ -93,6 +93,7 @@ import {
   type ZcodeTerminalPayload,
 } from "./parser.ts";
 import {
+  defaultPersonalProviderConfigPath,
   defaultV2ConfigPath,
   listZcodeModels,
   locateZcodeBuiltinCatalog,
@@ -643,6 +644,9 @@ export class ZcodeEngine implements EnginePort {
     const env = buildAppServerEnv(this.deps.processEnv ?? process.env);
     env.ZCODE_ENG_CLI_PATH = cliPath;
     env.ZCODE_ENG_V2_CONFIG = this.deps.sources?.v2ConfigPath ?? defaultV2ConfigPath();
+    // [D3 顺带发现 6] wrapper 补注入源 = 引擎侧模型校验源同锚（ZcodeSourcePaths
+    // personalProviderConfigPath 单源——两处读同一文件，解析源统一在该锚上收口）
+    env.ZCODE_ENG_PROVIDER_CONFIG = this.deps.sources?.personalProviderConfigPath ?? defaultPersonalProviderConfigPath();
     // 会话库隔离（设计 zcode-session-db-isolation.md D1/E4）：覆盖式写入隔离库路径，
     // 忽略宿主继承值（用户 shell 的同名 env 不得把我们重定向到别处；配置分层
     // Cli > Env > User 保证 env 压过用户 config 的 storage.sessionDbPath）。同时显式
