@@ -240,10 +240,8 @@ export class RelayTee {
         if (t === 'message.text_delta') {
           const delta = (ev.message.payload as { delta?: unknown }).delta
           if (typeof delta !== 'string') return
-          state.textAccumulated += delta
-          // B2：内容改走增量 chunk（delta 原样转发 + 双序号标识拼合位置）。deltaSeq 先取
-          // 后进（publish 抛错走单事件隔离丢弃时序号不虚占）。R 路径不再产生携带 lines
-          // 全文的 stream_delta（该形态余留 W 路径产生端）。
+          // B2：内容改走增量 chunk（delta 原样转发 + 双序号标识拼合位置）。R 路径不再产生
+          // 携带 lines 全文的 stream_delta（该形态余留 W 路径产生端）。
           this.opts.publish(this.opts.mainSessionId, {
             type: 'subagent.stream_chunk',
             payload: {
@@ -254,6 +252,10 @@ export class RelayTee {
               delta,
             },
           })
+          // publish 成功后才进累积与序号：保持不变量「textAccumulated = delta
+          // 0..deltaSeq-1 拼接」——publish 抛错走 W1 单事件隔离丢弃时两者同步不含本条，
+          // getStreamState 拉取回放不失配（孤儿 delta 不在 lines 里重复显示）。
+          state.textAccumulated += delta
           state.deltaSeq += 1
           return
         }

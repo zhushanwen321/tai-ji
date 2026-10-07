@@ -146,6 +146,30 @@ describe('RelayTee stream_chunk 增量契约（B2 subagent-stream-chunk §4.2）
     ])
   })
 
+  it('text_delta chunk publish 抛错：单事件隔离丢弃，textAccumulated 与 deltaSeq 保持配对（拉取回放无孤儿 delta）', () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const { tee, publish, published } = createTee()
+    feedLines(tee, [
+      { type: 'message_start' },
+      { type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'a' } },
+    ])
+    // 中间一条 chunk publish 抛错（bus 故障形态，W1 隔离丢弃该事件）
+    publish.mockImplementationOnce(() => {
+      throw new Error('bus down')
+    })
+    feedLines(tee, [{ type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'ORPHAN' } }])
+    // 失败不连坐：后续 delta 照常发布，deltaSeq 连续（未被失败事件虚占）
+    feedLines(tee, [{ type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'b' } }])
+    const chunks = chunkFrames(published)
+    expect(chunks.map((c) => [c.msgSeq, c.deltaSeq, c.delta])).toEqual([
+      [1, 0, 'a'],
+      [1, 1, 'b'],
+    ])
+    // 配对不变量：lines 只含成功发布 delta 的拼接（不含被丢弃的 'ORPHAN'），
+    // lastDeltaSeq 与已发布条数一致——getStreamState 拉取回放不重复显示孤儿 delta
+    expect(tee.getStreamState()).toEqual({ found: true, msgSeq: 1, lastDeltaSeq: 1, lines: ['ab'] })
+  })
+
   it('user/toolResult message_end 不发清除帧、user message_start 不递进 msgSeq（msgSeq 只数 assistant 消息）', () => {
     const { tee, published } = createTee()
     feedLines(tee, [
