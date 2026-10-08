@@ -1,12 +1,13 @@
 <!--
-  GenStatsSpeedCard —— TOKEN 速度浮层的**纯内容卡**（W3a 拆分：原 GenStatsTriggers 的速度
-  HoverCardContent 内容原样迁移，head / 四行聚合 / 口径说明与 data-testid 不变）。
+  GenStatsSpeedCard —— TOKEN 速度浮层的**纯内容卡**：head / 四行聚合 / 口径说明，data-testid
+  随卡承载。
 
-  拆分动机：指标聚合页（ComposerMetricsAggregate）要把速度卡与容量卡、缓存卡纵向拼进同一浮层，
-  沿用「触发器包内容」会嵌套 HoverCard 且重复渲染——故内容独立成卡，原触发器与聚合页共挂本卡。
+  内容独立成卡的动机：指标聚合页（ComposerMetricsAggregate）把容量、TTFT、速度、缓存四张卡
+  纵向拼进同一 HoverCard 浮层——入口各自包内容会嵌套 HoverCard 且重复渲染。本卡唯一挂载方
+  = ComposerMetricsAggregate。
 
-  契约：props = { sessionId?, modelId? }（受控，语义与原触发器一致），无 emits。
-  数据纯读：本卡自持 useGenStats 分区实例（useSessionScopedState 共享分区，与触发器同源收敛）。
+  契约：props = { sessionId?, modelId? }（受控），无 emits。
+  数据纯读：本卡自持 useGenStats 分区实例（useSessionScopedState 共享分区，与聚合页同源）。
 -->
 <template>
   <!-- head -->

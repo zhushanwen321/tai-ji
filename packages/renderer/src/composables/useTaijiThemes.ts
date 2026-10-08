@@ -15,13 +15,13 @@
  * - 朱印（亮·宣纸朱砂）  → theme=light,   preset='zhuyin'
  *
  * themeSwatch 返回该主题的 4 个代表性色块（accent / fg / surface / bg），用于主题列表行的预览。
- * 取值来源：与 useTheme.ts THEMES 常量逐字对齐（.tmp/v6 真值源），不读运行时 CSS 变量（避免
- * 被页面内临时覆盖的 token 污染预览）。
+ * 取值来源：与 style.css :root（令牌值现行权威源，docs/DESIGN.md §10 优先级链顶端）对齐，
+ * 不读运行时 CSS 变量（避免被页面内临时覆盖的 token 污染预览）。
  */
 import type { SystemSettings } from '@taiji/core'
 
 export interface TaijiTheme {
-  /** 显示名（含性质后缀，与 demo useTheme.ts THEMES 的 key 一致） */
+  /** 显示名（含性质后缀：主题名 + 亮暗 · 色相特征 · 默认标记） */
   label: string
   /** 短名（nav/badge 用，不含括号后缀） */
   shortName: string
@@ -35,7 +35,7 @@ export interface TaijiTheme {
   swatch: [string, string, string, string]
 }
 
-/** 6 太极主题（顺序：3 暗 + 3 亮，与 demo themeEntries 一致） */
+/** 6 太极主题（顺序：3 暗 + 3 亮） */
 export const TAIJI_THEMES: TaijiTheme[] = [
   {
     label: '太极 · 玄（暗 · 弱蓝灰 · 默认）',

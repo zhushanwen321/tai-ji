@@ -2,7 +2,6 @@
 /**
  * SettingRow —— v6 设置行原语（label + 12px neutral-mid desc + 右侧 control slot）。
  * 用于 SystemPage 等设置页内的「左标签 + 右控件」行范式。
- * 与 demo .tmp/v6/src/components/settings/SettingRow.vue 范式对齐。
  */
 defineProps<{
   label: string

@@ -1,6 +1,6 @@
 # neutral 五档令牌去色相偏（D4 移出项，品牌一致性清洁项）
 
-状态：待裁决（移出 ui-signal-density 范围——收益在感知阈以下，三问答不出「不做会怎样」；可与下一次令牌改动合并做）。登记来源：ui-signal-density 设计 D4「本轮移出本次范围」
+状态：部分解决——桌面侧已由 ui-optimize-unified 决策 2 落地（五档重校档距 + 纯中性，非本文件原候选值：本文件原「保持亮度仅去色相」方案被该决策的「重校档距 + 纯中性」取代，桌面终态见 `packages/renderer/src/style.css` :root）；mobile 侧残留旧值待裁决，登记见 [mobile-token-mirror-divergence.md](mobile-token-mirror-divergence.md)。登记来源：ui-signal-density 设计 D4「本轮移出本次范围」
 
 ## 背景
 
@@ -13,6 +13,8 @@
 | `--neutral-dim` | `#74747a` | `#757575` |
 | `--neutral-faint` | `#46464c` | `#474747` |
 | `--neutral-ico` | `#86868c` | `#878787` |
+
+> 注：桌面侧终态已由 ui-optimize-unified 决策 2 落地（重校档距 + 纯中性，**非本表候选值**），现行值见 `packages/renderer/src/style.css` :root neutral 段；本表为历史候选记录。mobile 镜像残留见 [mobile-token-mirror-divergence.md](mobile-token-mirror-divergence.md)。
 
 ## 移出理由（设计原文口径）
 

@@ -59,7 +59,7 @@ const CLUSTER_RIGHT_SELECTOR = '[data-composer-cluster="right"]'
 let warnedNoResizeObserver = false
 
 /**
- * 展开态分组容器类（未聚合时的子组容器：模型+思考、指标三触发器平铺）。
+ * 展开态分组容器类（模型+思考组的展开态容器：模型名完整展示 + 思考档位按钮平铺）。
  * [HISTORICAL] 原有 MERGED_CHIP_CLASS（合流单 chip）/ MODEL_MERGED_CHIP_CLASS（88px 截断）/
  * MODEL_SIMPLIFIED_CHIP_CLASS（56px 截断）/ MERGED_CHIP_SEPARATOR_CLASS（发丝分隔）已随
  * tier 合流态与截断态删除——模型名非聚合态恒完整展示，分组视觉仅剩本展开态容器。

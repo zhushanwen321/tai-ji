@@ -1,8 +1,9 @@
 <!--
-  GenStatsCacheCard —— 缓存命中率浮层的**纯内容卡**（W3a 拆分：原 GenStatsTriggers 的缓存
-  HoverCardContent 内容原样迁移，head / 两行聚合 / bar / 归因说明行与 data-testid 不变）。
+  GenStatsCacheCard —— 缓存命中率浮层的**纯内容卡**：head / 两行聚合 / bar / 归因说明行，
+  data-testid 随卡承载。
 
-  拆分动机与 GenStatsSpeedCard 相同：指标聚合页直拼本卡，原触发器也改挂本卡，删重复渲染。
+  内容独立成卡的动机与 GenStatsSpeedCard 相同：指标聚合页（ComposerMetricsAggregate）纵向
+  直拼本卡，避免嵌套 HoverCard 与重复渲染；本卡唯一挂载方 = ComposerMetricsAggregate。
 
   归因降噪（2026-09-19 D-A）：帧带 cacheRatio.currentMiss（cold-start / idle-expiry /
   context-rewrite）时，本次行显成因文案（中性色，非故障）+ 浮层说明行；未知成因的 0% 仍走

@@ -55,7 +55,7 @@ components:
 > - **值真值 = [`packages/renderer/src/style.css`](../packages/renderer/src/style.css) 的 `:root` tokens**（运行时唯一源）。本文件 §4 token 表与它挂值相等检查（pre-commit 检查）。
 > - **本文件（docs/DESIGN.md）= 视觉范式权威 + token 登记对照 + AI / impeccable 视觉上下文入口**。范式冲突以本文件为准；值冲突以 style.css 为准，并回修本文件。
 > - 原 `docs/page-design/` 目录整体退役（2026-09-13）：v6-master-spec.md 与 traffic-light-layout.md 的有价值内容已并入本文件，其余文件（v6-tokens.css / v6-spec-*.html / v6-spec-base.css / 各 demo html 等）已删除，git 可追溯。
-> - 设计演变史见 [docs/design-evolution.md](./design-evolution.md)；demo 活验证在 `.tmp/v6/`。
+> - 设计演变史见 [docs/design-evolution.md](./design-evolution.md)。
 
 ## §1 背景
 
@@ -98,7 +98,7 @@ v6 重构的三个缘由：
 
 | 维度 | 基准 |
 |---|---|
-| 视觉 | demo（`.tmp/v6/`）目标态为 SSOT；三层背景肉眼可辨；impeccable AI slop test 通过；正文全部过 WCAG AA |
+| 视觉 | 令牌/视觉唯一权威 = style.css :root 与本文件 §4 挂值表（CSS_TOKEN_SSOT_CHECK 守护）；三层背景肉眼可辨；impeccable AI slop test 通过；正文全部过 WCAG AA |
 | 架构 | runtime 三层契约名实相符；shared 无运行期实现；IPC 仅 OS 特权；renderer stores 零互相 import |
 | 测试 | coverage 启用进 CI；E2E 双轨进 CI；对话流/session 生命周期/设置持久化有 E2E 覆盖 |
 | 扩展 | builtin tasks plugin 跑通；core 零 tool name 硬编码特判 |
@@ -154,7 +154,7 @@ v6 审查发现「被选中」出现三种视觉语言，统一为二分：
 
 ### 3.5 实践原则（2026-08-02 demo 迭代记录在案）
 
-> 以下 8 条来自 `.tmp/v6/` demo 多轮迭代的实际教训，是 §3.1 视觉五原则在具体场景的展开。涉及状态指示的已在 §5.6 / §9 对齐。
+> 以下 8 条来自设计原型阶段多轮迭代的实际教训，是 §3.1 视觉五原则在具体场景的展开。涉及状态指示的已在 §5.6 / §9 对齐。
 
 #### 3.5.1 Token 语义归位，不要「就近借色」
 
@@ -405,7 +405,7 @@ demo 引入完整多主题系统（spec 无，demo 重大扩展）。机制：�
 
 ## §5 Design System（组件范式）
 
-> **真相源**：`.tmp/v6/src/styles/base.css`（SSOT 全局范式）+ demo 组件实现。
+> **真相源**：本节范式登记 + 组件实装 = @taiji/ui（packages/ui）；令牌值以 style.css :root 为准（§10 优先级链）。
 
 ### 5.1 `.btn` SSOT（base + 4 variant × 尺寸 + focus + disabled + svg）
 
@@ -884,7 +884,7 @@ demo 用 `@keyframes shimmer`（1.4s ease-in-out infinite，linear-gradient 扫�
 ```
 style.css（packages/renderer/src/style.css :root，值真值，运行时唯一源）
   > 本文件（docs/DESIGN.md，范式与 token 登记对照）
-  > .tmp/v6/ demo（组件实现活验证）
+  > @taiji/ui（组件实装）
 ```
 
 **冲突处理**：范式冲突以本文件为准；值冲突以 style.css 为准并回修本文件（§4 挂值相等检查，pre-commit 检查）。
@@ -896,36 +896,11 @@ style.css（packages/renderer/src/style.css :root，值真值，运行时唯一�
 | v6-master-spec.md（§1-§9 + 附录 A/B） | 并入本文件 |
 | traffic-light-layout.md | 并入本文件 §11 |
 | v6-tokens.css / v6-spec-*.html / v6-spec-base.css / page-design 各 demo html / 过程文档（review/fix-plan 等） | 已删除（2026-09-13 退役，git 可追溯；裁决收敛进 §9，UI 演变叙事见 design-evolution.md） |
-| `.tmp/v6/` demo | 保留为组件实现活验证 |
+| `.tmp/v6/` demo | gitignored 原型临时产物，不入库不保留；组件实装权威 = @taiji/ui |
 
 ---
 
-## 附录 A：demo 项目结构（`.tmp/v6/`）
-
-完整 Vue 3 可运行参考实现，27 张截图覆盖全部视图。技术栈：原生 CSS + tokens + 迷你组件（刻意不绑 Tailwind/@taiji/ui，真实实施按本文档 §8.4 阶段 C 映射到项目技术栈）。
-
-```
-.tmp/v6/src/
-├─ styles/tokens.css（token SSOT，太极玄定稿）
-├─ styles/base.css（.btn SSOT + 全局重置 + keyframes）
-├─ views/ShellView.vue（三栏布局 + 三层明度 + 折叠态 + landing 条件渲染）
-├─ composables/useStore.ts（状态管理 + landingMode + projects 增删）
-├─ composables/useTheme.ts（6 太极主题定义 + applyTheme 切换机制，全局共享）
-├─ mock/*.ts（9 个 mock 数据文件）
-├─ components/
-│  ├─ shell/（PanelHeader/SplitterHandle/TrafficLight/AppNavControls）
-│  ├─ sidebar/（Sidebar/SegmentedTab/SessionList/ProjectSwitcher[增删project]/PluginPanel/FileTreeView/...）
-│  ├─ chat/（MessageStream/TurnRail[滚动条二合一+折展toggle]/LandingView[landing页]/ToolBlock/ThinkingBlock/ChangeSetCard/...）
-│  ├─ drawer/（SideDrawer/GitPanel/DiffView/DetailPane/TerminalView/BrowserPane/...）
-│  ├─ settings/（SettingsOverlay/GroupCard/ProviderPage/SystemPage[6太极主题]/TokenDebugPage/...11 page）
-│  ├─ overlays/（SearchModal/FormOverlay/ConfirmDialog）
-│  ├─ composer/（Composer[variant双形态+landing meta-row]/CommandPopover/QueueBubble/QuickComposer）
-│  ├─ common/（预留共享控件层，当前为空；UiInput/UiSwitch/SettingRow/SettingsNavItem 等暂在 settings/ 下）
-│  └─ icons/（TaijiLogo 图标组件）
-└─ SETTINGS-DESIGN-CONTEXT.md（设置页实现基准）
-```
-
-## 附录 B：impeccable AI slop 检测清单
+## 附录 A：impeccable AI slop 检测清单
 
 实施时逐项检查：
 - [ ] 产品 UI 无 uppercase tracking-wider 装饰文字

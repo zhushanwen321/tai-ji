@@ -5,10 +5,9 @@
 /* ============================================================
    taiji Design Tokens · v6 太极（2026-08-02 定稿反写）
    ────────────────────────────────────────────────────────────
-   SSOT: docs/DESIGN.md §4
-        + .tmp/v6/src/styles/tokens.css（token 真值源，逐字对齐）
-        + .tmp/v6/src/composables/useTheme.ts（6 太极主题 entry）
-        + .tmp/v6/src/styles/base.css（全局 reset / keyframes / btn 原语）
+   令牌值唯一权威 = 本文件 :root；登记对照表 = docs/DESIGN.md §4
+   （pre-commit CSS_TOKEN_SSOT_CHECK 挂值相等检查）；
+   6 太极主题 entry = useTaijiThemes.ts TAIJI_THEMES。
 
    主题系统（v6 太极，3 暗 + 3 亮）：
      暗：玄（:root 默认 · 纯灰）/ 黛蓝 / 暖墨   —— data-theme-preset 覆盖

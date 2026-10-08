@@ -1,17 +1,17 @@
 <!--
-  ComposerMetricsAggregate —— composer 底栏「指标」聚合入口（W3a 三步聚合：左簇 → 指标 → 模型+思考，
-  累计退化；指标档把 容量 + TTFT + 速度 + 缓存 四个数值触发器收为单图标按钮）。
+  ComposerMetricsAggregate —— composer 底栏「指标」聚合入口（三步聚合序：左簇 → 指标 → 模型+思考，
+  累计退化；容量 + TTFT + 速度 + 缓存 四项指标收为单图标按钮）。
 
   形态硬约束（S1–S7）：
   - 聚合按钮**单一图标**（Gauge），禁多 icon 重叠；
   - 指标聚合 = **hover** 弹指标聚合页（HoverCard）——与模型聚合的 click 语义区分；
   - 内容 = 四张纯内容卡纵向拼装（ContextCapacityCard + GenStatsTtftCard + GenStatsSpeedCard
     + GenStatsCacheCard），卡间发丝分隔（token 工具类 h-px bg-border-strong 局部定义，不
-    import 接线层常量）；四卡共享 useGenStats / useContextUsage 分区，与原触发器同源收敛。
+    import 接线层常量）；四卡共享 useGenStats / useContextUsage 分区，数据同源。
 
   契约：props = { sessionId: string; modelId?: string }，无 emits。
-  quota 的 hover-enter 查询挂在本触发器上（与原容量触发器同语义——查询触发属「hover 指标 chip」
-  这一交互面；store 全局共享，与卡内展示实例同源收敛）。
+  quota 的 hover-enter 查询挂在 HoverCardTrigger 上——查询触发属「hover 指标入口」这一
+  交互面；store 全局共享，与卡内展示实例同源。
 -->
 <template>
   <HoverCard>

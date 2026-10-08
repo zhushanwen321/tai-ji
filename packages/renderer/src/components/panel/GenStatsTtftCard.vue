@@ -1,12 +1,12 @@
 <!--
-  GenStatsTtftCard —— TTFT 首字延迟浮层的**纯内容卡**（合并集成：dev-0.10.4 线 TTFT 触发器
-  的 HoverCardContent 内容原样迁出，head / 四行聚合（p50 口径）/ 口径说明与 data-testid 不变）。
+  GenStatsTtftCard —— TTFT 首字延迟浮层的**纯内容卡**：head / 四行聚合（p50 口径）/ 口径
+  说明，data-testid 随卡承载。
 
-  拆分动机同 GenStatsSpeedCard：触发器与指标聚合页（ComposerMetricsAggregate）共挂本卡，
-  避免嵌套 HoverCard 与重复渲染（2026-09-19 D-A 拆卡先例）。
+  内容独立成卡的动机同 GenStatsSpeedCard：指标聚合页（ComposerMetricsAggregate）纵向直拼
+  本卡，避免嵌套 HoverCard 与重复渲染（2026-09-19 D-A 拆卡先例）。
 
-  契约：props = { sessionId?, modelId? }（受控，语义与原触发器一致），无 emits。
-  数据纯读：本卡自持 useGenStats 分区实例（useSessionScopedState 共享分区，与触发器同源收敛）。
+  契约：props = { sessionId?, modelId? }（受控），无 emits。
+  数据纯读：本卡自持 useGenStats 分区实例（useSessionScopedState 共享分区，与聚合页同源）。
 -->
 <template>
   <!-- head -->
