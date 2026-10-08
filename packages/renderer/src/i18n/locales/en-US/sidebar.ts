@@ -72,12 +72,21 @@ export default {
     // counts unfinished children (non-green: active / error / stopped / dead), hence "unfinished"
     // rather than "running".
     childCount: '{n} child session unfinished | {n} child sessions unfinished',
+    // N8 hover detail card field labels (branch / full directory; no message count — no such
+    // field on SessionSummary, zero new data channel)
+    detailBranch: 'Branch',
+    detailDirectory: 'Directory',
   },
   sessionList: {
     empty: 'No sessions',
     newSession: 'New session',
     newSessionInFolder: 'New session in this folder',
     deleteFolderConfirm: 'Delete all sessions in this folder?',
+    // N8 A/C dual mode (ui-optimize-unified decision 9): section header title + the mode names
+    // of the two-segment icon toggle (hover tooltip)
+    header: 'Recent',
+    modeFlat: 'Flat list',
+    modeGroup: 'Group by folder',
   },
   assignProjectFailed: 'Failed to assign to project: {msg}',
   forceQuitFailed: 'Failed to force quit: {msg}',

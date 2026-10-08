@@ -6,6 +6,13 @@
       - SessionItemActions：hover ghost 操作 + 归入项目菜单 + 删除两段确认 UI（confirming 经 v-model 提升）
     本组件只保留：对外 props/emit 契约、根 div 与确认态多路 reset 通道、ariaLabel 语义补回。
   -->
+  <!-- N8 hover 详情卡（ui-optimize-unified 决策 9）：Teleport fixed 全局浮层，不被侧栏
+       滚动容器裁剪；字段 = 分支 + 完整目录（无消息数——SessionSummary 无该字段，与零新数据
+       通道约束一致）。A/C 两种列表模式下同样生效（SessionItem 自承载）。
+       实现说明：不用 reka HoverCard 原语——其 Trigger/Anchor as-child 跨 SessionItemContextMenu
+       （多根组件）合并事件/ref 时 fallthrough 中断（实施期两个嵌套方向均实测断链：外层嵌套断
+       pointerenter、内层嵌套断 contextmenu），故触发事件直挂根 div + 受控显隐，卡片定位取行
+       rect（右弹 + 视口右缘 clamp，无 reka flip 时的近似防溢出）。 -->
   <SessionItemContextMenu
     :session-id="session.id"
     :parent-agent-session-id="session.parentAgentSessionId"
@@ -25,6 +32,8 @@
       ]"
       :aria-label="ariaLabel"
       @click="emit('select', session.id)"
+      @pointerenter="onDetailEnter"
+      @pointerleave="onDetailLeave"
       @mouseleave="confirming = false"
     >
       <SessionItemDisplay :session="displaySession" :status="status" :child-count="childCount" />
@@ -38,6 +47,34 @@
       />
     </div>
   </SessionItemContextMenu>
+
+  <Teleport to="body">
+    <div
+      v-if="detailVisible"
+      data-testid="session-detail-card"
+      class="fixed z-[90] max-w-[320px] rounded-md border border-border-strong bg-bg-elevated p-2 text-neutral-fg shadow-2"
+      :style="detailStyle"
+    >
+      <div class="flex flex-col gap-1">
+        <div v-if="session.gitBranch" class="flex items-baseline gap-2">
+          <span class="shrink-0 text-[length:var(--text-3xs)] text-neutral-dim">
+            {{ t('sidebar.sessionItem.detailBranch') }}
+          </span>
+          <span class="min-w-0 break-all font-mono text-[length:var(--text-3xs)] text-neutral-mid">
+            {{ session.gitBranch }}
+          </span>
+        </div>
+        <div class="flex items-baseline gap-2">
+          <span class="shrink-0 text-[length:var(--text-3xs)] text-neutral-dim">
+            {{ t('sidebar.sessionItem.detailDirectory') }}
+          </span>
+          <span class="min-w-0 break-all font-mono text-[length:var(--text-3xs)] text-neutral-mid">
+            {{ session.cwd }}
+          </span>
+        </div>
+      </div>
+    </div>
+  </Teleport>
 </template>
 
 <script setup lang="ts">
@@ -120,6 +157,47 @@ const confirming = ref(false)
 
 /** 根元素引用（onClickOutside 目标） */
 const rootEl = ref<HTMLElement | null>(null)
+
+// ── N8 hover 详情卡（分支 + 完整目录）──
+
+/** 详情卡显示延迟（hover 交互惯例定时，防扫过列表逐行闪烁；产品功能定时，非时间平抑） */
+const DETAIL_HOVER_DELAY_MS = 700
+/** 右缘 clamp 预留（卡 max-w 320px + 视口边距 16px） */
+const DETAIL_CARD_MAX_W = 320
+const DETAIL_VIEWPORT_MARGIN = 16
+/** 卡与行水平间隙 / 视口最小边距（px） */
+const DETAIL_CARD_GAP_PX = 6
+const DETAIL_MIN_EDGE_PX = 6
+
+const detailVisible = ref(false)
+const detailStyle = ref<Record<string, string>>({})
+let detailTimer: number | undefined
+
+/** 行 hover 进入：延迟后取行 rect 右弹定位（视口右缘 clamp，超出改贴右缘）显示详情卡 */
+function onDetailEnter(): void {
+  detailTimer = window.setTimeout(() => {
+    const el = rootEl.value
+    if (!el) return
+    const rect = el.getBoundingClientRect()
+    const left = Math.min(
+      rect.right + DETAIL_CARD_GAP_PX,
+      window.innerWidth - DETAIL_CARD_MAX_W - DETAIL_VIEWPORT_MARGIN,
+    )
+    detailStyle.value = {
+      left: `${Math.max(DETAIL_MIN_EDGE_PX, left)}px`,
+      top: `${Math.max(DETAIL_MIN_EDGE_PX, rect.top)}px`,
+    }
+    detailVisible.value = true
+  }, DETAIL_HOVER_DELAY_MS)
+}
+
+/** 行 hover 离开：取消未触发的显示定时 + 收卡 */
+function onDetailLeave(): void {
+  window.clearTimeout(detailTimer)
+  detailVisible.value = false
+}
+
+onBeforeUnmount(() => window.clearTimeout(detailTimer))
 
 /** 失焦自动重置：切到其它 session（active → false）时清掉残留确认态 */
 watch(

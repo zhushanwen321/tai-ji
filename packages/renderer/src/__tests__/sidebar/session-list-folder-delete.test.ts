@@ -52,6 +52,9 @@ function findFolderDeleteButton(wrapper: ReturnType<typeof mountList>) {
 
 beforeEach(() => {
   setActivePinia(createPinia())
+  // N8 A/C 双模式改造后目录操作归 C 分组模式组头承载（A 平铺无组头）——本文件语义即
+  // C 模式组头行为，预置分组模式（与组件 localStorage 持久化键一致）
+  localStorage.setItem('taiji:sidebar-session-mode', 'groups')
 })
 
 describe('SessionList folder 删除按钮首屏渲染', () => {
@@ -128,8 +131,8 @@ describe('SessionList folder 删除两段式确认（W2TC5）', () => {
     expect(findFolderDeleteButton(wrapper)!.attributes('title')).toBe('确认删除此文件夹下所有会话？')
 
     // mouseleave 绑定在 ml-auto 容器 div（包裹 Button），对其触发 mouseleave
-    // 容器含 ml-auto class
-    const container = wrapper.find('.ml-auto')
+    // N8 双模式后模板另有区头开关容器（同为 .ml-auto），用 .group-section 前缀精确锚定组头容器
+    const container = wrapper.find('.group-section .ml-auto')
     expect(container.exists()).toBe(true)
     await container.trigger('mouseleave')
 

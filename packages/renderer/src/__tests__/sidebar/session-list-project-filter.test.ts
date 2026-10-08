@@ -76,6 +76,8 @@ function setupProjects(activeId: string, names: Array<[string, string]>): Return
 beforeEach(() => {
   setActivePinia(createPinia())
   localStorage.removeItem('taiji:projects')
+  // N8 双模式：默认平铺下断言 label 可见性（组结构无关）；folder 按钮 describe 内单独预置分组模式
+  localStorage.removeItem('taiji:sidebar-session-mode')
 })
 
 describe('SessionList: 默认项目 = 未归类 + 孤儿聚合', () => {
@@ -148,6 +150,11 @@ describe('SessionList: 切换 project 列表实时变化（用户主诉求回归
 })
 
 describe('SessionList: folder 删除按钮随过滤状态隐藏（review MF-2 防护）', () => {
+  // N8 双模式：folder 删除按钮是 C 分组模式组头元素，本 describe 断言其渲染守卫，预置分组模式
+  beforeEach(() => {
+    localStorage.setItem('taiji:sidebar-session-mode', 'groups')
+  })
+
   it('命名 project 过滤态（/repo 可见 1/3）→ folder-delete-btn 不存在（防误删不可见 session）', () => {
     // 仅 /repo 单组：sa 归属 proj-a 可见，sb 未归类 / sc 归属 proj-b 被过滤 → visible(1) < total(3)。
     // 不能用默认 makeGroups（其 /repo2 组 sd 归属 proj-a 全量可见会渲染按钮，污染计数断言）。

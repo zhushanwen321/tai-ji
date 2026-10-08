@@ -1,15 +1,64 @@
 <template>
   <!--
     展示组件 · 会话列表（子视图 A，draft-five-states 卡 A/D）。
-    按 cwd 分组渲染（D7：对齐后端 SessionGroup[]）—— 每组一个标题（cwd 末段）+ 组内 SessionItem 列表。
+    N8 A/C 双模式（ui-optimize-unified 决策 9）：A 平铺单行（默认）/ C 目录分组折叠，
+    24px 区头行承载「最近会话」标题 + 会话计数 + 双段图标开关，选中模式持久化 localStorage。
+    两种模式共用同一排序（runtime 组序，sessionsInRuntimeGroupOrder SSOT，客户端零重排）
+    与同一 activeId 选中态；hover 详情卡（分支/完整目录）由 SessionItem 自承载，两模式同样生效。
     【D14 语义修正 2026-08-04】按 activeProject 过滤 session（session.projectId，cwd 只是展示聚合）：
     命名 project → 只显示归属它的 session（同 cwd 组内可混合不同归属，逐 session 过滤）；
     默认项目 → 未归类（无 projectId）+ 孤儿（归属的 project 已删除）聚合。
     ScrollArea 包裹；空态（D，session 数=0）显示极淡「暂无会话」占位。
     v-model 语义用 activeId（单向：子→父 select）。
   -->
-  <ScrollArea class="session-list h-full">
+  <div class="session-list flex h-full min-h-0 flex-col">
+    <!-- 区头（N8 开关落点，24px）：现状列表无区头行，此为最小可发现落点。
+         固定于 ScrollArea 外（不随列表滚动），C 模式组头 sticky 贴 ScrollArea 顶、不重叠。 -->
+    <div class="flex h-6 shrink-0 items-center gap-1.5 pl-2 pr-1" data-testid="session-list-header">
+      <span class="truncate text-[length:var(--text-3xs)] font-medium text-neutral-dim">
+        {{ t('sidebar.sessionList.header') }}
+      </span>
+      <span class="font-mono text-[length:var(--text-3xs)] text-neutral-dim opacity-60">{{ totalCount }}</span>
+      <!-- A/C 双段图标开关：选中态对齐 SegmentedTab 形态（bg-bg-elevated 浮起 + fg 字），
+           小型化嵌入 24px 区头。title 承载模式名（无 label 文字，demo 悬停提示范式）。 -->
+      <div class="ml-auto flex items-center gap-0.5">
+        <Button
+          variant="ghost"
+          size="icon"
+          data-testid="session-mode-flat"
+          class="h-4 w-5 rounded-sm p-0"
+          :class="mode === 'flat'
+            ? 'bg-bg-elevated text-neutral-fg hover:bg-bg-elevated hover:text-neutral-fg'
+            : 'text-neutral-mid hover:bg-transparent hover:text-neutral-fg'"
+          :title="t('sidebar.sessionList.modeFlat')"
+          :aria-pressed="mode === 'flat'"
+          @click="setMode('flat')"
+        >
+          <List class="size-[11px]" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          data-testid="session-mode-groups"
+          class="h-4 w-5 rounded-sm p-0"
+          :class="mode === 'groups'
+            ? 'bg-bg-elevated text-neutral-fg hover:bg-bg-elevated hover:text-neutral-fg'
+            : 'text-neutral-mid hover:bg-transparent hover:text-neutral-fg'"
+          :title="t('sidebar.sessionList.modeGroup')"
+          :aria-pressed="mode === 'groups'"
+          @click="setMode('groups')"
+        >
+          <Folder class="size-[11px]" />
+        </Button>
+      </div>
+    </div>
+
+    <ScrollArea class="min-h-0 flex-1">
     <div class="flex flex-col px-1">
+      <!-- C 目录分组模式：每组一个标题（cwd 末段）+ 组内 SessionItem 列表。
+           目录级操作（组内新建 / 目录删除）只落在此模式组头（N8：A 平铺不提供，
+           低频操作避免单行列表挂操作入口回归臃肿）。 -->
+      <template v-if="mode === 'groups'">
       <div
         v-for="g in visibleGroups"
         :key="g.cwd"
@@ -82,6 +131,27 @@
           @force-quit="emit('forceQuit', $event)"
         />
       </div>
+      </template>
+      <!-- A 平铺模式（N8 默认）：runtime 组序展平（sessionsInRuntimeGroupOrder SSOT，
+           与 C 模式共用同一排序，客户端零重排），无组头行——目录操作归 C 分组模式组头。 -->
+      <template v-else>
+        <SessionItem
+          v-for="s in flatSessions"
+          :key="s.id"
+          :session="s"
+          :active="s.id === activeId"
+          :status="statusOf(s.id)"
+          :child-count="childCountOf(s)"
+          :parent-label="parentLabelOf(s)"
+          @select="emit('select', $event)"
+          @rename="emit('rename', $event)"
+          @delete="emit('delete', $event)"
+          @set-project="emit('setProject', $event)"
+          @navigate-parent="emit('navigateParent', $event)"
+          @abort="emit('abort', $event)"
+          @force-quit="emit('forceQuit', $event)"
+        />
+      </template>
     </div>
     <div
       v-if="totalCount === 0"
@@ -99,14 +169,16 @@
       </Button>
     </div>
   </ScrollArea>
+  </div>
 </template>
 
 <script setup lang="ts">
 import type { SessionGroup, SessionSummary } from '@taiji/shared'
+import { sessionsInRuntimeGroupOrder } from '@taiji/core'
 import type { DerivedStatus } from '@/types'
 import { computed, onBeforeUnmount, provide, ref, watch, type Ref } from 'vue'
 import { useEventListener } from '@vueuse/core'
-import { Plus, Folder, Trash2, Check } from '@lucide/vue'
+import { Plus, Folder, Trash2, Check, List } from '@lucide/vue'
 import { useI18n } from 'vue-i18n'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -174,6 +246,14 @@ const visibleGroups = computed<SessionGroup[]>(() => {
 const totalCount = computed(() =>
   visibleGroups.value.reduce((sum, g) => sum + g.sessions.length, 0),
 )
+
+/**
+ * A 平铺模式的会话序：runtime 组序展平（A13/U20 排序唯一定义点 sessionsInRuntimeGroupOrder，
+ * 组间序 + 组内序都不重排）——与 C 分组模式共用同一权威序，客户端零重排；壳内禁止自写排序
+ * （core store.ts 排序谓词注释的显式约束）。输入取可见分组（visibleGroups），
+ * 项目过滤在两种模式下同样生效。
+ */
+const flatSessions = computed<SessionSummary[]>(() => sessionsInRuntimeGroupOrder(visibleGroups.value))
 
 /**
  * folder 删除可用性（review MF-2）：组内可见 session 数 < 该 cwd 全量 session 数时隐藏删除按钮。
@@ -269,6 +349,30 @@ function onFolderRemoveClick(cwd: string): void {
 function onFolderMouseLeave(cwd: string): void {
   if (folderConfirmingCwd.value === cwd) folderConfirmingCwd.value = null
 }
+
+// ── N8 A/C 双模式（ui-optimize-unified 决策 9）──
+
+/** 侧栏会话列表展示模式：A = 平铺单行（默认）/ C = 目录分组折叠 */
+type SidebarSessionMode = 'flat' | 'groups'
+
+/** 模式持久化键（与 useDrawerSplitWidth 的 `taiji:` 前缀 UI 偏好同通道、同 localStorage 直存形态） */
+const SESSION_MODE_KEY = 'taiji:sidebar-session-mode'
+
+/** 恢复持久化模式（缺失/非法值回退默认平铺——N8 默认 A） */
+function loadSidebarSessionMode(): SidebarSessionMode {
+  return localStorage.getItem(SESSION_MODE_KEY) === 'groups' ? 'groups' : 'flat'
+}
+
+const mode = ref<SidebarSessionMode>(loadSidebarSessionMode())
+
+/** 切换模式并持久化；离开 C 模式时复位组头删除确认态（组头随模式卸载，确认态不留残） */
+function setMode(next: SidebarSessionMode): void {
+  if (mode.value === next) return
+  mode.value = next
+  folderConfirmingCwd.value = null
+  localStorage.setItem(SESSION_MODE_KEY, next)
+}
+
 watch(escCount, () => {
   if (folderConfirmingCwd.value) folderConfirmingCwd.value = null
 })
