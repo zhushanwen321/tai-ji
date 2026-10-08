@@ -226,6 +226,24 @@
               <span v-for="(line, i) in toolDisplayLines" :key="i" class="whitespace-nowrap">{{ line }}</span>
             </span>
           </span>
+          <!-- N1（ui-optimize-unified 决策 8）：edit/write 行 = 工具名 + basename chip，
+               与 UserBubble 文件 badge 同语义（openFileDetail 双通道 + @click.stop 防行展开 +
+               title 完整路径 + ellipsis）；中性 chip 形态不打破工具行灰阶（决策 2） -->
+          <span
+            v-else-if="argPath && isFileWriteTool"
+            data-testid="tool-file-chip"
+            class="inline-flex min-w-0 max-w-full cursor-pointer items-center gap-1 rounded-sm border border-hairline px-1.5 py-px font-mono text-[length:var(--text-xs)] normal-case tracking-normal [font-weight:var(--fw-text)] text-neutral-mid transition-colors hover:border-border-strong hover:text-neutral-fg"
+            role="button"
+            tabindex="0"
+            :title="argPath"
+            @click.stop="openFileDetail(argPath)"
+            @keydown.enter.stop.prevent="openFileDetail(argPath)"
+            @keydown.space.stop.prevent="openFileDetail(argPath)"
+          >
+            <FileText class="size-3 shrink-0" />
+            <span class="min-w-0 truncate">{{ fileChipBasename }}</span>
+            <!-- 统计段预留位（决策 8：diff +N −N 数据不可得本波不做，登记 docs/todo 随 U19 执行） -->
+          </span>
           <span v-else-if="argPath" class="min-w-0 normal-case tracking-normal text-neutral-dim truncate" :class="{ invisible: toolExpanded && isBashTool }">· {{ shortenForHeader(argPath) }}</span>
           <!-- tool 块行尾槽：耗时 · 时刻（D2 悬停化：悬停该行 / 键盘焦点进入该行才显现） -->
           <span v-if="tool?.startTime" class="ml-auto shrink-0 flex items-center gap-1 font-mono text-[length:var(--text-2xs)] tabular-nums opacity-0 transition-opacity group-hover/tool:opacity-100 group-focus-within/tool:opacity-100" data-testid="tool-time-slot">
@@ -316,7 +334,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { AlertCircle, Check, Copy as CopyIcon } from '@lucide/vue'
+import { AlertCircle, Check, Copy as CopyIcon, FileText } from '@lucide/vue'
 import type { GuiComponent } from '@zhushanwen/extension-protocol'
 import { extractGui } from '@zhushanwen/extension-protocol'
 import type { MessageStatus, ToolCall } from '@taiji/shared'
@@ -338,9 +356,13 @@ import { useCopy } from './composables/useCopy'
 import { TAIL_WINDOW_LINES, useTailScroll } from './composables/useTailScroll'
 import { useThinkingCollapse } from './composables/useThinkingCollapse'
 import { useLiveToolDuration } from './composables/useLiveToolDuration'
+import { useChatViewDeps } from './chat-view-deps'
 
 const { t } = useI18n()
 const { copied, copy } = useCopy()
+// N1 文件 chip 的 drawer 双通道经壳依赖注入（与 UserBubble 同一契约面；inject 强契约，
+// 须在 provide ChatViewDepsKey 的容器内渲染）
+const chatViewDeps = useChatViewDeps()
 
 const props = defineProps<{
   type: 'thinking' | 'tool' | 'text' | 'agentgraph' | 'bash-group'
@@ -599,6 +621,24 @@ const argPath = computed(() => {
   if (Array.isArray(input.tasks)) return `${input.tasks.length} todos`
   return ''
 })
+
+/* ── N1（ui-optimize-unified 决策 8）：edit/write 工具行文件 basename chip ──
+ * edit/write = pi builtin 写文件工具（shared BUILTIN_TOOLS；block-icon 同族归并 tool-edit），
+ * header 摘要从完整路径 shortenForHeader 升级为 basename chip；read/bash 等其他工具行不变。 */
+const isFileWriteTool = computed(() => toolName.value === 'edit' || toolName.value === 'write')
+
+/** chip 显示名：路径末段（UserBubble file badge 的 fileBasename 同款口径，仅按 / 切分） */
+const fileChipBasename = computed(() => {
+  const parts = argPath.value.split('/')
+  return parts[parts.length - 1] ?? argPath.value
+})
+
+/** 点击 chip → 开 drawer detail tab（与 UserBubble badge 同语义双通道：selectFile 同 tick
+ * 注入 detail tab 实例 + openDrawer 切 tab 开抽屉，缺一不可——见壳层 useDetailPane 注释） */
+function openFileDetail(path: string): void {
+  chatViewDeps.onFileClick(path)
+  chatViewDeps.openDrawer('detail', { filePath: path })
+}
 
 
 /** 活动 block 态（chat-flow-polish P0-1）：running 块左缘 accent rail（inset box-shadow，

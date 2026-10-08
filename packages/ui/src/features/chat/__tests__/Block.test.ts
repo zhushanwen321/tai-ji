@@ -15,7 +15,7 @@ import { mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
 import { Block } from '@taiji/ui'
 import type { MessageStatus, ToolCall } from '@taiji/shared'
-import { MdStub, AnsiStub, GuiStub, makeToolCall, mountToolBlock } from './helpers'
+import { MdStub, AnsiStub, GuiStub, makeToolCall, mountToolBlock, mockChatProvide } from './helpers'
 
 function mountTextBlock(over: { streaming?: boolean; status?: MessageStatus; error?: string; content?: string; messageTimestamp?: number } = {}) {
   return mount(Block, {
@@ -25,7 +25,9 @@ function mountTextBlock(over: { streaming?: boolean; status?: MessageStatus; err
       ...over,
     },
     global: {
-      // 渲染 content 的 stub：wrapper.text() 才能断言正文/错误文本（stubs: true 会吞掉 content）
+      // Block 经 useChatViewDeps inject 消费壳依赖（N1 起，全块类型 setup 都执行 inject），
+      // 直接 mount 必须注入 mock deps；渲染 content 的 stub：wrapper.text() 才能断言正文/错误文本
+      provide: mockChatProvide(),
       stubs: {
         MarkdownRenderer: {
           props: ['content', 'variant'],
@@ -162,6 +164,92 @@ describe('D5 行类型定档: completed tool header 染 neutral-mid', () => {
   })
 })
 
+/* ── ui-optimize-unified N1（决策 8）：edit/write 工具行文件 basename chip ──
+ * - edit/write 行 = 工具名 + basename chip（title 完整路径、点击开 drawer detail、
+ *   @click.stop 防行展开、超长 CSS ellipsis）——与 UserBubble 文件 badge 同语义双通道
+ * - bash/read 等其他工具行不变（read 保持 shortenForHeader 摘要）
+ * - diff 统计 +N −N 本波不做（决策 8：数据不可得，chip 结构预留统计段） */
+describe('ui-optimize-unified N1: edit/write 工具行 basename chip（决策 8）', () => {
+  const FILE_PATH = '/home/user/project/src/app.ts'
+  const CHIP_SEL = '[data-testid="tool-file-chip"]'
+
+  /** mount 文件工具行 + 可引用的 deps mock（断言 onFileClick/openDrawer 双通道调用参数） */
+  function makeChipWrapper(over: Partial<ToolCall> = {}) {
+    const onFileClick = vi.fn()
+    const openDrawer = vi.fn()
+    const wrapper = mount(Block, {
+      props: { type: 'tool', tool: makeToolCall(over) },
+      global: {
+        provide: mockChatProvide({ onFileClick, openDrawer }),
+        stubs: { GuiComponentRenderer: GuiStub, AnsiText: AnsiStub, MarkdownRenderer: MdStub },
+      },
+    })
+    return { wrapper, onFileClick, openDrawer }
+  }
+
+  it('edit 行渲染 chip：文本 = basename、title = 完整路径（完整路径移 title 悬停）', () => {
+    const { wrapper } = makeChipWrapper({ toolName: 'edit', input: { path: FILE_PATH } })
+    const chip = wrapper.find(CHIP_SEL)
+    expect(chip.exists()).toBe(true)
+    expect(chip.text()).toBe('app.ts')
+    expect(chip.attributes('title')).toBe(FILE_PATH)
+    // 完整路径不再以摘要形态出现在 header（移 title）
+    const header = wrapper.find('[data-testid="tool-block-header"]')
+    expect(header.text()).not.toContain(FILE_PATH)
+  })
+
+  it('write 行同样渲染 chip（file_path 字段同覆盖）', () => {
+    const { wrapper } = makeChipWrapper({ toolName: 'write', input: { file_path: FILE_PATH } })
+    const chip = wrapper.find(CHIP_SEL)
+    expect(chip.exists()).toBe(true)
+    expect(chip.text()).toBe('app.ts')
+    expect(chip.attributes('title')).toBe(FILE_PATH)
+  })
+
+  it('chip 点击：@click.stop 不触发行展开 + onFileClick/openDrawer 双通道（UserBubble badge 同语义）', async () => {
+    const { wrapper, onFileClick, openDrawer } = makeChipWrapper({ toolName: 'edit', input: { path: FILE_PATH } })
+    await wrapper.find(CHIP_SEL).trigger('click')
+    // 双通道：selectFile（选中态落位 + 注入 detail tab 实例）+ openDrawer（切 detail tab + 开抽屉）
+    expect(onFileClick).toHaveBeenCalledWith(FILE_PATH)
+    expect(openDrawer).toHaveBeenCalledWith('detail', { filePath: FILE_PATH })
+    // 行未展开（stop 拦截 header 的 toggleTool；.tool-result = 展开输出区锚点）
+    expect(wrapper.find('.tool-result').exists()).toBe(false)
+  })
+
+  it('chip 键盘 enter/space 触发同样双通道（role=button 键盘可达）', async () => {
+    const { wrapper, onFileClick, openDrawer } = makeChipWrapper({ toolName: 'write', input: { path: FILE_PATH } })
+    const chip = wrapper.find(CHIP_SEL)
+    expect(chip.attributes('role')).toBe('button')
+    await chip.trigger('keydown.enter')
+    expect(onFileClick).toHaveBeenCalledTimes(1)
+    await chip.trigger('keydown.space')
+    expect(onFileClick).toHaveBeenCalledTimes(2)
+    expect(openDrawer).toHaveBeenCalledTimes(2)
+  })
+
+  it('超长 basename CSS ellipsis：chip 内 basename span 带 truncate + chip 可收缩（min-w-0）', () => {
+    const { wrapper } = makeChipWrapper({ toolName: 'edit', input: { path: '/a/very-long-basename-that-should-truncate.ts' } })
+    const chip = wrapper.find(CHIP_SEL)
+    expect(chip.classes()).toContain('min-w-0')
+    const name = chip.find('span')
+    expect(name.classes()).toContain('truncate')
+  })
+
+  it('read 行不渲染 chip，保持 shortenForHeader 摘要形态（其他工具行不变）', () => {
+    const wrapper = mountToolBlock(makeToolCall({ toolName: 'read', input: { path: FILE_PATH } }))
+    expect(wrapper.find(CHIP_SEL).exists()).toBe(false)
+    // 摘要形态保持：「· 」前缀 + shortenForHeader 缩短路径（…/src/app.ts），非 chip 元素
+    const header = wrapper.find('[data-testid="tool-block-header"]')
+    expect(header.text()).toContain('·')
+    expect(header.text()).toContain('…/src/app.ts')
+  })
+
+  it('bash 行不渲染 chip（bash/其他工具行不变）', () => {
+    const wrapper = mountToolBlock(makeToolCall({ toolName: 'bash', input: { command: 'pnpm build' } }))
+    expect(wrapper.find(CHIP_SEL).exists()).toBe(false)
+  })
+})
+
 /* ── error-visibility M3：thinking 可收起 + 完成态回落（TC1-3）──
  * - T1: thinkingExpanded 去 props.working 短路（working 默认展开改由 collapsed 初值承担）
  *   ——working 挂载 collapsed 初值 false（展开）、非 working 挂载 true（收起，G3 骨架）
@@ -177,6 +265,7 @@ describe('error-visibility M3: thinking 可收起 + 完成态回落（TC1-3）',
       // fallback 导致误展开；显式 undefined 才等价「未提供」，`?? true` 正常生效）
       props: { type: 'thinking', content: 'deep reasoning content', thinkingId: 't-1', collapsed: undefined, ...over },
       global: {
+        provide: mockChatProvide(), // N1 起 Block setup 执行 useChatViewDeps inject，直接 mount 必须注入
         stubs: { MarkdownRenderer: MdStub },
       },
     })
@@ -298,6 +387,7 @@ describe('W4 tail-scroll: thinking 双态（U8）', () => {
     return mount(Block, {
       props: { type: 'thinking', content, thinkingId: 't-tail', collapsed: undefined, ...over },
       global: {
+        provide: mockChatProvide(), // N1 起 Block setup 执行 useChatViewDeps inject，直接 mount 必须注入
         stubs: { MarkdownRenderer: MdStub },
       },
     })
@@ -560,7 +650,7 @@ describe('chat-flow-timestamp U2: Block 行尾时间槽（A3/A4 + D2 悬停化�
     // collapsed 显式传 undefined（同 M3 组：键缺失会吃掉 `?? true` 的 fallback）
     return mount(Block, {
       props: { type: 'thinking', content: 'deep reasoning content', thinkingId: 't-time', collapsed: undefined, ...over },
-      global: { stubs: { MarkdownRenderer: MdStub } },
+      global: { provide: mockChatProvide(), stubs: { MarkdownRenderer: MdStub } },
     })
   }
 
@@ -686,6 +776,7 @@ function mountBashGroup(group: ReturnType<typeof makeBashGroupProp>) {
   return mount(Block, {
     props: { type: 'bash-group', group, sessionId: 'sess-bash-group-test' },
     global: {
+      provide: mockChatProvide(), // N1 起 Block setup 执行 useChatViewDeps inject，直接 mount 必须注入
       stubs: { GuiComponentRenderer: GuiStub, AnsiText: AnsiStub, MarkdownRenderer: MdStub },
     },
   })
