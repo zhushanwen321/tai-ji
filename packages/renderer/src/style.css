@@ -63,6 +63,13 @@
   --accent-ring: color-mix(in oklch, var(--accent) 30%, transparent); /* 选中态内描边（Card-Active），见 design-system §2 */
   --accent-fg: #1a1a1c;         /* accent 实色上的文字（玄主题用深字）；对 #a5adc2 对比 7.74:1 过 AA（D3 门禁） */
 
+  /* 行内代码弱底彩字（ui-optimize 决策5）：底 = accent 8% 弱化层（与对话流 --surface
+     明度差 0.007，改前 --surface-2 直引为 0.015）；字 = accent 等色相提亮一档 + OKLCh
+     降饱和（C≤0.05，守对话流灰白纪律，--name 同先例），对合成底 8.99:1。六主题 entry
+     各一对值，对比断言 ≥4:1（设计 §4 场景 2）。 */
+  --md-code-bg: color-mix(in oklch, var(--accent) 8%, transparent);
+  --md-code-fg: #b5bdd3;
+
   /* ── 状态色（水墨降饱和，克制放开档）────────────────── */
   --success: #78a87e;
   --warn: #b79c54;
@@ -253,6 +260,11 @@
   --accent-ring: color-mix(in oklch, var(--accent) 30%, transparent);
   --accent-fg: #f5f4f1;
 
+  /* 行内代码弱底彩字（决策5 亮色族）：底 = accent 6%；字 = accent 压暗一档 + 降饱和，
+     对合成底 12.52:1（取值逻辑同 :root 注释） */
+  --md-code-bg: color-mix(in oklch, var(--accent) 6%, transparent);
+  --md-code-fg: #292622;
+
   /* 状态色（亮色族 TAIJI_STATES_LIGHT：宣纸上的沉稳颜料） */
   --success: #368047;
   --warn: #977629;
@@ -313,6 +325,9 @@
   --accent: #9ca9c9;
   --accent-hover: #b0bcd4;
   --accent-fg: #151824;
+  /* 行内代码弱底彩字（决策5）：暗色族底 = accent 8%；字 = 提亮一档 + 降饱和，对合成底 8.68:1 */
+  --md-code-bg: color-mix(in oklch, var(--accent) 8%, transparent);
+  --md-code-fg: #acb9da;
   --chart-ink: var(--neutral-fg);
   --chart-p1: color-mix(in oklch, var(--chart-ink) 92%, var(--bg));
   --chart-p2: color-mix(in oklch, var(--chart-ink) 70%, var(--bg));
@@ -354,6 +369,9 @@
   --accent: #cbc3b3;
   --accent-hover: #ded7c8;
   --accent-fg: #201d18;
+  /* 行内代码弱底彩字（决策5）：暗色族底 = accent 8%；字 = 提亮一档 + 降饱和，对合成底 11.25:1 */
+  --md-code-bg: color-mix(in oklch, var(--accent) 8%, transparent);
+  --md-code-fg: #dcd4c4;
   --chart-ink: var(--neutral-fg);
   --chart-p1: color-mix(in oklch, var(--chart-ink) 92%, var(--bg));
   --chart-p2: color-mix(in oklch, var(--chart-ink) 70%, var(--bg));
@@ -380,6 +398,9 @@
   --accent: #3d6b6b;
   --accent-hover: #4e7d7d;
   --accent-fg: #f2f7f6;
+  /* 行内代码弱底彩字（决策5）：亮色族底 = accent 6%；字 = 压暗一档 + 降饱和，对合成底 6.41:1 */
+  --md-code-bg: color-mix(in oklch, var(--accent) 6%, transparent);
+  --md-code-fg: #2f5c5c;
   --chart-ink: color-mix(in oklch, var(--accent) 45%, var(--neutral-fg));
   --chart-p1: color-mix(in oklch, var(--chart-ink) 92%, var(--bg));
   --chart-p2: color-mix(in oklch, var(--chart-ink) 70%, var(--bg));
@@ -406,6 +427,9 @@
   --accent: #9c4335;
   --accent-hover: #b04f41;
   --accent-fg: #faf3f0;
+  /* 行内代码弱底彩字（决策5）：亮色族底 = accent 6%；字 = 压暗一档 + 降饱和，对合成底 6.58:1 */
+  --md-code-bg: color-mix(in oklch, var(--accent) 6%, transparent);
+  --md-code-fg: #6d4a43;
   --chart-ink: color-mix(in oklch, var(--accent) 45%, var(--neutral-fg));
   --chart-p1: color-mix(in oklch, var(--chart-ink) 92%, var(--bg));
   --chart-p2: color-mix(in oklch, var(--chart-ink) 70%, var(--bg));

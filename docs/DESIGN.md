@@ -291,7 +291,28 @@ demo 阶段功能做到「可见 + 可交互 + 数据 mock」即够。不接 run
 --danger-soft:    color-mix(in oklch, var(--danger) 12%, transparent);
 --info-soft:      color-mix(in oklch, var(--info) 12%, transparent);
 --reasoning-soft: color-mix(in oklch, var(--reasoning) 12%, transparent);
+
+/* 行内代码弱底彩字（ui-optimize 决策5）：markdown 行内 code 专属令牌组，
+   六主题 entry 各一对值（消费点 = MarkdownRenderer.vue 行内 code 规则）。
+   底 = accent 弱化层（暗色族 8% / 亮色族 6%，color-mix 派生自动跟随各主题 accent）；
+   字 = accent 同色相 ± 一档（暗提亮 / 亮压暗，dL≈0.052 与 --accent-hover 同模式）
+   + OKLCh 降饱和（C≤0.05，守对话流灰白纪律，--name 同先例）。 */
+--md-code-bg: color-mix(in oklch, var(--accent) 8%, transparent);   /* 暗色族（玄/黛蓝/暖墨） */
+--md-code-fg: #b5bdd3;                                              /* 玄 */
+--md-code-bg: color-mix(in oklch, var(--accent) 6%, transparent);   /* 亮色族（皓/青墨/朱印） */
+--md-code-fg: #292622;                                              /* 皓 */
 ```
+
+六主题 `--md-code-fg` 挂值（底合成到对话流 `--surface` 后的 WCAG 对比，断言线 ≥4:1，§4 场景 2）：
+
+| 主题 | 族 | `--md-code-fg` | 对比 |
+|---|---|---|---|
+| 玄 | 暗 | `#b5bdd3` | 8.99:1 |
+| 黛蓝 | 暗 | `#acb9da` | 8.68:1 |
+| 暖墨 | 暗 | `#dcd4c4` | 11.25:1 |
+| 皓 | 亮 | `#292622` | 12.52:1 |
+| 青墨 | 亮 | `#2f5c5c` | 6.41:1 |
+| 朱印 | 亮 | `#6d4a43` | 6.58:1 |
 
 ### 4.5 diff 着色（柔化 12%）
 

@@ -288,16 +288,17 @@ function onClick(e: MouseEvent): void {
 .md-render :deep(h3),
 .md-render :deep(h4) { font-size: 1.06em; }
 
-/* p margin 归零：用户气泡里列表与相邻段落紧贴（旧 0.5em 0 让列表上下多 7px 空行）。
-   块级 <p> 天然换行，margin:0 后多段落仍可区分（换行在，只是无额外间距）。
-   assistant summary 同此样式，多段落紧贴也是合理节奏。 */
+/* p 段内呼吸（ui-optimize-unified 决策 4）：下 margin 0.4em 小量级，多段落有可感知间距；
+   [HISTORICAL] 旧值 margin:0（更旧 0.5em 0 让用户气泡列表上下多 7px 空行被裁决归零）——
+   历史裁决「用户气泡列表不该有大间距感」由 0.4em 小量级满足（决策 4 衔接条款）。 */
 .md-render :deep(p) {
-  margin: 0;
+  margin: 0 0 0.4em;
   line-height: 1.7;
 }
 
 /* 列表样式：让编号/符号列表在视觉上接近普通正文行（用户气泡里手打的编号列表
-   不该被当成大间距结构化块）。紧凑节奏：无项间 margin、行高对齐 <p>、左缩进仅留编号位。
+   不该被当成大间距结构化块）。紧凑节奏：条目间 0.25em 微呼吸（决策 4，同 p 的衔接条款）、
+   行高对齐 <p>、左缩进仅留编号位。
    [HISTORICAL] 旧值 margin:0.5em 0 + li margin:0.2em 0 + padding-left:1.5em + marker --subtle，
    导致编号行上下多空行、左缩进过深、编号是三级灰与正文不一致——被用户判定为「像多一个空行」。 */
 .md-render :deep(ul),
@@ -314,8 +315,19 @@ function onClick(e: MouseEvent): void {
   list-style-type: decimal;
 }
 .md-render :deep(li) {
-  margin: 0;
+  margin: 0 0 0.25em;
   line-height: 1.7;
+}
+/* 叠加核算（决策 4）：首/末元素的块级 margin 不参与「容器 gap + 首段 margin」叠加——
+   块间 20px/12px 两档节奏由 Block/Turn 容器层单值承载（Turn.vue trace 相邻选择器），
+   .md-render 首元素 top / 末元素 bottom 归零使段内呼吸与块间节奏解耦、距离可断言。
+   无 > 限定：v-html 段外层有段容器 div，:last-child 逐层命中末子元素（li 内末 p、
+   blockquote 内末 p 一并归零，条目/引用间距始终由其宿主元素承载）。 */
+.md-render :deep(:first-child) {
+  margin-top: 0;
+}
+.md-render :deep(:last-child) {
+  margin-bottom: 0;
 }
 /* 编号颜色与正文一致（旧 --subtle 让编号变灰，与正文 fg 脱节） */
 .md-render :deep(li)::marker {
@@ -356,11 +368,16 @@ function onClick(e: MouseEvent): void {
   text-decoration: underline;
 }
 
-/* 行内代码：弱底色 + 等宽，区分正文 */
+/* 行内代码：弱底彩字 + 等宽，区分正文（ui-optimize 决策5）。
+   底/字色消费六主题各自的 --md-code-bg/fg（style.css 各主题 entry 挂值），
+   对比断言 ≥4:1（设计 §4 场景 2）。
+   [HISTORICAL] 旧底色直引 --surface-2（无专属字色、随正文继承）——明度差过大且
+   不随主题 accent 成色，随决策 5 退役。 */
 .md-render :deep(code:not(pre code)) {
   font-family: var(--font-mono);
   font-size: 0.88em;
-  background: var(--surface-2);
+  background: var(--md-code-bg);
+  color: var(--md-code-fg);
   padding: 0.1em 0.35em;
   border-radius: var(--radius-sm);
 }
