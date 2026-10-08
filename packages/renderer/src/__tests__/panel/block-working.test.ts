@@ -129,16 +129,16 @@ describe('Block working 态 · tool 块', () => {
     expect(wrapper.text()).toContain('done')
   })
 
-  it('U7: working=false running 默认 1 行收起，header 含双环 loader 指示（Demo H）', () => {
+  it('U7: working=false running 默认 1 行收起，header 含呼吸弧 loader 指示（Demo H）', () => {
     const wrapper = mount(Block, {
       props: { type: 'tool', tool: makeTool({ status: 'running', output: undefined }), working: false },
       global: { provide: mockChatProvide() },
     })
-    // header 行含工具名 + 参数（N1 basename chip）+ 双环 loader（1 行即可观察进度）
+    // header 行含工具名 + 参数（N1 basename chip）+ 呼吸弧 loader（1 行即可观察进度）
     expect(wrapper.text()).toContain('edit')
     expect(wrapper.text()).toContain('App.vue')
     expect(wrapper.find('[data-testid="tool-file-chip"]').attributes('title')).toBe('src/App.vue')
-    // Demo H：running 态双环 loader（animate-loader-spin + text-accent），无旧脉冲点
+    // Demo H：running 态呼吸弧 loader（animate-loader-spin + text-accent），无旧脉冲点
     expect(wrapper.find('.animate-loader-spin').exists()).toBe(true)
     expect(wrapper.find('.animate-working-pulse').exists()).toBe(false)
     // 详情区默认收起（running 不再强制展开）

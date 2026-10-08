@@ -8,7 +8,7 @@
   也改挂本卡，删掉重复渲染。
 
   契约：props = { sessionId?, modelId? }（受控，语义与原 Popover 一致——sessionId 为可选是
-  为兼容 ContextCapacityPopover 的可选透传），无 emits。数据纯读（useContextUsage 分区 +
+  为兼容原 ContextCapacityPopover 的可选透传），无 emits。数据纯读（useContextUsage 分区 +
   useQuotaDisplay 派生），quota 查询触发不在本卡（hover-enter 查询仍挂在各自触发器上，
   store 全局共享、双实例同源收敛）。
 -->

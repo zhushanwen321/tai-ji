@@ -749,6 +749,54 @@ describe('chat-flow-timestamp U2: Block 行尾时间槽（A3/A4 + D2 悬停化�
 })
 
 // ═════════════════════════════════════════════════════════════════
+// ui-optimize-unified 决策 8 N6（U14）：thinking 摘要行时长
+// 数据源 = ThinkingBlock.startTime/endTime（Turn.vue kindBlockProps 透传）；双有值才渲染
+// thinking-duration 槽（持久化重载链路 thinking part 无时间戳 → 缺值维持现状展示 = 设计
+// 「推导不出则降级」分支）；形态对齐 tool-time-slot：时长 · 时刻，悬停两翼显现（group/think）。
+// i18n mock 为 key-echo 模式（vitest.setup.ts：无占位符 key 追加命名值），断言数值与结构。
+// ═════════════════════════════════════════════════════════════════
+
+describe('ui-optimize-unified U14: thinking 行时长（N6）', () => {
+  function mountThinkingDurationBlock(over: Record<string, unknown> = {}) {
+    // collapsed 显式传 undefined（同 M3/U2 组：键缺失会吃掉 `?? true` 的 fallback）
+    return mount(Block, {
+      props: { type: 'thinking', content: 'deep reasoning content', thinkingId: 't-dur', collapsed: undefined, messageTimestamp: 5000, ...over },
+      global: { provide: mockChatProvide(), stubs: { MarkdownRenderer: MdStub } },
+    })
+  }
+
+  it('startTime=1000/endTime=3000 → thinking-duration 渲染，文本含 formatDuration(2000)（2s）', () => {
+    const wrapper = mountThinkingDurationBlock({ thinkingStart: 1000, thinkingEnd: 3000 })
+    const dur = wrapper.find('[data-testid="thinking-duration"]')
+    expect(dur.exists()).toBe(true)
+    expect(dur.text()).toContain('2s')
+  })
+
+  it('endTime 缺失（working 中 / 持久化重载链路）→ 不渲染（缺值维持现状展示）', () => {
+    const wrapper = mountThinkingDurationBlock({ thinkingStart: 1000 })
+    expect(wrapper.find('[data-testid="thinking-duration"]').exists()).toBe(false)
+    // 时刻槽不受影响（两槽守卫独立）
+    expect(wrapper.find('[data-testid="thinking-time-slot"]').exists()).toBe(true)
+  })
+
+  it('startTime 缺失 / end<=start → 不渲染（守卫与 useLiveToolDuration 终态分支同构）', () => {
+    const noStart = mountThinkingDurationBlock({ thinkingEnd: 3000 })
+    expect(noStart.find('[data-testid="thinking-duration"]').exists()).toBe(false)
+    const inverted = mountThinkingDurationBlock({ thinkingStart: 3000, thinkingEnd: 1000 })
+    expect(inverted.find('[data-testid="thinking-duration"]').exists()).toBe(false)
+  })
+
+  it('时长槽悬停三件套（group/think 同翼）+ 时刻在场时尾缀 · 分隔（形态对齐 tool-time-slot）', () => {
+    const wrapper = mountThinkingDurationBlock({ thinkingStart: 1000, thinkingEnd: 3000 })
+    const dur = wrapper.find('[data-testid="thinking-duration"]')
+    expect(dur.classes()).toContain('opacity-0')
+    expect(dur.classes()).toContain('group-hover/think:opacity-100')
+    expect(dur.classes()).toContain('group-focus-within/think:opacity-100')
+    expect(dur.text()).toContain('·')
+  })
+})
+
+// ═════════════════════════════════════════════════════════════════
 // ui-signal-density §3.3 D1 U3：Block bash-group 组块（连续 bash 折叠）
 // 组头三条计数口径由 core groupConsecutiveBash 算好（header），本文件断言渲染形态：
 // 组头 / 失败段 testid、展开收起、成员默认收起态、两步路径、failed 成员默认展开（V8）。

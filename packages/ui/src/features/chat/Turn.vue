@@ -491,6 +491,9 @@ interface BlockUnitProps {
   status?: Message['status']
   error?: string
   messageTimestamp?: number
+  /** thinking 起止毫秒时间戳（N6 思考行时长数据源，ThinkingBlock.startTime/endTime 透传） */
+  thinkingStart?: number
+  thinkingEnd?: number
   group?: { members: FlatBlock[]; header: { count: number; durationMs: number; failedCount: number }; hasRunning: boolean }
 }
 
@@ -509,7 +512,9 @@ function kindBlockProps(
       return { content: ref as string }
     case 'thinking': {
       const t = ref as ThinkingBlock
-      return { content: t.content, thinkingId: t.id, collapsed: t.collapsed }
+      // N6 思考行时长：startTime/endTime 透传（实时链路 thinking_start/end 效果器填充；重载
+      // 链路两字段 undefined → Block 侧守卫不渲染时长，维持现状展示）
+      return { content: t.content, thinkingId: t.id, collapsed: t.collapsed, thinkingStart: t.startTime, thinkingEnd: t.endTime }
     }
     case 'tool':
     case 'agentgraph':

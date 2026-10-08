@@ -6,7 +6,7 @@
     running → 呼吸弧 loader；failed → icon + 文案降 neutral-mid。
     点击整行 → openSubagent（drawer 开 subagent tab，主对话流保留）。subagentId 取自 toolResult.output。
   -->
-  <div class="trace-subagent pb-2.5 mb-0.5" data-testid="subagent-block">
+  <div class="trace-subagent" data-testid="subagent-block">
     <div
       class="flex min-w-0 cursor-pointer select-none items-center gap-1.5 text-[length:var(--text-base)] font-medium text-neutral-dim transition-opacity hover:opacity-80"
       @click="openSubagentDrawer"

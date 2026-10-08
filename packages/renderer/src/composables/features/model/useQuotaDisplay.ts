@@ -1,7 +1,9 @@
 /**
- * useQuotaDisplay —— ContextCapacityPopover 的 coding-plan 额度展示逻辑。
+ * useQuotaDisplay —— coding-plan 额度展示逻辑（现役消费方：ComposerMetricsAggregate +
+ * ContextCapacityCard）。
  *
- * 从 ContextCapacityPopover.vue 抽出，使 script setup ≤300 行。
+ * 自 ContextCapacityPopover.vue 抽出使宿主 script setup ≤300 行；该宿主已随 ui-optimize
+ * 决策 6 退役，本 composable 由聚合页继续消费。
  * 职责：
  * - 从 settingsStore.providers 派生 matchedProviderId（quota enabled 的 provider）
  * - 计算 matchedPresetLabel（手动 fetcher 优先，fallback 自动匹配）

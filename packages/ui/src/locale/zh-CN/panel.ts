@@ -96,6 +96,9 @@ export default {
     blockScrollExpandAll: '展开全部',
     // 过程块（第三族）header 前缀与细节条：前缀是「块类型标记」，细节条是技术统计
     thinkingBlock: '思考',
+    // N6 思考行时长（ui-optimize-unified 决策 8）：摘要行尾槽「持续了 Ns」，mono dim，
+    // duration 由 ThinkingBlock.startTime/endTime 差推导（缺值不渲染本段）
+    thinkingDuration: '持续了 {duration}',
     subagent: '子代理',
     metaLines: '{n} 行',
     metaChars: '{n} 字符',
@@ -236,7 +239,7 @@ export default {
     unknown: '未知',
     noCodingPlan: '无 Coding Plan',
     configureCodingPlan: '配置',
-    // coding-plan 额度查询（ContextCapacityPopover + useQuotaDisplay）
+    // coding-plan 额度查询（ContextCapacityCard + useQuotaDisplay）
     quotaQuerying: '查询中…',
     noQuotaData: '暂无额度数据',
     noCodingPlanData: '无 Coding Plan 数据',

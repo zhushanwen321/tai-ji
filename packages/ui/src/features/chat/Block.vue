@@ -49,6 +49,11 @@
             </span>
           </span>
           <span v-else class="flex-1 min-w-0 truncate text-[length:var(--text-xs)] text-neutral-dim" :class="[working ? 'text-sweep' : '', thinkingExpanded ? 'invisible' : '']">{{ previewText }}</span>
+          <!-- N6 思考行时长（ui-optimize-unified 决策 8）：startTime/endTime 双有值才渲染（实时链路
+               thinking_start/end 效果器填充；持久化重载链路 thinking part 无时间戳数据源 → 缺值
+               维持现状展示 = 设计「推导不出则降级」分支按块级生效）；悬停显现与 thinking-time-slot
+               同翼，形态对齐 tool-time-slot（时长 · 时刻）。 -->
+          <span v-if="thinkingDuration" class="shrink-0 font-mono text-[length:var(--text-2xs)] text-neutral-dim tabular-nums opacity-0 transition-opacity group-hover/think:opacity-100 group-focus-within/think:opacity-100" data-testid="thinking-duration">{{ t('panel.message.thinkingDuration', { duration: thinkingDuration }) }} <span v-if="messageTimestamp" class="text-neutral-faint">·</span></span>
           <!-- thinking 块行尾时刻（D2 悬停化：常驻改按需——悬停该行 / 键盘焦点进入该行才显现） -->
           <span v-if="messageTimestamp" class="ml-auto shrink-0 font-mono text-[length:var(--text-2xs)] text-neutral-dim tabular-nums opacity-0 transition-opacity group-hover/think:opacity-100 group-focus-within/think:opacity-100" data-testid="thinking-time-slot">{{ formatClock(messageTimestamp) }}</span>
         </div>
@@ -367,6 +372,10 @@ const props = defineProps<{
   content?: string
   /** thinking 块 id（thinking 类型时由父组件透传，用于 data-testid 精确锚定；其他类型忽略） */
   thinkingId?: string
+  /** thinking 起止毫秒时间戳（ThinkingBlock.startTime/endTime 透传，N6 思考行时长数据源；
+   *  任一缺失不渲染时长——持久化重载链路 thinking part 无时间戳，维持现状展示） */
+  thinkingStart?: number
+  thinkingEnd?: number
   /** tool_call 数据（type==='tool' 时必填） */
   tool?: ToolCall
   /** bash 组块数据（type==='bash-group' 时由 Turn.vue 透传；D1 组块数据契约 members+header+hasRunning）。
@@ -410,6 +419,16 @@ const { thinkingExpanded, toggleThinking, previewText, thinkingTailLines, thinkD
 
 /** error 终态：msg.error 有值（收口侧兜底保证非空；!! 防御漏网产出点）→ 独立 danger 行。 */
 const isAppendError = computed(() => props.status === 'error' && !!props.error)
+
+/** N6 思考行时长：startTime/endTime 双有值才推导（end<=start 视为数据缺口，守卫与
+ *  useLiveToolDuration 终态分支同构）；口径 formatDuration 与工具行行尾耗时一致。 */
+const thinkingDuration = computed(() => {
+  const start = props.thinkingStart
+  if (typeof start !== 'number') return ''
+  const end = props.thinkingEnd
+  if (typeof end !== 'number' || end <= start) return ''
+  return formatDuration(end - start)
+})
 
 /** text 分支颜色：正常正文 streaming→neutral-mid、complete→neutral-fg（正文永不因 error 整条染红） */
 const textColorClass = computed(() => {

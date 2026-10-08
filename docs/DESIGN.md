@@ -616,7 +616,7 @@ demo 用 `@keyframes shimmer`（1.4s ease-in-out infinite，linear-gradient 扫�
 
 ### 6.1 对话流（assistant 居中 720）
 
-- **MessageStream**：整 turn 居中 `max-w-content-max-w`(720) + `margin:0 auto`；UserBubble 列内右浮（max-w-76%）；隐藏原生滚动条由 TurnRail 接管
+- **MessageStream**：整 turn 居中 `max-w-content-max-w`(720) + `margin:0 auto`；UserBubble 列内右浮（max-width min(72%,64ch) + overflow-wrap:anywhere，编辑态同宽——ui-optimize 决策 8 N3）；隐藏原生滚动条由 TurnRail 接管
 - **TurnMeta**：pill 默认可见（`bg-elevated` 浮起，解决主面板 surface 上「面上面」不可见）；删 turn 间 `hr` 改加大 turn gap；**重试中态**：重试不进 composer——`RetryIndicator.vue` 独立行（RefreshCw + 「重试中 N/M」+ warn 色，`border-warn/35 bg-warn-soft`），TurnMeta 自身只随 streaming 转 accent spinner（无分级配色，2026-09 删 warn/danger 时长三档）〔2026-09-13 自 v6-design.md 并入；2026-09-19 校正归属 + 删分级配色〕
 - **Block·tool**：状态矩阵 collapsed/expanded × running/done/failed；running 呼吸弧 loader（13px）；exit≠0 加 mono 标签；**failed 统一不切 icon**（保留原 tool icon，toolName 降 `neutral-mid` 表达，无红框——与 subagent/workflow block 一致）；unfinished 显「未结束」标签〔2026-09-13 自 v6-design.md 并入〕
 - **Block·thinking**：收起态 1 行 CSS ellipsis（`text-overflow: ellipsis` 视觉截断，非硬字符数限制）；expanded body 用 `neutral-mid`（过 AA）
@@ -655,14 +655,15 @@ demo 用 `@keyframes shimmer`（1.4s ease-in-out infinite，linear-gradient 扫�
 ### 6.2 侧栏（3 tab + 容器）
 
 - 底色 `var(--bg)`；SegmentedTab 见 §5.3；SessionItem 选中态见 §5.4
-- **Project 一级导航**（D14）：nav 下方 ProjectSwitcher。**折叠态** = 当前 project 名 + ChevronDown（点击展开列表）；**展开态** = project 列表（popover 范式 bg-elevated + border-strong + shadow-2），每行 project 名 + hover 显删除按钮（Trash icon，danger 色，点击 window.confirm 后 removeProject），底部「+ 新建项目」按钮（点击变 input，Enter 创建 + 设活跃）；选中态 `bg-surface + accent 字`（列表项型）。session 按 workspace（目录）分组，worktree chip 用 `--reasoning` 紫（§3.5.7）
+- **Project 一级导航**（D14）：nav 下方 ProjectSwitcher。**折叠态** = 当前 project 名 + ChevronDown（点击展开列表）；**展开态** = project 列表（popover 范式 bg-elevated + border-strong + shadow-2），每行 project 名 + hover 显删除按钮（Trash icon，danger 色，点击 window.confirm 后 removeProject），底部「+ 新建项目」按钮（点击变 input，Enter 创建 + 设活跃）；选中态 `bg-surface + accent 字`（列表项型）；worktree chip 用 `--reasoning` 紫（§3.5.7）
+- **SessionList 会话列表 A/C 双模式（ui-optimize 决策 9 / N8）**：列表顶部 **24px 区头行**（`h-6`，固定于 ScrollArea 外不随列表滚动）= 「最近会话」标题 + 会话计数（mono dim）+ 右贴**双段图标开关**（List=平铺列表 / Folder=按目录分组，11px icon，选中态 `bg-bg-elevated` 浮起 + fg 字，模式名走 title 悬停；文案 key sidebar.sessionList.header/modeFlat/modeGroup）。**模式持久化** = localStorage `taiji:sidebar-session-mode`（与 useDrawerSplitWidth 等 `taiji:` 前缀 UI 偏好同通道），缺失/非法值回退默认平铺。**A 平铺（默认）**：runtime 组序展平为单行列表，无组头行；**C 目录分组**：每目录一组（组标题行 = Folder icon + cwd 末段 + 组内计数，sticky 贴顶 `bg-bg` 不透明），**目录级操作只落 C 模式组头**（hover 显「+ 在此目录新建会话」恒渲染 + 目录批量删除两段式确认——批量删除仅当组内可见数 = 该 cwd 全量数时渲染，防项目过滤下误删不可见 session）；A 模式不提供目录操作（低频操作，避免单行列表挂操作入口回归臃肿）。两模式共用同一排序（core `sessionsInRuntimeGroupOrder` SSOT，客户端零重排）与同一 activeId 选中态；项目过滤（D14）在两种模式下同样生效
+- **Session hover 详情卡（ui-optimize 决策 9 / N8）**：SessionItem 自承载，A/C 两模式同样生效——行 hover 700ms 延迟后右弹显示（防扫过列表逐行闪烁），Teleport body + `fixed` 全局浮层（`z-[90]`，max-w 320px，`bg-bg-elevated + border-strong + shadow-2`），不被侧栏滚动容器裁剪；字段 = 分支（`gitBranch`，无分支该行不渲染）+ 完整目录（cwd），**无消息数**（SessionSummary 无该字段，零新数据通道约束）；定位 = 行右缘外 6px + 视口右缘 clamp
 - **3 tab**（sessions/files/plugins；plugins 为第 3 枚，Puzzle icon，plugin view 收敛于此）
 - 组标题去 uppercase；ForkGroup 去 border 改缩进，分支行单行（序号 pill + 标题 + 时间，不显示状态，§3.5.4）；FileTree 缩进 10px gap 4px
 - SessionList 状态信号见 §5.6A（左未读点 + 右异常 badge）；非列表行场景（GitPanel 等）用 §5.6B 的 7px 圆点
 - **Brand 区**（顶部）：TaijiLogo 28px 旋转（8s，reduced-motion 停，currentColor 适配主题）+ 产品名(base 600) + 版本号(2xs mid) + 可升级按钮（accent + 7px danger 红点角标）
 - **NavItem**：primary(accent 实色 32px) / ghost(透明) 双层级 + `<kbd>` 快捷键标签（`border-strong` 例外保留，物理按键语义）
 - **UserArea**（footer 钉底）：`margin-top:auto` + 20px accent 纯色头像（去装饰渐变）+ 用户名 + 设置齿轮(24px)
-- **QuickComposer**（workspace 快捷新建 spotlight）：SessionList group head hover「+」触发；spotlight 卡片 560px 宽 `bg-elevated + border-strong + shadow-2 + radius-lg`，backdrop `rgba(0,0,0,0.45)`（比 modal 0.8 轻）；预选 cwd chip + branch 去重；Enter 创建 / Esc 取消
 
 ### 6.3 右侧 Drawer（三卡化 + 8 tab）
 

@@ -28,7 +28,8 @@
  * （本会话最近一次请求；同模型多 session 各自独立，无回落），day/d7/d30 为该模型跨会话
  * 全局聚合（同模型多 session 聚合值相同是预期行为，非串台）。
  *
- * 消费方：GenStatsTriggers.vue 纯读。必须在组件 setup 同步调用（内部 useSessionEvents
+ * 消费方：GenStats 三卡（SpeedCard/CacheCard/TtftCard，经 ComposerMetricsAggregate
+ * 聚合页挂载）纯读。必须在组件 setup 同步调用（内部 useSessionEvents
  * 依赖 getCurrentInstance 守卫）。
  */
 import { computed, reactive, watch, type ComputedRef, type Ref } from 'vue'
@@ -70,8 +71,8 @@ export function useGenStats(
   /**
    * 已退役（A4/S18 归属上移 runtime）：帧归属判定权威在 gen-stats-service（帧 model 字段
    * = runtime 权威解析的复合 modelKey），renderer 不再本地比对。参数签名保留——生产调用方
-   * GenStatsTriggers.vue 仍按双参形态传 props.modelId，删参会破坏其编译；该调用方与
-   * Composer 下传链的 prop 清理属 composable 之外，随调用方后续清扫一并移除。
+   * GenStats 三卡（SpeedCard/CacheCard/TtftCard）仍按双参形态传 props.modelId，删参会破坏
+   * 其编译；调用方与 Composer 下传链的 prop 清理属 composable 之外，随调用方后续清扫一并移除。
    */
   _modelIdRef?: Ref<string | null | undefined>,
 ): UseGenStatsReturn {

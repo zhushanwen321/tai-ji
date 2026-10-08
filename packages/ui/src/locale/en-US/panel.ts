@@ -97,6 +97,10 @@ export default {
     blockScrollExpandAll: 'Expand all',
     // Process-block (third family) header prefixes and detail-bar stats
     thinkingBlock: 'Thinking',
+    // N6 thinking-row duration (ui-optimize-unified decision 8): tail slot "Lasted Ns", mono
+    // dim; duration derived from ThinkingBlock.startTime/endTime diff (segment not rendered
+    // when either value is missing)
+    thinkingDuration: 'Lasted {duration}',
     subagent: 'Subagent',
     metaLines: '{n} lines',
     metaChars: '{n} chars',
@@ -240,7 +244,7 @@ export default {
     unknown: 'Unknown',
     noCodingPlan: 'No Coding Plan',
     configureCodingPlan: 'Configure',
-    // coding-plan quota query (ContextCapacityPopover + useQuotaDisplay)
+    // coding-plan quota query (ContextCapacityCard + useQuotaDisplay)
     quotaQuerying: 'Querying…',
     noQuotaData: 'No quota data',
     noCodingPlanData: 'No Coding Plan data',

@@ -35,7 +35,7 @@ const KEY_REF = /panel\.context\.([A-Za-z0-9_]+)(?=["'`])/g
 
 /**
  * 扫描通路自证下界（防空集合恒绿）。当前生产源码静态引用 40+ 个 context key
- * （ContextCapacityPopover / ContextChipsBar / GenStatsTriggers / useQuotaDisplay 等），
+ * （ContextCapacityCard / ContextChipsBar / GenStatsTtftCard / useQuotaDisplay 等），
  * 下界留在明显低于实况的档位，避免正常增删 key 触发假红，又足以在扫描根写错 /
  * 正则失效时立刻暴露。
  */

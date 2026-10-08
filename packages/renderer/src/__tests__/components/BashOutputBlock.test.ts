@@ -3,7 +3,7 @@
  *
  * 验证：
  * - complete 态 exit 0 → command + output + 「exit 0」success 标签
- * - streaming 态 → 双环 loader-spin + 取消按钮；点击取消触发 abortBash
+ * - streaming 态 → 呼吸弧 loader-spin + 取消按钮；点击取消触发 abortBash
  * - exit N(>0) → 「exit N」warn 标签（灰阶化：哑光金替代 danger 红，bash exit N 非致命）
  * - excludeFromContext=true → no context 标记
  * - cancelled=true → 「cancelled」neutral-dim 标签
@@ -74,7 +74,7 @@ describe('BashOutputBlock', () => {
     expect(tag.classes()).toContain('text-success')
   })
 
-  it('streaming 态 → 双环 loader-spin + 取消按钮存在；点击取消触发 abortBash', async () => {
+  it('streaming 态 → 呼吸弧 loader-spin + 取消按钮存在；点击取消触发 abortBash', async () => {
     const msg = makeMessage({
       status: 'streaming',
       bashExecution: {
@@ -90,7 +90,7 @@ describe('BashOutputBlock', () => {
     const wrapper = mountBlock(msg)
     // streaming 不渲染 status-tag（spinner 无 status-tag testid），取消按钮存在
     expect(wrapper.find('[data-testid="bash-status-tag"]').exists()).toBe(false)
-    // 灰阶化（§13.2-D）：streaming 态用本分支双环 loader-spin（animate-loader-spin + text-accent），
+    // 灰阶化（§13.2-D）：streaming 态用本分支呼吸弧 loader-spin（animate-loader-spin + text-accent），
     // 替代 main 的 Loader2 animate-spin
     const spinner = wrapper.find('[data-testid="bash-streaming-spinner"]')
     expect(spinner.exists()).toBe(true)
