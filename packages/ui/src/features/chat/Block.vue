@@ -28,7 +28,9 @@
         <!-- 摘要行：flex 布局，min-h 锁定高度避免展开时跳动 -->
         <div class="flex items-center gap-1.5 min-h-[1.5rem]">
           <component :is="BLOCK_ICON_LUCIDE.thinking" :class="BLOCK_ICON_CLASS" />
-          <span :class="BLOCK_LABEL_CLASS">{{ t('panel.message.thinkingBlock') }}</span>
+          <!-- 状态词 label：working 态跑文字扫光（决策 10）；base 覆盖为 mid 档对齐
+               BLOCK_LABEL_CLASS 常态字色（reduced-motion 停帧态 = 常态色，构造性回退） -->
+          <span :class="[BLOCK_LABEL_CLASS, working ? 'text-sweep [--sweep-base:var(--neutral-mid)]' : '']">{{ t('panel.message.thinkingBlock') }}</span>
           <span v-if="!working" class="text-neutral-faint" :class="thinkingExpanded ? 'invisible' : ''">·</span>
           <!-- working 态：单行尾行视口（2026-08 抖动修复重写）。横向钉右 = viewport flex
                justify-end + 行右对齐 + mr-auto（溢出裁左纯 CSS 无 scrollLeft 时序；mr-auto
@@ -42,11 +44,11 @@
             class="flex h-[1lh] min-w-0 flex-1 justify-end overflow-hidden text-[length:var(--text-xs)] leading-normal text-neutral-dim"
             :class="thinkingExpanded ? 'invisible' : ''"
           >
-            <span class="mr-auto flex flex-col items-end self-start" :style="thinkScrollStyle">
+            <span class="text-sweep mr-auto flex flex-col items-end self-start" :style="thinkScrollStyle">
               <span v-for="(line, i) in thinkDisplayLines" :key="i" class="whitespace-nowrap">{{ line }}</span>
             </span>
           </span>
-          <span v-else class="flex-1 min-w-0 truncate text-[length:var(--text-xs)] text-neutral-dim" :class="thinkingExpanded ? 'invisible' : ''">{{ previewText }}</span>
+          <span v-else class="flex-1 min-w-0 truncate text-[length:var(--text-xs)] text-neutral-dim" :class="[working ? 'text-sweep' : '', thinkingExpanded ? 'invisible' : '']">{{ previewText }}</span>
           <!-- thinking 块行尾时刻（D2 悬停化：常驻改按需——悬停该行 / 键盘焦点进入该行才显现） -->
           <span v-if="messageTimestamp" class="ml-auto shrink-0 font-mono text-[length:var(--text-2xs)] text-neutral-dim tabular-nums opacity-0 transition-opacity group-hover/think:opacity-100 group-focus-within/think:opacity-100" data-testid="thinking-time-slot">{{ formatClock(messageTimestamp) }}</span>
         </div>
@@ -121,11 +123,9 @@
         @keydown.space.prevent="toggleGroup"
       >
         <!-- running 态 loader（双环 + accent），其余走静态组图标。
-             执行中扫光（2026-10-06 对话流视觉裁决）：图标容器 overflow-hidden 裁剪，
-             内部 absolute 扫光层跑全局 sheen-x（渐变带 var(--sheen)，仅扫图标不扫文字） -->
-        <span v-if="group.hasRunning" class="relative inline-flex size-[13px] shrink-0 items-center justify-center overflow-hidden rounded-sm text-accent">
+             组头文字（×N · 共 Xs 计数/耗时口径）是稳定标识，不跑文字扫光（决策 10） -->
+        <span v-if="group.hasRunning" class="inline-flex size-[13px] shrink-0 items-center justify-center text-accent">
           <span class="inline-flex size-full items-center justify-center animate-loader-spin" v-html="RUNNING_LOADER_SVG" /> <!-- eslint-disable-line vue/no-v-html -- hardcoded constant from block-icon.ts -->
-          <span class="pointer-events-none absolute inset-0 bg-[linear-gradient(100deg,transparent_22%,var(--sheen)_50%,transparent_78%)] animate-[sheen-x_2.8s_cubic-bezier(.45,0,.25,1)_infinite]" aria-hidden="true" />
         </span>
         <component :is="BLOCK_ICON_LUCIDE['bash-group']" v-else :class="BLOCK_ICON_CLASS" />
         <span class="min-w-0 truncate text-left">{{ t('panel.message.traceBashSummary', { count: group.header.count, duration: formatDuration(group.header.durationMs) }) }}</span>
@@ -206,12 +206,9 @@
           :title="toolExpanded ? t('panel.message.collapse') : t('panel.message.expand')"
           @click="toggleTool"
         >
-          <!-- running 态 loader（双环 + accent），其余走 BLOCK_ICON_LUCIDE[iconKind]。
-               执行中扫光（2026-10-06 对话流视觉裁决）：图标容器 overflow-hidden 裁剪，
-               内部 absolute 扫光层跑全局 sheen-x（渐变带 var(--sheen)，仅扫图标不扫文字） -->
-          <span v-if="isRunning" class="relative inline-flex size-[13px] shrink-0 items-center justify-center overflow-hidden rounded-sm text-accent">
+          <!-- running 态 loader（双环 + accent），其余走 BLOCK_ICON_LUCIDE[iconKind] -->
+          <span v-if="isRunning" class="inline-flex size-[13px] shrink-0 items-center justify-center text-accent">
             <span class="inline-flex size-full items-center justify-center animate-loader-spin" v-html="RUNNING_LOADER_SVG" /> <!-- eslint-disable-line vue/no-v-html -- hardcoded constant from block-icon.ts -->
-            <span class="pointer-events-none absolute inset-0 bg-[linear-gradient(100deg,transparent_22%,var(--sheen)_50%,transparent_78%)] animate-[sheen-x_2.8s_cubic-bezier(.45,0,.25,1)_infinite]" aria-hidden="true" />
           </span>
           <component :is="headerBlockIcon" v-else :class="[BLOCK_ICON_CLASS, isFailed ? 'hover:text-warn' : '']" />
           <span class="shrink-0 normal-case tracking-normal [font-weight:var(--fw-bold)]">{{ toolName }}</span>
@@ -222,7 +219,7 @@
             class="flex h-[1lh] min-w-0 flex-1 justify-end overflow-hidden normal-case leading-normal tracking-normal text-neutral-dim"
             :class="{ invisible: toolExpanded && isBashTool }"
           >
-            <span class="mr-auto flex flex-col items-end self-start" :style="toolScrollStyle">
+            <span class="text-sweep mr-auto flex flex-col items-end self-start" :style="toolScrollStyle">
               <span v-for="(line, i) in toolDisplayLines" :key="i" class="whitespace-nowrap">{{ line }}</span>
             </span>
           </span>
@@ -244,7 +241,7 @@
             <span class="min-w-0 truncate">{{ fileChipBasename }}</span>
             <!-- 统计段预留位（决策 8：diff +N −N 数据不可得本波不做，登记 docs/todo 随 U19 执行） -->
           </span>
-          <span v-else-if="argPath" class="min-w-0 normal-case tracking-normal text-neutral-dim truncate" :class="{ invisible: toolExpanded && isBashTool }">· {{ shortenForHeader(argPath) }}</span>
+          <span v-else-if="argPath" class="min-w-0 normal-case tracking-normal text-neutral-dim truncate" :class="[{ invisible: toolExpanded && isBashTool }, isRunning ? 'text-sweep' : '']">· {{ shortenForHeader(argPath) }}</span>
           <!-- tool 块行尾槽：耗时 · 时刻（D2 悬停化：悬停该行 / 键盘焦点进入该行才显现） -->
           <span v-if="tool?.startTime" class="ml-auto shrink-0 flex items-center gap-1 font-mono text-[length:var(--text-2xs)] tabular-nums opacity-0 transition-opacity group-hover/tool:opacity-100 group-focus-within/tool:opacity-100" data-testid="tool-time-slot">
             <span v-if="toolDuration" :class="isRunning ? 'text-accent' : 'text-neutral-dim'">{{ toolDuration }}</span>
@@ -683,6 +680,28 @@ const testId = computed(() => {
 .block-expand-leave-to {
   opacity: 0;
   transform: translateY(-4px);
+}
+
+/* 执行中文字扫光（ui-optimize-unified 决策 10 / N13）：扫光对象 = 执行中行正在发生的
+   内容文字（思考行状态词 + 预览流、工具行执行命令/摘要），稳定标识（工具名/时间戳/计数）
+   不扫。机制 = background-clip:text + 透明字色，base（--sweep-base，缺省 dim 档 =
+   预览流/摘要常态字色；label 处经任意属性类覆盖为 mid 档）与 peak（--neutral-fg）
+   全令牌化，六主题免逐个定值。周期 2.6s：前 55% 扫程（peak 自元素左外 -25% 移至
+   右外 125%），后 45% 停帧。keyframes（text-sweep）在 renderer style.css 动画区
+   全局定义——scoped 内定义会被编译器哈希改名而失效（同全局动画区先例理由）。
+   prefers-reduced-motion 由 style.css 全局兜底（duration 0.01ms 停终态帧 position 0%，
+   元素内恒 base 段 = 常态字色，「退回常态字色」构造性成立，无需额外覆盖）。
+   escape hatch 理由：多属性组合类 + 变量参数化 + 停帧几何推导，Tailwind 任意值
+   内联需 6 类 × 5 消费点且 motion-reduce 变体逐点易漏。 */
+.text-sweep {
+  --sweep-base: var(--neutral-dim);
+  background-image: linear-gradient(100deg, var(--sweep-base) 42%, var(--neutral-fg) 50%, var(--sweep-base) 58%);
+  background-size: 250% 100%;
+  background-repeat: no-repeat;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: text-sweep 2.6s cubic-bezier(0.45, 0, 0.25, 1) infinite;
 }
 </style>
 

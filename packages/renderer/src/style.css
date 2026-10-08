@@ -47,9 +47,6 @@
      workflow / subagent 的具体名称——暖驼微暖低饱和，不随主色态变化；
      亮色主题（[data-theme="light"]）覆盖加深档，preset 不覆盖 */
   --name: #d7b894;
-  /* 执行中工具图标扫光带（2026-10-06 对话流视觉裁决，demo --w-sheen 反写）：
-     暗色亮带 / 亮色暗带反转，消费点 sheen-x keyframes（style.css 底部动画区） */
-  --sheen: rgba(236, 236, 236, 0.55);
 
   /* ── 边框/分隔 ─────────────────────────────────────────── */
   --border: rgba(255, 255, 255, 0.07);
@@ -245,9 +242,8 @@
   --neutral-faint: #c7c5c0;
   --neutral-ico: #82807b;
   --neutral-ico-hover: #2b2a28;
-  /* 对话流专属名称色（亮色加深档，对比 5.2:1）+ 扫光带反转暗带（同 :root 注释） */
+  /* 对话流专属名称色（亮色加深档，对比 5.2:1） */
   --name: #8c6231;
-  --sheen: rgba(23, 23, 26, 0.3);
 
   --border: rgba(0, 0, 0, 0.07);
   --border-strong: rgba(0, 0, 0, 0.14);
@@ -647,18 +643,19 @@ textarea {
 }
 @keyframes blink { 0%, 49% { opacity: 1; } 50%, 100% { opacity: 0; } }
 @keyframes loader-spin { to { transform: rotate(360deg); } }
-/* 执行中工具图标扫光（2026-10-06 对话流视觉裁决）：
-   chat/Block.vue 普通工具块与 bash 组头的 running 图标容器（relative overflow-hidden
-   rounded-sm）内叠加 absolute inset-0 扫光层，Tailwind 任意值类
-   animate-[sheen-x_2.8s_cubic-bezier(.45,0,.25,1)_infinite] +
-   bg-[linear-gradient(100deg,transparent_22%,var(--sheen)_50%,transparent_78%)] 消费；
+/* 执行中文字扫光（ui-optimize-unified 决策 10 / N13）：chat/Block.vue scoped
+   .text-sweep 类消费——background-clip:text 文字扫光，base/peak 全令牌化
+   （base = --sweep-base 缺省 --neutral-dim，peak = --neutral-fg）；周期 2.6s，
+   0%→55% 扫程（peak 自元素左外 -25% 移至右外 125%，背景位移动画不用 transform
+   是因为 clip:text 下字形填充由 background-position 驱动），55%→100% 停帧。
    keyframes 必须在全局定义——scoped 内定义会被编译器改名为哈希名而失效 */
-@keyframes sheen-x {
-  0% { transform: translateX(-130%); }
-  100% { transform: translateX(130%); }
+@keyframes text-sweep {
+  0% { background-position: 100% 0; }
+  55% { background-position: 0% 0; }
+  100% { background-position: 0% 0; }
 }
 /* Gantt 运行段透明度呼吸（workflow-viz WorkflowVizGantt 模板 Tailwind 任意值类
-   animate-[wfvz-gantt-pulse_1.5s_ease-in-out_infinite] 消费；同 sheen-x 理由
+   animate-[wfvz-gantt-pulse_1.5s_ease-in-out_infinite] 消费；同上理由
    keyframes 必须全局定义） */
 @keyframes wfvz-gantt-pulse {
   0%, 100% { opacity: 1; }

@@ -368,10 +368,6 @@ demo 阶段功能做到「可见 + 可交互 + 数据 mock」即够。不接 run
 --ease: cubic-bezier(0.4,0,0.2,1);
 --duration-fast: 120ms;  --duration: 200ms;  --duration-slow: 320ms;
 
-/* 执行中工具图标扫光带（2026-10-06 对话流视觉裁决）：暗色亮带 / 亮色主题反转暗带
-   rgba(23,23,26,0.3)，preset 不覆盖；消费点 = sheen-x keyframes（style.css 动画区） */
---sheen: rgba(236, 236, 236, 0.55);
-
 /* 组件尺寸 */
 --content-max-w: 720px;  --composer-btn-size: 30px;
 --bash-output-max-height: 240px;  --bar-fill-soft: 55%;
