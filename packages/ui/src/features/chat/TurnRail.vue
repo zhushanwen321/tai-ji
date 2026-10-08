@@ -5,13 +5,13 @@
     - 常驻右侧窄条，hover 弹出全 turn 列表浮层（mini-map + 快速跳转）
     - 窄条上有 viewport indicator 标记当前 turn 在窄条上的纵向位置
     - 浮层内每个节点两行：user 行（User 图标 + user 文本）+ agent 行（Bot 图标 + agent 摘要）
-    - 状态融入 Bot 图标颜色（失败 danger 红常驻 / 进行中 accent + loader-spin / 完成中性灰 ico）
+    - 状态融入 Bot 图标颜色（失败 danger 红常驻 / 进行中 accent + 呼吸弧 / 完成中性灰 ico）
     - toggle 按钮 hover 浮出（渐进披露），active 节点常驻可见，垂直居中于节点右侧
 
     状态色（W2，§13.2-C + §5.6B failed=danger）：
     - failed 图标常驻 text-danger（非 hover 渐显——rail 是全局导航，一眼可辨失败位置；§5.6B 统一 error=danger，推翻早期 CL5 的 warn 取舍）
     - failed 文本 text-neutral-mid（hover 升 text-neutral-fg）
-    - active 图标 text-accent + 双环 loader-spin 微缩（复用 Block.vue 的 RUNNING_LOADER_SVG）
+    - active 图标 text-accent + 呼吸弧微缩（复用 Block.vue 的 RUNNING_LOADER_SVG）
     - done 图标 text-neutral-ico；user 行图标 text-neutral-ico，文本 text-neutral-fg
     - chevron text-neutral-dim
     - spine/viewport/panel 的 bg-surface-hover/border-accent/bg-accent-soft 保留（中性灰+accent，不冲突）
@@ -68,7 +68,7 @@
                把已完结 user-only turn（命令取消 / 纯 notify 命令）也算进来致永久占位，故加门收敛；
                门关的 user-only turn 走空格 fallback（D2，与 user 行同款 `|| ' '`），不谎报进行中。 -->
           <div class="flex min-w-0 items-center gap-1.5">
-            <!-- active 态：双环 loader-spin（微缩，复用 Block.vue 的 RUNNING_LOADER_SVG，accent 蓝）。
+            <!-- active 态：呼吸弧（微缩，复用 Block.vue 的 RUNNING_LOADER_SVG，accent 蓝）。
                  loader 判据 isActiveTurn = sessionActive ∧ 视口位（activeTurnIndex），与占位判据
                  （sessionActive ∧ 真末位）有意分离：上滑时占位留在末位节点、loader 随视口走，
                  两判据同门反而错（占位会被视口态压空串，streaming/ask-user 等待击穿）。 -->
@@ -176,7 +176,7 @@ function isTurnExpanded(idx: number): boolean {
 
 /**
  * 判断指定 turn 是否为「激活态」（sessionActive 且当前激活）。
- * 激活态用 loader-spin 双环图标（accent 蓝），非激活态用 Bot 图标按 agentIconClass 着色。
+ * 激活态用呼吸弧图标（accent 蓝），非激活态用 Bot 图标按 agentIconClass 着色。
  */
 function isActiveTurn(_turn: MessageTurn, idx: number): boolean {
   return props.sessionActive && idx === props.activeTurnIndex

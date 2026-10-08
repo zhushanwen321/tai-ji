@@ -161,7 +161,7 @@ describe('TurnRail (IF4)', () => {
   it('TC-w3-8: agent-icon 颜色反映状态（done=text-neutral-ico / failed=text-warn 常驻 / active=text-accent + loader-spin）', () => {
     // 灰阶化（W2，§13.2-C + CL5 修正）：
     // turn0: done（无失败）→ neutral-ico；turn1: failed → warn（常驻哑光金，非 hover）；
-    // turn2: active（sessionActive + 当前激活）→ accent + 双环 loader-spin（span，非 Bot svg）
+    // turn2: active（sessionActive + 当前激活）→ accent + 呼吸弧 loader-spin（span，非 Bot svg）
     const turns = [
       makeRailTurn(0, { failed: false }),
       makeRailTurn(1, { failed: true }),
@@ -175,7 +175,7 @@ describe('TurnRail (IF4)', () => {
     expect(icons[0].classes()).toContain('text-neutral-ico')
     // failed turn → text-danger（agentIconClass hasFailedTool 分支，v6 视觉重构后 danger 色）
     expect(icons[1].classes()).toContain('text-danger')
-    // active turn → text-accent + animate-loader-spin（双环微缩 loader，进行中信号）
+    // active turn → text-accent + animate-loader-spin（呼吸弧微缩 loader，进行中信号）
     expect(icons[2].classes()).toContain('text-accent')
     expect(icons[2].classes()).toContain('animate-loader-spin')
   })

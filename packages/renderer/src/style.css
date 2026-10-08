@@ -643,6 +643,32 @@ textarea {
 }
 @keyframes blink { 0%, 49% { opacity: 1; } 50%, 100% { opacity: 0; } }
 @keyframes loader-spin { to { transform: rotate(360deg); } }
+/* 呼吸弧 loader 弧段动画（ui-optimize-unified 决策 11 / N14）：RUNNING_LOADER_SVG
+   （packages/ui features/chat/block-icon.ts 单一出口，chat 域 7 处 running 挂点共用）
+   v-html 注入的 .ld-arc circle 消费——v-html 内容不带 scoped data-v 属性，Tailwind 类
+   也无法静态命中，故与 reka-*-transition 同层属全局动画原语（check_css_tokens.py
+   ALLOWED_GLOBAL_ANIMATION_CLASSES 白名单登记）。呼吸 = dasharray 16%↔54%（pathLength=100
+   归一，gap 100 保证单段弧）+ 150° 摆动（-75°↔+75°）同周期同相（2.3s ease-in-out）；
+   整体 1.15s/圈旋转由容器 animate-loader-spin 简写承担（tailwind.config.ts）。
+   基态 = 固定相位短弧：prefers-reduced-motion 全局兜底（0.01ms 瞬切 + iteration 1）
+   播完回基态，静态呈现「淡轨整圈 + 固定相位弧段」，与动画 0% 帧一致无跳变。 */
+.ld-arc {
+  stroke-dasharray: 16 100;
+  transform: rotate(-75deg);
+  transform-box: fill-box;
+  transform-origin: center;
+  animation:
+    ld-arc-swing 2.3s ease-in-out infinite,
+    ld-arc-dash 2.3s ease-in-out infinite;
+}
+@keyframes ld-arc-swing {
+  0%, 100% { transform: rotate(-75deg); }
+  50% { transform: rotate(75deg); }
+}
+@keyframes ld-arc-dash {
+  0%, 100% { stroke-dasharray: 16 100; }
+  50% { stroke-dasharray: 54 100; }
+}
 /* 执行中文字扫光（ui-optimize-unified 决策 10 / N13）：chat/Block.vue scoped
    .text-sweep 类消费——background-clip:text 文字扫光，base/peak 全令牌化
    （base = --sweep-base 缺省 --neutral-dim，peak = --neutral-fg）；周期 2.6s，

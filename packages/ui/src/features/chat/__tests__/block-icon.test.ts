@@ -58,12 +58,17 @@ describe('block-icon.ts', () => {
     expect(BLOCK_ICON_LUCIDE['bash-group']).toBe(SquareTerminal)
   })
 
-  it('RUNNING_LOADER_SVG: 双环 loader（含 svg + circle，外环 r=10 + 内实心 r=3）', () => {
+  it('RUNNING_LOADER_SVG: 呼吸弧 loader（淡轨整圈 .ld-track + accent 弧段 .ld-arc pathLength=100，r=10）', () => {
     expect(RUNNING_LOADER_SVG).not.toBe('')
     expect(RUNNING_LOADER_SVG).toContain('<svg')
     expect(RUNNING_LOADER_SVG).toContain('circle')
+    // 淡轨整圈（stroke 16% 透明度）+ 弧段（pathLength=100 归一，dasharray 呼吸/摆动由
+    // 全局 .ld-arc 类驱动——style.css 动画 SSOT 区）
+    expect(RUNNING_LOADER_SVG).toContain('class="ld-track"')
+    expect(RUNNING_LOADER_SVG).toContain('opacity="0.16"')
+    expect(RUNNING_LOADER_SVG).toContain('class="ld-arc"')
+    expect(RUNNING_LOADER_SVG).toContain('pathLength="100"')
     expect(RUNNING_LOADER_SVG).toContain('r="10"')
-    expect(RUNNING_LOADER_SVG).toContain('r="3"')
     expect(RUNNING_LOADER_SVG).toContain('stroke-width="1.7"')
   })
 })

@@ -3,7 +3,7 @@
     subagent 块（@zhushanwen/pi-subagent-workflow，重写 fork）—— collapsed only（spec §10 / design D2）。
     异步 background 执行：只展示发起参数（input），看不到执行过程（结果由 agent 后续 turn 总结）。
     单行摘要：subagent prefix + agent · slug + (model · thinking X)。
-    running → 双环 loader；failed → icon + 文案降 neutral-mid。
+    running → 呼吸弧 loader；failed → icon + 文案降 neutral-mid。
     点击整行 → openSubagent（drawer 开 subagent tab，主对话流保留）。subagentId 取自 toolResult.output。
   -->
   <div class="trace-subagent pb-2.5 mb-0.5" data-testid="subagent-block">
@@ -11,7 +11,7 @@
       class="flex min-w-0 cursor-pointer select-none items-center gap-1.5 text-[length:var(--text-base)] font-medium text-neutral-dim transition-opacity hover:opacity-80"
       @click="openSubagentDrawer"
     >
-      <!-- running 态 loader（双环 + accent），其余走 users ICON -->
+      <!-- running 态 loader（呼吸弧 + accent），其余走 users ICON -->
       <span v-if="isRunning" class="inline-flex size-[13px] shrink-0 items-center justify-center text-accent animate-loader-spin" v-html="RUNNING_LOADER_SVG" /> <!-- eslint-disable-line vue/no-v-html -- hardcoded constant from block-icon.ts -->
       <component
         :is="BLOCK_ICON_LUCIDE.subagent"

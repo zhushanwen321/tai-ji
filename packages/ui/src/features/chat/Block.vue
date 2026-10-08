@@ -122,7 +122,7 @@
         @keydown.enter.prevent="toggleGroup"
         @keydown.space.prevent="toggleGroup"
       >
-        <!-- running 态 loader（双环 + accent），其余走静态组图标。
+        <!-- running 态 loader（呼吸弧 + accent），其余走静态组图标。
              组头文字（×N · 共 Xs 计数/耗时口径）是稳定标识，不跑文字扫光（决策 10） -->
         <span v-if="group.hasRunning" class="inline-flex size-[13px] shrink-0 items-center justify-center text-accent">
           <span class="inline-flex size-full items-center justify-center animate-loader-spin" v-html="RUNNING_LOADER_SVG" /> <!-- eslint-disable-line vue/no-v-html -- hardcoded constant from block-icon.ts -->
@@ -160,7 +160,7 @@
           class="flex min-w-0 cursor-pointer select-none items-center gap-1.5 text-[length:var(--text-base)] [font-weight:var(--fw-mid)] text-neutral-dim transition-opacity hover:opacity-80"
           @click="openWorkflowDrawer"
         >
-          <!-- running 态 loader（双环 + accent），其余走 list-checks ICON -->
+          <!-- running 态 loader（呼吸弧 + accent），其余走 list-checks ICON -->
           <span v-if="isRunning" class="inline-flex size-[13px] shrink-0 items-center justify-center text-accent animate-loader-spin" v-html="RUNNING_LOADER_SVG" /> <!-- eslint-disable-line vue/no-v-html -- hardcoded constant from block-icon.ts -->
           <component :is="BLOCK_ICON_LUCIDE.workflow" v-else :class="[BLOCK_ICON_CLASS, isFailed ? 'hover:text-warn' : '']" />
           <span :class="BLOCK_LABEL_CLASS">{{ t('panel.message.workflow') }}</span>
@@ -206,7 +206,7 @@
           :title="toolExpanded ? t('panel.message.collapse') : t('panel.message.expand')"
           @click="toggleTool"
         >
-          <!-- running 态 loader（双环 + accent），其余走 BLOCK_ICON_LUCIDE[iconKind] -->
+          <!-- running 态 loader（呼吸弧 + accent），其余走 BLOCK_ICON_LUCIDE[iconKind] -->
           <span v-if="isRunning" class="inline-flex size-[13px] shrink-0 items-center justify-center text-accent">
             <span class="inline-flex size-full items-center justify-center animate-loader-spin" v-html="RUNNING_LOADER_SVG" /> <!-- eslint-disable-line vue/no-v-html -- hardcoded constant from block-icon.ts -->
           </span>

@@ -20,7 +20,7 @@ import type { ToolCallStatus } from '@taiji/shared'
  *
  * BLOCK_ICON_LUCIDE 是 H 最终图标（brain/book-open/square-terminal/pencil/users/list-checks/
  * alert-triangle/arrow-right），统一规格 14×14 / stroke-width 1.7 / currentColor。
- * running 态不走该映射，消费方改用 RUNNING_LOADER_SVG（双环 loader，1.4s 旋转 + accent 蓝）。
+ * running 态不走该映射，消费方改用 RUNNING_LOADER_SVG（呼吸弧 loader，三重动画 + accent 蓝）。
  *
  * 归属：本文件是图标决策的 SSOT（IF1/IF2 契约）。消费方拿 BlockIconKind 后，running 用
  * RUNNING_LOADER_SVG，其余用 BLOCK_ICON_LUCIDE[kind]。
@@ -82,18 +82,29 @@ export const BLOCK_ICON_LUCIDE: Record<Exclude<BlockIconKind, 'running'>, Compon
 }
 
 /**
- * running 态双环 loader SVG（Demo H）。
- * 外环 circle r=10 opacity 0.35 + 内实心 circle r=3，viewBox 0 0 24 24，
- * stroke currentColor stroke-width 1.7 / linecap round / linejoin round。
- * 消费方渲染时套 class animate-loader-spin（1.4s 线性旋转）+ text-accent。
- * prefers-reduced-motion 由 style.css 全局 @media reduce 兜底（animation-duration:0.01ms）。
+ * running 态呼吸弧 loader SVG（ui-optimize-unified 决策 11 / N14）。
+ * 淡轨整圈 circle r=10 opacity 0.16 + accent 弧段 circle r=10 pathLength=100，
+ * viewBox 0 0 24 24，stroke currentColor stroke-width 1.7 / linecap round / linejoin round。
+ * 颜色唯一 accent（消费方 text-accent 继承 currentColor），不加发光与缩放脉冲。
  *
- * 外环用 .ld-outer class 标记 opacity（消费方 scoped 可覆盖，但默认用 inline opacity 保证 v-html 可用）。
+ * 三重动画的驱动位置：
+ * - 整体旋转 = 消费方容器 class animate-loader-spin（1.15s/圈 cubic-bezier(.6,.1,.35,.9)，
+ *   简写注册在 renderer tailwind.config.ts animation 段）；
+ * - 弧段呼吸/摆动 = 全局 .ld-arc 类（style.css 动画 SSOT 区：dasharray 16%↔54% 呼吸
+ *   2.3s ease-in-out + 150° 摆动同周期同相）——v-html 注入的 SVG 内部元素不带 scoped
+ *   data-v 属性，Tailwind 类也无法静态命中，只能全局类声明（keyframes 同理必须全局）。
+ *
+ * prefers-reduced-motion 由 style.css 全局 @media reduce 兜底（animation-duration 0.01ms
+ * + iteration 1）：三重动画全部瞬切终态后回 .ld-arc 基态——静态呈现「淡轨整圈 + 固定
+ * 相位弧段」，无运动感但保留形态识别。
+ *
+ * 淡轨 .ld-track / 弧段 .ld-arc class 仅作形态标记与动画挂点，样式一律由 CSS 侧持有，
+ * inline 只保留无动画的静态属性（opacity/pathLength），保证 v-html 可用。
  */
 export const RUNNING_LOADER_SVG: string =
   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">' +
-  '<circle class="ld-outer" cx="12" cy="12" r="10" opacity="0.35"/>' +
-  '<circle cx="12" cy="12" r="3" fill="currentColor" stroke="none"/>' +
+  '<circle class="ld-track" cx="12" cy="12" r="10" opacity="0.16"/>' +
+  '<circle class="ld-arc" cx="12" cy="12" r="10" pathLength="100"/>' +
   '</svg>'
 
 /**

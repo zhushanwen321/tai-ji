@@ -15,7 +15,7 @@
     BashOutputBlock 作为 Virtualizer 子项挂载后由 virtua 统一接管测高，无需注册 useResizeReport。
 
     灰阶化（main-fusion W4 / §13.2-D）：terminal 图标改 neutral-ico，streaming 态改用本分支
-    双环 loader-spin（复用 Block.vue 的 RUNNING_LOADER_SVG + animate-loader-spin），timeout/
+    呼吸弧 loader（复用 Block.vue 的 RUNNING_LOADER_SVG + animate-loader-spin），timeout/
     cancelled 改 neutral-dim，exit 0 保留 success（唯一彩色例外，成功确认语义），exit N 改 warn
     （哑光金，bash exit N 是用户命令失败非致命，不该用 danger 红告警权重）。取消按钮/输出文本/
     截断标记/空输出占位全切到 neutral-* 谱系。结构层零改动（bashExecution 消费 /
@@ -38,7 +38,7 @@
         >{{ t('panel.message.bashNoContext') }}</span>
       </div>
       <div class="flex shrink-0 items-center gap-1.5">
-        <!-- 灰阶化（§13.2-D）：streaming 态改用本分支双环 loader-spin（复用 Block.vue RUNNING_LOADER_SVG +
+        <!-- 灰阶化（§13.2-D）：streaming 态改用本分支呼吸弧 loader（复用 Block.vue RUNNING_LOADER_SVG +
              animate-loader-spin，accent 蓝），替代 main 的 Loader2 animate-spin -->
         <span
           v-if="isStreaming"
