@@ -380,7 +380,7 @@ const composerStubs = {
   CommandPopover: CommandPopoverStub,
   AddMenuPopover: AddMenuPopoverStub,
   ContextChipsBar: SIMPLE,
-  ContextCapacityPopover: SIMPLE,
+  ComposerCapacityBar: SIMPLE,
   ModelSelectPopover: SIMPLE,
   ThinkingLevelPopover: SIMPLE,
   RetryIndicator: SIMPLE,

@@ -224,8 +224,10 @@ export default {
     unavailableTitle: 'Git 不可用，无法读取仓库状态',
   },
   context: {
-    // 指标聚合入口（W3a 单图标聚合按钮，hover 出容量+速度+缓存聚合页）title
+    // 指标聚合入口（W3a 单图标聚合按钮；ui-optimize 决策 6 起对所有 fit 级常驻，hover 出容量+速度+缓存聚合页）title
     metricsAggregateTitle: '指标',
+    // 顶缘容量细条（ui-optimize 决策 6 / N7）可访问性提示（aria-label；细条只给色阶不显数字）
+    capacityBarHint: '上下文用量 {percent}%',
     capacity: '上下文容量',
     used: '已用',
     total: '总量',

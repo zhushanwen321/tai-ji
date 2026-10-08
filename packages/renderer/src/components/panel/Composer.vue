@@ -105,13 +105,14 @@
           @blur="onBoxFocusOut"
         />
 
-      <!-- 底栏三簇（D6 修订「三步聚合」）：左簇（`+` / 托盘 / 插件 toolbar，shrink-0）· 中簇（可压缩占位）·
-           右簇（指标 / 模型+思考 / 发送位，shrink-0 且发送位右锚）。**flex-nowrap 永不换行**；
-           逐组形态由密度状态机（ResizeObserver 实测两簇占宽 vs 可用宽 → composer-density）驱动，
-           累计三步退化：序 0 发送位/`+` 不退化不裁剪 · 序 1 左簇收**单图标**聚合按钮 · 序 2 指标收
-           单图标聚合按钮（hover 聚合页）· 序 3 模型+思考收单图标聚合按钮（click 弹层 + hover 行内
-           切换；非聚合态模型名**恒完整展示**，无截断态）· 顶格仍溢出 → 锚点保护（中部让位）。
-           禁硬编码 px 断点（判据全在实测回路，`»` 省略号入口已退役）。
+      <!-- 底栏三簇（D6 修订「三步聚合」+ ui-optimize 决策 6）：左簇（`+` / 托盘 / 插件 toolbar，shrink-0）·
+           中簇（可压缩占位）· 右簇（指标聚合 / 模型+思考 / 发送位，shrink-0 且发送位右锚）。
+           **flex-nowrap 永不换行**；逐组形态由密度状态机（ResizeObserver 实测两簇占宽 vs 可用宽
+           → composer-density）驱动：序 0 发送位/`+` 不退化不裁剪 · 序 1 左簇收**单图标**聚合按钮 ·
+           序 2 指标**默认聚合**（单图标聚合按钮对所有 fit 级常驻，hover 聚合页——fit 0 平铺形态
+           已退役，L2 不再产生形态变化，fit 回路自然穿过）· 序 3 模型+思考收单图标聚合按钮
+           （click 弹层 + hover 行内切换；非聚合态模型名**恒完整展示**，无截断态）·
+           顶格仍溢出 → 锚点保护（中部让位）。禁硬编码 px 断点（判据全在实测回路，`»` 省略号入口已退役）。
            左右两簇挂 data-composer-cluster：fit 回路据二者占宽之和判「放不放得下」（中簇可压到 0）。 -->
       <div
         ref="composerBarRef"
@@ -143,8 +144,8 @@
                badge = useBtwTabData 聚合 Σ unread（清除 = 线内容进视口）。 -->
           <ComposerBtwButton v-if="showBtw && sessionId" :session-id="sessionId" />
           <!-- 任务托盘（设计 docs/design/composer-task-tray.md——已删除，git 可追溯——D1：`+` 之后、composer.toolbar 之前）。
-               挂载/可见拆两层：v-if="sessionId"（landing 态卸载，与 GenStatsTriggers /
-               ContextCapacityPopover 同判据，无 session 无任务面）；锚点保护态 v-show 样式折叠
+               挂载/可见拆两层：v-if="sessionId"（landing 态卸载，与指标聚合按钮同判据，无 session 无任务面）；
+               锚点保护态 v-show 样式折叠
                **不卸载**——`update:has-items` 的 emitter 与 useTrayCounts 数据面唯一实例都活在
                本组件内，保护态阈值附近的宽度抖动（拖拽窗口/分屏）每次 protect/unprotect 往返
                若走 v-if 都会重订阅 + 重首拉。
@@ -178,26 +179,13 @@
 
         <!-- 右簇：指标 / 模型+思考 / 发送位（shrink-0，发送位右锚不漂移） -->
         <div data-composer-cluster="right" class="flex min-w-0 shrink-0 items-center gap-0">
-          <!-- 序 2：指标（容量 + 速度 + 缓存）。展开 = 三触发器平铺（各自浮层保留为再入路径）；
-               aggregated = **单图标**聚合按钮（hover 弹指标聚合页，容量/速度/缓存三段全量）；
-               absent = 锚点保护让位（不渲染）。landing（无 session）不渲染。 -->
-          <div
-            v-if="sessionId && density.slots.metrics !== 'absent'"
-            :class="density.slots.metrics === 'aggregated' ? AGGREGATE_GROUP_CLASS : EXPANDED_GROUP_CLASS"
-          >
-            <ComposerMetricsAggregate
-              v-if="density.slots.metrics === 'aggregated'"
-              :session-id="sessionId"
-              :model-id="currentModelId"
-            />
-            <template v-else>
-              <!-- 生成指标双触发器（composer-gen-stats §3.1：速度 t/s + 缓存命中率 %，位于上下文容量左侧）。
-                   landing（无 session，尚未开始）隐藏：无采样无用量，两项恒「—」横线无信息量。
-                   [HISTORICAL] variant（simplified/iconic 中间态）已随三步聚合退役——收不完就整组聚合。 -->
-              <GenStatsTriggers :session-id="sessionId" :model-id="currentModelId" />
-              <!-- 上下文容量（spec §2a：hover 出容量 popover；session 通道订阅 context.update） -->
-              <ContextCapacityPopover :session-id="sessionId" :model-id="currentModelId" />
-            </template>
+          <!-- 序 2：指标（容量 + 速度 + 缓存）。ui-optimize 决策 6：指标**默认聚合**——单图标
+               聚合按钮对所有 fit 级常驻（hover 弹指标聚合页，容量/速度/缓存三段全量）；
+               fit 0 平铺直挂渲染分支（GenStatsTriggers / ContextCapacityPopover）已随决策退役，
+               形态域收窄为 aggregated | absent（absent = 锚点保护让位，不渲染）。
+               landing（无 session）不渲染。 -->
+          <div v-if="sessionId && density.slots.metrics !== 'absent'" :class="AGGREGATE_GROUP_CLASS">
+            <ComposerMetricsAggregate :session-id="sessionId" :model-id="currentModelId" />
           </div>
           <!-- 序 3：模型 + 推理档位。展开 = 模型名**恒完整展示**（无 88/56px 截断态）+ 档位按钮；
                aggregated = **单图标**聚合按钮（click 弹模型列表+思考档位，hover 行内即切换，D2）。 -->
@@ -285,6 +273,10 @@
         </Button>
         </div>
       </div>
+
+        <!-- 顶缘容量细条（ui-optimize 决策 6 / N7）：2px 色阶预警条，只显分档不显数字
+             （精确读数在指标聚合按钮 hover 页）；数字 aria 提示见组件自身。 -->
+        <ComposerCapacityBar v-if="sessionId" :session-id="sessionId" />
     </div>
     </CommandPopover>
 
@@ -303,11 +295,10 @@ import AddMenuPopover from './AddMenuPopover.vue'
 import ComposerBtwButton from './tray/ComposerBtwButton.vue'
 import ComposerTray from './tray/ComposerTray.vue'
 import CommandPopover from './CommandPopover.vue'
-import ContextCapacityPopover from './ContextCapacityPopover.vue'
-import GenStatsTriggers from './GenStatsTriggers.vue'
 import ModelSelectPopover from './ModelSelectPopover.vue'
 import ThinkingLevelPopover from './ThinkingLevelPopover.vue'
 import ComposerMetricsAggregate from './ComposerMetricsAggregate.vue'
+import ComposerCapacityBar from './ComposerCapacityBar.vue'
 import ModelThinkingAggregate from './ModelThinkingAggregate.vue'
 import ContextChipsBar from './ContextChipsBar.vue'
 import RetryIndicator from './RetryIndicator.vue'

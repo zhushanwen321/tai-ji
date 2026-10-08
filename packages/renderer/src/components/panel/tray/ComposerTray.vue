@@ -4,7 +4,7 @@
 
   ── 结构与挂载（D1/D12）──
   挂 `Composer.vue` 的 `.composer-bar` 左簇、AddMenuPopover 之后（`v-if="sessionId"`，landing 态
-  隐藏与 GenStatsTriggers 同判据）；随 Composer 实例化（per-Composer 归属），数据按该 Composer 绑定
+  隐藏与指标聚合按钮同判据——无 session 无任务面）；随 Composer 实例化（per-Composer 归属），数据按该 Composer 绑定
   的 sessionId 过滤——三件计数走 `useTrayCounts(sessionId)`（**唯一实例在本外壳创建**，见文末
   「数据面归属」），widget 走 ViewHostStore 的 per-session 分区，切 session 即跟随。
   条目 = built-in 四件（bash → subagent → workflow → session，固定序恒在最左）+ 协议 widget 区（排序后逐个

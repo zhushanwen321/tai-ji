@@ -273,7 +273,6 @@ const composerStubs = {
   CommandPopover: defineComponent({ name: 'CommandPopover', template: '<div><slot /></div>' }),
   AddMenuPopover: SIMPLE,
   ContextChipsBar: SIMPLE,
-  ContextCapacityPopover: SIMPLE,
   RetryIndicator: SIMPLE,
   QueueBubble: SIMPLE,
 }

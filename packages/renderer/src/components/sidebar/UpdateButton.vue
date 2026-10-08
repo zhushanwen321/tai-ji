@@ -46,7 +46,7 @@
     >
       <Loader2 class="size-3 animate-spin" />
       <span class="tabular-nums">{{ t('sidebar.update.downloading', { percent: state.percent }) }}</span>
-      <!-- 进度条（与 ContextCapacityPopover.vue:42-47 同范式：div 拼，bg-surface-2 容器 + bg-accent 子条） -->
+      <!-- 进度条（div 拼：bg-surface-2 容器 + bg-accent 子条） -->
       <span
         class="h-1 w-10 overflow-hidden rounded-full bg-surface-2"
         role="progressbar"

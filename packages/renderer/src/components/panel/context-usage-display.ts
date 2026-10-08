@@ -1,10 +1,13 @@
 /**
- * context-usage-display —— 上下文用量触发器（底栏 chip）与 ContextCapacityCard（浮层内容）
- * 共用的显示纯函数。
+ * context-usage-display —— 上下文用量的显示纯函数（K/M 制格式化 + bar 配色分档）。
  *
- * 为什么独立成模块（防两处复制）：W3a 拆卡后格式化与分档逻辑存在两个消费方，
- * 「12K / 1.6M 的 K/M 制」与「>70% warn / >90% danger 的 bar 配色」若各写一份，
- * 后续调整口径必然漂移。零 vue 组件依赖，i18n 无关（纯数值格式化）。
+ * 消费方：ContextCapacityCard（hover 指标聚合页的容量卡）与 ComposerCapacityBar
+ * （composer 顶缘容量细条，ui-optimize 决策 6）。[HISTORICAL] 底栏容量触发器（chip）
+ * 已随决策 6 平铺形态退役——原「触发器与浮层内容共用」的动机句随之收窄。
+ *
+ * 为什么独立成模块（防多处复制）：格式化与分档逻辑存在多个消费方，
+ * 「12K / 1.6M 的 K/M 制」与两套 bar 配色分档若各写一份，后续调整口径必然漂移。
+ * 零 vue 组件依赖，i18n 无关（纯数值格式化）。
  */
 
 /** 用量分档阈值（<70 accent · 70–90 warning · >90 danger，与设计 §3 一致） */
@@ -32,4 +35,23 @@ export function usageBarClass(percent: number): string {
   if (percent > USAGE_DANGER_THRESHOLD) return 'bg-danger'
   if (percent > USAGE_HIGH_THRESHOLD) return 'bg-warn'
   return 'bg-gradient-to-r from-accent to-accent-hover'
+}
+
+/**
+ * 容量细条（ui-optimize 决策 6 / N7：composer 顶缘 2px 余量指示条）三段色阶。
+ * 与浮层卡内 bar（usageBarClass）阈值**不同**（80/95 vs 70/90）——细条是「余量将尽」的
+ * 预警通道，只提醒不承载精确读数（数字在 hover 指标聚合页），阈值刻意后移降低打扰面。
+ * 两套阈值并存是有意差异（业务含义不同），禁止合并；后续若裁决统一，两处同批改。
+ */
+
+/** 细条 warn 阈值（>80% 变 warn） */
+export const CAPACITY_BAR_WARN_THRESHOLD = 80
+/** 细条 danger 阈值（>95% 变 danger） */
+export const CAPACITY_BAR_DANGER_THRESHOLD = 95
+
+/** 使用率 → 细条配色 token 工具类（常态 accent 半透明 · >80% warn · >95% danger） */
+export function capacityBarClass(percent: number): string {
+  if (percent > CAPACITY_BAR_DANGER_THRESHOLD) return 'bg-danger'
+  if (percent > CAPACITY_BAR_WARN_THRESHOLD) return 'bg-warn'
+  return 'bg-accent-soft'
 }

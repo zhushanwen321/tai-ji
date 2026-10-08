@@ -2,7 +2,8 @@
  * Composer 底栏密度接线测试（D6 修订「三步聚合」版）。
  *
  * 覆盖（三视角，用户可见 DOM 断言优先）：
- * - 使用者（黑盒）：① 实测溢出逐级触发 左簇聚合 → 指标聚合 → 模型+思考聚合（累计）；
+ * - 使用者（黑盒）：① 实测溢出逐级触发 左簇聚合 → 模型+思考聚合（累计）；指标聚合按钮
+ *   **恒常驻**（ui-optimize 决策 6：fit 0 平铺直挂形态已退役，L2 无形态变化、fit 回路自然穿过）；
  *   ② 锚点保护：顶格仍溢出 → 中部让位，`+` 与发送按钮恒在且为首末按钮（零裁剪）；
  *   ③ 不留死入口：托盘全无 + 插件零贡献 → 无聚合入口；`»` Ellipsis 菜单在任何状态都不出现（退役回归）。
  * - 观察者（形态）：底栏 `flex-nowrap`（永不换行）+ 三簇结构；`data-fit` / `data-slot-*` /
@@ -96,8 +97,6 @@ vi.mock('@/stores/session', () => composerSessionStoreModule())
 
 // ── 子组件 stub（ComposerInput mock 收敛 composer-mount 共用面工厂）──
 const { lastInputText, ComposerInputMock } = makeComposerInputMock()
-// GenStatsTriggers 专属空 stub（共享骨架未覆盖的本文件特例）
-const SIMPLE = defineComponent({ name: 'SimpleStub', template: '<div />' })
 /** 聚合组件 stub（契约 testid = 组件级测试约定值；断言「哪个组件被挂载」） */
 const MetricsAggregateStub = defineComponent({
   name: 'ComposerMetricsAggregate',
@@ -113,7 +112,6 @@ const { AddMenuPopover: _addMenuPopoverReal, ...childStubs } = composerChildStub
 const stubs = {
   ComposerInput: ComposerInputMock,
   ...childStubs,
-  GenStatsTriggers: SIMPLE,
   ComposerMetricsAggregate: MetricsAggregateStub,
   ModelThinkingAggregate: ModelThinkingAggregateStub,
 }
@@ -122,8 +120,8 @@ const SID = 's-density'
 
 /** S4 两用例共用的全档宽度矩阵（截断 class 扫描 + `»` 退役检查；末行全档放不下驱动顶格） */
 const WIDTH_MATRIX: Array<[number, Record<string, number>]> = [
-  [800, { 0: 300, 1: 200, 2: 150, 3: 120 }],
-  [400, { 0: 500, 1: 300, 2: 180, 3: 100 }],
+  [800, { 0: 300, 1: 200, 2: 200, 3: 120 }],
+  [400, { 0: 500, 1: 300, 2: 300, 3: 100 }],
   [300, { 0: 500, 1: 500, 2: 500, 3: 500 }],
 ]
 
@@ -232,47 +230,49 @@ describe('底栏三簇与永不换行（D6 硬约束）', () => {
   })
 })
 
-describe('三步聚合：实测溢出 → 状态机 → DOM（累计，左簇 → 指标 → 模型）', () => {
-  it('放得下 → fit 0 全展开：托盘逐件按钮在、无任何聚合入口', async () => {
-    await mountAndFit(800, { 0: 300, 1: 200, 2: 150, 3: 120 })
+describe('三步聚合 + 决策 6 默认聚合：实测溢出 → 状态机 → DOM', () => {
+  it('放得下 → fit 0：左簇/模型展开、指标聚合常驻（决策 6 宽窗口右簇 = 聚合/模型/发送）', async () => {
+    await mountAndFit(800, { 0: 300, 1: 200, 2: 200, 3: 120 })
     expect(bar().attributes('data-fit')).toBe('0')
     expect(bar().attributes('data-slot-left-cluster')).toBe('expanded')
-    expect(bar().attributes('data-slot-metrics')).toBe('expanded')
+    expect(bar().attributes('data-slot-metrics')).toBe('aggregated')
     expect(bar().attributes('data-slot-model-thinking')).toBe('expanded')
     expect(bar().find('[data-testid="tray-aggregate-button"]').exists()).toBe(false)
     expect(bar().findAll('[data-testid="tray-builtin-button"]').length).toBeGreaterThanOrEqual(2)
-    expect(bar().find('[data-testid="composer-metrics-aggregate"]').exists()).toBe(false)
+    // 指标聚合按钮常驻（fit 0 平铺直挂分支已退役）
+    expect(bar().find('[data-testid="composer-metrics-aggregate"]').exists()).toBe(true)
     expect(bar().find('[data-testid="composer-model-thinking-aggregate"]').exists()).toBe(false)
   })
 
-  it('L1 收缩停级 → 左簇聚合（托盘单入口 + 运行数），指标/模型仍展开', async () => {
+  it('L1 收缩停级 → 左簇聚合（托盘单入口 + 运行数），指标恒聚合、模型仍展开', async () => {
     // L0 需求 80+500=580 > 400；L1 需求 80+300=380 ≤ 400 → 停在 L1
-    await mountAndFit(400, { 0: 500, 1: 300, 2: 180, 3: 100 })
+    await mountAndFit(400, { 0: 500, 1: 300, 2: 300, 3: 100 })
     expect(bar().attributes('data-fit')).toBe('1')
     expect(bar().attributes('data-slot-left-cluster')).toBe('aggregated')
     const aggregate = bar().find('[data-testid="tray-aggregate-button"]')
     expect(aggregate.exists()).toBe(true)
     expect(aggregate.find('[data-testid="tray-aggregate-count"]').text()).toBe('3')
     expect(bar().findAll('[data-testid="tray-builtin-button"]')).toHaveLength(0)
-    // 序 2/3 未触发
-    expect(bar().attributes('data-slot-metrics')).toBe('expanded')
-    expect(bar().attributes('data-slot-model-thinking')).toBe('expanded')
-  })
-
-  it('L2 → 指标聚合（单图标聚合组件挂载），模型仍完整形态', async () => {
-    // L0 580 > 300；L1 380 > 300；L2 260 ≤ 300 → 停在 L2
-    await mountAndFit(300, { 0: 500, 1: 300, 2: 180, 3: 100 })
-    expect(bar().attributes('data-fit')).toBe('2')
-    expect(bar().attributes('data-slot-left-cluster')).toBe('aggregated')
+    // 序 2 恒生效（决策 6）；序 3 未触发
     expect(bar().attributes('data-slot-metrics')).toBe('aggregated')
     expect(bar().find('[data-testid="composer-metrics-aggregate"]').exists()).toBe(true)
     expect(bar().attributes('data-slot-model-thinking')).toBe('expanded')
-    expect(bar().find('[data-testid="composer-model-thinking-aggregate"]').exists()).toBe(false)
+  })
+
+  it('L2 穿过 → 指标恒聚合使本级无形态变化，fit 回路直达 L3（模型聚合）', async () => {
+    // L0 580 > 300；L1 380 > 300；L2 无形态变化（380 > 300）→ L3 需求 80+100=180 ≤ 300 → 停在 L3
+    await mountAndFit(300, { 0: 500, 1: 300, 2: 300, 3: 100 })
+    expect(bar().attributes('data-fit')).toBe('3')
+    expect(bar().attributes('data-slot-left-cluster')).toBe('aggregated')
+    expect(bar().attributes('data-slot-metrics')).toBe('aggregated')
+    expect(bar().find('[data-testid="composer-metrics-aggregate"]').exists()).toBe(true)
+    expect(bar().attributes('data-slot-model-thinking')).toBe('aggregated')
+    expect(bar().find('[data-testid="composer-model-thinking-aggregate"]').exists()).toBe(true)
   })
 
   it('L3 顶格 → 模型+思考聚合（三步全生效）', async () => {
     // 所有级别都放不下 → 顶格 L3（且 demand 仍 > avail → 进锚点保护，见下个 describe）
-    await mountAndFit(300, { 0: 500, 1: 400, 2: 350, 3: 100 })
+    await mountAndFit(300, { 0: 500, 1: 400, 2: 400, 3: 100 })
     expect(bar().attributes('data-fit')).toBe('3')
     expect(bar().attributes('data-slot-model-thinking')).toBe('aggregated')
     expect(bar().find('[data-testid="composer-model-thinking-aggregate"]').exists()).toBe(true)
@@ -295,15 +295,15 @@ describe('锚点保护：顶格仍放不下 → 中部让位，锚点零裁剪�
     expect(lastButtonTitle()).toContain('发送')
   })
 
-  it('窗口放宽 → 解除保护并逐级降回全展开', async () => {
-    await mountAndFit(300, { 0: 500, 1: 400, 2: 350, 3: 320 })
+  it('窗口放宽 → 解除保护并逐级降回（指标恒聚合不随级变化）', async () => {
+    await mountAndFit(300, { 0: 500, 1: 400, 2: 400, 3: 320 })
     expect(bar().attributes('data-anchor-protected')).toBe('true')
     // 放宽到 600（L0 需求 380 ≤ 600）→ 解保护 + 连续降级到 0
-    await dispatchFitGeometry(600, 80, { 0: 300, 1: 200, 2: 150, 3: 120 })
+    await dispatchFitGeometry(600, 80, { 0: 300, 1: 200, 2: 200, 3: 120 })
     expect(bar().attributes('data-anchor-protected')).toBeUndefined()
     expect(bar().attributes('data-fit')).toBe('0')
     expect(bar().attributes('data-slot-left-cluster')).toBe('expanded')
-    expect(bar().attributes('data-slot-metrics')).toBe('expanded')
+    expect(bar().attributes('data-slot-metrics')).toBe('aggregated')
   })
 })
 
@@ -327,7 +327,7 @@ describe('S4 模型名零截断 + `»` 退役（构造性回归防线）', () =>
       expect(bar().find('[data-testid="composer-overflow-capacity-metrics"]').exists()).toBe(false)
     }
     // 插件有贡献 + 展开态：左簇仍是散图标路径（挂载点内联），无 `»`
-    await dispatchFitGeometry(800, 80, { 0: 300, 1: 200, 2: 150, 3: 120 })
+    await dispatchFitGeometry(800, 80, { 0: 300, 1: 200, 2: 200, 3: 120 })
     expect(bar().attributes('data-slot-left-cluster')).toBe('expanded')
   })
 })
@@ -335,7 +335,7 @@ describe('S4 模型名零截断 + `»` 退役（构造性回归防线）', () =>
 describe('不留死入口（能力标志 → 左簇形态）', () => {
   it('托盘全无条目 + 插件零贡献 → leftCluster absent，任何状态无聚合入口', async () => {
     setTrayCounts(0, 0)
-    await mountAndFit(800, { 0: 300, 1: 200, 2: 150, 3: 120 })
+    await mountAndFit(800, { 0: 300, 1: 200, 2: 200, 3: 120 })
     expect(bar().attributes('data-slot-left-cluster')).toBe('absent')
     expect(bar().find('[data-testid="tray-aggregate-button"]').exists()).toBe(false)
     // `+` 仍在（序 0 与托盘无关）
@@ -344,7 +344,7 @@ describe('不留死入口（能力标志 → 左簇形态）', () => {
 
   it('非保护态托盘恒挂载：条目归零→恢复，聚合按钮经 absent 再回来（emitter 存活链）', async () => {
     // L1 聚合态起步：聚合入口在场
-    await mountAndFit(400, { 0: 500, 1: 300, 2: 180, 3: 100 })
+    await mountAndFit(400, { 0: 500, 1: 300, 2: 300, 3: 100 })
     expect(bar().attributes('data-slot-left-cluster')).toBe('aggregated')
     expect(bar().find('[data-testid="tray-aggregate-button"]').exists()).toBe(true)
 
@@ -364,21 +364,21 @@ describe('不留死入口（能力标志 → 左簇形态）', () => {
 
 describe('fit 收敛回路（宽度矩阵驱动）', () => {
   it('放得下 → 不施加 fit 退化（data-fit = 0）', async () => {
-    await mountAndFit(800, { 0: 300, 1: 200, 2: 150, 3: 120 })
+    await mountAndFit(800, { 0: 300, 1: 200, 2: 200, 3: 120 })
     expect(bar().attributes('data-fit')).toBe('0')
   })
 
-  it('同宽度下反复派发不抖（级数稳定）', async () => {
-    await mountAndFit(300, { 0: 500, 1: 300, 2: 180, 3: 100 })
-    expect(bar().attributes('data-fit')).toBe('2')
+  it('同宽度下反复派发不抖（级数稳定；L2 穿过后停级 = 3）', async () => {
+    await mountAndFit(300, { 0: 500, 1: 300, 2: 300, 3: 100 })
+    expect(bar().attributes('data-fit')).toBe('3')
     for (let i = 0; i < 4; i += 1) {
-      await dispatchFitGeometry(300, 80, { 0: 500, 1: 300, 2: 180, 3: 100 })
+      await dispatchFitGeometry(300, 80, { 0: 500, 1: 300, 2: 300, 3: 100 })
     }
-    expect(bar().attributes('data-fit')).toBe('2')
+    expect(bar().attributes('data-fit')).toBe('3')
   })
 
   it('卸载后 observer 断开（不再消费派发）', async () => {
-    await mountAndFit(800, { 0: 300, 1: 200, 2: 150, 3: 120 })
+    await mountAndFit(800, { 0: 300, 1: 200, 2: 200, 3: 120 })
     const observer = ManualResizeObserverStub.created()[0]
     wrapper?.unmount()
     wrapper = null
