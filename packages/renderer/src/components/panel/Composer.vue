@@ -42,7 +42,7 @@
     >
       <div
         ref="composerBoxRef"
-        class="composer-box relative rounded-lg border bg-[var(--composer-bg)]"
+        class="composer-box relative rounded-lg border bg-bg"
         :class="[boxClass, focusRingClass]"
         data-testid="composer-box"
         @dragover.prevent="onDragOver"

@@ -32,7 +32,6 @@
   /* 用户气泡底色归浮层档（与 hover 详情卡/popover 同引 --bg-elevated，RGB 采样同值）。
      亮色族白纸化裁决保留（见 [data-theme="light"] 覆盖）：灰底易读作禁用态，纯白浮起。 */
   --bubble-bg: var(--bg-elevated);
-  --composer-bg: var(--bg-input);
   --bar-fill-soft: 55%;         /* progress-bar fill 柔化档 */
 
   /* ── 文字（neutral 谱系 · 纯中性四档，ui-optimize 决策2 去蓝偏）──
@@ -230,9 +229,8 @@
   --bg-elevated: #faf9f6;
   --bg-input: #e5e3df;
   --bg-card: #f1efec;
-  /* 亮色白纸：用户气泡与 composer 输入区用纯白（灰底读作禁用态，见 :root 注释） */
+  /* 亮色白纸：用户气泡用纯白（灰底读作禁用态，见 :root 注释） */
   --bubble-bg: #ffffff;
-  --composer-bg: #ffffff;
 
   --neutral-fg: #2b2a28;
   --neutral-mid: #706e6a;
