@@ -28,9 +28,12 @@
         <!-- 摘要行：flex 布局，min-h 锁定高度避免展开时跳动 -->
         <div class="flex items-center gap-1.5 min-h-[1.5rem]">
           <component :is="BLOCK_ICON_LUCIDE.thinking" :class="BLOCK_ICON_CLASS" />
-          <!-- 状态词 label：working 态跑文字扫光（决策 10）；base 覆盖为 mid 档对齐
-               BLOCK_LABEL_CLASS 常态字色（reduced-motion 停帧态 = 常态色，构造性回退） -->
-          <span :class="[BLOCK_LABEL_CLASS, working ? 'text-sweep [--sweep-base:var(--neutral-mid)]' : '']">{{ t('panel.message.thinkingBlock') }}</span>
+          <!-- 状态词 label：思考进行中跑文字扫光（决策 10）。生命周期 = 块级（thinkingEnd 未填），
+               非消息级 working——思考完结后消息仍在流式（工具执行中），扫光随思考完结熄灭。
+               base 覆盖为 mid 档对齐 BLOCK_LABEL_CLASS 常态字色（reduced-motion 停帧态 = 常态色，
+               构造性回退）。:key 绑定预览形态：预览分支切换（单行预览 ↔ 尾行视口）时预览元素
+               重建重启动画，状态词同帧重建使两处扫光同一动画相位（整体一起闪）。 -->
+          <span :key="thinkingSweepPhase" :class="[BLOCK_LABEL_CLASS, thinkingSweeping ? 'text-sweep [--sweep-base:var(--neutral-mid)]' : '']">{{ t('panel.message.thinkingBlock') }}</span>
           <span v-if="!working" class="text-neutral-faint" :class="thinkingExpanded ? 'invisible' : ''">·</span>
           <!-- working 态：单行尾行视口（2026-08 抖动修复重写）。横向钉右 = viewport flex
                justify-end + 行右对齐 + mr-auto（溢出裁左纯 CSS 无 scrollLeft 时序；mr-auto
@@ -44,11 +47,11 @@
             class="flex h-[1lh] min-w-0 flex-1 justify-end overflow-hidden text-[length:var(--text-xs)] leading-normal text-neutral-dim"
             :class="thinkingExpanded ? 'invisible' : ''"
           >
-            <span class="text-sweep mr-auto flex flex-col items-end self-start" :style="thinkScrollStyle">
+            <span :class="[thinkingSweeping ? 'text-sweep' : '', 'mr-auto flex flex-col items-end self-start']" :style="thinkScrollStyle">
               <span v-for="(line, i) in thinkDisplayLines" :key="i" class="whitespace-nowrap">{{ line }}</span>
             </span>
           </span>
-          <span v-else class="flex-1 min-w-0 truncate text-[length:var(--text-xs)] text-neutral-dim" :class="[working ? 'text-sweep' : '', thinkingExpanded ? 'invisible' : '']">{{ previewText }}</span>
+          <span v-else class="flex-1 min-w-0 truncate text-[length:var(--text-xs)] text-neutral-dim" :class="[thinkingSweeping ? 'text-sweep' : '', thinkingExpanded ? 'invisible' : '']">{{ previewText }}</span>
           <!-- N6 思考行时长（ui-optimize-unified 决策 8）：startTime/endTime 双有值才渲染（实时链路
                thinking_start/end 效果器填充；持久化重载链路 thinking part 无时间戳数据源 → 缺值
                维持现状展示 = 设计「推导不出则降级」分支按块级生效）；悬停显现与 thinking-time-slot
@@ -429,6 +432,28 @@ const thinkingDuration = computed(() => {
   if (typeof end !== 'number' || end <= start) return ''
   return formatDuration(end - start)
 })
+
+/** 思考是否已完结：endTime 晚于 startTime（实时链路 thinking_end 效果器填充；重载链路
+ *  双 undefined → false，但历史块 working 恒 false，扫光判定不受影响）。守卫与
+ *  thinkingDuration 同构。 */
+const thinkingEnded = computed(() => {
+  const start = props.thinkingStart
+  const end = props.thinkingEnd
+  return typeof start === 'number' && typeof end === 'number' && end > start
+})
+
+/** 思考扫光进行中（决策 10 生命周期修正）：消息级 working（assistant 仍在流式）不足以判
+ *  块级扫光——思考完结后消息继续流式（工具执行中），扫光必须随思考完结熄灭，否则思考行
+ *  与工具行同时闪。实时链路主路径：有 start 无 end = 进行中扫、end 有值 = 完结熄。
+ *  重载链路双时间戳缺失（进程恢复中的进行中会话）无数据可判 → 跟随消息级 working
+ *  （错闪成本低于进行中活性信号丢失）。 */
+const thinkingSweeping = computed(() => props.working === true && !thinkingEnded.value)
+
+/** 扫光相位键：预览形态（单行预览 ↔ 尾行视口）切换时预览元素重建重启动画，状态词以同
+ *  key 同帧重建，使两处扫光同一动画相位——整体一起闪，不做两处各闪。 */
+const thinkingSweepPhase = computed(() =>
+  thinkingSweeping.value ? (thinkingTailLines.value.length > 0 ? 'tail' : 'preview') : 'idle',
+)
 
 /** text 分支颜色：正常正文 streaming→neutral-mid、complete→neutral-fg（正文永不因 error 整条染红） */
 const textColorClass = computed(() => {

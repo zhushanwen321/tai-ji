@@ -796,6 +796,37 @@ describe('ui-optimize-unified U14: thinking 行时长（N6）', () => {
   })
 })
 
+describe('ui-optimize-unified 决策 10 修正: thinking 扫光生命周期（块级，随思考完结熄灭）', () => {
+  function mountSweepBlock(over: Record<string, unknown> = {}) {
+    return mount(Block, {
+      props: { type: 'thinking', content: 'deep reasoning content', thinkingId: 't-sweep', collapsed: undefined, messageTimestamp: 5000, ...over },
+      global: { provide: mockChatProvide(), stubs: { MarkdownRenderer: MdStub } },
+    })
+  }
+
+  it('思考进行中（working + 有 start 无 end）→ 状态词与预览两挂点都挂 text-sweep（整体一起闪）', () => {
+    const wrapper = mountSweepBlock({ working: true, thinkingStart: 1000 })
+    expect(wrapper.findAll('.text-sweep').length).toBe(2)
+  })
+
+  it('思考完结但消息仍在流式（working + start/end 双有值）→ 扫光熄灭（工具行闪时思考行不再闪）', () => {
+    const wrapper = mountSweepBlock({ working: true, thinkingStart: 1000, thinkingEnd: 3000 })
+    expect(wrapper.findAll('.text-sweep').length).toBe(0)
+  })
+
+  it('非 working（历史/完结块）→ 恒不扫', () => {
+    const idle = mountSweepBlock()
+    expect(idle.findAll('.text-sweep').length).toBe(0)
+    const ended = mountSweepBlock({ thinkingStart: 1000, thinkingEnd: 3000 })
+    expect(ended.findAll('.text-sweep').length).toBe(0)
+  })
+
+  it('重载链路时间戳缺失（start/end 双 undefined）→ 跟随消息级 working 扫（恢复中会话无数据可判，活性优先）', () => {
+    const wrapper = mountSweepBlock({ working: true })
+    expect(wrapper.findAll('.text-sweep').length).toBe(2)
+  })
+})
+
 // ═════════════════════════════════════════════════════════════════
 // ui-signal-density §3.3 D1 U3：Block bash-group 组块（连续 bash 折叠）
 // 组头三条计数口径由 core groupConsecutiveBash 算好（header），本文件断言渲染形态：
