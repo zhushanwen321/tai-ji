@@ -17,6 +17,8 @@ import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { Block } from '@taiji/ui'
 import type { ToolCall } from '@taiji/shared'
+// Block setup 顶部经 useChatViewDeps inject 壳依赖（ui-optimize-unified N1 起），直接 mount 必须注入 mock deps
+import { mockChatProvide } from '@/__tests__/helpers/chat-view-deps'
 
 function makeTool(over: Partial<ToolCall> = {}): ToolCall {
   return {
@@ -35,6 +37,7 @@ describe('W3: 普通 tool 展开体去重复 + 加补充细节条', () => {
   it('展开后不重复打印 toolName(args) 行（header 已有）', async () => {
     const wrapper = mount(Block, {
       props: { type: 'tool', tool: makeTool(), working: false },
+      global: { provide: mockChatProvide() },
     })
     await wrapper.find('[data-testid="tool-block-header"]').trigger('click')
     // 关键断言：展开体内不应再有 "edit(src/App.vue)" 这样的重复行
@@ -48,6 +51,7 @@ describe('W3: 普通 tool 展开体去重复 + 加补充细节条', () => {
   it('展开后 result 区无 Check/XCircle 图标（header 状态指示已覆盖）', async () => {
     const wrapper = mount(Block, {
       props: { type: 'tool', tool: makeTool({ output: 'success result' }), working: false },
+      global: { provide: mockChatProvide() },
     })
     await wrapper.find('[data-testid="tool-block-header"]').trigger('click')
     // 当前实现 :112-113 在 result 前放 Check/XCircle（红灯——改后应移除）
@@ -64,6 +68,7 @@ describe('W3: 普通 tool 展开体去重复 + 加补充细节条', () => {
   it('展开后显示补充细节条（耗时，从 startTime+endTime 计算）', async () => {
     const wrapper = mount(Block, {
       props: { type: 'tool', tool: makeTool({ startTime: 1000, endTime: 3000 }), working: false },
+      global: { provide: mockChatProvide() },
     })
     await wrapper.find('[data-testid="tool-block-header"]').trigger('click')
     // 关键断言：展开后显示耗时（diff=2000ms → formatDuration "2s"）
@@ -75,6 +80,7 @@ describe('W3: 普通 tool 展开体去重复 + 加补充细节条', () => {
   it('展开后结果文本仍可见（去重复不影响结果展示）', async () => {
     const wrapper = mount(Block, {
       props: { type: 'tool', tool: makeTool({ output: 'file content here' }), working: false },
+      global: { provide: mockChatProvide() },
     })
     await wrapper.find('[data-testid="tool-block-header"]').trigger('click')
     // 结果仍可见
@@ -88,6 +94,7 @@ describe('W3: 普通 tool 展开体去重复 + 加补充细节条', () => {
         tool: makeTool({ status: 'error', output: 'old_string not found', startTime: 1000, endTime: 1200 }),
         working: false,
       },
+      global: { provide: mockChatProvide() },
     })
     // failed 终态挂载默认展开（错误输出立即可见），error text 通过 displayContent 兜底显示
     expect(wrapper.text()).toContain('old_string not found')
@@ -111,6 +118,7 @@ describe('W3 补充：read/bash 工具特化 meta（行数/字符数自算）', 
         tool: makeTool({ toolName: 'read', output: fileContent, startTime: 1000, endTime: 3000 }),
         working: false,
       },
+      global: { provide: mockChatProvide() },
     })
     await wrapper.find('[data-testid="tool-block-header"]').trigger('click')
     const text = wrapper.text()
@@ -130,6 +138,7 @@ describe('W3 补充：read/bash 工具特化 meta（行数/字符数自算）', 
         tool: makeTool({ toolName: 'bash', output, startTime: 1000, endTime: 5200 }),
         working: false,
       },
+      global: { provide: mockChatProvide() },
     })
     await wrapper.find('[data-testid="tool-block-header"]').trigger('click')
     const text = wrapper.text()
@@ -149,6 +158,7 @@ describe('W3 补充：read/bash 工具特化 meta（行数/字符数自算）', 
         tool: makeTool({ toolName: 'read', output: bigContent, startTime: 1000, endTime: 2000 }),
         working: false,
       },
+      global: { provide: mockChatProvide() },
     })
     await wrapper.find('[data-testid="tool-block-header"]').trigger('click')
     // 2500 字符 → 2.5K 字符（panel.message.metaCharsK）
@@ -162,6 +172,7 @@ describe('W3 补充：read/bash 工具特化 meta（行数/字符数自算）', 
         tool: makeTool({ toolName: 'edit', output: 'done', startTime: 1000, endTime: 1500 }),
         working: false,
       },
+      global: { provide: mockChatProvide() },
     })
     await wrapper.find('[data-testid="tool-block-header"]').trigger('click')
     const text = wrapper.text()
@@ -184,6 +195,7 @@ describe('W3 补充：read/bash 工具特化 meta（行数/字符数自算）', 
         }),
         working: false,
       },
+      global: { provide: mockChatProvide() },
     })
     // failed 终态挂载默认展开（584869378）：错误文本通过 displayContent（兜底 tool.error）在内容区可见
     expect(wrapper.text()).toContain('File not found: src/missing.ts')

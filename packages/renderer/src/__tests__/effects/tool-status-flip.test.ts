@@ -338,6 +338,7 @@ describe('方案 a: mount Block 组件 — 翻转 props.tool.status', () => {
     const tool = makeTool({ status: 'running' })
     const wrapper = mount(Block, {
       props: { type: 'tool', tool, sessionId: 's1' },
+      global: { provide: mockChatProvide() },
     })
 
     // running 态：双环 loader 存在
