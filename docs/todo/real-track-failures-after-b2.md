@@ -8,6 +8,7 @@
 
 - 症状：A1 `waitForAskUserRequest` 等 `extension.ui_request`（form/askUser:true）60s 超时；diag（/tmp/askuser-a1-diag.json）显示 `extension.dialog` 帧已到达、tool_call_start 正常——marker select 被适配器按普通 dialog 翻译，未走 ui_request/form 分支
 - 失败链：event-adapter marker select 判定 / pi-ask-user 扩展 marker 字面 / 测试预期——三者均在 B2 零改动集
+- 复跑佐证（2026-10-08 ui-optimize-unified U19 REAL 轨空载串行）：同 3 failed，症状一致（A1 `faux toolCall ask_user → ui_request 应确定性到达` undefined）；`git diff 2bd72f4ee..HEAD` 佐证扩展——`packages/runtime/src/` 与 `extensions/universal/ask-user/` 在 ui-optimize-unified 全窗口（2bd72f4ee..HEAD）零改动，失败链继续与本分支全部在途 UI 单元零交集
 - 处置建议：核对 ask-user 扩展与 runtime 的 marker 常量是否随分支其他特性漂移（ui-redesign 合入窗口）；非 B2 责任面
 
 ## 2. btw S7（两次失败、两次失败模式不同）
