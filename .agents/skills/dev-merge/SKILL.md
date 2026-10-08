@@ -55,15 +55,16 @@ description: >-
 ```bash
 node scripts/quality-gates.mjs --side dev-merge   # 质量门聚合：typecheck 四处（含 mobile-renderer）+ 增量 coverage（含新增文件机器盲区判定，coverage-file-gate-exempt 可豁免）+ metrics
 node scripts/changeset-check.mjs                  # changeset 完整性：diff 触及 extensions/**/src/** 且包缺 .changeset/*.md → WARN 清单
+node "$(git rev-parse --show-toplevel)/.agents/skills/dev-merge/scripts/pi-extension-smoke.mjs" --json   # pi extension 启动冒烟：本 worktree 全部 extension 源码入口（extensions/{taiji,universal}/*/package.json 的 main）经 pi 真实加载一遍（--mode rpc + stdin EOF，零 LLM 调用），抓 main 声明指向缺失文件 / 入口加载期即崩——这类问题装进 pi 宿主才暴露，前置到合并边界
 ```
 
-- 退出码：quality-gates `0` = 全绿 / `1` = FAIL / `2` = 用法或环境错误；changeset-check `0` = pass/warn/skip（WARN 不阻断）/ `2` = 工具错误。
-- **FAIL（exit 1）**：派 fixer 修复后重跑——gates 脚本累计执行 ≤3 次、fixer 最多派发 2 次（fixer 只修失败输出直接相关的问题、修完自行 commit（显式路径，禁 `git add -A`）、每轮修完重跑脚本验证）；预算用尽仍 FAIL 停下呈报人工处置，不进后续步骤。
+- 退出码：quality-gates `0` = 全绿 / `1` = FAIL / `2` = 用法或环境错误；changeset-check `0` = pass/warn/skip（WARN 不阻断）/ `2` = 工具错误；pi-extension-smoke `0` = pass 或 skip（pi 未安装 / 无可加载入口，skip 不阻塞但必须随汇报披露）/ `1` = FAIL / `2` = 用法或环境错误。
+- **FAIL（exit 1）**：派 fixer 修复后重跑——quality-gates 与 pi-extension-smoke 的 FAIL 各走同款修复子循环：脚本累计执行各 ≤3 次、fixer 各最多派发 2 次（fixer 只修失败输出直接相关的问题——质量门失败修对应门项，冒烟失败修对应 extension 包的 main 声明或加载期问题；修完自行 commit（显式路径，禁 `git add -A`）、每轮修完重跑对应脚本验证）；预算用尽仍 FAIL 停下呈报人工处置，不进后续步骤。
 - **exit 2**：工具/环境错误不进 fixer 循环，按脚本输出的缺失路径与恢复指引处置。
 - **changeset WARN**：主 agent 按 Gate-1a.5 同款分类逻辑处置（不弹窗问用户）——实质改动（包有对外语义变化）→ 起草 `.changeset/*.md` 且理由列明；非发布改动（纯注释/文档/无对外语义变化的内部整理）→ 跳过起草并列明理由。skip/pass → 无动作，汇报记一句。
 - **base 口径**：`--side dev-merge` = 分支增量（`git merge-base github/main HEAD`，脚本自解析），与第 1.7 步审查对象同口径；禁止传 `--base main`（那是 pr-cr-fix 侧的累积口径，两侧差异有意）。
 
-**存在性检查（zcode/pi 两侧通用）**：跑前 `test -f scripts/quality-gates.mjs` 检查脚本存在——脚本随 git 分支传播，skill 实体经 symlink 即时生效，feature 分支未含新脚本 commit 时必然缺失（介质错速）。缺失 → 显式输出「quality-gates 脚本不存在（该分支未含 U1 commit），本轮跳过 gates 并披露」，继续第 1.7 步；不崩溃、不静默。changeset-check.mjs 缺失同款处置。恢复通道：源 worktree `git merge dev-0.10.5`（或发布后 merge main）主动吸收后重跑。
+**存在性检查（zcode/pi 两侧通用）**：跑前 `test -f scripts/quality-gates.mjs` 检查脚本存在——脚本随 git 分支传播，skill 实体经 symlink 即时生效，feature 分支未含新脚本 commit 时必然缺失（介质错速）。缺失 → 显式输出「quality-gates 脚本不存在（该分支未含 U1 commit），本轮跳过 gates 并披露」，继续第 1.7 步；不崩溃、不静默。changeset-check.mjs 缺失同款处置。恢复通道：源 worktree `git merge dev-0.10.5`（或发布后 merge main）主动吸收后重跑。pi-extension-smoke.mjs 不同：它在 skill 实体内（workspace 根 `.agents/skills/dev-merge/scripts/` 共享，不入 git、无介质错速窗口），缺失 = skill 实体损坏（worktree 内 `.agents` symlink 断裂等），按 exit 2 环境错误处置（恢复：检查 workspace 根 skill 目录完整性），不得按介质错速语义静默跳过——那是关掉 gate 的假绿。
 
 **宿主分工**：zcode 宿主 = 发起项目 workflow（CreateWorkflow path 指向 `.agents/workflows/dev-merge-gates.dwf.ts`），一次承载本步 + 第 1.7 步（gates + branch-review 两步前置，存在性检查内建，失败以 failed 终态返回）；pi 宿主无对应 workflow（dev-merge 使用频率低，不维护双宿主镜像），主 agent 按本步与第 1.7 步手工编排——gates 走上述 node 脚本 + changeset WARN 起草指令，branch-review 走 review-fix-loop。
 

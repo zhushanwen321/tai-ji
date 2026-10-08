@@ -3,7 +3,9 @@ description: dev-merge 的前置两步 workflow（gates + branch-review）。①
   scripts/quality-gates.mjs / scripts/changeset-check.mjs 缺失（feature 分支未含 U1 commit，
   脚本随 git 分支传播而 skill 实体经 symlink 即时生效的介质错速）→ 显式披露跳过、不崩溃、
   继续后续步骤；在盘则跑 quality-gates.mjs --side dev-merge（分支增量口径）FAIL 派 fixer
-  修复重跑 ≤3 轮；changeset-check.mjs WARN 走同款「检查 → 起草 agent 修复 → 重跑检查」
+  修复重跑 ≤3 轮；pi extension 启动冒烟（skill 实体脚本 pi-extension-smoke.mjs，全
+  extension 源码入口经 pi 真实加载，零 LLM 调用）FAIL 同款修复子循环 ≤3 轮、宿主无 pi 时
+  skip 披露不阻塞；changeset-check.mjs WARN 走同款「检查 → 起草 agent 修复 → 重跑检查」
   循环 ≤3 轮（起草漏包由下轮以剩余 missing 补上一轮；已判定跳过的非发布包视同处置完成，
   因 changeset-check 只认声明不懂跳过语义）。②branch-review——恒派 3 维 business-logic
   （含降级策略红线）/ arch-boundary / data-governance + 触发 3 维 electron-build /

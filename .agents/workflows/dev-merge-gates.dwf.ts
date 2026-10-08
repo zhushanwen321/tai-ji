@@ -3,7 +3,9 @@ description: dev-merge 的前置两步 workflow（gates + branch-review）。①
   scripts/quality-gates.mjs / scripts/changeset-check.mjs 缺失（feature 分支未含 U1 commit，
   脚本随 git 分支传播而 skill 实体经 symlink 即时生效的介质错速）→ 显式披露跳过、不崩溃、
   继续后续步骤；在盘则跑 quality-gates.mjs --side dev-merge（分支增量口径）FAIL 派 fixer
-  修复重跑 ≤3 轮；changeset-check.mjs WARN 走同款「检查 → 起草 agent 修复 → 重跑检查」
+  修复重跑 ≤3 轮；pi extension 启动冒烟（skill 实体脚本 pi-extension-smoke.mjs，全
+  extension 源码入口经 pi 真实加载，零 LLM 调用）FAIL 同款修复子循环 ≤3 轮、宿主无 pi 时
+  skip 披露不阻塞；changeset-check.mjs WARN 走同款「检查 → 起草 agent 修复 → 重跑检查」
   循环 ≤3 轮（起草漏包由下轮以剩余 missing 补上一轮；已判定跳过的非发布包视同处置完成，
   因 changeset-check 只认声明不懂跳过语义）。②branch-review——恒派 3 维 business-logic
   （含降级策略红线）/ arch-boundary / data-governance + 触发 3 维 electron-build /
@@ -102,6 +104,9 @@ const AGENT_DIR = ".agents/skills/dev-merge/agents";
 const REPORT_ROOT = ".tmp/dev-merge-review";
 const GATES_SCRIPT = "scripts/quality-gates.mjs";
 const CHANGESET_SCRIPT = "scripts/changeset-check.mjs";
+// skill 实体脚本（workspace 根共享 + worktree 内 symlink 即时生效，不入 git、无介质错速窗口）；
+// 缺失 = skill 实体损坏，fail-fast 不静默跳过
+const SMOKE_SCRIPT = ".agents/skills/dev-merge/scripts/pi-extension-smoke.mjs";
 const ALWAYS_DIMS = ["business-logic", "arch-boundary", "data-governance"]; // 恒派 3 维（含降级红线——决策 1/3）
 // 维度 → agent 定义 read 引用的通用判据技能（相对 ~/.agents/skills/；纯项目特化维度无条目）。
 // 在盘检查用：缺失 fail-fast 指明路径，不静默降级为无判据审查（口径悄悄变窄比失败更危险）。
@@ -908,6 +913,79 @@ async function main(): Promise<Record<string, unknown>> {
       );
     }
     log(`[gates] quality-gates 全绿（base=${base}）`);
+
+    // pi extension 启动冒烟（dev-merge SKILL 1.6 同款门禁）：本 worktree 全部 extension 源码
+    // 入口经 pi 真实加载一遍（--mode rpc + stdin EOF，零 LLM 调用），抓 main 声明指向缺失
+    // 文件 / 入口加载期即崩——装进 pi 宿主才暴露的问题前置到合并边界。脚本宿主无 pi 或无
+    // 可加载入口时自身 skip（exit 0 + status skip），照常披露不阻塞
+    if (!(await existsViaNode(SMOKE_SCRIPT))) {
+      throw new Error(`pi-extension-smoke 脚本不存在：${SMOKE_SCRIPT}（skill 实体损坏或 worktree 内 .agents symlink 断裂）。恢复：检查 workspace 根 .agents/skills/dev-merge/scripts/ 完整性后重新发起本 workflow`);
+    }
+    const smokeRoundFails: string[] = [];
+    for (let round = 1; round <= MAX_GATE_ROUNDS; round++) {
+      const sm = await world.run("node", [SMOKE_SCRIPT, "--json"], { timeoutMs: 300_000 });
+      let smJson: { status?: unknown; reason?: unknown; entryCount?: unknown } | null = null;
+      try {
+        smJson = JSON.parse(sm.stdout) as typeof smJson;
+      } catch {
+        throw new Error(`pi-extension-smoke --json 输出解析失败：\n${tailLines(`${sm.stderr}\n${sm.stdout}`, 15)}\n按输出处置后重新发起本 workflow`);
+      }
+      const smStatus = typeof smJson.status === "string" ? smJson.status : "";
+      if (sm.exitCode === 2) {
+        throw new Error(`pi-extension-smoke exit 2（用法/环境错误，不自动重试）：\n${tailLines(`${sm.stderr}\n${sm.stdout}`, 15)}\n按输出的恢复动作处置后重新发起本 workflow`);
+      }
+      if (smStatus === "skip") {
+        disclosures.push({ item: "pi-extension-smoke", reason: `跳过：${String(smJson.reason ?? "（无 reason）")}` });
+        log(`[gates] pi-extension-smoke skip：${String(smJson.reason ?? "")}`);
+        break;
+      }
+      const failDetail = nonEmptyStr(smJson.reason) ? String(smJson.reason) : tailLines(`${sm.stderr}\n${sm.stdout}`, 20);
+      if (sm.exitCode === 0 && smStatus === "pass") {
+        log(`[gates] pi-extension-smoke 全绿（${String(smJson.entryCount ?? "?")} 个入口经 pi 加载成功）`);
+        break;
+      }
+      // FAIL：修复子循环（与 quality-gates 同预算：脚本累计 ≤3 次执行、fixer ≤2 次派发）
+      smokeRoundFails.push(`第 ${round} 轮：${tailLines(failDetail, 6)}`);
+      if (round === MAX_GATE_ROUNDS) {
+        throw new Error(
+          [
+            `pi-extension-smoke 经 ${MAX_GATE_ROUNDS} 轮修复子循环仍未通过。历轮摘要：${smokeRoundFails.join("；")}`,
+            `末轮失败明细：`,
+            failDetail,
+            `人工修复对应 extension 包并 commit 后重新发起本 workflow（冒烟面对已 commit 的改动正常判定）`,
+          ].join("\n"),
+        );
+      }
+      const fixer = agent(
+        `dmg-smoke-fix-r${round}`,
+        "你是 gate 修复工程师：只修失败输出直接相关的问题，修完自行 commit（显式路径），禁止 git add -A / git add .。",
+      );
+      const reply = await fixer.ask<string>(
+        [
+          `workflow dev-merge-gates 第 ${round} 轮 pi extension 启动冒烟失败（${SMOKE_SCRIPT}），失败明细：`,
+          failDetail,
+          "",
+          `需要全量输出时可自行重跑：node ${SMOKE_SCRIPT} --json。`,
+          "",
+          "要求：",
+          "1. 修复失败涉及的全部问题（package.json main 声明指向缺失文件 → 修声明或补文件；入口加载期报错 → 修对应源码），只改与失败直接相关的文件。",
+          `2. 修完自行 commit：git add <显式路径> && git commit -m "fix: dev-merge extension smoke round ${round}"。`,
+          "3. 禁止 git add -A / git add .（会把工作区无关改动一起提交）。",
+          "4. 修不完的部分在回复中明确说明，不要静默跳过。",
+        ].join("\n"),
+      );
+      log(`[gates] 第 ${round} 轮 smoke fixer 回复（末 20 行）：\n${tailLines(typeof reply === "string" ? reply : "", 20)}`);
+      const dirt = await dirtyFiles();
+      if (dirt.length > 0) {
+        const uc = await runUnifiedCommit([{ group: "smoke-residual", files: dirt, message: "fix: dev-merge extension smoke residual" }], round, { tag: "smoke" });
+        if (uc.blocked.length > 0) {
+          throw new Error(
+            `smoke fixer 返回后的残留改动统一提交处置后仍失败：\n${uc.blocked.map((b) => `${b.group}: ${tailLines(b.error, 3)}`).join("\n")}\n残留文件：\n${dirt.join("\n")}\n人工检查后显式路径 commit 或还原，再重新发起本 workflow`,
+          );
+        }
+        log(`[gates] 第 ${round} 轮 smoke fixer 残留 ${dirt.length} 文件经统一提交 agent 三分类处置入库`);
+      }
+    }
 
     // changeset 检查（与 quality-gates 同批落盘的独立脚本；缺失时同款检查披露）
     if (!(await existsViaNode(CHANGESET_SCRIPT))) {
