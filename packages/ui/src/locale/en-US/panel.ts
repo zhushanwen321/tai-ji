@@ -143,7 +143,7 @@ export default {
     toastDropped: '{count} more notification(s) hidden',
     toastDroppedDismiss: 'Dismiss collapsed-notification notice',
     startConversation: 'Start a conversation, or select a session from the left',
-    scrollToBottom: 'Scroll to bottom',
+    scrollToBottom: 'Back to latest',
     // [system-notice-rendering-upgrade U3] compaction row splits in two (D3): main copy keeps the
     // phrase, tokens move out to the right-pinned mono meta (compactedTokens drops parentheses)
     compacted: 'Context compacted',

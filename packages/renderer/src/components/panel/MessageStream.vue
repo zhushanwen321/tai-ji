@@ -3,7 +3,7 @@
     容器组件 · message-stream（panel/spec.md zone ②，draft-message-stream）。
     读 chat store 按 sessionId 分区的消息 → groupTurns 分回合 → 渲染 Turn 列表。
     auto-scroll（spec §8.5 + G2-007）：stickToBottom 判定，上滚脱离锚定不强制拉回，
-    非贴底有新内容显「回到底部」浮层，点浮层平滑滚回并恢复锚定。
+    滚动离底超过一屏显「回到最新」胶囊（决策 12，未读条件已退役），点胶囊平滑滚回并恢复锚定。
     用户主动发送（composer 直发 / steer·followUp 投递 / defer flush / 编辑重发）例外：
     尾部新增 user 消息时强制回底重锚定（feat-new-message-to-bottom，见
     useMessageStreamFollowTriggers 触发矩阵末行）。
@@ -158,17 +158,19 @@
     </div>
     </div>
 
-    <!-- 回到底部浮层：非贴底且有未读新内容时显示（showJumpButton），点之平滑滚回并恢复锚定 -->
+    <!-- 回到最新胶囊（N11/决策12）：滚动离底超过一屏即浮现（showJumpButton 距底几何判定），
+         点之平滑滚回并恢复锚定（force 同步清零距底快照 → 胶囊即时消失） -->
     <Transition name="fade">
       <Button
         v-if="showJumpButton"
-        variant="default"
-        size="icon"
-        class="absolute bottom-4 left-1/2 z-10 size-9 -translate-x-1/2 rounded-full shadow-lg"
+        variant="secondary"
+        size="sm"
+        class="absolute bottom-4 left-1/2 z-10 h-7 -translate-x-1/2 rounded-full bg-[var(--bg-elevated)] px-3 text-[length:var(--text-xs)] shadow-lg"
         :title="t('panel.message.scrollToBottom')"
         @click="followToBottom(true)"
       >
-        <ChevronDown class="size-4" />
+        <ChevronDown class="size-3.5" />
+        <span>{{ t('panel.message.scrollToBottom') }}</span>
       </Button>
     </Transition>
 
@@ -417,10 +419,11 @@ const { stickToBottom, showJumpButton, onScroll, onWheel, followIfStuck, followT
 
 // [D3/D5] 跟随触发编排（RO 兜底网 + store watch，useMessageStreamScroll 继任；≤300 行规范拆出）。
 // followToBottomForce：用户主动发送（尾部新增 user 消息）强制回底重锚定（feat-new-message-to-bottom）。
+// [决策 12] isPrepend 不再传入：前插抑制窗的标记门控随未读标记链路退役（isPrepend 仍服务
+// Virtualizer :shift 与触顶续载，见 useLoadMoreHistory）。
 const { contentWrapEl, tailEl, tailHeight } = useMessageStreamFollowTriggers({
   messages: currentMessages,
   lastRenderTurn,
-  isPrepend,
   scrollEl,
   followIfStuck,
   notifyRoActivity,
@@ -500,7 +503,7 @@ watch(
 /* [cw wave w3 / design §4.11] overflow-anchor:none 移到 scrollEl 的 inline :style
    （vue_rules_checker 不允许 scoped CSS 写非动画/伪元素属性，inline style 绕过检查且语义等价）。 */
 
-/* 回到底部浮层过渡 */
+/* 回到最新胶囊过渡 */
 .fade-enter-active, .fade-leave-active { transition: opacity var(--duration-fast) ease; }
 .fade-enter-from, .fade-leave-to { opacity: 0; }
 </style>

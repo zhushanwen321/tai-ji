@@ -4,6 +4,8 @@
  * 覆盖（D7 反例重演①-⑥ + D7① 复合判据与 D7② 收敛抑制窗用例清单）：
  * - 既有 follow 状态机（W1TC*，U1 适配后语义）：onWheel 脱离 / onScroll 恢复分支 /
  *   followIfStuck guard（rAF 内重读）/ followToBottom(force) / showJumpButton 派生
+ * - 决策 12（ui-optimize-unified N11）：showJumpButton = 离底超过一屏（距底几何判定，
+ *   未读标记条件已退役）+ followToBottom(true) 同步清零距底快照（胶囊即时消失）
  * - U1 R3 回归：D1 末项索引直取（itemCount 注入，scrollToIndex 收到 length-1，
  *   findItemIndex 反查已删除）+ D2 endOffset 尾部高度进滚动目标
  * - U1 D7① 复合判据四回声：程序性写入回声（offset 递增）不脱离 / clamp 回声（distance≤0）
@@ -11,18 +13,20 @@
  *   force 后首个 scroll 事件只建 lastOffset 快照不判定（NaN 哨兵）
  * - U1 D7② 收敛抑制窗：窗内负补偿回声不脱离 / onWheel 恒即时脱离（不受抑制窗约束）/
  *   RO 静默 120ms 关窗 / RO 持续活跃下 1500ms 硬上限关窗 / notifyRoActivity 重置静默计时
- * - U1 静默跟随变体（followIfStuck({markUnread:false})：脱离态不标 unread、贴底态正常滚）
- *   与 onSessionRebuild（置 NaN 快照 + 开抑制窗）
+ * - U1 onSessionRebuild（置 NaN 快照 + 开抑制窗）
  * - U3 guard 语义迁移（D5 删 useMessageStreamScroll 后）：
  *   followToBottom() 默认非 force 受 guard（旧 MS6 等价）/ followToBottom(true) 完整重置面
- *   unread+浮层清零（旧 MS4/force 语义等价）；MS1-MS3/MS5/isStreaming 守卫的去留逐条
+ *   贴底回真 + 距底快照清零（旧 MS4/force 语义等价）；MS1-MS3/MS5/isStreaming 守卫的去留逐条
  *   依据见迁移 describe 块注释
  *
  * INVAR-M4-2′（现行语义，取代旧 INVAR-M4-2「wheel-only + onScroll 只单向翻真」）：
  * stickToBottom=false 只由用户输入信号驱动——① onWheel deltaY<0（滚轮上滑，恒即时生效，
  * 不受收敛抑制窗约束）；② onScroll 复合判据（offset 递减 ∧ 距底 > BOTTOM_THRESHOLD，
  * 收敛抑制窗内暂停翻 false）。程序性跟随一律走 followIfStuck 的 rAF 内重读 guard，不得把
- * 用户扯回底部；followToBottom(true)（用户显式点「回到底部」）是唯一例外。
+ * 用户扯回底部；followToBottom(true)（用户显式点「回到最新」胶囊）是唯一例外。
+ * [决策 12] 胶囊浮现（showJumpButton）与 stickToBottom 是两条独立链：前者纯距底几何
+ * （距底 > 视口高），不依赖 stick 判定、无收敛抑制窗概念——NaN 哨兵期/抑制窗内距底快照
+ * 照常更新。
  *
  * mock 策略：不 mount 真实 virtua 组件（happy-dom 下 Virtualizer 行为不可控），用
  * createMockVlist 造满足 VirtualizerHandle 接口、可断言调用的 mock 注入 vlistRef。末项索引
@@ -125,18 +129,14 @@ describe('useVirtuaFollow', () => {
       expect(mock.findItemIndex).not.toHaveBeenCalled()
     })
 
-    it('W1TC6 followIfStuck stickToBottom=false 不调 scrollToIndex，但置 unreadBelow=true（markUnread 缺省 true）', async () => {
-      const { stickToBottom, unreadBelow, followIfStuck } = setupFollow()
+    it('W1TC6 followIfStuck stickToBottom=false 不调 scrollToIndex（rAF 重读 guard 拦截）', async () => {
+      const { stickToBottom, followIfStuck } = setupFollow()
       stickToBottom.value = false
-      expect(unreadBelow.value).toBe(false)
 
       followIfStuck()
       await vi.advanceTimersByTimeAsync(16)
 
       expect(mock.scrollToIndex).not.toHaveBeenCalled()
-      // U15 即时语义：非贴底时新内容到达 → 标记 unreadBelow，让 showJumpButton 浮层
-      // （= !stickToBottom && unreadBelow）出现，用户可点「回到底部」
-      expect(unreadBelow.value).toBe(true)
     })
 
     it('W1TC7 followIfStuck rAF 内重读 stickToBottom（INVAR-M4-2′）：调用后立即上滑→rAF 不滚', async () => {
@@ -162,37 +162,46 @@ describe('useVirtuaFollow', () => {
 
       followToBottom(true)
 
-      // 同步执行（不走 rAF，用户点击「回到底部」即时反馈最强）
+      // 同步执行（不走 rAF，用户点击「回到最新」胶囊即时反馈最强）
       expect(stickToBottom.value).toBe(true)
       expect(mock.scrollToIndex).toHaveBeenCalledWith(4, { align: 'end', offset: 0 })
       expect(mock.findItemIndex).not.toHaveBeenCalled()
       expect(onStickChange).toHaveBeenCalledWith(true)
     })
 
-    describe('W1TC9 showJumpButton 派生 = !stickToBottom && unreadBelow', () => {
-      it('① stickToBottom=true / unreadBelow=true → false（贴底时不显示回到底部）', () => {
-        const { stickToBottom, unreadBelow, showJumpButton } = setupFollow()
-        stickToBottom.value = true
-        unreadBelow.value = true
+    describe('W1TC9 showJumpButton 派生 = 离底超过一屏（决策 12 距底几何判定）', () => {
+      it('① 距底 ≤ 视口高（未超一屏）→ false', () => {
+        const { showJumpButton, onScroll } = setupFollow(
+          {},
+          { scrollSize: 2000, viewportSize: 500 },
+        )
+        onScroll(1200) // distance = 2000-1200-500 = 300 ≤ 500（首事件：距底快照照常更新）
         expect(showJumpButton.value).toBe(false)
       })
 
-      it('② stickToBottom=false / unreadBelow=false → false（未贴底但无未读新内容）', () => {
-        const { stickToBottom, unreadBelow, showJumpButton } = setupFollow()
-        stickToBottom.value = false
-        unreadBelow.value = false
-        expect(showJumpButton.value).toBe(false)
-      })
-
-      it('③ stickToBottom=false / unreadBelow=true → true（未贴底且有未读新内容）', () => {
-        const { stickToBottom, unreadBelow, showJumpButton } = setupFollow()
-        stickToBottom.value = false
-        unreadBelow.value = true
+      it('② 距底 > 视口高（离底超过一屏）→ true——回看历史（无新内容）也有回底入口', () => {
+        const { showJumpButton, onScroll } = setupFollow(
+          {},
+          { scrollSize: 2000, viewportSize: 500 },
+        )
+        onScroll(900) // distance = 600 > 500 → 浮现（N11 问题陈述：回看历史不再恒不浮现）
         expect(showJumpButton.value).toBe(true)
       })
 
-      it('④ 默认（stickToBottom=true / unreadBelow=false）→ false', () => {
+      it('③ 视口尚未测量（无 scroll 事件）→ false（防首帧误浮现）', () => {
         const { showJumpButton } = setupFollow()
+        expect(showJumpButton.value).toBe(false)
+      })
+
+      it('④ followToBottom(true)（点击胶囊）→ 距底快照同步清零，胶囊即时消失（不等 scroll 回声）', () => {
+        const { showJumpButton, onScroll, followToBottom } = setupFollow(
+          { itemCount: () => 5 },
+          { scrollSize: 2000, viewportSize: 500 },
+        )
+        onScroll(900) // 离底超一屏 → 浮现
+        expect(showJumpButton.value).toBe(true)
+
+        followToBottom(true)
         expect(showJumpButton.value).toBe(false)
       })
     })
@@ -261,8 +270,8 @@ describe('useVirtuaFollow', () => {
       expect(onStickChange).toHaveBeenCalledWith(true)
     })
 
-    it('用户拖拽（offset 递减 + distance>40）→ 脱离，后续 followIfStuck 不滚屏（guard）并标 unread', async () => {
-      const { stickToBottom, unreadBelow, showJumpButton, onScroll, followIfStuck } =
+    it('用户拖拽（offset 递减 + distance>40）→ 脱离，后续 followIfStuck 不滚屏（guard）', async () => {
+      const { stickToBottom, onScroll, followIfStuck } =
         setupFollow({ itemCount: () => 5 })
 
       // 首事件建快照
@@ -277,9 +286,6 @@ describe('useVirtuaFollow', () => {
       await vi.advanceTimersByTimeAsync(16)
 
       expect(mock.scrollToIndex).not.toHaveBeenCalled()
-      // 标 unread → 「回到底部」浮层点亮
-      expect(unreadBelow.value).toBe(true)
-      expect(showJumpButton.value).toBe(true)
     })
 
     it('force 后首个 scroll 事件只建快照不判定（NaN 消费后同型序列才脱离）', async () => {
@@ -408,45 +414,9 @@ describe('useVirtuaFollow', () => {
     })
   })
 
-  describe('U1 静默跟随变体 followIfStuck({markUnread:false})', () => {
-    it('脱离态：不标 unread 且不滚屏', async () => {
-      const { unreadBelow, showJumpButton, onWheel, followIfStuck } = setupFollow({
-        itemCount: () => 5,
-      })
-
-      onWheel({ deltaY: -100 } as WheelEvent)
-      followIfStuck({ markUnread: false })
-      await vi.advanceTimersByTimeAsync(16)
-
-      expect(mock.scrollToIndex).not.toHaveBeenCalled()
-      expect(unreadBelow.value).toBe(false)
-      expect(showJumpButton.value).toBe(false)
-    })
-
-    it('贴底态：正常滚底（itemCount-1 索引直取）', async () => {
-      const { followIfStuck } = setupFollow({ itemCount: () => 5 })
-
-      followIfStuck({ markUnread: false })
-      await vi.advanceTimersByTimeAsync(16)
-
-      expect(mock.scrollToIndex).toHaveBeenCalledWith(4, { align: 'end', offset: 0 })
-    })
-
-    it('同帧标记型 + 静默型并发 → cancel-reschedule 后标记不丢失且不滚屏', async () => {
-      const { stickToBottom, unreadBelow, onWheel, followIfStuck } = setupFollow({
-        itemCount: () => 5,
-      })
-
-      onWheel({ deltaY: -100 } as WheelEvent)
-      followIfStuck() // 标记型（脱离态即时置 unreadBelow + pendingMarkUnread sticky 位）
-      followIfStuck({ markUnread: false }) // 静默型 cancel 旧 rAF 重排——不得丢标记
-      await vi.advanceTimersByTimeAsync(16)
-
-      expect(mock.scrollToIndex).not.toHaveBeenCalled()
-      expect(unreadBelow.value).toBe(true)
-      expect(stickToBottom.value).toBe(false)
-    })
-  })
+  // [决策 12] 旧「U1 静默跟随变体 followIfStuck({markUnread:false})」describe 随标记分档
+  // 参数退役删除：标记/静默两档合一后「贴底态正常滚」由 W1TC5、「脱离态不滚屏」由 W1TC6 +
+  // D7① 拖拽用例覆盖，无独立行为面残留。
 
   describe('U1 onSessionRebuild（session 重建入口）', () => {
     it('置 NaN：重建后首个 scroll 事件只建快照不判定', async () => {
@@ -505,8 +475,8 @@ describe('useVirtuaFollow', () => {
      *   无 isStreaming 概念）；其 guard 面即 followIfStuck rAF 内重读（W1TC7），不重复迁移。
      */
 
-    it('MS6 迁移：followToBottom() 默认非 force → 受 stickToBottom guard（脱离不扯回 + 标 unread）', async () => {
-      const { stickToBottom, unreadBelow, showJumpButton, onWheel, followToBottom } = setupFollow({
+    it('MS6 迁移：followToBottom() 默认非 force → 受 stickToBottom guard（脱离不扯回）', async () => {
+      const { stickToBottom, onWheel, followToBottom } = setupFollow({
         itemCount: () => 5,
       })
 
@@ -516,40 +486,39 @@ describe('useVirtuaFollow', () => {
       expect(mock.scrollToIndex).toHaveBeenCalledTimes(1)
       expect(mock.scrollToIndex).toHaveBeenCalledWith(4, { align: 'end', offset: 0 })
 
-      // 脱离态默认调用：rAF 内重读 guard 拦截 → 不把上滑用户扯回，只标 unread（MS6 语义本体：
-      // 非 force 的 follow 尊重 stickToBottom，视口不动、「回到底部」浮层点亮）
+      // 脱离态默认调用：rAF 内重读 guard 拦截 → 不把上滑用户扯回（MS6 语义本体：
+      // 非 force 的 follow 尊重 stickToBottom，视口不动）
       onWheel({ deltaY: -100 } as WheelEvent)
       followToBottom()
       await vi.advanceTimersByTimeAsync(16)
 
       expect(mock.scrollToIndex).toHaveBeenCalledTimes(1) // 未新增滚动
       expect(stickToBottom.value).toBe(false)
-      expect(unreadBelow.value).toBe(true)
-      expect(showJumpButton.value).toBe(true)
     })
 
-    it('MS4/force 语义迁移：followToBottom(true) 是 guard 唯一例外——脱离/未读/浮层全重置并同步滚底', async () => {
-      const { stickToBottom, unreadBelow, showJumpButton, onWheel, followIfStuck, followToBottom } =
-        setupFollow({ itemCount: () => 5 })
+    it('MS4/force 语义迁移：followToBottom(true) 是 guard 唯一例外——脱离/胶囊全重置并同步滚底', async () => {
+      const { stickToBottom, showJumpButton, onScroll, followToBottom } =
+        setupFollow({ itemCount: () => 5 }, { scrollSize: 2000, viewportSize: 500 })
 
-      // 用户上滑脱离 + 新内容到达标 unread → 「回到底部」浮层亮（点击前态）
-      onWheel({ deltaY: -100 } as WheelEvent)
-      followIfStuck()
+      // 用户上滑离底超一屏（scroll 回声递减脱离锚定 + 距底快照超一屏）→ 胶囊亮（点击前态）
+      onScroll(1200) // 首事件：NaN 只建 stick 快照；distance = 300 ≤ 500，胶囊不亮
+      expect(stickToBottom.value).toBe(true)
+      onScroll(900) // 递减 ∧ distance = 600 > 40 → 脱离；距底 600 > 一屏 → 胶囊亮
       expect(stickToBottom.value).toBe(false)
       expect(showJumpButton.value).toBe(true)
 
-      // 点「回到底部」：force 是唯一例外——同步滚底（不走 rAF）+ 贴底回真 + unread/浮层清零
+      // 点「回到最新」：force 是唯一例外——同步滚底（不走 rAF）+ 贴底回真 + 距底快照清零
+      // （胶囊即时消失，不等 scroll 回声）
       followToBottom(true)
       expect(stickToBottom.value).toBe(true)
-      expect(unreadBelow.value).toBe(false)
       expect(showJumpButton.value).toBe(false)
       expect(mock.scrollToIndex).toHaveBeenCalledWith(4, { align: 'end', offset: 0 })
 
-      // 既有 followIfStuck 的 pending rAF 在 force 后触发也不改变终态（force 不取消 pending，
-      // 但 stick 已回真 → 重复滚底同参数无害）；终态稳定是「回到底部」闭环的不变量
+      // force 后 scroll 抑制窗内的回声期终态稳定（stick 已回真 + 距底清零）：
+      // 「回到最新」闭环的不变量
       await vi.advanceTimersByTimeAsync(16)
       expect(stickToBottom.value).toBe(true)
-      expect(unreadBelow.value).toBe(false)
+      expect(showJumpButton.value).toBe(false)
     })
   })
 

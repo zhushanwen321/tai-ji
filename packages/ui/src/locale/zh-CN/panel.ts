@@ -142,7 +142,7 @@ export default {
     toastDropped: '还有 {count} 条通知未显示',
     toastDroppedDismiss: '关闭折叠通知提示',
     startConversation: '开始对话，或从左侧选择一个会话',
-    scrollToBottom: '回到底部',
+    scrollToBottom: '回到最新',
     // [system-notice-rendering-upgrade U3] 压缩完成行拆两段（D3）：主文案只留短语，
     // tokens 从文案拆出为钉右 mono meta（compactedTokens 去括号）
     compacted: '已压缩上下文',

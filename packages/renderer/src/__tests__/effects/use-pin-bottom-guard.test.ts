@@ -27,11 +27,9 @@ import { usePinBottomGuard, type FollowApi } from '@/composables/panel/usePinBot
 /** 构造完整 FollowApi stub（guard 仅消费 stickToBottom + 透传两个 follow 原语） */
 function createFollowStub(): FollowApi {
   const stickToBottom = ref(true)
-  const unreadBelow = ref(false)
   return {
     stickToBottom,
-    unreadBelow,
-    showJumpButton: computed(() => !stickToBottom.value && unreadBelow.value),
+    showJumpButton: computed(() => false),
     onScroll: vi.fn(),
     onWheel: vi.fn(),
     followIfStuck: vi.fn(),
@@ -180,7 +178,7 @@ describe('usePinBottomGuard（§4.4 护栏⑦ dev 断言）', () => {
     expect(warnSpy).not.toHaveBeenCalled()
   })
 
-  it('followToBottom 包装透传 force 参数并触发窗口（回到底部按钮 / force 内联路径同一入口）', async () => {
+  it('followToBottom 包装透传 force 参数并触发窗口（回到最新胶囊 / force 内联路径同一入口）', async () => {
     const { follow, api } = setup()
 
     api.followToBottom(true)

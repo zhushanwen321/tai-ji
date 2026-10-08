@@ -166,8 +166,8 @@ export function usePinBottomGuard(deps: PinBottomGuardDeps): FollowApi {
 
   return {
     ...follow,
-    followIfStuck: (followOpts) => {
-      follow.followIfStuck(followOpts)
+    followIfStuck: () => {
+      follow.followIfStuck()
       countFollowExecution()
       armWindow()
     },
