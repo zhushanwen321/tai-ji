@@ -35,13 +35,15 @@
   --composer-bg: var(--bg-input);
   --bar-fill-soft: 55%;         /* progress-bar fill 柔化档 */
 
-  /* ── 文字（neutral 谱系，上抬，dim 对比度 ~4.4:1）────────── */
-  --neutral-fg: #dedee2;        /* 主前景 */
-  --neutral-mid: #96969c;       /* 正文（过 AA） */
-  --neutral-dim: #74747a;       /* 次要（提亮一档） */
-  --neutral-faint: #46464c;     /* 极弱/装饰 */
-  --neutral-ico: #86868c;       /* 图标默认色 */
-  --neutral-ico-hover: #dedee2; /* 图标 hover 色 */
+  /* ── 文字（neutral 谱系 · 纯中性四档，ui-optimize 决策2 去蓝偏）──
+     暗色族三主题（玄/黛蓝/暖墨）文字档统一为同一组纯中性值；
+     亮色族三主题文字档维持宣纸墨色不变（亮色族无蓝偏问题） */
+  --neutral-fg: #ececec;        /* 主前景 + 正文（对话流/侧栏主文字/composer 可操作文字同档，≈16:1） */
+  --neutral-mid: #8a8a8a;       /* 工具行/次要（~5.4:1，过 AA 大字线） */
+  --neutral-dim: #5c5c5c;       /* 时间与元信息（~2.8:1，低显著度装饰性文字的显式取舍） */
+  --neutral-faint: #45454a;     /* 极弱/装饰 */
+  --neutral-ico: #8a8a8a;       /* 图标默认色（随 mid 档校准） */
+  --neutral-ico-hover: #ececec; /* 图标 hover 色 */
   /* 对话流专属名称色（2026-10-06 对话流视觉裁决，demo --w-name 反写）：
      workflow / subagent 的具体名称——暖驼微暖低饱和，不随主色态变化；
      亮色主题（[data-theme="light"]）覆盖加深档，preset 不覆盖 */
@@ -182,7 +184,7 @@
 
   /* ── 图表派生 tokens（玄 · 暗，默认 :root）──────────────
      不手写色值，全部从 --chart-ink 派生（color-mix）。
-     --chart-ink = neutral-fg；黛蓝/暖墨中性谱自带色相故派生自动跟随；
+     --chart-ink = neutral-fg，neutral 档改值（含决策2 纯中性化）派生自动跟随；
      彩色亮色 preset（青墨/朱印）掺入 accent 色相，见下方 preset 块覆盖。
      明度方向自动反转（暗：墨越亮越浓；亮：墨越深越浓）。 */
   --chart-ink: var(--neutral-fg);
@@ -304,12 +306,12 @@
   --bg-elevated: #2a2b34;
   --bg-input: #151619;
   --bg-card: #25262a;
-  --neutral-fg: #dedfe5;
-  --neutral-mid: #9597a1;
-  --neutral-dim: #74767f;
-  --neutral-faint: #474853;
-  --neutral-ico: #868895;
-  --neutral-ico-hover: #dedfe5;
+  --neutral-fg: #ececec;
+  --neutral-mid: #8a8a8a;
+  --neutral-dim: #5c5c5c;
+  --neutral-faint: #45454a;
+  --neutral-ico: #8a8a8a;
+  --neutral-ico-hover: #ececec;
   --accent: #9ca9c9;
   --accent-hover: #b0bcd4;
   --accent-fg: #151824;
@@ -345,12 +347,12 @@
   --bg-elevated: #2e2b27;
   --bg-input: #191712;
   --bg-card: #292722;
-  --neutral-fg: #e2dfdb;
-  --neutral-mid: #9a9690;
-  --neutral-dim: #79756f;
-  --neutral-faint: #4a4743;
-  --neutral-ico: #8a867f;
-  --neutral-ico-hover: #e2dfdb;
+  --neutral-fg: #ececec;
+  --neutral-mid: #8a8a8a;
+  --neutral-dim: #5c5c5c;
+  --neutral-faint: #45454a;
+  --neutral-ico: #8a8a8a;
+  --neutral-ico-hover: #ececec;
   --accent: #cbc3b3;
   --accent-hover: #ded7c8;
   --accent-fg: #201d18;

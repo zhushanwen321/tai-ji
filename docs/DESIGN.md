@@ -4,8 +4,8 @@ description: AI Agent 桌面工作台 · 太极纯灰（v6）设计系统
 colors:
   bg: "#1e1e1e"
   surface: "#101010"
-  fg: "#dedee2"
-  muted: "#96969c"
+  fg: "#ececec"
+  muted: "#8a8a8a"
   border: "rgba(255, 255, 255, 0.07)"
   accent: "#a5adc2"
   success: "#78a87e"
@@ -113,7 +113,7 @@ v6 重构的三个缘由：
 |---|------|---------|
 | 1 | **层级代替边框** | 静态容器只用一个表面色，不叠加 border；靠 bg 层级浮起分隔。border 仅保留给浮起可交互容器（popover/dialog/composer）和 focus 态 |
 | 2 | **圆角档位提升** | `--radius-sm` 6px（全局默认档）；卡片 10px；浮层/composer 12px；徽章/pill 999px 胶囊 |
-| 3 | **正文提亮** | `--neutral-dim` 抬亮一档；正文位置统一用 `--neutral-mid`（过 WCAG AA ≥4.5:1）；仅装饰/极弱位置保留 dim/faint |
+| 3 | **正文提亮** | 正文位置统一用 `--neutral-fg`（暗色下 ≈16:1）；工具行/次要落 `--neutral-mid`（~5.4:1，过 AA 大字线）；时间与元信息落 `--neutral-dim`（~2.8:1，低显著度装饰性文字的显式取舍）；仅极弱/装饰位置保留 faint |
 | 4 | **内容收窄** | assistant 居中 720px（整 turn 居中，UserBubble 列内右浮）；设置内容列同 720px 左对齐；Composer 非 landing 对齐同列 |
 | 5 | **彩色降噪** | 保留 git 语义色（M/A/D 降为极小圆点或单字）+ accent + 真 failure 的 danger，其余降灰阶。从色块/pill 降级为极小圆点或单字 badge |
 
@@ -245,15 +245,17 @@ demo 阶段功能做到「可见 + 可交互 + 数据 mock」即够。不接 run
 - **浮层**：`--bg-elevated` `#2b2b2e`（hover 详情卡 / popover / 用户气泡）；overlay 遮罩半透明黑（`bg-black/80`）全场最暗，遮罩上面板靠 border + shadow 分离
 - 黛蓝/暖墨暗色 entry 按玄五层骨架 + 各自色相偏移推导（黛蓝 B>R、暖墨 R>B，通道差与各自旧 entry 一致）；亮色族三主题（皓/青墨/朱印）bg 阶梯沿用宣纸镜像（surface 最亮、框架层深一档），青墨/朱印不覆写
 
-### 4.2 文字 neutral 谱系（上抬，dim ~4.4:1）
+### 4.2 文字 neutral 谱系（纯中性四档，暗色族三主题统一）
+
+四档全部纯中性去蓝偏（ui-optimize 决策2）：正文/侧栏主文字/composer 可操作文字同落 fg 档（≈16:1），工具行/次要 mid 档，时间与元信息 dim 档，极弱/装饰 faint 档；图标档随 mid 档校准。暗色族三主题（玄/黛蓝/暖墨）文字档统一为同一组值；亮色族三主题文字档维持宣纸墨色不变（无蓝偏问题）。
 
 ```css
---neutral-fg:    #dedee2;  /* 主前景 */
---neutral-mid:   #96969c;  /* 正文（过 AA）*/
---neutral-dim:   #74747a;  /* 次要（提亮一档）*/
---neutral-faint: #46464c;  /* 极弱/装饰 */
---neutral-ico:   #86868c;  /* 图标默认色 */
---neutral-ico-hover: #dedee2;
+--neutral-fg:    #ececec;  /* 主前景 + 正文 */
+--neutral-mid:   #8a8a8a;  /* 工具行/次要（~5.4:1，过 AA 大字线）*/
+--neutral-dim:   #5c5c5c;  /* 时间与元信息（~2.8:1，低显著度装饰性文字的显式取舍）*/
+--neutral-faint: #45454a;  /* 极弱/装饰 */
+--neutral-ico:   #8a8a8a;  /* 图标默认色（随 mid 档校准） */
+--neutral-ico-hover: #ececec;
 
 /* 对话流专属名称色（2026-10-06 对话流视觉裁决）：workflow / subagent 的具体名称——
    暖驼微暖低饱和，不随主色态变化；亮色主题覆盖 #8c6231（对比 5.2:1），preset 不覆盖 */
