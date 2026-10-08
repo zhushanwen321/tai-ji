@@ -18,7 +18,7 @@
     唤回侧栏靠 ⌘B + 此 chrome 按钮（rail-restore 已移除）。
   -->
   <header
-    class="flex h-[22px] flex-shrink-0 items-center gap-2 bg-surface px-3.5 [-webkit-app-region:drag]"
+    class="flex h-[22px] flex-shrink-0 items-center gap-2 border-b border-border bg-surface px-3.5 [-webkit-app-region:drag]"
     :class="showChrome && !isFullscreen ? 'pl-[88px]' : 'pl-4'"
   >
     <!-- 折叠态 P1 chrome 槽位：收起/←/→ 三按钮（sidebar/spec §收起态「导航能力迁移」）。
