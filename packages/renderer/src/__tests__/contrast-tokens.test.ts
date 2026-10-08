@@ -13,7 +13,11 @@
  * 决策 2「亮色族文字档维持现行值」冲突——故亮色族 dim 断言现行值锚定（防漂移）
  * 而非 2.8 阈值，改值须先改设计。场景 1③ 阈值全套断言于暗色族三主题。
  *
- * 行内 code 令牌（--md-code-bg/fg）对比断言（场景 2③ ≥ 4:1）随 A2 单元增补。
+ * 行内 code 令牌（--md-code-bg/fg）对比断言（场景 2③ ≥ 4:1）已入库（D5 终态同步 F1-7：
+ * 设计声称「断言脚本六主题循环」而单测缺位，本 describe 补齐兑现）。--md-code-bg 为
+ * color-mix(in oklch, accent N%, transparent) 形态（非 hex 字面值），不走 REQUIRED_TOKENS
+ * 的 hex 断言面：premultiplied alpha 混合语义下该 color-mix 结果 = accent 本色 + alpha N/100，
+ * 渲染底 = sRGB 逐通道 α×accent + (1-α)×surface 合成（与浏览器半透明背景合成公式一致）。
  */
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
@@ -98,6 +102,34 @@ function contrastRatio(fg: string, bg: string): number {
 
 const tokensByTheme = new Map<string, ThemeTokens>(THEMES.map((t) => [t.id, resolveThemeTokens(t)]))
 
+type ThemeEntry = (typeof THEMES)[number]
+
+/** color-mix 形态令牌的原始串解析（--accent/--md-code-* 不进 REQUIRED_TOKENS 的 hex 断言面） */
+function parseThemeRawVars(theme: ThemeEntry, names: readonly string[]): Record<string, string> {
+  const merged: Record<string, string> = {}
+  for (const selector of theme.chain) {
+    Object.assign(merged, parseBlockVars(selector))
+  }
+  const out: Record<string, string> = {}
+  for (const name of names) {
+    const raw = merged[name]
+    expect(raw, `主题 ${theme.id}（${theme.label}）缺 ${name} 声明`).toBeDefined()
+    out[name] = raw
+  }
+  return out
+}
+
+/** 半透明前景（accent + alpha）渲染于不透明底色上的 sRGB 逐通道合成（浏览器背景色合成公式） */
+function compositeOver(accentHex: string, alpha: number, baseHex: string): string {
+  const a = parseInt(accentHex.slice(1), 16)
+  const b = parseInt(baseHex.slice(1), 16)
+  const mix = (x: number, y: number) => Math.round(alpha * x + (1 - alpha) * y)
+  const r = mix((a >> 16) & 255, (b >> 16) & 255)
+  const g = mix((a >> 8) & 255, (b >> 8) & 255)
+  const bch = mix(a & 255, b & 255)
+  return `#${((r << 16) | (g << 8) | bch).toString(16).padStart(6, '0')}`
+}
+
 describe('对比度令牌阈值（ui-optimize §4 场景 1③，宿主 = 对话流卡 --surface）', () => {
   it('六主题级联解析健全：断言面 8 令牌全部为 hex 字面值', () => {
     expect([...tokensByTheme.keys()].sort()).toEqual([...THEMES.map((t) => t.id)].sort())
@@ -135,6 +167,27 @@ describe('对比度令牌阈值（ui-optimize §4 场景 1③，宿主 = 对话�
     for (const theme of THEMES.filter((t) => t.family === 'light')) {
       const t = tokensByTheme.get(theme.id)!
       expect(t['--neutral-dim'], `${theme.label} dim 漂离现行值（改值须先改 ui-optimize 决策 2）`).toBe(LIGHT_DIM_ANCHOR)
+    }
+  })
+})
+
+describe('行内 code 对比（场景 2③ ≥ 4:1，六主题）', () => {
+  const MD_CODE_MIX_RE = /^color-mix\(in oklch,\s*var\(--accent\)\s*([\d.]+)%,\s*transparent\)$/
+
+  it('--md-code-fg 于合成底（accent N% 叠 surface）上对比 ≥ 4:1（六主题）', () => {
+    for (const theme of THEMES) {
+      const raw = parseThemeRawVars(theme, ['--accent', '--md-code-bg', '--md-code-fg'])
+      const accent = raw['--accent'] ?? ''
+      const fg = (raw['--md-code-fg'] ?? '').toLowerCase()
+      expect(accent, `主题 ${theme.label} --accent 非 hex 字面值：${accent}`).toMatch(/^#[0-9a-fA-F]{6}$/)
+      expect(fg, `主题 ${theme.label} --md-code-fg 非 hex 字面值：${raw['--md-code-fg']}`).toMatch(/^#[0-9a-fA-F]{6}$/)
+      const mix = (raw['--md-code-bg'] ?? '').match(MD_CODE_MIX_RE)
+      expect(mix, `主题 ${theme.label} --md-code-bg 形态非 color-mix(accent N%, transparent)：${raw['--md-code-bg']}`).not.toBeNull()
+      const alpha = Number(mix![1]) / 100
+      const surface = tokensByTheme.get(theme.id)!['--surface']
+      const codeBg = compositeOver(accent, alpha, surface)
+      const ratio = contrastRatio(fg, codeBg)
+      expect(ratio, `${theme.label} code ${fg} on ${codeBg}（accent ${mix![1]}% 叠 surface）= ${ratio.toFixed(2)}:1`).toBeGreaterThanOrEqual(4)
     }
   })
 })

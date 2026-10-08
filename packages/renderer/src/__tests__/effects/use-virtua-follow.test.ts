@@ -124,7 +124,7 @@ describe('useVirtuaFollow', () => {
       await vi.advanceTimersByTimeAsync(16)
 
       expect(mock.scrollToIndex).toHaveBeenCalledTimes(1)
-      expect(mock.scrollToIndex).toHaveBeenCalledWith(4, { align: 'end', offset: 0 })
+      expect(mock.scrollToIndex).toHaveBeenCalledWith(4, { align: 'end', offset: 0, smooth: false })
       // D1：findItemIndex 反查派生已删除，任何路径不得再调用
       expect(mock.findItemIndex).not.toHaveBeenCalled()
     })
@@ -164,9 +164,24 @@ describe('useVirtuaFollow', () => {
 
       // 同步执行（不走 rAF，用户点击「回到最新」胶囊即时反馈最强）
       expect(stickToBottom.value).toBe(true)
-      expect(mock.scrollToIndex).toHaveBeenCalledWith(4, { align: 'end', offset: 0 })
+      expect(mock.scrollToIndex).toHaveBeenCalledWith(4, { align: 'end', offset: 0, smooth: false })
       expect(mock.findItemIndex).not.toHaveBeenCalled()
       expect(onStickChange).toHaveBeenCalledWith(true)
+    })
+
+    it('W1TC8b followToBottom(force=true, smooth=true)（胶囊点击路径，决策 12「点击平滑回底」）→ scrollToIndex 带 smooth: true；胶囊即时消失不等动画', () => {
+      const { showJumpButton, onScroll, followToBottom } = setupFollow(
+        { itemCount: () => 5 },
+        { scrollSize: 2000, viewportSize: 500 },
+      )
+      onScroll(900) // distance = 600 > 一屏 → 胶囊浮现
+      expect(showJumpButton.value).toBe(true)
+
+      followToBottom(true, true)
+
+      expect(mock.scrollToIndex).toHaveBeenCalledWith(4, { align: 'end', offset: 0, smooth: true })
+      // 胶囊即时消失不等动画：距底快照同步清零 → showJumpButton 立即翻 false
+      expect(showJumpButton.value).toBe(false)
     })
 
     describe('W1TC9 showJumpButton 派生 = 离底超过一屏（决策 12 距底几何判定）', () => {
@@ -221,7 +236,7 @@ describe('useVirtuaFollow', () => {
       followToBottom(true)
 
       // 末项索引 = itemCount-1 = 4 直取（不吃反查结果 3）；offset = endOffset() = 24
-      expect(mock.scrollToIndex).toHaveBeenCalledWith(4, { align: 'end', offset: 24 })
+      expect(mock.scrollToIndex).toHaveBeenCalledWith(4, { align: 'end', offset: 24, smooth: false })
       expect(findItemIndex).not.toHaveBeenCalled()
     })
 
@@ -484,7 +499,7 @@ describe('useVirtuaFollow', () => {
       followToBottom()
       await vi.advanceTimersByTimeAsync(16)
       expect(mock.scrollToIndex).toHaveBeenCalledTimes(1)
-      expect(mock.scrollToIndex).toHaveBeenCalledWith(4, { align: 'end', offset: 0 })
+      expect(mock.scrollToIndex).toHaveBeenCalledWith(4, { align: 'end', offset: 0, smooth: false })
 
       // 脱离态默认调用：rAF 内重读 guard 拦截 → 不把上滑用户扯回（MS6 语义本体：
       // 非 force 的 follow 尊重 stickToBottom，视口不动）
@@ -512,7 +527,7 @@ describe('useVirtuaFollow', () => {
       followToBottom(true)
       expect(stickToBottom.value).toBe(true)
       expect(showJumpButton.value).toBe(false)
-      expect(mock.scrollToIndex).toHaveBeenCalledWith(4, { align: 'end', offset: 0 })
+      expect(mock.scrollToIndex).toHaveBeenCalledWith(4, { align: 'end', offset: 0, smooth: false })
 
       // force 后 scroll 抑制窗内的回声期终态稳定（stick 已回真 + 距底清零）：
       // 「回到最新」闭环的不变量

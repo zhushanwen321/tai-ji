@@ -562,7 +562,9 @@ function onClick(e: MouseEvent): void {
    - 标题用 --reasoning（紫）而非 --fg（白），避免与正文 summary 白标题撞色，保持紫色语义族
    - li::marker / blockquote 压到 --subtle（三级灰），结构存在但不抢戏
    - strong 回升到 --fg，提供强调层级（muted 段落里 fg 粗体是唯一强调点）
-   - p 行高保持 1.7（继承默认），段落间距与正文一致 */
+   - p 行高随全局 1.8（决策 7 为不分 variant 的全局规则，thinking 无覆盖——与 thinking 容器
+     直挂文本的 1.7 存在 streaming→markdown 化的行高跳变，统一方向待裁决：
+     docs/todo/thinking-block-line-height.md），段落间距与正文一致 */
 .md-render--thinking :deep(h1),
 .md-render--thinking :deep(h2),
 .md-render--thinking :deep(h3),

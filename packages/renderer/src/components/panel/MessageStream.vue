@@ -167,7 +167,7 @@
         size="sm"
         class="absolute bottom-4 left-1/2 z-10 h-7 -translate-x-1/2 rounded-full bg-[var(--bg-elevated)] px-3 text-[length:var(--text-xs)] shadow-lg"
         :title="t('panel.message.scrollToBottom')"
-        @click="followToBottom(true)"
+        @click="followToBottom(true, true)"
       >
         <ChevronDown class="size-3.5" />
         <span>{{ t('panel.message.scrollToBottom') }}</span>

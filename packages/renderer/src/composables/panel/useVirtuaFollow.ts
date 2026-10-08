@@ -99,7 +99,8 @@ export function useVirtuaFollow(opts: {
   onScroll: (offset: number) => void
   onWheel: (e: WheelEvent) => void
   followIfStuck: () => void
-  followToBottom: (force?: boolean) => void
+  /** smooth 仅「回到最新」胶囊点击传递（决策 12「点击平滑回底」）；挂载首滚 / session 切换 / 自动跟随保持即时 */
+  followToBottom: (force?: boolean, smooth?: boolean) => void
   /** D7 session 重建入口：置 NaN 快照 + 开收敛抑制窗（U2 在 sessionId watch 同步调用） */
   onSessionRebuild: () => void
   /** D7② RO 活动信号入口：U2 的 contentWrapEl ResizeObserver 回调喂入（重置 120ms 静默计时） */
@@ -137,15 +138,19 @@ export function useVirtuaFollow(opts: {
    * follow 原语的滚动目标（D1 + D2）：末项索引直取 + offset = endOffset()。
    * 边界4：itemCount() ≤ 0（空列表）→ 无末项可滚，跳过。
    */
-  function scrollToRealBottom(v: VirtualizerHandle): void {
+  function scrollToRealBottom(v: VirtualizerHandle, smooth = false): void {
     const count = opts.itemCount?.() ?? Number.MAX_SAFE_INTEGER
     if (count <= 0) return
-    v.scrollToIndex(count - 1, { align: 'end', offset: opts.endOffset?.() ?? 0 })
+    // smooth 仅胶囊点击路径（决策 12「点击平滑回底」断言）。已知残留风险：virtua smooth 为
+    // JS rAF 驱动，动画期间用户 wheel 不会打断写入（动画最长数帧到 1.5s 收敛窗同量级），
+    // 极端「点击后立即滚动」场景有短暂抖动——换取长距离回底的可达性反馈。
+    v.scrollToIndex(count - 1, { align: 'end', offset: opts.endOffset?.() ?? 0, smooth })
   }
 
   // ── D7② force 后收敛抑制窗 ────────────────────────────────────────────────
-  // 与 D3 触发矩阵的 isPrepend 前插抑制窗（U2 实现，抑制的是 unread 标记）是两个独立窗口，
-  // 互不共用状态（设计 D7 命名区分声明）。本窗只抑制 onScroll 复合判据的翻 false。
+  // [HISTORICAL] 与 D3 触发矩阵的 isPrepend 前插抑制窗曾是两个独立窗口；isPrepend 窗已随
+  // 决策 12 unreadBelow 标记退役一并删除（useMessageStreamFollowTriggers 不再传入
+  // isPrepend），本文件只剩本窗。本窗只抑制 onScroll 复合判据的翻 false。
   /** 抑制窗是否打开（窗内暂停脱离判定；快照维护 / 恢复分支 / wheel 均不受影响） */
   let convergenceWindowActive = false
   /** RO 静默关窗计时器（每次 RO 活动重置；触发即关窗） */
@@ -318,11 +323,14 @@ export function useVirtuaFollow(opts: {
    * - force=true（用户「回到最新」胶囊点击 / U2 的挂载首滚与 session 切换强滚）：无视
    *   stickToBottom，**同步**强制滚到底并重置贴底态（同步不走 rAF，让用户点击的即时反馈最强）。
    *   同时置 lastOffset=NaN 并开收敛抑制窗（D7②——强滚后的估算收敛风暴期负补偿回声不误脱离）。
-   *   距底快照同步清零 → 胶囊即时消失（不等 scroll 回声，决策 12「点击平滑回底后消失」）。
+   *   距底快照同步清零 → 胶囊即时消失（不等 scroll 回声，决策 12「点击平滑回底后消失」——
+   *   平滑由 smooth 参数承载，胶囊消失仍走同步清零，不等动画走完）。
    *   状态重置不受 vlistRef null 影响（强滚语义下贴底态为真，即使句柄尚未挂上无法执行滚动）。
+   * - smooth=true：仅胶囊点击传递，scrollToIndex 带平滑动画；动画期间的 scroll 回声在
+   *   stickToBottom=true（offset 单调向底）与收敛抑制窗罩内，不触发脱离误判。
    * - force=false（默认）：同 followIfStuck（受 stickToBottom guard，非贴底时不滚）。
    */
-  function followToBottom(force = false): void {
+  function followToBottom(force = false, smooth = false): void {
     if (!force) {
       followIfStuck()
       return
@@ -332,7 +340,7 @@ export function useVirtuaFollow(opts: {
     lastOffset = Number.NaN
     openConvergenceWindow()
     const v = vlistRef.value
-    if (v) scrollToRealBottom(v)
+    if (v) scrollToRealBottom(v, smooth)
     onStickChange?.(true)
   }
 
