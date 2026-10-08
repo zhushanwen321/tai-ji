@@ -60,7 +60,7 @@
     <Teleport to="body">
       <div
         v-if="tipVisible"
-        class="fixed z-40 pointer-events-none bg-[var(--surface)] border border-[var(--border-strong)] rounded-[var(--radius-sm)] shadow-[var(--shadow-2)] px-2.5 py-1.5 text-[12px] leading-[1.7] font-mono"
+        class="fixed z-40 pointer-events-none bg-[var(--bg-elevated)] border border-[var(--border-strong)] rounded-[var(--radius-sm)] shadow-[var(--shadow-2)] px-2.5 py-1.5 text-[12px] leading-[1.7] font-mono"
         :style="tipPos"
       >
         <div class="text-[var(--neutral-dim)] text-[10px]">{{ tipDate }}</div>

@@ -2,8 +2,8 @@
 name: taiji
 description: AI Agent 桌面工作台 · 太极纯灰（v6）设计系统
 colors:
-  bg: "#131316"
-  surface: "#1f1f22"
+  bg: "#1e1e1e"
+  surface: "#101010"
   fg: "#dedee2"
   muted: "#96969c"
   border: "rgba(255, 255, 255, 0.07)"
@@ -224,23 +224,26 @@ demo 阶段功能做到「可见 + 可交互 + 数据 mock」即够。不接 run
 > **真相源**：[`packages/renderer/src/style.css`](../packages/renderer/src/style.css) 的 `:root`（token 值真值，运行时唯一源）。以下值与该文件逐字对齐，受挂值相等检查保护（pre-commit）；运行时值更新时须同 commit 回写本表。
 > 本节取代 v6-design.md §2 / v6-summary.md §3（两文档已删除，残值并入本文档）与 v6-spec-tokens.html（已删除，2026-09-13 退役，git 可追溯）。
 
-### 4.1 背景层级（阶梯上抬 + 加宽级差，暗端防糊）
+### 4.1 背景层级（五层职能分层：读的地方沉下去，操作的地方浮上来）
 
 ```css
---bg:           #131316;   /* 画布色（侧栏/settings 内容区底）*/
---bg-sunken:    var(--bg); /* 同画布色（语义变更：不往黑推，靠内容卡 surface 浮起分隔）*/
---bg-input:     #17171a;   /* 输入框/凹陷区/实例 tab 非激活底（比 bg 更深）*/
---bg-card:      #1b1b1e;   /* 设置分组卡片（介于 bg 与 surface）*/
---surface:      #1f1f22;   /* 内容卡浮起表面（对话流/右抽屉/底抽屉三卡同色）*/
+--bg-stage:     #0a0a0c;   /* 窗口壳：标题栏底、卡片之间的缝（全场最深）*/
+--bg:           #1e1e1e;   /* 框架层：侧栏/composer/settings 内容区（同层同色）*/
+--bg-sunken:    var(--bg); /* 框架层沉底同值跟随（语义 = 与宿主 --bg 同值）*/
+--bg-input:     #161618;   /* 内容层内次级：代码块/文件 chip 底/实例 tab 非激活底*/
+--surface:      #101010;   /* 内容层：对话流/右抽屉/底抽屉阅读区（沉底，各卡自持 border + shadow）*/
+--bg-card:      #262626;   /* 操作域浮起容器：设置分组卡片等（亮于 --bg 一档）*/
+--bg-elevated:  #2b2b2e;   /* 浮层：hover 详情卡/popover/用户气泡（--bubble-bg 同引此档）*/
 --surface-2:    #27272a;   /* 次级表面（header 浮起分层 / SegmentedTab 内项 active）*/
---bg-elevated:  #2b2b2e;   /* tab 型选中态浮起 / popover 浮层 */
 --surface-hover:#303033;   /* hover 态 */
 ```
 
-**三层明度**（2026-10-04 三卡化后）：
-- **stage 最深底**：`--bg-stage` `#0a0a0c`（tokens.css 新增，ShellView .stage 引用；三层明度在玄主题下完整保留）。**亮色（皓族）**：`--bg-stage` `#dbd9d4`（TAIJI_PAPER 未定义独立 stage，复用宣纸族最深暖灰；style.css `[data-theme=light]` 覆盖，避免泄漏暗色 #0a0a0c 形成黑框）
-- **画布层**：`--bg` `#131316`（aside/settings 内容区 + 三卡之间的缝）
-- **surface 浮起**：`--surface` `#1f1f22`（对话流 / 右抽屉 / 底抽屉三张内容卡同色共享，各卡自持 border + shadow）
+**五层阶梯**（玄值由深到浅：`#0a0a0c → #101010 → #161618 → #1e1e1e → #2b2b2e`，越浮越亮）：
+- **窗口壳**：`--bg-stage` `#0a0a0c`（ShellView .stage 引用）。**亮色（皓族）**：`--bg-stage` `#dbd9d4`（TAIJI_PAPER 未定义独立 stage，复用宣纸族最深暖灰；style.css `[data-theme=light]` 覆盖，避免泄漏暗色 #0a0a0c 形成黑框）
+- **内容层（沉底）**：`--surface` `#101010`（对话流 / 右抽屉 / 底抽屉三张阅读卡同色共享）；`--bg-input` `#161618` 为其内次级（代码块/文件 chip）
+- **框架层（浮起）**：`--bg` `#1e1e1e`（aside / composer / settings 内容区同层同色）；操作域浮起容器 `--bg-card` `#262626` 亮于本层一档
+- **浮层**：`--bg-elevated` `#2b2b2e`（hover 详情卡 / popover / 用户气泡）；overlay 遮罩半透明黑（`bg-black/80`）全场最暗，遮罩上面板靠 border + shadow 分离
+- 黛蓝/暖墨暗色 entry 按玄五层骨架 + 各自色相偏移推导（黛蓝 B>R、暖墨 R>B，通道差与各自旧 entry 一致）；亮色族三主题（皓/青墨/朱印）bg 阶梯沿用宣纸镜像（surface 最亮、框架层深一档），青墨/朱印不覆写
 
 ### 4.2 文字 neutral 谱系（上抬，dim ~4.4:1）
 

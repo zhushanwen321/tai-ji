@@ -105,7 +105,7 @@
       <!-- tooltip（绝对定位） -->
       <div
         v-if="hoverIdx >= 0 && tipData"
-        class="absolute pointer-events-none z-40 bg-[var(--surface)] border border-[var(--border-strong)] rounded-[var(--radius-sm)] shadow-[var(--shadow-2)] p-2.5 min-w-[180px] text-[12px] leading-[1.7]"
+        class="absolute pointer-events-none z-40 bg-[var(--bg-elevated)] border border-[var(--border-strong)] rounded-[var(--radius-sm)] shadow-[var(--shadow-2)] p-2.5 min-w-[180px] text-[12px] leading-[1.7]"
         :style="tipStyle"
       >
         <!-- 日期 -->

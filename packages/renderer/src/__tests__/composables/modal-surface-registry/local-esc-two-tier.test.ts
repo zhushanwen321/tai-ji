@@ -297,6 +297,9 @@ describe('后行档契约：SessionList 确认态本体入聚合（yieldsEsc 让
   it('folder 确认态开着 → 聚合让位；无确认态时 escCount 广播不误绑（反向断言）', async () => {
     const wrapper = mountList()
     await nextTick()
+    // N8 A/C 双模式（U15 改造）：folder 删除确认态本体移至 C 分组模式组头——切 groups 取确认态载体
+    await wrapper.find('[data-testid="session-mode-groups"]').trigger('click')
+    await nextTick()
     expect(anyModalSurfaceYieldsEsc(), '挂载未确认 ⇒ 不让位').toBe(false)
 
     // 反向断言：Esc 广播计数器自增（无确认态）不得触发让位——误绑计数器 = 全局 Esc 死键
@@ -309,6 +312,7 @@ describe('后行档契约：SessionList 确认态本体入聚合（yieldsEsc 让
     expect(wrapper.find('[data-testid="folder-delete-btn"]').attributes('title')).toBe('确认删除此文件夹下所有会话？')
     expect(anyModalSurfaceYieldsEsc(), '确认态本体开着 ⇒ 让位').toBe(true)
     wrapper.unmount()
+    window.localStorage.removeItem('taiji:sidebar-session-mode')
   })
 
   it('SessionItem 后代删除确认态开着 → 聚合让位（N 后代确认态聚合谓词）', async () => {
@@ -347,6 +351,9 @@ describe('后行档契约：SessionList 确认态本体入聚合（yieldsEsc 让
 
     const wrapper = mountList()
     await nextTick()
+    // N8 A/C 双模式（U15 改造）：确认态载体在 C 分组模式组头——切 groups 后走原事件序断言
+    await wrapper.find('[data-testid="session-mode-groups"]').trigger('click')
+    await nextTick()
     await wrapper.find('[data-testid="folder-delete-btn"]').trigger('click')
     expect(wrapper.find('[data-testid="folder-delete-btn"]').attributes('title')).toBe('确认删除此文件夹下所有会话？')
 
@@ -362,5 +369,6 @@ describe('后行档契约：SessionList 确认态本体入聚合（yieldsEsc 让
 
     window.removeEventListener('keydown', onOrchestratorKeydown)
     wrapper.unmount()
+    window.localStorage.removeItem('taiji:sidebar-session-mode')
   })
 })

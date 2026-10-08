@@ -14,7 +14,7 @@ import type { ITheme } from '@xterm/xterm'
 export const darkTerminalTheme: ITheme = {
   /* ── 核心色 ──────────────────────────────────────────
      背景 #000：2026-08-14 裁决遵循 v6-drawer-tabs-demo——纯黑圆角块嵌在 drawer 深底
-     （bg #131316）上，黑块与深底的明度差即层次（替代旧 #1a1b1f 与容器 bg-black 混搭）。 */
+     （--surface 沉底内容层）上，黑块与深底的明度差即层次（替代旧 #1a1b1f 与容器 bg-black 混搭）。 */
   background: '#000000',
   foreground: '#f7f8fc',      // --fg
   cursor: '#4f8ef7',          // --accent

@@ -18,20 +18,20 @@
    ============================================================ */
 
 :root {
-  /* ── 背景层级（v6 玄：阶梯上抬+加宽级差，暗端防糊）────────── */
-  --bg-stage: #0a0a0c;          /* 舞台深底（最外层衬底，低于 --bg；v6 §4） */
-  --bg: #131316;                /* 画布底层（玄，侧栏/drawer/settings 内容区底） */
-  --bg-sunken: var(--bg);       /* 同画布色（语义变更，靠 surface 浮起分隔） */
-  --surface: #1f1f22;           /* 主面板/drawer 浮起表面 */
+  /* ── 背景层级（五层职能分层：读的地方沉下去，操作的地方浮上来；
+     阶梯单调递增「越浮越亮」，SSOT = docs/DESIGN.md §4.1）────── */
+  --bg-stage: #0a0a0c;          /* 窗口壳：标题栏底、卡片之间的缝（全场最深） */
+  --bg: #1e1e1e;                /* 框架层：侧栏/composer/settings 内容区（同层同色） */
+  --bg-sunken: var(--bg);       /* 框架层沉底同值跟随（语义 = 与宿主 --bg 同值） */
+  --surface: #101010;           /* 内容层：对话流/右侧 drawer/底部 drawer 的阅读区（沉底） */
   --surface-hover: #303033;     /* 面板悬停 */
   --surface-2: #27272a;         /* 二级表面（header 浮起分层 / SegmentedTab active） */
-  --bg-elevated: #2b2b2e;       /* tab 型选中态浮起 / popover 浮层 */
-  --bg-input: #17171a;          /* 输入框/凹陷区（比 bg 更深） */
-  --bg-card: #1b1b1e;           /* 设置分组卡片（介于 bg 与 surface） */
-  /* 用户气泡/输入区专用底色（暗：浮起灰 / 亮：纯白，见 [data-theme="light"] 覆盖）。
-     亮色下灰底（surface-hover/bg-input）易读作禁用态，故白纸化——气泡/输入框是内容载体，
-     白色浮起与米白面板区分，墨绿链接对比度同步从 4.24 升至 5.53。 */
-  --bubble-bg: var(--surface-hover);
+  --bg-elevated: #2b2b2e;       /* 浮层：hover 详情卡/popover/用户气泡 */
+  --bg-input: #161618;          /* 内容层内次级：代码块/文件 chip 底 */
+  --bg-card: #262626;           /* 设置分组卡片等操作域浮起容器（亮于 --bg 一档） */
+  /* 用户气泡底色归浮层档（与 hover 详情卡/popover 同引 --bg-elevated，RGB 采样同值）。
+     亮色族白纸化裁决保留（见 [data-theme="light"] 覆盖）：灰底易读作禁用态，纯白浮起。 */
+  --bubble-bg: var(--bg-elevated);
   --composer-bg: var(--bg-input);
   --bar-fill-soft: 55%;         /* progress-bar fill 柔化档 */
 
@@ -167,7 +167,7 @@
        • --muted：v3=次级文字色 / shadcn=背景色 → 维持文字色 */
   --primary: var(--accent);            /* default Button 底 = 主色 */
   --primary-foreground: var(--neutral-fg);     /* 底上字 */
-  --secondary: var(--surface);         /* secondary Button 底 */
+  --secondary: var(--bg-card);         /* secondary Button 底（操作域浮起档，亮于 settings 内容区 --bg） */
   --secondary-foreground: var(--neutral-fg);
   --destructive: var(--danger);        /* destructive Button 底 */
   --destructive-foreground: var(--neutral-fg);
@@ -175,7 +175,7 @@
   --accent-foreground: var(--neutral-fg);      /* ghost hover 底配字 */
   --background: var(--bg);             /* bg-background / ring-offset-background */
   --foreground: var(--neutral-fg);             /* text-foreground */
-  --popover: var(--surface);           /* bg-popover */
+  --popover: var(--bg-elevated);       /* bg-popover（浮层档，与 PopoverContent 直挂的 bg-bg-elevated 同源） */
   --popover-foreground: var(--neutral-fg);
   --input: var(--border);              /* border-input */
   --ring: var(--accent);               /* ring-ring（focus，主色）*/
@@ -293,16 +293,17 @@
    真
    ============================================================ */
 
-/* 黛蓝（暗 · 依稀蓝相，S≈8%，与玄拉开可感知差距但不罩色） */
+/* 黛蓝（暗 · 依稀蓝相，S≈8%，与玄拉开可感知差距但不罩色）
+   bg 阶梯 = 玄五层骨架 + 黛蓝蓝相偏移（B>R 的通道差与旧 entry 一致），真机校准随场景 1 */
 :root[data-theme-preset="dailan"] {
-  --bg: #121319;
-  --bg-sunken: #121319;
-  --surface: #1e1f25;
+  --bg: #1d1e21;
+  --bg-sunken: #1d1e21;
+  --surface: #0f1013;
   --surface-hover: #2f3039;
   --surface-2: #262731;
   --bg-elevated: #2a2b34;
-  --bg-input: #16171d;
-  --bg-card: #1a1b22;
+  --bg-input: #151619;
+  --bg-card: #25262a;
   --neutral-fg: #dedfe5;
   --neutral-mid: #9597a1;
   --neutral-dim: #74767f;
@@ -333,16 +334,17 @@
   --heat-outline: color-mix(in oklch, var(--neutral-fg) 45%, transparent);
 }
 
-/* 暖墨（暗 · 宣纸暖相） */
+/* 暖墨（暗 · 宣纸暖相）
+   bg 阶梯 = 玄五层骨架 + 暖墨暖相偏移（R>B 的通道差与旧 entry 一致），真机校准随场景 1 */
 :root[data-theme-preset="nuanmo"] {
-  --bg: #161413;
-  --bg-sunken: #161413;
-  --surface: #221f1d;
+  --bg: #211f1b;
+  --bg-sunken: #211f1b;
+  --surface: #13100b;
   --surface-hover: #33302c;
   --surface-2: #2a2724;
   --bg-elevated: #2e2b27;
-  --bg-input: #1a1816;
-  --bg-card: #1e1c1a;
+  --bg-input: #191712;
+  --bg-card: #292722;
   --neutral-fg: #e2dfdb;
   --neutral-mid: #9a9690;
   --neutral-dim: #79756f;
@@ -527,9 +529,8 @@ body,
   font-family: var(--font-sans);
   font-size: var(--text-base);
   color: var(--neutral-fg);
-  /* v6 §2 三层明度：窗口底为 stage 最深层（#0a0a0c），app-shell(bg #131316 + rounded-[10px])
-     落在 stage 上，圆角/padding 区透出 stage 衬底，形成 base(深)→canvas(中)→surface(浅) 阶梯。
-     原 var(--bg) 与 app-shell 同色，stage 层缺失致三层明度扁平。 */
+  /* 五层职能分层：窗口底为 stage 最深层（#0a0a0c），app-shell(bg #1e1e1e 框架层 + rounded-[10px])
+     落在 stage 上，圆角/padding 区透出 stage 衬底；内容卡（--surface #101010 沉底）浮于框架层内。 */
   background: var(--bg-stage);
 
 }
