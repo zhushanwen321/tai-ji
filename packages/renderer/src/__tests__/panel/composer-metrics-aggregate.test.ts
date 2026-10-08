@@ -1,12 +1,12 @@
 /**
- * ComposerMetricsAggregate 测试 —— W3a 指标聚合按钮（hover 出三卡聚合页）。
+ * ComposerMetricsAggregate 测试 —— W3a 指标聚合按钮（hover 出四卡聚合页）。
  *
  * 三视角：
  * - 使用者黑盒：触发器 DOM（单图标按钮 + title「指标」）+ 真实 HoverCard 路径打开聚合页
  *   （focus → reka open 计时器 → 内容进 body portal，对齐 context-capacity-quota 的 openPopover 形态）；
- * - 观察者形态：HoverCard 家族 stub 常开，断言聚合页三段卡齐全（容量 / 速度 / 缓存 的
- *   文案与 data-testid）+ 两条发丝分隔 + 帧驱动实时值；
- * - 构建者白盒：数据注入经真实 events.dispatchSession 通道（对齐 gen-stats-triggers.test.ts 形态）。
+ * - 观察者形态：HoverCard 家族 stub 常开，断言聚合页四段卡齐全（容量 / TTFT / 速度 / 缓存 的
+ *   文案与 data-testid）+ 三条发丝分隔 + 帧驱动实时值；
+ * - 构建者白盒：数据注入经真实 events.dispatchSession 通道（对齐 gen-stats 系测试形态）。
  *
  * mock 边界：getGenStats / getContext 恢复腿均为受控 pending（不落地，不污染帧直驱断言）。
  *
@@ -67,7 +67,7 @@ describe('指标聚合触发器（黑盒 DOM）', () => {
     expect(btn.attributes('title')).toBe('指标')
     // 单图标硬约束：按钮内只有一个 svg（禁多 icon 重叠）
     expect(btn.findAll('svg')).toHaveLength(1)
-    // 触发器本身不带数值文本（数值在聚合页三卡里，信息不丢）
+    // 触发器本身不带数值文本（数值在聚合页四卡里，信息不丢）
     expect(btn.text()).toBe('')
   })
 
@@ -90,7 +90,7 @@ describe('指标聚合触发器（黑盒 DOM）', () => {
 // ── 观察者形态（HoverCard stub 常开：聚合页内容行断言）────────────
 
 describe('聚合页四段卡（观察者形态）', () => {
-  it('三张卡齐全：容量段（上下文容量/已用/使用率）+ 速度段 head + 缓存段 head 与数值 testid', () => {
+  it('四张卡齐全：容量段（上下文容量/已用/使用率）+ TTFT 段 head + 速度段 head + 缓存段 head 与数值 testid', () => {
     const wrapper = mountAggregate(true)
     const text = wrapper.text()
     // ContextCapacityCard 段

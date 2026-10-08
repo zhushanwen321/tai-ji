@@ -178,11 +178,16 @@ describe('usePinBottomGuard（§4.4 护栏⑦ dev 断言）', () => {
     expect(warnSpy).not.toHaveBeenCalled()
   })
 
-  it('followToBottom 包装透传 force 参数并触发窗口（回到最新胶囊 / force 内联路径同一入口）', async () => {
+  it('followToBottom 包装全量透传参数（force + smooth）并触发窗口（回到最新胶囊 / force 内联路径同一入口）', async () => {
     const { follow, api } = setup()
 
     api.followToBottom(true)
-    expect(follow.followToBottom).toHaveBeenCalledWith(true)
+    expect(follow.followToBottom).toHaveBeenCalledWith(true, undefined)
+
+    // smooth 透传断言：胶囊点击传 (true, true)（决策 12「点击平滑回底」），底层必须收到
+    // smooth=true——包装层曾只透传 force，dev 构建胶囊点击恒瞬跳（生产分支不经包装无此问题）
+    api.followToBottom(true, true)
+    expect(follow.followToBottom).toHaveBeenLastCalledWith(true, true)
 
     await vi.advanceTimersByTimeAsync(700)
     expect(warnSpy).toHaveBeenCalledTimes(1) // 窗口已开：gap 超阈双采样后照常报警

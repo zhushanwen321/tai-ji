@@ -2,7 +2,8 @@
  * visual baseline: AppShell 整页 —— C层 Playwright 像素 diff（IF3）。
  *
  * 截 mock 模式 renderer 首屏（AppShell Landing 态，无 session 激活）。
- * baseline: e2e/visual-baselines/shell/shell-default.png（git tracked，Q3/D3）。
+ * baseline: e2e/visual-baselines/shell.spec/shell-default.png（git tracked，Q3/D3；
+ * 路径由 playwright.config.ts snapshotPathTemplate '{snapshotDir}/{testFileBaseName}/{arg}{ext}' 推导）。
  *
  * F1 阶段 baseline 是 v3 现状占位（v6 视觉 F4 才落地，届时 --update-snapshots 更新）。
  * 运行：npx playwright test e2e/visual/shell.spec.ts --project=visual-chromium

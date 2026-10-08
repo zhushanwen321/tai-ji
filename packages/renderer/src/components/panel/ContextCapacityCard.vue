@@ -2,7 +2,7 @@
   ContextCapacityCard —— 上下文容量浮层的**纯内容卡**（W3a 拆分：原 ContextCapacityPopover 的
   HoverCardContent 完整内容原样迁移，head / bar / stats / coding-plan quota 段结构与文案不变）。
 
-  拆分动机：三步聚合的指标聚合页（ComposerMetricsAggregate）要把「容量 + 速度 + 缓存」三张卡
+  拆分动机：三步聚合的指标聚合页（ComposerMetricsAggregate）要把「容量 + TTFT + 速度 + 缓存」四张卡
   纵向拼进同一个浮层——若沿用「Popover 包内容」的形态，聚合页会嵌套 HoverCard / Popover，
   触发器重复渲染且交互打架。故内容独立成本卡：聚合页直拼本卡，既有触发器（本卡的原宿主）
   也改挂本卡，删掉重复渲染。

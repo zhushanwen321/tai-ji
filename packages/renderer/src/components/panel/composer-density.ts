@@ -12,7 +12,7 @@
  * 退化序（D6 修订「三步聚合」，评审 demo 对齐；累计生效，级数由接线层实测溢出后逐级喂入）：
  * - 序 0（类型级保证，不入序集）：`+` 与发送按钮**恒不退化、不被裁剪**（锚点）。
  * - 序 1（L1）：左簇（托盘 + 插件 toolbar 散图标）→ **1 个单图标聚合按钮**（click 弹全图标列表）。
- * - 序 2（L2）：指标（容量 + 速度 + 缓存）→ **1 个单图标聚合按钮**（hover 弹指标聚合页）。
+ * - 序 2（L2）：指标（容量 + TTFT + 速度 + 缓存）→ **1 个单图标聚合按钮**（hover 弹指标聚合页，四卡）。
  *   ui-optimize 决策 6：序 2 聚合**对所有 fit 级无条件生效**——指标恒为聚合按钮（fit 0 的
  *   平铺直挂形态已退役），本级在 fit 轴上不再产生形态变化（测量回路自然穿过：需求宽不变 →
  *   继续升到下一级），序号保留为 appliedOrders 前缀登记位。
@@ -101,7 +101,7 @@ export interface ComposerDensitySlots {
    */
   readonly leftCluster: 'expanded' | 'aggregated' | 'absent'
   /**
-   * 序 2：指标（容量 + 速度 + 缓存）——决策 6 后**恒 `aggregated`**（单图标聚合按钮，hover 弹
+   * 序 2：指标（容量 + TTFT + 速度 + 缓存）——决策 6 后**恒 `aggregated`**（单图标聚合按钮，hover 弹
    * 指标聚合页；fit 0 平铺直挂形态已退役）；`absent` 仅锚点保护态（让位隐藏）。
    */
   readonly metrics: 'aggregated' | 'absent'

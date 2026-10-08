@@ -216,7 +216,8 @@
 
 /* ============================================================
    皓主题（亮 · 宣纸墨黑 · 默认亮色）
-   <html data-theme="light"> 触发。真值源：useTheme.ts THEMES['太极 · 皓…']
+   <html data-theme="light"> 触发。真值 = 本文件 [data-theme="light"] 块；
+   主题列表数据 = useTaijiThemes.ts TAIJI_THEMES（与头注释 :8-10 同口径）。
    宣纸米白阶梯 + 暖墨文字 + 墨黑 accent；青墨/朱印仅覆盖 accent（见下方 preset）。
    ============================================================ */
 [data-theme="light"] {

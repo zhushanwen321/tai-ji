@@ -171,8 +171,10 @@ export function usePinBottomGuard(deps: PinBottomGuardDeps): FollowApi {
       countFollowExecution()
       armWindow()
     },
-    followToBottom: (force) => {
-      follow.followToBottom(force)
+    // 参数须全量透传（force + smooth）：smooth 是决策 12「点击平滑回底」的载体（仅胶囊点击
+    // 传递），曾只透传 force 致 dev 构建胶囊点击恒瞬跳（生产分支 return follow 不经此处）。
+    followToBottom: (force, smooth) => {
+      follow.followToBottom(force, smooth)
       countFollowExecution()
       armWindow()
     },

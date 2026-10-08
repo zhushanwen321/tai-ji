@@ -378,7 +378,8 @@ describe('BashOutputBlock W4 — 视觉降级', () => {
     expect(classes).not.toContain('border-border')
     expect(classes).not.toContain('rounded-md')
     expect(classes.some((c) => c.startsWith('bg-surface-hover'))).toBe(false)
-    // 极简风保留 py-2（与 Block.vue trace-blk py-2 一致）
+    // 极简风保留 py-2（turn 级 notice 间距；trace 块自身 py 节奏已随决策 4 退役，
+    // 块间间距权威 = Turn.vue trace 相邻选择器）
     expect(classes).toContain('py-2')
   })
 })

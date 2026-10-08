@@ -179,8 +179,8 @@
 
         <!-- 右簇：指标 / 模型+思考 / 发送位（shrink-0，发送位右锚不漂移） -->
         <div data-composer-cluster="right" class="flex min-w-0 shrink-0 items-center gap-0">
-          <!-- 序 2：指标（容量 + 速度 + 缓存）。ui-optimize 决策 6：指标**默认聚合**——单图标
-               聚合按钮对所有 fit 级常驻（hover 弹指标聚合页，容量/速度/缓存三段全量）；
+          <!-- 序 2：指标（容量 + TTFT + 速度 + 缓存）。ui-optimize 决策 6：指标**默认聚合**——单图标
+               聚合按钮对所有 fit 级常驻（hover 弹指标聚合页，容量/TTFT/速度/缓存四卡全量、三条发丝分隔）；
                fit 0 平铺直挂渲染分支（GenStatsTriggers / ContextCapacityPopover）已随决策退役，
                形态域收窄为 aggregated | absent（absent = 锚点保护让位，不渲染）。
                landing（无 session）不渲染。 -->

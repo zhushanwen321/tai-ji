@@ -377,13 +377,19 @@ demo 阶段功能做到「可见 + 可交互 + 数据 mock」即够。不接 run
 
 ### 4.8 主题系统（太极阴阳 6 预设）
 
-demo 引入完整多主题系统（spec 无，demo 重大扩展）。机制：改 CSS 变量（resetToken 清空 → writeToken 批量写入），派生色自动跟随。
+机制：CSS 属性选择器覆盖——切换只写 `<html>` 的 `data-theme`（dark/light）与 `data-theme-preset` 两个属性，令牌值全部由 `packages/renderer/src/style.css` 的选择器块静态声明（派生色 `color-mix` 引用基色自动跟随）。
 
-**切换链路**（demo 已接通）：`useTheme.ts` composable（全局共享）持有 `THEMES`（6 主题定义）+ `currentThemeName` ref + `applyTheme(name, theme)` 函数。SystemPage「配色主题」GroupCard 渲染 6 主题列表行（`theme-row` + `theme-swatches` 四色缩略图），**点击即时切换**（调 applyTheme，不走 draft/save），选中态 `bg-surface + accent 字`（列表项型）。TokenDebugPage 也从 useTheme import 同一份数据（保持调试功能）。
+**切换链路**：`applySystemToDom`（`packages/ui/src/features/settings/apply-system-to-dom.ts`）把 SystemSettings 外观偏好写入 DOM 槽位——`theme=system` 经 `matchMedia` 解析为 light/dark，`themePreset` 缺省 `cold-blue`；W4 壳侧 watch store 调用。主题列表渲染 = 设置页 AppearancePage（`packages/renderer/src/components/settings/appearance/AppearancePage.vue`）消费 `useTaijiThemes.ts` 的 `TAIJI_THEMES`（label/preset/swatch 预览色；令牌真值不在其中，真值唯一权威 = style.css，见 style.css 头注释）。
 
-**applyTheme 机制**：先对所有 COLOR_TOKENS(19) + EFFECT_TOKENS(6) 逐个 `removeProperty`（清 inline 值落回 `:root` 默认），再按新主题 entry `setProperty` 写入（entry 没给的 key 保持默认）。每主题覆盖 26 个变量（bg 阶梯 8 + neutral 6 含 ico-hover + accent 3 + 状态 6 + border 3）。
+**选择器块与覆盖面**（按 style.css 现值，非默认主题按块内声明覆盖、块外继承族默认）：
 
-> COLOR_TOKENS(19) = bg 8 + neutral 5(fg/mid/dim/faint/ico) + accent 1 + 状态 5(success/warn/danger/info/reasoning)；EFFECT_TOKENS(6) = border 3 + accent-hover + neutral-ico-hover + danger-fg。主题 entry 覆盖的 neutral 是 6（含 `--neutral-ico-hover`，该变量虽在 EFFECT_TOKENS 数组里，但主题 entry 会覆盖它）。`--accent-fg` 同理：不在两组数组中，但 6 个主题 entry 均包含，write 时 `setProperty` 直接覆盖（当前不残留；若未来新增不含 accent-fg 的主题，需补入 EFFECT_TOKENS reset）。
+| 主题 | 选择器块 | 覆盖变量数与构成 |
+|---|---|---|
+| 玄（暗·默认） | `:root` | 全部默认值，无独立块 |
+| 皓（亮·默认） | `[data-theme="light"]` | 54 = bg 阶梯 9 + bubble 1 + neutral 7（含 name）+ border 3 + accent 5 + md-code 2 + 状态 8 + chart 族 19 |
+| 黛蓝 / 暖墨 | `:root[data-theme-preset="dailan"/"nuanmo"]` | 38 = bg 阶梯 8 + neutral 6 + accent 3 + md-code 2 + chart 族 19（不覆盖 border/状态色） |
+| 青墨 | `[data-theme="light"][data-theme-preset="qingmo"]` | 24 = accent 3 + md-code 2 + chart 族 19（宣纸底不换、只换 accent 颜料） |
+| 朱印 | `[data-theme="light"][data-theme-preset="zhuyin"]` | 31 = 青墨面 24 + 状态 7（danger 系与玫红错开等） |
 
 **阴 · 暗色族（3 个）**——背景近中性，色相只做「依稀相」(S≤6%)，靠明度阶梯说话：
 | 主题 | accent | 特色 |
@@ -629,7 +635,7 @@ demo 用 `@keyframes shimmer`（1.4s ease-in-out infinite，linear-gradient 扫�
   - **landing meta-row**（仅 `variant="landing"` 时渲染，comp-box 内顶部）：ghost chip 行 = directory chip(Folder icon + mono 目录名，空 cwd 时 accent 色) + `meta-sep`(1px border 竖线) + branch chip(GitBranch icon + mono 分支名) + meta-sep + mode chip(SlidersHorizontal icon + 模式名)；chip 样式 h-auto gap-1.5 px-2 py-1 text-xs accent-soft 底 + accent 文字（hover 不变——**颜色即「非默认模式」状态**，见计划 D-8 待产品裁决）。窄窗口下按序退化（目录截断 → 分支截断 → 分支退化图标 → 模式退化纯图标），模式 chip 的「含替换提示词」信任标记**跨档不丢**（文本档 = chip 内后缀；纯图标档 = 右上角警示色角标 + tooltip）
   - **landing 页布局**（LandingView）：`flex items-center justify-center` 垂直水平居中；问候语 h1（22px font-650 neutral-fg，按时段「上午好呀/下午好呀/晚上好呀，有什么想让我帮忙的吗」）+ landing Composer（max-w 720px）
   - **inline chip 四色**（无底无边 + `font-weight 600` + 前缀 icon 13px + × 删除按钮 hover 染 danger-soft）：`file`=success 绿 / `image`=reasoning 紫 / `slash`=reasoning 紫 / `@`=accent 蓝；四色 chip 都有 × 删除按钮
-  - **composer-bar 组成（左→右）**：左簇 = `+`添加 → 任务托盘（下行）/ extension toolbar 挂载点（`composer.toolbar`，无贡献时零 DOM）→ spacer；右簇 = 指标聚合按钮（`ComposerMetricsAggregate`，单 Gauge 图标，**hover** 弹容量+速度+缓存聚合页——ui-optimize 决策 6 起对所有 fit 级常驻，fit 0 平铺直挂触发器已退役） / 模型(click popover, 分组+搜索+选中 check) / 思考强度(click popover, 6 档圆点) / send-slot(30×30 accent 圆角矩形 radius 8px + 倾斜箭头)；bar-btn h28 icon 14px；popover 锚点范式见 §5.12
+  - **composer-bar 组成（左→右）**：左簇 = `+`添加 → 任务托盘（下行）/ extension toolbar 挂载点（`composer.toolbar`，无贡献时零 DOM）→ spacer；右簇 = 指标聚合按钮（`ComposerMetricsAggregate`，单 Gauge 图标，**hover** 弹容量+TTFT+速度+缓存四卡聚合页——ui-optimize 决策 6 起对所有 fit 级常驻，fit 0 平铺直挂触发器已退役） / 模型(click popover, 分组+搜索+选中 check) / 思考强度(click popover, 6 档圆点) / send-slot(30×30 accent 圆角矩形 radius 8px + 倾斜箭头)；bar-btn h28 icon 14px；popover 锚点范式见 §5.12
   - **composer 顶缘容量细条（ComposerCapacityBar，ui-optimize 决策 6 / N7）**：composer-box 顶部 2px 全宽横条（rounded-t-lg 随容器圆角，`absolute inset-x-0 top-0`），常态 `bg-accent-soft`（accent 半透明）、>80% `bg-warn`、>95% `bg-danger`（分档纯函数 `capacityBarClass`，阈值刻意后移于浮层卡内 bar 的 70/90——细条只做「余量将尽」预警）；只显色阶不显数字（数字唯一入口 = 指标聚合按钮 hover 聚合页），aria-label 双语提示当前百分比；无百分比可分档（unknown / no-value / contextWindow 未知）不渲染
   - **composer-bar 密度策略（三簇 + 三步聚合 + 锚点保护，D6 修订 + ui-optimize 决策 6）**：容器 `flex-nowrap` **永不换行**（发送位右锚不漂移）；`+` 与发送按钮 = **序 0 锚点：任何宽度不退化、不被裁剪**。fit 级退化由 `ResizeObserver` 实测「左右两簇占宽之和 vs 可用宽」逐级触发（[HISTORICAL] 原 640/520 三档固定阈值 tier 轴已退役——固定阈值判不出内容放不放得下，曾导致「放得下也截模型名」）：序 1 左簇（托盘 + 插件 toolbar）收**单图标**聚合按钮（click 弹全图标列表，角标仅运行数数字，禁多 icon 重叠）→ 序 2 指标**默认聚合**（单图标聚合按钮对所有 fit 级常驻、**hover** 弹指标聚合页——fit 0 平铺直挂形态已退役，本级不再产生形态变化，fit 回路自然穿过）→ 序 3 模型+思考收单图标聚合按钮（**click** 弹模型列表+思考档位，**hover 行内即切换**）。**模型名只有两态**：完整展示（恒不截断——[HISTORICAL] 原 88px/56px 容器截断态已删）/ 聚合按钮；底栏**无 `»` 省略号入口**（[HISTORICAL] 原溢出菜单已退役：插件 toolbar 并入左簇聚合、指标并入指标聚合）。顶格仍放不下 → **锚点保护**：左簇与指标让位隐藏，只留模型聚合按钮 + 两侧锚点（[HISTORICAL] 原 `justify-end` 左裁 `+` 行为已封死）。纯状态机 `packages/renderer/src/components/panel/composer-density.ts`（fit 级 0–3 → 形态）+ 接线件 `packages/renderer/src/components/panel/tray/use-composer-bar-density.ts`（测量回路）。图标语义硬约束（修订）：聚合入口 = 单图标按钮，**省略号入口不复存在**（原「聚合 = 层叠图标 / 溢出 = 省略号，两者不共用」随溢出语义一并退役）
   - **composer-bar 任务托盘（ComposerTray）**：`+`添加 之后、spacer 之前的左簇常驻托盘（`v-if="sessionId"`，landing 态隐藏；锚点保护态经 `v-show="!density.anchorProtected"` 样式折叠隐藏——组件恒挂载，保 `update:has-items` emitter 与 `useTrayCounts` 唯一数据面，保护态往返不重订阅/重首拉）。条目 = built-in 四件（后台命令 / 子代理 / 工作流 / 子会话，固定序恒在最左）+ 协议 widget 区（todo / goal known-order 优先，其余按 ViewHostStore 当前插入序；icon / badge / 状态色由 `WidgetMeta` 驱动）。三态：该类有进行中 → accent 计数 + 呼吸点；仅历史 → dim 常驻（无计数）；全无记录 → 不渲染（归零不虚噪）。第 4 件「子会话」= `parentAgentSessionId === 当前 sessionId` 的条目，pin 态行内「打开 / 停止（两段确认）」，行点击跳该子会话——调度模式的观察入口。fit L1（实测左簇放不下）时整托盘 + 插件 toolbar 聚合为**单图标**聚合按钮（角标仅运行数数字，禁多 icon 重叠），面板内分段展示；托盘全无条目且插件零贡献时不渲染（无死入口）。交互：hover icon 160ms 开面板、指针离开 icon+面板整体 240ms 收（移入面板不收起），点击 icon = pin（再点 / Esc / 点面板外解除），同一时刻至多一个面板；面板锚定 icon 上方 400px 宽、max-h 60vh 内滚动，行内操作仅 pin 态渲染，行点击开 drawer 对应 tab 详情（session 行为跳转子会话）。设计文档已删除（git 可追溯；终态以本节与 CONTEXT.md「任务托盘」词条为准）
