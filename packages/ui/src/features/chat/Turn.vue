@@ -88,7 +88,8 @@
         :session-id="sessionId"
       />
 
-      <!-- trace 容器：恒渲染（v-if 下沉 Block 级）。
+      <!-- trace 容器：恒渲染（v-if 下沉 Block 级）。mt-3 = TurnMeta→首块 12px（原由首块
+           py-2 顶距参与合成的节奏，块 padding 退役后归容器单值，ui-optimize-unified 决策 4）。
            折叠态（!showTrace）仅末位 text 正文（scope wave D1）；
            工作展开态（showTrace && isWorkingTurn）渲染 computeTraceWindow 窗口切片结果
              （末位 text + 进行中块 + 最近 W 个已完成过程块）；
@@ -96,9 +97,10 @@
              （design §3.1 交互6「回看就是全量」、G5「完成态与历史呈现不变」，窗口只作用于工作 turn）。
            收编行仅在「工作 turn 且（接管态 或 有收编/失败块）」时显示（design §3.1，D5 零 chrome）。
            takeover 态保留行以提供「恢复精简」回退入口（design 交互1），否则用户卡死在全展态。 -->
-      <div class="trace mt-1 mb-1 flex flex-col">
+      <div class="trace mt-3 mb-1 flex flex-col">
         <TraceCompactorRow
           v-if="showTrace && isWorkingTurn && (takeover || traceWindow.compactedCount > 0 || traceWindow.failedCount > 0)"
+          class="trace-compactor-row"
           :compacted-count="traceWindow.compactedCount"
           :failed-count="traceWindow.failedCount"
           :takeover="takeover"
@@ -132,8 +134,9 @@
           :session-id="sessionId"
         />
         <!-- streaming 光标：turn 内容区末尾独立元素（跟在所有 block 后，位置稳定不受 block 增删/折叠态影响）。
+             mt-2 维持原「末块 py-2 底距 8px」观感（块 padding 退役后由光标自带，非容器节奏档）。
              末位可见 block 为 running tool 时隐藏（工具自带 loader）。 -->
-        <span v-if="showStreamingCursor" class="streaming-tail ml-0.5 inline-block h-3.5 w-[7px] rounded-[1px] bg-accent align-middle animate-blink" />
+        <span v-if="showStreamingCursor" class="streaming-tail mt-2 ml-0.5 inline-block h-3.5 w-[7px] rounded-[1px] bg-accent align-middle animate-blink" />
       </div>
 
       <!-- 操作栏：TurnSummary 子组件（去内容化后仅 hover actions） -->
@@ -587,3 +590,25 @@ const showStreamingCursor = computed(() => {
   return true
 })
 </script>
+
+<style scoped>
+/* 块间两档节奏（ui-optimize-unified 决策 4 / U5 叠加核算）：间距唯一权威 = trace 容器
+   相邻选择器，后块 margin-top 定档——flex 容器内 margin 不折叠，距离 = 单值可断言；
+   块自身 py 节奏 padding 已退役（原 tool↔tool 8+8=16、text→tool 24px 隐式叠加消除）。
+   - 过程行（思考/工具/bash 组/workflow）之后 12px：过程行→正文 12px（「过程行与相邻
+     正文 12px」条款），过程行之间同档紧凑。
+   - 正文块（.trace-blk--text）之后 20px：正文↔正文 20px（「正文级块间 20px」条款），
+     正文→过程行 20px 落场景 3③ 区间 [12,20] 上限（正文段落后留足呼吸再接工具行）。
+   - 收编行（TraceCompactorRow，容器首位、非 .trace-blk）之后的首块 12px：补偿原首块
+     py-2 顶距承载的节奏。streaming-tail 光标非块，不命中（自身 mt-2 维持原观感）。
+   escape hatch 依据：结构选择器属 scoped 样式准许形态（项目样式三层规范）。 */
+.trace > .trace-blk + .trace-blk {
+  margin-top: 12px;
+}
+.trace > .trace-blk--text + .trace-blk {
+  margin-top: 20px;
+}
+.trace > .trace-compactor-row + .trace-blk {
+  margin-top: 12px;
+}
+</style>
