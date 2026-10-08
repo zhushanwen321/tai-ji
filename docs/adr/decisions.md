@@ -644,4 +644,26 @@ WorkflowTab 步骤列表的数据源绑定从「workflow-record 全量快照（6
 - **成员态三态（引擎中立）**：switched（生效值+档位回执）/ not-active（引擎定位不到活跃子进程，已退出成员承接态）/ not-applicable（引擎 capability unsupported，提示性应答非错误，记账照写）+ 失败名单（独立组件，非成员态——转发失败成员的成员标识 + fail-fast 分型；单成员失败不回滚其他成员、不影响 run 级意图写入）。聚合应答恒为「成员态数组 + 失败名单 + 汇总文案」三组件固定结构（前端按成员分项呈现）。run 级全切为 2026-10-05 用户裁决翻转初稿「run 级只记账不转发成员」条款的结果（随持久化裁决一并确认——该反向方案已否决，勿再议）。resume 生效模型三档回落：resume 显式参数 > 持久化覆盖 > run 创建模型。
 
 **登记**：设计 SSOT = `.tmp/tech-design/subagent-model-switch.md`（§5.2 解析链 / §7.1.1 通道机制 / §7.4 三态）；术语投影 = docs/CONTEXT.md「模型覆盖」词条；验收终态 = 5 轮真机验收 degraded 无阻塞缺陷（`.tmp/dev-flow/subagent-model-switch.acceptance/verdict.json`）；验收期遗留裁决项 = `docs/todo/subagent-model-switch-d3-defects.md`。
->>>>>>> feat-workflow-change-model
+
+### ADR-0130 界面视觉令牌体系：五层职能分层 + 令牌名只改值 + 灰阶四档去蓝偏 + 字重三档上移（2026-10-08 用户裁决，ui-optimize-unified）
+
+**决策**：
+- **五层职能分层规则**：明度层级按「读的地方沉下去、操作的地方浮上来」组织，五层自沉到浮 = 窗口壳 `--bg-stage #0a0a0c` → 内容层 `--surface #101010`（对话流/drawer 等阅读区沉底）→ 内容层内次级 `--bg-input #161618` → 框架层 `--bg #1e1e1e`（侧栏与 composer 同层，操作区浮亮）→ 浮层 `--bg-elevated #2b2b2e`；亮色族按镜像规则反向推导，settings 域与派生令牌（`--bg-card`/`--secondary`/`--bg-sunken`/`--bubble-bg` 等）随批归层对齐。
+- **令牌命名裁决 = 保留现行令牌名只改值**：不新增 `--card`/`--card-inset` 等新令牌名——设计表中的此类名是概念层名，实装一律映射到现行令牌改值。理由：同一「对话流卡片底」在改值前后换名字，git 历史里「明度反转」这一行为会被改名噪声淹没，review 与回溯成本上升而用户可感知终态相同。
+- **灰阶四档去蓝偏**：`--neutral-fg #ececec`（正文/侧栏主文字/composer 可操作文字共用正文档，R=G=B 纯中性）+ `--neutral-mid #8a8a8a`（工具行/次要）+ `--neutral-dim #5c5c5c`（时间/元信息）+ `--neutral-faint #45454a`。对比度显式取舍：dim 档对 surface 约 2.8:1、低于 WCAG AA 正文线，仅用于时间戳/元信息等低显著度装饰性文字；工具行落 mid 档（约 5.4:1）。范围 = 暗色族三主题（玄/黛蓝/暖墨）文字档全部重校，亮色族三主题文字档维持现行值（无蓝偏问题），bg 分层经镜像规则核对零 diff。
+- **字重三档上移**：`--fw-text/mid/bold` 400/500/600 → 500/600/700——「档差不变、整体更实」的解读（三档等距上移；mid 不动则 text 与 mid 重合塌成两档）。
+
+**依据**：双向真机实测 + 用户对分层表与灰阶值的逐项裁决（设计包 wave3 §2.1/§2.4）；「正文 ≥12:1 / 工具行 4–6:1 / 元信息 ≥2.8:1」阈值固化为永久单测——亮色族 dim 因维持现行值 #9d9b96（≈2.57）不跑 2.8 阈值，改锚定现行值断言防漂移、改值须先改设计。ADR-0066 的 accent 弱蓝灰补记不受影响（本波未动 accent 与状态色）。
+
+**登记**：值权威 = `packages/renderer/src/style.css`；挂值对照 = `docs/DESIGN.md` §4（CSS_TOKEN_SSOT_CHECK 机器核对两处逐字一致）；阈值单测 = `packages/renderer/src/__tests__/contrast-tokens.test.ts`；设计文档 `.tmp/tech-design/ui-optimize-unified.md`（过程产物不入库），本条即令牌体系裁决的现行登记处。
+
+### ADR-0131 运行态动画与「回到最新」胶囊：文字扫光替换底板扫光（sheen-x 退役）+ 浮现条件改离底一屏（unreadBelow 退役）（2026-10-08 设计落地，ui-optimize-unified 决策 10/12）
+
+**决策**：
+- **文字扫光**：扫光对象 = 执行中行正在发生的内容文字（思考行状态词与预览流、工具行执行命令/摘要），稳定标识（工具名/时间戳/计数）不扫；实现 = `linear-gradient` + `background-clip: text` + 透明字色，base = 行常态字色（dim/mid）、peak = `--neutral-fg`，全令牌化免六主题逐个定值；周期 2.6s、扫程占前 55%；`prefers-reduced-motion` 下退回常态字色。
+- **sheen-x 扫光层退役**：原「icon 底板扫光」（Block 普通工具块与 bash 组头的 `absolute inset-0` 扫光层、style.css `sheen-x` keyframes、`--sheen` 令牌、DESIGN.md 挂值条目）全链删除，退役范围经 grep 穷尽核实零残留。
+- **「回到最新」胶囊浮现条件**：从「非贴底且有未读新内容（unreadBelow）」改为「滚动离底超过一屏」（一屏 = 对话流滚动容器可视高度，virtua 环境以 viewportSize 快照承载）——回看历史（无新内容）也有回底入口；点击平滑回底后消失，生成中自动跟随不变。`unreadBelow` 状态链（ref/置位清除分支/`shouldMarkUnread`）全删。
+
+**依据**：N13 问题陈述 = 底板扫光扫的是静态标识而非正在发生的内容，信息价值错位；N11 问题陈述 = 回看历史后无快捷回底入口，unreadBelow 必要条件直接指向此变更。两处退役范围均实施期 grep 复核零残留消费。
+
+**登记**：实装 = `packages/ui/src/features/chat/Block.vue`（text-sweep 挂点与动画）/ `block-icon.ts` / `packages/renderer/src/style.css` / `packages/renderer/src/composables/panel/useVirtuaFollow.ts`；设计文档 `.tmp/tech-design/ui-optimize-unified.md`（过程产物不入库），本条即两项裁决的现行登记处；运行态观感验收为用户真机自验项（D3 inspect verdict=degraded 无 blockers）。
