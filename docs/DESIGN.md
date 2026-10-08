@@ -329,10 +329,10 @@ demo 阶段功能做到「可见 + 可交互 + 数据 mock」即够。不接 run
 --font-sans: system-ui, 'PingFang SC', 'Helvetica Neue', 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif;
 --font-mono: 'JetBrains Mono', 'IBM Plex Mono', ui-monospace, Menlo, monospace;
 
-/* 字重三档（2026-10-06 对话流视觉裁决）：消费方用 Tailwind 任意值类 [font-weight:var(--fw-*)] */
---fw-text: 400;  /* 日常文字 */
---fw-mid: 500;   /* 中档：行容器 / 组头 */
---fw-bold: 600;  /* 粗体：动作词 / 工具名 */
+/* 字重三档（2026-10-06 对话流视觉裁决 + 整体上移一档 500/600/700）：消费方用 Tailwind 任意值类 [font-weight:var(--fw-*)] */
+--fw-text: 500;  /* 日常文字 */
+--fw-mid: 600;   /* 中档：行容器 / 组头 */
+--fw-bold: 700;  /* 粗体：动作词 / 工具名 */
 
 /* 字号 scale（base 13→14 上移，calc 自适应）*/
 > 2026-08-25：--font-sans 改系统栈，supersede ADR-0019 的 Inter 字体子决策（chat-visual-font-optimize）

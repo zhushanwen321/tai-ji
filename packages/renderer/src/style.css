@@ -90,9 +90,9 @@
   --font-mono: 'JetBrains Mono', 'IBM Plex Mono', ui-monospace, Menlo, monospace;
   /* 字重三档（2026-10-06 对话流视觉裁决）：正文 / 中档 / 粗体唯一来源，
      消费方用 Tailwind 任意值类 [font-weight:var(--fw-*)] 引用 */
-  --fw-text: 400;               /* 日常文字 */
-  --fw-mid: 500;                /* 中档：行容器 / 组头 */
-  --fw-bold: 600;               /* 粗体：动作词 / 工具名 */
+  --fw-text: 500;               /* 日常文字 */
+  --fw-mid: 600;                /* 中档：行容器 / 组头 */
+  --fw-bold: 700;               /* 粗体：动作词 / 工具名 */
 
   /* 字号 scale（v6 §4：calc 自适应，2026-08-02 整体上移一档 base 13→14）
    * 自适应公式：calc(Npx × --font-scale-u × --font-scale-mq)
