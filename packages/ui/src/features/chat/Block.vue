@@ -14,7 +14,10 @@
     - failed：无鲜红全展开（红框已删），改中性灰默认 + hover 染 warn，错误摘要进 body 文本。
     审批按钮 DEFERRED（G-018），v1 不渲染。failed 救生按钮不做（agent 自处理，design.md 决策 3）。
   -->
-  <div class="trace-blk transition-[background-color,box-shadow] duration-[var(--duration)] ease-[var(--ease)] py-2" :class="blockClass" :data-testid="testId">
+  <!-- 块间节奏（ui-optimize-unified 决策 4）：间距唯一权威 = Turn.vue trace 容器相邻选择器
+       （后块 margin-top 定档 20px/12px），块自身不再携带 py 节奏 padding（叠加核算：原 8+8
+       隐式叠加改为容器单值显式声明）。trace-blk--text 是正文类型标记，供两档分化选择器前锚。 -->
+  <div class="trace-blk transition-[background-color,box-shadow] duration-[var(--duration)] ease-[var(--ease)]" :class="[blockClass, type === 'text' ? 'trace-blk--text' : '']" :data-testid="testId">
     <!-- thinking 块：同行展开（float 布局——第一行环绕 label，第二行起从最左侧开始） -->
     <div v-if="type === 'thinking'" class="trace-think">
       <div
@@ -72,13 +75,13 @@
       </div>
     </div>
 
-    <!-- 正文 text 块：全 inline 统一正文样式（text-md/leading-7，D5 行类型定档 15px），颜色跟所属
+    <!-- 正文 text 块：全 inline 统一正文样式（text-md/leading-[1.8]，D5 行类型定档 15px），颜色跟所属
          assistant streaming 态（streaming→neutral-mid，complete/缺省→neutral-fg，单调不随兄弟
          message 翻转）。group/text 命名分组承载行尾时刻的悬停/键盘聚焦两翼显现。
          streaming-tail 光标在 Turn.vue trace 容器末尾（跟在所有 block 后，不受 contentBlocks 时序影响）。
          [M2 形态统一] 唯一 error 形态 = 追加形态：content 崩溃前正文保持原色（可为空），
          msg.error 独立 danger 行（错误文本只住 error 字段，永不染红正文）。 -->
-    <div v-else-if="type === 'text'" data-testid="block-text" class="group/text flex items-start gap-2 pb-2 text-[length:var(--text-md)] leading-[1.75]" :class="textColorClass">
+    <div v-else-if="type === 'text'" data-testid="block-text" class="group/text flex items-start gap-2 text-[length:var(--text-md)] leading-[1.8]" :class="textColorClass">
       <div class="min-w-0 flex-1">
         <MarkdownRenderer v-if="content" :content="content ?? ''" :session-id="sessionId ?? undefined" :streaming="streaming" />
         <!-- error 独立 danger 行（AlertCircle + msg.error 文本） -->
@@ -151,7 +154,7 @@
 
       <!-- ── workflow 块：collapsed only 单行（icon + workflow prefix + name · slug），点击开 workflow overlay（workflow-visualization U6/D1 入口改向）；
            name 下多阶段 chips（phases 折叠快照，§3.1-2④：只表达 phase 名与最新一轮状态，不经 DAG 通道）── -->
-      <div v-else-if="isWorkflow" class="trace-workflow pb-2.5 mb-0.5" data-testid="workflow-block">
+      <div v-else-if="isWorkflow" class="trace-workflow" data-testid="workflow-block">
         <div
           data-testid="tool-block-header"
           class="flex min-w-0 cursor-pointer select-none items-center gap-1.5 text-[length:var(--text-base)] [font-weight:var(--fw-mid)] text-neutral-dim transition-opacity hover:opacity-80"

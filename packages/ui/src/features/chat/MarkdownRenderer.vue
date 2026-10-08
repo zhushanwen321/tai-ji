@@ -293,7 +293,7 @@ function onClick(e: MouseEvent): void {
    历史裁决「用户气泡列表不该有大间距感」由 0.4em 小量级满足（决策 4 衔接条款）。 */
 .md-render :deep(p) {
   margin: 0 0 0.4em;
-  line-height: 1.7;
+  line-height: 1.8;
 }
 
 /* 列表样式：让编号/符号列表在视觉上接近普通正文行（用户气泡里手打的编号列表
@@ -316,7 +316,7 @@ function onClick(e: MouseEvent): void {
 }
 .md-render :deep(li) {
   margin: 0 0 0.25em;
-  line-height: 1.7;
+  line-height: 1.8;
 }
 /* 叠加核算（决策 4）：首/末元素的块级 margin 不参与「容器 gap + 首段 margin」叠加——
    块间 20px/12px 两档节奏由 Block/Turn 容器层单值承载（Turn.vue trace 相邻选择器），

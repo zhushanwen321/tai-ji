@@ -164,7 +164,7 @@ function lineHeightAnchor(): HTMLElement | null {
 
 /**
  * 内容行高（px）：
- * 1. computed line-height 可解析（mono 的 leading-snug / markdown 的 leading-[1.7]）→ 实测值；
+ * 1. computed line-height 可解析（mono 的 leading-snug / markdown 的 leading-[1.8]）→ 实测值；
  * 2. 'normal' 或不可解析 → 字号 × leading-snug 估算；
  * 3. 字号也不可用 → 基准常量。
  * 后两条是 jsdom/happy-dom（无布局引擎）下的可测降级路径。
