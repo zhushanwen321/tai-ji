@@ -63,6 +63,15 @@ describe('W4TC3: UserBubble 展示态', () => {
     expect(bubble.classes()).toContain('bg-\[var\(--bubble-bg\)\]')
   })
 
+  it('N3 宽度纪律：气泡 max-width min(72%, 64ch) + overflow-wrap anywhere（锁 class 机制面）', () => {
+    // 测试环境无布局引擎，锁 DOM 机制面：宽度纪律与长令牌折行由这两个 class 承载，
+    // 实际宽度/折行视觉随场景 7③ 真机走查验收。
+    const wrapper = mountBubble()
+    const bubble = wrapper.find('.rounded-\\[14px_14px_4px_14px\\]')
+    expect(bubble.classes()).toContain('max-w-[min(72%,64ch)]')
+    expect(bubble.classes()).toContain('[overflow-wrap:anywhere]')
+  })
+
   it('展示态 hover actions 容器存在（group-hover 可见）', () => {
     const wrapper = mountBubble()
     // hover actions 容器：opacity-0 group-hover:opacity-100
@@ -363,6 +372,17 @@ describe('W4TC3: UserBubble 编辑态', () => {
     await buttons[1].trigger('click')
     // 编辑态有 textarea
     expect(wrapper.find('textarea').exists()).toBe(true)
+  })
+
+  it('N3 编辑态气泡同宽同纪律：max-width min(72%, 64ch) + overflow-wrap anywhere（锁 class 机制面）', async () => {
+    // 设计决策 8 N3「编辑态气泡同宽」：编辑态容器与展示态气泡持同一宽度/折行纪律。
+    const wrapper = mountBubble({ canEdit: true, isSessionEditable: false })
+    const actions = wrapper.find('.group\\/user > .opacity-0')
+    await actions.findAll('button')[1].trigger('click')
+    const editBubble = wrapper.find('.rounded-\\[14px\\]')
+    expect(editBubble.exists()).toBe(true)
+    expect(editBubble.classes()).toContain('max-w-[min(72%,64ch)]')
+    expect(editBubble.classes()).toContain('[overflow-wrap:anywhere]')
   })
 
   it('编辑态取消 → emit edit-state-change false', async () => {

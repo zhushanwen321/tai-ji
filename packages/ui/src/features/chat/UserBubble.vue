@@ -8,7 +8,7 @@
     <!-- 编辑态：编辑后 fork 新会话 -->
     <div
       v-if="isEditingThisUser"
-      class="w-full max-w-[85%] min-w-0 break-words rounded-[14px] border border-accent bg-bg-input p-2 shadow-[0_0_0_3px_color-mix(in_oklch,var(--accent)_22%,transparent)]"
+      class="w-full max-w-[min(72%,64ch)] min-w-0 [overflow-wrap:anywhere] rounded-[14px] border border-accent bg-bg-input p-2 shadow-[0_0_0_3px_color-mix(in_oklch,var(--accent)_22%,transparent)]"
     >
       <Textarea v-model="draftText" class="min-h-[64px] border-0 bg-transparent px-1 text-[length:var(--text-base)] leading-[1.55] focus-visible:ring-0" />
       <div class="mt-1.5 flex items-center justify-between px-1">
@@ -31,8 +31,11 @@
       <span v-if="turn.user?.timestamp" class="shrink-0 self-start pt-1.5 font-mono text-[length:var(--text-2xs)] text-neutral-dim tabular-nums opacity-0 transition-opacity duration-150 group-hover/ts:opacity-100 group-focus-within/ts:opacity-100" data-testid="user-timestamp">
         {{ formatClock(turn.user.timestamp) }}
       </span>
+      <!-- N3 宽度纪律（设计决策 8）：max-width min(72%, 64ch) 双约束——窄窗按容器 72% 收，
+           宽窗按 64ch 封顶防长行拉伸；overflow-wrap: anywhere（替代 break-words）让无空格
+           长令牌可折行，编辑态气泡同宽同纪律。 -->
       <div
-        class="max-w-[85%] min-w-0 break-words rounded-[14px_14px_4px_14px] border border-border-strong bg-[var(--bubble-bg)] px-[13px] py-[9px] text-[length:var(--text-base)] leading-[1.55] text-neutral-fg"
+        class="max-w-[min(72%,64ch)] min-w-0 [overflow-wrap:anywhere] rounded-[14px_14px_4px_14px] border border-border-strong bg-[var(--bubble-bg)] px-[13px] py-[9px] text-[length:var(--text-base)] leading-[1.55] text-neutral-fg"
         :class="{ 'is-mixed': isMixedContent }"
       >
       <template v-for="(seg, i) in orderedSegments" :key="i">
