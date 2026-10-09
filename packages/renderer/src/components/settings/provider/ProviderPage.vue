@@ -6,13 +6,14 @@
     dirty 守卫：展开行有未保存改动时，切换/收起/新建 → ConfirmDialog 二次确认。
   -->
   <div class="flex flex-col gap-3">
-    <header class="mb-3 flex items-start justify-between gap-4">
-      <div class="min-w-0">
-        <h1 class="text-[20px] font-semibold tracking-[-0.01em] text-neutral-fg">{{ t('settings.menu.provider') }}</h1>
-        <p class="mt-2 text-sm text-neutral-mid">{{ t('settings.menu.providerDesc') }}</p>
+    <!-- 页头 = SettingsModal 共享 .page-head 形态（demo .pg-set .page-head：title 20px/600、desc mt-8 13px mid、actions gap-8px） -->
+    <header class="page-head">
+      <div class="head-text">
+        <h1 class="title">{{ t('settings.menu.provider') }}</h1>
+        <p class="desc">{{ t('settings.menu.providerDesc') }}</p>
       </div>
       <div class="flex shrink-0 flex-col items-end gap-1.5">
-        <div class="flex shrink-0 gap-2">
+        <div class="head-actions">
           <ProviderImportMenu :disabled="importState !== 'idle'" @select="onImportSelect" />
           <!-- F2：入口聚合为「+ 添加供应商 ▾」菜单（内置模板（推荐）/ 自定义），自定义走 createAndExpand 原流程 -->
           <ProviderTemplatePicker
@@ -52,30 +53,37 @@
       <span class="truncate">{{ actionError }}</span>
     </div>
 
-    <!-- 空状态 -->
-    <div v-if="!providers.length && expandedId !== NEW_ID" class="flex flex-col items-center gap-2 py-16 text-center">
-      <div class="grid size-16 place-items-center rounded-full border-2 border-dashed border-border-strong">
-        <Settings class="size-7 text-neutral-dim" />
+    <!-- 空状态（demo .pg-set .empty 形态：64px 虚线圆 ring + 14px/600 标题 + 13px mid 描述） -->
+    <div v-if="!providers.length && expandedId !== NEW_ID" class="flex flex-col items-center px-[16px] py-[40px] text-center">
+      <div class="mb-[12px] grid size-16 place-items-center rounded-full border-[1.5px] border-dashed border-border-strong">
+        <Settings class="size-[26px] text-neutral-mid" />
       </div>
-      <p class="text-[14px] font-medium text-neutral-fg">{{ t('settings.provider.emptyTitle') }}</p>
-      <p class="text-[12px] text-neutral-mid">{{ t('settings.provider.emptyDesc') }}</p>
+      <p class="text-[length:var(--text-base)] font-semibold text-neutral-fg">{{ t('settings.provider.emptyTitle') }}</p>
+      <p class="mt-[6px] text-[length:var(--text-sm)] text-neutral-mid">{{ t('settings.provider.emptyDesc') }}</p>
     </div>
 
-    <!-- 实体列表（含新建态合成行）。组头对齐 ExtensionList 分组模式（小节标题 + count）：
-         scoped-model 卡片与本列表同为 bg-card 卡片、仅 gap-3 分隔会视觉连片，组头拉开语义分界。 -->
-    <section v-if="renderList.length" class="flex flex-col gap-3">
-      <div data-testid="provider-list-header" class="flex items-center gap-2 pt-2">
-        <h3 class="text-[12px] font-medium text-neutral-fg">{{ t('settings.provider.listTitle') }}</h3>
-        <span class="rounded-sm bg-surface px-1.5 py-0.5 text-[10px] text-neutral-dim">{{ providers.length }}</span>
-      </div>
+    <!-- 实体列表（含新建态合成行）。demo .gcard 形态：GroupCard（gc-title 卡头 + bdg 计数徽标），
+         行 = .prow（bg-surface 8px 圆角内嵌行，行间 8px）。 -->
+    <section v-if="renderList.length">
+      <GroupCard>
+        <template #head>
+          <div data-testid="provider-list-header" class="gc-head-text">
+            <h3 class="gc-title">{{ t('settings.provider.listTitle') }}</h3>
+          </div>
+        </template>
+        <template #actions>
+          <!-- demo .bdg：h16 / bg-surface / mono / 10px / fw-bold / neutral-fg-2 -->
+          <span class="inline-flex h-[16px] min-w-[16px] items-center justify-center rounded-full bg-surface px-[5px] font-mono text-[10px] font-bold text-[color:var(--neutral-fg-2)]">{{ providers.length }}</span>
+        </template>
+        <div class="flex flex-col gap-[8px] p-[12px_16px]">
       <div
         v-for="p in renderList"
         :key="p.id"
         data-testid="provider-card"
-        class="overflow-hidden rounded-card bg-card"
+        class="rounded-md bg-surface p-[12px_14px] hover:bg-surface-hover"
       >
-      <!-- 行头 -->
-      <div class="flex min-w-0 items-center gap-3 px-4 py-3">
+      <!-- 行头（demo .prow：状态点/开关/名称/徽标/计数/删除/chevron，gap 12px） -->
+      <div class="flex min-w-0 items-center gap-3">
         <span
           v-if="p.id !== NEW_ID"
           class="size-[7px] shrink-0 rounded-full"
@@ -93,23 +101,23 @@
           @update:model-value="onToggleEnabled(p, $event)"
         />
 
-        <!-- 供应商名称（点击展开/收起就地编辑） -->
+        <!-- 供应商名称（点击展开/收起就地编辑；demo .pname = 14px / fw-mid / neutral-fg） -->
         <span
-          class="flex-1 cursor-pointer truncate text-[13px] font-medium text-neutral-fg"
+          class="flex-1 cursor-pointer truncate text-[length:var(--text-base)] font-semibold text-neutral-fg"
           role="button"
           :aria-expanded="expandedId === p.id"
           @click="toggleExpand(p.id)"
         >{{ p.id === NEW_ID ? t('settings.provider.newProvider') : p.name }}</span>
 
-        <!-- 认证方式徽章（demo provider-auth-badge 三色，wave-list-badge） -->
+        <!-- 认证方式徽章（demo .tag 形态：h18 / px7 / 圆角 999 / text-2xs / fw-mid；配色读 provider-badge） -->
         <span
           v-if="p.id !== NEW_ID"
           data-testid="provider-auth-badge"
-          class="shrink-0 rounded-sm px-1.5 py-0.5 text-[10px] font-medium"
+          class="inline-flex h-[18px] shrink-0 items-center rounded-full px-[7px] text-[length:var(--text-2xs)] font-semibold"
           :class="authBadgeClass(p)"
         >{{ t(`settings.provider.builtinTemplate.authBadge.${authBadgeTextKey(p)}`) }}</span>
 
-        <!-- 默认供应商 pill（P2：可点击 → 弹模型选择，选中后 config.setDefaultModel） -->
+        <!-- 默认供应商 pill（P2：可点击 → 弹模型选择，选中后 config.setDefaultModel；demo .tag.ok 形态） -->
         <ModelSelectPopover
           v-if="p.id !== NEW_ID && p.id === defaultProviderId"
           :selected="settingsStore.defaultModel.value"
@@ -120,7 +128,7 @@
             <PopoverTrigger as-child>
               <Button
                 variant="ghost"
-                class="h-auto shrink-0 rounded-sm bg-accent-soft px-1.5 py-0.5 text-[10px] font-medium text-accent hover:bg-accent-soft"
+                class="h-[18px] shrink-0 rounded-full bg-accent-soft px-[7px] py-0 text-[length:var(--text-2xs)] font-semibold text-accent hover:bg-accent-soft"
                 :title="t('panel.modelSelect.switchModel')"
                 data-testid="provider-default-pill"
               >{{ t('settings.provider.defaultPill') }}</Button>
@@ -128,7 +136,7 @@
           </template>
         </ModelSelectPopover>
 
-        <span v-if="p.id !== NEW_ID" class="shrink-0 text-[11px] text-neutral-dim">{{ t('settings.provider.modelsCount', { count: p.models.length }) }}</span>
+        <span v-if="p.id !== NEW_ID" class="shrink-0 text-[length:var(--text-xs)] text-neutral-fg-2">{{ t('settings.provider.modelsCount', { count: p.models.length }) }}</span>
 
         <!-- dirty 徽章（展开编辑且有未保存改动时） -->
         <span
@@ -142,21 +150,29 @@
 
         <span class="flex-1" />
 
-        <!-- 删除按钮（wave4 TC5：title 按差异收窄——catalog=移除/custom=删除） -->
+        <!-- 删除按钮（demo .btn.icon.danger-hover：28px 方钮 / neutral-mid / hover danger；
+             wave4 TC5：title 按差异收窄——catalog=移除/custom=删除） -->
         <Button
           v-if="p.id !== NEW_ID"
           variant="ghost"
-          class="size-6 shrink-0 rounded-sm p-0 text-neutral-dim hover:bg-danger-soft hover:text-danger [&_svg]:size-[13px]"
+          class="h-[28px] w-[28px] shrink-0 rounded-md p-0 text-neutral-mid hover:bg-surface-hover hover:text-danger [&_svg]:size-[14px]"
           :title="p.kind === 'catalog' ? t('settings.provider.removeTitle') : t('settings.provider.deleteTitle')"
           :data-testid="p.kind === 'catalog' ? 'provider-remove-btn' : 'provider-delete-btn'"
           @click.stop="deleteTarget = p"
         >
           <Trash2 />
         </Button>
+
+        <!-- 展开指示（demo：chevron-down 14px mid，闭合 -90°，展开归位） -->
+        <ChevronDown
+          class="size-[14px] shrink-0 text-neutral-mid transition-transform duration-[var(--duration-fast)]"
+          :class="expandedId === p.id ? '' : '-rotate-90'"
+        />
       </div>
 
-      <!-- 展开就地编辑体（R4）。B-1：OAuth 态经 props/事件接线（composable 内共享单实例 useProviderOAuth，无双 listener） -->
-      <div v-if="expandedId === p.id" class="border-t border-border" data-testid="provider-expand-body">
+      <!-- 展开就地编辑体（R4；demo 展开体 = 行内 border-top hairline + pt 12px）。
+           B-1：OAuth 态经 props/事件接线（composable 内共享单实例 useProviderOAuth，无双 listener） -->
+      <div v-if="expandedId === p.id" class="mt-[4px] border-t border-hairline pt-[12px]" data-testid="provider-expand-body">
         <ProviderEditBody
           :provider="p.id === NEW_ID ? null : p"
           :oauth-present="hasOauthPresence(p.id)"
@@ -169,6 +185,8 @@
         />
       </div>
     </div>
+        </div>
+      </GroupCard>
     </section>
 
     <!-- dirty 守卫确认弹窗（切换/收起/新建时拦截未保存改动） -->
@@ -245,7 +263,7 @@
 <script setup lang="ts">
 import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { AlertCircle, AlertTriangle, Settings, Trash2 } from '@lucide/vue'
+import { AlertCircle, AlertTriangle, ChevronDown, Settings, Trash2 } from '@lucide/vue'
 import { useProviderCatalogsStale } from '@/composables/features/settings/useProviderCatalogsStale'
 import { ConfirmDialog } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
@@ -258,6 +276,7 @@ import { useQuotaStore } from '@/stores/quota'
 import { useProviderImport } from '@/composables/features/settings/useProviderImport'
 import { useToast } from '@/composables/useToast'
 import {
+  GroupCard,
   ProviderEditBody,
   ProviderImportMenu,
   ProviderImportPreviewDialog,

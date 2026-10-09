@@ -6,43 +6,41 @@
 -->
 <template>
   <div class="flex flex-col gap-3 px-3 py-3">
-    <!-- 名称 + ID（内置 disabled） -->
+    <!-- 名称 + ID（内置 disabled）；标签 = demo .flab 档（12px/600，gcard 内 fg-2） -->
     <!-- 受控写法（:model-value + @update:model-value）有意为之：配合 debounce
          控制字段更新的 flush 时机（onFieldChange → debouncedUpdate 400ms）。
          改 v-model 会失去 debounce 能力（每次 keystroke 立即触发 RPC）。 -->
     <div class="grid grid-cols-2 gap-3">
       <div>
-        <Label class="mb-1 block text-[11px] font-semibold text-neutral-mid">
+        <Label class="mb-1 block text-[length:var(--text-xs)] text-neutral-fg-2">
           {{ t('settings.preset.name') }}
         </Label>
         <Input
           :model-value="preset.name"
           :disabled="disabled"
-          class="h-8 text-[12px]"
           :placeholder="t('settings.preset.namePlaceholder')"
           @update:model-value="(v) => onFieldChange('name', String(v))"
         />
       </div>
       <div>
-        <Label class="mb-1 block text-[11px] font-semibold text-neutral-mid">
+        <Label class="mb-1 block text-[length:var(--text-xs)] text-neutral-fg-2">
           {{ t('settings.preset.id') }}
         </Label>
         <Input
           :model-value="preset.id"
           disabled
-          class="h-8 text-[12px] font-mono"
+          class="font-mono"
         />
       </div>
     </div>
     <!-- 描述（受控写法 + debounce，同 name 字段，见上文注释） -->
     <div>
-      <Label class="mb-1 block text-[11px] font-semibold text-neutral-mid">
+      <Label class="mb-1 block text-[length:var(--text-xs)] text-neutral-fg-2">
         {{ t('settings.preset.description') }}
       </Label>
       <Input
         :model-value="preset.description ?? ''"
         :disabled="disabled"
-        class="h-8 text-[12px]"
         :placeholder="t('settings.preset.descPlaceholder')"
         @update:model-value="(v) => onFieldChange('description', String(v))"
       />
