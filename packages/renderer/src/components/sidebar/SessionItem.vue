@@ -25,9 +25,9 @@
   >
     <div
       ref="rootEl"
-      class="session-item group/item relative flex cursor-pointer select-none items-start gap-2 rounded-md px-2 py-1 transition-colors"
+      class="session-item group/item relative flex cursor-pointer select-none items-start gap-2 rounded-sm px-2 py-[7px] transition-colors"
       :class="[
-        active ? 'bg-accent-soft shadow-[inset_2px_0_0_var(--accent)]' : 'hover:bg-surface-hover',
+        active ? 'bg-bg-elevated text-neutral-fg shadow-[inset_2px_0_0_var(--accent)]' : 'text-neutral-fg hover:bg-surface-hover',
         isDead ? 'opacity-50' : '',
       ]"
       :aria-label="ariaLabel"
@@ -36,7 +36,7 @@
       @pointerleave="onDetailLeave"
       @mouseleave="confirming = false"
     >
-      <SessionItemDisplay :session="displaySession" :status="status" :child-count="childCount" />
+      <SessionItemDisplay :session="displaySession" :status="status" :child-count="childCount" :active="active" />
 
       <SessionItemActions
         v-model:confirming="confirming"
@@ -48,32 +48,36 @@
     </div>
   </SessionItemContextMenu>
 
+  <!-- hover 详情卡（demo .sess-pop 形态：fixed 232px / elevated 底 / border-strong / radius-lg
+       / shadow-2 / 行间 hairline 分隔 / opacity+translateX 0.15s 进出过渡 / z-hovercard 梯队） -->
   <Teleport to="body">
-    <div
-      v-if="detailVisible"
-      data-testid="session-detail-card"
-      class="fixed z-[90] max-w-[320px] rounded-md border border-border-strong bg-bg-elevated p-2 text-neutral-fg shadow-2"
-      :style="detailStyle"
-    >
-      <div class="flex flex-col gap-1">
-        <div v-if="session.gitBranch" class="flex items-baseline gap-2">
-          <span class="shrink-0 text-[length:var(--text-3xs)] text-neutral-dim">
-            {{ t('sidebar.sessionItem.detailBranch') }}
-          </span>
-          <span class="min-w-0 break-all font-mono text-[length:var(--text-3xs)] text-neutral-mid">
-            {{ session.gitBranch }}
-          </span>
-        </div>
-        <div class="flex items-baseline gap-2">
-          <span class="shrink-0 text-[length:var(--text-3xs)] text-neutral-dim">
-            {{ t('sidebar.sessionItem.detailDirectory') }}
-          </span>
-          <span class="min-w-0 break-all font-mono text-[length:var(--text-3xs)] text-neutral-mid">
-            {{ session.cwd }}
-          </span>
+    <Transition name="sess-pop">
+      <div
+        v-if="detailVisible"
+        data-testid="session-detail-card"
+        class="fixed z-[var(--z-hovercard)] w-[232px] rounded-lg border border-border-strong bg-bg-elevated px-3 py-2 text-neutral-fg shadow-2"
+        :style="detailStyle"
+      >
+        <div class="flex flex-col divide-y divide-hairline">
+          <div v-if="session.gitBranch" class="flex items-baseline gap-2 py-[5px]">
+            <span class="shrink-0 text-[length:var(--text-xs)] text-neutral-dim">
+              {{ t('sidebar.sessionItem.detailBranch') }}
+            </span>
+            <span class="min-w-0 break-all font-mono text-[length:var(--text-xs)] text-neutral-fg-2">
+              {{ session.gitBranch }}
+            </span>
+          </div>
+          <div class="flex items-baseline gap-2 py-[5px]">
+            <span class="shrink-0 text-[length:var(--text-xs)] text-neutral-dim">
+              {{ t('sidebar.sessionItem.detailDirectory') }}
+            </span>
+            <span class="min-w-0 break-all font-mono text-[length:var(--text-xs)] text-neutral-fg-2">
+              {{ session.cwd }}
+            </span>
+          </div>
         </div>
       </div>
-    </div>
+    </Transition>
   </Teleport>
 </template>
 
@@ -162,8 +166,8 @@ const rootEl = ref<HTMLElement | null>(null)
 
 /** 详情卡显示延迟（hover 交互惯例定时，防扫过列表逐行闪烁；产品功能定时，非时间平抑） */
 const DETAIL_HOVER_DELAY_MS = 700
-/** 右缘 clamp 预留（卡 max-w 320px + 视口边距 16px） */
-const DETAIL_CARD_MAX_W = 320
+/** 卡宽（demo .sess-pop 232px 固定宽；右缘 clamp 预留 + 视口边距 16px） */
+const DETAIL_CARD_MAX_W = 232
 const DETAIL_VIEWPORT_MARGIN = 16
 /** 卡与行水平间隙 / 视口最小边距（px） */
 const DETAIL_CARD_GAP_PX = 6
@@ -234,3 +238,23 @@ const ariaLabel = computed(() =>
     : props.session.label,
 )
 </script>
+
+<style scoped>
+/* 详情卡进出过渡（demo .sess-pop：opacity + translateX(-3px) 0.15s ease）——
+   Transition 类是 scoped style 的合法 escape hatch；reduced-motion 停（demo 同款）。 */
+.sess-pop-enter-active,
+.sess-pop-leave-active {
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+.sess-pop-enter-from,
+.sess-pop-leave-to {
+  opacity: 0;
+  transform: translateX(-3px);
+}
+@media (prefers-reduced-motion: reduce) {
+  .sess-pop-enter-active,
+  .sess-pop-leave-active {
+    transition: none;
+  }
+}
+</style>

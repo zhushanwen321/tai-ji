@@ -21,12 +21,12 @@
       <ContextMenuContent
         ref="menuContentRef"
         data-testid="session-context-menu"
-        class="z-[1100] min-w-[160px] rounded-md border border-border-strong bg-bg-elevated p-1 text-neutral-fg shadow-2 outline-none"
+        class="z-[1100] min-w-[148px] rounded-md border border-border-strong bg-bg-elevated p-1 text-neutral-fg shadow-2 outline-none"
       >
         <ContextMenuItem
           v-if="hasAgentParent"
           data-testid="session-view-parent-item"
-          class="flex h-auto w-full cursor-pointer select-none items-center gap-2 rounded-sm px-2 py-1.5 text-[length:var(--text-xs)] text-neutral-mid outline-none hover:bg-surface-hover hover:text-neutral-fg [&_svg]:size-[13px]"
+          class="flex h-auto w-full cursor-pointer select-none items-center gap-2 rounded-sm px-2 py-1.5 text-[length:var(--text-xs)] text-neutral-fg outline-none hover:bg-surface-hover hover:text-neutral-fg [&_svg]:size-[13px]"
           @select="onViewParent"
         >
           <CornerLeftUp />

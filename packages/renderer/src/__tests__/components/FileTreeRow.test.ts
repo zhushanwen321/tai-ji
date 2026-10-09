@@ -101,12 +101,12 @@ describe('FileTreeRow 视觉一致性（D-007 字号 / D-022 chevron 槽）', ()
     expect(dirRow.classes()).toContain('font-mono')
   })
 
-  it('文件行字号 12px + font-mono', () => {
+  it('文件行字号 12px + font-mono（M1 对齐 demo .frow：字体声明在行容器，name span 继承）', () => {
     const row = makeRow({ path: 'a.ts', type: 'file' })
     const wrapper = mountRow(row)
-    const nameSpan = wrapper.find('[data-testid="file-tree-file-a.ts"] .shrink')
-    expect(nameSpan.classes()).toContain('text-[length:var(--text-xs)]')
-    expect(nameSpan.classes()).toContain('font-mono')
+    const fileRow = wrapper.find('[data-testid="file-tree-file-a.ts"]')
+    expect(fileRow.classes()).toContain('text-[length:var(--text-xs)]')
+    expect(fileRow.classes()).toContain('font-mono')
   })
 
   it('目录行与文件行渲染字号一致（D-007：均 12px，不再 11/12 混用）', () => {
@@ -114,11 +114,11 @@ describe('FileTreeRow 视觉一致性（D-007 字号 / D-022 chevron 槽）', ()
     const fileWrapper = mountRow(makeRow({ path: 'a.ts', type: 'file' }))
 
     const dirRow = dirWrapper.find('[data-testid="file-tree-dir-src"]')
-    const fileNameSpan = fileWrapper.find('[data-testid="file-tree-file-a.ts"] .shrink')
+    const fileRow = fileWrapper.find('[data-testid="file-tree-file-a.ts"]')
     expect(dirRow.classes()).toContain('text-[length:var(--text-xs)]')
     expect(dirRow.classes()).not.toContain('text-[11px]')
-    expect(fileNameSpan.classes()).toContain('text-[length:var(--text-xs)]')
-    expect(fileNameSpan.classes()).not.toContain('text-[11px]')
+    expect(fileRow.classes()).toContain('text-[length:var(--text-xs)]')
+    expect(fileRow.classes()).not.toContain('text-[11px]')
   })
 
   it('行 padding-left 用单一公式 depth*10+8（D-022，dir/file/hint 行共用投影 depth）', () => {
@@ -281,17 +281,18 @@ describe('FileTreeRow 交互（emit 路由，不再直调 useFileTree）', () =>
 })
 
 describe('FileTreeRow 选中态（selected prop，组件零 store 依赖）', () => {
-  it('selected=true 的文件行 → bg-surface + 名称 accent 加粗', () => {
+  it('selected=true 的文件行 → elevated 底 + 左侧 2px accent 竖条 + 名称 fg fw-mid（demo .frow.sel 范式）', () => {
     const wrapper = mountRow(makeRow({ path: 'a.ts', type: 'file' }), true)
     const rowEl = wrapper.find('[data-testid="file-tree-file-a.ts"]')
-    expect(rowEl.classes()).toContain('bg-surface')
+    expect(rowEl.classes()).toContain('bg-bg-elevated')
+    expect(rowEl.classes()).toContain('shadow-[inset_2px_0_0_var(--accent)]')
     const nameSpan = wrapper.find('[data-testid="file-tree-file-a.ts"] .shrink')
-    expect(nameSpan.classes()).toContain('text-accent')
-    expect(nameSpan.classes()).toContain('font-semibold')
+    expect(nameSpan.classes()).toContain('text-neutral-fg')
+    expect(nameSpan.classes()).toContain('font-medium')
   })
 
   it('selected=false → 无选中态样式', () => {
     const wrapper = mountRow(makeRow({ path: 'a.ts', type: 'file' }), false)
-    expect(wrapper.find('[data-testid="file-tree-file-a.ts"]').classes()).not.toContain('bg-surface')
+    expect(wrapper.find('[data-testid="file-tree-file-a.ts"]').classes()).not.toContain('bg-bg-elevated')
   })
 })

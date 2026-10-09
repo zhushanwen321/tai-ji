@@ -26,17 +26,19 @@ withDefaults(defineProps<Props>(), {
 </script>
 
 <template>
-  <div class="flex items-center gap-2 px-2 pb-3.5">
+  <!-- demo .brand：flex align-center gap 9px / padding 14px 14px 10px；产品名 --fs-body 15px
+       fw-bold ls 0.02em；版本行 --fs-sm 11px --dim mt 1px。 -->
+  <div class="flex items-center gap-[9px] px-3.5 pb-2.5 pt-3.5">
     <TaijiLogo :size="28" :duration="8" class="shrink-0 text-neutral-fg" />
     <div class="flex min-w-0 flex-col leading-[1.1]">
       <!-- 产品名 + DEV 徽标内层行：产品名 min-w-0 让 truncate 在窄侧栏生效（flex item
            默认 min-width:auto 会撑住不截断），徽标 shrink-0 保证不被挤掉 -->
       <div class="flex items-center gap-1.5">
-        <span class="min-w-0 truncate text-[length:var(--text-sm)] font-semibold text-neutral-fg">{{ t('app.title') }}</span>
+        <span class="min-w-0 truncate text-[length:var(--text-md)] font-bold tracking-[0.02em] text-neutral-fg">{{ t('app.title') }}</span>
         <span v-if="isDevMode()" data-testid="brand-dev-badge"
           class="shrink-0 rounded-sm bg-info-soft px-1.5 py-0.5 text-[length:var(--text-3xs)] font-semibold text-info">DEV</span>
       </div>
-      <span v-if="versionLabel" class="text-[length:var(--text-3xs)] text-neutral-mid">{{ versionLabel }}</span>
+      <span v-if="versionLabel" class="mt-px text-[length:var(--text-2xs)] text-neutral-dim">{{ versionLabel }}</span>
     </div>
     <!-- trailing slot：Sidebar 注入 UpdateButton（ml-auto 推到右侧） -->
     <slot name="trailing" />

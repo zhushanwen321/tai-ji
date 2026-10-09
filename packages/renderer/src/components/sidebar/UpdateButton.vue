@@ -8,20 +8,21 @@
     单例：useAppUpdate 的 state 全应用共享（Sidebar initAutoCheck 检测，UpdateButton 消费）。
   -->
   <span v-if="visible" class="update-button inline-flex items-center" data-testid="update-button">
-    <!-- available：可升级，hover 显 release note，click 触发 performDownload -->
+    <!-- available：可升级，hover 显 release note，click 触发 performDownload。
+         形态对齐 demo .upd（brand 行升级钮）：32px 图标钮（tbtn 语言）+ 右上 7px danger 红点。 -->
     <HoverCard v-if="state.state === 'available'">
       <HoverCardTrigger as-child>
         <Button
           variant="ghost"
           size="sm"
-          class="relative h-auto gap-0.5 px-1 py-0 text-[length:var(--text-3xs)] text-accent hover:text-accent"
+          class="relative size-8 shrink-0 rounded-sm p-0 text-neutral-dim transition-colors hover:bg-surface-hover hover:text-neutral-fg"
           data-testid="update-available"
           :title="t('sidebar.update.newVersion')"
           @click="onPerformUpdate"
         >
-          <ArrowUp class="size-3" />
-          <!-- 红点角标（与 SegmentedTab.vue:27-30 同范式） -->
-          <span class="absolute right-0 top-0 size-[7px] rounded-full bg-danger" data-testid="update-badge" />
+          <ArrowUp class="size-[15px]" />
+          <!-- 红点角标（demo .upd-dot：top/right 4px，7px 圆） -->
+          <span class="absolute right-1 top-1 size-[7px] rounded-full bg-danger" data-testid="update-badge" />
         </Button>
       </HoverCardTrigger>
       <HoverCardContent side="top" class="release-notes-content max-h-[360px] w-[360px] overflow-auto p-4 text-[length:var(--text-xs)] text-neutral-fg">

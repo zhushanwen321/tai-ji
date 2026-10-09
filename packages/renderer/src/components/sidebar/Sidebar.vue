@@ -1,7 +1,8 @@
 <template>
   <!--
     容器组件 · L1 Sidebar（sidebar/spec.md 四态）。
-    分层（自上而下）：Brand → 主操作 nav（新建 ⌘N / 导入会话 ⌘I / 搜索 ⌘K）→ segmented tab（会话|文件|Plugins）→ 子视图区 → 用户区。
+    分层（自上而下，对齐 demo .sidebar 区块序）：Brand → ProjectSwitcher → 新建任务 →
+    次操作 nav（导入会话 ⌘I / 搜索 ⌘K）→ segmented tab（会话|文件|Plugins）→ 子视图区 → 用户区。
     折叠态 C：整体隐藏（width:0 + opacity:0），spec §收起态。
     File View 内容 G2-003 defer。
     [HISTORICAL] 2026-09-16 五 tab 收敛为三 tab：Agents（子代理列表）/ Flows（工作流列表 +
@@ -13,7 +14,7 @@
     class="sidebar h-full transition-[width,opacity] duration-[var(--duration-slow)] ease-[var(--ease)]"
     :class="{ 'w-0 opacity-0 overflow-hidden': sidebar.collapsed }"
   >
-    <div class="sidebar__inner flex h-full w-[300px] flex-col pl-0.5">
+    <div class="sidebar__inner flex h-full w-[252px] flex-col">
       <!-- Brand（太极 logo + 产品名 + 版本号 + 升级指示器，v6 §6.2） -->
       <Brand :version-label="versionLabel">
         <template #trailing>
@@ -22,47 +23,45 @@
         </template>
       </Brand>
 
-      <!-- 主操作 nav：新建任务（主操作，中性底不再 accent 实色——用户裁决 2026-10-06
-           对齐 demo .w-new 形态）/ 导入会话 ⌘I / 搜索 ⌘K（ghost 次操作）。
+      <!-- ProjectSwitcher（demo .projwrap：Brand 行下方项目切换条） -->
+      <ProjectSwitcher />
+
+      <!-- 新建任务（demo .newtask：elevated 卡主操作，中性底——用户裁决 2026-10-06）。
            快捷键提示并入 :title（demo data-tip 悬停形态），不渲染常驻 kbd。 -->
-      <nav class="flex flex-col gap-1 px-1">
-        <Button
-          variant="ghost"
-          class="group h-8 w-full justify-start gap-2.5 rounded-md border border-border-strong bg-surface-2 px-3 text-[length:var(--text-xs)] font-medium text-neutral-fg transition-colors hover:bg-surface-hover"
-          :title="`${t('sidebar.newTask')} · ${formatKbd('n')}`"
-          @click="onNewSession"
-        >
-          <Plus class="size-[15px]" />
-          <span class="flex-1 text-left">{{ t('sidebar.newTask') }}</span>
-        </Button>
-        <!-- 导入会话入口（import-session 设计 §3.1）：外部 pi session
-             纳入管理。ghost 次操作；open 状态本组件持有，
-             ⌘I 经 useGlobalShortcuts 注入的 onOpenImportSession 派发同一状态。 -->
+      <Button
+        variant="ghost"
+        class="mx-2.5 mt-0.5 mb-1 flex h-auto justify-start gap-2 rounded border border-hairline bg-bg-elevated px-2.5 py-2 text-[length:var(--text-sm)] font-medium text-neutral-fg transition-colors hover:bg-bg-elevated hover:border-border-strong"
+        :title="`${t('sidebar.newTask')} · ${formatKbd('n')}`"
+        @click="onNewSession"
+      >
+        <Plus class="size-[15px] shrink-0" />
+        <span class="flex-1 text-left">{{ t('sidebar.newTask') }}</span>
+      </Button>
+
+      <!-- 次操作 nav：导入会话 ⌘I / 搜索 ⌘K（demo .snav ghost 行）。
+           导入会话入口（import-session 设计 §3.1）：外部 pi session 纳入管理；open 状态
+           本组件持有，⌘I 经 useGlobalShortcuts 注入的 onOpenImportSession 派发同一状态。 -->
+      <nav class="flex flex-col px-1.5 py-0.5">
         <Button
           variant="ghost"
           data-testid="sidebar-import-session-btn"
-          class="group h-8 w-full justify-start gap-2.5 rounded-md px-3 text-[length:var(--text-xs)] text-neutral-mid transition-colors hover:bg-surface-hover hover:text-neutral-fg"
+          class="group flex h-auto w-full justify-start gap-[9px] rounded-sm px-2 py-[7px] text-[length:var(--text-sm)] text-neutral-mid transition-colors hover:bg-surface-hover hover:text-neutral-fg"
           :title="`${t('importSession.title')} · ${formatKbd('i')}`"
           @click="importOpen = true"
         >
-          <Download class="size-[15px] text-neutral-dim transition-colors group-hover:text-neutral-mid" />
+          <Download class="size-[15px] shrink-0" />
           <span class="flex-1 text-left">{{ t('importSession.title') }}</span>
         </Button>
         <Button
           variant="ghost"
-          class="group h-8 w-full justify-start gap-2.5 rounded-md px-3 text-[length:var(--text-xs)] text-neutral-mid hover:bg-surface-hover hover:text-neutral-fg"
+          class="group flex h-auto w-full justify-start gap-[9px] rounded-sm px-2 py-[7px] text-[length:var(--text-sm)] text-neutral-mid transition-colors hover:bg-surface-hover hover:text-neutral-fg"
           :title="`${t('sidebar.search')} · ${formatKbd('k')}`"
           @click="searchModal.open()"
         >
-          <Search class="size-[15px] text-neutral-dim transition-colors group-hover:text-neutral-mid" />
+          <Search class="size-[15px] shrink-0" />
           <span class="flex-1 text-left">{{ t('sidebar.search') }}</span>
         </Button>
       </nav>
-
-      <div class="my-2 mx-2.5 h-px bg-border" />
-
-      <!-- ProjectSwitcher（v6 D14：nav 下方 Project 一级导航，spec §6.2） -->
-      <ProjectSwitcher />
 
       <!-- segmented tab（会话 | 文件 | Plugins） -->
       <SegmentedTab
@@ -139,18 +138,22 @@
         </template>
       </div>
 
-      <!-- 用户区（footer）· §6.2 UserArea：accent 纯色头像（去装饰渐变）+ 用户名 + 设置齿轮。 -->
-      <div class="mt-auto flex items-center gap-2 rounded-md px-2 py-2 text-[length:var(--text-xs)] text-neutral-mid transition-colors hover:bg-surface-hover">
-        <span class="size-5 shrink-0 rounded-full bg-accent" />
-        <span class="flex-1 truncate text-neutral-fg">{{ t('sidebar.developer') }}</span>
-        <Button
-          variant="ghost"
-          class="grid size-6 shrink-0 place-items-center rounded-sm p-0 text-neutral-dim transition-colors hover:bg-surface-hover hover:text-neutral-fg [&_svg]:size-[14px]"
-          :title="t('sidebar.settingsTitle')"
-          @click="openSettings()"
-        >
-          <Settings class="size-[14px]" />
-        </Button>
+      <!-- 用户区（footer）· demo .side-foot：hairline 顶线分隔 + 开发者身份行（accent 软底头像
+           + 名字 + 图标钮）。real 独有缺远程/外观钮（无对应功能，不添加），设置钮按 demo .tbtn
+           语言（32px 方钮 + 15px 图标 + dim→fg hover）造型。 -->
+      <div class="mt-auto flex-none border-t border-hairline px-3.5 pb-2.5 pt-3">
+        <div class="flex items-center gap-[9px]">
+          <span class="size-5 shrink-0 rounded-full border border-accent-ring bg-accent-soft" />
+          <span class="min-w-0 flex-1 truncate text-[length:var(--text-sm)] font-medium text-neutral-fg-2">{{ t('sidebar.developer') }}</span>
+          <Button
+            variant="ghost"
+            class="grid size-8 shrink-0 place-items-center rounded-sm p-0 text-neutral-dim transition-colors hover:bg-surface-hover hover:text-neutral-fg [&_svg]:size-[15px]"
+            :title="t('sidebar.settingsTitle')"
+            @click="openSettings()"
+          >
+            <Settings class="size-[15px]" />
+          </Button>
+        </div>
       </div>
     </div>
 

@@ -27,14 +27,14 @@ describe('Brand', () => {
   it('versionLabel fallback：未传（piVersion 未就绪）时不渲染版本行', () => {
     const wrapper = mount(Brand)
     // 默认 versionLabel='' → v-if 不渲染版本号行（只留 logo + 产品名）
-    const versionLine = wrapper.find('.text-\\[length\\:var\\(--text-3xs\\)\\]')
+    const versionLine = wrapper.find('.text-\\[length\\:var\\(--text-2xs\\)\\]')
     expect(versionLine.exists()).toBe(false)
     expect(wrapper.text()).not.toContain('v0.0.0-test')
   })
 
   it('产品名渲染 app.title i18n（zh-CN：太极）', () => {
     const wrapper = mount(Brand)
-    const title = wrapper.find('span.text-\\[length\\:var\\(--text-sm\\)\\]')
+    const title = wrapper.find('span.text-\\[length\\:var\\(--text-md\\)\\]')
     expect(title.exists()).toBe(true)
     expect(title.text()).toBe('太极')
   })

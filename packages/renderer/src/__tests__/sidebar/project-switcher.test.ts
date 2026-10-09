@@ -106,9 +106,9 @@ describe('ProjectSwitcher 3A：2 列网格渲染 + 徽章 + 切换', () => {
     expect(cards).toHaveLength(3)
     expect(cardById(wrapper, 'a').find('[data-testid="project-card-name"]').text()).toBe('Alpha')
     expect(cardById(wrapper, DEFAULT_PROJECT_ID).find('[data-testid="project-card-name"]').text()).toBe('默认项目')
-    // active 卡高亮（bg-surface 范式），非 active 卡无
-    expect(cardById(wrapper, 'a').classes()).toContain('bg-surface')
-    expect(cardById(wrapper, 'b').classes()).not.toContain('bg-surface')
+    // active 卡高亮（demo .proj-bar 形态：bg-bg-elevated），非 active 卡无
+    expect(cardById(wrapper, 'a').classes()).toContain('bg-bg-elevated')
+    expect(cardById(wrapper, 'b').classes()).not.toContain('bg-bg-elevated')
     // 网格尾部有「新建项目」入口
     expect(wrapper.find('[data-testid="project-add-btn"]').exists()).toBe(true)
   })
@@ -146,8 +146,8 @@ describe('ProjectSwitcher 3A：2 列网格渲染 + 徽章 + 切换', () => {
     await cardById(wrapper, 'b').trigger('click')
 
     expect(projectStore.activeProjectId).toBe('b')
-    expect(cardById(wrapper, 'b').classes()).toContain('bg-surface')
-    expect(cardById(wrapper, 'a').classes()).not.toContain('bg-surface')
+    expect(cardById(wrapper, 'b').classes()).toContain('bg-bg-elevated')
+    expect(cardById(wrapper, 'a').classes()).not.toContain('bg-bg-elevated')
   })
 
   it('title 兜底：卡片 title = 全名（sidebar 滚动容器内 CSS tooltip 裁剪的规避决策）', () => {

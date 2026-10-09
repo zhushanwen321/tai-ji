@@ -48,11 +48,12 @@ describe('D4: SessionItem hover 按钮定位', () => {
   })
 })
 
-// ── D5: SegmentedTab count 数字渲染（三 tab 终态）────────────────
-// [HISTORICAL] 原「badge 蓝点位置」用例已改写：badge 随 count 数字恢复一并移除
-// （一态一手段——数字是「计数 > 0」的精确表达）。
-describe('D5: SegmentedTab count 数字渲染', () => {
-  it('count > 0 渲染数字 span，badge 蓝点不再存在（数字取代 badge）', () => {
+// ── D5: SegmentedTab 文字 tab 形态（三 tab 终态）────────────────
+// [HISTORICAL] 2026-09-16 任务 tab 退役；2026-10 M1 视觉复刻：icon-only + count 数字形态
+// 随 demo .vtab 文字 tab 对齐退役，用例改写为「无 icon / 无数字」形态断言（count props
+// 保留外部契约不渲染）。
+describe('D5: SegmentedTab 文字 tab 形态', () => {
+  it('count > 0 也不渲染数字与 icon（demo .vtab 文字 tab）', () => {
     const wrapper = mount(SegmentedTab, {
       props: {
         modelValue: 'sessions',
@@ -62,26 +63,14 @@ describe('D5: SegmentedTab count 数字渲染', () => {
     })
     // badge 蓝点（原 absolute 定位 span）已移除
     expect(wrapper.find('.absolute.right-1.top-1').exists()).toBe(false)
-    // 各 tab 图标右侧渲染 count 数字
+    // 文字 tab：三按钮只含 label 文字，无 icon svg、无 count 数字
     const buttons = wrapper.findAll('button')
     expect(buttons).toHaveLength(3)
-    expect(buttons[0].text()).toContain('3')
-    expect(buttons[1].text()).toContain('10')
-  })
-
-  it('count = 0 不渲染数字 span（决策 4：避免一排 0 的噪音）', () => {
-    const wrapper = mount(SegmentedTab, {
-      props: {
-        modelValue: 'sessions',
-        sessionCount: 0,
-        fileCount: 0,
-      },
-    })
-    expect(wrapper.find('.absolute.right-1.top-1').exists()).toBe(false)
-    const buttons = wrapper.findAll('button')
     for (const btn of buttons) {
-      expect(btn.find('span').exists()).toBe(false)
+      expect(btn.find('svg').exists()).toBe(false)
     }
+    expect(buttons[0].text()).not.toContain('3')
+    expect(buttons[1].text()).not.toContain('10')
   })
 })
 

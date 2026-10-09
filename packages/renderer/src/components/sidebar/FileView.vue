@@ -15,44 +15,43 @@
     - 编排走 useFileTree（loadTree/expandNode/collapseNode/selectFile/setFilter）
     - sessionId 由 Sidebar 注入（当前 active session），切 session 触发 loadTree
   -->
-  <div class="flex h-full min-h-0 flex-col gap-0.5 px-1" data-testid="file-view-root">
-    <!-- 头部：当前 session 标签 + 分支（左）× showIgnored 开关（右），同一行。
-         D-020/D-004：忽略项开关从过滤框下方上移至此（与会话名同行：会话名左、忽略项右）。 -->
-    <div v-if="sessionLabel" class="flex items-center gap-2 px-2 py-1.5">
-      <div class="min-w-0 flex-1 truncate font-mono text-[length:var(--text-3xs)] text-neutral-mid">
-        <span class="text-neutral-fg">{{ sessionLabel }}</span>
-        <span v-if="branch" class="opacity-60"> · </span>
-        <span v-if="branch" class="text-accent">{{ branch }}</span>
-      </div>
+  <div class="flex h-full min-h-0 flex-col px-1.5" data-testid="file-view-root">
+    <!-- fv-head（demo 形态）：session 标题（13px fw-mid fg）+ 分支行（mono 11px fg-2——
+         信息文字不占 accent，workbench.css .fv-branch 语义），块底 hairline 分隔。
+         D-020/D-004：忽略项开关移入下方 fv-tools 行（与过滤框同行，demo 同构）。 -->
+    <div v-if="sessionLabel" class="mb-2 border-b border-hairline px-2 pb-2 pt-0.5">
+      <div class="min-w-0 truncate text-[length:var(--text-sm)] font-medium text-neutral-fg">{{ sessionLabel }}</div>
+      <div v-if="branch" class="mt-0.5 truncate font-mono text-[length:var(--text-2xs)] text-neutral-fg-2">{{ branch }}</div>
+    </div>
+
+    <!-- fv-tools（demo 形态）：忽略项开关 + 过滤框同一行（gap 6px）。 -->
+    <div class="flex items-center gap-1.5 px-2 pb-2">
       <Button
         variant="ghost"
-        class="h-5 shrink-0 gap-1 rounded-sm px-1.5 text-[length:var(--text-3xs)]"
+        class="h-6 shrink-0 gap-1 rounded-sm px-[7px] text-[length:var(--text-2xs)]"
         :class="store.showIgnored ? 'text-accent' : 'text-neutral-dim'"
         :title="store.showIgnored ? t('sidebar.fileView.hideIgnored') : t('sidebar.fileView.showIgnored')"
         data-testid="file-show-ignored-toggle"
         @click="onToggleShowIgnored"
       >
-        <EyeOff v-if="store.showIgnored" class="size-3" />
-        <Eye v-else class="size-3" />
+        <EyeOff v-if="store.showIgnored" class="size-[15px]" />
+        <Eye v-else class="size-[15px]" />
         <span>{{ t('sidebar.fileView.ignoredItem') }}</span>
       </Button>
-    </div>
-
-    <!-- 过滤框：实时按 path 模糊匹配（store.filterText，useFileTree.setFilter 驱动） -->
-    <div class="relative px-2 pb-1.5">
-      <!-- 图标按 input(h-6=24px) 高度居中：top-3(12px)=input 中心，再 -translate-y-1/2。
-           不能用 top-1/2：容器有 pb-1.5(底部6px) 无顶部 padding，容器 box 高 30px，
-           top-1/2=15px 会让图标相对整个容器居中而偏低 3px（padding/2）。 -->
-      <Search class="pointer-events-none absolute left-4 top-3 size-3 -translate-y-1/2 text-neutral-dim" />
-      <Input
-        :model-value="filterDisplay"
-        class="h-6 pl-6 pr-2 text-[length:var(--text-2xs)]"
-        :placeholder="t('sidebar.fileView.filterPlaceholder')"
-        data-testid="file-filter-input"
-        @focus="filterFocused = true"
-        @blur="filterFocused = false"
-        @update:model-value="onFilter"
-      />
+      <!-- 过滤框（demo .fv-filter）：左 7px 12px 图标 + h-6 凹陷输入（bg-input/hairline 边）。
+           容器即 input 高度，图标直接 top-1/2 居中。 -->
+      <div class="relative min-w-0 flex-1">
+        <Search class="pointer-events-none absolute left-[7px] top-1/2 size-3 -translate-y-1/2 text-neutral-dim" />
+        <Input
+          :model-value="filterDisplay"
+          class="h-6 pl-6 pr-2 text-[length:var(--text-xs)]"
+          :placeholder="t('sidebar.fileView.filterPlaceholder')"
+          data-testid="file-filter-input"
+          @focus="filterFocused = true"
+          @blur="filterFocused = false"
+          @update:model-value="onFilter"
+        />
+      </div>
     </div>
 
     <!-- 滚动区：仅承载树（加载/错误/空态）。virtua Virtualizer 必须是其 parentElement
@@ -66,7 +65,7 @@
         data-testid="file-loading"
       >
         <Loader2 class="size-4 animate-spin text-neutral-dim opacity-60" />
-        <p class="text-[length:var(--text-2xs)] text-neutral-dim opacity-60">{{ t('sidebar.fileView.loadingTree') }}</p>
+        <p class="text-[length:var(--text-xs)] text-neutral-dim opacity-60">{{ t('sidebar.fileView.loadingTree') }}</p>
       </div>
 
       <!-- 错误态（loadTree 失败，可重试） -->
@@ -76,8 +75,8 @@
         data-testid="file-error"
       >
         <AlertCircle class="size-5 text-danger opacity-60" />
-        <p class="text-[length:var(--text-2xs)] text-neutral-mid">{{ t('sidebar.fileView.loadFailed', { reason: rootState.reason ?? 'unknown' }) }}</p>
-        <Button variant="ghost" class="h-6 text-[length:var(--text-2xs)] text-accent" data-testid="file-retry" @click="retry">{{ t('sidebar.fileView.retry') }}</Button>
+        <p class="text-[length:var(--text-xs)] text-neutral-mid">{{ t('sidebar.fileView.loadFailed', { reason: rootState.reason ?? 'unknown' }) }}</p>
+        <Button variant="ghost" class="h-6 text-[length:var(--text-xs)] text-accent" data-testid="file-retry" @click="retry">{{ t('sidebar.fileView.retry') }}</Button>
       </div>
 
       <!-- 空态：loaded 但无节点（空目录 cwd）或过滤无匹配（E7-c：投影空 → 维持既有空态） -->
@@ -87,7 +86,7 @@
         data-testid="file-empty"
       >
         <component :is="hasFilter ? SearchX : FolderOpen" class="size-5 text-neutral-dim opacity-50" />
-        <p class="text-[length:var(--text-2xs)] text-neutral-dim opacity-55">{{ hasFilter ? t('sidebar.fileView.noMatch') : t('sidebar.fileView.noFile') }}</p>
+        <p class="text-[length:var(--text-xs)] text-neutral-dim opacity-55">{{ hasFilter ? t('sidebar.fileView.noMatch') : t('sidebar.fileView.noFile') }}</p>
       </div>
 
       <!-- 文件树：virtua 挂扁平行（可见行 = projectVisibleRows 投影；itemProps 宽度 max-content

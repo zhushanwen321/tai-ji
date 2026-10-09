@@ -179,26 +179,28 @@ function cancelCreate() {
 </script>
 
 <template>
-  <div class="mb-1 mx-1" data-testid="project-switcher">
-    <!-- 2 列卡片网格（demo 3A：gap 4px / 单行 pill 26px / radius-sm） -->
+  <div class="mb-1 mx-2.5" data-testid="project-switcher">
+    <!-- 2 列卡片网格（功能结构保留；卡片形态语言 = demo .proj-bar：elevated 底 + hairline 边
+         + radius 8 + 名字 fw-mid + mono 计数，hover 提边框） -->
     <div class="grid grid-cols-2 gap-1" data-testid="project-grid">
       <template v-for="p in projectStore.recentProjects" :key="p.id">
         <!-- 右键菜单（删除入口；默认项目卡无菜单项 → Portal 条件渲染，不吞右键） -->
         <ContextMenuRoot @update:open="onCardMenuOpenChange">
           <ContextMenuTrigger as-child>
             <!-- 卡片：div role=button（旧列表项同范式，避免 button 嵌套 input/触发器）；
-                 active 态沿用侧栏既有范式 bg-surface + text-accent（SessionItem/旧列表一致）。 -->
+                 active 卡 = demo .proj-bar 形态（bg-bg-elevated + border-hairline + 名字中性亮字），
+                 inactive 卡 = ghost 行语言（hover 软底）。 -->
             <div
               role="button"
               tabindex="0"
               draggable="true"
               data-testid="project-card"
               :data-project-id="p.id"
-              class="flex h-[26px] min-w-0 cursor-pointer select-none items-center gap-1.5 rounded-sm border px-2 text-[length:var(--text-xs)] transition-colors duration-[var(--duration-fast)] ease-[var(--ease)]"
+              class="flex min-w-0 cursor-pointer select-none items-center gap-[7px] rounded px-[9px] py-[7px] text-[length:var(--text-xs)] transition-colors duration-[var(--duration-fast)] ease-[var(--ease)]"
               :class="[
                 p.id === projectStore.activeProjectId
-                  ? 'border-transparent bg-surface text-accent'
-                  : 'border-transparent text-neutral-mid hover:bg-surface-hover hover:text-neutral-fg',
+                  ? 'border border-hairline bg-bg-elevated font-medium text-neutral-fg hover:border-border-strong'
+                  : 'border border-transparent text-neutral-mid hover:bg-surface-hover hover:text-neutral-fg',
                 dragId === p.id ? 'opacity-45' : '',
                 overId === p.id && dragId !== p.id ? 'border-accent border-dashed' : '',
               ]"
@@ -219,15 +221,11 @@ function cancelCreate() {
               <span class="min-w-0 flex-1 truncate text-left" data-testid="project-card-name">
                 {{ displayName(p) }}
               </span>
-              <!-- 会话数徽章：规则与 SessionList 过滤共享（SSOT），数字 = 点击后列表实际条数 -->
+              <!-- 会话数徽章：规则与 SessionList 过滤共享（SSOT），数字 = 点击后列表实际条数。
+                   形态 = demo .cnt（mono 11px dim，无底无胶囊） -->
               <span
                 data-testid="project-card-count"
-                class="flex-none rounded-full px-[5px] text-center text-[length:var(--text-3xs)] leading-[15px]"
-                :class="
-                  p.id === projectStore.activeProjectId
-                    ? 'bg-surface-hover text-accent'
-                    : 'bg-surface-hover text-neutral-dim'
-                "
+                class="flex-none font-mono text-[length:var(--text-2xs)] text-neutral-dim"
               >
                 {{ sessionCounts.get(p.id) ?? 0 }}
               </span>
@@ -237,7 +235,7 @@ function cancelCreate() {
             <ContextMenuContent
               :ref="setCardMenuContentRef"
               data-testid="project-context-menu"
-              class="z-[1100] min-w-[160px] rounded-md border border-border-strong bg-bg-elevated p-1 text-neutral-fg shadow-2 outline-none"
+              class="z-[1100] min-w-[148px] rounded-md border border-border-strong bg-bg-elevated p-1 text-neutral-fg shadow-2 outline-none"
             >
               <ContextMenuItem
                 data-testid="project-delete-item"
@@ -252,13 +250,14 @@ function cancelCreate() {
         </ContextMenuRoot>
       </template>
 
-      <!-- 新建：add 卡 / 内联 Input 互斥（Esc 取消 / Enter、blur 提交） -->
+      <!-- 新建：add 卡 / 内联 Input 互斥（Esc 取消 / Enter、blur 提交）。
+           add 卡形态 = demo .pp-add ghost 行（无描边、mid 字、hover 软底） -->
       <Input
         v-if="creating"
         ref="inputRef"
         v-model="draft"
         data-testid="project-create-input"
-        class="h-[26px] rounded-sm border-border-strong bg-bg-input px-2 text-[length:var(--text-xs)] text-neutral-fg"
+        class="h-6 rounded-sm border-border-strong bg-bg-input px-[7px] text-[length:var(--text-xs)] text-neutral-fg"
         :placeholder="t('sidebar.projectSwitcher.namePlaceholder')"
         @keydown.enter.prevent="commitCreate"
         @keydown.esc.prevent="cancelCreate"
@@ -269,7 +268,7 @@ function cancelCreate() {
         variant="ghost"
         type="button"
         data-testid="project-add-btn"
-        class="h-[26px] w-full justify-center gap-1 rounded-sm border border-dashed border-border-strong text-[length:var(--text-xs)] text-neutral-dim [&_svg]:size-3"
+        class="h-auto w-full justify-start gap-[7px] rounded-sm px-2 py-[7px] text-[length:var(--text-xs)] text-neutral-mid transition-colors hover:bg-surface-hover hover:text-neutral-fg [&_svg]:size-[13px]"
         @click="startCreate"
       >
         <Plus class="shrink-0" />

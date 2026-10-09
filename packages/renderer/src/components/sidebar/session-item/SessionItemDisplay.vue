@@ -34,11 +34,12 @@
     />
   </div>
 
-  <!-- 主体：label + sub（fork 血缘 / branch） -->
+  <!-- 主体：label + sub（fork 血缘 / branch）。label 形态 = demo .si .nm（13px fw-mid fg-2，
+       选中态 fg——active 由父组件透传，demo .si.on 行级 color 覆盖的等价实现）。 -->
   <div class="min-w-0 flex-1">
     <div
-      class="flex min-w-0 items-center gap-1 text-[length:var(--text-xs)] leading-[1.35] text-neutral-fg"
-      :class="markedDone ? 'opacity-60' : ''"
+      class="flex min-w-0 items-center gap-1 text-[length:var(--text-sm)] font-medium leading-[1.35]"
+      :class="[active ? 'text-neutral-fg' : 'text-neutral-fg-2', markedDone ? 'opacity-60' : '']"
     >
       <span class="min-w-0 flex-1 truncate">{{ session.label }}</span>
       <!-- agent-spawned badge（U8）：accent 低饱和形态（bg-accent-soft + text-accent，
@@ -85,7 +86,7 @@
     <span>{{ childCount }}</span>
   </span>
   <span
-    class="mt-1 shrink-0 font-mono text-[length:var(--text-3xs)] leading-[1.35] text-neutral-dim"
+    class="mt-1 shrink-0 font-mono text-[length:var(--text-2xs)] leading-[1.35] text-neutral-dim"
   >{{ timeLabel }}</span>
 </template>
 
@@ -109,6 +110,8 @@ const props = withDefaults(defineProps<{
   status: DerivedStatus
   /** 子会话数（按 parentAgentSessionId 计数，SessionList 注入）；0/缺省不渲染徒标 */
   childCount?: number
+  /** 选中态（SessionItem 透传）：标题字色提档 fg-2 → fg（demo .si.on 行级覆盖） */
+  active?: boolean
 }>(), { childCount: 0 })
 
 const { t } = useI18n()

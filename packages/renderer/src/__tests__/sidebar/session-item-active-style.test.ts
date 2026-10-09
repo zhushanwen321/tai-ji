@@ -2,9 +2,9 @@
  * 会话条目激活态样式测试（用户裁决 2026-10-06：对齐 demo .sess.is-active 形态）。
  *
  * 三视角（TEST-STRATEGY §3）：
- *  - 构建者白盒：active prop 驱动根节点激活类分支（bg-accent-soft + inset 竖条）
+ *  - 构建者白盒：active prop 驱动根节点激活类分支（bg-bg-elevated + inset 竖条）
  *  - 使用者黑盒：激活条目标题文字可见且为中性色
- *  - 观察者形态：激活态 = accent 浅底（bg-accent-soft）+ 左侧 2px accent 竖条
+ *  - 观察者形态：激活态 = elevated 浮起底（bg-bg-elevated，demo 选中态单一范式）+ 左侧 2px accent 竖条
  *    （inset shadow，不占布局）+ 标题中性色（不再 text-accent）
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/sidebar/session-item-active-style.test.ts
@@ -38,10 +38,10 @@ beforeEach(() => {
 })
 
 describe('会话条目激活态样式（用户裁决 2026-10-06，对齐 demo .sess.is-active）', () => {
-  it('激活条目：根节点带 accent 浅底（bg-accent-soft）与左侧 2px accent 竖条（inset shadow，不占布局）', () => {
+  it('激活条目：根节点带 elevated 浮起底（bg-bg-elevated）与左侧 2px accent 竖条（inset shadow，不占布局）', () => {
     const wrapper = mountItem(true)
     const root = wrapper.find('.session-item')
-    expect(root.classes()).toContain('bg-accent-soft')
+    expect(root.classes()).toContain('bg-bg-elevated')
     expect(root.classes()).toContain('shadow-[inset_2px_0_0_var(--accent)]')
     expect(root.classes()).not.toContain('hover:bg-surface-hover')
   })
@@ -55,10 +55,10 @@ describe('会话条目激活态样式（用户裁决 2026-10-06，对齐 demo .s
     expect(titleRow.className).not.toContain('text-accent')
   })
 
-  it('非激活条目无 accent 浅底（hover 底生效路径不变）', () => {
+  it('非激活条目无 elevated 选中底（hover 底生效路径不变）', () => {
     const wrapper = mountItem(false)
     const root = wrapper.find('.session-item')
-    expect(root.classes()).not.toContain('bg-accent-soft')
+    expect(root.classes()).not.toContain('bg-bg-elevated')
     expect(root.classes()).toContain('hover:bg-surface-hover')
   })
 })

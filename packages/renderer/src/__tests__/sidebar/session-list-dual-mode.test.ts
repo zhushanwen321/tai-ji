@@ -118,18 +118,18 @@ describe('N8 模式切换与持久化', () => {
 })
 
 describe('N8 选中态同步（两模式一致）', () => {
-  it('A 平铺模式：activeId 对应行呈 accent 高亮', () => {
+  it('A 平铺模式：activeId 对应行呈 elevated 选中底（demo .si.on 范式）', () => {
     const wrapper = mountList(makeGroups(), 'a2')
     const items = wrapper.findAll('.session-item')
     const activeRow = items.find((w) => w.text().includes('会话 a2'))
-    expect(activeRow?.classes()).toContain('bg-accent-soft')
+    expect(activeRow?.classes()).toContain('bg-bg-elevated')
   })
 
   it('C 分组模式：同一 activeId 对应行同样高亮', () => {
     localStorage.setItem(SESSION_MODE_KEY, 'groups')
     const wrapper = mountList(makeGroups(), 'b1')
     const activeRow = wrapper.findAll('.session-item').find((w) => w.text().includes('会话 b1'))
-    expect(activeRow?.classes()).toContain('bg-accent-soft')
+    expect(activeRow?.classes()).toContain('bg-bg-elevated')
   })
 })
 

@@ -12,49 +12,51 @@
     v-model 语义用 activeId（单向：子→父 select）。
   -->
   <div class="session-list flex h-full min-h-0 flex-col">
-    <!-- 区头（N8 开关落点，24px）：现状列表无区头行，此为最小可发现落点。
-         固定于 ScrollArea 外（不随列表滚动），C 模式组头 sticky 贴 ScrollArea 顶、不重叠。 -->
-    <div class="flex h-6 shrink-0 items-center gap-1.5 pl-2 pr-1" data-testid="session-list-header">
-      <span class="truncate text-[length:var(--text-3xs)] font-medium text-neutral-dim">
+    <!-- 区头（demo .sess-head：gap 6px / padding 8px 10px 5px；lbl 12px mid、count mono 11px fg-2、
+         右侧模式开关 = .mode-seg 凹陷槽）。固定于 ScrollArea 外（不随列表滚动），
+         C 模式组头 sticky 贴 ScrollArea 顶、不重叠。 -->
+    <div class="flex shrink-0 items-center gap-1.5 px-2.5 pt-2 pb-[5px]" data-testid="session-list-header">
+      <span class="truncate text-[length:var(--text-xs)] text-neutral-mid">
         {{ t('sidebar.sessionList.header') }}
       </span>
-      <span class="font-mono text-[length:var(--text-3xs)] text-neutral-dim opacity-60">{{ totalCount }}</span>
-      <!-- A/C 双段图标开关：选中态对齐 SegmentedTab 形态（bg-bg-elevated 浮起 + fg 字），
-           小型化嵌入 24px 区头。title 承载模式名（无 label 文字，demo 悬停提示范式）。 -->
-      <div class="ml-auto flex items-center gap-0.5">
+      <span class="font-mono text-[length:var(--text-2xs)] text-neutral-fg-2">{{ totalCount }}</span>
+      <!-- A/C 双段图标开关（demo .mode-seg：surface 槽 + hairline 边 + 26×24 钮 + 13px 图标）：
+           选中态 = demo 选中范式（elevated 浮起 + fg 字 + 1px accent 内描边）。
+           title 承载模式名（无 label 文字，demo 悬停提示范式）。 -->
+      <div class="ml-auto flex items-center rounded-sm border border-hairline bg-surface p-[2px]">
         <Button
           variant="ghost"
           size="icon"
           data-testid="session-mode-flat"
-          class="h-4 w-5 rounded-sm p-0"
+          class="h-6 w-[26px] rounded-[var(--radius-xs)] p-0"
           :class="mode === 'flat'
-            ? 'bg-bg-elevated text-neutral-fg hover:bg-bg-elevated hover:text-neutral-fg'
-            : 'text-neutral-mid hover:bg-transparent hover:text-neutral-fg'"
+            ? 'bg-bg-elevated text-neutral-fg shadow-[inset_0_0_0_1px_var(--accent)] hover:bg-bg-elevated hover:text-neutral-fg'
+            : 'bg-transparent text-neutral-dim hover:bg-transparent hover:text-neutral-fg'"
           :title="t('sidebar.sessionList.modeFlat')"
           :aria-pressed="mode === 'flat'"
           @click="setMode('flat')"
         >
-          <List class="size-[11px]" />
+          <List class="size-[13px]" />
         </Button>
         <Button
           variant="ghost"
           size="icon"
           data-testid="session-mode-groups"
-          class="h-4 w-5 rounded-sm p-0"
+          class="h-6 w-[26px] rounded-[var(--radius-xs)] p-0"
           :class="mode === 'groups'
-            ? 'bg-bg-elevated text-neutral-fg hover:bg-bg-elevated hover:text-neutral-fg'
-            : 'text-neutral-mid hover:bg-transparent hover:text-neutral-fg'"
+            ? 'bg-bg-elevated text-neutral-fg shadow-[inset_0_0_0_1px_var(--accent)] hover:bg-bg-elevated hover:text-neutral-fg'
+            : 'bg-transparent text-neutral-dim hover:bg-transparent hover:text-neutral-fg'"
           :title="t('sidebar.sessionList.modeGroup')"
           :aria-pressed="mode === 'groups'"
           @click="setMode('groups')"
         >
-          <Folder class="size-[11px]" />
+          <Folder class="size-[13px]" />
         </Button>
       </div>
     </div>
 
     <ScrollArea class="min-h-0 flex-1">
-    <div class="flex flex-col px-1">
+    <div class="flex flex-col px-1.5 pt-0.5 pb-2">
       <!-- C 目录分组模式：每组一个标题（cwd 末段）+ 组内 SessionItem 列表。
            目录级操作（组内新建 / 目录删除）只落在此模式组头（N8：A 平铺不提供，
            低频操作避免单行列表挂操作入口回归臃肿）。 -->
@@ -64,17 +66,17 @@
         :key="g.cwd"
         class="group-section flex flex-col gap-0.5"
       >
-        <!-- 组标题：cwd 末段（长路径只显末段防溢出，与 SessionItem.dirName 同一信息原子）。
+        <!-- 组标题（demo .gh 语言：12px 图标 + mono 12px mid 组名 + mono 11px fg-2 计数）。
              sticky 贴顶用 bg-bg 不透明（侧边栏底色透明融合 bg，header 同色遮住滚过的 item 文字）。
              group/folder 命名 group 只放在 header 行上（本容器**不能**带 group/folder——Tailwind
              命名 group 是「任意层级祖先」匹配，容器带它会令 hover 组内任意 SessionItem 时也触发
              folder 按钮，破坏单行独立 hover 语义）。 -->
-        <div class="group/folder sticky top-0 z-[1] flex items-center gap-1.5 bg-bg px-2 pb-0.5 pt-1">
-          <Folder class="size-[11px] shrink-0 text-neutral-dim" />
-          <span class="truncate text-[length:var(--text-3xs)] font-medium text-neutral-dim">
+        <div class="group/folder sticky top-0 z-[1] flex items-center gap-1.5 bg-bg px-2 pt-[9px] pb-1">
+          <Folder class="size-3 shrink-0 text-neutral-dim" />
+          <span class="min-w-0 truncate font-mono text-[length:var(--text-xs)] text-neutral-mid">
             {{ dirNameOf(g.cwd) }}
           </span>
-          <span class="font-mono text-[length:var(--text-3xs)] text-neutral-dim opacity-60">{{ g.sessions.length }}</span>
+          <span class="font-mono text-[length:var(--text-2xs)] text-neutral-fg-2">{{ g.sessions.length }}</span>
           <!-- folder 行操作区：+ 新建（非破坏性，恒渲染）与批量删除（两段式确认）。
                容器 ml-auto 右贴 + hover 显隐；[review MF-2] 删除按钮仅当组内可见数 = 该 cwd 全量数时渲染：
                removeByCwd 是 cwd 全量删除（项目无关），项目过滤隐藏了部分 session 时点删除会误删
