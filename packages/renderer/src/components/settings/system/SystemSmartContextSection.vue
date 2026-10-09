@@ -1,18 +1,22 @@
 <template>
+  <!-- [w2] demo 对照：SystemSection.vue「智能上下文压缩」卡——阈值行 = UiInput w72 ×3 +
+       neutral-mid「/」分隔 + srow-desc「K」；排除 chips = mono t-note + dashed border-strong
+       999px 圆角 + padding 2px 8px + 24px 命中区负 margin 移除钮；添加钮 = btn ghost（plus 12px）。
+       real 的添加走 Select 下拉（功能结构，demo 为 mock 逐个添加），形态对齐 ghost。 -->
   <GroupCard :title="t('settings.system.smartContextTitle')">
-    <div class="px-2.5 pt-1 pb-2">
+    <div class="px-[10px] pt-[4px] pb-[8px]">
       <!-- RD-4#8：读配置失败常驻提示（默认值非已存值）+ 重试；控件禁用直到重拉成功 -->
       <div
         v-if="loadError"
         data-testid="smart-context-load-error"
-        class="mb-2 flex items-center gap-2 rounded-md border border-warn/40 bg-warn-soft px-3 py-1.5 text-[11px] text-warn"
+        class="mb-2 flex items-center gap-2 rounded-md border border-warn/40 bg-warn-soft px-3 py-1.5 text-[length:var(--text-2xs)] text-warn"
       >
         <AlertTriangle class="size-3.5 shrink-0" />
         <span>{{ t('settings.system.loadErrorHint') }}</span>
         <Button
           variant="ghost"
           size="sm"
-          class="h-5 px-1.5 text-[11px] text-accent"
+          class="h-5 px-1.5 text-[length:var(--text-2xs)] text-accent"
           data-testid="smart-context-load-retry"
           @click="loadConfig"
         >{{ t('settings.system.loadErrorRetry') }}</Button>
@@ -31,7 +35,7 @@
           :disabled="!enabled || compactModelBusy || loadError"
           @update:model-value="onCompactModelChange"
         >
-          <SelectTrigger class="h-8 w-[200px] px-2 text-xs" data-testid="setting-smart-context-model">
+          <SelectTrigger class="w-[200px]" data-testid="setting-smart-context-model">
             <SelectValue :placeholder="t('settings.system.smartContextModelFollow')" />
           </SelectTrigger>
           <SelectContent>
@@ -51,7 +55,7 @@
       </SettingRow>
       <SettingRow :label="t('settings.system.smartContextThresholdLabel')" :desc="t('settings.system.smartContextThresholdDesc')">
         <template v-for="(_tk, i) in thresholdsK" :key="i">
-          <span v-if="i > 0" class="text-neutral-faint text-xs">/</span>
+          <span v-if="i > 0" class="text-neutral-mid">/</span>
           <Input
             :data-testid="`setting-smart-context-threshold-${i + 1}`"
             v-model.number="thresholdsK[i]"
@@ -59,28 +63,29 @@
             :min="1"
             :step="1"
             :aria-label="`${t('settings.system.smartContextThresholdLabel')} ${i + 1}`"
-            class="h-8 w-[72px] px-2 text-right font-mono text-xs"
+            class="w-[72px]"
             :disabled="!enabled || thresholdsBusy || loadError"
             @change="onThresholdsSave"
           />
-          <span class="text-neutral-dim font-mono text-xs">K</span>
+          <span class="text-[length:var(--text-sm)] text-neutral-fg-2">K</span>
         </template>
       </SettingRow>
       <SettingRow :label="t('settings.system.smartContextExcludedLabel')" :desc="t('settings.system.smartContextExcludedDesc')">
-        <div data-testid="setting-smart-context-excluded" class="flex max-w-[320px] flex-wrap items-center justify-end gap-1.5">
+        <div data-testid="setting-smart-context-excluded" class="flex flex-wrap items-center gap-[6px]">
           <span
             v-for="model in excludedModels"
             :key="model"
-            class="inline-flex max-w-[200px] items-center gap-1 rounded-sm border border-border bg-surface-2 px-1.5 py-0.5 font-mono text-[11px] text-neutral-mid"
+            class="inline-flex max-w-[200px] items-center gap-1 rounded-full border border-dashed border-border-strong px-[8px] py-[2px] font-mono text-[length:var(--text-2xs)] text-neutral-fg-2"
           >
             <span class="truncate">{{ model }}</span>
+            <!-- 24px 命中区：负 margin 补偿使 chip 视觉尺寸不变（demo 同款） -->
             <Button
               variant="ghost"
-              class="grid size-4 shrink-0 place-items-center rounded-sm p-0 text-neutral-dim hover:text-neutral-fg"
+              class="m-[-7px] grid size-6 flex-none place-items-center rounded-full p-0 text-neutral-dim hover:text-neutral-fg"
               :title="t('settings.system.smartContextExcludedRemove')"
               @click="onExcludedRemove(model)"
             >
-              <X class="size-3" />
+              <X class="size-[10px]" />
             </Button>
           </span>
           <Select
@@ -88,8 +93,8 @@
             :disabled="!enabled || excludedBusy || addableGroups.length === 0 || loadError"
             @update:model-value="onExcludedAdd"
           >
-            <SelectTrigger class="h-6 gap-1 rounded-sm border border-dashed border-border-strong px-2 text-xs text-neutral-dim">
-              <Plus class="size-3" />
+            <SelectTrigger class="h-[32px] w-auto gap-1 border-0 bg-transparent px-[12px] text-[length:var(--text-sm)] text-neutral-mid">
+              <Plus class="size-[12px]" />
               {{ t('settings.system.smartContextExcludedAdd') }}
             </SelectTrigger>
             <SelectContent>

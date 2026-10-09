@@ -1,6 +1,8 @@
 <template>
+  <!-- [w2] demo 对照：SystemSection.vue「Code Mode（脚本模式）」卡（单开关行）。
+       corruption 错误块为 real 功能结构（codemode 设计 D3，demo mock 无对应物），令牌化保留。 -->
   <GroupCard :title="t('settings.system.codemodeTitle')">
-    <div class="px-2.5 pt-1 pb-2" data-testid="codemode-section">
+    <div class="px-[10px] pt-[4px] pb-[8px]" data-testid="codemode-section">
       <SettingRow :label="t('settings.system.codemodeEnable')" :desc="t('settings.system.codemodeDesc')">
         <Switch
           data-testid="codemode-enabled-switch"
@@ -23,7 +25,7 @@
         </p>
         <div class="mt-1.5 flex items-center gap-2">
           <code
-            class="min-w-0 flex-1 truncate rounded-sm bg-surface-2 px-1.5 py-0.5 font-mono text-[11px] text-neutral-mid"
+            class="min-w-0 flex-1 truncate rounded-sm bg-surface-2 px-1.5 py-0.5 font-mono text-[length:var(--text-2xs)] text-neutral-mid"
             data-testid="codemode-corruption-path"
             :title="corruption.filePath"
           >
@@ -32,7 +34,7 @@
           <Button
             variant="ghost"
             size="sm"
-            class="h-6 shrink-0 gap-1 px-2 text-[11px] text-muted hover:text-fg"
+            class="h-6 shrink-0 gap-1 px-2 text-[length:var(--text-2xs)] text-neutral-mid hover:text-neutral-fg"
             data-testid="codemode-copy-path-btn"
             @click="copyCorruptedPath"
           >
@@ -40,12 +42,12 @@
             {{ t('settings.system.codemodeCopyPath') }}
           </Button>
         </div>
-        <p class="mt-1.5 text-[11px] leading-relaxed text-neutral-mid" data-testid="codemode-corruption-guide">
+        <p class="mt-1.5 text-[length:var(--text-2xs)] leading-relaxed text-neutral-mid" data-testid="codemode-corruption-guide">
           {{ t('settings.system.codemodeCorruptionGuide') }}
         </p>
         <p
           v-if="corruption.corruptCopyPath"
-          class="mt-1 text-[11px] leading-relaxed text-warn"
+          class="mt-1 text-[length:var(--text-2xs)] leading-relaxed text-warn"
           data-testid="codemode-corrupt-copy-path"
         >
           {{ t('settings.system.codemodeCorruptCopyHint', { path: corruption.corruptCopyPath }) }}

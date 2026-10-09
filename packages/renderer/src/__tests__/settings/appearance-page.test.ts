@@ -58,7 +58,12 @@ describe('AppearancePage 渲染 gate', () => {
     expect(h1?.textContent).toBe('外观') // settings.menu.appearance
     const html = document.body.innerHTML
     expect(html).not.toContain('settings.menu.appearance') // t() 命中后不应出现 raw key
-    expect(html).toContain('分区字号') // settings.appearance.regionFontTitle
+    // [w2] demo AppearanceSection 权威结构 = 首张无卡头卡 6 行（外观模式/字体大小/三分区/终端），
+    // 原「分区字号」卡头（settings.appearance.regionFontTitle）随重组移除；
+    // 配色主题卡头副标题 = gc-sub（settings.system.themePresetHint）。
+    // 「分区字号」字样在页头描述（appearanceDesc）中仍合法存在，hint 断言用 regionFontHint 独有片段。
+    expect(html).toContain('太极配色 · 即时切换（点击即生效，无需保存）')
+    expect(html).not.toContain('按界面区域独立调整字号') // regionFontHint 不再渲染
     expect(html).toContain('左侧边栏') // settings.appearance.region.sidebar
     expect(html).toContain('对话流')
     expect(html).toContain('侧边抽屉')

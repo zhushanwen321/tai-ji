@@ -1,22 +1,23 @@
 <template>
   <GroupCard :title="t('settings.system.autoRenameSession')">
+    <!-- [w2] 卡体 = demo `.gcard-body.tight`（4px 10px 8px）；SelectTrigger 走 M7b 原语默认。 -->
     <!-- RD-4#8：读配置失败常驻提示（默认值非已存值）+ 重试；控件禁用直到重拉成功 -->
     <div
       v-if="loadError"
       data-testid="auto-rename-load-error"
-      class="flex items-center gap-2 px-2.5 pt-2 pb-1 text-[11px] text-warn"
+      class="flex items-center gap-2 px-[10px] pt-[8px] pb-[4px] text-[length:var(--text-2xs)] text-warn"
     >
       <AlertTriangle class="size-3.5 shrink-0" />
       <span>{{ t('settings.system.loadErrorHint') }}</span>
       <Button
         variant="ghost"
         size="sm"
-        class="h-5 px-1.5 text-[11px] text-accent"
+        class="h-5 px-1.5 text-[length:var(--text-2xs)] text-accent"
         data-testid="auto-rename-load-retry"
         @click="loadConfig"
       >{{ t('settings.system.loadErrorRetry') }}</Button>
     </div>
-    <div class="px-2.5 pt-1 pb-2">
+    <div class="px-[10px] pt-[4px] pb-[8px]">
       <SettingRow :label="t('settings.system.autoRenameSession')" :desc="t('settings.system.autoRenameDesc')">
         <Switch
           data-testid="setting-auto-rename-session"
@@ -31,7 +32,7 @@
           :disabled="renameModeBusy || loadError"
           @update:model-value="onRenameModeChange"
         >
-          <SelectTrigger class="h-8 w-[200px] px-2 text-xs" data-testid="setting-rename-mode">
+          <SelectTrigger class="w-[200px]" data-testid="setting-rename-mode">
             <SelectValue :placeholder="t('settings.system.renameMode')" />
           </SelectTrigger>
           <SelectContent>
@@ -47,7 +48,7 @@
           :disabled="!autoRenameEnabled || renameModelBusy || loadError"
           @update:model-value="onRenameModelChange"
         >
-          <SelectTrigger class="h-8 w-[200px] px-2 text-xs" data-testid="setting-rename-model">
+          <SelectTrigger class="w-[200px]" data-testid="setting-rename-model">
             <SelectValue :placeholder="t('settings.system.renameModelFollow')" />
           </SelectTrigger>
           <SelectContent>
