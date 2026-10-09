@@ -23,8 +23,9 @@
 -->
 <template>
   <div class="flex h-full min-h-0 flex-col" data-testid="drawer-btw-tab">
-    <!-- 头部：线列表标签 + 新建入口 -->
-    <div class="flex shrink-0 items-center gap-1.5 bg-surface-2 px-2.5 py-1.5">
+    <!-- 头部：线列表标签 + 新建入口。对齐 demo 抽屉头行形态：透明底（无 surface-2 色块）、
+         左右内缩 14px、下 6px（与 SubagentTab/WorkflowTab 头行同节奏）。 -->
+    <div class="flex shrink-0 items-center gap-1.5 px-3.5 pb-1.5 pt-2">
       <MessagesSquare class="size-3.5 shrink-0 text-neutral-dim" />
       <span class="min-w-0 truncate text-[length:var(--text-xs)] font-medium text-neutral-fg">
         {{ t('btw.panel.threadsTitle') }}
@@ -69,14 +70,14 @@
       </Button>
     </div>
 
-    <!-- 空态（无线且加载未出错）：图标 + 说明 + Primary 入口（空态三要素） -->
+    <!-- 空态（无线且加载未出错）：图标 + 说明 + Primary 入口（空态三要素；demo .empty 文字形态） -->
     <div
       v-if="!state.loadError && !state.loading && state.threads.length === 0"
       class="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 p-4 text-center"
       data-testid="btw-empty"
     >
-      <MessagesSquare class="size-6 text-neutral-dim opacity-40" />
-      <p class="text-[length:var(--text-xs)] text-neutral-dim opacity-70">{{ t('btw.panel.emptyList') }}</p>
+      <MessagesSquare class="size-6 text-neutral-dim opacity-40" stroke-width="1.6" />
+      <p class="text-[length:var(--text-xs)] text-neutral-mid">{{ t('btw.panel.emptyList') }}</p>
       <Button
         variant="default"
         class="h-7 gap-1 rounded px-3 text-[length:var(--text-xs)]"
@@ -89,15 +90,26 @@
       </Button>
     </div>
 
-    <!-- 有线：chip 行（线列表）+ 当前线会话区 -->
+    <!-- 有线：chip 行（线列表）+ 当前线会话区。
+         chip 行形态对齐 demo .itabs（实例 tab 条共用范式）：p-1 + 底部 hairline 分隔 +
+         可横滚 scrollbar 隐藏；chip = itab 胶囊（border + bg-input + mono 2xs；
+         选中 border-strong + elevated + fg，非激活 hover 提亮）。real 线无关闭动作
+         （demo itab 关闭叉无对应功能），不渲染叉。 -->
     <template v-else-if="state.threads.length > 0">
-      <div class="flex shrink-0 gap-1 overflow-x-auto px-2 py-1.5" data-testid="btw-thread-list">
+      <div
+        class="flex shrink-0 items-center gap-0.5 overflow-x-auto border-b border-hairline px-1 py-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        data-testid="btw-thread-list"
+      >
         <Button
           v-for="thread in state.threads"
           :key="thread.vid"
           variant="ghost"
-          class="h-6 shrink-0 rounded-full px-2 font-mono text-[length:var(--text-2xs)]"
-          :class="thread.vid === selectedVid ? 'bg-surface text-accent' : 'text-neutral-dim hover:text-neutral-fg'"
+          class="h-6 shrink-0 rounded-sm border px-2 font-mono text-[length:var(--text-2xs)]"
+          :class="
+            thread.vid === selectedVid
+              ? 'border-border-strong bg-bg-elevated text-neutral-fg'
+              : 'border-border bg-bg-input text-neutral-mid hover:bg-surface-hover hover:text-neutral-fg'
+          "
           :aria-pressed="thread.vid === selectedVid"
           data-testid="btw-thread-chip"
           :data-vid="thread.vid"

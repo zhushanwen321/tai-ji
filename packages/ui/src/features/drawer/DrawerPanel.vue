@@ -32,20 +32,25 @@
     >
       <!-- L1 tab 栏：drawer 内部子区。三卡化（2026-10-04）后 aside 与 main 同为 surface 卡片，
            「aside 深底 bg 色差分隔」的前提消失，L1 选中态回归 DESIGN §3.4 标准 tab 型
-           （bg-elevated + neutral-fg）；L1 栏无 border-b，与卡片内壁靠留白分隔。 -->
-      <div class="flex items-center gap-1 px-2 py-1.5">
-        <div class="flex flex-1 gap-0.5">
+           （bg-elevated + neutral-fg）。ui-replica M5 对齐 demo（drawers.css .l1bar）：
+           栏底补 hairline 分隔线（E1：顶部固定 chrome 与内容区有边界，与底抽屉实例条同构）；
+           tab 列可横滚 + 12px 双侧渐隐 mask（G5：scrollbar 隐藏时裁切内容唯一的可视提示，
+           窄抽屉下 8 个 tab 可滚动触达不丢失）。 -->
+      <div class="flex items-center gap-1 border-b border-hairline px-2 py-1.5">
+        <div
+          class="flex flex-1 gap-0.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden [mask-image:linear-gradient(90deg,transparent,#000_12px,#000_calc(100%_-_12px),transparent)]"
+        >
           <Button
             v-for="tab in tabs"
             :key="tab.key"
             variant="ghost"
             class="size-[30px] shrink-0 justify-center rounded-sm p-0"
-            :class="activeTab === tab.key ? 'bg-bg-elevated text-neutral-fg' : 'text-neutral-mid'"
+            :class="activeTab === tab.key ? 'bg-bg-elevated text-neutral-fg' : 'text-neutral-mid hover:text-neutral-fg'"
             :title="tab.label"
             :data-testid="`drawer-tab-${tab.key}`"
             @click="emit('set-tab', tab.key)"
           >
-            <component :is="tab.icon" class="size-3.5" />
+            <component :is="tab.icon" class="!size-3.5" stroke-width="1.8" />
           </Button>
         </div>
 
@@ -53,15 +58,16 @@
              可选具名 slot，无默认内容；ui 容器零 chatStore 感知（D3 纯净性）。 -->
         <slot name="header-extra" />
         <!-- 容器级关闭控件统一放右簇最右（2026-10-04 裁决：关闭语义控件恒在容器右缘最右，
-             与底抽屉收起按钮、终端 tab 关闭叉同一侧性）。 -->
+             与底抽屉收起按钮、终端 tab 关闭叉同一侧性）。demo .dclose：28×28 + neutral-mid +
+             12px 图标 stroke 1.8。 -->
         <Button
           variant="ghost"
-          class="size-7 shrink-0 rounded-sm p-0 text-neutral-dim hover:text-neutral-fg"
+          class="size-7 shrink-0 rounded-sm p-0 text-neutral-mid hover:text-neutral-fg"
           :title="t('panel.sideDrawer.close')"
           data-testid="drawer-close"
           @click="emit('close')"
         >
-          <X class="size-3" />
+          <X class="!size-3" stroke-width="1.8" />
         </Button>
       </div>
 
@@ -77,15 +83,16 @@
              tab 切换改瞬时 v-if/v-else（无动画），稳定性优先。
              [P4 s5 drawer-widget-removal] 原 gui→lines→空态三支已删（widget 通道移除），仅剩空态。 -->
         <slot v-if="hasDesktopPanelContent()" />
-        <!-- active tab 无内容面板 → 空态占位 -->
+        <!-- active tab 无内容面板 → 空态占位（demo .empty：图标 24px dim 40% + e1 md 档 mid +
+             e2 sm 档 dim，均无附加透明度） -->
         <div
           v-else
           class="flex h-full flex-col items-center justify-center gap-2 p-4 text-center"
           data-testid="drawer-widget-empty"
         >
-          <component :is="activeTabMeta.icon" class="size-6 text-neutral-dim opacity-40" />
-          <p class="text-[length:var(--text-xs)] text-neutral-dim opacity-70">{{ activeTabMeta.emptyText }}</p>
-          <p class="text-[length:var(--text-2xs)] text-neutral-dim opacity-50">{{ activeTabMeta.emptyHint }}</p>
+          <component :is="activeTabMeta.icon" class="size-6 text-neutral-dim opacity-40" stroke-width="1.6" />
+          <p class="text-[length:var(--text-xs)] text-neutral-mid">{{ activeTabMeta.emptyText }}</p>
+          <p class="text-[length:var(--text-2xs)] text-neutral-dim">{{ activeTabMeta.emptyHint }}</p>
         </div>
       </div>
     </aside>

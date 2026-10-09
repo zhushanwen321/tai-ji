@@ -178,7 +178,8 @@
               data-testid="drawer-unread-badge"
               :title="t('panel.sideDrawer.unreadMessages', { count: unreadCount })"
             >
-              <span class="size-1.5 animate-pulse rounded-full bg-accent-fg" />
+              <!-- demo G6：未读 dot 静态（pulse 语义 = 运行中，不挪给未读态） -->
+              <span class="size-1.5 rounded-full bg-accent-fg" />
               <span class="font-mono text-[10px] text-accent-fg">{{ unreadCount > 9 ? '9+' : unreadCount }}</span>
             </div>
           </template>

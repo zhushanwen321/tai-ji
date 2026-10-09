@@ -18,20 +18,22 @@
 -->
 <template>
   <div class="flex h-full min-h-0 flex-col" data-testid="drawer-subagent-tab">
-    <!-- 空态：未选中 subagent（selectedSubagentId === null） -->
+    <!-- 空态：未选中 subagent（selectedSubagentId === null；demo .empty 文字形态） -->
     <div
       v-if="!selectedSubagentId"
       class="flex h-full flex-col items-center justify-center gap-2 p-4 text-center"
       data-testid="drawer-subagent-empty"
     >
-      <Bot class="size-6 text-neutral-dim opacity-40" />
-      <p class="text-[length:var(--text-xs)] text-neutral-dim opacity-70">{{ t('panel.sideDrawer.noSubagent') }}</p>
-      <p class="text-[length:var(--text-2xs)] text-neutral-dim opacity-50">{{ t('panel.sideDrawer.subagentHint') }}</p>
+      <Bot class="size-6 text-neutral-dim opacity-40" stroke-width="1.6" />
+      <p class="text-[length:var(--text-xs)] text-neutral-mid">{{ t('panel.sideDrawer.noSubagent') }}</p>
+      <p class="text-[length:var(--text-2xs)] text-neutral-dim">{{ t('panel.sideDrawer.subagentHint') }}</p>
     </div>
 
     <template v-else>
-      <!-- 标题栏：差异化层（enteredFrom==='workflow' 显返回按钮；agent·slug + model·thinking 元信息） -->
-      <div class="flex shrink-0 items-center gap-2 bg-surface-2 px-2.5 py-1.5">
+      <!-- 标题栏：差异化层（enteredFrom==='workflow' 显返回按钮；agent·slug + model·thinking 元信息）。
+           对齐 demo .sub-head：透明底（无 surface-2 色块），左右内缩 14px、下 6px
+           （demo panel 12px + sub-head 0 2px 6px 折算）。 -->
+      <div class="flex shrink-0 items-center gap-2 px-3.5 pb-1.5 pt-2">
         <Button
           v-if="enteredFrom === 'workflow'"
           variant="ghost"
@@ -47,7 +49,7 @@
         <span class="min-w-0 truncate font-mono text-xs font-medium text-neutral-fg">
           {{ subagentMeta?.agent ?? 'subagent' }}
         </span>
-        <span v-if="subagentMeta?.slug" class="min-w-0 shrink-0 truncate font-mono text-xs text-neutral-dim">
+        <span v-if="subagentMeta?.slug" class="min-w-0 shrink-0 truncate font-mono text-[length:var(--text-2xs)] text-neutral-dim">
           · {{ subagentMeta.slug }}
         </span>
         <!-- 引擎 badge（U3 D9）：常态引擎名（运行期不换引擎，无回退态） -->
@@ -104,11 +106,18 @@
         </span>
       </div>
 
+      <!-- 只读提示（差异化层：subagent 为 background 任务，无 composer）。
+           对齐 demo .sub-ro：头行下方的纯文字行（3xs 档 mid、无边框无图标），
+           不再是底部 border-t 条。 -->
+      <div class="flex shrink-0 items-center px-3.5 pb-2 text-[length:var(--text-3xs)] text-neutral-mid">
+        <span>{{ t('panel.sideDrawer.subagentReadonly') }}</span>
+      </div>
+
       <!-- 运行中 coarse 提示（U4 D7）：非 pi 引擎 running 任务不支持实时流，如实提示不伪造流。
            pi 任务恒不出现（D5：undefined 缺省映射为 pi）。 -->
       <div
         v-if="coarseHintVisible"
-        class="flex shrink-0 items-center gap-1.5 border-b border-hairline bg-surface-2 px-3 py-1.5 text-[10px] text-neutral-dim"
+        class="flex shrink-0 items-center gap-1.5 border-b border-hairline bg-surface-2 px-3.5 py-1.5 text-[10px] text-neutral-dim"
         data-testid="subagent-coarse-hint"
       >
         <Clock class="size-3 shrink-0 opacity-70" />
@@ -145,12 +154,6 @@
         :session-id="selectedSubagentId"
         :main-session-id="panelStore.focusedSessionId ?? undefined"
       />
-
-      <!-- 底部只读提示条（差异化层：subagent 为 background 任务，无 composer） -->
-      <div class="flex shrink-0 items-center gap-1.5 border-t border-hairline px-3 py-1.5 text-[length:var(--text-3xs)] text-neutral-dim">
-        <Lock class="size-3 shrink-0 opacity-70" />
-        <span>{{ t('panel.sideDrawer.subagentReadonly') }}</span>
-      </div>
     </template>
   </div>
 </template>
@@ -158,7 +161,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { AlertCircle, Bot, ChevronDown, ChevronLeft, Clock, Lock } from '@lucide/vue'
+import { AlertCircle, Bot, ChevronDown, ChevronLeft, Clock } from '@lucide/vue'
 import { Button } from '@taiji/ui'
 import { useSubagentSelection, openWorkflowInDrawer } from '@taiji/core/domain/drawer'
 import { usePanelStore } from '@/stores/panel'

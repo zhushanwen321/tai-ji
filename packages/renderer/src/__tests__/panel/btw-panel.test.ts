@@ -156,7 +156,7 @@ describe('BtwPanel 首屏冒烟与线列表（观察者 + 使用者）', () => {
     expect(wrapper.find('[data-testid="btw-fork-pill"]').exists()).toBe(false)
   })
 
-  it('点击 chip 切线：会话区跟随 + 选中态样式（列表项型 bg-surface+accent）+ 分区同步', async () => {
+  it('点击 chip 切线：会话区跟随 + 选中态样式（itab 胶囊型 border-strong+elevated）+ 分区同步', async () => {
     apiMock.list.mockResolvedValue([{ vid: 'btw:pi-1' }, { vid: 'btw:pi-2' }])
     const wrapper = mountPanel(MAIN_A)
     await settle(wrapper)
@@ -169,8 +169,10 @@ describe('BtwPanel 首屏冒烟与线列表（观察者 + 使用者）', () => {
     expect(wrapper.find('[data-testid="btw-stream"]').attributes('session-id')).toBe('btw:pi-1')
     expect(wrapper.find('[data-testid="btw-composer"]').attributes('session-id')).toBe('btw:pi-1')
     expect(chip1.attributes('aria-pressed')).toBe('true')
-    expect(chip1.classes()).toContain('bg-surface')
-    expect(chip1.classes()).toContain('text-accent')
+    // ui-replica M5：chip 形态对齐 demo .itab 胶囊（选中 border-strong + elevated 底 + fg）
+    expect(chip1.classes()).toContain('border-border-strong')
+    expect(chip1.classes()).toContain('bg-bg-elevated')
+    expect(chip1.classes()).toContain('text-neutral-fg')
     expect(useBtwSelection().selectedBtwVid.value).toBe('btw:pi-1')
   })
 })

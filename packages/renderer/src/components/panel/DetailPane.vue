@@ -19,12 +19,16 @@
     <!-- 实例层 tab 条（§6.3：文档式，做在 detail 面板内顶部；类型层容器 tab 在 DrawerPanel）。
          点击切换（keep-alive：实例内容/模式态/滚动锚点原样保持）；× 关闭（激活者关闭时
          激活右邻/左邻）；不设打开上限（§6.3，内存锚点 §11-9）。
-         tab 范式随实例 tab 条统一（三卡化 2026-10-04）：非激活 bg-input+border、激活
-         bg-elevated+border-strong；关闭叉常驻命中 20px（hover 染 danger）。 -->
+         tab 范式随实例 tab 条统一（三卡化 2026-10-04）+ ui-replica M5 对齐 demo .itab：
+         非激活 bg-input+border、激活 bg-elevated+border-strong；非激活 hover 提亮（surface-hover 底）；
+         关闭叉常驻命中 20px（hover 染 danger）、r-xs 圆角、11px 叉。
+         键盘可达（demo D2）：div[role=tab] 不能依赖 button 原生 Space——tabindex + Enter/Space
+         双支持与 click 同通道。 -->
     <div
       v-if="tabs.length > 0"
-      class="flex shrink-0 items-center gap-0.5 overflow-x-auto border-b border-hairline px-1 py-1"
+      class="flex shrink-0 items-center gap-0.5 overflow-x-auto border-b border-hairline px-1 py-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       data-testid="detail-tab-strip"
+      role="tablist"
     >
       <div
         v-for="tab in tabs"
@@ -32,30 +36,37 @@
         data-testid="detail-tab"
         :data-path="tab.path"
         :data-active="tab.path === activePath ? 'true' : 'false'"
-        class="flex shrink-0 cursor-pointer select-none items-center gap-1 rounded-sm border px-1.5 py-0.5 font-mono text-[length:var(--text-2xs)] transition-colors"
+        role="tab"
+        tabindex="0"
+        :aria-selected="tab.path === activePath"
+        class="flex shrink-0 cursor-pointer select-none items-center gap-0.5 rounded-sm border py-0.5 pl-1.5 pr-[3px] font-mono text-[length:var(--text-2xs)] transition-colors"
         :class="
           tab.path === activePath
             ? 'border-border-strong bg-bg-elevated text-neutral-fg'
-            : 'border-border bg-bg-input text-neutral-mid hover:bg-surface-2 hover:text-neutral-fg'
+            : 'border-border bg-bg-input text-neutral-mid hover:bg-surface-hover hover:text-neutral-fg'
         "
         :title="tab.path"
         @click="activateTab(tab.path)"
+        @keydown.enter.prevent="activateTab(tab.path)"
+        @keydown.space.prevent="activateTab(tab.path)"
       >
         <span class="max-w-32 truncate">{{ tabName(tab.path) }}</span>
         <Button
           variant="ghost"
           data-testid="detail-tab-close"
-          class="size-5 shrink-0 rounded-sm p-0 text-neutral-dim hover:bg-danger-soft hover:text-danger"
+          class="size-5 shrink-0 rounded-[var(--radius-xs)] p-0 text-neutral-dim hover:bg-danger-soft hover:text-danger"
           :title="t('panel.sideDrawer.close')"
           @click.stop="closeTab(tab.path)"
         >
-          <X class="size-3" />
+          <X class="!size-[11px]" />
         </Button>
       </div>
     </div>
 
-    <!-- header：文件名（hover 显绝对路径 + 复制文件名）+ 复制绝对路径按钮 + view toggle -->
-    <div class="flex items-center gap-2 border-b border-hairline px-2 py-1.5">
+    <!-- header：文件名（hover 显绝对路径 + 复制文件名）+ 复制绝对路径按钮 + view toggle。
+         对齐 demo .fhead：无底部分隔线（与 tab 条靠 spacing 分段），左右内缩 14px
+         （demo panel 12px + fhead 2px 折算），上 8px 下 8px。 -->
+    <div class="flex items-center gap-2 px-3.5 pb-2 pt-2">
       <FileText class="size-3.5 shrink-0 text-neutral-dim" />
       <HoverCard :open-delay="0">
         <HoverCardTrigger as-child>
@@ -119,19 +130,21 @@
       >
         <Quote class="size-3.5 text-neutral-dim" />
       </Button>
-      <!-- view toggle：有 git 改动时可切换 diff/preview -->
-      <div v-if="state.hasGitChange" class="flex gap-0.5 rounded-md bg-bg-input p-0.5" data-testid="detail-view-toggle">
+      <!-- view toggle：有 git 改动时可切换 diff/preview。
+           对齐 demo .fview：无容器底（裸按钮组），按钮 10px 横向 padding + 2xs 字，
+           选中 = surface-hover 底 + fg（demo .fview button.on = --hover 底）。 -->
+      <div v-if="state.hasGitChange" class="flex gap-0.5" data-testid="detail-view-toggle">
         <Button
           variant="ghost"
-          class="h-6 rounded-sm px-1.5 text-[length:var(--text-3xs)]"
-          :class="state.viewMode === 'diff' ? 'bg-bg-elevated text-neutral-fg' : 'text-neutral-mid'"
+          class="h-6 rounded-sm px-2.5 text-[length:var(--text-2xs)]"
+          :class="state.viewMode === 'diff' ? 'bg-surface-hover text-neutral-fg' : 'text-neutral-mid'"
           :title="t('panel.detail.showDiff')"
           @click="onToggleView('diff')"
         >{{ t('panel.detail.tabDiff') }}</Button>
         <Button
           variant="ghost"
-          class="h-6 rounded-sm px-1.5 text-[length:var(--text-3xs)]"
-          :class="state.viewMode === 'preview' ? 'bg-bg-elevated text-neutral-fg' : 'text-neutral-mid'"
+          class="h-6 rounded-sm px-2.5 text-[length:var(--text-2xs)]"
+          :class="state.viewMode === 'preview' ? 'bg-surface-hover text-neutral-fg' : 'text-neutral-mid'"
           :title="t('panel.detail.showPreview')"
           @click="onToggleView('preview')"
         >{{ t('panel.detail.preview') }}</Button>
@@ -160,14 +173,14 @@
       <p class="font-mono text-[length:var(--text-3xs)] text-neutral-dim opacity-70">{{ state.error }}</p>
     </div>
 
-    <!-- 空态（无选中文件） -->
+    <!-- 空态（无选中文件；demo .empty e1：md 档 mid 字，无附加透明度） -->
     <div
       v-else-if="state.status === 'idle' || !state.path"
       class="flex flex-1 flex-col items-center justify-center gap-2 p-4 text-center"
       data-testid="detail-empty"
     >
-      <FileText class="size-6 text-neutral-dim opacity-40" />
-      <p class="text-[length:var(--text-2xs)] text-neutral-dim opacity-55">{{ t('panel.detail.clickFilePreview') }}</p>
+      <FileText class="size-6 text-neutral-dim opacity-40" stroke-width="1.6" />
+      <p class="text-[length:var(--text-xs)] text-neutral-mid">{{ t('panel.detail.clickFilePreview') }}</p>
     </div>
 
     <!-- 二进制文件占位（AC-6.5/T6.6：binary=true） -->
