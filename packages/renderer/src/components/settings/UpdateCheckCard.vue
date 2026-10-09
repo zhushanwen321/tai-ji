@@ -19,9 +19,10 @@
   - unsupported  前往下载（备用页）
 -->
 <template>
-  <!-- 状态行 = demo .srow（min-h 44 / py-2.5 / border-t hairline / gap-4；px-4 对齐 UpdatePage
-       卡内行内容左缘 16px，与 demo 语境 gcard-body(10px)+srow(6px) 左缘等价） -->
-  <div class="flex min-h-[44px] items-center justify-between gap-4 border-t border-hairline px-4 py-2.5">
+  <!-- 状态行 = demo .srow（min-h 44 / py-2.5 / border-t hairline / gap-4；px-[6px] 对齐
+       UpdatePage tight 卡体（10px）+ 行内边距（6px）= 16px 内容左缘，与 demo 语境
+       gcard-body tight(10px)+srow(6px) 等价——[w3] 卡体切 GroupCard tight 后 px-4 改 px-[6px]） -->
+  <div class="flex min-h-[44px] items-center justify-between gap-4 border-t border-hairline px-[6px] py-2.5">
       <!-- 状态文案（左） -->
       <div class="flex min-w-0 items-center gap-1.5">
         <!-- idle / checking：无左侧状态文案（当前版本已由自动更新卡内版本行展示），仅保留右侧按钮 -->
@@ -161,7 +162,7 @@
       class="border-t border-hairline"
       data-testid="settings-update-manual-channel"
     >
-      <div class="flex items-center px-4 py-2">
+      <div class="flex items-center px-[6px] py-2">
         <CollapsibleTrigger as-child>
           <Button
             variant="ghost"
@@ -177,7 +178,7 @@
           </Button>
         </CollapsibleTrigger>
       </div>
-      <CollapsibleContent class="px-4 pb-3">
+      <CollapsibleContent class="px-[6px] pb-3">
         <p class="text-[length:var(--text-sm)] leading-relaxed text-[color:var(--neutral-fg-2)]" data-testid="settings-update-manual-hint">
           {{ t('settings.system.manualChannelHint') }}
         </p>

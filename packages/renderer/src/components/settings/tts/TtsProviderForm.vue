@@ -12,19 +12,16 @@
   清除/带入只发事件；聚焦遇掩码态全选便于整体替换，失焦空值回填脱敏展示。
 -->
 <template>
-  <div class="flex flex-col gap-3" :data-testid="`tts-form-${providerId}`">
-    <!-- ── 凭据 ── -->
+  <div class="flex flex-col" :data-testid="`tts-form-${providerId}`">
+    <!-- ── 凭据（[w3] 卡体 tight + SettingRow 行化，demo TtsSection 同款行范式）── -->
     <GroupCard>
       <template #head>
         <div class="gc-head-text">
           <h3 class="gc-title">{{ t('settings.tts.credentialsSection') }}</h3>
         </div>
       </template>
-      <div class="flex flex-col gap-4 px-4 py-3">
-        <div class="flex flex-col gap-1.5">
-          <Label class="text-[11px] text-neutral-dim" :for="`tts-apikey-${providerId}`">
-            {{ t('settings.tts.apiKeyLabel') }}
-          </Label>
+      <div class="px-[10px] pb-[8px] pt-[4px]">
+        <SettingRow :label="t('settings.tts.apiKeyLabel')">
           <div class="flex items-center gap-2">
             <Input
               :id="`tts-apikey-${providerId}`"
@@ -34,60 +31,57 @@
               autocomplete="off"
               :placeholder="hasApiKey ? t('settings.tts.apiKeySavedPlaceholder') : t('settings.tts.apiKeyPlaceholder')"
               :disabled="disabled"
-              class="h-8 flex-1 font-mono text-[12px]"
+              class="w-[320px] font-mono"
               @focus="onKeyFocus"
               @blur="emit('keyBlur')"
             />
             <Button
               v-if="hasApiKey"
               variant="ghost"
-              size="dense"
               :data-testid="`tts-apikey-clear-${providerId}`"
               :title="t('settings.tts.clearKeyTitle')"
               :aria-label="t('settings.tts.clearKey')"
               :aria-pressed="keyOp === 'clear'"
-              :class="keyOp === 'clear' ? '!border-accent !bg-surface' : ''"
+              class="h-[32px] px-[12px] text-[length:var(--text-sm)]"
+              :class="keyOp === 'clear' ? '!bg-surface !text-neutral-fg' : ''"
               :disabled="disabled"
               @click="emit('clearKey')"
             >
               {{ t('settings.tts.clearKey') }}
             </Button>
           </div>
-          <!-- armed 待生效提示（点击动作按钮后可见，保存后消失） -->
-          <p
-            v-if="keyOp"
-            :data-testid="`tts-keyop-pending-${providerId}`"
-            class="text-[11px] text-neutral-mid"
+        </SettingRow>
+        <!-- armed 待生效提示（点击动作按钮后可见，保存后消失） -->
+        <p
+          v-if="keyOp"
+          :data-testid="`tts-keyop-pending-${providerId}`"
+          class="px-[6px] pb-[4px] text-[length:var(--text-2xs)] text-neutral-mid"
+        >
+          {{ keyOp === 'clear' ? t('settings.tts.keyOpPendingClear') : t('settings.tts.keyOpPendingBring') }}
+        </p>
+        <!-- Key 联动提示（D4；providerKeyAvailable 由 runtime 判定，StepFun 恒 false 不渲染） -->
+        <div
+          v-if="providerKeyAvailable"
+          :data-testid="`tts-key-link-hint-${providerId}`"
+          class="mx-[6px] mb-[8px] flex items-center gap-2 rounded-md bg-surface-2 px-2.5 py-1.5 text-[length:var(--text-xs)] text-neutral-mid"
+        >
+          <KeyRound class="size-[14px] shrink-0" aria-hidden="true" />
+          <span class="flex-1">{{ t('settings.tts.providerKeyLinked') }}</span>
+          <Button
+            variant="secondary"
+            :data-testid="`tts-key-bring-${providerId}`"
+            :aria-pressed="keyOp === 'bring'"
+            class="h-[32px] px-[12px] text-[length:var(--text-sm)]"
+            :class="keyOp === 'bring' ? '!border-accent !bg-surface' : ''"
+            :disabled="disabled"
+            @click="emit('bringKey')"
           >
-            {{ keyOp === 'clear' ? t('settings.tts.keyOpPendingClear') : t('settings.tts.keyOpPendingBring') }}
-          </p>
-          <!-- Key 联动提示（D4；providerKeyAvailable 由 runtime 判定，StepFun 恒 false 不渲染） -->
-          <div
-            v-if="providerKeyAvailable"
-            :data-testid="`tts-key-link-hint-${providerId}`"
-            class="flex items-center gap-2 rounded-md bg-surface-2 px-2.5 py-1.5 text-[12px] text-neutral-mid"
-          >
-            <KeyRound class="size-[14px] shrink-0" aria-hidden="true" />
-            <span class="flex-1">{{ t('settings.tts.providerKeyLinked') }}</span>
-            <Button
-              variant="secondary"
-              size="dense"
-              :data-testid="`tts-key-bring-${providerId}`"
-              :aria-pressed="keyOp === 'bring'"
-              :class="keyOp === 'bring' ? '!border-accent !bg-surface' : ''"
-              :disabled="disabled"
-              @click="emit('bringKey')"
-            >
-              {{ t('settings.tts.bringFromProvider') }}
-            </Button>
-          </div>
+            {{ t('settings.tts.bringFromProvider') }}
+          </Button>
         </div>
-        <div class="flex flex-col gap-1.5">
-          <Label class="text-[11px] text-neutral-dim" :for="`tts-baseurl-${providerId}`">
-            {{ t('settings.tts.baseUrlLabel') }}
-          </Label>
+        <SettingRow :label="t('settings.tts.baseUrlLabel')">
           <Select v-model="state.baseUrl" :disabled="disabled">
-            <SelectTrigger :id="`tts-baseurl-${providerId}`" :data-testid="`tts-baseurl-select-${providerId}`" class="h-8 w-[320px] text-[12px]">
+            <SelectTrigger :id="`tts-baseurl-${providerId}`" :data-testid="`tts-baseurl-select-${providerId}`" class="w-[320px]">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -96,73 +90,77 @@
               </SelectItem>
             </SelectContent>
           </Select>
-        </div>
+        </SettingRow>
       </div>
     </GroupCard>
 
-    <!-- ── 基础（模型/音色恒渲染；语速/音量/音调按值域 null 置灰）── -->
+    <!-- ── 基础（模型/音色恒渲染；语速/音量/音调按值域 null 置灰：desc 注记 + 「—」占位）── -->
     <GroupCard>
       <template #head>
         <div class="gc-head-text">
           <h3 class="gc-title">{{ t('settings.tts.basicSection') }}</h3>
         </div>
       </template>
-      <div class="flex flex-col gap-4 px-4 py-3">
-        <div class="flex flex-col gap-1.5">
-          <Label class="text-[11px] text-neutral-dim" :for="`tts-model-${providerId}`">{{ t('settings.tts.modelLabel') }}</Label>
+      <div class="px-[10px] pb-[8px] pt-[4px]">
+        <SettingRow :label="t('settings.tts.modelLabel')">
           <Select v-model="state.model" :disabled="disabled">
-            <SelectTrigger :id="`tts-model-${providerId}`" :data-testid="`tts-model-select-${providerId}`" class="h-8 w-[320px] text-[12px]">
+            <SelectTrigger :id="`tts-model-${providerId}`" :data-testid="`tts-model-select-${providerId}`" class="w-[320px]">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
               <SelectItem v-for="opt in form.models" :key="opt.id" :value="opt.id">{{ opt.label }}</SelectItem>
             </SelectContent>
           </Select>
-        </div>
-        <div class="flex flex-col gap-1.5">
-          <Label class="text-[11px] text-neutral-dim" :for="`tts-voice-${providerId}`">{{ t('settings.tts.voiceLabel') }}</Label>
+        </SettingRow>
+        <SettingRow :label="t('settings.tts.voiceLabel')">
           <Select v-model="state.voice" :disabled="disabled">
-            <SelectTrigger :id="`tts-voice-${providerId}`" :data-testid="`tts-voice-select-${providerId}`" class="h-8 w-[320px] text-[12px]">
+            <SelectTrigger :id="`tts-voice-${providerId}`" :data-testid="`tts-voice-select-${providerId}`" class="w-[320px]">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
               <SelectItem v-for="opt in form.voices" :key="opt.id" :value="opt.id">{{ opt.label }}</SelectItem>
             </SelectContent>
           </Select>
-        </div>
-        <div class="flex flex-col gap-1.5">
-          <Label class="text-[11px] text-neutral-dim" :for="`tts-speed-${providerId}`">{{ t('settings.tts.speedLabel') }}</Label>
+        </SettingRow>
+        <SettingRow
+          :label="t('settings.tts.speedLabel')"
+          :desc="speedOpts.length === 0 ? t('settings.tts.notSupportedHint') : undefined"
+        >
           <Select v-model="speedModel" :disabled="disabled || speedOpts.length === 0">
-            <SelectTrigger :id="`tts-speed-${providerId}`" :data-testid="`tts-speed-select-${providerId}`" class="h-8 w-[160px] text-[12px]">
-              <SelectValue :placeholder="speedOpts.length > 0 ? undefined : t('settings.tts.notSupportedHint')" />
+            <SelectTrigger :id="`tts-speed-${providerId}`" :data-testid="`tts-speed-select-${providerId}`" class="w-[160px]">
+              <SelectValue :placeholder="speedOpts.length > 0 ? undefined : '—'" />
             </SelectTrigger>
             <SelectContent>
               <SelectItem v-for="opt in speedOpts" :key="opt.id" :value="opt.id">{{ opt.label }}</SelectItem>
             </SelectContent>
           </Select>
-        </div>
-        <div class="flex flex-col gap-1.5">
-          <Label class="text-[11px] text-neutral-dim" :for="`tts-volume-${providerId}`">{{ t('settings.tts.volumeLabel') }}</Label>
+        </SettingRow>
+        <SettingRow
+          :label="t('settings.tts.volumeLabel')"
+          :desc="volumeOpts.length === 0 ? t('settings.tts.notSupportedHint') : undefined"
+        >
           <Select v-model="volumeModel" :disabled="disabled || volumeOpts.length === 0">
-            <SelectTrigger :id="`tts-volume-${providerId}`" :data-testid="`tts-volume-select-${providerId}`" class="h-8 w-[160px] text-[12px]">
-              <SelectValue :placeholder="volumeOpts.length > 0 ? undefined : t('settings.tts.notSupportedHint')" />
+            <SelectTrigger :id="`tts-volume-${providerId}`" :data-testid="`tts-volume-select-${providerId}`" class="w-[160px]">
+              <SelectValue :placeholder="volumeOpts.length > 0 ? undefined : '—'" />
             </SelectTrigger>
             <SelectContent>
               <SelectItem v-for="opt in volumeOpts" :key="opt.id" :value="opt.id">{{ opt.label }}</SelectItem>
             </SelectContent>
           </Select>
-        </div>
-        <div class="flex flex-col gap-1.5">
-          <Label class="text-[11px] text-neutral-dim" :for="`tts-pitch-${providerId}`">{{ t('settings.tts.pitchLabel') }}</Label>
+        </SettingRow>
+        <SettingRow
+          :label="t('settings.tts.pitchLabel')"
+          :desc="pitchOpts.length === 0 ? t('settings.tts.notSupportedHint') : undefined"
+        >
           <Select v-model="pitchModel" :disabled="disabled || pitchOpts.length === 0">
-            <SelectTrigger :id="`tts-pitch-${providerId}`" :data-testid="`tts-pitch-select-${providerId}`" class="h-8 w-[160px] text-[12px]">
-              <SelectValue :placeholder="pitchOpts.length > 0 ? undefined : t('settings.tts.notSupportedHint')" />
+            <SelectTrigger :id="`tts-pitch-${providerId}`" :data-testid="`tts-pitch-select-${providerId}`" class="w-[160px]">
+              <SelectValue :placeholder="pitchOpts.length > 0 ? undefined : '—'" />
             </SelectTrigger>
             <SelectContent>
               <SelectItem v-for="opt in pitchOpts" :key="opt.id" :value="opt.id">{{ opt.label }}</SelectItem>
             </SelectContent>
           </Select>
-        </div>
+        </SettingRow>
       </div>
     </GroupCard>
 
@@ -173,29 +171,27 @@
           <h3 class="gc-title">{{ t('settings.tts.audioSection') }}</h3>
         </div>
       </template>
-      <div class="flex flex-col gap-4 px-4 py-3">
-        <div v-if="sampleRateOpts.length > 0" class="flex flex-col gap-1.5">
-          <Label class="text-[11px] text-neutral-dim" :for="`tts-samplerate-${providerId}`">{{ t('settings.tts.sampleRateLabel') }}</Label>
+      <div class="px-[10px] pb-[8px] pt-[4px]">
+        <SettingRow v-if="sampleRateOpts.length > 0" :label="t('settings.tts.sampleRateLabel')">
           <Select v-model="sampleRateModel" :disabled="disabled">
-            <SelectTrigger :id="`tts-samplerate-${providerId}`" :data-testid="`tts-samplerate-select-${providerId}`" class="h-8 w-[160px] text-[12px]">
+            <SelectTrigger :id="`tts-samplerate-${providerId}`" :data-testid="`tts-samplerate-select-${providerId}`" class="w-[160px]">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
               <SelectItem v-for="opt in sampleRateOpts" :key="opt.id" :value="opt.id">{{ opt.label }}</SelectItem>
             </SelectContent>
           </Select>
-        </div>
-        <div v-if="form.channels.length > 0" class="flex flex-col gap-1.5">
-          <Label class="text-[11px] text-neutral-dim" :for="`tts-channel-${providerId}`">{{ t('settings.tts.channelLabel') }}</Label>
+        </SettingRow>
+        <SettingRow v-if="form.channels.length > 0" :label="t('settings.tts.channelLabel')">
           <Select v-model="channelModel" :disabled="disabled">
-            <SelectTrigger :id="`tts-channel-${providerId}`" :data-testid="`tts-channel-select-${providerId}`" class="h-8 w-[160px] text-[12px]">
+            <SelectTrigger :id="`tts-channel-${providerId}`" :data-testid="`tts-channel-select-${providerId}`" class="w-[160px]">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
               <SelectItem v-for="opt in form.channels" :key="opt.id" :value="opt.id">{{ opt.label }}</SelectItem>
             </SelectContent>
           </Select>
-        </div>
+        </SettingRow>
       </div>
     </GroupCard>
 
@@ -206,10 +202,11 @@
           <h3 class="gc-title">{{ t('settings.tts.styleSection') }}</h3>
         </div>
       </template>
-      <div class="flex flex-col gap-4 px-4 py-3">
-        <div v-if="form.capabilities.supportsInstructions" class="flex flex-col gap-1.5">
+      <div class="px-[10px] pb-[8px] pt-[4px]">
+        <!-- 风格指令 = demo .vrow 纵排（标签在上 + 全宽 textarea，W2 TerminalPage vrow 同款） -->
+        <div v-if="form.capabilities.supportsInstructions" class="flex flex-col gap-[6px] border-t border-hairline py-[10px] first:border-t-0">
           <!-- 指令置灰只对 perModel 显式 null 条目生效；无条目（undefined）= 默认支持、无上限不置灰 -->
-          <Label class="text-[11px] text-neutral-dim" :for="`tts-instructions-${providerId}`">{{ t('settings.tts.instructionsLabel') }}</Label>
+          <Label class="text-[length:var(--text-2xs)] font-normal text-[color:var(--neutral-fg-2)]" :for="`tts-instructions-${providerId}`">{{ t('settings.tts.instructionsLabel') }}</Label>
           <Textarea
             :id="`tts-instructions-${providerId}`"
             v-model="state.instructions"
@@ -217,13 +214,12 @@
             :placeholder="t('settings.tts.instructionsPlaceholder')"
             :maxlength="instructionMaxChars ?? undefined"
             :disabled="disabled || instructionMaxChars === null"
-            class="min-h-[64px] text-[12px]"
+            class="min-h-[64px]"
           />
         </div>
-        <div v-if="form.emotions.length > 0" class="flex flex-col gap-1.5">
-          <Label class="text-[11px] text-neutral-dim" :for="`tts-emotion-${providerId}`">{{ t('settings.tts.emotionLabel') }}</Label>
+        <SettingRow v-if="form.emotions.length > 0" :label="t('settings.tts.emotionLabel')">
           <Select v-model="emotionModel" :disabled="disabled">
-            <SelectTrigger :id="`tts-emotion-${providerId}`" :data-testid="`tts-emotion-select-${providerId}`" class="h-8 w-[220px] text-[12px]">
+            <SelectTrigger :id="`tts-emotion-${providerId}`" :data-testid="`tts-emotion-select-${providerId}`" class="w-[220px]">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -231,24 +227,22 @@
               <SelectItem v-for="opt in form.emotions" :key="opt.id" :value="opt.id">{{ opt.label }}</SelectItem>
             </SelectContent>
           </Select>
-        </div>
+        </SettingRow>
         <!-- 音色标签（StepFun voice_label；perModel 表非空才携带，选中模型不支持则置灰） -->
-        <div v-if="showVoiceLabel" class="flex flex-col gap-1.5">
-          <Label class="text-[11px] text-neutral-dim" :for="`tts-voicetag-${providerId}`">{{ t('settings.tts.voiceTagLabel') }}</Label>
+        <SettingRow v-if="showVoiceLabel" :label="t('settings.tts.voiceTagLabel')">
           <div class="flex items-center gap-2">
             <Select :model-value="NONE_OPTION_ID" :disabled="true">
-              <SelectTrigger :id="`tts-voicetag-${providerId}`" :data-testid="`tts-voicetag-select-${providerId}`" class="h-8 w-[220px] text-[12px]">
+              <SelectTrigger :id="`tts-voicetag-${providerId}`" :data-testid="`tts-voicetag-select-${providerId}`" class="w-[220px]">
                 <SelectValue :placeholder="t('settings.tts.voiceTagNone')" />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem :value="NONE_OPTION_ID">{{ t('settings.tts.voiceTagNone') }}</SelectItem>
               </SelectContent>
             </Select>
-            <span v-if="!voiceLabelSupported" class="text-[12px] text-neutral-dim">{{ t('settings.tts.voiceTagDisabledHint') }}</span>
+            <span v-if="!voiceLabelSupported" class="text-[length:var(--text-xs)] text-[var(--neutral-dim)]">{{ t('settings.tts.voiceTagDisabledHint') }}</span>
           </div>
-        </div>
-        <div v-for="id in styleToggles" :key="id" class="flex items-center justify-between">
-          <Label class="text-[11px] text-neutral-dim" :for="`tts-toggle-${providerId}-${id}`">{{ t(`settings.tts.toggle.${id}`) }}</Label>
+        </SettingRow>
+        <SettingRow v-for="id in styleToggles" :key="id" :label="t(`settings.tts.toggle.${id}`)">
           <Switch
             :id="`tts-toggle-${providerId}-${id}`"
             :data-testid="`tts-toggle-${providerId}-${id}`"
@@ -256,11 +250,10 @@
             :disabled="disabled"
             @update:model-value="state.toggles[id] = $event === true"
           />
-        </div>
-        <div v-if="form.languages.length > 0" class="flex flex-col gap-1.5">
-          <Label class="text-[11px] text-neutral-dim" :for="`tts-lang-${providerId}`">{{ t('settings.tts.languageBoostLabel') }}</Label>
+        </SettingRow>
+        <SettingRow v-if="form.languages.length > 0" :label="t('settings.tts.languageBoostLabel')">
           <Select v-model="languageModel" :disabled="disabled">
-            <SelectTrigger :id="`tts-lang-${providerId}`" :data-testid="`tts-lang-select-${providerId}`" class="h-8 w-[220px] text-[12px]">
+            <SelectTrigger :id="`tts-lang-${providerId}`" :data-testid="`tts-lang-select-${providerId}`" class="w-[220px]">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -268,24 +261,24 @@
               <SelectItem v-for="opt in form.languages" :key="opt.id" :value="opt.id">{{ opt.label }}</SelectItem>
             </SelectContent>
           </Select>
-        </div>
+        </SettingRow>
       </div>
     </GroupCard>
 
-    <!-- ── 进阶（长尾四区：混合音色/效果器/词典/长尾区开关；全空整卡不渲染）── -->
+    <!-- ── 进阶（长尾四区：混合音色/效果器/词典/长尾区开关；全空整卡不渲染；demo mock 投影为空无对应形态，
+         字段行跟随 SettingRow 范式、分节标题 = W1 PiPresets 分节档）── -->
     <GroupCard v-if="hasLongtailSection">
       <template #head>
         <div class="gc-head-text">
           <h3 class="gc-title">{{ t('settings.tts.longtailSection') }}</h3>
         </div>
       </template>
-      <div class="flex flex-col gap-4 px-4 py-3">
-        <div v-if="form.maxTimbreVoices > 0" class="flex flex-col gap-1.5">
-          <span class="text-[11px] font-medium text-neutral-mid">{{ t('settings.tts.timbreSection') }}</span>
-          <div class="flex flex-col gap-1.5">
-            <Label class="text-[11px] text-neutral-dim" :for="`tts-secondvoice-${providerId}`">{{ t('settings.tts.secondVoiceLabel') }}</Label>
+      <div class="px-[10px] pb-[8px] pt-[4px]">
+        <div v-if="form.maxTimbreVoices > 0" class="flex flex-col border-t border-hairline py-[10px] first:border-t-0">
+          <span class="text-[length:var(--text-xs)] font-semibold text-[color:var(--neutral-fg-2)]">{{ t('settings.tts.timbreSection') }}</span>
+          <SettingRow class="mt-[4px]" :label="t('settings.tts.secondVoiceLabel')">
             <Select v-model="secondVoiceModel" :disabled="disabled">
-              <SelectTrigger :id="`tts-secondvoice-${providerId}`" :data-testid="`tts-secondvoice-select-${providerId}`" class="h-8 w-[220px] text-[12px]">
+              <SelectTrigger :id="`tts-secondvoice-${providerId}`" :data-testid="`tts-secondvoice-select-${providerId}`" class="w-[220px]">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -293,36 +286,33 @@
                 <SelectItem v-for="opt in form.voices" :key="opt.id" :value="opt.id">{{ opt.label }}</SelectItem>
               </SelectContent>
             </Select>
-          </div>
-          <div v-if="state.secondVoice" class="flex flex-col gap-1.5">
-            <Label class="text-[11px] text-neutral-dim" :for="`tts-weight-${providerId}`">{{ t('settings.tts.secondVoiceWeightLabel') }}</Label>
+          </SettingRow>
+          <SettingRow v-if="state.secondVoice" :label="t('settings.tts.secondVoiceWeightLabel')">
             <Select v-model="state.secondVoiceWeight" :disabled="disabled">
-              <SelectTrigger :id="`tts-weight-${providerId}`" :data-testid="`tts-weight-select-${providerId}`" class="h-8 w-[160px] text-[12px]">
+              <SelectTrigger :id="`tts-weight-${providerId}`" :data-testid="`tts-weight-select-${providerId}`" class="w-[160px]">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem v-for="opt in weightOpts" :key="opt.id" :value="opt.id">{{ opt.label }}</SelectItem>
               </SelectContent>
             </Select>
-          </div>
+          </SettingRow>
         </div>
-        <div v-if="form.voiceModify" class="flex flex-col gap-1.5">
-          <span class="text-[11px] font-medium text-neutral-mid">{{ t('settings.tts.voiceModifySection') }}</span>
-          <div v-for="tier in form.voiceModify.tiers" :key="tier.id" class="flex flex-col gap-1.5">
-            <Label class="text-[11px] text-neutral-dim" :for="`tts-vm-${providerId}-${tier.id}`">{{ tier.label }}</Label>
+        <div v-if="form.voiceModify" class="flex flex-col border-t border-hairline py-[10px]">
+          <span class="text-[length:var(--text-xs)] font-semibold text-[color:var(--neutral-fg-2)]">{{ t('settings.tts.voiceModifySection') }}</span>
+          <SettingRow v-for="tier in form.voiceModify.tiers" :key="tier.id" class="mt-[4px]" :label="tier.label">
             <Select v-model="state.voiceModifyValues[tier.id]" :disabled="disabled">
-              <SelectTrigger :id="`tts-vm-${providerId}-${tier.id}`" :data-testid="`tts-vm-${providerId}-${tier.id}`" class="h-8 w-[160px] text-[12px]">
+              <SelectTrigger :id="`tts-vm-${providerId}-${tier.id}`" :data-testid="`tts-vm-${providerId}-${tier.id}`" class="w-[160px]">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem v-for="opt in modifyOpts" :key="opt.id" :value="opt.id">{{ opt.label }}</SelectItem>
               </SelectContent>
             </Select>
-          </div>
-          <div v-if="form.voiceModify.effects.length > 0" class="flex flex-col gap-1.5">
-            <Label class="text-[11px] text-neutral-dim" :for="`tts-vm-effect-${providerId}`">{{ t('settings.tts.voiceModifyEffectLabel') }}</Label>
+          </SettingRow>
+          <SettingRow v-if="form.voiceModify.effects.length > 0" :label="t('settings.tts.voiceModifyEffectLabel')">
             <Select v-model="voiceModifyEffectModel" :disabled="disabled">
-              <SelectTrigger :id="`tts-vm-effect-${providerId}`" :data-testid="`tts-vm-effect-${providerId}`" class="h-8 w-[220px] text-[12px]">
+              <SelectTrigger :id="`tts-vm-effect-${providerId}`" :data-testid="`tts-vm-effect-${providerId}`" class="w-[220px]">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -330,10 +320,9 @@
                 <SelectItem v-for="opt in form.voiceModify.effects" :key="opt.id" :value="opt.id">{{ opt.label }}</SelectItem>
               </SelectContent>
             </Select>
-          </div>
+          </SettingRow>
         </div>
-        <div v-for="id in longtailToggles" :key="id" class="flex items-center justify-between">
-          <Label class="text-[11px] text-neutral-dim" :for="`tts-toggle-${providerId}-${id}`">{{ t(`settings.tts.toggle.${id}`) }}</Label>
+        <SettingRow v-for="id in longtailToggles" :key="id" :label="t(`settings.tts.toggle.${id}`)">
           <Switch
             :id="`tts-toggle-${providerId}-${id}`"
             :data-testid="`tts-toggle-${providerId}-${id}`"
@@ -341,9 +330,9 @@
             :disabled="disabled"
             @update:model-value="state.toggles[id] = $event === true"
           />
-        </div>
-        <div v-if="form.hasPronunciationDict" class="flex flex-col gap-1.5">
-          <span class="text-[11px] font-medium text-neutral-mid">{{ t('settings.tts.pronunciationSection') }}</span>
+        </SettingRow>
+        <div v-if="form.hasPronunciationDict" class="flex flex-col gap-[6px] border-t border-hairline py-[10px]">
+          <span class="text-[length:var(--text-xs)] font-semibold text-[color:var(--neutral-fg-2)]">{{ t('settings.tts.pronunciationSection') }}</span>
           <TtsPronunciationEditor v-model="state.pronunciationRules" :testid="providerId" :disabled="disabled" />
         </div>
       </div>
@@ -362,6 +351,7 @@ import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { GroupCard } from '@taiji/ui/features/settings'
+import SettingRow from '../SettingRow.vue'
 import TtsPronunciationEditor from './TtsPronunciationEditor.vue'
 import {
   NONE_OPTION_ID,

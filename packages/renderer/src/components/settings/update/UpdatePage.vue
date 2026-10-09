@@ -4,55 +4,63 @@
   + 预下载开关 + 代理模式选择 + 手动模式下 HTTP/HTTPS 代理输入 + 测试代理连接。
   更新设置三字段（autoUpdate/preDownload/updateSource）走 setting-field module 编排；
   代理表单为显式保存形态（createExplicitSave）；onTestProxy 为查询型动作留组件。
+
+  [w3] demo 对照（UpdateSection.vue）：三卡 = GroupCard（gcard-head gc-title+gc-sub /
+  tight 卡体 4-10-8）；行 = SettingRow（.srow 范式）；版本行 = demo srow（tag.ok pill +
+  srow-desc 渠道注记）；测试/保存行收进代理卡体尾（demo srow border-top:0）。
 -->
 <template>
-  <div class="flex max-w-[860px] flex-col gap-3">
+  <div class="flex flex-col">
+    <!-- page-head（对齐 settings 页共享范式；demo 页头 = 标题 + desc） -->
+    <header class="page-head">
+      <div class="head-text">
+        <h1 class="title">{{ t('settings.menu.update') }}</h1>
+        <p class="desc">{{ t('settings.menu.updateDesc') }}</p>
+      </div>
+    </header>
+
     <!-- RD-4#8：读配置失败常驻提示（默认值非已存值）+ 重试；可落盘控件禁用直到重拉成功 -->
     <div
       v-if="loadError"
       data-testid="update-page-load-error"
-      class="flex items-center gap-2 px-1 text-[11px] text-warn"
+      class="flex items-center gap-2 px-1 pb-[8px] text-[length:var(--text-2xs)] text-warn"
     >
       <AlertTriangle class="size-3.5 shrink-0" />
       <span>{{ t('settings.update.loadErrorHint') }}</span>
       <Button
         variant="ghost"
         size="sm"
-        class="h-5 px-1.5 text-[11px] text-accent"
+        class="h-5 px-1.5 text-[length:var(--text-2xs)] text-accent"
         data-testid="update-page-load-retry"
         @click="loadConfig"
       >{{ t('settings.update.loadErrorRetry') }}</Button>
     </div>
 
-    <!-- 卡 1：自动更新（v6 demo 回填：开关 + 当前版本 + 检查更新状态机） -->
-    <div class="rounded-md border border-border bg-bg">
-      <div class="px-4 pb-3 pt-3">
-        <h3 class="text-[13px] font-medium text-fg">{{ t('settings.update.autoUpdateTitle') }}</h3>
-        <p class="mt-0.5 text-[11px] text-muted">{{ t('settings.update.autoUpdateDesc') }}</p>
-      </div>
-      <div class="border-t border-border">
-        <!-- 自动更新开关行 -->
-        <div class="flex items-center justify-between px-4 py-3">
-          <Label class="text-[12px] text-fg">{{ t('settings.update.autoUpdateLabel') }}</Label>
+    <!-- 卡 1：自动更新（开关 + 更新来源 + 版本行 + 检查更新状态机 + 手动升级通道） -->
+    <GroupCard>
+      <template #head>
+        <div class="gc-head-text">
+          <h3 class="gc-title">{{ t('settings.update.autoUpdateTitle') }}</h3>
+          <p class="gc-sub">{{ t('settings.update.autoUpdateDesc') }}</p>
+        </div>
+      </template>
+      <div class="px-[10px] pb-[8px] pt-[4px]">
+        <SettingRow :label="t('settings.update.autoUpdateLabel')">
           <Switch
             data-testid="switch-auto-update"
             :model-value="autoUpdate"
             :disabled="autoUpdateBusy || loadError"
             @update:model-value="onToggleAutoUpdate"
           />
-        </div>
+        </SettingRow>
         <!-- 更新来源行（三选：自动（推荐）/GitHub/GitCode；选择即优先级，切换即持久化） -->
-        <div class="flex items-center justify-between border-t border-border px-4 py-3">
-          <Label class="text-[12px] text-fg">{{ t('settings.update.updateSourceLabel') }}</Label>
+        <SettingRow :label="t('settings.update.updateSourceLabel')">
           <Select
             :model-value="updateSource"
             :disabled="updateSourceBusy || loadError"
             @update:model-value="(v) => onSourceChange(String(v))"
           >
-            <SelectTrigger
-              class="h-8 w-[200px] px-2 text-[12px]"
-              data-testid="select-update-source"
-            >
+            <SelectTrigger class="w-[200px]" data-testid="select-update-source">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -61,54 +69,56 @@
               <SelectItem value="gitcode">{{ t('settings.update.updateSourceGitcode') }}</SelectItem>
             </SelectContent>
           </Select>
-        </div>
-        <!-- 当前版本行 -->
-        <div class="flex items-center justify-between border-t border-border px-4 py-3">
-          <Label class="text-[12px] text-fg">{{ t('settings.update.currentVersionLabel') }}</Label>
+        </SettingRow>
+        <!-- 版本行 = demo srow：tag.ok pill（版本号）+ srow-desc 渠道/重启弱注记（R2-13 拆分同款） -->
+        <div class="flex min-h-[44px] items-center gap-4 border-t border-hairline px-[6px] py-[10px]">
           <span
-            class="rounded-sm border border-border-strong bg-bg-input px-2 py-0.5 font-mono text-[11px] text-fg"
+            class="inline-flex h-[18px] shrink-0 items-center rounded-full bg-accent-soft px-[7px] font-mono text-[length:var(--text-2xs)] font-semibold text-accent"
             data-testid="current-version-pill"
-          >v{{ appVersion }} · {{ t('settings.update.channelHint') }}</span>
+          >v{{ appVersion }}</span>
+          <span class="min-w-0 text-[length:var(--text-sm)] text-[color:var(--neutral-fg-2)]">{{ t('settings.update.channelHint') }}</span>
         </div>
         <!-- 检查更新状态机（UpdateCheckCard 内嵌为卡内区块） -->
         <UpdateCheckCard />
       </div>
-    </div>
+    </GroupCard>
 
     <!-- 卡 2：预下载设置 -->
-    <div class="rounded-md border border-border bg-bg">
-      <div class="px-4 pb-3 pt-3">
-        <h3 class="text-[13px] font-medium text-fg">{{ t('settings.update.preDownloadTitle') }}</h3>
-        <p class="mt-0.5 text-[11px] text-muted">{{ t('settings.update.preDownloadDesc') }}</p>
-      </div>
-      <div class="border-t border-border">
-        <div class="flex items-center justify-between px-4 py-3">
-          <Label class="text-[12px] text-fg">{{ t('settings.update.preDownloadLabel') }}</Label>
+    <GroupCard>
+      <template #head>
+        <div class="gc-head-text">
+          <h3 class="gc-title">{{ t('settings.update.preDownloadTitle') }}</h3>
+          <p class="gc-sub">{{ t('settings.update.preDownloadDesc') }}</p>
+        </div>
+      </template>
+      <div class="px-[10px] pb-[8px] pt-[4px]">
+        <SettingRow :label="t('settings.update.preDownloadLabel')">
           <Switch
             data-testid="switch-pre-download"
             :model-value="preDownload"
             :disabled="preDownloadBusy || loadError"
             @update:model-value="onTogglePreDownload"
           />
-        </div>
+        </SettingRow>
       </div>
-    </div>
+    </GroupCard>
 
     <!-- 卡 3：代理配置 -->
-    <div class="rounded-md border border-border bg-bg">
-      <div class="px-4 pb-3 pt-3">
-        <h3 class="text-[13px] font-medium text-fg">{{ t('settings.update.sectionTitle') }}</h3>
-        <p class="mt-0.5 text-[11px] text-muted">{{ t('settings.update.sectionDesc') }}</p>
-      </div>
-      <div class="border-t border-border">
+    <GroupCard>
+      <template #head>
+        <div class="gc-head-text">
+          <h3 class="gc-title">{{ t('settings.update.sectionTitle') }}</h3>
+          <p class="gc-sub">{{ t('settings.update.sectionDesc') }}</p>
+        </div>
+      </template>
+      <div class="px-[10px] pb-[8px] pt-[4px]">
         <!-- 代理模式 -->
-        <div class="flex items-center justify-between px-4 py-3">
-          <Label class="text-[12px] text-fg">{{ t('settings.update.proxyMode') }}</Label>
+        <SettingRow :label="t('settings.update.proxyMode')">
           <Select
             :model-value="localConfig.mode"
             @update:model-value="(v) => onModeChange(String(v))"
           >
-            <SelectTrigger class="h-8 w-[200px] px-2 text-[12px]">
+            <SelectTrigger class="w-[200px]">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -117,92 +127,85 @@
               <SelectItem value="disabled">{{ t('settings.update.proxyModeDisabled') }}</SelectItem>
             </SelectContent>
           </Select>
-        </div>
+        </SettingRow>
 
-        <!-- HTTP 代理（手动模式） -->
-        <div v-if="localConfig.mode === 'manual'" class="border-t border-border px-4 py-3">
-          <Label class="mb-2 block text-[12px] text-fg">{{ t('settings.update.httpProxy') }}</Label>
+        <!-- HTTP 代理（手动模式；demo UiRow 右置 280px mono 输入） -->
+        <SettingRow v-if="localConfig.mode === 'manual'" :label="t('settings.update.httpProxy')">
           <Input
             v-model="localConfig.httpProxy"
             :placeholder="t('settings.update.httpProxyPlaceholder')"
-            class="h-8 text-[12px]"
+            class="w-[280px] font-mono"
             data-testid="input-http-proxy"
           />
-        </div>
+        </SettingRow>
 
         <!-- HTTPS 代理（手动模式） -->
-        <div v-if="localConfig.mode === 'manual'" class="border-t border-border px-4 py-3">
-          <Label class="mb-2 block text-[12px] text-fg">{{ t('settings.update.httpsProxy') }}</Label>
+        <SettingRow v-if="localConfig.mode === 'manual'" :label="t('settings.update.httpsProxy')">
           <Input
             v-model="localConfig.httpsProxy"
             :placeholder="t('settings.update.httpsProxyPlaceholder')"
-            class="h-8 text-[12px]"
+            class="w-[280px] font-mono"
             data-testid="input-https-proxy"
           />
-        </div>
-      </div>
-    </div>
+        </SettingRow>
 
-    <!-- 操作栏 -->
-    <div class="flex items-center justify-between">
-      <div class="flex items-center gap-2">
-        <!-- 测试代理按钮 -->
-        <Button
-          variant="ghost"
-          size="sm"
-          :disabled="testing || localConfig.mode === 'disabled'"
-          :title="localConfig.mode === 'disabled' ? t('settings.update.testProxyTooltipDisabled') : undefined"
-          class="gap-1.5 text-[12px]"
-          data-testid="btn-test-proxy"
-          @click="onTestProxy"
-        >
-          <Zap v-if="!testing" class="size-3.5" />
-          <Loader2 v-else class="size-3.5 animate-spin" />
-          <span>{{ testing ? t('settings.update.testing') : t('settings.update.testProxy') }}</span>
-        </Button>
-      </div>
-
-      <div class="flex items-center gap-2">
-        <!-- 测试结果 -->
-        <div
-          v-if="testResult !== null"
-          class="text-[11px]"
-          data-testid="test-proxy-result"
-        >
-          <span
-            :class="{
-              'text-success': testResult.status === 'success',
-              'text-danger': testResult.status === 'failed',
-              'text-muted': testResult.status === 'skipped',
-            }"
+        <!-- 测试/保存行（demo srow border-top:0：测试钮左 · 结果中 · solid 保存右） -->
+        <div class="flex min-h-[44px] items-center gap-4 px-[6px] py-[10px]">
+          <Button
+            variant="ghost"
+            :disabled="testing || localConfig.mode === 'disabled'"
+            :title="localConfig.mode === 'disabled' ? t('settings.update.testProxyTooltipDisabled') : undefined"
+            class="h-[32px] gap-[6px] px-[12px] text-[length:var(--text-sm)]"
+            data-testid="btn-test-proxy"
+            @click="onTestProxy"
           >
-            {{ testResult.status === 'success'
-              ? t('settings.update.testSuccess')
-              : testResult.status === 'skipped'
-                ? (testResult.message ?? '')
-                : t('settings.update.testFailed', { msg: testResult.message ?? '' })
-            }}
-          </span>
-          <!-- 恢复指引（suggestion 存在时显示） -->
-          <div v-if="testResult.status === 'failed' && testResult.suggestion" class="mt-0.5 text-muted">
-            {{ testResult.suggestion }}
-          </div>
-        </div>
+            <Zap v-if="!testing" class="size-3.5" />
+            <Loader2 v-else class="size-3.5 animate-spin" />
+            <span>{{ testing ? t('settings.update.testing') : t('settings.update.testProxy') }}</span>
+          </Button>
 
-        <!-- 保存按钮 -->
-        <Button
-          size="sm"
-          :disabled="saveProxySaving || loadError"
-          class="gap-1.5 text-[12px]"
-          data-testid="btn-save-proxy"
-          @click="onSave"
-        >
-          <Save v-if="!saveProxySaving" class="size-3.5" />
-          <Loader2 v-else class="size-3.5 animate-spin" />
-          <span>{{ saveProxySaving ? t('settings.update.saving') : t('settings.update.save') }}</span>
-        </Button>
+          <span class="flex-1" />
+
+          <!-- 测试结果 -->
+          <div
+            v-if="testResult !== null"
+            class="min-w-0 text-[length:var(--text-xs)]"
+            data-testid="test-proxy-result"
+          >
+            <span
+              :class="{
+                'text-success': testResult.status === 'success',
+                'text-danger': testResult.status === 'failed',
+                'text-neutral-mid': testResult.status === 'skipped',
+              }"
+            >
+              {{ testResult.status === 'success'
+                ? t('settings.update.testSuccess')
+                : testResult.status === 'skipped'
+                  ? (testResult.message ?? '')
+                  : t('settings.update.testFailed', { msg: testResult.message ?? '' })
+              }}
+            </span>
+            <!-- 恢复指引（suggestion 存在时显示） -->
+            <div v-if="testResult.status === 'failed' && testResult.suggestion" class="mt-0.5 text-[length:var(--text-2xs)] text-neutral-mid">
+              {{ testResult.suggestion }}
+            </div>
+          </div>
+
+          <!-- 保存按钮（demo btn solid） -->
+          <Button
+            :disabled="saveProxySaving || loadError"
+            class="h-[32px] gap-[6px] px-[12px] text-[length:var(--text-sm)]"
+            data-testid="btn-save-proxy"
+            @click="onSave"
+          >
+            <Save v-if="!saveProxySaving" class="size-3.5" />
+            <Loader2 v-else class="size-3.5 animate-spin" />
+            <span>{{ saveProxySaving ? t('settings.update.saving') : t('settings.update.save') }}</span>
+          </Button>
+        </div>
       </div>
-    </div>
+    </GroupCard>
   </div>
 </template>
 
@@ -212,13 +215,14 @@ import { useI18n } from 'vue-i18n'
 import { Zap, Save, Loader2, AlertTriangle } from '@lucide/vue'
 import type { IProxyConfig, UpdateSourcePref } from '@taiji/shared'
 import { Button } from '@/components/ui/button'
-import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { GroupCard } from '@taiji/ui/features/settings'
 import { getProxyConfig, setProxyConfig, testProxy, getUpdateSettings, setUpdateSettings } from '@/api/domains/settings'
 import { createExplicitSave, createSettingFieldGroup } from '@/composables/features/settings/setting-field'
 import { useToast } from '@/composables/useToast'
+import SettingRow from '../SettingRow.vue'
 import UpdateCheckCard from '../UpdateCheckCard.vue'
 
 const { t } = useI18n()

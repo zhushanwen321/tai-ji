@@ -91,11 +91,12 @@ afterEach(() => {
 
 /**
  * 定位某扩展名对应的「已安装项」根 div。
- * 已安装项根 div 的 class 含 flex items-center gap-3 rounded-card（v6 卡片范式，§5.8 GroupCard；
- * 原 rounded-md border 是 v6 清理的装饰 class，2026-08-04 settings-newtask-v6 wave 修复后改用稳定范式 class）。
+ * [w3b] 行根 = demo .srow 形态（min-h-[44px] 行范式，与 w2 设置行口径一致）；
+ * 原 v6 卡片范式 class（flex items-center gap-3 rounded-card）已随形态更新退役，
+ * 以 min-h-[44px] 子串选择器定位（行内无其他 min-h 消费点）。
  */
 function findExtRow(root: ReturnType<typeof mount>, name: string) {
-  const rows = root.findAll('div.flex.items-center.gap-3.rounded-card')
+  const rows = root.findAll('div[class*="min-h-[44px]"]')
   return rows.find((r) => r.text().includes(name))
 }
 
