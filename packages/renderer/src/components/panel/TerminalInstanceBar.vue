@@ -25,6 +25,8 @@
     一级 tab 条同构，DetailPane tab 条同款分隔线 + 滚动条隐藏）；
   - tab = demo .inst-tab：py-0.5 pl-1 pr-[3px]（demo 2/4/3px，右 3px 不在标准档保留字面）、
     max-w-160 在 tab 整体（demo 在 .inst-tab 非 name 钮）、非激活 hover 提亮 surface-hover；
+    transition 时长/缓动 = demo dur-fast ease-out（fix-v3 逐参数核对补齐；描边 0.07/0.13 白
+    与 demo 像素级一致——pair-04-05 A2「无可辨描边」实为 1x 插值截图伪影，2x 原生重拍证伪）；
   - 关闭叉 = demo .inst-x：r-xs 圆角、20px 命中、11px 叉、hover danger-soft 底、禁用同色
     0.4 透明度（arbitrary 形态压过 Button 基类 disabled:opacity-50）；
   - 右簇 = demo .ib-right/.ib-btn：gap 4px、24px 钮、r-xs 圆角、14px 图标（hover 提亮底由
@@ -54,7 +56,7 @@
       <div
         v-for="inst in instances"
         :key="inst.terminalId"
-        class="flex max-w-[160px] shrink-0 items-center gap-0.5 rounded-sm border py-0.5 pl-1 pr-[3px] transition-colors"
+        class="flex max-w-[160px] shrink-0 items-center gap-0.5 rounded-sm border py-0.5 pl-1 pr-[3px] transition-colors duration-[var(--duration-fast)] ease-[var(--ease-out)]"
         :class="
           isActive(inst)
             ? 'border-border-strong bg-bg-elevated'

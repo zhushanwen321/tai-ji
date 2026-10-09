@@ -43,7 +43,8 @@
          开合宽度动画。手写布局能力（ui-signal-density D10 2026-10-06 修订）：无 drawer 时
          main 卡撑满公共容器（width 100% + margin 0），卡内内容列（对话流 + composer，消费
          .content-col 的 max-width: var(--content-max-w)）限宽 60% 居中——留白在卡内而非卡外；
-         60% 实算低于 720px 下限即撑满，drawer 挤窄后恒撑满（派生单处在 useDrawerSplitWidth）；
+         60% 实算低于 720px 下限即撑满，standalone 两分支均封 demo 阅读列 720 cap，drawer 挤窄
+         后恒撑满（派生单处在 useDrawerSplitWidth）；
          drawer 打开时 main width 动画到拆分比例、内容列恒撑满；handle 拖动（pointer capture
          跟手，拖动期间 transition:none）+ 键盘微调 + localStorage 持久化。
          drawer wrapper 常驻（width 0 ↔ drawerPct%）承载 width 动画；DrawerPanel 内部 aside

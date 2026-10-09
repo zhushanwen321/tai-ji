@@ -117,9 +117,14 @@ function onSelect(tpl: BuiltinProviderTemplate): void {
 
 <template>
   <Popover v-model:open="open">
+    <!-- 主行动钮视觉 = demo .btn.solid（accent 实底 + accent-fg 字 + hover accent-hover，h32/r-md/
+         text-sm 档）：class 覆盖 TRIGGER_TEXT_CLASS 的 ghost 文字档（tailwind-merge 同键后赢）。
+         chevron 关闭（demo 主钮无下拉指示），入口菜单（内置模板/自定义）行为不变。 -->
     <PopoverTriggerButton
       data-testid="provider-template-picker"
       :title="t('settings.provider.builtinTemplate.trigger')"
+      :show-chevron="false"
+      class="h-8 gap-[6px] rounded-md bg-accent px-3 text-[length:var(--text-sm)] text-accent-fg hover:bg-accent-hover hover:text-accent-fg [&_svg]:size-[14px]"
     >
       <Plus class="size-3.5" />
       {{ t('settings.provider.builtinTemplate.trigger') }}

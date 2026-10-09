@@ -12,10 +12,8 @@
  * 退化序（D6 修订「三步聚合」，评审 demo 对齐；累计生效，级数由接线层实测溢出后逐级喂入）：
  * - 序 0（类型级保证，不入序集）：`+` 与发送按钮**恒不退化、不被裁剪**（锚点）。
  * - 序 1（L1）：左簇（托盘 + 插件 toolbar 散图标）→ **1 个单图标聚合按钮**（click 弹全图标列表）。
- * - 序 2（L2）：指标（容量 + TTFT + 速度 + 缓存）→ **1 个单图标聚合按钮**（hover 弹指标聚合页，四卡）。
- *   ui-optimize 决策 6：序 2 聚合**对所有 fit 级无条件生效**——指标恒为聚合按钮（fit 0 的
- *   平铺直挂形态已退役），本级在 fit 轴上不再产生形态变化（测量回路自然穿过：需求宽不变 →
- *   继续升到下一级），序号保留为 appliedOrders 前缀登记位。
+ * - 序 2（L2）：指标（容量 + TTFT + 速度 + 缓存）→ **1 个单图标聚合按钮**（hover 弹指标聚合页，四卡）；
+ *   fit 0/1 保持平铺（GenStatsTriggers / ContextCapacityPopover 纯文本触发器，demo `.mtr-exp` 同款）。
  * - 序 3（L3）：模型 + 思考等级 → **1 个单图标聚合按钮**（click 弹模型+思考，hover 行内即切换）。
  *   模型名形态域**只有两态**：完整展示 / 聚合按钮——**不存在任何中间截断态**（见 [HISTORICAL]）。
  * - 顶格（L3）仍实测放不下 → `anchorProtected`：左簇与指标聚合按钮隐藏，只留模型聚合按钮 +
@@ -47,10 +45,7 @@
 export const COMPOSER_FIT_LEVEL_NONE = 0
 /** L1：左簇（托盘 + 插件 toolbar）→ 单图标聚合按钮 */
 export const COMPOSER_FIT_LEVEL_LEFT_AGGREGATE = 1
-/**
- * L2：序 2 纳入 appliedOrders 前缀的界。决策 6 后指标聚合对所有 fit 级无条件生效，
- * 本级**无形态变化**（fit 回路自然穿过），序号保留仅作前缀登记（见文件头退化序说明）。
- */
+/** L2：指标（容量 + TTFT + 速度 + 缓存）→ 单图标聚合按钮（hover 聚合页）；fit 0/1 保持平铺 */
 export const COMPOSER_FIT_LEVEL_METRICS_AGGREGATE = 2
 /** L3：模型 + 思考 → 单图标聚合按钮（click 弹层 + hover 行内切换） */
 export const COMPOSER_FIT_LEVEL_MODEL_AGGREGATE = 3
@@ -101,10 +96,10 @@ export interface ComposerDensitySlots {
    */
   readonly leftCluster: 'expanded' | 'aggregated' | 'absent'
   /**
-   * 序 2：指标（容量 + TTFT + 速度 + 缓存）——决策 6 后**恒 `aggregated`**（单图标聚合按钮，hover 弹
-   * 指标聚合页；fit 0 平铺直挂形态已退役）；`absent` 仅锚点保护态（让位隐藏）。
+   * 序 2：指标（容量 + TTFT + 速度 + 缓存）——`expanded` 纯文本触发器平铺（demo `.mtr-exp`）/
+   * `aggregated` 单图标聚合按钮（hover 弹指标聚合页）/ `absent` 锚点保护态隐藏。
    */
-  readonly metrics: 'aggregated' | 'absent'
+  readonly metrics: 'expanded' | 'aggregated' | 'absent'
   /**
    * 序 3：模型 + 思考——`aggregated` 单图标聚合按钮 / `expanded` 完整形态（模型名**恒完整展示**，
    * 无截断态）。**恒不为 `absent`** —— 切模型/切档位是底栏核心动作，任何宽度保留可点入口。
@@ -141,11 +136,7 @@ export function normalizeComposerFitLevel(level: number): ComposerFitDegradation
   return Math.round(level) as ComposerFitDegradationLevel
 }
 
-/**
- * fit 级 → 已生效退化序（前缀累计，单真源 = fitLevel）。
- * [决策 6] 序 2 已退役为无条件形态（指标恒聚合、不随 fit 变化），appliedOrders 收窄为
- * 「fit 轴驱动序集」——序 2 的纳入仅是 L2 的前缀登记，不再对应 metrics 槽的形态变化。
- */
+/** fit 级 → 已生效退化序（前缀累计；与 slots 恒一致——二者同源于 fitLevel，单真源）。 */
 function deriveAppliedOrders(fitLevel: ComposerFitDegradationLevel): ComposerDegradationOrder[] {
   const orders: ComposerDegradationOrder[] = []
   if (fitLevel >= COMPOSER_FIT_LEVEL_LEFT_AGGREGATE) orders.push(COMPOSER_DEGRADATION_ORDER.LEFT_CLUSTER_AGGREGATE)
@@ -186,9 +177,13 @@ export function resolveComposerDensity(
           : fitLevel >= COMPOSER_FIT_LEVEL_LEFT_AGGREGATE
             ? 'aggregated'
             : 'expanded',
-    // 序 2：指标。决策 6：聚合对所有 fit 级无条件生效（fit 0 平铺直挂形态已退役，见文件头）；
+    // 序 2：指标。fit 0/1 平铺（纯文本触发器），L2 起聚合为单图标聚合按钮；
     // 锚点保护 → 让位隐藏。landing 无 session 的隐藏归渲染层 v-if。
-    metrics: anchorProtected ? 'absent' : 'aggregated',
+    metrics: anchorProtected
+      ? 'absent'
+      : fitLevel >= COMPOSER_FIT_LEVEL_METRICS_AGGREGATE
+        ? 'aggregated'
+        : 'expanded',
     // 序 3：模型 + 思考。L3 起聚合；否则完整形态（模型名恒完整，无中间截断态）；恒不缺席。
     modelThinking: fitLevel >= COMPOSER_FIT_LEVEL_MODEL_AGGREGATE ? 'aggregated' : 'expanded',
   }

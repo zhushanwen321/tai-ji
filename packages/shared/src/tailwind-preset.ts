@@ -85,6 +85,13 @@ export default {
         input: 'var(--input)',
         ring: 'var(--ring)',
       },
+      // 裸 `border` 工具类的默认色（demo 语义 = 全部裸边框走 --border 令牌，亮暗主题自动跟随）。
+      // 不映射时 Tailwind 缺省 DEFAULT = gray-200，裸 `border` 全部渲染成亮灰线（与暗色主题断裂）。
+      // 覆盖缺省 DEFAULT 不影响 `...theme('colors')` 展开产生的 border-<color> 具名工具类；
+      // renderer 侧 borderColor.hairline 扩展点经深合并叠加，不受此处影响。
+      borderColor: {
+        DEFAULT: 'var(--border)',
+      },
       fontFamily: {
         sans: ['var(--font-sans)'],
         mono: ['JetBrains Mono', 'IBM Plex Mono', 'ui-monospace', 'Menlo', 'monospace'],

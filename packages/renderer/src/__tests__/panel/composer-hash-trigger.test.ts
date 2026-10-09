@@ -572,6 +572,7 @@ const composerStubs = {
   CommandPopover: CommandPopoverStub,
   AddMenuPopover: AddMenuPopoverStub,
   ContextChipsBar: SIMPLE,
+  ContextCapacityPopover: SIMPLE,
   ComposerCapacityBar: SIMPLE,
   ModelSelectPopover: SIMPLE,
   ThinkingLevelPopover: SIMPLE,
@@ -670,6 +671,7 @@ describe('选中插 chip 集成（C 组，真实浮层 + 真实输入区）', ()
         stubs: {
           AddMenuPopover: AddMenuPopoverStub,
           ContextChipsBar: SIMPLE,
+  ContextCapacityPopover: SIMPLE,
   ComposerCapacityBar: SIMPLE,
           ModelSelectPopover: SIMPLE,
           ThinkingLevelPopover: SIMPLE,

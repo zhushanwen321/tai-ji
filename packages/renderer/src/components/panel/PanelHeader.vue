@@ -115,11 +115,13 @@
         <span>{{ shortFileName }}</span>
       </Button>
       <!-- session-trace（D5a）：「对话 | Trace」SegmentedTab。视图态 per-session 分区（store
-           view 字段），切换仅切 main 区渲染分支，不重建数据（A42）。sessionId 为空（landing）不渲染。 -->
+           view 字段），切换仅切 main 区渲染分支，不重建数据（A42）。
+           landing（无 session）恒渲染但 disabled（demo Workbench.vue 卡头分段
+           :disabled="route.name === 'new-task'" 同款——分段是卡头常驻形态，空态不可点）。 -->
       <TraceViewToggle
-        v-if="sessionId"
         :model-value="tracePartition.view"
-        @update:model-value="(v) => setTraceView(sessionId!, v)"
+        :disabled="!sessionId"
+        @update:model-value="onTraceViewChange"
       />
       <!-- ExtensionHost panel.header 挂载点（audit §12.1，MountPointRegistry panel.header）。
            plugin 经 views.update 贡献 header action 视图 → ViewHost 渲染。
@@ -164,7 +166,7 @@ import { useSidebar } from '@/composables/features/sidebar/useSidebar'
 import { usePlatformChrome } from '@/composables/effects/usePlatformChrome'
 import { useCopy } from '@/composables/panel/useCopy'
 import TerminalToggleButton from './TerminalToggleButton.vue'
-import { useSessionTrace, setTraceView } from '@/composables/features/trace/useSessionTrace'
+import { useSessionTrace, setTraceView, type TraceMainView } from '@/composables/features/trace/useSessionTrace'
 import TraceViewToggle from './trace/TraceViewToggle.vue'
 import { ViewHost } from '@taiji/ui/extension-host'
 import type { DerivedStatus } from '@/types'
@@ -194,6 +196,11 @@ const { newSession } = useSidebar()
 const { isFullscreen } = usePlatformChrome()
 // session-trace：视图态读 store 当前分区（分区键 focusedSessionId == props.sessionId，单 panel 恒真）
 const { partition: tracePartition } = useSessionTrace()
+
+/** trace 切换接收点：仅在有 session 时落库（landing 态分段已 disabled，此处是类型面守卫冗余）。 */
+function onTraceViewChange(view: TraceMainView): void {
+  if (props.sessionId) setTraceView(props.sessionId, view)
+}
 
 /** 折叠态新建任务钮（demo .hdr-fold）：复用 sidebar 新建任务流（landing/会话创建统一入口）。 */
 async function onNewTask(): Promise<void> {

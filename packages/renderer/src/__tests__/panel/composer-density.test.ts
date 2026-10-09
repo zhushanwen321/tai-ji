@@ -1,17 +1,14 @@
 // @vitest-environment node
 
 /**
- * composer-density 纯状态机单测（D6 修订「三步聚合」+ ui-optimize 决策 6 版）。
+ * composer-density 纯状态机单测（D6 修订「三步聚合」版）。
  *
  * 覆盖（穷举 = 本模块的 100% 行覆盖承诺）：
- * - fit 级归一（NaN / 负 / 越界 / 取整）与累计映射（L1 左簇 / L2 序 2 前缀登记 / L3 模型+思考）。
- * - 决策 6：指标**恒聚合**（所有 fit 级 aggregated，fit 0 平铺形态已退役；L2 无形态变化，
- *   fit 回路自然穿过）；缺席（absent）只可能来自锚点保护。
+ * - fit 级归一（NaN / 负 / 越界 / 取整）与三步累计映射（L1 左簇 / L2 指标 / L3 模型+思考）。
  * - 能力标志：托盘全无 + 插件零贡献 → `leftCluster: 'absent'`（不留死入口）；任一有内容 → 可聚合。
  * - 锚点保护：仅 L3 顶格生效；左簇/指标让位，模型聚合按钮与序 0 锚点恒在。
  * - **构造性回归防线**：模型形态域只有 `expanded`（完整名）/ `aggregated` 两态——穷举矩阵断言
- *   不存在任何截断/进菜单形态；指标形态域只有 `aggregated` / `absent` 两态（平铺 expanded
- *   构造性不存在）；输出域不存在 `tier` / `overflow*` 键（双轴旧语义已退役）。
+ *   不存在任何截断/进菜单形态；输出域不存在 `tier` / `overflow*` 键（双轴旧语义已退役）。
  * - 纯函数契约：同输入恒等、不改入参、不共享引用。
  *
  * [HISTORICAL] 旧版三档阈值（640/520 tier 轴）、`»` 溢出菜单、simplified/iconic/merged 中间态
@@ -77,21 +74,21 @@ describe('常量与归一', () => {
 })
 
 describe('三步累计映射（fit 级 → 形态）', () => {
-  it('L0：左簇/模型展开、指标恒聚合（决策 6），零退化序', () => {
+  it('L0 全展开：三组均原形态，零退化序', () => {
     const layout = resolveComposerDensity({}, 0)
     expect(layout.slots.leftCluster).toBe('expanded')
-    expect(layout.slots.metrics).toBe('aggregated')
+    expect(layout.slots.metrics).toBe('expanded')
     expect(layout.slots.modelThinking).toBe('expanded')
     expect(layout.appliedOrders).toEqual([])
     expect(layout.anchorProtected).toBe(false)
     expect(layout.allowsWrap).toBe(false)
   })
 
-  it('L1 聚合左簇；L2 仅序 2 前缀登记（指标恒聚合，无形态变化）；L3 再聚合模型+思考', () => {
+  it('L1 只聚合左簇；L2 再聚合指标；L3 再聚合模型+思考（前缀累计）', () => {
     const l1 = resolveComposerDensity({}, COMPOSER_FIT_LEVEL_LEFT_AGGREGATE)
     expect(l1.slots).toMatchObject({
       leftCluster: 'aggregated',
-      metrics: 'aggregated',
+      metrics: 'expanded',
       modelThinking: 'expanded',
     })
     expect(l1.appliedOrders).toEqual([COMPOSER_DEGRADATION_ORDER.LEFT_CLUSTER_AGGREGATE])
@@ -113,16 +110,9 @@ describe('三步累计映射（fit 级 → 形态）', () => {
     expect(l3.appliedOrders).toEqual([1, 2, 3])
   })
 
-  it('缺省 fit 入参 = 0（左簇/模型展开，指标恒聚合）', () => {
+  it('缺省 fit 入参 = 0（全展开）', () => {
     expect(resolveComposerDensity().fitLevel).toBe(0)
     expect(resolveComposerDensity({}).slots.leftCluster).toBe('expanded')
-    expect(resolveComposerDensity({}).slots.metrics).toBe('aggregated')
-  })
-
-  it('决策 6：指标聚合对所有 fit 级生效（0–3 全级 aggregated）', () => {
-    for (const level of ALL_LEVELS) {
-      expect(resolveComposerDensity({}, level).slots.metrics).toBe('aggregated')
-    }
   })
 })
 
@@ -179,7 +169,7 @@ describe('锚点保护（L3 顶格仍放不下 → 中部让位，锚点与模�
 })
 
 describe('穷举矩阵不变式（32 组合：4 级 × 4 能力 × 2 保护）', () => {
-  it('序 0 恒不退化；模型形态只有两态且恒不缺席；指标恒聚合或保护缺席；输出域无双轴旧键', () => {
+  it('序 0 恒不退化；模型形态只有两态且恒不缺席；输出域无双轴旧键', () => {
     for (const { out } of allCombos()) {
       // 锚点类型级保证
       expect(out.slots.add).toBe('expanded')
@@ -187,11 +177,8 @@ describe('穷举矩阵不变式（32 组合：4 级 × 4 能力 × 2 保护）',
       expect(out.allowsWrap).toBe(false)
       // 模型名两态：完整展示 / 聚合按钮——**无截断态、永不缺席**（切模型恒可达）
       expect(['expanded', 'aggregated']).toContain(out.slots.modelThinking)
-      // 指标两态（决策 6）：恒聚合，或锚点保护让位——平铺 expanded 构造性不存在
-      expect(['aggregated', 'absent']).toContain(out.slots.metrics)
-      // 缺席 ⇔ 锚点保护（双向）
+      // 指标缺席只可能来自锚点保护
       if (out.slots.metrics === 'absent') expect(out.anchorProtected).toBe(true)
-      if (!out.anchorProtected) expect(out.slots.metrics).toBe('aggregated')
       // 双轴旧语义构造性不存在
       expect('tier' in out).toBe(false)
       expect('overflowItems' in out).toBe(false)

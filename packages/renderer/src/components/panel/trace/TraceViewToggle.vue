@@ -22,6 +22,7 @@
         : 'text-neutral-dim hover:bg-transparent hover:text-neutral-fg'"
       :data-testid="`trace-view-toggle-${seg.value}`"
       :aria-pressed="modelValue === seg.value"
+      :disabled="disabled"
       @click="emit('update:modelValue', seg.value)"
     >
       <component :is="seg.icon" class="size-[15px] shrink-0" stroke-width="1.8" />
@@ -43,6 +44,8 @@ import type { TraceMainView } from '@/composables/features/trace/useSessionTrace
 
 defineProps<{
   modelValue: TraceMainView
+  /** landing（无 session）态 = true：两段钮均 disabled（demo Workbench.vue :disabled="route.name === 'new-task'" 同款——分段恒渲染，仅空态不可点） */
+  disabled?: boolean
 }>()
 const emit = defineEmits<{
   'update:modelValue': [value: TraceMainView]

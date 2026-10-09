@@ -509,7 +509,8 @@ describe('PanelContainer 动态宽度（feat-chat-flow-width）', () => {
       // 不是卡容器——留白在卡内两侧，卡与 header 横跨全宽
       expect(mainStyle).toContain('margin-left: 0')
       expect(mainStyle).toContain('margin-right: 0')
-      expect(mainStyle).toContain('--content-max-w: 60%')
+      // 60% 比例外再封 demo 阅读列 720 cap（min(720px, 60%)——1600×60%=960 ≥ 720 → 实际生效 720）
+      expect(mainStyle).toContain('--content-max-w: min(720px, 60%)')
       expect(areaWidth(wrapper, 'drawer-area')).toBe('0%')
       expect(wrapper.find('[data-testid="drawer-resize-handle"]').exists()).toBe(false)
     } finally {
@@ -517,8 +518,8 @@ describe('PanelContainer 动态宽度（feat-chat-flow-width）', () => {
     }
   }, 60_000)
 
-  it('无 drawer 窄 panel：60% 实算低于 720px 下限 → 内容列撑满（--content-max-w: 100%）', async () => {
-    // 1000 × 60% = 600 < 720 → 下限触发撑满（drawer 挤窄后恒撑满同因）
+  it('无 drawer 窄 panel：60% 实算低于 720px 下限 → 内容列撑满封 720（min(720px, 100%)）', async () => {
+    // 1000 × 60% = 600 < 720 → 下限触发撑满（drawer 挤窄后恒撑满同因）；撑满封 demo 720 cap
     const restoreRect = stubAllElementRects(1000)
     try {
       const panel = usePanelStore()
@@ -528,7 +529,7 @@ describe('PanelContainer 动态宽度（feat-chat-flow-width）', () => {
       await nextTick()
 
       expect(areaWidth(wrapper, 'main-area')).toBe('100%')
-      expect(areaStyle(wrapper, 'main-area')).toContain('--content-max-w: 100%')
+      expect(areaStyle(wrapper, 'main-area')).toContain('--content-max-w: min(720px, 100%)')
     } finally {
       restoreRect()
     }
@@ -657,10 +658,10 @@ describe('PanelContainer 动态宽度（feat-chat-flow-width）', () => {
 
     const wrapper = await mountContainer()
     await nextTick()
-    // standalone：卡撑满（未 stub rect → 宽度未测得，内容列走纯比例分支 60%）
+    // standalone：卡撑满（未 stub rect → 宽度未测得，内容列走纯比例分支 60% 封 720）
     expect(areaWidth(wrapper, 'main-area')).toBe('100%')
     expect(areaStyle(wrapper, 'main-area')).toContain('margin-left: 0')
-    expect(areaStyle(wrapper, 'main-area')).toContain('--content-max-w: 60%')
+    expect(areaStyle(wrapper, 'main-area')).toContain('--content-max-w: min(720px, 60%)')
 
     // 打开 drawer：main 收缩到拆分比例（margin 恒 0 贴左），内容列改撑满
     // [HISTORICAL] 用例原名含「+ layout 事件派发」：taiji:splitter-layout 已随消费方

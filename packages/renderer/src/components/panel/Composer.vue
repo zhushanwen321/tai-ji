@@ -42,8 +42,8 @@
     >
       <div
         ref="composerBoxRef"
-        class="composer-box relative rounded-lg border bg-bg"
-        :class="[boxClass, focusRingClass]"
+        class="composer-box relative border bg-bg"
+        :class="[boxClass, focusRingClass, boxRadiusClass]"
         data-testid="composer-box"
         @dragover.prevent="onDragOver"
         @dragleave.prevent="onDragLeave"
@@ -105,12 +105,12 @@
           @blur="onBoxFocusOut"
         />
 
-      <!-- 底栏三簇（D6 修订「三步聚合」+ ui-optimize 决策 6）：左簇（`+` / 托盘 / 插件 toolbar，shrink-0）·
-           中簇（可压缩占位）· 右簇（指标聚合 / 模型+思考 / 发送位，shrink-0 且发送位右锚）。
+      <!-- 底栏三簇（D6 修订「三步聚合」）：左簇（`+` / 托盘 / 插件 toolbar，shrink-0）·
+           中簇（可压缩占位）· 右簇（指标 / 模型+思考 / 发送位，shrink-0 且发送位右锚）。
            **flex-nowrap 永不换行**；逐组形态由密度状态机（ResizeObserver 实测两簇占宽 vs 可用宽
            → composer-density）驱动：序 0 发送位/`+` 不退化不裁剪 · 序 1 左簇收**单图标**聚合按钮 ·
-           序 2 指标**默认聚合**（单图标聚合按钮对所有 fit 级常驻，hover 聚合页——fit 0 平铺形态
-           已退役，L2 不再产生形态变化，fit 回路自然穿过）· 序 3 模型+思考收单图标聚合按钮
+           序 2 指标 fit 0/1 平铺（纯文本触发器）/ L2 起收**单图标**聚合按钮（hover 聚合页）·
+           序 3 模型+思考收单图标聚合按钮
            （click 弹层 + hover 行内切换；非聚合态模型名**恒完整展示**，无截断态）·
            顶格仍溢出 → 锚点保护（中部让位）。禁硬编码 px 断点（判据全在实测回路，`»` 省略号入口已退役）。
            左右两簇挂 data-composer-cluster：fit 回路据二者占宽之和判「放不放得下」（中簇可压到 0）。 -->
@@ -179,13 +179,19 @@
 
         <!-- 右簇：指标 / 模型+思考 / 发送位（shrink-0，发送位右锚不漂移） -->
         <div data-composer-cluster="right" class="flex min-w-0 shrink-0 items-center gap-1">
-          <!-- 序 2：指标（容量 + TTFT + 速度 + 缓存）。ui-optimize 决策 6：指标**默认聚合**——单图标
-               聚合按钮对所有 fit 级常驻（hover 弹指标聚合页，容量/TTFT/速度/缓存四卡全量、三条发丝分隔）；
-               fit 0 平铺直挂渲染分支（GenStatsTriggers / ContextCapacityPopover）已随决策退役，
-               形态域收窄为 aggregated | absent（absent = 锚点保护让位，不渲染）。
-               landing（无 session）不渲染。 -->
-          <div v-if="sessionId && density.slots.metrics !== 'absent'" :class="AGGREGATE_GROUP_CLASS">
-            <ComposerMetricsAggregate :session-id="sessionId" :model-id="currentModelId" />
+          <!-- 序 2：指标（容量 + TTFT + 速度 + 缓存）。expanded（fit 0/1）= 纯文本触发器平铺
+               （TTFT / 速度 / 缓存 + 容量，各自 hover 浮层保留为再入路径，demo `.mtr-exp` 同款）；
+               aggregated（L2 起）= **单图标**聚合按钮（hover 弹指标聚合页，容量/TTFT/速度/缓存四卡
+               全量）；absent = 锚点保护让位（不渲染）。landing（无 session）不渲染。 -->
+          <div
+            v-if="sessionId && density.slots.metrics !== 'absent'"
+            :class="density.slots.metrics === 'aggregated' ? AGGREGATE_GROUP_CLASS : EXPANDED_GROUP_CLASS"
+          >
+            <ComposerMetricsAggregate v-if="density.slots.metrics === 'aggregated'" :session-id="sessionId" :model-id="currentModelId" />
+            <template v-else>
+              <GenStatsTriggers :session-id="sessionId" :model-id="currentModelId" />
+              <ContextCapacityPopover :session-id="sessionId" :model-id="currentModelId" />
+            </template>
           </div>
           <!-- 序 3：模型 + 推理档位。展开 = 模型名**恒完整展示**（无 88/56px 截断态）+ 档位按钮；
                aggregated = **单图标**聚合按钮（click 弹模型列表+思考档位，hover 行内即切换，D2）。 -->
@@ -316,6 +322,8 @@ import ModelSelectPopover from './ModelSelectPopover.vue'
 import ThinkingLevelPopover from './ThinkingLevelPopover.vue'
 import ComposerMetricsAggregate from './ComposerMetricsAggregate.vue'
 import ComposerCapacityBar from './ComposerCapacityBar.vue'
+import GenStatsTriggers from './GenStatsTriggers.vue'
+import ContextCapacityPopover from './ContextCapacityPopover.vue'
 import ModelThinkingAggregate from './ModelThinkingAggregate.vue'
 import ContextChipsBar from './ContextChipsBar.vue'
 import RetryIndicator from './RetryIndicator.vue'
@@ -373,6 +381,10 @@ const projectSkillsCwd = computed<string | null>(() => {
 const { projectSkills } = useProjectSkills(projectSkillsCwd) // W3 ADR-0051：当前 cwd 项目 skill（两态接线见上）
 const { globalSkills } = useGlobalSkills() // W4 FR-5：全局 skill（skill 段两态共用）
 const isActive = computed(() => (props.sessionId ? chatStore.isActive(props.sessionId) : false))
+
+/** composer-box 圆角分档（demo 同款）：panel = --radius-lg 12px（workbench.css .composer-box）；
+ *  landing = --radius 8px（unpacked.css .landing .composer，M9 交接项对齐）。 */
+const boxRadiusClass = computed(() => (props.variant === 'landing' ? 'rounded' : 'rounded-lg'))
 
 /** #13 retry 指示位数据源（store 由 W0/#8 维护，不可变 Map 更新触发响应）。[u3c] queueState 已退役：队列区数据源收敛为 session.delivery 帧投影（useQueueRows）。 */
 const retryState = computed(() => (props.sessionId ? chatStore.getRetryState(props.sessionId) : undefined))

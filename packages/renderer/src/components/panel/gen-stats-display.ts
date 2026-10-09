@@ -110,3 +110,12 @@ export function ttftTier(ms: number | null): TtftTier {
   if (ms <= TTFT_DANGER_THRESHOLD_MS) return 'warn'
   return 'danger'
 }
+
+/** 档位 → 触发器 class 映射。字面量静态串（Tailwind JIT 按源码扫描生成类；模板字符串
+ *  拼接动态类名不在扫描集，样式会静默丢失——映射表而非 `text-${tier}` 拼接）。 */
+export const TTFT_TRIGGER_TIER_CLASSES: Record<TtftTier, string> = {
+  success: 'text-success hover:text-success',
+  warn: 'text-warn hover:text-warn',
+  danger: 'text-danger hover:text-danger',
+  neutral: 'text-neutral-dim hover:text-neutral-mid',
+}
