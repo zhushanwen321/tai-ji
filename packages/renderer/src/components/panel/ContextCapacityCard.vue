@@ -13,39 +13,40 @@
   store 全局共享、双实例同源收敛）。
 -->
 <template>
-  <!-- head -->
+  <!-- head（demo .cap-h：hairline 下边 + mono 10px 0.08em 小写标，无底色 tint，M4c） -->
   <div
-    class="flex items-center justify-between border-b border-border bg-white/[0.015] px-2.5 py-2 font-mono text-[10px] uppercase tracking-[0.08em] text-neutral-dim"
+    class="flex items-center justify-between border-b border-hairline px-2.5 py-2 font-mono text-[length:var(--text-3xs)] uppercase tracking-[0.08em] text-neutral-dim"
   >
     <span>{{ t('panel.context.capacity') }}</span>
     <!-- modelId 无 runtime 来源（D9）：占位「—」 -->
     <span>—</span>
   </div>
-  <!-- bar（仅 contextWindow 已知时显示） -->
-  <div v-if="hasPercent" class="mx-2.5 mt-2.5 h-1.5 overflow-hidden rounded-full bg-surface-2">
+  <!-- bar（仅 contextWindow 已知时显示；轨道对齐 demo .cap-bar：6px 高 + --hover 底，
+       填充三档语义色保留 real 既有设计——demo accent 填充无阈值语义，M4c 登记） -->
+  <div v-if="hasPercent" class="mx-2.5 mt-2.5 h-1.5 overflow-hidden rounded-full bg-surface-hover">
     <div
       :class="cn('h-full rounded-full transition-[width,background-color]', usageBarClass(usage.percent))"
       :style="{ width: `${usage.percent}%` }"
     />
   </div>
-  <!-- stats -->
+  <!-- stats（demo .cap-grid 语言：2 列 8/14px 间距 + 10px 内边距 + mono 标 / 14px 值） -->
   <div class="grid grid-cols-2 gap-x-3.5 gap-y-2 px-2.5 py-2.5">
     <div class="flex flex-col gap-0.5">
-      <span class="font-mono text-[10px] uppercase tracking-[0.05em] text-neutral-dim">{{ t('panel.context.used') }}</span>
-      <span class="font-sans text-[14px] font-semibold tabular-nums text-neutral-fg">{{ usedDisplay }}</span>
+      <span class="font-mono text-[length:var(--text-3xs)] uppercase tracking-[0.05em] text-neutral-dim">{{ t('panel.context.used') }}</span>
+      <span class="font-sans text-[length:var(--text-base)] font-semibold tabular-nums text-neutral-fg">{{ usedDisplay }}</span>
     </div>
     <div class="flex flex-col gap-0.5">
-      <span class="font-mono text-[10px] uppercase tracking-[0.05em] text-neutral-dim">{{ t('panel.context.total') }}</span>
-      <span class="font-sans text-[14px] font-semibold tabular-nums text-neutral-fg">{{ hasPercent ? totalDisplay : t('panel.context.unknown') }}</span>
+      <span class="font-mono text-[length:var(--text-3xs)] uppercase tracking-[0.05em] text-neutral-dim">{{ t('panel.context.total') }}</span>
+      <span class="font-sans text-[length:var(--text-base)] font-semibold tabular-nums text-neutral-fg">{{ hasPercent ? totalDisplay : t('panel.context.unknown') }}</span>
     </div>
     <div class="flex flex-col gap-0.5">
-      <span class="font-mono text-[10px] uppercase tracking-[0.05em] text-neutral-dim">{{ t('panel.context.usageRate') }}</span>
-      <span class="font-sans text-[14px] font-semibold tabular-nums text-neutral-fg">{{ hasPercent ? `${usage.percent}%` : '—' }}</span>
+      <span class="font-mono text-[length:var(--text-3xs)] uppercase tracking-[0.05em] text-neutral-dim">{{ t('panel.context.usageRate') }}</span>
+      <span class="font-sans text-[length:var(--text-base)] font-semibold tabular-nums text-neutral-fg">{{ hasPercent ? `${usage.percent}%` : '—' }}</span>
     </div>
     <div class="flex flex-col gap-0.5">
-      <span class="font-mono text-[10px] uppercase tracking-[0.05em] text-neutral-dim">{{ t('panel.context.cacheHit') }}</span>
+      <span class="font-mono text-[length:var(--text-3xs)] uppercase tracking-[0.05em] text-neutral-dim">{{ t('panel.context.cacheHit') }}</span>
       <!-- cacheHit 无 runtime 来源（D9）：占位「—」 -->
-      <span class="font-sans text-[14px] font-semibold tabular-nums text-neutral-dim">—</span>
+      <span class="font-sans text-[length:var(--text-base)] font-semibold tabular-nums text-neutral-dim">—</span>
     </div>
   </div>
 
@@ -105,7 +106,7 @@
   </template>
 
   <!-- footer -->
-  <div class="flex items-center justify-between border-t border-border px-2.5 py-1.5 font-mono text-[10px] text-neutral-dim">
+  <div class="flex items-center justify-between border-t border-hairline px-2.5 py-1.5 font-mono text-[length:var(--text-3xs)] text-neutral-dim">
     <span v-if="matchedProviderId && lastFetchAt">
       {{ formatLastFetch(lastFetchAt) }}
     </span>

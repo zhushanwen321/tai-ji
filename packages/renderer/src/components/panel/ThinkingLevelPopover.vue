@@ -1,14 +1,16 @@
 <template>
   <!--
     思考等级 popover（draft-composer-states §2c）。
-    触发器按「可操作 = 亮字」口径提亮（正文档色 + 600 字重，与模型触发器同款）；
-    浮层列表保持中性配色，仅选中态走 accent。等级强度靠 popover 内 off→max 的语义表达。
+    触发器对齐 demo `.thinksel`（M4c：11px 字号 / r-xs 圆角 / --fw-mid 字重，「可操作 = 亮字」
+    口径与模型触发器同款）；浮层列表对齐 demo `.popover right w120` 行语言（.pop-item：
+    min-h 28 / 5px 8px 内边距 / r-sm / fs-md / mid 字 hover 提 fg，无行首档位点——demo 行 =
+    名称 + 选中勾两元素），选中态走 demo 单一范式（SELECTED_ITEM_CLASS）。
   -->
   <Popover v-model:open="canOpen">
     <PopoverTrigger as-child>
       <Button
         variant="ghost"
-        class="h-7 gap-1 rounded-sm px-2 text-[11px] text-neutral-fg font-semibold transition-colors"
+        class="h-7 gap-1 rounded-[var(--radius-xs)] px-2 text-[length:var(--text-2xs)] text-neutral-fg font-semibold transition-colors"
         :title="t('panel.thinkingLevel.title')"
       >
         <!-- U4：切换中（停止态切档要先 ensureActive 拉活）→ 转圈 + 禁止重复开合/点选 -->
@@ -21,10 +23,16 @@
         />
       </Button>
     </PopoverTrigger>
-    <PopoverContent side="top" class="w-[180px] p-0">
-      <!-- head -->
+    <!-- 容器对齐 demo `.popover right w120`：右锚 / 锚距 10px / 最小宽 120px / r-lg / 4px 内边距 -->
+    <PopoverContent
+      side="top"
+      align="end"
+      :side-offset="10"
+      class="tl-pop-motion min-w-[120px] rounded-lg p-1"
+    >
+      <!-- head（demo .pop-head：mono 小写字距标，无底色无分隔边） -->
       <div
-        class="flex items-center justify-between border-b border-border bg-white/[0.015] px-2.5 py-2 font-mono text-[10px] uppercase tracking-[0.08em] text-neutral-dim"
+        class="px-2 pb-[4px] pt-[6px] font-mono text-[length:var(--text-3xs)] uppercase tracking-[0.08em] text-neutral-dim"
       >
         <span>{{ t('panel.thinkingLevel.title') }}</span>
       </div>
@@ -33,17 +41,13 @@
         v-for="opt in availableOptions"
         :key="opt.level"
         variant="ghost"
-        class="flex w-full items-center gap-2 rounded-none px-2.5 py-2 text-[13px] text-neutral-mid hover:bg-surface-hover hover:text-neutral-fg"
-        :class="level === opt.level && 'bg-accent-soft text-accent hover:bg-accent-soft hover:text-accent'"
+        class="flex min-h-[28px] w-full items-center gap-2 rounded-sm px-2 py-[5px] font-normal text-[length:var(--text-xs)] text-neutral-mid hover:bg-surface-hover hover:text-neutral-fg"
+        :class="level === opt.level && SELECTED_ITEM_CLASS"
         @click="onSelect(opt)"
       >
-        <span
-          class="size-[7px] shrink-0 rounded-full"
-          :class="level === opt.level ? 'bg-accent' : 'bg-neutral-dim'"
-        />
         <span class="flex-1 text-left">{{ getDisplayLabel(opt.level, props.levelMap, t) }}</span>
         <Check
-          class="size-[13px] text-accent transition-opacity"
+          class="size-[13px] shrink-0 transition-opacity"
           :class="level === opt.level ? 'opacity-100' : 'opacity-0'"
         />
       </Button>
@@ -57,6 +61,7 @@ import { useI18n } from 'vue-i18n'
 import { Check, ChevronDown, LoaderCircle, Brain } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { SELECTED_ITEM_CLASS } from '@/composables/logic/popover-styles'
 import {
   currentThinkingLevelKey,
   availableThinkingLevelOptions,
@@ -130,3 +135,30 @@ function onSelect(opt: ThinkingLevelOption): void {
   open.value = false
 }
 </script>
+
+<style>
+/*
+ * 思考档位弹层开合动效（demo E5 方向缓动；M4b tray-pop-motion 同范式，机制说明见
+ * ModelSelectPopover.vue 文件尾同款块）：进 ease-out / 出 ease-in，位移 3px + 透明度，
+ * 120ms；@starting-style 提供进场首帧；reduced-motion 全关。tl- 前缀命名空间。
+ */
+.tl-pop-motion[data-state='open'] {
+  transform: translateY(0) !important;
+  transition-timing-function: var(--ease-out) !important;
+}
+.tl-pop-motion[data-state='closed'] {
+  transform: translateY(3px) !important;
+  transition-timing-function: var(--ease-in) !important;
+}
+@starting-style {
+  .tl-pop-motion[data-state='open'] {
+    transform: translateY(3px) !important;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tl-pop-motion[data-state='open'],
+  .tl-pop-motion[data-state='closed'] {
+    transition: none !important;
+  }
+}
+</style>

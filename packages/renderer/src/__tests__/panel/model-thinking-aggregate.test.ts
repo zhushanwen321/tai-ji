@@ -287,9 +287,10 @@ describe('数据面与 ModelSelectPopover 同源（model-picker-data）', () => 
     await openAggregate(w)
 
     const claudeRow = document.body.querySelector('[data-testid="model-picker-item-claude-4"]')
-    // 选中行带 SELECTED_ITEM_CLASS（bg-accent-soft），非选中行不带——裸 id 反查对齐的 DOM 侧证
-    expect(claudeRow?.className ?? '').toContain('bg-accent-soft')
+    // 选中行带 SELECTED_ITEM_CLASS（demo 选中范式：elevated 底 + accent 内嵌标，M4c），
+    // 非选中行不带——裸 id 反查对齐的 DOM 侧证
+    expect(claudeRow?.className ?? '').toContain('shadow-[inset_2px_0_0_var(--accent)]')
     const gptRow = document.body.querySelector('[data-testid="model-picker-item-gpt-4"]')
-    expect(gptRow?.className ?? '').not.toContain('bg-accent-soft')
+    expect(gptRow?.className ?? '').not.toContain('shadow-[inset_2px_0_0_var(--accent)]')
   })
 })

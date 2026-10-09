@@ -12,36 +12,38 @@
   契约：props = { sessionId?, modelId? }，无 emits。数据纯读（useGenStats 分区自持实例）。
 -->
 <template>
-  <!-- head -->
+  <!-- head（demo .cap-h：hairline 下边 + mono 10px 0.08em 小写标，无底色 tint，M4c） -->
   <div
-    class="flex items-center justify-between border-b border-border bg-white/[0.015] px-2.5 py-2 font-mono text-[10px] uppercase tracking-[0.08em] text-neutral-dim"
+    class="flex items-center justify-between border-b border-hairline px-2.5 py-2 font-mono text-[length:var(--text-3xs)] uppercase tracking-[0.08em] text-neutral-dim"
   >
     <span>{{ t('panel.context.genStatsCacheTitle') }}</span>
     <span class="max-w-[140px] truncate" data-testid="genstats-cache-model">{{ frame?.model ?? '—' }}</span>
   </div>
   <!-- 无合法帧：暂无数据 -->
-  <div v-if="!frame" class="px-2.5 py-3 text-center text-[10.5px] text-neutral-dim">
+  <div v-if="!frame" class="px-2.5 py-3 text-center text-[length:var(--text-3xs)] text-neutral-dim">
     {{ t('panel.context.genStatsNoData') }}
   </div>
   <template v-else>
-    <!-- 两行聚合：本次请求 / 今日加权 -->
+    <!-- 两行聚合：本次请求 / 今日加权（demo .cap-grid 语言：2 列 8/14px 间距 + 10px 内边距） -->
     <div class="grid grid-cols-2 gap-x-3.5 gap-y-2 px-2.5 py-2.5">
       <div class="flex flex-col gap-0.5">
-        <span class="font-mono text-[10px] uppercase tracking-[0.05em] text-neutral-dim">{{ t('panel.context.genStatsCurrentReq') }}</span>
-        <span class="font-sans text-[14px] font-semibold tabular-nums" :class="cacheCurrentClass">
+        <span class="font-mono text-[length:var(--text-3xs)] uppercase tracking-[0.05em] text-neutral-dim">{{ t('panel.context.genStatsCurrentReq') }}</span>
+        <span class="font-sans text-[length:var(--text-base)] font-semibold tabular-nums" :class="cacheCurrentClass">
           {{ cacheDisplay }}
         </span>
       </div>
       <div class="flex flex-col gap-0.5">
-        <span class="font-mono text-[10px] uppercase tracking-[0.05em] text-neutral-dim">{{ t('panel.context.genStatsDayShort') }}</span>
-        <span class="font-sans text-[14px] font-semibold tabular-nums" :class="frame.cacheRatio.day == null ? 'text-neutral-dim' : 'text-neutral-fg'">
+        <span class="font-mono text-[length:var(--text-3xs)] uppercase tracking-[0.05em] text-neutral-dim">{{ t('panel.context.genStatsDayShort') }}</span>
+        <span class="font-sans text-[length:var(--text-base)] font-semibold tabular-nums" :class="frame.cacheRatio.day == null ? 'text-neutral-dim' : 'text-neutral-fg'">
           {{ cachePercentDisplay(frame.cacheRatio.day) }}
         </span>
       </div>
     </div>
     <!-- bar（仅未归因的数值命中率有值时显示；宽度/颜色按三档语义色）——归因态无 0% 数值可画，
-         空轨道反而会读成「命中率 0」的另一种画法，故整体隐藏 -->
-    <div v-if="frame.cacheRatio.current != null && !cacheMiss" class="mx-2.5 mt-0.5 h-1 overflow-hidden rounded-full bg-surface-2">
+         空轨道反而会读成「命中率 0」的另一种画法，故整体隐藏。轨道对齐 demo .cap-bar：
+         6px 高 + --hover 底（填充色保留 real 三档语义色，demo cap-bar 的 accent 填充是
+         容量语义，缓存三档语义色是 real 既有设计，M4c 登记） -->
+    <div v-if="frame.cacheRatio.current != null && !cacheMiss" class="mx-2.5 mt-0.5 h-1.5 overflow-hidden rounded-full bg-surface-hover">
       <div
         :class="cn('h-full rounded-full transition-[width,background-color]', CACHE_TIER_BG_CLASS[cacheTierOf(cacheCurrent)])"
         :style="{ width: `${frame.cacheRatio.current}%` }"
@@ -49,7 +51,7 @@
       />
     </div>
     <!-- 口径说明（归因降噪：已知成因的 0% 先把成因说清，再接通用口径） -->
-    <div class="mt-2 border-t border-border px-2.5 py-1.5 font-mono text-[10px] text-neutral-dim">
+    <div class="mt-2 border-t border-hairline px-2.5 py-1.5 font-mono text-[length:var(--text-3xs)] text-neutral-dim">
       <p
         v-if="cacheMissNoteText"
         class="mb-1 text-neutral-mid"

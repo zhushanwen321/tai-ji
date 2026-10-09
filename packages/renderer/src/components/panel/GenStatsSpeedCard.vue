@@ -10,33 +10,34 @@
   数据纯读：本卡自持 useGenStats 分区实例（useSessionScopedState 共享分区，与聚合页同源）。
 -->
 <template>
-  <!-- head -->
+  <!-- head（demo .cap-h：hairline 下边 + mono 10px 0.08em 小写标，无底色 tint，M4c） -->
   <div
-    class="flex items-center justify-between border-b border-border bg-white/[0.015] px-2.5 py-2 font-mono text-[10px] uppercase tracking-[0.08em] text-neutral-dim"
+    class="flex items-center justify-between border-b border-hairline px-2.5 py-2 font-mono text-[length:var(--text-3xs)] uppercase tracking-[0.08em] text-neutral-dim"
   >
     <span>{{ t('panel.context.genStatsSpeedTitle') }}</span>
     <span class="max-w-[140px] truncate" data-testid="genstats-speed-model">{{ frame?.model ?? '—' }}</span>
   </div>
   <!-- 无合法帧：暂无数据（§3.4——从未有帧与有帧无值的 UX 差异落在浮层） -->
-  <div v-if="!frame" class="px-2.5 py-3 text-center text-[10.5px] text-neutral-dim">
+  <div v-if="!frame" class="px-2.5 py-3 text-center text-[length:var(--text-3xs)] text-neutral-dim">
     {{ t('panel.context.genStatsNoData') }}
   </div>
   <template v-else>
-    <!-- 四行聚合（2×2 grid）：本次 / 今日均值 / 近 7 天 / 近 30 天 -->
+    <!-- 四行聚合（2×2 grid）：本次 / 今日均值 / 近 7 天 / 近 30 天
+         （demo .cap-grid 语言：2 列 8/14px 间距 + 10px 内边距 + mono 标 / 14px 值） -->
     <div class="grid grid-cols-2 gap-x-3.5 gap-y-2 px-2.5 py-2.5">
       <div v-for="row in speedRows" :key="row.label" class="flex flex-col gap-0.5">
         <!-- 「本次」label 带 hover 补句（C4）：current 无窗口过滤且为会话私有样本，澄清样本来自本会话最近一次请求 -->
         <span
-          class="font-mono text-[10px] uppercase tracking-[0.05em] text-neutral-dim"
+          class="font-mono text-[length:var(--text-3xs)] uppercase tracking-[0.05em] text-neutral-dim"
           :title="row.note ?? undefined"
         >{{ row.label }}</span>
-        <span class="font-sans text-[14px] font-semibold tabular-nums" :class="row.value == null ? 'text-neutral-dim' : 'text-neutral-fg'">
+        <span class="font-sans text-[length:var(--text-base)] font-semibold tabular-nums" :class="row.value == null ? 'text-neutral-dim' : 'text-neutral-fg'">
           {{ row.value == null ? '—' : formatSpeed(row.value) }}
         </span>
       </div>
     </div>
     <!-- 口径说明 -->
-    <div class="border-t border-border px-2.5 py-1.5 font-mono text-[10px] text-neutral-dim">
+    <div class="border-t border-hairline px-2.5 py-1.5 font-mono text-[length:var(--text-3xs)] text-neutral-dim">
       {{ t('panel.context.genStatsSpeedNote') }}
     </div>
   </template>

@@ -207,8 +207,9 @@ describe('ScheduleForm · §4-附 行为保真清单', () => {
 
     // 「当前会话」标记跟随 draft.currentModel（触发器内）
     expect(fallback.find('[data-testid="schedule-create-model-trigger"]').text()).toContain('当前会话')
-    // 候选列表常挂（v-show），选中项高亮（ModelPickerPanel 选中态）
-    expect(fallback.find('[data-testid="schedule-create-model-m-1"]').classes().join(' ')).toContain('bg-accent-soft')
+    // 候选列表常挂（v-show），选中项高亮（ModelPickerPanel 选中态 = demo 选中范式
+    // elevated 底 + accent 内嵌标，M4c）
+    expect(fallback.find('[data-testid="schedule-create-model-m-1"]').classes().join(' ')).toContain('shadow-[inset_2px_0_0_var(--accent)]')
 
     // 空候选列表 → hint（跟随会话当前模型），提交不携带 model
     const noModels = mountForm({ ...baseDraft, models: [], currentModel: undefined })

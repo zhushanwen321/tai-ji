@@ -27,7 +27,15 @@
         <span v-else>{{ currentName }}</span>
       </PopoverTriggerButton>
     </slot>
-    <PopoverContent side="top" class="w-[220px] p-0">
+    <!-- 容器对齐 demo `.popover right w190`（workbench.css composer 段，M4c）：右锚
+         （align end）/ 锚距 10px / 最小宽 190px / r-lg 圆角 / 4px 内边距（搜索框与行自带的
+         内边距叠在其上）；开合动效走文件尾 ms-pop-motion 全局块（M4b tray-pop-motion 同范式） -->
+    <PopoverContent
+      side="top"
+      align="end"
+      :side-offset="10"
+      class="ms-pop-motion min-w-[190px] rounded-lg p-1"
+    >
       <ModelPickerPanel
         :groups="pickerGroups"
         :model-value="bareModelId(selectedValue)"
@@ -118,3 +126,35 @@ function onSelect(id: string, provider: ProviderId): void {
   emit('select', { modelId: id, provider })
 }
 </script>
+
+<style>
+/*
+ * 模型弹层开合动效（demo E5 方向缓动，drawers.css 的 .pop-enter-active / .pop-leave-active
+ * 权威；M4b tray-pop-motion 同范式）：进 = opacity 0→1 + translateY(3px)→0，ease-out；
+ * 出 = 反向，ease-in；时长 120ms（--duration-fast，与 demo --dur-fast 同值，由基类
+ * .reka-popover-transition 的 transition 简写承载）；关闭态 transform 由基类 scale(0.96)
+ * 改写为 translateY(3px)。!important 压过基类同特异性规则（style.css 中
+ * .reka-popover-transition 声明序在 tailwind utilities 之后，非 important 覆写会输掉级联）；
+ * @starting-style 给进场首帧提供 translateY(3px) 起点（Tailwind 无法表达，机制先例见
+ * TrayPanelSurface.vue 文件头）。命名空间 ms- 前缀防与其他浮层动效类冲突。
+ */
+.ms-pop-motion[data-state='open'] {
+  transform: translateY(0) !important;
+  transition-timing-function: var(--ease-out) !important;
+}
+.ms-pop-motion[data-state='closed'] {
+  transform: translateY(3px) !important;
+  transition-timing-function: var(--ease-in) !important;
+}
+@starting-style {
+  .ms-pop-motion[data-state='open'] {
+    transform: translateY(3px) !important;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ms-pop-motion[data-state='open'],
+  .ms-pop-motion[data-state='closed'] {
+    transition: none !important;
+  }
+}
+</style>

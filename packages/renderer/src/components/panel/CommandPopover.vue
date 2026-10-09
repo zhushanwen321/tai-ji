@@ -27,7 +27,9 @@
     - 选中态 bg-surface（实色）——D8 特例，不复用 popover-styles.ts 的 SELECTED_ITEM_CLASS（bg-accent-soft）
     - skill 类命令未选中时图标 text-reasoning（紫，demo .cmd-ico.skill）；选中统一 text-accent
     - 命令名 font-semibold（非 mono）+ middot · 分隔符（命令名与描述间）
-    - 容器投影走 PopoverContent 默认 shadow-2（demo .cmd-pop box-shadow）
+    - 容器投影走 PopoverContent 默认 shadow-2；容器圆角/锚距/动效对齐弹层通用语言
+      （M4c：rounded-lg 12px / 锚距 10px / E5 方向缓动——demo composer 无命令浮层对应物，
+      按任务目标 2 自洽）
   -->
   <Popover v-model:open="controlledOpen">
     <!-- anchor：composer-box 本身（由调用方通过 slot 传入），仅作定位/宽度锚源，
@@ -43,9 +45,9 @@
       v-if="open"
       side="top"
       align="start"
-      :side-offset="6"
+      :side-offset="10"
       :collision-padding="8"
-      class="w-[var(--reka-popper-anchor-width)] max-w-[calc(100vw-16px)] overflow-hidden p-0"
+      class="cp-pop-motion w-[var(--reka-popper-anchor-width)] max-w-[calc(100vw-16px)] overflow-hidden rounded-lg p-0"
       @open-auto-focus.prevent
     >
       <!-- D7：landing cwd 路错误态（加载失败 vs 无结果两因区分）——整行可点重试（重发起拉取） -->
@@ -443,3 +445,31 @@ const { activeIndex, handleKeydown } = useCommandPopoverKeyboard<CmdItem>({
 
 defineExpose({ handleKeydown })
 </script>
+
+<style>
+/*
+ * 命令浮层开合动效（demo E5 方向缓动；M4b tray-pop-motion 同范式，机制说明见
+ * ModelSelectPopover.vue 文件尾同款块）：进 ease-out / 出 ease-in，位移 3px + 透明度，
+ * 120ms；@starting-style 提供进场首帧；reduced-motion 全关。cp- 前缀命名空间。
+ * demo composer 无命令浮层对应物——动效取弹层通用语言（任务目标 2），行形态保留 real。
+ */
+.cp-pop-motion[data-state='open'] {
+  transform: translateY(0) !important;
+  transition-timing-function: var(--ease-out) !important;
+}
+.cp-pop-motion[data-state='closed'] {
+  transform: translateY(3px) !important;
+  transition-timing-function: var(--ease-in) !important;
+}
+@starting-style {
+  .cp-pop-motion[data-state='open'] {
+    transform: translateY(3px) !important;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cp-pop-motion[data-state='open'],
+  .cp-pop-motion[data-state='closed'] {
+    transition: none !important;
+  }
+}
+</style>

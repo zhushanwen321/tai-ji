@@ -121,26 +121,27 @@ function onRowEnter(model: ModelPickerModel, group: ModelPickerGroup): void {
 
 <template>
   <div class="flex flex-col" data-testid="model-picker-panel">
-    <!-- 搜索 -->
-    <div class="border-b border-border p-2">
+    <!-- 搜索（real 功能面：demo 模型弹层无搜索框；输入槽形态对齐 demo .tsearch——
+         card-inset 凹陷底 + r-xs 圆角 + 8px 水平内边距 + fs-md 字号，M4c） -->
+    <div class="border-b border-hairline p-1">
       <Input
         v-model="query"
         data-testid="model-picker-search"
         :placeholder="t('panel.modelSelect.searchPlaceholder')"
-        class="h-7 bg-surface-2 text-[12px]"
+        class="h-7 rounded-[var(--radius-xs)] bg-bg-input px-2 text-[length:var(--text-xs)]"
       />
     </div>
 
-    <!-- 分组列表 -->
-    <div class="max-h-[280px] overflow-y-auto py-1" data-testid="model-picker-list">
+    <!-- 分组列表（demo 行语言 = .pop-item：min-h 28 / 5px 8px 内边距 / r-sm 圆角 /
+         fs-md 字号 / mid 字 hover 提 fg；max-h 滚动列表 real 独有，模型池可超一屏） -->
+    <div class="max-h-[280px] overflow-y-auto" data-testid="model-picker-list">
       <div
         v-for="group in filteredGroups"
         :key="group.provider || '__ungrouped__'"
-        class="py-1"
       >
         <div
           v-if="group.provider"
-          class="px-2.5 pb-1 pt-2 font-mono text-[10px] uppercase tracking-[0.08em] text-neutral-dim"
+          class="px-2 pb-[4px] pt-[6px] font-mono text-[length:var(--text-3xs)] uppercase tracking-[0.08em] text-neutral-dim"
         >
           {{ group.provider }}
         </div>
@@ -149,14 +150,15 @@ function onRowEnter(model: ModelPickerModel, group: ModelPickerGroup): void {
           :key="model.id"
           variant="ghost"
           :data-testid="`${itemTestIdPrefix}-${model.id}`"
-          class="flex w-full items-center gap-2 rounded-none px-2.5 py-[7px] text-[13px] text-neutral-mid hover:bg-surface-hover hover:text-neutral-fg"
+          class="flex min-h-[28px] w-full items-center gap-2 rounded-sm px-2 py-[5px] font-normal text-[length:var(--text-xs)] text-neutral-mid hover:bg-surface-hover hover:text-neutral-fg"
           :class="isRowSelected(model, group) && SELECTED_ITEM_CLASS"
           @click="onPick(model, group)"
           @pointerenter="onRowEnter(model, group)"
         >
+          <!-- 行名不截断（demo .pop-item white-space:nowrap，弹层宽随最长行增长；Button 基类自带 nowrap） -->
           <span class="flex-1 text-left">{{ model.name ?? model.id }}</span>
           <Check
-            class="size-[13px] text-accent opacity-0"
+            class="size-[13px] shrink-0 opacity-0"
             :class="isRowSelected(model, group) && 'opacity-100'"
           />
         </Button>
@@ -165,7 +167,7 @@ function onRowEnter(model: ModelPickerModel, group: ModelPickerGroup): void {
       <div
         v-if="filteredGroups.length === 0"
         data-testid="model-picker-empty"
-        class="px-2.5 py-3 text-center text-[12px] text-neutral-dim"
+        class="px-2 py-3 text-center text-[length:var(--text-xs)] text-neutral-dim"
       >
         {{ hasAnyCandidate ? t('panel.modelSelect.noMatch') : t('panel.modelSelect.noModel') }}
       </div>
