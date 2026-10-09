@@ -62,11 +62,11 @@ provide(NewTaskDepsKey, deps)
 const flow = deps.flow
 const toastError = deps.toast.error
 
-/** [D9] landing 输入卡固定窄宽：根元素局部覆写全局令牌 --content-max-w（值同全局 720px）。
- *  main-area 恒把该令牌覆写为 100%（useDrawerSplitWidth），全局封顶在此被解除——landing
- *  内容列不加本覆写会被撑满。覆写后 composer 实宽 = min(0.6 × W − 48px, 720px)；
+/** [D9] landing 输入卡固定窄宽：根元素局部覆写全局令牌 --content-max-w（demo 阅读列形态
+ *  min(720px, 100%)——窄容器自动让位满宽）。main-area 恒把该令牌覆写为 100%
+ *  （useDrawerSplitWidth），全局封顶在此被解除——landing 内容列不加本覆写会被撑满；
  *  覆写手段与 main-area 的 100% 覆写同族（局部覆写全局令牌，不新造机制/令牌）。 */
-const LANDING_CONTENT_MAX_W = '720px'
+const LANDING_CONTENT_MAX_W = 'min(720px, 100%)'
 
 /**
  * [perf-landing 跳转先行] 首发提交飞行中（flow.isInflight = createInFlight，submitFirstMessage
@@ -289,7 +289,7 @@ function onPresetSelect(payload: { presetId: string }): void {
 <template>
   <div
     data-testid="new-task-landing"
-    class="relative flex min-h-0 flex-1 flex-col items-center justify-center gap-8 overflow-hidden p-6"
+    class="relative flex min-h-0 flex-1 flex-col items-center justify-center gap-4 overflow-hidden p-6"
     :style="{ '--content-max-w': LANDING_CONTENT_MAX_W }"
   >
 
@@ -311,7 +311,7 @@ function onPresetSelect(payload: { presetId: string }): void {
       <Button
         data-testid="new-task-cancel-create"
         variant="ghost"
-        class="h-auto gap-1.5 px-3 py-1.5 text-[12px] text-neutral-mid hover:bg-surface-hover hover:text-neutral-fg disabled:pointer-events-none disabled:opacity-50"
+        class="h-auto gap-1.5 px-3 py-1.5 text-[length:var(--text-xs)] text-neutral-mid hover:bg-surface-hover hover:text-neutral-fg disabled:pointer-events-none disabled:opacity-50"
         :disabled="isCancelling"
         @click="onCancelCreate"
       >
@@ -334,7 +334,7 @@ function onPresetSelect(payload: { presetId: string }): void {
       v-if="historyError"
       data-testid="retry-history"
       variant="secondary"
-      class="z-10 h-auto gap-1.5 px-3 py-1.5 text-[12px] text-neutral-mid hover:bg-surface-hover hover:text-neutral-fg [&_svg]:size-3.5"
+      class="z-10 h-auto gap-1.5 px-3 py-1.5 text-[length:var(--text-xs)] text-neutral-mid hover:bg-surface-hover hover:text-neutral-fg [&_svg]:size-3.5"
       @click="onRetry"
     >
       <RefreshCw class="shrink-0" />
@@ -359,14 +359,14 @@ function onPresetSelect(payload: { presetId: string }): void {
               <Button
                 data-testid="chip-directory"
                 variant="ghost"
-                class="h-auto min-w-0 shrink-0 gap-1.5 px-2 py-1 text-[12px] text-neutral-mid hover:bg-surface-hover hover:text-neutral-fg [&_svg]:size-3.5"
+                class="h-auto min-h-6 min-w-0 shrink-0 gap-1.5 rounded-sm px-2 py-[3px] text-[length:var(--text-xs)] text-neutral-mid hover:bg-surface-hover hover:text-neutral-fg [&_svg]:size-3.5"
                 :class="{ '!text-accent': !cwd }"
               >
                 <Folder class="shrink-0" />
                 <span class="max-w-[110px] truncate font-mono">{{ dirLabel }}</span>
               </Button>
             </PopoverTrigger>
-            <PopoverContent side="top" :collision-padding="8" class="w-[320px] p-0">
+            <PopoverContent side="top" :side-offset="10" :collision-padding="8" class="w-[320px] p-0">
               <DirSelectPopover
                 :current-cwd="currentCwd ?? null"
                 @select="onSelectWorkspace"
@@ -381,13 +381,13 @@ function onPresetSelect(payload: { presetId: string }): void {
               <Button
                 data-testid="chip-branch"
                 variant="ghost"
-                class="h-auto min-w-0 shrink-[8] gap-1.5 px-2 py-1 text-[12px] text-neutral-mid hover:bg-surface-hover hover:text-neutral-fg [&_svg]:size-3.5"
+                class="h-auto min-h-6 min-w-0 shrink-[8] gap-1.5 rounded-sm px-2 py-[3px] text-[length:var(--text-xs)] text-neutral-mid hover:bg-surface-hover hover:text-neutral-fg [&_svg]:size-3.5"
               >
                 <GitFork class="shrink-0" />
                 <span class="max-w-[76px] min-w-0 truncate font-mono">{{ branch || t('newTask.landing.gitRepo') }}</span>
               </Button>
             </PopoverTrigger>
-            <PopoverContent side="top" :collision-padding="8" class="w-[420px] p-0">
+            <PopoverContent side="top" :side-offset="10" :collision-padding="8" class="w-[420px] p-0">
               <BranchSelectPopover
                 :mode="flow.mode?.value === 'bare-workspace' ? 'bare-workspace' : 'plain-repo'"
                 :cwd="cwd ?? ''"

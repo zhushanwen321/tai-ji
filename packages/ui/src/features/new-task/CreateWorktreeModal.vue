@@ -217,78 +217,79 @@ onBeforeUnmount(() => { cancelled.value = true; clearSuccessTimer() })
 
 <template>
   <Dialog :open="true" @update:open="onOpenChange">
-    <DialogContent data-testid="create-worktree-modal" class="sm:max-w-[560px]" :hide-close="phase === 'progress'">
+    <DialogContent data-testid="create-worktree-modal" class="sm:max-w-[520px]" :hide-close="phase === 'progress'">
       <DialogHeader>
         <DialogTitle>{{ t('newTask.createWorktree.title') }}</DialogTitle>
         <DialogDescription>{{ t('newTask.createWorktree.desc') }}</DialogDescription>
       </DialogHeader>
 
-      <!-- ── form 态（<form> 包裹：Enter 提交走原生隐式提交链路） ── -->
-      <form v-if="phase === 'form'" class="mt-2 space-y-4" @submit.prevent="submitCreate">
+      <!-- ── form 态（<form> 包裹：Enter 提交走原生隐式提交链路）。表单节奏对齐 demo 弹窗语言
+          （cpop）：标题下 12px、行距 10px、label↔input 4px、动作区上距 16px ── -->
+      <form v-if="phase === 'form'" class="mt-3 space-y-2.5" @submit.prevent="submitCreate">
         <!-- Git 仓库选择器 -->
-        <div class="space-y-1.5">
+        <div class="space-y-1">
           <Label>{{ t('newTask.createWorktree.repoLabel') }}</Label>
-          <div v-if="repoDetectLoading" data-testid="repo-loading" class="flex items-center gap-2 rounded-md border border-border bg-surface-2 px-3 py-2">
-            <Loader2 class="size-4 animate-spin text-neutral-dim" /><span class="text-[13px] text-neutral-dim">...</span>
+          <div v-if="repoDetectLoading" data-testid="repo-loading" class="flex items-center gap-2 rounded-md border border-border bg-bg-input px-3 py-2">
+            <Loader2 class="size-4 animate-spin text-neutral-dim" /><span class="text-[length:var(--text-sm)] text-neutral-dim">...</span>
           </div>
-          <div v-else-if="isBareMode" data-testid="repo-bare" class="flex items-center gap-2 rounded-md border border-border bg-surface-2 px-3 py-2">
+          <div v-else-if="isBareMode" data-testid="repo-bare" class="flex items-center gap-2 rounded-md border border-border bg-bg-input px-3 py-2">
             <Folder class="size-4 shrink-0 text-neutral-dim" />
-            <span class="flex-1 truncate font-mono text-[13px] text-neutral-fg">{{ repoPath }}</span>
-            <span data-testid="repo-bare-badge" class="shrink-0 rounded-full bg-accent/15 px-2 py-0.5 text-[11px] font-medium text-accent">{{ t('newTask.createWorktree.repoBareBadge') }}</span>
+            <span class="flex-1 truncate font-mono text-[length:var(--text-sm)] text-neutral-fg">{{ repoPath }}</span>
+            <span data-testid="repo-bare-badge" class="shrink-0 rounded-full bg-accent/15 px-2 py-0.5 text-[length:var(--text-2xs)] font-medium text-accent">{{ t('newTask.createWorktree.repoBareBadge') }}</span>
           </div>
-          <div v-else-if="isPlainRepoMode" data-testid="repo-plain" class="flex items-center gap-2 rounded-md border border-border bg-surface-2 px-3 py-2">
+          <div v-else-if="isPlainRepoMode" data-testid="repo-plain" class="flex items-center gap-2 rounded-md border border-border bg-bg-input px-3 py-2">
             <FolderOpen class="size-4 shrink-0 text-neutral-dim" />
-            <span class="flex-1 truncate font-mono text-[13px] text-neutral-fg">{{ repoPath }}</span>
-            <Button type="button" variant="ghost" data-testid="repo-change-btn" class="h-auto shrink-0 px-2 py-0.5 text-[12px] text-accent hover:text-accent" @click="onChangeRepo">{{ t('newTask.createWorktree.repoChange') }}</Button>
+            <span class="flex-1 truncate font-mono text-[length:var(--text-sm)] text-neutral-fg">{{ repoPath }}</span>
+            <Button type="button" variant="ghost" data-testid="repo-change-btn" class="h-auto shrink-0 px-2 py-0.5 text-[length:var(--text-xs)] text-accent hover:text-accent" @click="onChangeRepo">{{ t('newTask.createWorktree.repoChange') }}</Button>
           </div>
-          <div v-else-if="isDetectFailedMode" data-testid="repo-detect-failed" class="flex items-center gap-2 rounded-md border border-border bg-surface-2 px-3 py-2 opacity-60">
+          <div v-else-if="isDetectFailedMode" data-testid="repo-detect-failed" class="flex items-center gap-2 rounded-md border border-border bg-bg-input px-3 py-2 opacity-60">
             <AlertTriangle class="size-4 shrink-0 text-warn" />
-            <span class="text-[13px] text-neutral-mid">{{ t('newTask.createWorktree.repoDetectFailed') }}</span>
+            <span class="text-[length:var(--text-sm)] text-neutral-mid">{{ t('newTask.createWorktree.repoDetectFailed') }}</span>
           </div>
-          <div v-else data-testid="repo-not-repo" class="flex items-center gap-2 rounded-md border border-border bg-surface-2 px-3 py-2 opacity-60">
+          <div v-else data-testid="repo-not-repo" class="flex items-center gap-2 rounded-md border border-border bg-bg-input px-3 py-2 opacity-60">
             <AlertTriangle class="size-4 shrink-0 text-warn" />
-            <span class="text-[13px] text-neutral-mid">{{ t('newTask.createWorktree.repoNotRepo') }}</span>
+            <span class="text-[length:var(--text-sm)] text-neutral-mid">{{ t('newTask.createWorktree.repoNotRepo') }}</span>
           </div>
         </div>
 
         <!-- 分支名 -->
-        <div class="space-y-1.5">
+        <div class="space-y-1">
           <Label for="worktree-branch-input">{{ t('newTask.createWorktree.branchLabel') }}</Label>
           <Input id="worktree-branch-input" ref="inputRef" v-model="branchName" data-testid="worktree-branch-input" :placeholder="t('newTask.createWorktree.branchPlaceholder')" autocomplete="off" :class="showFormatError ? '!border-destructive' : ''" :disabled="isRepoUnavailable" />
-          <p v-if="showFormatError" data-testid="worktree-branch-error" class="text-[12px] text-danger">{{ t('newTask.createWorktree.branchValidation') }}</p>
+          <p v-if="showFormatError" data-testid="worktree-branch-error" class="text-[length:var(--text-xs)] text-danger">{{ t('newTask.createWorktree.branchValidation') }}</p>
         </div>
 
         <!-- 目录名预览 -->
         <div class="space-y-1">
-          <p class="text-[12px] text-neutral-dim">{{ t('newTask.createWorktree.dirPreviewLabel') }}</p>
-          <p data-testid="worktree-dir-preview" class="rounded-md border border-border bg-surface-2 px-3 py-2 font-mono text-[13px] text-neutral-fg">{{ dirPreview || '—' }}</p>
+          <p class="text-[length:var(--text-xs)] text-neutral-dim">{{ t('newTask.createWorktree.dirPreviewLabel') }}</p>
+          <p data-testid="worktree-dir-preview" class="rounded-md border border-border bg-bg-input px-3 py-2 font-mono text-[length:var(--text-sm)] text-neutral-fg">{{ dirPreview || '—' }}</p>
         </div>
 
         <!-- base 分支可搜索 combobox -->
         <div class="space-y-1">
-          <p class="text-[12px] text-neutral-dim">{{ t('newTask.createWorktree.baseLabel') }}</p>
+          <p class="text-[length:var(--text-xs)] text-neutral-dim">{{ t('newTask.createWorktree.baseLabel') }}</p>
           <Popover :open="basePopoverOpen" @update:open="onBasePopoverOpenChange">
             <PopoverTrigger as-child>
-              <Button type="button" variant="ghost" data-testid="worktree-base-trigger" class="h-auto w-full justify-between rounded-md border border-border bg-surface-2 px-3 py-2 text-left text-[13px] text-neutral-fg hover:bg-surface-hover" :disabled="isRepoUnavailable || branchesLoading">
+              <Button type="button" variant="ghost" data-testid="worktree-base-trigger" class="h-auto w-full justify-between rounded-md border border-border bg-bg-input px-3 py-2 text-left text-[length:var(--text-sm)] text-neutral-fg hover:bg-surface-hover" :disabled="isRepoUnavailable || branchesLoading">
                 <span class="flex items-center gap-2 truncate"><GitBranch class="size-3.5 shrink-0 text-neutral-dim" /><span class="truncate">{{ baseDisplayLabel }}</span></span>
                 <ChevronDown class="size-3.5 shrink-0 text-neutral-dim" />
               </Button>
             </PopoverTrigger>
             <PopoverContent class="w-[var(--reka-popover-trigger-width)] p-0" align="start">
-              <div class="border-b border-border p-2">
-                <Input v-model="baseSearch" data-testid="worktree-base-search" :placeholder="t('newTask.createWorktree.baseSearchPlaceholder')" class="h-8 bg-surface-2 text-[13px]" />
+              <div class="border-b border-hairline p-2">
+                <Input v-model="baseSearch" data-testid="worktree-base-search" :placeholder="t('newTask.createWorktree.baseSearchPlaceholder')" class="h-8 bg-bg-input text-[length:var(--text-sm)]" />
               </div>
               <div class="max-h-60 overflow-y-auto py-1">
                 <template v-for="(group, gIdx) in (['quick', 'remote', 'local'] as const)" :key="group">
-                  <div v-if="groupItems(group).length > 0" :class="gIdx > 0 ? 'mt-1 border-t border-border' : ''" class="px-3 py-1 text-[11px] text-neutral-dim">
+                  <div v-if="groupItems(group).length > 0" :class="gIdx > 0 ? 'mt-1 border-t border-hairline' : ''" class="px-3 py-1 text-[length:var(--text-2xs)] text-neutral-dim">
                     {{ group === 'quick' ? t('newTask.createWorktree.baseGroupQuick') : group === 'remote' ? t('newTask.createWorktree.baseGroupRemote') : t('newTask.createWorktree.baseGroupLocal') }}
                   </div>
-                  <Button v-for="item in groupItems(group)" :key="`${group}-${item.name}`" type="button" variant="ghost" data-testid="worktree-base-item" :data-branch="item.name" class="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] hover:bg-surface-hover" :class="baseBranch === item.name ? 'bg-accent/10 text-accent' : 'text-neutral-fg'" @click="selectBaseBranch(item.name)">
+                  <Button v-for="item in groupItems(group)" :key="`${group}-${item.name}`" type="button" variant="ghost" data-testid="worktree-base-item" :data-branch="item.name" class="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[length:var(--text-sm)] hover:bg-surface-hover" :class="baseBranch === item.name ? 'bg-accent-soft text-accent' : 'text-neutral-fg'" @click="selectBaseBranch(item.name)">
                     <span class="flex-1 truncate font-mono">{{ item.name }}</span>
                     <Check v-if="baseBranch === item.name" class="size-3.5 shrink-0 text-accent" />
                   </Button>
                 </template>
-                <div v-if="filteredBranchItems.length === 0" class="px-3 py-4 text-center text-[12px] text-neutral-mid">—</div>
+                <div v-if="filteredBranchItems.length === 0" class="px-3 py-4 text-center text-[length:var(--text-xs)] text-neutral-mid">—</div>
               </div>
             </PopoverContent>
           </Popover>
@@ -296,7 +297,7 @@ onBeforeUnmount(() => { cancelled.value = true; clearSuccessTimer() })
 
         <!-- 创建位置 radio（用 Button + aria-pressed 表达单选；不用原生 <input type="radio">） -->
         <div class="space-y-1">
-          <p class="text-[12px] text-neutral-dim">{{ t('newTask.createWorktree.locationLabel') }}</p>
+          <p class="text-[length:var(--text-xs)] text-neutral-dim">{{ t('newTask.createWorktree.locationLabel') }}</p>
           <div v-if="isBareMode" class="space-y-1">
             <Button
               type="button"
@@ -305,11 +306,11 @@ onBeforeUnmount(() => { cancelled.value = true; clearSuccessTimer() })
               role="radio"
               :aria-checked="locationMode === 'workspace'"
               class="flex h-auto w-full cursor-pointer items-center justify-start gap-3 rounded-md border px-3 py-2 transition-colors hover:bg-transparent"
-              :class="locationMode === 'workspace' ? 'border-accent bg-accent/5 text-neutral-fg hover:bg-accent/5' : 'border-border bg-surface-2 text-neutral-fg hover:bg-surface-2'"
+              :class="locationMode === 'workspace' ? 'border-accent bg-accent/5 text-neutral-fg hover:bg-accent/5' : 'border-border bg-bg-input text-neutral-fg hover:bg-bg-input'"
               @click="selectLocation('workspace')"
             >
               <span class="size-3.5 shrink-0 rounded-full border" :class="locationMode === 'workspace' ? 'border-accent bg-accent' : 'border-border'" />
-              <span class="text-[13px]">{{ t('newTask.createWorktree.locationWorkspace') }}</span>
+              <span class="text-[length:var(--text-sm)]">{{ t('newTask.createWorktree.locationWorkspace') }}</span>
             </Button>
           </div>
           <div v-else-if="isPlainRepoMode" class="space-y-1">
@@ -320,11 +321,11 @@ onBeforeUnmount(() => { cancelled.value = true; clearSuccessTimer() })
               role="radio"
               :aria-checked="locationMode === 'repo-dir'"
               class="flex h-auto w-full cursor-pointer items-center justify-start gap-3 rounded-md border px-3 py-2 transition-colors hover:bg-transparent"
-              :class="locationMode === 'repo-dir' ? 'border-accent bg-accent/5 text-neutral-fg hover:bg-accent/5' : 'border-border bg-surface-2 text-neutral-fg hover:bg-surface-2'"
+              :class="locationMode === 'repo-dir' ? 'border-accent bg-accent/5 text-neutral-fg hover:bg-accent/5' : 'border-border bg-bg-input text-neutral-fg hover:bg-bg-input'"
               @click="selectLocation('repo-dir')"
             >
               <span class="size-3.5 shrink-0 rounded-full border" :class="locationMode === 'repo-dir' ? 'border-accent bg-accent' : 'border-border'" />
-              <span class="text-[13px]">{{ t('newTask.createWorktree.locationRepoDir') }}</span>
+              <span class="text-[length:var(--text-sm)]">{{ t('newTask.createWorktree.locationRepoDir') }}</span>
             </Button>
             <Button
               type="button"
@@ -333,71 +334,71 @@ onBeforeUnmount(() => { cancelled.value = true; clearSuccessTimer() })
               role="radio"
               :aria-checked="locationMode === 'dedicated-dir'"
               class="flex h-auto w-full cursor-pointer items-center justify-start gap-3 rounded-md border px-3 py-2 transition-colors hover:bg-transparent"
-              :class="locationMode === 'dedicated-dir' ? 'border-accent bg-accent/5 text-neutral-fg hover:bg-accent/5' : 'border-border bg-surface-2 text-neutral-fg hover:bg-surface-2'"
+              :class="locationMode === 'dedicated-dir' ? 'border-accent bg-accent/5 text-neutral-fg hover:bg-accent/5' : 'border-border bg-bg-input text-neutral-fg hover:bg-bg-input'"
               @click="selectLocation('dedicated-dir')"
             >
               <span class="size-3.5 shrink-0 rounded-full border" :class="locationMode === 'dedicated-dir' ? 'border-accent bg-accent' : 'border-border'" />
-              <span class="flex-1 text-left text-[13px]">{{ t('newTask.createWorktree.locationDedicatedDir', { dir: dedicatedDirPreview }) }}</span>
-              <span data-testid="location-recommended-badge" class="shrink-0 rounded-full bg-accent/15 px-2 py-0.5 text-[11px] font-medium text-accent">{{ t('newTask.createWorktree.locationRecommended') }}</span>
+              <span class="flex-1 text-left text-[length:var(--text-sm)]">{{ t('newTask.createWorktree.locationDedicatedDir', { dir: dedicatedDirPreview }) }}</span>
+              <span data-testid="location-recommended-badge" class="shrink-0 rounded-full bg-accent/15 px-2 py-0.5 text-[length:var(--text-2xs)] font-medium text-accent">{{ t('newTask.createWorktree.locationRecommended') }}</span>
             </Button>
           </div>
         </div>
 
-        <div class="flex justify-end gap-2 pt-1">
+        <div class="flex justify-end gap-2 pt-4">
           <Button type="button" variant="secondary" data-testid="worktree-cancel-btn" @click="onCancel">{{ t('newTask.createWorktree.cancelBtn') }}</Button>
           <Button type="submit" data-testid="worktree-create-btn" :disabled="!canSubmit">{{ t('newTask.createWorktree.createBtn') }}</Button>
         </div>
       </form>
 
       <!-- ── progress 态 ── -->
-      <div v-else-if="phase === 'progress'" class="mt-2 space-y-3">
-        <div data-testid="worktree-loading-bar" class="h-1 w-full overflow-hidden rounded-full bg-surface-2"><div class="h-full w-1/3 animate-pulse rounded-full bg-accent"></div></div>
+      <div v-else-if="phase === 'progress'" class="mt-3 space-y-3">
+        <div data-testid="worktree-loading-bar" class="h-1 w-full overflow-hidden rounded-full bg-bg-input"><div class="h-full w-1/3 animate-pulse rounded-full bg-accent"></div></div>
         <ul class="space-y-2">
-          <li v-for="(step, idx) in progressSteps" :key="step.testid" :data-testid="step.testid" class="flex items-center gap-2 text-[13px]">
+          <li v-for="(step, idx) in progressSteps" :key="step.testid" :data-testid="step.testid" class="flex items-center gap-2 text-[length:var(--text-sm)]">
             <Loader2 class="size-4 animate-spin text-accent" /><span class="text-neutral-fg">{{ step.label }}</span>
-            <span v-if="idx === progressSteps.length - 1" class="ml-auto text-[11px] text-neutral-dim">...</span>
+            <span v-if="idx === progressSteps.length - 1" class="ml-auto text-[length:var(--text-2xs)] text-neutral-dim">...</span>
           </li>
         </ul>
-        <Button variant="ghost" data-testid="worktree-log-toggle" class="h-auto w-full justify-start gap-1 rounded px-1 py-0.5 text-[12px] text-neutral-dim" @click="logExpanded = !logExpanded">
+        <Button variant="ghost" data-testid="worktree-log-toggle" class="h-auto w-full justify-start gap-1 rounded px-1 py-0.5 text-[length:var(--text-xs)] text-neutral-dim" @click="logExpanded = !logExpanded">
           <ChevronDown v-if="logExpanded" class="size-3.5" /><ChevronRight v-else class="size-3.5" />
           {{ t('newTask.createWorktree.showLog') }}
         </Button>
       </div>
 
       <!-- ── success 态 ── -->
-      <div v-else-if="phase === 'success'" data-testid="worktree-success" class="mt-2 space-y-3">
+      <div v-else-if="phase === 'success'" data-testid="worktree-success" class="mt-3 space-y-3">
         <div class="flex items-center gap-3">
           <div class="flex size-9 items-center justify-center rounded-full bg-accent-soft"><Check class="size-5 text-accent" /></div>
           <div class="space-y-0.5">
-            <p class="text-[14px] font-medium text-neutral-fg">{{ t('newTask.createWorktree.successTitle') }}</p>
-            <p class="text-[12px] text-neutral-dim">{{ t('newTask.createWorktree.successDesc') }}</p>
+            <p class="text-[length:var(--text-base)] font-medium text-neutral-fg">{{ t('newTask.createWorktree.successTitle') }}</p>
+            <p class="text-[length:var(--text-xs)] text-neutral-dim">{{ t('newTask.createWorktree.successDesc') }}</p>
           </div>
         </div>
       </div>
 
       <!-- ── error 态 ── -->
-      <div v-else-if="phase === 'error'" class="mt-2 space-y-3">
+      <div v-else-if="phase === 'error'" class="mt-3 space-y-3">
         <div class="flex items-start gap-2">
           <AlertTriangle class="mt-0.5 size-4 shrink-0 text-danger" />
           <div data-testid="worktree-step-failed" class="min-w-0 flex-1 space-y-1">
-            <p class="text-[13px] font-medium text-neutral-fg">{{ t('newTask.createWorktree.failedStep') }}</p>
-            <p v-if="lastError?.code" class="text-[11px] text-neutral-dim">code: {{ lastError.code }}<template v-if="lastError.exitCode != null"> · exit {{ lastError.exitCode }}</template></p>
+            <p class="text-[length:var(--text-sm)] font-medium text-neutral-fg">{{ t('newTask.createWorktree.failedStep') }}</p>
+            <p v-if="lastError?.code" class="text-[length:var(--text-2xs)] text-neutral-dim">code: {{ lastError.code }}<template v-if="lastError.exitCode != null"> · exit {{ lastError.exitCode }}</template></p>
           </div>
         </div>
-        <pre v-if="lastError?.stderr" data-testid="worktree-error-output" class="max-h-40 overflow-auto whitespace-pre-wrap rounded-md border border-border bg-surface-2 p-2 font-mono text-[11px] text-neutral-fg">{{ lastError.stderr }}</pre>
-        <pre v-else data-testid="worktree-error-output" class="max-h-40 overflow-auto whitespace-pre-wrap rounded-md border border-border bg-surface-2 p-2 font-mono text-[11px] text-neutral-fg">{{ lastError?.message ?? '' }}</pre>
-        <div class="flex justify-end gap-2 pt-1">
+        <pre v-if="lastError?.stderr" data-testid="worktree-error-output" class="max-h-40 overflow-auto whitespace-pre-wrap rounded-md border border-border bg-bg-input p-2 font-mono text-[length:var(--text-2xs)] text-neutral-fg">{{ lastError.stderr }}</pre>
+        <pre v-else data-testid="worktree-error-output" class="max-h-40 overflow-auto whitespace-pre-wrap rounded-md border border-border bg-bg-input p-2 font-mono text-[length:var(--text-2xs)] text-neutral-fg">{{ lastError?.message ?? '' }}</pre>
+        <div class="flex justify-end gap-2 pt-4">
           <Button type="button" variant="ghost" data-testid="worktree-cleanup-btn" @click="onCleanup">{{ t('newTask.createWorktree.cleanupBtn') }}</Button>
           <Button type="button" variant="default" data-testid="worktree-retry-btn" class="primary" @click="onRetry">{{ t('newTask.createWorktree.retryBtn') }}</Button>
         </div>
       </div>
 
       <!-- ── exists 态 ── -->
-      <div v-else-if="phase === 'exists'" class="mt-2 space-y-3">
-        <div data-testid="worktree-exists-notice" class="flex items-start gap-2 rounded-md border border-border bg-surface-2 p-3">
-          <AlertTriangle class="mt-0.5 size-4 shrink-0 text-warn" /><p class="text-[13px] text-neutral-fg">{{ t('newTask.createWorktree.existsNotice') }}</p>
+      <div v-else-if="phase === 'exists'" class="mt-3 space-y-3">
+        <div data-testid="worktree-exists-notice" class="flex items-start gap-2 rounded-md border border-border bg-bg-input p-3">
+          <AlertTriangle class="mt-0.5 size-4 shrink-0 text-warn" /><p class="text-[length:var(--text-sm)] text-neutral-fg">{{ t('newTask.createWorktree.existsNotice') }}</p>
         </div>
-        <div class="flex justify-end gap-2 pt-1">
+        <div class="flex justify-end gap-2 pt-4">
           <Button type="button" variant="secondary" data-testid="worktree-cancel-btn" @click="onCancel">{{ t('newTask.createWorktree.cancelBtn') }}</Button>
           <Button type="button" variant="default" data-testid="worktree-use-existing-btn" @click="onUseExisting">{{ t('newTask.createWorktree.useExistingBtn') }}</Button>
         </div>
