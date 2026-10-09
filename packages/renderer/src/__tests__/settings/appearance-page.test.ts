@@ -81,14 +81,14 @@ describe('AppearancePage 渲染 gate', () => {
     expect(document.body.innerHTML).toContain('--bg')
   })
 
-  it('玄主题行渲染：label 含「弱蓝灰」、swatch 第一格 = demo 终态青玉 #7fb89c（V4⑤ 单测侧落点）', async () => {
+  it('玄主题行渲染：label 含「青玉」、swatch 第一格 = demo 终态青玉 #7fb89c（V4⑤ 单测侧落点）', async () => {
     wrapper = mountPage()
     await flushPromises()
     // 玄 preset='' → testid 为 appearance-theme-（模板 `appearance-theme-${th.preset}`）
     const xuan = document.body.querySelector<HTMLElement>('[data-testid="appearance-theme-"]')
     expect(xuan, '玄主题按钮应存在').toBeTruthy()
-    // label：主题名属产品命名（demo 亦沿用旧名），色相描述留产品裁决，本波只对齐 swatch 值
-    expect(xuan!.textContent).toContain('太极 · 玄（暗 · 弱蓝灰 · 默认）')
+    // label 与 demo 文案一致：色相描述 = 青玉（与 swatch 首格 #7fb89c 名实一致）
+    expect(xuan!.textContent).toContain('太极 · 玄（暗 · 青玉 · 默认）')
     expect(xuan!.textContent).not.toContain('纯灰')
     // swatch 第一格（accent 位）= demo 终态职能分色青玉值；style 序列化形态按环境可能是 hex 或 rgb
     const firstSwatchStyle = xuan!.querySelector('span[style]')?.getAttribute('style') ?? ''

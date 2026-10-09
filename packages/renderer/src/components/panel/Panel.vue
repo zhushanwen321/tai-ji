@@ -90,7 +90,7 @@
          统一表单 overlay（ui-presentation-protocol D5）：请求到达时 FormOverlay 覆盖
          composer 位置（互斥），对话历史全程可见，composer 消失输入禁止。
          [U7] overlay 移除后 composer 常驻（不再 v-if="!isViewingSubagent"）。 -->
-    <div class="composer-band flex flex-shrink-0 flex-col gap-1.5 px-5 pb-3.5">
+    <div class="composer-band flex flex-shrink-0 flex-col gap-1.5 px-3.5 pb-3.5">
       <!-- [T4] 「引擎恢复中」过渡条（pi 意外退出 → 自动 respawn 窗口）。
            数据源 = chat store respawnPending 分区（与 usePanelView 的 isSessionRespawning
            同源）；此时 panelView.kind 恒为 conversation/trace（respawning 抑制 dead），

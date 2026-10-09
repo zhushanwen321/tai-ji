@@ -124,7 +124,7 @@ function onSelect(tpl: BuiltinProviderTemplate): void {
       data-testid="provider-template-picker"
       :title="t('settings.provider.builtinTemplate.trigger')"
       :show-chevron="false"
-      class="h-8 gap-[6px] rounded-md bg-accent px-3 text-[length:var(--text-sm)] text-accent-fg hover:bg-accent-hover hover:text-accent-fg [&_svg]:size-[14px]"
+      class="h-8 gap-[6px] rounded-md bg-accent px-3 text-[length:var(--text-sm)] font-semibold text-accent-fg hover:bg-accent-hover hover:text-accent-fg [&_svg]:size-[14px]"
     >
       <Plus class="size-3.5" />
       {{ t('settings.provider.builtinTemplate.trigger') }}

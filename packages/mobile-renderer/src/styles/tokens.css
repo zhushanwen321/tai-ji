@@ -41,6 +41,7 @@
 
   /* ── 文字（neutral 谱系，上抬，dim 对比度 ~4.4:1）────────── */
   --neutral-fg: #dedee2;        /* 主前景 */
+  --neutral-fg-2: #d9d9d9;      /* 次级正文（demo --fg-2：正文与工具行之间的强调文字档） */
   --neutral-mid: #96969c;       /* 正文（过 AA） */
   --neutral-dim: #74747a;       /* 次要（提亮一档） */
   --neutral-faint: #46464c;     /* 极弱/装饰 */
@@ -188,6 +189,7 @@
   --composer-bg: #ffffff;
 
   --neutral-fg: #2b2a28;
+  --neutral-fg-2: #3a3936;
   --neutral-mid: #706e6a;
   --neutral-dim: #9d9b96;
   --neutral-faint: #c7c5c0;

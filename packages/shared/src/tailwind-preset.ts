@@ -34,6 +34,7 @@ export default {
         },
         neutral: {
           fg: 'var(--neutral-fg)',
+          'fg-2': 'var(--neutral-fg-2)', // 次级正文档（demo --fg-2；真值源 style.css --neutral-fg-2，两壳 tokens 均定义）
           mid: 'var(--neutral-mid)',
           dim: 'var(--neutral-dim)',
           faint: 'var(--neutral-faint)',

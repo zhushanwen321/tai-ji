@@ -37,15 +37,13 @@ export default {
     updateDesc: 'Configure auto-update and proxy settings',
     appearance: 'Appearance',
     appearanceDesc: 'Theme, colors and per-region font size',
-    usage: 'Usage',
+    usage: 'Usage Statistics',
     usageDesc: 'View token usage and session statistics',
     remoteAccess: 'Remote Access',
     remoteAccessDesc: 'Access taiji from a mobile browser (LAN / Tailscale)',
   },
   // ── Appearance page (AppearancePage) ──
   appearance: {
-    regionFontTitle: 'Per-region font size',
-    regionFontHint: 'Adjust font size per UI region (×0.9 / ×1.0 / ×1.15 / ×1.3), applies instantly',
     region: {
       sidebar: 'Left sidebar',
       chat: 'Chat stream',
@@ -946,7 +944,6 @@ export default {
     updateSourceAuto: 'Auto (recommended)',
     updateSourceGithub: 'GitHub',
     updateSourceGitcode: 'GitCode',
-    currentVersionLabel: 'Current Version',
     channelHint: 'stable channel · restart the app for the update to take effect',
     // Module-standard toasts for the three update-settings fields (autoUpdate/preDownload/updateSource)
     // after the setting-field migration; the saved/saveFailed keys above stay proxy-form-specific

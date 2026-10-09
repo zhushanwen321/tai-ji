@@ -213,7 +213,7 @@ function sourceLabel(source: string): string {
           v-for="p in preview.providers"
           :key="p.id"
           data-testid="preview-provider-item"
-          class="rounded-card bg-card px-3 py-2 text-[12px]"
+          class="rounded-card bg-bg-card px-3 py-2 text-[12px]"
           :class="{ 'opacity-70': p.conflict === 'duplicate-id' }"
         >
           <div class="flex items-center gap-2">
@@ -299,7 +299,7 @@ function sourceLabel(source: string): string {
             v-for="o in preview.orphanCredentials"
             :key="o.providerId"
             data-testid="preview-orphan-item"
-            class="rounded-card bg-card px-3 py-2 text-[12px]"
+            class="rounded-card bg-bg-card px-3 py-2 text-[12px]"
           >
             <div class="flex items-center gap-2">
               <Checkbox

@@ -5,7 +5,7 @@
     基色 --mid、字号 14px、底边框 1px --hairline 与对话流分隔（bg 沉底与对话流连成一体）。
     布局：状态图标 + 会话名 + 目录/分支次要行 + ... + [jsonl|对话/Trace|终端|drawer]。
     折叠态：收起/←/→ 三钮迁入卡头最左 chrome 槽位（34 宽 × 30 高，demo .pch）+ 新建任务钮（demo .hdr-fold）；
-    非全屏 pl-[88px] 让位红黄绿（右缘 60），全屏态 pl-4。唤回侧栏靠 ⌘B + chrome 按钮。
+    非全屏 pl-[88px] 让位红黄绿（右缘 60），全屏态 pl-3.5。唤回侧栏靠 ⌘B + chrome 按钮。
     中线几何：main-panel 顶 y4（AppShell 上内边距）+ chat 卡 1px 上边框 = 卡头顶 y5，
     40px 高 → 中线 y25 = 窗口 chrome 行（AppNavControls top 9 + 32/2）与红黄绿（trafficLightPosition y16）共线。
     拖拽区：header 空白 -webkit-app-region:drag，交互元素 no-drag。
@@ -13,7 +13,7 @@
   -->
   <header
     class="flex h-[40px] flex-shrink-0 items-center gap-2 border-b border-hairline bg-surface px-3.5 text-[length:var(--text-base)] text-neutral-mid [-webkit-app-region:drag]"
-    :class="showChrome && !isFullscreen ? 'pl-[88px]' : 'pl-4'"
+    :class="showChrome && !isFullscreen ? 'pl-[88px]' : 'pl-3.5'"
   >
     <!-- 折叠态 chrome 槽位：收起/←/→ + 新建任务（demo .pch ×3 + .hdr-fold）。
          组内 gap 8px（demo .panelhead gap）；整组 no-drag；flex-shrink:0 让会话名自动右移。 -->
@@ -80,7 +80,7 @@
          绝不盖右侧按钮组（按钮组 ml-auto + shrink-0）。 -->
     <div class="flex min-w-0 shrink items-center gap-1.5 [-webkit-app-region:no-drag]">
       <span
-        class="truncate font-bold"
+        class="truncate"
         data-testid="panel-session-label"
         :title="sessionLabel || t('workspace.newTask')"
       >{{ sessionLabel || t('workspace.newTask') }}</span>
@@ -211,7 +211,7 @@ async function onNewTask(): Promise<void> {
  * 折叠态 chrome 槽位判据：sidebar 折叠 → 收起/←/→ + 新建任务迁入此 header（demo .app.folded
  * .panelhead .pch { display:inline-flex } 同语义）。v2：单 panel 恒 P1，不再需要 isFirstPanel 判据。
  * 安全区 padding 由 template 的 `showChrome && !isFullscreen` 二级判断：
- * 非全屏留 pl-[88px] 让位 traffic-light（红黄绿 x8~60）；全屏红黄绿 OS 隐藏，header pl-4 不让位。
+ * 非全屏留 pl-[88px] 让位 traffic-light（红黄绿 x8~60）；全屏红黄绿 OS 隐藏，header pl-3.5 不让位。
  */
 const showChrome = computed(() => sidebar.collapsed)
 

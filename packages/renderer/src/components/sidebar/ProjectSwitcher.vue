@@ -3,8 +3,11 @@
  * ProjectSwitcher —— ProjectSwitcher 3A：2 列卡片网格（形态权威见 git 历史 project-switcher-demo.html 变体 3A 单行 pill，
  * page-design 目录已退役）+ 1 步点击切换 + 拖拽/键盘排序（D7/D8）。
  *
- * 形态（demo 3A）：单行 pill 卡（26px）= 项目名（截断 + title 全名兜底）+ 会话数徽章；
- * 网格尾部「新建」卡（点击展开内联 Input，Enter/blur 提交、Esc 取消）。
+ * 形态（demo 3A）：单行 pill 卡（26px）= Folder 前导图标 + 项目名（截断 + title 全名兜底）
+ * + 会话数徽章；demo .proj-bar 尾部的 ▾ chevron 不复刻——其语义是「bar 点击展开下拉」
+ * 的触发器，本组件是卡片网格 1 步点击直接切换（无下拉层级），渲染 chevron 会声明不存在的
+ * 交互（伪可供性），形态豁免登记于此。网格尾部「新建」卡（点击展开内联 Input，Enter/blur
+ * 提交、Esc 取消）。
  *
  * 排序（D7，2026-09-02 语义修正）：卡片顺序完全由用户控制——有 userOrder 升序在前，
  * 无 userOrder 按创建/持久化序稳定在后；点击切换不改顺序（active/lastUsedAt 不参与
@@ -26,7 +29,7 @@
  * runtime projects.json（deep watch → 全量 save，userOrder 随之持久化，跨重启稳定）。
  */
 import { computed, nextTick, onBeforeUnmount, ref, type ComponentPublicInstance } from 'vue'
-import { Plus, Trash2 } from '@lucide/vue'
+import { Folder, Plus, Trash2 } from '@lucide/vue'
 import { useI18n } from 'vue-i18n'
 import {
   ContextMenuRoot,
@@ -180,8 +183,8 @@ function cancelCreate() {
 
 <template>
   <div class="mb-1 mx-2.5" data-testid="project-switcher">
-    <!-- 2 列卡片网格（功能结构保留；卡片形态语言 = demo .proj-bar：elevated 底 + hairline 边
-         + radius 8 + 名字 fw-mid + mono 计数，hover 提边框） -->
+    <!-- 2 列卡片网格（功能结构保留；卡片形态语言 = demo .proj-bar：Folder 前导图标 + elevated 底
+         + hairline 边 + radius 8 + 名字 fw-mid + mono 计数，hover 提边框；▾ chevron 豁免见头注释） -->
     <div class="grid grid-cols-2 gap-1" data-testid="project-grid">
       <template v-for="p in projectStore.recentProjects" :key="p.id">
         <!-- 右键菜单（删除入口；默认项目卡无菜单项 → Portal 条件渲染，不吞右键） -->
@@ -218,6 +221,9 @@ function cancelCreate() {
               @keydown.down.prevent="moveCard(p.id, 1)"
               @keydown.right.prevent="moveCard(p.id, 1)"
             >
+              <!-- 前导图标 = demo .proj-bar 的 Folder 标识（13px dim，全 sidebar 既有惯例：
+                   FileTreeRow/SessionList 同款） -->
+              <Folder class="size-[13px] shrink-0 text-neutral-dim" />
               <span class="min-w-0 flex-1 truncate text-left" data-testid="project-card-name">
                 {{ displayName(p) }}
               </span>
@@ -235,7 +241,7 @@ function cancelCreate() {
             <ContextMenuContent
               :ref="setCardMenuContentRef"
               data-testid="project-context-menu"
-              class="z-[1100] min-w-[148px] rounded-md border border-border-strong bg-bg-elevated p-1 text-neutral-fg shadow-2 outline-none"
+              class="z-[var(--z-dialog)] min-w-[148px] rounded-md border border-border-strong bg-bg-elevated p-1 text-neutral-fg shadow-2 outline-none"
             >
               <ContextMenuItem
                 data-testid="project-delete-item"

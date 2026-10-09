@@ -13,7 +13,7 @@
  * - 观察者：DOM 含 testid + 短文件名文本 + 位置在右侧按钮组
  *
  * 覆盖（review MF-6）：折叠态 chrome 迁入（collapsed → sidebar-collapse-toggle + pl-[88px] 让位；
- * 全屏态回退 pl-4）+ ExtensionHost panel.header 挂载点（sessionId → ViewHost 挂载且
+ * 全屏态回退 pl-3.5）+ ExtensionHost panel.header 挂载点（sessionId → ViewHost 挂载且
  * viewId/sessionId/empty 正确；不传不渲染）。
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/panel/PanelHeader.test.ts
@@ -127,21 +127,21 @@ describe('PanelHeader 折叠态 chrome 迁入（review MF-6）', () => {
     expect(wrapper.find('[data-testid="drawer-toggle"]').exists()).toBe(false)
   })
 
-  it('collapsed=true + isFullscreen → header 回退 pl-4（全屏红黄绿 OS 隐藏不占位）', () => {
+  it('collapsed=true + isFullscreen → header 回退 pl-3.5（全屏红黄绿 OS 隐藏不占位）', () => {
     const sidebar = useSidebarStore()
     sidebar.collapsed = true
     platformChromeMock.isFullscreen.value = true
 
     const wrapper = mountHeader()
     const header = wrapper.find('header')
-    expect(header.classes()).toContain('pl-4')
+    expect(header.classes()).toContain('pl-3.5')
     expect(header.classes()).not.toContain('pl-[88px]')
   })
 
-  it('collapsed=false → chrome 不迁入（无 sidebar-collapse-toggle），header 保持 pl-4', () => {
+  it('collapsed=false → chrome 不迁入（无 sidebar-collapse-toggle），header 保持 pl-3.5', () => {
     const wrapper = mountHeader()
     const header = wrapper.find('header')
-    expect(header.classes()).toContain('pl-4')
+    expect(header.classes()).toContain('pl-3.5')
     expect(header.classes()).not.toContain('pl-[88px]')
     expect(wrapper.find('[data-testid="sidebar-collapse-toggle"]').exists()).toBe(false)
     // 非折叠态 drawer toggle 保留

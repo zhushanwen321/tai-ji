@@ -183,18 +183,18 @@ export const MODAL_SURFACE_MANIFEST = [
     family: 'popover-layer',
     kind: 'member',
     zAnchors: [
-      { file: 'packages/renderer/src/components/sidebar/session-item/SessionItemContextMenu.vue', form: 'class-raw', literal: '1100', count: 1 },
+      { file: 'packages/renderer/src/components/sidebar/session-item/SessionItemContextMenu.vue', form: 'class-token', literal: 'var(--z-dialog)', count: 1 },
     ],
-    basis: '§6.7 表：弹出层族（右键菜单）',
+    basis: '§6.7 表：弹出层族（右键菜单；已令牌化 --z-dialog）',
   },
   {
     id: 'project-switcher-menu',
     family: 'popover-layer',
     kind: 'member',
     zAnchors: [
-      { file: 'packages/renderer/src/components/sidebar/ProjectSwitcher.vue', form: 'class-raw', literal: '1100', count: 1 },
+      { file: 'packages/renderer/src/components/sidebar/ProjectSwitcher.vue', form: 'class-token', literal: 'var(--z-dialog)', count: 1 },
     ],
-    basis: '§6.7 表：弹出层族（项目切换菜单）',
+    basis: '§6.7 表：弹出层族（项目切换菜单；已令牌化 --z-dialog）',
   },
   {
     id: 'toast-container',
@@ -219,9 +219,9 @@ export const MODAL_SURFACE_MANIFEST = [
     family: 'rolling-banner',
     kind: 'member',
     zAnchors: [
-      { file: 'packages/renderer/src/components/ui/RollingRestartBanner.vue', form: 'class-raw', literal: '10000', count: 1 },
+      { file: 'packages/renderer/src/components/ui/RollingRestartBanner.vue', form: 'class-token', literal: 'var(--z-banner)', count: 1 },
     ],
-    basis: '§6.7 表：RollingRestartBanner（可编程横幅，滚动重启）',
+    basis: '§6.7 表：RollingRestartBanner（可编程横幅，滚动重启；已令牌化 --z-banner）',
   },
   {
     id: 'overlay-shell',

@@ -35,11 +35,11 @@
     </header>
 
     <!-- Scoped Model 配置区（模型白名单 + 有序列表）。容器 = GroupCard（demo .gcard 卡底
-         bg-card #262626 / r-card / overflow-hidden，与下方供应商列表卡同原语）。白名单标题/
+         --bg-card #262626 / r-card / overflow-hidden，与下方供应商列表卡同原语）。白名单标题/
          描述/添加钮由 ScopedModelSection 自带头承载（i18n 文案与 demo gc-title/gc-sub 一致）；
          其卡头形态差异（--card-head 底 / padding 10-16）= w1 交接项 1 归 ui 包波次，本层不动。
-         注：ScopedModelSection 根上的 bg-card 是失效类名（preset 色键嵌套在 bg 下，真实类名
-         .bg-bg-card），底色由本层 GroupCard 提供，无叠底冲突。 -->
+         注：ScopedModelSection 根上的 bg-bg-card 与本层 GroupCard 卡底同变量（--bg-card）同色，
+         无叠底冲突。 -->
     <GroupCard>
       <ScopedModelSection
         :scoped-list="scopedRenderItems"

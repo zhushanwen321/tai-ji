@@ -6,7 +6,7 @@
   添加面板：按 provider 分组全量模型列表 + 搜索 + 多选确认。
 -->
 <template>
-  <section data-testid="scoped-model-section" class="overflow-hidden rounded-card bg-card">
+  <section data-testid="scoped-model-section" class="overflow-hidden rounded-card bg-bg-card">
     <div class="flex items-center justify-between px-4 py-3">
       <div>
         <h3 class="text-[13px] font-medium text-neutral-fg">{{ t('settings.scopedModel.title') }}</h3>

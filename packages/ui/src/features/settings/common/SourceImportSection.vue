@@ -9,7 +9,7 @@
     - kind='extension'：W1 不处理（显示提示，无候选）
     共享池检测：候选 dir 与 existingDirs normalize 后相等 → 标「已通过共享池生效」，默认不勾选。
   -->
-  <section data-testid="import-from-agents" class="rounded-card bg-card">
+  <section data-testid="import-from-agents" class="rounded-card bg-bg-card">
     <h4 class="px-3 py-2 text-[12px] font-medium text-neutral-fg">
       {{ t('settings.loadPaths.importFromAgents.title') }}
     </h4>

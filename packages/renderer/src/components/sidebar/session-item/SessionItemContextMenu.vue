@@ -21,7 +21,7 @@
       <ContextMenuContent
         ref="menuContentRef"
         data-testid="session-context-menu"
-        class="z-[1100] min-w-[148px] rounded-md border border-border-strong bg-bg-elevated p-1 text-neutral-fg shadow-2 outline-none"
+        class="z-[var(--z-dialog)] min-w-[148px] rounded-md border border-border-strong bg-bg-elevated p-1 text-neutral-fg shadow-2 outline-none"
       >
         <ContextMenuItem
           v-if="hasAgentParent"

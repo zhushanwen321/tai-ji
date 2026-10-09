@@ -17,7 +17,7 @@
       v-for="p in presets"
       :key="p.id"
       :open="isExpanded(p.id)"
-      class="mb-[10px] overflow-hidden rounded-[var(--radius-md)] border border-border bg-bg"
+      class="mb-[10px] overflow-hidden rounded-md border border-border bg-bg"
       @update:open="(v) => toggleExpanded(p.id, v)"
     >
       <!-- 预设头部：CollapsibleTrigger as-child 包 Button，构成全宽点击区。

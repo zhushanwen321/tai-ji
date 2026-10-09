@@ -4,19 +4,21 @@
 
 ## 现状（2026-10-08 核实）
 
-`packages/mobile-renderer/src/styles/tokens.css:20-22` 文件头自述「真值源仍是 renderer style.css……改动须同步两处」，但桌面侧 ui-optimize-unified 已完成五层分层改值 + 灰阶四档去蓝偏 + `--composer-bg`/`--bubble-bg` 退役，mobile 侧全部未跟随：
+`packages/mobile-renderer/src/styles/tokens.css:20-22` 文件头自述「真值源仍是 renderer style.css……改动须同步两处」，但桌面侧 ui-optimize-unified 已完成五层分层改值 + 灰阶四档去蓝偏 + `--composer-bg` 退役删除 + `--bubble-bg` 归层派生 `--bg-elevated`（demo 暗族三主题同值；2026-10-10 demo 复刻保真修复），mobile 侧全部未跟随：
 
 | 位置 | mobile 现值 | 桌面终态 |
 |---|---|---|
 | tokens.css:27 `--bg` | `#131316` | `#1e1e1e`（框架层提亮） |
 | tokens.css:29 `--surface` | `#1f1f22`（亮于 bg 的旧方向） | `#101010`（内容层沉底） |
-| tokens.css:38 `--bubble-bg` | `var(--surface-hover)`（已退役改指） | `--bg-elevated` |
-| tokens.css:39/:188 `--composer-bg` | 残留（桌面已退役，全仓零消费方——死定义） | 已删除 |
-| tokens.css:43-44 neutral fg/mid | `#dedee2`/`#96969c`（蓝偏旧值） | `#ececec`/`#8a8a8a`（纯中性四档） |
+| tokens.css:38 `--bubble-bg` | `var(--surface-hover)`（已退役改指） | `var(--bg-elevated)` 派生（暗族同值）/亮族 `#fefefe` 独立档 |
+| tokens.css:39/:189 `--composer-bg` | 残留（桌面已退役，全仓零消费方——死定义） | 已删除 |
+| tokens.css:43/:45 neutral fg/mid | `#dedee2`/`#96969c`（蓝偏旧值） | `#ececec`/`#8a8a8a`（纯中性四档） |
 | tokens.css 全文件 | 无 `--md-code-*` 组 | `--md-code-bg/fg` 六主题各一对（决策 5） |
 | main.ts:41-44 neutral 兜底值 | 同旧 | —（style.css 加载成功时不生效，但兜底失真） |
 
 镜像校验单测 `mobile-token-mirror-parity.test.ts` 断言面仅 accent 族四组，neutral/bg/fw 不在断言面，故双绿不拦分叉。
+
+增量（2026-10-10 demo 复刻波）：桌面侧六主题 accent 换青玉系 + 新增 `--link-c`/`--code-c`/`--md-code-*` 改 code-c 派生，parity 断言强制下 accent 族已机械同步到 mobile 镜像（:root + light 块）；其余分叉项如上表维持待裁决。
 
 ## 裁决选项
 
@@ -25,5 +27,5 @@
 
 ## 关联登记
 
-- [neutral-tokens-dehue.md](neutral-tokens-dehue.md)（neutral 去蓝偏——桌面侧已由 ui-optimize-unified 决策 2 落地，mobile 侧残留旧值即本文件 :43-44 行）
+- [neutral-tokens-dehue.md](neutral-tokens-dehue.md)（neutral 去蓝偏——桌面侧已由 ui-optimize-unified 决策 2 落地，mobile 侧残留旧值即本文件 :43/:45 行）
 - [mobile-token-mirror-e2e-map-scope-gap.md](mobile-token-mirror-e2e-map-scope-gap.md)（镜像范围口径既有登记）

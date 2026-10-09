@@ -35,10 +35,11 @@
            （bg-elevated + neutral-fg）。ui-replica M5 对齐 demo（drawers.css .l1bar）：
            栏底补 hairline 分隔线（E1：顶部固定 chrome 与内容区有边界，与底抽屉实例条同构）；
            tab 列可横滚 + 12px 双侧渐隐 mask（G5：scrollbar 隐藏时裁切内容唯一的可视提示，
-           窄抽屉下 8 个 tab 可滚动触达不丢失）。 -->
+           窄抽屉下 8 个 tab 可滚动触达不丢失）。mask 颜色段仅取 alpha 语义
+           （rgba(0,0,0,1)=不透明显示），非颜色令牌消费，不随主题变化，故用 rgba 形式。 -->
       <div class="flex items-center gap-1 border-b border-hairline px-2 py-1.5">
         <div
-          class="flex flex-1 gap-0.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden [mask-image:linear-gradient(90deg,transparent,#000_12px,#000_calc(100%_-_12px),transparent)]"
+          class="flex flex-1 gap-0.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden [mask-image:linear-gradient(90deg,transparent,rgba(0,0,0,1)_12px,rgba(0,0,0,1)_calc(100%_-_12px),transparent)]"
         >
           <Button
             v-for="tab in tabs"

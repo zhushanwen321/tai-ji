@@ -71,7 +71,7 @@
              group/folder 命名 group 只放在 header 行上（本容器**不能**带 group/folder——Tailwind
              命名 group 是「任意层级祖先」匹配，容器带它会令 hover 组内任意 SessionItem 时也触发
              folder 按钮，破坏单行独立 hover 语义）。 -->
-        <div class="group/folder sticky top-0 z-[1] flex items-center gap-1.5 bg-bg px-2 pt-[9px] pb-1">
+        <div class="group/folder sticky top-0 z-[var(--z-sticky)] flex items-center gap-1.5 bg-bg px-2 pt-[9px] pb-1">
           <Folder class="size-3 shrink-0 text-neutral-dim" />
           <span class="min-w-0 truncate font-mono text-[length:var(--text-xs)] text-neutral-mid">
             {{ dirNameOf(g.cwd) }}

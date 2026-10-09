@@ -25,10 +25,12 @@
   --surface: #101010;           /* 内容层：对话流/右侧 drawer/底部 drawer 的阅读区（沉底） */
   --surface-hover: #262629;     /* 面板悬停 */
   --surface-2: #27272a;         /* 二级表面（header 浮起分层 / SegmentedTab active） */
-  --bg-elevated: #2b2b2e;       /* 浮层：hover 详情卡/popover/用户气泡 */
+  --bg-elevated: #2b2b2e;       /* 浮层：hover 详情卡/popover */
   --bg-input: #161618;          /* 内容层内次级：代码块/文件 chip 底 */
   --bg-card: #262626;           /* 设置分组卡片等操作域浮起容器（亮于 --bg 一档） */
-  /* 用户气泡底色归浮层档（与 hover 详情卡/popover 同引 --bg-elevated，RGB 采样同值）。
+  /* 用户气泡随 --bg-elevated 派生：demo 暗族三主题 --bubble 逐块等于同块 --elevated
+     （玄 #2b2b2e / 黛蓝 #2a2b34 / 暖墨 #2e2b27），无独立档，preset 块不重声明即自动逐主题相等；
+     唯一独立档在亮族（demo 皓 --bubble #fefefe ≠ --elevated #ffffff）。
      亮色族纸白微梯度（见 [data-theme="light"] 覆盖 #fefefe）：灰底易读作禁用态，
      纸白浮起且与 card/elevated 保持微梯度（demo styles #14：纯白让位 elevated）。 */
   --bubble-bg: var(--bg-elevated);

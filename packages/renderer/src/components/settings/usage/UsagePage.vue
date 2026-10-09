@@ -127,7 +127,7 @@
         <span class="flex-1" />
 
         <!-- 指标切换（.u-seg 分段形态，W1 决 8 McpSection 同款） -->
-        <div data-testid="usage-metric-toggle" class="seg inline-flex shrink-0 items-center gap-[2px] rounded-[var(--radius-md)] border border-hairline bg-surface-2 p-[2px]">
+        <div data-testid="usage-metric-toggle" class="seg inline-flex shrink-0 items-center gap-[2px] rounded-md border border-hairline bg-surface-2 p-[2px]">
           <Button
             v-for="m in (['tokens', 'cost'] as const)"
             :key="m"
@@ -144,7 +144,7 @@
         </div>
 
         <!-- 范围切换 -->
-        <div data-testid="usage-range-toggle" class="seg inline-flex shrink-0 items-center gap-[2px] rounded-[var(--radius-md)] border border-hairline bg-surface-2 p-[2px]">
+        <div data-testid="usage-range-toggle" class="seg inline-flex shrink-0 items-center gap-[2px] rounded-md border border-hairline bg-surface-2 p-[2px]">
           <Button
             v-for="r in RANGE_OPTIONS"
             :key="r"

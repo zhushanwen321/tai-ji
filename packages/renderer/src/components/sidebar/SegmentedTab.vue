@@ -21,7 +21,7 @@
       :class="cn(
         'h-6 flex-1 justify-center rounded-[var(--radius-xs)] px-1 text-[length:var(--text-xs)]',
         modelValue === tab.value
-          ? 'bg-bg-elevated font-medium text-neutral-fg shadow-[inset_0_0_0_1px_var(--accent)] hover:bg-bg-elevated hover:text-neutral-fg'
+          ? 'bg-bg-elevated font-semibold text-neutral-fg shadow-[inset_0_0_0_1px_var(--accent)] hover:bg-bg-elevated hover:text-neutral-fg'
           : 'bg-transparent text-neutral-dim hover:bg-transparent hover:text-neutral-fg',
       )"
       @click="emit('update:modelValue', tab.value)"

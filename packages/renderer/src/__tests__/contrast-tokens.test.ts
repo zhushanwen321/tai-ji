@@ -19,8 +19,8 @@
  * 该 color-mix 结果 = code-c 本色 + alpha N/100，渲染底 = sRGB 逐通道 α×code-c + (1-α)×surface
  * 合成（与浏览器半透明背景合成公式一致）；--md-code-fg = var(--code-c) 引用（六主题逐块
  * 解析 --code-c hex）。对比锚定：暗色族 7.06–7.79:1 / 皓 4.37 / 青墨 4.27 均过 ≥4:1；
- * 朱印 demo 权威值实测 3.92:1 低于旧线——demo 唯一视觉权威不改值，按 demo 锚定断言
- * （差异已在 wave1 汇报置顶报告，待用户裁决是否放宽 demo 值或断言线）。
+ * 朱印 demo 权威值实测 3.92:1 低于旧线——demo 唯一视觉权威不改值，按 demo 锚定断言；
+ * 朱印 3.9 豁免待用户裁决，登记见 docs/todo/zhuyin-code-contrast-ruling.md。
  */
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
@@ -179,8 +179,8 @@ describe('行内 code 对比（场景 2③，六主题；demo 终态职能分色
   const VAR_REF_RE = /^var\(--([a-zA-Z0-9-]+)\)$/
 
   /** demo 终态各主题 md-code 对比下限（sRGB 合成模型，同 compositeOver）：朱印 demo 权威值
-   * #9a6b40 于 7% 叠 surface 实测 3.92:1——demo 唯一视觉权威不改值，锚定 3.9 并置顶上报，
-   * 其余主题维持 ≥4:1 旧线 */
+   * #9a6b40 于 7% 叠 surface 实测 3.92:1——demo 唯一视觉权威不改值，朱印锚定 3.9，
+   * 其余主题维持 ≥4:1 旧线；该豁免待用户裁决，登记见 docs/todo/zhuyin-code-contrast-ruling.md */
   const CODE_CONTRAST_MIN: Record<(typeof THEMES)[number]['id'], number> = {
     xuan: 4,
     dailan: 4,

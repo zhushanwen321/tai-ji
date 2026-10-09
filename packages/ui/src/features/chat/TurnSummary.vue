@@ -7,7 +7,10 @@
   -->
   <!-- 轮次边界（M3a，docs/todo/turn-boundary-rhythm.md 选项 2 落地）：本组件悬浮化——
        h-0 不占流内高度，actions 绝对定位悬浮于本 turn 尾部（bottom-0，向上盖过 trace 末
-       24px，悬停经 DOM 祖先传递保持 group/ai 悬停态）。轮次边界唯一贡献 = Turn 根 pb-5
+       24px，悬停经 DOM 祖先传递保持 group/ai 悬停态）。actions 为不透明 chip 形态
+       （bg-bg-elevated + hairline 边 + 圆角 + shadow-2，同 TurnRail/PopoverContent 浮层
+       范式）：悬浮位与末块正文重叠，透明底会让按钮图标直接叠压末块文字（markdown 表格
+       末行尤甚），不透明底使覆盖区域成为明确 chip 占位。轮次边界唯一贡献 = Turn 根 pb-5
        （20px，demo workbench.css .blk margin-bottom = --blk-gap）。默认 pointer-events-none，
        悬停/焦点才可命中。 -->
   <div v-if="lastAssistant" class="turn-summary relative h-0">
@@ -19,7 +22,7 @@
     -->
     <div
       v-if="lastAssistant"
-      class="absolute bottom-0 left-0 flex items-center gap-0.5 opacity-0 pointer-events-none transition-opacity duration-150 group-hover/ai:opacity-100 group-hover/ai:pointer-events-auto group-focus-within/ai:opacity-100 group-focus-within/ai:pointer-events-auto"
+      class="absolute bottom-0 left-0 flex items-center gap-0.5 rounded-md border border-border-strong bg-bg-elevated p-0.5 shadow-2 opacity-0 pointer-events-none transition-opacity duration-150 group-hover/ai:opacity-100 group-hover/ai:pointer-events-auto group-focus-within/ai:opacity-100 group-focus-within/ai:pointer-events-auto"
     >
       <!-- 复制（纯文本）-->
       <Button

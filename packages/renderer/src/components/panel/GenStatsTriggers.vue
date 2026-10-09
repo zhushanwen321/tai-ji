@@ -27,7 +27,7 @@
           variant="ghost"
           :class="
             cn(
-              'h-7 gap-1 rounded-sm px-2 text-[11px] transition-colors',
+              'h-7 gap-1 rounded-[var(--radius-xs)] px-2 text-[11px] transition-colors',
               ttftTriggerClass,
             )
           "
@@ -50,7 +50,7 @@
       <HoverCardTrigger as-child>
         <Button
           variant="ghost"
-          class="h-7 gap-1 rounded-sm px-2 text-[11px] text-neutral-dim transition-colors hover:text-neutral-mid"
+          class="h-7 gap-1 rounded-[var(--radius-xs)] px-2 text-[11px] text-neutral-dim transition-colors hover:text-neutral-mid"
           :title="t('panel.context.genStatsSpeedTitle')"
         >
           <span class="tabular-nums" data-testid="genstats-speed-value">{{ speedDisplay }}</span>
@@ -69,7 +69,7 @@
       <HoverCardTrigger as-child>
         <Button
           variant="ghost"
-          :class="cn('h-7 gap-1 rounded-sm px-2 text-[11px] transition-colors', cacheTriggerClass)"
+          :class="cn('h-7 gap-1 rounded-[var(--radius-xs)] px-2 text-[11px] transition-colors', cacheTriggerClass)"
           :title="t('panel.context.genStatsCacheTitle')"
         >
           <span class="tabular-nums" data-testid="genstats-cache-value">{{ cacheDisplay }}</span>

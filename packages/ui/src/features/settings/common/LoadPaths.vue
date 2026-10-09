@@ -26,7 +26,7 @@
       {{ t('settings.loadPaths.saveErrorHint') }}
     </p>
 
-    <div class="overflow-hidden rounded-card bg-card">
+    <div class="overflow-hidden rounded-card bg-bg-card">
       <div
         v-for="scope in SCOPES"
         :key="scope"
