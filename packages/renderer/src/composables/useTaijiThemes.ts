@@ -43,7 +43,7 @@ export const TAIJI_THEMES: TaijiTheme[] = [
     theme: 'dark',
     preset: '',
     dark: true,
-    swatch: ['#a5adc2', '#ececec', '#101010', '#1e1e1e'],
+    swatch: ['#7fb89c', '#ececec', '#101010', '#1e1e1e'],
   },
   {
     label: '太极 · 黛蓝（暗 · 依稀蓝相）',
@@ -51,7 +51,7 @@ export const TAIJI_THEMES: TaijiTheme[] = [
     theme: 'dark',
     preset: 'dailan',
     dark: true,
-    swatch: ['#9ca9c9', '#ececec', '#0f1013', '#1d1e21'],
+    swatch: ['#7db2a9', '#ececf0', '#0f1016', '#1f2029'],
   },
   {
     label: '太极 · 暖墨（暗 · 宣纸暖相）',
@@ -59,7 +59,7 @@ export const TAIJI_THEMES: TaijiTheme[] = [
     theme: 'dark',
     preset: 'nuanmo',
     dark: true,
-    swatch: ['#cbc3b3', '#ececec', '#13100b', '#211f1b'],
+    swatch: ['#a2b48b', '#eceae6', '#100f0e', '#201e1c'],
   },
   {
     label: '太极 · 皓（亮 · 宣纸墨黑 · 默认）',
@@ -67,7 +67,7 @@ export const TAIJI_THEMES: TaijiTheme[] = [
     theme: 'light',
     preset: '',
     dark: false,
-    swatch: ['#36332f', '#2b2a28', '#f7f6f3', '#edebe8'],
+    swatch: ['#43765d', '#2b2a28', '#f7f6f3', '#edebe8'],
   },
   {
     label: '太极 · 青墨（亮 · 宣纸花青）',
@@ -75,7 +75,7 @@ export const TAIJI_THEMES: TaijiTheme[] = [
     theme: 'light',
     preset: 'qingmo',
     dark: false,
-    swatch: ['#3d6b6b', '#2b2a28', '#f7f6f3', '#edebe8'],
+    swatch: ['#40775f', '#2b2a28', '#f7f6f3', '#edebe8'],
   },
   {
     label: '太极 · 朱印（亮 · 宣纸朱砂）',
@@ -83,7 +83,7 @@ export const TAIJI_THEMES: TaijiTheme[] = [
     theme: 'light',
     preset: 'zhuyin',
     dark: false,
-    swatch: ['#9c4335', '#2b2a28', '#f7f6f3', '#edebe8'],
+    swatch: ['#4d7a63', '#2b2a28', '#f7f6f3', '#edebe8'],
   },
 ]
 

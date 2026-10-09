@@ -10,7 +10,7 @@
  *  1. :root 玄块 accent 主三值（--accent / --accent-hover / --accent-fg）
  *  2. :root 玄块 color-mix 派生式（--accent-soft / --accent-ring，两文件同为字面）
  *  3. shadcn 映射段（--primary / --ring 两行 var(--accent) 引用）
- *  4. desktop 侧定稿值锚定（防止双侧一起漂移成镜像一致的错值；D3 定稿 #a5adc2 族）
+ *  4. desktop 侧定稿值锚定（防止双侧一起漂移成镜像一致的错值；demo 终态青玉 #7fb89c 族）
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/mobile-token-mirror-parity.test.ts
  */
@@ -61,10 +61,10 @@ describe('mobile tokens.css ↔ renderer style.css 令牌镜像逐字一致（D3
     }
   })
 
-  it('组 4：desktop 侧定稿值锚定（D3：弱蓝灰 #a5adc2 族；防双侧同漂的假一致）', () => {
-    expect(decl(desktopRoot, '--accent', 'desktop')).toContain('#a5adc2')
-    expect(decl(desktopRoot, '--accent-hover', 'desktop')).toContain('#b5bdd4')
-    // PR-3 门禁通过（fg #1a1a1c 对 #a5adc2 对比 7.74:1 ≥ 4.5 AA），故 fg 保持不动
-    expect(decl(desktopRoot, '--accent-fg', 'desktop')).toContain('#1a1a1c')
+  it('组 4：desktop 侧定稿值锚定（demo 终态职能分色青玉 #7fb89c 族；防双侧同漂的假一致）', () => {
+    expect(decl(desktopRoot, '--accent', 'desktop')).toContain('#7fb89c')
+    expect(decl(desktopRoot, '--accent-hover', 'desktop')).toContain('#92c7ae')
+    // demo 终态青玉 #7fb89c 对 #152019 对比 7.38:1 ≥ 4.5 AA
+    expect(decl(desktopRoot, '--accent-fg', 'desktop')).toContain('#152019')
   })
 })

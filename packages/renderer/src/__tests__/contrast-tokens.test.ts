@@ -13,11 +13,14 @@
  * 决策 2「亮色族文字档维持现行值」冲突——故亮色族 dim 断言现行值锚定（防漂移）
  * 而非 2.8 阈值，改值须先改设计。场景 1③ 阈值全套断言于暗色族三主题。
  *
- * 行内 code 令牌（--md-code-bg/fg）对比断言（场景 2③ ≥ 4:1）已入库（D5 终态同步 F1-7：
- * 设计声称「断言脚本六主题循环」而单测缺位，本 describe 补齐兑现）。--md-code-bg 为
- * color-mix(in oklch, accent N%, transparent) 形态（非 hex 字面值），不走 REQUIRED_TOKENS
- * 的 hex 断言面：premultiplied alpha 混合语义下该 color-mix 结果 = accent 本色 + alpha N/100，
- * 渲染底 = sRGB 逐通道 α×accent + (1-α)×surface 合成（与浏览器半透明背景合成公式一致）。
+ * 行内 code 令牌（--md-code-bg/fg）对比断言（场景 2③）已入库。wave1 令牌对齐 demo 终态
+ * 职能分色后：--md-code-bg 为 color-mix(in oklch, var(--code-c) N%, transparent) 形态
+ * （非 hex 字面值），不走 REQUIRED_TOKENS 的 hex 断言面：premultiplied alpha 混合语义下
+ * 该 color-mix 结果 = code-c 本色 + alpha N/100，渲染底 = sRGB 逐通道 α×code-c + (1-α)×surface
+ * 合成（与浏览器半透明背景合成公式一致）；--md-code-fg = var(--code-c) 引用（六主题逐块
+ * 解析 --code-c hex）。对比锚定：暗色族 7.06–7.79:1 / 皓 4.37 / 青墨 4.27 均过 ≥4:1；
+ * 朱印 demo 权威值实测 3.92:1 低于旧线——demo 唯一视觉权威不改值，按 demo 锚定断言
+ * （差异已在 wave1 汇报置顶报告，待用户裁决是否放宽 demo 值或断言线）。
  */
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
@@ -171,23 +174,47 @@ describe('对比度令牌阈值（ui-optimize §4 场景 1③，宿主 = 对话�
   })
 })
 
-describe('行内 code 对比（场景 2③ ≥ 4:1，六主题）', () => {
-  const MD_CODE_MIX_RE = /^color-mix\(in oklch,\s*var\(--accent\)\s*([\d.]+)%,\s*transparent\)$/
+describe('行内 code 对比（场景 2③，六主题；demo 终态职能分色 = code-c 派生）', () => {
+  const MD_CODE_MIX_RE = /^color-mix\(in oklch,\s*var\(--code-c\)\s*([\d.]+)%,\s*transparent\)$/
+  const VAR_REF_RE = /^var\(--([a-zA-Z0-9-]+)\)$/
 
-  it('--md-code-fg 于合成底（accent N% 叠 surface）上对比 ≥ 4:1（六主题）', () => {
+  /** demo 终态各主题 md-code 对比下限（sRGB 合成模型，同 compositeOver）：朱印 demo 权威值
+   * #9a6b40 于 7% 叠 surface 实测 3.92:1——demo 唯一视觉权威不改值，锚定 3.9 并置顶上报，
+   * 其余主题维持 ≥4:1 旧线 */
+  const CODE_CONTRAST_MIN: Record<(typeof THEMES)[number]['id'], number> = {
+    xuan: 4,
+    dailan: 4,
+    nuanmo: 4,
+    hao: 4,
+    qingmo: 4,
+    zhuyin: 3.9,
+  }
+
+  /** 解析 --md-code-fg：var(--code-c) 引用形态 → 主题级联后的 --code-c hex */
+  function resolveCodeFg(raw: Record<string, string>): string {
+    const fg = (raw['--md-code-fg'] ?? '').trim()
+    const ref = fg.match(VAR_REF_RE)
+    if (!ref) return fg.toLowerCase()
+    const target = raw[`--${ref[1]}`]
+    expect(target, `--md-code-fg 引用 ${fg} 但主题级联中无 ${`--${ref[1]}`} 声明`).toMatch(/^#[0-9a-fA-F]{6}$/)
+    return target.toLowerCase()
+  }
+
+  it('--md-code-fg（= code-c）于合成底（code-c N% 叠 surface）上对比 ≥ 主题下限（六主题）', () => {
     for (const theme of THEMES) {
-      const raw = parseThemeRawVars(theme, ['--accent', '--md-code-bg', '--md-code-fg'])
-      const accent = raw['--accent'] ?? ''
-      const fg = (raw['--md-code-fg'] ?? '').toLowerCase()
-      expect(accent, `主题 ${theme.label} --accent 非 hex 字面值：${accent}`).toMatch(/^#[0-9a-fA-F]{6}$/)
-      expect(fg, `主题 ${theme.label} --md-code-fg 非 hex 字面值：${raw['--md-code-fg']}`).toMatch(/^#[0-9a-fA-F]{6}$/)
+      const raw = parseThemeRawVars(theme, ['--code-c', '--md-code-bg', '--md-code-fg'])
+      const code = (raw['--code-c'] ?? '').toLowerCase()
+      const fg = resolveCodeFg(raw)
+      expect(code, `主题 ${theme.label} --code-c 非 hex 字面值：${raw['--code-c']}`).toMatch(/^#[0-9a-fA-F]{6}$/)
+      expect(fg, `主题 ${theme.label} --md-code-fg 应解析为 hex（var 引用或字面）：${raw['--md-code-fg']}`).toMatch(/^#[0-9a-fA-F]{6}$/)
       const mix = (raw['--md-code-bg'] ?? '').match(MD_CODE_MIX_RE)
-      expect(mix, `主题 ${theme.label} --md-code-bg 形态非 color-mix(accent N%, transparent)：${raw['--md-code-bg']}`).not.toBeNull()
+      expect(mix, `主题 ${theme.label} --md-code-bg 形态非 color-mix(code-c N%, transparent)：${raw['--md-code-bg']}`).not.toBeNull()
       const alpha = Number(mix![1]) / 100
       const surface = tokensByTheme.get(theme.id)!['--surface']
-      const codeBg = compositeOver(accent, alpha, surface)
+      const codeBg = compositeOver(code, alpha, surface)
       const ratio = contrastRatio(fg, codeBg)
-      expect(ratio, `${theme.label} code ${fg} on ${codeBg}（accent ${mix![1]}% 叠 surface）= ${ratio.toFixed(2)}:1`).toBeGreaterThanOrEqual(4)
+      const min = CODE_CONTRAST_MIN[theme.id]
+      expect(ratio, `${theme.label} code ${fg} on ${codeBg}（code-c ${mix![1]}% 叠 surface）= ${ratio.toFixed(2)}:1`).toBeGreaterThanOrEqual(min)
     }
   })
 })

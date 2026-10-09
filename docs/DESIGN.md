@@ -7,7 +7,7 @@ colors:
   fg: "#ececec"
   muted: "#8a8a8a"
   border: "rgba(255, 255, 255, 0.07)"
-  accent: "#a5adc2"
+  accent: "#7fb89c"
   success: "#78a87e"
   warn: "#b79c54"
   danger: "#bf6b6b"
@@ -21,7 +21,7 @@ typography:
 rounded:
   sm: "6px"
   md: "8px"
-  card: "10px"
+  card: "12px"
   lg: "12px"
 spacing:
   xs: "4px"
@@ -32,7 +32,7 @@ spacing:
 components:
   button-default:
     backgroundColor: "{colors.accent}"
-    textColor: "#1a1a1c"
+    textColor: "#152019"
     rounded: "{rounded.md}"
   button-secondary:
     backgroundColor: "transparent"
@@ -112,7 +112,7 @@ v6 重构的三个缘由：
 | # | 原则 | 具体含义 |
 |---|------|---------|
 | 1 | **层级代替边框** | 静态容器只用一个表面色，不叠加 border；靠 bg 层级浮起分隔。border 仅保留给浮起可交互容器（popover/dialog/composer）和 focus 态 |
-| 2 | **圆角档位提升** | `--radius-sm` 6px（全局默认档）；卡片 10px；浮层/composer 12px；徽章/pill 999px 胶囊 |
+| 2 | **圆角档位提升** | `--radius-sm` 6px（全局默认档）；卡片/浮层/composer 12px（demo 卡片形态统一 lg 档，无 10px 档）；徽章/pill 999px 胶囊 |
 | 3 | **正文提亮** | 正文位置统一用 `--neutral-fg`（暗色下 ≈16:1）；工具行/次要落 `--neutral-mid`（~5.4:1，过 AA 大字线）；时间与元信息落 `--neutral-dim`（~2.8:1，低显著度装饰性文字的显式取舍）；仅极弱/装饰位置保留 faint |
 | 4 | **内容收窄** | assistant 居中 720px（整 turn 居中，UserBubble 列内右浮）；设置内容列同 720px 左对齐；Composer 非 landing 对齐同列 |
 | 5 | **彩色降噪** | 保留 git 语义色（M/A/D 降为极小圆点或单字）+ accent + 真 failure 的 danger，其余降灰阶。从色块/pill 降级为极小圆点或单字 badge |
@@ -235,7 +235,7 @@ demo 阶段功能做到「可见 + 可交互 + 数据 mock」即够。不接 run
 --bg-card:      #262626;   /* 操作域浮起容器：设置分组卡片等（亮于 --bg 一档）*/
 --bg-elevated:  #2b2b2e;   /* 浮层：hover 详情卡/popover/用户气泡（--bubble-bg 同引此档）*/
 --surface-2:    #27272a;   /* 次级表面（header 浮起分层 / SegmentedTab 内项 active）*/
---surface-hover:#303033;   /* hover 态 */
+--surface-hover:#262629;   /* hover 态 */
 ```
 
 **五层阶梯**（玄值由深到浅：`#0a0a0c → #101010 → #161618 → #1e1e1e → #2b2b2e`，越浮越亮）：
@@ -251,6 +251,7 @@ demo 阶段功能做到「可见 + 可交互 + 数据 mock」即够。不接 run
 
 ```css
 --neutral-fg:    #ececec;  /* 主前景 + 正文 */
+--neutral-fg-2:  #d9d9d9;  /* 次级正文（demo --fg-2：正文与工具行之间的强调文字档） */
 --neutral-mid:   #8a8a8a;  /* 工具行/次要（~5.4:1，过 AA 大字线）*/
 --neutral-dim:   #5c5c5c;  /* 时间与元信息（~2.8:1，低显著度装饰性文字的显式取舍）*/
 --neutral-faint: #45454a;  /* 极弱/装饰 */
@@ -273,17 +274,24 @@ demo 阶段功能做到「可见 + 可交互 + 数据 mock」即够。不接 run
 ### 4.4 主色 / 状态色（太极·玄默认：水墨降饱和，克制放开档）
 
 ```css
-/* 主色（玄 = 近无彩度底 + 一枚贯穿全应用的弱蓝灰；彩度「依稀」量级，可寻不与状态色争语义）*/
---accent:        #a5adc2;
---accent-hover:  #b5bdd4;  /* accent 等色相提亮一档（OKLCh dL≈0.052，与其余 preset 同模式） */
+/* 主色（demo 终态职能分色裁决：主行动 = 青玉 A9；链接 = 正蓝；行内代码 = 杏橘 W2——
+   三种彩色职能各自独立令牌，accent 不再兼职链接与行内代码色相）*/
+--accent:        #7fb89c;
+--accent-hover:  #92c7ae;  /* accent 同色相提亮一档（暗色族；亮色族压暗，demo 同构） */
 --accent-soft:   color-mix(in oklch, var(--accent) 10%, transparent);  /* 派生 */
 --accent-ring:   color-mix(in oklch, var(--accent) 30%, transparent);  /* 派生 */
---accent-fg:     #1a1a1c;  /* accent 实色上的文字（玄主题用深字）*/
+--accent-fg:     #152019;  /* accent 实色上的文字；对 #7fb89c 7.38:1 过 AA */
+
+/* 职能分色（demo 终态，各主题独立定值）*/
+--link-c: #4d8dff;   /* 链接正蓝 */
+--code-c: #cf9d78;   /* 行内代码杏橘 W2 */
 
 /* 状态色（水墨降饱和：饱和度/明度 +15~20%，保留水墨感不艳）*/
 --success: #78a87e;  --warn: #b79c54;  --danger: #bf6b6b;
 --info:    #6d99a5;  --reasoning: #8e85ab;
---danger-fg: #f0f0f2;  /* danger 实色上的文字（玄主题用浅字）*/
+--danger-fg: color-mix(in oklch, var(--danger) 18%, #160b0b);
+/* danger 实色上的文字（demo 公式：color-mix 中的 var(--danger) 每元素解析，
+   亮色族/朱印随各自 --danger 自动跟随，主题块零覆盖声明——Chromium 实测行为）*/
 
 /* soft 派生（自动跟随，主题切换无需单独覆盖）*/
 --success-soft:   color-mix(in oklch, var(--success) 12%, transparent);
@@ -292,27 +300,25 @@ demo 阶段功能做到「可见 + 可交互 + 数据 mock」即够。不接 run
 --info-soft:      color-mix(in oklch, var(--info) 12%, transparent);
 --reasoning-soft: color-mix(in oklch, var(--reasoning) 12%, transparent);
 
-/* 行内代码弱底彩字（ui-optimize 决策5）：markdown 行内 code 专属令牌组，
-   六主题 entry 各一对值（消费点 = MarkdownRenderer.vue 行内 code 规则）。
-   底 = accent 弱化层（暗色族 8% / 亮色族 6%，color-mix 派生自动跟随各主题 accent）；
-   字 = accent 同色相 ± 一档（暗提亮 / 亮压暗，dL≈0.052 与 --accent-hover 同模式）
-   + OKLCh 降饱和（C≤0.05，守对话流灰白纪律，--name 同先例）。 */
---md-code-bg: color-mix(in oklch, var(--accent) 8%, transparent);   /* 暗色族（玄/黛蓝/暖墨） */
---md-code-fg: #b5bdd3;                                              /* 玄 */
---md-code-bg: color-mix(in oklch, var(--accent) 6%, transparent);   /* 亮色族（皓/青墨/朱印） */
---md-code-fg: #292622;                                              /* 皓 */
+/* 行内代码（demo 终态：底与字都跟 --code-c，不跟主行动 accent；消费点 = MarkdownRenderer.vue）：
+   底 = code-c 8% 弱化层（暗色族；亮色族 7% 由 light 块重声明），
+   字 = var(--code-c)。color-mix 中的 var() 每元素解析（Chromium 实测），
+   preset 块只覆盖 --code-c 即自动跟随，全部主题块零重复声明。 */
+--md-code-bg: color-mix(in oklch, var(--code-c) 8%, transparent);   /* 暗色族（玄/黛蓝/暖墨） */
+--md-code-bg: color-mix(in oklch, var(--code-c) 7%, transparent);   /* 亮色族（皓/青墨/朱印，light 块） */
+--md-code-fg: var(--code-c);
 ```
 
-六主题 `--md-code-fg` 挂值（底合成到对话流 `--surface` 后的 WCAG 对比，断言线 ≥4:1，§4 场景 2）：
+六主题 `--code-c`（= `--md-code-fg` 解析值）挂值（底合成到对话流 `--surface` 后的 WCAG 对比，§4 场景 2）：
 
-| 主题 | 族 | `--md-code-fg` | 对比 |
+| 主题 | 族 | `--code-c` | 对比 |
 |---|---|---|---|
-| 玄 | 暗 | `#b5bdd3` | 8.99:1 |
-| 黛蓝 | 暗 | `#acb9da` | 8.68:1 |
-| 暖墨 | 暗 | `#dcd4c4` | 11.25:1 |
-| 皓 | 亮 | `#292622` | 12.52:1 |
-| 青墨 | 亮 | `#2f5c5c` | 6.41:1 |
-| 朱印 | 亮 | `#6d4a43` | 6.58:1 |
+| 玄 | 暗 | `#cf9d78` | 7.12:1 |
+| 黛蓝 | 暗 | `#c99e80` | 7.06:1 |
+| 暖墨 | 暗 | `#d4a684` | 7.79:1 |
+| 皓 | 亮 | `#96622f` | 4.37:1 |
+| 青墨 | 亮 | `#92663a` | 4.27:1 |
+| 朱印 | 亮 | `#9a6b40` | **3.92:1**（demo 权威值低于旧 4:1 线——demo 唯一视觉权威不改值，单测锚定 3.9 上报待裁决） |
 
 ### 4.5 diff 着色（柔化 12%）
 
@@ -349,27 +355,34 @@ demo 阶段功能做到「可见 + 可交互 + 数据 mock」即够。不接 run
 ### 4.7 圆角 / 间距 / 阴影 / z-index / 动效
 
 ```css
-/* 圆角 */
---radius-sm: 6px;   --radius: 8px;   --radius-lg: 12px;   --radius-card: 10px;
+/* 圆角（demo 四档；卡片形态统一 lg 档，demo 无 10px 档）*/
+--radius-xs: 4px;   --radius-sm: 6px;   --radius: 8px;   --radius-lg: 12px;   --radius-card: 12px;
 
 /* 间距（4px 栅格）*/
 --space-1:4px; --space-2:8px; --space-3:12px; --space-4:16px;
 --space-6:24px; --space-8:32px; --space-12:48px; --space-16:64px;
 
-/* 阴影 */
+/* 正文级块间节奏（demo N2：对话流块间距令牌；消费点迁移归组件波次）*/
+--blk-gap: 20px;  --blk-gap-tight: 12px;
+
+/* 阴影（demo 三档）*/
 --shadow-1: 0 0 0 1px rgba(0,0,0,0.2);
 --shadow-2: 0 8px 24px rgba(0,0,0,0.4);
+--shadow-3: 0 12px 32px rgba(0,0,0,0.45);   /* 顶级浮层 */
 --shadow-glow: 0 0 0 3px color-mix(in oklch, var(--accent) 25%, transparent);
 
-/* z-index 语义化 */
---z-sticky: 1;  --z-popover: 10;  --z-overlay: 20;  --z-modal: 1000;
+/* z-index 语义化（demo styles #8 梯队：sticky < popover < overlay < hovercard < modal < dialog < toast < banner）*/
+--z-sticky: 1;  --z-popover: 10;  --z-overlay: 20;  --z-hovercard: 500;
+--z-modal: 1000;  --z-dialog: 1100;  --z-toast: 2000;  --z-banner: 2100;
 
-/* 动效 */
+/* 动效（--ease-in/--ease-out = demo E5 抽屉方向缓动：进 out / 出 in）*/
 --ease: cubic-bezier(0.4,0,0.2,1);
+--ease-out: cubic-bezier(0,0,0.2,1);  --ease-in: cubic-bezier(0.4,0,1,1);
 --duration-fast: 120ms;  --duration: 200ms;  --duration-slow: 320ms;
 
-/* 组件尺寸 */
---content-max-w: 720px;  --composer-btn-size: 30px;
+/* 组件尺寸（--content-max-w = demo min(720px,100%)：窄容器自动让位满宽）*/
+--content-max-w: min(720px, 100%);  --content-max-w-wide: 1064px;
+--composer-btn-size: 30px;
 --bash-output-max-height: 240px;  --bar-fill-soft: 55%;
 --block-scroll-max-height: 240px;  /* 展开块统一限高（thinking / bash / 工具输出，BlockScrollBox 消费）；与 --bash-output-max-height 消费域独立 */
 --panel-bg: var(--surface);  /* panel 内 sticky 浮层底色契约 */
@@ -381,31 +394,31 @@ demo 阶段功能做到「可见 + 可交互 + 数据 mock」即够。不接 run
 
 **切换链路**：`applySystemToDom`（`packages/ui/src/features/settings/apply-system-to-dom.ts`）把 SystemSettings 外观偏好写入 DOM 槽位——`theme=system` 经 `matchMedia` 解析为 light/dark，`themePreset` 缺省 `cold-blue`；W4 壳侧 watch store 调用。主题列表渲染 = 设置页 AppearancePage（`packages/renderer/src/components/settings/appearance/AppearancePage.vue`）消费 `useTaijiThemes.ts` 的 `TAIJI_THEMES`（label/preset/swatch 预览色；令牌真值不在其中，真值唯一权威 = style.css，见 style.css 头注释）。
 
-**选择器块与覆盖面**（按 style.css 现值，非默认主题按块内声明覆盖、块外继承族默认）：
+**选择器块与覆盖面**（按 style.css 现值，非默认主题按块内声明覆盖、块外继承族默认；派生公式 color-mix 中的 var() 每元素解析，preset 只覆盖基色即自动跟随）：
 
 | 主题 | 选择器块 | 覆盖变量数与构成 |
 |---|---|---|
 | 玄（暗·默认） | `:root` | 全部默认值，无独立块 |
-| 皓（亮·默认） | `[data-theme="light"]` | 54 = bg 阶梯 9 + bubble 1 + neutral 7（含 name）+ border 3 + accent 5 + md-code 2 + 状态 8 + chart 族 19 |
-| 黛蓝 / 暖墨 | `:root[data-theme-preset="dailan"/"nuanmo"]` | 38 = bg 阶梯 8 + neutral 6 + accent 3 + md-code 2 + chart 族 19（不覆盖 border/状态色） |
-| 青墨 | `[data-theme="light"][data-theme-preset="qingmo"]` | 24 = accent 3 + md-code 2 + chart 族 19（宣纸底不换、只换 accent 颜料） |
-| 朱印 | `[data-theme="light"][data-theme-preset="zhuyin"]` | 31 = 青墨面 24 + 状态 7（danger 系与玫红错开等） |
+| 皓（亮·默认） | `[data-theme="light"]` | 55 = bg 阶梯 9 + bubble 1 + neutral 8（含 name、fg-2）+ border 3 + accent 5 + link-c/code-c 2 + md-code 1（7% 重声明）+ 状态 7 + chart 族 19 |
+| 黛蓝 / 暖墨 | `:root[data-theme-preset="dailan"/"nuanmo"]` | 38 = bg 阶梯 7 + neutral 7（含 fg-2）+ accent 3 + link-c/code-c 2 + chart 族 19（不覆盖 border/状态色；--bg-sunken/--md-code 继承派生公式不重声明） |
+| 青墨 | `[data-theme="light"][data-theme-preset="qingmo"]` | 24 = accent 3 + link-c/code-c 2 + chart 族 19（宣纸底不换、只换颜料） |
+| 朱印 | `[data-theme="light"][data-theme-preset="zhuyin"]` | 30 = 青墨面 24 + 状态 6（danger 系玫红错开等；--danger-fg 继承派生公式不重声明） |
 
-**阴 · 暗色族（3 个）**——背景近中性，色相只做「依稀相」(S≤6%)，靠明度阶梯说话：
+**阴 · 暗色族（3 个）**——背景近中性，色相只做「依稀相」(S≤6%)，靠明度阶梯说话；彩色职能按 demo 终态三分（主行动青玉 / 链接正蓝 / 行内代码杏橘）：
 | 主题 | accent | 特色 |
 |---|---|---|
-| **太极·玄（默认）** | `#a5adc2` 弱蓝灰 | 暗端防糊，阶梯上抬+加宽级差；唯一贯穿全应用的色相锚点（OKLCh C 0.0315，依稀量级） |
-| 太极·黛蓝 | `#9ca9c9` 依稀蓝相 | S≈8% |
-| 太极·暖墨 | `#cbc3b3` 暖相 | 宣纸暖 |
+| **太极·玄（默认）** | `#7fb89c` 青玉 | demo 终态职能分色锚点：主行动青玉 A9 / 链接正蓝 / 行内代码杏橘 W2 |
+| 太极·黛蓝 | `#7db2a9` 青玉 | 暗 · 依稀蓝相（bg/文字档全值随 demo，蓝相区分玄） |
+| 太极·暖墨 | `#a2b48b` 青玉暖 | 宣纸暖（bg/文字档全值随 demo，暖相区分玄） |
 
-**阳 · 亮色族（3 个）**——宣纸为底，彩色只做小面积 accent（朱印点睛）：
+**阳 · 亮色族（3 个）**——宣纸为底，彩色只做小面积 accent：
 | 主题 | accent | 特色 |
 |---|---|---|
-| **太极·皓** | `#36332f` 墨黑 | 亮·宣纸墨黑 |
-| 太极·青墨 | `#3d6b6b` 花青 | 亮·宣纸花青 |
-| 太极·朱印 | `#9c4335` 朱砂 | 亮·宣纸朱砂（danger 错开玫红 `#b23855` 防撞色）|
+| **太极·皓** | `#43765d` 青玉深 | 亮 · 宣纸墨黑（青玉深颜料；elevated 纯白档） |
+| 太极·青墨 | `#40775f` 青玉 | 亮 · 宣纸花青（青玉系颜料） |
+| 太极·朱印 | `#4d7a63` 青玉 | 亮 · 宣纸朱砂（accent 青玉系；danger 玫红 `#b23855` 防撞色）|
 
-**设计原理**：暗底彩色必须提亮才可读（提亮即荧光），故靠明度阶梯说话而非色相；亮底允许低饱和低明度「颜料 accent」。亮色族共用同一套宣纸阶梯，只换 accent 颜料不换纸。
+**设计原理**：暗底彩色必须提亮才可读（提亮即荧光），故靠明度阶梯说话而非色相；亮底允许低饱和低明度「颜料 accent」。亮色族共用同一套宣纸阶梯，只换颜料不换纸。demo 终态把「主行动 / 链接 / 行内代码」三种职能拆为三个独立令牌（accent / link-c / code-c），色相冲突（青绿主色 vs 蓝链接）由令牌分治而非单色兼职。
 
 ---
 
@@ -546,7 +559,7 @@ lucide-vue 内联 SVG，stroke-width 默认 **1.75**（特殊图标如 checkbox 
 ### 5.8 GroupCard（设置分组卡片）
 
 ```
-.group-card { background: var(--bg-card); border-radius: 10px; padding: 10px; }  /* 去 border */
+.group-card { background: var(--bg-card); border-radius: var(--radius-card); padding: 10px; }  /* 去 border；demo 无 10px 档，卡片 = lg 档 12px */
 .group-head { background: var(--surface-2); padding: 10px 16px; border-top: 1px rgba(255,255,255,0.04); }  /* 首张 border-top:0 */
 ```
 
@@ -644,7 +657,7 @@ demo 用 `@keyframes shimmer`（1.4s ease-in-out infinite，linear-gradient 扫�
 - **ContextBar**（composer 上方，goal/todo 摘要 + plugin foot 挂载点）：与 composer 同宽同中线居中；常态归零（无 goal/todo 时整条隐藏）；slim bar 24px `text-2xs neutral-dim`；点击展开 popover（goal 全文 + 3px 进度条 + todo checklist）
 - **TurnRail**（右侧 turn 导航 + 自定义滚动条接管）：spine(`surface-hover` 6px 暗条 340px，点击翻页) + thumb(`accent-soft + 2px accent border-left`，按滚动比例定位 min-h 24px，可拖拽，hover/active 三档色阶详见 §3.5.6)；hover 展开 mini-map(6px→224px，turn 节点两行：user 行 + agent 状态图标行，含**折展 toggle** ChevronUp/Down，active 节点常驻可见 toggle)；**定位 = absolute 于对话流容器右缘 8px**（2026-10-04 三卡化：原 fixed 视口垂直居中不感知底抽屉高度，窗口矮/抽屉高时叠进终端卡——absolute 后随对话流卡 overflow 裁剪，跨区构造性不可能）；active 节点见 §3.4 例外
   > **failed 节点色阶待统一**：§5.6B 规定 error=`--danger`，但 demo `TurnRail.vue` 当前 failed 节点用 `--warn`（`.warn` class，行 179/195/205）。demo 未对齐范式，实施时应按 §5.6B 改为 `--danger`
-- **ChangeSetCard**：去 border 改 `bg-surface` + 10px 圆角；5 态 badge 中 accumulating/ready/partially-reviewed/resolved 4 态用 `*-soft` 底 + 实色字，superseded 例外用 `bg-elevated + neutral-dim`（中性降级态，非彩色语义）
+- **ChangeSetCard**：去 border 改 `bg-surface` + `--radius-card`（12px，demo 卡片档）圆角；5 态 badge 中 accumulating/ready/partially-reviewed/resolved 4 态用 `*-soft` 底 + 实色字，superseded 例外用 `bg-elevated + neutral-dim`（中性降级态，非彩色语义）
 - **PanelHeader**：去 `border-b`，用 `bg-elevated` 浮起分层
 - **goal/todo 回归对话流**（D3）：移除 tasks tab + `HIDDEN_TOOL_NAMES`，走 GuiComponent 统一渲染
 - **通知族二分**（2026-08-19 裁决，2026-09-13 自 design-system.md §2.5 并入；2026-09-18 方案 A 增补「主体有界 + 悬停详情」）：对话流「非对话内容行」按**可交互性**二分，两形态不得混用——
@@ -673,7 +686,7 @@ demo 用 `@keyframes shimmer`（1.4s ease-in-out infinite，linear-gradient 扫�
 
 ### 6.3 右侧 Drawer（三卡化 + 8 tab）
 
-- **三卡化**（2026-10-04 用户裁决，推翻 D2 一体化生长）：右抽屉是独立内容卡（`--surface` + border + 10px 圆角 + shadow-1），与对话流卡、底抽屉卡并列，卡间缝 = a = 窗口边距 p-1 的 4px（2026-10-04 三轮裁决：横缝/纵缝/状态条间距统一 4px 实际边距，非叠加值）；**对话流卡默认撑满公共容器**（主区除侧栏外全部空间；二轮裁决——原「无 drawer 限宽 75% 居中」行为随卡片化退役，拉开 drawer 才让位）；**PanelHeader 是对话流卡的卡头**（二轮裁决：header 只与对话流构成整体——右抽屉卡有自己的 L1 栏、底抽屉卡有自己的实例切换条）；L1 栏选中态回归标准 tab 型（§3.4，原「bg-surface-hover 例外」随同 surface 前提消失退役）；关闭控件（X）居 L1 栏右簇最右。主面板:drawer 默认宽度比 1:1，可拖拽调整〔2026-09-13 自 v6-design.md 并入〕；宽度拖拽 handle = 卡缝本体（4px 缝内 1px 视觉线，hover `border-strong` / drag `accent`，`cursor: col-resize`）
+- **三卡化**（2026-10-04 用户裁决，推翻 D2 一体化生长）：右抽屉是独立内容卡（`--surface` + border + `--radius-card` 12px 圆角 + shadow-1），与对话流卡、底抽屉卡并列，卡间缝 = a = 窗口边距 p-1 的 4px（2026-10-04 三轮裁决：横缝/纵缝/状态条间距统一 4px 实际边距，非叠加值）；**对话流卡默认撑满公共容器**（主区除侧栏外全部空间；二轮裁决——原「无 drawer 限宽 75% 居中」行为随卡片化退役，拉开 drawer 才让位）；**PanelHeader 是对话流卡的卡头**（二轮裁决：header 只与对话流构成整体——右抽屉卡有自己的 L1 栏、底抽屉卡有自己的实例切换条）；L1 栏选中态回归标准 tab 型（§3.4，原「bg-surface-hover 例外」随同 surface 前提消失退役）；关闭控件（X）居 L1 栏右簇最右。主面板:drawer 默认宽度比 1:1，可拖拽调整〔2026-09-13 自 v6-design.md 并入〕；宽度拖拽 handle = 卡缝本体（4px 缝内 1px 视觉线，hover `border-strong` / drag `accent`，`cursor: col-resize`）
 - **容器归属规则**：内容按形状分家——竖长阅读型归右抽屉、横宽输出流归底抽屉（§6.4）、全画布内容（网页/workflow 图）归浮层（§6.5）；归属声明唯一权威 = 容器注册表（`packages/core/src/domain/drawer/registry.ts`，core 纯数据，ui 层映射图标渲染）
 - **形态 B**：icon 一级 + 各 tab 自治二级（L1 列表由容器注册表驱动，8 条）
   - git/doc：无二级 tab
@@ -690,7 +703,7 @@ demo 用 `@keyframes shimmer`（1.4s ease-in-out infinite，linear-gradient 扫�
 
 ### 6.4 Bottom Drawer（底抽屉）
 
-- **位置**（三卡化）：独立内容卡（`--surface` + border + 10px 圆角 + shadow-1），split 行（对话流卡 + 右抽屉卡）之下、StatusBar 之上，横跨主区全宽；与上方卡列间距 = a = 4px（三轮裁决：与横缝及窗口边距统一）、与 StatusBar 间 4px；composer 在其上沿保持可见、随开合上移。与右抽屉可同时开（一挤宽度、一挤高度互不冲突；右抽屉开着时底抽屉全宽、右抽屉变矮）
+- **位置**（三卡化）：独立内容卡（`--surface` + border + `--radius-card` 12px 圆角 + shadow-1），split 行（对话流卡 + 右抽屉卡）之下、StatusBar 之上，横跨主区全宽；与上方卡列间距 = a = 4px（三轮裁决：与横缝及窗口边距统一）、与 StatusBar 间 4px；composer 在其上沿保持可见、随开合上移。与右抽屉可同时开（一挤宽度、一挤高度互不冲突；右抽屉开着时底抽屉全宽、右抽屉变矮）
 - **高度**：默认 35%；上沿拖拽手柄命中区跨进卡上方缝（4px，视觉线贴卡顶边 1px，hover `border-strong` / drag `accent`）；拖拽 clamp 15%–70%，高度为全局布局值单键持久化（`taiji:bottom-drawer-height`）；窗口过矮时显示期钳制保证对话流 + composer 最小可视区域，不写回持久值
 - **内容**：terminal 唯一内容（不预设 tab 枚举）；终端面板头部一行 = **实例切换条**（tab 条 + 右簇）——多实例：条目切换（tab 范式见 §5.3.1）/ 「+」新建（新建即自动激活并聚焦新实例输入区，2026-10-04 产品裁决）/ tab 内**常驻**关闭叉（最后实例灰置禁用）/ 空态占位（文案如「终端 1」按序号命名）/ 右簇**收起按钮**（收起整个终端区，收起语义非销毁，实例保留、重开走对账恢复，焦点回 composer）；原第二行工具栏（清屏/终止）随 head 一行化移除，清屏功能退役；空态时 xterm 黑块容器不渲染；spawn 失败走 inline 错误条 + 重试，chunk 装载失败走 AsyncErrorFallback
 - **开关**：`` ⌃` ``（before-input-event 窗口级拦截，不经 globalShortcut——失焦无动作）+ **PanelHeader 顶栏终端按钮**（三卡化 2026-10-04 迁入：原 StatusBar 底栏 trailing 落点退役，鼠标路径入口与右抽屉开关同区、居其左；StatusBar 回落「有状态项才显示」纯显隐）；开合态按会话分区、不持久化；终端聚焦时 Esc 归终端输入，关抽屉走 `` ⌃` `` / 顶栏按钮 / 终端头部收起按钮
@@ -708,7 +721,7 @@ demo 用 `@keyframes shimmer`（1.4s ease-in-out infinite，linear-gradient 扫�
 - 左 nav `w-220px bg-sunken` 无 border-r；右内容区底色 `--bg`（卡片才能浮起），内容列 `max-w-content-max-w`(720) **左对齐**（非居中）
 - nav 选中态见 §5.4（列表项型）；nav-brand `uppercase 0.08em`（例外）
 - **11 个 nav 项**（provider/skill/agent/extension/system-prompt/terminal/preset/worktree/update/system/token-debug），每项 icon + label + 可选 count badge（中性圆点 `bg-surface` + `neutral-dim` mono）；hover 右侧显 chevron（链接提示）。注意：`skill` 项的 key 是 `'skill'`，但 demo 渲染的是 `ResourcesPage`（技能资源管理页），无独立 `SkillPage` 组件
-- 11 个 page 分组卡片 `bg-card` + 10px 圆角 + 去 border；行分隔 hairline 0.05；每行 label 加 12px `neutral-mid` 描述
+- 11 个 page 分组卡片 `bg-card` + `--radius-card`（12px）圆角 + 去 border；行分隔 hairline 0.05；每行 label 加 12px `neutral-mid` 描述
 - **ProviderEdit**：展开就地编辑（手风琴，取代 ProviderEditModal 双层 modal）
 - 表单 label 去 uppercase tracking-wider
 - **交互状态机**（有编辑态的页面）：dirty 快照 diff（净零翻转恢复 clean）/ 保存流（mock 延迟 + 已保存反馈）/ 离开检查（dirty 拦截切页 + 放弃先还原快照防重入）/ beforeunload
@@ -769,7 +782,7 @@ demo 用 `@keyframes shimmer`（1.4s ease-in-out infinite，linear-gradient 扫�
 
 | 原语 | v6 视觉 |
 |---|---|
-| card | 去边框靠 bg 层级（bg-card→surface→surface-2）；header 去 border-b 改 bg 浮起；圆角 8-10px；variant 靠 dot+badge |
+| card | 去边框靠 bg 层级（bg-card→surface→surface-2）；header 去 border-b 改 bg 浮起；圆角随卡片档 12px；variant 靠 dot+badge |
 | stats-line | severity 收窄（danger 保留，ok/warn 降中性）；border-l hairline 保留 |
 | progress-bar | fill 柔化 color-mix；done 降中性；圆角 6px |
 | list-tree | 缩进 16px 留白档；icon 12px；status 7px 圆点替换文字 |
