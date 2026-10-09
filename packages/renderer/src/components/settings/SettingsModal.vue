@@ -1,9 +1,10 @@
 <!--
-  容器组件 · Settings 全屏 overlay（v6 §6.4 D1 + §5.8 GroupCard）。
+  容器组件 · Settings 全屏 overlay（demo .pg-set .settings 形态 + v6 §6.4 D1）。
   数据来自 settings store（单一真相源：providers/skills/agents/extensions/system）。
   store 由 AppShell 应用级 init（常驻订阅），本组件只读 store + open 时刷新 providers。
-  形态：fixed inset-0 z-modal bg-bg 全屏覆盖。左 nav 220px（bg-sunken）+ 右 content flex-1（内容列 max-w-720 左对齐）。
-  nav 11 项（含 appearance 外观）。header 面包屑「设置 · <page>」+ 右侧 X 关闭。
+  形态：fixed inset-0 z-modal bg-bg 全屏覆盖。左 nav 252px（bg-sunken + 右 hairline 分隔，
+  三组头分组，nav 列表自身滚动）+ 右 content flex-1（内容列 max-w 720/860/1064 三态左对齐）。
+  header 面包屑「设置 · <page>」+ 右侧 X 关闭。
 -->
 <template>
   <Teleport to="body">
@@ -15,74 +16,78 @@
       :aria-label="t('settings.title')"
       @keydown="onKeydown"
     >
-      <!-- 左上 chrome 按钮组（与主应用 AppNavControls 同位 top-5/left-8/translate-x-64 + 同样式 nav-btn）：
-           ← 后退退出 settings（回到非 settings 页面）；收起侧栏/前进在 settings 全屏内无可见导航语义，禁用。
-           浮在 overlay 层（非 nav 内），确保按钮组定位对齐窗口左上（与主应用一致）且不受 nav 布局影响。 -->
-      <div class="absolute top-[5px] left-[8px] z-10 flex gap-0.5 translate-x-[64px] [-webkit-app-region:no-drag]">
+      <!-- 左上 chrome 按钮组（demo .chrome：fixed top 9px / left 8px / translateX(58px) / gap 2px，
+           钮 32x32 r-sm、icon 15px；顺序 = 后退（可用）· 收起侧栏 · 前进，与主应用 win-chrome 同位接管形态。
+           浮在 overlay 层（非 nav 内），确保按钮组定位对齐窗口左上且不受 nav 布局影响。 -->
+      <div class="absolute top-[9px] left-[8px] z-10 flex gap-[2px] translate-x-[58px] [-webkit-app-region:no-drag]">
         <Button
           variant="ghost"
           size="icon"
-          disabled
-          class="nav-btn h-[22px] w-[26px] rounded-md text-neutral-dim disabled:opacity-40"
-          :title="t('shell.collapseSidebar')"
-          :aria-label="t('shell.toggleSidebar')"
-        >
-          <PanelLeftClose class="size-[14px]" />
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon"
-          class="nav-btn h-[22px] w-[26px] rounded-md text-neutral-dim hover:bg-surface-hover hover:text-neutral-fg"
+          class="nav-btn h-[32px] w-[32px] rounded-[var(--radius-sm)] text-neutral-mid hover:bg-surface-hover hover:text-neutral-fg focus-visible:ring-0 focus-visible:ring-offset-0"
           :title="t('shell.goBack')"
           :aria-label="t('shell.goBack')"
           data-testid="settings-back-btn"
           @click="close"
         >
-          <ArrowLeft class="size-[14px]" />
+          <ArrowLeft class="size-[15px]" />
         </Button>
         <Button
           variant="ghost"
           size="icon"
           disabled
-          class="nav-btn h-[22px] w-[26px] rounded-md text-neutral-dim disabled:opacity-40"
+          class="nav-btn h-[32px] w-[32px] rounded-[var(--radius-sm)] text-neutral-mid hover:bg-surface-hover hover:text-neutral-fg disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-neutral-mid focus-visible:ring-0 focus-visible:ring-offset-0"
+          :title="t('shell.collapseSidebar')"
+          :aria-label="t('shell.toggleSidebar')"
+        >
+          <PanelLeftClose class="size-[15px]" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          disabled
+          class="nav-btn h-[32px] w-[32px] rounded-[var(--radius-sm)] text-neutral-mid hover:bg-surface-hover hover:text-neutral-fg disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-neutral-mid focus-visible:ring-0 focus-visible:ring-offset-0"
           :title="t('shell.goForward')"
           :aria-label="t('shell.goForward')"
         >
-          <ArrowRight class="size-[14px]" />
+          <ArrowRight class="size-[15px]" />
         </Button>
       </div>
-      <!-- 左 nav -->
-      <nav ref="navRootEl" class="flex w-[220px] shrink-0 flex-col bg-[var(--bg-sunken)] p-[8px] gap-[1px]" data-settings-nav>
+      <!-- 左 nav（demo .s-nav：252px + 右 1px hairline 分隔；nav 列表自身滚动 flex-1 overflow-y-auto） -->
+      <aside class="flex w-[252px] shrink-0 flex-col border-r border-hairline bg-[var(--bg-sunken)] p-[8px]" data-settings-nav>
         <!-- traffic light + chrome 让位（44px）：按钮组浮在 overlay 层（上方 absolute，同主应用 AppNavControls
              位置），nav 顶部留白避免遮挡 menus。红黄绿原生位置 x8~60。 -->
         <div class="h-[44px] shrink-0"></div>
-        <div class="flex flex-col gap-[1px]">
-          <Button
-            v-for="item in menus"
-            :key="item.id"
-            type="button"
-            variant="ghost"
-            class="nav-item group h-auto w-full flex items-center gap-[8px] py-[8px] px-[10px] rounded-[var(--radius-sm)] text-[length:var(--text-base)] font-normal leading-[1.5] text-left text-neutral-mid whitespace-normal transition-colors duration-[var(--duration-fast)] ease-[var(--ease)] [&:hover:not(.active)]:bg-surface-hover [&:hover:not(.active)]:text-neutral-fg [&.active]:!bg-surface [&.active]:text-accent"
-            :class="{ active: item.id === activeMenu }"
-            :data-testid="`settings-nav-${item.id}`"
-            :aria-current="item.id === activeMenu ? 'page' : undefined"
-            @click="select(item.id)"
-          >
-            <component :is="item.icon" class="!w-[16px] !h-[16px] shrink-0 opacity-[0.85] transition-opacity duration-[var(--duration-fast)] ease-[var(--ease)] group-hover:opacity-100 group-[.active]:opacity-100" />
-            <span class="flex-1 min-w-0 truncate">{{ t(item.labelKey) }}</span>
-            <span v-if="getItemCount(item.id)" class="inline-flex h-[16px] min-w-[16px] items-center justify-center rounded-full bg-surface px-[5px] font-mono text-[10px] font-semibold text-neutral-dim shrink-0">{{ getItemCount(item.id) }}</span>
-          </Button>
-        </div>
-      </nav>
+        <nav ref="navRootEl" :aria-label="t('settings.title')" class="flex min-h-0 flex-1 flex-col gap-[1px] overflow-y-auto pb-[8px]">
+          <template v-for="group in navGroups" :key="group.labelKey">
+            <!-- demo .nv-group：text-2xs neutral-mid，padding 10/10/3，字距 0.02em；首组头顶距 2px -->
+            <div class="px-[10px] pb-[3px] pt-[10px] text-[length:var(--text-2xs)] tracking-[0.02em] text-neutral-mid first:pt-[2px]">{{ t(group.labelKey) }}</div>
+            <Button
+              v-for="item in group.items"
+              :key="item.id"
+              type="button"
+              variant="ghost"
+              class="nav-item group h-auto w-full flex items-center gap-[8px] py-[8px] px-[10px] rounded-[var(--radius-sm)] text-[length:var(--text-base)] font-normal leading-[1.5] text-left text-neutral-mid whitespace-normal transition-colors duration-[var(--duration-fast)] ease-[var(--ease)] focus-visible:ring-0 focus-visible:ring-offset-0 [&:hover:not(.active)]:bg-surface-hover [&:hover:not(.active)]:text-neutral-fg [&.active]:bg-surface [&.active]:text-neutral-fg"
+              :class="{ active: item.id === activeMenu }"
+              :data-testid="`settings-nav-${item.id}`"
+              :aria-current="item.id === activeMenu ? 'page' : undefined"
+              @click="select(item.id)"
+            >
+              <component :is="item.icon" class="!w-[16px] !h-[16px] shrink-0 opacity-[0.85] transition-opacity duration-[var(--duration-fast)] ease-[var(--ease)] group-hover:opacity-100 group-[.active]:opacity-100" />
+              <span class="flex-1 min-w-0 truncate">{{ t(item.labelKey) }}</span>
+              <span v-if="getItemCount(item.id)" class="inline-flex h-[16px] min-w-[16px] items-center justify-center rounded-full bg-surface px-[5px] font-mono text-[10px] font-bold text-[color:var(--neutral-fg-2)] group-hover:bg-card group-[.active]:text-neutral-fg shrink-0">{{ getItemCount(item.id) }}</span>
+            </Button>
+          </template>
+        </nav>
+      </aside>
 
       <!-- 右 content -->
       <div ref="contentEl" class="flex min-w-0 flex-1 flex-col bg-bg overflow-auto">
         <div class="flex h-[44px] shrink-0 items-center justify-between px-[14px] border-b border-border">
-          <span class="text-[14px] font-semibold text-neutral-fg">{{ t('settings.title') }} · {{ t(currentMenu.labelKey) }}</span>
+          <span class="text-[length:var(--text-sm)] font-semibold text-neutral-fg">{{ t('settings.title') }} · {{ t(currentMenu.labelKey) }}</span>
           <Button
             type="button"
             variant="ghost"
-            class="xbtn flex h-[28px] w-[28px] p-0 items-center justify-center rounded-[var(--radius-sm)] text-[length:var(--text-base)] font-normal leading-[1.5] text-neutral-mid whitespace-normal transition-colors duration-[var(--duration-fast)] ease-[var(--ease)] hover:bg-surface-hover hover:text-neutral-fg"
+            class="xbtn flex h-[28px] w-[28px] p-0 items-center justify-center rounded-[var(--radius-sm)] text-[length:var(--text-base)] font-normal leading-[1.5] text-neutral-mid whitespace-normal transition-colors duration-[var(--duration-fast)] ease-[var(--ease)] hover:bg-surface-hover hover:text-neutral-fg focus-visible:ring-0 focus-visible:ring-offset-0"
             :title="t('settings.closeEsc')"
             :aria-label="t('settings.close')"
             data-testid="settings-close-btn"
@@ -92,7 +97,7 @@
           </Button>
         </div>
         <div class="content-col-inner w-full m-0 pt-[var(--space-6)] px-[24px] pb-[var(--space-8)]"
-             :style="{ maxWidth: activeMenu === 'usage' ? '1064px' : 'var(--content-max-w)' }">
+             :style="{ maxWidth: contentMaxWidth }">
           <!-- 设置页切换保持瞬时（不加过渡动画）：
                Vue <Transition mode="out-in"> + v-if/else-if 链在 Vue 3.5.39 下 leave
                完成后 enter 不触发（调度 bug，内容区永久空白）；concurrent 模式（无 mode）
@@ -142,7 +147,7 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useEventListener } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
-import { Settings, Sparkles, Bot, Blocks, SlidersHorizontal, ScrollText, TerminalSquare, GitBranch, ClipboardList, Server, Volume2, X, Download, Palette, BarChart3, ArrowLeft, ArrowRight, PanelLeftClose, Wifi } from '@lucide/vue'
+import { Settings, Sparkles, Bot, Blocks, SlidersHorizontal, ScrollText, TerminalSquare, GitBranch, ClipboardList, Server, Volume2, X, Download, Palette, ChartColumn, ArrowLeft, ArrowRight, PanelLeftClose, Wifi, type LucideIcon } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import { registerModalSurface } from '@/composables/features/app/modal-surface-registry'
 import { cycleTabFocus, getFocusableElements } from '@/composables/logic/focus-trap'
@@ -167,25 +172,47 @@ import RemoteAccessPage from './remote-access/RemoteAccessPage.vue'
 import UsagePage from './usage/UsagePage.vue'
 import AppearancePage from './appearance/AppearancePage.vue'
 
-const menus = [
-  { id: 'provider', labelKey: 'settings.menu.provider', icon: Settings },
-  { id: 'appearance', labelKey: 'settings.menu.appearance', icon: Palette },
-  { id: 'skill', labelKey: 'settings.menu.skill', icon: Sparkles },
-  { id: 'agent', labelKey: 'settings.menu.agent', icon: Bot },
-  { id: 'extension', labelKey: 'settings.menu.extension', icon: Blocks },
-  { id: 'system-prompt', labelKey: 'settings.menu.systemPrompt', icon: ScrollText },
-  { id: 'terminal', labelKey: 'settings.menu.terminal', icon: TerminalSquare },
-  { id: 'mcp', labelKey: 'settings.menu.mcp', icon: Server },
-  { id: 'preset', labelKey: 'settings.menu.preset', icon: ClipboardList },
-  { id: 'tts', labelKey: 'settings.menu.tts', icon: Volume2 },
-  { id: 'worktree', labelKey: 'settings.menu.worktree', icon: GitBranch },
-  { id: 'update', labelKey: 'settings.menu.update', icon: Download },
-  { id: 'remote-access', labelKey: 'settings.menu.remoteAccess', icon: Wifi },
-  { id: 'system', labelKey: 'settings.menu.system', icon: SlidersHorizontal },
-  { id: 'usage', labelKey: 'settings.menu.usage', icon: BarChart3 },
+// 左 nav 分组（demo NAV_GROUPS 形态：三组头 + 组内项；渲染与键盘 ↑↓/Home/End 顺序均按此结构）。
+// 仅展示层分组，不改分区注册/store 契约（menus 各项的 id/labelKey/icon 原样保留）。
+const navGroups = [
+  {
+    labelKey: 'settings.menu.groupResources',
+    items: [
+      { id: 'provider', labelKey: 'settings.menu.provider', icon: Settings },
+      { id: 'skill', labelKey: 'settings.menu.skill', icon: Sparkles },
+      { id: 'agent', labelKey: 'settings.menu.agent', icon: Bot },
+      { id: 'extension', labelKey: 'settings.menu.extension', icon: Blocks },
+      { id: 'mcp', labelKey: 'settings.menu.mcp', icon: Server },
+      { id: 'preset', labelKey: 'settings.menu.preset', icon: ClipboardList },
+    ],
+  },
+  {
+    labelKey: 'settings.menu.groupInputAppearance',
+    items: [
+      { id: 'appearance', labelKey: 'settings.menu.appearance', icon: Palette },
+      { id: 'system-prompt', labelKey: 'settings.menu.systemPrompt', icon: ScrollText },
+      { id: 'tts', labelKey: 'settings.menu.tts', icon: Volume2 },
+      { id: 'terminal', labelKey: 'settings.menu.terminal', icon: TerminalSquare },
+    ],
+  },
+  {
+    labelKey: 'settings.menu.groupEnvSystem',
+    items: [
+      { id: 'worktree', labelKey: 'settings.menu.worktree', icon: GitBranch },
+      { id: 'update', labelKey: 'settings.menu.update', icon: Download },
+      { id: 'remote-access', labelKey: 'settings.menu.remoteAccess', icon: Wifi },
+      { id: 'system', labelKey: 'settings.menu.system', icon: SlidersHorizontal },
+      { id: 'usage', labelKey: 'settings.menu.usage', icon: ChartColumn },
+    ],
+  },
 ] as const
 
-type MenuId = (typeof menus)[number]['id']
+type MenuId = (typeof navGroups)[number]['items'][number]['id']
+
+/** 键盘 ↑↓/Home/End 导航与页查找用的平铺顺序（= 显示顺序）；显式注解 + spread 拷贝解
+ *  as const 元组 flatMap 的推断塌缩（readonly 字面量元组直接 flatMap 会推成数组联合） */
+const flatMenus: readonly { id: MenuId; labelKey: string; icon: LucideIcon }[] =
+  navGroups.flatMap((group) => [...group.items])
 
 const { t } = useI18n()
 
@@ -204,7 +231,15 @@ onBeforeUnmount(disposeSurfaceRegistration)
 const activeMenu = ref<MenuId>('provider')
 /** extension 域子视图（M16）：main=扩展管理 ExtensionPage / contributions=插件贡献 PluginContributionsPage。 */
 const extensionView = ref<'main' | 'contributions'>('main')
-const currentMenu = computed(() => menus.find((m) => m.id === activeMenu.value) ?? menus[0])
+const currentMenu = computed(() => flatMenus.find((m) => m.id === activeMenu.value) ?? flatMenus[0])
+
+// 内容列限宽三态（demo：wide=--content-max-w-wide 1064（usage）· narrow 860（mcp/system-prompt，
+// demo P2「限宽双实现」收敛值）· 其余 --content-max-w 720）
+const contentMaxWidth = computed(() => {
+  if (activeMenu.value === 'usage') return 'var(--content-max-w-wide)'
+  if (activeMenu.value === 'mcp' || activeMenu.value === 'system-prompt') return '860px'
+  return 'var(--content-max-w)'
+})
 
 const settingsStore = getSettingsStore()
 const { providers, skills, agents, extensions, system, skillDirs, agentDirs } = settingsStore
@@ -303,7 +338,7 @@ function handleNavItemNavigation(e: KeyboardEvent): void {
   if (next < 0 || next >= items.length) return
   e.preventDefault()
   items[next].focus()
-  select(menus[next].id)
+  select(flatMenus[next].id)
 }
 
 /** overlay 内可聚焦元素（Tab 循环三路语义见共享单元 focus-trap）。
@@ -339,7 +374,7 @@ onBeforeUnmount(() => {
 </script>
 
 <style>
-/* ── v6 settings 页共享范式（v6 §6.4 + §5.8）──
+/* ── v6 settings 页共享范式（demo .pg-set 段对齐）──
    集中定义避免各页 scoped 重复；限定 .content-col-inner 作用域，不污染全局。
    page-head：各页顶部 H1 + 描述 block；gc-sub：GroupCard head slot 内副标题。 */
 .content-col-inner .page-head {
@@ -386,24 +421,31 @@ onBeforeUnmount(() => {
 .content-col-inner .gc-sub {
   margin-top: 2px;
   font-size: var(--text-2xs);
-  color: var(--neutral-mid);
+  color: var(--neutral-fg-2);
   line-height: 1.4;
 }
+/* 卡内设置行描述弱化档（demo `.pg-set .gcard .srow-desc` → neutral-fg-2）：
+   SettingRow desc 默认 neutral-mid，进 GroupCard（.group-card）后切次级正文档。 */
+.content-col-inner .group-card .setting-row-desc {
+  color: var(--neutral-fg-2);
+}
+
+/* 弹层开合过渡（demo `.pg-set .settings` fade-in 0.16s ease，reduced-motion 门控）。
+   keyframes 局部命名不进全局 SSOT：仅本弹层消费、无其他挂点（非共享动画原语）。 */
+@media (prefers-reduced-motion: no-preference) {
+  .fso { animation: settings-fade-in 0.16s ease; }
+}
+@keyframes settings-fade-in { from { opacity: 0; } }
 </style>
 
 <style scoped>
-/* [HISTORICAL] 本文件保留 <style scoped> 的原因：.nav-item:focus-visible / .xbtn:focus-visible
-   的双环 box-shadow `0 0 0 2px var(--accent), 0 0 0 4px rgba(0,0,0,0.4)` 是多值叠加（内环
-   accent + 外环半透明黑），Tailwind 单个 box-shadow 工具类无法表达多值叠加，属 AGENTS.md §3
-   明确允许的 escape hatch（与 MainPanel.vue 多值 shadow 同类）。其余几何/颜色/布局/过渡均已
-   迁移至 Tailwind 工具类（见 template 各元素 class）。 */
-.nav-item:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 2px var(--accent), 0 0 0 4px rgba(0, 0, 0, 0.4);
-}
+/* 焦点环（demo .pg-set 焦点语言：outline 2px solid var(--focus-ring)，--focus-ring = var(--accent)）
+   offset -1px 内缩贴合圆角。Button cva 自带 focus-visible ring 通道，已在各按钮 class 上
+   ring-0 关闭，焦点指示统一收归本 outline 通道。 */
+.nav-item:focus-visible,
 .xbtn:focus-visible,
 .nav-btn:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 2px var(--accent), 0 0 0 4px rgba(0, 0, 0, 0.4);
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
 }
 </style>

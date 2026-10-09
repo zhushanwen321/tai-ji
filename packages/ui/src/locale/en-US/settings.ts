@@ -8,6 +8,9 @@ export default {
   saved: 'Saved',
   // ── Menu navigation (SettingsModal left nav + right detail title/desc) ──
   menu: {
+    groupResources: 'Models & Resources',
+    groupInputAppearance: 'Input & Appearance',
+    groupEnvSystem: 'Environment & System',
     provider: 'Provider',
     providerDesc: 'Configure model providers and API keys',
     skill: 'Skill',

@@ -8,6 +8,9 @@ export default {
   saved: '已保存',
   // ── 菜单导航（SettingsModal 左导航 + 右详情标题/描述）──
   menu: {
+    groupResources: '模型与资源',
+    groupInputAppearance: '输入与外观',
+    groupEnvSystem: '环境与系统',
     provider: '供应商',
     providerDesc: '配置模型供应商与 API Key',
     skill: '技能',
