@@ -60,12 +60,13 @@ describe('色阶三档（决策 6：常态 accent 半透明 · >80 warn · >95 d
     [95, 'bg-warn'],
     [96, 'bg-danger'],
     [100, 'bg-danger'],
-  ])('percent=%i → %s', (percent, expected) => {
+  ])('percent=%i → 内层填充条 %s', (percent, expected) => {
     usageFixture.current = okPartition(percent)
     const wrapper = mountBar()
     const bar = wrapper.find('[data-testid="composer-capacity-bar"]')
     expect(bar.exists()).toBe(true)
-    expect(bar.classes()).toContain(expected)
+    // 色阶落内层填充条（demo .capbar > i 结构；外层轨道只管定位与裁剪）
+    expect(bar.find('span').classes()).toContain(expected)
   })
 })
 
@@ -77,6 +78,13 @@ describe('形态锚与可访问性（用户可见）', () => {
     for (const cls of ['absolute', 'top-0', 'h-[2px]', 'rounded-t-lg']) {
       expect(bar.classes()).toContain(cls)
     }
+  })
+
+  it('内层填充条宽度 = 已用百分比（demo .capbar i width:% 对齐）', () => {
+    usageFixture.current = okPartition(42)
+    const wrapper = mountBar()
+    const fill = wrapper.find('[data-testid="composer-capacity-bar"] span')
+    expect(fill.attributes('style')).toContain('width: 42%')
   })
 
   it('aria-label 带百分比数字（数字唯一入口在 hover 指标聚合页，细条只给色阶 + 读屏提示）', () => {

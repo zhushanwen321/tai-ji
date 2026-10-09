@@ -10,12 +10,15 @@
     × 按钮变得不可见且不可达——「无声裁切」）；内层 name span 补 `min-w-0` 让 truncate 真正生效，
     chip 挂 `:title` 兜住被截断的全名。
   -->
-  <div v-if="items.length" class="flex flex-wrap items-center gap-1.5 overflow-hidden px-3.5 pt-[7px]">
+  <div v-if="items.length" class="flex flex-wrap items-center gap-1.5 overflow-hidden px-4 pt-[7px]">
+    <!-- chip 语言类推（demo 无上下文 chips 对应物）：取 demo .workmeta .chipn 形态语言
+         （hairline 边 + bg-input 凹陷底 + r-sm + mid 字，workbench.css:361，M3a TurnMeta
+         已裁决的同款 chip 语言）+ demo .chip 字号档 --text-xs -->
     <span
       v-for="item in items"
       :key="item.id"
       :title="item.name"
-      class="group inline-flex min-w-0 max-w-[min(180px,100%)] shrink-0 items-center gap-1 rounded-sm bg-surface-2 px-1.5 py-0.5 text-[length:var(--text-2xs)] text-neutral-mid"
+      class="group inline-flex min-w-0 max-w-[min(180px,100%)] shrink-0 items-center gap-1 rounded-sm border border-hairline bg-bg-input px-2 py-px text-[length:var(--text-xs)] text-neutral-mid"
       :class="item.type === 'image' ? 'text-reasoning' : ''"
     >
       <component :is="iconFor(item)" class="size-3 shrink-0" :class="item.type === 'image' ? 'text-reasoning' : 'text-neutral-dim'" />

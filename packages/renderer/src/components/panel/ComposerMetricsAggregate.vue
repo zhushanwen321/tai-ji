@@ -3,8 +3,10 @@
   累计退化；容量 + TTFT + 速度 + 缓存 四项指标收为单图标按钮）。
 
   形态硬约束（S1–S7）：
-  - 聚合按钮**单一图标**（Gauge），禁多 icon 重叠；
+  - 聚合按钮**单一图标**（Gauge），禁多 icon 重叠；几何对齐 demo .cbtn（30×30 / r-sm /
+    dim → hover surface-hover 底 + fg 提字，workbench.css composer 段）；
   - 指标聚合 = **hover** 弹指标聚合页（HoverCard）——与模型聚合的 click 语义区分；
+    容器对齐 demo .stats-pop（右下锚 10px 间距 / r-lg / border-strong / shadow-2）；
   - 内容 = 四张纯内容卡纵向拼装（ContextCapacityCard + GenStatsTtftCard + GenStatsSpeedCard
     + GenStatsCacheCard），卡间发丝分隔（token 工具类 h-px bg-border-strong 局部定义，不
     import 接线层常量）；四卡共享 useGenStats / useContextUsage 分区，数据同源。
@@ -16,17 +18,21 @@
 <template>
   <HoverCard>
     <HoverCardTrigger as-child>
+      <!-- 钮形态对齐 demo .cbtn（workbench.css composer 段）：30×30 / r-sm / dim，hover
+           surface-hover 底 + fg 提字；Gauge 16px stroke 1.6 同 demo 图标规格 -->
       <Button
         variant="ghost"
         data-testid="composer-metrics-aggregate"
-        class="h-7 gap-1 rounded-sm px-1.5 text-neutral-dim transition-colors hover:text-neutral-mid"
+        class="size-[30px] rounded-sm p-0 text-neutral-dim transition-colors hover:text-neutral-fg"
         :title="t('panel.context.metricsAggregateTitle')"
         @mouseenter="quota.onHoverEnter"
       >
-        <Gauge class="size-4 shrink-0" />
+        <Gauge class="size-4 shrink-0" :stroke-width="1.6" />
       </Button>
     </HoverCardTrigger>
-    <HoverCardContent side="top" class="w-[300px] p-0">
+    <!-- 容器对齐 demo .stats-pop：右下锚 + 10px 间距 + r-lg 圆角；宽 300 保留 real
+         四卡布局宽（demo 240 是四行 sr 形态的宽，登记差异） -->
+    <HoverCardContent side="top" :side-offset="10" class="w-[300px] rounded-lg p-0">
       <ContextCapacityCard :session-id="props.sessionId" :model-id="props.modelId" />
       <span class="block h-px bg-border-strong" aria-hidden="true" />
       <GenStatsTtftCard :session-id="props.sessionId" :model-id="props.modelId" />

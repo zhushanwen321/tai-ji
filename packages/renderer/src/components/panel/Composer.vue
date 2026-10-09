@@ -122,13 +122,13 @@
         :data-slot-left-cluster="density.slots.leftCluster"
         :data-slot-metrics="density.slots.metrics"
         :data-slot-model-thinking="density.slots.modelThinking"
-        class="composer-bar flex flex-nowrap items-center justify-end gap-0 px-2.5 pb-2 mt-1"
+        class="composer-bar flex flex-nowrap items-center justify-end gap-0 px-2.5 pb-2.5 mt-1.5"
       >
         <!-- 左簇：`+`（序 0，不退化不裁剪）/ btw 旁路提问（序 0，退化序登记见
              use-composer-bar-density COMPOSER_BTW_BUTTON_DEGRADATION_ORDER）/ 任务托盘
              （左簇唯一聚合入口：aggregated 时单图标按钮承载托盘分段 + 插件 toolbar）/
              展开态插件 toolbar 挂载点 -->
-        <div data-composer-cluster="left" class="flex min-w-0 shrink-0 items-center gap-0.5">
+        <div data-composer-cluster="left" class="flex min-w-0 shrink-0 items-center gap-1">
           <AddMenuPopover @select="onAddSelect" />
           <!-- plugin headerAction 挂载点（demo 裁决落点 = composer 左簇、「+」之后；用户裁决
                2026-10-06）。显隐由 hidden 管线唯一裁决：无任务插件推 hidden=true → 列表构建层
@@ -178,7 +178,7 @@
         <span class="min-w-0 flex-1" />
 
         <!-- 右簇：指标 / 模型+思考 / 发送位（shrink-0，发送位右锚不漂移） -->
-        <div data-composer-cluster="right" class="flex min-w-0 shrink-0 items-center gap-0">
+        <div data-composer-cluster="right" class="flex min-w-0 shrink-0 items-center gap-1">
           <!-- 序 2：指标（容量 + TTFT + 速度 + 缓存）。ui-optimize 决策 6：指标**默认聚合**——单图标
                聚合按钮对所有 fit 级常驻（hover 弹指标聚合页，容量/TTFT/速度/缓存四卡全量、三条发丝分隔）；
                fit 0 平铺直挂渲染分支（GenStatsTriggers / ContextCapacityPopover）已随决策退役，
@@ -222,19 +222,19 @@
           v-if="staging.activeStaging.value && !isSending"
           variant="default"
           size="icon"
-          class="ml-1.5 size-[var(--composer-btn-size)] rounded-md bg-accent text-accent-fg transition-colors enabled:hover:bg-accent-hover disabled:bg-transparent disabled:text-[var(--neutral-dim)]"
+          class="ml-1 size-[var(--composer-btn-size)] rounded-md bg-accent text-accent-fg transition-colors enabled:hover:bg-accent-hover disabled:bg-accent-soft disabled:text-neutral-mid disabled:opacity-100"
           :disabled="!canSubmit"
           :data-testid="staging.activeStaging.value.type === 'fork' ? 'fork-send-btn' : 'handoff-send-btn'"
           :title="staging.activeStaging.value.type === 'fork' ? t('panel.composer.forkSend') : t('panel.composer.handoffSend')"
           @click="onSendClick"
         >
-          <ArrowUp class="size-[15px]" />
+          <ArrowUp class="size-4" />
         </Button>
         <Button
           v-else-if="sendButtonState === 'stop'"
           variant="ghost"
           size="icon"
-          class="stop-btn ml-1.5 size-[var(--composer-btn-size)] rounded-md bg-surface-hover text-neutral-mid hover:bg-danger-soft hover:text-danger"
+          class="stop-btn ml-1 size-[var(--composer-btn-size)] rounded-md bg-surface-hover text-neutral-mid hover:bg-danger-soft hover:text-danger"
           :title="t('panel.composer.stop')"
           @click="onStopClick"
         >
@@ -244,32 +244,49 @@
           v-else-if="sendButtonState === 'queue'"
           variant="default"
           size="icon"
-          class="queue-send-btn relative ml-1.5 size-[var(--composer-btn-size)] rounded-md bg-accent text-accent-fg transition-colors enabled:hover:bg-accent-hover disabled:bg-transparent disabled:text-[var(--neutral-dim)]"
+          class="queue-send-btn relative ml-1 size-[var(--composer-btn-size)] rounded-md bg-accent text-accent-fg transition-colors enabled:hover:bg-accent-hover disabled:bg-accent-soft disabled:text-neutral-mid disabled:opacity-100"
           :disabled="!canSubmit"
           :title="canSubmit ? `${t('panel.composer.queueSend')} · ⏎` : t('panel.composer.sendHint')"
           @click="onSendClick"
         >
-          <ArrowUp class="size-[15px]" />
+          <ArrowUp class="size-4" />
           <!-- 时钟角标（D6 场景 1）：排队语义视觉锚点，右上角 1/4 尺寸 -->
           <Clock class="absolute right-[2px] top-[2px] size-2" aria-hidden="true" />
         </Button>
+        <!-- 发送中 spinner = 呼吸弧（chat 域统一 loader 规格同构：15px accent + 三重动画）。
+             svg 骨架与 ui 包 RUNNING_LOADER_SVG 同构（该常量未在 ui 包 exports 白名单，
+             共享需动 package.json 归交接项）；弧段动画原语 .ld-track/.ld-arc 仍由
+             style.css 全局单源承载，此处仅静态属性无独立样式。 -->
         <div
           v-else-if="isSending"
-          class="ml-1.5 grid size-[var(--composer-btn-size)] place-items-center rounded-md bg-accent text-accent-fg"
+          class="ml-1 grid size-[var(--composer-btn-size)] place-items-center rounded-md bg-accent text-accent-fg"
           :title="t('panel.composer.sending')"
         >
-          <Loader2 class="size-4 animate-spin" />
+          <span class="inline-block size-[15px] animate-loader-spin" aria-hidden="true">
+            <svg
+              class="size-full"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.7"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <circle class="ld-track" cx="12" cy="12" r="10" opacity="0.16" />
+              <circle class="ld-arc" cx="12" cy="12" r="10" pathLength="100" />
+            </svg>
+          </span>
         </div>
         <Button
           v-else
           variant="default"
           size="icon"
-          class="ml-1.5 size-[var(--composer-btn-size)] rounded-md bg-accent text-accent-fg transition-colors enabled:hover:bg-accent-hover disabled:bg-transparent disabled:text-[var(--neutral-dim)]"
+          class="ml-1 size-[var(--composer-btn-size)] rounded-md bg-accent text-accent-fg transition-colors enabled:hover:bg-accent-hover disabled:bg-accent-soft disabled:text-neutral-mid disabled:opacity-100"
           :disabled="!canSubmit"
           :title="canSubmit ? `${t('panel.composer.send')} · ⏎` : t('panel.composer.sendHint')"
           @click="onSendClick"
         >
-          <ArrowUp class="size-[15px]" />
+          <ArrowUp class="size-4" />
         </Button>
         </div>
       </div>
@@ -286,7 +303,7 @@
 <script setup lang="ts">
 import { computed, createVNode, nextTick, provide, ref, render, watch, type Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ArrowUp, Clock, Loader2, Square, X } from '@lucide/vue'
+import { ArrowUp, Clock, Square, X } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import { ComposerInput, ComposerInputDepsKey, type ComposerInputDeps } from '@taiji/ui/features/composer'
 import { ViewHost } from '@taiji/ui/extension-host'

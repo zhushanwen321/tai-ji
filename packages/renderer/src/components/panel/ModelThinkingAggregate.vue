@@ -26,13 +26,16 @@
 <template>
   <Popover v-model:open="open">
     <PopoverTrigger as-child>
+      <!-- 钮形态对齐 demo .cbtn / .agg-mt（workbench.css composer 段）：30×30 / r-sm /
+           dim → hover surface-hover 底 + fg 提字；Boxes 16px stroke 1.6 同 demo 图标规格。
+           弹层本体形态归下一波次（M4b），本波只动主条触发钮。 -->
       <Button
         variant="ghost"
         data-testid="composer-model-thinking-aggregate"
-        class="h-7 gap-1 rounded-sm px-1.5 text-neutral-fg transition-colors"
+        class="size-[30px] rounded-sm p-0 text-neutral-dim transition-colors hover:text-neutral-fg"
         :title="t('panel.modelSelect.modelThinkingAggregateTitle')"
       >
-        <Boxes class="size-4 shrink-0" />
+        <Boxes class="size-4 shrink-0" :stroke-width="1.6" />
       </Button>
     </PopoverTrigger>
     <PopoverContent side="top" class="w-[240px] p-0">

@@ -225,9 +225,13 @@ const iconTitle = computed(() =>
 )
 /** 新建会话快捷键显示（跨平台；⌘N / Ctrl+N） */
 const newSessionKbd = computed(() => formatKbd('n'))
-/** chip 基础类（accent 底 = 非默认模式这一状态通道） */
+/**
+ * chip 基础类（accent 底 = 非默认模式这一状态通道）。几何对齐 demo .chip 档
+ * （unpacked.css：min-h 24 / padding 3px 8px / r-sm 6px / 字号 --text-xs 12px）；
+ * accent-soft 底为 real 语义通道（demo 无对话态模式 chip 对应物，登记类推）。
+ */
 const CHIP_CLASS =
-  'relative h-auto min-w-0 shrink gap-1.5 rounded-md px-2 py-1 text-[12px] font-normal [&_svg]:size-3.5'
+  'relative h-auto min-h-6 min-w-0 shrink gap-1.5 rounded-sm px-2 py-[3px] text-[length:var(--text-xs)] font-normal [&_svg]:size-3.5'
 </script>
 
 <template>

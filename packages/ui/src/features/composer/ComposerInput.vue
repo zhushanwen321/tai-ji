@@ -11,8 +11,14 @@
   -->
   <div
     ref="elRef"
-    class="composer-input relative min-h-[60px] max-h-[120px] overflow-y-auto px-3.5 pb-1 pt-[11px] text-[length:var(--text-sm)] leading-[1.55] text-neutral-fg outline-none"
-    :class="{ 'is-empty': isEmpty, 'is-focused': isFocused }"
+    class="composer-input relative min-h-[42px] max-h-[132px] overflow-y-auto px-4 pt-[13px] pb-[6px] text-[length:var(--text-md)] leading-[1.5] text-neutral-fg outline-none"
+    :class="[
+      { 'is-empty': isEmpty, 'is-focused': isFocused },
+      // 聚焦 inset 中性边（demo 权威：textarea.composer-input:focus-visible 的
+      // box-shadow inset 0 0 0 1px var(--border-strong)）——与外框 border-strong 提亮
+      // （composer-focus-ring）构成 demo 的双层聚焦形态；isFocused 状态类驱动。
+      isFocused && 'shadow-[inset_0_0_0_1px_var(--border-strong)]',
+    ]"
     :contenteditable="!disabled"
     :data-placeholder="placeholder"
     role="textbox"
