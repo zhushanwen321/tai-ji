@@ -9,7 +9,7 @@
  * A43 行组件渲染：
  * - 12 kind + MALFORMED 行摘要齐全（§3.4 渲染模型表）
  * - 影子化降透明（shadowed 行 opacity 类 + data-shadowed）
- * - 选中态 surface-hover + 强调字色（无 ring，v6 §3.4 列表项型 + SearchModal sm-item 例外）
+ * - 选中态 demo 行类范式：elevated 浮起底 + 左侧 accent 内嵌条 + headline 提 fg（无 ring）
  * - >500 虚拟滚动启用（不全量渲染）；≤500 全量
  * - BASH meta excludeFromContext（core 小改）行内「不进上下文」注记
  * - kind chips / 搜索 / 仅当前 context toggle / context 分界行
@@ -171,7 +171,7 @@ describe('A42 SegmentedTab 对话|Trace per-pane 视图状态', () => {
     expect(msgChip.classes().join(' ')).toContain('bg-bg-elevated')
     // 选中行仍高亮（u2 = 保留区 USER）
     const selRow = view2.find('[data-testid="trace-row-9"]')
-    expect(selRow.classes().join(' ')).toContain('bg-surface-hover')
+    expect(selRow.classes().join(' ')).toContain('bg-bg-elevated')
     view2.unmount()
   })
 })
@@ -207,18 +207,19 @@ describe('A43 行组件渲染（12 kind + 影子化 + 选中态 + 虚拟滚动�
     view.unmount()
   })
 
-  it('选中态：surface-hover + 强调字色、无 ring（SearchModal sm-item 例外登记）', async () => {
+  it('选中态：demo 行类范式（elevated 浮起 + 左侧 accent 内嵌条 + headline 提 fg），无 ring', async () => {
     const view = await mountTraceView()
     const row = view.find('[data-testid="trace-row-10"]') // a2 保留区 assistant
-    expect(row.classes().join(' ')).not.toContain('bg-surface-hover')
+    expect(row.classes().join(' ')).not.toContain('bg-bg-elevated')
     await row.trigger('click')
     const selected = view.find('[data-testid="trace-row-10"]')
     const cls = selected.classes().join(' ')
-    expect(cls).toContain('bg-surface-hover')
+    expect(cls).toContain('bg-bg-elevated')
+    expect(cls).toContain('shadow-[inset_2px_0_0_var(--accent)]')
     expect(cls).not.toMatch(/\bring/)
-    // 摘要强调字色（选中行内的 summary span）
+    // 选中行 headline 提 fg（demo 范式行类选中 color: fg）
     const summary = selected.find('span.flex-1')
-    expect(summary.classes().join(' ')).toContain('text-accent')
+    expect(summary.classes().join(' ')).toContain('text-neutral-fg')
     view.unmount()
   })
 
@@ -493,7 +494,7 @@ describe('assistant 聚合行子 block 内联展开（chevron + block 子行 + �
     await view.find('[data-testid="trace-block-row-5-1"]').trigger('click')
     expect(useSessionTrace().partition.value.selectedKey).toBe('a1#block-1')
     // 子行选中态（同 testid 元素高亮）
-    expect(view.find('[data-testid="trace-block-row-5-1"]').classes().join(' ')).toContain('bg-surface-hover')
+    expect(view.find('[data-testid="trace-block-row-5-1"]').classes().join(' ')).toContain('bg-bg-elevated')
     view.unmount()
   })
 

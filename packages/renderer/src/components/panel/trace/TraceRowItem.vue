@@ -7,15 +7,15 @@
     badge 列恒对齐）；点击整行 = 选中 + 展开/收起（chevron 无独立点击目标）。
     状态语义：
     - 影子化（shadowed）：降透明（demo .tr-row.shadowed opacity .42），hover 恢复。
-    - 选中态：bg-surface-hover + 摘要 text-accent，无 ring 无左条（v6 §3.4 列表项型；
-      行底色已是 surface 的场景按 SearchModal sm-item 登记例外——surface-hover + 强调字色）。
+    - 选中态（demo workbench.css「选中态单一范式」行类：elevated 浮起底 + fg 字 +
+      左侧 2px accent 内嵌条）；行 headline 常态 = neutral-mid（demo .trow color: mid）。
     - MALFORMED headline 走 i18n（core headline 是数据提取，损坏行文案归 UI 层）。
   -->
   <div
-    class="flex cursor-pointer select-none items-center gap-2 rounded-sm px-2 py-[5px] transition-colors duration-[var(--duration-fast)] ease-[var(--ease)] hover:bg-surface-2"
+    class="flex cursor-pointer select-none items-center gap-2 rounded-sm px-2 py-[5px] transition-colors duration-[var(--duration-fast)] ease-[var(--ease)] hover:bg-surface-hover"
     :class="[
       row.shadowed ? 'opacity-40 hover:opacity-75' : '',
-      selected ? 'bg-surface-hover hover:bg-surface-hover' : '',
+      selected ? 'bg-bg-elevated shadow-[inset_2px_0_0_var(--accent)] hover:bg-bg-elevated' : '',
     ]"
     :data-testid="`trace-row-${row.seq}`"
     :data-kind="row.kind"
@@ -27,7 +27,7 @@
   >
     <!-- seq 列（w-12 全行恒宽 → badge 列对齐）：chevron 指示符 + 右对齐数字成组靠右，
          chevron 落在数字左侧的列内留白处；无 chevron 行留白由左侧轨道线锚定 -->
-    <span class="flex w-12 shrink-0 items-center justify-end gap-1 font-mono text-[length:var(--text-3xs)] tabular-nums text-neutral-faint">
+    <span class="flex w-12 shrink-0 items-center justify-end gap-1 font-mono text-[length:var(--text-2xs)] tabular-nums text-neutral-faint">
       <ChevronDown
         v-if="expandable && expanded"
         class="size-3 shrink-0"
@@ -43,13 +43,14 @@
       <span>#{{ row.seq }}</span>
     </span>
     <span
-      class="shrink-0 rounded px-1.5 py-px font-mono text-[length:var(--text-3xs)] tracking-wide"
+      class="shrink-0 rounded px-[7px] py-px font-mono text-[length:var(--text-3xs)]"
       :class="KIND_BADGE_CLASS[row.kind]"
     >{{ row.kind }}</span>
-    <span v-if="time" class="shrink-0 font-mono text-[length:var(--text-3xs)] tabular-nums text-neutral-faint">{{ time }}</span>
+    <span v-if="time" class="shrink-0 font-mono text-[length:var(--text-2xs)] tabular-nums text-neutral-faint">{{ time }}</span>
+    <!-- headline 常态 = neutral-mid（demo .trow color: mid），选中范式提 fg -->
     <span
       class="min-w-0 flex-1 truncate text-[length:var(--text-xs)]"
-      :class="selected ? 'text-accent' : row.shadowed ? 'text-neutral-mid' : 'text-neutral-fg'"
+      :class="selected ? 'text-neutral-fg' : 'text-neutral-mid'"
     >
       <!-- [RD-2#6] 损坏行行号未知（协议/版本漂移防御）：显示「行号未知」，不伪装成「第 0 行」 -->
       <template v-if="row.kind === 'MALFORMED'">{{
@@ -58,7 +59,8 @@
           : t('panel.trace.malformedLineUnknown')
       }}</template>
       <template v-else>{{ headline }}</template>
-      <span v-if="suffix" data-testid="trace-suffix" class="ml-1.5 font-mono text-[length:var(--text-3xs)] text-neutral-dim">{{ suffix }}</span>
+      <!-- meta 后缀（demo .t-dur 无独立样式：继承行字号与字色，随选中态同行） -->
+      <span v-if="suffix" data-testid="trace-suffix" class="ml-1.5">{{ suffix }}</span>
     </span>
     <span
       v-if="!row.inContext && !row.shadowed"
@@ -70,7 +72,7 @@
       v-if="row.kind === 'SESSION' && row.meta.parentSession"
       variant="ghost"
       size="sm"
-      class="h-4 shrink-0 gap-0.5 px-1 text-[length:var(--text-3xs)] text-accent hover:bg-surface-2 hover:underline"
+      class="h-4 shrink-0 gap-0.5 px-1 text-[length:var(--text-3xs)] text-accent hover:bg-surface-hover hover:underline"
       data-testid="trace-row-jump-parent"
       :title="t('panel.trace.jumpParentTitle')"
       @click.stop="emit('jump-parent', row)"
