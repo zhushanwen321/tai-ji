@@ -59,6 +59,18 @@ const CONTENT_COL_PCT = 60
  *  settings / landing / composer 同锚的既有内容列口径） */
 const CONTENT_COL_MIN_PX = 720
 
+/** E5 抽屉方向缓动（demo drawers.css）：开 = --ease-out（减速入场）/ 关 = --ease-in（加速
+ *  离场）。返回的 ease 类拼进横/纵轴过渡类——过渡类与宽/高样式同一渲染帧生效，transition
+ *  以新 ease 起跑；拖拽期过渡类整体为空不受影响。模块层函数：横轴 useDrawerSplitWidth 与
+ *  纵轴 useBottomDrawerHeight 两个组合式函数共用。 */
+function directionalEaseClass(open: Ref<boolean>) {
+  const opening = ref(true)
+  watch(open, (now) => {
+    opening.value = now
+  })
+  return computed(() => (opening.value ? 'ease-[var(--ease-out)]' : 'ease-[var(--ease-in)]'))
+}
+
 function clampDrawerPct(v: number): number {
   return Math.min(DRAWER_MAX_PCT, Math.max(DRAWER_MIN_PCT, v))
 }
@@ -78,11 +90,14 @@ export function useDrawerSplitWidth(splitAreaEl: Ref<HTMLElement | null>, drawer
   const isDragging = ref(false)
   const drawerPct = ref<number>(loadDrawerPct())
 
+  /** E5 方向缓动：helper 见模块层 directionalEaseClass（横/纵轴共用） */
+  const widthEaseClass = directionalEaseClass(drawerOpen)
+
   /** main/drawer 双侧过渡类：拖动期间移除 transition 保证跟手，其余时间 width 过渡 */
   const splitTransitionClass = computed(() =>
     isDragging.value
       ? ''
-      : 'transition-[width] duration-[var(--duration-slow)] ease-[var(--ease)]',
+      : `transition-[width] duration-[var(--duration-slow)] ${widthEaseClass.value}`,
   )
 
   /** split-area 实测宽度（px）：内容列 60%↔撑满 的派生输入。未测得（0，观察器就绪前/
@@ -252,11 +267,12 @@ export function useBottomDrawerHeight(
     return `${bottomOpen.value ? pct : 0}%`
   })
 
-  /** 高度过渡（沿用现有 transition 体系加纵轴）：拖动期间移除过渡保证跟手 */
+  /** 高度过渡（沿用现有 transition 体系加纵轴）：拖动期间移除过渡保证跟手；方向缓动同横轴 */
+  const heightEaseClass = directionalEaseClass(bottomOpen)
   const bottomTransitionClass = computed(() =>
     isBottomDragging.value
       ? ''
-      : 'transition-[height] duration-[var(--duration-slow)] ease-[var(--ease)]',
+      : `transition-[height] duration-[var(--duration-slow)] ${heightEaseClass.value}`,
   )
 
   /** 上沿手柄拖动（pointer capture：同横轴，拖出元素外仍跟手；jsdom 兼容可选调用） */
