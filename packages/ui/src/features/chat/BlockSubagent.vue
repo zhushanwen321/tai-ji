@@ -3,24 +3,28 @@
     subagent 块（@zhushanwen/pi-subagent-workflow，重写 fork）—— collapsed only（spec §10 / design D2）。
     异步 background 执行：只展示发起参数（input），看不到执行过程（结果由 agent 后续 turn 总结）。
     单行摘要：subagent prefix + agent · slug + (model · thinking X)。
-    running → 呼吸弧 loader；failed → icon + 文案降 neutral-mid。
+    running → 呼吸弧 loader；failed → 图标常驻染 danger（行文字保持层级灰，demo 形态）。
     点击整行 → openSubagent（drawer 开 subagent tab，主对话流保留）。subagentId 取自 toolResult.output。
   -->
   <div class="trace-subagent" data-testid="subagent-block">
     <div
-      class="flex min-w-0 cursor-pointer select-none items-center gap-1.5 text-[length:var(--text-base)] font-medium text-neutral-dim transition-opacity hover:opacity-80"
+      class="flex min-w-0 cursor-pointer select-none items-center gap-2 text-[length:var(--text-base)] [font-weight:var(--fw-mid)] text-neutral-dim transition-opacity hover:opacity-80"
       @click="openSubagentDrawer"
     >
-      <!-- running 态 loader（呼吸弧 + accent），其余走 users ICON -->
-      <span v-if="isRunning" class="inline-flex size-[13px] shrink-0 items-center justify-center text-accent animate-loader-spin" v-html="RUNNING_LOADER_SVG" /> <!-- eslint-disable-line vue/no-v-html -- hardcoded constant from block-icon.ts -->
+      <!-- running 态 loader（呼吸弧 + accent），其余走 users ICON；failed 图标常驻染 danger
+           （[M3b demo 复刻] workbench.css .line.subagent.failed .sicon，原 hover:text-warn 废弃；
+           显式整类重写而非追加 text-danger——同特异性 text 色工具类由样式表序裁决，不可靠） -->
+      <span v-if="isRunning" class="inline-flex size-[15px] shrink-0 items-center justify-center text-accent animate-loader-spin" v-html="RUNNING_LOADER_SVG" /> <!-- eslint-disable-line vue/no-v-html -- hardcoded constant from block-icon.ts -->
       <component
         :is="BLOCK_ICON_LUCIDE.subagent"
         v-else
-        :class="[BLOCK_ICON_CLASS, isFailed ? 'hover:text-warn' : '']"
+        :class="headerIconClass"
       />
       <span :class="BLOCK_LABEL_CLASS">{{ t('panel.message.subagent') }}</span>
-      <!-- agent 名染对话流专属名称色 --name（2026-10-06 裁决）；slug / model 括注降行层级灰（与「子代理」标签同色 --neutral-mid） -->
-      <span class="shrink-0 whitespace-nowrap font-mono text-[length:var(--text-sm)] text-[color:var(--name)]">{{ subagentAgent }}</span>
+      <!-- agent 名染对话流专属名称色 --name（2026-10-06 裁决）；[M3b demo 复刻] 对齐 demo
+           .subagent .sa-name：sans 14px（行级档，去 mono/13px 定档）+ fw-mid（行头继承）；
+           slug / model 括注降行层级灰 mono（demo 无对应物，real 保留并登记） -->
+      <span class="shrink-0 whitespace-nowrap text-[color:var(--name)]">{{ subagentAgent }}</span>
       <template v-if="subagentSlug">
         <span class="text-neutral-faint">·</span>
         <span class="shrink-0 whitespace-nowrap font-mono text-[length:var(--text-sm)] text-neutral-mid">{{ subagentSlug }}</span>
@@ -53,6 +57,10 @@ const { t } = useI18n()
 
 const isFailed = computed(() => props.tool.status === 'error')
 const isRunning = computed(() => props.tool.status === 'running')
+
+/** header 图标 class：常态走 BLOCK_ICON_CLASS SSOT；failed 常驻染 danger（demo
+ *  .line.subagent.failed .sicon，替代原 hover:text-warn——失败态不应依赖悬停才可辨）。 */
+const headerIconClass = computed(() => (isFailed.value ? 'size-[15px] shrink-0 text-danger [stroke-width:1.6]' : BLOCK_ICON_CLASS))
 
 /* header 色（feat-chat-flow-dim）：恒 neutral-dim 置灰（用户裁决降两档，dim 不过 AA——
  * 仅限过程块折叠 header；running 由 loader + accent 文案表达）。 */

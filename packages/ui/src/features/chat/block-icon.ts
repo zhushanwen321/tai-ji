@@ -115,9 +115,10 @@ export const RUNNING_LOADER_SVG: string =
  * 「uppercase + tracking-wider 装饰文字」。字号取 --text-sm（13px）与块内其余槽位
  * （toolName / name / slug 均 13px）同档，层级由色彩承担而非缩到 11px。
  */
-export const BLOCK_ICON_CLASS = 'size-3.5 shrink-0 text-neutral-ico hover:text-neutral-ico-hover'
-/** 动作词 label（思考 / 执行工具 / WORKFLOW. / SUBAGENT. 前缀）：字重走 --fw-bold（600）；
- *  颜色落行层级灰 --neutral-mid——标签随所在行灰阶（2026-10-06 用户裁决：动作词不再
- *  顶白，行视觉锚点由工具名加粗承担）。字号取 --text-sm 与块内其余槽位同档。 */
+export const BLOCK_ICON_CLASS =
+  'size-[15px] shrink-0 text-neutral-ico hover:text-neutral-ico-hover [stroke-width:1.6]'
+/** 动作词 label（思考 / 执行工具 / WORKFLOW. / SUBAGENT. 前缀）：字重走 --fw-mid；
+ *  颜色落行层级灰 --neutral-mid。M3b demo 复刻对齐（demo .blk 过程行 14px + label
+ *  fw-mid），随 BLOCK_ICON_CLASS 同批从 13px/bold 迁移。 */
 export const BLOCK_LABEL_CLASS =
-  'mr-0.5 inline-block shrink-0 whitespace-nowrap text-[length:var(--text-sm)] [font-weight:var(--fw-bold)] text-neutral-mid'
+  'mr-0.5 inline-block shrink-0 whitespace-nowrap text-[length:var(--text-base)] [font-weight:var(--fw-mid)] text-neutral-mid'

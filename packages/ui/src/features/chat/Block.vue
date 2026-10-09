@@ -4,20 +4,24 @@
     展示组件 · trace 块（message-stream 折叠区内的单个块）。Demo H 视觉：灰阶 + SVG ICON +
     唯一 accent 蓝（running）+ failed hover muted 暖橙。
     - thinking：lightbulb ICON + header 可点击 toggle，长块独立再折叠（本地折叠态）。
-    - tool：默认 1 行收起（streaming/running 也收起），点击展开详情。failed 终态默认展开（streaming 中失败不 remount，只 header 红）。
+    - tool：默认 1 行收起（streaming/running 也收起），点击展开详情。failed 终态默认展开（streaming 中失败不 remount，只图标染 danger）。
     - workflow：list-checks ICON + WORKFLOW. prefix + 状态动词 + workflow 名，详情区走 list-tree GUI / 文本。
     - subagent：渲染委托给 BlockSubagent（users ICON + SUBAGENT. prefix + 去卡片化）。
     - bash-group：连续 bash 组块（ui-signal-density D1 U3）——组头「×N · 共 Xs · 含 M 次失败」，
       展开后成员行（嵌套递归渲染普通 tool 收起态，SFC 文件名自引用）。
     - 展开块限高：thinking / bash 输出 / 非 bash 工具输出统一走 BlockScrollBox（240px 块内滚动 +
       渐隐提示 + 行区间信息条；bash 命令头保持在滚动区外 = 恒吸顶）；GUI 协议输出自管理高度不包。
-    - failed：无鲜红全展开（红框已删），改中性灰默认 + hover 染 warn，错误摘要进 body 文本。
+    - failed：无鲜红全展开（红框已删），行文字保持中性灰、图标常驻染 danger（demo
+      .line.subagent.failed .sicon 形态），错误摘要进 body 文本。
     审批按钮 DEFERRED（G-018），v1 不渲染。failed 救生按钮不做（agent 自处理，design.md 决策 3）。
   -->
   <!-- 块间节奏（ui-optimize-unified 决策 4）：间距唯一权威 = Turn.vue trace 容器相邻选择器
        （后块 margin-top 定档 20px/12px），块自身不再携带 py 节奏 padding（叠加核算：原 8+8
-       隐式叠加改为容器单值显式声明）。trace-blk--text 是正文类型标记，供两档分化选择器前锚。 -->
-  <div class="trace-blk transition-[background-color,box-shadow] duration-[var(--duration)] ease-[var(--ease)]" :class="[blockClass, type === 'text' ? 'trace-blk--text' : '']" :data-testid="testId">
+       隐式叠加改为容器单值显式声明）。trace-blk--text 是正文类型标记，供两档分化选择器前锚。
+       [M3b demo 复刻] 块级 running 容器染色（chat-flow-polish P0-1 accent 左标 + soft 底）已删：
+       demo 运行态只落在行级（呼吸弧 accent 图标 + 文字扫光，workbench.css .run-ic/.shine），
+       .blk 容器无任何 running 形态——行级信号已足，块级染色是 demo 不存在的自行发明。 -->
+  <div class="trace-blk" :class="type === 'text' ? 'trace-blk--text' : ''" :data-testid="testId">
     <!-- thinking 块：同行展开（float 布局——第一行环绕 label，第二行起从最左侧开始） -->
     <div v-if="type === 'thinking'" class="trace-think">
       <div
@@ -25,16 +29,30 @@
         :title="thinkingExpanded ? t('panel.message.collapseReasoning') : t('panel.message.expandReasoning')"
         @click="toggleThinking"
       >
-        <!-- 摘要行：flex 布局，min-h 锁定高度避免展开时跳动 -->
-        <div class="flex items-center gap-1.5 min-h-[1.5rem]">
-          <component :is="BLOCK_ICON_LUCIDE.thinking" :class="BLOCK_ICON_CLASS" />
+        <!-- 摘要行：flex 布局，min-h 锁定高度避免展开时跳动。
+             [M3b demo 复刻]（workbench.css .line/.think）：行内间距 gap-2（demo 8px）；
+             图标染 --reasoning（.think .sicon，显式类替换 BLOCK_ICON_CLASS——两者 text 色
+             工具类同特异性，追加不构成可靠覆盖）；行字号继承头部 --text-base（14px =
+             demo fs-lg 行级档）。 -->
+        <div class="flex items-center gap-2 min-h-[1.5rem]">
+          <component :is="BLOCK_ICON_LUCIDE.thinking" class="size-3.5 shrink-0 text-reasoning" />
           <!-- 状态词 label：思考进行中跑文字扫光（决策 10）。生命周期 = 块级（thinkingEnd 未填），
                非消息级 working——思考完结后消息仍在流式（工具执行中），扫光随思考完结熄灭。
                base 覆盖为 mid 档对齐 BLOCK_LABEL_CLASS 常态字色（reduced-motion 停帧态 = 常态色，
                构造性回退）。:key 绑定预览形态：预览分支切换（单行预览 ↔ 尾行视口）时预览元素
                重建重启动画，状态词同帧重建使两处扫光同一动画相位（整体一起闪）。 -->
           <span :key="thinkingSweepPhase" :class="[BLOCK_LABEL_CLASS, thinkingSweeping ? 'text-sweep [--sweep-base:var(--neutral-mid)]' : '']">{{ t('panel.message.thinkingBlock') }}</span>
-          <span v-if="!working" class="text-neutral-faint" :class="thinkingExpanded ? 'invisible' : ''">·</span>
+          <!-- 分隔点常驻（demo 思考行运行/完成两态都有「·」）；展开态仅当其后无时长段时随
+               预览一起隐（防悬挂点；展开且有时长 =「思考 · 22s」句式保留分隔） -->
+          <span class="text-neutral-dim" :class="thinkingExpanded && !thinkingDuration ? 'invisible' : ''">·</span>
+          <!-- N6 思考行时长（ui-optimize-unified 决策 8）：startTime/endTime 双有值才渲染（实时链路
+               thinking_start/end 效果器填充；持久化重载链路 thinking part 无时间戳数据源 → 缺值
+               维持现状展示 = 设计「推导不出则降级」分支按块级生效）。
+               [M3b demo 复刻] 时长常驻显形 + 位置贴状态词（demo「· 持续了 22 秒 ·」在预览前，
+               .think 同行 14px sans dim）——原 D2 悬停化 + mono 11px 形态被 demo 权威覆盖；
+               行尾时刻槽（thinking-time-slot）保留 D2 悬停化（demo .ts 即 hover 显形）。 -->
+          <span v-if="thinkingDuration" class="shrink-0 text-neutral-dim" data-testid="thinking-duration">{{ t('panel.message.thinkingDuration', { duration: thinkingDuration }) }}</span>
+          <span v-if="thinkingDuration && messageTimestamp" class="shrink-0 text-neutral-faint opacity-0 transition-opacity group-hover/think:opacity-100 group-focus-within/think:opacity-100">·</span>
           <!-- working 态：单行尾行视口（2026-08 抖动修复重写）。横向钉右 = viewport flex
                justify-end + 行右对齐 + mr-auto（溢出裁左纯 CSS 无 scrollLeft 时序；mr-auto
                短行左贴 label、长行溢出时钉右）；纵向换行 = useTailScroll settled/sliding
@@ -44,19 +62,14 @@
                emoji 21px，CJK 行被裁 2-5px）；无单位系数使行盒恒 = 系数×字号，字体无关。 -->
           <span
             v-if="working && thinkingTailLines.length > 0"
-            class="flex h-[1lh] min-w-0 flex-1 justify-end overflow-hidden text-[length:var(--text-xs)] leading-normal text-neutral-dim"
+            class="flex h-[1lh] min-w-0 flex-1 justify-end overflow-hidden leading-normal text-neutral-dim"
             :class="thinkingExpanded ? 'invisible' : ''"
           >
             <span :class="[thinkingSweeping ? 'text-sweep' : '', 'mr-auto flex flex-col items-end self-start']" :style="thinkScrollStyle">
               <span v-for="(line, i) in thinkDisplayLines" :key="i" class="whitespace-nowrap">{{ line }}</span>
             </span>
           </span>
-          <span v-else class="flex-1 min-w-0 truncate text-[length:var(--text-xs)] text-neutral-dim" :class="[thinkingSweeping ? 'text-sweep' : '', thinkingExpanded ? 'invisible' : '']">{{ previewText }}</span>
-          <!-- N6 思考行时长（ui-optimize-unified 决策 8）：startTime/endTime 双有值才渲染（实时链路
-               thinking_start/end 效果器填充；持久化重载链路 thinking part 无时间戳数据源 → 缺值
-               维持现状展示 = 设计「推导不出则降级」分支按块级生效）；悬停显现与 thinking-time-slot
-               同翼，形态对齐 tool-time-slot（时长 · 时刻）。 -->
-          <span v-if="thinkingDuration" class="shrink-0 font-mono text-[length:var(--text-2xs)] text-neutral-dim tabular-nums opacity-0 transition-opacity group-hover/think:opacity-100 group-focus-within/think:opacity-100" data-testid="thinking-duration">{{ t('panel.message.thinkingDuration', { duration: thinkingDuration }) }} <span v-if="messageTimestamp" class="text-neutral-faint">·</span></span>
+          <span v-else class="flex-1 min-w-0 truncate text-neutral-dim" :class="[thinkingSweeping ? 'text-sweep' : '', thinkingExpanded ? 'invisible' : '']">{{ previewText }}</span>
           <!-- thinking 块行尾时刻（D2 悬停化：常驻改按需——悬停该行 / 键盘焦点进入该行才显现） -->
           <span v-if="messageTimestamp" class="ml-auto shrink-0 font-mono text-[length:var(--text-2xs)] text-neutral-dim tabular-nums opacity-0 transition-opacity group-hover/think:opacity-100 group-focus-within/think:opacity-100" data-testid="thinking-time-slot">{{ formatClock(messageTimestamp) }}</span>
         </div>
@@ -120,8 +133,7 @@
     <div v-else-if="type === 'bash-group' && group" class="trace-bash-group" data-testid="bash-group">
       <div
         data-testid="bash-group-header"
-        class="flex min-w-0 cursor-pointer select-none items-center gap-1.5 text-[length:var(--text-sm)] [font-weight:var(--fw-mid)] transition-opacity hover:opacity-80"
-        :class="group.hasRunning ? 'text-accent' : 'text-neutral-mid'"
+        class="flex min-w-0 cursor-pointer select-none items-center gap-2 text-[length:var(--text-base)] [font-weight:var(--fw-mid)] text-neutral-mid transition-opacity hover:opacity-80"
         role="button"
         tabindex="0"
         :aria-expanded="groupExpanded"
@@ -131,13 +143,17 @@
         @keydown.space.prevent="toggleGroup"
       >
         <!-- running 态 loader（呼吸弧 + accent），其余走静态组图标。
-             组头文字（×N · 共 Xs 计数/耗时口径）是稳定标识，不跑文字扫光（决策 10） -->
-        <span v-if="group.hasRunning" class="inline-flex size-[13px] shrink-0 items-center justify-center text-accent">
+             组头文字（×N · 共 Xs 计数/耗时口径）是稳定标识，不跑文字扫光（决策 10）。
+             [M3b demo 复刻] 行文字不染 accent（demo 运行态 = 仅呼吸弧图标 accent，文字保持
+             行层级 mid，workbench.css .tool .t-name），与普通 tool 行运行态同款。 -->
+        <span v-if="group.hasRunning" class="inline-flex size-[15px] shrink-0 items-center justify-center text-accent">
           <span class="inline-flex size-full items-center justify-center animate-loader-spin" v-html="RUNNING_LOADER_SVG" /> <!-- eslint-disable-line vue/no-v-html -- hardcoded constant from block-icon.ts -->
         </span>
         <component :is="BLOCK_ICON_LUCIDE['bash-group']" v-else :class="BLOCK_ICON_CLASS" />
         <span class="min-w-0 truncate text-left">{{ t('panel.message.traceBashSummary', { count: group.header.count, duration: formatDuration(group.header.durationMs) }) }}</span>
-        <span v-if="group.header.failedCount > 0" data-testid="bash-group-failed" class="shrink-0 text-danger">· {{ t('panel.message.traceFailed', { count: group.header.failedCount }) }}</span>
+        <!-- 失败段 chip 化（demo failtag 形态：workbench.css .failtag = 11px fw-mid danger +
+             danger-soft 底 + r-xs 4px + 1px 6px 内边距） -->
+        <span v-if="group.header.failedCount > 0" data-testid="bash-group-failed" class="shrink-0 rounded-[var(--radius-xs)] bg-danger-soft px-1.5 py-px text-[length:var(--text-2xs)] [font-weight:var(--fw-mid)] text-danger">{{ t('panel.message.traceFailed', { count: group.header.failedCount }) }}</span>
       </div>
       <Transition name="block-expand">
         <div v-if="groupExpanded" class="mt-0.5 flex min-w-0 flex-col">
@@ -165,12 +181,13 @@
       <div v-else-if="isWorkflow" class="trace-workflow" data-testid="workflow-block">
         <div
           data-testid="tool-block-header"
-          class="flex min-w-0 cursor-pointer select-none items-center gap-1.5 text-[length:var(--text-base)] [font-weight:var(--fw-mid)] text-neutral-dim transition-opacity hover:opacity-80"
+          class="flex min-w-0 cursor-pointer select-none items-center gap-2 text-[length:var(--text-base)] [font-weight:var(--fw-mid)] text-neutral-dim transition-opacity hover:opacity-80"
           @click="openWorkflowDrawer"
         >
-          <!-- running 态 loader（呼吸弧 + accent），其余走 list-checks ICON -->
-          <span v-if="isRunning" class="inline-flex size-[13px] shrink-0 items-center justify-center text-accent animate-loader-spin" v-html="RUNNING_LOADER_SVG" /> <!-- eslint-disable-line vue/no-v-html -- hardcoded constant from block-icon.ts -->
-          <component :is="BLOCK_ICON_LUCIDE.workflow" v-else :class="[BLOCK_ICON_CLASS, isFailed ? 'hover:text-warn' : '']" />
+          <!-- running 态 loader（呼吸弧 + accent），其余走 list-checks ICON；
+               failed 图标染 danger（与普通 tool 行同款，demo .line.subagent.failed .sicon 形态家族） -->
+          <span v-if="isRunning" class="inline-flex size-[15px] shrink-0 items-center justify-center text-accent animate-loader-spin" v-html="RUNNING_LOADER_SVG" /> <!-- eslint-disable-line vue/no-v-html -- hardcoded constant from block-icon.ts -->
+          <component :is="BLOCK_ICON_LUCIDE.workflow" v-else :class="headerIconClass" />
           <span :class="BLOCK_LABEL_CLASS">{{ t('panel.message.workflow') }}</span>
           <!-- name 染对话流专属名称色 --name（2026-10-06 裁决）；slug 降行层级灰（与「子代理」等标签同色 --neutral-mid） -->
           <span v-if="workflowFields.nameShort" class="shrink-0 whitespace-nowrap font-mono text-[length:var(--text-sm)] text-[color:var(--name)]" :title="workflowFields.name">{{ workflowFields.nameShort }}</span>
@@ -209,22 +226,26 @@
       <div v-else class="group/tool">
         <div
           data-testid="tool-block-header"
-          class="tool-header flex min-w-0 cursor-pointer select-none items-center gap-1.5 text-[length:var(--text-sm)] [font-weight:var(--fw-mid)] transition-opacity hover:opacity-80"
-          :class="toolStatusClass"
+          class="tool-header flex min-w-0 cursor-pointer select-none items-center gap-2 text-[length:var(--text-base)] [font-weight:var(--fw-mid)] text-neutral-mid transition-opacity hover:opacity-80"
           :title="toolExpanded ? t('panel.message.collapse') : t('panel.message.expand')"
           @click="toggleTool"
         >
-          <!-- running 态 loader（呼吸弧 + accent），其余走 BLOCK_ICON_LUCIDE[iconKind] -->
-          <span v-if="isRunning" class="inline-flex size-[13px] shrink-0 items-center justify-center text-accent">
+          <!-- running 态 loader（呼吸弧 + accent），其余走 BLOCK_ICON_LUCIDE[iconKind]。
+               [M3b demo 复刻]（workbench.css .tool/.run-ic）：行文字恒行层级 mid 不随状态染色
+               （demo .tool .t-name 恒 mid，无 accent/danger 文字态），状态色只落在图标——
+               running = accent 呼吸弧、failed = danger（.line.subagent.failed .sicon）。 -->
+          <span v-if="isRunning" class="inline-flex size-[15px] shrink-0 items-center justify-center text-accent">
             <span class="inline-flex size-full items-center justify-center animate-loader-spin" v-html="RUNNING_LOADER_SVG" /> <!-- eslint-disable-line vue/no-v-html -- hardcoded constant from block-icon.ts -->
           </span>
-          <component :is="headerBlockIcon" v-else :class="[BLOCK_ICON_CLASS, isFailed ? 'hover:text-warn' : '']" />
-          <span class="shrink-0 normal-case tracking-normal [font-weight:var(--fw-bold)]">{{ toolName }}</span>
+          <component :is="headerBlockIcon" v-else :class="headerIconClass" />
+          <span class="shrink-0 normal-case tracking-normal">{{ toolName }}</span>
           <!-- running + 有流式输出：单行尾行视口（同 thinking header 结构：leading-normal
-               字体无关行高 + mr-auto 短行左贴/溢出钉右 + 纵向状态机滑入）；否则静态 shortenForHeader -->
+               字体无关行高 + mr-auto 短行左贴/溢出钉右 + 纵向状态机滑入）；否则静态 shortenForHeader。
+               [M3b demo 复刻] 摘要/尾行走 mono 13px（--text-sm，demo .tool .cmd =
+               font-mono fs-base dim），与行级 14px sans 拉开命令语境。 -->
           <span
             v-if="isRunning && toolTailLines.length > 0"
-            class="flex h-[1lh] min-w-0 flex-1 justify-end overflow-hidden normal-case leading-normal tracking-normal text-neutral-dim"
+            class="flex h-[1lh] min-w-0 flex-1 justify-end overflow-hidden font-mono text-[length:var(--text-sm)] normal-case leading-normal tracking-normal text-neutral-dim"
             :class="{ invisible: toolExpanded && isBashTool }"
           >
             <span class="text-sweep mr-auto flex flex-col items-end self-start" :style="toolScrollStyle">
@@ -233,11 +254,14 @@
           </span>
           <!-- N1（ui-optimize-unified 决策 8）：edit/write 行 = 工具名 + basename chip，
                与 UserBubble 文件 badge 同语义（openFileDetail 双通道 + @click.stop 防行展开 +
-               title 完整路径 + ellipsis）；中性 chip 形态不打破工具行灰阶（决策 2） -->
+               title 完整路径 + ellipsis）。
+               [M3b demo 复刻] chip 形态对齐 demo .tool .fchip（workbench.css:372）：card-inset
+               凹陷底 + hairline 边 + fg-2 字 + 12px mono + 1px 8px 内边距；demo chip 无图标
+               （FileText 移除）。hover 提亮为 real 保留 affordance（demo 无 hover 形态）。 -->
           <span
             v-else-if="argPath && isFileWriteTool"
             data-testid="tool-file-chip"
-            class="inline-flex min-w-0 max-w-full cursor-pointer items-center gap-1 rounded-sm border border-hairline px-1.5 py-px font-mono text-[length:var(--text-xs)] normal-case tracking-normal [font-weight:var(--fw-text)] text-neutral-mid transition-colors hover:border-border-strong hover:text-neutral-fg"
+            class="inline-flex min-w-0 max-w-full cursor-pointer items-center gap-1 rounded-sm border border-hairline bg-bg-input px-2 py-px font-mono text-[length:var(--text-xs)] normal-case tracking-normal [font-weight:var(--fw-text)] text-[color:var(--neutral-fg-2)] transition-colors hover:border-border-strong hover:text-neutral-fg"
             role="button"
             tabindex="0"
             :title="argPath"
@@ -245,16 +269,17 @@
             @keydown.enter.stop.prevent="openFileDetail(argPath)"
             @keydown.space.stop.prevent="openFileDetail(argPath)"
           >
-            <FileText class="size-3 shrink-0" />
             <span class="min-w-0 truncate">{{ fileChipBasename }}</span>
             <!-- 统计段预留位（决策 8：diff +N −N 数据不可得本波不做，登记 docs/todo 随 U19 执行） -->
           </span>
-          <span v-else-if="argPath" class="min-w-0 normal-case tracking-normal text-neutral-dim truncate" :class="[{ invisible: toolExpanded && isBashTool }, isRunning ? 'text-sweep' : '']">· {{ shortenForHeader(argPath) }}</span>
-          <!-- tool 块行尾槽：耗时 · 时刻（D2 悬停化：悬停该行 / 键盘焦点进入该行才显现） -->
-          <span v-if="tool?.startTime" class="ml-auto shrink-0 flex items-center gap-1 font-mono text-[length:var(--text-2xs)] tabular-nums opacity-0 transition-opacity group-hover/tool:opacity-100 group-focus-within/tool:opacity-100" data-testid="tool-time-slot">
-            <span v-if="toolDuration" :class="isRunning ? 'text-accent' : 'text-neutral-dim'">{{ toolDuration }}</span>
-            <span v-if="toolDuration" class="text-neutral-faint">·</span>
-            <span class="text-neutral-dim">{{ formatClock(tool.startTime) }}</span>
+          <span v-else-if="argPath" class="min-w-0 font-mono text-[length:var(--text-sm)] normal-case tracking-normal text-neutral-dim truncate" :class="[{ invisible: toolExpanded && isBashTool }, isRunning ? 'text-sweep' : '']">{{ shortenForHeader(argPath) }}</span>
+          <!-- tool 块行尾槽（[M3b demo 复刻] demo .dur/.ts）：耗时常驻显形（demo .dur 无显隐
+               门控，fs-md 12px mono dim——running 也保持 dim，accent 只在呼吸弧图标），
+               时刻保留 D2 悬停化（demo .ts opacity 0→1 hover 显形）；耗时与时刻间无分隔点
+               （demo 两 span 裸相邻，行 gap 8px 承担间距）。 -->
+          <span v-if="tool?.startTime" class="ml-auto shrink-0 flex items-center gap-2 font-mono tabular-nums" data-testid="tool-time-slot">
+            <span v-if="toolDuration" class="text-[length:var(--text-xs)] text-neutral-dim">{{ toolDuration }}</span>
+            <span class="text-[length:var(--text-2xs)] text-neutral-dim opacity-0 transition-opacity group-hover/tool:opacity-100 group-focus-within/tool:opacity-100">{{ formatClock(tool.startTime) }}</span>
           </span>
         </div>
         <Transition name="block-expand">
@@ -339,7 +364,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { AlertCircle, Check, Copy as CopyIcon, FileText } from '@lucide/vue'
+import { AlertCircle, Check, Copy as CopyIcon } from '@lucide/vue'
 import type { GuiComponent } from '@zhushanwen/extension-protocol'
 import { extractGui } from '@zhushanwen/extension-protocol'
 import type { MessageStatus, ToolCall } from '@taiji/shared'
@@ -538,15 +563,13 @@ const headerBlockIcon = computed(() => {
   return kind === 'running' ? BLOCK_ICON_LUCIDE['tool-other'] : BLOCK_ICON_LUCIDE[kind]
 })
 
-/** 普通 tool header 状态色：running 染 accent，failed 染 danger（错误醒目），
- *  其余（completed/unfinished，abort/中断非失败不标 danger 防 abort 满屏红误读）
- *  按 D5 行类型定档染 --neutral-mid（工具行层级明度；行层级由「字号 × 明度」拉开，
- *  见 ui-signal-density §3.3 D5，取代旧 feat-chat-flow-dim 的 dim 档裁决）。 */
-const toolStatusClass = computed(() => {
-  if (isRunning.value) return 'text-accent'
-  if (isFailed.value) return 'text-danger'
-  return 'text-neutral-mid'
-})
+/** header 图标状态色（[M3b demo 复刻] workbench.css）：状态色只落图标不落行文字——
+ *  running 走模板 loader 分支（accent 呼吸弧，行文字恒 mid），failed 图标染 danger
+ *  （demo .line.subagent.failed .sicon，常驻非 hover——原 hover:text-warn 形态废弃）。
+ *  failed 分支显式整类重写而非在 BLOCK_ICON_CLASS 上追加 text-danger：两个 text 色
+ *  工具类同特异性，追加后由样式表序裁决、覆盖不成立。行文字层级 = static
+ *  text-neutral-mid（D5 工具行档 + demo .tool .t-name 恒 mid 双依据）。 */
+const headerIconClass = computed(() => (isFailed.value ? 'size-[15px] shrink-0 text-danger [stroke-width:1.6]' : BLOCK_ICON_CLASS))
 
 /** workflow 顶层 input 安全读取（拍平 schema：action/name/slug/args/runId 都在顶层；runId 仅 schema 描述——run 动作调用时刻 runId 尚未由引擎生成、不可得，组件不读该字段，run 定位经 (name, slug) 反查，见 openWorkflowDrawer 注释与设计 §5 检查点④核实结论） */
 const workflowInputObj = computed(() => {
@@ -681,17 +704,6 @@ function openFileDetail(path: string): void {
   chatViewDeps.openDrawer('detail', { filePath: path })
 }
 
-
-/** 活动 block 态（chat-flow-polish P0-1）：running 块左缘 accent rail（inset box-shadow，
- *  不改布局）+ accent-soft 微染，让 streaming 中「当前跑到哪了」扫视可见；rail 是无彩色依赖的
- *  第二通道（色弱友好）。完成（running→completed）时染色 200ms 淡出——根 div 常驻
- *  transition-[background-color,box-shadow]，状态切换自动过渡。bash 展开容器 bg-bg-input 压盖
- *  染色，容器内不被染脏（design §1.2 方案 A 风险已规避）。
- *  failed/unfinished/completed 不染色（中性灰，header 已有状态指示）。 */
-const blockClass = computed(() => {
-  if (!isRunning.value) return ''
-  return 'bg-accent-soft [box-shadow:inset_2px_0_0_0_var(--accent)]'
-})
 
 /** data-testid 锚点：按块类型拼接可定位 id，供 E2E 精确断言特定块。
  *  格式：block-tool-${tool.id}（type==='tool'/'agentgraph' 且有 tool）/ block-thinking-${thinkingId}（type==='thinking'）。

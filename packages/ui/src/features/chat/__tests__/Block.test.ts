@@ -6,7 +6,10 @@
  * message 翻转）。旧「过程文字暗色小字」两级视觉层级已取消（text-sm/leading-relaxed/
  * 恒 neutral-mid 移除）。
  * [D5 行类型定档] 正文行字号档位从 --text-base（14px）抬到 --text-md（15px）——
- * 行类型「字号 × 明度」三层：正文 15px / 工具 13px / thinking 12px（ui-signal-density §3.3 D5）。
+ * 行类型「字号 × 明度」：正文 15px / 过程行（工具/思考）14px（M3b demo 复刻：demo
+ * .line = fs-lg 14px，工作bench 行级档；命令摘要/尾行窗口为 mono 13px 子档）。
+ * [M3b demo 复刻] 过程行状态色只落图标（running=accent 呼吸弧 / failed=danger 图标），
+ * 行文字恒 --neutral-mid（demo .tool .t-name 恒 mid）；耗时槽常驻（demo .dur），时刻槽悬停（demo .ts）。
  *
  * 运行：cd packages/ui && npx vitest run src/features/chat/__tests__/Block.test.ts
  */
@@ -119,12 +122,14 @@ describe('error-visibility M2: Block text 分支 error 形态判定（TC1/TC3）
  * stub / makeToolCall / mountToolBlock 经 ./helpers 共享（与 BlockWorkflow.test.ts 公共样板提取） */
 
 describe('error-visibility M1: failed tool header danger + 终态展开（TC1-3）', () => {
-  it('TC1: failed(error) tool header 染 text-danger（非中性灰）', () => {
+  it('TC1: failed(error) 行文字恒中性 text-neutral-mid，失败色常驻落在图标 text-danger（M3b demo 形态：.tool .t-name 恒 mid + .line.subagent.failed .sicon）', () => {
     const wrapper = mountToolBlock(makeToolCall({ status: 'error', output: 'ENOENT: no such file' }))
     const header = wrapper.find('[data-testid="tool-block-header"]')
-    expect(header.classes()).toContain('text-danger')
-    // 不再是中性灰
-    expect(header.classes()).not.toContain('text-neutral-dim')
+    // 行文字保持工具行档 mid（失败色不传染文字，demo 权威形态）
+    expect(header.classes()).toContain('text-neutral-mid')
+    expect(header.classes()).not.toContain('text-danger')
+    // 失败色常驻在图标（非 hover 变体）
+    expect(header.find('svg').classes()).toContain('text-danger')
   })
 
   it('TC2: failed(error) tool 终态挂载默认展开（错误输出可见，无需点击）', () => {
@@ -144,10 +149,11 @@ describe('error-visibility M1: failed tool header danger + 终态展开（TC1-3�
   })
 })
 
-/* ── D5 行类型定档：工具行 = 13px（--text-sm）× --neutral-mid（ui-signal-density §3.3 D5）──
- * - completed/unfinished tool header 染 text-neutral-mid（工具行层级明度；取代旧
- *   feat-chat-flow-dim 的 dim 档裁决——行层级改由「字号 × 明度」三档拉开）
- * - running 保持 accent、failed 保持 danger（状态色不是层级色，不随 D5 变） */
+/* ── D5 行类型定档（M3b demo 复刻修订）：工具行 = 14px（--text-base，demo .line fs-lg）
+ * × --neutral-mid（ui-signal-density §3.3 D5 明度档保留）──
+ * - completed/unfinished/running tool 行文字恒染 text-neutral-mid（工具行层级明度）
+ * - 状态色只落图标不落文字（M3b demo 权威：demo .tool .t-name 恒 mid，running=accent
+ *   呼吸弧、failed=danger 图标）——「状态色不是层级色」原则不变，落点从行文字改为图标 */
 describe('D5 行类型定档: completed tool header 染 neutral-mid', () => {
   it('completed tool header 染 text-neutral-mid（工具行档，不再是最亮 neutral-fg）', () => {
     const wrapper = mountToolBlock(makeToolCall({ status: 'completed' }))
@@ -156,11 +162,13 @@ describe('D5 行类型定档: completed tool header 染 neutral-mid', () => {
     expect(header.classes()).not.toContain('text-neutral-fg')
   })
 
-  it('running tool header 保持 text-accent（进行中状态色，不落工具行档）', () => {
+  it('running tool 行文字恒 text-neutral-mid，accent 只在呼吸弧 loader（M3b demo 形态：.run-ic 独占状态色）', () => {
     const wrapper = mountToolBlock(makeToolCall({ status: 'running' }))
     const header = wrapper.find('[data-testid="tool-block-header"]')
-    expect(header.classes()).toContain('text-accent')
-    expect(header.classes()).not.toContain('text-neutral-mid')
+    expect(header.classes()).toContain('text-neutral-mid')
+    expect(header.classes()).not.toContain('text-accent')
+    // accent 常驻 loader 容器（外层 span text-accent 内层 animate-loader-spin）
+    expect(header.find('.text-accent .animate-loader-spin').exists()).toBe(true)
   })
 })
 
@@ -238,9 +246,8 @@ describe('ui-optimize-unified N1: edit/write 工具行 basename chip（决策 8�
   it('read 行不渲染 chip，保持 shortenForHeader 摘要形态（其他工具行不变）', () => {
     const wrapper = mountToolBlock(makeToolCall({ toolName: 'read', input: { path: FILE_PATH } }))
     expect(wrapper.find(CHIP_SEL).exists()).toBe(false)
-    // 摘要形态保持：「· 」前缀 + shortenForHeader 缩短路径（…/src/app.ts），非 chip 元素
+    // 摘要形态（M3b demo 复刻：去「· 」前缀，demo .tool .cmd 为裸命令文本）：shortenForHeader 缩短路径
     const header = wrapper.find('[data-testid="tool-block-header"]')
-    expect(header.text()).toContain('·')
     expect(header.text()).toContain('…/src/app.ts')
   })
 
@@ -661,12 +668,12 @@ describe('chat-flow-timestamp U2: Block 行尾时间槽（A3/A4 + D2 悬停化�
     expect(slot.classes()).toContain(`group-focus-within/${group}:opacity-100`)
   }
 
-  it('A3 tool 块 startTime=1000/endTime=3000 → 槽文本 `2s·HH:MM:SS`（耗时 formatDuration(2000) + 时刻 formatClock(1000)）', () => {
+  it('A3 tool 块 startTime=1000/endTime=3000 → 槽文本 `2s HH:MM:SS`（耗时 formatDuration(2000) + 时刻 formatClock(1000)；M3b demo 形态无 · 分隔点，行 gap 承担间距）', () => {
     const wrapper = mountToolBlock(makeToolCall({ startTime: 1000, endTime: 3000 }))
     const slot = wrapper.find('[data-testid="tool-time-slot"]')
     expect(slot.exists()).toBe(true)
-    // 剥掉全部空白后整串比对：耗时 + · 分隔 + 时刻，顺序结构同时锁定
-    expect(slot.text().replace(/\s+/g, '')).toBe(`2s·${clockOf(1000)}`)
+    // 剥掉全部空白后整串比对：耗时 + 时刻裸相邻（demo .dur/.ts 无分隔点），顺序结构同时锁定
+    expect(slot.text().replace(/\s+/g, '')).toBe(`2s${clockOf(1000)}`)
   })
 
   it('A3 endTime 缺失 → 槽内只有时刻无耗时（数据缺口降级，设计 §2.5）', () => {
@@ -676,15 +683,16 @@ describe('chat-flow-timestamp U2: Block 行尾时间槽（A3/A4 + D2 悬停化�
     expect(slot.text().replace(/\s+/g, '')).toBe(clockOf(1000))
   })
 
-  it('A3 status=running → 耗时 span 染 text-accent（实时跳动态，end>start 静态分支不走）', () => {
-    // endTime 显式剔除：确保 accent 来自 running 分支而非静态耗时
+  it('A3 status=running → 耗时 span 恒 text-neutral-dim（M3b demo 形态：.dur 无 accent，accent 只在呼吸弧图标）', () => {
+    // endTime 显式剔除：确保断言对象是 running 耗时分支
     const wrapper = mountToolBlock(makeToolCall({ status: 'running', startTime: 1000, endTime: undefined }))
     const slot = wrapper.find('[data-testid="tool-time-slot"]')
     expect(slot.exists()).toBe(true)
     // 槽内第一个 span 是耗时 span（toolDuration 非空才渲染）
     const durSpan = slot.find('span')
     expect(durSpan.exists()).toBe(true)
-    expect(durSpan.classes()).toContain('text-accent')
+    expect(durSpan.classes()).toContain('text-neutral-dim')
+    expect(durSpan.classes()).not.toContain('text-accent')
     expect(durSpan.text()).not.toBe('')
   })
 
@@ -728,11 +736,15 @@ describe('chat-flow-timestamp U2: Block 行尾时间槽（A3/A4 + D2 悬停化�
     expectHoverVisibility(slot, 'think')
   })
 
-  it('V2: tool 块无常驻时刻——tool-time-slot 三件套（group/tool 行容器）', () => {
+  it('V2: tool 块耗时常驻显形（M3b demo .dur 无显隐门控），时刻段悬停三件套（demo .ts hover 显形）', () => {
     const wrapper = mountToolBlock(makeToolCall({ startTime: 1000, endTime: 3000 }))
     const slot = wrapper.find('[data-testid="tool-time-slot"]')
     expect(slot.exists()).toBe(true)
-    expectHoverVisibility(slot, 'tool')
+    const spans = slot.findAll('span')
+    // 耗时段常驻（无 opacity 门控）
+    expect(spans[0]!.classes()).not.toContain('opacity-0')
+    // 时刻段悬停/键盘两翼显现（group/tool）
+    expectHoverVisibility(spans[1]!, 'tool')
   })
 
   it('V3: 三槽 group 容器在 DOM（悬停移开后回落 opacity-0 默认态 = 移开消失的结构前提）', () => {
@@ -786,13 +798,17 @@ describe('ui-optimize-unified U14: thinking 行时长（N6）', () => {
     expect(inverted.find('[data-testid="thinking-duration"]').exists()).toBe(false)
   })
 
-  it('时长槽悬停三件套（group/think 同翼）+ 时刻在场时尾缀 · 分隔（形态对齐 tool-time-slot）', () => {
+  it('时长槽常驻显形（M3b demo 复刻：demo 思考行「· 持续了 X 秒」恒显，无悬停门控、无尾缀 ·）+ 时刻槽保留悬停三件套', () => {
     const wrapper = mountThinkingDurationBlock({ thinkingStart: 1000, thinkingEnd: 3000 })
     const dur = wrapper.find('[data-testid="thinking-duration"]')
-    expect(dur.classes()).toContain('opacity-0')
-    expect(dur.classes()).toContain('group-hover/think:opacity-100')
-    expect(dur.classes()).toContain('group-focus-within/think:opacity-100')
-    expect(dur.text()).toContain('·')
+    expect(dur.classes()).not.toContain('opacity-0')
+    expect(dur.classes()).not.toContain('group-hover/think:opacity-100')
+    expect(dur.text()).not.toContain('·')
+    // 时刻槽（demo .ts）仍为悬停两翼显现
+    const slot = wrapper.find('[data-testid="thinking-time-slot"]')
+    expect(slot.classes()).toContain('opacity-0')
+    expect(slot.classes()).toContain('group-hover/think:opacity-100')
+    expect(slot.classes()).toContain('group-focus-within/think:opacity-100')
   })
 })
 
@@ -891,17 +907,18 @@ describe('ui-signal-density D1 U3: Block bash-group 组块', () => {
     expect(wrapper.find('[data-testid="bash-group-failed"]').exists()).toBe(false)
   })
 
-  it('hasRunning 执行态视觉（D1 语义变更）：true → 组头 loader（animate-loader-spin + svg）+ 整行 text-accent；false → 静态图标 + text-neutral-mid', () => {
+  it('hasRunning 执行态视觉（M3b demo 形态）：true → 组头 loader（accent 容器 + animate-loader-spin + svg）+ 行文字恒 text-neutral-mid；false → 静态图标 + text-neutral-mid', () => {
     const runningWrapper = mountBashGroup(makeBashGroupProp([
       makeToolCall({ id: 'b0', toolName: 'bash', input: { command: 'a' }, startTime: 0, endTime: 1000 }),
       makeToolCall({ id: 'b1', toolName: 'bash', input: { command: 'b' }, status: 'running', startTime: 2000 }),
     ]))
     const runningHeader = runningWrapper.find('[data-testid="bash-group-header"]')
-    expect(runningHeader.classes()).toContain('text-accent')
-    expect(runningHeader.classes()).not.toContain('text-neutral-mid')
-    // loader 形态与其余执行中块同款：RUNNING_LOADER_SVG 塞进 animate-loader-spin 旋转容器
+    // 行文字不染 accent（demo 运行态 = 状态色只在图标，.tool .t-name 恒 mid）
+    expect(runningHeader.classes()).toContain('text-neutral-mid')
+    expect(runningHeader.classes()).not.toContain('text-accent')
+    // loader 形态与其余执行中块同款：RUNNING_LOADER_SVG 塞进 accent 容器 + animate-loader-spin 旋转
+    expect(runningHeader.find('.text-accent .animate-loader-spin').exists()).toBe(true)
     const loader = runningHeader.find('.animate-loader-spin')
-    expect(loader.exists()).toBe(true)
     expect(loader.find('svg').exists()).toBe(true)
 
     const doneWrapper = mountBashGroup(makeBashGroupProp([

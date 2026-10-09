@@ -55,8 +55,8 @@ describe('Block working 态 · thinking 块', () => {
     expect(wrapper.find('.stub-md-render').exists()).toBe(false)
     // 内容以截断形式出现在 header 行（previewText 截断到 60 字符）
     expect(wrapper.text()).toContain(LONG_THINKING.slice(0, 60))
-    // 收起预览前缀 · 不应出现（streaming 态用无前缀的内联预览）
-    expect(wrapper.text()).not.toContain('·')
+    // 分隔点 · 常驻（M3b demo 复刻：demo 思考行运行/完成两态都是「思考(中) · <预览>」句式）
+    expect(wrapper.text()).toContain('·')
   })
 
   it('U2: working=false → 仅预览行（截断 60 字符）', () => {
