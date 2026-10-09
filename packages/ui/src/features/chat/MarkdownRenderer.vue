@@ -32,7 +32,7 @@
         class="my-2.5 flex items-center gap-1.5 rounded border border-border bg-surface-2 px-2.5 py-1.5"
       >
         <!-- eslint-disable-next-line vue/no-v-html -- 硬编码常量 loader SVG（block-icon.ts，同 Block.vue running 态用法） -->
-        <span class="inline-flex size-[13px] shrink-0 items-center justify-center text-accent animate-loader-spin" v-html="RUNNING_LOADER_SVG" />
+        <span class="inline-flex size-[15px] shrink-0 items-center justify-center text-accent animate-loader-spin" v-html="RUNNING_LOADER_SVG" />
         <span data-testid="md-streaming-fence-lang" class="font-mono text-[length:var(--text-2xs)] font-semibold lowercase tracking-[0.08em] text-neutral-dim">{{ seg.lang }}</span>
       </div>
       <!-- html-preview 段（chat-html-support §6.3 D3，v16 内联容器）：纯路径载荷走
@@ -275,19 +275,24 @@ function onClick(e: MouseEvent): void {
 /* ── markdown 排版（design-tokens 语义色，不硬编码）──
    全局默认已翻转：style.css 内容默认可选，交互控件统一禁选。
    .md-render div 的 select-text 类保留为显式语义标记（行为上已与全局默认一致）。 */
+/* 标题六级（M3c demo 复刻）：demo workbench.css 对 .md 内标题零定制 → 权威 = 浏览器 UA
+   默认档（字号/边距各档如下）；Tailwind preflight 已抹掉 UA 默认，须在此显式还原。
+   行高不设（demo .md line-height 1.8 经继承进入标题）；字重 = demo --fw-bold。 */
 .md-render :deep(h1),
 .md-render :deep(h2),
 .md-render :deep(h3),
-.md-render :deep(h4) {
-  font-weight: 600;
-  line-height: 1.3;
-  margin: 1em 0 0.5em;
+.md-render :deep(h4),
+.md-render :deep(h5),
+.md-render :deep(h6) {
+  font-weight: var(--fw-bold);
   color: var(--neutral-fg);
 }
-.md-render :deep(h1) { font-size: 1.3em; }
-.md-render :deep(h2) { font-size: 1.18em; }
-.md-render :deep(h3),
-.md-render :deep(h4) { font-size: 1.06em; }
+.md-render :deep(h1) { font-size: 2em; margin: 0.67em 0; }
+.md-render :deep(h2) { font-size: 1.5em; margin: 0.83em 0; }
+.md-render :deep(h3) { font-size: 1.17em; margin: 1em 0; }
+.md-render :deep(h4) { font-size: 1em; margin: 1.33em 0; }
+.md-render :deep(h5) { font-size: 0.83em; margin: 1.67em 0; }
+.md-render :deep(h6) { font-size: 0.67em; margin: 2.33em 0; }
 
 /* p 段内呼吸（ui-optimize-unified 决策 4）：下 margin 0.4em 小量级，多段落有可感知间距；
    [HISTORICAL] 旧值 margin:0（更旧 0.5em 0 让用户气泡列表上下多 7px 空行被裁决归零）——
@@ -297,15 +302,16 @@ function onClick(e: MouseEvent): void {
   line-height: 1.8;
 }
 
-/* 列表样式：让编号/符号列表在视觉上接近普通正文行（用户气泡里手打的编号列表
-   不该被当成大间距结构化块）。紧凑节奏：条目间 0.25em 微呼吸（决策 4，同 p 的衔接条款）、
-   行高对齐 <p>、左缩进仅留编号位。
-   [HISTORICAL] 旧值 margin:0.5em 0 + li margin:0.2em 0 + padding-left:1.5em + marker --subtle，
-   导致编号行上下多空行、左缩进过深、编号是三级灰与正文不一致——被用户判定为「像多一个空行」。 */
+/* 列表（M3c demo 复刻 workbench.css .md ul）：上下 margin 0.2em/0.4em 让列表作为块内
+   子结构获得 demo 同款呼吸（与相邻 p 的 margin 按 CSS 规则折叠，间距不叠加）；
+   缩进 1.4em（demo 权威）。[HISTORICAL] 旧值 margin:0 + 1.2em（用户气泡列表零间距裁决）
+   ——0.4em 小量级下「不大间距感」仍然成立（同 p 的衔接条款），缩进档位对齐 demo。
+   ol 缩进跟随 ul（demo 无 ol 内容样例，与 ul 同形取一致性；ol margin 保持 0 登记于
+   M3c 报告——demo UA 默认 ol margin 无 real 对应消费场景）。 */
 .md-render :deep(ul),
 .md-render :deep(ol) {
-  margin: 0;
-  padding-left: 1.2em;
+  margin: 0.2em 0 0.4em;
+  padding-left: 1.4em;
 }
 /* 恢复 Tailwind preflight 清掉的 list-style-type（preflight 对 ol/ul 设 list-style:none）。
    不恢复则 <ol> 数字编号不可见——用户气泡里的编号列表会丢编号只剩换行。 */
@@ -330,9 +336,13 @@ function onClick(e: MouseEvent): void {
 .md-render :deep(:last-child) {
   margin-bottom: 0;
 }
-/* 编号颜色与正文一致（旧 --subtle 让编号变灰，与正文 fg 脱节） */
+/* 编号颜色与正文一致（旧 --subtle 让编号变灰，与正文 fg 脱节）；
+   strong 字重显式取 demo --fw-bold（preflight 的 bolder 在嵌套强调下会漂移档位） */
 .md-render :deep(li)::marker {
   color: var(--neutral-fg);
+}
+.md-render :deep(strong) {
+  font-weight: var(--fw-bold);
 }
 
 .md-render :deep(blockquote) {
@@ -350,8 +360,10 @@ function onClick(e: MouseEvent): void {
   margin: 0.6em 0;
 }
 
+/* 链接正蓝（M3c demo 复刻：--link-c 职能分色，wave1 六主题挂值；demo 对话流域无 a 定制
+   ——UA 默认蓝的同职能令牌化。hover 下划线保留 real 既有反馈形态）。 */
 .md-render :deep(a) {
-  color: var(--accent);
+  color: var(--link-c);
   text-decoration: none;
 }
 .md-render :deep(a:hover) { text-decoration: underline; }
@@ -394,39 +406,42 @@ function onClick(e: MouseEvent): void {
   border-radius: var(--radius);
   overflow: hidden;
 }
+/* header（M3c demo 复刻 .cb-head）：padding 4px 6px 4px 12px / hover 底（demo --hover ↔
+   --surface-hover）/ gap 8px；两端对齐由 space-between 承担（demo = 语言标签 + auto-margin
+   复制钮，构图等效）。 */
 .md-render :deep(.md-codeblock__header) {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0.25em 0.4em 0.25em 0.8em;
-  background: var(--surface-2);
+  gap: 8px;
+  padding: 4px 6px 4px 12px;
+  background: var(--surface-hover);
   border-bottom: 1px solid var(--border);
 }
 .md-render :deep(.md-codeblock__lang) {
   font-family: var(--font-mono);
-  font-size: 0.72em;
+  font-size: var(--text-xs);
   color: var(--neutral-dim);
   text-transform: lowercase;
-  letter-spacing: 0.02em;
 }
 .md-render :deep(.md-codeblock__copy) {
   appearance: none;
   border: 0;
   background: transparent;
   cursor: pointer;
-  width: 20px;
-  height: 20px;
+  width: 22px;
+  height: 22px;
   padding: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: var(--radius-sm);
-  color: var(--neutral-mid);
+  border-radius: var(--radius-xs);
+  color: var(--neutral-dim);
   transition: color var(--duration-fast) var(--ease), background var(--duration-fast) var(--ease);
 }
 .md-render :deep(.md-codeblock__copy:hover) {
   color: var(--neutral-fg);
-  background: var(--surface-hover);
+  background: var(--bg-elevated);
 }
 /* 复制 icon：默认 Copy（用 inline SVG mask），已复制态用 .is-copied 切换为 Check。
    v-html 内不能用 Vue 组件 icon，用 CSS background + currentColor mask 实现 icon 着色。 */
@@ -450,14 +465,15 @@ function onClick(e: MouseEvent): void {
 }
 
 /* shiki <pre>：被容器包住后去掉自身 margin/圆角，仅保留内边距 + 横向滚动。
+   内边距 10px 13px / 字号 13px（--text-sm，demo .codeblock pre = fs-base 档；M3c 对齐）。
    背景用 --bg-input（凹陷容器语义，跟随 6 套主题；min 系列 shiki 主题背景透明）。 */
 .md-render :deep(.md-codeblock pre.shiki) {
   margin: 0;
-  padding: 0.8em 1em;
+  padding: 10px 13px;
   border-radius: 0;
   overflow-x: auto;
   font-family: var(--font-mono);
-  font-size: 0.85em;
+  font-size: var(--text-sm);
   line-height: 1.6;
   background: var(--bg-input);
 }
@@ -501,7 +517,7 @@ function onClick(e: MouseEvent): void {
 .md-render :deep(td) {
   border-right: 1px solid var(--border);
   border-bottom: 1px solid var(--border);
-  padding: 0.35em 0.6em;
+  padding: 5px 9px;
   /* 列宽地板（CJK min-content 修正，2026-09-18）：table 的 width:max-content +
      max-width:100% 夹紧后，auto table layout 把所有列压向各自 min-content。拉丁文
      min-content = 最长单词（合理地板），CJK = 任意两个汉字间都是合法断行点 → 1 个
@@ -530,10 +546,16 @@ function onClick(e: MouseEvent): void {
 .md-render :deep(tbody tr:last-child td) {
   border-bottom: 0;
 }
+/* 表头（M3c demo 复刻 .mds th）：bg-input 底（demo --card-inset）+ 12px 字号（--text-xs，
+   demo fs-md）+ fw-mid；td 次级正文色（demo .mds td = --fg-2 ↔ --neutral-fg-2，wave1 挂值） */
 .md-render :deep(th) {
-  background: var(--surface-2);
-  font-weight: 600;
+  background: var(--bg-input);
+  font-size: var(--text-xs);
+  font-weight: var(--fw-mid);
   color: var(--neutral-fg);
+}
+.md-render :deep(td) {
+  color: var(--neutral-fg-2);
 }
 
 .md-render :deep(hr) {

@@ -23,7 +23,7 @@
 
     <div
       ref="scrollEl"
-      class="message-stream relative flex-1 overflow-y-auto px-5 pt-[var(--message-stream-pad-top)] pb-[8px]"
+      class="message-stream relative flex-1 overflow-y-auto px-[30px] pt-[var(--message-stream-pad-top)] pb-[24px]"
       :style="{ overflowAnchor: 'none' }"
       @wheel="onWheel"
     >
@@ -203,8 +203,7 @@ import ModeDeclarationRow from './ModeDeclarationRow.vue'
 // [u5 mode-declaration-row] 首次 connected 自动拉取 preset（冷启动直进非默认模式会话时 store
 // 为空会误报「模式已删除」）：MessageStream 是会话面板常驻挂载点，在此安装幂等单例。
 import { installPresetAutoLoad } from '@/composables/features/settings/usePiPresets'
-// [u8-pi-respawn] 恢复提示条重试按钮的手动恢复（crash-resilience D7 熔断后的用户出口）：
-// RPC + revive + toast 指引自本容器拆至 composables/panel/useSessionRespawnRetry.ts。
+// [u8-pi-respawn] 恢复提示条重试（说明见 useSessionRespawnRetry 调用处注释）。
 import { useSessionRespawnRetry } from '@/composables/panel/useSessionRespawnRetry'
 import { getExecutingBash } from '@taiji/core'
 import { useVirtuaFollow } from '@/composables/panel/useVirtuaFollow'
@@ -236,8 +235,7 @@ import { useSessionActive } from '@/composables/panel/useSessionActive'
 import { useMessageStreamFollowTriggers } from '@/composables/panel/useMessageStreamFollowTriggers'
 import { useMessageStreamRail } from '@/composables/panel/useMessageStreamRail'
 import { useStreamingPin } from '@/composables/panel/useStreamingPin'
-// [u6a] 两常量的消费点已迁 ActivityStrip；ESTIMATED_TURN_HEIGHT / LOAD_MORE_RESERVED_HEIGHT
-// 同源（virta 布局常量族）。
+// [u6a] 两常量的消费点已迁 ActivityStrip；与 ESTIMATED_TURN_HEIGHT 同源（virta 布局常量族）。
 import {
   ESTIMATED_TURN_HEIGHT,
   LOAD_MORE_RESERVED_HEIGHT,
@@ -408,8 +406,10 @@ const { pinnedIndexes } = useStreamingPin({
 /** [cw wave w3] auto-scroll follow 状态机（D1/D2/D7）：onScroll 复合判据
  *  （INVAR-M4-2′）/ onWheel 恒即时脱离 / followIfStuck rAF 重读 guard。virta 单一 scrollTop owner。 */
 // [U4 护栏⑦] dev-only 贴底跟随断言包装（生产透传零开销；spec 详见 usePinBottomGuard.ts 头注释）。
-// [D2 数学不变量] endOffset = tailEl 实测总高：scrollEl pt-20 + pb-8 = 28px 与 virtua
-// viewportSize 不含 padding 的 28px 扣除精确抵消 → offset=tailHeight 落点即真实底部（改任一 padding 必复核）。
+// [D2 数学不变量] endOffset = tailEl 实测总高：滚动容器纵向 padding（pt 令牌 + pb-24px）
+// 参与 virtua viewportSize 扣除与 scrollToIndex 落点公式——viewportSize 按 content-box 测量
+// 随 padding 自动重算，落点偏差由 BOTTOM_THRESHOLD 吸收（M3c 起 30/24 对齐 demo .chat-scroll
+// 呼吸间距；改任一纵向 padding 必复核 useVirtuaFollow D2 推导并真机复验贴底）。
 const { stickToBottom, showJumpButton, onScroll, onWheel, followIfStuck, followToBottom, onSessionRebuild, notifyRoActivity } =
   usePinBottomGuard({
     follow: useVirtuaFollow({
@@ -496,11 +496,12 @@ watch(
 </script>
 
 <style scoped>
-/* message-stream 滚动条（draft） */
+/* message-stream 滚动条（M3c demo 复刻 .chat-scroll::-webkit-scrollbar：thumb faint 档 +
+   r-xs 圆角，hover 提到 dim 档） */
 .message-stream::-webkit-scrollbar { width: 8px; }
 .message-stream::-webkit-scrollbar-thumb {
-  background: var(--border-strong);
-  border-radius: 4px;
+  background: var(--neutral-faint);
+  border-radius: var(--radius-xs);
 }
 .message-stream::-webkit-scrollbar-thumb:hover { background: var(--neutral-dim); }
 

@@ -146,7 +146,7 @@
   --content-max-w: min(720px, 100%); /* 内容列最大宽（settings/对话流收窄；窄容器自动让位满宽） */
   --content-max-w-wide: 1064px; /* 宽内容列上限（demo B2 宽形态阅读列） */
   --panel-bg: var(--surface);   /* panel 内 sticky 浮层底色契约 */
-  --message-stream-pad-top: 20px; /* 消息流顶部留白：scrollEl pt 与 TurnMeta sticky 覆盖同源（改一处两处同步生效；TurnMeta 用 -mt+pt 同值让 sticky 浮层背景覆盖 padding 区，挡住滚过来的文字） */
+  --message-stream-pad-top: 30px; /* 消息流顶部留白（M3c demo 复刻 30/30/24 容器留白；TurnMeta sticky 已移除，本值只承载 scrollEl pt） */
   --z-sticky: 1;
   --z-popover: 10;
   --z-overlay: 20;

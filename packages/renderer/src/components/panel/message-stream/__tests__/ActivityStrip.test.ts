@@ -115,10 +115,10 @@ describe('ActivityStrip · 四类状态各自渲染（P1）', () => {
     const wrapper = await mountStrip({ occupancy: { turn: 'idle', compacting: true, bash: false } })
     const row = wrapper.find('[data-testid="activity-strip-row-compacting"]')
     expect(row.exists()).toBe(true)
-    // 用户可见文案（zh-CN）+ spinner（Loader2 animate-spin）；行内左右各一条渐隐 hairline
+    // 用户可见文案（zh-CN）+ 呼吸弧（animate-loader-spin，M3c demo .run-ic 复刻）；行内左右各一条渐隐 hairline
     //（断言随 6d6ebb905 渐变 hairline 形态更新，形态细节断言见下方「横线分隔行族」describe）
     expect(wrapper.find('[data-testid="activity-strip-text-compacting"]').text()).toBe('压缩中')
-    expect(row.find('.animate-spin').exists()).toBe(true)
+    expect(row.find('.animate-loader-spin').exists()).toBe(true)
     expect(row.findAll('.h-px').length).toBe(2)
     wrapper.unmount()
   })
@@ -179,7 +179,7 @@ describe('ActivityStrip · 四类状态各自渲染（P1）', () => {
     const row = wrapper.find('[data-testid="activity-strip-row-thinking"]')
     expect(row.exists()).toBe(true)
     expect(wrapper.find('[data-testid="activity-strip-text-thinking"]').text()).toBe('思考中…')
-    expect(row.find('.animate-spin').exists()).toBe(true)
+    expect(row.find('.animate-loader-spin').exists()).toBe(true)
     wrapper.unmount()
   })
 
@@ -189,7 +189,7 @@ describe('ActivityStrip · 四类状态各自渲染（P1）', () => {
     expect(row.exists()).toBe(true)
     // 文案复用 dispatching key「思考中…」（P-1 探针 V8 校准点：P95 > 2s 常态化则换「收尾中…」）
     expect(wrapper.find('[data-testid="activity-strip-text-settling"]').text()).toBe('思考中…')
-    expect(row.find('.animate-spin').exists()).toBe(true)
+    expect(row.find('.animate-loader-spin').exists()).toBe(true)
     wrapper.unmount()
   })
 
@@ -227,17 +227,16 @@ describe('ActivityStrip · 横线分隔行族形态（compacting 降级回归 + 
       expect(line.classes()).toContain('flex-1')
       expect(line.classes()).toContain(FADE_LINE_CLASS)
     }
-    // spinner：13px + stroke 2.2 + neutral-mid（原通栏带 size-3.5 text-accent 作废）
-    const spinner = row.find('.animate-spin')
-    expect(spinner.exists()).toBe(true)
-    expect(spinner.classes()).toContain('size-[13px]')
-    expect(spinner.classes()).toContain('text-neutral-mid')
-    expect(spinner.attributes('stroke-width')).toBe('2.2')
-    // 主文案（文本容器首个 span）：text-sm / neutral-fg / 550
+    // 呼吸弧：15px + accent（M3c demo .run-ic 复刻，替换原 Loader2 13px neutral-mid spinner）
+    const loader = row.find('.animate-loader-spin')
+    expect(loader.exists()).toBe(true)
+    expect(loader.classes()).toContain('size-[15px]')
+    expect(loader.classes()).toContain('text-accent')
+    // 主文案（文本容器首个 span）：text-base / neutral-mid / fw-mid（demo .think .t-name）
     const main = row.find('[data-testid="activity-strip-text-compacting"] > span')
-    expect(main.classes()).toContain('text-[length:var(--text-sm)]')
-    expect(main.classes()).toContain('text-neutral-fg')
-    expect(main.classes()).toContain('font-[550]')
+    expect(main.classes()).toContain('text-[length:var(--text-base)]')
+    expect(main.classes()).toContain('text-neutral-mid')
+    expect(main.classes()).toContain('[font-weight:var(--fw-mid)]')
     wrapper.unmount()
   })
 
@@ -291,14 +290,13 @@ describe('ActivityStrip · 横线分隔行族形态（compacting 降级回归 + 
     for (const line of bashLines) {
       expect(line.classes()).toContain(FADE_LINE_CLASS)
     }
-    // spinner 13px / stroke 2.2 / neutral-mid
-    const spinner = bashRow.find('.animate-spin')
-    expect(spinner.classes()).toContain('size-[13px]')
-    expect(spinner.attributes('stroke-width')).toBe('2.2')
-    // 主文案 text-sm/fg/550；方案 A 后无内联命令（命令在悬停详情），行内仅短语 + elapsed meta
+    // 呼吸弧 15px / accent（M3c）
+    const loader = bashRow.find('.animate-loader-spin')
+    expect(loader.classes()).toContain('size-[15px]')
+    // 主文案 text-base/mid/fw-mid（M3c demo .think .t-name）；方案 A 后无内联命令（命令在悬停详情），行内仅短语 + elapsed meta
     const main = bashRow.find('[data-testid="activity-strip-text-bash"] > span')
-    expect(main.classes()).toContain('text-[length:var(--text-sm)]')
-    expect(main.classes()).toContain('font-[550]')
+    expect(main.classes()).toContain('text-[length:var(--text-base)]')
+    expect(main.classes()).toContain('[font-weight:var(--fw-mid)]')
     expect(bashRow.find('[data-testid="activity-strip-text-bash"] .font-mono').exists()).toBe(true)
 
     wrapper.unmount()
