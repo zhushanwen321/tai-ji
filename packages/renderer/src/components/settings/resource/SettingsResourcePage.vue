@@ -5,7 +5,7 @@
     层 A 勾选/排序写 discovery.json（SSOT），层 B 只读预览扫描结果。
     通过 kind 区分 skill/agent，差异仅资源类型/标题/来源配色/扫描 API（统一内聚）。
   -->
-  <div class="flex flex-col gap-4">
+  <div class="flex flex-col">
     <header class="page-head">
       <div class="head-text">
         <h1 class="title">{{ kind === 'skill' ? t('settings.menu.skill') : t('settings.menu.agent') }}</h1>
@@ -13,71 +13,90 @@
       </div>
     </header>
 
-    <!-- 层 A · 加载路径（共享组件，接 store *Dirs，emit 回写 store） -->
-    <LoadPaths
-      :kind="kind"
-      :forced-dirs="forcedDirs"
-      :dirs="dirs"
-      :disabled="false"
-      :save-error="saveError"
-      @update-dirs="onUpdateDirs"
-    />
+    <!-- 层 A · 加载路径（共享组件，接 store *Dirs，emit 回写 store）。
+         [w3b] LoadPaths 为 ui 包组件（非 GroupCard，无相邻 margin），mb-16 兜住卡间距。 -->
+    <div class="mb-[16px]">
+      <LoadPaths
+        :kind="kind"
+        :forced-dirs="forcedDirs"
+        :dirs="dirs"
+        :disabled="false"
+        :save-error="saveError"
+        @update-dirs="onUpdateDirs"
+      />
+    </div>
 
     <!-- RD-4#11：数据目录读取失败时的显式标注（user 级强制目录不展示，不伪装真实路径） -->
     <p
       v-if="dataDirReadFailed"
       data-testid="resource-datadir-read-failed"
-      class="text-[11px] text-warn"
+      class="mb-[16px] text-[length:var(--text-2xs)] text-warn"
     >{{ t('settings.resource.dataDirReadFailed') }}</p>
 
-    <!-- 层 B · 资源只读预览 -->
-    <section>
-      <!-- 来源 tab 过滤 -->
-      <div class="mb-2 flex items-center gap-2">
-        <h3 class="text-[12px] font-medium text-neutral-fg">{{ t('settings.resource.discovered', { label }) }}</h3>
-        <span class="rounded-sm bg-surface px-1.5 py-0.5 text-[10px] text-neutral-dim">{{ filteredItems.length }}</span>
+    <!-- 层 B · 资源只读预览。
+         [w3b] demo 对照：AgentSection.vue「已发现的 Agent」卡——卡头 gc-title + .bdg 计数 +
+         .btn.secondary 刷新钮（icon 14px / spin 12px）；body = .u-seg tab（mb 10px）+ .srow
+         align-start 行（name 14px/600 + 来源 tag 链，首位「生效」后缀、其余 opacity .6，+
+         desc max-w 200 截断）。bdg 计数 = 全量清单数（demo found.length，不随 tab 变化）。 -->
+    <GroupCard>
+      <template #head>
+        <div class="gc-head-text">
+          <h3 class="gc-title">{{ t('settings.resource.discovered', { label }) }}</h3>
+        </div>
+      </template>
+      <template #actions>
+        <span class="inline-flex h-[16px] min-w-[16px] items-center justify-center rounded-full bg-surface px-[5px] font-mono text-[10px] font-bold text-[color:var(--neutral-fg-2)]">{{ items.length }}</span>
         <Button
           variant="secondary"
-          class="ml-1 gap-1.5 rounded-sm px-2 py-0.5 text-[11px] [&_svg]:size-3"
+          class="h-[32px] gap-[6px] px-[12px] text-[length:var(--text-sm)] [&_svg]:size-[14px]"
           :disabled="scanning"
           @click="onScan"
         >
           <RefreshCw v-if="scanning" class="animate-spin" />
           {{ scanning ? t('settings.resource.refreshing') : t('settings.resource.refresh') }}
         </Button>
-        <div class="ml-auto flex gap-0.5">
+      </template>
+      <div class="p-[12px_16px]">
+        <!-- 来源 tab 过滤（demo .u-seg 分段，McpServerForm 同款范式） -->
+        <div class="mb-[10px] inline-flex gap-[2px] rounded-md border border-hairline bg-surface-2 p-[2px]" role="tablist">
           <Button
             variant="ghost"
             v-for="tab in sourceTabs"
             :key="tab.id"
-            class="h-auto rounded-sm px-2 py-0.5 text-[11px]"
-            :class="activeSource === tab.id ? 'bg-bg-elevated text-neutral-fg' : 'text-neutral-mid hover:text-neutral-fg'"
+            type="button"
+            role="tab"
+            class="h-[26px] rounded-[var(--radius-sm)] px-[10px] text-[length:var(--text-xs)] hover:bg-transparent"
+            :class="activeSource === tab.id ? 'bg-bg-elevated font-semibold text-neutral-fg' : 'text-neutral-mid hover:text-neutral-fg'"
+            :aria-selected="activeSource === tab.id"
             @click="activeSource = tab.id"
           >{{ t(tab.labelKey) }}</Button>
         </div>
+
+        <p v-if="actionError" class="mb-[8px] px-[6px] text-[length:var(--text-2xs)] text-danger">{{ actionError }}</p>
+
+        <!-- 空态（demo 卡内空态行：desc p 8px 6px） -->
+        <div v-if="!filteredItems.length" class="px-[6px] py-[8px] text-[length:var(--text-sm)] text-[color:var(--neutral-fg-2)]">{{ t(activeSource === 'all' ? 'settings.resource.notFound' : 'settings.resource.notFoundInSource', { label }) }}</div>
+
+        <!-- ADR §5：只读预览，无开关无 CRUD。来源 badge 链（demo .tag 形态）+ effective 标生效。 -->
+        <div v-for="item in filteredItems" :key="item.id" class="flex min-h-[44px] items-start gap-4 border-t border-hairline px-1.5 py-2.5">
+          <span class="min-w-0 flex-1 truncate text-[length:var(--text-base)] font-semibold text-neutral-fg">{{ item.name }}</span>
+          <!-- 来源 badge 链（多来源时展开，第一个标生效；demo tag 链 opacity .6） -->
+          <span class="flex shrink-0 flex-wrap items-center gap-[4px]">
+            <span
+              v-for="(src, i) in itemSources(item)"
+              :key="src.source + src.sourcePath"
+              class="inline-flex h-[18px] items-center rounded-full px-[7px] text-[length:var(--text-2xs)] font-semibold"
+              :class="[sourceBadgeClass(src.source), i > 0 ? 'opacity-60' : '']"
+              :title="i === 0 ? t('settings.resource.effective') : src.sourcePath"
+            >{{ i === 0 ? `${src.source} · ${t('settings.resource.effective')}` : src.source }}</span>
+            <!-- 单来源无 badge 链时，直接标 source + 生效 -->
+            <span v-if="!itemSources(item).length" class="inline-flex h-[18px] items-center rounded-full px-[7px] text-[length:var(--text-2xs)] font-semibold" :class="sourceBadgeClass(itemSource(item))">{{ itemSource(item) }}</span>
+            <span v-if="item.effective && !itemSources(item).length" class="inline-flex h-[18px] items-center rounded-full bg-accent-soft px-[7px] text-[length:var(--text-2xs)] font-semibold text-accent">{{ t('settings.resource.effective') }}</span>
+          </span>
+          <span class="max-w-[200px] shrink-0 truncate text-[length:var(--text-sm)] text-[color:var(--neutral-fg-2)]" :title="item.description">{{ item.description }}</span>
+        </div>
       </div>
-
-      <p v-if="actionError" class="mb-2 text-[11px] text-danger">{{ actionError }}</p>
-
-      <div v-if="!filteredItems.length" class="py-8 text-center text-[12px] text-neutral-mid">{{ t(activeSource === 'all' ? 'settings.resource.notFound' : 'settings.resource.notFoundInSource', { label }) }}</div>
-
-      <!-- ADR §5：只读预览，无开关无 CRUD。来源 badge 链 + effective 标生效。 -->
-      <div v-for="item in filteredItems" :key="item.id" class="flex items-center gap-2 rounded-card bg-card px-3 py-2">
-        <span class="flex-1 truncate text-[12px] font-medium text-neutral-fg">{{ item.name }}</span>
-        <!-- 来源 badge 链（多来源时展开，第一个标生效） -->
-        <span
-          v-for="(src, i) in itemSources(item)"
-          :key="src.source + src.sourcePath"
-          class="rounded-sm px-1.5 py-0.5 text-[10px]"
-          :class="[sourceBadgeClass(src.source), i === 0 ? 'ring-1 ring-inset ring-accent/40' : 'opacity-60']"
-          :title="i === 0 ? t('settings.resource.effective') : src.sourcePath"
-        >{{ i === 0 ? `${t('settings.resource.effective')}·${src.source}` : src.source }}</span>
-        <!-- 单来源无 badge 链时，直接标 source + 生效 -->
-        <span v-if="!itemSources(item).length" class="rounded-sm px-1.5 py-0.5 text-[10px]" :class="sourceBadgeClass(itemSource(item))">{{ itemSource(item) }}</span>
-        <span v-if="item.effective && !itemSources(item).length" class="rounded-sm bg-accent-soft px-1.5 py-0.5 text-[10px] text-accent">{{ t('settings.resource.effective') }}</span>
-        <span class="max-w-[200px] truncate text-[11px] text-neutral-dim" :title="item.description">{{ item.description }}</span>
-      </div>
-    </section>
+    </GroupCard>
   </div>
 </template>
 
@@ -86,7 +105,7 @@ import { computed, ref, provide, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { RefreshCw } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
-import { LoadPaths, SETTINGS_CHOOSE_DIRECTORY_KEY } from '@taiji/ui/features/settings'
+import { GroupCard, LoadPaths, SETTINGS_CHOOSE_DIRECTORY_KEY } from '@taiji/ui/features/settings'
 import type { SkillInfo, AgentInfo, SkillDirConfig } from '@taiji/shared'
 import { getSettingsTransport } from '@taiji/core'
 import { chooseDirectory, getDataDir } from '@/api/domains/settings'

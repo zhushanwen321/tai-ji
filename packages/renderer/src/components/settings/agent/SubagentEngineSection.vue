@@ -1,29 +1,32 @@
 <template>
+  <!-- [w3b] demo 对照：AgentSection.vue「子代理引擎」卡（gc-title 卡头 + tight body + SettingRow +
+       Select w160）。loadError 行形态与 SystemAutoRenameSection 同族（RD-4#8；卡内 padding 10/8/4
+       绝对 px + text-2xs 令牌），重试钮保持 W2 卡内小钮档。 -->
   <GroupCard :title="t('settings.subagentEngine.title')">
     <!-- RD-4#8：读配置失败常驻提示（默认值非已存值）+ 重试；控件禁用直到重拉成功 -->
     <div
       v-if="loadError"
       data-testid="subagent-engine-load-error"
-      class="flex items-center gap-2 px-2.5 pt-2 pb-1 text-[11px] text-warn"
+      class="flex items-center gap-2 px-[10px] pt-[8px] pb-[4px] text-[length:var(--text-2xs)] text-warn"
     >
       <AlertTriangle class="size-3.5 shrink-0" />
       <span>{{ t('settings.subagentEngine.loadErrorHint') }}</span>
       <Button
         variant="ghost"
         size="sm"
-        class="h-5 px-1.5 text-[11px] text-accent"
+        class="h-5 px-1.5 text-[length:var(--text-2xs)] text-accent"
         data-testid="subagent-engine-load-retry"
         @click="loadConfig"
       >{{ t('settings.subagentEngine.loadErrorRetry') }}</Button>
     </div>
-    <div class="px-2.5 pt-1 pb-2" data-testid="subagent-engine-section">
+    <div class="px-[10px] pt-[4px] pb-[8px]" data-testid="subagent-engine-section">
       <SettingRow :label="t('settings.subagentEngine.label')" :desc="t('settings.subagentEngine.desc')">
         <Select
           :model-value="current"
           :disabled="loading || saving || engines.length === 0 || loadError"
           @update:model-value="onEngineChange"
         >
-          <SelectTrigger class="h-8 w-[160px] px-2 text-xs" data-testid="subagent-engine-select">
+          <SelectTrigger class="w-[160px]" data-testid="subagent-engine-select">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>

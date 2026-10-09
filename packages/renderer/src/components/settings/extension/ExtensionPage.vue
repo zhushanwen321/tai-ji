@@ -4,8 +4,11 @@
     刷新机制：finishInstall/uninstall 后 runtime 推 config.extensions → onExtensions 订阅（SettingsModal 持有）
     → extensions prop 流入本页，无需本页自建订阅。
     容器职责：header + 加载路径配置 + 装配子组件（安装流 ExtensionInstallFlow / 列表 ExtensionList）。
+    [w3b] demo 对照：ExtensionSection.vue（.pg-set 段）——页容器不设 gap，卡间距由 GroupCard
+    相邻 margin（16px）承担；LoadPaths（ui 包组件，非 GroupCard）与读取失败标注行自带
+    mb-16 兜住间距断链；「插件贡献」入口钮 = demo .btn.secondary（h32/px12/text-sm）。
   -->
-  <div class="flex flex-col gap-4">
+  <div class="flex flex-col">
     <header class="page-head">
       <div class="head-text">
         <h1 class="title">{{ t('settings.menu.extension') }}</h1>
@@ -14,8 +17,8 @@
       <!-- 插件贡献子页入口（M16）：SettingsModal 按 extensionView 切换子页，本页 emit 通知切换。 -->
       <div class="head-actions">
         <Button
-          size="dense"
-          class="rounded-sm text-[12px]"
+          variant="secondary"
+          class="h-[32px] px-[12px] text-[length:var(--text-sm)]"
           data-testid="extension-contributions-entry"
           @click="emit('open-contributions')"
         >
@@ -28,26 +31,28 @@
          extension 的「优先级」语义因资源类型而异（tool 靠前生效、hook 全部执行），
          故措辞用「加载顺序」而非优先级；新会话生效，无需重启提示。
          不复用 SettingsResourcePage：extension 的实体列表模型与 skill/agent 不同（安装多步流、来源标签）。 -->
-    <LoadPaths
-      kind="extension"
-      :forced-dirs="forcedExtDirs"
-      :dirs="extensionDirs"
-      :save-error="saveExtensionDirs.saveError.value"
-      @update-dirs="saveExtensionDirs.run"
-    />
+    <div class="mb-[16px]">
+      <LoadPaths
+        kind="extension"
+        :forced-dirs="forcedExtDirs"
+        :dirs="extensionDirs"
+        :save-error="saveExtensionDirs.saveError.value"
+        @update-dirs="saveExtensionDirs.run"
+      />
+    </div>
 
     <!-- RD-4#11：数据目录读取失败时的显式标注（user 级强制目录不展示，不伪装真实路径） -->
     <p
       v-if="dataDirReadFailed"
       data-testid="extension-datadir-read-failed"
-      class="text-[11px] text-warn"
+      class="mb-[16px] text-[length:var(--text-2xs)] text-warn"
     >{{ t('settings.extension.dataDirReadFailed') }}</p>
 
     <!-- 安装流（推荐扩展 + npm/dir/git 安装 + 候选内联展开） -->
     <ExtensionInstallFlow :extensions="extensions" />
 
     <!-- 已安装列表（行 = ExtensionDetail 信息区 + ExtensionActions 操作区） -->
-    <ExtensionList :extensions="extensions" />
+    <ExtensionList class="mt-[16px]" :extensions="extensions" />
   </div>
 </template>
 

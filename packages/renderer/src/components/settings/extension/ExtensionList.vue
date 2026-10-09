@@ -1,52 +1,66 @@
 <template>
   <!-- 已安装列表：按 layer 分两组（builtin 系统强制在前 / user 用户安装在后）。
-       组头对齐 v6 demo GroupCard：标题 + scope pill + count + aux。
-       空组整体隐藏（不渲染组头），全部为空时保留统一空态。 -->
-  <section>
+       [w3b] demo 对照：ExtensionSection.vue「内置扩展（系统强制）」「已安装扩展（用户）」两卡
+       （.gcard + 卡头 gc-title + tight body + .srow align-start 行）。scope 信息 = 卡头
+       gc-title 旁 tag（i18n 现状两卡共用 installedBuiltinTitle，demo 括号后缀以「标题 + 徽标」
+       组合表达，不新增 key）；卡头右 = aux 文案（.gcard .srow-desc 档）+ .bdg 计数徽标。
+       空组整体隐藏（不渲染卡），全部为空时保留统一空态（demo .empty 语言）。 -->
+  <div class="flex flex-col">
     <!-- builtin 组（系统强制） -->
-    <div v-if="builtinExts.length" data-testid="extension-group-builtin">
-      <div class="mb-2 flex items-center gap-2">
-        <h3 class="text-[12px] font-medium text-neutral-fg">{{ t('settings.extension.installedBuiltinTitle') }}</h3>
-        <span class="inline-flex items-center gap-1 rounded-full bg-surface px-2 py-0.5 text-[10px] font-medium text-neutral-mid">
-          <Lock :size="11" />
-          {{ t('settings.extension.scopeBuiltinPill') }}
-        </span>
-        <span class="rounded-sm bg-surface px-1.5 py-0.5 text-[10px] text-neutral-dim">{{ builtinExts.length }}</span>
-        <span class="text-[10px] text-neutral-mid">{{ t('settings.extension.builtinAux') }}</span>
+    <GroupCard v-if="builtinExts.length" data-testid="extension-group-builtin">
+      <template #head>
+        <div class="gc-head-text flex items-center gap-2">
+          <h3 class="gc-title">{{ t('settings.extension.installedBuiltinTitle') }}</h3>
+          <span class="inline-flex h-[18px] items-center rounded-full bg-accent-soft px-[7px] text-[length:var(--text-2xs)] font-semibold text-accent">{{ t('settings.extension.scopeBuiltinPill') }}</span>
+        </div>
+      </template>
+      <template #actions>
+        <span class="text-[length:var(--text-sm)] text-[color:var(--neutral-fg-2)]">{{ t('settings.extension.builtinAux') }}</span>
+        <span class="inline-flex h-[16px] min-w-[16px] items-center justify-center rounded-full bg-surface px-[5px] font-mono text-[10px] font-bold text-[color:var(--neutral-fg-2)]">{{ builtinExts.length }}</span>
+      </template>
+      <div class="px-[10px] pt-[4px] pb-[8px]">
+        <div v-for="ext in builtinExts" :key="ext.name" class="flex min-h-[44px] items-start gap-4 border-t border-hairline px-1.5 py-2.5 first:border-t-0">
+          <ExtensionDetail :ext="ext" />
+          <ExtensionActions :ext="ext" />
+        </div>
       </div>
-
-      <div v-for="ext in builtinExts" :key="ext.name" class="flex items-center gap-3 rounded-card bg-card px-3 py-2.5">
-        <ExtensionDetail :ext="ext" />
-        <ExtensionActions :ext="ext" />
-      </div>
-    </div>
+    </GroupCard>
 
     <!-- user 组（用户安装） -->
-    <div v-if="userExts.length" data-testid="extension-group-user">
-      <div class="mb-2 flex items-center gap-2">
-        <h3 class="text-[12px] font-medium text-neutral-fg">{{ t('settings.extension.installedBuiltinTitle') }}</h3>
-        <span class="inline-flex items-center gap-1 rounded-full bg-surface px-2 py-0.5 text-[10px] font-medium text-neutral-mid">
-          {{ t('settings.extension.scopeUserPill') }}
-        </span>
-        <span class="rounded-sm bg-surface px-1.5 py-0.5 text-[10px] text-neutral-dim">{{ userExts.length }}</span>
-        <span class="text-[10px] text-neutral-mid">{{ t('settings.extension.userAux') }}</span>
+    <GroupCard v-if="userExts.length" data-testid="extension-group-user">
+      <template #head>
+        <div class="gc-head-text flex items-center gap-2">
+          <h3 class="gc-title">{{ t('settings.extension.installedBuiltinTitle') }}</h3>
+          <span class="inline-flex h-[18px] items-center rounded-full bg-accent-soft px-[7px] text-[length:var(--text-2xs)] font-semibold text-accent">{{ t('settings.extension.scopeUserPill') }}</span>
+        </div>
+      </template>
+      <template #actions>
+        <span class="text-[length:var(--text-sm)] text-[color:var(--neutral-fg-2)]">{{ t('settings.extension.userAux') }}</span>
+        <span class="inline-flex h-[16px] min-w-[16px] items-center justify-center rounded-full bg-surface px-[5px] font-mono text-[10px] font-bold text-[color:var(--neutral-fg-2)]">{{ userExts.length }}</span>
+      </template>
+      <div class="px-[10px] pt-[4px] pb-[8px]">
+        <div v-for="ext in userExts" :key="ext.name" class="flex min-h-[44px] items-start gap-4 border-t border-hairline px-1.5 py-2.5 first:border-t-0">
+          <ExtensionDetail :ext="ext" />
+          <ExtensionActions :ext="ext" />
+        </div>
       </div>
+    </GroupCard>
 
-      <div v-for="ext in userExts" :key="ext.name" class="flex items-center gap-3 rounded-card bg-card px-3 py-2.5">
-        <ExtensionDetail :ext="ext" />
-        <ExtensionActions :ext="ext" />
+    <!-- 全空态（两组都为空；demo .pg-set .empty 语言：64px 虚线圆 ring + 描述行） -->
+    <div v-if="!extensions.length" class="flex flex-col items-center px-[16px] py-[40px] text-center">
+      <div class="mb-[12px] grid size-16 place-items-center rounded-full border-[1.5px] border-dashed border-border-strong">
+        <Blocks class="size-[26px] text-neutral-mid" />
       </div>
+      <p class="text-[length:var(--text-sm)] text-neutral-mid">{{ t('settings.extension.noExtensions') }}</p>
     </div>
-
-    <!-- 全空态（两组都为空） -->
-    <div v-if="!extensions.length" class="py-8 text-center text-[12px] text-neutral-mid">{{ t('settings.extension.noExtensions') }}</div>
-  </section>
+  </div>
 </template>
 
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Lock } from '@lucide/vue'
+import { Blocks } from '@lucide/vue'
+import { GroupCard } from '@taiji/ui/features/settings'
 import type { ExtensionItem } from '@taiji/core'
 import ExtensionDetail from './ExtensionDetail.vue'
 import ExtensionActions from './ExtensionActions.vue'

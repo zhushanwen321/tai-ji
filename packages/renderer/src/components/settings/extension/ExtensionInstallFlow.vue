@@ -1,25 +1,36 @@
 <template>
-  <div class="flex flex-col gap-4">
+  <!--
+    [w3b] demo 对照：ExtensionSection.vue 安装域三卡（.gcard 结构 + 卡头 gc-title）。
+    推荐扩展卡 = .gcard-body.tight（4px 10px 8px）+ .srow 行（name 14px/600 + desc/pkg 13px fg-2，
+    右侧 .btn.secondary 安装 / disabled+Check 已安装）；安装卡 = .gcard-body（12px 16px）+
+    .u-seg 分段 tab（bg-surface-2 凹底 / hairline 边 / r-md / p 2px / 钮 26px r-sm）+ .inp/.btn
+    输入行 + 错误行（srow-desc danger p 6px，无图标）；候选内联展开在安装卡体内（demo 权威位），
+    行 = .srow 单行内联（Checkbox + name + mono dirName + .tag.ok 版本 + desc）。
+    demo 推荐行有第三行 pkg 文本——real RecommendedExtension.name 即 npm 包名（安装入参），
+    重复展示无信息量，不照抄（内容跟 real）。
+  -->
+  <div class="flex flex-col">
     <!-- 推荐扩展区：快捷一键安装 builtin pi-extensions（SSOT = recommended-extensions.json）。onMounted 拉取 installed，install 后 watch(extensions) 刷新。-->
-    <section v-if="recommended.length" class="rounded-card bg-card">
-      <div class="border-b border-border px-3 py-2">
-        <h3 class="text-[12px] font-medium text-neutral-fg">{{ t('settings.extension.recommendedTitle') }}</h3>
-      </div>
-      <div class="flex flex-col gap-0.5 p-2">
+    <GroupCard v-if="recommended.length">
+      <template #head>
+        <div class="gc-head-text">
+          <h3 class="gc-title">{{ t('settings.extension.recommendedTitle') }}</h3>
+        </div>
+      </template>
+      <div class="px-[10px] pt-[4px] pb-[8px]">
         <div
           v-for="r in recommended"
           :key="r.name"
-          class="flex items-center gap-3 rounded-sm px-2 py-2 hover:bg-surface"
+          class="flex min-h-[44px] items-center gap-4 border-t border-hairline px-1.5 py-2.5 first:border-t-0"
         >
-          <div class="min-w-0 flex-1 flex flex-col gap-0.5">
-            <span class="truncate text-[12px] font-medium text-neutral-fg">{{ r.name }}</span>
-            <span class="truncate text-[11px] text-neutral-mid">{{ r.description }}</span>
+          <div class="flex min-w-0 flex-1 flex-col">
+            <span class="truncate text-[length:var(--text-base)] font-semibold text-neutral-fg">{{ r.name }}</span>
+            <span class="mt-0.5 truncate text-[length:var(--text-sm)] text-[color:var(--neutral-fg-2)]">{{ r.description }}</span>
           </div>
           <!-- 已安装：disabled + Check 图标；未安装：点击调 install(npm:pkgName) -->
           <Button
-            variant="ghost"
-            size="dense"
-            class="shrink-0 rounded-sm text-[11px]"
+            variant="secondary"
+            class="h-[32px] shrink-0 px-[12px] text-[length:var(--text-sm)] [&_svg]:size-[14px]"
             :disabled="r.installed || installingRecommended.has(r.name)"
             @click="onInstallRecommended(r.name)"
           >
@@ -29,97 +40,105 @@
           </Button>
         </div>
       </div>
-    </section>
+    </GroupCard>
 
     <!-- 安装区 -->
-    <section class="rounded-card bg-card">
-      <div class="flex items-center gap-1 border-b border-border px-3 py-2">
-        <Button
-          variant="ghost"
-          v-for="tab in tabs"
-          :key="tab.id"
-          class="h-auto rounded-sm px-2.5 py-1 text-[12px]"
-          :class="activeTab === tab.id ? 'bg-bg-elevated text-neutral-fg' : 'text-neutral-mid hover:text-neutral-fg'"
-          @click="activeTab = tab.id"
-        >{{ tab.label }}</Button>
-      </div>
-      <div class="flex items-center gap-2 p-3">
-        <Input
-          v-model="installInput"
-          data-testid="install-input"
-          class="h-8 flex-1 text-[12px]"
-          :placeholder="tabPlaceholder"
-          @keyup.enter="onInstall"
-        />
-        <Button
-          class="h-8 shrink-0 rounded-sm px-3 text-[12px]"
-          :disabled="!installInput.trim() || installing"
-          @click="onInstall"
-        >
-          <Loader2 v-if="installing" class="animate-spin" />
-          {{ installButtonText }}
-        </Button>
-      </div>
-      <!-- 错误反馈（非静默吞，AGENTS.md 规则 #3） -->
-      <div v-if="actionError" class="flex items-center gap-1.5 border-t border-border px-3 py-1.5 text-[11px] text-danger">
-        <AlertCircle class="size-3.5 shrink-0" />
-        <span class="truncate">{{ actionError }}</span>
-      </div>
-    </section>
-
-    <!-- 候选内联展开（dir/git 多步第二步，§6.3 点3：安装区下方直接展开） -->
-    <section v-if="discovered" data-testid="install-candidates" class="rounded-card bg-card">
-      <div class="flex items-center justify-between border-b border-border px-3 py-2">
-        <h3 class="text-[12px] font-medium text-neutral-fg">{{ t('settings.extension.discoverResultTitle', discovered.candidates.length, { named: { count: discovered.candidates.length } }) }}</h3>
-        <Button variant="ghost" class="h-auto px-2 py-0.5 text-[11px] text-neutral-dim" @click="onCancelInstall">{{ t('settings.extension.cancel') }}</Button>
-      </div>
-      <div v-if="!discovered.candidates.length" class="py-4 text-center text-[11px] text-neutral-mid">{{ t('settings.extension.noCandidates') }}</div>
-      <div v-else class="flex flex-col gap-0.5 p-2">
-        <Label
-          v-for="c in discovered.candidates"
-          :key="c.dirName"
-          class="flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 hover:bg-surface"
-        >
-          <!--
-            候选多选（W2 D3 修复）：Checkbox 受控（selected Set 管理）。去掉内层 div @click，
-            仅靠 Label→Checkbox 转发 + update:model-value 单通道，避免双触发翻转抵消。
-          -->
-          <Checkbox
-            :model-value="selected.has(c.dirName)"
-            class="shrink-0"
-            @update:model-value="toggleCandidate(c.dirName)"
+    <GroupCard>
+      <template #head>
+        <div class="gc-head-text">
+          <h3 class="gc-title">{{ t('settings.extension.install') }}</h3>
+        </div>
+      </template>
+      <div class="p-[12px_16px]">
+        <!-- demo .u-seg 分段（McpServerForm 同款范式）：bg-surface-2 凹底 / hairline 边 / r-md / p 2px / 钮 26px r-sm -->
+        <div class="mb-[10px] inline-flex gap-[2px] rounded-md border border-hairline bg-surface-2 p-[2px]" role="tablist">
+          <Button
+            v-for="tab in tabs"
+            :key="tab.id"
+            type="button"
+            role="tab"
+            variant="ghost"
+            class="h-[26px] rounded-[var(--radius-sm)] px-[10px] text-[length:var(--text-xs)] hover:bg-transparent"
+            :class="activeTab === tab.id ? 'bg-bg-elevated font-semibold text-neutral-fg' : 'text-neutral-mid hover:text-neutral-fg'"
+            :aria-selected="activeTab === tab.id"
+            @click="activeTab = tab.id"
+          >{{ tab.label }}</Button>
+        </div>
+        <div class="flex items-center gap-[8px]">
+          <Input
+            v-model="installInput"
+            data-testid="install-input"
+            class="flex-1"
+            :placeholder="tabPlaceholder"
+            @keyup.enter="onInstall"
           />
-          <div class="min-w-0 flex-1">
-            <div class="flex items-center gap-2">
-              <span class="truncate text-[12px] text-neutral-fg">{{ c.name }}</span>
-              <span class="rounded-sm bg-surface px-1 py-0.5 font-mono text-[10px] text-neutral-dim">{{ c.dirName }}</span>
-              <span class="font-mono text-[10px] text-neutral-dim">v{{ c.version }}</span>
-            </div>
-            <span class="truncate text-[11px] text-neutral-mid">{{ c.description }}</span>
-          </div>
-        </Label>
-      </div>
-      <div v-if="discovered.candidates.length" class="flex items-center justify-between gap-2 border-t border-border px-3 py-2">
-        <div class="flex items-center gap-2">
-          <span class="text-[11px] text-neutral-dim">{{ t('settings.extension.selectedCount', { selected: selected.size, total: discovered.candidates.length }) }}</span>
-          <Button variant="ghost" size="dense" class="h-auto px-1.5 py-0.5 text-[11px] text-neutral-dim hover:text-neutral-fg" @click="toggleSelectAll">
-            {{ isAllSelected ? t('settings.extension.unselectAll') : t('settings.extension.selectAll') }}
+          <!-- npm 单步直装 = demo .btn.solid；dir/git 多步发现 = demo .btn.secondary -->
+          <Button
+            :variant="activeTab === 'npm' ? 'default' : 'secondary'"
+            class="h-[32px] shrink-0 px-[12px] text-[length:var(--text-sm)]"
+            :disabled="!installInput.trim() || installing"
+            @click="onInstall"
+          >
+            <Loader2 v-if="installing" class="animate-spin" />
+            {{ installButtonText }}
           </Button>
         </div>
-        <Button size="dense" :disabled="selected.size === 0 || installing" @click="onFinishInstall">
-          <Loader2 v-if="installing" class="animate-spin" />
-          {{ t('settings.extension.installSelected') }}
-        </Button>
+        <!-- 错误反馈（demo：srow-desc danger + padding 6px，无图标；非静默吞，AGENTS.md 规则 #3） -->
+        <div v-if="actionError" class="p-[6px] text-[length:var(--text-sm)] text-danger">
+          <span class="truncate">{{ actionError }}</span>
+        </div>
+
+        <!-- 候选内联展开（dir/git 多步第二步，§6.3 点3：安装卡体内直接展开 = demo 权威位） -->
+        <div v-if="discovered" data-testid="install-candidates" class="mt-[4px]">
+          <div class="flex min-h-[44px] items-center gap-[8px] border-t border-hairline px-[6px] py-2.5">
+            <span class="text-[length:var(--text-sm)] font-semibold text-neutral-fg">{{ t('settings.extension.discoverResultTitle', discovered.candidates.length, { named: { count: discovered.candidates.length } }) }}</span>
+            <span class="flex-1" />
+            <Button variant="ghost" class="h-[32px] px-[12px] text-[length:var(--text-sm)]" @click="onCancelInstall">{{ t('settings.extension.cancel') }}</Button>
+          </div>
+          <div v-if="!discovered.candidates.length" class="px-[6px] py-[8px] text-[length:var(--text-sm)] text-[color:var(--neutral-fg-2)]">{{ t('settings.extension.noCandidates') }}</div>
+          <!-- 候选行 = demo .srow 单行内联（chk + name + mono dirName + tag 版本 + desc 同行） -->
+          <Label
+            v-for="c in discovered.candidates"
+            :key="c.dirName"
+            class="flex min-h-[44px] cursor-pointer items-center gap-[8px] border-t border-hairline px-[6px] py-2.5"
+          >
+            <!--
+              候选多选（W2 D3 修复）：Checkbox 受控（selected Set 管理）。去掉内层 div @click，
+              仅靠 Label→Checkbox 转发 + update:model-value 单通道，避免双触发翻转抵消。
+            -->
+            <Checkbox
+              :model-value="selected.has(c.dirName)"
+              class="shrink-0"
+              @update:model-value="toggleCandidate(c.dirName)"
+            />
+            <span class="min-w-0 flex-1 truncate text-[length:var(--text-sm)] text-neutral-fg">{{ c.name }}</span>
+            <span class="min-w-0 truncate font-mono text-[length:var(--text-2xs)] text-[color:var(--neutral-fg-2)]">{{ c.dirName }}</span>
+            <span class="inline-flex h-[18px] shrink-0 items-center rounded-full bg-accent-soft px-[7px] text-[length:var(--text-2xs)] font-semibold text-accent">v{{ c.version }}</span>
+            <span class="min-w-0 flex-[2] truncate text-[length:var(--text-sm)] text-[color:var(--neutral-fg-2)]">{{ c.description }}</span>
+          </Label>
+          <div v-if="discovered.candidates.length" class="flex min-h-[44px] items-center gap-[8px] border-t border-hairline px-[6px] py-2.5">
+            <span class="text-[length:var(--text-sm)] text-[color:var(--neutral-fg-2)]">{{ t('settings.extension.selectedCount', { selected: selected.size, total: discovered.candidates.length }) }}</span>
+            <Button variant="ghost" size="dense" class="h-auto px-1.5 py-0.5 text-[length:var(--text-2xs)] text-neutral-mid hover:text-neutral-fg" @click="toggleSelectAll">
+              {{ isAllSelected ? t('settings.extension.unselectAll') : t('settings.extension.selectAll') }}
+            </Button>
+            <span class="flex-1" />
+            <Button variant="secondary" class="h-[32px] px-[12px] text-[length:var(--text-sm)]" :disabled="selected.size === 0 || installing" @click="onFinishInstall">
+              <Loader2 v-if="installing" class="animate-spin" />
+              {{ t('settings.extension.installSelected') }}
+            </Button>
+          </div>
+        </div>
       </div>
-    </section>
+    </GroupCard>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, ref, watch, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Loader2, AlertCircle, Check } from '@lucide/vue'
+import { Loader2, Check } from '@lucide/vue'
 import type { ExtensionDiscoveredPayload, RecommendedExtension } from '@taiji/shared'
+import { GroupCard } from '@taiji/ui/features/settings'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'

@@ -6,21 +6,21 @@
   单测 global.provide mock）。本子页只做入口装配（page-head + 返回按钮 + 挂载），不持有数据。
 -->
 <template>
-  <div class="flex flex-col gap-4">
+  <div class="flex flex-col">
     <header class="page-head">
       <div class="head-text">
         <h1 class="title">{{ t('settings.extension.contributionsTitle') }}</h1>
         <p class="desc">{{ t('settings.extension.contributionsDesc') }}</p>
       </div>
       <div class="head-actions">
+        <!-- [w3b] demo 页头钮语言 = .btn.secondary；本页返回为 real 功能钮，ghost 形态对齐 demo btn ghost（neutral-mid）+ icon 14px -->
         <Button
           variant="ghost"
-          size="dense"
-          class="rounded-sm text-[12px]"
+          class="h-[32px] px-[12px] text-[length:var(--text-sm)] [&_svg]:size-[14px]"
           data-testid="plugin-contributions-back"
           @click="emit('back')"
         >
-          <ArrowLeft class="size-3.5" />
+          <ArrowLeft />
           {{ t('common.back') }}
         </Button>
       </div>
