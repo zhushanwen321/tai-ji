@@ -137,10 +137,10 @@ export const MODAL_SURFACE_MANIFEST = [
     family: 'modal-dialog',
     kind: 'member',
     zAnchors: [
-      { file: 'packages/renderer/src/components/ui/dialog/DialogContent.vue', form: 'class-raw', literal: '1000', count: 2 },
+      { file: 'packages/renderer/src/components/ui/dialog/DialogContent.vue', form: 'class-token', literal: 'var(--z-modal)', count: 2 },
       { file: 'packages/ui/src/primitives/dialog/DialogContent.vue', form: 'class-raw', literal: '1000', count: 2 },
     ],
-    basis: '§6.7 表：DialogContent 确认框族（遮罩 + 面板各一 z 字面量；renderer/ui 双副本各 count=2）',
+    basis: '§6.7 表：DialogContent 确认框族（遮罩 + 面板各一 z 字面量；renderer 副本已令牌化 --z-modal，ui 副本保持裸数字形态）',
   },
   {
     id: 'companion-band',
@@ -163,20 +163,20 @@ export const MODAL_SURFACE_MANIFEST = [
     family: 'popover-layer',
     kind: 'member',
     zAnchors: [
-      { file: 'packages/renderer/src/components/ui/popover/PopoverContent.vue', form: 'class-raw', literal: '1100', count: 1 },
+      { file: 'packages/renderer/src/components/ui/popover/PopoverContent.vue', form: 'class-token', literal: 'var(--z-dialog)', count: 1 },
       { file: 'packages/ui/src/primitives/popover/PopoverContent.vue', form: 'class-raw', literal: '1100', count: 1 },
     ],
-    basis: '§6.7 表：弹出层族（reka DismissableLayer——Esc 让位、⌘W 不让位）',
+    basis: '§6.7 表：弹出层族（reka DismissableLayer——Esc 让位、⌘W 不让位；renderer 副本已令牌化 --z-dialog，ui 副本保持裸数字形态）',
   },
   {
     id: 'select-content',
     family: 'popover-layer',
     kind: 'member',
     zAnchors: [
-      { file: 'packages/renderer/src/components/ui/select/SelectContent.vue', form: 'class-raw', literal: '1100', count: 1 },
+      { file: 'packages/renderer/src/components/ui/select/SelectContent.vue', form: 'class-token', literal: 'var(--z-dialog)', count: 1 },
       { file: 'packages/ui/src/primitives/select/SelectContent.vue', form: 'class-raw', literal: '1100', count: 1 },
     ],
-    basis: '§6.7 表：弹出层族（Select 下拉）',
+    basis: '§6.7 表：弹出层族（Select 下拉；renderer 副本已令牌化 --z-dialog，ui 副本保持裸数字形态）',
   },
   {
     id: 'session-item-context-menu',
@@ -201,9 +201,9 @@ export const MODAL_SURFACE_MANIFEST = [
     family: 'toast',
     kind: 'member',
     zAnchors: [
-      { file: 'packages/renderer/src/components/ui/ToastContainer.vue', form: 'class-raw', literal: '9999', count: 1 },
+      { file: 'packages/renderer/src/components/ui/ToastContainer.vue', form: 'class-token', literal: 'var(--z-toast)', count: 1 },
     ],
-    basis: '§6.7 表：ToastContainer（非阻塞通知，不入让位族、只入 view 遮蔽族）',
+    basis: '§6.7 表：ToastContainer（非阻塞通知，不入让位族、只入 view 遮蔽族；M7b 令牌化 --z-toast=2000）',
   },
   {
     id: 'memory-pressure-bar',

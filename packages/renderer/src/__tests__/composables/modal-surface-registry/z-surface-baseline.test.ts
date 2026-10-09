@@ -50,7 +50,7 @@ describe('z 基线 ↔ 登记表全等对账（§6.7 完备性判据）', () => 
     expect(keys.some((k) => k.includes('SettingsModal.vue') && k.includes('var(--z-modal)'))).toBe(true)
     expect(keys.some((k) => k.includes('overlays/SearchModal.vue') && k.endsWith('|1000'))).toBe(true)
     expect(keys.some((k) => k.includes('CompanionBand.vue') && k.includes('var(--z-dialog)'))).toBe(true)
-    expect(keys.some((k) => k.includes('ToastContainer.vue') && k.endsWith('|9999'))).toBe(true)
+    expect(keys.some((k) => k.includes('ToastContainer.vue') && k.endsWith('|var(--z-toast)'))).toBe(true)
     // 三类字面形态 + CSS 声明形都在扫描面里（CSS 形现存 0 处，形本身仍须在场）
     for (const o of occurrences) expect(o.value).toBeGreaterThanOrEqual(1000)
   })
@@ -91,7 +91,7 @@ describe('z 基线 ↔ 登记表全等对账（§6.7 完备性判据）', () => 
     }
   })
 
-  it('豁免与低 z 面不入基线：HoverCard（z-[90]）/ PlanCommentPopover（--z-overlay: 20）零登记零扫描', () => {
+  it('豁免与低 z 面不入基线：HoverCard（--z-hovercard: 500 < 1000）/ PlanCommentPopover（--z-overlay: 20）零登记零扫描', () => {
     const keys = [...scannedCounts().keys()]
     expect(keys.some((k) => k.includes('HoverCard'))).toBe(false)
     expect(keys.some((k) => k.includes('PlanCommentPopover'))).toBe(false)

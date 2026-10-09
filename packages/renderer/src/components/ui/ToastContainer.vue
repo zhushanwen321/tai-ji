@@ -2,16 +2,20 @@
   <!--
     定位契约：absolute 右上角锚定最近 positioned 祖先（非视口 fixed）——右上角避开 composer，
     锚在 chat 主区（main-area）内时 drawer 打开随主区收窄左移，恒不遮 drawer。
+    [M7b demo 对照] demo ToastHost 为底部居中 fixed + composerH 避让——本容器定位不跟随：
+    改底部需引入 composer 高度数据通路（逻辑改动，超「纯样式」红线），且右上定位承担
+    「不遮 drawer」功能契约；卡片形态（底色/边框/圆角/阴影/堆叠 gap/进出场动效）已对齐 demo。
+    z-index = --z-toast(2000)（demo 梯队：toast 低于 banner；原裸数字 9999 档不在梯队）。
     挂载点两分支（互斥）：PanelContainer main-area（chat 主区）/ MainPanel
     （settings view 兜底）。
   -->
-  <div ref="containerRef" class="absolute inset-x-4 top-4 z-[9999] flex flex-col items-end gap-2.5 pointer-events-none">
+  <div ref="containerRef" class="absolute inset-x-4 top-4 z-[var(--z-toast)] flex flex-col items-end gap-2 pointer-events-none">
     <!-- RD-3#7 溢出折叠摘要：droppedCount 消费方——在列上限丢弃的通知以「还有 N 条」显形，
          不再只 console.warn 无 UI 留痕。可关闭（resetDropped 归零，给累计计数一个重置出口）。 -->
     <div
       v-if="droppedCount > 0"
       data-testid="toast-overflow-summary"
-      class="pointer-events-auto flex w-fit max-w-[min(360px,100%)] items-center gap-1.5 rounded-lg border border-border bg-surface py-1.5 pl-3 pr-1.5 text-[11.5px] text-neutral-dim shadow-lg"
+      class="pointer-events-auto flex w-fit max-w-[min(360px,100%)] items-center gap-1.5 rounded-lg border border-border bg-bg-elevated py-1.5 pl-3 pr-1.5 text-[11.5px] text-neutral-dim shadow-2"
     >
       <span data-testid="toast-overflow-text" class="select-text">{{ t('panel.message.toastDropped', { count: droppedCount }) }}</span>
       <Button
@@ -26,12 +30,12 @@
     <TransitionGroup
       tag="div"
       name="toast"
-      class="flex flex-col items-end gap-2.5"
+      class="flex flex-col items-end gap-2"
     >
     <div
       v-for="t in toasts"
       :key="t.id"
-      class="pointer-events-auto flex w-fit max-w-[min(360px,100%)] items-start gap-2.5 rounded-lg border border-border bg-surface py-2.5 pl-3 pr-2 shadow-lg"
+      class="pointer-events-auto flex w-fit max-w-[min(360px,100%)] items-start gap-2.5 rounded-lg border border-border bg-bg-elevated py-2.5 pl-3 pr-2 shadow-2"
       :class="toastClass(t.type)"
       @mouseenter="pause(t.id)"
       @mouseleave="resume(t.id)"
@@ -96,7 +100,7 @@
         <!-- 消息体：pre-line 渲染 \n，最多 5 行 -->
         <p
           :data-testid="`toast-message-${t.id}`"
-          class="whitespace-pre-line break-words text-[12.5px] leading-[1.55] line-clamp-5 select-text"
+          class="whitespace-pre-line break-words text-[length:var(--text-xs)] leading-[1.55] line-clamp-5 select-text"
           :class="textClass(t.type)"
         >{{ t.message }}</p>
       </div>
@@ -165,8 +169,11 @@ async function onJump(sessionId: string, toastId: number): Promise<void> {
 </script>
 
 <style scoped>
+/* 进出场动效对齐 demo ToastHost.vue：opacity + translateY(8px)，双向 --duration(200ms)
+   （原 enter 200/leave 120 不对称与 translateX(20px) 横滑形态随 demo 权威退役）。
+   toast-enter-from 与 leave-to 起止位同点：demo .toast-enter-from/.toast-leave-to 同款。 */
 .toast-enter-active { transition: opacity var(--duration) var(--ease), transform var(--duration) var(--ease); }
-.toast-leave-active { transition: opacity var(--duration-fast) var(--ease), transform var(--duration-fast) var(--ease); }
-.toast-enter-from { opacity: 0; transform: translateX(20px); }
-.toast-leave-to { opacity: 0; transform: translateX(20px); }
+.toast-leave-active { transition: opacity var(--duration) var(--ease), transform var(--duration) var(--ease); }
+.toast-enter-from { opacity: 0; transform: translateY(8px); }
+.toast-leave-to { opacity: 0; transform: translateY(8px); }
 </style>

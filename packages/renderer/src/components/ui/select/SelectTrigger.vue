@@ -7,8 +7,10 @@ import { ChevronDown } from '@lucide/vue'
 import { cn } from '@/lib/utils'
 
 /**
- * SelectTrigger —— 触发器，样式与 Input 对齐（h-9 / 圆角 / 边框 / 聚焦环）。
- * 右侧自带 ChevronDown。尺寸可通过 class 覆盖（如 h-8）。
+ * SelectTrigger —— 触发器，形态对齐 demo pages.css .pg-set .sel-btn：高 32px、
+ * 水平内边距 10px、边框 --border / 底 --bg-input、hover 边框提亮 --border-strong、
+ * chevron 10px --neutral-mid。焦点 = inset 中性边（demo 文本输入焦点语言，与
+ * Input/ComposerInput 同构，M4a 决 5 同款）。尺寸可通过 class 覆盖（如 h-8）。
  *
  * gap-1 + whitespace-nowrap：触发器内只有「值 + chevron」两块，gap-2(8px) 过宽；
  * nowrap 防止「High / Max」这类带空格文案在窄触发器（如 w-[88px]）里折行。
@@ -22,14 +24,14 @@ const delegatedProps = reactiveOmit(props, 'class')
     v-bind="delegatedProps"
     :class="
       cn(
-        'flex w-full items-center justify-between gap-1 whitespace-nowrap rounded-md border border-border bg-surface-2 px-3 py-2 text-[13px] text-neutral-fg outline-none transition-colors placeholder:text-neutral-mid focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent-ring disabled:cursor-not-allowed disabled:opacity-50 data-[placeholder]:text-neutral-mid',
+        'flex h-[32px] w-full items-center justify-between gap-1 whitespace-nowrap rounded-md border border-border bg-bg-input px-[10px] text-[length:var(--text-sm)] text-neutral-fg outline-none transition-colors hover:border-border-strong placeholder:text-neutral-mid focus-visible:shadow-[inset_0_0_0_1px_var(--border-strong)] disabled:cursor-not-allowed disabled:opacity-50 data-[placeholder]:text-neutral-mid',
         props.class,
       )
     "
   >
     <slot />
     <SelectIcon as-child>
-      <ChevronDown class="size-3.5 shrink-0 text-neutral-dim opacity-50 transition-transform duration-[var(--duration)] ease-[var(--ease)]" />
+      <ChevronDown class="size-[10px] shrink-0 text-neutral-mid transition-transform duration-[var(--duration)] ease-[var(--ease)]" />
     </SelectIcon>
   </SelectTrigger>
 </template>

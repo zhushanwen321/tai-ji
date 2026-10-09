@@ -734,9 +734,11 @@ textarea {
    用 transition（可中断 retarget）而非 keyframes（restart from zero）。
    ============================================================ */
 
-/* popover 族：缩放跟随触发点（reka 计算 --reka-popper-transform-origin） */
+/* popover 族：缩放跟随触发点（reka 计算 --reka-popper-transform-origin）。
+   缓动 = --ease-out：demo 浮层过渡唯一实测缓动（.sess-pop/.stats-pop dur-fast ease-out，
+   tokens.css E5 注：ease-out 是进方向档）；时长 --duration-fast 与 demo --dur-fast 同值。 */
 .reka-popover-transition {
-  transition: opacity var(--duration-fast) var(--ease), transform var(--duration-fast) var(--ease);
+  transition: opacity var(--duration-fast) var(--ease-out), transform var(--duration-fast) var(--ease-out);
   transform-origin: var(--reka-popper-transform-origin, center);
 }
 .reka-popover-transition[data-state='open'] {
@@ -754,9 +756,12 @@ textarea {
   }
 }
 
-/* dialog：居中缩放（modal 允许 center origin，transform 保留 translate 居中） */
+/* dialog：居中缩放（modal 允许 center origin，transform 保留 translate 居中）。
+   160ms = demo modal 族唯一动画档（pages.css pop-in/fade-in 0.16s + overlay.css
+   rmodal-in 0.16s 三处实测同值；real --duration 200ms 偏慢故此处写实测档值）。
+   遮罩与盒同档（demo .cmask 无独立过渡，取盒档保持同进同出）。 */
 .reka-dialog-transition {
-  transition: opacity var(--duration) var(--ease), transform var(--duration) var(--ease);
+  transition: opacity 160ms var(--ease), transform 160ms var(--ease);
 }
 .reka-dialog-transition[data-state='open'] {
   opacity: 1;
@@ -773,9 +778,9 @@ textarea {
   }
 }
 
-/* dialog 遮罩：纯 opacity */
+/* dialog 遮罩：纯 opacity（160ms 与盒同档，见 .reka-dialog-transition 注） */
 .reka-overlay-transition {
-  transition: opacity var(--duration) var(--ease);
+  transition: opacity 160ms var(--ease);
 }
 .reka-overlay-transition[data-state='open'] { opacity: 1; }
 .reka-overlay-transition[data-state='closed'] { opacity: 0; }

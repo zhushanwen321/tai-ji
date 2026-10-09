@@ -48,7 +48,10 @@ function onCancel(): void {
 
 <template>
   <Dialog :open="open" @update:open="emit('update:open', $event)">
-    <DialogContent hide-close class="max-w-[360px]">
+    <!-- 形态对齐 demo pages.css .pg-set .cpop（确认弹窗基准）：宽 min(360px) / 圆角 --r-md(8px)
+         / 标题→描述 8px（Header gap-y-2）/ 描述→按钮区 16px（网格 gap-[16px]，actions 自带
+         padding-top 退役） -->
+    <DialogContent hide-close class="max-w-[360px] gap-[16px] rounded-md">
       <DialogHeader>
         <DialogTitle class="flex items-center gap-2">
           <!-- v6 §6.5：danger 三角 icon 降 size-4 -->
@@ -64,7 +67,7 @@ function onCancel(): void {
       <!-- 消费方可放置额外内容（如错误反馈） -->
       <slot />
 
-      <div class="flex justify-end gap-2 pt-4">
+      <div class="flex justify-end gap-2">
         <Button variant="ghost" :disabled="props.loading" @click="onCancel">
           {{ props.cancelText }}
         </Button>
