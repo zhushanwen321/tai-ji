@@ -277,19 +277,20 @@ export async function createWindow(
     show: false,
     title: deps.isDev ? 'TaiJi dev' : 'TaiJi',
     // 跨平台窗口装饰（shell spec §五方案 X）。
-    // mac：hidden + trafficLightPosition 把红黄绿放到 macOS 原生左上角位置 {8,8}（圆点中线理论 y=14，实测 ≈y15.75）。
+    // mac：hidden + trafficLightPosition 把红黄绿放到 40px 卡头行（ui-replica M2，demo 40 档裁决）。
     //   不用 hiddenInset：inset 模式强制红黄绿水平内缩，trafficLightPosition.x 被系统忽略。
     //   hidden 模式下红黄绿仍由 OS 绘制（点击/全屏 hover 行为不变），位置可控。
-    //   原生位置：圆点 12px，顶理论 y=8 / 实测中线 y≈15.75（macOS 亚像素偏置，比理论 y14 低 ~2pt）；左缘 x=8 / 右缘 x=60（红 8~20 / 黄 28~40 / 绿 48~60）。
-    //   AppShell 是 p-1(4px) → aside 左缘 x=4，与红黄绿 x=8 有 4px 差（AGENTS.md 规则 11 明确该差值为预期）；
-    //   AppNavControls top-[5px] → 按钮中线 y=16（≈ 红黄绿实测中线 y15.75 对齐）；left-[72px]（右缘 60 + 12 呼吸）。
-    //   取舍：不再追求与 PanelHeader 中线(y=32)对齐——原生 mac 应用红黄绿在 titlebar 顶部、
-    //   工具栏按钮在其下方，二者本就不同高；折叠态 PanelHeader chrome 在 header 中线，与红黄绿有高度差属预期。
-    // win/linux：frame:false 应用自绘圆点 mimic mac（renderer TrafficLight.vue left-0/top-[4px]：aside 顶 y=4 → 圆点 y8 与 mac 同位；x=4 与 mac x8 有 4px 预期差（DESIGN §11））。
+    //   y=16：窗口上内边距 4 + 卡头半高 20 = 卡头几何中心 y24，扣除 macOS 渲染亚像素偏置 ~1.75pt
+    //   （{8,8} 时代实测：理论中线 y14 → 实测 y15.75）→ 推导 y≈16（demo 注释同源推导，真机校准项）。
+    //   x=8 保持：AppShell 左内边距 0 → aside 左缘 x0，win/linux 自绘圆点 left-2 = x8 与 mac 完全同位。
+    //   共线几何：卡头顶 y5（4 + chat 卡 1px 上边框）+ 40/2 = 中线 y25 = AppNavControls（top 9 + 32/2）
+    //   = 灯实测中线（16 + 6 + 1.75 ≈ 23.75，与 25 差 ~1px 属亚像素校准余量）。
+    // win/linux：frame:false 应用自绘圆点 mimic mac（renderer TrafficLight.vue left-2/top-[4px]：
+    //   aside 左缘 x0 → left-2 = 窗口 x8 与 mac 同位；aside 顶 y4 → top-4px = 窗口 y8 同位）。
     ...(process.platform === 'darwin'
       ? {
         titleBarStyle: 'hidden' as const,
-        trafficLightPosition: { x: 8, y: 8 },
+        trafficLightPosition: { x: 8, y: 16 },
       }
       : { frame: false }),
     webPreferences: {

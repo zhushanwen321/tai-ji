@@ -26,7 +26,7 @@
     <Transition name="drawer-slide-right">
     <aside
       v-if="isOpen"
-      class="relative flex h-full min-w-0 flex-col rounded-[10px] border border-border bg-surface shadow-[var(--shadow-1)]"
+      class="relative flex h-full min-w-0 flex-col rounded-[var(--radius-card)] border border-border bg-surface shadow-[var(--shadow-1)]"
       :aria-label="t('panel.sideDrawer.title')"
       data-testid="drawer-panel"
     >

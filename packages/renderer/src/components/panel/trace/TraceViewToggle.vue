@@ -1,14 +1,14 @@
 <template>
   <!--
     展示组件 · trace-view-toggle（session-trace D5a：SegmentedTab「对话 | Trace」）。
-    放 main panel header 右侧按钮组（demo .seg 同源：凹陷槽 bg-bg-input + p-[2px]，
-    active = bg-bg-elevated 中性浮起；v6 §3.4 tab 型范式）。
-    高度约束：header h-[22px]（traffic light 共线，traffic-light-layout.md）——本控件整体
-    h-[18px]，紧凑于 sidebar SegmentedTab（h-7，icon-only 4 段等宽不适用本场景）。
+    放 main panel header 右侧按钮组（ui-replica M2：demo .seg 40px 卡头档 —— 凹陷槽 bg-input +
+    r-sm 6px 槽 + 2px 内衬；按钮 h-26px（--hb-segbtn）/ 13px 字（--hb-segfs）/ 15px 图标（--hb-segicon）/
+    r-xs 4px；激活 = bg-elevated 中性浮起 + accent 1px 内描边 + 600 字重（demo 选中态单一范式），
+    未选中 hover 无底仅提字色。总高 30px 内收于 40px 卡头）。
     视图状态 per-session 分区（store view 字段，D5c：切换不重建数据，仅切渲染分支）。
   -->
   <div
-    class="flex shrink-0 gap-0.5 rounded-md bg-bg-input p-[2px] [-webkit-app-region:no-drag]"
+    class="flex shrink-0 gap-0.5 rounded-sm bg-bg-input p-[2px] [-webkit-app-region:no-drag]"
     data-testid="trace-view-toggle"
   >
     <Button
@@ -16,13 +16,15 @@
       :key="seg.value"
       variant="ghost"
       size="sm"
-      class="h-[14px] gap-1 rounded-sm px-2.5 text-[length:var(--text-2xs)]"
-      :class="modelValue === seg.value ? 'bg-bg-elevated text-neutral-fg hover:bg-bg-elevated' : 'text-neutral-dim hover:bg-transparent hover:text-neutral-fg'"
+      class="h-[26px] gap-1 rounded-[var(--radius-xs)] px-2.5 text-[length:var(--text-sm)]"
+      :class="modelValue === seg.value
+        ? 'bg-bg-elevated font-semibold text-neutral-fg shadow-[inset_0_0_0_1px_var(--accent)] hover:bg-bg-elevated'
+        : 'text-neutral-dim hover:bg-transparent hover:text-neutral-fg'"
       :data-testid="`trace-view-toggle-${seg.value}`"
       :aria-pressed="modelValue === seg.value"
       @click="emit('update:modelValue', seg.value)"
     >
-      <component :is="seg.icon" class="size-3 shrink-0" />
+      <component :is="seg.icon" class="size-[15px] shrink-0" stroke-width="1.8" />
       {{ seg.label }}
     </Button>
   </div>

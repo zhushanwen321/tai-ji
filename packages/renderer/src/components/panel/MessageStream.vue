@@ -159,17 +159,21 @@
     </div>
 
     <!-- 回到最新胶囊（N11/决策12）：滚动离底超过一屏即浮现（showJumpButton 距底几何判定），
-         点之平滑滚回并恢复锚定（force 同步清零距底快照 → 胶囊即时消失） -->
+         点之平滑滚回并恢复锚定（force 同步清零距底快照 → 胶囊即时消失）。
+         形态 = demo .to-latest：elevated 浮层底 + border-strong 边 + shadow-2 + 12px/600 字重 +
+         0.02em 字距 + hover 提边框色（无底色反馈）；浮现 = opacity + 6px 上浮（demo .18s，
+         取令牌 --duration）。[&_svg] important：Button 基类 [&_svg]:size-4 特异性更高，
+         锁 13px 图标（demo .to-latest .sicon）需 ! 前缀（TrafficLight 同款先例）。 -->
     <Transition name="fade">
       <Button
         v-if="showJumpButton"
         variant="secondary"
         size="sm"
-        class="absolute bottom-4 left-1/2 z-10 h-7 -translate-x-1/2 rounded-full bg-[var(--bg-elevated)] px-3 text-[length:var(--text-xs)] shadow-lg"
+        class="absolute bottom-4 left-1/2 z-10 h-7 -translate-x-1/2 rounded-full border-border-strong bg-[var(--bg-elevated)] px-3.5 text-[length:var(--text-xs)] font-semibold tracking-[0.02em] shadow-[var(--shadow-2)] hover:!border-neutral-dim hover:!bg-transparent"
         :title="t('panel.message.scrollToBottom')"
         @click="followToBottom(true, true)"
       >
-        <ChevronDown class="size-3.5" />
+        <ChevronDown class="!size-[13px]" stroke-width="2" />
         <span>{{ t('panel.message.scrollToBottom') }}</span>
       </Button>
     </Transition>
@@ -503,7 +507,8 @@ watch(
 /* [cw wave w3 / design §4.11] overflow-anchor:none 移到 scrollEl 的 inline :style
    （vue_rules_checker 不允许 scoped CSS 写非动画/伪元素属性，inline style 绕过检查且语义等价）。 */
 
-/* 回到最新胶囊过渡 */
-.fade-enter-active, .fade-leave-active { transition: opacity var(--duration-fast) ease; }
-.fade-enter-from, .fade-leave-to { opacity: 0; }
+/* 回到最新胶囊过渡（demo .to-latest：opacity + 6px 上浮；时长取令牌 --duration，
+   translate(-50%,…) 与胶囊 -translate-x-1/2 同含 x 分量，矩阵插值不跳位） */
+.fade-enter-active, .fade-leave-active { transition: opacity var(--duration) ease, transform var(--duration) ease; }
+.fade-enter-from, .fade-leave-to { opacity: 0; transform: translate(-50%, 6px); }
 </style>

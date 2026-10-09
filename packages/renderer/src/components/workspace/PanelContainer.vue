@@ -4,14 +4,15 @@
     v2：移除 split 后恒单 Panel（撑满），不再有单/双 panel 状态机。
     active panel 的 sessionId 跟随 session store.activeId（sidebar 选 session → 载入 panel）。
 
-    三卡化（2026-10-04 用户裁决，推翻 D2 一体化生长）：对话流 / 右抽屉 / 底抽屉三块内容区
-    各自持 float-panel 壳（border/radius/bg/shadow-[var(--shadow-1)]）；本组件与 MainPanel
-    只做布局，不持卡片视觉。PanelHeader 是对话流卡的卡头（2026-10-04 二轮裁决：header 只与
-    对话流构成整体，不横跨抽屉卡——右抽屉卡有自己的 L1 栏、底抽屉卡有自己的实例切换条）；
-    StatusBar 仍是横跨状态条。main 与 drawer 的宽度 handle 即卡缝本体（w-1 缝内 1px 视觉线，
-    hover/drag 染色）——drawer 关闭时 handle 随 v-if 消失，无缝无残线。卡间缝（横缝与纵缝）
-    统一 = a = 窗口边距 p-1 的 4px（三轮裁决：与左右边距一致，实际边距 4px 非叠加值）；
-    底抽屉卡与 StatusBar 间 4px。
+    三卡化（2026-10-04 用户裁决，推翻 D2 一体化生长）+ ui-replica M2 对齐 demo 卡壳：
+    对话流 / 右抽屉 / 底抽屉三块内容区各自持卡壳。demo 权威形态两档——对话卡 = bg-surface +
+    hairline 边 + 12px 圆角、无阴影（demo .chat-card）；右/底抽屉卡 = bg-surface + border 边 +
+    12px 圆角 + shadow-1（demo .drawer-card/.term-card）。PanelHeader 是对话流卡的卡头
+    （2026-10-04 二轮裁决：header 只与对话流构成整体，不横跨抽屉卡——右抽屉卡有自己的 L1 栏、
+    底抽屉卡有自己的实例切换条）；StatusBar 仍是横跨状态条。main 与 drawer 的宽度 handle 即卡缝
+    本体（w-1 = 4px 缝，缝内 1px 视觉线，hover/键盘焦点显、drag 染 accent）——drawer 关闭时
+    handle 随 v-if 消失，无缝无残线。卡间缝（横缝与纵缝）统一 = 窗口边距 4px（demo 三卡化裁决
+    「卡间缝 4px = 窗口边距同值」）；底抽屉卡与 StatusBar 间 4px。
 
     Drawer 协调（W4 drawer-shell-integration）：drawer 固定挂本容器（单实例），恒作 flex 子项与
     Panel 各占一半并排（mode='split'），贴右展开（direction='right'）。单 panel 下不再有 overlay
@@ -55,7 +56,7 @@
     <div ref="splitAreaEl" data-testid="split-area" class="relative flex min-h-0 flex-1 overflow-hidden">
       <div
         data-fs-scope="chat"
-        class="relative flex h-full min-w-0 flex-col overflow-hidden rounded-[10px] border border-border bg-surface shadow-[var(--shadow-1)]"
+        class="relative flex h-full min-w-0 flex-col overflow-hidden rounded-[var(--radius-card)] border border-hairline bg-surface"
         :class="splitTransitionClass"
         :style="mainAreaStyle"
         data-testid="main-area"
@@ -88,15 +89,16 @@
          内容显隐由 DrawerPanel 内部 aside v-if（Transition）承接。git 数据由本容器 provide，
          GitPanel inject。内容区按 activeTab 经默认 slot 注入桌面独占面板（C2 contract：该 tab
          无桌面面板时不注入 → DrawerPanel 空态 fallback 渲染）。 -->
-      <!-- 卡缝本体（三卡化）：8px 缝，视觉线居中（hover 显 / drag 染 accent）。
-           width 动画期间 transition:none 的语义保持（splitTransitionClass 不作用于本元素——
-           缝宽恒 8px，只有 main/drawer 两侧宽度动）。 -->
+      <!-- 卡缝本体（三卡化 + ui-replica M2 对齐 demo .split-handle）：4px 缝（= 窗口边距同值，
+           demo 三卡化裁决「卡间缝 4px = 窗口边距同值」），缝内 1px 视觉线居中（hover/键盘焦点显 /
+           drag 染 accent）。width 动画期间 transition:none 的语义保持（splitTransitionClass 不作用于
+           本元素——缝宽恒 4px，只有 main/drawer 两侧宽度动）。 -->
       <div
         v-if="drawerOpen"
         role="separator"
         aria-orientation="vertical"
         tabindex="0"
-        class="relative w-1 shrink-0 cursor-col-resize touch-none select-none"
+        class="relative w-1 shrink-0 cursor-col-resize touch-none select-none [&:focus-visible>div]:bg-border-strong"
         :data-state="isDragging ? 'drag' : undefined"
         data-testid="drawer-resize-handle"
         @pointerdown="onHandlePointerDown"
@@ -200,14 +202,14 @@
       :data-find-surface="bottomOpen ? 'bottom-drawer' : undefined"
     >
       <!-- 上沿手柄（三卡化）：命中区跨进卡上方缝（-top-1 h-1 覆盖 4px 缝，视觉线贴卡顶边）——
-           缝即拖拽区。卡间缝统一为窗口边距 a = p-1 的 4px（2026-10-04 三轮裁决：实际边距
-           4px，非叠加值）。 -->
+           缝即拖拽区。卡间缝统一为窗口边距 4px（demo 三卡化裁决：卡间缝 = 窗口边距同值），
+           键盘焦点显视觉线（demo .split-handle:focus-visible .shl）。 -->
       <div
         v-if="bottomOpen"
         role="separator"
         aria-orientation="horizontal"
         tabindex="0"
-        class="absolute inset-x-0 -top-1 z-10 h-1 cursor-row-resize touch-none select-none"
+        class="absolute inset-x-0 -top-1 z-10 h-1 cursor-row-resize touch-none select-none [&:focus-visible>div]:bg-border-strong"
         :data-state="isBottomDragging ? 'drag' : undefined"
         data-testid="bottom-drawer-resize-handle"
         @pointerdown="onBottomHandlePointerDown"
@@ -226,7 +228,7 @@
            事件顺序语义，无定时兜底）。Transition 直接子项用无 key 包装层：retry 的 :key 重挂
            留在内层，chunk 重试换件不经 leave/enter 过渡（chunk 失败占位链断言面不变）。 -->
       <Transition name="bottom-drawer-content">
-        <div v-if="bottomOpen" class="h-full overflow-hidden rounded-[10px] border border-border bg-surface shadow-[var(--shadow-1)]">
+        <div v-if="bottomOpen" class="h-full overflow-hidden rounded-[var(--radius-card)] border border-border bg-surface shadow-[var(--shadow-1)]">
           <TerminalView
             :key="terminalRetryKey"
             :session-id="panelSessionId"

@@ -5,16 +5,21 @@
     与 streaming 光标（迁移到 Turn.vue trace 容器末尾 streaming-tail）。
     fork/handoff useTurnActions 在内部调用，不冒泡。
   -->
-  <div v-if="lastAssistant" class="turn-summary pt-3">
+  <!-- 轮次边界（M3a，docs/todo/turn-boundary-rhythm.md 选项 2 落地）：本组件悬浮化——
+       h-0 不占流内高度，actions 绝对定位悬浮于本 turn 尾部（bottom-0，向上盖过 trace 末
+       24px，悬停经 DOM 祖先传递保持 group/ai 悬停态）。轮次边界唯一贡献 = Turn 根 pb-5
+       （20px，demo workbench.css .blk margin-bottom = --blk-gap）。默认 pointer-events-none，
+       悬停/焦点才可命中。 -->
+  <div v-if="lastAssistant" class="turn-summary relative h-0">
     <!--
-      hover actions（5 个并列按钮：复制 / 复制MD / 朗读 / fork / handoff）。
+      hover actions（5 个并列按钮：复制 / 复制MD / 朗读 / fork / handoff），悬浮位见根注释。
       fork/handoff 点击进 composer staging 模式：可输入文本带上发送，也可不输入直接提交（空提交≈
       原后台 fork/handoff，由 forkSessionAsk/handoff 空 content 守卫实现）。
       非 subagent session：5 按钮全显；subagent session：复制/复制MD/朗读（无 fork/handoff）。
     -->
     <div
       v-if="lastAssistant"
-      class="mt-1.5 flex items-center gap-0.5 opacity-0 transition-opacity duration-150 group-hover/ai:opacity-100 group-focus-within/ai:opacity-100"
+      class="absolute bottom-0 left-0 flex items-center gap-0.5 opacity-0 pointer-events-none transition-opacity duration-150 group-hover/ai:opacity-100 group-hover/ai:pointer-events-auto group-focus-within/ai:opacity-100 group-focus-within/ai:pointer-events-auto"
     >
       <!-- 复制（纯文本）-->
       <Button

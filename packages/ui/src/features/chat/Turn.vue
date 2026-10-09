@@ -8,8 +8,10 @@
     收编区（compacted/failed）由 TraceCompactorRow 承载（零 chrome，双态，D5）。
     折叠作用域（showTrace）仍由 scope wave D1 控制（isWorkingTurn || isExpanded）。
   -->
-  <!-- 根元素 content-col（居中 + 封顶 --content-max-w，720px 内容列原语）：整 turn 居中（spec §6.1 R4）。 -->
-  <div class="content-col flex flex-col gap-3.5 pb-5" :data-testid="`turn-${turn.index}`">
+  <!-- 根元素 content-col（居中 + 封顶 --content-max-w，720px 内容列原语）：整 turn 居中（spec §6.1 R4）。
+       轮次节奏（demo workbench.css 权威值）：gap-3 = 用户气泡→轮头 12px 紧凑档（.blk:has(+ .blk-compact)）；
+       pb-5 = 轮边界 20px（--blk-gap，唯一边界贡献——TurnSummary 悬浮化后 trace 无 mb、占位零高度）。 -->
+  <div class="content-col flex flex-col gap-3 pb-5" :data-testid="`turn-${turn.index}`">
     <!-- user 区：UserBubble 子组件 -->
     <UserBubble
       v-if="turn.user"
@@ -90,6 +92,8 @@
 
       <!-- trace 容器：恒渲染（v-if 下沉 Block 级）。mt-3 = TurnMeta→首块 12px（原由首块
            py-2 顶距参与合成的节奏，块 padding 退役后归容器单值，ui-optimize-unified 决策 4）。
+           无 mb（demo 轮次边界唯一贡献 = 根元素 pb-5 的 20px；原 mb-1 为 TurnSummary 流内
+           占位预留，悬浮化后移除——docs/todo/turn-boundary-rhythm.md 选项 2 落地）。
            折叠态（!showTrace）仅末位 text 正文（scope wave D1）；
            工作展开态（showTrace && isWorkingTurn）渲染 computeTraceWindow 窗口切片结果
              （末位 text + 进行中块 + 最近 W 个已完成过程块）；
@@ -97,7 +101,7 @@
              （design §3.1 交互6「回看就是全量」、G5「完成态与历史呈现不变」，窗口只作用于工作 turn）。
            收编行仅在「工作 turn 且（接管态 或 有收编/失败块）」时显示（design §3.1，D5 零 chrome）。
            takeover 态保留行以提供「恢复精简」回退入口（design 交互1），否则用户卡死在全展态。 -->
-      <div class="trace mt-3 mb-1 flex flex-col">
+      <div class="trace mt-3 flex flex-col">
         <TraceCompactorRow
           v-if="showTrace && isWorkingTurn && (takeover || traceWindow.compactedCount > 0 || traceWindow.failedCount > 0)"
           class="trace-compactor-row"
@@ -146,10 +150,10 @@
         :last-assistant="lastAssistant"
       />
 
-      <!-- 变更集卡（W10，ADR-0024） -->
+      <!-- 变更集卡（W10，ADR-0024）：mt-3 = 12px 过程行节奏档（demo --blk-gap-tight） -->
       <ChangeSetCard
         v-if="changeSetFileChanges.length > 0"
-        class="mt-2"
+        class="mt-3"
         :file-changes="changeSetFileChanges"
         :status="changeSetStatus"
         :session-id="sessionId"

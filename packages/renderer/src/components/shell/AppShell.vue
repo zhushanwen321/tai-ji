@@ -1,19 +1,17 @@
 <template>
   <!--
-    L0 Shell · zcode-demo 拓扑（shell/spec.md SSOT）
-    base 平铺（bg-bg）+ aside 透明融合 + main float-panel 浮起。
-    traffic light 安全区在 AsideRegion 内（padding-top:52px 恒定，spec §三）。
+    L0 Shell · demo Workbench.vue .app 拓扑（ui-replica M2：demo 为唯一视觉权威）。
+    base 平铺（bg-bg）+ aside 透明融合 + main 三卡浮起。
+    padding 对齐 demo .app { padding: 4px 4px 4px 0 }：上/右/下 4px，左 0（aside 透明融合直接贴窗口左缘，
+    侧栏内容边距由 Sidebar 自持）。traffic light 安全区在 AsideRegion 内（padding-top:44px 恒定）。
   -->
-  <!-- padding：p-1(4) 四周统一 4px（紧凑但有呼吸，上下左右对称）。
-       注意：左右 4 使 aside 左缘 x=4，与红黄绿 x=8 有 4px 差（红黄绿位置由 main trafficLightPosition 控制，见 window-factory）；
-       若要对齐需调 trafficLightPosition.x 8→4（main 改动，需重启 dev）。
+  <!-- gap 对齐 demo .app { gap: 8px }：aside 与主面板卡间 8px（折叠态 aside 归零，主面板左缘 = gap 8px，与 demo 折叠态同值）。
+       折叠态 !gap-0 的 !important 必须：gap-0 与 gap-2 同特异性，Tailwind 源码顺序 gap-0 先于 gap-2 生成，不加 ! 会被 gap-2 永久覆盖（死代码 bug）。
        圆角：rounded-[10px] 仅 mac（三平台圆角策略，跨平台窗口外壳设计 §6.2）——mac 系统圆角 + 应用内圆角共线保留；
        win/linux 是不透明方形窗口，应用内圆角只会产生四角色差小方块，故非 mac 不渲染该类（类绑定，拓扑测试两态断言）。
-       窗口侧不加任何圆角配置键（roundedCorners 默认即 true 是 no-op，已否决）。
-       折叠态 !gap-0：收起态 aside 归零，padding 保持 p-1（四周 4px，和展开一致）。
-       !important 必须：gap-0 与 gap-3 同特异性，Tailwind 源码顺序 gap-0 先于 gap-3 生成，不加 ! 会被 gap-3 永久覆盖（死代码 bug）。 -->
+       窗口侧不加任何圆角配置键（roundedCorners 默认即 true 是 no-op，已否决）。 -->
   <div
-    class="app-shell relative flex h-screen w-screen gap-3 overflow-hidden bg-bg p-1"
+    class="app-shell relative flex h-screen w-screen gap-2 overflow-hidden bg-bg py-1 pr-1"
     :class="[isMac ? 'rounded-[10px]' : '', sidebar.collapsed ? '!gap-0' : '']"
     data-testid="app-shell"
   >

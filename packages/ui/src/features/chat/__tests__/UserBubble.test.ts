@@ -57,8 +57,8 @@ function mountBubble(props: {
 describe('W4TC3: UserBubble 展示态', () => {
   it('user 气泡存在且含 content 文本', () => {
     const wrapper = mountBubble()
-    // 气泡容器：rounded + border + bg-surface-hover
-    const bubble = wrapper.find('.rounded-\\[14px_14px_4px_14px\\]')
+    // 气泡容器：rounded-lg（demo .user-bubble 12px 统一圆角）+ bubble-bg 底
+    const bubble = wrapper.find('.rounded-lg')
     expect(bubble.exists()).toBe(true)
     expect(bubble.classes()).toContain('bg-\[var\(--bubble-bg\)\]')
   })
@@ -67,7 +67,7 @@ describe('W4TC3: UserBubble 展示态', () => {
     // 测试环境无布局引擎，锁 DOM 机制面：宽度纪律与长令牌折行由这两个 class 承载，
     // 实际宽度/折行视觉随场景 7③ 真机走查验收。
     const wrapper = mountBubble()
-    const bubble = wrapper.find('.rounded-\\[14px_14px_4px_14px\\]')
+    const bubble = wrapper.find('.rounded-lg')
     expect(bubble.classes()).toContain('max-w-[min(72%,64ch)]')
     expect(bubble.classes()).toContain('[overflow-wrap:anywhere]')
   })
@@ -202,7 +202,7 @@ describe('[D12] UserBubble 混排 inline 化（is-mixed）', () => {
   }
 
   function bubble(wrapper: ReturnType<typeof mount>) {
-    return wrapper.find('.rounded-\\[14px_14px_4px_14px\\]')
+    return wrapper.find('.rounded-lg')
   }
 
   it('[text, skill, text] 混排 → 气泡带 is-mixed，badge 与前后 text 段同处气泡可见流', () => {
@@ -305,7 +305,7 @@ describe('[MF-1] UserBubble slash 段（归位序渲染 + live ≡ reload）', (
   }
 
   function bubbleText(wrapper: ReturnType<typeof mount>): string {
-    return wrapper.find('.rounded-\\[14px_14px_4px_14px\\]').text()
+    return wrapper.find('.rounded-lg').text()
   }
 
   it('含 slash 段 → 气泡渲染 `/name`（此前无分支，命令文本静默消失）', () => {

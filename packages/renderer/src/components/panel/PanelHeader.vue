@@ -1,65 +1,71 @@
 <template>
   <!--
-    展示组件 · panel-header（panel/spec.md zone ①）。
-    布局：状态点 + breadcrumb（项目▸会话▸分支，shell/spec §四）+ ... + [jsonl|对话/Trace|终端|drawer] + 更多。
-    breadcrumb 三段：项目名（cwd 末段）▸ 会话名 ▸ 分支名（mono+accent）。
-    popover 点击跳转 DEFERRED（shell/spec §八，属 G3 联调）；v1 纯展示。
-    v2：移除 split 后无 split/新建会话/关闭按钮（原双 panel 专属操作）。
-    更多菜单（G2-005 rename 等）DEFERRED hide。
-    拖拽区（shell/spec §七-6）：header 空白 -webkit-app-region:drag，交互元素 no-drag。
-    背景 = bg-surface（2026-10-08 用户观感裁决）：顶栏与对话流同层沉底连成一体，不再用浮层档。
-    高度对齐 trafficlight 行（AGENTS.md #11）：h-[22px] 使 header 与窗口红黄绿+nav 按钮行共线。
-      main-panel 顶=AppShell p-1(4)+border(1)=y5，h-22 → bottom y27 = AppNavControls 按钮 bottom（top-5+h-22），
-      内容中线 y16 ≈ 红黄绿实测中线 y15.75。右侧 drawer 按钮 size-22 适配（不溢出 22 高 header）。
-    折叠态 chrome 落位（sidebar/spec.md §收起态 + draft-collapsed-state.html 卡 A/B/C）：
-    sidebar 折叠时，收起/←/→ 三按钮迁入此 header 最左侧（chrome 槽位）。
-    安全区 padding：非全屏留 pl-[88px] 让位窗口左上 traffic-light（红黄绿原生 x8~60，header 内容起 x≈88，
-    chrome 按钮与红黄绿拉开约 28px 呼吸）；全屏态红黄绿 OS 隐藏，header pl-4（卡 B「h-nav 紧贴左」）。
-    唤回侧栏靠 ⌘B + 此 chrome 按钮（rail-restore 已移除）。
+    展示组件 · panel-header（ui-replica M2：demo Workbench.vue .panelhead 40px 档形态）。
+    demo 权威值（.app 变量 --hb-*）：卡头高 40（N16 单档终态）、内边距 0 14px、行 gap 8px、
+    基色 --mid、字号 14px、底边框 1px --hairline 与对话流分隔（bg 沉底与对话流连成一体）。
+    布局：状态图标 + 会话名 + 目录/分支次要行 + ... + [jsonl|对话/Trace|终端|drawer]。
+    折叠态：收起/←/→ 三钮迁入卡头最左 chrome 槽位（34 宽 × 30 高，demo .pch）+ 新建任务钮（demo .hdr-fold）；
+    非全屏 pl-[88px] 让位红黄绿（右缘 60），全屏态 pl-4。唤回侧栏靠 ⌘B + chrome 按钮。
+    中线几何：main-panel 顶 y4（AppShell 上内边距）+ chat 卡 1px 上边框 = 卡头顶 y5，
+    40px 高 → 中线 y25 = 窗口 chrome 行（AppNavControls top 9 + 32/2）与红黄绿（trafficLightPosition y16）共线。
+    拖拽区：header 空白 -webkit-app-region:drag，交互元素 no-drag。
+    背景 = bg-surface（沉底连体保留）。
   -->
   <header
-    class="flex h-[22px] flex-shrink-0 items-center gap-2 border-b border-border bg-surface px-3.5 [-webkit-app-region:drag]"
+    class="flex h-[40px] flex-shrink-0 items-center gap-2 border-b border-hairline bg-surface px-3.5 text-[length:var(--text-base)] text-neutral-mid [-webkit-app-region:drag]"
     :class="showChrome && !isFullscreen ? 'pl-[88px]' : 'pl-4'"
   >
-    <!-- 折叠态 P1 chrome 槽位：收起/←/→ 三按钮（sidebar/spec §收起态「导航能力迁移」）。
-         整组 no-drag（修折叠态浮层按钮被 drag 区拦截的 bug）；flex-shrink:0 让 breadcrumb 自动右移。 -->
+    <!-- 折叠态 chrome 槽位：收起/←/→ + 新建任务（demo .pch ×3 + .hdr-fold）。
+         组内 gap 8px（demo .panelhead gap）；整组 no-drag；flex-shrink:0 让会话名自动右移。 -->
     <div
       v-if="showChrome"
-      class="flex shrink-0 items-center gap-0.5 [-webkit-app-region:no-drag]"
+      class="flex shrink-0 items-center gap-2 [-webkit-app-region:no-drag]"
     >
       <Button
         variant="ghost"
         size="icon"
-        class="nav-btn h-[22px] w-[26px] rounded-md text-neutral-dim hover:bg-surface-hover hover:text-neutral-fg"
+        class="nav-btn h-[30px] w-[34px] rounded-sm text-neutral-dim hover:bg-surface-hover hover:text-neutral-fg"
         :title="sidebar.collapsed ? t('panel.header.toggleSidebarExpand') : t('panel.header.toggleSidebarCollapse')"
         :aria-label="t('panel.header.toggleSidebarAria')"
         data-testid="sidebar-collapse-toggle"
         @click="sidebar.toggleCollapsed()"
       >
-        <PanelLeftOpen v-if="sidebar.collapsed" class="size-[14px]" />
-        <PanelLeftClose v-else class="size-[14px]" />
+        <PanelLeftOpen v-if="sidebar.collapsed" class="size-[17px]" stroke-width="1.6" />
+        <PanelLeftClose v-else class="size-[17px]" stroke-width="1.6" />
       </Button>
       <Button
         variant="ghost"
         size="icon"
-        class="nav-btn h-[22px] w-[26px] rounded-md text-neutral-dim hover:bg-surface-hover hover:text-neutral-fg disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-neutral-dim"
+        class="nav-btn h-[30px] w-[34px] rounded-sm text-neutral-dim hover:bg-surface-hover hover:text-neutral-fg disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-neutral-dim"
         :disabled="!navigation.canBack"
         :title="t('panel.header.back')"
         :aria-label="t('panel.header.back')"
         @click="navigation.back()"
       >
-        <ArrowLeft class="size-[14px]" />
+        <ArrowLeft class="size-[17px]" stroke-width="1.8" />
       </Button>
       <Button
         variant="ghost"
         size="icon"
-        class="nav-btn h-[22px] w-[26px] rounded-md text-neutral-dim hover:bg-surface-hover hover:text-neutral-fg disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-neutral-dim"
+        class="nav-btn h-[30px] w-[34px] rounded-sm text-neutral-dim hover:bg-surface-hover hover:text-neutral-fg disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-neutral-dim"
         :disabled="!navigation.canForward"
         :title="t('panel.header.forward')"
         :aria-label="t('panel.header.forward')"
         @click="navigation.forward()"
       >
-        <ArrowRight class="size-[14px]" />
+        <ArrowRight class="size-[17px]" stroke-width="1.8" />
+      </Button>
+      <!-- 新建任务钮（demo .hdr-fold：折叠态卡头唯一新建入口，展开态随组隐藏） -->
+      <Button
+        variant="ghost"
+        size="icon"
+        class="h-[30px] w-[30px] rounded-sm text-neutral-dim hover:bg-surface-hover hover:text-neutral-fg"
+        :title="t('workspace.newTask')"
+        :aria-label="t('workspace.newTask')"
+        data-testid="panel-header-new-task"
+        @click="onNewTask"
+      >
+        <Plus class="size-[17px]" stroke-width="1.8" />
       </Button>
     </div>
     <component
@@ -69,33 +75,30 @@
       class="size-[13px] shrink-0"
       :class="[iconConfig.color, iconConfig.animation]"
     />
-    <!-- breadcrumb（shell/spec §四：项目 ▸ 分支，落点在 main-header 内）。
-         不显会话名（仅目录 + 分支两段），避免与目录视觉重复。
-         shrink + min-w-0：长目录+分支时截断优先发生于此，绝不盖右侧 3 按钮（按钮组 ml-auto + shrink-0）。 -->
-    <nav class="flex min-w-0 shrink items-center gap-1 [-webkit-app-region:no-drag]">
-      <ol class="flex min-w-0 items-center gap-1 text-[length:var(--text-xs)]">
-        <li class="flex min-w-0 items-center gap-1.5">
-          <Folder class="size-3 shrink-0 opacity-70 text-neutral-dim" />
-          <span
-            class="truncate font-mono text-[length:var(--text-xs)] font-semibold text-neutral-fg"
-            :title="`${t('panel.header.workingDir')}：${sessionDir}`"
-          >{{ dirName }}</span>
-        </li>
-        <template v-if="gitBranch">
-          <li aria-hidden="true" class="text-neutral-dim opacity-50">
-            <ChevronRight class="size-3 shrink-0" />
-          </li>
-          <li class="min-w-0">
-            <span
-              class="truncate font-mono text-[length:var(--text-2xs)] text-accent"
-              :title="`${t('panel.header.branch')}：${gitBranch}`"
-            >{{ gitBranch }}</span>
-          </li>
-        </template>
-      </ol>
-    </nav>
+    <!-- 会话名（demo 问题 7 裁决：卡头只显会话名）+ 目录/分支次要行（real 独有信息保留，
+         mono 小字弱化，demo crumb 语言：sep 用 faint）。长会话名截断优先发生于此，
+         绝不盖右侧按钮组（按钮组 ml-auto + shrink-0）。 -->
+    <div class="flex min-w-0 shrink items-center gap-1.5 [-webkit-app-region:no-drag]">
+      <span
+        class="truncate font-bold"
+        data-testid="panel-session-label"
+        :title="sessionLabel || t('workspace.newTask')"
+      >{{ sessionLabel || t('workspace.newTask') }}</span>
+      <span
+        v-if="dirName"
+        class="truncate font-mono text-[length:var(--text-2xs)] text-neutral-dim"
+        :title="`${t('panel.header.workingDir')}：${sessionDir}`"
+      >{{ dirName }}</span>
+      <template v-if="gitBranch">
+        <span aria-hidden="true" class="shrink-0 text-neutral-faint">/</span>
+        <span
+          class="truncate font-mono text-[length:var(--text-2xs)] text-neutral-dim"
+          :title="`${t('panel.header.branch')}：${gitBranch}`"
+        >{{ gitBranch }}</span>
+      </template>
+    </div>
 
-    <div class="ml-auto flex items-center gap-0.5 [-webkit-app-region:no-drag]">
+    <div class="ml-auto flex items-center gap-2 [-webkit-app-region:no-drag]">
       <!-- session JSONL 文件名（id 前 8 位 + .jsonl）：点击复制磁盘真实绝对路径。
            路径为空（pi 延迟写入窗口，规则 #6）时不渲染。放右侧按钮组最前。
            [U7] overlay 移除后恒用主 sessionFile（不再有 overlaySessionFile 两态）。 -->
@@ -131,18 +134,18 @@
            容器开关同区，位于右侧抽屉开关左边）。恒显（不随折叠态 chrome 迁移、不随 sessionId
            消失——landing 态也开终端区，与原 StatusBar 按钮行为对齐）。 -->
       <TerminalToggleButton />
-      <!-- SideDrawer toggle（always-visible）。
-           非折叠态显此按钮；折叠态 chrome 按钮组已含侧栏切换。 -->
+      <!-- SideDrawer toggle（always-visible）。demo 形态：30×30 钮 + 17px 图标（--hb-btn/--hb-icon），
+           开态无选中视觉（demo 选中态范式不含卡头开关钮），开关反馈由抽屉面板本身承担。 -->
       <Button
         v-if="!showChrome"
         variant="ghost"
         size="icon"
-        class="size-[22px] rounded-md text-neutral-mid hover:bg-surface-hover hover:text-neutral-fg [-webkit-app-region:no-drag]"
+        class="size-[30px] rounded-sm text-neutral-dim hover:bg-surface-hover hover:text-neutral-fg [-webkit-app-region:no-drag]"
         data-testid="drawer-toggle"
         :title="t('panel.sideDrawer.title')"
         @click="emit('toggleDrawer')"
       >
-        <PanelRight class="size-[15px]" />
+        <PanelRight class="size-[17px]" stroke-width="1.6" />
       </Button>
       <!-- 三点更多 ⋯（G2-005 rename 等）全 DEFERRED，按 G3-002 hide 规则不显示 -->
     </div>
@@ -153,10 +156,11 @@
  
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Folder, ChevronRight, PanelLeftOpen, PanelLeftClose, PanelRight, ArrowLeft, ArrowRight, RefreshCw, ArrowUpCircle, Hourglass, Wrench, Zap, CheckCircle2, Ban, AlertCircle, FileText, Check } from '@lucide/vue'
+import { PanelLeftOpen, PanelLeftClose, PanelRight, ArrowLeft, ArrowRight, Plus, RefreshCw, ArrowUpCircle, Hourglass, Wrench, Zap, CheckCircle2, Ban, AlertCircle, FileText, Check } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import { useNavigationStore } from '@/stores/navigation'
 import { useSidebarStore } from '@/stores/sidebar'
+import { useSidebar } from '@/composables/features/sidebar/useSidebar'
 import { usePlatformChrome } from '@/composables/effects/usePlatformChrome'
 import { useCopy } from '@/composables/panel/useCopy'
 import TerminalToggleButton from './TerminalToggleButton.vue'
@@ -186,16 +190,21 @@ const emit = defineEmits<{
 const { t } = useI18n()
 const navigation = useNavigationStore()
 const sidebar = useSidebarStore()
+const { newSession } = useSidebar()
 const { isFullscreen } = usePlatformChrome()
 // session-trace：视图态读 store 当前分区（分区键 focusedSessionId == props.sessionId，单 panel 恒真）
 const { partition: tracePartition } = useSessionTrace()
 
+/** 折叠态新建任务钮（demo .hdr-fold）：复用 sidebar 新建任务流（landing/会话创建统一入口）。 */
+async function onNewTask(): Promise<void> {
+  await newSession()
+}
+
 /**
- * 折叠态 chrome 落位判据（draft-collapsed-state.html 卡 A/B/C + sidebar/spec §收起态）：
- * sidebar 折叠 → 收起/←/→ 三按钮迁入此 header。
- * v2：单 panel 恒 P1，不再需要 isFirstPanel 判据。
+ * 折叠态 chrome 槽位判据：sidebar 折叠 → 收起/←/→ + 新建任务迁入此 header（demo .app.folded
+ * .panelhead .pch { display:inline-flex } 同语义）。v2：单 panel 恒 P1，不再需要 isFirstPanel 判据。
  * 安全区 padding 由 template 的 `showChrome && !isFullscreen` 二级判断：
- * 非全屏留 pl-[88px] 让位 traffic-light（红黄绿 x16~68）；全屏（卡 B）红黄绿 OS 隐藏，header pl-4 不让位。
+ * 非全屏留 pl-[88px] 让位 traffic-light（红黄绿 x8~60）；全屏红黄绿 OS 隐藏，header pl-4 不让位。
  */
 const showChrome = computed(() => sidebar.collapsed)
 

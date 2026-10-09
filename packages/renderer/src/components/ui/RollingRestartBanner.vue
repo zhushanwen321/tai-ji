@@ -6,7 +6,9 @@
     重连/刷新不丢）。
     挂载点 AppShell（连接后主界面；restarting 全屏过渡态由 App.vue 承接，横幅无需在场）。
     **横幅唯一性（D5「同一时刻只有一条横幅」）**：z-[10000] 顶部同位唯一横幅
-    （不透明 bg-surface 完整覆盖下层同位元素）。
+    （不透明完整覆盖下层同位元素）。
+    形态 = demo 浮层语言（ui-replica M2）：bg-elevated 浮层底 + border-strong 硬边界 +
+    shadow-2 + 12px 圆角（radius-card；demo 弹层主流 r-lg 档），功能与状态机不动。
   -->
   <Transition name="rolling-restart-banner">
     <div
@@ -15,7 +17,7 @@
       data-testid="rolling-restart-banner"
       :data-phase="phase.kind"
       role="alert"
-      class="fixed left-1/2 top-3 z-[10000] flex max-w-[min(560px,calc(100vw-6rem))] -translate-x-1/2 items-start gap-2 rounded-[var(--radius)] border border-border bg-surface py-2 pl-3 pr-2 shadow-lg"
+      class="fixed left-1/2 top-3 z-[10000] flex max-w-[min(560px,calc(100vw-6rem))] -translate-x-1/2 items-start gap-2 rounded-[var(--radius-card)] border border-border-strong bg-[var(--bg-elevated)] py-2 pl-3 pr-2 shadow-[var(--shadow-2)]"
     >
       <component :is="toneIcon" data-testid="rolling-restart-icon" class="mt-0.5 size-3.5 shrink-0" :class="toneClass" aria-hidden="true" />
       <p data-testid="rolling-restart-text" class="select-text break-words text-[12.5px] leading-snug text-neutral-fg">

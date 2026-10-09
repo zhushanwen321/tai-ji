@@ -139,7 +139,7 @@ bash scripts/validate-runtime-bundle.sh    # runtime bundle 深度验证
 4. `v-model`（禁 `:value` + `@input`）；独立数据源用 `Promise.allSettled`
 5. 禁止硬编码颜色 / 魔数间距（用 CSS 变量与标准 Tailwind scale）
 6. border-radius 遵循 v3 tokens（`--radius-sm:3px` 默认 / `--radius:8px` / `--radius-lg:12px`，ADR-0019）
-7. **窗口顶部 traffic light 布局**：v3 刻意调整形态（非 v6 demo），全部数值（AppShell p-1 / pt-11 / {x:8,y:8} / h-[22px] 共线等）见 [DESIGN.md §11](docs/DESIGN.md)——改窗口顶部 UI 前必读
+7. **窗口顶部 traffic light 布局**：demo 40px 卡头档拓扑，全部数值（AppShell py-1 pr-1 左 0 / gap-2 / pt-11 / trafficLightPosition {x:8,y:16} / h-[40px] 三者中线 y25 共线等）见 [DESIGN.md §11](docs/DESIGN.md)——改窗口顶部 UI 前必读
 8. **reka ScrollAreaViewport 默认 `overflow-x: hidden` [HISTORICAL]**：横向滚动需给 `ScrollArea` 传 `horizontal` prop（`!overflow-x-auto` 覆盖内联；`:deep()` 会破坏 reka Root 渲染顺序）
 
 自动化检查：taste-lint（no-native-html / no-emoji / prefer-v-model 等，`pnpm run lint` + pre-commit）· vue_rules_checker.py（行数/选择器/Tab/原生元素，pre-commit）。

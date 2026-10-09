@@ -1,11 +1,14 @@
 <template>
   <!--
-    TurnMeta：回合状态条（状态字 + elapsed + 区间 + tokens + 思考/工具计数，单行）。
-    从 Turn.vue 拆出。全行统一形态：各段 mono + text-2xs + text-neutral-dim，以 `·` 分隔，
-    无底色无边框无图标；accent 仅用于交互指示（streaming spinner / chevron 展开态）。
-    （用户裁决 2026-10-06）
+    TurnMeta：回合状态条（demo workbench.css .workmeta 轮头形态，M3a 视觉复刻对齐）。
+    从 Turn.vue 拆出。demo 权威形态：mono + 12px（--text-xs）+ dim 单行，段间 10px gap，
+    内容左缘 x=0（Button px-0）；「已工作」的时长值 = mid 色 + fw-mid 强调（demo .workmeta b）；
+    思考/工具计数 = chipn chips（hairline 边框 + 6px 圆角 + 1×8 padding + mid 字 + bg-input 底，
+    demo .workmeta .chipn）；无分隔线（demo 轮次分隔 = 纯 20px 留白，无 hr）。
+    （原「纯文本段无底色无边框」形态 = 用户裁决 2026-10-06，被 M3a demo 权威覆盖，登记于
+    .tmp/ui-replica/reports/m3a-turn-skeleton.md 决策清单）
   -->
-  <!-- turn-meta + hr wrapper（sticky 已移除：负 margin 覆盖 scrollEl padding-top 的技巧不可靠——
+  <!-- turn-meta wrapper（sticky 已移除：负 margin 覆盖 scrollEl padding-top 的技巧不可靠——
        working 态贴顶时与 scrollEl 顶部有间隔，滚过来的文字从 gap 漏出。改回正常文档流）。
        [u6a] v-if 收窄回 assistants.length > 0：dispatching 空窗期的空 turn（user 已发、
        assistant 未到）不再渲染 TurnMeta 占位——「思考中」指示已迁对话流尾部 ActivityStrip
@@ -14,69 +17,71 @@
     v-if="turn.assistants.length > 0"
     :data-testid="`turn-meta-${turnIndex}`"
   >
-    <Button
-      variant="ghost"
-      size="sm"
-      class="turn-meta h-auto w-fit items-center justify-start gap-2.5 self-start px-1 py-1 font-mono font-normal text-[length:var(--text-2xs)] transition-colors duration-[var(--duration-fast)] ease-[var(--ease)]"
-      :class="[
-        !turn.hasFoldable
-          ? 'cursor-default hover:text-neutral-mid'
-          : 'cursor-pointer hover:text-neutral-fg',
-      ]"
-      :disabled="isWorkingTurn || !turn.hasFoldable"
-      @click="toggle(turnKey)"
-    >
-      <!-- streaming 态：spinner（更显眼的流式生成指示），替代原脉冲点。仅文本流式生成时转（A 类） -->
-      <!-- [u6a] dispatching 占位态（isPendingPlaceholder）已删除：空 turn 不再渲染 TurnMeta
-           （v-if 收窄），「思考中」指示迁 ActivityStrip thinking 行；spinner 只跟 isStreaming -->
-      <!-- 配色恒 accent：曾按期长分 warn(5min)/danger(30min) 三档警示，已删（2026-09）——
-           时长改为整 turn 墙钟（含工具执行/等待）后，等构建/等子代理/等用户回答都会触红，
-           颜色不再是「生成异常」信号（唯一可靠的信号是时长数字本身） -->
-      <Loader2 v-if="isStreaming" class="size-3.5 shrink-0 animate-spin text-accent" />
-      <!-- 状态段（状态字 + elapsed）：与区间/tokens/计数段同构——恒 text-neutral-dim，
-           working 态不再染 accent（用户裁决 2026-10-06） -->
-      <span class="tm-status font-mono text-[length:var(--text-2xs)] text-neutral-dim tabular-nums">
-        <span class="lbl">{{ statusLabel }}</span>
-        <span class="elapsed ml-1">{{ elapsed }}</span>
-      </span>
-      <!-- Turn 区间（整个 agent-turn 起止时刻）：进行中右端显「（进行中）」，
-           定格后显末次产出结束时刻 -->
-      <span v-if="startedAt > 0" class="tm-range ml-1.5 font-mono text-[length:var(--text-2xs)] text-neutral-dim tabular-nums">
-        · {{ formatClock(startedAt) }} → {{ isLive ? t('panel.message.inProgress') : formatClock(endedAt) }}
-      </span>
-      <!-- 已生成 token 数（B1 完成态定格常驻；口径 = 本 turn 已上报的真实 usage.outputTokens
-           之和，含正文 + 思考 + 工具参数——pi usage 原语义，无需按 block 分类）：
-           TurnMeta 是 per-turn 事实聚合位，tokens 与 elapsed/时刻区间同族事实。
-           流式期的当前调用尚无 usage → 显示已完成段的真实累计（收口时跳到完整值）；
-           全程无近似值（用户裁决 A：不在真值之外显示估算）。0 不渲染（零内容 turn 不占行宽） -->
-      <span
-        v-if="generatedTokens > 0"
-        data-testid="turn-meta-tokens"
-        class="tm-tokens ml-1.5 font-mono text-[length:var(--text-2xs)] text-neutral-dim tabular-nums"
-      >· {{ t('panel.message.generatedTokens', { tokens: generatedTokens.toLocaleString() }) }}</span>
-      <!-- chevron 紧跟耗时（展开/收起 trace 入口），在 badge 之前 -->
-      <ChevronRight
-        v-if="turn.hasFoldable && !isWorkingTurn"
-        class="chev size-[9px] text-neutral-dim transition-transform duration-[var(--duration)] ease-[var(--ease)]"
-        :class="isExpanded(turnKey) ? 'rotate-90 text-accent' : ''"
-      />
-      <!-- 思考/工具计数段：与区间/tokens 段同构的纯文本段（mono text-2xs neutral-dim，
-           `·` 起头，无底色无圆角无图标）——用户裁决 2026-10-06 -->
-      <span v-if="thinkCount > 0" class="badge badge-think ml-1.5 font-mono text-[length:var(--text-2xs)] text-neutral-dim tabular-nums">· {{ t('panel.message.thinkCount', { count: thinkCount }) }}</span>
-      <span v-if="toolCount > 0" class="badge badge-tool ml-1.5 font-mono text-[length:var(--text-2xs)] text-neutral-dim tabular-nums">· {{ t('panel.message.toolCount', { count: toolCount }) }}</span>
-    </Button>
-    <hr class="border-0 border-t border-border" />
+    <!-- 轮头行：flex 容器承载运行态呼吸弧 + Button。呼吸弧悬挂在 Button 外——Button 基类
+         [&_svg]:size-4 会覆盖注入 svg 的尺寸，弧规格（demo run-ic 15px accent）由外层 span 承载。 -->
+    <div class="flex items-center gap-2.5">
+      <!-- eslint-disable-next-line vue/no-v-html -- hardcoded constant from block-icon.ts -->
+      <span v-if="isStreaming" class="inline-block size-[15px] shrink-0 text-accent animate-loader-spin" v-html="RUNNING_LOADER_SVG" />
+      <Button
+        variant="ghost"
+        size="sm"
+        class="turn-meta h-auto w-fit items-center justify-start gap-2.5 self-start px-0 py-1 font-mono font-normal text-[length:var(--text-xs)] transition-colors duration-[var(--duration-fast)] ease-[var(--ease)]"
+        :class="[
+          !turn.hasFoldable
+            ? 'cursor-default hover:text-neutral-mid'
+            : 'cursor-pointer hover:text-neutral-fg',
+        ]"
+        :disabled="isWorkingTurn || !turn.hasFoldable"
+        @click="toggle(turnKey)"
+      >
+        <!-- 运行态指示 = 外层呼吸弧（demo run-ic 规格）；原 Loader2 spinner 已换（wave3 起
+             chat 域 loader 统一呼吸弧，TurnMeta 是最后一处 Loader2 残留） -->
+        <!-- 状态段（状态字 + elapsed）：状态字恒 text-neutral-dim；elapsed = demo .workmeta b
+             强调档（mid 色 + fw-mid）。 -->
+        <span class="tm-status font-mono text-[length:var(--text-xs)] text-neutral-dim tabular-nums">
+          <span class="lbl">{{ statusLabel }}</span>
+          <span class="elapsed ml-1 text-neutral-mid [font-weight:var(--fw-mid)]">{{ elapsed }}</span>
+        </span>
+        <!-- Turn 区间（整个 agent-turn 起止时刻）：进行中右端显「（进行中）」，
+             定格后显末次产出结束时刻 -->
+        <span v-if="startedAt > 0" class="tm-range ml-1.5 font-mono text-[length:var(--text-xs)] text-neutral-dim tabular-nums">
+          · {{ formatClock(startedAt) }} → {{ isLive ? t('panel.message.inProgress') : formatClock(endedAt) }}
+        </span>
+        <!-- 已生成 token 数（B1 完成态定格常驻；口径 = 本 turn 已上报的真实 usage.outputTokens
+             之和，含正文 + 思考 + 工具参数——pi usage 原语义，无需按 block 分类）：
+             TurnMeta 是 per-turn 事实聚合位，tokens 与 elapsed/时刻区间同族事实。
+             流式期的当前调用尚无 usage → 显示已完成段的真实累计（收口时跳到完整值）；
+             全程无近似值（用户裁决 A：不在真值之外显示估算）。0 不渲染（零内容 turn 不占行宽）。
+             值内加粗（demo `已生成 <b>7,705</b> tokens`）受 i18n 单串模板边界限制未做，登记报告。 -->
+        <span
+          v-if="generatedTokens > 0"
+          data-testid="turn-meta-tokens"
+          class="tm-tokens ml-1.5 font-mono text-[length:var(--text-xs)] text-neutral-dim tabular-nums"
+        >· {{ t('panel.message.generatedTokens', { tokens: generatedTokens.toLocaleString() }) }}</span>
+        <!-- chevron 紧跟耗时（展开/收起 trace 入口），在 badge 之前 -->
+        <ChevronRight
+          v-if="turn.hasFoldable && !isWorkingTurn"
+          class="chev size-[9px] text-neutral-dim transition-transform duration-[var(--duration)] ease-[var(--ease)]"
+          :class="isExpanded(turnKey) ? 'rotate-90 text-accent' : ''"
+        />
+        <!-- 思考/工具计数段：chipn chips（demo .workmeta .chipn：hairline 边框 + 6px 圆角 +
+             1×8 padding + mid 字 + bg-input 底），段间距由外层 flex gap 10px 承担（无 ml） -->
+        <span v-if="thinkCount > 0" class="badge badge-think inline-flex items-center gap-[5px] rounded-sm border border-hairline bg-bg-input px-2 py-px font-mono text-[length:var(--text-xs)] text-neutral-mid tabular-nums">{{ t('panel.message.thinkCount', { count: thinkCount }) }}</span>
+        <span v-if="toolCount > 0" class="badge badge-tool inline-flex items-center gap-[5px] rounded-sm border border-hairline bg-bg-input px-2 py-px font-mono text-[length:var(--text-xs)] text-neutral-mid tabular-nums">{{ t('panel.message.toolCount', { count: toolCount }) }}</span>
+      </Button>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import { ChevronRight, Loader2 } from '@lucide/vue'
+import { ChevronRight } from '@lucide/vue'
 import { useI18n } from 'vue-i18n'
 // primitives 直接路径（不经 @taiji/ui 顶层 barrel）：chat 组件被 barrel 再导出，
 // barrel 自引用会闭合一族循环依赖环（详见 BashOutputBlock.vue 同款注释）
 import { Button } from '../../primitives/button'
 import type { MessageTurn } from '@taiji/core/domain/chat'
+import { RUNNING_LOADER_SVG } from './block-icon'
 import { useChatViewDeps } from './chat-view-deps'
 import { formatClock } from './format-utils'
 

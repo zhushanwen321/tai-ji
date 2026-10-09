@@ -94,7 +94,7 @@ export default {
         DEFAULT: '8px', // 按钮/卡片默认档（对应 --radius）
         md: '8px',
         lg: '12px', // 面板/弹层（对应 --radius-lg）
-        card: '10px', // v6 新增：卡片容器（对应 --radius-card）
+        card: 'var(--radius-card)', // 卡片容器（真值源 style.css --radius-card = 12px，此处只映射）
       },
       boxShadow: {
         1: 'var(--shadow-1)',
