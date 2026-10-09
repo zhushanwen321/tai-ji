@@ -37,6 +37,19 @@ vi.mock('@/api', () => ({
     getTraceEntries: apiMock.getTraceEntries,
     fetchCurrentSystemPrompt: apiMock.fetchCurrentSystemPrompt,
   },
+  // PanelHeader 挂载链引入 useChat（chat 域门面），模块加载期要求 chat 导出存在；
+  // 本测试不发消息，成员全 stub 即可（成员清单 = useChat 的 ChatApiPort 消费面）
+  chat: {
+    send: vi.fn(),
+    submitDelivery: vi.fn(),
+    abort: vi.fn(),
+    compact: vi.fn(),
+    bash: vi.fn(),
+    abortBash: vi.fn(),
+    getHistory: vi.fn(),
+    streamSubscribe: vi.fn(),
+    cancelDelivery: vi.fn(),
+  },
 }))
 
 // ── mock useTraceJump（TraceView 溯源链接只验证事件编排链路，真实编排归 useTraceJump.test.ts）──

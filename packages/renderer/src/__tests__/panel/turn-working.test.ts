@@ -205,8 +205,9 @@ describe('Turn working 态 · 完成复位 + elapsed live', () => {
     })
     expect(wrapper.find('.turn-meta').exists()).toBe(true)
     expect(wrapper.find('.lbl').text()).toBe('工作中')
-    // working 态用 spinner（Loader2 animate-spin），不再用 working-dot 脉冲点
-    expect(wrapper.find('.turn-meta .animate-spin').exists()).toBe(true)
+    // working 态 loader 统一呼吸弧（RUNNING_LOADER_SVG + animate-loader-spin 容器；M3a demo 复刻
+    // 后弧挂 Button 外层 wrapper——.turn-meta 类在 Button 上，弧是其兄弟，故按 wrapper testid 定位）
+    expect(wrapper.find('[data-testid^="turn-meta-"] .animate-loader-spin .ld-arc').exists()).toBe(true)
     expect(wrapper.find('.chev').exists()).toBe(false)
     expect(wrapper.find('.trace').exists()).toBe(true)
   })
@@ -863,7 +864,7 @@ describe('Turn · subagent 虚拟 session 轮终 running-resumable 不再卡 str
       isSessionActive: sessionActive.value,
     })
     expect(wrapper.find('.lbl').text()).toBe('工作中')
-    expect(wrapper.find('.turn-meta .animate-spin').exists()).toBe(true)
+    expect(wrapper.find('[data-testid^="turn-meta-"] .animate-loader-spin .ld-arc').exists()).toBe(true)
   })
 
   it('轮终到达时派生翻转：真 running → 轮终（running + result）→ forceWorking true → false（视图复位）', async () => {

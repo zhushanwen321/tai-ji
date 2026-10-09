@@ -121,8 +121,9 @@ describe('U7 首屏冒烟：fork 按钮恒渲染（门控已放宽）', () => {
     // fork 统一为 fork-ask-btn（与复制/复制MD/朗读/handoff 并列同行）
     expect(wrapper.findAll('[data-testid="fork-background-btn"]').length).toBe(0)
     expect(wrapper.findAll('[data-testid="fork-ask-btn"]').length).toBe(1)
-    // fork 按钮与复制按钮在同一容器（action 行，5 个并列按钮：ai-voice-tts §5.1 朗读按钮加入后）
-    const actionRow = wrapper.find('.turn-summary .mt-1\\.5')
+    // fork 按钮与复制按钮在同一容器（action 行，5 个并列按钮：ai-voice-tts §5.1 朗读按钮加入后；
+    // M3a demo 复刻悬浮化后 action 行 = absolute bottom-0 容器，选择器随形态更新）
+    const actionRow = wrapper.find('.turn-summary .absolute.bottom-0')
     expect(actionRow.exists()).toBe(true)
     expect(actionRow.find('[data-testid="fork-ask-btn"]').exists()).toBe(true)
     expect(actionRow.findAll('button').length).toBe(5)
