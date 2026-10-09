@@ -79,22 +79,24 @@
       <!-- 列表（当前桶非空） -->
       <ScrollArea v-if="hasRows" class="min-h-0 flex-1">
         <div class="flex flex-col px-1.5">
-          <!-- bash 行：状态 icon + 命令 + 耗时 / pid · exit + 两段式终止（仅 running 行、仅 pin 态） -->
+          <!-- bash 行：状态 icon + 命令 + 耗时 / pid · exit + 两段式终止（仅 running 行、仅 pin 态）
+               ——行容器形态 = demo .tray-row（min-h 26 / r-sm / px 6 / 字 --mid、hover 提 --fg） -->
           <template v-if="kind === 'bash'">
             <div
               v-for="entry in bashRows" :key="entry.taskId"
-              class="group/item relative flex cursor-pointer select-none items-start gap-2 rounded-md px-2 py-1 transition-colors hover:bg-surface-hover"
+              class="group/item relative flex min-h-[26px] cursor-pointer select-none items-start gap-2 rounded-sm px-1.5 py-1 text-neutral-mid transition-colors hover:bg-surface-hover hover:text-neutral-fg"
               data-testid="tray-bash-row" :aria-label="`${statusText(entry)}: ${entry.command}`"
               @click="openBashTask(entry)" @mouseleave="killConfirm.clear()"
             >
-              <div class="mt-[6px] size-[7px] shrink-0" data-testid="tray-bash-icon" :title="statusText(entry)">
+              <div class="mt-[3px] size-[7px] shrink-0" data-testid="tray-bash-icon" :title="statusText(entry)">
                 <span v-if="iconOf(entry).shape === 'spinner'"
                   class="block size-[7px] animate-spin rounded-full border-[1.5px] border-accent border-t-transparent" />
                 <span v-else class="block size-[7px] rounded-full" :class="DOT_TONE_CLASS[iconOf(entry).tone]" />
               </div>
               <div class="min-w-0 flex-1">
-                <div class="flex min-w-0 items-center gap-1 text-[length:var(--text-xs)] leading-[1.35] text-neutral-fg">
-                  <span class="min-w-0 flex-1 truncate">{{ entry.command }}</span>
+                <!-- 命令行 = demo .bash-cmd（mono 10px）；主行字色继承行容器（--mid → hover --fg） -->
+                <div class="flex min-w-0 items-center gap-1 text-[length:var(--text-xs)] leading-[1.35]">
+                  <span class="min-w-0 flex-1 truncate font-mono text-[length:var(--text-3xs)]">{{ entry.command }}</span>
                   <span class="shrink-0 font-mono text-[length:var(--text-3xs)] leading-[1.35] text-neutral-dim">{{ elapsedLabel(entry) }}</span>
                 </div>
                 <div data-testid="tray-bash-meta"
@@ -116,11 +118,12 @@
             </div>
           </template>
 
-          <!-- subagent 行：引擎 icon + 状态点/spinner + agent + slug / turns · tokens · 耗时 / task 摘要 -->
+          <!-- subagent 行：引擎 icon + 状态点/spinner + agent + slug / turns · tokens · 耗时 / task 摘要
+               （行容器 = demo .tray-row 形态；名称字色继承 --mid → hover --fg） -->
           <template v-else-if="kind === 'subagent'">
             <div
               v-for="record in subagentRows" :key="record.subagentId"
-              class="group relative cursor-pointer select-none rounded-md px-2 py-1 transition-colors hover:bg-surface-hover"
+              class="group relative min-h-[26px] cursor-pointer select-none rounded-sm px-1.5 py-1 text-neutral-mid transition-colors hover:bg-surface-hover hover:text-neutral-fg"
               data-testid="tray-subagent-row"
               :title="record.slug ? record.agent + ' · ' + record.slug : record.agent"
               @click="openSubagentRow(record)" @mouseleave="cancelConfirm.clear()"
@@ -130,12 +133,12 @@
                   class="size-[13px] shrink-0 text-neutral-dim" data-testid="tray-subagent-engine-icon" />
                 <Loader2 v-if="isRunningSubagent(record)" data-testid="tray-subagent-spinner"
                   class="size-[13px] shrink-0 animate-spin text-accent" />
-                <span v-else class="size-2 shrink-0 rounded-full" :class="subagentDotClass(record)" />
-                <span class="min-w-0 flex-1 truncate text-[length:var(--text-xs)] font-medium leading-[1.35] text-neutral-fg">
+                <span v-else class="size-[7px] shrink-0 rounded-full" :class="subagentDotClass(record)" />
+                <span class="min-w-0 flex-1 truncate text-[length:var(--text-xs)] leading-[1.35]">
                   {{ displayAgentName(record.agent) }}
                 </span>
                 <span v-if="record.slug" data-testid="tray-subagent-slug"
-                  class="shrink-0 font-mono text-[length:var(--text-3xs)] text-neutral-mid">{{ record.slug }}</span>
+                  class="shrink-0 font-mono text-[length:var(--text-3xs)] text-neutral-dim">{{ record.slug }}</span>
                 <!-- 确认窗口期保留按钮：第一击进入确认态后迟到收口广播不得把确认钮藏掉（可达性优先） -->
                 <TrayConfirmButton
                   v-if="pinned && (isRunningSubagent(record) || cancelConfirm.isConfirming(record.subagentId))"
@@ -157,24 +160,25 @@
             </div>
           </template>
 
-          <!-- workflow 行：状态点/spinner + scriptName + slug / 进度条 + N/M + 耗时 + abort（两段式；pause/resume 已随扩展 D-2 移除） -->
+          <!-- workflow 行：状态点/spinner + scriptName + slug / 进度条 + N/M + 耗时 + abort（两段式；
+               pause/resume 已随扩展 D-2 移除；行容器 = demo .tray-row 形态，进度轨道 = demo --hover 档） -->
           <template v-else>
             <div
               v-for="record in workflowRows" :key="record.runId"
-              class="group relative cursor-pointer select-none rounded-md px-2 py-1 transition-colors hover:bg-surface-hover"
+              class="group relative min-h-[26px] cursor-pointer select-none rounded-sm px-1.5 py-1 text-neutral-mid transition-colors hover:bg-surface-hover hover:text-neutral-fg"
               data-testid="tray-workflow-row"
               @click="openWorkflowRow(record)" @mouseleave="clearAbortConfirm"
             >
               <div class="flex items-center gap-2">
                 <Loader2 v-if="record.status === 'running'" data-testid="tray-workflow-spinner"
                   class="size-[13px] shrink-0 animate-spin text-accent" />
-                <span v-else class="size-2 shrink-0 rounded-full" :class="workflowToneClass(record)"
+                <span v-else class="size-[7px] shrink-0 rounded-full" :class="workflowToneClass(record)"
                   :title="workflowStatusLabel(record)" />
-                <span class="min-w-0 flex-1 truncate text-[length:var(--text-xs)] font-medium leading-[1.35] text-neutral-fg">
+                <span class="min-w-0 flex-1 truncate text-[length:var(--text-xs)] leading-[1.35]">
                   {{ record.scriptName }}
                 </span>
                 <span v-if="record.slug" data-testid="tray-workflow-slug"
-                  class="shrink-0 font-mono text-[length:var(--text-3xs)] text-neutral-mid">{{ record.slug }}</span>
+                  class="shrink-0 font-mono text-[length:var(--text-3xs)] text-neutral-dim">{{ record.slug }}</span>
                 <!-- [D2] 中断 run 人读状态文案（可见文本——场景 25 CDP 断言 innerText 承载位）：
                      「已中断（可续跑）」非「运行中」；状态点色调归 workflowToneClass 中性暗档，
                      hover title 不承载（workflowStatusLabel 出终态文案，interrupted 非终局） -->
@@ -196,8 +200,8 @@
                 </template>
               </div>
               <div class="mt-1 flex items-center gap-1.5 pl-[21px] font-mono text-[length:var(--text-3xs)] text-neutral-dim">
-                <div class="h-[3px] min-w-[40px] flex-1 overflow-hidden rounded-full bg-border">
-                  <div class="h-full rounded-full transition-[width,background-color]"
+                <div class="h-[3px] min-w-[40px] flex-1 overflow-hidden rounded-full bg-surface-hover">
+                  <div class="h-full rounded-full transition-[width,background-color] duration-300 ease-[var(--ease)]"
                     :class="workflowToneClass(record)" :style="{ width: `${workflowPercent(record)}%` }" />
                 </div>
                 <span class="shrink-0">{{ t('panel.tray.agentsLabel', { done: completedAgentCount(record), total: record.agentCalls.length }) }}</span>

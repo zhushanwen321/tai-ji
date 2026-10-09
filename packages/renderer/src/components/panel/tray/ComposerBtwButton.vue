@@ -19,18 +19,19 @@
   <Button
     variant="ghost"
     size="icon"
-    class="relative size-[28px] shrink-0 rounded-sm text-neutral-dim transition-colors hover:bg-surface-hover hover:text-neutral-mid"
+    class="relative size-[30px] shrink-0 rounded-sm p-0 text-neutral-dim transition-colors hover:bg-surface-hover hover:text-neutral-fg"
     data-testid="composer-btw-button"
     :title="title"
     @click="openBtw"
   >
-    <MessagesSquare class="size-4" />
-    <!-- 计数角标（Badge 范式 = 计数角标，DESIGN §5.13；accent 实底 + accent-fg 字，
+    <MessagesSquare class="size-4" :stroke-width="1.6" />
+    <!-- 计数角标（demo .cbtn .badge 形态：右上角 -3px、min-w/h 14px、px 3px 胶囊、
+         mono 10px fw-mid；Badge 范式 = 计数角标，DESIGN §5.13；accent 实底 + accent-fg 字，
          PanelContainer unread badge 同款语义色对） -->
     <span
       v-if="totalUnread > 0"
       data-testid="composer-btw-badge"
-      class="pointer-events-none absolute -right-1 -top-1 grid h-3.5 min-w-3.5 place-items-center rounded-full bg-accent px-0.5 font-mono text-[length:var(--text-3xs)] text-accent-fg"
+      class="pointer-events-none absolute -right-[3px] -top-[3px] grid h-[14px] min-w-[14px] place-items-center rounded-full bg-accent px-[3px] font-mono text-[length:var(--text-3xs)] [font-weight:var(--fw-mid)] text-accent-fg"
     >{{ totalUnread > 9 ? '9+' : totalUnread }}</span>
     <!-- 待处理徽点（badge 两态并列呈现：右下角独立徽点，与右上计数角标分角共存；
          形态 = DESIGN §5.13 Status Dot 6-8px 圆点，色相走灰阶 neutral-mid token

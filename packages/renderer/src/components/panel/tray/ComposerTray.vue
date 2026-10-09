@@ -15,7 +15,8 @@
     widget   → TrayWidgetPanel（viewId / meta / guiTree，meta+guiTree 取自外壳 entries 切片）
 
   ── built-in 三态（D7；验收 N2「归零不虚亮」）──
-  running > 0 → 亮计数 + 呼吸点（accent；视觉序与 TrayWidgetButton 同款 [icon][呼吸点][计数]）
+  running > 0 → 亮呼吸点（inline，accent）+ 计数角标（demo .cbtn .badge 形态：右上角胶囊，
+  accent 实底；视觉序与 TrayWidgetButton 同款 [icon][呼吸点][计数角标]）
   有历史无进行中 → dim 常驻（无计数、无呼吸点）
   全无记录 → 该按钮不渲染（DOM 层不存在，而非 opacity:0 —— 归零不虚亮的结构性保证）
 
@@ -94,9 +95,11 @@
           @pointerleave="onHoverEnd"
           @click="onTogglePin(AGGREGATE_PANEL_KEY)"
         >
-          <!-- 单一图标（聚合语义 = layers 层叠面；有进行中时 accent 提亮，无则中性） -->
+          <!-- 单一图标（聚合语义 = layers 层叠面；有进行中时 accent 提亮，无则中性）；
+               stroke 1.6 = demo .cbtn 图标规格（16px stroke 1.6，M4a 决 10 同款） -->
           <Layers
             class="size-4 shrink-0"
+            :stroke-width="1.6"
             :class="aggregateRunningCount > 0 ? 'text-accent' : 'text-neutral-dim'"
             aria-hidden="true"
           />
@@ -107,10 +110,11 @@
             :class="TRAY_PULSE_CLASS"
             aria-hidden="true"
           />
+          <!-- 运行数角标（demo .cbtn .badge 形态：右上角胶囊，accent 实底） -->
           <span
             v-if="aggregateRunningCount > 0"
             data-testid="tray-aggregate-count"
-            :class="[TRAY_ITEM_COUNT_CLASS, 'text-accent']"
+            :class="[TRAY_ITEM_COUNT_CLASS, 'bg-accent', 'text-accent-fg']"
           >{{ aggregateRunningCount }}</span>
         </Button>
       </PopoverAnchor>
@@ -169,10 +173,12 @@
           <component
             :is="item.icon"
             class="size-4 shrink-0"
+            :stroke-width="1.6"
             :class="item.running > 0 ? 'text-accent' : ''"
             aria-hidden="true"
           />
-          <!-- 呼吸点 + 计数：仅「有进行中」渲染（有历史无进行中 → 两者都不出，归零不虚亮） -->
+          <!-- 呼吸点 + 计数：仅「有进行中」渲染（有历史无进行中 → 两者都不出，归零不虚亮）；
+               计数走 demo .cbtn .badge 角标形态（右上角胶囊，accent 实底） -->
           <span
             v-if="item.running > 0"
             data-testid="tray-builtin-pulse"
@@ -182,7 +188,7 @@
           <span
             v-if="item.running > 0"
             data-testid="tray-builtin-count"
-            :class="[TRAY_ITEM_COUNT_CLASS, 'text-accent']"
+            :class="[TRAY_ITEM_COUNT_CLASS, 'bg-accent', 'text-accent-fg']"
           >{{ badgeCount(item) }}</span>
         </Button>
       </PopoverAnchor>

@@ -364,8 +364,10 @@ describe('ComposerTray built-in 三态（D7 / N2）', () => {
     expect(button.attributes('data-state')).toBe('running')
     expect(button.find('[data-testid="tray-builtin-count"]').text()).toBe('2')
     expect(button.find('[data-testid="tray-builtin-pulse"]').exists()).toBe(true)
-    // 亮态色（accent 系，非 dim）——归零不虚亮与「有进行中必亮」两面
-    expect(button.find('[data-testid="tray-builtin-count"]').classes()).toContain('text-accent')
+    // 亮态色（角标 = demo .cbtn .badge 形态：accent 实底 + accent-fg 字）——
+    // 归零不虚亮与「有进行中必亮」两面
+    expect(button.find('[data-testid="tray-builtin-count"]').classes()).toContain('bg-accent')
+    expect(button.find('[data-testid="tray-builtin-count"]').classes()).toContain('text-accent-fg')
     expect(button.find('[data-testid="tray-builtin-pulse"]').classes()).toContain('bg-accent')
     // 只有有进行中的那一件变亮，其余仍 dim 常驻
     expect(builtinButton('subagent').attributes('data-state')).toBe('idle')
@@ -454,11 +456,11 @@ describe('ComposerTray hover 时序（D8：160ms 开 / 240ms 收 / 移入面板�
     await builtinButton('bash').trigger('pointerenter')
     await advance(OPEN_MS)
 
-    // 结构不变量：p-1.5 必须在挂 pointerenter 的面板节点上（= 覆盖浮层全幅），
+    // 结构不变量：p-1 必须在挂 pointerenter 的面板节点上（= 覆盖浮层全幅），
     // 留在浮层根上就会形成一圈不会取消收起计时的缺口（U3 根因）
     const panel = layerNode()
-    expect(panel.className).toContain('p-1.5')
-    expect(panelLayerNode().className).not.toContain('p-1.5')
+    expect(panel.className).toContain('p-1')
+    expect(panelLayerNode().className).not.toContain('p-1')
 
     await builtinButton('bash').trigger('pointerleave')
     fire(panel, 'pointerenter')
@@ -735,8 +737,8 @@ describe('ComposerTray widget 区与面板分流', () => {
     expect(panelKeys()).toEqual(['widget:todo'])
 
     const panel = layerNode()
-    expect(panel.className).toContain('p-1.5')
-    expect(panelLayerNode().className).not.toContain('p-1.5')
+    expect(panel.className).toContain('p-1')
+    expect(panelLayerNode().className).not.toContain('p-1')
 
     await row().find('[data-testid="tray-widget-button"][data-widget-key="todo"]').trigger('pointerleave')
     fire(panel, 'pointerenter')

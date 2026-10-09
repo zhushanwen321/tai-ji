@@ -1,20 +1,28 @@
 <!--
   TrayPanelSurface —— 托盘条目浮层的统一外壳（ComposerTray 的 built-in 分支与 widget 分支共用）。
 
-  浮层形态契约（设计 §3.3 D8 + 固定高裁决 2026-09-16 + U3 热区修复）：
-  - 锚定 icon 上方（side="top"）、宽 400px 由外壳给；
+  浮层形态契约（设计 §3.3 D8 + 固定高裁决 2026-09-16 + U3 热区修复 + M4b demo 对齐）：
+  - 锚定 icon 上方（side="top"）、宽 400px 由外壳给、锚距 10px（demo .composer .popover
+    bottom: calc(100% + 10px)，workbench.css 权威）；
   - [窄视口钳制] 追加 `max-w-[calc(100vw-16px)]`（仓内 CommandPopover / AmbiguousFilePopover
     同款）：固定宽 400px 在视口 < ~416px 时右侧被裁（reka 碰撞位移也救不回一个比视口还宽的面板），
     上限收到视口 −16px 后面板自身收窄即可完整落在视口内；`min-w-0` 解掉包装层 `min-w-[240px]`
     在极窄视口下反过来压过 max-width 的优先级问题（min-width 在 CSS 里胜出）。
+  - 浮层容器形态对齐 demo .popover / .tray-pop（M4b）：bg-elevated 浮层档 + border-strong 边 +
+    圆角 rounded-lg（12px，demo --r-lg）+ shadow-2（原语基类已带）+ 内边距 p-1（4px）；
   - 内容区固定高 h-[340px]（小屏 max-h 60vh 兜底）：切内部 tab 容器不塌缩，hover 态指针不
-    落空（面板收起的根因消除）；
-  - 热区：内边距 p-1.5 放在**内容 div 自身**（不是浮层根）——内容 div 因此覆盖浮层全幅，
+    落空（面板收起的根因消除）；宽高不随 demo 收窄（固定 400×340 是本仓 hover 稳定性的
+    既有裁决，demo 无固定宽高对应物）；
+  - 热区：内边距 p-1 放在**内容 div 自身**（不是浮层根）——内容 div 因此覆盖浮层全幅，
     指针落在 padding 带上同样触发 pointerenter 取消收起计时（U3：挂在浮层根做不到——本仓
     PopoverContent 包装组件的根是 PopoverPortal/Teleport，未声明为 props/emits 的原生监听在
     Teleport 根被 Vue 丢弃；reka PopoverContent 自身会经 PopperContent 的 `$attrs` 透传到浮层根）。
   - `data-testid="tray-panel"` 与 `data-panel-key` / `data-pinned` 是外壳状态机与 e2e 的接口，
     字符串形态不得改（e2e 依赖 `[data-testid="tray-panel"][data-panel-key=…]`）。
+  - 开合动效（M4b 对齐 demo E5：进 ease-out / 出 ease-in，位移 3px + 透明度，120ms）：落点 =
+    文件尾的 style 全局块——reka 浮层经 Teleport 渲染，本组件 scope attr 不会落到浮层元素上
+    （scoped 选择器不命中），且 @starting-style 无法用 Tailwind 任意变体表达，故用命名空间类
+    tray-pop-motion 承载（机制先例 = CollapsibleContent.vue 的 reka data-state 过渡 escape hatch）。
 
   交互（pointer 热区 / 层外拦截 / 打开不抢焦点）经 emit 上抛给 ComposerTray 状态机消费。
 -->
@@ -22,8 +30,8 @@
   <PopoverContent
     side="top"
     align="start"
-    :side-offset="6"
-    class="w-[400px] min-w-0 max-w-[calc(100vw-16px)]"
+    :side-offset="10"
+    class="tray-pop-motion w-[400px] min-w-0 max-w-[calc(100vw-16px)] rounded-lg"
     @interact-outside="emit('interactOutside', $event)"
     @open-auto-focus="emit('openAutoFocus', $event)"
   >
@@ -31,7 +39,7 @@
       data-testid="tray-panel"
       :data-panel-key="panelKey"
       :data-pinned="pinned ? 'true' : 'false'"
-      class="flex h-[340px] max-h-[60vh] flex-col p-1.5"
+      class="flex h-[340px] max-h-[60vh] flex-col p-1"
       @pointerenter="emit('panelEnter')"
       @pointerleave="emit('panelLeave')"
     >
@@ -61,3 +69,34 @@ const emit = defineEmits<{
   openAutoFocus: [event: Event]
 }>()
 </script>
+
+<style>
+/*
+ * 托盘浮层开合动效（demo E5 方向缓动，drawers.css 的 .pop-enter-active / .pop-leave-active
+ * 权威）：进 = opacity 0→1 + translateY(3px)→0，ease-out；出 = 反向，ease-in；时长 120ms
+ * （--duration-fast，与 demo --dur-fast 同值，由基类 .reka-popover-transition 的
+ * transition 简写承载）；关闭态 transform 由基类 scale(0.96) 改写为 translateY(3px)。
+ * !important 压过基类同特异性规则（style.css 中 .reka-popover-transition 声明序在
+ * tailwind utilities 之后，非 important 覆写会输掉级联）；@starting-style 给进场
+ * 首帧提供 translateY(3px) 起点（Tailwind 无法表达，机制先例见文件头）。
+ */
+.tray-pop-motion[data-state='open'] {
+  transform: translateY(0) !important;
+  transition-timing-function: var(--ease-out) !important;
+}
+.tray-pop-motion[data-state='closed'] {
+  transform: translateY(3px) !important;
+  transition-timing-function: var(--ease-in) !important;
+}
+@starting-style {
+  .tray-pop-motion[data-state='open'] {
+    transform: translateY(3px) !important;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tray-pop-motion[data-state='open'],
+  .tray-pop-motion[data-state='closed'] {
+    transition: none !important;
+  }
+}
+</style>
