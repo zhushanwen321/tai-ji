@@ -45,17 +45,18 @@
       {{ t('sidebar.fileTree.emptyDir') }}
     </div>
 
-    <!-- 目录行（demo .frow 语言：h-24 / gap 5px / radius-sm / mono 12px mid 字、hover 提 fg） -->
+    <!-- 目录行（demo .frow 语言：height 24px / gap 5px / radius-sm / mono 12px mid 字、hover 提 fg）。
+         行高必须 px 定高 h-[24px]：h-6=1.5rem 在 html 14px 基准（style.css --text-base）下=21px，缺 3px -->
     <div
       v-else-if="row.type === 'dir'"
-      class="flex w-max min-w-full cursor-pointer select-none items-center gap-[5px] rounded-sm py-0.5 pr-2 font-mono text-[length:var(--text-xs)] text-neutral-mid transition-colors hover:bg-surface-hover hover:text-neutral-fg"
+      class="flex h-[24px] w-max min-w-full cursor-default select-none items-center gap-[5px] rounded-sm py-0.5 pr-2 font-mono text-[length:var(--text-xs)] text-neutral-mid transition-colors hover:bg-surface-hover hover:text-neutral-fg"
       :style="rowPaddingStyle"
       :data-testid="`file-tree-dir-${row.path}`"
       @click="emit('toggle', row)"
     >
       <span :class="chevronSlotClass" data-testid="chevron-slot">
         <ChevronRight
-          class="size-2.5 text-neutral-dim transition-transform duration-[var(--duration)] ease-[var(--ease)]"
+          class="size-2.5 text-neutral-dim transition-transform duration-[var(--duration-fast)] ease-[var(--ease-out)]"
           :class="{ 'rotate-90': row.expanded }"
         />
       </span>
@@ -71,11 +72,11 @@
     </div>
 
     <!-- 文件行（v-else 紧邻上方目录 v-else-if，链绑定到 row.type 判断）。
-         选中态 = demo 选中范式（elevated 浮起底 + 左侧 2px accent 竖条 + 文件名 fg fw-mid）。 -->
+         选中态 = demo Tier B 行类范式（.frow.sel 无底无框，仅文字提亮 fg + fw-mid）。 -->
     <div
       v-else
-      class="flex w-max min-w-full cursor-pointer select-none items-center gap-[5px] rounded-sm py-0.5 pr-2 font-mono text-[length:var(--text-xs)] text-neutral-mid transition-colors hover:bg-surface-hover hover:text-neutral-fg"
-      :class="{ 'bg-bg-elevated text-neutral-fg shadow-[inset_2px_0_0_var(--accent)]': selected }"
+      class="flex h-[24px] w-max min-w-full cursor-default select-none items-center gap-[5px] rounded-sm py-0.5 pr-2 font-mono text-[length:var(--text-xs)] text-neutral-mid transition-colors hover:bg-surface-hover hover:text-neutral-fg"
+      :class="{ 'text-neutral-fg': selected }"
       :style="rowPaddingStyle"
       :data-testid="`file-tree-file-${row.path}`"
       @click="emit('select', row)"
@@ -87,20 +88,21 @@
         class="shrink whitespace-nowrap"
         :class="[
           row.ignored ? 'text-neutral-dim italic' : '',
-          selected ? 'font-medium text-neutral-fg' : '',
+          selected ? 'text-neutral-fg [font-weight:var(--fw-mid)]' : '',
         ]"
       >{{ row.name }}</span>
       <!-- git overlay 角标（D-012 树/标注分离：从投影的 row.gitStatus 取 status）。
            形态 = demo .gmark（10px fw-mid / radius-xs / 1×5 padding / 语义软底） -->
       <span
         v-if="gitBadge"
-        class="rounded-[var(--radius-xs)] px-[5px] py-px font-mono text-[length:var(--text-3xs)]"
+        class="rounded-[var(--radius-xs)] px-[5px] py-px font-mono text-[length:var(--text-3xs)] [font-weight:var(--fw-mid)]"
         :class="gitBadgeClass"
       >{{ gitBadge }}</span>
-      <!-- W2 文件行数 +N −M（tracked 改动有 numstat；untracked 降级显 ~size） -->
+      <!-- W2 文件行数 +N −M（tracked 改动有 numstat；untracked 降级显 ~size）。
+           形态 = demo .fdiff（ml-auto 右贴 + gap 5px + flex:none），三档 span 不再粘连 -->
       <span
         v-if="row.lineStats"
-        class="shrink-0 font-mono text-[length:var(--text-3xs)]"
+        class="ml-auto inline-flex shrink-0 gap-[5px] font-mono text-[length:var(--text-3xs)]"
         :data-testid="`file-tree-linestats-${row.path}`"
       >
         <span v-if="row.lineStats.add !== undefined" class="text-success">+{{ formatCount(row.lineStats.add) }}</span>
@@ -173,7 +175,7 @@ const gitBadgeClass = computed(() => {
     case 'modified': return 'bg-warn-soft text-warn'
     case 'added': return 'bg-success-soft text-success'
     case 'deleted': return 'bg-danger-soft text-danger'
-    case 'unmerged': return 'bg-danger-soft text-danger font-semibold'
+    case 'unmerged': return 'bg-danger-soft text-danger'
     case 'renamed': return 'bg-info-soft text-info'
     case 'untracked': return 'bg-success-soft text-success'
     default: return ''

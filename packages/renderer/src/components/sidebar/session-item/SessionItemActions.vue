@@ -101,10 +101,10 @@ import { useI18n } from 'vue-i18n'
 import { Check, Pencil, Trash2, Archive, FolderKanban, Quote } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover'
-import { useProjectStore } from '@/stores/project'
 import { useSessionStore } from '@/stores/session'
 import { composerInjectionStore } from '@/composables/panel/composer-injection-store'
 import { toggleMarkedDone, isMarkedDone } from '@/composables/useSessionMarkers'
+import { useAssignTargets } from './assign-targets'
 import type { SessionItemSession } from './types'
 
 const props = defineProps<{
@@ -124,13 +124,9 @@ const emit = defineEmits<{
 const { t } = useI18n()
 
 // ── 归入项目菜单（D14 语义修正 2026-08-04）──
-const projectStore = useProjectStore()
 const assignOpen = ref(false)
-/** 归类目标列表：默认项目（未归类聚合）+ 全部命名 project。归回默认 = projectId 空串。 */
-const assignTargets = computed(() => [
-  { id: '', name: t('sidebar.projectSwitcher.defaultName') },
-  ...projectStore.projects.filter((p) => p.name).map((p) => ({ id: p.id, name: p.name })),
-])
+/** 归类目标列表（与右键菜单「移动到项目」分组共用同一实现，assign-targets.ts）。 */
+const assignTargets = useAssignTargets()
 /** 点击归类：emit + 关菜单（归类可逆，无需两段确认） */
 function onAssign(projectId: string): void {
   emit('setProject', { sessionId: props.session.id, projectId })

@@ -20,14 +20,14 @@
           :title="t('sidebar.update.newVersion')"
           @click="onPerformUpdate"
         >
-          <ArrowUp class="size-[15px]" />
+          <ArrowUp class="size-[15px]" :stroke-width="1.8" />
           <!-- 红点角标（demo .upd-dot：top/right 4px，7px 圆） -->
           <span class="absolute right-1 top-1 size-[7px] rounded-full bg-danger" data-testid="update-badge" />
         </Button>
       </HoverCardTrigger>
       <HoverCardContent side="top" class="release-notes-content max-h-[360px] w-[360px] overflow-auto p-4 text-[length:var(--text-xs)] text-neutral-fg">
         <div class="mb-2 text-[length:var(--text-sm)] font-semibold text-accent">{{ t('sidebar.update.newVersionWithVersion', { version: state.latestRelease?.version }) }}</div>
-        <div class="mb-3 text-[length:var(--text-2xs)] text-muted">{{ t('sidebar.update.versionTransition', { from: appVersion, to: state.latestRelease?.version }) }}</div>
+        <div class="mb-3 text-[length:var(--text-2xs)] text-neutral-mid">{{ t('sidebar.update.versionTransition', { from: appVersion, to: state.latestRelease?.version }) }}</div>
         <!--
           不复用 MarkdownRenderer 组件：该组件位于 panel/message-stream 下，强依赖 fileSearch/fileTree/
           sideDrawer/AmbiguousFilePopover/MermaidRenderer 等 panel 上下文（sessionId 在此无值，文件路径识别/
@@ -113,7 +113,7 @@
         <!-- 错误摘要 -->
         <div class="text-danger">{{ state.errorMessage }}</div>
         <!-- 恢复指引（suggestion 存在时显示） -->
-        <div v-if="state.errorSuggestion" class="mt-1 text-muted">{{ state.errorSuggestion }}</div>
+        <div v-if="state.errorSuggestion" class="mt-1 text-neutral-mid">{{ state.errorSuggestion }}</div>
         <Button
           variant="secondary"
           size="sm"
@@ -225,7 +225,7 @@ function onRetry(): void {
   font-weight: 600;
   line-height: 1.35;
   margin: 0.8em 0 0.4em;
-  color: var(--fg);
+  color: var(--neutral-fg);
 }
 .release-notes-markdown :deep(h1) { font-size: 1.25em; }
 .release-notes-markdown :deep(h2) { font-size: 1.15em; }
@@ -252,14 +252,14 @@ function onRetry(): void {
   line-height: 1.65;
 }
 .release-notes-markdown :deep(li)::marker {
-  color: var(--fg);
+  color: var(--neutral-fg);
 }
 
 .release-notes-markdown :deep(blockquote) {
   border-left: 2px solid var(--border-strong);
   padding-left: 0.8em;
   margin: 0.5em 0;
-  color: var(--muted);
+  color: var(--neutral-mid);
 }
 
 .release-notes-markdown :deep(a) {
@@ -277,7 +277,7 @@ function onRetry(): void {
   background: var(--surface-2);
   padding: 0.1em 0.35em;
   border-radius: var(--radius-sm);
-  color: var(--fg);
+  color: var(--neutral-fg);
 }
 
 /* 代码块：简化版（无复制按钮/语言标签，只读展示） */
@@ -297,7 +297,7 @@ function onRetry(): void {
 .release-notes-markdown :deep(.md-codeblock__lang) {
   font-family: var(--font-mono);
   font-size: 0.72em;
-  color: var(--subtle);
+  color: var(--neutral-dim);
   text-transform: lowercase;
 }
 /* 隐藏复制按钮（只读展示不需要） */
@@ -349,7 +349,7 @@ function onRetry(): void {
 .release-notes-markdown :deep(th) {
   background: var(--surface-2);
   font-weight: 600;
-  color: var(--fg);
+  color: var(--neutral-fg);
 }
 
 .release-notes-markdown :deep(hr) {

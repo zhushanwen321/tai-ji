@@ -281,18 +281,21 @@ describe('FileTreeRow 交互（emit 路由，不再直调 useFileTree）', () =>
 })
 
 describe('FileTreeRow 选中态（selected prop，组件零 store 依赖）', () => {
-  it('selected=true 的文件行 → elevated 底 + 左侧 2px accent 竖条 + 名称 fg fw-mid（demo .frow.sel 范式）', () => {
+  it('selected=true 的文件行 → Tier B 无底无框（行级文字提 fg）+ 名称 fg fw-mid（demo .frow.sel 范式）', () => {
     const wrapper = mountRow(makeRow({ path: 'a.ts', type: 'file' }), true)
     const rowEl = wrapper.find('[data-testid="file-tree-file-a.ts"]')
-    expect(rowEl.classes()).toContain('bg-bg-elevated')
-    expect(rowEl.classes()).toContain('shadow-[inset_2px_0_0_var(--accent)]')
+    expect(rowEl.classes()).not.toContain('bg-bg-elevated')
+    expect(rowEl.classes()).not.toContain('shadow-[inset_2px_0_0_var(--accent)]')
+    expect(rowEl.classes()).toContain('text-neutral-fg')
     const nameSpan = wrapper.find('[data-testid="file-tree-file-a.ts"] .shrink')
     expect(nameSpan.classes()).toContain('text-neutral-fg')
-    expect(nameSpan.classes()).toContain('font-medium')
+    expect(nameSpan.classes()).toContain('[font-weight:var(--fw-mid)]')
   })
 
   it('selected=false → 无选中态样式', () => {
     const wrapper = mountRow(makeRow({ path: 'a.ts', type: 'file' }), false)
-    expect(wrapper.find('[data-testid="file-tree-file-a.ts"]').classes()).not.toContain('bg-bg-elevated')
+    expect(wrapper.find('[data-testid="file-tree-file-a.ts"]').classes()).not.toContain('text-neutral-fg')
+    const nameSpan = wrapper.find('[data-testid="file-tree-file-a.ts"] .shrink')
+    expect(nameSpan.classes()).not.toContain('text-neutral-fg')
   })
 })

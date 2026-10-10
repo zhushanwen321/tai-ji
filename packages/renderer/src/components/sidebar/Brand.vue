@@ -38,7 +38,7 @@ withDefaults(defineProps<Props>(), {
         <span v-if="isDevMode()" data-testid="brand-dev-badge"
           class="shrink-0 rounded-sm bg-info-soft px-1.5 py-0.5 text-[length:var(--text-3xs)] font-semibold text-info">DEV</span>
       </div>
-      <span v-if="versionLabel" class="mt-px text-[length:var(--text-2xs)] text-neutral-dim">{{ versionLabel }}</span>
+      <span v-if="versionLabel" class="mt-px font-mono tabular-nums text-[length:var(--text-2xs)] text-neutral-dim">{{ versionLabel }}</span>
     </div>
     <!-- trailing slot：Sidebar 注入 UpdateButton（ml-auto 推到右侧） -->
     <slot name="trailing" />

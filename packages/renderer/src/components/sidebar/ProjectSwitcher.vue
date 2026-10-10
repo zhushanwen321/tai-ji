@@ -241,11 +241,11 @@ function cancelCreate() {
             <ContextMenuContent
               :ref="setCardMenuContentRef"
               data-testid="project-context-menu"
-              class="z-[var(--z-dialog)] min-w-[148px] rounded-md border border-border-strong bg-bg-elevated p-1 text-neutral-fg shadow-2 outline-none"
+              class="z-[var(--z-popover)] min-w-[148px] rounded-md border border-border-strong bg-bg-elevated p-1 text-neutral-fg shadow-2 outline-none"
             >
               <ContextMenuItem
                 data-testid="project-delete-item"
-                class="flex h-auto w-full cursor-pointer select-none items-center gap-2 rounded-sm px-2 py-1.5 text-[length:var(--text-xs)] text-danger/90 outline-none hover:bg-danger-soft hover:text-danger [&_svg]:size-[13px]"
+                class="flex h-[28px] w-full cursor-pointer select-none items-center gap-2 rounded-sm px-[9px] text-[length:var(--text-xs)] text-danger outline-none hover:bg-danger-soft hover:text-danger [&_svg]:size-[13px]"
                 @select="requestDelete(p.id)"
               >
                 <Trash2 />

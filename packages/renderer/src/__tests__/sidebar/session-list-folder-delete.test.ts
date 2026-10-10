@@ -130,9 +130,9 @@ describe('SessionList folder 删除两段式确认（W2TC5）', () => {
     await btn.trigger('click')
     expect(findFolderDeleteButton(wrapper)!.attributes('title')).toBe('确认删除此文件夹下所有会话？')
 
-    // mouseleave 绑定在 ml-auto 容器 div（包裹 Button），对其触发 mouseleave
-    // N8 双模式后模板另有区头开关容器（同为 .ml-auto），用 .group-section 前缀精确锚定组头容器
-    const container = wrapper.find('.group-section .ml-auto')
+    // mouseleave 绑定在操作区容器 div（包裹 Button），对其触发 mouseleave
+    // 锚定用结构化 testid（类选择器 .ml-auto 已随「计数右贴」修复挪到计数 span 上，不再唯一）
+    const container = wrapper.find('[data-testid="folder-actions"]')
     expect(container.exists()).toBe(true)
     await container.trigger('mouseleave')
 

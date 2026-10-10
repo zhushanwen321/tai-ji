@@ -20,15 +20,17 @@
     :has-agent-parent="hasAgentParent"
     :can-force-quit="canForceQuit"
     :can-stop="canStop"
+    :project-id="session.projectId"
     @navigate-parent="emit('navigateParent', $event)"
     @abort="emit('abort', $event)"
     @force-quit="emit('forceQuit', $event)"
+    @set-project="emit('setProject', $event)"
   >
     <!-- 激活态 = demo .si.on（workbench.css 文件尾 Tier B）：无底无框，仅行文字提亮 fg；
          非激活 hover 才有 bg-surface-hover 临时反馈（demo .si:hover 同款） -->
     <div
       ref="rootEl"
-      class="session-item group/item relative flex cursor-pointer select-none items-start gap-2 rounded-sm px-2 py-[7px] transition-colors"
+      class="session-item group/item relative flex cursor-pointer select-none items-center gap-2 rounded-sm px-2 py-[7px] transition-colors"
       :class="[
         active ? 'text-neutral-fg' : 'text-neutral-fg hover:bg-surface-hover',
         isDead ? 'opacity-50' : '',

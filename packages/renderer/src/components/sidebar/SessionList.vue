@@ -21,7 +21,7 @@
       </span>
       <span class="font-mono text-[length:var(--text-2xs)] text-neutral-fg-2">{{ totalCount }}</span>
       <!-- A/C 双段图标开关（demo .mode-seg：surface 槽 + hairline 边 + 26×24 钮 + 13px 图标）：
-           选中态 = demo 选中范式（elevated 浮起 + fg 字 + 1px accent 内描边）。
+           选中态 = demo Tier A 状态件范式（--sel-bg accent tint 底 + fg 字 + 1px --sel-edge 内描边）。
            title 承载模式名（无 label 文字，demo 悬停提示范式）。 -->
       <div class="ml-auto flex items-center rounded-sm border border-hairline bg-surface p-[2px]">
         <Button
@@ -30,7 +30,7 @@
           data-testid="session-mode-flat"
           class="h-6 w-[26px] rounded-[var(--radius-xs)] p-0"
           :class="mode === 'flat'
-            ? 'bg-bg-elevated text-neutral-fg shadow-[inset_0_0_0_1px_var(--accent)] hover:bg-bg-elevated hover:text-neutral-fg'
+            ? 'bg-[var(--sel-bg)] text-neutral-fg [font-weight:var(--fw-mid)] shadow-[inset_0_0_0_1px_var(--sel-edge)] hover:bg-[var(--sel-bg)] hover:text-neutral-fg'
             : 'bg-transparent text-neutral-dim hover:bg-transparent hover:text-neutral-fg'"
           :title="t('sidebar.sessionList.modeFlat')"
           :aria-pressed="mode === 'flat'"
@@ -44,13 +44,13 @@
           data-testid="session-mode-groups"
           class="h-6 w-[26px] rounded-[var(--radius-xs)] p-0"
           :class="mode === 'groups'
-            ? 'bg-bg-elevated text-neutral-fg shadow-[inset_0_0_0_1px_var(--accent)] hover:bg-bg-elevated hover:text-neutral-fg'
+            ? 'bg-[var(--sel-bg)] text-neutral-fg [font-weight:var(--fw-mid)] shadow-[inset_0_0_0_1px_var(--sel-edge)] hover:bg-[var(--sel-bg)] hover:text-neutral-fg'
             : 'bg-transparent text-neutral-dim hover:bg-transparent hover:text-neutral-fg'"
           :title="t('sidebar.sessionList.modeGroup')"
           :aria-pressed="mode === 'groups'"
           @click="setMode('groups')"
         >
-          <Folder class="size-[13px]" />
+          <Folder class="size-[13px]" :stroke-width="1.8" />
         </Button>
       </div>
     </div>
@@ -73,16 +73,19 @@
              folder 按钮，破坏单行独立 hover 语义）。 -->
         <div class="group/folder sticky top-0 z-[var(--z-sticky)] flex items-center gap-1.5 bg-bg px-2 pt-[9px] pb-1">
           <Folder class="size-3 shrink-0 text-neutral-dim" />
-          <span class="min-w-0 truncate font-mono text-[length:var(--text-xs)] text-neutral-mid">
+          <span class="min-w-0 truncate font-mono text-[length:var(--text-xs)] text-neutral-mid group-hover/folder:text-neutral-fg">
             {{ dirNameOf(g.cwd) }}
           </span>
-          <span class="font-mono text-[length:var(--text-2xs)] text-neutral-fg-2">{{ g.sessions.length }}</span>
+          <span class="ml-auto font-mono text-[length:var(--text-2xs)] text-neutral-fg-2">{{ g.sessions.length }}</span>
           <!-- folder 行操作区：+ 新建（非破坏性，恒渲染）与批量删除（两段式确认）。
-               容器 ml-auto 右贴 + hover 显隐；[review MF-2] 删除按钮仅当组内可见数 = 该 cwd 全量数时渲染：
+               右贴由计数 span 的 ml-auto 承接（单一 auto margin → 计数紧贴操作区左缘、
+               二者整体贴行右缘，demo .gh .count{margin-left:auto} 同构）；hover 显隐；
+               [review MF-2] 删除按钮仅当组内可见数 = 该 cwd 全量数时渲染：
                removeByCwd 是 cwd 全量删除（项目无关），项目过滤隐藏了部分 session 时点删除会误删
                用户不可见的其他 project session；+ 按钮无此守卫（新建不受过滤影响）。 -->
           <div
-            class="ml-auto flex items-center gap-1"
+            class="flex items-center gap-1"
+            data-testid="folder-actions"
             :class="folderConfirmingCwd === g.cwd ? '' : 'opacity-0 group-hover/folder:opacity-100'"
             @mouseleave="onFolderMouseLeave(g.cwd)"
           >

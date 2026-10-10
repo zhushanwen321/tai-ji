@@ -30,11 +30,11 @@
            快捷键提示并入 :title（demo data-tip 悬停形态），不渲染常驻 kbd。 -->
       <Button
         variant="ghost"
-        class="mx-2.5 mt-0.5 mb-1 flex h-auto justify-start gap-2 rounded border border-hairline bg-bg-elevated px-2.5 py-2 text-[length:var(--text-sm)] font-medium text-neutral-fg transition-colors hover:bg-bg-elevated hover:border-border-strong"
+        class="mx-2.5 mt-0.5 mb-1 flex h-auto justify-start gap-2 rounded border border-hairline bg-bg-elevated px-2.5 py-2 text-[length:var(--text-sm)] [font-weight:var(--fw-mid)] text-neutral-fg transition-colors hover:bg-bg-elevated hover:border-border-strong"
         :title="`${t('sidebar.newTask')} · ${formatKbd('n')}`"
         @click="onNewSession"
       >
-        <Plus class="size-[15px] shrink-0" />
+        <Plus class="size-[15px] shrink-0" :stroke-width="1.8" />
         <span class="flex-1 text-left">{{ t('sidebar.newTask') }}</span>
       </Button>
 
@@ -49,7 +49,7 @@
           :title="`${t('importSession.title')} · ${formatKbd('i')}`"
           @click="importOpen = true"
         >
-          <Download class="size-[15px] shrink-0" />
+          <Download class="size-[15px] shrink-0" :stroke-width="1.6" />
           <span class="flex-1 text-left">{{ t('importSession.title') }}</span>
         </Button>
         <Button
@@ -58,7 +58,7 @@
           :title="`${t('sidebar.search')} · ${formatKbd('k')}`"
           @click="searchModal.open()"
         >
-          <Search class="size-[15px] shrink-0" />
+          <Search class="size-[15px] shrink-0" :stroke-width="1.6" />
           <span class="flex-1 text-left">{{ t('sidebar.search') }}</span>
         </Button>
       </nav>
@@ -141,14 +141,18 @@
       <!-- 用户区（footer）· demo .side-foot：hairline 顶线分隔 + 开发者身份行（accent 软底头像
            + 名字 + 三图标钮）。三钮左→右 = 远程连接 / 外观快捷面板 / 设置（demo Sidebar.vue:437-445；
            原 M1「无对应功能不补」裁决经用户反馈覆盖——前两钮接线到真实功能：设置弹层 remote-access
-           分区 + 六主题 setSystem 即时切换）。钮形 = demo .tbtn（24px 方钮 + 15px 图标 + dim→fg hover）。 -->
-      <div class="mt-auto flex-none border-t border-hairline px-3.5 pb-2.5 pt-3">
+           分区 + 六主题 setSystem 即时切换）。钮形 = demo .tbtn（32px 方钮——.app 作用域
+           --hb-chrome-btn 继承值，fallback 24 不生效——+ 15px 图标 + dim→fg hover）。 -->
+      <!-- 净内缩 14/12/10 = demo .side-foot padding 10px + .user 行 padding 2px 4px 0 折算（本结构无
+           .user 中间行，直接写净值）；14px rem 基准下 px-3.5/pb-2.5/pt-3 会收缩为 12.25/8.75/10.5，
+           故 px-bracket 定值 -->
+      <div class="mt-auto flex-none border-t border-hairline px-[14px] pt-[12px] pb-[10px]">
         <div class="flex items-center gap-[9px]">
-          <span class="size-5 shrink-0 rounded-full border border-accent-ring bg-accent-soft" />
+          <span class="size-[20px] shrink-0 rounded-full border border-accent-ring bg-accent-soft" />
           <span class="min-w-0 flex-1 truncate text-[length:var(--text-sm)] [font-weight:var(--fw-mid)] text-neutral-fg-2">{{ t('sidebar.developer') }}</span>
           <Button
             variant="ghost"
-            class="grid size-6 shrink-0 place-items-center rounded-sm p-0 text-neutral-dim transition-colors hover:bg-surface-hover hover:text-neutral-fg [&_svg]:size-[15px]"
+            class="grid size-[32px] shrink-0 place-items-center rounded-sm p-0 text-neutral-dim transition-colors hover:bg-surface-hover hover:text-neutral-fg [&_svg]:size-[15px]"
             :title="t('sidebar.remoteConnect')"
             :aria-label="t('sidebar.remoteConnect')"
             data-testid="sidebar-remote-connect"
@@ -160,7 +164,7 @@
             <PopoverTrigger as-child>
               <Button
                 variant="ghost"
-                class="grid size-6 shrink-0 place-items-center rounded-sm p-0 text-neutral-dim transition-colors hover:bg-surface-hover hover:text-neutral-fg [&_svg]:size-[15px]"
+                class="ml-1 grid size-[32px] shrink-0 place-items-center rounded-sm p-0 text-neutral-dim transition-colors hover:bg-surface-hover hover:text-neutral-fg [&_svg]:size-[15px]"
                 :title="t('sidebar.quickAppearance')"
                 :aria-label="t('sidebar.quickAppearance')"
                 data-testid="sidebar-quick-appearance"
@@ -185,12 +189,12 @@
               @mouseleave="quickThemeLeave"
             >
               <div class="mb-[6px] mt-[2px] px-[2px] text-[length:var(--text-2xs)] [font-weight:var(--fw-mid)] tracking-[0.05em] text-neutral-dim">{{ t('sidebar.quickThemeTitle') }}</div>
-              <div class="grid grid-cols-2 gap-1">
+              <div class="grid grid-cols-2 gap-[4px]">
                 <button
                   v-for="th in TAIJI_THEMES"
                   :key="th.label"
                   type="button"
-                  class="flex items-center gap-[7px] rounded-[var(--radius-sm)] px-2 py-[5px] text-left text-[length:var(--text-xs)] transition-colors duration-[var(--duration-fast)] ease-[var(--ease-out)]"
+                  class="flex items-center gap-[7px] rounded-[var(--radius-sm)] border border-transparent px-[8px] py-[5px] text-left text-[length:var(--text-xs)] transition-colors duration-[var(--duration-fast)] ease-[var(--ease-out)]"
                   :class="th.label === currentTheme.label
                     ? 'bg-[var(--sel-bg)] text-neutral-fg shadow-[inset_0_0_0_1px_var(--sel-edge)] [font-weight:var(--fw-mid)]'
                     : 'text-neutral-fg-2 hover:bg-surface-hover hover:text-neutral-fg'"
@@ -211,7 +215,7 @@
           </Popover>
           <Button
             variant="ghost"
-            class="grid size-6 shrink-0 place-items-center rounded-sm p-0 text-neutral-dim transition-colors hover:bg-surface-hover hover:text-neutral-fg [&_svg]:size-[15px]"
+            class="ml-1 grid size-[32px] shrink-0 place-items-center rounded-sm p-0 text-neutral-dim transition-colors hover:bg-surface-hover hover:text-neutral-fg [&_svg]:size-[15px]"
             :title="t('sidebar.settingsTitle')"
             :aria-label="t('sidebar.settingsTitle')"
             @click="openSettings()"

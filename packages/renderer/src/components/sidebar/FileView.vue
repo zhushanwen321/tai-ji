@@ -18,14 +18,15 @@
   <div class="flex h-full min-h-0 flex-col px-1.5" data-testid="file-view-root">
     <!-- fv-head（demo 形态）：session 标题（13px fw-mid fg）+ 分支行（mono 11px fg-2——
          信息文字不占 accent，workbench.css .fv-branch 语义），块底 hairline 分隔。
-         D-020/D-004：忽略项开关移入下方 fv-tools 行（与过滤框同行，demo 同构）。 -->
-    <div v-if="sessionLabel" class="mb-2 border-b border-hairline px-2 pb-2 pt-0.5">
-      <div class="min-w-0 truncate text-[length:var(--text-sm)] font-medium text-neutral-fg">{{ sessionLabel }}</div>
+         内缩 = demo 阶梯（head 18px / tools 16px / 树行 14px）：根 px-1.5(6px) +
+         head px-[12px] = 18px。D-020/D-004：忽略项开关移入下方 fv-tools 行（与过滤框同行，demo 同构）。 -->
+    <div v-if="sessionLabel" class="mb-2 border-b border-hairline px-[12px] pb-2 pt-0.5">
+      <div class="min-w-0 truncate text-[length:var(--text-sm)] [font-weight:var(--fw-mid)] text-neutral-fg">{{ sessionLabel }}</div>
       <div v-if="branch" class="mt-0.5 truncate font-mono text-[length:var(--text-2xs)] text-neutral-fg-2">{{ branch }}</div>
     </div>
 
-    <!-- fv-tools（demo 形态）：忽略项开关 + 过滤框同一行（gap 6px）。 -->
-    <div class="flex items-center gap-1.5 px-2 pb-2">
+    <!-- fv-tools（demo 形态）：忽略项开关 + 过滤框同一行（gap 6px）。内缩 = 根 6px + px-[10px] = 16px 阶梯档。 -->
+    <div class="flex items-center gap-1.5 px-[10px] pb-2">
       <Button
         variant="ghost"
         class="h-6 shrink-0 gap-1 rounded-sm px-[7px] text-[length:var(--text-2xs)]"
@@ -39,12 +40,13 @@
         <span>{{ t('sidebar.fileView.ignoredItem') }}</span>
       </Button>
       <!-- 过滤框（demo .fv-filter）：左 7px 12px 图标 + h-6 凹陷输入（bg-input/hairline 边）。
-           容器即 input 高度，图标直接 top-1/2 居中。 -->
+           容器即 input 高度，图标直接 top-1/2 居中。Input 原语默认 rounded-md(8px)/
+           placeholder mid/border-input(0.07)，此处覆写为 demo 值（r-sm 6px / dim / hairline 0.05）。 -->
       <div class="relative min-w-0 flex-1">
         <Search class="pointer-events-none absolute left-[7px] top-1/2 size-3 -translate-y-1/2 text-neutral-dim" />
         <Input
           :model-value="filterDisplay"
-          class="h-6 pl-6 pr-2 text-[length:var(--text-xs)]"
+          class="h-6 rounded-sm border-hairline pl-6 pr-2 text-[length:var(--text-xs)] placeholder:text-neutral-dim"
           :placeholder="t('sidebar.fileView.filterPlaceholder')"
           data-testid="file-filter-input"
           @focus="filterFocused = true"
@@ -79,23 +81,47 @@
         <Button variant="ghost" class="h-6 text-[length:var(--text-xs)] text-accent" data-testid="file-retry" @click="retry">{{ t('sidebar.fileView.retry') }}</Button>
       </div>
 
-      <!-- 空态：loaded 但无节点（空目录 cwd）或过滤无匹配（E7-c：投影空 → 维持既有空态） -->
+      <!-- 空态两分支（E7-c：投影空）：
+           hasFilter = demo .ftree-empty 权威形态（workbench.css:653-654 横排 space-between、
+           padding 14px 10px、--text-xs dim 文案、无图标；Sidebar.vue:448-451 附「清空过滤」
+           一键恢复按钮 = fileFilter('') + showIgnored(true)，映射到既有 setFilter/toggleShowIgnored
+           通道，见 onClearFilter）；
+           空目录（cwd 无节点）= demo 无对应权威形态，保留 real 纵排图标+文案并在此登记差异。 -->
+      <div
+        v-else-if="visibleRows.length === 0 && hasFilter"
+        class="flex items-center justify-between gap-2 px-[10px] py-[14px]"
+        data-testid="file-empty"
+      >
+        <span class="text-[length:var(--text-xs)] text-neutral-dim">{{ t('sidebar.fileView.noMatch') }}</span>
+        <Button
+          variant="secondary"
+          class="h-auto rounded-sm border-border-strong bg-surface-hover px-[10px] py-[3px] text-[length:var(--text-xs)] text-neutral-fg"
+          data-testid="file-clear-filter"
+          @click="onClearFilter"
+        >
+          {{ t('sidebar.fileView.clearFilter') }}
+        </Button>
+      </div>
       <div
         v-else-if="visibleRows.length === 0"
         class="flex flex-col items-center justify-center gap-2 py-10 text-center"
-        data-testid="file-empty"
+        data-testid="file-empty-dir"
       >
-        <component :is="hasFilter ? SearchX : FolderOpen" class="size-5 text-neutral-dim opacity-50" />
-        <p class="text-[length:var(--text-xs)] text-neutral-dim opacity-55">{{ hasFilter ? t('sidebar.fileView.noMatch') : t('sidebar.fileView.noFile') }}</p>
+        <FolderOpen class="size-5 text-neutral-dim opacity-50" />
+        <p class="text-[length:var(--text-xs)] text-neutral-dim opacity-55">{{ t('sidebar.fileView.noFile') }}</p>
       </div>
 
       <!-- 文件树：virtua 挂扁平行（可见行 = projectVisibleRows 投影；itemProps 宽度 max-content
            使长文件名撑开横向滚动，minWidth 100% 保短行 hover 铺满容器——实测量化见 W28 汇报探针）。
+           【登记：demo .fname 截断 + hover 滚动契约（workbench.css .fname-scroll/.fname-roll）与本宽度模型
+           互斥，不实施】demo 契约前提 = 行宽 ≤ 容器宽且名称可截断；本处行宽 = max-content（名称无宽度
+           上限，长名可见性由整树横滚等价承接，W28 实测架构）——truncate 在 w-max 行内永不触发为死类，
+           实施截断须推翻该架构。差异待用户裁决：改横滚为截断 + 滚动，或维持横滚豁免（m1-sidebar.md 跳 3
+           同源登记）。待裁决期间任何修复波次不得给树行名称补 truncate/hover 滚动。
            注意：<template #default> 内禁止放注释/文本节点——virtua 的 item key 提取要求 slot 返回
            恰好 1 个 vnode（P(): e.length===1 才取 e[0].key），注释节点会 fallback 索引 key。 -->
       <Virtualizer
         v-else
-        class="mt-1"
         :data="visibleRows"
         :item-size="ROW_HEIGHT_ESTIMATE"
         :item-props="() => ({ style: { width: 'max-content', minWidth: '100%' } })"
@@ -118,7 +144,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onBeforeUnmount, toRef } from 'vue'
 import { Virtualizer } from 'virtua/vue'
-import { FolderOpen, Search, SearchX, Loader2, AlertCircle, Eye, EyeOff } from '@lucide/vue'
+import { FolderOpen, Search, Loader2, AlertCircle, Eye, EyeOff } from '@lucide/vue'
 import { useI18n } from 'vue-i18n'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Input } from '@/components/ui/input'
@@ -148,7 +174,7 @@ const selectedPath = computed(() => store.getSelectedPath(props.sessionId))
 const { loadTree, setFilter, setupInvalidation, toggleShowIgnored, expandNode, collapseNode, selectFile } = useFileTree()
 const drawer = useSideDrawer()
 
-/** virtua item-size 初始估算（px）：行高 = py-0.5(4px) + 单行内容 ≈ 24px，挂载后 ResizeObserver 实测校正 */
+/** virtua item-size 初始估算（px）：树行已按 demo .frow 定高 24px（FileTreeRow h-[24px]），与实测一致 */
 const ROW_HEIGHT_ESTIMATE = 24
 
 /** 跨 store 失效 unwatch 句柄（onBeforeUnmount 清理，W6 #3.11） */
@@ -210,6 +236,17 @@ watch(
 function onFilter(value: string | number): void {
   filterDisplay.value = String(value)
   setFilter(String(value))
+}
+
+/**
+ * 清空过滤（demo .ftree-empty「清空过滤」一键恢复，Sidebar.vue:448-451）：
+ * demo 语义 = fileFilter('') + showIgnored(true)——复用 onFilter('') 通道（防抖提交一致）；
+ * showIgnored 走 toggleShowIgnored 通道但加守卫只在关闭态触发（toggle 直调会把已开启的
+ * 忽略项误关，偏离 demo 的「设为 true」语义）。
+ */
+function onClearFilter(): void {
+  onFilter('')
+  if (!store.showIgnored) toggleShowIgnored()
 }
 
 /** 错误态重试：重 loadTree（useFileTree 内 loaded 复用，error 态会重发） */

@@ -8,8 +8,9 @@
     右侧仅保留时间文字。未读标记 7px accent 圆点叠在 icon 右上角。
   -->
   <!-- 左侧 7px 状态 icon：spinning(旋转箭头) / hollow(空心圆) / waiting / error / done / stopped / dead / 空。
-       未读标记 7px accent 圆点叠在 icon 右上角（absolute + box-shadow 镂空）。 -->
-  <div class="relative mt-[6px] size-[7px] shrink-0" data-testid="session-icon">
+       未读标记 7px accent 圆点叠在 icon 右上角（absolute + box-shadow 镂空）。
+       行容器 items-center（demo .si align-items:center）垂直居中，icon 不再手补 margin。 -->
+  <div class="relative size-[7px] shrink-0" data-testid="session-icon">
     <!-- spinning: streaming / compacting / working / retrying → 旋转箭头（accent 边框 + 透明顶边） -->
     <span v-if="iconKind === 'spinning'" class="block size-[7px] animate-spin rounded-full border-[1.5px] border-accent border-t-transparent" />
     <!-- hollow: pending → accent 空心圆 -->
@@ -43,9 +44,9 @@
       :class="[active ? 'text-neutral-fg' : 'text-neutral-fg-2', markedDone ? 'opacity-60' : '']"
     >
       <span class="min-w-0 flex-1 truncate">{{ session.label }}</span>
-      <!-- agent-spawned badge（U8）：accent 低饱和形态（bg-accent-soft + text-accent，
-           对齐 popover-styles SELECTED_ITEM_CLASS 配对）；尺寸/圆角对齐同目录
-           FileTreeRow badge（rounded-sm px-1 py-0.5 text-[length:var(--text-3xs)]），不抢左侧状态 icon 焦点 -->
+      <!-- agent-spawned badge（U8）：accent 低饱和形态（bg-accent-soft 底 + accent 字）；
+           尺寸/圆角对齐同目录 FileTreeRow badge（rounded-sm px-1 py-0.5 text-[length:var(--text-3xs)]），
+           不抢左侧状态 icon 焦点 -->
       <span
         v-if="isAgentSpawned"
         data-testid="session-agent-badge"
@@ -68,14 +69,14 @@
   <span
     v-if="childCount > 0"
     data-testid="session-child-count"
-    class="mt-0.5 flex shrink-0 items-center gap-0.5 rounded-sm border border-border-strong px-1 py-px font-mono text-[length:var(--text-3xs)] leading-[1.3] text-neutral-dim"
+    class="flex shrink-0 items-center gap-0.5 rounded-sm border border-border-strong px-1 py-px font-mono text-[length:var(--text-3xs)] leading-[1.3] text-neutral-dim"
     :title="t('sidebar.sessionItem.childCount', { n: childCount })"
   >
     <Layers class="size-[9px] shrink-0" />
     <span>{{ childCount }}</span>
   </span>
   <span
-    class="mt-1 shrink-0 font-mono text-[length:var(--text-2xs)] leading-[1.35] text-neutral-dim"
+    class="shrink-0 font-mono text-[length:var(--text-2xs)] leading-[1.35] text-neutral-dim"
   >{{ timeLabel }}</span>
 </template>
 

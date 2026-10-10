@@ -4,8 +4,8 @@
     文字 tab：3 tab 等宽均分（flex-1），label 直出；第 3 个 plugins 为挂载点占位
     （无 plugin 贡献时 ViewHost 空态自隐藏，见下方 tabs 定义）。
     容器 = 凹陷槽（bg-surface ← demo --card）+ hairline 描边 + rounded-sm(6px) + p-[2px]；
-    按钮 h-6 / 12px 字 / dim / radius-xs；选中态 = demo 选中范式单一声明
-    （elevated 浮起底 + 中性亮字 + fw-mid + 1px accent 内描边）。
+    按钮 h-6 / 12px 字 / dim / radius-xs；选中态 = demo Tier A 状态件选中范式
+    （--sel-bg accent tint 底 + 中性亮字 + fw-mid + 1px --sel-edge 内描边）。
     inactive hover 只提亮文字（text-neutral-fg），不加底色——凹陷槽内加底色会显脏。
     [HISTORICAL] 2026-09-16 五 tab 收敛为三 tab（Agents/Flows 退役，任务观察入口唯一化收口到
     composer 任务托盘）——subagent/workflow 计数不再经侧栏。
@@ -21,7 +21,7 @@
       :class="cn(
         'h-6 flex-1 justify-center rounded-[var(--radius-xs)] px-1 text-[length:var(--text-xs)]',
         modelValue === tab.value
-          ? 'bg-bg-elevated font-semibold text-neutral-fg shadow-[inset_0_0_0_1px_var(--accent)] hover:bg-bg-elevated hover:text-neutral-fg'
+          ? 'bg-[var(--sel-bg)] text-neutral-fg [font-weight:var(--fw-mid)] shadow-[inset_0_0_0_1px_var(--sel-edge)] hover:bg-[var(--sel-bg)] hover:text-neutral-fg'
           : 'bg-transparent text-neutral-dim hover:bg-transparent hover:text-neutral-fg',
       )"
       @click="emit('update:modelValue', tab.value)"

@@ -61,6 +61,9 @@ export default {
     unmarkDone: 'Unmark done',
     archived: 'Archived',
     assignToProject: 'Assign to project',
+    // Context-menu "Move to project" group label (demo .ctx-label authoritative copy; kept
+    // separate from the ghost button title "Assign to project")
+    moveToProject: 'Move to project',
     quoteToComposer: 'Quote to composer',
     // agent-managed-session U8：agent 创建的 session 标记 badge（语言无关 token，两侧同文案）
     agentBadge: 'AI',
@@ -125,6 +128,7 @@ export default {
     retry: 'Retry',
     noMatch: 'No matching files',
     noFile: 'No files',
+    clearFilter: 'Clear filter',
   },
   renameDialog: {
     title: 'Rename session',

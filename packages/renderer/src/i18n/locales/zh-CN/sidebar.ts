@@ -60,6 +60,8 @@ export default {
     unmarkDone: '取消标记',
     archived: '已归档',
     assignToProject: '归入项目',
+    // 右键菜单「移动到项目」分组标签（demo .ctx-label 权威文案，与 ghost 钮 title 的「归入项目」分开登记）
+    moveToProject: '移动到项目',
     quoteToComposer: '引用到输入区',
     // agent-managed-session U8：agent 创建的 session 标记 badge（语言无关 token，两侧同文案）
     agentBadge: 'AI',
@@ -122,6 +124,7 @@ export default {
     retry: '重试',
     noMatch: '无匹配文件',
     noFile: '暂无文件',
+    clearFilter: '清空过滤',
   },
   renameDialog: {
     title: '重命名会话',
