@@ -130,7 +130,7 @@ const dotClass = (status?: 'done' | 'pending') => {
       :key="i"
       class="tab-bar__tab flex select-none items-center gap-1 rounded-sm px-2.5 py-1 font-mono text-[length:var(--text-xs)] text-neutral-dim transition-colors hover:text-neutral-fg"
       :class="{
-        'bg-elevated text-neutral-fg': isActiveTab(tab, i),
+        'bg-bg-elevated text-neutral-fg': isActiveTab(tab, i),
         'cursor-pointer': containerized,
       }"
       @click="selectTab(i)"

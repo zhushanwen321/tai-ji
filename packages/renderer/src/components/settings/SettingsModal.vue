@@ -216,7 +216,7 @@ const flatMenus: readonly { id: MenuId; labelKey: string; icon: LucideIcon }[] =
 
 const { t } = useI18n()
 
-const props = defineProps<{ open: boolean }>()
+const props = defineProps<{ open: boolean; /** 直达分区（AppShell openSettings(section) 传入；非法值回落 provider——侧栏远程钮等深链入口用） */ initialSection?: string }>()
 const emit = defineEmits<{ 'update:open': [value: boolean] }>()
 
 // 模态表面聚合注册（§6.7）：开合态绑 props.open 状态本体；旗标组由登记表按 id 读取
@@ -228,7 +228,9 @@ const disposeSurfaceRegistration = registerModalSurface({
 })
 onBeforeUnmount(disposeSurfaceRegistration)
 
-const activeMenu = ref<MenuId>('provider')
+const activeMenu = ref<MenuId>(
+  flatMenus.some((m) => m.id === props.initialSection) ? (props.initialSection as MenuId) : 'provider',
+)
 /** extension 域子视图（M16）：main=扩展管理 ExtensionPage / contributions=插件贡献 PluginContributionsPage。 */
 const extensionView = ref<'main' | 'contributions'>('main')
 const currentMenu = computed(() => flatMenus.find((m) => m.id === activeMenu.value) ?? flatMenus[0])

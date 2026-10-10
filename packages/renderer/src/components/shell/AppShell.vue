@@ -27,7 +27,7 @@
          实例化时立即触发 loader（Vue runtime-core setup 内 load()），SettingsModal 内部 v-if="open"
          挡不住启动期加载；首开设置才拉取设置页树 chunk（首次触发才出现在 Network）。
          内部自动重试（D6）经 retryKey 重挂承载（见 script 注释）。 -->
-    <SettingsModal v-if="settingsOpen" :key="settingsRetryKey" v-model:open="settingsOpen" />
+    <SettingsModal v-if="settingsOpen" :key="settingsRetryKey" v-model:open="settingsOpen" :initial-section="settingsSection" />
     <!-- workflow-viz overlay 全局单例容器（workflow-visualization U6/D8）：关闭态壳 v-if
          不渲染（DOM 零痕迹，像素轨基线安全）；盖全屏跨双 pane，绑定发起 pane 的 session。 -->
     <WorkflowVizOverlayHost />
@@ -95,9 +95,14 @@ const { syncSessionToPanel } = useSidebar()
 // 驱动根节点 rounded-[10px] 仅 mac 渲染；jsdom/真实模块回退 'mac'，mac 行为零变化。
 const isMac = detectPlatform() === 'mac'
 
-/** Settings modal 开关（⌘, / sidebar 用户区触发） */
+/** Settings modal 开关（⌘, / sidebar 用户区触发；带分区参数 = 直达对应 nav 分区，
+ *  侧栏底部「远程连接」钮经此开到 remote-access——demo 独立远程 modal 的真实功能等价接线） */
 const settingsOpen = ref(false)
-provide('openSettings', () => { settingsOpen.value = true })
+const settingsSection = ref<string | undefined>(undefined)
+provide('openSettings', (section?: string) => {
+  settingsSection.value = section
+  settingsOpen.value = true
+})
 
 // 平台 + 全屏态：data-platform 注入 <html>（usePlatformChrome）；全屏态经 isFullscreen ref 响应式通路消费（TrafficLight opacity / AppNavControls left），不设 data-fullscreen 属性。
 usePlatformChrome()

@@ -139,8 +139,9 @@
       </div>
 
       <!-- 用户区（footer）· demo .side-foot：hairline 顶线分隔 + 开发者身份行（accent 软底头像
-           + 名字 + 图标钮）。real 独有缺远程/外观钮（无对应功能，不添加），设置钮按 demo .tbtn
-           语言（32px 方钮 + 15px 图标 + dim→fg hover）造型。 -->
+           + 名字 + 三图标钮）。三钮左→右 = 远程连接 / 外观快捷面板 / 设置（demo Sidebar.vue:437-445；
+           原 M1「无对应功能不补」裁决经用户反馈覆盖——前两钮接线到真实功能：设置弹层 remote-access
+           分区 + 六主题 setSystem 即时切换）。钮形按 demo .tbtn 语言（32px 方钮 + 15px 图标 + dim→fg hover）。 -->
       <div class="mt-auto flex-none border-t border-hairline px-3.5 pb-2.5 pt-3">
         <div class="flex items-center gap-[9px]">
           <span class="size-5 shrink-0 rounded-full border border-accent-ring bg-accent-soft" />
@@ -148,7 +149,65 @@
           <Button
             variant="ghost"
             class="grid size-8 shrink-0 place-items-center rounded-sm p-0 text-neutral-dim transition-colors hover:bg-surface-hover hover:text-neutral-fg [&_svg]:size-[15px]"
+            :title="t('sidebar.remoteConnect')"
+            :aria-label="t('sidebar.remoteConnect')"
+            data-testid="sidebar-remote-connect"
+            @click="openSettings('remote-access')"
+          >
+            <Smartphone class="size-[15px]" />
+          </Button>
+          <Popover v-model:open="quickThemeOpen">
+            <PopoverTrigger as-child>
+              <Button
+                variant="ghost"
+                class="grid size-8 shrink-0 place-items-center rounded-sm p-0 text-neutral-dim transition-colors hover:bg-surface-hover hover:text-neutral-fg [&_svg]:size-[15px]"
+                :title="t('sidebar.quickAppearance')"
+                :aria-label="t('sidebar.quickAppearance')"
+                data-testid="sidebar-quick-appearance"
+              >
+                <Palette class="size-[15px]" />
+              </Button>
+            </PopoverTrigger>
+            <!-- 外观快捷面板 = demo .qs-panel（workbench.css:209-217）：212px 浮层卡（elevated 底 +
+                 border-strong + r-lg + shadow-3），头「主题」+ 双列色卡 chip（外框主题底 + 内点 accent）；
+                 选中态用 real 外观页主题行同款（surface-hover 底 + inset border-strong + fw-mid） -->
+            <PopoverContent
+              side="top"
+              align="end"
+              :side-offset="10"
+              class="w-[212px] rounded-[var(--radius-lg)] border-border-strong p-[10px] shadow-[var(--shadow-3)]"
+              data-testid="sidebar-quick-appearance-panel"
+            >
+              <div class="mb-[6px] mt-[2px] px-[2px] text-[length:var(--text-sm)] [font-weight:var(--fw-mid)] tracking-[0.05em] text-neutral-dim">{{ t('sidebar.quickThemeTitle') }}</div>
+              <div class="grid grid-cols-2 gap-1">
+                <button
+                  v-for="th in TAIJI_THEMES"
+                  :key="th.label"
+                  type="button"
+                  class="flex items-center gap-[7px] rounded-[var(--radius-sm)] px-2 py-[5px] text-left text-[length:var(--text-md)] transition-colors duration-[var(--duration-fast)] ease-[var(--ease-out)]"
+                  :class="th.label === currentTheme.label
+                    ? 'bg-surface-hover text-neutral-fg shadow-[inset_0_0_0_1px_var(--border-strong)] [font-weight:var(--fw-mid)]'
+                    : 'text-neutral-fg-2 hover:bg-surface-hover hover:text-neutral-fg'"
+                  :aria-pressed="th.label === currentTheme.label"
+                  :data-testid="`sidebar-quick-theme-${th.preset || th.theme}`"
+                  @click="applyTheme(th)"
+                >
+                  <span
+                    class="flex size-[14px] flex-none items-center justify-center rounded-[var(--radius-xs)] border border-border-strong"
+                    :style="{ background: th.swatch[3] }"
+                  >
+                    <i class="block size-[6px] rounded-full" :style="{ background: th.swatch[0] }" />
+                  </span>
+                  <span class="min-w-0 truncate">{{ th.shortName }}</span>
+                </button>
+              </div>
+            </PopoverContent>
+          </Popover>
+          <Button
+            variant="ghost"
+            class="grid size-8 shrink-0 place-items-center rounded-sm p-0 text-neutral-dim transition-colors hover:bg-surface-hover hover:text-neutral-fg [&_svg]:size-[15px]"
             :title="t('sidebar.settingsTitle')"
+            :aria-label="t('sidebar.settingsTitle')"
             @click="openSettings()"
           >
             <Settings class="size-[15px]" />
@@ -181,11 +240,13 @@
 
 <script setup lang="ts">
 import { computed, inject, onBeforeUnmount, onMounted, ref } from 'vue'
-import { Plus, Search, Settings, FolderOpen, AlertCircle, Puzzle, Download } from '@lucide/vue'
+import { Plus, Search, Settings, FolderOpen, AlertCircle, Puzzle, Download, Smartphone, Palette } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { SearchModal } from '@taiji/ui'
 import { PluginViewContainer } from '@taiji/ui/extension-host'
-import { useSearchModal } from '@taiji/core'
+import { useSearchModal, getSettingsStore } from '@taiji/core'
+import { TAIJI_THEMES, resolveTaijiTheme, type TaijiTheme } from '@/composables/useTaijiThemes'
 import { useSessionStore } from '@/stores/session'
 import { useSidebarStore } from '@/stores/sidebar'
 import { useSidebar } from '@/composables/features/sidebar/useSidebar'
@@ -219,7 +280,19 @@ const { isOpen } = searchModal
 const session = useSessionStore()
 const sidebar = useSidebarStore()
 const { error: toastError } = useToast()
-const openSettings = inject<() => void>('openSettings', () => {})
+const openSettings = inject<(section?: string) => void>('openSettings', () => {})
+// 外观快捷面板（demo .qs-panel）：六主题即时切换，写同一条 setSystem 通道（settings 弹层
+// onSystemUpdate 同源——持久化 + DOM 同步在 store 内完成），选中项经 resolveTaijiTheme 解析。
+const quickThemeOpen = ref(false)
+const settingsStore = getSettingsStore()
+const currentTheme = computed(() => resolveTaijiTheme(settingsStore.system.value))
+async function applyTheme(th: TaijiTheme): Promise<void> {
+  try {
+    await settingsStore.setSystem({ theme: th.theme, themePreset: th.preset })
+  } catch (e) {
+    toastError(e instanceof Error ? e.message : String(e))
+  }
+}
 const { selectSession, restoreSession, newSession, loadSessions, renameSession, deleteSession, deleteFolder, assignSessionToProject, focusedSessionId, focusedSession: currentSession, forkFromLastAssistant, enterForkModeFromLastAssistant, handoffFromLastAssistant } = useSidebar()
 const piVersion = ref('')
 const versionLabel = computed(() => piVersion.value ? `v${__APP_VERSION__} · pi v${piVersion.value}` : `v${__APP_VERSION__}`)
