@@ -526,15 +526,29 @@ const {
 
 <style scoped>
 /*
- * 底抽屉收合过渡期内容保挂载（display-containers §6.2 S1「开合动画平顺」，U6 修复）：
- * 壳 height 过渡（--duration-slow）收拢期间内容不同帧消失——leave 期保持挂载并随壳淡出，
- * 卸载时机 = leave 过渡结束（Vue Transition 事件顺序语义，无定时兜底）。leave-active 加
- * absolute inset-0：收拢中的离场内容不占文档流（leave 未完即重开时新旧内容不叠流）。
- * 淡出走 opacity：E5 关方向 ease-in，时长 = demo --dur-base（与壳层 height 过渡
- * --duration-slow 分层各自独立，demo 两层时长本就不同），消费令牌层既有 --duration
- * （值 200ms 与 demo --dur-base 同值，MF-2-17 收编，不新增 --duration-base 重复令牌）；
- * reduced-motion 全局兜底保留 opacity 过渡（style.css「更少更温和」非零裁决）。
+ * 底抽屉内容显隐过渡（display-containers §6.2 S1「开合动画平顺」；demo drawers.css .bd
+ * 显隐层语义，与壳层 height 过渡 --duration-slow 分层各自独立——demo 两层时长本就不同）：
+ * - 开（enter）：opacity 0→1 + translateY(16px→0) 上浮淡入，E5 显隐层开方向 ease-out；
+ * - 关（leave）：收合过渡期内容保挂载（U6）——壳 height 过渡收拢期间内容不同帧消失，
+ *   leave 期保持挂载并随壳淡出，卸载时机 = leave 过渡结束（Vue Transition 事件顺序语义，
+ *   无定时兜底）；leave-active 加 absolute inset-0：收拢中的离场内容不占文档流（leave
+ *   未完即重开时新旧内容不叠流）；淡出走 opacity，E5 显隐层关方向 ease-in；
+ * - 时长 = demo --dur-base，消费令牌层既有 --duration（值 200ms 与 demo --dur-base 同值，
+ *   MF-2-17 收编，不新增 --duration-base 重复令牌）；
+ * - reduced-motion 全局兜底（style.css）：transform 移出过渡属性位移瞬切，opacity 保留
+ *   温和过渡（「更少更温和」非零裁决）。
  */
+.bottom-drawer-content-enter-active {
+  transition:
+    opacity var(--duration) var(--ease-out),
+    transform var(--duration) var(--ease-out);
+}
+
+.bottom-drawer-content-enter-from {
+  opacity: 0;
+  transform: translateY(16px);
+}
+
 .bottom-drawer-content-leave-active {
   position: absolute;
   inset: 0;

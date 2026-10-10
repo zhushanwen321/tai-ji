@@ -15,14 +15,14 @@
         <Button
           variant="ghost"
           size="sm"
-          class="relative size-8 shrink-0 rounded-sm p-0 text-neutral-dim transition-colors hover:bg-surface-hover hover:text-neutral-fg"
+          class="relative size-[32px] shrink-0 rounded-sm p-0 text-neutral-dim transition-colors hover:bg-surface-hover hover:text-neutral-fg"
           data-testid="update-available"
           :title="t('sidebar.update.newVersion')"
           @click="onPerformUpdate"
         >
           <ArrowUp class="size-[15px]" :stroke-width="1.8" />
           <!-- 红点角标（demo .upd-dot：top/right 4px，7px 圆） -->
-          <span class="absolute right-1 top-1 size-[7px] rounded-full bg-danger" data-testid="update-badge" />
+          <span class="absolute right-[4px] top-[4px] size-[7px] rounded-full bg-danger" data-testid="update-badge" />
         </Button>
       </HoverCardTrigger>
       <HoverCardContent side="top" class="release-notes-content max-h-[360px] w-[360px] overflow-auto p-4 text-[length:var(--text-xs)] text-neutral-fg">

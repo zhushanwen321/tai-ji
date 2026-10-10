@@ -8,8 +8,9 @@
   - 指标聚合 = **hover** 弹指标聚合页（HoverCard）——与模型聚合的 click 语义区分；
     容器对齐 demo .stats-pop（右下锚 10px 间距 / r-lg / border-strong / shadow-2）；
   - 内容 = 四张纯内容卡纵向拼装（ContextCapacityCard + GenStatsTtftCard + GenStatsSpeedCard
-    + GenStatsCacheCard），卡间发丝分隔（token 工具类 h-px bg-border-strong 局部定义，不
-    import 接线层常量）；四卡共享 useGenStats / useContextUsage 分区，数据同源。
+    + GenStatsCacheCard），卡间发丝分隔（对齐 demo .ag-seg 相邻边框 hairline 档：
+    h-px bg-[color:var(--hairline)] 局部定义，不 import 接线层常量）；四卡共享
+    useGenStats / useContextUsage 分区，数据同源。
 
   契约：props = { sessionId: string; modelId?: string }，无 emits。
   quota 的 hover-enter 查询挂在 HoverCardTrigger 上——查询触发属「hover 指标入口」这一
@@ -34,11 +35,11 @@
          四卡布局宽（demo 240 是四行 sr 形态的宽，登记差异） -->
     <HoverCardContent side="top" align="end" :side-offset="10" class="w-[300px] rounded-lg p-0">
       <ContextCapacityCard :session-id="props.sessionId" :model-id="props.modelId" />
-      <span class="block h-px bg-border-strong" aria-hidden="true" />
+      <span class="block h-px bg-[color:var(--hairline)]" aria-hidden="true" />
       <GenStatsTtftCard :session-id="props.sessionId" :model-id="props.modelId" />
-      <span class="block h-px bg-border-strong" aria-hidden="true" />
+      <span class="block h-px bg-[color:var(--hairline)]" aria-hidden="true" />
       <GenStatsSpeedCard :session-id="props.sessionId" :model-id="props.modelId" />
-      <span class="block h-px bg-border-strong" aria-hidden="true" />
+      <span class="block h-px bg-[color:var(--hairline)]" aria-hidden="true" />
       <GenStatsCacheCard :session-id="props.sessionId" :model-id="props.modelId" />
     </HoverCardContent>
   </HoverCard>

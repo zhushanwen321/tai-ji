@@ -208,7 +208,7 @@ function onOpenBrowser(): void {
           <div
             v-if="authorized"
             data-testid="oauth-authorized"
-            class="flex items-center gap-1.5 rounded-md border border-success/30 bg-success-soft px-3 py-2 text-[12px] text-success"
+            class="flex items-center gap-1.5 rounded-md border border-[color-mix(in_oklch,var(--success)_30%,transparent)] bg-success-soft px-3 py-2 text-[12px] text-success"
           >
             <Check class="size-4 shrink-0" />
             <span class="font-medium">{{ t('settings.provider.oauthDialog.alreadyAuthorized') }}</span>
@@ -295,7 +295,7 @@ function onOpenBrowser(): void {
         <div
           v-else-if="status === 'success'"
           data-testid="oauth-success"
-          class="flex flex-col items-center gap-2 rounded-md border border-success/30 bg-success-soft px-3 py-6 text-[12px]"
+          class="flex flex-col items-center gap-2 rounded-md border border-[color-mix(in_oklch,var(--success)_30%,transparent)] bg-success-soft px-3 py-6 text-[12px]"
         >
           <span class="flex size-9 items-center justify-center rounded-full bg-success text-white">
             <Check class="size-5" />
@@ -308,7 +308,7 @@ function onOpenBrowser(): void {
         <div
           v-else-if="status === 'error'"
           data-testid="oauth-error"
-          class="flex items-start gap-1.5 rounded-md border border-danger/30 bg-danger-soft px-3 py-2 text-[12px] text-danger"
+          class="flex items-start gap-1.5 rounded-md border border-[color-mix(in_oklch,var(--danger)_30%,transparent)] bg-danger-soft px-3 py-2 text-[12px] text-danger"
         >
           <AlertCircle class="size-4 shrink-0" />
           <span>{{ errorMessage || t('settings.provider.oauthDialog.errorUnknown') }}</span>

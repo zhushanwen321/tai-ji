@@ -235,7 +235,7 @@ onBeforeUnmount(() => { cancelled.value = true; clearSuccessTimer() })
           <div v-else-if="isBareMode" data-testid="repo-bare" class="flex items-center gap-2 rounded-md border border-border bg-bg-input px-3 py-2">
             <Folder class="size-4 shrink-0 text-neutral-dim" />
             <span class="flex-1 truncate font-mono text-[length:var(--text-sm)] text-neutral-fg">{{ repoPath }}</span>
-            <span data-testid="repo-bare-badge" class="shrink-0 rounded-full bg-accent/15 px-2 py-0.5 text-[length:var(--text-2xs)] font-medium text-accent">{{ t('newTask.createWorktree.repoBareBadge') }}</span>
+            <span data-testid="repo-bare-badge" class="shrink-0 rounded-full bg-[color-mix(in_oklch,var(--accent)_15%,transparent)] px-2 py-0.5 text-[length:var(--text-2xs)] font-medium text-accent">{{ t('newTask.createWorktree.repoBareBadge') }}</span>
           </div>
           <div v-else-if="isPlainRepoMode" data-testid="repo-plain" class="flex items-center gap-2 rounded-md border border-border bg-bg-input px-3 py-2">
             <FolderOpen class="size-4 shrink-0 text-neutral-dim" />
@@ -306,7 +306,7 @@ onBeforeUnmount(() => { cancelled.value = true; clearSuccessTimer() })
               role="radio"
               :aria-checked="locationMode === 'workspace'"
               class="flex h-auto w-full cursor-pointer items-center justify-start gap-3 rounded-md border px-3 py-2 transition-colors hover:bg-transparent"
-              :class="locationMode === 'workspace' ? 'border-accent bg-accent/5 text-neutral-fg hover:bg-accent/5' : 'border-border bg-bg-input text-neutral-fg hover:bg-bg-input'"
+              :class="locationMode === 'workspace' ? 'border-accent bg-[color-mix(in_oklch,var(--accent)_5%,transparent)] text-neutral-fg hover:bg-[color-mix(in_oklch,var(--accent)_5%,transparent)]' : 'border-border bg-bg-input text-neutral-fg hover:bg-bg-input'"
               @click="selectLocation('workspace')"
             >
               <span class="size-3.5 shrink-0 rounded-full border" :class="locationMode === 'workspace' ? 'border-accent bg-accent' : 'border-border'" />
@@ -321,7 +321,7 @@ onBeforeUnmount(() => { cancelled.value = true; clearSuccessTimer() })
               role="radio"
               :aria-checked="locationMode === 'repo-dir'"
               class="flex h-auto w-full cursor-pointer items-center justify-start gap-3 rounded-md border px-3 py-2 transition-colors hover:bg-transparent"
-              :class="locationMode === 'repo-dir' ? 'border-accent bg-accent/5 text-neutral-fg hover:bg-accent/5' : 'border-border bg-bg-input text-neutral-fg hover:bg-bg-input'"
+              :class="locationMode === 'repo-dir' ? 'border-accent bg-[color-mix(in_oklch,var(--accent)_5%,transparent)] text-neutral-fg hover:bg-[color-mix(in_oklch,var(--accent)_5%,transparent)]' : 'border-border bg-bg-input text-neutral-fg hover:bg-bg-input'"
               @click="selectLocation('repo-dir')"
             >
               <span class="size-3.5 shrink-0 rounded-full border" :class="locationMode === 'repo-dir' ? 'border-accent bg-accent' : 'border-border'" />
@@ -334,12 +334,12 @@ onBeforeUnmount(() => { cancelled.value = true; clearSuccessTimer() })
               role="radio"
               :aria-checked="locationMode === 'dedicated-dir'"
               class="flex h-auto w-full cursor-pointer items-center justify-start gap-3 rounded-md border px-3 py-2 transition-colors hover:bg-transparent"
-              :class="locationMode === 'dedicated-dir' ? 'border-accent bg-accent/5 text-neutral-fg hover:bg-accent/5' : 'border-border bg-bg-input text-neutral-fg hover:bg-bg-input'"
+              :class="locationMode === 'dedicated-dir' ? 'border-accent bg-[color-mix(in_oklch,var(--accent)_5%,transparent)] text-neutral-fg hover:bg-[color-mix(in_oklch,var(--accent)_5%,transparent)]' : 'border-border bg-bg-input text-neutral-fg hover:bg-bg-input'"
               @click="selectLocation('dedicated-dir')"
             >
               <span class="size-3.5 shrink-0 rounded-full border" :class="locationMode === 'dedicated-dir' ? 'border-accent bg-accent' : 'border-border'" />
               <span class="flex-1 text-left text-[length:var(--text-sm)]">{{ t('newTask.createWorktree.locationDedicatedDir', { dir: dedicatedDirPreview }) }}</span>
-              <span data-testid="location-recommended-badge" class="shrink-0 rounded-full bg-accent/15 px-2 py-0.5 text-[length:var(--text-2xs)] font-medium text-accent">{{ t('newTask.createWorktree.locationRecommended') }}</span>
+              <span data-testid="location-recommended-badge" class="shrink-0 rounded-full bg-[color-mix(in_oklch,var(--accent)_15%,transparent)] px-2 py-0.5 text-[length:var(--text-2xs)] font-medium text-accent">{{ t('newTask.createWorktree.locationRecommended') }}</span>
             </Button>
           </div>
         </div>

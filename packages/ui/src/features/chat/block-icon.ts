@@ -112,13 +112,17 @@ export const RUNNING_LOADER_SVG: string =
 /**
  * trace 块 header 的 ICON + 前缀文案统一规格（thinking / tool / subagent / workflow 四块共用）。
  *
+ * 图标静态档 = --neutral-dim（demo `.tool .sicon { color: var(--dim) }`，workbench.css:378，
+ * --dim 即「工具行/元信息」档）；demo 图标无 hover 变色，故不带 hover 类——failed/thinking/
+ * running 三状态分支的显式换色不受影响（消费方 headerIconClass / 行内显式类各自覆盖）。
+ *
  * 前缀单语言化后必须非 mono、非 uppercase、非 letter-spacing：中文 label 走 mono 会掉回 CJK
  * 字体（英文 mono 的等宽观感消失），tracking 撑开汉字间距正是 DESIGN.md:124/:862 禁的
  * 「uppercase + tracking-wider 装饰文字」。字号取 --text-sm（13px）与块内其余槽位
  * （toolName / name / slug 均 13px）同档，层级由色彩承担而非缩到 11px。
  */
 export const BLOCK_ICON_CLASS =
-  'size-[15px] shrink-0 text-neutral-ico hover:text-neutral-ico-hover [stroke-width:1.6]'
+  'size-[15px] shrink-0 text-neutral-dim [stroke-width:1.6]'
 /** 动作词 label（思考 / 执行工具 / WORKFLOW. / SUBAGENT. 前缀）：字重走 --fw-mid；
  *  颜色落行层级灰 --neutral-mid。M3b demo 复刻对齐（demo .blk 过程行 14px + label
  *  fw-mid），随 BLOCK_ICON_CLASS 同批从 13px/bold 迁移。 */

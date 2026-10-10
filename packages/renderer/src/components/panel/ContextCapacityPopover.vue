@@ -16,8 +16,8 @@
         variant="ghost"
         :class="
           cn(
-            'h-7 gap-1 rounded-[var(--radius-xs)] px-2 text-[length:var(--text-2xs)] transition-colors',
-            isHigh ? 'text-warn hover:text-warn' : 'text-neutral-dim hover:text-neutral-mid',
+            'h-7 gap-1 rounded-[var(--radius-xs)] px-2 text-[length:var(--text-2xs)] transition-colors hover:bg-transparent',
+            isHigh ? 'text-warn' : 'text-neutral-dim',
           )
         "
         :title="t('panel.context.capacity')"
@@ -37,7 +37,7 @@
       side="top"
       align="end"
       :side-offset="10"
-      class="w-[260px] p-0"
+      class="w-[248px] p-0"
     >
       <ContextCapacityCard :session-id="props.sessionId" :model-id="props.modelId" />
     </HoverCardContent>

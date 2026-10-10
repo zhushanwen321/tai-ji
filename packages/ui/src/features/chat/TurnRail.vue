@@ -15,7 +15,7 @@
     - 节点 = 6px 圆角（--radius-sm）4×6 padding，行 12px 字号 1.35 行高（demo .rail-row）
     - 节点 hover = surface-hover 底（全节点统一——demo .rail-node:hover 无条件命中，
       选中项 hover 同样给临时反馈底；Tier B 选中规则只管文字提亮，与 hover 底不冲突）
-    - 选中节点（.on）= demo Tier B 行类范式：无底无框仅文字提亮（workbench.css:727
+    - 选中节点（.on）= demo Tier B 行类范式：无底无框仅文字提亮（workbench.css:749
       .si.on,.frow.sel,.rail-node.on{color:var(--fg)} + :291 收编注释），节点文字提为
       text-neutral-fg；图标提为 fg-2（demo .rail-node.on .rail-row svg——呼吸弧行图标
       同为 fg-2，非 accent）
@@ -197,7 +197,7 @@ function agentRowIconClass(turn: MessageTurn, idx: number): string {
 
 /**
  * agent 行摘要文字色（demo Tier B 行类文字提亮 + real 超集语义）：
- * 选中节点 → text-neutral-fg（Tier B「无底无框仅文字提亮」，demo workbench.css:727
+ * 选中节点 → text-neutral-fg（Tier B「无底无框仅文字提亮」，demo workbench.css:749
  * .rail-node.on{color:var(--fg)}——span 有自有 mid 色不吃节点继承，须显式提亮）；
  * 未选中 failed → text-neutral-mid + hover 提亮；未选中普通 → text-neutral-mid
  * （demo .rail-row span）。failed 状态信号由图标 danger 常驻承担，选中时文字照常提亮。

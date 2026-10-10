@@ -131,12 +131,15 @@ function onSelect(tpl: BuiltinProviderTemplate): void {
     </PopoverTriggerButton>
     <PopoverContent class="w-72 p-1">
       <!-- 一级：入口菜单（内置模板（推荐，默认高亮）+ 自定义）。默认高亮项 = demo
-           .pop-item.current 中性定位态（surface-2 底 + border-strong 内嵌描边，不消费 accent），
-           与 POPOVER_LIST_ITEM_ACTIVE_CLASS（ui popover styles.ts）同款描边语言。 -->
+           .pop-item.current 中性定位态（border-strong 内嵌描边 + 凹陷档底，不消费 accent），
+           与 POPOVER_LIST_ITEM_ACTIVE_CLASS（ui popover styles.ts）同款语言。
+           底色引 --bg-input 凹陷档：demo --surface-2 = var(--card-inset) 凹陷档，
+           real --surface-2 浮起档（U1 在册）同名分叉，复刻消费点按 demo 渲染方向引凹陷档
+           （与 ExtensionInstallFlow .u-seg 槽底同批先例同款写法）。 -->
       <Button
         variant="ghost"
         data-testid="add-menu-builtin"
-        class="flex h-auto w-full items-center gap-2 rounded-sm bg-surface-2 px-2.5 py-2 text-[13px] text-neutral-fg shadow-[inset_0_0_0_1px_var(--border-strong)] hover:bg-surface-2"
+        class="flex h-auto w-full items-center gap-2 rounded-sm bg-bg-input px-2.5 py-2 text-[13px] text-neutral-fg shadow-[inset_0_0_0_1px_var(--border-strong)] hover:bg-bg-input"
         @click="onMenuBuiltin"
       >
         <Library class="size-4 shrink-0 text-accent" />

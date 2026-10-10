@@ -229,7 +229,7 @@ async function onScan(): Promise<void> {
  * 来源 badge 配色——token 化（ADR-0019）：全部用 design-tokens 语义色，
  * 禁止直引 Tailwind 调色板（amber/emerald/violet）。
  * skill/agent 配色统一：pi=accent(主色) · claude=warning · agents=success · pi-install=info。
- * /12 软底透明度对齐 FileTreeRow.vue 既有的 badge 模式（bg-success/12 text-success）。
+ * 软底统一用 *-soft 令牌类（与 FileTreeRow.vue badge 的 bg-success-soft text-success 同款）。
  */
 function sourceBadgeClass(source: string): string {
   const map: Record<string, string> = {

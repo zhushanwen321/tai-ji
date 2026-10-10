@@ -28,7 +28,7 @@
           variant="ghost"
           :class="
             cn(
-              'h-7 gap-1 rounded-[var(--radius-xs)] px-2 text-[length:var(--text-2xs)] transition-colors',
+              'h-7 gap-1 rounded-[var(--radius-xs)] px-2 text-[length:var(--text-2xs)] transition-colors hover:bg-transparent',
               ttftTriggerClass,
             )
           "
@@ -43,7 +43,7 @@
         side="top"
         align="end"
         :side-offset="10"
-        class="w-[260px] p-0"
+        class="w-[248px] p-0"
         data-testid="genstats-ttft-popover"
       >
         <GenStatsTtftCard :session-id="props.sessionId" :model-id="props.modelId" />
@@ -55,7 +55,7 @@
       <HoverCardTrigger as-child>
         <Button
           variant="ghost"
-          class="h-7 gap-1 rounded-[var(--radius-xs)] px-2 text-[length:var(--text-2xs)] text-neutral-dim transition-colors hover:text-neutral-mid"
+          class="h-7 gap-1 rounded-[var(--radius-xs)] px-2 text-[length:var(--text-2xs)] text-neutral-dim transition-colors hover:bg-transparent"
           :title="t('panel.context.genStatsSpeedTitle')"
         >
           <span class="tabular-nums" data-testid="genstats-speed-value">{{ speedDisplay }}</span>
@@ -65,7 +65,7 @@
         side="top"
         align="end"
         :side-offset="10"
-        class="w-[260px] p-0"
+        class="w-[248px] p-0"
       >
         <GenStatsSpeedCard :session-id="props.sessionId" :model-id="props.modelId" />
       </HoverCardContent>
@@ -76,7 +76,7 @@
       <HoverCardTrigger as-child>
         <Button
           variant="ghost"
-          :class="cn('h-7 gap-1 rounded-[var(--radius-xs)] px-2 text-[length:var(--text-2xs)] transition-colors', cacheTriggerClass)"
+          :class="cn('h-7 gap-1 rounded-[var(--radius-xs)] px-2 text-[length:var(--text-2xs)] transition-colors hover:bg-transparent', cacheTriggerClass)"
           :title="t('panel.context.genStatsCacheTitle')"
         >
           <span class="tabular-nums" data-testid="genstats-cache-value">{{ cacheDisplay }}</span>
@@ -86,7 +86,7 @@
         side="top"
         align="end"
         :side-offset="10"
-        class="w-[260px] p-0"
+        class="w-[248px] p-0"
       >
         <GenStatsCacheCard :session-id="props.sessionId" :model-id="props.modelId" />
       </HoverCardContent>
@@ -165,12 +165,12 @@ const cacheCurrent = computed(() => frame.value?.cacheRatio.current ?? null)
 /** 归因态（runtime 已归因的「预期内 0%」）→ 触发器中性色 + 成因文案 */
 const cacheMiss = computed(() => frame.value?.cacheRatio.currentMiss ?? null)
 
-/** 触发器色：归因态 / 无值 → 中性；否则数值三档色（hover 同色，语义色下 hover 不改档） */
+/** 触发器色：归因态 / 无值 → 中性；否则数值三档色（仅前景档——demo 权威触发器 hover
+ *  零反馈，悬停即开浮层，hover 底由按钮静态串 hover:bg-transparent 压掉） */
 const cacheTriggerClass = computed(() => {
   const tier: CacheTier = cacheMiss.value ? 'neutral' : cacheTierOf(cacheCurrent.value)
-  if (tier === 'neutral') return 'text-neutral-dim hover:text-neutral-mid'
-  const cls = CACHE_TIER_TEXT_CLASS[tier]
-  return `${cls} hover:${cls}`
+  if (tier === 'neutral') return 'text-neutral-dim'
+  return CACHE_TIER_TEXT_CLASS[tier]
 })
 
 /** 触发器显示：归因态 → 成因文案（「空闲过期」等）；否则数值（null →「—」） */

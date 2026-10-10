@@ -3,7 +3,7 @@
     [W28/D-7.2] 纯行组件（收 VisibleRow，替代旧递归行）：
     - 递归 v-for（旧 :65-71）移出——展开子行由 FileView 的扁平行投影（projectVisibleRows）产出，
       本组件只渲染单行（dir/file/loading/error/empty 五态）
-    - 零 store 依赖：depth/expanded/changeCount/gitStatus/lineStats 全部来自 row（投影预计算），
+    - 零 store 依赖：depth/expanded/childCount/gitStatus/lineStats 全部来自 row（投影预计算），
       交互（toggle/select）经 emit 交给 FileView（持有 useFileTree + useSideDrawer）
     - data-testid 用 path（E2E 选择器，与旧递归版一致），dir/file 区分前缀
     - [HISTORICAL v-if/v-else 链断裂事故] 五态链保持单根：loading v-if → error v-else-if →
@@ -56,24 +56,25 @@
     >
       <span :class="chevronSlotClass" data-testid="chevron-slot">
         <ChevronRight
-          class="size-2.5 text-neutral-dim transition-transform duration-[var(--duration-fast)] ease-[var(--ease-out)]"
+          class="size-[10px] text-neutral-dim transition-transform duration-[var(--duration-fast)] ease-[var(--ease-out)]"
           :class="{ 'rotate-90': row.expanded }"
         />
       </span>
       <Folder class="size-[13px] shrink-0 text-neutral-dim" />
+      <!-- 长文件名 = demo .fname 契约（2026-10-10 裁决改向：省略号截断 + title 悬停展示全名，
+           不做 hover 横向滚动——原 marquee 双层结构/keyframes 已随改向卸载） -->
       <span
-        class="fname-scroll block flex-1 min-w-0 overflow-hidden whitespace-nowrap text-ellipsis hover:text-clip [container-type:inline-size]"
+        class="fname block min-w-0 flex-1 overflow-hidden whitespace-nowrap text-ellipsis"
         :class="row.ignored ? 'text-neutral-dim italic' : ''"
-      >
-        <span class="fname-roll inline-block w-max align-top">{{ row.name }}</span>
-      </span>
-      <!-- W2 目录改动数徽章（子树改动文件数，>0 才显；预聚合 count 由投影预计算）。
-           形态 = demo .fbadge（10px / card-inset 凹陷底 / radius-xs / 1×5 padding） -->
+        :title="row.name"
+      >{{ row.name }}</span>
+      <!-- 目录徽标（demo .fbadge 权威：是目录即恒渲染，内容 = 可见直接子项数，0 也显；
+           形态 = 10px / card-inset 凹陷底 / radius-xs / 1×5 padding）。
+           [2026-10-10 改向] 原「子树改动数 >0 才显」语义退役（改动数承载去向见 ledger 登记） -->
       <span
-        v-if="row.changeCount > 0"
         class="shrink-0 rounded-[var(--radius-xs)] bg-bg-input px-[5px] py-px font-mono text-[length:var(--text-3xs)] text-neutral-dim"
         :data-testid="`file-tree-dir-badge-${row.path}`"
-      >{{ row.changeCount > 999 ? '999+' : row.changeCount }}</span>
+      >{{ row.childCount > 999 ? '999+' : row.childCount }}</span>
     </div>
 
     <!-- 文件行（v-else 紧邻上方目录 v-else-if，链绑定到 row.type 判断）。
@@ -89,15 +90,15 @@
       <!-- D-022：chevron 槽固定宽度占位，使文件 icon 与目录 folder icon 垂直对齐 -->
       <span :class="chevronSlotClass" data-testid="chevron-slot" />
       <component :is="fileIcon" class="size-[13px] shrink-0" :class="fileIconColor" />
+      <!-- 长文件名 = demo .fname 契约（同目录行：ellipsis 截断 + title 悬停展示全名） -->
       <span
-        class="fname-scroll block flex-1 min-w-0 overflow-hidden whitespace-nowrap text-ellipsis hover:text-clip [container-type:inline-size]"
+        class="fname block min-w-0 flex-1 overflow-hidden whitespace-nowrap text-ellipsis"
         :class="[
           row.ignored ? 'text-neutral-dim italic' : '',
           selected ? 'text-neutral-fg [font-weight:var(--fw-mid)]' : '',
         ]"
-      >
-        <span class="fname-roll inline-block w-max align-top">{{ row.name }}</span>
-      </span>
+        :title="row.name"
+      >{{ row.name }}</span>
       <!-- git overlay 角标（D-012 树/标注分离：从投影的 row.gitStatus 取 status）。
            形态 = demo .gmark（10px fw-mid / radius-xs / 1×5 padding / 语义软底） -->
       <span
@@ -226,19 +227,3 @@ const fileIconColor = computed(() => {
   }
 })
 </script>
-
-<style scoped>
-/* 长文件名三要素（R6.1：截断 + hover 滚动展示全文；demo workbench.css .fname-scroll/.fname-roll
-   契约类逐值对齐，2026-10-10 用户裁决落定——原 max-content 整树横滚架构退役）：
-   布局属性走模板 Tailwind 工具类（ellipsis 截断 + [container-type:inline-size] 容器查询封
-   width 基准，cqw = 名称可见宽）；此处只留动画层——hover 时 ellipsis 让位滚动
-   （hover:text-clip），内层 w-max 持全文，0.35s 延迟防误触，2.4s 匀速滚到
-   「全文末对齐容器右缘」停住（短名不滚）；移出复位（动画卸载）；reduced-motion 停。 */
-.fname-scroll:hover .fname-roll { animation: fname-roll-x 2.4s var(--ease-out) 0.35s forwards; }
-@keyframes fname-roll-x {
-  to { transform: translateX(min(0px, calc(-100% + 100cqw))); }
-}
-@media (prefers-reduced-motion: reduce) {
-  .fname-scroll:hover .fname-roll { animation: none; }
-}
-</style>

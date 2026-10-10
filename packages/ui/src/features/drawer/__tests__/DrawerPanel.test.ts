@@ -135,6 +135,13 @@ describe('DrawerPanel (R3 抽屉域焦点作用域，MF-1-51)', () => {
     expect(aside.classes()).toContain('[&_input:focus-visible]:outline-none')
     expect(aside.classes()).toContain('[&_input:focus-visible]:shadow-none')
   })
+
+  it('[tabindex] 键盘聚焦双压：inset shadow 通道 + outline-none 同在（漏 outline-none 时 UA 默认焦点环与 inset 框叠双框）', () => {
+    const wrapper = mount(DrawerPanel, { props: baseProps() })
+    const aside = wrapper.find('[data-testid="drawer-panel"]')
+    expect(aside.classes()).toContain('[&_[tabindex]:focus-visible]:shadow-[inset_0_0_0_1px_var(--border-strong)]')
+    expect(aside.classes()).toContain('[&_[tabindex]:focus-visible]:outline-none')
+  })
 })
 
 // bashTask tab（2026-09 background-task-sidebar-view D5②）：tabs 加第 8 个 TabMeta。

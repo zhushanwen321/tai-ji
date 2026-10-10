@@ -113,10 +113,12 @@ export function ttftTier(ms: number | null): TtftTier {
 }
 
 /** 档位 → 触发器 class 映射。字面量静态串（Tailwind JIT 按源码扫描生成类；模板字符串
- *  拼接动态类名不在扫描集，样式会静默丢失——映射表而非 `text-${tier}` 拼接）。 */
+ *  拼接动态类名不在扫描集，样式会静默丢失——映射表而非 `text-${tier}` 拼接）。
+ *  仅前景色档，无 hover 类：demo 权威 .mchip 无任何 :hover 规则（悬停即开浮层，
+ *  触发器本身零反馈），hover 覆盖由消费方 `hover:bg-transparent` 压 Button ghost 底。 */
 export const TTFT_TRIGGER_TIER_CLASSES: Record<TtftTier, string> = {
-  success: 'text-success hover:text-success',
-  warn: 'text-warn hover:text-warn',
-  danger: 'text-danger hover:text-danger',
-  neutral: 'text-neutral-dim hover:text-neutral-mid',
+  success: 'text-success',
+  warn: 'text-warn',
+  danger: 'text-danger',
+  neutral: 'text-neutral-dim',
 }

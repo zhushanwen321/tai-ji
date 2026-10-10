@@ -15,10 +15,13 @@
   aside 根持容器级 focus-visible 覆盖——input 聚焦零框（光标即反馈，与 composer 同规）。
   MF-1-71 后全局 Input 聚焦走 outline 通道，抽屉域须双属性同压：shadow-none 压
   ring/box-shadow 通道 + outline-none 压 outline 通道（漏一即穿，MF-1-51×MF-1-71
-  合流缺口教训）；button/[tabindex]
-  键盘焦点 = inset 1px --border-strong（压掉 ui Button 基类 ring-2 外环——ring-0 +
-  ring-offset-0 归零 ring 变量后由 inset shadow 承接；[tabindex] 覆盖 DetailPane 等
-  role=tab 后代）。作用域只罩本 aside 后代，不触全局 Input.vue / button-variants.ts 基类。
+  合流缺口教训）；[tabindex]
+  键盘焦点 = inset 1px --border-strong + outline-none 双压（demo drawers.css .rd
+  [tabindex]:focus-visible 同款双声明——只压 shadow 通道时 UA 默认 focus 环仍在，
+  与 inset 框叠双框；[tabindex] 覆盖 DetailPane 等 role=tab 后代）。button 键盘焦点 =
+  inset 1px --border-strong（压掉 ui Button 基类 ring-2 外环——ring-0 + ring-offset-0
+  归零 ring 变量后由 inset shadow 承接）。作用域只罩本 aside 后代，不触全局
+  Input.vue / button-variants.ts 基类。
 
   状态/数据契约（IF2 + clarify C1）：
   - props{isOpen, activeTab, sessionId} 为控制态（父组件 PanelContainer 管理），
@@ -35,7 +38,7 @@
     <Transition name="drawer-slide-right">
     <aside
       v-if="isOpen"
-      class="relative flex h-full min-w-0 flex-col rounded-[var(--radius-card)] border border-border bg-surface shadow-[var(--shadow-1)] [&_input:focus-visible]:shadow-none [&_input:focus-visible]:outline-none [&_button:focus-visible]:ring-0 [&_button:focus-visible]:ring-offset-0 [&_button:focus-visible]:shadow-[inset_0_0_0_1px_var(--border-strong)] [&_[tabindex]:focus-visible]:shadow-[inset_0_0_0_1px_var(--border-strong)]"
+      class="relative flex h-full min-w-0 flex-col rounded-[var(--radius-card)] border border-border bg-surface shadow-[var(--shadow-1)] [&_input:focus-visible]:shadow-none [&_input:focus-visible]:outline-none [&_button:focus-visible]:ring-0 [&_button:focus-visible]:ring-offset-0 [&_button:focus-visible]:shadow-[inset_0_0_0_1px_var(--border-strong)] [&_[tabindex]:focus-visible]:shadow-[inset_0_0_0_1px_var(--border-strong)] [&_[tabindex]:focus-visible]:outline-none"
       :aria-label="t('panel.sideDrawer.title')"
       data-testid="drawer-panel"
     >

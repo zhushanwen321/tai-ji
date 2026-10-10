@@ -20,16 +20,16 @@
          信息文字不占 accent，workbench.css .fv-branch 语义），块底 hairline 分隔。
          内缩 = demo 阶梯（head 18px / tools 16px / 树行 14px）：根 px-1.5(6px) +
          head px-[12px] = 18px。D-020/D-004：忽略项开关移入下方 fv-tools 行（与过滤框同行，demo 同构）。 -->
-    <div v-if="sessionLabel" class="mb-2 border-b border-hairline px-[12px] pb-2 pt-0.5">
+    <div v-if="sessionLabel" class="mb-[8px] border-b border-hairline px-[12px] pb-[8px] pt-0.5">
       <div class="min-w-0 truncate text-[length:var(--text-sm)] [font-weight:var(--fw-mid)] text-neutral-fg">{{ sessionLabel }}</div>
       <div v-if="branch" class="mt-0.5 truncate font-mono text-[length:var(--text-2xs)] text-neutral-fg-2">{{ branch }}</div>
     </div>
 
     <!-- fv-tools（demo 形态）：忽略项开关 + 过滤框同一行（gap 6px）。内缩 = 根 6px + px-[10px] = 16px 阶梯档。 -->
-    <div class="flex items-center gap-1.5 px-[10px] pb-2">
+    <div class="flex items-center gap-[6px] px-[10px] pb-[8px]">
       <Button
         variant="ghost"
-        class="h-6 shrink-0 gap-1 rounded-sm px-[7px] text-[length:var(--text-2xs)]"
+        class="h-[24px] shrink-0 gap-1 rounded-sm px-[7px] text-[length:var(--text-2xs)] [&_svg]:size-[15px]"
         :class="store.showIgnored ? 'text-accent' : 'text-neutral-dim'"
         :title="store.showIgnored ? t('sidebar.fileView.hideIgnored') : t('sidebar.fileView.showIgnored')"
         data-testid="file-show-ignored-toggle"
@@ -43,10 +43,10 @@
            容器即 input 高度，图标直接 top-1/2 居中。Input 原语默认 rounded-md(8px)/
            placeholder mid/border-input(0.07)，此处覆写为 demo 值（r-sm 6px / dim / hairline 0.05）。 -->
       <div class="relative min-w-0 flex-1">
-        <Search class="pointer-events-none absolute left-[7px] top-1/2 size-3 -translate-y-1/2 text-neutral-dim" />
+        <Search class="pointer-events-none absolute left-[7px] top-1/2 size-[12px] -translate-y-1/2 text-neutral-dim" />
         <Input
           :model-value="filterDisplay"
-          class="h-6 rounded-sm border-hairline pl-6 pr-2 text-[length:var(--text-xs)] placeholder:text-neutral-dim"
+          class="h-[24px] rounded-sm border-hairline pl-[24px] pr-[8px] text-[length:var(--text-xs)] placeholder:text-neutral-dim"
           :placeholder="t('sidebar.fileView.filterPlaceholder')"
           data-testid="file-filter-input"
           @focus="filterFocused = true"
@@ -113,7 +113,7 @@
 
       <!-- 文件树：virtua 挂扁平行（可见行 = projectVisibleRows 投影）。2026-10-10 用户裁决
            （「长文件名不做横向滚动，用省略号+悬停展示」）落定 demo .fname 契约：行宽 = 100%
-           容器宽，名称超宽截断（FileTreeRow 的 fname-scroll/fname-roll 契约类承接悬停滚动）；
+           容器宽，名称超宽省略号截断 + title 悬停展示全名（FileTreeRow .fname 承接）；
            原 max-content 整树横滚架构退役（旧互斥登记作废）。
            注意：<template #default> 内禁止放注释/文本节点——virtua 的 item key 提取要求 slot 返回
            恰好 1 个 vnode（P(): e.length===1 才取 e[0].key），注释节点会 fallback 索引 key。 -->
@@ -183,7 +183,7 @@ const rootState = computed(() => store.getNodeState(props.sessionId, ''))
 /**
  * [W28/D-7.2] 唯一「树 → 可见行」投影 computed（E7-a：computed 缓存投影，依赖分桶后的
  * 细粒度 getter——展开/折叠/过滤/overlay 变化触发一次 O(可见行) 重投影）。
- * [W28 审查 Fix-2] overlay/counts 走 per-session getter（getGitOverlay/getDirChangeCounts，
+ * [W28 审查 Fix-2] overlay 走 per-session getter（getGitOverlay，
  * 与 getExpanded 同款分桶）——只追踪本 sid 分桶 key，异 sid git.status 回写不触发重算
  * （split mode 多面板隔离；store 侧 setGitOverlay 已改 keyed set 支撑）。
  * 语义与旧递归渲染逐行等价（顶层过滤 + 展开 DFS + loading/error/empty 占位行）。
@@ -193,7 +193,6 @@ const visibleRows = computed<VisibleRow[]>(() =>
     (sid) => store.getTree(sid),
     (sid) => store.getExpanded(sid),
     (sid) => store.getGitOverlay(sid),
-    (sid) => store.getDirChangeCounts(sid),
     store.filterText,
     store.showIgnored,
     props.sessionId,

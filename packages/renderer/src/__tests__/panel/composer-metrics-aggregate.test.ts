@@ -111,9 +111,9 @@ describe('聚合页四段卡（观察者形态）', () => {
     expect(wrapper.find('[data-testid="genstats-cache-miss-note"]').exists()).toBe(false)
   })
 
-  it('卡间恰好三条发丝分隔（h-px + bg-border-strong），无死分隔（四卡：容量/TTFT/速度/缓存）', () => {
+  it('卡间恰好三条发丝分隔（h-px + hairline 档），无死分隔（四卡：容量/TTFT/速度/缓存）', () => {
     const wrapper = mountAggregate(true)
-    const separators = wrapper.findAll('span.h-px.bg-border-strong')
+    const separators = wrapper.findAll('span.h-px.bg-\\[color\\:var\\(--hairline\\)\\]')
     expect(separators).toHaveLength(3)
   })
 

@@ -28,7 +28,7 @@ withDefaults(defineProps<Props>(), {
 <template>
   <!-- demo .brand：flex align-center gap 9px / padding 14px 14px 10px；产品名 --fs-body 15px
        fw-bold ls 0.02em；版本行 --fs-sm 11px --dim mt 1px。 -->
-  <div class="flex items-center gap-[9px] px-3.5 pb-2.5 pt-3.5">
+  <div class="flex items-center gap-[9px] px-[14px] pt-[14px] pb-[10px]">
     <TaijiLogo :size="28" :duration="8" class="shrink-0 text-neutral-fg" />
     <div class="flex min-w-0 flex-col leading-[1.1]">
       <!-- 产品名 + DEV 徽标内层行：产品名 min-w-0 让 truncate 在窄侧栏生效（flex item

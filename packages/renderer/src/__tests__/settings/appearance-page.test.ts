@@ -84,9 +84,12 @@ describe('AppearancePage 渲染 gate', () => {
   it('玄主题行渲染：label 含「青玉」、swatch 第一格 = demo 终态青玉 #7fb89c（V4⑤ 单测侧落点）', async () => {
     wrapper = mountPage()
     await flushPromises()
-    // 玄 preset='' → testid 为 appearance-theme-（模板 `appearance-theme-${th.preset}`）
-    const xuan = document.body.querySelector<HTMLElement>('[data-testid="appearance-theme-"]')
+    // 玄 preset='' → testid 回落 theme（模板 `appearance-theme-${th.preset || th.theme}`，qs chip 同款）
+    const xuan = document.body.querySelector<HTMLElement>('[data-testid="appearance-theme-dark"]')
     expect(xuan, '玄主题按钮应存在').toBeTruthy()
+    // 玄/皓 preset 均为空串，回落后 testid 不撞名（玄=dark、皓=light 各唯一）
+    expect(document.body.querySelectorAll('[data-testid="appearance-theme-dark"]')).toHaveLength(1)
+    expect(document.body.querySelector('[data-testid="appearance-theme-light"]')).toBeTruthy()
     // label 与 demo 文案一致：色相描述 = 青玉（与 swatch 首格 #7fb89c 名实一致）
     expect(xuan!.textContent).toContain('太极 · 玄（暗 · 青玉 · 默认）')
     expect(xuan!.textContent).not.toContain('纯灰')

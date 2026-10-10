@@ -101,8 +101,10 @@
         </Button>
       </div>
     </div>
-    <!-- 右簇：「+」新建 + 收起整个终端区（shrink-0 恒在可视区；gap 4px = demo .ib-right） -->
-    <div class="flex shrink-0 items-center gap-1">
+    <!-- 右簇：「+」新建 + 收起整个终端区（shrink-0 恒在可视区；gap 4px = demo .ib-right）。
+         ml-auto = demo .ib-right margin-left:auto：恒贴行尾——空态分支占位 <p> 无 flex-1、
+         tab 条被 v-else 摘除时右簇仍贴右，不紧贴占位文案 -->
+    <div class="ml-auto flex shrink-0 items-center gap-1">
       <Button
         variant="ghost"
         class="size-6 shrink-0 rounded-[var(--radius-xs)] p-0 text-neutral-mid hover:text-neutral-fg [&_svg]:size-[14px]"

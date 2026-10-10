@@ -381,6 +381,10 @@ async function submitEdit(): Promise<void> {
 .user-bubble-md :deep(.md-render .md-codeblock) {
   border: 0;
   border-radius: var(--radius);
+  /* margin 归零（与下方 table 容器对称）：共享规则 margin:0.7em 0（MarkdownRenderer）在
+     气泡内继续生效会使代码块上隙 ≈10.5px（BFC 不折叠）+ 内层 pre 6px ≈16.5px，demo 气泡
+     pre 单层 margin 仅 6px 0 0（workbench.css:338）——上距由内层 pre 规则（:389）承担。 */
+  margin: 0;
 }
 .user-bubble-md :deep(.md-render .md-codeblock__header) {
   display: none;

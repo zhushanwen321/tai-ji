@@ -155,10 +155,13 @@ describe('FileView 真实 virtua 虚拟滚动（P-D7-1：万级可见行 DOM 行
     store.addExpanded('s1', 'big')
     await flushVirtua()
 
-    // 真实 FileTreeRow 渲染（未 stub）——断言 DOM 中的实际行节点数
-    const dirRows = wrapper.findAll('[data-testid^="file-tree-dir-"]')
+    // 真实 FileTreeRow 渲染（未 stub）——断言 DOM 中的实际行节点数。
+    // 目录徽章（file-tree-dir-badge-*）2026-10-10 起目录恒渲染，前缀 ^="file-tree-dir-" 会同时
+    // 命中徽章节点，行计数必须排除徽章。
+    const dirRows = wrapper.findAll('[data-testid^="file-tree-dir-"]:not([data-testid*="-badge-"])')
     const fileRows = wrapper.findAll('[data-testid^="file-tree-file-"]')
     expect(dirRows.length).toBe(1) // big 目录行在 DOM
+    expect(wrapper.findAll('[data-testid="file-tree-dir-badge-big"]').length).toBe(1) // 徽章恒渲染
     expect(fileRows.length).toBeGreaterThan(0) // 视口内至少渲染了若干文件行
     // P-D7-1 量化 bound：DOM 行数 < 200（总可见行 10001）
     expect(fileRows.length + dirRows.length).toBeLessThan(200)

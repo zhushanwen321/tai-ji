@@ -38,10 +38,13 @@ export const POPOVER_LIST_ITEM_CLASS =
   'h-auto w-full justify-start gap-2 rounded-none px-2.5 py-1.5 text-[13px] text-neutral-fg hover:bg-surface-hover [&_svg]:size-4'
 
 /**
- * 列表项「已选」高亮类（当前 cwd / 当前分支）：surface-2 底 + 中性内嵌描边。
+ * 列表项「已选」高亮类（当前 cwd / 当前分支）：凹陷档底 + 中性内嵌描边。
  * 对齐 demo `.pop-item.current`（pages.css：background var(--surface-2) +
  * box-shadow inset 0 0 0 1px var(--border-strong)）——「当前项」是中性定位态，
  * 不消费 accent（accent 留给 Tier A 状态件/焦点/告警）。
+ * 底色引 --bg-input 凹陷档：demo --surface-2 = var(--card-inset) 凹陷档（浮层上呈
+ * 明显深一档的槽），real --surface-2 浮起档（U1 在册）同名分叉，复刻消费点按 demo
+ * 渲染方向引凹陷档（与 ui 包 popover styles 同名常量同款写法）。
  */
 export const POPOVER_LIST_ITEM_ACTIVE_CLASS =
-  'bg-surface-2 shadow-[inset_0_0_0_1px_var(--border-strong)]'
+  'bg-bg-input shadow-[inset_0_0_0_1px_var(--border-strong)]'

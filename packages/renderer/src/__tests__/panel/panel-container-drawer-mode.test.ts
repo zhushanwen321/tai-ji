@@ -281,8 +281,9 @@ describe('PanelContainer 首屏冒烟（TC1）', () => {
     // main-area + drawer-area 双区域挂载（手写 flex，宽度拆分）
     expect(wrapper.find('[data-testid="main-area"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="drawer-area"]').exists()).toBe(true)
-    // E5 方向缓动（demo drawers.css）：开方向 = ease-out 挂壳层 width 过渡类（ui-replica MF-1-50 防回归）
-    expect(wrapper.find('[data-testid="main-area"]').classes().join(' ')).toContain('ease-[var(--ease-out)]')
+    // 壳层 width 过渡 ease 恒 --ease（demo workbench.css .right-pane 权威；E5 分向缓动只属
+    // 显隐层）。classes() 数组元素全等断言：分向 ease-out/ease-in 类回归即红
+    expect(wrapper.find('[data-testid="main-area"]').classes()).toContain('ease-[var(--ease)]')
     // DrawerPanel 探针收到壳派发的 sessionId（分区键跟随 panel）
     expect(wrapper.find('[data-testid="drawer-panel"]').attributes('data-session-id')).toBe('sess-tc1')
   }, 60_000)
@@ -318,8 +319,8 @@ describe('PanelContainer 壳行为迁移（旧 side-drawer.test.ts 行为断言�
     await wrapper.find('[data-testid="drawer-close"]').trigger('click')
     await nextTick()
     expect(wrapper.find('[data-testid="drawer-panel"]').exists()).toBe(false)
-    // E5 关方向 = ease-in 挂壳层 width 过渡类（ui-replica MF-1-50 防回归）
-    expect(wrapper.find('[data-testid="main-area"]').classes().join(' ')).toContain('ease-[var(--ease-in)]')
+    // 壳层过渡 ease 不随开合方向变化（恒 --ease；E5 分向缓动只属显隐层）
+    expect(wrapper.find('[data-testid="main-area"]').classes()).toContain('ease-[var(--ease)]')
   }, 60_000)
 
   it('点 drawer-close 关闭后焦点回 composer（§6.7 焦点契约右抽屉鼠标通道，TerminalToggleButton（终端开关）同款）', async () => {

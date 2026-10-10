@@ -67,7 +67,7 @@
                 <span v-if="runModelDisplay.label" class="max-w-[140px] truncate">{{ runModelDisplay.label }}</span>
                 <span
                   v-if="runModelDisplay.overridden"
-                  class="shrink-0 rounded-sm border border-accent/40 px-1 text-[length:var(--text-3xs)] text-accent"
+                  class="shrink-0 rounded-sm border border-[color-mix(in_oklch,var(--accent)_40%,transparent)] px-1 text-[length:var(--text-3xs)] text-accent"
                   data-testid="drawer-workflow-override-badge"
                 >{{ t('panel.sideDrawer.subagentOverrideBadge') }}</span>
                 <ChevronDown class="size-3 shrink-0 opacity-60" />
@@ -101,7 +101,7 @@
             <div
               v-if="hasExplicitPhases"
               class="flex items-center gap-1.5 rounded-sm px-1 py-1"
-              :class="group.phaseStatus === 'running' ? 'bg-accent/10' : ''"
+              :class="group.phaseStatus === 'running' ? 'bg-accent-soft' : ''"
             >
               <span class="size-1.5 shrink-0 rounded-full" :class="phaseDotClass(group.phaseStatus)" />
               <span class="text-[length:var(--text-3xs)] font-medium text-neutral-dim">{{ group.phase }}</span>

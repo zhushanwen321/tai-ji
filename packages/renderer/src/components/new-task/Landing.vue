@@ -359,7 +359,7 @@ function onPresetSelect(payload: { presetId: string }): void {
               <Button
                 data-testid="chip-directory"
                 variant="ghost"
-                class="h-auto min-h-6 min-w-0 shrink-0 gap-1.5 rounded-sm px-2 py-[3px] text-[length:var(--text-xs)] text-neutral-mid hover:bg-surface-hover hover:text-neutral-fg [&_svg]:size-3.5"
+                class="h-auto min-h-6 min-w-0 shrink-0 gap-1.5 rounded-sm px-2 py-[3px] font-normal text-[length:var(--text-xs)] text-neutral-mid hover:bg-surface-hover hover:text-neutral-fg [&_svg]:size-3.5"
                 :class="{ '!text-accent': !cwd }"
               >
                 <Folder class="shrink-0" />
@@ -381,7 +381,7 @@ function onPresetSelect(payload: { presetId: string }): void {
               <Button
                 data-testid="chip-branch"
                 variant="ghost"
-                class="h-auto min-h-6 min-w-0 shrink-[8] gap-1.5 rounded-sm px-2 py-[3px] text-[length:var(--text-xs)] text-neutral-mid hover:bg-surface-hover hover:text-neutral-fg [&_svg]:size-3.5"
+                class="h-auto min-h-6 min-w-0 shrink-[8] gap-1.5 rounded-sm px-2 py-[3px] font-normal text-[length:var(--text-xs)] text-neutral-mid hover:bg-surface-hover hover:text-neutral-fg [&_svg]:size-3.5"
               >
                 <GitFork class="shrink-0" />
                 <span class="max-w-[76px] min-w-0 truncate font-mono">{{ branch || t('newTask.landing.gitRepo') }}</span>

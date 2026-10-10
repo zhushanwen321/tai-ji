@@ -16,7 +16,8 @@
  * - hint 行（loading/error/empty）：各自渲染，error 行点击 emit toggle（旧递归语义）
  * - 字号一致性（D-007）：dir/file 行 name span 均含 text-[12px]
  * - chevron 槽（D-022）：dir 行含 ChevronRight，file 行含空占位
- * - W2 徽章/行数：changeCount/lineStats 全部来自 row（投影预计算，组件不再读 store）
+ * - W2 徽章/行数：childCount/lineStats 全部来自 row（投影预计算，组件不再读 store）
+ * - 长文件名（demo .fname 契约，2026-10-10 裁决）：省略号截断 + title 悬停展示全名
  * - 交互：点 dir → emit toggle；点 file → emit select；selected 控制选中态样式
  *
  * 运行：pnpm --filter @taiji/frontend run test -- src/__tests__/components/FileTreeRow.test.ts
@@ -35,7 +36,7 @@ function makeRow(overrides: Partial<VisibleRow> & Pick<VisibleRow, 'path' | 'typ
     type,
     depth: overrides.depth ?? 0,
     expanded: overrides.expanded ?? false,
-    changeCount: overrides.changeCount ?? 0,
+    childCount: overrides.childCount ?? 0,
     ignored: overrides.ignored ?? false,
     hint: overrides.hint,
     gitStatus: overrides.gitStatus,
@@ -156,9 +157,9 @@ describe('FileTreeRow 视觉一致性（D-007 字号 / D-022 chevron 槽）', ()
   })
 })
 
-describe('FileTreeRow W2 目录改动徽章（changeCount 来自投影 row）', () => {
-  it('目录子树有改动文件 → 渲染徽章（含改动数）', () => {
-    const row = makeRow({ path: 'src', type: 'dir', changeCount: 2 })
+describe('FileTreeRow 目录徽标（childCount 来自投影 row，demo .fbadge：是目录即恒渲染）', () => {
+  it('目录行恒渲染徽标，内容 = 可见子项数', () => {
+    const row = makeRow({ path: 'src', type: 'dir', childCount: 2 })
     const wrapper = mountRow(row)
 
     const badge = wrapper.find('[data-testid="file-tree-dir-badge-src"]')
@@ -166,22 +167,24 @@ describe('FileTreeRow W2 目录改动徽章（changeCount 来自投影 row）', 
     expect(badge.text()).toBe('2')
   })
 
-  it('目录子树无改动 → 不渲染徽章', () => {
-    const row = makeRow({ path: 'src', type: 'dir', changeCount: 0 })
+  it('可见子项数 0（空目录 / ignored 目录）也恒渲染徽标（demo：是目录即显）', () => {
+    const row = makeRow({ path: 'src', type: 'dir', childCount: 0 })
     const wrapper = mountRow(row)
 
-    expect(wrapper.find('[data-testid="file-tree-dir-badge-src"]').exists()).toBe(false)
+    const badge = wrapper.find('[data-testid="file-tree-dir-badge-src"]')
+    expect(badge.exists()).toBe(true)
+    expect(badge.text()).toBe('0')
   })
 
-  it('改动数 > 999 → 显 999+', () => {
-    const row = makeRow({ path: 'src', type: 'dir', changeCount: 1000 })
+  it('子项数 > 999 → 显 999+', () => {
+    const row = makeRow({ path: 'src', type: 'dir', childCount: 1000 })
     const wrapper = mountRow(row)
 
     expect(wrapper.find('[data-testid="file-tree-dir-badge-src"]').text()).toBe('999+')
   })
 
-  it('文件行不渲染改动数徽章（changeCount 仅目录行语义）', () => {
-    const row = makeRow({ path: 'a.ts', type: 'file', changeCount: 5 })
+  it('文件行不渲染目录徽标（childCount 仅目录行语义）', () => {
+    const row = makeRow({ path: 'a.ts', type: 'file', childCount: 5 })
     const wrapper = mountRow(row)
 
     expect(wrapper.find('[data-testid="file-tree-dir-badge-a.ts"]').exists()).toBe(false)
@@ -287,7 +290,7 @@ describe('FileTreeRow 选中态（selected prop，组件零 store 依赖）', ()
     expect(rowEl.classes()).not.toContain('bg-bg-elevated')
     expect(rowEl.classes()).not.toContain('shadow-[inset_2px_0_0_var(--accent)]')
     expect(rowEl.classes()).toContain('text-neutral-fg')
-    const nameSpan = wrapper.find('[data-testid="file-tree-file-a.ts"] .fname-scroll')
+    const nameSpan = wrapper.find('[data-testid="file-tree-file-a.ts"] .fname')
     expect(nameSpan.classes()).toContain('text-neutral-fg')
     expect(nameSpan.classes()).toContain('[font-weight:var(--fw-mid)]')
   })
@@ -295,7 +298,39 @@ describe('FileTreeRow 选中态（selected prop，组件零 store 依赖）', ()
   it('selected=false → 无选中态样式', () => {
     const wrapper = mountRow(makeRow({ path: 'a.ts', type: 'file' }), false)
     expect(wrapper.find('[data-testid="file-tree-file-a.ts"]').classes()).not.toContain('text-neutral-fg')
-    const nameSpan = wrapper.find('[data-testid="file-tree-file-a.ts"] .fname-scroll')
+    const nameSpan = wrapper.find('[data-testid="file-tree-file-a.ts"] .fname')
     expect(nameSpan.classes()).not.toContain('text-neutral-fg')
+  })
+})
+
+describe('FileTreeRow 长文件名（demo .fname 契约，2026-10-10 裁决：ellipsis 截断 + title 悬停展示全名）', () => {
+  it('文件行 name span 单层 ellipsis 截断 + title 展示全名', () => {
+    const row = makeRow({ path: 'src/very-long-file-name.ts', type: 'file' })
+    const wrapper = mountRow(row)
+    const nameSpan = wrapper.find('[data-testid="file-tree-file-src/very-long-file-name.ts"] .fname')
+
+    expect(nameSpan.exists()).toBe(true)
+    expect(nameSpan.classes()).toContain('text-ellipsis')
+    expect(nameSpan.classes()).toContain('overflow-hidden')
+    expect(nameSpan.classes()).toContain('whitespace-nowrap')
+    expect(nameSpan.attributes('title')).toBe('very-long-file-name.ts')
+  })
+
+  it('目录行 name span 同契约（ellipsis + title）', () => {
+    const row = makeRow({ path: 'src/very-long-dir-name', type: 'dir' })
+    const wrapper = mountRow(row)
+    const nameSpan = wrapper.find('[data-testid="file-tree-dir-src/very-long-dir-name"] .fname')
+
+    expect(nameSpan.exists()).toBe(true)
+    expect(nameSpan.classes()).toContain('text-ellipsis')
+    expect(nameSpan.attributes('title')).toBe('very-long-dir-name')
+  })
+
+  it('marquee 契约类已卸载（fname-scroll/fname-roll/hover 滚动类零残留）', () => {
+    const wrapper = mountRow(makeRow({ path: 'src', type: 'dir' }))
+    expect(wrapper.html()).not.toContain('fname-scroll')
+    expect(wrapper.html()).not.toContain('fname-roll')
+    expect(wrapper.html()).not.toContain('hover:text-clip')
+    expect(wrapper.html()).not.toContain('container-type')
   })
 })

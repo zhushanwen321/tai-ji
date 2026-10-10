@@ -59,7 +59,7 @@
     <div
       v-if="actionError"
       data-testid="provider-action-error"
-      class="mt-[16px] flex items-center gap-1.5 rounded-md border border-danger/30 bg-danger-soft px-3 py-1.5 text-[11px] text-danger"
+      class="mt-[16px] flex items-center gap-1.5 rounded-md border border-[color-mix(in_oklch,var(--danger)_30%,transparent)] bg-danger-soft px-3 py-1.5 text-[11px] text-danger"
     >
       <AlertCircle class="size-3.5 shrink-0" />
       <span class="truncate">{{ actionError }}</span>
@@ -86,7 +86,7 @@
         </template>
         <template #actions>
           <!-- demo .bdg：h16 / bg-surface / mono / 10px / fw-bold / neutral-fg-2 -->
-          <span class="inline-flex h-[16px] min-w-[16px] items-center justify-center rounded-full bg-surface px-[5px] font-mono text-[10px] font-bold text-[color:var(--neutral-fg-2)]">{{ providers.length }}</span>
+          <span class="inline-flex h-[16px] min-w-[16px] items-center justify-center rounded-full bg-surface px-[5px] font-mono text-[length:var(--text-3xs)] font-bold text-[color:var(--neutral-fg-2)]">{{ providers.length }}</span>
         </template>
         <div class="flex flex-col gap-[8px] p-[12px_16px]">
       <div

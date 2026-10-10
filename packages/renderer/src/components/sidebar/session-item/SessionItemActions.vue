@@ -6,20 +6,33 @@
     （reset 通道：根 div mouseleave / watch active / Esc / onClickOutside 的锚点
     都在主组件），经 v-model:confirming 双向。
   -->
-  <!-- 位置 bottom-right（遮 meta 而非 dirName，与 demo 对齐）；删除走两段式确认。 -->
+  <!-- 位置右缘垂直居中（demo .si-acts 权威：right 6px / top 50% 平移 / gap 2px）；
+       钮序 = 重命名 → 删除 → 归入项目（demo 重设计 2026-10-10）。删除走两段式确认。 -->
   <div
-    class="absolute bottom-0.5 right-1 gap-0.5"
+    class="absolute right-[6px] top-1/2 -translate-y-1/2 gap-[2px]"
     :class="confirming ? 'flex' : 'flex opacity-0 group-hover/item:opacity-100 group-focus-within/item:opacity-100'"
   >
     <Button
       v-if="!confirming"
       variant="ghost"
       size="icon"
-      class="size-[22px] rounded-sm text-neutral-mid hover:bg-surface-hover hover:text-neutral-fg"
+      class="size-[20px] rounded-sm text-neutral-dim hover:bg-surface-hover hover:text-neutral-fg"
       :title="t('sidebar.sessionItem.rename')"
       @click.stop="emit('rename', session.id)"
     >
-      <Pencil class="size-[13px]" />
+      <Pencil class="size-[12px]" />
+    </Button>
+    <Button
+      variant="ghost"
+      size="icon"
+      :class="confirming
+        ? 'size-[20px] rounded-sm bg-danger text-neutral-fg'
+        : 'size-[20px] rounded-sm text-neutral-dim hover:bg-surface-hover hover:text-danger'"
+      :title="confirming ? t('sidebar.sessionItem.deleteConfirm') : t('sidebar.sessionItem.delete')"
+      @click.stop="onRemoveClick"
+    >
+      <Check v-if="confirming" class="size-[12px]" />
+      <Trash2 v-else class="size-[12px]" />
     </Button>
     <!-- 归入项目（D14 语义修正 2026-08-04）：Popover 菜单列全部 project，点击即归类。
          归类可逆（可再点其他 project / 默认项目），无需两段确认。 -->
@@ -29,11 +42,11 @@
           variant="ghost"
           size="icon"
           data-testid="assign-project-btn"
-          class="size-[22px] rounded-sm text-neutral-mid hover:bg-surface-hover hover:text-neutral-fg"
+          class="size-[20px] rounded-sm text-neutral-dim hover:bg-surface-hover hover:text-neutral-fg"
           :title="t('sidebar.sessionItem.assignToProject')"
           @click.stop="assignOpen = true"
         >
-          <FolderKanban class="size-[13px]" />
+          <FolderKanban class="size-[12px]" />
         </Button>
       </PopoverTrigger>
       <PopoverContent side="right" align="start" :collision-padding="8" class="w-44 p-1">
@@ -57,18 +70,6 @@
         </div>
       </PopoverContent>
     </Popover>
-    <Button
-      variant="ghost"
-      size="icon"
-      :class="confirming
-        ? 'size-[22px] rounded-sm bg-danger text-neutral-fg'
-        : 'size-[22px] rounded-sm text-neutral-mid hover:bg-surface-hover hover:text-danger'"
-      :title="confirming ? t('sidebar.sessionItem.deleteConfirm') : t('sidebar.sessionItem.delete')"
-      @click.stop="onRemoveClick"
-    >
-      <Check v-if="confirming" class="size-[13px]" />
-      <Trash2 v-else class="size-[13px]" />
-    </Button>
   </div>
 </template>
 

@@ -21,7 +21,7 @@ beforeEach(() => {
   setActivePinia(createPinia())
 })
 
-// ── D4: SessionItem hover 按钮 bottom-right 定位（spec §5.6A）──────
+// ── D4: SessionItem hover 按钮定位（demo .si-acts 契约：右缘 6px 垂直居中，钮 20px / 图标 12px / 间距 2px）──────
 describe('D4: SessionItem hover 按钮定位', () => {
   function makeSession() {
     return {
@@ -32,7 +32,7 @@ describe('D4: SessionItem hover 按钮定位', () => {
     }
   }
 
-  it('hover 按钮容器定位在 bottom-right（遮 meta 而非 dirName，与 demo 一致）', () => {
+  it('hover 按钮容器定位在行右缘垂直居中（demo .si-acts 契约）', () => {
     const wrapper = mount(SessionItem, {
       props: {
         session: makeSession(),
@@ -40,11 +40,12 @@ describe('D4: SessionItem hover 按钮定位', () => {
         status: 'done' as never,
       },
     })
-    // spec §5.6A / D12：actions 容器 absolute bottom-0.5 right-1（bottom-right）。
-    // 用 [class~=] 单词匹配避开 happy-dom 对 class 选择器中点（bottom-0.5）转义的脆弱性。
-    const actionsContainer = wrapper.find('.absolute[class~="bottom-0.5"]')
+    // demo .si-acts 契约：absolute right-[6px] top-1/2 -translate-y-1/2 gap-[2px]（垂直居中右侧）。
+    // 用 [class~=] 单词匹配避开 happy-dom 对 class 选择器中点/方括号转义的脆弱性。
+    const actionsContainer = wrapper.find('.absolute[class~="top-1/2"][class~="right-[6px]"]')
     expect(actionsContainer.exists()).toBe(true)
-    expect(actionsContainer.classes()).toContain('right-1')
+    expect(actionsContainer.classes()).toContain('-translate-y-1/2')
+    expect(actionsContainer.classes()).toContain('gap-[2px]')
   })
 })
 

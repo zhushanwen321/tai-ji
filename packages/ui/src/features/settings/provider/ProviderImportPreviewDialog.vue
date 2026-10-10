@@ -168,7 +168,7 @@ function sourceLabel(source: string): string {
       <div
         v-else-if="error"
         data-testid="preview-error"
-        class="flex items-center gap-1.5 rounded-md border border-danger/30 bg-danger-soft px-3 py-2 text-[12px] text-danger"
+        class="flex items-center gap-1.5 rounded-md border border-[color-mix(in_oklch,var(--danger)_30%,transparent)] bg-danger-soft px-3 py-2 text-[12px] text-danger"
       >
         <AlertTriangle class="size-4 shrink-0" />
         <span class="truncate">{{ error }}</span>
@@ -179,7 +179,7 @@ function sourceLabel(source: string): string {
         <div
           v-if="preview.parseError"
           data-testid="preview-parse-error"
-          class="flex items-start gap-1.5 rounded-md border border-warn/30 bg-warn-soft px-3 py-2 text-[12px] text-warn"
+          class="flex items-start gap-1.5 rounded-md border border-[color-mix(in_oklch,var(--warn)_30%,transparent)] bg-warn-soft px-3 py-2 text-[12px] text-warn"
         >
           <AlertTriangle class="size-4 shrink-0 mt-0.5" />
           <span>{{ t('settings.provider.importPreview.parseError', { message: preview.parseError }) }}</span>
@@ -189,7 +189,7 @@ function sourceLabel(source: string): string {
         <div
           v-if="preview.warnings?.length"
           data-testid="preview-top-warnings"
-          class="flex items-start gap-1.5 rounded-md border border-warn/30 bg-warn-soft px-3 py-2 text-[12px] text-warn"
+          class="flex items-start gap-1.5 rounded-md border border-[color-mix(in_oklch,var(--warn)_30%,transparent)] bg-warn-soft px-3 py-2 text-[12px] text-warn"
         >
           <AlertTriangle class="size-4 shrink-0 mt-0.5" />
           <ul class="flex flex-col gap-0.5">

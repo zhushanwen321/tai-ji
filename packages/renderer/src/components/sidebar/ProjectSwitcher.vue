@@ -202,7 +202,7 @@ function cancelCreate() {
               class="flex min-w-0 cursor-pointer select-none items-center gap-[7px] rounded px-[9px] py-[7px] text-[length:var(--text-xs)] transition-colors duration-[var(--duration-fast)] ease-[var(--ease)]"
               :class="[
                 p.id === projectStore.activeProjectId
-                  ? 'border border-hairline bg-bg-elevated font-medium text-neutral-fg hover:border-border-strong'
+                  ? 'border border-hairline bg-bg-elevated [font-weight:var(--fw-mid)] text-neutral-fg hover:border-border-strong'
                   : 'border border-transparent text-neutral-mid hover:bg-surface-hover hover:text-neutral-fg',
                 dragId === p.id ? 'opacity-45' : '',
                 overId === p.id && dragId !== p.id ? 'border-accent border-dashed' : '',
@@ -241,11 +241,11 @@ function cancelCreate() {
             <ContextMenuContent
               :ref="setCardMenuContentRef"
               data-testid="project-context-menu"
-              class="z-[var(--z-popover)] min-w-[148px] rounded-md border border-border-strong bg-bg-elevated p-1 text-neutral-fg shadow-2 outline-none"
+              class="z-[var(--z-popover)] min-w-[148px] rounded-md border border-border-strong bg-bg-elevated p-[4px] text-neutral-fg shadow-2 outline-none"
             >
               <ContextMenuItem
                 data-testid="project-delete-item"
-                class="flex h-[28px] w-full cursor-pointer select-none items-center gap-2 rounded-sm px-[9px] text-[length:var(--text-xs)] text-danger outline-none hover:bg-danger-soft hover:text-danger [&_svg]:size-[13px]"
+                class="flex h-[28px] w-full cursor-pointer select-none items-center gap-[8px] rounded-sm px-[9px] text-[length:var(--text-xs)] text-danger outline-none hover:bg-danger-soft hover:text-danger [&_svg]:size-[13px]"
                 @select="requestDelete(p.id)"
               >
                 <Trash2 />

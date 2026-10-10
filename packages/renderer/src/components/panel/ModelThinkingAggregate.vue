@@ -38,7 +38,7 @@
         <Boxes class="size-4 shrink-0" :stroke-width="1.6" />
       </Button>
     </PopoverTrigger>
-    <PopoverContent side="top" class="w-[240px] p-0">
+    <PopoverContent side="top" :side-offset="10" class="w-[240px] p-0">
       <!-- 上半：模型选择（hover 选择开启——hover 即切，不关弹层） -->
       <ModelPickerPanel
         :groups="pickerGroups"
@@ -50,25 +50,22 @@
         @update:model-value="onPickModel"
       />
       <span class="block h-px bg-border-strong" aria-hidden="true" />
-      <!-- 下半：思考档位行（radio 圆点 + 显示 label + Check 选中态；可用集与 ThinkingLevelPopover 同源） -->
+      <!-- 下半：思考档位行（显示 label + 行尾 Check 选中态；可用集与 ThinkingLevelPopover 同源；
+           行语言与其逐字一致——demo R3：弹层行不进选中范式，无底/框/字色选中态与行首圆点） -->
       <div class="py-1" data-testid="model-thinking-level-list">
         <Button
           v-for="opt in availableOptions"
           :key="opt.level"
           variant="ghost"
           :data-testid="'thinking-level-row-' + opt.level"
-          class="flex w-full items-center gap-2 rounded-none px-2.5 py-2 text-[13px] text-neutral-mid hover:bg-surface-hover hover:text-neutral-fg"
-          :class="opt.level === currentLevelKey && 'bg-accent-soft text-accent hover:bg-accent-soft hover:text-accent'"
+          class="flex min-h-[28px] w-full items-center gap-2 rounded-sm px-2 py-[5px] font-normal text-[length:var(--text-xs)] text-neutral-mid hover:bg-surface-hover hover:text-neutral-fg"
           @pointerenter="onHoverLevel(opt)"
           @click="onPickLevel(opt)"
         >
-          <span
-            class="size-[7px] shrink-0 rounded-full"
-            :class="opt.level === currentLevelKey ? 'bg-accent' : 'bg-neutral-dim'"
-          />
           <span class="flex-1 text-left">{{ getDisplayLabel(opt.level, props.levelMap, t) }}</span>
           <Check
-            class="size-[13px] text-accent transition-opacity"
+            class="size-[13px] shrink-0 transition-opacity"
+            :stroke-width="2.2"
             :class="opt.level === currentLevelKey ? 'opacity-100' : 'opacity-0'"
           />
         </Button>

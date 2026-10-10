@@ -90,7 +90,7 @@
                 <span v-if="modelDisplay.label" class="max-w-[160px] truncate">{{ modelDisplay.label }}</span>
                 <span
                   v-if="modelDisplay.overridden"
-                  class="shrink-0 rounded-sm border border-accent/40 px-1 text-[length:var(--text-3xs)] text-accent"
+                  class="shrink-0 rounded-sm border border-[color-mix(in_oklch,var(--accent)_40%,transparent)] px-1 text-[length:var(--text-3xs)] text-accent"
                   data-testid="subagent-override-badge"
                 >{{ t('panel.sideDrawer.subagentOverrideBadge') }}</span>
                 <ChevronDown class="size-3 shrink-0 opacity-60" />

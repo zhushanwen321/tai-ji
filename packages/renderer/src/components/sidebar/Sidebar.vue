@@ -30,7 +30,7 @@
            快捷键提示并入 :title（demo data-tip 悬停形态），不渲染常驻 kbd。 -->
       <Button
         variant="ghost"
-        class="mx-2.5 mt-0.5 mb-1 flex h-auto justify-start gap-2 rounded border border-hairline bg-bg-elevated px-2.5 py-2 text-[length:var(--text-sm)] [font-weight:var(--fw-mid)] text-neutral-fg transition-colors hover:bg-bg-elevated hover:border-border-strong"
+        class="mx-[10px] mt-[2px] mb-[4px] flex h-auto justify-start gap-[8px] rounded border border-hairline bg-bg-elevated px-[10px] py-[8px] text-[length:var(--text-sm)] [font-weight:var(--fw-mid)] text-neutral-fg transition-colors hover:bg-bg-elevated hover:border-border-strong"
         :title="`${t('sidebar.newTask')} · ${formatKbd('n')}`"
         @click="onNewSession"
       >
@@ -41,11 +41,11 @@
       <!-- 次操作 nav：导入会话 ⌘I / 搜索 ⌘K（demo .snav ghost 行）。
            导入会话入口（import-session 设计 §3.1）：外部 pi session 纳入管理；open 状态
            本组件持有，⌘I 经 useGlobalShortcuts 注入的 onOpenImportSession 派发同一状态。 -->
-      <nav class="flex flex-col px-1.5 py-0.5">
+      <nav class="flex flex-col px-[6px] py-[2px]">
         <Button
           variant="ghost"
           data-testid="sidebar-import-session-btn"
-          class="group flex h-auto w-full justify-start gap-[9px] rounded-sm px-2 py-[7px] text-[length:var(--text-sm)] text-neutral-mid transition-colors hover:bg-surface-hover hover:text-neutral-fg"
+          class="group flex h-auto w-full justify-start gap-[9px] rounded-sm px-[8px] py-[7px] text-[length:var(--text-sm)] text-neutral-mid transition-colors hover:bg-surface-hover hover:text-neutral-fg"
           :title="`${t('importSession.title')} · ${formatKbd('i')}`"
           @click="importOpen = true"
         >
@@ -54,7 +54,7 @@
         </Button>
         <Button
           variant="ghost"
-          class="group flex h-auto w-full justify-start gap-[9px] rounded-sm px-2 py-[7px] text-[length:var(--text-sm)] text-neutral-mid transition-colors hover:bg-surface-hover hover:text-neutral-fg"
+          class="group flex h-auto w-full justify-start gap-[9px] rounded-sm px-[8px] py-[7px] text-[length:var(--text-sm)] text-neutral-mid transition-colors hover:bg-surface-hover hover:text-neutral-fg"
           :title="`${t('sidebar.search')} · ${formatKbd('k')}`"
           @click="searchModal.open()"
         >
@@ -164,7 +164,7 @@
             <PopoverTrigger as-child>
               <Button
                 variant="ghost"
-                class="ml-1 grid size-[32px] shrink-0 place-items-center rounded-sm p-0 text-neutral-dim transition-colors hover:bg-surface-hover hover:text-neutral-fg [&_svg]:size-[15px]"
+                class="ml-[4px] grid size-[32px] shrink-0 place-items-center rounded-sm p-0 text-neutral-dim transition-colors hover:bg-surface-hover hover:text-neutral-fg [&_svg]:size-[15px]"
                 :title="t('sidebar.quickAppearance')"
                 :aria-label="t('sidebar.quickAppearance')"
                 data-testid="sidebar-quick-appearance"
@@ -215,7 +215,7 @@
           </Popover>
           <Button
             variant="ghost"
-            class="ml-1 grid size-[32px] shrink-0 place-items-center rounded-sm p-0 text-neutral-dim transition-colors hover:bg-surface-hover hover:text-neutral-fg [&_svg]:size-[15px]"
+            class="ml-[4px] grid size-[32px] shrink-0 place-items-center rounded-sm p-0 text-neutral-dim transition-colors hover:bg-surface-hover hover:text-neutral-fg [&_svg]:size-[15px]"
             :title="t('sidebar.settingsTitle')"
             :aria-label="t('sidebar.settingsTitle')"
             @click="openSettings()"

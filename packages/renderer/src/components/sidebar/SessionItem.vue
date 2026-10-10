@@ -31,13 +31,16 @@
          非激活 hover 才有 bg-surface-hover 临时反馈（demo .si:hover 同款） -->
     <div
       ref="rootEl"
-      class="session-item group/item relative flex cursor-pointer select-none items-center gap-2 rounded-sm px-2 py-[7px] transition-colors"
+      role="button"
+      tabindex="0"
+      class="session-item group/item relative flex cursor-pointer select-none items-center gap-[8px] rounded-sm px-[8px] py-[7px] transition-colors"
       :class="[
         active ? 'text-neutral-fg' : 'text-neutral-fg hover:bg-surface-hover',
         isDead ? 'opacity-50' : '',
       ]"
       :aria-label="ariaLabel"
       @click="emit('select', session.id)"
+      @keydown="onItemKeydown"
       @pointerenter="onDetailEnter"
       @pointerleave="onDetailLeave"
       @focusin="onDetailEnter"
@@ -186,6 +189,49 @@ const confirming = ref(false)
 
 /** 根元素引用（onClickOutside 目标） */
 const rootEl = ref<HTMLElement | null>(null)
+
+// ── 键盘可达（demo Sidebar.vue onSiKey 同链路：Tab 聚焦行 → Enter/Space 选择 →
+//    ContextMenu/Shift+F10 开右键菜单）──
+
+/** 行级键处理：e.target 守卫行自身聚焦（子钮聚焦时 Enter 冒泡到此不得二次触发
+ *  select，钮激活交还原生 click）。Enter/Space = 选择（Space preventDefault 防滚动）。
+ *  不用 Vue 按键修饰符：withKeys 按 hyphenate(event.key) 匹配（@vue/runtime-dom
+ *  keyNames 表），'ContextMenu' 键 hyphenate 后为 'context-menu' 无对应修饰符，
+ *  shift 守卫也无法表达——手写判断。 */
+function onItemKeydown(e: KeyboardEvent): void {
+  const el = rootEl.value
+  if (!el || e.target !== el) return
+  if (e.key === 'Enter' || e.key === ' ') {
+    e.preventDefault()
+    emit('select', props.session.id)
+    return
+  }
+  if (e.key === 'ContextMenu' || (e.key === 'F10' && e.shiftKey)) {
+    e.preventDefault()
+    onKeyOpenMenu()
+  }
+}
+
+/** 行中点除数：菜单锚点取行几何中心的坐标计算基数。 */
+const MIDPOINT_DIVISOR = 2
+
+/** 键盘打开右键菜单：reka ContextMenuTrigger 只监听 contextmenu 事件且菜单锚点取
+ *  event.clientX/Y（reka-ui dist/ContextMenu/ContextMenuTrigger.js handleContextMenu），
+ *  无受控 open 通道——按 radix/reka 生态惯例合成 contextmenu MouseEvent 转发，
+ *  坐标取行中心让菜单锚定在行上。 */
+function onKeyOpenMenu(): void {
+  const el = rootEl.value
+  if (!el) return
+  const rect = el.getBoundingClientRect()
+  el.dispatchEvent(
+    new MouseEvent('contextmenu', {
+      bubbles: true,
+      cancelable: true,
+      clientX: Math.round(rect.left + rect.width / MIDPOINT_DIVISOR),
+      clientY: Math.round(rect.top + rect.height / MIDPOINT_DIVISOR),
+    }),
+  )
+}
 
 // ── N8 hover 详情卡（demo .sess-pop 交互同款）──
 

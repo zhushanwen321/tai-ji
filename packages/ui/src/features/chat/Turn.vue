@@ -147,7 +147,8 @@
           :session-id="sessionId"
         />
         <!-- streaming 光标：turn 内容区末尾独立元素（跟在所有 block 后，位置稳定不受 block 增删/折叠态影响）。
-             mt-2 维持原「末块 py-2 底距 8px」观感（块 padding 退役后由光标自带，非容器节奏档）。
+             mt-2 = 8px 光标底距（正文末块无 py 时为唯一贡献；MF-1-3 过程行恢复 py 5px 后，
+             过程行末块后为 13px——光标场景以正文流式为主，按高频场景校准）。
              末位可见 block 为 running tool 时隐藏（工具自带 loader）。 -->
         <span v-if="showStreamingCursor" class="streaming-tail mt-2 ml-0.5 inline-block h-3.5 w-[7px] rounded-[1px] bg-accent align-middle animate-blink" />
       </div>
@@ -610,26 +611,25 @@ const showStreamingCursor = computed(() => {
 </script>
 
 <style scoped>
-/* 块间四档节奏（MF-1-25，demo workbench.css 权威有效值校准）：demo 有效间距 =
-   .line py 5px 叠加（workbench.css:348）+ --blk-gap 20 / --blk-gap-tight 12（tokens.css:75-76）：
-   工具↔工具 5+12+5=22、工具→正文 5+12=17、正文→工具 12+5=17、正文↔正文 20。
-   real 块 py padding 已退役，间距唯一权威 = trace 容器相邻选择器，后块 margin-top 承载
-   同值——flex 容器内 margin 不折叠，距离 = 单值可断言。
-   - .trace-blk + .trace-blk（前工具，默认档）= 22px：工具相邻档（含工具→正文）；
-   - .trace-blk--text + .trace-blk = 17px：正文→工具；
-   - .trace-blk + .trace-blk--text = 17px：工具→正文（覆盖默认 22）；
-   - .trace-blk--text + .trace-blk--text = 20px：正文↔正文（覆盖前两条，须置末位）。
+/* 块间节奏（MF-1-3，demo workbench.css 机制同构复刻）：demo = .line py 5px（workbench.css:353，
+   仅过程行挂，参与块间与两处容器边界）+ --blk-gap-tight 12 / --blk-gap 20（tokens.css:75-76）
+   两档 margin；real 同构——过程行块 py 由容器选择器恢复（.trace-blk--text 正文块无 py），
+   块间 margin 两档（flex 容器内不折叠，后块 margin-top 承载）：
+   - 默认 12px：过程行↔过程行有效 5+12+5=22、过程行→正文 5+12=17、正文→过程行 12+5=17；
+   - 正文↔正文 20px（覆盖默认，须置后）。
+   容器边界由过程行 py 自动参与（单值化路线只校准块间的残留差收齐）：轮头（TurnMeta py-1）
+   →首过程行 4+12+5=21、末位过程行→轮界 5+20=25，demo 同值。
    - 收编行（TraceCompactorRow，容器首位、非 .trace-blk）之后的首块 12px：demo 无收编行
-     对应物，保留 real 紧凑档。streaming-tail 光标非块，不命中（自身 mt-2 维持原观感）。
+     对应物，保留 real 紧凑档（首块为过程行时有效 17px，含其 py 顶距）。
+   - streaming-tail 光标非块，不命中（mt-2 对正文末块维持 8px 观感；过程行末块后为 13px，
+     光标场景以正文流式为主）。嵌套 bash-group 成员行非 .trace 直子，不受本组规则影响。
    escape hatch 依据：结构选择器属 scoped 样式准许形态（项目样式三层规范）。 */
+.trace > .trace-blk:not(.trace-blk--text) {
+  padding-top: 5px;
+  padding-bottom: 5px;
+}
 .trace > .trace-blk + .trace-blk {
-  margin-top: 22px;
-}
-.trace > .trace-blk--text + .trace-blk {
-  margin-top: 17px;
-}
-.trace > .trace-blk + .trace-blk--text {
-  margin-top: 17px;
+  margin-top: 12px;
 }
 .trace > .trace-blk--text + .trace-blk--text {
   margin-top: 20px;

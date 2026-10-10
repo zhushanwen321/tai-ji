@@ -15,7 +15,7 @@
     <!-- 区头（demo .sess-head：gap 6px / padding 8px 10px 5px；lbl 12px mid、count mono 11px fg-2、
          右侧模式开关 = .mode-seg 凹陷槽）。固定于 ScrollArea 外（不随列表滚动），
          C 模式组头 sticky 贴 ScrollArea 顶、不重叠。 -->
-    <div class="flex shrink-0 items-center gap-1.5 px-2.5 pt-2 pb-[5px]" data-testid="session-list-header">
+    <div class="flex shrink-0 items-center gap-[6px] px-[10px] pt-[8px] pb-[5px]" data-testid="session-list-header">
       <span class="truncate text-[length:var(--text-xs)] text-neutral-mid">
         {{ t('sidebar.sessionList.header') }}
       </span>
@@ -28,7 +28,7 @@
           variant="ghost"
           size="icon"
           data-testid="session-mode-flat"
-          class="h-6 w-[26px] rounded-[var(--radius-xs)] p-0"
+          class="h-[24px] w-[26px] rounded-[var(--radius-xs)] p-0"
           :class="mode === 'flat'
             ? 'bg-[var(--sel-bg)] text-neutral-fg [font-weight:var(--fw-mid)] shadow-[inset_0_0_0_1px_var(--sel-edge)] hover:bg-[var(--sel-bg)] hover:text-neutral-fg'
             : 'bg-transparent text-neutral-dim hover:bg-transparent hover:text-neutral-fg'"
@@ -42,7 +42,7 @@
           variant="ghost"
           size="icon"
           data-testid="session-mode-groups"
-          class="h-6 w-[26px] rounded-[var(--radius-xs)] p-0"
+          class="h-[24px] w-[26px] rounded-[var(--radius-xs)] p-0"
           :class="mode === 'groups'
             ? 'bg-[var(--sel-bg)] text-neutral-fg [font-weight:var(--fw-mid)] shadow-[inset_0_0_0_1px_var(--sel-edge)] hover:bg-[var(--sel-bg)] hover:text-neutral-fg'
             : 'bg-transparent text-neutral-dim hover:bg-transparent hover:text-neutral-fg'"
@@ -71,8 +71,8 @@
              group/folder 命名 group 只放在 header 行上（本容器**不能**带 group/folder——Tailwind
              命名 group 是「任意层级祖先」匹配，容器带它会令 hover 组内任意 SessionItem 时也触发
              folder 按钮，破坏单行独立 hover 语义）。 -->
-        <div class="group/folder sticky top-0 z-[var(--z-sticky)] flex items-center gap-1.5 bg-bg px-2 pt-[9px] pb-1">
-          <Folder class="size-3 shrink-0 text-neutral-dim" />
+        <div class="group/folder sticky top-0 z-[var(--z-sticky)] flex items-center gap-[6px] bg-bg px-[8px] pt-[9px] pb-[4px]">
+          <Folder class="size-[12px] shrink-0 text-neutral-dim" />
           <span class="min-w-0 truncate font-mono text-[length:var(--text-xs)] text-neutral-mid group-hover/folder:text-neutral-fg">
             {{ dirNameOf(g.cwd) }}
           </span>

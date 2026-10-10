@@ -211,7 +211,7 @@
       <!-- 截断提示（>1MB，AC-6.5/T6.5） -->
       <div
         v-if="state.truncated"
-        class="border-b border-warn/30 bg-warn-soft px-2 py-1 text-[length:var(--text-3xs)] text-warn"
+        class="border-b border-[color-mix(in_oklch,var(--warn)_30%,transparent)] bg-warn-soft px-2 py-1 text-[length:var(--text-3xs)] text-warn"
         data-testid="detail-truncated"
       >
         {{ t('panel.detail.truncated') }}
@@ -296,7 +296,7 @@
         <!-- text（兜底）：纯文本插值 -->
         <pre
           v-else
-          class="whitespace-pre-wrap break-all p-2 font-mono text-[length:var(--text-xs)] leading-[1.5] text-neutral-fg/90"
+          class="whitespace-pre-wrap break-all p-2 font-mono text-[length:var(--text-xs)] leading-[1.5] text-[color-mix(in_oklch,var(--neutral-fg)_90%,transparent)]"
           data-testid="detail-text"
         >{{ state.content }}</pre>
       </template>

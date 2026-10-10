@@ -68,15 +68,16 @@ function onCancel(): void {
       <slot />
 
       <!-- 钮形态族对齐 demo pages.css .pg-set .btn（32px 高 / 12px 水平内距 / 6px 间距 /
-           --fw-mid 600 字重）与 :12-15 内缩焦点环（2px accent 内缩 1px，focus-visible:outline
-           声明 style 顶掉 cva outline-none 的 transparent，缺它 outline-2/accent 不渲染）；
-           消费点覆写，不动全局 cva 基类。取消钮 ghost 字色对齐 demo .btn.ghost（neutral-mid，
-           hover 提亮 fg）。 -->
+           --fw-mid 600 字重 / 字号 var(--text-sm)=13px）与 :12-15 内缩焦点环（2px accent 内缩
+           1px，focus-visible:outline 声明 style 顶掉 cva outline-none 的 transparent，缺它
+           outline-2/accent 不渲染）；消费点覆写，不动全局 cva 基类（基类 text-sm = 0.875rem ×
+           html 14px = 12.25px，与 demo .btn 13px 差半像素档）。取消钮 ghost 字色对齐 demo
+           .btn.ghost（neutral-mid，hover 提亮 fg）。 -->
       <div class="flex justify-end gap-2">
         <Button
           variant="ghost"
           :disabled="props.loading"
-          class="h-[32px] px-[12px] gap-[6px] [font-weight:var(--fw-mid)] text-neutral-mid hover:text-neutral-fg focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent focus-visible:-outline-offset-1 focus-visible:shadow-none"
+          class="h-[32px] px-[12px] gap-[6px] [font-weight:var(--fw-mid)] text-[length:var(--text-sm)] text-neutral-mid hover:text-neutral-fg focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent focus-visible:-outline-offset-1 focus-visible:shadow-none"
           @click="onCancel"
         >
           {{ props.cancelText }}
@@ -86,7 +87,7 @@ function onCancel(): void {
         <Button
           :variant="props.variant === 'danger' ? 'danger-solid' : 'default'"
           :disabled="props.loading"
-          class="h-[32px] px-[12px] gap-[6px] [font-weight:var(--fw-mid)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent focus-visible:-outline-offset-1 focus-visible:shadow-none"
+          class="h-[32px] px-[12px] gap-[6px] [font-weight:var(--fw-mid)] text-[length:var(--text-sm)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent focus-visible:-outline-offset-1 focus-visible:shadow-none"
           @click="emit('confirm')"
         >
           <Loader2 v-if="props.loading" class="animate-spin" />

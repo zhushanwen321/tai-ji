@@ -23,7 +23,7 @@
         <Button
           variant="ghost"
           size="icon"
-          class="nav-btn h-[32px] w-[32px] rounded-[var(--radius-sm)] text-neutral-mid hover:bg-surface-hover hover:text-neutral-fg focus-visible:ring-0 focus-visible:ring-offset-0"
+          class="nav-btn relative h-[32px] w-[32px] rounded-[var(--radius-sm)] text-neutral-mid hover:bg-surface-hover hover:text-neutral-fg focus-visible:ring-0 focus-visible:ring-offset-0 after:absolute after:-inset-[3px] after:content-['']"
           :title="t('shell.goBack')"
           :aria-label="t('shell.goBack')"
           data-testid="settings-back-btn"
@@ -87,7 +87,7 @@
           <Button
             type="button"
             variant="ghost"
-            class="xbtn flex h-[28px] w-[28px] p-0 items-center justify-center rounded-[var(--radius-sm)] text-[length:var(--text-base)] font-normal leading-[1.5] text-neutral-mid whitespace-normal transition-colors duration-[var(--duration-fast)] ease-[var(--ease)] hover:bg-surface-hover hover:text-neutral-fg focus-visible:ring-0 focus-visible:ring-offset-0"
+            class="xbtn relative flex h-[28px] w-[28px] p-0 items-center justify-center rounded-[var(--radius-sm)] text-[length:var(--text-base)] font-normal leading-[1.5] text-neutral-mid whitespace-normal transition-colors duration-[var(--duration-fast)] ease-[var(--ease)] hover:bg-surface-hover hover:text-neutral-fg focus-visible:ring-0 focus-visible:ring-offset-0 after:absolute after:-inset-[3px] after:content-['']"
             :title="t('settings.closeEsc')"
             :aria-label="t('settings.close')"
             data-testid="settings-close-btn"
@@ -441,6 +441,14 @@ onBeforeUnmount(() => {
   outline: 2px solid var(--accent);
   outline-offset: -1px;
   box-shadow: none;
+}
+/* 选中主题行的静态 inset 描边在键盘焦点态恢复：上方容器规则的 box-shadow:none 收敛
+   Button cva 外扩环通道时，会连带抹掉主题行（@layer utilities 静态类）的选中 inset
+   描边——demo 同场景 outline 与 inline inset 环同时呈现（AppearanceSection 主题行
+   inline boxShadow 恒挂，类规则压不掉）。本规则同处 unlayered 且特异性 (0,4,0) 压过
+   容器规则 (0,2,1)，仅按静态值恢复选中行的 inset 描边；cva 外扩环继续被容器压制。 */
+.content-col-inner .theme-row[aria-pressed="true"]:focus-visible {
+  box-shadow: inset 0 0 0 1px var(--border-strong);
 }
 
 /* 弹层开合过渡（demo `.pg-set .settings` fade-in 0.16s ease，reduced-motion 门控）。

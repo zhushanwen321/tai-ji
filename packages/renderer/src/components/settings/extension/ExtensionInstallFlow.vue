@@ -31,7 +31,7 @@
           <!-- 已安装：disabled + Check 图标；未安装：点击调 install(npm:pkgName) -->
           <Button
             variant="secondary"
-            class="h-[32px] shrink-0 px-[12px] text-[length:var(--text-sm)] [&_svg]:size-[14px]"
+            class="h-[32px] shrink-0 border-border-strong px-[12px] text-[length:var(--text-sm)] [&_svg]:size-[14px]"
             :disabled="r.installed || installingRecommended.has(r.name)"
             @click="onInstallRecommended(r.name)"
           >
@@ -125,7 +125,7 @@
               {{ isAllSelected ? t('settings.extension.unselectAll') : t('settings.extension.selectAll') }}
             </Button>
             <span class="flex-1" />
-            <Button variant="secondary" class="h-[32px] px-[12px] text-[length:var(--text-sm)]" :disabled="selected.size === 0 || installing" @click="onFinishInstall">
+            <Button variant="secondary" class="h-[32px] border-border-strong px-[12px] text-[length:var(--text-sm)]" :disabled="selected.size === 0 || installing" @click="onFinishInstall">
               <Loader2 v-if="installing" class="animate-spin" />
               {{ t('settings.extension.installSelected') }}
             </Button>
