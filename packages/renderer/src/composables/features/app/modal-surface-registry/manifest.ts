@@ -33,7 +33,7 @@ import type { ModalSurfaceFlags } from '@taiji/core/domain/overlay'
 export type ModalSurfaceFamily =
   /** 全屏阻塞模态族（token z 形）：SettingsModal / AsyncErrorFallback overlay 态 */
   | 'modal-token-z'
-  /** 全屏阻塞模态族（裸数字 z 形）：SearchModal / DialogContent 确认框族（遮罩+面板） */
+  /** 全屏阻塞模态族（token z 形）：SearchModal / DialogContent 确认框族（遮罩+面板） */
   | 'modal-dialog'
   /** CompanionBand expanded 待决确认（inline z 高于 modal，阻塞交互） */
   | 'companion-band'
@@ -128,9 +128,9 @@ export const MODAL_SURFACE_MANIFEST = [
     family: 'modal-dialog',
     kind: 'member',
     zAnchors: [
-      { file: 'packages/ui/src/overlays/SearchModal.vue', form: 'class-raw', literal: '1000', count: 1 },
+      { file: 'packages/ui/src/overlays/SearchModal.vue', form: 'class-token', literal: 'var(--z-modal)', count: 1 },
     ],
-    basis: '§6.7 表：SearchModal（遮罩+面板全屏阻塞面）',
+    basis: '§6.7 表：SearchModal（遮罩+面板全屏阻塞面；z 已令牌化 --z-modal）',
   },
   {
     id: 'dialog-confirm',
@@ -182,19 +182,15 @@ export const MODAL_SURFACE_MANIFEST = [
     id: 'session-item-context-menu',
     family: 'popover-layer',
     kind: 'member',
-    zAnchors: [
-      { file: 'packages/renderer/src/components/sidebar/session-item/SessionItemContextMenu.vue', form: 'class-token', literal: 'var(--z-dialog)', count: 1 },
-    ],
-    basis: '§6.7 表：弹出层族（右键菜单；已令牌化 --z-dialog）',
+    zAnchors: [],
+    basis: '§6.7 表：弹出层族（右键菜单；z 已降到 --z-popover:10，低于基线阈值 1000，不再持 ≥1000 锚）',
   },
   {
     id: 'project-switcher-menu',
     family: 'popover-layer',
     kind: 'member',
-    zAnchors: [
-      { file: 'packages/renderer/src/components/sidebar/ProjectSwitcher.vue', form: 'class-token', literal: 'var(--z-dialog)', count: 1 },
-    ],
-    basis: '§6.7 表：弹出层族（项目切换菜单；已令牌化 --z-dialog）',
+    zAnchors: [],
+    basis: '§6.7 表：弹出层族（项目切换菜单；z 已降到 --z-popover:10，低于基线阈值 1000，不再持 ≥1000 锚——MF-2-14 对齐 demo .ctxmenu 梯队）',
   },
   {
     id: 'toast-container',
