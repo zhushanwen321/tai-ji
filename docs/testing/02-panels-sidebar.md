@@ -30,7 +30,7 @@
 
 `Sidebar.vue` 的 SegmentedTab「文件」页签渲染 `FileView.vue`（`data-testid="file-view-root"`）。头部行（session 标签 + 分支 + `file-show-ignored-toggle` 开关）与 `file-filter-input` 过滤框固定在滚动区外；滚动区内是加载/错误/空态（`file-loading` / `file-error`+`file-retry` / `file-empty`），树体由 virtua Virtualizer 挂载扁平可见行（`projectVisibleRows` 投影），每行是纯行组件 `FileTreeRow.vue`（`file-tree-dir-{path}` / `file-tree-file-{path}`，文件行含 A/M/D/U git 角标）。无活跃 session 时显示 `file-view-no-session` 空态。
 
-[W28/D-7.2] 结构要点：头部与过滤框移出滚动区是 virtua Virtualizer 的硬约束（parentElement 必须是滚动容器且前方无内容）；树形递归渲染改为「扁平可见行投影 + 虚拟滚动」，万级目录展开只挂载视口 ± 缓冲的行（DOM 行数 < 200）；depth/expanded/changeCount/gitStatus/lineStats 全部由投影预计算，交互经 emit 归位 FileView 层。
+[W28/D-7.2] 结构要点：头部与过滤框移出滚动区是 virtua Virtualizer 的硬约束（parentElement 必须是滚动容器且前方无内容）；树形递归渲染改为「扁平可见行投影 + 虚拟滚动」，万级目录展开只挂载视口 ± 缓冲的行（DOM 行数 < 200）；depth/expanded/childCount/gitStatus/lineStats 全部由投影预计算，交互经 emit 归位 FileView 层。目录徽标（`file-tree-dir-badge-{path}`）按 demo 权威是目录即恒渲染，内容 = 可见直接子项数（childCount）。
 
 ## 3. data-testid 清单
 
