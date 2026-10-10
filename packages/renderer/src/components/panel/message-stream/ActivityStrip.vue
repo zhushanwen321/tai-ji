@@ -59,11 +59,21 @@
       :data-testid="`activity-strip-row-${row.kind}`"
     >
       <span class="h-px flex-1 bg-[image:linear-gradient(to_right,transparent,var(--border-strong)_18%,var(--border-strong)_82%,transparent)]" />
-      <!-- 呼吸弧（M3c demo 复刻 .run-ic 规格：15px accent + animate-loader-spin 三重动画）。
-           内联 SVG 结构复制自 block-icon.ts RUNNING_LOADER_SVG（该常量消费模式 = v-html 注入，
-           需行内豁免注释；本组件按红线改取静态模板内联、零豁免；弧动画类
+      <!-- waiting 行（裁决 3A）：三点等待（accent 4px 圆点 ×3，900ms 周期错峰 120ms）；
+           其余行保持呼吸弧（M3c demo 复刻 .run-ic 规格：15px accent + animate-loader-spin
+           三重动画）。内联 SVG 结构复制自 block-icon.ts RUNNING_LOADER_SVG（该常量消费模式 =
+           v-html 注入，需行内豁免注释；本组件按红线改取静态模板内联、零豁免；弧动画类
            .ld-track/.ld-arc 由 style.css 全局层持有，改动两处须同步）。 -->
+      <span
+        v-if="row.kind === 'waiting'"
+        class="wait-dots inline-flex h-[22px] shrink-0 items-center gap-[5px]"
+        aria-hidden="true"
+        data-testid="activity-strip-dots-waiting"
+      >
+        <i class="block size-[6px] rounded-full bg-accent opacity-30"></i><i class="block size-[6px] rounded-full bg-accent opacity-30"></i><i class="block size-[6px] rounded-full bg-accent opacity-30"></i>
+      </span>
       <svg
+        v-else
         class="size-[15px] shrink-0 text-accent animate-loader-spin"
         viewBox="0 0 24 24"
         fill="none"
@@ -157,10 +167,10 @@ const props = defineProps<{
 const chat = useChatStore()
 const { t } = useI18n()
 
-/** 活动条行（单一变化轴：行类型 + 文案）。优先级 = 数组序（compacting > bash > thinking / settling，
- *  thinking 与 settling 互斥不并存——turn 单值，同一档位）。 */
+/** 活动条行（单一变化轴：行类型 + 文案）。优先级 = 数组序（compacting > bash > waiting / thinking /
+ *  settling，waiting 与 thinking 同档互斥——dispatching 优先三点等待行，subagentThinking 才落呼吸弧行）。 */
 interface ActivityRow {
-  kind: 'compacting' | 'bash' | 'thinking' | 'settling'
+  kind: 'compacting' | 'bash' | 'waiting' | 'thinking' | 'settling'
   text: string
   /** mono meta 钉右（text-2xs/500/tabular-nums）：bash 行 elapsed 计时（方案 A——命令移入
    *  悬停详情后，行内保留执行期观察） */
@@ -207,10 +217,13 @@ const rows = computed<ActivityRow[]>(() => {
       detail: { label: t('panel.message.bashCommandLabel'), body: props.executingBash.command },
     })
   }
-  // thinking 行：无 compacting/bash 且（turn=dispatching（occupancy 权威投影，替代原 TurnMeta
-  // isPendingPlaceholder 占位）或 subagentThinking（§6.3：虚拟 session 收不到 occupancy 帧，
-  // 思考行由 subagent forceWorking 补充驱动））——「无以上但有思考信号」才显示，避免与压缩/命令行重复堆叠
-  if (!compacting && !props.executingBash && (turn === 'dispatching' || props.subagentThinking)) {
+  // 等待行（demo chat spec 裁决 3A）：turn=dispatching（prompt 已发、message_start 未到 =
+  // 「已发送、等待首个 token」阶段）→ 三点等待行，消除发送后无任何反馈的死寂窗口；首包到达
+  // （turn 翻 generating）后行消失，streaming 本体由末位 turn 的 TurnMeta「工作中」行承担。
+  // subagentThinking（§6.3 虚拟 session 强制思考，非「等待首包」语义）保持呼吸弧 thinking 行。
+  if (!compacting && !props.executingBash && turn === 'dispatching') {
+    list.push({ kind: 'waiting', text: t('panel.message.waitingResponse') })
+  } else if (!compacting && !props.executingBash && props.subagentThinking) {
     list.push({ kind: 'thinking', text: t('panel.message.dispatching') })
   }
   // settling 行（D6 表行 4 活动条列前半，修复一致性审查 R3-U1）：无 compacting/bash 且
@@ -309,3 +322,21 @@ function copyDetailBody(kind: ActivityRow['kind']): void {
 }
 
 </script>
+
+<style scoped>
+/* 等待三点跳动（demo chat spec 裁决 3A，workbench.css .wait-dots 同参）：900ms 周期，
+   35% 帧顶点（上浮 4px + 全亮），70% 归位——三点错峰 delay 0/120/240ms，accent 单色无发光。
+   仅动画属性落 scoped（形态类在模板），keyframes scoped 内定义 + 同块引用自洽（Vue SFC
+   编译器重写 scoped 动画名，仅本组件单消费点，Block.vue fchip-roll-x 同先例）。
+   prefers-reduced-motion 由 style.css 全局兜底（duration 0.01ms + iteration 1 → 停 0% 帧
+   静态常态色）。escape hatch：keyframes + nth-child 错峰延迟组合，Tailwind 无法表达。 */
+.wait-dots i {
+  animation: wait-dot 900ms var(--ease-out-soft, var(--ease-out)) infinite;
+}
+.wait-dots i:nth-child(2) { animation-delay: 120ms; }
+.wait-dots i:nth-child(3) { animation-delay: 240ms; }
+@keyframes wait-dot {
+  0%, 70%, 100% { opacity: 0.3; transform: translateY(0); }
+  35% { opacity: 1; transform: translateY(-4px); }
+}
+</style>

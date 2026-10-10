@@ -40,9 +40,6 @@ export default {
     toggleSidebarAria: 'Toggle sidebar',
     back: 'Back',
     forward: 'Forward',
-    workingDir: 'Working directory',
-    branch: 'Branch',
-    copySessionFile: 'Copy session file path',
     // Plugin header action buttons (HeaderActionsHost, E13 tri-state tooltip; plugin-header-action-modal-points AP-1)
     pluginActionExtensionNotLoaded: 'Required extension not loaded in this session',
     pluginActionRestoring: 'Session restoring, availability unknown',
@@ -138,6 +135,7 @@ export default {
     respawnRetry: 'Retry recovery',
     respawnRetryFailed: 'Recovery failed — try again later or create a new session',
     dispatching: 'Thinking…',
+    waitingResponse: 'Waiting for response',
     railInProgress: 'in progress…',
     // [RD-2#1 render error boundary] per-item failure placeholder row + retry; global render error toast
     itemRenderFailed: 'This item failed to render',

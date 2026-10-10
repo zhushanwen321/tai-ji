@@ -92,6 +92,19 @@ export default [
       'max-lines': 'off',
     },
   },
+  // chat 展示三件（Turn 轮次聚合 / Block 块渲染 / MarkdownRenderer 分通道净化渲染）：
+  // 职责内聚（轮次聚合、块类型分发、markdown 渲染管线各自唯一实现），行数超 500，
+  // 拆分属独立重构任务（文件头注释已登记）。短期 max-lines override 避免阻塞，长期应拆分。
+  {
+    files: [
+      'packages/ui/src/features/chat/Turn.vue',
+      'packages/ui/src/features/chat/Block.vue',
+      'packages/ui/src/features/chat/MarkdownRenderer.vue',
+    ],
+    rules: {
+      'max-lines': 'off',
+    },
+  },
   // [HISTORICAL] runtime 的 .cjs 文件（plugin-esm-loader.cjs 等）是 Node CJS 模块，
   // require() 是唯一导入方式——no-require-imports 规则对 .cjs 是误报（2026-08-05 添加，
   // sandbox ESM loader 落地时确认：tsup entry 直接打包 .cjs 源文件，无 TS 转换层）。

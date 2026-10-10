@@ -40,9 +40,6 @@ export default {
     toggleSidebarAria: '切换侧栏',
     back: '后退',
     forward: '前进',
-    workingDir: '工作目录',
-    branch: '分支',
-    copySessionFile: '复制 session 文件路径',
     // plugin 顶栏按钮区（HeaderActionsHost，E13 三态 tooltip；plugin-header-action-modal-points AP-1）
     pluginActionExtensionNotLoaded: '本会话未加载所需扩展',
     pluginActionRestoring: '会话恢复中，暂无法判定',
@@ -136,6 +133,7 @@ export default {
     respawnRetry: '重试恢复',
     respawnRetryFailed: '恢复失败，请稍后重试或新建会话',
     dispatching: '思考中…',
+    waitingResponse: '等待响应',
     railInProgress: '进行中…',
     // [RD-2#1 渲染错误边界] 单条渲染失败占位行 + 重试入口；全局渲染异常上屏 toast
     itemRenderFailed: '本条渲染失败',

@@ -43,10 +43,15 @@
              baseline（MF-1-34，workbench.css:348 align-items:baseline），图标保持
              self-center（demo .sicon align-self:center）。 -->
         <div class="flex items-baseline gap-2 min-h-[1.5rem]">
-          <span v-if="thinkingSweeping" class="inline-flex size-[15px] shrink-0 self-center items-center justify-center text-accent">
-            <span class="inline-flex size-full items-center justify-center animate-loader-spin" v-html="RUNNING_LOADER_SVG" /> <!-- eslint-disable-line vue/no-v-html -- hardcoded constant from block-icon.ts -->
-          </span>
-          <component :is="BLOCK_ICON_LUCIDE.thinking" v-else class="size-[15px] shrink-0 self-center text-reasoning [stroke-width:1.6]" />
+          <!-- 运行→完成图标交叉切换（动效裁决 2A 出半，demo .tico 同参）：运行呼吸弧 150ms
+               ease-in 淡出、完成图标 200ms 带自下 4px 落位淡入（scoped 尾部 tico 过渡类）；
+               reduced-motion 走 style.css 全局兜底。 -->
+          <Transition mode="out-in" name="tico">
+            <span v-if="thinkingSweeping" class="inline-flex size-[15px] shrink-0 self-center items-center justify-center text-accent">
+              <span class="inline-flex size-full items-center justify-center animate-loader-spin" v-html="RUNNING_LOADER_SVG" /> <!-- eslint-disable-line vue/no-v-html -- hardcoded constant from block-icon.ts -->
+            </span>
+            <component :is="BLOCK_ICON_LUCIDE.thinking" v-else class="size-[15px] shrink-0 self-center text-reasoning [stroke-width:1.6]" />
+          </Transition>
           <!-- 状态词 label：思考进行中跑文字扫光（决策 10）。生命周期 = 块级（thinkingEnd 未填），
                非消息级 working——思考完结后消息仍在流式（工具执行中），扫光随思考完结熄灭。
                base 覆盖为 mid 档对齐 BLOCK_LABEL_CLASS 常态字色（reduced-motion 停帧态 = 常态色，
@@ -153,14 +158,16 @@
         @keydown.enter.prevent="toggleGroup"
         @keydown.space.prevent="toggleGroup"
       >
-        <!-- running 态 loader（呼吸弧 + accent），其余走静态组图标。
-             组头文字（×N · 共 Xs 计数/耗时口径）是稳定标识，不跑文字扫光（决策 10）。
-             [M3b demo 复刻] 行文字不染 accent（demo 运行态 = 仅呼吸弧图标 accent，文字保持
-             行层级 mid，workbench.css .tool .t-name），与普通 tool 行运行态同款。 -->
-        <span v-if="group.hasRunning" class="inline-flex size-[15px] shrink-0 self-center items-center justify-center text-accent">
-          <span class="inline-flex size-full items-center justify-center animate-loader-spin" v-html="RUNNING_LOADER_SVG" /> <!-- eslint-disable-line vue/no-v-html -- hardcoded constant from block-icon.ts -->
-        </span>
-        <component :is="BLOCK_ICON_LUCIDE['bash-group']" v-else :class="[BLOCK_ICON_CLASS, 'self-center']" />
+        <!-- running 态 loader（呼吸弧 + accent），其余走静态组图标（切换走 tico 交叉过渡，
+             同 tool/thinking 行）。组头文字（×N · 共 Xs 计数/耗时口径）是稳定标识，不跑文字
+             扫光（决策 10）。[M3b demo 复刻] 行文字不染 accent（demo 运行态 = 仅呼吸弧图标
+             accent，文字保持行层级 mid，workbench.css .tool .t-name），与普通 tool 行运行态同款。 -->
+        <Transition mode="out-in" name="tico">
+          <span v-if="group.hasRunning" class="inline-flex size-[15px] shrink-0 self-center items-center justify-center text-accent">
+            <span class="inline-flex size-full items-center justify-center animate-loader-spin" v-html="RUNNING_LOADER_SVG" /> <!-- eslint-disable-line vue/no-v-html -- hardcoded constant from block-icon.ts -->
+          </span>
+          <component :is="BLOCK_ICON_LUCIDE['bash-group']" v-else :class="[BLOCK_ICON_CLASS, 'self-center']" />
+        </Transition>
         <span class="min-w-0 truncate text-left transition-opacity duration-[var(--duration-fast)] group-hover/bgroup:opacity-80">{{ t('panel.message.traceBashSummary', { count: group.header.count, duration: formatDuration(group.header.durationMs) }) }}</span>
         <!-- 失败段 chip 化（demo failtag 形态：workbench.css .failtag = 11px fw-mid danger +
              danger-soft 底 + r-xs 4px + 1px 6px 内边距） -->
@@ -195,10 +202,12 @@
           class="group/wf flex min-w-0 cursor-pointer select-none items-baseline gap-2 text-[length:var(--text-base)] [font-weight:var(--fw-mid)] text-neutral-dim"
           @click="openWorkflowDrawer"
         >
-          <!-- running 态 loader（呼吸弧 + accent），其余走 list-checks ICON；
+          <!-- running 态 loader（呼吸弧 + accent），其余走 list-checks ICON（tico 交叉过渡）；
                failed 图标染 danger（与普通 tool 行同款，demo .line.subagent.failed .sicon 形态家族） -->
-          <span v-if="isRunning" class="inline-flex size-[15px] shrink-0 self-center items-center justify-center text-accent animate-loader-spin" v-html="RUNNING_LOADER_SVG" /> <!-- eslint-disable-line vue/no-v-html -- hardcoded constant from block-icon.ts -->
-          <component :is="BLOCK_ICON_LUCIDE.workflow" v-else :class="[headerIconClass, 'self-center']" />
+          <Transition mode="out-in" name="tico">
+            <span v-if="isRunning" class="inline-flex size-[15px] shrink-0 self-center items-center justify-center text-accent animate-loader-spin" v-html="RUNNING_LOADER_SVG" /> <!-- eslint-disable-line vue/no-v-html -- hardcoded constant from block-icon.ts -->
+            <component :is="BLOCK_ICON_LUCIDE.workflow" v-else :class="[headerIconClass, 'self-center']" />
+          </Transition>
           <span :class="[BLOCK_LABEL_CLASS, 'transition-opacity duration-[var(--duration-fast)] group-hover/wf:opacity-80']">{{ t('panel.message.workflow') }}</span>
           <!-- name 染对话流专属名称色 --name（2026-10-06 裁决）；slug 降行层级灰（与「子代理」等标签同色 --neutral-mid） -->
           <span v-if="workflowFields.nameShort" class="shrink-0 whitespace-nowrap font-mono text-[length:var(--text-sm)] text-[color:var(--name)] transition-opacity duration-[var(--duration-fast)] group-hover/wf:opacity-80" :title="workflowFields.name">{{ workflowFields.nameShort }}</span>
@@ -241,14 +250,17 @@
           :title="toolExpanded ? t('panel.message.collapse') : t('panel.message.expand')"
           @click="toggleTool"
         >
-          <!-- running 态 loader（呼吸弧 + accent），其余走 BLOCK_ICON_LUCIDE[iconKind]。
+          <!-- running 态 loader（呼吸弧 + accent），其余走 BLOCK_ICON_LUCIDE[iconKind]
+               （tico 交叉过渡，动效裁决 2A 出半）。
                [M3b demo 复刻]（workbench.css .tool/.run-ic）：行文字恒行层级 mid 不随状态染色
                （demo .tool .t-name 恒 mid，无 accent/danger 文字态），状态色只落在图标——
                running = accent 呼吸弧、failed = danger（.line.subagent.failed .sicon）。 -->
-          <span v-if="isRunning" class="inline-flex size-[15px] shrink-0 self-center items-center justify-center text-accent">
-            <span class="inline-flex size-full items-center justify-center animate-loader-spin" v-html="RUNNING_LOADER_SVG" /> <!-- eslint-disable-line vue/no-v-html -- hardcoded constant from block-icon.ts -->
-          </span>
-          <component :is="headerBlockIcon" v-else :class="[headerIconClass, 'self-center']" />
+          <Transition mode="out-in" name="tico">
+            <span v-if="isRunning" class="inline-flex size-[15px] shrink-0 self-center items-center justify-center text-accent">
+              <span class="inline-flex size-full items-center justify-center animate-loader-spin" v-html="RUNNING_LOADER_SVG" /> <!-- eslint-disable-line vue/no-v-html -- hardcoded constant from block-icon.ts -->
+            </span>
+            <component :is="headerBlockIcon" v-else :class="[headerIconClass, 'self-center']" />
+          </Transition>
           <span class="shrink-0 normal-case tracking-normal transition-opacity duration-[var(--duration-fast)] group-hover/tool:opacity-80">{{ toolName }}</span>
           <!-- running + 有流式输出：单行尾行视口（同 thinking header 结构：leading-normal
                字体无关行高 + mr-auto 短行左贴/溢出钉右 + 纵向状态机滑入）；否则静态 shortenForHeader。
@@ -785,5 +797,27 @@ const testId = computed(() => {
 .tool-file-chip:hover .fchip-roll { animation: fchip-roll-x 2.4s var(--ease-out) 0.35s forwards; }
 @keyframes fchip-roll-x { to { transform: translateX(min(0px, calc(304px - 100%))); } }
 @media (prefers-reduced-motion: reduce) { .tool-file-chip:hover .fchip-roll { animation: none; } }
+
+/* 运行→完成图标交叉切换（动效裁决 2A 出半，demo workbench.css .tico 同参）：运行图标 150ms
+   ease-in 淡出（先出）、完成图标 200ms --ease-out-soft 带自下 4px 落位淡入（后入，out-in）。
+   消费点 = thinking / bash-group / workflow / tool 四处行头 loader↔静态图标（模板 Transition
+   name="tico"）。--ease-out-soft 令牌待 tokens 域补登记，fallback --ease-out 就近生效。
+   reduced-motion 由 style.css 全局兜底（duration 0.01ms 瞬切）。escape hatch：Vue Transition
+   类用 scoped 表达（block-expand 同先例）。 */
+.tico-enter-active {
+  transition:
+    opacity 200ms var(--ease-out-soft, var(--ease-out)),
+    transform 200ms var(--ease-out-soft, var(--ease-out));
+}
+.tico-leave-active {
+  transition: opacity 150ms var(--ease-in);
+}
+.tico-enter-from {
+  opacity: 0;
+  transform: translateY(4px);
+}
+.tico-leave-to {
+  opacity: 0;
+}
 </style>
 

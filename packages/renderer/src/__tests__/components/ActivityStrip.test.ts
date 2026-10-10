@@ -63,12 +63,12 @@ describe('ActivityStrip subagentThinking 行渲染（u3-thinking / §6.3）', ()
     wrapper.unmount()
   })
 
-  it('subagentThinking=true 且 turn=dispatching → 仍只有一行（条件合并不重复渲染）', () => {
+  it('subagentThinking=true 且 turn=dispatching → 仍只有一行，且归三点等待行（demo 裁决 3A：dispatching 优先）', () => {
     chatState.turn = 'dispatching'
     const wrapper = mountStrip({ subagentThinking: true })
     const rows = wrapper.findAll('[data-testid^="activity-strip-row-"]')
     expect(rows).toHaveLength(1)
-    expect(rows[0].attributes('data-testid')).toBe('activity-strip-row-thinking')
+    expect(rows[0].attributes('data-testid')).toBe('activity-strip-row-waiting')
     wrapper.unmount()
   })
 })

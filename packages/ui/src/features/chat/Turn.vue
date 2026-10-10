@@ -107,10 +107,15 @@
            工作展开态（showTrace && isWorkingTurn）渲染 computeTraceWindow 窗口切片结果
              （末位 text + 进行中块 + 最近 W 个已完成过程块）；
            完成态/历史手动展开（showTrace && !isWorkingTurn）渲染全量 flatBlocks
-             （design §3.1 交互6「回看就是全量」、G5「完成态与历史呈现不变」，窗口只作用于工作 turn）。
+             （design §3.1 交互6「回看就是全量」，窗口只作用于工作 turn）。
            收编行仅在「工作 turn 且（接管态 或 有收编/失败块）」时显示（design §3.1，D5 零 chrome）。
-           takeover 态保留行以提供「恢复精简」回退入口（design 交互1），否则用户卡死在全展态。 -->
-      <div class="trace mt-3 flex flex-col">
+           takeover 态保留行以提供「恢复精简」回退入口（design 交互1），否则用户卡死在全展态。
+           [动效裁决 1B/2A] trace--live = 工作 turn 挂载的块播一次纯淡入（260ms 只动 opacity，
+           不带位移——对话流块平铺直排，位移会与贴底跟随的滚动叠加产生晃动；v-memo 保 DOM
+           使流式重渲染不重播；keepMounted 使工作 turn 不被虚拟化卸载，无重挂重播）；
+           trace--just-done = 轮次落完成瞬间的换块落位标记（200ms 淡入 + 4px 落位），仅刚落
+           完成的轮次携带（justDone ref，见 script），历史轮不误标。 -->
+      <div class="trace mt-3 flex flex-col" :class="{ 'trace--live': isWorkingTurn, 'trace--just-done': justDone }">
         <TraceCompactorRow
           v-if="showTrace && isWorkingTurn && (takeover || traceWindow.compactedCount > 0 || traceWindow.failedCount > 0)"
           class="trace-compactor-row"
@@ -187,7 +192,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import type { Component } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Bell, CheckCircle2, TriangleAlert } from '@lucide/vue'
@@ -405,6 +410,29 @@ const turnAggregates = computed(() => deriveTurnAggregates(props.turn))
  * 工具执行期间两种判据同值（pi 整轮才 agent_end，assistant 保持 streaming）。
  */
 const isTurnRunning = computed(() => isWorkingTurn.value)
+
+/**
+ * [动效裁决 2A] 换块落位标记（demo t.justDone 同构）：turn 从工作态落完成的一瞬置位，驱动
+ * trace--just-done ——该轮各块播 200ms 淡入落位（配合 Block 内图标交叉切换构成换块感知）。
+ * 短窗清除（900ms > 动画 200ms）：虚拟化下完成 turn 不在 keepMounted，滚出视口卸载/滚回
+ * 重挂会重实例化组件（ref 归 false 不重播），但保活期间的重挂（如展开态切换 remount）会
+ * 重播——落位是「落成瞬间」的一次性信号，播完即清。历史/重开轮组件初值恒 false 不误标。
+ */
+/** 落位标记清除窗（ms）：须 > 动画时长 200ms，播完即清（防保活期间重挂重播） */
+const JUST_DONE_CLEAR_MS = 900
+const justDone = ref(false)
+let justDoneTimer: ReturnType<typeof setTimeout> | null = null
+watch(isWorkingTurn, (working, prev) => {
+  if (prev && !working) {
+    justDone.value = true
+    if (justDoneTimer) clearTimeout(justDoneTimer)
+    justDoneTimer = setTimeout(() => { justDone.value = false }, JUST_DONE_CLEAR_MS)
+  } else if (working) {
+    // 复工作（streaming 重开）即撤销未播完的落位标记，避免与 trace--live 入场叠加
+    justDone.value = false
+    if (justDoneTimer) { clearTimeout(justDoneTimer); justDoneTimer = null }
+  }
+})
 
 /**
  * 折叠作用域（scope wave D1）：工作 turn 或手动 expanded 时展开 trace。
@@ -636,5 +664,29 @@ const showStreamingCursor = computed(() => {
 }
 .trace > .trace-compactor-row + .trace-blk {
   margin-top: 12px;
+}
+
+/* ── 块动效（demo chat spec 动效裁决 1B / 2A，workbench.css 动效基元区同参）──
+   挂载即播的 CSS animation 天然满足「已存在块不重播」：v-memo 保 DOM（流式重渲染不重播）、
+   keepMounted 保工作 turn（虚拟化不卸载）。live/just-done 由容器级状态类门控：
+   - trace--live（1B）：工作 turn 新挂载块纯淡入 260ms，只动 opacity 不带位移（平铺直排的
+     块位移会与贴底跟随滚动叠加晃动）；
+   - trace--just-done（2A 入半）：落完成瞬间各块 200ms 淡入 + 4px 落位（出半 = Block 内
+     图标交叉切换），仅刚落完成轮次携带。
+   --ease-out-soft 令牌待 tokens 域补登记（style.css 现缺），fallback --ease-out 就近生效。
+   keyframes scoped 内定义 + 同块引用自洽（Vue SFC 编译器重写 scoped 动画名，仅本组件
+   单消费点）。prefers-reduced-motion 由 style.css 全局兜底（duration 0.01ms + iteration 1
+   → 瞬达终态静态）。escape hatch：animation + 状态类组合，Tailwind 无法表达。 */
+.trace--live .trace-blk {
+  animation: tblk-in 260ms var(--ease-out-soft, var(--ease-out));
+}
+@keyframes tblk-in {
+  from { opacity: 0; }
+}
+.trace--just-done .trace-blk {
+  animation: tblk-swap-in 200ms var(--ease-out-soft, var(--ease-out));
+}
+@keyframes tblk-swap-in {
+  from { opacity: 0; transform: translateY(4px); }
 }
 </style>

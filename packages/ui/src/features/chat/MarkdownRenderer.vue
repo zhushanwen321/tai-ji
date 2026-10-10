@@ -159,7 +159,8 @@ function onAmbiguousSelect(path: string): void {
 // ── 代码块复制反馈态（DOM imperative：v-html 内 .md-codeblock__copy 无 Vue 响应式）──
 let copiedBtn: HTMLElement | null = null
 let copiedTimer: ReturnType<typeof setTimeout> | null = null
-const COPIED_FEEDBACK_MS = 1200
+// demo 权威 1.6s 后复原（specs/chat.md 3.3：成功态对勾图标 1.6s 后复原）
+const COPIED_FEEDBACK_MS = 1600
 
 // ④⑤路链接判定/resolve 与 data-path 解码 → ./markdown-links.ts（镜像纯函数模块，设计 markdown-html-sanitize-render D4）
 
@@ -433,12 +434,19 @@ function onClick(e: MouseEvent): void {
   width: 22px;
   height: 22px;
   padding: 0;
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   border-radius: var(--radius-xs);
   color: var(--neutral-dim);
   transition: color var(--duration-fast) var(--ease), background var(--duration-fast) var(--ease);
+}
+/* 热区外扩 24px（demo .cb-copy::after，specs/chat.md 3.3）：视觉 22px 不变，命中区 24px */
+.md-render :deep(.md-codeblock__copy::after) {
+  content: '';
+  position: absolute;
+  inset: -1px;
 }
 .md-render :deep(.md-codeblock__copy:hover) {
   color: var(--neutral-fg);

@@ -27,6 +27,10 @@
       :style="{ overflowAnchor: 'none' }"
       @wheel="onWheel"
     >
+    <!-- 顶缘渐焦（demo chat spec 裁决 4B）：滚动容器第一个子元素挂载（sticky 钉顶 + 负 margin
+         净高 0 不参与布局，不扰动 virtua 测量），自驱动离顶（scrollTop>4）显隐 + 容器顶部 mask，
+         消费方零配置。降级：reduced-motion 关过渡 / reduced-transparency 整体摘除（组件内置）。 -->
+    <EdgeFade />
     <!-- 空态欢迎语（G2-004）：独立于虚拟列表，作为 scrollEl 直接子节点撑满视口。
          Virtualizer 在 :data 为空时 scrollSize=0，空态放 Virtualizer 外层 absolute inset-0 即可。 -->
     <div v-if="renderItems.length === 0" class="absolute inset-0 flex flex-col items-center justify-center gap-2 text-center">
@@ -197,6 +201,7 @@ import { computed, nextTick, onMounted, provide, ref, shallowRef, watch } from '
 import { useI18n } from 'vue-i18n'
 import { ChevronDown, Sparkles } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
+import { EdgeFade } from '@/components/ui/edge-fade'
 import { Virtualizer, type VirtualizerHandle } from 'virtua/vue'
 import { useChatStore } from '@/stores/chat'
 import ModeDeclarationRow from './ModeDeclarationRow.vue'
@@ -236,10 +241,7 @@ import { useMessageStreamFollowTriggers } from '@/composables/panel/useMessageSt
 import { useMessageStreamRail } from '@/composables/panel/useMessageStreamRail'
 import { useStreamingPin } from '@/composables/panel/useStreamingPin'
 // [u6a] 两常量的消费点已迁 ActivityStrip；与 ESTIMATED_TURN_HEIGHT 同源（virta 布局常量族）。
-import {
-  ESTIMATED_TURN_HEIGHT,
-  LOAD_MORE_RESERVED_HEIGHT,
-} from '@/composables/panel/message-stream-layout'
+import { ESTIMATED_TURN_HEIGHT, LOAD_MORE_RESERVED_HEIGHT } from '@/composables/panel/message-stream-layout'
 
 const props = defineProps<{
   sessionId: string
