@@ -1158,6 +1158,9 @@ ForkGroup（当前会话的「本会话的分支」折叠区）已整体退役�
 | `session-child-count` | SessionItemDisplay.vue | **父条目中性计数徽标**：`childCount > 0` 才渲染（子会话数按 `parentAgentSessionId` 分组纯内存派生，零新协议）；只读、描边 chip、**不用 accent**（accent 在本产品语义是「活跃/点睛」，且已被 `[AI]` 来源徽标占用）；`title` = `sidebar.sessionItem.childCount` |
 | `session-stop-item` | SessionItemContextMenu.vue | 运行中 session 的行菜单「停止」项（软停止；与硬杀态 `session-force-quit-item` 并列且语义不同——abort vs forceQuit → dead） |
 | `session-unread-dot` | SessionItemDisplay.vue（既有元素，**源已扩展**） | 后台完成未读 **或** fork 分支状态变更未读（两源合流，见 §1）；点开该行后消失（两源在同一清除点被清） |
+| `context-assign-label` | SessionItemContextMenu.vue | 行菜单「移动到项目」分组标签行（demo `.ctx-label`；菜单打开即渲染，随 Portal 条件） |
+| `context-assign-project-option` | SessionItemContextMenu.vue | 行菜单「移动到项目」分组项目行（当前归属项行首显 Check 勾标；与 ghost Popover 的 `assign-project-option` 是两个 surface，testid 分开命名避免双命中） |
+| `folder-actions` | SessionList.vue | 目录组头操作区（+ 新建恒渲染 + 批量删除两段式确认；非确认态 hover 显隐 `opacity-0 group-hover/folder:opacity-100`，确认中常显） |
 
 > **不变项**：`session-context-menu` / `session-view-parent-item` / `session-force-quit-item` / `session-icon` / `session-agent-badge` / `session-imported-fresh` / `sidebar-session-sub` / `mark-done-btn` / `quote-to-composer-btn` / `assign-project-btn` / `assign-project-option` / `folder-new-session-btn` / `folder-delete-btn` 语义与触发条件均未变。
 >

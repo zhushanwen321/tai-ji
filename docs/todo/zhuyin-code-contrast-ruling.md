@@ -1,21 +1,16 @@
-# 朱印主题行内 code 对比度锚定线（3.9 vs 4.0）待用户裁决
+# 朱印主题行内 code 对比度锚定线登记（已失效）
 
-状态：待用户裁决（现行落码形态 = 朱印锚定 3.9、其余五主题 ≥4:1；本文件是该裁决的登记处，裁决后按所选方向落终态并关闭）
+状态：已失效（无需裁决）——`--md-code-fg` 公式对齐 demo R4 弱化终态（`color-mix(in oklch, var(--neutral-fg) 85%, var(--code-c))`，`packages/renderer/src/style.css`）后，朱印实测对比 10.50:1，六主题恢复统一 ≥4:1 断言线（`contrast-tokens.test.ts` 的 `CODE_CONTRAST_MIN` 全表为 4）。
 
-## 待裁决项
+## 登记内容与失效原因
 
-行内 code 对比下限单测（`packages/renderer/src/__tests__/contrast-tokens.test.ts` 的 `CODE_CONTRAST_MIN` 表）对六主题的断言线：玄 / 黛蓝 / 暖墨 / 皓 / 青墨均为 ≥4:1，唯独朱印（亮）锚定 3.9。偏离原因：朱印 demo 权威颜料 `--code-c: #9a6b40`（`packages/renderer/src/style.css` 朱印块；code 底 = code-c 7% 叠亮色族 `--surface` `#f7f6f3`）在同口径 sRGB 合成下实测对比 3.92:1（复算 3.9212:1，合成底 `#f0ece6`），达不到统一 4:1 线；demo 是唯一视觉权威、不改值，故朱印单独锚定 3.9 保真。
+原裁决对象：行内 code 对比下限单测对朱印（亮）单独锚定 3.9（其余五主题 ≥4:1）。原因：旧公式下字色 = `--code-c` 本色，朱印 demo 权威颜料 `#9a6b40` 于 7% 叠亮色族 `--surface` 的 sRGB 合成实测 3.92:1，达不到统一 4:1 线；demo 是唯一视觉权威、不改值，故朱印单独锚定 3.9 保真，裁决权在用户。
 
-该豁免使朱印成为六主题中唯一低于 4:1 线的主题，属对比度防线阈值的取舍，裁决权在用户；测试断言值与注释均已指向本登记，裁决前维持现状不改。
-
-## 裁决方向（二选一）
-
-1. **接受 3.9 锚定线（现状转正）**：朱印维持 demo 值 `#9a6b40` 与 3.9 锚定下限，其余五主题维持 ≥4:1；裁决后本文件状态行落定案，测试注释去掉「待裁决」表述。
-2. **放宽 demo 值**：朱印 `--code-c` 调深至同口径实测 ≥4:1（偏离 demo 权威颜料——视觉权威让位于可读性下限的裁决），六主题统一 ≥4:1；单测 `CODE_CONTRAST_MIN.zhuyin` 改回 4，注释与本文件同步关闭。
+失效原因：R4 公式落地后字色不再是 code-c 本色（主前景 85% 混合，对比大幅升高），六主题（含朱印）全部 ≥10:1，3.9 锚定线失去对象，断言回归统一 4:1，无需用户裁决。
 
 ## 关联位置
 
 - 断言表与锚定注释：`packages/renderer/src/__tests__/contrast-tokens.test.ts`（文件头 + `CODE_CONTRAST_MIN` 表）
-- 颜料定义：`packages/renderer/src/style.css` 朱印块 `--code-c`
-- 设计权威同值记载：`docs/DESIGN.md` §4 六主题 `--code-c` 挂值表（朱印行 3.92:1）
-- `docs/todo/ui-replica-demo-fidelity.md`「待用户裁决」清单第 1 项与本登记同指一项：裁决与关闭以本文件为准，防双登记漂移
+- 颜料与公式定义：`packages/renderer/src/style.css`（`--md-code-fg` 公式 + 朱印块 `--code-c`）
+- `docs/todo/ui-replica-demo-fidelity.md`「待用户裁决」清单中与本登记同指一项的条目：以本文件状态行为准，防双登记漂移
+- 若后续出现「调深朱印 `--code-c` 颜料」类新裁决需求，另立登记，不在本文件复活
