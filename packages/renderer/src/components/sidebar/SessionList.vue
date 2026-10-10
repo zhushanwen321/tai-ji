@@ -56,6 +56,9 @@
     </div>
 
     <ScrollArea class="min-h-0 flex-1">
+    <!-- 顶缘渐焦（spec sidebar §3.1：三视图滚动容器接 EdgeFade）：自驱动父级滚动容器
+         mask，滚动离顶才启用，reduced-transparency 降级纯色渐隐 -->
+    <EdgeFade />
     <div class="flex flex-col px-1.5 pt-0.5 pb-2">
       <!-- C 目录分组模式：每组一个标题（cwd 末段）+ 组内 SessionItem 列表。
            目录级操作（组内新建 / 目录删除）只落在此模式组头（N8：A 平铺不提供，
@@ -187,6 +190,7 @@ import { Plus, Folder, Trash2, Check, List } from '@lucide/vue'
 import { useI18n } from 'vue-i18n'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { EdgeFade } from '@/components/ui/edge-fade'
 import { dirNameOf } from '@taiji/ui'
 import { collectNamedProjectIds, sessionBelongsToProject } from '@/composables/logic/project-session'
 import { isSessionCompleted } from '@/composables/logic/sessionStatus'

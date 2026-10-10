@@ -82,4 +82,38 @@ describe('SegmentedTab', () => {
     expect(emitted).toBeTruthy()
     expect(emitted![0][0]).toBe('files')
   })
+
+  it('tablist 范式（spec sidebar §3.1）：容器 role=tablist + 钮 role=tab + aria-selected', () => {
+    const wrapper = mountTab({ modelValue: 'files' })
+
+    expect(wrapper.find('[role="tablist"]').exists()).toBe(true)
+    const buttons = wrapper.findAll('button')
+    expect(buttons.map((b) => b.attributes('role'))).toEqual(['tab', 'tab', 'tab'])
+    expect(buttons[1].attributes('aria-selected')).toBe('true')
+    expect(buttons[0].attributes('aria-selected')).toBe('false')
+  })
+
+  it('方向键环形移动并立即激活（spec §3.1：→ 下一视图、← 上一视图、首尾环形）', async () => {
+    const wrapper = mountTab({ modelValue: 'sessions' })
+    const tablist = wrapper.find('[role="tablist"]')
+
+    // → 自会话到文件
+    await tablist.trigger('keydown', { key: 'ArrowRight' })
+    expect(wrapper.emitted('update:modelValue')![0][0]).toBe('files')
+    await wrapper.setProps({ modelValue: 'files' })
+
+    // → 自文件到插件（立即激活随 modelValue 推进）
+    await tablist.trigger('keydown', { key: 'ArrowRight' })
+    expect(wrapper.emitted('update:modelValue')![1][0]).toBe('plugins')
+    await wrapper.setProps({ modelValue: 'plugins' })
+
+    // → 自插件环形回会话（尾首相接）
+    await tablist.trigger('keydown', { key: 'ArrowRight' })
+    expect(wrapper.emitted('update:modelValue')![2][0]).toBe('sessions')
+    await wrapper.setProps({ modelValue: 'sessions' })
+
+    // ← 自会话环形回插件（反向环绕）
+    await tablist.trigger('keydown', { key: 'ArrowLeft' })
+    expect(wrapper.emitted('update:modelValue')![3][0]).toBe('plugins')
+  })
 })

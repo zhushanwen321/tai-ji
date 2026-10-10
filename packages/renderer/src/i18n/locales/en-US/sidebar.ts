@@ -91,6 +91,8 @@ export default {
     modeGroup: 'Group by folder',
   },
   assignProjectFailed: 'Failed to assign to project: {msg}',
+  // "Move to project" success feedback (sessions spec §3.3: move + toast on click)
+  movedToProject: 'Moved to project "{name}"',
   forceQuitFailed: 'Failed to force quit: {msg}',
   // [delivery-ownership kernel u3c / D10] explicit toast after forceQuit drains undelivered kernel entries into the Composer draft
   forceQuitQueueRecovered: '{count} queued message moved back to draft | {count} queued messages moved back to draft',
@@ -102,6 +104,8 @@ export default {
     session: 'Session',
     file: 'File',
     plugin: 'Plugins',
+    // tablist container aria-label (sidebar spec §3.1)
+    viewLabel: 'Sidebar views',
   },
   projectSwitcher: {
     defaultName: 'Default project',
@@ -109,7 +113,8 @@ export default {
     namePlaceholder: 'Project name',
     deleteProject: 'Delete project',
     deleteTitle: 'Delete project',
-    deleteDesc: 'Delete project "{name}"? This cannot be undone.',
+    // Confirm copy states the consequence (sidebar spec §3.7: sessions return to the default project)
+    deleteDesc: 'Delete project "{name}"? Its {count} session(s) will return to the default project, and the project itself will be deleted.',
     deleteConfirm: 'Delete',
     cancel: 'Cancel',
   },

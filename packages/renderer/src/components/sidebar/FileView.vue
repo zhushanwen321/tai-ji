@@ -32,6 +32,7 @@
         class="h-[24px] shrink-0 gap-1 rounded-sm px-[7px] text-[length:var(--text-2xs)] [&_svg]:size-[15px]"
         :class="store.showIgnored ? 'text-accent' : 'text-neutral-dim'"
         :title="store.showIgnored ? t('sidebar.fileView.hideIgnored') : t('sidebar.fileView.showIgnored')"
+        :aria-pressed="store.showIgnored"
         data-testid="file-show-ignored-toggle"
         @click="onToggleShowIgnored"
       >
@@ -58,8 +59,11 @@
 
     <!-- 滚动区：仅承载树（加载/错误/空态）。virtua Virtualizer 必须是其 parentElement
          （ScrollAreaViewport）的直接子节点——滚动容器由 virtua 从 parentElement 探测，
-         中间不能有包装 div（探针实证，MessageStream 同结构）。三态与树互为 v-if/v-else 链。 -->
+         中间不能有包装 div（探针实证，MessageStream 同结构）。三态与树互为 v-if/v-else 链。
+         顶缘渐焦（spec sidebar §3.1）：EdgeFade 作为 Viewport 首子元素自驱动 mask，
+         与 Virtualizer 互为兄弟节点，不破坏「直接子节点」探测前提。 -->
     <ScrollArea class="min-h-0 flex-1" horizontal>
+      <EdgeFade />
       <!-- 加载态（loadTree 在途） -->
       <div
         v-if="rootState.status === 'loading'"
@@ -117,8 +121,11 @@
            原 max-content 整树横滚架构退役（旧互斥登记作废）。
            注意：<template #default> 内禁止放注释/文本节点——virtua 的 item key 提取要求 slot 返回
            恰好 1 个 vnode（P(): e.length===1 才取 e[0].key），注释节点会 fallback 索引 key。 -->
+      <!-- role=tree（spec files §2 ftree 树语义容器）：经 attrs 透传落到 Virtualizer 根 div
+           （virtua 未关 inheritAttrs），行级 role=treeitem 由 FileTreeRow 承载。 -->
       <Virtualizer
         v-else
+        role="tree"
         :data="visibleRows"
         :item-size="ROW_HEIGHT_ESTIMATE"
         :item-props="() => ({ style: { width: '100%' } })"
@@ -144,6 +151,7 @@ import { Virtualizer } from 'virtua/vue'
 import { FolderOpen, Search, Loader2, AlertCircle, Eye, EyeOff } from '@lucide/vue'
 import { useI18n } from 'vue-i18n'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { EdgeFade } from '@/components/ui/edge-fade'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import FileTreeRow from './FileTreeRow.vue'

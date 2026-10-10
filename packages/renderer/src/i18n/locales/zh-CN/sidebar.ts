@@ -87,6 +87,8 @@ export default {
     modeGroup: '按目录分组',
   },
   assignProjectFailed: '归入项目失败：{msg}',
+  // 「移动到项目」迁移成功反馈（spec sessions §3.3：点击即迁移 + toast）
+  movedToProject: '已移动到项目「{name}」',
   forceQuitFailed: '强制退出失败：{msg}',
   // [投递所有权内核 u3c / D10] 强制退出后 delivery.drain 回收内核未送达条目进 Composer 草稿的显式提示
   forceQuitQueueRecovered: '{count} 条排队消息已收回草稿',
@@ -98,6 +100,8 @@ export default {
     session: '会话',
     file: '文件',
     plugin: '插件',
+    // tablist 容器 aria-label（spec sidebar §3.1）
+    viewLabel: '侧栏视图',
   },
   projectSwitcher: {
     defaultName: '默认项目',
@@ -105,7 +109,8 @@ export default {
     namePlaceholder: '项目名称',
     deleteProject: '删除项目',
     deleteTitle: '删除项目',
-    deleteDesc: '确认删除项目「{name}」？该操作不可撤销。',
+    // 二次确认写明后果（spec sidebar §3.7：「N 个会话将归回默认项目，项目本身将被删除」）
+    deleteDesc: '删除项目「{name}」？该项目下 {count} 个会话将归回默认项目，项目本身将被删除。',
     deleteConfirm: '删除',
     cancel: '取消',
   },

@@ -46,13 +46,20 @@
     </div>
 
     <!-- 目录行（demo .frow 语言：height 24px / gap 5px / radius-sm / mono 12px mid 字、hover 提 fg）。
-         行高必须 px 定高 h-[24px]：h-6=1.5rem 在 html 14px 基准（style.css --text-base）下=21px，缺 3px -->
+         行高必须 px 定高 h-[24px]：h-6=1.5rem 在 html 14px 基准（style.css --text-base）下=21px，缺 3px。
+         树语义（spec files §2/§3.1）：role=treeitem + tabindex=0 + aria-expanded 同步 +
+         Enter/Space 开合（键盘与点击同通道）。 -->
     <div
       v-else-if="row.type === 'dir'"
       class="flex h-[24px] w-full cursor-default select-none items-center gap-[5px] rounded-sm py-0.5 pr-2 font-mono text-[length:var(--text-xs)] text-neutral-mid transition-colors hover:bg-surface-hover hover:text-neutral-fg"
       :style="rowPaddingStyle"
+      role="treeitem"
+      tabindex="0"
+      :aria-expanded="row.expanded"
       :data-testid="`file-tree-dir-${row.path}`"
       @click="emit('toggle', row)"
+      @keydown.enter.prevent="emit('toggle', row)"
+      @keydown.space.prevent="emit('toggle', row)"
     >
       <span :class="chevronSlotClass" data-testid="chevron-slot">
         <ChevronRight
@@ -78,14 +85,18 @@
     </div>
 
     <!-- 文件行（v-else 紧邻上方目录 v-else-if，链绑定到 row.type 判断）。
-         选中态 = demo Tier B 行类范式（.frow.sel 无底无框，仅文字提亮 fg + fw-mid）。 -->
+         选中态 = demo Tier B 行类范式（.frow.sel 无底无框，仅文字提亮 fg + fw-mid）。
+         树语义（spec files §3.1）：role=treeitem + tabindex=0 + Enter 打开。 -->
     <div
       v-else
       class="flex h-[24px] w-full cursor-default select-none items-center gap-[5px] rounded-sm py-0.5 pr-2 font-mono text-[length:var(--text-xs)] text-neutral-mid transition-colors hover:bg-surface-hover hover:text-neutral-fg"
       :class="{ 'text-neutral-fg': selected }"
       :style="rowPaddingStyle"
+      role="treeitem"
+      tabindex="0"
       :data-testid="`file-tree-file-${row.path}`"
       @click="emit('select', row)"
+      @keydown.enter.prevent="emit('select', row)"
     >
       <!-- D-022：chevron 槽固定宽度占位，使文件 icon 与目录 folder icon 垂直对齐 -->
       <span :class="chevronSlotClass" data-testid="chevron-slot" />
@@ -141,8 +152,9 @@ const emit = defineEmits<{
   select: [row: VisibleRow]
 }>()
 
-/** 缩进步进（px）：每层级增加的 padding-left（v6 spec §6.2：14→10）*/
-const INDENT_STEP = 10
+/** 缩进步进（px）：层级缩进档（spec files §4，demo .frow.ind0-3 权威：18px 步进，
+ *  depth 0/1/2/3 = padding-left 8/26/44/62px）。原 v6 §6.2 的 10px 步进已随新 spec 树退役。 */
+const INDENT_STEP = 18
 /** 行 padding 基线（px）：depth=0 时的起始 padding-left（D-022） */
 const BASE_PADDING = 8
 /**

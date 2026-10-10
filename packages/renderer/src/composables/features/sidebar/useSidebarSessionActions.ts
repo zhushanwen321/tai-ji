@@ -25,6 +25,7 @@ import { composerInjectionStore } from '@/composables/panel/composer-injection-s
 import { useSearchModalDeps } from '@/composables/features/search/useSearchModalDeps'
 import { useSideDrawer } from '@/composables/features/drawer/useSideDrawer'
 import { useSessionStore } from '@/stores/session'
+import { useProjectStore } from '@/stores/project'
 import { useToast } from '@/composables/useToast'
 import { markForcedExit, consumeForcedExit } from '@/composables/effects/forced-exit-marks'
 import { useI18n } from 'vue-i18n'
@@ -222,10 +223,15 @@ export function useSidebarSessionActions(options: UseSidebarSessionActionsOption
     }
   }
 
-  /** 归入项目（D14 语义修正）：SessionItem 菜单选择后 RPC + 乐观更新；失败 toast。 */
+  /** 归入项目（D14 语义修正）：SessionItem 菜单/悬停浮层选择后 RPC + 乐观更新。
+   *  成功 toast 反馈（spec sessions §3.3「移动到项目点击即迁移 + toast」）；失败 toast。 */
   async function onAssignProject(payload: { sessionId: string; projectId: string }): Promise<void> {
     try {
       await assignSessionToProject(payload.sessionId, payload.projectId)
+      const name = payload.projectId
+        ? useProjectStore().projects.find((p) => p.id === payload.projectId)?.name || payload.projectId
+        : t('sidebar.projectSwitcher.defaultName')
+      toastInfo(t('sidebar.movedToProject', { name }))
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
       toastError(t('sidebar.assignProjectFailed', { msg }))

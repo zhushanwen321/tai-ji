@@ -89,7 +89,9 @@
              （padding 6/9/3、10.5px dim→real 取 --text-2xs 11px 档、letter-spacing 0.03em）+ 项目行首定宽勾标列
              （14px 居中 accent，当前归属项显 Check）。demo 勾标为文本字符（U+2713），
              real 按 no-emoji-in-template 规则换 lucide Check（同一勾形语义；像素形态差异
-             随菜单 IA 差异登记 docs/todo/ui-replica-demo-fidelity.md）。归属判定与 ghost
+             随菜单 IA 差异登记 docs/todo/ui-replica-demo-fidelity.md）。项目行 gap-2 =
+             demo .ctxmenu button 同参（demo overlays spec §6 + §5.6 验收：项目名距菜单左缘
+             ≈35px = 菜单 p4 + 行 px9 + 勾标列 14 + gap 8）。归属判定与 ghost
              Popover 同口径（projectId || '' 归一，review S-2）；归类动作 emit setProject
              复用 SessionItem 既有出站链（D14）。行操作组（重命名/归档/导出 JSONL/删除）
              不在菜单承载（收敛 hover ghost 层），差异登记同上。 -->
@@ -108,7 +110,7 @@
           v-for="p in assignTargets"
           :key="p.id"
           data-testid="context-assign-project-option"
-          class="flex h-[28px] w-full cursor-pointer select-none items-center rounded-sm px-[9px] text-[length:var(--text-xs)] text-neutral-fg outline-none hover:bg-surface-hover"
+          class="flex h-[28px] w-full cursor-pointer select-none items-center gap-2 rounded-sm px-[9px] text-[length:var(--text-xs)] text-neutral-fg outline-none hover:bg-surface-hover"
           @select="onAssignProject(p.id)"
         >
           <span class="flex w-[14px] shrink-0 items-center justify-center text-accent">

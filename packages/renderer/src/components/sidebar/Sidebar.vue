@@ -11,8 +11,9 @@
   -->
   <div
     data-fs-scope="sidebar"
-    class="sidebar h-full transition-[width,opacity] duration-[var(--duration-slow)] ease-[var(--ease)]"
+    class="sidebar h-full data-[collapsed=true]:invisible motion-reduce:data-[collapsed=true]:hidden"
     :class="{ 'w-0 opacity-0 overflow-hidden': sidebar.collapsed }"
+    :data-collapsed="sidebar.collapsed ? 'true' : undefined"
   >
     <div class="sidebar__inner flex h-full w-[252px] flex-col">
       <!-- Brand（太极 logo + 产品名 + 版本号 + 升级指示器，v6 §6.2） -->
@@ -70,34 +71,39 @@
         :file-count="fileCount"
       />
 
-      <!-- 子视图区：会话列表 / 文件视图 / plugin sidebar view -->
+      <!-- 子视图区：会话列表 / 文件视图 / plugin sidebar view。
+           视图切换方向滑入（spec §3.1 裁决 P1-6，demo vt-slide 同语言）：三个分支各挂
+           viewSlideCls——目标视图序号更大自右滑入、反之自左；v-if 分支重挂载使动画每次
+           切换重播；首次进入不播（方向类初始为空，watch 置值前无类）。 -->
       <div class="mt-1 min-h-0 flex-1 overflow-hidden">
         <template v-if="sidebar.activeTab === 'sessions'">
-          <!-- S5：加载失败态 + 重试（session.listLoadError 非空时） -->
-          <div
-            v-if="session.listLoadError"
-            class="flex flex-col items-center justify-center gap-2 py-10 text-center"
-            data-testid="session-list-error"
-          >
-            <AlertCircle class="size-5 text-danger opacity-60" />
-            <p class="text-[length:var(--text-2xs)] text-neutral-mid">{{ t('sidebar.sessionListLoadFailed', { error: session.listLoadError }) }}</p>
-            <Button variant="ghost" class="h-6 text-[length:var(--text-2xs)] text-accent" data-testid="session-list-retry" @click="onRetryLoadSessions">{{ t('sidebar.retry') }}</Button>
+          <div class="h-full min-h-0" :class="viewSlideCls">
+            <!-- S5：加载失败态 + 重试（session.listLoadError 非空时） -->
+            <div
+              v-if="session.listLoadError"
+              class="flex flex-col items-center justify-center gap-2 py-10 text-center"
+              data-testid="session-list-error"
+            >
+              <AlertCircle class="size-5 text-danger opacity-60" />
+              <p class="text-[length:var(--text-2xs)] text-neutral-mid">{{ t('sidebar.sessionListLoadFailed', { error: session.listLoadError }) }}</p>
+              <Button variant="ghost" class="h-6 text-[length:var(--text-2xs)] text-accent" data-testid="session-list-retry" @click="onRetryLoadSessions">{{ t('sidebar.retry') }}</Button>
+            </div>
+            <SessionList
+              v-else
+              :groups="session.groups"
+              :active-id="focusedSessionId"
+              :status-of="statusOf"
+              @select="onSelectSession"
+              @new-session="onNewSession"
+              @rename="onRenameSession"
+              @delete="onDeleteSession"
+              @delete-folder="onDeleteFolder"
+              @new-session-in-folder="onNewSessionInFolder"
+              @abort="onAbortSession"
+              @force-quit="onForceQuitSession"
+              @set-project="onAssignProject"
+            />
           </div>
-          <SessionList
-            v-else
-            :groups="session.groups"
-            :active-id="focusedSessionId"
-            :status-of="statusOf"
-            @select="onSelectSession"
-            @new-session="onNewSession"
-            @rename="onRenameSession"
-            @delete="onDeleteSession"
-            @delete-folder="onDeleteFolder"
-            @new-session-in-folder="onNewSessionInFolder"
-            @abort="onAbortSession"
-            @force-quit="onForceQuitSession"
-            @set-project="onAssignProject"
-          />
         </template>
         <!-- ExtensionHost sidebar view 宿主（audit §12.1 sidebar.tab 挂载点）。
              L2 二级路由：PluginViewContainer 经 VIEWS_SOURCE_KEY 取 plugin view 清单
@@ -105,35 +111,39 @@
              （数据按 viewId 'todo'/'goal' 落，见 02-extension-host-wiring.md 重构 2）。
              sessionId 绑定焦点 session。 -->
         <template v-else-if="sidebar.activeTab === 'plugins'">
-          <PluginViewContainer
-            v-if="focusedSessionId"
-            :session-id="focusedSessionId"
-          />
-          <!-- 无焦点 session 时空态占位，与 files tab 同范式 -->
-          <div
-            v-else
-            class="flex flex-col items-center justify-center gap-2 py-10 text-center"
-            data-testid="sidebar-plugin-no-session"
-          >
-            <Puzzle class="size-5 text-neutral-dim opacity-40" />
-            <p class="text-[length:var(--text-2xs)] text-neutral-dim opacity-55">{{ t('sidebar.selectSessionHint') }}</p>
+          <div class="h-full min-h-0" :class="viewSlideCls">
+            <PluginViewContainer
+              v-if="focusedSessionId"
+              :session-id="focusedSessionId"
+            />
+            <!-- 无焦点 session 时空态占位，与 files tab 同范式 -->
+            <div
+              v-else
+              class="flex flex-col items-center justify-center gap-2 py-10 text-center"
+              data-testid="sidebar-plugin-no-session"
+            >
+              <Puzzle class="size-5 text-neutral-dim opacity-40" />
+              <p class="text-[length:var(--text-2xs)] text-neutral-dim opacity-55">{{ t('sidebar.selectSessionHint') }}</p>
+            </div>
           </div>
         </template>
         <template v-else>
-          <FileView
-            v-if="focusedSessionId"
-            :session-id="focusedSessionId"
-            :session-label="currentSession?.label"
-            :branch="currentSession?.gitBranch"
-          />
-          <!-- 无 active session（无聚焦态）→ 文件视图空态占位 -->
-          <div
-            v-else
-            class="flex flex-col items-center justify-center gap-2 py-10 text-center"
-            data-testid="file-view-no-session"
-          >
-            <FolderOpen class="size-5 text-neutral-dim opacity-40" />
-            <p class="text-[length:var(--text-2xs)] text-neutral-dim opacity-55">{{ t('sidebar.selectSessionHint') }}</p>
+          <div class="h-full min-h-0" :class="viewSlideCls">
+            <FileView
+              v-if="focusedSessionId"
+              :session-id="focusedSessionId"
+              :session-label="currentSession?.label"
+              :branch="currentSession?.gitBranch"
+            />
+            <!-- 无 active session（无聚焦态）→ 文件视图空态占位 -->
+            <div
+              v-else
+              class="flex flex-col items-center justify-center gap-2 py-10 text-center"
+              data-testid="file-view-no-session"
+            >
+              <FolderOpen class="size-5 text-neutral-dim opacity-40" />
+              <p class="text-[length:var(--text-2xs)] text-neutral-dim opacity-55">{{ t('sidebar.selectSessionHint') }}</p>
+            </div>
           </div>
         </template>
       </div>
@@ -218,7 +228,8 @@
             class="ml-[4px] grid size-[32px] shrink-0 place-items-center rounded-sm p-0 text-neutral-dim transition-colors hover:bg-surface-hover hover:text-neutral-fg [&_svg]:size-[15px]"
             :title="t('sidebar.settingsTitle')"
             :aria-label="t('sidebar.settingsTitle')"
-            @click="openSettings()"
+            data-testid="sidebar-settings"
+            @click="openSettings('appearance')"
           >
             <Settings class="size-[15px]" :stroke-width="1.6" />
           </Button>
@@ -249,7 +260,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, inject, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Plus, Search, Settings, FolderOpen, AlertCircle, Puzzle, Download, Smartphone, Palette } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
@@ -320,6 +331,21 @@ function quickThemeCancelClose(): void {
 }
 
 onBeforeUnmount(() => window.clearTimeout(quickThemeCloseTimer))
+
+// ── 视图切换方向滑入（spec §3.1 裁决 P1-6，demo Sidebar.vue VIEW_ORDER 同源）──
+// 方向判定 = 激活位索引比较：目标序号更大自右滑入、反之自左；初始为空 = 首次进入不播
+// （无前序方向不叠动画，与抽屉面板同纪律）。reduced-motion 由 style.css 全局 reduce 块归零。
+const VIEW_ORDER = ['sessions', 'files', 'plugins'] as const
+const viewSlideCls = ref('')
+watch(
+  () => sidebar.activeTab,
+  (nv, ov) => {
+    if (ov === undefined) return
+    viewSlideCls.value
+      = VIEW_ORDER.indexOf(nv) > VIEW_ORDER.indexOf(ov) ? 'vt-slide-r' : 'vt-slide-l'
+  },
+)
+
 const settingsStore = getSettingsStore()
 const currentTheme = computed(() => resolveTaijiTheme(settingsStore.system.value))
 async function applyTheme(th: TaijiTheme): Promise<void> {
@@ -363,4 +389,30 @@ useAppUpdate().initAutoCheck() // setup 顶层同步调用（非 onMounted）：
 </script>
 
 <style scoped>
+/* 折叠过渡（demo shell spec §3.6 裁决 5A）：宽度 320ms 收拢 + 200ms 淡出（--duration 与
+   demo --dur-base 同值）——transition 从 Tailwind 类收编到此处单点声明：① 淡出/收拢分属性
+   时长 Tailwind transition-* 类表达不了（duration 类是全属性单值）；② 折叠态 visibility
+   延迟翻转（过渡结束后才 hidden，隐藏行不进 Tab 焦点序）需要分属性 delay。
+   作用对象 = 本组件 width/opacity（w-0/opacity-0 类切换值）；aside flexBasis 归零不挂过渡
+   （CDP 环境下 flex-basis transition 锁死 declared value，AsideRegion 头注既有登记，不改）。
+   reduce 降级：全局 style.css reduce 块把过渡压到 0.01ms（瞬切），此处补 display:none
+   （demo .app.folded .sidebar 同款——直接离场不留 0 宽占位）。 */
+.sidebar { transition: width var(--duration-slow) var(--ease), opacity var(--duration) var(--ease), visibility 0s 0s; }
+.sidebar[data-collapsed='true'] { transition: width var(--duration-slow) var(--ease), opacity var(--duration) var(--ease), visibility 0s var(--duration-slow); }
+/* 视图切换方向滑入（demo workbench.css 动效基元 vt-slide 同参数：300ms + --ease-out-soft，
+   位移 ≤10px 动效纪律）：单组件消费 → scoped 声明，不进 style.css 全局动画原语白名单；
+   选择器挂 .sidebar 祖先（后代形式，同 ActivityStrip .wait-dots i 先例）。
+   reduced-motion 降级由 style.css 全局 reduce 块兜底（animation-duration 归零 = 瞬切）。 */
+.sidebar .vt-slide-r {
+  animation: vt-slide-r 300ms var(--ease-out-soft);
+}
+.sidebar .vt-slide-l {
+  animation: vt-slide-l 300ms var(--ease-out-soft);
+}
+@keyframes vt-slide-r {
+  from { opacity: 0; transform: translateX(10px); }
+}
+@keyframes vt-slide-l {
+  from { opacity: 0; transform: translateX(-10px); }
+}
 </style>

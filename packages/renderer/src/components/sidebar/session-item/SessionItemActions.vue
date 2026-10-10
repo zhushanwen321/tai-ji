@@ -7,7 +7,9 @@
     都在主组件），经 v-model:confirming 双向。
   -->
   <!-- 位置右缘垂直居中（demo .si-acts 权威：right 6px / top 50% 平移 / gap 2px）；
-       钮序 = 重命名 → 删除 → 归入项目（demo 重设计 2026-10-10）。删除走两段式确认。 -->
+       钮序 = 重命名 → 删除 → 归入项目（demo 重设计 2026-10-10）。删除走两段式确认。
+       三钮 tabindex=-1（spec §3.4：键盘不走悬停钮，走行 Tab → Enter/Space → ContextMenu
+       右键菜单通道）+ @pointerdown.stop（demo 同款：按下不触发行侧副作用） -->
   <div
     class="absolute right-[6px] top-1/2 -translate-y-1/2 gap-[2px]"
     :class="confirming ? 'flex' : 'flex opacity-0 group-hover/item:opacity-100 group-focus-within/item:opacity-100'"
@@ -16,56 +18,66 @@
       v-if="!confirming"
       variant="ghost"
       size="icon"
+      tabindex="-1"
       class="size-[20px] rounded-sm text-neutral-dim hover:bg-surface-hover hover:text-neutral-fg"
       :title="t('sidebar.sessionItem.rename')"
       @click.stop="emit('rename', session.id)"
+      @pointerdown.stop
     >
       <Pencil class="size-[12px]" />
     </Button>
     <Button
       variant="ghost"
       size="icon"
+      tabindex="-1"
       :class="confirming
         ? 'size-[20px] rounded-sm bg-danger text-neutral-fg'
         : 'size-[20px] rounded-sm text-neutral-dim hover:bg-surface-hover hover:text-danger'"
       :title="confirming ? t('sidebar.sessionItem.deleteConfirm') : t('sidebar.sessionItem.delete')"
       @click.stop="onRemoveClick"
+      @pointerdown.stop
     >
       <Check v-if="confirming" class="size-[12px]" />
       <Trash2 v-else class="size-[12px]" />
     </Button>
-    <!-- 归入项目（D14 语义修正 2026-08-04）：Popover 菜单列全部 project，点击即归类。
-         归类可逆（可再点其他 project / 默认项目），无需两段确认。 -->
+    <!-- 归入项目（D14 语义修正 2026-08-04）：Popover 浮层列全部 project，点击即归类。
+         归类可逆（可再点其他 project / 默认项目），无需两段确认。
+         浮层形态 = spec 待裁决 3 既定方向「复用右键菜单的项目选择浮层」：行渲染与
+         SessionItemContextMenu「移动到项目」分组同构（行首 14px 定宽勾标列，当前归属项
+         accent Check），仅含项目列表；迁移 toast 在共享 handler（useSidebarSessionActions）统一出。 -->
     <Popover v-if="!confirming" :open="assignOpen" @update:open="assignOpen = $event">
       <PopoverTrigger as-child>
         <Button
           variant="ghost"
           size="icon"
+          tabindex="-1"
           data-testid="assign-project-btn"
           class="size-[20px] rounded-sm text-neutral-dim hover:bg-surface-hover hover:text-neutral-fg"
           :title="t('sidebar.sessionItem.assignToProject')"
           @click.stop="assignOpen = true"
+          @pointerdown.stop
         >
           <FolderKanban class="size-[12px]" />
         </Button>
       </PopoverTrigger>
       <PopoverContent side="right" align="start" :collision-padding="8" class="w-44 p-1">
-        <div class="flex flex-col gap-px">
-          <!-- 默认项目项 id=''：未归类 session 的 projectId 是 undefined，必须归一为空串才能命中高亮（review S-2） -->
+        <div class="flex flex-col">
+          <!-- 默认项目项 id=''：未归类 session 的 projectId 是 undefined，必须归一为空串才能命中勾标（review S-2） -->
           <Button
             v-for="p in assignTargets"
             :key="p.id"
             variant="ghost"
             data-testid="assign-project-option"
-            class="h-auto w-full justify-start gap-2 rounded-sm px-2 py-1.5 text-[length:var(--text-xs)] text-neutral-mid hover:bg-surface-hover hover:text-neutral-fg"
-            :class="(session.projectId || '') === p.id ? 'text-accent' : ''"
+            class="flex h-[28px] w-full justify-start gap-2 rounded-sm px-[9px] text-[length:var(--text-xs)] text-neutral-fg hover:bg-surface-hover"
             @click="onAssign(p.id)"
           >
-            <span
-              class="size-2 shrink-0 rounded-full"
-              :class="(session.projectId || '') === p.id ? 'bg-accent' : 'bg-transparent'"
-            />
-            <span class="truncate">{{ p.name || t('sidebar.projectSwitcher.defaultName') }}</span>
+            <span class="flex w-[14px] shrink-0 items-center justify-center">
+              <Check
+                v-if="(session.projectId || '') === p.id"
+                class="size-[11px] text-accent"
+              />
+            </span>
+            <span class="min-w-0 truncate">{{ p.name || t('sidebar.projectSwitcher.defaultName') }}</span>
           </Button>
         </div>
       </PopoverContent>

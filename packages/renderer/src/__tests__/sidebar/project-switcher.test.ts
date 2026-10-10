@@ -347,8 +347,9 @@ describe('ProjectSwitcher 3A：删除流（右键 ContextMenu）', () => {
     deleteItem!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     await nextTick()
 
-    // ConfirmDialog（teleport 到 body）确认
-    expect(document.body.textContent).toContain('确认删除项目「Beta」')
+    // ConfirmDialog（teleport 到 body）确认（spec sidebar §3.7：正文写明「会话归回默认项目」后果）
+    expect(document.body.textContent).toContain('删除项目「Beta」')
+    expect(document.body.textContent).toContain('将归回默认项目')
     findDialogButton('删除')!.dispatchEvent(new MouseEvent('click'))
     await nextTick()
 

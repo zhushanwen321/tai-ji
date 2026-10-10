@@ -28,14 +28,15 @@
     @set-project="emit('setProject', $event)"
   >
     <!-- 激活态 = demo .si.on（workbench.css 文件尾 Tier B）：无底无框，仅行文字提亮 fg；
-         非激活 hover 才有 bg-surface-hover 临时反馈（demo .si:hover 同款） -->
+         非激活行不加行级色（标题色三级范式：普通 fg-2 由 Display 的 .nm 分支承载，
+         hover 只变背景不变字色——demo .si:hover 仅 background） -->
     <div
       ref="rootEl"
       role="button"
       tabindex="0"
       class="session-item group/item relative flex cursor-pointer select-none items-center gap-[8px] rounded-sm px-[8px] py-[7px] transition-colors"
       :class="[
-        active ? 'text-neutral-fg' : 'text-neutral-fg hover:bg-surface-hover',
+        active ? 'text-neutral-fg' : 'hover:bg-surface-hover',
         isDead ? 'opacity-50' : '',
       ]"
       :aria-label="ariaLabel"
@@ -212,13 +213,13 @@ function onItemKeydown(e: KeyboardEvent): void {
   }
 }
 
-/** 行中点除数：菜单锚点取行几何中心的坐标计算基数。 */
-const MIDPOINT_DIVISOR = 2
+/** 键盘呼出菜单的锚点下探量（px）：demo openCtxKey 取行左下角 +2px。 */
+const KEYBOARD_MENU_ANCHOR_GAP_PX = 2
 
 /** 键盘打开右键菜单：reka ContextMenuTrigger 只监听 contextmenu 事件且菜单锚点取
  *  event.clientX/Y（reka-ui dist/ContextMenu/ContextMenuTrigger.js handleContextMenu），
- *  无受控 open 通道——按 radix/reka 生态惯例合成 contextmenu MouseEvent 转发，
- *  坐标取行中心让菜单锚定在行上。 */
+ *  无受控 open 通道——按 radix/reka 生态惯例合成 contextmenu MouseEvent 转发。
+ *  锚点 = 行左下角（demo openCtxKey：无指针坐标时以触发行左下角锚定菜单，spec §3.4）。 */
 function onKeyOpenMenu(): void {
   const el = rootEl.value
   if (!el) return
@@ -227,8 +228,8 @@ function onKeyOpenMenu(): void {
     new MouseEvent('contextmenu', {
       bubbles: true,
       cancelable: true,
-      clientX: Math.round(rect.left + rect.width / MIDPOINT_DIVISOR),
-      clientY: Math.round(rect.top + rect.height / MIDPOINT_DIVISOR),
+      clientX: Math.round(rect.left),
+      clientY: Math.round(rect.bottom + KEYBOARD_MENU_ANCHOR_GAP_PX),
     }),
   )
 }

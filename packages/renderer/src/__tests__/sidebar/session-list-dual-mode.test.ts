@@ -174,3 +174,14 @@ describe('N8 hover 详情卡（demo .sess-pop：行首图标 + 立即开 + 末�
     wrapper.unmount()
   })
 })
+
+// ── 顶缘渐焦（spec sidebar §3.1：三视图滚动容器接 EdgeFade，滚动离顶才启用）──
+describe('N8 EdgeFade 顶缘渐焦接线', () => {
+  it('滚动容器内挂载 EdgeFade（首个子元素，自驱动父级 mask）', () => {
+    const wrapper = mountList()
+    // EdgeFade 作为 ScrollArea Viewport 首子元素挂载（滚动容器内存在即接线成立；
+    // 显隐/mask 由组件自驱动，纯展示态断言挂载位）
+    expect(wrapper.find('[data-testid="edge-fade"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+})

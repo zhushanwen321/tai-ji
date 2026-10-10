@@ -282,11 +282,15 @@ function cancelCreate() {
       </Button>
     </div>
 
-    <!-- 删除确认 -->
+    <!-- 删除确认（文案写明后果，spec sidebar §3.7：「N 个会话将归回默认项目」；
+         计数与卡片徽章同源 sessionCounts——数字 = 实际归回的会话数） -->
     <ConfirmDialog
       v-model:open="deleteOpen"
       :title="t('sidebar.projectSwitcher.deleteTitle')"
-      :description="t('sidebar.projectSwitcher.deleteDesc', { name: pendingDeleteName || t('sidebar.projectSwitcher.defaultName') })"
+      :description="t('sidebar.projectSwitcher.deleteDesc', {
+        name: pendingDeleteName || t('sidebar.projectSwitcher.defaultName'),
+        count: pendingDeleteId ? (sessionCounts.get(pendingDeleteId) ?? 0) : 0,
+      })"
       :confirm-text="t('sidebar.projectSwitcher.deleteConfirm')"
       :cancel-text="t('sidebar.projectSwitcher.cancel')"
       variant="danger"

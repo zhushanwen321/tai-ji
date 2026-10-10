@@ -122,15 +122,23 @@ describe('FileTreeRow 视觉一致性（D-007 字号 / D-022 chevron 槽）', ()
     expect(fileRow.classes()).not.toContain('text-[11px]')
   })
 
-  it('行 padding-left 用单一公式 depth*10+8（D-022，dir/file/hint 行共用投影 depth）', () => {
+  it('行 padding-left 用单一公式 depth*18+8（spec files §4 缩进档 8/26/44/62，dir/file/hint 行共用投影 depth）', () => {
     const dirWrapper = mountRow(makeRow({ path: 'src', type: 'dir', depth: 2 }))
     const dirRow = dirWrapper.find('[data-testid="file-tree-dir-src"]')
-    expect((dirRow.element as HTMLElement).style.paddingLeft).toBe('28px') // 2*10+8（INDENT_STEP v6 14→10）
+    expect((dirRow.element as HTMLElement).style.paddingLeft).toBe('44px') // 2*18+8（demo .frow.ind2）
 
     // hint 行 depth 已由投影 +1（子区占位缩进），组件直接用 row.depth——与旧 childHintPaddingStyle 等价
     const hintWrapper = mountRow(makeRow({ path: 'src', type: 'dir', depth: 2, hint: 'loading' }))
     const hintRow = hintWrapper.find('[data-testid="file-tree-loading-src"]')
-    expect((hintRow.element as HTMLElement).style.paddingLeft).toBe('28px') // 2*10+8
+    expect((hintRow.element as HTMLElement).style.paddingLeft).toBe('44px') // 2*18+8
+  })
+
+  it('缩进四档与 demo .ind0-.ind3 对齐（18px 步进：8/26/44/62）', () => {
+    for (const [depth, expected] of [[0, '8px'], [1, '26px'], [2, '44px'], [3, '62px']] as const) {
+      const wrapper = mountRow(makeRow({ path: 'src', type: 'dir', depth }))
+      const row = wrapper.find('[data-testid="file-tree-dir-src"]')
+      expect((row.element as HTMLElement).style.paddingLeft).toBe(expected)
+    }
   })
 
   it('文件行与目录行同 depth 的 padding-left 一致（icon 垂直对齐前提）', () => {
@@ -280,6 +288,37 @@ describe('FileTreeRow 交互（emit 路由，不再直调 useFileTree）', () =>
       expect(wrapper.emitted('toggle')).toBeUndefined()
       expect(wrapper.emitted('select')).toBeUndefined()
     }
+  })
+
+  it('目录行键盘通道（spec files §3.1）：treeitem 角色 + aria-expanded 同步 + Enter/Space 开合', async () => {
+    const row = makeRow({ path: 'src', type: 'dir', expanded: false })
+    const wrapper = mountRow(row)
+    const dirRow = wrapper.find('[data-testid="file-tree-dir-src"]')
+
+    expect(dirRow.attributes('role')).toBe('treeitem')
+    expect(dirRow.attributes('tabindex')).toBe('0')
+    expect(dirRow.attributes('aria-expanded')).toBe('false')
+
+    await dirRow.trigger('keydown.enter')
+    expect(wrapper.emitted('toggle')).toHaveLength(1)
+    await dirRow.trigger('keydown.space')
+    expect(wrapper.emitted('toggle')).toHaveLength(2)
+
+    // aria-expanded 随投影行 expanded 值同步（展开态行）
+    const openWrapper = mountRow(makeRow({ path: 'src', type: 'dir', expanded: true }))
+    expect(openWrapper.find('[data-testid="file-tree-dir-src"]').attributes('aria-expanded')).toBe('true')
+  })
+
+  it('文件行键盘通道（spec files §3.1）：treeitem 角色 + Enter 打开', async () => {
+    const row = makeRow({ path: 'a.ts', type: 'file' })
+    const wrapper = mountRow(row)
+    const fileRow = wrapper.find('[data-testid="file-tree-file-a.ts"]')
+
+    expect(fileRow.attributes('role')).toBe('treeitem')
+    expect(fileRow.attributes('tabindex')).toBe('0')
+
+    await fileRow.trigger('keydown.enter')
+    expect(wrapper.emitted('select')).toEqual([[row]])
   })
 })
 
