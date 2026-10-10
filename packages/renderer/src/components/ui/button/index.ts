@@ -13,6 +13,10 @@ export const buttonVariants = cva(
           "bg-transparent border border-border text-neutral-fg hover:bg-surface-hover",
         ghost: "hover:bg-surface-hover",
         danger: "text-danger hover:bg-danger-soft",
+        // 危险实底钮（demo pages.css .btn.danger-solid：--danger 底 + --danger-fg 字 + hover
+        // brightness 1.1）；消费方 = ConfirmDialog 危险确认分支等需要重钮权重的危险动作
+        "danger-solid":
+          "bg-danger text-[color:var(--danger-fg)] hover:brightness-110",
       },
       size: {
         "default": "h-9 px-4 py-2",

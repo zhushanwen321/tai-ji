@@ -9,9 +9,12 @@
 
       <!-- 表单/代码双 tab（D7）：切换保留内容；表单 → 代码自动序列化为包装形态；
            代码 → 表单解析成功才切换，失败留代码模式并显示解析错误。
-           形态 = demo .u-seg 分段（bg-surface-2 凹底 / hairline 边 / r-md / p 2px / 钮 26px r-sm，
-           选中 = elevated 底 + 正文字 + fw-mid） -->
-      <div class="inline-flex gap-[2px] rounded-md border border-hairline bg-surface-2 p-[2px]" role="tablist" data-testid="mcp-form-tabs">
+           形态 = demo .u-seg 分段（hairline 边 / r-md / p 2px / 钮 26px r-sm，
+           选中 = elevated 底 + 正文字 + fw-mid）。
+           槽底引 --bg-input（凹陷档）而非同名 --surface-2：demo --surface-2 = var(--card-inset)
+           为凹陷档，real --surface-2 = #27272a 为浮起档（DESIGN.md U1 在册登记），同名令牌
+           分叉——demo 复刻消费点按 demo 渲染方向引凹陷档，令牌本体不动 -->
+      <div class="inline-flex gap-[2px] rounded-md border border-hairline bg-bg-input p-[2px]" role="tablist" data-testid="mcp-form-tabs">
         <Button
           v-for="tab in (['form', 'code'] as const)"
           :key="tab"

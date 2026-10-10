@@ -16,10 +16,10 @@
       </template>
       <template #actions>
         <span class="text-[length:var(--text-sm)] text-[color:var(--neutral-fg-2)]">{{ t('settings.extension.builtinAux') }}</span>
-        <span class="inline-flex h-[16px] min-w-[16px] items-center justify-center rounded-full bg-surface px-[5px] font-mono text-[10px] font-bold text-[color:var(--neutral-fg-2)]">{{ builtinExts.length }}</span>
+        <span class="inline-flex h-[16px] min-w-[16px] items-center justify-center rounded-full bg-surface px-[5px] font-mono text-[length:var(--text-3xs)] font-bold text-[color:var(--neutral-fg-2)]">{{ builtinExts.length }}</span>
       </template>
       <div class="px-[10px] pt-[4px] pb-[8px]">
-        <div v-for="ext in builtinExts" :key="ext.name" class="flex min-h-[44px] items-start gap-4 border-t border-hairline px-1.5 py-2.5 first:border-t-0">
+        <div v-for="ext in builtinExts" :key="ext.name" class="flex min-h-[44px] items-start gap-[16px] border-t border-hairline px-[6px] py-[10px] first:border-t-0">
           <ExtensionDetail :ext="ext" />
           <ExtensionActions :ext="ext" />
         </div>
@@ -36,10 +36,10 @@
       </template>
       <template #actions>
         <span class="text-[length:var(--text-sm)] text-[color:var(--neutral-fg-2)]">{{ t('settings.extension.userAux') }}</span>
-        <span class="inline-flex h-[16px] min-w-[16px] items-center justify-center rounded-full bg-surface px-[5px] font-mono text-[10px] font-bold text-[color:var(--neutral-fg-2)]">{{ userExts.length }}</span>
+        <span class="inline-flex h-[16px] min-w-[16px] items-center justify-center rounded-full bg-surface px-[5px] font-mono text-[length:var(--text-3xs)] font-bold text-[color:var(--neutral-fg-2)]">{{ userExts.length }}</span>
       </template>
       <div class="px-[10px] pt-[4px] pb-[8px]">
-        <div v-for="ext in userExts" :key="ext.name" class="flex min-h-[44px] items-start gap-4 border-t border-hairline px-1.5 py-2.5 first:border-t-0">
+        <div v-for="ext in userExts" :key="ext.name" class="flex min-h-[44px] items-start gap-[16px] border-t border-hairline px-[6px] py-[10px] first:border-t-0">
           <ExtensionDetail :ext="ext" />
           <ExtensionActions :ext="ext" />
         </div>

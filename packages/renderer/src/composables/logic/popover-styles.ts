@@ -1,8 +1,12 @@
 /**
  * Panel popover 共享样式常量（架构审查 D4）。
  *
- * ModelSelectPopover / ThinkingLevelPopover / AddMenuPopover 三者 trigger 与列表选中态
- * 类名各自重复，在此统一抽出，避免一字不差地抄写三遍。
+ * ModelSelectPopover / ThinkingLevelPopover / AddMenuPopover 三者 trigger 类名各自重复，
+ * 在此统一抽出，避免一字不差地抄写三遍。
+ *
+ * 列表选中态不设样式常量：demo R3 裁决弹层行不进选中范式（workbench.css「.pop-item.on
+ * 不进选中范式：行尾对勾 .ck 即选中指示」）——选中指示 = 行尾 13px 对勾显隐，行底/框/字色
+ * 无选中态声明，hover 反馈由行基础类承担。
  */
 
 /**
@@ -26,14 +30,6 @@ export const TRIGGER_ICON_CLASS =
   'size-[30px] shrink-0 rounded-sm p-0 text-neutral-dim transition-colors hover:text-neutral-fg'
 
 /**
- * 列表项「选中态」类名（ModelSelect / ThinkingLevel 列表项共用）。
- * 对齐 demo 选中态单一范式（workbench.css 文件尾 `.composer .pop-item.on`）：浮层同色
- * elevated 底 + 行首 2px accent 内嵌标 + 提字，并锁死 hover 不回退，避免选中项悬停闪色。
- */
-export const SELECTED_ITEM_CLASS =
-  'bg-bg-elevated text-neutral-fg shadow-[inset_2px_0_0_var(--accent)] hover:bg-bg-elevated hover:text-neutral-fg'
-
-/**
  * 选择类 popover（DirSelect / BranchSelect）列表项与动作项基础类（架构审查 F5）。
  * 贴合全宽 + 左对齐 + 紧凑高度 + hover 底色 + svg 等比 16px。
  * DirSelect 的 workspace 列表项与 BranchSelect 的 branch 列表项、两者尾部的动作项共用此类。
@@ -42,7 +38,10 @@ export const POPOVER_LIST_ITEM_CLASS =
   'h-auto w-full justify-start gap-2 rounded-none px-2.5 py-1.5 text-[13px] text-neutral-fg hover:bg-surface-hover [&_svg]:size-4'
 
 /**
- * 列表项「已选」高亮类（当前 cwd / 当前分支）：surface-2 底 + accent inset ring。
+ * 列表项「已选」高亮类（当前 cwd / 当前分支）：surface-2 底 + 中性内嵌描边。
+ * 对齐 demo `.pop-item.current`（pages.css：background var(--surface-2) +
+ * box-shadow inset 0 0 0 1px var(--border-strong)）——「当前项」是中性定位态，
+ * 不消费 accent（accent 留给 Tier A 状态件/焦点/告警）。
  */
 export const POPOVER_LIST_ITEM_ACTIVE_CLASS =
-  'bg-surface-2 ring-1 ring-inset ring-accent-ring'
+  'bg-surface-2 shadow-[inset_0_0_0_1px_var(--border-strong)]'

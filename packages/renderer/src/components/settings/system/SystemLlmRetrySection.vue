@@ -48,7 +48,7 @@
 
       <!-- 高级折叠区（D5）：provider 层三键，默认收起（demo：chevron-right 旋转 90° + text-sm neutral-mid） -->
       <Collapsible v-model:open="advancedOpen" class="border-t border-hairline" data-testid="llm-retry-advanced">
-        <div class="flex items-center px-1.5 py-2.5">
+        <div class="flex items-center px-[6px] py-[10px]">
           <CollapsibleTrigger as-child>
             <Button
               variant="ghost"
@@ -57,7 +57,7 @@
               data-testid="llm-retry-advanced-toggle"
             >
               <ChevronRight
-                class="size-[12px] shrink-0 transition-transform duration-150"
+                class="size-[12px] shrink-0 transition-transform duration-[var(--duration-fast)]"
                 :class="advancedOpen ? 'rotate-90' : ''"
               />
               {{ t('settings.system.llmRetryAdvancedTitle') }}
@@ -124,7 +124,7 @@
       </p>
 
       <!-- 显式保存 + 生效范围固定提示（D6）；demo 行序 = 提示左 · tag ok · spacer · 保存钮右 -->
-      <div class="flex items-center gap-3 border-t border-hairline px-1.5 py-2.5">
+      <div class="flex items-center gap-[16px] border-t border-hairline px-[6px] py-[10px]">
         <span class="text-[length:var(--text-sm)] text-neutral-fg-2" data-testid="llm-retry-effective-hint">
           {{ t('settings.system.llmRetryEffectiveHint') }}
         </span>

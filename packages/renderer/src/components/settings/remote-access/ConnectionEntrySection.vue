@@ -15,7 +15,7 @@
   <div class="flex flex-col">
     <!-- 警告文案（太极纯灰 warn 语义 token，不硬编码颜色） -->
     <div
-      class="flex items-start gap-4 px-1.5 py-2.5"
+      class="flex items-start gap-[16px] px-[6px] py-[10px]"
       data-testid="remote-access-warning"
     >
       <AlertTriangle class="mt-[2px] size-[16px] shrink-0 text-warn" />
@@ -47,7 +47,7 @@
       <!-- 选中 Tailscale 地址的使用前提（选中态提示；单 tailscale 地址无下拉也渲染） -->
       <p
         v-if="selectedKind === 'tailscale'"
-        class="flex min-h-[44px] items-center border-t border-hairline px-1.5 py-2.5 text-[length:var(--text-sm)] text-[color:var(--neutral-fg-2)]"
+        class="flex min-h-[44px] items-center border-t border-hairline px-[6px] py-[10px] text-[length:var(--text-sm)] text-[color:var(--neutral-fg-2)]"
         data-testid="remote-access-tailscale-selected-hint"
       >
         {{ t('settings.remoteAccess.tailscaleSelectedHint') }}
@@ -55,7 +55,7 @@
 
       <!-- 二维码行（demo srow align-start gap 16px；qrcode toDataURL 自绘 img，不引 vue 包装依赖）；
            生成失败/在途渲染占位提示。二维码底白 = 内容语义色例外条款（点阵黑白是内容本身） -->
-      <div class="flex items-start gap-4 border-t border-hairline px-1.5 py-2.5">
+      <div class="flex items-start gap-[16px] border-t border-hairline px-[6px] py-[10px]">
         <div class="h-[140px] w-[140px] shrink-0 rounded-md border border-border bg-white p-[8px]" :aria-label="t('settings.remoteAccess.qrAlt')">
           <img
             v-if="qrDataUrl"
@@ -96,7 +96,7 @@
     </template>
 
     <!-- 防火墙授权提示（OS 级行为说明；非 macOS 用户看到亦无害，不做平台分支） -->
-    <p class="border-t border-hairline px-1.5 py-2.5 text-[length:var(--text-sm)] text-[color:var(--neutral-fg-2)]">{{ t('settings.remoteAccess.firewallHint') }}</p>
+    <p class="border-t border-hairline px-[6px] py-[10px] text-[length:var(--text-sm)] text-[color:var(--neutral-fg-2)]">{{ t('settings.remoteAccess.firewallHint') }}</p>
   </div>
 </template>
 

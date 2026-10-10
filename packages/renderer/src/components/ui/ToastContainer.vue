@@ -15,12 +15,12 @@
     <div
       v-if="droppedCount > 0"
       data-testid="toast-overflow-summary"
-      class="pointer-events-auto flex w-fit max-w-[min(360px,100%)] items-center gap-1.5 rounded-lg border border-border bg-bg-elevated py-1.5 pl-3 pr-1.5 text-[11.5px] text-neutral-dim shadow-2"
+      class="pointer-events-auto flex w-fit max-w-[min(360px,100%)] items-center gap-1.5 rounded-lg border border-border bg-bg-elevated py-1.5 pl-3 pr-1.5 text-[length:var(--text-2xs)] text-neutral-dim shadow-2"
     >
       <span data-testid="toast-overflow-text" class="select-text">{{ t('panel.message.toastDropped', { count: droppedCount }) }}</span>
       <Button
         variant="ghost"
-        class="ml-0.5 size-5 shrink-0 rounded-sm p-0 opacity-60 hover:opacity-100"
+        class="ml-0.5 size-5 shrink-0 rounded-[var(--radius-xs)] p-0 opacity-60 hover:opacity-100"
         :aria-label="t('panel.message.toastDroppedDismiss')"
         @click="resetDropped"
       >
@@ -107,7 +107,7 @@
 
       <Button
         variant="ghost"
-        class="ml-1 size-6 shrink-0 rounded-sm p-0 opacity-60 hover:opacity-100"
+        class="ml-1 size-6 shrink-0 rounded-[var(--radius-xs)] p-0 opacity-60 hover:opacity-100"
         @click="remove(t.id)"
       >
         <svg class="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>

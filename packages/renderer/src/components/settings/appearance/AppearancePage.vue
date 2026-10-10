@@ -79,6 +79,7 @@
             type="number"
             min="8"
             max="24"
+            placeholder="14"
             class="w-[120px] font-mono"
             data-testid="appearance-terminal-font-size-input"
             :disabled="terminalLoading"
@@ -104,23 +105,23 @@
           :key="th.label"
           variant="ghost"
           type="button"
-          class="theme-row flex w-full cursor-pointer items-center justify-between rounded-md px-[10px] py-[8px] text-[length:var(--text-sm)] font-semibold text-neutral-fg transition-colors"
+          class="theme-row flex h-[32px] w-full cursor-pointer items-center justify-between rounded-md px-[10px] py-[8px] text-[length:var(--text-sm)] [font-weight:var(--fw-mid)] transition-colors"
           :class="th.label === currentTheme.label
             ? 'bg-surface-hover text-neutral-fg shadow-[inset_0_0_0_1px_var(--border-strong)] hover:bg-surface-hover'
-            : ''"
+            : 'text-neutral-mid'"
           :aria-pressed="th.label === currentTheme.label"
           :data-testid="`appearance-theme-${th.preset}`"
           @click="applyTaijiTheme(th)"
         >
-          <span class="inline-flex min-w-0 items-center gap-1.5">
-            <!-- P0-5：选中持久标记（accent 对勾），与瞬态键盘焦点（outline 环）拉开；
-                 16px 固定占位保证未选中行文字对齐不跳动（demo 同款） -->
-            <span class="flex size-4 flex-none items-center justify-center">
-              <Check v-if="th.label === currentTheme.label" class="size-3.5 text-accent" />
+          <span class="inline-flex min-w-0 items-center gap-[6px]">
+            <!-- P0-5：选中持久标记（accent 对勾），与瞬态键盘焦点（outline 内缩环，壳同款）
+                 拉开；16px 固定占位保证未选中行文字对齐不跳动（demo 同款） -->
+            <span class="flex size-[16px] flex-none items-center justify-center">
+              <Check v-if="th.label === currentTheme.label" class="size-[14px] text-accent" />
             </span>
             <span class="truncate">{{ th.label }}</span>
           </span>
-          <span class="flex gap-1">
+          <span class="flex gap-[4px]">
             <span
               v-for="(c, i) in th.swatch"
               :key="i"
@@ -139,7 +140,7 @@
       :title="t('settings.appearance.tokenGroup.' + g.titleKey)"
     >
       <div class="px-[10px] pt-[4px] pb-[8px]">
-        <div v-for="row in g.rows" :key="row.name" class="flex min-h-[36px] items-center gap-2.5 border-t border-hairline px-[6px] py-[6px] font-mono text-[length:var(--text-xs)] first:border-t-0">
+        <div v-for="row in g.rows" :key="row.name" class="flex min-h-[36px] items-center gap-[16px] border-t border-hairline px-[6px] py-[6px] font-mono text-[length:var(--text-xs)] first:border-t-0">
           <span class="flex-1 text-neutral-fg-2">{{ row.name }}</span>
           <span
             v-if="row.value.startsWith('#') || row.value.startsWith('rgb')"

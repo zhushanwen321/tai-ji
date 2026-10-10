@@ -6,12 +6,14 @@
 -->
 <template>
   <div class="flex flex-col">
-    <!-- 每个 model 一行（行形态 = demo 缓存构成 srow：min-h 40 / mono 名 / 120px 条 surface-2 底 / 44px 占比） -->
+    <!-- 每个 model 一行（行形态 = demo 缓存构成 srow：min-h 40 / mono 名 / 120px 条凹陷档底 / 44px 占比） -->
     <div class="flex min-h-[40px] items-center gap-4 border-t border-hairline px-[6px] py-[10px] first:border-t-0" v-for="row in cacheData" :key="`${row.provider}/${row.model}`">
       <span class="min-w-0 flex-1 truncate font-mono text-[length:var(--text-xs)] text-neutral-fg"><span class="text-[var(--neutral-dim)]">{{ row.provider }}/</span>{{ row.model }}</span>
 
-      <!-- 三段构成条（--cache-* 令牌；底轨 = demo surface-2） -->
-      <span class="h-[8px] w-[120px] shrink-0 overflow-hidden rounded-[4px] bg-surface-2">
+      <!-- 三段构成条（--cache-* 令牌）。底轨引 --bg-input（凹陷档）：demo 同名 --surface-2 =
+           var(--card-inset) 凹陷档，real --surface-2 浮起档（U1 在册）同名分叉，
+           复刻消费点按 demo 方向引凹陷档 -->
+      <span class="h-[8px] w-[120px] shrink-0 overflow-hidden rounded-[4px] bg-bg-input">
         <span class="flex h-full">
           <span
             class="h-full shrink-0"

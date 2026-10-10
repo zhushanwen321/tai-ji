@@ -130,11 +130,13 @@ function onSelect(tpl: BuiltinProviderTemplate): void {
       {{ t('settings.provider.builtinTemplate.trigger') }}
     </PopoverTriggerButton>
     <PopoverContent class="w-72 p-1">
-      <!-- 一级：入口菜单（内置模板（推荐，默认高亮）+ 自定义） -->
+      <!-- 一级：入口菜单（内置模板（推荐，默认高亮）+ 自定义）。默认高亮项 = demo
+           .pop-item.current 中性定位态（surface-2 底 + border-strong 内嵌描边，不消费 accent），
+           与 POPOVER_LIST_ITEM_ACTIVE_CLASS（ui popover styles.ts）同款描边语言。 -->
       <Button
         variant="ghost"
         data-testid="add-menu-builtin"
-        class="flex h-auto w-full items-center gap-2 rounded-sm bg-surface-2 px-2.5 py-2 text-[13px] text-neutral-fg ring-1 ring-inset ring-accent-ring hover:bg-surface-2"
+        class="flex h-auto w-full items-center gap-2 rounded-sm bg-surface-2 px-2.5 py-2 text-[13px] text-neutral-fg shadow-[inset_0_0_0_1px_var(--border-strong)] hover:bg-surface-2"
         @click="onMenuBuiltin"
       >
         <Library class="size-4 shrink-0 text-accent" />

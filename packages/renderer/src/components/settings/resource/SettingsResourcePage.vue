@@ -57,8 +57,10 @@
         </Button>
       </template>
       <div class="p-[12px_16px]">
-        <!-- 来源 tab 过滤（demo .u-seg 分段，McpServerForm 同款范式） -->
-        <div class="mb-[10px] inline-flex gap-[2px] rounded-md border border-hairline bg-surface-2 p-[2px]" role="tablist">
+        <!-- 来源 tab 过滤（demo .u-seg 分段，McpServerForm 同款范式）。槽底引 --bg-input（凹陷档）：
+             demo --surface-2 = var(--card-inset) 凹陷档，real --surface-2 浮起档（U1 在册）
+             同名分叉，复刻消费点按 demo 方向引凹陷档 -->
+        <div class="mb-[10px] inline-flex gap-[2px] rounded-md border border-hairline bg-bg-input p-[2px]" role="tablist">
           <Button
             variant="ghost"
             v-for="tab in sourceTabs"
@@ -78,7 +80,7 @@
         <div v-if="!filteredItems.length" class="px-[6px] py-[8px] text-[length:var(--text-sm)] text-[color:var(--neutral-fg-2)]">{{ t(activeSource === 'all' ? 'settings.resource.notFound' : 'settings.resource.notFoundInSource', { label }) }}</div>
 
         <!-- ADR §5：只读预览，无开关无 CRUD。来源 badge 链（demo .tag 形态）+ effective 标生效。 -->
-        <div v-for="item in filteredItems" :key="item.id" class="flex min-h-[44px] items-start gap-4 border-t border-hairline px-1.5 py-2.5">
+        <div v-for="item in filteredItems" :key="item.id" class="flex min-h-[44px] items-start gap-[16px] border-t border-hairline px-[6px] py-[10px]">
           <span class="min-w-0 flex-1 truncate text-[length:var(--text-base)] font-semibold text-neutral-fg">{{ item.name }}</span>
           <!-- 来源 badge 链（多来源时展开，第一个标生效；demo tag 链 opacity .6） -->
           <span class="flex shrink-0 flex-wrap items-center gap-[4px]">

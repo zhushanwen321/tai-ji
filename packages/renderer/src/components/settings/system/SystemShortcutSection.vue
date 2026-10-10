@@ -14,7 +14,7 @@
       <div
         v-for="cmd in shortcutRows"
         :key="cmd.id"
-        class="flex items-center gap-4 border-t border-hairline px-1.5 py-2.5 min-h-[44px] first:border-t-0"
+        class="flex items-center gap-[16px] border-t border-hairline px-[6px] py-[10px] min-h-[44px] first:border-t-0"
       >
         <div class="flex-1 min-w-0">
           <div class="flex items-center gap-2">

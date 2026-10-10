@@ -5,7 +5,12 @@
     展开体：ProviderEditBody（凭据/模型/验证/额度 + sticky save-bar）。
     dirty 守卫：展开行有未保存改动时，切换/收起/新建 → ConfirmDialog 二次确认。
   -->
-  <div class="flex flex-col gap-3">
+  <!-- 垂直节奏 = demo .gcard+.gcard 唯一 16px 档：根容器无 gap（对齐 AppearancePage 形态），
+       页头→首卡 16px 由共享 .page-head margin-bottom 承担；GroupCard 相邻 16px 由
+       GroupCard 自带 .group-card + .group-card 规则承担；非卡片兄弟块（inline error /
+       空状态 / 列表 section）各自 mt-[16px]（rem gap 类在 14px html 基准下收缩为 demo 值
+       的 87.5%，本页全部槽位走绝对 px）。 -->
+  <div class="flex flex-col">
     <!-- 页头 = SettingsModal 共享 .page-head 形态（demo .pg-set .page-head：title 20px/600、desc mt-8 13px mid、actions gap-8px） -->
     <header class="page-head">
       <div class="head-text">
@@ -54,14 +59,14 @@
     <div
       v-if="actionError"
       data-testid="provider-action-error"
-      class="flex items-center gap-1.5 rounded-md border border-danger/30 bg-danger-soft px-3 py-1.5 text-[11px] text-danger"
+      class="mt-[16px] flex items-center gap-1.5 rounded-md border border-danger/30 bg-danger-soft px-3 py-1.5 text-[11px] text-danger"
     >
       <AlertCircle class="size-3.5 shrink-0" />
       <span class="truncate">{{ actionError }}</span>
     </div>
 
     <!-- 空状态（demo .pg-set .empty 形态：64px 虚线圆 ring + 14px/600 标题 + 13px mid 描述） -->
-    <div v-if="!providers.length && expandedId !== NEW_ID" class="flex flex-col items-center px-[16px] py-[40px] text-center">
+    <div v-if="!providers.length && expandedId !== NEW_ID" class="mt-[16px] flex flex-col items-center px-[16px] py-[40px] text-center">
       <div class="mb-[12px] grid size-16 place-items-center rounded-full border-[1.5px] border-dashed border-border-strong">
         <Settings class="size-[26px] text-neutral-mid" />
       </div>
@@ -70,8 +75,9 @@
     </div>
 
     <!-- 实体列表（含新建态合成行）。demo .gcard 形态：GroupCard（gc-title 卡头 + bdg 计数徽标），
-         行 = .prow（bg-surface 8px 圆角内嵌行，行间 8px）。 -->
-    <section v-if="renderList.length">
+         行 = .prow（bg-surface 8px 圆角内嵌行，行间 8px）。section 包裹使 .group-card+.group-card
+         相邻选择器不命中，卡间 16px 由本层 mt-[16px] 承担。 -->
+    <section v-if="renderList.length" class="mt-[16px]">
       <GroupCard>
         <template #head>
           <div data-testid="provider-list-header" class="gc-head-text">

@@ -94,7 +94,7 @@ const visibleItems = computed<StatusBarEntry[]>(() => {
       <span
         v-if="item.status"
         data-testid="status-bar-dot"
-        class="mr-1 inline-block size-[7px] shrink-0 rounded-full align-middle"
+        class="mr-1.5 inline-block size-[7px] shrink-0 rounded-full align-middle"
         :class="dotClass(item.status)"
       />
       {{ item.text }}

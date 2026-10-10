@@ -74,7 +74,7 @@
             >
               <component :is="item.icon" class="!w-[16px] !h-[16px] shrink-0 opacity-[0.85] transition-opacity duration-[var(--duration-fast)] ease-[var(--ease)] group-hover:opacity-100 group-[.active]:opacity-100" />
               <span class="flex-1 min-w-0 truncate">{{ t(item.labelKey) }}</span>
-              <span v-if="getItemCount(item.id)" class="inline-flex h-[16px] min-w-[16px] items-center justify-center rounded-full bg-surface px-[5px] font-mono text-[10px] font-bold text-[color:var(--neutral-fg-2)] group-hover:bg-bg-card group-[.active]:text-neutral-fg shrink-0">{{ getItemCount(item.id) }}</span>
+              <span v-if="getItemCount(item.id)" class="inline-flex h-[16px] min-w-[16px] items-center justify-center rounded-full bg-surface px-[5px] font-mono text-[length:var(--text-3xs)] font-bold text-[color:var(--neutral-fg-2)] group-hover:bg-bg-card group-[.active]:text-neutral-fg shrink-0">{{ getItemCount(item.id) }}</span>
             </Button>
           </template>
         </nav>
@@ -432,6 +432,17 @@ onBeforeUnmount(() => {
   color: var(--neutral-fg-2);
 }
 
+/* 内容区按钮焦点环（demo pages.css `.pg-set button:focus-visible` → outline 2px
+   var(--focus-ring)=accent、offset -1px 内缩，作用于设置弹层全部按钮）：容器作用域
+   一次收敛全部页面层按钮，不逐钮覆写。box-shadow: none 关闭 Button cva 基类
+   focus-visible ring 通道（Tailwind ring 编译为 box-shadow，外扩 ring+offset 双层），
+   焦点指示统一收归本 outline 内缩通道。 */
+.content-col-inner button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+  box-shadow: none;
+}
+
 /* 弹层开合过渡（demo `.pg-set .settings` fade-in 0.16s ease，reduced-motion 门控）。
    keyframes 局部命名不进全局 SSOT：仅本弹层消费、无其他挂点（非共享动画原语）。 */
 @media (prefers-reduced-motion: no-preference) {
@@ -442,8 +453,9 @@ onBeforeUnmount(() => {
 
 <style scoped>
 /* 焦点环（demo .pg-set 焦点语言：outline 2px solid var(--focus-ring)，--focus-ring = var(--accent)）
-   offset -1px 内缩贴合圆角。Button cva 自带 focus-visible ring 通道，已在各按钮 class 上
-   ring-0 关闭，焦点指示统一收归本 outline 通道。 */
+   offset -1px 内缩贴合圆角。Button cva 自带 focus-visible ring 通道：nav/chrome 各按钮
+   class 上 ring-0 关闭、收归本 outline 通道；内容区页面层按钮由上方共享范式段的
+   .content-col-inner button:focus-visible 容器规则统一收敛，不逐钮覆写。 */
 .nav-item:focus-visible,
 .xbtn:focus-visible,
 .nav-btn:focus-visible {

@@ -3,7 +3,8 @@
     [w3b] demo 对照：ExtensionSection.vue 安装域三卡（.gcard 结构 + 卡头 gc-title）。
     推荐扩展卡 = .gcard-body.tight（4px 10px 8px）+ .srow 行（name 14px/600 + desc/pkg 13px fg-2，
     右侧 .btn.secondary 安装 / disabled+Check 已安装）；安装卡 = .gcard-body（12px 16px）+
-    .u-seg 分段 tab（bg-surface-2 凹底 / hairline 边 / r-md / p 2px / 钮 26px r-sm）+ .inp/.btn
+    .u-seg 分段 tab（凹陷档槽底 / hairline 边 / r-md / p 2px / 钮 26px r-sm；槽底引 --bg-input，
+    同名 --surface-2 分叉说明见下方分段处注释）+ .inp/.btn
     输入行 + 错误行（srow-desc danger p 6px，无图标）；候选内联展开在安装卡体内（demo 权威位），
     行 = .srow 单行内联（Checkbox + name + mono dirName + .tag.ok 版本 + desc）。
     demo 推荐行有第三行 pkg 文本——real RecommendedExtension.name 即 npm 包名（安装入参），
@@ -21,7 +22,7 @@
         <div
           v-for="r in recommended"
           :key="r.name"
-          class="flex min-h-[44px] items-center gap-4 border-t border-hairline px-1.5 py-2.5 first:border-t-0"
+          class="flex min-h-[44px] items-center gap-[16px] border-t border-hairline px-[6px] py-[10px] first:border-t-0"
         >
           <div class="flex min-w-0 flex-1 flex-col">
             <span class="truncate text-[length:var(--text-base)] font-semibold text-neutral-fg">{{ r.name }}</span>
@@ -50,8 +51,10 @@
         </div>
       </template>
       <div class="p-[12px_16px]">
-        <!-- demo .u-seg 分段（McpServerForm 同款范式）：bg-surface-2 凹底 / hairline 边 / r-md / p 2px / 钮 26px r-sm -->
-        <div class="mb-[10px] inline-flex gap-[2px] rounded-md border border-hairline bg-surface-2 p-[2px]" role="tablist">
+        <!-- demo .u-seg 分段（McpServerForm 同款范式）：hairline 边 / r-md / p 2px / 钮 26px r-sm。
+             槽底引 --bg-input（凹陷档）：demo --surface-2 = var(--card-inset) 凹陷档，
+             real --surface-2 浮起档（U1 在册）同名分叉，复刻消费点按 demo 方向引凹陷档 -->
+        <div class="mb-[10px] inline-flex gap-[2px] rounded-md border border-hairline bg-bg-input p-[2px]" role="tablist">
           <Button
             v-for="tab in tabs"
             :key="tab.id"

@@ -171,7 +171,7 @@
             data-testid="settings-update-manual-toggle"
           >
             <ChevronRight
-              class="size-3 shrink-0 transition-transform duration-150"
+              class="size-3 shrink-0 transition-transform duration-[var(--duration-fast)]"
               :class="manualChannelOpen ? 'rotate-90' : ''"
             />
             {{ t('settings.system.manualChannelTitle') }}

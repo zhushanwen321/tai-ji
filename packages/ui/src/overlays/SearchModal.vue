@@ -26,7 +26,7 @@
   <div
     v-if="open"
     data-testid="search-modal-overlay"
-    class="fixed inset-0 z-[1000] flex items-start justify-center bg-black/80 px-4 pt-[10vh] backdrop-blur-sm"
+    class="fixed inset-0 z-[var(--z-modal)] flex items-start justify-center bg-black/80 px-4 pt-[10vh] backdrop-blur-sm"
     @click.self="onBackdropClick"
   >
     <div
@@ -35,7 +35,7 @@
       aria-modal="true"
       :aria-label="t('search.title')"
       tabindex="-1"
-      class="relative w-full max-w-[620px] overflow-hidden rounded-lg border bg-surface shadow-2 outline-none"
+      class="relative w-full max-w-[620px] overflow-hidden rounded-lg border bg-bg-elevated shadow-2 outline-none"
       @click.stop
       @keydown="onGlobalKeydown"
     >
@@ -52,12 +52,12 @@
             ref="inputRef"
             v-model="query"
             data-testid="search-input"
-            class="h-8 border-0 bg-transparent px-0 text-[14px] shadow-none focus-visible:ring-0"
+            class="h-8 border-0 bg-transparent px-0 text-[length:var(--text-base)] shadow-none focus-visible:ring-0"
             :placeholder="t('search.placeholder')"
             @keydown="onKeydown"
           />
           <!-- v6 §6.5：esc 关闭快捷键提示徽标（对齐 demo） -->
-          <kbd class="ml-auto rounded border border-border-strong bg-surface px-1.5 py-0.5 font-mono text-[10px] text-neutral-dim">esc</kbd>
+          <kbd class="ml-auto rounded border border-border-strong bg-surface px-1.5 py-0.5 font-mono text-[length:var(--text-3xs)] text-neutral-dim">esc</kbd>
         </div>
 
         <!-- 结果区 -->
@@ -66,7 +66,7 @@
           <div
             v-if="loading"
             data-testid="search-loading"
-            class="flex items-center justify-center gap-2 px-6 py-6 text-[12px] text-neutral-dim"
+            class="flex items-center justify-center gap-2 px-6 py-6 text-[length:var(--text-xs)] text-neutral-dim"
           >
             <Loader2 class="size-3.5 animate-spin" />
             <span>{{ t('search.searching') }}</span>
@@ -81,7 +81,7 @@
               class="py-1"
             >
               <div
-                class="flex items-center gap-2 px-4 pb-1 pt-2 font-mono text-[10px] tracking-wider text-neutral-dim"
+                class="flex items-center gap-2 px-4 pb-1 pt-2 font-mono text-[length:var(--text-3xs)] tracking-wider text-neutral-dim"
               >
                 <span>{{ s.label }}</span>
                 <span class="text-neutral-dim">{{ s.items.length }}</span>
@@ -104,14 +104,15 @@
                   :class="it.idx === selIdx ? 'text-accent' : 'text-neutral-dim'"
                 />
                 <span class="flex min-w-0 flex-1 flex-col gap-0.5">
-                  <span class="truncate text-[13.5px] text-neutral-fg">
+                  <!-- 主行 13.5px 归 --text-sm 档（demo 精确值无对应 token，差 0.5px 换取随字体档缩放） -->
+                  <span class="truncate text-[length:var(--text-sm)] text-neutral-fg">
                     <template v-for="(seg, i) in segments(it.title, query.trim())" :key="i">
                       <!-- v6 §6.5：高亮 font-semibold 不染蓝，颜色继承父元素（title=neutral-fg / sub=neutral-dim） -->
                       <mark v-if="seg.hit" class="bg-transparent font-semibold text-inherit">{{ seg.text }}</mark>
                       <template v-else>{{ seg.text }}</template>
                     </template>
                   </span>
-                  <span class="truncate font-mono text-[11px] text-neutral-dim">
+                  <span class="truncate font-mono text-[length:var(--text-2xs)] text-neutral-dim">
                     <template v-for="(seg, i) in segments(it.sub, query.trim())" :key="i">
                       <mark v-if="seg.hit" class="bg-transparent font-semibold text-inherit">{{ seg.text }}</mark>
                       <template v-else>{{ seg.text }}</template>
@@ -134,13 +135,13 @@
           >
             <Search class="size-7 text-neutral-dim" />
             <!-- recents 库空（空查询 + 无最近/建议）：首用引导 -->
-            <p v-if="!query.trim()" class="text-[14px] text-neutral-fg">{{ t('search.startHint') }}</p>
+            <p v-if="!query.trim()" class="text-[length:var(--text-base)] text-neutral-fg">{{ t('search.startHint') }}</p>
             <!-- 查询无结果（非空 query 无命中）：带引号提示 -->
             <template v-else>
-              <p class="text-[14px] text-neutral-fg">
+              <p class="text-[length:var(--text-base)] text-neutral-fg">
                 {{ t('search.noResult', { query: query.trim() }) }}
               </p>
-              <p class="text-[12px] text-neutral-dim">{{ t('search.tryOther') }}</p>
+              <p class="text-[length:var(--text-xs)] text-neutral-dim">{{ t('search.tryOther') }}</p>
             </template>
           </div>
         </div>

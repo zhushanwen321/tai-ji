@@ -155,7 +155,7 @@
         <p class="pb-2 text-[length:var(--text-sm)] leading-relaxed text-neutral-fg-2">{{ t('settings.systemPrompt.appendHint') }}</p>
         <!-- taiji 内置能力告知开关（capability 段）：与 append 同卡同保存流（编辑不写盘，保存生效）。
              demo = srow 范式（label 14px/600 + desc + 右 Switch），无行分隔。 -->
-        <div class="flex min-h-[44px] items-center gap-4 px-1.5 py-2.5" data-testid="system-prompt-capability-row">
+        <div class="flex min-h-[44px] items-center gap-[16px] px-[6px] py-[10px]" data-testid="system-prompt-capability-row">
           <div class="flex-1 min-w-0">
             <Label class="text-[length:var(--text-base)] font-semibold text-neutral-fg" for="system-prompt-capability-switch">
               {{ t('settings.systemPrompt.capabilityLabel') }}
