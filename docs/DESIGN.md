@@ -381,6 +381,7 @@ demo 阶段功能做到「可见 + 可交互 + 数据 mock」即够。不接 run
 /* 动效（--ease-in/--ease-out = demo E5 抽屉方向缓动：进 out / 出 in）*/
 --ease: cubic-bezier(0.4,0,0.2,1);
 --ease-out: cubic-bezier(0,0,0.2,1);  --ease-in: cubic-bezier(0.4,0,1,1);
+--ease-out-soft: cubic-bezier(0.23,1,0.32,1);  /* 入场类软缓出（内容入场统一缓动：消息块淡入/分区切换/面板方向滑入/空态级联）*/
 --duration-fast: 120ms;  --duration: 200ms;  --duration-slow: 320ms;
 
 /* 组件尺寸（--content-max-w = demo min(720px,100%)：窄容器自动让位满宽）*/
@@ -402,10 +403,10 @@ demo 阶段功能做到「可见 + 可交互 + 数据 mock」即够。不接 run
 | 主题 | 选择器块 | 覆盖变量数与构成 |
 |---|---|---|
 | 玄（暗·默认） | `:root` | 全部默认值，无独立块 |
-| 皓（亮·默认） | `[data-theme="light"]` | 59 = bg 阶梯 9 + bubble 1 + neutral 8（含 name、fg-2）+ border 3 + accent 5 + link-c/code-c 2 + md-code 1（7% 重声明）+ 状态 8（含 danger-fg 白字覆盖）+ 阴影 3 + chart 族 19 |
+| 皓（亮·默认） | `[data-theme="light"]` | 54 = bg 阶梯 8 + bubble 1 + neutral 8（含 name、fg-2）+ border 3 + accent 3 + link-c/code-c 2 + md-code 1（7% 重声明）+ 状态 6（含 danger-fg 白字覆盖）+ 阴影 3 + chart 族 19（--bg-sunken 与 accent-soft/accent-ring/*-soft 派生公式继承 ：root 不重声明） |
 | 黛蓝 / 暖墨 | `:root[data-theme-preset="dailan"/"nuanmo"]` | 38 = bg 阶梯 7 + neutral 7（含 fg-2）+ accent 3 + link-c/code-c 2 + chart 族 19（不覆盖 border/状态色；--bg-sunken/--md-code 继承派生公式不重声明） |
 | 青墨 | `[data-theme="light"][data-theme-preset="qingmo"]` | 24 = accent 3 + link-c/code-c 2 + chart 族 19（宣纸底不换、只换颜料） |
-| 朱印 | `[data-theme="light"][data-theme-preset="zhuyin"]` | 30 = 青墨面 24 + 状态 6（danger 系玫红错开等；--danger-fg 继承 light 块白字覆盖不重声明） |
+| 朱印 | `[data-theme="light"][data-theme-preset="zhuyin"]` | 25 = accent 3 + link-c/code-c 2 + danger 1（玫红错开）+ chart 族 19（其余状态色与 light 族默认同值不重声明；--danger-fg 继承 light 块白字覆盖不重声明） |
 
 **阴 · 暗色族（3 个）**——背景近中性，色相只做「依稀相」(S≤6%)，靠明度阶梯说话；彩色职能按 demo 终态三分（主行动青玉 / 链接正蓝 / 行内代码杏橘）：
 | 主题 | accent | 特色 |

@@ -98,6 +98,7 @@ export default {
         mono: ['JetBrains Mono', 'IBM Plex Mono', 'ui-monospace', 'Menlo', 'monospace'],
       },
       borderRadius: {
+        xs: 'var(--radius-xs)', // 微件档 4px（seg 项/滚动条 thumb/badge 内件；demo --r-xs 同档，收敛组件 rounded-[4px] 任意值）
         sm: '6px', // v6 升档（对应 --radius-sm）
         DEFAULT: '8px', // 按钮/卡片默认档（对应 --radius）
         md: '8px',

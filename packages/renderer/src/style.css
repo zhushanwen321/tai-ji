@@ -185,9 +185,13 @@
   --ease: cubic-bezier(0.4, 0, 0.2, 1);
   --ease-out: cubic-bezier(0, 0, 0.2, 1);   /* 进方向缓动（demo E5 抽屉配套） */
   --ease-in: cubic-bezier(0.4, 0, 1, 1);    /* 出方向缓动（demo E5 抽屉配套） */
-  --duration-fast: 120ms;
-  --duration: 200ms;
-  --duration-slow: 320ms;
+  /* 入场类软缓出（demo tokens.css 同名同值）：内容入场统一缓动——消息块淡入、分区切换、
+     面板方向滑入、空态级联；demo 动效纪律「入场统一 --ease-out-soft，禁止模块私定曲线」，
+     组件波次迁移硬写曲线时回填引用本令牌 */
+  --ease-out-soft: cubic-bezier(0.23, 1, 0.32, 1);
+  --duration-fast: 120ms;   /* 反馈与状态切换档（demo --dur-fast 同值） */
+  --duration: 200ms;        /* 面板进出与开合基准档（demo --dur-base 同值） */
+  --duration-slow: 320ms;   /* 面板形变档（spec 基准三档：320–400ms 封顶，侧栏折叠 320ms 即本档） */
 
   /* ── shadcn-vue 命名空间别名 ────────────────────────────
      @taiji/ui / 本地 components/ui（shadcn copy）依赖 shadcn 命名约定
@@ -255,7 +259,7 @@
      延续暗色 base(深)→canvas(中)→surface(浅) 三层明度；避免泄漏 :root 暗色 #0a0a0c 形成黑框。 */
   --bg-stage: #dbd9d4;
   --bg: #edebe8;
-  --bg-sunken: #edebe8;
+  /* --bg-sunken 不重声明：继承 :root var(--bg) 公式随本块 --bg 自动跟随（demo settings-vars 同构） */
   --surface: #f7f6f3;
   --surface-hover: #e6e4e0;
   --surface-2: #efede9;         /* = demo 亮族 --card-head（设置分组卡头） */
@@ -280,11 +284,11 @@
   --border-strong: rgba(0, 0, 0, 0.14);
   --hairline: rgba(0, 0, 0, 0.05);
 
-  /* 青玉 accent（宣纸上的深颜料，demo 终态职能分色；亮色族 hover 压暗一档） */
+  /* 青玉 accent（宣纸上的深颜料，demo 终态职能分色；亮色族 hover 压暗一档）。
+     --accent-soft/--accent-ring 不重声明：继承 :root 派生公式，随本块 --accent 每元素解析自动跟随
+     （demo tokens.css 亮色块同构——公式类派生只声明一次，spec §4 机制约束） */
   --accent: #43765d;
   --accent-hover: #386650;
-  --accent-soft: color-mix(in oklch, var(--accent) 10%, transparent);
-  --accent-ring: color-mix(in oklch, var(--accent) 30%, transparent);
   --accent-fg: #f2f7f4;
   --link-c: #2e6ae0;            /* 链接正蓝（亮色族压暗档） */
   --code-c: #96622f;            /* 行内代码杏橘（亮色族压暗档） */
@@ -293,13 +297,12 @@
      var(--code-c) 随本族/各亮色 preset 解析）；字 = var(--code-c) 继承 :root 不重声明 */
   --md-code-bg: color-mix(in oklch, var(--code-c) 7%, transparent);
 
-  /* 状态色（亮色族 TAIJI_STATES_LIGHT：宣纸上的沉稳颜料） */
+  /* 状态色（亮色族 TAIJI_STATES_LIGHT：宣纸上的沉稳颜料）。
+     --*-soft 不重声明：继承 :root 派生公式随本块基色自动跟随（同 --md-code-bg 理由） */
   --success: #368047;
   --warn: #977629;
-  --warn-soft: color-mix(in oklch, var(--warn) 14%, transparent);
   --danger: #b24c4a;
   --danger-fg: #ffffff;          /* danger 实底钮文字（demo tokens.css light 块同值白字；:root 公式为暗色档不适用亮底） */
-  --danger-soft: color-mix(in oklch, var(--danger) 12%, transparent);
   --info: #3a7688;
   --reasoning: #71659c;
 
@@ -459,7 +462,9 @@
 
 /* 朱印（亮 · 宣纸朱砂）：accent 换青玉系颜料，danger 错开为玫红防撞色 + 图表墨掺朱砂；
    --md-code-bg/fg 不重声明：继承 light 块/:root 派生公式，随本块 --code-c 自动解析；
-   --danger-fg 不重声明：继承 light 块白字覆盖（demo light 族同构） */
+   --danger-fg 不重声明：继承 light 块白字覆盖（demo light 族同构）；
+   其余状态色（success/warn/info/reasoning）与 --*-soft 不重声明：与 light 块默认同值/公式继承，
+   demo tokens.css 朱印块即只覆盖 accent 族 + danger（spec §8：preset 只覆盖实际不同的令牌） */
 [data-theme="light"][data-theme-preset="zhuyin"] {
   --accent: #4d7a63;
   --accent-hover: #416e56;
@@ -485,12 +490,7 @@
   --row-hover: color-mix(in oklch, var(--neutral-fg) 3%, transparent);
   --track: color-mix(in oklch, var(--neutral-fg) 8%, transparent);
   --heat-outline: color-mix(in oklch, var(--neutral-fg) 45%, transparent);
-  --success: #368047;
-  --warn: #977629;
-  --danger: #b23855;
-  --danger-soft: color-mix(in oklch, var(--danger) 12%, transparent);
-  --info: #3a7688;
-  --reasoning: #71659c;
+  --danger: #b23855;   /* 朱印唯一独立状态色：玫红防撞色 */
 }
 
 /* ============================================================
@@ -751,55 +751,65 @@ textarea {
    用 transition（可中断 retarget）而非 keyframes（restart from zero）。
    ============================================================ */
 
-/* popover 族：缩放跟随触发点（reka 计算 --reka-popper-transform-origin）。
-   缓动 = --ease-out：demo 浮层过渡唯一实测缓动（.sess-pop/.stats-pop dur-fast ease-out，
-   tokens.css E5 注：ease-out 是进方向档）；时长 --duration-fast 与 demo --dur-fast 同值。 */
+/* popover 族：透明度 + 3px 位移（spec overlays.md §2 动效，demo drawers.css .pop 同参：
+   进 ease-out / 出 ease-in，--dur-fast = 本仓 --duration-fast 120ms）。
+   位移方向随 reka data-side（内容朝锚点一侧起落：side=top 自下 3px 升入、退场沉回锚侧；
+   reka popper 系内容元素（Popover/Select/HoverCard）均携带 data-side）。 */
 .reka-popover-transition {
   transition: opacity var(--duration-fast) var(--ease-out), transform var(--duration-fast) var(--ease-out);
-  transform-origin: var(--reka-popper-transform-origin, center);
 }
+.reka-popover-transition[data-side='top'] { --pop-offset: translateY(3px); }
+.reka-popover-transition[data-side='bottom'] { --pop-offset: translateY(-3px); }
+.reka-popover-transition[data-side='left'] { --pop-offset: translateX(3px); }
+.reka-popover-transition[data-side='right'] { --pop-offset: translateX(-3px); }
 .reka-popover-transition[data-state='open'] {
   opacity: 1;
-  transform: scale(1);
+  transform: translate(0, 0);
 }
 .reka-popover-transition[data-state='closed'] {
   opacity: 0;
-  transform: scale(0.96);
+  transform: var(--pop-offset, translateY(3px));
+  transition-timing-function: var(--ease-in);
 }
 @starting-style {
   .reka-popover-transition[data-state='open'] {
     opacity: 0;
-    transform: scale(0.96);
+    transform: var(--pop-offset, translateY(3px));
   }
 }
 
-/* dialog：居中缩放（modal 允许 center origin，transform 保留 translate 居中）。
-   160ms = demo modal 族唯一动画档（pages.css pop-in/fade-in 0.16s + overlay.css
-   rmodal-in 0.16s 三处实测同值；real --duration 200ms 偏慢故此处写实测档值）。
-   遮罩与盒同档（demo .cmask 无独立过渡，取盒档保持同进同出）。 */
+/* dialog（确认弹层/modal 族）：统一升入过渡（spec overlays.md §2，demo overlay.css
+   .wov/.rmod 同参——遮罩 200ms 淡入 ease-out / 盒 240ms 自下 8px 升入 --ease-out-soft /
+   关闭 150ms ease-in 整层纯淡出（盒不起落，与遮罩同步起落）。
+   原 160ms scale 档对齐的是旧 demo rmodal-in 0.16s（demo 已退役该档，P1-8：与遮罩
+   不同步且无退场），随 spec 树重写换统一升入参数）。 */
 .reka-dialog-transition {
-  transition: opacity 160ms var(--ease), transform 160ms var(--ease);
+  transition: opacity 150ms var(--ease-in);
 }
 .reka-dialog-transition[data-state='open'] {
   opacity: 1;
-  transform: translate(-50%, -50%) scale(1);
+  transform: translate(-50%, -50%);
+  transition: opacity 240ms var(--ease-out-soft), transform 240ms var(--ease-out-soft);
 }
 .reka-dialog-transition[data-state='closed'] {
   opacity: 0;
-  transform: translate(-50%, -50%) scale(0.96);
+  transform: translate(-50%, -50%);
 }
 @starting-style {
   .reka-dialog-transition[data-state='open'] {
     opacity: 0;
-    transform: translate(-50%, -50%) scale(0.96);
+    transform: translate(-50%, -50%) translateY(8px);
   }
 }
 
-/* dialog 遮罩：纯 opacity（160ms 与盒同档，见 .reka-dialog-transition 注） */
+/* dialog 遮罩：纯 opacity（进 200ms ease-out / 出 150ms ease-in，spec overlays.md §2） */
 .reka-overlay-transition {
-  transition: opacity 160ms var(--ease);
+  transition: opacity 150ms var(--ease-in);
 }
-.reka-overlay-transition[data-state='open'] { opacity: 1; }
+.reka-overlay-transition[data-state='open'] {
+  opacity: 1;
+  transition: opacity 200ms var(--ease-out);
+}
 .reka-overlay-transition[data-state='closed'] { opacity: 0; }
 @starting-style {
   .reka-overlay-transition[data-state='open'] { opacity: 0; }
