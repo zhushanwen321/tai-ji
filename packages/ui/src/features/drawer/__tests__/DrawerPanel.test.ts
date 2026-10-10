@@ -144,6 +144,34 @@ describe('DrawerPanel (R3 抽屉域焦点作用域，MF-1-51)', () => {
   })
 })
 
+// 面板方向滑入（demo drawers.css 裁决 10B，spec §3.3）：tab 切换后内容 wrapper 挂方向动画类
+// （目标 tab 序更大 = 自右滑入 from-r，更小 = 自左 from-l）；首次挂载不挂动画类（抽屉首开
+// 不叠面板动画）。类存在性断言 = 动画契约断言（jsdom 不执行 CSS animation，同 R3 作用域
+// 断言口径——契约的定义面就是类串本身）。wrapper 挂在「有内容」分支（v-if），故注入 slot。
+describe('DrawerPanel (面板方向滑入，裁决 10B)', () => {
+  const slotStubs = { default: '<div data-testid="panel-slot" />' }
+
+  it('首次挂载：内容 wrapper 存在但不挂方向动画类（首开不叠面板动画）', () => {
+    const wrapper = mount(DrawerPanel, { props: baseProps(), slots: slotStubs })
+    const slotWrap = wrapper.find('[data-testid="drawer-panel-slot"]')
+    expect(slotWrap.exists()).toBe(true)
+    expect(slotWrap.classes()).not.toContain('drawer-panel-slide-r')
+    expect(slotWrap.classes()).not.toContain('drawer-panel-slide-l')
+  })
+
+  it('tab 序增大（git→doc）：挂自右滑入类 drawer-panel-slide-r', async () => {
+    const wrapper = mount(DrawerPanel, { props: baseProps(), slots: slotStubs })
+    await wrapper.setProps({ activeTab: 'doc' })
+    expect(wrapper.find('[data-testid="drawer-panel-slot"]').classes()).toContain('drawer-panel-slide-r')
+  })
+
+  it('tab 序减小（btw→git）：挂自左滑入类 drawer-panel-slide-l', async () => {
+    const wrapper = mount(DrawerPanel, { props: baseProps({ activeTab: 'btw' }), slots: slotStubs })
+    await wrapper.setProps({ activeTab: 'git' })
+    expect(wrapper.find('[data-testid="drawer-panel-slot"]').classes()).toContain('drawer-panel-slide-l')
+  })
+})
+
 // bashTask tab（2026-09 background-task-sidebar-view D5②）：tabs 加第 8 个 TabMeta。
 // 内容面板由壳层（PanelContainer）slot 注入，本组件只负责 tab 元信息与空态 fallback。
 describe('DrawerPanel (bashTask tab，background-task-sidebar-view D5②)', () => {

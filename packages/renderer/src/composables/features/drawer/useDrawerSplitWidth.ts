@@ -302,6 +302,7 @@ export function useBottomDrawerHeight(
   }
 
   return {
+    heightPct,
     bottomHeightStyle,
     isBottomDragging,
     bottomTransitionClass,

@@ -122,7 +122,8 @@
             data-testid="btw-thread-pending"
             :title="t('btw.interaction.pendingLabel')"
           />
-          {{ shortVid(thread.vid) }}
+          <!-- 标签截断对齐 demo .itab-lbl 口径：max-w 128px 省略 + Button title 显全名（spec §3.4） -->
+          <span class="min-w-0 max-w-[128px] truncate">{{ shortVid(thread.vid) }}</span>
         </Button>
       </div>
 

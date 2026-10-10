@@ -93,9 +93,22 @@
              2026-08 移除：Vue 3.5.39 下 Transition out-in leave 完成后 enter 不触发（调度 bug），
              内容区永久空白死锁（dev app 实测 8/8 复现）。同构踩坑已 3 处
              （本处 / Sidebar workflow / SettingsModal）。vue_rules_checker.py 已加规则禁止该写法。
-             tab 切换改瞬时 v-if/v-else（无动画），稳定性优先。
-             [P4 s5 drawer-widget-removal] 原 gui→lines→空态三支已删（widget 通道移除），仅剩空态。 -->
-        <slot v-if="hasDesktopPanelContent()" />
+             tab 切换改瞬时 v-if/v-else，稳定性优先。
+             [P4 s5 drawer-widget-removal] 原 gui→lines→空态三支已删（widget 通道移除），仅剩空态。
+             面板方向滑入（demo drawers.css 裁决 10B / spec §3.3）：CSS animation 形态（非 Vue
+             Transition，不触 out-in 调度 bug）——新面板按目标 tab 相对当前位置自左/右 10px 滑入 +
+             淡入；wrapper :key=activeTab 使每次 tab 切换重放动画（v-if chain 换面板本就重建，
+             key 仅保证动画类复挂时也重放）；slideDir 初始空 = 抽屉首次打开不叠面板动画（壳层
+             已有开合入场，避免双层叠加，spec §3.3）。 -->
+        <div
+          v-if="hasDesktopPanelContent()"
+          :key="activeTab"
+          class="h-full min-h-0"
+          :class="slideAnimClass"
+          data-testid="drawer-panel-slot"
+        >
+          <slot />
+        </div>
         <!-- active tab 无内容面板 → 空态占位（demo .empty：图标 24px dim 40% + e1 md 档 mid +
              e2 sm 档 dim，均无附加透明度） -->
         <div
@@ -113,7 +126,7 @@
 </template>
 
 <script setup lang="ts">
-import { Comment, computed, useSlots } from 'vue'
+import { Comment, computed, ref, useSlots, watch } from 'vue'
 import type { Component } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { BookOpen, Bot, FileText, GitBranch, Globe, MessagesSquare, SquareCheckBig, SquareTerminal, Terminal as TerminalIcon, Workflow, X } from '@lucide/vue'
@@ -194,6 +207,25 @@ const tabs = computed<TabMeta[]>(() =>
 )
 
 const activeTabMeta = computed<TabMeta>(() => tabs.value.find((tab) => tab.key === props.activeTab) ?? tabs.value[0])
+
+// ── 面板方向滑入（demo drawers.css 裁决 10B，spec §3.3）────────────────────
+// 目标 tab 在当前 tab 右侧 → 新面板自右 10px 滑入（from-r），反之自左（from-l）。
+// slideDir 初始空：抽屉首次打开不叠面板动画（壳层 wrapper width 过渡 + aside 显隐过渡
+// 已是两层，面板再加一层 = 三层叠加，spec §3.3 明示排除）；仅在 tab 变化后才有值。
+// 方向查表用注册表序（tabs computed，与 L1 栏渲染序同源，不另立 tab 序）。
+type SlideDir = '' | 'from-r' | 'from-l'
+const slideDir = ref<SlideDir>('')
+watch(
+  () => props.activeTab,
+  (nv, ov) => {
+    const ni = tabs.value.findIndex((tab) => tab.key === nv)
+    const oi = tabs.value.findIndex((tab) => tab.key === ov)
+    slideDir.value = ni < 0 || oi < 0 || ni === oi ? '' : ni > oi ? 'from-r' : 'from-l'
+  },
+)
+const slideAnimClass = computed(() =>
+  slideDir.value === 'from-r' ? 'drawer-panel-slide-r' : slideDir.value === 'from-l' ? 'drawer-panel-slide-l' : '',
+)
 </script>
 
 <style scoped>
@@ -220,5 +252,32 @@ const activeTabMeta = computed<TabMeta>(() => tabs.value.find((tab) => tab.key =
   transition:
     opacity var(--duration) var(--ease-in),
     transform var(--duration) var(--ease-in);
+}
+
+/* 一级面板切换方向滑入（demo drawers.css 裁决 10B）：按目标 tab 相对位置自左/右 10px + 淡入。
+   形态 = CSS animation（进场上映一次即止，非 Vue Transition——out-in 调度 bug 见上方模板
+   HISTORICAL 注记）；时长消费 --duration-slow（面板形变档 320ms，demo 同场景 300ms 字面值
+   归档到 real 三档制的慢档，差 20ms 不可感知）+ --ease-out-soft（demo 动效纪律「入场统一
+   软缓出」，令牌注释已登记本场景为预期消费方）。no-preference 包裹 = reduce 环境动画整体
+   不定义（比全局 reduce 兜底的「温和过渡」更彻底，同 demo drawers.css reduce 块约定）。 */
+@media (prefers-reduced-motion: no-preference) {
+  .drawer-panel-slide-r {
+    animation: drawer-panel-slide-r var(--duration-slow) var(--ease-out-soft);
+  }
+  .drawer-panel-slide-l {
+    animation: drawer-panel-slide-l var(--duration-slow) var(--ease-out-soft);
+  }
+}
+@keyframes drawer-panel-slide-r {
+  from {
+    opacity: 0;
+    transform: translateX(10px);
+  }
+}
+@keyframes drawer-panel-slide-l {
+  from {
+    opacity: 0;
+    transform: translateX(-10px);
+  }
 }
 </style>

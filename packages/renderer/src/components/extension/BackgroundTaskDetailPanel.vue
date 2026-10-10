@@ -94,8 +94,10 @@
       </Button>
     </div>
 
-    <!-- 输出尾部（等宽滚动块，running 时 2s 跟随；lost = 输出文件已清理/丢失，§3.1 失败路径） -->
+    <!-- 输出尾部（等宽滚动块，running 时 2s 跟随；lost = 输出文件已清理/丢失，§3.1 失败路径）。
+         顶缘 EdgeFade（spec §3.5 五个可滚动面板）：滚动容器首子元素，sticky 离顶渐焦，自驱动。 -->
     <div class="min-h-0 flex-1 overflow-auto px-3 py-2">
+      <EdgeFade />
       <div
         v-if="outputLost"
         class="text-[length:var(--text-2xs)] text-neutral-dim"
@@ -159,6 +161,7 @@ import { formatClockDuration } from '@/lib/duration-format'
 import * as backgroundTaskApi from '@taiji/core/transport/api/domains/background-task'
 import { useToast } from '@/composables/useToast'
 import { useCopy } from '@/composables/panel/useCopy'
+import { EdgeFade } from '@/components/ui/edge-fade'
 
 const FOLLOW_INTERVAL_MS = 2000
 

@@ -278,6 +278,11 @@ describe('PanelContainer 首屏冒烟（TC1）', () => {
     const handle = wrapper.find('[data-testid="drawer-resize-handle"]')
     expect(handle.exists()).toBe(true)
     expect(handle.attributes('role')).toBe('separator')
+    // aria 值三件套（demo spec §3.2 键盘微调可达性）：钳制区间 20–60 + 当前值（spec drawers spec（demo） §3.2）
+    expect(handle.attributes('aria-valuemin')).toBe('20')
+    expect(handle.attributes('aria-valuemax')).toBe('60')
+    expect(Number(handle.attributes('aria-valuenow'))).toBeGreaterThanOrEqual(20)
+    expect(Number(handle.attributes('aria-valuenow'))).toBeLessThanOrEqual(60)
     // main-area + drawer-area 双区域挂载（手写 flex，宽度拆分）
     expect(wrapper.find('[data-testid="main-area"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="drawer-area"]').exists()).toBe(true)
