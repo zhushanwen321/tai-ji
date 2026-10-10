@@ -244,6 +244,7 @@ demo 阶段功能做到「可见 + 可交互 + 数据 mock」即够。不接 run
 - **框架层（浮起）**：`--bg` `#1e1e1e`（aside / composer / settings 内容区同层同色）；操作域浮起容器 `--bg-card` `#262626` 亮于本层一档
 - **浮层**：`--bg-elevated` `#2b2b2e`（hover 详情卡 / popover；用户气泡 `--bubble-bg` 随本层派生——demo 暗族三主题 bubble 逐块等于 elevated、无独立档，亮族独立 `#fefefe`）；overlay 遮罩半透明黑（`bg-black/80`）全场最暗，遮罩上面板靠 border + shadow 分离
 - 黛蓝/暖墨暗色 entry 按玄五层骨架 + 各自色相偏移推导（黛蓝 B>R、暖墨 R>B，通道差与各自旧 entry 一致）；亮色族三主题（皓/青墨/朱印）bg 阶梯沿用宣纸镜像（surface 最亮、框架层深一档），青墨/朱印不覆写
+- **亮色（皓族）设置卡双层底**：`--bg-card` `#fcfbf9`（分组卡底，近白纸、亮于页底 `#edebe8`）、`--surface-2` `#efede9`（分组卡头，= demo 亮族 `--card-head`；style.css `[data-theme=light]`）——「卡浮于底」层级在亮色族与暗色族同构（卡底亮于页底，卡头 = 页底色调档）
 
 ### 4.2 文字 neutral 谱系（纯中性四档，暗色族三主题统一）
 
@@ -289,9 +290,10 @@ demo 阶段功能做到「可见 + 可交互 + 数据 mock」即够。不接 run
 /* 状态色（水墨降饱和：饱和度/明度 +15~20%，保留水墨感不艳）*/
 --success: #78a87e;  --warn: #b79c54;  --danger: #bf6b6b;
 --info:    #6d99a5;  --reasoning: #8e85ab;
---danger-fg: color-mix(in oklch, var(--danger) 18%, #160b0b);
-/* danger 实色上的文字（demo 公式：color-mix 中的 var(--danger) 每元素解析，
-   亮色族/朱印随各自 --danger 自动跟随，主题块零覆盖声明——Chromium 实测行为）*/
+--danger-fg: color-mix(in oklch, var(--danger) 12%, #160b0b);
+/* danger 实色上的文字（demo tokens.css 同公式浓度 12%；暗色族 color-mix 中的
+   var(--danger) 每元素解析，随各自 --danger 自动跟随——Chromium 实测行为；
+   亮色族由 [data-theme="light"] 块覆盖为白字 #ffffff，青墨/朱印继承该覆盖）*/
 
 /* soft 派生（自动跟随，主题切换无需单独覆盖）*/
 --success-soft:   color-mix(in oklch, var(--success) 12%, transparent);
@@ -300,25 +302,26 @@ demo 阶段功能做到「可见 + 可交互 + 数据 mock」即够。不接 run
 --info-soft:      color-mix(in oklch, var(--info) 12%, transparent);
 --reasoning-soft: color-mix(in oklch, var(--reasoning) 12%, transparent);
 
-/* 行内代码（demo 终态：底与字都跟 --code-c，不跟主行动 accent；消费点 = MarkdownRenderer.vue）：
+/* 行内代码（demo R4 弱化终态：底跟 --code-c、字近正文微暖；消费点 = MarkdownRenderer.vue）：
    底 = code-c 8% 弱化层（暗色族；亮色族 7% 由 light 块重声明），
-   字 = var(--code-c)。color-mix 中的 var() 每元素解析（Chromium 实测），
-   preset 块只覆盖 --code-c 即自动跟随，全部主题块零重复声明。 */
+   字 = 主前景 85% 混 code-c 15%（demo 令牌名 --fg 在本仓 = --neutral-fg）。
+   color-mix 中的 var() 每元素解析（Chromium 实测），preset 块只覆盖
+   --neutral-fg/--code-c 即自动跟随，全部主题块零重复声明。 */
 --md-code-bg: color-mix(in oklch, var(--code-c) 8%, transparent);   /* 暗色族（玄/黛蓝/暖墨） */
 --md-code-bg: color-mix(in oklch, var(--code-c) 7%, transparent);   /* 亮色族（皓/青墨/朱印，light 块） */
---md-code-fg: var(--code-c);
+--md-code-fg: color-mix(in oklch, var(--neutral-fg) 85%, var(--code-c));
 ```
 
-六主题 `--code-c`（= `--md-code-fg` 解析值）挂值（底合成到对话流 `--surface` 后的 WCAG 对比，§4 场景 2）：
+六主题 `--code-c` 颜料挂值（字色 = `--md-code-fg` 公式下于合成底——code-c N% 叠对话流 `--surface`——的 WCAG 对比，§4 场景 2；单测 contrast-tokens.test.ts 同模型断言统一 ≥4:1 线）：
 
 | 主题 | 族 | `--code-c` | 对比 |
 |---|---|---|---|
-| 玄 | 暗 | `#cf9d78` | 7.12:1 |
-| 黛蓝 | 暗 | `#c99e80` | 7.06:1 |
-| 暖墨 | 暗 | `#d4a684` | 7.79:1 |
-| 皓 | 亮 | `#96622f` | 4.37:1 |
-| 青墨 | 亮 | `#92663a` | 4.27:1 |
-| 朱印 | 亮 | `#9a6b40` | **3.92:1**（demo 权威值低于旧 4:1 线——demo 唯一视觉权威不改值，单测锚定 3.9 上报待裁决） |
+| 玄 | 暗 | `#cf9d78` | 13.13:1 |
+| 黛蓝 | 暗 | `#c99e80` | 13.12:1 |
+| 暖墨 | 暗 | `#d4a684` | 13.06:1 |
+| 皓 | 亮 | `#96622f` | 10.65:1 |
+| 青墨 | 亮 | `#92663a` | 10.62:1 |
+| 朱印 | 亮 | `#9a6b40` | 10.50:1 |
 
 ### 4.5 diff 着色（柔化 12%）
 
@@ -399,10 +402,10 @@ demo 阶段功能做到「可见 + 可交互 + 数据 mock」即够。不接 run
 | 主题 | 选择器块 | 覆盖变量数与构成 |
 |---|---|---|
 | 玄（暗·默认） | `:root` | 全部默认值，无独立块 |
-| 皓（亮·默认） | `[data-theme="light"]` | 55 = bg 阶梯 9 + bubble 1 + neutral 8（含 name、fg-2）+ border 3 + accent 5 + link-c/code-c 2 + md-code 1（7% 重声明）+ 状态 7 + chart 族 19 |
+| 皓（亮·默认） | `[data-theme="light"]` | 59 = bg 阶梯 9 + bubble 1 + neutral 8（含 name、fg-2）+ border 3 + accent 5 + link-c/code-c 2 + md-code 1（7% 重声明）+ 状态 8（含 danger-fg 白字覆盖）+ 阴影 3 + chart 族 19 |
 | 黛蓝 / 暖墨 | `:root[data-theme-preset="dailan"/"nuanmo"]` | 38 = bg 阶梯 7 + neutral 7（含 fg-2）+ accent 3 + link-c/code-c 2 + chart 族 19（不覆盖 border/状态色；--bg-sunken/--md-code 继承派生公式不重声明） |
 | 青墨 | `[data-theme="light"][data-theme-preset="qingmo"]` | 24 = accent 3 + link-c/code-c 2 + chart 族 19（宣纸底不换、只换颜料） |
-| 朱印 | `[data-theme="light"][data-theme-preset="zhuyin"]` | 30 = 青墨面 24 + 状态 6（danger 系玫红错开等；--danger-fg 继承派生公式不重声明） |
+| 朱印 | `[data-theme="light"][data-theme-preset="zhuyin"]` | 30 = 青墨面 24 + 状态 6（danger 系玫红错开等；--danger-fg 继承 light 块白字覆盖不重声明） |
 
 **阴 · 暗色族（3 个）**——背景近中性，色相只做「依稀相」(S≤6%)，靠明度阶梯说话；彩色职能按 demo 终态三分（主行动青玉 / 链接正蓝 / 行内代码杏橘）：
 | 主题 | accent | 特色 |
@@ -943,7 +946,7 @@ style.css（packages/renderer/src/style.css :root，值真值，运行时唯一�
 - AppShell padding = demo `.app { padding: 4px 4px 4px 0 }`：上/右/下 4px、**左 0**（aside 透明融合直接贴窗口左缘，侧栏内容边距由 Sidebar 自持）；`gap-2`(8px) = demo aside 与主面板卡缝；折叠态 `!gap-0`（aside 归零，padding 不变，主面板左缘 = gap 8px）
 - `.aside-region` 恒定 `padding-top: 44px`(pt-11)（安全区 + 拉开 chrome 行与 LOGO 行间距），**三平台统一，全屏也保留**（mac 全屏 hover 时系统下拉覆盖层会落进这块留白）。AppShell py-1 使 aside 顶在窗口 y=4，安全区让出
 - mac 红黄绿位置由主进程 `titleBarStyle:'hidden'` + `trafficLightPosition:{x:8,y:16}`（**不用 hiddenInset**——inset 模式强制水平内缩，`trafficLightPosition.x` 被系统忽略）。y=16 推导：窗口上边距 4 + 卡头半高 20 = 卡头几何中心 y24，扣除 macOS 渲染亚像素偏置 ~1.75pt（{8,8} 时代实测：理论中线 y14 → 实测 y15.75）→ y≈16（demo 注释同源推导，真机校准项）。x=8：AppShell 左边距 0 后与 win/linux 自绘圆点完全同位
-- win/linux 自绘圆点 `left-2 top-[4px]`（TrafficLight.vue 挂载于 AsideRegion 内，aside 左缘 x0 / 顶 y4 → 窗口 (8,8)，x/y 与 mac 同位）。圆点 12px / gap 8px（demo .lights）
+- win/linux 自绘圆点 `left-2 top-[12px]`（TrafficLight.vue 挂载于 AsideRegion 内，aside 左缘 x0 / 顶 y4 → 窗口 (8,16)，x/y 与 mac `trafficLightPosition:{x:8,y:16}` 同位）。圆点 12px / gap 8px（demo .lights）
 - 窗口 chrome 行（AppNavControls：收起/←/→）浮在 AppShell 层（aside 外，避免折叠态 overflow-hidden 裁剪），钮 32×32（demo `--hb-chrome-btn`，行定高防塌缩）、图标 15px（stroke 折叠 1.6 / 导航 1.8）、`top:9px`（中线 y = 9+16 = 25）。**非全屏** transform 平移 `translate-x-[58px]`（红黄绿右缘 60 + demo .lights margin-right 4 + 行 gap 2 = 折叠钮左缘 66，减基准 left 8 = 58）；**全屏**无平移（占红黄绿位 x=8，320ms 与 traffic-light opacity 同步）
 - **PanelHeader `h-[40px]`**（demo 40px 卡头单档终态）：main-panel 顶 y4 + chat 卡 1px 上边框 = 卡头顶 y5，40/2 → **中线 y25 = chrome 行中线 = 红黄绿实测中线（16+6+1.75≈23.75，~1px 亚像素余量）三者共线**。内边距 0 14px、行 gap 8px、基色 --mid、字号 14px、底边框 1px --hairline 与对话流分隔（bg-surface 沉底连体）。卡头钮两档：chrome 槽位钮 34×30（demo .pch）+ 新建任务钮 30×30（demo .hdr-fold，仅折叠态）；右簇钮 30×30（demo `--hb-btn`）、图标 17px（`--hb-icon`）。「对话|Trace」分段控件（TraceViewToggle）= demo .seg：凹陷槽 bg-input + 6px 圆角 + 2px 内衬，按钮 26px 高 / 13px 字 / 15px 图标 / 4px 圆角，激活 = elevated 浮起 + accent 1px 内描边 + 600 字重（总高 30px 内收于卡头）
 - **折叠态** chrome 迁入 PanelHeader 头部槽位（header `pl-[88px]` 让位红黄绿右缘 60；全屏态红黄绿 OS 隐藏，pl-4）；AppShell 折叠态 `!gap-0`（强制覆盖 gap-2）

@@ -73,18 +73,20 @@
   --link-c: #4d8dff;
   --code-c: #cf9d78;
 
-  /* 行内代码（demo 终态：底与字都跟 --code-c，不跟主行动）——底 = code-c 8% 弱化层，
-     字 = code-c 本色。color-mix 中的 var() 在每元素计算值阶段解析（Chromium 实测），
-     preset 块只覆盖 --code-c 即自动跟随，故暗色 preset 不重声明本对；
-     亮色族百分率不同（7%）由 [data-theme="light"] 块重声明。对比断言见场景 2（≥4:1）。 */
+  /* 行内代码（demo R4 弱化终态）——底 = code-c 8% 弱化层，字 = 主前景 85% 混 code-c 15%
+     （「接近正文色、只微暖不抢眼」；demo 令牌名 --fg 在本仓映射为 --neutral-fg）。
+     color-mix 中的 var() 在每元素计算值阶段解析（Chromium 实测），preset 块只覆盖
+     --neutral-fg/--code-c 即自动跟随，故暗色 preset 不重声明本对；亮色族 bg 百分率
+     不同（7%）由 [data-theme="light"] 块重声明，fg 公式主题通用不重声明。
+     对比断言见 contrast-tokens.test.ts 场景 2③。 */
   --md-code-bg: color-mix(in oklch, var(--code-c) 8%, transparent);
-  --md-code-fg: var(--code-c);
+  --md-code-fg: color-mix(in oklch, var(--neutral-fg) 85%, var(--code-c));
 
   /* ── 状态色（水墨降饱和，克制放开档）────────────────── */
   --success: #78a87e;
   --warn: #b79c54;
   --danger: #bf6b6b;
-  --danger-fg: color-mix(in oklch, var(--danger) 18%, #160b0b); /* danger 实色上的文字（demo 公式：var 随各主题 --danger 自动解析，亮色族不再覆盖） */
+  --danger-fg: color-mix(in oklch, var(--danger) 12%, #160b0b); /* danger 实色上的文字（demo tokens.css 同公式浓度 12%；var 随各主题 --danger 自动解析，亮色族由 [data-theme="light"] 块覆盖为白字） */
   --info: #6d99a5;
   /* reasoning 紫：思考块色相（draft-message-stream §4 + composer 思考等级） */
   --reasoning: #8e85ab;
@@ -209,6 +211,7 @@
   --popover-foreground: var(--neutral-fg);
   --input: var(--border);              /* border-input */
   --ring: var(--accent);               /* ring-ring（focus，主色）*/
+  --focus-ring: var(--accent);         /* 焦点指示色别名（demo tokens.css 同名同值；表单原语 :focus-visible outline 通道，见 components/ui/input 等） */
 
   /* ── 图表派生 tokens（玄 · 暗，默认 :root）──────────────
      不手写色值，全部从 --chart-ink 派生（color-mix）。
@@ -255,10 +258,10 @@
   --bg-sunken: #edebe8;
   --surface: #f7f6f3;
   --surface-hover: #e6e4e0;
-  --surface-2: #e3e1dc;
+  --surface-2: #efede9;         /* = demo 亮族 --card-head（设置分组卡头） */
   --bg-elevated: #ffffff;
-  --bg-input: #e5e3df;
-  --bg-card: #f1efec;
+  --bg-input: #efedea;
+  --bg-card: #fcfbf9;           /* 卡浮于页底（亮于 --bg 两档近白纸） */
   /* 亮色纸白：用户气泡用 #fefefe（灰底读作禁用态；纯白让位 elevated，
      纸白与 card/elevated 保持微梯度，见 :root 注释） */
   --bubble-bg: #fefefe;
@@ -295,10 +298,16 @@
   --warn: #977629;
   --warn-soft: color-mix(in oklch, var(--warn) 14%, transparent);
   --danger: #b24c4a;
-  /* --danger-fg 不覆盖：继承 :root color-mix 公式，随本主题 --danger 自动解析（demo 同构） */
+  --danger-fg: #ffffff;          /* danger 实底钮文字（demo tokens.css light 块同值白字；:root 公式为暗色档不适用亮底） */
   --danger-soft: color-mix(in oklch, var(--danger) 12%, transparent);
   --info: #3a7688;
   --reasoning: #71659c;
+
+  /* 阴影三档（亮色族降浓度覆盖，值 = demo tokens.css light 块）：不覆盖会沿用 :root 暗色档
+     （0.2/0.4/0.45），亮色浮层（popover/dialog/hovercard/抽屉）阴影过重约 2.5-3.3 倍 */
+  --shadow-1: 0 0 0 1px rgba(0, 0, 0, 0.08);
+  --shadow-2: 0 8px 24px rgba(0, 0, 0, 0.12);
+  --shadow-3: 0 12px 32px rgba(0, 0, 0, 0.16);
 
   /* ── 图表派生 tokens（皓 · 亮色，默认亮色）── 同玄，auto 跟随 neutral-fg + bg */
   --chart-ink: var(--neutral-fg);
@@ -449,7 +458,8 @@
 }
 
 /* 朱印（亮 · 宣纸朱砂）：accent 换青玉系颜料，danger 错开为玫红防撞色 + 图表墨掺朱砂；
-   --md-code-bg/fg 与 --danger-fg 不重声明：继承 light 块/:root 派生公式，随本块 --code-c/--danger 自动解析 */
+   --md-code-bg/fg 不重声明：继承 light 块/:root 派生公式，随本块 --code-c 自动解析；
+   --danger-fg 不重声明：继承 light 块白字覆盖（demo light 族同构） */
 [data-theme="light"][data-theme-preset="zhuyin"] {
   --accent: #4d7a63;
   --accent-hover: #416e56;

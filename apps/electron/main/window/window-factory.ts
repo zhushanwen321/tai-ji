@@ -285,8 +285,9 @@ export async function createWindow(
     //   x=8 保持：AppShell 左内边距 0 → aside 左缘 x0，win/linux 自绘圆点 left-2 = x8 与 mac 完全同位。
     //   共线几何：卡头顶 y5（4 + chat 卡 1px 上边框）+ 40/2 = 中线 y25 = AppNavControls（top 9 + 32/2）
     //   = 灯实测中线（16 + 6 + 1.75 ≈ 23.75，与 25 差 ~1px 属亚像素校准余量）。
-    // win/linux：frame:false 应用自绘圆点 mimic mac（renderer TrafficLight.vue left-2/top-[4px]：
-    //   aside 左缘 x0 → left-2 = 窗口 x8 与 mac 同位；aside 顶 y4 → top-4px = 窗口 y8 同位）。
+    // win/linux：frame:false 应用自绘圆点 mimic mac（renderer TrafficLight.vue left-2/top-[12px]：
+    //   aside 左缘 x0 → left-2 = 窗口 x8 与 mac 同位；aside 顶 y4 → top-12px = 窗口 y16 与 mac
+    //   trafficLightPosition.y=16 同位）。
     ...(process.platform === 'darwin'
       ? {
         titleBarStyle: 'hidden' as const,

@@ -13,14 +13,16 @@
  * 决策 2「亮色族文字档维持现行值」冲突——故亮色族 dim 断言现行值锚定（防漂移）
  * 而非 2.8 阈值，改值须先改设计。场景 1③ 阈值全套断言于暗色族三主题。
  *
- * 行内 code 令牌（--md-code-bg/fg）对比断言（场景 2③）已入库。wave1 令牌对齐 demo 终态
- * 职能分色后：--md-code-bg 为 color-mix(in oklch, var(--code-c) N%, transparent) 形态
- * （非 hex 字面值），不走 REQUIRED_TOKENS 的 hex 断言面：premultiplied alpha 混合语义下
- * 该 color-mix 结果 = code-c 本色 + alpha N/100，渲染底 = sRGB 逐通道 α×code-c + (1-α)×surface
- * 合成（与浏览器半透明背景合成公式一致）；--md-code-fg = var(--code-c) 引用（六主题逐块
- * 解析 --code-c hex）。对比锚定：暗色族 7.06–7.79:1 / 皓 4.37 / 青墨 4.27 均过 ≥4:1；
- * 朱印 demo 权威值实测 3.92:1 低于旧线——demo 唯一视觉权威不改值，按 demo 锚定断言；
- * 朱印 3.9 豁免待用户裁决，登记见 docs/todo/zhuyin-code-contrast-ruling.md。
+ * 行内 code 令牌（--md-code-bg/fg）对比断言（场景 2③）已入库。R4 弱化终态（demo tokens.css
+ * 同构）：--md-code-bg 为 color-mix(in oklch, var(--code-c) N%, transparent) 形态，
+ * --md-code-fg 为 color-mix(in oklch, var(--neutral-fg) 85%, var(--code-c)) 形态
+ * （demo 令牌名 --fg 在本仓映射为 --neutral-fg）。两者均不走 REQUIRED_TOKENS 的 hex
+ * 断言面，由本文件解析混合：底 = premultiplied alpha 的 sRGB 逐通道合成（与浏览器
+ * 半透明背景合成公式一致）；字 = OKLab 三分量 lerp（color-mix(in oklch) 的浏览器
+ * 混合空间，Björn Ottosson 线性空间矩阵），转 linear sRGB 算亮度。
+ * 对比锚定（R4 公式重验）：暗色族 ≈13.1:1 / 皓 10.65 / 青墨 10.62 / 朱印 10.50，
+ * 六主题全部过统一 ≥4:1 线；旧「朱印 code-c 本色字 3.92:1」的 3.9 豁免随 R4 公式
+ * 落地失效，登记见 docs/todo/zhuyin-code-contrast-ruling.md（状态行已同步）。
  */
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
@@ -174,47 +176,105 @@ describe('对比度令牌阈值（ui-optimize §4 场景 1③，宿主 = 对话�
   })
 })
 
-describe('行内 code 对比（场景 2③，六主题；demo 终态职能分色 = code-c 派生）', () => {
+describe('行内 code 对比（场景 2③，六主题；demo R4 弱化终态 = fg 主导混 code-c）', () => {
   const MD_CODE_MIX_RE = /^color-mix\(in oklch,\s*var\(--code-c\)\s*([\d.]+)%,\s*transparent\)$/
-  const VAR_REF_RE = /^var\(--([a-zA-Z0-9-]+)\)$/
+  const CODE_FG_MIX_RE = /^color-mix\(in oklch,\s*var\(--neutral-fg\)\s*([\d.]+)%,\s*var\(--code-c\)\)$/
 
-  /** demo 终态各主题 md-code 对比下限（sRGB 合成模型，同 compositeOver）：朱印 demo 权威值
-   * #9a6b40 于 7% 叠 surface 实测 3.92:1——demo 唯一视觉权威不改值，朱印锚定 3.9，
-   * 其余主题维持 ≥4:1 旧线；该豁免待用户裁决，登记见 docs/todo/zhuyin-code-contrast-ruling.md */
+  /** 六主题统一 ≥4:1 线（R4 公式重验：暗族 ≈13.1 / 皓 10.65 / 青墨 10.62 / 朱印 10.50）。
+   * 旧「朱印 3.9 豁免」锚定的是旧公式（字色 = code-c 本色）下朱印 3.92:1——公式改 R4 后
+   * 该前提失效，登记见 docs/todo/zhuyin-code-contrast-ruling.md。 */
   const CODE_CONTRAST_MIN: Record<(typeof THEMES)[number]['id'], number> = {
     xuan: 4,
     dailan: 4,
     nuanmo: 4,
     hao: 4,
     qingmo: 4,
-    zhuyin: 3.9,
+    zhuyin: 4,
   }
 
-  /** 解析 --md-code-fg：var(--code-c) 引用形态 → 主题级联后的 --code-c hex */
-  function resolveCodeFg(raw: Record<string, string>): string {
-    const fg = (raw['--md-code-fg'] ?? '').trim()
-    const ref = fg.match(VAR_REF_RE)
-    if (!ref) return fg.toLowerCase()
-    const target = raw[`--${ref[1]}`]
-    expect(target, `--md-code-fg 引用 ${fg} 但主题级联中无 ${`--${ref[1]}`} 声明`).toMatch(/^#[0-9a-fA-F]{6}$/)
-    return target.toLowerCase()
+  const srgbToLinear = (c: number): number => (c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4))
+
+  /** sRGB hex → OKLab（Björn Ottosson 线性空间矩阵，color-mix(in oklch) 的浏览器混合空间） */
+  function hexToOklab(hex: string): [number, number, number] {
+    const n = parseInt(hex.slice(1), 16)
+    const [r, g, b] = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((c) => srgbToLinear(c / 255))
+    const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b)
+    const m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b)
+    const s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b)
+    return [
+      0.2104542553 * l + 0.7936177850 * m - 0.0040720468 * s,
+      1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s,
+      0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s,
+    ]
   }
 
-  it('--md-code-fg（= code-c）于合成底（code-c N% 叠 surface）上对比 ≥ 主题下限（六主题）', () => {
+  function oklabToLinear([L, a, b]: [number, number, number]): [number, number, number] {
+    const l_ = L + 0.3963377774 * a + 0.2158037573 * b
+    const m_ = L - 0.1055613458 * a - 0.0638541728 * b
+    const s_ = L - 0.0894841775 * a - 1.2914855480 * b
+    const [l, m, s] = [l_ ** 3, m_ ** 3, s_ ** 3]
+    return [
+      4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
+      -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
+      -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s,
+    ]
+  }
+
+  /** color-mix(in oklch, A t%, B)：OKLab 三分量各自 lerp → linear sRGB
+   * （亮度直接在 linear 空间计算，不经 hex 往返避免舍入漂移） */
+  function mixOklabToLinear(hexA: string, t: number, hexB: string): [number, number, number] {
+    const ka = hexToOklab(hexA)
+    const kb = hexToOklab(hexB)
+    return oklabToLinear([
+      ka[0] * t + kb[0] * (1 - t),
+      ka[1] * t + kb[1] * (1 - t),
+      ka[2] * t + kb[2] * (1 - t),
+    ])
+  }
+
+  function luminanceOfLinear([r, g, b]: [number, number, number]): number {
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+  }
+
+  function contrastRatioLinear(
+    fg: [number, number, number],
+    bg: [number, number, number],
+  ): number {
+    const l1 = luminanceOfLinear(fg)
+    const l2 = luminanceOfLinear(bg)
+    return (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05)
+  }
+
+  function hexToLinearRgb(hex: string): [number, number, number] {
+    return [1, 3, 5].map((i) => srgbToLinear(parseInt(hex.slice(i, i + 2), 16) / 255)) as [
+      number,
+      number,
+      number,
+    ]
+  }
+
+  it('--md-code-fg（neutral-fg 85% 混 code-c）于合成底（code-c N% 叠 surface）上对比 ≥4:1（六主题统一线）', () => {
     for (const theme of THEMES) {
-      const raw = parseThemeRawVars(theme, ['--code-c', '--md-code-bg', '--md-code-fg'])
+      const raw = parseThemeRawVars(theme, ['--neutral-fg', '--code-c', '--md-code-bg', '--md-code-fg'])
+      const fgRaw = (raw['--md-code-fg'] ?? '').trim()
+      const fgMix = fgRaw.match(CODE_FG_MIX_RE)
+      expect(
+        fgMix,
+        `主题 ${theme.label} --md-code-fg 形态非 color-mix(in oklch, var(--neutral-fg) N%, var(--code-c))：${fgRaw}`,
+      ).not.toBeNull()
+      const fg = (raw['--neutral-fg'] ?? '').toLowerCase()
       const code = (raw['--code-c'] ?? '').toLowerCase()
-      const fg = resolveCodeFg(raw)
+      expect(fg, `主题 ${theme.label} --neutral-fg 非 hex 字面值：${raw['--neutral-fg']}`).toMatch(/^#[0-9a-fA-F]{6}$/)
       expect(code, `主题 ${theme.label} --code-c 非 hex 字面值：${raw['--code-c']}`).toMatch(/^#[0-9a-fA-F]{6}$/)
-      expect(fg, `主题 ${theme.label} --md-code-fg 应解析为 hex（var 引用或字面）：${raw['--md-code-fg']}`).toMatch(/^#[0-9a-fA-F]{6}$/)
-      const mix = (raw['--md-code-bg'] ?? '').match(MD_CODE_MIX_RE)
-      expect(mix, `主题 ${theme.label} --md-code-bg 形态非 color-mix(code-c N%, transparent)：${raw['--md-code-bg']}`).not.toBeNull()
-      const alpha = Number(mix![1]) / 100
+      const bgMix = (raw['--md-code-bg'] ?? '').match(MD_CODE_MIX_RE)
+      expect(bgMix, `主题 ${theme.label} --md-code-bg 形态非 color-mix(code-c N%, transparent)：${raw['--md-code-bg']}`).not.toBeNull()
+      const alpha = Number(bgMix![1]) / 100
       const surface = tokensByTheme.get(theme.id)!['--surface']
       const codeBg = compositeOver(code, alpha, surface)
-      const ratio = contrastRatio(fg, codeBg)
+      const fgLinear = mixOklabToLinear(fg, Number(fgMix![1]) / 100, code)
+      const ratio = contrastRatioLinear(fgLinear, hexToLinearRgb(codeBg))
       const min = CODE_CONTRAST_MIN[theme.id]
-      expect(ratio, `${theme.label} code ${fg} on ${codeBg}（code-c ${mix![1]}% 叠 surface）= ${ratio.toFixed(2)}:1`).toBeGreaterThanOrEqual(min)
+      expect(ratio, `${theme.label} code ${fgRaw} on ${codeBg}（code-c ${bgMix![1]}% 叠 surface）= ${ratio.toFixed(2)}:1`).toBeGreaterThanOrEqual(min)
     }
   })
 })
