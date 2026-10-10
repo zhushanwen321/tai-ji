@@ -1,5 +1,5 @@
 <!--
-  ComposerMetricsAggregate —— composer 底栏「指标」聚合入口（三步聚合序：左簇 → 指标 → 模型+思考，
+  ComposerMetricsAggregate —— composer 底栏「指标」聚合入口（三步聚合序：指标 → 左簇 → 模型+思考，
   累计退化；容量 + TTFT + 速度 + 缓存 四项指标收为单图标按钮）。
 
   形态硬约束（S1–S7）：

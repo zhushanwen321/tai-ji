@@ -105,11 +105,12 @@
           @blur="onBoxFocusOut"
         />
 
-      <!-- 底栏三簇（D6 修订「三步聚合」）：左簇（`+` / 托盘 / 插件 toolbar，shrink-0）·
+      <!-- 底栏三簇（「三步聚合」目标次序 = 指标 → 左簇 → 模型）：左簇（`+` / 托盘 / 插件 toolbar，shrink-0）·
            中簇（可压缩占位）· 右簇（指标 / 模型+思考 / 发送位，shrink-0 且发送位右锚）。
            **flex-nowrap 永不换行**；逐组形态由密度状态机（ResizeObserver 实测两簇占宽 vs 可用宽
-           → composer-density）驱动：序 0 发送位/`+` 不退化不裁剪 · 序 1 左簇收**单图标**聚合按钮 ·
-           序 2 指标 fit 0/1 平铺（纯文本触发器）/ L2 起收**单图标**聚合按钮（hover 聚合页）·
+           → composer-density）驱动：序 0 发送位/`+`/btw 不退化不裁剪 · 序 1 指标 fit 0 平铺
+           （纯文本触发器）/ L1 起收**单图标**聚合按钮（hover 聚合页；右簇信息先让位）·
+           序 2 左簇收**单图标**聚合按钮 ·
            序 3 模型+思考收单图标聚合按钮
            （click 弹层 + hover 行内切换；非聚合态模型名**恒完整展示**，无截断态）·
            顶格仍溢出 → 锚点保护（中部让位）。禁硬编码 px 断点（判据全在实测回路，`»` 省略号入口已退役）。
@@ -149,7 +150,7 @@
                **不卸载**——`update:has-items` 的 emitter 与 useTrayCounts 数据面唯一实例都活在
                本组件内，保护态阈值附近的宽度抖动（拖拽窗口/分屏）每次 protect/unprotect 往返
                若走 v-if 都会重订阅 + 重首拉。
-               aggregated = 序 1 生效：托盘 + 插件 toolbar 收为**单图标**聚合按钮（角标仅运行数数字，
+               aggregated = 序 2 生效：托盘 + 插件 toolbar 收为**单图标**聚合按钮（角标仅运行数数字，
                禁多 icon 重叠），面板内分段展示。
                **可见性不吃 `leftCluster === 'absent'`**：若按「无条目」卸载托盘，emitter 永冻
                false → 切回有条目会话时托盘永不重挂（e2e workflow-sidebar-sync T2 死锁回归）。
@@ -164,7 +165,7 @@
             @update:has-items="onTrayItemsChange"
           />
           <!-- ExtensionHost composer.toolbar 挂载点（audit §12.1，MountPointRegistry composer.toolbar）。
-               展开态渲染（零贡献时 empty=hidden 零 DOM）；序 1 聚合后本处不渲染，同一挂载点 view
+               展开态渲染（零贡献时 empty=hidden 零 DOM）；序 2 聚合后本处不渲染，同一挂载点 view
                改在托盘聚合面板内渲染（仍是同一份缓存）。[HISTORICAL] `»` Ellipsis 溢出菜单已随
                三步聚合退役（底栏不再有省略号入口）。 -->
           <ViewHost
@@ -179,10 +180,10 @@
 
         <!-- 右簇：指标 / 模型+思考 / 发送位（shrink-0，发送位右锚不漂移） -->
         <div data-composer-cluster="right" class="flex min-w-0 shrink-0 items-center gap-1">
-          <!-- 序 2：指标（容量 + TTFT + 速度 + 缓存）。expanded（fit 0/1）= 纯文本触发器平铺
+          <!-- 序 1：指标（容量 + TTFT + 速度 + 缓存）。expanded（fit 0）= 纯文本触发器平铺
                （TTFT / 速度 / 缓存 + 容量，各自 hover 浮层保留为再入路径，demo `.mtr-exp` 同款）；
-               aggregated（L2 起）= **单图标**聚合按钮（hover 弹指标聚合页，容量/TTFT/速度/缓存四卡
-               全量）；absent = 锚点保护让位（不渲染）。landing（无 session）不渲染。 -->
+               aggregated（L1 起，右簇信息先让位）= **单图标**聚合按钮（hover 弹指标聚合页，
+               容量/TTFT/速度/缓存四卡全量）；absent = 锚点保护让位（不渲染）。landing（无 session）不渲染。 -->
           <div
             v-if="sessionId && density.slots.metrics !== 'absent'"
             :class="density.slots.metrics === 'aggregated' ? AGGREGATE_GROUP_CLASS : EXPANDED_GROUP_CLASS"

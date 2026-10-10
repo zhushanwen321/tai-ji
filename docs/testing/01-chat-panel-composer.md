@@ -335,7 +335,7 @@ testid 以组件 template 内 data-testid 属性为准。
 | testid | 所在组件 | 触发/可见条件 |
 |--------|---------|--------------|
 | `composer-bar` | Composer.vue | 恒显；容器 `flex-nowrap`（永不换行）；`data-fit`（0–3）/ `data-anchor-protected` / `data-slot-left-cluster` / `data-slot-metrics` / `data-slot-model-thinking` 与状态机输出同步（形态断言首选用 data 属性） |
-| `composer-metrics-aggregate` | ComposerMetricsAggregate.vue | 有 session 恒渲染（ui-optimize 决策 6 起对所有 fit 级常驻，不依赖 fit 级，`data-slot-metrics` 恒 `aggregated`），仅锚点保护态（`data-anchor-protected` / `data-slot-metrics === 'absent'`）隐藏；单图标指标聚合按钮（hover 弹聚合页） |
+| `composer-metrics-aggregate` | ComposerMetricsAggregate.vue | 序 1 生效（`data-slot-metrics === 'aggregated'`，实测四枚平铺指标放不下；fit 0 保持平铺直挂触发器）；仅锚点保护态（`data-anchor-protected` / `data-slot-metrics === 'absent'`）隐藏；单图标指标聚合按钮（hover 弹聚合页） |
 | `composer-model-thinking-aggregate` | ModelThinkingAggregate.vue | 序 3 生效（`data-slot-model-thinking === 'aggregated'`，实测完整模型名+档位放不下）；单图标模型聚合按钮（click 弹层，hover 行内切换） |
 | [HISTORICAL] `composer-overflow-menu` / `composer-overflow-capacity-metrics` / `composer-capacity-merged` / `composer-model-merged` | — | 已随三步聚合退役（`»` 入口与合流/截断态删除，2026-09-25）——存量测试/脚本再遇这些 id 即为旧代码 |
 
@@ -346,7 +346,7 @@ testid 以组件 template 内 data-testid 属性为准。
 | `composer-tray` | 有 sessionId（panel 态）；landing 态不渲染 |
 | `tray-builtin-button` | built-in 每件一个（`data-kind` = `bash` / `subagent` / `workflow` / `session`，`data-state` = `running` / `idle`） |
 | `tray-builtin-pulse` / `tray-builtin-count` | 该类有进行中（`running > 0`）才渲染（归零不虚亮） |
-| `tray-aggregate-button` | fit L1 生效（实测左簇放不下，`data-slot-left-cluster === 'aggregated'`）且（托盘有条目 或 插件 toolbar 有贡献）；聚合入口 = **单图标** + 运行数数字角标（禁多 icon 重叠） |
+| `tray-aggregate-button` | fit L2 生效（实测左簇放不下，`data-slot-left-cluster === 'aggregated'`）且（托盘有条目 或 插件 toolbar 有贡献）；聚合入口 = **单图标** + 运行数数字角标（禁多 icon 重叠） |
 | `tray-aggregate-pulse` / `tray-aggregate-count` | 聚合态且有运行中 |
 | `tray-aggregate-panel` / `tray-aggregate-section-{kind}` / `tray-aggregate-count-{kind}` | 聚合面板内分段展示全部类别 |
 | `tray-session-panel` / `tray-session-header` / `tray-session-row` / `tray-session-dot` / `tray-session-meta` / `tray-session-empty` | 第 4 件「子会话」面板（扁平列表，非分桶槽）：数据 = `parentAgentSessionId === 当前 sessionId`；行内操作仅 pin 态（打开 / 停止两段确认，停止 testid = `tray-session-stop` 与确认态 `tray-session-stop-confirm`） |

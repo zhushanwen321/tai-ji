@@ -4,7 +4,7 @@
  * composer-density 纯状态机单测（D6 修订「三步聚合」版）。
  *
  * 覆盖（穷举 = 本模块的 100% 行覆盖承诺）：
- * - fit 级归一（NaN / 负 / 越界 / 取整）与三步累计映射（L1 左簇 / L2 指标 / L3 模型+思考）。
+ * - fit 级归一（NaN / 负 / 越界 / 取整）与三步累计映射（L1 指标 / L2 左簇 / L3 模型+思考）。
  * - 能力标志：托盘全无 + 插件零贡献 → `leftCluster: 'absent'`（不留死入口）；任一有内容 → 可聚合。
  * - 锚点保护：仅 L3 顶格生效；左簇/指标让位，模型聚合按钮与序 0 锚点恒在。
  * - **构造性回归防线**：模型形态域只有 `expanded`（完整名）/ `aggregated` 两态——穷举矩阵断言
@@ -84,16 +84,16 @@ describe('三步累计映射（fit 级 → 形态）', () => {
     expect(layout.allowsWrap).toBe(false)
   })
 
-  it('L1 只聚合左簇；L2 再聚合指标；L3 再聚合模型+思考（前缀累计）', () => {
-    const l1 = resolveComposerDensity({}, COMPOSER_FIT_LEVEL_LEFT_AGGREGATE)
+  it('L1 只聚合指标；L2 再聚合左簇；L3 再聚合模型+思考（前缀累计）', () => {
+    const l1 = resolveComposerDensity({}, COMPOSER_FIT_LEVEL_METRICS_AGGREGATE)
     expect(l1.slots).toMatchObject({
-      leftCluster: 'aggregated',
-      metrics: 'expanded',
+      leftCluster: 'expanded',
+      metrics: 'aggregated',
       modelThinking: 'expanded',
     })
-    expect(l1.appliedOrders).toEqual([COMPOSER_DEGRADATION_ORDER.LEFT_CLUSTER_AGGREGATE])
+    expect(l1.appliedOrders).toEqual([COMPOSER_DEGRADATION_ORDER.METRICS_AGGREGATE])
 
-    const l2 = resolveComposerDensity({}, COMPOSER_FIT_LEVEL_METRICS_AGGREGATE)
+    const l2 = resolveComposerDensity({}, COMPOSER_FIT_LEVEL_LEFT_AGGREGATE)
     expect(l2.slots).toMatchObject({
       leftCluster: 'aggregated',
       metrics: 'aggregated',
@@ -124,10 +124,11 @@ describe('能力标志（不留死入口）', () => {
     }
   })
 
-  it('托盘全无但插件有贡献 → 左簇仍可达（L0 展开 / L1+ 聚合）', () => {
+  it('托盘全无但插件有贡献 → 左簇仍可达（L0/L1 展开 / L2+ 聚合）', () => {
     const caps: ComposerDensityCapabilities = { hasTrayItems: false, pluginToolbarContributionCount: 1 }
     expect(resolveComposerDensity(caps, 0).slots.leftCluster).toBe('expanded')
-    expect(resolveComposerDensity(caps, 1).slots.leftCluster).toBe('aggregated')
+    expect(resolveComposerDensity(caps, 1).slots.leftCluster).toBe('expanded')
+    expect(resolveComposerDensity(caps, 2).slots.leftCluster).toBe('aggregated')
   })
 
   it('贡献数非正数一律视为零贡献；缺省 hasTrayItems = true', () => {
