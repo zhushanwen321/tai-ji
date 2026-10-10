@@ -111,20 +111,17 @@
         <p class="text-[length:var(--text-xs)] text-neutral-dim opacity-55">{{ t('sidebar.fileView.noFile') }}</p>
       </div>
 
-      <!-- 文件树：virtua 挂扁平行（可见行 = projectVisibleRows 投影；itemProps 宽度 max-content
-           使长文件名撑开横向滚动，minWidth 100% 保短行 hover 铺满容器——实测量化见 W28 汇报探针）。
-           【登记：demo .fname 截断 + hover 滚动契约（workbench.css .fname-scroll/.fname-roll）与本宽度模型
-           互斥，不实施】demo 契约前提 = 行宽 ≤ 容器宽且名称可截断；本处行宽 = max-content（名称无宽度
-           上限，长名可见性由整树横滚等价承接，W28 实测架构）——truncate 在 w-max 行内永不触发为死类，
-           实施截断须推翻该架构。差异待用户裁决：改横滚为截断 + 滚动，或维持横滚豁免（m1-sidebar.md 跳 3
-           同源登记）。待裁决期间任何修复波次不得给树行名称补 truncate/hover 滚动。
+      <!-- 文件树：virtua 挂扁平行（可见行 = projectVisibleRows 投影）。2026-10-10 用户裁决
+           （「长文件名不做横向滚动，用省略号+悬停展示」）落定 demo .fname 契约：行宽 = 100%
+           容器宽，名称超宽截断（FileTreeRow 的 fname-scroll/fname-roll 契约类承接悬停滚动）；
+           原 max-content 整树横滚架构退役（旧互斥登记作废）。
            注意：<template #default> 内禁止放注释/文本节点——virtua 的 item key 提取要求 slot 返回
            恰好 1 个 vnode（P(): e.length===1 才取 e[0].key），注释节点会 fallback 索引 key。 -->
       <Virtualizer
         v-else
         :data="visibleRows"
         :item-size="ROW_HEIGHT_ESTIMATE"
-        :item-props="() => ({ style: { width: 'max-content', minWidth: '100%' } })"
+        :item-props="() => ({ style: { width: '100%' } })"
         :key="props.sessionId"
       >
         <template #default="{ item }">

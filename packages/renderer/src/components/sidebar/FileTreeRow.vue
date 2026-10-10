@@ -49,7 +49,7 @@
          行高必须 px 定高 h-[24px]：h-6=1.5rem 在 html 14px 基准（style.css --text-base）下=21px，缺 3px -->
     <div
       v-else-if="row.type === 'dir'"
-      class="flex h-[24px] w-max min-w-full cursor-default select-none items-center gap-[5px] rounded-sm py-0.5 pr-2 font-mono text-[length:var(--text-xs)] text-neutral-mid transition-colors hover:bg-surface-hover hover:text-neutral-fg"
+      class="flex h-[24px] w-full cursor-default select-none items-center gap-[5px] rounded-sm py-0.5 pr-2 font-mono text-[length:var(--text-xs)] text-neutral-mid transition-colors hover:bg-surface-hover hover:text-neutral-fg"
       :style="rowPaddingStyle"
       :data-testid="`file-tree-dir-${row.path}`"
       @click="emit('toggle', row)"
@@ -61,7 +61,12 @@
         />
       </span>
       <Folder class="size-[13px] shrink-0 text-neutral-dim" />
-      <span class="shrink whitespace-nowrap" :class="row.ignored ? 'text-neutral-dim italic' : ''">{{ row.name }}</span>
+      <span
+        class="fname-scroll block flex-1 min-w-0 overflow-hidden whitespace-nowrap text-ellipsis hover:text-clip [container-type:inline-size]"
+        :class="row.ignored ? 'text-neutral-dim italic' : ''"
+      >
+        <span class="fname-roll inline-block w-max align-top">{{ row.name }}</span>
+      </span>
       <!-- W2 目录改动数徽章（子树改动文件数，>0 才显；预聚合 count 由投影预计算）。
            形态 = demo .fbadge（10px / card-inset 凹陷底 / radius-xs / 1×5 padding） -->
       <span
@@ -75,7 +80,7 @@
          选中态 = demo Tier B 行类范式（.frow.sel 无底无框，仅文字提亮 fg + fw-mid）。 -->
     <div
       v-else
-      class="flex h-[24px] w-max min-w-full cursor-default select-none items-center gap-[5px] rounded-sm py-0.5 pr-2 font-mono text-[length:var(--text-xs)] text-neutral-mid transition-colors hover:bg-surface-hover hover:text-neutral-fg"
+      class="flex h-[24px] w-full cursor-default select-none items-center gap-[5px] rounded-sm py-0.5 pr-2 font-mono text-[length:var(--text-xs)] text-neutral-mid transition-colors hover:bg-surface-hover hover:text-neutral-fg"
       :class="{ 'text-neutral-fg': selected }"
       :style="rowPaddingStyle"
       :data-testid="`file-tree-file-${row.path}`"
@@ -85,12 +90,14 @@
       <span :class="chevronSlotClass" data-testid="chevron-slot" />
       <component :is="fileIcon" class="size-[13px] shrink-0" :class="fileIconColor" />
       <span
-        class="shrink whitespace-nowrap"
+        class="fname-scroll block flex-1 min-w-0 overflow-hidden whitespace-nowrap text-ellipsis hover:text-clip [container-type:inline-size]"
         :class="[
           row.ignored ? 'text-neutral-dim italic' : '',
           selected ? 'text-neutral-fg [font-weight:var(--fw-mid)]' : '',
         ]"
-      >{{ row.name }}</span>
+      >
+        <span class="fname-roll inline-block w-max align-top">{{ row.name }}</span>
+      </span>
       <!-- git overlay 角标（D-012 树/标注分离：从投影的 row.gitStatus 取 status）。
            形态 = demo .gmark（10px fw-mid / radius-xs / 1×5 padding / 语义软底） -->
       <span
@@ -219,3 +226,19 @@ const fileIconColor = computed(() => {
   }
 })
 </script>
+
+<style scoped>
+/* 长文件名三要素（R6.1：截断 + hover 滚动展示全文；demo workbench.css .fname-scroll/.fname-roll
+   契约类逐值对齐，2026-10-10 用户裁决落定——原 max-content 整树横滚架构退役）：
+   布局属性走模板 Tailwind 工具类（ellipsis 截断 + [container-type:inline-size] 容器查询封
+   width 基准，cqw = 名称可见宽）；此处只留动画层——hover 时 ellipsis 让位滚动
+   （hover:text-clip），内层 w-max 持全文，0.35s 延迟防误触，2.4s 匀速滚到
+   「全文末对齐容器右缘」停住（短名不滚）；移出复位（动画卸载）；reduced-motion 停。 */
+.fname-scroll:hover .fname-roll { animation: fname-roll-x 2.4s var(--ease-out) 0.35s forwards; }
+@keyframes fname-roll-x {
+  to { transform: translateX(min(0px, calc(-100% + 100cqw))); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .fname-scroll:hover .fname-roll { animation: none; }
+}
+</style>
