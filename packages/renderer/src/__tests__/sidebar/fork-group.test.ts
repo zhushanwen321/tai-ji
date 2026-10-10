@@ -20,7 +20,7 @@
  */
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { nextTick } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
@@ -137,7 +137,7 @@ describe('R1: ForkGroup 组件退役', () => {
 
 // ── R2：扁平列表不丢行 ───────────────────────────────────────
 describe('R2: 分支会话仍在扁平列表各占一行', () => {
-  it('父 + 分支 = 两行；分支行标题与「fork 自 <父名>」血缘均可见', () => {
+  it('父 + 分支 = 两行；列表单行（标题+时间），血缘/分支/cwd 不再上列表行', () => {
     const parent = makeSession({ id: 'sess-parent', label: '主线会话', sessionFile: PARENT_FILE })
     const branch = makeSession({ id: 'sess-branch', label: '探索方案 A', parentSession: PARENT_FILE })
     const wrapper = mountList([parent, branch], 'sess-parent')
@@ -146,8 +146,31 @@ describe('R2: 分支会话仍在扁平列表各占一行', () => {
     expect(wrapper.findAll('.session-item')).toHaveLength(2)
     expect(wrapper.text()).toContain('主线会话')
     expect(wrapper.text()).toContain('探索方案 A')
-    // 血缘展示保留（SessionItem sub 行，D9 未迁移该能力——它原本就在通用行）
-    expect(wrapper.text()).toContain('fork 自 主线会话')
+    // 单行化（demo .si，用户裁决 2026-10-10）：列表行只有标题+时间，
+    // 血缘/分支/cwd 副行退役——元信息归 hover 详情卡（下方血缘卡片用例）
+    expect(wrapper.text()).not.toContain('fork 自 主线会话')
+    expect(wrapper.find('[data-testid="sidebar-session-sub"]').exists()).toBe(false)
+  })
+
+  it('hover 详情卡展示「fork 自 <父名>」血缘行', async () => {
+    vi.useFakeTimers()
+    const branch = makeSession({ id: 'sess-branch', label: '探索方案 A', parentSession: PARENT_FILE, parentLabel: '主线会话' })
+    const wrapper = mount(SessionItem, {
+      attachTo: document.body,
+      props: { session: branch, active: false, status: 'done' as never },
+    })
+    await wrapper.find('.session-item').trigger('pointerenter')
+    // HoverCardRoot openDelay 700ms（reka-ui），fake timers 推进后 open
+    vi.advanceTimersByTime(700)
+    await nextTick()
+
+    const card = document.body.querySelector('[data-testid="session-detail-card"]')
+    expect(card).not.toBeNull()
+    // textContent 拼接去 span 间空白：标签与值分断言
+    expect(card?.textContent).toContain('fork 自')
+    expect(card?.textContent).toContain('主线会话')
+    wrapper.unmount()
+    vi.useRealTimers()
   })
 })
 

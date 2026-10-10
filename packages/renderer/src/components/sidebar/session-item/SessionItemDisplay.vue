@@ -1,6 +1,7 @@
 <template>
   <!--
-    SessionItem 条目展示子块：7px 状态 icon + unread 圆点 + label + 徽标 + sub 元信息 + 时间。
+    SessionItem 条目展示子块：7px 状态 icon + unread 圆点 + label + 徽标 + 时间（单行，
+    demo .si 形态——分支/cwd/fork 血缘等元信息归 hover 详情卡展示，列表行不占副行）。
     纯展示（零 emit）：unread / markedDone / fresh 徽标读模块级响应式集合，
     toggle 由 Actions 子组件执行，此处响应式自动跟随。
     状态信号集中在左侧 7px 单一 icon（旋转箭头/空心圆/实心圆/空白），
@@ -60,18 +61,6 @@
         :class="freshImportState === 'fading' ? 'opacity-0' : ''"
       >{{ t('importSession.freshBadge') }}</span>
     </div>
-    <div
-      class="mt-0.5 truncate font-mono text-[length:var(--text-3xs)] leading-[1.3] text-neutral-dim"
-      data-testid="sidebar-session-sub"
-    >
-      <!-- 分支血缘元信息（spec §8.5：分支 session 自身显示「↑ fork 自 <父名>」）优先；
-           无血缘则显 branch（git 分支）；都无则回退 cwd 末段，避免空行。 -->
-      <template v-if="session.parentSession">
-        <span class="fork-lineage text-accent/80">{{ t('sidebar.sessionItem.forkFrom') }} {{ session.parentLabel || session.parentSession }}</span>
-      </template>
-      <template v-else-if="session.gitBranch">{{ session.gitBranch }}</template>
-      <template v-else>{{ dirName }}</template>
-    </div>
   </div>
 
   <!-- 右侧：子会话计数 chip（描边 + 层叠图标 + 数字；仅父条目有子会话时渲染，只读中性色，
@@ -96,7 +85,6 @@ import { useI18n } from 'vue-i18n'
 import { Layers } from '@lucide/vue'
 import type { DerivedStatus } from '@/types'
 import { formatRelativeTime } from '@/composables/logic/formatTime'
-import { dirNameOf } from '@taiji/ui'
 import { isUnread, isMarkedDone } from '@/composables/useSessionMarkers'
 import { unreadByBranch } from '@/composables/features/fork-handoff/useForkBranchNotify'
 import { isImportedFresh } from '@/composables/features/sidebar/useImportSession'
@@ -167,10 +155,6 @@ const iconKind = computed<IconKind>(() => {
       return 'done'
   }
 })
-
-/** 工作目录名（cwd 末段），长路径只显末段防溢出（dirNameOf 收敛到 logic/path SSOT）。
- *  仅在无 fork 血缘且无 gitBranch 时作为副标题兜底（避免空行）。 */
-const dirName = computed(() => dirNameOf(props.session.cwd))
 
 /** 时间格式化：复用 logic 层相对时间纯函数（同一信息原子） */
 const timeLabel = computed(() => formatRelativeTime(props.session.lastActiveAt))

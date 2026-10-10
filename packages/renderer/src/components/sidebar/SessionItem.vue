@@ -59,6 +59,15 @@
         :style="detailStyle"
       >
         <div class="flex flex-col divide-y divide-hairline">
+          <!-- fork 血缘（原列表行 sub 信息随单行化迁入卡片：spec §8.5「↑ fork 自 <父名>」） -->
+          <div v-if="session.parentSession" class="flex items-baseline gap-2 py-[5px]">
+            <span class="shrink-0 text-[length:var(--text-xs)] text-neutral-dim">
+              {{ t('sidebar.sessionItem.forkFrom') }}
+            </span>
+            <span class="min-w-0 break-all font-mono text-[length:var(--text-xs)] text-neutral-fg-2">
+              {{ session.parentLabel || session.parentSession }}
+            </span>
+          </div>
           <div v-if="session.gitBranch" class="flex items-baseline gap-2 py-[5px]">
             <span class="shrink-0 text-[length:var(--text-xs)] text-neutral-dim">
               {{ t('sidebar.sessionItem.detailBranch') }}
