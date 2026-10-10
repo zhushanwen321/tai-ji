@@ -52,7 +52,7 @@
             ref="inputRef"
             v-model="query"
             data-testid="search-input"
-            class="h-8 border-0 bg-transparent px-0 text-[length:var(--text-base)] shadow-none focus-visible:ring-0"
+            class="h-8 border-0 bg-transparent px-0 text-[length:var(--text-base)] shadow-none focus-visible:ring-0 focus-visible:outline-none"
             :placeholder="t('search.placeholder')"
             @keydown="onKeydown"
           />
