@@ -5,7 +5,7 @@
 ## 待用户裁决
 
 1. **朱印主题行内代码对比度 3.92:1**：demo 权威值朱印 `--code-c #9a6b40`（亮色 7% 叠底）实测 3.92:1，低于旧 ≥4:1 断言线；contrast 单测已按 demo 值锚定 3.9 下限 + hex 双锁。选项：接受 3.92:1 为该主题终态（现状）/ 放宽 demo 朱印 code-c。
-2. **M8 扩展宿主面（StatusBar/L2TabBar/CompanionBand）**：demo 产品页无此面（HostFace 为存档页），本波未做权威对齐；L2TabBar 仅随裸 border 根修间接获益。待有 demo 权威后单开波次。
+2. **M8 扩展宿主面（StatusBar/L2TabBar/CompanionBand）**：demo 产品页无此面（HostFace 为存档页）。2026-10-10 真机核实渲染条件：StatusBar 由 pi 扩展调用 `setStatus` API（status-set 事件链）贡献条目，当前全仓零调用方 → 设计内零 DOM（PanelContainer 挂载位 = 主面板底部 26px 横带，见该文件 249 行）；demo 亦无此面对照。已顺手清掉 X1 登记的四死类（StatusBar/Card elevated 头/TabBar 激活项/FindBar 的 `bg-elevated` → `bg-bg-elevated`，模块地图 X1 全部关闭）。待有扩展真实消费或 demo 权威后单开波次。
 4. **指标槽密度逆转登记**：本波按 demo 终态恢复了 fit 0/1 平铺四 chip（U11 曾按当期 demo 裁决退役平铺改全档聚合）；fit 2/3 聚合与容量顶缘细条保留。两期 demo 形态不同，以 2026-10-09 demo 终态为准。
 
 ## 已裁决/登记即关闭
