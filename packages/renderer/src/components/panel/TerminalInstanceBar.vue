@@ -84,7 +84,7 @@
         <!-- 关闭叉常驻（可发现性）；最后实例禁用同色降透明并明示不可关（demo .inst-x:disabled） -->
         <Button
           variant="ghost"
-          class="mr-0.5 size-5 shrink-0 rounded-[var(--radius-xs)] p-0 [&_svg]:size-[11px]"
+          class="size-5 shrink-0 rounded-[var(--radius-xs)] p-0 [&_svg]:size-[11px]"
           :class="
             closeDisabled
               ? 'text-neutral-dim disabled:opacity-[0.4]'
@@ -97,7 +97,7 @@
           :title="closeDisabled ? t('panel.terminal.instanceCloseDisabled') : t('panel.terminal.instanceClose')"
           @click.stop="onClose(inst.terminalId)"
         >
-          <X class="size-[11px]" />
+          <X class="size-[11px]" stroke-width="1.8" />
         </Button>
       </div>
     </div>
@@ -111,7 +111,7 @@
         :title="t('panel.terminal.instanceCreate')"
         @click="onCreate"
       >
-        <Plus class="size-3.5" />
+        <Plus class="size-3.5" stroke-width="1.8" />
       </Button>
       <Button
         variant="ghost"
@@ -121,7 +121,7 @@
         :title="t('panel.terminal.collapse')"
         @click="emit('collapse')"
       >
-        <ChevronDown class="size-3.5" />
+        <ChevronDown class="size-3.5" stroke-width="1.8" />
       </Button>
     </div>
   </div>

@@ -7,15 +7,15 @@
     badge 列恒对齐）；点击整行 = 选中 + 展开/收起（chevron 无独立点击目标）。
     状态语义：
     - 影子化（shadowed）：降透明（demo .tr-row.shadowed opacity .42），hover 恢复。
-    - 选中态（demo workbench.css「选中态单一范式」行类：elevated 浮起底 + fg 字 +
-      左侧 2px accent 内嵌条）；行 headline 常态 = neutral-mid（demo .trow color: mid）。
+    - 选中态 = demo Tier B 行类范式（.trow 选中无底无框，仅文字提亮 fg + fw-mid）；
+      行 headline 常态 = neutral-mid（demo .trow color: mid）。
     - MALFORMED headline 走 i18n（core headline 是数据提取，损坏行文案归 UI 层）。
   -->
   <div
     class="flex cursor-pointer select-none items-center gap-2 rounded-sm px-2 py-[5px] transition-colors duration-[var(--duration-fast)] ease-[var(--ease)] hover:bg-surface-hover"
     :class="[
       row.shadowed ? 'opacity-40 hover:opacity-75' : '',
-      selected ? 'bg-bg-elevated shadow-[inset_2px_0_0_var(--accent)] hover:bg-bg-elevated' : '',
+      selected ? 'text-neutral-fg' : '',
     ]"
     :data-testid="`trace-row-${row.seq}`"
     :data-kind="row.kind"
@@ -47,10 +47,10 @@
       :class="KIND_BADGE_CLASS[row.kind]"
     >{{ row.kind }}</span>
     <span v-if="time" class="shrink-0 font-mono text-[length:var(--text-2xs)] tabular-nums text-neutral-faint">{{ time }}</span>
-    <!-- headline 常态 = neutral-mid（demo .trow color: mid），选中范式提 fg -->
+    <!-- headline 常态 = neutral-mid（demo .trow color: mid），选中范式（Tier B）提 fg + fw-mid -->
     <span
       class="min-w-0 flex-1 truncate text-[length:var(--text-xs)]"
-      :class="selected ? 'text-neutral-fg' : 'text-neutral-mid'"
+      :class="selected ? 'text-neutral-fg [font-weight:var(--fw-mid)]' : 'text-neutral-mid'"
     >
       <!-- [RD-2#6] 损坏行行号未知（协议/版本漂移防御）：显示「行号未知」，不伪装成「第 0 行」 -->
       <template v-if="row.kind === 'MALFORMED'">{{

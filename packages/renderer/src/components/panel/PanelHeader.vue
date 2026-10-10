@@ -137,9 +137,10 @@
            消失——landing 态也开终端区，与原 StatusBar 按钮行为对齐）。 -->
       <TerminalToggleButton />
       <!-- SideDrawer toggle（always-visible）。demo 形态：30×30 钮 + 17px 图标（--hb-btn/--hb-icon），
-           开态无选中视觉（demo 选中态范式不含卡头开关钮），开关反馈由抽屉面板本身承担。 -->
+           开态无选中视觉（demo 选中态范式不含卡头开关钮），开关反馈由抽屉面板本身承担。
+           折叠态恒显（demo .app.folded 隐藏规则不波及 .tbtn 开关钮）：折叠后侧栏消失，
+           本钮是右抽屉唯一鼠标入口，隐藏即鼠标路径无法开右抽屉。 -->
       <Button
-        v-if="!showChrome"
         variant="ghost"
         size="icon"
         class="size-[30px] rounded-sm text-neutral-dim hover:bg-surface-hover hover:text-neutral-fg [-webkit-app-region:no-drag]"
@@ -158,7 +159,7 @@
  
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { PanelLeftOpen, PanelLeftClose, PanelRight, ArrowLeft, ArrowRight, Plus, RefreshCw, ArrowUpCircle, Hourglass, Wrench, Zap, CheckCircle2, Ban, AlertCircle, FileText, Check } from '@lucide/vue'
+import { PanelLeftOpen, PanelLeftClose, PanelRight, ArrowLeft, ArrowRight, Plus, RefreshCw, ArrowUpCircle, Hourglass, Wrench, Zap, Ban, AlertCircle, FileText, Check } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import { useNavigationStore } from '@/stores/navigation'
 import { useSidebarStore } from '@/stores/sidebar'
@@ -237,7 +238,7 @@ const ICON_COMPONENTS: Record<string, unknown> = {
   Hourglass,
   Wrench,
   Zap,
-  CheckCircle2,
+  Check,
   Ban,
   AlertCircle,
 }

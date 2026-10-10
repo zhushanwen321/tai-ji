@@ -10,19 +10,20 @@
  */
 import type { GenStatsCacheMiss } from '@taiji/shared'
 
-/** 缓存命中率语义色三档阈值（设计 §3.1：≥80 success / 50–80 warn / <50 danger） */
+/** 缓存命中率语义色三档阈值（demo ComposerBar cacheCls 对齐：≥80 success / 50–80 中性 /
+ *  <50 warn——中档是「正常波动」非告警，低档才值得提醒，均非 danger 级） */
 const CACHE_SUCCESS_THRESHOLD = 80
 const CACHE_WARN_THRESHOLD = 50
 
-/** 缓存命中率的语义色档（neutral = 无值 / 归因态，非故障） */
+/** 缓存命中率的语义色档（neutral = 无值 / 归因态 / 50–80 中性档） */
 export type CacheTier = 'success' | 'warn' | 'danger' | 'neutral'
 
 /** 数值 → 语义色档（null = 无数据 → neutral；归因态由调用方强制 neutral） */
 export function cacheTierOf(v: number | null | undefined): CacheTier {
   if (v == null) return 'neutral'
   if (v >= CACHE_SUCCESS_THRESHOLD) return 'success'
-  if (v >= CACHE_WARN_THRESHOLD) return 'warn'
-  return 'danger'
+  if (v >= CACHE_WARN_THRESHOLD) return 'neutral'
+  return 'warn'
 }
 
 /** 档 → 前景色 token 工具类（指标卡行共用） */

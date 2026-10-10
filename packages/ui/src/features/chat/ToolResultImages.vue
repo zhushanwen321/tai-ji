@@ -21,7 +21,7 @@
         :src="thumbSrc(item.path)"
         :alt="`tool-result-${i + 1}`"
         data-testid="tool-image"
-        class="tool-image max-h-[120px] max-w-[200px] rounded-md border border-[var(--border-neutral-dim)] object-cover"
+        class="tool-image max-h-[120px] max-w-[200px] rounded-md border border-neutral-dim object-cover"
         @error="onImgError(i)"
       />
       <span

@@ -48,7 +48,8 @@
          drawer 打开时 main width 动画到拆分比例、内容列恒撑满；handle 拖动（pointer capture
          跟手，拖动期间 transition:none）+ 键盘微调 + localStorage 持久化。
          drawer wrapper 常驻（width 0 ↔ drawerPct%）承载 width 动画；DrawerPanel 内部 aside
-         Transition（淡入右移）与 wrapper width 动画同时长（--duration-slow），叠加和谐。
+         Transition（淡入右移）走 E5 显隐层独立参数（--duration 分向缓动，见 DrawerPanel style），
+         与壳层 width 过渡（--duration-slow）分层各自独立——demo 权威即两层不同时长。
          [HISTORICAL] taiji:splitter-layout 派发已随消费方退役（终态同步 2026-10-03）：
          原「拖动/键盘直发 + 开合动画 rAF 逐帧派发（BrowserPane 侧 33ms 节流）」的消费方
          useBrowserRectSync 已随 BrowserPane 迁浮层视口删除监听（§7.3：不造无人读的事件），
@@ -99,7 +100,7 @@
         role="separator"
         aria-orientation="vertical"
         tabindex="0"
-        class="relative w-1 shrink-0 cursor-col-resize touch-none select-none [&:focus-visible>div]:bg-border-strong"
+        class="group relative w-1 shrink-0 cursor-col-resize touch-none select-none [&:focus-visible>div]:bg-border-strong"
         :data-state="isDragging ? 'drag' : undefined"
         data-testid="drawer-resize-handle"
         @pointerdown="onHandlePointerDown"
@@ -109,7 +110,7 @@
         @keydown="onHandleKeydown"
       >
         <div
-          class="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-transparent transition-colors duration-[var(--duration-fast)] ease-[var(--ease)] group-hover:bg-border-strong hover:bg-border-strong data-[state=drag]:bg-accent"
+          class="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-transparent transition-colors duration-[var(--duration-fast)] ease-[var(--ease-out)] group-hover:bg-border-strong hover:bg-border-strong data-[state=drag]:bg-accent"
           :data-state="isDragging ? 'drag' : undefined"
         />
       </div>
@@ -119,7 +120,7 @@
       <div
         data-fs-scope="drawer"
         class="relative h-full min-w-0 overflow-hidden"
-        :class="splitTransitionClass"
+        :class="[splitTransitionClass, DRAWER_FOCUS_SCOPE]"
         :style="{ width: drawerOpen ? `${drawerPct}%` : '0%' }"
         data-testid="drawer-area"
         :data-find-surface="drawerOpen ? 'right-drawer' : undefined"
@@ -199,7 +200,7 @@
     <div
       data-testid="bottom-drawer"
       class="relative shrink-0 overflow-hidden"
-      :class="bottomTransitionClass"
+      :class="[bottomTransitionClass, DRAWER_FOCUS_SCOPE]"
       :style="{ height: bottomHeightStyle, marginTop: '4px' }"
       :data-find-surface="bottomOpen ? 'bottom-drawer' : undefined"
     >
@@ -211,7 +212,7 @@
         role="separator"
         aria-orientation="horizontal"
         tabindex="0"
-        class="absolute inset-x-0 -top-1 z-10 h-1 cursor-row-resize touch-none select-none [&:focus-visible>div]:bg-border-strong"
+        class="group absolute inset-x-0 -top-1 z-10 h-1 cursor-row-resize touch-none select-none [&:focus-visible>div]:bg-border-strong"
         :data-state="isBottomDragging ? 'drag' : undefined"
         data-testid="bottom-drawer-resize-handle"
         @pointerdown="onBottomHandlePointerDown"
@@ -221,7 +222,7 @@
         @keydown="onBottomHandleKeydown"
       >
         <div
-          class="absolute inset-x-0 bottom-0 h-px bg-transparent transition-colors duration-[var(--duration-fast)] ease-[var(--ease)] hover:bg-border-strong data-[state=drag]:bg-accent"
+          class="absolute inset-x-0 bottom-0 h-px bg-transparent transition-colors duration-[var(--duration-fast)] ease-[var(--ease-out)] group-hover:bg-border-strong hover:bg-border-strong data-[state=drag]:bg-accent"
           :data-state="isBottomDragging ? 'drag' : undefined"
         />
       </div>
@@ -230,7 +231,7 @@
            事件顺序语义，无定时兜底）。Transition 直接子项用无 key 包装层：retry 的 :key 重挂
            留在内层，chunk 重试换件不经 leave/enter 过渡（chunk 失败占位链断言面不变）。 -->
       <Transition name="bottom-drawer-content">
-        <div v-if="bottomOpen" class="h-full overflow-hidden rounded-[var(--radius-card)] border border-border bg-surface shadow-[var(--shadow-1)]">
+        <div v-if="bottomOpen" class="h-full overflow-hidden rounded-[var(--radius-card)] border border-border bg-surface shadow-[var(--shadow-1)]" :class="DRAWER_FOCUS_SCOPE">
           <TerminalView
             :key="terminalRetryKey"
             :session-id="panelSessionId"
@@ -337,6 +338,18 @@ const WorkflowTab = defineAsyncComponent({
 })
 
 const { t } = useI18n()
+
+// R3 抽屉域焦点收敛（ui-replica MF-1-51，demo drawers.css .rd/.bd「元素级重置收窄到抽屉根」）：
+// input 聚焦零框（光标即反馈）。MF-1-71 后全局 Input 聚焦走 outline 通道，抽屉域须双属性
+// 同压——shadow-none 压 ring/box-shadow 通道 + outline-none 压 outline 通道（漏一即穿）；
+// button 键盘焦点 = inset 1px --border-strong（ring-0 + ring-offset-0 归零 ui Button
+// 的 ring 变量；renderer Button 的 shadow 双环被同特异性更高形态整体替换为 inset shadow）。
+// 挂载层：drawer-area（右抽屉 FindBar surface）、底抽屉内容区（TerminalView 实例条）、
+// bottom-drawer 壳（底抽屉 FindBar surface）；右抽屉内部（L1 栏/关闭钮/BtwPanel/DetailPane）
+// 由 DrawerPanel aside 根同款作用域承接。本层不罩 [tabindex]（防误伤底抽屉 handle 与
+// xterm 内部可聚焦元素；抽屉内 role=tab 后代由 aside 层覆盖）。
+const DRAWER_FOCUS_SCOPE =
+  '[&_input:focus-visible]:shadow-none [&_input:focus-visible]:outline-none [&_button:focus-visible]:ring-0 [&_button:focus-visible]:ring-offset-0 [&_button:focus-visible]:shadow-[inset_0_0_0_1px_var(--border-strong)]'
 
 const panel = usePanelStore()
 const session = useSessionStore()
@@ -517,13 +530,15 @@ const {
  * 壳 height 过渡（--duration-slow）收拢期间内容不同帧消失——leave 期保持挂载并随壳淡出，
  * 卸载时机 = leave 过渡结束（Vue Transition 事件顺序语义，无定时兜底）。leave-active 加
  * absolute inset-0：收拢中的离场内容不占文档流（leave 未完即重开时新旧内容不叠流）。
- * 淡出走 opacity 且与壳 height 过渡同参数同时长（收拢与淡出同步收束）；reduced-motion
- * 全局兜底保留 opacity 过渡（style.css「更少更温和」非零裁决）。
+ * 淡出走 opacity：E5 关方向 ease-in，时长 = demo --dur-base（与壳层 height 过渡
+ * --duration-slow 分层各自独立，demo 两层时长本就不同），消费令牌层既有 --duration
+ * （值 200ms 与 demo --dur-base 同值，MF-2-17 收编，不新增 --duration-base 重复令牌）；
+ * reduced-motion 全局兜底保留 opacity 过渡（style.css「更少更温和」非零裁决）。
  */
 .bottom-drawer-content-leave-active {
   position: absolute;
   inset: 0;
-  transition: opacity var(--duration-slow) var(--ease);
+  transition: opacity var(--duration) var(--ease-in);
 }
 
 .bottom-drawer-content-leave-from {

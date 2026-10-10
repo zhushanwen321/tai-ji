@@ -58,7 +58,7 @@
           :title="t('panel.sideDrawer.close')"
           @click.stop="closeTab(tab.path)"
         >
-          <X class="!size-[11px]" />
+          <X class="!size-[11px]" stroke-width="1.8" />
         </Button>
       </div>
     </div>

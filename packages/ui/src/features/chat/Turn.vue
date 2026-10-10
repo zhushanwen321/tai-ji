@@ -10,8 +10,17 @@
   -->
   <!-- 根元素 content-col（居中 + 封顶 --content-max-w，720px 内容列原语）：整 turn 居中（spec §6.1 R4）。
        轮次节奏（demo workbench.css 权威值）：gap-3 = 用户气泡→轮头 12px 紧凑档（.blk:has(+ .blk-compact)）；
-       pb-5 = 轮边界 20px（--blk-gap，唯一边界贡献——TurnSummary 悬浮化后 trace 无 mb、占位零高度）。 -->
-  <div class="content-col flex flex-col gap-3 pb-5" :data-testid="`turn-${turn.index}`">
+       pb-5 = 轮边界 20px（--blk-gap，唯一边界贡献——TurnSummary 悬浮化后 trace 无 mb、占位零高度）。
+       [MF-1-33]（demo .blk:last-child margin-bottom:0，workbench.css:314）：末位 turn 去 pb-5——
+       末轮底部留白只剩滚动容器的 24px（MessageStream pb-[24px]），非历史轮保持 20px 轮边界。
+       [MF-1-35]（demo .blk scroll-margin-top:8px，workbench.css:313）：scrollIntoView 落点让出
+       悬挂时间戳（DOM scrollIntoView 通路生效；virtua scrollToIndex 不读 scroll-margin，
+       其落点补偿归 virtua API 侧）。 -->
+  <div
+    class="content-col flex flex-col gap-3 [scroll-margin-top:8px]"
+    :class="isLastTurn ? '' : 'pb-5'"
+    :data-testid="`turn-${turn.index}`"
+  >
     <!-- user 区：UserBubble 子组件 -->
     <UserBubble
       v-if="turn.user"
@@ -601,20 +610,28 @@ const showStreamingCursor = computed(() => {
 </script>
 
 <style scoped>
-/* 块间两档节奏（ui-optimize-unified 决策 4 / U5 叠加核算）：间距唯一权威 = trace 容器
-   相邻选择器，后块 margin-top 定档——flex 容器内 margin 不折叠，距离 = 单值可断言；
-   块自身 py 节奏 padding 已退役（原 tool↔tool 8+8=16、text→tool 24px 隐式叠加消除）。
-   - 过程行（思考/工具/bash 组/workflow）之后 12px：过程行→正文 12px（「过程行与相邻
-     正文 12px」条款），过程行之间同档紧凑。
-   - 正文块（.trace-blk--text）之后 20px：正文↔正文 20px（「正文级块间 20px」条款），
-     正文→过程行 20px 落场景 3③ 区间 [12,20] 上限（正文段落后留足呼吸再接工具行）。
-   - 收编行（TraceCompactorRow，容器首位、非 .trace-blk）之后的首块 12px：补偿原首块
-     py-2 顶距承载的节奏。streaming-tail 光标非块，不命中（自身 mt-2 维持原观感）。
+/* 块间四档节奏（MF-1-25，demo workbench.css 权威有效值校准）：demo 有效间距 =
+   .line py 5px 叠加（workbench.css:348）+ --blk-gap 20 / --blk-gap-tight 12（tokens.css:75-76）：
+   工具↔工具 5+12+5=22、工具→正文 5+12=17、正文→工具 12+5=17、正文↔正文 20。
+   real 块 py padding 已退役，间距唯一权威 = trace 容器相邻选择器，后块 margin-top 承载
+   同值——flex 容器内 margin 不折叠，距离 = 单值可断言。
+   - .trace-blk + .trace-blk（前工具，默认档）= 22px：工具相邻档（含工具→正文）；
+   - .trace-blk--text + .trace-blk = 17px：正文→工具；
+   - .trace-blk + .trace-blk--text = 17px：工具→正文（覆盖默认 22）；
+   - .trace-blk--text + .trace-blk--text = 20px：正文↔正文（覆盖前两条，须置末位）。
+   - 收编行（TraceCompactorRow，容器首位、非 .trace-blk）之后的首块 12px：demo 无收编行
+     对应物，保留 real 紧凑档。streaming-tail 光标非块，不命中（自身 mt-2 维持原观感）。
    escape hatch 依据：结构选择器属 scoped 样式准许形态（项目样式三层规范）。 */
 .trace > .trace-blk + .trace-blk {
-  margin-top: 12px;
+  margin-top: 22px;
 }
 .trace > .trace-blk--text + .trace-blk {
+  margin-top: 17px;
+}
+.trace > .trace-blk + .trace-blk--text {
+  margin-top: 17px;
+}
+.trace > .trace-blk--text + .trace-blk--text {
   margin-top: 20px;
 }
 .trace > .trace-compactor-row + .trace-blk {

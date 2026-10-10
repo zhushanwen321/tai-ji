@@ -25,7 +25,7 @@
       <Button
         variant="ghost"
         size="sm"
-        class="turn-meta h-auto w-fit items-center justify-start gap-2.5 self-start px-0 py-1 font-mono font-normal text-[length:var(--text-xs)] transition-colors duration-[var(--duration-fast)] ease-[var(--ease)]"
+        class="turn-meta h-auto w-fit flex-wrap items-center justify-start gap-2.5 self-start px-0 py-1 font-mono font-normal text-[length:var(--text-xs)] transition-colors duration-[var(--duration-fast)] ease-[var(--ease)]"
         :class="[
           !turn.hasFoldable
             ? 'cursor-default hover:text-neutral-mid'
@@ -52,12 +52,14 @@
              TurnMeta 是 per-turn 事实聚合位，tokens 与 elapsed/时刻区间同族事实。
              流式期的当前调用尚无 usage → 显示已完成段的真实累计（收口时跳到完整值）；
              全程无近似值（用户裁决 A：不在真值之外显示估算）。0 不渲染（零内容 turn 不占行宽）。
-             值内加粗（demo `已生成 <b>7,705</b> tokens`）受 i18n 单串模板边界限制未做，登记报告。 -->
+             [MF-1-37]（demo TurnList.vue:63 `已生成 <b>7,705</b> tokens` + workbench.css
+             .workmeta b）：数值段强调档 mid 色 + fw-mid——i18n 单串 {tokens} 占位无法局部
+             包 span，经 generatedTokensParts 哨兵拆段渲染（key 与 locale 零改动）。 -->
         <span
           v-if="generatedTokens > 0"
           data-testid="turn-meta-tokens"
           class="tm-tokens ml-1.5 font-mono text-[length:var(--text-xs)] text-neutral-dim tabular-nums"
-        >· {{ t('panel.message.generatedTokens', { tokens: generatedTokens.toLocaleString() }) }}</span>
+        >· {{ generatedTokensParts.before }}<span class="text-neutral-mid [font-weight:var(--fw-mid)]">{{ generatedTokens.toLocaleString() }}</span>{{ generatedTokensParts.after }}</span>
         <!-- chevron 紧跟耗时（展开/收起 trace 入口），在 badge 之前 -->
         <ChevronRight
           v-if="turn.hasFoldable && !isWorkingTurn"
@@ -126,5 +128,17 @@ const { t } = useI18n()
 const statusLabel = computed(() => {
   if (!props.isWorkingTurn) return t('panel.message.worked')
   return t('panel.message.working')
+})
+
+/**
+ * [MF-1-37] tokens 文案前后段（demo TurnList.vue:63 数值段 `<b>` 强调档，workbench.css
+ * .workmeta b = mid + fw-mid）：i18n 单串 {tokens} 占位无法局部包 span——以 NUL 哨兵
+ * 占位求值后按哨兵拆前后段，数值段独立 span 承载强调档；语序（zh「已生成 X tokens」/
+ * en「Generated X tokens」）由串自身承载，key 与 locale 文件零改动。
+ */
+const TOKENS_SENTINEL = '\u0000'
+const generatedTokensParts = computed(() => {
+  const parts = t('panel.message.generatedTokens', { tokens: TOKENS_SENTINEL }).split(TOKENS_SENTINEL)
+  return { before: parts[0] ?? '', after: parts[1] ?? '' }
 })
 </script>

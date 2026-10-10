@@ -60,7 +60,7 @@
     <div class="flex flex-wrap items-center gap-1.5">
       <!-- demo .tchip：常态即 fw-mid（选中辨识交给范式块，消除选中瞬间字重跳变的布局抖动）；
            hover 纯提字色（hover:bg-transparent 压掉 ghost variant 自带 hover 底）；
-           选中 = elevated 浮起 + accent 1px 内描边（workbench.css 选中态单一范式）。 -->
+           选中 = demo Tier A 状态件范式（--sel-bg accent tint 底 + 1px --sel-edge 内描边）。 -->
       <Button
         v-for="chip in chips"
         :key="chip.key"
@@ -68,7 +68,7 @@
         size="sm"
         class="h-5 rounded-full px-2.5 font-semibold text-[length:var(--text-2xs)]"
         :class="chip.active
-          ? 'bg-bg-elevated text-neutral-fg shadow-[inset_0_0_0_1px_var(--accent)] hover:bg-bg-elevated'
+          ? 'bg-[var(--sel-bg)] text-neutral-fg [font-weight:var(--fw-mid)] shadow-[inset_0_0_0_1px_var(--sel-edge)] hover:bg-[var(--sel-bg)]'
           : 'text-neutral-dim hover:bg-transparent hover:text-neutral-fg'"
         :data-testid="`trace-chip-${chip.key}`"
         @click="emit('toggle-group', chip.key)"

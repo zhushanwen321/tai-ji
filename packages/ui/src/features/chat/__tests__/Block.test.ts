@@ -235,12 +235,18 @@ describe('ui-optimize-unified N1: edit/write 工具行 basename chip（决策 8�
     expect(openDrawer).toHaveBeenCalledTimes(2)
   })
 
-  it('超长 basename CSS ellipsis：chip 内 basename span 带 truncate + chip 可收缩（min-w-0）', () => {
+  it('超长 basename CSS ellipsis：chip 容器 truncate + 320px 上限（MF-1-24 demo .fchip 形态），内层 fchip-roll 为 hover 滚动载体（inline-block + nowrap）', () => {
     const { wrapper } = makeChipWrapper({ toolName: 'edit', input: { path: '/a/very-long-basename-that-should-truncate.ts' } })
     const chip = wrapper.find(CHIP_SEL)
+    // 容器承载截断（ellipsis）与 320px 上限（demo workbench.css .fchip max-width:320px）
     expect(chip.classes()).toContain('min-w-0')
+    expect(chip.classes()).toContain('truncate')
+    expect(chip.classes()).toContain('max-w-[320px]')
+    // 内层双 span 轻方案：fchip-roll（hover 滚到文末停，动画在 Block.vue scoped）
     const name = chip.find('span')
-    expect(name.classes()).toContain('truncate')
+    expect(name.classes()).toContain('fchip-roll')
+    expect(name.classes()).toContain('inline-block')
+    expect(name.classes()).toContain('whitespace-nowrap')
   })
 
   it('read 行不渲染 chip，保持 shortenForHeader 摘要形态（其他工具行不变）', () => {
@@ -421,11 +427,11 @@ describe('W4 tail-scroll: thinking 双态（U8）', () => {
     // jsdom 下 offsetHeight 为 0，但 DOM 结构应稳定（min-h-[1.5rem] 在父容器）
     const minHeightEl = wrapper.find('.min-h-\\[1\.5rem\\]')
     // Tailwind 类含方括号，选择器需转义；若未找到用备选方案
-    const thinkHeader = minHeightEl.exists() ? minHeightEl : wrapper.find('.trace-think .flex.items-center')
+    const thinkHeader = minHeightEl.exists() ? minHeightEl : wrapper.find('.trace-think .flex.items-baseline')
     expect(thinkHeader.exists()).toBe(true)
     // 切换 working 态后 DOM 结构不变
     await wrapper.setProps({ working: false } as never)
-    const thinkHeaderAfter = minHeightEl.exists() ? minHeightEl : wrapper.find('.trace-think .flex.items-center')
+    const thinkHeaderAfter = minHeightEl.exists() ? minHeightEl : wrapper.find('.trace-think .flex.items-baseline')
     expect(thinkHeaderAfter.exists()).toBe(true)
   })
 

@@ -5,8 +5,10 @@
  * 分档阈值回归无锚。阈值常量未导出（模块内私有），用例以字面量数值锁定行为边界——
  * 常量改名/调档时本测试显式红灯，防静默漂移。
  *
- * capacityBarClass（ui-optimize 决策 6 / N7 容量细条三段色阶）同形态边界锚：阈值 80/95
+ * capacityBarClass（ui-optimize 决策 6 / N7 容量细条两段告警色阶）同形态边界锚：阈值 80/95
  * 刻意区别于浮层卡内 bar（70/90），两套阈值并存是有意差异（见模块内注释），禁止「统一」合并。
+ * 仅告警显示（spec R2.3 / demo ComposerBar v-else-if contextPct>80）：≤80% 返回空串
+ * （渲染门控在 ComposerCapacityBar，≤80% 不渲染——常态无 accent 细条）。
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/panel/context-usage-display.test.ts
  */
@@ -31,16 +33,16 @@ describe('usageBarClass 分档边界（严格大于）', () => {
   })
 })
 
-describe('capacityBarClass 细条三段边界（严格大于，阈值 80/95）', () => {
-  it('80（= warn 阈值）→ bg-accent-soft 常态档（不严格大于 80）', () => {
-    expect(capacityBarClass(80)).toBe('bg-accent-soft')
+describe('capacityBarClass 细条两段告警边界（严格大于，阈值 80/95；≤80 仅告警显示不渲染）', () => {
+  it('80（= warn 阈值）→ 空串常态档（不严格大于 80；渲染门控 ≤80% 不渲染）', () => {
+    expect(capacityBarClass(80)).toBe('')
   })
 
   it('81（> warn 阈值且 ≤ danger 阈值）→ bg-warn', () => {
     expect(capacityBarClass(81)).toBe('bg-warn')
   })
 
-  it('95（= danger 阈值）→ bg-warn（严格大于：95 仍属 80–95 档）', () => {
+  it('95（= danger 阈值）→ bg-warn（严格大于：95 仍属 80–95 告警档）', () => {
     expect(capacityBarClass(95)).toBe('bg-warn')
   })
 

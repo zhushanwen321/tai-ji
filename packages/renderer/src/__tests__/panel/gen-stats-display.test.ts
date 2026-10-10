@@ -14,9 +14,32 @@ import { describe, expect, it } from 'vitest'
 import {
   TTFT_DANGER_THRESHOLD_MS,
   TTFT_WARN_THRESHOLD_MS,
+  cacheTierOf,
   formatTtftDuration,
   ttftTier,
 } from '@/components/panel/gen-stats-display'
+
+describe('cacheTierOf 缓存命中率档位（demo ComposerBar cacheCls 对齐：≥80 success / ≥50 neutral / <50 warn）', () => {
+  it('null / undefined → neutral（无值，显示「—」）', () => {
+    expect(cacheTierOf(null)).toBe('neutral')
+    expect(cacheTierOf(undefined)).toBe('neutral')
+  })
+
+  it('≥80 → success（demo mchip-ok --success）', () => {
+    expect(cacheTierOf(100)).toBe('success')
+    expect(cacheTierOf(80)).toBe('success')
+  })
+
+  it('50–79 → neutral 中性档（demo 无类保持 --dim——正常波动非告警）', () => {
+    expect(cacheTierOf(79)).toBe('neutral')
+    expect(cacheTierOf(50)).toBe('neutral')
+  })
+
+  it('<50 → warn（demo mchip-warn --warn；0 是真实测量值非无值）', () => {
+    expect(cacheTierOf(49)).toBe('warn')
+    expect(cacheTierOf(0)).toBe('warn')
+  })
+})
 
 describe('TTFT 纯函数：formatTtftDuration / ttftTier', () => {
   it('formatTtftDuration：<1000 → 整数毫秒（0 是真实测量值显「0ms」，非无值）', () => {

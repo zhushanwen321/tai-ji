@@ -11,7 +11,7 @@
       v-if="!failed && path"
       :src="thumbSrc"
       :alt="displayName"
-      class="image-thumb mr-1 max-w-[120px] max-h-[80px] rounded-md border border-[var(--border-neutral-dim)] object-cover align-middle"
+      class="image-thumb mr-1 max-w-[120px] max-h-[80px] rounded-md border border-neutral-dim object-cover align-middle"
       @error="onError"
     />
     <!-- 降级 badge：复用 file badge 的绿色 token + 间距/字号（Turn.vue:82-96），视觉同族。

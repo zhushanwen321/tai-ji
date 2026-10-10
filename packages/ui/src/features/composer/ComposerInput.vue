@@ -9,16 +9,15 @@
     props/emits/expose 契约不变（C1 契约），壳层 deps（pasteImage/renderIcon/t）
     经 ComposerInputDeps inject token 注入（clarify C1，对齐 w6 ChatViewDeps 范式）。
   -->
+  <!-- 几何与字号锁 demo workbench.css composer 段：--fs-lg 14px（--text-base 档，R4 降档）+
+       两行起步 min-height:calc(3em+19px)（2 行 × 1.5 行高 + 上下 padding 和 13+6=19px，
+       border-box 联动）+ 5 行封顶 max-height:calc(7.5em+19px)（同式外推）；聚焦无焦点边界
+       （demo R3 撤销：composer 输入区无焦点边界，光标即焦点反馈），is-focused 状态类
+       保留为聚焦挂点（现行无样式消费方）。 -->
   <div
     ref="elRef"
-    class="composer-input relative min-h-[42px] max-h-[132px] overflow-y-auto px-4 pt-[13px] pb-[6px] text-[length:var(--text-md)] leading-[1.5] text-neutral-fg outline-none"
-    :class="[
-      { 'is-empty': isEmpty, 'is-focused': isFocused },
-      // 聚焦 inset 中性边（demo 权威：textarea.composer-input:focus-visible 的
-      // box-shadow inset 0 0 0 1px var(--border-strong)）——与外框 border-strong 提亮
-      // （composer-focus-ring）构成 demo 的双层聚焦形态；isFocused 状态类驱动。
-      isFocused && 'shadow-[inset_0_0_0_1px_var(--border-strong)]',
-    ]"
+    class="composer-input relative min-h-[calc(3em+19px)] max-h-[calc(7.5em+19px)] overflow-y-auto px-4 pt-[13px] pb-[6px] text-[length:var(--text-base)] leading-[1.5] text-neutral-fg outline-none"
+    :class="{ 'is-empty': isEmpty, 'is-focused': isFocused }"
     :contenteditable="!disabled"
     :data-placeholder="placeholder"
     role="textbox"
@@ -102,7 +101,8 @@ const emit = defineEmits<{
 const deps = useComposerInputDeps()
 
 const elRef = ref<HTMLDivElement | null>(null)
-/** 聚焦态：控制 placeholder 显隐（仅未聚焦且空时显）与光标可见性（未聚焦不显光标） */
+/** 聚焦态：驱动 is-focused 状态类（聚焦挂点；R3 无焦点边界，光标即焦点反馈，
+ *  placeholder 空态恒显不再依赖聚焦态） */
 const isFocused = ref(false)
 
 // contenteditable 输入机制（getText/syncEmpty/触发检测/光标滚动/选区保存恢复/IME 守卫/换行/粘贴）
@@ -182,7 +182,8 @@ function onBlur(): void {
   saveSelection()
 }
 
-/** focus：设内部聚焦态（placeholder 显隐）+ emit 给父 Composer 驱动 .composer-box ring */
+/** focus：设内部聚焦态（is-focused 挂点）+ emit 给父 Composer（R3：无焦点边界，
+ *  光标即焦点反馈，父层不再有聚焦环） */
 function onInputFocus(): void {
   isFocused.value = true
   emit('focus')
@@ -282,11 +283,12 @@ onMounted(() => {
 
 <style scoped>
 /* placeholder：伪元素 Tailwind 表达不了，走 scoped style。
-   用 --subtle（三级文字/占位，design-tokens SSOT + design-system §4 明确）。
+   用 --neutral-dim（三级文字/占位，design-tokens SSOT）。
    设计意图：占位是三级最暗层，与输入正文 --fg 拉开梯度，弱化提示语。
    —— absolute 脱文档流：不占行内位，光标始终在内容区最左（开头）而非 placeholder 末尾。
-   —— 仅未聚焦且空时显（is-empty && !is-focused）：聚焦即隐，光标停在开头闪烁。 */
-.composer-input.is-empty:not(.is-focused)::before {
+   —— 空态恒显（含聚焦，demo textarea 原生 placeholder 同形态）：R3 无缝输入面，
+      聚焦后光标与 placeholder 共存，光标即焦点反馈，无聚焦边界。 */
+.composer-input.is-empty::before {
   content: attr(data-placeholder);
   position: absolute;
   inset: 0;

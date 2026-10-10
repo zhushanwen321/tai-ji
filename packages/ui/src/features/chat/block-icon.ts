@@ -1,13 +1,12 @@
 import type { Component } from 'vue'
 import {
-  Brain,
+  Lightbulb,
   BookOpen,
   SquareTerminal,
   Pencil,
   SquareFunction,
   Users,
   ListChecks,
-  AlertTriangle,
   ArrowRight,
 } from '@lucide/vue'
 import type { ToolCallStatus } from '@taiji/shared'
@@ -15,11 +14,14 @@ import type { ToolCallStatus } from '@taiji/shared'
 /**
  * block-icon.ts —— trace 块图标映射（Demo H 最终视觉 SSOT）。
  *
- * 10 类 BlockIconKind 对应 trace 流里所有块的图标语义。getBlockIcon 按「状态 > 类型」的
- * 固定优先级决策（running 覆盖一切 → failed → subagent → workflow → toolName 映射）。
+ * 9 类 BlockIconKind 对应 trace 流里所有块的图标语义。getBlockIcon 按「状态 > 类型」的
+ * 固定优先级决策（running 覆盖一切 → subagent → workflow → toolName 映射）。
  *
- * BLOCK_ICON_LUCIDE 是 H 最终图标（brain/book-open/square-terminal/pencil/users/list-checks/
- * alert-triangle/arrow-right），统一规格 14×14 / stroke-width 1.7 / currentColor。
+ * failed 不换形（demo TurnList.vue:86-89 权威：图标名不随失败态变，仅由消费方
+ * headerIconClass 把原工具图标染 danger——原 'failed'→AlertTriangle 换形枚举已删）。
+ *
+ * BLOCK_ICON_LUCIDE 是 H 最终图标（lightbulb/book-open/square-terminal/pencil/users/
+ * list-checks/arrow-right），统一规格 14×14 / stroke-width 1.7 / currentColor。
  * running 态不走该映射，消费方改用 RUNNING_LOADER_SVG（呼吸弧 loader，三重动画 + accent 蓝）。
  *
  * 归属：本文件是图标决策的 SSOT（IF1/IF2 契约）。消费方拿 BlockIconKind 后，running 用
@@ -27,7 +29,7 @@ import type { ToolCallStatus } from '@taiji/shared'
  */
 export type BlockIconKind =
   | 'thinking' | 'tool-read' | 'tool-bash' | 'tool-edit' | 'tool-other'
-  | 'subagent' | 'workflow' | 'running' | 'failed' | 'text'
+  | 'subagent' | 'workflow' | 'running' | 'text'
   | 'bash-group'
 
 /** toolName → tool 细分类映射（未命中的 toolName 走 'tool-other'） */
@@ -41,10 +43,11 @@ const TOOL_ICON_MAP: Record<string, BlockIconKind> = {
 /**
  * 决策块图标种类。优先级（覆盖关系）：
  *   status==='running' → running（运行中态覆盖一切，用 loader 动画）
- *   status==='error'   → failed
  *   isSubagent         → subagent
  *   isWorkflow         → workflow
  *   否则               → TOOL_ICON_MAP[toolName] ?? 'tool-other'
+ * status==='error' 不入决策（MF-1-29 demo 权威：failed 行保持原工具图标，失败信号由
+ * 消费方 headerIconClass 染 danger 承担，图标名不变——见 BLOCK_ICON_LUCIDE 上方说明）。
  */
 export function getBlockIcon(
   toolName: string,
@@ -53,7 +56,6 @@ export function getBlockIcon(
   isWorkflow: boolean,
 ): BlockIconKind {
   if (status === 'running') return 'running'
-  if (status === 'error') return 'failed'
   if (isSubagent) return 'subagent'
   if (isWorkflow) return 'workflow'
   return TOOL_ICON_MAP[toolName] ?? 'tool-other'
@@ -61,22 +63,22 @@ export function getBlockIcon(
 
 /**
  * BlockIconKind → lucide 组件映射（不含 running——running 用 RUNNING_LOADER_SVG）。
- * Demo H 最终值：thinking=brain / tool-read=book-open / tool-bash=square-terminal /
+ * Demo H 最终值：thinking=lightbulb（TurnList.vue:73 静止态；running 态呼吸弧由消费方
+ * RUNNING_LOADER_SVG 承担）/ tool-read=book-open / tool-bash=square-terminal /
  * tool-edit=pencil / tool-other=square-function / subagent=users / workflow=list-checks /
- * failed=alert-triangle / text=arrow-right。
+ * text=arrow-right。
  * bash-group（ui-signal-density §3.3 D1 U3）= square-terminal：组头是 bash 段的聚合行，
  * 图标沿用 bash 语义（与 tool-bash 同源）；组身份由「×N · 共 Xs」计数前缀承载，行内有
  * running 成员时图标位让给 RUNNING_LOADER_SVG（渲染层 hasRunning 分支，不走本映射）。
  */
 export const BLOCK_ICON_LUCIDE: Record<Exclude<BlockIconKind, 'running'>, Component> = {
-  thinking: Brain,
+  thinking: Lightbulb,
   'tool-read': BookOpen,
   'tool-bash': SquareTerminal,
   'tool-edit': Pencil,
   'tool-other': SquareFunction,
   subagent: Users,
   workflow: ListChecks,
-  failed: AlertTriangle,
   text: ArrowRight,
   'bash-group': SquareTerminal,
 }

@@ -227,6 +227,8 @@ describe('底抽屉纵轴布局（S1/S2 形态：split 行之下、StatusBar 之
     expect(handle.exists()).toBe(true)
     expect(handle.attributes('role')).toBe('separator')
     expect(handle.attributes('aria-orientation')).toBe('horizontal')
+    // E5 方向缓动（demo drawers.css .bd）：开方向 = ease-out 挂壳层 height 过渡类（ui-replica MF-1-50 防回归）
+    expect(wrapper.find('[data-testid="bottom-drawer"]').classes().join(' ')).toContain('ease-[var(--ease-out)]')
   }, 60_000)
 
   it('S2 双容器同开：右抽屉 git + 底抽屉同时可见', async () => {
@@ -266,6 +268,8 @@ describe('底抽屉纵轴布局（S1/S2 形态：split 行之下、StatusBar 之
     toggleBottomDrawer()
     await nextTick()
     expect(bottomHeight(wrapper)).toBe('0%')
+    // E5 关方向 = ease-in 挂壳层 height 过渡类（ui-replica MF-1-50 防回归）
+    expect(wrapper.find('[data-testid="bottom-drawer"]').classes().join(' ')).toContain('ease-[var(--ease-in)]')
     // [U6] 收合动画期（壳 height 过渡期）终端仍挂载——动画期空抽屉回归锚点（真实
     // Transition leave：元素带 leave-active 类保挂载，卸载时机 = leave 过渡结束）
     expect(wrapper.find('[data-testid="terminal-loaded"]').exists()).toBe(true)

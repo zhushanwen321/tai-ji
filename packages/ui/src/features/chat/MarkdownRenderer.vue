@@ -381,16 +381,17 @@ function onClick(e: MouseEvent): void {
   text-decoration: underline;
 }
 
-/* 行内代码：弱底彩字 + 等宽，区分正文（ui-optimize 决策5）。
-   底/字色消费六主题各自的 --md-code-bg/fg（style.css 各主题 entry 挂值），
-   对比断言 ≥4:1（设计 §4 场景 2）。
+/* 行内代码：R4 chip 形态（demo workbench.css）——圆角弱底 + 1px 细边框，字号比正文
+   小一档 0.85em；底/字色消费 --md-code-bg/fg（style.css 挂值，字 = 主前景 85% 混
+   code-c 微暖档）。对比断言见 contrast-tokens.test.ts 场景 2③（≥4:1，朱印豁免行见该文件）。
    [HISTORICAL] 旧底色直引 --surface-2（无专属字色、随正文继承）——明度差过大且
    不随主题 accent 成色，随决策 5 退役。 */
 .md-render :deep(code:not(pre code)) {
   font-family: var(--font-mono);
-  font-size: 0.88em;
+  font-size: 0.85em;
   background: var(--md-code-bg);
   color: var(--md-code-fg);
+  border: 1px solid var(--border);
   padding: 0.1em 0.35em;
   border-radius: var(--radius-sm);
 }

@@ -4,7 +4,8 @@
     组件内顺序（左→右）：TTFT 首字延迟 · TOKEN 速度（t/s）· 缓存命中率（%），整组位于
     上下文容量触发器左侧。独立判定 null →「—」（无值编码纪律：null=无数据，0=真实测量值，D4）。
     语义色三档（项目语义色 token，纯灰体系既有档）：
-      命中率（正向）：≥80 success · 50–80 warn · <50 danger；
+      命中率（正向）：≥80 success · 50–80 中性（dim）· <50 warn（demo cacheCls 对齐——
+      中档是正常波动非告警）；
       TTFT（反向延迟）：<1500ms success · 1500–3000ms warn · >3000ms danger（阈值为初值，
       无历史校准源，重审触发 = 用户反馈档位与体感系统性不符，设计 §3.1）；null 恒中性灰。
     归因降噪（2026-09-19 D-A）：帧带 cacheRatio.currentMiss 时本次触发器显成因文案（中性色，
@@ -27,7 +28,7 @@
           variant="ghost"
           :class="
             cn(
-              'h-7 gap-1 rounded-[var(--radius-xs)] px-2 text-[11px] transition-colors',
+              'h-7 gap-1 rounded-[var(--radius-xs)] px-2 text-[length:var(--text-2xs)] transition-colors',
               ttftTriggerClass,
             )
           "
@@ -36,8 +37,12 @@
           <span class="tabular-nums" data-testid="genstats-ttft-value">{{ ttftDisplay }}</span>
         </Button>
       </HoverCardTrigger>
+      <!-- 右下锚（demo .stats-pop：right:0 + bottom:calc(100%+10px)）：align="end" +
+           side-offset 10px，三触发器浮层同规格 -->
       <HoverCardContent
         side="top"
+        align="end"
+        :side-offset="10"
         class="w-[260px] p-0"
         data-testid="genstats-ttft-popover"
       >
@@ -50,7 +55,7 @@
       <HoverCardTrigger as-child>
         <Button
           variant="ghost"
-          class="h-7 gap-1 rounded-[var(--radius-xs)] px-2 text-[11px] text-neutral-dim transition-colors hover:text-neutral-mid"
+          class="h-7 gap-1 rounded-[var(--radius-xs)] px-2 text-[length:var(--text-2xs)] text-neutral-dim transition-colors hover:text-neutral-mid"
           :title="t('panel.context.genStatsSpeedTitle')"
         >
           <span class="tabular-nums" data-testid="genstats-speed-value">{{ speedDisplay }}</span>
@@ -58,6 +63,8 @@
       </HoverCardTrigger>
       <HoverCardContent
         side="top"
+        align="end"
+        :side-offset="10"
         class="w-[260px] p-0"
       >
         <GenStatsSpeedCard :session-id="props.sessionId" :model-id="props.modelId" />
@@ -69,7 +76,7 @@
       <HoverCardTrigger as-child>
         <Button
           variant="ghost"
-          :class="cn('h-7 gap-1 rounded-[var(--radius-xs)] px-2 text-[11px] transition-colors', cacheTriggerClass)"
+          :class="cn('h-7 gap-1 rounded-[var(--radius-xs)] px-2 text-[length:var(--text-2xs)] transition-colors', cacheTriggerClass)"
           :title="t('panel.context.genStatsCacheTitle')"
         >
           <span class="tabular-nums" data-testid="genstats-cache-value">{{ cacheDisplay }}</span>
@@ -77,6 +84,8 @@
       </HoverCardTrigger>
       <HoverCardContent
         side="top"
+        align="end"
+        :side-offset="10"
         class="w-[260px] p-0"
       >
         <GenStatsCacheCard :session-id="props.sessionId" :model-id="props.modelId" />

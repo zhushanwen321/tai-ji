@@ -3,7 +3,8 @@
     TrafficLight · 跨平台窗口控制
     - mac：空占位 div（保留 .traffic-light 定位 + opacity transition 语义，红黄绿由 OS 绘制）
     - win/linux：自绘 3 彩色圆点 mimic mac（AppShell 左 padding 0 后 aside 左缘 = 窗口 x0，left-2 = 窗口 x8，
-      与 mac trafficLightPosition.x=8 完全同位；top-[4px] = 窗口 y8 与 mac 同位），hover 整组显 close/min/max 符号，点击 IPC 控窗口
+      与 mac trafficLightPosition.x=8 完全同位；top-[12px] = 窗口 y16 与 mac trafficLightPosition.y=16 同位），
+      hover 整组显 close/min/max 符号，点击 IPC 控窗口
     全屏态 isFullscreen=true 时 opacity→0 + pointer-events-none（响应式 :class 绑定，替代旧 [data-fullscreen] 祖先选择器），
     mac 系统 hover 浮层独立不参与。
     [review MF-1] pointer-events-none 必须与 opacity-0 成对：仅隐藏视觉时，隐形圆点组
@@ -13,7 +14,7 @@
     保住点击命中（与 PanelHeader 交互元素防误拖语义对齐）。
   -->
   <div
-    class="traffic-light absolute left-2 top-[4px] flex gap-2 z-10 transition-opacity duration-[var(--duration-slow)] ease-[var(--ease)] group [-webkit-app-region:no-drag]"
+    class="traffic-light absolute left-2 top-[12px] flex gap-2 z-10 transition-opacity duration-[var(--duration-slow)] ease-[var(--ease)] group [-webkit-app-region:no-drag]"
     :class="{ 'opacity-0 pointer-events-none': isFullscreen }"
   >
     <template v-if="!isMac">

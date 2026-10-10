@@ -113,7 +113,7 @@ describe('PanelHeader 折叠态 chrome 迁入（review MF-6）', () => {
     platformChromeMock.isFullscreen.value = false
   })
 
-  it('collapsed=true → header 渲染 sidebar-collapse-toggle + pl-[88px] 让位红黄绿，drawer-toggle 隐藏', () => {
+  it('collapsed=true → header 渲染 sidebar-collapse-toggle + pl-[88px] 让位红黄绿，drawer-toggle 恒显（ui-replica MF-1-49）', () => {
     const sidebar = useSidebarStore()
     sidebar.collapsed = true
 
@@ -123,8 +123,9 @@ describe('PanelHeader 折叠态 chrome 迁入（review MF-6）', () => {
     expect(header.classes()).toContain('pl-[88px]')
     // chrome 三按钮组迁入 header（收起按钮 testid 与浮层 AppNavControls 同源）
     expect(wrapper.find('[data-testid="sidebar-collapse-toggle"]').exists()).toBe(true)
-    // 折叠态 drawer toggle 不渲染（chrome 按钮组已含侧栏切换）
-    expect(wrapper.find('[data-testid="drawer-toggle"]').exists()).toBe(false)
+    // 折叠态右抽屉开关恒显（demo .app.folded 隐藏规则不波及 .tbtn 开关钮；侧栏折叠后
+    // 本钮是右抽屉唯一鼠标入口，demo 两开关折叠态恒渲染）
+    expect(wrapper.find('[data-testid="drawer-toggle"]').exists()).toBe(true)
   })
 
   it('collapsed=true + isFullscreen → header 回退 pl-3.5（全屏红黄绿 OS 隐藏不占位）', () => {

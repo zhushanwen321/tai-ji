@@ -52,7 +52,7 @@ import type { RenderRule } from 'markdown-it/lib/renderer.mjs'
 import type StateCore from 'markdown-it/lib/rules_core/state_core.mjs'
 import { createHighlighterCore } from 'shiki/core'
 import { createJavaScriptRegexEngine } from 'shiki/engine/javascript'
-import type { HighlighterCore } from 'shiki/core'
+import type { HighlighterCore, ThemeRegistration } from 'shiki/core'
 // fine-grained 静态 grammar/theme import（release 附件体积优化批三 §3.2.1）：
 // 不走 shiki full bundle（其模块图含全量 200+ 语言的动态 import 入口 → 产物 289 个死
 // 语言 chunk 8.1MB）。core + 显式 import 后死模块从模块图构造性消失。解析依赖扁平
@@ -92,11 +92,41 @@ export const SHIKI_LANGS = ['typescript', 'javascript', 'vue', 'json', 'bash', '
  * [HISTORICAL] 曾用 dark-plus/light-plus（VSCode 级高亮但底色硬编码 #1e1e1e/#fff，
  * 不随 6 套太极主题 token 变化：暖墨面板嵌冷灰块、皓/青墨米白面板嵌纯白块）。
  * min 系列背景透明（--shiki-dark-bg/--shiki-light-bg 为透明），代码块容器底色由
- * MarkdownRenderer/CodeBlock 的 var(--bg-input) 提供——跟随全部主题/preset；
- * 语法 token 色保持明暗两档（代码高亮是独立彩色通道，不跟 accent 走，见 PRODUCT.md）。
+ * MarkdownRenderer/CodeBlock 的 var(--bg-input) 提供——跟随全部主题/preset。
+ * 语法 token 色：内置 min 系彩色档已经 toTaijiFlatCodeTheme 收敛为 demo 扁平三色档
+ * （见该函数注释），双主题结构保留（defaultColor:false 机制不变），两变量值恒等当前
+ * 主题令牌。
  */
 const SHIKI_DARK = 'min-dark'
 const SHIKI_LIGHT = 'min-light'
+
+/**
+ * [MF-1-27] demo 扁平三色档（workbench.css .codeblock pre/.cm/.val，471-479）：代码块
+ * 语法色收敛三档——正文 fg-2（--neutral-fg-2）、注释 dim（--neutral-dim）、值
+ * md-code-fg（--md-code-fg）。shiki 内置 min 系全语法彩色档（默认 token 紫 #b392f0、
+ * keyword 粉红、constant 蓝）与 demo 近单色 + 暖值档明显偏离，按 demo 权威收敛。
+ * 色值经 var() 引用 real 语义令牌而非静态 hex：① 六主题（含亮色切换）自动跟随；②
+ * --md-code-fg 是 color-mix 动态公式，唯 var 可表达。defaultColor:false 下 shiki 把
+ * token 色写进 --shiki-dark/--shiki-light 变量，var() 嵌套引用在 CSS 层合法解析
+ * （MarkdownRenderer .shiki span 的 color 消费变量），亮/暗两变量同令牌 → 双主题
+ * 机制保持结构、值恒等当前主题令牌。
+ * scope 分档：无 scope 匹配的默认档 = 正文色；comment（含 docstring，min-dark 原本
+ * 同档）= 注释档；string/constant 前缀 = 值档（shiki scope 前缀匹配覆盖
+ * string.quoted / constant.numeric / constant.language 等）。italic/bold 字形档 demo
+ * 无权威，一并收敛（扁平化）。
+ * 影响面：getHighlighter 单例消费方（对话流 MarkdownRenderer + drawer CodeBlock /
+ * DiffView）同步三档——demo drawers.css 代码块与 workbench.css 同规格，方向一致。
+ */
+const TAIJI_FLAT_CODE_TOKEN_COLORS: NonNullable<ThemeRegistration['tokenColors']> = [
+  { settings: { foreground: 'var(--neutral-fg-2)' } },
+  { scope: ['comment', 'string.quoted.docstring.multi'], settings: { foreground: 'var(--neutral-dim)' } },
+  { scope: ['string', 'constant'], settings: { foreground: 'var(--md-code-fg)' } },
+]
+
+/** 主题扁平化：保留 name/colors（主题名匹配与透明底机制不变），仅替换 tokenColors。 */
+function toTaijiFlatCodeTheme(base: ThemeRegistration): ThemeRegistration {
+  return { ...base, tokenColors: TAIJI_FLAT_CODE_TOKEN_COLORS }
+}
 
 /** shiki 单例（全局一次，避免重复语法加载） */
 let highlighterPromise: Promise<HighlighterCore> | null = null
@@ -109,8 +139,9 @@ let cachedMarkdown: MarkdownIt | null = null
 export function getHighlighter(): Promise<HighlighterCore> {
   if (!highlighterPromise) {
     highlighterPromise = createHighlighterCore({
-      // 静态 import 的 theme 对象（与 SHIKI_DARK/SHIKI_LIGHT 同名：min-dark / min-light）
-      themes: [minDark, minLight],
+      // 静态 import 的 theme 对象经扁平化（MF-1-27 三档色阶，name 不变与 SHIKI_DARK/
+      // SHIKI_LIGHT 主题名匹配保持）
+      themes: [toTaijiFlatCodeTheme(minDark), toTaijiFlatCodeTheme(minLight)],
       // 静态 import 的 grammar 对象（SHIKI_LANGS 的 13 项：bash/shell 由 shellscript 的
       // grammar aliases 覆盖，无需单独 import，见 import 区注释）
       langs: [typescript, javascript, vue, json, shellscript, markdown, css, html, yaml, python, go, rust],

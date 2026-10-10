@@ -33,7 +33,7 @@
       class="group/ts relative flex items-start justify-end"
     >
       <!-- 用户时刻（悬挂气泡上方右侧，demo .user-bubble .ts） -->
-      <span v-if="turn.user?.timestamp" class="absolute -top-[22px] right-[10px] font-mono text-[length:var(--text-2xs)] text-neutral-dim tabular-nums opacity-0 transition-opacity duration-150 group-hover/ts:opacity-100 group-focus-within/ts:opacity-100" data-testid="user-timestamp">
+      <span v-if="turn.user?.timestamp" class="absolute -top-[22px] right-[10px] font-mono text-[length:var(--text-2xs)] text-neutral-dim tabular-nums opacity-0 transition-opacity duration-[var(--duration-fast)] group-hover/ts:opacity-100 group-focus-within/ts:opacity-100" data-testid="user-timestamp">
         {{ formatClock(turn.user.timestamp) }}
       </span>
       <!-- N3 宽度纪律（设计决策 8）：max-width min(72%, 64ch) 双约束——窄窗按容器 72% 收，
@@ -43,7 +43,7 @@
            边框 + 12px 统一圆角（--radius-lg）+ 15px/10px 内边距 + 15px 字号（--text-md）
            1.7 行高。 -->
       <div
-        class="max-w-[min(72%,64ch)] min-w-0 [overflow-wrap:anywhere] rounded-lg border border-hairline bg-[var(--bubble-bg)] px-[15px] py-[10px] text-[length:var(--text-md)] leading-[1.7] text-neutral-fg"
+        class="user-bubble-md max-w-[min(72%,64ch)] min-w-0 [overflow-wrap:anywhere] rounded-lg border border-hairline bg-[var(--bubble-bg)] px-[15px] py-[10px] text-[length:var(--text-md)] leading-[1.7] text-neutral-fg"
         :class="{ 'is-mixed': isMixedContent }"
       >
       <template v-for="(seg, i) in orderedSegments" :key="i">
@@ -122,7 +122,7 @@
          才可命中（消除原「隐形按钮拦截点击」形态）。 -->
     <div
       v-if="!isEditingThisUser"
-      class="absolute bottom-0 right-0 flex items-center gap-0.5 opacity-0 pointer-events-none transition-opacity duration-150 group-hover/user:opacity-100 group-hover/user:pointer-events-auto group-focus-within/user:opacity-100 group-focus-within/user:pointer-events-auto"
+      class="absolute bottom-0 right-0 flex items-center gap-0.5 opacity-0 pointer-events-none transition-opacity duration-[var(--duration-fast)] group-hover/user:opacity-100 group-hover/user:pointer-events-auto group-focus-within/user:opacity-100 group-focus-within/user:pointer-events-auto"
     >
       <Button
         variant="ghost"
@@ -368,5 +368,39 @@ async function submitEdit(): Promise<void> {
 .is-mixed :deep(.md-render p + p)::before {
   content: '\a';
   white-space: pre;
+}
+/* [MF-1-26] 气泡内 markdown 简化形态（demo workbench.css .user-bubble pre/table 权威，
+   332-338）：pre = 无 header、无边框、padding 8px 10px、fs-md 档（--text-xs 12px）1.65
+   行高、margin 6px 0 0、card-inset（--bg-input）底、r-md（--radius）圆角；table = 仅
+   display:block + max-width:100% + overflow-x:auto——去外框/格线/表头底（demo 气泡表格
+   是 UA 平形态，非正文 .mds 网格档）。img 限宽（demo :338）由 MarkdownRenderer img 规则
+   已有（max-width:100% + height:auto），无需覆盖。
+   选择器以 .md-render 中锚抬高特异性（恒压 MarkdownRenderer 同特异性规则，不依赖样式
+   注入顺序）；不动共用渲染器 MarkdownRenderer 本体（其他消费点不受影响）。
+   escape hatch：跨组件 :deep 宿主作用域特化。 */
+.user-bubble-md :deep(.md-render .md-codeblock) {
+  border: 0;
+  border-radius: var(--radius);
+}
+.user-bubble-md :deep(.md-render .md-codeblock__header) {
+  display: none;
+}
+.user-bubble-md :deep(.md-render .md-codeblock pre.shiki) {
+  margin: 6px 0 0;
+  padding: 8px 10px;
+  font-size: var(--text-xs);
+  line-height: 1.65;
+}
+.user-bubble-md :deep(.md-render table) {
+  border: 0;
+  border-radius: 0;
+  margin: 0;
+}
+.user-bubble-md :deep(.md-render th),
+.user-bubble-md :deep(.md-render td) {
+  border: 0;
+}
+.user-bubble-md :deep(.md-render th) {
+  background: transparent;
 }
 </style>

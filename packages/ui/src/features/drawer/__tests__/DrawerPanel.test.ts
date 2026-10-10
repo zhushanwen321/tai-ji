@@ -124,6 +124,19 @@ describe('DrawerPanel (header-extra slot，W4 壳层挂载点)', () => {
   })
 })
 
+// R3 抽屉域焦点收敛（ui-replica MF-1-51）：aside 根持 input 聚焦零框作用域，双属性同压——
+// MF-1-71 后全局 Input 聚焦走 outline 通道，shadow-none（压 ring/box-shadow 通道）单独
+// 压不住 outline，漏一即穿。class 存在性断言 = 作用域契约断言（jsdom 不加载 Tailwind CSS，
+// 计算样式不可验；作用域的定义面就是 aside 类串本身）。
+describe('DrawerPanel (R3 抽屉域焦点作用域，MF-1-51)', () => {
+  it('input 聚焦零边界：aside 根双属性类在位（outline-none 压 outline 通道 + shadow-none 压 ring/box-shadow 通道）', () => {
+    const wrapper = mount(DrawerPanel, { props: baseProps() })
+    const aside = wrapper.find('[data-testid="drawer-panel"]')
+    expect(aside.classes()).toContain('[&_input:focus-visible]:outline-none')
+    expect(aside.classes()).toContain('[&_input:focus-visible]:shadow-none')
+  })
+})
+
 // bashTask tab（2026-09 background-task-sidebar-view D5②）：tabs 加第 8 个 TabMeta。
 // 内容面板由壳层（PanelContainer）slot 注入，本组件只负责 tab 元信息与空态 fallback。
 describe('DrawerPanel (bashTask tab，background-task-sidebar-view D5②)', () => {

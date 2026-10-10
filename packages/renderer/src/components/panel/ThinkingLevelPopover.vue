@@ -4,7 +4,8 @@
     触发器对齐 demo `.thinksel`（M4c：11px 字号 / r-xs 圆角 / --fw-mid 字重，「可操作 = 亮字」
     口径与模型触发器同款）；浮层列表对齐 demo `.popover right w120` 行语言（.pop-item：
     min-h 28 / 5px 8px 内边距 / r-sm / fs-md / mid 字 hover 提 fg，无行首档位点——demo 行 =
-    名称 + 选中勾两元素），选中态走 demo 单一范式（SELECTED_ITEM_CLASS）。
+    名称 + 选中勾两元素），选中态 = 行尾对勾显隐（demo R3：弹层行不进选中范式，
+    无底/框/字色选中态声明）。
   -->
   <Popover v-model:open="canOpen">
     <PopoverTrigger as-child>
@@ -42,12 +43,13 @@
         :key="opt.level"
         variant="ghost"
         class="flex min-h-[28px] w-full items-center gap-2 rounded-sm px-2 py-[5px] font-normal text-[length:var(--text-xs)] text-neutral-mid hover:bg-surface-hover hover:text-neutral-fg"
-        :class="level === opt.level && SELECTED_ITEM_CLASS"
         @click="onSelect(opt)"
       >
         <span class="flex-1 text-left">{{ getDisplayLabel(opt.level, props.levelMap, t) }}</span>
+        <!-- 选中指示 = 行尾对勾显隐（demo R3：弹层行不进选中范式，行无底/框/字色选中态） -->
         <Check
           class="size-[13px] shrink-0 transition-opacity"
+          :stroke-width="2.2"
           :class="level === opt.level ? 'opacity-100' : 'opacity-0'"
         />
       </Button>
@@ -61,7 +63,6 @@ import { useI18n } from 'vue-i18n'
 import { Check, ChevronDown, LoaderCircle, Brain } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-import { SELECTED_ITEM_CLASS } from '@/composables/logic/popover-styles'
 import {
   currentThinkingLevelKey,
   availableThinkingLevelOptions,

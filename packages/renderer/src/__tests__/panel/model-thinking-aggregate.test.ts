@@ -282,15 +282,18 @@ describe('数据面与 ModelSelectPopover 同源（model-picker-data）', () => 
 
   it('selected 带 provider 前缀时按裸 id 高亮（复合串拆段，同值判定同源）', async () => {
     // selected 已是 'anthropic/claude-4'（fixture 默认）——hover claude-4 不 emit 即反证裸 id 对齐；
-    // 此处补 DOM 侧选中态断言（选中行带 SELECTED_ITEM_CLASS）
+    // 此处补 DOM 侧选中态断言（选中指示 = 行尾对勾显隐，demo R3：弹层行无底无框）
     const w = mountAggregate()
     await openAggregate(w)
 
     const claudeRow = document.body.querySelector('[data-testid="model-picker-item-claude-4"]')
-    // 选中行带 SELECTED_ITEM_CLASS（demo 选中范式：elevated 底 + accent 内嵌标，M4c），
-    // 非选中行不带——裸 id 反查对齐的 DOM 侧证
-    expect(claudeRow?.className ?? '').toContain('shadow-[inset_2px_0_0_var(--accent)]')
-    const gptRow = document.body.querySelector('[data-testid="model-picker-item-gpt-4"]')
-    expect(gptRow?.className ?? '').not.toContain('shadow-[inset_2px_0_0_var(--accent)]')
+    // 选中行无底/框选中态类（demo R3：弹层行不进选中范式），行尾对勾显形（opacity-100）——
+    // 非选中行对勾隐藏——裸 id 反查对齐的 DOM 侧证
+    expect(claudeRow?.className ?? '').not.toContain('shadow-[inset')
+    expect(claudeRow?.className ?? '').not.toContain('bg-bg-elevated')
+    const claudeCheck = claudeRow?.querySelector('svg')
+    expect(claudeCheck?.getAttribute('class') ?? '').toContain('opacity-100')
+    const gptCheck = document.body.querySelector('[data-testid="model-picker-item-gpt-4"]')?.querySelector('svg')
+    expect(gptCheck?.getAttribute('class') ?? '').not.toContain('opacity-100')
   })
 })

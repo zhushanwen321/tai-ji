@@ -20,7 +20,6 @@ import { Check } from '@lucide/vue'
 import type { ProviderId } from '@taiji/shared'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { SELECTED_ITEM_CLASS } from '@/composables/logic/popover-styles'
 
 export interface ModelPickerModel {
   id: string
@@ -151,14 +150,15 @@ function onRowEnter(model: ModelPickerModel, group: ModelPickerGroup): void {
           variant="ghost"
           :data-testid="`${itemTestIdPrefix}-${model.id}`"
           class="flex min-h-[28px] w-full items-center gap-2 rounded-sm px-2 py-[5px] font-normal text-[length:var(--text-xs)] text-neutral-mid hover:bg-surface-hover hover:text-neutral-fg"
-          :class="isRowSelected(model, group) && SELECTED_ITEM_CLASS"
           @click="onPick(model, group)"
           @pointerenter="onRowEnter(model, group)"
         >
           <!-- 行名不截断（demo .pop-item white-space:nowrap，弹层宽随最长行增长；Button 基类自带 nowrap） -->
           <span class="flex-1 text-left">{{ model.name ?? model.id }}</span>
+          <!-- 选中指示 = 行尾对勾显隐（demo R3：弹层行不进选中范式，行无底/框/字色选中态） -->
           <Check
             class="size-[13px] shrink-0 opacity-0"
+            :stroke-width="2.2"
             :class="isRowSelected(model, group) && 'opacity-100'"
           />
         </Button>

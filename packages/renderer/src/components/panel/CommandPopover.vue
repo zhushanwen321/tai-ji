@@ -24,8 +24,11 @@
 
     **v6 视觉范式（B3 问题 14，对齐 demo .cmd-row）**：
     - 行用纯 div（非 Button variant=ghost），避免 button 的 font-medium/ring-offset 噪音
-    - 选中态 bg-surface（实色）——D8 特例，不复用 popover-styles.ts 的 SELECTED_ITEM_CLASS（bg-accent-soft）
-    - skill 类命令未选中时图标 text-reasoning（紫，demo .cmd-ico.skill）；选中统一 text-accent
+    - 选中辨识由 bg-surface 实色底承担（demo pages.css .cmd-row.selected = surface 底 +
+      cmd-name neutral-fg），文字/图标保持中性前景不染 accent——不与弹层列表选中态范式
+      混同（旧 accent 范式常量 SELECTED_ITEM_CLASS 已从 renderer 与 ui 两包删除，
+      弹层列表「当前项」范式 = surface-2 底 + 中性 border-strong 内嵌描边）
+    - skill 类命令未选中时图标 text-reasoning（紫）；选中随行色（中性前景）
     - 命令名 font-semibold（非 mono）+ middot · 分隔符（命令名与描述间）
     - 容器投影走 PopoverContent 默认 shadow-2；容器圆角/锚距/动效对齐弹层通用语言
       （M4c：rounded-lg 12px / 锚距 10px / E5 方向缓动——demo composer 无命令浮层对应物，
@@ -53,7 +56,7 @@
       <!-- D7：landing cwd 路错误态（加载失败 vs 无结果两因区分）——整行可点重试（重发起拉取） -->
       <div
         v-if="fileErrorVisible"
-        class="flex cursor-pointer items-center gap-2 px-2.5 py-2 text-left text-[12px] text-neutral-mid transition-colors hover:bg-surface-hover hover:text-neutral-fg"
+        class="flex cursor-pointer items-center gap-2 px-2.5 py-2 text-left text-[length:var(--text-xs)] text-neutral-mid transition-colors hover:bg-surface-hover hover:text-neutral-fg"
         role="button"
         data-testid="cmd-file-error"
         @click="retryCwdFileFetch"
@@ -64,7 +67,7 @@
       <!-- D7：无结果空态（拉取成功但目录无文件；query 过滤致空不在此列——源非空不弹本态） -->
       <div
         v-else-if="fileNoResultsVisible"
-        class="flex items-center gap-2 px-2.5 py-2 text-[12px] text-neutral-dim"
+        class="flex items-center gap-2 px-2.5 py-2 text-[length:var(--text-xs)] text-neutral-dim"
         data-testid="cmd-file-empty"
       >
         <FolderOpen class="size-[15px] shrink-0 opacity-60" />
@@ -74,7 +77,7 @@
            两种来源都是「结果稍后会到」的态，必须有可见行兜住（否则 open 但无渲染）。 -->
       <div
         v-else-if="fileLoadingVisible"
-        class="flex items-center gap-2 px-2.5 py-2 text-[12px] text-neutral-dim"
+        class="flex items-center gap-2 px-2.5 py-2 text-[length:var(--text-xs)] text-neutral-dim"
         data-testid="cmd-popover-loading"
       >
         <LoaderCircle class="size-[15px] shrink-0 opacity-60" />
@@ -85,7 +88,7 @@
            该行同时是「open 即消费键盘」的反馈前提（见脚本区 fileLoadingVisible 上方注释）。 -->
       <div
         v-else-if="items.length === 0"
-        class="flex items-center gap-2 px-2.5 py-2 text-[12px] text-neutral-dim"
+        class="flex items-center gap-2 px-2.5 py-2 text-[length:var(--text-xs)] text-neutral-dim"
         data-testid="cmd-popover-empty"
       >
         <SearchX class="size-[15px] shrink-0 opacity-60" />
@@ -93,14 +96,13 @@
       </div>
       <template v-else>
         <!-- list · 行用纯 div（对齐 demo .cmd-row：避免 Button variant=ghost 的 font-medium/ring-offset 噪音）。
-             选中态 bg-surface（实色）是 D8 特例——不复用 popover-styles.ts 的 SELECTED_ITEM_CLASS
-             （该 class 是 bg-accent-soft，供 ModelSelect/ThinkingLevel 用）；CommandPopover 按 D8 用实色。 -->
+             选中辨识由 bg-surface 实色底承担（demo .cmd-row.selected），文字/图标保持中性前景不染 accent。 -->
         <div class="max-h-[180px] overflow-y-auto py-1">
           <div
             v-for="(item, i) in items"
             :key="item.id"
-            class="cmd-row flex w-full select-none items-center gap-2 px-2.5 py-1.5 text-left text-[12px] leading-[1.4] transition-colors"
-            :class="i === activeIndex ? 'bg-surface text-accent' : 'text-neutral-mid hover:bg-surface-hover hover:text-neutral-fg'"
+            class="cmd-row flex w-full select-none items-center gap-2 px-2.5 py-1.5 text-left text-[length:var(--text-xs)] leading-[1.4] transition-colors"
+            :class="i === activeIndex ? 'bg-surface text-neutral-fg' : 'text-neutral-mid hover:bg-surface-hover hover:text-neutral-fg'"
             :aria-disabled="item.selected ? 'true' : undefined"
             @click="onSelect(item)"
             @mouseenter="activeIndex = i"
@@ -112,15 +114,17 @@
             <!-- file 类型：两行（basename 主 + 父目录路径暗色小字），区分同名文件 + 知道文件位置。
                  file basename 保留 font-mono（路径/文件名等宽对齐是常见范式，与 slash 命令名 sans 区分）。 -->
             <div v-if="props.type === 'file'" class="min-w-0 flex-1">
-              <div class="truncate font-mono text-[12px]" :class="i === activeIndex ? 'text-accent' : 'text-neutral-fg'">{{ item.name }}</div>
-              <div v-if="item.dirPath" class="truncate font-mono text-[10px] leading-tight text-neutral-dim">{{ item.dirPath }}</div>
+              <div class="truncate font-mono text-[length:var(--text-xs)] text-neutral-fg">{{ item.name }}</div>
+              <!-- 副行档对齐 demo .cmd-desc（pages.css：--fs-sm 11px + --neutral-mid）＝ --text-2xs + neutral-mid -->
+              <div v-if="item.dirPath" class="truncate font-mono text-[length:var(--text-2xs)] leading-tight text-neutral-mid">{{ item.dirPath }}</div>
             </div>
             <!-- session / subagent 类型：两行（主行 + subText 副行）——session 副行 = cwd · 相对时间、
                  subagent 副行 = agent · status、新建项无副行。主行 sans（标题/短标签语义，与 file 的
                  mono 路径区分）。派生逻辑在 command-popover-symbols.ts（纯函数可单测）。 -->
             <div v-else-if="props.type === 'session' || props.type === 'subagent'" class="min-w-0 flex-1">
-              <div class="truncate text-[12px] font-medium" :class="i === activeIndex ? 'text-accent' : 'text-neutral-fg'">{{ item.name }}</div>
-              <div v-if="item.subText" class="truncate text-[10px] leading-tight text-neutral-dim">{{ item.subText }}</div>
+              <div class="truncate text-[length:var(--text-xs)] font-medium text-neutral-fg">{{ item.name }}</div>
+              <!-- 副行档对齐 demo .cmd-desc（pages.css：--fs-sm 11px + --neutral-mid）＝ --text-2xs + neutral-mid -->
+              <div v-if="item.subText" class="truncate text-[length:var(--text-2xs)] leading-tight text-neutral-mid">{{ item.subText }}</div>
             </div>
             <!-- slash 类型：单行（命令名加粗 sans + middot + description/kind 提示词）。
                  skill 只显名字（icon+紫色已传达类型，/skill: 前缀对用户冗余）；
@@ -128,20 +132,20 @@
                  item.displayName 是显示名（skill 去前缀）——onSelect 传 name 保证路由正确。
                  middot · 与 demo .cmd-mid 对齐（命令名与描述间的视觉分隔）。 -->
             <template v-else>
-              <span class="shrink-0 font-semibold" :class="i === activeIndex ? 'text-accent' : 'text-neutral-fg'">{{ item.displayName ?? item.name }}</span>
+              <span class="shrink-0 font-semibold text-neutral-fg">{{ item.displayName ?? item.name }}</span>
               <span v-if="item.description" class="shrink-0 text-neutral-faint">·</span>
               <span v-if="item.description" class="ml-auto shrink-0 truncate max-w-[520px] text-neutral-dim">{{ item.description }}</span>
               <!-- skill 已选标记（多 skill 注入 D2）：命中 selectedSkillNames 的项显示「已选」，
                    onSelect 守卫禁选（防同一 skill 重复注入全文） -->
-              <span v-if="item.selected" class="ml-auto shrink-0 text-[10px] text-neutral-dim">{{ t('panel.command.skillSelected') }}</span>
-              <span v-else-if="!item.description" class="ml-auto shrink-0 text-[10px] text-neutral-dim">{{ item.kind }}</span>
+              <span v-if="item.selected" class="ml-auto shrink-0 text-[length:var(--text-3xs)] text-neutral-dim">{{ t('panel.command.skillSelected') }}</span>
+              <span v-else-if="!item.description" class="ml-auto shrink-0 text-[length:var(--text-3xs)] text-neutral-dim">{{ item.kind }}</span>
             </template>
           </div>
         </div>
         <!-- D7：DoS 上限 5000 截断提示（runtime truncated 信号；目标文件可能不在候选的感知入口） -->
         <div
           v-if="fileTruncatedVisible"
-          class="border-t border-hairline px-2.5 py-1 text-[10px] text-neutral-dim"
+          class="border-t border-hairline px-2.5 py-1 text-[length:var(--text-3xs)] text-neutral-dim"
           data-testid="cmd-file-truncated"
         >{{ t('panel.command.fileTruncated') }}</div>
       </template>
@@ -392,9 +396,10 @@ function iconFor(item: { icon: string }) {
   return ICONS[item.icon] ?? ICONS.file
 }
 
-/** 图标色 class：选中→text-accent；未选中 skill→text-reasoning；其他→text-neutral-dim */
+/** 图标色 class：选中随行色（demo .cmd-row.selected 无独立图标档，行 neutral-fg 继承）；
+ *  未选中 skill→text-reasoning；其他→text-neutral-dim */
 function iconClass(item: { isSkill?: boolean }, isSelected: boolean): string {
-  if (isSelected) return 'text-accent'
+  if (isSelected) return ''
   return item.isSkill ? 'text-reasoning' : 'text-neutral-dim'
 }
 

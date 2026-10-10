@@ -22,7 +22,7 @@
     -->
     <div
       v-if="lastAssistant"
-      class="absolute bottom-0 left-0 flex items-center gap-0.5 rounded-md border border-border-strong bg-bg-elevated p-0.5 shadow-2 opacity-0 pointer-events-none transition-opacity duration-150 group-hover/ai:opacity-100 group-hover/ai:pointer-events-auto group-focus-within/ai:opacity-100 group-focus-within/ai:pointer-events-auto"
+      class="absolute bottom-0 left-0 flex items-center gap-0.5 rounded-md border border-border-strong bg-bg-elevated p-0.5 shadow-2 opacity-0 pointer-events-none transition-opacity duration-[var(--duration-fast)] group-hover/ai:opacity-100 group-hover/ai:pointer-events-auto group-focus-within/ai:opacity-100 group-focus-within/ai:pointer-events-auto"
     >
       <!-- 复制（纯文本）-->
       <Button

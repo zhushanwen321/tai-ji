@@ -2,8 +2,7 @@
   <!--
     §2a 上下文容量 popover + coding-plan 额度（draft-composer-states §2a + merged-card）。
     hover 触发，按钮文字始终显当前用量摘要（69K · 6.9%），浮层给完整容量。
-    用量分档：<70% accent · 70–90% warning · >90% danger（bar）。
-    缓存命中：≥50% success · <50% warning。
+    触发器两档着色（>70% warn，其余中性；缓存命中率显示在 GenStats 卡/触发器，不在本组件）。
 
     [HISTORICAL] `variant`（simplified/iconic）中间态已随 W3b 删除——聚合形态由
     ComposerMetricsAggregate（单图标聚合页）承担，本组件恒为 full 文本触发器；
@@ -17,7 +16,7 @@
         variant="ghost"
         :class="
           cn(
-            'h-7 gap-1 rounded-sm px-2 text-[11px] transition-colors',
+            'h-7 gap-1 rounded-[var(--radius-xs)] px-2 text-[length:var(--text-2xs)] transition-colors',
             isHigh ? 'text-warn hover:text-warn' : 'text-neutral-dim hover:text-neutral-mid',
           )
         "
@@ -32,8 +31,12 @@
         </template>
       </Button>
     </HoverCardTrigger>
+    <!-- 右下锚（demo .stats-pop：right:0 + bottom:calc(100%+10px)）——align="end" 右对齐
+         触发钮、side-offset 10px 锚距（reka 默认 center/6px 与 demo 不符） -->
     <HoverCardContent
       side="top"
+      align="end"
+      :side-offset="10"
       class="w-[260px] p-0"
     >
       <ContextCapacityCard :session-id="props.sessionId" :model-id="props.modelId" />

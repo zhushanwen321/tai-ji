@@ -13,10 +13,12 @@
       demo .rail-viewport——原 accent 形态被 demo 权威覆盖）
     - 浮层面板 = bg-elevated + 1px border-strong 硬边界 + shadow-2（demo .rail-panel）
     - 节点 = 6px 圆角（--radius-sm）4×6 padding，行 12px 字号 1.35 行高（demo .rail-row）
-    - 节点 hover = surface-hover 底（仅非选中节点——demo 文件尾选中规则同特异性靠后压过
-      hover，选中项 hover 不掉底）
-    - 选中节点（.on）= elevated 底 + inset 2px accent 左标（demo 选中态单一范式），图标
-      提为 fg-2（demo .rail-node.on .rail-row svg——呼吸弧行图标同为 fg-2，非 accent）
+    - 节点 hover = surface-hover 底（全节点统一——demo .rail-node:hover 无条件命中，
+      选中项 hover 同样给临时反馈底；Tier B 选中规则只管文字提亮，与 hover 底不冲突）
+    - 选中节点（.on）= demo Tier B 行类范式：无底无框仅文字提亮（workbench.css:727
+      .si.on,.frow.sel,.rail-node.on{color:var(--fg)} + :291 收编注释），节点文字提为
+      text-neutral-fg；图标提为 fg-2（demo .rail-node.on .rail-row svg——呼吸弧行图标
+      同为 fg-2，非 accent）
     - failed 图标常驻 text-danger（real 超集语义 §5.6B，优先于选中提色）
 
     设计约束：
@@ -52,10 +54,8 @@
           v-for="(turn, idx) in turns"
           :key="turnStableId(turn)"
           data-testid="rail-node"
-          class="group/rail-node rail-node relative flex cursor-pointer select-none flex-col gap-0.5 rounded-sm px-1.5 py-1 transition-colors"
-          :class="idx === activeTurnIndex
-            ? 'active bg-bg-elevated shadow-[inset_2px_0_0_var(--accent)]'
-            : 'hover:bg-surface-hover'"
+          class="group/rail-node rail-node relative flex cursor-pointer select-none flex-col gap-0.5 rounded-sm px-1.5 py-1 transition-colors hover:bg-surface-hover"
+          :class="idx === activeTurnIndex ? 'active text-neutral-fg' : ''"
           @click="emit('jump', idx)"
         >
           <!-- user 行：User 图标 + user 文本（text-neutral-fg）。
@@ -68,7 +68,8 @@
             </span>
           </div>
           <!-- agent 行：状态图标（failed=danger 常驻 / 选中=fg-2 呼吸弧或 Bot / 其余=neutral-ico Bot）+ agent 摘要。
-               failed 文本 text-neutral-mid（hover 升 text-neutral-fg），其余 text-neutral-mid。
+               failed 文本未选中时 text-neutral-mid（hover 升 text-neutral-fg）；选中节点提
+               text-neutral-fg（demo Tier B）；其余未选中 text-neutral-mid。
                agent 摘要文本优先（content 截断），空则 fallback 计数（N thoughts · M tools）。
                摘要全空时只在占位门开（isPlaceholderVisible = sessionActive ∧ 真末位）显「进行中…」——
                本意覆盖 pending turn（streaming 刚起 / ask-user 表单等待）；原裸判据「无 agent 内容」
@@ -91,7 +92,7 @@
             />
             <span
               class="flex-1 truncate pr-6 text-[length:var(--text-xs)] leading-[1.35] transition-colors"
-              :class="railMemoFor(turn).failed ? 'text-neutral-mid hover:text-neutral-fg' : 'text-neutral-mid'"
+              :class="agentSummaryClass(turn, idx)"
             >
               {{ railMemoFor(turn).agentSummary || (isPlaceholderVisible(turn, idx) ? t('panel.message.railInProgress') : ' ') }}
             </span>
@@ -99,7 +100,8 @@
           <!-- 折展 toggle 按钮：hover/focus 浮出（渐进披露），active 节点常驻可见（用户决策）。
                图标语义：ChevronDown=折叠态（向下展开）/ ChevronUp=展开态（向上收起），直观不混语义。
                chevron 用 text-neutral-dim（中性灰，不抢视觉）。
-               「当前位置」标记不再借用 chevron 方向，由节点底色 bg-accent-soft + ring 独立承担。 -->
+               「当前位置」标记不再借用 chevron 方向，选中态由 demo Tier B 文字提亮承担
+               （节点 text-neutral-fg + 图标 fg-2，无底无框）。 -->
           <Button
             variant="ghost"
             size="icon"
@@ -191,6 +193,19 @@ function agentRowIconClass(turn: MessageTurn, idx: number): string {
   const memo = railMemoFor(turn)
   if (memo.failed) return memo.iconClass
   return idx === props.activeTurnIndex ? 'text-[color:var(--neutral-fg-2)]' : memo.iconClass
+}
+
+/**
+ * agent 行摘要文字色（demo Tier B 行类文字提亮 + real 超集语义）：
+ * 选中节点 → text-neutral-fg（Tier B「无底无框仅文字提亮」，demo workbench.css:727
+ * .rail-node.on{color:var(--fg)}——span 有自有 mid 色不吃节点继承，须显式提亮）；
+ * 未选中 failed → text-neutral-mid + hover 提亮；未选中普通 → text-neutral-mid
+ * （demo .rail-row span）。failed 状态信号由图标 danger 常驻承担，选中时文字照常提亮。
+ * 纯展示派生：只读 memo 与 activeTurnIndex，无副作用。
+ */
+function agentSummaryClass(turn: MessageTurn, idx: number): string {
+  if (idx === props.activeTurnIndex) return 'text-neutral-fg'
+  return railMemoFor(turn).failed ? 'text-neutral-mid hover:text-neutral-fg' : 'text-neutral-mid'
 }
 
 /**

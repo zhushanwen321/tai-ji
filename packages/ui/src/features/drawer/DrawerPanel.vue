@@ -11,6 +11,15 @@
   [P4 s5 drawer-widget-removal] 内置 widget 内容区（gui/lines/status footer）已删：
   旧 extension:widget/widgetGui/status 通道由 PluginViewContainer 承接。
 
+  R3 抽屉域焦点收敛（ui-replica MF-1-51，demo drawers.css「元素级重置收窄到抽屉根」）：
+  aside 根持容器级 focus-visible 覆盖——input 聚焦零框（光标即反馈，与 composer 同规）。
+  MF-1-71 后全局 Input 聚焦走 outline 通道，抽屉域须双属性同压：shadow-none 压
+  ring/box-shadow 通道 + outline-none 压 outline 通道（漏一即穿，MF-1-51×MF-1-71
+  合流缺口教训）；button/[tabindex]
+  键盘焦点 = inset 1px --border-strong（压掉 ui Button 基类 ring-2 外环——ring-0 +
+  ring-offset-0 归零 ring 变量后由 inset shadow 承接；[tabindex] 覆盖 DetailPane 等
+  role=tab 后代）。作用域只罩本 aside 后代，不触全局 Input.vue / button-variants.ts 基类。
+
   状态/数据契约（IF2 + clarify C1）：
   - props{isOpen, activeTab, sessionId} 为控制态（父组件 PanelContainer 管理），
     本组件只接收 + emit close/set-tab，不持有状态（§6.3 点5 架构解耦）。
@@ -26,7 +35,7 @@
     <Transition name="drawer-slide-right">
     <aside
       v-if="isOpen"
-      class="relative flex h-full min-w-0 flex-col rounded-[var(--radius-card)] border border-border bg-surface shadow-[var(--shadow-1)]"
+      class="relative flex h-full min-w-0 flex-col rounded-[var(--radius-card)] border border-border bg-surface shadow-[var(--shadow-1)] [&_input:focus-visible]:shadow-none [&_input:focus-visible]:outline-none [&_button:focus-visible]:ring-0 [&_button:focus-visible]:ring-offset-0 [&_button:focus-visible]:shadow-[inset_0_0_0_1px_var(--border-strong)] [&_[tabindex]:focus-visible]:shadow-[inset_0_0_0_1px_var(--border-strong)]"
       :aria-label="t('panel.sideDrawer.title')"
       data-testid="drawer-panel"
     >
@@ -189,16 +198,24 @@ const activeTabMeta = computed<TabMeta>(() => tabs.value.find((tab) => tab.key =
 /* 抽屉从右缘滑入/滑回（panel/spec.md v2 + chat-flow-polish P1-1）。
    语义「从右缘来、回右缘去」（Spatial consistency）：opacity 淡入 + translateX(16px→0) 位移。
    transform 不触发布局（drawer 是 SplitterPanel，避免 width 动画引起 main reflow）。
-   escape hatch：Vue Transition 类无法用 Tailwind 表达（需 enter-from/leave-to 同时设 transform）。 */
+   escape hatch：Vue Transition 类无法用 Tailwind 表达（需 enter-from/leave-to 同时设 transform）。
+   E5 方向缓动（demo drawers.css .rd）：开 = ease-out（快起缓停，跟手）、关 = ease-in（缓起快走，
+   利落）；时长 = demo --dur-base（显隐层专属档，与壳层 width 过渡 --duration-slow 分层
+   各自独立——demo 两层时长本就不同），消费令牌层既有 --duration（值 200ms 与 demo
+   --dur-base 同值，MF-2-17 收编，不新增 --duration-base 重复令牌）。 */
 .drawer-slide-right-enter-from,
 .drawer-slide-right-leave-to {
   opacity: 0;
   transform: translateX(16px);
 }
-.drawer-slide-right-enter-active,
+.drawer-slide-right-enter-active {
+  transition:
+    opacity var(--duration) var(--ease-out),
+    transform var(--duration) var(--ease-out);
+}
 .drawer-slide-right-leave-active {
   transition:
-    opacity var(--duration-slow) var(--ease),
-    transform var(--duration-slow) var(--ease);
+    opacity var(--duration) var(--ease-in),
+    transform var(--duration) var(--ease-in);
 }
 </style>

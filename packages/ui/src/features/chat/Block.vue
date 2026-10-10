@@ -15,9 +15,9 @@
       .line.subagent.failed .sicon 形态），错误摘要进 body 文本。
     审批按钮 DEFERRED（G-018），v1 不渲染。failed 救生按钮不做（agent 自处理，design.md 决策 3）。
   -->
-  <!-- 块间节奏（ui-optimize-unified 决策 4）：间距唯一权威 = Turn.vue trace 容器相邻选择器
-       （后块 margin-top 定档 20px/12px），块自身不再携带 py 节奏 padding（叠加核算：原 8+8
-       隐式叠加改为容器单值显式声明）。trace-blk--text 是正文类型标记，供两档分化选择器前锚。
+  <!-- 块间节奏（MF-1-25，demo workbench.css 有效值 22/17/17/20 校准）：间距唯一权威 =
+       Turn.vue trace 容器相邻选择器（后块 margin-top 按「前块类型 × 后块类型」四档定档），
+       块自身不再携带 py 节奏 padding。trace-blk--text 是正文类型标记，供四档分化选择器前锚。
        [M3b demo 复刻] 块级 running 容器染色（chat-flow-polish P0-1 accent 左标 + soft 底）已删：
        demo 运行态只落在行级（呼吸弧 accent 图标 + 文字扫光，workbench.css .run-ic/.shine），
        .blk 容器无任何 running 形态——行级信号已足，块级染色是 demo 不存在的自行发明。 -->
@@ -33,9 +33,18 @@
              [M3b demo 复刻]（workbench.css .line/.think）：行内间距 gap-2（demo 8px）；
              图标染 --reasoning（.think .sicon，显式类替换 BLOCK_ICON_CLASS——两者 text 色
              工具类同特异性，追加不构成可靠覆盖）；行字号继承头部 --text-base（14px =
-             demo fs-lg 行级档）。 -->
-        <div class="flex items-center gap-2 min-h-[1.5rem]">
-          <component :is="BLOCK_ICON_LUCIDE.thinking" class="size-3.5 shrink-0 text-reasoning" />
+             demo fs-lg 行级档）。
+             [MF-1-28]（demo TurnList.vue:72-73）：running 态 = 呼吸弧 accent（同工具行
+             :237 形态，信号源 = thinkingSweeping）；静止态 = lightbulb 15px stroke1.6 染
+             --reasoning。行 hover 反馈（MF-1-17/F17，workbench.css:350 .line:hover 文字
+             opacity .8 的行级等价形态，同 tool/bash-group/workflow 行）；行内垂直对齐
+             baseline（MF-1-34，workbench.css:348 align-items:baseline），图标保持
+             self-center（demo .sicon align-self:center）。 -->
+        <div class="flex items-baseline gap-2 min-h-[1.5rem] transition-opacity duration-[var(--duration-fast)] hover:opacity-80">
+          <span v-if="thinkingSweeping" class="inline-flex size-[15px] shrink-0 self-center items-center justify-center text-accent">
+            <span class="inline-flex size-full items-center justify-center animate-loader-spin" v-html="RUNNING_LOADER_SVG" /> <!-- eslint-disable-line vue/no-v-html -- hardcoded constant from block-icon.ts -->
+          </span>
+          <component :is="BLOCK_ICON_LUCIDE.thinking" v-else class="size-[15px] shrink-0 self-center text-reasoning [stroke-width:1.6]" />
           <!-- 状态词 label：思考进行中跑文字扫光（决策 10）。生命周期 = 块级（thinkingEnd 未填），
                非消息级 working——思考完结后消息仍在流式（工具执行中），扫光随思考完结熄灭。
                base 覆盖为 mid 档对齐 BLOCK_LABEL_CLASS 常态字色（reduced-motion 停帧态 = 常态色，
@@ -52,7 +61,7 @@
                .think 同行 14px sans dim）——原 D2 悬停化 + mono 11px 形态被 demo 权威覆盖；
                行尾时刻槽（thinking-time-slot）保留 D2 悬停化（demo .ts 即 hover 显形）。 -->
           <span v-if="thinkingDuration" class="shrink-0 text-neutral-dim" data-testid="thinking-duration">{{ t('panel.message.thinkingDuration', { duration: thinkingDuration }) }}</span>
-          <span v-if="thinkingDuration && messageTimestamp" class="shrink-0 text-neutral-faint opacity-0 transition-opacity group-hover/think:opacity-100 group-focus-within/think:opacity-100">·</span>
+          <span v-if="thinkingDuration && messageTimestamp" class="shrink-0 text-neutral-faint opacity-0 transition-opacity duration-[var(--duration-fast)] group-hover/think:opacity-100 group-focus-within/think:opacity-100">·</span>
           <!-- working 态：单行尾行视口（2026-08 抖动修复重写）。横向钉右 = viewport flex
                justify-end + 行右对齐 + mr-auto（溢出裁左纯 CSS 无 scrollLeft 时序；mr-auto
                短行左贴 label、长行溢出时钉右）；纵向换行 = useTailScroll settled/sliding
@@ -62,7 +71,7 @@
                emoji 21px，CJK 行被裁 2-5px）；无单位系数使行盒恒 = 系数×字号，字体无关。 -->
           <span
             v-if="working && thinkingTailLines.length > 0"
-            class="flex h-[1lh] min-w-0 flex-1 justify-end overflow-hidden leading-normal text-neutral-dim"
+            class="flex h-[1lh] min-w-0 flex-1 self-center justify-end overflow-hidden leading-normal text-neutral-dim"
             :class="thinkingExpanded ? 'invisible' : ''"
           >
             <span :class="[thinkingSweeping ? 'text-sweep' : '', 'mr-auto flex flex-col items-end self-start']" :style="thinkScrollStyle">
@@ -71,7 +80,7 @@
           </span>
           <span v-else class="flex-1 min-w-0 truncate text-neutral-dim" :class="[thinkingSweeping ? 'text-sweep' : '', thinkingExpanded ? 'invisible' : '']">{{ previewText }}</span>
           <!-- thinking 块行尾时刻（D2 悬停化：常驻改按需——悬停该行 / 键盘焦点进入该行才显现） -->
-          <span v-if="messageTimestamp" class="ml-auto shrink-0 font-mono text-[length:var(--text-2xs)] text-neutral-dim tabular-nums opacity-0 transition-opacity group-hover/think:opacity-100 group-focus-within/think:opacity-100" data-testid="thinking-time-slot">{{ formatClock(messageTimestamp) }}</span>
+          <span v-if="messageTimestamp" class="ml-auto shrink-0 self-center font-mono text-[length:var(--text-2xs)] text-neutral-dim tabular-nums opacity-0 transition-opacity duration-[var(--duration-fast)] group-hover/think:opacity-100 group-focus-within/think:opacity-100" data-testid="thinking-time-slot">{{ formatClock(messageTimestamp) }}</span>
         </div>
         <!-- 展开内容区：copy 按钮浮在左上角（BlockScrollBox 外层，层级不动）。按钮常驻 DOM 且
              层级固定，可见度由悬停控制（opacity-0 + group-hover/result:opacity-100）——
@@ -115,7 +124,7 @@
       </div>
       <!-- text 块行尾时刻（D2 悬停化：原 w-28 固定占位列随悬停化一并移除，正文行恢复满宽；
            ml-auto 钉行尾，悬停/键盘焦点进入该行才显现） -->
-      <span v-if="messageTimestamp" class="ml-auto shrink-0 font-mono text-[length:var(--text-2xs)] text-neutral-dim tabular-nums opacity-0 transition-opacity group-hover/text:opacity-100 group-focus-within/text:opacity-100" data-testid="text-time-slot">{{ formatClock(messageTimestamp) }}</span>
+      <span v-if="messageTimestamp" class="ml-auto shrink-0 self-center font-mono text-[length:var(--text-2xs)] text-neutral-dim tabular-nums opacity-0 transition-opacity duration-[var(--duration-fast)] group-hover/text:opacity-100 group-focus-within/text:opacity-100" data-testid="text-time-slot">{{ formatClock(messageTimestamp) }}</span>
     </div>
 
     <!-- ── bash 组块（ui-signal-density §3.3 D1 U3）：连续 bash 折成一行组头「×N · 共 Xs」。
@@ -133,7 +142,7 @@
     <div v-else-if="type === 'bash-group' && group" class="trace-bash-group" data-testid="bash-group">
       <div
         data-testid="bash-group-header"
-        class="flex min-w-0 cursor-pointer select-none items-center gap-2 text-[length:var(--text-base)] [font-weight:var(--fw-mid)] text-neutral-mid transition-opacity hover:opacity-80"
+        class="flex min-w-0 cursor-pointer select-none items-baseline gap-2 text-[length:var(--text-base)] [font-weight:var(--fw-mid)] text-neutral-mid transition-opacity hover:opacity-80"
         role="button"
         tabindex="0"
         :aria-expanded="groupExpanded"
@@ -146,10 +155,10 @@
              组头文字（×N · 共 Xs 计数/耗时口径）是稳定标识，不跑文字扫光（决策 10）。
              [M3b demo 复刻] 行文字不染 accent（demo 运行态 = 仅呼吸弧图标 accent，文字保持
              行层级 mid，workbench.css .tool .t-name），与普通 tool 行运行态同款。 -->
-        <span v-if="group.hasRunning" class="inline-flex size-[15px] shrink-0 items-center justify-center text-accent">
+        <span v-if="group.hasRunning" class="inline-flex size-[15px] shrink-0 self-center items-center justify-center text-accent">
           <span class="inline-flex size-full items-center justify-center animate-loader-spin" v-html="RUNNING_LOADER_SVG" /> <!-- eslint-disable-line vue/no-v-html -- hardcoded constant from block-icon.ts -->
         </span>
-        <component :is="BLOCK_ICON_LUCIDE['bash-group']" v-else :class="BLOCK_ICON_CLASS" />
+        <component :is="BLOCK_ICON_LUCIDE['bash-group']" v-else :class="[BLOCK_ICON_CLASS, 'self-center']" />
         <span class="min-w-0 truncate text-left">{{ t('panel.message.traceBashSummary', { count: group.header.count, duration: formatDuration(group.header.durationMs) }) }}</span>
         <!-- 失败段 chip 化（demo failtag 形态：workbench.css .failtag = 11px fw-mid danger +
              danger-soft 底 + r-xs 4px + 1px 6px 内边距） -->
@@ -181,13 +190,13 @@
       <div v-else-if="isWorkflow" class="trace-workflow" data-testid="workflow-block">
         <div
           data-testid="tool-block-header"
-          class="flex min-w-0 cursor-pointer select-none items-center gap-2 text-[length:var(--text-base)] [font-weight:var(--fw-mid)] text-neutral-dim transition-opacity hover:opacity-80"
+          class="flex min-w-0 cursor-pointer select-none items-baseline gap-2 text-[length:var(--text-base)] [font-weight:var(--fw-mid)] text-neutral-dim transition-opacity hover:opacity-80"
           @click="openWorkflowDrawer"
         >
           <!-- running 态 loader（呼吸弧 + accent），其余走 list-checks ICON；
                failed 图标染 danger（与普通 tool 行同款，demo .line.subagent.failed .sicon 形态家族） -->
-          <span v-if="isRunning" class="inline-flex size-[15px] shrink-0 items-center justify-center text-accent animate-loader-spin" v-html="RUNNING_LOADER_SVG" /> <!-- eslint-disable-line vue/no-v-html -- hardcoded constant from block-icon.ts -->
-          <component :is="BLOCK_ICON_LUCIDE.workflow" v-else :class="headerIconClass" />
+          <span v-if="isRunning" class="inline-flex size-[15px] shrink-0 self-center items-center justify-center text-accent animate-loader-spin" v-html="RUNNING_LOADER_SVG" /> <!-- eslint-disable-line vue/no-v-html -- hardcoded constant from block-icon.ts -->
+          <component :is="BLOCK_ICON_LUCIDE.workflow" v-else :class="[headerIconClass, 'self-center']" />
           <span :class="BLOCK_LABEL_CLASS">{{ t('panel.message.workflow') }}</span>
           <!-- name 染对话流专属名称色 --name（2026-10-06 裁决）；slug 降行层级灰（与「子代理」等标签同色 --neutral-mid） -->
           <span v-if="workflowFields.nameShort" class="shrink-0 whitespace-nowrap font-mono text-[length:var(--text-sm)] text-[color:var(--name)]" :title="workflowFields.name">{{ workflowFields.nameShort }}</span>
@@ -226,7 +235,7 @@
       <div v-else class="group/tool">
         <div
           data-testid="tool-block-header"
-          class="tool-header flex min-w-0 cursor-pointer select-none items-center gap-2 text-[length:var(--text-base)] [font-weight:var(--fw-mid)] text-neutral-mid transition-opacity hover:opacity-80"
+          class="tool-header flex min-w-0 cursor-pointer select-none items-baseline gap-2 text-[length:var(--text-base)] [font-weight:var(--fw-mid)] text-neutral-mid transition-opacity hover:opacity-80"
           :title="toolExpanded ? t('panel.message.collapse') : t('panel.message.expand')"
           @click="toggleTool"
         >
@@ -234,10 +243,10 @@
                [M3b demo 复刻]（workbench.css .tool/.run-ic）：行文字恒行层级 mid 不随状态染色
                （demo .tool .t-name 恒 mid，无 accent/danger 文字态），状态色只落在图标——
                running = accent 呼吸弧、failed = danger（.line.subagent.failed .sicon）。 -->
-          <span v-if="isRunning" class="inline-flex size-[15px] shrink-0 items-center justify-center text-accent">
+          <span v-if="isRunning" class="inline-flex size-[15px] shrink-0 self-center items-center justify-center text-accent">
             <span class="inline-flex size-full items-center justify-center animate-loader-spin" v-html="RUNNING_LOADER_SVG" /> <!-- eslint-disable-line vue/no-v-html -- hardcoded constant from block-icon.ts -->
           </span>
-          <component :is="headerBlockIcon" v-else :class="headerIconClass" />
+          <component :is="headerBlockIcon" v-else :class="[headerIconClass, 'self-center']" />
           <span class="shrink-0 normal-case tracking-normal">{{ toolName }}</span>
           <!-- running + 有流式输出：单行尾行视口（同 thinking header 结构：leading-normal
                字体无关行高 + mr-auto 短行左贴/溢出钉右 + 纵向状态机滑入）；否则静态 shortenForHeader。
@@ -245,7 +254,7 @@
                font-mono fs-base dim），与行级 14px sans 拉开命令语境。 -->
           <span
             v-if="isRunning && toolTailLines.length > 0"
-            class="flex h-[1lh] min-w-0 flex-1 justify-end overflow-hidden font-mono text-[length:var(--text-sm)] normal-case leading-normal tracking-normal text-neutral-dim"
+            class="flex h-[1lh] min-w-0 flex-1 self-center justify-end overflow-hidden font-mono text-[length:var(--text-sm)] normal-case leading-normal tracking-normal text-neutral-dim"
             :class="{ invisible: toolExpanded && isBashTool }"
           >
             <span class="text-sweep mr-auto flex flex-col items-end self-start" :style="toolScrollStyle">
@@ -257,11 +266,15 @@
                title 完整路径 + ellipsis）。
                [M3b demo 复刻] chip 形态对齐 demo .tool .fchip（workbench.css:372）：card-inset
                凹陷底 + hairline 边 + fg-2 字 + 12px mono + 1px 8px 内边距；demo chip 无图标
-               （FileText 移除）。hover 提亮为 real 保留 affordance（demo 无 hover 形态）。 -->
+               （FileText 移除）。hover 提亮为 real 保留 affordance（demo 无 hover 形态）。
+               [MF-1-24]（demo workbench.css:372-386 同款）：max-w-[320px] 上限（长文件名不再
+               吃满整行）+ 内层 fchip-roll 双 span 轻方案——静态 truncate 截断，hover 时容器
+               text-overflow:clip + 内层 roll 滚到文末停（forwards）、短名 min(0px,…) 取 0
+               不滚、reduced-motion 停（动画与 media 查询在本文件 scoped 尾部）。 -->
           <span
             v-else-if="argPath && isFileWriteTool"
             data-testid="tool-file-chip"
-            class="inline-flex min-w-0 max-w-full cursor-pointer items-center gap-1 rounded-sm border border-hairline bg-bg-input px-2 py-px font-mono text-[length:var(--text-xs)] normal-case tracking-normal [font-weight:var(--fw-text)] text-[color:var(--neutral-fg-2)] transition-colors hover:border-border-strong hover:text-neutral-fg"
+            class="tool-file-chip inline-flex min-w-0 max-w-[320px] cursor-pointer items-center gap-1 truncate rounded-sm border border-hairline bg-bg-input px-2 py-px font-mono text-[length:var(--text-xs)] normal-case tracking-normal [font-weight:var(--fw-text)] text-[color:var(--neutral-fg-2)] transition-colors hover:border-border-strong hover:text-neutral-fg hover:[text-overflow:clip]"
             role="button"
             tabindex="0"
             :title="argPath"
@@ -269,7 +282,7 @@
             @keydown.enter.stop.prevent="openFileDetail(argPath)"
             @keydown.space.stop.prevent="openFileDetail(argPath)"
           >
-            <span class="min-w-0 truncate">{{ fileChipBasename }}</span>
+            <span class="fchip-roll inline-block whitespace-nowrap">{{ fileChipBasename }}</span>
             <!-- 统计段预留位（决策 8：diff +N −N 数据不可得本波不做，登记 docs/todo 随 U19 执行） -->
           </span>
           <span v-else-if="argPath" class="min-w-0 font-mono text-[length:var(--text-sm)] normal-case tracking-normal text-neutral-dim truncate" :class="[{ invisible: toolExpanded && isBashTool }, isRunning ? 'text-sweep' : '']">{{ shortenForHeader(argPath) }}</span>
@@ -277,9 +290,9 @@
                门控，fs-md 12px mono dim——running 也保持 dim，accent 只在呼吸弧图标），
                时刻保留 D2 悬停化（demo .ts opacity 0→1 hover 显形）；耗时与时刻间无分隔点
                （demo 两 span 裸相邻，行 gap 8px 承担间距）。 -->
-          <span v-if="tool?.startTime" class="ml-auto shrink-0 flex items-center gap-2 font-mono tabular-nums" data-testid="tool-time-slot">
+          <span v-if="tool?.startTime" class="ml-auto shrink-0 flex items-center gap-2 self-center font-mono tabular-nums" data-testid="tool-time-slot">
             <span v-if="toolDuration" class="text-[length:var(--text-xs)] text-neutral-dim">{{ toolDuration }}</span>
-            <span class="text-[length:var(--text-2xs)] text-neutral-dim opacity-0 transition-opacity group-hover/tool:opacity-100 group-focus-within/tool:opacity-100">{{ formatClock(tool.startTime) }}</span>
+            <span class="text-[length:var(--text-2xs)] text-neutral-dim opacity-0 transition-opacity duration-[var(--duration-fast)] group-hover/tool:opacity-100 group-focus-within/tool:opacity-100">{{ formatClock(tool.startTime) }}</span>
           </span>
         </div>
         <Transition name="block-expand">
@@ -759,5 +772,16 @@ const testId = computed(() => {
   color: transparent;
   animation: text-sweep 2.6s cubic-bezier(0.45, 0, 0.25, 1) infinite;
 }
+
+/* 工具行文件 chip hover 滚动（MF-1-24，demo workbench.css .fchip-roll 轻方案原样移植）：
+   静态截断由容器 truncate（ellipsis）承担，hover 时容器 text-overflow:clip（模板
+   hover:[text-overflow:clip] 任意属性类）+ 内层 .fchip-roll 从原位滚到文末停（forwards），
+   短名 min(0px, 304px-100%) 取 0 不滚（304 = max-w 320 - 左右 padding 16）。
+   escape hatch：keyframes + 后代选择器组合（Tailwind 无法表达 hover 触发的位移动画）。
+   keyframes 在 scoped 内定义 + 同块引用自洽（Vue SFC 编译器对 scoped keyframes 同块重写
+   动画名；仅本组件单消费点，无跨组件引用失效问题）。 */
+.tool-file-chip:hover .fchip-roll { animation: fchip-roll-x 2.4s var(--ease-out) 0.35s forwards; }
+@keyframes fchip-roll-x { to { transform: translateX(min(0px, calc(304px - 100%))); } }
+@media (prefers-reduced-motion: reduce) { .tool-file-chip:hover .fchip-roll { animation: none; } }
 </style>
 

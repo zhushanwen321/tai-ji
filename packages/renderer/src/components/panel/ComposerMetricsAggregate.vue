@@ -32,7 +32,7 @@
     </HoverCardTrigger>
     <!-- 容器对齐 demo .stats-pop：右下锚 + 10px 间距 + r-lg 圆角；宽 300 保留 real
          四卡布局宽（demo 240 是四行 sr 形态的宽，登记差异） -->
-    <HoverCardContent side="top" :side-offset="10" class="w-[300px] rounded-lg p-0">
+    <HoverCardContent side="top" align="end" :side-offset="10" class="w-[300px] rounded-lg p-0">
       <ContextCapacityCard :session-id="props.sessionId" :model-id="props.modelId" />
       <span class="block h-px bg-border-strong" aria-hidden="true" />
       <GenStatsTtftCard :session-id="props.sessionId" :model-id="props.modelId" />

@@ -232,6 +232,23 @@ describe('PanelContainer 单 panel + Drawer 壳路径（AC9/AC12 冒烟载体）
     expect(wrapper.find('[data-testid="drawer-panel"]').exists()).toBe(false)
     expect(wrapper.findAll('[data-testid="panel"]')).toHaveLength(1)
   }, 60_000)
+
+  // R3 抽屉域焦点收敛（MF-1-51）：抽屉挂载层（drawer-area = 右抽屉 FindBar surface）持
+  // input 聚焦零框作用域，双属性同压——MF-1-71 后全局 Input 聚焦走 outline 通道，
+  // shadow-none（压 ring/box-shadow 通道）单独压不住 outline，漏一即穿。class 存在性断言 =
+  // 作用域契约断言（jsdom 不加载 Tailwind CSS；作用域定义面就是挂载元素类串本身）。
+  it('R3 抽屉域焦点作用域：drawer-area 根 input 聚焦零边界双属性类在位（outline-none + shadow-none）', async () => {
+    const panel = usePanelStore()
+    panel.loadSession(ROOT_PANEL_ID, 'sess-focus-scope')
+    openDrawerTab('git')
+
+    const wrapper = await mountContainer()
+    await nextTick()
+
+    const area = wrapper.find('[data-testid="drawer-area"]')
+    expect(area.classes()).toContain('[&_input:focus-visible]:outline-none')
+    expect(area.classes()).toContain('[&_input:focus-visible]:shadow-none')
+  }, 60_000)
 })
 
 // 首屏冒烟（TC1）：DrawerPanel 探针 stub 仅本用例覆盖——断言壳派发的 sessionId 落进
@@ -264,6 +281,8 @@ describe('PanelContainer 首屏冒烟（TC1）', () => {
     // main-area + drawer-area 双区域挂载（手写 flex，宽度拆分）
     expect(wrapper.find('[data-testid="main-area"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="drawer-area"]').exists()).toBe(true)
+    // E5 方向缓动（demo drawers.css）：开方向 = ease-out 挂壳层 width 过渡类（ui-replica MF-1-50 防回归）
+    expect(wrapper.find('[data-testid="main-area"]').classes().join(' ')).toContain('ease-[var(--ease-out)]')
     // DrawerPanel 探针收到壳派发的 sessionId（分区键跟随 panel）
     expect(wrapper.find('[data-testid="drawer-panel"]').attributes('data-session-id')).toBe('sess-tc1')
   }, 60_000)
@@ -299,6 +318,8 @@ describe('PanelContainer 壳行为迁移（旧 side-drawer.test.ts 行为断言�
     await wrapper.find('[data-testid="drawer-close"]').trigger('click')
     await nextTick()
     expect(wrapper.find('[data-testid="drawer-panel"]').exists()).toBe(false)
+    // E5 关方向 = ease-in 挂壳层 width 过渡类（ui-replica MF-1-50 防回归）
+    expect(wrapper.find('[data-testid="main-area"]').classes().join(' ')).toContain('ease-[var(--ease-in)]')
   }, 60_000)
 
   it('点 drawer-close 关闭后焦点回 composer（§6.7 焦点契约右抽屉鼠标通道，TerminalToggleButton（终端开关）同款）', async () => {

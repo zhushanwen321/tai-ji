@@ -38,20 +38,24 @@ export function usageBarClass(percent: number): string {
 }
 
 /**
- * 容量细条（ui-optimize 决策 6 / N7：composer 顶缘 2px 余量指示条）三段色阶。
- * 与浮层卡内 bar（usageBarClass）阈值**不同**（80/95 vs 70/90）——细条是「余量将尽」的
- * 预警通道，只提醒不承载精确读数（数字在 hover 指标聚合页），阈值刻意后移降低打扰面。
+ * 容量细条（ui-optimize 决策 6 / N7：composer 顶缘 2px 余量指示条）两段告警色阶。
+ * 仅告警显示（spec R2.3 / demo ComposerBar v-else-if contextPct>80）：≤80% 不渲染
+ * （渲染门控在 ComposerCapacityBar，与本函数共用 CAPACITY_BAR_WARN_THRESHOLD）——
+ * accent 常态条稀释告警语义，违背 accent 稀缺原则。与浮层卡内 bar（usageBarClass）
+ * 阈值**不同**（80/95 vs 70/90）——细条是「余量将尽」的预警通道，只提醒不承载精确
+ * 读数（数字在 hover 指标聚合页），阈值刻意后移降低打扰面。
  * 两套阈值并存是有意差异（业务含义不同），禁止合并；后续若裁决统一，两处同批改。
  */
 
-/** 细条 warn 阈值（>80% 变 warn） */
+/** 细条 warn 阈值（>80% 变 warn；同时是渲染门控阈值：≤80% 不渲染） */
 export const CAPACITY_BAR_WARN_THRESHOLD = 80
 /** 细条 danger 阈值（>95% 变 danger） */
 export const CAPACITY_BAR_DANGER_THRESHOLD = 95
 
-/** 使用率 → 细条配色 token 工具类（常态 accent 半透明 · >80% warn · >95% danger） */
+/** 使用率 → 细条配色 token 工具类（仅告警显示：>80% warn · >95% danger；≤80% 返回空——
+ *  调用方按 >80% 门控不渲染，本分支兜底直调场景） */
 export function capacityBarClass(percent: number): string {
   if (percent > CAPACITY_BAR_DANGER_THRESHOLD) return 'bg-danger'
   if (percent > CAPACITY_BAR_WARN_THRESHOLD) return 'bg-warn'
-  return 'bg-accent-soft'
+  return ''
 }

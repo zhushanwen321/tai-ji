@@ -48,7 +48,7 @@ describe('z 基线 ↔ 登记表全等对账（§6.7 完备性判据）', () => 
   it('扫描器非空转：已知表面（SettingsModal / SearchModal / CompanionBand / ToastContainer）均被扫到', () => {
     const keys = [...scannedCounts().keys()]
     expect(keys.some((k) => k.includes('SettingsModal.vue') && k.includes('var(--z-modal)'))).toBe(true)
-    expect(keys.some((k) => k.includes('overlays/SearchModal.vue') && k.endsWith('|1000'))).toBe(true)
+    expect(keys.some((k) => k.includes('overlays/SearchModal.vue') && k.includes('var(--z-modal)'))).toBe(true)
     expect(keys.some((k) => k.includes('CompanionBand.vue') && k.includes('var(--z-dialog)'))).toBe(true)
     expect(keys.some((k) => k.includes('ToastContainer.vue') && k.endsWith('|var(--z-toast)'))).toBe(true)
     // 三类字面形态 + CSS 声明形都在扫描面里（CSS 形现存 0 处，形本身仍须在场）

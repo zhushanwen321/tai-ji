@@ -73,49 +73,53 @@
     </div>
     <!-- 台账主体 -->
     <template v-else>
-      <!-- RPC 降级 banner（§3.1 失败路径：pi RPC 失败/非活跃 session 走文件直读，无实时增量）。
+      <!-- 对话流居中列（spec R5.1 同轨居中）：与 chat 视图共用 .content-col 布局原语
+           （margin-inline auto + w-full + max-width var(--content-max-w)，demo .chat-scroll>*
+           唯一权威）；原 ml-2 的 8px 呼吸改列内 pl-2 承接，滚动容器自身尺寸语义不变。 -->
+      <div class="content-col flex min-h-0 min-w-0 flex-1 flex-col pl-2">
+        <!-- RPC 降级 banner（§3.1 失败路径：pi RPC 失败/非活跃 session 走文件直读，无实时增量）。
            source='file' 涵盖两种情形，语义统一：凡文件路径均无实时更新（增量腿只随 RPC 建立）。 -->
-      <div
-        v-if="partition.source === 'file'"
-        class="flex flex-shrink-0 items-center gap-1.5 border-b border-hairline px-3.5 py-1 text-[length:var(--text-2xs)] text-neutral-dim"
-        data-testid="trace-degraded-banner"
-      >
-        <FileWarning class="size-3 shrink-0 opacity-70" />
-        <span>{{ t('panel.trace.degradedFileSource') }}</span>
-      </div>
-      <!--
+        <div
+          v-if="partition.source === 'file'"
+          class="flex flex-shrink-0 items-center gap-1.5 border-b border-hairline px-3.5 py-1 text-[length:var(--text-2xs)] text-neutral-dim"
+          data-testid="trace-degraded-banner"
+        >
+          <FileWarning class="size-3 shrink-0 opacity-70" />
+          <span>{{ t('panel.trace.degradedFileSource') }}</span>
+        </div>
+        <!--
            B11 台账截断降级 banner（正交字段 truncated，参照 source:'oversize' 先例——
            不新增 status 值，台账仍正常渲染）：entries 达 5000 软上限停止追加后提示台账
            不完整。与 file 降级 banner 同构（icon + 文案），正交可同时出现。 -->
-      <div
-        v-if="partition.truncated"
-        class="flex flex-shrink-0 items-center gap-1.5 border-b border-hairline px-3.5 py-1 text-[length:var(--text-2xs)] text-neutral-dim"
-        data-testid="trace-truncated-banner"
-      >
-        <FileWarning class="size-3 shrink-0 opacity-70" />
-        <span>{{ t('panel.trace.truncatedLedger') }}</span>
-      </div>
-      <TraceToolbar
-        :rows="rows"
-        :context-only="partition.contextOnly"
-        :active-groups="partition.activeGroups"
-        :search-text="partition.searchText"
-        :current-prompt="partition.currentPrompt"
-        :fetching="partition.currentPromptFetching"
-        :fetch-error-code="partition.currentPromptErrorCode"
-        @toggle-group="onToggleGroup"
-        @toggle-context="onToggleContext"
-        @update:search-text="(v) => setFilter(props.sessionId, { searchText: v })"
-        @fetch-current="fetchCurrentPrompt(props.sessionId)"
-      />
-      <!-- 左侧 timeline 轨道线（demo .trace-elist：margin-left 8px + border-left 1px --hairline）
+        <div
+          v-if="partition.truncated"
+          class="flex flex-shrink-0 items-center gap-1.5 border-b border-hairline px-3.5 py-1 text-[length:var(--text-2xs)] text-neutral-dim"
+          data-testid="trace-truncated-banner"
+        >
+          <FileWarning class="size-3 shrink-0 opacity-70" />
+          <span>{{ t('panel.trace.truncatedLedger') }}</span>
+        </div>
+        <TraceToolbar
+          :rows="rows"
+          :context-only="partition.contextOnly"
+          :active-groups="partition.activeGroups"
+          :search-text="partition.searchText"
+          :current-prompt="partition.currentPrompt"
+          :fetching="partition.currentPromptFetching"
+          :fetch-error-code="partition.currentPromptErrorCode"
+          @toggle-group="onToggleGroup"
+          @toggle-context="onToggleContext"
+          @update:search-text="(v) => setFilter(props.sessionId, { searchText: v })"
+          @fetch-current="fetchCurrentPrompt(props.sessionId)"
+        />
+        <!-- 左侧 timeline 轨道线（demo .trace-elist：margin-left 8px + border-left 1px --hairline）
            填充 seq 右对齐列的留白区；border 在滚动容器边框盒上，行 hover 底色（内容区）
-           不会盖住线；ml-2 让线与面板边缘留 8px 呼吸 -->
-      <div
-        ref="scrollEl"
-        class="ml-2 min-h-0 flex-1 overflow-y-auto border-l border-hairline pb-4 pt-1 [overflow-anchor:none]"
-        data-testid="trace-list"
-      >
+           不会盖住线；8px 呼吸由居中列 pl-2 承接 -->
+        <div
+          ref="scrollEl"
+          class="min-h-0 flex-1 overflow-y-auto border-l border-hairline pb-4 pt-1 [overflow-anchor:none]"
+          data-testid="trace-list"
+        >
         <!-- 空态：过滤后无匹配（demo .trace-empty 文字档 fs-md dim 纯色；real 居中列结构保留，
              无「清空过滤」钮——过滤重置归 store 编排且 i18n 键不在本波白名单，交接登记） -->
         <div
@@ -163,6 +167,7 @@
             @select-block="onSelectBlock"
           />
         </template>
+        </div>
       </div>
     </template>
   </div>

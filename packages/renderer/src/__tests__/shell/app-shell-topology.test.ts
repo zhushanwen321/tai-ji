@@ -8,7 +8,7 @@
  *    MainPanel 为透明布局容器（三卡化 2026-10-04：float-panel 壳下沉到三块内容卡）
  *  - 折叠态 !gap-0（强制覆盖 gap-2），展开态无
  *  - TrafficLight 挂载在 AsideRegion 内（ui-replica M2：AppShell 左边距 0 后 aside 左缘 = 窗口 x0，
- *    left-2/top-4 = 窗口 (8,8)，与 mac trafficLightPosition {8,16} 的 x 完全同位）
+ *    left-2/top-[12px] = 窗口 (8,16)，x/y 与 mac trafficLightPosition {8,16} 完全同位）
  *  - 平台两态成对（跨平台窗口外壳 u-shell-chrome）：非 mac 根节点无 rounded-[10px]（修复证明面：方形窗口下
  *    应用内圆角只会产生四角色差方块）+ 渲染 aside-drag-strip 拖拽条带；mac 根节点保留 rounded-[10px]
  *    （零变化面）+ 不渲染条带（mac 拖拽由系统提供）
@@ -97,7 +97,7 @@ describe('AppShell 拓扑渲染 gate（刻意调整形态回归防线）', () =>
     expect(wrapper.find('[data-testid="app-shell"]').classes()).toContain('!gap-0')
   })
 
-  it('TrafficLight 挂载在 AsideRegion 内：left-2/top-4 相对 aside 左缘 x0/顶 y4 = 窗口 (8,8)，x/y 与 mac 同位（ui-replica M2）', () => {
+  it('TrafficLight 挂载在 AsideRegion 内：left-2/top-[12px] 相对 aside 左缘 x0/顶 y4 = 窗口 (8,16)，x/y 与 mac 同位（ui-replica M2）', () => {
     const wrapper = mount(AppShell)
 
     // traffic-light 在 aside 内（aside 左缘 x0 后 left-2 → 窗口 x8 = mac trafficLightPosition.x）

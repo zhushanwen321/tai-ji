@@ -8,7 +8,7 @@
   -->
   <div
     class="flex cursor-pointer select-none items-center gap-2 rounded-sm px-2 py-[5px] transition-colors duration-[var(--duration-fast)] ease-[var(--ease)] hover:bg-surface-hover"
-    :class="selected ? 'bg-bg-elevated shadow-[inset_2px_0_0_var(--accent)] hover:bg-bg-elevated' : ''"
+    :class="selected ? 'text-neutral-fg' : ''"
     :data-testid="`trace-block-row-${parent.seq}-${index}`"
     :data-block-kind="blockBadgeLabel(block)"
     :title="headline || blockBadgeLabel(block)"
@@ -21,10 +21,10 @@
       class="shrink-0 rounded px-[7px] py-px font-mono text-[length:var(--text-3xs)]"
       :class="BLOCK_BADGE_CLASS[block.kind]"
     >{{ blockBadgeLabel(block) }}</span>
-    <!-- headline 常态 = neutral-mid（与主行 demo .trow color: mid 同口径），选中范式提 fg -->
+    <!-- headline 常态 = neutral-mid（与主行 demo .trow color: mid 同口径），选中范式（Tier B）提 fg + fw-mid -->
     <span
       class="min-w-0 flex-1 truncate text-[length:var(--text-xs)]"
-      :class="selected ? 'text-neutral-fg' : 'text-neutral-mid'"
+      :class="selected ? 'text-neutral-fg [font-weight:var(--fw-mid)]' : 'text-neutral-mid'"
     >{{ headline || blockBadgeLabel(block) }}</span>
     <span
       v-if="resultState"
