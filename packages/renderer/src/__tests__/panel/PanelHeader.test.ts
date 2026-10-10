@@ -1,20 +1,20 @@
 /**
- * PanelHeader 组件单测：session JSONL 文件名展示与复制。
+ * PanelHeader 组件单测：卡头控件构成（demo shell spec §3.5 + 审计 R11）。
  *
  * 覆盖：
- * - 右侧按钮组内展示短文件名（前 8 位 + .jsonl），点击复制绝对路径
- * - sessionFile 为空时不渲染（aca29110c 移除 overlay 两态后恒用主 sessionFile；
- *   subagent/agent call 详情改由 drawer primary tabs 承接）
- * - i18n 契约
+ * - R11 回归防线：卡头只留会话级控件——.jsonl 文件名按钮与目录/分支次要行不渲染
+ *   （「卡头是当前会话身份位，只显会话名」；session 磁盘路径复用入口归详情抽屉/右键菜单）
+ * - 会话名显示：sessionLabel / 空态回落「新任务」（demo /new 空态 h1 同语义）
+ * - i18n 契约（折叠态 chrome 槽位文案）
  *
  * 三视角（AGENTS.md 测试规范 #5-8）：
- * - 构建者：props 驱动 displayFile computed
- * - 使用者：点击 → clipboard.writeText 被调用
- * - 观察者：DOM 含 testid + 短文件名文本 + 位置在右侧按钮组
+ * - 构建者：props 驱动（sessionLabel/status/sessionId）
+ * - 使用者：折叠态 chrome 按钮可点（toggle collapsed）
+ * - 观察者：DOM 含 testid / 无 R11 移除项残留
  *
- * 覆盖（review MF-6）：折叠态 chrome 迁入（collapsed → sidebar-collapse-toggle + pl-[88px] 让位；
- * 全屏态回退 pl-3.5）+ ExtensionHost panel.header 挂载点（sessionId → ViewHost 挂载且
- * viewId/sessionId/empty 正确；不传不渲染）。
+ * 覆盖（review MF-6 保留面）：折叠态 chrome 迁入（collapsed → sidebar-collapse-toggle +
+ * pl-[88px] 让位；全屏态回退 pl-3.5）+ ExtensionHost panel.header 挂载点（sessionId →
+ * ViewHost 挂载且 viewId/sessionId/empty 正确；不传不渲染）。
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/panel/PanelHeader.test.ts
  */
@@ -39,16 +39,11 @@ vi.mock('@/composables/effects/usePlatformChrome', async () => {
   }
 })
 
-const SESSION_FILE_PATH =
-  '/Users/u/.taiji/agent/sessions/cwd-hash/2026-07-09T11-16-46-632Z_019f4698-2fa8-791c-858f-d02ba39d9676.jsonl'
-
 function mountHeader(overrides: Record<string, unknown> = {}) {
   return mount(PanelHeader, {
     props: {
       sessionLabel: 'test',
-      sessionDir: '/repo',
       status: 'done' as DerivedStatus,
-      sessionFile: SESSION_FILE_PATH,
       ...overrides,
     },
   })
@@ -57,54 +52,32 @@ function mountHeader(overrides: Record<string, unknown> = {}) {
 beforeEach(() => {
   setActivePinia(createPinia())
   vi.clearAllMocks()
-  Object.defineProperty(navigator, 'clipboard', {
-    value: { writeText: vi.fn().mockResolvedValue(undefined) },
-    writable: true,
-    configurable: true,
-  })
+  // 折叠态持久化跨测试隔离：上一用例写入的折叠态不得泄漏进下一用例的 store 初始化
+  localStorage.removeItem('taiji:side-collapsed')
 })
 
-describe('PanelHeader session 文件名展示（正常态）', () => {
-  it('U1: 有 sessionFile 时展示短文件名 019f4698.jsonl', () => {
-    const wrapper = mountHeader()
-    const el = wrapper.find('[data-testid="panel-session-file"]')
-    expect(el.exists()).toBe(true)
-    expect(el.text()).toContain('019f4698.jsonl')
+describe('PanelHeader 卡头构成（demo spec §3.5 + 审计 R11 回归防线）', () => {
+  it('U1: 有 sessionLabel 时显示会话名', () => {
+    const wrapper = mountHeader({ sessionLabel: '修复登录 bug' })
+    expect(wrapper.find('[data-testid="panel-session-label"]').text()).toBe('修复登录 bug')
   })
 
-  it('U2: 无 sessionFile 时不渲染', () => {
-    const wrapper = mountHeader({ sessionFile: undefined })
+  it('U2: 无 session（空态）显示「新建任务」（workspace.newTask 兜底）', () => {
+    const wrapper = mountHeader({ sessionLabel: '' })
+    expect(wrapper.find('[data-testid="panel-session-label"]').text()).toContain('新建任务')
+  })
+
+  it('R11-1: .jsonl 文件名按钮不再上卡头（存储实现细节不占主 chrome）', () => {
+    const wrapper = mountHeader()
     expect(wrapper.find('[data-testid="panel-session-file"]').exists()).toBe(false)
   })
 
-  it('U3: 点击文件名复制主 session 绝对路径', async () => {
+  it('R11-2: 目录/分支次要行不再上卡头（三重重复形态移除，只显会话名）', () => {
     const wrapper = mountHeader()
-    await wrapper.find('[data-testid="panel-session-file"]').trigger('click')
-    expect(navigator.clipboard.writeText).toHaveBeenCalledWith(SESSION_FILE_PATH)
-  })
-
-  it('U4: 文件名按钮在右侧按钮组内（drawer 按钮之前）', () => {
-    const wrapper = mountHeader()
-    const fileBtn = wrapper.find('[data-testid="panel-session-file"]')
-    const drawerBtn = wrapper.find('[data-testid="drawer-toggle"]')
-    expect(fileBtn.exists()).toBe(true)
-    // 两个按钮在同一个右侧容器内（父元素含 ml-auto）
-    const rightGroup = wrapper.find('.ml-auto')
-    expect(rightGroup.exists()).toBe(true)
-    expect(rightGroup.element.contains(fileBtn.element)).toBe(true)
-    // 文件名按钮在 drawer 按钮之前（DOM 顺序）
-    expect(fileBtn.element.compareDocumentPosition(drawerBtn.element as Node)).toBe(
-      Node.DOCUMENT_POSITION_FOLLOWING,
-    )
-  })
-})
-
-describe('PanelHeader i18n 契约', () => {
-  it('E1: 中英文 locale 均包含 copySessionFile 文案', async () => {
-    const { default: zh } = await import('@taiji/ui/locale/zh-CN/panel')
-    const { default: en } = await import('@taiji/ui/locale/en-US/panel')
-    expect(zh.header.copySessionFile).toBe('复制 session 文件路径')
-    expect(en.header.copySessionFile).toBe('Copy session file path')
+    const labelWrap = wrapper.find('[data-testid="panel-session-label"]').element.parentElement!
+    // 会话名容器内只有会话名一个文本节点（无 mono 目录名/分支后缀）
+    expect(labelWrap.querySelectorAll('span').length).toBe(1)
+    expect(labelWrap.textContent).toBe('test')
   })
 })
 
@@ -113,7 +86,7 @@ describe('PanelHeader 折叠态 chrome 迁入（review MF-6）', () => {
     platformChromeMock.isFullscreen.value = false
   })
 
-  it('collapsed=true → header 渲染 sidebar-collapse-toggle + pl-[88px] 让位红黄绿，drawer-toggle 恒显（ui-replica MF-1-49）', () => {
+  it('collapsed=true → header 渲染 sidebar-collapse-toggle + pl-[88px] 让位红黄绿，drawer-toggle 恒显（ui-replica MF-1-49）', async () => {
     const sidebar = useSidebarStore()
     sidebar.collapsed = true
 

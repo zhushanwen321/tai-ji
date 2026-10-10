@@ -57,6 +57,8 @@ beforeEach(() => {
   setActivePinia(createPinia())
   platformChromeMock.isFullscreen.value = false
   platformChromeMock.detectPlatform.mockReturnValue('mac')
+  // 折叠态持久化跨测试隔离：上一用例写入的折叠态不得泄漏进下一用例的 store 初始化
+  localStorage.removeItem('taiji:side-collapsed')
 })
 
 describe('AppShell 拓扑渲染 gate（刻意调整形态回归防线）', () => {

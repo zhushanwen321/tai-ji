@@ -64,13 +64,12 @@
         data-testid="main-area"
       >
         <!-- header 是对话流卡的组成部分（2026-10-04 用户裁决：header 只与对话流构成整体，
-             不再横跨抽屉卡）——右抽屉卡有自己的 L1 栏，底抽屉卡有自己的实例切换条。 -->
+             不再横跨抽屉卡）——右抽屉卡有自己的 L1 栏，底抽屉卡有自己的实例切换条。
+             [shell 域对齐 demo spec §3.5 + 审计 R11] 卡头只显会话级控件：目录/分支次要行与
+             .jsonl 文件名按钮已移除（sessionDir/gitBranch 仍供 Panel 消费）。 -->
         <PanelHeader
           :session-label="sessionLabelOf(leaf)"
-          :session-dir="sessionDirOf(leaf)"
           :session-id="leaf.sessionId ?? undefined"
-          :session-file="sessionFileOf(leaf)"
-          :git-branch="gitBranchOf(leaf)"
           :status="statusOf(leaf)"
           @toggle-drawer="onDrawerToggle()"
         />
@@ -100,6 +99,9 @@
         role="separator"
         aria-orientation="vertical"
         tabindex="0"
+        :aria-valuemin="20"
+        :aria-valuemax="60"
+        :aria-valuenow="Math.round(drawerPct)"
         class="group relative w-1 shrink-0 cursor-col-resize touch-none select-none [&:focus-visible>div]:bg-border-strong"
         :data-state="isDragging ? 'drag' : undefined"
         data-testid="drawer-resize-handle"
@@ -212,6 +214,9 @@
         role="separator"
         aria-orientation="horizontal"
         tabindex="0"
+        :aria-valuemin="BOTTOM_DRAWER_HEIGHT_MIN_PCT"
+        :aria-valuemax="BOTTOM_DRAWER_HEIGHT_MAX_PCT"
+        :aria-valuenow="Math.round(bottomHeightPct)"
         class="group absolute inset-x-0 -top-1 z-10 h-1 cursor-row-resize touch-none select-none [&:focus-visible>div]:bg-border-strong"
         :data-state="isBottomDragging ? 'drag' : undefined"
         data-testid="bottom-drawer-resize-handle"
@@ -266,6 +271,8 @@ import {
 import {
   bindBottomDrawerSessionId,
   useBottomDrawerControl,
+  BOTTOM_DRAWER_HEIGHT_MIN_PCT,
+  BOTTOM_DRAWER_HEIGHT_MAX_PCT,
 } from '@taiji/core/domain/bottom-drawer'
 import { DrawerPanel } from '@taiji/ui/features/drawer'
 import { StatusBar } from '@taiji/ui/extension-host'
@@ -368,9 +375,6 @@ function sessionLabelOf(l: PanelLeaf): string {
 }
 function sessionDirOf(l: PanelLeaf): string {
   return l.sessionId ? session.list.find((s) => s.id === l.sessionId)?.cwd ?? '' : ''
-}
-function sessionFileOf(l: PanelLeaf): string | undefined {
-  return l.sessionId ? session.list.find((s) => s.id === l.sessionId)?.sessionFile : undefined
 }
 function gitBranchOf(l: PanelLeaf): string | undefined {
   return l.sessionId ? session.list.find((s) => s.id === l.sessionId)?.gitBranch : undefined
@@ -514,6 +518,7 @@ const {
 // ── 纵轴：底抽屉高度（§7.3）——pool = split 行 + 底抽屉共享容器（拖拽数学与显示期 clamp 基准）──
 const poolEl = ref<HTMLElement | null>(null)
 const {
+  heightPct: bottomHeightPct,
   bottomHeightStyle,
   isBottomDragging,
   bottomTransitionClass,

@@ -324,8 +324,9 @@ function onPresetSelect(payload: { presetId: string }): void {
          v-show 切 display:none/'' 不改变原有布局（若用普通 div 包裹会多一层 flex item 断 gap）。 -->
     <div v-show="!isCreating" class="contents">
 
-    <!-- 问候语（22px / weight 650 / --fg，spec §3.1） -->
-    <h1 class="z-10 text-center text-[22px] font-[650] text-neutral-fg">
+    <!-- 问候语（22px / weight 650 / --fg，spec §3.1）；landing-cascade 首项（级联入场见
+         文件尾 scoped 注释） -->
+    <h1 class="landing-cascade-greet z-10 text-center text-[22px] font-[650] text-neutral-fg">
       {{ greetingPrefix }}，{{ t('app.greetingPrompt') }}
     </h1>
 
@@ -346,7 +347,7 @@ function onPresetSelect(payload: { presetId: string }): void {
          使该形态从未生效。--bg-input + --border + --radius-lg）。
          spec §3.1：chip 是 composer 卡片顶部元信息行，非悬空 → 经 #meta-row slot 注入。
          landing 态 session 真源用 flow（composerSid），props 作 fallback。 -->
-    <Composer variant="landing" :session-id="composerSid">
+    <Composer variant="landing" :session-id="composerSid" class="landing-cascade-composer">
       <template #meta-row>
         <!-- 首行三 chip（目录 ｜ 分支 ｜ 模式；设计 §7.4）：容器 nowrap + overflow-hidden，
              各 chip min-w-0；截断优先级 = 目录截断(110px) → 分支截断(76px) → 分支退化为图标
@@ -432,3 +433,26 @@ function onPresetSelect(payload: { presetId: string }): void {
     </div><!-- /v-show 内容态（display:contents 包裹） -->
   </div>
 </template>
+
+<style scoped>
+/* 首屏级联入场（demo shell/chat spec 裁决 9A 可落部分）：问候语 → composer 卡片依次淡入上浮
+   （位移 10px、软缓出，参数 = demo unpacked.css 空态入场段实装：300ms/项、次项延迟 100ms——
+   spec 文本「260ms/步进 40ms」与 demo 实装 CSS 有口径漂移，视觉权威按 demo 实装取值，
+   漂移已登记 shell 域对齐报告）。示例/最近会话分区 real 无对应产品功能（chat 域已登记不造）。
+   挂载即播一次（CSS 动画随挂载播、无循环；创建失败回显不重播）；no-preference 包裹 =
+   prefers-reduced-motion 用户直接满态呈现（无动画无位移）。 */
+@media (prefers-reduced-motion: no-preference) {
+  .landing-cascade-greet {
+    animation: landing-cascade-in 300ms var(--ease-out-soft) both;
+  }
+  .landing-cascade-composer {
+    animation: landing-cascade-in 300ms var(--ease-out-soft) 100ms both;
+  }
+}
+@keyframes landing-cascade-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+}
+</style>

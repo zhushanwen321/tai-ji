@@ -41,6 +41,7 @@ import { useNavigationStore } from '@/stores/navigation'
 import { useSessionStore } from '@/stores/session'
 import { detectPlatform, usePlatformChrome } from '@/composables/effects/usePlatformChrome'
 import { useSettingsShell } from '@/composables/shell/useSettingsShell'
+import { useNarrowWindowCollapse } from '@/composables/shell/useNarrowWindowCollapse'
 import { useSidebar } from '@/composables/features/sidebar/useSidebar'
 import AppNavControls from './AppNavControls.vue'
 import AsideRegion from './AsideRegion.vue'
@@ -111,6 +112,10 @@ usePlatformChrome()
 // （挂常驻订阅 + 同步 system 偏好）+ provide 3 个 ui 注入 key + watch system.theme 挂/卸 matchMedia。
 // core 零 DOM；壳持 platform/transport 注入 + DOM 副作用。幂等（core 模块级单例）。
 useSettingsShell()
+
+// 窄窗自动折叠（demo shell spec §3.6）：≤960px 进入断点折叠侧栏、离开不强制展开、
+// 首屏窄窗同步折叠；折叠态真源与持久化归 sidebar store，本 composable 只写该单键。
+useNarrowWindowCollapse()
 
 // 导航栈指针变化 → 同步 session.activeId + panel 载入（shell spec §八.5 G3-003「历史状态正确恢复」）。
 // 覆盖 ⌘[/⌘] 与 AppNavControls 后退/前进：pointer 变后若落在 chat+sessionId 条目，恢复该 session 到 panel。
