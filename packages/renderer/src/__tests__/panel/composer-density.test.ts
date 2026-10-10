@@ -39,6 +39,10 @@ const CAP_VARIANTS: Array<[string, ComposerDensityCapabilities]> = [
   ['托盘全无 + 插件零贡献', { hasTrayItems: false }],
   ['托盘全无 + 插件有贡献', { hasTrayItems: false, pluginToolbarContributionCount: 1 }],
   ['托盘有面 + 插件有贡献', { hasTrayItems: true, pluginToolbarContributionCount: 3 }],
+  ['托盘全无 + toolbar 零贡献 + headerAction 有入口', { hasTrayItems: false, hasHeaderActionEntries: true }],
+  ['托盘全无 + toolbar 零贡献 + headerAction 无入口（三源全空）', { hasTrayItems: false, hasHeaderActionEntries: false }],
+  ['托盘有面 + headerAction 有入口', { hasTrayItems: true, hasHeaderActionEntries: true }],
+  ['托盘有面 + toolbar 有贡献 + headerAction 有入口', { hasTrayItems: true, pluginToolbarContributionCount: 1, hasHeaderActionEntries: true }],
 ]
 const PROTECT_VARIANTS = [false, true]
 
@@ -140,6 +144,16 @@ describe('能力标志（不留死入口）', () => {
     ).toBe('absent')
     expect(resolveComposerDensity({ pluginToolbarContributionCount: 1 }, 0).slots.leftCluster).toBe('expanded')
   })
+
+  it('headerAction 有入口 = 左簇第三内容源：托盘空 + toolbar 零贡献仍可聚合（B3 聚合面含定时任务）', () => {
+    // 三源全空才 absent；headerAction 单独在场 → L0 展开 / L2 聚合（被聚合 clock 由聚合面板段承接）
+    const caps: ComposerDensityCapabilities = { hasTrayItems: false, hasHeaderActionEntries: true }
+    expect(resolveComposerDensity(caps, 0).slots.leftCluster).toBe('expanded')
+    expect(resolveComposerDensity(caps, 2).slots.leftCluster).toBe('aggregated')
+    // hasHeaderActionEntries 缺省 false：三源全空 → absent（与旧判据兼容）
+    expect(resolveComposerDensity({ hasTrayItems: false }, 0).slots.leftCluster).toBe('absent')
+    expect(resolveComposerDensity({ hasTrayItems: false, hasHeaderActionEntries: false }, 0).slots.leftCluster).toBe('absent')
+  })
 })
 
 describe('锚点保护（L3 顶格仍放不下 → 中部让位，锚点与模型入口零裁剪）', () => {
@@ -169,7 +183,7 @@ describe('锚点保护（L3 顶格仍放不下 → 中部让位，锚点与模�
   })
 })
 
-describe('穷举矩阵不变式（32 组合：4 级 × 4 能力 × 2 保护）', () => {
+describe('穷举矩阵不变式（64 组合：4 级 × 8 能力 × 2 保护）', () => {
   it('序 0 恒不退化；模型形态只有两态且恒不缺席；输出域无双轴旧键', () => {
     for (const { out } of allCombos()) {
       // 锚点类型级保证

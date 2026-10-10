@@ -40,6 +40,7 @@ import {
   makeMountPointSource as makeHelperSource,
   toolbarEntry,
 } from './_density-geometry-helper'
+import { HEADER_ACTIONS_SOURCE_KEY } from '@/composables/shell/useExtensionHostBridge'
 import type { UseTrayCountsReturn } from '@/components/panel/tray/useTrayCounts'
 import Composer from '@/components/panel/Composer.vue'
 
@@ -143,14 +144,38 @@ function makeMountPointSource(partition: Map<string, ViewCacheEntry>): ViewHostS
   return makeHelperSource(SID, partition)
 }
 
+/**
+ * headerAction 数据源替身（B3 聚合面用例：scheduler overlay 直开声明形态——
+ * hasVisibleHeaderActions 判定消费 getDeclarations/getRuntimeState 两面）。
+ */
+function makeHeaderActionSource(hidden = false): object {
+  return {
+    getDeclarations: () => [
+      {
+        pluginId: 'scheduler-manager',
+        contributionId: 'scheduler-manager.open',
+        type: 'headerAction',
+        headerAction: { activation: 'scheduler-overlay', icon: 'clock', title: '定时任务' },
+      },
+    ],
+    getRuntimeState: () => (hidden ? { hidden: true } : undefined),
+    resolveCommandAvailability: () => 'registered',
+    executeCommand: () => true,
+  }
+}
+
 let wrapper: VueWrapper | null = null
 
-function mountComposer(source: ViewHostSource | null): VueWrapper {
+function mountComposer(source: ViewHostSource | null, headerSource?: object | null): VueWrapper {
+  const provide: Record<symbol, unknown> = {}
+  if (source) provide[VIEW_HOST_SOURCE_KEY as symbol] = source
+  if (headerSource) provide[HEADER_ACTIONS_SOURCE_KEY as symbol] = headerSource
   wrapper = mount(Composer, {
     props: { sessionId: SID },
     global: {
       stubs,
-      ...(source ? { provide: { [VIEW_HOST_SOURCE_KEY as symbol]: source } } : {}),
+      // 键是 symbol（Object.keys 不含 symbol，判空用 Reflect.ownKeys）
+      ...(Reflect.ownKeys(provide).length > 0 ? { provide } : {}),
     },
   })
   return wrapper
@@ -365,6 +390,45 @@ describe('S4 模型名零截断 + `»` 退役（构造性回归防线）', () =>
     // 插件有贡献 + 展开态：左簇仍是散图标路径（挂载点内联），无 `»`
     await dispatchFitGeometry(800, 80, { 0: 300, 1: 200, 2: 150, 3: 120 })
     expect(bar().attributes('data-slot-left-cluster')).toBe('expanded')
+  })
+})
+
+describe('B3 聚合面：headerAction（定时任务钮）随左簇聚合走（demo composer-bar spec §2.1/§4.2）', () => {
+  it('L0 expanded：headerAction 钮在左簇渲染（clock 直开入口在场）', async () => {
+    mountComposer(makeMountPointSource(reactive(new Map())), makeHeaderActionSource())
+    await dispatchTick()
+    expect(bar().attributes('data-slot-left-cluster')).toBe('expanded')
+    expect(bar().find('[data-testid="header-action-scheduler-manager-open"]').exists()).toBe(true)
+  })
+
+  it('L2 aggregated：左簇摘除 headerAction 钮（聚合面板首段承接，面板段断言归 composer-tray.test）', async () => {
+    mountComposer(makeMountPointSource(reactive(new Map())), makeHeaderActionSource())
+    // L0 580 > 300；L1 380 > 300；L2 80+180=260 ≤ 300 → 停在 L2
+    await dispatchFitGeometry(300, 80, { 0: 500, 1: 300, 2: 180, 3: 100 })
+    expect(bar().attributes('data-fit')).toBe('2')
+    expect(bar().attributes('data-slot-left-cluster')).toBe('aggregated')
+    // 左簇内 headerAction 钮已摘除（入口改由聚合面板承载）
+    expect(bar().find('[data-testid="header-action-scheduler-manager-open"]').exists()).toBe(false)
+    expect(bar().find('[data-testid="tray-aggregate-button"]').exists()).toBe(true)
+  })
+
+  it('托盘全无 + toolbar 零贡献 + headerAction 有入口 → leftCluster 非 absent（第三内容源）', async () => {
+    setTrayCounts(0, 0)
+    mountComposer(makeMountPointSource(reactive(new Map())), makeHeaderActionSource())
+    await dispatchFitGeometry(300, 80, { 0: 500, 1: 300, 2: 180, 3: 100 })
+    // 若无 headerAction 源，此几何下 leftCluster = absent（不留死入口旧行为）；
+    // 有源则聚合入口必须在场——被聚合 clock 的直开动作不因托盘空而丢失
+    expect(bar().attributes('data-slot-left-cluster')).toBe('aggregated')
+    expect(bar().find('[data-testid="tray-aggregate-button"]').exists()).toBe(true)
+  })
+
+  it('声明运行时 hidden=true → 视为无入口：托盘空 + toolbar 零贡献 → absent', async () => {
+    setTrayCounts(0, 0)
+    // hidden 声明不构成左簇内容（hasVisibleHeaderActions 判定），mountAndFit 的空 provide 路径
+    // 不带 headerSource——为覆盖「hidden 源在场」形态走显式挂载
+    mountComposer(makeMountPointSource(reactive(new Map())), makeHeaderActionSource(true))
+    await dispatchFitGeometry(800, 80, { 0: 300, 1: 200, 2: 150, 3: 120 })
+    expect(bar().attributes('data-slot-left-cluster')).toBe('absent')
   })
 })
 

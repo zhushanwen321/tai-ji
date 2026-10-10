@@ -23,10 +23,10 @@
     :title="confirming ? confirmTitle : title"
   >
     <slot v-if="confirming" name="confirmIcon">
-      <Check class="size-3" />
+      <Check class="!size-[12px]" />
     </slot>
     <slot v-else name="icon">
-      <X class="size-3" />
+      <X class="!size-[12px]" />
     </slot>
   </Button>
 </template>

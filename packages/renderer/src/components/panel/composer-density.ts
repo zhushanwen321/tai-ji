@@ -6,14 +6,14 @@
  * Composer.vue 只负责「形态 → DOM」的映射。
  *
  * 输入 → 输出：
- * - 输入 = 能力标志（插件 toolbar 贡献 / 托盘是否有条目）+ **fit 退化级（0–3）** + 锚点保护标志；
+ * - 输入 = 能力标志（插件 toolbar 贡献 / 托盘是否有条目 / headerAction 可见入口）+ **fit 退化级（0–3）** + 锚点保护标志；
  * - 输出 = 逐组呈现形态（`slots`）+ 已生效退化序（`appliedOrders`）+ 锚点保护态。
  *
  * 退化序（「三步聚合」目标次序 = 指标 → 左簇 → 模型；累计生效，级数由接线层实测溢出后逐级喂入）：
  * - 序 0（类型级保证，不入序集）：`+` / btw 与发送按钮**恒不退化、不被裁剪**（锚点）。
  * - 序 1（L1）：指标（容量 + TTFT + 速度 + 缓存）→ **1 个单图标聚合按钮**（hover 弹指标聚合页，四卡）；
  *   fit 0 保持平铺（GenStatsTriggers / ContextCapacityPopover 纯文本触发器，demo `.mtr-exp` 同款）。
- * - 序 2（L2）：左簇（托盘 + 插件 toolbar 散图标）→ **1 个单图标聚合按钮**（click 弹全图标列表）。
+ * - 序 2（L2）：左簇（托盘 + 插件 toolbar 散图标 + headerAction 入口）→ **1 个单图标聚合按钮**（click 弹全图标列表）。
  * - 序 3（L3）：模型 + 思考等级 → **1 个单图标聚合按钮**（click 弹模型+思考，hover 行内即切换）。
  *   模型名形态域**只有两态**：完整展示 / 聚合按钮——**不存在任何中间截断态**（见 [HISTORICAL]）。
  * - 顶格（L3）仍实测放不下 → `anchorProtected`：左簇与指标聚合按钮隐藏，只留模型聚合按钮 +
@@ -34,7 +34,8 @@
  * 1. **永不换行** —— `allowsWrap` 恒 false；容器 `flex-nowrap` 由消费方落实。
  * 2. **序 0 不退化** —— `slots.add` / `slots.send` 写死 `'expanded'` 字面量，误用被 tsc 拦。
  * 3. **累计退化** —— 级数越高，序 1..N 依次生效（不是互斥选择）。
- * 4. **不留死入口** —— 托盘全无条目且插件零贡献 → `leftCluster: 'absent'`（不渲染聚合按钮）。
+ * 4. **不留死入口** —— 托盘全无条目、插件零贡献且 headerAction 无入口 → `leftCluster: 'absent'`
+ *    （不渲染聚合按钮）。
  *
  * 纯函数契约：零 Vue / Pinia / DOM 依赖，无副作用——每次调用返回全新对象与数组、不读写模块级
  * 可变状态、不修改入参，同输入恒同输出。**不读容器宽度**：宽度→fit 级的换算（测量回路）在
@@ -56,7 +57,9 @@ export const COMPOSER_FIT_LEVEL_MODEL_AGGREGATE = 3
  */
 export const COMPOSER_DENSITY_MAX_FIT_DEGRADATION = COMPOSER_FIT_LEVEL_MODEL_AGGREGATE
 
-/** 可选能力标志（缺省 = 最保守假设：插件零贡献、托盘有面）。 */
+/**
+ * 可选能力标志（缺省 = 最保守假设：插件零贡献、托盘有面）。
+ */
 export interface ComposerDensityCapabilities {
   /**
    * 插件 `composer.toolbar` 挂载点的贡献数。缺省 0 = 默认安装零贡献 → 左簇聚合按钮不含插件段
@@ -68,6 +71,15 @@ export interface ComposerDensityCapabilities {
    * 缺省 true。false = 全无 → 沿托盘三态规则不渲染；与插件零贡献同时成立 → `leftCluster: 'absent'`。
    */
   readonly hasTrayItems?: boolean
+  /**
+   * 插件 headerAction 声明面是否有可见入口（scheduler 定时任务钮等；判定实现 =
+   * `hasVisibleHeaderActions`，与渲染过滤同构）。缺省 false。
+   * 左簇内容三源之一（托盘条目 / toolbar 贡献 / headerAction 入口）：L2 聚合面含
+   * headerAction（demo composer-bar spec §2.1 B3「定时任务 + 托盘 → layers」），故
+   * 「不留死入口」的 absent 判据必须覆盖它——否则托盘空 + toolbar 零贡献时聚合入口
+   * 不渲染，被聚合的 clock 直开动作丢失。
+   */
+  readonly hasHeaderActionEntries?: boolean
 }
 
 /** 退化序（序 0 不入序集）：数值升序 = 应用先后（累计退化）。指标（信息展示）先让位、左簇（功能动作）后让位。 */
@@ -163,14 +175,16 @@ export function resolveComposerDensity(
 
   const hasPluginToolbarContributions = (capabilities.pluginToolbarContributionCount ?? 0) > 0
   const hasTrayItems = capabilities.hasTrayItems ?? true
+  const hasHeaderActionEntries = capabilities.hasHeaderActionEntries ?? false
 
   const slots: ComposerDensitySlots = {
     // 序 0：任何宽度都保留原形态。
     add: 'expanded',
     send: 'expanded',
-    // 序 2：左簇。无内容（托盘全无 + 插件零贡献）或锚点保护 → 不渲染；L2 起聚合；否则展开。
+    // 序 2：左簇。无内容（托盘全无 + 插件零贡献 + headerAction 无入口）或锚点保护 → 不渲染；
+    // L2 起聚合；否则展开。
     leftCluster:
-      !hasTrayItems && !hasPluginToolbarContributions
+      !hasTrayItems && !hasPluginToolbarContributions && !hasHeaderActionEntries
         ? 'absent'
         : anchorProtected
           ? 'absent'

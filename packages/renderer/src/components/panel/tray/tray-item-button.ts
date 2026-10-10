@@ -15,7 +15,7 @@ import { cn } from '@/lib/utils'
  *  relative = 计数角标的定位锚（角标绝对定位于按钮右上角）。 */
 export function trayItemButtonClass(active: boolean): string {
   return cn(
-    'relative size-[30px] shrink-0 justify-center gap-1 rounded-sm p-0',
+    'relative size-[30px] shrink-0 justify-center gap-[4px] rounded-sm p-0',
     active
       ? 'bg-surface-hover text-neutral-fg'
       : 'text-neutral-dim hover:bg-surface-hover hover:text-neutral-fg',
@@ -23,7 +23,7 @@ export function trayItemButtonClass(active: boolean): string {
 }
 
 /** running 呼吸点类（仅「有进行中」渲染；归零不虚亮由各自 v-if 判定） */
-export const TRAY_PULSE_CLASS = 'size-1.5 shrink-0 animate-pulse rounded-full bg-accent'
+export const TRAY_PULSE_CLASS = 'size-[6px] shrink-0 animate-pulse rounded-full bg-accent'
 
 /**
  * 计数角标形态（demo .cbtn .badge）：绝对定位于按钮右上角 -3px，min-w/h 14px、px 3px、

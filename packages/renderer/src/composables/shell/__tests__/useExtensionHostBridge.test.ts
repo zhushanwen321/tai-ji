@@ -30,6 +30,7 @@ import { dispatchCrossSession, dispatchGlobal } from '@taiji/core/transport/api'
 import {
   getExtensionBus,
   initExtensionHostBridge,
+  hasVisibleHeaderActions,
   resolveHeaderActionAvailability,
   HEADER_ACTIONS_SOURCE_KEY,
   __testing,
@@ -400,6 +401,49 @@ describe('u4b E13 四态判定 resolveHeaderActionAvailability（纯函数直测
   it('④ 分区为空 → unknown（未拉取/恢复窗口的保守判定，不拦入口）', () => {
     expect(resolveHeaderActionAvailability(readerOf([]), makeRegistry([]), 's1', 'any.open'))
       .toBe('unknown')
+  })
+})
+
+describe('hasVisibleHeaderActions（headerAction 可见性判定，与 HeaderActionsHost 渲染过滤同构对账）', () => {
+  /** 最小 source stub（只带可见性判定消费的三个读面；E13/E3 面不参与可见性） */
+  function sourceOf(
+    declarations: Array<{ id: string; ha: Record<string, unknown> | null }>,
+    hiddenByDefault = false,
+  ): HeaderActionsSource {
+    return {
+      getDeclarations: () =>
+        declarations.map((d) => ({
+          pluginId: 'demo-plugin',
+          contributionId: d.id,
+          type: 'headerAction',
+          headerAction: d.ha,
+        })),
+      getRuntimeState: (_sid, _id) => (hiddenByDefault ? { hidden: true } : undefined),
+      resolveCommandAvailability: () => 'registered',
+      executeCommand: () => true,
+    } as unknown as HeaderActionsSource
+  }
+
+  it('overlay 直开声明（无 commandId）可见——scheduler 定时任务钮形态', () => {
+    const source = sourceOf([{ id: 'c1', ha: { activation: 'scheduler-overlay', icon: 'clock', title: '定时任务' } }])
+    expect(hasVisibleHeaderActions(source, 's1')).toBe(true)
+  })
+
+  it('命令链声明（有 commandId）可见；无 commandId 且无 activation 的声明不可见', () => {
+    const withCmd = sourceOf([{ id: 'c1', ha: { commandId: 'demo.open', title: 'T' } }])
+    expect(hasVisibleHeaderActions(withCmd, 's1')).toBe(true)
+    const bare = sourceOf([{ id: 'c1', ha: { icon: 'puzzle', title: 'T' } }])
+    expect(hasVisibleHeaderActions(bare, 's1')).toBe(false)
+  })
+
+  it('运行时 hidden=true → 不可见（插件「无任务不显示」契约的对账位）', () => {
+    const source = sourceOf([{ id: 'c1', ha: { activation: 'scheduler-overlay', icon: 'clock', title: '定时任务' } }], true)
+    expect(hasVisibleHeaderActions(source, 's1')).toBe(false)
+  })
+
+  it('无声明 / 非本类型声明 → false', () => {
+    expect(hasVisibleHeaderActions(sourceOf([]), 's1')).toBe(false)
+    expect(hasVisibleHeaderActions(sourceOf([{ id: 'c1', ha: null }]), 's1')).toBe(false)
   })
 })
 

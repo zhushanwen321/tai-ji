@@ -40,7 +40,7 @@
           <div
             class="flex shrink-0 items-center gap-1.5 px-1.5 pb-[5px] pt-[3px] font-mono text-[length:var(--text-3xs)] uppercase tracking-[0.08em] text-neutral-dim"
           >
-            <component :is="section.icon" class="size-3 shrink-0" aria-hidden="true" />
+            <component :is="section.icon" class="!size-[13px] shrink-0" aria-hidden="true" />
             <span class="min-w-0 flex-1 truncate">{{ t(`panel.tray.title.${section.kind}`) }}</span>
             <!-- 段头计数：进行中 / 全量（与段内面板 tab 计数同源，不是第二口径） -->
             <span

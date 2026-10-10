@@ -38,7 +38,7 @@
  * [领地说明] 接线件落在 `panel/tray/` 下（u6b 领地 = Composer.vue 底栏区 + tray/**）；底栏其余部分
  * 未抽离是为了控制 Composer.vue 的 script 行数余量（该文件已贴 300 行硬门禁）。
  */
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { ComputedRef, Ref } from 'vue'
 import {
   COMPOSER_DENSITY_MAX_FIT_DEGRADATION,
@@ -50,6 +50,10 @@ import type {
   ComposerFitDegradationLevel,
 } from '@/components/panel/composer-density'
 import { usePluginToolbarContribution } from './use-plugin-toolbar'
+import {
+  HEADER_ACTIONS_SOURCE_KEY,
+  hasVisibleHeaderActions,
+} from '@/composables/shell/useExtensionHostBridge'
 
 /** 左右两簇的 data 属性（fit 测量定位用；中簇是可压缩占位，不参与需求宽） */
 const CLUSTER_LEFT_SELECTOR = '[data-composer-cluster="left"]'
@@ -138,6 +142,15 @@ export function useComposerBarDensity(sessionId: Ref<string | null>): UseCompose
    * （内层 computed 惰性：sid 空时不触发挂载点查询，与旧短路行为等价）。
    */
   const pluginToolbarHasContribution = usePluginToolbarContribution(() => sessionId.value ?? '')
+  /**
+   * 插件 headerAction 可见入口面（左簇内容三源之一；demo composer-bar spec §2.1 B3——L2 聚合面
+   * 含定时任务钮，其存在性必须参与「左簇有无内容」判定，否则托盘空 + toolbar 零贡献时聚合
+   * 入口不渲染、被聚合 clock 直开动作丢失）。判定纯函数与渲染过滤同构（bridge 单份）。
+   */
+  const headerActionsSource = inject(HEADER_ACTIONS_SOURCE_KEY, null)
+  const hasHeaderActionEntries = computed(
+    () => !!headerActionsSource && !!sessionId.value && hasVisibleHeaderActions(headerActionsSource, sessionId.value),
+  )
   const pluginToolbarContributionCount = computed(() =>
     sessionId.value && pluginToolbarHasContribution.value ? 1 : 0,
   )
@@ -147,6 +160,7 @@ export function useComposerBarDensity(sessionId: Ref<string | null>): UseCompose
       {
         pluginToolbarContributionCount: pluginToolbarContributionCount.value,
         hasTrayItems: hasTrayItems.value,
+        hasHeaderActionEntries: hasHeaderActionEntries.value,
       },
       fitLevel.value,
       anchorProtected.value,
@@ -276,9 +290,10 @@ export function useComposerBarDensity(sessionId: Ref<string | null>): UseCompose
     passCount = 0
   })
 
-  // 托盘条目面 / 插件贡献变化会改左簇占宽（散图标 ↔ 聚合 ↔ 缺席），重新判一次
+  // 托盘条目面 / 插件贡献 / headerAction 声明面变化会改左簇占宽（散图标 ↔ 聚合 ↔ 缺席），重新判一次
   watch(hasTrayItems, () => scheduleFitPass())
   watch(pluginToolbarContributionCount, () => scheduleFitPass())
+  watch(hasHeaderActionEntries, () => scheduleFitPass())
 
   return {
     barRef,

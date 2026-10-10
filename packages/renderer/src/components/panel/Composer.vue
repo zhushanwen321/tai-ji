@@ -75,7 +75,7 @@
             :title="staging.activeStaging.value.type === 'fork' ? t('panel.composer.forkExit') : t('panel.composer.handoffExit')"
             @click="staging.exit"
           >
-            <X class="size-3" />
+            <X class="!size-[12px]" />
           </Button>
         </div>
         <!-- 顶部元信息行（u4 mode-visibility-chip）：对话态只读模式 chip（**仅非默认模式**渲染，
@@ -105,16 +105,15 @@
           @blur="onBoxFocusOut"
         />
 
-      <!-- 底栏三簇（「三步聚合」目标次序 = 指标 → 左簇 → 模型）：左簇（`+` / 托盘 / 插件 toolbar，shrink-0）·
-           中簇（可压缩占位）· 右簇（指标 / 模型+思考 / 发送位，shrink-0 且发送位右锚）。
-           **flex-nowrap 永不换行**；逐组形态由密度状态机（ResizeObserver 实测两簇占宽 vs 可用宽
-           → composer-density）驱动：序 0 发送位/`+`/btw 不退化不裁剪 · 序 1 指标 fit 0 平铺
-           （纯文本触发器）/ L1 起收**单图标**聚合按钮（hover 聚合页；右簇信息先让位）·
-           序 2 左簇收**单图标**聚合按钮 ·
-           序 3 模型+思考收单图标聚合按钮
-           （click 弹层 + hover 行内切换；非聚合态模型名**恒完整展示**，无截断态）·
-           顶格仍溢出 → 锚点保护（中部让位）。禁硬编码 px 断点（判据全在实测回路，`»` 省略号入口已退役）。
-           左右两簇挂 data-composer-cluster：fit 回路据二者占宽之和判「放不放得下」（中簇可压到 0）。 -->
+      <!-- 底栏三簇（「三步聚合」目标次序 = 指标 → 左簇 → 模型）：左簇（`+` / btw / 托盘 /
+           插件 toolbar + headerAction，shrink-0）· 中簇（可压缩占位）· 右簇（指标 / 模型+思考 /
+           发送位，shrink-0 且发送位右锚）。**flex-nowrap 永不换行**；逐组形态由密度状态机
+           （ResizeObserver 实测两簇占宽 vs 可用宽 → composer-density）驱动：序 0 发送位/`+`/btw
+           不退化不裁剪 · 序 1 指标 L1 起收**单图标**聚合按钮（hover 聚合页；右簇信息先让位）·
+           序 2 左簇收**单图标**聚合按钮 · 序 3 模型+思考收单图标聚合按钮（click 弹层 + hover
+           行内切换；非聚合态模型名**恒完整展示**，无截断态）· 顶格仍溢出 → 锚点保护（中部让位）。
+           禁硬编码 px 断点（判据全在实测回路，`»` 省略号入口已退役）。左右两簇挂
+           data-composer-cluster：fit 回路据二者占宽之和判「放不放得下」（中簇可压到 0）。 -->
       <div
         ref="composerBarRef"
         data-testid="composer-bar"
@@ -129,16 +128,15 @@
              use-composer-bar-density COMPOSER_BTW_BUTTON_DEGRADATION_ORDER）/ 任务托盘
              （左簇唯一聚合入口：aggregated 时单图标按钮承载托盘分段 + 插件 toolbar）/
              展开态插件 toolbar 挂载点 -->
-        <div data-composer-cluster="left" class="flex min-w-0 shrink-0 items-center gap-1">
+        <div data-composer-cluster="left" class="flex min-w-0 shrink-0 items-center gap-[4px]">
           <AddMenuPopover @select="onAddSelect" />
           <!-- plugin headerAction 挂载点（demo 裁决落点 = composer 左簇、「+」之后；用户裁决
                2026-10-06）。显隐由 hidden 管线唯一裁决：无任务插件推 hidden=true → 列表构建层
-               剔除，零 DOM 不渲染；无声明同样零 DOM。
-               密度机不参与（不加 anchorProtected v-show）：锚点保护的职责是折叠托盘聚合入口
-               （受托盘 emitter/数据面唯一实例约束只能折叠不能卸载），headerAction 入口的显隐
-               权威在插件 hidden 推送（hidden=false = 插件要求常驻），密度折叠会让插件显式
-               申报的入口被宽度条件静默吞掉，两套显隐权威冲突时以 hidden 管线为准。 -->
-          <HeaderActionsHost v-if="sessionId" :session-id="sessionId" />
+               剔除，零 DOM 不渲染；无声明同样零 DOM。密度归属（demo composer-bar spec §2.1/§4.2
+               B3：L2 聚合面 = 定时任务 + 托盘 → layers 单钮）：expanded 在左簇渲染；aggregated
+               起摘除、同一挂载点数据源改在托盘聚合面板首段渲染（与插件 toolbar 同构）；
+               anchorProtected 随托盘折叠（L4）。 -->
+          <HeaderActionsHost v-if="sessionId && density.slots.leftCluster === 'expanded'" :session-id="sessionId" />
           <!-- btw 入口（btw-question D7，M3-b）：`+` 之后、托盘之前。show-btw 实例开关
                （false 不出按钮——drawer 内 BtwPanel 的 Composer 传 false 防递归出 btw 入口）；
                无 session 不出（与托盘同判据，badge 数据面需主会话）。点击 = openDrawerTab('btw')，
@@ -179,7 +177,7 @@
         <span class="min-w-0 flex-1" />
 
         <!-- 右簇：指标 / 模型+思考 / 发送位（shrink-0，发送位右锚不漂移） -->
-        <div data-composer-cluster="right" class="flex min-w-0 shrink-0 items-center gap-1">
+        <div data-composer-cluster="right" class="flex min-w-0 shrink-0 items-center gap-[4px]">
           <!-- 序 1：指标（容量 + TTFT + 速度 + 缓存）。expanded（fit 0）= 纯文本触发器平铺
                （TTFT / 速度 / 缓存 + 容量，各自 hover 浮层保留为再入路径，demo `.mtr-exp` 同款）；
                aggregated（L1 起，右簇信息先让位）= **单图标**聚合按钮（hover 弹指标聚合页，
@@ -229,36 +227,36 @@
           v-if="staging.activeStaging.value && !isSending"
           variant="default"
           size="icon"
-          class="ml-1 size-[var(--composer-btn-size)] rounded-md bg-accent text-accent-fg transition-colors enabled:hover:bg-accent-hover disabled:bg-accent-soft disabled:text-neutral-mid disabled:opacity-100"
+          class="ml-[4px] size-[var(--composer-btn-size)] rounded-md bg-accent text-accent-fg transition-colors enabled:hover:bg-accent-hover disabled:bg-accent-soft disabled:text-neutral-mid disabled:opacity-100"
           :disabled="!canSubmit"
           :data-testid="staging.activeStaging.value.type === 'fork' ? 'fork-send-btn' : 'handoff-send-btn'"
           :title="staging.activeStaging.value.type === 'fork' ? t('panel.composer.forkSend') : t('panel.composer.handoffSend')"
           @click="onSendClick"
         >
-          <ArrowUp class="size-4" />
+          <ArrowUp class="!size-[16px]" />
         </Button>
         <Button
           v-else-if="sendButtonState === 'stop'"
           variant="ghost"
           size="icon"
-          class="stop-btn ml-1 size-[var(--composer-btn-size)] rounded-md bg-surface-hover text-neutral-mid hover:bg-danger-soft hover:text-danger"
+          class="stop-btn ml-[4px] size-[var(--composer-btn-size)] rounded-md bg-surface-hover text-neutral-mid hover:bg-danger-soft hover:text-danger"
           :title="t('panel.composer.stop')"
           @click="onStopClick"
         >
-          <Square class="size-[13px]" />
+          <Square class="!size-[13px]" />
         </Button>
         <Button
           v-else-if="sendButtonState === 'queue'"
           variant="default"
           size="icon"
-          class="queue-send-btn relative ml-1 size-[var(--composer-btn-size)] rounded-md bg-accent text-accent-fg transition-colors enabled:hover:bg-accent-hover disabled:bg-accent-soft disabled:text-neutral-mid disabled:opacity-100"
+          class="queue-send-btn relative ml-[4px] size-[var(--composer-btn-size)] rounded-md bg-accent text-accent-fg transition-colors enabled:hover:bg-accent-hover disabled:bg-accent-soft disabled:text-neutral-mid disabled:opacity-100"
           :disabled="!canSubmit"
           :title="canSubmit ? `${t('panel.composer.queueSend')} · ⏎` : t('panel.composer.sendHint')"
           @click="onSendClick"
         >
-          <ArrowUp class="size-4" />
+          <ArrowUp class="!size-[16px]" />
           <!-- 时钟角标（D6 场景 1）：排队语义视觉锚点，右上角 1/4 尺寸 -->
-          <Clock class="absolute right-[2px] top-[2px] size-2" aria-hidden="true" />
+          <Clock class="absolute right-[2px] top-[2px] !size-[8px]" aria-hidden="true" />
         </Button>
         <!-- 发送中 spinner = 呼吸弧（chat 域统一 loader 规格同构：15px accent + 三重动画）。
              svg 骨架与 ui 包 RUNNING_LOADER_SVG 同构（该常量未在 ui 包 exports 白名单，
@@ -266,10 +264,10 @@
              style.css 全局单源承载，此处仅静态属性无独立样式。 -->
         <div
           v-else-if="isSending"
-          class="ml-1 grid size-[var(--composer-btn-size)] place-items-center rounded-md bg-accent text-accent-fg"
+          class="ml-[4px] grid size-[var(--composer-btn-size)] place-items-center rounded-md bg-accent text-accent-fg"
           :title="t('panel.composer.sending')"
         >
-          <span class="inline-block size-[15px] animate-loader-spin" aria-hidden="true">
+          <span class="inline-block !size-[15px] animate-loader-spin" aria-hidden="true">
             <svg
               class="size-full"
               viewBox="0 0 24 24"
@@ -288,12 +286,12 @@
           v-else
           variant="default"
           size="icon"
-          class="ml-1 size-[var(--composer-btn-size)] rounded-md bg-accent text-accent-fg transition-colors enabled:hover:bg-accent-hover disabled:bg-accent-soft disabled:text-neutral-mid disabled:opacity-100"
+          class="ml-[4px] size-[var(--composer-btn-size)] rounded-md bg-accent text-accent-fg transition-colors enabled:hover:bg-accent-hover disabled:bg-accent-soft disabled:text-neutral-mid disabled:opacity-100"
           :disabled="!canSubmit"
           :title="canSubmit ? `${t('panel.composer.send')} · ⏎` : t('panel.composer.sendHint')"
           @click="onSendClick"
         >
-          <ArrowUp class="size-4" />
+          <ArrowUp class="!size-[16px]" />
         </Button>
         </div>
       </div>

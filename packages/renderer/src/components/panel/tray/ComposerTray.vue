@@ -1,3 +1,4 @@
+<!-- split-justified: 托盘外壳域（聚合入口判据 + hover/pin/互斥状态机 + B3 第三内容源接线——三件内置面板与 widget 区共用的唯一外壳状态机容器） -->
 <!--
   ComposerTray —— composer 任务托盘外壳（设计 docs/design/composer-task-tray.md——已删除，git 可追溯——
   §3.3 D1/D6/D8/D9/D12 + §3.1 场景 A/C + §3.4 终态数据流 + §3.5 错误规格 + §3.6 探针 P7）。
@@ -67,7 +68,7 @@
     :data-session-id="sessionId"
     role="group"
     :aria-label="t('panel.tray.trayLabel')"
-    class="flex min-w-0 shrink-0 items-center gap-0.5"
+    class="flex min-w-0 shrink-0 items-center gap-[2px]"
   >
     <!-- 序 4 聚合单入口（D6 密度档 `aggregated`）：整个托盘收为「单图标 + 运行数数字角标」一个按钮，
          点击开面板（TrayPanelSurface）内分段展示全部类别（TrayAggregatePanel）+ 插件 toolbar 贡献段；
@@ -98,7 +99,7 @@
           <!-- 单一图标（聚合语义 = layers 层叠面；有进行中时 accent 提亮，无则中性）；
                stroke 1.6 = demo .cbtn 图标规格（16px stroke 1.6，M4a 决 10 同款） -->
           <Layers
-            class="size-4 shrink-0"
+            class="!size-[16px] shrink-0"
             :stroke-width="1.6"
             :class="aggregateRunningCount > 0 ? 'text-accent' : 'text-neutral-dim'"
             aria-hidden="true"
@@ -126,6 +127,17 @@
         @interact-outside="onInteractOutside"
         @open-auto-focus="onOpenAutoFocus"
       >
+        <!-- 插件 headerAction 段（demo composer-bar spec §2.1 B3：L2 聚合面 = 定时任务 + 托盘 →
+             layers 单钮，被聚合 clock 的直开动作由面板首段承接——demo TrayPanel ⓪「定时任务
+             入口行」的对位；与左簇挂载点互斥渲染（左簇只在 expanded 挂），同一份数据源）。
+             有可见按钮才出段（hasVisibleHeaderActions 与 HeaderActionsHost 渲染过滤同构），
+             段后发丝分隔与段体一起出现，零声明/全 hidden 不留死分隔。 -->
+        <template v-if="hasHeaderActions">
+          <div class="shrink-0 pb-1 pt-1">
+            <HeaderActionsHost :session-id="sessionId" />
+          </div>
+          <span class="h-px w-full shrink-0 bg-border-strong" aria-hidden="true" />
+        </template>
         <TrayAggregatePanel
           :session-id="sessionId"
           :sections="builtinItems"
@@ -172,7 +184,7 @@
         >
           <component
             :is="item.icon"
-            class="size-4 shrink-0"
+            class="!size-[16px] shrink-0"
             :stroke-width="1.6"
             :class="item.running > 0 ? 'text-accent' : ''"
             aria-hidden="true"
@@ -266,6 +278,11 @@ import { Bot, Layers, SquareTerminal, Waypoints, Workflow } from '@lucide/vue'
 import { VIEW_HOST_SOURCE_KEY, ViewHost } from '@taiji/ui/extension-host'
 import { usePluginToolbarContribution } from '@/components/panel/tray/use-plugin-toolbar'
 import type { ViewCacheEntry } from '@taiji/ui/extension-host'
+import {
+  HEADER_ACTIONS_SOURCE_KEY,
+  hasVisibleHeaderActions,
+} from '@/composables/shell/useExtensionHostBridge'
+import HeaderActionsHost from '@/components/extension/HeaderActionsHost.vue'
 import { Popover, PopoverAnchor } from '@/components/ui/popover'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -405,9 +422,24 @@ const hasTrayItems = computed(() => builtinItems.value.length > 0 || widgetItems
 
 watch(hasTrayItems, (value) => emit('update:hasItems', value), { immediate: true })
 
-/** 插件 toolbar 贡献面 + 聚合入口可见条件（W3a：托盘有条目 或 插件有贡献，两者皆无不留死入口；贡献判定实现见 use-plugin-toolbar） */
+/**
+ * 插件 headerAction 可见面（聚合面板首段的渲染条件；与左簇挂载点互斥——左簇只在
+ * leftCluster==='expanded' 挂 HeaderActionsHost，聚合态同一数据源改由本面板承载，
+ * demo composer-bar spec §2.1 B3「定时任务 + 托盘 → layers 单钮」的入口承接）。
+ */
+const headerActionsSource = inject(HEADER_ACTIONS_SOURCE_KEY, null)
+const hasHeaderActions = computed(() =>
+  !!headerActionsSource && hasVisibleHeaderActions(headerActionsSource, props.sessionId),
+)
+
+/** 插件 toolbar 贡献面 + 聚合入口可见条件（W3a：托盘有条目 / 插件 toolbar 有贡献 /
+ *  headerAction 有入口三者任一，皆无不留死入口；贡献判定实现见 use-plugin-toolbar，
+ *  headerAction 判定 = hasVisibleHeaderActions——与密度状态机的 absent 判据同构，
+ *  缺一会造成「状态机判 aggregated 而聚合钮不渲染」的入口丢失）。 */
 const hasPluginToolbar = usePluginToolbarContribution(() => props.sessionId)
-const showAggregate = computed(() => props.aggregated && (hasTrayItems.value || hasPluginToolbar.value))
+const showAggregate = computed(
+  () => props.aggregated && (hasTrayItems.value || hasPluginToolbar.value || hasHeaderActions.value),
+)
 
 /** 聚合入口运行数（built-in 进行中 + widget 推送中；归零不虚亮由按钮 v-if 统一判定） */
 const aggregateRunningCount = computed(
