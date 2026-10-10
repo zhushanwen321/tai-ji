@@ -63,6 +63,11 @@
   --accent-soft: color-mix(in oklch, var(--accent) 10%, transparent);
   --accent-ring: color-mix(in oklch, var(--accent) 30%, transparent); /* 选中态内描边（Card-Active），见 design-system §2 */
   --accent-fg: #152019;         /* accent 实色上的文字；对 #7fb89c 7.38:1 过 AA */
+  /* Tier A 状态件选中态（demo tokens.css 同名 token：qs-panel 主题 chip 等必须可见的
+     静态状态件；行类不消费——demo R3 裁决行类无底无框）。color-mix 中的 var() 每元素
+     解析，preset 块覆盖基色即自动适配六主题，无需各主题重声明。 */
+  --sel-bg: color-mix(in oklch, var(--accent) 7%, var(--bg-elevated));
+  --sel-edge: color-mix(in oklch, var(--accent) 40%, transparent);
 
   /* 职能分色（demo 终态）：链接正蓝 / 行内代码杏橘，各主题独立定值 */
   --link-c: #4d8dff;

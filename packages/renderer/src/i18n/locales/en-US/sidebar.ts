@@ -75,10 +75,6 @@ export default {
     // counts unfinished children (non-green: active / error / stopped / dead), hence "unfinished"
     // rather than "running".
     childCount: '{n} child session unfinished | {n} child sessions unfinished',
-    // N8 hover detail card field labels (branch / full directory; no message count — no such
-    // field on SessionSummary, zero new data channel)
-    detailBranch: 'Branch',
-    detailDirectory: 'Directory',
   },
   sessionList: {
     empty: 'No sessions',

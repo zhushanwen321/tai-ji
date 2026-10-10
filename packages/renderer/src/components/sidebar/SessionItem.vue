@@ -6,13 +6,14 @@
       - SessionItemActions：hover ghost 操作 + 归入项目菜单 + 删除两段确认 UI（confirming 经 v-model 提升）
     本组件只保留：对外 props/emit 契约、根 div 与确认态多路 reset 通道、ariaLabel 语义补回。
   -->
-  <!-- N8 hover 详情卡（ui-optimize-unified 决策 9）：Teleport fixed 全局浮层，不被侧栏
-       滚动容器裁剪；字段 = 分支 + 完整目录（无消息数——SessionSummary 无该字段，与零新数据
-       通道约束一致）。A/C 两种列表模式下同样生效（SessionItem 自承载）。
+  <!-- N8 hover 详情卡（demo .sess-pop 权威形态）：Teleport fixed 全局浮层，不被侧栏
+       滚动容器裁剪；交互 = mouseenter 立即开 / 离行即关 / 卡体进入即关（demo Sidebar.vue
+       openCard/closeCard 同款，含 focusin/focusout 键盘路径）；字段 = fork 血缘 + 分支 +
+       完整目录 + 末行相对时间（消息数 SessionSummary 无该字段，零新数据通道约束）。
        实现说明：不用 reka HoverCard 原语——其 Trigger/Anchor as-child 跨 SessionItemContextMenu
        （多根组件）合并事件/ref 时 fallthrough 中断（实施期两个嵌套方向均实测断链：外层嵌套断
        pointerenter、内层嵌套断 contextmenu），故触发事件直挂根 div + 受控显隐，卡片定位取行
-       rect（右弹 + 视口右缘 clamp，无 reka flip 时的近似防溢出）。 -->
+       rect（demo openCard 公式：右弹 8px + 右缘/下缘视口钳制）。 -->
   <SessionItemContextMenu
     :session-id="session.id"
     :parent-agent-session-id="session.parentAgentSessionId"
@@ -23,17 +24,21 @@
     @abort="emit('abort', $event)"
     @force-quit="emit('forceQuit', $event)"
   >
+    <!-- 激活态 = demo .si.on（workbench.css 文件尾 Tier B）：无底无框，仅行文字提亮 fg；
+         非激活 hover 才有 bg-surface-hover 临时反馈（demo .si:hover 同款） -->
     <div
       ref="rootEl"
       class="session-item group/item relative flex cursor-pointer select-none items-start gap-2 rounded-sm px-2 py-[7px] transition-colors"
       :class="[
-        active ? 'bg-bg-elevated text-neutral-fg shadow-[inset_2px_0_0_var(--accent)]' : 'text-neutral-fg hover:bg-surface-hover',
+        active ? 'text-neutral-fg' : 'text-neutral-fg hover:bg-surface-hover',
         isDead ? 'opacity-50' : '',
       ]"
       :aria-label="ariaLabel"
       @click="emit('select', session.id)"
       @pointerenter="onDetailEnter"
       @pointerleave="onDetailLeave"
+      @focusin="onDetailEnter"
+      @focusout="onDetailLeave"
       @mouseleave="confirming = false"
     >
       <SessionItemDisplay :session="displaySession" :status="status" :child-count="childCount" :active="active" />
@@ -49,7 +54,9 @@
   </SessionItemContextMenu>
 
   <!-- hover 详情卡（demo .sess-pop 形态：fixed 232px / elevated 底 / border-strong / radius-lg
-       / shadow-2 / 行间 hairline 分隔 / opacity+translateX 0.15s 进出过渡 / z-hovercard 梯队） -->
+       / shadow-2 / 行间 hairline 分隔 / 行首 13px 图标 + mono 值 + 末行时间 meta / opacity+
+       translateX dur-fast ease-out 进出过渡 / z-hovercard 梯队 / mouseenter 立即开 + 卡体
+       进入即关） -->
   <Teleport to="body">
     <Transition name="sess-pop">
       <div
@@ -57,32 +64,35 @@
         data-testid="session-detail-card"
         class="fixed z-[var(--z-hovercard)] w-[232px] rounded-lg border border-border-strong bg-bg-elevated px-3 py-2 text-neutral-fg shadow-2"
         :style="detailStyle"
+        @pointerenter="onDetailLeave"
       >
         <div class="flex flex-col divide-y divide-hairline">
-          <!-- fork 血缘（原列表行 sub 信息随单行化迁入卡片：spec §8.5「↑ fork 自 <父名>」） -->
-          <div v-if="session.parentSession" class="flex items-baseline gap-2 py-[5px]">
-            <span class="shrink-0 text-[length:var(--text-xs)] text-neutral-dim">
-              {{ t('sidebar.sessionItem.forkFrom') }}
-            </span>
-            <span class="min-w-0 break-all font-mono text-[length:var(--text-xs)] text-neutral-fg-2">
-              {{ session.parentLabel || session.parentSession }}
+          <!-- 行形态 = demo .sess-pop .pr：行首 13px 图标（dim）+ 值（mono 12px fg-2 break-all），
+               padding 5px 0 / gap 7px；图标 margin-top 2px 对齐首行文本 -->
+          <!-- fork 血缘（原列表行 sub 信息随单行化迁入卡片：spec §8.5「↑ fork 自 <父名>」；
+               demo 无此概念，复用分支行 GitBranch 图标语言） -->
+          <div v-if="session.parentSession" class="flex items-start gap-[7px] py-[5px]">
+            <GitBranch class="mt-[2px] size-[13px] shrink-0 text-neutral-dim" :stroke-width="1.8" />
+            <span class="min-w-0 break-all text-[length:var(--text-xs)] leading-[1.55] text-neutral-fg-2">
+              {{ t('sidebar.sessionItem.forkFrom') }} {{ session.parentLabel || session.parentSession }}
             </span>
           </div>
-          <div v-if="session.gitBranch" class="flex items-baseline gap-2 py-[5px]">
-            <span class="shrink-0 text-[length:var(--text-xs)] text-neutral-dim">
-              {{ t('sidebar.sessionItem.detailBranch') }}
-            </span>
-            <span class="min-w-0 break-all font-mono text-[length:var(--text-xs)] text-neutral-fg-2">
+          <div v-if="session.gitBranch" class="flex items-start gap-[7px] py-[5px]">
+            <GitBranch class="mt-[2px] size-[13px] shrink-0 text-neutral-dim" :stroke-width="1.8" />
+            <span class="min-w-0 break-all font-mono text-[length:var(--text-xs)] leading-[1.55] text-neutral-fg-2">
               {{ session.gitBranch }}
             </span>
           </div>
-          <div class="flex items-baseline gap-2 py-[5px]">
-            <span class="shrink-0 text-[length:var(--text-xs)] text-neutral-dim">
-              {{ t('sidebar.sessionItem.detailDirectory') }}
-            </span>
-            <span class="min-w-0 break-all font-mono text-[length:var(--text-xs)] text-neutral-fg-2">
+          <div class="flex items-start gap-[7px] py-[5px]">
+            <Folder class="mt-[2px] size-[13px] shrink-0 text-neutral-dim" :stroke-width="1.8" />
+            <span class="min-w-0 break-all font-mono text-[length:var(--text-xs)] leading-[1.55] text-neutral-fg-2">
               {{ session.cwd }}
             </span>
+          </div>
+          <!-- 末行 meta（demo .pr.meta：dim 12px 纯文本行；demo 内容 = 时间 · 消息数，
+               real SessionSummary 无消息数字段——只放相对时间，零新数据通道约束） -->
+          <div class="py-[5px] text-[length:var(--text-xs)] leading-[1.55] text-neutral-dim">
+            {{ timeLabel }}
           </div>
         </div>
       </div>
@@ -94,7 +104,9 @@
 import { computed, inject, onBeforeUnmount, ref, watch, type Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { onClickOutside } from '@vueuse/core'
+import { Folder, GitBranch } from '@lucide/vue'
 import { isMarkedDone } from '@/composables/useSessionMarkers'
+import { formatRelativeTime } from '@/composables/logic/formatTime'
 import type { DerivedStatus } from '@/types'
 import SessionItemContextMenu from './session-item/SessionItemContextMenu.vue'
 import SessionItemDisplay from './session-item/SessionItemDisplay.vue'
@@ -103,8 +115,9 @@ import type { SessionItemSession } from './session-item/types'
 
 /**
  * 展示组件 · 单会话项（spec §5.6A / D12 列表主行范式）。
- * active=accent 浅底（bg-accent-soft）+ 左侧 2px accent 竖条（inset shadow，不占布局），
- * 标题文字保持中性色（用户裁决 2026-10-06，对齐 demo .sess.is-active 形态）；
+ * active = demo .si.on（workbench.css 文件尾 Tier B 范式）：无底无框，仅行文字提亮 fg
+ * （2026-10-10 对齐 demo 终态；此前 accent 浅底 + 2px 竖条形态对应的是旧 demo .sess.is-active，
+ * demo 单行 .si 化后选中态已收编为 Tier B）；
  * hover ghost 操作（bottom-right）；
  * agent-spawned session（U8）：标题旁 [AI] badge + 右键「查看父 session」菜单。
  * 非 dead session 右键另有「强制退出」逃生入口（两段确认，状态机在 ContextMenu 子组件）。
@@ -117,8 +130,8 @@ const props = withDefaults(defineProps<{
   status: DerivedStatus
   /** 子会话数（按 parentAgentSessionId 计数，SessionList 注入）；只读徒标，0 不渲染 */
   childCount?: number
-  /** 父 session 显示名（SessionList 反查血缘注入，sub 行展示「fork 自 <父名>」；
-   *  缺省回退 session.parentSession 原值——SessionItemDisplay 的 `parentLabel || parentSession`） */
+  /** 父 session 显示名（SessionList 反查血缘注入，hover 详情卡血缘行展示「fork 自 <父名>」；
+   *  缺省回退 session.parentSession 原值——卡片血缘行的 `parentLabel || parentSession`） */
   parentLabel?: string
 }>(), { childCount: 0 })
 
@@ -171,46 +184,39 @@ const confirming = ref(false)
 /** 根元素引用（onClickOutside 目标） */
 const rootEl = ref<HTMLElement | null>(null)
 
-// ── N8 hover 详情卡（分支 + 完整目录）──
+// ── N8 hover 详情卡（demo .sess-pop 交互同款）──
 
-/** 详情卡显示延迟（hover 交互惯例定时，防扫过列表逐行闪烁；产品功能定时，非时间平抑） */
-const DETAIL_HOVER_DELAY_MS = 700
-/** 卡宽（demo .sess-pop 232px 固定宽；右缘 clamp 预留 + 视口边距 16px） */
-const DETAIL_CARD_MAX_W = 232
-const DETAIL_VIEWPORT_MARGIN = 16
-/** 卡与行水平间隙 / 视口最小边距（px） */
-const DETAIL_CARD_GAP_PX = 6
-const DETAIL_MIN_EDGE_PX = 6
+/** 卡宽（demo .sess-pop 232px 固定宽）；定位常量 = demo Sidebar.vue openCard 公式：
+ *  右弹 gap 8px，右缘 clamp 预留 240（卡宽 232 + 8），视口下缘按卡估高 158 钳制，四边最小 8px */
+const DETAIL_CARD_GAP_PX = 8
+const DETAIL_VIEWPORT_MARGIN = 240
+const DETAIL_CARD_ESTIMATED_H = 158
+const DETAIL_MIN_EDGE_PX = 8
 
 const detailVisible = ref(false)
 const detailStyle = ref<Record<string, string>>({})
-let detailTimer: number | undefined
 
-/** 行 hover 进入：延迟后取行 rect 右弹定位（视口右缘 clamp，超出改贴右缘）显示详情卡 */
+/** 行 hover/键盘聚焦进入：立即取行 rect 右弹定位显示详情卡（demo @mouseenter=openCard 同款，
+ *  无防扫过延迟——mock 权威即此交互；键盘路径 focusin 同样开卡，与 demo @focusin 一致） */
 function onDetailEnter(): void {
-  detailTimer = window.setTimeout(() => {
-    const el = rootEl.value
-    if (!el) return
-    const rect = el.getBoundingClientRect()
-    const left = Math.min(
-      rect.right + DETAIL_CARD_GAP_PX,
-      window.innerWidth - DETAIL_CARD_MAX_W - DETAIL_VIEWPORT_MARGIN,
-    )
-    detailStyle.value = {
-      left: `${Math.max(DETAIL_MIN_EDGE_PX, left)}px`,
-      top: `${Math.max(DETAIL_MIN_EDGE_PX, rect.top)}px`,
-    }
-    detailVisible.value = true
-  }, DETAIL_HOVER_DELAY_MS)
+  const el = rootEl.value
+  if (!el) return
+  const rect = el.getBoundingClientRect()
+  const left = Math.min(
+    rect.right + DETAIL_CARD_GAP_PX,
+    window.innerWidth - DETAIL_VIEWPORT_MARGIN,
+  )
+  detailStyle.value = {
+    left: `${Math.max(DETAIL_MIN_EDGE_PX, left)}px`,
+    top: `${Math.max(DETAIL_MIN_EDGE_PX, Math.min(rect.top, window.innerHeight - DETAIL_CARD_ESTIMATED_H))}px`,
+  }
+  detailVisible.value = true
 }
 
-/** 行 hover 离开：取消未触发的显示定时 + 收卡 */
+/** 行 hover/聚焦离开（及卡体进入）：收卡——demo 卡体 @mouseenter=closeCard，卡为纯展示不可进入 */
 function onDetailLeave(): void {
-  window.clearTimeout(detailTimer)
   detailVisible.value = false
 }
-
-onBeforeUnmount(() => window.clearTimeout(detailTimer))
 
 /** 失焦自动重置：切到其它 session（active → false）时清掉残留确认态 */
 watch(
@@ -238,6 +244,9 @@ onClickOutside(rootEl, () => {
   confirming.value = false
 })
 
+/** 详情卡末行 meta：相对时间（demo .pr.meta 的 upd 段；消息数无字段不展示） */
+const timeLabel = computed(() => formatRelativeTime(props.session.lastActiveAt))
+
 /** 无障碍 label：归档态把归档语义拼进 label，让屏幕阅读器读出「已归档: <名称>」。
  *  背景是归档态移除了可见的「已归档」文字（改用 opacity-60 降权），opacity 不影响 a11y，
  *  故在此补回语义。 */
@@ -249,11 +258,11 @@ const ariaLabel = computed(() =>
 </script>
 
 <style scoped>
-/* 详情卡进出过渡（demo .sess-pop：opacity + translateX(-3px) 0.15s ease）——
+/* 详情卡进出过渡（demo .sess-pop：opacity + translateX(-3px) dur-fast ease-out）——
    Transition 类是 scoped style 的合法 escape hatch；reduced-motion 停（demo 同款）。 */
 .sess-pop-enter-active,
 .sess-pop-leave-active {
-  transition: opacity 0.15s ease, transform 0.15s ease;
+  transition: opacity var(--duration-fast) var(--ease-out), transform var(--duration-fast) var(--ease-out);
 }
 .sess-pop-enter-from,
 .sess-pop-leave-to {

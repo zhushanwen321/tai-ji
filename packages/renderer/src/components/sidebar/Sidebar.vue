@@ -141,52 +141,58 @@
       <!-- 用户区（footer）· demo .side-foot：hairline 顶线分隔 + 开发者身份行（accent 软底头像
            + 名字 + 三图标钮）。三钮左→右 = 远程连接 / 外观快捷面板 / 设置（demo Sidebar.vue:437-445；
            原 M1「无对应功能不补」裁决经用户反馈覆盖——前两钮接线到真实功能：设置弹层 remote-access
-           分区 + 六主题 setSystem 即时切换）。钮形按 demo .tbtn 语言（32px 方钮 + 15px 图标 + dim→fg hover）。 -->
+           分区 + 六主题 setSystem 即时切换）。钮形 = demo .tbtn（24px 方钮 + 15px 图标 + dim→fg hover）。 -->
       <div class="mt-auto flex-none border-t border-hairline px-3.5 pb-2.5 pt-3">
         <div class="flex items-center gap-[9px]">
           <span class="size-5 shrink-0 rounded-full border border-accent-ring bg-accent-soft" />
-          <span class="min-w-0 flex-1 truncate text-[length:var(--text-sm)] font-medium text-neutral-fg-2">{{ t('sidebar.developer') }}</span>
+          <span class="min-w-0 flex-1 truncate text-[length:var(--text-sm)] [font-weight:var(--fw-mid)] text-neutral-fg-2">{{ t('sidebar.developer') }}</span>
           <Button
             variant="ghost"
-            class="grid size-8 shrink-0 place-items-center rounded-sm p-0 text-neutral-dim transition-colors hover:bg-surface-hover hover:text-neutral-fg [&_svg]:size-[15px]"
+            class="grid size-6 shrink-0 place-items-center rounded-sm p-0 text-neutral-dim transition-colors hover:bg-surface-hover hover:text-neutral-fg [&_svg]:size-[15px]"
             :title="t('sidebar.remoteConnect')"
             :aria-label="t('sidebar.remoteConnect')"
             data-testid="sidebar-remote-connect"
             @click="openSettings('remote-access')"
           >
-            <Smartphone class="size-[15px]" />
+            <Smartphone class="size-[15px]" :stroke-width="1.6" />
           </Button>
           <Popover v-model:open="quickThemeOpen">
             <PopoverTrigger as-child>
               <Button
                 variant="ghost"
-                class="grid size-8 shrink-0 place-items-center rounded-sm p-0 text-neutral-dim transition-colors hover:bg-surface-hover hover:text-neutral-fg [&_svg]:size-[15px]"
+                class="grid size-6 shrink-0 place-items-center rounded-sm p-0 text-neutral-dim transition-colors hover:bg-surface-hover hover:text-neutral-fg [&_svg]:size-[15px]"
                 :title="t('sidebar.quickAppearance')"
                 :aria-label="t('sidebar.quickAppearance')"
                 data-testid="sidebar-quick-appearance"
+                @mouseenter="quickThemeEnter"
+                @mouseleave="quickThemeLeave"
               >
-                <Palette class="size-[15px]" />
+                <Palette class="size-[15px]" :stroke-width="1.6" />
               </Button>
             </PopoverTrigger>
-            <!-- 外观快捷面板 = demo .qs-panel（workbench.css:209-217）：212px 浮层卡（elevated 底 +
-                 border-strong + r-lg + shadow-3），头「主题」+ 双列色卡 chip（外框主题底 + 内点 accent）；
-                 选中态用 real 外观页主题行同款（surface-hover 底 + inset border-strong + fw-mid） -->
+            <!-- 外观快捷面板 = demo .qs-panel（workbench.css:209-218）：212px 浮层卡（elevated 底 +
+                 border-strong + r-lg + shadow-3），头「主题」（11px）+ 双列色卡 chip（外框主题底 +
+                 内点 accent）；选中态 = demo Tier A 范式（--sel-bg accent tint 底 + inset 1px
+                 --sel-edge 描边）；左对齐锚钮 + 底距钮顶 8px（demo placeQs 公式）；hover 开 +
+                 离开 260ms 延迟关（demo qsEnter/qsLeave 同款）；z 取 demo --z-hovercard 档 -->
             <PopoverContent
               side="top"
-              align="end"
-              :side-offset="10"
-              class="w-[212px] rounded-[var(--radius-lg)] border-border-strong p-[10px] shadow-[var(--shadow-3)]"
+              align="start"
+              :side-offset="8"
+              class="z-[var(--z-hovercard)] w-[212px] min-w-[212px] rounded-[var(--radius-lg)] border-border-strong p-[10px] shadow-3 ![transition-property:none]"
               data-testid="sidebar-quick-appearance-panel"
+              @mouseenter="quickThemeCancelClose"
+              @mouseleave="quickThemeLeave"
             >
-              <div class="mb-[6px] mt-[2px] px-[2px] text-[length:var(--text-sm)] [font-weight:var(--fw-mid)] tracking-[0.05em] text-neutral-dim">{{ t('sidebar.quickThemeTitle') }}</div>
+              <div class="mb-[6px] mt-[2px] px-[2px] text-[length:var(--text-2xs)] [font-weight:var(--fw-mid)] tracking-[0.05em] text-neutral-dim">{{ t('sidebar.quickThemeTitle') }}</div>
               <div class="grid grid-cols-2 gap-1">
                 <button
                   v-for="th in TAIJI_THEMES"
                   :key="th.label"
                   type="button"
-                  class="flex items-center gap-[7px] rounded-[var(--radius-sm)] px-2 py-[5px] text-left text-[length:var(--text-md)] transition-colors duration-[var(--duration-fast)] ease-[var(--ease-out)]"
+                  class="flex items-center gap-[7px] rounded-[var(--radius-sm)] px-2 py-[5px] text-left text-[length:var(--text-xs)] transition-colors duration-[var(--duration-fast)] ease-[var(--ease-out)]"
                   :class="th.label === currentTheme.label
-                    ? 'bg-surface-hover text-neutral-fg shadow-[inset_0_0_0_1px_var(--border-strong)] [font-weight:var(--fw-mid)]'
+                    ? 'bg-[var(--sel-bg)] text-neutral-fg shadow-[inset_0_0_0_1px_var(--sel-edge)] [font-weight:var(--fw-mid)]'
                     : 'text-neutral-fg-2 hover:bg-surface-hover hover:text-neutral-fg'"
                   :aria-pressed="th.label === currentTheme.label"
                   :data-testid="`sidebar-quick-theme-${th.preset || th.theme}`"
@@ -205,12 +211,12 @@
           </Popover>
           <Button
             variant="ghost"
-            class="grid size-8 shrink-0 place-items-center rounded-sm p-0 text-neutral-dim transition-colors hover:bg-surface-hover hover:text-neutral-fg [&_svg]:size-[15px]"
+            class="grid size-6 shrink-0 place-items-center rounded-sm p-0 text-neutral-dim transition-colors hover:bg-surface-hover hover:text-neutral-fg [&_svg]:size-[15px]"
             :title="t('sidebar.settingsTitle')"
             :aria-label="t('sidebar.settingsTitle')"
             @click="openSettings()"
           >
-            <Settings class="size-[15px]" />
+            <Settings class="size-[15px]" :stroke-width="1.6" />
           </Button>
         </div>
       </div>
@@ -283,7 +289,33 @@ const { error: toastError } = useToast()
 const openSettings = inject<(section?: string) => void>('openSettings', () => {})
 // 外观快捷面板（demo .qs-panel）：六主题即时切换，写同一条 setSystem 通道（settings 弹层
 // onSystemUpdate 同源——持久化 + DOM 同步在 store 内完成），选中项经 resolveTaijiTheme 解析。
+// 交互 = demo qsEnter/qsLeave 同款：hover 立即开、离开 260ms 延迟关（钮与面板共享定时——
+// 鼠标在钮与面板间移动不闪关）、click 由 Popover v-model 切换、点外/Esc 走 reka dismiss
 const quickThemeOpen = ref(false)
+let quickThemeCloseTimer: number | undefined
+const QUICK_THEME_CLOSE_DELAY_MS = 260
+
+/** hover 进入（钮）：取消待关定时并打开（demo qsEnter 同款） */
+function quickThemeEnter(): void {
+  window.clearTimeout(quickThemeCloseTimer)
+  quickThemeOpen.value = true
+}
+
+/** hover 离开（钮或面板）：延迟后收面板（demo qsLeave 同款；click 打开态同样被收——
+ *  demo click 打开后鼠标移出同样 260ms 关，click 与 hover 共用同一显隐状态） */
+function quickThemeLeave(): void {
+  window.clearTimeout(quickThemeCloseTimer)
+  quickThemeCloseTimer = window.setTimeout(() => {
+    quickThemeOpen.value = false
+  }, QUICK_THEME_CLOSE_DELAY_MS)
+}
+
+/** 面板 hover 进入：只清待关定时（面板已随钮打开，无需重复置位） */
+function quickThemeCancelClose(): void {
+  window.clearTimeout(quickThemeCloseTimer)
+}
+
+onBeforeUnmount(() => window.clearTimeout(quickThemeCloseTimer))
 const settingsStore = getSettingsStore()
 const currentTheme = computed(() => resolveTaijiTheme(settingsStore.system.value))
 async function applyTheme(th: TaijiTheme): Promise<void> {

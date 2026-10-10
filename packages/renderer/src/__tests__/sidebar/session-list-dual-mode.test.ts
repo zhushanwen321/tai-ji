@@ -117,23 +117,25 @@ describe('N8 模式切换与持久化', () => {
   })
 })
 
-describe('N8 选中态同步（两模式一致）', () => {
-  it('A 平铺模式：activeId 对应行呈 elevated 选中底（demo .si.on 范式）', () => {
+describe('N8 选中态同步（两模式一致，demo .si.on Tier B：仅文字提亮无选中底）', () => {
+  it('A 平铺模式：activeId 对应行无选中底，行文字提亮 text-neutral-fg', () => {
     const wrapper = mountList(makeGroups(), 'a2')
     const items = wrapper.findAll('.session-item')
     const activeRow = items.find((w) => w.text().includes('会话 a2'))
-    expect(activeRow?.classes()).toContain('bg-bg-elevated')
+    expect(activeRow?.classes()).not.toContain('bg-bg-elevated')
+    expect(activeRow?.classes()).toContain('text-neutral-fg')
   })
 
-  it('C 分组模式：同一 activeId 对应行同样高亮', () => {
+  it('C 分组模式：同一 activeId 对应行同样仅文字提亮', () => {
     localStorage.setItem(SESSION_MODE_KEY, 'groups')
     const wrapper = mountList(makeGroups(), 'b1')
     const activeRow = wrapper.findAll('.session-item').find((w) => w.text().includes('会话 b1'))
-    expect(activeRow?.classes()).toContain('bg-bg-elevated')
+    expect(activeRow?.classes()).not.toContain('bg-bg-elevated')
+    expect(activeRow?.classes()).toContain('text-neutral-fg')
   })
 })
 
-describe('N8 hover 详情卡（分支 + 完整目录，无消息数）', () => {
+describe('N8 hover 详情卡（demo .sess-pop：行首图标 + 立即开 + 末行时间 meta）', () => {
   function mountItem(over: Partial<SessionSummary> = {}) {
     return mount(SessionItem, {
       attachTo: document.body,
@@ -145,36 +147,30 @@ describe('N8 hover 详情卡（分支 + 完整目录，无消息数）', () => {
     })
   }
 
-  it('pointerenter（经 openDelay）→ portal 详情卡渲染分支 + 完整目录', async () => {
-    vi.useFakeTimers()
+  it('pointerenter 立即开 → portal 详情卡渲染分支 + 完整目录（行首图标形态）', async () => {
     const wrapper = mountItem()
+    // demo @mouseenter=openCard 无延迟定时，pointerenter 后同步渲染
     await wrapper.find('.session-item').trigger('pointerenter')
-    // HoverCardRoot openDelay 默认 700ms（reka-ui），fake timers 推进后 open
-    vi.advanceTimersByTime(700)
     await nextTick()
 
     const card = document.body.querySelector('[data-testid="session-detail-card"]')
     expect(card).not.toBeNull()
-    expect(card?.textContent).toContain('分支')
+    // demo .pr 形态：行首图标（分支/目录各一）+ mono 值，无文字标签
+    expect(card?.querySelectorAll('svg').length).toBeGreaterThanOrEqual(2)
     expect(card?.textContent).toContain('feat/detail-card')
-    expect(card?.textContent).toContain('目录')
     expect(card?.textContent).toContain('/repo/deep/dir')
-    // 无消息数字段（SessionSummary 无该数据源，决策 9 口径）
-    expect(card?.textContent).not.toContain('消息数')
     wrapper.unmount()
   })
 
-  it('无 gitBranch 时详情卡只显目录行（缺失字段不渲染空标签）', async () => {
-    vi.useFakeTimers()
+  it('无 gitBranch 时详情卡只显目录行（缺失字段不渲染空图标行）', async () => {
     const wrapper = mountItem({ gitBranch: undefined })
     await wrapper.find('.session-item').trigger('pointerenter')
-    vi.advanceTimersByTime(700)
     await nextTick()
 
     const card = document.body.querySelector('[data-testid="session-detail-card"]')
     expect(card).not.toBeNull()
     expect(card?.textContent).toContain('/repo/deep/dir')
-    expect(card?.textContent).not.toContain('分支')
+    expect(card?.querySelectorAll('svg')).toHaveLength(1)
     wrapper.unmount()
   })
 })

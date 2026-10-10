@@ -17,6 +17,7 @@
 - **markdown 表格网格 / 底抽屉 tab 描边**：像素取证证伪（1x 缩略截图伪影），代码已与 demo 逐值一致。
 - **裸 border 灰白线（系统性）**：根修 = shared preset `borderColor.DEFAULT = var(--border)`，15 处消费点随之修正。
 - **bg-card / text-muted / text-fg 失效类名**：preset 无映射的死类。本波改动面内已清零（含 ProviderPage 包裹 GroupCard 时顺带核实的 ScopedModelSection bg-card）；ui 包 settings 域其余文件仍有残留（W2 报告登记 5 处已顺手清零，ModelListSection/ScopedModelSection 等原语层待 ui 包波次清扫）。
+- **侧栏三件套逐值对齐（2026-10-10 用户反馈驱动）**：会话行（字重 `--fw-mid` 600 替代 font-semibold 700；选中态 = demo `.si.on` Tier B 无底无框仅文字提亮，覆盖 2026-10-06 accent 底+竖条形态）、hover 详情卡（demo `.sess-pop`：mouseenter 立即开替代 700ms 延迟、行首 13px 图标 + mono 12px 值、末行时间 meta、定位/120ms `--duration-fast --ease-out` 对齐 openCard 公式）、footer 三钮（24px `.tbtn` + 15px 图标 + stroke 1.6）、快捷面板（chip 12px、头 11px、`--sel-bg/--sel-edge` Tier A 选中 token 新增、左对齐 bottom 锚 8px、hover 开 + 260ms 延迟关、主题序对齐 demo THEME_PRESETS）。连带发现并根修 **PopoverContent 封装 fallthrough 断链**：封装模板单根 = PopoverPortal(Teleport)，消费方传的 data-testid/事件监听被 Vue 在 Teleport 边界静默丢弃（ImportSessionDialog 的 import-dir-menu 同类隐患一并治愈）——`inheritAttrs:false` + `$attrs` 显式转发到内部 reka PopoverContent；preset boxShadow 补第三档 `3: var(--shadow-3)`。面板 testid 丢失曾致真机排查大面积假阴性（面板实际正常渲染），排查时以 reka 原生 `id^="reka-popover-content-"` 为准。
 
 ## 关联
 

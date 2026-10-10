@@ -370,8 +370,8 @@ describe('E2E-L1-1 侧栏：forkSessionAsk 成功 → appendSession → SessionL
     expect(rows).toHaveLength(2)
     const branchRow = rows.find((r) => r.text().includes('追问那条'))
     expect(branchRow).toBeTruthy()
-    // 分支自身行展示血缘（用户可见 sub 行）
-    expect(branchRow!.text()).toContain('fork 自')
+    // 单行化（demo .si，2026-10-10）：列表行只有标题+时间，血缘归 hover 详情卡
+    expect(branchRow!.text()).not.toContain('fork 自')
     // 聚合容器退役：无 ForkGroup 组件 / 无 fork-group-* testid
     expect(wrapper.findComponent({ name: 'ForkGroup' }).exists()).toBe(false)
     expect(wrapper.find('[data-testid^="fork-group"]').exists()).toBe(false)

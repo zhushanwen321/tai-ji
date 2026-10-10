@@ -73,9 +73,6 @@ export default {
     // 子会话计数徽标（D9）：父条目右侧中性 chip 的 tooltip。数字口径 = 未完成子会话数
     // （非绿点：active / error / stopped / dead 都计入），故文案用「未完成」而非「运行中」。
     childCount: '{n} 个子会话未完成',
-    // N8 hover 详情卡字段标签（分支/完整目录；无消息数——SessionSummary 无该字段，零新数据通道）
-    detailBranch: '分支',
-    detailDirectory: '目录',
   },
   sessionList: {
     empty: '暂无会话',

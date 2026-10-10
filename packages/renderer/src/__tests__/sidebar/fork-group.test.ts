@@ -20,7 +20,7 @@
  */
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { nextTick } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
@@ -152,25 +152,27 @@ describe('R2: 分支会话仍在扁平列表各占一行', () => {
     expect(wrapper.find('[data-testid="sidebar-session-sub"]').exists()).toBe(false)
   })
 
-  it('hover 详情卡展示「fork 自 <父名>」血缘行', async () => {
-    vi.useFakeTimers()
+  it('hover 详情卡展示「fork 自 <父名>」血缘行（demo .sess-pop：行首图标 + 立即开）', async () => {
     const branch = makeSession({ id: 'sess-branch', label: '探索方案 A', parentSession: PARENT_FILE, parentLabel: '主线会话' })
     const wrapper = mount(SessionItem, {
       attachTo: document.body,
       props: { session: branch, active: false, status: 'done' as never },
     })
+    // demo @mouseenter=openCard 立即开（无延迟定时），pointerenter 后同步渲染
     await wrapper.find('.session-item').trigger('pointerenter')
-    // HoverCardRoot openDelay 700ms（reka-ui），fake timers 推进后 open
-    vi.advanceTimersByTime(700)
     await nextTick()
 
     const card = document.body.querySelector('[data-testid="session-detail-card"]')
     expect(card).not.toBeNull()
-    // textContent 拼接去 span 间空白：标签与值分断言
+    // 行首图标（demo .pr 形态：GitBranch 13px）+ 值；textContent 拼接去 span 间空白分断言
+    expect(card?.querySelector('svg')).not.toBeNull()
     expect(card?.textContent).toContain('fork 自')
     expect(card?.textContent).toContain('主线会话')
+    // 离行即关（demo closeCard 同款）
+    await wrapper.find('.session-item').trigger('pointerleave')
+    await nextTick()
+    expect(document.body.querySelector('[data-testid="session-detail-card"]')).toBeNull()
     wrapper.unmount()
-    vi.useRealTimers()
   })
 })
 
