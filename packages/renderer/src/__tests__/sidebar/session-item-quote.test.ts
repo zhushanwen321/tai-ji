@@ -52,9 +52,11 @@ describe('SessionItem 引用到输入区（写入侧）', () => {
   it('有活跃 session → target=current：目标 = 活跃 session，被引用 = 本条 session', async () => {
     sessionState.active = { id: 's-cur', cwd: '/p' }
     const wrapper = mountItem()
-    const btn = wrapper.find('[data-testid="quote-to-composer-btn"]')
-    expect(btn.exists()).toBe(true)
-    await btn.trigger('click')
+    // 2026-10-10 入口重设计：引用入口自 ghost 钮迁右键菜单（session-quote-item）
+    await wrapper.find('.session-item').trigger('contextmenu')
+    const item = document.body.querySelector('[data-testid="session-quote-item"]')
+    expect(item).not.toBeNull()
+    item!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
 
     const store = composerInjectionStore
     expect(store.pendingInjection.value).toMatchObject({
@@ -68,7 +70,10 @@ describe('SessionItem 引用到输入区（写入侧）', () => {
   it('landing 态（无活跃 session）→ target=new + sessionId null（landing composer 消费）', async () => {
     sessionState.active = undefined
     const wrapper = mountItem()
-    await wrapper.find('[data-testid="quote-to-composer-btn"]').trigger('click')
+    await wrapper.find('.session-item').trigger('contextmenu')
+    const item = document.body.querySelector('[data-testid="session-quote-item"]')
+    expect(item).not.toBeNull()
+    item!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
 
     const store = composerInjectionStore
     expect(store.pendingInjection.value).toMatchObject({
@@ -82,7 +87,10 @@ describe('SessionItem 引用到输入区（写入侧）', () => {
   it('引用自身（活跃 session 即本条）→ 正常注入无特判', async () => {
     sessionState.active = { id: 's-item', cwd: '/p' }
     const wrapper = mountItem()
-    await wrapper.find('[data-testid="quote-to-composer-btn"]').trigger('click')
+    await wrapper.find('.session-item').trigger('contextmenu')
+    const item = document.body.querySelector('[data-testid="session-quote-item"]')
+    expect(item).not.toBeNull()
+    item!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
 
     const store = composerInjectionStore
     expect(store.pendingInjection.value).toMatchObject({

@@ -16,6 +16,7 @@
        rect（demo openCard 公式：右弹 8px + 右缘/下缘视口钳制）。 -->
   <SessionItemContextMenu
     :session-id="session.id"
+    :session-label="session.label"
     :parent-agent-session-id="session.parentAgentSessionId"
     :has-agent-parent="hasAgentParent"
     :can-force-quit="canForceQuit"

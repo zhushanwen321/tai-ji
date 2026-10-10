@@ -8,24 +8,45 @@
 
     「停止」= 软停止（abort → 会话转 stopped，可 restore 重开），由 ForkGroup 退役迁入（D9）；
     「强制退出」= 硬杀 pi 进程 → dead（逃生入口），两者不是同一能力，不可互相替代。
-    行操作组（重命名/归档/导出 JSONL/删除）不在本菜单承载（收敛 hover ghost 层），
-    信息架构差异登记 docs/todo/ui-replica-demo-fidelity.md。
+    2026-10-10 用户裁决（入口重设计）：悬停 ghost 钮收敛为 3 个（重命名/删除/归入项目），
+    「标记完成」「引用到输入区」自 ghost 层迁入本菜单（原「行操作组不承载」口径作废，
+    重命名/删除仍归 ghost 层）。信息架构登记 docs/todo/ui-replica-demo-fidelity.md 第 5 条。
   -->
   <!-- 右键菜单用 reka ContextMenu 原语（光标定位原语级支持，PanelContainer 同为直接引 reka-ui 先例）。 -->
   <ContextMenuRoot @update:open="onMenuOpenChange">
     <ContextMenuTrigger as-child>
       <slot />
     </ContextMenuTrigger>
-    <!-- 右键菜单：agent-spawned 且带父 id → 「查看父 session」；运行中 → 「停止」（软停止）；
-         非 dead session → 「强制退出」（硬杀）。后两者均两段确认。
-         条件渲染整块 Portal——全部皆无时右键无任何菜单项，不吞 native menu 之外的语义。
-         跳转/停止/退出逻辑由上层接线，本组件只保证事件链 emit navigateParent / abort / forceQuit。 -->
-    <ContextMenuPortal v-if="hasAgentParent || canStop || canForceQuit">
+    <!-- 右键菜单（2026-10-10 入口重设计后恒有内容：标记完成/引用到输入区 + 移动到项目
+         分组；查看父/停止/强制退出按条件插入）。跳转/停止/退出逻辑由上层接线，
+         本组件只保证事件链 emit navigateParent / abort / forceQuit。 -->
+    <ContextMenuPortal>
       <ContextMenuContent
         ref="menuContentRef"
         data-testid="session-context-menu"
         class="z-[var(--z-popover)] min-w-[148px] rounded-md border border-border-strong bg-bg-elevated p-1 text-neutral-fg shadow-2 outline-none"
       >
+        <!-- 标记完成（自 ghost 层迁入 2026-10-10）：toggle 模块级 markers 集合，
+             Display 的 icon/降权响应式跟随；title 随态切换。 -->
+        <ContextMenuItem
+          data-testid="session-mark-done-item"
+          class="flex h-[28px] w-full cursor-pointer select-none items-center gap-2 rounded-sm px-[9px] text-[length:var(--text-xs)] outline-none [&_svg]:size-[13px]"
+          :class="markedDone ? 'text-success' : 'text-neutral-fg hover:bg-surface-hover hover:text-neutral-fg'"
+          @select="onMarkDone"
+        >
+          <Archive :class="markedDone ? 'fill-current' : ''" />
+          <span>{{ markedDone ? t('sidebar.sessionItem.unmarkDone') : t('sidebar.sessionItem.markDone') }}</span>
+        </ContextMenuItem>
+        <!-- 引用到输入区（自 ghost 层迁入 2026-10-10）：四符号体系 §3.1.2 侧边栏直引 G2 入口，
+             经 composerInjectionStore 一次性通道（语义同原 ghost 钮，landing 态 target=new）。 -->
+        <ContextMenuItem
+          data-testid="session-quote-item"
+          class="flex h-[28px] w-full cursor-pointer select-none items-center gap-2 rounded-sm px-[9px] text-[length:var(--text-xs)] text-neutral-fg outline-none hover:bg-surface-hover hover:text-neutral-fg [&_svg]:size-[13px]"
+          @select="onQuoteToComposer"
+        >
+          <Quote />
+          <span>{{ t('sidebar.sessionItem.quoteToComposer') }}</span>
+        </ContextMenuItem>
         <ContextMenuItem
           v-if="hasAgentParent"
           data-testid="session-view-parent-item"
@@ -103,7 +124,7 @@
 <script setup lang="ts">
 import { computed, ref, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Check, CornerLeftUp, Power, Square } from '@lucide/vue'
+import { Archive, Check, CornerLeftUp, Power, Quote, Square } from '@lucide/vue'
 import {
   ContextMenuRoot,
   ContextMenuTrigger,
@@ -113,10 +134,15 @@ import {
   ContextMenuSeparator,
 } from 'reka-ui'
 import { registerModalSurface, surfaceRectOf } from '@/composables/features/app/modal-surface-registry'
+import { useSessionStore } from '@/stores/session'
+import { composerInjectionStore } from '@/composables/panel/composer-injection-store'
+import { toggleMarkedDone, isMarkedDone } from '@/composables/useSessionMarkers'
 import { useAssignTargets } from './assign-targets'
 
 const props = defineProps<{
   sessionId: string
+  /** 会话显示名（引用到输入区的 chip label，SessionItem 透传） */
+  sessionLabel: string
   /** 父 agent session id（U8）：「查看父 session」的跳转目标 payload */
   parentAgentSessionId?: string
   /** agent-spawned 且带父 id（badge 只标来源；右键菜单还需父 id 才有可导航目标） */
@@ -143,6 +169,30 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
+
+// ── 标记完成（ghost 层迁入）──
+const markedDone = computed(() => isMarkedDone(props.sessionId))
+/** toggle 模块级 markers 集合，Display 的 icon/降权响应式跟随。 */
+function onMarkDone(): void {
+  toggleMarkedDone(props.sessionId)
+}
+
+// ── 引用到输入区（四符号体系 §3.1.2 侧边栏直引，自 ghost 层迁入）──
+const sessionStore = useSessionStore()
+
+/**
+ * 把本 session 作为 # 引用注入当前 composer（语义同原 ghost 钮，见 SessionItemActions
+ * 历史实现：被引用 = 本条 session，目标 = 当前活跃 session 的 composer）。landing 态
+ * （无活跃 session）走 target=new。
+ */
+function onQuoteToComposer(): void {
+  const activeId = sessionStore.active?.id ?? null
+  composerInjectionStore.requestInjection(
+    activeId
+      ? { target: 'current', sessionId: activeId, refSessionId: props.sessionId, label: props.sessionLabel }
+      : { target: 'new', refSessionId: props.sessionId, label: props.sessionLabel },
+  )
+}
 
 // ── 「移动到项目」分组（demo 菜单主体组）──
 const assignTargets = useAssignTargets()
