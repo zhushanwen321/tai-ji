@@ -77,7 +77,7 @@ function onCancel(): void {
         <Button
           variant="ghost"
           :disabled="props.loading"
-          class="h-[32px] px-[12px] gap-[6px] [font-weight:var(--fw-mid)] text-[length:var(--text-sm)] text-neutral-mid hover:text-neutral-fg focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent focus-visible:-outline-offset-1 focus-visible:shadow-none"
+          class="h-[32px] px-[12px] gap-[6px] [font-weight:var(--fw-mid)] text-[length:var(--text-sm)] text-neutral-mid hover:text-neutral-fg focus-visible:outline focus-visible:outline-2 focus-visible:outline-[color:var(--focus-ring)] focus-visible:-outline-offset-1 focus-visible:shadow-none"
           @click="onCancel"
         >
           {{ props.cancelText }}
@@ -87,7 +87,7 @@ function onCancel(): void {
         <Button
           :variant="props.variant === 'danger' ? 'danger-solid' : 'default'"
           :disabled="props.loading"
-          class="h-[32px] px-[12px] gap-[6px] [font-weight:var(--fw-mid)] text-[length:var(--text-sm)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent focus-visible:-outline-offset-1 focus-visible:shadow-none"
+          class="h-[32px] px-[12px] gap-[6px] [font-weight:var(--fw-mid)] text-[length:var(--text-sm)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[color:var(--focus-ring)] focus-visible:-outline-offset-1 focus-visible:shadow-none"
           @click="emit('confirm')"
         >
           <Loader2 v-if="props.loading" class="animate-spin" />

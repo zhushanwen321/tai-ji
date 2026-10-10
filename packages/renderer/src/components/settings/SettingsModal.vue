@@ -85,6 +85,7 @@
         <div class="flex h-[44px] shrink-0 items-center justify-between px-[14px] border-b border-border">
           <span class="text-[length:var(--text-sm)] font-semibold text-neutral-fg">{{ t('settings.title') }} · {{ t(currentMenu.labelKey) }}</span>
           <Button
+            ref="closeBtnEl"
             type="button"
             variant="ghost"
             class="xbtn relative flex h-[28px] w-[28px] p-0 items-center justify-center rounded-[var(--radius-sm)] text-[length:var(--text-base)] font-normal leading-[1.5] text-neutral-mid whitespace-normal transition-colors duration-[var(--duration-fast)] ease-[var(--ease)] hover:bg-surface-hover hover:text-neutral-fg focus-visible:ring-0 focus-visible:ring-offset-0 after:absolute after:-inset-[3px] after:content-['']"
@@ -98,45 +99,51 @@
         </div>
         <div class="content-col-inner w-full m-0 pt-[var(--space-6)] px-[24px] pb-[var(--space-8)]"
              :style="{ maxWidth: contentMaxWidth }">
-          <!-- 设置页切换保持瞬时（不加过渡动画）：
-               Vue <Transition mode="out-in"> + v-if/else-if 链在 Vue 3.5.39 下 leave
-               完成后 enter 不触发（调度 bug，内容区永久空白）；concurrent 模式（无 mode）
-               两个 block 页面同时 in-flow 会垂直堆叠、容器高度翻倍。设置页是低频操作，
-               瞬时切换是 Linear/Raycast 的标准行为，符合太极克制风格。 -->
-          <ProviderPage v-if="activeMenu === 'provider'" :key="activeMenu" :providers="providers" />
-          <SettingsResourcePage
-            v-else-if="activeMenu === 'skill'"
-            :key="activeMenu"
-            kind="skill"
-            :items="skills"
-            :dirs="skillDirs"
-            :save-error="saveSkillDirs.saveError.value"
-            @update-dirs="saveSkillDirs.run"
-          />
-          <div v-else-if="activeMenu === 'agent'" :key="activeMenu" class="flex flex-col gap-4">
-            <!-- [U7] 子代理引擎选择（engines.json 动态清单；置顶为该页第一配置） -->
-            <SubagentEngineSection />
-            <SettingsResourcePage
-              kind="agent"
-              :items="agents"
-              :dirs="agentDirs"
-              :save-error="saveAgentDirs.saveError.value"
-              @update-dirs="saveAgentDirs.run"
-            />
-          </div>
-          <ExtensionPage v-else-if="activeMenu === 'extension' && extensionView === 'main'" :key="activeMenu" :extensions="extensions" @open-contributions="extensionView = 'contributions'" />
-          <PluginContributionsPage v-else-if="activeMenu === 'extension' && extensionView === 'contributions'" :key="'plugin-contributions'" @back="extensionView = 'main'" />
-          <SystemPage v-else-if="activeMenu === 'system'" :key="activeMenu" :system="system" @update="onSystemUpdate" />
-          <SystemPromptPage v-else-if="activeMenu === 'system-prompt'" :key="activeMenu" />
-          <TerminalPage v-else-if="activeMenu === 'terminal'" :key="activeMenu" />
-          <McpSection v-else-if="activeMenu === 'mcp'" :key="activeMenu" />
-          <PiPresetsPage v-else-if="activeMenu === 'preset'" :key="activeMenu" />
-          <TtsPage v-else-if="activeMenu === 'tts'" :key="activeMenu" />
-          <WorktreePage v-else-if="activeMenu === 'worktree'" :key="activeMenu" />
-          <UpdatePage v-else-if="activeMenu === 'update'" :key="activeMenu" />
-          <RemoteAccessPage v-else-if="activeMenu === 'remote-access'" :key="activeMenu" />
-          <AppearancePage v-else-if="activeMenu === 'appearance'" :key="activeMenu" :system="system" @update="onSystemUpdate" />
-          <UsagePage v-else-if="activeMenu === 'usage'" :key="activeMenu" />
+          <!-- 分区切换（demo settings spec §2/§3.3 裁决 6A）：已访问分区 v-show 常挂载 +
+               sec-fade 类随激活位移动。不用 <Transition>（Vue 3.5.39 out-in leave 后 enter
+               不触发、concurrent 两页堆叠），不用 KeepAlive（只缓存组件 vnode，分支里的
+               普通 element 包装层不进缓存、实例不保留）——demo 同款机制兼容性最稳：
+               v-show 保留组件实例（表单态跨分区不丢），display:none ↔ 可见切换 + 类重挂
+               重触发 300ms 淡入。分区首访才挂载（visitedViews），避免开弹层即触发全部
+               15 分区的加载副作用。extension 域子视图（contributions）是独立访问键，
+               切回扩展管理页表单态同样保留。 -->
+          <template v-for="view in visitedViews" :key="view">
+            <div v-show="activeView === view" class="sec-fade" :class="{ on: activeView === view }">
+              <ProviderPage v-if="view === 'provider'" :providers="providers" :is-active="activeView === 'provider'" />
+              <SettingsResourcePage
+                v-else-if="view === 'skill'"
+                kind="skill"
+                :items="skills"
+                :dirs="skillDirs"
+                :save-error="saveSkillDirs.saveError.value"
+                @update-dirs="saveSkillDirs.run"
+              />
+              <div v-else-if="view === 'agent'" class="flex flex-col gap-4">
+                <!-- [U7] 子代理引擎选择（engines.json 动态清单；置顶为该页第一配置） -->
+                <SubagentEngineSection />
+                <SettingsResourcePage
+                  kind="agent"
+                  :items="agents"
+                  :dirs="agentDirs"
+                  :save-error="saveAgentDirs.saveError.value"
+                  @update-dirs="saveAgentDirs.run"
+                />
+              </div>
+              <ExtensionPage v-else-if="view === 'extension'" :extensions="extensions" @open-contributions="extensionView = 'contributions'" />
+              <PluginContributionsPage v-else-if="view === 'extension-contributions'" @back="extensionView = 'main'" />
+              <SystemPage v-else-if="view === 'system'" :system="system" @update="onSystemUpdate" />
+              <SystemPromptPage v-else-if="view === 'system-prompt'" />
+              <TerminalPage v-else-if="view === 'terminal'" :is-active="activeView === 'terminal'" />
+              <McpSection v-else-if="view === 'mcp'" />
+              <PiPresetsPage v-else-if="view === 'preset'" />
+              <TtsPage v-else-if="view === 'tts'" />
+              <WorktreePage v-else-if="view === 'worktree'" />
+              <UpdatePage v-else-if="view === 'update'" />
+              <RemoteAccessPage v-else-if="view === 'remote-access'" />
+              <AppearancePage v-else-if="view === 'appearance'" :system="system" :is-active="activeView === 'appearance'" @update="onSystemUpdate" />
+              <UsagePage v-else-if="view === 'usage'" />
+            </div>
+          </template>
         </div>
       </div>
     </div>
@@ -149,7 +156,7 @@ import { useEventListener } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import { Settings, Sparkles, Bot, Blocks, SlidersHorizontal, ScrollText, TerminalSquare, GitBranch, ClipboardList, Server, Volume2, X, Download, Palette, ChartColumn, ArrowLeft, ArrowRight, PanelLeftClose, Wifi, type LucideIcon } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
-import { registerModalSurface } from '@/composables/features/app/modal-surface-registry'
+import { registerModalSurface, otherSurfaceYieldsEsc } from '@/composables/features/app/modal-surface-registry'
 import { cycleTabFocus, getFocusableElements } from '@/composables/logic/focus-trap'
 import { getSettingsStore, useSettings, type SystemSettings } from '@taiji/core'
 import { useToast } from '@/composables/useToast'
@@ -234,6 +241,20 @@ const activeMenu = ref<MenuId>(
 /** extension 域子视图（M16）：main=扩展管理 ExtensionPage / contributions=插件贡献 PluginContributionsPage。 */
 const extensionView = ref<'main' | 'contributions'>('main')
 const currentMenu = computed(() => flatMenus.find((m) => m.id === activeMenu.value) ?? flatMenus[0])
+/** keyed 访问键（v-show 常挂载渲染表）：nav 分区 id；extension 域子视图展开为独立键
+ *  （切回扩展管理页表单态保留）。其余分区键 = 分区 id 本身。 */
+const activeView = computed(() =>
+  activeMenu.value === 'extension' && extensionView.value === 'contributions'
+    ? 'extension-contributions'
+    : (activeMenu.value as string),
+)
+/** 已访问分区清单（首访挂载，此后 v-show 常挂载——demo「15 分区组件常挂载、切分区
+ *  不丢已填表单与交互态」的 real 形态；首访才挂载是 real 侧加载副作用的收敛差异）。
+ *  activeView 变化即登记，覆盖 nav 点击与 extension 子视图事件两条进入路径。 */
+const visitedViews = ref<string[]>([])
+watch(activeView, (view) => {
+  if (!visitedViews.value.includes(view)) visitedViews.value.push(view)
+}, { immediate: true })
 
 // 内容列限宽三态（demo：wide=--content-max-w-wide 1064（usage）· narrow 860（mcp/system-prompt，
 // demo P2「限宽双实现」收敛值）· 其余 --content-max-w 720）
@@ -247,20 +268,25 @@ const settingsStore = getSettingsStore()
 const { providers, skills, agents, extensions, system, skillDirs, agentDirs } = settingsStore
 const { refreshProviders } = useSettings()
 
-// 打开时刷新 providers + 聚焦首个 nav 项；关闭时还原焦点给触发元素
+// 打开时刷新 providers + 焦点落点 = 顶栏关闭钮（demo settings spec §2/§3.1 锚定行为）；
+// 关闭时还原焦点给触发元素
 const triggerEl = ref<HTMLElement | null>(null)
 const navRootEl = ref<HTMLElement | null>(null)
 const contentEl = ref<HTMLElement | null>(null)
+/** 关闭钮（Button 封装单根 native button，模板 ref 拿组件实例——$el 即按钮元素） */
+const closeBtnEl = ref<{ $el?: HTMLElement } | null>(null)
 
 // [W31 review major-1] immediate 必须保留：AppShell 懒加载下 settingsOpen=true 与组件挂载同帧，
 // props.open 初始即 true，非 immediate watch 无变化沿 → 回调不执行 → refreshProviders
-// （settings-lifecycle「打开 modal 时刷新 providers」语义）、triggerEl 捕获、首 nav 项聚焦全部跳过。
+// （settings-lifecycle「打开 modal 时刷新 providers」语义）、triggerEl 捕获、焦点落点（关闭钮）
+// 全部跳过。
 watch(() => props.open, (isOpen) => {
   if (isOpen) {
     triggerEl.value = document.activeElement instanceof HTMLElement ? document.activeElement : null
     refreshProviders()
     nextTick(() => {
-      navRootEl.value?.querySelector<HTMLElement>('.nav-item')?.focus()
+      // 焦点落点 = 顶栏关闭钮（demo settings spec §3.1「打开时焦点移入顶栏关闭钮」）
+      closeBtnEl.value?.$el?.focus()
     })
   } else if (triggerEl.value) {
     // 选型说明：当前唯一宿主 AppShell 是 v-if 卸载式（关闭 = settingsOpen=false = 同帧卸载，
@@ -279,13 +305,17 @@ function close(): void {
 /** window 级 ESC 兜底：焦点逃逸到 body（不在 .fso 内）时，.fso 的 @keydown 收不到事件，
  *  需 window 监听兜底。open=true 时注册、false 时自动卸载（reactive target）。
  *  与 .fso 的 onKeydown 并存：焦点在 .fso 内时 onKeydown 先 fire（preventDefault），
- *  本监听检查 defaultPrevented 跳过，避免重复 close。 */
+ *  本监听检查 defaultPrevented 跳过，避免重复 close。
+ *  内层弹层让位（demo settings spec §3.2 Esc 三段分流前两段）：壳内确认弹层 / 下拉 / popover
+ *  开着时 Esc 归该内层（reka DismissableLayer 自行 dismiss 且不 preventDefault，事件必然
+ *  冒泡到本监听）——查聚合登记表跳过自关，「Esc 只关内层、已填表单不丢」。 */
 useEventListener(
   () => (props.open ? window : null),
   'keydown',
   (e: KeyboardEvent) => {
     if (e.key !== 'Escape') return
     if (e.defaultPrevented) return
+    if (otherSurfaceYieldsEsc('settings-modal')) return
     e.preventDefault()
     close()
   },
@@ -310,9 +340,12 @@ function getItemCount(id: string): number {
 }
 
 /** 键盘：Tab 循环（焦点陷阱）+ nav 内 ↑↓/Home/End 移动切换 + Esc 关闭。
- *  三路编排（complexity-debt U02 拆分）：Escape / Tab / nav 导航各归独立 helper，落空放行。 */
+ *  三路编排（complexity-debt U02 拆分）：Escape / Tab / nav 导航各归独立 helper，落空放行。
+ *  Esc 内层让位与 window 兜底同口径（见其注释）——焦点在下拉触发钮上时事件先经本 handler
+ *  再冒泡到 window，两路都须查内层，否则下拉开着按 Esc 整壳被关（Esc 死区的反面）。 */
 function onKeydown(e: KeyboardEvent): void {
   if (e.key === 'Escape') {
+    if (otherSurfaceYieldsEsc('settings-modal')) return
     e.preventDefault()
     close()
     return
@@ -433,12 +466,12 @@ onBeforeUnmount(() => {
 }
 
 /* 内容区按钮焦点环（demo pages.css `.pg-set button:focus-visible` → outline 2px
-   var(--focus-ring)=accent、offset -1px 内缩，作用于设置弹层全部按钮）：容器作用域
-   一次收敛全部页面层按钮，不逐钮覆写。box-shadow: none 关闭 Button cva 基类
-   focus-visible ring 通道（Tailwind ring 编译为 box-shadow，外扩 ring+offset 双层），
-   焦点指示统一收归本 outline 内缩通道。 */
+   var(--focus-ring)（焦点指示唯一令牌，style.css 定义 = accent 别名）、offset -1px 内缩，
+   作用于设置弹层全部按钮）：容器作用域一次收敛全部页面层按钮，不逐钮覆写。
+   box-shadow: none 关闭 Button cva 基类 focus-visible ring 通道（Tailwind ring 编译为
+   box-shadow，外扩 ring+offset 双层），焦点指示统一收归本 outline 内缩通道。 */
 .content-col-inner button:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--focus-ring);
   outline-offset: -1px;
   box-shadow: none;
 }
@@ -451,23 +484,27 @@ onBeforeUnmount(() => {
   box-shadow: inset 0 0 0 1px var(--border-strong);
 }
 
-/* 弹层开合过渡（demo `.pg-set .settings` fade-in 0.16s ease，reduced-motion 门控）。
+/* 弹层开合过渡（demo `.pg-set .settings` fade-in 0.16s ease，reduced-motion 门控）+
+   分区切换淡入（demo settings spec §3.3 裁决 6A：激活分区 300ms 纯淡入 --ease-out-soft；
+   sec-fade 类随激活位移动——demo 同款：类重挂即重触发，v-show 显示切换不重建组件）。
    keyframes 局部命名不进全局 SSOT：仅本弹层消费、无其他挂点（非共享动画原语）。 */
 @media (prefers-reduced-motion: no-preference) {
   .fso { animation: settings-fade-in 0.16s ease; }
+  .content-col-inner .sec-fade.on { animation: settings-sec-fade-in 300ms var(--ease-out-soft); }
 }
 @keyframes settings-fade-in { from { opacity: 0; } }
+@keyframes settings-sec-fade-in { from { opacity: 0; } }
 </style>
 
 <style scoped>
-/* 焦点环（demo .pg-set 焦点语言：outline 2px solid var(--focus-ring)，--focus-ring = var(--accent)）
+/* 焦点环（demo .pg-set 焦点语言：outline 2px solid var(--focus-ring)，--focus-ring = accent 别名）
    offset -1px 内缩贴合圆角。Button cva 自带 focus-visible ring 通道：nav/chrome 各按钮
    class 上 ring-0 关闭、收归本 outline 通道；内容区页面层按钮由上方共享范式段的
    .content-col-inner button:focus-visible 容器规则统一收敛，不逐钮覆写。 */
 .nav-item:focus-visible,
 .xbtn:focus-visible,
 .nav-btn:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--focus-ring);
   outline-offset: -1px;
 }
 </style>

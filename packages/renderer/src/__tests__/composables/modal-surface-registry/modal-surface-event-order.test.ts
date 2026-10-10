@@ -26,6 +26,7 @@ import { defineComponent, h, nextTick, onBeforeUnmount, ref } from 'vue'
 import {
   registerModalSurface,
   anyModalSurfaceYieldsEsc,
+  otherSurfaceYieldsEsc,
   resetModalSurfaceRegistry,
 } from '@/composables/features/app/modal-surface-registry'
 
@@ -160,5 +161,42 @@ describe('B. document 先行消费方同步清态（PlanCommentPopover 形态反
     document.dispatchEvent(esc())
     expect(consumer.selOpen(), '浮条/浮层已关').toBe(false)
     expect(decisions, 'defaultPrevented 已置位 ⇒ 编排器不动作').toEqual(['skip-prevented'])
+  })
+})
+
+// ── C. otherSurfaceYieldsEsc（settings 壳内层让位，demo settings spec §3.2 三段分流）──
+// 复合容器壳（SettingsModal）的自身 Esc 通路在「内层确认弹层 / 下拉 / popover 开着」时
+// 须让位（reka DismissableLayer 自行 dismiss 且不 preventDefault，事件必然冒泡到壳监听）。
+// exclude = 壳自身（settings-modal 也持 yieldsEsc 旗标，不排除则恒真）。
+describe('C. otherSurfaceYieldsEsc（容器壳内层让位）', () => {
+  function mountFlagSurface(surface: 'settings-modal' | 'dialog-confirm' | 'select-content', open: () => boolean): void {
+    const Host = defineComponent({
+      setup(_, { expose }) {
+        const dispose = registerModalSurface({ surface, key: `k-${surface}`, isOpen: open })
+        onBeforeUnmount(dispose)
+        expose({})
+        return () => h('div')
+      },
+    })
+    mount(Host)
+  }
+
+  it('内层 dialog-confirm / select-content 开着 ⇒ 壳（settings-modal）让位；全关 ⇒ 不让位', () => {
+    // 壳自身开着（exclude 生效性前提）：仅自身 ⇒ 不让位
+    mountFlagSurface('settings-modal', () => true)
+    expect(otherSurfaceYieldsEsc('settings-modal')).toBe(false)
+
+    // 内层确认弹层开着 ⇒ 让位
+    mountFlagSurface('dialog-confirm', () => true)
+    expect(otherSurfaceYieldsEsc('settings-modal')).toBe(true)
+
+    // 确认弹层关、下拉开 ⇒ 仍让位（Esc 归下拉——demo spec §3.2 第二段，防 Esc 死区反面）
+    mountFlagSurface('dialog-confirm', () => false)
+    mountFlagSurface('select-content', () => true)
+    expect(otherSurfaceYieldsEsc('settings-modal')).toBe(true)
+
+    // 全关 ⇒ 不让位（壳自关通道恢复）
+    mountFlagSurface('select-content', () => false)
+    expect(otherSurfaceYieldsEsc('settings-modal')).toBe(false)
   })
 })

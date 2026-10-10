@@ -92,7 +92,8 @@
             @blur="onSaveBareSetupScript"
           />
         </SettingRow>
-        <!-- 超时时间（校验反馈 danger 13px 在输入下方；demo 的「秒」后缀依赖新增 i18n key，
+        <!-- 超时时间（校验反馈 danger text-xs 在输入下方——demo settings spec §6 三件套统一
+             小字档；demo 的「秒」后缀依赖新增 i18n key，
              locale 文件不在本波清单——不造词，单位说明由 hint 承载） -->
         <SettingRow :label="t('settings.worktree.timeout')" :desc="t('settings.worktree.timeoutHint')">
           <div class="flex flex-col items-end gap-1">
@@ -107,7 +108,7 @@
               :disabled="timeoutBusy || loadError"
               @blur="onSaveTimeout"
             />
-            <span v-if="timeoutInvalid" data-testid="worktree-timeout-error" class="text-[length:var(--text-sm)] text-danger">
+            <span v-if="timeoutInvalid" data-testid="worktree-timeout-error" class="text-[length:var(--text-xs)] text-danger">
               {{ inlineText(timeoutInvalid) }}
             </span>
           </div>
@@ -135,7 +136,7 @@
               :disabled="baseBranchBusy || loadError"
               @blur="onSaveDefaultBaseBranch"
             />
-            <span v-if="baseBranchInvalid" data-testid="worktree-base-branch-error" class="text-[length:var(--text-sm)] text-danger">
+            <span v-if="baseBranchInvalid" data-testid="worktree-base-branch-error" class="text-[length:var(--text-xs)] text-danger">
               {{ inlineText(baseBranchInvalid) }}
             </span>
           </div>

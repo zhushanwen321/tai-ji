@@ -174,6 +174,10 @@ import { useToast } from '@/composables/useToast'
 
 const props = defineProps<{
   system: SystemSettings
+  /** 壳激活信号（SettingsModal v-show 常挂载形态独有）：false→true = 切回本页（重拉终端
+   *  配置 + 刷新 token 读值快照），true→false = 切出（失焦兜底保存终端字号输入）。缺省
+   *  （undefined，测试/独立宿主直挂）不参与信号，行为同旧版。 */
+  isActive?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -311,9 +315,22 @@ onMounted(() => {
   refreshTokens()
   window.addEventListener('resize', refreshTokens)
 })
+
+// 壳激活信号（v-show 常挂载形态）：切回重拉终端配置（终端分区与本页共用 TerminalConfig
+// SSOT，双向同步）+ 刷新 token 读值快照；切出即失焦兜底保存未落盘的终端字号输入
+// （saveTerminalFontSize 同值短路，不产生多余写入）。
+watch(() => props.isActive, (now, prev) => {
+  if (prev === undefined) return
+  if (now) {
+    void loadTerminalConfig()
+    refreshTokens()
+  } else {
+    void saveTerminalFontSize()
+  }
+})
 onUnmounted(() => {
   window.removeEventListener('resize', refreshTokens)
-  // 终端字号失焦兜底：直接卸载（如切页）时保存未落盘的输入
+  // 终端字号失焦兜底：直接卸载（如关闭设置）时保存未落盘的输入
   void saveTerminalFontSize()
 })
 </script>

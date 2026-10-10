@@ -19,6 +19,8 @@ defineProps<{
     连续兄弟排列、首个 SettingRow 即容器 first child）。
     label 字重 600（demo --fw-mid）；desc 默认 neutral-mid，进 GroupCard 后由 SettingsModal
     共享样式块（.group-card .setting-row-desc）切 neutral-fg-2（demo .gcard .srow-desc 档）。
+    under 具名插槽 = demo UiRow 同款：主列（desc 下方）扩展位，承载行内错误文案等
+    「字段正下方」内容（demo settings spec §5.4/§6 校验三件套的文案落点）。
   -->
   <div class="flex min-h-[44px] items-center gap-[16px] px-[6px] py-[10px] border-t border-hairline first:border-t-0">
     <div class="flex-1 min-w-0">
@@ -26,6 +28,7 @@ defineProps<{
         <span class="text-[length:var(--text-base)] font-semibold text-neutral-fg">{{ label }}</span>
       </div>
       <p v-if="desc" class="setting-row-desc mt-0.5 text-[length:var(--text-sm)] text-neutral-mid">{{ desc }}</p>
+      <slot name="under" />
     </div>
     <div class="flex shrink-0 items-center gap-2">
       <slot />

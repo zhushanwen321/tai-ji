@@ -1,7 +1,9 @@
+<!-- split-justified: MCP 表单单一语义域（多传输类型 schema 校验 + 错误三件套 + 滚动定位——校验面围绕同一表单状态机） -->
 <template>
   <Dialog :open="open" @update:open="emit('update:open', $event)">
-    <!-- 宽 = demo .cpop-lg（min(520px, 100vw-48px)） -->
-    <DialogContent class="max-w-[520px]" data-testid="mcp-form-dialog">
+    <!-- 宽/高 = demo .cpop-lg（min(520px, 100vw-48px) / max-height 82vh 内滚动——保存被拦
+         滚动定位首个出错字段的滚动容器） -->
+    <DialogContent class="max-w-[520px] max-h-[82vh] overflow-y-auto" data-testid="mcp-form-dialog">
       <DialogHeader>
         <DialogTitle>{{ editing ? t('settings.mcp.editServer') : t('settings.mcp.addServer') }}</DialogTitle>
         <DialogDescription>{{ t('settings.mcp.formDesc') }}</DialogDescription>
@@ -41,6 +43,7 @@
             data-testid="mcp-form-name"
             :placeholder="t('settings.mcp.fieldNamePlaceholder')"
             :disabled="!!editing"
+            :error="!!fieldErrors.name"
           />
           <!-- 错误位 = demo .form-err（danger / text-xs / mt 4px，出错字段正下方） -->
           <p v-if="fieldErrors.name" class="mt-[4px] text-[length:var(--text-xs)] text-danger" data-testid="mcp-form-name-error">{{ fieldErrors.name }}</p>
@@ -75,6 +78,7 @@
               data-testid="mcp-form-command"
               :placeholder="t('settings.mcp.fieldCommandPlaceholder')"
               class="font-mono"
+              :error="!!fieldErrors.command"
             />
             <p v-if="fieldErrors.command" class="mt-[4px] text-[length:var(--text-xs)] text-danger" data-testid="mcp-form-command-error">{{ fieldErrors.command }}</p>
             <p v-else class="text-[length:var(--text-sm)] text-neutral-mid">{{ t('settings.mcp.fieldCommandHint') }}</p>
@@ -97,6 +101,7 @@
               data-testid="mcp-form-env"
               :placeholder="t('settings.mcp.fieldEnvPlaceholder')"
               class="min-h-[56px] font-mono"
+              :error="!!fieldErrors.env"
             />
             <p v-if="fieldErrors.env" class="mt-[4px] text-[length:var(--text-xs)] text-danger" data-testid="mcp-form-env-error">{{ fieldErrors.env }}</p>
           </div>
@@ -122,6 +127,7 @@
               data-testid="mcp-form-url"
               :placeholder="t('settings.mcp.fieldUrlPlaceholder')"
               class="font-mono"
+              :error="!!fieldErrors.url"
             />
             <p v-if="fieldErrors.url" class="mt-[4px] text-[length:var(--text-xs)] text-danger" data-testid="mcp-form-url-error">{{ fieldErrors.url }}</p>
           </div>
@@ -133,6 +139,7 @@
               data-testid="mcp-form-headers"
               :placeholder="t('settings.mcp.fieldHeadersPlaceholder')"
               class="min-h-[56px] font-mono"
+              :error="!!fieldErrors.headers"
             />
             <p v-if="fieldErrors.headers" class="mt-[4px] text-[length:var(--text-xs)] text-danger" data-testid="mcp-form-headers-error">{{ fieldErrors.headers }}</p>
           </div>
@@ -204,7 +211,7 @@
  * 删除后重建）。`type` 三值闭集与形态一致性校验归 runtime（u1 复刻校验权威），本组件把
  * ok:false 的 error 经 serverError 内联显示，不复刻闭集（防双源漂移）。
  */
-import { ref, watch } from 'vue'
+import { ref, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
@@ -472,6 +479,26 @@ function resolveFormCandidate(): { name: string; entry: McpServerEntryValue } {
   return { name: name.value.trim(), entry: built.entry }
 }
 
+/** 表单 tab 校验失败的字段呈现序（demo settings spec §6：滚动定位首个出错字段）。
+ *  元素 id 与模板 input/textarea 的 id 一一对应。 */
+const ERROR_FIELD_ORDER = ['name', 'command', 'url', 'env', 'headers'] as const
+const ERROR_FIELD_ELEMENT_ID: Record<(typeof ERROR_FIELD_ORDER)[number], string> = {
+  name: 'mcp-form-name',
+  command: 'mcp-form-command',
+  url: 'mcp-form-url',
+  env: 'mcp-form-env',
+  headers: 'mcp-form-headers',
+}
+
+/** 保存被拦时滚动定位首个出错字段（弹层 max-h 82vh 内滚动；弹层不关闭）。 */
+function scrollToFirstError(): void {
+  const first = ERROR_FIELD_ORDER.find((key) => fieldErrors.value[key])
+  if (!first) return
+  void nextTick(() => {
+    document.getElementById(ERROR_FIELD_ELEMENT_ID[first])?.scrollIntoView({ block: 'nearest' })
+  })
+}
+
 /** 提交（保存按钮）：当前 tab 内容 → 解析 → 校验 → emit（保存协议调用与损坏拒入处理归 McpSection） */
 function submit(): void {
   fieldErrors.value = {}
@@ -492,5 +519,6 @@ function submit(): void {
     return
   }
   if (nameError) fieldErrors.value.name = nameError
+  scrollToFirstError()
 }
 </script>

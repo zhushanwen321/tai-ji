@@ -38,13 +38,13 @@ const forwarded = useForwardPropsEmits(delegatedProps, emits)
     class="after:content-['']"
     :class="
       cn(
-        'peer relative inline-flex h-[20px] w-[36px] shrink-0 cursor-pointer items-center rounded-full border border-transparent transition-colors outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent focus-visible:-outline-offset-1 disabled:cursor-not-allowed disabled:opacity-50 after:absolute after:-inset-[4px] after:rounded-full data-[state=checked]:bg-accent data-[state=unchecked]:bg-border-strong',
+        'peer relative inline-flex h-[20px] w-[36px] shrink-0 cursor-pointer items-center rounded-full border border-transparent transition-colors outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-[color:var(--focus-ring)] focus-visible:-outline-offset-1 motion-reduce:transition-none disabled:cursor-not-allowed disabled:opacity-50 after:absolute after:-inset-[4px] after:rounded-full data-[state=checked]:bg-accent data-[state=unchecked]:bg-border-strong',
         props.class,
       )
     "
   >
     <SwitchThumb
-      class="pointer-events-none block size-[16px] rounded-full bg-neutral-fg ring-0 transition-[transform,background-color] data-[state=checked]:translate-x-[17px] data-[state=checked]:bg-accent-fg data-[state=unchecked]:translate-x-[1px]"
+      class="pointer-events-none block size-[16px] rounded-full bg-neutral-fg ring-0 transition-[transform,background-color] motion-reduce:transition-none data-[state=checked]:translate-x-[17px] data-[state=checked]:bg-accent-fg data-[state=unchecked]:translate-x-[1px]"
     />
   </SwitchRoot>
 </template>

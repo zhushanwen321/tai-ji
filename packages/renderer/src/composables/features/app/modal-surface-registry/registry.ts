@@ -139,6 +139,17 @@ export function anyModalSurfaceYieldsEsc(): boolean {
   return openEntries().some((entry) => modalSurfaceFlags(entry.surface).yieldsEsc)
 }
 
+/**
+ * 除 exclude 表面外，任一开着的成员 yieldsEsc ⇒ 该 exclude 容器的自身 Esc 通路须让位。
+ * 消费方 = 复合容器壳（SettingsModal）：容器内嵌的确认弹层 / 下拉 / popover 都是登记表成员
+ * （reka DismissableLayer 自行 dismiss，且不 preventDefault——事件必然继续冒泡到容器的
+ * window/根元素监听），容器先于 reka 收到 Esc 时查本函数跳过自关，「Esc 只关内层」
+ * （demo settings spec §3.2 三段分流的前两段：内层弹层可见只关内层；下拉开着 Esc 归下拉）。
+ */
+export function otherSurfaceYieldsEsc(exclude: ModalSurfaceId): boolean {
+  return openEntries().some((entry) => entry.surface !== exclude && modalSurfaceFlags(entry.surface).yieldsEsc)
+}
+
 /** 让位旗标族（⌘W）：任一开着的成员 yieldsCmdW ⇒ ⌘W 不动作（模态族让位、弹出层族不让） */
 export function anyModalSurfaceYieldsCmdW(): boolean {
   return openEntries().some((entry) => modalSurfaceFlags(entry.surface).yieldsCmdW)

@@ -75,8 +75,8 @@
             data-testid="terminal-font-size-input"
             v-model.number="fontSize"
             type="number"
-            :min="6"
-            :max="72"
+            :min="TERMINAL_FONT_MIN"
+            :max="TERMINAL_FONT_MAX"
             class="w-[120px]"
           />
         </div>
@@ -160,7 +160,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { AlertTriangle } from '@lucide/vue'
 import { Input } from '@/components/ui/input'
@@ -174,8 +174,18 @@ import { useToast } from '@/composables/useToast'
 import { createExplicitSave } from '@/composables/features/settings/setting-field'
 import type { TerminalConfig } from '@taiji/shared'
 
+/** 壳激活信号（SettingsModal v-show 常挂载形态独有）：false→true = 从其他分区切回本页，
+ *  此时重拉配置——终端字号与外观分区共用 TerminalConfig SSOT，双向同步（demo settings
+ *  spec §4）。缺省（undefined，测试/独立宿主直挂）不参与信号，行为同旧版仅 onMounted 拉取。 */
+const props = defineProps<{ isActive?: boolean }>()
+
 const { t } = useI18n()
 const { error } = useToast()
+
+/** 字号范围（demo settings spec §4 终端：clamp 8–24，与外观分区终端字号行同一口径/
+ *  同一 TerminalConfig SSOT——两分区双向同步）。 */
+const TERMINAL_FONT_MIN = 8
+const TERMINAL_FONT_MAX = 24
 
 /** 当前加载的配置（getTerminalConfig 返回）。corrupted=true 表示磁盘损坏已回退默认。 */
 const corrupted = ref(false)
@@ -197,7 +207,8 @@ const saveConfig = createExplicitSave({
 })
 const saving = saveConfig.saving
 
-/** 从本地编辑态组装 TerminalConfig。shellArgs 由逗号分隔串转为 string[]。 */
+/** 从本地编辑态组装 TerminalConfig。shellArgs 由逗号分隔串转为 string[]；
+ *  字号 clamp 8–24（与外观分区终端字号行同口径，越界静默取界值）。 */
 function buildConfig(): TerminalConfig {
   return {
     version: 1,
@@ -206,7 +217,7 @@ function buildConfig(): TerminalConfig {
       .split(',')
       .map((s) => s.trim())
       .filter(Boolean),
-    fontSize: Number(fontSize.value),
+    fontSize: Math.min(TERMINAL_FONT_MAX, Math.max(TERMINAL_FONT_MIN, Math.round(Number(fontSize.value)))),
     fontFamily: fontFamily.value,
     scrollback: Number(scrollback.value),
     cursorStyle: cursorStyle.value,
@@ -233,5 +244,10 @@ async function loadConfig(): Promise<void> {
 
 onMounted(() => {
   void loadConfig()
+})
+
+// 分区切回（isActive false→true）重拉配置：常挂载缓存的本地编辑态对齐 SSOT（双向同步）。
+watch(() => props.isActive, (now, prev) => {
+  if (prev !== undefined && now) void loadConfig()
 })
 </script>
