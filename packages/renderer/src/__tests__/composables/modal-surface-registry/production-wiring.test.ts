@@ -38,9 +38,9 @@ import { MODAL_SURFACE_REGISTRAR_KEY, type UiModalSurfaceRegistration } from '@t
 import { useToast } from '@/composables/useToast'
 import { setActivePinia, createPinia } from 'pinia'
 
-import DialogContentWrapper from '@/components/ui/dialog/DialogContent.vue'
-import PopoverContentWrapper from '@/components/ui/popover/PopoverContent.vue'
-import SelectContentWrapper from '@/components/ui/select/SelectContent.vue'
+import { DialogContent as DialogContentWrapper } from '@/components/ui/dialog'
+import { PopoverContent as PopoverContentWrapper } from '@/components/ui/popover'
+import { SelectContent as SelectContentWrapper } from '@/components/ui/select'
 import ToastContainer from '@/components/ui/ToastContainer.vue'
 import FormOverlay from '@/components/extension/form/FormOverlay.vue'
 
@@ -49,6 +49,26 @@ beforeEach(() => {
 })
 
 enableAutoUnmount(afterEach)
+
+/**
+ * ui 桥注册的测试装配（App.vue 生产同款）：浮层三包装收敛至 @taiji/ui 后走
+ * registerUiModalSurface provide/inject 桥自注册，宿主须 provide 桥把注册转接进
+ * renderer registry（未装配桥 = ui 原语静默跳过注册，见下方「ui 包注册桥」describe）。
+ */
+function uiBridgeProvide() {
+  return {
+    global: {
+      provide: {
+        [MODAL_SURFACE_REGISTRAR_KEY as symbol]: (registration: UiModalSurfaceRegistration): (() => void) => {
+          if (!isModalSurfaceId(registration.surface)) {
+            throw new Error(`modal-surface-registry: 未登记的表面 id '${registration.surface}'——先在 manifest.ts 登记（§6.7 完备性判据）`)
+          }
+          return registerModalSurface(registration)
+        },
+      },
+    },
+  }
+}
 
 /** 受控 DialogRoot 宿主（消费方形态：Dialog :open + DialogContent 常驻模板） */
 function mountDialogHost() {
@@ -60,7 +80,7 @@ function mountDialogHost() {
           default: () => h(DialogContentWrapper),
         })
     },
-  }))
+  }), uiBridgeProvide())
   return { wrapper, open }
 }
 
@@ -94,7 +114,7 @@ describe('reka 托管弹层族（renderer 三包装）：开合态绑 root conte
             default: () => h(PopoverContentWrapper),
           })
       },
-    }))
+    }), uiBridgeProvide())
     void wrapper
 
     open.value = true
@@ -124,7 +144,7 @@ describe('reka 托管弹层族（renderer 三包装）：开合态绑 root conte
             default: () => [h(SelectTrigger), h(SelectContentWrapper)],
           })
       },
-    }))
+    }), uiBridgeProvide())
 
     open.value = true
     await nextTick()

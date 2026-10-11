@@ -7,15 +7,14 @@ import { ChevronDown } from '@lucide/vue'
 import { cn } from '../../lib/utils'
 
 /**
- * SelectTrigger —— 触发器，形态收敛到 demo pages.css .pg-set .sel-btn（与 renderer 侧
- * @/components/ui/select/SelectTrigger 副本同源同形态）：高 32px、水平内边距 10px、
- * 边框 --border / 底 --bg-input、hover 边框提亮 --border-strong。焦点 = :focus-visible
- * 2px var(--focus-ring)（焦点指示唯一令牌，= accent 别名）outline 内缩 1px，旧
- * ring-inset 双环通道退役。右侧自带 ChevronDown 10px --neutral-mid。
+ * SelectTrigger —— 触发器，形态对齐 demo pages.css .pg-set .sel-btn：高 32px、
+ * 水平内边距 10px、边框 --border / 底 --bg-input、hover 边框提亮 --border-strong、
+ * chevron 10px --neutral-mid。焦点 = :focus-visible 2px accent outline 内缩 1px
+ * （demo pages.css 焦点通道 --focus-ring = accent，与 Input/Switch 原语同款）。
  * 尺寸可通过 class 覆盖（如 h-8）。
  *
- * gap-2 + whitespace-nowrap：间距对齐 demo .sel-btn { gap: 8px }；nowrap 防止
- * 「High / Max」这类带空格文案在窄触发器（如 w-[88px]）里折行。
+ * gap-2 + whitespace-nowrap：间距对齐 demo .sel-btn { gap: 8px }；
+ * nowrap 防止「High / Max」这类带空格文案在窄触发器（如 w-[88px]）里折行。
  */
 const props = defineProps<SelectTriggerProps & { class?: HTMLAttributes['class'] }>()
 const delegatedProps = reactiveOmit(props, 'class')

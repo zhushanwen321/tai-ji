@@ -89,7 +89,14 @@
   --text-base: calc(14px * var(--font-scale-u));
   --text-md: calc(15px * var(--font-scale-u));
 
-  /* ── 圆角（v6：sm 6px / 8px / lg 12px / card 10px）───────── */
+  /* 字重三档（与 renderer style.css 同值；@taiji/ui 类串经 [font-weight:var(--fw-*)]
+     消费，缺失会回退浏览器默认 400） */
+  --fw-text: 500;               /* 日常文字 */
+  --fw-mid: 600;                /* 中档：行容器 / 组头 */
+  --fw-bold: 700;               /* 粗体：动作词 / 工具名 */
+
+  /* ── 圆角（v6：xs 4px / sm 6px / 8px / lg 12px / card 10px）───────── */
+  --radius-xs: 4px;             /* 微件：seg 项/badge 内件/popover trigger */
   --radius-sm: 6px;             /* 输入框/标签 */
   --radius: 8px;                /* 按钮/卡片（默认）*/
   --radius-card: 10px;          /* 卡片容器 */
@@ -116,7 +123,9 @@
   --z-sticky: 1;
   --z-popover: 10;
   --z-overlay: 20;
+  --z-hovercard: 500;           /* hover 详情卡（demo 梯队：hovercard 不压 modal、与 dialog 分档） */
   --z-modal: 1000;
+  --z-dialog: 1100;
   --bash-output-max-height: 240px;
   /* 展开块统一限高（消费域 = BlockScrollBox：thinking 展开区 / bash 凹槽输出区 / 非 bash
      工具输出区；与 --bash-output-max-height 同量级、消费域独立互不替代）。
@@ -159,6 +168,7 @@
   --popover-foreground: var(--neutral-fg);
   --input: var(--border);              /* border-input */
   --ring: var(--accent);               /* ring-ring（focus，主色）*/
+  --focus-ring: var(--accent);         /* 焦点指示色别名（@taiji/ui 表单原语 :focus-visible outline 通道） */
 
   /* ── 视口安全区（A16：刘海屏/Home Indicator 避让）──────────
      env() 消费唯一定义点：组件经 Tailwind arbitrary value（如

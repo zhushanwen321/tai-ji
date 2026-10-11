@@ -199,20 +199,21 @@ describe('CollapsibleContent 展开过渡（Plan 01 续）', () => {
 
 // ── 原 overlay-transitions.test.ts 并入（同族过渡原语守卫，共享 DEAD_CLASSES 全集）──
 const styleCss = readFileSync(resolve(__dirname, '../../style.css'), 'utf-8')
+// 浮层四族实现已收敛至 @taiji/ui（renderer components/ui 降级 re-export），守卫随实现走
 const popoverContent = readFileSync(
-  resolve(__dirname, '../../components/ui/popover/PopoverContent.vue'),
+  resolve(__dirname, '../../../../ui/src/primitives/popover/PopoverContent.vue'),
   'utf-8',
 )
 const selectContent = readFileSync(
-  resolve(__dirname, '../../components/ui/select/SelectContent.vue'),
+  resolve(__dirname, '../../../../ui/src/primitives/select/SelectContent.vue'),
   'utf-8',
 )
 const hoverCardContent = readFileSync(
-  resolve(__dirname, '../../components/ui/hover-card/HoverCardContent.vue'),
+  resolve(__dirname, '../../../../ui/src/primitives/hover-card/HoverCardContent.vue'),
   'utf-8',
 )
 const dialogContent = readFileSync(
-  resolve(__dirname, '../../components/ui/dialog/DialogContent.vue'),
+  resolve(__dirname, '../../../../ui/src/primitives/dialog/DialogContent.vue'),
   'utf-8',
 )
 

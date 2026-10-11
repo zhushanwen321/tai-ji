@@ -158,7 +158,7 @@ import { useI18n } from 'vue-i18n'
 import { AlertTriangle, Copy, Plus } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import { GroupCard } from '@taiji/ui/features/settings'
-import ConfirmDialog from '@/components/ui/dialog/ConfirmDialog.vue'
+import { ConfirmDialog } from '@/components/ui/dialog'
 import McpServerList from './McpServerList.vue'
 import McpServerForm from './McpServerForm.vue'
 import {

@@ -2,13 +2,14 @@
 import type { SelectItemEmits, SelectItemProps } from 'reka-ui'
 import type { HTMLAttributes } from 'vue'
 import { reactiveOmit } from '@vueuse/core'
-import { SelectItem, SelectItemIndicator, SelectItemText, useForwardPropsEmits } from 'reka-ui'
-import { Check } from '@lucide/vue'
+import { SelectItem, SelectItemText, useForwardPropsEmits } from 'reka-ui'
 import { cn } from '../../lib/utils'
 
 /**
- * SelectItem —— 下拉项。选中态显示 check，配色与项目其他 popover 列表项一致。
- * 文字用 text-neutral-fg（非 text-neutral-mid）：下拉项需保证可读对比度，muted 在暗底偏淡。
+ * SelectItem —— 下拉项。形态对齐 demo pages.css .pg-set .sel-opt：行高 32px、
+ * 水平内边距 10px、未选中字 --neutral-fg-2、hover --surface-hover 提亮、
+ * 选中态 = --surface 凹陷底 + 正文字色（demo .sel-opt.on，无 check 图标——
+ * 选中辨识由底色承担，原 Check 指示器随 demo 权威退役）。
  */
 const props = defineProps<SelectItemProps & { class?: HTMLAttributes['class'] }>()
 const emits = defineEmits<SelectItemEmits>()
@@ -21,7 +22,7 @@ const forwarded = useForwardPropsEmits(delegatedProps, emits)
     v-bind="forwarded"
     :class="
       cn(
-        'relative flex w-full cursor-pointer select-none items-center gap-2 rounded-sm py-1.5 pl-2.5 pr-8 text-[length:var(--text-sm)] text-neutral-fg outline-none transition-colors data-[highlighted]:bg-surface-hover data-[highlighted]:text-neutral-fg data-[state=checked]:text-accent',
+        'relative flex h-[32px] w-full cursor-pointer select-none items-center gap-2 rounded-sm px-[10px] text-[length:var(--text-sm)] text-neutral-fg-2 outline-none transition-colors data-[highlighted]:bg-surface-hover data-[highlighted]:text-neutral-fg data-[state=checked]:bg-surface data-[state=checked]:text-neutral-fg',
         props.class,
       )
     "
@@ -34,7 +35,7 @@ const forwarded = useForwardPropsEmits(delegatedProps, emits)
         <slot />
       </SelectItemText>
     </span>
-    <!-- 可选 #action slot：选项右侧 append 区（Check 指示器左旁）。
+    <!-- 可选 #action slot：选项右侧 append 区（绝对定位悬浮于选项上方）。
          仅当调用方传 #action 时渲染，原有仅传文案的调用零影响。
          用法场景：SystemPage 提示音选择，每个声音项右侧带试听按钮。
 
@@ -55,11 +56,6 @@ const forwarded = useForwardPropsEmits(delegatedProps, emits)
       @pointerup.stop
     >
       <slot name="action" />
-    </span>
-    <span class="absolute right-2 flex size-4 items-center justify-center">
-      <SelectItemIndicator>
-        <Check class="size-3.5 text-accent" />
-      </SelectItemIndicator>
     </span>
   </SelectItem>
 </template>

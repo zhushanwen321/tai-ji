@@ -18,8 +18,8 @@ import { describe, it, expect, afterEach } from 'vitest'
 import { mount, DOMWrapper, type VueWrapper } from '@vue/test-utils'
 import { SelectRoot, SelectTrigger } from 'reka-ui'
 
-import SelectContent from '@/components/ui/select/SelectContent.vue'
-import SelectItem from '@/components/ui/select/SelectItem.vue'
+import { SelectContent } from '@/components/ui/select'
+import { SelectItem } from '@/components/ui/select'
 
 let wrapper: VueWrapper | null = null
 

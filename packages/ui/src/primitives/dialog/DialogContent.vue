@@ -21,6 +21,15 @@ import { registerUiModalSurface } from "../../modal-surface-registrar"
 // DialogContent 的 v-bind="mergedAttrs" 显式接收（那才是渲染 DOM 面板的元素）。
 defineOptions({ inheritAttrs: false })
 
+// 形态对照 demo（pages.css .pg-set .croot/.cpop 确认弹窗 + overlay.css .rmodal 大 modal）：
+// 盒底 = 浮层级 --bg-elevated（demo 两 modal 一致，「遮罩上的面板不沉入内容层」归层原则）；
+// 边框 = --hairline（.rmodal-box 档）；阴影 = --shadow-3；圆角 --radius-lg 12px（去 sm:
+// 前缀——demo 无条件圆角，窄窗不该塌成直角）；内边距 20px（.cpop padding）；遮罩
+// bg-black/80 + blur 4px 与 demo .cmask 同值。z-index 走 --z-modal(1000)：demo .rmodal
+// 用 --z-dialog 是其单一语义；real 的 --z-dialog(1100) 档被嵌套弹层（Popover/Select）与
+// ui-request band（AP-2：浮于 modal 之上）占用，DialogContent 升档会破坏 band 语义。
+// 进出场过渡参数见 style.css .reka-dialog-transition（demo rmodal-in 0.16s 档）。
+
 const props = defineProps<DialogContentProps & { class?: HTMLAttributes["class"]; hideClose?: boolean }>()
 const emits = defineEmits<DialogContentEmits>()
 const attrs = useAttrs()
@@ -47,28 +56,24 @@ onBeforeUnmount(disposeSurfaceRegistration)
 <template>
   <DialogPortal>
     <DialogOverlay
-      class="fixed inset-0 z-[1000] bg-black/80 backdrop-blur-sm reka-overlay-transition"
+      class="fixed inset-0 z-[var(--z-modal)] bg-black/80 backdrop-blur-sm reka-overlay-transition"
     />
-    <!-- 形态收敛（settings 确认弹层统一，与 renderer 侧 @/components/ui/dialog/DialogContent
-         同源同形态，对齐 demo pages.css .pg-set .cpop）：盒底 = 浮层级 --bg-elevated（遮罩上
-         的面板不沉入内容层）+ --hairline 边框 + --shadow-3 + 无条件圆角 12px + 内边距 20px。
-         z 保持裸数字 1000（manifest zAnchors class-raw 对账锚，令牌化随 ui 包波次另行裁决）。 -->
     <DialogContent
       v-bind="mergedAttrs"
       :class="
         cn(
-          'fixed left-1/2 top-1/2 z-[1000] grid w-full max-w-lg gap-4 border border-hairline bg-bg-elevated p-[20px] shadow-[var(--shadow-3)] select-text reka-dialog-transition rounded-lg',
+          'fixed left-1/2 top-1/2 z-[var(--z-modal)] grid w-full max-w-lg gap-4 border border-hairline bg-bg-elevated p-[20px] shadow-[var(--shadow-3)] select-text reka-dialog-transition rounded-lg',
           props.class,
         )"
-      >
+    >
       <slot />
 
       <!-- 关闭按钮：默认 absolute 右上角。消费者提供 hideClose 时隐藏（自行在内容内渲染 DialogClose）。
-           形态对齐 demo overlay.css .rmodal-x/.rmodal-xic（与 renderer 副本同款）：24px 热区 +
-           --radius 圆角 + dim 色，hover = --hover 底提亮字，焦点走 --focus-ring outline 内缩通道 -->
+           形态对齐 demo overlay.css .rmodal-x/.rmodal-xic：24px 热区 + --radius 圆角 + dim 色，
+           hover = --hover 底提亮字（原 opacity 渐隐形态退役） -->
       <DialogClose
         v-if="!props.hideClose"
-        class="absolute right-4 top-4 flex size-6 items-center justify-center rounded-[var(--radius)] text-neutral-dim transition-colors hover:bg-surface-hover hover:text-neutral-fg focus-visible:outline focus-visible:outline-2 focus-visible:outline-[color:var(--focus-ring)] focus-visible:-outline-offset-1 disabled:pointer-events-none data-[state=open]:bg-surface-hover data-[state=open]:text-neutral-mid"
+        class="absolute right-4 top-4 flex size-6 items-center justify-center rounded-[var(--radius)] text-neutral-dim transition-colors hover:bg-surface-hover hover:text-neutral-fg focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent focus-visible:-outline-offset-1 disabled:pointer-events-none data-[state=open]:bg-surface-hover data-[state=open]:text-neutral-mid"
       >
         <X class="size-[15px]" />
         <span class="sr-only">Close</span>

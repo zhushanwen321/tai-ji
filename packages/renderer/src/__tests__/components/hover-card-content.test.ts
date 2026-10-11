@@ -22,7 +22,7 @@ import { describe, it, expect, afterEach } from 'vitest'
 import { mount, DOMWrapper, type VueWrapper } from '@vue/test-utils'
 import { HoverCardRoot, HoverCardTrigger } from 'reka-ui'
 
-import HoverCardContent from '@/components/ui/hover-card/HoverCardContent.vue'
+import { HoverCardContent } from '@/components/ui/hover-card'
 
 let wrapper: VueWrapper | null = null
 

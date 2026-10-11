@@ -103,7 +103,7 @@ import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
 import { GroupCard } from '@taiji/ui/features/settings'
 import SettingRow from '../SettingRow.vue'
-import ConfirmDialog from '@/components/ui/dialog/ConfirmDialog.vue'
+import { ConfirmDialog } from '@/components/ui/dialog'
 import { useToast } from '@/composables/useToast'
 import ConnectionEntrySection from './ConnectionEntrySection.vue'
 import {
