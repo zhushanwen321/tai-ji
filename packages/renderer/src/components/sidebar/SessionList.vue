@@ -73,10 +73,11 @@
       </div>
     </div>
 
-    <ScrollArea class="min-h-0 flex-1">
-    <!-- 顶缘渐焦（spec sidebar §3.1：三视图滚动容器接 EdgeFade）：自驱动父级滚动容器
-         mask，滚动离顶才启用，reduced-transparency 降级纯色渐隐 -->
-    <EdgeFade />
+    <ScrollArea ref="listScrollArea" class="min-h-0 flex-1">
+    <!-- 顶缘渐焦（spec sidebar §3.1：三视图滚动容器接 EdgeFade）：滚动宿主显式传入
+         （reka 封装在挂载点与真滚动 viewport 之间有内部 wrapper），显隐/mask 仍自驱动，
+         reduced-transparency 降级纯色渐隐 -->
+    <EdgeFade :scroller-el="listScrollerEl" />
     <div class="flex flex-col pt-0.5 pb-2 pl-1.5">
       <!-- 新建项目草稿行（用户裁决 2026-10-11：区头「+」点击后，列表顶部出现新组输入态；
            Enter / 失焦提交非空名 → 创建并锚定展开，空名 / Esc 丢弃草稿不创建） -->
@@ -261,7 +262,7 @@
 <script setup lang="ts">
 import type { SessionGroup, SessionSummary } from '@taiji/shared'
 import type { DerivedStatus } from '@/types'
-import { computed, onBeforeUnmount, provide, ref, watch, type Ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, provide, ref, watch, type Ref } from 'vue'
 import { useEventListener } from '@vueuse/core'
 import { Plus, Folder, Trash2, Check, List } from '@lucide/vue'
 import { useI18n } from 'vue-i18n'
@@ -307,6 +308,15 @@ const emit = defineEmits<{
   /** 强制退出（两段确认后）：透传 SessionItem 的 forceQuit，Sidebar 接 sessionApi.forceQuit */
   forceQuit: [sessionId: string]
 }>()
+
+// 滚动宿主（EdgeFade scrollerEl）：reka ScrollArea 在 slot 内容与真滚动 viewport 之间有
+// 内部 content wrapper，parentElement 探测不成立——从 ScrollArea expose 显式取 viewport 元素
+//（expose 链两层解包：ScrollArea.viewportEl（自动解包的 ref）→ Viewport 实例.viewportElement）
+const listScrollArea = ref<{ viewportEl: { viewportElement: HTMLElement } | null } | null>(null)
+const listScrollerEl = ref<HTMLElement | null>(null)
+onMounted(() => {
+  listScrollerEl.value = listScrollArea.value?.viewportEl?.viewportElement ?? null
+})
 
 
 /**

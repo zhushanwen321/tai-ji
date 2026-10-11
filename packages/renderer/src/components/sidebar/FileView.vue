@@ -62,10 +62,11 @@
     <!-- 滚动区：仅承载树（加载/错误/空态）。virtua Virtualizer 必须是其 parentElement
          （ScrollAreaViewport）的直接子节点——滚动容器由 virtua 从 parentElement 探测，
          中间不能有包装 div（探针实证，MessageStream 同结构）。三态与树互为 v-if/v-else 链。
-         顶缘渐焦（侧栏 spec（demo）§3.1）：EdgeFade 作为 Viewport 首子元素自驱动 mask，
+         顶缘渐焦（侧栏 spec（demo）§3.1）：滚动宿主显式传入（reka 封装在挂载点与真滚动
+         viewport 之间有内部 wrapper，parentElement 探测不成立），显隐/mask 自驱动，
          与 Virtualizer 互为兄弟节点，不破坏「直接子节点」探测前提。 -->
-    <ScrollArea class="min-h-0 flex-1">
-      <EdgeFade />
+    <ScrollArea ref="treeScrollArea" class="min-h-0 flex-1">
+      <EdgeFade :scroller-el="treeScrollerEl" />
       <!-- 加载态（loadTree 在途） -->
       <div
         v-if="rootState.status === 'loading'"
@@ -180,6 +181,15 @@ const store = useFileTreeStore()
 const selectedPath = computed(() => store.getSelectedPath(props.sessionId))
 const { loadTree, setFilter, setupInvalidation, toggleShowIgnored, expandNode, collapseNode, selectFile } = useFileTree()
 const drawer = useSideDrawer()
+
+// 滚动宿主（EdgeFade scrollerEl）：同 SessionList——reka ScrollArea 内部 wrapper 使
+// parentElement 探测不成立，从 ScrollArea expose 显式取 viewport 元素
+//（expose 链两层解包：ScrollArea.viewportEl（自动解包的 ref）→ Viewport 实例.viewportElement）
+const treeScrollArea = ref<{ viewportEl: { viewportElement: HTMLElement } | null } | null>(null)
+const treeScrollerEl = ref<HTMLElement | null>(null)
+onMounted(() => {
+  treeScrollerEl.value = treeScrollArea.value?.viewportEl?.viewportElement ?? null
+})
 
 /** virtua item-size 初始估算（px）：树行已按 demo .frow 定高 24px（FileTreeRow h-[24px]），与实测一致 */
 const ROW_HEIGHT_ESTIMATE = 24

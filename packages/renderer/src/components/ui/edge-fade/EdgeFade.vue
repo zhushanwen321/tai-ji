@@ -16,11 +16,17 @@
 // 滚过 padding 前带悬浮于视口中部（顶缘露出未处理区）；顶部留白放滚动内容内（spacer）。
 // 降级：prefers-reduced-motion 关过渡（motion-reduce 变体）；prefers-reduced-transparency
 // 关整个渐焦效果（遮罩层隐藏 + 容器 mask 摘除）。
-import { ref, onMounted, onBeforeUnmount } from 'vue'
+import { ref, watch, onMounted, onBeforeUnmount } from 'vue'
 
 const on = ref(false)
 const reducedTransparency = ref(false)
 const root = ref<HTMLElement | null>(null)
+/** 显式指定滚动宿主：ScrollArea 封装类消费方传入（其挂载点与真滚动元素之间有内部
+ *  wrapper，scroll 不冒泡、mask 须作用于滚动盒，parentElement 解析不成立）；缺省回退
+ *  parentElement（原生滚动容器直接子元素的经典接线，行为不变）。prop 到位晚于挂载时
+ *  经 watch 补绑。 */
+const props = defineProps<{ scrollerEl?: HTMLElement | null }>()
+
 let scroller: HTMLElement | null = null
 let transparencyMedia: MediaQueryList | null = null
 
@@ -54,23 +60,42 @@ function onTransparencyChange(): void {
   sync()
 }
 
+function unbind(): void {
+  if (!scroller) return
+  scroller.removeEventListener('scroll', sync)
+  scroller.style.maskImage = ''
+  scroller = null
+}
+
+function bind(el: HTMLElement | null): void {
+  if (scroller === el) return
+  unbind()
+  scroller = el
+  scroller?.addEventListener('scroll', sync, { passive: true })
+  onTransparencyChange()
+}
+
 onMounted(() => {
-  scroller = root.value?.parentElement ?? null
   // matchMedia 缺失环境（happy-dom 等测试宿主）跳过 transparency 监听：reducedTransparency
   // 保持 false = 渐焦全功能生效（守卫降级而非崩溃，onTransparencyChange 已容 null media）
   if (typeof window.matchMedia === 'function') {
     transparencyMedia = window.matchMedia('(prefers-reduced-transparency: reduce)')
     transparencyMedia.addEventListener('change', onTransparencyChange)
   }
-  onTransparencyChange()
-  scroller?.addEventListener('scroll', sync, { passive: true })
+  bind(props.scrollerEl ?? root.value?.parentElement ?? null)
 })
+
+// scrollerEl 到位晚于挂载（父组件 onMounted 才能拿到 ScrollArea viewport 引用）时补绑
+watch(
+  () => props.scrollerEl,
+  (el) => bind(el ?? root.value?.parentElement ?? null),
+)
 
 onBeforeUnmount(() => {
   transparencyMedia?.removeEventListener('change', onTransparencyChange)
-  scroller?.removeEventListener('scroll', sync)
-  if (scroller) scroller.style.maskImage = ''
+  unbind()
 })
+
 </script>
 
 <template>
