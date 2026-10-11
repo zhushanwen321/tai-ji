@@ -313,9 +313,9 @@ const emit = defineEmits<{
 // 内部 content wrapper，parentElement 探测不成立——从 ScrollArea expose 显式取 viewport 元素
 //（expose 链两层解包：ScrollArea.viewportEl（自动解包的 ref）→ Viewport 实例.viewportElement）
 const listScrollArea = ref<{ viewportEl: { viewportElement: HTMLElement } | null } | null>(null)
-const listScrollerEl = ref<HTMLElement | null>(null)
+const listScrollerEl = ref<HTMLElement | undefined>(undefined)
 onMounted(() => {
-  listScrollerEl.value = listScrollArea.value?.viewportEl?.viewportElement ?? null
+  listScrollerEl.value = listScrollArea.value?.viewportEl?.viewportElement ?? undefined
 })
 
 

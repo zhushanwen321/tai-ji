@@ -6,7 +6,9 @@
  * - happy-dom 无布局引擎（clientHeight 恒 0，实测），virtua 的视口/条目尺寸全靠
  *   ResizeObserver 回调——本文件注入 fake ResizeObserver（同步回填几何尺寸）驱动窗口化，
  *   不 mock virtua 组件本身（DOM 行数断言必须走真实 Virtualizer 的窗口逻辑）
- * - 滚动容器 = Virtualizer 的 parentElement（ScrollArea stub 内联高度样式）
+ * - 滚动容器 = 真 reka ScrollArea 的 viewport（不 stub——曾用无 wrapper 的 stub 替身，
+ *   parentElement 探测在替身下成立、生产 reka wrapper 下断裂，测试全绿但虚拟化静默失效；
+ *   Virtualizer 现经 scrollRef 显式接滚动宿主，替身必须保持生产 DOM 形态防假绿回归）
  * - 断言：DOM 行数远小于总可见行数（10000 文件目录 → < 200 行）
  *
  * 运行：npx vitest run src/__tests__/components/FileView-virtua.test.ts
@@ -54,7 +56,7 @@ class FakeResizeObserver {
   }
   observe(el: Element): void {
     queueMicrotask(() => {
-      const isContainer = el.classList.contains('scroll-stub')
+      const isContainer = el.hasAttribute('data-reka-scroll-area-viewport')
       this.cb(
         [
           {
@@ -97,11 +99,6 @@ function buildBigTree(): FileNode[] {
   ]
 }
 
-/** ScrollArea stub：带内联高度的滚动容器（真实 virtua 的 parentElement） */
-const ScrollAreaStub = {
-  template: '<div class="scroll-stub" style="height: 400px; overflow-y: auto;"><slot /></div>',
-}
-
 async function mountView(nodes: FileNode[]): Promise<ReturnType<typeof mount>> {
   mockFileTree.mockResolvedValueOnce(nodes)
   mockGitStatus.mockResolvedValueOnce({
@@ -116,9 +113,6 @@ async function mountView(nodes: FileNode[]): Promise<ReturnType<typeof mount>> {
   const wrapper = mount(FileView, {
     props: { sessionId: 's1' },
     attachTo: document.body,
-    global: {
-      stubs: { ScrollArea: ScrollAreaStub },
-    },
   })
   await flushPromises()
   return wrapper
@@ -166,6 +160,29 @@ describe('FileView 真实 virtua 虚拟滚动（P-D7-1：万级可见行 DOM 行
     // P-D7-1 量化 bound：DOM 行数 < 200（总可见行 10001）
     expect(fileRows.length + dirRows.length).toBeLessThan(200)
     expect(fileRows.length + dirRows.length).toBeLessThan(10001)
+
+    wrapper.unmount()
+  })
+
+  it('scrollRef 显式绑定生效：滚动 reka viewport → 窗口跟随移动（绑定错误时窗口不动，全量渲染形态）', async () => {
+    const wrapper = await mountView(buildBigTree())
+    const store = useFileTreeStore()
+    store.setNodeState('s1', 'big', { status: 'loaded' })
+    store.addExpanded('s1', 'big')
+    await flushVirtua()
+
+    // 绑定正确时 virtua 监听 reka viewport：滚动驱动窗口移动；曾因 parentElement 探测
+    // 被 reka 内部 wrapper 隔断而监听落空——虚拟化静默失效（全量渲染）
+    const viewport = wrapper.find('[data-reka-scroll-area-viewport]').element as HTMLElement
+    const firstFileBefore = wrapper.find('[data-testid^="file-tree-file-"]').attributes('data-testid')
+
+    viewport.scrollTop = 100 * ITEM_H
+    viewport.dispatchEvent(new Event('scroll'))
+    await flushVirtua()
+
+    const firstFileAfter = wrapper.find('[data-testid^="file-tree-file-"]').attributes('data-testid')
+    expect(firstFileAfter).toBeTruthy()
+    expect(firstFileAfter).not.toBe(firstFileBefore) // 窗口已移过 ~100 行
 
     wrapper.unmount()
   })

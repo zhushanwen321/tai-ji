@@ -133,6 +133,7 @@
         :item-size="ROW_HEIGHT_ESTIMATE"
         :item-props="() => ({ style: { width: '100%' } })"
         :key="props.sessionId"
+        :scroll-ref="treeScrollerEl"
       >
         <template #default="{ item }">
           <FileTreeRow
@@ -185,10 +186,10 @@ const drawer = useSideDrawer()
 // 滚动宿主（EdgeFade scrollerEl）：同 SessionList——reka ScrollArea 内部 wrapper 使
 // parentElement 探测不成立，从 ScrollArea expose 显式取 viewport 元素
 //（expose 链两层解包：ScrollArea.viewportEl（自动解包的 ref）→ Viewport 实例.viewportElement）
+const treeScrollerEl = ref<HTMLElement | undefined>(undefined)
 const treeScrollArea = ref<{ viewportEl: { viewportElement: HTMLElement } | null } | null>(null)
-const treeScrollerEl = ref<HTMLElement | null>(null)
 onMounted(() => {
-  treeScrollerEl.value = treeScrollArea.value?.viewportEl?.viewportElement ?? null
+  treeScrollerEl.value = treeScrollArea.value?.viewportEl?.viewportElement ?? undefined
 })
 
 /** virtua item-size 初始估算（px）：树行已按 demo .frow 定高 24px（FileTreeRow h-[24px]），与实测一致 */
