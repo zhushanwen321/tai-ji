@@ -1160,6 +1160,8 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
   async getSubagentEngineConfig(): Promise<SubagentEngineConfigView> { return this.records.getSubagentEngineConfig() }
   /** [U7] 设置默认引擎（带跨进程锁的 RMW + 原子写，实现迁 session-records.ts）。 */
   async setSubagentDefaultEngine(engineId: string): Promise<void> { return this.records.setSubagentDefaultEngine(engineId) }
+  /** engine-provider-unification D5：per-engine 默认模型偏好写入（同锁 RMW，实现迁 session-records.ts）。 */
+  async setSubagentEngineDefaultModel(engineId: string, modelRef: string): Promise<void> { return this.records.setSubagentEngineDefaultModel(engineId, modelRef) }
   /** workflow 列表（冷启动磁盘扫描，实现迁 session-records.ts）。 */
   async getWorkflows(sessionId: string): Promise<OversizeAwareResult<WorkflowRunRecord>> { return this.records.getWorkflows(sessionId) }
 

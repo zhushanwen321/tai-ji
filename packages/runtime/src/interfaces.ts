@@ -248,6 +248,13 @@ export interface ISessionService {
    */
   setSubagentDefaultEngine(engineId: string): Promise<void>
   /**
+   * engine-provider-unification D5：设置 per-engine 默认模型偏好（读改写 config.json
+   * engineDefaults 键，与 setSubagentDefaultEngine 同锁原子写）。modelRef 不在该引擎
+   * 模型清单内时 throw（防写坏配置）。生效时机：下次派发（派发时点直读，活跃 session
+   * 保存即生效——设计 D6）。
+   */
+  setSubagentEngineDefaultModel(engineId: string, modelRef: string): Promise<void>
+  /**
    * 获取 session 派生的 workflow 列表（从主 session JSONL 的 workflow-state-link 提取）。
    * 纯磁盘读取，不依赖 pi 进程活跃。文件不存在或无 workflow 调用时返回空数组。
    * [RT-4#8] 返回结构化结果：语义同 getSubagents（oversize=true 时列表不可用）。

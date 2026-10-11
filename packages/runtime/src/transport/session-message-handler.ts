@@ -181,6 +181,7 @@ export class SessionMessageHandler {
     'session.getSubagentStreamState': (msg, ws) => this.handleSessionGetSubagentStreamState(msg, ws),
     'session.getSubagentEngineConfig': (msg, ws) => this.handleSessionGetSubagentEngineConfig(msg, ws),
     'session.setSubagentDefaultEngine': (msg, ws) => this.handleSessionSetSubagentDefaultEngine(msg, ws),
+    'session.setSubagentEngineDefaultModel': (msg, ws) => this.handleSessionSetSubagentEngineDefaultModel(msg, ws),
     'session.getWorkflows': (msg, ws) => this.handleSessionGetWorkflows(msg, ws),
     'session.getAgentCallHistory': (msg, ws) => this.handleSessionGetAgentCallHistory(msg, ws),
     'session.getAgentCallFilePath': (msg, ws) => this.handleSessionGetAgentCallFilePath(msg, ws),
@@ -641,6 +642,14 @@ export class SessionMessageHandler {
   private async handleSessionSetSubagentDefaultEngine(msg: Extract<ClientMessage, { type: 'session.setSubagentDefaultEngine' }>, ws: WsType): Promise<void> {
     await this.ctx.sessionService.setSubagentDefaultEngine(msg.payload.engineId)
     return this.ctx.reply(ws, msg.id, 'session.subagentDefaultEngineSet', { engineId: msg.payload.engineId })
+  }
+
+  // engine-provider-unification D5：per-engine 默认模型偏好写入（写入校验 + 同锁 RMW 在
+  // session-records；reply 回显 engineId/modelRef——mutation 分支二原样存储）
+  private async handleSessionSetSubagentEngineDefaultModel(msg: Extract<ClientMessage, { type: 'session.setSubagentEngineDefaultModel' }>, ws: WsType): Promise<void> {
+    const { engineId, modelRef } = msg.payload
+    await this.ctx.sessionService.setSubagentEngineDefaultModel(engineId, modelRef)
+    return this.ctx.reply(ws, msg.id, 'session.subagentEngineDefaultModelSet', { engineId, modelRef })
   }
 
   private async handleSessionGetWorkflows(msg: Extract<ClientMessage, { type: 'session.getWorkflows' }>, ws: WsType): Promise<void> {
