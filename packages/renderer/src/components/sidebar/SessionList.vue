@@ -67,7 +67,7 @@
       <div
         v-for="g in visibleGroups"
         :key="g.cwd"
-        class="group-section flex flex-col gap-0.5"
+        class="group-section flex flex-col"
       >
         <!-- 组标题（demo .gh 语言：12px 图标 + mono 12px mid 组名 + mono 11px fg-2 计数）。
              sticky 贴顶用 bg-bg 不透明（侧边栏底色透明融合 bg，header 同色遮住滚过的 item 文字）。

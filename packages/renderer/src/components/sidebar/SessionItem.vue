@@ -34,9 +34,9 @@
       ref="rootEl"
       role="button"
       tabindex="0"
-      class="session-item group/item relative flex cursor-pointer select-none items-center gap-[8px] rounded-sm px-[8px] py-[7px] transition-colors"
+      class="session-item group/item relative flex cursor-pointer select-none items-center gap-[8px] rounded-sm px-[8px] py-[7px] transition-colors duration-[var(--duration-fast)] ease-[var(--ease-out)] hover:bg-surface-hover"
       :class="[
-        active ? 'text-neutral-fg' : 'hover:bg-surface-hover',
+        active ? 'text-neutral-fg' : '',
         isDead ? 'opacity-50' : '',
       ]"
       :aria-label="ariaLabel"

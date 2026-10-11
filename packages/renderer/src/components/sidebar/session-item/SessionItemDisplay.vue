@@ -40,7 +40,7 @@
        选中态 fg——active 由父组件透传，demo .si.on 行级 color 覆盖的等价实现）。 -->
   <div class="min-w-0 flex-1">
     <div
-      class="flex min-w-0 items-center gap-1 text-[length:var(--text-sm)] [font-weight:var(--fw-mid)] leading-[1.35]"
+      class="flex min-w-0 items-center gap-1 text-[length:var(--text-sm)] [font-weight:var(--fw-mid)] leading-[1.55]"
       :class="[active ? 'text-neutral-fg' : 'text-neutral-fg-2', markedDone ? 'opacity-60' : '']"
     >
       <span class="min-w-0 flex-1 truncate">{{ session.label }}</span>
@@ -76,7 +76,7 @@
     <span>{{ childCount }}</span>
   </span>
   <span
-    class="shrink-0 font-mono text-[length:var(--text-2xs)] leading-[1.35] text-neutral-dim"
+    class="shrink-0 font-mono text-[length:var(--text-2xs)] leading-[1.55] text-neutral-dim"
   >{{ timeLabel }}</span>
 </template>
 

@@ -1,6 +1,6 @@
 <template>
   <!--
-    展示组件 · 文件视图（#4，draft-five-states §B）。
+    展示组件 · 文件视图（#4，draft-five-states spec（demo）§B）。
     [W28/D-7.2] 树形递归渲染 → 扁平可见行（projectVisibleRows）+ virtua 虚拟滚动：
     - 树数据仍是 SSOT（fileTreeStore 4 facet 不变），本组件持有唯一「树→可见行」投影 computed
     - FileTreeRow 改纯行组件（收 VisibleRow），展开/选中交互在本层编排（useFileTree + useSideDrawer）
@@ -15,7 +15,9 @@
     - 编排走 useFileTree（loadTree/expandNode/collapseNode/selectFile/setFilter）
     - sessionId 由 Sidebar 注入（当前 active session），切 session 触发 loadTree
   -->
-  <div class="flex h-full min-h-0 flex-col px-1.5" data-testid="file-view-root">
+  <!-- 根容器即滚动内容节（demo .side-scroll padding 2px 6px 8px：pt-0.5 = 顶 2px、
+       px-1.5 = 左右 6px、pb-[8px] = 底 8px；与 SegmentedTab mb-2 折算联动核算见 MF 登记） -->
+  <div class="flex h-full min-h-0 flex-col px-1.5 pt-0.5 pb-[8px]" data-testid="file-view-root">
     <!-- fv-head（demo 形态）：session 标题（13px fw-mid fg）+ 分支行（mono 11px fg-2——
          信息文字不占 accent，workbench.css .fv-branch 语义），块底 hairline 分隔。
          内缩 = demo 阶梯（head 18px / tools 16px / 树行 14px）：根 px-1.5(6px) +
@@ -60,9 +62,9 @@
     <!-- 滚动区：仅承载树（加载/错误/空态）。virtua Virtualizer 必须是其 parentElement
          （ScrollAreaViewport）的直接子节点——滚动容器由 virtua 从 parentElement 探测，
          中间不能有包装 div（探针实证，MessageStream 同结构）。三态与树互为 v-if/v-else 链。
-         顶缘渐焦（spec sidebar §3.1）：EdgeFade 作为 Viewport 首子元素自驱动 mask，
+         顶缘渐焦（侧栏 spec（demo）§3.1）：EdgeFade 作为 Viewport 首子元素自驱动 mask，
          与 Virtualizer 互为兄弟节点，不破坏「直接子节点」探测前提。 -->
-    <ScrollArea class="min-h-0 flex-1" horizontal>
+    <ScrollArea class="min-h-0 flex-1">
       <EdgeFade />
       <!-- 加载态（loadTree 在途） -->
       <div
@@ -86,8 +88,8 @@
       </div>
 
       <!-- 空态两分支（E7-c：投影空）：
-           hasFilter = demo .ftree-empty 权威形态（workbench.css:653-654 横排 space-between、
-           padding 14px 10px、--text-xs dim 文案、无图标；Sidebar.vue:448-451 附「清空过滤」
+           hasFilter = demo .ftree-empty 权威形态（横排 space-between、
+           padding 14px 10px、--text-xs dim 文案、无图标；demo 文件树空态附「清空过滤」
            一键恢复按钮 = fileFilter('') + showIgnored(true)，映射到既有 setFilter/toggleShowIgnored
            通道，见 onClearFilter）；
            空目录（cwd 无节点）= demo 无对应权威形态，保留 real 纵排图标+文案并在此登记差异。 -->
@@ -121,7 +123,7 @@
            原 max-content 整树横滚架构退役（旧互斥登记作废）。
            注意：<template #default> 内禁止放注释/文本节点——virtua 的 item key 提取要求 slot 返回
            恰好 1 个 vnode（P(): e.length===1 才取 e[0].key），注释节点会 fallback 索引 key。 -->
-      <!-- role=tree（spec files §2 ftree 树语义容器）：经 attrs 透传落到 Virtualizer 根 div
+      <!-- role=tree（files spec（demo）§2 ftree 树语义容器）：经 attrs 透传落到 Virtualizer 根 div
            （virtua 未关 inheritAttrs），行级 role=treeitem 由 FileTreeRow 承载。 -->
       <Virtualizer
         v-else
@@ -243,7 +245,7 @@ function onFilter(value: string | number): void {
 }
 
 /**
- * 清空过滤（demo .ftree-empty「清空过滤」一键恢复，Sidebar.vue:448-451）：
+ * 清空过滤（demo .ftree-empty 的「清空过滤」一键恢复）：
  * demo 语义 = fileFilter('') + showIgnored(true)——复用 onFilter('') 通道（防抖提交一致）；
  * showIgnored 走 toggleShowIgnored 通道但加守卫只在关闭态触发（toggle 直调会把已开启的
  * 忽略项误关，偏离 demo 的「设为 true」语义）。

@@ -25,13 +25,18 @@
         ref="menuContentRef"
         data-testid="session-context-menu"
         class="z-[var(--z-popover)] min-w-[148px] rounded-md border border-border-strong bg-bg-elevated p-[4px] text-neutral-fg shadow-2 outline-none"
+        :collision-padding="8"
       >
         <!-- 标记完成（自 ghost 层迁入 2026-10-10）：toggle 模块级 markers 集合，
-             Display 的 icon/降权响应式跟随；title 随态切换。 -->
+             Display 的 icon/降权响应式跟随；title 随态切换。
+             键盘高亮 = data-[highlighted]（与 ui/select SelectItem 先例同形态；demo
+             .ctxmenu button:hover 仅变底色）；确认态分支不挂 highlighted 类，红底不被覆盖。 -->
         <ContextMenuItem
           data-testid="session-mark-done-item"
           class="flex h-[28px] w-full cursor-pointer select-none items-center gap-[8px] rounded-sm px-[9px] text-[length:var(--text-xs)] outline-none [&_svg]:size-[13px]"
-          :class="markedDone ? 'text-success' : 'text-neutral-fg hover:bg-surface-hover hover:text-neutral-fg'"
+          :class="markedDone
+            ? 'text-success data-[highlighted]:bg-surface-hover'
+            : 'text-neutral-fg hover:bg-surface-hover hover:text-neutral-fg data-[highlighted]:bg-surface-hover data-[highlighted]:text-neutral-fg'"
           @select="onMarkDone"
         >
           <Archive :class="markedDone ? 'fill-current' : ''" />
@@ -41,7 +46,7 @@
              经 composerInjectionStore 一次性通道（语义同原 ghost 钮，landing 态 target=new）。 -->
         <ContextMenuItem
           data-testid="session-quote-item"
-          class="flex h-[28px] w-full cursor-pointer select-none items-center gap-[8px] rounded-sm px-[9px] text-[length:var(--text-xs)] text-neutral-fg outline-none hover:bg-surface-hover hover:text-neutral-fg [&_svg]:size-[13px]"
+          class="flex h-[28px] w-full cursor-pointer select-none items-center gap-[8px] rounded-sm px-[9px] text-[length:var(--text-xs)] text-neutral-fg outline-none hover:bg-surface-hover hover:text-neutral-fg data-[highlighted]:bg-surface-hover data-[highlighted]:text-neutral-fg [&_svg]:size-[13px]"
           @select="onQuoteToComposer"
         >
           <Quote />
@@ -50,7 +55,7 @@
         <ContextMenuItem
           v-if="hasAgentParent"
           data-testid="session-view-parent-item"
-          class="flex h-[28px] w-full cursor-pointer select-none items-center gap-[8px] rounded-sm px-[9px] text-[length:var(--text-xs)] text-neutral-fg outline-none hover:bg-surface-hover hover:text-neutral-fg [&_svg]:size-[13px]"
+          class="flex h-[28px] w-full cursor-pointer select-none items-center gap-[8px] rounded-sm px-[9px] text-[length:var(--text-xs)] text-neutral-fg outline-none hover:bg-surface-hover hover:text-neutral-fg data-[highlighted]:bg-surface-hover data-[highlighted]:text-neutral-fg [&_svg]:size-[13px]"
           @select="onViewParent"
         >
           <CornerLeftUp />
@@ -65,7 +70,7 @@
           class="flex h-[28px] w-full cursor-pointer select-none items-center gap-[8px] rounded-sm px-[9px] text-[length:var(--text-xs)] outline-none [&_svg]:size-[13px]"
           :class="confirmingStop
             ? 'bg-danger text-neutral-fg'
-            : 'text-neutral-fg hover:bg-surface-hover hover:text-neutral-fg'"
+            : 'text-neutral-fg hover:bg-surface-hover hover:text-neutral-fg data-[highlighted]:bg-surface-hover data-[highlighted]:text-neutral-fg'"
           @select="onStopSelect"
         >
           <Square />
@@ -79,7 +84,7 @@
           class="flex h-[28px] w-full cursor-pointer select-none items-center gap-[8px] rounded-sm px-[9px] text-[length:var(--text-xs)] outline-none [&_svg]:size-[13px]"
           :class="confirmingQuit
             ? 'bg-danger text-neutral-fg'
-            : 'text-danger hover:bg-danger-soft hover:text-danger'"
+            : 'text-danger hover:bg-danger-soft hover:text-danger data-[highlighted]:bg-danger-soft data-[highlighted]:text-danger'"
           @select="onForceQuitSelect"
         >
           <Power />
@@ -110,7 +115,7 @@
           v-for="p in assignTargets"
           :key="p.id"
           data-testid="context-assign-project-option"
-          class="flex h-[28px] w-full cursor-pointer select-none items-center gap-2 rounded-sm px-[9px] text-[length:var(--text-xs)] text-neutral-fg outline-none hover:bg-surface-hover"
+          class="flex h-[28px] w-full cursor-pointer select-none items-center gap-2 rounded-sm px-[9px] text-[length:var(--text-xs)] text-neutral-fg outline-none hover:bg-surface-hover data-[highlighted]:bg-surface-hover data-[highlighted]:text-neutral-fg"
           @select="onAssignProject(p.id)"
         >
           <span class="flex w-[14px] shrink-0 items-center justify-center text-accent">

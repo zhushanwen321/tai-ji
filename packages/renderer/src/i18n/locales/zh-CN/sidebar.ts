@@ -123,7 +123,7 @@ export default {
     hideIgnored: '隐藏忽略文件',
     showIgnored: '显示忽略文件',
     ignoredItem: '忽略项',
-    filterPlaceholder: '过滤文件…',
+    filterPlaceholder: '过滤文件',
     loadingTree: '加载文件树…',
     loadFailed: '加载失败（{reason}）',
     retry: '重试',

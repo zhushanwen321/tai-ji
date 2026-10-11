@@ -1,6 +1,6 @@
 /**
  * 会话条目激活态样式测试（demo .si.on 终态：workbench.css 文件尾「选中态两级范式」Tier B——
- * 无底无框，仅行文字提亮 fg；hover 临时反馈只在非激活行）。
+ * 无底无框，仅行文字提亮 fg；hover 底恒在（demo .si:hover 恒有背景，与激活态不排他））。
  *
  * 三视角（TEST-STRATEGY §3）：
  *  - 构建者白盒：active prop 驱动根节点类分支（激活无选中底/框）
@@ -55,7 +55,7 @@ describe('会话条目激活态样式（demo .si.on Tier B：无底无框仅文�
     expect(titleRow.className).not.toContain('text-accent')
   })
 
-  it('非激活条目：无选中文字提亮，hover 底临时反馈生效', () => {
+  it('非激活条目：无选中文字提亮，行根恒挂 hover 底（demo .si:hover 恒有背景）', () => {
     const wrapper = mountItem(false)
     const root = wrapper.find('.session-item')
     expect(root.classes()).toContain('hover:bg-surface-hover')

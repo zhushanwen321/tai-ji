@@ -3,11 +3,12 @@
  * ProjectSwitcher —— ProjectSwitcher 3A：2 列卡片网格（形态权威见 git 历史 project-switcher-demo.html 变体 3A 单行 pill，
  * page-design 目录已退役）+ 1 步点击切换 + 拖拽/键盘排序（D7/D8）。
  *
- * 形态（demo 3A）：单行 pill 卡（26px）= Folder 前导图标 + 项目名（截断 + title 全名兜底）
- * + 会话数徽章；demo .proj-bar 尾部的 ▾ chevron 不复刻——其语义是「bar 点击展开下拉」
- * 的触发器，本组件是卡片网格 1 步点击直接切换（无下拉层级），渲染 chevron 会声明不存在的
- * 交互（伪可供性），形态豁免登记于此。网格尾部「新建」卡（点击展开内联 Input，Enter/blur
- * 提交、Esc 取消）。
+ * 形态（单行 pill 卡 26px，视觉复刻 R6.2 波次重建前的现行值）：Folder 前导图标 + 项目名
+ * （截断 + title 全名兜底）+ 会话数徽章；尾部 ▾ chevron 不渲染——本组件是卡片网格
+ * 1 步点击直接切换（无下拉层级），渲染 chevron 会声明不存在的交互（伪可供性），形态豁免
+ * 登记于此。网格尾部「新建」卡（点击展开内联 Input，Enter/blur 提交、Esc 取消）。
+ * 注：原引用的 demo .proj-bar/.cnt 权威选择器已随 demo 项目区重构（锚定分组）消失，
+ * 本组件权威锚点随 R6.2 波次重建后再对齐。
  *
  * 排序（D7，2026-09-02 语义修正）：卡片顺序完全由用户控制——有 userOrder 升序在前，
  * 无 userOrder 按创建/持久化序稳定在后；点击切换不改顺序（active/lastUsedAt 不参与
@@ -21,7 +22,7 @@
  * 规则 SSOT——徽章数字 = 点击该卡后 SessionList 实际显示的会话数；默认项目计入
  * 未归类 + 孤儿 session。
  *
- * 删除：demo 3A 卡片无删除按钮（26px 单行放不下），保留既有删除能力走右键 ContextMenu
+ * 删除：单行 pill 卡放不下删除按钮，保留既有删除能力走右键 ContextMenu
  * （reka 原语，SessionItem 同范式）→ ConfirmDialog 确认；默认项目卡不渲染删除项
  * （review MF-1 双保险，与 store.removeProject 守卫一致）。
  *
@@ -183,15 +184,16 @@ function cancelCreate() {
 
 <template>
   <div class="mb-1 mx-2.5" data-testid="project-switcher">
-    <!-- 2 列卡片网格（功能结构保留；卡片形态语言 = demo .proj-bar：Folder 前导图标 + elevated 底
-         + hairline 边 + radius 8 + 名字 fw-mid + mono 计数，hover 提边框；▾ chevron 豁免见头注释） -->
+    <!-- 2 列卡片网格（功能结构保留；卡片形态语言：Folder 前导图标 + elevated 底
+         + hairline 边 + radius 8 + 名字 fw-mid + mono 计数，hover 提边框；▾ chevron 豁免见头注释。
+         权威锚点随 R6.2 波次重建后再对齐） -->
     <div class="grid grid-cols-2 gap-1" data-testid="project-grid">
       <template v-for="p in projectStore.recentProjects" :key="p.id">
         <!-- 右键菜单（删除入口；默认项目卡无菜单项 → Portal 条件渲染，不吞右键） -->
         <ContextMenuRoot @update:open="onCardMenuOpenChange">
           <ContextMenuTrigger as-child>
             <!-- 卡片：div role=button（旧列表项同范式，避免 button 嵌套 input/触发器）；
-                 active 卡 = demo .proj-bar 形态（bg-bg-elevated + border-hairline + 名字中性亮字），
+                 active 卡形态（bg-bg-elevated + border-hairline + 名字中性亮字），
                  inactive 卡 = ghost 行语言（hover 软底）。 -->
             <div
               role="button"
@@ -221,14 +223,14 @@ function cancelCreate() {
               @keydown.down.prevent="moveCard(p.id, 1)"
               @keydown.right.prevent="moveCard(p.id, 1)"
             >
-              <!-- 前导图标 = demo .proj-bar 的 Folder 标识（13px dim，全 sidebar 既有惯例：
+              <!-- 前导图标：Folder 标识（13px dim，全 sidebar 既有惯例：
                    FileTreeRow/SessionList 同款） -->
               <Folder class="size-[13px] shrink-0 text-neutral-dim" />
               <span class="min-w-0 flex-1 truncate text-left" data-testid="project-card-name">
                 {{ displayName(p) }}
               </span>
               <!-- 会话数徽章：规则与 SessionList 过滤共享（SSOT），数字 = 点击后列表实际条数。
-                   形态 = demo .cnt（mono 11px dim，无底无胶囊） -->
+                   形态：mono 11px 档 dim 字，无底无胶囊 -->
               <span
                 data-testid="project-card-count"
                 class="flex-none font-mono text-[length:var(--text-2xs)] text-neutral-dim"
@@ -245,7 +247,7 @@ function cancelCreate() {
             >
               <ContextMenuItem
                 data-testid="project-delete-item"
-                class="flex h-[28px] w-full cursor-pointer select-none items-center gap-[8px] rounded-sm px-[9px] text-[length:var(--text-xs)] text-danger outline-none hover:bg-danger-soft hover:text-danger [&_svg]:size-[13px]"
+                class="flex h-[28px] w-full cursor-pointer select-none items-center gap-[8px] rounded-sm px-[9px] text-[length:var(--text-xs)] text-danger outline-none hover:bg-danger-soft hover:text-danger data-[highlighted]:bg-danger-soft data-[highlighted]:text-danger [&_svg]:size-[13px]"
                 @select="requestDelete(p.id)"
               >
                 <Trash2 />
