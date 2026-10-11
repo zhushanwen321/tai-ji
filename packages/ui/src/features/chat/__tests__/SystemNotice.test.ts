@@ -417,7 +417,7 @@ describe('SystemNotice D3 增强规格（U3）', () => {
     }
   })
 
-  it('主文案：text-sm + 550 字重 + fg 提色；行距 py-1.5；动效与内容列宽度不动', () => {
+  it('主文案：text-sm + --fw-mid 字重 + fg 提色；行距 py-1.5；动效与内容列宽度不动', () => {
     const wrapper = mount(SystemNotice, { props: { message: compactionMessage(1000) } })
     const row = wrapper.find('.system-notice')
     expect(row.classes()).toContain('py-1.5')
@@ -425,7 +425,7 @@ describe('SystemNotice D3 增强规格（U3）', () => {
     expect(row.classes()).toContain('content-col')
     const text = row.find('[data-testid="system-notice-text"]')
     expect(text.classes()).toEqual(
-      expect.arrayContaining(['text-[length:var(--text-sm)]', 'font-[550]', 'text-neutral-fg']),
+      expect.arrayContaining(['text-[length:var(--text-sm)]', '[font-weight:var(--fw-mid)]', 'text-neutral-fg']),
     )
   })
 

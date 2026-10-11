@@ -324,9 +324,9 @@ function onPresetSelect(payload: { presetId: string }): void {
          v-show 切 display:none/'' 不改变原有布局（若用普通 div 包裹会多一层 flex item 断 gap）。 -->
     <div v-show="!isCreating" class="contents">
 
-    <!-- 问候语（22px / weight 650 / --fg，spec §3.1）；landing-cascade 首项（级联入场见
-         文件尾 scoped 注释） -->
-    <h1 class="landing-cascade-greet z-10 text-center text-[22px] font-[650] text-neutral-fg">
+    <!-- 问候语（22px / --fg，spec §3.1；字重 demo 为 650 无独立档，归展示级 bold 档）；
+         landing-cascade 首项（级联入场见文件尾 scoped 注释） -->
+    <h1 class="landing-cascade-greet z-10 text-center text-[22px] font-bold text-neutral-fg">
       {{ greetingPrefix }}，{{ t('app.greetingPrompt') }}
     </h1>
 

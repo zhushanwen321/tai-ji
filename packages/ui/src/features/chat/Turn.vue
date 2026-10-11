@@ -309,8 +309,8 @@ const notifyDuration = computed(() => {
 // 分隔点规则（与既有 DOM 逐字一致）：失败分句与耗时前置点无条件；从文案仅在有主文案时带前导点
 // （D5「无主文案时不带前导点」）；计数与点列段无前置点（点列恒紧贴前段，不单独成段群）。
 
-/** 主文案（D3）：text-sm + 550 字重 + fg 提色 */
-const NOTIFY_COUNT_CLASS = 'shrink-0 text-[length:var(--text-sm)] font-[550] text-neutral-fg'
+/** 主文案（D3）：text-sm + --fw-mid 字重 + fg 提色 */
+const NOTIFY_COUNT_CLASS = 'shrink-0 text-[length:var(--text-sm)] [font-weight:var(--fw-mid)] text-neutral-fg'
 /** 失败分句（D3）：text-xs + mid 提色 */
 const NOTIFY_FAILED_CLASS = 'shrink-0 text-[length:var(--text-xs)] text-neutral-mid'
 /** 从文案（D3）：faint 弱化 */

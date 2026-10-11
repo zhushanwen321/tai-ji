@@ -156,8 +156,8 @@ const respawn: PiRespawnNoticeVariant | null =
 // 同一串 arbitrary class 不在多处漂移。Tailwind 扫描器按 SFC 原文匹配 class 字符串，
 // 常量值即候选（renderer / mobile tailwind content 均含 ../ui/src/**）。
 
-/** 主文案（D3）：text-sm + 550 字重 + fg 提色，主从分明 */
-const TEXT_BODY_CLASS = 'text-[length:var(--text-sm)] font-[550] text-neutral-fg'
+/** 主文案（D3）：text-sm + --fw-mid 字重 + fg 提色，主从分明 */
+const TEXT_BODY_CLASS = 'text-[length:var(--text-sm)] [font-weight:var(--fw-mid)] text-neutral-fg'
 /** 可悬停详情的可发现性暗示（方案 A）：点状下划线，提示「此处有更多」 */
 const DETAIL_HINT_CLASS = 'underline decoration-dotted decoration-neutral-faint underline-offset-[3px]'
 /** 图标色档：中性（默认）/ accent（background-bash 结构化行） */
