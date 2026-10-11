@@ -16,7 +16,8 @@
  * 注入（clarify C1 D1），core 不再 import useImageAttachment。paste 通路（占位 badge 插入 +
  * 异步回填/降级编排）保留，仅 IPC 调用上移壳层。
  *
- * 行为约定（byte-for-byte 与原 useContenteditableInput 一致，CRITICAL）：
+ * 行为约定（CRITICAL）：
+ * - IME 组词中（composing.value）onInput 直接返回——不序列化不触发检测，compositionend 统一处理
  * - IME 组合中（composing.value / e.isComposing）不拦截 Enter
  * - Shift+Enter → insertLineBreak + onInput + scrollCursorIntoView
  * - Enter（无 shift）→ emit('keydown', e)
@@ -203,6 +204,11 @@ export function useContenteditableInput(
   }
 
   function onInput(): void {
+    // IME 组词守卫（demo onInput 首行同款）：组词期间每次按键都会派发 input 事件，
+    // 此时不序列化（emitInput）也不跑五路触发检测（组词中的假文本不构成触发），统一由
+    // onCompositionEnd（先复位 composing 再调本函数）收口处理。接线：ComposerInput.vue
+    // `@compositionstart="composing = true"`。
+    if (composing.value) return
     // 单次全文遍历复用（性能 A 档）：syncEmpty 判空与 emitInput 消费同一 text 快照。
     // 两者之间原本就无 DOM 写（syncEmpty 只赋 isEmpty ref），同帧读取恒等价。
     const text = getText()

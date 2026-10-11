@@ -29,13 +29,16 @@ export function useComposerChipCommands(
 
   /**
    * chip 的 × 删除按钮（slash/file/image chip 通用，§2e）。内联 svg X（demo 方案 C 同款：
-   * stroke-width 2.2 + round cap，12px 定格），role/aria-label 机制保留——文本 '×' 退役
-   * 后按钮文本恒空，segment-parse 的 isInChipXSubtree 拒绝逻辑不受影响。
+   * stroke-width 2.2 + round cap，12px 定格）。原生 <button type="button">（demo chipHtml
+   * 同款）自带按钮语义与键盘可达（Tab 聚焦 + Enter/Space 触发 click），不另设 role；
+   * aria-label 保留——按钮文本恒空，segment-parse 的 isInChipXSubtree 拒绝逻辑不受影响
+   * （按 .chip-x class 判定，与 tagName 无关）。button 的 UA 默认样式由壳层 .chip-x 规则
+   * 清零（ComposerInput.vue：background/border/padding/font）。
    */
   function makeXButton(chip: HTMLElement): HTMLElement {
-    const x = document.createElement('span')
+    const x = document.createElement('button')
+    x.type = 'button'
     x.className = 'chip-x'
-    x.setAttribute('role', 'button')
     x.setAttribute('aria-label', t('composable.removeLabel'))
     const SVG_NS = 'http://www.w3.org/2000/svg'
     const svg = document.createElementNS(SVG_NS, 'svg')
@@ -160,10 +163,13 @@ export function useComposerChipCommands(
     chip.contentEditable = 'false'
     chip.dataset.chipType = 'slash'
     chip.dataset.chipName = command.startsWith('/') ? command.slice(1) : command
+    // title 全名（spec §2「title 给全名」）：label 同文，悬停兜底长名截断
+    const commandLabel = command.startsWith('/') ? command : `/${command}`
+    chip.title = commandLabel
     renderIconInto(chip, icon)
     const label = document.createElement('span')
     label.className = 'chip-label'
-    label.textContent = command.startsWith('/') ? command : `/${command}`
+    label.textContent = commandLabel
     chip.appendChild(label)
     chip.appendChild(makeXButton(chip))
     insertChipAtSelection(el, chip)
@@ -227,6 +233,8 @@ export function useComposerChipCommands(
       chip.dataset.chipLineEnd = String(end)
       labelText += start === end ? `:L${start}` : `:L${start}-L${end}`
     }
+    // title 全名（spec §2）：含行号段的完整引用文本，悬停兜底长路径截断
+    chip.title = labelText
     chip.appendChild(makePreMark('$'))
     const label = document.createElement('span')
     label.className = 'chip-label'
@@ -287,6 +295,7 @@ export function useComposerChipCommands(
     const chip = document.createElement('span')
     chip.className = 'mention-chip mention-at'
     chip.contentEditable = 'false'
+    chip.title = name // title 全名（spec §2）：被 @ 的名字，悬停兜底截断
     chip.appendChild(makePreMark('@'))
     const label = document.createElement('span')
     label.className = 'chip-label'
@@ -316,6 +325,7 @@ export function useComposerChipCommands(
     chip.dataset.chipType = 'session'
     chip.dataset.chipSessionId = sessionId
     chip.dataset.chipLabel = label
+    chip.title = label // title 全名（spec §2）：人可读标题，悬停兜底截断
     chip.appendChild(makePreMark('#'))
     const labelEl = document.createElement('span')
     labelEl.className = 'chip-label'
@@ -345,6 +355,7 @@ export function useComposerChipCommands(
     chip.dataset.chipType = 'subagent'
     chip.dataset.chipSubagentId = subagentId
     chip.dataset.chipSlug = slug
+    chip.title = `@${slug}` // title 全名（spec §2）：带前缀的完整定向文本
     chip.appendChild(makePreMark('@'))
     const labelEl = document.createElement('span')
     labelEl.className = 'chip-label'

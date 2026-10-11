@@ -31,6 +31,7 @@
     @blur="onBlur"
     @compositionstart="composing = true"
     @compositionend="onCompositionEnd"
+    @mousedown="onEditorMousedown"
     @mouseup="saveSelection"
   />
 </template>
@@ -189,6 +190,21 @@ function onInputFocus(): void {
   emit('focus')
 }
 
+/**
+ * 徽章原子化（demo onEdMouseDown 同款，spec §4「mousedown 不落光标」）：mousedown 落在
+ * 徽章内时 preventDefault，浏览器不把光标放进徽章边界（徽章整体不可点入，行为原子化）。
+ * 类名沿用 dom-core 的 chip 判定（isDeletableChipNode 三类 class）：slash-chip / mention-chip，
+ * image-chip 同时挂在 mention-chip 上故被 mention-chip 覆盖。× 删除不受影响——preventDefault
+ * 只阻止光标放置与拖选启动，click 事件照常派发，chip-x 的 click 删除监听（dom-core
+ * makeXButton）独立生效。
+ */
+function onEditorMousedown(e: MouseEvent): void {
+  const target = e.target
+  if (target instanceof Element && target.closest('.slash-chip, .mention-chip')) {
+    e.preventDefault()
+  }
+}
+
 // clear / setText / insertTextAtCursor 不再在组件定义：DOM 写入已收口进 core composable
 // （savedRange 闭包在 composable 内，组件层无法重置它；详见 contenteditable.ts 注释）。
 // 组件通过 defineExpose 透传 composable 返回的同名方法，维持对外 API 契约不变。
@@ -331,6 +347,12 @@ onMounted(() => {
   color: var(--neutral-fg-2);
   white-space: nowrap;
   user-select: none;
+  /* 底/边/字三通道统一反馈过渡（demo 统一过渡组 .ichip 同参 120ms）：本体、:hover 提色、
+     just-inserted 淡染起落三处状态变化共用此组，无过渡会跳变 */
+  transition:
+    background-color var(--duration-fast) var(--ease-out),
+    border-color var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out);
 }
 /* 基线 strut：inline-flex 容器基线取首个 flex 项，首项是 svg（无文字基线）时退化为
    底边锚定——零宽空格把容器基线钉到 chip 字号的真实文字基线，与编辑器两侧兜底
@@ -368,18 +390,25 @@ onMounted(() => {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-/* 前缀符号（$ @ #）：类型标记弱化为元数据层，辨型交给图标与前缀，不挪用语义色 */
+/* 前缀符号（$ @ #）：类型标记弱化为元数据层，辨型交给图标与前缀，不挪用语义色
+   （字重 --fw-text 同 demo .pre，mono 小字在 500 档才立得住） */
 .composer-input :deep(.slash-chip .chip-pre),
 .composer-input :deep(.mention-chip .chip-pre) {
   font-family: var(--font-mono);
   font-size: var(--text-2xs);
-  font-weight: 400;
+  font-weight: var(--fw-text);
   color: var(--neutral-dim);
 }
 /* × 删除钮：14px 常驻占位防宽度跳变，chip hover 才显形；hover 反馈中性
-   （elevated 底 + fg 前景）。duration 用统一反馈档 --duration-fast（demo --dur-fast 同值 120ms） */
+   （elevated 底 + fg 前景）。duration 用统一反馈档 --duration-fast（demo --dur-fast 同值 120ms）。
+   前四行清零原生 button 的 UA 默认（demo 全局 button reset 同款语义）——× 现为
+   <button type="button">（键盘可达），清掉底色/边框/内边距/字体后由本块定妆 */
 .composer-input :deep(.slash-chip .chip-x),
 .composer-input :deep(.mention-chip .chip-x) {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
   display: grid;
   place-items: center;
   width: 14px;

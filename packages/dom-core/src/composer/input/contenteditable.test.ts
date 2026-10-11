@@ -714,3 +714,58 @@ describe('useContenteditableInput onKeydown IME 守卫（composition 中不转�
     cleanup = c.cleanup
   })
 })
+
+// ── IME 组词守卫（onInput 顶部：组词中不序列化不弹层，compositionend 统一处理）──
+// demo 权威形态：onInput() 首行 `if (composing.value) return`。组词期间每次按键都会派发
+// input 事件，守卫缺失时组词假文本会反复跑五路触发检测并序列化草稿（浮层闪烁/误触发）。
+// 接线闭环：ComposerInput.vue `@compositionstart="composing = true"` 置位 → 组词中 input
+// 全部短路 → `@compositionend="onCompositionEnd"` 复位后调 onInput() 统一处理一次。
+describe('useContenteditableInput onInput IME 组词守卫（组词中不序列化不弹层）', () => {
+  let cleanup: () => void
+  afterEach(() => {
+    cleanup?.()
+  })
+
+  it('组词中（composing=true）onInput：emitInput 不发、五路触发回调全不发（连 null 也不发）', () => {
+    const c = setup('组词', {
+      onDollarFileTrigger: vi.fn(),
+      onSubagentTrigger: vi.fn(),
+      onSkillTrigger: vi.fn(),
+    })
+    // 产线接线：ComposerInput.vue `@compositionstart="composing = true"`（对同一 ref 直写）
+    c.composing.value = true
+    c.onInput()
+
+    expect(c.callbacks.onInput).not.toHaveBeenCalled()
+    expect(c.callbacks.onSlashTrigger).not.toHaveBeenCalled()
+    expect(c.callbacks.onFileTrigger).not.toHaveBeenCalled()
+    expect(c.callbacks.onDollarFileTrigger).not.toHaveBeenCalled()
+    expect(c.callbacks.onSubagentTrigger).not.toHaveBeenCalled()
+    expect(c.callbacks.onSkillTrigger).not.toHaveBeenCalled()
+    cleanup = c.cleanup
+  })
+
+  it('compositionend：复位 composing 后统一处理一次（emitInput + 触发检测照常跑）', () => {
+    const c = setup('/goal', {
+      onDollarFileTrigger: vi.fn(),
+      onSubagentTrigger: vi.fn(),
+      onSkillTrigger: vi.fn(),
+    })
+    c.composing.value = true
+    c.onCompositionEnd() // 产线接线：`@compositionend`
+
+    expect(c.composing.value).toBe(false)
+    expect(c.callbacks.onInput).toHaveBeenCalledTimes(1)
+    expect(c.callbacks.onInput).toHaveBeenCalledWith('/goal')
+    expect(c.callbacks.onSlashTrigger).toHaveBeenCalledTimes(1)
+    expect(c.callbacks.onSlashTrigger).toHaveBeenCalledWith({ query: 'goal' })
+    cleanup = c.cleanup
+  })
+
+  it('对照：composing=false（默认）时 onInput 照常序列化（守卫非恒真）', () => {
+    const c = setup('done')
+    c.onInput()
+    expect(c.callbacks.onInput).toHaveBeenCalledWith('done')
+    cleanup = c.cleanup
+  })
+})

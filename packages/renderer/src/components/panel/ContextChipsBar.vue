@@ -22,13 +22,13 @@
       v-for="item in items"
       :key="item.id"
       :title="item.name"
-      class="group inline-flex h-[22px] min-w-0 max-w-[min(200px,100%)] shrink-0 items-center gap-[5px] whitespace-nowrap rounded-[var(--chip-r)] border border-hairline bg-[var(--chip-bg)] pl-[7px] pr-[5px] text-[length:var(--text-xs)] text-neutral-mid"
+      class="group inline-flex h-[22px] min-w-0 max-w-[min(200px,100%)] shrink-0 items-center gap-[5px] whitespace-nowrap rounded-[var(--chip-r)] border border-hairline bg-[var(--chip-bg)] pl-[7px] pr-[5px] text-[length:var(--text-xs)] text-neutral-mid transition-colors duration-[var(--duration-fast)]"
     >
       <component :is="iconFor(item)" class="size-3 shrink-0 text-neutral-dim" />
       <span class="min-w-0 truncate">{{ item.name }}</span>
       <Button
         variant="ghost"
-        class="-mr-[2px] grid size-3.5 shrink-0 place-items-center rounded-[3px] p-0 text-neutral-dim transition-colors hover:bg-bg-elevated hover:text-neutral-fg"
+        class="-mr-[2px] grid size-3.5 shrink-0 place-items-center rounded-[3px] p-0 text-neutral-dim transition-colors duration-[var(--duration-fast)] hover:bg-bg-elevated hover:text-neutral-fg"
         :title="t('panel.contextChips.removeFromContext')"
         @click.stop="onRemove(item.id)"
       >

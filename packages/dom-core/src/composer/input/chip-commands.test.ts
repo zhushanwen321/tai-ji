@@ -80,10 +80,13 @@ describe('useComposerChipCommands insertSlashChip', () => {
     expect(newChip.dataset.chipLocation).toBeUndefined()
     // 图标经 renderIcon 透传（第三参 icon 原样传给 insertSkillChip）
     expect(c.callbacks.renderIcon).toHaveBeenCalledWith(expect.any(HTMLElement), 'terminal')
-    // × 删除按钮（aria-label 经 t 注入；按钮内容为内联 svg X，文本 '×' 已退役）
+    // × 删除按钮：原生 button[type=button]（demo chipHtml 同款，键盘可达——原生语义自带，
+    // 不另设 role）；aria-label 经 t 注入；按钮内容为内联 svg X，文本 '×' 已退役
     const xBtn = newChip.querySelector('.chip-x') as HTMLElement
     expect(xBtn).not.toBeNull()
-    expect(xBtn.getAttribute('role')).toBe('button')
+    expect(xBtn.tagName).toBe('BUTTON')
+    expect((xBtn as HTMLButtonElement).type).toBe('button')
+    expect(xBtn.getAttribute('role')).toBeNull()
     expect(xBtn.getAttribute('aria-label')).toBe('composable.removeLabel')
     const xSvg = xBtn.querySelector('svg')
     expect(xSvg).not.toBeNull()

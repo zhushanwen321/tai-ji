@@ -655,13 +655,13 @@ textarea {
    改一处两档同变。demo 权威 = workbench.css .composer 段；本仓挂点 = Composer 根
    div.composer，消费方 = ui 包 ComposerInput 的 .slash-chip/.mention-chip 与 renderer
    ContextChipsBar 的 chip。--chip-bg 引凹陷档 --bg-input（demo --card-inset 同值，同名
-   分叉按渲染方向对齐，先例 ProviderTemplatePicker）；--chip-bg-hover = 凹陷底提亮 5%
-   （demo --hover 对 --card-inset 提亮幅度的 token 化推导，优于引实底色）。 */
+   分叉按渲染方向对齐，先例 ProviderTemplatePicker）；--chip-bg-hover 引 --surface-hover
+   （demo --hover 同值 token 直引，四主题跟随）。 */
 .composer {
   --chip-r: 5px;
   --chip-bg: var(--bg-input);
   --chip-border: var(--hairline);
-  --chip-bg-hover: color-mix(in oklch, var(--neutral-fg) 5%, var(--bg-input));
+  --chip-bg-hover: var(--surface-hover);
   --chip-border-hover: var(--border-strong);
 }
 

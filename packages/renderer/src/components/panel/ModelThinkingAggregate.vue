@@ -38,7 +38,10 @@
         <Boxes class="size-[16px] shrink-0" :stroke-width="1.6" />
       </Button>
     </PopoverTrigger>
-    <PopoverContent side="top" :side-offset="10" class="w-[240px] p-0">
+    <!-- 容器对齐同簇 ModelSelectPopover/ThinkingLevelPopover：右锚（align end）/ 锚距 10px /
+         r-lg 圆角；p-0 下首尾元素与 12px 圆角无冲突（首元素搜索区自带 p-1 且透明底，
+         尾元素档位行 rounded-sm + py-1 收在圆角弧线内），无需 overflow-hidden -->
+    <PopoverContent side="top" align="end" :side-offset="10" class="w-[240px] rounded-lg p-0">
       <!-- 上半：模型选择（hover 选择开启——hover 即切，不关弹层） -->
       <ModelPickerPanel
         :groups="pickerGroups"
