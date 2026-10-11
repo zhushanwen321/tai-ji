@@ -75,7 +75,11 @@ import { isContainedStreamError } from './infra/system/uncaught-policy.js'
 import { trash } from './infra/system/trash.js'
 
 import { ProcessManager } from './infra/pi/process-manager.js'
-import { getProviderConfig, clearProviderApiKey, initProviderCredentialResolver, cleanLeakedPackages, sanitizeInvalidProviders } from './infra/pi/pi-provider-store.js'
+import { getProviderConfig, clearProviderApiKey, initProviderCredentialResolver, cleanLeakedPackages, sanitizeInvalidProviders, isModelsStoreCorrupted } from './infra/pi/pi-provider-store.js'
+// engine-provider-unification u2：pi→zcode provider 启动同步接线（路径拼装 + D7 降级
+// 包装收敛在该模块——组合根 import 即执行 main()，降级分支抽独立模块才可单测，
+// run-extras-migration 同族先例）。
+import { runZcodeProviderStartupSync } from './services/zcode-provider-sync-wiring.js'
 import { getExtensionsDir, getNpmDir, getTmpDir, getProviderExtrasPath, getPiAgentDir } from './infra/pi/pi-paths.js'
 import { getPiGlobalAgentDir, syncBundledResources } from './infra/pi/pi-maintenance.js'
 import { runCodemodeStartupMigration } from './infra/pi/pi-codemode-settings.js'
@@ -1190,6 +1194,18 @@ async function main(): Promise<void> {
   // configService（getOAuthConfig），构造在 configService 之后——setter 回填（回填前无
   // RPC 处理，server.start 在全部装配后，无窗口期）。
   configService.setCredentialWriter(authService)
+  // engine-provider-unification §3.3 D1：pi→zcode provider 启动同步。时序下界 =
+  // sanitizeInvalidProviders 之后（同为「启动时一次性配置自愈」先例位）；实际落点在
+  // authService 构造后——同步消费 resolver 的 async 腿（resolveProviderCredential），
+  // 其 auth.json 源经上方 providerCredentialResolver 构造的闭包延迟引用 authService，
+  // 早于此点会 TDZ（wiring 的 catch 降级能兜住但同步功能整体失效，不可接受）。
+  // D7 降级语义在 wiring 模块收敛：任何异常 warn 不阻断启动（副本是可用性增强不是启动
+  // 前置）。路径缺省拼装与 catalog 单点直传均收在 runZcodeProviderStartupSync。
+  await runZcodeProviderStartupSync({
+    configStore,
+    credentialResolver: providerCredentialResolver,
+    isModelsCorrupted: isModelsStoreCorrupted,
+  })
   const fileService = new FileService({
     sessionService,
     executor: new FsExecutor(),
@@ -1618,6 +1634,9 @@ async function main(): Promise<void> {
   // 导致 async 错误变成 unhandled rejection，Node.js 16+ 默认行为是终止进程。
   // 虽然 server.ts 已修复（加了 .catch），这里作为最后防线保留。
   process.on('unhandledRejection', (reason) => {
+    // 逃逸取证：先于 console.error 落盘一行零格式化证据（console 通道在风暴形态下
+    // 走不完，reason 内容会整体丢失）；写入细节与铁律见 appendProcessEscapeLog。
+    appendProcessEscapeLog(join(getDataDir(), 'logs'), 'unhandled-rejection', reason)
     console.error('[runtime] *** UNHANDLED REJECTION *** (should not happen):', reason)
   })
 
@@ -1641,6 +1660,11 @@ async function main(): Promise<void> {
       console.warn('[runtime] stream-level exception contained (no shutdown):', err)
       return
     }
+    // 逃逸取证（风暴排障前置）：先于 console.error 用 appendFileSync 直写一行零格式化
+    // 证据——console.error 经 inspector 同步格式化深栈，正是风暴死循环的热点，风暴形态下
+    // shutdown 走不完、异常内容零落盘；取证行必须在它之前落盘。流级噪声
+    // （isContainedStreamError 分支）已有 console.warn → logger 落盘通道，不进本文件。
+    appendProcessEscapeLog(join(getDataDir(), 'logs'), 'uncaught-exception', err)
     console.error('[runtime] *** UNCAUGHT EXCEPTION *** (attempting graceful shutdown):', err)
     void shutdown('uncaughtException', 1)
   })
