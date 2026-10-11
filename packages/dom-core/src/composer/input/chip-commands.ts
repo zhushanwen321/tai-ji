@@ -16,6 +16,9 @@ import { randomUuid } from '@taiji/core'
 import { removeChipNode, isSpacerNode, placeCursorAfter } from './input-dom'
 import type { ChipCallbacks } from './types'
 
+/** 落位反馈淡染时长（demo 方案 C「插入瞬间」权威定值 800ms，样式侧 --sel-bg/--sel-edge 染色） */
+const JUST_INSERTED_FLASH_MS = 800
+
 export function useComposerChipCommands(
   elRef: Ref<HTMLDivElement | null>,
   { onChanged, restoreSelection, renderIcon, t }: ChipCallbacks,
@@ -24,13 +27,32 @@ export function useComposerChipCommands(
     return elRef.value
   }
 
-  /** chip 的 × 删除按钮（slash/file/image chip 通用，§2e） */
+  /**
+   * chip 的 × 删除按钮（slash/file/image chip 通用，§2e）。内联 svg X（demo 方案 C 同款：
+   * stroke-width 2.2 + round cap，12px 定格），role/aria-label 机制保留——文本 '×' 退役
+   * 后按钮文本恒空，segment-parse 的 isInChipXSubtree 拒绝逻辑不受影响。
+   */
   function makeXButton(chip: HTMLElement): HTMLElement {
     const x = document.createElement('span')
     x.className = 'chip-x'
     x.setAttribute('role', 'button')
     x.setAttribute('aria-label', t('composable.removeLabel'))
-    x.textContent = '×'
+    const SVG_NS = 'http://www.w3.org/2000/svg'
+    const svg = document.createElementNS(SVG_NS, 'svg')
+    svg.setAttribute('viewBox', '0 0 24 24')
+    svg.setAttribute('fill', 'none')
+    svg.setAttribute('stroke', 'currentColor')
+    svg.setAttribute('stroke-width', '2.2')
+    svg.setAttribute('stroke-linecap', 'round')
+    svg.setAttribute('aria-hidden', 'true')
+    svg.setAttribute('width', '12')
+    svg.setAttribute('height', '12')
+    for (const d of ['M18 6 6 18', 'm6 6 12 12']) {
+      const path = document.createElementNS(SVG_NS, 'path')
+      path.setAttribute('d', d)
+      svg.appendChild(path)
+    }
+    x.appendChild(svg)
     x.addEventListener('click', (e: MouseEvent) => {
       e.preventDefault()
       e.stopPropagation()
@@ -40,11 +62,40 @@ export function useComposerChipCommands(
   }
 
   /**
+   * 前缀符号标记（$ @ #，demo .pre 元数据层）：mono 小字弱化为类型标记，辨型交给图标
+   * 与前缀，不挪用语义色。aria-hidden——序列化层拍平 mention-at 时前缀由 label 语义
+   * 承载（无 dataset 旧通路 textContent 拍平仍含 @，见 insertMentionChip 注释）。
+   */
+  function makePreMark(pre: string): HTMLElement {
+    const preEl = document.createElement('span')
+    preEl.className = 'chip-pre'
+    preEl.textContent = pre
+    preEl.setAttribute('aria-hidden', 'true')
+    return preEl
+  }
+
+  /**
    * chip 落位共用段：无选区 appendChild 到末尾，有选区删选区内容后插到光标处，
    * chip 后补 ZWSP spacer（光标锚点 + 删除 chip 时一并清理）并把光标定位其后。
    * 各 chip 插入函数共用（slash/skill/file/image/mention/session/subagent 全类型内联 chip——
    * 结构惯例收敛，防多份漂移）。
+   *
+   * 落位反馈（demo 方案 C「插入瞬间」）：just-inserted 淡染 800ms 后摘除。timer 是本
+   * composable 闭包级单例（对齐 demo flashTimer 组件级单例语义；不放大更外层模块级——
+   * split 双 Composer 实例并发插入会跨实例互 clear，前一枚 chip 淡染将永不摘除）。
+   * 连续插入时旧 timer 被 clearTimeout 顺延（demo 同款）；旧 timer 闭包持有的 chip 若
+   * 已被删除（slash 替换语义），回调对已分离节点摘 class，无害。
    */
+  let justInsertedTimer: ReturnType<typeof setTimeout> | null = null
+  function flashJustInserted(chip: HTMLElement): void {
+    chip.classList.add('just-inserted')
+    if (justInsertedTimer !== null) clearTimeout(justInsertedTimer)
+    justInsertedTimer = setTimeout(() => {
+      chip.classList.remove('just-inserted')
+      justInsertedTimer = null
+    }, JUST_INSERTED_FLASH_MS)
+  }
+
   function insertChipAtSelection(el: HTMLDivElement, chip: HTMLElement): void {
     const sel = window.getSelection()
     if (!sel || !sel.rangeCount) {
@@ -57,6 +108,7 @@ export function useComposerChipCommands(
     const spacer = document.createTextNode('\u200B')
     chip.after(spacer)
     placeCursorAfter(spacer)
+    flashJustInserted(chip)
   }
 
   /**
@@ -175,6 +227,7 @@ export function useComposerChipCommands(
       chip.dataset.chipLineEnd = String(end)
       labelText += start === end ? `:L${start}` : `:L${start}-L${end}`
     }
+    chip.appendChild(makePreMark('$'))
     const label = document.createElement('span')
     label.className = 'chip-label'
     label.textContent = labelText
@@ -211,7 +264,15 @@ export function useComposerChipCommands(
     onChanged()
   }
 
-  /** 插入 @ mention 内联 chip（§2d：蓝名）。# 入口委托 insertFileChip（向后兼容）。 */
+  /**
+   * 插入 @ mention 内联 chip（§2d）。# 入口委托 insertFileChip（向后兼容）。
+   *
+   * @ 分支（旧通路）：结构化 pre(@) + label(name) + × 按钮，与实体 chip 形态对齐，但
+   * 刻意不加 dataset（保持旧通路无 dataset 现状）——segment-parse 对无 dataset mention-at
+   * 走文本拍平（设计 F3 历史兼容），拍平结果 pre 文本 + label 文本 = `@{name}`，与旧
+   * 纯 textContent 形态逐字节一致，序列化契约零改动；× 子树经 isInChipXSubtree 拒绝、
+   * svg 无文本，均不进 segments。
+   */
   function insertMentionChip(type: '@' | '#', name: string): void {
     if (type === '#') {
       insertFileChip(name)
@@ -226,7 +287,12 @@ export function useComposerChipCommands(
     const chip = document.createElement('span')
     chip.className = 'mention-chip mention-at'
     chip.contentEditable = 'false'
-    chip.textContent = `@${name}`
+    chip.appendChild(makePreMark('@'))
+    const label = document.createElement('span')
+    label.className = 'chip-label'
+    label.textContent = name
+    chip.appendChild(label)
+    chip.appendChild(makeXButton(chip))
     insertChipAtSelection(el, chip)
     onChanged()
   }
@@ -250,6 +316,7 @@ export function useComposerChipCommands(
     chip.dataset.chipType = 'session'
     chip.dataset.chipSessionId = sessionId
     chip.dataset.chipLabel = label
+    chip.appendChild(makePreMark('#'))
     const labelEl = document.createElement('span')
     labelEl.className = 'chip-label'
     labelEl.textContent = label
@@ -278,9 +345,10 @@ export function useComposerChipCommands(
     chip.dataset.chipType = 'subagent'
     chip.dataset.chipSubagentId = subagentId
     chip.dataset.chipSlug = slug
+    chip.appendChild(makePreMark('@'))
     const labelEl = document.createElement('span')
     labelEl.className = 'chip-label'
-    labelEl.textContent = `@${slug}`
+    labelEl.textContent = slug
     chip.appendChild(labelEl)
     chip.appendChild(makeXButton(chip))
     insertChipAtSelection(el, chip)

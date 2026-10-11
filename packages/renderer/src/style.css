@@ -650,6 +650,21 @@ textarea {
   color: var(--accent-fg);
 }
 
+/* composer 徽章两档同步变量（specs/composer/composer-chips.md 第一节契约）：行内徽章 20px
+   与附件上下文行 22px 是同一形态家族两档，圆角/底/边/hover 抽成 composer 作用域变量，
+   改一处两档同变。demo 权威 = workbench.css .composer 段；本仓挂点 = Composer 根
+   div.composer，消费方 = ui 包 ComposerInput 的 .slash-chip/.mention-chip 与 renderer
+   ContextChipsBar 的 chip。--chip-bg 引凹陷档 --bg-input（demo --card-inset 同值，同名
+   分叉按渲染方向对齐，先例 ProviderTemplatePicker）；--chip-bg-hover = 凹陷底提亮 5%
+   （demo --hover 对 --card-inset 提亮幅度的 token 化推导，优于引实底色）。 */
+.composer {
+  --chip-r: 5px;
+  --chip-bg: var(--bg-input);
+  --chip-border: var(--hairline);
+  --chip-bg-hover: color-mix(in oklch, var(--neutral-fg) 5%, var(--bg-input));
+  --chip-border-hover: var(--border-strong);
+}
+
 /* 注：demo base.css 的 .btn 原语系统不搬入此文件——renderer 用本地 ui 原语 <Button> 组件
  * （packages/renderer/src/components/ui/button），不消费 .btn-* class。按钮 variant/尺寸
  * 的 v6 对齐归各消费组件（M5 sidebar/M8 composer 等）按 Button 组件 props 处理。

@@ -297,87 +297,118 @@ onMounted(() => {
   pointer-events: none;
 }
 
-/* slash 命令 chip（§9B v6 统一范式：无底无边 + 加粗 font-weight 600 + 前缀 icon + 语义色 + × 删除）
-   去掉 reasoning-soft 底色块（旧范式），保留语义色文字 + icon。 */
-.composer-input :deep(.slash-chip) {
-  display: inline-flex;
-  /* 内部也按基线对齐：icon host（含 svg 的 flex 容器）基线 = svg 底边、label/× 基线 =
-     文字基线，baseline 对齐使三者基线互共线；center 会在各 item 盒高不等时重新引入偏差。 */
-  align-items: baseline;
-  /* vertical-align: baseline：inline-flex 盒子基线 = 首个 flex 项的基线，chip 与正文
-     基线严格共线。不能用 middle——它对齐的是「父基线 + x-height/2」而非基线，
-     badge 相对正文有 1-2px 上下浮动，视觉不水平。 */
-  vertical-align: baseline;
-  gap: 4px;
-  /* 与后续文字空开约一字符宽（4px），避免 chip 贴紧正文 */
-  margin-right: 4px;
-  /* 无底色无边框（v6 §9B 统一范式），仅靠 icon + 语义色文字区分类型 */
-  color: var(--reasoning);
-  /* 字号走 token 与正文同源：chip 是行内内容，同字号 + 加粗 + 语义色已足够区分；
-   * 写死像素值会脱离 --font-scale-u/mq 缩放体系（用户调大字体后 chip 恒小）。 */
-  font: 600 var(--text-sm) / 1.4 var(--font-sans);
-  user-select: none;
-}
-/* skill chip 前后自动空开（D13）：margin-left 4px + margin-right 提至 6px，仅 skill chip
-   （用户报告面）；slash/file/session/subagent chip 维持各自单侧间距不动。行首抑制：
-   chip 为其父容器首子节点（前无兄弟节点，landing / 清空后插入形态）时不缩进——
-   触发路径（空格 + /）清 query 后前置空格仍在，靠文本空格分隔，不依赖本规则。
-   纯视觉零数据污染：ZWSP spacer 契约与序列化层 needsBoundarySpace 空格补齐均不动。 */
-.composer-input :deep(.slash-chip[data-chip-type='skill']) {
-  margin-left: 4px;
-  margin-right: 6px;
-}
-.composer-input :deep(.slash-chip[data-chip-type='skill']:first-child) {
-  margin-left: 0;
-}
-.composer-input :deep(.slash-chip .chip-icon) {
-  display: inline-flex;
-  align-items: center;
-  color: var(--reasoning);
-}
-.composer-input :deep(.slash-chip .chip-icon svg) {
-  /* 1em 随 chip 字号联动（13px 正文下即 13px），不与文字脱节 */
-  width: 1em;
-  height: 1em;
-}
-.composer-input :deep(.slash-chip .chip-x) {
-  cursor: pointer;
-  font-size: var(--text-sm);
-  line-height: 1;
-  opacity: 0.5;
-}
-.composer-input :deep(.slash-chip .chip-x:hover) {
-  opacity: 1;
-  color: var(--danger);
-}
-
-/* @ 引用 / # 文件 mention 内联 chip（§9B v6 统一范式：无底无边 + 加粗 + 前缀 icon + 语义色） */
+/* ─── 行内 chip（实体化 chip 形态，方案 C 精修定稿）───
+   权威源 = demo workbench.css .ichip 段 + specs/composer/composer-chips.md §2（逐项定值）。
+   [HISTORICAL] 旧「无底无边 + 语义色文字」范式整体退役，被实体 chip 形态（底+边+定高）取代：
+   mention-at/file/session 语义色分叉（--accent/--success/--warn）、image-chip 紫色、
+   skill chip --reasoning 紫与 D13 skill margin 特例（双侧 3px 恒距已覆盖其语义）、
+   × 按钮 opacity .5 常显与 :hover 红（删除反馈改中性，红色只留给真正不可逆动作）。
+   --chip-* 变量（圆角/底/边/hover 提色）由 renderer style.css .composer 作用域定义
+   （demo 两档同步机制：行内 20px 与上下文行 22px 共用同组变量），本文件只消费不定义，
+   依赖祖先作用域注入。 */
+.composer-input :deep(.slash-chip),
 .composer-input :deep(.mention-chip) {
   display: inline-flex;
-  /* 同 .slash-chip：内部基线互对齐 + 与正文基线共线（middle 是 x-height 中点对齐，会浮动） */
-  align-items: baseline;
+  align-items: center;
+  /* vertical-align: baseline：徽章文字与正文共享基线，对齐由机制保证而非目测调参。
+     不能用 middle——它以拉丁 x-height 中点为锚，中文场景整枚徽章下沉约 1.5px（demo §3 对照） */
   vertical-align: baseline;
-  gap: 4px;
-  /* 与后续文字空开约一字符宽（4px），与 slash-chip 对齐 */
-  margin-right: 4px;
-  /* 无底色无边框（v6 §9B 统一范式） */
-  font: 600 var(--text-sm) / 1.4 var(--font-sans);
+  height: 20px;
+  padding: 0 5px 0 7px;
+  /* 中文无空格必须双侧给距（单右距左侧文字贴边框）；3px 贴合不打断阅读节奏 */
+  margin-inline: 3px;
+  gap: 5px;
+  /* 长名截断不爆版，ellipsis 由 .chip-label 承载 */
+  max-width: 240px;
+  border: 1px solid var(--chip-border);
+  border-radius: var(--chip-r);
+  background: var(--chip-bg);
+  /* 13px 与正文 14px 差一档而非两档，靠字重 + 对比立实体感，不用尺寸断层；
+     line-height 18px = 20px 高 − 上下边 2px（demo 权威定值） */
+  font-size: var(--text-sm);
+  line-height: 18px;
+  font-weight: var(--fw-mid);
+  color: var(--neutral-fg-2);
+  white-space: nowrap;
   user-select: none;
 }
-.composer-input :deep(.mention-chip.mention-at) {
-  color: var(--accent);
+/* 基线 strut：inline-flex 容器基线取首个 flex 项，首项是 svg（无文字基线）时退化为
+   底边锚定——零宽空格把容器基线钉到 chip 字号的真实文字基线，与编辑器两侧兜底
+   ZWSP spacer 互不冲突 */
+.composer-input :deep(.slash-chip)::before,
+.composer-input :deep(.mention-chip)::before {
+  content: '\200B';
 }
-.composer-input :deep(.mention-chip.mention-file) {
-  color: var(--success);
+.composer-input :deep(.slash-chip:first-child),
+.composer-input :deep(.mention-chip:first-child) {
+  margin-left: 0;
 }
-/* session 引用 chip（四符号体系 # session 语义）：--warn 金色——与 skill/reasoning 紫、
-   file 绿、@ accent 蓝灰四色互斥，靠语义色区分 chip 类型（v6 §9B 无底无边范式）。 */
-.composer-input :deep(.mention-chip.mention-session) {
-  color: var(--warn);
+/* hover 提底提边，前景不变暗（--chip-bg-hover / --chip-border-hover 同为 .composer 作用域变量） */
+.composer-input :deep(.slash-chip:hover),
+.composer-input :deep(.mention-chip:hover) {
+  background: var(--chip-bg-hover);
+  border-color: var(--chip-border-hover);
 }
-/* 图片 badge（Cmd+V 富呈现通路）：复用 .mention-chip 基础样式 + .image-chip 紫色修饰，
-   覆盖 mention-file 的绿色，与 ContextChipsBar image chip（text-reasoning）视觉一致（TO2）。 */
-.composer-input :deep(.mention-chip.image-chip) {
-  color: var(--reasoning);
+.composer-input :deep(.slash-chip .chip-icon),
+.composer-input :deep(.mention-chip .chip-icon) {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  color: var(--neutral-mid);
+}
+.composer-input :deep(.slash-chip .chip-icon svg),
+.composer-input :deep(.mention-chip .chip-icon svg) {
+  /* 固定 12px（demo .ichip > svg 权威值）：icon 略小于行高；替换旧 1em 随字号联动 */
+  width: 12px;
+  height: 12px;
+}
+.composer-input :deep(.slash-chip .chip-label),
+.composer-input :deep(.mention-chip .chip-label) {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* 前缀符号（$ @ #）：类型标记弱化为元数据层，辨型交给图标与前缀，不挪用语义色 */
+.composer-input :deep(.slash-chip .chip-pre),
+.composer-input :deep(.mention-chip .chip-pre) {
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  font-weight: 400;
+  color: var(--neutral-dim);
+}
+/* × 删除钮：14px 常驻占位防宽度跳变，chip hover 才显形；hover 反馈中性
+   （elevated 底 + fg 前景）。duration 用统一反馈档 --duration-fast（demo --dur-fast 同值 120ms） */
+.composer-input :deep(.slash-chip .chip-x),
+.composer-input :deep(.mention-chip .chip-x) {
+  display: grid;
+  place-items: center;
+  width: 14px;
+  height: 14px;
+  margin-right: -3px;
+  border-radius: 3px;
+  color: var(--neutral-dim);
+  flex: none;
+  cursor: pointer;
+  opacity: 0;
+  transition:
+    opacity var(--duration-fast) var(--ease-out),
+    background-color var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out);
+}
+.composer-input :deep(.slash-chip:hover .chip-x),
+.composer-input :deep(.mention-chip:hover .chip-x) {
+  opacity: 1;
+}
+.composer-input :deep(.slash-chip .chip-x:hover),
+.composer-input :deep(.mention-chip .chip-x:hover) {
+  background: var(--bg-elevated);
+  color: var(--neutral-fg);
+}
+/* 插入瞬间淡染一闪（--sel-bg/--sel-edge，800ms 由 dom-core chip-commands 摘除）；
+   全屏唯一 accent 染色点，在 accent 预算内 */
+.composer-input :deep(.slash-chip.just-inserted),
+.composer-input :deep(.mention-chip.just-inserted) {
+  background: var(--sel-bg);
+  border-color: var(--sel-edge);
 }
 </style>
