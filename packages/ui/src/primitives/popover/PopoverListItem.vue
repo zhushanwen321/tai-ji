@@ -66,7 +66,7 @@ const emit = defineEmits<{
     <slot />
     <Check
       v-if="props.selected"
-      class="size-4 shrink-0 text-accent"
+      class="shrink-0 text-accent"
     />
   </Button>
 </template>

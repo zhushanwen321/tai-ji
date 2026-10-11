@@ -39,7 +39,7 @@
         :disabled="disabled"
         @click="removeRow(i)"
       >
-        <X class="size-[14px]" />
+        <X />
       </Button>
     </div>
     <div>

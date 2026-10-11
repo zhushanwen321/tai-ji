@@ -38,8 +38,8 @@
         data-testid="file-show-ignored-toggle"
         @click="onToggleShowIgnored"
       >
-        <EyeOff v-if="store.showIgnored" class="size-[15px]" />
-        <Eye v-else class="size-[15px]" />
+        <EyeOff v-if="store.showIgnored" />
+        <Eye v-else />
         <span>{{ t('sidebar.fileView.ignoredItem') }}</span>
       </Button>
       <!-- 过滤框（demo .fv-filter）：左 7px 12px 图标 + h-6 凹陷输入（bg-input/hairline 边）。

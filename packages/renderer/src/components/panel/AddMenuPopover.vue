@@ -20,7 +20,7 @@
       side="top"
       align="start"
       :side-offset="10"
-      class="am-pop-motion min-w-[160px] rounded-lg p-1"
+      class="min-w-[160px] rounded-lg p-1"
     >
       <Button
         v-for="item in items"
@@ -80,30 +80,3 @@ function onSelect(type: AddType): void {
   emit('select', type)
 }
 </script>
-
-<style>
-/*
- * 添加菜单开合动效（demo E5 方向缓动；M4b tray-pop-motion 同范式，机制说明见
- * ModelSelectPopover.vue 文件尾同款块）：进 ease-out / 出 ease-in，位移 3px + 透明度，
- * 120ms；@starting-style 提供进场首帧；reduced-motion 全关。am- 前缀命名空间。
- */
-.am-pop-motion[data-state='open'] {
-  transform: translateY(0) !important;
-  transition-timing-function: var(--ease-out) !important;
-}
-.am-pop-motion[data-state='closed'] {
-  transform: translateY(3px) !important;
-  transition-timing-function: var(--ease-in) !important;
-}
-@starting-style {
-  .am-pop-motion[data-state='open'] {
-    transform: translateY(3px) !important;
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .am-pop-motion[data-state='open'],
-  .am-pop-motion[data-state='closed'] {
-    transition: none !important;
-  }
-}
-</style>

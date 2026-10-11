@@ -8,6 +8,10 @@
 // 亮色沉入纸白；底色非 --surface 的消费方在滚动容器上覆写 --edge-fade-sink。层遮罩与
 // 容器 mask 用多 stop 近似 smoothstep 的平滑剖面（线性渐变人眼感知中段偏快，多 stop
 // 消台阶感）。
+// z-[3] 为容器内局部层级刻意值，不取 style.css z 档（对照 z 表：--z-sticky 1 / --z-popover 10）：
+// 须高于滚动容器内 sticky 内容（SessionList 组标题走 --z-sticky 档，同 z 值时按 DOM 序会盖住
+// 渐焦带、滚入带内逃逸失焦+沉色），又须低于容器内交互控件（MessageStream 回到底部按钮、
+// DetailPane 选区 bubble 走 --z-popover 同值 10 档）——装饰渐焦带夹两档之间。
 // [贴顶前提] 消费方滚动容器禁设顶部 padding——sticky 带的正常流位置会被压到 padding 之下，
 // 滚过 padding 前带悬浮于视口中部（顶缘露出未处理区）；顶部留白放滚动内容内（spacer）。
 // 降级：prefers-reduced-motion 关过渡（motion-reduce 变体）；prefers-reduced-transparency

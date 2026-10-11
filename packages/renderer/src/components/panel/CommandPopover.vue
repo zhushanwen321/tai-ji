@@ -26,7 +26,9 @@
 
     **形态对齐 demo 插入浮层（workbench.css .composer .pop-item 档 = ComposerBar.vue
     store.pop === 'insert' 触发器弹层同款）**：
-    - 行用纯 div（非 Button variant=ghost），避免 button 的 font-medium/ring-offset 噪音
+    - 候选行用受控 div（非 Button）：行高亮由键盘 activeIndex 驱动（hover 只同步 activeIndex），
+      行内为双行结构（主行 + 副行），非自足按钮；无键盘导航语义的反馈行（重试行）用
+      Button variant=ghost 承载（font-normal 覆盖基类 font-medium）
     - 行盒参数 = demo .pop-item 档：min-h 28px / padding 5px 8px / r-sm 圆角；行内结构
       （图标 / 主行 / 副行两行）为 real 扩展——demo 行单行（pre-ins 前缀 + 名 + 描述）
     - 高亮/选中态 = demo .pop-item.hot 语言：--hover 底（real --surface-hover 同值直引）+
@@ -53,23 +55,23 @@
       align="start"
       :side-offset="10"
       :collision-padding="8"
-      class="cp-pop-motion w-[var(--reka-popper-anchor-width)] max-w-[calc(100vw-16px)] overflow-hidden rounded-lg p-1"
+      class="w-[var(--reka-popper-anchor-width)] max-w-[calc(100vw-16px)] overflow-hidden rounded-lg p-1"
       @open-auto-focus.prevent
     >
       <!-- 以下四态行（加载失败重试 / 无结果 / 加载中 / 通用无匹配）为 real 扩展态
            （demo 插入浮层仅 .ins-empty 空态一行），盒参数随 .pop-item 档
            （min-h 28 / 5px 8px / r-sm）。 -->
       <!-- D7：landing cwd 路错误态（加载失败 vs 无结果两因区分）——整行可点重试（重发起拉取） -->
-      <div
+      <Button
         v-if="fileErrorVisible"
-        class="flex min-h-[28px] cursor-pointer items-center gap-2 rounded-sm px-2 py-[5px] text-left text-[length:var(--text-xs)] text-neutral-mid transition-colors hover:bg-surface-hover hover:text-neutral-fg"
-        role="button"
+        variant="ghost"
+        class="flex min-h-[28px] w-full cursor-pointer items-center gap-2 rounded-sm px-2 py-[5px] text-left font-normal text-[length:var(--text-xs)] text-neutral-mid hover:bg-surface-hover hover:text-neutral-fg"
         data-testid="cmd-file-error"
         @click="retryCwdFileFetch"
       >
         <AlertCircle class="size-[15px] shrink-0 text-danger opacity-70" />
         <span class="truncate">{{ t('panel.command.fileLoadFailed') }}</span>
-      </div>
+      </Button>
       <!-- D7：无结果空态（拉取成功但目录无文件；query 过滤致空不在此列——源非空不弹本态） -->
       <div
         v-else-if="fileNoResultsVisible"
@@ -459,31 +461,3 @@ const { activeIndex, handleKeydown } = useCommandPopoverKeyboard<CmdItem>({
 
 defineExpose({ handleKeydown })
 </script>
-
-<style>
-/*
- * 命令浮层开合动效：demo E5 方向缓动（.popover 的 pop 过渡语言——透明度 + 3px 位移，
- * 进 ease-out / 出 ease-in）；M4b tray-pop-motion 同范式，机制说明见
- * ModelSelectPopover.vue 文件尾同款块。位移 3px + 透明度，120ms；@starting-style 提供
- * 进场首帧；reduced-motion 全关。cp- 前缀命名空间。
- */
-.cp-pop-motion[data-state='open'] {
-  transform: translateY(0) !important;
-  transition-timing-function: var(--ease-out) !important;
-}
-.cp-pop-motion[data-state='closed'] {
-  transform: translateY(3px) !important;
-  transition-timing-function: var(--ease-in) !important;
-}
-@starting-style {
-  .cp-pop-motion[data-state='open'] {
-    transform: translateY(3px) !important;
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .cp-pop-motion[data-state='open'],
-  .cp-pop-motion[data-state='closed'] {
-    transition: none !important;
-  }
-}
-</style>

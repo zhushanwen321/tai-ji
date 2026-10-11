@@ -19,10 +19,10 @@
     Teleport 根被 Vue 丢弃；reka PopoverContent 自身会经 PopperContent 的 `$attrs` 透传到浮层根）。
   - `data-testid="tray-panel"` 与 `data-panel-key` / `data-pinned` 是外壳状态机与 e2e 的接口，
     字符串形态不得改（e2e 依赖 `[data-testid="tray-panel"][data-panel-key=…]`）。
-  - 开合动效（M4b 对齐 demo E5：进 ease-out / 出 ease-in，位移 3px + 透明度，120ms）：落点 =
-    文件尾的 style 全局块——reka 浮层经 Teleport 渲染，本组件 scope attr 不会落到浮层元素上
-    （scoped 选择器不命中），且 @starting-style 无法用 Tailwind 任意变体表达，故用命名空间类
-    tray-pop-motion 承载（机制先例 = CollapsibleContent.vue 的 reka data-state 过渡 escape hatch）。
+  - 开合动效（demo E5：进 ease-out / 出 ease-in，位移 3px + 透明度，120ms）：走 PopoverContent
+    基类 reka-popover-transition（style.css 浮层进出场过渡段，同参实现）——reka 浮层经 Teleport
+    渲染，scoped 选择器不命中浮层元素，且 @starting-style 无法用 Tailwind 表达，两者由该全局段
+    统一承载（机制先例 = CollapsibleContent.vue 的 reka data-state 过渡 escape hatch）。
 
   交互（pointer 热区 / 层外拦截 / 打开不抢焦点）经 emit 上抛给 ComposerTray 状态机消费。
 -->
@@ -31,7 +31,7 @@
     side="top"
     align="start"
     :side-offset="10"
-    class="tray-pop-motion w-[400px] min-w-0 max-w-[calc(100vw-16px)] rounded-lg"
+    class="w-[400px] min-w-0 max-w-[calc(100vw-16px)] rounded-lg"
     @interact-outside="emit('interactOutside', $event)"
     @open-auto-focus="emit('openAutoFocus', $event)"
   >
@@ -69,34 +69,3 @@ const emit = defineEmits<{
   openAutoFocus: [event: Event]
 }>()
 </script>
-
-<style>
-/*
- * 托盘浮层开合动效（demo E5 方向缓动，drawers.css 的 .pop-enter-active / .pop-leave-active
- * 权威）：进 = opacity 0→1 + translateY(3px)→0，ease-out；出 = 反向，ease-in；时长 120ms
- * （--duration-fast，与 demo --dur-fast 同值，由基类 .reka-popover-transition 的
- * transition 简写承载）；关闭态 transform 由基类 scale(0.96) 改写为 translateY(3px)。
- * !important 压过基类同特异性规则（style.css 中 .reka-popover-transition 声明序在
- * tailwind utilities 之后，非 important 覆写会输掉级联）；@starting-style 给进场
- * 首帧提供 translateY(3px) 起点（Tailwind 无法表达，机制先例见文件头）。
- */
-.tray-pop-motion[data-state='open'] {
-  transform: translateY(0) !important;
-  transition-timing-function: var(--ease-out) !important;
-}
-.tray-pop-motion[data-state='closed'] {
-  transform: translateY(3px) !important;
-  transition-timing-function: var(--ease-in) !important;
-}
-@starting-style {
-  .tray-pop-motion[data-state='open'] {
-    transform: translateY(3px) !important;
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .tray-pop-motion[data-state='open'],
-  .tray-pop-motion[data-state='closed'] {
-    transition: none !important;
-  }
-}
-</style>

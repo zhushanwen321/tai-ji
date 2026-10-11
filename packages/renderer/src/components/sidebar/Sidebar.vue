@@ -168,7 +168,7 @@
             data-testid="sidebar-remote-connect"
             @click="openSettings('remote-access')"
           >
-            <Smartphone class="size-[15px]" :stroke-width="1.6" />
+            <Smartphone :stroke-width="1.6" />
           </Button>
           <Popover v-model:open="quickThemeOpen">
             <PopoverTrigger as-child>
@@ -182,7 +182,7 @@
                 @mouseleave="quickThemeLeave"
                 @click="quickThemeTriggerClick"
               >
-                <Palette class="size-[15px]" :stroke-width="1.6" />
+                <Palette :stroke-width="1.6" />
               </Button>
             </PopoverTrigger>
             <!-- 外观快捷面板 = demo .qs-panel（workbench.css:209-218）：212px 浮层卡（elevated 底 +
@@ -202,14 +202,15 @@
             >
               <div class="mb-[6px] mt-[2px] px-[2px] text-[length:var(--text-2xs)] [font-weight:var(--fw-mid)] tracking-[0.05em] text-neutral-dim">{{ t('sidebar.quickThemeTitle') }}</div>
               <div class="grid grid-cols-2 gap-[4px]">
-                <button
+                <Button
                   v-for="th in TAIJI_THEMES"
                   :key="th.label"
                   type="button"
+                  variant="ghost"
                   class="flex items-center gap-[7px] rounded-[var(--radius-sm)] border border-transparent px-[8px] py-[5px] text-left text-[length:var(--text-xs)] transition-colors duration-[var(--duration-fast)] ease-[var(--ease-out)]"
                   :class="th.label === currentTheme.label
-                    ? 'bg-[var(--sel-bg)] text-neutral-fg shadow-[inset_0_0_0_1px_var(--sel-edge)] [font-weight:var(--fw-mid)]'
-                    : 'text-neutral-fg-2 hover:bg-surface-hover hover:text-neutral-fg'"
+                    ? 'bg-[var(--sel-bg)] text-neutral-fg shadow-[inset_0_0_0_1px_var(--sel-edge)] [font-weight:var(--fw-mid)] hover:bg-[var(--sel-bg)]'
+                    : 'font-normal text-neutral-fg-2 hover:bg-surface-hover hover:text-neutral-fg'"
                   :aria-pressed="th.label === currentTheme.label"
                   :data-testid="`sidebar-quick-theme-${th.preset || th.theme}`"
                   @click="applyTheme(th)"
@@ -221,7 +222,7 @@
                     <i class="block size-[6px] rounded-full" :style="{ background: th.swatch[0] }" />
                   </span>
                   <span class="min-w-0 truncate">{{ th.shortName }}</span>
-                </button>
+                </Button>
               </div>
             </PopoverContent>
           </Popover>
@@ -237,8 +238,8 @@
                  几何，齿形外沿 x3–21 占 viewBox 18/24）。现役 @lucide/vue v1.23 的 Settings 已重绘
                  为小齿形（占 16/24），同 15px 盒内墨迹比 demo 小一圈（r4 footer 项：demo ~14×14 vs
                  real ~12×13）；footer 三钮中另两钮的 lucide 几何与 demo 一致，仅此一枚需对齐源
-                 path。尺寸/描边维持 15px / 1.6 与同排另两钮一致。 -->
-            <svg class="size-[15px] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+                 path。尺寸 15px 由容器类 [&_svg]:size-[15px] 单点声明，描边 1.6 与同排另两钮一致。 -->
+            <svg class="shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
               <circle cx="12" cy="12" r="3" />
               <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h0a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
             </svg>

@@ -1,35 +1,33 @@
 <template>
   <!--
     思考等级 popover（draft-composer-states §2c）。
-    触发器对齐 demo `.thinksel`（M4c：11px 字号 / r-xs 圆角 / --fw-mid 字重，「可操作 = 亮字」
-    口径与模型触发器同款）；浮层列表对齐 demo `.popover right w120` 行语言（.pop-item：
+    触发器对齐 demo `.thinksel`（11px 字号 / r-xs 圆角 / --fw-mid 字重，「可操作 = 亮字」
+    口径与模型触发器同款；经共享组件 PopoverTriggerButton 承载，仅字号差异经 class 覆盖）；
+    浮层列表对齐 demo `.popover right w120` 行语言（.pop-item：
     min-h 28 / 5px 8px 内边距 / r-sm / fs-md / mid 字 hover 提 fg，无行首档位点——demo 行 =
     名称 + 选中勾两元素），选中态 = 行尾对勾显隐（demo R3：弹层行不进选中范式，
     无底/框/字色选中态声明）。
   -->
   <Popover v-model:open="canOpen">
-    <PopoverTrigger as-child>
-      <Button
-        variant="ghost"
-        class="h-7 gap-1 rounded-[var(--radius-xs)] px-2 text-[length:var(--text-2xs)] text-neutral-fg font-semibold transition-colors"
-        :title="t('panel.thinkingLevel.title')"
-      >
-        <!-- U4：切换中（停止态切档要先 ensureActive 拉活）→ 转圈 + 禁止重复开合/点选 -->
+    <PopoverTriggerButton
+      :open="open"
+      variant="text"
+      class="text-[length:var(--text-2xs)]"
+      :title="t('panel.thinkingLevel.title')"
+    >
+      <!-- U4：切换中（停止态切档要先 ensureActive 拉活）→ 转圈 + 禁止重复开合/点选 -->
+      <template #leading>
         <LoaderCircle v-if="switching" class="size-[12px] shrink-0 animate-spin" />
         <Brain v-else class="size-[12px] shrink-0" />
-        <span>{{ currentLabel }}</span>
-        <ChevronDown
-          class="ml-px size-[9px] transition-transform duration-[var(--duration)] ease-[var(--ease)]"
-          :class="open && 'rotate-180'"
-        />
-      </Button>
-    </PopoverTrigger>
+      </template>
+      <span>{{ currentLabel }}</span>
+    </PopoverTriggerButton>
     <!-- 容器对齐 demo `.popover right w120`：右锚 / 锚距 10px / 最小宽 120px / r-lg / 4px 内边距 -->
     <PopoverContent
       side="top"
       align="end"
       :side-offset="10"
-      class="tl-pop-motion min-w-[120px] rounded-lg p-1"
+      class="min-w-[120px] rounded-lg p-1"
     >
       <!-- head（demo .pop-head：mono 小写字距标，无底色无分隔边） -->
       <div
@@ -60,9 +58,9 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Check, ChevronDown, LoaderCircle, Brain } from '@lucide/vue'
+import { Check, LoaderCircle, Brain } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { Popover, PopoverContent, PopoverTriggerButton } from '@/components/ui/popover'
 import {
   currentThinkingLevelKey,
   availableThinkingLevelOptions,
@@ -136,30 +134,3 @@ function onSelect(opt: ThinkingLevelOption): void {
   open.value = false
 }
 </script>
-
-<style>
-/*
- * 思考档位弹层开合动效（demo E5 方向缓动；M4b tray-pop-motion 同范式，机制说明见
- * ModelSelectPopover.vue 文件尾同款块）：进 ease-out / 出 ease-in，位移 3px + 透明度，
- * 120ms；@starting-style 提供进场首帧；reduced-motion 全关。tl- 前缀命名空间。
- */
-.tl-pop-motion[data-state='open'] {
-  transform: translateY(0) !important;
-  transition-timing-function: var(--ease-out) !important;
-}
-.tl-pop-motion[data-state='closed'] {
-  transform: translateY(3px) !important;
-  transition-timing-function: var(--ease-in) !important;
-}
-@starting-style {
-  .tl-pop-motion[data-state='open'] {
-    transform: translateY(3px) !important;
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .tl-pop-motion[data-state='open'],
-  .tl-pop-motion[data-state='closed'] {
-    transition: none !important;
-  }
-}
-</style>

@@ -30,6 +30,7 @@
 - **capbar 常态渲染 vs spec R2.3（已修复对齐，review-fix-loop 第 1 轮 MF-1-40 落地）**：渲染门控已按 spec R2.3 / demo ComposerBar（`v-else-if contextPct>80`）对齐——≤80% 不渲染（ComposerCapacityBar.vue 门控 `hasPercent && percent > CAPACITY_BAR_WARN_THRESHOLD`），capacityBarClass 无 accent 常态档（仅 >80 warn / >95 danger 两档，context-usage-display.ts；与浮层卡内 usageBarClass 的 70/90 阈值差为在册有意差异）。spec 基线文档 taiji-ui-requirements-spec.md 不在本仓，其 S3 行（capbar 冲突）同步标记已解决，待主会话在 spec 侧同步。
 - **文件树长文件名展示契约互斥（已关闭，2026-10-10 用户裁决 #7「不做横向滚动，用省略号+悬停展示」；demo 同日 20:00 改向同口径）**：real 宽度模型从 max-content 整树横滚切换为 100% 容器宽（FileView itemProps），FileTreeRow 名称段 = ellipsis 截断 + title 悬停展示全名，与 demo `.fname` 现行契约同构（demo 早期 `.fname-scroll/.fname-roll` marquee 方案已废弃、源树无该类定义，real 侧 marquee 双层结构随改向卸载）。旧互斥登记与「待裁决期间禁止补 truncate」约束作废。
 - **spec R8.3 footer 钮尺寸文本与 demo 权威矛盾（已关闭，spec v1.1 已含 R8.3 32px 勘误）**：demo 权威 = workbench.css `.app{--hb-chrome-btn:32px}`，`.tbtn{width:var(--hb-chrome-btn,24px)}` 的 fallback 24 因变量恒有值永不生效；real 侧按 32px 对齐已随本波 MF-1-4 落地，spec 文本修订（R8.3 尺寸 24px→32px）已由主会话在 spec 侧完成。R6.2 状态列 real 未复刻标注已随第 6 条登记。
+- **UsageLedger 用量摘要行展示级 21/24px 字号不入 --text-* 档（登记保留）**：settings 用量摘要数字行 = demo ledger 展示级字面大字号（总 Token lead 24px / 其余格 21px，UsageLedger.vue 全仓仅有的 21/24px 使用点），超出字号 scale 档位上限（style.css `--text-*` 仅 10–15px 六档，全档随全局/分区字号缩放），刻意跳过归档、维持 demo 字面 px（不随缩放链，展示级大字非正文可读性字号）；同 22px 问候语先例（Landing.vue，spec §3.1 出处登记在案）。UsageLedger.vue 文件头注释已补值级出处。
 
 ## 关联
 

@@ -1,8 +1,8 @@
 /**
  * Panel popover 共享样式常量（架构审查 D4）。
  *
- * ModelSelectPopover / ThinkingLevelPopover / AddMenuPopover 三者 trigger 类名各自重复，
- * 在此统一抽出，避免一字不差地抄写三遍。
+ * ModelSelectPopover / ThinkingLevelPopover / AddMenuPopover 三者 trigger 的共享类常量，
+ * 经 PopoverTriggerButton 统一消费。
  *
  * 列表选中态不设样式常量：demo R3 裁决弹层行不进选中范式（workbench.css「.pop-item.on
  * 不进选中范式：行尾对勾 .ck 即选中指示」）——选中指示 = 行尾 13px 对勾显隐，行底/框/字色
@@ -10,8 +10,9 @@
  */
 
 /**
- * 文本型 trigger 基础类（ModelSelect / ThinkingLevel 共用）。
- * 几何与字色对齐 demo `.modelsel`（workbench.css composer 段，M4c）：高 28px / 水平内边距
+ * 文本型 trigger 基础类（ModelSelect / ThinkingLevel；ThinkingLevel 经 props.class
+ * 覆盖字号 --text-2xs，几何与字重同档）。
+ * 几何与字色对齐 demo `.modelsel`（workbench.css composer 段）：高 28px / 水平内边距
  * 8px / 圆角 --radius-xs（4px，demo --r-xs）/ 字号 --text-xs（12px，demo fs-md，随字体档
  * 缩放）/ 正文档色 + 600 字重（font-semibold 与 --fw-mid 同值；用具名工具类而非
  * [font-weight:…] 任意属性——须确定性压过 Button 基类的 font-medium，任意属性与具名类

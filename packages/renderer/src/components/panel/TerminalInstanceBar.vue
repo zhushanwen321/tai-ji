@@ -98,7 +98,7 @@
           :title="closeDisabled ? t('panel.terminal.instanceCloseDisabled') : t('panel.terminal.instanceClose')"
           @click.stop="onClose(inst.terminalId)"
         >
-          <X class="size-[11px]" stroke-width="1.8" />
+          <X stroke-width="1.8" />
         </Button>
       </div>
     </div>
@@ -114,7 +114,7 @@
         :title="t('panel.terminal.instanceCreate')"
         @click="onCreate"
       >
-        <Plus class="size-3.5" stroke-width="1.8" />
+        <Plus :stroke-width="1.8" />
       </Button>
       <Button
         variant="ghost"
@@ -124,7 +124,7 @@
         :title="t('panel.terminal.collapse')"
         @click="emit('collapse')"
       >
-        <ChevronDown class="size-3.5" stroke-width="1.8" />
+        <ChevronDown :stroke-width="1.8" />
       </Button>
     </div>
   </div>

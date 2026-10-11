@@ -2,7 +2,7 @@
 /**
  * Panel popover 通用 trigger 按钮（架构审查 D4）。
  *
- * 统一 ModelSelectPopover / ThinkingLevelPopover / AddMenuPopover 三者重复的 trigger：
+ * 统一 ModelSelectPopover / ThinkingLevelPopover / AddMenuPopover 三者的 trigger：
  * 包裹 `PopoverTrigger as-child` + `Button variant="ghost"`，内建共享类名、
  * 可选 ChevronDown（rotate 随 open）、leading-icon / default 两个 slot。
  *
