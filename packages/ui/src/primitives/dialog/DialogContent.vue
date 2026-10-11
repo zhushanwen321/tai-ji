@@ -73,7 +73,7 @@ onBeforeUnmount(disposeSurfaceRegistration)
            hover = --hover 底提亮字（原 opacity 渐隐形态退役） -->
       <DialogClose
         v-if="!props.hideClose"
-        class="absolute right-4 top-4 flex size-6 items-center justify-center rounded-[var(--radius)] text-neutral-dim transition-colors hover:bg-surface-hover hover:text-neutral-fg focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent focus-visible:-outline-offset-1 disabled:pointer-events-none data-[state=open]:bg-surface-hover data-[state=open]:text-neutral-mid"
+        class="absolute right-4 top-4 flex size-6 items-center justify-center rounded-[var(--radius)] text-neutral-dim transition-colors hover:bg-surface-hover hover:text-neutral-fg focus-visible:outline focus-visible:outline-2 focus-visible:outline-[color:var(--focus-ring)] focus-visible:-outline-offset-1 disabled:pointer-events-none data-[state=open]:bg-surface-hover data-[state=open]:text-neutral-mid"
       >
         <X class="size-[15px]" />
         <span class="sr-only">Close</span>

@@ -6,6 +6,8 @@ import { cva } from 'class-variance-authority'
 // Button.vue 又 from '.' 取 variants 会闭合环）。原导出位置经 index.ts
 // `export *` 保持不变，外部消费方 import 路径零变化。
 export const buttonVariants = cva(
+  // 焦点双环阴影 = DESIGN.md §.btn 明文刻意值（内环 2px accent、外环 4px black/0.4
+  // 亮色底可见性衬底），非默认 ring 系——字面色保留。
   // 图标默认尺寸 = :where() 整体零特异性（生成 `:where(.cls svg)`，特异性 0,0,0）：
   // 使用方在 svg 上写的任何普通尺寸类（size-[17px] 等，0,1,0）结构性恒赢，禁止再退回
   // [&_svg]:size-4 式后代选择器（0,1,1）——它会压制单点尺寸类，逼使用方散布 ! important。
