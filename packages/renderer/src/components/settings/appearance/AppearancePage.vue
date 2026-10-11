@@ -7,10 +7,9 @@
     原调试用的主题/字号即时覆盖已由本页持久化控件取代，不再保留。
     [w2] demo 对照（AppearanceSection.vue）：首卡 = 无卡头单卡 6 行（外观模式/字体大小/
     左侧边栏/对话流/侧边抽屉/终端，gcard-body tight）；配色主题卡头 = gc-title + gc-sub，
-    主题行 = btn ghost 全宽（px 10px py 8px）+ 16px check 占位（选中 accent 对勾）+ 1px
-    accent 外框（demo .btn[aria-pressed="true"] 选中强调，pages.css 全局规则）+ inset
-    1px border-strong 环 + hover 底 + fg 字（P0-5 选中范式；未选中行 hover 同步底字双提亮
-    = demo .btn.ghost:hover）+ 12px 圆点 swatch gap 4px；
+    主题行 = btn ghost 全宽（px 10px py 8px）+ 16px check 占位（选中 accent 对勾）+
+    inset 1px border-strong 环 + hover 底 + fg 字（P0-5 选中范式，三键无外描边；
+    未选中行 hover 同步底字双提亮 = demo .btn.ghost:hover）+ 12px 圆点 swatch gap 4px；
     Token 行 = min-h 36 / px 6px / border-t hairline + mono text-xs + 14px 色块（仅色值）。
     卡间距靠 GroupCard 相邻 margin（16px）。
   -->
@@ -109,7 +108,7 @@
           type="button"
           class="theme-row flex h-[32px] w-full cursor-pointer items-center justify-between rounded-md px-[10px] py-[8px] text-[length:var(--text-sm)] [font-weight:var(--fw-mid)] transition-colors"
           :class="th.label === currentTheme.label
-            ? 'border border-accent bg-surface-hover text-neutral-fg shadow-[inset_0_0_0_1px_var(--border-strong)] hover:bg-surface-hover'
+            ? 'bg-surface-hover text-neutral-fg shadow-[inset_0_0_0_1px_var(--border-strong)] hover:bg-surface-hover'
             : 'text-neutral-mid hover:text-neutral-fg'"
           :aria-pressed="th.label === currentTheme.label"
           :data-testid="`appearance-theme-${th.preset || th.theme}`"

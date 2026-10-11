@@ -53,7 +53,8 @@
       <div class="p-[12px_16px]">
         <!-- demo .u-seg 分段（McpServerForm 同款范式）：hairline 边 / r-md / p 2px / 钮 26px r-sm。
              槽底引 --bg-input（凹陷档）：demo --surface-2 = var(--card-inset) 凹陷档，
-             real --surface-2 浮起档（U1 在册）同名分叉，复刻消费点按 demo 方向引凹陷档 -->
+             real --surface-2 浮起档（登记见 docs/DESIGN.md §4.1 背景层级）同名分叉，
+             复刻消费点按 demo 方向引凹陷档 -->
         <div class="mb-[10px] inline-flex gap-[2px] rounded-md border border-hairline bg-bg-input p-[2px]" role="tablist">
           <Button
             v-for="tab in tabs"

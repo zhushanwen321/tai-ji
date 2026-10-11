@@ -11,8 +11,8 @@
       <span class="min-w-0 flex-1 truncate font-mono text-[length:var(--text-xs)] text-neutral-fg"><span class="text-[var(--neutral-dim)]">{{ row.provider }}/</span>{{ row.model }}</span>
 
       <!-- 三段构成条（--cache-* 令牌）。底轨引 --bg-input（凹陷档）：demo 同名 --surface-2 =
-           var(--card-inset) 凹陷档，real --surface-2 浮起档（U1 在册）同名分叉，
-           复刻消费点按 demo 方向引凹陷档 -->
+           var(--card-inset) 凹陷档，real --surface-2 浮起档（登记见 docs/DESIGN.md §4.1
+           背景层级）同名分叉，复刻消费点按 demo 方向引凹陷档 -->
       <span class="h-[8px] w-[120px] shrink-0 overflow-hidden rounded-[4px] bg-bg-input">
         <span class="flex h-full">
           <span

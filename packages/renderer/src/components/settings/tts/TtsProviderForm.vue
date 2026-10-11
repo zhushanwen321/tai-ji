@@ -43,7 +43,7 @@
               :aria-label="t('settings.tts.clearKey')"
               :aria-pressed="keyOp === 'clear'"
               class="h-[32px] px-[12px] text-[length:var(--text-sm)]"
-              :class="keyOp === 'clear' ? '!bg-surface !text-neutral-fg' : ''"
+              :class="keyOp === 'clear' ? '!border-accent !bg-surface !text-neutral-fg' : ''"
               :disabled="disabled"
               @click="emit('clearKey')"
             >

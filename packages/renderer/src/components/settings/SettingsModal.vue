@@ -484,13 +484,28 @@ onBeforeUnmount(() => {
   box-shadow: inset 0 0 0 1px var(--border-strong);
 }
 
+/* 弹层域级滚动条（demo pages.css `.pg-set ::-webkit-scrollbar`：10px 宽 + thumb
+   border-strong / r-xs 圆角 / 2px 透明边 background-clip:content-box 收窄出悬浮感；
+   覆盖全局 4px faint 隐蔽条，与 MessageStream 域级覆盖同模式，不动全局） */
+.fso ::-webkit-scrollbar { width: 10px; height: 10px; }
+.fso ::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: var(--radius-xs);
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+/* 首卡去线（demo pages.css `.pg-set .page > .gcard:first-of-type .gcard-head`）：仅页面
+   首张卡的卡头去顶部高光线；GroupCard 内置的恒命中 first-child 去线已删，此处域级承接 */
+.content-col-inner .group-card:first-of-type .group-head { border-top: 0; }
+
 /* 弹层开合过渡（demo `.pg-set .settings` fade-in 0.16s ease，reduced-motion 门控）+
-   分区切换淡入（demo settings spec §3.3 裁决 6A：激活分区 300ms 纯淡入 --ease-out-soft；
+   分区切换淡入（demo settings spec §3.3 裁决 6A：激活分区 300ms 纯淡入 --ease-out；
    sec-fade 类随激活位移动——demo 同款：类重挂即重触发，v-show 显示切换不重建组件）。
    keyframes 局部命名不进全局 SSOT：仅本弹层消费、无其他挂点（非共享动画原语）。 */
 @media (prefers-reduced-motion: no-preference) {
   .fso { animation: settings-fade-in 0.16s ease; }
-  .content-col-inner .sec-fade.on { animation: settings-sec-fade-in 300ms var(--ease-out-soft); }
+  .content-col-inner .sec-fade.on { animation: settings-sec-fade-in 300ms var(--ease-out); }
 }
 @keyframes settings-fade-in { from { opacity: 0; } }
 @keyframes settings-sec-fade-in { from { opacity: 0; } }

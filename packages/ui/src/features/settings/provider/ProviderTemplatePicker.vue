@@ -134,7 +134,8 @@ function onSelect(tpl: BuiltinProviderTemplate): void {
            .pop-item.current 中性定位态（border-strong 内嵌描边 + 凹陷档底，不消费 accent），
            与 POPOVER_LIST_ITEM_ACTIVE_CLASS（ui popover styles.ts）同款语言。
            底色引 --bg-input 凹陷档：demo --surface-2 = var(--card-inset) 凹陷档，
-           real --surface-2 浮起档（U1 在册）同名分叉，复刻消费点按 demo 渲染方向引凹陷档
+           real --surface-2 浮起档（登记见 docs/DESIGN.md §4.1 背景层级）同名分叉，
+           复刻消费点按 demo 渲染方向引凹陷档
            （与 ExtensionInstallFlow .u-seg 槽底同批先例同款写法）。 -->
       <Button
         variant="ghost"

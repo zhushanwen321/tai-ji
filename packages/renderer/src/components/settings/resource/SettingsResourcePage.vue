@@ -45,7 +45,7 @@
         </div>
       </template>
       <template #actions>
-        <span class="inline-flex h-[16px] min-w-[16px] items-center justify-center rounded-full bg-surface px-[5px] font-mono text-[10px] font-bold text-[color:var(--neutral-fg-2)]">{{ items.length }}</span>
+        <span class="inline-flex h-[16px] min-w-[16px] items-center justify-center rounded-full bg-surface px-[5px] font-mono text-[length:var(--text-3xs)] font-bold text-[color:var(--neutral-fg-2)]">{{ items.length }}</span>
         <Button
           variant="secondary"
           class="h-[32px] gap-[6px] px-[12px] text-[length:var(--text-sm)] [&_svg]:size-[14px]"
@@ -58,8 +58,8 @@
       </template>
       <div class="p-[12px_16px]">
         <!-- 来源 tab 过滤（demo .u-seg 分段，McpServerForm 同款范式）。槽底引 --bg-input（凹陷档）：
-             demo --surface-2 = var(--card-inset) 凹陷档，real --surface-2 浮起档（U1 在册）
-             同名分叉，复刻消费点按 demo 方向引凹陷档 -->
+             demo --surface-2 = var(--card-inset) 凹陷档，real --surface-2 浮起档（登记见
+             docs/DESIGN.md §4.1 背景层级）同名分叉，复刻消费点按 demo 方向引凹陷档 -->
         <div class="mb-[10px] inline-flex gap-[2px] rounded-md border border-hairline bg-bg-input p-[2px]" role="tablist">
           <Button
             variant="ghost"

@@ -127,8 +127,8 @@
         <span class="flex-1" />
 
         <!-- 指标切换（.u-seg 分段形态，W1 决 8 McpSection 同款）。槽底引 --bg-input（凹陷档）：
-             demo --surface-2 = var(--card-inset) 凹陷档，real --surface-2 浮起档（U1 在册）
-             同名分叉，复刻消费点按 demo 方向引凹陷档 -->
+             demo --surface-2 = var(--card-inset) 凹陷档，real --surface-2 浮起档（登记见
+             docs/DESIGN.md §4.1 背景层级）同名分叉，复刻消费点按 demo 方向引凹陷档 -->
         <div data-testid="usage-metric-toggle" class="seg inline-flex shrink-0 items-center gap-[2px] rounded-md border border-hairline bg-bg-input p-[2px]">
           <Button
             v-for="m in (['tokens', 'cost'] as const)"

@@ -75,9 +75,9 @@ function toggle(): void {
   background: var(--surface-2);
   border-top: 1px solid rgba(255, 255, 255, 0.04);
 }
-.group-head:first-child {
-  border-top: 0;
-}
+/* 「仅页面首卡去线」由消费域承接（SettingsModal 共享块
+   `.content-col-inner .group-card:first-of-type .group-head`，demo pages.css 同规）：
+   组件内置 first-child 去线会误伤每张卡的组头（demo 仅首卡去线），不在此做 */
 .head-left {
   display: flex;
   align-items: center;

@@ -14,8 +14,8 @@
            形态 = demo .u-seg 分段（hairline 边 / r-md / p 2px / 钮 26px r-sm，
            选中 = elevated 底 + 正文字 + fw-mid）。
            槽底引 --bg-input（凹陷档）而非同名 --surface-2：demo --surface-2 = var(--card-inset)
-           为凹陷档，real --surface-2 = #27272a 为浮起档（DESIGN.md U1 在册登记），同名令牌
-           分叉——demo 复刻消费点按 demo 渲染方向引凹陷档，令牌本体不动 -->
+           为凹陷档，real --surface-2 = #27272a 为浮起档（docs/DESIGN.md §4.1 背景层级登记），
+           同名令牌分叉——demo 复刻消费点按 demo 渲染方向引凹陷档，令牌本体不动 -->
       <div class="inline-flex gap-[2px] rounded-md border border-hairline bg-bg-input p-[2px]" role="tablist" data-testid="mcp-form-tabs">
         <Button
           v-for="tab in (['form', 'code'] as const)"

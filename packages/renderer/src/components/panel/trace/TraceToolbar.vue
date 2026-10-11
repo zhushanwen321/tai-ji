@@ -75,8 +75,8 @@
       >
         {{ chip.label }}<span class="ml-1 font-mono text-[length:var(--text-3xs)] text-[color:var(--neutral-fg-2)]">{{ chip.count }}</span>
       </Button>
-      <!-- demo .tsearch：凹陷底 + r-xs 4px + 焦点边框 accent 实色（--focus-ring = var(--accent)） -->
-      <div class="ml-1 flex min-w-[110px] flex-1 items-center gap-1.5 rounded-[var(--radius-xs)] border border-transparent bg-bg-input px-2 py-[3px] focus-within:border-accent">
+      <!-- demo .tsearch：凹陷底 + r-xs 4px + 聚焦零边界（光标即反馈；键盘走全局 :focus-visible 环） -->
+      <div class="ml-1 flex min-w-[110px] flex-1 items-center gap-1.5 rounded-[var(--radius-xs)] border border-transparent bg-bg-input px-2 py-[3px] focus-within:border-transparent">
         <Search class="size-3 shrink-0 text-neutral-dim" />
         <Input
           v-model="searchModel"

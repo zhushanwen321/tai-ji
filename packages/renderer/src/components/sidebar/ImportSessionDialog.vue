@@ -190,16 +190,18 @@
             <div data-testid="import-group" class="px-1 pb-1 pt-3 text-xs font-medium text-neutral-dim">
               {{ group.label }}
             </div>
+            <!-- 选中态消费 settings 弹层行 sel-opt.on 范式（surface 底 + fg 字，无描边）；
+                 hover 同 sel-opt:hover（surface-hover 提底），透明 border 仅防布局跳动 -->
             <div
               v-for="item in group.items"
               :key="item.sessionId"
               data-testid="import-item"
               :title="item.sourcePath"
-              class="mb-1 cursor-pointer select-none rounded-md border px-3 py-2 transition-colors"
+              class="mb-1 cursor-pointer select-none rounded-md border border-transparent px-3 py-2 transition-colors"
               :class="[
                 selectedId === item.sessionId
-                  ? 'border-accent-ring bg-surface'
-                  : 'border-transparent hover:bg-surface-hover',
+                  ? 'bg-surface text-neutral-fg'
+                  : 'hover:bg-surface-hover',
                 item.alreadyImported ? 'opacity-50' : '',
               ]"
               @click="select(item.sessionId)"
