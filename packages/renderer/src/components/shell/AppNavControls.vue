@@ -5,8 +5,11 @@
     top-[9px]：按钮高 32，中线 y = 9 + 16 = 25，与 40px 卡头几何中心共线
     （main-panel 顶 y4 + chat 卡 1px 上边框 = 卡头顶 y5，40/2 → 中线 y25；demo --hb-chrome-top:9px 同源推导）。
     left-[8px]：基准定位固定在全屏位（红黄绿 OS 隐藏时的位置 x=8），常态/全屏态都不动 left，避免 layout 重排。
-    transform 方案：常态叠 translate-x-[58px]（红黄绿右缘 x=60 + demo .lights margin-right 4 + 行 gap 2 =
-    折叠钮左缘 x66，减基准 8 = 平移 58），全屏态无 translate 类即归零（按钮占红黄绿位 x=8）。
+    transform 方案：常态叠 translate-x（基准 left 8 + 平移 = 灯组右缘 + demo .lights margin-right 4 + 行 gap 2
+    = 首钮盒左缘，盒距 6px = demo 实测 6.00，减基准 8）。灯组右缘随平台：
+    mac 灯组由 OS 绘制、几何随系统版本（macOS 26 实测 2026-10-10，半高交越法：单颗 ~14px / 中心距 23px /
+    灯组右缘 x≈68）→ 平移 66（首钮盒左缘 74）；win/linux 自绘灯组右缘 60（§11/demo）→ 平移 58（首钮盒左缘 66 = demo）。
+    全屏态无平移类即归零（按钮占红黄绿位 x=8）。
     用 transform 替代 left 动画：left 是 layout 属性，动画时触发整个窗口重排；transform 走 GPU 合成，零重排。
     条件类单向覆盖（常态显式平移 / 全屏态无类归零），无特异性冲突，不需 !important。
     320ms 平移与 traffic-light opacity 同步。
@@ -15,18 +18,18 @@
     渲染条件（demo .app.folded .win-chrome .tbtn { display:none } 同语义——折叠态导航能力迁入卡头 chrome 槽位）：
     - 非折叠态：浮此浮层，全屏态占红黄绿位 x=8。
     - 折叠态：隐藏此浮层 → chrome 已迁入 PanelHeader（卡头槽位），避免重复渲染两套 chrome。
-    钮尺寸 32×32 = demo --hb-chrome-btn（行定高：折叠/settings 态钮隐藏后灯中线恒 y25 不塌缩）；
+    钮尺寸 32×32（px 定值，不随根字号缩放）= demo --hb-chrome-btn（行定高：折叠/settings 态钮隐藏后灯中线恒 y25 不塌缩）；
     图标 15px + stroke 折叠 1.6 / 导航 1.8 = demo .sicon 与 .tbtn 路径字重。
   -->
   <div
     v-if="!sidebar.collapsed"
-    class="app-nav-controls absolute top-[9px] left-[8px] z-10 flex gap-0.5 transition-transform duration-[var(--duration-slow)] ease-[var(--ease)]"
-    :class="{ 'translate-x-[58px]': !isFullscreen }"
+    class="app-nav-controls absolute top-[9px] left-[8px] z-10 flex gap-[2px] transition-transform duration-[var(--duration-slow)] ease-[var(--ease)]"
+    :class="{ 'translate-x-[66px]': !isFullscreen && isMac, 'translate-x-[58px]': !isFullscreen && !isMac }"
   >
     <Button
       variant="ghost"
       size="icon"
-      class="nav-btn h-8 w-8 rounded-sm text-neutral-dim hover:bg-surface-hover hover:text-neutral-fg [-webkit-app-region:no-drag]"
+      class="nav-btn h-[32px] w-[32px] rounded-sm text-neutral-dim hover:bg-surface-hover hover:text-neutral-fg [-webkit-app-region:no-drag]"
       :title="sidebar.collapsed ? t('shell.expandSidebar') : t('shell.collapseSidebar')"
       :aria-label="t('shell.toggleSidebar')"
       data-testid="sidebar-collapse-toggle"
@@ -38,7 +41,7 @@
     <Button
       variant="ghost"
       size="icon"
-      class="nav-btn h-8 w-8 rounded-sm text-neutral-dim hover:bg-surface-hover hover:text-neutral-fg disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-neutral-dim [-webkit-app-region:no-drag]"
+      class="nav-btn h-[32px] w-[32px] rounded-sm text-neutral-dim hover:bg-surface-hover hover:text-neutral-fg disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-neutral-dim [-webkit-app-region:no-drag]"
       :disabled="!navigation.canBack"
       :title="t('shell.goBack')"
       :aria-label="t('shell.goBack')"
@@ -49,7 +52,7 @@
     <Button
       variant="ghost"
       size="icon"
-      class="nav-btn h-8 w-8 rounded-sm text-neutral-dim hover:bg-surface-hover hover:text-neutral-fg disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-neutral-dim [-webkit-app-region:no-drag]"
+      class="nav-btn h-[32px] w-[32px] rounded-sm text-neutral-dim hover:bg-surface-hover hover:text-neutral-fg disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-neutral-dim [-webkit-app-region:no-drag]"
       :disabled="!navigation.canForward"
       :title="t('shell.goForward')"
       :aria-label="t('shell.goForward')"
@@ -65,12 +68,12 @@
  * 容器组件：注入 navigation + sidebar store。
  * ←/→ 绑定导航历史栈 back/forward（与 Flow 4 分支回退解耦）。
  * 收起按钮 toggle sidebar.collapsed；折叠态 chrome 视觉在 PanelHeader（卡头槽位），此处只切状态。
- * 形态数值（32×32 钮 / top 9 / 平移 58）= demo .win-chrome 权威值，几何推导见 template 头注释。
+ * 形态数值（32×32 钮 / top 9 / 平移 mac 66·其余 58）= demo .win-chrome 权威值 + mac 灯组 OS 实测，几何推导见 template 头注释。
  */
 import { ArrowLeft, ArrowRight, PanelLeftClose, PanelLeftOpen } from '@lucide/vue'
 import { useI18n } from 'vue-i18n'
 import { Button } from '@/components/ui/button'
-import { usePlatformChrome } from '@/composables/effects/usePlatformChrome'
+import { detectPlatform, usePlatformChrome } from '@/composables/effects/usePlatformChrome'
 import { useNavigationStore } from '@/stores/navigation'
 import { useSidebarStore } from '@/stores/sidebar'
 
@@ -78,4 +81,6 @@ const { t } = useI18n()
 const navigation = useNavigationStore()
 const sidebar = useSidebarStore()
 const { isFullscreen } = usePlatformChrome()
+// mac 灯组为 OS 绘制，几何随系统版本 → chrome 行平移按平台分叉（推导见 template 头注释 / DESIGN.md §11）
+const isMac = detectPlatform() === 'mac'
 </script>

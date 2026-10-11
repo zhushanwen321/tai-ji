@@ -16,10 +16,16 @@
       :aria-label="t('settings.title')"
       @keydown="onKeydown"
     >
-      <!-- 左上 chrome 按钮组（demo .chrome：fixed top 9px / left 8px / translateX(58px) / gap 2px，
-           钮 32x32 r-sm、icon 15px；顺序 = 后退（可用）· 收起侧栏 · 前进，与主应用 win-chrome 同位接管形态。
-           浮在 overlay 层（非 nav 内），确保按钮组定位对齐窗口左上且不受 nav 布局影响。 -->
-      <div class="absolute top-[9px] left-[8px] z-10 flex gap-[2px] translate-x-[58px] [-webkit-app-region:no-drag]">
+      <!-- 左上 chrome 按钮组（demo .chrome：fixed top 9px / left 8px / gap 2px，钮 32x32 r-sm、icon 15px；
+           顺序 = 后退（可用）· 收起侧栏 · 前进，与主应用 win-chrome 同位接管形态。
+           浮在 overlay 层（非 nav 内），确保按钮组定位对齐窗口左上且不受 nav 布局影响。
+           平移按平台（推导同 AppNavControls / DESIGN.md §11）：基准 left 8 + 平移 = 灯组右缘 + 6px 盒距
+           （demo .lights margin-right 4 + 行 gap 2，实测 6.00）- 8；mac 灯组 OS 绘制（macOS 26 实测右缘 x≈68）
+           → 66，win/linux 自绘灯组右缘 60 → 58。 -->
+      <div
+        class="absolute top-[9px] left-[8px] z-10 flex gap-[2px] [-webkit-app-region:no-drag]"
+        :class="isMac ? 'translate-x-[66px]' : 'translate-x-[58px]'"
+      >
         <Button
           variant="ghost"
           size="icon"
@@ -157,6 +163,7 @@ import { useI18n } from 'vue-i18n'
 import { Settings, Sparkles, Bot, Blocks, SlidersHorizontal, ScrollText, TerminalSquare, GitBranch, ClipboardList, Server, Volume2, X, Download, Palette, ChartColumn, ArrowLeft, ArrowRight, PanelLeftClose, Wifi, type LucideIcon } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import { registerModalSurface, otherSurfaceYieldsEsc } from '@/composables/features/app/modal-surface-registry'
+import { detectPlatform } from '@/composables/effects/usePlatformChrome'
 import { cycleTabFocus, getFocusableElements } from '@/composables/logic/focus-trap'
 import { getSettingsStore, useSettings, type SystemSettings } from '@taiji/core'
 import { useToast } from '@/composables/useToast'
@@ -178,6 +185,9 @@ import UpdatePage from './update/UpdatePage.vue'
 import RemoteAccessPage from './remote-access/RemoteAccessPage.vue'
 import UsagePage from './usage/UsagePage.vue'
 import AppearancePage from './appearance/AppearancePage.vue'
+
+// mac 灯组为 OS 绘制，几何随系统版本 → 左上 chrome 组平移按平台分叉（推导见 template 内注释）
+const isMac = detectPlatform() === 'mac'
 
 // 左 nav 分组（demo NAV_GROUPS 形态：三组头 + 组内项；渲染与键盘 ↑↓/Home/End 顺序均按此结构）。
 // 仅展示层分组，不改分区注册/store 契约（menus 各项的 id/labelKey/icon 原样保留）。
