@@ -73,17 +73,28 @@ describe('sidebar store 折叠态持久化（用户意图位）', () => {
 })
 
 describe('sidebar store 两事实源合成（userCollapsed || viewportNarrow）', () => {
-  it('视口强制独立生效：userCollapsed=false + viewportNarrow=true → 折叠，且不落盘', async () => {
+  it('视口强制独立生效：userCollapsed=false + viewportNarrow=true → 折叠；不落盘且刷新后不恢复视口位', async () => {
     const sidebar = useSidebarStore()
     sidebar.viewportNarrow = true
     expect(sidebar.collapsed).toBe(true)
     await nextTick()
     expect(localStorage.getItem('taiji:side-collapsed')).toBe(null)
+
+    // 不落盘 ⇒ 刷新（重建 store）读回无值，视口位与折叠随之复位——视口态是易失的
+    setActivePinia(createPinia())
+    const fresh = useSidebarStore()
+    expect(fresh.viewportNarrow).toBe(false)
+    expect(fresh.collapsed).toBe(false)
   })
 
-  it('窄窗强制态下 toggle → 意图=展开，仍折叠；意图无变化不写盘；强制解除后弹回', async () => {
+  it('窄窗强制态下 toggle（含重复点击）→ 意图=展开，仍折叠；意图无变化不写盘；强制解除后弹回', async () => {
     const sidebar = useSidebarStore()
     sidebar.viewportNarrow = true
+    sidebar.toggleCollapsed()
+    expect(sidebar.userCollapsed).toBe(false)
+    expect(sidebar.collapsed).toBe(true)
+    // 重复点击：窄窗强制态下按钮可见形态恒为「展开」，每次点击都表达展开意图，意图位不翻转回收起
+    // （对「无条件翻转意图位」类错误实现，上一行的单次断言已先红——偶数次点击会恢复奇偶性）
     sidebar.toggleCollapsed()
     await nextTick()
 
@@ -94,29 +105,5 @@ describe('sidebar store 两事实源合成（userCollapsed || viewportNarrow）'
 
     sidebar.viewportNarrow = false
     expect(sidebar.collapsed).toBe(false)
-  })
-
-  it('窄窗强制态下重复 toggle → 意图位保持展开（按钮可见形态恒为展开语义）；强制解除后弹回', async () => {
-    const sidebar = useSidebarStore()
-    sidebar.viewportNarrow = true
-    sidebar.toggleCollapsed()
-    sidebar.toggleCollapsed()
-    await nextTick()
-
-    // 窄窗强制收起态下按钮图标恒为「展开」，每次点击都在表达展开意图
-    expect(sidebar.userCollapsed).toBe(false)
-    sidebar.viewportNarrow = false
-    expect(sidebar.collapsed).toBe(false)
-  })
-
-  it('viewportNarrow 不持久化：强制收起后重建 store（模拟刷新）不恢复视口位', async () => {
-    const sidebar = useSidebarStore()
-    sidebar.viewportNarrow = true
-    await nextTick()
-
-    setActivePinia(createPinia())
-    const fresh = useSidebarStore()
-    expect(fresh.viewportNarrow).toBe(false)
-    expect(fresh.collapsed).toBe(false)
   })
 })

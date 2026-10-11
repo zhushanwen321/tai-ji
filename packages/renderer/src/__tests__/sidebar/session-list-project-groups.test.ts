@@ -78,11 +78,25 @@ beforeEach(async () => {
 describe('组头操作（hover 动作钮，demo .pgh-acts）', () => {
   it('「+」先落点该项目再 emit newSession；该组展开（先锚定后建，新会话归属正确）', async () => {
     const store = setupProjects(DEFAULT_PROJECT_ID)
-    const wrapper = mountList()
+    // 在 newSession 事件触发时刻采样落点：终态断言无法区分「先锚定后 emit」与「先 emit 后锚定」
+    // ——后者正是新会话落错项目的 bug 形态
+    let activeAtEmit: string | null = null
+    const wrapper = mount(SessionList, {
+      attachTo: document.body,
+      props: {
+        groups: makeGroups(),
+        activeId: null,
+        statusOf: () => 'done' as never,
+        onNewSession: () => {
+          activeAtEmit = store.activeProjectId
+        },
+      },
+    })
 
     await groupOf(wrapper, 'proj-a').find('[data-testid="project-group-new-task"]').trigger('click')
 
-    expect(store.activeProjectId).toBe('proj-a') // 落点先行（create 归属读 activeProjectId）
+    expect(activeAtEmit).toBe('proj-a') // emit 时刻 activeProjectId 已切换（先锚定后建）
+    expect(store.activeProjectId).toBe('proj-a')
     expect(wrapper.emitted('newSession')).toBeTruthy()
     expect(groupOf(wrapper, 'proj-a').find('[data-testid="project-group-toggle"]').attributes('aria-expanded')).toBe('true')
   })
@@ -213,16 +227,5 @@ describe('目录模式 = 浏览态（方案 A 目录裁决：组头只开合、�
 
     await toggle().trigger('click')
     expect(toggle().attributes('aria-expanded')).toBe('true')
-  })
-})
-
-describe('空组（当前组）组内空态', () => {
-  it('当前组无会话 → 「暂无会话，点组头「+」在此新建任务」可见（缩进对齐左线内侧）', () => {
-    setupProjects(DEFAULT_PROJECT_ID)
-    const wrapper = mountList([])
-    const empty = groupOf(wrapper, DEFAULT_PROJECT_ID).find('[data-testid="project-group-empty"]')
-    expect(empty.exists()).toBe(true)
-    expect(empty.text()).toContain('暂无会话')
-    expect(empty.text()).toContain('新建任务')
   })
 })

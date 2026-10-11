@@ -55,19 +55,13 @@ describe('渲染条件（无百分比不分档 / 未达告警档，不渲染）'
   })
 })
 
-describe('色阶两档告警（决策 6 + R2.3 仅告警显示：>80 warn · >95 danger，严格大于）', () => {
-  it.each([
-    [81, 'bg-warn'],
-    [95, 'bg-warn'],
-    [96, 'bg-danger'],
-    [100, 'bg-danger'],
-  ])('percent=%i → 内层填充条 %s', (percent, expected) => {
-    usageFixture.current = okPartition(percent)
+describe('色阶接线（阈值矩阵归 context-usage-display.test.ts 纯函数层，此处只锁产出落点）', () => {
+  it('capacityBarClass 产出落在内层填充条 span：percent=96 → bg-danger（demo .capbar > i 结构；外层轨道只管定位与裁剪）', () => {
+    usageFixture.current = okPartition(96)
     const wrapper = mountBar()
     const bar = wrapper.find('[data-testid="composer-capacity-bar"]')
     expect(bar.exists()).toBe(true)
-    // 色阶落内层填充条（demo .capbar > i 结构；外层轨道只管定位与裁剪）
-    expect(bar.find('span').classes()).toContain(expected)
+    expect(bar.find('span').classes()).toContain('bg-danger')
   })
 })
 

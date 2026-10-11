@@ -130,7 +130,7 @@ describe('主面板：composer 渲染在 band 带壳内（使用者黑盒 + 观�
     sessionMock.list = []
   })
 
-  it('band 是 section 直子级、持有同缘 token、composer 在带内；无提示条时 band 仅含 composer', async () => {
+  it('band 是 section 直子级、持有同缘 token、composer 渲染在带内', async () => {
     const wrapper = mountPanel('s1')
     await nextTick()
     const band = wrapper.find('.composer-band')

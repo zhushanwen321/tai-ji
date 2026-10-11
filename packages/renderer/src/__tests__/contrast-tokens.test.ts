@@ -22,7 +22,7 @@
  * 混合空间，Björn Ottosson 线性空间矩阵），转 linear sRGB 算亮度。
  * 对比锚定（R4 公式重验）：暗色族 ≈13.1:1 / 皓 10.65 / 青墨 10.62 / 朱印 10.50，
  * 六主题全部过统一 ≥4:1 线；旧「朱印 code-c 本色字 3.92:1」的 3.9 豁免随 R4 公式
- * 落地失效，登记见 docs/todo/zhuyin-code-contrast-ruling.md（状态行已同步）。
+ * 落地失效，后随 2026-10-10 裁决统一提升至 WCAG AA 4.5:1（见 CODE_CONTRAST_MIN）。
  */
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
@@ -137,7 +137,13 @@ function compositeOver(accentHex: string, alpha: number, baseHex: string): strin
 
 describe('对比度令牌阈值（ui-optimize §4 场景 1③，宿主 = 对话流卡 --surface）', () => {
   it('六主题级联解析健全：断言面 8 令牌全部为 hex 字面值', () => {
-    expect([...tokensByTheme.keys()].sort()).toEqual([...THEMES.map((t) => t.id)].sort())
+    // 显式遍历断言（不依赖模块顶层构造期的校验副作用——那以文件级错误出现，不落在任何用例上）
+    for (const theme of THEMES) {
+      const t = tokensByTheme.get(theme.id)!
+      for (const name of REQUIRED_TOKENS) {
+        expect(t[name], `${theme.label} 的 ${name} 缺声明或非 hex 字面值：${t[name] ?? '<undefined>'}`).toMatch(/^#[0-9a-fA-F]{6}$/)
+      }
+    }
   })
 
   it('正文档 --neutral-fg 对比 ≥ 12:1（六主题）', () => {
@@ -182,7 +188,7 @@ describe('行内 code 对比（场景 2③，六主题；demo R4 弱化终态 = 
 
   /** 六主题统一 ≥4:1 线（R4 公式重验：暗族 ≈13.1 / 皓 10.65 / 青墨 10.62 / 朱印 10.50）。
    * 旧「朱印 3.9 豁免」锚定的是旧公式（字色 = code-c 本色）下朱印 3.92:1——公式改 R4 后
-   * 该前提失效，登记见 docs/todo/zhuyin-code-contrast-ruling.md。 */
+   * 该前提失效，豁免废除（2026-10-10 裁决，本线提升至 WCAG AA 4.5）。 */
   // 2026-10-10 用户裁决：行内代码按实际可读性标准（WCAG AA 4.5:1 正文线）统一断言，
   // 不再按主题设差异化下限（旧朱印 3.9 豁免随 R4 公式 + 本线提升双重失效）。
   const CODE_CONTRAST_MIN: Record<(typeof THEMES)[number]['id'], number> = {

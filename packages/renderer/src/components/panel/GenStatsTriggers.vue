@@ -97,21 +97,6 @@
   </div>
 </template>
 
-<script lang="ts">
-/**
- * TTFT 展示纯函数与阈值常量已下沉 gen-stats-display.ts（与 speed/cache 同居：GenStatsTtftCard
- * 与本触发器共用，模块下沉避免 card ↔ triggers 循环 import）。此处**再导出**保持单测直连
- * 本 SFC 的既有导入面不变（gen-stats-triggers.test.ts；照 AsyncErrorFallback.vue 双 script 块先例）。
- */
-export {
-  TTFT_WARN_THRESHOLD_MS,
-  TTFT_DANGER_THRESHOLD_MS,
-  formatTtftDuration,
-  ttftTier,
-  TTFT_TRIGGER_TIER_CLASSES,
-} from './gen-stats-display'
-</script>
-
 <script setup lang="ts">
 import { computed, toRef } from 'vue'
 import { useI18n } from 'vue-i18n'

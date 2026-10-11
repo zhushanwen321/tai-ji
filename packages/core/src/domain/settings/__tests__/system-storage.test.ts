@@ -51,9 +51,10 @@ describe('getSystem 分区字号默认档位一次性迁移', () => {
 
   it('迁移标记不落盘前重复读取幂等（读侧迁移不写 storage，写入仍由启动链负责）', async () => {
     const storage = seed({ sidebar: 'large', chat: 'medium', drawer: 'medium' })
-    const first = await getSystem(storage)
+    await getSystem(storage)
     const second = await getSystem(storage)
-    expect(first).toEqual(second)
+    // 幂等 = 重复读稳定回落同一档位（读侧无累进状态），且全程不写 storage（落盘归启动链）
+    expect(second.fontScales?.sidebar).toBe('medium')
     expect(storage.peek(SYSTEM_KEY)).not.toContain('fontScalesDefaultMigrated')
   })
 })

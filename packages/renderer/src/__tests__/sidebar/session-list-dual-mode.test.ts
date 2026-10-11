@@ -72,13 +72,19 @@ describe('N8 默认平铺（A 模式）', () => {
     expect(wrapper.find('[data-testid="folder-delete-btn"]').exists()).toBe(false)
   })
 
-  it('会话行按 runtime 组序展平（跨组交叉顺序 = groups 展平原序，不按 cwd 重排）', () => {
-    const wrapper = mountList()
-    // flatSessions = groups.flatMap(g => g.sessions)：a1, a2, b1（组序恒等）
-    expect(wrapper.findAll('.session-item')).toHaveLength(3)
-    expect(wrapper.text()).toContain('会话 a1')
-    expect(wrapper.text()).toContain('会话 a2')
-    expect(wrapper.text()).toContain('会话 b1')
+  it('会话行按 runtime 组序展平（fixture 输入序与 cwd 字典序相反：sort / 按 cwd 重排类回归即红）', () => {
+    // 组序 zulu → alpha（与 cwd 字典序相反）：若实现按 cwd 排序或任何重排，序列断言即红
+    const crossed: SessionGroup[] = [
+      { cwd: '/zulu', sessions: [makeSession('z1', '/zulu'), makeSession('z2', '/zulu')] },
+      { cwd: '/alpha', sessions: [makeSession('a1', '/alpha')] },
+    ]
+    const wrapper = mountList(crossed)
+    // flatSessions = groups.flatMap(g => g.sessions)：z1, z2, a1（组序恒等，零重排）
+    const texts = wrapper.findAll('.session-item').map((w) => w.text())
+    expect(texts).toHaveLength(3)
+    expect(texts[0]).toContain('会话 z1')
+    expect(texts[1]).toContain('会话 z2')
+    expect(texts[2]).toContain('会话 a1')
   })
 
   it('区头显示「项目与会话」标题 + 全量会话计数', () => {
@@ -177,11 +183,19 @@ describe('N8 hover 详情卡（demo .sess-pop：行首图标 + 立即开 + 末�
 
 // ── 顶缘渐焦（spec sidebar §3.1：三视图滚动容器接 EdgeFade，滚动离顶才启用）──
 describe('N8 EdgeFade 顶缘渐焦接线', () => {
-  it('滚动容器内挂载 EdgeFade（首个子元素，自驱动父级 mask）', () => {
+  it('EdgeFade 在滚动视口内且 scroller 解析命中真滚动元素（reka 内部 wrapper 之下仍可达；离顶渐焦激活）', async () => {
     const wrapper = mountList()
-    // EdgeFade 作为 ScrollArea Viewport 首子元素挂载（滚动容器内存在即接线成立；
-    // 显隐/mask 由组件自驱动，纯展示态断言挂载位）
-    expect(wrapper.find('[data-testid="edge-fade"]').exists()).toBe(true)
+    const fade = wrapper.find('[data-testid="edge-fade"]')
+    expect(fade.exists()).toBe(true)
+    // 渐焦带必须挂在滚动视口内部（sticky 钉顶 + scroller 解析的前提；挪出滚动容器即红）
+    const viewport = fade.element.closest('[data-reka-scroll-area-viewport]') as HTMLElement | null
+    expect(viewport).not.toBeNull()
+    // 滚动事件驱动显隐 + 容器 mask：滚动宿主（scrollerEl prop）经 SessionList onMounted
+    // → EdgeFade watch 补绑，先 flush 再派发
+    await nextTick()
+    viewport!.scrollTop = 20
+    viewport!.dispatchEvent(new Event('scroll'))
+    expect(viewport!.style.maskImage).toContain('linear-gradient')
     wrapper.unmount()
   })
 })

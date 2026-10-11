@@ -96,10 +96,12 @@ describe('ComposerInput × 删除路径与 mousedown 拦截共存（修复 2/3 �
     // 修复 2 与删除路径共存：mousedown 被 handler 拦截（不落光标），随后 click 照常派发——
     // 真实浏览器序列中 preventDefault 只阻止光标放置，删除监听（dom-core makeXButton）独立生效
     expect(dispatchMousedown(x).defaultPrevented).toBe(true)
+    // 插入阶段（insertSlashChip 末尾 onChanged）已产生过 input 事件，须以长度增量才能区分删除路径的新 emit
+    const emittedCountBeforeClick = wrapper.emitted('input')?.length ?? 0
     x.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
 
     expect(editor.querySelector('.slash-chip')).toBeNull()
     // removeChipNode → onChanged → onInput → emit('input')：draft 同步链路未断
-    expect(wrapper.emitted('input')).toBeTruthy()
+    expect(wrapper.emitted('input')?.length ?? 0).toBe(emittedCountBeforeClick + 1)
   })
 })

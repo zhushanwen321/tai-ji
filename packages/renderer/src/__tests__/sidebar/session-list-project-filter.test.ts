@@ -130,6 +130,8 @@ describe('SessionList: 项目锚定分组（全部项目并列，按 projectId �
     expect(emptyGroup.text()).not.toContain('会话 sa')
     expect(emptyGroup.find('[data-testid="project-group-empty"]').exists()).toBe(true)
     expect(emptyGroup.find('[data-testid="project-group-empty"]').text()).toContain('暂无会话')
+    // 完整文案含「点组头「+」在此新建任务」引导（原 session-list-project-groups 空态用例并入）
+    expect(emptyGroup.find('[data-testid="project-group-empty"]').text()).toContain('新建任务')
   })
 
   it('「当前」chip 只渲染在锚定组；组序默认项目固定最后（用户裁决：兜底聚合恒在尾部）', () => {
