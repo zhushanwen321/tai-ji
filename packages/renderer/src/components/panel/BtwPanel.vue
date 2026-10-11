@@ -146,11 +146,15 @@
           :session-id="selectedVid"
           data-testid="btw-stream"
         />
-        <!-- M3-c 交互闭环（D8 降级路径唯一形态：drawer 内联确认条，富表单降档；五类请求
-             按 vid 路由本面板，主视图三模态面零浮出）。Guard 子组件包全部风险渲染——
-             异常由 onErrorCaptured 在本组件收口（return false 不外溢主面板，P2 隔离），
-             错误条 + 重试在 Guard 外恒可达。 -->
-        <div v-if="selectedVid" class="flex shrink-0 flex-col gap-1.5 px-2 pb-1.5" data-testid="btw-interaction">
+        <!-- composer band 壳（与 Panel.vue 主面板同壳，类链单一来源 composer-band.ts）：
+             左右缘与 MessageStream 内容列对齐（Composer.vue 宽度契约「composer 与消息流
+             同宽同缘」），composer 不再贴边满宽；band gap-1.5 承接交互降档行行距，
+             无交互时带内仅 composer（空闲几何与主面板一致）。
+             M3-c 交互闭环（D8 降级路径唯一形态：drawer 内联确认条，富表单降档；五类请求
+             按 vid 路由本面板，主视图三模态面零浮出）。Guard 为无 DOM 渲染哨兵，包全部
+             风险渲染——异常由 onErrorCaptured 在本组件收口（return false 不外溢主面板，
+             P2 隔离），错误条 + 重试在 Guard 外恒可达。 -->
+        <div v-if="selectedVid" :class="COMPOSER_BAND_CLASS" data-testid="btw-interaction">
           <BtwInteractionGuard :key="interactionKey">
             <!-- 终态机失效支行内提示（失效支单入口 invalidateBtwRequests——事件帧一路：badge 清 + 表单撤下 + 本提示同拍收口，D-B2-3） -->
             <div v-if="expiredNotice" class="flex items-center gap-1.5 rounded bg-danger-soft px-2.5 py-1.5 text-[length:var(--text-2xs)] text-danger" data-testid="btw-request-expired">
@@ -236,14 +240,14 @@
             <span>{{ t('btw.interaction.error') }}</span>
             <Button variant="ghost" class="ml-auto h-5 shrink-0 rounded px-1.5 text-[length:var(--text-2xs)]" data-testid="btw-interaction-retry" @click="retryInteraction">{{ t('common.retry') }}</Button>
           </div>
+          <Composer
+            v-if="selectedVid"
+            :session-id="selectedVid"
+            variant="panel"
+            :show-btw="false"
+            data-testid="btw-composer"
+          />
         </div>
-        <Composer
-          v-if="selectedVid"
-          :session-id="selectedVid"
-          variant="panel"
-          :show-btw="false"
-          data-testid="btw-composer"
-        />
       </div>
     </template>
   </div>
@@ -265,6 +269,7 @@ import { isBtwVirtualId, extractBtwPiSessionId } from '@taiji/shared'
 import type { ServerMessageMap } from '@taiji/shared'
 import MessageStream from '@/components/panel/MessageStream.vue'
 import Composer from '@/components/panel/Composer.vue'
+import { COMPOSER_BAND_CLASS } from '@/components/panel/composer-band'
 
 // btw 具名类型走 indexed-access（shared 包出口选择性 re-export 未挂具名——M2-a 登记的
 // SegmentsMetadataEntry 同款惯例，SSOT = shared protocol.ts）

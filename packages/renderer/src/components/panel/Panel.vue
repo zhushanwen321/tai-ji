@@ -90,10 +90,12 @@
          统一表单 overlay（ui-presentation-protocol D5）：请求到达时 FormOverlay 覆盖
          composer 位置（互斥），对话历史全程可见，composer 消失输入禁止。
          [U7] overlay 移除后 composer 常驻（不再 v-if="!isViewingSubagent"）。 -->
-    <!-- 顶缘 6px（demo workbench.css .composer{margin:6px 14px 14px} 顶距）：对话流底
-         padding 24px + 6px = 流到 composer 30px；左右/下 14px 由 px-3.5/pb-3.5 承接。
-         顶距走 padding 不走 gap——band 内 gap-1.5 是 RetryIndicator/overlay 内部行距，勿混用。 -->
-    <div class="composer-band flex flex-shrink-0 flex-col gap-1.5 px-3.5 pb-3.5 pt-[6px]">
+    <!-- 顶缘 6px（demo .composer margin-top）：对话流底 padding 24px + 6px = 流到 composer 30px；
+         左右 30px 与 MessageStream px-[30px] 同一内容列（Composer.vue 宽度契约「composer 与
+         消息流同宽同缘」，未封顶宽度下 composer 不外扩出消息列）。
+         壳层类链单一来源 = composer-band.ts（BtwPanel 同壳），顶距走 padding 不走 gap——
+         band 内 gap-1.5 是 RetryIndicator/overlay 内部行距，勿混用。 -->
+    <div :class="COMPOSER_BAND_CLASS">
       <!-- [T4] 「引擎恢复中」过渡条（pi 意外退出 → 自动 respawn 窗口）。
            数据源 = chat store respawnPending 分区（与 usePanelView 的 isSessionRespawning
            同源）；此时 panelView.kind 恒为 conversation/trace（respawning 抑制 dead），
@@ -156,6 +158,7 @@ import { isFormQuestion, isScheduleDraft, type FormQuestion, type ScheduleDraft 
 import MessageStream from './MessageStream.vue'
 import ModeDeclarationRow from './ModeDeclarationRow.vue'
 import Composer from './Composer.vue'
+import { COMPOSER_BAND_CLASS } from './composer-band'
 import PlanModeBar from './plan/PlanModeBar.vue'
 import TraceView from './trace/TraceView.vue'
 import { Button } from '@/components/ui/button'
