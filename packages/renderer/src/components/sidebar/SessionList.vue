@@ -1,57 +1,75 @@
 <template>
   <!--
-    展示组件 · 会话列表（子视图 A，draft-five-states 卡 A/D）。
-    N8 A/C 双模式（ui-optimize-unified 决策 9）：A 平铺单行（默认）/ C 目录分组折叠，
-    24px 区头行承载「最近会话」标题 + 会话计数 + 双段图标开关，选中模式持久化 localStorage。
-    两种模式共用同一排序（runtime 组序，sessionsInRuntimeGroupOrder SSOT，客户端零重排）
-    与同一 activeId 选中态；hover 详情卡（分支/完整目录）由 SessionItem 自承载，两模式同样生效。
-    【D14 语义修正 2026-08-04】按 activeProject 过滤 session（session.projectId，cwd 只是展示聚合）：
-    命名 project → 只显示归属它的 session（同 cwd 组内可混合不同归属，逐 session 过滤）；
-    默认项目 → 未归类（无 projectId）+ 孤儿（归属的 project 已删除）聚合。
-    ScrollArea 包裹；空态（D，session 数=0）显示极淡「暂无会话」占位。
-    v-model 语义用 activeId（单向：子→父 select）。
+    展示组件 · 会话列表（R6.2 锚定分组形态，demo Sidebar.vue sessions 视图权威）。
+    区头「项目与会话」+ 总会话计数 + 双段模式开关，下方为项目分组列表：
+    - 平铺模式 = 锚定聚焦：仅当前组展开（左缘细线 + 会话行缩进表达归属），其余组折叠
+      一行；点其他组头 = 切换锚定并展开（唯一项目切换路径），点当前组头 = 折叠/展开翻转。
+    - 目录模式 = 浏览态：全部项目组默认展开，组头只开合自己、不切换锚定，「当前」chip
+      只读；组内按 cwd 目录静态标签分组（标签无折叠钮，会话始终可见）。目录行悬停操作
+      （目录内新建 / 批量删除）为 real 独有功能性入口（demo mock 无对应物，已登记差异）。
+    分组规则 SSOT = sessionBelongsToProject（默认项目聚合未归类 + 孤儿）；组序 SSOT =
+    projectStore.orderedProjects（lastUsedAt 稳定序 + 默认项目固定最后，锚定切换不重排）。
+    组内平铺序 = runtime 组序展平（sessionsInRuntimeGroupOrder，客户端零重排）。
+    新建项目入口 = 区头行内「+」钮（紧贴模式开关左侧，用户裁决 2026-10-11）：点击后列表
+    顶部出现草稿输入行，Enter 确认 → 锚定新项目并展开空态（空名 / Esc 丢弃草稿）。
+    空组显示「暂无会话，点组头「+」在此新建任务」（缩进对齐左线内侧）。
   -->
   <div class="session-list flex h-full min-h-0 flex-col">
     <!-- 区头（demo .sess-head：gap 6px / padding 8px 10px 5px；lbl 12px mid、count mono 11px fg-2、
-         右侧模式开关 = .mode-seg 凹陷槽）。固定于 ScrollArea 外（不随列表滚动），
-         C 模式组头 sticky 贴 ScrollArea 顶、不重叠。 -->
+         右侧模式开关 = .mode-seg 凹陷槽）。固定于 ScrollArea 外（不随列表滚动）。 -->
     <div class="flex shrink-0 items-center gap-[6px] px-[10px] pt-[8px] pb-[5px]" data-testid="session-list-header">
       <span class="truncate text-[length:var(--text-xs)] text-neutral-mid">
         {{ t('sidebar.sessionList.header') }}
       </span>
       <span class="font-mono text-[length:var(--text-2xs)] text-neutral-fg-2">{{ totalCount }}</span>
-      <!-- A/C 双段图标开关（demo .mode-seg：surface 槽 + hairline 边 + 26×24 钮 + 13px 图标）：
-           选中态 = demo Tier A 状态件范式（--sel-bg accent tint 底 + fg 字 + 1px --sel-edge 内描边）。
-           title 承载模式名（无 label 文字，demo 悬停提示范式）。 -->
-      <div class="ml-auto flex items-center rounded-sm border border-hairline bg-surface p-[2px]">
+      <!-- 右侧工具组（用户裁决 2026-10-11）：新建项目「+」紧贴模式开关（组内 gap 2px，
+           组整体 ml-auto 承接右贴）。新建项目入口 = 区头「+」→ 列表顶部草稿行（见列表容器首行），
+           不再使用区头内联输入。 -->
+      <div class="ml-auto flex items-center gap-[2px]">
         <Button
           variant="ghost"
           size="icon"
-          data-testid="session-mode-flat"
-          class="h-[24px] w-[26px] rounded-[var(--radius-xs)] p-0"
-          :class="mode === 'flat'
-            ? 'bg-[var(--sel-bg)] text-neutral-fg [font-weight:var(--fw-mid)] shadow-[inset_0_0_0_1px_var(--sel-edge)] hover:bg-[var(--sel-bg)] hover:text-neutral-fg'
-            : 'bg-transparent text-neutral-dim hover:bg-transparent hover:text-neutral-fg'"
-          :title="t('sidebar.sessionList.modeFlat')"
-          :aria-pressed="mode === 'flat'"
-          @click="setMode('flat')"
+          data-testid="project-add-btn"
+          class="grid size-[24px] place-items-center rounded-[var(--radius-xs)] p-0 text-neutral-dim transition-colors hover:bg-surface-hover hover:text-neutral-fg [&_svg]:size-[13px]"
+          :title="t('sidebar.projectGroup.newProject')"
+          :aria-label="t('sidebar.projectGroup.newProject')"
+          @click="startCreate"
         >
-          <List class="size-[13px]" />
+          <Plus :stroke-width="1.8" />
         </Button>
-        <Button
-          variant="ghost"
-          size="icon"
-          data-testid="session-mode-groups"
-          class="h-[24px] w-[26px] rounded-[var(--radius-xs)] p-0"
-          :class="mode === 'groups'
-            ? 'bg-[var(--sel-bg)] text-neutral-fg [font-weight:var(--fw-mid)] shadow-[inset_0_0_0_1px_var(--sel-edge)] hover:bg-[var(--sel-bg)] hover:text-neutral-fg'
-            : 'bg-transparent text-neutral-dim hover:bg-transparent hover:text-neutral-fg'"
-          :title="t('sidebar.sessionList.modeGroup')"
-          :aria-pressed="mode === 'groups'"
-          @click="setMode('groups')"
-        >
-          <Folder class="size-[13px]" :stroke-width="1.8" />
-        </Button>
+        <!-- A/C 双段图标开关（demo .mode-seg：surface 槽 + hairline 边 + 26×24 钮 + 13px 图标）：
+             选中态 = demo Tier A 状态件范式（--sel-bg accent tint 底 + fg 字 + 1px --sel-edge 内描边）。
+             title 承载模式名（无 label 文字，demo 悬停提示范式）。 -->
+        <div class="flex items-center rounded-sm border border-hairline bg-surface p-[2px]">
+          <Button
+            variant="ghost"
+            size="icon"
+            data-testid="session-mode-flat"
+            class="h-[24px] w-[26px] rounded-[var(--radius-xs)] p-0"
+            :class="mode === 'flat'
+              ? 'bg-[var(--sel-bg)] text-neutral-fg [font-weight:var(--fw-mid)] shadow-[inset_0_0_0_1px_var(--sel-edge)] hover:bg-[var(--sel-bg)] hover:text-neutral-fg'
+              : 'bg-transparent text-neutral-dim hover:bg-transparent hover:text-neutral-fg'"
+            :title="t('sidebar.sessionList.modeFlat')"
+            :aria-pressed="mode === 'flat'"
+            @click="setMode('flat')"
+          >
+            <List class="size-[13px]" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            data-testid="session-mode-groups"
+            class="h-[24px] w-[26px] rounded-[var(--radius-xs)] p-0"
+            :class="mode === 'groups'
+              ? 'bg-[var(--sel-bg)] text-neutral-fg [font-weight:var(--fw-mid)] shadow-[inset_0_0_0_1px_var(--sel-edge)] hover:bg-[var(--sel-bg)] hover:text-neutral-fg'
+              : 'bg-transparent text-neutral-dim hover:bg-transparent hover:text-neutral-fg'"
+            :title="t('sidebar.sessionList.modeGroup')"
+            :aria-pressed="mode === 'groups'"
+            @click="setMode('groups')"
+          >
+            <Folder class="size-[13px]" :stroke-width="1.8" />
+          </Button>
+        </div>
       </div>
     </div>
 
@@ -59,153 +77,215 @@
     <!-- 顶缘渐焦（spec sidebar §3.1：三视图滚动容器接 EdgeFade）：自驱动父级滚动容器
          mask，滚动离顶才启用，reduced-transparency 降级纯色渐隐 -->
     <EdgeFade />
-    <div class="flex flex-col px-1.5 pt-0.5 pb-2">
-      <!-- C 目录分组模式：每组一个标题（cwd 末段）+ 组内 SessionItem 列表。
-           目录级操作（组内新建 / 目录删除）只落在此模式组头（N8：A 平铺不提供，
-           低频操作避免单行列表挂操作入口回归臃肿）。 -->
-      <template v-if="mode === 'groups'">
-      <div
-        v-for="g in visibleGroups"
-        :key="g.cwd"
-        class="group-section flex flex-col"
-      >
-        <!-- 组标题（demo .gh 语言：12px 图标 + mono 12px mid 组名 + mono 11px fg-2 计数）。
-             sticky 贴顶用 bg-bg 不透明（侧边栏底色透明融合 bg，header 同色遮住滚过的 item 文字）。
-             group/folder 命名 group 只放在 header 行上（本容器**不能**带 group/folder——Tailwind
-             命名 group 是「任意层级祖先」匹配，容器带它会令 hover 组内任意 SessionItem 时也触发
-             folder 按钮，破坏单行独立 hover 语义）。 -->
-        <div class="group/folder sticky top-0 z-[var(--z-sticky)] flex items-center gap-[6px] bg-bg px-[8px] pt-[9px] pb-[4px]">
-          <Folder class="size-[12px] shrink-0 text-neutral-dim" />
-          <span class="min-w-0 truncate font-mono text-[length:var(--text-xs)] text-neutral-mid group-hover/folder:text-neutral-fg">
-            {{ dirNameOf(g.cwd) }}
-          </span>
-          <span class="ml-auto font-mono text-[length:var(--text-2xs)] text-neutral-fg-2">{{ g.sessions.length }}</span>
-          <!-- folder 行操作区：+ 新建（非破坏性，恒渲染）与批量删除（两段式确认）。
-               右贴由计数 span 的 ml-auto 承接（单一 auto margin → 计数紧贴操作区左缘、
-               二者整体贴行右缘，demo .gh .count{margin-left:auto} 同构）；hover 显隐；
-               [review MF-2] 删除按钮仅当组内可见数 = 该 cwd 全量数时渲染：
-               removeByCwd 是 cwd 全量删除（项目无关），项目过滤隐藏了部分 session 时点删除会误删
-               用户不可见的其他 project session；+ 按钮无此守卫（新建不受过滤影响）。 -->
-          <div
-            class="flex items-center gap-1"
-            data-testid="folder-actions"
-            :class="folderConfirmingCwd === g.cwd ? '' : 'opacity-0 group-hover/folder:opacity-100'"
-            @mouseleave="onFolderMouseLeave(g.cwd)"
-          >
-            <Button
-              variant="ghost"
-              size="icon"
-              data-testid="folder-new-session-btn"
-              class="size-[22px] rounded-sm border border-border-strong bg-surface text-neutral-mid hover:bg-surface-hover hover:text-neutral-fg"
-              :title="t('sidebar.sessionList.newSessionInFolder')"
-              @click.stop="emit('newSessionInFolder', g.cwd)"
-            >
-              <Plus class="size-[13px]" />
-            </Button>
-            <Button
-              v-if="isFolderDeleteAvailable(g.cwd)"
-              variant="ghost"
-              size="icon"
-              data-testid="folder-delete-btn"
-              :class="folderConfirmingCwd === g.cwd
-                ? 'size-[22px] rounded-sm border border-danger bg-danger text-neutral-fg'
-                : 'size-[22px] rounded-sm border border-border-strong bg-surface text-neutral-mid hover:bg-surface-hover hover:text-danger'"
-              :title="folderConfirmingCwd === g.cwd
-                ? t('sidebar.sessionList.deleteFolderConfirm')
-                : t('sidebar.sessionItem.delete')"
-              @click.stop="onFolderRemoveClick(g.cwd)"
-            >
-              <Check v-if="folderConfirmingCwd === g.cwd" class="size-[13px]" />
-              <Trash2 v-else class="size-[13px]" />
-            </Button>
-          </div>
-        </div>
-        <!-- 每条 session 渲染 SessionItem（扁平列表：fork 分支 / agent 子会话均按一般 session 各占一行，
-             侧栏不做父子聚合——D9；父条目右侧徒标承载子会话计数）。 -->
-        <SessionItem
-          v-for="s in g.sessions"
-          :key="s.id"
-          :session="s"
-          :active="s.id === activeId"
-          :status="statusOf(s.id)"
-          :child-count="childCountOf(s)"
-          :parent-label="parentLabelOf(s)"
-          @select="emit('select', $event)"
-          @rename="emit('rename', $event)"
-          @delete="emit('delete', $event)"
-          @set-project="emit('setProject', $event)"
-          @navigate-parent="emit('navigateParent', $event)"
-          @abort="emit('abort', $event)"
-          @force-quit="emit('forceQuit', $event)"
+    <div class="flex flex-col pt-0.5 pb-2 pl-1.5">
+      <!-- 新建项目草稿行（用户裁决 2026-10-11：区头「+」点击后，列表顶部出现新组输入态；
+           Enter / 失焦提交非空名 → 创建并锚定展开，空名 / Esc 丢弃草稿不创建） -->
+      <div v-if="creating" class="flex items-center px-[6px] py-[5px]" data-testid="project-draft-row">
+        <Input
+          ref="createInputRef"
+          v-model="draft"
+          data-testid="project-create-input"
+          class="min-w-0 flex-1 h-[24px] rounded-[5px] border-border-strong bg-bg-input px-[7px] text-[length:var(--text-xs)] text-neutral-fg"
+          :placeholder="t('sidebar.projectGroup.namePlaceholder')"
+          :aria-label="t('sidebar.projectGroup.newProject')"
+          @keydown.enter.prevent="commitCreate"
+          @keydown.esc.stop.prevent="cancelCreate"
+          @blur="onDraftBlur"
         />
       </div>
+      <!-- 平铺模式：锚定聚焦（当前组展开 + 左缘细线，位置不重排；其余组恒折叠一行） -->
+      <template v-if="mode === 'flat'">
+        <!-- 会话行缩进（demo .pgi .si）：行内左距 9px 与目录标签对齐；作用到 ProjectGroup
+             槽内直接子 .session-item（任意变体替代 scoped 后代选择器） -->
+        <ProjectGroup
+          v-for="pg in projectGroups"
+          :key="pg.id"
+          :project-id="pg.id"
+          :name="pg.name"
+          :count="pg.items.length"
+          :current="pg.id === projectStore.activeProjectId"
+          :expanded="pg.id === projectStore.activeProjectId && curOpen"
+          :is-default="pg.isDefault"
+          class="[&>.session-item]:pl-[9px]"
+          @head-click="onGroupHeadClick(pg)"
+          @create-task="onCreateTaskIn(pg)"
+          @rename-commit="onRenameCommit(pg, $event)"
+          @delete-request="requestDelete(pg)"
+        >
+          <SessionItem
+            v-for="s in pg.items"
+            :key="s.id"
+            :session="s"
+            :active="s.id === activeId"
+            :status="statusOf(s.id)"
+            :child-count="childCountOf(s)"
+            :parent-label="parentLabelOf(s)"
+            @select="emit('select', $event)"
+            @rename="emit('rename', $event)"
+            @delete="emit('delete', $event)"
+            @set-project="emit('setProject', $event)"
+            @navigate-parent="emit('navigateParent', $event)"
+            @abort="emit('abort', $event)"
+            @force-quit="emit('forceQuit', $event)"
+          />
+          <div
+            v-if="!pg.items.length"
+            class="pt-[2px] pb-[6px] pl-[9px] pr-[8px] text-[length:var(--text-2xs)] text-neutral-dim"
+            data-testid="project-group-empty"
+          >
+            {{ t('sidebar.sessionList.groupEmpty') }}
+          </div>
+        </ProjectGroup>
       </template>
-      <!-- A 平铺模式（N8 默认）：runtime 组序展平（sessionsInRuntimeGroupOrder SSOT，
-           与 C 模式共用同一排序，客户端零重排），无组头行——目录操作归 C 分组模式组头。 -->
+      <!-- 目录模式：浏览态（全部项目组默认展开，组头只开合不切换锚定）+ 目录静态标签分组 -->
       <template v-else>
-        <SessionItem
-          v-for="s in flatSessions"
-          :key="s.id"
-          :session="s"
-          :active="s.id === activeId"
-          :status="statusOf(s.id)"
-          :child-count="childCountOf(s)"
-          :parent-label="parentLabelOf(s)"
-          @select="emit('select', $event)"
-          @rename="emit('rename', $event)"
-          @delete="emit('delete', $event)"
-          @set-project="emit('setProject', $event)"
-          @navigate-parent="emit('navigateParent', $event)"
-          @abort="emit('abort', $event)"
-          @force-quit="emit('forceQuit', $event)"
-        />
+        <!-- 目录内会话行再深一级（demo .pgi .gi .si = 21px），任意变体替代 scoped 后代选择器 -->
+        <ProjectGroup
+          v-for="pg in projectGroups"
+          :key="pg.id"
+          :project-id="pg.id"
+          :name="pg.name"
+          :count="pg.items.length"
+          :current="pg.id === projectStore.activeProjectId"
+          :expanded="!dirClosed.has(pg.id)"
+          :is-default="pg.isDefault"
+          class="[&_.gi>.session-item]:pl-[21px]"
+          @head-click="onGroupHeadClick(pg)"
+          @create-task="onCreateTaskIn(pg)"
+          @rename-commit="onRenameCommit(pg, $event)"
+          @delete-request="requestDelete(pg)"
+        >
+          <div
+            v-if="!pg.items.length"
+            class="pt-[2px] pb-[6px] pl-[9px] pr-[8px] text-[length:var(--text-2xs)] text-neutral-dim"
+            data-testid="project-group-empty"
+          >
+            {{ t('sidebar.sessionList.groupEmpty') }}
+          </div>
+          <template v-else>
+            <!-- 目录静态标签（demo .gh.gh-static：无折叠钮、会话始终可见，归属靠缩进表达）。
+                 行内悬停操作（+ 新建 / 批量删除）= real 独有功能性入口。group/folder 命名
+                 group 只放在标签行上（Tailwind 命名 group 是「任意层级祖先」匹配，容器带它会令
+                 hover 组内任意 SessionItem 时也触发 folder 按钮，破坏单行独立 hover 语义）。 -->
+            <div v-for="g in pg.dirs" :key="g.cwd" class="grp">
+              <div class="group/folder flex items-center gap-[6px] pr-[8px] pl-[9px] pt-[9px] pb-[4px]">
+                <Folder class="size-[11px] shrink-0 text-neutral-dim" />
+                <span class="min-w-0 truncate font-mono text-[length:var(--text-2xs)] text-neutral-dim">
+                  {{ dirNameOf(g.cwd) }}
+                </span>
+                <span class="ml-auto font-mono text-[length:var(--text-2xs)] text-neutral-fg-2">{{ g.sessions.length }}</span>
+                <!-- folder 行操作区：+ 新建（非破坏性，恒渲染）与批量删除（两段式确认）。
+                     右贴由计数 span 的 ml-auto 承接；hover 显隐。
+                     [review MF-2] 删除按钮仅当组内可见数 = 该 cwd 全量数时渲染：
+                     removeByCwd 是 cwd 全量删除（项目无关），按项目分组隐藏了部分 session 时
+                     点删除会误删用户不可见的其他 project session；+ 按钮无此守卫。 -->
+                <div
+                  class="flex items-center gap-1"
+                  data-testid="folder-actions"
+                  :class="folderConfirmingCwd === g.cwd ? '' : 'opacity-0 group-hover/folder:opacity-100'"
+                  @mouseleave="onFolderMouseLeave(g.cwd)"
+                >
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    data-testid="folder-new-session-btn"
+                    class="size-[22px] rounded-sm border border-border-strong bg-surface text-neutral-mid hover:bg-surface-hover hover:text-neutral-fg"
+                    :title="t('sidebar.sessionList.newSessionInFolder')"
+                    @click.stop="emit('newSessionInFolder', g.cwd)"
+                  >
+                    <Plus class="size-[13px]" />
+                  </Button>
+                  <Button
+                    v-if="isFolderDeleteAvailable(pg, g.cwd)"
+                    variant="ghost"
+                    size="icon"
+                    data-testid="folder-delete-btn"
+                    :class="folderConfirmingCwd === g.cwd
+                      ? 'size-[22px] rounded-sm border border-danger bg-danger text-neutral-fg'
+                      : 'size-[22px] rounded-sm border border-border-strong bg-surface text-neutral-mid hover:bg-surface-hover hover:text-danger'"
+                    :title="folderConfirmingCwd === g.cwd
+                      ? t('sidebar.sessionList.deleteFolderConfirm')
+                      : t('sidebar.sessionItem.delete')"
+                    @click.stop="onFolderRemoveClick(g.cwd)"
+                  >
+                    <Check v-if="folderConfirmingCwd === g.cwd" class="size-[13px]" />
+                    <Trash2 v-else class="size-[13px]" />
+                  </Button>
+                </div>
+              </div>
+              <!-- 目录内会话行（再深一级缩进）：每条 session 渲染 SessionItem（扁平列表：
+                   fork 分支 / agent 子会话均按一般 session 各占一行，侧栏不做父子聚合——D9）。 -->
+              <div class="gi">
+                <SessionItem
+                  v-for="s in g.sessions"
+                  :key="s.id"
+                  :session="s"
+                  :active="s.id === activeId"
+                  :status="statusOf(s.id)"
+                  :child-count="childCountOf(s)"
+                  :parent-label="parentLabelOf(s)"
+                  @select="emit('select', $event)"
+                  @rename="emit('rename', $event)"
+                  @delete="emit('delete', $event)"
+                  @set-project="emit('setProject', $event)"
+                  @navigate-parent="emit('navigateParent', $event)"
+                  @abort="emit('abort', $event)"
+                  @force-quit="emit('forceQuit', $event)"
+                />
+              </div>
+            </div>
+          </template>
+        </ProjectGroup>
       </template>
-    </div>
-    <div
-      v-if="totalCount === 0"
-      class="flex flex-1 flex-col items-center justify-center gap-3 py-8 text-center"
-    >
-      <p class="text-[length:var(--text-2xs)] text-neutral-dim opacity-55">{{ t('sidebar.sessionList.empty') }}</p>
-      <Button
-        variant="ghost"
-        size="sm"
-        class="h-7 gap-1.5 rounded-md px-2 text-[length:var(--text-2xs)] text-neutral-mid hover:bg-surface-hover hover:text-neutral-fg"
-        @click="emit('newSession')"
-      >
-        <Plus class="size-[14px]" />
-        {{ t('sidebar.sessionList.newSession') }}
-      </Button>
+
     </div>
   </ScrollArea>
+
+    <!-- 删除项目二次确认（文案写明后果，spec sidebar §3.7：「N 个会话将归回默认项目」；
+         计数 = 该组实际会话数——数字 = 实际归回的会话数） -->
+    <ConfirmDialog
+      v-model:open="deleteOpen"
+      :title="t('sidebar.projectGroup.deleteTitle')"
+      :description="t('sidebar.projectGroup.deleteDesc', {
+        name: pendingDelete?.name || t('sidebar.projectGroup.defaultName'),
+        count: pendingDelete?.items.length ?? 0,
+      })"
+      :confirm-text="t('sidebar.projectGroup.deleteConfirm')"
+      :cancel-text="t('sidebar.projectGroup.cancel')"
+      variant="danger"
+      @confirm="confirmDelete"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
 import type { SessionGroup, SessionSummary } from '@taiji/shared'
-import { sessionsInRuntimeGroupOrder } from '@taiji/core'
 import type { DerivedStatus } from '@/types'
 import { computed, onBeforeUnmount, provide, ref, watch, type Ref } from 'vue'
 import { useEventListener } from '@vueuse/core'
 import { Plus, Folder, Trash2, Check, List } from '@lucide/vue'
 import { useI18n } from 'vue-i18n'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { ConfirmDialog } from '@/components/ui/dialog'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { EdgeFade } from '@/components/ui/edge-fade'
 import { dirNameOf } from '@taiji/ui'
-import { collectNamedProjectIds, sessionBelongsToProject } from '@/composables/logic/project-session'
 import { isSessionCompleted } from '@/composables/logic/sessionStatus'
 import { registerModalSurface } from '@/composables/features/app/modal-surface-registry'
 import { useProjectStore } from '@/stores/project'
+import { useProjectGroups, type ProjectGroupVM, type SidebarSessionMode } from '@/composables/features/sidebar/useProjectGroups'
+import ProjectGroup from './ProjectGroup.vue'
 import SessionItem from './SessionItem.vue'
 
 const { t } = useI18n()
 const projectStore = useProjectStore()
 
 const props = defineProps<{
-  /** 按 cwd 分组的会话（D7，对齐后端 SessionGroup[]） */
+  /** 按 cwd 分组的会话（对齐后端 SessionGroup[]，全量、不预过滤——分组归属在本组件按项目切分） */
   groups: SessionGroup[]
   activeId: string | null
-  /** 派生状态点（D6），由容器注入 useSessionDerivations.derivedStatus */
+  /** 派生状态点，由容器注入 useSessionDerivations.derivedStatus */
   statusOf: (id: string) => DerivedStatus
 }>()
 
@@ -222,73 +302,22 @@ const emit = defineEmits<{
   deleteFolder: [cwd: string]
   /** 归入项目（D14 语义修正）：透传 SessionItem 的 setProject */
   setProject: [{ sessionId: string; projectId: string }]
-  /** 查看父 session（agent-managed-session U8）：透传 SessionItem 的 navigateParent，
-   *  跳转接线（select 该父 session）由上层 Sidebar/store 完成。 */
+  /** 查看父 session（agent-managed-session U8）：透传 SessionItem 的 navigateParent */
   navigateParent: [parentAgentSessionId: string]
   /** 强制退出（两段确认后）：透传 SessionItem 的 forceQuit，Sidebar 接 sessionApi.forceQuit */
   forceQuit: [sessionId: string]
 }>()
 
-/**
- * 按 activeProject 过滤后的分组（D14 语义修正 2026-08-04，SSOT 见 shared/project.ts）。
- *
- * 过滤粒度是 **session 级**：同一 cwd 组内可混合不同归属的 session（project 可跨目录，
- * 同一目录下不同 session 可服务不同 project），按 session.projectId 逐条匹配后重组分组。
- *
- * 过滤规则本体已提取到 sessionBelongsToProject（composables/logic/project-session.ts SSOT），
- * ProjectSwitcher 徽章计数消费同一函数——保证徽章数字与点击后本列表实际显示数恒一致。
- *
- * 过滤后无匹配 → totalCount=0 走空态（「暂无会话」+ 新建按钮）。
- */
-const visibleGroups = computed<SessionGroup[]>(() => {
-  const pid = projectStore.activeProjectId
-  const isDefault = projectStore.isDefaultProject
-  const knownIds = collectNamedProjectIds(projectStore.projects)
-  const matches = (s: SessionGroup['sessions'][number]): boolean =>
-    sessionBelongsToProject(s, pid, isDefault, knownIds)
-  return props.groups
-    .map((g) => ({ cwd: g.cwd, sessions: g.sessions.filter(matches) }))
-    .filter((g) => g.sessions.length > 0)
-})
-
-/** 全部 session 总数（空态判定，跨组汇总） */
-const totalCount = computed(() =>
-  visibleGroups.value.reduce((sum, g) => sum + g.sessions.length, 0),
-)
-
-/**
- * A 平铺模式的会话序：runtime 组序展平（A13/U20 排序唯一定义点 sessionsInRuntimeGroupOrder，
- * 组间序 + 组内序都不重排）——与 C 分组模式共用同一权威序，客户端零重排；壳内禁止自写排序
- * （core store.ts 排序谓词注释的显式约束）。输入取可见分组（visibleGroups），
- * 项目过滤在两种模式下同样生效。
- */
-const flatSessions = computed<SessionSummary[]>(() => sessionsInRuntimeGroupOrder(visibleGroups.value))
-
-/**
- * folder 删除可用性（review MF-2）：组内可见 session 数 < 该 cwd 全量 session 数时隐藏删除按钮。
- * 项目过滤按 session.projectId 逐条过滤（同 cwd 跨项目是模型常态），而 deleteFolder →
- * api.removeByCwd(cwd) 是项目无关的全量删除——过滤态下删除会连带删掉不可见的 session，
- * 且 header 计数（过滤后）会误导「删 1 个实际删 N 个」。全量数从未过滤的 props.groups 取，
- * 不改 runtime removeByCwd 语义。
- */
-function isFolderDeleteAvailable(cwd: string): boolean {
-  const total = props.groups.find((g) => g.cwd === cwd)?.sessions.length ?? 0
-  const visible = visibleGroups.value.find((g) => g.cwd === cwd)?.sessions.length ?? 0
-  return total === visible
-}
 
 /**
  * 子会话计数（D9 中性计数徒标）：按 parentAgentSessionId 分组计数（零新协议，纯内存推导）。
  * 口径 = **未完成数**（判据见 sessionStatus.ts 的 isSessionCompleted）：绿点（idle/done）
- * 不予计入，active / error / stopped / dead 都算——与徒标「还有多少未完成」的阅读预期一致，
- * 不再显示子会话总数。
- * 取可见分组（visibleGroups）计数——徒标与屏幕上实际可扫读的行保持一致（项目过滤下不会
- * 报出不可见子会话）。fork 分支走 parentSession 血缘，不计数：它已在扁平列表逐行可见，
- * 无需计数补偿（只有 agent 子会话在 project 视图下可能被遗漏）。
+ * 不予计入，active / error / stopped / dead 都算。取全量 groups 计数——锚定分组形态下
+ * 全部会话行都已挂载（折叠组体常驻 DOM），跨项目的 agent 子会话同样可见可数。
  */
 const childCountByParent = computed<Map<string, number>>(() => {
   const counts = new Map<string, number>()
-  for (const g of visibleGroups.value) {
+  for (const g of props.groups) {
     for (const s of g.sessions) {
       const parent = s.parentAgentSessionId
       if (!parent) continue
@@ -307,22 +336,33 @@ function childCountOf(s: SessionSummary): number {
 /**
  * 反查分支 session 的父 session label（P3 修复血缘显示）。
  *
- * SessionItem 模板用 `session.parentLabel || session.parentSession` 展示血缘，但此前 SessionList
- * 从未传 parentLabel → 实际显示 parentSession（文件路径或 UUID，不可读）。本 helper 按
+ * SessionItem 模板用 `session.parentLabel || session.parentSession` 展示血缘，本 helper 按
  * session.parentSession 反查父 session，取其 label 注入 parentLabel。
  *
  * 匹配规则（FR-20 双键兜底）：parentSession 可能是父的 sessionFile（活跃 session
  * 落盘路径）或父的 id（源未落盘时用 sessionId 作血缘键），两种 key 取并集保证命中。
- * 仅在当前 session 所在组内查找（分支与父同 cwd，不需跨组扫描）；无父（parentSession 空）或
- * 父不在当前分组返回空串，SessionItem 回退到 parentSession 原值。
+ * 仅在当前 session 所在 cwd 组内查找（分支与父同 cwd）；无父或父不在同组返回空串，
+ * SessionItem 回退到 parentSession 原值。
  */
 function parentLabelOf(s: SessionSummary): string {
   if (!s.parentSession) return ''
-  const parent = visibleGroups.value
+  const parent = props.groups
     .filter((g) => g.cwd === s.cwd)
     .flatMap((g) => g.sessions)
     .find((p) => p.sessionFile === s.parentSession || p.id === s.parentSession)
   return parent?.label ?? ''
+}
+
+/**
+ * folder 删除可用性（review MF-2，项目分组版）：该 cwd 在**此项目分组内**的可见 session 数
+ * < 该 cwd 全量 session 数时隐藏删除按钮。removeByCwd 是 cwd 全量删除（项目无关）——
+ * 同一 cwd 的 session 可散布在多个项目分组（按 session.projectId 逐条切分），任一分组内
+ * 只显示子集；仅当某分组恰好包含该 cwd 全量会话时点删除才不会连带删掉不可见 session。
+ */
+function isFolderDeleteAvailable(pg: ProjectGroupVM, cwd: string): boolean {
+  const total = props.groups.find((g) => g.cwd === cwd)?.sessions.length ?? 0
+  const visible = pg.dirs.find((g) => g.cwd === cwd)?.sessions.length ?? 0
+  return total > 0 && total === visible
 }
 
 /** 单一 Esc 监听器——避免每个 SessionItem 各自注册 window keydown listener（N 项 N 个监听器）。
@@ -342,8 +382,7 @@ provide('sessionItemConfirmingSet', itemConfirmingSet)
 /**
  * folder 维度删除的两段式确认态（与 SessionItem.confirming 同范式）。
  * 存当前确认的 cwd（同时只允许一个 folder 处于确认态）；二次点击同 cwd 才 emit deleteFolder。
- * Esc / mouseleave / 点击外部（onClickOutside）复位——folder 按钮直接用本组件持有的 escCount
- * 同源 ref，不需 inject（SessionList 是 provide 源头）。
+ * Esc / mouseleave / 点击外部复位。
  */
 const folderConfirmingCwd = ref<string | null>(null)
 function onFolderRemoveClick(cwd: string): void {
@@ -359,10 +398,7 @@ function onFolderMouseLeave(cwd: string): void {
   if (folderConfirmingCwd.value === cwd) folderConfirmingCwd.value = null
 }
 
-// ── N8 A/C 双模式（ui-optimize-unified 决策 9）──
-
-/** 侧栏会话列表展示模式：A = 平铺单行（默认）/ C = 目录分组折叠 */
-type SidebarSessionMode = 'flat' | 'groups'
+// ── A/C 双模式（N8 延续：flat = 锚定聚焦 / groups = 目录浏览态；类型来自 useProjectGroups）──
 
 /** 模式持久化键（与 useDrawerSplitWidth 的 `taiji:` 前缀 UI 偏好同通道、同 localStorage 直存形态） */
 const SESSION_MODE_KEY = 'taiji:sidebar-session-mode'
@@ -374,7 +410,7 @@ function loadSidebarSessionMode(): SidebarSessionMode {
 
 const mode = ref<SidebarSessionMode>(loadSidebarSessionMode())
 
-/** 切换模式并持久化；离开 C 模式时复位组头删除确认态（组头随模式卸载，确认态不留残） */
+/** 切换模式并持久化；离开目录模式时复位组头删除确认态（组头随模式卸载，确认态不留残） */
 function setMode(next: SidebarSessionMode): void {
   if (mode.value === next) return
   mode.value = next
@@ -382,20 +418,45 @@ function setMode(next: SidebarSessionMode): void {
   localStorage.setItem(SESSION_MODE_KEY, next)
 }
 
+// ── 项目分组派生与动作（useProjectGroups：归属切分 / 组序 / 锚定交互 / 新建草稿流 /
+//    重命名与删除确认态；切模式复位 folderConfirmingCwd 的联动保留在本组件 setMode）──
+const {
+  projectGroups,
+  totalCount,
+  curOpen,
+  dirClosed,
+  onGroupHeadClick,
+  onCreateTaskIn,
+  deleteOpen,
+  pendingDelete,
+  requestDelete,
+  confirmDelete,
+  onRenameCommit,
+  creating,
+  draft,
+  createInputRef,
+  startCreate,
+  commitCreate,
+  onDraftBlur,
+  cancelCreate,
+} = useProjectGroups({
+  groups: () => props.groups,
+  mode,
+  onNewSession: () => emit('newSession'),
+})
+
 watch(escCount, () => {
   if (folderConfirmingCwd.value) folderConfirmingCwd.value = null
 })
 
 /**
- * S4：点击 folder 确认按钮外部时复位确认态（与 SessionItem.onClickOutside 同范式）。
+ * 点击 folder 确认按钮外部时复位确认态（与 SessionItem.onClickOutside 同范式）。
  * folder 标题行处于 v-for 循环（多个 folder），不便逐项挂 onClickOutside ref，故用
  * 单一 window pointerdown 监听（pointerdown 先于 click，比 click 更早收口确认态）。
  *
  * 同级 folder 按钮冲突规避：点击另一 folder 的删除按钮时，该按钮的 @click.stop 会切
- * folderConfirmingCwd 到新 cwd。若此处无条件复位 '' 会覆盖新值。故只在「点击目标不在任何
+ * folderConfirmingCwd 到新 cwd。若此处无条件复位会覆盖新值。故只在「点击目标不在任何
  * folder 删除按钮内」时复位——新 cwd 的切换由 onFolderRemoveClick 自行处理，互不干扰。
- * 用 [data-testid="folder-delete-btn"] 锚定 folder 删除按钮（S5 前置 testid），与 SessionItem
- * 的 session 删除按钮 testid 区分。
  */
 useEventListener(window, 'pointerdown', (e: PointerEvent) => {
   if (!folderConfirmingCwd.value) return
@@ -417,7 +478,5 @@ const disposeSurfaceRegistration = registerModalSurface({
   isOpen: anyDeleteConfirming,
 })
 onBeforeUnmount(disposeSurfaceRegistration)
-
-// 显式声明 props 已读（避免某些 lint 规则误报未使用）。
-void props
 </script>
+

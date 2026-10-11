@@ -81,11 +81,11 @@ describe('N8 默认平铺（A 模式）', () => {
     expect(wrapper.text()).toContain('会话 b1')
   })
 
-  it('区头显示「最近会话」标题 + 会话计数', () => {
+  it('区头显示「项目与会话」标题 + 全量会话计数', () => {
     const wrapper = mountList()
     const header = wrapper.find('[data-testid="session-list-header"]')
     expect(header.exists()).toBe(true)
-    expect(header.text()).toContain('最近会话')
+    expect(header.text()).toContain('项目与会话')
     expect(header.text()).toContain('3')
   })
 })

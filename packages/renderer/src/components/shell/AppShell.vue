@@ -11,7 +11,7 @@
        win/linux 是不透明方形窗口，应用内圆角只会产生四角色差小方块，故非 mac 不渲染该类（类绑定，拓扑测试两态断言）。
        窗口侧不加任何圆角配置键（roundedCorners 默认即 true 是 no-op，已否决）。 -->
   <div
-    class="app-shell relative flex h-screen w-screen gap-2 overflow-hidden bg-bg py-1 pr-1"
+    class="app-shell relative flex h-screen w-screen gap-1 overflow-hidden bg-bg py-1 pr-1"
     :class="[isMac ? 'rounded-[10px]' : '', sidebar.collapsed ? '!gap-0' : '']"
     data-testid="app-shell"
   >

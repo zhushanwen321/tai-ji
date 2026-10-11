@@ -230,7 +230,7 @@ export function useSidebarSessionActions(options: UseSidebarSessionActionsOption
       await assignSessionToProject(payload.sessionId, payload.projectId)
       const name = payload.projectId
         ? useProjectStore().projects.find((p) => p.id === payload.projectId)?.name || payload.projectId
-        : t('sidebar.projectSwitcher.defaultName')
+        : t('sidebar.projectGroup.defaultName')
       toastInfo(t('sidebar.movedToProject', { name }))
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)

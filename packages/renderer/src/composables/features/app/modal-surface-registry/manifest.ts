@@ -39,7 +39,7 @@ export type ModalSurfaceFamily =
   | 'companion-band'
   /** FormOverlay（插件表单 Panel 内覆盖，可能带未提交输入） */
   | 'form-overlay'
-  /** 弹出层族（PopoverContent / SelectContent / SessionItemContextMenu / ProjectSwitcher） */
+  /** 弹出层族（PopoverContent / SelectContent / SessionItemContextMenu） */
   | 'popover-layer'
   /** ToastContainer（非阻塞通知，不消费 Esc） */
   | 'toast'
@@ -181,13 +181,6 @@ export const MODAL_SURFACE_MANIFEST = [
     kind: 'member',
     zAnchors: [],
     basis: '§6.7 表：弹出层族（右键菜单；z 已降到 --z-popover:10，低于基线阈值 1000，不再持 ≥1000 锚）',
-  },
-  {
-    id: 'project-switcher-menu',
-    family: 'popover-layer',
-    kind: 'member',
-    zAnchors: [],
-    basis: '§6.7 表：弹出层族（项目切换菜单；z 已降到 --z-popover:10，低于基线阈值 1000，不再持 ≥1000 锚——MF-2-14 对齐 demo .ctxmenu 梯队）',
   },
   {
     id: 'toast-container',

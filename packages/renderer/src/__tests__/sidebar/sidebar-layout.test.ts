@@ -32,7 +32,7 @@ describe('D4: SessionItem hover 按钮定位', () => {
     }
   }
 
-  it('hover 按钮容器定位在行右缘垂直居中（demo .si-acts 契约）', () => {
+  it('hover 按钮容器覆盖行右侧定宽槽（2026-10-11 裁决：absolute inset-0 覆盖「点+时间」槽，不遮名称）', () => {
     const wrapper = mount(SessionItem, {
       props: {
         session: makeSession(),
@@ -40,12 +40,19 @@ describe('D4: SessionItem hover 按钮定位', () => {
         status: 'done' as never,
       },
     })
-    // demo .si-acts 契约：absolute right-[6px] top-1/2 -translate-y-1/2 gap-[2px]（垂直居中右侧）。
+    // 契约：Actions 容器 = absolute inset-0 justify-end（覆盖 Display 右槽 58px，槽内
+    // meta 悬停淡出）；名称块 flex-1 min-w-0 在槽左缘截断，钮构造性不遮名称。
     // 用 [class~=] 单词匹配避开 happy-dom 对 class 选择器中点/方括号转义的脆弱性。
-    const actionsContainer = wrapper.find('.absolute[class~="top-1/2"][class~="right-[6px]"]')
+    const actionsContainer = wrapper.find('.absolute[class~="inset-0"][class~="justify-end"]')
     expect(actionsContainer.exists()).toBe(true)
-    expect(actionsContainer.classes()).toContain('-translate-y-1/2')
     expect(actionsContainer.classes()).toContain('gap-[2px]')
+    // 右槽定宽 58px（三钮 18px×3 + gap 2×2 的覆盖预算）
+    const slot = wrapper.find('.relative[class~="w-[58px]"]')
+    expect(slot.exists()).toBe(true)
+    // 状态点在右槽内（时间左侧），不在名称块前（2026-10-11 裁决改位）
+    expect(slot.find('[data-testid="session-icon"]').exists()).toBe(true)
+    const nameBlock = wrapper.find('.min-w-0.flex-1')
+    expect(nameBlock.find('[data-testid="session-icon"]').exists()).toBe(false)
   })
 })
 

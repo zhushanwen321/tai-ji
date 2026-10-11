@@ -77,11 +77,18 @@ export const LOCAL_ESC_CONSUMERS = [
     basis: '元素级监听（冒泡先达）',
   },
   {
-    id: 'project-switcher-create-input',
-    file: 'packages/renderer/src/components/sidebar/ProjectSwitcher.vue',
+    id: 'session-list-create-input',
+    file: 'packages/renderer/src/components/sidebar/SessionList.vue',
     tier: 'first',
     contract: 'prevent-default',
-    basis: '元素级监听（@keydown.esc.prevent 新建项目输入 Esc 取消，冒泡先达；.prevent 即 defaultPrevented 约定已落实）——2026-10-03 终态同步补登：模板修饰符形态不在早期 Escape 字面量扫描面（F1-15 盲区），scanEscConsumers 三形态扫描补收',
+    basis: '元素级监听（@keydown.esc.stop.prevent 新建项目输入 Esc 取消，冒泡先达；.stop 不入 window bubble，defaultPrevented 约定已落实）——R6.2 锚定分组（2026-10-11）：原 ProjectSwitcher 创建输入随卡片网格退役，入口迁至 SessionList（区头「+」点击 → 列表顶部草稿行输入态）',
+  },
+  {
+    id: 'project-group-rename-input',
+    file: 'packages/renderer/src/components/sidebar/ProjectGroup.vue',
+    tier: 'first',
+    contract: 'prevent-default',
+    basis: '元素级监听（@keydown.esc.stop.prevent 组头行内重命名 Esc 取消，冒泡先达；.stop 不入 window bubble，defaultPrevented 约定已落实）——R6.2 锚定分组（2026-10-11）新增',
   },
   {
     id: 'find-bar',

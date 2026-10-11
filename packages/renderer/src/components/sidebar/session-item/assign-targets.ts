@@ -23,7 +23,7 @@ export function useAssignTargets(): ComputedRef<AssignTarget[]> {
   const projectStore = useProjectStore()
   const { t } = useI18n()
   return computed(() => [
-    { id: '', name: t('sidebar.projectSwitcher.defaultName') },
+    { id: '', name: t('sidebar.projectGroup.defaultName') },
     ...projectStore.projects.filter((p) => p.name).map((p) => ({ id: p.id, name: p.name })),
   ])
 }

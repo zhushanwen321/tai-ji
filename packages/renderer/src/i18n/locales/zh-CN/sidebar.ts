@@ -77,12 +77,14 @@ export default {
     childCount: '{n} 个子会话未完成',
   },
   sessionList: {
-    empty: '暂无会话',
-    newSession: '新建会话',
+    // R6.2 锚定分组（2026-10-11）：区头标题 + 组内空态 + 组头「+」提示；
+    // 原「最近会话」区头与全局空态（empty/newSession）随项目分组形态退役
+    header: '项目与会话',
+    groupEmpty: '暂无会话，点组头「+」在此新建任务',
+    newSessionInProject: '在此项目新建任务',
     newSessionInFolder: '在此目录新建会话',
     deleteFolderConfirm: '确认删除此文件夹下所有会话？',
-    // N8 A/C 双模式（ui-optimize-unified 决策 9）：区头标题 + 双段图标开关的模式名（title 悬停提示）
-    header: '最近会话',
+    // N8 A/C 双模式（ui-optimize-unified 决策 9）：双段图标开关的模式名（title 悬停提示）
     modeFlat: '平铺列表',
     modeGroup: '按目录分组',
   },
@@ -103,10 +105,13 @@ export default {
     // tablist 容器 aria-label（spec sidebar §3.1）
     viewLabel: '侧栏视图',
   },
-  projectSwitcher: {
+  // R6.2 锚定分组（原 projectSwitcher.* 键段随卡片网格退役更名：项目管理面 = 会话视图内项目分组）
+  projectGroup: {
     defaultName: '默认项目',
+    currentChip: '当前',
     newProject: '新建项目',
-    namePlaceholder: '项目名称',
+    namePlaceholder: '项目名称，Enter 确认',
+    renameProject: '重命名项目',
     deleteProject: '删除项目',
     deleteTitle: '删除项目',
     // 二次确认写明后果（spec sidebar §3.7：「N 个会话将归回默认项目，项目本身将被删除」）

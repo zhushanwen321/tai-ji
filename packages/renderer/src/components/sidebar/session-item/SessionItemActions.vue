@@ -6,12 +6,14 @@
     （reset 通道：根 div mouseleave / watch active / Esc / onClickOutside 的锚点
     都在主组件），经 v-model:confirming 双向。
   -->
-  <!-- 位置右缘垂直居中（demo .si-acts 权威：right 6px / top 50% 平移 / gap 2px）；
+  <!-- 位置 = Display 右槽覆盖层（2026-10-11 用户裁决：absolute inset-0 覆盖「点 + 时间」
+       定宽槽、justify-end 贴右；槽定宽 58px 由 Display 声明，名称在槽左缘截断构造性不受遮）。
        钮序 = 重命名 → 删除 → 归入项目（demo 重设计 2026-10-10）。删除走两段式确认。
        三钮 tabindex=-1（spec §3.4：键盘不走悬停钮，走行 Tab → Enter/Space → ContextMenu
-       右键菜单通道）+ @pointerdown.stop（demo 同款：按下不触发行侧副作用） -->
+       右键菜单通道）+ @pointerdown.stop（demo 同款：按下不触发行侧副作用）。
+       钮 18px 视觉（缩宽裁决）+ after 伪元素外扩 3px = 24px 热区下限口径（同 .pp-act 技法）。 -->
   <div
-    class="absolute right-[6px] top-1/2 -translate-y-1/2 gap-[2px]"
+    class="absolute inset-0 justify-end gap-[2px]"
     :class="confirming ? 'flex' : 'flex opacity-0 group-hover/item:opacity-100 group-focus-within/item:opacity-100'"
   >
     <Button
@@ -19,7 +21,7 @@
       variant="ghost"
       size="icon"
       tabindex="-1"
-      class="size-[20px] rounded-sm text-neutral-dim hover:bg-surface-hover hover:text-neutral-fg"
+      class="relative size-[18px] rounded-sm text-neutral-dim after:absolute after:inset-[-3px] after:content-[''] hover:bg-surface-hover hover:text-neutral-fg"
       :title="t('sidebar.sessionItem.rename')"
       @click.stop="emit('rename', session.id)"
       @pointerdown.stop
@@ -30,9 +32,10 @@
       variant="ghost"
       size="icon"
       tabindex="-1"
+      class="relative size-[18px] rounded-sm after:absolute after:inset-[-3px] after:content-['']"
       :class="confirming
-        ? 'size-[20px] rounded-sm bg-danger text-neutral-fg'
-        : 'size-[20px] rounded-sm text-neutral-dim hover:bg-surface-hover hover:text-danger'"
+        ? 'bg-danger text-neutral-fg'
+        : 'text-neutral-dim hover:bg-surface-hover hover:text-danger'"
       :title="confirming ? t('sidebar.sessionItem.deleteConfirm') : t('sidebar.sessionItem.delete')"
       @click.stop="onRemoveClick"
       @pointerdown.stop
@@ -52,7 +55,7 @@
           size="icon"
           tabindex="-1"
           data-testid="assign-project-btn"
-          class="size-[20px] rounded-sm text-neutral-dim hover:bg-surface-hover hover:text-neutral-fg"
+          class="relative size-[18px] rounded-sm text-neutral-dim after:absolute after:inset-[-3px] after:content-[''] hover:bg-surface-hover hover:text-neutral-fg"
           :title="t('sidebar.sessionItem.assignToProject')"
           @click.stop="assignOpen = true"
           @pointerdown.stop
@@ -77,7 +80,7 @@
                 class="size-[11px] text-accent"
               />
             </span>
-            <span class="min-w-0 truncate">{{ p.name || t('sidebar.projectSwitcher.defaultName') }}</span>
+            <span class="min-w-0 truncate">{{ p.name || t('sidebar.projectGroup.defaultName') }}</span>
           </Button>
         </div>
       </PopoverContent>

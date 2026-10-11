@@ -1,37 +1,14 @@
 <template>
   <!--
-    SessionItem 条目展示子块：7px 状态 icon + unread 圆点 + label + 徽标 + 时间（单行，
+    SessionItem 条目展示子块：label + 徽标（左）+ 右侧固定槽（7px 状态 icon + 时间）（单行，
     demo .si 形态——分支/cwd/fork 血缘等元信息归 hover 详情卡展示，列表行不占副行）。
     纯展示（零 emit）：unread / markedDone / fresh 徽标读模块级响应式集合，
     toggle 由 Actions 子组件执行，此处响应式自动跟随。
-    状态信号集中在左侧 7px 单一 icon（未读/旋转箭头/空心圆/实心圆/空白），
-    右侧仅保留时间文字。未读 = accent 实心点替换状态 icon（替换式，不叠加）。
+    [2026-10-11 用户裁决改版] 状态点自名称左侧移到右侧时间左边（名称贴左缩进、贴近项目
+    左线）；右侧槽定宽 58px（容纳悬停三钮 18px×3 + 2px 间隙），名称块 flex-1 min-w-0 截断
+    ——悬停钮以 absolute inset-0 覆盖槽内「点 + 时间」（Actions 子组件经默认 slot 注入），
+    构造性保证不遮名称。槽内 meta 与钮互斥显隐（opacity 切换，占位不变零布局跳动）。
   -->
-  <!-- 左侧 7px 状态 icon：unread(未读替换) / spinning(旋转箭头) / hollow(空心圆) / waiting / error /
-       done / stopped / dead / 空。未读为替换式：accent 实心点本体取代状态 icon——叠加式
-       （同尺寸 7px 点偏移 2px + 镂空环）几何上盖不全 7px 状态点，左下必露底层点月牙边。
-       行容器 items-center（demo .si align-items:center）垂直居中，icon 不再手补 margin。 -->
-  <div class="size-[7px] shrink-0" data-testid="session-icon">
-    <!-- unread: 未读 → accent 实心圆（替换式，demo 右抽屉 .unread .dot 语言） -->
-    <span v-if="iconKind === 'unread'" data-testid="session-unread-dot" class="block size-[7px] rounded-full bg-accent" />
-    <!-- spinning: streaming / compacting / working / retrying → 旋转箭头（accent 边框 + 透明顶边） -->
-    <span v-else-if="iconKind === 'spinning'" class="block size-[7px] animate-spin rounded-full border-[1.5px] border-accent border-t-transparent" />
-    <!-- hollow: pending → accent 空心圆 -->
-    <span v-else-if="iconKind === 'hollow'" class="block size-[7px] rounded-full border-[1.5px] border-accent" />
-    <!-- hollow-dim: stopped → dim 空心圆 -->
-    <span v-else-if="iconKind === 'hollow-dim'" class="block size-[7px] rounded-full border-[1.5px] border-neutral-dim opacity-60" />
-    <!-- waiting → warn 实心圆 -->
-    <span v-else-if="iconKind === 'waiting'" class="block size-[7px] rounded-full bg-warn" />
-    <!-- error → danger 实心圆 -->
-    <span v-else-if="iconKind === 'error'" class="block size-[7px] rounded-full bg-danger" />
-    <!-- done → success 实心圆 90% -->
-    <span v-else-if="iconKind === 'done'" class="block size-[7px] rounded-full bg-success opacity-90" />
-    <!-- dead → neutral-dim 实心圆 50% -->
-    <span v-else-if="iconKind === 'dead'" class="block size-[7px] rounded-full bg-neutral-dim opacity-50" />
-    <!-- 已归档+已读 → 空（无 icon） -->
-    <span v-else aria-hidden="true" />
-  </div>
-
   <!-- 主体：label + sub（fork 血缘 / branch）。label 形态 = demo .si .nm（13px fw-mid fg-2，
        选中态 fg——active 由父组件透传，demo .si.on 行级 color 覆盖的等价实现）。 -->
   <div class="min-w-0 flex-1">
@@ -42,7 +19,7 @@
       <span class="min-w-0 flex-1 truncate">{{ session.label }}</span>
       <!-- agent-spawned badge（U8）：accent 低饱和形态（bg-accent-soft 底 + accent 字）；
            尺寸/圆角对齐同目录 FileTreeRow badge（rounded-sm px-1 py-0.5 text-[length:var(--text-3xs)]），
-           不抢左侧状态 icon 焦点 -->
+           不抢右侧状态点焦点 -->
       <span
         v-if="isAgentSpawned"
         data-testid="session-agent-badge"
@@ -61,7 +38,8 @@
   </div>
 
   <!-- 右侧：子会话计数 chip（描边 + 层叠图标 + 数字；仅父条目有子会话时渲染，只读中性色，
-       不用 accent——accent 已被 [AI] 来源徒标占用）+ 时间文字。 -->
+       不用 accent——accent 已被 [AI] 来源徒标占用）。悬停钮只覆盖右槽（点 + 时间），
+       chip 在槽外不受覆盖。 -->
   <span
     v-if="childCount > 0"
     data-testid="session-child-count"
@@ -71,9 +49,36 @@
     <Layers class="size-[9px] shrink-0" />
     <span>{{ childCount }}</span>
   </span>
-  <span
-    class="shrink-0 font-mono text-[length:var(--text-2xs)] leading-[1.55] text-neutral-dim"
-  >{{ timeLabel }}</span>
+
+  <!-- 右侧固定槽（用户裁决 2026-10-11）：定宽 58px = 悬停三钮（18px×3 + gap 2×2）宽，
+       点 + 时间右对齐常驻；悬停/聚焦时 meta 淡出、Actions 钮（默认 slot 注入，absolute
+       inset-0 覆盖本槽）淡入——显隐走 opacity，占位恒定零布局跳动；名称块在槽左缘截断，
+       钮构造性不遮名称。 -->
+  <div class="relative flex h-full w-[58px] shrink-0 items-center justify-end gap-[8px]">
+    <div
+      class="flex items-center gap-[8px]"
+      data-testid="session-meta"
+      :class="confirming ? 'opacity-0' : 'group-hover/item:opacity-0 group-focus-within/item:opacity-0'"
+    >
+      <!-- 7px 状态 icon（原名称左侧位右移至此）：unread(未读替换) / spinning(旋转箭头) /
+           hollow(空心圆) / waiting / error / done / stopped / dead / 空。未读为替换式：
+           accent 实心点本体取代状态 icon——叠加式几何上盖不全 7px 状态点，左下必露底层点月牙边。 -->
+      <span v-if="iconKind === 'unread'" data-testid="session-unread-dot" class="block size-[7px] shrink-0 rounded-full bg-accent" />
+      <span v-else-if="iconKind === 'spinning'" data-testid="session-icon" class="block size-[7px] shrink-0 animate-spin rounded-full border-[1.5px] border-accent border-t-transparent" />
+      <span v-else-if="iconKind === 'hollow'" data-testid="session-icon" class="block size-[7px] shrink-0 rounded-full border-[1.5px] border-accent" />
+      <span v-else-if="iconKind === 'hollow-dim'" data-testid="session-icon" class="block size-[7px] shrink-0 rounded-full border-[1.5px] border-neutral-dim opacity-60" />
+      <span v-else-if="iconKind === 'waiting'" data-testid="session-icon" class="block size-[7px] shrink-0 rounded-full bg-warn" />
+      <span v-else-if="iconKind === 'error'" data-testid="session-icon" class="block size-[7px] shrink-0 rounded-full bg-danger" />
+      <span v-else-if="iconKind === 'done'" data-testid="session-icon" class="block size-[7px] shrink-0 rounded-full bg-success opacity-90" />
+      <span v-else-if="iconKind === 'dead'" data-testid="session-icon" class="block size-[7px] shrink-0 rounded-full bg-neutral-dim opacity-50" />
+      <span v-else data-testid="session-icon" class="block size-[7px] shrink-0" aria-hidden="true" />
+      <span
+        class="shrink-0 font-mono text-[length:var(--text-2xs)] leading-[1.55] text-neutral-dim"
+      >{{ timeLabel }}</span>
+    </div>
+    <!-- 悬停操作钮注入点（SessionItemActions，absolute inset-0 覆盖本槽） -->
+    <slot />
+  </div>
 </template>
 
 <script setup lang="ts">
@@ -87,7 +92,7 @@ import { unreadByBranch } from '@/composables/features/fork-handoff/useForkBranc
 import { isImportedFresh } from '@/composables/features/sidebar/useImportSession'
 import type { SessionItemSession } from './types'
 
-/** 左侧状态 icon 种类（7px 单一 icon 范式）。 */
+/** 左侧（现右槽）状态 icon 种类（7px 单一 icon 范式）。 */
 type IconKind = 'unread' | 'spinning' | 'hollow' | 'hollow-dim' | 'waiting' | 'error' | 'done' | 'dead' | 'empty'
 
 const props = withDefaults(defineProps<{
@@ -97,6 +102,8 @@ const props = withDefaults(defineProps<{
   childCount?: number
   /** 选中态（SessionItem 透传）：标题字色提档 fg-2 → fg（demo .si.on 行级覆盖） */
   active?: boolean
+  /** 删除两段确认态（SessionItem 透传 Actions 的同一状态）：true 时右槽 meta 让位 */
+  confirming?: boolean
 }>(), { childCount: 0 })
 
 const { t } = useI18n()
@@ -121,7 +128,7 @@ const markedDone = computed(() => isMarkedDone(props.session.id))
 const freshImportState = computed(() => isImportedFresh(props.session.id))
 
 /**
- * 左侧 7px 状态 icon 映射（单一 icon 范式）。
+ * 状态 icon 映射（单一 icon 范式，位次随裁决移至右槽）。
  * unread: 未读（后台完成 / fork 分支变更，两源合流）→ accent 实心圆替换状态 icon
  * spinning: streaming/compacting/working/retrying → 旋转箭头（accent 边框+透明顶边）
  * hollow: pending → accent 空心圆
@@ -130,7 +137,7 @@ const freshImportState = computed(() => isImportedFresh(props.session.id))
  * error: 出错 → danger 实心圆
  * done: 正常完成 → success 实心圆 90%
  * dead: 进程退出 → neutral-dim 实心圆 50%
- * empty: 已归档+已读 → 无 icon
+ * empty: 已归档+已读 → 无 icon（占位 7px 空白，保时间对齐稳定）
  */
 const iconKind = computed<IconKind>(() => {
   if (unread.value) return 'unread'

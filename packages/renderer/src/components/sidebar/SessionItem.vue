@@ -48,15 +48,17 @@
       @focusout="onDetailLeave"
       @mouseleave="confirming = false"
     >
-      <SessionItemDisplay :session="displaySession" :status="status" :child-count="childCount" :active="active" />
-
-      <SessionItemActions
-        v-model:confirming="confirming"
-        :session="session"
-        @delete="emit('delete', $event)"
-        @rename="emit('rename', $event)"
-        @set-project="emit('setProject', $event)"
-      />
+      <!-- 右槽与悬停钮：Actions 经默认 slot 注入 Display 右槽（absolute inset-0 覆盖点+时间，
+           2026-10-11 裁决：钮只覆盖槽区，名称由槽左缘截断构造性不受遮） -->
+      <SessionItemDisplay :session="displaySession" :status="status" :child-count="childCount" :active="active" :confirming="confirming">
+        <SessionItemActions
+          v-model:confirming="confirming"
+          :session="session"
+          @delete="emit('delete', $event)"
+          @rename="emit('rename', $event)"
+          @set-project="emit('setProject', $event)"
+        />
+      </SessionItemDisplay>
     </div>
   </SessionItemContextMenu>
 

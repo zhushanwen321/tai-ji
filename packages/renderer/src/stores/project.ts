@@ -1,7 +1,8 @@
 /**
- * Project store —— v6 D14 Project 一级导航的状态层（2026-08-04 语义修正 + 持久化迁移）。
+ * Project store —— v6 D14 Project 一级导航的状态层（2026-08-04 语义修正 + 持久化迁移；
+ * 2026-10-11 R6.2 锚定分组：排序改 lastUsedAt 稳定序 + renameProject，拖拽排序退役）。
  *
- * 职责：Project CRUD + activeProjectId 切换 + runtime 持久化（projects.json）。
+ * 职责：Project CRUD + activeProjectId 锚定切换 + runtime 持久化（projects.json）。
  *
  * 关系模型（SSOT 见 shared/project.ts + docs/architecture/project-session-model.md）：
  * Project 直接关联 Session（session.projectId，创建时归属，runtime sidecar 持久化）。
@@ -19,6 +20,7 @@ import { defineStore } from 'pinia'
 import { computed, ref, watch } from 'vue'
 import type { Project, ProjectStoreState } from '@taiji/shared'
 import { project as projectApi } from '@/api'
+import { isDefaultProjectOf } from '@/composables/logic/project-session'
 
 export const STORAGE_KEY = 'taiji:projects'
 export const DEFAULT_PROJECT_ID = 'proj-default'
@@ -81,25 +83,23 @@ export const useProjectStore = defineStore('project', () => {
   const isDefaultProject = computed(() => !activeProject.value.name)
 
   /**
-   * Project 列表渲染序（供 ProjectSwitcher 网格渲染，D7；名字沿用历史——曾按最近使用
-   * 排序，2026-09-02 起语义修正为「顺序完全由用户控制」）。
+   * 项目分组渲染序（R6.2 锚定分组，侧栏会话列表组序 SSOT；消费方 = SessionList 组列表
+   * + ImportSessionDialog 目标下拉——两处同序，下拉顺序与列表组序一致）。
    *
-   * 排序规则（任何自动因素不参与，active 置顶 / lastUsedAt 均已移除）：
-   *  1. 有 userOrder：按 userOrder 升序排前段——拖拽意图跨重启稳定；
-   *  2. 无 userOrder：按原数组顺序（projects.json 持久化序 / 创建序）稳定排后段——
-   *     新建项目 push 数组尾自然落在末尾。
-   * setActiveProject 只更新 lastUsedAt 留痕，不改变列表顺序（切换 ≠ 排序意图，点击
-   * 任何项目顺序均不变）；首次拖拽后 reorderProject 全量重编号，整表顺序固化。
-   * 默认项目（isDefault）同卡同权参与排序，无特殊待遇。
+   * 排序规则（用户裁决 2026-10-11「顺序稳定不置顶」）：
+   *  1. 默认项目（nameless）固定最后——未归类/孤儿 session 的兜底聚合恒在列表尾部；
+   *  2. 其余按 lastUsedAt 倒序（该字段仅创建时写入，见 shared/project.ts——因此组位置
+   *     对切换/使用动作完全稳定，锚定切换只改变展开态不重排）；
+   *  3. 同值用持久化序（原数组 index）稳定 tiebreaker（ES2019+ sort 稳定，此处显式化）。
    */
-  const recentProjects = computed<Project[]>(() => {
-    // userOrder 升序；未排序项视为 +∞ 殿后；同值（外部脏数据 / 同为 ∞）用原数组
-    // index 做稳定 tiebreaker
+  const orderedProjects = computed<Project[]>(() => {
     const indexed = projects.value.map((p, i) => ({ p, i }))
     indexed.sort((a, b) => {
-      const ao = a.p.userOrder ?? Number.MAX_SAFE_INTEGER
-      const bo = b.p.userOrder ?? Number.MAX_SAFE_INTEGER
-      return ao !== bo ? ao - bo : a.i - b.i
+      const ad = isDefaultProjectOf(a.p)
+      const bd = isDefaultProjectOf(b.p)
+      if (ad !== bd) return ad ? 1 : -1
+      if (a.p.lastUsedAt !== b.p.lastUsedAt) return b.p.lastUsedAt - a.p.lastUsedAt
+      return a.i - b.i
     })
     return indexed.map((x) => x.p)
   })
@@ -146,7 +146,7 @@ export const useProjectStore = defineStore('project', () => {
    * 被持久化回 projects.json，重启后 bug 依旧。
    * ① activeProjectId 失配（legacy 迁移残留 / projects.json 被外部编辑或跨实例残留，指向已删除
    *    项目）→ 回退：nameless 默认项 → 首个 → DEFAULT_PROJECT_ID。失配时 SessionList 过滤与
-   *    recentProjects 高亮消费原始 id，activeProject computed 兜底只覆盖显示层 → 会话列表空态
+   *    orderedProjects 高亮消费原始 id，activeProject computed 兜底只覆盖显示层 → 会话列表空态
    *    + 默认聚合进不去，且无自动恢复路径。
    * ② nameless 默认项缺失（legacy/外部数据）→ 补插 makeDefaultProject()：默认项目是未归类/孤儿
    *    session 的兜底聚合，缺失则默认项目视图永久不可达（makeDefaultProject 仅初始态，init 整体替换）。
@@ -155,7 +155,7 @@ export const useProjectStore = defineStore('project', () => {
   function normalizeLoadedProjects(): void {
     // ① 默认项目占用检查（[review S-1]）：按 id 判占用而非按 nameless——外部编辑把默认项改名
     //    （name 非空）时旧条件会 unshift 第二个同 id 项（重复 id 被 deep watch 全量持久化，
-    //    recentProjects 的 filter/find 语义错乱）。id 占用即默认项存在，改名不触发补插。
+    //    orderedProjects 的 filter/find 语义错乱）。id 占用即默认项存在，改名不触发补插。
     //    注：默认项被改名后不再 nameless，下方 stale-id 回退链 find(p=>!p.name) 会落到
     //    projects[0]（已收录在回退链「首个」档），行为可接受。
     if (!projects.value.some((p) => p.id === DEFAULT_PROJECT_ID)) {
@@ -211,13 +211,10 @@ export const useProjectStore = defineStore('project', () => {
   }
 
   function setActiveProject(id: string): void {
+    // 不更新 lastUsedAt：该字段是分组排序键且仅创建时写入（shared/project.ts）——切换
+    // 锚定若留痕会把被点组顶到最前，违反「顺序稳定不置顶」裁决（R6.2）。
     const target = projects.value.find((p) => p.id === id)
-    if (target) {
-      // 切换即「最近使用」：lastUsedAt 仅作持久化留痕，不驱动列表排序（点击不改顺序，
-      // deep watch 照常触发 save）
-      target.lastUsedAt = Date.now()
-      activeProjectId.value = id
-    }
+    if (target) activeProjectId.value = id
   }
 
   /** 新建 project：生成 id、push、设为活跃。返回新 id；空名不创建。 */
@@ -232,46 +229,21 @@ export const useProjectStore = defineStore('project', () => {
   }
 
   /**
-   * 拖拽/键盘 reorder 提交（D7 赋号语义：drop 位置密集重排，ProjectSwitcher 拖拽与方向键
-   * 共用此单一入口）。
-   *
-   * 算法：以 recentProjects 当前显示顺序为基准执行 splice（dragId 移到 targetId 位置），
-   * 然后把 splice 后的完整显示序全量密集重编号 0..n-1 写回（review MF-12）——不做 midpoint
-   * 稀疏编号，删除项目留下的空洞由下次 drop 自然消除。首次拖拽后整表顺序固化；
-   * 后续新增项目（无 userOrder）按创建序落在末尾，直到再次拖拽。
-   *
-   * 推演（覆盖验收关键场景）：
-   *  - 有序卡之间拖动：换位后整段重编 0..n-1；
-   *  - 无序卡拖到任意位置（含首位/中间）：落点即位次，连同其余卡一起全量编号；
-   *  - 全量定序保证显示序 ≡ splice 结果，无序卡被拖不再瞬移到网格边缘。
-   * 持久化：deep watch 感知 userOrder 原地写 → 全量 RPC save，无需额外调用。
+   * 重命名 project（组头行内输入框提交）。空名 / 未知 id 不动作。
+   * 默认项目（nameless）禁改名：默认项目的身份就是 nameless（isDefaultProjectOf 口径，
+   * 未归类/孤儿 session 的兜底聚合判据），改名会把它变成命名项目，孤儿从此无聚合可归。
+   * 与 removeProject 的默认项守卫同源（组件侧对默认组头不渲染重命名钮，双保险）。
    */
-  function reorderProject(dragId: string, targetId: string): void {
-    if (!dragId || dragId === targetId) return
-    const display = recentProjects.value
-    const from = display.findIndex((p) => p.id === dragId)
-    const to = display.findIndex((p) => p.id === targetId)
-    if (from === -1 || to === -1) return
-    const next = [...display]
-    const [dragged] = next.splice(from, 1)
-    // 插入位 = 移除后的 to：from>to（上移）时目标仍在 to，落目标前；from<to（下移）
-    // 时目标已左移到 to-1，落 to 即目标后——键盘 ↑/↓ 的相邻交换两个方向都成立
-    //（D↔E 互换语义对称），无需方向修正（曾试 `from<to?to:to-1`，to=0 时负索引 splice
-    // 尾插致错序，见 review MF-12 回归）。
-    next.splice(to, 0, dragged!)
-    // 全量定序（review MF-12）：把 splice 后的完整显示序固化为用户序（0..n-1）。
-    // 旧实现只 pin「旧有序段 ∪ 被拖卡」，无序卡片被拖时仅其自身获得 userOrder=0
-    // → 渲染时瞬移到用户序段头部（[A,B,C,D,E] 上移 D 实际显示 [D,A,B,C,E]），
-    // 且该错序被持久化。全量 pin 后显示序 ≡ splice 结果；后续新增项目（userOrder
-    // null）按创建序排在末尾，语义不变。
-    let order = 0
-    for (const p of next) {
-      projects.value.find((q) => q.id === p.id)!.userOrder = order
-      order++
-    }
+  function renameProject(id: string, name: string): void {
+    const trimmed = name.trim()
+    if (!trimmed) return
+    const target = projects.value.find((p) => p.id === id)
+    if (!target || isDefaultProjectOf(target)) return
+    target.name = trimmed
   }
 
-  /** 删除 project：移除；若删的是活跃则切到第一个；保底不删最后一个（UI 永远有项可显）。
+  /** 删除 project：移除；若删的是活跃则锚定回落默认项目并展开（spec sidebar §3.7：让归回的
+   *  会话直接可见）；保底不删最后一个（UI 永远有项可显）。
    *  删除不影响已归属该 project 的 session（归属在 session sidecar，project 删除后这些
    *  session 在展示层落入默认项目聚合——projectId 匹配不到任何命名 project）。
    *  [MANDATORY] 默认项目（DEFAULT_PROJECT_ID）不可删除（review MF-1）：默认项目是未归类/孤儿
@@ -284,9 +256,9 @@ export const useProjectStore = defineStore('project', () => {
     if (idx === -1) return
     projects.value.splice(idx, 1)
     if (activeProjectId.value === id) {
-      activeProjectId.value = projects.value[0]?.id ?? ''
+      activeProjectId.value = DEFAULT_PROJECT_ID
     }
   }
 
-  return { projects, activeProjectId, activeProject, isDefaultProject, recentProjects, loadState, loadError, init, setActiveProject, addProject, removeProject, reorderProject }
+  return { projects, activeProjectId, activeProject, isDefaultProject, orderedProjects, loadState, loadError, init, setActiveProject, addProject, renameProject, removeProject }
 })

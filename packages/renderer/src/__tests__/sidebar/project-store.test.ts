@@ -99,7 +99,7 @@ describe('Project store: 初始态与 init()', () => {
     const store = useProjectStore()
     await store.init()
 
-    // stale id 不再被 SessionList 过滤/recentProjects 高亮消费：回退到 nameless 默认项
+    // stale id 不再被 SessionList 分组/orderedProjects 高亮消费：回退到 nameless 默认项
     expect(store.activeProjectId).toBe(DEFAULT_PROJECT_ID)
     expect(store.isDefaultProject).toBe(true)
     // 归一化状态被 deep watch 持久化（重启不再复现 stale id）
@@ -125,7 +125,7 @@ describe('Project store: 初始态与 init()', () => {
 
   it('init()：默认项被外部改名（id 占用但 name 非空）→ 不补插第二个同 id 项（review S-1）', async () => {
     // 触发类与 MF-2 相同（projects.json 被外部编辑）：默认项改名 'General'，旧补插条件
-    // 查「无 nameless 项」会 unshift 第二个 id='proj-default' → 重复 id 被持久化 + recentProjects
+    // 查「无 nameless 项」会 unshift 第二个 id='proj-default' → 重复 id 被持久化 + orderedProjects
     // 的 filter/find 语义错乱。修复：按 id 占用判默认项存在。
     mockLoad.mockResolvedValue({
       projects: [makeProject('proj-default', 'General'), makeProject('proj-a', 'Alpha')],
@@ -231,18 +231,21 @@ describe('Project store: CRUD + 持久化', () => {
     expect(store.projects).toHaveLength(2)
   })
 
-  it('setActiveProject：切换 + lastUsedAt 更新；recentProjects 顺序不变（点击不改顺序）', () => {
+  it('setActiveProject：纯锚定切换——不改 lastUsedAt、orderedProjects 顺序不变（R6.2 不置顶）', () => {
     const store = useProjectStore()
     const a = store.addProject('A')
     const b = store.addProject('B')
+    // 同毫秒创建 lastUsedAt 相同（tiebreaker = 持久化序）；显式设键锁定倒序断言语义
+    store.projects.find((p) => p.id === a)!.lastUsedAt = 100
+    store.projects.find((p) => p.id === b)!.lastUsedAt = 200
     store.setActiveProject(a)
 
     expect(store.activeProjectId).toBe(a)
-    // 全员无 userOrder：显示序 = 数组序 [DEFAULT, A, B]，active a 不置顶
-    expect(store.recentProjects.map((p) => p.id)).toEqual([DEFAULT_PROJECT_ID, a, b])
+    // 命名段按 lastUsedAt 倒序（B 较新在前），默认项目固定最后
+    expect(store.orderedProjects.map((p) => p.id)).toEqual([b, a, DEFAULT_PROJECT_ID])
   })
 
-  it('setActiveProject 更新目标 lastUsedAt，不动其他项；addProject 新建时 lastUsedAt = 当前时间', () => {
+  it('setActiveProject 不更新 lastUsedAt（排序键仅创建时写入，shared/project.ts 契约）', () => {
     const store = useProjectStore()
     const a = store.addProject('A')
     const b = store.addProject('B')
@@ -251,13 +254,13 @@ describe('Project store: CRUD + 持久化', () => {
 
     store.setActiveProject(a)
 
-    expect(store.projects.find((p) => p.id === a)!.lastUsedAt).toBeGreaterThanOrEqual(aBefore)
+    expect(store.projects.find((p) => p.id === a)!.lastUsedAt).toBe(aBefore) // 不 bump
     expect(store.projects.find((p) => p.id === b)!.lastUsedAt).toBe(bBefore) // 未动
     // addProject 用 Date.now()（同毫秒可能相等，断言不小于创建前时间即可）
     expect(store.projects.find((p) => p.id === b)!.lastUsedAt).toBeGreaterThan(0)
   })
 
-  it('removeProject：默认项目不可删；保底不删最后一个；删活跃项自动切首个', () => {
+  it('removeProject：默认项目不可删；保底不删最后一个；删活跃项锚定回落默认项目（spec sidebar §3.7）', () => {
     const store = useProjectStore()
     const a = store.addProject('A')
     const b = store.addProject('B')
@@ -265,7 +268,7 @@ describe('Project store: CRUD + 持久化', () => {
 
     store.removeProject(a)
     expect(store.projects).toHaveLength(2) // 默认 + B
-    expect(store.activeProjectId).not.toBe(a)
+    expect(store.activeProjectId).toBe(DEFAULT_PROJECT_ID) // 回落默认，非首个
 
     // 默认项目（DEFAULT_PROJECT_ID）不可删除（review MF-1 守卫：未归类 session 的兜底聚合）
     store.removeProject(DEFAULT_PROJECT_ID)
@@ -275,6 +278,20 @@ describe('Project store: CRUD + 持久化', () => {
     expect(store.projects).toHaveLength(1) // 只剩默认（保底不删最后一个）
     store.removeProject(store.projects[0]!.id)
     expect(store.projects).toHaveLength(1) // 默认项目守卫再拦一次
+  })
+
+  it('renameProject：命名项目改名生效；默认项目拒改（nameless 身份守卫，双保险见组件侧）', () => {
+    const store = useProjectStore()
+    const id = store.addProject('A')
+
+    store.renameProject(id, 'A2')
+    expect(store.projects.find((p) => p.id === id)!.name).toBe('A2')
+
+    store.renameProject(id, '   ') // 空名守卫
+    expect(store.projects.find((p) => p.id === id)!.name).toBe('A2')
+
+    store.renameProject(DEFAULT_PROJECT_ID, '改默认')
+    expect(store.projects.find((p) => p.id === DEFAULT_PROJECT_ID)!.name).toBe('')
   })
 
   it('isDefaultProject：命名 project 非默认；默认 project（name 空）是默认', () => {

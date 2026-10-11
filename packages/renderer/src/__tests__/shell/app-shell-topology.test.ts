@@ -4,7 +4,7 @@
  * 覆盖（ui-replica M2：demo Workbench.vue .app 为窗口 frame 视觉权威）：
  *  - 三个拓扑 testid 存在：app-shell / app-shell-aside / app-shell-main
  *  - 关键类：AppShell py-1 pr-1（demo .app padding 4px 4px 4px 0：上/右/下 4、左 0 透明融合）、
- *    gap-2（demo 卡缝 8px）、aside pt-11（44px traffic-light 安全区，恒定）、
+ *    gap-1（2026-10-11 用户裁决：侧栏-main 缝 4px，与窗口右缘 pr-1 同节奏）、aside pt-11（44px traffic-light 安全区，恒定）、
  *    MainPanel 为透明布局容器（三卡化 2026-10-04：float-panel 壳下沉到三块内容卡）
  *  - 折叠态 !gap-0（强制覆盖 gap-2），展开态无
  *  - TrafficLight 挂载在 AsideRegion 内（ui-replica M2：AppShell 左边距 0 后 aside 左缘 = 窗口 x0，
@@ -62,7 +62,7 @@ beforeEach(() => {
 })
 
 describe('AppShell 拓扑渲染 gate（刻意调整形态回归防线）', () => {
-  it('展开态：三个拓扑 testid 存在 + 关键类（py-1 pr-1 / gap-2 / aside pt-11 / main 透明布局容器）', () => {
+  it('展开态：三个拓扑 testid 存在 + 关键类（py-1 pr-1 / gap-1 / aside pt-11 / main 透明布局容器）', () => {
     const wrapper = mount(AppShell)
 
     // ① app-shell 根容器：demo .app padding 4px 4px 4px 0（py-1 pr-1，左 0 侧栏透明融合贴边）+ relative 定位基准
@@ -70,7 +70,7 @@ describe('AppShell 拓扑渲染 gate（刻意调整形态回归防线）', () =>
     expect(shell.exists()).toBe(true)
     expect(shell.classes()).toContain('py-1')
     expect(shell.classes()).toContain('pr-1')
-    expect(shell.classes()).toContain('gap-2')
+    expect(shell.classes()).toContain('gap-1')
     expect(shell.classes()).toContain('relative')
 
     // ② aside：pt-11(44px) traffic-light 安全区恒定
@@ -85,7 +85,7 @@ describe('AppShell 拓扑渲染 gate（刻意调整形态回归防线）', () =>
     expect(main.classes()).not.toContain('border')
     expect(main.classes()).not.toContain('bg-surface')
 
-    // 展开态无 !gap-0（gap-2 生效）
+    // 展开态无 !gap-0（gap-1 生效）
     expect(shell.classes()).not.toContain('!gap-0')
   })
 

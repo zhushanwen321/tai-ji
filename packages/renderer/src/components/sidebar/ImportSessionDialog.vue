@@ -269,7 +269,7 @@
             </SelectTrigger>
             <SelectContent>
               <SelectItem
-                v-for="p in projectStore.recentProjects"
+                v-for="p in projectStore.orderedProjects"
                 :key="p.id"
                 :value="p.id"
               >

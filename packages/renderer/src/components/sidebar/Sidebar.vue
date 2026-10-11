@@ -1,8 +1,10 @@
 <template>
   <!--
     容器组件 · L1 Sidebar（sidebar/spec.md 四态）。
-    分层（自上而下，对齐 demo .sidebar 区块序）：Brand → ProjectSwitcher → 新建任务 →
+    分层（自上而下，对齐 demo .sidebar 区块序）：Brand → 新建任务 →
     次操作 nav（导入会话 ⌘I / 搜索 ⌘K）→ segmented tab（会话|文件|Plugins）→ 子视图区 → 用户区。
+    项目管理 = 会话视图内的锚定分组（R6.2，SessionList + ProjectGroup），顶部无独立切换条——
+    原 ProjectSwitcher 卡片网格随 R6.2 复刻退役（切换路径唯一化到组头点击）。
     折叠态 C：整体隐藏（width:0 + opacity:0），spec §收起态。
     File View 内容 G2-003 defer。
     [HISTORICAL] 2026-09-16 五 tab 收敛为三 tab：Agents（子代理列表）/ Flows（工作流列表 +
@@ -23,9 +25,6 @@
           <UpdateButton class="ml-auto" />
         </template>
       </Brand>
-
-      <!-- ProjectSwitcher（demo .projwrap：Brand 行下方项目切换条） -->
-      <ProjectSwitcher />
 
       <!-- 新建任务（demo .newtask：elevated 卡主操作，中性底——用户裁决 2026-10-06）。
            快捷键提示并入 :title（demo data-tip 悬停形态），不渲染常驻 kbd。 -->
@@ -287,7 +286,6 @@ import SegmentedTab from './SegmentedTab.vue'
 import SessionList from './SessionList.vue'
 import UpdateButton from './UpdateButton.vue'
 import Brand from './Brand.vue'
-import ProjectSwitcher from './ProjectSwitcher.vue'
 import FileView from './FileView.vue'
 import RenameSessionDialog from './RenameSessionDialog.vue'
 import ImportSessionDialog from './ImportSessionDialog.vue'
