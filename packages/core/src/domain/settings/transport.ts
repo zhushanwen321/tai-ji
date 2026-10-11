@@ -188,8 +188,8 @@ export interface SettingsTransport {
   // ── 用量 / 子代理引擎 ──
   /** 用量统计（session JSONL 扫描聚合） */
   getUsageStats(): Promise<UsageStatsResult>
-  /** 子代理引擎清单 + 当前默认引擎 */
-  getSubagentEngineConfig(): Promise<{ engines: string[]; defaultEngine: string }>
+  /** 子代理引擎清单 + 当前默认引擎 + per-engine 模型清单/默认模型偏好（D5 扩展，两键 optional） */
+  getSubagentEngineConfig(): Promise<ServerMessageMap['session.subagentEngineConfig']>
 
   // ── coding-plan 额度 ──
   /** 读缓存不发起请求（无缓存返回 { data: null, lastFetchAt: null }） */

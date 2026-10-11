@@ -246,8 +246,10 @@ export function getSubagentStreamState(
 /**
  * [U7] 子代理引擎配置视图（engines = engines.json 动态清单 + config.json defaultEngine）。
  * Settings「子代理」页引擎选择器数据源；无 session 依赖（全局配置，冷启动可用）。
+ * engine-provider-unification D5 扩展：reply 增 engineModels（per-engine 可选模型清单）与
+ * engineDefaults（per-engine 默认模型偏好）两 optional 键，缺省语义 = 空表/无偏好。
  */
-export async function getSubagentEngineConfig(): Promise<{ engines: string[]; defaultEngine: string }> {
+export async function getSubagentEngineConfig(): Promise<ServerMessageMap['session.subagentEngineConfig']> {
   return command('session.getSubagentEngineConfig', {}, RPC_BACKSTOP_TIMEOUT_MS)
 }
 

@@ -726,10 +726,12 @@ const sessionImpl = {
   /**
    * Mock 子代理引擎配置视图（[G4 锚定补齐]：锚定前 mock 缺此成员）。mock 无 engines.json
    * 基建，返回空清单 + 空 default（Settings「子代理」页 mock 轨展示空态）。
+   * engine-provider-unification D5：engineModels/engineDefaults 显式空表/空偏好——与协议
+   * 缺省语义等价（optional 键缺失 = 空），mock 轨不带可用模型数据。
    */
-  async getSubagentEngineConfig(): Promise<{ engines: string[]; defaultEngine: string }> {
+  async getSubagentEngineConfig(): Promise<ServerMessageMap['session.subagentEngineConfig']> {
     await sleep(TIMING.ack)
-    return { engines: [], defaultEngine: '' }
+    return { engines: [], defaultEngine: '', engineModels: {}, engineDefaults: {} }
   },
 
   /** Mock 设置默认子代理引擎（回执 = 请求值回显，对齐 model.switchModel mock 同模式；无持久化） */

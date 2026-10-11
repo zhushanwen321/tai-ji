@@ -125,7 +125,7 @@ export function makeSettingsTransportStub(overrides: SettingsTransportStubOverri
     })),
     getCodemodeEnabled: vi.fn(async () => ({ enabled: true, corruption: null })),
     getUsageStats: vi.fn(async () => ({ rows: [], scannedAt: 0, sessionCount: 0, skippedLines: 0 })),
-    getSubagentEngineConfig: vi.fn(async () => ({ engines: ['pi'], defaultEngine: 'pi' })),
+    getSubagentEngineConfig: vi.fn(async () => ({ engines: ['pi'], defaultEngine: 'pi', engineModels: {}, engineDefaults: {} })),
     getCachedQuota: vi.fn(async () => ({ data: null, lastFetchAt: null })),
     refreshQuota: vi.fn(async () => ({ data: null, lastFetchAt: null })),
     listPresets: vi.fn(async () => []),

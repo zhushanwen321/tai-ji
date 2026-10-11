@@ -224,7 +224,8 @@ describe('mock session domain', () => {
       expect('dag' in dag || dag.code === 'parse_failed', `${actorId} DAG 回执可达（成功臂或 parse_failed 错误臂）`).toBe(true)
     }
     // [G4 锚定补齐] 缺失成员 stub：引擎配置视图 / 默认引擎回执回显 / agent call 路径恒空串
-    expect(await session.getSubagentEngineConfig()).toEqual({ engines: [], defaultEngine: '' })
+    //（engineModels/engineDefaults = engine-provider-unification D5 扩展键，mock 轨空表/空偏好）
+    expect(await session.getSubagentEngineConfig()).toEqual({ engines: [], defaultEngine: '', engineModels: {}, engineDefaults: {} })
     expect(await session.setSubagentDefaultEngine('eng-x')).toEqual({ engineId: 'eng-x' })
     expect(await session.getAgentCallFilePath('s1', 'ac1')).toBe('')
     // workflowAction 仅 'abort'（pause/resume 已随扩展 D-2 移除，real 域参数为 'abort' 字面量）

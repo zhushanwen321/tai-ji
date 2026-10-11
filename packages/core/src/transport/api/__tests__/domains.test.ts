@@ -551,7 +551,13 @@ describe('session 域 请求-响应', () => {
     await expect(session.getSubagentHistory('s1', 'sa')).resolves.toEqual([{ id: 'm' }])
     expect(mockCommand.mock.calls[2].slice(0, 2)).toEqual(['session.getSubagentHistory', { sessionId: 's1', subagentId: 'sa' }])
 
-    const eng = { engines: ['zcode'], defaultEngine: 'zcode' }
+    // engineModels/engineDefaults = engine-provider-unification D5 扩展键（exact toEqual 证明新键透传）
+    const eng = {
+      engines: ['zcode'],
+      defaultEngine: 'zcode',
+      engineModels: { zcode: [{ id: 'zai-coding-cn/glm-5.3', name: 'GLM 5.3' }] },
+      engineDefaults: { zcode: 'zai-coding-cn/glm-5.3' },
+    }
     mockCommand.mockResolvedValueOnce(eng)
     await expect(session.getSubagentEngineConfig()).resolves.toEqual(eng)
     expect(mockCommand.mock.calls[3][0]).toBe('session.getSubagentEngineConfig')
