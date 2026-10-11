@@ -3,9 +3,10 @@
  *
  * 驱动方式：fork/handoff 进入走真实信号链——triggerEnterForkMode / triggerEnterHandoffMode
  * 写 channel signal → Composer 内 watch → staging.enter（与 Sidebar 快捷键同一生产通路）。
- * 模式态断言全部经用户可见 DOM（composer-mode-chip / fork-mode class /
- * fork-send-btn·handoff-send-btn 的 disabled 形态），不经组件 expose（expose 面生产零消费，
- * 已收窄为无）。
+ * 模式态断言全部经用户可见 DOM（composer-mode-banner / fork-send-btn·handoff-send-btn 的
+ * disabled 形态），不经组件 expose（expose 面生产零消费，已收窄为无）。
+ * [HISTORICAL] 断言锚点 composer-mode-chip 与 fork-mode box 染色 class 已随 staging banner
+ * 形态退役（demo 裁决：banner 图标染 accent 是模式在途唯一染色点），模式标识迁至 banner。
  *
  * 覆盖：
  * - U12 forkMode 三重视觉 + chip + placeholder（fork-mode class + mode-chip + placeholder 切换）
@@ -131,32 +132,32 @@ function makeStreaming(sid: string): void {
   })
 }
 
-// ── U12：forkMode 三重视觉 + chip + placeholder ─────────────────────────
-describe('U12：forkMode 三重视觉 + mode-chip + placeholder 切换', () => {
-  it('channel signal 触发后容器含 fork-mode class + mode-chip DOM', async () => {
+// ── U12：forkMode banner + box 不染色 + placeholder 静态 ────────────────
+describe('U12：forkMode 视觉 = staging banner（box 无染色、placeholder 静态）', () => {
+  it('channel signal 触发后 banner DOM 存在，composer-box 无 fork-mode 染色', async () => {
     const wrapper = mountComposer({ sessionId: 's1' })
     triggerEnterForkMode('s1', 'm1')
     await wrapper.vm.$nextTick()
 
     const box = wrapper.find('[data-testid="composer-box"]')
-    // 容器含 fork-mode class（三重视觉之一）
-    expect(box.classes()).toContain('fork-mode')
-    // mode-chip DOM 存在（标识当前为 fork 提问模式）
-    expect(wrapper.find('[data-testid="composer-mode-chip"]').exists()).toBe(true)
+    // [HISTORICAL] fork-mode 整框 accent 染色档已随 staging banner 退役（demo：banner 图标
+    // 染 accent 是模式在途唯一染色点，box 中性）
+    expect(box.classes()).not.toContain('fork-mode')
+    // staging banner DOM 存在（模式标识载体）
+    expect(wrapper.find('[data-testid="composer-mode-banner"]').exists()).toBe(true)
   })
 
-  it('fork 模式下 placeholder 切换为 fork 提问文案', async () => {
+  it('fork 模式下 placeholder 保持静态（不换文案）', async () => {
     const wrapper = mountComposer({ sessionId: 's1' })
     triggerEnterForkMode('s1', 'm1')
     await wrapper.vm.$nextTick()
 
-    // ComposerInput mock 不渲染 placeholder 属性文本，断言 props 透传的 placeholder 变化
+    // ComposerInput mock 不渲染 placeholder 属性文本，断言 props 透传的 placeholder 不变
     const input = wrapper.findComponent(ComposerInputMock)
-    // fork 模式 placeholder 应不同于普通 inputHint（含「提问」/「fork」语义）
+    // [HISTORICAL] staging placeholder 换文案档（forkHint）已随 banner 退役：demo 口径
+    // placeholder 静态，仍为常规 inputHint
     const placeholderProp = input.props('placeholder') as string
-    expect(placeholderProp).not.toContain('描述你想让 AI 做什么')
-    // fork 提问文案应含 fork/提问 语义关键词之一
-    expect(/fork|提问/i.test(placeholderProp)).toBe(true)
+    expect(placeholderProp).toContain('描述你想让 AI 做什么')
   })
 })
 
@@ -178,8 +179,8 @@ describe('U13：forkMode 下发送 → 调 forkSessionAsk + 自动退出 fork �
     // forkSessionAsk 被调（而非 send）
     expect(forkSessionAskMock).toHaveBeenCalled()
     expect(chatApi.send).not.toHaveBeenCalled()
-    // 发送后自动退出：模式 chip 消失
-    expect(wrapper.find('[data-testid="composer-mode-chip"]').exists()).toBe(false)
+    // 发送后自动退出：staging banner 消失
+    expect(wrapper.find('[data-testid="composer-mode-banner"]').exists()).toBe(false)
   })
 })
 
@@ -189,26 +190,26 @@ describe('U14：Esc 退出 + 切 session 自动退出 forkMode', () => {
     const wrapper = mountComposer({ sessionId: 's1' })
     triggerEnterForkMode('s1', 'm1')
     await wrapper.vm.$nextTick()
-    expect(wrapper.find('[data-testid="composer-mode-chip"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="composer-mode-banner"]').exists()).toBe(true)
 
     // 按 Esc（经 ComposerInput keydown 事件）
     wrapper.findComponent(ComposerInputMock).vm.$emit('keydown', keyEvent('Escape'))
     await wrapper.vm.$nextTick()
 
-    expect(wrapper.find('[data-testid="composer-mode-chip"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="composer-mode-banner"]').exists()).toBe(false)
   })
 
   it('forkMode 下切 session（sessionId 变化）→ 自动退出', async () => {
     const wrapper = mountComposer({ sessionId: 's1' })
     triggerEnterForkMode('s1', 'm1')
     await wrapper.vm.$nextTick()
-    expect(wrapper.find('[data-testid="composer-mode-chip"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="composer-mode-banner"]').exists()).toBe(true)
 
     // 切 session：改 sessionId prop（Composer watch → staging.exit()）
     await wrapper.setProps({ sessionId: 's2' })
     await wrapper.vm.$nextTick()
 
-    expect(wrapper.find('[data-testid="composer-mode-chip"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="composer-mode-banner"]').exists()).toBe(false)
   })
 })
 

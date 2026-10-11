@@ -321,7 +321,7 @@ testid 以组件 template 内 data-testid 属性为准。
 |--------|--------------|
 | `composer-box` | 恒显（composer 容器） |
 | *(密度类)* | 见 §3.1 单点登记（`composer-bar` / `composer-metrics-aggregate` / `composer-model-thinking-aggregate`）；本表不重复登记，避免两处漂移 |
-| `composer-mode-chip` / `composer-handoff-chip` | 仅 fork / handoff staging 态（与「模式」概念无关，是 staging chip 的历史命名） |
+| `composer-mode-banner` / `composer-handoff-banner` | 仅 fork / handoff staging 态（staging 模式横幅，demo `.mode-banner` 形态；2026-10-11 前身为 `composer-mode-chip` / `composer-handoff-chip`，已随 banner 形态退役） |
 | `fork-send-btn` / `handoff-send-btn` | staging 态发送位 |
 
 ### 3.1 底栏密度 / 任务托盘 / 模式可见性 testid（u6 / u4 / u5 落地）

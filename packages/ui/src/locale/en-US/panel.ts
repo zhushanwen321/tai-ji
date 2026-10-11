@@ -65,10 +65,21 @@ export default {
     forkChip: 'Sends to a new branch · isolated from main line',
     forkSend: 'fork & send',
     forkExit: 'Exit fork mode',
+    // Staging banner two-part copy (demo .mode-banner form: bold title + " · " + description).
+    // [HISTORICAL] the former mode-chip single-key label (forkChip/handoffChip) and placeholder
+    // swap (forkHint/handoffHint) presentation channels retired with the banner form
+    forkBannerTitle: 'Fork new branch',
+    forkBannerDesc: 'Your input will go to a new branch, isolated from the main line',
     handoffHint: 'Enter text to send as the first message in the new session (optional)… (⏎ handoff & send, Esc to exit)',
     handoffChip: 'Hand off to new session · your input goes to the new session',
     handoffSend: 'Hand off & send to new session',
     handoffExit: 'Exit handoff mode',
+    handoffBannerTitle: 'Handoff',
+    handoffBannerDesc: 'On send, a session summary is generated and handed off to a new session to continue',
+    // Handoff entry/send guard toast (handoff-mode.ts enterGuard/beforeSend: blocked while the
+    // source session is streaming). [HISTORICAL] key referenced since the D8 generalization but
+    // missing from both locales (toast showed the bare key); added in the same batch
+    handoffBusy: 'Session is busy, handoff is unavailable right now',
     bashPlaceholder: 'Run bash command… (!! prefix excludes from context)',
     // Composer shortcut action table copy feedback (composer-pi-shortcuts decision 4 / §3.5)
     copyLastReply: 'Copied last reply',

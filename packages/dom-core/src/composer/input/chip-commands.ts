@@ -28,8 +28,9 @@ export function useComposerChipCommands(
   }
 
   /**
-   * chip 的 × 删除按钮（slash/file/image chip 通用，§2e）。内联 svg X（demo 方案 C 同款：
-   * stroke-width 2.2 + round cap，12px 定格）。原生 <button type="button">（demo chipHtml
+   * chip 的 × 删除按钮（slash/file/image chip 通用，§2e）。内联 svg X（规格源
+   * composer-input-refine.html 全部 chip × 实例显式 10px / stroke-width 2.2 + round cap，
+   * ichip/ctxchip 两档一致；12px 属 banner ×，D1 裁决）。原生 <button type="button">（demo chipHtml
    * 同款）自带按钮语义与键盘可达（Tab 聚焦 + Enter/Space 触发 click），不另设 role；
    * aria-label 保留——按钮文本恒空，segment-parse 的 isInChipXSubtree 拒绝逻辑不受影响
    * （按 .chip-x class 判定，与 tagName 无关）。button 的 UA 默认样式由壳层 .chip-x 规则
@@ -48,8 +49,8 @@ export function useComposerChipCommands(
     svg.setAttribute('stroke-width', '2.2')
     svg.setAttribute('stroke-linecap', 'round')
     svg.setAttribute('aria-hidden', 'true')
-    svg.setAttribute('width', '12')
-    svg.setAttribute('height', '12')
+    svg.setAttribute('width', '10')
+    svg.setAttribute('height', '10')
     for (const d of ['M18 6 6 18', 'm6 6 12 12']) {
       const path = document.createElementNS(SVG_NS, 'path')
       path.setAttribute('d', d)
@@ -263,6 +264,8 @@ export function useComposerChipCommands(
     chip.dataset.chipFileName = fileName
     chip.dataset.chipDisplayName = displayName
     chip.dataset.chipNeedsMigrate = needsMigrate ? 'true' : 'false'
+    // title 全名（spec §2）：其余 chip 类均有 title，本类曾是唯一漏项（S-A3），悬停兜底长名截断
+    chip.title = displayName
     const label = document.createElement('span')
     label.className = 'chip-label'
     label.textContent = displayName

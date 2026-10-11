@@ -702,8 +702,15 @@ describe('选中插 chip 集成（C 组，真实浮层 + 真实输入区）', ()
     // chip 显示 label（人可读标题）而非 uuid；dataset 携带 sessionId 供 segment 解析
     expect(chips[0]?.textContent ?? '').toContain('alpha 设计讨论')
     expect(chips[0]?.dataset.chipSessionId).toBe('sess-alpha')
-    // #query 过滤文本被清除（boundaryLen 模式只删 #alpha 段）
-    expect((wrapper!.find('[role="textbox"]').element as HTMLDivElement).textContent ?? '').not.toContain('#alpha')
+    // #query 过滤文本被清除（boundaryLen 模式只删 #alpha 段）。
+    // 断言读 chip 外的文本节点而非整框 textContent：chip 自身 = pre('#') + label 拼接，
+    // 标题以 'alpha' 开头时整框 textContent 会拼出 '#alpha' 假阳性（chip-pre 引入后实测）。
+    const textbox = wrapper!.find('[role="textbox"]').element as HTMLDivElement
+    const textOutsideChips = Array.from(textbox.childNodes)
+      .filter((n) => !(n.nodeType === Node.ELEMENT_NODE && (n as HTMLElement).classList.contains('mention-chip')))
+      .map((n) => n.textContent ?? '')
+      .join('')
+    expect(textOutsideChips).not.toContain('#alpha')
   })
 
   it('C2 @ 选 subagent → 插 .mention-at chip（@slug + dataset.chipSubagentId）', async () => {

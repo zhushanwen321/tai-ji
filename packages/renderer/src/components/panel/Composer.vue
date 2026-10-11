@@ -60,23 +60,20 @@
           @cancel="onCancelQueueEntry"
           @retry="onRetryQueueEntry"
         />
-        <!-- Staging 模式标识 chip（fork/handoff 统一）：顶部 accent chip 提示当前 staging 类型 + × 退出。
-             经 staging.activeStaging 统一渲染（ADR-0057），退出调 staging.exit() -->
-        <div
-          v-if="staging.activeStaging.value"
-          class="composer-mode-chip mx-2.5 mt-2 flex items-center gap-1.5 rounded-md bg-[var(--accent-soft)] px-2 py-1 text-[length:var(--text-2xs)] font-medium text-[var(--accent)]"
-          :data-testid="staging.activeStaging.value.type === 'fork' ? 'composer-mode-chip' : 'composer-handoff-chip'"
+        <!-- Staging 模式 banner（fork/handoff 统一，demo .mode-banner 形态对齐）：composer-box 顶缘
+             整条横幅，图标染 accent = 模式在途唯一染色点（标题粗体中性 fg，描述 fg-2，× 中性）。
+             [HISTORICAL] 前身 mode-chip（accent-soft 底 + accent 字 + accent × + placeholder/box
+             整框染色）已随 banner 形态整体退役。经 staging.activeStaging 统一渲染（ADR-0057），
+             退出调 staging.exit()（Esc / 发送 / 切 session 三路退出链不变） -->
+        <div v-if="staging.activeStaging.value" class="mx-2 mt-2 flex items-center gap-[8px] rounded-[var(--radius)] border border-border bg-bg-elevated px-2.5 py-[6px]"
+          :data-testid="staging.activeStaging.value.type === 'fork' ? 'composer-mode-banner' : 'composer-handoff-banner'"
         >
-          <component :is="staging.activeStaging.value.visual.chipIcon" class="size-3" />
-          <span class="flex-1">{{ t(staging.activeStaging.value.visual.chipLabelKey) }}</span>
-          <Button
-            variant="ghost"
-            size="icon"
-            class="size-4 rounded-sm p-0 text-[var(--accent)] hover:bg-[var(--accent)] hover:text-accent-fg"
-            :title="staging.activeStaging.value.type === 'fork' ? t('panel.composer.forkExit') : t('panel.composer.handoffExit')"
-            @click="staging.exit"
-          >
-            <X class="size-[12px]" />
+          <component :is="staging.activeStaging.value.visual.chipIcon" class="size-[14px] shrink-0 text-accent" :stroke-width="1.8" />
+          <span class="min-w-0 flex-1 truncate text-[length:var(--text-xs)] text-neutral-fg-2">
+            <span class="text-neutral-fg [font-weight:var(--fw-mid)]">{{ stagingBannerTitle }}</span> · {{ stagingBannerDesc }}
+          </span>
+          <Button variant="ghost" size="icon" class="size-[22px] rounded-[var(--radius-sm)] p-0 text-neutral-dim hover:text-neutral-fg" :title="staging.activeStaging.value.type === 'fork' ? t('panel.composer.forkExit') : t('panel.composer.handoffExit')" @click="staging.exit">
+            <X class="size-[12px]" :stroke-width="2" />
           </Button>
         </div>
         <!-- 顶部元信息行（u4 mode-visibility-chip）：对话态只读模式 chip（**仅非默认模式**渲染，
@@ -496,6 +493,8 @@ const {
   canSubmit,
   boxClass,
   placeholder,
+  stagingBannerTitle,
+  stagingBannerDesc,
   // bash 态（draft.trimStart().startsWith('!')，core dispatch/bash.ts isBashMode 同源判定）：
   // 传 ComposerInput suppressTriggers——bash 模式下 $/#/@/ 全部不触发浮层（设计 D6 豁免）
   isBashMode,

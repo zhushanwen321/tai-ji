@@ -13,10 +13,12 @@
        两行起步 min-height:calc(3em+19px)（2 行 × 1.5 行高 + 上下 padding 和 13+6=19px，
        border-box 联动）+ 5 行封顶 max-height:calc(7.5em+19px)（同式外推）；聚焦无焦点边界
        （demo R3 撤销：composer 输入区无焦点边界，光标即焦点反馈），is-focused 状态类
-       保留为聚焦挂点（现行无样式消费方）。 -->
+       保留为聚焦挂点（现行无样式消费方）。
+       break-words（overflow-wrap，demo workbench.css .composer-input 同声明）：超长 URL
+       等无断点长串在词内折行，防撑破横向。 -->
   <div
     ref="elRef"
-    class="composer-input relative min-h-[calc(3em+19px)] max-h-[calc(7.5em+19px)] overflow-y-auto px-4 pt-[13px] pb-[6px] text-[length:var(--text-base)] leading-[1.5] text-neutral-fg outline-none"
+    class="composer-input relative min-h-[calc(3em+19px)] max-h-[calc(7.5em+19px)] overflow-y-auto px-4 pt-[13px] pb-[6px] text-[length:var(--text-base)] leading-[1.5] text-neutral-fg outline-none break-words"
     :class="{ 'is-empty': isEmpty, 'is-focused': isFocused }"
     :contenteditable="!disabled"
     :data-placeholder="placeholder"

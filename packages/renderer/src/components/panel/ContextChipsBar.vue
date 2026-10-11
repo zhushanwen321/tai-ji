@@ -6,23 +6,26 @@
     删除经 emit('remove', id) 回传父组件定位 DOM 节点移除（W4：从本地 ref([]) 改 props/emit 接真实数据源）。
 
     形态权威：demo .ctxchip 22px 档（specs/composer/composer-chips.md 两档同步契约——行内 20px 档
-    与本档同一形态家族），消费 .composer 作用域 --chip-* 变量（圆角 --chip-r / 底 --chip-bg，
-    改一处两档同变）；删除钮 hover 中性（底 --elevated + 字 --fg），红色只留给真正不可逆动作。
+    与本档同一形态家族），消费 .composer 作用域 --chip-* 变量（圆角 --chip-r / 底 --chip-bg /
+    边 --chip-border，改一处两档同变；上下文档直引 hairline 是契约缺角，已归位变量）；删除钮
+    hover 中性（底 --elevated + 字 --fg），红色只留给真正不可逆动作。
 
-    [窄宽容错] chip 宽 `max-w-[min(200px,100%)]` + `min-w-0`：容器窄于 200px 时 chip 跟着收缩
+    [窄宽容错] chip 宽 `max-w-[min(200px,100%)]`：容器窄于 200px 时百分比盖帽把 chip 压到容器宽
     （旧 `max-w-[180px] shrink-0` 在 < ~208px 的 composer 盒里被容器 overflow-hidden 切掉右半，
-    × 按钮变得不可见且不可达——「无声裁切」）；内层 name span 补 `min-w-0` 让 truncate 真正生效，
-    chip 挂 `:title` 兜住被截断的全名。
+    × 按钮变得不可见且不可达——「无声裁切」）。截断的真实生效机制 = max-w 百分比盖帽，与
+    shrink-0 无关——shrink-0 只决定多 chip 溢出走 wrap、chip 自身永不收缩，chip 级 min-w-0
+    在其下恒无效（已删）；truncate 生效的真实条件 = 被盖帽压窄的 chip 内，内层 name span 的
+    `min-w-0` 允许它缩到内容宽以下（ellipsis 才挂得上）。chip 挂 `:title` 兜住被截断的全名。
   -->
   <div v-if="items.length" class="flex flex-wrap items-center gap-1.5 overflow-hidden px-4 pt-[9px]">
     <!-- chip 形态（demo .ctxchip 22px 档）：高 22px / 截断 200px / pl7 pr5 / gap 5px / nowrap，
-         hairline 边 + mid 字，统一中性档（无语义色分叉，image 同中性）；圆角与底消费
+         chip-border 边 + mid 字，统一中性档（无语义色分叉，image 同中性）；圆角与底消费
          .composer 作用域 --chip-r / --chip-bg 族变量（与行内 20px 档同族同变） -->
     <span
       v-for="item in items"
       :key="item.id"
       :title="item.name"
-      class="group inline-flex h-[22px] min-w-0 max-w-[min(200px,100%)] shrink-0 items-center gap-[5px] whitespace-nowrap rounded-[var(--chip-r)] border border-hairline bg-[var(--chip-bg)] pl-[7px] pr-[5px] text-[length:var(--text-xs)] text-neutral-mid transition-colors duration-[var(--duration-fast)]"
+      class="group inline-flex h-[22px] max-w-[min(200px,100%)] shrink-0 items-center gap-[5px] whitespace-nowrap rounded-[var(--chip-r)] border border-[color:var(--chip-border)] bg-[var(--chip-bg)] pl-[7px] pr-[5px] text-[length:var(--text-xs)] text-neutral-mid transition-colors duration-[var(--duration-fast)]"
     >
       <component :is="iconFor(item)" class="size-3 shrink-0 text-neutral-dim" />
       <span class="min-w-0 truncate">{{ item.name }}</span>

@@ -715,8 +715,10 @@ describe('useContenteditableInput onKeydown IME 守卫（composition 中不转�
   })
 })
 
-// ── IME 组词守卫（onInput 顶部：组词中不序列化不弹层，compositionend 统一处理）──
-// demo 权威形态：onInput() 首行 `if (composing.value) return`。组词期间每次按键都会派发
+// ── IME 组词守卫（onInput：组词中不序列化不弹层，空态同步照跑，compositionend 统一处理）──
+// 守卫形态：emitInput 与五路触发检测被 `if (composing.value) return` 拦下，syncEmpty
+// （isEmpty 判空，不含触发/序列化语义）在守卫前照跑——否则组词期 placeholder 与显在
+// 假文本瞬态重叠（demo 用 CSS :empty 伪类原生机制无此瞬态）。组词期间每次按键都会派发
 // input 事件，守卫缺失时组词假文本会反复跑五路触发检测并序列化草稿（浮层闪烁/误触发）。
 // 接线闭环：ComposerInput.vue `@compositionstart="composing = true"` 置位 → 组词中 input
 // 全部短路 → `@compositionend="onCompositionEnd"` 复位后调 onInput() 统一处理一次。
@@ -742,6 +744,26 @@ describe('useContenteditableInput onInput IME 组词守卫（组词中不序列�
     expect(c.callbacks.onDollarFileTrigger).not.toHaveBeenCalled()
     expect(c.callbacks.onSubagentTrigger).not.toHaveBeenCalled()
     expect(c.callbacks.onSkillTrigger).not.toHaveBeenCalled()
+    cleanup = c.cleanup
+  })
+
+  it('组词中 onInput：syncEmpty 照跑（isEmpty 跟随真实 DOM 内容），emitInput/触发检测仍不发', () => {
+    const c = setup('', {
+      onDollarFileTrigger: vi.fn(),
+      onSubagentTrigger: vi.fn(),
+      onSkillTrigger: vi.fn(),
+    })
+    c.syncEmpty() // 挂载基线：空态 true（ComposerInput onMounted 同款接线）
+    expect(c.isEmpty.value).toBe(true)
+    c.composing.value = true
+    // 组词中 IME 假文本进 DOM（input 事件已派发，compositionend 未到）
+    c.el.textContent = '组词假文本'
+    c.onInput()
+    // isEmpty 跟随（placeholder 不与组词假文本瞬态重叠）；序列化与触发检测仍被守卫拦下
+    expect(c.isEmpty.value).toBe(false)
+    expect(c.callbacks.onInput).not.toHaveBeenCalled()
+    expect(c.callbacks.onSlashTrigger).not.toHaveBeenCalled()
+    expect(c.callbacks.onFileTrigger).not.toHaveBeenCalled()
     cleanup = c.cleanup
   })
 

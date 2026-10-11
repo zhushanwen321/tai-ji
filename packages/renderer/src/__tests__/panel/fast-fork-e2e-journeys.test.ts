@@ -11,7 +11,7 @@
  * 名实标注：Turn 点击 → channel signal → Composer watch 的**同屏**联动留 Playwright E2E。
  * 本文件用分段断言拼接覆盖：
  *   - Turn 断言 signal 更新（点 fork 提问按钮 → useForkModeChannel.signal 携带 srcSessionId/fromMessageId）
- *   - Composer 经 triggerEnterForkMode 真实信号驱动进 fork 模式，断言三重视觉
+ *   - Composer 经 triggerEnterForkMode 真实信号驱动进 fork 模式，断言 staging banner 视觉
  *   - handleForkSend 断言 forkSessionAsk（sessionApi.fork + chatApi.submitDelivery 新 session id，u3c/D-10）
  * 非真正跨 mount 实例链通（Turn 与 Composer 未同屏 mount，channel 经 watch 的真实投递未在此验证）。
  *
@@ -262,20 +262,20 @@ describe('E2E-L1-1: fork-ask 完整旅程（Turn → channel → Composer → fo
     expect(onForkAskMock).toHaveBeenCalledWith('s-src', expect.objectContaining({ id: 'a1' }))
   })
 
-  it('Composer 订阅 channel：signal 命中本 session → 进入 fork 模式（三重视觉 DOM 可见）', async () => {
+  it('Composer 订阅 channel：signal 命中本 session → 进入 fork 模式（staging banner DOM 可见）', async () => {
     const wrapper = mount(Composer, { props: { sessionId: 's-src' }, global: { stubs: otherComposerStubs } })
     // 真实信号驱动：channel 模块级单例写入 → Composer 内 watch → enterForkMode
     triggerEnterForkMode('s-src', 'a1')
     await nextTick()
 
-    // 用户可见三重视觉：composer-box 含 fork-mode class
+    // 用户可见形态：staging banner 存在；composer-box 无 fork-mode 染色
+    // （[HISTORICAL] 整框染色档已随 banner 退役，demo：banner 图标是唯一 accent 染色点）
     const box = wrapper.find('[data-testid="composer-box"]')
-    expect(box.classes()).toContain('fork-mode')
-    // mode-chip DOM 存在
-    expect(wrapper.find('[data-testid="composer-mode-chip"]').exists()).toBe(true)
-    // placeholder 切换为 fork 提问语义（含 fork/提问）
+    expect(box.classes()).not.toContain('fork-mode')
+    expect(wrapper.find('[data-testid="composer-mode-banner"]').exists()).toBe(true)
+    // placeholder 静态（[HISTORICAL] staging 换文案档已随 banner 退役，demo 口径）
     const placeholderProp = wrapper.findComponent(ComposerInputMock).props('placeholder') as string
-    expect(/fork|提问/i.test(placeholderProp)).toBe(true)
+    expect(placeholderProp).toContain('描述你想让 AI 做什么')
   })
 
   it('fork 模式下输入 + Enter → forkSessionAsk 被调（sessionApi.fork + chatApi.send 新 session）', async () => {
@@ -297,8 +297,8 @@ describe('E2E-L1-1: fork-ask 完整旅程（Turn → channel → Composer → fo
     const wrapper = mount(Composer, { props: { sessionId: 's-src' }, global: { stubs: otherComposerStubs } })
     triggerEnterForkMode('s-src', 'a1')
     await nextTick()
-    // fork 模式激活：mode-chip DOM 可见
-    expect(wrapper.find('[data-testid="composer-mode-chip"]').exists()).toBe(true)
+    // fork 模式激活：staging banner DOM 可见
+    expect(wrapper.find('[data-testid="composer-mode-banner"]').exists()).toBe(true)
 
     // 输入 fork 提问内容
     wrapper.findComponent(ComposerInputMock).vm.$emit('input', '追问那条回复')
@@ -317,8 +317,8 @@ describe('E2E-L1-1: fork-ask 完整旅程（Turn → channel → Composer → fo
     expect(chatApiMock.submitDelivery.mock.calls[0][0]).toBe('s-forked')
     expect(chatApiMock.submitDelivery.mock.calls[0][2]).toMatch(/^u-[0-9a-fA-F-]{36}$/)
     expect(chatApiMock.send).not.toHaveBeenCalled()
-    // forkMode 自动复位 false（发送后退出 fork 模式）：mode-chip 消失 + fork-mode class 退场
-    expect(wrapper.find('[data-testid="composer-mode-chip"]').exists()).toBe(false)
+    // forkMode 自动复位 false（发送后退出 fork 模式）：staging banner 消失 + fork-mode class 退场
+    expect(wrapper.find('[data-testid="composer-mode-banner"]').exists()).toBe(false)
     // 用户可见：composer-box 已退出 fork-mode class
     expect(wrapper.find('[data-testid="composer-box"]').classes()).not.toContain('fork-mode')
   })

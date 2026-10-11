@@ -65,10 +65,20 @@ export default {
     forkChip: '将发到新分支 · 与主线隔离',
     forkSend: 'fork 并发送',
     forkExit: '退出 fork 模式',
+    // staging banner 两段文案（demo .mode-banner 形态：粗体标题 + 「 · 」+ 描述）。
+    // [HISTORICAL] 前身 mode-chip 单 key 标签（forkChip/handoffChip）+ placeholder 换文案
+    // （forkHint/handoffHint）呈现通道已随 banner 形态退役（demo：图标染 accent 唯一染色点）
+    forkBannerTitle: 'Fork 新分支',
+    forkBannerDesc: '当前输入将发到新分支，与主线隔离',
     handoffHint: '输入内容将作为新 session 的首条消息发送给 AI（可选）…（⏎ 交接并发送，Esc 退出）',
     handoffChip: '交接到新 session · 当前输入将发送到新会话',
     handoffSend: '交接并发送到新 session',
     handoffExit: '退出交接模式',
+    handoffBannerTitle: 'Handoff 交接',
+    handoffBannerDesc: '发送后将生成会话摘要，交接给新会话继续',
+    // handoff 入口/发送守卫 toast（handoff-mode.ts enterGuard/beforeSend：源 session 流式中拦截）。
+    // [HISTORICAL] key 自 D8 泛化即被引用但双侧 locale 漏定义（toast 显裸 key），同批补齐
+    handoffBusy: '当前会话正在处理中，暂无法交接',
     bashPlaceholder: '运行 bash 命令…（!! 前缀排除出上下文）',
     // composer 命令动作表复制反馈（composer-pi-shortcuts 决策 4 / §3.5）
     copyLastReply: '已复制最后回复',

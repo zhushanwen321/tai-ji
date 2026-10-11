@@ -34,7 +34,7 @@
       :key="b.key"
       variant="ghost"
       size="icon"
-      class="relative size-[30px] shrink-0 rounded-sm text-neutral-dim transition-colors hover:bg-surface-hover hover:text-neutral-mid disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-neutral-mid"
+      class="relative size-[30px] shrink-0 rounded-sm text-neutral-dim transition-colors hover:bg-surface-hover hover:text-neutral-fg disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-neutral-mid"
       :data-testid="b.testid"
       :disabled="b.disabled"
       :title="b.tooltip"

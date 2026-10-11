@@ -6,9 +6,11 @@
  * - 统一中性档：image 与 @/# 同为 --mid 中性（demo .ctxchip 22px 档无语义色分叉，紫色分叉已退役）
  * - 空数组：整行 v-if 自隐藏（不渲染外层容器）
  *
- * [窄宽容错] chip 宽 `max-w-[min(200px,100%)]` + `min-w-0`：容器窄于 200px 时 chip 跟着收缩，
+ * [窄宽容错] chip 宽 `max-w-[min(200px,100%)]`：容器窄于 200px 时百分比盖帽把 chip 压到容器宽，
  *   × 按钮保持可达（旧 `max-w-[180px] shrink-0` 在窄盒里被容器 overflow-hidden 切掉右半）。
- *   内层 name span `min-w-0` + chip `:title` 兜住被截断的全名。
+ *   截断的真实机制 = max-w 盖帽（shrink-0 只管多 chip 溢出走 wrap，chip 级 min-w-0 在其下
+ *   恒无效、已删）；truncate 生效的真实条件 = 内层 name span `min-w-0`。chip `:title` 兜住
+ *   被截断的全名。chip 边框走 `--chip-border`（两档同步契约——与行内档同族同变，不直引 hairline）。
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/panel/context-chips-bar.test.ts
  */
@@ -76,9 +78,13 @@ describe('ContextChipsBar (W4 props/emit)', () => {
     // 上限仍是 200px，但允许收到 100%（容器更窄时跟着缩）——固定 200px 会在窄盒里被裁
     expect(cls).toContain('max-w-[min(200px,100%)]')
     expect(cls).not.toContain('max-w-[200px]')
-    // chip 自身可收缩 + 内层 name span 可收缩（truncate 生效的前提）
-    expect(cls).toContain('min-w-0')
+    // 收缩由 max-w 盖帽承担；chip 级 min-w-0 在 shrink-0 下恒不生效（永不收缩则最小宽无约束机会），禁回流
+    expect(cls).not.toContain('min-w-0')
+    // 内层 name span 可收缩才是 truncate 生效的前提
     expect(chip.find('span.truncate').classes()).toContain('min-w-0')
+    // 边框走两档同步契约变量（与行内档同族同变），不直引 hairline
+    expect(cls).toContain('border-[color:var(--chip-border)]')
+    expect(cls).not.toContain('border-hairline')
   })
 
   it('窄宽容错：被截断的全名经 chip title 可达（不「无声裁切」）', () => {
