@@ -16,8 +16,8 @@
     视觉派生），ComposerInput 从 ui 包渲染（D5 占位：壳内硬编码渲染，P4 ExtensionHost 前不走
     contribution 路由）。子组件（CommandPopover/AddMenu/ModelSelect 等）留壳，不在本 wave 范围。
   -->
-  <!-- 宽度按 variant 分流：panel 全宽（demo 14px 外距由外层 composer-band padding 承接，720px 限宽是错误压缩）；landing 保留 content-col（消费 Landing 根覆写的 --content-max-w=720px 阅读列）。 -->
-  <div class="composer" :class="variant === 'landing' ? 'content-col' : undefined">
+  <!-- 宽度契约：恒 content-col（居中 + 封顶 --content-max-w），与消息列（Turn 根）/FormOverlay 同一内容列——composer 与消息流同宽同缘，overlay 互斥替换不跳变；landing 消费 Landing 根覆写的 --content-max-w=720 阅读列。[HISTORICAL] 曾按 demo .composer 无 max-width 做 panel 全宽（band padding 承接 14px 外距），与消息列 720 居中不同缘，用户裁决回归内容列。 -->
+  <div class="composer content-col">
     <!-- retry/queue 指示位（spec C10，#13，composer 上方独立行）：
          auto_retry_end / message_start 到达时 store 自动清 → state=undefined → 组件 v-if 消失 -->
     <RetryIndicator :state="retryState" />
