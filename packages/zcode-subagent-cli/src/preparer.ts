@@ -2,12 +2,21 @@
 //
 // ZcodeEngine prepare 期模型解析件：app-server 注册表对齐源（2026-09-29 account
 // 体系迁移同步后的形态）：
-//   - **模型源 = ~/.zcode/v2/provider_config.json 单源（个人 provider）**——app
-//     3.14.x 起 plan 家族 provider（builtin:/account: 前缀）经账号 entitlement 门控，
-//     外部 spawn 的 app-server 注册表只装载个人 provider（实测：显式引用 plan 家族
-//     任何 id 一律 Provider Registry 拒绝；个人 provider 的 provider/model 组合可用）。
-//     旧源 v2 config.json 的 provider 条目（builtin: plan 家族 + 过期 UUID 清单）与
-//     注册表实况不符，不再作为校验源；
+//   - **模型源 = 个人 provider 解析链**（engine-provider-unification D3 扩链）：
+//     taiji 同步副本 `<engineDataDir>/engines/zcode/pi-synced-provider-config.json`
+//     存在 → 读 merge(真实 `~/.zcode/v2/provider_config.json` 实时内容, 副本) 视图
+//     （D3 换轨版：真实条目优先、副本独有追加——与 appserver-launcher 拦截分支的
+//     内嵌 mergeProviderConfig 同规则，对账单测锁步；两消费方〔本文件校验链 / CLI
+//     Provider Registry〕看到同一视图，消除「校验放行 × CLI 拒载」分叉）；副本
+//     缺失 → 回落真实文件直读。副本是 runtime 启动段把 pi 侧 provider 映射落盘的
+//     纯 pi 侧产物（不透传真实内容），本文件不写副本只消费——解析链单点 =
+//     resolvePersonalProviderConfigPath（zcode-engine 的 ZCODE_ENG_PROVIDER_CONFIG
+//     env 赋值同函数，两消费方同锚）。
+//     app 3.14.x 起 plan 家族 provider（builtin:/account: 前缀）经账号 entitlement
+//     门控，外部 spawn 的 app-server 注册表只装载个人 provider（实测：显式引用
+//     plan 家族任何 id 一律 Provider Registry 拒绝；个人 provider 的 provider/model
+//     组合可用）。旧源 v2 config.json 的 provider 条目（builtin: plan 家族 + 过期
+//     UUID 清单）与注册表实况不符，不作为校验源；
 //   - **缺席模型（task.model 空）= 返回空串**：create 帧省略 model 键，交给 CLI
 //     自身缺省解析（实测落到 providerOrder 首位的可用模型并自动补齐 reasoning
 //     档位）——不再伪造 plan 家族兜底 id（该 id 在注册表侧已不可用）；
@@ -23,7 +32,13 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
-import { ZCODE_PERSONAL_PROVIDER_CONFIG_PATH_SUFFIX, ZCODE_V2_CONFIG_PATH_SUFFIX } from "./constants.ts";
+import { resolveEngineDataDir } from "@zhushanwen/subagent-engine-sdk";
+
+import {
+  ZCODE_PERSONAL_PROVIDER_CONFIG_PATH_SUFFIX,
+  ZCODE_PI_SYNCED_PROVIDER_CONFIG_SEGMENTS,
+  ZCODE_V2_CONFIG_PATH_SUFFIX,
+} from "./constants.ts";
 
 // ============================================================
 // 结构化错误（prepare 期——进程创建前 reject 的载体）
@@ -44,6 +59,15 @@ export class ZcodePrepareError extends Error {
     this.code = code;
   }
 }
+
+/**
+ * 副本语境恢复指引（全部 throw 文案的公共尾句——engine-provider-unification §5
+ * 单元 3 文案修复）：既有指引一律指向 ZCode 桌面端，对读 taiji 同步副本的场景
+ * （条目来自 pi 侧映射/让位）与失效默认模型偏好（settings 偏好事后失效被显式
+ * 报错，无自动清理）两个场景都错位——本句把这两个场景的恢复动作指向 taiji 侧。
+ */
+const TAIJI_SYNC_GUIDANCE =
+  "若使用 taiji 同步副本/默认模型，到 taiji settings 核对或重选，重启 taiji 生效。";
 
 // ============================================================
 // 源 config 读取（运行时 guard，禁 any）
@@ -76,34 +100,104 @@ function strArray(v: unknown): string[] {
 }
 
 /**
- * 读个人 provider 源（~/.zcode/v2/provider_config.json——GUI 管理面写入、app-server
- * 注册表实际装载的 provider 清单）。文件缺失/损坏 → 空源（凭据检查会给出
- * engine_credential_missing 的 fail-fast，不在此处吞成静默空表）。
+ * 读个人 provider 源 JSON（~/.zcode/v2/provider_config.json——GUI 管理面写入、
+ * app-server 注册表实际装载的 provider 清单）。文件缺失/损坏/非对象 → undefined
+ * （消费方语义：直读形态 = 空源，凭据检查给出 engine_credential_missing 的
+ * fail-fast；merge 形态 = 该侧缺席，由 merge 规则裁决）。
  */
-function readSourceConfig(absPath: string): SourceConfig {
-  const empty: SourceConfig = { providers: new Map(), order: [] };
+function readSourceJsonOrUndefined(absPath: string): unknown {
   let raw: string;
   try {
     raw = fs.readFileSync(absPath, "utf8");
   } catch {
-    return empty;
+    return undefined;
   }
-  let parsed: unknown;
   try {
-    parsed = JSON.parse(raw);
+    return JSON.parse(raw);
   } catch {
-    return empty;
+    return undefined;
   }
-  if (!isRecord(parsed)) return empty;
-  const rules = (parsed["config"] as Record<string, unknown> | undefined)?.["providerConfigRules"];
-  const providerRules = !isRecord(rules)
-    ? undefined
-    : rules["providerRules"];
-  const orderSrc = (parsed["config"] as Record<string, unknown> | undefined)?.["providerOrder"];
-  const conf: SourceConfig = { providers: new Map(), order: strArray(orderSrc) };
-  if (!Array.isArray(providerRules)) return conf;
-  collectProviderRules(providerRules, conf);
+}
+
+/**
+ * 解析后的 provider_config JSON → SourceConfig（providerRules 逐条归并 + order
+ * 提取；非对象/损坏 → 空源——不在此处吞成静默空表，凭据检查会 fail-fast）。
+ */
+function extractSourceConfig(parsed: unknown): SourceConfig {
+  const conf: SourceConfig = { providers: new Map(), order: [] };
+  if (!isRecord(parsed)) return conf;
+  const config = parsed["config"];
+  if (!isRecord(config)) return conf;
+  conf.order = strArray(config["providerOrder"]);
+  const rules = config["providerConfigRules"];
+  const providerRules = isRecord(rules) ? rules["providerRules"] : undefined;
+  if (Array.isArray(providerRules)) collectProviderRules(providerRules, conf);
   return conf;
+}
+
+/** 单文件直读形态（显式源 / 回落真实文件——无 merge）。 */
+function readSourceConfig(absPath: string): SourceConfig {
+  return extractSourceConfig(readSourceJsonOrUndefined(absPath));
+}
+
+// ============================================================
+// merge 视图（D3 换轨：真实文件实时内容 + taiji 同步副本——两消费方同一视图）
+// ============================================================
+
+/**
+ * merge(真实, 副本)——provider_config.json 的 D3 换轨合并视图，与 appserver-launcher
+ * 内嵌 mergeProviderConfig 同规则对账锁步（改任一侧须同步另一侧并跑对账单测）：
+ *   - 副本非对象 → 原样返回 real（副本缺席回落语义——wrapper 侧更早短路回原文件
+ *     字节，本分支是 TS 读链的等价回落）；
+ *   - 真实非对象（ENOENT/损坏）→ 原样返回 copy（副本独有条目为全集：providerRules
+ *     仅副本条目 + order 仅副本序，顶层字段随副本保持形态完整）；
+ *   - providerRules：真实条目整条保留在前，副本独有 id 追加（真实优先 = 同名让位
+ *     的运行时第二道防线）；无有效 providerId 的副本条目丢弃，真实条目原样保留；
+ *   - providerOrder：真实现值序 + 副本独有 id 追加（去重保序）；
+ *   - 其余字段（含 config 内其他键）取真实现值。
+ * 纯函数无 IO——调用方每次读取现读现算（事实驱动，禁缓存/时间窗）。
+ */
+export function mergePersonalProviderConfig(realObj: unknown, copyObj: unknown): unknown {
+  if (!isRecord(copyObj)) return realObj;
+  if (!isRecord(realObj)) return copyObj;
+  const cfgOf = (obj: Record<string, unknown>): Record<string, unknown> =>
+    isRecord(obj["config"]) ? obj["config"] : {};
+  const rulesOf = (obj: Record<string, unknown>): unknown[] => {
+    const pcr = cfgOf(obj)["providerConfigRules"];
+    const rules = isRecord(pcr) ? pcr["providerRules"] : undefined;
+    return Array.isArray(rules) ? rules : [];
+  };
+  const mergedRules: unknown[] = [];
+  const seen = new Set<string>();
+  for (const rule of rulesOf(realObj)) {
+    mergedRules.push(rule);
+    if (isRecord(rule)) {
+      const id = rule["providerId"];
+      if (typeof id === "string" && id !== "") seen.add(id);
+    }
+  }
+  for (const rule of rulesOf(copyObj)) {
+    if (!isRecord(rule)) continue;
+    const id = rule["providerId"];
+    if (typeof id !== "string" || id === "") continue;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    mergedRules.push(rule);
+  }
+  const mergedOrder: string[] = [];
+  for (const id of [...strArray(cfgOf(realObj)["providerOrder"]), ...strArray(cfgOf(copyObj)["providerOrder"])]) {
+    if (!mergedOrder.includes(id)) mergedOrder.push(id);
+  }
+  const realCfg = cfgOf(realObj);
+  const realPcr = isRecord(realCfg["providerConfigRules"]) ? realCfg["providerConfigRules"] : {};
+  return {
+    ...realObj,
+    config: {
+      ...realCfg,
+      providerOrder: mergedOrder,
+      providerConfigRules: { ...realPcr, providerRules: mergedRules },
+    },
+  };
 }
 
 /** [readSourceConfig 拆分] providerRules 逐条归并（id 键守卫 + access/personalModelIds
@@ -147,7 +241,11 @@ export function hasApiKey(entry: ZcodeProviderEntry): boolean {
 }
 
 export interface ZcodeSourcePaths {
-  /** 个人 provider 注册表源（app-server 注册表对齐）。缺省 ~/.zcode/v2/provider_config.json。 */
+  /**
+   * 个人 provider 注册表源（app-server 注册表对齐）——显式定型，直读指定路径
+   * （绕过副本 merge 视图与回落）。缺省走 readPersonalProviderView 的默认读链
+   * （副本存在 → merge 视图；缺失 → 回落真实文件）。
+   */
   personalProviderConfigPath?: string;
   /** launcher 凭据注入的 v2 config 源（ZCODE_ENG_V2_CONFIG 消费——凭据供数面，与模型校验源无关）。缺省 ~/.zcode/v2/config.json。 */
   v2ConfigPath?: string;
@@ -162,6 +260,88 @@ export function defaultPersonalProviderConfigPath(): string {
 /** launcher 凭据注入的 v2 config 缺省路径（ZCODE_ENG_V2_CONFIG 消费，与模型校验源无关）。 */
 export function defaultV2ConfigPath(): string {
   return path.join(os.homedir(), ...ZCODE_V2_CONFIG_PATH_SUFFIX);
+}
+
+/** taiji 同步副本绝对路径（<engineDataDir>/engines/zcode/pi-synced-provider-config.json）。 */
+export function piSyncedProviderConfigPath(engineDataDir: string): string {
+  return path.join(engineDataDir, ...ZCODE_PI_SYNCED_PROVIDER_CONFIG_SEGMENTS);
+}
+
+/**
+ * env 推导的引擎数据目录（与 registration.ts defaultEngineDataDir 同源——
+ * resolveEngineDataDir(process.env)）。缺 env 且无 fallback 时该函数抛错（standalone
+ * 裸跑形态）——此时副本无定位点，捕获为 undefined 走真实文件回落：宿主内运行 env
+ * 恒注入（生产不可达分支），裸跑形态本就没有 taiji 同步副本可言。
+ */
+function envEngineDataDirOrUndefined(): string | undefined {
+  try {
+    return resolveEngineDataDir(process.env);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * 三态链的结构化解析结果（读取语义分形态——路径函数与 merge 视图读链共用同一条链，
+ * 回落判定点单点）：
+ *   - explicit：显式定型，直读指定路径（绕过 merge——生产 deps.sources 恒 undefined
+ *     不走此分支）；
+ *   - copy：taiji 同步副本存在——读取语义 = merge(真实实时内容, 副本) 视图（realPath
+ *     为 merge 第二源）；
+ *   - real：副本缺失回落真实文件直读。
+ */
+type PersonalProviderResolution =
+  | { kind: "explicit"; path: string }
+  | { kind: "copy"; path: string; realPath: string }
+  | { kind: "real"; path: string };
+
+function resolvePersonalProviderSource(sources?: ZcodeSourcePaths, engineDataDir?: string): PersonalProviderResolution {
+  const explicit = sources?.personalProviderConfigPath;
+  if (explicit !== undefined) return { kind: "explicit", path: explicit };
+  const dataDir = engineDataDir ?? envEngineDataDirOrUndefined();
+  if (dataDir !== undefined && fs.existsSync(piSyncedProviderConfigPath(dataDir))) {
+    return { kind: "copy", path: piSyncedProviderConfigPath(dataDir), realPath: defaultPersonalProviderConfigPath() };
+  }
+  return { kind: "real", path: defaultPersonalProviderConfigPath() };
+}
+
+/**
+ * 个人 provider 校验源路径解析（engine-provider-unification D3 锚点扩链；两消费方
+ * 同锚——zcode-engine 的 ZCODE_ENG_PROVIDER_CONFIG env 赋值走本函数〔D3 换轨后
+ * 语义收窄 = taiji 同步副本路径；副本缺失回落真实路径〕，校验链读取走
+ * readPersonalProviderView 的 merge 视图，禁止各自拼路径）。每次调用现读存在性
+ * （无缓存）——副本落盘/删除对下一次解析即时生效。
+ *
+ * @param engineDataDir 引擎数据目录（zcode-engine 侧传 deps.engineDataDir() 的
+ *   DI 值；缺席时按 env 推导——生产两通道同值）
+ */
+export function resolvePersonalProviderConfigPath(sources?: ZcodeSourcePaths, engineDataDir?: string): string {
+  return resolvePersonalProviderSource(sources, engineDataDir).path;
+}
+
+/** 校验链读取结果：SourceConfig + 诊断面已读源描述（merge 视图 = 双路径）。 */
+interface PersonalProviderView {
+  conf: SourceConfig;
+  sourceDesc: string;
+}
+
+/**
+ * 校验链读取入口（resolveZcodeModelRef/listZcodeModels 的单一读源）：三态链
+ * copy 分支读 merge(真实, 副本) 视图，其余形态单文件直读。副本与 wrapper 拦截
+ * 分支同一 merge 规则（mergePersonalProviderConfig）——两消费方（校验链/CLI
+ * Provider Registry）看到同一视图。每次调用现读现合并（无缓存）。
+ */
+function readPersonalProviderView(sources?: ZcodeSourcePaths): PersonalProviderView {
+  const resolution = resolvePersonalProviderSource(sources);
+  if (resolution.kind !== "copy") {
+    return { conf: readSourceConfig(resolution.path), sourceDesc: resolution.path };
+  }
+  const copyJson = readSourceJsonOrUndefined(resolution.path);
+  const realJson = readSourceJsonOrUndefined(resolution.realPath);
+  return {
+    conf: extractSourceConfig(mergePersonalProviderConfig(realJson, copyJson)),
+    sourceDesc: `merge(真实 ${resolution.realPath} + 副本 ${resolution.path})`,
+  };
 }
 
 // ============================================================
@@ -310,8 +490,7 @@ function defaultProviderForShortName(
  * engine_credential_missing；provider/模型不存在 → model_not_available（列可用清单）。
  */
 export function resolveZcodeModelRef(requested: string | undefined, sources?: ZcodeSourcePaths): string {
-  const srcPath = sources?.personalProviderConfigPath ?? defaultPersonalProviderConfigPath();
-  const conf = readSourceConfig(srcPath);
+  const { conf, sourceDesc } = readPersonalProviderView(sources);
   const withKey = [...conf.providers.entries()].filter(([, e]) => hasApiKey(e));
   const wanted = requested?.trim() || undefined;
 
@@ -319,10 +498,11 @@ export function resolveZcodeModelRef(requested: string | undefined, sources?: Zc
     const hint = wanted ? `model="${wanted}" 不能校验` : "缺省模型解析不能校验";
     throw new ZcodePrepareError(
       "engine_credential_missing",
-      `zcode 引擎找不到任何带 apiKey 的个人 provider（${hint}）。已读源：${srcPath}。` +
+      `zcode 引擎找不到任何带 apiKey 的个人 provider（${hint}）。已读源：${sourceDesc}。` +
         `恢复指引：在 ZCode 桌面端配置至少一个个人 provider（provider_config.json 内存在` +
         ` config.access.apiKey 非空条目）后重试；plan 套餐族（builtin:/account: 前缀）经账号` +
-        ` entitlement 门控，外部 spawn 的引擎注册表不装载，不可作为引擎模型。`,
+        ` entitlement 门控，外部 spawn 的引擎注册表不装载，不可作为引擎模型。` +
+        TAIJI_SYNC_GUIDANCE,
     );
   }
 
@@ -339,7 +519,8 @@ export function resolveZcodeModelRef(requested: string | undefined, sources?: Zc
       "model_not_available",
       `未知 provider "${provider}"（带凭据的个人 provider: ${known}）。` +
         `恢复指引：改用上述 provider 之一（全名 provider/model），或在 ZCode 桌面端配置该` +
-        ` provider 后重试；省略 model 参数则走引擎缺省解析（CLI 自身选取可用模型）。`,
+        ` provider 后重试；省略 model 参数则走引擎缺省解析（CLI 自身选取可用模型）。` +
+        TAIJI_SYNC_GUIDANCE,
     );
   }
   if (!hasApiKey(entry)) {
@@ -347,7 +528,8 @@ export function resolveZcodeModelRef(requested: string | undefined, sources?: Zc
       "engine_credential_missing",
       `provider "${provider}" 存在但未配置 apiKey。` +
         `恢复指引：在 ZCode 桌面端为该 provider 配置凭据，或改用已配凭据的 provider` +
-        `（${withKey.map(([id]) => id).join(", ")}）后重试。`,
+        `（${withKey.map(([id]) => id).join(", ")}）后重试。` +
+        TAIJI_SYNC_GUIDANCE,
     );
   }
   const models = entry.models ?? [];
@@ -355,7 +537,8 @@ export function resolveZcodeModelRef(requested: string | undefined, sources?: Zc
     throw new ZcodePrepareError(
       "model_not_available",
       `未知模型 "${short}"（provider ${provider} 下可用: ${models.join(", ")}）。` +
-        `恢复指引：改用该 provider 下的模型，或在 ZCode 桌面端启用目标模型后重试。`,
+        `恢复指引：改用该 provider 下的模型，或在 ZCode 桌面端启用目标模型后重试。` +
+        TAIJI_SYNC_GUIDANCE,
     );
   }
   return `${provider}/${short}`;
@@ -366,13 +549,13 @@ export function resolveZcodeModelRef(requested: string | undefined, sources?: Zc
 // ============================================================
 
 /**
- * 列出当前环境 zcode 引擎实际可用的模型（provider_config.json 内带 apiKey 的个人
- * provider × 其模型清单——与 app-server 注册表的装载实况一致）。消费方：
- * EnginePort.listModels（system prompt 引擎段 / GUI）。失败安全：源不可读 → 空清单
- * （可发现性降级不阻塞主流程）。
+ * 列出当前环境 zcode 引擎实际可用的模型（readPersonalProviderView 解析的校验源内
+ * 带 apiKey 的个人 provider × 其模型清单——副本存在时即 merge 视图聚合，与
+ * app-server 注册表的装载实况一致）。消费方：EnginePort.listModels（system prompt
+ * 引擎段 / GUI）。失败安全：源不可读 → 空清单（可发现性降级不阻塞主流程）。
  */
 export function listZcodeModels(sources?: ZcodeSourcePaths): Array<{ id: string; name?: string }> {
-  const conf = readSourceConfig(sources?.personalProviderConfigPath ?? defaultPersonalProviderConfigPath());
+  const { conf } = readPersonalProviderView(sources);
   const out: Array<{ id: string; name?: string }> = [];
   for (const [pid, entry] of conf.providers) {
     if (!hasApiKey(entry)) continue;
