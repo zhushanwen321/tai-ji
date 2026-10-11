@@ -2,9 +2,12 @@
   <!--
     TurnMeta：回合状态条（demo workbench.css .workmeta 轮头形态，M3a 视觉复刻对齐）。
     从 Turn.vue 拆出。demo 权威形态：mono + 12px（--text-xs）+ dim 单行，段间 10px gap，
-    内容左缘 x=0（Button px-0）；「已工作」的时长值 = mid 色 + fw-mid 强调（demo .workmeta b）；
+    内容左缘 x=0（Button px-1.5 的占位由 -mx-1.5 抵消——ghost hover 背景左右各留 6px
+    内边距，文字对齐不变）；「已工作」的时长值 = mid 色 + fw-mid 强调（demo .workmeta b）；
     思考/工具计数 = chipn chips（hairline 边框 + 6px 圆角 + 1×8 padding + mid 字 + bg-input 底，
-    demo .workmeta .chipn）；无分隔线（demo 轮次分隔 = 纯 20px 留白，无 hr）。
+    demo .workmeta .chipn）；行尾至列右缘补两端渐隐横线（同 SystemNotice / ActivityStrip
+    分隔行族 gradient，用户裁决 2026-10-11 参考「后台命令已完成」分割线设计——demo
+    「轮次分隔 = 纯留白无 hr」形态由该裁决覆盖）。
     （原「纯文本段无底色无边框」形态 = 用户裁决 2026-10-06，被 M3a demo 权威覆盖，登记于
     .tmp/ui-replica/reports/m3a-turn-skeleton.md 决策清单）
   -->
@@ -25,7 +28,7 @@
       <Button
         variant="ghost"
         size="sm"
-        class="turn-meta h-auto w-fit flex-wrap items-center justify-start gap-[10px] self-start px-0 py-[4px] font-mono font-normal text-[length:var(--text-xs)] transition-colors duration-[var(--duration-fast)] ease-[var(--ease)]"
+        class="turn-meta -mx-1.5 h-auto w-fit flex-wrap items-center justify-start gap-[10px] self-start px-1.5 py-[4px] font-mono font-normal text-[length:var(--text-xs)] transition-colors duration-[var(--duration-fast)] ease-[var(--ease)]"
         :class="[
           !turn.hasFoldable
             ? 'cursor-default hover:text-neutral-mid'
@@ -71,6 +74,9 @@
         <span v-if="thinkCount > 0" class="badge badge-think inline-flex items-center gap-[5px] rounded-sm border border-hairline bg-bg-input px-2 py-px font-mono text-[length:var(--text-xs)] text-neutral-mid tabular-nums">{{ t('panel.message.thinkCount', { count: thinkCount }) }}</span>
         <span v-if="toolCount > 0" class="badge badge-tool inline-flex items-center gap-[5px] rounded-sm border border-hairline bg-bg-input px-2 py-px font-mono text-[length:var(--text-xs)] text-neutral-mid tabular-nums">{{ t('panel.message.toolCount', { count: toolCount }) }}</span>
       </Button>
+      <!-- 行尾分隔横线：从轮头内容尾延伸至列右缘（flex-1），两端渐隐 gradient 与 SystemNotice /
+           ActivityStrip 分隔行族同款（用户裁决 2026-10-11，见头注） -->
+      <span class="h-px min-w-4 flex-1 bg-[image:linear-gradient(to_right,transparent,var(--border-strong)_18%,var(--border-strong)_82%,transparent)]" />
     </div>
   </div>
 </template>
