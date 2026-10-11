@@ -88,7 +88,7 @@ describe('PanelHeader 折叠态 chrome 迁入（review MF-6）', () => {
 
   it('collapsed=true → header 渲染 sidebar-collapse-toggle + pl-[88px] 让位红黄绿，drawer-toggle 恒显（ui-replica MF-1-49）', async () => {
     const sidebar = useSidebarStore()
-    sidebar.collapsed = true
+    sidebar.userCollapsed = true
 
     const wrapper = mountHeader()
     const header = wrapper.find('header')
@@ -103,7 +103,7 @@ describe('PanelHeader 折叠态 chrome 迁入（review MF-6）', () => {
 
   it('collapsed=true + isFullscreen → header 回退 pl-3.5（全屏红黄绿 OS 隐藏不占位）', () => {
     const sidebar = useSidebarStore()
-    sidebar.collapsed = true
+    sidebar.userCollapsed = true
     platformChromeMock.isFullscreen.value = true
 
     const wrapper = mountHeader()

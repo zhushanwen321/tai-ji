@@ -94,7 +94,7 @@ describe('AppShell 拓扑渲染 gate（刻意调整形态回归防线）', () =>
     const wrapper = mount(AppShell)
     expect(wrapper.find('[data-testid="app-shell"]').classes()).not.toContain('!gap-0')
 
-    sidebar.collapsed = true
+    sidebar.userCollapsed = true
     await nextTick()
     expect(wrapper.find('[data-testid="app-shell"]').classes()).toContain('!gap-0')
   })
