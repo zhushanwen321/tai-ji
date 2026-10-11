@@ -139,6 +139,9 @@ export type ClientMessageType =
   | 'session.getPlanState' | 'session.abortPlan'
   // [U7] 子代理引擎配置（Settings 引擎选择器：动态引擎列表 + defaultEngine 读写）
   | 'session.getSubagentEngineConfig' | 'session.setSubagentDefaultEngine'
+  // engine-provider-unification D5：settings per-engine 默认模型写入（engine-provider-unification
+  // 设计 §3.3 D5）。payload：engineId 定位引擎，modelRef = 模型全 ref（zcode 形态 providerId/modelId）。
+  | 'session.setSubagentEngineDefaultModel'
   | 'session.getWorkflows' | 'session.getAgentCallHistory' | 'session.getAgentCallFilePath'
   | 'session.workflowAction' | 'session.subagentAction'
   // workflow 可视化（workflow-visualization 设计 §3.1-4/§3.1-5 / U2 协议冻结）：
@@ -613,6 +616,9 @@ export interface ClientMessageMap {
   // [U7] 子代理引擎配置读写（payload：set 带 engineId；get 无参）
   'session.getSubagentEngineConfig': Record<string, never>
   'session.setSubagentDefaultEngine': { engineId: string }
+  // engine-provider-unification D5：per-engine 默认模型写入（runtime 写 config.json engineDefaults
+  // 键，写入前校验 modelRef ∈ 该引擎模型清单；engineId/modelRef 回显见 mutation reply）。
+  'session.setSubagentEngineDefaultModel': { engineId: string; modelRef: string }
   // workflow 列表/agent call 对话流读取（runtime 直读主 session JSONL + workflow-state JSONL，不依赖扩展）
   'session.getWorkflows': { sessionId: string }
   'session.getAgentCallHistory': { sessionId: string; agentCallSessionId: string }
@@ -1115,8 +1121,11 @@ export type ServerMessageType =
   //（last-value 语义——重连/切回经 stateSnapshot 回放自动恢复）；冷启动/切换首拉走
   // session.getPlanState RPC，reply 复用本 payload。
   | 'session.planState'
-  // [U7] 子代理引擎配置（Settings 引擎选择器；形状 = @zhushanwen/extension-protocol SubagentEngineConfigView，契约 SSOT 在彼处）
+  // [U7] 子代理引擎配置（Settings 引擎选择器；形状 = @zhushanwen/extension-protocol SubagentEngineConfigView 扩展 + engineModels/engineDefaults 两键（engine-provider-unification D5），契约 SSOT 在彼处）
   | 'session.subagentEngineConfig' | 'session.subagentDefaultEngineSet'
+  // engine-provider-unification D5：setSubagentEngineDefaultModel 的 reply type（与 request
+  // 同名配对模式，setSubagentDefaultEngine → subagentDefaultEngineSet 先例）。
+  | 'session.subagentEngineDefaultModelSet'
   // E 方案（subagent-realtime-channel §4.3）：runtime relay tee 产出的 subagent entry 增量帧
   | 'session.subagentEntriesAppended'
   | 'session.workflows' | 'session.agentCallHistory' | 'session.agentCallFilePath'
@@ -1756,6 +1765,22 @@ export interface SubagentDefaultEngineMutationReply {
   engineId: string
 }
 
+/** 引擎可选模型清单条目（值形状镜像 = zcode-subagent-cli preparer listZcodeModels 返回形态）。
+ *  engine-provider-unification D5：settings per-engine 模型清单与写入校验共用该形态。 */
+export interface SubagentEngineModelInfo {
+  /** 模型全 ref（zcode 形态 providerId/modelId，与 resolveZcodeModelRef 校验值同域）。 */
+  id: string
+  /** 展示名（如 `ProviderName · model`）；派生源 provider 无名时缺省。 */
+  name?: string
+}
+
+/** session.setSubagentEngineDefaultModel 的 reply：写 config.json engineDefaults 后的确认回显
+ *  （分支二原样存储，engineId/modelRef 回显必需——setSubagentDefaultEngine reply 同款）。 */
+export interface SubagentEngineDefaultModelMutationReply {
+  engineId: string
+  modelRef: string
+}
+
 /** session.rename 的 reply：回显请求名（原样存储）。本类型同时是广播帧形状（broadcastSessionList）。 */
 export interface SessionRenameMutationReply {
   sessionId: string
@@ -2261,11 +2286,24 @@ export interface ServerMessageMapBase {
   // truncated：u4b（D5①）巨型 subagent JSONL（高发源）超预检阈值后逆序窗口降级标志
   //（optional——mock / 旧 runtime 不带此键，消费方按 false 处理）。
   'session.subagentHistory': { sessionId: string; subagentId: string; messages: import('./message').Message[]; truncated?: boolean }
-  // [U7] getSubagentEngineConfig 的 reply（engines = extension engines.json 动态清单；形状与 extension-protocol 契约一致）
-  'session.subagentEngineConfig': { engines: string[]; defaultEngine: string }
+  // [U7] getSubagentEngineConfig 的 reply（engines = extension engines.json 动态清单；基础形状 =
+  // @zhushanwen/extension-protocol SubagentEngineConfigView）。engine-provider-unification D5 扩展：
+  // engineModels（per-engine 可选模型清单，值形状 = SubagentEngineModelInfo[]）与 engineDefaults
+  //（per-engine 默认模型偏好，值 = 模型全 ref）。两键 optional——旧 runtime / mock / 广播帧不带时
+  // 消费方按空表与「无偏好」处理（oversize?/found? 同款缺省惯例）；契约 SSOT 仍在 extension-protocol
+  // view，runtime 侧跟随扩展属下游单元连带。
+  'session.subagentEngineConfig': {
+    engines: string[]
+    defaultEngine: string
+    engineModels?: Record<string, SubagentEngineModelInfo[]>
+    engineDefaults?: Record<string, string>
+  }
   // [U7] setSubagentDefaultEngine 的 reply（写 config.json 后确认；新 session 生效）。
   // [C-pi-14/ADR-0065] mutation reply（分支二原样存储）：engineId 回显必需。
   'session.subagentDefaultEngineSet': SubagentDefaultEngineMutationReply
+  // engine-provider-unification D5：setSubagentEngineDefaultModel 的 reply（写 config.json
+  // engineDefaults 键后确认回显）。
+  'session.subagentEngineDefaultModelSet': SubagentEngineDefaultModelMutationReply
   // session.subagentEntriesAppended（E 方案，subagent-realtime-channel §4.3/§6）：runtime relay
   // tee 翻译层产出的 subagent entry 增量帧——子进程 stdout 事件经 event-adapter 独立实例
   // 翻译 + entry 化（与主对话流 message.message_end / tool_call_* 帧的 entry 形态同构，
@@ -3072,6 +3110,9 @@ export interface ReplyPayloadMap {
   'session.getSubagentStreamState': ServerMessageMap['session.getSubagentStreamState']
   'session.getSubagentEngineConfig': ServerMessageMap['session.subagentEngineConfig']
   'session.setSubagentDefaultEngine': ServerMessageMap['session.subagentDefaultEngineSet']
+  // engine-provider-unification D5：per-engine 默认模型写入的 reply（mutation 分支二回显，
+  // 运行时契约测试 MUTATION_RPC_REGISTRY 登记义务在 handler 单元承接）。
+  'session.setSubagentEngineDefaultModel': ServerMessageMap['session.subagentEngineDefaultModelSet']
   'session.getSubagents': ServerMessageMap['session.subagents']
   // plan 模式（D1-⑥ 冷启动首拉）：reply 复用 session.planState 广播 payload（同 getSubagents 先例）
   'session.getPlanState': ServerMessageMap['session.planState']
