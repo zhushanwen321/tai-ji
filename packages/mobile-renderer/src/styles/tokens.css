@@ -79,18 +79,15 @@
   --font-sans: system-ui, 'PingFang SC', 'Helvetica Neue', 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif;
   --font-mono: 'JetBrains Mono', 'IBM Plex Mono', ui-monospace, Menlo, monospace;
 
-  /* 字号 scale（v6 §4：calc 自适应，2026-08-02 整体上移一档 base 13→14）
-   * 自适应公式：calc(Npx × --font-scale-u × --font-scale-mq)
-   *   --font-scale-u：用户档位（data-font-size 映射，见下方选择器）
-   *   --font-scale-mq：视口媒体查询自动档位（见文件底部 @media） */
+  /* 字号 scale：--text-* = 基准px × 用户档位（demo 固定 px，无视口档）
+   *   --font-scale-u：用户档位（data-font-size 映射，见下方选择器） */
   --font-scale-u: 1;
-  --font-scale-mq: 1;
-  --text-3xs: calc(10px * var(--font-scale-u) * var(--font-scale-mq));
-  --text-2xs: calc(11px * var(--font-scale-u) * var(--font-scale-mq));
-  --text-xs: calc(12px * var(--font-scale-u) * var(--font-scale-mq));
-  --text-sm: calc(13px * var(--font-scale-u) * var(--font-scale-mq));
-  --text-base: calc(14px * var(--font-scale-u) * var(--font-scale-mq));
-  --text-md: calc(15px * var(--font-scale-u) * var(--font-scale-mq));
+  --text-3xs: calc(10px * var(--font-scale-u));
+  --text-2xs: calc(11px * var(--font-scale-u));
+  --text-xs: calc(12px * var(--font-scale-u));
+  --text-sm: calc(13px * var(--font-scale-u));
+  --text-base: calc(14px * var(--font-scale-u));
+  --text-md: calc(15px * var(--font-scale-u));
 
   /* ── 圆角（v6：sm 6px / 8px / lg 12px / card 10px）───────── */
   --radius-sm: 6px;             /* 输入框/标签 */
@@ -234,12 +231,4 @@
 
 :root[data-font-size="large"] {
   --font-scale-u: 1.143;
-}
-
-/* 视口自适应字号（与 --font-scale-mq 配合：大屏放大、小屏收缩） */
-@media (min-width: 2100px) {
-  :root { --font-scale-mq: 1.08; }
-}
-@media (max-width: 1399px) {
-  :root { --font-scale-mq: 0.95; }
 }

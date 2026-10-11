@@ -106,23 +106,21 @@
   --fw-mid: 600;                /* 中档：行容器 / 组头 */
   --fw-bold: 700;               /* 粗体：动作词 / 工具名 */
 
-  /* 字号 scale（v6 §4：calc 自适应，2026-08-02 整体上移一档 base 13→14）
-   * 自适应公式：calc(Npx × --font-scale-u × --font-scale-mq)
-   *   --font-scale-u：用户档位（data-font-size 映射，见下方选择器）
-   *   --font-scale-mq：视口媒体查询自动档位（见文件底部 @media） */
+  /* 字号 scale：--text-* = 基准px × 用户全局档位 × 分区档位（demo 固定 px，无视口档）
+   *   --font-scale-u：用户全局档位（data-font-size 映射，见下方选择器）
+   *   --font-scale-<region>：分区档位（data-fs-* 映射，区域根 [data-fs-scope] 子树重声明） */
   --font-scale-u: 1;
-  --font-scale-mq: 1;
   /* 分区字号倍率（data-fs-sidebar/chat/drawer 档位映射，见下方选择器）。
    * 区域根节点挂 [data-fs-scope] 属性后，子树内 --text-* 链乘以对应倍率。 */
   --font-scale-sidebar: 1;
   --font-scale-chat: 1;
   --font-scale-drawer: 1;
-  --text-3xs: calc(10px * var(--font-scale-u) * var(--font-scale-mq));
-  --text-2xs: calc(11px * var(--font-scale-u) * var(--font-scale-mq));
-  --text-xs: calc(12px * var(--font-scale-u) * var(--font-scale-mq));
-  --text-sm: calc(13px * var(--font-scale-u) * var(--font-scale-mq));
-  --text-base: calc(14px * var(--font-scale-u) * var(--font-scale-mq));
-  --text-md: calc(15px * var(--font-scale-u) * var(--font-scale-mq));
+  --text-3xs: calc(10px * var(--font-scale-u));
+  --text-2xs: calc(11px * var(--font-scale-u));
+  --text-xs: calc(12px * var(--font-scale-u));
+  --text-sm: calc(13px * var(--font-scale-u));
+  --text-base: calc(14px * var(--font-scale-u));
+  --text-md: calc(15px * var(--font-scale-u));
 
   /* ── 圆角（demo 四档：xs 4 / sm 6 / 8 / lg 12；demo 卡片形态统一走 lg 档，无 10px 档）── */
   --radius-xs: 4px;             /* 微件：seg 项/滚动条 thumb/badge 内件 */
@@ -537,38 +535,30 @@
  * 缩放；硬编码 px 字号类不响应（各区域组件已转换为 token 引用）。
  * 属性选择器而非类名：与 data-font-size 槽位同范式，且仍是纯 token 重声明。 */
 [data-fs-scope="sidebar"] {
-  --text-3xs: calc(10px * var(--font-scale-u) * var(--font-scale-mq) * var(--font-scale-sidebar));
-  --text-2xs: calc(11px * var(--font-scale-u) * var(--font-scale-mq) * var(--font-scale-sidebar));
-  --text-xs: calc(12px * var(--font-scale-u) * var(--font-scale-mq) * var(--font-scale-sidebar));
-  --text-sm: calc(13px * var(--font-scale-u) * var(--font-scale-mq) * var(--font-scale-sidebar));
-  --text-base: calc(14px * var(--font-scale-u) * var(--font-scale-mq) * var(--font-scale-sidebar));
-  --text-md: calc(15px * var(--font-scale-u) * var(--font-scale-mq) * var(--font-scale-sidebar));
+  --text-3xs: calc(10px * var(--font-scale-u) * var(--font-scale-sidebar));
+  --text-2xs: calc(11px * var(--font-scale-u) * var(--font-scale-sidebar));
+  --text-xs: calc(12px * var(--font-scale-u) * var(--font-scale-sidebar));
+  --text-sm: calc(13px * var(--font-scale-u) * var(--font-scale-sidebar));
+  --text-base: calc(14px * var(--font-scale-u) * var(--font-scale-sidebar));
+  --text-md: calc(15px * var(--font-scale-u) * var(--font-scale-sidebar));
 }
 
 [data-fs-scope="chat"] {
-  --text-3xs: calc(10px * var(--font-scale-u) * var(--font-scale-mq) * var(--font-scale-chat));
-  --text-2xs: calc(11px * var(--font-scale-u) * var(--font-scale-mq) * var(--font-scale-chat));
-  --text-xs: calc(12px * var(--font-scale-u) * var(--font-scale-mq) * var(--font-scale-chat));
-  --text-sm: calc(13px * var(--font-scale-u) * var(--font-scale-mq) * var(--font-scale-chat));
-  --text-base: calc(14px * var(--font-scale-u) * var(--font-scale-mq) * var(--font-scale-chat));
-  --text-md: calc(15px * var(--font-scale-u) * var(--font-scale-mq) * var(--font-scale-chat));
+  --text-3xs: calc(10px * var(--font-scale-u) * var(--font-scale-chat));
+  --text-2xs: calc(11px * var(--font-scale-u) * var(--font-scale-chat));
+  --text-xs: calc(12px * var(--font-scale-u) * var(--font-scale-chat));
+  --text-sm: calc(13px * var(--font-scale-u) * var(--font-scale-chat));
+  --text-base: calc(14px * var(--font-scale-u) * var(--font-scale-chat));
+  --text-md: calc(15px * var(--font-scale-u) * var(--font-scale-chat));
 }
 
 [data-fs-scope="drawer"] {
-  --text-3xs: calc(10px * var(--font-scale-u) * var(--font-scale-mq) * var(--font-scale-drawer));
-  --text-2xs: calc(11px * var(--font-scale-u) * var(--font-scale-mq) * var(--font-scale-drawer));
-  --text-xs: calc(12px * var(--font-scale-u) * var(--font-scale-mq) * var(--font-scale-drawer));
-  --text-sm: calc(13px * var(--font-scale-u) * var(--font-scale-mq) * var(--font-scale-drawer));
-  --text-base: calc(14px * var(--font-scale-u) * var(--font-scale-mq) * var(--font-scale-drawer));
-  --text-md: calc(15px * var(--font-scale-u) * var(--font-scale-mq) * var(--font-scale-drawer));
-}
-
-/* 视口自适应字号（与 --font-scale-mq 配合：大屏放大、小屏收缩） */
-@media (min-width: 2100px) {
-  :root { --font-scale-mq: 1.08; }
-}
-@media (max-width: 1399px) {
-  :root { --font-scale-mq: 0.95; }
+  --text-3xs: calc(10px * var(--font-scale-u) * var(--font-scale-drawer));
+  --text-2xs: calc(11px * var(--font-scale-u) * var(--font-scale-drawer));
+  --text-xs: calc(12px * var(--font-scale-u) * var(--font-scale-drawer));
+  --text-sm: calc(13px * var(--font-scale-u) * var(--font-scale-drawer));
+  --text-base: calc(14px * var(--font-scale-u) * var(--font-scale-drawer));
+  --text-md: calc(15px * var(--font-scale-u) * var(--font-scale-drawer));
 }
 
 /* ============================================================

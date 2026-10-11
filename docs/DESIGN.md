@@ -332,7 +332,7 @@ demo 阶段功能做到「可见 + 可交互 + 数据 mock」即够。不接 run
 --diff-del-strong: color-mix(in oklch, var(--danger) 45%, transparent);
 ```
 
-### 4.6 字体 / 字号 scale（2026-08-02 整体上移一档 + 自适应）
+### 4.6 字体 / 字号 scale
 
 ```css
 --font-sans: system-ui, 'PingFang SC', 'Helvetica Neue', 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif;
@@ -343,16 +343,15 @@ demo 阶段功能做到「可见 + 可交互 + 数据 mock」即够。不接 run
 --fw-mid: 600;   /* 中档：行容器 / 组头 */
 --fw-bold: 700;  /* 粗体：动作词 / 工具名 */
 
-/* 字号 scale（base 13→14 上移，calc 自适应）*/
+/* 字号 scale：--text-* = 基准px × 用户全局档位 × 分区档位（demo 固定 px，无视口档）*/
 > 2026-08-25：--font-sans 改系统栈，supersede ADR-0019 的 Inter 字体子决策（chat-visual-font-optimize）
---font-scale-u: 1;   /* 用户档位（AppearancePage 选：small 0.929 / medium 1.0 / large 1.143）*/
---font-scale-mq: 1;  /* 视口档位（媒体查询：≥2100px ×1.08 / <1400px ×0.95）*/
---text-3xs: calc(10px * var(--font-scale-u) * var(--font-scale-mq));
---text-2xs: calc(11px * var(--font-scale-u) * var(--font-scale-mq));
---text-xs:   calc(12px * var(--font-scale-u) * var(--font-scale-mq));
---text-sm:   calc(13px * var(--font-scale-u) * var(--font-scale-mq));
---text-base: calc(14px * var(--font-scale-u) * var(--font-scale-mq));
---text-md:   calc(15px * var(--font-scale-u) * var(--font-scale-mq));
+--font-scale-u: 1;   /* 用户全局档位（AppearancePage 选：small 0.929 / medium 1.0 / large 1.143）*/
+--text-3xs: calc(10px * var(--font-scale-u));
+--text-2xs: calc(11px * var(--font-scale-u));
+--text-xs:   calc(12px * var(--font-scale-u));
+--text-sm:   calc(13px * var(--font-scale-u));
+--text-base: calc(14px * var(--font-scale-u));
+--text-md:   calc(15px * var(--font-scale-u));
 ```
 
 ### 4.7 圆角 / 间距 / 阴影 / z-index / 动效

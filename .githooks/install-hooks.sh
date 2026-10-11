@@ -790,6 +790,35 @@ else
 fi
 
 # ============================================================================
+# 视口字号自动档禁令检查（font-scale-mq / 字号 @media 不复发）
+# ============================================================================
+
+FONT_SCALE_CHECKER=".githooks/check_font_scale_viewport.py"
+FONT_SCALE_FILES="packages/renderer/src/style.css packages/mobile-renderer/src/styles/tokens.css docs/DESIGN.md"
+
+if [ "$SKIP_ALL_CHECKS" != "1" ]; then
+    # 仅当三个字号 token 权威文件之一变更时才检查（R1 惯例：不设独立 SKIP 开关）
+    FONT_SCALE_CHANGED=$(echo "$STAGED_FILES" | grep -E "^packages/renderer/src/style\.css$|^packages/mobile-renderer/src/styles/tokens\.css$|^docs/DESIGN\.md$" || true)
+    if [ -n "$FONT_SCALE_CHANGED" ]; then
+        echo -e "${BLUE}[INFO] 运行视口字号自动档禁令检查...${NC}"
+
+        if [ ! -f "$FONT_SCALE_CHECKER" ]; then
+            echo -e "${YELLOW}[WARN] 找不到检查脚本 $FONT_SCALE_CHECKER${NC}"
+        else
+            python3 "$FONT_SCALE_CHECKER"
+            EXIT_CODE=$?
+
+            if [ $EXIT_CODE -ne 0 ]; then
+                echo ""
+                echo -e "${RED}[ERROR] 视口字号自动档禁令检查失败：字号 token 文件出现视口驱动字号缩放${NC}"
+                echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
+                exit 1
+            fi
+        fi
+    fi
+fi
+
+# ============================================================================
 # Renderer 依赖完整性检查（import vs package.json）
 # ============================================================================
 

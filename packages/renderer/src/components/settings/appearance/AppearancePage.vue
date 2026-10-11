@@ -228,7 +228,7 @@ function applyTaijiTheme(th: TaijiTheme): void {
 }
 
 // ── 分区字号（setSystem 浅合并，须回传完整 fontScales 对象）──
-// 显示回落逐区域取 DEFAULT_FONT_SCALES（SSOT，sidebar=large），不写死 'medium'。
+// 显示回落逐区域取 DEFAULT_FONT_SCALES（SSOT，三区域均 medium），不写死档位字面量。
 const FONT_REGIONS = [
   { key: 'sidebar', descKey: 'settings.appearance.regionSidebarDesc' },
   { key: 'chat', descKey: 'settings.appearance.regionChatDesc' },
