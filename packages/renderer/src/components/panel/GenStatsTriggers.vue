@@ -3,6 +3,9 @@
     composer-gen-stats 三触发器（D4/D5 + 归因降噪 2026-09-19 D-A + composer-genstats-ttft U4）。
     组件内顺序（左→右）：TTFT 首字延迟 · TOKEN 速度（t/s）· 缓存命中率（%），整组位于
     上下文容量触发器左侧。独立判定 null →「—」（无值编码纪律：null=无数据，0=真实测量值，D4）。
+    空值不占位（2026-10-11 用户裁决，对齐 landing 无数据不渲染的形态）：某触发器无值
+    （null 且非归因态）时整钮不渲染——新会话/新旁路线首 turn 前底栏不再出现「— — —」；
+    有值/归因态（成因文案是待读信号）照常显示。
     语义色三档（项目语义色 token，纯灰体系既有档）：
       命中率（正向）：≥80 success · 50–80 中性（dim）· <50 warn（demo cacheCls 对齐——
       中档是正常波动非告警）；
@@ -21,8 +24,8 @@
     model 校验兜底全在 composable）。
   -->
   <div class="flex items-center gap-0">
-    <!-- TTFT 触发器（速度左侧，composer-genstats-ttft） -->
-    <HoverCard>
+    <!-- TTFT 触发器（速度左侧，composer-genstats-ttft）；null 不渲染（空值不占位裁决） -->
+    <HoverCard v-if="ttftCurrent != null">
       <HoverCardTrigger as-child>
         <Button
           variant="ghost"
@@ -50,8 +53,8 @@
       </HoverCardContent>
     </HoverCard>
 
-    <!-- 速度触发器（只留数值） -->
-    <HoverCard>
+    <!-- 速度触发器（只留数值）；null 不渲染 -->
+    <HoverCard v-if="speedCurrent != null">
       <HoverCardTrigger as-child>
         <Button
           variant="ghost"
@@ -71,8 +74,8 @@
       </HoverCardContent>
     </HoverCard>
 
-    <!-- 缓存命中率触发器（归因态仍显成因文案，优先级高于精简） -->
-    <HoverCard>
+    <!-- 缓存命中率触发器（归因态仍显成因文案，优先级高于精简）；null 且非归因态不渲染 -->
+    <HoverCard v-if="cacheCurrent != null || cacheMiss != null">
       <HoverCardTrigger as-child>
         <Button
           variant="ghost"
@@ -158,7 +161,8 @@ const ttftDisplay = computed(() => (ttftCurrent.value == null ? '—' : formatTt
 const ttftTriggerClass = computed(() => TTFT_TRIGGER_TIER_CLASSES[ttftTier(ttftCurrent.value)])
 
 /** 速度触发器：current →「N t/s」，null →「—」（与卡内四行同口径，formatSpeed 共用） */
-const speedDisplay = computed(() => formatSpeed(frame.value?.speed.current))
+const speedCurrent = computed(() => frame.value?.speed.current ?? null)
+const speedDisplay = computed(() => formatSpeed(speedCurrent.value))
 
 const cacheCurrent = computed(() => frame.value?.cacheRatio.current ?? null)
 

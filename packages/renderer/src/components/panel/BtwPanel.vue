@@ -264,6 +264,7 @@ import { isBtwPending } from '@/composables/panel/btw-pending-bookkeeping'
 import { useBtwPanelSurface } from '@/composables/panel/useBtwTabData'
 import { useBtwInteraction } from '@/composables/panel/useBtwInteraction'
 import { useSessionScopedState } from '@/composables/useSessionScopedState'
+import { useBtwSessionStateStore } from '@/stores/btw-session-state'
 import { setBtwView, useBtwSelection, getBoundSessionId } from '@taiji/core/domain/drawer'
 import { isBtwVirtualId, extractBtwPiSessionId } from '@taiji/shared'
 import type { ServerMessageMap } from '@taiji/shared'
@@ -282,6 +283,9 @@ const props = defineProps<{
 }>()
 
 const { t } = useI18n()
+
+/** 线模型显示态 store（vid→mainSid 绑定写入方；读取方 = composer-shell 解析支） */
+const btwSessionState = useBtwSessionStateStore()
 
 /** per-main-session 面板状态（ADR-0049 Map 分区；切 sid 不丢、切回恢复，异步回写用 updateFor） */
 // @data-owner #44 —— #44 btw 线列表的 renderer 面板消费分区（btw.list 拉取 reply 喂入，
@@ -344,6 +348,8 @@ async function loadThreads(captured: string): Promise<void> {
       s.loading = false
       s.threads = threads
     })
+    // vid → 主会话绑定（btw 线模型显示态回退解析的钥匙，见 btw-session-state store 头注释）
+    for (const th of threads) btwSessionState.bindMainSid(th.vid, captured)
     autoSelect(captured, threads)
   } catch (e) {
     scoped.updateFor(captured, (s) => {
@@ -394,6 +400,7 @@ async function createThread(): Promise<void> {
         s.threads = [...s.threads, { vid: reply.vid }]
       }
     })
+    btwSessionState.bindMainSid(reply.vid, captured)
     if (canWriteSelection(captured)) setBtwView(reply.vid)
   } catch (e) {
     scoped.updateFor(captured, (s) => {

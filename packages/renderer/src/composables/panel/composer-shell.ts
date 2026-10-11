@@ -54,6 +54,10 @@ import {
 } from '@taiji/dom-core/composer/input'
 import { useChatStore } from '@/stores/chat'
 import { useSessionStore } from '@/stores/session'
+import {
+  useBtwSessionStateStore,
+  resolveComposerSessionState,
+} from '@/stores/btw-session-state'
 import { usePresetStore } from '@/stores/preset'
 import { getSettingsStore } from '@taiji/core'
 import { useChat } from '@/composables/features/chat/useChat'
@@ -173,6 +177,7 @@ export function useComposerShell(params: ComposerShellParams) {
   const { t } = useI18n()
   const chatStore = useChatStore()
   const sessionStore = useSessionStore()
+  const btwSessionState = useBtwSessionStateStore()
   const presetStore = usePresetStore()
   const settingsStore = getSettingsStore()
   const flow = useNewTaskFlow()
@@ -198,11 +203,15 @@ export function useComposerShell(params: ComposerShellParams) {
     exitStagingMode,
     getStagingConfig,
   } = useComposerModelThinking(sessionIdRef, {
-    getSessionState: (sid: string) => {
-      const s = sessionStore.list.find((x) => x.id === sid)
-      if (!s) return null
-      return { modelId: s.modelId, thinkingLevel: s.thinkingLevel }
-    },
+    getSessionState: (sid: string) =>
+      // btw vid 走线态解析（线回执 → 主会话回退，见 btw-session-state store 头注释）；
+      // 非 vid 行为不变（主列表直查）。
+      resolveComposerSessionState(
+        sid,
+        sessionStore.list,
+        (vid) => btwSessionState.modelByVid[vid],
+        (vid) => btwSessionState.mainSidByVid[vid],
+      ),
     defaultModel: computed(() => settingsStore.defaultModel.value),
     currentModel: flow.currentModel,
     // [U4r2] 显式 preset 选择进 chip 侧 resolve 输入（D1 pending 三兄弟补齐）：flow
