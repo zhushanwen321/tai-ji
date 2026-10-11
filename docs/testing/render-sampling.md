@@ -41,6 +41,19 @@ import { connectPage, sampleDomShape } from '../../../scripts/render-sampling/li
 | `scripts/render-sampling/decisions.mjs` | 判定层 | 发送按钮探测 / 渲染判稳 / CDP 边框余量算术 / CLI 参数解析；浏览器侧函数自包含（page.evaluate 序列化无闭包），单测 `scripts/__tests__/render-sampling-decisions.test.mjs`（CI scripts guards 轨） | 2026-09-23 建立（31 例全绿） |
 | `scripts/render-sampling/cli.mjs` | 端到端 | 冒烟入口（连接→注入→采样→落盘） | 2026-09-19 建立 |
 
+## 视觉对比口径（demo ↔ real）
+
+demo（standalone HTML 直开）与 real dev 实例做视觉对比前，先定标两个变量：
+
+- **DPR（devicePixelRatio）**：对比必须在同 DPR 口径下进行。截图像素尺寸 = CSS 尺寸 × DPR，
+  跨端像素级比对前先统一 DPR；几何/样式断言读 computed 值与 `getBoundingClientRect`，不受
+  DPR 影响，优先采用。实测口径：real dev 实例取页面 `window.devicePixelRatio`（Retina 本机
+  实测 2）；demo 的 DPR = 打开它的浏览器窗口的 DPR，不是固定值——截图管线的
+  `deviceScaleFactor` 只决定截图像素密度，不是页面固有 DPR，不得按它折算 demo 布局。
+- **窗口宽度**：不构成对比变量。real root font-size 恒 14px、与视口无关（1300/1600/2200
+  三档探针全等）；侧栏分区字号默认档 = medium（1.0 基准）。demo 布局不消费 root rem 缩放
+  （字号全部为 px token），窗口宽度同样不影响 demo 度量。
+
 ## 已知坑
 
 - **composer 是 contenteditable**：选择器写 `[contenteditable="true"]`；`fill()` 前必须 `click()` 聚焦。
