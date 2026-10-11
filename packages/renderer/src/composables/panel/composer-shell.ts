@@ -414,8 +414,10 @@ export function useComposerShell(params: ComposerShellParams) {
 
   // ── 视觉派生（原 useComposerBoxClass + useComposerModeVisual 合并，D1 留壳）──
   /** composer-box class 链：bash（accent 边 + ring）> 流式 steer 呼吸 > has-input 微环；发送中叠半透明。
-   *  分支 token 同口径（has-input = 2px surface-hover/40 微环，不改 border；
-   *  rgba(255,255,255,0.04) 硬编码已废弃）。
+   *  档位经 2026-10-11 用户裁决降一档（demo 无对应形态、贴合 R3 无缝输入原则收紧）：
+   *  steer = accent 边 + 2px accent-ring（原 --shadow-glow 3px/25%）；has-input = 2px
+   *  surface-hover/25% 微环（原 40%，不改 border）；bash 特殊模式档保持强提示不动。
+   *  rgba(255,255,255,0.04) 硬编码已废弃。
    *  [HISTORICAL] staging 整框染色档（accent 边 + 3px ring + accent-soft 底）已随 staging banner
    *  形态退役（demo 裁决：banner 图标染 accent 是模式在途的唯一染色点，文字/×/box 均中性）——
    *  staging 活跃时 box 回归链上下一档（bash/steer/has-input 判定不变）。 */
@@ -423,9 +425,9 @@ export function useComposerShell(params: ComposerShellParams) {
     isBashMode.value
       ? 'composer-bash-mode border-[var(--accent)] shadow-[0_0_0_3px_var(--accent-ring)]'
       : isActive.value
-        ? 'border-[var(--accent)] shadow-[var(--shadow-glow)]'
+        ? 'border-[var(--accent)] shadow-[0_0_0_2px_var(--accent-ring)]'
         : hasInput.value
-          ? 'shadow-[0_0_0_2px_color-mix(in_oklch,var(--surface-hover)_40%,transparent)]'
+          ? 'shadow-[0_0_0_2px_color-mix(in_oklch,var(--surface-hover)_25%,transparent)]'
           : '',
     isSending.value && 'opacity-[0.55]',
   ])
