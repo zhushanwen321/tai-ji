@@ -4,15 +4,18 @@
     demo .si 形态——分支/cwd/fork 血缘等元信息归 hover 详情卡展示，列表行不占副行）。
     纯展示（零 emit）：unread / markedDone / fresh 徽标读模块级响应式集合，
     toggle 由 Actions 子组件执行，此处响应式自动跟随。
-    状态信号集中在左侧 7px 单一 icon（旋转箭头/空心圆/实心圆/空白），
-    右侧仅保留时间文字。未读标记 7px accent 圆点叠在 icon 右上角。
+    状态信号集中在左侧 7px 单一 icon（未读/旋转箭头/空心圆/实心圆/空白），
+    右侧仅保留时间文字。未读 = accent 实心点替换状态 icon（替换式，不叠加）。
   -->
-  <!-- 左侧 7px 状态 icon：spinning(旋转箭头) / hollow(空心圆) / waiting / error / done / stopped / dead / 空。
-       未读标记 7px accent 圆点叠在 icon 右上角（absolute + box-shadow 镂空）。
+  <!-- 左侧 7px 状态 icon：unread(未读替换) / spinning(旋转箭头) / hollow(空心圆) / waiting / error /
+       done / stopped / dead / 空。未读为替换式：accent 实心点本体取代状态 icon——叠加式
+       （同尺寸 7px 点偏移 2px + 镂空环）几何上盖不全 7px 状态点，左下必露底层点月牙边。
        行容器 items-center（demo .si align-items:center）垂直居中，icon 不再手补 margin。 -->
-  <div class="relative size-[7px] shrink-0" data-testid="session-icon">
+  <div class="size-[7px] shrink-0" data-testid="session-icon">
+    <!-- unread: 未读 → accent 实心圆（替换式，demo 右抽屉 .unread .dot 语言） -->
+    <span v-if="iconKind === 'unread'" data-testid="session-unread-dot" class="block size-[7px] rounded-full bg-accent" />
     <!-- spinning: streaming / compacting / working / retrying → 旋转箭头（accent 边框 + 透明顶边） -->
-    <span v-if="iconKind === 'spinning'" class="block size-[7px] animate-spin rounded-full border-[1.5px] border-accent border-t-transparent" />
+    <span v-else-if="iconKind === 'spinning'" class="block size-[7px] animate-spin rounded-full border-[1.5px] border-accent border-t-transparent" />
     <!-- hollow: pending → accent 空心圆 -->
     <span v-else-if="iconKind === 'hollow'" class="block size-[7px] rounded-full border-[1.5px] border-accent" />
     <!-- hollow-dim: stopped → dim 空心圆 -->
@@ -27,13 +30,6 @@
     <span v-else-if="iconKind === 'dead'" class="block size-[7px] rounded-full bg-neutral-dim opacity-50" />
     <!-- 已归档+已读 → 空（无 icon） -->
     <span v-else aria-hidden="true" />
-    <!-- 未读标记：叠在 icon 右上角 -->
-    <span
-      v-if="unread"
-      data-testid="session-unread-dot"
-      class="absolute -right-0.5 -top-0.5 size-[7px] rounded-full bg-accent"
-      style="box-shadow: 0 0 0 2px var(--bg)"
-    />
   </div>
 
   <!-- 主体：label + sub（fork 血缘 / branch）。label 形态 = demo .si .nm（13px fw-mid fg-2，
@@ -92,7 +88,7 @@ import { isImportedFresh } from '@/composables/features/sidebar/useImportSession
 import type { SessionItemSession } from './types'
 
 /** 左侧状态 icon 种类（7px 单一 icon 范式）。 */
-type IconKind = 'spinning' | 'hollow' | 'hollow-dim' | 'waiting' | 'error' | 'done' | 'dead' | 'empty'
+type IconKind = 'unread' | 'spinning' | 'hollow' | 'hollow-dim' | 'waiting' | 'error' | 'done' | 'dead' | 'empty'
 
 const props = withDefaults(defineProps<{
   session: SessionItemSession
@@ -126,6 +122,7 @@ const freshImportState = computed(() => isImportedFresh(props.session.id))
 
 /**
  * 左侧 7px 状态 icon 映射（单一 icon 范式）。
+ * unread: 未读（后台完成 / fork 分支变更，两源合流）→ accent 实心圆替换状态 icon
  * spinning: streaming/compacting/working/retrying → 旋转箭头（accent 边框+透明顶边）
  * hollow: pending → accent 空心圆
  * hollow-dim: stopped → dim 空心圆
@@ -136,6 +133,7 @@ const freshImportState = computed(() => isImportedFresh(props.session.id))
  * empty: 已归档+已读 → 无 icon
  */
 const iconKind = computed<IconKind>(() => {
+  if (unread.value) return 'unread'
   if (isDead.value) return 'dead'
   if (markedDone.value && !unread.value) return 'empty'
   switch (props.status) {

@@ -14,6 +14,7 @@ import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import SessionItem from '@/components/sidebar/SessionItem.vue'
 import { useChatStore } from '@/stores/chat'
+import { markUnread, clearUnread } from '@/composables/useSessionMarkers'
 import { DOT_CLASS, deriveStatus, STATUS_ICON } from '@/composables/logic/sessionStatus'
 import type { DerivedStatus } from '@/types'
 
@@ -163,5 +164,29 @@ describe('session status icons extended states', () => {
     expect(icon.find('.bg-neutral-dim').exists()).toBe(true)
     expect(icon.find('.opacity-50').exists()).toBe(true)
     expect(wrapper.find('.session-item').classes()).toContain('opacity-50')
+  })
+
+  it('未读替换式：unread 时左侧渲染单一 accent 实心点，状态 icon 被替换不叠加', () => {
+    markUnread('1')
+    try {
+      const wrapper = mount(SessionItem, {
+        props: {
+          session: { id: '1', label: 'x', cwd: '/a', lastActiveAt: 0, status: 'active' },
+          active: false,
+          status: 'done',
+        },
+      })
+      const icon = wrapper.find('[data-testid="session-icon"]')
+      // 用户可见 DOM：未读点本体 = accent 实心圆
+      const dot = icon.find('[data-testid="session-unread-dot"]')
+      expect(dot.exists()).toBe(true)
+      expect(dot.classes()).toContain('bg-accent')
+      // 替换而非叠加：容器内仅此一个元素，done 的 success 点不再渲染
+      // （叠加式两点同尺寸 7px 盖不全，左下会露出底层点月牙边）
+      expect(icon.find('.bg-success').exists()).toBe(false)
+      expect(icon.findAll('span')).toHaveLength(1)
+    } finally {
+      clearUnread('1')
+    }
   })
 })
