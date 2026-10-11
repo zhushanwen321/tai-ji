@@ -1,5 +1,5 @@
 <template>
-  <!-- split-justified: trace 块分支体系（五分支共享 ICON/折叠态/composable 基建，按分支机械拆分产出转发壳）；script 超 300 为存量（HEAD 已 317），bash-group 组分支（D1 U3）叠加后 329，拆分属独立重构任务 -->
+  <!-- split-justified: trace 块分支体系（五分支共享 ICON/折叠态/composable 基建，按分支机械拆分产出转发壳）；script 超 300 为存量（HEAD 已 317），run 组分支叠加后 329，拆分属独立重构任务 -->
   <!--
     展示组件 · trace 块（message-stream 折叠区内的单个块）。Demo H 视觉：灰阶 + SVG ICON +
     唯一 accent 蓝（running）+ failed hover muted 暖橙。
@@ -7,7 +7,7 @@
     - tool：默认 1 行收起（streaming/running 也收起），点击展开详情。failed 终态默认展开（streaming 中失败不 remount，只图标染 danger）。
     - workflow：list-checks ICON + WORKFLOW. prefix + 状态动词 + workflow 名，详情区走 list-tree GUI / 文本。
     - subagent：渲染委托给 BlockSubagent（users ICON + SUBAGENT. prefix + 去卡片化）。
-    - bash-group：连续 bash 组块（ui-signal-density D1 U3）——组头「×N · 共 Xs · 含 M 次失败」，
+    - run-group：run 类型分组组块——组头「类型名[ · 序号] + N 步 · 耗时 + 含 M 次失败」，
       展开后成员行（嵌套递归渲染普通 tool 收起态，SFC 文件名自引用）。
     - 展开块限高：thinking / bash 输出 / 非 bash 工具输出统一走 BlockScrollBox（240px 块内滚动 +
       渐隐提示 + 行区间信息条；bash 命令头保持在滚动区外 = 恒吸顶）；GUI 协议输出自管理高度不包。
@@ -134,21 +134,20 @@
       <span v-if="messageTimestamp" class="ml-auto shrink-0 self-center font-mono text-[length:var(--text-2xs)] text-neutral-dim tabular-nums opacity-0 transition-opacity duration-[var(--duration-fast)] group-hover/text:opacity-100 group-focus-within/text:opacity-100" data-testid="text-time-slot">{{ formatClock(messageTimestamp) }}</span>
     </div>
 
-    <!-- ── bash 组块（ui-signal-density §3.3 D1 U3）：连续 bash 折成一行组头「×N · 共 Xs」。
-         组资格只看工具类型不看状态（D1 语义变更：running 成员也入组），组头计数三条口径
-         （×N=成员数 / Xs=已完成成员耗时合计 / M=组内失败数）与 hasRunning 由 core
-         groupConsecutiveBash 一次算好（header），本组件零解析。组头不跑计时器（组头时长
-         只累计已完成成员；running 成员入组，其计时跳动在展开后的成员行内）。
-         hasRunning=true（组内含执行中成员）时组头套执行态视觉：loader 图标 + accent 文字色
-         （与 tool/workflow 分支的 running 态同款）；false 时静态组图标 + 中性灰。
-         失败不隐瞒（V8）：成员含 error 时行尾 traceFailed 段（M = 组内口径，与
-         TraceCompactorRow 全局 failedCount 分账）。展开后成员保持各自 1 行收起态（嵌套
-         普通 tool Block 复用既有行形态与 PR-1 行高不变量），要看某个成员的输出需再点
-         那一行（两步路径，D1 已接受代价①）。展开态住组件本地 ref、不进 store 不持久化
-         （与 toolCollapsed/thinkingExpanded 同级，D1「组展开态住在哪里」）。 -->
-    <div v-else-if="type === 'bash-group' && group" class="trace-bash-group" data-testid="bash-group">
+    <!-- ── run 组块（run 类型分组，demo specs/chat/history-load-and-run-grouping.md §3）：
+         连续同类型（探索 / 改动 / 执行命令）的工具行折成一行组头。组资格只看工具类型不看状态，
+         组头计数三条口径（N=成员数 / 耗时=已完成成员合计 / M=组内失败数）与 hasRunning 由 core
+         groupToolRuns 一次算好（header），本组件零解析。类型判定表见 core RUN_GROUP_TOOLS。
+         展开态：挂载即展开的条件 = 组内有 running 成员（正在发生的组要让用户看见），否则挂载即收起；
+         用户手动开合后以手动为准（本地 ref）。**不做「跑完自动收起」**——status 翻转驱动的开合会让
+         流式中的块高度突变，破坏贴底跟随（同 Block toolCollapsed 挂载快照的既有取舍）。
+         失败不隐瞒：成员含 error 时行尾 traceFailed 段（M = 组内口径，与 TraceCompactorRow 全局
+         failedCount 分账）。展开后成员保持各自 1 行收起态（嵌套普通 tool Block 复用既有行形态与
+         PR-1 行高不变量），要看某个成员的输出需再点那一行（两步路径）。展开态住组件本地 ref、
+         不进 store 不持久化（turn 级展开态现状也不持久化，不为更低层的 UI 态单开先例）。 -->
+    <div v-else-if="type === 'run-group' && group" class="trace-run-group" data-testid="run-group">
       <div
-        data-testid="bash-group-header"
+        data-testid="run-group-header"
         class="group/bgroup flex min-w-0 cursor-pointer select-none items-baseline gap-[8px] text-[length:var(--text-base)] [font-weight:var(--fw-mid)] text-neutral-mid"
         role="button"
         tabindex="0"
@@ -158,20 +157,23 @@
         @keydown.enter.prevent="toggleGroup"
         @keydown.space.prevent="toggleGroup"
       >
-        <!-- running 态 loader（呼吸弧 + accent），其余走静态组图标（切换走 tico 交叉过渡，
-             同 tool/thinking 行）。组头文字（×N · 共 Xs 计数/耗时口径）是稳定标识，不跑文字
-             扫光（决策 10）。[M3b demo 复刻] 行文字不染 accent（demo 运行态 = 仅呼吸弧图标
-             accent，文字保持行层级 mid，workbench.css .tool .t-name），与普通 tool 行运行态同款。 -->
+        <!-- running 态 loader（呼吸弧 + accent），其余走组类型对应的静态图标（切换走 tico 交叉过渡，
+             同 tool/thinking 行）。组头文字（「N 步 · 耗时」计数/耗时口径）是稳定标识，不跑文字扫光。
+             行文字不染 accent（demo 运行态 = 仅呼吸弧图标 accent，文字保持行层级 mid，
+             workbench.css .tool .t-name），与普通 tool 行运行态同款。 -->
         <Transition mode="out-in" name="tico">
           <span v-if="group.hasRunning" class="inline-flex size-[15px] shrink-0 self-center items-center justify-center text-accent">
             <span class="inline-flex size-full items-center justify-center animate-loader-spin" v-html="RUNNING_LOADER_SVG" /> <!-- eslint-disable-line vue/no-v-html -- hardcoded constant from block-icon.ts -->
           </span>
-          <component :is="BLOCK_ICON_LUCIDE['bash-group']" v-else :class="[BLOCK_ICON_CLASS, 'self-center']" />
+          <component :is="BLOCK_ICON_LUCIDE[RUN_GROUP_ICON[group.base]]" v-else :class="[BLOCK_ICON_CLASS, 'self-center']" />
         </Transition>
-        <span class="min-w-0 truncate text-left transition-opacity duration-[var(--duration-fast)] group-hover/bgroup:opacity-80">{{ t('panel.message.traceBashSummary', { count: group.header.count, duration: formatDuration(group.header.durationMs) }) }}</span>
+        <span class="shrink-0 whitespace-nowrap text-left transition-opacity duration-[var(--duration-fast)] group-hover/bgroup:opacity-80">{{ t(RUN_GROUP_LABEL_KEY[group.base]) }}</span>
+        <!-- 同名组序号（demo `.rg-seq`）：第二个「探索」起显示「 · 2」，同类型的多段在回看时可区分 -->
+        <span v-if="group.seq > 1" class="shrink-0 whitespace-nowrap font-mono text-[length:var(--text-sm)] text-neutral-dim">· {{ group.seq }}</span>
+        <span class="min-w-0 truncate text-left font-mono text-[length:var(--text-sm)] text-neutral-dim transition-opacity duration-[var(--duration-fast)] group-hover/bgroup:opacity-80">{{ groupStatText }}</span>
         <!-- 失败段 chip 化（demo failtag 形态：workbench.css .failtag = 11px fw-mid danger +
              danger-soft 底 + r-xs 4px + 1px 6px 内边距） -->
-        <span v-if="group.header.failedCount > 0" data-testid="bash-group-failed" class="shrink-0 rounded-[var(--radius-xs)] bg-danger-soft px-1.5 py-px text-[length:var(--text-2xs)] [font-weight:var(--fw-mid)] text-danger">{{ t('panel.message.traceFailed', { count: group.header.failedCount }) }}</span>
+        <span v-if="group.header.failedCount > 0" data-testid="run-group-failed" class="shrink-0 rounded-[var(--radius-xs)] bg-danger-soft px-1.5 py-px text-[length:var(--text-2xs)] [font-weight:var(--fw-mid)] text-danger">{{ t('panel.message.traceFailed', { count: group.header.failedCount }) }}</span>
       </div>
       <Transition name="block-expand">
         <div v-if="groupExpanded" class="mt-0.5 flex min-w-0 flex-col">
@@ -396,15 +398,16 @@ import type { GuiComponent } from '@zhushanwen/extension-protocol'
 import { extractGui } from '@zhushanwen/extension-protocol'
 import type { MessageStatus, ToolCall } from '@taiji/shared'
 import { SUBAGENT_TOOL_NAMES, WORKFLOW_TOOL_NAMES, displayWorkflowName } from '@taiji/shared'
-import type { FlatBlock } from '@taiji/core/domain/chat'
+import type { FlatBlock, RunGroupBase } from '@taiji/core/domain/chat'
 import { lookupWorkflowRun, openWorkflow } from '@taiji/core/domain/drawer'
 import { AnsiText, GuiComponentRenderer } from '../../rendering-protocol'
 import MarkdownRenderer from './MarkdownRenderer.vue'
 import BlockSubagent from './BlockSubagent.vue'
 import BlockScrollBox from './BlockScrollBox.vue'
 import ToolResultImages from './ToolResultImages.vue'
+import type { BlockIconKind } from './block-icon'
 import { BLOCK_ICON_CLASS, BLOCK_ICON_LUCIDE, BLOCK_LABEL_CLASS, RUNNING_LOADER_SVG, getBlockIcon } from './block-icon'
-import { formatClock, formatDuration, formatJsonIfValid, shortenForHeader, tailLines, stripAnsi } from './format-utils'
+import { MS_PER_SECOND, formatClock, formatDuration, formatJsonIfValid, shortenForHeader, tailLines, stripAnsi } from './format-utils'
 // primitives 直接路径（不经 @taiji/ui 顶层 barrel）：chat 组件被 barrel 再导出，
 // barrel 自引用会闭合一族循环依赖环（详见 BashOutputBlock.vue 同款注释）
 import { Button } from '../../primitives/button'
@@ -422,7 +425,7 @@ const { copied, copy } = useCopy()
 const chatViewDeps = useChatViewDeps()
 
 const props = defineProps<{
-  type: 'thinking' | 'tool' | 'text' | 'agentgraph' | 'bash-group'
+  type: 'thinking' | 'tool' | 'text' | 'agentgraph' | 'run-group'
   /** thinking / text 内容 */
   content?: string
   /** thinking 块 id（thinking 类型时由父组件透传，用于 data-testid 精确锚定；其他类型忽略） */
@@ -433,9 +436,15 @@ const props = defineProps<{
   thinkingEnd?: number
   /** tool_call 数据（type==='tool' 时必填） */
   tool?: ToolCall
-  /** bash 组块数据（type==='bash-group' 时由 Turn.vue 透传；D1 组块数据契约 members+header+hasRunning）。
-   *  header 三条口径（count/durationMs/failedCount）与 hasRunning 由 core groupConsecutiveBash 一次算好。 */
-  group?: { members: FlatBlock[]; header: { count: number; durationMs: number; failedCount: number }; hasRunning: boolean }
+  /** run 组块数据（type==='run-group' 时由 Turn.vue 透传；组块数据契约 base/seq/members/header/hasRunning）。
+   *  base/seq 与 header 三条口径（count/durationMs/failedCount）由 core groupToolRuns 一次算好。 */
+  group?: {
+    base: RunGroupBase
+    seq: number
+    members: FlatBlock[]
+    header: { count: number; durationMs: number; failedCount: number }
+    hasRunning: boolean
+  }
   /** thinking 块初始折叠态（来自 ThinkingBlock.collapsed，默认收起） */
   collapsed?: boolean
   /** working 态（turn 进行中）：thinking 各态默认折叠（collapsed 初值 true），working→false
@@ -688,13 +697,45 @@ function toggleTool(): void {
   toolCollapsed.value = !toolCollapsed.value
 }
 
-/* ── bash 组展开态（D1「组展开态住在哪里」）：组件本地 ref，不进 store、不持久化——
- *    turn 级展开态（useTurnExpansion / turn-expansion store）现状也不持久化，
- *    不为一个更低层的 UI 态单开持久化先例。与 toolCollapsed / thinkingExpanded 同级。 ── */
-const groupExpanded = ref(false)
+/* ── run 组块：图标 / 组名 / 统计段 / 展开态 ─────────────────────────────── */
+
+/** 组类型 → 块图标：与同语义工具行同图标（探索 = 只读档 book-open / 改动 = pencil /
+ *  执行命令 = square-terminal），三档都复用既有 BlockIconKind，不新开图标（组头即该段语义的标题）。
+ *  排掉 'running'——组头运行态走 loader 分支（hasRunning），静态档永远不是 running 图标。 */
+const RUN_GROUP_ICON: Record<RunGroupBase, Exclude<BlockIconKind, 'running'>> = {
+  explore: 'tool-read',
+  edit: 'tool-edit',
+  exec: 'tool-bash',
+}
+
+/** 组类型 → 组头名（ui locale：探索 / 改动 / 执行命令） */
+const RUN_GROUP_LABEL_KEY: Record<RunGroupBase, string> = {
+  explore: 'panel.message.runGroupExplore',
+  edit: 'panel.message.runGroupEdit',
+  exec: 'panel.message.runGroupExec',
+}
+
+/**
+ * 组头统计段「N 步 · 耗时」：耗时只在 ≥1s 时显示（不足 1s 的秒数对回看没有信息量，demo `.rg-stat`
+ * 同口径）。耗时口径 = 组内已完成成员合计（core 侧算好），running 成员不计入。
+ */
+const groupStatText = computed(() => {
+  const g = props.group
+  if (!g) return ''
+  const steps = t('panel.message.runGroupSteps', { count: g.header.count })
+  return g.header.durationMs >= MS_PER_SECOND ? `${steps} · ${formatDuration(g.header.durationMs)}` : steps
+})
+
+/* ── run 组展开态：组件本地 ref，不进 store、不持久化——turn 级展开态（useTurnExpansion /
+ *    turn-expansion store）现状也不持久化，不为一个更低层的 UI 态单开持久化先例。
+ *    初值 = 挂载快照「组内有 running 成员则展开」（正在发生的组要让用户看见，回看历史时全收起），
+ *    此后只由用户点击翻转。**不做 status 驱动的自动收起**：跑完自动收起会让流式中的块高度突变、
+ *    破坏贴底跟随（同 toolCollapsed 挂载快照的既有取舍，见该处注释的「被否」一条）。 ── */
+const groupCollapsed = ref(!(props.group?.hasRunning ?? false))
+const groupExpanded = computed(() => !groupCollapsed.value)
 
 function toggleGroup(): void {
-  groupExpanded.value = !groupExpanded.value
+  groupCollapsed.value = !groupCollapsed.value
 }
 
 /**

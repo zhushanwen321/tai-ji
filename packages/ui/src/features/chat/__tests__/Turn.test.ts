@@ -72,11 +72,19 @@ function makeTurn(over: Partial<MessageTurn> = {}): MessageTurn {
  * window wave 用：构造指定数量过程块（toolCall）+ 末位 text 的 turn。
  * 走 contentBlocks 显式时序（expandAssistantBlocks 走 contentBlocks 路径，非 fallback），
  * 前 `failedCount` 个 tool 标 status='error'（测 failed 子计数 danger）。
+ *
+ * 工具名按 WINDOW_TOOL_CYCLE 交替三类（探索 / 改动 / 执行命令）：相邻块类型恒不同 → 每块自成一组，
+ * 「窗口内可见块数」的计数断言与分组前同形（组不吞并相邻块、不改变这些用例的口径）；
+ * 分组的规则本身由「run 类型分组」describe 与 core 单测覆盖。
  */
+const WINDOW_TOOL_CYCLE = ['read', 'bash', 'edit'] as const
+
 function makeWindowTurn(opts: {
   toolCount?: number
   failedCount?: number
   assistantStatus?: Message['status']
+  /** 覆盖工具名（缺省按类型循环）：验「非分组工具块」的 props 透传时传名单外的名字。 */
+  toolName?: string
 } = {}): MessageTurn {
   const toolCount = opts.toolCount ?? 12
   const failedCount = opts.failedCount ?? 0
@@ -88,7 +96,7 @@ function makeWindowTurn(opts: {
     const isFail = i < failedCount
     toolCalls.push({
       id,
-      toolName: 'read',
+      toolName: opts.toolName ?? WINDOW_TOOL_CYCLE[i % WINDOW_TOOL_CYCLE.length],
       input: { path: `/tmp/f${i}` },
       status: isFail ? 'error' : 'completed',
       startTime: NOW + i,
@@ -117,7 +125,7 @@ function makeWindowTurn(opts: {
 // ─── mount helper ───────────────────────────────────────────────
 
 /** Block stub：根节点带 .trace-blk + data-type/data-status/data-streaming，供断言 trace 块渲染与 props 透传。
- *  data-content 透传 text 正文（DOM 断言锚点）。 */
+ *  data-content 透传 text 正文（DOM 断言锚点）；data-group-base 透传 run 组的组类型（分组断言锚点）。 */
 const BlockStub = {
   name: 'Block',
   props: {
@@ -127,8 +135,9 @@ const BlockStub = {
     streaming: { type: Boolean, default: false },
     working: { type: Boolean, default: false },
     tool: { type: Object, default: undefined },
+    group: { type: Object, default: undefined },
   },
-  template: `<div class="trace-blk" :data-type="type" :data-content="content ?? ''" :data-status="status" :data-streaming="streaming ? 'true' : 'false'" :data-working="working ? 'true' : 'false'" />`,
+  template: `<div class="trace-blk" :data-type="type" :data-content="content ?? ''" :data-status="status" :data-streaming="streaming ? 'true' : 'false'" :data-working="working ? 'true' : 'false'" :data-group-base="group ? group.base : ''" />`,
 }
 
 function mountTurn(opts: {
@@ -182,7 +191,8 @@ describe('streaming-trace-window D1: Turn 折叠作用域降到 turn 级', () =>
     const wrapper = mountTurn({ isSessionActive: true, isLastTurn: true })
     expect(wrapper.find('.trace .trace-blk[data-type="text"]').exists()).toBe(true)
     expect(wrapper.find('.trace .trace-blk[data-type="thinking"]').exists()).toBe(true)
-    expect(wrapper.find('.trace .trace-blk[data-type="tool"]').exists()).toBe(true)
+    // 工具行按类型折进 run 组（单成员也成组）：末位工作 turn 可见的是组行
+    expect(wrapper.find('.trace .trace-blk[data-type="run-group"]').exists()).toBe(true)
   })
 
   it('手动展开（isExpanded=true）优先于作用域——非末位 turn 也展开', () => {
@@ -192,7 +202,7 @@ describe('streaming-trace-window D1: Turn 折叠作用域降到 turn 级', () =>
       isExpanded: () => true,
     })
     expect(wrapper.find('.trace .trace-blk[data-type="thinking"]').exists()).toBe(true)
-    expect(wrapper.find('.trace .trace-blk[data-type="tool"]').exists()).toBe(true)
+    expect(wrapper.find('.trace .trace-blk[data-type="run-group"]').exists()).toBe(true)
   })
 })
 
@@ -207,11 +217,11 @@ describe('streaming-trace-window window: Turn 窗口切片渲染', () => {
       isSessionActive: true,
       isLastTurn: true,
     })
-    // visible = 4 个 completed tool（tc-8..tc-11）+ 1 text = 5 块（W 6→4 期望同步，口径同 turn-working.test.ts）
+    // visible = 4 个 completed tool（tc-8..tc-11，各类交替 → 各自成组）+ 1 text = 5 块（W 6→4 期望同步，口径同 turn-working.test.ts）
     const blocks = wrapper.findAll('.trace .trace-blk')
     expect(blocks.length).toBe(5)
     // 收编区前 8 个 tool（tc-0..tc-7）不在 DOM
-    expect(wrapper.find('.trace-blk[data-type="tool"]').exists()).toBe(true)
+    expect(wrapper.find('.trace-blk[data-type="run-group"]').exists()).toBe(true)
     // 收编行存在（compactedCount=8）
     expect(wrapper.find('[data-testid="trace-compactor"]').exists()).toBe(true)
   })
@@ -267,9 +277,10 @@ describe('streaming-trace-window window: Turn 窗口切片渲染', () => {
   })
 
   it('TC9: Block props 透传——streaming assistant 的块收到 streaming=true / status=streaming / working=true', () => {
-    // assistantStatus='streaming' + 末位 running tool
+    // assistantStatus='streaming' + 末位 running tool。工具名走名单外（MCP 工具，不成组）：
+    // working/streaming 透传只发生在普通块分支，组块只接 group 数据（成员行由组内递归渲染）
     const wrapper = mountTurn({
-      turn: makeWindowTurn({ toolCount: 1, assistantStatus: 'streaming' }),
+      turn: makeWindowTurn({ toolCount: 1, assistantStatus: 'streaming', toolName: 'mcp__srv__render' }),
       isSessionActive: true,
       isLastTurn: true,
     })
@@ -685,13 +696,52 @@ describe('U6 D5: trigger 起点行聚合渲染', () => {
 })
 
 // ═════════════════════════════════════════════════════════════════
-// ui-signal-density §3.3 D1 U3：Turn bash 组块接线（visibleBlocks 三分支汇合之后）
-// - 三路径可见性（V1）：工作回合窗口 / 历史手动展开全量 → 组行出现；折叠态 → 无组行。
-// - PR-6（附录 A）：key/v-memo 契约在两个生长方向下组行 DOM 节点不变（isSameNode）+ 展开态不丢——
+// run 类型分组：Turn 接线（visibleBlocks 三分支汇合之后）
+// - 三路径可见性：工作回合窗口 / 历史手动展开全量 → 组行出现；折叠态 → 无组行。
+// - 判定表与序号由 core 单测覆盖；本文件只验「接线位置 + 单元类型 + 组行 key 稳定性」。
+// - PR-6：key/v-memo 契约在两个生长方向下组行 DOM 节点不变（isSameNode）+ 展开态不丢——
 //   ① 段尾延长（running 并入，append）；② 窗口右滑使段首成员被收编出窗（run head 锚定 key 的验证）。
 // ═════════════════════════════════════════════════════════════════
 
-/** bash 组接线用 turn：nCompleted 个已完成连续 bash + 可选尾部 running bash + 末位 text。 */
+/** 组接线用 turn：按工具序列（名称 + 状态）构建 + 末位 text；running 成员不带 endTime（真实形态）。 */
+function makeToolSeqTurn(
+  specs: Array<{ name: string; status?: ToolCall['status'] }>,
+  assistantStatus: Message['status'] = 'streaming',
+) {
+  const toolCalls: ToolCall[] = []
+  const contentBlocks: ContentBlock[] = []
+  specs.forEach((spec, i) => {
+    const id = `t${i}`
+    toolCalls.push({
+      id,
+      toolName: spec.name,
+      input: {},
+      status: spec.status ?? 'completed',
+      startTime: NOW + i * 1000,
+      ...(spec.status === 'running' ? {} : { endTime: NOW + i * 1000 + 500 }),
+    })
+    contentBlocks.push({ type: 'toolCall', refId: id })
+  })
+  contentBlocks.push({ type: 'text', refId: 'text' })
+  const assistant: Message = {
+    id: 'a1',
+    role: 'assistant',
+    content: '最终回复',
+    status: assistantStatus,
+    timestamp: NOW,
+    toolCalls,
+    contentBlocks,
+  }
+  return {
+    index: 1,
+    user: { id: 'u1', role: 'user', content: 'hi', status: 'complete', timestamp: NOW } as Message,
+    assistants: [assistant],
+    isStreaming: assistantStatus === 'streaming',
+    hasFoldable: true,
+  }
+}
+
+/** bash 组接线用 turn：nCompleted 个已完成连续 bash + 可选尾部 running bash + 末位 text（PR-6 用）。 */
 function makeBashChainTurn(opts: { completed?: number; running?: boolean; assistantStatus?: Message['status'] } = {}) {
   const completed = opts.completed ?? 3
   const status = opts.assistantStatus ?? 'streaming'
@@ -725,71 +775,85 @@ function makeBashChainTurn(opts: { completed?: number; running?: boolean; assist
   }
 }
 
-describe('ui-signal-density D1 U3: Turn bash 组块接线（三路径 + PR-6）', () => {
-  it('路径 B（工作回合窗口）：连续 bash 折成组行，running bash 入组（D1 语义变更：组资格只看工具类型）', () => {
+describe('run 类型分组: Turn 组块接线（三路径 + PR-6）', () => {
+  it('路径 B（工作回合窗口）：连续同类型折成组行，running 成员入组（组资格只看工具类型）', () => {
     const wrapper = mountTurn({
-      turn: makeBashChainTurn({ completed: 3, running: true }),
+      turn: makeToolSeqTurn([
+        { name: 'read' },
+        { name: 'read' },
+        { name: 'bash' },
+        { name: 'bash' },
+        { name: 'bash', status: 'running' },
+      ]),
       isSessionActive: true,
       isLastTurn: true,
     })
-    const kinds = wrapper.findAll('.trace .trace-blk').map((b) => b.attributes('data-type'))
-    // [bash-group(3 个已完成 + 1 个 running 成员), text(末位正文)]——running 不再独立成行
-    expect(kinds).toEqual(['bash-group', 'text'])
+    // [探索(read×2), 执行命令(bash×2 + running), text(末位正文)]——running 不独立成行
+    expect(wrapper.findAll('.trace .trace-blk').map((b) => b.attributes('data-type'))).toEqual([
+      'run-group',
+      'run-group',
+      'text',
+    ])
+    expect(wrapper.findAll('.trace .trace-blk[data-type="run-group"]').map((b) => b.attributes('data-group-base'))).toEqual([
+      'explore',
+      'exec',
+    ])
   })
 
-  it('路径 B 窗口截断语义：组头 ×N = 窗口内成员数（W=4 收编 1 个后组行只剩窗口内成员）', () => {
-    // 5 个连续 bash + running：③池 5 → 窗口末 4 → 组 = b1..b4 + running（D1 语义变更：running 入组），
+  it('路径 B 窗口截断语义：组头成员数 = 窗口内成员数（W=4 收编 1 个后组行只剩窗口内成员）', () => {
+    // 5 个连续 bash + running：③池 5 → 窗口末 4 → 组 = b1..b4 + running，
     // 最早的 b0 被收编进 TraceCompactorRow
     const wrapper = mountTurn({
       turn: makeBashChainTurn({ completed: 5, running: true }),
       isSessionActive: true,
       isLastTurn: true,
     })
-    const kinds = wrapper.findAll('.trace .trace-blk').map((b) => b.attributes('data-type'))
-    expect(kinds).toEqual(['bash-group', 'text'])
+    expect(wrapper.findAll('.trace .trace-blk').map((b) => b.attributes('data-type'))).toEqual(['run-group', 'text'])
     expect(wrapper.find('[data-testid="trace-compactor"]').exists()).toBe(true) // b0 并入计数
   })
 
-  it('路径 C（历史回合手动展开）：全量 flatBlocks 上组行出现（D1 收益最大路径，§3.2.2 接线点）', () => {
+  it('路径 C（历史回合手动展开）：全量序列上混合类型各成一相（探索 / 执行命令 / 改动 / 探索 · 2）', () => {
     const wrapper = mountTurn({
-      turn: makeBashChainTurn({ completed: 3, assistantStatus: 'complete' }),
+      turn: makeToolSeqTurn(
+        [{ name: 'read' }, { name: 'bash' }, { name: 'edit' }, { name: 'read' }],
+        'complete',
+      ),
       isSessionActive: true,
       isLastTurn: false,
       isExpanded: () => true,
     })
-    const kinds = wrapper.findAll('.trace .trace-blk').map((b) => b.attributes('data-type'))
-    // 全量序列无 running → 3 个连续 bash 全部成组
-    expect(kinds).toEqual(['bash-group', 'text'])
+    const groups = wrapper.findAll('.trace .trace-blk[data-type="run-group"]')
+    expect(groups.length).toBe(4) // 全量展开路径拿得到分组（收益最大路径）
+    expect(groups.map((b) => b.attributes('data-group-base'))).toEqual([
+      'explore',
+      'exec',
+      'edit',
+      'explore',
+    ])
   })
 
-  it('路径 A（折叠态）：组行不出现（只渲染末位 text，R6 默认作用域不动）', () => {
+  it('路径 A（折叠态）：组行不出现（只渲染末位 text，默认作用域不动）', () => {
     const wrapper = mountTurn({
-      turn: makeBashChainTurn({ completed: 3, assistantStatus: 'complete' }),
+      turn: makeToolSeqTurn([{ name: 'read' }, { name: 'bash' }], 'complete'),
       isSessionActive: true,
       isLastTurn: false,
     })
-    const kinds = wrapper.findAll('.trace .trace-blk').map((b) => b.attributes('data-type'))
-    expect(kinds).toEqual(['text'])
+    expect(wrapper.findAll('.trace .trace-blk').map((b) => b.attributes('data-type'))).toEqual(['text'])
   })
 
-  it('read 等非 bash 工具不打折（R5）：连续段被 read 打断为独立行', () => {
-    const turn = makeBashChainTurn({ completed: 2, assistantStatus: 'complete' })
-    const read: ToolCall = { id: 'r0', toolName: 'read', input: { path: '/tmp/x' }, status: 'completed', startTime: NOW }
-    const assistant = turn.assistants[0]
-    // 时序：[b0, b1, read, text]——read 插在末位 text 之前（text 恒末位）
-    assistant.toolCalls = [...(assistant.toolCalls ?? []), read]
-    const blocks = [...(assistant.contentBlocks ?? [])]
-    blocks.splice(blocks.length - 1, 0, { type: 'toolCall', refId: 'r0' })
-    assistant.contentBlocks = blocks
+  it('名单外工具原样成行且打断分组：subagent 不并进两侧的 bash 组', () => {
     const wrapper = mountTurn({
-      turn,
+      turn: makeToolSeqTurn([{ name: 'bash' }, { name: 'subagent' }, { name: 'bash' }], 'complete'),
       isSessionActive: true,
       isLastTurn: false,
       isExpanded: () => true,
     })
-    // [组(b0,b1), read 独立行, text]——read 后无连续 bash，不成组
-    const kinds = wrapper.findAll('.trace .trace-blk').map((b) => b.attributes('data-type'))
-    expect(kinds).toEqual(['bash-group', 'tool', 'text'])
+    expect(wrapper.findAll('.trace .trace-blk').map((b) => b.attributes('data-type'))).toEqual([
+      'run-group',
+      'agentgraph',
+      'run-group',
+      'text',
+    ])
   })
 
   it('PR-6 方向①（段尾延长 append）：running 并入使 members 增长，组行 DOM 节点不变（isSameNode）+ 展开态不丢', async () => {
@@ -811,22 +875,21 @@ describe('ui-signal-density D1 U3: Turn bash 组块接线（三路径 + PR-6）'
         },
       },
     })
-    const header1 = wrapper.find('[data-testid="bash-group-header"]')
+    const header1 = wrapper.find('[data-testid="run-group-header"]')
     expect(header1.exists()).toBe(true)
-    // 展开组（真实 Block 本地 ref）。D1 语义变更（running 入组）：成员 = 3 个已完成 + running = 4
-    await header1.trigger('click')
-    expect(wrapper.find('[data-testid="bash-group"]').findAll('.trace-blk').length).toBe(4)
+    // 组内含 running 成员 → 挂载即展开（默认开合由 hasRunning 快照决定，非用户点击）
+    expect(wrapper.find('[data-testid="run-group"]').findAll('.trace-blk').length).toBe(4)
     const node1 = header1.element
     // 段尾延长：b3 完成、r3→r4 新 running（members 4→5，run head 不变 → key 稳定）
     await wrapper.setProps({ turn: makeBashChainTurn({ completed: 4, running: true }) })
-    const header2 = wrapper.find('[data-testid="bash-group-header"]')
+    const header2 = wrapper.find('[data-testid="run-group-header"]')
     expect(header2.exists()).toBe(true)
     expect(header2.element.isSameNode(node1)).toBe(true) // 不 remount（PR-6 方向①）
     // 展开态保持：成员行仍在 DOM（5 个）
-    expect(wrapper.find('[data-testid="bash-group"]').findAll('.trace-blk').length).toBe(5)
+    expect(wrapper.find('[data-testid="run-group"]').findAll('.trace-blk').length).toBe(5)
   })
 
-  it('PR-6 方向②（窗口右滑段首出窗）：members[0] 变更而 run head 锚不变，组行 DOM 节点不变（isSameNode，v8 key 规则的核心验证）', async () => {
+  it('PR-6 方向②（窗口右滑段首出窗）：members[0] 变更而 run head 锚不变，组行 DOM 节点不变（isSameNode，key 规则的核心验证）', async () => {
     const wrapper = mount(Turn, {
       props: {
         turn: makeBashChainTurn({ completed: 5, running: true }), // 窗口=末4：组(b1..b4+running, head=b0=0)
@@ -845,18 +908,19 @@ describe('ui-signal-density D1 U3: Turn bash 组块接线（三路径 + PR-6）'
         },
       },
     })
-    const header1 = wrapper.find('[data-testid="bash-group-header"]')
+    const header1 = wrapper.find('[data-testid="run-group-header"]')
     expect(header1.exists()).toBe(true)
-    await header1.trigger('click')
+    // 组内含 running 成员 → 挂载即展开
+    expect(wrapper.find('[data-testid="run-group"]').findAll('.trace-blk').length).toBe(5)
     const node1 = header1.element
     // 窗口右滑：b5 完成入池、新 running r 启动 → 窗口=末4：组(b2..b5+running)，members[0] 从 b1 变 b2；
-    // 若 key=members[0].flatIndex（v7 旧规则被击穿的形态）→ remount → isSameNode=false
+    // 若 key=members[0].flatIndex（旧规则被击穿的形态）→ remount → isSameNode=false
     await wrapper.setProps({ turn: makeBashChainTurn({ completed: 6, running: true }) })
-    const header2 = wrapper.find('[data-testid="bash-group-header"]')
+    const header2 = wrapper.find('[data-testid="run-group-header"]')
     expect(header2.exists()).toBe(true)
     expect(header2.element.isSameNode(node1)).toBe(true) // run head 锚定 → 不 remount（PR-6 方向②）
-    // 展开态保持（remount 会丢组件本地 ref 的展开态）。D1 语义变更（running 入组）：
+    // 展开态保持（remount 会丢组件本地 ref 的展开态）。running 入组：
     // 两次成员数 = 4 个窗口内已完成 + running = 5
-    expect(wrapper.find('[data-testid="bash-group"]').findAll('.trace-blk').length).toBe(5)
+    expect(wrapper.find('[data-testid="run-group"]').findAll('.trace-blk').length).toBe(5)
   })
 })

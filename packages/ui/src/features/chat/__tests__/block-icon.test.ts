@@ -54,9 +54,10 @@ describe('block-icon.ts', () => {
     expect(BLOCK_ICON_LUCIDE['tool-other']).toBe(SquareFunction)
     expect(BLOCK_ICON_LUCIDE.workflow).toBe(ListChecks)
     expect(BLOCK_ICON_LUCIDE.text).toBe(ArrowRight)
-    // D1 语义变更：bash-group 组头图标 = bash 语义（SquareTerminal，与 tool-bash 同源），
-    // 组身份由「×N」计数前缀承载；组内含 running 成员时图标位由渲染层 RUNNING_LOADER_SVG 顶替
-    expect(BLOCK_ICON_LUCIDE['bash-group']).toBe(SquareTerminal)
+    // run 组块不占独立档：组头图标 = 组类型的语义图标（Block.vue RUN_GROUP_ICON：
+    // 探索→tool-read / 改动→tool-edit / 执行命令→tool-bash），组内含 running 成员时
+    // 图标位由渲染层 RUNNING_LOADER_SVG 顶替——档位数恒 8（不含 running）
+    expect(Object.keys(BLOCK_ICON_LUCIDE)).toHaveLength(8)
   })
 
   it('RUNNING_LOADER_SVG: 呼吸弧 loader（淡轨整圈 .ld-track + accent 弧段 .ld-arc pathLength=100，r=10）', () => {

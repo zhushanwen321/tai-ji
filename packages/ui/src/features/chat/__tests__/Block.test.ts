@@ -18,6 +18,9 @@ import { mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
 import { Block } from '@taiji/ui'
 import type { MessageStatus, ToolCall } from '@taiji/shared'
+import type { RunGroupBase } from '@taiji/core/domain/chat'
+import zhPanel from '../../../locale/zh-CN/panel'
+import enPanel from '../../../locale/en-US/panel'
 import { MdStub, AnsiStub, GuiStub, makeToolCall, mountToolBlock, mockChatProvide } from './helpers'
 
 function mountTextBlock(over: { streaming?: boolean; status?: MessageStatus; error?: string; content?: string; messageTimestamp?: number } = {}) {
@@ -850,14 +853,20 @@ describe('ui-optimize-unified 决策 10 修正: thinking 扫光生命周期（�
 })
 
 // ═════════════════════════════════════════════════════════════════
-// ui-signal-density §3.3 D1 U3：Block bash-group 组块（连续 bash 折叠）
-// 组头三条计数口径由 core groupConsecutiveBash 算好（header），本文件断言渲染形态：
-// 组头 / 失败段 testid、展开收起、成员默认收起态、两步路径、failed 成员默认展开（V8）。
+// run 类型分组：Block 组块渲染
+// 组头数据（base/seq + 三条计数口径）由 core groupToolRuns 算好，本文件断言渲染形态：
+// 组头 testid / 组名与序号 / 统计段 / 失败段、默认开合（进行中展开、已完成收起）、
+// 成员默认收起态、两步路径、failed 成员默认展开。
 // ═════════════════════════════════════════════════════════════════
 
-/** bash 组块 fixture：ToolCall[] → Turn.vue 组分支透传的 group prop 形态（members+header+hasRunning）。 */
-function makeBashGroupProp(tools: ToolCall[]) {
+/** 组块 fixture：ToolCall[] → Turn.vue 组分支透传的 group prop 形态（base/seq/members/header/hasRunning）。 */
+function makeRunGroupProp(
+  tools: ToolCall[],
+  opts: { base?: RunGroupBase; seq?: number } = {},
+) {
   return {
+    base: opts.base ?? ('exec' as RunGroupBase),
+    seq: opts.seq ?? 1,
     members: tools.map((tc, i) => ({
       assistantId: 'a1',
       assistantStatus: 'complete' as const,
@@ -873,9 +882,9 @@ function makeBashGroupProp(tools: ToolCall[]) {
   }
 }
 
-function mountBashGroup(group: ReturnType<typeof makeBashGroupProp>) {
+function mountRunGroup(group: ReturnType<typeof makeRunGroupProp>) {
   return mount(Block, {
-    props: { type: 'bash-group', group, sessionId: 'sess-bash-group-test' },
+    props: { type: 'run-group', group, sessionId: 'sess-run-group-test' },
     global: {
       provide: mockChatProvide(), // N1 起 Block setup 执行 useChatViewDeps inject，直接 mount 必须注入
       stubs: { GuiComponentRenderer: GuiStub, AnsiText: AnsiStub, MarkdownRenderer: MdStub },
@@ -883,42 +892,68 @@ function mountBashGroup(group: ReturnType<typeof makeBashGroupProp>) {
   })
 }
 
-describe('ui-signal-density D1 U3: Block bash-group 组块', () => {
-  it('组行形态：bash-group / bash-group-header testid 存在（§4.2 gui-components 组头分支的锚点）', () => {
-    const wrapper = mountBashGroup(makeBashGroupProp([makeToolCall({ id: 'b0', toolName: 'bash', input: { command: 'echo hi' }, startTime: 0, endTime: 1000 })]))
-    expect(wrapper.find('[data-testid="bash-group"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="bash-group-header"]').exists()).toBe(true)
+describe('run 类型分组: Block 组块', () => {
+  it('组行形态：run-group / run-group-header testid 存在（e2e gui-components 组头分支的锚点）', () => {
+    const wrapper = mountRunGroup(makeRunGroupProp([makeToolCall({ id: 'b0', toolName: 'bash', input: { command: 'echo hi' }, startTime: 0, endTime: 1000 })]))
+    expect(wrapper.find('[data-testid="run-group"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="run-group-header"]').exists()).toBe(true)
   })
 
-  it('组头三条口径渲染：count / durationMs / failedCount 数字出现在组头文本（header 由 core 算好，组件零解析）', () => {
-    const wrapper = mountBashGroup(
-      makeBashGroupProp([
+  it('组头文案：类型名键 + 统计段「{count} 步 · 耗时」+ 失败段（header 由 core 算好，组件零解析）', () => {
+    const wrapper = mountRunGroup(
+      makeRunGroupProp([
         makeToolCall({ id: 'b0', toolName: 'bash', input: { command: 'a' }, startTime: 0, endTime: 1500 }),
         makeToolCall({ id: 'b1', toolName: 'bash', input: { command: 'b' }, status: 'error', startTime: 2000, endTime: 3500 }),
         makeToolCall({ id: 'b2', toolName: 'bash', input: { command: 'c' }, startTime: 4000, endTime: 5000 }),
       ]),
     )
-    const headerText = wrapper.find('[data-testid="bash-group-header"]').text()
-    expect(headerText).toContain('3') // ×N = 组内已完成成员数
-    expect(headerText).toContain('4s') // 共 Xs = 1500+1500+1000 = 4000ms → formatDuration '4s'
-    expect(wrapper.find('[data-testid="bash-group-failed"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="bash-group-failed"]').text()).toContain('1') // · 含 M 次失败
+    const headerText = wrapper.find('[data-testid="run-group-header"]').text()
+    // 组名走 runGroup* 键（测试环境 t() 返回 key；中文文案由文件末「组名文案」用例对 locale 断言）
+    expect(headerText).toContain('panel.message.runGroupExec')
+    expect(headerText).toContain('panel.message.runGroupSteps')
+    expect(headerText).toContain('3') // N = 成员数（mock 把命名参数拼进 key 串）
+    expect(headerText).toContain('4s') // 耗时 = 1500+1500+1000 = 4000ms → formatDuration '4s'
+    expect(wrapper.find('[data-testid="run-group-failed"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="run-group-failed"]').text()).toContain('1') // · 含 M 次失败
+  })
+
+  it('组名按 base 走三档（探索 / 改动 / 执行命令），同名组序号 >1 时显示「· N」', () => {
+    const headerOf = (base: RunGroupBase, seq: number) =>
+      mountRunGroup(makeRunGroupProp([makeToolCall({ id: 'r0', toolName: 'read', input: { path: '/x' } })], { base, seq }))
+        .find('[data-testid="run-group-header"]')
+        .text()
+    expect(headerOf('explore', 1)).toContain('panel.message.runGroupExplore')
+    expect(headerOf('edit', 1)).toContain('panel.message.runGroupEdit')
+    expect(headerOf('exec', 1)).toContain('panel.message.runGroupExec')
+    // 首个同名组不带序号（不显示「· 1」），第二个起带「· 2」
+    expect(headerOf('explore', 1)).not.toContain('· 1')
+    expect(headerOf('explore', 2)).toContain('· 2')
+  })
+
+  it('耗时不足 1s 不显示（统计段只剩步数）', () => {
+    const wrapper = mountRunGroup(
+      makeRunGroupProp([makeToolCall({ id: 'b0', toolName: 'bash', input: { command: 'a' }, startTime: 0, endTime: 400 })]),
+    )
+    const headerText = wrapper.find('[data-testid="run-group-header"]').text()
+    expect(headerText).toContain('panel.message.runGroupSteps')
+    expect(headerText).toContain('1') // 1 步
+    expect(headerText).not.toContain('400ms')
   })
 
   it('failedCount=0 → 失败段不渲染（组行不虚构失败）', () => {
-    const wrapper = mountBashGroup(makeBashGroupProp([
+    const wrapper = mountRunGroup(makeRunGroupProp([
       makeToolCall({ id: 'b0', toolName: 'bash', input: { command: 'a' } }),
       makeToolCall({ id: 'b1', toolName: 'bash', input: { command: 'b' } }),
     ]))
-    expect(wrapper.find('[data-testid="bash-group-failed"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="run-group-failed"]').exists()).toBe(false)
   })
 
-  it('hasRunning 执行态视觉（M3b demo 形态）：true → 组头 loader（accent 容器 + animate-loader-spin + svg）+ 行文字恒 text-neutral-mid；false → 静态图标 + text-neutral-mid', () => {
-    const runningWrapper = mountBashGroup(makeBashGroupProp([
+  it('hasRunning 执行态视觉：true → 组头 loader（accent 容器 + animate-loader-spin + svg）+ 行文字恒 text-neutral-mid；false → 静态图标 + text-neutral-mid', () => {
+    const runningWrapper = mountRunGroup(makeRunGroupProp([
       makeToolCall({ id: 'b0', toolName: 'bash', input: { command: 'a' }, startTime: 0, endTime: 1000 }),
       makeToolCall({ id: 'b1', toolName: 'bash', input: { command: 'b' }, status: 'running', startTime: 2000 }),
     ]))
-    const runningHeader = runningWrapper.find('[data-testid="bash-group-header"]')
+    const runningHeader = runningWrapper.find('[data-testid="run-group-header"]')
     // 行文字不染 accent（demo 运行态 = 状态色只在图标，.tool .t-name 恒 mid）
     expect(runningHeader.classes()).toContain('text-neutral-mid')
     expect(runningHeader.classes()).not.toContain('text-accent')
@@ -927,63 +962,90 @@ describe('ui-signal-density D1 U3: Block bash-group 组块', () => {
     const loader = runningHeader.find('.animate-loader-spin')
     expect(loader.find('svg').exists()).toBe(true)
 
-    const doneWrapper = mountBashGroup(makeBashGroupProp([
+    const doneWrapper = mountRunGroup(makeRunGroupProp([
       makeToolCall({ id: 'b0', toolName: 'bash', input: { command: 'a' } }),
       makeToolCall({ id: 'b1', toolName: 'bash', input: { command: 'b' } }),
     ]))
-    const doneHeader = doneWrapper.find('[data-testid="bash-group-header"]')
+    const doneHeader = doneWrapper.find('[data-testid="run-group-header"]')
     expect(doneHeader.classes()).toContain('text-neutral-mid')
     expect(doneHeader.classes()).not.toContain('text-accent')
     expect(doneHeader.find('.animate-loader-spin').exists()).toBe(false)
   })
 
-  it('展开收起：默认收起（成员不在 DOM）；点组头展开 → 成员行各自 1 行收起态；再点收起 → 成员消失', async () => {
-    const wrapper = mountBashGroup(makeBashGroupProp([
+  it('默认开合：组内有 running 成员 → 挂载即展开（成员行在场）；全已完成 → 挂载即收起', () => {
+    const running = mountRunGroup(makeRunGroupProp([
+      makeToolCall({ id: 'b0', toolName: 'bash', input: { command: 'a' } }),
+      makeToolCall({ id: 'b1', toolName: 'bash', input: { command: 'b' }, status: 'running' }),
+    ]))
+    expect(running.find('[data-testid="run-group"]').findAll('.trace-blk').length).toBe(2)
+    expect(running.find('[data-testid="run-group-header"]').attributes('aria-expanded')).toBe('true')
+
+    const done = mountRunGroup(makeRunGroupProp([
       makeToolCall({ id: 'b0', toolName: 'bash', input: { command: 'a' } }),
       makeToolCall({ id: 'b1', toolName: 'bash', input: { command: 'b' } }),
     ]))
-    expect(wrapper.find('[data-testid="bash-group"]').findAll('.trace-blk').length).toBe(0) // 默认收起（成员行 = 组容器内嵌套 Block 根 .trace-blk；外层查找收窄到 bash-group 子树，排除 Block 根容器自身）
-    await wrapper.find('[data-testid="bash-group-header"]').trigger('click')
-    const members = wrapper.find('[data-testid="bash-group"]').findAll('.trace-blk')
+    expect(done.find('[data-testid="run-group"]').findAll('.trace-blk').length).toBe(0)
+    expect(done.find('[data-testid="run-group-header"]').attributes('aria-expanded')).toBe('false')
+  })
+
+  it('展开收起（用户手动开合）：点组头展开 → 成员行各自 1 行收起态；再点收起 → 成员消失', async () => {
+    const wrapper = mountRunGroup(makeRunGroupProp([
+      makeToolCall({ id: 'b0', toolName: 'bash', input: { command: 'a' } }),
+      makeToolCall({ id: 'b1', toolName: 'bash', input: { command: 'b' } }),
+    ]))
+    expect(wrapper.find('[data-testid="run-group"]').findAll('.trace-blk').length).toBe(0) // 默认收起（成员行 = 组容器内嵌套 Block 根 .trace-blk；外层查找收窄到组子树，排除 Block 根容器自身）
+    await wrapper.find('[data-testid="run-group-header"]').trigger('click')
+    const members = wrapper.find('[data-testid="run-group"]').findAll('.trace-blk')
     expect(members.length).toBe(2) // 成员行出现
     // 成员保持各自 1 行收起态（PR-1 行高不变量）：无展开输出区
     expect(wrapper.find('.tool-result').exists()).toBe(false)
     // aria-expanded 翻转
-    expect(wrapper.find('[data-testid="bash-group-header"]').attributes('aria-expanded')).toBe('true')
-    await wrapper.find('[data-testid="bash-group-header"]').trigger('click')
-    expect(wrapper.find('[data-testid="bash-group"]').findAll('.trace-blk').length).toBe(0) // 收起
-    expect(wrapper.find('[data-testid="bash-group-header"]').attributes('aria-expanded')).toBe('false')
+    expect(wrapper.find('[data-testid="run-group-header"]').attributes('aria-expanded')).toBe('true')
+    await wrapper.find('[data-testid="run-group-header"]').trigger('click')
+    expect(wrapper.find('[data-testid="run-group"]').findAll('.trace-blk').length).toBe(0) // 收起
+    expect(wrapper.find('[data-testid="run-group-header"]').attributes('aria-expanded')).toBe('false')
   })
 
-  it('两步路径（V1 已接受代价①）：组展开 → 点成员行 → 该成员完整输出可见', async () => {
-    const wrapper = mountBashGroup(makeBashGroupProp([
+  it('两步路径：组展开 → 点成员行 → 该成员完整输出可见', async () => {
+    const wrapper = mountRunGroup(makeRunGroupProp([
       makeToolCall({ id: 'b0', toolName: 'bash', input: { command: 'echo step-one' }, output: 'step-one-output' }),
       makeToolCall({ id: 'b1', toolName: 'bash', input: { command: 'echo step-two' } }),
     ]))
-    await wrapper.find('[data-testid="bash-group-header"]').trigger('click')
+    await wrapper.find('[data-testid="run-group-header"]').trigger('click')
     // 第一步：组展开（成员行在场、均收起）
     expect(wrapper.find('.tool-result').exists()).toBe(false)
     // 第二步：点成员行 → 完整输出可见（bash 凹槽命令头 + 输出）
-    const firstHeader = wrapper.find('[data-testid="bash-group"]').findAll('.trace-blk')[0].find('[data-testid="tool-block-header"]')
+    const firstHeader = wrapper.find('[data-testid="run-group"]').findAll('.trace-blk')[0].find('[data-testid="tool-block-header"]')
     await firstHeader.trigger('click')
-    const expanded = wrapper.find('[data-testid="bash-group"]').findAll('.trace-blk')[0]
+    const expanded = wrapper.find('[data-testid="run-group"]').findAll('.trace-blk')[0]
     expect(expanded.text()).toContain('echo step-one')
     expect(expanded.text()).toContain('step-one-output')
   })
 
-  it('V8 形态：failed 成员行在组展开后挂载即默认展开（错误输出立即可见，无需再点）', async () => {
-    const wrapper = mountBashGroup(makeBashGroupProp([
+  it('失败成员行在组展开后挂载即默认展开（错误输出立即可见，无需再点）', async () => {
+    const wrapper = mountRunGroup(makeRunGroupProp([
       makeToolCall({ id: 'b0', toolName: 'bash', input: { command: 'ok' } }),
       makeToolCall({ id: 'b1', toolName: 'bash', input: { command: 'boom' }, status: 'error', error: 'exit code 1' }),
       makeToolCall({ id: 'b2', toolName: 'bash', input: { command: 'after' } }),
     ]))
-    await wrapper.find('[data-testid="bash-group-header"]').trigger('click')
-    const members = wrapper.find('[data-testid="bash-group"]').findAll('.trace-blk')
+    await wrapper.find('[data-testid="run-group-header"]').trigger('click')
+    const members = wrapper.find('[data-testid="run-group"]').findAll('.trace-blk')
     expect(members.length).toBe(3)
     // 失败成员（第 2 个）挂载即展开：输出区在场（displayContent 兜底 tool.error）
     expect(members[1].find('.tool-result').exists()).toBe(true)
     expect(members[1].text()).toContain('exit code 1')
     // 非失败成员保持收起
     expect(members[0].find('.tool-result').exists()).toBe(false)
+  })
+
+  it('组名与统计段文案在 zh / en 两侧都登记（键缺失时生产环境会把 key 原样渲染到界面）', () => {
+    expect(zhPanel.message.runGroupExplore).toBe('探索')
+    expect(zhPanel.message.runGroupEdit).toBe('改动')
+    expect(zhPanel.message.runGroupExec).toBe('执行命令')
+    expect(zhPanel.message.runGroupSteps).toBe('{count} 步')
+    expect(enPanel.message.runGroupExplore).toBe('Explore')
+    expect(enPanel.message.runGroupEdit).toBe('Edits')
+    expect(enPanel.message.runGroupExec).toBe('Commands')
+    expect(enPanel.message.runGroupSteps).toBe('{count} steps')
   })
 })

@@ -416,12 +416,12 @@ describe('Turn · trace 块按 contentBlocks 真实时序渲染', () => {
     // trace 存在
     expect(wrapper.find('.trace').exists()).toBe(true)
     // trace 内所有 Block 根（.trace-blk）。thinkToolAssistant 无 text 块，trace 仍 2 块
-    const blocks = wrapper.findAll('.trace .trace-blk')
+    const blocks = wrapper.findAll('.trace > .trace-blk')
     expect(blocks.length).toBe(2)
     // 第一个块是 thinking（.trace-think 存在）
     expect(blocks[0].find('.trace-think').exists()).toBe(true)
-    // 第二个块是 tool（.trace-tool 存在）
-    expect(blocks[1].find('.trace-tool').exists()).toBe(true)
+    // 第二个块是 run 组（grep → 探索组；run 类型分组把工具行折进组）
+    expect(blocks[1].find('.trace-run-group').exists()).toBe(true)
     // 操作栏也存在（lastAssistant 非 null，去内容化后仅 hover actions）
     expect(wrapper.find('.turn-summary').exists()).toBe(true)
   })
@@ -434,10 +434,10 @@ describe('Turn · trace 块按 contentBlocks 真实时序渲染', () => {
         assistants: [thinkToolAssistant(false)],
       }),
     })
-    const blocks = wrapper.findAll('.trace .trace-blk')
+    const blocks = wrapper.findAll('.trace > .trace-blk')
     expect(blocks.length).toBe(2)
-    // 第一个块是 tool
-    expect(blocks[0].find('.trace-tool').exists()).toBe(true)
+    // 第一个块是 run 组（grep → 探索组）
+    expect(blocks[0].find('.trace-run-group').exists()).toBe(true)
     // 第二个块是 thinking
     expect(blocks[1].find('.trace-think').exists()).toBe(true)
     // 操作栏存在（lastAssistant 非 null）
@@ -457,10 +457,14 @@ describe('Turn · trace 块按 contentBlocks 真实时序渲染', () => {
     // [block-rendering M0] streaming 光标迁移到 Turn 尾部 streaming-tail；
     // 末位可见 block 是 running tool（textFirstAssistant: text→tool running）→ 隐藏（工具自带 loader）
     expect(wrapper.find('.streaming-tail').exists()).toBe(false)
-    // trace 内 text + tool 两个块（末位 text 不再被 filter，全 inline 就地渲染）
-    const blocks = wrapper.findAll('.trace .trace-blk')
+    // trace 内 text + run 组两个单元（末位 text 不再被 filter，全 inline 就地渲染）。
+    // 取顶层单元用子选择器：组内含 running 成员时组是展开的，成员行（嵌套 .trace-blk）也会被
+    // 后代选择器数进来——分组后「块数」口径一律指顶层单元数
+    const blocks = wrapper.findAll('.trace > .trace-blk')
     expect(blocks.length).toBe(2)
     expect(blocks[0].findComponent({ name: 'MarkdownRenderer' }).exists()).toBe(true)
+    expect(blocks[1].find('.trace-run-group').exists()).toBe(true)
+    // 组展开后成员行 = 真正的 tool 行（.trace-tool）
     expect(blocks[1].find('.trace-tool').exists()).toBe(true)
   })
 
@@ -509,11 +513,11 @@ describe('Turn · trace 块按 contentBlocks 真实时序渲染', () => {
     // complete 态默认收起，手动展开 trace（点击 turn-meta）
     await wrapper.find('.turn-meta').trigger('click')
     expect(wrapper.find('.trace').exists()).toBe(true)
-    // [block-rendering M0] text 全 inline：trace 内 text + tool 两块（末位 text 不再被跳过）
-    const blocks = wrapper.findAll('.trace .trace-blk')
+    // [block-rendering M0] text 全 inline：trace 内 text + run 组两个顶层单元（末位 text 不再被跳过）
+    const blocks = wrapper.findAll('.trace > .trace-blk')
     expect(blocks.length).toBe(2)
     expect(blocks[0].findComponent({ name: 'MarkdownRenderer' }).exists()).toBe(true)
-    expect(blocks[1].find('.trace-tool').exists()).toBe(true)
+    expect(blocks[1].find('.trace-run-group').exists()).toBe(true)
   })
 
   // [block-rendering M0] TC-M0-1：末位 text 不再被 filter，全 inline 就地渲染（多 assistant 跨 message 顺序）
@@ -534,11 +538,11 @@ describe('Turn · trace 块按 contentBlocks 真实时序渲染', () => {
     })
     // complete 态默认折叠，手动展开 trace
     await wrapper.find('.turn-meta').trigger('click')
-    // a1 text 在 trace 内（不再被 filter 掉）、在 tool 之前（contentBlocks 顺序）；a2 text 正常渲染
-    const blocks = wrapper.findAll('.trace .trace-blk')
+    // a1 text 在 trace 内（不再被 filter 掉）、在 run 组之前（contentBlocks 顺序）；a2 text 正常渲染
+    const blocks = wrapper.findAll('.trace > .trace-blk')
     expect(blocks.length).toBe(3)
     expect(blocks[0].findComponent({ name: 'MarkdownRenderer' }).exists()).toBe(true)
-    expect(blocks[1].find('.trace-tool').exists()).toBe(true)
+    expect(blocks[1].find('.trace-run-group').exists()).toBe(true)
     expect(blocks[2].findComponent({ name: 'MarkdownRenderer' }).exists()).toBe(true)
     // 操作栏存在但不再承载文字内容（MarkdownRenderer stub 不在 .turn-summary 内）
     expect(wrapper.find('.turn-summary').exists()).toBe(true)
@@ -933,9 +937,12 @@ describe('Turn · forceWorking 虚拟 session 回归（edges wave CL1）', () =>
   // subagent 虚拟 session 块多时仍受窗口策略约束（visible=last W + text，compactedCount>0）。
   // W=8→6：e9651bfa6（design D7 V1 tuning）；W=6→4：ui-signal-density 候选 E（窗口收窄省 2 行）
   it('forceWorking + >W 完成块（10 tool）→ 窗口收编生效（visible=4 tool + text=5，compactedCount=6）', () => {
+    // 工具名交替三类（探索 / 改动 / 执行命令）：相邻块类型恒不同 → 每块自成一组，
+    // 「窗口内可见单元数」的口径与分组前同形（组不吞并相邻块）
+    const names = ['read', 'bash', 'edit'] as const
     const tools = Array.from({ length: 10 }, (_, i) => ({
       id: `tc${i}`,
-      toolName: 'read',
+      toolName: names[i % names.length],
       input: {},
       status: 'completed' as const,
       startTime: 0,

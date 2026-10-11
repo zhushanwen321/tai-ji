@@ -126,24 +126,13 @@
           @toggle="onToggleTakeover"
         />
         <!-- 单层 v-for 渲染窗口 visible 块。:key=flatIndex（拍平后全 turn 一维稳定序号，跨 assistant 连续）。
-             [ui-signal-density D1 U3] 渲染单元 = groupConsecutiveBash(visibleBlocks, flatBlocks)——
-             分组接线点在 visibleBlocks 三分支汇合之后（§3.2.2：不接在 computeTraceWindow 之后，
-             历史回合手动展开全量路径才能拿到分组），普通块与 bash 组块经 unitBlockProps/unitMemoDeps
-             双 helper 单元素收敛（vue/valid-v-memo 禁 template v-for 子元素挂 v-memo，分支不能拆成
-             双 Block）。组块 :key = headFlatIndex（members[0] 所属连续 bash 段的段首锚定 run head，
-             v8）——对段尾延长（running 并入）与窗口右滑（段首被收编出窗）两方向稳定，key 抖 = remount =
-             展开态丢 + 滚动锚点跳（PR-6）。v-memo deps 按单元类型二选一（unitMemoDeps）：
-             组块四项 = [members.length, 末成员 block.ref, header.count, header.durationMs]（末成员 ref
-             覆盖 running→completed 内容重组、count/durationMs 覆盖组头刷新、length 覆盖成员增减；
-             不用整个 members 数组引用入 deps——每次重组都是新数组，v-memo 将永远失效）；
-             普通 [W21 D-4] deps = [块身份/内容引用, assistant 状态, thinking store 折叠态, assistant error,
-             assistant timestamp]。block.ref 即「身份+内容」——text 是 normalizeContent 字符串、
-             thinking/tool 是块对象引用（D-1 不可变语义下内容/status/id 变化 = 新对象替换，引用入键即
-             覆盖 08 §3.3.1 键清单的 thinking.id / tool.id / content / tool.status）；working/streaming
-             由 assistantStatus 派生。刻意不含 Block 本地折叠 ref（thinkingCollapsed/toolCollapsed）——
-             v-memo deps 在父组件渲染作用域求值，无法引用子组件私有 ref；折叠由 Block 自身响应式驱动
-             （实例经 :key 保活，v-memo 不 gate 子组件内部更新）。sessionId 不入键：跨 session 时
-             renderKey 不同 → Turn 实例整体重建，不存在同实例跨 session 复用。 -->
+             渲染单元 = groupToolRuns(visibleBlocks, flatBlocks)——run 类型分组（探索 / 改动 / 执行命令），
+             分组接线点在 visibleBlocks 三分支汇合之后（历史回合手动展开全量路径才能拿到分组），
+             普通块与 run 组块经 unitBlockProps/unitMemoDeps 双 helper 单元素收敛
+             （vue/valid-v-memo 禁 template v-for 子元素挂 v-memo，分支不能拆成双 Block）。
+             组块 :key = headFlatIndex（members[0] 所属同类型段的段首锚定 run head）——对段尾延长
+             （running 并入）与窗口右滑（段首被收编出窗）两方向稳定，key 抖 = remount = 展开态丢 +
+             滚动锚点跳（PR-6）。v-memo deps 按单元类型二选一（unitMemoDeps）。 -->
         <Block
           v-for="unit in renderUnits"
           :key="unitKey(unit)"
@@ -196,15 +185,15 @@ import { computed, ref, watch } from 'vue'
 import type { Component } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Bell, CheckCircle2, TriangleAlert } from '@lucide/vue'
-import type { MessageTurn, FlatBlock, TraceRenderUnit, NotifyOutcome } from '@taiji/core/domain/chat'
+import type { MessageTurn, FlatBlock, TraceRenderUnit, NotifyOutcome, RunGroupBase } from '@taiji/core/domain/chat'
 import {
   countThinking,
   countToolCalls,
   deriveTurnAggregates,
   flattenTurnBlocks,
   computeTraceWindow,
-  groupConsecutiveBash,
-  isBashGroupBlock,
+  groupToolRuns,
+  isRunGroupBlock,
   turnStableId,
   W,
 } from '@taiji/core/domain/chat'
@@ -482,29 +471,41 @@ const visibleBlocks = computed<FlatBlock[]>(() => {
 })
 
 /**
- * [ui-signal-density §3.3 D1 U3] 实际渲染单元：visibleBlocks 三分支汇合之后接连续 bash 折叠
- * （接线点在汇合后而非 computeTraceWindow 之后——否则历史回合手动展开全量路径拿不到分组，
- * D1 收益最大路径静默落空，§3.2.2）。flatBlocks 与 visibleBlocks 同源同拍（都是 props.turn.assistants
- * 的 computed 派生、同一渲染拍计算），满足 groupConsecutiveBash 的入参一致性不变量（v9 契约缝③）。
+ * run 类型分组：visibleBlocks 三分支汇合之后接 groupToolRuns（接线点在汇合后而非 computeTraceWindow
+ * 之后——否则历史回合手动展开全量路径拿不到分组，收益最大路径静默落空）。flatBlocks 与 visibleBlocks
+ * 同源同拍（都是 props.turn.assistants 的 computed 派生、同一渲染拍计算），满足 groupToolRuns 的
+ * 入参一致性不变量（段首回查用 flatBlocks）。
  */
 const renderUnits = computed<TraceRenderUnit[]>(() =>
-  groupConsecutiveBash(visibleBlocks.value, flatBlocks.value),
+  groupToolRuns(visibleBlocks.value, flatBlocks.value),
 )
 
-/** 渲染单元 key（D1 v8 run head）：普通块 = flatIndex；bash 组块 = 段首锚定 headFlatIndex。 */
+/** 渲染单元 key（run head）：普通块 = flatIndex；run 组块 = 段首锚定 headFlatIndex。 */
 function unitKey(unit: TraceRenderUnit): number {
-  return isBashGroupBlock(unit) ? unit.headFlatIndex : unit.flatIndex
+  return isRunGroupBlock(unit) ? unit.headFlatIndex : unit.flatIndex
 }
 
 /**
  * v-memo deps（按单元类型二选一，见模板注释）。
- * 组块五项 = D1 契约字面（hasRunning = 组头执行态视觉的切换信号，running 成员全部完成时
- * loader ↔ 静态图标翻转）；普通块五项 = W21 D-4 既有键清单原样迁移。
+ * 组块七项 = [base, seq, members.length, 末成员 block.ref, header.count, header.durationMs,
+ * hasRunning]：base/seq 覆盖「同名组序号随可见序列变化」（窗口右滑使更早的同名组出窗时，成员的
+ * 引用可以全不变而序号从 2 变 1，漏了这两项组头会显示旧序号）；末成员 ref 覆盖 running→completed
+ * 内容重组、count/durationMs 覆盖组头刷新、length 覆盖成员增减、hasRunning 覆盖组头执行态翻转。
+ * 不用整个 members 数组引用入 deps——每次重组都是新数组，v-memo 将永远失效。
+ * 普通块五项 = W21 D-4 既有键清单原样迁移：block.ref 即「身份+内容」——text 是 normalizeContent
+ * 字符串、thinking/tool 是块对象引用（D-1 不可变语义下内容/status/id 变化 = 新对象替换，引用入键即
+ * 覆盖 08 §3.3.1 键清单的 thinking.id / tool.id / content / tool.status）；working/streaming 由
+ * assistantStatus 派生。刻意不含 Block 本地折叠 ref（thinkingCollapsed/toolCollapsed）——v-memo deps
+ * 在父组件渲染作用域求值，无法引用子组件私有 ref；折叠由 Block 自身响应式驱动（实例经 :key 保活，
+ * v-memo 不 gate 子组件内部更新）。sessionId 不入键：跨 session 时 renderKey 不同 → Turn 实例整体
+ * 重建，不存在同实例跨 session 复用。
  * deps 在父组件渲染作用域求值（assistantById 为 computed，此处取 .value）。
  */
 function unitMemoDeps(unit: TraceRenderUnit): unknown[] {
-  if (isBashGroupBlock(unit)) {
+  if (isRunGroupBlock(unit)) {
     return [
+      unit.base,
+      unit.seq,
       unit.members.length,
       unit.members[unit.members.length - 1].block.ref,
       unit.header.count,
@@ -523,7 +524,7 @@ function unitMemoDeps(unit: TraceRenderUnit): unknown[] {
 
 /** unitBlockProps 的返回形状（对齐 Block.vue props 类型，v-bind 展开的类型前提）。 */
 interface BlockUnitProps {
-  type: 'thinking' | 'tool' | 'text' | 'agentgraph' | 'bash-group'
+  type: 'thinking' | 'tool' | 'text' | 'agentgraph' | 'run-group'
   content?: string
   tool?: ToolCall
   thinkingId?: string
@@ -536,7 +537,13 @@ interface BlockUnitProps {
   /** thinking 起止毫秒时间戳（N6 思考行时长数据源，ThinkingBlock.startTime/endTime 透传） */
   thinkingStart?: number
   thinkingEnd?: number
-  group?: { members: FlatBlock[]; header: { count: number; durationMs: number; failedCount: number }; hasRunning: boolean }
+  group?: {
+    base: RunGroupBase
+    seq: number
+    members: FlatBlock[]
+    header: { count: number; durationMs: number; failedCount: number }
+    hasRunning: boolean
+  }
 }
 
 /**
@@ -566,13 +573,22 @@ function kindBlockProps(
 
 /**
  * Block props（按单元类型二选一）：普通块从 FlatBlock 解出 kind/ref + 所属 assistant 的
- * status/error/timestamp（D8 形态原样迁移）；bash 组块走 type='bash-group' + group 数据
- * （header 三条口径由 core 一次算好）。经 v-bind 展开收敛到单 Block 元素——vue/valid-v-memo
- * 禁止 template v-for 子元素挂 v-memo，双分支无法各自带 memo（vue eslint 规则 + 编译器语义）。
+ * status/error/timestamp（D8 形态原样迁移）；run 组块走 type='run-group' + group 数据
+ * （base/seq + header 三条口径由 core 一次算好）。经 v-bind 展开收敛到单 Block 元素——
+ * vue/valid-v-memo 禁止 template v-for 子元素挂 v-memo，双分支无法各自带 memo。
  */
 function unitBlockProps(unit: TraceRenderUnit): BlockUnitProps {
-  if (isBashGroupBlock(unit)) {
-    return { type: 'bash-group', group: { members: unit.members, header: unit.header, hasRunning: unit.hasRunning } }
+  if (isRunGroupBlock(unit)) {
+    return {
+      type: 'run-group',
+      group: {
+        base: unit.base,
+        seq: unit.seq,
+        members: unit.members,
+        header: unit.header,
+        hasRunning: unit.hasRunning,
+      },
+    }
   }
   const assistant = assistantById.value.get(unit.assistantId)
   return {

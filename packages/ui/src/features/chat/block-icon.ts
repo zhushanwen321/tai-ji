@@ -30,7 +30,6 @@ import type { ToolCallStatus } from '@taiji/shared'
 export type BlockIconKind =
   | 'thinking' | 'tool-read' | 'tool-bash' | 'tool-edit' | 'tool-other'
   | 'subagent' | 'workflow' | 'running' | 'text'
-  | 'bash-group'
 
 /** toolName → tool 细分类映射（未命中的 toolName 走 'tool-other'） */
 const TOOL_ICON_MAP: Record<string, BlockIconKind> = {
@@ -67,9 +66,9 @@ export function getBlockIcon(
  * RUNNING_LOADER_SVG 承担）/ tool-read=book-open / tool-bash=square-terminal /
  * tool-edit=pencil / tool-other=square-function / subagent=users / workflow=list-checks /
  * text=arrow-right。
- * bash-group（ui-signal-density §3.3 D1 U3）= square-terminal：组头是 bash 段的聚合行，
- * 图标沿用 bash 语义（与 tool-bash 同源）；组身份由「×N · 共 Xs」计数前缀承载，行内有
- * running 成员时图标位让给 RUNNING_LOADER_SVG（渲染层 hasRunning 分支，不走本映射）。
+ * run 组块（run 类型分组）不占独立档：组头图标 = 组类型的语义图标（探索→tool-read /
+ * 改动→tool-edit / 执行命令→tool-bash，映射在 Block.vue 的 RUN_GROUP_ICON），组身份由
+ * 「类型名 + N 步」文案承载，行内有 running 成员时图标位让给 RUNNING_LOADER_SVG。
  */
 export const BLOCK_ICON_LUCIDE: Record<Exclude<BlockIconKind, 'running'>, Component> = {
   thinking: Lightbulb,
@@ -80,7 +79,6 @@ export const BLOCK_ICON_LUCIDE: Record<Exclude<BlockIconKind, 'running'>, Compon
   subagent: Users,
   workflow: ListChecks,
   text: ArrowRight,
-  'bash-group': SquareTerminal,
 }
 
 /**
