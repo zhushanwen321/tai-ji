@@ -23,7 +23,7 @@
 
     <div
       ref="scrollEl"
-      class="message-stream relative flex-1 overflow-y-auto px-[30px] pb-[24px]"
+      class="message-stream relative flex-1 overflow-y-auto px-[30px]"
       :style="{ overflowAnchor: 'none' }"
       @wheel="onWheel"
     >
@@ -415,10 +415,10 @@ const { pinnedIndexes } = useStreamingPin({
 /** [cw wave w3] auto-scroll follow 状态机（D1/D2/D7）：onScroll 复合判据
  *  （INVAR-M4-2′）/ onWheel 恒即时脱离 / followIfStuck rAF 重读 guard。virta 单一 scrollTop owner。 */
 // [U4 护栏⑦] dev-only 贴底跟随断言包装（生产透传零开销；spec 详见 usePinBottomGuard.ts 头注释）。
-// [D2 数学不变量] endOffset = tailEl 实测总高：滚动容器纵向 padding（pt 令牌 + pb-24px）
-// 参与 virtua viewportSize 扣除与 scrollToIndex 落点公式——viewportSize 按 content-box 测量
-// 随 padding 自动重算，落点偏差由 BOTTOM_THRESHOLD 吸收（M3c 起 30/24 对齐 demo .chat-scroll
-// 呼吸间距；改任一纵向 padding 必复核 useVirtuaFollow D2 推导并真机复验贴底）。
+// [D2 数学不变量] endOffset = tailEl 实测总高：滚动容器纵向 padding（pt 令牌；底部 padding
+// 已随 2026-10-11 贴合裁决移除——composer 带壳顶缘与流底缘 0 间距）参与 virtua viewportSize
+// 扣除与 scrollToIndex 落点公式——viewportSize 按 content-box 测量随 padding 自动重算，
+// 落点偏差由 BOTTOM_THRESHOLD 吸收（改任一纵向 padding 必复核 useVirtuaFollow D2 推导并真机复验贴底）。
 const { stickToBottom, showJumpButton, onScroll, onWheel, followIfStuck, followToBottom, onSessionRebuild, notifyRoActivity } =
   usePinBottomGuard({
     follow: useVirtuaFollow({
