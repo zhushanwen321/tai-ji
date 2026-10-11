@@ -75,7 +75,7 @@
            视图切换方向滑入（spec §3.1 裁决 P1-6，demo vt-slide 同语言）：三个分支各挂
            viewSlideCls——目标视图序号更大自右滑入、反之自左；v-if 分支重挂载使动画每次
            切换重播；首次进入不播（方向类初始为空，watch 置值前无类）。 -->
-      <div class="mt-1 min-h-0 flex-1 overflow-hidden">
+      <div class="min-h-0 flex-1 overflow-hidden">
         <template v-if="sidebar.activeTab === 'sessions'">
           <div class="h-full min-h-0" :class="viewSlideCls">
             <!-- S5：加载失败态 + 重试（session.listLoadError 非空时） -->
@@ -180,6 +180,7 @@
                 data-testid="sidebar-quick-appearance"
                 @mouseenter="quickThemeEnter"
                 @mouseleave="quickThemeLeave"
+                @click="quickThemeTriggerClick"
               >
                 <Palette class="size-[15px]" :stroke-width="1.6" />
               </Button>
@@ -195,6 +196,7 @@
               :side-offset="8"
               class="z-[var(--z-hovercard)] w-[212px] min-w-[212px] rounded-[var(--radius-lg)] border-border-strong p-[10px] shadow-3 ![transition-property:none]"
               data-testid="sidebar-quick-appearance-panel"
+              @open-auto-focus="onQuickThemeOpenAutoFocus"
               @mouseenter="quickThemeCancelClose"
               @mouseleave="quickThemeLeave"
             >
@@ -231,7 +233,15 @@
             data-testid="sidebar-settings"
             @click="openSettings('appearance')"
           >
-            <Settings class="size-[15px]" :stroke-width="1.6" />
+            <!-- 内联 gear = demo Sidebar.vue side-foot 设置钮的同一 path（经典 feather settings
+                 几何，齿形外沿 x3–21 占 viewBox 18/24）。现役 @lucide/vue v1.23 的 Settings 已重绘
+                 为小齿形（占 16/24），同 15px 盒内墨迹比 demo 小一圈（r4 footer 项：demo ~14×14 vs
+                 real ~12×13）；footer 三钮中另两钮的 lucide 几何与 demo 一致，仅此一枚需对齐源
+                 path。尺寸/描边维持 15px / 1.6 与同排另两钮一致。 -->
+            <svg class="size-[15px] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+              <circle cx="12" cy="12" r="3" />
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h0a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h0a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+            </svg>
           </Button>
         </div>
       </div>
@@ -261,7 +271,7 @@
 
 <script setup lang="ts">
 import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { Plus, Search, Settings, FolderOpen, AlertCircle, Puzzle, Download, Smartphone, Palette } from '@lucide/vue'
+import { Plus, Search, FolderOpen, AlertCircle, Puzzle, Download, Smartphone, Palette } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { SearchModal } from '@taiji/ui'
@@ -310,10 +320,30 @@ const quickThemeOpen = ref(false)
 let quickThemeCloseTimer: number | undefined
 const QUICK_THEME_CLOSE_DELAY_MS = 260
 
-/** hover 进入（钮）：取消待关定时并打开（demo qsEnter 同款） */
+/**
+ * 打开来源旗标（demo toggleQs 焦点语义，r2 条 8）：hover 打开不移焦——鼠标划过抢焦点
+ * 会中断正在输入的用户；click 打开保留 reka 默认移焦（对齐 aria-haspopup="dialog" 语义）。
+ * open-auto-focus 在 FocusScope 挂载时同步读旗标：mouseenter 置位先于 reka 弹层渲染，
+ * click 置位（同步 handler）先于 open 状态驱动的 FocusScope 挂载，两路时序均成立。
+ */
+let quickThemeOpenedByHover = false
+
+/** hover 进入（钮）：取消待关定时并打开（demo qsEnter 同款），标记来源 = hover */
 function quickThemeEnter(): void {
   window.clearTimeout(quickThemeCloseTimer)
+  quickThemeOpenedByHover = true
   quickThemeOpen.value = true
+}
+
+/** 钮 click（reka Trigger 原生 click 切 v-model，与 hover 共用同一显隐状态）：
+ *  标记来源 = click——open=false 时 click 打开（键盘 Enter/Space 路径）保留移焦 */
+function quickThemeTriggerClick(): void {
+  quickThemeOpenedByHover = false
+}
+
+/** 弹层自动聚焦仲裁（demo toggleQs）：hover 来源不抢焦点，click 来源保留 reka 默认移焦 */
+function onQuickThemeOpenAutoFocus(event: Event): void {
+  if (quickThemeOpenedByHover) event.preventDefault()
 }
 
 /** hover 离开（钮或面板）：延迟后收面板（demo qsLeave 同款；click 打开态同样被收——
@@ -397,8 +427,8 @@ useAppUpdate().initAutoCheck() // setup 顶层同步调用（非 onMounted）：
    （CDP 环境下 flex-basis transition 锁死 declared value，AsideRegion 头注既有登记，不改）。
    reduce 降级：全局 style.css reduce 块把过渡压到 0.01ms（瞬切），此处补 display:none
    （demo .app.folded .sidebar 同款——直接离场不留 0 宽占位）。 */
-.sidebar { transition: width var(--duration-slow) var(--ease), opacity var(--duration) var(--ease), visibility 0s 0s; }
-.sidebar[data-collapsed='true'] { transition: width var(--duration-slow) var(--ease), opacity var(--duration) var(--ease), visibility 0s var(--duration-slow); }
+.sidebar { transition: width var(--duration-slow) var(--ease-out), opacity var(--duration) var(--ease-out), visibility 0s 0s; }
+.sidebar[data-collapsed='true'] { transition: width var(--duration-slow) var(--ease-out), opacity var(--duration) var(--ease-out), visibility 0s var(--duration-slow); }
 /* 视图切换方向滑入（demo workbench.css 动效基元 vt-slide 同参数：300ms + --ease-out-soft，
    位移 ≤10px 动效纪律）：单组件消费 → scoped 声明，不进 style.css 全局动画原语白名单；
    选择器挂 .sidebar 祖先（后代形式，同 ActivityStrip .wait-dots i 先例）。

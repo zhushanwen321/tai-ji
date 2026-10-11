@@ -87,9 +87,10 @@ describe('滚动修复：Sidebar 子视图区 overflow-hidden 防御', () => {
     const path = await import('node:path')
     const sidebarPath = path.resolve(__dirname, '../../components/sidebar/Sidebar.vue')
     const source = fs.readFileSync(sidebarPath, 'utf-8')
-    // 子视图区容器：mt-1 min-h-0 flex-1 后须含 overflow-hidden
-    // 正则匹配 `mt-1 min-h-0 flex-1 overflow-hidden`（允许 class 顺序中三者同时出现）
-    const hasOverflowHidden = /mt-1\s+min-h-0\s+flex-1\s+overflow-hidden/.test(source)
+    // 子视图区容器：min-h-0 flex-1 后须含 overflow-hidden；mt-1 已删（视觉复刻 MF-1-16：
+    // flex 容器内不塌缩多出 4px，节奏由 SegmentedTab mb-2 承担）
+    const hasOverflowHidden = /min-h-0\s+flex-1\s+overflow-hidden/.test(source)
     expect(hasOverflowHidden).toBe(true)
+    expect(source).not.toMatch(/class="mt-1\s+min-h-0/)
   })
 })
