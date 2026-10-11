@@ -129,6 +129,11 @@ export default [
       // 机制入列时统计行越过 500）。职责内聚，拆分 = stream 回调按帧族重组，属独立
       // 重构任务。短期 max-lines override 避免阻塞，长期应拆分。
       'packages/core/src/domain/chat/useChat.ts',
+      // zcode provider 启动同步模块聚合点（engine-provider-unification 单元 1：映射纯
+      // 函数 + zai 关联特例 + 让位四源 + 编排落盘 + settings 清单派生 + zcode 侧文件读取，
+      // 设计文档指定单文件）。职责内聚（同一同步链的生成侧全量实装），拆分 = 按 zcode
+      // 读侧 / 纯映射 / 编排三段重组，属独立重构任务。短期 override 避免阻塞，长期应拆分。
+      'packages/runtime/src/services/zcode-provider-sync.ts',
     ],
     rules: {
       'max-lines': 'off',
