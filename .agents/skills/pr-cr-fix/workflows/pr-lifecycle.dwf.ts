@@ -224,14 +224,14 @@ async function sweepResidualChanges(): Promise<string[]> {
 }
 
 async function writeViaNode(path: string, body: string): Promise<void> {
-  const r = await world.run("node", ["-e", WRITE_FILE, path, body]);
+  const r = await runNode(["-e", WRITE_FILE, path, body]);
   if (r.exitCode !== 0) {
     throw new Error(`写盘失败（${path}，exit ${r.exitCode}）：${r.stderr.trim() || r.stdout.trim()}`);
   }
 }
 
 async function readJsonViaNode<T>(path: string): Promise<T | null> {
-  const r = await world.run("node", ["-e", READ_FILE_QUIET, path]);
+  const r = await runNode(["-e", READ_FILE_QUIET, path]);
   if (r.exitCode !== 0 || r.stdout.trim() === "") return null;
   try {
     return JSON.parse(r.stdout) as T;
@@ -241,7 +241,7 @@ async function readJsonViaNode<T>(path: string): Promise<T | null> {
 }
 
 async function existsViaNode(path: string): Promise<boolean> {
-  const r = await world.run("node", ["-e", EXISTS, path]);
+  const r = await runNode(["-e", EXISTS, path]);
   return r.exitCode === 0;
 }
 
@@ -258,9 +258,15 @@ let nodeAbs = "";
 const commitShScript = (argv: string[]): string =>
   `PATH=${shq(nodeAbs.slice(0, nodeAbs.lastIndexOf("/")))}:"$HOME"/Library/pnpm:"$PATH" git ${argv.map(shq).join(" ")}`;
 
+/** node 调用经 nodeAbs 绝对路径执行（结构性不依赖 PATH——引擎环境 PATH 无 nvm node
+ *  时裸 world.run("node") spawn ENOENT；2026-10-12 v-zcode 实测 fix 阶段 existsViaNode
+ *  即此形态炸 fix-failure）。全部 node 调用统一走本助手。 */
+const runNode = (nodeArgs: string[]): Promise<{ exitCode: number; stdout: string; stderr: string }> =>
+  world.run("sh", ["-c", [shq(nodeAbs), ...nodeArgs.map(shq)].join(" ")]);
+
 // pre-merge marker（pr-pre-merge.sh 唯一写入方）：result="PASS" 形态
 async function readPremergeMarker(): Promise<string | null> {
-  const r = await world.run("node", ["-e", READ_FILE_QUIET, ".review/premerge-result"]);
+  const r = await runNode(["-e", READ_FILE_QUIET, ".review/premerge-result"]);
   const m = r.stdout.match(/result="([^"]+)"/);
   return m?.[1] ?? null;
 }
@@ -1552,7 +1558,7 @@ await step("pr-submit", async () => {
 phase("约束加载与覆盖率/度量门禁");
 // step 5：constraints（约束动态加载 → .review/constraints.md，reviewer 消费）
 await step("constraints", async () => {
-  const res = await world.run("node", ["scripts/select-constraints.mjs", "--base", base]);
+  const res = await runNode(["scripts/select-constraints.mjs", "--base", base]);
   if (res.exitCode !== 0) {
     throw new Error(`select-constraints.mjs 失败（exit ${res.exitCode}）：\n${tailLines(`${res.stderr}\n${res.stdout}`, 15)}\n检查 docs/constraints.json 与脚本输出后重新发起`);
   }
@@ -1913,7 +1919,7 @@ await step("final-gates", async () => {
   sweptFiles = await sweepResidualChanges();
   // e2e 影响面披露（非门禁）：PR/merge 门禁不跑真实 LLM e2e，披露只保证「哪些 e2e 面被
   // 本次改动触及、由开发阶段承接」对用户可见；脚本失败仅记 WARN 不阻塞
-  const e2e = await world.run("node", ["scripts/select-affected-e2e.mjs", "--base", base]);
+  const e2e = await runNode(["scripts/select-affected-e2e.mjs", "--base", base]);
   if (e2e.exitCode === 0) {
     log(`[final-gates] e2e 影响面披露（非门禁；受影响资产由开发阶段按改动范围承接）：\n${tailLines(e2e.stdout, 40)}`);
   } else {
