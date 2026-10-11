@@ -630,6 +630,13 @@ textarea {
   outline: none;
 }
 
+/* 文本选区底色（对齐 demo base.css ::selection 全局声明，accent 30% 同值令牌）：
+   UA 默认蓝底与太极纯灰范式不符，全局 reset 层统一接管（ui-replica MF-1-9）。
+   终端 xterm 有自己的主题选区轨（xterm theme.selectionBackground），不经此通道。 */
+::selection {
+  background: var(--accent-ring);
+}
+
 /* 隐蔽 overlay 滚动条（对齐 TurnRail 窄条风格：细 / 透明 track / thumb 默认弱、hover 亮） */
 ::-webkit-scrollbar { width: 4px; height: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }

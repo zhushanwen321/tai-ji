@@ -206,9 +206,12 @@
       :style="{ height: bottomHeightStyle, marginTop: '4px' }"
       :data-find-surface="bottomOpen ? 'bottom-drawer' : undefined"
     >
-      <!-- 上沿手柄（三卡化）：命中区跨进卡上方缝（-top-1 h-1 覆盖 4px 缝，视觉线贴卡顶边）——
-           缝即拖拽区。卡间缝统一为窗口边距 4px（demo 三卡化裁决：卡间缝 = 窗口边距同值），
-           键盘焦点显视觉线（demo .split-handle:focus-visible .shl）。 -->
+      <!-- 上沿手柄（三卡化 + ui-replica MF-1-1 对齐 demo .split-handle.hz）：手柄挂壳内顶部
+           （top-0 h-1，demo pane 内 top:0 同构）——壳 overflow-hidden 会裁掉 border box 外的
+           盒体，旧 -top-1 外扩形态整个手柄被裁=不可见也不命中。命中区 = 卡顶 4px 内距带
+           （demo 明示不做向下外扩：实例条工具钮顶缘在 pane 顶 7px 处，下探外扩劫持按钮点击），
+           视觉线保持手柄盒底 bottom-0（贴卡顶边内侧）。卡间缝统一为窗口边距 4px（demo 三卡化
+           裁决：卡间缝 = 窗口边距同值），键盘焦点显视觉线（demo .split-handle:focus-visible .shl）。 -->
       <div
         v-if="bottomOpen"
         role="separator"
@@ -217,7 +220,7 @@
         :aria-valuemin="BOTTOM_DRAWER_HEIGHT_MIN_PCT"
         :aria-valuemax="BOTTOM_DRAWER_HEIGHT_MAX_PCT"
         :aria-valuenow="Math.round(bottomHeightPct)"
-        class="group absolute inset-x-0 -top-1 z-10 h-1 cursor-row-resize touch-none select-none [&:focus-visible>div]:bg-border-strong"
+        class="group absolute inset-x-0 top-0 z-10 h-1 cursor-row-resize touch-none select-none [&:focus-visible>div]:bg-border-strong"
         :data-state="isBottomDragging ? 'drag' : undefined"
         data-testid="bottom-drawer-resize-handle"
         @pointerdown="onBottomHandlePointerDown"
@@ -537,7 +540,8 @@ const {
  * - 关（leave）：收合过渡期内容保挂载（U6）——壳 height 过渡收拢期间内容不同帧消失，
  *   leave 期保持挂载并随壳淡出，卸载时机 = leave 过渡结束（Vue Transition 事件顺序语义，
  *   无定时兜底）；leave-active 加 absolute inset-0：收拢中的离场内容不占文档流（leave
- *   未完即重开时新旧内容不叠流）；淡出走 opacity，E5 显隐层关方向 ease-in；
+ *   未完即重开时新旧内容不叠流）；淡出 = opacity + translateY(16px) 下沉成对（demo
+ *   .bd.is-closed 同构成对声明，ui-replica MF-1-7），E5 显隐层关方向 ease-in；
  * - 时长 = demo --dur-base，消费令牌层既有 --duration（值 200ms 与 demo --dur-base 同值，
  *   MF-2-17 收编，不新增 --duration-base 重复令牌）；
  * - reduced-motion 全局兜底（style.css）：transform 移出过渡属性位移瞬切，opacity 保留
@@ -557,7 +561,9 @@ const {
 .bottom-drawer-content-leave-active {
   position: absolute;
   inset: 0;
-  transition: opacity var(--duration) var(--ease-in);
+  transition:
+    opacity var(--duration) var(--ease-in),
+    transform var(--duration) var(--ease-in);
 }
 
 .bottom-drawer-content-leave-from {
@@ -566,5 +572,6 @@ const {
 
 .bottom-drawer-content-leave-to {
   opacity: 0;
+  transform: translateY(16px);
 }
 </style>

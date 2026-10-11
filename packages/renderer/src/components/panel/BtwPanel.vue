@@ -96,10 +96,10 @@
             v-for="thread in state.threads"
             :key="thread.vid"
             variant="ghost"
-            class="h-6 shrink-0 rounded-sm border px-2 font-mono text-[length:var(--text-2xs)]"
+            class="h-6 shrink-0 rounded-sm border px-2 font-mono text-[length:var(--text-2xs)] duration-[var(--duration-fast)] ease-[var(--ease-out)]"
             :class="
               thread.vid === selectedVid
-                ? 'border-border-strong bg-bg-elevated text-neutral-fg'
+                ? 'border-border-strong bg-bg-elevated text-neutral-fg hover:bg-bg-elevated'
                 : 'border-border bg-bg-input text-neutral-mid hover:bg-surface-hover hover:text-neutral-fg'
             "
             :aria-pressed="thread.vid === selectedVid"

@@ -51,7 +51,7 @@ function onCancel(): void {
     <!-- 形态对齐 demo pages.css .pg-set .cpop（确认弹窗基准）：宽 min(360px, 100vw-48px)
          （窄窗两侧各留 24px）/ 圆角 --r-md(8px) / 标题→描述 8px（Header gap-y-2）/
          描述→按钮区 16px（网格 gap-[16px]，actions 自带 padding-top 退役） -->
-    <DialogContent hide-close class="max-w-[min(360px,calc(100vw_-_48px))] gap-[16px] rounded-md">
+    <DialogContent hide-close class="max-w-[min(360px,calc(100vw_-_48px))] gap-[16px] rounded-md border-border">
       <DialogHeader>
         <DialogTitle class="flex items-center gap-2">
           <!-- v6 §6.5：danger 三角 icon 降 size-4 -->

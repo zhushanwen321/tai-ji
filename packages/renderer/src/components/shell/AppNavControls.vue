@@ -32,8 +32,8 @@
       data-testid="sidebar-collapse-toggle"
       @click="sidebar.toggleCollapsed()"
     >
-      <PanelLeftOpen v-if="sidebar.collapsed" class="size-[15px]" stroke-width="1.6" />
-      <PanelLeftClose v-else class="size-[15px]" stroke-width="1.6" />
+      <PanelLeftOpen v-if="sidebar.collapsed" class="!size-[15px]" stroke-width="1.6" />
+      <PanelLeftClose v-else class="!size-[15px]" stroke-width="1.6" />
     </Button>
     <Button
       variant="ghost"
@@ -44,7 +44,7 @@
       :aria-label="t('shell.goBack')"
       @click="navigation.back()"
     >
-      <ArrowLeft class="size-[15px]" stroke-width="1.8" />
+      <ArrowLeft class="!size-[15px]" stroke-width="1.8" />
     </Button>
     <Button
       variant="ghost"
@@ -55,7 +55,7 @@
       :aria-label="t('shell.goForward')"
       @click="navigation.forward()"
     >
-      <ArrowRight class="size-[15px]" stroke-width="1.8" />
+      <ArrowRight class="!size-[15px]" stroke-width="1.8" />
     </Button>
   </div>
 </template>

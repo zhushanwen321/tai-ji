@@ -58,7 +58,7 @@
             :key="tab.key"
             variant="ghost"
             class="size-[30px] shrink-0 justify-center rounded-sm p-0"
-            :class="activeTab === tab.key ? 'bg-bg-elevated text-neutral-fg' : 'text-neutral-mid hover:text-neutral-fg'"
+            :class="activeTab === tab.key ? 'bg-bg-elevated text-neutral-fg hover:bg-bg-elevated' : 'text-neutral-mid hover:text-neutral-fg'"
             :title="tab.label"
             :data-testid="`drawer-tab-${tab.key}`"
             @click="emit('set-tab', tab.key)"

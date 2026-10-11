@@ -39,7 +39,7 @@
         role="tab"
         tabindex="0"
         :aria-selected="tab.path === activePath"
-        class="flex shrink-0 cursor-pointer select-none items-center gap-0.5 rounded-sm border py-0.5 pl-1.5 pr-[3px] font-mono text-[length:var(--text-2xs)] transition-colors"
+        class="flex shrink-0 cursor-pointer select-none items-center gap-0.5 rounded-sm border py-0.5 pl-1.5 pr-[3px] font-mono text-[length:var(--text-2xs)] transition-colors duration-[var(--duration-fast)] ease-[var(--ease-out)]"
         :class="
           tab.path === activePath
             ? 'border-border-strong bg-bg-elevated text-neutral-fg'
