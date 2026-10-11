@@ -124,9 +124,11 @@ function onSelect(tpl: BuiltinProviderTemplate): void {
       data-testid="provider-template-picker"
       :title="t('settings.provider.builtinTemplate.trigger')"
       :show-chevron="false"
-      class="h-8 gap-[6px] rounded-md bg-accent px-3 text-[length:var(--text-sm)] font-semibold text-accent-fg hover:bg-accent-hover hover:text-accent-fg [&_svg]:size-[14px]"
+      class="h-8 gap-[6px] rounded-md bg-accent px-3 text-[length:var(--text-sm)] font-semibold text-accent-fg hover:bg-accent-hover hover:text-accent-fg"
     >
-      <Plus class="size-3.5" />
+      <!-- 加号 14px = demo ProviderSection/McpSection 主钮 `Icon plus :size=14` 权威；值落图标自身
+           单源（Button 基类零特异性后容器级 [&_svg] 覆盖属双轨残留，曾静默压掉旧 size-3.5）。 -->
+      <Plus class="size-[14px]" />
       {{ t('settings.provider.builtinTemplate.trigger') }}
     </PopoverTriggerButton>
     <PopoverContent class="w-72 p-1">
