@@ -30,15 +30,15 @@
   <div
     v-if="turns.length > 0"
     data-testid="turn-rail"
-    class="turn-rail group absolute top-1/2 right-2 z-[var(--z-sticky)] h-[340px] w-1.5 -translate-y-1/2 transition-[width] duration-[var(--duration)] ease-[var(--ease)] hover:w-56 before:absolute before:-left-1.5 before:top-0 before:bottom-0 before:w-3 before:content-['']"
+    class="turn-rail group absolute top-1/2 right-2 z-[var(--z-sticky)] h-[340px] w-[6px] -translate-y-1/2 transition-[width] duration-[var(--duration)] ease-[var(--ease)] hover:w-[224px] before:absolute before:-left-[6px] before:top-0 before:bottom-0 before:w-[12px] before:content-['']"
   >
     <!-- 常驻窄条 spine：未 hover 时唯一可见区域。bg-surface-hover 保证在 bg 上明确可见（L1 入口可发现性）。 -->
-    <div class="rail-spine absolute bottom-0 left-0 top-0 w-1.5 rounded-full bg-surface-hover" />
+    <div class="rail-spine absolute bottom-0 left-0 top-0 w-[6px] rounded-full bg-surface-hover" />
 
     <!-- viewport indicator：标记当前视口在窄条上的纵向位置（mini-map 高亮）。
          中性配色（demo .rail-viewport）：fg-2 左描边 + fg 14% 弱底，不占用 accent 信号。 -->
     <div
-      class="rail-viewport absolute left-0 w-1.5 rounded-full border-l-2 border-[color:var(--neutral-fg-2)] bg-[color-mix(in_oklch,var(--neutral-fg)_14%,transparent)]"
+      class="rail-viewport absolute left-0 w-[6px] rounded-full border-l-2 border-[color:var(--neutral-fg-2)] bg-[color-mix(in_oklch,var(--neutral-fg)_14%,transparent)]"
       :style="viewportStyle"
     />
 
@@ -46,23 +46,23 @@
          demo .rail-panel：bg-bg-elevated（浮起面板语义）+ 1px border-strong 硬边界 +
          shadow-2。去掉 backdrop-blur（不透明底上零效果）。 -->
     <div
-      class="rail-panel absolute bottom-0 left-3 right-0 top-0 translate-x-2 rounded-lg border border-border-strong bg-bg-elevated p-2 opacity-0 shadow-2 pointer-events-none transition-[transform,opacity] group-hover:translate-x-0 group-hover:opacity-100 group-hover:pointer-events-auto"
+      class="rail-panel absolute bottom-0 left-[12px] right-0 top-0 translate-x-2 rounded-lg border border-border-strong bg-bg-elevated p-2 opacity-0 shadow-2 pointer-events-none transition-[transform,opacity] group-hover:translate-x-0 group-hover:opacity-100 group-hover:pointer-events-auto"
     >
       <!-- 节点列表（铺满 rail 浮层，超出靠浮层自身高度滚动） -->
-      <div class="rail-list flex max-h-full flex-col gap-0.5 overflow-y-auto">
+      <div class="rail-list flex max-h-full flex-col gap-[2px] overflow-y-auto">
         <div
           v-for="(turn, idx) in turns"
           :key="turnStableId(turn)"
           data-testid="rail-node"
-          class="group/rail-node rail-node relative flex cursor-pointer select-none flex-col gap-0.5 rounded-sm px-1.5 py-1 transition-colors hover:bg-surface-hover"
+          class="group/rail-node rail-node relative flex cursor-pointer select-none flex-col gap-[2px] rounded-sm px-[6px] py-[4px] transition-colors hover:bg-surface-hover"
           :class="idx === activeTurnIndex ? 'active text-neutral-fg' : ''"
           @click="emit('jump', idx)"
         >
           <!-- user 行：User 图标 + user 文本（text-neutral-fg）。
                无 user 时整行省略（首条 assistant 边缘 turn）。
                图标色（demo .rail-node.on .rail-row svg）：选中节点提为 fg-2，否则 neutral-ico。 -->
-          <div v-if="turn.user" class="flex min-w-0 items-center gap-1.5">
-            <User class="size-3 shrink-0" :class="idx === activeTurnIndex ? 'text-[color:var(--neutral-fg-2)]' : 'text-neutral-ico'" />
+          <div v-if="turn.user" class="flex min-w-0 items-center gap-[6px]">
+            <User class="size-[12px] shrink-0" :class="idx === activeTurnIndex ? 'text-[color:var(--neutral-fg-2)]' : 'text-neutral-ico'" />
             <span class="flex-1 truncate pr-6 text-[length:var(--text-xs)] leading-[1.35] text-neutral-fg">
               {{ railMemoFor(turn).userSummary || ' ' }}
             </span>
@@ -75,19 +75,19 @@
                本意覆盖 pending turn（streaming 刚起 / ask-user 表单等待）；原裸判据「无 agent 内容」
                把已完结 user-only turn（命令取消 / 纯 notify 命令）也算进来致永久占位，故加门收敛；
                门关的 user-only turn 走空格 fallback（D2，与 user 行同款 `|| ' '`），不谎报进行中。 -->
-          <div class="flex min-w-0 items-center gap-1.5">
+          <div class="flex min-w-0 items-center gap-[6px]">
             <!-- active 态：呼吸弧（微缩，复用 Block.vue 的 RUNNING_LOADER_SVG）。
                  图标色随选中节点提为 fg-2（demo .rail-node.on .rail-row svg 对弧同样生效）。
                  loader 判据 isActiveTurn = sessionActive ∧ 视口位（activeTurnIndex），与占位判据
                  （sessionActive ∧ 真末位）有意分离：上滑时占位留在末位节点、loader 随视口走，
                  两判据同门反而错（占位会被视口态压空串，streaming/ask-user 等待击穿）。 -->
             <!-- eslint-disable-next-line vue/no-v-html -- hardcoded constant from block-icon.ts -->
-            <span v-if="isActiveTurn(turn, idx)" data-testid="rail-agent-icon" class="inline-flex size-3 shrink-0 items-center justify-center text-[color:var(--neutral-fg-2)] animate-loader-spin" v-html="RUNNING_LOADER_SVG" />
+            <span v-if="isActiveTurn(turn, idx)" data-testid="rail-agent-icon" class="inline-flex size-[12px] shrink-0 items-center justify-center text-[color:var(--neutral-fg-2)] animate-loader-spin" v-html="RUNNING_LOADER_SVG" />
             <!-- 非 active 态：Bot 图标（failed=danger 常驻 / 其余 neutral-ico；选中提 fg-2） -->
             <Bot
               v-else
               data-testid="rail-agent-icon"
-              class="size-3 shrink-0 transition-colors"
+              class="size-[12px] shrink-0 transition-colors"
               :class="agentRowIconClass(turn, idx)"
             />
             <span
@@ -112,8 +112,8 @@
             :disabled="sessionActive"
             @click.stop="emit('toggle', idx)"
           >
-            <ChevronUp v-if="isTurnExpanded(idx)" class="size-3" />
-            <ChevronDown v-else class="size-3" />
+            <ChevronUp v-if="isTurnExpanded(idx)" class="size-[12px]" />
+            <ChevronDown v-else class="size-[12px]" />
           </Button>
         </div>
       </div>

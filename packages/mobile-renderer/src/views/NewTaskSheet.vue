@@ -82,7 +82,7 @@ async function onSubmit(): Promise<void> {
 <template>
   <div v-if="open" class="fixed inset-0 z-50 flex flex-col justify-end" data-testid="new-task-sheet">
     <!-- 遮罩（点击关闭） -->
-    <div class="absolute inset-0 bg-bg/60" data-testid="new-task-backdrop" @click="emit('close')" />
+    <div class="absolute inset-0 bg-[color-mix(in_oklch,var(--bg)_60%,transparent)]" data-testid="new-task-backdrop" @click="emit('close')" />
     <!-- sheet 本体 -->
     <div
       class="relative flex flex-col gap-3 rounded-t-lg border-t border-[var(--border)] bg-bg-input p-4"

@@ -118,8 +118,8 @@ export const RUNNING_LOADER_SVG: string =
  *
  * 前缀单语言化后必须非 mono、非 uppercase、非 letter-spacing：中文 label 走 mono 会掉回 CJK
  * 字体（英文 mono 的等宽观感消失），tracking 撑开汉字间距正是 DESIGN.md:124/:862 禁的
- * 「uppercase + tracking-wider 装饰文字」。字号取 --text-sm（13px）与块内其余槽位
- * （toolName / name / slug 均 13px）同档，层级由色彩承担而非缩到 11px。
+ * 「uppercase + tracking-wider 装饰文字」。字号走 --text-base（14px，demo 过程行 fs-lg 档，
+ * 见 BLOCK_LABEL_CLASS 注释），层级由色彩承担而非缩到 11px。
  */
 export const BLOCK_ICON_CLASS =
   'size-[15px] shrink-0 text-neutral-dim [stroke-width:1.6]'

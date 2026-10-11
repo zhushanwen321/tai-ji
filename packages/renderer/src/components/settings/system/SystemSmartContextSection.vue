@@ -9,7 +9,7 @@
       <div
         v-if="loadError"
         data-testid="smart-context-load-error"
-        class="mb-2 flex items-center gap-2 rounded-md border border-warn/40 bg-warn-soft px-3 py-1.5 text-[length:var(--text-2xs)] text-warn"
+        class="mb-2 flex items-center gap-2 rounded-md border border-[color-mix(in_oklch,var(--warn)_40%,transparent)] bg-warn-soft px-3 py-1.5 text-[length:var(--text-2xs)] text-warn"
       >
         <AlertTriangle class="size-3.5 shrink-0" />
         <span>{{ t('settings.system.loadErrorHint') }}</span>

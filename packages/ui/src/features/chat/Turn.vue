@@ -9,7 +9,7 @@
     折叠作用域（showTrace）仍由 scope wave D1 控制（isWorkingTurn || isExpanded）。
   -->
   <!-- 根元素 content-col（居中 + 封顶 --content-max-w，720px 内容列原语）：整 turn 居中（spec §6.1 R4）。
-       轮次节奏（demo workbench.css 权威值）：gap-3 = 用户气泡→轮头 12px 紧凑档（.blk:has(+ .blk-compact)）；
+       轮次节奏（demo workbench.css 权威值）：gap-[12px] = 用户气泡→轮头 12px 紧凑档（.blk:has(+ .blk-compact)）；
        pb-5 = 轮边界 20px（--blk-gap，唯一边界贡献——TurnSummary 悬浮化后 trace 无 mb、占位零高度）。
        [MF-1-33]（demo .blk:last-child margin-bottom:0，workbench.css:314）：末位 turn 去 pb-5——
        末轮底部留白只剩滚动容器的 24px（MessageStream pb-[24px]），非历史轮保持 20px 轮边界。
@@ -17,7 +17,7 @@
        悬挂时间戳（DOM scrollIntoView 通路生效；virtua scrollToIndex 不读 scroll-margin，
        其落点补偿归 virtua API 侧）。 -->
   <div
-    class="content-col flex flex-col gap-3 [scroll-margin-top:8px]"
+    class="content-col flex flex-col gap-[12px] [scroll-margin-top:8px]"
     :class="isLastTurn ? '' : 'pb-5'"
     :data-testid="`turn-${turn.index}`"
   >
@@ -99,7 +99,7 @@
         :session-id="sessionId"
       />
 
-      <!-- trace 容器：恒渲染（v-if 下沉 Block 级）。mt-3 = TurnMeta→首块 12px（原由首块
+      <!-- trace 容器：恒渲染（v-if 下沉 Block 级）。mt-[12px] = TurnMeta→首块 12px（原由首块
            py-2 顶距参与合成的节奏，块 padding 退役后归容器单值，ui-optimize-unified 决策 4）。
            无 mb（demo 轮次边界唯一贡献 = 根元素 pb-5 的 20px；原 mb-1 为 TurnSummary 流内
            占位预留，悬浮化后移除——docs/todo/turn-boundary-rhythm.md 选项 2 落地）。
@@ -115,7 +115,7 @@
            使流式重渲染不重播；keepMounted 使工作 turn 不被虚拟化卸载，无重挂重播）；
            trace--just-done = 轮次落完成瞬间的换块落位标记（200ms 淡入 + 4px 落位），仅刚落
            完成的轮次携带（justDone ref，见 script），历史轮不误标。 -->
-      <div class="trace mt-3 flex flex-col" :class="{ 'trace--live': isWorkingTurn, 'trace--just-done': justDone }">
+      <div class="trace mt-[12px] flex flex-col" :class="{ 'trace--live': isWorkingTurn, 'trace--just-done': justDone }">
         <TraceCompactorRow
           v-if="showTrace && isWorkingTurn && (takeover || traceWindow.compactedCount > 0 || traceWindow.failedCount > 0)"
           class="trace-compactor-row"
@@ -645,7 +645,7 @@ const showStreamingCursor = computed(() => {
    块间 margin 两档（flex 容器内不折叠，后块 margin-top 承载）：
    - 默认 12px：过程行↔过程行有效 5+12+5=22、过程行→正文 5+12=17、正文→过程行 12+5=17；
    - 正文↔正文 20px（覆盖默认，须置后）。
-   容器边界由过程行 py 自动参与（单值化路线只校准块间的残留差收齐）：轮头（TurnMeta py-1）
+   容器边界由过程行 py 自动参与（单值化路线只校准块间的残留差收齐）：轮头（TurnMeta py-[4px]）
    →首过程行 4+12+5=21、末位过程行→轮界 5+20=25，demo 同值。
    - 收编行（TraceCompactorRow，容器首位、非 .trace-blk）之后的首块 12px：demo 无收编行
      对应物，保留 real 紧凑档（首块为过程行时有效 17px，含其 py 顶距）。

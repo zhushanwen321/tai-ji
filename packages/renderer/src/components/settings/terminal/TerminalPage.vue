@@ -21,7 +21,7 @@
     <!-- corrupted 提示条：getTerminalConfig 返回 corrupted=true 时显示（real 功能，demo 无对应物） -->
     <div
       v-if="corrupted"
-      class="mb-[16px] flex items-start gap-2 rounded-md border border-warn/40 bg-warn-soft px-3 py-2 text-[length:var(--text-xs)] text-neutral-fg"
+      class="mb-[16px] flex items-start gap-2 rounded-md border border-[color-mix(in_oklch,var(--warn)_40%,transparent)] bg-warn-soft px-3 py-2 text-[length:var(--text-xs)] text-neutral-fg"
     >
       <AlertTriangle class="mt-px size-4 flex-shrink-0 text-warn" />
       <span>{{ t('settings.terminal.corruptedHint') }}</span>

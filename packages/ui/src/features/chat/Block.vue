@@ -31,7 +31,7 @@
         @click="toggleThinking"
       >
         <!-- 摘要行：flex 布局，min-h 锁定高度避免展开时跳动。
-             [M3b demo 复刻]（workbench.css .line/.think）：行内间距 gap-2（demo 8px）；
+             [M3b demo 复刻]（workbench.css .line/.think）：行内间距 gap-[8px]（demo 8px）；
              图标染 --reasoning（.think .sicon，显式类替换 BLOCK_ICON_CLASS——两者 text 色
              工具类同特异性，追加不构成可靠覆盖）；行字号继承头部 --text-base（14px =
              demo fs-lg 行级档）。
@@ -42,7 +42,7 @@
              容器，同 tool/bash-group/workflow 行）；行内垂直对齐
              baseline（MF-1-34，workbench.css:348 align-items:baseline），图标保持
              self-center（demo .sicon align-self:center）。 -->
-        <div class="flex items-baseline gap-2 min-h-[1.5rem]">
+        <div class="flex items-baseline gap-[8px] min-h-[1.5rem]">
           <!-- 运行→完成图标交叉切换（动效裁决 2A 出半，demo .tico 同参）：运行呼吸弧 150ms
                ease-in 淡出、完成图标 200ms 带自下 4px 落位淡入（scoped 尾部 tico 过渡类）；
                reduced-motion 走 style.css 全局兜底。 -->
@@ -120,7 +120,7 @@
          streaming-tail 光标在 Turn.vue trace 容器末尾（跟在所有 block 后，不受 contentBlocks 时序影响）。
          [M2 形态统一] 唯一 error 形态 = 追加形态：content 崩溃前正文保持原色（可为空），
          msg.error 独立 danger 行（错误文本只住 error 字段，永不染红正文）。 -->
-    <div v-else-if="type === 'text'" data-testid="block-text" class="group/text flex items-start gap-2 text-[length:var(--text-md)] leading-[1.8]" :class="textColorClass">
+    <div v-else-if="type === 'text'" data-testid="block-text" class="group/text flex items-start gap-[8px] text-[length:var(--text-md)] leading-[1.8]" :class="textColorClass">
       <div class="min-w-0 flex-1">
         <MarkdownRenderer v-if="content" :content="content ?? ''" :session-id="sessionId ?? undefined" :streaming="streaming" />
         <!-- error 独立 danger 行（AlertCircle + msg.error 文本） -->
@@ -149,7 +149,7 @@
     <div v-else-if="type === 'bash-group' && group" class="trace-bash-group" data-testid="bash-group">
       <div
         data-testid="bash-group-header"
-        class="group/bgroup flex min-w-0 cursor-pointer select-none items-baseline gap-2 text-[length:var(--text-base)] [font-weight:var(--fw-mid)] text-neutral-mid"
+        class="group/bgroup flex min-w-0 cursor-pointer select-none items-baseline gap-[8px] text-[length:var(--text-base)] [font-weight:var(--fw-mid)] text-neutral-mid"
         role="button"
         tabindex="0"
         :aria-expanded="groupExpanded"
@@ -199,7 +199,7 @@
       <div v-else-if="isWorkflow" class="trace-workflow" data-testid="workflow-block">
         <div
           data-testid="tool-block-header"
-          class="group/wf flex min-w-0 cursor-pointer select-none items-baseline gap-2 text-[length:var(--text-base)] [font-weight:var(--fw-mid)] text-neutral-dim"
+          class="group/wf flex min-w-0 cursor-pointer select-none items-baseline gap-[8px] text-[length:var(--text-base)] [font-weight:var(--fw-mid)] text-neutral-dim"
           @click="openWorkflowDrawer"
         >
           <!-- running 态 loader（呼吸弧 + accent），其余走 list-checks ICON（tico 交叉过渡）；
@@ -246,7 +246,7 @@
       <div v-else class="group/tool">
         <div
           data-testid="tool-block-header"
-          class="tool-header flex min-w-0 cursor-pointer select-none items-baseline gap-2 text-[length:var(--text-base)] [font-weight:var(--fw-mid)] text-neutral-mid"
+          class="tool-header flex min-w-0 cursor-pointer select-none items-baseline gap-[8px] text-[length:var(--text-base)] [font-weight:var(--fw-mid)] text-neutral-mid"
           :title="toolExpanded ? t('panel.message.collapse') : t('panel.message.expand')"
           @click="toggleTool"
         >

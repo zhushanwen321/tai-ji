@@ -21,7 +21,7 @@
     <div
       v-if="capsFailed"
       data-testid="tts-caps-failed"
-      class="mb-[16px] flex items-center gap-2 rounded-md border border-warn/40 bg-warn-soft px-3 py-2 text-[length:var(--text-sm)] text-neutral-fg"
+      class="mb-[16px] flex items-center gap-2 rounded-md border border-[color-mix(in_oklch,var(--warn)_40%,transparent)] bg-warn-soft px-3 py-2 text-[length:var(--text-sm)] text-neutral-fg"
     >
       <AlertTriangle class="size-4 shrink-0 text-warn" aria-hidden="true" />
       <span class="flex-1">{{ t('settings.tts.capsFailedHint') }}</span>

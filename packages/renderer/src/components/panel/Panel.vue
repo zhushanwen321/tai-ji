@@ -102,7 +102,7 @@
       <div
         v-if="respawnPending"
         data-testid="respawn-pending-bar"
-        class="flex items-center gap-2 rounded-[var(--radius-sm)] border border-warn/40 bg-warn-soft px-3 py-2"
+        class="flex items-center gap-2 rounded-[var(--radius-sm)] border border-[color-mix(in_oklch,var(--warn)_40%,transparent)] bg-warn-soft px-3 py-2"
         role="status"
       >
         <LoaderCircle class="size-3.5 shrink-0 animate-spin text-warn" />

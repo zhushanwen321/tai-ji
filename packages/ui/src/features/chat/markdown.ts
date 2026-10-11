@@ -248,14 +248,6 @@ async function getMarkdown(): Promise<MarkdownIt> {
       return stashTrusted(env, `<div class="md-html-preview" data-path="${encodeBase64(code)}"></div>`) + '\n'
     }
 
-    // html-preview 块（chat-html-support §6.2 D2）：输出纯路径占位容器，由 MarkdownRenderer
-    // 分发到 HtmlPreviewInline 内联容器（路径载荷不进 v-html/净化信任槽——容器 DOM 由 Vue
-    // 模板产出）。与 mermaid 同构：info 首词命中即识别（尾随 token 忽略），载荷 base64 进
-    // data-path 杜绝引号/HTML 注入。内容合法性（空/多行 → 「路径非法」降级）由容器判定（D3）。
-    if (lang.toLowerCase() === 'html-preview') {
-      return stashTrusted(env, `<div class="md-html-preview" data-path="${encodeBase64(code)}"></div>`) + '\n'
-    }
-
     // 普通代码块：shiki 高亮 + 语言标签 + 复制按钮
     const shikiHtml = highlightShikiSync(hl, code, lang)
     const langLabel = lang || 'text'
