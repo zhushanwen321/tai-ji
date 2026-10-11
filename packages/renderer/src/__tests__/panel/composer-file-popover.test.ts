@@ -69,7 +69,7 @@ describe('CommandPopover file 分支', () => {
     await flushPromises()
     await nextTick()
 
-    const btns = Array.from(document.body.querySelectorAll('.cmd-row'))
+    const btns = Array.from(document.body.querySelectorAll('.pop-item'))
     const fileBtn = btns.find((b) => b.textContent?.includes('a.ts'))
     expect(fileBtn).toBeDefined()
     wrapper.unmount()
@@ -85,8 +85,8 @@ describe('CommandPopover file 分支', () => {
     await flushPromises()
     await nextTick()
 
-    // PopoverContent v-if="items.length > 0"，空候选不渲染浮层（无 .cmd-row 行）
-    const rows = Array.from(document.body.querySelectorAll('.cmd-row'))
+    // PopoverContent v-if="items.length > 0"，空候选不渲染浮层（无 .pop-item 行）
+    const rows = Array.from(document.body.querySelectorAll('.pop-item'))
     expect(rows.length).toBe(0)
     wrapper.unmount()
   })
@@ -106,7 +106,7 @@ describe('CommandPopover file 分支', () => {
     await nextTick()
 
     // 目录项 name 补斜杠（src/），验证 G16 映射后目录正确识别
-    const dirBtn = Array.from(document.body.querySelectorAll('.cmd-row')).find((b) =>
+    const dirBtn = Array.from(document.body.querySelectorAll('.pop-item')).find((b) =>
       b.textContent?.includes('src/'),
     )
     expect(dirBtn).toBeDefined()
@@ -133,7 +133,7 @@ it('U33 sid A→B 切换后 B 的候选不显示 A 残留（ADR-0049 回归）',
   await nextTick()
 
   // A 的候选可见
-  const btnsA = Array.from(document.body.querySelectorAll('.cmd-row'))
+  const btnsA = Array.from(document.body.querySelectorAll('.pop-item'))
   expect(btnsA.some((b) => b.textContent?.includes('a.ts'))).toBe(true)
   expect(btnsA.some((b) => b.textContent?.includes('b.ts'))).toBe(false)
 
@@ -143,7 +143,7 @@ it('U33 sid A→B 切换后 B 的候选不显示 A 残留（ADR-0049 回归）',
   await nextTick()
 
   // B 的候选可见，A 的残留不可见
-  const btnsB = Array.from(document.body.querySelectorAll('.cmd-row'))
+  const btnsB = Array.from(document.body.querySelectorAll('.pop-item'))
   expect(btnsB.some((b) => b.textContent?.includes('b.ts'))).toBe(true)
   expect(btnsB.some((b) => b.textContent?.includes('a.ts'))).toBe(false)
 
@@ -152,7 +152,7 @@ it('U33 sid A→B 切换后 B 的候选不显示 A 残留（ADR-0049 回归）',
   await flushPromises()
   await nextTick()
 
-  const btnsA2 = Array.from(document.body.querySelectorAll('.cmd-row'))
+  const btnsA2 = Array.from(document.body.querySelectorAll('.pop-item'))
   expect(btnsA2.some((b) => b.textContent?.includes('a.ts'))).toBe(true)
   expect(btnsA2.some((b) => b.textContent?.includes('b.ts'))).toBe(false)
 
@@ -194,7 +194,7 @@ describe('landing cwd 路（LP 组，u5 G1/D2）', () => {
     expect(getFileCandidatesByCwdMock).toHaveBeenCalledTimes(1)
     expect(getFileCandidatesByCwdMock).toHaveBeenCalledWith('/tmp/landing-proj')
     // 拉取结果渲染进浮层（用户可见 DOM）
-    const btn = Array.from(document.body.querySelectorAll('.cmd-row')).find((b) =>
+    const btn = Array.from(document.body.querySelectorAll('.pop-item')).find((b) =>
       b.textContent?.includes('landing-main.ts'),
     )
     expect(btn).toBeDefined()
@@ -219,7 +219,7 @@ describe('landing cwd 路（LP 组，u5 G1/D2）', () => {
     const errRow = document.body.querySelector('[data-testid="cmd-file-error"]')
     expect(errRow).not.toBeNull()
     expect(document.body.querySelector('[data-testid="cmd-file-empty"]')).toBeNull()
-    expect(document.body.querySelectorAll('.cmd-row')).toHaveLength(0)
+    expect(document.body.querySelectorAll('.pop-item')).toHaveLength(0)
 
     // 点击错误行 → 重试（force 绕过 1s 节流，仍在窗口内即重发）；成功后错误态消失、候选渲染
     getFileCandidatesByCwdMock.mockResolvedValueOnce({
@@ -232,7 +232,7 @@ describe('landing cwd 路（LP 组，u5 G1/D2）', () => {
     expect(getFileCandidatesByCwdMock).toHaveBeenCalledTimes(2)
     expect(document.body.querySelector('[data-testid="cmd-file-error"]')).toBeNull()
     expect(
-      Array.from(document.body.querySelectorAll('.cmd-row')).some((b) => b.textContent?.includes('recovered.ts')),
+      Array.from(document.body.querySelectorAll('.pop-item')).some((b) => b.textContent?.includes('recovered.ts')),
     ).toBe(true)
   })
 
@@ -252,7 +252,7 @@ describe('landing cwd 路（LP 组，u5 G1/D2）', () => {
     await nextTick()
 
     expect(
-      Array.from(document.body.querySelectorAll('.cmd-row')).some((b) => b.textContent?.includes('big-repo-file.ts')),
+      Array.from(document.body.querySelectorAll('.pop-item')).some((b) => b.textContent?.includes('big-repo-file.ts')),
     ).toBe(true)
     expect(document.body.querySelector('[data-testid="cmd-file-truncated"]')).not.toBeNull()
   })
@@ -288,7 +288,7 @@ describe('landing cwd 路（LP 组，u5 G1/D2）', () => {
     await wrapper.setProps({ open: true })
     await flushPromises()
     expect(
-      Array.from(document.body.querySelectorAll('.cmd-row')).some((b) => b.textContent?.includes('a.ts')),
+      Array.from(document.body.querySelectorAll('.pop-item')).some((b) => b.textContent?.includes('a.ts')),
     ).toBe(true)
 
     // 第二拍：切 cwd B 重开（推进时钟出节流）——B 拉取挂起期间，open 边沿已清 A 的陈旧候选
@@ -302,7 +302,7 @@ describe('landing cwd 路（LP 组，u5 G1/D2）', () => {
     await wrapper.setProps({ cwd: '/dir-b', open: true })
     await flushPromises()
     expect(
-      Array.from(document.body.querySelectorAll('.cmd-row')).some((b) => b.textContent?.includes('a.ts')),
+      Array.from(document.body.querySelectorAll('.pop-item')).some((b) => b.textContent?.includes('a.ts')),
     ).toBe(false) // 陈旧候选已清（FileNode.path 相对旧 cwd，跨目录显示是事实错误）
 
     // 在途期间再切 cwd → C：B 的回执到达时快照失配（cwd ≠ 发起时 /dir-b）→ 丢弃
@@ -311,7 +311,7 @@ describe('landing cwd 路（LP 组，u5 G1/D2）', () => {
     resolveB({ files: [{ path: 'b-only.ts', name: 'b-only.ts', type: 'file' }], truncated: false })
     await flushPromises()
     await nextTick()
-    expect(document.body.querySelectorAll('.cmd-row')).toHaveLength(0)
+    expect(document.body.querySelectorAll('.pop-item')).toHaveLength(0)
   })
 })
 

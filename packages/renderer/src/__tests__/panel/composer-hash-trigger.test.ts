@@ -232,7 +232,7 @@ describe('CommandPopover file query 过滤 + 路径展示（U7-U9）', () => {
 
   /** body 内的 file 候选行（含文件名/路径文本）。 */
   function bodyButtons(): HTMLElement[] {
-    return Array.from(document.body.querySelectorAll('.cmd-row')).filter((b) => {
+    return Array.from(document.body.querySelectorAll('.pop-item')).filter((b) => {
       const t = b.textContent ?? ''
       return t.includes('.ts') || t.includes('/') || t.includes('utils')
     })
@@ -296,7 +296,7 @@ describe('CommandPopover session 候选（S 组，# session 语义）', () => {
   }
 
   function bodyRows(): HTMLElement[] {
-    return Array.from(document.body.querySelectorAll('.cmd-row'))
+    return Array.from(document.body.querySelectorAll('.pop-item'))
   }
 
   it('S1 跨 cwd 候选按 lastActiveAt 降序 + 两行展示（label 主行 + cwd·age 副行）', async () => {
@@ -373,7 +373,7 @@ describe('CommandPopover subagent 候选（A 组，@ subagent 语义）', () => 
   })
 
   function bodyRows(): HTMLElement[] {
-    return Array.from(document.body.querySelectorAll('.cmd-row'))
+    return Array.from(document.body.querySelectorAll('.pop-item'))
   }
 
   it('A1 列表项两行（slug 主行 + agent·status 副行）+ 固定尾部「＋ 新建 subagent」项', async () => {
@@ -467,7 +467,7 @@ describe('slash 浮层打开主动拉（SL 组）', () => {
   })
 
   function bodyRows(): HTMLElement[] {
-    return Array.from(document.body.querySelectorAll('.cmd-row'))
+    return Array.from(document.body.querySelectorAll('.pop-item'))
   }
 
   it('SL1 open false→true 且 type=slash 且有 sessionId → getCommands 被调 + 回填后 DOM 出现命令', async () => {
@@ -692,7 +692,7 @@ describe('选中插 chip 集成（C 组，真实浮层 + 真实输入区）', ()
     await flushPromises()
     await typeInComposer(wrapper, '#alpha', 6)
     await nextTick()
-    const row = Array.from(document.body.querySelectorAll('.cmd-row')).find((r) => (r.textContent ?? '').includes('alpha 设计讨论'))
+    const row = Array.from(document.body.querySelectorAll('.pop-item')).find((r) => (r.textContent ?? '').includes('alpha 设计讨论'))
     expect(row).toBeDefined()
     await (row as HTMLElement).click()
     await nextTick()
@@ -723,7 +723,7 @@ describe('选中插 chip 集成（C 组，真实浮层 + 真实输入区）', ()
     await typeInComposer(wrapper, '@build', 6)
     await flushPromises()
     await nextTick()
-    const row = Array.from(document.body.querySelectorAll('.cmd-row')).find((r) => (r.textContent ?? '').includes('build-api'))
+    const row = Array.from(document.body.querySelectorAll('.pop-item')).find((r) => (r.textContent ?? '').includes('build-api'))
     expect(row).toBeDefined()
     await (row as HTMLElement).click()
     await nextTick()
@@ -742,7 +742,7 @@ describe('选中插 chip 集成（C 组，真实浮层 + 真实输入区）', ()
     await typeInComposer(wrapper, '@', 1)
     await flushPromises()
     await nextTick()
-    const row = Array.from(document.body.querySelectorAll('.cmd-row')).find((r) => (r.textContent ?? '').includes('新建 subagent'))
+    const row = Array.from(document.body.querySelectorAll('.pop-item')).find((r) => (r.textContent ?? '').includes('新建 subagent'))
     expect(row).toBeDefined()
     await (row as HTMLElement).click()
     await nextTick()

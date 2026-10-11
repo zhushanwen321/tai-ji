@@ -30,7 +30,7 @@
  *   subagent-core orchestration/workflow-record-entry.ts）：kind=registered（起跑，无
  *   status 字段）与 kind=settled（终局，status ∈ 'done'|'interrupted'）两条小条目——
  *   读取形态同 lastWorkflowRecordFor（registered 投影 running，settled 取 status）。
- * - composer skill 浮层候选行：CommandPopover.vue:95 `.cmd-row`（portal 到 body，00-overview §6.4），
+ * - composer skill 浮层候选行：CommandPopover.vue `.pop-item`（portal 到 body，00-overview §6.4），
  *   skill 项 displayName = 裸名（command-popover-skill-candidates.ts:68，`/skill:` 前缀已去）。
  *   触发 = 行中空白后 `/`（非换行空白 + `/`，空 query 合法——dom-core skill-trigger.test.ts 锁定语义）。
  * - 托盘：`[data-testid="tray-builtin-button"][data-kind="workflow"]` +

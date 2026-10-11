@@ -147,10 +147,11 @@ v6 审查发现「被选中」出现三种视觉语言，统一为二分：
 
 **accent-soft 仅留瞬时高亮**（fresh 新增项 / is-current popover 项），不作持久选中态。
 
-**两类已登记例外**（demo 落地取舍，非范式违反）；
+**已登记例外**（demo 落地取舍，非范式违反）；
 〔2026-10-04 三卡化〕原第三条「drawer L1 icon tab 用 bg-surface-hover」例外随 drawer 与 main 同 surface 的前提消失而退役——L1 tab 回归标准 tab 型（bg-elevated + neutral-fg）：
 - **TurnRail mini-map 节点**：active 用 `bg-accent-soft + inset accent-ring`（第三种视觉语言）。理由：mini-map 是「当前位置指示器」语义（非持久选中），且节点极小（224px 浮层内），accent-soft 染底 + ring 提供最强可见性。属瞬时高亮的延伸。
 - **SearchModal sm-item**：用 `bg-surface-hover` + accent 蓝字/蓝 icon（非列表项型默认的 bg-surface）。理由：dialog 底 = surface，sel 用 bg-surface 会同色淹没，改 surface-hover 靠蓝字区分（Linear/Raycast 范式）。
+- **CommandPopover 项**（composer 四路插入浮层候选行）：用 `bg-surface-hover` + `text-neutral-fg`，键盘高亮与 hover 同形态，不染 accent。理由：对齐 demo 插入浮层 `.pop-item.hot` 行语言（`--hover` 底 + 前景提 fg，real `--surface-hover` 同值直引），浮层高亮是「当前项」指示而非持久选中。
 
 ### 3.5 实践原则（2026-08-02 demo 迭代记录在案）
 
