@@ -20,7 +20,7 @@
     <div class="flex">
       <!-- 星期标签 -->
       <div
-        class="mr-2 grid gap-[2px] font-mono text-[10px] text-[var(--neutral-dim)]"
+        class="mr-2 grid gap-[2px] font-mono text-[length:var(--text-3xs)] text-[var(--neutral-dim)]"
         style="grid-template-rows:repeat(7,12px)"
       >
         <span v-for="(lbl, i) in dayLabels" :key="i" class="h-[12px] leading-[12px]">
@@ -45,7 +45,7 @@
     </div>
 
     <!-- 底部图例（demo：10px 色块 · 4px 间距 · srow-desc 字档） -->
-    <div class="ml-[18px] flex items-center gap-[4px] text-[10px] text-[var(--neutral-dim)] font-mono">
+    <div class="ml-[18px] flex items-center gap-[4px] text-[length:var(--text-3xs)] text-[var(--neutral-dim)] font-mono">
       <span>{{ t('settings.usage.less') }}</span>
       <div class="h-[10px] w-[10px] rounded-[2px] bg-[var(--heat-0)]" />
       <div class="h-[10px] w-[10px] rounded-[2px] bg-[var(--heat-1)]" />
@@ -60,10 +60,10 @@
     <Teleport to="body">
       <div
         v-if="tipVisible"
-        class="fixed z-40 pointer-events-none bg-[var(--bg-elevated)] border border-[var(--border-strong)] rounded-[var(--radius-sm)] shadow-[var(--shadow-2)] px-2.5 py-1.5 text-[12px] leading-[1.7] font-mono"
+        class="fixed z-40 pointer-events-none bg-[var(--bg-elevated)] border border-[var(--border-strong)] rounded-[var(--radius-sm)] shadow-[var(--shadow-2)] px-2.5 py-1.5 text-[length:var(--text-xs)] leading-[1.7] font-mono"
         :style="tipPos"
       >
-        <div class="text-[var(--neutral-dim)] text-[10px]">{{ tipDate }}</div>
+        <div class="text-[var(--neutral-dim)] text-[length:var(--text-3xs)]">{{ tipDate }}</div>
         <div class="text-[var(--neutral-fg)]">{{ tipTokens }}</div>
       </div>
     </Teleport>

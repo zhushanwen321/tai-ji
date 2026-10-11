@@ -10,18 +10,18 @@
     共享池检测：候选 dir 与 existingDirs normalize 后相等 → 标「已通过共享池生效」，默认不勾选。
   -->
   <section data-testid="import-from-agents" class="rounded-card bg-bg-card">
-    <h4 class="px-3 py-2 text-[12px] font-medium text-neutral-fg">
+    <h4 class="px-3 py-2 text-[length:var(--text-xs)] font-medium text-neutral-fg">
       {{ t('settings.loadPaths.importFromAgents.title') }}
     </h4>
 
-    <div v-if="loading" class="border-t border-border px-3 py-2 text-[11px] text-neutral-mid">
+    <div v-if="loading" class="border-t border-border px-3 py-2 text-[length:var(--text-2xs)] text-neutral-mid">
       {{ t('settings.loadPaths.importFromAgents.loading') }}
     </div>
 
     <div
       v-else-if="error"
       data-testid="detect-error"
-      class="border-t border-border px-3 py-2 text-[11px] text-danger"
+      class="border-t border-border px-3 py-2 text-[length:var(--text-2xs)] text-danger"
     >
       {{ t('settings.loadPaths.importFromAgents.detectError') }}
     </div>
@@ -29,7 +29,7 @@
     <template v-else>
       <p
         v-if="kind === 'agent'"
-        class="border-t border-border px-3 py-1.5 text-[11px] text-neutral-dim"
+        class="border-t border-border px-3 py-1.5 text-[length:var(--text-2xs)] text-neutral-dim"
       >
         {{ t('settings.loadPaths.importFromAgents.agentOnlyClaudeHint') }}
       </p>
@@ -38,7 +38,7 @@
         v-for="item in candidates"
         :key="item.source"
         data-testid="import-candidate"
-        class="flex items-center gap-2 border-t border-border px-3 py-2 text-[12px]"
+        class="flex items-center gap-2 border-t border-border px-3 py-2 text-[length:var(--text-xs)]"
         :class="{ 'opacity-60': !item.installed || isShared(item.dir) }"
       >
         <Checkbox
@@ -88,7 +88,7 @@
     >
       <ul
         data-testid="import-confirm-bullets"
-        class="flex flex-col gap-1.5 text-[12px] text-neutral-mid"
+        class="flex flex-col gap-1.5 text-[length:var(--text-xs)] text-neutral-mid"
       >
         <li class="flex items-start gap-2">
           <CheckCircle2 class="mt-0.5 size-3 shrink-0 text-neutral-dim" />

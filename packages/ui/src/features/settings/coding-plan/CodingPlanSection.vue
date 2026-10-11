@@ -17,13 +17,13 @@
     警示分档）全部在 module 内，本组件纯展示 + i18n 映射。
   -->
   <div class="border-t border-border pt-4" data-testid="coding-plan-section">
-    <Label class="mb-1.5 block text-[11px] font-semibold text-neutral-mid">
+    <Label class="mb-1.5 block text-[length:var(--text-2xs)] font-semibold text-neutral-mid">
       {{ t('settings.providerEdit.quotaSection') }}
     </Label>
 
     <!-- 类型选择（始终渲染：区块对所有 provider 显示，内部按「是否已选类型」分层，D8） -->
     <div class="mb-2">
-      <Label class="mb-1 block text-[10px] text-neutral-mid">
+      <Label class="mb-1 block text-[length:var(--text-3xs)] text-neutral-mid">
         {{ t('settings.providerEdit.quotaType') }}
         <span class="normal-case text-neutral-dim">{{ t('settings.providerEdit.quotaTypeHint') }}</span>
       </Label>
@@ -31,7 +31,7 @@
         :model-value="view.type.selected"
         @update:model-value="selectType"
       >
-        <SelectTrigger class="h-8 text-[12px]" data-testid="quota-type-select">
+        <SelectTrigger class="h-8 text-[length:var(--text-xs)]" data-testid="quota-type-select">
           <SelectValue :placeholder="t('settings.providerEdit.quotaTypePlaceholder')" />
         </SelectTrigger>
         <SelectContent>
@@ -50,16 +50,16 @@
       providers.json）。后者若继续渲染参数区，未知 fetcher 会借 api-key 分支给出一组永远无法生效
       的控件，正是 D8 要堵的反例；两来源共用同一指引（module view.type.undetermined 归一）。
     -->
-    <p v-if="view.type.undetermined" class="text-[10px] text-neutral-dim" data-testid="quota-no-type-hint">
+    <p v-if="view.type.undetermined" class="text-[length:var(--text-3xs)] text-neutral-dim" data-testid="quota-no-type-hint">
       {{ t('settings.providerEdit.quotaTypeFirstHint') }}
     </p>
 
     <template v-else>
       <!-- 启用开关（D4：纯配置位——拨动即时落盘，不触发任何网络请求） -->
       <div class="flex items-center justify-between py-1.5">
-        <span class="text-[12px] text-neutral-fg">
+        <span class="text-[length:var(--text-xs)] text-neutral-fg">
           {{ t('settings.providerEdit.quotaEnable') }}
-          <span class="text-[10px] text-neutral-dim">{{ t('settings.providerEdit.quotaEnableHintIdle') }}</span>
+          <span class="text-[length:var(--text-3xs)] text-neutral-dim">{{ t('settings.providerEdit.quotaEnableHintIdle') }}</span>
         </span>
         <Switch
           :model-value="view.enabled"
@@ -71,19 +71,19 @@
 
       <!-- Cookie 类：cookie 输入（D7 去掩码，草稿只放用户真实输入；「已配置」为独立标记） -->
       <div v-if="view.credential.form === 'cookie'" class="mt-2" data-testid="quota-cookie-block">
-        <Label class="mb-1 block text-[10px] text-neutral-mid">
+        <Label class="mb-1 block text-[length:var(--text-3xs)] text-neutral-mid">
           Cookie
           <span class="normal-case text-neutral-dim">· {{ fieldBadgeLabel('cookie') }}</span>
         </Label>
         <Textarea
           v-model="draft.cookie"
-          class="min-h-[56px] resize-y font-mono text-[11px]"
+          class="min-h-[56px] resize-y font-mono text-[length:var(--text-2xs)]"
           :placeholder="t('settings.providerEdit.quotaCookiePlaceholder')"
           data-testid="quota-cookie-input"
         />
         <p
           v-if="isMissing('cookie')"
-          class="mt-1 text-[10px] text-warn"
+          class="mt-1 text-[length:var(--text-3xs)] text-warn"
           data-testid="quota-missing-cookie"
         >{{ missingHint('cookie') }}</p>
       </div>
@@ -91,13 +91,13 @@
       <!-- api-key 类：凭证来源分段控件（D3）+ 专属 Key 输入（仅选「用专属 Key」时出现） -->
       <template v-else>
         <div v-if="view.credential.exclusiveApplicable" class="mt-1.5" data-testid="quota-credential-source">
-          <Label class="mb-1 block text-[10px] text-neutral-mid">
+          <Label class="mb-1 block text-[length:var(--text-3xs)] text-neutral-mid">
             {{ t('settings.providerEdit.quotaCredentialSourceLabel') }}
           </Label>
           <div class="inline-flex gap-0.5 rounded-sm bg-bg-input p-0.5" role="group">
             <Button
               variant="ghost"
-              class="h-6 rounded-sm px-2.5 text-[11px]"
+              class="h-6 rounded-sm px-2.5 text-[length:var(--text-2xs)]"
               :class="draft.credentialSource === 'provider' ? 'bg-surface-2 text-neutral-fg' : 'text-neutral-dim'"
               :aria-pressed="draft.credentialSource === 'provider'"
               :disabled="!view.credential.providerAvailable"
@@ -106,31 +106,31 @@
             >{{ t('settings.providerEdit.quotaSourceProvider') }}</Button>
             <Button
               variant="ghost"
-              class="h-6 rounded-sm px-2.5 text-[11px]"
+              class="h-6 rounded-sm px-2.5 text-[length:var(--text-2xs)]"
               :class="draft.credentialSource === 'exclusive' ? 'bg-surface-2 text-neutral-fg' : 'text-neutral-dim'"
               :aria-pressed="draft.credentialSource === 'exclusive'"
               data-testid="quota-source-exclusive-btn"
               @click="setCredentialSource('exclusive')"
             >{{ t('settings.providerEdit.quotaSourceExclusive') }}</Button>
           </div>
-          <p class="mt-1 text-[10px] text-neutral-dim" data-testid="quota-source-hint">{{ sourceHintText }}</p>
+          <p class="mt-1 text-[length:var(--text-3xs)] text-neutral-dim" data-testid="quota-source-hint">{{ sourceHintText }}</p>
         </div>
 
         <div v-if="view.credential.exclusiveApplicable && draft.credentialSource === 'exclusive'" class="mt-1.5" data-testid="quota-exclusive-key-block">
-          <Label class="mb-1 block text-[10px] text-neutral-mid">
+          <Label class="mb-1 block text-[length:var(--text-3xs)] text-neutral-mid">
             {{ t('settings.providerEdit.quotaApiKey') }}
             <span class="normal-case text-neutral-dim">· {{ fieldBadgeLabel('apiKey') }}</span>
           </Label>
           <Input
             v-model="draft.apiKey"
             type="password"
-            class="h-8 font-mono text-[11px]"
+            class="h-8 font-mono text-[length:var(--text-2xs)]"
             :placeholder="exclusiveKeyPlaceholder"
             data-testid="quota-apikey-input"
           />
           <p
             v-if="isMissing('apiKey')"
-            class="mt-1 text-[10px] text-warn"
+            class="mt-1 text-[length:var(--text-3xs)] text-warn"
             data-testid="quota-missing-apikey"
           >{{ missingHint('apiKey') }}</p>
         </div>
@@ -141,33 +141,33 @@
         -->
         <p
           v-else-if="view.credential.providerWarning"
-          class="mt-1 text-[10px] text-warn"
+          class="mt-1 text-[length:var(--text-3xs)] text-warn"
           data-testid="quota-provider-credential-warning"
         >{{ providerCredentialWarningText }}</p>
       </template>
 
       <!-- Workspace 地址（资源维度 fetcher；明文回显，D13 判定只看草稿） -->
       <div v-if="view.workspace.required" class="mt-2" data-testid="quota-workspace-block">
-        <Label class="mb-1 block text-[10px] text-neutral-mid">
+        <Label class="mb-1 block text-[length:var(--text-3xs)] text-neutral-mid">
           {{ t('settings.providerEdit.quotaWorkspaceLabel') }}
           <span class="normal-case text-neutral-dim">· {{ fieldBadgeLabel('workspace') }}</span>
         </Label>
         <Input
           v-model="draft.workspace"
-          class="h-8 font-mono text-[11px]"
+          class="h-8 font-mono text-[length:var(--text-2xs)]"
           :placeholder="t('settings.providerEdit.quotaWorkspacePlaceholder')"
           data-testid="quota-workspace-input"
         />
         <p
           v-if="isMissing('workspace')"
-          class="mt-1 text-[10px] text-warn"
+          class="mt-1 text-[length:var(--text-3xs)] text-warn"
           data-testid="quota-missing-workspace"
         >{{ missingHint('workspace') }}</p>
-        <p class="mt-1 text-[10px] text-neutral-dim">{{ t('settings.providerEdit.quotaWorkspaceHelp') }}</p>
+        <p class="mt-1 text-[length:var(--text-3xs)] text-neutral-dim">{{ t('settings.providerEdit.quotaWorkspaceHelp') }}</p>
       </div>
 
       <!-- 帮助链接 -->
-      <p v-if="view.help" class="mt-1.5 flex items-start gap-1 text-[10px] text-neutral-dim">
+      <p v-if="view.help" class="mt-1.5 flex items-start gap-1 text-[length:var(--text-3xs)] text-neutral-dim">
         <ExternalLink class="mt-0.5 size-3 shrink-0" />
         <span>{{ view.help.text }}
           <a
@@ -182,7 +182,7 @@
       <!-- D2 单动作按钮：保存并测试（D1 齐备性置灰是唯一门控；无网络副作用之外的第二个动作） -->
       <div class="mt-2 flex items-center gap-2" data-testid="quota-actions">
         <Button
-          class="h-7 gap-1 px-2.5 text-[11px]"
+          class="h-7 gap-1 px-2.5 text-[length:var(--text-2xs)]"
           :disabled="!view.readiness.ready || view.configuring"
           data-testid="quota-save-test-btn"
           @click="saveAndTest()"
@@ -190,14 +190,14 @@
           <Loader2 v-if="view.configuring" class="animate-spin" />
           {{ view.configuring ? t('settings.providerEdit.quotaSaveAndTestRunning') : t('settings.providerEdit.quotaSaveAndTest') }}
         </Button>
-        <span v-if="!view.readiness.ready" class="text-[10px] text-neutral-dim" data-testid="quota-ready-hint">
+        <span v-if="!view.readiness.ready" class="text-[length:var(--text-3xs)] text-neutral-dim" data-testid="quota-ready-hint">
           {{ t('settings.providerEdit.quotaReadyHint') }}
         </span>
       </div>
 
       <!-- 测试查询成功 + 内联额度预览（3 窗口行；B-3：used/limit 绝对量 + pct 双轨） -->
       <div v-if="test.status === 'success' && test.row" class="mt-2" data-testid="quota-result">
-        <div class="flex items-center gap-1.5 text-[11px] text-success">
+        <div class="flex items-center gap-1.5 text-[length:var(--text-2xs)] text-success">
           <CheckCircle2 class="size-3" />
           {{ t('settings.providerEdit.quotaTestSuccess') }}
           <span v-if="test.lastFetchAt" class="text-neutral-dim">· {{ formatTimeAgo(test.lastFetchAt) }}</span>
@@ -209,14 +209,14 @@
 
       <!-- 测试查询失败（B-3 / A2-4）：失败态整体替换数据展示，旧缓存只经「查看上次成功数据」展开可见 -->
       <div v-if="test.status === 'error'" class="mt-2" data-testid="quota-error">
-        <div class="flex items-center gap-1.5 text-[11px] text-danger" data-testid="quota-error-msg">
+        <div class="flex items-center gap-1.5 text-[length:var(--text-2xs)] text-danger" data-testid="quota-error-msg">
           <AlertCircle class="size-3" />
           {{ failMessage }}
         </div>
         <Button
           v-if="view.credential.form === 'cookie'"
           variant="ghost"
-          class="mt-1 h-auto p-0 text-[11px] text-accent hover:bg-transparent hover:underline"
+          class="mt-1 h-auto p-0 text-[length:var(--text-2xs)] text-accent hover:bg-transparent hover:underline"
           data-testid="quota-update-cookie-btn"
           @click="clearCookieDraft"
         >
@@ -226,14 +226,14 @@
         <Button
           v-if="test.row"
           variant="ghost"
-          class="mt-1 h-auto p-0 text-[11px] text-accent hover:bg-transparent hover:underline"
+          class="mt-1 h-auto p-0 text-[length:var(--text-2xs)] text-accent hover:bg-transparent hover:underline"
           data-testid="quota-toggle-last-success"
           @click="showLastSuccess = !showLastSuccess"
         >
           {{ showLastSuccess ? t('settings.providerEdit.collapse') : t('settings.providerEdit.quotaLastSuccessToggle') }}
         </Button>
         <div v-if="showLastSuccess && test.row" class="mt-2 rounded-sm border border-border bg-bg-input p-2.5" data-testid="quota-last-success">
-          <p v-if="test.lastFetchAt" class="mb-1 text-[10px] text-neutral-dim">
+          <p v-if="test.lastFetchAt" class="mb-1 text-[length:var(--text-3xs)] text-neutral-dim">
             {{ t('settings.providerEdit.quotaLastSuccessAt', { time: formatAbsoluteTime(test.lastFetchAt) }) }}
           </p>
           <QuotaWindowList :windows="visibleWindows" :labels="windowLabels" tone="muted" />
@@ -241,7 +241,7 @@
       </div>
 
       <!-- 配置错误（D9：统一走 i18n 的保存类错误出口） -->
-      <p v-if="view.configureError" class="mt-1 text-[11px] text-danger" data-testid="quota-configure-error">{{ view.configureError }}</p>
+      <p v-if="view.configureError" class="mt-1 text-[length:var(--text-2xs)] text-danger" data-testid="quota-configure-error">{{ view.configureError }}</p>
     </template>
   </div>
 </template>

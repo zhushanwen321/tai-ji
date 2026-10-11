@@ -37,7 +37,7 @@
             />
             <!-- 单行排布（demo：名称 + 标签 + 摘要/描述同排；折叠态显摘要、展开态显描述） -->
             <div class="flex min-w-0 flex-1 items-center gap-2">
-              <span class="truncate text-[13px] font-semibold">{{ p.name }}</span>
+              <span class="truncate text-[length:var(--text-sm)] font-semibold">{{ p.name }}</span>
               <span
                 v-if="p.builtin"
                 class="inline-flex h-[18px] shrink-0 items-center rounded-full bg-warn-soft px-[7px] text-[length:var(--text-2xs)] font-semibold text-warn"
@@ -57,7 +57,7 @@
             v-if="p.id !== defaultPresetId"
             variant="ghost"
             size="dense"
-            class="rounded-sm text-[11px] text-neutral-dim hover:text-neutral-fg"
+            class="rounded-sm text-[length:var(--text-2xs)] text-neutral-dim hover:text-neutral-fg"
             @click="emit('set-default', p.id)"
           >
             <Star class="size-3.5" />
@@ -68,7 +68,7 @@
             v-if="p.builtin"
             variant="ghost"
             size="dense"
-            class="rounded-sm text-[11px] text-neutral-dim hover:text-neutral-fg"
+            class="rounded-sm text-[length:var(--text-2xs)] text-neutral-dim hover:text-neutral-fg"
             :disabled="restoring.has(p.id)"
             @click="emit('restore', p)"
           >
@@ -80,7 +80,7 @@
             v-if="!p.builtin"
             variant="ghost"
             size="dense"
-            class="rounded-sm text-[11px] text-neutral-dim hover:text-danger"
+            class="rounded-sm text-[length:var(--text-2xs)] text-neutral-dim hover:text-danger"
             @click="emit('delete', p.id)"
           >
             <Trash2 class="size-3.5" />

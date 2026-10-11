@@ -117,7 +117,7 @@
            pi 任务恒不出现（D5：undefined 缺省映射为 pi）。 -->
       <div
         v-if="coarseHintVisible"
-        class="flex shrink-0 items-center gap-1.5 border-b border-hairline bg-surface-2 px-3.5 py-1.5 text-[10px] text-neutral-dim"
+        class="flex shrink-0 items-center gap-1.5 border-b border-hairline bg-surface-2 px-3.5 py-1.5 text-[length:var(--text-3xs)] text-neutral-dim"
         data-testid="subagent-coarse-hint"
       >
         <Clock class="size-3 shrink-0 opacity-70" />

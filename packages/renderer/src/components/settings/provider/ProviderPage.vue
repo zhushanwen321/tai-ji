@@ -31,7 +31,7 @@
         <span
           v-if="catalogsStale"
           data-testid="provider-catalogs-stale"
-          class="flex items-center gap-1 text-[11px] text-warn"
+          class="flex items-center gap-1 text-[length:var(--text-2xs)] text-warn"
         >
           <AlertTriangle class="size-3.5 shrink-0" />
           {{ t('settings.provider.catalogsStale') }}
@@ -59,7 +59,7 @@
     <div
       v-if="actionError"
       data-testid="provider-action-error"
-      class="mt-[16px] flex items-center gap-1.5 rounded-md border border-[color-mix(in_oklch,var(--danger)_30%,transparent)] bg-danger-soft px-3 py-1.5 text-[11px] text-danger"
+      class="mt-[16px] flex items-center gap-1.5 rounded-md border border-[color-mix(in_oklch,var(--danger)_30%,transparent)] bg-danger-soft px-3 py-1.5 text-[length:var(--text-2xs)] text-danger"
     >
       <AlertCircle class="size-3.5 shrink-0" />
       <span class="truncate">{{ actionError }}</span>
@@ -155,7 +155,7 @@
         <span
           v-if="expandedId === p.id && currentBodyDirty"
           data-testid="provider-dirty-badge"
-          class="flex shrink-0 items-center gap-1 rounded-full bg-warn-soft px-2 py-0.5 text-[10px] font-semibold text-warn"
+          class="flex shrink-0 items-center gap-1 rounded-full bg-warn-soft px-2 py-0.5 text-[length:var(--text-3xs)] font-semibold text-warn"
         >
           <span class="size-1.5 rounded-full bg-warn" />
           {{ t('settings.provider.unsavedBadge') }}
@@ -230,7 +230,7 @@
       :loading="deleting"
       @confirm="confirmDelete"
     >
-      <p v-if="actionError" class="pt-2 text-[12px] text-danger">{{ actionError }}</p>
+      <p v-if="actionError" class="pt-2 text-[length:var(--text-xs)] text-danger">{{ actionError }}</p>
     </ConfirmDialog>
 
     <!-- 导入预览弹窗（W2） -->

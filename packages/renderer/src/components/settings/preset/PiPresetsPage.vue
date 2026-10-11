@@ -24,11 +24,11 @@
     <!-- 加载失败提示（S-RN-7：消费 loadError 错误态） -->
     <div
       v-if="loadError"
-      class="flex items-center gap-2 rounded-sm border border-border bg-surface px-3 py-2 text-[12px] text-danger"
+      class="flex items-center gap-2 rounded-sm border border-border bg-surface px-3 py-2 text-[length:var(--text-xs)] text-danger"
     >
       <AlertCircle class="size-3.5 shrink-0" />
       <span class="flex-1">{{ loadError }}</span>
-      <Button variant="ghost" size="dense" class="rounded-sm text-[11px]" @click="retryLoad">
+      <Button variant="ghost" size="dense" class="rounded-sm text-[length:var(--text-2xs)]" @click="retryLoad">
         {{ t('common.retry') }}
       </Button>
     </div>

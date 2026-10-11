@@ -246,7 +246,7 @@ function onSubmit(): void {
       <!-- 单问题：标题提到 head 行，单行 truncate（draft 直挂无问题文本 → 只余脉冲点） -->
       <span
         v-if="!multiQuestion"
-        class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[13px] font-medium text-neutral-fg"
+        class="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[length:var(--text-sm)] font-medium text-neutral-fg"
         data-testid="form-question-text"
       >
         {{ activeTitle }}
@@ -258,7 +258,7 @@ function onSubmit(): void {
           :key="qKey(q)"
           variant="ghost"
           :class="[
-            'rounded-sm px-2.5 py-1 text-[12px] font-normal transition-colors',
+            'rounded-sm px-2.5 py-1 text-[length:var(--text-xs)] font-normal transition-colors',
             i === activeIdx
               ? 'bg-accent-soft font-medium text-neutral-fg'
               : 'text-neutral-dim hover:text-neutral-mid',
@@ -284,7 +284,7 @@ function onSubmit(): void {
       <p
         v-if="activeQuestion.context"
         data-testid="form-context"
-        class="rounded bg-surface-hover px-2.5 py-1.5 text-[12px] leading-1.5 text-neutral-mid"
+        class="rounded bg-surface-hover px-2.5 py-1.5 text-[length:var(--text-xs)] leading-1.5 text-neutral-mid"
       >
         {{ activeQuestion.context }}
       </p>
@@ -292,7 +292,7 @@ function onSubmit(): void {
       <!-- 多问题时的问题文本（单问题已在 head 行） -->
       <p
         v-if="multiQuestion"
-        class="py-0.5 text-[13px] font-medium text-neutral-fg"
+        class="py-0.5 text-[length:var(--text-sm)] font-medium text-neutral-fg"
         data-testid="form-question-text-multi"
       >
         {{ activeQuestion.question }}
@@ -319,14 +319,14 @@ function onSubmit(): void {
         <p
           v-if="i === activeIdx"
           data-testid="form-context"
-          class="px-3.5 pt-2.5 text-[12px] leading-1.5 text-neutral-mid"
+          class="px-3.5 pt-2.5 text-[length:var(--text-xs)] leading-1.5 text-neutral-mid"
         >
           {{ t('extensionUI.scheduleCreateSubtitle') }}
         </p>
         <p
           v-if="q.context && i === activeIdx"
           data-testid="form-context-note"
-          class="px-3.5 pt-1 text-[12px] leading-1.5 text-neutral-mid"
+          class="px-3.5 pt-1 text-[length:var(--text-xs)] leading-1.5 text-neutral-mid"
         >
           {{ q.context }}
         </p>

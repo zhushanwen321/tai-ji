@@ -9,8 +9,8 @@
   <section data-testid="scoped-model-section" class="overflow-hidden rounded-card bg-bg-card">
     <div class="flex items-center justify-between px-4 py-3">
       <div>
-        <h3 class="text-[13px] font-medium text-neutral-fg">{{ t('settings.scopedModel.title') }}</h3>
-        <p class="mt-0.5 text-[11px] text-neutral-mid">{{ t('settings.scopedModel.desc') }}</p>
+        <h3 class="text-[length:var(--text-sm)] font-medium text-neutral-fg">{{ t('settings.scopedModel.title') }}</h3>
+        <p class="mt-0.5 text-[length:var(--text-2xs)] text-neutral-mid">{{ t('settings.scopedModel.desc') }}</p>
       </div>
       <Button
         variant="secondary"
@@ -27,7 +27,7 @@
     <div
       v-if="!scopedList.length && !showAddPanel"
       data-testid="scoped-empty"
-      class="px-4 pb-3 text-[11px] text-neutral-dim"
+      class="px-4 pb-3 text-[length:var(--text-2xs)] text-neutral-dim"
     >
       {{ t('settings.scopedModel.emptyHint') }}
     </div>
@@ -38,7 +38,7 @@
         v-for="(item, idx) in scopedList"
         :key="item.scoped"
         data-testid="scoped-row"
-        class="flex items-center gap-2 px-4 py-2 text-[12px]"
+        class="flex items-center gap-2 px-4 py-2 text-[length:var(--text-xs)]"
         :class="{ 'border-t border-border': idx > 0 }"
       >
         <!-- 模型名 -->
@@ -46,14 +46,14 @@
           {{ item.modelName }}
         </span>
         <!-- provider 名 -->
-        <span class="shrink-0 text-[11px] text-neutral-mid" data-testid="scoped-provider-name">
+        <span class="shrink-0 text-[length:var(--text-2xs)] text-neutral-mid" data-testid="scoped-provider-name">
           {{ item.providerName }}
         </span>
         <!-- 警示标记：apiKeySet=false -->
         <span
           v-if="!item.apiKeySet"
           data-testid="scoped-warn-nokey"
-          class="shrink-0 rounded-sm bg-warn-soft px-1.5 py-0.5 text-[10px] text-warn"
+          class="shrink-0 rounded-sm bg-warn-soft px-1.5 py-0.5 text-[length:var(--text-3xs)] text-warn"
         >
           {{ t('settings.scopedModel.noKey') }}
         </span>
@@ -61,7 +61,7 @@
         <span
           v-if="item.missing"
           data-testid="scoped-warn-missing"
-          class="shrink-0 rounded-sm bg-danger-soft px-1.5 py-0.5 text-[10px] text-danger"
+          class="shrink-0 rounded-sm bg-danger-soft px-1.5 py-0.5 text-[length:var(--text-3xs)] text-danger"
         >
           {{ t('settings.scopedModel.missing') }}
         </span>
@@ -114,14 +114,14 @@
         <Input
           v-model="searchQuery"
           :placeholder="t('settings.scopedModel.searchPlaceholder')"
-          class="h-8 text-[12px]"
+          class="h-8 text-[length:var(--text-xs)]"
           data-testid="scoped-search"
         />
       </div>
 
       <!-- 按 provider 分组的全量模型列表 -->
       <div class="max-h-[240px] overflow-y-auto px-4">
-        <div v-if="filteredGroups.length === 0" class="py-4 text-center text-[11px] text-neutral-dim">
+        <div v-if="filteredGroups.length === 0" class="py-4 text-center text-[length:var(--text-2xs)] text-neutral-dim">
           {{ t('settings.scopedModel.noResults') }}
         </div>
         <div
@@ -129,7 +129,7 @@
           :key="group.providerId"
           data-testid="scoped-group"
         >
-          <div class="sticky top-0 bg-surface-2 px-2 py-1.5 text-[11px] font-semibold text-neutral-fg">
+          <div class="sticky top-0 bg-surface-2 px-2 py-1.5 text-[length:var(--text-2xs)] font-semibold text-neutral-fg">
             {{ group.providerName }}
           </div>
           <div
@@ -145,17 +145,17 @@
               class="shrink-0"
               @update:model-value="toggleSelection(model.fullId)"
             />
-            <span class="flex-1 truncate text-[12px] text-neutral-fg">{{ model.name || model.modelId }}</span>
+            <span class="flex-1 truncate text-[length:var(--text-xs)] text-neutral-fg">{{ model.name || model.modelId }}</span>
             <span
               v-if="!model.apiKeySet"
               data-testid="scoped-add-warn"
-              class="shrink-0 rounded-sm bg-warn-soft px-1 py-0.5 text-[10px] text-warn"
+              class="shrink-0 rounded-sm bg-warn-soft px-1 py-0.5 text-[length:var(--text-3xs)] text-warn"
             >
               {{ t('settings.scopedModel.noKey') }}
             </span>
             <span
               v-if="model.alreadyAdded"
-              class="shrink-0 text-[10px] text-neutral-dim"
+              class="shrink-0 text-[length:var(--text-3xs)] text-neutral-dim"
             >
               {{ t('settings.scopedModel.added') }}
             </span>

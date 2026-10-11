@@ -208,7 +208,7 @@ function onOpenBrowser(): void {
           <div
             v-if="authorized"
             data-testid="oauth-authorized"
-            class="flex items-center gap-1.5 rounded-md border border-[color-mix(in_oklch,var(--success)_30%,transparent)] bg-success-soft px-3 py-2 text-[12px] text-success"
+            class="flex items-center gap-1.5 rounded-md border border-[color-mix(in_oklch,var(--success)_30%,transparent)] bg-success-soft px-3 py-2 text-[length:var(--text-xs)] text-success"
           >
             <Check class="size-4 shrink-0" />
             <span class="font-medium">{{ t('settings.provider.oauthDialog.alreadyAuthorized') }}</span>
@@ -217,7 +217,7 @@ function onOpenBrowser(): void {
           <p
             v-else
             data-testid="oauth-oauthname-hint"
-            class="flex items-center gap-1.5 rounded-md bg-surface-2 px-3 py-2 text-[12px] text-neutral-mid"
+            class="flex items-center gap-1.5 rounded-md bg-surface-2 px-3 py-2 text-[length:var(--text-xs)] text-neutral-mid"
           >
             <KeyRound class="size-3.5 shrink-0 text-neutral-dim" />
             {{ t('settings.provider.oauthDialog.oauthNameHint', { name: displayName }) }}
@@ -237,7 +237,7 @@ function onOpenBrowser(): void {
         <div v-else-if="status === 'pending'" data-testid="oauth-pending" class="flex flex-col gap-2.5">
           <!-- device flow：user_code 大字号 + 复制 + 打开浏览器 + 倒计时 -->
           <template v-if="deviceInfo">
-            <p class="text-[12px] text-neutral-mid">{{ t('settings.provider.oauthDialog.deviceStep') }}</p>
+            <p class="text-[length:var(--text-xs)] text-neutral-mid">{{ t('settings.provider.oauthDialog.deviceStep') }}</p>
             <div class="flex items-center gap-2">
               <span
                 data-testid="oauth-user-code"
@@ -248,14 +248,14 @@ function onOpenBrowser(): void {
                 {{ copied ? t('settings.provider.oauthDialog.copied') : t('settings.provider.oauthDialog.copyCode') }}
               </Button>
             </div>
-            <p v-if="copyFailed" data-testid="oauth-copy-failed" class="text-[11px] text-danger">
+            <p v-if="copyFailed" data-testid="oauth-copy-failed" class="text-[length:var(--text-2xs)] text-danger">
               {{ t('settings.provider.oauthDialog.copyFailed') }}
             </p>
             <Button variant="secondary" size="dense" data-testid="oauth-open-browser" @click="onOpenBrowser">
               <ExternalLink class="size-3.5" />
               {{ t('settings.provider.oauthDialog.openBrowser') }}
             </Button>
-            <div class="flex items-center gap-1.5 text-[12px] text-neutral-mid">
+            <div class="flex items-center gap-1.5 text-[length:var(--text-xs)] text-neutral-mid">
               <Loader2 class="size-3.5 animate-spin" />
               <span>{{ t('settings.provider.oauthDialog.waitingAuth') }}</span>
               <span v-if="countdown > 0" data-testid="oauth-countdown" class="tabular-nums">
@@ -266,7 +266,7 @@ function onOpenBrowser(): void {
 
           <!-- callback flow：打开浏览器授权 + 本地端口提示 -->
           <template v-else-if="authUrl">
-            <p class="text-[12px] text-neutral-mid">{{ t('settings.provider.oauthDialog.callbackStep') }}</p>
+            <p class="text-[length:var(--text-xs)] text-neutral-mid">{{ t('settings.provider.oauthDialog.callbackStep') }}</p>
             <Button size="dense" data-testid="oauth-open-browser" @click="onOpenBrowser">
               <ExternalLink class="size-3.5" />
               {{ t('settings.provider.oauthDialog.openBrowserAuthorize') }}
@@ -274,18 +274,18 @@ function onOpenBrowser(): void {
             <p
               v-if="callbackPort"
               data-testid="oauth-callback-port"
-              class="rounded-md border border-info/30 bg-info-soft px-3 py-2 font-mono text-[11px] text-info"
+              class="rounded-md border border-info/30 bg-info-soft px-3 py-2 font-mono text-[length:var(--text-2xs)] text-info"
             >
               {{ t('settings.provider.oauthDialog.callbackHint', { port: String(callbackPort) }) }}
             </p>
-            <div class="flex items-center gap-1.5 text-[12px] text-neutral-mid">
+            <div class="flex items-center gap-1.5 text-[length:var(--text-xs)] text-neutral-mid">
               <Loader2 class="size-3.5 animate-spin" />
               <span>{{ t('settings.provider.oauthDialog.waitingAuth') }}</span>
             </div>
           </template>
 
           <!-- 未知中间态（父已置 pending 但事件未到）：通用等待 -->
-          <div v-else class="flex items-center gap-1.5 text-[12px] text-neutral-mid">
+          <div v-else class="flex items-center gap-1.5 text-[length:var(--text-xs)] text-neutral-mid">
             <Loader2 class="size-3.5 animate-spin" />
             <span>{{ t('settings.provider.oauthDialog.waitingAuth') }}</span>
           </div>
@@ -295,7 +295,7 @@ function onOpenBrowser(): void {
         <div
           v-else-if="status === 'success'"
           data-testid="oauth-success"
-          class="flex flex-col items-center gap-2 rounded-md border border-[color-mix(in_oklch,var(--success)_30%,transparent)] bg-success-soft px-3 py-6 text-[12px]"
+          class="flex flex-col items-center gap-2 rounded-md border border-[color-mix(in_oklch,var(--success)_30%,transparent)] bg-success-soft px-3 py-6 text-[length:var(--text-xs)]"
         >
           <span class="flex size-9 items-center justify-center rounded-full bg-success text-white">
             <Check class="size-5" />
@@ -308,7 +308,7 @@ function onOpenBrowser(): void {
         <div
           v-else-if="status === 'error'"
           data-testid="oauth-error"
-          class="flex items-start gap-1.5 rounded-md border border-[color-mix(in_oklch,var(--danger)_30%,transparent)] bg-danger-soft px-3 py-2 text-[12px] text-danger"
+          class="flex items-start gap-1.5 rounded-md border border-[color-mix(in_oklch,var(--danger)_30%,transparent)] bg-danger-soft px-3 py-2 text-[length:var(--text-xs)] text-danger"
         >
           <AlertCircle class="size-4 shrink-0" />
           <span>{{ errorMessage || t('settings.provider.oauthDialog.errorUnknown') }}</span>

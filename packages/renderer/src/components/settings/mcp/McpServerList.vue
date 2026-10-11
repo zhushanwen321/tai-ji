@@ -24,7 +24,7 @@
       >
         <div class="min-w-0 flex-1">
           <div class="flex items-center gap-2">
-            <span class="truncate text-[13px] font-semibold text-neutral-fg" :data-testid="`mcp-row-name-${entry.name}`">{{ entry.name }}</span>
+            <span class="truncate text-[length:var(--text-sm)] font-semibold text-neutral-fg" :data-testid="`mcp-row-name-${entry.name}`">{{ entry.name }}</span>
             <span class="inline-flex h-[18px] shrink-0 items-center rounded-full bg-accent-soft px-[7px] text-[length:var(--text-2xs)] font-semibold text-accent">{{ transportLabel(entry.value) }}</span>
           </div>
           <p v-if="entry.value.description" class="setting-row-desc mt-[2px] truncate text-[length:var(--text-sm)] text-neutral-mid">{{ entry.value.description }}</p>

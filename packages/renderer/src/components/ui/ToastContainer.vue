@@ -82,7 +82,7 @@
           v-if="t.sessionLabel && t.sessionId"
           variant="ghost"
           :data-testid="`toast-session-${t.id}`"
-          class="h-auto max-w-full justify-start gap-1 self-start rounded-sm px-0 py-0 text-left text-[11px] font-normal leading-4 text-neutral-dim hover:bg-transparent hover:text-neutral-fg focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent focus-visible:shadow-none active:scale-100 [&_svg]:h-3 [&_svg]:w-3"
+          class="h-auto max-w-full justify-start gap-1 self-start rounded-sm px-0 py-0 text-left text-[length:var(--text-2xs)] font-normal leading-4 text-neutral-dim hover:bg-transparent hover:text-neutral-fg focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent focus-visible:shadow-none active:scale-100 [&_svg]:h-3 [&_svg]:w-3"
           @click.stop="onJump(t.sessionId, t.id)"
         >
           <span class="truncate">{{ t.sessionLabel }}</span>

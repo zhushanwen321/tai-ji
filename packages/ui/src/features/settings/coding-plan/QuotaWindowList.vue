@@ -4,9 +4,9 @@
   <div
     v-for="win in windows"
     :key="win.idx"
-    class="flex items-center justify-between py-0.5 text-[11px]"
+    class="flex items-center justify-between py-0.5 text-[length:var(--text-2xs)]"
   >
-    <span class="font-mono text-[10px] text-neutral-mid">{{ labels[win.idx] }}</span>
+    <span class="font-mono text-[length:var(--text-3xs)] text-neutral-mid">{{ labels[win.idx] }}</span>
     <span v-if="win.pct !== null" :class="['font-semibold tabular-nums', tone === 'current' ? 'text-neutral-fg' : 'text-neutral-mid']">
       <template v-if="win.used != null && win.limit != null">
         {{ t('settings.providerEdit.quotaUsedOf', { used: formatAmount(win.used), limit: formatAmount(win.limit) }) }}

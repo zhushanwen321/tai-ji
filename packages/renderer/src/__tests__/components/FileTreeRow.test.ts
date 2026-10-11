@@ -14,7 +14,7 @@
  * - 折叠/展开目录：只渲染 dir 行，不存在同名 file 行（事故根因回归防护）
  * - 文件节点：只渲染 file 行，不存在 dir 行
  * - hint 行（loading/error/empty）：各自渲染，error 行点击 emit toggle（旧递归语义）
- * - 字号一致性（D-007）：dir/file 行 name span 均含 text-[12px]
+ * - 字号一致性（D-007）：dir/file 行 name span 均含 text-[length:var(--text-xs)]（12px 档）
  * - chevron 槽（D-022）：dir 行含 ChevronRight，file 行含空占位
  * - W2 徽章/行数：childCount/lineStats 全部来自 row（投影预计算，组件不再读 store）
  * - 长文件名（demo .fname 契约，2026-10-10 裁决）：省略号截断 + title 悬停展示全名

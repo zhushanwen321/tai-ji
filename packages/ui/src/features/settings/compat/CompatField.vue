@@ -8,7 +8,7 @@
   <div class="flex flex-col gap-0.5">
     <!-- switch 字段 -->
     <div v-if="meta.type === 'switch'" class="flex items-center justify-between">
-      <Label class="text-[12px] text-neutral-fg">{{ t(meta.labelKey) }}</Label>
+      <Label class="text-[length:var(--text-xs)] text-neutral-fg">{{ t(meta.labelKey) }}</Label>
       <Switch
         :model-value="value === true"
         :aria-label="t(meta.labelKey)"
@@ -17,12 +17,12 @@
     </div>
     <!-- select 字段 -->
     <div v-else-if="meta.type === 'select'" class="flex items-center justify-between gap-3">
-      <Label class="min-w-0 flex-1 truncate text-[12px] text-neutral-fg">{{ t(meta.labelKey) }}</Label>
+      <Label class="min-w-0 flex-1 truncate text-[length:var(--text-xs)] text-neutral-fg">{{ t(meta.labelKey) }}</Label>
       <Select
         :model-value="typeof value === 'string' ? value : undefined"
         @update:model-value="$emit('change', { field: meta.field, value: $event })"
       >
-        <SelectTrigger class="h-7 w-[180px] shrink-0 px-2 text-[11px]">
+        <SelectTrigger class="h-7 w-[180px] shrink-0 px-2 text-[length:var(--text-2xs)]">
           <SelectValue :placeholder="t('settings.compat.unset')" />
         </SelectTrigger>
         <SelectContent>
@@ -37,19 +37,19 @@
     <!-- text 字段：object 类高级字段（openRouterRouting / vercelGatewayRouting / chatTemplateKwargs），
          渲染 JSON 编辑器：值→JSON.stringify 显示，blur 时 JSON.parse 校验，成功 emit，失败提示。 -->
     <div v-else class="flex flex-col gap-1">
-      <Label class="text-[12px] text-neutral-fg">{{ t(meta.labelKey) }}</Label>
+      <Label class="text-[length:var(--text-xs)] text-neutral-fg">{{ t(meta.labelKey) }}</Label>
       <Textarea
         :model-value="draft"
         rows="4"
-        class="font-mono text-[11px]"
+        class="font-mono text-[length:var(--text-2xs)]"
         :aria-label="t(meta.labelKey)"
         @update:model-value="onDraftInput"
         @blur="commitDraft"
       />
-      <p v-if="jsonError" class="text-[10px] text-danger">{{ t('settings.compat.jsonInvalid') }}</p>
+      <p v-if="jsonError" class="text-[length:var(--text-3xs)] text-danger">{{ t('settings.compat.jsonInvalid') }}</p>
     </div>
     <!-- hint 注脚 -->
-    <p class="text-[10px] text-neutral-dim">{{ t(meta.hintKey) }}</p>
+    <p class="text-[length:var(--text-3xs)] text-neutral-dim">{{ t(meta.hintKey) }}</p>
   </div>
 </template>
 

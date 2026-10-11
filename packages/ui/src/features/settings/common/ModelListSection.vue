@@ -8,8 +8,8 @@
   -->
   <div class="flex min-w-0 flex-1 flex-col overflow-hidden">
     <div class="flex items-center justify-between border-b border-border px-5 py-3">
-      <span class="text-[13px] font-semibold text-neutral-fg">{{ t(props.titleKey) }}</span>
-      <Button variant="ghost" class="h-auto p-0 text-[11px] text-accent hover:bg-transparent hover:underline" @click="$emit('update:showAddModel', !showAddModel)">
+      <span class="text-[length:var(--text-sm)] font-semibold text-neutral-fg">{{ t(props.titleKey) }}</span>
+      <Button variant="ghost" class="h-auto p-0 text-[length:var(--text-2xs)] text-accent hover:bg-transparent hover:underline" @click="$emit('update:showAddModel', !showAddModel)">
         {{ showAddModel ? t('settings.providerEdit.collapse') : t('settings.providerEdit.manualAdd') }}
       </Button>
     </div>
@@ -19,21 +19,21 @@
       <!-- 第 1 行：模型名称（占满）+ 输入类型分段 -->
       <div class="flex items-end gap-3">
         <div class="min-w-0 flex-1">
-          <Label class="mb-1 block text-[10px] text-neutral-mid">{{ t('settings.providerEdit.modelNameLabel') }}</Label>
-          <Input v-model="deps.newModel.name" :placeholder="t('settings.providerEdit.modelNamePlaceholder')" class="h-8 text-[12px]" />
+          <Label class="mb-1 block text-[length:var(--text-3xs)] text-neutral-mid">{{ t('settings.providerEdit.modelNameLabel') }}</Label>
+          <Input v-model="deps.newModel.name" :placeholder="t('settings.providerEdit.modelNamePlaceholder')" class="h-8 text-[length:var(--text-xs)]" />
         </div>
         <div>
-          <Label class="mb-1 block text-[10px] text-neutral-mid">{{ t('settings.providerEdit.inputTypeLabel') }}</Label>
+          <Label class="mb-1 block text-[length:var(--text-3xs)] text-neutral-mid">{{ t('settings.providerEdit.inputTypeLabel') }}</Label>
           <div class="flex h-8 gap-0.5 rounded-md border border-border bg-surface-2 p-0.5">
             <Button
               variant="ghost"
-              class="h-full gap-1 rounded-sm px-2 text-[10px] hover:bg-transparent [&_svg]:size-3"
+              class="h-full gap-1 rounded-sm px-2 text-[length:var(--text-3xs)] hover:bg-transparent [&_svg]:size-3"
               :class="deps.newModel.inputTypes.includes('text') ? 'bg-accent-soft text-accent' : 'text-neutral-mid hover:text-neutral-fg'"
               @click="deps.toggleNewInput('text')"
             ><FileText /> {{ t('settings.providerEdit.inputText') }}</Button>
             <Button
               variant="ghost"
-              class="h-full gap-1 rounded-sm px-2 text-[10px] hover:bg-transparent [&_svg]:size-3"
+              class="h-full gap-1 rounded-sm px-2 text-[length:var(--text-3xs)] hover:bg-transparent [&_svg]:size-3"
               :class="deps.newModel.inputTypes.includes('image') ? 'bg-accent-soft text-accent' : 'text-neutral-mid hover:text-neutral-fg'"
               @click="deps.toggleNewInput('image')"
             ><ImageIcon /> {{ t('settings.providerEdit.inputImage') }}</Button>
@@ -43,9 +43,9 @@
       <!-- 第 2 行：上下文 + 思考 + 添加 -->
       <div class="mt-3 flex items-end gap-3">
         <div>
-          <Label class="mb-1 block text-[10px] text-neutral-mid">{{ t('settings.providerEdit.contextLabel') }}</Label>
+          <Label class="mb-1 block text-[length:var(--text-3xs)] text-neutral-mid">{{ t('settings.providerEdit.contextLabel') }}</Label>
           <Select v-model="deps.newModel.contextWindow">
-            <SelectTrigger class="h-8 w-[110px] px-2 text-[11px]">
+            <SelectTrigger class="h-8 w-[110px] px-2 text-[length:var(--text-2xs)]">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -54,9 +54,9 @@
           </Select>
         </div>
         <div>
-          <Label class="mb-1 block text-[10px] text-neutral-mid">{{ t('settings.providerEdit.thinkingLabel') }}</Label>
+          <Label class="mb-1 block text-[length:var(--text-3xs)] text-neutral-mid">{{ t('settings.providerEdit.thinkingLabel') }}</Label>
           <Select v-model="deps.newModel.thinking">
-            <SelectTrigger class="h-8 w-[130px] px-1.5 py-0 text-[11px]">
+            <SelectTrigger class="h-8 w-[130px] px-1.5 py-0 text-[length:var(--text-2xs)]">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -67,7 +67,7 @@
         <!-- D4 reasoning 开关：默认按思考策略自动推导（非 all-levels 自动 true），用户可显式关。
              显式 boolean 落盘——reasoning 缺失会让 pi 把思考档全钳回 off（事故 B）。 -->
         <div>
-          <Label class="mb-1 block text-[10px] text-neutral-mid">{{ t('settings.providerEdit.reasoningLabel') }}</Label>
+          <Label class="mb-1 block text-[length:var(--text-3xs)] text-neutral-mid">{{ t('settings.providerEdit.reasoningLabel') }}</Label>
           <Switch
             :model-value="deps.newModel.reasoning"
             class="mt-[9px]"
@@ -76,16 +76,16 @@
             @update:model-value="deps.newModel.reasoning = $event"
           />
         </div>
-        <Button class="h-8 shrink-0 px-3 text-[12px]" @click="$emit('addModel')">{{ t('settings.providerEdit.addBtn') }}</Button>
+        <Button class="h-8 shrink-0 px-3 text-[length:var(--text-xs)]" @click="$emit('addModel')">{{ t('settings.providerEdit.addBtn') }}</Button>
       </div>
     </div>
 
     <!-- 模型列表 -->
     <div class="min-h-0 flex-1 overflow-y-auto">
-      <div v-if="!localModels.length" class="py-8 text-center text-[12px] text-neutral-mid">{{ t('settings.providerEdit.noModels') }}</div>
+      <div v-if="!localModels.length" class="py-8 text-center text-[length:var(--text-xs)] text-neutral-mid">{{ t('settings.providerEdit.noModels') }}</div>
 
       <!-- 表头。非名称列统一 text-center，与下方行 value 单元格对齐方式一致。 -->
-      <div v-if="localModels.length" class="flex items-center border-b border-border bg-surface px-5 py-2 text-center text-[10px] text-neutral-dim">
+      <div v-if="localModels.length" class="flex items-center border-b border-border bg-surface px-5 py-2 text-center text-[length:var(--text-3xs)] text-neutral-dim">
         <span class="flex-1 text-left">{{ t('settings.providerEdit.modelLabel') }}</span>
         <span class="w-14">{{ t('settings.providerEdit.headInput') }}</span>
         <span class="w-[80px]">{{ t('settings.providerEdit.headContext') }}</span>
@@ -99,7 +99,7 @@
         class="border-b border-border"
       >
         <!-- 横向行（原列内容）-->
-        <div class="flex items-center px-5 py-2 text-[12px]">
+        <div class="flex items-center px-5 py-2 text-[length:var(--text-xs)]">
           <span class="flex flex-1 min-w-0 items-center gap-1.5">
             <span class="truncate font-mono text-neutral-fg">{{ m.id }}</span>
             <!-- 来源徽章（B-2：catalog 复用时标「自定义」；custom 不传不渲染） -->
@@ -132,7 +132,7 @@
               :model-value="m.contextWindow"
               @update:model-value="onCtxSelect(m, $event)"
             >
-              <SelectTrigger class="h-7 w-[72px] px-1.5 py-0 text-[11px]">
+              <SelectTrigger class="h-7 w-[72px] px-1.5 py-0 text-[length:var(--text-2xs)]">
                 <SelectValue placeholder="—" />
               </SelectTrigger>
               <SelectContent>
@@ -146,7 +146,7 @@
               :model-value="deps.getStrategyFromMap(m.thinkingLevelMap)"
               @update:model-value="onStrategySelect(m, $event)"
             >
-              <SelectTrigger class="h-7 w-[88px] px-1.5 py-0 text-[11px]">
+              <SelectTrigger class="h-7 w-[88px] px-1.5 py-0 text-[length:var(--text-2xs)]">
                 <SelectValue placeholder="—" />
               </SelectTrigger>
               <SelectContent>

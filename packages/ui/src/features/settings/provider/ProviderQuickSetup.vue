@@ -139,30 +139,30 @@ function onOAuthLogin(): void {
 
       <!-- 内置配置信息块（demo builtinInfo）。端点/协议按模板模型集聚合展示（M4/D5）：
            模板 provider 级 api/baseUrl 是构建期 artifact，禁止直接展示。 -->
-      <div class="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 rounded-md border border-border bg-surface-2 px-3 py-2.5 text-[12px]">
+      <div class="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 rounded-md border border-border bg-surface-2 px-3 py-2.5 text-[length:var(--text-xs)]">
         <span class="text-neutral-dim">{{ t('settings.provider.builtinTemplate.infoBaseUrl') }}</span>
-        <span class="truncate font-mono text-[11px] text-neutral-fg" data-testid="builtin-baseurl">{{ templateBaseUrlText }}</span>
+        <span class="truncate font-mono text-[length:var(--text-2xs)] text-neutral-fg" data-testid="builtin-baseurl">{{ templateBaseUrlText }}</span>
         <span class="text-neutral-dim">{{ t('settings.provider.builtinTemplate.infoApi') }}</span>
         <span class="truncate text-neutral-fg" data-testid="builtin-api">{{ templateApiText }}</span>
         <!-- 推荐环境变量（demo envLine） -->
         <template v-if="template.envVars.length > 0">
           <span class="text-neutral-dim">{{ t('settings.provider.builtinTemplate.infoEnvVar') }}</span>
-          <span class="truncate font-mono text-[11px] text-neutral-fg" data-testid="builtin-envvar">${{ template.envVars[0] }}</span>
+          <span class="truncate font-mono text-[length:var(--text-2xs)] text-neutral-fg" data-testid="builtin-envvar">${{ template.envVars[0] }}</span>
         </template>
         <span class="text-neutral-dim">{{ t('settings.provider.builtinTemplate.infoModels') }}</span>
         <span data-testid="builtin-models">
           <code
             v-for="m in template.models.slice(0, 8)"
             :key="m.id"
-            class="mr-1 rounded-sm bg-surface-hover px-1 py-0.5 font-mono text-[10px] text-neutral-mid"
+            class="mr-1 rounded-sm bg-surface-hover px-1 py-0.5 font-mono text-[length:var(--text-3xs)] text-neutral-mid"
           >{{ m.id }}</code>
-          <span v-if="template.models.length > 8" class="text-[10px] text-neutral-dim">+{{ template.models.length - 8 }}</span>
+          <span v-if="template.models.length > 8" class="text-[length:var(--text-3xs)] text-neutral-dim">+{{ template.models.length - 8 }}</span>
         </span>
       </div>
 
       <!-- 认证方式（demo auth-options，radio 四选一） -->
       <div class="flex flex-col gap-2">
-        <Label class="text-[11px] font-semibold uppercase tracking-wide text-neutral-mid">
+        <Label class="text-[length:var(--text-2xs)] font-semibold uppercase tracking-wide text-neutral-mid">
           {{ t('settings.provider.builtinTemplate.credentialModeLabel') }}
         </Label>
         <div
@@ -182,7 +182,7 @@ function onOAuthLogin(): void {
             >
               <span v-if="authMethod === opt.id" class="size-2 rounded-full bg-accent"></span>
             </span>
-            <span class="flex-1 text-[13px] font-medium text-neutral-fg">{{ t(`settings.provider.builtinTemplate.${opt.titleKey}`) }}</span>
+            <span class="flex-1 text-[length:var(--text-sm)] font-medium text-neutral-fg">{{ t(`settings.provider.builtinTemplate.${opt.titleKey}`) }}</span>
             <span
               v-if="opt.rec"
               class="rounded-sm bg-accent px-1.5 py-0.5 text-[9px] font-semibold text-accent-fg"
@@ -236,7 +236,7 @@ function onOAuthLogin(): void {
               <!-- 检测态（demo env-detected） -->
               <div
                 v-if="envDetected !== undefined"
-                class="mt-1.5 flex items-center gap-1.5 text-[11px]"
+                class="mt-1.5 flex items-center gap-1.5 text-[length:var(--text-2xs)]"
                 :class="envDetected ? 'text-success' : 'text-warn'"
                 data-testid="env-detected"
               >
@@ -246,7 +246,7 @@ function onOAuthLogin(): void {
                   ? t('settings.provider.builtinTemplate.envDetected', { name: resolvedEnvVar })
                   : t('settings.provider.builtinTemplate.envNotSet', { name: resolvedEnvVar }) }}
               </div>
-              <div class="mt-1.5 text-[10px] text-neutral-dim">
+              <div class="mt-1.5 text-[length:var(--text-3xs)] text-neutral-dim">
                 {{ t('settings.provider.builtinTemplate.envStoredPreview', { value: `$${resolvedEnvVar || 'VAR'}` }) }}
               </div>
             </template>
@@ -255,7 +255,7 @@ function onOAuthLogin(): void {
             <div v-else-if="opt.id === 'oauth'" class="text-center">
               <div
                 v-if="oauthAuthorized"
-                class="flex items-center justify-center gap-1.5 text-[12px] font-medium text-success"
+                class="flex items-center justify-center gap-1.5 text-[length:var(--text-xs)] font-medium text-success"
                 data-testid="oauth-authorized"
               >
                 <Check class="size-4" />
@@ -269,14 +269,14 @@ function onOAuthLogin(): void {
                 >
                   {{ t('settings.provider.builtinTemplate.oauthLogin', { name: template.oauthName || template.name }) }}
                 </Button>
-                <p class="mt-1.5 text-[11px] text-neutral-dim">
+                <p class="mt-1.5 text-[length:var(--text-2xs)] text-neutral-dim">
                   {{ t('settings.provider.builtinTemplate.oauthHint', { name: template.oauthName || template.name }) }}
                 </p>
               </template>
             </div>
 
             <!-- 云凭证：说明（demo ambient-box） -->
-            <div v-else-if="opt.id === 'ambient'" class="flex items-center gap-1.5 text-[12px] text-neutral-mid" data-testid="credential-ambient">
+            <div v-else-if="opt.id === 'ambient'" class="flex items-center gap-1.5 text-[length:var(--text-xs)] text-neutral-mid" data-testid="credential-ambient">
               <Cloud class="size-4 shrink-0 text-neutral-dim" />
               {{ t('settings.provider.builtinTemplate.ambientHint') }}
             </div>
@@ -286,7 +286,7 @@ function onOAuthLogin(): void {
 
       <!-- 底部操作区：footer hint + 取消/保存 -->
       <div class="flex items-center justify-end gap-2">
-        <span class="mr-auto text-[11px] text-neutral-dim" data-testid="footer-hint">{{ footerHint }}</span>
+        <span class="mr-auto text-[length:var(--text-2xs)] text-neutral-dim" data-testid="footer-hint">{{ footerHint }}</span>
         <Button variant="secondary" size="dense" @click="emit('cancel')">
           {{ t('settings.providerEdit.cancel') }}
         </Button>
