@@ -417,12 +417,19 @@ describe('SystemNotice D3 增强规格（U3）', () => {
     }
   })
 
-  it('主文案：text-sm + --fw-mid 字重 + fg 提色；行距 py-1.5；动效与内容列宽度不动', () => {
+  it('主文案：text-sm + --fw-mid 字重 + fg 提色；静态外部行距 = 裁决三值（pt-[13px] pb-[19px]，specs/chat/system-notices.md §4）；inline 行保持 py-1.5；动效与内容列宽度不动', () => {
     const wrapper = mount(SystemNotice, { props: { message: compactionMessage(1000) } })
     const row = wrapper.find('.system-notice')
-    expect(row.classes()).toContain('py-1.5')
+    // 静态外部行（缺省）：demo 权威间距（margin 10/16 + 行内 padding 3px 的合成视觉值）
+    expect(row.classes()).toContain('pt-[13px]')
+    expect(row.classes()).toContain('pb-[19px]')
+    expect(row.classes()).not.toContain('py-1.5')
     expect(row.classes()).toContain('animate-notice-in')
     expect(row.classes()).toContain('content-col')
+    // 轮内 inline 行（工作态收纳通知的临时外部行）：维持现状行距
+    const inlineRow = mount(SystemNotice, { props: { message: compactionMessage(1000), inline: true } }).find('.system-notice')
+    expect(inlineRow.classes()).toContain('py-1.5')
+    expect(inlineRow.classes()).not.toContain('pt-[13px]')
     const text = row.find('[data-testid="system-notice-text"]')
     expect(text.classes()).toEqual(
       expect.arrayContaining(['text-[length:var(--text-sm)]', '[font-weight:var(--fw-mid)]', 'text-neutral-fg']),

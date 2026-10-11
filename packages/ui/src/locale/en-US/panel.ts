@@ -205,6 +205,34 @@ export default {
     // Turn.vue): dedicated key, not reusing traceFailed ("{count} failed" belongs to the
     // TraceCompactorRow compacted-row phrasing — different semantic domain)
     turnTriggerBgNotifyFailed: '{count} failed',
+    // [bg-notice-fold specs/chat/system-notices.md §3.3] settled-turn folded label: segmented by
+    // type (occurrence order deduped, "·" joined; elapsed stays as the single trailing number).
+    // Managed session is the fourth member — its wording awaits user ruling (spec §6); the
+    // fold-into-meta demo proposal lands for now
+    noticeFoldedBash: 'Handled background tasks',
+    noticeFoldedSubagent: 'Handled Subagent',
+    noticeFoldedWorkflow: 'Handled Workflow',
+    noticeFoldedManagedSession: 'Handled managed sessions',
+    // Folded-row failure tag (warn pill, scannable without expanding)
+    noticeFoldFailedTag: '{count} failed',
+    // Type words (explanation-card header / expanded detail-row type column)
+    noticeTypeBash: 'Background task',
+    noticeTypeSubagent: 'Subagent',
+    noticeTypeWorkflow: 'Workflow',
+    noticeTypeManagedSession: 'Managed session',
+    // Explanation-card description (§3.5: one-line meaning + per-type tally)
+    noticeTypeDescBash: 'Background command: a shell command started in the background before your confirmation; it arrives as a notification when done and folds into this summary when the round settles.',
+    noticeTypeDescSubagent: 'Background subagent: an independently running subagent task that reports its result when finished.',
+    noticeTypeDescWorkflow: 'Background workflow: a multi-step orchestrated run that reports its overall result when finished.',
+    noticeTypeDescManagedSession: 'Managed sub-session: a sub-session supervised by the main session whose terminal state arrives as a notification.',
+    // Explanation-card per-type tally (failure K appended only when K > 0)
+    noticeTypeSummaryOk: '{total} total · {ok} succeeded',
+    noticeTypeSummaryFail: '{failed} failed',
+    // Expanded detail-row status words (bash uses literal "exit N"; timeout and non-bash types use words)
+    noticeStatusSuccess: 'success',
+    noticeStatusFailed: 'failed',
+    noticeStatusNeutral: 'cancelled',
+    noticeStatusTimeout: 'timeout',
     // [W4 turn-attribution] executing-bash transient row prefix (MessageStream.vue → ActivityStrip row)
     executingBash: 'Running',
     // [notice-family-phrase-detail 2026-09-18 option A] executing-bash row elapsed meta — keeps an

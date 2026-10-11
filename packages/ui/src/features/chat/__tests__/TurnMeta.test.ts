@@ -338,3 +338,113 @@ describe('长时生成分级配色已删除（回归锚点）', () => {
     expect(spinner.classes().some((c) => c.includes('warn') || c.includes('danger'))).toBe(false)
   })
 })
+
+// ═════════════════════════════════════════════════════════
+// [bg-notice-fold specs/chat/system-notices.md §3.3/§3.5] settle 收纳折叠标签：
+// 落成态状态字换为「已处理 …」分段（发生序去重 + · 连接），失败词标跨类型累计；
+// 工作态维持「工作中」（临时外部行由 Turn 渲染，两形态不重复出现）。
+// ui 包 i18n mock 回 key 本体（vitest.setup.ts），文案断言锚定键名 + 分段结构。
+// ═════════════════════════════════════════════════════════
+import type { FoldedNoticeRow } from '@taiji/core/domain/chat'
+
+function foldedRow(over: Partial<FoldedNoticeRow> = {}): FoldedNoticeRow {
+  return {
+    type: 'bash',
+    summary: 'pnpm test',
+    fullText: 'pnpm test',
+    outcome: 'success',
+    id: 'task-1',
+    ...over,
+  }
+}
+
+describe('bg-notice-fold: TurnMeta settle 收纳折叠标签', () => {
+  it('落成态：分段标签渲染 + 失败词标 + 类型词 testid（ui i18n mock 回 key）', () => {
+    const turn = makeTurn()
+    const wrapper = mount(TurnMeta, {
+      props: {
+        turn,
+        isWorkingTurn: false,
+        isStreaming: false,
+        thinkCount: 0,
+        toolCount: 0,
+        elapsed: '4s',
+        startedAt: NOW,
+        endedAt: NOW + 4000,
+        isLive: false,
+        turnIndex: turn.index,
+        turnKey: turnStableId(turn),
+        sessionId: SID,
+        foldedRows: [
+          foldedRow({ type: 'bash', outcome: 'success', id: 't1' }),
+          foldedRow({ type: 'bash', outcome: 'failed', id: 't2', summary: 'lint' }),
+          foldedRow({ type: 'subagent', outcome: 'success', id: 'sa-1', summary: 'reviewer' }),
+        ],
+      },
+      global: { provide: mockChatProvide() },
+    })
+    const lbl = wrapper.find('.lbl')
+    // 分段 = 发生序去重（bash 只一段）+ · 分隔；键名即文案源（ui mock 回 key）
+    expect(lbl.text()).toContain('panel.message.noticeFoldedBash')
+    expect(lbl.text()).toContain('panel.message.noticeFoldedSubagent')
+    expect(lbl.text()).toContain('·')
+    // 类型词 testid（bash/subagent 两段；同类型去重后不重复）
+    expect(wrapper.findAll('[data-testid="turn-meta-folded-type-bash"]')).toHaveLength(1)
+    expect(wrapper.find('[data-testid="turn-meta-folded-type-subagent"]').exists()).toBe(true)
+    // 失败词标（1 项失败，跨类型累计）+ warn 档
+    const failTag = wrapper.find('[data-testid="turn-meta-folded-failed"]')
+    expect(failTag.exists()).toBe(true)
+    expect(failTag.text()).toContain('panel.message.noticeFoldFailedTag')
+    expect(failTag.classes()).toContain('text-warn')
+    // elapsed 段保留（收纳标签只替换状态字，时长沿用）
+    expect(wrapper.find('.elapsed').text()).toBe('4s')
+  })
+
+  it('落成态全成功：无失败词标', () => {
+    const turn = makeTurn()
+    const wrapper = mount(TurnMeta, {
+      props: {
+        turn,
+        isWorkingTurn: false,
+        isStreaming: false,
+        thinkCount: 0,
+        toolCount: 0,
+        elapsed: '2s',
+        startedAt: NOW,
+        endedAt: NOW + 2000,
+        isLive: false,
+        turnIndex: turn.index,
+        turnKey: turnStableId(turn),
+        sessionId: SID,
+        foldedRows: [foldedRow({ outcome: 'success' })],
+      },
+      global: { provide: mockChatProvide() },
+    })
+    expect(wrapper.find('[data-testid="turn-meta-folded-failed"]').exists()).toBe(false)
+  })
+
+  it('工作态：状态字维持「工作中」（key），折叠分段与失败词标都不渲染', () => {
+    const turn = makeTurn()
+    const wrapper = mount(TurnMeta, {
+      props: {
+        turn,
+        isWorkingTurn: true,
+        isStreaming: true,
+        thinkCount: 0,
+        toolCount: 0,
+        elapsed: '2s',
+        startedAt: NOW,
+        endedAt: NOW + 2000,
+        isLive: true,
+        turnIndex: turn.index,
+        turnKey: turnStableId(turn),
+        sessionId: SID,
+        foldedRows: [foldedRow({ outcome: 'failed' })],
+      },
+      global: { provide: mockChatProvide() },
+    })
+    expect(wrapper.find('.lbl').text()).toBe('panel.message.working')
+    expect(wrapper.find('[data-testid="turn-meta-folded-type-bash"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="turn-meta-folded-failed"]').exists()).toBe(false)
+  })
+})

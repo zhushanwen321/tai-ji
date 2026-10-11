@@ -199,6 +199,33 @@ export default {
     // [system-notice-rendering-upgrade U6] 边界行失败分句（D5「· M 失败」，Turn.vue 消费）：
     // 专用键不复用 traceFailed（「含 {count} 次失败」属 TraceCompactorRow 收编行句式，两者语义域不同）
     turnTriggerBgNotifyFailed: '{count} 失败',
+    // [bg-notice-fold specs/chat/system-notices.md §3.3] settle 收纳后轮头行折叠标签：按类型
+    // 分段（发生序去重，「·」连接，耗时沿用 elapsed 段单数字）。托管会话为第四成员，折叠词
+    // 待用户裁决（spec §6），暂按 fold-into-meta demo 提案值落地
+    noticeFoldedBash: '已处理后台任务',
+    noticeFoldedSubagent: '已处理 Subagent',
+    noticeFoldedWorkflow: '已处理 Workflow',
+    noticeFoldedManagedSession: '已处理托管会话',
+    // 折叠行失败词标（warn 色胶囊，不展开也可扫到异常终态）
+    noticeFoldFailedTag: '{count} 项失败',
+    // 类型词（解释卡词头 / 展开明细行类型列）
+    noticeTypeBash: '后台任务',
+    noticeTypeSubagent: 'Subagent',
+    noticeTypeWorkflow: 'Workflow',
+    noticeTypeManagedSession: '托管会话',
+    // 类型词解释卡词义（§3.5：一句词义 + 该类型汇总）
+    noticeTypeDescBash: '后台命令：在你确认前已在后台启动的 shell 命令，完成时以通知到达，本轮结束时收进这条摘要。',
+    noticeTypeDescSubagent: '后台子代理：独立运行的子代理任务，完成后汇报结果。',
+    noticeTypeDescWorkflow: '后台 workflow：多步编排运行，完成后汇报整体结果。',
+    noticeTypeDescManagedSession: '托管子会话：由主会话托管运行的子会话，终态以通知到达。',
+    // 解释卡该类型汇总（失败 K 仅在 K>0 时追加拼接）
+    noticeTypeSummaryOk: '{total} 条 · 成功 {ok}',
+    noticeTypeSummaryFail: '失败 {failed}',
+    // 展开明细行状态词（bash 用 exit N 字面量；timeout 与非 bash 类型用词）
+    noticeStatusSuccess: '成功',
+    noticeStatusFailed: '失败',
+    noticeStatusNeutral: '已取消',
+    noticeStatusTimeout: '超时',
     // [W4 turn-attribution] bash 执行中瞬时行前缀（MessageStream.vue → ActivityStrip 行）
     executingBash: '正在执行',
     // [notice-family-phrase-detail 2026-09-18 方案 A] bash 执行行 elapsed meta——命令移入悬停

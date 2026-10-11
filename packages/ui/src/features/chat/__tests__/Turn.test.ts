@@ -519,13 +519,16 @@ describe('turn-attribution W4: trigger 起点行 + turn 内 notice', () => {
     } as Message
   }
 
-  it('W4-T1: trigger turn（user:null + trigger:bg-notify）→ 起点行渲染且含从文案，UserBubble 不渲染', () => {
-    const wrapper = mountTurn({ turn: makeTriggerTurn() })
+  it('W4-T1: trigger turn（user:null + trigger:bg-notify）工作态 → 起点行渲染且含从文案，UserBubble 不渲染；落成态起点行退役（specs/chat/system-notices.md §3：数据收进轮头行）', () => {
+    const wrapper = mountTurn({ turn: makeTriggerTurn(), isSessionActive: true, isLastTurn: true })
     const row = wrapper.find('[data-testid="turn-trigger-bgnotify"]')
     expect(row.exists()).toBe(true)
     expect(row.text()).toContain('已继续处理')
     // 非 user 气泡：起点行是弱化元信息行，不冒充用户发言
     expect(wrapper.findComponent(UserBubble).exists()).toBe(false)
+    // 落成态（settle）：聚合行摘除，收纳数据改道 TurnMeta 折叠标签
+    const settled = mountTurn({ turn: makeTriggerTurn(), isSessionActive: false, isLastTurn: true })
+    expect(settled.find('[data-testid="turn-trigger-bgnotify"]').exists()).toBe(false)
   })
 
   it('W4-T2: 普通 user turn → 无 trigger 起点行（UserBubble 正常渲染）', () => {
@@ -568,6 +571,8 @@ describe('turn-attribution W4: trigger 起点行 + turn 内 notice', () => {
   it('W4-N3: trigger turn 也可携带 notices（后台续跑期间跑过 `!` 命令）——起点行与 notice 共存', () => {
     const wrapper = mountTurn({
       turn: makeTriggerTurn({ notices: [bashNotice('bash-t1')] }),
+      isSessionActive: true,
+      isLastTurn: true,
     })
     expect(wrapper.find('[data-testid="turn-trigger-bgnotify"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="turn-inline-bash"]').exists()).toBe(true)
@@ -608,7 +613,7 @@ describe('U6 D5: trigger 起点行聚合渲染', () => {
   }
 
   it('D5-ICON1: failedCount>0 → 图标 warn（TriangleAlert）且失败分句渲染', () => {
-    const wrapper = mountTurn({ turn: makeSummaryTurn(summaryOf(['success', 'failed'], { count: 3, failedCount: 1 })) })
+    const wrapper = mountTurn({ turn: makeSummaryTurn(summaryOf(['success', 'failed'], { count: 3, failedCount: 1 })), isSessionActive: true, isLastTurn: true })
     const icon = wrapper.find('[data-testid="turn-trigger-bgnotify-icon"]')
     expect(icon.classes()).toContain('text-warn')
     expect(wrapper.findComponent(TriangleAlert).exists()).toBe(true)
@@ -617,7 +622,7 @@ describe('U6 D5: trigger 起点行聚合渲染', () => {
   })
 
   it('D5-ICON2: failedCount===0 且 neutralCount>0 → 图标中性（Bell，不冒充成功）', () => {
-    const wrapper = mountTurn({ turn: makeSummaryTurn(summaryOf(['success', 'neutral'], { count: 2, neutralCount: 1 })) })
+    const wrapper = mountTurn({ turn: makeSummaryTurn(summaryOf(['success', 'neutral'], { count: 2, neutralCount: 1 })), isSessionActive: true, isLastTurn: true })
     const icon = wrapper.find('[data-testid="turn-trigger-bgnotify-icon"]')
     expect(icon.classes()).toContain('text-neutral-mid')
     expect(wrapper.findComponent(Bell).exists()).toBe(true)
@@ -626,7 +631,7 @@ describe('U6 D5: trigger 起点行聚合渲染', () => {
   })
 
   it('D5-ICON3: 全成功 → 图标 success（CheckCircle2）', () => {
-    const wrapper = mountTurn({ turn: makeSummaryTurn(summaryOf(['success', 'success'])) })
+    const wrapper = mountTurn({ turn: makeSummaryTurn(summaryOf(['success', 'success'])), isSessionActive: true, isLastTurn: true })
     const icon = wrapper.find('[data-testid="turn-trigger-bgnotify-icon"]')
     expect(icon.classes()).toContain('text-success')
     expect(wrapper.findComponent(CheckCircle2).exists()).toBe(true)
@@ -637,6 +642,8 @@ describe('U6 D5: trigger 起点行聚合渲染', () => {
       turn: makeSummaryTurn(
         summaryOf(['success', 'failed', 'neutral'], { count: 3, durationMs: 1_563_000 }),
       ),
+      isSessionActive: true,
+      isLastTurn: true,
     })
     expect(wrapper.find('[data-testid="turn-trigger-bgnotify-count"]').text()).toBe('3 个后台任务完成')
     expect(wrapper.find('[data-testid="turn-trigger-bgnotify-failed"]').text()).toBe('1 失败')
@@ -660,6 +667,8 @@ describe('U6 D5: trigger 起点行聚合渲染', () => {
   it('D5-EMPTY: count===0（全解析失败/中性）→ 不渲染计数段与点列，从文案不带前导点', () => {
     const wrapper = mountTurn({
       turn: makeSummaryTurn({ count: 0, failedCount: 0, neutralCount: 2, outcomes: [] }),
+      isSessionActive: true,
+      isLastTurn: true,
     })
     expect(wrapper.find('[data-testid="turn-trigger-bgnotify-count"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="turn-trigger-bgnotify-dots"]').exists()).toBe(false)
@@ -672,22 +681,22 @@ describe('U6 D5: trigger 起点行聚合渲染', () => {
 
   it('D5-DOTS: >8 条去重记录只显计数（点列不渲染）', () => {
     const outcomes: NotifySummary['outcomes'] = new Array(9).fill('success')
-    const wrapper = mountTurn({ turn: makeSummaryTurn(summaryOf(outcomes)) })
+    const wrapper = mountTurn({ turn: makeSummaryTurn(summaryOf(outcomes)), isSessionActive: true, isLastTurn: true })
     expect(wrapper.find('[data-testid="turn-trigger-bgnotify-dots"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="turn-trigger-bgnotify-count"]').text()).toBe('9 个后台任务完成')
   })
 
   it('D5-DURATION: 无含值记录不渲染耗时 meta；秒级/时级格式与设计样本一致', () => {
-    const noDuration = mountTurn({ turn: makeSummaryTurn(summaryOf(['success'])) })
+    const noDuration = mountTurn({ turn: makeSummaryTurn(summaryOf(['success'])), isSessionActive: true, isLastTurn: true })
     expect(noDuration.find('[data-testid="turn-trigger-bgnotify-duration"]').exists()).toBe(false)
-    const seconds = mountTurn({ turn: makeSummaryTurn(summaryOf(['success'], { durationMs: 45_000 })) })
+    const seconds = mountTurn({ turn: makeSummaryTurn(summaryOf(['success'], { durationMs: 45_000 })), isSessionActive: true, isLastTurn: true })
     expect(seconds.find('[data-testid="turn-trigger-bgnotify-duration"]').text()).toBe('45s')
-    const hours = mountTurn({ turn: makeSummaryTurn(summaryOf(['success'], { durationMs: 3_723_000 })) })
+    const hours = mountTurn({ turn: makeSummaryTurn(summaryOf(['success'], { durationMs: 3_723_000 })), isSessionActive: true, isLastTurn: true })
     expect(hours.find('[data-testid="turn-trigger-bgnotify-duration"]').text()).toBe('1h02m03s')
   })
 
   it('D5-NOSUMMARY: 无 notifySummary（历史 turn / 空载体）→ 行形态回到无聚合态（只有图标 + 从文案）', () => {
-    const wrapper = mountTurn({ turn: makeSummaryTurn(undefined) })
+    const wrapper = mountTurn({ turn: makeSummaryTurn(undefined), isSessionActive: true, isLastTurn: true })
     // 无聚合值：行仍渲染（trigger 语义），但不带任何聚合段
     expect(wrapper.find('[data-testid="turn-trigger-bgnotify-count"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="turn-trigger-bgnotify-duration"]').exists()).toBe(false)

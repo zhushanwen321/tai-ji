@@ -21,6 +21,20 @@
     :class="isLastTurn ? '' : 'pb-5'"
     :data-testid="`turn-${turn.index}`"
   >
+    <!-- 收纳完成通知的临时外部行（specs/chat/system-notices.md §3.2 生命周期）：工作态按
+         「现状外部形态」渲染在轮头行上方（inline 行距），settle 后消失——同一批通知在流内
+         只出现一次（外部行与折叠标签不重复渲染）。bash 结构化行经 core isBashCompleteNotice
+         判定过滤（判定单点不复制）；隐藏通知（subagent/workflow）无外部行。 -->
+    <template v-if="isWorkingTurn">
+      <SystemNotice
+        v-for="m in workingBashNotices"
+        :key="m.id"
+        :message="m"
+        inline
+        data-testid="turn-folded-notice-external"
+      />
+    </template>
+
     <!-- user 区：UserBubble 子组件 -->
     <UserBubble
       v-if="turn.user"
@@ -31,13 +45,13 @@
       @edit-state-change="emit('edit-state-change', $event)"
     />
 
-    <!-- trigger 起点行（W4·D3 + U6·D5 聚合增强）：无 user 起点的后台续跑 turn（隐藏完成通知
-         边界开启）渲染轻量弱化起点行替代 user 气泡——横线分隔（D3 增强规格：border-strong +
-         两端渐隐）+ 三态图标 + 计数/成败/耗时，视觉语言对齐 SystemNotice 元信息行（不冒充用户
-         发言）。计数/成败/耗时来自 core 分组层 notifySummary（D5 单一派生点），渲染层零解析、
-         零回扫 store。assistant 自启 turn（user:null 无 trigger）两者皆不渲染。 -->
+    <!-- trigger 起点行（W4·D3 + U6·D5 聚合增强；[bg-notice-fold] settle 后退役）：无 user 起点的
+         后台续跑 turn 仅在工作态渲染聚合行（「N 个后台任务完成 · M 失败 ●●● · 已继续处理 · 耗时」
+         ——视觉语言对齐 SystemNotice 元信息行）。落成态聚合行摘除，数据已随分组层收进轮头行
+         （TurnMeta 折叠分段标签 + 展开明细行，specs/chat/system-notices.md §3）。assistant
+         自启 turn（user:null 无 trigger）两者皆不渲染。 -->
     <div
-      v-else-if="turn.trigger === 'bg-notify'"
+      v-else-if="turn.trigger === 'bg-notify' && isWorkingTurn"
       class="mx-auto flex w-full min-w-0 items-center gap-2 py-1.5 animate-notice-in"
       data-testid="turn-trigger-bgnotify"
     >
@@ -82,7 +96,8 @@
 
     <!-- assistant 区 -->
     <div class="group/ai flex flex-col gap-0 self-stretch">
-      <!-- turn-meta：TurnMeta 子组件（展开态直接读 useTurnExpansion 共享 store） -->
+      <!-- turn-meta：TurnMeta 子组件（展开态直接读 useTurnExpansion 共享 store）；
+           foldedRows = 收纳明细行（core 单点派生），justDone = 落成瞬间一次性高亮信号 -->
       <TurnMeta
         :turn="turn"
         :is-working-turn="isWorkingTurn"
@@ -94,6 +109,8 @@
         :ended-at="endedAt"
         :is-live="isLive"
         :generated-tokens="generatedTokens"
+        :folded-rows="foldedRows"
+        :just-done="justDone"
         :turn-index="turn.index"
         :turn-key="turnStableId(turn)"
         :session-id="sessionId"
@@ -102,7 +119,7 @@
       <!-- trace 容器：恒渲染（v-if 下沉 Block 级）。mt-[12px] = TurnMeta→首块 12px（原由首块
            py-2 顶距参与合成的节奏，块 padding 退役后归容器单值，ui-optimize-unified 决策 4）。
            无 mb（demo 轮次边界唯一贡献 = 根元素 pb-5 的 20px；原 mb-1 为 TurnSummary 流内
-           占位预留，悬浮化后移除——docs/todo/turn-boundary-rhythm.md 选项 2 落地）。
+           占位预留，TurnSummary 悬浮化后移除）。
            折叠态（!showTrace）仅末位 text 正文（scope wave D1）；
            工作展开态（showTrace && isWorkingTurn）渲染 computeTraceWindow 窗口切片结果
              （末位 text + 进行中块 + 最近 W 个已完成过程块）；
@@ -116,6 +133,42 @@
            trace--just-done = 轮次落完成瞬间的换块落位标记（200ms 淡入 + 4px 落位），仅刚落
            完成的轮次携带（justDone ref，见 script），历史轮不误标。 -->
       <div class="trace mt-[12px] flex flex-col" :class="{ 'trace--live': isWorkingTurn, 'trace--just-done': justDone }">
+        <!-- 收纳完成通知展开明细行（specs/chat/system-notices.md §3.4）：展开区首行起逐条一行
+             （低频查看区，行距紧凑、无横线装饰；成功弱档 dim / 失败 warn 不依赖 hover），
+             其后才是本轮 trace。仅落成态展开时渲染（工作态通知还是外部行，无明细可看）。 -->
+        <div
+          v-if="!isWorkingTurn && foldedRows.length > 0"
+          class="flex flex-col"
+          data-testid="turn-folded-notices"
+        >
+          <div
+            v-for="row in foldedRows"
+            :key="`${row.type}:${row.id}`"
+            class="flex items-baseline gap-2 py-[3px] text-[length:var(--text-xs)]"
+            :data-testid="`turn-folded-notice-${row.type}`"
+          >
+            <component
+              :is="FOLDED_TYPE_ICON[row.type]"
+              class="size-[13px] shrink-0 self-center text-neutral-dim"
+              stroke-width="1.6"
+            />
+            <span class="shrink-0 text-neutral-mid">{{ t(FOLDED_TYPE_WORD_KEY[row.type]) }}</span>
+            <span
+              class="min-w-0 flex-1 truncate font-mono text-neutral-dim"
+              :title="row.fullText"
+            >{{ row.summary }}</span>
+            <span
+              class="shrink-0 font-mono tabular-nums"
+              :class="row.outcome === 'failed' ? 'text-warn' : 'text-neutral-dim'"
+              data-testid="turn-folded-notice-status"
+            >{{ foldedStatusText(row, t) }}</span>
+            <span
+              v-if="row.durationMs !== undefined"
+              class="shrink-0 font-mono tabular-nums text-neutral-dim"
+            >{{ formatDurationHms(row.durationMs) }}</span>
+            <span class="ml-1 shrink-0 font-mono text-neutral-faint" data-testid="turn-folded-notice-id">{{ row.id }}</span>
+          </div>
+        </div>
         <TraceCompactorRow
           v-if="showTrace && isWorkingTurn && (takeover || traceWindow.compactedCount > 0 || traceWindow.failedCount > 0)"
           class="trace-compactor-row"
@@ -185,14 +238,23 @@ import { computed, ref, watch } from 'vue'
 import type { Component } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Bell, CheckCircle2, TriangleAlert } from '@lucide/vue'
-import type { MessageTurn, FlatBlock, TraceRenderUnit, NotifyOutcome, RunGroupBase } from '@taiji/core/domain/chat'
+import type {
+  FoldedNoticeRow,
+  MessageTurn,
+  FlatBlock,
+  TraceRenderUnit,
+  NotifyOutcome,
+  RunGroupBase,
+} from '@taiji/core/domain/chat'
 import {
   countThinking,
   countToolCalls,
+  deriveFoldedNoticeRows,
   deriveTurnAggregates,
   flattenTurnBlocks,
   computeTraceWindow,
   groupToolRuns,
+  isBashCompleteNotice,
   isRunGroupBlock,
   turnStableId,
   W,
@@ -206,6 +268,7 @@ import Block from './Block.vue'
 import TraceCompactorRow from './TraceCompactorRow.vue'
 import BashOutputBlock from './BashOutputBlock.vue'
 import SystemNotice from './SystemNotice.vue'
+import { FOLDED_TYPE_ICON, FOLDED_TYPE_WORD_KEY, foldedStatusText } from './folded-notice'
 import { useTurnElapsed } from './composables/useTurnElapsed'
 import { formatDurationHms } from './format-utils'
 import { useChatViewDeps } from './chat-view-deps'
@@ -381,6 +444,20 @@ const isWorkingTurn = computed(() => sessionActive.value && (props.isLastTurn ??
 
 const thinkCount = computed(() => countThinking(props.turn))
 const toolCount = computed(() => countToolCalls(props.turn))
+
+// ── 收纳完成通知（specs/chat/system-notices.md §3）─────────────────────────────
+// 明细行经 core deriveFoldedNoticeRows 单点派生（载荷解析 SSOT，渲染层零解析零回扫）；
+// 工作态临时外部行只取 bash 结构化行（隐藏通知无外部行形态——工作态走 D5 聚合行）。
+
+/** 收纳明细行（TurnMeta 折叠标签/解释卡 + 展开区明细行的共同数据源） */
+const foldedRows = computed<FoldedNoticeRow[]>(() =>
+  deriveFoldedNoticeRows(props.turn.foldedNotices ?? []),
+)
+
+/** 工作态临时外部行消息（bash 结构化行；settle 后本列表不再渲染） */
+const workingBashNotices = computed(() =>
+  (props.turn.foldedNotices ?? []).filter(isBashCompleteNotice),
+)
 
 /**
  * 整个 agent-turn 的聚合事实（core 纯函数，live 与 reload 同一公式）：

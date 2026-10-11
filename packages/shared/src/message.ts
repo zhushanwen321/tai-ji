@@ -598,6 +598,9 @@ export interface WorkflowResultNotify {
   /** 词表内的 reason 原值；词表外/缺失时不写入（保持 undefined，消费侧只看 outcome）。
    *  诊断透传字段：当前零生产读取，成败判定一律走 outcome。 */
   reason?: WorkflowDoneReason
+  /** run 名称（details.name，写侧 notifyDone 携带）——完成通知收纳明细行的摘要文本。
+   *  可选：旧 session / 畸形载荷缺失时消费侧回退 runId。 */
+  name?: string
 }
 
 /**
@@ -616,9 +619,12 @@ export function parseWorkflowResultNotify(details: unknown): WorkflowResultNotif
   if (!d) return null
   const runId = asRecordString(d.runId)
   if (!runId) return null
+  const name = asRecordString(d.name)
   const reason = asWorkflowDoneReason(d.reason)
-  if (!reason) return { runId, outcome: 'neutral' }
-  return { runId, outcome: WORKFLOW_DONE_REASON_OUTCOME[reason], reason }
+  if (!reason) return name ? { runId, outcome: 'neutral', name } : { runId, outcome: 'neutral' }
+  return name
+    ? { runId, outcome: WORKFLOW_DONE_REASON_OUTCOME[reason], reason, name }
+    : { runId, outcome: WORKFLOW_DONE_REASON_OUTCOME[reason], reason }
 }
 
 // ── Flow-2 代码变更审查数据契约（FileChanges 通道）──────────────────

@@ -33,14 +33,23 @@
   <!-- 横线分隔行族（D3 增强规格 + [notice-family-phrase-detail 2026-09-18 方案 A]）：compaction /
        branch / background-bash 结构化行 / 兜底原文行共用一套 DOM 结构——两端渐隐横线
        （transparent → --border-strong 18% → 82% → transparent）+ 13px/stroke 2.2 图标 +
-       主体（短语 text-sm/fg/550）+ 可选钉右 mono meta（text-2xs/500/tabular-nums），行距
-       py-1.5。三段 flex 居中结构 / content-col 宽度 / animate-notice-in 动效三项不动。
+       主体（短语 text-sm/fg/550）+ 可选钉右 mono meta（text-2xs/500/tabular-nums）。
+       行距（specs/chat/system-notices.md §4，2026-10 裁决三值 上 10 / 下 16 / 相邻 20——
+       修复「bottom 外部距离太短」）：静态外部行 = demo 权威形态 pt-[13px] pb-[19px]
+       （demo margin 10/16 + 行内 padding 3px 的合成视觉值；相邻两行 32px，与本族连发
+       「独立事件保留间隔感」判据一致）；轮内 inline 行（工作态收纳通知的临时外部行 /
+       liveOnly 健康警告）维持现状 py-1.5（临时形态按「现状外部形态出现」，settle 即摘除）。
+       三段 flex 居中结构 / content-col 宽度 / animate-notice-in 动效三项不动。
        方案 A 增补（主体有界 + 悬停详情）：主体只承载有界短语——无界载荷（background-bash
        命令原文 / 超 40 字符的兜底 system 原文）移入 HoverCard 悬停详情（只读 + 复制），
        行内不再渲染命令/长文原文。根治长载荷把 flex-1 横线挤成几像素残端或零宽的形态塌缩
        （横线长度自此不随载荷波动）；「后台」chip 随短语语义并入退役；族「静态无交互」判据
        收窄为「无点击交互入口」——悬停只读详情为唯一例外。 -->
-  <div v-else class="system-notice content-col flex min-w-0 animate-notice-in items-center gap-2 py-1.5">
+  <div
+    v-else
+    class="system-notice content-col flex min-w-0 animate-notice-in items-center gap-2"
+    :class="inline ? 'py-1.5' : 'pt-[13px] pb-[19px]'"
+  >
     <!-- 两端渐隐横线：Tailwind 任意值声明 background-image（h-px 高度由 class 承担） -->
     <span class="h-px flex-1 bg-[image:linear-gradient(to_right,transparent,var(--border-strong)_18%,var(--border-strong)_82%,transparent)]" />
     <!-- 图标 D3 规格：13px + stroke 2.2（与 ActivityStrip / Turn 起点行同规格） -->
@@ -125,9 +134,16 @@ import { formatDurationHms } from './format-utils'
 
 const { t } = useI18n()
 
-const props = defineProps<{
-  message: Message
-}>()
+const props = withDefaults(
+  defineProps<{
+    message: Message
+    /** 轮内 inline 形态（specs/chat/system-notices.md §4）：工作态收纳通知的临时外部行 /
+     *  liveOnly 健康警告等轮内消费点——维持现状行距 py-1.5；缺省（静态外部行）= 裁决三值的
+     *  demo 权威间距 pt-[13px] pb-[19px]。 */
+    inline?: boolean
+  }>(),
+  { inline: false },
+)
 
 const emit = defineEmits<{
   /** [u8] 重试按钮点击（仅 restoreFailed 形态渲染）——壳层接手动恢复 RPC */
