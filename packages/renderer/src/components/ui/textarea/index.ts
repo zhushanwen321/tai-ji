@@ -1,1 +1,1 @@
-export { default as Textarea } from './Textarea.vue'
+export { Textarea } from '@taiji/ui'
