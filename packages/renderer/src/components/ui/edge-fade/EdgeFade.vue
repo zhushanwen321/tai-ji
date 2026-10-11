@@ -3,6 +3,13 @@
 // 自包含：作为任意 overflow 滚动容器的第一个子元素挂载（sticky 钉在滚动视口顶，不随内容滚走）；
 // 自行监听滚动父级的 scroll（程序赋值 scrollTop 同样触发 scroll 事件）切换显隐，
 // 并直接驱动父级容器的顶部 mask（内容在渐焦带下淡出顶缘）——消费方零配置。
+// 渐焦 = 失焦 + 沉色双通道：四层渐高 blur 之上叠一层底色渐变（--edge-fade-sink，默认
+// --surface，峰值浓度 75%：光晕基本压平且保留失焦感），暗色压住亮字模糊的泛白光晕、
+// 亮色沉入纸白；底色非 --surface 的消费方在滚动容器上覆写 --edge-fade-sink。层遮罩与
+// 容器 mask 用多 stop 近似 smoothstep 的平滑剖面（线性渐变人眼感知中段偏快，多 stop
+// 消台阶感）。
+// [贴顶前提] 消费方滚动容器禁设顶部 padding——sticky 带的正常流位置会被压到 padding 之下，
+// 滚过 padding 前带悬浮于视口中部（顶缘露出未处理区）；顶部留白放滚动内容内（spacer）。
 // 降级：prefers-reduced-motion 关过渡（motion-reduce 变体）；prefers-reduced-transparency
 // 关整个渐焦效果（遮罩层隐藏 + 容器 mask 摘除）。
 import { ref, onMounted, onBeforeUnmount } from 'vue'
@@ -24,13 +31,16 @@ const LAYERS = [
 const SCROLL_TOP_THRESHOLD = 4
 /** 顶缘渐焦带高度（px），同时是容器 mask 的过渡段长度（demo 同值）。 */
 const FADE_BAND_HEIGHT = 40
+/** 容器 mask 多 stop 剖面的比例点（近似 smoothstep：40px 带上 13px/26px 两档过渡）。 */
+const MASK_STOP_SOFT = 0.325
+const MASK_STOP_FIRM = 0.65
 
 function sync(): void {
   if (!scroller) return
   const active = scroller.scrollTop > SCROLL_TOP_THRESHOLD && !reducedTransparency.value
   on.value = active
   const next = active
-    ? `linear-gradient(to bottom, transparent 0, #000 ${FADE_BAND_HEIGHT}px)`
+    ? `linear-gradient(to bottom, transparent 0, rgba(0,0,0,0.4) ${Math.round(FADE_BAND_HEIGHT * MASK_STOP_SOFT)}px, rgba(0,0,0,0.8) ${Math.round(FADE_BAND_HEIGHT * MASK_STOP_FIRM)}px, #000 ${FADE_BAND_HEIGHT}px)`
     : ''
   if (scroller.style.maskImage !== next) scroller.style.maskImage = next
 }
@@ -70,8 +80,13 @@ onBeforeUnmount(() => {
     <i
       v-for="(l, i) in LAYERS"
       :key="i"
-      class="absolute inset-x-0 top-0 block [mask-image:linear-gradient(to_bottom,#000_20%,transparent)] transition-opacity duration-[140ms] ease-[var(--ease-out)] motion-reduce:transition-none"
+      class="absolute inset-x-0 top-0 block [mask-image:linear-gradient(to_bottom,#000_12%,rgba(0,0,0,0.78)_34%,rgba(0,0,0,0.42)_62%,transparent_88%)] transition-opacity duration-[140ms] ease-[var(--ease-out)] motion-reduce:transition-none"
       :class="[l.blur, on ? 'opacity-100' : 'opacity-0']"
+    />
+    <i
+      aria-hidden="true"
+      class="absolute inset-x-0 top-0 block h-full bg-[linear-gradient(to_bottom,color-mix(in_oklab,var(--edge-fade-sink,var(--surface))_75%,transparent),transparent)] transition-opacity duration-[140ms] ease-[var(--ease-out)] motion-reduce:transition-none"
+      :class="on ? 'opacity-100' : 'opacity-0'"
     />
   </div>
 </template>

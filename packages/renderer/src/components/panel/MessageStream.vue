@@ -23,14 +23,21 @@
 
     <div
       ref="scrollEl"
-      class="message-stream relative flex-1 overflow-y-auto px-[30px] pt-[var(--message-stream-pad-top)] pb-[24px]"
+      class="message-stream relative flex-1 overflow-y-auto px-[30px] pb-[24px]"
       :style="{ overflowAnchor: 'none' }"
       @wheel="onWheel"
     >
     <!-- 顶缘渐焦（demo chat spec 裁决 4B）：滚动容器第一个子元素挂载（sticky 钉顶 + 负 margin
          净高 0 不参与布局，不扰动 virtua 测量），自驱动离顶（scrollTop>4）显隐 + 容器顶部 mask，
-         消费方零配置。降级：reduced-motion 关过渡 / reduced-transparency 整体摘除（组件内置）。 -->
+         消费方零配置。降级：reduced-motion 关过渡 / reduced-transparency 整体摘除（组件内置）。
+         [贴顶前提] 滚动容器禁设顶部 padding——sticky 正常流位置会被压到 padding 之下，滚过
+         padding 前带悬浮于视口中部（顶缘露出未处理区）；顶部留白由下方 spacer 承载
+         （2026-10-11 修法 A 裁决）。 -->
     <EdgeFade />
+    <!-- 顶部留白 spacer：EdgeFade 的 sticky 正常流位置因此与视口顶重合（滚动 1px 带即贴顶）。
+         virtua 每次滚动沿 offsetParent 链重测 container 偏移，前置兄弟高度自然计入，
+         startMargin 无需感知本 spacer。 -->
+    <div class="h-[var(--message-stream-pad-top)]" aria-hidden="true"></div>
     <!-- 空态欢迎语（G2-004）：独立于虚拟列表，作为 scrollEl 直接子节点撑满视口。
          Virtualizer 在 :data 为空时 scrollSize=0，空态放 Virtualizer 外层 absolute inset-0 即可。 -->
     <div v-if="renderItems.length === 0" class="absolute inset-0 flex flex-col items-center justify-center gap-2 text-center">
@@ -166,8 +173,8 @@
          点之平滑滚回并恢复锚定（force 同步清零距底快照 → 胶囊即时消失）。
          形态 = demo .to-latest：elevated 浮层底 + border-strong 边 + shadow-2 + 12px/600 字重 +
          0.02em 字距 + hover 提边框色（无底色反馈）；浮现 = opacity + 6px 上浮（demo .18s，
-         取令牌 --duration）。[&_svg] important：Button 基类 [&_svg]:size-4 特异性更高，
-         锁 13px 图标（demo .to-latest .sicon）需 ! 前缀（TrafficLight 同款先例）。 -->
+         取令牌 --duration）；图标 13px（demo .to-latest .sicon）= svg 普通尺寸类（Button 基类
+         图标默认规则已零特异性，普通类结构性恒赢，无需 important）。 -->
     <Transition name="fade">
       <Button
         v-if="showJumpButton"
@@ -177,7 +184,7 @@
         :title="t('panel.message.scrollToBottom')"
         @click="followToBottom(true, true)"
       >
-        <ChevronDown class="!size-[13px]" stroke-width="2" />
+        <ChevronDown class="size-[13px]" stroke-width="2" />
         <span>{{ t('panel.message.scrollToBottom') }}</span>
       </Button>
     </Transition>

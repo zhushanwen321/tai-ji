@@ -95,9 +95,12 @@
     </div>
 
     <!-- 输出尾部（等宽滚动块，running 时 2s 跟随；lost = 输出文件已清理/丢失，§3.1 失败路径）。
-         顶缘 EdgeFade（spec §3.5 五个可滚动面板）：滚动容器首子元素，sticky 离顶渐焦，自驱动。 -->
-    <div class="min-h-0 flex-1 overflow-auto px-3 py-2">
+         顶缘 EdgeFade（spec §3.5 五个可滚动面板）：滚动容器首子元素，sticky 离顶渐焦，自驱动。
+         [贴顶前提] 滚动容器禁设顶部 padding（sticky 正常流位置会被压到 padding 之下，滚过前
+         带悬浮于视口中部）——顶部留白由下方 spacer 承载，容器只保留 pb-2。 -->
+    <div class="min-h-0 flex-1 overflow-auto px-3 pb-2">
       <EdgeFade />
+      <div class="h-2" aria-hidden="true"></div>
       <div
         v-if="outputLost"
         class="text-[length:var(--text-2xs)] text-neutral-dim"

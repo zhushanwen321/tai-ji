@@ -153,7 +153,7 @@
   --content-max-w: min(720px, 100%); /* 内容列最大宽（settings/对话流收窄；窄容器自动让位满宽） */
   --content-max-w-wide: 1064px; /* 宽内容列上限（demo B2 宽形态阅读列） */
   --panel-bg: var(--surface);   /* panel 内 sticky 浮层底色契约 */
-  --message-stream-pad-top: 30px; /* 消息流顶部留白（M3c demo 复刻 30/30/24 容器留白；TurnMeta sticky 已移除，本值只承载 scrollEl pt） */
+  --message-stream-pad-top: 30px; /* 消息流顶部留白（M3c demo 复刻 30/30/24 容器留白；TurnMeta sticky 已移除，本值只承载滚动内容内 spacer——EdgeFade 贴顶前提：滚动容器自身禁设顶部 padding） */
   --z-sticky: 1;
   --z-popover: 10;
   --z-overlay: 20;
