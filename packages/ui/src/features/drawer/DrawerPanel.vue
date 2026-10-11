@@ -63,7 +63,7 @@
             :data-testid="`drawer-tab-${tab.key}`"
             @click="emit('set-tab', tab.key)"
           >
-            <component :is="tab.icon" class="!size-3.5" stroke-width="1.8" />
+            <component :is="tab.icon" class="size-3.5" stroke-width="1.8" />
           </Button>
         </div>
 
@@ -81,7 +81,7 @@
           data-testid="drawer-close"
           @click="emit('close')"
         >
-          <X class="!size-3" stroke-width="1.8" />
+          <X class="size-3" stroke-width="1.8" />
         </Button>
       </div>
 

@@ -83,10 +83,10 @@ describe('HeaderActionsHost', () => {
     const wrapper = mountHost(makeSource())
     const btn = wrapper.find('[data-testid=header-action-scheduler-manager-open]')
     expect(btn.exists()).toBe(true)
-    // 用户可见断言：与 demo .cbtn 同规格（!size-[30px]，demo composer-bar spec §4——demo 左簇
-    // 钮统一 30×30；! 前缀 = 压过 Button 基类 [&_svg]:size-4 后代规则对钮内 svg 的 rem 缩放；
-    // 用户裁决 2026-10-06 自 panel 顶栏迁入 composer 左簇）+ 声明 title 兜底 tooltip
-    expect(btn.classes()).toContain('!size-[30px]')
+    // 用户可见断言：与 demo .cbtn 同规格（size-[30px]，demo composer-bar spec §4——demo 左簇
+    // 钮统一 30×30；普通类经 cn 合并压过 size 变体 h-10/w-10；用户裁决 2026-10-06 自
+    // panel 顶栏迁入 composer 左簇）+ 声明 title 兜底 tooltip
+    expect(btn.classes()).toContain('size-[30px]')
     expect(btn.classes()).toContain('rounded-sm')
     expect(btn.attributes('title')).toBe('定时任务')
     // 无 badge 时不渲染徽标

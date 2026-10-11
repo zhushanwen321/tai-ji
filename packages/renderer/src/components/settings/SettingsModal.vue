@@ -72,7 +72,7 @@
               :aria-current="item.id === activeMenu ? 'page' : undefined"
               @click="select(item.id)"
             >
-              <component :is="item.icon" class="!w-[16px] !h-[16px] shrink-0 opacity-[0.85] transition-opacity duration-[var(--duration-fast)] ease-[var(--ease)] group-hover:opacity-100 group-[.active]:opacity-100" />
+              <component :is="item.icon" class="w-[16px] h-[16px] shrink-0 opacity-[0.85] transition-opacity duration-[var(--duration-fast)] ease-[var(--ease)] group-hover:opacity-100 group-[.active]:opacity-100" />
               <span class="flex-1 min-w-0 truncate">{{ t(item.labelKey) }}</span>
               <span v-if="getItemCount(item.id)" class="inline-flex h-[16px] min-w-[16px] items-center justify-center rounded-full bg-surface px-[5px] font-mono text-[length:var(--text-3xs)] font-bold text-[color:var(--neutral-fg-2)] group-hover:bg-bg-card group-[.active]:text-neutral-fg shrink-0">{{ getItemCount(item.id) }}</span>
             </Button>
@@ -94,7 +94,7 @@
             data-testid="settings-close-btn"
             @click="close"
           >
-            <X class="!w-[16px] !h-[16px]" />
+            <X class="w-[16px] h-[16px]" />
           </Button>
         </div>
         <div class="content-col-inner w-full m-0 pt-[var(--space-6)] px-[24px] pb-[var(--space-8)]"

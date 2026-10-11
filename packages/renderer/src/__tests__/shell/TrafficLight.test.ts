@@ -7,7 +7,7 @@
  *  - 全屏态：isFullscreen=true → 根 div opacity-0 + pointer-events-none 成对
  *    （review MF-1：单独任一都会让隐形圆点组劫持 PanelHeader chrome 点击）
  *  - issue #24 缺陷修复：悬停同色 important 覆盖（缺陷 A：旧 hover:bg-transparent 把圆点
- *    底色一并透明化）、图标锁定 8px（缺陷 B：Button 基础样式 [&_svg]:size-4 压过 lucide :size=8）、
+ *    底色一并透明化）、图标锁 size-2 普通类（缺陷 B：lucide :size=8 属性被 CSS 覆盖）、
  *    容器 [-webkit-app-region:no-drag]（叠在侧栏顶部拖拽条带之上保住点击命中）
  *
  * Mock 策略（对齐 app-shell-topology.test.ts platformChromeMock 范式）：
@@ -124,15 +124,16 @@ describe('TrafficLight issue #24 缺陷修复（悬停同色 / 图标 8px / no-d
     expect(dots[0].classes()).not.toContain('hover:bg-transparent')
   })
 
-  it('缺陷 B 图标锁定 8px：圆点 Button 带 [&_svg]:!size-2 覆盖类且 svg 实际渲染', () => {
+  it('缺陷 B 图标锁定：圆点内 svg 持普通 size-2 覆盖类（压 lucide :size=8 属性）且实际渲染', () => {
     const wrapper = mount(TrafficLight)
     const dots = wrapper.findAll('.tl-dot')
 
-    // Button 基础样式 [&_svg]:size-4（16px）压过 lucide :size=8 —— 必须 important 覆盖锁回 8px（size-2）
+    // lucide :size=8 写的是 width/height 属性，任何 CSS 规则都会覆盖属性——svg 普通类
+    // size-2 即可锁定尺寸（Button 基类图标默认规则已零特异性，不与使用方类竞争）
     dots.forEach((dot) => {
-      expect(dot.classes()).toContain('[&_svg]:!size-2')
-      // 每个圆点内黑色符号 svg 真实存在（用户可见：hover 整组浮出 ×/−/+ 符号）
-      expect(dot.find('svg').exists()).toBe(true)
+      const svg = dot.find('svg')
+      expect(svg.exists()).toBe(true)
+      expect(svg.classes()).toContain('size-2')
     })
   })
 

@@ -24,11 +24,11 @@
       <Button
         variant="ghost"
         data-testid="composer-metrics-aggregate"
-        class="!size-[30px] rounded-sm p-0 text-neutral-dim transition-colors hover:text-neutral-fg"
+        class="size-[30px] rounded-sm p-0 text-neutral-dim transition-colors hover:text-neutral-fg"
         :title="t('panel.context.metricsAggregateTitle')"
         @mouseenter="quota.onHoverEnter"
       >
-        <Gauge class="!size-[16px] shrink-0" :stroke-width="1.6" />
+        <Gauge class="size-[16px] shrink-0" :stroke-width="1.6" />
       </Button>
     </HoverCardTrigger>
     <!-- 容器对齐 demo .stats-pop：右下锚 + 10px 间距 + r-lg 圆角；宽 300 保留 real

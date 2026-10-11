@@ -59,7 +59,7 @@ const props = withDefaults(
       <slot />
       <ChevronDown
         v-if="props.showChevron"
-        class="ml-px !size-[9px] transition-transform duration-[var(--duration)] ease-[var(--ease)]"
+        class="ml-px size-[9px] transition-transform duration-[var(--duration)] ease-[var(--ease)]"
         :class="props.open && 'rotate-180'"
       />
     </Button>

@@ -21,22 +21,23 @@
       <!-- [issue #24 缺陷A] 悬停同色 important 覆盖：旧 hover:bg-transparent 本意压 ghost 灰底，
            却把圆点自身底色一并透明化（悬停即消失）。改为逐点同色 hover:!bg-<色>，important 必须：
            ghost 变体 hover:bg-surface-hover 与覆盖类同特异性，源码顺序不可靠（先例 AppShell !gap-0）。
-           [issue #24 缺陷B] [&_svg]:!size-2 锁图标 8px：Button 基础样式 [&_svg]:size-4（16px）
-           压过 lucide :size=8 属性，16px 图标画在 12px 圆点里溢出变形。 -->
+           [issue #24 缺陷B] 图标锁 size-2：lucide :size=8 属性会被任何 CSS 规则覆盖
+           （属性优先级最低），svg 上普通 size-2 类压住属性即可（Button 基类图标默认规则
+           已零特异性，不与使用方类竞争）。 -->
       <Button
         v-for="dot in dots"
         :key="dot.action"
         variant="ghost"
         :aria-label="dot.label"
         :title="dot.label"
-        class="tl-dot h-3 w-3 grid place-items-center rounded-full p-0 [&_svg]:!size-2"
+        class="tl-dot h-3 w-3 grid place-items-center rounded-full p-0"
         :class="[dot.bgClass, dot.hoverBgClass]"
         @click="onAction(dot.action)"
       >
         <component
           :is="dot.icon"
           :size="8"
-          class="text-black/55 opacity-0 transition-opacity duration-[var(--duration-fast)] group-hover:opacity-100"
+          class="size-2 text-black/55 opacity-0 transition-opacity duration-[var(--duration-fast)] group-hover:opacity-100"
         />
       </Button>
     </template>

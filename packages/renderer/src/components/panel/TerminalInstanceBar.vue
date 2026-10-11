@@ -31,8 +31,9 @@
     0.4 透明度（arbitrary 形态压过 Button 基类 disabled:opacity-50）；
   - 右簇 = demo .ib-right/.ib-btn：gap 4px、24px 钮、r-xs 圆角、14px 图标（hover 提亮底由
     ghost 变体内建）；
-  - 图标尺寸经 [&_svg]:size-[Npx] 落在 Button 上：Button 基类 [&_svg]:size-4（specificity
-    更高）会压过 svg 自身 size-* 类（级联探针实测），arbitrary 值按输出顺序稳定反压。
+  - 图标尺寸经 [&_svg]:size-[Npx] 落在 Button 上（钮级规则 0,1,1 恒赢 svg 自身普通类与
+    零特异性的钮基类默认值 [:where(&_svg)]:size-4，历史「important 反压」形态已随基类
+    零特异性化退役）。
 -->
 <template>
   <div

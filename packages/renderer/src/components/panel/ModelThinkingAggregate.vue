@@ -32,10 +32,10 @@
       <Button
         variant="ghost"
         data-testid="composer-model-thinking-aggregate"
-        class="!size-[30px] rounded-sm p-0 text-neutral-dim transition-colors hover:text-neutral-fg"
+        class="size-[30px] rounded-sm p-0 text-neutral-dim transition-colors hover:text-neutral-fg"
         :title="t('panel.modelSelect.modelThinkingAggregateTitle')"
       >
-        <Boxes class="!size-[16px] shrink-0" :stroke-width="1.6" />
+        <Boxes class="size-[16px] shrink-0" :stroke-width="1.6" />
       </Button>
     </PopoverTrigger>
     <PopoverContent side="top" :side-offset="10" class="w-[240px] p-0">
@@ -64,7 +64,7 @@
         >
           <span class="flex-1 text-left">{{ getDisplayLabel(opt.level, props.levelMap, t) }}</span>
           <Check
-            class="!size-[13px] shrink-0 transition-opacity"
+            class="size-[13px] shrink-0 transition-opacity"
             :stroke-width="2.2"
             :class="opt.level === currentLevelKey ? 'opacity-100' : 'opacity-0'"
           />

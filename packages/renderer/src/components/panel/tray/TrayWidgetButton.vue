@@ -66,13 +66,13 @@
     <!-- icon 区（fallback 链产物：自定义形状 svg 或 lucide 组件二选一） -->
     <span
       data-testid="tray-widget-icon"
-      class="flex !size-[16px] shrink-0 items-center justify-center"
+      class="flex size-[16px] shrink-0 items-center justify-center"
       :class="toneClass"
     >
       <svg
         v-if="icon.kind === 'paths'"
         data-testid="tray-widget-icon-paths"
-        class="!size-[16px]"
+        class="size-[16px]"
         viewBox="0 0 24 24"
         fill="none"
         stroke="currentColor"

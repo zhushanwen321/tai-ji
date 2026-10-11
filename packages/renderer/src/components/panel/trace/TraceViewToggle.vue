@@ -25,7 +25,7 @@
       :disabled="disabled"
       @click="emit('update:modelValue', seg.value)"
     >
-      <component :is="seg.icon" class="!size-[15px] shrink-0" stroke-width="1.8" />
+      <component :is="seg.icon" class="size-[15px] shrink-0" stroke-width="1.8" />
       {{ seg.label }}
     </Button>
   </div>

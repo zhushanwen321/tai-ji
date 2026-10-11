@@ -15,11 +15,11 @@
         :title="t('panel.thinkingLevel.title')"
       >
         <!-- U4：切换中（停止态切档要先 ensureActive 拉活）→ 转圈 + 禁止重复开合/点选 -->
-        <LoaderCircle v-if="switching" class="!size-[12px] shrink-0 animate-spin" />
-        <Brain v-else class="!size-[12px] shrink-0" />
+        <LoaderCircle v-if="switching" class="size-[12px] shrink-0 animate-spin" />
+        <Brain v-else class="size-[12px] shrink-0" />
         <span>{{ currentLabel }}</span>
         <ChevronDown
-          class="ml-px !size-[9px] transition-transform duration-[var(--duration)] ease-[var(--ease)]"
+          class="ml-px size-[9px] transition-transform duration-[var(--duration)] ease-[var(--ease)]"
           :class="open && 'rotate-180'"
         />
       </Button>
@@ -48,7 +48,7 @@
         <span class="flex-1 text-left">{{ getDisplayLabel(opt.level, props.levelMap, t) }}</span>
         <!-- 选中指示 = 行尾对勾显隐（demo R3：弹层行不进选中范式，行无底/框/字色选中态） -->
         <Check
-          class="!size-[13px] shrink-0 transition-opacity"
+          class="size-[13px] shrink-0 transition-opacity"
           :stroke-width="2.2"
           :class="level === opt.level ? 'opacity-100' : 'opacity-0'"
         />

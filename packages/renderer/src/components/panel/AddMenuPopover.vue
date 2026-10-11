@@ -13,7 +13,7 @@
       :show-chevron="false"
       :title="t('panel.composer.addContent')"
     >
-      <Plus class="!size-[16px]" :stroke-width="1.6" />
+      <Plus class="size-[16px]" :stroke-width="1.6" />
     </PopoverTriggerButton>
     <!-- 容器对齐 demo `.popover` 基形态：左锚 / 锚距 10px / 最小宽 160px / r-lg / 4px 内边距 -->
     <PopoverContent

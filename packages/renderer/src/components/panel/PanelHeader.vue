@@ -33,8 +33,8 @@
         data-testid="sidebar-collapse-toggle"
         @click="sidebar.toggleCollapsed()"
       >
-        <PanelLeftOpen v-if="sidebar.collapsed" class="!size-[17px]" stroke-width="1.6" />
-        <PanelLeftClose v-else class="!size-[17px]" stroke-width="1.6" />
+        <PanelLeftOpen v-if="sidebar.collapsed" class="size-[17px]" stroke-width="1.6" />
+        <PanelLeftClose v-else class="size-[17px]" stroke-width="1.6" />
       </Button>
       <Button
         variant="ghost"
@@ -45,7 +45,7 @@
         :aria-label="t('panel.header.back')"
         @click="navigation.back()"
       >
-        <ArrowLeft class="!size-[17px]" stroke-width="1.8" />
+        <ArrowLeft class="size-[17px]" stroke-width="1.8" />
       </Button>
       <Button
         variant="ghost"
@@ -56,7 +56,7 @@
         :aria-label="t('panel.header.forward')"
         @click="navigation.forward()"
       >
-        <ArrowRight class="!size-[17px]" stroke-width="1.8" />
+        <ArrowRight class="size-[17px]" stroke-width="1.8" />
       </Button>
       <!-- 新建任务钮（demo .hdr-fold：折叠态卡头唯一新建入口，展开态随组隐藏） -->
       <Button
@@ -68,7 +68,7 @@
         data-testid="panel-header-new-task"
         @click="onNewTask"
       >
-        <Plus class="!size-[17px]" stroke-width="1.8" />
+        <Plus class="size-[17px]" stroke-width="1.8" />
       </Button>
     </div>
     <component
@@ -124,7 +124,7 @@
         :title="t('panel.sideDrawer.title')"
         @click="emit('toggleDrawer')"
       >
-        <PanelRight class="!size-[17px]" stroke-width="1.6" />
+        <PanelRight class="size-[17px]" stroke-width="1.6" />
       </Button>
       <!-- 三点更多 ⋯（G2-005 rename 等）全 DEFERRED，按 G3-002 hide 规则不显示 -->
     </div>

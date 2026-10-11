@@ -99,7 +99,7 @@
           <!-- 单一图标（聚合语义 = layers 层叠面；有进行中时 accent 提亮，无则中性）；
                stroke 1.6 = demo .cbtn 图标规格（16px stroke 1.6，M4a 决 10 同款） -->
           <Layers
-            class="!size-[16px] shrink-0"
+            class="size-[16px] shrink-0"
             :stroke-width="1.6"
             :class="aggregateRunningCount > 0 ? 'text-accent' : 'text-neutral-dim'"
             aria-hidden="true"
@@ -184,7 +184,7 @@
         >
           <component
             :is="item.icon"
-            class="!size-[16px] shrink-0"
+            class="size-[16px] shrink-0"
             :stroke-width="1.6"
             :class="item.running > 0 ? 'text-accent' : ''"
             aria-hidden="true"

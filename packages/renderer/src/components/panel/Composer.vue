@@ -76,7 +76,7 @@
             :title="staging.activeStaging.value.type === 'fork' ? t('panel.composer.forkExit') : t('panel.composer.handoffExit')"
             @click="staging.exit"
           >
-            <X class="!size-[12px]" />
+            <X class="size-[12px]" />
           </Button>
         </div>
         <!-- 顶部元信息行（u4 mode-visibility-chip）：对话态只读模式 chip（**仅非默认模式**渲染，
@@ -238,7 +238,7 @@
           :title="staging.activeStaging.value.type === 'fork' ? t('panel.composer.forkSend') : t('panel.composer.handoffSend')"
           @click="onSendClick"
         >
-          <ArrowUp class="!size-[16px]" />
+          <ArrowUp class="size-[16px]" />
         </Button>
         <Button
           v-else-if="sendButtonState === 'stop'"
@@ -248,7 +248,7 @@
           :title="t('panel.composer.stop')"
           @click="onStopClick"
         >
-          <Square class="!size-[13px]" />
+          <Square class="size-[13px]" />
         </Button>
         <Button
           v-else-if="sendButtonState === 'queue'"
@@ -259,9 +259,9 @@
           :title="canSubmit ? `${t('panel.composer.queueSend')} · ⏎` : t('panel.composer.sendHint')"
           @click="onSendClick"
         >
-          <ArrowUp class="!size-[16px]" />
+          <ArrowUp class="size-[16px]" />
           <!-- 时钟角标（D6 场景 1）：排队语义视觉锚点，右上角 1/4 尺寸 -->
-          <Clock class="absolute right-[2px] top-[2px] !size-[8px]" aria-hidden="true" />
+          <Clock class="absolute right-[2px] top-[2px] size-[8px]" aria-hidden="true" />
         </Button>
         <!-- 发送中 spinner = 呼吸弧（chat 域统一 loader 规格同构：15px accent + 三重动画）。
              svg 骨架与 ui 包 RUNNING_LOADER_SVG 同构（该常量未在 ui 包 exports 白名单，
@@ -272,7 +272,7 @@
           class="ml-[4px] grid size-[var(--composer-btn-size)] place-items-center rounded-md bg-accent text-accent-fg"
           :title="t('panel.composer.sending')"
         >
-          <span class="inline-block !size-[15px] animate-loader-spin" aria-hidden="true">
+          <span class="inline-block size-[15px] animate-loader-spin" aria-hidden="true">
             <svg
               class="size-full"
               viewBox="0 0 24 24"
@@ -296,7 +296,7 @@
           :title="canSubmit ? `${t('panel.composer.send')} · ⏎` : t('panel.composer.sendHint')"
           @click="onSendClick"
         >
-          <ArrowUp class="!size-[16px]" />
+          <ArrowUp class="size-[16px]" />
         </Button>
         </div>
       </div>

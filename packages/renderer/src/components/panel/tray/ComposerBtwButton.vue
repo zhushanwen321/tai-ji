@@ -19,12 +19,12 @@
   <Button
     variant="ghost"
     size="icon"
-    class="relative !size-[30px] shrink-0 rounded-sm p-0 text-neutral-dim transition-colors hover:bg-surface-hover hover:text-neutral-fg"
+    class="relative size-[30px] shrink-0 rounded-sm p-0 text-neutral-dim transition-colors hover:bg-surface-hover hover:text-neutral-fg"
     data-testid="composer-btw-button"
     :title="title"
     @click="openBtw"
   >
-    <MessagesSquare class="!size-[16px]" :stroke-width="1.6" />
+    <MessagesSquare class="size-[16px]" :stroke-width="1.6" />
     <!-- 计数角标（demo .cbtn .badge 形态：右上角 -3px、min-w/h 14px、px 3px 胶囊、
          mono 10px fw-mid；Badge 范式 = 计数角标，DESIGN §5.13；accent 实底 + accent-fg 字，
          PanelContainer unread badge 同款语义色对） -->
@@ -39,7 +39,7 @@
     <span
       v-if="totalPending > 0"
       data-testid="composer-btw-pending"
-      class="pointer-events-none absolute -bottom-1 -right-1 !size-[8px] rounded-full bg-neutral-mid"
+      class="pointer-events-none absolute -bottom-1 -right-1 size-[8px] rounded-full bg-neutral-mid"
     />
   </Button>
 </template>

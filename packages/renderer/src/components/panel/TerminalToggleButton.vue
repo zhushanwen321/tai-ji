@@ -17,7 +17,7 @@
     data-testid="terminal-toggle-button"
     @click="onToggle"
   >
-    <Terminal class="!size-[17px]" stroke-width="1.6" />
+    <Terminal class="size-[17px]" stroke-width="1.6" />
   </Button>
 </template>
 

@@ -15,7 +15,7 @@
       data-testid="tray-bash-corrupt-banner"
       class="flex shrink-0 items-center gap-1.5 rounded-sm bg-warn-soft px-2 py-1 text-[length:var(--text-2xs)] text-warn"
     >
-      <AlertTriangle class="!size-[14px] shrink-0" />
+      <AlertTriangle class="size-[14px] shrink-0" />
       <span class="min-w-0 flex-1">{{ t('panel.tray.corruptBanner') }}</span>
     </div>
     <!-- 断连提示条（bash，S6）：断连 &&（拉取失败 || 未拉到过）——重连边沿由 useBackgroundTasks
@@ -25,14 +25,14 @@
       data-testid="tray-bash-disconnect-banner"
       class="flex shrink-0 items-center gap-1.5 rounded-sm bg-bg-input px-2 py-1 text-[length:var(--text-2xs)] text-neutral-mid"
     >
-      <WifiOff class="!size-[14px] shrink-0" />
+      <WifiOff class="size-[14px] shrink-0" />
       <span class="min-w-0 flex-1">{{ t('panel.tray.disconnectBanner') }}</span>
     </div>
 
     <!-- 加载态：在途且该类无数据（bash = 从未拉到过一次；重连腿恢复后自消）——有缓存即直出列表 -->
     <div v-if="isKindLoading" data-testid="tray-panel-loading"
       class="flex flex-col items-center justify-center gap-2 py-8 text-center">
-      <Loader2 class="!size-[16px] animate-spin text-neutral-dim opacity-60" />
+      <Loader2 class="size-[16px] animate-spin text-neutral-dim opacity-60" />
       <p class="text-[length:var(--text-2xs)] text-neutral-dim opacity-60">{{ t('panel.tray.loading') }}</p>
     </div>
 
@@ -88,10 +88,10 @@
               data-testid="tray-bash-row" :aria-label="`${statusText(entry)}: ${entry.command}`"
               @click="openBashTask(entry)" @mouseleave="killConfirm.clear()"
             >
-              <div class="mt-[3px] !size-[7px] shrink-0" data-testid="tray-bash-icon" :title="statusText(entry)">
+              <div class="mt-[3px] size-[7px] shrink-0" data-testid="tray-bash-icon" :title="statusText(entry)">
                 <span v-if="iconOf(entry).shape === 'spinner'"
-                  class="block !size-[7px] animate-spin rounded-full border-[1.5px] border-accent border-t-transparent" />
-                <span v-else class="block !size-[7px] rounded-full" :class="DOT_TONE_CLASS[iconOf(entry).tone]" />
+                  class="block size-[7px] animate-spin rounded-full border-[1.5px] border-accent border-t-transparent" />
+                <span v-else class="block size-[7px] rounded-full" :class="DOT_TONE_CLASS[iconOf(entry).tone]" />
               </div>
               <div class="min-w-0 flex-1">
                 <!-- 命令行 = demo .bash-cmd（mono 10px）；主行字色继承行容器（--mid → hover --fg） -->
@@ -130,10 +130,10 @@
             >
               <div class="flex items-center gap-2">
                 <component :is="resolveEngineIcon(record.engine).icon" :title="resolveEngineIcon(record.engine).label"
-                  class="!size-[13px] shrink-0 text-neutral-dim" data-testid="tray-subagent-engine-icon" />
+                  class="size-[13px] shrink-0 text-neutral-dim" data-testid="tray-subagent-engine-icon" />
                 <Loader2 v-if="isRunningSubagent(record)" data-testid="tray-subagent-spinner"
-                  class="!size-[13px] shrink-0 animate-spin text-accent" />
-                <span v-else class="!size-[7px] shrink-0 rounded-full" :class="subagentDotClass(record)" />
+                  class="size-[13px] shrink-0 animate-spin text-accent" />
+                <span v-else class="size-[7px] shrink-0 rounded-full" :class="subagentDotClass(record)" />
                 <span class="min-w-0 flex-1 truncate text-[length:var(--text-xs)] leading-[1.35]">
                   {{ displayAgentName(record.agent) }}
                 </span>
@@ -171,8 +171,8 @@
             >
               <div class="flex items-center gap-2">
                 <Loader2 v-if="record.status === 'running'" data-testid="tray-workflow-spinner"
-                  class="!size-[13px] shrink-0 animate-spin text-accent" />
-                <span v-else class="!size-[7px] shrink-0 rounded-full" :class="workflowToneClass(record)"
+                  class="size-[13px] shrink-0 animate-spin text-accent" />
+                <span v-else class="size-[7px] shrink-0 rounded-full" :class="workflowToneClass(record)"
                   :title="workflowStatusLabel(record)" />
                 <span class="min-w-0 flex-1 truncate text-[length:var(--text-xs)] leading-[1.35]">
                   {{ record.scriptName }}
@@ -195,7 +195,7 @@
                     :rounded="false"
                     @click.stop="onAbortClick(record.runId)"
                   >
-                    <template #icon><Square class="!size-[12px]" /></template>
+                    <template #icon><Square class="size-[12px]" /></template>
                   </TrayConfirmButton>
                 </template>
               </div>
