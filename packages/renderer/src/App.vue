@@ -56,7 +56,7 @@
     v-if="memoryLevel !== 'normal' && !memoryBarDismissed"
     ref="memoryBarRef"
     data-testid="memory-pressure-bar"
-    class="fixed left-1/2 top-3 z-[9999] flex max-w-[min(520px,calc(100vw-6rem))] -translate-x-1/2 items-center gap-2 rounded-[var(--radius)] border border-border bg-surface py-2 pl-3 pr-2 shadow-lg"
+    class="fixed left-1/2 top-3 z-[var(--z-banner)] flex max-w-[min(520px,calc(100vw-6rem))] -translate-x-1/2 items-center gap-2 rounded-[var(--radius)] border border-border bg-surface py-2 pl-3 pr-2 shadow-[var(--shadow-2)]"
   >
     <AlertTriangle class="size-3.5 shrink-0 text-warn" aria-hidden="true" />
     <p data-testid="memory-pressure-text" class="select-text break-words text-[12.5px] leading-snug text-neutral-fg">
@@ -179,7 +179,7 @@ const memoryBarDismissed = ref(false)
 // level 变化（normal→warn→critical 升级）时重显提示条：dismiss 只对当前 level 生效，不跨级别持久。
 watch(memoryLevel, () => { memoryBarDismissed.value = false })
 
-// 模态表面聚合注册（§6.7 横幅族）：内存压力提示条（App.vue 内联块，z-[9999]）非阻塞
+// 模态表面聚合注册（§6.7 横幅族）：内存压力提示条（App.vue 内联块，z-[var(--z-banner)]）非阻塞
 // 不入让位族，只入 view 遮蔽族（shieldsView intersecting——与 view 矩形几何相交才隐藏）。
 // 开合态绑「level 非正常 ∧ 未 dismiss」状态本体（与模板 v-if 同一谓词）；rect 读提示条
 // 根元素实测（warn/critical 文案切换的几何在重渲染后由上报链重测）。旗标组由登记表按 id 读取。
