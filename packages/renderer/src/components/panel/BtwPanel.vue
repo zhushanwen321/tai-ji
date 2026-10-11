@@ -23,24 +23,10 @@
 -->
 <template>
   <div class="flex h-full min-h-0 flex-col" data-testid="drawer-btw-tab">
-    <!-- 头部：线列表标签 + 新建入口。对齐 demo 抽屉头行形态：透明底（无 surface-2 色块）、
-         左右内缩 14px、下 6px（与 SubagentTab/WorkflowTab 头行同节奏）。 -->
-    <div class="flex shrink-0 items-center gap-1.5 px-3.5 pb-1.5 pt-2">
-      <MessagesSquare class="size-3.5 shrink-0 text-neutral-dim" />
-      <span class="min-w-0 truncate text-[length:var(--text-xs)] font-medium text-neutral-fg">
-        {{ t('btw.panel.threadsTitle') }}
-      </span>
-      <Button
-        variant="ghost"
-        class="ml-auto h-6 gap-1 rounded px-2 text-[length:var(--text-2xs)]"
-        :disabled="!sessionId || state.creating"
-        data-testid="btw-new-thread"
-        @click="createThread"
-      >
-        <Plus class="size-3" />
-        <span>{{ state.creating ? t('btw.panel.creating') : t('btw.panel.newThread') }}</span>
-      </Button>
-    </div>
+    <!-- 无恒渲染标题行（r5 视觉对齐 demo BtwPanel：二级 chip 条直接顶置，demo 面板无头行）。
+         「新建提问」入口承载 = 空态 Primary 钮 + 有线态 chip 行右簇固定钮（demo 入口在
+         composer 左簇弹层，real panel composer 禁 btw 递归入口故面板内承载；
+         chip 行形态 = 实例条范式「左簇 tab 可横滚 + 右簇恒在可视区」）。 -->
 
     <!-- 内联错误条（P2 降级：可见失败 + 不拖垮面板；恢复动作见下方重试） -->
     <div
@@ -91,39 +77,56 @@
     </div>
 
     <!-- 有线：chip 行（线列表）+ 当前线会话区。
-         chip 行形态对齐 demo .itabs（实例 tab 条共用范式）：p-1 + 底部 hairline 分隔 +
+         chip 行形态对齐 demo .itabs（实例 tab 条共用范式）：底部 hairline 分隔 +
          可横滚 scrollbar 隐藏；chip = itab 胶囊（border + bg-input + mono 2xs；
          选中 border-strong + elevated + fg，非激活 hover 提亮）。real 线无关闭动作
-         （demo itab 关闭叉无对应功能），不渲染叉。 -->
+         （demo itab 关闭叉无对应功能），不渲染叉。
+         右簇固定「新建提问」钮（r5 结构对齐 demo 无头行形态后的入口承载；
+         在滚动区外恒在可视区，TerminalInstanceBar 同款左右簇范式）。 -->
     <template v-else-if="state.threads.length > 0">
       <div
-        class="flex shrink-0 items-center gap-0.5 overflow-x-auto border-b border-hairline px-1 py-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-        data-testid="btw-thread-list"
+        class="flex shrink-0 items-center gap-0.5 border-b border-hairline py-1 pl-1 pr-[2px]"
+        data-testid="btw-thread-bar"
       >
-        <Button
-          v-for="thread in state.threads"
-          :key="thread.vid"
-          variant="ghost"
-          class="h-6 shrink-0 rounded-sm border px-2 font-mono text-[length:var(--text-2xs)]"
-          :class="
-            thread.vid === selectedVid
-              ? 'border-border-strong bg-bg-elevated text-neutral-fg'
-              : 'border-border bg-bg-input text-neutral-mid hover:bg-surface-hover hover:text-neutral-fg'
-          "
-          :aria-pressed="thread.vid === selectedVid"
-          data-testid="btw-thread-chip"
-          :data-vid="thread.vid"
-          @click="selectThread(thread.vid)"
+        <div
+          class="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          data-testid="btw-thread-list"
         >
-          <!-- badge 待处理态 per-line 挂点（D8 终态机驱动；聚合面 = composer btw 按钮 Σ） -->
-          <span
-            v-if="isBtwPending(thread.vid)"
-            class="size-1.5 shrink-0 rounded-full bg-warn"
-            data-testid="btw-thread-pending"
-            :title="t('btw.interaction.pendingLabel')"
-          />
-          <!-- 标签截断对齐 demo .itab-lbl 口径：max-w 128px 省略 + Button title 显全名（spec §3.4） -->
-          <span class="min-w-0 max-w-[128px] truncate">{{ shortVid(thread.vid) }}</span>
+          <Button
+            v-for="thread in state.threads"
+            :key="thread.vid"
+            variant="ghost"
+            class="h-6 shrink-0 rounded-sm border px-2 font-mono text-[length:var(--text-2xs)]"
+            :class="
+              thread.vid === selectedVid
+                ? 'border-border-strong bg-bg-elevated text-neutral-fg'
+                : 'border-border bg-bg-input text-neutral-mid hover:bg-surface-hover hover:text-neutral-fg'
+            "
+            :aria-pressed="thread.vid === selectedVid"
+            data-testid="btw-thread-chip"
+            :data-vid="thread.vid"
+            @click="selectThread(thread.vid)"
+          >
+            <!-- badge 待处理态 per-line 挂点（D8 终态机驱动；聚合面 = composer btw 按钮 Σ） -->
+            <span
+              v-if="isBtwPending(thread.vid)"
+              class="size-1.5 shrink-0 rounded-full bg-warn"
+              data-testid="btw-thread-pending"
+              :title="t('btw.interaction.pendingLabel')"
+            />
+            <!-- 标签截断对齐 demo .itab-lbl 口径：max-w 128px 省略 + Button title 显全名（spec §3.4） -->
+            <span class="min-w-0 max-w-[128px] truncate">{{ shortVid(thread.vid) }}</span>
+          </Button>
+        </div>
+        <Button
+          variant="ghost"
+          class="h-6 shrink-0 gap-1 rounded px-1.5 text-[length:var(--text-2xs)]"
+          :disabled="!sessionId || state.creating"
+          data-testid="btw-new-thread"
+          @click="createThread"
+        >
+          <Plus class="size-3" />
+          <span>{{ state.creating ? t('btw.panel.creating') : t('btw.panel.newThread') }}</span>
         </Button>
       </div>
 

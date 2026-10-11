@@ -27,18 +27,21 @@ withDefaults(defineProps<Props>(), {
 
 <template>
   <!-- demo .brand：flex align-center gap 9px / padding 14px 14px 10px；产品名 --fs-body 15px
-       fw-bold ls 0.02em；版本行 --fs-sm 11px --dim mt 1px。 -->
+       fw-bold ls 0.02em；版本行 --fs-sm 11px --dim mt 1px。行高对齐 demo（r5 视觉修复）：
+       demo 无显式行高声明，继承 base 1.55（探针实测 .brand b 23.25px / span 17.05px），
+       行距拉开是品牌区高度的主导项（demo 总高 70.5 vs real 52.2）——行高类直接落在两个
+       span 上（自身声明优先于继承链上中途插进来的 1.4 档，容器级 leading 类管不到它们）。 -->
   <div class="flex items-center gap-[9px] px-[14px] pt-[14px] pb-[10px]">
     <TaijiLogo :size="28" :duration="8" class="shrink-0 text-neutral-fg" />
-    <div class="flex min-w-0 flex-col leading-[1.1]">
+    <div class="flex min-w-0 flex-col">
       <!-- 产品名 + DEV 徽标内层行：产品名 min-w-0 让 truncate 在窄侧栏生效（flex item
            默认 min-width:auto 会撑住不截断），徽标 shrink-0 保证不被挤掉 -->
       <div class="flex items-center gap-1.5">
-        <span class="min-w-0 truncate text-[length:var(--text-md)] font-bold tracking-[0.02em] text-neutral-fg">{{ t('app.title') }}</span>
+        <span class="min-w-0 truncate text-[length:var(--text-md)] font-bold leading-[1.55] tracking-[0.02em] text-neutral-fg">{{ t('app.title') }}</span>
         <span v-if="isDevMode()" data-testid="brand-dev-badge"
           class="shrink-0 rounded-sm bg-info-soft px-1.5 py-0.5 text-[length:var(--text-3xs)] font-semibold text-info">DEV</span>
       </div>
-      <span v-if="versionLabel" class="mt-px font-mono tabular-nums text-[length:var(--text-2xs)] text-neutral-dim">{{ versionLabel }}</span>
+      <span v-if="versionLabel" class="mt-px font-mono leading-[1.55] tabular-nums text-[length:var(--text-2xs)] text-neutral-dim">{{ versionLabel }}</span>
     </div>
     <!-- trailing slot：Sidebar 注入 UpdateButton（ml-auto 推到右侧） -->
     <slot name="trailing" />

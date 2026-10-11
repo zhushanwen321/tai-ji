@@ -35,7 +35,10 @@ export interface TaijiTheme {
   swatch: [string, string, string, string]
 }
 
-/** 6 太极主题（顺序 = demo THEME_PRESETS 权威序：玄/黛蓝/暖墨 + 青墨/朱印/皓，亮色默认皓收尾） */
+/** 6 太极主题（顺序 = demo 设置区配色主题行权威序，settings-mock.js TAIJI_THEMES：
+ *  玄/黛蓝/暖墨 + 皓/青墨/朱印——亮色组内默认主题皓居首；r5 视觉修复对齐。
+ *  侧栏快捷面板槽位序跟随本清单（单清单两消费方；demo 快捷面板旧序皓收尾与之不同，
+ *  属 demo 两形态自身差异，以设置区序为准）。 */
 export const TAIJI_THEMES: TaijiTheme[] = [
   {
     label: '太极 · 玄（暗 · 青玉 · 默认）',
@@ -62,6 +65,14 @@ export const TAIJI_THEMES: TaijiTheme[] = [
     swatch: ['#a2b48b', '#eceae6', '#100f0e', '#201e1c'],
   },
   {
+    label: '太极 · 皓（亮 · 宣纸墨黑 · 默认）',
+    shortName: '皓',
+    theme: 'light',
+    preset: '',
+    dark: false,
+    swatch: ['#43765d', '#2b2a28', '#f7f6f3', '#edebe8'],
+  },
+  {
     label: '太极 · 青墨（亮 · 宣纸花青）',
     shortName: '青墨',
     theme: 'light',
@@ -76,14 +87,6 @@ export const TAIJI_THEMES: TaijiTheme[] = [
     preset: 'zhuyin',
     dark: false,
     swatch: ['#4d7a63', '#2b2a28', '#f7f6f3', '#edebe8'],
-  },
-  {
-    label: '太极 · 皓（亮 · 宣纸墨黑 · 默认）',
-    shortName: '皓',
-    theme: 'light',
-    preset: '',
-    dark: false,
-    swatch: ['#43765d', '#2b2a28', '#f7f6f3', '#edebe8'],
   },
 ]
 

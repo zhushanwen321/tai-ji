@@ -71,11 +71,12 @@
              可选具名 slot，无默认内容；ui 容器零 chatStore 感知（D3 纯净性）。 -->
         <slot name="header-extra" />
         <!-- 容器级关闭控件统一放右簇最右（2026-10-04 裁决：关闭语义控件恒在容器右缘最右，
-             与底抽屉收起按钮、终端 tab 关闭叉同一侧性）。demo .dclose：28×28 + neutral-mid +
-             12px 图标 stroke 1.8。 -->
+             与底抽屉收起按钮、终端 tab 关闭叉同一侧性）。demo .dclose：28×28 + 12px 图标
+             stroke 1.8；字色对齐 demo 运行时渲染口径（r5 探针实测 computed rgb(236,236,236)
+             = --fg，静态 drawers.css 的 --neutral-mid 声明被后序规则覆盖，以渲染权威为准）。 -->
         <Button
           variant="ghost"
-          class="size-7 shrink-0 rounded-sm p-0 text-neutral-mid hover:text-neutral-fg"
+          class="size-7 shrink-0 rounded-sm p-0 text-neutral-fg hover:text-neutral-fg"
           :title="t('panel.sideDrawer.close')"
           data-testid="drawer-close"
           @click="emit('close')"
