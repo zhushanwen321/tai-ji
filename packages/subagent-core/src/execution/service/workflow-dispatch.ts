@@ -77,6 +77,10 @@ import {
 } from "../engine/routing.ts";
 import type { AgentOutcome } from "../engine/types.ts";
 import type { ModelConfigService } from "../assembly/model-config-service.ts";
+// [engine-provider-unification D6] engineDefaults 派发时点直读（u5 readEngineDefaults
+// ——与 run-orchestration.resolveIdentityForRoute 同源同层序；routeWorkflowEngine 的
+// globalDefaultEngine 路由输入只定引擎，模型偏好层在本文件 identity 解析点透传）。
+import { readEngineDefaults } from "../assembly/config.ts";
 import type { AgentConfig, ModelInfo } from "../assembly/model-resolver.ts";
 import type { NotifyHost } from "../notify/notify-host.ts";
 // [R3] ResolvedIdentity 接口本体在 record-access.ts（生产者 resolveIdentity 所属聚合），
@@ -462,6 +466,11 @@ export class WorkflowDispatch {
    * executeViaEngine 同一入口同一文案；model 源 = 显式 opts.model > agent frontmatter
    * ——u-h2 D2-1③ 同款）。model 源非空时同步覆写 execOpts.model（record 留痕 +
    * taskSpec 直传一致）。
+   * [engine-provider-unification D6] 非 pi 解析式扩为四层（与 run-orchestration
+   * .resolveIdentityForRoute 同层序）：task 显式 > agent frontmatter > settings 用户
+   * 偏好（engineDefaults[engineId]，派发时点直读磁盘）> 引擎缺省。偏好补缺值经本
+   * 方法尾部的 execOpts.model 覆写与显式指定同形留痕；?? 链惰性求值——前两层任一
+   * 在场时不触盘。
    *
    * [D8 派发期对称校验] pi 引擎：对称补齐目录校验——脚本内 agent({model}) 字面量与
    * agent ref 的 frontmatter model 创建期不可静态可得（JS 动态求值），在此 identity
@@ -471,7 +480,8 @@ export class WorkflowDispatch {
    * validateModelForEngine 域（builtin:* 套餐族模型空间单独立设计），跳过目录校验
    * 不误拒。identity 解析内部 resolveModel → assertCanonicalModelRef 仍是解析权威
    * （孪生守卫等全量裁决在彼执行，本层只补分类化前置拒单）。
-   * 范围限定（用户裁决 2026-09-21）：仅 pi 引擎。 */
+   * 范围限定（用户裁决 2026-09-21）：仅 pi 引擎（pi 路由不插偏好层——pi 链自有三层
+   * 解析，D6 不采用段；下方 declaredModel 只看两层显式声明，与偏好层无关）。 */
   private async resolveWorkflowIdentity(
     route: EngineRouteResult,
     opts: AgentCallOpts,
@@ -479,7 +489,11 @@ export class WorkflowDispatch {
     agentConfig: AgentConfig | undefined,
   ): Promise<ResolvedIdentity> {
     const isPiRoute = route.engineId === DEFAULT_ENGINE_ID;
-    const engineModel = isPiRoute ? undefined : (opts.model ?? agentConfig?.model);
+    const engineModel = isPiRoute
+      ? undefined
+      : (opts.model ??
+        agentConfig?.model ??
+        readEngineDefaults(this.deps.getModelService().getAgentDir())[route.engineId]);
     if (isPiRoute) {
       const declaredModel = opts.model ?? agentConfig?.model;
       if (declaredModel !== undefined) {
