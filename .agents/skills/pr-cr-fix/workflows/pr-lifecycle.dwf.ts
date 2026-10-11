@@ -138,6 +138,9 @@ const MAX_FIX_ATTEMPTS = 2; // 同一问题修复尝试上限，超过判 needs-
 const CR_FIX_RETRY_TERMINATED = new Set(["review-failure", "aggregator-failure", "fix-failure"]);
 const CR_FIX_STUCK_TERMINATED = new Set(["stuck", "max-rounds", "needs-redesign", "needs-human"]);
 const CR_FIX_MAX_ATTEMPTS = 2; // cr-fix 环境类失败自动重试 1 次（同 zsw 版）
+// content 类 commit 拦截的补修子循环上限（最多派 2 个补修 agent，超限 fix-failure 交人工；
+// 对齐 dev-merge-gates 同名常量语义——设计 commit-content-self-heal §3.1）
+const MAX_COMMIT_REPAIRS = 2;
 
 // node -e 通道（脚本无 fs/process：写盘/读 JSON/存在性探测走 world.run，argv 传参无 shell 注入面）
 const WRITE_FILE =
@@ -241,6 +244,19 @@ async function existsViaNode(path: string): Promise<boolean> {
   const r = await world.run("node", ["-e", EXISTS, path]);
   return r.exitCode === 0;
 }
+
+/** shell 单引号转义：'…'\''…' 形态，覆盖任意路径/内容安全嵌入 sh -c 脚本。 */
+const shq = (s: string): string => `'${s.replace(/'/g, "'\\''")}'`;
+
+// nodeAbs 在主流程开头的环境预检解析；commitShScript 闭包引用，调用时恒已赋值。
+let nodeAbs = "";
+
+/** git commit 经 PATH 前缀执行（2026-10-11 教训：pre-commit 钩子子进程沿引擎默认
+ *  PATH 找不到 nvm node/npx/pnpm，`npx: command not found` 红灯——钩子跑在 git commit
+ *  的子进程环境里）。前缀 = nodeBin（环境预检解析的 node 所在目录）+ macOS pnpm
+ *  默认位 + 原 PATH；HOME 展开留给 sh，路径字面经 shq 转义。 */
+const commitShScript = (argv: string[]): string =>
+  `PATH=${shq(nodeAbs.slice(0, nodeAbs.lastIndexOf("/")))}:"$HOME"/Library/pnpm:"$PATH" git ${argv.map(shq).join(" ")}`;
 
 // pre-merge marker（pr-pre-merge.sh 唯一写入方）：result="PASS" 形态
 async function readPremergeMarker(): Promise<string | null> {
@@ -397,6 +413,14 @@ interface FixOutcome {
   deferred: { issueId: string; reason: string }[];
   /** 工作流统一 commit 的 message；未 commit 时空串 */
   commitMessage: string;
+}
+
+/** content 类 commit 拦截补修 agent 的结构化契约（只改报错点名的登记/配套文件，不 commit） */
+interface CommitRepairReport {
+  /** 补修涉及的全部文件，不只报错点名文件——供对账核对越权改动（与修复前后 git status 增量交叉验证，不一致以实际为准并披露） */
+  repairedFiles: string[];
+  /** 一句补修说明 */
+  note: string;
 }
 
 interface IssueRecord {
@@ -1140,7 +1164,7 @@ async function runCrFixOnce(diffBase: string, batch1Paths: string[], attempt: nu
         }
         if (staged.length > 0) {
           const commitMsg = `fix: review round ${round} — ${mustFix} must-fix`;
-          let commitRes = await world.run("git", ["commit", "-m", commitMsg]);
+          let commitRes = await world.run("sh", ["-c", commitShScript(["commit", "-m", commitMsg])]);
           if (commitRes.exitCode !== 0) {
             // 提交前自动检查（pre-commit hook）拦截 → 环境恢复 agent 读报错、执行报错写明的
             // 环境恢复命令后重跑同一 commit（对齐 review-fix-loop / dev-merge-gates 同源机制
@@ -1160,9 +1184,99 @@ async function runCrFixOnce(diffBase: string, batch1Paths: string[], attempt: nu
               ].join("\n"),
             );
             log(`环境恢复 agent 回复（末 15 行）：\n${envReply.split("\n").slice(-15).join("\n")}`);
-            commitRes = await world.run("git", ["commit", "-m", commitMsg]);
+            commitRes = await world.run("sh", ["-c", commitShScript(["commit", "-m", commitMsg])]);
             if (commitRes.exitCode !== 0) {
-              return finish("fix-failure", round, `统一 git commit 环境恢复重试后仍失败（exit ${commitRes.exitCode}）：${commitRes.stderr.trim() || commitRes.stdout.trim()}；改动已 staged 未提交，人工检查 git status 后显式路径处置（环境恢复 agent 回复末段：${String(envReply).slice(-300)}）`);
+              // ── content 补修子循环（设计 commit-content-self-heal §3.1）──
+              // env 恢复后重跑仍被拦截 = 恢复需要修改仓库内文件（如 e2e-map 补登记）。
+              // 按报错原文派补修 agent → 对账 → 显式路径 add → 重跑同一条 commit；
+              // 上限 MAX_COMMIT_REPAIRS 次（循环头判定，对齐 dev-merge-gates 补修循环）；
+              // 补修 agent 返回空 repairedFiles = 判不可修，立即 fix-failure 不空耗剩余次数。
+              // 终态恒带补修全记录（次数/文件/note + 末次报错 + staged 位置 + env 回复末段），
+              // 人工 git status 盘点后显式路径处置。ask 调用异常不 catch——provider 类失败
+              // 由平台 stopped/resume 承接，不进入脚本（设计 §3.1 契约节）。
+              let lastContentErr = (commitRes.stderr.trim() || commitRes.stdout.trim()).slice(0, 4000);
+              let repairTries = 0;
+              const allRepairFiles: string[] = [];
+              let lastNote = "";
+              const isValidRepairReport = (v: unknown): v is CommitRepairReport =>
+                typeof v === "object" && v !== null && Array.isArray((v as CommitRepairReport).repairedFiles) &&
+                typeof (v as CommitRepairReport).note === "string" && (v as CommitRepairReport).note.trim() !== "";
+              while (true) {
+                // 循环头次数检查：尝试次数达上限 → fix-failure（终态信息全集）
+                if (repairTries >= MAX_COMMIT_REPAIRS) {
+                  return finish("fix-failure", round, `统一 git commit 补修 ${repairTries} 次仍被拦截（exit ${commitRes.exitCode}）：${lastContentErr}；补修涉及文件（全部）：${allRepairFiles.join("、") || "（无）"}${lastNote !== "" ? `；补修说明：${lastNote}` : ""}；改动已 staged 未提交，人工检查 git status 后显式路径处置（环境恢复 agent 回复末段：${String(envReply).slice(-300)}）`);
+                }
+                // before 快照（每次尝试派发前重取，对齐参照实装；复用既有 dirtyLines + porcelainPath）
+                const before = new Set((await dirtyLines()).map(porcelainPath));
+                // 补修 agent（每次尝试重建，序号 = 当前尝试次数 + 1——裸名第二次必撞名，参照实装同款教训）
+                const repairAgent = agent(
+                  `commit-content-fix-r${round}-a${repairTries + 1}`,
+                  "你是提交拦截补修工程师：只按报错原文写明的恢复动作修改登记/配套文件，不碰其他文件与检查器本体，不 commit（工作流统一提交），绝不 --no-verify 与 SKIP_* 变量。无法修复时如实返回 repairedFiles 空数组并说明原因。",
+                );
+                const repairPrompt = (retryNote: string[]): string =>
+                  [
+                    `workflow pr-lifecycle cr-fix 第 ${round} 轮——修复改动统一 commit 被提交前自动检查（pre-commit）拦截，环境恢复后重试仍失败（content 类：恢复需要修改仓库内文件，报错写明了具体动作）。`,
+                    "你的职责 = 按报错写明的恢复动作完成内容补全（如补登记、补配套改动），使该 commit 重试可以通过。",
+                    "",
+                    "报错原文（权威源，恢复动作以它为准）：",
+                    wrapUntrusted(lastContentErr),
+                    "",
+                    "要求：",
+                    "1. 只改报错原文写明的登记/配套文件（如 e2e-map 新增 rule、补 changeset 声明），恢复动作以报错原文为权威源；不碰其他文件，不改检查器本体。",
+                    "2. 报错原文没有写明可改文件的恢复动作时不要臆测——返回 repairedFiles 空数组并在 note 说明。",
+                    "3. 不 commit：工作流把补修文件 git add 后统一重试。",
+                    '4. 返回严格 JSON：{ "repairedFiles": ["<补修涉及的全部文件>"], "note": "<一句补修说明>" }——repairedFiles 列全部你实际改动的文件（不只报错点名文件，供对账核对越权）。',
+                    ...retryNote,
+                  ].join("\n");
+                const firstAsk = await repairAgent.ask<CommitRepairReport>(repairPrompt([]));
+                // 计数立即 +1（先于任何判定——终态「尝试次数」即该值，不可修场景显示 1；回注重试不消耗次数）
+                repairTries += 1;
+                // 字段级校验（repairedFiles 数组、note 非空字符串）：失败回注原因重试一次，再败 fix-failure
+                let report: CommitRepairReport | null = isValidRepairReport(firstAsk) ? firstAsk : null;
+                if (report === null) {
+                  const invalidWhy = "返回非对象，或 repairedFiles 非数组，或 note 非非空字符串";
+                  log(`补修 agent 结构化返回无效（${invalidWhy}），回注失败原因重试一次`);
+                  const retryAsk = await repairAgent.ask<CommitRepairReport>(
+                    repairPrompt(["", `上一次返回被判为无效（原因：${invalidWhy}）。重新输出有效 JSON。`]),
+                  );
+                  if (!isValidRepairReport(retryAsk)) {
+                    return finish("fix-failure", round, `补修 agent 结构化返回非法（回注重试后仍无效：${invalidWhy}）；统一 git commit 第 ${repairTries} 次补修后仍被拦截（exit ${commitRes.exitCode}）：${lastContentErr}；补修涉及文件（全部）：${allRepairFiles.join("、") || "（无）"}；改动已 staged 未提交，人工检查 git status 后显式路径处置（环境恢复 agent 回复末段：${String(envReply).slice(-300)}）`);
+                  }
+                  report = retryAsk;
+                }
+                // 补修 agent 判不可修（空申报）→ 立即 fix-failure（终态信息全集，不空耗剩余次数）
+                if (report.repairedFiles.length === 0) {
+                  return finish("fix-failure", round, `补修 agent 判定不可修（repairedFiles 为空，说明：${report.note}）；统一 git commit 第 ${repairTries} 次补修后仍被拦截（exit ${commitRes.exitCode}）：${lastContentErr}；补修涉及文件（全部）：${allRepairFiles.join("、") || "（无）"}；改动已 staged 未提交，人工检查 git status 后显式路径处置（环境恢复 agent 回复末段：${String(envReply).slice(-300)}）`);
+                }
+                lastNote = report.note;
+                // after 快照差集对账：差集 = 补修期间新增脏文件；未申报文件以实际为准并入（越权改动防线）。
+                // 边界（与参照实装同款）：差集只覆盖新增脏文件——本轮修复改动已在 before 集合内不会被
+                // 误判；补修 agent 对既有脏/已暂存文件的未申报改动不进差集，靠申报文件恒被 add 兜底
+                const declared = [...new Set(
+                  report.repairedFiles
+                    .filter((s): s is string => typeof s === "string")
+                    .map((s) => s.trim())
+                    .filter(Boolean),
+                )];
+                const actualNew = (await dirtyLines()).map(porcelainPath).filter((f) => !before.has(f));
+                const undeclared = actualNew.filter((f) => !declared.includes(f));
+                if (undeclared.length > 0) {
+                  log(`WARN: 补修 agent 申报与 git status 实际增量不一致（以实际为准并入并披露）：未申报 ${undeclared.join("、")}`);
+                }
+                const roundRepairFiles = [...new Set([...declared, ...actualNew])];
+                for (const f of roundRepairFiles) if (!allRepairFiles.includes(f)) allRepairFiles.push(f);
+                // 补修文件必须进 staged（e2e-map 等登记门禁按 --staged 模式只查暂存内容，不进 staged 则门禁原样再拦，补修白做）
+                await world.run("git", ["add", "--", ...roundRepairFiles]);
+                // 重跑同一条 commit（命令与参数与首次完全一致——journal 重放确定性保持）
+                commitRes = await world.run("sh", ["-c", commitShScript(["commit", "-m", commitMsg])]);
+                if (commitRes.exitCode === 0) {
+                  log(`补修重试成功（第 ${repairTries} 次补修）：补修文件 ${allRepairFiles.join("、") || "（无）"}；报错首行：${lastContentErr.split("\n")[0] ?? ""}${lastNote !== "" ? `；补修说明：${lastNote}` : ""}`);
+                  break;
+                }
+                // 仍败 → 最新报错原文（≤4000 截断，同 firstErr 口径）进下一轮补修 prompt，回循环头次数检查
+                lastContentErr = (commitRes.stderr.trim() || commitRes.stdout.trim()).slice(0, 4000);
+                log(`补修重试仍被拦截（第 ${repairTries} 次补修后，exit ${commitRes.exitCode}）——回到补修循环头`);
+              }
             }
             log("环境恢复后 commit 重试成功");
           }
@@ -1200,6 +1314,32 @@ async function runCrFixOnce(diffBase: string, batch1Paths: string[], attempt: nu
 }
 
 // ══ 9 step 主流程 ══
+
+// ── 环境预检：node 绝对路径解析（2026-10-11 事故加固，对齐 review-fix-loop 同款；
+//    step 体系外执行——preflight 被 skipSteps 跳过时 commitShScript 依然可用）──
+// 确定性探测链：command -v → nvm 目录 glob → 常见安装位；全部失败 = 快速终态
+// （fail-fast 带恢复指引）。解析出的绝对路径供 commitShScript 构造 PATH 前缀，
+// 统一 commit 结构性不依赖引擎默认 PATH。
+phase("环境预检");
+{
+  const probes = [
+    "command -v node 2>/dev/null",
+    'ls -1 "$HOME"/.nvm/versions/node/*/bin/node 2>/dev/null | tail -1',
+    "ls -1 /usr/local/bin/node /opt/homebrew/bin/node 2>/dev/null | head -1",
+  ];
+  for (const script of probes) {
+    const r = await world.run("sh", ["-c", script]);
+    const p = (r.exitCode === 0 ? r.stdout : "").trim().split("\n").filter(Boolean).pop() ?? "";
+    if (p.startsWith("/")) {
+      nodeAbs = p;
+      break;
+    }
+  }
+}
+if (nodeAbs === "") {
+  throw new Error('无法定位 node 可执行文件（command -v / nvm 目录 / 常见安装位均未命中）：本 workflow 的统一 commit 经 PATH 前缀执行（pre-commit 钩子子进程需要可用的 node/npx/pnpm）。恢复动作：把 nvm node 暴露到系统级 PATH（如 sudo ln -sf "$HOME"/.nvm/versions/node/<版本>/bin/node /usr/local/bin/node，或向 /etc/paths.d/ 追加 nvm bin 目录）后重新发起。');
+}
+log(`node 可执行：${nodeAbs}`);
 
 phase("发起前检查");
 // base 锁定（step 体系外的幂等读——preflight 被 skipSteps 跳过时 baseHash 依然锁定，
@@ -1569,7 +1709,11 @@ phase("条件评审修复循环");
 // step 7：cr-fix（内联 review-fix-loop；代码审查维度默认不派，显式 reviewers 参数
 // 是唯一开启方式，与分支名无关；环境类失败自动重试 1 次）
 await step("cr-fix", async () => {
-  const relReviewers = (await files.glob(".agents/skills/dev-merge/agents/review-*.md")).sort();
+  // 维度清单不走宿主 files.glob——它对路径中的 symlink 目录不跟随，`.agents`（workspace
+  // 根共享实体经 worktree symlink 形态）下恒空 → reviewers 逃生舱失效；改用 fs.readdirSync
+  // （跟随路径 symlink）经 nodeAbs 执行，返回形态与原 glob 一致（相对路径列表）。存量缺陷
+  // 2026-10-12 由 commit-content-self-heal 验证暴露后就地修复（范围外必要改动，deviations 登记）。
+  const relReviewers = (await world.run("sh", ["-c", shq(nodeAbs) + " -e " + shq("const fs=require('fs'),d='.agents/skills/dev-merge/agents';try{process.stdout.write(fs.readdirSync(d).filter(f=>/^review-.+\\.md$/.test(f)).map(f=>d+'/'+f).join('\\n'))}catch(e){}")])).stdout.split("\n").filter(Boolean).sort();
   let picked: string[];
   if (reviewers.length > 0) {
     // 显式 reviewers 白名单裁剪（对现存 agent 文件按路径子串匹配）
@@ -1612,6 +1756,12 @@ await step("cr-fix", async () => {
         }
         log(`[cr-fix] nested loop ${last.terminated}（第 ${attempt} 次发起），自动重试 1 次`);
         continue;
+      }
+      // fix-failure 整类共用一条来源中性文案（不按产生终态的 finish 调用点细分——
+      // throw 点只拿得到 terminated 与 nested message，来源信息只在 message 开头；
+      // 设计 commit-content-self-heal §3.1 交互分析末条）
+      if (last.terminated === "fix-failure") {
+        throw new Error(`cr-fix 连续 ${CR_FIX_MAX_ATTEMPTS} 次 fix-failure：按 nested message 判定来源处置——环境类查引擎凭证/模型配额后重新发起（cr-fix 整体重跑）；content 补修耗尽按补修记录人工 git status 盘点后显式路径处置；fix 阶段失败 / ES3 校验违规按嵌套报错及其自带恢复动作处置。nested message：${last.message}`);
       }
       throw new Error(`cr-fix 连续 ${CR_FIX_MAX_ATTEMPTS} 次 ${last.terminated}（环境类失败）：检查引擎凭证/模型配额后重新发起（cr-fix 整体重跑）。nested message：${last.message}`);
     }
