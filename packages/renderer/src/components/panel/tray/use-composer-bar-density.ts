@@ -71,6 +71,43 @@ let warnedNoResizeObserver = false
 export const EXPANDED_GROUP_CLASS = 'flex items-center gap-0'
 
 /**
+ * 展开态模型+思考组容器类：demo `.composer-row` 行 gap 4px 的对齐位（模型触发器 ↔ 思考触发器
+ * 之间 4px，r4 视觉对齐——两组件贴在 flex 子层的 pop-anchor 里，demo 靠行 gap 天然得到 4px，
+ * real 的组容器原复用 gap-0 使两触发器贴死）。指标展开组保持 `EXPANDED_GROUP_CLASS`（gap-0，
+ * demo `.mtr` gap:0 同款，chips 相邻由各自 px 内边距撑开）。
+ */
+export const EXPANDED_MODEL_THINKING_GROUP_CLASS = 'flex items-center gap-[4px]'
+
+/**
+ * 右簇组容器 / btw 左距的档位条件值（r4 视觉对齐；demo 权威值来自活实例探针——demo 的
+ * 4/8/12px 由「零宽 pop-anchor 仍占行内 gap 位」这一结构事实叠出，real 是 v-if 摘除元素，
+ * 故按档位补差值；landing（无 session）恢复 8px 基准）：
+ * - 模型+思考组：展开（panel）= 行 gap 4px 对齐位 + mr-4（demo「思考档位 ↔ 发送」12px =
+ *   行 gap 4 + 空 agg-mt 锚位 gap 4 + send 自身 ml 4，real 无零宽锚位，右距补 4；landing
+ *   demo 本就 8px = gap 4 + ml 4，不加右距）；聚合 = 聚合容器 + ml-8（demo L3 Gauge↔Boxes
+ *   12px = 行 gap 4 + mt-exp 两个零宽锚位的 gap 4×2，real 补 8），此时发送位恢复相邻 8px。
+ * - btw 左距（demo fit2/3「+ ↔ btw」8px）：左簇聚合档下 Clock 的零宽 pop-anchor 仍在 demo
+ *   行内，real 的 headerAction 是 v-if 摘除（无零宽占位），聚合档给 btw 补 4px 左距。
+ */
+export function useComposerSpacingClasses(
+  sessionId: Ref<string | null>,
+  density: ComputedRef<ComposerDensityLayout>,
+): { modelThinkingGroupClass: ComputedRef<string>; btwSpacingClass: ComputedRef<string | undefined> } {
+  const modelThinkingGroupClass = computed(() => {
+    if (density.value.slots.modelThinking === 'aggregated') {
+      return `${AGGREGATE_GROUP_CLASS} ml-[8px]`
+    }
+    return sessionId.value
+      ? `${EXPANDED_MODEL_THINKING_GROUP_CLASS} mr-[4px]`
+      : EXPANDED_MODEL_THINKING_GROUP_CLASS
+  })
+  const btwSpacingClass = computed(() =>
+    density.value.slots.leftCluster === 'aggregated' ? 'ml-[4px]' : undefined,
+  )
+  return { modelThinkingGroupClass, btwSpacingClass }
+}
+
+/**
  * ── btw 按钮退化序登记（btw-question D7，M3-b）─────────────────────────────
  *
  * 左簇新增的 btw 旁路提问入口（`ComposerBtwButton.vue`，位次 = `+` 之后、任务托盘之前）

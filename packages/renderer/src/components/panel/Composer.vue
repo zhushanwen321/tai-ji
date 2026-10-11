@@ -124,11 +124,13 @@
         :data-slot-model-thinking="density.slots.modelThinking"
         class="composer-bar flex flex-nowrap items-center justify-end gap-0 px-2.5 pb-2.5 mt-1.5"
       >
-        <!-- 左簇：`+`（序 0，不退化不裁剪）/ btw 旁路提问（序 0，退化序登记见
+        <!-- 左簇（landing 不渲染：demo ComposerBar 同判据「左簇挂载 = 有 session」，空态卸载——
+             r4 landing 对齐修复：原 AddMenuPopover 无 sessionId 守卫，空态左下角多出一颗「+」）：
+             `+`（序 0，不退化不裁剪）/ btw 旁路提问（序 0，退化序登记见
              use-composer-bar-density COMPOSER_BTW_BUTTON_DEGRADATION_ORDER）/ 任务托盘
              （左簇唯一聚合入口：aggregated 时单图标按钮承载托盘分段 + 插件 toolbar）/
              展开态插件 toolbar 挂载点 -->
-        <div data-composer-cluster="left" class="flex min-w-0 shrink-0 items-center gap-[4px]">
+        <div v-if="sessionId" data-composer-cluster="left" class="flex min-w-0 shrink-0 items-center gap-[4px]">
           <AddMenuPopover @select="onAddSelect" />
           <!-- plugin headerAction 挂载点（demo 裁决落点 = composer 左簇、「+」之后；用户裁决
                2026-10-06）。显隐由 hidden 管线唯一裁决：无任务插件推 hidden=true → 列表构建层
@@ -141,7 +143,7 @@
                （false 不出按钮——drawer 内 BtwPanel 的 Composer 传 false 防递归出 btw 入口）；
                无 session 不出（与托盘同判据，badge 数据面需主会话）。点击 = openDrawerTab('btw')，
                badge = useBtwTabData 聚合 Σ unread（清除 = 线内容进视口）。 -->
-          <ComposerBtwButton v-if="showBtw && sessionId" :session-id="sessionId" />
+          <ComposerBtwButton v-if="showBtw && sessionId" :session-id="sessionId" :class="btwSpacingClass" />
           <!-- 任务托盘（设计 docs/design/composer-task-tray.md——已删除，git 可追溯——D1：`+` 之后、composer.toolbar 之前）。
                挂载/可见拆两层：v-if="sessionId"（landing 态卸载，与指标聚合按钮同判据，无 session 无任务面）；
                锚点保护态 v-show 样式折叠
@@ -192,11 +194,13 @@
               <ContextCapacityPopover :session-id="sessionId" :model-id="currentModelId" />
             </template>
           </div>
-          <!-- 序 3：模型 + 推理档位。展开 = 模型名**恒完整展示**（无 88/56px 截断态）+ 档位按钮；
-               aggregated = **单图标**聚合按钮（click 弹模型列表+思考档位，hover 行内即切换，D2）。 -->
-          <div
-            :class="density.slots.modelThinking === 'aggregated' ? AGGREGATE_GROUP_CLASS : EXPANDED_GROUP_CLASS"
-          >
+          <!-- 序 3：模型 + 推理档位。展开 = 模型名**恒完整展示**（无 88/56px 截断态）+ 档位按钮
+               （组容器 = demo 行 gap 4px 对齐位 EXPANDED_MODEL_THINKING_GROUP_CLASS）；
+               aggregated = **单图标**聚合按钮（click 弹模型列表+思考档位，hover 行内即切换，D2），
+               ml-[8px] 还原 demo L3 下「Gauge ↔ Boxes」12px（demo 由 mt-exp 两个零宽 pop-anchor
+               的行 gap 叠出，real 是 v-if 摘除，故补在组容器左距）。
+               组间距条件值见 modelThinkingGroupClass 注释（r4 项 3/4，接线件 useComposerSpacingClasses）。 -->
+          <div :class="modelThinkingGroupClass">
             <ModelThinkingAggregate
               v-if="density.slots.modelThinking === 'aggregated'"
               :selected="currentModelId"
@@ -337,9 +341,7 @@ import { useQueueRows } from '@/composables/panel/useQueueRows'
 import { useComposerModeChip } from '@/composables/panel/useComposerModeChip'
 import { useComposerFocusRing } from '@/composables/panel/composer-focus-ring'
 import {
-  useComposerBarDensity,
-  AGGREGATE_GROUP_CLASS,
-  EXPANDED_GROUP_CLASS,
+  useComposerBarDensity, useComposerSpacingClasses, AGGREGATE_GROUP_CLASS, EXPANDED_GROUP_CLASS,
 } from '@/components/panel/tray/use-composer-bar-density'
 import { useComposerShell, createComposerDrafts, type ShellInputInstance } from '@/composables/panel/composer-shell'
 import { useComposerKeydown } from '@/composables/panel/composer-keydown'
@@ -359,11 +361,12 @@ const props = withDefaults(
 )
 
 const { t } = useI18n()
+const sessionIdRef = computed(() => props.sessionId)
 /** 底栏密度接线（D6 修订「三步聚合」）：ResizeObserver 实测溢出 → `density`（逐组形态 / fit 级 / 锚点
  * 保护）；判据与退化序全在 `composer-density.ts` + 本件测量回路，本处零 px 常量（容器 class 见接线件导出）。 */
-const { barRef: composerBarRef, density, onTrayItemsChange } = useComposerBarDensity(
-  computed(() => props.sessionId),
-)
+const { barRef: composerBarRef, density, onTrayItemsChange } = useComposerBarDensity(sessionIdRef)
+// 右簇组容器 / btw 左间距的档位条件值（r4 视觉对齐，判据与 demo 权威值见接线件注释）
+const { modelThinkingGroupClass, btwSpacingClass } = useComposerSpacingClasses(sessionIdRef, density)
 const chatStore = useChatStore()
 const sessionStore = useSessionStore()
 const flow = useNewTaskFlow()
@@ -394,8 +397,6 @@ const inputRef = ref<InstanceType<typeof ComposerInput> | null>(null)
 const shellInputRef = inputRef as Ref<ShellInputInstance | null>
 // 模板顶层 ref 会被渲染代理解包成值——经普通对象字段中转保活「传引用」语义（通道缺口③，fail-closed 见 CommandPopover）
 const shellInputHolder = { ref: shellInputRef }
-
-const sessionIdRef = computed(() => props.sessionId)
 
 /**
  * U4「切换中」（设计 §5.1 U4 语义②③）：core 的 `switching` 是**每实例**瞬态真值，
