@@ -227,6 +227,8 @@ describe('mock session domain', () => {
     //（engineModels/engineDefaults = engine-provider-unification D5 扩展键，mock 轨空表/空偏好）
     expect(await session.getSubagentEngineConfig()).toEqual({ engines: [], defaultEngine: '', engineModels: {}, engineDefaults: {} })
     expect(await session.setSubagentDefaultEngine('eng-x')).toEqual({ engineId: 'eng-x' })
+    // D5 per-engine 默认模型写入：回执 = 请求值回显（setSubagentDefaultEngine mock 同模式）
+    expect(await session.setSubagentEngineDefaultModel('eng-x', 'prov-a/m-1')).toEqual({ engineId: 'eng-x', modelRef: 'prov-a/m-1' })
     expect(await session.getAgentCallFilePath('s1', 'ac1')).toBe('')
     // workflowAction 仅 'abort'（pause/resume 已随扩展 D-2 移除，real 域参数为 'abort' 字面量）
     await expect(session.workflowAction('s3', 'abort', 'r1')).resolves.toBeUndefined()

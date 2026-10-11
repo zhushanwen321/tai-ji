@@ -159,6 +159,7 @@ export function makeSettingsTransportStub(overrides: SettingsTransportStubOverri
     setSmartContextExcludedModels: vi.fn(async (models) => ({ models })),
     setCodemodeEnabled: vi.fn(async (enabled: boolean) => ({ ok: true as const, enabled })),
     setSubagentDefaultEngine: vi.fn(async (engineId) => ({ engineId })),
+    setSubagentEngineDefaultModel: vi.fn(async (engineId: string, modelRef: string) => ({ engineId, modelRef })),
     oauthLogin: vi.fn(async () => ({ started: false, error: 'stub transport' })),
     oauthCancel: vi.fn(async () => ({ cancelled: false })),
     oauthLogout: vi.fn(async () => ({ ok: true })),

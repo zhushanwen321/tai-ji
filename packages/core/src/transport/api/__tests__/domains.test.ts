@@ -565,6 +565,11 @@ describe('session 域 请求-响应', () => {
     mockCommand.mockResolvedValueOnce({ engineId: 'zcode' })
     await expect(session.setSubagentDefaultEngine('zcode')).resolves.toEqual({ engineId: 'zcode' })
     expect(mockCommand.mock.calls[4][0]).toBe('session.setSubagentDefaultEngine')
+
+    // D5：per-engine 默认模型写入（engineId + modelRef 透传，reply = mutation 回显原样透传）
+    mockCommand.mockResolvedValueOnce({ engineId: 'zcode', modelRef: 'zai-coding-cn/glm-5.3' })
+    await expect(session.setSubagentEngineDefaultModel('zcode', 'zai-coding-cn/glm-5.3')).resolves.toEqual({ engineId: 'zcode', modelRef: 'zai-coding-cn/glm-5.3' })
+    expect(mockCommand.mock.calls[5].slice(0, 2)).toEqual(['session.setSubagentEngineDefaultModel', { engineId: 'zcode', modelRef: 'zai-coding-cn/glm-5.3' }])
   })
 
   it('workflow 派生：getWorkflows / getAgentCallHistory / getAgentCallFilePath / workflowAction / subagentAction', async () => {

@@ -75,6 +75,10 @@ export default {
     saveFailed: 'Save failed: {reason}',
     loadErrorHint: 'Failed to load; showing defaults',
     loadErrorRetry: 'Retry',
+    modelLabel: '{engine} default model',
+    modelDesc: 'Fallback when dispatching this engine without an explicit model',
+    piModelNote: 'The pi engine resolves its model itself (inherits main session model > pi default)',
+    modelSaveFailed: 'Save failed: {reason}',
   },
   // ── SystemPrompt page (SystemPromptPage) ──
   systemPrompt: {

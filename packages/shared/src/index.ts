@@ -45,6 +45,9 @@ export type {
   SubagentSetModelReply, SubagentChatSetModelReply,
   SubagentSetModelEffectiveReply, SubagentSetModelRecordedReply,
   SubagentSetModelAggregateReply, SubagentSetModelMemberState, SubagentSetModelMemberFailure,
+  // 引擎默认模型族（engine-provider-unification D5）：setSubagentEngineDefaultModel 的
+  // reply 具名类型 + per-engine 模型清单条目（core api 域 / settings UI 跨包具名消费）
+  SubagentEngineDefaultModelMutationReply, SubagentEngineModelInfo,
 } from './protocol'
 // 消息撤回（U3）：__taiji_nav__ 信令命令名常量——U4 runtime 编排跨包消费；
 // 本文件对 protocol.ts 是显式 allowlist（非 export *），漏登记会使常量对下游不可达。
@@ -362,7 +365,7 @@ export {
   WORKFLOW_RUN_OUTCOME_LABELS,
   WORKFLOW_RUN_OUTCOME_COVERAGE_LOCK,
 } from './workflow'
-// [可视化 U2] workflow-visualization 协议冻结段的运行时常量（截断白名单四字段 /
+// [可视化 U2] workflow-visualization 协议冻结段的运行时常量（截断白名单五字段 /
 // 截断阈值 / 事件类型全集 + 反向完备编译锁）——消费入口经包根导出面（同上先例）。
 export {
   WORKFLOW_RUN_EVENT_TRUNCATED_FIELDS,

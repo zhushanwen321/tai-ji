@@ -266,6 +266,14 @@ export interface SettingsTransport {
   // ── 子代理引擎 ──
   /** 设置全局默认子代理引擎（写 config.json，新 session 生效） */
   setSubagentDefaultEngine(engineId: string): Promise<{ engineId: string }>
+  /**
+   * 设置 per-engine 默认模型偏好（engine-provider-unification D5：写 config.json
+   * engineDefaults 键，runtime 写入前校验 modelRef ∈ 该引擎模型清单；reply = engineId/modelRef 回显）。
+   */
+  setSubagentEngineDefaultModel(
+    engineId: string,
+    modelRef: string,
+  ): Promise<ServerMessageMap['session.subagentEngineDefaultModelSet']>
 
   // ── OAuth ──
   /** 启动 OAuth flow（device/callback；started=false + error = 启动失败） */

@@ -7,7 +7,7 @@
  * 注：ServerMessage(id) → pending.resolve 的回灌由 features 层 dispatcher 串联（Wave 3）。
  *      mock 模式下不走本域（api/index 切到 mock 门面）。
  */
-import type { SessionSummary, SessionGroup, SubagentRecord, WorkflowRunRecord, Message, BatchDeleteResult, ServerMessage, ServerMessageMap, ThinkingLevel, ImportCandidatesRequest, ImportCandidatesReply, ImportRequest, ImportReply, SessionRevokeMessageReply, WorkflowRunEventsReply, WorkflowDagReply } from '@taiji/shared'
+import type { SessionSummary, SessionGroup, SubagentRecord, WorkflowRunRecord, Message, BatchDeleteResult, ServerMessage, ServerMessageMap, ThinkingLevel, ImportCandidatesRequest, ImportCandidatesReply, ImportRequest, ImportReply, SessionRevokeMessageReply, WorkflowRunEventsReply, WorkflowDagReply, SubagentEngineDefaultModelMutationReply } from '@taiji/shared'
 import { PI_THINKING_LEVELS } from '@taiji/shared'
 import { RPC_BACKSTOP_TIMEOUT_MS } from '../pending'
 import { command } from '../request'
@@ -258,6 +258,18 @@ export async function getSubagentEngineConfig(): Promise<ServerMessageMap['sessi
  */
 export function setSubagentDefaultEngine(engineId: string): Promise<{ engineId: string }> {
   return command('session.setSubagentDefaultEngine', { engineId }, RPC_BACKSTOP_TIMEOUT_MS)
+}
+
+/**
+ * engine-provider-unification D5：设置 per-engine 默认模型偏好（runtime 同锁读改写
+ * config.json engineDefaults 键，写入前校验 modelRef ∈ 该引擎模型清单）。
+ * reply = SubagentEngineDefaultModelMutationReply（engineId/modelRef 回显，mutation 分支二）。
+ */
+export function setSubagentEngineDefaultModel(
+  engineId: string,
+  modelRef: string,
+): Promise<SubagentEngineDefaultModelMutationReply> {
+  return command('session.setSubagentEngineDefaultModel', { engineId, modelRef }, RPC_BACKSTOP_TIMEOUT_MS)
 }
 
 /**

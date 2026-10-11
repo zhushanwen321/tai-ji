@@ -740,6 +740,19 @@ const sessionImpl = {
     return { engineId }
   },
 
+  /**
+   * Mock per-engine 默认模型偏好写入（engine-provider-unification D5）：回执 = 请求值回显
+   * （setSubagentDefaultEngine mock 同模式）；无持久化/无清单校验（mock 轨 engineModels 恒空，
+   * 无校验数据源）。
+   */
+  async setSubagentEngineDefaultModel(
+    engineId: string,
+    modelRef: string,
+  ): Promise<ServerMessageMap['session.subagentEngineDefaultModelSet']> {
+    await sleep(TIMING.ack)
+    return { engineId, modelRef }
+  },
+
   /** Mock workflow 操作（abort；pause/resume 已随扩展 D-2 移除。E2E 不断言此路径，stub resolve 即可） */
   async workflowAction(_sessionId: string, _action: 'abort', _runId: string): Promise<void> {
     await sleep(TIMING.ack)

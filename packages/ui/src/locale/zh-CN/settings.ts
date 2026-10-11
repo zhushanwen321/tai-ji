@@ -75,6 +75,10 @@ export default {
     saveFailed: '保存失败：{reason}',
     loadErrorHint: '读取失败，显示的是默认值',
     loadErrorRetry: '重试',
+    modelLabel: '{engine} 默认模型',
+    modelDesc: '派发该引擎任务未显式指定模型时的补缺值',
+    piModelNote: 'pi 引擎模型由 pi 自身解析（继承主会话模型 > pi 自身缺省）',
+    modelSaveFailed: '保存失败：{reason}',
   },
   // ── SystemPrompt 页（SystemPromptPage）──
   systemPrompt: {
