@@ -41,14 +41,18 @@
       :aria-label="b.tooltip"
       @click="b.onClick()"
     >
-      <!-- 图标 16px 固定（demo .cbtn 图标规格；rem 类会随 --font-scale 视口档缩放偏离 demo 值） -->
-      <component :is="b.icon" class="!size-[16px]" />
-      <!-- 角标走中性 quiet 档（demo workbench.css .badge-quiet：hover 底 + mid 字；spec
+      <!-- 图标 16px 固定（demo .cbtn 图标规格；rem 类会随 --font-scale 视口档缩放偏离 demo 值）。
+           stroke-width 1.6 与全仓 lucide 图标统一细线口径（demo 同款）；b.icon 恒为 lucide
+           组件（HEADER_ACTION_ICONS 映射表 + Puzzle fallback），插件不投递自带上色 SVG。 -->
+      <component :is="b.icon" class="!size-[16px]" :stroke-width="1.6" />
+      <!-- 角标形态 = TRAY_ITEM_COUNT_CLASS 同款（demo .cbtn .badge：-3px 外扩 / 14px 高 /
+           px 3px / 胶囊 / mono 10px / fw-mid），单点消费 tray-item-button.ts 共享常量防漂移；
+           配色走中性 quiet 档（demo workbench.css .badge-quiet：hover 底 + mid 字；spec
            composer spec（demo） §4 / composer #8——accent 实底只给未读类需关注态（btw 未读角标），
            headerAction 计数是一般计数不走 accent） -->
       <span
         v-if="b.badge"
-        class="absolute -right-1.5 -top-1.5 inline-flex h-3 min-w-3 items-center justify-center rounded-full bg-surface-hover px-1 font-mono text-[9px] font-semibold leading-none text-neutral-mid ring-1 ring-bg"
+        :class="[TRAY_ITEM_COUNT_CLASS, 'bg-surface-hover', 'text-neutral-mid']"
       >{{ b.badge }}</span>
     </Button>
   </template>
@@ -61,6 +65,7 @@ import type { Component } from 'vue'
 import { Button } from '@/components/ui/button'
 import { useI18n } from 'vue-i18n'
 import { openSchedulerTab } from '@/components/panel/workflow-viz/overlay/workflow-viz-overlay'
+import { TRAY_ITEM_COUNT_CLASS } from '@/components/panel/tray/tray-item-button'
 import { HEADER_ACTIONS_SOURCE_KEY } from '@/composables/shell/useExtensionHostBridge'
 import type {
   HeaderActionCommandAvailability,

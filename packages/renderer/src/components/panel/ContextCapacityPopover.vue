@@ -26,7 +26,8 @@
         <span class="tabular-nums">{{ hasUsage ? usedDisplay : '—' }}</span>
         <!-- 只留百分比（绝对用量进 title 与浮层） -->
         <template v-if="hasPercent">
-          <span aria-hidden="true">·</span>
+          <!-- 分隔点降档（demo .mchip .mdot opacity .7）：装饰位不吃正文着色档 -->
+          <span aria-hidden="true" class="opacity-70">·</span>
           <span class="tabular-nums">{{ usage.percent }}%</span>
         </template>
       </Button>
