@@ -30,11 +30,21 @@
  * 已有级联（不重做，本模块之外）：主文件+sidecars / btw 线目录（closeAllForMain）/
  * artifacts-attachments-cache-images（purgeSessionSidecars）/ 终端 PTY
  * （terminal-service destroySessionPties）。
+ *
+ * btw 树豁免的成立前提：步骤 2 的引用并集扫描根只覆盖 sessionsRoot（sessions 树），
+ * 不覆盖 btw 线树 `<piAgentDir>/btw/<encodeCwd>/<mainSid>/`（布局见 infra/pi/pi-paths.ts
+ * getBtwRoot）。若 btw 线引用了子代理文件族，本模块的并集防护看不见该引用——不误删
+ * 依赖一个模块外组合事实：deleteSession 尾部同批 closeAllForMain 杀线 + 删线目录
+ * （session-lifecycle.ts，漏删线目录由启动孤儿补账 reconcileOrphanThreadDirs 兜底），
+ * 即主删时 btw 线同批消亡、不存在「线仍存活引用子代理族而扫描看不见」的窗口。未来
+ * btw 删除时序与主删解耦（closeAllForMain 移出 deleteSession 同批 / 异步延迟删线）时，
+ * 扫描根必须扩为 sessions ∪ btw 两树，否则构成共享族误删面。
  */
 
 import { existsSync, readdirSync, readFileSync, rmSync, unlinkSync } from 'node:fs'
 import { dirname, isAbsolute, join, resolve, sep } from 'node:path'
 import {
+  RECORD_EVENTS_SUFFIX,
   SUBAGENT_RECORD_CUSTOM_TYPE,
   classifySubagentRecordEntryData,
   type SubagentRecordRegisteredEntryData,
@@ -46,9 +56,17 @@ import { isEnoent } from '../../utils/errors.js'
 type SubagentRecordEntry = SubagentRecordRegisteredEntryData | SubagentRecordSettledEntryData
 
 /**
- * 子代理会话文件族 sidecar 扩展名名单（现役 .record-binding + 旧终态/探活兼容名）。
- * 本名单是这些 sidecar 的唯一删除面（删主会话级联；外部删除主文件场景接受残留，
- * 2026-10-12 裁决）——增删 sidecar 名在本名单同步。
+ * 子代理会话文件族 sidecar 扩展名名单——本名单是这些 sidecar 的唯一删除面
+ * （删主会话级联；外部删除主文件场景接受残留，2026-10-12 裁决）。
+ *
+ * 现役/退场锚定（防名单与 subagent-core 写点漂移）：
+ * - `.record-binding` = 现役绑定 sidecar，写点单一入口 subagent-core
+ *   `state-marker.ts` 的 `RECORD_BINDING_SIDECAR_EXT`（该侧注释反向锚定本名单）；
+ * - `.alive` = 现役操作租约，写点单一入口 subagent-core `alive-store.ts` 的
+ *   `writeAliveMarker`；
+ * - `.state` / `.finalized` / `.cancelled` = 写侧已退场的旧收条 sidecar（收条改由
+ *   record 事件帧承载，state-marker.ts 头注），保留在名单清理升级前的旧产物残留。
+ * 新增 sidecar 后缀时在 subagent-core 写点与本名单同步。
  */
 const SUBAGENT_SESSION_SIDECAR_EXTS: readonly string[] = [
   '.record-binding',
@@ -58,8 +76,6 @@ const SUBAGENT_SESSION_SIDECAR_EXTS: readonly string[] = [
   '.finalized',
 ]
 
-/** record 事件文件后缀（与 subagent-core record-events.ts RECORD_EVENTS_SUFFIX 同字面；该常量未进 barrel，引入整文件不划算——同式漂移由本注释锚定）。 */
-const RECORD_EVENTS_SUFFIX = '.events'
 
 /** session-reader 导出物目录（tool-handler.ts doExport 的 outDir：`<agentDir>/tmp`）。 */
 const SESSION_VIEW_TMP_DIRNAME = 'tmp'

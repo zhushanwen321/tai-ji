@@ -6,10 +6,13 @@
 //     pool-manager.test.ts 深度覆盖，本文件锁包装层接线）
 //   - engines 根不存在 / dataDir 解析失败不外抛（best-effort）
 //   - startEngineJournalGcTimer：接线即扫一次 + 24h 复扫 + stop
+//   - worktree .patch 孤儿清扫（传 agentDir 时）：仅 *.patch 按 mtime TTL，级联领地
+//     （.jsonl / sidecar）零触碰；不传 agentDir = 缺省仅 journal（行为不变）
 //
-// 范围注记（2026-10-12 裁决）：子代理会话文件（<agentDir>/subagents 树）不在本 GC
-// 范围——回收归删主会话级联（runtime session-content-cascade）；本文件不含该树的
-// 清理用例（该清理面已随裁决删除）。
+// 范围注记（2026-10-12 裁决）：子代理会话文件（<agentDir>/subagents 树的 .jsonl /
+// sidecar / manifest / .events 族）不在本 GC 范围——回收归删主会话级联（runtime
+// session-content-cascade）；.patch 例外（按 branch 命名无会话锚，级联无锚可达，
+// 唯一 mtime 兜底通道——文件头范围声明 2）。
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -65,6 +68,16 @@ function createEngineFile(relPath: string, daysAgo: number): string {
   return fullPath;
 }
 
+/** 在 subagents 树的 sessions enc 段内建一个文件（worktree .patch 落盘布局），mtime 设为指定天数前。 */
+function createSubagentFile(relPath: string, daysAgo: number): string {
+  const fullPath = path.join(tmpAgentDir, "subagents", relPath);
+  fs.mkdirSync(path.dirname(fullPath), { recursive: true });
+  fs.writeFileSync(fullPath, "patch\n", "utf-8");
+  const targetTime = Date.now() / 1000 - daysAgo * 86400;
+  fs.utimesSync(fullPath, targetTime, targetTime);
+  return fullPath;
+}
+
 // ============================================================
 // cleanupExpiredEngineJournals
 // ============================================================
@@ -91,6 +104,40 @@ describe("cleanupExpiredEngineJournals", () => {
   it("dataDir 解析失败不外抛（未配置宿主服务 = best-effort 吞掉）", () => {
     dataDirHolder.throwOnCall = true;
     expect(() => cleanupExpiredEngineJournals()).not.toThrow();
+  });
+});
+
+// ============================================================
+// worktree .patch 孤儿清扫（传 agentDir 时；文件头范围声明 2）
+// ============================================================
+
+describe("cleanupExpiredEngineJournals: worktree patch sweep", () => {
+  it("传 agentDir：超龄 .patch 回收、未到期保留（<enc>/sessions 落盘布局）", () => {
+    const oldPatch = createSubagentFile(path.join("enc-seg", "sessions", "feat-main.patch"), 31);
+    const youngPatch = createSubagentFile(path.join("enc-seg", "sessions", "feat-dev.patch"), 5);
+    cleanupExpiredEngineJournals(tmpAgentDir);
+    expect(fs.existsSync(oldPatch)).toBe(false);
+    expect(fs.existsSync(youngPatch)).toBe(true);
+  });
+
+  it("传 agentDir：级联领地零触碰（.jsonl 与 sidecar 同池共存不被误删）", () => {
+    const jsonl = createSubagentFile(path.join("enc-seg", "sessions", "20261012T000000_sa-1.jsonl"), 31);
+    const sidecar = createSubagentFile(path.join("enc-seg", "sessions", "20261012T000000_sa-1.jsonl.alive"), 31);
+    const patch = createSubagentFile(path.join("enc-seg", "sessions", "feat-main.patch"), 31);
+    cleanupExpiredEngineJournals(tmpAgentDir);
+    expect(fs.existsSync(jsonl)).toBe(true);
+    expect(fs.existsSync(sidecar)).toBe(true);
+    expect(fs.existsSync(patch)).toBe(false);
+  });
+
+  it("传 agentDir：subagents 根不存在不抛（从未有过子代理 = 合法空态）", () => {
+    expect(() => cleanupExpiredEngineJournals(tmpAgentDir)).not.toThrow();
+  });
+
+  it("不传 agentDir：缺省仅 journal，.patch 不清（缺省行为不变）", () => {
+    const patch = createSubagentFile(path.join("enc-seg", "sessions", "feat-main.patch"), 31);
+    cleanupExpiredEngineJournals();
+    expect(fs.existsSync(patch)).toBe(true);
   });
 });
 

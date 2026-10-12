@@ -90,7 +90,7 @@ runtime→renderer 的 per-session 消息分发（`packages/runtime/src/services
 事件/RPC 消息类型受 ServerMessageType 联合约束，emit 拼错编译期报错（原 event-bus 文件已随包重构消失，现形态 = protocol.ts 类型定义 + route-inbound 分发，约束精神不变）。
 
 ### ADR-0010 / ADR-0012 Extension UI 独立通道（0012 的 plugin bridge 部分已退役）
-pi extension 的 confirm/select/input 交互走独立 `extension.ui_request`/`extension.ui_timeout` 事件，与 Tool Approval 的 tool_call_pending 语义隔离、错误隔离；该通路的现行形态 = event-adapter 直接消费 pi 事件按结构化字段路由（ADR-0111）。plugin-bridge 已整体退役（插件工具进 pi 通路暂缺，现行登记见 `docs/todo/plugin-tool-access-gap.md`）。登记 C-comm-12。
+pi extension 的 confirm/select/input 交互走独立 `extension.ui_request`/`extension.ui_timeout` 事件，与 Tool Approval 的 tool_call_pending 语义隔离、错误隔离；该通路的现行形态 = event-adapter 直接消费 pi 事件按结构化字段路由（ADR-0111）。plugin-bridge 已整体退役（插件工具进 pi 通路暂缺，原缺口登记已关闭删除，本条即权威记录）。登记 C-comm-12。
 
 ### ADR-0024 FileChanges runtime 解析通道
 event-adapter 在 tool_execution_end 按 write/edit 分派提取 FileChange（参数名 path 为契约权威），bash 不解析、由回合边界 git 对账补齐 delete/bash 变更；runtime 只推 accumulating/ready 两态，审查态归前端。登记 C-comm-04。
@@ -681,12 +681,12 @@ WorkflowTab 步骤列表的数据源绑定从「workflow-record 全量快照（6
 **决策**：删主会话 = 事务性级联删除其下挂的一切内容（级联清单单一入口 = `packages/runtime/src/services/session/session-content-cascade.ts`：子代理文件族〔.jsonl / sidecar / manifest / .events〕→ session-reader 导出物 → base-tool-enhance 后台任务目录 → trash 主文件，fork 引用并集保护；commit `0c0954508`）。「下挂内容生命周期 ⊆ 主会话生命周期」——下挂内容不再有任何独立回收机制，三条既有独立回收通道废弃删除：
 
 1. **产物目录保留期扫描**（runtime `services/session/artifact-retention.ts`：7 天 mtime + 三树枚举保护，启动扫 + 每日复扫，`TAIJI_ARTIFACTS_KEEP_DAYS` env 通道）——artifacts 回收由级联 purgeSessionSidecars 段承接；startup-background-init 序列 ⑪ 挂载点随之摘除（编号保留不重排）。
-2. **subagent 会话树 TTL GC**（subagent-core `session-file-gc.ts` 的 walkAndClean 族：30 天 mtime + `.alive` 探活 + 孤儿 sidecar/records manifest 清理）——子代理会话文件族回收由级联承接（sidecar 名单迁居 cascade `SUBAGENT_SESSION_SIDECAR_EXTS`）；该文件收缩为 `engine-journal-gc.ts`（仅保留引擎 journal TTL 定时器，`cleanupExpiredEngineJournals` / `startEngineJournalGcTimer`）。
+2. **subagent 会话树 TTL GC**（subagent-core `session-file-gc.ts` 的 walkAndClean 族：30 天 mtime + `.alive` 探活 + 孤儿 sidecar/records manifest 清理）——子代理会话文件族回收由级联承接（sidecar 名单迁居 cascade `SUBAGENT_SESSION_SIDECAR_EXTS`）；该文件收缩为 `engine-journal-gc.ts`（引擎 journal TTL 定时器 + worktree `.patch` 孤儿 TTL 清扫，`cleanupExpiredEngineJournals` / `startEngineJournalGcTimer`）。
 3. **session-reader 导出物保留期清扫**（`sweepExpiredSessionViews`：export 写入点顺带 30 天清扫）——session-view 导出物由级联 A21 段承接。
 
-**保留边界（非会话下挂域，不在本裁决射程）**：引擎 journal 30 天 TTL（`engine-journal-gc.ts` → `cleanupExpiredJournals`——journal 是引擎运行证据域，record 主数据死亡对 core 无触发点，无精确回收锚）；zcode 隔离会话库条目 TTL（引擎侧 sweep，C-data-22——pi 侧 transcript 无独立 TTL 后两域不再有「同窗」绑定，窗口值 30 天维持）；workflow run 孤儿对账与统一保留维护轮（`run-state-evidence.ts`——判据本就以主会话引用集为锚，维持现状）；main 域机制（log-retention / tts-cache 封顶 / gen-stats 窗口 / update 版本封顶 / image-cache 孤儿扫描——属 main 进程资源域，image-cache 孤儿扫描的后续取舍待 main 域裁决）。
+**保留边界（非会话下挂域，不在本裁决射程）**：引擎 journal 30 天 TTL（`engine-journal-gc.ts` → `cleanupExpiredJournals`——journal 是引擎运行证据域，record 主数据死亡对 core 无触发点，无精确回收锚）；worktree `.patch` 回传件 30 天 mtime TTL 孤儿清扫（同文件 `cleanupOrphanWorktreePatches`，接线方传 agentDir 生效——`<sessionsDir>/<branch>.patch` 按 branch 命名、与 `.jsonl` basename 无关联，v2 条目契约不承载 patchFile/branch，级联引用并集〔record id ∪ sessionFile〕无锚可达，与引擎 journal 同性质只能按 mtime 兜底回收；清扫范围仅 subagents 各 enc 段 sessions 目录内的 `*.patch` 两层枚举，级联领地文件族不触碰；超龄后 `record.patchFile` 指针悬空 = 「续聊重建无备份」的既有降级形态承接）；zcode 隔离会话库条目 TTL（引擎侧 sweep，C-data-22——pi 侧 transcript 无独立 TTL 后两域不再有「同窗」绑定，窗口值 30 天维持）；workflow run 孤儿对账与统一保留维护轮（`run-state-evidence.ts`——判据本就以主会话引用集为锚，维持现状）；main 域机制（log-retention / tts-cache 封顶 / gen-stats 窗口 / update 版本封顶 / image-cache 孤儿扫描——属 main 进程资源域，image-cache 孤儿扫描的后续取舍待 main 域裁决）。
 
-**接受残留（显式不回收）**：外部删除主会话文件场景（绕过删除链路的直接 rm）的下挂内容残留；级联枚举/引用扫描失败时保守放弃族删除的残留（宁保留不误删 fork 共享文件）；worktree `.patch` 回传件（按 branch 命名无会话锚，级联清单不含）。
+**接受残留（显式不回收）**：外部删除主会话文件场景（绕过删除链路的直接 rm）的下挂内容残留；级联枚举/引用扫描失败时保守放弃族删除的残留（宁保留不误删 fork 共享文件）。
 
 **依据**：三条机制都是级联缺失时代的兜底——级联补齐后同一文件族存在两个生命周期权威（TTL 按时间判、级联按归属判），先于级联触发即误删、后于级联触发即死代码；数据目录累积治理由级联单判据承载（原缺口登记已关闭删除，本条即权威记录，branch-review 三树枚举完备性检查提案的前提随扫描废弃消失）。
 

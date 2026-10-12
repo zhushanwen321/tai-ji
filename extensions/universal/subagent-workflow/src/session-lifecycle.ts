@@ -568,12 +568,14 @@ async function runProcessLevelMaintenance(
   deps: SessionLifecycleDeps,
 ): Promise<void> {
   try {
-    // 引擎 journal TTL 回收（30 天 mtime）属进程级维护——oncePerProcess 守卫防双跑
-    // （u-audit-fix）。接线即扫一次 + 24h 定时复扫（unref 不 hold 进程退出，对齐 main
-    // 侧 log-retention 形态）。子代理会话文件不在本维护面——回收归删主会话级联
-    // （runtime session-content-cascade，2026-10-12 裁决）。
+    // 引擎 journal TTL 回收（30 天 mtime）+ worktree .patch 孤儿清扫（同 TTL，仅
+    // *.patch 两层枚举——按 branch 命名无会话锚，级联引用并集无锚可达，唯一 mtime
+    // 兜底通道）属进程级维护——oncePerProcess 守卫防双跑（u-audit-fix）。接线即扫
+    // 一次 + 24h 定时复扫（unref 不 hold 进程退出，对齐 main 侧 log-retention 形态）。
+    // 子代理会话文件（*.jsonl / sidecar / manifest / *.events）不在本维护面——回收归
+    // 删主会话级联（runtime session-content-cascade，2026-10-12 裁决）。
     oncePerProcess("subagent-workflow:engine-journal-gc", () =>
-      startEngineJournalGcTimer());
+      startEngineJournalGcTimer(agentDir));
   } catch (err) {
     logger.warn("[subagents] engine journal gc failed", {
       reason: toErrorMessage(err),
