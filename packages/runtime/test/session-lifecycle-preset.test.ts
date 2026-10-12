@@ -24,6 +24,10 @@ vi.mock('node:fs', () => ({
   unlinkSync: vi.fn(),
   mkdirSync: vi.fn(),
   statSync: vi.fn(() => ({ size: 100, mtimeMs: 0 })),
+  // delete 下挂内容级联（session-content-cascade）的 fs 面：空池枚举（无其他主会话
+  // 引用、无子代理 enc 段）+ A23 目录删除 no-op——本文件只关心 preset sidecar 断言。
+  readdirSync: vi.fn(() => []),
+  rmSync: vi.fn(),
 }))
 
 vi.mock('node:fs/promises', () => ({
@@ -39,6 +43,9 @@ vi.mock('../src/services/session/session-fork.js', () => ({
 
 vi.mock('../src/infra/pi/pi-paths.js', () => ({
   getSessionsDir: () => '/tmp/sessions',
+  // delete 下挂内容级联（session-content-cascade）需要 agentDir（session-view /
+  // base-tool-enhance 推导根）——本文件断言不涉及其内容，固定假路径即可。
+  getPiAgentDir: () => '/tmp/agent',
 }))
 
 import { SessionLifecycle } from '../src/services/session/session-lifecycle.js'
