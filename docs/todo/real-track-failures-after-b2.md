@@ -1,15 +1,14 @@
 # B2 D3 A7 real 轨三组失败登记（归因完成，非 B2 引入，待人工复核）
 
-- 状态：未解决（非 B2 引入的既有/环境失败，登记待人工定责复跑）
+- 状态：条目 1 已修（2026-10-12，见下）；未解决项余三条（非 B2 引入的既有/环境失败，登记待人工定责复跑）
 - 发现时点：2026-10-07 B2 subagent-stream-chunk D3 验收 A7（G3 real 轨）
 - B2 无交集佐证（确定性）：`git diff 4bc83d6d6..HEAD` 不含 ask-user 扩展 / event-adapter / btw 链路 / verify-plugin-contract.sh / find-pi-executable / process-manager 任何文件；同窗口 B2 触及的等价性轨（EQUIV-01 76 用例、EQUIV-05）与行为轨（mock 58 用例）全绿。
 
-## 1. ask-user-real A1/A2/A3（3 failed，两次复跑稳定复现）
+## 1. ask-user-real A1/A2/A3（3 failed，两次复跑稳定复现）——已修（2026-10-12），待真机复跑确认
 
-- 症状：A1 `waitForAskUserRequest` 等 `extension.ui_request`（form/askUser:true）60s 超时；diag（/tmp/askuser-a1-diag.json）显示 `extension.dialog` 帧已到达、tool_call_start 正常——marker select 被适配器按普通 dialog 翻译，未走 ui_request/form 分支
-- 失败链：event-adapter marker select 判定 / pi-ask-user 扩展 marker 字面 / 测试预期——三者均在 B2 零改动集
-- 复跑佐证（2026-10-08 ui-optimize-unified U19 REAL 轨空载串行）：同 3 failed，症状一致（A1 `faux toolCall ask_user → ui_request 应确定性到达` undefined）；`git diff 2bd72f4ee..HEAD` 佐证扩展——`packages/runtime/src/` 与 `extensions/universal/ask-user/` 在 ui-optimize-unified 全窗口（2bd72f4ee..HEAD）零改动，失败链继续与本分支全部在途 UI 单元零交集
-- 处置建议：核对 ask-user 扩展与 runtime 的 marker 常量是否随分支其他特性漂移（ui-redesign 合入窗口）；非 B2 责任面
+- 根因：e2e spec 等待谓词未跟随 pi1-adapt U4（de900a937，2026-10-04）的对话框族 WS 帧类型改名 `extension.ui_request` → `extension.dialog`（EXTENSION_EVENTS.DIALOG，core bridge / renderer 消费端 U4 同批迁移，e2e 目录不在该 commit 触及面）。pi 侧事件形态与 runtime 适配器 marker 路由均无缺陷：diag piLogsTail 实录 pi 已发 `extension_ui_request{method:select, title:UI_FORM_MARKER}`，runtime marker 单测锚定广播 `extension.dialog` + `form:true`（askUser/askUserQuestions 键经 legacy 归一不出帧）；第二断点 = 现行 form 帧 payload 用 `dialogKind:'select'`（无 `method` 键），e2e 的 `payload.method` 断言在谓词修复后会成为下一个失败点
+- 修复：`e2e/ask-user-real.spec.ts` 谓词改等 `extension.dialog` + `payload.form === true`（删除归一后不可达的 askUser 双读死分支），`payload.method` 断言改 `payload.dialogKind`，协议事实注释同步现行帧形态；`event-adapter-ui-form-marker.test.ts` 文件头注释帧类型更正。回写帧 `extension.ui_response` 未改名（payload.method 仍为客户端回写协议字段），回写通道零改动
+- 验证：runtime marker/dialog-kind 单测 51 绿 + core message-bus-bridge/domains 单测 125 绿 + playwright spec 加载编译通过；真机复跑 A1/A2/A3 待主会话统一安排
 
 ## 2. btw S7（两次失败、两次失败模式不同）
 
