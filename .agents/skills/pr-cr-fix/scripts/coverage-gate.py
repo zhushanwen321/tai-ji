@@ -58,7 +58,9 @@ node 解析，原因见上 [HISTORICAL] #3）。未声明的包记 SKIP 并给�
 from __future__ import annotations
 
 import json
+import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -213,7 +215,37 @@ def coverage_declared(pkg_dir: Path) -> bool:
     return "@vitest/coverage-v8" in deps
 
 
-def run_coverage(pkg_dir: Path, flat_layout: bool = False) -> tuple[bool, str]:
+def resolve_npx() -> str:
+    """解析 npx 可执行路径（不在 PATH 时按确定性顺序探测绝对路径）。
+
+    非交互 shell（AI agent 执行体 / 最小 CI 环境）常缺版本管理器的 bin 目录：
+    本仓 fallow 经 Homebrew 前缀 symlink 暴露而 npx 无对应安排，subprocess 直调
+    "npx" 会 FileNotFoundError 裸 traceback 退出（exit 1 且不产 coverage.json，
+    聚合层只能报「产物不可读」）。探测顺序：PATH → nvm 安装布局（取最高版本，
+    版本管理器是工具链权威）→ Homebrew / 系统前缀。解析失败 = 工具错误 exit 2
+    （与 metrics-gate 对 fallow 缺失的处理同语义），报错列出全部探测位置与恢复动作。
+    """
+    found = shutil.which("npx")
+    if found:
+        return found
+    candidates: list[Path] = []
+    nvm_root = Path.home() / ".nvm" / "versions" / "node"
+    if nvm_root.is_dir():
+        versions = sorted(p for p in nvm_root.iterdir() if p.is_dir())
+        if versions:
+            candidates.append(versions[-1] / "bin" / "npx")
+    candidates += [Path("/opt/homebrew/bin/npx"), Path("/usr/local/bin/npx")]
+    for c in candidates:
+        if c.is_file() and os.access(c, os.X_OK):
+            return str(c)
+    searched = ", ".join(["PATH"] + [str(c) for c in candidates])
+    print(f"ERROR: 未找到 npx。已探测：{searched}。"
+          f"恢复：安装 Node.js（含 npx）并使其出现在 PATH，或在有 npx 的环境中重跑本脚本",
+          file=sys.stderr)
+    sys.exit(2)
+
+
+def run_coverage(pkg_dir: Path, npx_cmd: str, flat_layout: bool = False) -> tuple[bool, str]:
     """包内跑 vitest --coverage 产 lcov。返回 (ok, 说明)。
 
     TAIJI_SKIP_REAL_PI=1 与 CI 同口径（TEST-STRATEGY §4 双轨设计）：真实 pi 子进程用例
@@ -226,13 +258,12 @@ def run_coverage(pkg_dir: Path, flat_layout: bool = False) -> tuple[bool, str]:
     cov_include = "." if flat_layout else "src"
     cov_exclude = "__tests__/**" if flat_layout else "src/**/__tests__/**"
     cmd = [
-        "npx", "vitest", "run", "--coverage",
+        npx_cmd, "vitest", "run", "--coverage",
         "--coverage.reporter=lcov", "--coverage.reporter=json-summary",
         "--coverage.reportsDirectory=coverage",
         f"--coverage.include={cov_include}",
         f"--coverage.exclude={cov_exclude}",
     ]
-    import os
     # 降载开关（opt-in，默认口径不变）：TAIJI_COVERAGE_GATE_SERIAL=1 时测试文件串行跑。
     # 背景：11 包连跑的包内默认并发下，faux 真进程时序断言（idle-pi-reclaim）与 vitest
     # worker teardown 竞态会随机 1 例级失败（单包复跑均绿、断言本身无问题）——串行只排除
@@ -240,6 +271,10 @@ def run_coverage(pkg_dir: Path, flat_layout: bool = False) -> tuple[bool, str]:
     if os.environ.get("TAIJI_COVERAGE_GATE_SERIAL") == "1":
         cmd.append("--no-file-parallelism")
     env = {**os.environ, "TAIJI_SKIP_REAL_PI": "1"}
+    # npx 走绝对路径（resolve_npx 兜底 PATH 缺失）时，把同 bin 目录前置进子进程
+    # PATH：npx shebang 是 `#!/usr/bin/env node`，且 vitest 链路内 node/npm 需同套
+    # 工具链，避免 PATH 里残存的异版本 node 与解析出的 npx 版本错配
+    env["PATH"] = f"{Path(npx_cmd).resolve().parent}:{env.get('PATH', '')}"
     debug(f"run_coverage: {' '.join(cmd)}  (cwd={pkg_dir})")
     proc = subprocess.run(cmd, cwd=pkg_dir, capture_output=True, text=True, env=env)
     if proc.returncode != 0:
@@ -415,6 +450,7 @@ def main() -> None:
 
     report: dict[str, dict] = {}
     verdict = "pass"
+    npx_cmd = resolve_npx()
     # 全文件级真实覆盖率（repo 相对路径 → executable/hit/pct），供 Gate-1.5 metrics-gate
     # 替换 fallow 静态估算消费；仅 OK 包贡献（SKIP/FAIL 包无 lcov）
     file_cov: dict[str, dict] = {}
@@ -435,7 +471,7 @@ def main() -> None:
             report[pkg] = entry
             print(f"  SKIP {pkg}: {entry['note']}")
             continue
-        ok, err = run_coverage(pkg_dir, flat_layout=pkg.startswith("resources/plugins/"))
+        ok, err = run_coverage(pkg_dir, npx_cmd, flat_layout=pkg.startswith("resources/plugins/"))
         if not ok:
             entry.update({"status": "FAIL", "reason": err})
             report[pkg] = entry
