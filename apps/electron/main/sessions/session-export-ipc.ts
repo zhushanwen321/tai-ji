@@ -26,7 +26,7 @@ import { copyFile, stat } from 'node:fs/promises'
 import { basename, isAbsolute, join, resolve, sep } from 'node:path'
 import type { SessionJsonlExportPayload, SessionJsonlExportResult } from '@taiji/shared'
 import { SESSION_EXPORT_JSONL } from '@taiji/shared'
-import { getPiAgentDir } from '@taiji/shared/paths'
+import { getPiAgentDir, PI_SESSION_TREE_SEGMENTS } from '@taiji/shared/paths'
 import { mainLogger } from '../logs/main-logger.js'
 
 /** 保存对话框返回形态（diagnostics-export-ipc 的 SaveDialogResult 同款测试最小投影）。 */
@@ -46,13 +46,6 @@ export interface SessionExportIpcDeps { // oe-exempt:20261012:framework:deps 注
 }
 
 /**
- * 会话文件三棵树目录段（`<piAgentDir>/sessions|subagents|btw`）。
- * 布局权威 = runtime infra/pi/pi-paths.ts（getSessionsDir / getSubagentSessionDir /
- * getBtwRoot）；main 不 import runtime（包边界），经 shared getPiAgentDir 同构推导。
- */
-const SESSION_TREE_SEGMENTS = ['sessions', 'subagents', 'btw'] as const
-
-/**
  * 校验候选路径位于会话文件三棵树之内（树内包含判定，双侧 casefold——大小写不敏感卷
  * （macOS/Windows 默认）上路径大小写变体命中同一物理文件，对齐 shared paths.ts
  * assertNotLeakedProdDataDir 的 casefold 先例；双侧都经 resolve 词法消解，不做 realpath
@@ -63,7 +56,7 @@ export function isInsideSessionTrees(candidate: string, piAgentDir: string): boo
   if (!isAbsolute(candidate)) return false
   const resolvedCandidate = resolve(candidate).toLowerCase()
   const resolvedAgentDir = resolve(piAgentDir).toLowerCase()
-  return SESSION_TREE_SEGMENTS.some((segment) => {
+  return PI_SESSION_TREE_SEGMENTS.some((segment) => {
     const treeRoot = join(resolvedAgentDir, segment)
     return resolvedCandidate.startsWith(treeRoot + sep)
   })
