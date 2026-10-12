@@ -60,6 +60,9 @@ export default {
     markDone: 'Mark done',
     unmarkDone: 'Unmark done',
     archived: 'Archived',
+    // Session detail hover card message count (ui-replica-demo-fidelity channel 2):
+    // last row "time · N msgs" two segments, tone aligned with the demo msgs segment
+    msgCount: '{count} msgs',
     // Export JSONL (ui-replica-demo-fidelity channel 1): context-menu item; unavailable =
     // disabled-state title shown when sessionFile is missing (pi lazy-write window)
     exportJsonl: 'Export JSONL',

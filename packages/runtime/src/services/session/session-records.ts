@@ -44,6 +44,8 @@ import {
   readGlobalConfig,
 } from '@zhushanwen/subagent-core'
 import { extractPlanStateFromSessionFile, scanPlanStateEntries, INACTIVE_PLAN_STATE_VIEW } from './plan-state-extractor.js'
+// 悬停详情卡消息计数（通道 2）：流式计数会话 JSONL 的用户+助手消息条数
+import { countSessionMessagesInFile } from './session-message-count.js'
 // PLAN_STATE_CUSTOM_TYPE canonical = extension-protocol legacy-entries（D-B4-1 从 shared
 // constants 迁出——plan-state entry 契约与 legacy 读取同域单源；包依赖，与下方 engines
 // 契约同引法）
@@ -1337,6 +1339,21 @@ export class SessionRecords {
     const target = this.deps.sessionStore.scanSessions({ force: true }).find((s) => s.id === sessionId)
     if (!target) return INACTIVE_PLAN_STATE_VIEW
     return extractPlanStateFromSessionFile(target.filePath)
+  }
+
+  /**
+   * 获取 session 的对话消息条数（悬停详情卡消息计数，ui-replica-demo-fidelity 通道 2，
+   * 供 session.getMessageCount RPC handler 调用）。
+   *
+   * 路径解析与 getPlanState 同款（scanSessions force 单 session 路径解析口径——刚落盘
+   * session 在 TTL 窗口内不静默返回空；文件不存在 = pi 延迟写入窗口，session 不在册
+   * 同语义）。计数 = countSessionMessagesInFile 流式统计（大文件恒定内存），非对话
+   * entry（toolResult/system/compaction/usage 等）不计入，口径证据见该模块头注释。
+   */
+  async getMessageCount(sessionId: string): Promise<number> {
+    const target = this.deps.sessionStore.scanSessions({ force: true }).find((s) => s.id === sessionId)
+    if (!target) return 0
+    return countSessionMessagesInFile(target.filePath)
   }
 
   /**

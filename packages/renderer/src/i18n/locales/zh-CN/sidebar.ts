@@ -59,6 +59,9 @@ export default {
     markDone: '标记完成',
     unmarkDone: '取消标记',
     archived: '已归档',
+    // 悬停详情卡消息计数（ui-replica-demo-fidelity 通道 2）：末行「时间 · N 条消息」两段，
+    // 文案语气对齐 demo sessions.js msgs 段（'42 条消息'）
+    msgCount: '{count} 条消息',
     // 导出 JSONL（ui-replica-demo-fidelity 通道 1）：右键菜单项；unavailable = sessionFile
     // 缺失（pi 延迟写入窗口）时的禁用态 title 提示
     exportJsonl: '导出 JSONL',

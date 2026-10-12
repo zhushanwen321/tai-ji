@@ -9,7 +9,9 @@
   <!-- N8 hover 详情卡（demo .sess-pop 权威形态）：Teleport fixed 全局浮层，不被侧栏
        滚动容器裁剪；交互 = mouseenter 立即开 / 离行即关 / 卡体进入即关（demo Sidebar.vue
        openCard/closeCard 同款，含 focusin/focusout 键盘路径）；字段 = fork 血缘 + 分支 +
-       完整目录 + 末行相对时间（消息数 SessionSummary 无该字段，零新数据通道约束）。
+       完整目录 + 末行「相对时间 · 消息数」两段（消息数经 session.getMessageCount 按需
+       拉取，ui-replica-demo-fidelity 通道 2；拉取式 + lastActiveAt 键控缓存，见
+       session-item/use-message-count.ts）。
        实现说明：不用 reka HoverCard 原语——其 Trigger/Anchor as-child 跨 SessionItemContextMenu
        （多根组件）合并事件/ref 时 fallthrough 中断（实施期两个嵌套方向均实测断链：外层嵌套断
        pointerenter、内层嵌套断 contextmenu），故触发事件直挂根 div + 受控显隐，卡片定位取行
@@ -100,10 +102,11 @@
               {{ session.cwd }}
             </span>
           </div>
-          <!-- 末行 meta（demo .pr.meta：dim 12px 纯文本行；demo 内容 = 时间 · 消息数，
-               real SessionSummary 无消息数字段——只放相对时间，零新数据通道约束） -->
+          <!-- 末行 meta（demo .pr.meta：dim 12px 纯文本行；demo 内容 = `upd · msgs` 两段，
+               分隔 = ` · `；real 段一 = 相对时间，段二 = 消息计数（通道 2 按需拉取，
+               未返回前该段不渲染——避免闪 0）） -->
           <div class="py-[5px] text-[length:var(--text-xs)] leading-[1.55] text-neutral-dim">
-            {{ timeLabel }}
+            {{ timeLabel }}<template v-if="messageCount !== null"> · <span data-testid="session-detail-card-msg-count">{{ msgCountLabel }}</span></template>
           </div>
         </div>
       </div>
@@ -118,6 +121,7 @@ import { onClickOutside } from '@vueuse/core'
 import { Folder, GitBranch } from '@lucide/vue'
 import { isMarkedDone } from '@/composables/useSessionMarkers'
 import { formatRelativeTime } from '@/composables/logic/formatTime'
+import { fetchSessionMessageCount } from './session-item/use-message-count'
 import type { DerivedStatus } from '@/types'
 import SessionItemContextMenu from './session-item/SessionItemContextMenu.vue'
 import SessionItemDisplay from './session-item/SessionItemDisplay.vue'
@@ -254,8 +258,10 @@ const detailVisible = ref(false)
 const detailStyle = ref<Record<string, string>>({})
 
 /** 行 hover/键盘聚焦进入：立即取行 rect 右弹定位显示详情卡（demo @mouseenter=openCard 同款，
- *  无防扫过延迟——mock 权威即此交互；键盘路径 focusin 同样开卡，与 demo @focusin 一致） */
+ *  无防扫过延迟——mock 权威即此交互；键盘路径 focusin 同样开卡，与 demo @focusin 一致）；
+ *  开卡同时按需拉取消息计数（通道 2：缓存命中即回，未命中经 in-flight 去重发 RPC） */
 function onDetailEnter(): void {
+  void loadMessageCount()
   const el = rootEl.value
   if (!el) return
   const rect = el.getBoundingClientRect()
@@ -301,8 +307,24 @@ onClickOutside(rootEl, () => {
   confirming.value = false
 })
 
-/** 详情卡末行 meta：相对时间（demo .pr.meta 的 upd 段；消息数无字段不展示） */
+/** 详情卡末行 meta 段一：相对时间（demo .pr.meta 的 upd 段） */
 const timeLabel = computed(() => formatRelativeTime(props.session.lastActiveAt))
+
+// ── 悬停详情卡消息计数（ui-replica-demo-fidelity 通道 2）──
+
+/** 计数段值：null = 未返回 / 拉取失败（该段不渲染，避免闪 0 与失败误显示） */
+const messageCount = ref<number | null>(null)
+
+/** 开卡触发：拉取式（缓存命中 lastActiveAt 未变即回，失败占位 null 不缓存） */
+async function loadMessageCount(): Promise<void> {
+  messageCount.value = await fetchSessionMessageCount({
+    id: props.session.id,
+    lastActiveAt: props.session.lastActiveAt,
+  })
+}
+
+/** 详情卡末行 meta 段二：消息计数（demo msgs 段语气对齐：zh「N 条消息」/ en「N msgs」） */
+const msgCountLabel = computed(() => t('sidebar.sessionItem.msgCount', { count: messageCount.value ?? 0 }))
 
 /** 无障碍 label：归档态把归档语义拼进 label，让屏幕阅读器读出「已归档: <名称>」。
  *  背景是归档态移除了可见的「已归档」文字（改用 opacity-60 降权），opacity 不影响 a11y，

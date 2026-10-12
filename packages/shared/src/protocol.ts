@@ -107,6 +107,10 @@ export type UiLocale = 'zh-CN' | 'en-US'
 
 export type ClientMessageType =
   | 'session.create' | 'session.delete' | 'session.deleteByCwd' | 'config.sessions' | 'session.switch' | 'session.restore' | 'session.history' | 'session.getCommands' | 'session.getContext'
+  // 悬停详情卡消息计数（ui-replica-demo-fidelity 通道 2）：session.getMessageCount 按需拉取
+  // 该会话的对话消息条数（用户+助手），runtime 流式计数 session JSONL，reply 同名
+  //（payload 消费型，session.subscribe 模式）。拉取式（悬停时拉即最新），不做订阅/推送。
+  | 'session.getMessageCount'
   | 'session.compact' | 'session.rename' | 'session.fork' | 'session.setProject'
   // composer-gen-stats（D4）：session.getGenStats 拉该 session
   // 当前模型的速度/缓存命中率快照（恢复腿——切 session 主动拉取，规避 broadcast 早于订阅的时序竞争）。
@@ -547,6 +551,9 @@ export interface ClientMessageMap {
   'session.history': { sessionId: string; cursor?: string; limitTurns?: number; maxBytes?: number }
   'session.getCommands': { sessionId: string }
   'session.getContext': { sessionId: string }
+  // session.getMessageCount（悬停详情卡消息计数，通道 2）：reply 同名 { sessionId, count }。
+  // 文件不存在（pi 延迟写入窗口）= count 0（非错误）；读文件失败走 error envelope。
+  'session.getMessageCount': { sessionId: string }
   // session.getGenStats（D4）：生成指标恢复腿。
   // reply = session.stats_update payload 同形（无任何数据时 speed/cacheRatio 全 null + model 缺省）。
   'session.getGenStats': { sessionId: string }
@@ -1193,6 +1200,8 @@ export type ServerMessageType =
   // w21 data-source-governance：message_end 重构 entry 的实时 feed 载体帧（见 ServerMessageMapBase 条目注释）
   | 'message.message_end'
   | 'session.commands'
+  // session.getMessageCount（悬停详情卡消息计数，通道 2）：同名 reply（sendCommand 按 id resolve）。
+  | 'session.getMessageCount'
   // session.importCandidates / session.import（docs/design/import-session.md（已删除，git 可追溯）§3.3 D5）：reply 与 request
   // 同名（session.subscribe 模式，sendCommand 按 id resolve），payload 见 ServerMessageMapBase。
   | 'session.importCandidates' | 'session.import'
@@ -2260,6 +2269,10 @@ export interface ServerMessageMapBase {
   // session.commands：pi 扩展命令列表（fetchAndBroadcastCommands 广播）
   // sourceInfo 透传自 pi get_commands 的 RpcSlashCommand（SKILL.md / extension 文件路径等），可选（旧消费方向后兼容）
   'session.commands': { sessionId: string; commands: Array<{ name: string; description?: string; source: string; sourceInfo?: CommandSourceInfo }> }
+  // session.getMessageCount reply（悬停详情卡消息计数，通道 2）：count = 用户+助手消息条数
+  //（runtime 流式计数 session JSONL，口径与 core 对话流 reducer 一致——toolResult/system/
+  // custom 消息与 compaction/usage 等非对话 entry 不计入）；文件缺失（pi 延迟写入窗口）= 0。
+  'session.getMessageCount': { sessionId: string; count: number }
   // session.importCandidates / session.import reply（docs/design/import-session.md（已删除，git 可追溯）§3.3 D5）：
   // 与 ClientMessageMap 同名 request 一一对应；失败走 error envelope（code 见 ImportErrorCode）。
   'session.importCandidates': ImportCandidatesReply
@@ -3099,6 +3112,8 @@ export interface ReplyPayloadMap {
   'session.getAgentCallHistory': ServerMessageMap['session.agentCallHistory']
   'session.getCommands': ServerMessageMap['session.commands']
   'session.getContext': ServerMessageMap['context.update']
+  // session.getMessageCount：同名 reply（payload 消费型，悬停详情卡消息计数通道 2）。
+  'session.getMessageCount': ServerMessageMap['session.getMessageCount']
   // session.getGenStats：reply = session.stats_update payload 同形（payload 消费型；
   // D4 恢复腿，runtime 侧 modelId 解析降级链权威）。
   'session.getGenStats': ServerMessageMap['session.stats_update']

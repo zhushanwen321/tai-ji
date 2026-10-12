@@ -1173,6 +1173,12 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
   async getPlanState(sessionId: string): Promise<PlanStateView> { return this.records.getPlanState(sessionId) }
 
   /**
+   * 会话消息条数（悬停详情卡消息计数，通道 2）：对称 getPlanState 转发形态，实现迁
+   * session-records.ts（路径解析 + session-message-count 流式计数）。
+   */
+  async getMessageCount(sessionId: string): Promise<number> { return this.records.getMessageCount(sessionId) }
+
+  /**
    * session-trace 台账全量拉取（RPC 混合路由 → 文件降级 → empty 空态）。
    * 实现在 trace-sync.ts（S4 迁出），路由与失败路径详见该模块。
    */

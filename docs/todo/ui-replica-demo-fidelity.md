@@ -1,16 +1,12 @@
 # demo 复刻波待立项数据通道
 
-状态：已关闭，仅余 1 项待立项（2026-10-12 通道 1/3/4 落地关闭——本文件主体 = 下方 1 项待立项数据通道；已裁决与登记型条目收编于文末「已裁决/登记即关闭」，完整历史 = 本文件 git 历史）。复刻 = Open Design 项目 f7a69696 的 taiji-vue-app 高保真 demo 为唯一视觉权威；登记来源：ui-replica 会话（令牌地基 Wave1 + M0-M9 十模块复刻 + 视觉对比修复三轮 + review-fix-loop）。
-
-## 待立项数据通道（1 项）
-
-### 2. 悬停详情卡消息计数
-
-demo 悬停详情卡末行 = 「时间 · 消息数」两段（Sidebar.vue `cardSess.upd · cardSess.msgs`），real 末行仅相对时间——SessionSummary 无消息数字段，按「零新数据通道」约束未补（SessionItem.vue 注释在案）。待 SessionSummary 消息计数数据通道立项后对齐。
+状态：已关闭，待立项数据通道全部落地（2026-10-12 通道 1/2/3/4 落地关闭——已裁决与登记型条目收编于下方「已裁决/登记即关闭」，完整历史 = 本文件 git 历史）。复刻 = Open Design 项目 f7a69696 的 taiji-vue-app 高保真 demo 为唯一视觉权威；登记来源：ui-replica 会话（令牌地基 Wave1 + M0-M9 十模块复刻 + 视觉对比修复三轮 + review-fix-loop）。
 
 ## 已裁决/登记即关闭
 
 ### 待立项通道关闭（2026-10-12 落地）
+
+- **通道 2 · 悬停详情卡消息计数（已落地）**：详情卡末行 = 「相对时间 · 消息数」两段（demo Sidebar.vue `cardSess.upd · cardSess.msgs`，分隔形态 ` · `）。数据通道 = 新 RPC `session.getMessageCount`（runtime 流式逐行计数该会话 JSONL 的用户+助手消息条数——`type:'message'` 且 role user/assistant 计入，toolResult/system/compaction/usage 等非对话 entry 不计，与 core 对话流 reducer 同口径；createReadStream+readline 恒定内存不整文件读；文件缺失 = pi 延迟写入窗口归 0 不报错，读失败 error envelope renderer 占位）。renderer 按需拉取（悬停开卡才拉，拉为主、推补充第一原则，无预取/无订阅），模块级缓存 lastActiveAt 键控（未变命中复用、变了重新拉取、失败占位不缓存），计数未返回前该段不渲染（不闪 0）。落点 = shared protocol 四登记 + runtime `session-message-count.ts` / SessionRecords `getMessageCount` / session-message-handler 路由 + renderer `session-item/use-message-count.ts` / SessionItem.vue 末行 + i18n `sidebar.sessionItem.msgCount` zh/en（「{count} 条消息」/「{count} msgs」）。
 
 - **通道 1 · 会话导出 JSONL（已落地）**：会话右键菜单新增「导出 JSONL」项（SessionItemContextMenu，紧随「标记完成」= demo 归档/导出相邻 IA；sessionFile 缺失 = pi 延迟写入窗口 → 菜单项禁用态 + title 提示——缺失是可预知的静态数据态，不为已知不可用的动作走失败 IPC）。数据通道 = 新增 `session:export-jsonl` IPC（shared 通道常量 + payload/result 三态契约：exported 带 path/bytes / canceled 静默 / error 带 EPATH/EINVALID/EDIALOG/fs errno）：main 侧复制前先校验 renderer 半可信源路径位于会话文件三棵树 `<piAgentDir>/sessions|subagents|btw` 之内（piAgentDir 经 `@taiji/shared/paths` getPiAgentDir 与 runtime pi-paths.ts 同源推导，越界拒绝报 EPATH 不 fallback），再弹保存对话框（默认名 = 会话 label 经 basename 剥目录 + 非法字符清洗 + .jsonl 后缀，空值回退 sessionId）+ `fs.promises.copyFile` 直复制（不读入内存缓冲，会话文件可达数十 MB）。落点 = `apps/electron/main/sessions/session-export-ipc.ts`（ipc-handlers 聚合点注册）+ preload `exportSessionJsonl` + renderer 域函数 `api/domains/session-export.ts` + SessionItem → SessionList → Sidebar → useSidebarSessionActions 事件链（成功/失败 toast，canceled 静默对齐 DiagnosticsExportAction 口径）；i18n key `sidebar.sessionItem.exportJsonl` / `exportJsonlUnavailable` / `sidebar.exportJsonlSuccess` / `exportJsonlFailed` zh/en 双侧。
 - **通道 3 · composer image 徽章真图缩略图（已落地）**：行内 image badge 与上下文行 image chip 的 lead 均为 16px 真图缩略（demo `.ichip .thumb` / `.ctxchip .thumb` 四值：16px / r-3.5px / object-fit cover / flex none）。数据通道 = 既有 local-file:// 协议复用（未新开通路）：暂存图落盘 attachments/tmpdir（白名单内），URL 构造收敛 `@taiji/shared` `localFileUrl` 单点；加载失败回退 ImageIcon 占位不留破图。落点 = dom-core chip-commands `makeImageThumb`（行内 badge）+ renderer ContextChipsBar（上下文档）+ core context-chips 派生带 path。
