@@ -86,6 +86,26 @@ export function isPlainRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v)
 }
 
+/**
+ * edit 工具 result.details.diff → 增删行数统计（ToolCall.diffStat 数据源，live overlay 与
+ * reducer computeToolCallFill 同函数同口径——live ≡ reload 构造性成立）。
+ *
+ * pi edit 工具 diff 行格式（pi-coding-agent dist edit-diff.js generateDiffString）：变更行 =
+ * `+<行号> <内容>`（新增）/ `-<行号> <内容>`（删除），上下文行与省略标记以空格开头——
+ * 行首字符 +/- 即增删语义，逐行计数即可。非字符串（write 工具 details 恒 undefined /
+ * 畸形数据）或空 diff → undefined，ToolCall.diffStat 缺省，渲染侧不显示统计段。
+ */
+export function parseDiffStat(diff: unknown): { additions: number; deletions: number } | undefined {
+  if (typeof diff !== 'string' || diff === '') return undefined
+  let additions = 0
+  let deletions = 0
+  for (const line of diff.split('\n')) {
+    if (line.startsWith('+')) additions++
+    else if (line.startsWith('-')) deletions++
+  }
+  return { additions, deletions }
+}
+
 // ── stripAnsi / normalizePiToolResult（迁移自 runtime normalize-tool-result.ts）──────
 //
 // 迁移副本（非 import）：core 包不依赖 runtime（包依赖方向），而 reducer 需要归一规则。

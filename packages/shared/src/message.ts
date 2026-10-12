@@ -250,6 +250,13 @@ export interface ToolCall {
   outputTruncated?: boolean
   /** pi tool_execution_end result.details — 结构化扩展数据 */
   details?: Record<string, unknown>
+  /**
+   * edit 工具 result.details.diff 的增删行数统计（core computeToolCallFill 解析，live 与
+   * reload 同函数同口径）。pi edit.js details = { diff, patch, firstChangedLine }，write
+   * 工具 details 恒 undefined。缺省 = 数据不可得（write / 历史会话 / 非本口径引擎），渲染侧
+   * 不显示统计段。
+   */
+  diffStat?: { additions: number; deletions: number }
   /** Extension tool_call_update 详细信息。
    *  subagent sync 模式下存 pi-subagents 推送的 AgentProgress 快照（聚合摘要：
    *  currentTool/turnCount/tokens/recentTools 等），前端据此滚动更新 subagent 行。 */

@@ -179,10 +179,12 @@ describe('D5 行类型定档: completed tool header 染 neutral-mid', () => {
  * - edit/write 行 = 工具名 + basename chip（title 完整路径、点击开 drawer detail、
  *   @click.stop 防行展开、超长 CSS ellipsis）——与 UserBubble 文件 badge 同语义双通道
  * - bash/read 等其他工具行不变（read 保持 shortenForHeader 摘要）
- * - diff 统计 +N −N 本波不做（决策 8：数据不可得，chip 结构预留统计段） */
+ * - 统计段 = edit 工具 diff +N −N（ToolCall.diffStat，core parseDiffStat 数据层；write/
+ *   历史会话缺省不渲染） */
 describe('ui-optimize-unified N1: edit/write 工具行 basename chip（决策 8）', () => {
   const FILE_PATH = '/home/user/project/src/app.ts'
   const CHIP_SEL = '[data-testid="tool-file-chip"]'
+  const DIFFSTAT_SEL = '[data-testid="tool-file-chip-diffstat"]'
 
   /** mount 文件工具行 + 可引用的 deps mock（断言 onFileClick/openDrawer 双通道调用参数） */
   function makeChipWrapper(over: Partial<ToolCall> = {}) {
@@ -215,6 +217,22 @@ describe('ui-optimize-unified N1: edit/write 工具行 basename chip（决策 8�
     expect(chip.exists()).toBe(true)
     expect(chip.text()).toBe('app.ts')
     expect(chip.attributes('title')).toBe(FILE_PATH)
+  })
+
+  it('edit 行 diffStat 有值：统计段渲染 +N −N（diff 数据层供给，登记 docs/todo 修复）', () => {
+    const { wrapper } = makeChipWrapper({ toolName: 'edit', input: { path: FILE_PATH }, diffStat: { additions: 2, deletions: 1 } })
+    const stat = wrapper.find(DIFFSTAT_SEL)
+    expect(stat.exists()).toBe(true)
+    expect(stat.text()).toBe('+2 −1')
+    // 统计段在 chip 内（basename 之后同容器），dim 灰阶（与行尾耗时槽同档）
+    expect(wrapper.find(CHIP_SEL).text()).toContain('+2 −1')
+    expect(stat.classes()).toContain('text-neutral-dim')
+  })
+
+  it('diffStat 缺省（write 工具 details 恒 undefined / 历史会话）不渲染统计段，形态回退现状', () => {
+    const { wrapper } = makeChipWrapper({ toolName: 'write', input: { file_path: FILE_PATH } })
+    expect(wrapper.find(DIFFSTAT_SEL).exists()).toBe(false)
+    expect(wrapper.find(CHIP_SEL).text()).toBe('app.ts')
   })
 
   it('chip 点击：@click.stop 不触发行展开 + onFileClick/openDrawer 双通道（UserBubble badge 同语义）', async () => {

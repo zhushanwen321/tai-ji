@@ -93,7 +93,7 @@
              层级固定，可见度由悬停控制（opacity-0 + group-hover/result:opacity-100）——
              「始终可见」指常驻 DOM 与层级，非视觉常显。 -->
         <Transition name="block-expand">
-        <div v-if="thinkingExpanded" class="group/result relative mt-1 pl-4 text-[length:var(--text-sm)] leading-[1.7] text-neutral-mid">
+        <div v-if="thinkingExpanded" class="group/result relative mt-1 pl-4 text-[length:var(--text-sm)] leading-[1.8] text-neutral-mid">
           <Button
             variant="ghost"
             size="icon"
@@ -311,7 +311,13 @@
             @keydown.space.stop.prevent="openFileDetail(argPath)"
           >
             <span class="fchip-roll inline-block whitespace-nowrap">{{ fileChipBasename }}</span>
-            <!-- 统计段预留位（决策 8：diff +N −N 数据不可得本波不做，登记 docs/todo 随 U19 执行） -->
+            <!-- 统计段：edit 工具 diff 增删行数（core parseDiffStat 数据层；write 工具/历史会话
+                 缺省不渲染）。mono dim，与行尾耗时槽同档灰阶。 -->
+            <span
+              v-if="fileChipDiffStat"
+              data-testid="tool-file-chip-diffstat"
+              class="shrink-0 tabular-nums text-neutral-dim"
+            >+{{ fileChipDiffStat.additions }} −{{ fileChipDiffStat.deletions }}</span>
           </span>
           <span v-else-if="argPath" class="min-w-0 font-mono text-[length:var(--text-sm)] normal-case tracking-normal text-neutral-dim truncate transition-opacity duration-[var(--duration-fast)] group-hover/tool:opacity-80" :class="[{ invisible: toolExpanded && isBashTool }, isRunning ? 'text-sweep' : '']">{{ shortenForHeader(argPath) }}</span>
           <!-- tool 块行尾槽（[M3b demo 复刻] demo .dur/.ts）：耗时常驻显形（demo .dur 无显隐
@@ -776,6 +782,10 @@ const fileChipBasename = computed(() => {
   const parts = argPath.value.split('/')
   return parts[parts.length - 1] ?? argPath.value
 })
+
+/** edit 工具 diff 增删行数统计（core computeToolCallFill 解析 details.diff；write 工具
+ * details 恒 undefined、历史会话缺字段 → undefined 不渲染统计段，形态回退现状） */
+const fileChipDiffStat = computed(() => props.tool?.diffStat)
 
 /** 点击 chip → 开 drawer detail tab（与 UserBubble badge 同语义双通道：selectFile 同 tick
  * 注入 detail tab 实例 + openDrawer 切 tab 开抽屉，缺一不可——见壳层 useDetailPane 注释） */

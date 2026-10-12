@@ -17,6 +17,7 @@
  */
 import { describe, it, expect } from 'vitest'
 import { computeToolCallFill } from '../apply-entry-convert'
+import { parseDiffStat } from '../apply-entry-utils'
 import { applyEntry, createInitialChatViewState, replayEntries } from '../apply-entry'
 import type { PiEntry, PiMessageEntry } from '../apply-entry'
 import { msgEntry } from './helpers/fixtures'
@@ -184,5 +185,82 @@ describe('确定性：endTime 派生自 entry 数据，无 Date.now() 渗入（r
     const s1 = applyEntry(createInitialChatViewState(), entry)
     const s2 = applyEntry(createInitialChatViewState(), entry)
     expect(s1.orphanToolResults).toEqual(s2.orphanToolResults)
+  })
+})
+
+// ── [diff-stat-chip] edit 工具 details.diff → diffStat（ToolCall 新字段，live≡reload 同口径）──
+//
+// pi edit 工具 result.details = { diff, patch, firstChangedLine }（pi dist edit.js），diff 行
+// 格式（edit-diff.js generateDiffString）：变更行 `+<行号> <内容>` / `-<行号> <内容>`，
+// 上下文行与省略标记以空格开头。write 工具 details 恒 undefined → diffStat 缺省不渲染。
+
+const EDIT_DIFF = [
+  '+ 3 const b = 2',
+  '  1 const a = 1',
+  '- 2 const b = old',
+  '       ...',
+  '+ 5 const c = 3',
+].join('\n')
+
+describe('parseDiffStat：pi edit diff 行格式统计', () => {
+  it('行首 +/- 计数（上下文行与省略标记以空格开头，不计入）', () => {
+    expect(parseDiffStat(EDIT_DIFF)).toEqual({ additions: 2, deletions: 1 })
+  })
+
+  it('非字符串（write 工具 details 恒 undefined / 畸形数据）与空 diff → undefined', () => {
+    expect(parseDiffStat(undefined)).toBeUndefined()
+    expect(parseDiffStat(123)).toBeUndefined()
+    expect(parseDiffStat('')).toBeUndefined()
+  })
+})
+
+describe('computeToolCallFill：diffStat 派生', () => {
+  it('edit details.diff → fill.diffStat 有值', () => {
+    const fill = computeToolCallFill({
+      role: 'toolResult', toolCallId: 'tc1', toolName: 'edit',
+      content: [{ type: 'text', text: 'ok' }],
+      details: { diff: EDIT_DIFF, patch: '---', firstChangedLine: 3 },
+    })
+    expect(fill.diffStat).toEqual({ additions: 2, deletions: 1 })
+  })
+
+  it('write（details 缺省）→ 不设 diffStat 字段（条件 spread，无 undefined 噪声）', () => {
+    const fill = computeToolCallFill({
+      role: 'toolResult', toolCallId: 'tc1', toolName: 'write',
+      content: [{ type: 'text', text: 'ok' }],
+    })
+    expect('diffStat' in fill).toBe(false)
+  })
+})
+
+describe('reload 路径 toolCall.diffStat 回填（reducer 腿，与 live overlay 同口径）', () => {
+  it('replayEntries：edit toolResult entry details.diff → toolCall.diffStat 有值', () => {
+    const state = replayEntries([
+      msgEntry('e-asst', {
+        role: 'assistant',
+        content: [{ type: 'toolCall', id: 'tc-ed', name: 'edit', arguments: { path: '/a.ts' } }],
+        timestamp: 1000,
+      }, { timestamp: ISO(1000) }),
+      toolResultEntry('e-tr', 'tc-ed', 5432, {
+        details: { diff: EDIT_DIFF, patch: '---', firstChangedLine: 3 },
+      }),
+    ])
+    expect(state.messages).toHaveLength(1)
+    const tc = state.messages[0]!.toolCalls![0]!
+    expect(tc.diffStat).toEqual({ additions: 2, deletions: 1 })
+    expect(tc.details).toEqual({ diff: EDIT_DIFF, patch: '---', firstChangedLine: 3 })
+  })
+
+  it('write toolResult（无 details）→ toolCall 不带 diffStat 字段（缺省语义：不渲染统计段）', () => {
+    const state = replayEntries([
+      msgEntry('e-asst', {
+        role: 'assistant',
+        content: [{ type: 'toolCall', id: 'tc-wr', name: 'write', arguments: { path: '/a.ts' } }],
+        timestamp: 1000,
+      }, { timestamp: ISO(1000) }),
+      toolResultEntry('e-tr', 'tc-wr', 5432),
+    ])
+    const tc = state.messages[0]!.toolCalls![0]!
+    expect('diffStat' in tc).toBe(false)
   })
 })
