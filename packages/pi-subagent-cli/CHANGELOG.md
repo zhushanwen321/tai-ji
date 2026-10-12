@@ -1,5 +1,11 @@
 # @zhushanwen/pi-subagent-cli
 
+## 0.7.1
+
+### Patch Changes
+
+- 0c4bec66e: chore: refresh dependency range (triggered by @zhushanwen/subagent-engine-sdk@0.10.0 → @zhushanwen/subagent-engine-sdk@0.10.1)
+
 ## 0.7.0
 
 ### Minor Changes

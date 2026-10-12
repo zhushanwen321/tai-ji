@@ -1,5 +1,11 @@
 # @zhushanwen/pi-rename-session
 
+## 0.11.1
+
+### Patch Changes
+
+- 0c4bec66e: chore: refresh dependency range (triggered by @zhushanwen/pi-ext-guards@0.4.3 → @zhushanwen/pi-ext-guards@0.4.4, @zhushanwen/pi-llm-shared@0.11.1 → @zhushanwen/pi-llm-shared@0.11.2)
+
 ## 0.11.0
 
 ### Minor Changes
