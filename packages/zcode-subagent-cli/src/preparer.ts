@@ -32,11 +32,10 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
-import { resolveEngineDataDir } from "@zhushanwen/subagent-engine-sdk";
+import { resolveEngineDataDir, ZCODE_PI_SYNCED_PROVIDER_CONFIG_SEGMENTS } from "@zhushanwen/subagent-engine-sdk";
 
 import {
   ZCODE_PERSONAL_PROVIDER_CONFIG_PATH_SUFFIX,
-  ZCODE_PI_SYNCED_PROVIDER_CONFIG_SEGMENTS,
   ZCODE_V2_CONFIG_PATH_SUFFIX,
 } from "./constants.ts";
 

@@ -58,6 +58,10 @@ import { SUBAGENTS_ENGINES_FILENAME, PLAN_STATE_CUSTOM_TYPE } from '@zhushanwen/
 // paths.ts 是 Node-only 模块，刻意不从 shared barrel 导出（见 shared/src/index.ts L32 注释），
 // Node 端从子路径 import
 import { getDataDir } from '@taiji/shared/paths'
+// zcode 同步副本段常量单源（SDK zcode-db-paths.ts）——与引擎读侧（zcode-subagent-cli
+// preparer 解析链）同源 import；SDK 是跨包契约根，不违 C-ext-13 的「runtime 不 import
+// 引擎包」红线（relay-registry.ts 同款先例）
+import { ZCODE_PI_SYNCED_PROVIDER_CONFIG_SEGMENTS } from '@zhushanwen/subagent-engine-sdk'
 import type { IProcessManager, IPiEngine } from '../ports/pi-engine.js'
 import { getHistoryFromFilePath, type HistoryFileReadResult } from '../session-history.js'
 import { extractSubagentsFromSessionFile } from './subagent-extractor.js'
@@ -286,11 +290,10 @@ export interface SessionRecordsDeps {
   /**
    * engine-provider-unification D5：zcode 模型清单派生源路径（真实 provider_config.json
    * 与 taiji 同步副本——deriveZcodeEngineModels 消费）。缺省 = 真实 ~/.zcode/v2/
-   * provider_config.json + <dataDir>/engines/zcode/pi-synced-provider-config.json（与
-   * zcode-subagent-cli 侧 ZCODE_PERSONAL_PROVIDER_CONFIG_PATH_SUFFIX /
-   * ZCODE_PI_SYNCED_PROVIDER_CONFIG_SEGMENTS 同源约定——runtime 不 import 该包（跨包
-   * 红线，u1 同源复制先例），路径段漂移由 u1/u2b 侧对账防线覆盖）。测试注入隔离
-   * 真实 ~/.zcode 树（缺省会读到宿主真实配置，断言不可控）。
+   * provider_config.json + <dataDir>/engines/zcode/pi-synced-provider-config.json
+   * （副本段常量单源 = SDK zcode-db-paths.ts ZCODE_PI_SYNCED_PROVIDER_CONFIG_SEGMENTS，
+   * 与 zcode-subagent-cli preparer 解析链同源 import——SDK 契约根，不违 C-ext-13）。
+   * 测试注入隔离真实 ~/.zcode 树（缺省会读到宿主真实配置，断言不可控）。
    */
   zcodeModelListPaths?: Pick<ZcodeProviderSyncPaths, 'realProviderConfigPath' | 'syncedCopyPath'>
   /**
@@ -1195,7 +1198,7 @@ export class SessionRecords {
   private zcodeModelListPaths(): Pick<ZcodeProviderSyncPaths, 'realProviderConfigPath' | 'syncedCopyPath'> {
     return this.deps.zcodeModelListPaths ?? {
       realProviderConfigPath: join(homedir(), '.zcode', 'v2', 'provider_config.json'),
-      syncedCopyPath: join(getDataDir(), 'engines', 'zcode', 'pi-synced-provider-config.json'),
+      syncedCopyPath: join(getDataDir(), ...ZCODE_PI_SYNCED_PROVIDER_CONFIG_SEGMENTS),
     }
   }
 

@@ -7,12 +7,14 @@
  *
  * 与 u1-sync（zcode-provider-sync.ts）的职责边界：u1 承载映射与落盘编排（DI 面）；本文件
  * 只承载组合根接线决策——缺省路径拼装（真实三路径 homedir 推导 + 副本路径 getDataDir
- * 派生，段形态对齐 zcode-subagent-cli 的 ZCODE_PI_SYNCED_PROVIDER_CONFIG_SEGMENTS，runtime
- * 自行拼装不跨包 import，session-records zcodeModelListPaths 缺省同款）+ catalog 单点直传
+ * 派生，段常量 = SDK zcode-db-paths.ts 的 ZCODE_PI_SYNCED_PROVIDER_CONFIG_SEGMENTS 单源，
+ * 与 zcode-subagent-cli preparer 解析链同源 import——SDK 是跨包契约根，不违 C-ext-13
+ * 的「runtime 不 import 引擎包」红线，relay-registry.ts 同款先例）+ catalog 单点直传
  * + try/catch 降级 + 结果摘要日志。
  */
 import { homedir } from 'node:os'
 import { join } from 'node:path'
+import { ZCODE_PI_SYNCED_PROVIDER_CONFIG_SEGMENTS } from '@zhushanwen/subagent-engine-sdk'
 import { getDataDir } from '@taiji/shared/paths'
 // logger 是 C-comm-03 文档登记受控例外（横切关注点，port 化只增加无意义间接层）
 import { logger } from '../infra/logger.js'
@@ -27,9 +29,8 @@ import {
 
 /**
  * 缺省路径拼装：真实文件 = ~/.zcode 树三路径（homedir 推导）；副本路径 =
- * <dataDir>/engines/zcode/pi-synced-provider-config.json（段形态对齐 zcode-subagent-cli
- * ZCODE_PI_SYNCED_PROVIDER_CONFIG_SEGMENTS = ['engines','zcode','pi-synced-provider-config.json']
- * ——runtime 侧自行拼装，跨包 import 红线；改段前先同步对账 zcode-subagent-cli/constants.ts）。
+ * <dataDir>/engines/zcode/pi-synced-provider-config.json（段常量单源 = SDK
+ * zcode-db-paths.ts ZCODE_PI_SYNCED_PROVIDER_CONFIG_SEGMENTS，与引擎读侧同源）。
  */
 export function defaultZcodeProviderSyncPaths(): ZcodeProviderSyncPaths {
   const zcodeRoot = join(homedir(), '.zcode')
@@ -37,7 +38,7 @@ export function defaultZcodeProviderSyncPaths(): ZcodeProviderSyncPaths {
     realProviderConfigPath: join(zcodeRoot, 'v2', 'provider_config.json'),
     v2ConfigPath: join(zcodeRoot, 'v2', 'config.json'),
     cliConfigPath: join(zcodeRoot, 'cli', 'config.json'),
-    syncedCopyPath: join(getDataDir(), 'engines', 'zcode', 'pi-synced-provider-config.json'),
+    syncedCopyPath: join(getDataDir(), ...ZCODE_PI_SYNCED_PROVIDER_CONFIG_SEGMENTS),
   }
 }
 

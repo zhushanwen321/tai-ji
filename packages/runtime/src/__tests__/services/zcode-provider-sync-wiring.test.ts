@@ -2,9 +2,10 @@
  * zcode provider 启动同步接线测试（engine-provider-unification u2-wiring）。
  *
  * 覆盖（对齐任务书：同步抛错不中断启动 + 接线契约）：
- * 1. 缺省路径拼装：真实三路径 homedir 段形态 + 副本路径段形态（与 zcode-subagent-cli
- *    ZCODE_PI_SYNCED_PROVIDER_CONFIG_SEGMENTS 同源约定锁步——段形态变了测试红，提示
- *    同步对账 zcode-subagent-cli/constants.ts，不跨包 import）；
+ * 1. 缺省路径拼装：真实三路径 homedir 段形态 + 副本路径段形态（副本段常量单源 =
+ *    SDK zcode-db-paths.ts ZCODE_PI_SYNCED_PROVIDER_CONFIG_SEGMENTS——测试锁 SDK 段
+ *    常量字面值 + 断言生产确实由该常量拼装，SDK 常量被误改或 runtime 漂移回自拼
+ *    字面量均在此红）；
  * 2. D7 降级：底层依赖抛错 → 不向调用方上抛（启动不中断）+ warn 留痕含恢复语义；
  * 3. 摘要日志三态：written（条目数 + 落盘路径）/ skipped-empty（删旧副本回落真实文件）。
  *
@@ -18,6 +19,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { getDataDir } from '@taiji/shared/paths'
+import { ZCODE_PI_SYNCED_PROVIDER_CONFIG_SEGMENTS } from '@zhushanwen/subagent-engine-sdk'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { ModelsConfigView, ProviderConfigView } from '../../infra/pi/pi-provider-store.js'
 import type { ResolvedProviderCredential } from '../../services/ports/provider-credential-resolver.js'
@@ -97,13 +99,21 @@ afterEach(() => {
 // ── 缺省路径拼装 ─────────────────────────────────────────────────────────────
 
 describe('defaultZcodeProviderSyncPaths', () => {
-  it('真实三路径 homedir 段形态 + 副本路径 getDataDir 段形态（同源约定锁步）', () => {
+  it('真实三路径 homedir 段形态 + 副本路径 getDataDir 段形态（SDK 段常量单源对账）', () => {
+    // SDK 段常量字面值锁（真实对账点）：runtime 生产代码与 zcode-subagent-cli 引擎
+    // 读侧同源 import 该常量——字面值被误改在此红，两侧消费同步断裂可感知
+    expect([...ZCODE_PI_SYNCED_PROVIDER_CONFIG_SEGMENTS]).toEqual([
+      'engines',
+      'zcode',
+      'pi-synced-provider-config.json',
+    ])
     const p = defaultZcodeProviderSyncPaths()
     const zcodeRoot = join(homedir(), '.zcode')
     expect(p.realProviderConfigPath).toBe(join(zcodeRoot, 'v2', 'provider_config.json'))
     expect(p.v2ConfigPath).toBe(join(zcodeRoot, 'v2', 'config.json'))
     expect(p.cliConfigPath).toBe(join(zcodeRoot, 'cli', 'config.json'))
-    expect(p.syncedCopyPath).toBe(join(getDataDir(), 'engines', 'zcode', 'pi-synced-provider-config.json'))
+    // 生产必须由 SDK 常量拼装（常量字面值已被上行锁死）——漂移回自拼字面量在此红
+    expect(p.syncedCopyPath).toBe(join(getDataDir(), ...ZCODE_PI_SYNCED_PROVIDER_CONFIG_SEGMENTS))
   })
 })
 

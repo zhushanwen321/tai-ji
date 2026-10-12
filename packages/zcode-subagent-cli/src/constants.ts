@@ -10,7 +10,8 @@
 // 随 2026-09 会话库隔离设计独立于宿主库（隔离路径契约见 db-path.ts 的
 // zcodeSessionDbPath/zcodeDbPathAllowlist；路径段常量 SSOT 已收编至
 // @zhushanwen/subagent-engine-sdk zcode-db-paths.ts，本文件不再持有
-// ZCODE_HOST_DB_SUFFIX——引擎包与 zcode-session-source 读侧（runtime 经其消费）同源 import）。
+// ZCODE_HOST_DB_SUFFIX 与 ZCODE_PI_SYNCED_PROVIDER_CONFIG_SEGMENTS——引擎包
+// 与 runtime 读/写侧同源 import SDK 常量，禁止本地再持同形字面量）。
 
 /** zcode 引擎的 registry key。 */
 export const ZCODE_ENGINE_ID = "zcode";
@@ -45,17 +46,6 @@ export const ZCODE_V2_CONFIG_PATH_SUFFIX = [".zcode", "v2", "config.json"] as co
  * （config.access.apiKey）。
  */
 export const ZCODE_PERSONAL_PROVIDER_CONFIG_PATH_SUFFIX = [".zcode", "v2", "provider_config.json"] as const;
-
-/**
- * taiji 同步副本相对段（`<engineDataDir>/engines/zcode/pi-synced-provider-config.json`，
- * 绝对路径 = join(engineDataDir, ...segments)）：runtime 启动段把 pi 侧 provider
- * 映射落盘的合并副本（真实 zcode 文件条目透传优先，唯一写方 = runtime 同步模块）。
- * 个人 provider 校验源解析链（preparer.ts resolvePersonalProviderConfigPath）的
- * 优先源——存在即用之，缺失回落 ZCODE_PERSONAL_PROVIDER_CONFIG_PATH_SUFFIX 真实
- * 文件。命名对齐 SDK 数据目录相对段形态（ZCODE_ISOLATED_DB_SEGMENTS 同族——同以
- * engineDataDir 为 join 根，与 homedir 根的 _PATH_SUFFIX 族区分）。
- */
-export const ZCODE_PI_SYNCED_PROVIDER_CONFIG_SEGMENTS = ["engines", "zcode", "pi-synced-provider-config.json"] as const;
 
 /** 杀链 grace 窗口：SIGTERM 后等这么久再 SIGKILL（zsub 同构 5s；实测 SIGTERM→exit 仅 103ms）。 */
 export const ZCODE_KILL_GRACE_MS = 5_000;
