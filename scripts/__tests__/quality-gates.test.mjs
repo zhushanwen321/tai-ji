@@ -164,6 +164,17 @@ describe('runGates 聚合编排（fake 子进程，不真跑重型命令）', ()
     expect(renderer.status).toBe('FAIL')
     expect(renderer.detail).toContain('TS2304')
   })
+  it('typecheck spawn 失败（命令不在 PATH，status null + error）→ FAIL 且 detail 含命令名与恢复动作（非哑 FAIL）', async () => {
+    const deps = makeDeps({
+      exec: () => ({ status: null, stdout: '', stderr: '', error: new Error('spawn npx ENOENT') }),
+    })
+    const { result } = await runGates(deps, { side: 'pr-cr-fix', base: null })
+    const ext = result.gates.find((g) => g.name === 'typecheck:extensions')
+    expect(ext.status).toBe('FAIL')
+    expect(ext.detail).toContain('npx')
+    expect(ext.detail).toContain('PATH')
+    expect(ext.detail).toContain('spawn npx ENOENT')
+  })
   it('py 实体缺失 → exitCode 2，错误指明缺失路径与恢复通道，且不跑任何门', async () => {
     let execCalls = 0
     let pyCalls = 0

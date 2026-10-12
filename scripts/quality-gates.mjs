@@ -349,9 +349,20 @@ function runTypecheckGates(deps, gates) {
     gates.push({
       name: step.name,
       status: ok ? 'PASS' : 'FAIL',
-      detail: ok ? '' : tailLines((r.stderr || '') + (r.stdout || ''), 30),
+      detail: ok ? '' : typecheckFailDetail(step, r),
     })
   }
+}
+
+/** spawn 失败（status null：命令不在 PATH / 不可执行）时 stderr 与 stdout 恒空——
+ *  若只拼两者会呈现为无 detail 的哑 FAIL（node 版本管理器环境漏 PATH 实例，typecheck
+ *  四门齐挂且无任何线索）。此处把 r.error 与恢复动作报进 detail。 */
+function typecheckFailDetail(step, r) {
+  if (r.status === null && r.error) {
+    return `命令无法执行：${step.cmd} 不在 PATH 或不可执行（${r.error.message}）。` +
+      `恢复：确保 pnpm/npx 在 PATH 中（node 版本管理器环境需先加载，如 nvm.sh）`
+  }
+  return tailLines((r.stderr || '') + (r.stdout || ''), 30)
 }
 
 /**
