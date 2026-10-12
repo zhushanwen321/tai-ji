@@ -68,7 +68,7 @@ import { probeSingleInstance, registerRuntimeInstance } from './infra/single-ins
 // 恒返回 no-op，pi-respawn / message-bus 守卫 / session 生命周期的全部 runtime 侧
 // 事件静默丢弃（crashes/runtime.jsonl 永不创建）。close 挂点属 shutdown 链（u7c）。
 import { initCrashJournal, closeCrashJournal } from './infra/crash-journal.js'
-import { isContainedStreamError } from './infra/system/uncaught-policy.js'
+import { appendProcessEscapeLog, isContainedStreamError } from './infra/system/uncaught-policy.js'
 // B5（memory-leak-remediation §3.2-B5）：sessionData 软删除实现——经 ITrash port
 // （services/ports/trash.ts）由组合根注入 SessionDataStore（三层约束 C-comm-03：
 // services 层不得 value import infra，装配归组合根）。结构匹配 ITrash.trashFile。
@@ -1762,6 +1762,7 @@ async function main(): Promise<void> {
     broadcastAppInfo: () => server.broadcastAppInfo(),
     skillRegistry,
     pluginService,
+
     // u5（crash-forensics D3）：收割完成 promise 交付（reattach 编排的唯一消费方）。
     onOrphanReapChainScheduled: (completion) => {
       orphanReapChain = completion
