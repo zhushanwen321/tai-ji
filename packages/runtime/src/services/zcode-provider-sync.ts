@@ -209,9 +209,144 @@ function participatingModels(
   })
 }
 
+/** ③ 每模型生效 baseUrl 集合 = 模型级覆盖 ?? provider 级两级网关（pi provider-composer
+ *  `definition.baseUrl ?? config.baseUrl ?? defaults.baseUrl` 三链同构）。 */
+function effectiveBaseUrlsOf(
+  models: readonly MappingModelSource[],
+  providerBaseUrl: string | undefined,
+): Set<string> {
+  const effectiveBaseUrls = new Set<string>()
+  for (const m of models) {
+    if (isUsableUrl(m.baseUrl)) effectiveBaseUrls.add(m.baseUrl)
+    else if (isUsableUrl(providerBaseUrl)) effectiveBaseUrls.add(providerBaseUrl)
+  }
+  return effectiveBaseUrls
+}
+
+/** ③⑤ baseUrl 判定：集合空 → ③（三链全空）；集合多值 → ⑤（模型级覆盖与 provider 级不一致）。 */
+function effectiveBaseUrlOf(
+  id: string,
+  models: readonly MappingModelSource[],
+  providerBaseUrl: string | undefined,
+): { readonly skip: ProviderSyncSkip } | { readonly baseUrl: string } {
+  const effectiveBaseUrls = effectiveBaseUrlsOf(models, providerBaseUrl)
+  if (effectiveBaseUrls.size === 0) {
+    return { skip: { providerId: id, rule: 'no-base-url', detail: 'baseUrl 三链全空（模型级/provider 级/catalog 级），跳过 zcode 同步——请在 taiji settings 补全 baseUrl 后重启' } }
+  }
+  if (effectiveBaseUrls.size > 1) {
+    return { skip: { providerId: id, rule: 'per-model-mismatch', detail: `模型级 baseUrl 覆盖与 provider 级生效值不一致（${[...effectiveBaseUrls].join(' vs ')}），zcode providerRule 是 provider 级单值，整条跳过` } }
+  }
+  return { baseUrl: [...effectiveBaseUrls][0]! }
+}
+
+/** ④ 每模型生效协议集合 = m.api ?? cfg.api。 */
+function effectiveApisOf(models: readonly MappingModelSource[], cfg: ProviderConfigView): Set<string> {
+  const effectiveApis = new Set<string>()
+  for (const m of models) {
+    if (typeof m.api === 'string' && m.api !== '') effectiveApis.add(m.api)
+    else if (typeof cfg.api === 'string' && cfg.api !== '') effectiveApis.add(cfg.api)
+  }
+  return effectiveApis
+}
+
+/** ④⑤ api 判定：集合多值 → ⑤（协议不一致）；一致值无 zcode 映射 → ④；否则返回映射值。 */
+function zcodeApiTypeOf(
+  id: string,
+  models: readonly MappingModelSource[],
+  cfg: ProviderConfigView,
+): { readonly skip: ProviderSyncSkip } | { readonly apiType: string } {
+  const effectiveApis = effectiveApisOf(models, cfg)
+  if (effectiveApis.size > 1) {
+    return { skip: { providerId: id, rule: 'per-model-mismatch', detail: `模型级协议覆盖与 provider 级不一致（${[...effectiveApis].join(' vs ')}），整条跳过` } }
+  }
+  const effectiveApi = effectiveApis.size === 1 ? [...effectiveApis][0]! : undefined
+  const zcodeApiType = effectiveApi !== undefined ? ZCODE_API_TYPE_MAP[effectiveApi] : undefined
+  if (zcodeApiType === undefined) {
+    return { skip: { providerId: id, rule: 'no-supported-api', detail: `生效协议 ${effectiveApi ?? '(未声明)'} 无 zcode 对应（仅映射 openai-completions/anthropic-messages），跳过` } }
+  }
+  return { apiType: zcodeApiType }
+}
+
+/** 正条附带的 per-model 规则（contextWindow 正数才产出——D2 字段转换表）。 */
+function modelRulesOf(
+  providerId: string,
+  models: readonly MappingModelSource[],
+): ZcodeProviderModelRule[] {
+  const modelRules: ZcodeProviderModelRule[] = []
+  for (const m of models) {
+    if (typeof m.contextWindow === 'number' && m.contextWindow > 0) {
+      modelRules.push({ providerId, modelId: m.id, config: { properties: { contextWindow: m.contextWindow } } })
+    }
+  }
+  return modelRules
+}
+
+/** 单 provider 映射产物：null = zai 系前置分流（静默跳过，D4）；skip = D2 判定命中；
+ *  rule = 正向映射条目（含 per-model 规则）。 */
+type SingleProviderMapping =
+  | null
+  | { readonly skip: ProviderSyncSkip }
+  | { readonly rule: ZcodeProviderRule; readonly modelRules: ZcodeProviderModelRule[] }
+
+/** 单 provider 判定链（D2 判定①-⑥ 逐条，先命中先跳过；分支体判定段见上方各 helper）。 */
+function mapSingleProviderToZcodeRule(
+  id: string,
+  cfg: ProviderConfigView,
+  input: ProviderMappingInput,
+): SingleProviderMapping {
+  if ((ZAI_OFFICIAL_PROVIDER_IDS as readonly string[]).includes(id)) return null
+
+  // ① 凭据可得 → 继续（resolver 单通道语义：unsupported 不降级、不映射为 api-key 条目）
+  const cred = input.credentials.get(id)
+  if (cred === undefined) {
+    return { skip: { providerId: id, rule: 'no-credential', detail: 'resolver 两源（auth.json/models.json）均无凭据，跳过 zcode 同步' } }
+  }
+  if ('unsupported' in cred) {
+    return { skip: { providerId: id, rule: 'unsupported-credential', detail: `凭据形态不支持（${cred.unsupported}），不做 api-key 映射，请修正 pi 侧凭据配置` } }
+  }
+
+  // ② provider 级禁用（models.json enabled:false 遗留形态 + enabledModels 白名单派生）→ 整条跳过
+  if (cfg.enabled === false || !deriveEnabled(id, input.enabledModels)) {
+    return { skip: { providerId: id, rule: 'provider-disabled', detail: 'provider 禁用（enabled:false 或白名单未启用），不同步' } }
+  }
+
+  const models = participatingModels(id, cfg, input)
+  if (models.length === 0) {
+    return { skip: { providerId: id, rule: 'no-models', detail: '过滤白名单/禁用后无参与模型，跳过 zcode 同步' } }
+  }
+
+  const baseUrlStep = effectiveBaseUrlOf(id, models, input.providerBaseUrlOf(id))
+  if ('skip' in baseUrlStep) return baseUrlStep
+
+  const apiStep = zcodeApiTypeOf(id, models, cfg)
+  if ('skip' in apiStep) return apiStep
+
+  // ⑥ 同名让位（zcode 侧保留，pi 映射不进副本——运行时 merge 真实条目优先为第二道防线）
+  if (input.occupiedProviderIds.has(id)) {
+    return { skip: { providerId: id, rule: 'yield-to-zcode', detail: 'zcode 侧已有同名条目（四源并集命中），pi 映射让位' } }
+  }
+
+  const modelIds = models.map(m => m.id)
+  return {
+    rule: {
+      providerId: id,
+      providerName: isUsableUrl(cfg.name) ? cfg.name : id,
+      config: {
+        group: 'standard-personal',
+        access: { type: 'api-key', apiKey: cred.key },
+        api: { type: apiStep.apiType, baseUrl: baseUrlStep.baseUrl },
+        personalModelIds: modelIds,
+        modelOrder: modelIds,
+      },
+    },
+    modelRules: modelRulesOf(id, models),
+  }
+}
+
 /**
- * 通用映射纯函数：pi providers → zcode providerRules（D2 判定①-⑥ 逐条，先命中先跳过）。
- * zai 系官方 provider 前置分流（D4），不经本函数。
+ * 通用映射纯函数：pi providers → zcode providerRules（D2 判定①-⑥ 逐条，先命中先跳过；
+ * 单 provider 判定链在 mapSingleProviderToZcodeRule）。zai 系官方 provider 前置分流（D4），
+ * 不经本函数。
  */
 export function mapPiProvidersToZcodeRules(input: ProviderMappingInput): ProviderMappingResult {
   const rules: ZcodeProviderRule[] = []
@@ -220,89 +355,14 @@ export function mapPiProvidersToZcodeRules(input: ProviderMappingInput): Provide
   const skips: ProviderSyncSkip[] = []
 
   for (const [id, cfg] of Object.entries(input.providers)) {
-    if ((ZAI_OFFICIAL_PROVIDER_IDS as readonly string[]).includes(id)) continue
-
-    // ① 凭据可得 → 继续（resolver 单通道语义：unsupported 不降级、不映射为 api-key 条目）
-    const cred = input.credentials.get(id)
-    if (cred === undefined) {
-      skips.push({ providerId: id, rule: 'no-credential', detail: 'resolver 两源（auth.json/models.json）均无凭据，跳过 zcode 同步' })
+    const mapped = mapSingleProviderToZcodeRule(id, cfg, input)
+    if (mapped === null) continue
+    if ('skip' in mapped) {
+      skips.push(mapped.skip)
       continue
     }
-    if ('unsupported' in cred) {
-      skips.push({ providerId: id, rule: 'unsupported-credential', detail: `凭据形态不支持（${cred.unsupported}），不做 api-key 映射，请修正 pi 侧凭据配置` })
-      continue
-    }
-
-    // ② provider 级禁用（models.json enabled:false 遗留形态 + enabledModels 白名单派生）→ 整条跳过
-    if (cfg.enabled === false || !deriveEnabled(id, input.enabledModels)) {
-      skips.push({ providerId: id, rule: 'provider-disabled', detail: 'provider 禁用（enabled:false 或白名单未启用），不同步' })
-      continue
-    }
-
-    const models = participatingModels(id, cfg, input)
-    if (models.length === 0) {
-      skips.push({ providerId: id, rule: 'no-models', detail: '过滤白名单/禁用后无参与模型，跳过 zcode 同步' })
-      continue
-    }
-
-    // ③⑤ baseUrl 判定：每模型生效值 = 模型级覆盖 ?? provider 级两级网关（pi provider-composer
-    // `definition.baseUrl ?? config.baseUrl ?? defaults.baseUrl` 三链同构）；全空 → ③；不一致 → ⑤
-    const providerBaseUrl = input.providerBaseUrlOf(id)
-    const effectiveBaseUrls = new Set<string>()
-    for (const m of models) {
-      if (isUsableUrl(m.baseUrl)) effectiveBaseUrls.add(m.baseUrl)
-      else if (isUsableUrl(providerBaseUrl)) effectiveBaseUrls.add(providerBaseUrl)
-    }
-    if (effectiveBaseUrls.size === 0) {
-      skips.push({ providerId: id, rule: 'no-base-url', detail: 'baseUrl 三链全空（模型级/provider 级/catalog 级），跳过 zcode 同步——请在 taiji settings 补全 baseUrl 后重启' })
-      continue
-    }
-    if (effectiveBaseUrls.size > 1) {
-      skips.push({ providerId: id, rule: 'per-model-mismatch', detail: `模型级 baseUrl 覆盖与 provider 级生效值不一致（${[...effectiveBaseUrls].join(' vs ')}），zcode providerRule 是 provider 级单值，整条跳过` })
-      continue
-    }
-    const baseUrl = [...effectiveBaseUrls][0]!
-
-    // ④⑤ api 判定：每模型生效协议 = m.api ?? cfg.api；不一致 → ⑤；一致值无映射 → ④
-    const effectiveApis = new Set<string>()
-    for (const m of models) {
-      if (typeof m.api === 'string' && m.api !== '') effectiveApis.add(m.api)
-      else if (typeof cfg.api === 'string' && cfg.api !== '') effectiveApis.add(cfg.api)
-    }
-    if (effectiveApis.size > 1) {
-      skips.push({ providerId: id, rule: 'per-model-mismatch', detail: `模型级协议覆盖与 provider 级不一致（${[...effectiveApis].join(' vs ')}），整条跳过` })
-      continue
-    }
-    const effectiveApi = effectiveApis.size === 1 ? [...effectiveApis][0]! : undefined
-    const zcodeApiType = effectiveApi !== undefined ? ZCODE_API_TYPE_MAP[effectiveApi] : undefined
-    if (zcodeApiType === undefined) {
-      skips.push({ providerId: id, rule: 'no-supported-api', detail: `生效协议 ${effectiveApi ?? '(未声明)'} 无 zcode 对应（仅映射 openai-completions/anthropic-messages），跳过` })
-      continue
-    }
-
-    // ⑥ 同名让位（zcode 侧保留，pi 映射不进副本——运行时 merge 真实条目优先为第二道防线）
-    if (input.occupiedProviderIds.has(id)) {
-      skips.push({ providerId: id, rule: 'yield-to-zcode', detail: 'zcode 侧已有同名条目（四源并集命中），pi 映射让位' })
-      continue
-    }
-
-    const modelIds = models.map(m => m.id)
-    rules.push({
-      providerId: id,
-      providerName: isUsableUrl(cfg.name) ? cfg.name : id,
-      config: {
-        group: 'standard-personal',
-        access: { type: 'api-key', apiKey: cred.key },
-        api: { type: zcodeApiType, baseUrl },
-        personalModelIds: modelIds,
-        modelOrder: modelIds,
-      },
-    })
-    for (const m of models) {
-      if (typeof m.contextWindow === 'number' && m.contextWindow > 0) {
-        modelRules.push({ providerId: id, modelId: m.id, config: { properties: { contextWindow: m.contextWindow } } })
-      }
-    }
+    rules.push(mapped.rule)
+    for (const modelRule of mapped.modelRules) modelRules.push(modelRule)
     providerOrder.push(id)
   }
 
@@ -443,16 +503,13 @@ export interface ZcodeOccupiedIds { // oe-exempt:20261012:framework:映射链形
   readonly cliAny: Set<string>
 }
 
-/**
- * 让位四源并集（同步侧）。provider_config ENOENT = 空集继续（D7③）；任何源读取异常
- * （非 ENOENT / JSON 损坏）抛错由编排层按 D7④中止——让位判定缺任何一源都会造成
- * 「校验链放行 × CLI 拒载」视图分叉（2026-08-25 事故同形态），中止保留旧副本更安全。
- */
-export function collectZcodeOccupiedProviderIds(paths: Pick<ZcodeProviderSyncPaths, 'realProviderConfigPath' | 'v2ConfigPath' | 'cliConfigPath'>): ZcodeOccupiedIds {
+/** 源①②：真实 provider_config.json 的让位 id（providerRules 键存在即算 + providerOrder 成员；
+ *  ENOENT = 空集继续 D7③，其余读取异常抛错由编排层按 D7④中止）。 */
+function readPersonalConfigOccupiedIds(absPath: string): Set<string> {
   const personalConfig = new Set<string>()
-  const providerConfig = readJsonFile(paths.realProviderConfigPath)
+  const providerConfig = readJsonFile(absPath)
   if (providerConfig.state === 'unreadable') {
-    throw new Error(`[zcode-provider-sync] 真实 provider_config.json 读取异常（${paths.realProviderConfigPath}），同步中止保留上次产物`)
+    throw new Error(`[zcode-provider-sync] 真实 provider_config.json 读取异常（${absPath}），同步中止保留上次产物`)
   }
   if (providerConfig.state === 'ok' && isRecord(providerConfig.value)) {
     const config = providerConfig.value['config']
@@ -470,12 +527,15 @@ export function collectZcodeOccupiedProviderIds(paths: Pick<ZcodeProviderSyncPat
       for (const id of strArray(config['providerOrder'])) personalConfig.add(id)
     }
   }
+  return personalConfig
+}
 
-  // 源③：v2 字典带 key 才算（wrapper injectable 判定 hasKey = options.apiKey 非空）
+/** 源③：v2 config.json provider 字典带 key 才算（wrapper injectable 判定 hasKey = options.apiKey 非空）。 */
+function readV2ProviderIdsWithKey(absPath: string): Set<string> {
   const v2WithKey = new Set<string>()
-  const v2 = readJsonFile(paths.v2ConfigPath)
+  const v2 = readJsonFile(absPath)
   if (v2.state === 'unreadable') {
-    throw new Error(`[zcode-provider-sync] v2 config.json 读取异常（${paths.v2ConfigPath}），同步中止保留上次产物`)
+    throw new Error(`[zcode-provider-sync] v2 config.json 读取异常（${absPath}），同步中止保留上次产物`)
   }
   if (v2.state === 'ok' && isRecord(v2.value) && isRecord(v2.value['provider'])) {
     for (const [id, entry] of Object.entries(v2.value['provider'])) {
@@ -486,17 +546,31 @@ export function collectZcodeOccupiedProviderIds(paths: Pick<ZcodeProviderSyncPat
       }
     }
   }
+  return v2WithKey
+}
 
-  // 源④：cli 字典键存在即算、不看 key（GUI-only 宿主可能从未写过，ENOENT = 空集）
+/** 源④：cli config.json provider 字典键存在即算、不看 key（GUI-only 宿主可能从未写过，ENOENT = 空集）。 */
+function readCliProviderIds(absPath: string): Set<string> {
   const cliAny = new Set<string>()
-  const cli = readJsonFile(paths.cliConfigPath)
+  const cli = readJsonFile(absPath)
   if (cli.state === 'unreadable') {
-    throw new Error(`[zcode-provider-sync] cli config.json 读取异常（${paths.cliConfigPath}），同步中止保留上次产物`)
+    throw new Error(`[zcode-provider-sync] cli config.json 读取异常（${absPath}），同步中止保留上次产物`)
   }
   if (cli.state === 'ok' && isRecord(cli.value) && isRecord(cli.value['provider'])) {
     for (const id of Object.keys(cli.value['provider'])) cliAny.add(id)
   }
+  return cliAny
+}
 
+/**
+ * 让位四源并集（同步侧）。provider_config ENOENT = 空集继续（D7③）；任何源读取异常
+ * （非 ENOENT / JSON 损坏）抛错由编排层按 D7④中止——让位判定缺任何一源都会造成
+ * 「校验链放行 × CLI 拒载」视图分叉（2026-08-25 事故同形态），中止保留旧副本更安全。
+ */
+export function collectZcodeOccupiedProviderIds(paths: Pick<ZcodeProviderSyncPaths, 'realProviderConfigPath' | 'v2ConfigPath' | 'cliConfigPath'>): ZcodeOccupiedIds {
+  const personalConfig = readPersonalConfigOccupiedIds(paths.realProviderConfigPath)
+  const v2WithKey = readV2ProviderIdsWithKey(paths.v2ConfigPath)
+  const cliAny = readCliProviderIds(paths.cliConfigPath)
   const all = new Set<string>([...personalConfig, ...v2WithKey, ...cliAny])
   return { all, personalConfig, v2WithKey, cliAny }
 }
@@ -591,6 +665,25 @@ export function locateZcodeBuiltinCatalogSync(explicitPath?: string): string | u
   return undefined
 }
 
+/** 目录单条 rule 的 coding-plan 提取：access.accountType 匹配家族且 mode=individual-coding-plan
+ *  才产出（不匹配返回 undefined，调用方继续扫下一条）。 */
+function codingPlanEntryOfRule(
+  rule: unknown,
+  family: 'bigmodel' | 'zai',
+): ZaiCodingPlanCatalogEntry | undefined {
+  if (!isRecord(rule)) return undefined
+  const cfg = isRecord(rule['config']) ? rule['config'] : undefined
+  if (!cfg) return undefined
+  const access = isRecord(cfg['access']) ? cfg['access'] : undefined
+  if (!access || access['accountType'] !== family || access['mode'] !== 'individual-coding-plan') return undefined
+  const api = isRecord(cfg['api']) ? cfg['api'] : undefined
+  return {
+    providerName: typeof rule['providerName'] === 'string' ? rule['providerName'] : undefined,
+    baseUrl: isRecord(api) && typeof api['baseUrl'] === 'string' ? api['baseUrl'] : undefined,
+    modelIds: strArray(cfg['builtinModelIds']),
+  }
+}
+
 /** 目录 coding-plan 条目提取：access.accountType 匹配家族且 mode=individual-coding-plan。 */
 export function readCodingPlanCatalogEntry(
   catalogPath: string,
@@ -604,17 +697,8 @@ export function readCodingPlanCatalogEntry(
     : undefined
   if (!Array.isArray(rules)) return undefined
   for (const rule of rules) {
-    if (!isRecord(rule)) continue
-    const cfg = isRecord(rule['config']) ? rule['config'] : undefined
-    if (!cfg) continue
-    const access = isRecord(cfg['access']) ? cfg['access'] : undefined
-    if (!access || access['accountType'] !== family || access['mode'] !== 'individual-coding-plan') continue
-    const api = isRecord(cfg['api']) ? cfg['api'] : undefined
-    return {
-      providerName: typeof rule['providerName'] === 'string' ? rule['providerName'] : undefined,
-      baseUrl: isRecord(api) && typeof api['baseUrl'] === 'string' ? api['baseUrl'] : undefined,
-      modelIds: strArray(cfg['builtinModelIds']),
-    }
+    const entry = codingPlanEntryOfRule(rule, family)
+    if (entry !== undefined) return entry
   }
   return undefined
 }
@@ -631,39 +715,56 @@ export function catalogViewToModelSources(view: MergedCatalogView | undefined): 
   }))
 }
 
-/**
- * 启动同步编排（async：凭据明文经 resolver 单通道 async 解析）。
- * D7：任何失败中止都保留上次产物（不删不写）；落盘条件 = pi 映射条目（含 zai 关联）非空，
- * 空则删旧副本回落真实文件；幂等 = 同字节跳写 + tmp+rename 原子替换。
- */
-export async function syncZcodeProviders(deps: ZcodeProviderSyncDeps): Promise<ZcodeProviderSyncOutcome> {
-  const warn = deps.warn ?? ((msg: string) => console.warn(msg))
-  const abort = (reason: string): ZcodeProviderSyncOutcome => {
-    warn(`[zcode-provider-sync] 同步中止（保留上次产物）：${reason}`)
-    return { status: 'aborted', copyPath: deps.paths.syncedCopyPath, ruleCount: 0, skips: [] }
-  }
+/** 编排步骤 helper 的两态产物：aborted = D7 中止 outcome（保留上次产物）；data = 继续编排。 */
+type SyncStep<T> = { readonly aborted: ZcodeProviderSyncOutcome } | { readonly data: T }
 
-  // D7①：readModels 真抛错（IO 异常）或损坏态 → 中止保留产物（ENOENT 是 readModels
-  // 内建容错返回空骨架，不在此列——按零配置继续）
+/** 编排中止出口（闭包形态由 syncZcodeProviders 提供，helper 只产出 outcome）。 */
+type SyncAbort = (reason: string) => ZcodeProviderSyncOutcome
+
+/** D7① 步：readModels 真抛错（IO 异常）或损坏态 → 中止保留产物（ENOENT 是 readModels
+ *  内建容错返回空骨架，不在此列——按零配置继续）。 */
+function readModelsForSync(
+  deps: ZcodeProviderSyncDeps,
+  abort: SyncAbort,
+): SyncStep<ModelsConfigView> {
   let models: ModelsConfigView
   try {
     models = deps.configStore.readModels()
   } catch (err) {
-    return abort(`readModels 抛错：${err instanceof Error ? err.message : String(err)}`)
+    return { aborted: abort(`readModels 抛错：${err instanceof Error ? err.message : String(err)}`) }
   }
-  if (deps.isModelsCorrupted()) return abort('models.json 处于损坏降级态（已隔离）')
+  if (deps.isModelsCorrupted()) return { aborted: abort('models.json 处于损坏降级态（已隔离）') }
+  return { data: models }
+}
 
-  // 让位四源（D7③④：ENOENT 容错空集；其余读取异常在此抛出 → 中止）
+/** 让位四源步（D7③④：ENOENT 容错空集；其余读取异常在此捕获 → 中止）。 */
+function collectOccupiedForSync(
+  deps: ZcodeProviderSyncDeps,
+  abort: SyncAbort,
+): SyncStep<ZcodeOccupiedIds> {
   let occupied: ZcodeOccupiedIds
   try {
     occupied = collectZcodeOccupiedProviderIds(deps.paths)
   } catch (err) {
-    return abort(err instanceof Error ? err.message : String(err))
+    return { aborted: abort(err instanceof Error ? err.message : String(err)) }
   }
+  return { data: occupied }
+}
 
-  // zai 关联前置读取（v2 token + 目录条目；v2 unreadable 按 D7④中止——token 引用源失真）
+/** zai 关联前置的读取产物（编排层 v2 token + 目录条目打包）。 */
+interface ZaiLinkedCatalogInputs { // oe-exempt:20261012:framework:映射链形态/ports 契约,单实现常态(类型契约先行)
+  readonly tokens: Partial<Record<'bigmodel' | 'zai', string>>
+  readonly catalogEntries: Partial<Record<'bigmodel' | 'zai', ZaiCodingPlanCatalogEntry>>
+}
+
+/** zai 关联前置读取步（v2 token + 目录条目；v2 unreadable 按 D7④中止——token 引用源失真）。 */
+function readCatalogInputsForSync(
+  deps: ZcodeProviderSyncDeps,
+  warn: (message: string) => void,
+  abort: SyncAbort,
+): SyncStep<ZaiLinkedCatalogInputs> {
   const { tokens, readable: v2Readable, absent: v2Absent } = readZcodeBuiltinPlanTokens(deps.paths.v2ConfigPath)
-  if (!v2Readable) return abort(`v2 config.json 读取异常（${deps.paths.v2ConfigPath}）`)
+  if (!v2Readable) return { aborted: abort(`v2 config.json 读取异常（${deps.paths.v2ConfigPath}）`) }
   // 设计 §2 前提表行 6 / D3 效果段：v2 缺失时 wrapper 凭据注入整体不安装（appserver-launcher
   // injectedConfigText 对 ENOENT 返回 null），副本条目仅进校验链不进 Registry——显式 warn，
   // 不静默（防 N1/P-cli-eat 在该环境失败时无信号可归因）
@@ -682,7 +783,7 @@ export async function syncZcodeProviders(deps: ZcodeProviderSyncDeps): Promise<Z
   const catalogEntries: Partial<Record<'bigmodel' | 'zai', ZaiCodingPlanCatalogEntry>> = {}
   if (catalogPath !== undefined) {
     const parsed = readJsonFile(catalogPath)
-    if (parsed.state === 'unreadable') return abort(`zcode-builtin.json 读取异常（${catalogPath}）`)
+    if (parsed.state === 'unreadable') return { aborted: abort(`zcode-builtin.json 读取异常（${catalogPath}）`) }
     if (parsed.state === 'ok') {
       for (const family of ['bigmodel', 'zai'] as const) {
         const entry = readCodingPlanCatalogEntry(catalogPath, family)
@@ -690,13 +791,126 @@ export async function syncZcodeProviders(deps: ZcodeProviderSyncDeps): Promise<Z
       }
     }
   }
+  return { data: { tokens, catalogEntries } }
+}
 
-  // 凭据单通道解析（只解析非 zai 系的通用映射候选；zai 系走存在性判定）
+/** 凭据单通道解析步（只解析非 zai 系的通用映射候选；zai 系走存在性判定）。 */
+async function resolveCredentialsForSync(
+  deps: ZcodeProviderSyncDeps,
+  providers: Record<string, ProviderConfigView>,
+): Promise<Map<string, ResolvedProviderCredential | undefined>> {
   const credentials = new Map<string, ResolvedProviderCredential | undefined>()
-  for (const id of Object.keys(models.providers)) {
+  for (const id of Object.keys(providers)) {
     if ((ZAI_OFFICIAL_PROVIDER_IDS as readonly string[]).includes(id)) continue
     credentials.set(id, await deps.credentialResolver.resolveProviderCredential(id))
   }
+  return credentials
+}
+
+/** 落盘载荷（mapping ∪ zai 关联合并后的四数组；skips 随 outcome 出参）。 */
+interface SyncedCopyPayload { // oe-exempt:20261012:framework:映射链形态/ports 契约,单实现常态(类型契约先行)
+  readonly rules: ZcodeProviderRule[]
+  readonly modelRules: ZcodeProviderModelRule[]
+  readonly providerOrder: string[]
+  readonly skips: ProviderSyncSkip[]
+}
+
+/** 映射结果与 zai 关联条目合并（正条进 rules/providerOrder；skip 条并入 skips），随后
+ *  全量 skip warn（warn 通道同一出口）。 */
+function mergeMappingAndZaiEntry(
+  mapping: ProviderMappingResult,
+  zai: ZaiLinkedEntryResult,
+  warn: (message: string) => void,
+): SyncedCopyPayload {
+  const skips = [...mapping.skips]
+  const rules = [...mapping.rules]
+  const modelRules = [...mapping.modelRules]
+  const providerOrder = [...mapping.providerOrder]
+  if ('entry' in zai) {
+    rules.push(zai.entry)
+    providerOrder.push(ZAI_LINKED_ENTRY_ID)
+  } else {
+    skips.push(zai.skip)
+  }
+  for (const skip of skips) {
+    warn(`[zcode-provider-sync] provider "${skip.providerId}" ${skip.rule}：${skip.detail}`)
+  }
+  return { rules, modelRules, providerOrder, skips }
+}
+
+/** 落盘条件步（D7）：pi 映射条目（含 zai 关联）空 → 删旧副本回落真实文件并返回
+ *  skipped-empty；非空返回 null 继续落盘。 */
+function removeStaleCopyOrOutcome(
+  deps: ZcodeProviderSyncDeps,
+  payload: SyncedCopyPayload,
+  abort: SyncAbort,
+): ZcodeProviderSyncOutcome | null {
+  if (payload.rules.length !== 0) return null
+  if (existsSync(deps.paths.syncedCopyPath)) {
+    try {
+      rmSync(deps.paths.syncedCopyPath)
+    } catch (err) {
+      return abort(`旧副本删除失败：${err instanceof Error ? err.message : String(err)}`)
+    }
+  }
+  return { status: 'skipped-empty', copyPath: deps.paths.syncedCopyPath, ruleCount: 0, skips: payload.skips }
+}
+
+/** 落盘步：幂等 = 同字节跳写 + tmp+rename 原子替换（任何失败经 abort 保留上次产物）。 */
+function writeSyncedCopy(
+  deps: ZcodeProviderSyncDeps,
+  payload: SyncedCopyPayload,
+  abort: SyncAbort,
+): ZcodeProviderSyncOutcome {
+  const file: SyncedProviderConfigFile = {
+    schemaVersion: 1,
+    config: {
+      providerOrder: payload.providerOrder,
+      providerConfigRules: { providerRules: payload.rules },
+      modelConfigRules: { providerModelRules: payload.modelRules },
+    },
+  }
+  const text = `${JSON.stringify(file, null, COPY_JSON_INDENT)}\n`
+  try {
+    // atomicWrite 不自建父目录（JsonStore 的 mkdirSync 职责在各自 store）——副本目录
+    // 首次落盘时可能不存在（engines/zcode/），此处补建
+    mkdirSync(dirname(deps.paths.syncedCopyPath), { recursive: true })
+    if (existsSync(deps.paths.syncedCopyPath) && readFileSync(deps.paths.syncedCopyPath, 'utf-8') === text) {
+      return { status: 'written', copyPath: deps.paths.syncedCopyPath, ruleCount: payload.rules.length, skips: payload.skips }
+    }
+    atomicWrite(deps.paths.syncedCopyPath, text)
+  } catch (err) {
+    return abort(`副本落盘失败：${err instanceof Error ? err.message : String(err)}`)
+  }
+  return { status: 'written', copyPath: deps.paths.syncedCopyPath, ruleCount: payload.rules.length, skips: payload.skips }
+}
+
+/**
+ * 启动同步编排（async：凭据明文经 resolver 单通道 async 解析）。
+ * D7：任何失败中止都保留上次产物（不删不写）；落盘条件 = pi 映射条目（含 zai 关联）非空，
+ * 空则删旧副本回落真实文件；幂等 = 同字节跳写 + tmp+rename 原子替换。
+ * 编排段拆分为上方 *ForSync helpers——调用顺序即原编排时序，中止点逐段保形。
+ */
+export async function syncZcodeProviders(deps: ZcodeProviderSyncDeps): Promise<ZcodeProviderSyncOutcome> {
+  const warn = deps.warn ?? ((msg: string) => console.warn(msg))
+  const abort = (reason: string): ZcodeProviderSyncOutcome => {
+    warn(`[zcode-provider-sync] 同步中止（保留上次产物）：${reason}`)
+    return { status: 'aborted', copyPath: deps.paths.syncedCopyPath, ruleCount: 0, skips: [] }
+  }
+
+  const modelsStep = readModelsForSync(deps, abort)
+  if ('aborted' in modelsStep) return modelsStep.aborted
+  const models = modelsStep.data
+
+  const occupiedStep = collectOccupiedForSync(deps, abort)
+  if ('aborted' in occupiedStep) return occupiedStep.aborted
+  const occupied = occupiedStep.data
+
+  const catalogStep = readCatalogInputsForSync(deps, warn, abort)
+  if ('aborted' in catalogStep) return catalogStep.aborted
+  const { tokens, catalogEntries } = catalogStep.data
+
+  const credentials = await resolveCredentialsForSync(deps, models.providers)
 
   const enabledModels = deps.configStore.getEnabledModels()
   const mapping = mapPiProvidersToZcodeRules({
@@ -718,53 +932,12 @@ export async function syncZcodeProviders(deps: ZcodeProviderSyncDeps): Promise<Z
     occupiedProviderIds: occupied.all,
   })
 
-  const skips = [...mapping.skips]
-  const rules = [...mapping.rules]
-  const modelRules = [...mapping.modelRules]
-  const providerOrder = [...mapping.providerOrder]
-  if ('entry' in zai) {
-    rules.push(zai.entry)
-    providerOrder.push(ZAI_LINKED_ENTRY_ID)
-  } else {
-    skips.push(zai.skip)
-  }
-  for (const skip of skips) {
-    warn(`[zcode-provider-sync] provider "${skip.providerId}" ${skip.rule}：${skip.detail}`)
-  }
+  const payload = mergeMappingAndZaiEntry(mapping, zai, warn)
 
-  // 落盘条件（D7）：pi 映射条目（含 zai 关联）非空；空 → 删旧副本回落真实文件
-  if (rules.length === 0) {
-    if (existsSync(deps.paths.syncedCopyPath)) {
-      try {
-        rmSync(deps.paths.syncedCopyPath)
-      } catch (err) {
-        return abort(`旧副本删除失败：${err instanceof Error ? err.message : String(err)}`)
-      }
-    }
-    return { status: 'skipped-empty', copyPath: deps.paths.syncedCopyPath, ruleCount: 0, skips }
-  }
+  const emptyOutcome = removeStaleCopyOrOutcome(deps, payload, abort)
+  if (emptyOutcome !== null) return emptyOutcome
 
-  const file: SyncedProviderConfigFile = {
-    schemaVersion: 1,
-    config: {
-      providerOrder,
-      providerConfigRules: { providerRules: rules },
-      modelConfigRules: { providerModelRules: modelRules },
-    },
-  }
-  const text = `${JSON.stringify(file, null, COPY_JSON_INDENT)}\n`
-  try {
-    // atomicWrite 不自建父目录（JsonStore 的 mkdirSync 职责在各自 store）——副本目录
-    // 首次落盘时可能不存在（engines/zcode/），此处补建
-    mkdirSync(dirname(deps.paths.syncedCopyPath), { recursive: true })
-    if (existsSync(deps.paths.syncedCopyPath) && readFileSync(deps.paths.syncedCopyPath, 'utf-8') === text) {
-      return { status: 'written', copyPath: deps.paths.syncedCopyPath, ruleCount: rules.length, skips }
-    }
-    atomicWrite(deps.paths.syncedCopyPath, text)
-  } catch (err) {
-    return abort(`副本落盘失败：${err instanceof Error ? err.message : String(err)}`)
-  }
-  return { status: 'written', copyPath: deps.paths.syncedCopyPath, ruleCount: rules.length, skips }
+  return writeSyncedCopy(deps, payload, abort)
 }
 
 // ── settings 清单派生（D5：真实 ∪ 副本 id 级聚合，真实优先；u7-rpc 复用）──────
