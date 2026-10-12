@@ -653,7 +653,11 @@ export async function activate(context: PluginContext): Promise<void> {
   sink.push(
     api.sessions.onDidActivateSession((session) => {
       focusSessionId = session.id
-      ensureMirror(api, session.id, sink)
+      const mirror = ensureMirror(api, session.id, sink)
+      // 已存在镜像若停在恢复窗口（读失败重试耗尽、文案停「恢复超时」），激活信号 =
+      // 进程就绪后的新证据（didActivate 在会话激活完成后投递），重置预算重拉自愈；
+      // 新建镜像的首拉已由 ensureMirror 武装，此处不重复
+      if (mirror.readFailure !== null) scheduleRefresh(api, session.id)
     }),
   )
   sink.push(api.sessions.onDidDestroySession((session) => teardownMirror(session.id)))
