@@ -187,7 +187,7 @@ export {
   type DiagnosticExportError,
   type DiagnosticExportBundleResult,
 } from './ipc-payloads'
-// session:export-jsonl 通道契约（ui-replica-demo-fidelity 通道 1：请求 payload / 三态返回
+// session:export-jsonl 通道契约（请求 payload / 三态返回
 // 类型——main handler、preload ElectronAPI 与 renderer 域函数三方共用同一形态声明，防漂移）。
 export type {
   SessionJsonlExportPayload,

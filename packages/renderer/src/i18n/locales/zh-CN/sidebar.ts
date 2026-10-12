@@ -59,10 +59,10 @@ export default {
     markDone: '标记完成',
     unmarkDone: '取消标记',
     archived: '已归档',
-    // 悬停详情卡消息计数（ui-replica-demo-fidelity 通道 2）：末行「时间 · N 条消息」两段，
+    // 悬停详情卡消息计数：末行「时间 · N 条消息」两段，
     // 文案语气对齐 demo sessions.js msgs 段（'42 条消息'）
     msgCount: '{count} 条消息',
-    // 导出 JSONL（ui-replica-demo-fidelity 通道 1）：右键菜单项；unavailable = sessionFile
+    // 导出 JSONL：右键菜单项；unavailable = sessionFile
     // 缺失（pi 延迟写入窗口）时的禁用态 title 提示
     exportJsonl: '导出 JSONL',
     exportJsonlUnavailable: '会话尚未产生记录文件（首条消息落盘后可导出）',
@@ -98,7 +98,7 @@ export default {
   assignProjectFailed: '归入项目失败：{msg}',
   // 「移动到项目」迁移成功反馈（spec sessions §3.3：点击即迁移 + toast）
   movedToProject: '已移动到项目「{name}」',
-  // 导出 JSONL 反馈（ui-replica-demo-fidelity 通道 1；canceled 静默，无 toast）
+  // 导出 JSONL 反馈（canceled 静默，无 toast）
   exportJsonlSuccess: '会话已导出到 {path}',
   exportJsonlFailed: '导出失败（{code}）：{message}',
   forceQuitFailed: '强制退出失败：{msg}',

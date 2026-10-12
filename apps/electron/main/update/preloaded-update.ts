@@ -13,7 +13,7 @@
  *
  * 版本封顶清扫（sweepStaleInstallers）：writePreloadedUpdate 成功落登记后，按版本号
  * 封顶保留最新 PRELOADED_INSTALLER_KEEP_COUNT 个安装包，超过的删除最老的
- * （2026-10-12 用户裁决，docs/todo/data-dir-accumulation-cleanup.md 缺口 3；
+ * （2026-10-12 用户裁决，登记已闭，git 可追溯；
  * 不做 TTL / 不读 downloadedAt，保留期方案同日裁决否决）。
  *
  * 依赖方向：preloaded-update → constants + pick-platform-asset + hash + @taiji/shared + node:fs/path

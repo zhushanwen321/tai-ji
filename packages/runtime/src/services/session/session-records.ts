@@ -1342,7 +1342,7 @@ export class SessionRecords {
   }
 
   /**
-   * 获取 session 的对话消息条数（悬停详情卡消息计数，ui-replica-demo-fidelity 通道 2，
+   * 获取 session 的对话消息条数（悬停详情卡消息计数，
    * 供 session.getMessageCount RPC handler 调用）。
    *
    * 路径解析与 getPlanState 同款（scanSessions force 单 session 路径解析口径——刚落盘

@@ -40,12 +40,12 @@
  * 字段域 merge（D1b）：写回时只覆盖 scope 声明的顶层 key，其余 key 取锁内最新读——
  * 进程内「分区靠调用方自觉」的历史约定升级为 API 强制（mutator 误改他域字段会被丢弃）。
  *
- * 🔒 写侧损坏拒入（settings-corruption-global-defense）：updateSettingsFields 进锁后先经
+ * 🔒 写侧损坏拒入（全局面防线之一）：updateSettingsFields 进锁后先经
  * getSettingsCorruption() 预检（与读改写同一临界区），命中损坏 → 结构化告警 +
  * 抛 SettingsWriteRejectedError 拒绝本次写入——坏文件原样保留，修复后无需重启即恢复。
  * 门禁在唯一写入口一处生效，覆盖全部字段域（model/skills/extension/retry/tools/full）。
  *
- * 🔒 读侧统一阻断（settings-corruption-global-defense 用户终裁：核心配置损坏一律
+ * 🔒 读侧统一阻断（用户终裁：核心配置损坏一律
  * fail-fast，损坏就不应该能启动 pi）：readSettings() 读前经 getSettingsCorruption()
  * 现查，损坏 → 抛 SettingsCorruptedError 阻断——不隔离改名、不回落空/缺省基线；
  * settings store 的 JsonStore 以 corruptReadPolicy:'throw' 关闭读时隔离（隔离+回落

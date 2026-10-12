@@ -1,6 +1,6 @@
 # mobile-renderer 令牌镜像副本与桌面 style.css 分叉待裁决
 
-状态：待裁决（D5 终态同步 contested 裁决：不把 ui-optimize-unified 令牌终态扩张到 mobile 壳——该设计从未裁决 mobile 壳视觉，盲改无验收覆盖；但镜像同步契约已被桌面侧改值打破，须显式登记）。登记来源：ui-optimize-unified D5 终态同步（2026-10-08）
+状态：待裁决（D5 终态同步 contested 裁决：不把 ui-optimize-unified 令牌终态扩张到 mobile 壳——该设计从未裁决 mobile 壳视觉，盲改无验收覆盖；但镜像同步契约已被桌面侧改值打破，须显式登记）。登记来源：ui-optimize-unified D5 终态同步（2026-10-08）。2026-10-11 用户裁决：保留登记；当前桌面 UI 正在进行大幅重构，待重构稳定后再做向 mobile 壳的同步
 
 ## 现状（2026-10-08 核实）
 
@@ -27,5 +27,4 @@
 
 ## 关联登记
 
-- [neutral-tokens-dehue.md](neutral-tokens-dehue.md)（neutral 去蓝偏——桌面侧已由 ui-optimize-unified 决策 2 落地，mobile 侧残留旧值即本文件 :43/:45 行）
-- [mobile-token-mirror-e2e-map-scope-gap.md](mobile-token-mirror-e2e-map-scope-gap.md)（镜像范围口径既有登记）
+- 镜像范围口径（2026-10-06 定案）：`docs/testing/e2e-map.json` E2E-VISUAL-01 已登记 `packages/mobile-renderer/src/styles/**` scope，镜像一致性机器断言 = `packages/renderer/src/__tests__/mobile-token-mirror-parity.test.ts`

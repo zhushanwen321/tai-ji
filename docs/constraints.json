@@ -777,7 +777,7 @@
     },
     {
       "id": "C-comm-12",
-      "summary": "extension UI 交互走 extension.ui_request/ui_response 独立通道（禁复用 tool approval）；插件工具接入 pi 的通路暂缺（Pi Bridge Extension 已整体退役，登记见 docs/todo/plugin-tool-access-gap.md）",
+      "summary": "extension UI 交互走 extension.ui_request/ui_response 独立通道（禁复用 tool approval）；插件工具接入 pi 的通路暂缺（Pi Bridge Extension 已整体退役）",
       "scope": [
         "packages/runtime/src/**",
         "extensions/taiji/**"
@@ -3262,7 +3262,7 @@
     },
     {
       "id": "C-ext-29",
-      "summary": "Extension 与 Plugin 概念区分（禁混用）：Extension = pi extension，运行在 pi 子进程内（ExtensionAPI），数据存 ~/.taiji/extensions/，由 extension-service 管理；Plugin = taiji 插件，运行在 runtime 的 Worker Thread（agentAPI），数据存 ~/.taiji/plugins/，由 PluginService 管理；插件工具接入 pi 的通路暂缺（Pi Bridge Extension 已整体退役，登记见 docs/todo/plugin-tool-access-gap.md）",
+      "summary": "Extension 与 Plugin 概念区分（禁混用）：Extension = pi extension，运行在 pi 子进程内（ExtensionAPI），数据存 ~/.taiji/extensions/，由 extension-service 管理；Plugin = taiji 插件，运行在 runtime 的 Worker Thread（agentAPI），数据存 ~/.taiji/plugins/，由 PluginService 管理；插件工具接入 pi 的通路暂缺（Pi Bridge Extension 已整体退役）",
       "scope": [
         "global"
       ],

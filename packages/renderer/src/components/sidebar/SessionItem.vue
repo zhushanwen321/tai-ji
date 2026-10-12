@@ -10,7 +10,7 @@
        滚动容器裁剪；交互 = mouseenter 立即开 / 离行即关 / 卡体进入即关（demo Sidebar.vue
        openCard/closeCard 同款，含 focusin/focusout 键盘路径）；字段 = fork 血缘 + 分支 +
        完整目录 + 末行「相对时间 · 消息数」两段（消息数经 session.getMessageCount 按需
-       拉取，ui-replica-demo-fidelity 通道 2；拉取式 + lastActiveAt 键控缓存，见
+       拉取；拉取式 + lastActiveAt 键控缓存，见
        session-item/use-message-count.ts）。
        实现说明：不用 reka HoverCard 原语——其 Trigger/Anchor as-child 跨 SessionItemContextMenu
        （多根组件）合并事件/ref 时 fallthrough 中断（实施期两个嵌套方向均实测断链：外层嵌套断
@@ -164,7 +164,7 @@ const emit = defineEmits<{
   abort: [sessionId: string]
   /** 强制退出（两段确认后 emit）：杀 pi 进程 + stopped 收敛，上层接 RPC。 */
   forceQuit: [sessionId: string]
-  /** 导出 JSONL（ui-replica-demo-fidelity 通道 1）：透传 ContextMenu 的 exportJsonl
+  /** 导出 JSONL：透传 ContextMenu 的 exportJsonl
    *  （payload = main 侧 IPC 请求体），Sidebar 接 exportSessionJsonl IPC + toast。 */
   exportJsonl: [payload: { sessionId: string; sessionFile?: string; suggestedName?: string }]
 }>()
@@ -310,7 +310,7 @@ onClickOutside(rootEl, () => {
 /** 详情卡末行 meta 段一：相对时间（demo .pr.meta 的 upd 段） */
 const timeLabel = computed(() => formatRelativeTime(props.session.lastActiveAt))
 
-// ── 悬停详情卡消息计数（ui-replica-demo-fidelity 通道 2）──
+// ── 悬停详情卡消息计数 ──
 
 /** 计数段值：null = 未返回 / 拉取失败（该段不渲染，避免闪 0 与失败误显示） */
 const messageCount = ref<number | null>(null)

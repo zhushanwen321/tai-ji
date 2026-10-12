@@ -35,7 +35,7 @@
 
 ## 遗留清单（待实施）
 
-1. 投递域重构批次：已实施（2026-10-05 同批落地——sweepInFlight 退役、命令/技能 started 基终局、断连钩子 + 失败批量显式上报、delivery backoff/settle 兜底/watchdog/退避轮询退役；裁决与实施形态见 delivery-backoff-retry-retirement / command-pi-restart-response-loss / skill-input-marker-pollution 三登记）。
+1. 投递域重构批次：已实施（2026-10-05 同批落地——sweepInFlight 退役、命令/技能 started 基终局、断连钩子 + 失败批量显式上报、delivery backoff/settle 兜底/watchdog/退避轮询退役；delivery backoff 退役的裁决与实施形态 = ADR-0122 首败即停统一语义：投递内核 onSendFail 一次失败即终局（checked 条目 reject + 移除、非 checked 条目 onSettled('rejected') 上报 + 移除，不产 tombstone），重试决策权归消费方（人看失败通知、agent 收失败回执），保留 resync 对账重投与 requeue 用户重试状态机，实施见 packages/session-delivery/src/delivery.ts 首部注释；命令/技能 started 基终局实装见 packages/runtime/src/services/session/session-delivery-registry.ts 的 settleAcceptedEntry / isUnmarkedEntry（JSDoc 记载无标记条目终局机制与污染源消除形态））。
 2. 追加裁决 ① 组 2/3/4/5 中依赖跨分区配合的残留：已全部实施——notify 看门狗重投、structured-output 兜底硬退（Wave 2-C2 批次）；zcode 双 timer、update 停滞检测（Wave 2-C1 批次）；event-tail watch 族（journal 推送通道替代，W-P1..W-P4）。
 3. scheduler 模型切换 tick 对账：已实施（Wave 2-C1——2-tick 窗口计数对账与 forceSettleExpiredInFlight 合并为 settlePendingIfIdle：记录存在 + isIdle() 同步事实查询即恢复，agent_settled 确定性事件保留为提前触发加速器；tick 心跳本体是产品功能定时，保留）。
 4. renderer 死代码 useCrashRecoveryNotice：已实施（Wave 2-C1——数据源 reloadWindowAfterCrash 随 recovery-policy 删除后结构性永不可见的完整死链，四文件整删 + 3 个死 i18n 键清理；app.crashDismiss 键被内存压力提示条复用，保留）。

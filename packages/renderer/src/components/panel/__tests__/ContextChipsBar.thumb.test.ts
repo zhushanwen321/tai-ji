@@ -1,5 +1,5 @@
 /**
- * ContextChipsBar image chip 真图缩略测试（demo .ctxchip .thumb，demo 对齐，登记 docs/todo/ui-replica-demo-fidelity.md 收口记录）。
+ * ContextChipsBar image chip 真图缩略测试（demo .ctxchip .thumb，demo 对齐）。
  *
  * 覆盖：
  *  - image 项 lead 渲染 img 缩略图（local-file:// src + 16px/r-3.5px/object-cover/flex-none 类，

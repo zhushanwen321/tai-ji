@@ -287,7 +287,7 @@ export interface ElectronAPI { // oe-exempt:20261003:framework:类型契约先�
    * / error 携带具体 errno），调用方（u3b）按 status 分支展示。
    */
   exportDiagnosticBundle(payload?: DiagnosticExportBundlePayload): Promise<DiagnosticExportBundleResult>
-  // ── 会话 JSONL 导出（ui-replica-demo-fidelity 通道 1）───────────
+  // ── 会话 JSONL 导出 ───────────
   /**
    * 导出会话 JSONL：main 校验源路径位于会话文件三棵树（`<piAgentDir>/sessions|subagents|btw`）
    * 后弹保存对话框（用户确认落点），fs.promises.copyFile 直复制。永不 reject——返回三态
@@ -463,7 +463,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // ── 诊断包导出（crash-forensics §3.3 D6；通道名经 shared SSOT 常量）──
   exportDiagnosticBundle: (payload?: DiagnosticExportBundlePayload) =>
     ipcRenderer.invoke(DIAGNOSTICS_EXPORT_BUNDLE, payload),
-  // ── 会话 JSONL 导出（ui-replica-demo-fidelity 通道 1；通道名经 shared SSOT 常量）──
+  // ── 会话 JSONL 导出（通道名经 shared SSOT 常量）──
   exportSessionJsonl: (payload: SessionJsonlExportPayload) =>
     ipcRenderer.invoke(SESSION_EXPORT_JSONL, payload),
 } satisfies ElectronAPI)

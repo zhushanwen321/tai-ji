@@ -90,7 +90,7 @@ export interface SessionHandlerContext extends MessageHandlerContext {
     getWorkflowRunEvents?(sessionId: string, runId: string): Promise<WorkflowRunEventsReply>
     getWorkflowDag?(sessionId: string, runId: string): Promise<WorkflowDagReply>
     /**
-     * 会话消息条数（悬停详情卡消息计数，ui-replica-demo-fidelity 通道 2）：SessionRecords
+     * 会话消息条数（悬停详情卡消息计数）：SessionRecords
      * 路径解析 + session-message-count 流式计数的转发面。可选成员形态对齐 getPlanState
      * 先例——缺省仅出现在测试最小 mock 中，case 内判空走 *_unsupported 防御分支。
      */
@@ -927,7 +927,7 @@ export class SessionMessageHandler {
     return this.ctx.reply(ws, msg.id, 'context.update', payload ? { sessionId, ...payload } : { sessionId })
   }
 
-  // ── 悬停详情卡消息计数（ui-replica-demo-fidelity 通道 2）──
+  // ── 悬停详情卡消息计数 ──
 
   private async handleSessionGetMessageCount(msg: Extract<ClientMessage, { type: 'session.getMessageCount' }>, ws: WsType): Promise<void> {
     // renderer 悬停会话行时按需拉取（拉为主、推补充第一原则——不做订阅/推送）。handler 只

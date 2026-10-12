@@ -1,5 +1,5 @@
 /**
- * 会话 JSONL 导出 IPC handler（ui-replica-demo-fidelity 待立项通道 1，2026-10-12 立项）。
+ * 会话 JSONL 导出 IPC handler（2026-10-12 立项）。
  *
  * 经 SESSION_EXPORT_JSONL（'session:export-jsonl'）通道把「复制会话 JSONL 到用户自选
  * 位置」暴露为 renderer 入口（SessionItemContextMenu 右键菜单「导出 JSONL」）：main 先经

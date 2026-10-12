@@ -245,7 +245,7 @@ export function useSidebarSessionActions(options: UseSidebarSessionActionsOption
   }
 
   /**
-   * 导出会话 JSONL（ui-replica-demo-fidelity 通道 1，SessionItemContextMenu 两段无确认
+   * 导出会话 JSONL（SessionItemContextMenu 两段无确认
    * 单击 emit）：payload 原样交 main 侧 IPC（源路径三树校验 + 保存对话框 + copyFile 都在
    * main）。三态永不 reject（shared SessionJsonlExportResult 契约，无需 catch）：
    * exported → 成功 toast（含保存路径）；error → 错误 toast（含错误码）；canceled → 静默

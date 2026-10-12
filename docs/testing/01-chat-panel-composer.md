@@ -761,8 +761,8 @@ Composer.onSend(segments)（send 显式接收 sessionId——双 panel 各自绑
 
 | 条目类型 | 出站形态 | 终局凭据 | 空窗计时器 |
 |---------|---------|---------|-----------|
-| 命令条目（识别命中） | 不尾附投递标记（裸命令文本） | disposition=handled 即终局——内核经 WS `session.deliveryHandled { sessionId, clientUuid }` 一对一通知，前端静默回滚三件套（移除乐观气泡 + 清空空窗计时器 + 递减在途计数），无错误提示 | 不挂（pendingSend 空窗计时器对命令条目豁免——D14③ 三闸联动之一，另两闸 = sendCommand 不限时 + 内核 settle 兜底不武装） |
-| 普通消息（未识别 `/` 前缀 / skill / prompt 模板） | 注标出站（形态与送达回执链路零变化） | message_end 回执命中（既有链路） | 30s 空窗不变 |
+| 命令条目（识别命中） | 不尾附投递标记（裸命令文本） | disposition=handled 即终局——内核经 WS `session.deliveryHandled { sessionId, clientUuid }` 一对一通知，前端静默回滚三件套（移除乐观气泡 + 清 dispatching 占位（clearPendingSend，纯 Set 操作）+ 递减在途计数），无错误提示 | 不挂（pendingSend 30s 空窗计时器已随 ADR-0122 整体退役，所有条目均不再挂墙钟计时器） |
+| 普通消息（未识别 `/` 前缀 / skill / prompt 模板） | 注标出站（形态与送达回执链路零变化） | message_end 回执命中（既有链路） | 不挂（同上，计时器已随 ADR-0122 退役） |
 
 命令条目终局凭据丢失时的兜底链路：
 - 断线窗口通知丢失 / runtime 重启 → `session.delivery` 快照孤儿对账（D1⑤）静默清除；操作域仅限受理回执登记的命令条目（普通条目清除会在快照先于回执窗口删掉已送达气泡）。

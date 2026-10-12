@@ -29,7 +29,7 @@
     >
       <!-- image lead = 16px 真图缩略（demo .ctxchip .thumb 四值：16px / r-3.5px /
            object-fit cover / flex none），经 local-file:// 通道加载（attachments/tmpdir
-           白名单落点）；加载失败回退 ImageIcon 占位不留破图（demo 对齐，登记见 docs/todo/ui-replica-demo-fidelity.md）。
+           白名单落点）；加载失败回退 ImageIcon 占位不留破图（demo 对齐）。
            items 形状 = core AttachedContextItem（type 恒 'image'，refreshAttachedItems 唯一
            构造点），v-else 即失败回退占位——[HISTORICAL] 原 iconFor 的 FileText/'@'/'#'
            分支无构造方，随类型单源化收窄删除 -->

@@ -1,5 +1,5 @@
 /**
- * 会话消息计数（悬停详情卡消息计数，ui-replica-demo-fidelity 通道 2）。
+ * 会话消息计数（悬停详情卡消息计数）。
  *
  * 流式逐行读取 session JSONL 统计对话消息条数——禁整文件读入内存（会话文件可达数十 MB，
  * 大文件全量 readFileSync 是退出侧同款内存尖峰形态，crash-resilience D5③ 同口径）。

@@ -1,5 +1,5 @@
 /**
- * SessionMessageHandler 消息计数 RPC 测试（悬停详情卡消息计数，ui-replica-demo-fidelity 通道 2）。
+ * SessionMessageHandler 消息计数 RPC 测试（悬停详情卡消息计数）。
  *
  * 覆盖：
  * - handles 认领 session.getMessageCount

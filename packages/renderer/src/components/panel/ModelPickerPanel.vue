@@ -55,7 +55,7 @@ const props = withDefaults(defineProps<{
    * 全局默认模型（config.defaults.defaultModel，"provider/modelId" 复合串，与 selected
    * 同格式；空串/缺省 = 未配置，无行显示标签）。命中行（id + 组 providerId 双匹配，与
    * isRowSelected 同构）渲染行尾「默认」标签——demo .pt（ComposerBar 模型弹层行尾标签，
-   * demo 对齐，登记见 docs/todo/ui-replica-demo-fidelity.md）；行名 flex-1 吸收剩余空间后标签紧贴行尾。
+   * demo 对齐）；行名 flex-1 吸收剩余空间后标签紧贴行尾。
    * 自建分组无 provider 语义的消费方（ScheduleForm 直挂）不传 = 无标签，行为不变。
    */
   defaultModel?: string

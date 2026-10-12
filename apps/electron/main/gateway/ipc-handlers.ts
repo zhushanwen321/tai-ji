@@ -42,7 +42,7 @@ export function registerIpcHandlers(deps: IpcHandlerDeps): void {
   registerLogRetentionDebugHandler()
   // [crash-forensics D6 u3a] 诊断包导出（设置页/死态页入口，保存对话框由 main 弹出）
   registerDiagnosticsExportHandler()
-  // [ui-replica-demo-fidelity 通道 1] 会话 JSONL 导出（右键菜单入口，源路径三树校验 +
+  // 会话 JSONL 导出（右键菜单入口，源路径三树校验 +
   // 保存对话框由 main 弹出，fs.promises.copyFile 直复制）
   registerSessionExportHandler()
 }

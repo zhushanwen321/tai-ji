@@ -1,5 +1,5 @@
 /**
- * ModelPickerPanel 行尾「默认」标签测试（demo .pt，demo 对齐，登记 docs/todo/ui-replica-demo-fidelity.md 收口记录）。
+ * ModelPickerPanel 行尾「默认」标签测试（demo .pt，demo 对齐）。
  *
  * 覆盖：
  *  - 命中 defaultModel 的行渲染行尾标签（i18n 文案），非默认行无标签（demo mock 存在空 tag 行，

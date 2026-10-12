@@ -688,7 +688,7 @@ WorkflowTab 步骤列表的数据源绑定从「workflow-record 全量快照（6
 
 **接受残留（显式不回收）**：外部删除主会话文件场景（绕过删除链路的直接 rm）的下挂内容残留；级联枚举/引用扫描失败时保守放弃族删除的残留（宁保留不误删 fork 共享文件）；worktree `.patch` 回传件（按 branch 命名无会话锚，级联清单不含）。
 
-**依据**：三条机制都是级联缺失时代的兜底——级联补齐后同一文件族存在两个生命周期权威（TTL 按时间判、级联按归属判），先于级联触发即误删、后于级联触发即死代码；数据目录累积治理由级联单判据承载（缺口登记 `docs/todo/data-dir-accumulation-cleanup.md` 终态化，branch-review 三树枚举完备性检查提案的前提随扫描废弃消失）。
+**依据**：三条机制都是级联缺失时代的兜底——级联补齐后同一文件族存在两个生命周期权威（TTL 按时间判、级联按归属判），先于级联触发即误删、后于级联触发即死代码；数据目录累积治理由级联单判据承载（原缺口登记已关闭删除，本条即权威记录，branch-review 三树枚举完备性检查提案的前提随扫描废弃消失）。
 
-**登记**：CONTEXT.md「会话产物目录」词条 / data-source-registry.md #8 与 #51 删除通道 / runtime-layering.md 基线债登记 / `docs/todo/` 两登记 / permanent-session-model 资源生命周期表述同批回写；C-data-22 summary 的「与 pi transcript 同窗」限定随之改写（结构不变，`node scripts/validate-constraints.mjs` 复验）。
+**登记**：CONTEXT.md「会话产物目录」词条 / data-source-registry.md #8 与 #51 删除通道 / runtime-layering.md 基线债登记 / permanent-session-model 资源生命周期表述同批回写；C-data-22 summary 的「与 pi transcript 同窗」限定随之改写（结构不变，`node scripts/validate-constraints.mjs` 复验）。
 

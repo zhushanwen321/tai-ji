@@ -199,7 +199,7 @@ export type DiagnosticExportBundleResult =
   | { status: 'error'; error: DiagnosticExportError }
 
 // ── 会话 JSONL 导出（SESSION_EXPORT_JSONL = 'session:export-jsonl' invoke 通道）
-//    [ui-replica-demo-fidelity 待立项通道 1，2026-10-12 立项] ─────────────────────
+//    [2026-10-12 立项] ─────────────────────
 
 /**
  * 会话 JSONL 导出请求 payload（renderer → main）。

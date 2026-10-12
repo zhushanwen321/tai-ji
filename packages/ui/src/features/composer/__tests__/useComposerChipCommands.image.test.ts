@@ -109,7 +109,7 @@ describe('TC6: insertImageBadge DOM 结构', () => {
   })
 })
 
-describe('image badge lead 缩略图（demo .ichip .thumb，demo 对齐，登记 docs/todo/ui-replica-demo-fidelity.md 收口记录）', () => {
+describe('image badge lead 缩略图（demo .ichip .thumb，demo 对齐）', () => {
   beforeEach(() => {
     document.body.innerHTML = ''
   })

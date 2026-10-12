@@ -1,6 +1,6 @@
 /**
- * pi-settings-store 读侧统一阻断（fail-fast）测试（settings-corruption-global-defense
- * 用户终裁：核心配置损坏一律 fail-fast——损坏的 settings.json 不应被静默回落成空配置
+ * pi-settings-store 读侧统一阻断（fail-fast）测试（用户终裁：核心配置损坏一律 fail-fast——
+ * 损坏的 settings.json 不应被静默回落成空配置
  * 继续运行，也不应在读取路径被隔离改名）。
  *
  * 锁定：

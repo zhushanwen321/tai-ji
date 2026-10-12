@@ -70,7 +70,7 @@ export const DEBUG_RUN_LOG_RETENTION = 'debug:run-log-retention' as const
 export const DIAGNOSTICS_EXPORT_BUNDLE = 'diagnostics:export-bundle' as const
 
 /**
- * 会话 JSONL 导出通道（ui-replica-demo-fidelity 待立项通道 1，2026-10-12 立项）。
+ * 会话 JSONL 导出通道（2026-10-12 立项）。
  *
  * invoke 通道：renderer（SessionItemContextMenu 右键菜单「导出 JSONL」）经此委托 main 把
  * 该会话的 pi session JSONL 文件复制到用户自选位置——main 先弹保存对话框（用户确认落点，

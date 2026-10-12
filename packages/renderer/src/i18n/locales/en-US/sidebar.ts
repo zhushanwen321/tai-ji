@@ -60,10 +60,10 @@ export default {
     markDone: 'Mark done',
     unmarkDone: 'Unmark done',
     archived: 'Archived',
-    // Session detail hover card message count (ui-replica-demo-fidelity channel 2):
+    // Session detail hover card message count:
     // last row "time · N msgs" two segments, tone aligned with the demo msgs segment
     msgCount: '{count} msgs',
-    // Export JSONL (ui-replica-demo-fidelity channel 1): context-menu item; unavailable =
+    // Export JSONL: context-menu item; unavailable =
     // disabled-state title shown when sessionFile is missing (pi lazy-write window)
     exportJsonl: 'Export JSONL',
     exportJsonlUnavailable: 'No session file yet (available after the first message is written)',
@@ -102,7 +102,7 @@ export default {
   assignProjectFailed: 'Failed to assign to project: {msg}',
   // "Move to project" success feedback (sessions spec §3.3: move + toast on click)
   movedToProject: 'Moved to project "{name}"',
-  // Export JSONL feedback (ui-replica-demo-fidelity channel 1; canceled is silent — no toast)
+  // Export JSONL feedback (canceled is silent — no toast)
   exportJsonlSuccess: 'Session exported to {path}',
   exportJsonlFailed: 'Export failed ({code}): {message}',
   forceQuitFailed: 'Failed to force quit: {msg}',

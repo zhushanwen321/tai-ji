@@ -107,7 +107,7 @@ harness 必备能力（业务价值视角，2026-09-12 用户裁决）：
 
 已移除条目（2026-09-12 用户裁决，功能已不存在）：双 Panel / split mode（UI 无活跃实现，仅 store 层 PanelTree 类型残留）；cw-tool / coding-workflow。
 
-已移除条目（2026-10-04 用户裁决「直接废除 bridge」，功能已不存在）：plugin-bridge（插件工具接入 pi 的通路暂缺，见 docs/todo/plugin-tool-access-gap.md）。
+已移除条目（2026-10-04 用户裁决「直接废除 bridge」，功能已不存在）：plugin-bridge（插件工具接入 pi 的通路暂缺）。
 
 ## 6. 引擎与 extension 分级表
 

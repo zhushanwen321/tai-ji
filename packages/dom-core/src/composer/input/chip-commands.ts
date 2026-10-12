@@ -299,7 +299,7 @@ export function useComposerChipCommands(
   }
 
   /** 插入图片 badge（Cmd/Ctrl+V 富呈现通路）。
-   *  lead = 16px 真图缩略（demo .ichip .thumb；demo 对齐，登记见 docs/todo/ui-replica-demo-fidelity.md），见 makeImageThumb。 */
+   *  lead = 16px 真图缩略（demo .ichip .thumb；demo 对齐），见 makeImageThumb。 */
   function insertImageBadge(path: string, fileName: string, displayName: string, needsMigrate: boolean = false): void {
     const el = getEl()
     if (!el) return

@@ -4,7 +4,7 @@
   数字在上、srow-desc 标签在下）。从 demo ledger 移植。
   数字行字号为 demo ledger 展示级字面大字号（总 Token lead 24px，其余格 21px）：
   超出 --text-* 字号档上限（15px，style.css 字号 scale），刻意跳过归档、维持 demo
-  字面 px（不随全局/分区字号缩放链）；登记见 docs/todo/ui-replica-demo-fidelity.md。
+  字面 px（不随全局/分区字号缩放链）。
 
   为什么 Token 是 lead 主指标而费用条件展示：订阅制 provider（kimi/zai/xiaomi 等）
   cost 恒为 0（USD 口径），以费用为中心会让订阅用户大面积看到 $0.00，故 cost=0 时

@@ -549,7 +549,7 @@ export function exportDiagnosticBundle(
   return api?.exportDiagnosticBundle?.(payload) ?? Promise.resolve({ status: 'canceled' })
 }
 
-// ── 会话 JSONL 导出（ui-replica-demo-fidelity 待立项通道 1）──────────────
+// ── 会话 JSONL 导出 ──────────────
 
 /**
  * 导出会话 JSONL（main 校验源路径位于会话文件三棵树后弹保存对话框，copyFile 直复制）。

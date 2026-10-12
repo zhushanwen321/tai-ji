@@ -1,5 +1,5 @@
 /**
- * 悬停详情卡消息计数测试（ui-replica-demo-fidelity 通道 2，SessionItem 消费侧）。
+ * 悬停详情卡消息计数测试（SessionItem 消费侧）。
  *
  * 三视角（TEST-STRATEGY §3）：
  *  - 构建者白盒：fetchSessionMessageCount 缓存（lastActiveAt 键控）驱动 command 调用次数

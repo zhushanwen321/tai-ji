@@ -10,7 +10,7 @@
     「强制退出」= 硬杀 pi 进程 → dead（逃生入口），两者不是同一能力，不可互相替代。
     2026-10-10 用户裁决（入口重设计）：悬停 ghost 钮收敛为 3 个（重命名/删除/归入项目），
     「标记完成」「引用到输入区」自 ghost 层迁入本菜单（原「行操作组不承载」口径作废，
-    重命名/删除仍归 ghost 层）。信息架构登记 docs/todo/ui-replica-demo-fidelity.md 第 5 条。
+    重命名/删除仍归 ghost 层）。
   -->
   <!-- 右键菜单用 reka ContextMenu 原语（光标定位原语级支持，PanelContainer 同为直接引 reka-ui 先例）。 -->
   <ContextMenuRoot @update:open="onMenuOpenChange">
@@ -43,7 +43,7 @@
           <Archive :class="markedDone ? 'fill-current' : ''" />
           <span>{{ markedDone ? t('sidebar.sessionItem.unmarkDone') : t('sidebar.sessionItem.markDone') }}</span>
         </ContextMenuItem>
-        <!-- 导出 JSONL（ui-replica-demo-fidelity 通道 1，2026-10-12 立项落地；demo 菜单
+        <!-- 导出 JSONL（2026-10-12 立项落地；demo 菜单
              归档/导出相邻，紧随标记完成）。sessionFile 缺失（pi 延迟写入窗口，首条消息前
              文件未落盘）→ 禁用态：缺失是可预知的静态数据态（SessionSummary 快照已含该
              信息），禁用即最短反馈路径，不为已知不可用的动作走一轮失败 IPC。导出经
@@ -111,18 +111,18 @@
              （padding 6/9/3、10.5px dim→real 取 --text-2xs 11px 档、letter-spacing 0.03em）+ 项目行首定宽勾标列
              （14px 居中 accent，当前归属项显 Check）。demo 勾标为文本字符（U+2713），
              real 按 no-emoji-in-template 规则换 lucide Check（同一勾形语义；像素形态差异
-             随菜单 IA 差异登记 docs/todo/ui-replica-demo-fidelity.md）。项目行 gap-2 =
+             为有意差异）。项目行 gap-2 =
              demo .ctxmenu button 同参（demo overlays spec §6 + §5.6 验收：项目名距菜单左缘
              ≈35px = 菜单 p4 + 行 px9 + 勾标列 14 + gap 8）。归属判定与 ghost
              Popover 同口径（projectId || '' 归一，review S-2）；归类动作 emit setProject
              复用 SessionItem 既有出站链（D14）。行操作组中「导出 JSONL」已于 2026-10-12
-             立项进菜单（ui-replica-demo-fidelity 通道 1，紧随标记完成 = demo 归档/导出
+             立项进菜单（紧随标记完成 = demo 归档/导出
              相邻 IA）；重命名/删除仍归 ghost 层。 -->
         <!-- sep：demo .ctxmenu .sep = height 1px + margin 4px 6px + var(--hairline)；bg-hairline
              无对应工具类规则（config 只扩展 borderColor.hairline），曾渲染透明分隔线。 -->
         <ContextMenuSeparator class="my-1 mx-[6px] h-px bg-[var(--hairline)]" />
         <!-- ctx-label 字号：demo 精确值 10.5px 无对应 token 档，取 --text-2xs(11px) 档换
-             --font-scale-sidebar 缩放能力，登记 0.5px 静态偏差（取舍见 docs/todo/ui-replica-demo-fidelity.md 登记）。 -->
+             --font-scale-sidebar 缩放能力，登记 0.5px 静态偏差（取舍登记已删除，git 可追溯）。 -->
         <div
           data-testid="context-assign-label"
           class="px-[9px] pt-[6px] pb-[3px] text-[length:var(--text-2xs)] text-neutral-dim [letter-spacing:0.03em]"
@@ -195,7 +195,7 @@ const emit = defineEmits<{
   /** 归入项目（D14 语义修正）：payload 单对象（规则 #1）。projectId 空串 = 归回默认项目。
    *  与 ghost Popover 的 setProject 同链路（SessionItem 透传 → Sidebar → useSidebar）。 */
   setProject: [{ sessionId: string; projectId: string }]
-  /** 导出 JSONL（ui-replica-demo-fidelity 通道 1）：payload 单对象（规则 #1），即 main
+  /** 导出 JSONL：payload 单对象（规则 #1），即 main
    *  侧 IPC 请求体（源路径三树校验 + 保存对话框 + copyFile 都在 main）。IPC 调用与
    *  toast 反馈由上层接线（Sidebar → useSidebarSessionActions）。 */
   exportJsonl: [payload: SessionJsonlExportPayload]

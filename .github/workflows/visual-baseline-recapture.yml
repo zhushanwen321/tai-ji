@@ -4,8 +4,8 @@
 # 保证）——本地重录即权威，本通道退居兜底：字体族/版本变更、或需要在干净 runner 环境批量
 # 重录时使用。
 # 背景（历史）：本地 macOS 与 GitHub runner 的系统中文字体 metrics 曾存在系统差异，本地重录
-# 的基线在 CI 视觉轨恒红（2026-09-30 v0.10.6 发布期 composer 基线事故，登记见
-# docs/todo/visual-baseline-font-drift.md）；该根因已由字体固定消除。
+# 的基线在 CI 视觉轨恒红（2026-09-30 v0.10.6 发布期 composer 基线事故）；该根因已由字体固定
+# 消除（机制与纪律登记见 docs/TEST-STRATEGY.md「字体固定」条目）。
 #
 # 步骤与 ci.yml e2e-visual job 同款（macos-latest + ELECTRON_SKIP_BINARY_DOWNLOAD +
 # E2E_VISUAL_ONLY），差异仅在 --update-snapshots=all 全量重录。

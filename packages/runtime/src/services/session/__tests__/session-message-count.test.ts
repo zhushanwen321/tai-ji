@@ -1,5 +1,5 @@
 /**
- * 会话消息计数单元测试（悬停详情卡消息计数，ui-replica-demo-fidelity 通道 2）。
+ * 会话消息计数单元测试（悬停详情卡消息计数）。
  *
  * 覆盖 countSessionMessagesInFile 纯文件读侧：
  * - 混合条目计数正确：user/assistant message entry 计入；toolResult/system role、

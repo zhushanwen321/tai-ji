@@ -573,7 +573,7 @@ taiji 管理的 extension 存储目录（`<dataDir>/extensions/`，本地/Git �
 runtime 侧服务模块（`packages/runtime/src/services/extension-service.ts`，接口 `IExtensionService`），管理 pi extension 生命周期：发现扫描（用户安装目录 `<dataDir>/extensions/`、npm 目录 `<dataDir>/npm/`）、settings.json `packages[]` 与 `disabled-packages.json` 启停管理、npm / 本地目录 / Git 三种安装来源、将 extension 路径注入 pi 进程启动参数。builtin pi-extensions 的打包内置清单 SSOT = `packages/shared/src/mandatory-extensions.json`（infrastructure 组不可禁、feature 组可禁）。
 
 ### Plugin
-taiji 自己的插件系统，由 PluginService 统一管理（`packages/runtime/src/services/plugin-service/`，接口 `IPluginService`）。宿主双轨：trusted 插件共享 Worker Thread（≤10 插件/Worker，`plugin-host.ts`），sandbox 插件独占 fork 子进程（`plugin-host-process.ts`，`ELECTRON_RUN_AS_NODE=1`）。使用 agentAPI（非 pi ExtensionAPI）。数据（storage KV、权限授予）存储在 `<dataDir>/plugins/` 下。与 pi Extension 是完全不同的概念。插件工具接入 pi 的通路暂缺，见 [docs/todo/plugin-tool-access-gap.md](todo/plugin-tool-access-gap.md)。
+taiji 自己的插件系统，由 PluginService 统一管理（`packages/runtime/src/services/plugin-service/`，接口 `IPluginService`）。宿主双轨：trusted 插件共享 Worker Thread（≤10 插件/Worker，`plugin-host.ts`），sandbox 插件独占 fork 子进程（`plugin-host-process.ts`，`ELECTRON_RUN_AS_NODE=1`）。使用 agentAPI（非 pi ExtensionAPI）。数据（storage KV、权限授予）存储在 `<dataDir>/plugins/` 下。与 pi Extension 是完全不同的概念。插件工具接入 pi 的通路暂缺。
 
 **避免使用**: "扩展"（Extension）——Extension 指 pi 的扩展，Plugin 指 taiji 的插件。
 

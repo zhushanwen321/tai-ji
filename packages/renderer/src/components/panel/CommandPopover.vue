@@ -21,8 +21,9 @@
     max-w calc(100vw-16px) 兜底防极窄视口溢出。提示词列 truncate 在固定宽度内截断。
     右侧提示词列透传 slash 命令 description（skill 描述等），无则退显 kind 标签。
     无 pop-head 组头：候选数据是单一平铺列表（四路各自的 items 无分组概念），补静态头
-    属造结构——不补，登记见 docs/todo/command-popover-pop-head-no-group.md；列表直接
-    展示，提示列更宽（max-w-[520px]）。
+    属造结构——不补；列表直接展示，提示列更宽（max-w-[520px]）。候选源引入分组语义时
+    随分组数据结构一并补组头，形态复用 ModelPickerPanel 组头写法（demo .pop-head 逐值
+    翻译）。
 
     **形态对齐 demo 插入浮层（workbench.css .composer .pop-item 档 = ComposerBar.vue
     store.pop === 'insert' 触发器弹层同款）**：

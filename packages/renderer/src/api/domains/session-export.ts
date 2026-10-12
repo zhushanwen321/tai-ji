@@ -1,4 +1,4 @@
-// 会话 JSONL 导出域（ui-replica-demo-fidelity 待立项通道 1，2026-10-12 立项）。
+// 会话 JSONL 导出域（2026-10-12 立项）。
 // Electron IPC 平台门面（对齐 ./diagnostics.ts 域形态：经 @/lib/ipc 二级适配——renderer 对
 // electronAPI 的唯一适配点是 lib/ipc（spec §4 R1，B1 IPC 门面守卫禁直调 window.electronAPI）；
 // 不进 api/index.ts 聚合——该门面只聚合 core transport 域）。

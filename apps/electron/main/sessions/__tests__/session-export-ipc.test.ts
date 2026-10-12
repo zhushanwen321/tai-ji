@@ -1,5 +1,5 @@
 /**
- * session-export-ipc 单测（ui-replica-demo-fidelity 待立项通道 1，2026-10-12 立项）。
+ * session-export-ipc 单测（2026-10-12 立项）。
  *
  * 覆盖（验收标准 1）：
  * - 正常复制成功：handler 返回 status='exported' + 产物路径 + 字节数（文件真实落盘，

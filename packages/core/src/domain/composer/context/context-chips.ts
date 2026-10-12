@@ -32,7 +32,7 @@ interface ComposerInputInstance {
 }
 
 /** 单条已附上下文（ContextChipsBar props 形状）。path = 图片磁盘绝对路径（16px 真图缩略
- *  经 local-file:// 通道加载用；demo .ctxchip .thumb，demo 对齐，登记见 docs/todo/ui-replica-demo-fidelity.md）。 */
+ *  经 local-file:// 通道加载用；demo .ctxchip .thumb，demo 对齐）。 */
 export interface AttachedContextItem {
   id: string
   name: string

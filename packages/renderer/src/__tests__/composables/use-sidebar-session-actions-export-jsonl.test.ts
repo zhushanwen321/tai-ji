@@ -1,8 +1,7 @@
 // @vitest-environment node
 
 /**
- * useSidebarSessionActions.onExportSessionJsonl 测试（sidebar 导出 JSONL handler，
- * ui-replica-demo-fidelity 通道 1）。
+ * useSidebarSessionActions.onExportSessionJsonl 测试（sidebar 导出 JSONL handler）。
  *
  * 锁定：
  * - EXH1: exported → 调 exportSessionJsonl IPC（payload 原样透传）+ toast info 携带

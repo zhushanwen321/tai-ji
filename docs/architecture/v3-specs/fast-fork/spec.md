@@ -337,9 +337,9 @@ async function forkSessionAsk(srcSessionId, fromMessageId, content) {
 - Esc 监听：composer focus 时 forkMode 下 Esc 退出（注意与 SessionList/SideDrawer 的 Esc 冲突，composer focus 时应优先退出 forkMode）
 - **切 session 时自动 exitForkMode**：避免 forkMode 残留到错误 session
 
-**快捷键注册**（`packages/renderer/src/components/sidebar/Sidebar.vue:371-404` keymap）：
-- 现有 `KeymapEntry`（`Sidebar.vue:363-369`）**需扩展加 `shift?: boolean` 字段**（当前只有 key/commandId/action）
-- `matchOverrideKey`（`Sidebar.vue:385-404`）加 shift 检查：`m.shift` 则要求 `e.shiftKey`，非 shift 则要求 `!e.shiftKey`（否则 ⌘G 和 ⌘⇧G 都命中 ⌘G）
+**快捷键注册**（`packages/renderer/src/composables/shell/useGlobalShortcuts.ts:101` keymap）：
+- 现有 `KeymapEntry`（`useGlobalShortcuts.ts:67`）**需扩展加 `shift?: boolean` 字段**（当前只有 key/commandId/action）
+- `matchOverrideKey`（`useGlobalShortcuts.ts:258`）加 shift 检查：`m.shift` 则要求 `e.shiftKey`，非 shift 则要求 `!e.shiftKey`（否则 ⌘G 和 ⌘⇧G 都命中 ⌘G）
 - keymap 加两条：`{ key: 'g', action: () => forkFromLastAssistant() }` + `{ key: 'g', shift: true, action: () => enterForkModeFromLastAssistant() }`
 - **⌘G/⌘⇧G 无冲突**（验证确认，grep `'g'` 无命中；现有 ⌘K/⌘N/⌘B/⌘[/⌘]/⌘,）
 - **fork 点来源**（验证发现的空白）：全局 ⌘G 触发时无 hover 上下文，**默认从末条 assistant fork**（`lastAssistant`），与用户在 message-stream 末尾的视觉焦点一致

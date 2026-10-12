@@ -64,10 +64,9 @@ useKeyOrchestrator()
 // 承接（createLazyChunkRetry：3 次 × 300ms 递增退避 + 失败 URL 提取 ?t=N cache-busting 绕过
 // module map 记忆化，机制与探针证据见 lazy-chunk-retry.ts 头注）；穷尽才呈现错误态（overlay
 // 形态文案给「重开恢复」指引），重开设置即重置计数获得新一轮自动重试。
-// retryKey 重挂保留：重试由 retryKey 重挂**单通道**驱动（不调 onError 的 userRetry——Vue 实装
-// 证实 userRetry 重跑的 load promise 无人 set loaded.value、只 userRetry UI 恒卡错误态；且双通道
-// 会产生幽灵 loader 双触发），重挂的新 wrapper setup 重新跑 loader、成功即渲染（机制详见
-// lazy-chunk-retry.ts 头注「重试驱动形态」）。
+// 重试驱动形态（单一描述以 lazy-chunk-retry.ts 头注「重试驱动形态」为准，本处不复述机制）：
+// 退避到点时 userRetry() + retryKey++ **双要素同调**，缺一即卡死（链恒 pending / loaded 不置位）；
+// 幽灵 loader 已由新 wrapper 短路共享排除。
 // [W31 review minor-4] loading/error 占位必须 overlay 形态（fixed 全屏遮罩）：本组件挂载点是根
 // div `flex gap-3` 的 flex 子项，默认形态占位（h-full w-full、无定位）会参与布局流——error 态
 // 永久挤压 MainPanel、loading 超 200ms 短暂挤压。defineAsyncComponent 的 loading/error 组件

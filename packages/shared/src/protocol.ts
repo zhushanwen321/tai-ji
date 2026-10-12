@@ -107,7 +107,7 @@ export type UiLocale = 'zh-CN' | 'en-US'
 
 export type ClientMessageType =
   | 'session.create' | 'session.delete' | 'session.deleteByCwd' | 'config.sessions' | 'session.switch' | 'session.restore' | 'session.history' | 'session.getCommands' | 'session.getContext'
-  // 悬停详情卡消息计数（ui-replica-demo-fidelity 通道 2）：session.getMessageCount 按需拉取
+  // 悬停详情卡消息计数：session.getMessageCount 按需拉取
   // 该会话的对话消息条数（用户+助手），runtime 流式计数 session JSONL，reply 同名
   //（payload 消费型，session.subscribe 模式）。拉取式（悬停时拉即最新），不做订阅/推送。
   | 'session.getMessageCount'

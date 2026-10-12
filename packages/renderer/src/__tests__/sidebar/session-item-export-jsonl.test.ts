@@ -1,5 +1,5 @@
 /**
- * sidebar 导出 JSONL（export JSONL）前端链路测试（ui-replica-demo-fidelity 通道 1）。
+ * sidebar 导出 JSONL（export JSONL）前端链路测试。
  *
  * 三视角（TEST-STRATEGY §3）：
  *  - 构建者白盒：sessionFile prop 驱动菜单项禁用分支（pi 延迟写入窗口 → data-disabled）
