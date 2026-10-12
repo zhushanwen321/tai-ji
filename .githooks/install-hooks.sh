@@ -1571,6 +1571,41 @@ else
 fi
 
 # ============================================================================
+# 文档 emoji 检测（README.md / README_EN.md 禁装饰 emoji）
+#   检测逻辑单一实现 .githooks/check_doc_emoji.py，merge 流程 release.sh 复用
+#   同一脚本校验 release notes。docs/ 下 ✓/⚠/✗ 等技术功能符号不在范围。
+#   无独立 SKIP 开关（R1 后惯例，SKIP_ALL_CHECKS 总开关兜底）。
+# ============================================================================
+
+DOC_EMOJI_CHECKER=".githooks/check_doc_emoji.py"
+
+if [ "$SKIP_ALL_CHECKS" != "1" ]; then
+    STAGED_README=$(echo "$STAGED_FILES" | grep -E "^README(_EN)?\.md$" || true)
+    if [ -n "$STAGED_README" ]; then
+        echo -e "${BLUE}[INFO] 运行文档 emoji 检测（README 系）...${NC}"
+
+        if [ ! -f "$DOC_EMOJI_CHECKER" ]; then
+            echo -e "${YELLOW}[WARN] 找不到检查脚本 $DOC_EMOJI_CHECKER${NC}"
+        else
+            ABSOLUTE_README=""
+            for FILE in $STAGED_README; do
+                ABSOLUTE_README="$ABSOLUTE_README $PROJECT_ROOT/$FILE"
+            done
+
+            python3 "$DOC_EMOJI_CHECKER" $ABSOLUTE_README
+            EXIT_CODE=$?
+
+            if [ $EXIT_CODE -ne 0 ]; then
+                echo ""
+                echo -e "${RED}[ERROR] README 含装饰 emoji${NC}"
+                echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
+                exit 1
+            fi
+        fi
+    fi
+fi
+
+# ============================================================================
 # pi 边界可靠性护栏（pi-boundary-reliability §3.3 D7 G1/G3/G4，U7b 接线）
 #   - G1 pi 语义登记检查：node scripts/check-pi-semantics.mjs（全仓校验：
 #     registry schema / 探针存在性 / pi 三包 + runtime pin 四包版本门禁；
@@ -2561,6 +2596,7 @@ echo -e "  ${GREEN}[+]${NC} AC7 extension-host 边界检查（core 变更时触�
 echo -e "  ${GREEN}[+]${NC} 打包配置预检查（asarUnpack/files 一致性 + symlink 检查）"
 echo -e "  ${GREEN}[+]${NC} i18n CJK 残留检测（.vue 模板不得含硬编码中文）"
 echo -e "  ${GREEN}[+]${NC} i18n locale 双侧 key 对齐检查（zh-CN === en-US）"
+echo -e "  ${GREEN}[+]${NC} 文档 emoji 检测（README 系禁装饰 emoji；release.sh 复用校验 release notes）"
 echo -e "  ${GREEN}[+]${NC} pi 边界可靠性护栏（G1 语义登记检查 / G3 档位差分探针 / G4 subagent 通道禁则）"
 echo -e "  ${GREEN}[+]${NC} thinking 档位词表比对检查（ext-simplify-17 D5：pi-ai ModelThinkingLevel ↔ llm-shared / pi-rpc 副本）"
 echo -e "  ${GREEN}[+]${NC} capability 清单 ↔ 渲染白名单对拍检查（chat-html-support D1：ALLOWED_TAGS/ATTR ↔ 能力段清单常量）"

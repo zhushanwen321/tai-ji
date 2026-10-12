@@ -142,7 +142,7 @@ bash scripts/validate-runtime-bundle.sh    # runtime bundle 深度验证
 7. **窗口顶部 traffic light 布局**：demo 40px 卡头档拓扑，全部数值（AppShell py-1 pr-1 左 0 / gap-2 / pt-11 / trafficLightPosition {x:8,y:16} / h-[40px] 三者中线 y25 共线等）见 [DESIGN.md §11](docs/DESIGN.md)——改窗口顶部 UI 前必读
 8. **reka ScrollAreaViewport 默认 `overflow-x: hidden` [HISTORICAL]**：横向滚动需给 `ScrollArea` 传 `horizontal` prop（`!overflow-x-auto` 覆盖内联；`:deep()` 会破坏 reka Root 渲染顺序）
 
-自动化检查：taste-lint（no-native-html / no-emoji / prefer-v-model 等，`pnpm run lint` + pre-commit）· vue_rules_checker.py（行数/选择器/Tab/原生元素，pre-commit）。
+自动化检查：taste-lint（no-native-html / no-emoji / prefer-v-model 等，`pnpm run lint` + pre-commit）· vue_rules_checker.py（行数/选择器/Tab/原生元素，pre-commit）· check_doc_emoji.py（README 系文档禁装饰 emoji，pre-commit；merge 流程 release.sh 复用同一脚本校验 release notes）。
 
 **Lint / Hooks 原则 [MANDATORY]**：按全局 AGENTS.md「Pre-commit Hook 问题处理」执行——检出问题全部当场直接修复（含存量、含 warning），禁 `--no-verify` / `SKIP_*`（仅限线上热修复并说明）；规则误报修正规则本体并加 `[HISTORICAL]` 注释，禁 `eslint-disable-next-line` 静默。
 
