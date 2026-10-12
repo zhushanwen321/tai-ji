@@ -43,5 +43,5 @@
 
 ## 关联
 
-- [e2e-visual-shell-baseline-stale.md](e2e-visual-shell-baseline-stale.md)：本波后 shell/composer 两张基线再次红（有意变更），push 后 CI 通道重录。
+- [e2e-visual-shell-baseline-stale.md](e2e-visual-shell-baseline-stale.md)：本波后 shell/composer 两张基线再次红（有意变更），已随 2026-10-12 视觉轨字体固定重录收口（bundled 字体渲染，本地重录即权威）。
 - [mobile-token-mirror-divergence.md](mobile-token-mirror-divergence.md)：Wave1 已同步 accent 族到 mobile 镜像（parity 断言强制），bg/neutral 等仍分叉如前述登记。
