@@ -8,8 +8,8 @@
  * - 分支④ 分叉态重载形态：record 详情载荷携带覆盖状态 + 最近生效值（回执态已丢）→
  *   模型标签显示最近生效值 ref、不回退覆盖意图值；「用户覆盖中」badge 在场；
  * - 兜底形态：从未切换的 record → 标签显示盖章值（record.model），无 badge；
- * - agentcall 视图（workflow 成员详情）：无切换入口（成员级入口登记后续项），标签
- *   走 meta 槽。
+ * - agentcall 视图（workflow 成员详情）：经 call.memberRecordId 圈定成员 record 接
+ *   切换入口（与 chat 域同组件同提交通道）；record 缺失降级 meta 槽纯显示。
  *
  * 全 mock：drawer control / 三 store / MessageStream / useSubagentTabData /
  * ModelSelectPopover（trigger slot 直通）/ vue-i18n。
@@ -163,9 +163,39 @@ describe('SubagentTab 模型标签槽（标签读取规则四分支的 DOM 呈�
     expect(wrapper.find('[data-testid="subagent-override-badge"]').exists()).toBe(false)
   })
 
-  it('agentcall 视图（workflow 成员详情）：无切换入口，标签走 meta 槽（成员级入口登记后续项）', async () => {
+  it('agentcall 视图（workflow 成员详情）：call.memberRecordId 圈定成员 record → 有切换入口，标签走读取规则合成', () => {
     drawerState.selectedSubagentId.value = 'agentcall:sa-wf-1'
-    // workflow store 返回匹配的 agent call（findAgentCall 消费面）
+    // 成员键单源对齐锚：call.memberRecordId ≡ SubagentRecord.subagentId
+    subagentRecordFixture = { ...baseRecord(), subagentId: 'sa-wf-1', model: 'p/member-stamped' }
+    workflowRecordsFixture = [
+      {
+        runId: 'wf-1',
+        scriptName: 'flow',
+        status: 'running',
+        startedAt: '2026-10-06T00:00:00Z',
+        agentCalls: [
+          {
+            id: 0,
+            agent: 'worker',
+            status: 'running',
+            model: 'p/call-model',
+            sessionId: 'sa-wf-1',
+            memberRecordId: 'sa-wf-1',
+          },
+        ],
+      },
+    ]
+    const wrapper = mountTab()
+    // 切换入口在场（与 chat 域同 trigger testid），标签显示成员 record 盖章值
+    // （读取规则兜底分支——从未切换）；call.model 不再走 meta 槽双处显示
+    const trigger = wrapper.find('[data-testid="subagent-model-trigger"]')
+    expect(trigger.exists()).toBe(true)
+    expect(trigger.text()).toContain('p/member-stamped')
+    expect(wrapper.find('[data-testid="subagent-override-badge"]').exists()).toBe(false)
+  })
+
+  it('agentcall 视图降级：call 无 memberRecordId（成员 record 缺失）→ 无切换入口，标签走 meta 槽纯显示', () => {
+    drawerState.selectedSubagentId.value = 'agentcall:sa-wf-1'
     workflowRecordsFixture = [
       {
         runId: 'wf-1',
@@ -173,6 +203,32 @@ describe('SubagentTab 模型标签槽（标签读取规则四分支的 DOM 呈�
         status: 'running',
         startedAt: '2026-10-06T00:00:00Z',
         agentCalls: [{ id: 0, agent: 'worker', status: 'running', model: 'p/call-model', sessionId: 'sa-wf-1' }],
+      },
+    ]
+    const wrapper = mountTab()
+    expect(wrapper.find('[data-testid="subagent-model-trigger"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('p/call-model')
+  })
+
+  it('agentcall 视图降级：memberRecordId 在场但 subagentStore 无对应 record → 无切换入口，meta 槽纯显示', () => {
+    drawerState.selectedSubagentId.value = 'agentcall:sa-wf-1'
+    // store fixture 默认 record.subagentId = 'sa-1'，与 memberRecordId 'sa-wf-1' 不命中
+    workflowRecordsFixture = [
+      {
+        runId: 'wf-1',
+        scriptName: 'flow',
+        status: 'running',
+        startedAt: '2026-10-06T00:00:00Z',
+        agentCalls: [
+          {
+            id: 0,
+            agent: 'worker',
+            status: 'running',
+            model: 'p/call-model',
+            sessionId: 'sa-wf-1',
+            memberRecordId: 'sa-wf-1',
+          },
+        ],
       },
     ]
     const wrapper = mountTab()
