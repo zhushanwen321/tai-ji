@@ -2,6 +2,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { isErrnoWithCode } from "@zhushanwen/pi-ext-guards";
 
 // 技能执行门禁（resolveSkills + SkillResolution）单源在 ADR-0074 共享包
 // @zhushanwen/pi-exec-skills（plan-mode-audit-remediation 批次 4②b 迁入，含空请求
@@ -132,9 +133,4 @@ export function activatePlanMode(
   });
 
   return { state, prompt };
-}
-
-/** Node ErrnoException 守卫（断言前先运行时核形状——extensions no-unsafe-cast 纪律） */
-function isErrnoWithCode(error: unknown, code: string): boolean {
-  return typeof error === "object" && error !== null && (error as NodeJS.ErrnoException).code === code;
 }
