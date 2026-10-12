@@ -15,6 +15,8 @@ import { cn } from '../../lib/utils'
  *
  * gap-2 + whitespace-nowrap：间距对齐 demo .sel-btn { gap: 8px }；
  * nowrap 防止「High / Max」这类带空格文案在窄触发器（如 w-[88px]）里折行。
+ * overflow-hidden 是长值的裁剪上下文（省略号收口由 SelectValue 的 truncate 承担），
+ * 缺了它长文本会画出控件右边界。
  */
 const props = defineProps<SelectTriggerProps & { class?: HTMLAttributes['class'] }>()
 const delegatedProps = reactiveOmit(props, 'class')
@@ -25,7 +27,7 @@ const delegatedProps = reactiveOmit(props, 'class')
     v-bind="delegatedProps"
     :class="
       cn(
-        'flex h-[32px] w-full items-center justify-between gap-2 whitespace-nowrap rounded-md border border-border bg-bg-input px-[10px] text-[length:var(--text-sm)] text-neutral-fg outline-none transition-colors hover:border-border-strong placeholder:text-neutral-mid focus-visible:outline focus-visible:outline-2 focus-visible:outline-[color:var(--focus-ring)] focus-visible:-outline-offset-1 disabled:cursor-not-allowed disabled:opacity-50 data-[placeholder]:text-neutral-mid',
+        'flex h-[32px] w-full items-center justify-between gap-2 overflow-hidden whitespace-nowrap rounded-md border border-border bg-bg-input px-[10px] text-[length:var(--text-sm)] text-neutral-fg outline-none transition-colors hover:border-border-strong placeholder:text-neutral-mid focus-visible:outline focus-visible:outline-2 focus-visible:outline-[color:var(--focus-ring)] focus-visible:-outline-offset-1 disabled:cursor-not-allowed disabled:opacity-50 data-[placeholder]:text-neutral-mid',
         props.class,
       )
     "
