@@ -326,6 +326,105 @@ function appendInlineNotice(
   return current
 }
 
+/** 规则 5 收纳分支的待附缓冲成员：bash 完成通知 + 其源数组下标（附着回拉组起始下标用） */
+interface PendingBashNotice {
+  msg: Message
+  index: number
+}
+
+/** pending bash 行落位独立 static 外部行（边界 1：agent 空闲无宿主轮不收纳；不丢消息）。
+ *  清空由调用方传入的缓冲数组原地完成（groupRenderInput 持有该数组引用）。 */
+function flushPendingBashAsStatic(
+  pendingBashNotices: PendingBashNotice[],
+  slots: GroupSlot[],
+): void {
+  for (const p of pendingBashNotices) {
+    slots.push({ slot: 'static', item: { kind: 'systemNotice', message: p.msg } })
+  }
+  pendingBashNotices.length = 0
+}
+
+/** pending bash 行按到达序注入宿主轮（数据原地搬家，settle 后收进轮头行）；
+ *  组起始下标回拉至 pending 首条下标（重跑等价性，见 groupRenderInput 的 pendingBashNotices 注）。 */
+function attachPendingBashToGroup(
+  group: TurnGroup,
+  pendingBashNotices: PendingBashNotice[],
+  groupsRef: TurnGroup[],
+  startsRef: number[],
+): void {
+  if (pendingBashNotices.length === 0) return
+  for (const p of pendingBashNotices) appendBashNotice(p.msg, group)
+  const gi = groupsRef.indexOf(group)
+  const firstIndex = pendingBashNotices[0].index
+  if (gi >= 0 && firstIndex < (startsRef[gi] ?? Number.POSITIVE_INFINITY)) {
+    startsRef[gi] = firstIndex
+  }
+  pendingBashNotices.length = 0
+}
+
+/** 规则 3 分支体：assistant 归 current（无则自启 user:null turn——首条 assistant 边缘保留）。
+ *  pending bash 行的宿主轮就此确定：先注入再归成员（foldedNotices 保持到达序）。 */
+function appendAssistantEntry(
+  msg: Message,
+  current: TurnGroup | null,
+  groups: TurnGroup[],
+  slots: GroupSlot[],
+  starts: number[],
+  index: number,
+  pendingBashNotices: PendingBashNotice[],
+): TurnGroup {
+  if (pendingBashNotices.length > 0) {
+    current ??= openTurn(null, undefined, groups, slots, starts, index)
+    attachPendingBashToGroup(current, pendingBashNotices, groups, starts)
+  }
+  current ??= openTurn(null, undefined, groups, slots, starts, index)
+  current.assistants.push(msg)
+  return current
+}
+
+/** 规则 2 分支体：隐藏完成通知 → turn 边界（D3）。连续边界折叠：current 已是未填实 trigger
+ *  turn 时复用该组（trigger 单值常量，取最新语义天然成立），不再压新组；此分支 current
+ *  为 null 或已填实（非空），closeTurn 无可折叠，直接开新 trigger turn。先注入 pending
+ *  bash 行（到达序在前），再压入本隐藏通知（D5 聚合载体 + 收纳明细行）。 */
+function appendHiddenNotifyBoundary(
+  msg: Message,
+  current: TurnGroup | null,
+  groups: TurnGroup[],
+  slots: GroupSlot[],
+  starts: number[],
+  index: number,
+  pendingBashNotices: PendingBashNotice[],
+): TurnGroup {
+  if (current === null || !isEmptyTurn(current)) {
+    current = openTurn(null, 'bg-notify', groups, slots, starts, index)
+  }
+  attachPendingBashToGroup(current, pendingBashNotices, groups, starts)
+  appendHiddenNotify(msg, current)
+  return current
+}
+
+/** 规则 5 收纳分支体（specs/chat/system-notices.md §3）：background-bash 结构化完成通知。
+ *  current 为未填实 trigger turn（同批完成通知收敛同一宿主轮）→ 直接附着该组；否则
+ *  关闭当前 turn 挂入 pending——宿主轮出现（assistant / 规则 2）即注入，user / 其余
+ *  可见 system / 数组结束（agent 空闲无 settle 时机）→ 落位独立 static 外部行。 */
+function collectBashCompleteNotice(
+  msg: Message,
+  current: TurnGroup | null,
+  groups: TurnGroup[],
+  slots: GroupSlot[],
+  starts: number[],
+  index: number,
+  pendingBashNotices: PendingBashNotice[],
+): TurnGroup | null {
+  if (current !== null && isEmptyTurn(current)) {
+    appendBashNotice(msg, current)
+    return current
+  }
+  current = closeTurn(current, groups, slots, starts)
+  pendingBashNotices.push({ msg, index })
+  return current
+}
+
 /**
  * 扁平消息（全量数组，含 display:false）→ 渲染槽位序列 + turn 成员组。
  * 分组规则 v2 见文件头「分组规则」节（conversation-turn-attribution §3.3 D3/D4）。
@@ -354,26 +453,7 @@ function groupRenderInput(
   // 携带源数组下标：附着发生在宿主轮开启之后，而开启下标 > pending 下标——turnStartOffsets
   // 的「分组状态归零」不变量（尾部快车道从该下标重跑与全量逐字一致）要求组起始下标覆盖
   // 全部成员，附着时回拉至 pending 首条下标。
-  const pendingBashNotices: Array<{ msg: Message; index: number }> = []
-  /** pending bash 行落位独立 static 外部行（边界 1：agent 空闲无宿主轮不收纳；不丢消息） */
-  const flushPendingBashAsStatic = (): void => {
-    for (const p of pendingBashNotices) {
-      slots.push({ slot: 'static', item: { kind: 'systemNotice', message: p.msg } })
-    }
-    pendingBashNotices.length = 0
-  }
-  /** pending bash 行按到达序注入宿主轮（数据原地搬家，settle 后收进轮头行）；
-   *  组起始下标回拉至 pending 首条下标（重跑等价性，见 pendingBashNotices 注）。 */
-  const attachPendingBash = (group: TurnGroup, groupsRef: TurnGroup[], startsRef: number[]): void => {
-    if (pendingBashNotices.length === 0) return
-    for (const p of pendingBashNotices) appendBashNotice(p.msg, group)
-    const gi = groupsRef.indexOf(group)
-    const firstIndex = pendingBashNotices[0].index
-    if (gi >= 0 && firstIndex < (startsRef[gi] ?? Number.POSITIVE_INFINITY)) {
-      startsRef[gi] = firstIndex
-    }
-    pendingBashNotices.length = 0
-  }
+  const pendingBashNotices: PendingBashNotice[] = []
 
   for (let i = from; i < messages.length; i++) {
     const msg = messages[i]
@@ -381,46 +461,25 @@ function groupRenderInput(
       // 规则 1：user 锚 → 开新 turn（挂起的空 trigger turn 折叠不产出；pending bash 无宿主
       // 轮 → 落位外部行，随后到达的用户消息不被误认为宿主）
       current = closeTurn(current, groups, slots, starts)
-      flushPendingBashAsStatic()
+      flushPendingBashAsStatic(pendingBashNotices, slots)
       current = openTurn(msg, undefined, groups, slots, starts, i)
     } else if (msg.role === 'assistant') {
-      // 规则 3：assistant 归 current（无则自启 user:null turn——首条 assistant 边缘保留）。
-      // pending bash 行的宿主轮就此确定：先注入再归成员（foldedNotices 保持到达序）
-      if (pendingBashNotices.length > 0) {
-        current ??= openTurn(null, undefined, groups, slots, starts, i)
-        attachPendingBash(current, groups, starts)
-      }
-      current ??= openTurn(null, undefined, groups, slots, starts, i)
-      current.assistants.push(msg)
+      // 规则 3（分支体见 appendAssistantEntry）
+      current = appendAssistantEntry(msg, current, groups, slots, starts, i, pendingBashNotices)
     } else if (isHiddenCompleteNotify(msg)) {
-      // 规则 2：隐藏完成通知 → turn 边界（D3）。连续边界折叠：current 已是未填实 trigger
-      // turn 时复用该组（trigger 单值常量，取最新语义天然成立），不再压新组；此分支 current
-      // 为 null 或已填实（非空），closeTurn 无可折叠，直接开新 trigger turn。
-      if (current === null || !isEmptyTurn(current)) {
-        current = openTurn(null, 'bg-notify', groups, slots, starts, i)
-      }
-      // 先注入 pending bash 行（到达序在前），再压入本隐藏通知（D5 聚合载体 + 收纳明细行）
-      attachPendingBash(current, groups, starts)
-      appendHiddenNotify(msg, current)
+      // 规则 2（分支体见 appendHiddenNotifyBoundary）
+      current = appendHiddenNotifyBoundary(msg, current, groups, slots, starts, i, pendingBashNotices)
     } else if (msg.display === false) {
       // 隐藏非完成通知消息（todo-context 等）透明：不参与边界、不产出渲染项——现状语义
       // 原样保留。消息仍在 store，不丢。
       continue
     } else if (isBashCompleteNotice(msg)) {
-      // 规则 5 收纳分支（specs/chat/system-notices.md §3）：background-bash 结构化完成通知。
-      // current 为未填实 trigger turn（同批完成通知收敛同一宿主轮）→ 直接附着该组；否则
-      // 关闭当前 turn 挂入 pending——宿主轮出现（assistant / 规则 2）即注入，user / 其余
-      // 可见 system / 数组结束（agent 空闲无 settle 时机）→ 落位独立 static 外部行。
-      if (current !== null && isEmptyTurn(current)) {
-        appendBashNotice(msg, current)
-      } else {
-        current = closeTurn(current, groups, slots, starts)
-        pendingBashNotices.push({ msg, index: i })
-      }
+      // 规则 5 收纳分支（分支体见 collectBashCompleteNotice）
+      current = collectBashCompleteNotice(msg, current, groups, slots, starts, i, pendingBashNotices)
     } else if (isInlineNotice(msg)) {
       // 规则 4：inline notice → 归当前 turn 内部（分支体见 appendInlineNotice）；
       // 无当前 turn 退化为独立 static 项——pending bash 行先落位（保持流序）
-      if (current === null) flushPendingBashAsStatic()
+      if (current === null) flushPendingBashAsStatic(pendingBashNotices, slots)
       current = appendInlineNotice(msg, current, slots)
     } else {
       // 规则 6：其余可见 system → boundary：独立 systemNotice 项 + 关闭当前 turn（现状语义）。
@@ -430,14 +489,14 @@ function groupRenderInput(
       // 「渲染过滤不丢消息」语义（AGENTS.md 规则 9）。bashExecution 此分支不可达（规则 4 已收）。
       // pending bash 行先落位（到达序在先）。
       current = closeTurn(current, groups, slots, starts)
-      flushPendingBashAsStatic()
+      flushPendingBashAsStatic(pendingBashNotices, slots)
       slots.push({ slot: 'static', item: { kind: 'systemNotice', message: msg } })
     }
   }
   // 数组结束时仍挂起的空 trigger turn 不产出（空 turn 折叠——其附着的 bash 行经 closeTurn
   // 落位外部行）；pending 余量 = agent 空闲到达的通知，落位外部行（边界 1）
   closeTurn(current, groups, slots, starts)
-  flushPendingBashAsStatic()
+  flushPendingBashAsStatic(pendingBashNotices, slots)
   return { slots, groups, starts }
 }
 
