@@ -664,6 +664,22 @@ describe('syncZcodeProviders：编排与瘦副本形态', () => {
     expect(outcome.status).toBe('aborted')
   })
 
+  it('v2 config.json 缺失（absent 态）→ 不中止照常落盘，但 warn 前置提示（§2 前提表行 6 / D3：不静默）', async () => {
+    // v2ConfigPath 不写盘（ENOENT = absent 态）——该形态下 wrapper fs 拦截整体不安装，
+    // 同步模块必须出声提示此前置，防 N1/P-cli-eat 失败无信号可归因
+    writeBuiltinCatalog()
+    const outcome = await syncZcodeProviders(makeDeps({
+      providers: { 'stepfun': stdProvider() },
+      credentials: { 'stepfun': stdCredential() },
+      baseUrls: { 'stepfun': 'https://api.stepfun.com/v1' },
+    }))
+    expect(outcome.status).toBe('written')
+    expect(outcome.ruleCount).toBe(1)
+    expect(warnings.some(w => w.includes('v2 config.json 缺失'))).toBe(true)
+    expect(warnings.some(w => w.includes('不进 Registry'))).toBe(true)
+    expect(warnings.some(w => w.includes('同步中止'))).toBe(false)
+  })
+
   it('zcode-builtin.json 定位不到 → 关联条目不生成 + warn，普通条目同步不受影响', async () => {
     const outcome = await syncZcodeProviders(makeDeps({
       providers: { 'stepfun': stdProvider() },

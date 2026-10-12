@@ -501,13 +501,21 @@ export function collectZcodeOccupiedProviderIds(paths: Pick<ZcodeProviderSyncPat
   return { all, personalConfig, v2WithKey, cliAny }
 }
 
-/** v2 config.json 的 zai 系特有 token（builtin 条目 apiKey 非空才有值；只读引用，D4）。 */
+/**
+ * v2 config.json 的 zai 系特有 token（builtin 条目 apiKey 非空才有值；只读引用，D4）。
+ * absent = 文件 ENOENT——设计 §2 前提表行 6 / D3 效果段的前置缺失形态（wrapper fs 拦截
+ * 整体不安装），编排层须据此 warn 提示，不静默。
+ */
 export function readZcodeBuiltinPlanTokens(
   v2ConfigPath: string,
-): { readonly tokens: Partial<Record<'bigmodel' | 'zai', string>>; readonly readable: boolean } {
+): { readonly tokens: Partial<Record<'bigmodel' | 'zai', string>>; readonly readable: boolean; readonly absent: boolean } {
   const outcome = readJsonFile(v2ConfigPath)
   if (outcome.state !== 'ok' || !isRecord(outcome.value) || !isRecord(outcome.value['provider'])) {
-    return { tokens: {}, readable: outcome.state === 'ok' || outcome.state === 'absent' }
+    return {
+      tokens: {},
+      readable: outcome.state === 'ok' || outcome.state === 'absent',
+      absent: outcome.state === 'absent',
+    }
   }
   const tokens: Partial<Record<'bigmodel' | 'zai', string>> = {}
   for (const family of ['bigmodel', 'zai'] as const) {
@@ -518,7 +526,7 @@ export function readZcodeBuiltinPlanTokens(
       tokens[family] = options['apiKey']
     }
   }
-  return { tokens, readable: true }
+  return { tokens, readable: true, absent: false }
 }
 
 // ── zcode-builtin.json 定位（与 preparer.ts locateZcodeBuiltinCatalog 同源复制，跨包红线）──
@@ -654,8 +662,14 @@ export async function syncZcodeProviders(deps: ZcodeProviderSyncDeps): Promise<Z
   }
 
   // zai 关联前置读取（v2 token + 目录条目；v2 unreadable 按 D7④中止——token 引用源失真）
-  const { tokens, readable: v2Readable } = readZcodeBuiltinPlanTokens(deps.paths.v2ConfigPath)
+  const { tokens, readable: v2Readable, absent: v2Absent } = readZcodeBuiltinPlanTokens(deps.paths.v2ConfigPath)
   if (!v2Readable) return abort(`v2 config.json 读取异常（${deps.paths.v2ConfigPath}）`)
+  // 设计 §2 前提表行 6 / D3 效果段：v2 缺失时 wrapper 凭据注入整体不安装（appserver-launcher
+  // injectedConfigText 对 ENOENT 返回 null），副本条目仅进校验链不进 Registry——显式 warn，
+  // 不静默（防 N1/P-cli-eat 在该环境失败时无信号可归因）
+  if (v2Absent) {
+    warn(`[zcode-provider-sync] v2 config.json 缺失（${deps.paths.v2ConfigPath}）——wrapper 凭据注入不安装，同步副本条目仅进校验链不进 Registry；ZCode 桌面端完成设置后该文件自动出现，重启 taiji 生效`)
+  }
 
   // zcode-builtin.json 定位（deps 注入了 locator 就完全信注入结果——含 undefined =
   // 定位失败；未注入走本模块同源扫描实现）

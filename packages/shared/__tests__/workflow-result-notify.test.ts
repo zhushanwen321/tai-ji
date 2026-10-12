@@ -31,6 +31,7 @@ describe('parseWorkflowResultNotify 合法输入与三态判定', () => {
       runId: 'wf-1783679279983-hlpc46',
       outcome: 'completed',
       reason: 'completed',
+      name: 'dev-flow',
     })
   })
 
@@ -40,13 +41,14 @@ describe('parseWorkflowResultNotify 合法输入与三态判定', () => {
         runId: 'wf-1783679279983-hlpc46',
         outcome: 'failed',
         reason,
+        name: 'dev-flow',
       })
     }
   })
 
-  it('多余字段忽略（只取 runId 与 reason，__gui__ 不进解析结果）', () => {
+  it('多余字段忽略（只取 runId/outcome/reason/name，__gui__ 不进解析结果）', () => {
     const parsed = parseWorkflowResultNotify(doneDetails)
-    expect(Object.keys(parsed as object)).toEqual(['runId', 'outcome', 'reason'])
+    expect(Object.keys(parsed as object)).toEqual(['runId', 'outcome', 'reason', 'name'])
   })
 })
 
