@@ -72,10 +72,14 @@ FIRST_POLL=true
 
 while true; do
     # 获取该 commit 上的 workflow runs
+    # [2026-10-13] 过滤 Dependabot Updates：event=dynamic 的平台侧依赖机器人任务（updater
+    # 容器对个别依赖如 electron 偶发 unknown_error 失败），不是本次合并的代码验证线——
+    # 计入判定会让发布恒被与代码无关的机器人红阻塞。WORKFLOW 显式指定时不过滤（用户点名）。
     if [[ -n "$WORKFLOW" ]]; then
         RUNS_JSON=$(gh run list --commit "$REF" --workflow "$WORKFLOW" $GH_FLAG --json databaseId,status,conclusion,name,workflowName 2>/dev/null || echo "[]")
     else
-        RUNS_JSON=$(gh run list --commit "$REF" $GH_FLAG --json databaseId,status,conclusion,name,workflowName 2>/dev/null || echo "[]")
+        RUNS_JSON=$(gh run list --commit "$REF" $GH_FLAG --json databaseId,status,conclusion,name,workflowName 2>/dev/null \
+            | jq -c '[.[] | select(.workflowName != "Dependabot Updates")]' 2>/dev/null || echo "[]")
     fi
 
     # 等待 CI 触发
