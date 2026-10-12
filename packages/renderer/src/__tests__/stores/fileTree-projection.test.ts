@@ -113,17 +113,22 @@ function legacyVisibleRows(
   return out
 }
 
-/** 用 store 状态驱动投影（与 FileView computed 相同的调用形态：per-session getter 传参） */
-function project(store: ReturnType<typeof useFileTreeStore>, sid = 's1'): VisibleRow[] {
-  return projectVisibleRows(
-    (s) => store.getTree(s),
-    (s) => store.getExpanded(s),
-    (s) => store.getGitOverlay(s),
+/** projectVisibleRows 参数序列单源（per-session getter 传参；getNodeState 可注入 spy）。 */
+function projectArgs(store: ReturnType<typeof useFileTreeStore>, sid: string, getNodeState?: (s: string, path: string) => unknown) {
+  return [
+    (s: string) => store.getTree(s),
+    (s: string) => store.getExpanded(s),
+    (s: string) => store.getGitOverlay(s),
     store.filterText,
     store.showIgnored,
     sid,
-    (s, path) => store.getNodeState(s, path),
-  )
+    getNodeState ?? ((s: string, path: string) => store.getNodeState(s, path)),
+  ] as const
+}
+
+/** 用 store 状态驱动投影（与 FileView computed 相同的调用形态：per-session getter 传参） */
+function project(store: ReturnType<typeof useFileTreeStore>, sid = 's1'): VisibleRow[] {
+  return projectVisibleRows(...projectArgs(store, sid))
 }
 
 function briefs(rows: VisibleRow[]): RowBrief[] {
@@ -382,15 +387,7 @@ describe('projectVisibleRows 性能量级（万级节点，替代旧 per-row 12 
     store.addExpanded('s1', 'big/nested')
 
     const spy = vi.fn((s: string, p: string) => store.getNodeState(s, p))
-    const rows = projectVisibleRows(
-      (s) => store.getTree(s),
-      (s) => store.getExpanded(s),
-      (s) => store.getGitOverlay(s),
-      store.filterText,
-      store.showIgnored,
-      's1',
-      spy,
-    )
+    const rows = projectVisibleRows(...projectArgs(store, 's1', spy))
     expect(rows).toHaveLength(20002) // big + 10000 files + nested + 10000 files，全部展开
     // 只对 2 个已展开目录调用（loading/error hint 判定），不做 20002 次 per-row 状态读取
     expect(spy).toHaveBeenCalledTimes(2)

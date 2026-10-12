@@ -20,6 +20,7 @@
  *
  * 运行：pnpm --filter @taiji/frontend run test -- src/__tests__/composables/useDetailPane.test.ts
  */
+import { apiProjectMock } from '@/__tests__/helpers/api-facade-mock'
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { effectScope, ref, nextTick, type EffectScope, type Ref } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
@@ -29,7 +30,8 @@ import { createPinia, setActivePinia } from 'pinia'
 // 覆盖 file/git 导出，否则 mock 不生效（会走 mockApi 基于文件名的 fixture 内容）。
 const mockFileRead = vi.fn()
 const mockGitGetDiff = vi.fn()
-vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
+vi.mock('@/api', () => ({
+  project: apiProjectMock(),
   file: { read: (...args: unknown[]) => mockFileRead(...(args as [string, string?])) },
   git: { getDiff: (...args: unknown[]) => mockGitGetDiff(...(args as [string, string])) },
 }))

@@ -28,6 +28,7 @@ import type { SessionJsonlExportPayload, SessionJsonlExportResult } from '@taiji
 import { SESSION_EXPORT_JSONL } from '@taiji/shared'
 import { getPiAgentDir, PI_SESSION_TREE_SEGMENTS } from '@taiji/shared/paths'
 import { mainLogger } from '../logs/main-logger.js'
+import { runSaveDialogGuarded } from '../utils/save-dialog-guard.js'
 
 /** 保存对话框返回形态（diagnostics-export-ipc 的 SaveDialogResult 同款测试最小投影）。 */
 export interface SessionExportSaveDialogResult { // oe-exempt:20261012:framework:deps 注入契约面——生产 dialog 返回投影 + 测试桩单消费位，接口先立防测试走真 electron 通道（对齐 diagnostics-export-ipc 先例形态）
@@ -125,15 +126,13 @@ export function registerSessionExportHandler(deps: SessionExportIpcDeps = {}): v
             error: { code: 'EPATH', message: '会话文件路径不在会话数据目录内，已拒绝导出' },
           }
         }
-        let save: SessionExportSaveDialogResult
-        try {
-          save = await showSave({ title: '导出会话 JSONL', defaultPath: buildDefaultFileName(sessionId, payload?.suggestedName) })
-        } catch (err) {
-          // 对话框崩溃同样降级为可判定的错误三态（不向 renderer 抛 invoke rejection）
-          mainLogger.warn(`[session-export-ipc] save dialog failed: ${err instanceof Error ? err.message : String(err)}`)
-          return { status: 'error', error: { code: 'EDIALOG', message: '保存对话框打开失败' } }
-        }
-        if (save.canceled || save.filePath === undefined) return { status: 'canceled' }
+        const dialog = await runSaveDialogGuarded({
+          logTag: 'session-export-ipc',
+          show: () => showSave({ title: '导出会话 JSONL', defaultPath: buildDefaultFileName(sessionId, payload?.suggestedName) }),
+        })
+        if (dialog.status === 'error') return dialog
+        if (dialog.status === 'canceled') return { status: 'canceled' }
+        const save = dialog.save
         try {
           // 先 stat 取源大小（作 bytes 汇报；不存在在此处得到具体 ENOENT），再内核直复制
           const { size } = await stat(sessionFile)

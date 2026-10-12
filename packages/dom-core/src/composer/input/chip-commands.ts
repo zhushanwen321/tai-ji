@@ -18,6 +18,23 @@ import { removeChipNode, isSpacerNode, placeCursorAfter } from './input-dom'
 import type { ChipCallbacks } from './types'
 
 /** 落位反馈淡染时长（demo 方案 C「插入瞬间」权威定值 800ms，样式侧 --sel-bg/--sel-edge 染色） */
+
+const SVG_NS = 'http://www.w3.org/2000/svg'
+
+/** 内联 svg 元素工厂（lucide 手绘 path 的共同基座：viewBox/stroke 档统一，尺寸与 stroke-width 由调用方给）。 */
+function createChipSvg(width: string, height: string, strokeWidth: string, withLinejoin = false): SVGElement {
+  const svg = document.createElementNS(SVG_NS, 'svg')
+  svg.setAttribute('viewBox', '0 0 24 24')
+  svg.setAttribute('fill', 'none')
+  svg.setAttribute('stroke', 'currentColor')
+  svg.setAttribute('stroke-width', strokeWidth)
+  svg.setAttribute('stroke-linecap', 'round')
+  if (withLinejoin) svg.setAttribute('stroke-linejoin', 'round')
+  svg.setAttribute('width', width)
+  svg.setAttribute('height', height)
+  return svg
+}
+
 const JUST_INSERTED_FLASH_MS = 800
 
 /**
@@ -42,16 +59,7 @@ function makeImageThumb(path: string, displayName: string): HTMLElement {
       const host = document.createElement('span')
       host.className = 'chip-icon chip-thumb-fallback'
       host.setAttribute('aria-hidden', 'true')
-      const SVG_NS = 'http://www.w3.org/2000/svg'
-      const svg = document.createElementNS(SVG_NS, 'svg')
-      svg.setAttribute('viewBox', '0 0 24 24')
-      svg.setAttribute('fill', 'none')
-      svg.setAttribute('stroke', 'currentColor')
-      svg.setAttribute('stroke-width', '2')
-      svg.setAttribute('stroke-linecap', 'round')
-      svg.setAttribute('stroke-linejoin', 'round')
-      svg.setAttribute('width', '12')
-      svg.setAttribute('height', '12')
+      const svg = createChipSvg('12', '12', '2', true)
       const rect = document.createElementNS(SVG_NS, 'rect')
       for (const [k, v] of [['width', '18'], ['height', '18'], ['x', '3'], ['y', '3'], ['rx', '2'], ['ry', '2']] as const) {
         rect.setAttribute(k, v)
@@ -93,16 +101,8 @@ export function useComposerChipCommands(
     x.type = 'button'
     x.className = 'chip-x'
     x.setAttribute('aria-label', t('composable.removeLabel'))
-    const SVG_NS = 'http://www.w3.org/2000/svg'
-    const svg = document.createElementNS(SVG_NS, 'svg')
-    svg.setAttribute('viewBox', '0 0 24 24')
-    svg.setAttribute('fill', 'none')
-    svg.setAttribute('stroke', 'currentColor')
-    svg.setAttribute('stroke-width', '2.2')
-    svg.setAttribute('stroke-linecap', 'round')
+    const svg = createChipSvg('10', '10', '2.2')
     svg.setAttribute('aria-hidden', 'true')
-    svg.setAttribute('width', '10')
-    svg.setAttribute('height', '10')
     for (const d of ['M18 6 6 18', 'm6 6 12 12']) {
       const path = document.createElementNS(SVG_NS, 'path')
       path.setAttribute('d', d)

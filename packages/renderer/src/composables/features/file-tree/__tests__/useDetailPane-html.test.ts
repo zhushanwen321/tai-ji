@@ -16,6 +16,7 @@
  *
  * 运行：cd packages/renderer && npx vitest run src/composables/features/file-tree/__tests__/useDetailPane-html.test.ts
  */
+import { apiProjectMock } from '@/__tests__/helpers/api-facade-mock'
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { ref, nextTick } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
@@ -26,7 +27,7 @@ const mockServable = vi.fn()
 const mockLocalFileRead = vi.fn()
 
 vi.mock('@/api', () => ({
-  project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
+  project: apiProjectMock(),
   file: { read: (...args: unknown[]) => mockFileRead(...(args as [string, string?])) },
   git: { getDiff: (...args: unknown[]) => mockGitGetDiff(...(args as [string, string])) },
 }))

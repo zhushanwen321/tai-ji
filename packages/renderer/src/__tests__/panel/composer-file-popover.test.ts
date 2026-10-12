@@ -57,17 +57,29 @@ afterEach(() => {
   document.body.innerHTML = ''
 })
 
+
+/** CommandPopover file 分支 mount 单源（attachTo body + open=true 驱动 + flush）。 */
+async function mountFilePopover(nodes: FileNode[]) {
+  mockLoad.mockResolvedValueOnce(nodes)
+  const wrapper = mount(CommandPopover, {
+    attachTo: document.body,
+    props: { open: true, type: 'file', sessionId: 's1' },
+  })
+  await flushPromises()
+  await nextTick()
+  return wrapper
+}
+
+/** pop-item 行文本包含判定（浮层渲染在 body，querySelectorAll 走 body 级）。 */
+function popItemTextIncludes(text: string): boolean {
+  return Array.from(document.body.querySelectorAll('.pop-item')).some((b) =>
+    b.textContent?.includes(text),
+  ) ?? false
+}
+
 describe('CommandPopover file 分支', () => {
   it('U27 type=file 渲染候选：DOM body 含文件名 button', async () => {
-    const nodes: FileNode[] = [{ path: 'a.ts', name: 'a.ts', type: 'file' }]
-    mockLoad.mockResolvedValueOnce(nodes)
-
-    const wrapper = mount(CommandPopover, {
-      attachTo: document.body,
-      props: { open: true, type: 'file', sessionId: 's1' },
-    })
-    await flushPromises()
-    await nextTick()
+    const wrapper = await mountFilePopover([{ path: 'a.ts', name: 'a.ts', type: 'file' }])
 
     const btns = Array.from(document.body.querySelectorAll('.pop-item'))
     const fileBtn = btns.find((b) => b.textContent?.includes('a.ts'))
@@ -76,34 +88,18 @@ describe('CommandPopover file 分支', () => {
   })
 
   it('U28 type=file 候选空 → PopoverContent 不渲染', async () => {
-    mockLoad.mockResolvedValueOnce([])
-
-    const wrapper = mount(CommandPopover, {
-      attachTo: document.body,
-      props: { open: true, type: 'file', sessionId: 's1' },
-    })
-    await flushPromises()
-    await nextTick()
+    await mountFilePopover([])
 
     // PopoverContent v-if="items.length > 0"，空候选不渲染浮层（无 .pop-item 行）
-    const rows = Array.from(document.body.querySelectorAll('.pop-item'))
-    expect(rows.length).toBe(0)
-    wrapper.unmount()
+    expect(popItemTextIncludes('a.ts')).toBe(false)
+    expect(document.body.querySelectorAll('.pop-item').length).toBe(0)
   })
 
   it('U29 候选含目录项 → 图标用 folder（G16 映射）', async () => {
-    const nodes: FileNode[] = [
+    const wrapper = await mountFilePopover([
       { path: 'src', name: 'src', type: 'dir' },
       { path: 'a.ts', name: 'a.ts', type: 'file' },
-    ]
-    mockLoad.mockResolvedValueOnce(nodes)
-
-    const wrapper = mount(CommandPopover, {
-      attachTo: document.body,
-      props: { open: true, type: 'file', sessionId: 's1' },
-    })
-    await flushPromises()
-    await nextTick()
+    ])
 
     // 目录项 name 补斜杠（src/），验证 G16 映射后目录正确识别
     const dirBtn = Array.from(document.body.querySelectorAll('.pop-item')).find((b) =>
@@ -287,9 +283,7 @@ describe('landing cwd 路（LP 组，u5 G1/D2）', () => {
     await nextTick()
     await wrapper.setProps({ open: true })
     await flushPromises()
-    expect(
-      Array.from(document.body.querySelectorAll('.pop-item')).some((b) => b.textContent?.includes('a.ts')),
-    ).toBe(true)
+    expect(popItemTextIncludes('a.ts')).toBe(true)
 
     // 第二拍：切 cwd B 重开（推进时钟出节流）——B 拉取挂起期间，open 边沿已清 A 的陈旧候选
     vi.advanceTimersByTime(1001)
@@ -301,9 +295,7 @@ describe('landing cwd 路（LP 组，u5 G1/D2）', () => {
     await nextTick()
     await wrapper.setProps({ cwd: '/dir-b', open: true })
     await flushPromises()
-    expect(
-      Array.from(document.body.querySelectorAll('.pop-item')).some((b) => b.textContent?.includes('a.ts')),
-    ).toBe(false) // 陈旧候选已清（FileNode.path 相对旧 cwd，跨目录显示是事实错误）
+    expect(popItemTextIncludes('a.ts')).toBe(false) // 陈旧候选已清（FileNode.path 相对旧 cwd，跨目录显示是事实错误）
 
     // 在途期间再切 cwd → C：B 的回执到达时快照失配（cwd ≠ 发起时 /dir-b）→ 丢弃
     await wrapper.setProps({ cwd: '/dir-c' })

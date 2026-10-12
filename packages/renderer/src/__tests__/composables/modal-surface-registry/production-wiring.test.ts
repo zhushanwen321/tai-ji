@@ -84,6 +84,18 @@ function mountDialogHost() {
   return { wrapper, open }
 }
 
+
+/** PopoverRoot 开关载体 mount 单源（open ref 可控；插槽内容与 mount options 由调用方给）。 */
+function mountPopoverRoot(content: () => ReturnType<typeof h>, options?: Parameters<typeof mount>[1]) {
+  const open = ref(false)
+  // open 读取必须留在渲染函数体内（每次渲染取 ref 当前值；提出即恒初始值）
+  const host = defineComponent({
+    setup: () => () => h(PopoverRoot, { open: open.value, 'onUpdate:open': (v: boolean) => { open.value = v } }, { default: content }),
+  })
+  const wrapper = mount(host, options)
+  return { open, wrapper }
+}
+
 describe('reka 托管弹层族（renderer 三包装）：开合态绑 root context open 状态本体', () => {
   it('dialog-confirm：开 → Esc/⌘W 双让位 + shieldsView unconditional；关 → 全复位', async () => {
     const host = mountDialogHost()
@@ -106,15 +118,7 @@ describe('reka 托管弹层族（renderer 三包装）：开合态绑 root conte
   })
 
   it('popover-content：开 → Esc 让位、⌘W 不让位（R4 双键拆分）+ shieldsView intersecting 带 rect', async () => {
-    const open = ref(false)
-    const wrapper = mount(defineComponent({
-      setup() {
-        return () =>
-          h(PopoverRoot, { open: open.value, 'onUpdate:open': (v: boolean) => { open.value = v } }, {
-            default: () => h(PopoverContentWrapper),
-          })
-      },
-    }), uiBridgeProvide())
+    const { open, wrapper } = mountPopoverRoot(() => h(PopoverContentWrapper), uiBridgeProvide())
     void wrapper
 
     open.value = true
@@ -231,15 +235,7 @@ describe('ui 包注册桥（MODAL_SURFACE_REGISTRAR_KEY）', () => {
       }
       return registerModalSurface({ surface, key, isOpen, rect })
     }
-    const open = ref(false)
-    const wrapper = mount(defineComponent({
-      setup() {
-        return () =>
-          h(PopoverRoot, { open: open.value, 'onUpdate:open': (v: boolean) => { open.value = v } }, {
-            default: () => h(UiPopoverContent),
-          })
-      },
-    }), {
+    const { open, wrapper } = mountPopoverRoot(() => h(UiPopoverContent), {
       global: { provide: { [MODAL_SURFACE_REGISTRAR_KEY as symbol]: registrar } },
     })
     void wrapper

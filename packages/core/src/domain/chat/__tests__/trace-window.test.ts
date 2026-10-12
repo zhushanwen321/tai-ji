@@ -20,6 +20,16 @@ import { BUILTIN_TOOLS } from '@taiji/shared'
 let toolSeq = 0
 let thinkSeq = 0
 
+
+/** 分组取样单源：tools → 唯一组（RunGroupBlock），断言单组 + 组头 count。 */
+function expectSingleGroup(tools: Parameters<typeof flatOfTools>[0], count: number): RunGroupBlock {
+  const units = groupOf(flatOfTools(tools))
+  expect(units).toHaveLength(1)
+  const g = units[0] as RunGroupBlock
+  expect(g.header.count).toBe(count)
+  return g
+}
+
 function makeThinking(over: Partial<ThinkingBlock> = {}): ThinkingBlock {
   thinkSeq += 1
   return { id: over.id ?? `t${thinkSeq}`, content: over.content ?? 'think', collapsed: false }
@@ -624,11 +634,8 @@ describe('run 类型分组 groupToolRuns: 分组规则', () => {
       makeTool({ id: 'b1' }),
       makeTool({ id: 'b2', status: 'running' }),
     ]
-    const units = groupOf(flatOfTools(tools))
-    expect(units).toHaveLength(1)
-    const g = units[0] as RunGroupBlock
+    const g = expectSingleGroup(tools, 3)
     expect(isGroup(g)).toBe(true)
-    expect(g.header.count).toBe(3)
     expect(g.members.map((m) => m.flatIndex)).toEqual([0, 1, 2])
     expect(g.members.some((m) => (m.block.ref as ToolCall).status === 'running')).toBe(true)
     expect(g.hasRunning).toBe(true)
@@ -649,10 +656,7 @@ describe('run 类型分组 groupToolRuns: 分组规则', () => {
       makeTool({ id: 'b1', status: 'error', startTime: 2000, endTime: 3500 }),
       makeTool({ id: 'b2', startTime: 4000 }), // endTime 缺失（end_not_received）→ 按 0 计
     ]
-    const units = groupOf(flatOfTools(tools))
-    expect(units).toHaveLength(1)
-    const g = units[0] as RunGroupBlock
-    expect(g.header.count).toBe(3)
+    const g = expectSingleGroup(tools, 3)
     expect(g.header.durationMs).toBe(1500 + 1500)
     expect(g.header.failedCount).toBe(1)
   })

@@ -112,11 +112,18 @@ beforeEach(() => {
   getDeliveryProjectionRef().value = new Map()
 })
 
+
+/** compacting 态 strip mount + 行存在断言单源（返回 wrapper/row 供形态差异断言）。 */
+async function mountCompactingStrip() {
+  const wrapper = await mountStrip({ occupancy: { turn: 'idle', compacting: true, bash: false } })
+  const row = wrapper.find('[data-testid="activity-strip-row-compacting"]')
+  expect(row.exists()).toBe(true)
+  return { wrapper, row }
+}
+
 describe('ActivityStrip · 四类状态各自渲染（P1）', () => {
   it('compacting + reason=manual（缺省）→「压缩中」行 + spinner', async () => {
-    const wrapper = await mountStrip({ occupancy: { turn: 'idle', compacting: true, bash: false } })
-    const row = wrapper.find('[data-testid="activity-strip-row-compacting"]')
-    expect(row.exists()).toBe(true)
+    const { wrapper, row } = await mountCompactingStrip()
     // 用户可见文案（zh-CN）+ 呼吸弧（animate-loader-spin，M3c demo .run-ic 复刻）；行内左右各一条渐隐 hairline
     //（断言随 6d6ebb905 渐变 hairline 形态更新，形态细节断言见下方「横线分隔行族」describe）
     expect(wrapper.find('[data-testid="activity-strip-text-compacting"]').text()).toBe('压缩中')
@@ -213,9 +220,7 @@ describe('ActivityStrip · 横线分隔行族形态（compacting 降级回归 + 
   }
 
   it('compacting 行降级回归横线分隔行族：content-col/system-notice 保留、无通栏带痕迹、两条渐隐横线', async () => {
-    const wrapper = await mountStrip({ occupancy: { turn: 'idle', compacting: true, bash: false } })
-    const row = wrapper.find('[data-testid="activity-strip-row-compacting"]')
-    expect(row.exists()).toBe(true)
+    const { wrapper, row } = await mountCompactingStrip()
     // 降级回归本族（2026-09-16 D4 裁决）：通栏活动带形态（-mx-5 通栏 / accent-soft 底 /
     // border-y）全部摘除，与 bash/thinking/settling 行共用横线分隔行 DOM。
     // 断言随 6d6ebb905 渐变 hairline 形态更新
@@ -272,9 +277,7 @@ describe('ActivityStrip · 横线分隔行族形态（compacting 降级回归 + 
 
   it('count=0：chip 不渲染，行仍在（压缩状态本身独立成立，A4）', async () => {
     setProjection(SID, [entry('d1', 'in-flight', 'direct')])
-    const wrapper = await mountStrip({ occupancy: { turn: 'idle', compacting: true, bash: false } })
-    const row = wrapper.find('[data-testid="activity-strip-row-compacting"]')
-    expect(row.exists()).toBe(true)
+    const { wrapper, row } = await mountCompactingStrip()
     expect(wrapper.find('[data-testid="activity-strip-flush-hint-compacting"]').exists()).toBe(false)
     expect(row.text()).not.toContain('·')
     wrapper.unmount()

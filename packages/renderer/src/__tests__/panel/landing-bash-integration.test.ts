@@ -30,6 +30,7 @@
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/panel/landing-bash-integration.test.ts
  */
+import { expectLandingShellDom } from '../helpers/composer-mount'
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 // 必须置于 Composer import 之前：@/api 的 vi.mock 工厂执行期解引用 helper 导出，
 // Composer 导入链触发工厂时 helper 模块必须已初始化（同 mode-declaration-row 先例）。
@@ -94,10 +95,7 @@ async function pressEnter(wrapper: ReturnType<typeof mountLandingComposer>): Pro
 describe('Landing 态 bash 首发的 mount 级集成（PR#116 review gap1）', () => {
   it('G1-T1: composer 输入区存在于 DOM（防「无 composer 输入区」事故重演）', () => {
     const wrapper = mountLandingComposer()
-    // composer-box 容器存在
-    expect(wrapper.find('[data-testid="composer-box"]').exists()).toBe(true)
-    // composer 输入区存在（事故复现点：曾全绿但此处 DOM 缺失）
-    expect(wrapper.find('[data-testid="composer-input"]').exists()).toBe(true)
+    expectLandingShellDom(wrapper)
   })
 
   it('G1-T2: 输入 !ls 后 composer-box 切到 bash 模式（composer-bash-mode class，视觉反馈）', async () => {

@@ -64,6 +64,13 @@ beforeEach(() => {
   provideSettingsTransport(makeSettingsTransportStub(sessionApiMock))
 })
 
+
+/** saved toast 断言单源（module 统一成功反馈，域文案 settings.subagentEngine.saved）。 */
+function expectSavedToast() {
+  const { toasts } = useToast()
+  expect(toasts.value.some((t) => t.type === 'info' && t.message.includes('已保存'))).toBe(true)
+}
+
 describe('SubagentEngineSection（U7 引擎选择器）', () => {
   it('渲染动态引擎清单与当前选中态（选项来自 RPC 非硬编码）', async () => {
     sessionApiMock.getSubagentEngineConfig.mockResolvedValueOnce({
@@ -95,8 +102,7 @@ describe('SubagentEngineSection（U7 引擎选择器）', () => {
     expect(sessionApiMock.setSubagentDefaultEngine).toHaveBeenCalledWith('pi')
     expect(wrapper.find('[data-testid=subagent-engine-select]').text()).toContain('pi')
     // module 统一成功反馈：saved toast（域文案 settings.subagentEngine.saved）
-    const { toasts } = useToast()
-    expect(toasts.value.some((t) => t.type === 'info' && t.message.includes('已保存'))).toBe(true)
+    expectSavedToast()
   })
 
   it('同值选择不发写请求（幂等）', async () => {
@@ -234,8 +240,7 @@ describe('SubagentEngineSection（U7 引擎选择器）', () => {
     // reply modelRef = 权威回填（触发器前进到新选中）
     expect(wrapper.find('[data-testid=subagent-engine-model-zcode]').text()).toContain('Prov B · m-2')
     // 保存交互与既有区块一致：saved toast（settings.subagentEngine.saved）
-    const { toasts } = useToast()
-    expect(toasts.value.some((t) => t.type === 'info' && t.message.includes('已保存'))).toBe(true)
+    expectSavedToast()
   })
 
   it('D5：模型保存失败 → 选中态回滚旧值 + modelSaveFailed toast（带 reason）', async () => {

@@ -358,14 +358,20 @@ describe("sanitizeEngineDefaults（设计 D5）", () => {
 // readEngineDefaults 派发时点直读（engine-provider-unification D6）
 // ============================================================
 
+
+/** seed + 直读断言单源（D6 直读语义的装载腿：写盘后立即可读得同值）。 */
+function seedEngineDefaults(tmpDir: string, engineDefaults: Record<string, string>): void {
+  writeConfig(tmpDir, JSON.stringify({ version: 1, engineDefaults }));
+  expect(readEngineDefaults(tmpDir)).toEqual(engineDefaults);
+}
+
 describe("readEngineDefaults 派发时点直读（设计 D6）", () => {
   beforeEach(() => {
     loggerMock.warn.mockClear();
   });
 
   it("直读语义：改盘后再读得新值（零缓存——每次调用读盘）", () => {
-    writeConfig(tmpDir, JSON.stringify({ version: 1, engineDefaults: { zcode: "a/old" } }));
-    expect(readEngineDefaults(tmpDir)).toEqual({ zcode: "a/old" });
+    seedEngineDefaults(tmpDir, { zcode: "a/old" });
     // 模拟 settings 保存（RPC 写盘）后活跃 session 的下一次派发：不改任何缓存、
     // 也不重启进程，直接再读——必须拿到新值（D6 场景 S2 的核心断言）
     writeConfig(tmpDir, JSON.stringify({ version: 1, engineDefaults: { zcode: "a/new" } }));
@@ -373,8 +379,7 @@ describe("readEngineDefaults 派发时点直读（设计 D6）", () => {
   });
 
   it("直读语义：键删除后再读无该条目（偏好清除即生效）", () => {
-    writeConfig(tmpDir, JSON.stringify({ version: 1, engineDefaults: { zcode: "a/old" } }));
-    expect(readEngineDefaults(tmpDir)).toEqual({ zcode: "a/old" });
+    seedEngineDefaults(tmpDir, { zcode: "a/old" });
     writeConfig(tmpDir, JSON.stringify({ version: 1 }));
     expect(readEngineDefaults(tmpDir)).toEqual({});
   });

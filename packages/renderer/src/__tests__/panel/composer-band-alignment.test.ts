@@ -22,6 +22,8 @@
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/panel/composer-band-alignment.test.ts
  */
+// helper import 必须先于项目内模块（@/api mock factory 在模块图加载期执行，TDZ 约束同 composer-mount 各消费文件）
+import { composerApiModuleActualWithBtw, composerBtwApiMock } from '../helpers/composer-mount'
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises, enableAutoUnmount } from '@vue/test-utils'
 import { ref, nextTick } from 'vue'
@@ -144,15 +146,9 @@ describe('主面板：composer 渲染在 band 带壳内（使用者黑盒 + 观�
 
 // ── 旁路提问：composer 在 band 带壳内 ──
 
-const apiMock = vi.hoisted(() => ({
-  list: vi.fn(),
-  create: vi.fn(),
-  remove: vi.fn(),
-}))
-vi.mock('@/api', async (importActual) => {
-  const actual = await importActual<typeof import('@/api')>()
-  return { ...actual, btw: apiMock }
-})
+vi.mock('@/api', (importActual) => composerApiModuleActualWithBtw(importActual))
+// 断言锚点：btw 域 spy 单例（helper 持有，播种/断言经别名）
+const apiMock = composerBtwApiMock
 vi.mock('@/components/panel/MessageStream.vue', async () => {
   const { defineComponent: dc, h: hs } = await import('vue')
   return { default: dc({ name: 'MessageStream', setup: () => () => hs('div') }) }

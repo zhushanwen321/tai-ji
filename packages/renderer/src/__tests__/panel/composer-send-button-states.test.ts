@@ -24,6 +24,8 @@
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/panel/composer-send-button-states.test.ts
  */
+// helper import 必须先于项目内模块（@/api mock factory 在模块图加载期执行，TDZ 约束）
+import { composerApiModule, composerChildStubs, composerFlowModule, composerSessionStoreModule, makeComposerInputMock } from '../helpers/composer-mount'
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount, type VueWrapper } from '@vue/test-utils'
 import { defineComponent, ref } from 'vue'
@@ -46,55 +48,18 @@ const chatApiMock = vi.hoisted(() => ({
 vi.mock('@/composables/features/chat/useChat', () => ({
   useChat: () => chatApiMock,
 }))
-vi.mock('@/composables/features/new-task/useNewTaskFlow', () => ({
-  useNewTaskFlow: () => ({ submitFirstMessage: vi.fn(), currentModel: { value: null }, setPendingModel: vi.fn(), currentCwd: ref(null) }),
-  resetNewTaskFlow: vi.fn(),
-}))
-vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
+vi.mock('@/composables/features/new-task/useNewTaskFlow', () => composerFlowModule())
+vi.mock('@/api', () => ({
+  ...composerApiModule(),
   chat: { send: chatApiMock.send, streamSubscribe: vi.fn(() => () => {}) },
-  model: { switchModel: vi.fn() },
-  session: { setThinkingLevel: vi.fn(async (sessionId: string, level: string) => ({ sessionId, level })) },
-  composer: { getMentionCandidates: vi.fn().mockResolvedValue([]), getFileCandidates: vi.fn().mockResolvedValue([]) },
-  config: { getGlobalSkills: vi.fn().mockResolvedValue([]), getProjectSkills: vi.fn().mockResolvedValue([]), onSkillCacheInvalidated: () => () => {} },
 }))
-vi.mock('@/stores/session', () => ({
-  useSessionStore: () => ({ active: undefined, list: [], applySnapshot: vi.fn() }),
-}))
+vi.mock('@/stores/session', () => composerSessionStoreModule())
 
-// ── ComposerInput mock：emit input 设 draft ──
-const lastInputText = ref('')
-const ComposerInputMock = defineComponent({
-  name: 'ComposerInput',
-  emits: {
-    input: (val: string) => {
-      lastInputText.value = val
-      return true
-    },
-    keydown: null,
-    'slash-trigger': null,
-    'file-trigger': null,
-  },
-  setup(_, { expose }) {
-    const clear = vi.fn()
-    const setText = vi.fn()
-    expose({ clear, setText, insertSlashChip: vi.fn(), getSegments: () => textToSegments(lastInputText.value) })
-    return { clear, setText }
-  },
-  template: '<div data-testid="composer-input" />',
-})
-
-const SIMPLE = defineComponent({ name: 'SimpleStub', template: '<div />' })
+// ── ComposerInput mock + 兄弟子 stubs：helper 单源基型 ──
+const { lastInputText, ComposerInputMock } = makeComposerInputMock()
 const otherStubs = {
   ComposerInput: ComposerInputMock,
-  CommandPopover: defineComponent({ name: 'CommandPopover', template: '<div><slot /></div>' }),
-  AddMenuPopover: SIMPLE,
-  ContextChipsBar: SIMPLE,
-  ContextCapacityPopover: SIMPLE,
-  ComposerCapacityBar: SIMPLE,
-  ModelSelectPopover: SIMPLE,
-  ThinkingLevelPopover: SIMPLE,
-  RetryIndicator: SIMPLE,
-  QueueBubble: SIMPLE,
+  ...composerChildStubs,
 }
 
 import Composer from '@/components/panel/Composer.vue'

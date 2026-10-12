@@ -179,6 +179,24 @@ function mountTurn(opts: {
 // ═════════════════════════════════════════════════════════════════
 // describe 1：scope wave D1 折叠作用域（回归保护）
 // ═════════════════════════════════════════════════════════════════
+
+/** trace 展开块存在断言单源（按 data-type 查 .trace-blk）。 */
+function expectTraceBlock(wrapper: { find: (s: string) => { exists: () => boolean } }, type: string) {
+  expect(wrapper.find(`.trace .trace-blk[data-type="${type}"]`).exists()).toBe(true)
+}
+
+/** 组行 DOM 稳定断言单源（props 更新后 header 节点 isSameNode + 成员行数保持——remount 即红）。 */
+function expectGroupNodeStable(
+  wrapper: { find: (s: string) => { exists: () => boolean; element: Element; findAll: (s: string) => unknown[] } },
+  node1: Element,
+  memberCount: number,
+) {
+  const header2 = wrapper.find('[data-testid="run-group-header"]')
+  expect(header2.exists()).toBe(true)
+  expect(header2.element.isSameNode(node1)).toBe(true)
+  expect(wrapper.find('[data-testid="run-group"]').findAll('.trace-blk').length).toBe(memberCount)
+}
+
 describe('streaming-trace-window D1: Turn 折叠作用域降到 turn 级', () => {
   it('非末位 turn（isLastTurn=false）→ trace 折叠（仅 text 末位正文，thinking/tool 隐藏）', () => {
     const wrapper = mountTurn({ isSessionActive: true, isLastTurn: false })
@@ -189,10 +207,10 @@ describe('streaming-trace-window D1: Turn 折叠作用域降到 turn 级', () =>
 
   it('末位工作 turn（isLastTurn=true, sessionActive）→ trace 展开', () => {
     const wrapper = mountTurn({ isSessionActive: true, isLastTurn: true })
-    expect(wrapper.find('.trace .trace-blk[data-type="text"]').exists()).toBe(true)
-    expect(wrapper.find('.trace .trace-blk[data-type="thinking"]').exists()).toBe(true)
+    expectTraceBlock(wrapper, 'text')
+    expectTraceBlock(wrapper, 'thinking')
     // 工具行按类型折进 run 组（单成员也成组）：末位工作 turn 可见的是组行
-    expect(wrapper.find('.trace .trace-blk[data-type="run-group"]').exists()).toBe(true)
+    expectTraceBlock(wrapper, 'run-group')
   })
 
   it('手动展开（isExpanded=true）优先于作用域——非末位 turn 也展开', () => {
@@ -201,8 +219,8 @@ describe('streaming-trace-window D1: Turn 折叠作用域降到 turn 级', () =>
       isLastTurn: false,
       isExpanded: () => true,
     })
-    expect(wrapper.find('.trace .trace-blk[data-type="thinking"]').exists()).toBe(true)
-    expect(wrapper.find('.trace .trace-blk[data-type="run-group"]').exists()).toBe(true)
+    expectTraceBlock(wrapper, 'thinking')
+    expectTraceBlock(wrapper, 'run-group')
   })
 })
 
@@ -891,11 +909,8 @@ describe('run 类型分组: Turn 组块接线（三路径 + PR-6）', () => {
     const node1 = header1.element
     // 段尾延长：b3 完成、r3→r4 新 running（members 4→5，run head 不变 → key 稳定）
     await wrapper.setProps({ turn: makeBashChainTurn({ completed: 4, running: true }) })
-    const header2 = wrapper.find('[data-testid="run-group-header"]')
-    expect(header2.exists()).toBe(true)
-    expect(header2.element.isSameNode(node1)).toBe(true) // 不 remount（PR-6 方向①）
-    // 展开态保持：成员行仍在 DOM（5 个）
-    expect(wrapper.find('[data-testid="run-group"]').findAll('.trace-blk').length).toBe(5)
+    // 不 remount（PR-6 方向①）+ 展开态保持：成员行仍在 DOM（5 个）
+    expectGroupNodeStable(wrapper, node1, 5)
   })
 
   it('PR-6 方向②（窗口右滑段首出窗）：members[0] 变更而 run head 锚不变，组行 DOM 节点不变（isSameNode，key 规则的核心验证）', async () => {
@@ -925,12 +940,9 @@ describe('run 类型分组: Turn 组块接线（三路径 + PR-6）', () => {
     // 窗口右滑：b5 完成入池、新 running r 启动 → 窗口=末4：组(b2..b5+running)，members[0] 从 b1 变 b2；
     // 若 key=members[0].flatIndex（旧规则被击穿的形态）→ remount → isSameNode=false
     await wrapper.setProps({ turn: makeBashChainTurn({ completed: 6, running: true }) })
-    const header2 = wrapper.find('[data-testid="run-group-header"]')
-    expect(header2.exists()).toBe(true)
-    expect(header2.element.isSameNode(node1)).toBe(true) // run head 锚定 → 不 remount（PR-6 方向②）
-    // 展开态保持（remount 会丢组件本地 ref 的展开态）。running 入组：
+    // run head 锚定 → 不 remount（PR-6 方向②）；展开态保持（remount 会丢组件本地 ref 的展开态）。
     // 两次成员数 = 4 个窗口内已完成 + running = 5
-    expect(wrapper.find('[data-testid="run-group"]').findAll('.trace-blk').length).toBe(5)
+    expectGroupNodeStable(wrapper, node1, 5)
   })
 })
 

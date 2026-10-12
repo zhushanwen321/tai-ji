@@ -19,6 +19,7 @@ import { DIAGNOSTICS_EXPORT_BUNDLE } from '@taiji/shared'
 import { exportDiagnosticBundle } from './export-diagnostic-bundle.js'
 import type { ExportDiagnosticBundleOptions } from './export-diagnostic-bundle.js'
 import { mainLogger } from '../logs/main-logger.js'
+import { runSaveDialogGuarded } from '../utils/save-dialog-guard.js'
 
 /** 保存对话框返回形态（Electron SaveDialogReturnValue 的测试最小投影）。 */
 export interface SaveDialogResult {
@@ -65,15 +66,13 @@ export function registerDiagnosticsExportHandler(deps: DiagnosticsExportIpcDeps 
     ipcMain.handle(
       DIAGNOSTICS_EXPORT_BUNDLE,
       async (_event: IpcMainInvokeEvent, payload?: DiagnosticExportBundlePayload): Promise<DiagnosticExportBundleResult> => {
-        let save: SaveDialogResult
-        try {
-          save = await showSave({ title: '导出诊断包', defaultPath: payload?.defaultPath })
-        } catch (err) {
-          // 对话框崩溃同样降级为可判定的错误三态（不向 renderer 抛 invoke rejection）
-          mainLogger.warn(`[diagnostics-export-ipc] save dialog failed: ${err instanceof Error ? err.message : String(err)}`)
-          return { status: 'error', error: { code: 'EDIALOG', message: '保存对话框打开失败' } }
-        }
-        if (save.canceled || save.filePath === undefined) return { status: 'canceled' }
+        const dialog = await runSaveDialogGuarded({
+          logTag: 'diagnostics-export-ipc',
+          show: () => showSave({ title: '导出诊断包', defaultPath: payload?.defaultPath }),
+        })
+        if (dialog.status === 'error') return dialog
+        if (dialog.status === 'canceled') return { status: 'canceled' }
+        const save = dialog.save
         const result = exportBundle({ outPath: save.filePath, appVersion: appVersion() })
         if (result.status === 'exported') {
           mainLogger.info('[diagnostics-export-ipc] bundle exported', {

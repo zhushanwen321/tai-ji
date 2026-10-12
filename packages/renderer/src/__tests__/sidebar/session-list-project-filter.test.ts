@@ -15,6 +15,7 @@
  * fixture 语义：sa/sd 归属 proj-a；sc 归属 proj-b；sb 未归类。
  * 运行：cd packages/renderer && npx vitest run src/__tests__/sidebar/session-list-project-filter.test.ts
  */
+import { flipProjectGroupToggle } from '../helpers/sidebar-mount'
 import { describe, it, expect, beforeEach } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
@@ -169,10 +170,7 @@ describe('SessionList: 锚定切换（平铺模式 = 锚定聚焦）', () => {
   it('点当前组头 → 折叠/展开翻转（不切换锚定）', async () => {
     setupProjects('proj-a', [['proj-a', 'Alpha'], ['proj-b', 'Beta']])
     const wrapper = mountList()
-    const toggle = () => groupOf(wrapper, 'proj-a').find('[data-testid="project-group-toggle"]')
-
-    await toggle().trigger('click')
-    expect(toggle().attributes('aria-expanded')).toBe('false')
+    const toggle = await flipProjectGroupToggle((id) => groupOf(wrapper, id), 'proj-a')
     expect(useProjectStore().activeProjectId).toBe('proj-a')
 
     await toggle().trigger('click')

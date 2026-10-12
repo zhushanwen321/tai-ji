@@ -16,22 +16,22 @@
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/composables/use-sidebar-session-actions-export-jsonl.test.ts
  */
+import { sidebarToastTripleMocks, sidebarToastTripleModule } from '../helpers/sidebar-mount'
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { ref } from 'vue'
 
 const exportSessionJsonlMock = vi.hoisted(() => vi.fn())
-const toastErrorMock = vi.hoisted(() => vi.fn())
-const toastSuccessMock = vi.hoisted(() => vi.fn())
-const toastInfoMock = vi.hoisted(() => vi.fn())
+// toast 三键 spy 单例驻 sidebar-mount（本文件别名保留原断言名）
+const toastErrorMock = sidebarToastTripleMocks.error
+const toastSuccessMock = sidebarToastTripleMocks.success
+const toastInfoMock = sidebarToastTripleMocks.info
 
 vi.mock('@/api/domains/session-export', () => ({
   exportSessionJsonl: exportSessionJsonlMock,
 }))
 
-vi.mock('@/composables/useToast', () => ({
-  useToast: () => ({ error: toastErrorMock, success: toastSuccessMock, info: toastInfoMock }),
-}))
+vi.mock('@/composables/useToast', () => sidebarToastTripleModule())
 
 import { useSidebarSessionActions } from '@/composables/features/sidebar/useSidebarSessionActions'
 

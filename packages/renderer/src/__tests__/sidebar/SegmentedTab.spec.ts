@@ -15,6 +15,7 @@
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/sidebar/SegmentedTab.spec.ts
  */
+import { expectTextOnlyTabs } from '../helpers/sidebar-mount'
 import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
 import SegmentedTab from '@/components/sidebar/SegmentedTab.vue'
@@ -63,13 +64,7 @@ describe('SegmentedTab', () => {
     const wrapper = mountTab({ sessionCount: 3, fileCount: 6, modelValue: 'sessions' })
 
     const buttons = wrapper.findAll('button')
-    // 无 icon（demo 文字 tab）
-    for (const btn of buttons) {
-      expect(btn.find('svg').exists()).toBe(false)
-    }
-    // 无 count 数字（sessionCount=3/fileCount=6 传入但不渲染）
-    expect(buttons[0].text()).not.toContain('3')
-    expect(buttons[1].text()).not.toContain('6')
+    expectTextOnlyTabs(buttons, ['3', '6'])
   })
 
   it('点击 tab 触发 update:modelValue', async () => {

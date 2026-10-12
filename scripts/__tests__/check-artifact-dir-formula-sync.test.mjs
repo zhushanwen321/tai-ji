@@ -12,7 +12,6 @@
  * （ci.yml「Test - scripts guards」逐文件列举同款口径。）
  */
 import { describe, it, expect } from 'vitest'
-import { spawnSync } from 'node:child_process'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
@@ -27,11 +26,10 @@ import {
   extractConstRegex,
   mirrorUsesSegmentConst,
 } from '../check-artifact-dir-formula-sync.mjs'
-import { createMirrorRoot, installGuardIntoMirror } from './helpers/guard-mirror.mjs'
+import { expectGuardDirectRunPasses, makeGuardMirror } from './helpers/guard-mirror.mjs'
 
 const TEST_DIR = dirname(fileURLToPath(import.meta.url))
 const SCRIPT = join(TEST_DIR, '..', 'check-artifact-dir-formula-sync.mjs')
-const REPO_ROOT = join(TEST_DIR, '..', '..')
 
 const DEFAULT_REGEX = '/^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/'
 
@@ -136,19 +134,17 @@ const runtimePiPathsSrc = ({ regex = DEFAULT_REGEX } = {}) =>
  * 注入点），missing 指定不落盘的文件。root/落盘/清理/守卫副本装置见 guard-mirror.mjs。
  */
 function makeMirror({ shared = {}, mirror = {}, runtime = {}, missing = [] } = {}) {
-  const { root, writeAt, cleanup } = createMirrorRoot('artifact-formula-fx-')
-  const files = {
-    'packages/shared/src/paths.ts': sharedPathsSrc(shared),
+  return makeGuardMirror({
+    prefix: 'artifact-formula-fx-',
+    files: {    'packages/shared/src/paths.ts': sharedPathsSrc(shared),
     'extensions/taiji/system-prompt/src/index.ts': mirrorSystemPromptSrc(mirror),
     'packages/runtime/src/infra/pi/pi-paths.ts': runtimePiPathsSrc(runtime),
+    },
+    missing,
+    script: SCRIPT,
   }
-  for (const [rel, content] of Object.entries(files)) {
-    if (missing.includes(rel)) continue
-    writeAt(rel, content)
-  }
-  const run = installGuardIntoMirror(root, SCRIPT)
-  return { root, run, cleanup }
-}
+)}
+
 
 describe('CLI 集成（守卫脚本 × tmp mirror）', () => {
   it('三方一致 → exit 0，各条比较逐一报一致（含 runtime 第三源）', () => {
@@ -240,8 +236,6 @@ describe('CLI 集成（守卫脚本 × tmp mirror）', () => {
 
 describe('真实仓库源文件（守卫对实际交付面非恒绿的反面：当前三方一致）', () => {
   it('直跑真实守卫 → exit 0', () => {
-    const r = spawnSync(process.execPath, [SCRIPT], { cwd: REPO_ROOT, encoding: 'utf-8' })
-    expect(r.status).toBe(0)
-    expect(r.stdout).toContain('✓ 产物目录公式对拍通过')
+    expectGuardDirectRunPasses(SCRIPT, '✓ 产物目录公式对拍通过')
   })
 })

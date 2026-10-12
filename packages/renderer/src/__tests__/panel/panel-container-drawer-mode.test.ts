@@ -150,6 +150,29 @@ const DesktopStub = (name: string, testid: string) =>
     template: `<div data-testid="${testid}" />`,
   })
 
+
+/** drawer resize handle 取样 + 存在性 / role=separator 断言单源（键盘可达入口）。 */
+function expectResizeHandleReachable(wrapper: ReturnType<typeof mountContainer>) {
+  const handle = wrapper.find('[data-testid="drawer-resize-handle"]')
+  expect(handle.exists()).toBe(true)
+  expect(handle.attributes('role')).toBe('separator')
+  return handle
+}
+
+/** open drawer → 点 close → drawer 收起断言单源（返回关闭后的 wrapper 供后续断言）。 */
+async function mountOpenAndCloseDrawer(sid: string, stubOverrides: Record<string, Component> = {}) {
+  const panel = usePanelStore()
+  panel.loadSession(ROOT_PANEL_ID, sid)
+  openDrawerTab('git')
+  const wrapper = await mountContainer(stubOverrides)
+  await nextTick()
+  expect(wrapper.find('[data-testid="drawer-panel"]').exists()).toBe(true)
+  await wrapper.find('[data-testid="drawer-close"]').trigger('click')
+  await nextTick()
+  expect(wrapper.find('[data-testid="drawer-panel"]').exists()).toBe(false)
+  return wrapper
+}
+
 async function mountContainer(stubOverrides: Record<string, Component> = {}) {
   // 动态 import 让 vi.mock 先生效
   const PanelContainer = (await import('@/components/workspace/PanelContainer.vue')).default
@@ -275,9 +298,7 @@ describe('PanelContainer 首屏冒烟（TC1）', () => {
     const wrapper = await mountContainer({ DrawerPanel: DrawerPanelProbe })
 
     // resize handle 存在（drawer 打开时可拖动调宽，role=separator 键盘可达）
-    const handle = wrapper.find('[data-testid="drawer-resize-handle"]')
-    expect(handle.exists()).toBe(true)
-    expect(handle.attributes('role')).toBe('separator')
+    const handle = expectResizeHandleReachable(wrapper)
     // aria 值三件套（demo spec §3.2 键盘微调可达性）：钳制区间 20–60 + 当前值（spec drawers spec（demo） §3.2）
     expect(handle.attributes('aria-valuemin')).toBe('20')
     expect(handle.attributes('aria-valuemax')).toBe('60')
@@ -313,17 +334,7 @@ describe('PanelContainer 壳行为迁移（旧 side-drawer.test.ts 行为断言�
   }, 60_000)
 
   it('close 按钮点击 → drawer 关闭（DrawerPanel emit close → 壳 closeDrawer）', async () => {
-    const panel = usePanelStore()
-    panel.loadSession(ROOT_PANEL_ID, 's-close-btn')
-    openDrawerTab('git')
-
-    const wrapper = await mountContainer()
-    await nextTick()
-    expect(wrapper.find('[data-testid="drawer-panel"]').exists()).toBe(true)
-
-    await wrapper.find('[data-testid="drawer-close"]').trigger('click')
-    await nextTick()
-    expect(wrapper.find('[data-testid="drawer-panel"]').exists()).toBe(false)
+    const wrapper = await mountOpenAndCloseDrawer('s-close-btn')
     // 壳层过渡 ease 不随开合方向变化（恒 --ease；E5 分向缓动只属显隐层）
     expect(wrapper.find('[data-testid="main-area"]').classes()).toContain('ease-[var(--ease)]')
   }, 60_000)
@@ -333,17 +344,7 @@ describe('PanelContainer 壳行为迁移（旧 side-drawer.test.ts 行为断言�
     document.body.innerHTML = '<div class="composer-box" data-testid="composer-box" tabindex="0"></div>'
     const composer = document.querySelector('[data-testid="composer-box"]')
     try {
-      const panel = usePanelStore()
-      panel.loadSession(ROOT_PANEL_ID, 's-close-focus')
-      openDrawerTab('git')
-
-      const wrapper = await mountContainer()
-      await nextTick()
-      expect(wrapper.find('[data-testid="drawer-panel"]').exists()).toBe(true)
-
-      await wrapper.find('[data-testid="drawer-close"]').trigger('click')
-      await nextTick()
-      expect(wrapper.find('[data-testid="drawer-panel"]').exists()).toBe(false)
+      const wrapper = await mountOpenAndCloseDrawer('s-close-focus')
       // 用户可见行为：键盘输入有归宿（不流失到 body）
       expect(document.activeElement).toBe(composer)
     } finally {
@@ -576,10 +577,7 @@ describe('PanelContainer 动态宽度（feat-chat-flow-width）', () => {
     expect(mainStyle).toContain('margin-left: 0')
     expect(mainStyle).toContain('--content-max-w: 100%')
     expect(areaWidth(wrapper, 'drawer-area')).toBe('50%')
-    const handle = wrapper.find('[data-testid="drawer-resize-handle"]')
-    expect(handle.exists()).toBe(true)
-    // separator 可达性（键盘微调入口，对齐原 Splitter 键盘交互）
-    expect(handle.attributes('role')).toBe('separator')
+    const handle = expectResizeHandleReachable(wrapper)
     expect(handle.attributes('tabindex')).toBe('0')
   }, 60_000)
 

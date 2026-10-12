@@ -46,12 +46,13 @@
  *   解析消费），相对 composerFlowModule 为超集，内联自足
  */
 import { ref } from 'vue'
-import { beforeEach, vi } from 'vitest'
+import { beforeEach, expect, vi } from 'vitest'
 import { defineComponent } from 'vue'
 import type { Component, Ref } from 'vue'
 import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { textToSegments } from '@taiji/shared'
+import { triggerEnterForkMode } from '@/composables/panel/useForkModeChannel'
 
 /** '@/composables/features/chat/useChat' mock 工厂（Composer 消费面 7 键全量）。
  *  api 对象在工厂内创建一次（vi.mock factory 每模块图只执行一次）：测试经
@@ -139,6 +140,24 @@ export function composerApiModuleWithChat() {
 export const composerBtwApiSpy = { list: vi.fn(), create: vi.fn(), remove: vi.fn() }
 
 /**
+ * btw 域 api spy 单例（importActual 合并形态的断言锚点）：btw 面 4 文件（btw-panel /
+ * btw-overlay-routing / btw-panel-contract-invisible / composer-band-alignment）经
+ * composerApiModuleActualWithBtw 注册后，用本单例播种 list 返回值 / 断言调用。
+ */
+export const composerBtwApiMock = { list: vi.fn(), create: vi.fn(), remove: vi.fn() }
+
+/**
+ * '@/api' mock 工厂（importActual 合并形态）：btw 域替换为 composerBtwApiMock，
+ * 门面其余域保真。注册形态 `vi.mock('@/api', composerApiModuleActualWithBtw)`。
+ */
+export async function composerApiModuleActualWithBtw(
+  importActual: <T = unknown>() => Promise<T>,
+) {
+  const actual = await importActual<Record<string, object>>()
+  return { ...actual, btw: composerBtwApiMock }
+}
+
+/**
  * '@/api' mock 工厂（chat + btw 组增量形态，btw-button 专用）：chat 组加 getHistory
  * 回放腿（空快照即可，drawer 选中线不走失败告警路径），btw 组为 badge 数据源。
  */
@@ -193,6 +212,43 @@ export function composerApiModule() {
       onSkillCacheInvalidated: () => () => {},
     },
   }
+}
+
+/** '@/composables/features/settings/useProjectSkills' mock 工厂（landing skill 双钩子空表态）。 */
+export function composerProjectSkillsModule() {
+  return {
+    useProjectSkills: () => ({ projectSkills: [] }),
+    useGlobalSkills: () => ({ globalSkills: [] }),
+  }
+}
+
+/** useSidebar fork 编排断言锚点（fork 发送链路的 spy 单例，文件内直接 import 断言）。 */
+export const composerForkSessionAskSpy = vi.fn(() => Promise.resolve())
+
+/**
+ * '@/composables/features/sidebar/useSidebar' mock 工厂（fork 模式族文件共用）：
+ * forkSessionAsk 走 composerForkSessionAskSpy 单例——测试文件 import 该 spy 直接
+ * 断言「fork 发送走了 ask 编排」。
+ */
+export function composerSidebarForkModule() {
+  return {
+    useSidebar: () => ({ forkSessionAsk: composerForkSessionAskSpy, forkSession: vi.fn() }),
+  }
+}
+
+/**
+ * fork 模式信号进入 + flush（真实信号链装配样板单源）：triggerEnterForkMode 写
+ * channel signal → Composer 内 watch → staging.enter，一次 nextTick flush 后 banner
+ * 形态可断言。fork-mode / staging-banner / fast-fork 等文件的
+ * 「trigger + nextTick」样板收敛于此，调用点 `await enterForkMode(wrapper, sid)`。
+ */
+export async function enterForkMode(
+  wrapper: { vm: { $nextTick: () => Promise<void> } },
+  sessionId: string,
+  modeId = 'm1',
+): Promise<void> {
+  triggerEnterForkMode(sessionId, modeId)
+  await wrapper.vm.$nextTick()
 }
 
 /**
@@ -338,3 +394,29 @@ export function makeKeyboardComposerInputMock() {
     extendExpose: () => ({ moveCaretVertical: () => 'edge' }),
   })
 }
+
+/**
+ * landing shell 冒烟断言（AGENTS.md MANDATORY 渲染 gate 单源）：composer-box /
+ * composer-input testid 在 DOM——防「单测全绿但 Landing 态无 composer 输入区」事故重演。
+ */
+export function expectLandingShellDom(wrapper: { find: (s: string) => { exists: () => boolean } }) {
+  // composer-box：Composer.vue:32 的 testid（01-chat-panel-composer spec（demo） §2（Composer）§3 文档入口 testid）
+  expect(wrapper.find('[data-testid="composer-box"]').exists()).toBe(true)
+  // composer-input：AGENTS.md 首屏冒烟模板断言项（事故复现点：曾全绿但此处 DOM 缺失）
+  expect(wrapper.find('[data-testid="composer-input"]').exists()).toBe(true)
+}
+
+/** fork 模式视觉断言单源：banner 在场 + composer-box 无 fork-mode 染色（[HISTORICAL] 整框染色档已退役，banner 图标是唯一 accent 染色点）。 */
+export function expectForkModeVisual(wrapper: { find: (s: string) => { exists: () => boolean; classes: () => string[] } }) {
+  const box = wrapper.find('[data-testid="composer-box"]')
+  expect(box.classes()).not.toContain('fork-mode')
+  // staging banner DOM 存在（模式标识载体）
+  expect(wrapper.find('[data-testid="composer-mode-banner"]').exists()).toBe(true)
+  return box
+}
+
+/** staging banner 显隐断言单源（visible=true 在场 / false 消失——模式退出语义的用户可见形态）。 */
+export function expectBannerVisible(wrapper: { find: (s: string) => { exists: () => boolean } }, visible: boolean) {
+  expect(wrapper.find('[data-testid="composer-mode-banner"]').exists()).toBe(visible)
+}
+

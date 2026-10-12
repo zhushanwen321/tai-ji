@@ -165,23 +165,27 @@ describe('FileTreeRow 视觉一致性（D-007 字号 / D-022 chevron 槽）', ()
   })
 })
 
+
+/** 目录徽标断言单源（badge testid 由 path 派生；text = childCount 文案）。 */
+function expectDirBadge(wrapper: { find: (s: string) => { exists: () => boolean; text: () => string } }, count: string) {
+  const badge = wrapper.find('[data-testid="file-tree-dir-badge-src"]')
+  expect(badge.exists()).toBe(true)
+  expect(badge.text()).toBe(count)
+}
+
 describe('FileTreeRow 目录徽标（childCount 来自投影 row，demo .fbadge：是目录即恒渲染）', () => {
   it('目录行恒渲染徽标，内容 = 可见子项数', () => {
     const row = makeRow({ path: 'src', type: 'dir', childCount: 2 })
     const wrapper = mountRow(row)
 
-    const badge = wrapper.find('[data-testid="file-tree-dir-badge-src"]')
-    expect(badge.exists()).toBe(true)
-    expect(badge.text()).toBe('2')
+    expectDirBadge(wrapper, '2')
   })
 
   it('可见子项数 0（空目录 / ignored 目录）也恒渲染徽标（demo：是目录即显）', () => {
     const row = makeRow({ path: 'src', type: 'dir', childCount: 0 })
     const wrapper = mountRow(row)
 
-    const badge = wrapper.find('[data-testid="file-tree-dir-badge-src"]')
-    expect(badge.exists()).toBe(true)
-    expect(badge.text()).toBe('0')
+    expectDirBadge(wrapper, '0')
   })
 
   it('子项数 > 999 → 显 999+', () => {

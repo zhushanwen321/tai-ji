@@ -102,6 +102,12 @@ function makeRelease(version = '0.9.0', asset?: Partial<ReleaseAsset>): LatestRe
   }
 }
 
+
+/** 0.9.x 系列产物存活断言单源（清扫后仍应在盘的一组）。 */
+function expectInstallersKept(paths: string[]): void {
+  for (const p of paths) expect(existsSync(p)).toBe(true)
+}
+
 describe('preloaded-update (预下载产物元信息 SSOT)', () => {
   let mod: PreloadedUpdateModule
   let originalPlatform: PropertyDescriptor | undefined
@@ -422,9 +428,7 @@ describe('preloaded-update (预下载产物元信息 SSOT)', () => {
 
       // 4 个可排序包照常封顶：最老的 0.9.0 被删
       expect(existsSync(v090)).toBe(false)
-      expect(existsSync(v091)).toBe(true)
-      expect(existsSync(v092)).toBe(true)
-      expect(existsSync(v093)).toBe(true)
+      expectInstallersKept([v091, v092, v093])
       // 版本解析不出的文件一律保留
       expect(existsSync(noVersion)).toBe(true)
       expect(existsSync(twoSegment)).toBe(true)
@@ -473,9 +477,7 @@ describe('preloaded-update (预下载产物元信息 SSOT)', () => {
 
       // 刚登记的产物受保护不删（否则登记立即指向已删除文件）
       expect(existsSync(v090)).toBe(true)
-      expect(existsSync(v091)).toBe(true)
-      expect(existsSync(v092)).toBe(true)
-      expect(existsSync(v093)).toBe(true)
+      expectInstallersKept([v091, v092, v093])
       expect(existsSync(PRELOADED_UPDATE_FILE)).toBe(true)
     })
 

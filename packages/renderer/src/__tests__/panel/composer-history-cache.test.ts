@@ -14,6 +14,17 @@
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/panel/composer-history-cache.test.ts
  */
+// helper import 必须先于一切项目内模块（@/stores 等会在模块图加载期触发 @/api mock
+// factory，factory 引用的 helper 绑定彼时必须已初始化，否则 TDZ——vi.mock hoisting 约束）
+import {
+  composerApiModule,
+  composerChatModule,
+  composerChildStubs,
+  composerFlowModule,
+  composerProjectSkillsModule,
+  composerSessionStoreModule,
+  composerSidebarForkModule,
+} from '../helpers/composer-mount'
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { defineComponent, nextTick, ref } from 'vue'
@@ -21,44 +32,15 @@ import { createPinia, setActivePinia } from 'pinia'
 import type { Message } from '@taiji/shared'
 import { deriveHistoryFromChatStore } from '@/composables/panel/composer-shell'
 import { useChatStore } from '@/stores/chat'
-import { composerChildStubs } from '../helpers/composer-mount'
 import Composer from '@/components/panel/Composer.vue'
 
-vi.mock('@/composables/features/chat/useChat', () => ({
-  useChat: () => ({
-    send: vi.fn(),
-    steer: vi.fn(),
-    followUp: vi.fn(),
-    abort: vi.fn(),
-    compact: vi.fn(),
-    sendBash: vi.fn(),
-  }),
-}))
-vi.mock('@/composables/features/new-task/useNewTaskFlow', () => ({
-  useNewTaskFlow: () => ({
-    submitFirstMessage: vi.fn(),
-    currentModel: { value: null },
-    setPendingModel: vi.fn(),
-    currentCwd: ref(null),
-  }),
-  resetNewTaskFlow: vi.fn(),
-}))
-vi.mock('@/api', () => ({
-  project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
-  model: { switchModel: vi.fn() },
-  session: { setThinkingLevel: vi.fn() },
-  composer: { getMentionCandidates: vi.fn().mockResolvedValue([]), getFileCandidates: vi.fn().mockResolvedValue([]) },
-}))
-vi.mock('@/composables/features/settings/useProjectSkills', () => ({
-  useProjectSkills: () => ({ projectSkills: [] }),
-  useGlobalSkills: () => ({ globalSkills: [] }),
-}))
-vi.mock('@/composables/features/sidebar/useSidebar', () => ({
-  useSidebar: () => ({ forkSessionAsk: vi.fn(), forkSession: vi.fn() }),
-}))
-vi.mock('@/stores/session', () => ({
-  useSessionStore: () => ({ active: undefined, list: [], applySnapshot: vi.fn() }),
-}))
+// mock 装配同 fork 族：①纯派生用例直调不依赖 mount；②R2-A6 用例 mount 真实 Composer 驱动草稿恢复
+vi.mock('@/composables/features/chat/useChat', () => composerChatModule())
+vi.mock('@/composables/features/new-task/useNewTaskFlow', () => composerFlowModule())
+vi.mock('@/api', () => composerApiModule())
+vi.mock('@/composables/features/settings/useProjectSkills', () => composerProjectSkillsModule())
+vi.mock('@/composables/features/sidebar/useSidebar', () => composerSidebarForkModule())
+vi.mock('@/stores/session', () => composerSessionStoreModule())
 
 type ChatStore = ReturnType<typeof useChatStore>
 

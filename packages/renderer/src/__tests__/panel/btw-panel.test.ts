@@ -18,6 +18,8 @@
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/panel/btw-panel.test.ts
  */
+// helper import 必须先于项目内模块（@/api mock factory 在模块图加载期执行，TDZ 约束同 composer-mount 各消费文件）
+import { composerApiModuleActualWithBtw, composerBtwApiMock } from '../helpers/composer-mount'
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises, enableAutoUnmount } from '@vue/test-utils'
 import { defineComponent, h, ref, nextTick } from 'vue'
@@ -36,15 +38,9 @@ import type { ServerMessageMap } from '@taiji/shared'
 type BtwForkState = ServerMessageMap['btw.create']['forkState']
 
 // ── @/api 门面局部 mock：只替换 btw 域（三元消费面 = 本面板唯一数据入口）──
-const apiMock = vi.hoisted(() => ({
-  list: vi.fn(),
-  create: vi.fn(),
-  remove: vi.fn(),
-}))
-vi.mock('@/api', async (importActual) => {
-  const actual = await importActual<typeof import('@/api')>()
-  return { ...actual, btw: apiMock }
-})
+vi.mock('@/api', (importActual) => composerApiModuleActualWithBtw(importActual))
+// 断言锚点：btw 域 spy 单例（helper 持有，播种/断言经别名）
+const apiMock = composerBtwApiMock
 
 // ── MessageStream / Composer 占位 stub（attrs 全透传 → DOM 属性断言装配面）──
 vi.mock('@/components/panel/MessageStream.vue', async () => {

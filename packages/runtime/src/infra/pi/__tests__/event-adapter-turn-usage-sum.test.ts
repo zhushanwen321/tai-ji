@@ -19,6 +19,7 @@
  *
  * 运行：cd packages/runtime && npx vitest run src/infra/pi/__tests__/event-adapter-turn-usage-sum.test.ts
  */
+import { expectCompleteMessage } from './event-adapter-test-helpers'
 import { describe, it, expect } from 'vitest'
 import { translate } from '../event-adapter.js'
 import type { PiAgentEndEvent } from '../pi-protocol.js'
@@ -38,11 +39,7 @@ function agentEnd(messages: unknown[], willRetry = false): PiAgentEndEvent {
 }
 
 function completePayloadOf(translated: ReturnType<typeof translate>): Record<string, unknown> {
-  const turnEnd = translated.find((e) => e.kind === 'turn-end')
-  expect(turnEnd).toBeDefined()
-  const message = (turnEnd as { message: { type: string; payload: Record<string, unknown> } }).message
-  expect(message.type).toBe('message.complete')
-  return message.payload
+  return expectCompleteMessage(translated).payload
 }
 
 describe('[turn-badge-tokens] agent_end payload.usage turn 级累计', () => {

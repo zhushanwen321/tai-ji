@@ -156,6 +156,16 @@ function makeDeps(input: FakeDepsInput = {}): ZcodeProviderSyncDeps {
   }
 }
 
+/** stepfun 标准输入单源（providers/credentials/baseUrls 三件套；差异键经 over 追加）。 */
+function stepfunDeps(over: Parameters<typeof makeDeps>[0] = {}) {
+  return makeDeps({
+    providers: { 'stepfun': stdProvider() },
+    credentials: { 'stepfun': stdCredential() },
+    baseUrls: { 'stepfun': 'https://api.stepfun.com/v1' },
+    ...over,
+  })
+}
+
 function existsFixtureCatalog(): boolean {
   try {
     statSync(join(root, 'zcode-builtin.json'))
@@ -225,6 +235,8 @@ afterEach(() => {
 // ── 映射纯函数：六条判定逐条 ───────────────────────────────────────────────
 
 describe('mapPiProvidersToZcodeRules：D2 六条判定', () => {
+
+
   it('判定①：resolver 两源均无凭据 → 跳过并登记 no-credential', () => {
     const result = mapPiProvidersToZcodeRules(mappingInput({
       providers: { 'p1': { api: 'openai-completions', baseUrl: 'https://x', models: [{ id: 'm1' }] } },
@@ -581,11 +593,7 @@ describe('syncZcodeProviders：编排与瘦副本形态', () => {
 
   it('幂等：同输入二次同步跳写（mtime 不变）', async () => {
     writeBuiltinCatalog()
-    const deps = makeDeps({
-      providers: { 'stepfun': stdProvider() },
-      credentials: { 'stepfun': stdCredential() },
-      baseUrls: { 'stepfun': 'https://api.stepfun.com/v1' },
-    })
+    const deps = stepfunDeps()
     await syncZcodeProviders(deps)
     const firstMtime = statSync(paths.syncedCopyPath).mtimeMs
     await new Promise(resolve => setTimeout(resolve, 10))
@@ -631,11 +639,7 @@ describe('syncZcodeProviders：编排与瘦副本形态', () => {
 
   it('失败分支③：真实 provider_config.json ENOENT = 真实条目空集（非失败）→ 照常落仅含 pi 映射的副本', async () => {
     writeBuiltinCatalog()
-    const outcome = await syncZcodeProviders(makeDeps({
-      providers: { 'stepfun': stdProvider() },
-      credentials: { 'stepfun': stdCredential() },
-      baseUrls: { 'stepfun': 'https://api.stepfun.com/v1' },
-    }))
+    const outcome = await syncZcodeProviders(stepfunDeps())
     expect(outcome.status).toBe('written')
     expect(outcome.ruleCount).toBe(1)
   })
@@ -645,22 +649,14 @@ describe('syncZcodeProviders：编排与瘦副本形态', () => {
     writeFileSync(paths.syncedCopyPath, 'previous-copy')
     writeFileSync(paths.v2ConfigPath, '{corrupt json')
 
-    const outcome = await syncZcodeProviders(makeDeps({
-      providers: { 'stepfun': stdProvider() },
-      credentials: { 'stepfun': stdCredential() },
-      baseUrls: { 'stepfun': 'https://api.stepfun.com/v1' },
-    }))
+    const outcome = await syncZcodeProviders(stepfunDeps())
     expect(outcome.status).toBe('aborted')
     expect(readFileSync(paths.syncedCopyPath, 'utf-8')).toBe('previous-copy')
   })
 
   it('失败分支④：cli config.json 损坏 → 中止（让位判定缺源 = 视图分叉风险，宁中止保留旧副本）', async () => {
     writeFileSync(paths.cliConfigPath, 'not-json')
-    const outcome = await syncZcodeProviders(makeDeps({
-      providers: { 'stepfun': stdProvider() },
-      credentials: { 'stepfun': stdCredential() },
-      baseUrls: { 'stepfun': 'https://api.stepfun.com/v1' },
-    }))
+    const outcome = await syncZcodeProviders(stepfunDeps())
     expect(outcome.status).toBe('aborted')
   })
 
@@ -668,11 +664,7 @@ describe('syncZcodeProviders：编排与瘦副本形态', () => {
     // v2ConfigPath 不写盘（ENOENT = absent 态）——该形态下 wrapper fs 拦截整体不安装，
     // 同步模块必须出声提示此前置，防 N1/P-cli-eat 失败无信号可归因
     writeBuiltinCatalog()
-    const outcome = await syncZcodeProviders(makeDeps({
-      providers: { 'stepfun': stdProvider() },
-      credentials: { 'stepfun': stdCredential() },
-      baseUrls: { 'stepfun': 'https://api.stepfun.com/v1' },
-    }))
+    const outcome = await syncZcodeProviders(stepfunDeps())
     expect(outcome.status).toBe('written')
     expect(outcome.ruleCount).toBe(1)
     expect(warnings.some(w => w.includes('v2 config.json 缺失'))).toBe(true)
@@ -681,11 +673,8 @@ describe('syncZcodeProviders：编排与瘦副本形态', () => {
   })
 
   it('zcode-builtin.json 定位不到 → 关联条目不生成 + warn，普通条目同步不受影响', async () => {
-    const outcome = await syncZcodeProviders(makeDeps({
-      providers: { 'stepfun': stdProvider() },
-      credentials: { 'stepfun': stdCredential() },
+    const outcome = await syncZcodeProviders(stepfunDeps({
       configuredIds: ['zai-coding-cn'], // pi 侧已配（前置②成立），但目录定位不到
-      baseUrls: { 'stepfun': 'https://api.stepfun.com/v1' },
     }))
     expect(outcome.status).toBe('written')
     expect(outcome.ruleCount).toBe(1) // 仅 stepfun，无 zai 关联

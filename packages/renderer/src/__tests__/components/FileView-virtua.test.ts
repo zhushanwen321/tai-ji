@@ -140,6 +140,17 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
+
+/** big/ 万行目录 mount + 展开单源（loaded 置位 → addExpanded → flush virtua）。 */
+async function mountExpandedBigTree() {
+  const wrapper = await mountView(buildBigTree())
+  const store = useFileTreeStore()
+  store.setNodeState('s1', 'big', { status: 'loaded' })
+  store.addExpanded('s1', 'big')
+  await flushVirtua()
+  return { wrapper, store }
+}
+
 describe('FileView 真实 virtua 虚拟滚动（P-D7-1：万级可见行 DOM 行数远小于总行数）', () => {
   it('展开 10000 文件目录 → DOM 只挂载视口 ± 缓冲的行（< 200），远小于 10001 总行', async () => {
     const wrapper = await mountView(buildBigTree())
@@ -165,11 +176,7 @@ describe('FileView 真实 virtua 虚拟滚动（P-D7-1：万级可见行 DOM 行
   })
 
   it('scrollRef 显式绑定生效：滚动 reka viewport → 窗口跟随移动（绑定错误时窗口不动，全量渲染形态）', async () => {
-    const wrapper = await mountView(buildBigTree())
-    const store = useFileTreeStore()
-    store.setNodeState('s1', 'big', { status: 'loaded' })
-    store.addExpanded('s1', 'big')
-    await flushVirtua()
+    const { wrapper, store } = await mountExpandedBigTree()
 
     // 绑定正确时 virtua 监听 reka viewport：滚动驱动窗口移动；曾因 parentElement 探测
     // 被 reka 内部 wrapper 隔断而监听落空——虚拟化静默失效（全量渲染）
@@ -188,11 +195,7 @@ describe('FileView 真实 virtua 虚拟滚动（P-D7-1：万级可见行 DOM 行
   })
 
   it('大数据量投影 + 虚拟滚动下过滤仍工作（命中后投影重算，DOM 行随投影收缩）', async () => {
-    const wrapper = await mountView(buildBigTree())
-    const store = useFileTreeStore()
-    store.setNodeState('s1', 'big', { status: 'loaded' })
-    store.addExpanded('s1', 'big')
-    await flushVirtua()
+    const { wrapper, store } = await mountExpandedBigTree()
 
     // 无匹配过滤 → 空态（投影 [] → file-empty）
     store.setFilter('zzz_no_match')
@@ -204,11 +207,7 @@ describe('FileView 真实 virtua 虚拟滚动（P-D7-1：万级可见行 DOM 行
   })
 
   it('折叠后投影收缩（可见行 10001 → 1），DOM 行数跟随', async () => {
-    const wrapper = await mountView(buildBigTree())
-    const store = useFileTreeStore()
-    store.setNodeState('s1', 'big', { status: 'loaded' })
-    store.addExpanded('s1', 'big')
-    await flushVirtua()
+    const { wrapper, store } = await mountExpandedBigTree()
     expect(wrapper.findAll('[data-testid^="file-tree-file-"]').length).toBeGreaterThan(0)
 
     store.removeExpanded('s1', 'big')

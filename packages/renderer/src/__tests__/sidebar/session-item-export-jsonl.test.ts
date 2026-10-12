@@ -72,14 +72,21 @@ afterEach(() => {
   document.body.innerHTML = ''
 })
 
+
+/** 断言「导出 JSONL」菜单项渲染 + 文案单源（返回该 item 供可用态差异断言）。 */
+function expectExportItemRendered(): HTMLElement | null {
+  const item = findExportItem()
+  expect(item).not.toBeNull()
+  expect(item!.textContent).toContain('导出 JSONL')
+  return item
+}
+
 describe('导出 JSONL 菜单项渲染（SessionItem）', () => {
   it('右键 session → 「导出 JSONL」菜单项出现且可用（使用者黑盒）', async () => {
     const wrapper = mountItem()
     await openContextMenu(wrapper)
 
-    const item = findExportItem()
-    expect(item).not.toBeNull()
-    expect(item!.textContent).toContain('导出 JSONL')
+    const item = expectExportItemRendered()
     expect(item!.hasAttribute('data-disabled')).toBe(false)
     expect(item!.getAttribute('title')).toBeNull()
   })
@@ -88,9 +95,7 @@ describe('导出 JSONL 菜单项渲染（SessionItem）', () => {
     const wrapper = mountItem({ sessionFile: undefined })
     await openContextMenu(wrapper)
 
-    const item = findExportItem()
-    expect(item).not.toBeNull()
-    expect(item!.textContent).toContain('导出 JSONL')
+    const item = expectExportItemRendered()
     expect(item!.hasAttribute('data-disabled')).toBe(true)
     expect(item!.getAttribute('title')).toContain('会话尚未产生记录文件')
   })

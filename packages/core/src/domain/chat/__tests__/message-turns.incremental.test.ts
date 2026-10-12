@@ -107,6 +107,26 @@ function mixedFixture(): Message[] {
   ]
 }
 
+
+/** bash 落位 static 外部行断言单源（items[1] = b1 systemNotice；尾 user turn 归属断言，返回尾 turn）。 */
+function expectBashAsStaticNotice(items: ReturnType<typeof toRenderItems>, tailUserId: string) {
+  expect(items).toHaveLength(3)
+  expect(items[1]).toEqual({ kind: 'systemNotice', message: expect.objectContaining({ id: 'b1' }) })
+  const t2 = turnOf(items[2])
+  expect(t2.user?.id).toBe(tailUserId)
+  return t2
+}
+
+/** bash + 隐藏通知共存的典型输入前缀（u1→a1→b1(done)→n1，尾随消息由调用方追加）。 */
+function bashThenNotifyPrefix() {
+  return [
+    makeMsg({ id: 'u1', role: 'user', content: 'q1' }),
+    makeMsg({ id: 'a1', role: 'assistant', content: 'r1' }),
+    bgBashDoneMsg('b1'),
+    notifyMsg('n1', 'subagent-bg-notify'),
+  ]
+}
+
 describe('toRenderItemsIncremental —— 退化路径与等价性', () => {
   it('cache=undefined 退化为全量版：输出与 toRenderItems deepEqual（forceWorking 双态）', () => {
     for (const fw of [false, true]) {
@@ -1329,10 +1349,7 @@ describe('groupRenderInput 分组规则 v2 —— 规则 5 收纳分支（specs/
       bgBashDoneMsg('b1'),
       makeMsg({ id: 'u2', role: 'user', content: 'q2' }),
     ])
-    expect(items).toHaveLength(3)
-    expect(items[1]).toEqual({ kind: 'systemNotice', message: expect.objectContaining({ id: 'b1' }) })
-    const t2 = turnOf(items[2])
-    expect(t2.user?.id).toBe('u2')
+    const t2 = expectBashAsStaticNotice(items, 'u2')
     expect(t2.foldedNotices).toBeUndefined()
   })
 
@@ -1346,13 +1363,7 @@ describe('groupRenderInput 分组规则 v2 —— 规则 5 收纳分支（specs/
   })
 
   it('bash → 隐藏通知 → assistant：同一 trigger turn 收纳两类，foldedNotices 保持到达序', () => {
-    const items = toRenderItems([
-      makeMsg({ id: 'u1', role: 'user', content: 'q1' }),
-      makeMsg({ id: 'a1', role: 'assistant', content: 'r1' }),
-      bgBashDoneMsg('b1'),
-      notifyMsg('n1', 'subagent-bg-notify'),
-      makeMsg({ id: 'a2', role: 'assistant', content: '续跑' }),
-    ])
+    const items = toRenderItems([...bashThenNotifyPrefix(), makeMsg({ id: 'a2', role: 'assistant', content: '续跑' })])
     expect(items).toHaveLength(2)
     const t2 = turnOf(items[1])
     expect(t2.trigger).toBe('bg-notify')
@@ -1377,17 +1388,11 @@ describe('groupRenderInput 分组规则 v2 —— 规则 5 收纳分支（specs/
 
   it('未填实 trigger turn 携带 bash 附着被折叠时：bash 落位 static 外部行（隐藏本体保持不渲染）', () => {
     const items = toRenderItems([
-      makeMsg({ id: 'u1', role: 'user', content: 'q1' }),
-      makeMsg({ id: 'a1', role: 'assistant', content: 'r1' }),
-      bgBashDoneMsg('b1'),
-      notifyMsg('n1', 'subagent-bg-notify'),
+      ...bashThenNotifyPrefix(),
       // 无 assistant 填实 → trigger turn 折叠，bash 行不能静默消失
       makeMsg({ id: 'u2', role: 'user', content: 'q2' }),
     ])
-    expect(items).toHaveLength(3)
-    expect(items[1]).toEqual({ kind: 'systemNotice', message: expect.objectContaining({ id: 'b1' }) })
-    const t2 = turnOf(items[2])
-    expect(t2.user?.id).toBe('u2')
+    expectBashAsStaticNotice(items, 'u2')
   })
 
   it('增量路径等价：bash 折叠场景 toRenderItemsIncremental ≡ toRenderItems', () => {

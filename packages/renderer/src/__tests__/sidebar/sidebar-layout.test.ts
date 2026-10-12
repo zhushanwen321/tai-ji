@@ -10,6 +10,7 @@
  * 测试框架：vitest（从 vitest 导入 describe/it/expect/vi）。
  * 运行：cd packages/renderer && npx vitest run src/__tests__/sidebar/sidebar-layout.test.ts
  */
+import { expectTextOnlyTabs } from '../helpers/sidebar-mount'
 import { describe, it, expect, beforeEach } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
@@ -74,11 +75,7 @@ describe('D5: SegmentedTab 文字 tab 形态', () => {
     // 文字 tab：三按钮只含 label 文字，无 icon svg、无 count 数字
     const buttons = wrapper.findAll('button')
     expect(buttons).toHaveLength(3)
-    for (const btn of buttons) {
-      expect(btn.find('svg').exists()).toBe(false)
-    }
-    expect(buttons[0].text()).not.toContain('3')
-    expect(buttons[1].text()).not.toContain('10')
+    expectTextOnlyTabs(buttons, ['3', '10'])
   })
 })
 

@@ -194,6 +194,13 @@ afterEach(() => {
 // chat 域（run-orchestration.resolveIdentityForRoute）
 // ============================================================
 
+
+/** 等待首个 run 落地并断言 create 帧 model（引擎默认值三层解析的判别面）。 */
+async function waitForFirstRunModel<R extends { task: { model?: string } }>(runs: R[], model: string) {
+  await vi.waitFor(() => expect(runs.length).toBe(1));
+  expect(runs[0]!.task.model).toBe(model);
+}
+
 describe("D6 四层优先级：chat 域（run-orchestration）", () => {
   it("形态 1：task 显式 model 赢过 frontmatter 与偏好（三层全配，留痕同形）", async () => {
     const { service, nonPi, store } = makeHarness({
@@ -207,9 +214,9 @@ describe("D6 四层优先级：chat 域（run-orchestration）", () => {
       model: "prov/task-model",
       agent: agentPath,
     });
-    await vi.waitFor(() => expect(nonPi.runs.length).toBe(1));
+    await waitForFirstRunModel(nonPi.runs, "prov/task-model");
     // 第一层赢：create 帧 model = task 显式值
-    expect(nonPi.runs[0]!.task.model).toBe("prov/task-model");
+
     // 留痕同形：偏好补缺与显式指定共用同一 record.opts.model 盖章通道
     expect(store.getMutable(handle.subagentId)?.model).toBe("prov/task-model");
     nonPi.runs[0]!.settle();
@@ -226,8 +233,7 @@ describe("D6 四层优先级：chat 域（run-orchestration）", () => {
       engine: NON_PI_ENGINE_ID,
       agent: agentPath,
     });
-    await vi.waitFor(() => expect(nonPi.runs.length).toBe(1));
-    expect(nonPi.runs[0]!.task.model).toBe("prov/front-model");
+    await waitForFirstRunModel(nonPi.runs, "prov/front-model");
     nonPi.runs[0]!.settle();
   });
 
@@ -240,8 +246,7 @@ describe("D6 四层优先级：chat 域（run-orchestration）", () => {
       slug: "d6-form3",
       engine: NON_PI_ENGINE_ID,
     });
-    await vi.waitFor(() => expect(nonPi.runs.length).toBe(1));
-    expect(nonPi.runs[0]!.task.model).toBe("prov/pref-model");
+    await waitForFirstRunModel(nonPi.runs, "prov/pref-model");
     // D6 留痕口径：record 消费方只关心「用了哪个模型」，不区分「谁决定的」
     expect(store.getMutable(handle.subagentId)?.model).toBe("prov/pref-model");
     nonPi.runs[0]!.settle();
@@ -307,8 +312,7 @@ describe("D6 四层优先级：workflow 域（workflow-dispatch）同层序", ()
       baseOpts({ model: "prov/task-model", agent: agentPath }),
       "run-d6-wf-1",
     );
-    await vi.waitFor(() => expect(nonPi.runs.length).toBe(1));
-    expect(nonPi.runs[0]!.task.model).toBe("prov/task-model");
+    await waitForFirstRunModel(nonPi.runs, "prov/task-model");
     nonPi.runs[0]!.settle();
     await pending;
   });
@@ -319,8 +323,7 @@ describe("D6 四层优先级：workflow 域（workflow-dispatch）同层序", ()
     });
     const agentPath = writeFrontmatterAgent(openHarnesses[0]!.tmpRoot, "d6-wf-agent", "prov/front-model");
     const pending = service.executeWorkflowAgent(baseOpts({ agent: agentPath }), "run-d6-wf-2");
-    await vi.waitFor(() => expect(nonPi.runs.length).toBe(1));
-    expect(nonPi.runs[0]!.task.model).toBe("prov/front-model");
+    await waitForFirstRunModel(nonPi.runs, "prov/front-model");
     nonPi.runs[0]!.settle();
     await pending;
   });
@@ -330,8 +333,7 @@ describe("D6 四层优先级：workflow 域（workflow-dispatch）同层序", ()
       [NON_PI_ENGINE_ID]: "prov/pref-model",
     });
     const pending = service.executeWorkflowAgent(baseOpts(), "run-d6-wf-3");
-    await vi.waitFor(() => expect(nonPi.runs.length).toBe(1));
-    expect(nonPi.runs[0]!.task.model).toBe("prov/pref-model");
+    await waitForFirstRunModel(nonPi.runs, "prov/pref-model");
     // record 创建先于引擎 run——running 窗口内可观测留痕盖章
     const running = store.listRunningMutable();
     expect(running).toHaveLength(1);
@@ -355,9 +357,9 @@ describe("D6 四层优先级：workflow 域（workflow-dispatch）同层序", ()
       { prompt: "d6 wf pi", description: "d6-wf-pi" },
       "run-d6-wf-5",
     );
-    await vi.waitFor(() => expect(fakePi.runs.length).toBe(1));
+    await waitForFirstRunModel(fakePi.runs, PI_CTX_MODEL_REF);
     // pi 链三层解析落 ctxModel（p/m）；误插偏好层则会出现 prov/pi-pref
-    expect(fakePi.runs[0]!.task.model).toBe(PI_CTX_MODEL_REF);
+
     fakePi.runs[0]!.settle({ content: "pi wf done" });
     await pending;
   });

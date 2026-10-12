@@ -685,17 +685,24 @@ function codingPlanEntryOfRule(
 }
 
 /** 目录 coding-plan 条目提取：access.accountType 匹配家族且 mode=individual-coding-plan。 */
+
+/** v2 config JSON → providerRules 数组（缺键/形变 → undefined）。 */
+function providerRulesOf(value: Record<string, unknown>): readonly unknown[] | undefined {
+  const config = value['config']
+  const rules = isRecord(config) && isRecord(config['providerConfigRules'])
+    ? config['providerConfigRules']['providerRules']
+    : undefined
+  return Array.isArray(rules) ? rules : undefined
+}
+
 export function readCodingPlanCatalogEntry(
   catalogPath: string,
   family: 'bigmodel' | 'zai',
 ): ZaiCodingPlanCatalogEntry | undefined {
   const outcome = readJsonFile(catalogPath)
   if (outcome.state !== 'ok' || !isRecord(outcome.value)) return undefined
-  const config = outcome.value['config']
-  const rules = isRecord(config) && isRecord(config['providerConfigRules'])
-    ? config['providerConfigRules']['providerRules']
-    : undefined
-  if (!Array.isArray(rules)) return undefined
+  const rules = providerRulesOf(outcome.value)
+  if (!rules) return undefined
   for (const rule of rules) {
     const entry = codingPlanEntryOfRule(rule, family)
     if (entry !== undefined) return entry
@@ -968,11 +975,8 @@ function toModelListEntry(rule: unknown): ModelListEntry | undefined {
 function readPersonalRules(absPath: string): ModelListEntry[] {
   const outcome = readJsonFile(absPath)
   if (outcome.state !== 'ok' || !isRecord(outcome.value)) return []
-  const config = outcome.value['config']
-  const rules = isRecord(config) && isRecord(config['providerConfigRules'])
-    ? config['providerConfigRules']['providerRules']
-    : undefined
-  if (!Array.isArray(rules)) return []
+  const rules = providerRulesOf(outcome.value)
+  if (!rules) return []
   const entries: ModelListEntry[] = []
   for (const rule of rules) {
     const entry = toModelListEntry(rule)

@@ -54,6 +54,16 @@ function setup(initialHtml = '', overrides: Partial<ContenteditableCallbacks> = 
   return { el, elRef, callbacks, ...api, cleanup: () => document.body.removeChild(el) }
 }
 
+
+/** 输入链三回调零触发断言单源（onInput/onSlashTrigger/onFileTrigger——组词与空态守卫的共同判别面）。 */
+function expectCoreInputCallbacksIdle(c: {
+  callbacks: Record<'onInput' | 'onSlashTrigger' | 'onFileTrigger', { not: { toHaveBeenCalled: () => void } }>
+}) {
+  expect(c.callbacks.onInput).not.toHaveBeenCalled()
+  expect(c.callbacks.onSlashTrigger).not.toHaveBeenCalled()
+  expect(c.callbacks.onFileTrigger).not.toHaveBeenCalled()
+}
+
 describe('useContenteditableInput onInput 触发检测', () => {
   let cleanup: () => void
   beforeEach(() => {
@@ -738,9 +748,7 @@ describe('useContenteditableInput onInput IME 组词守卫（组词中不序列�
     c.composing.value = true
     c.onInput()
 
-    expect(c.callbacks.onInput).not.toHaveBeenCalled()
-    expect(c.callbacks.onSlashTrigger).not.toHaveBeenCalled()
-    expect(c.callbacks.onFileTrigger).not.toHaveBeenCalled()
+    expectCoreInputCallbacksIdle(c)
     expect(c.callbacks.onDollarFileTrigger).not.toHaveBeenCalled()
     expect(c.callbacks.onSubagentTrigger).not.toHaveBeenCalled()
     expect(c.callbacks.onSkillTrigger).not.toHaveBeenCalled()
@@ -761,9 +769,7 @@ describe('useContenteditableInput onInput IME 组词守卫（组词中不序列�
     c.onInput()
     // isEmpty 跟随（placeholder 不与组词假文本瞬态重叠）；序列化与触发检测仍被守卫拦下
     expect(c.isEmpty.value).toBe(false)
-    expect(c.callbacks.onInput).not.toHaveBeenCalled()
-    expect(c.callbacks.onSlashTrigger).not.toHaveBeenCalled()
-    expect(c.callbacks.onFileTrigger).not.toHaveBeenCalled()
+    expectCoreInputCallbacksIdle(c)
     cleanup = c.cleanup
   })
 

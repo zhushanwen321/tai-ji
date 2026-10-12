@@ -18,6 +18,15 @@ import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
 import ContextChipsBar from '@/components/panel/ContextChipsBar.vue'
 
+
+/** chip 中性档断言单源（demo .ctxchip 无语义色分叉：text-neutral-mid 在、text-reasoning 不在）。 */
+function expectChipNeutral(wrapper: { findAll: (s: string) => { text: () => string; classes: () => string[] }[] }, name: string) {
+  const chip = wrapper.findAll('span').find((s) => s.text().includes(name))
+  expect(chip).toBeTruthy()
+  expect(chip!.classes()).toContain('text-neutral-mid')
+  expect(chip!.classes()).not.toContain('text-reasoning')
+}
+
 describe('ContextChipsBar (W4 props/emit)', () => {
   it('空 items → 整行 v-if 自隐藏，不渲染外层容器', () => {
     const wrapper = mount(ContextChipsBar, { props: { items: [] } })
@@ -36,10 +45,7 @@ describe('ContextChipsBar (W4 props/emit)', () => {
     // chip-label 显 name
     expect(wrapper.text()).toContain('a.png')
     // 统一中性档（demo .ctxchip 无语义色分叉）：紫色分叉已退役，image 同 --mid 中性
-    const chip = wrapper.findAll('span').find((s) => s.text().includes('a.png'))
-    expect(chip).toBeTruthy()
-    expect(chip!.classes()).toContain('text-neutral-mid')
-    expect(chip!.classes()).not.toContain('text-reasoning')
+    expectChipNeutral(wrapper, 'a.png')
   })
 
   it('TC8: 点 × 按钮 → emit remove 带 id（=path）', async () => {
@@ -63,10 +69,7 @@ describe('ContextChipsBar (W4 props/emit)', () => {
         items: [{ id: 'foo.ts', name: 'foo.ts', type: '#' }],
       },
     })
-    const chip = wrapper.findAll('span').find((s) => s.text().includes('foo.ts'))
-    expect(chip).toBeTruthy()
-    expect(chip!.classes()).toContain('text-neutral-mid')
-    expect(chip!.classes()).not.toContain('text-reasoning')
+    expectChipNeutral(wrapper, 'foo.ts')
   })
 
   it('窄宽容错：chip 宽随容器收缩（max-w 用 min() 而非固定 200px），不写死上限', () => {

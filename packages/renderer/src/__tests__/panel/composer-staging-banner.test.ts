@@ -11,68 +11,37 @@
  * mock 骨架同 composer-fork-mode.test.ts 范式（helpers/composer-mount.ts 单源）。
  * 运行：cd packages/renderer && npx vitest run src/__tests__/panel/composer-staging-banner.test.ts
  */
+// helper import 必须先于一切项目内模块（@/stores 等会在模块图加载期触发 @/api mock
+// factory，factory 引用的 helper 绑定彼时必须已初始化，否则 TDZ——vi.mock hoisting 约束）
+import {
+  composerApiModule,
+  composerChatModule,
+  composerChildStubs,
+  composerFlowModule,
+  composerProjectSkillsModule,
+  composerSessionStoreModule,
+  composerSidebarForkModule,
+  enterForkMode,
+  expectBannerVisible,
+  makeKeyboardComposerInputMock,
+  resetComposerMountState,
+} from '../helpers/composer-mount'
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
-import { defineComponent, ref } from 'vue'
-import { createPinia, setActivePinia } from 'pinia'
-import { textToSegments } from '@taiji/shared'
-import { ArrowRightLeft, GitBranch } from '@lucide/vue'
 import { triggerEnterForkMode } from '@/composables/panel/useForkModeChannel'
 import { triggerEnterHandoffMode } from '@/composables/panel/useHandoffModeChannel'
-import { composerChatModule, composerChildStubs } from '../helpers/composer-mount'
 
+// mock 装配同 fork 族：banner 组件级断言走真实信号链驱动（triggerEnter*）
 vi.mock('@/composables/features/chat/useChat', () => composerChatModule())
 
-vi.mock('@/composables/features/new-task/useNewTaskFlow', () => ({
-  useNewTaskFlow: () => ({ submitFirstMessage: vi.fn(), currentModel: { value: null }, setPendingModel: vi.fn(), currentCwd: ref(null) }),
-  resetNewTaskFlow: vi.fn(),
-}))
-vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
-  model: { switchModel: vi.fn() },
-  session: { setThinkingLevel: vi.fn(async (sessionId: string, level: string) => ({ sessionId, level })) },
-  composer: { getMentionCandidates: vi.fn().mockResolvedValue([]), getFileCandidates: vi.fn().mockResolvedValue([]) },
-}))
-vi.mock('@/composables/features/settings/useProjectSkills', () => ({
-  useProjectSkills: () => ({ projectSkills: [] }),
-  useGlobalSkills: () => ({ globalSkills: [] }),
-}))
-vi.mock('@/stores/session', () => ({
-  useSessionStore: () => ({ active: undefined, list: [], applySnapshot: vi.fn() }),
-}))
-vi.mock('@/composables/features/sidebar/useSidebar', () => ({
-  useSidebar: () => ({ forkSessionAsk: vi.fn(() => Promise.resolve()), forkSession: vi.fn() }),
-}))
+vi.mock('@/composables/features/new-task/useNewTaskFlow', () => composerFlowModule())
+vi.mock('@/api', () => composerApiModule())
+vi.mock('@/composables/features/settings/useProjectSkills', () => composerProjectSkillsModule())
+vi.mock('@/stores/session', () => composerSessionStoreModule())
+vi.mock('@/composables/features/sidebar/useSidebar', () => composerSidebarForkModule())
 
-// ── ComposerInput mock：defineExpose + emit（同 composer-fork-mode 范式）──
-const lastInputText = ref('')
-const ComposerInputMock = defineComponent({
-  name: 'ComposerInput',
-  props: {
-    placeholder: { type: String, default: '' },
-    disabled: { type: Boolean, default: false },
-  },
-  emits: {
-    input: (val: string) => {
-      lastInputText.value = val
-      return true
-    },
-    keydown: null,
-    'slash-trigger': null,
-    'file-trigger': null,
-  },
-  setup(_, { expose }) {
-    expose({
-      clear: vi.fn(),
-      setText: vi.fn(),
-      insertSlashChip: vi.fn(),
-      getSegments: () => textToSegments(lastInputText.value),
-      getText: () => lastInputText.value,
-      moveCaretVertical: () => 'edge',
-    })
-    return {}
-  },
-  template: '<div data-testid="composer-input" />',
-})
+// ── ComposerInput mock：helper 键盘交互变体单源（props/expose 面同手写版）──
+const { lastInputText, ComposerInputMock } = makeKeyboardComposerInputMock()
 
 const mountStubs = {
   ComposerInput: ComposerInputMock,
@@ -82,9 +51,7 @@ const mountStubs = {
 import Composer from '@/components/panel/Composer.vue'
 
 beforeEach(() => {
-  setActivePinia(createPinia())
-  vi.clearAllMocks()
-  lastInputText.value = ''
+  resetComposerMountState(lastInputText)
 })
 
 function mountComposer(props: { sessionId: string | null }) {
@@ -95,14 +62,13 @@ function mountComposer(props: { sessionId: string | null }) {
 describe('banner 条件渲染（驱动位 staging.activeStaging）', () => {
   it('无 staging（activeStaging null）→ banner 不渲染', () => {
     const wrapper = mountComposer({ sessionId: 's1' })
-    expect(wrapper.find('[data-testid="composer-mode-banner"]').exists()).toBe(false)
+    expectBannerVisible(wrapper, false)
     expect(wrapper.find('[data-testid="composer-handoff-banner"]').exists()).toBe(false)
   })
 
   it('fork 态 → 渲染 fork 标题 + GitBranch 图标 + × 退出钮，box 无 fork-mode 染色', async () => {
     const wrapper = mountComposer({ sessionId: 's1' })
-    triggerEnterForkMode('s1', 'm1')
-    await wrapper.vm.$nextTick()
+    await enterForkMode(wrapper, 's1')
 
     const banner = wrapper.find('[data-testid="composer-mode-banner"]')
     expect(banner.exists()).toBe(true)
@@ -123,14 +89,13 @@ describe('banner 条件渲染（驱动位 staging.activeStaging）', () => {
 describe('banner × click 触发 staging.exit', () => {
   it('fork 态点 × → banner 消失（模式退出）', async () => {
     const wrapper = mountComposer({ sessionId: 's1' })
-    triggerEnterForkMode('s1', 'm1')
-    await wrapper.vm.$nextTick()
-    expect(wrapper.find('[data-testid="composer-mode-banner"]').exists()).toBe(true)
+    await enterForkMode(wrapper, 's1')
+    expectBannerVisible(wrapper, true)
 
     await wrapper.find('[data-testid="composer-mode-banner"] button').trigger('click')
     await wrapper.vm.$nextTick()
 
-    expect(wrapper.find('[data-testid="composer-mode-banner"]').exists()).toBe(false)
+    expectBannerVisible(wrapper, false)
   })
 })
 
@@ -143,7 +108,7 @@ describe('handoff 态 banner（图标 ArrowRightLeft + handoff 文案）', () =>
 
     const banner = wrapper.find('[data-testid="composer-handoff-banner"]')
     expect(banner.exists()).toBe(true)
-    expect(wrapper.find('[data-testid="composer-mode-banner"]').exists()).toBe(false)
+    expectBannerVisible(wrapper, false)
     // 文案 = handoff 标题 + 描述（demo 权威 zh 文案）
     expect(banner.text()).toContain('Handoff 交接')
     expect(banner.text()).toContain('发送后将生成会话摘要，交接给新会话继续')

@@ -68,6 +68,18 @@ type Pool = {
 
 let pool: Pool | null = null
 
+
+/** 级联删除执行 + 结果断言单源（零失败 + 单保护族），返回 result 供补充断言。 */
+async function runCascade(sid: string, mainFile: string, p: ReturnType<typeof makePool>) {
+  const result = await cascadeDeleteSessionContent(
+    { sessionId: sid, sessionFilePath: mainFile, agentDir: p.agentDir, sessionsRoot: p.sessionsRoot, skipIfMainFileMissing: true },
+    makeDeps().deps,
+  )
+  expect(result.failures).toEqual([])
+  expect(result.subagentFamiliesProtected).toBe(1)
+  return result
+}
+
 function makePool(): Pool {
   const root = mkdtempSync(join(tmpdir(), 'taiji-content-cascade-'))
   const agentDir = join(root, 'agent')
@@ -286,12 +298,7 @@ describe('cascadeDeleteSessionContent 引用并集两锚（验收③）', () => 
     // sessionFile 锚独立生效——现实 fork 中 id 与 sessionFile 成对引用）。
     p.addMainSession('slug-b', '2026T_b', [settledLine('sa-other', family.sessionFile)])
 
-    const result = await cascadeDeleteSessionContent(
-      { sessionId: 'main-eeee', sessionFilePath: mainFile, agentDir: p.agentDir, sessionsRoot: p.sessionsRoot, skipIfMainFileMissing: true },
-      makeDeps().deps,
-    )
-    expect(result.failures).toEqual([])
-    expect(result.subagentFamiliesProtected).toBe(1)
+    await runCascade('main-eeee', mainFile, p)
     expectPresent([family.sessionFile, family.manifest, family.events])
   })
 
@@ -304,12 +311,7 @@ describe('cascadeDeleteSessionContent 引用并集两锚（验收③）', () => 
     const mainFile = p.addMainSession('slug-a', '2026T_a', [registeredLine('sa-only')])
     p.addMainSession('slug-b', '2026T_b', [registeredLine('sa-only')])
 
-    const result = await cascadeDeleteSessionContent(
-      { sessionId: 'main-ffff', sessionFilePath: mainFile, agentDir: p.agentDir, sessionsRoot: p.sessionsRoot, skipIfMainFileMissing: true },
-      makeDeps().deps,
-    )
-    expect(result.failures).toEqual([])
-    expect(result.subagentFamiliesProtected).toBe(1)
+    await runCascade('main-ffff', mainFile, p)
     expectPresent([jsonl, manifest])
   })
 })

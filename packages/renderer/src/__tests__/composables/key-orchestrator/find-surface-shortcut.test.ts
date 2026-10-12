@@ -38,6 +38,18 @@ afterEach(() => {
   document.body.innerHTML = ''
 })
 
+
+/** 「触发查找快捷键 → 消费 + 开面 + 表面类型」断言单源（返回事件与 find 句柄供补断言）。 */
+function expectFindShortcutTriggered(init: { key: string; metaKey?: boolean; ctrlKey?: boolean; shiftKey?: boolean }, kind: string) {
+  const e = keyEvent(init.key, init)
+  window.dispatchEvent(e)
+  const find = useFindInSurface()
+  expect(e.defaultPrevented).toBe(true)
+  expect(find.isOpen.value).toBe(true)
+  expect(find.surfaceKind.value).toBe(kind)
+  return find
+}
+
 /** 可搜表面桩（OverlayShell/PanelContainer 同款属性值；归属判定读该标记） */
 function appendSurface(kind: string): void {
   const el = document.createElement('div')
@@ -57,13 +69,7 @@ describe('Ctrl+F 表面内查找（find-in-surface 接线）', () => {
     appendSurface('overlay')
     const { stop } = startOrchestrator()
 
-    const e = keyEvent('f', { metaKey: true })
-    window.dispatchEvent(e)
-
-    const find = useFindInSurface()
-    expect(e.defaultPrevented).toBe(true)
-    expect(find.isOpen.value).toBe(true)
-    expect(find.surfaceKind.value).toBe('overlay')
+    const find = expectFindShortcutTriggered({ key: 'f', metaKey: true }, 'overlay')
     expect(find.focusTick.value, 'focusTick 自增 = FindBar 聚焦意图已送达').toBe(1)
     stop()
   })
@@ -72,13 +78,7 @@ describe('Ctrl+F 表面内查找（find-in-surface 接线）', () => {
     appendSurface('bottom-drawer')
     const { stop } = startOrchestrator()
 
-    const e = keyEvent('f', { ctrlKey: true })
-    window.dispatchEvent(e)
-
-    const find = useFindInSurface()
-    expect(e.defaultPrevented).toBe(true)
-    expect(find.isOpen.value).toBe(true)
-    expect(find.surfaceKind.value).toBe('bottom-drawer')
+    expectFindShortcutTriggered({ key: 'f', ctrlKey: true }, 'bottom-drawer')
     stop()
   })
 
@@ -87,13 +87,7 @@ describe('Ctrl+F 表面内查找（find-in-surface 接线）', () => {
     appendSurface('overlay')
     const { stop } = startOrchestrator()
 
-    const e = keyEvent('F', { metaKey: true, shiftKey: true })
-    window.dispatchEvent(e)
-
-    const find = useFindInSurface()
-    expect(e.defaultPrevented).toBe(true)
-    expect(find.isOpen.value).toBe(true)
-    expect(find.surfaceKind.value).toBe('overlay')
+    expectFindShortcutTriggered({ key: 'F', metaKey: true, shiftKey: true }, 'overlay')
     stop()
   })
 
@@ -101,13 +95,7 @@ describe('Ctrl+F 表面内查找（find-in-surface 接线）', () => {
     appendSurface('overlay')
     const { stop } = startOrchestrator()
 
-    const e = keyEvent('F', { ctrlKey: true, shiftKey: true })
-    window.dispatchEvent(e)
-
-    const find = useFindInSurface()
-    expect(e.defaultPrevented).toBe(true)
-    expect(find.isOpen.value).toBe(true)
-    expect(find.surfaceKind.value).toBe('overlay')
+    expectFindShortcutTriggered({ key: 'F', ctrlKey: true, shiftKey: true }, 'overlay')
     stop()
   })
 

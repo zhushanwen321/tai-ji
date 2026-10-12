@@ -15,6 +15,7 @@
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/sidebar/session-list-project-groups.test.ts
  */
+import { flipProjectGroupToggle } from '../helpers/sidebar-mount'
 import { describe, it, expect, beforeEach } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
@@ -219,10 +220,7 @@ describe('目录模式 = 浏览态（方案 A 目录裁决：组头只开合、�
   it('组头点击只开合自己，activeProjectId 不变（与平铺模式的可感知行为差异）', async () => {
     const store = setupProjects(DEFAULT_PROJECT_ID)
     const wrapper = mountList()
-    const toggle = () => groupOf(wrapper, 'proj-a').find('[data-testid="project-group-toggle"]')
-
-    await toggle().trigger('click')
-    expect(toggle().attributes('aria-expanded')).toBe('false')
+    const toggle = await flipProjectGroupToggle((id) => groupOf(wrapper, id), 'proj-a')
     expect(store.activeProjectId).toBe(DEFAULT_PROJECT_ID) // 未切换锚定
 
     await toggle().trigger('click')

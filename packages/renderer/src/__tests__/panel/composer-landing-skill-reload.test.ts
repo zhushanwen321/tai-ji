@@ -44,6 +44,7 @@
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/panel/composer-landing-skill-reload.test.ts
  */
+import { expectLandingShellDom } from '../helpers/composer-mount'
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { defineComponent, nextTick } from 'vue'
@@ -244,10 +245,6 @@ describe('Composer.vue landing 态 skill reload 集成（PR#123 reviewer-D WARNI
   // 拉取填充 SKILL_A_B，但本用例不检查 skill 内容，不受影响）。
   it('首屏冒烟：Landing 态 Composer DOM 含 composer 输入区 + composer-box（AGENTS.md MANDATORY 渲染 gate）', async () => {
     wrapper = await mountLandingComposer()
-
-    // composer-box：Composer.vue:32 的 testid（01-chat-panel-composer spec（demo） §2（Composer）§3 文档入口 testid）
-    expect(wrapper.find('[data-testid="composer-box"]').exists()).toBe(true)
-    // composer-input：AGENTS.md 首屏冒烟模板断言项（事故复现点：曾全绿但此处 DOM 缺失）
-    expect(wrapper.find('[data-testid="composer-input"]').exists()).toBe(true)
+    expectLandingShellDom(wrapper)
   })
 })

@@ -17,14 +17,16 @@
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/composables/use-sidebar-session-actions-forcequit.test.ts
  */
+import { sidebarToastTripleMocks, sidebarToastTripleModule } from '../helpers/sidebar-mount'
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { ref } from 'vue'
 
 const forceQuitMock = vi.hoisted(() => vi.fn(() => Promise.resolve()))
-const toastErrorMock = vi.hoisted(() => vi.fn())
-const toastSuccessMock = vi.hoisted(() => vi.fn())
-const toastInfoMock = vi.hoisted(() => vi.fn())
+// toast 三键 spy 单例驻 sidebar-mount（本文件别名保留原断言名）
+const toastErrorMock = sidebarToastTripleMocks.error
+const toastSuccessMock = sidebarToastTripleMocks.success
+const toastInfoMock = sidebarToastTripleMocks.info
 
 vi.mock('@/api', () => ({
   session: { forceQuit: forceQuitMock },
@@ -41,9 +43,7 @@ vi.mock('@/composables/features/chat/useChat', () => ({
   useChat: () => ({ abort: vi.fn() }),
 }))
 
-vi.mock('@/composables/useToast', () => ({
-  useToast: () => ({ error: toastErrorMock, success: toastSuccessMock, info: toastInfoMock }),
-}))
+vi.mock('@/composables/useToast', () => sidebarToastTripleModule())
 
 import { useSidebarSessionActions } from '@/composables/features/sidebar/useSidebarSessionActions'
 import { consumeForcedExit, resetForcedExitMarks } from '@/composables/effects/forced-exit-marks'

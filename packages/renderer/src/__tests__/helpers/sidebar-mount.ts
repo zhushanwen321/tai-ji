@@ -15,7 +15,7 @@
  * 文件内是独立实例（文件内 mock 工厂与断言共享同一批 vi.fn）。
  */
 import { ref } from 'vue'
-import { vi } from 'vitest'
+import { expect, vi } from 'vitest'
 
 /** sidebar 动作 mock 集（超集：assign-project 用基础面，import-entry 走 restore/fork/handoff 扩展面）。 */
 export const sidebarActionMocks = {
@@ -167,4 +167,42 @@ export function coreTransportApiModule() {
     dispatchSession: vi.fn(),
     dispatchGlobal: vi.fn(),
   }
+}
+
+/** toast 三键 spy 单例（sidebar 会话动作文件的 error/success/info 消费面，可断言）。 */
+export const sidebarToastTripleMocks = { error: vi.fn(), success: vi.fn(), info: vi.fn() }
+
+/** '@/composables/useToast' mock 工厂（三键单例形态）。 */
+export function sidebarToastTripleModule() {
+  return { useToast: () => sidebarToastTripleMocks }
+}
+
+/** 文字 tab 形态断言单源：按钮无 icon svg、首两钮无 count 数字（demo .vtab 契约）。 */
+export function expectTextOnlyTabs(
+  buttons: Array<{ find: (s: string) => { exists: () => boolean }; text: () => string }>,
+  counts: [string, string],
+) {
+  // 无 icon（demo 文字 tab）
+  for (const btn of buttons) {
+    expect(btn.find('svg').exists()).toBe(false)
+  }
+  // 无 count 数字（count props 传入但不渲染）
+  expect(buttons[0].text()).not.toContain(counts[0])
+  expect(buttons[1].text()).not.toContain(counts[1])
+}
+
+/**
+ * 项目组折叠翻转单源：点组头 toggle 并断言展开态翻转为 false，返回 toggle 再取器
+ * 供二次翻转/锚定断言（project-filter / project-groups 两文件的组头交互共用）。
+ */
+export async function flipProjectGroupToggle(
+  findGroup: (projectId: string) => {
+    find: (sel: string) => { trigger: (e: string) => Promise<void>; attributes: (a: string) => string | undefined }
+  },
+  projectId: string,
+) {
+  const toggle = () => findGroup(projectId).find('[data-testid="project-group-toggle"]')
+  await toggle().trigger('click')
+  expect(toggle().attributes('aria-expanded')).toBe('false')
+  return toggle
 }

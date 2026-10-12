@@ -56,13 +56,19 @@ describe('SessionMessageHandler.handles（消息计数）', () => {
 
 // ── session.getMessageCount（通道 2 按需拉取）────────────────────
 
+
+/** getMessageCount 用例驱动单源：mockContext 装配 + handler 挂端口 + 单条消息调用，返回 ctx。 */
+async function handleGetMessageCount(getMessageCount: ReturnType<typeof vi.fn>) {
+  const ctx = mockContext({ getMessageCount } as unknown as ISessionService)
+  const handler = new SessionMessageHandler(ctx)
+  await handler.handleSessionMessage(msg('session.getMessageCount', { sessionId: SID }), mockWs())
+  return ctx
+}
+
 describe('SessionMessageHandler session.getMessageCount', () => {
   it('透传：调 sessionService.getMessageCount + reply 同名 { sessionId, count } 形状', async () => {
     const getMessageCount = vi.fn(async () => 42)
-    const ctx = mockContext({ getMessageCount } as unknown as ISessionService)
-    const handler = new SessionMessageHandler(ctx)
-
-    await handler.handleSessionMessage(msg('session.getMessageCount', { sessionId: SID }), mockWs())
+    const ctx = await handleGetMessageCount(getMessageCount)
 
     expect(getMessageCount).toHaveBeenCalledTimes(1)
     expect(getMessageCount).toHaveBeenCalledWith(SID)
@@ -76,10 +82,7 @@ describe('SessionMessageHandler session.getMessageCount', () => {
 
   it('count 0（文件缺失 pi 延迟写入窗口 / 空会话）正常 reply 非错误', async () => {
     const getMessageCount = vi.fn(async () => 0)
-    const ctx = mockContext({ getMessageCount } as unknown as ISessionService)
-    const handler = new SessionMessageHandler(ctx)
-
-    await handler.handleSessionMessage(msg('session.getMessageCount', { sessionId: SID }), mockWs())
+    const ctx = await handleGetMessageCount(getMessageCount)
 
     expect(ctx.reply).toHaveBeenCalledWith(expect.anything(), 'msg-1', 'session.getMessageCount', {
       sessionId: SID,

@@ -44,6 +44,29 @@ function mountTextBlock(over: { streaming?: boolean; status?: MessageStatus; err
   })
 }
 
+
+/** 工具行 header 中性档断言单源（行文字恒 mid，失败色不落文字），返回 header 供补断言。 */
+function expectToolHeaderNeutral(wrapper: { find: (s: string) => { classes: () => string[]; find: (s: string) => { classes: () => string[] } } }) {
+  const header = wrapper.find('[data-testid="tool-block-header"]')
+  expect(header.classes()).toContain('text-neutral-mid')
+  expect(header.classes()).not.toContain('text-danger')
+  return header
+}
+/** 时刻/耗时槽文本断言单源（剥掉全部空白后整串比对；selector 由调用方给）。 */
+function expectTimeSlotText(wrapper: { find: (s: string) => { exists: () => boolean; text: () => string } }, selector: string, expected: string) {
+  const slot = wrapper.find(selector)
+  expect(slot.exists()).toBe(true)
+  expect(slot.text().replace(/\s+/g, '')).toBe(expected)
+}
+
+/** 双 bash 成员 run group mount 单源（b0/b1 同款输入，多数组行用例的基线形态）。 */
+function mountBashPairGroup() {
+  return mountRunGroup(makeRunGroupProp([
+    makeToolCall({ id: 'b0', toolName: 'bash', input: { command: 'a' } }),
+    makeToolCall({ id: 'b1', toolName: 'bash', input: { command: 'b' } }),
+  ]))
+}
+
 describe('block-rendering M0 + D5: Block text 分支正文样式（TC-M0-4）', () => {
   it('text 分支统一正文级样式：text-md/leading-[1.8]（D5 正文档 15px，ui-optimize-unified 决策 7 行高 1.8），不含过程样式 text-sm/leading-relaxed', () => {
     const wrapper = mountTextBlock({})
@@ -127,10 +150,8 @@ describe('error-visibility M2: Block text 分支 error 形态判定（TC1/TC3）
 describe('error-visibility M1: failed tool header danger + 终态展开（TC1-3）', () => {
   it('TC1: failed(error) 行文字恒中性 text-neutral-mid，失败色常驻落在图标 text-danger（M3b demo 形态：.tool .t-name 恒 mid + .line.subagent.failed .sicon）', () => {
     const wrapper = mountToolBlock(makeToolCall({ status: 'error', output: 'ENOENT: no such file' }))
-    const header = wrapper.find('[data-testid="tool-block-header"]')
     // 行文字保持工具行档 mid（失败色不传染文字，demo 权威形态）
-    expect(header.classes()).toContain('text-neutral-mid')
-    expect(header.classes()).not.toContain('text-danger')
+    const header = expectToolHeaderNeutral(wrapper)
     // 失败色常驻在图标（非 hover 变体）
     expect(header.find('svg').classes()).toContain('text-danger')
   })
@@ -145,10 +166,8 @@ describe('error-visibility M1: failed tool header danger + 终态展开（TC1-3�
 
   it('TC3: unfinished(end_not_received) tool header 染 text-neutral-mid（D5 工具行档，abort/中断非失败不标红）', () => {
     const wrapper = mountToolBlock(makeToolCall({ status: 'end_not_received' }))
-    const header = wrapper.find('[data-testid="tool-block-header"]')
-    expect(header.classes()).toContain('text-neutral-mid')
     // unfinished 不标红（区别于 failed）
-    expect(header.classes()).not.toContain('text-danger')
+    expectToolHeaderNeutral(wrapper)
   })
 })
 
@@ -184,6 +203,15 @@ describe('D5 行类型定档: completed tool header 染 neutral-mid', () => {
 describe('ui-optimize-unified N1: edit/write 工具行 basename chip（决策 8）', () => {
   const FILE_PATH = '/home/user/project/src/app.ts'
   const CHIP_SEL = '[data-testid="tool-file-chip"]'
+
+/** file chip 断言单源（文本 = basename、title = 完整路径），返回 chip。 */
+  function expectFileChip(wrapper: { find: (s: string) => { exists: () => boolean; text: () => string; attributes: (a: string) => string | undefined } }) {
+    const chip = wrapper.find(CHIP_SEL)
+    expect(chip.exists()).toBe(true)
+    expect(chip.text()).toBe('app.ts')
+    expect(chip.attributes('title')).toBe(FILE_PATH)
+    return chip
+  }
   const DIFFSTAT_SEL = '[data-testid="tool-file-chip-diffstat"]'
 
   /** mount 文件工具行 + 可引用的 deps mock（断言 onFileClick/openDrawer 双通道调用参数） */
@@ -202,10 +230,7 @@ describe('ui-optimize-unified N1: edit/write 工具行 basename chip（决策 8�
 
   it('edit 行渲染 chip：文本 = basename、title = 完整路径（完整路径移 title 悬停）', () => {
     const { wrapper } = makeChipWrapper({ toolName: 'edit', input: { path: FILE_PATH } })
-    const chip = wrapper.find(CHIP_SEL)
-    expect(chip.exists()).toBe(true)
-    expect(chip.text()).toBe('app.ts')
-    expect(chip.attributes('title')).toBe(FILE_PATH)
+    expectFileChip(wrapper)
     // 完整路径不再以摘要形态出现在 header（移 title）
     const header = wrapper.find('[data-testid="tool-block-header"]')
     expect(header.text()).not.toContain(FILE_PATH)
@@ -213,10 +238,7 @@ describe('ui-optimize-unified N1: edit/write 工具行 basename chip（决策 8�
 
   it('write 行同样渲染 chip（file_path 字段同覆盖）', () => {
     const { wrapper } = makeChipWrapper({ toolName: 'write', input: { file_path: FILE_PATH } })
-    const chip = wrapper.find(CHIP_SEL)
-    expect(chip.exists()).toBe(true)
-    expect(chip.text()).toBe('app.ts')
-    expect(chip.attributes('title')).toBe(FILE_PATH)
+    expectFileChip(wrapper)
   })
 
   it('edit 行 diffStat 有值：统计段渲染 +N −N（diff 数据层供给，登记 docs/todo 修复）', () => {
@@ -697,17 +719,13 @@ describe('chat-flow-timestamp U2: Block 行尾时间槽（A3/A4 + D2 悬停化�
 
   it('A3 tool 块 startTime=1000/endTime=3000 → 槽文本 `2s HH:MM:SS`（耗时 formatDuration(2000) + 时刻 formatClock(1000)；M3b demo 形态无 · 分隔点，行 gap 承担间距）', () => {
     const wrapper = mountToolBlock(makeToolCall({ startTime: 1000, endTime: 3000 }))
-    const slot = wrapper.find('[data-testid="tool-time-slot"]')
-    expect(slot.exists()).toBe(true)
     // 剥掉全部空白后整串比对：耗时 + 时刻裸相邻（demo .dur/.ts 无分隔点），顺序结构同时锁定
-    expect(slot.text().replace(/\s+/g, '')).toBe(`2s${clockOf(1000)}`)
+    expectTimeSlotText(wrapper, '[data-testid="tool-time-slot"]', `2s${clockOf(1000)}`)
   })
 
   it('A3 endTime 缺失 → 槽内只有时刻无耗时（数据缺口降级，设计 §2.5）', () => {
     const wrapper = mountToolBlock(makeToolCall({ startTime: 1000, endTime: undefined }))
-    const slot = wrapper.find('[data-testid="tool-time-slot"]')
-    expect(slot.exists()).toBe(true)
-    expect(slot.text().replace(/\s+/g, '')).toBe(clockOf(1000))
+    expectTimeSlotText(wrapper, '[data-testid="tool-time-slot"]', clockOf(1000))
   })
 
   it('A3 status=running → 耗时 span 恒 text-neutral-dim（M3b demo 形态：.dur 无 accent，accent 只在呼吸弧图标）', () => {
@@ -725,16 +743,12 @@ describe('chat-flow-timestamp U2: Block 行尾时间槽（A3/A4 + D2 悬停化�
 
   it('A4 text 块 messageTimestamp=1000 → text-time-slot 文本 = formatClock(1000)（本地时刻）', () => {
     const wrapper = mountTextBlock({ messageTimestamp: 1000 })
-    const slot = wrapper.find('[data-testid="text-time-slot"]')
-    expect(slot.exists()).toBe(true)
-    expect(slot.text().replace(/\s+/g, '')).toBe(clockOf(1000))
+    expectTimeSlotText(wrapper, '[data-testid="text-time-slot"]', clockOf(1000))
   })
 
   it('A4 thinking 块 messageTimestamp=1000 → thinking-time-slot 文本 = formatClock(1000)', () => {
     const wrapper = mountThinkingTimeBlock({ messageTimestamp: 1000 })
-    const slot = wrapper.find('[data-testid="thinking-time-slot"]')
-    expect(slot.exists()).toBe(true)
-    expect(slot.text().replace(/\s+/g, '')).toBe(clockOf(1000))
+    expectTimeSlotText(wrapper, '[data-testid="thinking-time-slot"]', clockOf(1000))
   })
 
   it('A4 messageTimestamp 缺失 → text/thinking 两槽均不渲染（异常降级整槽隐藏）', () => {
@@ -959,10 +973,7 @@ describe('run 类型分组: Block 组块', () => {
   })
 
   it('failedCount=0 → 失败段不渲染（组行不虚构失败）', () => {
-    const wrapper = mountRunGroup(makeRunGroupProp([
-      makeToolCall({ id: 'b0', toolName: 'bash', input: { command: 'a' } }),
-      makeToolCall({ id: 'b1', toolName: 'bash', input: { command: 'b' } }),
-    ]))
+    const wrapper = mountBashPairGroup()
     expect(wrapper.find('[data-testid="run-group-failed"]').exists()).toBe(false)
   })
 
@@ -980,10 +991,7 @@ describe('run 类型分组: Block 组块', () => {
     const loader = runningHeader.find('.animate-loader-spin')
     expect(loader.find('svg').exists()).toBe(true)
 
-    const doneWrapper = mountRunGroup(makeRunGroupProp([
-      makeToolCall({ id: 'b0', toolName: 'bash', input: { command: 'a' } }),
-      makeToolCall({ id: 'b1', toolName: 'bash', input: { command: 'b' } }),
-    ]))
+    const doneWrapper = mountBashPairGroup()
     const doneHeader = doneWrapper.find('[data-testid="run-group-header"]')
     expect(doneHeader.classes()).toContain('text-neutral-mid')
     expect(doneHeader.classes()).not.toContain('text-accent')
@@ -998,19 +1006,13 @@ describe('run 类型分组: Block 组块', () => {
     expect(running.find('[data-testid="run-group"]').findAll('.trace-blk').length).toBe(2)
     expect(running.find('[data-testid="run-group-header"]').attributes('aria-expanded')).toBe('true')
 
-    const done = mountRunGroup(makeRunGroupProp([
-      makeToolCall({ id: 'b0', toolName: 'bash', input: { command: 'a' } }),
-      makeToolCall({ id: 'b1', toolName: 'bash', input: { command: 'b' } }),
-    ]))
+    const done = mountBashPairGroup()
     expect(done.find('[data-testid="run-group"]').findAll('.trace-blk').length).toBe(0)
     expect(done.find('[data-testid="run-group-header"]').attributes('aria-expanded')).toBe('false')
   })
 
   it('展开收起（用户手动开合）：点组头展开 → 成员行各自 1 行收起态；再点收起 → 成员消失', async () => {
-    const wrapper = mountRunGroup(makeRunGroupProp([
-      makeToolCall({ id: 'b0', toolName: 'bash', input: { command: 'a' } }),
-      makeToolCall({ id: 'b1', toolName: 'bash', input: { command: 'b' } }),
-    ]))
+    const wrapper = mountBashPairGroup()
     expect(wrapper.find('[data-testid="run-group"]').findAll('.trace-blk').length).toBe(0) // 默认收起（成员行 = 组容器内嵌套 Block 根 .trace-blk；外层查找收窄到组子树，排除 Block 根容器自身）
     await wrapper.find('[data-testid="run-group-header"]').trigger('click')
     const members = wrapper.find('[data-testid="run-group"]').findAll('.trace-blk')

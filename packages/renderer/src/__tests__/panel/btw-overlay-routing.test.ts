@@ -20,6 +20,8 @@
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/panel/btw-overlay-routing.test.ts
  */
+// helper import 必须先于项目内模块（@/api mock factory 在模块图加载期执行，TDZ 约束同 composer-mount 各消费文件）
+import { composerApiModuleActualWithBtw, composerBtwApiMock } from '../helpers/composer-mount'
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises, enableAutoUnmount } from '@vue/test-utils'
 import { nextTick, ref, effectScope } from 'vue'
@@ -50,15 +52,9 @@ import { useExtensionUIStore } from '@/stores/extension-ui'
 import { useToast } from '@/composables/useToast'
 
 // ── @/api 门面局部 mock：只替换 btw 域 ──
-const apiMock = vi.hoisted(() => ({
-  list: vi.fn(),
-  create: vi.fn(),
-  remove: vi.fn(),
-}))
-vi.mock('@/api', async (importActual) => {
-  const actual = await importActual<typeof import('@/api')>()
-  return { ...actual, btw: apiMock }
-})
+vi.mock('@/api', (importActual) => composerApiModuleActualWithBtw(importActual))
+// 断言锚点：btw 域 spy 单例（helper 持有，播种/断言经别名）
+const apiMock = composerBtwApiMock
 
 // ── extension RPC domain mock（respond 送达可控；快照恒空 → retainOnly 不误清实时帧）──
 const extMock = vi.hoisted(() => ({

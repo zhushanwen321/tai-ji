@@ -25,6 +25,7 @@ import {
   composerSessionStoreModule,
 } from './composer-mount'
 
+// mock 装配同 fork 族：gen-stats 挂载链外围依赖隔离（组件与编排保持真实）
 vi.mock('@/composables/features/chat/useChat', () => composerChatModule())
 vi.mock('@/composables/features/new-task/useNewTaskFlow', () => composerFlowModule())
 vi.mock('@/api', () => composerApiModule())

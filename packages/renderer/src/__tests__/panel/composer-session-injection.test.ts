@@ -16,63 +16,26 @@
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/panel/composer-session-injection.test.ts
  */
+// helper import 必须先于一切项目内模块（@/stores 等会在模块图加载期触发 @/api mock
+// factory，factory 引用的 helper 绑定彼时必须已初始化，否则 TDZ——vi.mock hoisting 约束）
+import {
+  composerApiModule,
+  composerChatModule,
+  composerChatStoreModule,
+  composerChildStubs,
+  composerFlowModule,
+} from '../helpers/composer-mount'
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises, type VueWrapper } from '@vue/test-utils'
-import { defineComponent, nextTick, ref } from 'vue'
+import { defineComponent, nextTick } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
-import { composerChildStubs } from '../helpers/composer-mount'
 
-// ── mock composable / api（防真依赖构造报错，同 composer-file-injection.test.ts）──
-vi.mock('@/composables/features/chat/useChat', () => ({
-  useChat: () => ({
-    send: vi.fn(),
-    steer: vi.fn(),
-    followUp: vi.fn(),
-    abort: vi.fn(),
-    compact: vi.fn(),
-    editAndResend: vi.fn(),
-    hydrateHistory: vi.fn(),
-  }),
-}))
-vi.mock('@/composables/features/new-task/useNewTaskFlow', () => ({
-  useNewTaskFlow: () => ({
-    startFlow: vi.fn(),
-    submitFirstMessage: vi.fn(),
-    currentModel: ref(null),
-    setPendingModel: vi.fn(),
-    state: ref('idle'),
-    currentSessionId: ref(null),
-    currentCwd: ref(null),
-    pendingPreset: ref(null), // landing 态 launchConfigView 解析消费
-  }),
-  resetNewTaskFlow: vi.fn(),
-}))
-vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
-  model: { switchModel: vi.fn() },
-  session: { setThinkingLevel: vi.fn(async (sessionId: string, level: string) => ({ sessionId, level })) },
-  composer: {
-    getMentionCandidates: vi.fn().mockResolvedValue([]),
-    getFileCandidates: vi.fn().mockResolvedValue([]),
-  },
-  config: {
-    getGlobalSkills: vi.fn().mockResolvedValue([]),
-    getProjectSkills: vi.fn().mockResolvedValue([]),
-    onSkillCacheInvalidated: () => () => {},
-  },
-}))
-vi.mock('@/stores/chat', () => ({
-  useChatStore: () => ({
-    isStreaming: ref(false),
-    isActive: () => false,
-    getRetryState: () => undefined,
-    isCompacting: () => false,
-    // [u6b] 发送位四态渲染即读 occupancy 投影（sendButtonState ← effectivePhase），mock 需提供
-    sessionPhase: () => ({ turn: 'idle', compacting: false, bash: false }),
-    // [session-dead C1 方案一] Composer 挂 TurnProgressBar 读 turn 进展派生，新读口 mock 跟随
-    getMessages: () => [],
-    getOccupancy: () => ({ turn: 'idle', compacting: false, bash: false }),
-  }),
-}))
+// ── mock composable / api（防真依赖构造报错，工厂收编 helpers/composer-mount.ts；
+//     @/stores/session 留本地——S2 需可变 active（vi.hoisted），helper 只有静态版）──
+vi.mock('@/composables/features/chat/useChat', () => composerChatModule())
+vi.mock('@/composables/features/new-task/useNewTaskFlow', () => composerFlowModule())
+vi.mock('@/api', () => composerApiModule())
+vi.mock('@/stores/chat', () => composerChatStoreModule())
 // sessionStore mock：SessionItem（写入侧目标路由）与 Composer 壳 getActiveSessionId 共用
 const sessionState = vi.hoisted(() => ({
   active: undefined as { id: string; cwd: string } | undefined,
@@ -143,6 +106,19 @@ function mountSessionItem(id: string, label: string) {
   return wrapper
 }
 
+
+/** SessionItem 右键 → 「引用到输入区」点击驱动（S1-S3 共用交互样板单源）。 */
+async function quoteViaContextMenu(label: string): Promise<void> {
+  const item = mountSessionItem('s-ref', label)
+  await item.find('.session-item').trigger('contextmenu')
+  await nextTick()
+  await nextTick()
+  document.body
+    .querySelector('[data-testid="session-quote-item"]')!
+    .dispatchEvent(new MouseEvent('click', { bubbles: true }))
+  await flushPromises()
+}
+
 describe('Composer session 引用注入（S1-S3 · spy 层链路）', () => {
   it('S1 sidebar 点击 → store → panel Composer watch 消费 insertSessionChip(refSessionId, label)', async () => {
     sessionState.active = { id: 's-cur', cwd: '/p' }
@@ -158,12 +134,7 @@ describe('Composer session 引用注入（S1-S3 · spy 层链路）', () => {
     const spy = inputSpies.at(-1)
     if (!spy) throw new Error('ComposerInput spy 未生成')
 
-    const item = mountSessionItem('s-ref', '被引用会话')
-    await item.find('.session-item').trigger('contextmenu')
-    await nextTick()
-    await nextTick()
-    document.body.querySelector('[data-testid="session-quote-item"]')!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-    await flushPromises()
+    await quoteViaContextMenu('被引用会话')
 
     expect(spy.insertSessionChip).toHaveBeenCalledOnce()
     expect(spy.insertSessionChip).toHaveBeenCalledWith('s-ref', '被引用会话')
@@ -175,12 +146,7 @@ describe('Composer session 引用注入（S1-S3 · spy 层链路）', () => {
     sessionState.active = undefined
     const { spy } = mountComposer({ sessionId: null, variant: 'landing' })
 
-    const item = mountSessionItem('s-ref', 'landing 引用')
-    await item.find('.session-item').trigger('contextmenu')
-    await nextTick()
-    await nextTick()
-    document.body.querySelector('[data-testid="session-quote-item"]')!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-    await flushPromises()
+    await quoteViaContextMenu('landing 引用')
 
     expect(spy.insertSessionChip).toHaveBeenCalledWith('s-ref', 'landing 引用')
     expect(composerInjectionStore.pendingInjection.value).toBeNull()
@@ -191,12 +157,7 @@ describe('Composer session 引用注入（S1-S3 · spy 层链路）', () => {
     const { spy } = mountComposer({ sessionId: 's-cur', variant: 'panel' })
     const store = composerInjectionStore
 
-    const item = mountSessionItem('s-ref', '会话 A')
-    await item.find('.session-item').trigger('contextmenu')
-    await nextTick()
-    await nextTick()
-    document.body.querySelector('[data-testid="session-quote-item"]')!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-    await flushPromises()
+    await quoteViaContextMenu('会话 A')
     expect(spy.insertSessionChip).toHaveBeenCalledOnce()
     expect(store.pendingInjection.value).toBeNull()
 

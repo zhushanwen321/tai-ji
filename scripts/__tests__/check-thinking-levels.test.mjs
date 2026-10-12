@@ -25,7 +25,7 @@ import {
   resolvePiAiRoot,
 } from '../check-thinking-levels.mjs'
 import { setDiff } from '../lib/guard-report.mjs'
-import { createMirrorRoot, installGuardIntoMirror } from './helpers/guard-mirror.mjs'
+import { createMirrorRoot, writeFilesAndInstallGuard } from './helpers/guard-mirror.mjs'
 
 const SCRIPT = join(dirname(fileURLToPath(import.meta.url)), '..', 'check-thinking-levels.mjs')
 
@@ -144,11 +144,7 @@ function makeMirror({ thinkingOrder, piPresetLevels, missing = [] } = {}) {
     'packages/subagent-core/src/shared/model-ref.ts': subagentCoreModelRefSrc(thinkingOrder ?? REAL_MEMBERS),
     'packages/shared/src/pi-preset.ts': sharedPiPresetSrc(piPresetLevels ?? REAL_MEMBERS),
   }
-  for (const [rel, content] of Object.entries(files)) {
-    if (missing.includes(rel)) continue
-    writeAt(rel, content)
-  }
-  const run = installGuardIntoMirror(root, SCRIPT)
+  const run = writeFilesAndInstallGuard(root, writeAt, files, { missing, script: SCRIPT })
   const linkDir = join(root, 'node_modules', '@earendil-works')
   mkdirSync(linkDir, { recursive: true })
   symlinkSync(PI_AI_ROOT, join(linkDir, 'pi-ai'), 'dir')
