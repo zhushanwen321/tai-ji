@@ -739,3 +739,89 @@ describe('useComposerChipCommands handleBackspaceOnChip', () => {
     expect(api.handleBackspaceOnChip()).toBe(false)
   })
 })
+
+// ── image badge 缩略图加载失败回退（makeImageThumb 的 error 监听器）──
+// src 加载失败（403 白名单 / 文件损坏）→ once error 监听器把 img 原地替换为
+// span.chip-icon.chip-thumb-fallback 占位（内联 lucide Image svg），不留破图。
+
+describe('useComposerChipCommands insertImageBadge 缩略图加载失败回退', () => {
+  let cleanup: () => void
+  beforeEach(() => {
+    window.getSelection()?.removeAllRanges()
+  })
+  afterEach(() => {
+    cleanup?.()
+  })
+
+  it('img error 事件：img 被替换为 chip-thumb-fallback 占位（内联 lucide image svg 三段）', () => {
+    const c = setup()
+    c.insertImageBadge('/tmp/x.png', 'x.png', '截图.png')
+    const img = c.el.querySelector('img.chip-thumb') as HTMLImageElement
+    expect(img).not.toBeNull()
+    img.dispatchEvent(new Event('error'))
+    // img 原地被占位 host 替换
+    expect(c.el.querySelector('img.chip-thumb')).toBeNull()
+    const host = c.el.querySelector('.chip-thumb-fallback') as HTMLElement
+    expect(host).not.toBeNull()
+    expect(host.className).toBe('chip-icon chip-thumb-fallback')
+    expect(host.getAttribute('aria-hidden')).toBe('true')
+    // 占位 svg = lucide Image iconNode 同款（rect + circle + path 三段，12px currentColor）
+    const svg = host.querySelector('svg')
+    expect(svg?.getAttribute('viewBox')).toBe('0 0 24 24')
+    expect(svg?.getAttribute('fill')).toBe('none')
+    expect(svg?.getAttribute('stroke')).toBe('currentColor')
+    expect(svg?.getAttribute('width')).toBe('12')
+    expect(svg?.getAttribute('height')).toBe('12')
+    const rect = svg?.querySelector('rect')
+    expect(rect?.getAttribute('width')).toBe('18')
+    expect(rect?.getAttribute('height')).toBe('18')
+    expect(rect?.getAttribute('x')).toBe('3')
+    expect(rect?.getAttribute('y')).toBe('3')
+    expect(rect?.getAttribute('rx')).toBe('2')
+    expect(rect?.getAttribute('ry')).toBe('2')
+    expect(svg?.querySelector('circle')?.getAttribute('cx')).toBe('9')
+    expect(svg?.querySelector('circle')?.getAttribute('r')).toBe('2')
+    expect(svg?.querySelector('path')?.getAttribute('d')).toBe('m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21')
+    cleanup = c.cleanup
+  })
+})
+
+// ── chip × 按钮点击删除（makeXButton 的 click 监听器，§2e）──
+
+describe('useComposerChipCommands chip × 按钮点击删除', () => {
+  let cleanup: () => void
+  beforeEach(() => {
+    window.getSelection()?.removeAllRanges()
+  })
+  afterEach(() => {
+    cleanup?.()
+  })
+
+  it('file chip × 点击：chip 整块移除 + onChanged，preventDefault 且不冒泡到编辑器根', () => {
+    const c = setup()
+    c.insertFileChip('/a/b.ts')
+    const chip = c.el.querySelector('.mention-file') as HTMLElement
+    const xBtn = chip.querySelector('.chip-x') as HTMLElement
+    // stopPropagation 断言：编辑器根上的 click 监听不收到 × 的点击（防无关 click 逻辑误触）
+    const rootClick = vi.fn()
+    c.el.addEventListener('click', rootClick)
+    const ev = new MouseEvent('click', { bubbles: true, cancelable: true })
+    xBtn.dispatchEvent(ev)
+    expect(c.el.contains(chip)).toBe(false)
+    expect(c.callbacks.onChanged).toHaveBeenCalled()
+    expect(ev.defaultPrevented).toBe(true)
+    expect(rootClick).not.toHaveBeenCalled()
+    cleanup = c.cleanup
+  })
+
+  it('session chip × 点击：chip 移除（makeXButton 各 chip 类型共用通路）', () => {
+    const c = setup()
+    c.insertSessionChip('s-9', '会话 X')
+    const chip = c.el.querySelector('.mention-session') as HTMLElement
+    const xBtn = chip.querySelector('.chip-x') as HTMLElement
+    xBtn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+    expect(c.el.contains(chip)).toBe(false)
+    expect(c.callbacks.onChanged).toHaveBeenCalled()
+    cleanup = c.cleanup
+  })
+})

@@ -132,3 +132,20 @@ describe('创建成功后首条消息自动发送编排（createMobileTask：创
     wrapper.unmount()
   })
 })
+
+describe('NewTaskSheet backdrop 遮罩（点击关闭）', () => {
+  it('open=true：backdrop 渲染，点击 emit close', async () => {
+    const wrapper = mountSheet(true)
+    const backdrop = wrapper.get('[data-testid="new-task-backdrop"]')
+    expect(backdrop.exists()).toBe(true)
+    await backdrop.trigger('click')
+    expect(wrapper.emitted('close')).toBeTruthy()
+    wrapper.unmount()
+  })
+
+  it('open=false：backdrop 不渲染（v-if 整树关闭）', () => {
+    const wrapper = mountSheet(false)
+    expect(wrapper.find('[data-testid="new-task-backdrop"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+})

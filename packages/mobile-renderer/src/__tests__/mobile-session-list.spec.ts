@@ -238,3 +238,50 @@ describe('MobileSessionList 会话列表（remote-use-mobile D7 列表行）', (
     wrapper.unmount()
   })
 })
+
+// 动作菜单遮罩（长按/dead 引导菜单 + 重命名二级表单，底部 sheet 形态两处 backdrop）：
+// 菜单打开经 dead 条目点击分流（A3）驱动——无长按 timer，链路最短。
+
+describe('MobileSessionList 动作菜单 backdrop（点击关闭）', () => {
+  beforeEach(() => {
+    i18n.global.locale.value = 'zh-CN'
+    testState.list.value = []
+    sessionStore.listLoadError.value = null
+    sessionStore.activeId.value = null
+    testState.chatStore.isActive.mockReturnValue(false)
+    testState.chatStore.isCompacting.mockReturnValue(false)
+    testState.chatStore.isGenerating.mockReturnValue(false)
+    testState.chatStore.getMessages.mockReturnValue([])
+    testState.chatStore.getRetryState.mockReturnValue(undefined)
+    resetSubagentPartitionsForTest()
+    vi.mocked(loadSessions).mockClear()
+    vi.mocked(selectSession).mockClear()
+    vi.mocked(loadSessions).mockResolvedValue(undefined)
+    vi.mocked(selectSession).mockResolvedValue(undefined)
+  })
+
+  it('dead 条目点击 → 引导菜单打开（backdrop 可见）；点击 backdrop 关闭菜单', async () => {
+    testState.list.value = [makeSummary({ id: 's-dead-menu', status: 'dead', lastActiveAt: Date.now() })]
+    const wrapper = mountList()
+    // dead 分流（A3）：click 不切入，弹引导菜单
+    await wrapper.get('[data-testid="mobile-session-item-s-dead-menu"]').trigger('click')
+    expect(wrapper.get('[data-testid="mobile-session-menu-backdrop"]').exists()).toBe(true)
+    // 点击 backdrop 关闭菜单
+    await wrapper.get('[data-testid="mobile-session-menu-backdrop"]').trigger('click')
+    expect(wrapper.find('[data-testid="mobile-session-menu-backdrop"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('菜单·重命名 → 重命名表单打开（其 backdrop 可见，菜单已收起）；点击 backdrop 关闭表单', async () => {
+    testState.list.value = [makeSummary({ id: 's-menu-rename', status: 'dead', lastActiveAt: Date.now() })]
+    const wrapper = mountList()
+    await wrapper.get('[data-testid="mobile-session-item-s-menu-rename"]').trigger('click')
+    await wrapper.get('[data-testid="mobile-session-menu-rename"]').trigger('click')
+    // 二级表单 backdrop 可见，一级菜单已随 openRename 收起
+    expect(wrapper.get('[data-testid="mobile-session-rename-backdrop"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="mobile-session-menu-backdrop"]').exists()).toBe(false)
+    await wrapper.get('[data-testid="mobile-session-rename-backdrop"]').trigger('click')
+    expect(wrapper.find('[data-testid="mobile-session-rename-backdrop"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+})
