@@ -223,7 +223,8 @@ describe('E2E-L1-1: fork-ask 完整旅程（Turn → channel → Composer → fo
       global: {
         provide: mockChatProvide({ onForkAsk: onForkAskMock }),
         stubs: {
-          Block: true,
+          // Block 不 stub：[actions-anchor] 起 TurnSummary 经 Block 的 #turn-actions 具名插槽
+          // 挂载，stub 不渲染具名插槽会连 fork 按钮一起丢掉
           ChangeSetCard: true,
           MarkdownRenderer: true,
           HoverCard: { template: '<div><slot /></div>' },
@@ -245,7 +246,8 @@ describe('E2E-L1-1: fork-ask 完整旅程（Turn → channel → Composer → fo
       global: {
         provide: mockChatProvide({ onForkAsk: onForkAskMock }),
         stubs: {
-          Block: true,
+          // Block 不 stub：[actions-anchor] 起 TurnSummary 经 Block 的 #turn-actions 具名插槽
+          // 挂载，stub 不渲染具名插槽会连 fork 按钮一起丢掉
           ChangeSetCard: true,
           MarkdownRenderer: true,
           HoverCard: { template: '<div><slot /></div>' },

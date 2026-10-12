@@ -422,8 +422,8 @@ describe('Turn · trace 块按 contentBlocks 真实时序渲染', () => {
     expect(blocks[0].find('.trace-think').exists()).toBe(true)
     // 第二个块是 run 组（grep → 探索组；run 类型分组把工具行折进组）
     expect(blocks[1].find('.trace-run-group').exists()).toBe(true)
-    // 操作栏也存在（lastAssistant 非 null，去内容化后仅 hover actions）
-    expect(wrapper.find('.turn-summary').exists()).toBe(true)
+    // [actions-anchor] 无 text 块 → 无锚块 → 操作栏不渲染（lastAssistant 非 null 也不再足够）
+    expect(wrapper.find('.turn-summary').exists()).toBe(false)
   })
 
   it('U16: streaming 态 trace 块顺序 = contentBlocks 顺序（tool 在 think 之前）', () => {
@@ -440,8 +440,8 @@ describe('Turn · trace 块按 contentBlocks 真实时序渲染', () => {
     expect(blocks[0].find('.trace-run-group').exists()).toBe(true)
     // 第二个块是 thinking
     expect(blocks[1].find('.trace-think').exists()).toBe(true)
-    // 操作栏存在（lastAssistant 非 null）
-    expect(wrapper.find('.turn-summary').exists()).toBe(true)
+    // [actions-anchor] 无 text 块 → 无锚块 → 操作栏不渲染（lastAssistant 非 null 也不再足够）
+    expect(wrapper.find('.turn-summary').exists()).toBe(false)
   })
 
   it('U17: streaming 态 text 全 inline 在 trace 内（不再跳 summary），末位 running tool 时尾部光标隐藏', () => {

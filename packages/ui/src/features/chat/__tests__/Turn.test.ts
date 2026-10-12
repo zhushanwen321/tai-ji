@@ -933,3 +933,70 @@ describe('run 类型分组: Turn 组块接线（三路径 + PR-6）', () => {
     expect(wrapper.find('[data-testid="run-group"]').findAll('.trace-blk').length).toBe(5)
   })
 })
+
+// ═════════════════════════════════════════════════════════════════
+// describe：[actions-anchor] 操作栏插槽只挂末位 text 块
+// （真实 Block 渲染——BlockStub 不渲染插槽，锚块断言需真实 text 分支；显隐是 CSS
+// group-hover 行为，jsdom 不可断言，本层只验挂载点存在性、唯一性与归属）
+// ═════════════════════════════════════════════════════════════════
+describe('[actions-anchor] 操作栏只挂末位 text 块', () => {
+  function mountWithRealBlock(turn: MessageTurn, opts: { isExpanded?: boolean } = {}) {
+    return mount(Turn, {
+      props: { turn, sessionId: SID, isLastTurn: false },
+      global: {
+        provide: mockChatProvide({
+          isExpanded: () => opts.isExpanded ?? false,
+          isTakeover: () => false,
+        }),
+        stubs: {
+          UserBubble: true,
+          TurnMeta: true,
+          TurnSummary: true,
+          ChangeSetCard: true,
+          MarkdownRenderer: { props: ['content'], template: '<div class="stub-md" />' },
+          TraceCompactorRow: true,
+        },
+      },
+    })
+  }
+
+  it('折叠态：锚块包装层挂在唯一可见的末位 text 块行内', () => {
+    const wrapper = mountWithRealBlock(makeTurn())
+    const textBlocks = wrapper.findAll('.trace-blk--text')
+    expect(textBlocks.length).toBe(1)
+    const anchors = wrapper.findAll('[data-testid="turn-actions-anchor"]')
+    expect(anchors.length).toBe(1)
+    expect(textBlocks[0].element.contains(anchors[0].element)).toBe(true)
+  })
+
+  it('历史展开态多 text 块：锚全 turn 唯一，挂时序最后的 text 块', () => {
+    const twoTexts = makeTurn()
+    twoTexts.assistants = [
+      { id: 'a1', role: 'assistant', content: '第一段', status: 'complete', timestamp: NOW },
+      { id: 'a2', role: 'assistant', content: '最终回复', status: 'complete', timestamp: NOW },
+    ]
+    const wrapper = mountWithRealBlock(twoTexts, { isExpanded: true })
+    const textBlocks = wrapper.findAll('.trace-blk--text')
+    expect(textBlocks.length).toBe(2)
+    const anchors = wrapper.findAll('[data-testid="turn-actions-anchor"]')
+    expect(anchors.length).toBe(1)
+    expect(textBlocks[textBlocks.length - 1].element.contains(anchors[0].element)).toBe(true)
+  })
+
+  it('无 text 块（纯工具 turn）无锚块，操作栏不渲染', () => {
+    const toolsOnly = makeTurn()
+    toolsOnly.assistants = [
+      {
+        id: 'a1',
+        role: 'assistant',
+        content: '',
+        status: 'complete',
+        timestamp: NOW,
+        toolCalls: [{ id: 'tc-0', toolName: 'read', input: { path: '/tmp/x' }, status: 'completed', startTime: NOW }],
+        contentBlocks: [{ type: 'toolCall', refId: 'tc-0' }],
+      },
+    ]
+    const wrapper = mountWithRealBlock(toolsOnly, { isExpanded: true })
+    expect(wrapper.findAll('[data-testid="turn-actions-anchor"]').length).toBe(0)
+  })
+})

@@ -3,99 +3,95 @@
     TurnSummary：hover actions 操作栏（复制/MD/朗读/fork/handoff）。从 Turn.vue 拆出。
     [block-rendering M0] 去内容化：不再渲染正文文字（text 全 inline 到 turn 内容区统一正文样式）
     与 streaming 光标（迁移到 Turn.vue trace 容器末尾 streaming-tail）。
+    [actions-anchor] 本组件由 Turn.vue 经末位 text 块（Block.vue）的 #turn-actions 插槽挂载，
+    不再独立占位：悬停区 = text 块行本身（group/text 门控在 Block 的插槽包装层），悬浮位 =
+    text 块上方右侧（块间留白 + 左对齐邻块的行尾空区，不遮正文）。按钮是 text 块的 DOM 子孙，
+    鼠标从正文移入按钮期间 group/text 悬停态经 DOM 祖先传递保持不熄灭。
+    本组件只渲染 chip 本体：不透明底（bg-bg-elevated + hairline 边 + 圆角 + shadow-2，同
+    TurnRail/PopoverContent 浮层范式），透明底会让按钮图标直接叠压其覆盖区文字。
     fork/handoff useTurnActions 在内部调用，不冒泡。
   -->
-  <!-- 轮次边界（M3a，docs/todo/turn-boundary-rhythm.md 选项 2 落地）：本组件悬浮化——
-       h-0 不占流内高度，actions 绝对定位悬浮于本 turn 尾部（bottom-0，向上盖过 trace 末
-       24px，悬停经 DOM 祖先传递保持 group/ai 悬停态）。actions 为不透明 chip 形态
-       （bg-bg-elevated + hairline 边 + 圆角 + shadow-2，同 TurnRail/PopoverContent 浮层
-       范式）：悬浮位与末块正文重叠，透明底会让按钮图标直接叠压末块文字（markdown 表格
-       末行尤甚），不透明底使覆盖区域成为明确 chip 占位。轮次边界唯一贡献 = Turn 根 pb-5
-       （20px，demo workbench.css .blk margin-bottom = --blk-gap）。默认 pointer-events-none，
-       悬停/焦点才可命中。 -->
-  <div v-if="lastAssistant" class="turn-summary relative h-0">
-    <!--
-      hover actions（5 个并列按钮：复制 / 复制MD / 朗读 / fork / handoff），悬浮位见根注释。
-      fork/handoff 点击进 composer staging 模式：可输入文本带上发送，也可不输入直接提交（空提交≈
-      原后台 fork/handoff，由 forkSessionAsk/handoff 空 content 守卫实现）。
-      非 subagent session：5 按钮全显；subagent session：复制/复制MD/朗读（无 fork/handoff）。
-    -->
-    <div
-      v-if="lastAssistant"
-      class="absolute bottom-0 left-0 flex items-center gap-0.5 rounded-md border border-border-strong bg-bg-elevated p-0.5 shadow-2 opacity-0 pointer-events-none transition-opacity duration-[var(--duration-fast)] group-hover/ai:opacity-100 group-hover/ai:pointer-events-auto group-focus-within/ai:opacity-100 group-focus-within/ai:pointer-events-auto"
+  <!--
+    hover actions（5 个并列按钮：复制 / 复制MD / 朗读 / fork / handoff），挂载位见根注释。
+    fork/handoff 点击进 composer staging 模式：可输入文本带上发送，也可不输入直接提交（空提交≈
+    原后台 fork/handoff，由 forkSessionAsk/handoff 空 content 守卫实现）。
+    非 subagent session：5 按钮全显；subagent session：复制/复制MD/朗读（无 fork/handoff）。
+  -->
+  <div
+    v-if="lastAssistant"
+    class="turn-summary flex items-center gap-0.5 rounded-md border border-border-strong bg-bg-elevated p-0.5 shadow-2"
+  >
+    <!-- 复制（纯文本）-->
+    <Button
+      variant="ghost"
+      size="icon"
+      class="size-6 text-neutral-dim hover:text-neutral-fg"
+      data-testid="copy-btn"
+      :title="t('panel.message.copy')"
+      @click="copy(summaryText, aiCopyKey)"
     >
-      <!-- 复制（纯文本）-->
+      <Check v-if="copied === aiCopyKey" class="size-3 text-success" />
+      <Copy v-else class="size-3" />
+    </Button>
+    <!-- 复制 MD -->
+    <Button
+      variant="ghost"
+      size="icon"
+      class="relative size-6 text-neutral-dim hover:text-neutral-fg"
+      data-testid="copy-markdown-btn"
+      :title="t('panel.message.copyMarkdown')"
+      @click="copy(assistantToMarkdown(lastAssistant), aiMdKey)"
+    >
+      <Check v-if="copied === aiMdKey" class="size-3 text-success" />
+      <Copy v-else class="size-3" />
+      <span class="absolute -right-0.5 -bottom-0.5 rounded-sm bg-accent px-[2px] text-[8px] font-bold leading-[8px] text-accent-fg">MD</span>
+    </Button>
+    <!-- 朗读：状态机（ai-voice-tts §5.1）idle Volume2 → loading Loader2 旋转（可点，点击=取消）
+         → playing Square（点击=停止）→ idle；生成中置灰（disabled + title=回复生成中）。
+         对 subagent session 同样可见（朗读是只读消费，与复制同类，不受 fork/handoff 隐藏规则约束）。
+         deps 两字段（onSpeak/speakStateOf）未 provide 时按钮不渲染（宿主未接语音能力则无此交互面）；
+         点击动作分流（idle=朗读 / 非 idle=取消或停止）在壳层装配侧，ui 只调 onSpeak。 -->
+    <Button
+      v-if="speakState"
+      variant="ghost"
+      size="icon"
+      class="size-6 text-neutral-dim hover:text-neutral-fg"
+      data-testid="speak-btn"
+      :disabled="speakDisabled"
+      :title="speakTitle"
+      @click="onSpeakClick(lastAssistant)"
+    >
+      <Loader2 v-if="speakState === 'loading'" class="size-3 animate-spin" />
+      <Square v-else-if="speakState === 'playing'" class="size-3" />
+      <Volume2 v-else class="size-3" />
+    </Button>
+    <!-- subagent session：仅复制类按钮，无 fork/handoff -->
+    <template v-if="!isSubagentVirtualId(sessionId)">
+      <span class="as-sep mx-1 h-3.5 w-px shrink-0 bg-border" />
+      <!-- fork：进 composer 模式，可输入提问或空提交（空提交=后台 fork）-->
       <Button
         variant="ghost"
         size="icon"
-        class="size-6 text-neutral-dim hover:text-neutral-fg"
-        data-testid="copy-btn"
-        :title="t('panel.message.copy')"
-        @click="copy(summaryText, aiCopyKey)"
+        class="fork-btn relative size-6 text-neutral-dim hover:bg-accent-soft hover:text-accent"
+        data-testid="fork-ask-btn"
+        :title="t('panel.message.forkAsk')"
+        @click="onForkAsk(lastAssistant)"
       >
-        <Check v-if="copied === aiCopyKey" class="size-3 text-success" />
-        <Copy v-else class="size-3" />
+        <GitFork class="size-3" />
       </Button>
-      <!-- 复制 MD -->
+      <span class="as-sep mx-1 h-3.5 w-px shrink-0 bg-border" />
+      <!-- handoff：进 composer 模式，可输入备注或空提交（空提交=后台 handoff）-->
       <Button
         variant="ghost"
         size="icon"
-        class="relative size-6 text-neutral-dim hover:text-neutral-fg"
-        data-testid="copy-markdown-btn"
-        :title="t('panel.message.copyMarkdown')"
-        @click="copy(assistantToMarkdown(lastAssistant), aiMdKey)"
+        :class="['handoff-btn relative size-6 text-neutral-dim hover:text-neutral-fg', { 'opacity-50 pointer-events-none': isHandingOff }]"
+        data-testid="handoff-ask-btn"
+        :title="t('panel.message.handoffAsk')"
+        @click="onHandoffAsk(lastAssistant)"
       >
-        <Check v-if="copied === aiMdKey" class="size-3 text-success" />
-        <Copy v-else class="size-3" />
-        <span class="absolute -right-0.5 -bottom-0.5 rounded-sm bg-accent px-[2px] text-[8px] font-bold leading-[8px] text-accent-fg">MD</span>
+        <HandHelping class="size-3.5 fill-current" />
       </Button>
-      <!-- 朗读：状态机（ai-voice-tts §5.1）idle Volume2 → loading Loader2 旋转（可点，点击=取消）
-           → playing Square（点击=停止）→ idle；生成中置灰（disabled + title=回复生成中）。
-           对 subagent session 同样可见（朗读是只读消费，与复制同类，不受 fork/handoff 隐藏规则约束）。
-           deps 两字段（onSpeak/speakStateOf）未 provide 时按钮不渲染（宿主未接语音能力则无此交互面）；
-           点击动作分流（idle=朗读 / 非 idle=取消或停止）在壳层装配侧，ui 只调 onSpeak。 -->
-      <Button
-        v-if="speakState"
-        variant="ghost"
-        size="icon"
-        class="size-6 text-neutral-dim hover:text-neutral-fg"
-        data-testid="speak-btn"
-        :disabled="speakDisabled"
-        :title="speakTitle"
-        @click="onSpeakClick(lastAssistant)"
-      >
-        <Loader2 v-if="speakState === 'loading'" class="size-3 animate-spin" />
-        <Square v-else-if="speakState === 'playing'" class="size-3" />
-        <Volume2 v-else class="size-3" />
-      </Button>
-      <!-- subagent session：仅复制类按钮，无 fork/handoff -->
-      <template v-if="!isSubagentVirtualId(sessionId)">
-        <span class="as-sep mx-1 h-3.5 w-px shrink-0 bg-border" />
-        <!-- fork：进 composer 模式，可输入提问或空提交（空提交=后台 fork）-->
-        <Button
-          variant="ghost"
-          size="icon"
-          class="fork-btn relative size-6 text-neutral-dim hover:bg-accent-soft hover:text-accent"
-          data-testid="fork-ask-btn"
-          :title="t('panel.message.forkAsk')"
-          @click="onForkAsk(lastAssistant)"
-        >
-          <GitFork class="size-3" />
-        </Button>
-        <span class="as-sep mx-1 h-3.5 w-px shrink-0 bg-border" />
-        <!-- handoff：进 composer 模式，可输入备注或空提交（空提交=后台 handoff）-->
-        <Button
-          variant="ghost"
-          size="icon"
-          :class="['handoff-btn relative size-6 text-neutral-dim hover:text-neutral-fg', { 'opacity-50 pointer-events-none': isHandingOff }]"
-          data-testid="handoff-ask-btn"
-          :title="t('panel.message.handoffAsk')"
-          @click="onHandoffAsk(lastAssistant)"
-        >
-          <HandHelping class="size-3.5 fill-current" />
-        </Button>
-      </template>
-    </div>
+    </template>
   </div>
 </template>
 

@@ -2,7 +2,8 @@
   <!-- split-justified: main 侧合并带入（turn 编排器，单语义域）；script 超 300 为存量（base 175 → 317），拆分属独立重构任务（长期方向：trace 窗口化编排抽 useTurnTrace composable） -->
   <!--
     编排器 · Turn（message-stream 单个回合，W4 拆分后）。
-    组合 UserBubble + TurnMeta + TurnSummary 三个子组件。
+    组合 UserBubble + TurnMeta + Block 三个子组件；hover actions 操作栏（TurnSummary）经末位
+    text 块的 #turn-actions 插槽挂载（[actions-anchor]，悬停区 = text 块本身，见下方锚块注释）。
     保留：trace 区 Block 编排（窗口化）+ ChangeSetCard。
     [streaming-trace-window window wave] trace 区从双层 v-for 改单层渲染 computeTraceWindow 的 visible；
     收编区（compacted/failed）由 TraceCompactorRow 承载（零 chrome，双态，D5）。
@@ -185,14 +186,24 @@
              （vue/valid-v-memo 禁 template v-for 子元素挂 v-memo，分支不能拆成双 Block）。
              组块 :key = headFlatIndex（members[0] 所属同类型段的段首锚定 run head）——对段尾延长
              （running 并入）与窗口右滑（段首被收编出窗）两方向稳定，key 抖 = remount = 展开态丢 +
-             滚动锚点跳（PR-6）。v-memo deps 按单元类型二选一（unitMemoDeps）。 -->
+             滚动锚点跳（PR-6）。v-memo deps 按单元类型二选一（unitMemoDeps）。
+             [actions-anchor] 末位 text 块经 #turn-actions 插槽挂载 hover actions 操作栏
+             （TurnSummary，锚块判定 isActionsAnchor 单点），其余块不传插槽。 -->
         <Block
           v-for="unit in renderUnits"
           :key="unitKey(unit)"
           v-memo="unitMemoDeps(unit)"
           v-bind="unitBlockProps(unit)"
           :session-id="sessionId"
-        />
+        >
+          <template v-if="isActionsAnchor(unit)" #turn-actions>
+            <TurnSummary
+              :turn="turn"
+              :session-id="sessionId"
+              :last-assistant="lastAssistant"
+            />
+          </template>
+        </Block>
         <!-- streaming 光标：turn 内容区末尾独立元素（跟在所有 block 后，位置稳定不受 block 增删/折叠态影响）。
              mt-2 = 8px 光标底距（正文末块无 py 时为唯一贡献；MF-1-3 过程行恢复 py 5px 后，
              过程行末块后为 13px——光标场景以正文流式为主，按高频场景校准）。
@@ -200,12 +211,9 @@
         <span v-if="showStreamingCursor" class="streaming-tail mt-2 ml-0.5 inline-block h-3.5 w-[7px] rounded-[1px] bg-accent align-middle animate-blink" />
       </div>
 
-      <!-- 操作栏：TurnSummary 子组件（去内容化后仅 hover actions） -->
-      <TurnSummary
-        :turn="turn"
-        :session-id="sessionId"
-        :last-assistant="lastAssistant"
-      />
+      <!-- [actions-anchor] 操作栏（TurnSummary）不渲染于 trace 尾部：挂载点 = 末位 text 块的
+           #turn-actions 插槽（上方 Block v-for 内）——悬停区 = text 块本身（TurnMeta/过程行
+           悬停不触发），悬浮位 = text 块上方右侧（不遮正文）。 -->
 
       <!-- 变更集卡（W10，ADR-0024）：mt-3 = 12px 过程行节奏档（demo --blk-gap-tight） -->
       <ChangeSetCard
@@ -557,6 +565,26 @@ const renderUnits = computed<TraceRenderUnit[]>(() =>
   groupToolRuns(visibleBlocks.value, flatBlocks.value),
 )
 
+/**
+ * [actions-anchor] hover actions 锚块 = visibleBlocks 内 flatIndex 最大的 text 块（折叠态即唯一
+ * 可见的末位正文；工作展开/历史展开态取时序最后的 text）。操作栏（TurnSummary）经
+ * #turn-actions 插槽只挂在该块上：悬停区收窄到 text 块本身，悬浮位随块定位。无 text 块
+ * （纯工具 turn 流式前期）无锚 → 操作栏不渲染。
+ */
+const actionsAnchorFlatIndex = computed<number | null>(() => {
+  let last: number | null = null
+  for (const fb of visibleBlocks.value) {
+    if (fb.block.kind === 'text') last = fb.flatIndex
+  }
+  return last
+})
+
+/** 锚块判定（模板插槽 v-if 与 v-memo deps 共用单点）；run 组块永不命中。 */
+function isActionsAnchor(unit: TraceRenderUnit): boolean {
+  if (isRunGroupBlock(unit) || unit.block.kind !== 'text') return false
+  return unit.flatIndex === actionsAnchorFlatIndex.value
+}
+
 /** 渲染单元 key（run head）：普通块 = flatIndex；run 组块 = 段首锚定 headFlatIndex。 */
 function unitKey(unit: TraceRenderUnit): number {
   return isRunGroupBlock(unit) ? unit.headFlatIndex : unit.flatIndex
@@ -569,10 +597,13 @@ function unitKey(unit: TraceRenderUnit): number {
  * 引用可以全不变而序号从 2 变 1，漏了这两项组头会显示旧序号）；末成员 ref 覆盖 running→completed
  * 内容重组、count/durationMs 覆盖组头刷新、length 覆盖成员增减、hasRunning 覆盖组头执行态翻转。
  * 不用整个 members 数组引用入 deps——每次重组都是新数组，v-memo 将永远失效。
- * 普通块五项 = W21 D-4 既有键清单原样迁移：block.ref 即「身份+内容」——text 是 normalizeContent
+ * 普通块六项 = W21 D-4 既有键清单原样迁移 + [actions-anchor] 锚标记：block.ref 即「身份+内容」
+ * ——text 是 normalizeContent
  * 字符串、thinking/tool 是块对象引用（D-1 不可变语义下内容/status/id 变化 = 新对象替换，引用入键即
  * 覆盖 08 §3.3.1 键清单的 thinking.id / tool.id / content / tool.status）；working/streaming 由
- * assistantStatus 派生。刻意不含 Block 本地折叠 ref（thinkingCollapsed/toolCollapsed）——v-memo deps
+ * assistantStatus 派生。锚标记覆盖操作栏插槽挂载点切换——流式追加/窗口变化使锚在 text 块间移动
+ * 时，旧块摘插槽、新块挂插槽，漏了它被缓存的 vnode 不重渲染，插槽永远不跟着锚走。
+ * 刻意不含 Block 本地折叠 ref（thinkingCollapsed/toolCollapsed）——v-memo deps
  * 在父组件渲染作用域求值，无法引用子组件私有 ref；折叠由 Block 自身响应式驱动（实例经 :key 保活，
  * v-memo 不 gate 子组件内部更新）。sessionId 不入键：跨 session 时 renderKey 不同 → Turn 实例整体
  * 重建，不存在同实例跨 session 复用。
@@ -596,6 +627,7 @@ function unitMemoDeps(unit: TraceRenderUnit): unknown[] {
     unit.block.kind === 'thinking' ? (unit.block.ref as ThinkingBlock).collapsed : undefined,
     assistantById.value.get(unit.assistantId)?.error,
     assistantById.value.get(unit.assistantId)?.timestamp,
+    isActionsAnchor(unit),
   ]
 }
 

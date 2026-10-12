@@ -120,7 +120,19 @@
          streaming-tail 光标在 Turn.vue trace 容器末尾（跟在所有 block 后，不受 contentBlocks 时序影响）。
          [M2 形态统一] 唯一 error 形态 = 追加形态：content 崩溃前正文保持原色（可为空），
          msg.error 独立 danger 行（错误文本只住 error 字段，永不染红正文）。 -->
-    <div v-else-if="type === 'text'" data-testid="block-text" class="group/text flex items-start gap-[8px] text-[length:var(--text-md)] leading-[1.8]" :class="textColorClass">
+    <div v-else-if="type === 'text'" data-testid="block-text" class="group/text relative flex items-start gap-[8px] text-[length:var(--text-md)] leading-[1.8]" :class="textColorClass">
+      <!-- [actions-anchor] turn 级 hover actions 挂载位（Turn.vue 经 #turn-actions 插槽注入，
+           仅末位 text 块携带）。悬浮于本块上方右侧：上方是块间留白与左对齐邻块的行尾空区，
+           右侧是正文换行预留的行尾时刻槽，两向均不遮正文。显隐门控挂 group/text——悬停区 =
+           text 块行本身，TurnMeta/过程行/run 组行悬停不触发；pb 桥接正文→按钮的移动空档，
+           按钮作为本行 DOM 子孙，移入按钮期间 group/text 悬停态不丢失。 -->
+      <span
+        v-if="$slots['turn-actions']"
+        class="absolute bottom-full right-0 z-10 flex pb-1.5 opacity-0 pointer-events-none transition-opacity duration-[var(--duration-fast)] group-hover/text:pointer-events-auto group-hover/text:opacity-100 group-focus-within/text:pointer-events-auto group-focus-within/text:opacity-100"
+        data-testid="turn-actions-anchor"
+      >
+        <slot name="turn-actions" />
+      </span>
       <div class="min-w-0 flex-1">
         <MarkdownRenderer v-if="content" :content="content ?? ''" :session-id="sessionId ?? undefined" :streaming="streaming" />
         <!-- error 独立 danger 行（AlertCircle + msg.error 文本） -->
