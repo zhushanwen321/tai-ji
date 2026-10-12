@@ -47,12 +47,7 @@
           :disabled="loading || row.busy || loadError"
           @update:model-value="onModelChange(row.engine, $event)"
         >
-          <!-- title：显示名常超触发器宽度（truncate 收口后触发器只见省略号），hover 补偿看全名 -->
-          <SelectTrigger
-            class="w-[200px]"
-            :title="row.options.find((m) => m.id === row.current)?.name ?? row.current"
-            :data-testid="`subagent-engine-model-${row.engine}`"
-          >
+          <SelectTrigger class="w-[200px]" :data-testid="`subagent-engine-model-${row.engine}`">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
