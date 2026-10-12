@@ -25,8 +25,8 @@ export interface SubagentEnginesFile {
 
 /**
  * 引擎可选模型清单条目（engine-provider-unification D5；值形状镜像 =
- * zcode-subagent-cli preparer listZcodeModels 返回形态，与 @taiji/shared protocol
- * SubagentEngineModelInfo 字段一致——shared 侧是 wire 形状，本类型是契约面同名物）。
+ * zcode-subagent-cli preparer listZcodeModels 返回形态）。单源声明：@taiji/shared
+ * protocol 经 type-only 直引 re-export 本类型（无第二份声明，漂移结构性不可能）。
  */
 export interface SubagentEngineModelInfo {
   /** 模型全 ref（zcode 形态 providerId/modelId）。 */

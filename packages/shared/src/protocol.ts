@@ -53,7 +53,9 @@ import type { QuotaConfigurePayload } from './quota-types'
 // 直接引用 PlanLifecycleState（canonical = packages/extension-protocol/src/extensions/plan/state-machine，barrel 已 re-export），
 // type-only 零运行时面（shared 不因此获得对该包的运行时依赖；类型解析由 devDependency 承载，
 // plan-protocol.test.ts 的跨包 AssertExact 锁镜像漂移）。
-import type { PlanLifecycleState } from '@zhushanwen/extension-protocol'
+// SubagentEngineModelInfo 同款直引：单源 = extension-protocol subagent-engine 契约面，
+// 消除 shared 侧双声明漂移（engine-provider-unification D5）。
+import type { PlanLifecycleState, SubagentEngineModelInfo } from '@zhushanwen/extension-protocol'
 
 // tts.* 域载荷形状 SSOT 引用（ai-voice-tts 设计 §7.1：域形状归属 tts-types，本文件仅登记 type→payload 映射）
 import type {
@@ -1774,14 +1776,11 @@ export interface SubagentDefaultEngineMutationReply {
   engineId: string
 }
 
-/** 引擎可选模型清单条目（值形状镜像 = zcode-subagent-cli preparer listZcodeModels 返回形态）。
+/** 引擎可选模型清单条目——单源 = @zhushanwen/extension-protocol subagent-engine 契约面
+ *  （顶部 type-only 直引 + 此处 re-export，shared 协议出口对下游形态不变，双声明漂移以
+ *  单源收敛结构性消除）。值形状镜像 = zcode-subagent-cli preparer listZcodeModels 返回形态。
  *  engine-provider-unification D5：settings per-engine 模型清单与写入校验共用该形态。 */
-export interface SubagentEngineModelInfo {
-  /** 模型全 ref（zcode 形态 providerId/modelId，与 resolveZcodeModelRef 校验值同域）。 */
-  id: string
-  /** 展示名（如 `ProviderName · model`）；派生源 provider 无名时缺省。 */
-  name?: string
-}
+export type { SubagentEngineModelInfo }
 
 /** session.setSubagentEngineDefaultModel 的 reply：写 config.json engineDefaults 后的确认回显
  *  （分支二原样存储，engineId/modelRef 回显必需——setSubagentDefaultEngine reply 同款）。 */
