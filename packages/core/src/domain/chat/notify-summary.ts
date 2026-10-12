@@ -241,14 +241,14 @@ export interface FoldedNoticeRow {
 function bashNoticeRow(msg: Message): FoldedNoticeRow | null {
   const bash = parseBackgroundBashDetails(msg.details)
   if (!bash) return null
-  const outcome: NotifyOutcome =
-    bash.endReason === 'timeout'
-      ? 'neutral'
-      : bash.exitCode === null
-        ? 'neutral'
-        : bash.exitCode === 0
-          ? 'success'
-          : 'failed'
+  let outcome: NotifyOutcome
+  if (bash.endReason === 'timeout' || bash.exitCode === null) {
+    outcome = 'neutral'
+  } else if (bash.exitCode === 0) {
+    outcome = 'success'
+  } else {
+    outcome = 'failed'
+  }
   return {
     type: 'bash',
     summary: bash.command,

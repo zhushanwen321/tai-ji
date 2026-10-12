@@ -684,8 +684,6 @@ function codingPlanEntryOfRule(
   }
 }
 
-/** 目录 coding-plan 条目提取：access.accountType 匹配家族且 mode=individual-coding-plan。 */
-
 /** v2 config JSON → providerRules 数组（缺键/形变 → undefined）。 */
 function providerRulesOf(value: Record<string, unknown>): readonly unknown[] | undefined {
   const config = value['config']
