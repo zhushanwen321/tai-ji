@@ -30,7 +30,7 @@
 
 `Sidebar.vue` 的 SegmentedTab「文件」页签渲染 `FileView.vue`（`data-testid="file-view-root"`）。头部行（session 标签 + 分支 + `file-show-ignored-toggle` 开关）与 `file-filter-input` 过滤框固定在滚动区外；滚动区内是加载/错误/空态（`file-loading` / `file-error`+`file-retry` / `file-empty`），树体由 virtua Virtualizer 挂载扁平可见行（`projectVisibleRows` 投影），每行是纯行组件 `FileTreeRow.vue`（`file-tree-dir-{path}` / `file-tree-file-{path}`，文件行含 A/M/D/U git 角标）。无活跃 session 时显示 `file-view-no-session` 空态。
 
-[W28/D-7.2] 结构要点：头部与过滤框移出滚动区是 virtua Virtualizer 的硬约束（parentElement 必须是滚动容器且前方无内容）；树形递归渲染改为「扁平可见行投影 + 虚拟滚动」，万级目录展开只挂载视口 ± 缓冲的行（DOM 行数 < 200）；depth/expanded/changeCount/gitStatus/lineStats 全部由投影预计算，交互经 emit 归位 FileView 层。
+[W28/D-7.2] 结构要点：头部与过滤框移出滚动区是 virtua Virtualizer 的硬约束（parentElement 必须是滚动容器且前方无内容）；树形递归渲染改为「扁平可见行投影 + 虚拟滚动」，万级目录展开只挂载视口 ± 缓冲的行（DOM 行数 < 200）；depth/expanded/childCount/gitStatus/lineStats 全部由投影预计算，交互经 emit 归位 FileView 层。目录徽标（`file-tree-dir-badge-{path}`）按 demo 权威是目录即恒渲染，内容 = 可见直接子项数（childCount）。
 
 ## 3. data-testid 清单
 
@@ -1158,6 +1158,9 @@ ForkGroup（当前会话的「本会话的分支」折叠区）已整体退役�
 | `session-child-count` | SessionItemDisplay.vue | **父条目中性计数徽标**：`childCount > 0` 才渲染（子会话数按 `parentAgentSessionId` 分组纯内存派生，零新协议）；只读、描边 chip、**不用 accent**（accent 在本产品语义是「活跃/点睛」，且已被 `[AI]` 来源徽标占用）；`title` = `sidebar.sessionItem.childCount` |
 | `session-stop-item` | SessionItemContextMenu.vue | 运行中 session 的行菜单「停止」项（软停止；与硬杀态 `session-force-quit-item` 并列且语义不同——abort vs forceQuit → dead） |
 | `session-unread-dot` | SessionItemDisplay.vue（既有元素，**源已扩展**） | 后台完成未读 **或** fork 分支状态变更未读（两源合流，见 §1）；点开该行后消失（两源在同一清除点被清） |
+| `context-assign-label` | SessionItemContextMenu.vue | 行菜单「移动到项目」分组标签行（demo `.ctx-label`；菜单打开即渲染，随 Portal 条件） |
+| `context-assign-project-option` | SessionItemContextMenu.vue | 行菜单「移动到项目」分组项目行（当前归属项行首显 Check 勾标；与 ghost Popover 的 `assign-project-option` 是两个 surface，testid 分开命名避免双命中） |
+| `folder-actions` | SessionList.vue | 目录组头操作区（+ 新建恒渲染 + 批量删除两段式确认；非确认态 hover 显隐 `opacity-0 group-hover/folder:opacity-100`，确认中常显） |
 
 > **不变项**：`session-context-menu` / `session-view-parent-item` / `session-force-quit-item` / `session-icon` / `session-agent-badge` / `session-imported-fresh` / `sidebar-session-sub` / `mark-done-btn` / `quote-to-composer-btn` / `assign-project-btn` / `assign-project-option` / `folder-new-session-btn` / `folder-delete-btn` 语义与触发条件均未变。
 >

@@ -29,19 +29,13 @@
 export interface Project {
   id: string
   name: string
-  /** 最后活跃时间戳（ms）。0 = 未用过。
+  /** 项目分组稳定排序键（ms）。0 = 未记录（稳定殿后，默认项目不受此影响——固定最后）。
    *
-   * setActiveProject(id) 切换 / addProject(name) 新建时更新为 Date.now()。
-   * loadFromStorage 用 `p.lastUsedAt ?? 0` 兼容旧持久化数据（无该字段视为未用过）。
-   * 仅作持久化留痕，不驱动 project 列表排序（2026-09-02 语义修正：点击不改顺序）。 */
+   * 字段名沿用 demo 与旧持久化（projects.json 零转换兼容），现行语义 = 仅 addProject
+   * 新建时写入一次，此后不可变（R6.2 用户裁决 2026-10-11「顺序稳定不置顶」：锚定切换
+   * 只改变展开态，不重排组位置，因此任何切换/使用动作都不得更新该字段）。
+   * 存量数据带有的旧值（历史切换留痕）作为一次性初始排序键，稳定不变。 */
   lastUsedAt: number
-  /** 用户手动排序位（可选，2026-08-29 ProjectSwitcher 3A 拖拽排序，D7）。
-   *
-   * undefined = 未被手动排序（按创建/持久化序稳定排在已排序项目之后）；
-   * 有值 = 按升序参与排列。reorderProject 提交时对整个列表密集重编号 0..n-1，
-   * 不做稀疏编号——删除项目后留下的空洞由下次 drop 自然重编消除。
-   * 持久化随 projects.json 全量替换零转换兼容（WriteBackCache 不感知该字段）。 */
-  userOrder?: number
 }
 
 /** project store 持久化结构（localStorage / 未来 runtime projects.json） */

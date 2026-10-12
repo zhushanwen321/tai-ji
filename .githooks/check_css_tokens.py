@@ -39,6 +39,12 @@ ALLOWED_GLOBAL_ANIMATION_CLASSES = {
     'reka-popover-transition',   # popover 族进出场（Popover/Select/HoverCard 共用，跟随触发点 scale）
     'reka-dialog-transition',    # dialog 居中 modal 进出场（transform 含 translate 居中 + scale）
     'reka-overlay-transition',   # dialog 遮罩纯 opacity 过渡
+    # running 呼吸弧 loader 弧段（ui-optimize-unified 决策 11 / N14）：RUNNING_LOADER_SVG
+    # v-html 注入的 SVG 内部 circle，chat 域 5 组件 7 挂点共用（Block.vue×3 处 +
+    # BashOutputBlock / TurnRail / MarkdownRenderer / BlockSubagent 各 1 处）；v-html
+    # 内容不带 scoped data-v 属性，dasharray+transform 动画只能在全局类声明（keyframes
+    # 同在 style.css 动画 SSOT 区）
+    'ld-arc',
 }
 
 RED = '\033[0;31m'

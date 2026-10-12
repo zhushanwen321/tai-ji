@@ -190,21 +190,88 @@ function sessionFileIdFromName(fileName: string): string {
 }
 
 /**
+ * 会话文件名是否属于目录名 dirName（含解析失配的保守匹配；main 不 import runtime，
+ * 纯本地判定）。
+ *
+ * 主通道 = `sessionFileIdFromName` 解析值精确相等；失配通道 = 真 sid 可能含 `_`（解析
+ * 只取末段），按「首个 `_` 后全串」再比一次——命中即保护（宁可漏清不可误删）。
+ */
+function sessionFileNameMatchesDir(fileName: string, dirName: string): boolean {
+  if (sessionFileIdFromName(fileName) === dirName) return true
+  const stem = fileName.replace(/\.jsonl.*$/, '')
+  const first = stem.indexOf('_')
+  return first !== -1 && stem.slice(first + 1) === dirName
+}
+
+/**
+ * sessions 树枚举/条目探测失败（readdir / statSync）是否按「会话文件可能存在」保守保护：
+ * ENOENT = 目录未建立（pi 延迟写入窗口下合法
+ * 不存在）或枚举后条目已被并发删除（合法窗口）；其他错误码（EACCES 等）= 枚举面未知
+ * → 保守保护并 console.warn 出声（静默保护会让枚举故障不可见）。
+ */
+function readdirFailureMeansSessionFileMayExist(dir: string, err: unknown): boolean {
+  if ((err as NodeJS.ErrnoException | null)?.code === 'ENOENT') return false
+  console.warn(
+    `[images] image cache: 会话树枚举失败（按「可能存在会话文件」保守保护，本拍不清）: ${dir}`,
+    err,
+  )
+  return true
+}
+
+/**
  * 孤儿判据（文件系统级）：cache 目录名（sessionId，纯 uuid = header id）在 pi sessions
  * 目录无对应 session 文件 → 判死。判据只看文件存在性——subagent 虚拟分区历史同存于
  * sessions 目录，天然覆盖。
+ *
+ * 枚举深度 = 生产布局两层（`sessions/<encodeCwd>/<ISO>_<uuid>.jsonl`，pi 按 cwd 自动
+ * 分子目录，shared paths.ts 目录树注释；曾按单层扫描，encodeCwd 目录名不含 `.jsonl`
+ * 致判据恒「孤儿」，2026-10-11 失配修正）。第一层平铺文件兼容检查保留（只增保守不增
+ * 激进）；任一层枚举失败按「可能存在会话文件」保守放行，不判死。
  */
 function isOrphanSessionDir(sessionDirName: string, dirs: ImageCacheDirs): boolean {
   // 缺省 `<dataDir>/agent/sessions`（方案 B 新布局，shared paths getPiSessionsDir SSOT
   // ——与 runtime pi-paths.ts getSessionsDir 同构推导；main 不 import runtime，包边界。
   // 曾手拼错层致判据恒空，U1 修正）。
   const sessionsDir = dirs.sessionsDir ?? getPiSessionsDir(dirs.dataDir)
-  if (!existsSync(sessionsDir)) return false
-  for (const f of readdirSync(sessionsDir)) {
+  let top: string[]
+  try {
+    top = readdirSync(sessionsDir)
+  } catch (e) {
+    // 根层不可枚举 → 保守放行不判死（非 ENOENT 时出声）
+    readdirFailureMeansSessionFileMayExist(sessionsDir, e)
+    return false
+  }
+  for (const entry of top) {
+    const full = join(sessionsDir, entry)
+    let st
+    try {
+      st = statSync(full)
+    } catch (e) {
+      // 条目探测失败与 readdir 失败同口径：ENOENT = 枚举后条目被并发删除的合法窗口
+      // → 跳过该条目；其他错误码（EACCES 等）= 状态未知 → 保守放行不判死并出声
+      if (readdirFailureMeansSessionFileMayExist(full, e)) return false
+      continue
+    }
+    if (st.isFile()) {
+      // 平铺形态兼容（旧数据可能的形态；现役布局文件在第二层）
+      if (sessionFileNameMatchesDir(entry, sessionDirName)) return false
+      continue
+    }
+    if (!st.isDirectory()) continue
+    let files: string[]
+    try {
+      files = readdirSync(full)
+    } catch (e) {
+      // encodeCwd 层枚举失败：ENOENT 跳过该目录；其他错误码保守放行不判死
+      if (readdirFailureMeansSessionFileMayExist(full, e)) return false
+      continue
+    }
     // session 文件名形态 `<ISO时间戳>_<uuid>.jsonl`（sidecar `<同前缀>.jsonl.<suffix>`），
     // sessionId = 末段 `_` 后 uuid 段——曾按 `f.startsWith(sessionDirName + '.')` 前缀
     // 比对，与真实命名恒 false 致判据失明（U2 修正）。
-    if (f.includes('.jsonl') && sessionFileIdFromName(f) === sessionDirName) return false
+    for (const f of files) {
+      if (sessionFileNameMatchesDir(f, sessionDirName)) return false
+    }
   }
   return true
 }

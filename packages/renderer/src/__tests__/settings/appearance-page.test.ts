@@ -58,7 +58,12 @@ describe('AppearancePage 渲染 gate', () => {
     expect(h1?.textContent).toBe('外观') // settings.menu.appearance
     const html = document.body.innerHTML
     expect(html).not.toContain('settings.menu.appearance') // t() 命中后不应出现 raw key
-    expect(html).toContain('分区字号') // settings.appearance.regionFontTitle
+    // [w2] demo AppearanceSection 权威结构 = 首张无卡头卡 6 行（外观模式/字体大小/三分区/终端），
+    // 原「分区字号」卡头（settings.appearance.regionFontTitle）随重组移除；
+    // 配色主题卡头副标题 = gc-sub（settings.system.themePresetHint）。
+    // 「分区字号」字样在页头描述（appearanceDesc）中仍合法存在，hint 断言用 regionFontHint 独有片段。
+    expect(html).toContain('太极配色 · 即时切换（点击即生效，无需保存）')
+    expect(html).not.toContain('按界面区域独立调整字号') // regionFontHint 不再渲染
     expect(html).toContain('左侧边栏') // settings.appearance.region.sidebar
     expect(html).toContain('对话流')
     expect(html).toContain('侧边抽屉')
@@ -76,18 +81,21 @@ describe('AppearancePage 渲染 gate', () => {
     expect(document.body.innerHTML).toContain('--bg')
   })
 
-  it('玄主题行渲染 D3 定稿：label 含「弱蓝灰」、swatch 第一格 = #a5adc2（V4⑤ 单测侧落点）', async () => {
+  it('玄主题行渲染：label 含「青玉」、swatch 第一格 = demo 终态青玉 #7fb89c（V4⑤ 单测侧落点）', async () => {
     wrapper = mountPage()
     await flushPromises()
-    // 玄 preset='' → testid 为 appearance-theme-（模板 `appearance-theme-${th.preset}`）
-    const xuan = document.body.querySelector<HTMLElement>('[data-testid="appearance-theme-"]')
+    // 玄 preset='' → testid 回落 theme（模板 `appearance-theme-${th.preset || th.theme}`，qs chip 同款）
+    const xuan = document.body.querySelector<HTMLElement>('[data-testid="appearance-theme-dark"]')
     expect(xuan, '玄主题按钮应存在').toBeTruthy()
-    // label：改值后「纯灰」与实跑不符，已同步为「弱蓝灰」（含「纯灰」= 不通过）
-    expect(xuan!.textContent).toContain('太极 · 玄（暗 · 弱蓝灰 · 默认）')
+    // 玄/皓 preset 均为空串，回落后 testid 不撞名（玄=dark、皓=light 各唯一）
+    expect(document.body.querySelectorAll('[data-testid="appearance-theme-dark"]')).toHaveLength(1)
+    expect(document.body.querySelector('[data-testid="appearance-theme-light"]')).toBeTruthy()
+    // label 与 demo 文案一致：色相描述 = 青玉（与 swatch 首格 #7fb89c 名实一致）
+    expect(xuan!.textContent).toContain('太极 · 玄（暗 · 青玉 · 默认）')
     expect(xuan!.textContent).not.toContain('纯灰')
-    // swatch 第一格（accent 位）= D3 定稿值；style 序列化形态按环境可能是 hex 或 rgb
+    // swatch 第一格（accent 位）= demo 终态职能分色青玉值；style 序列化形态按环境可能是 hex 或 rgb
     const firstSwatchStyle = xuan!.querySelector('span[style]')?.getAttribute('style') ?? ''
-    expect(/a5adc2|rgb\(\s*165,\s*173,\s*194\s*\)/.test(firstSwatchStyle), `swatch 第一格 style=${firstSwatchStyle}`).toBe(true)
+    expect(/7fb89c|rgb\(\s*127,\s*184,\s*156\s*\)/.test(firstSwatchStyle), `swatch 第一格 style=${firstSwatchStyle}`).toBe(true)
   })
 })
 

@@ -2,21 +2,25 @@
   <!--
     定位契约：absolute 右上角锚定最近 positioned 祖先（非视口 fixed）——右上角避开 composer，
     锚在 chat 主区（main-area）内时 drawer 打开随主区收窄左移，恒不遮 drawer。
+    [M7b demo 对照] demo ToastHost 为底部居中 fixed + composerH 避让——本容器定位不跟随：
+    改底部需引入 composer 高度数据通路（逻辑改动，超「纯样式」红线），且右上定位承担
+    「不遮 drawer」功能契约；卡片形态（底色/边框/圆角/阴影/堆叠 gap/进出场动效）已对齐 demo。
+    z-index = --z-toast(2000)（demo 梯队：toast 低于 banner；原裸数字 9999 档不在梯队）。
     挂载点两分支（互斥）：PanelContainer main-area（chat 主区）/ MainPanel
     （settings view 兜底）。
   -->
-  <div ref="containerRef" class="absolute inset-x-4 top-4 z-[9999] flex flex-col items-end gap-2.5 pointer-events-none">
+  <div ref="containerRef" class="absolute inset-x-4 top-4 z-[var(--z-toast)] flex flex-col items-end gap-2 pointer-events-none">
     <!-- RD-3#7 溢出折叠摘要：droppedCount 消费方——在列上限丢弃的通知以「还有 N 条」显形，
          不再只 console.warn 无 UI 留痕。可关闭（resetDropped 归零，给累计计数一个重置出口）。 -->
     <div
       v-if="droppedCount > 0"
       data-testid="toast-overflow-summary"
-      class="pointer-events-auto flex w-fit max-w-[min(360px,100%)] items-center gap-1.5 rounded-lg border border-border bg-surface py-1.5 pl-3 pr-1.5 text-[11.5px] text-neutral-dim shadow-lg"
+      class="pointer-events-auto flex w-fit max-w-[min(360px,100%)] items-center gap-1.5 rounded-lg border border-border bg-bg-elevated py-1.5 pl-3 pr-1.5 text-[length:var(--text-2xs)] text-neutral-mid shadow-2"
     >
       <span data-testid="toast-overflow-text" class="select-text">{{ t('panel.message.toastDropped', { count: droppedCount }) }}</span>
       <Button
         variant="ghost"
-        class="ml-0.5 size-5 shrink-0 rounded-sm p-0 opacity-60 hover:opacity-100"
+        class="ml-0.5 size-5 shrink-0 rounded-[var(--radius-xs)] p-0 opacity-60 hover:opacity-100"
         :aria-label="t('panel.message.toastDroppedDismiss')"
         @click="resetDropped"
       >
@@ -26,12 +30,12 @@
     <TransitionGroup
       tag="div"
       name="toast"
-      class="flex flex-col items-end gap-2.5"
+      class="flex flex-col items-end gap-2"
     >
     <div
       v-for="t in toasts"
       :key="t.id"
-      class="pointer-events-auto flex w-fit max-w-[min(360px,100%)] items-start gap-2.5 rounded-lg border border-border bg-surface py-2.5 pl-3 pr-2 shadow-lg"
+      class="pointer-events-auto flex w-fit max-w-[min(360px,100%)] items-start gap-2.5 rounded-lg border border-border bg-bg-elevated py-2.5 pl-3 pr-2 shadow-2"
       :class="toastClass(t.type)"
       @mouseenter="pause(t.id)"
       @mouseleave="resume(t.id)"
@@ -78,7 +82,7 @@
           v-if="t.sessionLabel && t.sessionId"
           variant="ghost"
           :data-testid="`toast-session-${t.id}`"
-          class="h-auto max-w-full justify-start gap-1 self-start rounded-sm px-0 py-0 text-left text-[11px] font-normal leading-4 text-neutral-dim hover:bg-transparent hover:text-neutral-fg focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent focus-visible:shadow-none active:scale-100 [&_svg]:h-3 [&_svg]:w-3"
+          class="h-auto max-w-full justify-start gap-1 self-start rounded-sm px-0 py-0 text-left text-[length:var(--text-2xs)] font-normal leading-4 text-neutral-dim hover:bg-transparent hover:text-neutral-fg focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent focus-visible:shadow-none active:scale-100 [&_svg]:h-3 [&_svg]:w-3"
           @click.stop="onJump(t.sessionId, t.id)"
         >
           <span class="truncate">{{ t.sessionLabel }}</span>
@@ -96,14 +100,14 @@
         <!-- 消息体：pre-line 渲染 \n，最多 5 行 -->
         <p
           :data-testid="`toast-message-${t.id}`"
-          class="whitespace-pre-line break-words text-[12.5px] leading-[1.55] line-clamp-5 select-text"
+          class="whitespace-pre-line break-words text-[length:var(--text-xs)] leading-[1.55] line-clamp-5 select-text"
           :class="textClass(t.type)"
         >{{ t.message }}</p>
       </div>
 
       <Button
         variant="ghost"
-        class="ml-1 size-6 shrink-0 rounded-sm p-0 opacity-60 hover:opacity-100"
+        class="ml-1 size-6 shrink-0 rounded-[var(--radius-xs)] p-0 opacity-60 hover:opacity-100"
         @click="remove(t.id)"
       >
         <svg class="size-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
@@ -143,10 +147,19 @@ const disposeSurfaceRegistration = registerModalSurface({
 })
 onBeforeUnmount(disposeSurfaceRegistration)
 
-/** toast 类型 → 边框强调色（背景统一 bg-surface，克制：色彩只落在 icon 与正文） */
+/**
+ * toast 类型 → 边框强调色（背景统一 bg-bg-elevated，克制：色彩只落在 icon 与正文）。
+ * 取用来源登记（两权威分工）：
+ * - 卡形态（底色 bg-bg-elevated / 常态边框 border-border / 圆角 rounded-lg / 阴影 shadow-2 /
+ *   卡宽 max-w / padding）= demo 基元页 .pg-prim .toast 族；类型边框 = color-mix(warn/danger
+ *   40%, transparent)（demo .toast.t-error/.t-warning 同参——tailwind preset 色值为裸 var()，
+ *   /N 透明度修饰符零生成，故走 color-mix 任意值类）。
+ * - 容器定位（absolute 右上，有意偏离 demo 底部居中 fixed，理由见文件头定位契约）/ 堆叠
+ *   gap-2 / 进出场动效（opacity + translateY(8px)）= demo 真宿主 ToastHost.vue。
+ */
 function toastClass(type: 'error' | 'info' | 'warning'): string {
-  if (type === 'error') return 'border-danger/40'
-  if (type === 'warning') return 'border-warn/40'
+  if (type === 'error') return 'border-[color-mix(in_oklch,var(--danger)_40%,transparent)]'
+  if (type === 'warning') return 'border-[color-mix(in_oklch,var(--warn)_40%,transparent)]'
   return 'border-border'
 }
 
@@ -165,8 +178,11 @@ async function onJump(sessionId: string, toastId: number): Promise<void> {
 </script>
 
 <style scoped>
+/* 进出场动效对齐 demo ToastHost.vue：opacity + translateY(8px)，双向 --duration(200ms)
+   （原 enter 200/leave 120 不对称与 translateX(20px) 横滑形态随 demo 权威退役）。
+   toast-enter-from 与 leave-to 起止位同点：demo .toast-enter-from/.toast-leave-to 同款。 */
 .toast-enter-active { transition: opacity var(--duration) var(--ease), transform var(--duration) var(--ease); }
-.toast-leave-active { transition: opacity var(--duration-fast) var(--ease), transform var(--duration-fast) var(--ease); }
-.toast-enter-from { opacity: 0; transform: translateX(20px); }
-.toast-leave-to { opacity: 0; transform: translateX(20px); }
+.toast-leave-active { transition: opacity var(--duration) var(--ease), transform var(--duration) var(--ease); }
+.toast-enter-from { opacity: 0; transform: translateY(8px); }
+.toast-leave-to { opacity: 0; transform: translateY(8px); }
 </style>

@@ -1,19 +1,17 @@
 <template>
   <!--
-    L0 Shell · zcode-demo 拓扑（shell/spec.md SSOT）
-    base 平铺（bg-bg）+ aside 透明融合 + main float-panel 浮起。
-    traffic light 安全区在 AsideRegion 内（padding-top:52px 恒定，spec §三）。
+    L0 Shell · demo Workbench.vue .app 拓扑（ui-replica M2：demo 为唯一视觉权威）。
+    base 平铺（bg-bg）+ aside 透明融合 + main 三卡浮起。
+    padding 对齐 demo .app { padding: 4px 4px 4px 0 }：上/右/下 4px，左 0（aside 透明融合直接贴窗口左缘，
+    侧栏内容边距由 Sidebar 自持）。traffic light 安全区在 AsideRegion 内（padding-top:44px 恒定）。
   -->
-  <!-- padding：p-1(4) 四周统一 4px（紧凑但有呼吸，上下左右对称）。
-       注意：左右 4 使 aside 左缘 x=4，与红黄绿 x=8 有 4px 差（红黄绿位置由 main trafficLightPosition 控制，见 window-factory）；
-       若要对齐需调 trafficLightPosition.x 8→4（main 改动，需重启 dev）。
+  <!-- gap 对齐 demo .app { gap: 8px }：aside 与主面板卡间 8px（折叠态 aside 归零，主面板左缘 = gap 8px，与 demo 折叠态同值）。
+       折叠态 !gap-0 的 !important 必须：gap-0 与 gap-2 同特异性，Tailwind 源码顺序 gap-0 先于 gap-2 生成，不加 ! 会被 gap-2 永久覆盖（死代码 bug）。
        圆角：rounded-[10px] 仅 mac（三平台圆角策略，跨平台窗口外壳设计 §6.2）——mac 系统圆角 + 应用内圆角共线保留；
        win/linux 是不透明方形窗口，应用内圆角只会产生四角色差小方块，故非 mac 不渲染该类（类绑定，拓扑测试两态断言）。
-       窗口侧不加任何圆角配置键（roundedCorners 默认即 true 是 no-op，已否决）。
-       折叠态 !gap-0：收起态 aside 归零，padding 保持 p-1（四周 4px，和展开一致）。
-       !important 必须：gap-0 与 gap-3 同特异性，Tailwind 源码顺序 gap-0 先于 gap-3 生成，不加 ! 会被 gap-3 永久覆盖（死代码 bug）。 -->
+       窗口侧不加任何圆角配置键（roundedCorners 默认即 true 是 no-op，已否决）。 -->
   <div
-    class="app-shell relative flex h-screen w-screen gap-3 overflow-hidden bg-bg p-1"
+    class="app-shell relative flex h-screen w-screen gap-1 overflow-hidden bg-bg py-1 pr-1"
     :class="[isMac ? 'rounded-[10px]' : '', sidebar.collapsed ? '!gap-0' : '']"
     data-testid="app-shell"
   >
@@ -29,7 +27,7 @@
          实例化时立即触发 loader（Vue runtime-core setup 内 load()），SettingsModal 内部 v-if="open"
          挡不住启动期加载；首开设置才拉取设置页树 chunk（首次触发才出现在 Network）。
          内部自动重试（D6）经 retryKey 重挂承载（见 script 注释）。 -->
-    <SettingsModal v-if="settingsOpen" :key="settingsRetryKey" v-model:open="settingsOpen" />
+    <SettingsModal v-if="settingsOpen" :key="settingsRetryKey" v-model:open="settingsOpen" :initial-section="settingsSection" />
     <!-- workflow-viz overlay 全局单例容器（workflow-visualization U6/D8）：关闭态壳 v-if
          不渲染（DOM 零痕迹，像素轨基线安全）；盖全屏跨双 pane，绑定发起 pane 的 session。 -->
     <WorkflowVizOverlayHost />
@@ -43,6 +41,7 @@ import { useNavigationStore } from '@/stores/navigation'
 import { useSessionStore } from '@/stores/session'
 import { detectPlatform, usePlatformChrome } from '@/composables/effects/usePlatformChrome'
 import { useSettingsShell } from '@/composables/shell/useSettingsShell'
+import { useNarrowWindowCollapse } from '@/composables/shell/useNarrowWindowCollapse'
 import { useSidebar } from '@/composables/features/sidebar/useSidebar'
 import AppNavControls from './AppNavControls.vue'
 import AsideRegion from './AsideRegion.vue'
@@ -65,10 +64,9 @@ useKeyOrchestrator()
 // 承接（createLazyChunkRetry：3 次 × 300ms 递增退避 + 失败 URL 提取 ?t=N cache-busting 绕过
 // module map 记忆化，机制与探针证据见 lazy-chunk-retry.ts 头注）；穷尽才呈现错误态（overlay
 // 形态文案给「重开恢复」指引），重开设置即重置计数获得新一轮自动重试。
-// retryKey 重挂保留：重试由 retryKey 重挂**单通道**驱动（不调 onError 的 userRetry——Vue 实装
-// 证实 userRetry 重跑的 load promise 无人 set loaded.value、只 userRetry UI 恒卡错误态；且双通道
-// 会产生幽灵 loader 双触发），重挂的新 wrapper setup 重新跑 loader、成功即渲染（机制详见
-// lazy-chunk-retry.ts 头注「重试驱动形态」）。
+// 重试驱动形态（单一描述以 lazy-chunk-retry.ts 头注「重试驱动形态」为准，本处不复述机制）：
+// 退避到点时 userRetry() + retryKey++ **双要素同调**，缺一即卡死（链恒 pending / loaded 不置位）；
+// 幽灵 loader 已由新 wrapper 短路共享排除。
 // [W31 review minor-4] loading/error 占位必须 overlay 形态（fixed 全屏遮罩）：本组件挂载点是根
 // div `flex gap-3` 的 flex 子项，默认形态占位（h-full w-full、无定位）会参与布局流——error 态
 // 永久挤压 MainPanel、loading 超 200ms 短暂挤压。defineAsyncComponent 的 loading/error 组件
@@ -97,9 +95,14 @@ const { syncSessionToPanel } = useSidebar()
 // 驱动根节点 rounded-[10px] 仅 mac 渲染；jsdom/真实模块回退 'mac'，mac 行为零变化。
 const isMac = detectPlatform() === 'mac'
 
-/** Settings modal 开关（⌘, / sidebar 用户区触发） */
+/** Settings modal 开关（⌘, / sidebar 用户区触发；带分区参数 = 直达对应 nav 分区，
+ *  侧栏底部「远程连接」钮经此开到 remote-access——demo 独立远程 modal 的真实功能等价接线） */
 const settingsOpen = ref(false)
-provide('openSettings', () => { settingsOpen.value = true })
+const settingsSection = ref<string | undefined>(undefined)
+provide('openSettings', (section?: string) => {
+  settingsSection.value = section
+  settingsOpen.value = true
+})
 
 // 平台 + 全屏态：data-platform 注入 <html>（usePlatformChrome）；全屏态经 isFullscreen ref 响应式通路消费（TrafficLight opacity / AppNavControls left），不设 data-fullscreen 属性。
 usePlatformChrome()
@@ -108,6 +111,10 @@ usePlatformChrome()
 // （挂常驻订阅 + 同步 system 偏好）+ provide 3 个 ui 注入 key + watch system.theme 挂/卸 matchMedia。
 // core 零 DOM；壳持 platform/transport 注入 + DOM 副作用。幂等（core 模块级单例）。
 useSettingsShell()
+
+// 窄窗自动折叠（demo shell spec §3.6）：≤960px 进入断点折叠侧栏、离开不强制展开、
+// 首屏窄窗同步折叠；折叠态真源与持久化归 sidebar store，本 composable 只写该单键。
+useNarrowWindowCollapse()
 
 // 导航栈指针变化 → 同步 session.activeId + panel 载入（shell spec §八.5 G3-003「历史状态正确恢复」）。
 // 覆盖 ⌘[/⌘] 与 AppNavControls 后退/前进：pointer 变后若落在 chat+sessionId 条目，恢复该 session 到 panel。

@@ -119,7 +119,7 @@ function changeBadgeClass(status: FileChange['status']): string {
     added: 'bg-success-soft text-success',
     modified: 'bg-info-soft text-info',
     deleted: 'bg-danger-soft text-danger',
-    unmerged: 'bg-danger/20 text-danger ring-1 ring-danger/40',
+    unmerged: 'bg-[color-mix(in_oklch,var(--danger)_20%,transparent)] text-danger ring-1 ring-[color-mix(in_oklch,var(--danger)_40%,transparent)]',
   }[status]
 }
 

@@ -2,19 +2,30 @@
  * ContextChipsBar 组件单测 —— W4 props/emit 重构（从本地 ref([]) 改 defineProps items + emit remove）。
  *
  * 覆盖：
- * - TC8: props items 含 image → 渲染 image chip（ImageIcon + chip-label 显 name + text-reasoning 色），
- *         点 × → emit('remove', path)
+ * - TC8: props items 含 image → 渲染 image chip（ImageIcon + chip-label 显 name），点 × → emit('remove', path)
+ * - 统一中性档：image 与 @/# 同为 --mid 中性（demo .ctxchip 22px 档无语义色分叉，紫色分叉已退役）
  * - 空数组：整行 v-if 自隐藏（不渲染外层容器）
  *
- * [窄宽容错] chip 宽 `max-w-[min(180px,100%)]` + `min-w-0`：容器窄于 180px 时 chip 跟着收缩，
+ * [窄宽容错] chip 宽 `max-w-[min(200px,100%)]`：容器窄于 200px 时百分比盖帽把 chip 压到容器宽，
  *   × 按钮保持可达（旧 `max-w-[180px] shrink-0` 在窄盒里被容器 overflow-hidden 切掉右半）。
- *   内层 name span `min-w-0` + chip `:title` 兜住被截断的全名。
+ *   截断的真实机制 = max-w 盖帽（shrink-0 只管多 chip 溢出走 wrap，chip 级 min-w-0 在其下
+ *   恒无效、已删）；truncate 生效的真实条件 = 内层 name span `min-w-0`。chip `:title` 兜住
+ *   被截断的全名。chip 边框走 `--chip-border`（两档同步契约——与行内档同族同变，不直引 hairline）。
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/panel/context-chips-bar.test.ts
  */
 import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
 import ContextChipsBar from '@/components/panel/ContextChipsBar.vue'
+
+
+/** chip 中性档断言单源（demo .ctxchip 无语义色分叉：text-neutral-mid 在、text-reasoning 不在）。 */
+function expectChipNeutral(wrapper: { findAll: (s: string) => { text: () => string; classes: () => string[] }[] }, name: string) {
+  const chip = wrapper.findAll('span').find((s) => s.text().includes(name))
+  expect(chip).toBeTruthy()
+  expect(chip!.classes()).toContain('text-neutral-mid')
+  expect(chip!.classes()).not.toContain('text-reasoning')
+}
 
 describe('ContextChipsBar (W4 props/emit)', () => {
   it('空 items → 整行 v-if 自隐藏，不渲染外层容器', () => {
@@ -23,7 +34,7 @@ describe('ContextChipsBar (W4 props/emit)', () => {
     expect(wrapper.find('div.flex-wrap').exists()).toBe(false)
   })
 
-  it('TC8: items 含 image → 渲染 chip（label 显 name + text-reasoning）', () => {
+  it('TC8: items 含 image → 渲染 chip（label 显 name，统一中性档）', () => {
     const wrapper = mount(ContextChipsBar, {
       props: {
         items: [{ id: '/tmp/a.png', name: 'a.png', type: 'image' }],
@@ -33,10 +44,8 @@ describe('ContextChipsBar (W4 props/emit)', () => {
     expect(wrapper.find('div.flex-wrap').exists()).toBe(true)
     // chip-label 显 name
     expect(wrapper.text()).toContain('a.png')
-    // image chip 带 text-reasoning class（第一个 span chip）
-    const chip = wrapper.findAll('span').find((s) => s.text().includes('a.png'))
-    expect(chip).toBeTruthy()
-    expect(chip!.classes()).toContain('text-reasoning')
+    // 统一中性档（demo .ctxchip 无语义色分叉）：紫色分叉已退役，image 同 --mid 中性
+    expectChipNeutral(wrapper, 'a.png')
   })
 
   it('TC8: 点 × 按钮 → emit remove 带 id（=path）', async () => {
@@ -54,29 +63,31 @@ describe('ContextChipsBar (W4 props/emit)', () => {
     expect(removeEvents![0]).toEqual(['/tmp/a.png'])
   })
 
-  it('非 image 类型（@/#）→ 不带 text-reasoning class', () => {
+  it('非 image 类型（@/#）→ 同为中性档（无类型分叉）', () => {
     const wrapper = mount(ContextChipsBar, {
       props: {
         items: [{ id: 'foo.ts', name: 'foo.ts', type: '#' }],
       },
     })
-    const chip = wrapper.findAll('span').find((s) => s.text().includes('foo.ts'))
-    expect(chip).toBeTruthy()
-    expect(chip!.classes()).not.toContain('text-reasoning')
+    expectChipNeutral(wrapper, 'foo.ts')
   })
 
-  it('窄宽容错：chip 宽随容器收缩（max-w 用 min() 而非固定 180px），不写死上限', () => {
+  it('窄宽容错：chip 宽随容器收缩（max-w 用 min() 而非固定 200px），不写死上限', () => {
     const wrapper = mount(ContextChipsBar, {
       props: { items: [{ id: 'a.ts', name: 'a.ts', type: '#' }] },
     })
     const chip = wrapper.findAll('span').find((s) => s.text().includes('a.ts'))!
     const cls = chip.classes().join(' ')
-    // 上限仍是 180px，但允许收到 100%（容器更窄时跟着缩）——固定 180px 会在窄盒里被裁
-    expect(cls).toContain('max-w-[min(180px,100%)]')
-    expect(cls).not.toContain('max-w-[180px]')
-    // chip 自身可收缩 + 内层 name span 可收缩（truncate 生效的前提）
-    expect(cls).toContain('min-w-0')
+    // 上限仍是 200px，但允许收到 100%（容器更窄时跟着缩）——固定 200px 会在窄盒里被裁
+    expect(cls).toContain('max-w-[min(200px,100%)]')
+    expect(cls).not.toContain('max-w-[200px]')
+    // 收缩由 max-w 盖帽承担；chip 级 min-w-0 在 shrink-0 下恒不生效（永不收缩则最小宽无约束机会），禁回流
+    expect(cls).not.toContain('min-w-0')
+    // 内层 name span 可收缩才是 truncate 生效的前提
     expect(chip.find('span.truncate').classes()).toContain('min-w-0')
+    // 边框走两档同步契约变量（与行内档同族同变），不直引 hairline
+    expect(cls).toContain('border-[color:var(--chip-border)]')
+    expect(cls).not.toContain('border-hairline')
   })
 
   it('窄宽容错：被截断的全名经 chip title 可达（不「无声裁切」）', () => {

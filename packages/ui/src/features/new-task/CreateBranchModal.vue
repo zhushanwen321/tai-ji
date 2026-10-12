@@ -94,7 +94,7 @@ function onCancel(): void {
 
 <template>
   <Dialog :open="isOpen" @update:open="onOpenChange">
-    <DialogContent class="sm:max-w-[560px]">
+    <DialogContent class="sm:max-w-[520px]">
       <DialogHeader>
         <DialogTitle>{{ t('newTask.createBranch.title') }}</DialogTitle>
         <DialogDescription>
@@ -102,8 +102,9 @@ function onCancel(): void {
         </DialogDescription>
       </DialogHeader>
 
-      <form class="mt-2 space-y-3" @submit.prevent="onSubmit">
-        <div class="space-y-1.5">
+      <!-- 表单节奏对齐 demo 弹窗语言（cpop）：标题下 12px、行距 10px、label↔input 4px、动作区上距 16px -->
+      <form class="mt-3 space-y-2.5" @submit.prevent="onSubmit">
+        <div class="space-y-1">
           <Label for="branch-name-input">{{ t('newTask.createBranch.nameLabel') }}</Label>
           <Input
             id="branch-name-input"
@@ -116,20 +117,20 @@ function onCancel(): void {
           <p
             v-if="showFormatError"
             data-testid="branch-name-error"
-            class="text-[12px] text-danger"
+            class="text-[length:var(--text-xs)] text-danger"
           >
             {{ t('newTask.createBranch.nameValidation') }}
           </p>
         </div>
 
-        <p class="text-[12px] text-neutral-dim">{{ t('newTask.createBranch.onlyHeadHint') }}</p>
+        <p class="text-[length:var(--text-xs)] text-neutral-dim">{{ t('newTask.createBranch.onlyHeadHint') }}</p>
 
         <!-- 提交失败错误（D-7 留 modal 显错） -->
-        <p v-if="errorMsg" data-testid="error-msg" class="text-[12px] text-danger">
+        <p v-if="errorMsg" data-testid="error-msg" class="text-[length:var(--text-xs)] text-danger">
           {{ errorMsg }}
         </p>
 
-        <div class="flex justify-end gap-2 pt-1">
+        <div class="flex justify-end gap-2 pt-4">
           <Button type="button" variant="secondary" @click="onCancel">{{ t('common.cancel') }}</Button>
           <Button data-testid="submit-btn" type="submit" :disabled="!canSubmit">
             {{ t('newTask.createBranch.createBtn') }}

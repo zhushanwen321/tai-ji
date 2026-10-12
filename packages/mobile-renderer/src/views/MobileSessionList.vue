@@ -233,7 +233,7 @@ async function onRenameSubmit(): Promise<void> {
 
     <!-- 动作菜单（长按任意条目 / 点 dead 条目引导；底部 sheet 形态对齐 NewTaskSheet 先例） -->
     <div v-if="menuSession" class="fixed inset-0 z-50 flex flex-col justify-end" data-testid="mobile-session-menu">
-      <div class="absolute inset-0 bg-bg/60" data-testid="mobile-session-menu-backdrop" @click="closeMenu" />
+      <div class="absolute inset-0 bg-[color-mix(in_oklch,var(--bg)_60%,transparent)]" data-testid="mobile-session-menu-backdrop" @click="closeMenu" />
       <div class="relative flex flex-col gap-1 rounded-t-lg border-t border-[var(--border)] bg-bg-input p-3" data-testid="mobile-session-menu-sheet">
         <span class="truncate px-2 pb-1 text-sm font-medium text-neutral-fg">{{ menuSession.label }}</span>
         <Button
@@ -256,7 +256,7 @@ async function onRenameSubmit(): Promise<void> {
 
     <!-- 重命名表单（动作菜单二级；Input 组件，禁原生表单元素） -->
     <div v-if="renameOpen" class="fixed inset-0 z-50 flex flex-col justify-end" data-testid="mobile-session-rename">
-      <div class="absolute inset-0 bg-bg/60" data-testid="mobile-session-rename-backdrop" @click="renameOpen = false" />
+      <div class="absolute inset-0 bg-[color-mix(in_oklch,var(--bg)_60%,transparent)]" data-testid="mobile-session-rename-backdrop" @click="renameOpen = false" />
       <div class="relative flex flex-col gap-3 rounded-t-lg border-t border-[var(--border)] bg-bg-input p-4" data-testid="mobile-session-rename-form">
         <span class="text-sm font-medium text-neutral-fg">{{ t('mobile.sessionList.renameTitle') }}</span>
         <Input

@@ -5,7 +5,7 @@
  * 统一 DirSelectPopover（打开文件夹 / 远程连接）与 BranchSelectPopover（创建分支 / Git 图谱）
  * 逐字相同的 Button markup：基础类 + hover 高亮。与 PopoverListItem 的差异：无选中态
  * （动作无「当前值」概念），结构固定为单 leading-icon + 单行 label。
- * 共享基础类抽自 composables/logic/popover-styles.ts。
+ * 共享基础类抽自本目录 styles.ts（POPOVER_LIST_ITEM_CLASS）。
  */
 // ui 包内相对导入（不经 @taiji/ui 顶层 barrel）：primitives 是顶层 barrel 的
 // 再导出来源，顶层 barrel 自引用会闭合循环依赖环

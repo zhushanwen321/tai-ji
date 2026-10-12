@@ -40,9 +40,6 @@ export default {
     toggleSidebarAria: 'Toggle sidebar',
     back: 'Back',
     forward: 'Forward',
-    workingDir: 'Working directory',
-    branch: 'Branch',
-    copySessionFile: 'Copy session file path',
     // Plugin header action buttons (HeaderActionsHost, E13 tri-state tooltip; plugin-header-action-modal-points AP-1)
     pluginActionExtensionNotLoaded: 'Required extension not loaded in this session',
     pluginActionRestoring: 'Session restoring, availability unknown',
@@ -68,10 +65,21 @@ export default {
     forkChip: 'Sends to a new branch · isolated from main line',
     forkSend: 'fork & send',
     forkExit: 'Exit fork mode',
+    // Staging banner two-part copy (demo .mode-banner form: bold title + " · " + description).
+    // [HISTORICAL] the former mode-chip single-key label (forkChip/handoffChip) and placeholder
+    // swap (forkHint/handoffHint) presentation channels retired with the banner form
+    forkBannerTitle: 'Fork new branch',
+    forkBannerDesc: 'Your input will go to a new branch, isolated from the main line',
     handoffHint: 'Enter text to send as the first message in the new session (optional)… (⏎ handoff & send, Esc to exit)',
     handoffChip: 'Hand off to new session · your input goes to the new session',
     handoffSend: 'Hand off & send to new session',
     handoffExit: 'Exit handoff mode',
+    handoffBannerTitle: 'Handoff',
+    handoffBannerDesc: 'On send, a session summary is generated and handed off to a new session to continue',
+    // Handoff entry/send guard toast (handoff-mode.ts enterGuard/beforeSend: blocked while the
+    // source session is streaming). [HISTORICAL] key referenced since the D8 generalization but
+    // missing from both locales (toast showed the bare key); added in the same batch
+    handoffBusy: 'Session is busy, handoff is unavailable right now',
     bashPlaceholder: 'Run bash command… (!! prefix excludes from context)',
     // Composer shortcut action table copy feedback (composer-pi-shortcuts decision 4 / §3.5)
     copyLastReply: 'Copied last reply',
@@ -97,6 +105,10 @@ export default {
     blockScrollExpandAll: 'Expand all',
     // Process-block (third family) header prefixes and detail-bar stats
     thinkingBlock: 'Thinking',
+    // N6 thinking-row duration (ui-optimize-unified decision 8): tail slot "Lasted Ns", mono
+    // dim; duration derived from ThinkingBlock.startTime/endTime diff (segment not rendered
+    // when either value is missing)
+    thinkingDuration: 'Lasted {duration}',
     subagent: 'Subagent',
     metaLines: '{n} lines',
     metaChars: '{n} chars',
@@ -134,6 +146,7 @@ export default {
     respawnRetry: 'Retry recovery',
     respawnRetryFailed: 'Recovery failed — try again later or create a new session',
     dispatching: 'Thinking…',
+    waitingResponse: 'Waiting for response',
     railInProgress: 'in progress…',
     // [RD-2#1 render error boundary] per-item failure placeholder row + retry; global render error toast
     itemRenderFailed: 'This item failed to render',
@@ -143,7 +156,7 @@ export default {
     toastDropped: '{count} more notification(s) hidden',
     toastDroppedDismiss: 'Dismiss collapsed-notification notice',
     startConversation: 'Start a conversation, or select a session from the left',
-    scrollToBottom: 'Scroll to bottom',
+    scrollToBottom: 'Back to latest',
     // [system-notice-rendering-upgrade U3] compaction row splits in two (D3): main copy keeps the
     // phrase, tokens move out to the right-pinned mono meta (compactedTokens drops parentheses)
     compacted: 'Context compacted',
@@ -158,10 +171,13 @@ export default {
     traceExpandAll: 'Expand all ({count} steps)',
     traceCollapse: 'Collapse to latest',
     traceFailed: '{count} failed',
-    // [ui-signal-density D1 U3] bash group header copy (Block.vue group branch): en mirrors the
-    // zh literal "{count} consecutive bash · total {duration}"; the failure clause reuses
-    // traceFailed ("· {count} failed" at the row tail) — same failure-count phrasing domain
-    traceBashSummary: '{count} consecutive bash · total {duration}',
+    // [run-group] run type group header (Block.vue group branch): type names mirror the zh literals
+    // (探索 / 改动 / 执行命令); the stat segment is "{count} steps" plus duration (appended by the
+    // renderer only when ≥1s); the failure clause reuses traceFailed — same failure-count domain.
+    runGroupExplore: 'Explore',
+    runGroupEdit: 'Edits',
+    runGroupExec: 'Commands',
+    runGroupSteps: '{count} steps',
     bashCancelled: 'cancelled',
     bashTimeout: 'timeout',
     bashOutputTruncated: 'Output truncated',
@@ -189,6 +205,34 @@ export default {
     // Turn.vue): dedicated key, not reusing traceFailed ("{count} failed" belongs to the
     // TraceCompactorRow compacted-row phrasing — different semantic domain)
     turnTriggerBgNotifyFailed: '{count} failed',
+    // [bg-notice-fold specs/chat/system-notices.md §3.3] settled-turn folded label: segmented by
+    // type (occurrence order deduped, "·" joined; elapsed stays as the single trailing number).
+    // Managed session is the fourth member — its wording awaits user ruling (spec §6); the
+    // fold-into-meta demo proposal lands for now
+    noticeFoldedBash: 'Handled background tasks',
+    noticeFoldedSubagent: 'Handled Subagent',
+    noticeFoldedWorkflow: 'Handled Workflow',
+    noticeFoldedManagedSession: 'Handled managed sessions',
+    // Folded-row failure tag (warn pill, scannable without expanding)
+    noticeFoldFailedTag: '{count} failed',
+    // Type words (explanation-card header / expanded detail-row type column)
+    noticeTypeBash: 'Background task',
+    noticeTypeSubagent: 'Subagent',
+    noticeTypeWorkflow: 'Workflow',
+    noticeTypeManagedSession: 'Managed session',
+    // Explanation-card description (§3.5: one-line meaning + per-type tally)
+    noticeTypeDescBash: 'Background command: a shell command started in the background before your confirmation; it arrives as a notification when done and folds into this summary when the round settles.',
+    noticeTypeDescSubagent: 'Background subagent: an independently running subagent task that reports its result when finished.',
+    noticeTypeDescWorkflow: 'Background workflow: a multi-step orchestrated run that reports its overall result when finished.',
+    noticeTypeDescManagedSession: 'Managed sub-session: a sub-session supervised by the main session whose terminal state arrives as a notification.',
+    // Explanation-card per-type tally (failure K appended only when K > 0)
+    noticeTypeSummaryOk: '{total} total · {ok} succeeded',
+    noticeTypeSummaryFail: '{failed} failed',
+    // Expanded detail-row status words (bash uses literal "exit N"; timeout and non-bash types use words)
+    noticeStatusSuccess: 'success',
+    noticeStatusFailed: 'failed',
+    noticeStatusNeutral: 'cancelled',
+    noticeStatusTimeout: 'timeout',
     // [W4 turn-attribution] executing-bash transient row prefix (MessageStream.vue → ActivityStrip row)
     executingBash: 'Running',
     // [notice-family-phrase-detail 2026-09-18 option A] executing-bash row elapsed meta — keeps an
@@ -228,8 +272,10 @@ export default {
     unavailableTitle: 'Git unavailable, repository status cannot be read',
   },
   context: {
-    // Metrics aggregate entry (W3a single-icon button; hover opens the capacity/speed/cache aggregate page) title
+    // Metrics aggregate entry (W3a single-icon button; resident at all fit levels since ui-optimize decision 6; hover opens the capacity/TTFT/speed/cache four-card aggregate page) title
     metricsAggregateTitle: 'Metrics',
+    // Top-edge capacity hairline bar (ui-optimize decision 6 / N7) accessibility hint (aria-label; the bar shows tier color only, no numbers)
+    capacityBarHint: 'Context usage {percent}%',
     capacity: 'Context capacity',
     used: 'Used',
     total: 'Total',
@@ -238,7 +284,7 @@ export default {
     unknown: 'Unknown',
     noCodingPlan: 'No Coding Plan',
     configureCodingPlan: 'Configure',
-    // coding-plan quota query (ContextCapacityPopover + useQuotaDisplay)
+    // coding-plan quota query (ContextCapacityCard + useQuotaDisplay)
     quotaQuerying: 'Querying…',
     noQuotaData: 'No quota data',
     noCodingPlanData: 'No Coding Plan data',
@@ -453,6 +499,8 @@ export default {
     searchPlaceholder: 'Search models…',
     noMatch: 'No matching models',
     placeholder: '\u2026',
+    // Model popover row-end "default" tag (demo .pt): shown on the row matching config.defaults.defaultModel
+    defaultTag: 'Default',
     // Model + thinking aggregate entry (W3a single-icon button; click opens model list + thinking levels) title
     modelThinkingAggregateTitle: 'Model · Thinking',
   },

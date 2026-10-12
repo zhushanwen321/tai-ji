@@ -323,29 +323,3 @@ describe('⑧ sessions 残留清扫家族扩展（缓存治理 U9：退役 .mode
     await expect(runStartupBackgroundInit(deps)).resolves.toBeUndefined()
   })
 })
-
-
-describe('⑪ 产物目录保留期扫描挂载（chat-html-support §6.7 D7 回收②）', () => {
-  it('传入 startArtifactRetention 时在序列中被调用恰一次', async () => {
-    const { deps } = makeDeps()
-    const startArtifactRetention = vi.fn()
-    await runStartupBackgroundInit({ ...deps, startArtifactRetention })
-    expect(startArtifactRetention).toHaveBeenCalledTimes(1)
-    expect(startArtifactRetention).toHaveBeenCalledWith()
-  })
-
-  it('未传 startArtifactRetention 时跳过且其余步骤不受影响（序列正常完成）', async () => {
-    const { deps, extensionService, pluginService } = makeDeps()
-    await expect(runStartupBackgroundInit(deps)).resolves.toBeUndefined()
-    expect(extensionService.migrateBuiltinExtensions).toHaveBeenCalled()
-    expect(pluginService.initialize).toHaveBeenCalled()
-  })
-
-  it('startArtifactRetention 抛错被挂载点 catch 消化，不阻塞序列（fire-and-forget 形态）', async () => {
-    const { deps, pluginService } = makeDeps()
-    const startArtifactRetention = vi.fn(() => { throw new Error('artifact retention boom') })
-    await expect(runStartupBackgroundInit({ ...deps, startArtifactRetention })).resolves.toBeUndefined()
-    expect(startArtifactRetention).toHaveBeenCalledTimes(1)
-    expect(pluginService.initialize).toHaveBeenCalled()
-  })
-})

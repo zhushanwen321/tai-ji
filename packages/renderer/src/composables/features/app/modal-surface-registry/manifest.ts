@@ -33,13 +33,13 @@ import type { ModalSurfaceFlags } from '@taiji/core/domain/overlay'
 export type ModalSurfaceFamily =
   /** 全屏阻塞模态族（token z 形）：SettingsModal / AsyncErrorFallback overlay 态 */
   | 'modal-token-z'
-  /** 全屏阻塞模态族（裸数字 z 形）：SearchModal / DialogContent 确认框族（遮罩+面板） */
+  /** 全屏阻塞模态族（token z 形）：SearchModal / DialogContent 确认框族（遮罩+面板） */
   | 'modal-dialog'
   /** CompanionBand expanded 待决确认（inline z 高于 modal，阻塞交互） */
   | 'companion-band'
   /** FormOverlay（插件表单 Panel 内覆盖，可能带未提交输入） */
   | 'form-overlay'
-  /** 弹出层族（PopoverContent / SelectContent / SessionItemContextMenu / ProjectSwitcher） */
+  /** 弹出层族（PopoverContent / SelectContent / SessionItemContextMenu） */
   | 'popover-layer'
   /** ToastContainer（非阻塞通知，不消费 Esc） */
   | 'toast'
@@ -128,19 +128,18 @@ export const MODAL_SURFACE_MANIFEST = [
     family: 'modal-dialog',
     kind: 'member',
     zAnchors: [
-      { file: 'packages/ui/src/overlays/SearchModal.vue', form: 'class-raw', literal: '1000', count: 1 },
+      { file: 'packages/ui/src/overlays/SearchModal.vue', form: 'class-token', literal: 'var(--z-modal)', count: 1 },
     ],
-    basis: '§6.7 表：SearchModal（遮罩+面板全屏阻塞面）',
+    basis: '§6.7 表：SearchModal（遮罩+面板全屏阻塞面；z 已令牌化 --z-modal）',
   },
   {
     id: 'dialog-confirm',
     family: 'modal-dialog',
     kind: 'member',
     zAnchors: [
-      { file: 'packages/renderer/src/components/ui/dialog/DialogContent.vue', form: 'class-raw', literal: '1000', count: 2 },
-      { file: 'packages/ui/src/primitives/dialog/DialogContent.vue', form: 'class-raw', literal: '1000', count: 2 },
+      { file: 'packages/ui/src/primitives/dialog/DialogContent.vue', form: 'class-token', literal: 'var(--z-modal)', count: 2 },
     ],
-    basis: '§6.7 表：DialogContent 确认框族（遮罩 + 面板各一 z 字面量；renderer/ui 双副本各 count=2）',
+    basis: '§6.7 表：DialogContent 确认框族（遮罩 + 面板各一 z 字面量；已收敛至 ui 包单一实现并令牌化 --z-modal）',
   },
   {
     id: 'companion-band',
@@ -163,65 +162,52 @@ export const MODAL_SURFACE_MANIFEST = [
     family: 'popover-layer',
     kind: 'member',
     zAnchors: [
-      { file: 'packages/renderer/src/components/ui/popover/PopoverContent.vue', form: 'class-raw', literal: '1100', count: 1 },
-      { file: 'packages/ui/src/primitives/popover/PopoverContent.vue', form: 'class-raw', literal: '1100', count: 1 },
+      { file: 'packages/ui/src/primitives/popover/PopoverContent.vue', form: 'class-token', literal: 'var(--z-dialog)', count: 1 },
     ],
-    basis: '§6.7 表：弹出层族（reka DismissableLayer——Esc 让位、⌘W 不让位）',
+    basis: '§6.7 表：弹出层族（reka DismissableLayer——Esc 让位、⌘W 不让位；已收敛至 ui 包单一实现并令牌化 --z-dialog）',
   },
   {
     id: 'select-content',
     family: 'popover-layer',
     kind: 'member',
     zAnchors: [
-      { file: 'packages/renderer/src/components/ui/select/SelectContent.vue', form: 'class-raw', literal: '1100', count: 1 },
-      { file: 'packages/ui/src/primitives/select/SelectContent.vue', form: 'class-raw', literal: '1100', count: 1 },
+      { file: 'packages/ui/src/primitives/select/SelectContent.vue', form: 'class-token', literal: 'var(--z-dialog)', count: 1 },
     ],
-    basis: '§6.7 表：弹出层族（Select 下拉）',
+    basis: '§6.7 表：弹出层族（Select 下拉；已收敛至 ui 包单一实现并令牌化 --z-dialog）',
   },
   {
     id: 'session-item-context-menu',
     family: 'popover-layer',
     kind: 'member',
-    zAnchors: [
-      { file: 'packages/renderer/src/components/sidebar/session-item/SessionItemContextMenu.vue', form: 'class-raw', literal: '1100', count: 1 },
-    ],
-    basis: '§6.7 表：弹出层族（右键菜单）',
-  },
-  {
-    id: 'project-switcher-menu',
-    family: 'popover-layer',
-    kind: 'member',
-    zAnchors: [
-      { file: 'packages/renderer/src/components/sidebar/ProjectSwitcher.vue', form: 'class-raw', literal: '1100', count: 1 },
-    ],
-    basis: '§6.7 表：弹出层族（项目切换菜单）',
+    zAnchors: [],
+    basis: '§6.7 表：弹出层族（右键菜单；z 已降到 --z-popover:10，低于基线阈值 1000，不再持 ≥1000 锚）',
   },
   {
     id: 'toast-container',
     family: 'toast',
     kind: 'member',
     zAnchors: [
-      { file: 'packages/renderer/src/components/ui/ToastContainer.vue', form: 'class-raw', literal: '9999', count: 1 },
+      { file: 'packages/renderer/src/components/ui/ToastContainer.vue', form: 'class-token', literal: 'var(--z-toast)', count: 1 },
     ],
-    basis: '§6.7 表：ToastContainer（非阻塞通知，不入让位族、只入 view 遮蔽族）',
+    basis: '§6.7 表：ToastContainer（非阻塞通知，不入让位族、只入 view 遮蔽族；M7b 令牌化 --z-toast=2000）',
   },
   {
     id: 'memory-pressure-bar',
     family: 'program-banner',
     kind: 'member',
     zAnchors: [
-      { file: 'packages/renderer/src/App.vue', form: 'class-raw', literal: '9999', count: 1 },
+      { file: 'packages/renderer/src/App.vue', form: 'class-token', literal: 'var(--z-banner)', count: 1 },
     ],
-    basis: '§6.7 表：memory pressure bar（可编程横幅，显示到 dismiss 或 level 变化）',
+    basis: '§6.7 表：memory pressure bar（可编程横幅，显示到 dismiss 或 level 变化；已令牌化 --z-banner）',
   },
   {
     id: 'rolling-restart-banner',
     family: 'rolling-banner',
     kind: 'member',
     zAnchors: [
-      { file: 'packages/renderer/src/components/ui/RollingRestartBanner.vue', form: 'class-raw', literal: '10000', count: 1 },
+      { file: 'packages/renderer/src/components/ui/RollingRestartBanner.vue', form: 'class-token', literal: 'var(--z-banner)', count: 1 },
     ],
-    basis: '§6.7 表：RollingRestartBanner（可编程横幅，滚动重启）',
+    basis: '§6.7 表：RollingRestartBanner（可编程横幅，滚动重启；已令牌化 --z-banner）',
   },
   {
     id: 'overlay-shell',

@@ -12,7 +12,7 @@
     --border:rgba(255,255,255,.07); --border-strong:rgba(255,255,255,.13); --hairline:rgba(255,255,255,.05);
     --accent:#cfcfd4; --accent-fg:#1a1a1c; --accent-soft:color-mix(in oklch, var(--accent) 10%, transparent);
     --info:#6d99a5; --info-soft:color-mix(in oklch, var(--info) 12%, transparent);
-    --composer-bg:var(--bg-input);
+    --composer-bg:var(--bg-input); /* 已失效（2026-10-08）：桌面侧 --composer-bg 已随 ui-optimize-unified U4 退役，composer 现行底色 = 框架层 --bg；本 demo 保留旧值仅作队列区行内形态基线，底色档不作基线 */
     --text-2xs:11px; --text-xs:12px; --text-sm:13px; --text-base:14px;
   }
   * { box-sizing:border-box; margin:0; padding:0; }
@@ -86,7 +86,7 @@
   /* ── composer ─────────────────────────────── */
   .composer-zone { padding:8px 18px 16px; }
   .composer-box {
-    background:var(--composer-bg);
+    background:var(--composer-bg); /* 已失效令牌：现行 composer 底色 = --bg（见 :root 处标注） */
     border:1px solid var(--border-strong); border-radius:12px;
     overflow:hidden;
   }
@@ -140,6 +140,7 @@
 
 <p class="spec-invalid">
   <b>形态失效标注（2026-09-16，系统通知渲染升级设计 D4）</b>：本资产「压缩中通栏活动带」部分<b>已失效</b>——压缩中提示已降级为与 bash/thinking/settling 行同构的 spinner 横线分隔行（待发副文案改「待发 N」chip），规格落点 = <b>docs/DESIGN.md §6.1 通知族二分「横线分隔行」修订行</b> + <b>docs/architecture/compact-defer-composer-queue.md §2.2</b>（资产保留作历史参照，不删除）。<b>队列区部分（下方 composer 队列区：defer 行 / Hourglass /「压缩后」chip / +N）继续有效</b>，仍为本地视觉基线。
+  <br><b>令牌失效标注（2026-10-08，ui-optimize-unified U4）</b>：本 demo 的 <code>--composer-bg</code>（= bg-input 档）已退役——composer 现行底色 = 框架层 <code>--bg</code>。队列区<b>行内形态</b>（行高/chip/icon）继续有效；<b>composer 底色档不作基线</b>，按本 demo 复核底色会得出过期预期。
 </p>
 
 <header class="demo-head">

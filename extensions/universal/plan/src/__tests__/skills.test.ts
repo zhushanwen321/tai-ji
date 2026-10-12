@@ -231,8 +231,8 @@ describe("E1 fail-fast via /plan handler", () => {
     await handler("重构 auth --skills tech-design,code review", ctx);
 
     expect(pi.setActiveTools).toHaveBeenCalledWith(["read", "bash", "grep", "find", "ls", "plan", "ask_user"]);
-    // slug 只保留 [a-z0-9]：「重构 auth」→ "auth"
-    expect(fs.mkdirSync).toHaveBeenCalledWith("/tmp/test-project/.tmp/plans/auth", { recursive: true });
+    // slug 只保留 [a-z0-9]：「重构 auth」→ "auth"；候选目录走非 recursive mkdir（原子唯一性）
+    expect(fs.mkdirSync).toHaveBeenCalledWith("/tmp/test-project/.tmp/plans/auth");
     expect(pi.appendEntry).toHaveBeenCalledWith(
       "plan-state",
       expect.objectContaining({

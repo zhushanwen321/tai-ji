@@ -2,8 +2,9 @@
 //
 // cwd → 安全目录名的编码逻辑。Core 叶子原语（零依赖）。
 //
-// 被 session-runner（subagent session 持久化目录）与 session-file-gc（清理过期
-// session 文件）共用——两处需要相同的编码，否则同一 cwd 会落到两个不同目录。
+// 被 session-runner（subagent session 持久化目录）与 runtime 删会话级联
+// （session-content-cascade 的族枚举按同一 <enc> 布局寻址）等消费方共用——
+// 编码漂移会让同一 cwd 落到两个不同目录。
 
 import * as path from "node:path";
 
@@ -26,7 +27,7 @@ export function encodeCwd(cwd: string): string {
  * docs/constraints.json C-ext-21。
  *
  * D-004: 用主 cwd 编码——保证同一主 cwd 下所有 subagent 的 session 文件
- * 存放在同一目录，便于 session-file-gc 统一清理。
+ * 存放在同一目录（enc 段不变量：磁盘重建扫描与删会话级联枚举都依赖它）。
  * [MF-3] worktree 模式下调用方必须传树根 cwd（ROOT mainCwd，经 PI_SUBAGENT_ROOT_CWD
  * 贯穿），不能传子进程自身的 checkout 路径——否则深层 record 落盘到 enc(worktree) 段，
  * ROOT 磁盘重建扫不到（全树可见性断裂）。根进程传自身 cwd（行为不变）。
@@ -53,8 +54,9 @@ export function getSubagentSessionDir(agentDir: string, mainCwd: string): string
  * 跨进程时统一用贯穿的 ROOT cwd）——sessions 与 records 两套目录同段，GC/重建才不会
  * 互相找不到（enc 段不变量）。
  *
- * D-004 同源：用主 cwd 编码做物理隔离，使 session-file-gc 按 <enc>/records/ 子目录
- * 匹配 manifest .json 时天然限定在当前 cwd 范围内，不会越界清理其他 cwd 的 manifest。
+ * D-004 同源：用主 cwd 编码做物理隔离，使删主会话级联（runtime
+ * session-content-cascade）按 <enc>/records/ 子目录匹配 manifest .json 时天然限定在
+ * 当前 cwd 范围内，不会越界删除其他 cwd 的 manifest。
  *
  * @param agentDir agent 配置目录（如 ~/.pi/agent）
  * @param mainCwd 树根主 agent 的工作目录（非 subagent 的 effectiveCwd；worktree 模式下

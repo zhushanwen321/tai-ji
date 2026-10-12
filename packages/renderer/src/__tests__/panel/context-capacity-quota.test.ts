@@ -1,5 +1,9 @@
 /**
- * ContextCapacityPopover coding-plan 区测试（w4）。
+ * 指标聚合页 coding-plan 区测试（w4；ui-optimize 决策 6 起宿主 = ComposerMetricsAggregate）。
+ *
+ * [迁移来源] 原宿主为平铺触发器 ContextCapacityPopover（决策 6 退役、组件已删除）——
+ * quota 查询触发（hover-enter）与聚合页内容在指标聚合按钮上同构存在（同 HoverCard 结构 +
+ * 同 onHoverEnter 挂载），mount 宿主与触发器锚（title → data-testid）随之切换。
  *
  * 覆盖 w4（Composer hover 合并浮层）新增的 coding-plan 额度显示：
  * - hover-enter 触发 quota 查询（先 cached 后 fetch）
@@ -54,7 +58,8 @@ vi.mock('@/i18n', () => ({
   default: { global: { t: (key: string) => key } },
 }))
 
-import ContextCapacityPopover from '@/components/panel/ContextCapacityPopover.vue'
+import ComposerMetricsAggregate from '@/components/panel/ComposerMetricsAggregate.vue'
+import ContextCapacityCard from '@/components/panel/ContextCapacityCard.vue'
 import { useSessionStore } from '@/stores/session'
 import { getSettingsStore, provideSettingsStore, createSettingsStore } from '@taiji/core'
 import { useQuotaStore } from '@/stores/quota'
@@ -132,20 +137,20 @@ function pushContextUpdate(sid: string, data: { inputTokens: number; contextLimi
 
 // ── tests ──
 
-describe('ContextCapacityPopover coding-plan 区', () => {
+describe('ComposerMetricsAggregate coding-plan 区', () => {
   describe('hover-enter 查询触发', () => {
     it('hover 按钮 + provider 命中 quota preset → 调 getCached + fetchQuota', async () => {
       setupProviders([zhipuProvider])
       vi.mocked(quotaApi.getCached).mockResolvedValue({ data: mockQuotaRow, lastFetchAt: 1000 })
       vi.mocked(quotaApi.fetchQuota).mockResolvedValue({ data: mockQuotaRow, lastFetchAt: 2000 })
 
-      const wrapper = mount(ContextCapacityPopover, {
-        props: { modelId: 'zhipu/glm-4' },
+      const wrapper = mount(ComposerMetricsAggregate, {
+        props: { sessionId: 's1', modelId: 'zhipu/glm-4' },
       })
       await flushPromises()
 
       // hover 按钮触发查询
-      const btn = wrapper.find('[title="上下文容量"]')
+      const btn = wrapper.find('[data-testid="composer-metrics-aggregate"]')
       await btn.trigger('mouseenter')
       await flushPromises()
 
@@ -156,12 +161,12 @@ describe('ContextCapacityPopover coding-plan 区', () => {
     it('provider 未配置 quota → 不调 quota API', async () => {
       setupProviders([deepseekProvider])
 
-      const wrapper = mount(ContextCapacityPopover, {
-        props: { modelId: 'deepseek/v3' },
+      const wrapper = mount(ComposerMetricsAggregate, {
+        props: { sessionId: 's1', modelId: 'deepseek/v3' },
       })
       await flushPromises()
 
-      const btn = wrapper.find('[title="上下文容量"]')
+      const btn = wrapper.find('[data-testid="composer-metrics-aggregate"]')
       await btn.trigger('mouseenter')
       await flushPromises()
 
@@ -176,12 +181,12 @@ describe('ContextCapacityPopover coding-plan 区', () => {
       }
       setupProviders([disabledProvider])
 
-      const wrapper = mount(ContextCapacityPopover, {
-        props: { modelId: 'zhipu/glm-4' },
+      const wrapper = mount(ComposerMetricsAggregate, {
+        props: { sessionId: 's1', modelId: 'zhipu/glm-4' },
       })
       await flushPromises()
 
-      const btn = wrapper.find('[title="上下文容量"]')
+      const btn = wrapper.find('[data-testid="composer-metrics-aggregate"]')
       await btn.trigger('mouseenter')
       await flushPromises()
 
@@ -191,12 +196,12 @@ describe('ContextCapacityPopover coding-plan 区', () => {
     it('无 modelId → 不调 quota API（未确定模型时不查 quota）', async () => {
       setupProviders([zhipuProvider])
 
-      const wrapper = mount(ContextCapacityPopover, {
-        props: {},
+      const wrapper = mount(ComposerMetricsAggregate, {
+        props: { sessionId: 's1' },
       })
       await flushPromises()
 
-      const btn = wrapper.find('[title="上下文容量"]')
+      const btn = wrapper.find('[data-testid="composer-metrics-aggregate"]')
       await btn.trigger('mouseenter')
       await flushPromises()
 
@@ -210,13 +215,13 @@ describe('ContextCapacityPopover coding-plan 区', () => {
       // 子组件不再自查 store。只要 modelId 命中已启用 quota 的 provider 即查。
       setupProviders([zhipuProvider])
 
-      const wrapper = mount(ContextCapacityPopover, {
+      const wrapper = mount(ComposerMetricsAggregate, {
         // landing 态：sessionId=undefined，但 modelId 受控下发
-        props: { modelId: 'zhipu/glm-4.6' },
+        props: { sessionId: 's1', modelId: 'zhipu/glm-4.6' },
       })
       await flushPromises()
 
-      const btn = wrapper.find('[title="上下文容量"]')
+      const btn = wrapper.find('[data-testid="composer-metrics-aggregate"]')
       await btn.trigger('mouseenter')
       await flushPromises()
 
@@ -229,8 +234,8 @@ describe('ContextCapacityPopover coding-plan 区', () => {
     it('未配置 provider 时 footer 渲染「配置」按钮（跳转 Settings）', async () => {
       setupProviders([deepseekProvider])
 
-      const wrapper = mount(ContextCapacityPopover, {
-        props: { modelId: 'deepseek/v3' },
+      const wrapper = mount(ComposerMetricsAggregate, {
+        props: { sessionId: 's1', modelId: 'deepseek/v3' },
         global: {
           provide: { openSettings: () => {} },
         },
@@ -240,7 +245,7 @@ describe('ContextCapacityPopover coding-plan 区', () => {
       // 注：HoverCardContent 在 reka-ui HoverCardPortal 内，happy-dom 下不渲染。
       // 「配置」按钮在 footer（portal 内），这里断言组件正常渲染不 crash；
       // trigger 按钮在 portal 外，始终可断言。
-      const trigger = wrapper.find('[title="上下文容量"]')
+      const trigger = wrapper.find('[data-testid="composer-metrics-aggregate"]')
       expect(trigger.exists()).toBe(true)
     })
   })
@@ -252,12 +257,12 @@ describe('ContextCapacityPopover coding-plan 区', () => {
       vi.mocked(quotaApi.getCached).mockResolvedValue({ data: mockQuotaRow, lastFetchAt: 1000 })
       vi.mocked(quotaApi.fetchQuota).mockResolvedValue({ data: mockQuotaRow, lastFetchAt: 2000 })
 
-      const wrapper = mount(ContextCapacityPopover, {
-        props: { modelId: 'zhipu/glm-4' },
+      const wrapper = mount(ComposerMetricsAggregate, {
+        props: { sessionId: 's1', modelId: 'zhipu/glm-4' },
       })
       await flushPromises()
 
-      const btn = wrapper.find('[title="上下文容量"]')
+      const btn = wrapper.find('[data-testid="composer-metrics-aggregate"]')
       await btn.trigger('mouseenter')
       await flushPromises()
 
@@ -278,12 +283,12 @@ describe('ContextCapacityPopover coding-plan 区', () => {
       vi.mocked(quotaApi.getCached).mockResolvedValue({ data: mockQuotaRow, lastFetchAt: 500 })
       vi.mocked(quotaApi.fetchQuota).mockRejectedValue(new Error('network'))
 
-      const wrapper = mount(ContextCapacityPopover, {
-        props: { modelId: 'zhipu/glm-4' },
+      const wrapper = mount(ComposerMetricsAggregate, {
+        props: { sessionId: 's1', modelId: 'zhipu/glm-4' },
       })
       await flushPromises()
 
-      const btn = wrapper.find('[title="上下文容量"]')
+      const btn = wrapper.find('[data-testid="composer-metrics-aggregate"]')
       await btn.trigger('mouseenter')
       await flushPromises()
 
@@ -303,12 +308,12 @@ describe('ContextCapacityPopover coding-plan 区', () => {
       vi.mocked(quotaApi.getCached).mockResolvedValue({ data: mockQuotaRow, lastFetchAt: 500 })
       vi.mocked(quotaApi.fetchQuota).mockResolvedValue({ data: null, lastFetchAt: 500, reason: 'unauthorized' })
 
-      const wrapper = mount(ContextCapacityPopover, {
-        props: { modelId: 'zhipu/glm-4' },
+      const wrapper = mount(ComposerMetricsAggregate, {
+        props: { sessionId: 's1', modelId: 'zhipu/glm-4' },
       })
       await flushPromises()
 
-      const btn = wrapper.find('[title="上下文容量"]')
+      const btn = wrapper.find('[data-testid="composer-metrics-aggregate"]')
       await btn.trigger('mouseenter')
       await flushPromises()
 
@@ -327,13 +332,13 @@ describe('ContextCapacityPopover coding-plan 区', () => {
      * @param openSettings - AppShell provide('openSettings') 的测试替身（断言 D11「配置」入口可达）
      */
     async function openPopover(openSettings: () => void = () => {}): Promise<ReturnType<typeof mount>> {
-      const wrapper = mount(ContextCapacityPopover, {
-        props: { modelId: 'zhipu/glm-4' },
+      const wrapper = mount(ComposerMetricsAggregate, {
+        props: { sessionId: 's1', modelId: 'zhipu/glm-4' },
         attachTo: document.body,
         global: { provide: { openSettings } },
       })
       await flushPromises()
-      await wrapper.find('[title="上下文容量"]').trigger('focus')
+      await wrapper.find('[data-testid="composer-metrics-aggregate"]').trigger('focus')
       await vi.advanceTimersByTimeAsync(700)
       await flushPromises()
       return wrapper
@@ -538,13 +543,13 @@ describe('ContextCapacityPopover coding-plan 区', () => {
     it('D11 边界：provider 未命中 quota → footer 只有「配置」（原 v-else 分支形态保留）', async () => {
       setupProviders([deepseekProvider])
 
-      const wrapper = mount(ContextCapacityPopover, {
-        props: { modelId: 'deepseek/v3' },
+      const wrapper = mount(ComposerMetricsAggregate, {
+        props: { sessionId: 's1', modelId: 'deepseek/v3' },
         attachTo: document.body,
         global: { provide: { openSettings: () => {} } },
       })
       await flushPromises()
-      await wrapper.find('[title="上下文容量"]').trigger('focus')
+      await wrapper.find('[data-testid="composer-metrics-aggregate"]').trigger('focus')
       await vi.advanceTimersByTimeAsync(700)
       await flushPromises()
 
@@ -555,11 +560,13 @@ describe('ContextCapacityPopover coding-plan 区', () => {
   })
 
   describe('容量区零回归', () => {
+    // [迁移来源] 原锚为平铺触发器按钮文字（决策 6 退役）——quota 环境下的容量显示回归宿主
+    // 换为 ContextCapacityCard（聚合按钮本身无数值文本，数字在 hover 页卡内）。
     it('context.update 仍正常工作', async () => {
       setupSession('s1', 'deepseek/v3')
       setupProviders([deepseekProvider])
 
-      const wrapper = mount(ContextCapacityPopover, {
+      const wrapper = mount(ContextCapacityCard, {
         props: { sessionId: 's1' },
       })
       await flushPromises()
@@ -567,16 +574,16 @@ describe('ContextCapacityPopover coding-plan 区', () => {
       pushContextUpdate('s1', { inputTokens: 50000, contextLimit: 100000, usagePercent: 50 })
       await flushPromises()
 
-      const text = wrapper.find('[title="上下文容量"]').text()
+      const text = wrapper.text()
       expect(text).toContain('50K')
       expect(text).toContain('50%')
     })
 
-    it('无 quota provider 时按钮正常显示用量', async () => {
+    it('无 quota provider 时卡内正常显示用量', async () => {
       setupSession('s1', 'deepseek/v3')
       setupProviders([deepseekProvider])
 
-      const wrapper = mount(ContextCapacityPopover, {
+      const wrapper = mount(ContextCapacityCard, {
         props: { sessionId: 's1' },
       })
       await flushPromises()
@@ -584,17 +591,16 @@ describe('ContextCapacityPopover coding-plan 区', () => {
       pushContextUpdate('s1', { inputTokens: 6900, contextLimit: 200000, usagePercent: 3 })
       await flushPromises()
 
-      const btn = wrapper.find('[title="上下文容量"]')
-      expect(btn.exists()).toBe(true)
-      expect(btn.text()).toContain('6.9K')
-      expect(btn.text()).toContain('3%')
+      const text = wrapper.text()
+      expect(text).toContain('6.9K')
+      expect(text).toContain('3%')
     })
 
-    it('有 quota provider 时按钮仍正常显示用量', async () => {
+    it('有 quota provider 时卡内仍正常显示用量', async () => {
       setupSession('s1', 'zhipu/glm-4')
       setupProviders([zhipuProvider])
 
-      const wrapper = mount(ContextCapacityPopover, {
+      const wrapper = mount(ContextCapacityCard, {
         props: { sessionId: 's1' },
       })
       await flushPromises()
@@ -602,7 +608,7 @@ describe('ContextCapacityPopover coding-plan 区', () => {
       pushContextUpdate('s1', { inputTokens: 12000, contextLimit: 200000, usagePercent: 6 })
       await flushPromises()
 
-      const text = wrapper.find('[title="上下文容量"]').text()
+      const text = wrapper.text()
       expect(text).toContain('12K')
       expect(text).toContain('6%')
     })

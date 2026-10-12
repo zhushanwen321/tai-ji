@@ -192,9 +192,9 @@ describe('buildSlashCandidates skill 项显示名（RC-A-5）', () => {
 
 // ─────────────── open-fetch file 路（D3：landing cwd 通道边沿拉，mount 验证） ───────────────
 
-/** body 内浮层候选行（PopoverContent teleport 到 body，v-for 渲染为 .cmd-row div） */
+/** body 内浮层候选行（PopoverContent teleport 到 body，v-for 渲染为 .pop-item div） */
 function bodyRows(): HTMLElement[] {
-  return Array.from(document.body.querySelectorAll('.cmd-row'))
+  return Array.from(document.body.querySelectorAll('.pop-item'))
 }
 
 describe('open-fetch file 路 landing cwd 通道（D2/D3）', () => {

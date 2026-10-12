@@ -60,7 +60,7 @@ const depthPadding = () => ({ paddingLeft: `${currentDepth() * INDENT_PX}px` })
     <template v-for="(item, i) in items" :key="i">
       <div class="list-tree__item flex items-center gap-1.5" :style="depthPadding()">
         <!-- numbered：行首弱化序号（编辑器行号范式，占据 icon 槽位） -->
-        <span v-if="numbered" class="w-4 shrink-0 text-right font-mono text-[10px] tabular-nums text-neutral-dim">
+        <span v-if="numbered" class="w-4 shrink-0 text-right font-mono text-[length:var(--text-3xs)] tabular-nums text-neutral-dim">
           {{ i + 1 }}
         </span>
         <span v-else class="list-tree__icon flex w-3.5 shrink-0 justify-center">

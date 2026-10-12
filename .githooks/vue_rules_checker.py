@@ -76,7 +76,7 @@ SPLIT_JUSTIFIED_SCAN_LINES = 30
 # 是 Tailwind 无法表达的，属 AGENTS.md 前端编码规范 escape hatch（与 MainPanel 多值 shadow 同类）。
 # 单组件样式归 scoped（多组件共享原语 popover/dialog/overlay 才进 style.css 全局层，
 # 见 check_css_tokens.py ALLOWED_GLOBAL_ANIMATION_CLASSES 判据）。
-STYLE_SCOPED_WHITELIST: list[str] = ['shell/MainPanel.vue', 'sidebar/UpdateButton.vue', 'settings/SettingsModal.vue', 'collapsible/CollapsibleContent.vue']
+STYLE_SCOPED_WHITELIST: list[str] = ['shell/MainPanel.vue', 'sidebar/UpdateButton.vue', 'settings/SettingsModal.vue', 'collapsible/CollapsibleContent.vue', 'sidebar/Sidebar.vue']
 
 # CSS 选择器检测正则
 RE_STYLE_SELECTOR = re.compile(r'^[.\w\-]+[\s,]*\{')

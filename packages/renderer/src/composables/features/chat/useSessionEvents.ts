@@ -1,7 +1,7 @@
 /**
  * useSessionEvents —— session 通道订阅编排（R2 features 层）。
  *
- * 归位动机：SideDrawer / CommandPopover / ContextCapacityPopover 原本各自 import
+ * 归位动机：SideDrawer / CommandPopover 等组件原本各自 import
  * @/api（extension）/ @/api/events 做会话级订阅。订阅编排（订阅时机、sessionId 切换重订、
  * 卸载退订）是跨组件重复的样板，且按 ADR「api 调用只在 features 层」铁律，@/api/events
  * 不应被组件层直接引用。本 composable 收口订阅生命周期，组件只声明「关心哪些 type + handler」。

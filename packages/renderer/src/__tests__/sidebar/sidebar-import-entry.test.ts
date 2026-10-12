@@ -96,14 +96,19 @@ beforeEach(() => {
 })
 
 describe('Sidebar 导入会话入口接线（import-session u6）', () => {
-  it('TC1: 「导入会话」按钮渲染在「新建任务」之后、「搜索」之前，带定位 testid', () => {
+  it('TC1: 「导入会话」按钮渲染在「新建任务」（nav 外独立主操作）之后、「搜索」之前，带定位 testid', () => {
     const wrapper = mountSidebar()
     try {
+      // M1 视觉复刻（demo .sidebar 区块序）：新建任务是 nav 外独立 elevated 卡；
+      // nav 内只剩导入会话 / 搜索两个 ghost 行，顺序保持导入在前
       const navTexts = wrapper.find('nav').findAll('button').map((b) => b.text())
-      expect(navTexts.length).toBe(3)
-      expect(navTexts[0]).toContain('新建任务')
-      expect(navTexts[1]).toContain('导入会话')
-      expect(navTexts[2]).toContain('搜索')
+      expect(navTexts.length).toBe(2)
+      expect(navTexts[0]).toContain('导入会话')
+      expect(navTexts[1]).toContain('搜索')
+      // 新建任务独立块在导入会话之前（demo .newtask 紧随项目切换条）
+      const rootText = wrapper.text()
+      expect(rootText).toContain('新建任务')
+      expect(rootText.indexOf('新建任务')).toBeLessThan(rootText.indexOf('导入会话'))
       // 入口按钮 testid（E2E 走查 V1 定位锚点）
       expect(wrapper.find('[data-testid="sidebar-import-session-btn"]').exists()).toBe(true)
     } finally {

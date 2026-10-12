@@ -790,6 +790,35 @@ else
 fi
 
 # ============================================================================
+# 视口字号自动档禁令检查（font-scale-mq / 字号 @media 不复发）
+# ============================================================================
+
+FONT_SCALE_CHECKER=".githooks/check_font_scale_viewport.py"
+FONT_SCALE_FILES="packages/renderer/src/style.css packages/mobile-renderer/src/styles/tokens.css docs/DESIGN.md"
+
+if [ "$SKIP_ALL_CHECKS" != "1" ]; then
+    # 仅当三个字号 token 权威文件之一变更时才检查（R1 惯例：不设独立 SKIP 开关）
+    FONT_SCALE_CHANGED=$(echo "$STAGED_FILES" | grep -E "^packages/renderer/src/style\.css$|^packages/mobile-renderer/src/styles/tokens\.css$|^docs/DESIGN\.md$" || true)
+    if [ -n "$FONT_SCALE_CHANGED" ]; then
+        echo -e "${BLUE}[INFO] 运行视口字号自动档禁令检查...${NC}"
+
+        if [ ! -f "$FONT_SCALE_CHECKER" ]; then
+            echo -e "${YELLOW}[WARN] 找不到检查脚本 $FONT_SCALE_CHECKER${NC}"
+        else
+            python3 "$FONT_SCALE_CHECKER"
+            EXIT_CODE=$?
+
+            if [ $EXIT_CODE -ne 0 ]; then
+                echo ""
+                echo -e "${RED}[ERROR] 视口字号自动档禁令检查失败：字号 token 文件出现视口驱动字号缩放${NC}"
+                echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
+                exit 1
+            fi
+        fi
+    fi
+fi
+
+# ============================================================================
 # Renderer 依赖完整性检查（import vs package.json）
 # ============================================================================
 
@@ -1542,6 +1571,41 @@ else
 fi
 
 # ============================================================================
+# 文档 emoji 检测（README.md / README_EN.md 禁装饰 emoji）
+#   检测逻辑单一实现 .githooks/check_doc_emoji.py，merge 流程 release.sh 复用
+#   同一脚本校验 release notes。docs/ 下 ✓/⚠/✗ 等技术功能符号不在范围。
+#   无独立 SKIP 开关（R1 后惯例，SKIP_ALL_CHECKS 总开关兜底）。
+# ============================================================================
+
+DOC_EMOJI_CHECKER=".githooks/check_doc_emoji.py"
+
+if [ "$SKIP_ALL_CHECKS" != "1" ]; then
+    STAGED_README=$(echo "$STAGED_FILES" | grep -E "^README(_EN)?\.md$" || true)
+    if [ -n "$STAGED_README" ]; then
+        echo -e "${BLUE}[INFO] 运行文档 emoji 检测（README 系）...${NC}"
+
+        if [ ! -f "$DOC_EMOJI_CHECKER" ]; then
+            echo -e "${YELLOW}[WARN] 找不到检查脚本 $DOC_EMOJI_CHECKER${NC}"
+        else
+            ABSOLUTE_README=""
+            for FILE in $STAGED_README; do
+                ABSOLUTE_README="$ABSOLUTE_README $PROJECT_ROOT/$FILE"
+            done
+
+            python3 "$DOC_EMOJI_CHECKER" $ABSOLUTE_README
+            EXIT_CODE=$?
+
+            if [ $EXIT_CODE -ne 0 ]; then
+                echo ""
+                echo -e "${RED}[ERROR] README 含装饰 emoji${NC}"
+                echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
+                exit 1
+            fi
+        fi
+    fi
+fi
+
+# ============================================================================
 # pi 边界可靠性护栏（pi-boundary-reliability §3.3 D7 G1/G3/G4，U7b 接线）
 #   - G1 pi 语义登记检查：node scripts/check-pi-semantics.mjs（全仓校验：
 #     registry schema / 探针存在性 / pi 三包 + runtime pin 四包版本门禁；
@@ -1649,14 +1713,15 @@ ${STAGED_DELETED}"
         echo -e "${GREEN}[OK] 无 capability 清单/渲染白名单文件变更，跳过清单对拍检查${NC}"
     fi
 
-    # 产物目录公式双实现对拍检查（chat-html-support §6.7 D7 / §11 检查点 8 / §10 u-artifacts，
+    # 产物目录公式对拍检查（chat-html-support §6.7 D7 / §11 检查点 8 / §10 u-artifacts，
     # 按路径触发）：shared getSessionArtifactsDir 与 system-prompt 包内镜像推导（
     # SESSION_ARTIFACTS_DIR_SEGMENT + resolveSessionArtifactsDir）的**段名字面量与 sessionId
-    # 校验正则字面量**对拍（读双侧源文件文本，零散文解析；与 u1 的 capability 清单对拍同型）。
-    # 两侧任一漂移 = agent 收到的路径与实际目录不符（写偏或预览 404），仅此检查红灯。
-    # 触发面：检查脚本自身 / shared paths 源 / system-prompt 源（文件被删除也必须触发，脚本对
-    # 文件缺失自带 fail 分支）。不设独立 SKIP_* 开关（R1 后惯例，总开关 SKIP_ALL_CHECKS 兜底）。
-    if echo "$PI_SYNC_TRIGGER_FILES" | grep -qE "^scripts/check-artifact-dir-formula-sync\.mjs$|^packages/shared/src/paths\.ts$|^extensions/taiji/system-prompt/src/index\.ts$"; then
+    # 校验正则字面量**对拍（读源文件文本，零散文解析；与 u1 的 capability 清单对拍同型）。
+    # 任一漂移 = agent 收到的路径与实际目录不符（写偏或预览 404），仅此检查红灯。
+    # 触发面：检查脚本自身 / shared paths 源 / system-prompt 源 / runtime pi-paths 第三源
+    # （sessionId 正则三方对拍的第三源；文件被删除也必须触发，脚本对文件缺失自带 fail
+    # 分支）。不设独立 SKIP_* 开关（R1 后惯例，总开关 SKIP_ALL_CHECKS 兜底）。
+    if echo "$PI_SYNC_TRIGGER_FILES" | grep -qE "^scripts/check-artifact-dir-formula-sync\.mjs$|^packages/shared/src/paths\.ts$|^extensions/taiji/system-prompt/src/index\.ts$|^packages/runtime/src/infra/pi/pi-paths\.ts$"; then
         echo -e "${BLUE}[INFO] 产物目录公式文件有变更，运行公式对拍检查...${NC}"
         if [ ! -f "scripts/check-artifact-dir-formula-sync.mjs" ]; then
             echo -e "${RED}[ERROR] 找不到 scripts/check-artifact-dir-formula-sync.mjs（D7 对拍机器检查交付物缺失）${NC}"
@@ -2531,6 +2596,7 @@ echo -e "  ${GREEN}[+]${NC} AC7 extension-host 边界检查（core 变更时触�
 echo -e "  ${GREEN}[+]${NC} 打包配置预检查（asarUnpack/files 一致性 + symlink 检查）"
 echo -e "  ${GREEN}[+]${NC} i18n CJK 残留检测（.vue 模板不得含硬编码中文）"
 echo -e "  ${GREEN}[+]${NC} i18n locale 双侧 key 对齐检查（zh-CN === en-US）"
+echo -e "  ${GREEN}[+]${NC} 文档 emoji 检测（README 系禁装饰 emoji；release.sh 复用校验 release notes）"
 echo -e "  ${GREEN}[+]${NC} pi 边界可靠性护栏（G1 语义登记检查 / G3 档位差分探针 / G4 subagent 通道禁则）"
 echo -e "  ${GREEN}[+]${NC} thinking 档位词表比对检查（ext-simplify-17 D5：pi-ai ModelThinkingLevel ↔ llm-shared / pi-rpc 副本）"
 echo -e "  ${GREEN}[+]${NC} capability 清单 ↔ 渲染白名单对拍检查（chat-html-support D1：ALLOWED_TAGS/ATTR ↔ 能力段清单常量）"

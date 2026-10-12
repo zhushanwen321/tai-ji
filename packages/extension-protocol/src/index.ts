@@ -238,6 +238,7 @@ export {
 export type {
   SubagentEnginesFile,
   SubagentEngineConfigView,
+  SubagentEngineModelInfo,
 } from './extensions/subagent-engine/contract'
 export { SUBAGENTS_ENGINES_FILENAME } from './extensions/subagent-engine/contract'
 

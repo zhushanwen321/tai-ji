@@ -18,20 +18,22 @@
 -->
 <template>
   <div class="flex h-full min-h-0 flex-col" data-testid="drawer-subagent-tab">
-    <!-- 空态：未选中 subagent（selectedSubagentId === null） -->
+    <!-- 空态：未选中 subagent（selectedSubagentId === null；demo .empty 文字形态） -->
     <div
       v-if="!selectedSubagentId"
       class="flex h-full flex-col items-center justify-center gap-2 p-4 text-center"
       data-testid="drawer-subagent-empty"
     >
-      <Bot class="size-6 text-neutral-dim opacity-40" />
-      <p class="text-[length:var(--text-xs)] text-neutral-dim opacity-70">{{ t('panel.sideDrawer.noSubagent') }}</p>
-      <p class="text-[length:var(--text-2xs)] text-neutral-dim opacity-50">{{ t('panel.sideDrawer.subagentHint') }}</p>
+      <Bot class="size-6 text-neutral-dim opacity-40" stroke-width="1.6" />
+      <p class="text-[length:var(--text-xs)] text-neutral-mid">{{ t('panel.sideDrawer.noSubagent') }}</p>
+      <p class="text-[length:var(--text-2xs)] text-neutral-dim">{{ t('panel.sideDrawer.subagentHint') }}</p>
     </div>
 
     <template v-else>
-      <!-- 标题栏：差异化层（enteredFrom==='workflow' 显返回按钮；agent·slug + model·thinking 元信息） -->
-      <div class="flex shrink-0 items-center gap-2 bg-surface-2 px-2.5 py-1.5">
+      <!-- 标题栏：差异化层（enteredFrom==='workflow' 显返回按钮；agent·slug + model·thinking 元信息）。
+           对齐 demo .sub-head：透明底（无 surface-2 色块），左右内缩 14px、下 6px
+           （demo panel 12px + sub-head 0 2px 6px 折算）。 -->
+      <div class="flex shrink-0 items-center gap-2 px-3.5 pb-1.5 pt-2">
         <Button
           v-if="enteredFrom === 'workflow'"
           variant="ghost"
@@ -47,7 +49,7 @@
         <span class="min-w-0 truncate font-mono text-xs font-medium text-neutral-fg">
           {{ subagentMeta?.agent ?? 'subagent' }}
         </span>
-        <span v-if="subagentMeta?.slug" class="min-w-0 shrink-0 truncate font-mono text-xs text-neutral-dim">
+        <span v-if="subagentMeta?.slug" class="min-w-0 shrink-0 truncate font-mono text-[length:var(--text-2xs)] text-neutral-dim">
           · {{ subagentMeta.slug }}
         </span>
         <!-- 引擎 badge（U3 D9）：常态引擎名（运行期不换引擎，无回退态） -->
@@ -65,12 +67,13 @@
           :title="t('panel.sideDrawer.subagentStopReason')"
           data-testid="subagent-stop-reason"
         >{{ subagentMeta.stopReason }}</span>
-        <!-- 模型标签（subagent-model-switch §7.1 入口层）：chat 域成员可切换
-             （ModelSelectPopover 复用；提交走 subagent.setModel，回执写状态禁乐观写）；
-             标签读取规则四分支合成见 modelDisplay。agentcall 视图只显示（成员级入口
-             登记后续项，§6.1 分流规则第三条）。 -->
+        <!-- 模型标签（subagent-model-switch §7.1 入口层）：chat 域成员与 agentcall 视图的
+             workflow 成员均可切换（ModelSelectPopover 复用；提交走 subagent.setModel，
+             回执写状态禁乐观写）；标签读取规则四分支合成见 modelDisplay。agentcall 视图
+             经 call.memberRecordId 圈定成员 record 作切换目标（switchRecord），record
+             缺失（未创建 / 载荷未经详情增强通道）降级为 meta 槽纯显示。 -->
         <ModelSelectPopover
-          v-if="chatMeta !== null"
+          v-if="switchRecord !== null"
           :selected="modelDisplay.label ?? ''"
           :switching="switching"
           @select="onModelSelect"
@@ -88,7 +91,7 @@
                 <span v-if="modelDisplay.label" class="max-w-[160px] truncate">{{ modelDisplay.label }}</span>
                 <span
                   v-if="modelDisplay.overridden"
-                  class="shrink-0 rounded-sm border border-accent/40 px-1 text-[length:var(--text-3xs)] text-accent"
+                  class="shrink-0 rounded-sm border border-[color-mix(in_oklch,var(--accent)_40%,transparent)] px-1 text-[length:var(--text-3xs)] text-accent"
                   data-testid="subagent-override-badge"
                 >{{ t('panel.sideDrawer.subagentOverrideBadge') }}</span>
                 <ChevronDown class="size-3 shrink-0 opacity-60" />
@@ -97,18 +100,25 @@
           </template>
         </ModelSelectPopover>
         <span
-          v-if="chatMeta === null && subagentMeta?.meta"
+          v-if="switchRecord === null && subagentMeta?.meta"
           class="ml-auto shrink-0 truncate font-mono text-[length:var(--text-3xs)] text-neutral-dim"
         >
           {{ subagentMeta.meta }}
         </span>
       </div>
 
+      <!-- 只读提示（差异化层：subagent 为 background 任务，无 composer）。
+           对齐 demo .sub-ro：头行下方的纯文字行（3xs 档 mid、无边框无图标），
+           不再是底部 border-t 条。 -->
+      <div class="flex shrink-0 items-center px-3.5 pb-2 text-[length:var(--text-3xs)] text-neutral-mid">
+        <span>{{ t('panel.sideDrawer.subagentReadonly') }}</span>
+      </div>
+
       <!-- 运行中 coarse 提示（U4 D7）：非 pi 引擎 running 任务不支持实时流，如实提示不伪造流。
            pi 任务恒不出现（D5：undefined 缺省映射为 pi）。 -->
       <div
         v-if="coarseHintVisible"
-        class="flex shrink-0 items-center gap-1.5 border-b border-hairline bg-surface-2 px-3 py-1.5 text-[10px] text-neutral-dim"
+        class="flex shrink-0 items-center gap-1.5 border-b border-hairline bg-surface-2 px-3.5 py-1.5 text-[length:var(--text-3xs)] text-neutral-dim"
         data-testid="subagent-coarse-hint"
       >
         <Clock class="size-3 shrink-0 opacity-70" />
@@ -145,12 +155,6 @@
         :session-id="selectedSubagentId"
         :main-session-id="panelStore.focusedSessionId ?? undefined"
       />
-
-      <!-- 底部只读提示条（差异化层：subagent 为 background 任务，无 composer） -->
-      <div class="flex shrink-0 items-center gap-1.5 border-t border-hairline px-3 py-1.5 text-[length:var(--text-3xs)] text-neutral-dim">
-        <Lock class="size-3 shrink-0 opacity-70" />
-        <span>{{ t('panel.sideDrawer.subagentReadonly') }}</span>
-      </div>
     </template>
   </div>
 </template>
@@ -158,7 +162,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { AlertCircle, Bot, ChevronDown, ChevronLeft, Clock, Lock } from '@lucide/vue'
+import { AlertCircle, Bot, ChevronDown, ChevronLeft, Clock } from '@lucide/vue'
 import { Button } from '@taiji/ui'
 import { useSubagentSelection, openWorkflowInDrawer } from '@taiji/core/domain/drawer'
 import { usePanelStore } from '@/stores/panel'
@@ -239,7 +243,9 @@ function agentCallHeaderMeta(vid: string): SubagentHeaderMeta | null {
   if (!call) return null
   return {
     agent: call.agent,
-    // model 'default' 不显示（占位值不展示，语义沿用退役的侧栏工作流详情视图）
+    // model 'default' 不显示（占位值不展示，语义沿用退役的侧栏工作流详情视图）；
+    // 成员 record 在场时模型标签由 ModelSelectPopover 承载（switchRecord 非空），
+    // 本 meta 槽仅在 record 缺失降级态显示 call.model
     meta: call.model && call.model !== 'default' ? call.model : undefined,
   }
 }
@@ -253,7 +259,8 @@ const subagentMeta = computed<SubagentHeaderMeta | null>(() => {
   return null
 })
 
-/** 当前选中的 chat 域 record（模型显示态合成与切换目标键；agentcall 两段式 = null）。 */
+/** 当前选中的 chat 域 record（对话流与头部元信息语义；agentcall 两段式 = null——
+ *  模型切换/标签合成目标见 switchRecord）。 */
 const chatMeta = computed<SubagentRecord | null>(() => {
   const vid = selectedSubagentId.value
   if (!vid || !isSubagentVirtualId(vid)) return null
@@ -262,6 +269,30 @@ const chatMeta = computed<SubagentRecord | null>(() => {
     .find((r) => r.subagentId === extractSubagentId(vid))
   return record ?? null
 })
+
+/**
+ * agentcall 两段式的 workflow 成员 record（成员级模型切换目标）：经 call.memberRecordId
+ * 圈定 subagentStore 成员 record——成员键单源对齐锚 = runtime 详情增强透出的
+ * memberRecordId ≡ SubagentRecord.subagentId（≡ run 级聚合应答成员标识；call.sessionId
+ * 是 pi session uuidv7，不在成员键域）。record 缺失（成员 record 未创建 / 载荷未经
+ * 详情增强通道）= null，切换入口降级为 meta 槽纯显示。
+ */
+const agentcallRecord = computed<SubagentRecord | null>(() => {
+  const vid = selectedSubagentId.value
+  if (!vid || !isAgentCallVirtualId(vid)) return null
+  const call = findAgentCall(extractAgentCallSessionId(vid))
+  const recordId = call?.memberRecordId
+  if (recordId === undefined) return null
+  return (
+    subagentStore
+      .getRecordsBySession(panelStore.focusedSessionId ?? '')
+      .find((r) => r.subagentId === recordId) ?? null
+  )
+})
+
+/** 模型标签合成与切换目标的 record：chat 域 = 三段式 record；agentcall 域 = 成员
+ *  record。两域共用同一 ModelSelectPopover 与 setModel 提交通道（recordId 键同源）。 */
+const switchRecord = computed<SubagentRecord | null>(() => chatMeta.value ?? agentcallRecord.value)
 
 // ── 执行模型切换（subagent-model-switch §7.1，U1）────────────────────
 
@@ -274,7 +305,7 @@ const switching = ref(false)
  * 防双处维护漂移。
  */
 const modelDisplay = computed(() => {
-  const record = chatMeta.value
+  const record = switchRecord.value
   if (record === null) return { label: undefined as string | undefined, overridden: false }
   return resolveSubagentModelDisplay({
     display: displayOf(record.subagentId),
@@ -285,9 +316,10 @@ const modelDisplay = computed(() => {
   })
 })
 
-/** 点选候选 → subagent.setModel（chat 域目标）；回执写状态在 composable（禁乐观写）。 */
+/** 点选候选 → subagent.setModel（switchRecord 目标——chat 域 record 或 agentcall 成员
+ *  record，recordId 键同源）；回执写状态在 composable（禁乐观写）。 */
 async function onModelSelect(payload: { modelId: string; provider: ProviderId }): Promise<void> {
-  const record = chatMeta.value
+  const record = switchRecord.value
   if (record === null || switching.value) return
   switching.value = true
   try {
@@ -313,7 +345,8 @@ const engineBadgeTitle = computed<string>(() => {
   return t('panel.sideDrawer.engineBadgeTitle', { engine: meta?.engine || DEFAULT_ENGINE_ID })
 })
 
-/** 当前选中 subagent 的 record（三段式虚拟 id 才有；agentcall 两段式返回 null）＝ chatMeta（同一判据，模型切换消费同键）。 */
+/** 当前选中 subagent 的 record（三段式虚拟 id 才有；agentcall 两段式返回 null）＝ chatMeta——
+ *  对话流加载 / coarse 提示 / 回填桥的 chat 域消费键（模型切换消费 switchRecord，范围更宽）。 */
 const currentRecord = chatMeta
 
 // 对话流数据编排（loadError 兜底态 + 加载/停止；recordEngine 供 coarse 提示与兜底判断复用）

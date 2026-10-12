@@ -13,10 +13,15 @@ import { resolve } from 'node:path'
  *   3. 0.3s/0.2s 硬编码，与 --ease/--duration-* token 体系脱节
  *
  * Plan 03 修复：显式列 opacity + transform 属性、enter/leave 都用 var(--ease)、
- * enter 用 --duration(200ms)、leave 用 --duration-fast(120ms) 更果断。
+ * 时长消费 --duration token。
  *
- * 本测试固化修复成果，防止上述 3 个 finding 回归，并守护 plan Boundaries
- * （不改 translateX 方向距离、不加 keyframes、类名命名不变）。
+ * [M7b demo 对照更新] 进出场动效对齐 demo ToastHost.vue（视觉唯一权威）：
+ * enter/leave 双向 var(--duration)(200ms)（原 leave --duration-fast 120ms 不对称档
+ * 退役）、位移方向 translateX(20px) 横滑 → translateY(8px) 纵浮（demo .toast-enter-from/
+ * .toast-leave-to 实测）。
+ *
+ * 本测试固化上述成果，防止回归，并守护 plan Boundaries
+ * （不加 keyframes、类名命名不变）。
  *
  * 参考：.taiji-harness/2026-08-09-animation-audit/03-toast-enter-exit-transition.md
  */
@@ -73,20 +78,20 @@ describe('Toast 进出场过渡（Plan 03: toast enter-exit transition）', () =
       )
     })
 
-    it('.toast-leave-active 用 --duration-fast（120ms，比 enter 更果断）', () => {
+    it('.toast-leave-active 用 --duration（200ms，M7b demo 对照：双向同档 200ms）', () => {
       expect(source).toMatch(
-        /\.toast-leave-active\s*\{[^}]*var\(--duration-fast\)/,
+        /\.toast-leave-active\s*\{[^}]*var\(--duration\)/,
       )
     })
   })
 
-  describe('plan Boundaries 守护（不改的部分）', () => {
-    it('.toast-enter-from / .toast-leave-to 保持 translateX(20px)（方向距离不变）', () => {
-      const fromMatches = source.match(/translateX\(20px\)/g)
-      expect(
-        fromMatches,
-        'translateX(20px) 应出现 2 次（enter-from + leave-to）',
-      ).toHaveLength(2)
+  describe('plan Boundaries 守护（M7b 后的形态）', () => {
+    it('.toast-enter-from / .toast-leave-to 保持 translateY(8px)（demo 纵浮方向距离不变）', () => {
+      // 规则级匹配（非全文计数）：注释里的示例字样不参与断言
+      const enterFrom = source.match(/\.toast-enter-from\s*\{([^}]*)\}/)?.[1] ?? ''
+      const leaveTo = source.match(/\.toast-leave-to\s*\{([^}]*)\}/)?.[1] ?? ''
+      expect(enterFrom).toContain('translateY(8px)')
+      expect(leaveTo).toContain('translateY(8px)')
     })
 
     it('保持 transition 不加 keyframes（维持可中断性，AUDIT §4 已合规）', () => {

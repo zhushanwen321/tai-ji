@@ -1,25 +1,37 @@
 <template>
-  <GroupCard :title="t('settings.system.shortcutTitle')">
-    <p class="mt-1.5 mb-2 mx-2.5 text-xs text-neutral-mid">{{ t('settings.system.shortcutRecordingHint') }}</p>
-    <div class="px-2.5 pt-1 pb-2 divide-y divide-border/50">
+  <!-- [w2] demo 对照：SystemSection.vue「快捷键」卡——副标题在卡头 gc-sub；行 = .srow
+       （min-h 44 / px 6px / border-t hairline，首行无分隔）；键位 = .kbd（surface-2 底 /
+       border 边 / r-xs / px 8px py 2px / text-xs / fg-2）；重录钮 = btn ghost（neutral-mid），
+       取消态 danger；录制提示 = label 下 desc 行 accent 色（demo 无动画）。 -->
+  <GroupCard>
+    <template #head>
+      <div class="gc-head-text">
+        <h3 class="gc-title">{{ t('settings.system.shortcutTitle') }}</h3>
+        <p class="gc-sub">{{ t('settings.system.shortcutRecordingHint') }}</p>
+      </div>
+    </template>
+    <div class="px-[10px] pt-[4px] pb-[8px]">
       <div
         v-for="cmd in shortcutRows"
         :key="cmd.id"
-        class="flex items-center gap-4 px-1.5 py-2.5 min-h-12"
+        class="flex items-center gap-[16px] border-t border-hairline px-[6px] py-[10px] min-h-[44px] first:border-t-0"
       >
         <div class="flex-1 min-w-0">
           <div class="flex items-center gap-2">
-            <span class="text-base text-neutral-fg font-medium">{{ t(`settings.command.${cmd.id}`) }}</span>
-            <span v-if="recordingId === cmd.id" class="rec-hint text-xs text-accent animate-[pulse-dot_1s_ease-in-out_infinite]">{{ t('settings.system.shortcutRecording') }}</span>
+            <span class="text-[length:var(--text-base)] font-semibold text-neutral-fg">{{ t(`settings.command.${cmd.id}`) }}</span>
           </div>
+          <p v-if="recordingId === cmd.id" class="mt-0.5 text-[length:var(--text-sm)] text-accent">{{ t('settings.system.shortcutRecording') }}</p>
         </div>
         <div class="flex items-center gap-2 shrink-0">
-          <kbd v-if="recordingId !== cmd.id && cmd.shortcut" class="inline-flex items-center h-5 px-1.5 rounded-sm border border-border-strong bg-surface font-mono text-[11px] text-neutral-dim">{{ cmd.shortcut }}</kbd>
-          <span v-else-if="recordingId !== cmd.id" class="text-[11px] text-neutral-dim">-</span>
+          <kbd
+            v-if="recordingId !== cmd.id && cmd.shortcut"
+            class="inline-flex items-center rounded-[var(--radius-xs)] border border-border bg-surface-2 px-[8px] py-[2px] font-mono text-[length:var(--text-xs)] text-neutral-fg-2"
+          >{{ cmd.shortcut }}</kbd>
+          <span v-else-if="recordingId !== cmd.id" class="text-[length:var(--text-2xs)] text-neutral-dim">-</span>
           <Button
             variant="ghost"
             size="dense"
-            class="h-7 px-2.5 text-xs text-accent"
+            class="h-[32px] px-[12px] text-[length:var(--text-sm)]"
             :class="{ 'text-danger': recordingId === cmd.id }"
             @click="recordingId === cmd.id ? cancelRecording() : startRecording(cmd.id)"
           >{{ recordingId === cmd.id ? t('settings.providerEdit.cancel') : t('settings.system.shortcutReRecord') }}</Button>
@@ -27,7 +39,7 @@
             v-if="commandStore.shortcutOverrides.value[cmd.id]"
             variant="ghost"
             size="dense"
-            class="h-7 px-2.5 text-xs text-neutral-dim hover:text-danger"
+            class="h-[32px] px-[12px] text-[length:var(--text-sm)]"
             @click="resetShortcut(cmd.id)"
           >{{ t('settings.system.shortcutReset') }}</Button>
         </div>

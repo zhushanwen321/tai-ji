@@ -6,7 +6,8 @@
     收敛在 DiagnosticsExportAction（与死态块第二入口共享同一组件，行为不分叉）。
   -->
   <GroupCard :title="t('settings.system.diagnosticsTitle')">
-    <div class="px-2.5 pt-1 pb-2" data-testid="diagnostics-section">
+    <!-- [w2] 卡体 = demo `.gcard-body.tight`；DiagnosticsExportAction 为共享动作组件，不在本波清单。 -->
+    <div class="px-[10px] pt-[4px] pb-[8px]" data-testid="diagnostics-section">
       <SettingRow :label="t('settings.system.diagnosticsExportLabel')" :desc="t('settings.system.diagnosticsExportDesc')">
         <DiagnosticsExportAction />
       </SettingRow>

@@ -379,9 +379,9 @@ describe('ExtensionPage 候选项点击不双触发（W2 D3）', () => {
     // 修复模式（div 无 @click）→ 路径2 不产生翻转 → 保持 checked。
     const candidateText = wrapper.findAll('span').find((s) => s.text() === 'cand-ext')
     expect(candidateText).toBeTruthy()
-    const clickableArea = candidateText!.element.closest('div.min-w-0')
-    expect(clickableArea).toBeTruthy()
-    clickableArea!.dispatchEvent(new Event('click', { bubbles: true }))
+    // [w3b] 候选行改 demo 单行内联形态（无旧两行文字区容器 div），文字元素 = name span 本身
+    const clickableArea = candidateText!.element
+    clickableArea.dispatchEvent(new Event('click', { bubbles: true }))
     await flushPromises()
 
     // 修复后：div 无 @click，路径2 不翻转 → 最终选中态 = checked

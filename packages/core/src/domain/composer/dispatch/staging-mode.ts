@@ -116,7 +116,7 @@ export interface StagingModeConfig<S extends StagingModeSource> {
   placeholderKey: string
   /** mode-chip 标签的 i18n key */
   chipLabelKey: string
-  /** mode-chip 图标组件（GitFork / Upload） */
+  /** staging banner 图标组件（fork = GitBranch / handoff = ArrowRightLeft，demo 权威） */
   chipIcon: Component
 }
 

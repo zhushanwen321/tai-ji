@@ -448,7 +448,8 @@ describe('projectSubagentModelDetailIntoRuns — run 详情逐成员携带', () 
     }
     const result = projectSubagentModelDetailIntoRuns('main-1', runs, [memberA, memberB], query)
 
-    expect(query.getRunOverride).toHaveBeenCalledWith('main-1', 'wf-1')
+    // resolved additive 可选参：调用方未传 = undefined 透传（缺省自扫语义不变）
+    expect(query.getRunOverride).toHaveBeenCalledWith('main-1', 'wf-1', undefined)
     const calls = result[0]?.agentCalls
     expect(calls).toHaveLength(2)
     // run 级覆盖：全成员携带同值（run 作用域意图）

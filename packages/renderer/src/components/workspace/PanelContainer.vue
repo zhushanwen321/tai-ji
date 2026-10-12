@@ -4,14 +4,15 @@
     v2：移除 split 后恒单 Panel（撑满），不再有单/双 panel 状态机。
     active panel 的 sessionId 跟随 session store.activeId（sidebar 选 session → 载入 panel）。
 
-    三卡化（2026-10-04 用户裁决，推翻 D2 一体化生长）：对话流 / 右抽屉 / 底抽屉三块内容区
-    各自持 float-panel 壳（border/radius/bg/shadow-[var(--shadow-1)]）；本组件与 MainPanel
-    只做布局，不持卡片视觉。PanelHeader 是对话流卡的卡头（2026-10-04 二轮裁决：header 只与
-    对话流构成整体，不横跨抽屉卡——右抽屉卡有自己的 L1 栏、底抽屉卡有自己的实例切换条）；
-    StatusBar 仍是横跨状态条。main 与 drawer 的宽度 handle 即卡缝本体（w-1 缝内 1px 视觉线，
-    hover/drag 染色）——drawer 关闭时 handle 随 v-if 消失，无缝无残线。卡间缝（横缝与纵缝）
-    统一 = a = 窗口边距 p-1 的 4px（三轮裁决：与左右边距一致，实际边距 4px 非叠加值）；
-    底抽屉卡与 StatusBar 间 4px。
+    三卡化（2026-10-04 用户裁决，推翻 D2 一体化生长）+ ui-replica M2 对齐 demo 卡壳：
+    对话流 / 右抽屉 / 底抽屉三块内容区各自持卡壳。demo 权威形态两档——对话卡 = bg-surface +
+    hairline 边 + 12px 圆角、无阴影（demo .chat-card）；右/底抽屉卡 = bg-surface + border 边 +
+    12px 圆角 + shadow-1（demo .drawer-card/.term-card）。PanelHeader 是对话流卡的卡头
+    （2026-10-04 二轮裁决：header 只与对话流构成整体，不横跨抽屉卡——右抽屉卡有自己的 L1 栏、
+    底抽屉卡有自己的实例切换条）；StatusBar 仍是横跨状态条。main 与 drawer 的宽度 handle 即卡缝
+    本体（w-1 = 4px 缝，缝内 1px 视觉线，hover/键盘焦点显、drag 染 accent）——drawer 关闭时
+    handle 随 v-if 消失，无缝无残线。卡间缝（横缝与纵缝）统一 = 窗口边距 4px（demo 三卡化裁决
+    「卡间缝 4px = 窗口边距同值」）；底抽屉卡与 StatusBar 间 4px。
 
     Drawer 协调（W4 drawer-shell-integration）：drawer 固定挂本容器（单实例），恒作 flex 子项与
     Panel 各占一半并排（mode='split'），贴右展开（direction='right'）。单 panel 下不再有 overlay
@@ -42,11 +43,13 @@
          开合宽度动画。手写布局能力（ui-signal-density D10 2026-10-06 修订）：无 drawer 时
          main 卡撑满公共容器（width 100% + margin 0），卡内内容列（对话流 + composer，消费
          .content-col 的 max-width: var(--content-max-w)）限宽 60% 居中——留白在卡内而非卡外；
-         60% 实算低于 720px 下限即撑满，drawer 挤窄后恒撑满（派生单处在 useDrawerSplitWidth）；
+         60% 实算低于 720px 下限即撑满，standalone 两分支均封 demo 阅读列 720 cap，drawer 挤窄
+         后恒撑满（派生单处在 useDrawerSplitWidth）；
          drawer 打开时 main width 动画到拆分比例、内容列恒撑满；handle 拖动（pointer capture
          跟手，拖动期间 transition:none）+ 键盘微调 + localStorage 持久化。
          drawer wrapper 常驻（width 0 ↔ drawerPct%）承载 width 动画；DrawerPanel 内部 aside
-         Transition（淡入右移）与 wrapper width 动画同时长（--duration-slow），叠加和谐。
+         Transition（淡入右移）走 E5 显隐层独立参数（--duration 分向缓动，见 DrawerPanel style），
+         与壳层 width 过渡（--duration-slow）分层各自独立——demo 权威即两层不同时长。
          [HISTORICAL] taiji:splitter-layout 派发已随消费方退役（终态同步 2026-10-03）：
          原「拖动/键盘直发 + 开合动画 rAF 逐帧派发（BrowserPane 侧 33ms 节流）」的消费方
          useBrowserRectSync 已随 BrowserPane 迁浮层视口删除监听（§7.3：不造无人读的事件），
@@ -55,19 +58,18 @@
     <div ref="splitAreaEl" data-testid="split-area" class="relative flex min-h-0 flex-1 overflow-hidden">
       <div
         data-fs-scope="chat"
-        class="relative flex h-full min-w-0 flex-col overflow-hidden rounded-[10px] border border-border bg-surface shadow-[var(--shadow-1)]"
+        class="relative flex h-full min-w-0 flex-col overflow-hidden rounded-[var(--radius-card)] border border-hairline bg-surface"
         :class="splitTransitionClass"
         :style="mainAreaStyle"
         data-testid="main-area"
       >
         <!-- header 是对话流卡的组成部分（2026-10-04 用户裁决：header 只与对话流构成整体，
-             不再横跨抽屉卡）——右抽屉卡有自己的 L1 栏，底抽屉卡有自己的实例切换条。 -->
+             不再横跨抽屉卡）——右抽屉卡有自己的 L1 栏，底抽屉卡有自己的实例切换条。
+             [shell 域对齐 demo spec §3.5 + 审计 R11] 卡头只显会话级控件：目录/分支次要行与
+             .jsonl 文件名按钮已移除（sessionDir/gitBranch 仍供 Panel 消费）。 -->
         <PanelHeader
           :session-label="sessionLabelOf(leaf)"
-          :session-dir="sessionDirOf(leaf)"
           :session-id="leaf.sessionId ?? undefined"
-          :session-file="sessionFileOf(leaf)"
-          :git-branch="gitBranchOf(leaf)"
           :status="statusOf(leaf)"
           @toggle-drawer="onDrawerToggle()"
         />
@@ -88,15 +90,19 @@
          内容显隐由 DrawerPanel 内部 aside v-if（Transition）承接。git 数据由本容器 provide，
          GitPanel inject。内容区按 activeTab 经默认 slot 注入桌面独占面板（C2 contract：该 tab
          无桌面面板时不注入 → DrawerPanel 空态 fallback 渲染）。 -->
-      <!-- 卡缝本体（三卡化）：8px 缝，视觉线居中（hover 显 / drag 染 accent）。
-           width 动画期间 transition:none 的语义保持（splitTransitionClass 不作用于本元素——
-           缝宽恒 8px，只有 main/drawer 两侧宽度动）。 -->
+      <!-- 卡缝本体（三卡化 + ui-replica M2 对齐 demo .split-handle）：4px 缝（= 窗口边距同值，
+           demo 三卡化裁决「卡间缝 4px = 窗口边距同值」），缝内 1px 视觉线居中（hover/键盘焦点显 /
+           drag 染 accent）。width 动画期间 transition:none 的语义保持（splitTransitionClass 不作用于
+           本元素——缝宽恒 4px，只有 main/drawer 两侧宽度动）。 -->
       <div
         v-if="drawerOpen"
         role="separator"
         aria-orientation="vertical"
         tabindex="0"
-        class="relative w-1 shrink-0 cursor-col-resize touch-none select-none"
+        :aria-valuemin="20"
+        :aria-valuemax="60"
+        :aria-valuenow="Math.round(drawerPct)"
+        class="group relative w-1 shrink-0 cursor-col-resize touch-none select-none [&:focus-visible>div]:bg-border-strong"
         :data-state="isDragging ? 'drag' : undefined"
         data-testid="drawer-resize-handle"
         @pointerdown="onHandlePointerDown"
@@ -106,7 +112,7 @@
         @keydown="onHandleKeydown"
       >
         <div
-          class="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-transparent transition-colors duration-[var(--duration-fast)] ease-[var(--ease)] group-hover:bg-border-strong hover:bg-border-strong data-[state=drag]:bg-accent"
+          class="absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-transparent transition-colors duration-[var(--duration-fast)] ease-[var(--ease-out)] group-hover:bg-border-strong hover:bg-border-strong data-[state=drag]:bg-accent"
           :data-state="isDragging ? 'drag' : undefined"
         />
       </div>
@@ -116,7 +122,7 @@
       <div
         data-fs-scope="drawer"
         class="relative h-full min-w-0 overflow-hidden"
-        :class="splitTransitionClass"
+        :class="[splitTransitionClass, DRAWER_FOCUS_SCOPE]"
         :style="{ width: drawerOpen ? `${drawerPct}%` : '0%' }"
         data-testid="drawer-area"
         :data-find-surface="drawerOpen ? 'right-drawer' : undefined"
@@ -176,8 +182,9 @@
               data-testid="drawer-unread-badge"
               :title="t('panel.sideDrawer.unreadMessages', { count: unreadCount })"
             >
-              <span class="size-1.5 animate-pulse rounded-full bg-accent-fg" />
-              <span class="font-mono text-[10px] text-accent-fg">{{ unreadCount > 9 ? '9+' : unreadCount }}</span>
+              <!-- demo G6：未读 dot 静态（pulse 语义 = 运行中，不挪给未读态） -->
+              <span class="size-1.5 rounded-full bg-accent-fg" />
+              <span class="font-mono text-[length:var(--text-3xs)] text-accent-fg">{{ unreadCount > 9 ? '9+' : unreadCount }}</span>
             </div>
           </template>
         </DrawerPanel>
@@ -195,19 +202,25 @@
     <div
       data-testid="bottom-drawer"
       class="relative shrink-0 overflow-hidden"
-      :class="bottomTransitionClass"
+      :class="[bottomTransitionClass, DRAWER_FOCUS_SCOPE]"
       :style="{ height: bottomHeightStyle, marginTop: '4px' }"
       :data-find-surface="bottomOpen ? 'bottom-drawer' : undefined"
     >
-      <!-- 上沿手柄（三卡化）：命中区跨进卡上方缝（-top-1 h-1 覆盖 4px 缝，视觉线贴卡顶边）——
-           缝即拖拽区。卡间缝统一为窗口边距 a = p-1 的 4px（2026-10-04 三轮裁决：实际边距
-           4px，非叠加值）。 -->
+      <!-- 上沿手柄（三卡化 + ui-replica MF-1-1 对齐 demo .split-handle.hz）：手柄挂壳内顶部
+           （top-0 h-1，demo pane 内 top:0 同构）——壳 overflow-hidden 会裁掉 border box 外的
+           盒体，旧 -top-1 外扩形态整个手柄被裁=不可见也不命中。命中区 = 卡顶 4px 内距带
+           （demo 明示不做向下外扩：实例条工具钮顶缘在 pane 顶 7px 处，下探外扩劫持按钮点击），
+           视觉线保持手柄盒底 bottom-0（贴卡顶边内侧）。卡间缝统一为窗口边距 4px（demo 三卡化
+           裁决：卡间缝 = 窗口边距同值），键盘焦点显视觉线（demo .split-handle:focus-visible .shl）。 -->
       <div
         v-if="bottomOpen"
         role="separator"
         aria-orientation="horizontal"
         tabindex="0"
-        class="absolute inset-x-0 -top-1 z-10 h-1 cursor-row-resize touch-none select-none"
+        :aria-valuemin="BOTTOM_DRAWER_HEIGHT_MIN_PCT"
+        :aria-valuemax="BOTTOM_DRAWER_HEIGHT_MAX_PCT"
+        :aria-valuenow="Math.round(bottomHeightPct)"
+        class="group absolute inset-x-0 top-0 z-10 h-1 cursor-row-resize touch-none select-none [&:focus-visible>div]:bg-border-strong"
         :data-state="isBottomDragging ? 'drag' : undefined"
         data-testid="bottom-drawer-resize-handle"
         @pointerdown="onBottomHandlePointerDown"
@@ -217,7 +230,7 @@
         @keydown="onBottomHandleKeydown"
       >
         <div
-          class="absolute inset-x-0 bottom-0 h-px bg-transparent transition-colors duration-[var(--duration-fast)] ease-[var(--ease)] hover:bg-border-strong data-[state=drag]:bg-accent"
+          class="absolute inset-x-0 bottom-0 h-px bg-transparent transition-colors duration-[var(--duration-fast)] ease-[var(--ease-out)] group-hover:bg-border-strong hover:bg-border-strong data-[state=drag]:bg-accent"
           :data-state="isBottomDragging ? 'drag' : undefined"
         />
       </div>
@@ -226,7 +239,7 @@
            事件顺序语义，无定时兜底）。Transition 直接子项用无 key 包装层：retry 的 :key 重挂
            留在内层，chunk 重试换件不经 leave/enter 过渡（chunk 失败占位链断言面不变）。 -->
       <Transition name="bottom-drawer-content">
-        <div v-if="bottomOpen" class="h-full overflow-hidden rounded-[10px] border border-border bg-surface shadow-[var(--shadow-1)]">
+        <div v-if="bottomOpen" class="h-full overflow-hidden rounded-[var(--radius-card)] border border-border bg-surface shadow-[var(--shadow-1)]" :class="DRAWER_FOCUS_SCOPE">
           <TerminalView
             :key="terminalRetryKey"
             :session-id="panelSessionId"
@@ -261,6 +274,8 @@ import {
 import {
   bindBottomDrawerSessionId,
   useBottomDrawerControl,
+  BOTTOM_DRAWER_HEIGHT_MIN_PCT,
+  BOTTOM_DRAWER_HEIGHT_MAX_PCT,
 } from '@taiji/core/domain/bottom-drawer'
 import { DrawerPanel } from '@taiji/ui/features/drawer'
 import { StatusBar } from '@taiji/ui/extension-host'
@@ -334,6 +349,18 @@ const WorkflowTab = defineAsyncComponent({
 
 const { t } = useI18n()
 
+// R3 抽屉域焦点收敛（ui-replica MF-1-51，demo drawers.css .rd/.bd「元素级重置收窄到抽屉根」）：
+// input 聚焦零框（光标即反馈）。MF-1-71 后全局 Input 聚焦走 outline 通道，抽屉域须双属性
+// 同压——shadow-none 压 ring/box-shadow 通道 + outline-none 压 outline 通道（漏一即穿）；
+// button 键盘焦点 = inset 1px --border-strong（ring-0 + ring-offset-0 归零 ui Button
+// 的 ring 变量；renderer Button 的 shadow 双环被同特异性更高形态整体替换为 inset shadow）。
+// 挂载层：drawer-area（右抽屉 FindBar surface）、底抽屉内容区（TerminalView 实例条）、
+// bottom-drawer 壳（底抽屉 FindBar surface）；右抽屉内部（L1 栏/关闭钮/BtwPanel/DetailPane）
+// 由 DrawerPanel aside 根同款作用域承接。本层不罩 [tabindex]（防误伤底抽屉 handle 与
+// xterm 内部可聚焦元素；抽屉内 role=tab 后代由 aside 层覆盖）。
+const DRAWER_FOCUS_SCOPE =
+  '[&_input:focus-visible]:shadow-none [&_input:focus-visible]:outline-none [&_button:focus-visible]:ring-0 [&_button:focus-visible]:ring-offset-0 [&_button:focus-visible]:shadow-[inset_0_0_0_1px_var(--border-strong)]'
+
 const panel = usePanelStore()
 const session = useSessionStore()
 const chatStore = useChatStore()
@@ -351,9 +378,6 @@ function sessionLabelOf(l: PanelLeaf): string {
 }
 function sessionDirOf(l: PanelLeaf): string {
   return l.sessionId ? session.list.find((s) => s.id === l.sessionId)?.cwd ?? '' : ''
-}
-function sessionFileOf(l: PanelLeaf): string | undefined {
-  return l.sessionId ? session.list.find((s) => s.id === l.sessionId)?.sessionFile : undefined
 }
 function gitBranchOf(l: PanelLeaf): string | undefined {
   return l.sessionId ? session.list.find((s) => s.id === l.sessionId)?.gitBranch : undefined
@@ -497,6 +521,7 @@ const {
 // ── 纵轴：底抽屉高度（§7.3）——pool = split 行 + 底抽屉共享容器（拖拽数学与显示期 clamp 基准）──
 const poolEl = ref<HTMLElement | null>(null)
 const {
+  heightPct: bottomHeightPct,
   bottomHeightStyle,
   isBottomDragging,
   bottomTransitionClass,
@@ -509,17 +534,36 @@ const {
 
 <style scoped>
 /*
- * 底抽屉收合过渡期内容保挂载（display-containers §6.2 S1「开合动画平顺」，U6 修复）：
- * 壳 height 过渡（--duration-slow）收拢期间内容不同帧消失——leave 期保持挂载并随壳淡出，
- * 卸载时机 = leave 过渡结束（Vue Transition 事件顺序语义，无定时兜底）。leave-active 加
- * absolute inset-0：收拢中的离场内容不占文档流（leave 未完即重开时新旧内容不叠流）。
- * 淡出走 opacity 且与壳 height 过渡同参数同时长（收拢与淡出同步收束）；reduced-motion
- * 全局兜底保留 opacity 过渡（style.css「更少更温和」非零裁决）。
+ * 底抽屉内容显隐过渡（display-containers §6.2 S1「开合动画平顺」；demo drawers.css .bd
+ * 显隐层语义，与壳层 height 过渡 --duration-slow 分层各自独立——demo 两层时长本就不同）：
+ * - 开（enter）：opacity 0→1 + translateY(16px→0) 上浮淡入，E5 显隐层开方向 ease-out；
+ * - 关（leave）：收合过渡期内容保挂载（U6）——壳 height 过渡收拢期间内容不同帧消失，
+ *   leave 期保持挂载并随壳淡出，卸载时机 = leave 过渡结束（Vue Transition 事件顺序语义，
+ *   无定时兜底）；leave-active 加 absolute inset-0：收拢中的离场内容不占文档流（leave
+ *   未完即重开时新旧内容不叠流）；淡出 = opacity + translateY(16px) 下沉成对（demo
+ *   .bd.is-closed 同构成对声明，ui-replica MF-1-7），E5 显隐层关方向 ease-in；
+ * - 时长 = demo --dur-base，消费令牌层既有 --duration（值 200ms 与 demo --dur-base 同值，
+ *   MF-2-17 收编，不新增 --duration-base 重复令牌）；
+ * - reduced-motion 全局兜底（style.css）：transform 移出过渡属性位移瞬切，opacity 保留
+ *   温和过渡（「更少更温和」非零裁决）。
  */
+.bottom-drawer-content-enter-active {
+  transition:
+    opacity var(--duration) var(--ease-out),
+    transform var(--duration) var(--ease-out);
+}
+
+.bottom-drawer-content-enter-from {
+  opacity: 0;
+  transform: translateY(16px);
+}
+
 .bottom-drawer-content-leave-active {
   position: absolute;
   inset: 0;
-  transition: opacity var(--duration-slow) var(--ease);
+  transition:
+    opacity var(--duration) var(--ease-in),
+    transform var(--duration) var(--ease-in);
 }
 
 .bottom-drawer-content-leave-from {
@@ -528,5 +572,6 @@ const {
 
 .bottom-drawer-content-leave-to {
   opacity: 0;
+  transform: translateY(16px);
 }
 </style>

@@ -7,11 +7,11 @@
  *   followIfStuck——scrollToIndex 落在 virtua 内部 RO 更新测量缓存之后（V6 残留根修验收面）
  * - 连续触发 cancel 合并：同帧两次 RO 触发只产生一次 followIfStuck（外层句柄 cancel-reschedule，
  *   同 U1 followIfStuck 的 pendingRafId 模式）
- * - markUnread sticky：同帧标记型（tail 增高）与静默型（视口 resize）先后触发 → 合并只调一次
- *   且标记不丢失（对齐 U1 pendingMarkUnread 语义）
  * - notifyRoActivity 时机：首次 RO 回调即喂信号（D7② 收敛抑制窗静默计时不因双 rAF 拖延）
- * - 语义不变面：tail/spacer 二分（增高标 unread / spacer 静默）、isPrepend 抑制窗、
- *   store watch 通路保持直调（不套外层 rAF）、dispose 取消 pending 外层 rAF
+ * - 语义不变面：store watch 通路保持直调（不套外层 rAF）、dispose 取消 pending 外层 rAF
+ * - [决策 12] 旧 markUnread sticky / tail-spacer 二分 / isPrepend 前插抑制窗用例随标记分档
+ *   退役删除（「回到最新」胶囊改距底几何判定，触发源不再区分标记/静默；同帧 tail 增高 +
+ *   视口 resize 的 cancel 合并行为保留用例验证只调一次）
  *
  * mock 策略：@vue/test-utils 挂载 harness 组件（composable 的 onMounted 需要组件实例）；
  * ManualResizeObserverStub（_virtua-mock-helper U1 定稿）确定性派发 RO 回调——组件内创建顺序
@@ -47,7 +47,6 @@ describe('useMessageStreamFollowTriggers（RO 回调双 rAF，P-timing 降级预
   function mountTriggers() {
     const messages = ref<Message[]>([])
     const lastRenderTurn = ref<{ isStreaming: boolean } | null>(null)
-    const isPrepend = ref(false)
     const scrollEl = ref<HTMLElement | null>(document.createElement('div'))
     const followIfStuck = vi.fn()
     const followToBottomForce = vi.fn()
@@ -59,7 +58,6 @@ describe('useMessageStreamFollowTriggers（RO 回调双 rAF，P-timing 降级预
         api = useMessageStreamFollowTriggers({
           messages: computed(() => messages.value),
           lastRenderTurn: computed(() => lastRenderTurn.value),
-          isPrepend,
           scrollEl,
           followIfStuck,
           followToBottomForce,
@@ -78,7 +76,6 @@ describe('useMessageStreamFollowTriggers（RO 回调双 rAF，P-timing 降级预
       api,
       messages,
       lastRenderTurn,
-      isPrepend,
       followIfStuck,
       followToBottomForce,
       notifyRoActivity,
@@ -94,7 +91,7 @@ describe('useMessageStreamFollowTriggers（RO 回调双 rAF，P-timing 降级预
     Object.defineProperty(el, 'offsetHeight', { value: height, configurable: true })
   }
 
-  it('双 rAF 核心：scrollEl RO 触发后 follow 不立即执行，flush 一帧后才调 followIfStuck({markUnread:false})', async () => {
+  it('双 rAF 核心：scrollEl RO 触发后 follow 不立即执行，flush 一帧后才调 followIfStuck()', async () => {
     const { scrollRo, followIfStuck, notifyRoActivity } = mountTriggers()
 
     scrollRo.dispatch()
@@ -106,7 +103,7 @@ describe('useMessageStreamFollowTriggers（RO 回调双 rAF，P-timing 降级预
 
     await vi.advanceTimersByTimeAsync(16) // flush 外层 rAF
     expect(followIfStuck).toHaveBeenCalledTimes(1)
-    expect(followIfStuck).toHaveBeenCalledWith({ markUnread: false })
+    expect(followIfStuck).toHaveBeenCalledWith()
     expect(notifyRoActivity).toHaveBeenCalledTimes(1) // 外层 rAF 执行不补喂
   })
 
@@ -118,41 +115,29 @@ describe('useMessageStreamFollowTriggers（RO 回调双 rAF，P-timing 降级预
 
     await vi.advanceTimersByTimeAsync(16)
     expect(followIfStuck).toHaveBeenCalledTimes(1)
-    expect(followIfStuck).toHaveBeenCalledWith({ markUnread: false })
+    expect(followIfStuck).toHaveBeenCalledWith()
   })
 
-  it('markUnread sticky：同帧 tail 增高（标记型）后跟视口 resize（静默型）→ 合并一次且标记不丢', async () => {
+  it('同帧 wrap RO（tail 增高）后跟视口 resize → cancel 合并只调一次 followIfStuck', async () => {
     const { api, wrapRo, scrollRo, followIfStuck } = mountTriggers()
 
-    stubTailHeight(api, 30) // 基线 0 → 30：tail 增高分支（标记型）
+    stubTailHeight(api, 30) // 基线 0 → 30：tail 高度变化
     wrapRo.dispatch([{ contentRect: { height: 0 } as DOMRectReadOnly }]) // wrap 高度未变，纯 tail 分量
-    scrollRo.dispatch() // 静默型后到：cancel 合并不丢标记
+    scrollRo.dispatch() // 后到：cancel 合并
 
     await vi.advanceTimersByTimeAsync(16)
     expect(followIfStuck).toHaveBeenCalledTimes(1)
-    expect(followIfStuck).toHaveBeenCalledWith({ markUnread: true })
+    expect(followIfStuck).toHaveBeenCalledWith()
   })
 
-  it('tail/spacer 二分语义不变：spacer 变化（tail 高度不变）→ 静默跟随 markUnread:false', async () => {
+  it('wrap RO spacer 变化（tail 高度不变）→ 跟随一次', async () => {
     const { api, wrapRo, followIfStuck } = mountTriggers()
 
     wrapRo.dispatch([{ contentRect: { height: 500 } as DOMRectReadOnly }]) // wrap 高度变、tail 未变
 
     await vi.advanceTimersByTimeAsync(16)
     expect(followIfStuck).toHaveBeenCalledTimes(1)
-    expect(followIfStuck).toHaveBeenCalledWith({ markUnread: false })
-  })
-
-  it('isPrepend 抑制窗语义不变：窗内 tail 增高也跟随但不标 unread', async () => {
-    const { api, isPrepend, wrapRo, followIfStuck } = mountTriggers()
-
-    isPrepend.value = true
-    stubTailHeight(api, 30)
-    wrapRo.dispatch([{ contentRect: { height: 0 } as DOMRectReadOnly }])
-
-    await vi.advanceTimersByTimeAsync(16)
-    expect(followIfStuck).toHaveBeenCalledTimes(1)
-    expect(followIfStuck).toHaveBeenCalledWith({ markUnread: false })
+    expect(followIfStuck).toHaveBeenCalledWith()
   })
 
   it('store watch 通路保持直调（不套外层 rAF）：messages.length 变化 nextTick 内即触发', async () => {
@@ -162,7 +147,7 @@ describe('useMessageStreamFollowTriggers（RO 回调双 rAF，P-timing 降级预
     await nextTick()
 
     // 未 flush 任何 rAF：watch 通路不经外层 rAF（D3 矩阵前两行时序语义不变）。
-    // 无参调用形态：markUnread 缺省=true 的语义在 useVirtuaFollow 原语内部。
+    // 无参调用形态：脱离态不滚的 guard 语义在 useVirtuaFollow 原语内部。
     expect(followIfStuck).toHaveBeenCalledTimes(1)
     expect(followIfStuck).toHaveBeenCalledWith()
   })

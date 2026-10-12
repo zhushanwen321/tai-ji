@@ -11,6 +11,7 @@
 import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { Block } from '@taiji/ui'
+import { mockChatProvide } from './helpers'
 
 /** u4a push 截断占位文案（契约保持式截断的 block 级替换产物） */
 const PLACEHOLDER = '内容过大（32.0 MB）已在传输层截断，完整内容见 session 文件：/tmp/sessions/abc.jsonl'
@@ -24,6 +25,8 @@ function mountPlaceholderBlock(content: string, role: 'assistant' | 'user' = 'as
       'data-role': role,
     },
     global: {
+      // Block 经 useChatViewDeps inject 消费壳依赖（N1 起），直接 mount 必须注入 mock deps
+      provide: mockChatProvide(),
       // 渲染 content 的 stub：wrapper.text() 才能断言正文（stubs: true 会吞掉 content）
       stubs: {
         MarkdownRenderer: {

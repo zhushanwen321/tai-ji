@@ -15,9 +15,14 @@ import {
   defaultPersonalProviderConfigPath,
   listZcodeModels,
   locateZcodeBuiltinCatalog,
+  piSyncedProviderConfigPath,
+  resolvePersonalProviderConfigPath,
   resolveZcodeMinimalReasoningLevel,
   resolveZcodeModelRef,
 } from "../preparer.ts";
+
+/** 副本语境恢复指引句（§5 单元 3 文案修复——四处 throw 公共尾句的断言锚点）。 */
+const TAIJI_GUIDANCE = "若使用 taiji 同步副本/默认模型，到 taiji settings 核对或重选，重启 taiji 生效。";
 
 // locateZcodeBuiltinCatalog 目录扫描分支以 os.homedir() 为根——测试不触碰真实
 // ~/.zcode：zcHomeRef 置值后 homedir 指向 tmp 树（缺省回落真实 HOME，供缺省路径
@@ -106,6 +111,7 @@ describe("resolveZcodeModelRef（provider_config 单源）", () => {
       const e = err as ZcodePrepareError;
       expect(e.code).toBe("model_not_available");
       expect(e.message).toContain("GLM-5.3, GLM-5.3-Flash, GLM-5.2");
+      expect(e.message).toContain(TAIJI_GUIDANCE);
     }
   });
 
@@ -117,6 +123,7 @@ describe("resolveZcodeModelRef（provider_config 单源）", () => {
       expect((err as ZcodePrepareError).code).toBe("model_not_available");
       expect((err as ZcodePrepareError).message).toContain(PROVIDER_A);
       expect((err as ZcodePrepareError).message).toContain(PROVIDER_B);
+      expect((err as ZcodePrepareError).message).toContain(TAIJI_GUIDANCE);
     }
   });
 
@@ -126,6 +133,7 @@ describe("resolveZcodeModelRef（provider_config 单源）", () => {
       expect.unreachable("should throw");
     } catch (err) {
       expect((err as ZcodePrepareError).code).toBe("engine_credential_missing");
+      expect((err as ZcodePrepareError).message).toContain(TAIJI_GUIDANCE);
     }
   });
 
@@ -137,7 +145,194 @@ describe("resolveZcodeModelRef（provider_config 单源）", () => {
     } catch (err) {
       expect((err as ZcodePrepareError).code).toBe("engine_credential_missing");
       expect((err as ZcodePrepareError).message).toContain("provider_config.json");
+      expect((err as ZcodePrepareError).message).toContain(TAIJI_GUIDANCE);
     }
+  });
+});
+
+// ── 默认解析链（engine-provider-unification D3 换轨：副本存在→读 merge(真实,副本)
+// 视图，缺失→回落真实文件直读；路径函数仍按三态链返回单路径供 env 赋值）──
+// env 全局污染防护：本 describe 用例独占 TAIJI_AGENT_DATA_DIR 的 save/set/restore
+//（防线 global-setup 会把它钉死 tmp 树，这里指向本用例自建 dataDir）；homedir 经
+// zcHomeRef 指向 tmp 树内的 fakeHome——真实文件与副本都写在 tmp 内，零触碰真实目录。
+const DATA_DIR_ENV_KEY = "TAIJI_AGENT_DATA_DIR";
+const COPY_PROVIDER = "33333333-cccc-4000-8000-000000000003";
+
+describe("resolvePersonalProviderConfigPath（默认解析链：显式 sources > 副本存在 > 真实文件）", () => {
+  let savedDataDirEnv: string | undefined;
+  let dataDir: string;
+  let realPath: string;
+
+  beforeEach(() => {
+    savedDataDirEnv = process.env[DATA_DIR_ENV_KEY];
+    dataDir = path.join(tmpRoot, "chain-data");
+    const fakeHome = path.join(tmpRoot, "chain-home");
+    realPath = path.join(fakeHome, ".zcode", "v2", "provider_config.json");
+    zcHomeRef.current = fakeHome;
+    // 真实文件只含 PROVIDER_A（与副本/显式源内容互异——三者可区分）
+    writeJson(realPath, {
+      schemaVersion: 1,
+      config: {
+        providerOrder: [PROVIDER_A],
+        providerConfigRules: {
+          providerRules: [
+            {
+              providerId: PROVIDER_A,
+              providerName: "provider-a",
+              config: { access: { type: "api-key", apiKey: "key-a" }, personalModelIds: ["GLM-5.3"] },
+            },
+          ],
+        },
+      },
+    });
+  });
+
+  afterEach(() => {
+    if (savedDataDirEnv === undefined) {
+      delete process.env[DATA_DIR_ENV_KEY];
+    } else {
+      process.env[DATA_DIR_ENV_KEY] = savedDataDirEnv;
+    }
+    zcHomeRef.current = undefined;
+  });
+
+  function writeCopy(dir: string, order: string[] = [COPY_PROVIDER]): string {
+    const copyPath = piSyncedProviderConfigPath(dir);
+    writeJson(copyPath, {
+      schemaVersion: 1,
+      config: {
+        providerOrder: order,
+        providerConfigRules: {
+          providerRules: [
+            {
+              providerId: COPY_PROVIDER,
+              providerName: "copy-only",
+              config: { access: { type: "api-key", apiKey: "key-c" }, personalModelIds: ["copy-model-x"] },
+            },
+          ],
+        },
+      },
+    });
+    return copyPath;
+  }
+
+  it("副本存在 → 读 merge 视图（真实 ∪ 副本；路径函数仍锚定副本路径供 env 赋值）", () => {
+    process.env[DATA_DIR_ENV_KEY] = dataDir;
+    const copyPath = writeCopy(dataDir);
+    expect(resolvePersonalProviderConfigPath()).toBe(copyPath);
+    // 副本独有条目可见（merge 追加面）。用全名 ref：短名按合并序首位（真实侧
+    // PROVIDER_A）解析，不再落副本——「副本遮蔽真实」的旧短名语义已随 merge 退役
+    expect(resolveZcodeModelRef(`${COPY_PROVIDER}/copy-model-x`)).toBe(`${COPY_PROVIDER}/copy-model-x`);
+    // 真实文件条目同样可见——D3 换轨核心：校验链与 Registry 读同一 merge 视图，
+    // 「读源 = 副本整体遮蔽真实」的旧语义已退役
+    expect(resolveZcodeModelRef("GLM-5.3")).toBe(`${PROVIDER_A}/GLM-5.3`);
+    // 清单聚合 = merge 视图全体（真实条目整条保留在前 → PROVIDER_A 先于副本条目）
+    expect(listZcodeModels().map((m) => m.id)).toEqual([
+      `${PROVIDER_A}/GLM-5.3`,
+      `${COPY_PROVIDER}/copy-model-x`,
+    ]);
+  });
+
+  it("同名 id 冲突 → 真实整条保留（副本同 id 条目让位——运行时第二道防线）", () => {
+    process.env[DATA_DIR_ENV_KEY] = dataDir;
+    const copyPath = piSyncedProviderConfigPath(dataDir);
+    writeJson(copyPath, {
+      schemaVersion: 1,
+      config: {
+        providerOrder: [PROVIDER_A, COPY_PROVIDER],
+        providerConfigRules: {
+          providerRules: [
+            {
+              // 与真实文件同 id：key 与模型清单都不同——merge 后真实条目胜出
+              providerId: PROVIDER_A,
+              providerName: "copy-shadow",
+              config: { access: { type: "api-key", apiKey: "key-copy-a" }, personalModelIds: ["copy-only-model"] },
+            },
+            {
+              providerId: COPY_PROVIDER,
+              providerName: "copy-only",
+              config: { access: { type: "api-key", apiKey: "key-c" }, personalModelIds: ["copy-model-x"] },
+            },
+          ],
+        },
+      },
+    });
+    // 真实侧模型可见（真实条目整条保留）
+    expect(resolveZcodeModelRef(`${PROVIDER_A}/GLM-5.3`)).toBe(`${PROVIDER_A}/GLM-5.3`);
+    // 副本侧同 id 条目的独有模型不可见（模型清单也是真实侧的）
+    expect(() => resolveZcodeModelRef(`${PROVIDER_A}/copy-only-model`)).toThrowError(/未知模型/);
+  });
+
+  it("order 合并 = 真实现值序前缀 + 副本独有追加（去重保序）——短名默认 provider 取合并序首位", () => {
+    process.env[DATA_DIR_ENV_KEY] = dataDir;
+    // 副本 order 把 COPY_PROVIDER 排前：若读副本整体，短名会先落到 COPY_PROVIDER；
+    // merge 后序 = [PROVIDER_A(真实), COPY_PROVIDER] → 短名仍落 PROVIDER_A
+    writeCopy(dataDir, [COPY_PROVIDER, PROVIDER_A]);
+    expect(resolveZcodeModelRef("GLM-5.3")).toBe(`${PROVIDER_A}/GLM-5.3`);
+  });
+
+  it("真实文件缺失 → 副本独有条目为全集（merge 输出 = 副本整体，真实侧条目不残留）", () => {
+    process.env[DATA_DIR_ENV_KEY] = dataDir;
+    fs.rmSync(realPath);
+    writeCopy(dataDir);
+    expect(resolveZcodeModelRef("copy-model-x")).toBe(`${COPY_PROVIDER}/copy-model-x`);
+    expect(listZcodeModels().map((m) => m.id)).toEqual([`${COPY_PROVIDER}/copy-model-x`]);
+    // 真实侧条目随真实文件缺席而消失
+    expect(() => resolveZcodeModelRef("GLM-5.3")).toThrowError(/未知模型/);
+  });
+
+  it("真实文件损坏 → 同真实缺失语义（副本独有条目为全集）", () => {
+    process.env[DATA_DIR_ENV_KEY] = dataDir;
+    fs.writeFileSync(realPath, "{broken-json");
+    writeCopy(dataDir);
+    expect(resolveZcodeModelRef("copy-model-x")).toBe(`${COPY_PROVIDER}/copy-model-x`);
+  });
+
+  it("merge 视图激活时凭据缺失报错的已读源 = merge(真实 + 副本) 双路径（诊断面锚点）", () => {
+    process.env[DATA_DIR_ENV_KEY] = dataDir;
+    writeJson(realPath, { schemaVersion: 1, config: { providerOrder: [], providerConfigRules: { providerRules: [] } } });
+    const copyPath = piSyncedProviderConfigPath(dataDir);
+    writeJson(copyPath, {
+      schemaVersion: 1,
+      config: {
+        providerOrder: ["no-key"],
+        providerConfigRules: {
+          providerRules: [{ providerId: "no-key", config: { access: { type: "api-key" }, personalModelIds: ["m"] } }],
+        },
+      },
+    });
+    try {
+      resolveZcodeModelRef(undefined);
+      expect.unreachable("should throw");
+    } catch (err) {
+      expect((err as ZcodePrepareError).code).toBe("engine_credential_missing");
+      expect((err as ZcodePrepareError).message).toContain("merge(真实 ");
+      expect((err as ZcodePrepareError).message).toContain(copyPath);
+    }
+  });
+
+  it("副本缺失（env 指向的 dataDir 下无副本文件）→ 回落真实文件", () => {
+    process.env[DATA_DIR_ENV_KEY] = dataDir;
+    expect(resolvePersonalProviderConfigPath()).toBe(realPath);
+    expect(resolveZcodeModelRef("GLM-5.3")).toBe(`${PROVIDER_A}/GLM-5.3`);
+  });
+
+  it("env 缺席（standalone 裸跑形态）→ 副本无定位点，回落真实文件", () => {
+    delete process.env[DATA_DIR_ENV_KEY];
+    expect(resolvePersonalProviderConfigPath()).toBe(realPath);
+  });
+
+  it("显式 sources.personalProviderConfigPath → 绕过副本与回落直读指定路径", () => {
+    process.env[DATA_DIR_ENV_KEY] = dataDir;
+    writeCopy(dataDir); // 副本在也压不过显式定型
+    expect(resolvePersonalProviderConfigPath({ personalProviderConfigPath: personalPath })).toBe(personalPath);
+  });
+
+  it("engineDataDir 入参优先于 env 推导（zcode-engine deps 注入形态）", () => {
+    process.env[DATA_DIR_ENV_KEY] = dataDir; // env 指向的 dataDir 无副本
+    const otherDir = path.join(tmpRoot, "chain-data-alt");
+    const copyPath = writeCopy(otherDir);
+    expect(resolvePersonalProviderConfigPath(undefined, otherDir)).toBe(copyPath);
   });
 });
 

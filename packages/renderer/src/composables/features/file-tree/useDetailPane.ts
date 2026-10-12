@@ -326,8 +326,10 @@ export function useDetailPane(sessionId: Ref<string | null>) {
   /**
    * watch drawer.detailFilePath：变更集卡等非文件树入口点击文件行时，
    * useSideDrawer.open('detail', { filePath }) 设置 detailFilePath。
-   * 变化时以 forceDiff 注入该文件（绕过 gitOverlay 判定——变更集文件来源即 git diff，
-   * 一定有改动，overlay 可能未刷新会导致误判 preview 模式）。消费后清空避免残留。
+   * 变化时按位置分流注入：cwd 内以 forceDiff 打开（绕过 gitOverlay 判定——变更集
+   * 文件来源即 git diff，一定有改动，overlay 可能未刷新会导致误判 preview 模式）；
+   * cwd 外（产物目录文件）走 preview（无 git 语义，读取经 readFileContent 白名单
+   * 通道）。消费后清空避免残留。
    *
    * immediate=true 兜底首次挂载时序：DetailPane 在抽屉内是条件挂载
    * （v-else-if="drawerTab==='detail'"），首次从变更集卡点文件时 drawer.open 同步设置
@@ -344,7 +346,14 @@ export function useDetailPane(sessionId: Ref<string | null>) {
     (path) => {
       const sid = sessionId.value
       if (!sid || !path) return
-      void openPreview(sid, path, true)
+      // 位置分流：cwd 内保持 forceDiff（变更集/消息链接入口来源即 git 改动，绕过
+      // gitOverlay 判定）；cwd 外（产物目录文件，无 git 语义）走 preview——由
+      // readFileContent 两通道分发落 localFile:read 白名单通道，且免去一次必空的
+      // git.getDiff + 空 patch 自动降级往返。sessionCwd 解析为 null（session 不在册）
+      // 视为 cwd 外走 preview：无 cwd 锚时 git 相对路径无法解析，forceDiff 只会空转。
+      const cwd = sessionCwd(sid)
+      const inCwd = cwd !== null && resolvePreviewPath(cwd, path).relative !== null
+      void openPreview(sid, path, inCwd)
       detailFilePath.value = null
     },
     { immediate: true },

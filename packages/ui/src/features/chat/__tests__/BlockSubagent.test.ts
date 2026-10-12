@@ -4,7 +4,7 @@
  * 设计对齐（spec v6 §10 / aca29110c「subagent/workflow details via drawer tabs」）：
  * - collapsed only：整个块单行精简摘要，无展开体、无 task 预览、无 bg 状态行（均已移除）
  * - 单行：Bot icon + subagent prefix + agent · slug + (model · thinking X)
- * - running 态双环 loader；failed 态整行降 neutral-mid（不切 icon）
+ * - running 态呼吸弧 loader；failed 态整行降 neutral-mid（不切 icon）
  * - 点击整行 → openSubagent（drawer 开 subagent tab 看完整对话流）；缺 subagentId/sessionId 时 no-op
  *
  * 数据形态（@zhushanwen/pi-subagent-workflow，重写 fork）：
@@ -229,7 +229,7 @@ describe('BlockSubagent: 点击行为（开 drawer subagent tab）', () => {
 })
 
 describe('BlockSubagent: running / failed / unfinished 态', () => {
-  it('running 态渲染双环 loader（animate-loader-spin + text-accent）', () => {
+  it('running 态渲染呼吸弧 loader（animate-loader-spin + text-accent）', () => {
     const wrapper = mount(BlockSubagent, {
       props: { tool: makeSubagent({ status: 'running' }) },
     })

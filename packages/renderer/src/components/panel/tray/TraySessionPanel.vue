@@ -26,11 +26,11 @@
     :aria-label="t('panel.tray.title.session')"
     class="flex min-h-0 w-full flex-1 flex-col gap-1"
   >
-    <!-- 段头摘要（与行集同源：total = children.length，running = 进行中数） -->
+    <!-- 段头摘要（与行集同源：total = children.length，running = 进行中数；字号 = demo 段头 10px 档） -->
     <div
       v-if="children.length > 0"
       data-testid="tray-session-header"
-      class="flex shrink-0 items-center px-1 font-mono text-[length:var(--text-2xs)] text-neutral-dim"
+      class="flex shrink-0 items-center px-1.5 font-mono text-[length:var(--text-3xs)] text-neutral-dim"
     >
       <span class="min-w-0 flex-1 truncate">{{ headerText }}</span>
     </div>
@@ -42,21 +42,21 @@
           :key="child.id"
           data-testid="tray-session-row"
           :data-child-session-id="child.id"
-          class="group/item relative flex cursor-pointer select-none items-start gap-2 rounded-md px-2 py-1 transition-colors hover:bg-surface-hover"
+          class="group/item relative flex min-h-[26px] cursor-pointer select-none items-start gap-2 rounded-sm px-1.5 py-1 text-neutral-mid transition-colors hover:bg-surface-hover hover:text-neutral-fg"
           :title="child.label"
           @click="openChild(child)"
           @mouseleave="stopConfirm.clear()"
         >
-          <!-- 7px 状态点（色语言 = DOT_CLASS 单点；error 行显 danger 色） -->
+          <!-- 7px 状态点（色语言 = DOT_CLASS 单点；error 行显 danger 色；mt 对齐 12px 首行行高中线） -->
           <span
             data-testid="tray-session-dot"
-            class="mt-[6px] size-[7px] shrink-0 rounded-full"
+            class="mt-[5px] size-[7px] shrink-0 rounded-full"
             :class="dotClass(child)"
             :title="statusText(child)"
             aria-hidden="true"
           />
           <div class="min-w-0 flex-1">
-            <div class="flex min-w-0 items-center gap-1 text-[length:var(--text-xs)] leading-[1.35] text-neutral-fg">
+            <div class="flex min-w-0 items-center gap-1 text-[length:var(--text-xs)] leading-[1.35]">
               <span class="min-w-0 flex-1 truncate">{{ child.label }}</span>
               <!-- 行内操作（仅 pin 态、仅运行中）：停止（软停止，两段确认） -->
               <TrayConfirmButton

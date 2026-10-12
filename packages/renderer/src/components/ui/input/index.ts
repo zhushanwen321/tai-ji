@@ -1,1 +1,1 @@
-export { default as Input } from "./Input.vue"
+export { Input } from '@taiji/ui'

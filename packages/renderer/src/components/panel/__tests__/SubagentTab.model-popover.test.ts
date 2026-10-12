@@ -7,7 +7,7 @@
  * ——真实挂载组件树（Popover / PopoverTrigger / ModelPickerPanel 全真实），点击
  * subagent-model-trigger 后断言 popover 内容渲染在场，拦截「SubagentTab 的 #trigger
  * slot 丢失 PopoverTrigger as-child 包裹致入口不可达」的同族回归（D3 缺陷一的根因
- * 之一 = 测试 mock 组件致点击行为零覆盖，登记 docs/todo/subagent-model-switch-d3-defects.md）。
+ * 之一 = 测试 mock 组件致点击行为零覆盖）。
  *
  * mock 面最小化（数据层替身）：drawer control / panel store / subagent store /
  * MessageStream / useSubagentTabData / vue-i18n；settings store 用真实单例直写

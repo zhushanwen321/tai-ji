@@ -14,7 +14,7 @@
     <div class="flex flex-wrap gap-2">
       <Button
         variant="secondary"
-        class="gap-1.5 px-2.5 py-1.5 text-[12px] text-neutral-mid [&_svg]:size-3.5"
+        class="gap-1.5 px-2.5 py-1.5 text-[length:var(--text-xs)] text-neutral-mid [&_svg]:size-3.5"
         :disabled="testing || discovering"
         @click="emit('test')"
       >
@@ -26,7 +26,7 @@
       <Button
         v-if="canDiscover"
         variant="secondary"
-        class="gap-1.5 px-2.5 py-1.5 text-[12px] text-neutral-mid [&_svg]:size-3.5"
+        class="gap-1.5 px-2.5 py-1.5 text-[length:var(--text-xs)] text-neutral-mid [&_svg]:size-3.5"
         :disabled="discovering || testing"
         @click="emit('discover')"
       >
@@ -38,11 +38,11 @@
 
     <!-- 按协议分组结果（test 模式 results 非空） -->
     <div v-if="testRows.length > 0" class="mt-2 space-y-1" data-testid="provider-test-results">
-      <div class="text-[11px] font-semibold text-neutral-mid">{{ t('settings.providerEdit.testConnTitle') }}</div>
+      <div class="text-[length:var(--text-2xs)] font-semibold text-neutral-mid">{{ t('settings.providerEdit.testConnTitle') }}</div>
       <div
         v-for="row in testRows"
         :key="row.key"
-        class="flex items-start gap-1.5 text-[12px]"
+        class="flex items-start gap-1.5 text-[length:var(--text-xs)]"
         :class="row.ok ? 'text-success' : 'text-danger'"
       >
         <CheckCircle2 v-if="row.ok" class="size-3.5 shrink-0" />
@@ -54,7 +54,7 @@
     <!-- 整体性失败（无分组结果，如未找到 API Key / 无可用模型） -->
     <div
       v-else-if="testResult === 'error'"
-      class="mt-2 flex items-center gap-1.5 text-[12px] text-danger"
+      class="mt-2 flex items-center gap-1.5 text-[length:var(--text-xs)] text-danger"
       data-testid="provider-test-overall-error"
     >
       <AlertCircle class="size-3.5 shrink-0" />
@@ -64,7 +64,7 @@
     <!-- 旧成功反馈行（runtime 未回分组结果时的兜底） -->
     <div
       v-else-if="testResult === 'ok'"
-      class="mt-2 flex items-center gap-1.5 text-[12px] text-success"
+      class="mt-2 flex items-center gap-1.5 text-[length:var(--text-xs)] text-success"
       data-testid="provider-test-ok"
     >
       <CheckCircle2 class="size-3.5 shrink-0" />
@@ -73,10 +73,10 @@
 
     <!-- 恢复指引（按失败类型，testHint* 系列；无对应失败类型则不渲染） -->
     <div v-if="recoveryHints.length > 0" class="mt-1 space-y-0.5" data-testid="provider-test-hints">
-      <div v-for="(hint, i) in recoveryHints" :key="i" class="text-[12px] text-neutral-mid">{{ hint }}</div>
+      <div v-for="(hint, i) in recoveryHints" :key="i" class="text-[length:var(--text-xs)] text-neutral-mid">{{ hint }}</div>
     </div>
 
-    <div v-if="discoverResult" class="mt-1 text-[12px] text-neutral-mid">{{ discoverResult }}</div>
+    <div v-if="discoverResult" class="mt-1 text-[length:var(--text-xs)] text-neutral-mid">{{ discoverResult }}</div>
   </div>
 </template>
 

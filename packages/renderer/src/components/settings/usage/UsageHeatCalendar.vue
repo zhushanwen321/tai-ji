@@ -5,38 +5,38 @@
 <template>
   <div class="flex flex-col gap-4">
     <!-- 顶部月份标签 -->
-    <div class="relative h-[14px] ml-[28px]" style="font-size:10px;">
+    <div class="relative ml-[18px] h-[14px]" style="font-size:10px;">
       <span
         v-for="ml in monthLabels"
         :key="ml.col"
         class="absolute font-mono text-[var(--neutral-dim)]"
-        :style="{ left: `${ml.col * 16}px` }"
+        :style="{ left: `${ml.col * 14}px` }"
       >
         {{ ml.label }}
       </span>
     </div>
 
-    <!-- 日历主体：左侧星期 + 网格 -->
+    <!-- 日历主体：左侧星期 + 网格（demo 热力格：12px / gap 2px / r-2px） -->
     <div class="flex">
       <!-- 星期标签 -->
       <div
-        class="grid grid-rows-7 gap-[3px] mr-2 font-mono text-[10px] text-[var(--neutral-dim)]"
-        style="grid-template-rows:repeat(7,13px)"
+        class="mr-2 grid gap-[2px] font-mono text-[length:var(--text-3xs)] text-[var(--neutral-dim)]"
+        style="grid-template-rows:repeat(7,12px)"
       >
-        <span v-for="(lbl, i) in dayLabels" :key="i" class="h-[13px] leading-[13px]">
+        <span v-for="(lbl, i) in dayLabels" :key="i" class="h-[12px] leading-[12px]">
           {{ lbl }}
         </span>
       </div>
 
       <!-- 网格 -->
       <div
-        class="grid gap-[3px]"
-        style="grid-auto-flow:column; grid-template-rows:repeat(7,13px); width:max-content"
+        class="grid gap-[2px]"
+        style="grid-auto-flow:column; grid-template-rows:repeat(7,12px); width:max-content"
       >
         <div
           v-for="(cell, ci) in cells"
           :key="ci"
-          class="w-[13px] h-[13px] rounded-[2.5px] cursor-default"
+          class="h-[12px] w-[12px] cursor-default rounded-[2px]"
           :class="[cell.level, { 'opacity-[0.28]': cell.future }]"
           @mouseenter="onEnter($event, cell)"
           @mouseleave="onLeave"
@@ -44,15 +44,15 @@
       </div>
     </div>
 
-    <!-- 底部图例 -->
-    <div class="flex items-center gap-2 ml-[28px] text-[10px] text-[var(--neutral-dim)] font-mono">
+    <!-- 底部图例（demo：10px 色块 · 4px 间距 · srow-desc 字档） -->
+    <div class="ml-[18px] flex items-center gap-[4px] text-[length:var(--text-3xs)] text-[var(--neutral-dim)] font-mono">
       <span>{{ t('settings.usage.less') }}</span>
-      <div class="w-[13px] h-[13px] rounded-[2.5px] bg-[var(--heat-0)]" />
-      <div class="w-[13px] h-[13px] rounded-[2.5px] bg-[var(--heat-1)]" />
-      <div class="w-[13px] h-[13px] rounded-[2.5px] bg-[var(--heat-2)]" />
-      <div class="w-[13px] h-[13px] rounded-[2.5px] bg-[var(--heat-3)]" />
-      <div class="w-[13px] h-[13px] rounded-[2.5px] bg-[var(--heat-4)]" />
-      <div class="w-[13px] h-[13px] rounded-[2.5px] bg-[var(--heat-5)]" />
+      <div class="h-[10px] w-[10px] rounded-[2px] bg-[var(--heat-0)]" />
+      <div class="h-[10px] w-[10px] rounded-[2px] bg-[var(--heat-1)]" />
+      <div class="h-[10px] w-[10px] rounded-[2px] bg-[var(--heat-2)]" />
+      <div class="h-[10px] w-[10px] rounded-[2px] bg-[var(--heat-3)]" />
+      <div class="h-[10px] w-[10px] rounded-[2px] bg-[var(--heat-4)]" />
+      <div class="h-[10px] w-[10px] rounded-[2px] bg-[var(--heat-5)]" />
       <span>{{ t('settings.usage.more') }}</span>
     </div>
 
@@ -60,10 +60,10 @@
     <Teleport to="body">
       <div
         v-if="tipVisible"
-        class="fixed z-40 pointer-events-none bg-[var(--surface)] border border-[var(--border-strong)] rounded-[var(--radius-sm)] shadow-[var(--shadow-2)] px-2.5 py-1.5 text-[12px] leading-[1.7] font-mono"
+        class="fixed z-40 pointer-events-none bg-[var(--bg-elevated)] border border-[var(--border-strong)] rounded-[var(--radius-sm)] shadow-[var(--shadow-2)] px-2.5 py-1.5 text-[length:var(--text-xs)] leading-[1.7] font-mono"
         :style="tipPos"
       >
-        <div class="text-[var(--neutral-dim)] text-[10px]">{{ tipDate }}</div>
+        <div class="text-[var(--neutral-dim)] text-[length:var(--text-3xs)]">{{ tipDate }}</div>
         <div class="text-[var(--neutral-fg)]">{{ tipTokens }}</div>
       </div>
     </Teleport>

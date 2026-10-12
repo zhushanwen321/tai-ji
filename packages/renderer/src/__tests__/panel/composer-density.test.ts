@@ -4,7 +4,7 @@
  * composer-density 纯状态机单测（D6 修订「三步聚合」版）。
  *
  * 覆盖（穷举 = 本模块的 100% 行覆盖承诺）：
- * - fit 级归一（NaN / 负 / 越界 / 取整）与三步累计映射（L1 左簇 / L2 指标 / L3 模型+思考）。
+ * - fit 级归一（NaN / 负 / 越界 / 取整）与三步累计映射（L1 指标 / L2 左簇 / L3 模型+思考）。
  * - 能力标志：托盘全无 + 插件零贡献 → `leftCluster: 'absent'`（不留死入口）；任一有内容 → 可聚合。
  * - 锚点保护：仅 L3 顶格生效；左簇/指标让位，模型聚合按钮与序 0 锚点恒在。
  * - **构造性回归防线**：模型形态域只有 `expanded`（完整名）/ `aggregated` 两态——穷举矩阵断言
@@ -39,6 +39,10 @@ const CAP_VARIANTS: Array<[string, ComposerDensityCapabilities]> = [
   ['托盘全无 + 插件零贡献', { hasTrayItems: false }],
   ['托盘全无 + 插件有贡献', { hasTrayItems: false, pluginToolbarContributionCount: 1 }],
   ['托盘有面 + 插件有贡献', { hasTrayItems: true, pluginToolbarContributionCount: 3 }],
+  ['托盘全无 + toolbar 零贡献 + headerAction 有入口', { hasTrayItems: false, hasHeaderActionEntries: true }],
+  ['托盘全无 + toolbar 零贡献 + headerAction 无入口（三源全空）', { hasTrayItems: false, hasHeaderActionEntries: false }],
+  ['托盘有面 + headerAction 有入口', { hasTrayItems: true, hasHeaderActionEntries: true }],
+  ['托盘有面 + toolbar 有贡献 + headerAction 有入口', { hasTrayItems: true, pluginToolbarContributionCount: 1, hasHeaderActionEntries: true }],
 ]
 const PROTECT_VARIANTS = [false, true]
 
@@ -84,16 +88,16 @@ describe('三步累计映射（fit 级 → 形态）', () => {
     expect(layout.allowsWrap).toBe(false)
   })
 
-  it('L1 只聚合左簇；L2 再聚合指标；L3 再聚合模型+思考（前缀累计）', () => {
-    const l1 = resolveComposerDensity({}, COMPOSER_FIT_LEVEL_LEFT_AGGREGATE)
+  it('L1 只聚合指标；L2 再聚合左簇；L3 再聚合模型+思考（前缀累计）', () => {
+    const l1 = resolveComposerDensity({}, COMPOSER_FIT_LEVEL_METRICS_AGGREGATE)
     expect(l1.slots).toMatchObject({
-      leftCluster: 'aggregated',
-      metrics: 'expanded',
+      leftCluster: 'expanded',
+      metrics: 'aggregated',
       modelThinking: 'expanded',
     })
-    expect(l1.appliedOrders).toEqual([COMPOSER_DEGRADATION_ORDER.LEFT_CLUSTER_AGGREGATE])
+    expect(l1.appliedOrders).toEqual([COMPOSER_DEGRADATION_ORDER.METRICS_AGGREGATE])
 
-    const l2 = resolveComposerDensity({}, COMPOSER_FIT_LEVEL_METRICS_AGGREGATE)
+    const l2 = resolveComposerDensity({}, COMPOSER_FIT_LEVEL_LEFT_AGGREGATE)
     expect(l2.slots).toMatchObject({
       leftCluster: 'aggregated',
       metrics: 'aggregated',
@@ -124,10 +128,11 @@ describe('能力标志（不留死入口）', () => {
     }
   })
 
-  it('托盘全无但插件有贡献 → 左簇仍可达（L0 展开 / L1+ 聚合）', () => {
+  it('托盘全无但插件有贡献 → 左簇仍可达（L0/L1 展开 / L2+ 聚合）', () => {
     const caps: ComposerDensityCapabilities = { hasTrayItems: false, pluginToolbarContributionCount: 1 }
     expect(resolveComposerDensity(caps, 0).slots.leftCluster).toBe('expanded')
-    expect(resolveComposerDensity(caps, 1).slots.leftCluster).toBe('aggregated')
+    expect(resolveComposerDensity(caps, 1).slots.leftCluster).toBe('expanded')
+    expect(resolveComposerDensity(caps, 2).slots.leftCluster).toBe('aggregated')
   })
 
   it('贡献数非正数一律视为零贡献；缺省 hasTrayItems = true', () => {
@@ -138,6 +143,16 @@ describe('能力标志（不留死入口）', () => {
       resolveComposerDensity({ hasTrayItems: false, pluginToolbarContributionCount: -2 }, 0).slots.leftCluster,
     ).toBe('absent')
     expect(resolveComposerDensity({ pluginToolbarContributionCount: 1 }, 0).slots.leftCluster).toBe('expanded')
+  })
+
+  it('headerAction 有入口 = 左簇第三内容源：托盘空 + toolbar 零贡献仍可聚合（B3 聚合面含定时任务）', () => {
+    // 三源全空才 absent；headerAction 单独在场 → L0 展开 / L2 聚合（被聚合 clock 由聚合面板段承接）
+    const caps: ComposerDensityCapabilities = { hasTrayItems: false, hasHeaderActionEntries: true }
+    expect(resolveComposerDensity(caps, 0).slots.leftCluster).toBe('expanded')
+    expect(resolveComposerDensity(caps, 2).slots.leftCluster).toBe('aggregated')
+    // hasHeaderActionEntries 缺省 false：三源全空 → absent（与旧判据兼容）
+    expect(resolveComposerDensity({ hasTrayItems: false }, 0).slots.leftCluster).toBe('absent')
+    expect(resolveComposerDensity({ hasTrayItems: false, hasHeaderActionEntries: false }, 0).slots.leftCluster).toBe('absent')
   })
 })
 
@@ -168,7 +183,7 @@ describe('锚点保护（L3 顶格仍放不下 → 中部让位，锚点与模�
   })
 })
 
-describe('穷举矩阵不变式（32 组合：4 级 × 4 能力 × 2 保护）', () => {
+describe('穷举矩阵不变式（64 组合：4 级 × 8 能力 × 2 保护）', () => {
   it('序 0 恒不退化；模型形态只有两态且恒不缺席；输出域无双轴旧键', () => {
     for (const { out } of allCombos()) {
       // 锚点类型级保证

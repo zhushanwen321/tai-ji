@@ -27,13 +27,16 @@
   - turn=generating 不渲染行：streaming 本体由末位 turn 的 TurnMeta「工作中」行承担
     （D6 活动条列「streaming 本体」，不重复指示）；全部 idle 渲染 nothing。
 
-  视觉（D3 增强规格横线分隔行，四行同构）：compacting 行自「通栏 accent-soft 活动带」降级回归
+  视觉（M3c demo 复刻运行态摘要行）：compacting 行自「通栏 accent-soft 活动带」降级回归
   本族（2026-09-16 裁决，design §3.3 D4）——摘除 -mx-5 通栏 / bg-[var(--accent-soft)] 底 /
   border-y，与 bash/thinking/settling 行共用一套 DOM 结构：两端渐隐横线（transparent→
-  --border-strong 18%→82%→transparent）+ 13px/stroke 2.2 Loader2 spinner（neutral-mid）+
-  text-sm/fg/550 主文案 + 可选 mono meta（text-2xs/500/tabular-nums/neutral-dim）+ 可选
-  「待发 N」chip（mono text-3xs + border-strong 描边，计数口径不变：未提交全量条数，
+  --border-strong 18%→82%→transparent）+ 15px accent 呼吸弧（demo .run-ic 规格，
+  animate-loader-spin 三重动画；M3c 起替换 Loader2 spinner）+ text-base(14px)/mid/fw-mid
+  主文案（demo .think .t-name）+ 可选 mono meta（text-2xs/500/tabular-nums/neutral-dim）+
+  可选「待发 N」chip（mono text-3xs + border-strong 描边，计数口径不变：未提交全量条数，
   count===0 时 chip 不渲染）。system-notice + content-col 保留（居中 720 内容列）。
+  demo 运行态文字扫光（N13 shine）不在本行落：扫光机制宿主 = Block 族行文本
+  （text-sweep，M3b 域），ActivityStrip 为会话级活动条不复制该形态（M3c 报告登记）。
   [notice-family-phrase-detail 2026-09-18 方案 A] bash 行短语化：命令原文不再内联（长命令
   会把 flex-1 横线挤成残端/归零），移入 HoverCard 悬停详情（只读 + 复制）；行内补 elapsed
   mono meta（「已 Ns」，1s tick 仅 executingBash 存在期间挂载）维持执行期观察。文档流
@@ -56,7 +59,33 @@
       :data-testid="`activity-strip-row-${row.kind}`"
     >
       <span class="h-px flex-1 bg-[image:linear-gradient(to_right,transparent,var(--border-strong)_18%,var(--border-strong)_82%,transparent)]" />
-      <Loader2 class="size-[13px] shrink-0 animate-spin text-neutral-mid" stroke-width="2.2" />
+      <!-- waiting 行（裁决 3A）：三点等待（accent 4px 圆点 ×3，900ms 周期错峰 120ms）；
+           其余行保持呼吸弧（M3c demo 复刻 .run-ic 规格：15px accent + animate-loader-spin
+           三重动画）。内联 SVG 结构复制自 block-icon.ts RUNNING_LOADER_SVG（该常量消费模式 =
+           v-html 注入，需行内豁免注释；本组件按红线改取静态模板内联、零豁免；弧动画类
+           .ld-track/.ld-arc 由 style.css 全局层持有，改动两处须同步）。 -->
+      <span
+        v-if="row.kind === 'waiting'"
+        class="wait-dots inline-flex h-[22px] shrink-0 items-center gap-[5px]"
+        aria-hidden="true"
+        data-testid="activity-strip-dots-waiting"
+      >
+        <i class="block size-[6px] rounded-full bg-accent opacity-30"></i><i class="block size-[6px] rounded-full bg-accent opacity-30"></i><i class="block size-[6px] rounded-full bg-accent opacity-30"></i>
+      </span>
+      <svg
+        v-else
+        class="size-[15px] shrink-0 text-accent animate-loader-spin"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.7"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        aria-hidden="true"
+      >
+        <circle class="ld-track" cx="12" cy="12" r="10" opacity="0.16" />
+        <circle class="ld-arc" cx="12" cy="12" r="10" pathLength="100" />
+      </svg>
       <HoverCard
         :open="openDetailKind === row.kind"
         :open-delay="DETAIL_OPEN_DELAY_MS"
@@ -67,8 +96,9 @@
             class="flex min-w-0 items-center gap-1"
             :data-testid="`activity-strip-text-${row.kind}`"
           >
+            <!-- 主文案（M3c demo 复刻 .think .t-name：mid 色 + fw-mid 600 + 14px/--text-base 档） -->
             <span
-              class="shrink-0 text-[length:var(--text-sm)] font-[550] text-neutral-fg"
+              class="shrink-0 text-[length:var(--text-base)] text-neutral-mid [font-weight:var(--fw-mid)]"
               :class="row.detail ? DETAIL_HINT_CLASS : ''"
             >{{ row.text }}</span>
             <!-- elapsed mono meta（方案 A）：bash 行计时观察——命令移入悬停详情后行内保留 -->
@@ -113,7 +143,6 @@
 <script setup lang="ts">
 import { computed, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Loader2 } from '@lucide/vue'
 import type { ExecutingBash } from '@taiji/core'
 import { formatDurationHms } from '@taiji/ui'
 import { useChatStore } from '@/stores/chat'
@@ -138,10 +167,10 @@ const props = defineProps<{
 const chat = useChatStore()
 const { t } = useI18n()
 
-/** 活动条行（单一变化轴：行类型 + 文案）。优先级 = 数组序（compacting > bash > thinking / settling，
- *  thinking 与 settling 互斥不并存——turn 单值，同一档位）。 */
+/** 活动条行（单一变化轴：行类型 + 文案）。优先级 = 数组序（compacting > bash > waiting / thinking /
+ *  settling，waiting 与 thinking 同档互斥——dispatching 优先三点等待行，subagentThinking 才落呼吸弧行）。 */
 interface ActivityRow {
-  kind: 'compacting' | 'bash' | 'thinking' | 'settling'
+  kind: 'compacting' | 'bash' | 'waiting' | 'thinking' | 'settling'
   text: string
   /** mono meta 钉右（text-2xs/500/tabular-nums）：bash 行 elapsed 计时（方案 A——命令移入
    *  悬停详情后，行内保留执行期观察） */
@@ -188,10 +217,13 @@ const rows = computed<ActivityRow[]>(() => {
       detail: { label: t('panel.message.bashCommandLabel'), body: props.executingBash.command },
     })
   }
-  // thinking 行：无 compacting/bash 且（turn=dispatching（occupancy 权威投影，替代原 TurnMeta
-  // isPendingPlaceholder 占位）或 subagentThinking（§6.3：虚拟 session 收不到 occupancy 帧，
-  // 思考行由 subagent forceWorking 补充驱动））——「无以上但有思考信号」才显示，避免与压缩/命令行重复堆叠
-  if (!compacting && !props.executingBash && (turn === 'dispatching' || props.subagentThinking)) {
+  // 等待行（demo chat spec 裁决 3A）：turn=dispatching（prompt 已发、message_start 未到 =
+  // 「已发送、等待首个 token」阶段）→ 三点等待行，消除发送后无任何反馈的死寂窗口；首包到达
+  // （turn 翻 generating）后行消失，streaming 本体由末位 turn 的 TurnMeta「工作中」行承担。
+  // subagentThinking（§6.3 虚拟 session 强制思考，非「等待首包」语义）保持呼吸弧 thinking 行。
+  if (!compacting && !props.executingBash && turn === 'dispatching') {
+    list.push({ kind: 'waiting', text: t('panel.message.waitingResponse') })
+  } else if (!compacting && !props.executingBash && props.subagentThinking) {
     list.push({ kind: 'thinking', text: t('panel.message.dispatching') })
   }
   // settling 行（D6 表行 4 活动条列前半，修复一致性审查 R3-U1）：无 compacting/bash 且
@@ -290,3 +322,21 @@ function copyDetailBody(kind: ActivityRow['kind']): void {
 }
 
 </script>
+
+<style scoped>
+/* 等待三点跳动（demo chat spec 裁决 3A，workbench.css .wait-dots 同参）：900ms 周期，
+   35% 帧顶点（上浮 4px + 全亮），70% 归位——三点错峰 delay 0/120/240ms，accent 单色无发光。
+   仅动画属性落 scoped（形态类在模板），keyframes scoped 内定义 + 同块引用自洽（Vue SFC
+   编译器重写 scoped 动画名，仅本组件单消费点，Block.vue fchip-roll-x 同先例）。
+   prefers-reduced-motion 由 style.css 全局兜底（duration 0.01ms + iteration 1 → 停 0% 帧
+   静态常态色）。escape hatch：keyframes + nth-child 错峰延迟组合，Tailwind 无法表达。 */
+.wait-dots i {
+  animation: wait-dot 900ms var(--ease-out-soft, var(--ease-out)) infinite;
+}
+.wait-dots i:nth-child(2) { animation-delay: 120ms; }
+.wait-dots i:nth-child(3) { animation-delay: 240ms; }
+@keyframes wait-dot {
+  0%, 70%, 100% { opacity: 0.3; transform: translateY(0); }
+  35% { opacity: 1; transform: translateY(-4px); }
+}
+</style>

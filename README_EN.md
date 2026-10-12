@@ -26,7 +26,7 @@ Current latest version: **v0.10.1** ([view all releases](https://github.com/zhus
 <!-- Version numbers inside this block are replaced automatically by .agents/skills/merge/scripts/update-readme-install.mjs after each official release; version numbers outside the block are left untouched. -->
 
 <details>
-<summary><b>🇨🇳 Mainland China download (GitCode mirror, ~15 MB/s)</b></summary>
+<summary><b>Mainland China download (GitCode mirror, ~15 MB/s)</b></summary>
 
 Mirror repository: [gitcode.com/qq_18433817/tai-ji](https://gitcode.com/qq_18433817/tai-ji)
 
@@ -48,7 +48,7 @@ Invoke-WebRequest -Uri "https://gitcode.com/qq_18433817/tai-ji/releases/download
 </details>
 
 <details>
-<summary><b>🌍 International download (GitHub)</b></summary>
+<summary><b>International download (GitHub)</b></summary>
 
 Repository: [github.com/zhushanwen321/tai-ji](https://github.com/zhushanwen321/tai-ji)
 
@@ -70,7 +70,7 @@ Invoke-WebRequest -Uri "https://github.com/zhushanwen321/tai-ji/releases/downloa
 </details>
 
 <details>
-<summary><b>❓ First launch issues?</b></summary>
+<summary><b>First launch issues?</b></summary>
 
 - **macOS says "damaged" or "cannot verify developer"**: run `xattr -cr /Applications/TaiJi.app`
 - **Linux AppImage won't start**: confirm `chmod +x` was run, or try `--no-sandbox`
@@ -86,25 +86,25 @@ Invoke-WebRequest -Uri "https://github.com/zhushanwen321/tai-ji/releases/downloa
 
 ## Core Capabilities
 
-### 🔄 Multi-session parallelism
+### Multi-session parallelism
 Run multiple AI tasks at once. The sidebar shows live status for each session. Fork a new session from any reply, hand off context, or import an existing session at any time.
 
-### 👁️ Fully visible execution
+### Fully visible execution
 Thinking chains, tool calls, and file edits stream in as they happen. Each turn collapses into a one-line summary; click to expand the full process. The Trace view supports filtering by type and full-text search.
 
-### 🤖 Subagents & Workflows
+### Subagents & Workflows
 Dispatch independent tasks to subagents running in parallel, or compose multi-step workflows with chain/parallel templates. The task tray aggregates progress in real time; each subtask runs under a budget and turn limit.
 
-### 🛠️ Workbench integration
+### Workbench integration
 Sidebar file tree (smooth on large directories + git badges), drawer terminal (per-session state), Git/worktree management, and a built-in browser pane.
 
-### 🧩 21 built-in extensions
+### 21 built-in extensions
 Agent capabilities are implemented through the pi extension mechanism, covering permissions, scheduled tasks, context compaction, structured output, and more. 16 are usable standalone outside taiji. See the [extension development guide](docs/extensions/development-guide.md).
 
 ---
 
 <details>
-<summary><b>📖 Full feature list (click to expand)</b></summary>
+<summary><b>Full feature list (click to expand)</b></summary>
 
 ### Agent execution
 - **Parallel subagents**: the task tray above the input box collects running subtasks; open one to read its full conversation and output in the drawer.

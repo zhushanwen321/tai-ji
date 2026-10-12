@@ -654,6 +654,14 @@ export interface SubagentsGlobalConfig {
    * 缺省 'pi'（P4 路由层 DEFAULT_ENGINE_ID）。加载期只做类型校验，注册表校验归路由层。
    */
   defaultEngine?: string;
+  /**
+   * 每引擎默认模型偏好（engine-provider-unification D5：键 = engineId，
+   * 值 = 模型全 ref，zcode 形态 `providerId/modelId`）。写入时校验 ref ∈ 引擎
+   * 模型清单；加载期只做形态校验（沿 defaultEngine 同判，注册表校验归消费层）。
+   * 派发消费走派发时点直读（D6，见 config.ts readEngineDefaults），不经
+   * ModelConfigService 进程缓存。
+   */
+  engineDefaults?: Record<string, string>;
 }
 
 // ============================================================

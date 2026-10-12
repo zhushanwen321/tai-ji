@@ -79,7 +79,7 @@ const hasDataSource = computed(() => dataSource !== null)
           <span
             data-testid="plugin-enabled"
             class="rounded-sm px-1.5 py-0.5 text-xs"
-            :class="plugin.enabled ? 'bg-accent/10 text-accent' : 'bg-surface-2 text-muted-foreground'"
+            :class="plugin.enabled ? 'bg-accent-soft text-accent' : 'bg-surface-2 text-muted-foreground'"
           >
             {{ plugin.enabled ? '已启用' : '已禁用' }}
           </span>

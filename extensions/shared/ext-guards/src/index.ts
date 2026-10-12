@@ -116,6 +116,18 @@ export function isEnoentError(err: unknown): boolean {
 	return err instanceof Error && "code" in err && err.code === "ENOENT";
 }
 
+/**
+ * 判断 error 是否为带指定 errno code 的 Node 系统调用错误（`Error` 实例且
+ * `code === 期望值`）。
+ *
+ * 与 isEnoentError 同一收窄纪律（`"code" in err` 零断言——taste/no-unsafe-cast），
+ * code 参数化：isEnoentError = code 钉死 "ENOENT" 的特化形态。非 Error 对象即使带
+ * 同名 code 也 false（与 isEnoentError 的严版口径一致——Node fs 抛错恒为 Error 实例）。
+ */
+export function isErrnoWithCode(error: unknown, code: string): boolean {
+	return error instanceof Error && "code" in error && error.code === code;
+}
+
 // ── subagent 进程判据（isSubagentProcess，ext-simplify-17 D4）────────────
 //
 // 背景：extension 需要知道「当前 pi 进程是否引擎链上的 subagent 子进程」来决定降级

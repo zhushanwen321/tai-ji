@@ -19,86 +19,92 @@
   - unsupported  前往下载（备用页）
 -->
 <template>
-  <div class="flex items-center justify-between border-t border-border px-4 py-3">
+  <!-- 状态行 = demo .srow（min-h 44 / py-2.5 / border-t hairline / gap-4；px-[6px] 对齐
+       UpdatePage tight 卡体（10px）+ 行内边距（6px）= 16px 内容左缘，与 demo 语境
+       gcard-body tight(10px)+srow(6px) 等价——[w3] 卡体切 GroupCard tight 后 px-4 改 px-[6px]） -->
+  <div class="flex min-h-[44px] items-center justify-between gap-4 border-t border-hairline px-[6px] py-2.5">
       <!-- 状态文案（左） -->
       <div class="flex min-w-0 items-center gap-1.5">
         <!-- idle / checking：无左侧状态文案（当前版本已由自动更新卡内版本行展示），仅保留右侧按钮 -->
         <!-- available：发现新版本 -->
         <span
           v-if="state.state === 'available'"
-          class="text-[12px] text-accent"
+          class="text-[length:var(--text-sm)] text-accent"
           data-testid="settings-update-new-version"
         >{{ t('settings.system.newVersionAvailable', { version: state.latestRelease?.version }) }}</span>
         <!-- downloading：进度 -->
         <span
           v-if="state.state === 'downloading'"
-          class="inline-flex items-center gap-1 text-[12px] text-neutral-mid"
+          class="inline-flex items-center gap-1 text-[length:var(--text-sm)] text-neutral-mid"
         >
-          <Loader2 class="size-4 animate-spin" />
+          <Loader2 class="size-3.5 animate-spin" />
           {{ t('settings.system.downloading', { percent: state.percent }) }}
         </span>
         <!-- downloaded：已下载 -->
         <span
           v-else-if="state.state === 'downloaded'"
-          class="inline-flex items-center gap-1 text-[12px] text-success"
+          class="inline-flex items-center gap-1 text-[length:var(--text-sm)] text-success"
         >
-          <CheckCircle2 class="size-4" />
+          <CheckCircle2 class="size-3.5" />
           {{ t('settings.system.downloaded') }}
         </span>
         <!-- replacing -->
         <span
           v-else-if="state.state === 'replacing'"
-          class="inline-flex items-center gap-1 text-[12px] text-neutral-mid"
+          class="inline-flex items-center gap-1 text-[length:var(--text-sm)] text-neutral-mid"
         >
-          <Loader2 class="size-4 animate-spin" />
+          <Loader2 class="size-3.5 animate-spin" />
           {{ t('settings.system.replacing') }}
         </span>
         <!-- restarting -->
         <span
           v-else-if="state.state === 'restarting'"
-          class="inline-flex items-center gap-1 text-[12px] text-success"
+          class="inline-flex items-center gap-1 text-[length:var(--text-sm)] text-success"
         >
-          <CheckCircle2 class="size-4" />
+          <CheckCircle2 class="size-3.5" />
           {{ t('settings.system.restarting') }}
         </span>
         <!-- error：错误信息 -->
         <span
           v-else-if="state.state === 'error'"
-          class="inline-flex items-center gap-1 text-[12px] text-danger"
+          class="inline-flex items-center gap-1 text-[length:var(--text-sm)] text-danger"
           data-testid="settings-update-error"
         >
-          <AlertCircle class="size-4 shrink-0" />
+          <AlertCircle class="size-3.5 shrink-0" />
           <span class="truncate">{{ state.errorMessage }}</span>
         </span>
         <!-- unsupported -->
         <span
           v-else-if="state.state === 'unsupported'"
-          class="text-[12px] text-neutral-mid"
+          class="text-[length:var(--text-sm)] text-neutral-mid"
         >{{ t('settings.system.unsupported') }}</span>
       </div>
 
-      <!-- 操作按钮（右） -->
+      <!-- 操作按钮（右）：h-8（demo .btn 32px）；检查/重试 = 描边（demo .btn.secondary），
+           下载/安装/前往下载 = accent 实底（demo .btn.solid → Button default） -->
       <div class="flex shrink-0 items-center gap-2">
         <!-- idle：检查更新 -->
         <Button
           v-if="state.state === 'idle'"
-          variant="default"
+          variant="secondary"
           size="sm"
+          class="h-8"
           data-testid="settings-update-check"
           @click="onCheck"
         >
-          <RefreshCw class="size-4" />
+          <RefreshCw class="size-3.5" />
           {{ t('settings.system.checkUpdate') }}
         </Button>
         <!-- checking：loading disabled -->
         <Button
           v-else-if="state.state === 'checking'"
-          variant="default"
+          variant="secondary"
           size="sm"
+          class="h-8"
           disabled
           data-testid="settings-update-check"
         >
-          <Loader2 class="size-4 animate-spin" />
+          <Loader2 class="size-3.5 animate-spin" />
           {{ t('settings.system.checking') }}
         </Button>
         <!-- available：下载并安装 -->
@@ -106,10 +112,11 @@
           v-else-if="state.state === 'available'"
           variant="default"
           size="sm"
+          class="h-8"
           data-testid="settings-update-download"
           @click="onDownload"
         >
-          <Download class="size-4" />
+          <Download class="size-3.5" />
           {{ t('settings.system.downloadAndInstall') }}
         </Button>
         <!-- downloaded：重启安装（弹确认 Dialog） -->
@@ -117,6 +124,7 @@
           v-else-if="state.state === 'downloaded'"
           variant="default"
           size="sm"
+          class="h-8"
           data-testid="settings-update-install"
           @click="onInstallClick"
         >{{ t('settings.system.restartInstall') }}</Button>
@@ -125,10 +133,11 @@
           v-else-if="state.state === 'error'"
           variant="secondary"
           size="sm"
+          class="h-8"
           data-testid="settings-update-retry"
           @click="onRetry"
         >
-          <RefreshCw class="size-4" />
+          <RefreshCw class="size-3.5" />
           {{ t('settings.system.retry') }}
         </Button>
         <!-- unsupported：前往下载 -->
@@ -136,6 +145,7 @@
           v-else-if="state.state === 'unsupported'"
           variant="default"
           size="sm"
+          class="h-8"
           data-testid="settings-update-unsupported"
           @click="onOpenFallbackUrl"
         >{{ t('settings.system.goToDownload') }}</Button>
@@ -145,47 +155,48 @@
     <!-- 手动升级通道（update-network-resilience D9）：断网/代理故障时的人工逃生通道。
          默认展开（路径属常驻引导），可折叠。目录路径与 main 侧 MANUAL_ASSET_DIR 同源
          （<dataDir>/update/manual），「打开目录」经 main 侧 update:openManualDir
-         （幂等建目录 + shell.openPath，见 impl-plan u7b）。 -->
+         （幂等建目录 + shell.openPath，见 impl-plan u7b）。
+         折叠头 = demo UpdateSection 形态：chevron-right 12px 旋转 90°（展开）+ text-sm neutral-mid。 -->
     <Collapsible
       v-model:open="manualChannelOpen"
-      class="border-t border-border"
+      class="border-t border-hairline"
       data-testid="settings-update-manual-channel"
     >
-      <div class="flex items-center px-4 py-2">
+      <div class="flex items-center px-[6px] py-2">
         <CollapsibleTrigger as-child>
           <Button
             variant="ghost"
             size="sm"
-            class="h-auto gap-1.5 px-2 text-[12px] text-muted hover:text-fg"
+            class="h-auto gap-1.5 px-2 text-[length:var(--text-sm)] text-neutral-mid hover:text-neutral-fg"
             data-testid="settings-update-manual-toggle"
           >
-            <ChevronDown
-              class="size-3.5 shrink-0 transition-transform duration-150"
-              :class="manualChannelOpen ? 'rotate-180' : ''"
+            <ChevronRight
+              class="size-3 shrink-0 transition-transform duration-[var(--duration-fast)]"
+              :class="manualChannelOpen ? 'rotate-90' : ''"
             />
             {{ t('settings.system.manualChannelTitle') }}
           </Button>
         </CollapsibleTrigger>
       </div>
-      <CollapsibleContent class="px-4 pb-3">
-        <p class="text-[11px] leading-relaxed text-neutral-mid" data-testid="settings-update-manual-hint">
+      <CollapsibleContent class="px-[6px] pb-3">
+        <p class="text-[length:var(--text-sm)] leading-relaxed text-[color:var(--neutral-fg-2)]" data-testid="settings-update-manual-hint">
           {{ t('settings.system.manualChannelHint') }}
         </p>
         <!-- D3 已知边界：sha256 基准只认 app 已知 release，必须向用户言明限定 -->
-        <p class="mt-1 text-[11px] text-muted" data-testid="settings-update-manual-restriction">
+        <p class="mt-1 text-[length:var(--text-2xs)] text-[color:var(--neutral-fg-2)]" data-testid="settings-update-manual-restriction">
           {{ t('settings.system.manualChannelRestriction') }}
         </p>
         <div class="mt-2 flex min-w-0 items-center gap-2">
-          <span class="shrink-0 text-[11px] text-fg">{{ t('settings.system.manualChannelDirLabel') }}</span>
+          <span class="shrink-0 text-[length:var(--text-2xs)] text-neutral-fg">{{ t('settings.system.manualChannelDirLabel') }}</span>
           <code
-            class="min-w-0 truncate rounded-sm border border-border-strong bg-bg-input px-2 py-0.5 font-mono text-[11px] text-fg"
+            class="min-w-0 truncate rounded-sm border border-border-strong bg-bg-input px-2 py-0.5 font-mono text-[length:var(--text-xs)] text-neutral-fg"
             data-testid="settings-update-manual-dir"
           >{{ manualDir ?? t('settings.system.manualChannelDirUnavailable') }}</code>
           <!-- D9 u7b：main 侧幂等建目录后打开，路径不可用时按钮仍可用（目录由 main 创建） -->
           <Button
             variant="secondary"
             size="sm"
-            class="h-6 shrink-0 gap-1 px-2 text-[11px]"
+            class="h-8 shrink-0 gap-1 px-3 text-[length:var(--text-sm)]"
             data-testid="settings-update-manual-open-dir"
             @click="onOpenManualDir"
           >
@@ -196,17 +207,20 @@
       </CollapsibleContent>
     </Collapsible>
 
-    <!-- 确认重启安装 Dialog -->
+    <!-- 确认重启安装 Dialog（demo .cpop 形态：宽 360 / actions justify-end gap-8 pt-16；
+         弹层容器底色/阴影/圆角与标题排版归 ui/dialog 原语，M7b 波次对齐） -->
     <Dialog :open="showConfirmDialog" @update:open="showConfirmDialog = $event">
-      <DialogContent class="sm:max-w-[400px]">
+      <DialogContent class="max-w-[360px]">
         <DialogHeader>
           <DialogTitle>{{ t('settings.system.restartInstall') }}</DialogTitle>
           <DialogDescription>
             {{ t('settings.system.confirmInstall', { version: state.latestRelease?.version }) }}
           </DialogDescription>
         </DialogHeader>
-        <div class="flex justify-end gap-2 pt-2">
+        <div class="flex justify-end gap-2 pt-4">
           <Button variant="ghost" size="sm" @click="onLater">{{ t('settings.system.installLater') }}</Button>
+          <!-- demo 为 danger-solid 实底钮（P0-2 形态）；Button danger-solid 变体归 M7b（ui/button），
+               现以 default（accent 实底）承载，M7b 落地后此处换 variant 即可 -->
           <Button
             variant="default"
             size="sm"
@@ -221,7 +235,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { RefreshCw, Download, CheckCircle2, AlertCircle, Loader2, ChevronDown, FolderOpen } from '@lucide/vue'
+import { RefreshCw, Download, CheckCircle2, AlertCircle, Loader2, ChevronRight, FolderOpen } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,

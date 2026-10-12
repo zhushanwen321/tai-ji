@@ -1,13 +1,16 @@
 <template>
+  <!-- [w2] demo 对照：SystemSection.vue「提示音」卡——行右 = UiSelect w160 + btn secondary
+       「试听」（h32 / px12 / text-sm，纯文字；试听中 = 12px spinner + 「试听中…」文案）。
+       下拉选项内逐项试听（SoundPreviewButton #action）为 real 功能结构，demo mock 无对应物，保留。 -->
   <GroupCard :title="t('settings.system.soundTitle')">
-    <div class="px-2.5 pt-1 pb-2">
+    <div class="px-[10px] pt-[4px] pb-[8px]">
       <SettingRow :label="t('settings.system.successSound')" :desc="t('settings.system.successSoundDesc')">
         <div class="flex items-center gap-2">
           <Select
             :model-value="system.successSound || SOUND_DEFAULT"
             @update:model-value="onSuccessSoundChange"
           >
-            <SelectTrigger class="h-8 w-[160px] px-2 text-xs">
+            <SelectTrigger class="w-[160px]">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -38,13 +41,12 @@
           <Button
             variant="secondary"
             size="dense"
-            class="h-8 min-w-[6.5rem] px-3 text-[11px]"
+            class="h-[32px] min-w-[64px] px-[12px] text-[length:var(--text-sm)]"
             :disabled="!!previewingKey && !previewingKey.startsWith('success:')"
             :aria-label="t('settings.system.soundPreview')"
             @click="previewSound('success', system.successSound || getDefaultSound(currentPlatform, 'success'), system.successSound || 'default')"
           >
-            <Loader2 v-if="previewingKey?.startsWith('success:')" class="size-3.5 animate-spin text-accent" />
-            <Volume2 v-else class="size-3.5" />
+            <Loader2 v-if="previewingKey?.startsWith('success:')" class="size-[12px] animate-spin text-accent" />
             {{ previewingKey?.startsWith('success:') ? t('settings.system.soundPreviewing') : t('settings.system.soundPreview') }}
           </Button>
         </div>
@@ -55,7 +57,7 @@
             :model-value="system.errorSound || SOUND_DEFAULT"
             @update:model-value="onErrorSoundChange"
           >
-            <SelectTrigger class="h-8 w-[160px] px-2 text-xs">
+            <SelectTrigger class="w-[160px]">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -86,13 +88,12 @@
           <Button
             variant="secondary"
             size="dense"
-            class="h-8 min-w-[6.5rem] px-3 text-[11px]"
+            class="h-[32px] min-w-[64px] px-[12px] text-[length:var(--text-sm)]"
             :disabled="!!previewingKey && !previewingKey.startsWith('error:')"
             :aria-label="t('settings.system.soundPreview')"
             @click="previewSound('error', system.errorSound || getDefaultSound(currentPlatform, 'error'), system.errorSound || 'default')"
           >
-            <Loader2 v-if="previewingKey?.startsWith('error:')" class="size-3.5 animate-spin text-accent" />
-            <Volume2 v-else class="size-3.5" />
+            <Loader2 v-if="previewingKey?.startsWith('error:')" class="size-[12px] animate-spin text-accent" />
             {{ previewingKey?.startsWith('error:') ? t('settings.system.soundPreviewing') : t('settings.system.soundPreview') }}
           </Button>
         </div>
@@ -104,7 +105,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Volume2, Loader2 } from '@lucide/vue'
+import { Loader2 } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { GroupCard, SoundPreviewButton } from '@taiji/ui/features/settings'

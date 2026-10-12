@@ -6,50 +6,48 @@
 -->
 <template>
   <GroupCard :title="t('settings.preset.groupTitle')">
-    <!-- 空态 -->
-    <div v-if="!presets.length" class="py-8 text-center text-[12px] text-neutral-mid">
+    <!-- 空态（demo：srow-desc 弱文档 13px，gcard 内 fg-2） -->
+    <div v-if="!presets.length" class="setting-row-desc p-[6px] text-[length:var(--text-sm)] text-neutral-mid">
       {{ t('settings.preset.empty') }}
     </div>
 
     <!-- 预设列表（每个卡片独立折叠：自定义默认展开便于编辑，内置默认折叠便于扫视） -->
-    <!-- 卡片层叠：GroupCard 提供 bg-card 容器，单个预设用 bg-bg + border 浮起分层（v6 §5.8） -->
+    <!-- 盒形态 = demo PresetSection：border 1px --border / r-md(8px) / mb 10px / overflow hidden（无展开高亮边） -->
     <Collapsible
       v-for="p in presets"
       :key="p.id"
       :open="isExpanded(p.id)"
-      class="rounded border border-border bg-bg"
-      :class="isExpanded(p.id) ? 'border-border-strong' : ''"
+      class="mb-[10px] overflow-hidden rounded-md border border-border bg-bg"
       @update:open="(v) => toggleExpanded(p.id, v)"
     >
       <!-- 预设头部：CollapsibleTrigger as-child 包 Button，构成全宽点击区。
-           操作按钮组（设为默认/恢复/删除）放 Trigger 外的同级 div，避免点操作也触发展开。 -->
-      <div class="flex items-center gap-3 px-3 py-2.5">
+           操作按钮组（设为默认/恢复/删除）放 Trigger 外的同级 div，避免点操作也触发展开。
+           （demo 头行只排 chevron/名称/标签/摘要单行；动作钮保留在头行 = real 交互面，见报告决策 3） -->
+      <div class="flex items-center gap-2 px-[12px] py-[10px]">
         <CollapsibleTrigger as-child>
           <Button
             variant="ghost"
             class="h-auto flex-1 justify-start gap-2 rounded-sm px-2 text-neutral-fg hover:bg-surface"
             :title="isExpanded(p.id) ? t('settings.preset.collapse') : t('settings.preset.expand')"
           >
+            <!-- demo：chevron 12px，闭合 -90°（指右），展开归位（指下） -->
             <ChevronDown
-              class="size-3.5 shrink-0 text-neutral-dim transition-transform duration-[var(--duration)] ease-[var(--ease)]"
-              :class="isExpanded(p.id) ? 'rotate-180' : ''"
+              class="size-3 shrink-0 text-neutral-dim transition-transform duration-[var(--duration-fast)] ease-[var(--ease)]"
+              :class="isExpanded(p.id) ? '' : '-rotate-90'"
             />
-            <div class="min-w-0 flex-1 flex flex-col gap-0.5">
-              <div class="flex items-center gap-2">
-                <span class="truncate text-[13px] font-medium">{{ p.name }}</span>
-                <span
-                  v-if="p.builtin"
-                  class="rounded-sm bg-surface px-1.5 py-0.5 text-[11px] text-neutral-dim"
-                >{{ t('settings.preset.builtin') }}</span>
-                <span
-                  v-if="p.id === defaultPresetId"
-                  class="rounded-sm bg-accent-soft px-1.5 py-0.5 text-[11px] text-accent"
-                >{{ t('settings.preset.default') }}</span>
-              </div>
-              <!-- 折叠态摘要行：一行 mode 概览（如「工具访问策略: 全部可用 · 扩展访问策略: 白名单 3 项」） -->
-              <span class="truncate text-[11px] text-neutral-mid">{{ summaryText(p) }}</span>
-              <!-- 展开态额外显示描述（折叠态由摘要代替，避免行数过多） -->
-              <span v-if="p.description && isExpanded(p.id)" class="truncate text-[11px] text-neutral-dim">{{ p.description }}</span>
+            <!-- 单行排布（demo：名称 + 标签 + 摘要/描述同排；折叠态显摘要、展开态显描述） -->
+            <div class="flex min-w-0 flex-1 items-center gap-2">
+              <span class="truncate text-[length:var(--text-sm)] font-semibold">{{ p.name }}</span>
+              <span
+                v-if="p.builtin"
+                class="inline-flex h-[18px] shrink-0 items-center rounded-full bg-warn-soft px-[7px] text-[length:var(--text-2xs)] font-semibold text-warn"
+              >{{ t('settings.preset.builtin') }}</span>
+              <span
+                v-if="p.id === defaultPresetId"
+                class="inline-flex h-[18px] shrink-0 items-center rounded-full bg-accent-soft px-[7px] text-[length:var(--text-2xs)] font-semibold text-accent"
+              >{{ t('settings.preset.default') }}</span>
+              <span v-if="!isExpanded(p.id)" class="min-w-0 truncate text-[length:var(--text-sm)] text-neutral-fg-2">{{ summaryText(p) }}</span>
+              <span v-else-if="p.description" class="min-w-0 truncate text-[length:var(--text-sm)] text-neutral-fg-2">{{ p.description }}</span>
             </div>
           </Button>
         </CollapsibleTrigger>
@@ -59,7 +57,7 @@
             v-if="p.id !== defaultPresetId"
             variant="ghost"
             size="dense"
-            class="rounded-sm text-[11px] text-neutral-dim hover:text-neutral-fg"
+            class="rounded-sm text-[length:var(--text-2xs)] text-neutral-dim hover:text-neutral-fg"
             @click="emit('set-default', p.id)"
           >
             <Star class="size-3.5" />
@@ -70,7 +68,7 @@
             v-if="p.builtin"
             variant="ghost"
             size="dense"
-            class="rounded-sm text-[11px] text-neutral-dim hover:text-neutral-fg"
+            class="rounded-sm text-[length:var(--text-2xs)] text-neutral-dim hover:text-neutral-fg"
             :disabled="restoring.has(p.id)"
             @click="emit('restore', p)"
           >
@@ -82,7 +80,7 @@
             v-if="!p.builtin"
             variant="ghost"
             size="dense"
-            class="rounded-sm text-[11px] text-neutral-dim hover:text-danger"
+            class="rounded-sm text-[length:var(--text-2xs)] text-neutral-dim hover:text-danger"
             @click="emit('delete', p.id)"
           >
             <Trash2 class="size-3.5" />
@@ -90,14 +88,14 @@
         </div>
       </div>
 
-      <!-- 详情编辑区（仅展开时渲染，内容组件见 PresetDetailSection） -->
-      <CollapsibleContent class="border-t border-border">
+      <!-- 详情编辑区（仅展开时渲染，内容组件见 PresetDetailSection；分隔 = demo hairline） -->
+      <CollapsibleContent class="border-t border-hairline">
         <slot :preset="p" :disabled="p.builtin" />
       </CollapsibleContent>
     </Collapsible>
 
-    <!-- 3 个内置扩展提示 -->
-    <p v-if="presets.length" class="text-[11px] text-neutral-dim">
+    <!-- 3 个内置扩展提示（demo：srow-desc 弱注记 13px fg-2） -->
+    <p v-if="presets.length" class="py-[4px] text-[length:var(--text-sm)] text-neutral-fg-2">
       {{ t('settings.preset.builtinExtensionHint') }}
     </p>
   </GroupCard>

@@ -6,12 +6,16 @@
  * 同样注入，不写盘读盘）。
  */
 import { describe, it, expect } from 'vitest'
+import { mkdtempSync, rmSync, realpathSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { delimiter, dirname, join } from 'node:path'
 import {
   parseGateArgs,
   resolveBase,
   buildCoverageCommand,
   buildMetricsCommand,
   buildTypecheckSteps,
+  buildGateEnv,
   hasExecutableLines,
   judgeNoLcov,
   runGates,
@@ -164,6 +168,17 @@ describe('runGates 聚合编排（fake 子进程，不真跑重型命令）', ()
     expect(renderer.status).toBe('FAIL')
     expect(renderer.detail).toContain('TS2304')
   })
+  it('typecheck spawn 失败（命令不在 PATH，status null + error）→ FAIL 且 detail 含命令名与恢复动作（非哑 FAIL）', async () => {
+    const deps = makeDeps({
+      exec: () => ({ status: null, stdout: '', stderr: '', error: new Error('spawn npx ENOENT') }),
+    })
+    const { result } = await runGates(deps, { side: 'pr-cr-fix', base: null })
+    const ext = result.gates.find((g) => g.name === 'typecheck:extensions')
+    expect(ext.status).toBe('FAIL')
+    expect(ext.detail).toContain('npx')
+    expect(ext.detail).toContain('PATH')
+    expect(ext.detail).toContain('spawn npx ENOENT')
+  })
   it('py 实体缺失 → exitCode 2，错误指明缺失路径与恢复通道，且不跑任何门', async () => {
     let execCalls = 0
     let pyCalls = 0
@@ -268,5 +283,36 @@ describe('hasExecutableLines：可执行行口径单元矩阵', () => {
     expect(hasExecutableLines('export function f() {}\n', 'a.ts')).toBe(true)
     expect(hasExecutableLines('export class C {}\n', 'a.ts')).toBe(true)
     expect(hasExecutableLines('export enum E { A }\n', 'a.ts')).toBe(true)
+  })
+})
+
+describe('buildGateEnv：门禁子进程 PATH 自举', () => {
+  it('存在的候选目录（PNPM_HOME）追加到现有 PATH 尾部，原 PATH 顺序保持、其余 env 透传', () => {
+    const pnpmHome = mkdtempSync(join(tmpdir(), 'quality-gates-env-'))
+    try {
+      const env = buildGateEnv({ PATH: '/usr/bin:/bin', PNPM_HOME: pnpmHome, MY_FLAG: '1' })
+      expect(env.PATH.split(delimiter).slice(0, 2)).toEqual(['/usr/bin', '/bin'])
+      expect(env.PATH.split(delimiter)).toContain(pnpmHome)
+      expect(env.MY_FLAG).toBe('1')
+    } finally {
+      rmSync(pnpmHome, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    }
+  })
+  it('PATH 已含的目录不重复追加', () => {
+    const pnpmHome = mkdtempSync(join(tmpdir(), 'quality-gates-env-'))
+    try {
+      const env = buildGateEnv({ PATH: `/usr/bin${delimiter}${pnpmHome}`, PNPM_HOME: pnpmHome })
+      expect(env.PATH.split(delimiter).filter((d) => d === pnpmHome)).toHaveLength(1)
+    } finally {
+      rmSync(pnpmHome, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    }
+  })
+  it('不存在的候选目录不追加', () => {
+    const env = buildGateEnv({ PATH: '/usr/bin', PNPM_HOME: join(tmpdir(), 'quality-gates-nonexistent-xyz') })
+    expect(env.PATH.split(delimiter)).not.toContain(join(tmpdir(), 'quality-gates-nonexistent-xyz'))
+  })
+  it('真实环境：运行中 node 的真实 bin 目录（symlink 解析后）必在自举后的 PATH 中', () => {
+    const nodeRealBinDir = dirname(realpathSync(process.execPath))
+    expect(buildGateEnv().PATH.split(delimiter)).toContain(nodeRealBinDir)
   })
 })

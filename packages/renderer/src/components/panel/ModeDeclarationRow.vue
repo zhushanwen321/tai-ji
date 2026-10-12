@@ -156,7 +156,7 @@ const newSessionKbd = computed(() => formatKbd('n'))
     />
     <span class="flex min-w-0 items-center gap-1">
       <span
-        class="min-w-0 truncate text-[length:var(--text-sm)] font-[550]"
+        class="min-w-0 truncate text-[length:var(--text-sm)] [font-weight:var(--fw-mid)]"
         :class="isDeleted ? 'text-neutral-mid' : 'text-neutral-fg'"
         data-testid="mode-declaration-label"
       >{{ label }}</span>

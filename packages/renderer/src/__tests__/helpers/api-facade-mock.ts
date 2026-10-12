@@ -175,3 +175,15 @@ export function apiConfigDomainMock(extraSubscriptionKeys: readonly string[] = [
     setTerminalConfig: vi.fn(async () => ({ config: { version: 1, shell: '', shellArgs: [], fontSize: 14, fontFamily: '', scrollback: 1000, cursorStyle: 'block' as const, bell: false }, corrupted: false })),
   }
 }
+
+/** file/git 域本地转发 mock（断言持文件内 mock 变量；延迟展开形态与 mockApi 同款）。 */
+export function apiFileGitMock(
+  mockFileRead: (...args: unknown[]) => unknown,
+  mockGitGetDiff: (...args: unknown[]) => unknown,
+) {
+  return {
+    file: { read: (...args: unknown[]) => mockFileRead(...(args as [string, string?])) },
+    git: { getDiff: (...args: unknown[]) => mockGitGetDiff(...(args as [string, string])) },
+  }
+}
+

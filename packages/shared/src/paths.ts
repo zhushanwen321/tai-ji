@@ -136,6 +136,20 @@ export function getPiSessionsDir(dataDir?: string): string {
 }
 
 /**
+ * pi 会话文件三棵树目录段（`<piAgentDir>/sessions|subagents|btw`）。
+ *
+ * 布局权威 = runtime pi-paths.ts（getSessionsDir / getSubagentSessionDir /
+ * getBtwSessionsRoot）：sessions = 主会话树 / subagents = 子代理会话树
+ * （`<agentDir>/subagents/<encodeCwd>/sessions/`）/ btw = btw 线会话树
+ * （`<agentDir>/btw/<encodeCwd>/<mainSid>/`）。main 进程不能 import runtime
+ * （包边界），树内包含判定（如会话 JSONL 导出的路径安全校验）等跨进程消费
+ * 经本 SSOT 推导，禁止各进程自带树段字面量——与 getPiSessionsDir 同款收敛
+ * （曾因手拼层级致跨进程判据漂移），runtime 改树名时唯一改点在本常量 +
+ * 权威源两处，消费方零改。
+ */
+export const PI_SESSION_TREE_SEGMENTS = ['sessions', 'subagents', 'btw'] as const
+
+/**
  * 用户安装的 extension 目录（`<dataDir>/extensions`）。
  *
  * local/git 安装的 extension 副本存放于此；也是 discovery.json 可选目录的强制基址

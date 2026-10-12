@@ -216,6 +216,12 @@ describe('settings-transport-adapter · @/api 门面八元全量转发矩阵（u
     setSubagentDefaultEngine: fwd('session', 'setSubagentDefaultEngine', ['probe-engine'], (t, engineId) =>
       t.setSubagentDefaultEngine(engineId),
     ),
+    setSubagentEngineDefaultModel: fwd(
+      'session',
+      'setSubagentEngineDefaultModel',
+      ['probe-engine', 'probe-provider/probe-model'],
+      (t, engineId, modelRef) => t.setSubagentEngineDefaultModel(engineId, modelRef),
+    ),
     oauthLogin: fwd('config', 'oauthLogin', [PROBE_PID], (t, providerId) => t.oauthLogin(providerId)),
     oauthCancel: fwd('config', 'oauthCancel', [PROBE_PID], (t, providerId) => t.oauthCancel(providerId)),
     oauthLogout: fwd('config', 'oauthLogout', [PROBE_PID], (t, providerId) => t.oauthLogout(providerId)),

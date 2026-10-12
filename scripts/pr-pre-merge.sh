@@ -98,6 +98,21 @@ log() {
 GIT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || { echo "Not a git repo" >&2; exit 2; })"
 cd "$GIT_ROOT"
 
+# 工具链自举：本脚本依赖 npm/npx/pnpm，而托管执行环境（workflow gate / CI runner）的
+# PATH 常被削减到只剩 node。nvm / homebrew / 官方 pkg 三种 node 安装形态下 npm/npx/pnpm
+# 均与 node 同目录，从 node 实际位置推导补齐；同时前置仓库 node_modules/.bin（与 npx
+# 本地优先语义一致，tsc/vitest/eslint 直接走 workspace 依赖，行为无变化）。
+NODE_BIN="$(command -v node 2>/dev/null || true)"
+if [[ -z "$NODE_BIN" ]]; then
+    echo "ERROR: node not found in PATH —— pr-pre-merge.sh 依赖 node 工具链（npm/npx/pnpm 按其与 node 同目录的安装惯例推导）。" >&2
+    echo "恢复：在 PATH 中提供 node（如 source nvm 初始化脚本或 export PATH=<node 安装目录>:$PATH）后重跑。" >&2
+    exit 2
+fi
+# node 常以 symlink 暴露在 PATH（如 homebrew 链接 nvm 版本）而 npm/npx/pnpm 只在真实目录——
+# 解析到真实路径再取目录；readlink -f 不可用（旧 BSD / 非 symlink）时原路径兜底。
+NODE_BIN_REAL="$(readlink -f "$NODE_BIN" 2>/dev/null || echo "$NODE_BIN")"
+export PATH="$(dirname "$NODE_BIN_REAL"):$GIT_ROOT/node_modules/.bin:$PATH"
+
 # ── --test-result 前置校验（防注入值与 coverage 产物竞态）：
 #    注入值来源是 coverage-gate 的测试判定，产物必须存在且针对同一 base，
 #    否则注入的是过期读数。不一致 → exit 2（工具错误），错误信息指向恢复动作。

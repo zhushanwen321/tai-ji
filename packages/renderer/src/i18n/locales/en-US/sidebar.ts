@@ -3,6 +3,9 @@ export default {
   search: 'Search',
   developer: 'Developer',
   settingsTitle: 'Settings',
+  remoteConnect: 'Remote connect',
+  quickAppearance: 'Appearance quick settings',
+  quickThemeTitle: 'Theme',
   selectSessionHint: 'Select a session to view files',
   sessionListLoadFailed: 'Failed to load sessions ({error})',
   switchSessionFailed: 'Failed to switch session: {msg}',
@@ -57,7 +60,17 @@ export default {
     markDone: 'Mark done',
     unmarkDone: 'Unmark done',
     archived: 'Archived',
+    // Session detail hover card message count:
+    // last row "time · N msgs" two segments, tone aligned with the demo msgs segment
+    msgCount: '{count} msgs',
+    // Export JSONL: context-menu item; unavailable =
+    // disabled-state title shown when sessionFile is missing (pi lazy-write window)
+    exportJsonl: 'Export JSONL',
+    exportJsonlUnavailable: 'No session file yet (available after the first message is written)',
     assignToProject: 'Assign to project',
+    // Context-menu "Move to project" group label (demo .ctx-label authoritative copy; kept
+    // separate from the ghost button title "Assign to project")
+    moveToProject: 'Move to project',
     quoteToComposer: 'Quote to composer',
     // agent-managed-session U8：agent 创建的 session 标记 badge（语言无关 token，两侧同文案）
     agentBadge: 'AI',
@@ -74,12 +87,24 @@ export default {
     childCount: '{n} child session unfinished | {n} child sessions unfinished',
   },
   sessionList: {
-    empty: 'No sessions',
-    newSession: 'New session',
+    // R6.2 anchored groups (2026-10-11): section header + in-group empty hint; the old
+    // "Recent" header and global empty state (empty/newSession) retired with the grouped form
+    header: 'Projects & sessions',
+    groupEmpty: 'No sessions yet — use the group header "+" to start one here',
+    newSessionInProject: 'New task in this project',
     newSessionInFolder: 'New session in this folder',
     deleteFolderConfirm: 'Delete all sessions in this folder?',
+    // N8 A/C dual mode (ui-optimize-unified decision 9): mode names of the two-segment
+    // icon toggle (hover tooltip)
+    modeFlat: 'Flat list',
+    modeGroup: 'Group by folder',
   },
   assignProjectFailed: 'Failed to assign to project: {msg}',
+  // "Move to project" success feedback (sessions spec §3.3: move + toast on click)
+  movedToProject: 'Moved to project "{name}"',
+  // Export JSONL feedback (canceled is silent — no toast)
+  exportJsonlSuccess: 'Session exported to {path}',
+  exportJsonlFailed: 'Export failed ({code}): {message}',
   forceQuitFailed: 'Failed to force quit: {msg}',
   // [delivery-ownership kernel u3c / D10] explicit toast after forceQuit drains undelivered kernel entries into the Composer draft
   forceQuitQueueRecovered: '{count} queued message moved back to draft | {count} queued messages moved back to draft',
@@ -91,14 +116,21 @@ export default {
     session: 'Session',
     file: 'File',
     plugin: 'Plugins',
+    // tablist container aria-label (sidebar spec §3.1)
+    viewLabel: 'Sidebar views',
   },
-  projectSwitcher: {
+  // R6.2 anchored groups (the projectSwitcher.* section retired with the card grid:
+  // project management now lives inside the sessions view as project groups)
+  projectGroup: {
     defaultName: 'Default project',
+    currentChip: 'Current',
     newProject: 'New project',
-    namePlaceholder: 'Project name',
+    namePlaceholder: 'Project name, Enter to confirm',
+    renameProject: 'Rename project',
     deleteProject: 'Delete project',
     deleteTitle: 'Delete project',
-    deleteDesc: 'Delete project "{name}"? This cannot be undone.',
+    // Confirm copy states the consequence (sidebar spec §3.7: sessions return to the default project)
+    deleteDesc: 'Delete project "{name}"? Its {count} session(s) will return to the default project, and the project itself will be deleted.',
     deleteConfirm: 'Delete',
     cancel: 'Cancel',
   },
@@ -117,6 +149,7 @@ export default {
     retry: 'Retry',
     noMatch: 'No matching files',
     noFile: 'No files',
+    clearFilter: 'Clear filter',
   },
   renameDialog: {
     title: 'Rename session',

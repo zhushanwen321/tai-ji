@@ -16,7 +16,7 @@
  * 归属：chat 域纯函数（零 Vue/renderer 依赖），对齐 w1-w6 chat 域绞杀模式（core SSOT）。
  * ui 包经 @taiji/core/domain/chat 子路径 import。
  *
- * 另含 groupConsecutiveBash（ui-signal-density §3.3 D1 增量）：连续 bash 折叠为组块的
+ * 另含 groupToolRuns（run 类型分组）：连续同类型（探索 / 改动 / 执行命令）工具行折叠为组块的
  * 下游纯变换，接线点在 Turn.vue visibleBlocks 三分支汇合之后；不修改上方三函数的输入输出契约。
  */
 import type { Message, ToolCall } from '@taiji/shared'
@@ -214,155 +214,189 @@ function countFailedOutsideVisible(blocks: FlatBlock[], visibleSet: Set<number>)
   return failedCount
 }
 
-/**
- * bash 组块（ui-signal-density §3.3 D1 组块数据契约）：`groupConsecutiveBash` 输出的新序列单元，
- * 不是 FlatBlock（组块没有单一 flatIndex）。组身份 = 成员集合本身，成员增减是组内容变化。
+/* ══ run 类型分组（demo specs/chat/history-load-and-run-grouping.md §3，real 侧落地）══
+ * 长 run 折叠的判定源只有工具行的 toolName 一个字段，不解析参数内容：组名依赖对 agent 行为的
+ * 语义解读，场景一变解读就会错；纯类型映射的错判在结构上不可能——漏登记工具的安全降级是
+ * 「多显示一行」，不是「归错组」。
  */
-export interface BashGroupBlock {
-  kind: 'bash-group'
-  /** 组成员（连续 bash 的可见块，按 flatIndex 升序；组资格只看工具类型，running 也入组） */
+
+/** 组类型：探索 / 改动 / 执行命令（中文名在 ui locale panel.message.runGroup*） */
+export type RunGroupBase = 'explore' | 'edit' | 'exec'
+
+/**
+ * 类型判定表（唯一维护点）：名单与 pi 内置工具注册表对齐（shared BUILTIN_TOOLS 的 7 个内置工具
+ * 全覆盖，pi 0.84.1 实装锚点见该常量注释）。
+ *
+ * 与 demo 表的差异是工具名对齐而非分类差异：demo 写 `glob` / `multiedit`，pi 注册表里对应的是
+ * `find`（无 glob）、也没有 multiedit——照抄 demo 名单会让 find 这类高频只读工具掉进「原样」档。
+ * 名单外的工具（子智能体 / workflow / MCP / 扩展工具）一律原样成行：归错组比归成自定义更糟
+ * ——把一次子智能体派发画成「探索」是谎报。
+ */
+export const RUN_GROUP_TOOLS: Record<RunGroupBase, readonly string[]> = {
+  explore: ['read', 'grep', 'find', 'ls'],
+  edit: ['edit', 'write'],
+  exec: ['bash'],
+}
+
+/** toolName → 组类型反查表（模块级构建一次，取代逐块线性查表） */
+const TOOL_RUN_BASE: Map<string, RunGroupBase> = new Map(
+  (Object.keys(RUN_GROUP_TOOLS) as RunGroupBase[]).flatMap((base) =>
+    RUN_GROUP_TOOLS[base].map((name): [string, RunGroupBase] => [name, base]),
+  ),
+)
+
+/**
+ * run 组块：`groupToolRuns` 输出的新序列单元，不是 FlatBlock（组块没有单一 flatIndex）。
+ * 组身份 = 类型 + 成员集合本身，成员增减是组内容变化。
+ */
+export interface RunGroupBlock {
+  kind: 'run-group'
+  /** 组类型（判定源 RUN_GROUP_TOOLS）：渲染层据此取名与图标 */
+  base: RunGroupBase
+  /** 同名组序号（渲染序列内按出现次序递增，1 起；>1 时显示「 · N」，对齐 demo 的 `.rg-seq`） */
+  seq: number
+  /** 组成员（连续同类型的可见块，按 flatIndex 升序；组资格只看工具类型，running 也入组） */
   members: FlatBlock[]
-  /** 组头聚合（三条计数口径，D1）：值在纯函数侧一次算好，渲染层零解析 */
+  /** 组头聚合（三条计数口径）：值在纯函数侧一次算好，渲染层零解析 */
   header: {
-    /** ×N = 成员数（含 running） */
+    /** N = 成员数（含 running） */
     count: number
-    /** 共 Xs = 已完成成员耗时合计（endTime − startTime 之和；endTime 缺失的成员按 0 计；running 成员不计入——其 endTime 必缺失，天然按 0） */
+    /** 耗时 = 已完成成员耗时合计（endTime − startTime 之和；endTime 缺失的成员按 0 计；running 成员不计入——其 endTime 必缺失，天然按 0） */
     durationMs: number
-    /** · 含 M 次失败 = 成员中 status==='error' 的数量（组内口径，与 TraceCompactorRow 的全局 failedCount 分账，V15⑦ 对账等式两项并列） */
+    /** 含 M 次失败 = 成员中 status==='error' 的数量（组内口径，与 TraceCompactorRow 的全局 failedCount 分账） */
     failedCount: number
   }
   /** 组内是否含 status==='running' 的成员（放接口顶层——它是渲染信号不是计数口径，不入 header）。
-   *  渲染层据此给组头套执行态视觉：loader 图标 + accent 文字色（与其余执行中块同款）。 */
+   *  渲染层据此给组头套执行态视觉：loader 图标 + 挂载即展开。 */
   hasRunning: boolean
-  /** 段首锚定 key（run head，v8）：members[0] 在 flatBlocks 全序列中所属连续 bash 段的段首 flatIndex。
-   *  只取首成员的段首入键（v9 契约缝①）；对窗口滑动（段首成员被收编出窗）与段尾延长（running 并入）
-   *  两个生长方向都稳定——窗口滑动不改段首在 flatBlocks 里的位置、段尾延长也不改段首。 */
+  /** 段首锚定 key（run head）：members[0] 在 flatBlocks 全序列中所属连续同类型段的段首 flatIndex。
+   *  对窗口滑动（段首成员被收编出窗）与段尾延长（running 并入）两个生长方向都稳定——窗口滑动
+   *  不改段首在 flatBlocks 里的位置、段尾延长也不改段首，故 :key 不抖（remount = 展开态丢 + 滚动锚点跳）。 */
   headFlatIndex: number
 }
 
-/** Turn.vue visibleBlocks 三分支汇合后的渲染单元：普通块或 bash 组块 */
-export type TraceRenderUnit = FlatBlock | BashGroupBlock
+/** Turn.vue visibleBlocks 三分支汇合后的渲染单元：普通块或 run 组块 */
+export type TraceRenderUnit = FlatBlock | RunGroupBlock
 
-/** bash 工具块判定（组员候选 / 段首回查共用）：kind==='tool' 且 toolName==='bash'。 */
-function isBashToolBlock(fb: FlatBlock): boolean {
-  return fb.block.kind === 'tool' && (fb.block.ref as ToolCall).toolName === 'bash'
+/** 组员候选判定（分组扫描 / 段首回查共用）：工具块且 toolName 在类型表内，两者都命中才给类型。 */
+function runBaseOf(fb: FlatBlock): RunGroupBase | null {
+  if (fb.block.kind !== 'tool') return null
+  return TOOL_RUN_BASE.get((fb.block.ref as ToolCall).toolName) ?? null
 }
 
-/** 单成员耗时（口径②）：endTime 缺失（end_not_received 等）按 0 计，负值钳 0。 */
-function bashMemberDurationMs(fb: FlatBlock): number {
+/** 单成员耗时：endTime 缺失（end_not_received 等）按 0 计，负值钳 0。 */
+function memberDurationMs(fb: FlatBlock): number {
   const tool = fb.block.ref as ToolCall
   if (typeof tool.startTime !== 'number' || typeof tool.endTime !== 'number') return 0
   return Math.max(0, tool.endTime - tool.startTime)
 }
 
 /**
- * 段首回查（v8 key 规则）：从首成员在 flatBlocks 中的位置沿 flatIndex 递减方向扫描连续 bash 至段头。
- * 段 = flatBlocks 全序列中相邻连续的 bash 块（纯几何概念，不筛 status——error bash 也是段内 bash）。
- * 入参一致性不变量（v9 契约缝③）：flatBlocks 与 visible 同源同拍（Turn.vue 两者都从
- * props.turn.assistants 的 computed 派生、同一渲染拍计算），首成员必在 flatBlocks 中；
- * 防御缺省（调用方违约）回落成员自身 flatIndex，不 throw。
+ * 段首回查（key 规则）：从首成员在 flatBlocks 中的位置沿 flatIndex 递减方向扫描同类型工具块至段头。
+ * 段 = flatBlocks 全序列中相邻连续的同类型工具块（纯几何概念，不筛 status——error 成员也是段内成员）。
+ * 入参一致性不变量：flatBlocks 与 visible 同源同拍（Turn.vue 两者都从 props.turn.assistants 的
+ * computed 派生、同一渲染拍计算），首成员必在 flatBlocks 中；防御缺省（调用方违约）回落成员自身
+ * flatIndex，不 throw。
  */
-function bashRunHeadIndex(firstMember: FlatBlock, flatBlocks: FlatBlock[]): number {
-  let startIdx = -1
-  for (let i = 0; i < flatBlocks.length; i++) {
-    if (flatBlocks[i].flatIndex === firstMember.flatIndex) {
-      startIdx = i
-      break
-    }
-  }
-  if (startIdx === -1) return firstMember.flatIndex
+function runHeadIndex(
+  firstMember: FlatBlock,
+  base: RunGroupBase,
+  flatBlocks: FlatBlock[],
+  positionByFlatIndex: Map<number, number>,
+): number {
+  const startIdx = positionByFlatIndex.get(firstMember.flatIndex)
+  if (startIdx === undefined) return firstMember.flatIndex
   let head = firstMember.flatIndex
   for (let i = startIdx - 1; i >= 0; i--) {
-    if (!isBashToolBlock(flatBlocks[i])) break
+    if (runBaseOf(flatBlocks[i]) !== base) break
     head = flatBlocks[i].flatIndex
   }
   return head
 }
 
 /** 组块构建：三条计数口径 + hasRunning 一次算好 + 段首锚定 key。 */
-function buildBashGroup(members: FlatBlock[], flatBlocks: FlatBlock[]): BashGroupBlock {
+function buildRunGroup(
+  base: RunGroupBase,
+  seq: number,
+  members: FlatBlock[],
+  flatBlocks: FlatBlock[],
+  positionByFlatIndex: Map<number, number>,
+): RunGroupBlock {
   let durationMs = 0
   let failedCount = 0
   let hasRunning = false
   for (const m of members) {
-    durationMs += bashMemberDurationMs(m)
-    if ((m.block.ref as ToolCall).status === 'error') failedCount += 1
-    if ((m.block.ref as ToolCall).status === 'running') hasRunning = true
+    durationMs += memberDurationMs(m)
+    const status = (m.block.ref as ToolCall).status
+    if (status === 'error') failedCount += 1
+    if (status === 'running') hasRunning = true
   }
   return {
-    kind: 'bash-group',
+    kind: 'run-group',
+    base,
+    seq,
     members,
     header: { count: members.length, durationMs, failedCount },
     hasRunning,
-    headFlatIndex: bashRunHeadIndex(members[0], flatBlocks),
+    headFlatIndex: runHeadIndex(members[0], base, flatBlocks, positionByFlatIndex),
   }
 }
 
-/** bash 组成组门槛（D1）：连续 ≥2 个 bash 才成组，单个保持独立行。 */
-const MIN_BASH_GROUP_SIZE = 2
-
 /**
- * bash 组块类型守卫：TraceRenderUnit 收窄用。FlatBlock 无 kind 字段（非判别属性齐全的联合），
+ * run 组块类型守卫：TraceRenderUnit 收窄用。FlatBlock 无 kind 字段（非判别属性齐全的联合），
  * `unit.kind` 直访在 TS 下非法，必须经 'kind' in 判定（ui Turn.vue 与测试共用本守卫）。
  */
-export function isBashGroupBlock(unit: TraceRenderUnit): unit is BashGroupBlock {
-  return 'kind' in unit && unit.kind === 'bash-group'
+export function isRunGroupBlock(unit: TraceRenderUnit): unit is RunGroupBlock {
+  return 'kind' in unit && unit.kind === 'run-group'
 }
 
 /**
- * 连续 bash 折叠（ui-signal-density §3.3 D1，本函数不修改任何入参、不碰既有三函数契约）。
+ * run 类型分组（demo chat spec §3 的切分算法，本函数不修改任何入参、不碰既有三函数契约）。
  *
  * 输入是可见派生序列（Turn.vue visibleBlocks 三分支汇合后的 FlatBlock[]）+ 同源同拍的 flatBlocks
  * （段首回查用）。规则：
- * - 组资格只看工具类型、不看状态（D1 语义变更：running 与已完成一视同仁）：连续 ≥2 个 bash
- *   工具块即成段成组（含 running 成员，组头 hasRunning=true 时渲染层呈现执行态——loader +
- *   accent）；不成组清单（read/grep/glob/cat/ls/find/write/edit/
- *   todo_write/thinking/subagent/workflow/text…）一律保持独立行，且打断成组（用户裁决 R5）。
- * - error bash 入组为失败成员（header.failedCount 计数，组行尾「· 含 M 次失败」承载，
- *   V8 双路径）；error 块不在输入序列中时（路径 B 窗口被 ③池剔除）前后两段按假邻接合并
- *   （v9 契约缝②），该 error 由 TraceCompactorRow 的全局 failedCount 报告、不入组内 M。
- * - 组块排序位置 = members[0].flatIndex；输出保持输入序列原序（分段扫描后按原序组装）。
- * 空输入 → 返回 []。
+ * - 逐块查表：命中类型表 → 与当前组同类型则并入、切型则收拢旧组开新组（同名组序号递增）；
+ *   未命中（自定义工具 / 子智能体 / workflow）+ 非工具块（thinking / text）→ 先收拢当前组再
+ *   原样成行，并打断分组。
+ * - 组资格只看工具类型、不看状态：running 与已完成一视同仁（running 不入「独立行」，其进度由
+ *   组头的 hasRunning 执行态承载）。
+ * - 组数 = 类型切换次数，与步数解耦；单成员组照出（demo 同口径：一个 read 也成「探索 1 步」，
+ *   回看历史时组头就是该段的标题）。
+ * - 组成员不在可见序列时（工作 turn 的 W 窗口把 error 成员剔出可见、前后两段按假邻接合并）：
+ *   合并后的组只统计可见成员，被剔除的 error 由 TraceCompactorRow 的全局 failedCount 报告。
+ * - 组块排序位置 = members[0] 在输入序列中的位置；输出保持输入序列原序。空输入 → 返回 []。
  */
-export function groupConsecutiveBash(visible: FlatBlock[], flatBlocks: FlatBlock[]): TraceRenderUnit[] {
-  const n = visible.length
-
-  // ① 分段扫描：段 = 连续 bash 工具块（组资格只看工具类型，running 与已完成一视同仁，
-  //    与段首回查 bashRunHeadIndex 的「纯几何段」口径一致）。遇非 bash 即断段。
-  //    segOf[k] = 可见下标 k 所属段号（-1 = 非 bash 独立块）。
-  const segments: number[][] = []
-  const segOf: number[] = new Array(n).fill(-1)
-  let i = 0
-  while (i < n) {
-    if (!isBashToolBlock(visible[i])) {
-      i += 1
-      continue
-    }
-    const seg: number[] = []
-    while (i < n && isBashToolBlock(visible[i])) {
-      seg.push(i)
-      segOf[i] = segments.length
-      i += 1
-    }
-    segments.push(seg)
-  }
-
-  // ② 按原序组装：段长 ≥2 → 段首位置输出组块、段内其余下标由组块承载（跳过）；
-  //    段长 <2 与非候选块 → 独立 FlatBlock 原样输出。
+export function groupToolRuns(visible: FlatBlock[], flatBlocks: FlatBlock[]): TraceRenderUnit[] {
   const units: TraceRenderUnit[] = []
-  for (let idx = 0; idx < n; idx++) {
-    const segId = segOf[idx]
-    if (segId === -1) {
-      units.push(visible[idx])
-      continue
-    }
-    const seg = segments[segId]
-    if (seg.length >= MIN_BASH_GROUP_SIZE) {
-      if (seg[0] === idx) units.push(buildBashGroup(seg.map((k) => visible[k]), flatBlocks))
-      continue
-    }
-    units.push(visible[idx])
+  // 段首回查用的位置表：一次构建 O(n)，组数 × 线性查找的二次复杂度不再出现。
+  const positionByFlatIndex = new Map<number, number>()
+  for (let i = 0; i < flatBlocks.length; i++) positionByFlatIndex.set(flatBlocks[i].flatIndex, i)
+
+  const seqOf = new Map<RunGroupBase, number>()
+  let members: FlatBlock[] = []
+  let base: RunGroupBase | null = null
+
+  const flush = (): void => {
+    if (base === null) return
+    const seq = (seqOf.get(base) ?? 0) + 1
+    seqOf.set(base, seq)
+    units.push(buildRunGroup(base, seq, members, flatBlocks, positionByFlatIndex))
+    members = []
+    base = null
   }
+
+  for (const fb of visible) {
+    const next = runBaseOf(fb)
+    if (next === null) {
+      flush()
+      units.push(fb)
+      continue
+    }
+    if (base !== null && base !== next) flush()
+    base = next
+    members.push(fb)
+  }
+  flush()
   return units
 }
 

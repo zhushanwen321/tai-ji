@@ -18,8 +18,8 @@
   data-testid="async-error-fallback"
 >
   <AlertCircle class="size-5 text-danger" />
-  <span class="text-[13px] text-neutral-mid">{{ t('common.loadFailed') }}</span>
-  <span class="text-[12px] text-neutral-dim">{{ t('common.loadFailedHint', { n: LAZY_RETRY_LIMIT }) }}</span>
+  <span class="text-[length:var(--text-sm)] text-neutral-mid">{{ t('common.loadFailed') }}</span>
+  <span class="text-[length:var(--text-xs)] text-neutral-dim">{{ t('common.loadFailedHint', { n: LAZY_RETRY_LIMIT }) }}</span>
 </div>
 <div
   v-else

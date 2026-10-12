@@ -31,7 +31,7 @@ afterEach(() => {
   rmSync(tmpRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
 });
 
-/** 与 session-file-gc 同量级：30 天（ms）。 */
+/** 引擎 journal TTL（engine-journal-gc 同款缺省）：30 天（ms）。 */
 const TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
 /** 把文件 mtime 设为 31 天前（超龄）。 */

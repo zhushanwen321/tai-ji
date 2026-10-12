@@ -3,12 +3,16 @@
     UserBubble：用户气泡（展示态/编辑态 + skill/file/image badge + hover actions）。
     从 Turn.vue 拆出。emit edit-state-change 通知父组件（MessageStream.onEditStateChange 按 turnKey 身份持有钉扎状态）。
   -->
-  <!-- user 区：编辑态切 textarea，展示态气泡 + hover actions -->
-  <div class="group/user flex flex-col items-end gap-1">
+  <!-- user 区：编辑态切 textarea，展示态气泡 + hover actions。
+       relative + actions 绝对定位（M3a 轮次节奏）：hover actions 悬浮于气泡右下角内
+       （bottom-0 right-0），不再常驻占流内高度——用户气泡→轮头距离 = 根容器 gap 12px
+       （demo .blk:has(+ .blk-compact) 紧凑档）。悬浮区内 hover 经 DOM 祖先传递保持
+       group/user 悬停态，按钮可达。 -->
+  <div class="group/user relative flex flex-col items-end">
     <!-- 编辑态：编辑后 fork 新会话 -->
     <div
       v-if="isEditingThisUser"
-      class="w-full max-w-[85%] min-w-0 break-words rounded-[14px] border border-accent bg-bg-input p-2 shadow-[0_0_0_3px_color-mix(in_oklch,var(--accent)_22%,transparent)]"
+      class="w-full max-w-[min(72%,64ch)] min-w-0 [overflow-wrap:anywhere] rounded-[14px] border border-accent bg-bg-input p-2 shadow-[0_0_0_3px_color-mix(in_oklch,var(--accent)_22%,transparent)]"
     >
       <Textarea v-model="draftText" class="min-h-[64px] border-0 bg-transparent px-1 text-[length:var(--text-base)] leading-[1.55] focus-visible:ring-0" />
       <div class="mt-1.5 flex items-center justify-between px-1">
@@ -21,18 +25,30 @@
         </div>
       </div>
     </div>
-    <!-- 展示态气泡（group/ts 命名分组：用户时刻与气泡同行，悬停该行 / 键盘焦点进入该行
-         时刻才显现——D2 四处时刻槽悬停化之一） -->
+    <!-- 展示态气泡（group/ts 命名分组：用户时刻悬挂气泡上方右侧，悬停该行 / 键盘焦点进入
+         该行时刻才显现——D2 四处时刻槽悬停化之一；悬挂位 = demo .user-bubble .ts
+         （right 10px / top -22px，workbench.css），非首轮悬挂进上一轮 20px 边界留白） -->
+    <!-- 行 self-stretch：行是 items-end 列里的收缩适配（shrink-to-fit）flex item，其内在宽度
+         反由气泡的内容贡献决定，而气泡 max-width 又是行宽的 72%——循环依赖下 Chromium 解出
+         的行宽会把气泡压得比内容单行自然宽更窄，造成无谓折行（「删除 Installer」被折成
+         删除/installe/r，headless 复现实测气泡 118.4px < 自然宽 120px）。行占满列宽后
+         百分比有了确定基准，气泡恢复内容自适应；demo 无此问题因 .user-row 是块级全宽 flex。 -->
     <div
       v-else
-      class="group/ts flex items-start justify-end gap-2"
+      class="group/ts relative flex items-start justify-end self-stretch"
     >
-      <!-- 用户时刻（气泡左侧，D2 悬停化） -->
-      <span v-if="turn.user?.timestamp" class="shrink-0 self-start pt-1.5 font-mono text-[length:var(--text-2xs)] text-neutral-dim tabular-nums opacity-0 transition-opacity duration-150 group-hover/ts:opacity-100 group-focus-within/ts:opacity-100" data-testid="user-timestamp">
+      <!-- 用户时刻（悬挂气泡上方右侧，demo .user-bubble .ts） -->
+      <span v-if="turn.user?.timestamp" class="absolute -top-[22px] right-[10px] font-mono text-[length:var(--text-2xs)] text-neutral-dim tabular-nums opacity-0 transition-opacity duration-[var(--duration-fast)] group-hover/ts:opacity-100 group-focus-within/ts:opacity-100" data-testid="user-timestamp">
         {{ formatClock(turn.user.timestamp) }}
       </span>
+      <!-- N3 宽度纪律（设计决策 8）：max-width min(72%, 64ch) 双约束——窄窗按容器 72% 收，
+           宽窗按 64ch 封顶防长行拉伸；overflow-wrap: anywhere（替代 break-words）让无空格
+           长令牌可折行，编辑态气泡同宽同纪律。
+           气泡形态（M3a demo 权威，workbench.css .user-bubble）：--bubble-bg 底 + hairline
+           边框 + 12px 统一圆角（--radius-lg）+ 15px/10px 内边距 + 15px 字号（--text-md）
+           1.7 行高。 -->
       <div
-        class="max-w-[85%] min-w-0 break-words rounded-[14px_14px_4px_14px] border border-border-strong bg-[var(--bubble-bg)] px-[13px] py-[9px] text-[length:var(--text-base)] leading-[1.55] text-neutral-fg"
+        class="user-bubble-md max-w-[min(72%,64ch)] min-w-0 [overflow-wrap:anywhere] rounded-lg border border-hairline bg-[var(--bubble-bg)] px-[15px] py-[10px] text-[length:var(--text-md)] leading-[1.7] text-neutral-fg"
         :class="{ 'is-mixed': isMixedContent }"
       >
       <template v-for="(seg, i) in orderedSegments" :key="i">
@@ -106,10 +122,12 @@
       <MarkdownRenderer v-if="!userSegments.length && typeof turn.user?.content === 'string'" :content="turn.user!.content" :session-id="sessionId" />
       </div>
     </div>
-    <!-- hover actions：复制常驻 hover；编辑仅 AI 停止（非活跃态）时显示；撤回单入口（D6，路由判定在 core）。 -->
+    <!-- hover actions：复制常驻 hover；编辑仅 AI 停止（非活跃态）时显示；撤回单入口（D6，路由判定在 core）。
+         悬浮于气泡右下角内（不占流内高度，见根注释）；默认 pointer-events-none，悬停/焦点
+         才可命中（消除原「隐形按钮拦截点击」形态）。 -->
     <div
       v-if="!isEditingThisUser"
-      class="flex items-center gap-0.5 opacity-0 transition-opacity duration-150 group-hover/user:opacity-100 group-focus-within/user:opacity-100"
+      class="absolute bottom-0 right-0 flex items-center gap-0.5 opacity-0 pointer-events-none transition-opacity duration-[var(--duration-fast)] group-hover/user:opacity-100 group-hover/user:pointer-events-auto group-focus-within/user:opacity-100 group-focus-within/user:pointer-events-auto"
     >
       <Button
         variant="ghost"
@@ -355,5 +373,43 @@ async function submitEdit(): Promise<void> {
 .is-mixed :deep(.md-render p + p)::before {
   content: '\a';
   white-space: pre;
+}
+/* [MF-1-26] 气泡内 markdown 简化形态（demo workbench.css .user-bubble pre/table 权威，
+   332-338）：pre = 无 header、无边框、padding 8px 10px、fs-md 档（--text-xs 12px）1.65
+   行高、margin 6px 0 0、card-inset（--bg-input）底、r-md（--radius）圆角；table = 仅
+   display:block + max-width:100% + overflow-x:auto——去外框/格线/表头底（demo 气泡表格
+   是 UA 平形态，非正文 .mds 网格档）。img 限宽（demo :338）由 MarkdownRenderer img 规则
+   已有（max-width:100% + height:auto），无需覆盖。
+   选择器以 .md-render 中锚抬高特异性（恒压 MarkdownRenderer 同特异性规则，不依赖样式
+   注入顺序）；不动共用渲染器 MarkdownRenderer 本体（其他消费点不受影响）。
+   escape hatch：跨组件 :deep 宿主作用域特化。 */
+.user-bubble-md :deep(.md-render .md-codeblock) {
+  border: 0;
+  border-radius: var(--radius);
+  /* margin 归零（与下方 table 容器对称）：共享规则 margin:0.7em 0（MarkdownRenderer）在
+     气泡内继续生效会使代码块上隙 ≈10.5px（BFC 不折叠）+ 内层 pre 6px ≈16.5px，demo 气泡
+     pre 单层 margin 仅 6px 0 0（workbench.css:338）——上距由内层 pre 规则（:389）承担。 */
+  margin: 0;
+}
+.user-bubble-md :deep(.md-render .md-codeblock__header) {
+  display: none;
+}
+.user-bubble-md :deep(.md-render .md-codeblock pre.shiki) {
+  margin: 6px 0 0;
+  padding: 8px 10px;
+  font-size: var(--text-xs);
+  line-height: 1.65;
+}
+.user-bubble-md :deep(.md-render table) {
+  border: 0;
+  border-radius: 0;
+  margin: 0;
+}
+.user-bubble-md :deep(.md-render th),
+.user-bubble-md :deep(.md-render td) {
+  border: 0;
+}
+.user-bubble-md :deep(.md-render th) {
+  background: transparent;
 }
 </style>

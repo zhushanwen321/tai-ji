@@ -777,7 +777,7 @@
     },
     {
       "id": "C-comm-12",
-      "summary": "extension UI 交互走 extension.ui_request/ui_response 独立通道（禁复用 tool approval）；插件工具接入 pi 的通路暂缺（Pi Bridge Extension 已整体退役，登记见 docs/todo/plugin-tool-access-gap.md）",
+      "summary": "extension UI 交互走 extension.ui_request/ui_response 独立通道（禁复用 tool approval）；插件工具接入 pi 的通路暂缺（Pi Bridge Extension 已整体退役）",
       "scope": [
         "packages/runtime/src/**",
         "extensions/taiji/**"
@@ -2448,7 +2448,7 @@
     },
     {
       "id": "C-data-22",
-      "summary": "zcode 隔离会话库条目 TTL 引擎侧 sweep（永久会话模型 §3.2.6 风险登记②执行锚，2026-09-13 U6 落地）：万物可续聊后 zcode 隔离库（<engineDataDir>/engines/zcode/session-db/db.sqlite）成为单调累积写入面（每 subagent 每轮追加、reopen 再开新 sessionId 继续追加），条目 TTL 必须与 pi transcript 同窗 30 天（ZCODE_SESSION_TTL_MS），且 TTL 通道与「zcode 万物可续聊」能力同发布单元（通道未落地不得发布该能力）；通道选型 = 引擎侧 sweep（zcode-subagent-cli session-db-maintenance.ts maybeSweepExpiredZcodeSessions）而非宿主侧清库——库写者是 app-server 常驻进程、引擎包持有其生命周期，写并发语义单点（busy_timeout 兜锁窗），宿主直写 sqlite 与会话库隔离方向（zcodeDbPathAllowlist 白名单化收紧）相悖；判龄 = session.time_updated ?? time_created（非数值保守保留——删错锚的代价（锚失效降级 reopen 丢历史）高于漏删）；活跃豁免 keepSessionIds = appserverRuntime.activeSessions 快照；节流 = 进程级 24h（ZCODE_SESSION_SWEEP_INTERVAL_MS）+ 运行时建立后 defer 50ms（ZCODE_SESSION_SWEEP_DEFER_MS）让位首 run 的 create；删除序先子表后 session（sqlite 默认 foreign_keys=0、engine 声明 CASCADE 不生效，不显式删子表留孤儿行；session_task_link 双向处置、workflow_* 父键置 NULL），每库单事务收尾 wal_checkpoint(PASSIVE)；fail-soft：任何失败（db 缺失 / node:sqlite 不可用 / 锁超时 / schema 漂移抛错）warn 留痕返回 {swept:0}，不拖垮 run 主链路；条目被清 = 锚失效 → 宿主侧自动 reopen 降级（同 id 带历史重开），无需人工恢复",
+      "summary": "zcode 隔离会话库条目 TTL 引擎侧 sweep（永久会话模型 §3.2.6 风险登记②执行锚，2026-09-13 U6 落地）：万物可续聊后 zcode 隔离库（<engineDataDir>/engines/zcode/session-db/db.sqlite）成为单调累积写入面（每 subagent 每轮追加、reopen 再开新 sessionId 继续追加），条目 TTL 30 天（ZCODE_SESSION_TTL_MS；pi 侧 transcript 回收自 2026-10-12 起归删主会话级联〔ADR-0133〕，无独立 TTL，两域不再有「同窗」绑定），且 TTL 通道与「zcode 万物可续聊」能力同发布单元（通道未落地不得发布该能力）；通道选型 = 引擎侧 sweep（zcode-subagent-cli session-db-maintenance.ts maybeSweepExpiredZcodeSessions）而非宿主侧清库——库写者是 app-server 常驻进程、引擎包持有其生命周期，写并发语义单点（busy_timeout 兜锁窗），宿主直写 sqlite 与会话库隔离方向（zcodeDbPathAllowlist 白名单化收紧）相悖；判龄 = session.time_updated ?? time_created（非数值保守保留——删错锚的代价（锚失效降级 reopen 丢历史）高于漏删）；活跃豁免 keepSessionIds = appserverRuntime.activeSessions 快照；节流 = 进程级 24h（ZCODE_SESSION_SWEEP_INTERVAL_MS）+ 运行时建立后 defer 50ms（ZCODE_SESSION_SWEEP_DEFER_MS）让位首 run 的 create；删除序先子表后 session（sqlite 默认 foreign_keys=0、engine 声明 CASCADE 不生效，不显式删子表留孤儿行；session_task_link 双向处置、workflow_* 父键置 NULL），每库单事务收尾 wal_checkpoint(PASSIVE)；fail-soft：任何失败（db 缺失 / node:sqlite 不可用 / 锁超时 / schema 漂移抛错）warn 留痕返回 {swept:0}，不拖垮 run 主链路；条目被清 = 锚失效 → 宿主侧自动 reopen 降级（同 id 带历史重开），无需人工恢复",
       "scope": [
         "packages/zcode-subagent-cli/src/session-db-maintenance.ts",
         "packages/zcode-subagent-cli/src/zcode-engine.ts",
@@ -3262,7 +3262,7 @@
     },
     {
       "id": "C-ext-29",
-      "summary": "Extension 与 Plugin 概念区分（禁混用）：Extension = pi extension，运行在 pi 子进程内（ExtensionAPI），数据存 ~/.taiji/extensions/，由 extension-service 管理；Plugin = taiji 插件，运行在 runtime 的 Worker Thread（agentAPI），数据存 ~/.taiji/plugins/，由 PluginService 管理；插件工具接入 pi 的通路暂缺（Pi Bridge Extension 已整体退役，登记见 docs/todo/plugin-tool-access-gap.md）",
+      "summary": "Extension 与 Plugin 概念区分（禁混用）：Extension = pi extension，运行在 pi 子进程内（ExtensionAPI），数据存 ~/.taiji/extensions/，由 extension-service 管理；Plugin = taiji 插件，运行在 runtime 的 Worker Thread（agentAPI），数据存 ~/.taiji/plugins/，由 PluginService 管理；插件工具接入 pi 的通路暂缺（Pi Bridge Extension 已整体退役）",
       "scope": [
         "global"
       ],

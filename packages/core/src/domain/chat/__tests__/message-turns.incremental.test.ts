@@ -107,6 +107,26 @@ function mixedFixture(): Message[] {
   ]
 }
 
+
+/** bash 落位 static 外部行断言单源（items[1] = b1 systemNotice；尾 user turn 归属断言，返回尾 turn）。 */
+function expectBashAsStaticNotice(items: ReturnType<typeof toRenderItems>, tailUserId: string) {
+  expect(items).toHaveLength(3)
+  expect(items[1]).toEqual({ kind: 'systemNotice', message: expect.objectContaining({ id: 'b1' }) })
+  const t2 = turnOf(items[2])
+  expect(t2.user?.id).toBe(tailUserId)
+  return t2
+}
+
+/** bash + 隐藏通知共存的典型输入前缀（u1→a1→b1(done)→n1，尾随消息由调用方追加）。 */
+function bashThenNotifyPrefix() {
+  return [
+    makeMsg({ id: 'u1', role: 'user', content: 'q1' }),
+    makeMsg({ id: 'a1', role: 'assistant', content: 'r1' }),
+    bgBashDoneMsg('b1'),
+    notifyMsg('n1', 'subagent-bg-notify'),
+  ]
+}
+
 describe('toRenderItemsIncremental —— 退化路径与等价性', () => {
   it('cache=undefined 退化为全量版：输出与 toRenderItems deepEqual（forceWorking 双态）', () => {
     for (const fw of [false, true]) {
@@ -1281,5 +1301,118 @@ describe('toRenderItemsIncremental —— ⑥ 全量兜底车道③（前插 / �
     // 串联末态：前位 turn（u1/a1）跨全程引用恒等（尾部车道零重算承诺）
     const last = toRenderItemsIncremental(steps[steps.length - 1], false, cache)
     expect(turnOf(last[0])).toBe(turnOf(r1[0]))
+  })
+})
+
+// ── 规则 5 收纳分支（specs/chat/system-notices.md §3，bg-notice-fold-into-meta）────────
+// background-bash 结构化完成通知：宿主响应轮出现即附着 foldedNotices（settle 后收进轮头行，
+// 渲染层形态切换），无宿主轮（user / 其余可见 system / 数组结束）落位独立 static 外部行。
+
+/** background-bash 结构化完成通知（可见 system 消息，details 经 shared 解析器命中） */
+function bgBashDoneMsg(id: string, exitCode = 0): Message {
+  return makeMsg({
+    id,
+    role: 'system',
+    content: `后台命令已完成（exit ${exitCode}）`,
+    details: {
+      taskId: `task-${id}`,
+      command: `cmd-${id}`,
+      durationMs: 1500,
+      endReason: 'natural',
+      exitCode,
+    },
+  })
+}
+
+describe('groupRenderInput 分组规则 v2 —— 规则 5 收纳分支（specs/chat/system-notices.md §3）', () => {
+  it('bash 通知 → assistant：附着续跑 turn（foldedNotices 到达序），不产外部行', () => {
+    const items = toRenderItems([
+      makeMsg({ id: 'u1', role: 'user', content: 'q1' }),
+      makeMsg({ id: 'a1', role: 'assistant', content: 'r1' }),
+      bgBashDoneMsg('b1'),
+      makeMsg({ id: 'a2', role: 'assistant', content: '续跑' }),
+    ])
+    // 无 static 项：bash 行被宿主轮收纳，流内只剩两个 turn
+    expect(items).toHaveLength(2)
+    const host = turnOf(items[1])
+    expect(host.user).toBeNull()
+    expect(host.assistants.map((m) => m.id)).toEqual(['a2'])
+    expect(host.foldedNotices?.map((m) => m.id)).toEqual(['b1'])
+    // 收纳通知构成展开入口（无 thinking/toolCall 块也可展开看明细）
+    expect(host.hasFoldable).toBe(true)
+  })
+
+  it('bash 通知 → user（空闲到达）：落位独立 static 外部行（边界 1，不收纳）', () => {
+    const items = toRenderItems([
+      makeMsg({ id: 'u1', role: 'user', content: 'q1' }),
+      makeMsg({ id: 'a1', role: 'assistant', content: 'r1' }),
+      bgBashDoneMsg('b1'),
+      makeMsg({ id: 'u2', role: 'user', content: 'q2' }),
+    ])
+    const t2 = expectBashAsStaticNotice(items, 'u2')
+    expect(t2.foldedNotices).toBeUndefined()
+  })
+
+  it('bash 通知 → 数组结束（agent 空闲）：static 外部行（不丢消息）', () => {
+    const items = toRenderItems([
+      makeMsg({ id: 'u1', role: 'user', content: 'q1' }),
+      bgBashDoneMsg('b1'),
+    ])
+    expect(items).toHaveLength(2)
+    expect(items[1]).toEqual({ kind: 'systemNotice', message: expect.objectContaining({ id: 'b1' }) })
+  })
+
+  it('bash → 隐藏通知 → assistant：同一 trigger turn 收纳两类，foldedNotices 保持到达序', () => {
+    const items = toRenderItems([...bashThenNotifyPrefix(), makeMsg({ id: 'a2', role: 'assistant', content: '续跑' })])
+    expect(items).toHaveLength(2)
+    const t2 = turnOf(items[1])
+    expect(t2.trigger).toBe('bg-notify')
+    expect(t2.foldedNotices?.map((m) => m.id)).toEqual(['b1', 'n1'])
+    // 聚合轴只消费隐藏通知（bash 载荷不混入——混入会推高 neutralCount）
+    expect(t2.notifySummary?.count).toBe(0)
+    expect(t2.notifySummary?.neutralCount).toBe(1)
+  })
+
+  it('trigger turn 已开（未填实）时 bash 直接着附（同批完成收敛同一宿主轮）', () => {
+    const items = toRenderItems([
+      makeMsg({ id: 'u1', role: 'user', content: 'q1' }),
+      makeMsg({ id: 'a1', role: 'assistant', content: 'r1' }),
+      notifyMsg('n1', 'workflow-result'),
+      bgBashDoneMsg('b1'),
+      makeMsg({ id: 'a2', role: 'assistant', content: '续跑' }),
+    ])
+    const t2 = turnOf(items[1])
+    expect(t2.trigger).toBe('bg-notify')
+    expect(t2.foldedNotices?.map((m) => m.id)).toEqual(['n1', 'b1'])
+  })
+
+  it('未填实 trigger turn 携带 bash 附着被折叠时：bash 落位 static 外部行（隐藏本体保持不渲染）', () => {
+    const items = toRenderItems([
+      ...bashThenNotifyPrefix(),
+      // 无 assistant 填实 → trigger turn 折叠，bash 行不能静默消失
+      makeMsg({ id: 'u2', role: 'user', content: 'q2' }),
+    ])
+    expectBashAsStaticNotice(items, 'u2')
+  })
+
+  it('增量路径等价：bash 折叠场景 toRenderItemsIncremental ≡ toRenderItems', () => {
+    const msgs: Message[] = [
+      makeMsg({ id: 'u1', role: 'user', content: 'q1' }),
+      makeMsg({ id: 'a1', role: 'assistant', content: 'r1' }),
+      bgBashDoneMsg('b1'),
+      notifyMsg('n1', 'subagent-bg-notify'),
+      makeMsg({ id: 'a2', role: 'assistant', content: '续跑' }),
+      bgBashDoneMsg('b2', 2),
+      makeMsg({ id: 'a3', role: 'assistant', content: '续跑 2' }),
+    ]
+    const cache = createTurnRenderCache()
+    // 逐步追加重放（覆盖快车道 / 尾部车道 / 全量重扫三车道）
+    let last: RenderItem[] = []
+    for (let i = 1; i <= msgs.length; i++) {
+      last = toRenderItemsIncremental(msgs.slice(0, i), false, cache)
+      expect(last).toEqual(toRenderItems(msgs.slice(0, i), false))
+    }
+    const t3 = turnOf(last[2])
+    expect(t3.foldedNotices?.map((m) => m.id)).toEqual(['b2'])
   })
 })

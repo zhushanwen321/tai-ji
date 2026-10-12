@@ -9,9 +9,9 @@
         <p class="desc" data-testid="mcp-snapshot-notice">{{ t('settings.mcp.snapshotNotice') }}</p>
       </div>
       <div class="head-actions">
+        <!-- demo .btn.solid：h32 / px12 / gap6 / 13px + plus 14px -->
         <Button
-          size="sm"
-          class="h-8 gap-1 px-3 text-[12px]"
+          class="h-8 gap-[6px] px-[12px] text-[length:var(--text-sm)]"
           :disabled="corruption !== null || loadError"
           data-testid="mcp-add-btn"
           @click="openAdd"
@@ -26,14 +26,14 @@
     <div
       v-if="loadError"
       data-testid="mcp-load-error"
-      class="flex items-center gap-2 px-4 text-[11px] text-warn"
+      class="flex items-center gap-2 px-4 text-[length:var(--text-2xs)] text-warn"
     >
       <AlertTriangle class="size-3.5 shrink-0" />
       <span>{{ t('settings.mcp.loadError') }}</span>
       <Button
         variant="ghost"
         size="sm"
-        class="h-5 px-1.5 text-[11px] text-accent"
+        class="h-5 px-1.5 text-[length:var(--text-2xs)] text-accent"
         data-testid="mcp-load-retry"
         @click="refresh"
       >{{ t('settings.mcp.loadErrorRetry') }}</Button>
@@ -46,14 +46,15 @@
           <h3 class="gc-title">{{ t('settings.mcp.listTitle') }}</h3>
         </div>
       </template>
-      <div class="px-2.5 pt-1 pb-3" data-testid="mcp-corruption-error">
+      <!-- 卡体 = demo .gcard-body（padding 12px 16px；清单行自身 srow px 6px 叠加出 22px 内容左缘） -->
+      <div class="px-[16px] py-[12px]" data-testid="mcp-corruption-error">
         <p class="flex items-center gap-1.5 text-[length:var(--text-sm)] text-warn" data-testid="mcp-corruption-title">
           <AlertTriangle class="size-3.5 shrink-0" />
           {{ t('settings.mcp.corruptionTitle') }}
         </p>
         <div class="mt-1.5 flex items-center gap-2">
           <code
-            class="min-w-0 flex-1 truncate rounded-sm bg-surface-2 px-1.5 py-0.5 font-mono text-[11px] text-neutral-mid"
+            class="min-w-0 flex-1 truncate rounded-sm bg-surface-2 px-1.5 py-0.5 font-mono text-[length:var(--text-2xs)] text-neutral-mid"
             data-testid="mcp-corruption-path"
             :title="corruption.filePath"
           >
@@ -62,7 +63,7 @@
           <Button
             variant="ghost"
             size="sm"
-            class="h-6 shrink-0 gap-1 px-2 text-[11px] text-muted hover:text-fg"
+            class="h-6 shrink-0 gap-1 px-2 text-[length:var(--text-2xs)] text-neutral-mid hover:text-neutral-fg"
             data-testid="mcp-copy-path-btn"
             @click="copyCorruptedPath"
           >
@@ -70,12 +71,12 @@
             {{ t('settings.mcp.copyPath') }}
           </Button>
         </div>
-        <p class="mt-1.5 text-[11px] leading-relaxed text-neutral-mid" data-testid="mcp-corruption-guide">
+        <p class="mt-1.5 text-[length:var(--text-2xs)] leading-relaxed text-neutral-fg-2" data-testid="mcp-corruption-guide">
           {{ t('settings.mcp.corruptionGuide') }}
         </p>
         <p
           v-if="corruption.corruptCopyPath"
-          class="mt-1 text-[11px] leading-relaxed text-warn"
+          class="mt-1 text-[length:var(--text-2xs)] leading-relaxed text-warn"
           data-testid="mcp-corrupt-copy-path"
         >
           {{ t('settings.mcp.corruptionCopyHint', { path: corruption.corruptCopyPath }) }}
@@ -91,7 +92,8 @@
           <p class="gc-sub">{{ t('settings.mcp.listDesc') }}</p>
         </div>
       </template>
-      <div class="px-2.5 pt-1 pb-2">
+      <!-- 卡体 = demo .gcard-body（padding 12px 16px）；行内边距由 McpServerList srow 自带 -->
+      <div class="px-[16px] py-[12px]">
         <McpServerList
           :servers="servers"
           :badges="badges"
@@ -156,7 +158,7 @@ import { useI18n } from 'vue-i18n'
 import { AlertTriangle, Copy, Plus } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import { GroupCard } from '@taiji/ui/features/settings'
-import ConfirmDialog from '@/components/ui/dialog/ConfirmDialog.vue'
+import { ConfirmDialog } from '@/components/ui/dialog'
 import McpServerList from './McpServerList.vue'
 import McpServerForm from './McpServerForm.vue'
 import {

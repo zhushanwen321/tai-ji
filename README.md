@@ -26,7 +26,7 @@
 <!-- 本区块内的版本号由 .agents/skills/merge/scripts/update-readme-install.mjs 在每次正式发布后自动替换；区块外的版本号不会被打扰。 -->
 
 <details>
-<summary><b>🇨🇳 国内下载（GitCode 镜像，~15 MB/s）</b></summary>
+<summary><b>国内下载（GitCode 镜像，~15 MB/s）</b></summary>
 
 镜像仓库：[gitcode.com/qq_18433817/tai-ji](https://gitcode.com/qq_18433817/tai-ji)
 
@@ -48,7 +48,7 @@ Invoke-WebRequest -Uri "https://gitcode.com/qq_18433817/tai-ji/releases/download
 </details>
 
 <details>
-<summary><b>🌍 国外下载（GitHub）</b></summary>
+<summary><b>国外下载（GitHub）</b></summary>
 
 仓库：[github.com/zhushanwen321/tai-ji](https://github.com/zhushanwen321/tai-ji)
 
@@ -70,7 +70,7 @@ Invoke-WebRequest -Uri "https://github.com/zhushanwen321/tai-ji/releases/downloa
 </details>
 
 <details>
-<summary><b>❓ 首次启动遇到问题？</b></summary>
+<summary><b>首次启动遇到问题？</b></summary>
 
 - **macOS 提示「已损坏」或「无法验证开发者」**：运行 `xattr -cr /Applications/TaiJi.app`
 - **Linux AppImage 无法启动**：确认已 `chmod +x`，或尝试 `--no-sandbox` 参数
@@ -86,25 +86,25 @@ Invoke-WebRequest -Uri "https://github.com/zhushanwen321/tai-ji/releases/downloa
 
 ## 核心能力
 
-### 🔄 多会话并行
+### 多会话并行
 同时运行多个 AI 任务，侧栏实时显示每个会话的状态。随时从任意回复分叉新会话、交接上下文、导入已有会话。
 
-### 👁️ 执行过程完全可见
+### 执行过程完全可见
 思考链、工具调用、文件编辑逐步流出；每轮结束折叠成一行摘要，点开可查看完整过程。Trace 视图支持按类型筛选和全文搜索。
 
-### 🤖 Subagent & Workflow
+### Subagent & Workflow
 把独立任务派给子 agent 并行执行，或用 chain/parallel 模板编排多步工作流。任务托盘实时汇总进度，每个子任务带预算与轮次上限。
 
-### 🛠️ 工作台集成
+### 工作台集成
 侧栏文件树（大目录流畅 + git 标记）、抽屉终端（每会话独立现场）、Git/worktree 管理、内置浏览器面板。
 
-### 🧩 22 个内置扩展
+### 22 个内置扩展
 Agent 能力通过 pi 扩展机制实现，涵盖权限控制、定时任务、上下文压缩、结构化输出等。17 个通用扩展可脱离 taiji 独立使用，5 个为 TaiJi 集成专用，详见[扩展开发指南](docs/extensions/development-guide.md)。
 
 ---
 
 <details>
-<summary><b>📖 完整功能列表（点击展开）</b></summary>
+<summary><b>完整功能列表（点击展开）</b></summary>
 
 ### Agent 执行
 - **并行 Subagent**：输入框上方的任务托盘汇总运行中的子任务，点开可在抽屉查看完整对话和产出。

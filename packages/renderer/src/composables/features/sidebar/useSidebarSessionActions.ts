@@ -21,10 +21,12 @@ import type { Ref } from 'vue'
 import { useChat } from '@/composables/features/chat/useChat'
 import { session as sessionApi } from '@/api'
 import { delivery } from '@/api/domains/delivery'
+import { exportSessionJsonl } from '@/api/domains/session-export'
 import { composerInjectionStore } from '@/composables/panel/composer-injection-store'
 import { useSearchModalDeps } from '@/composables/features/search/useSearchModalDeps'
 import { useSideDrawer } from '@/composables/features/drawer/useSideDrawer'
 import { useSessionStore } from '@/stores/session'
+import { useProjectStore } from '@/stores/project'
 import { useToast } from '@/composables/useToast'
 import { markForcedExit, consumeForcedExit } from '@/composables/effects/forced-exit-marks'
 import { useI18n } from 'vue-i18n'
@@ -222,10 +224,15 @@ export function useSidebarSessionActions(options: UseSidebarSessionActionsOption
     }
   }
 
-  /** 归入项目（D14 语义修正）：SessionItem 菜单选择后 RPC + 乐观更新；失败 toast。 */
+  /** 归入项目（D14 语义修正）：SessionItem 菜单/悬停浮层选择后 RPC + 乐观更新。
+   *  成功 toast 反馈（spec sessions §3.3「移动到项目点击即迁移 + toast」）；失败 toast。 */
   async function onAssignProject(payload: { sessionId: string; projectId: string }): Promise<void> {
     try {
       await assignSessionToProject(payload.sessionId, payload.projectId)
+      const name = payload.projectId
+        ? useProjectStore().projects.find((p) => p.id === payload.projectId)?.name || payload.projectId
+        : t('sidebar.projectGroup.defaultName')
+      toastInfo(t('sidebar.movedToProject', { name }))
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
       toastError(t('sidebar.assignProjectFailed', { msg }))
@@ -235,6 +242,22 @@ export function useSidebarSessionActions(options: UseSidebarSessionActionsOption
   /** S5：重试加载会话列表（loadSessions 失败后用户点击重试） */
   function onRetryLoadSessions(): void {
     void loadSessions()
+  }
+
+  /**
+   * 导出会话 JSONL（SessionItemContextMenu 两段无确认
+   * 单击 emit）：payload 原样交 main 侧 IPC（源路径三树校验 + 保存对话框 + copyFile 都在
+   * main）。三态永不 reject（shared SessionJsonlExportResult 契约，无需 catch）：
+   * exported → 成功 toast（含保存路径）；error → 错误 toast（含错误码）；canceled → 静默
+   * （用户取消对话框 = 导出未发生，与 DiagnosticsExportAction 同口径）。
+   */
+  async function onExportSessionJsonl(payload: { sessionId: string; sessionFile?: string; suggestedName?: string }): Promise<void> {
+    const res = await exportSessionJsonl(payload)
+    if (res.status === 'exported') {
+      toastInfo(t('sidebar.exportJsonlSuccess', { path: res.path }))
+    } else if (res.status === 'error') {
+      toastError(t('sidebar.exportJsonlFailed', { code: res.error.code, message: res.error.message }))
+    }
   }
 
   /** [w5] SearchModal deps 组装（SearchDeps 壳适配）+ drawer/toast 接线（C-NT-3/C-W4-5）：file 跳转开 detail tab；confirm 失败 toast（复用顶部 toastError）。 */
@@ -259,6 +282,7 @@ export function useSidebarSessionActions(options: UseSidebarSessionActionsOption
     onForceQuitSession,
     onConfirmRename,
     onAssignProject,
+    onExportSessionJsonl,
     onRetryLoadSessions,
     searchDeps,
     onOpenSearchDrawer,

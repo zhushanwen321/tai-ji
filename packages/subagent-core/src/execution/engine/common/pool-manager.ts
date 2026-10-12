@@ -10,9 +10,9 @@
 //   - deletePoolNativeState（池内引擎原生状态删除——共享布局下池目录只含 journal，
 //     无原生状态可删）与 .pool-cleanup-failed 标记机制；
 //   - cleanupSpawnedFiles（生产零调用的单次性产物清理）。
-// journal 回收只剩本文件唯一机制：30 天 mtime TTL（与 session-file-gc 的 session
-// TTL 同时间尺度）——record 主数据的死亡（主 session 文件被引擎侧管理）对 core 无
-// 触发点，done record 的 journal 没有精确回收锚，按 mtime 兜底回收是既有口径的
+// journal 回收只剩本文件唯一机制：30 天 mtime TTL（定时器接线 =
+// engine-journal-gc.ts）——record 主数据的死亡（主 session 文件被引擎侧管理）对
+// core 无触发点，done record 的 journal 没有精确回收锚，按 mtime 兜底回收是既有口径的
 // 落地（原 D8 分域「journal 依赖 30 天 TTL 自然回收」）。
 //
 // 目录枚举边界（保留原 A9 守卫形态）：扫描把 engines/<engineId>/ 下每个子目录都

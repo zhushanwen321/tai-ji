@@ -13,78 +13,36 @@
  *
  * 范式参照 composer-fork-mode.test.ts（mock useChat/useNewTaskFlow/api + stub 子组件）。
  */
+// helper import 必须先于一切项目内模块（@/stores 等会在模块图加载期触发 @/api mock
+// factory，factory 引用的 helper 绑定彼时必须已初始化，否则 TDZ——vi.mock hoisting 约束）
+import {
+  composerApiModule,
+  composerChatModule,
+  composerChildStubs,
+  composerFlowModule,
+  composerProjectSkillsModule,
+  composerSessionStoreModule,
+  composerSidebarForkModule,
+  makeKeyboardComposerInputMock,
+  resetComposerMountState,
+} from '../helpers/composer-mount'
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
-import { defineComponent, ref } from 'vue'
+import { defineComponent } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
-import { textToSegments } from '@taiji/shared'
 import type { ProviderInfo } from '@taiji/shared'
 import { getSettingsStore } from '@taiji/core'
 
-// ── mock useChat / useNewTaskFlow / api（fork-mode 范式） ──
-const chatApiMock = {
-  send: vi.fn(() => Promise.resolve()),
-  steer: vi.fn(() => Promise.resolve()),
-  followUp: vi.fn(() => Promise.resolve()),
-  abort: vi.fn(() => Promise.resolve()),
-  compact: vi.fn(() => Promise.resolve()),
-  editAndResend: vi.fn(),
-  hydrateHistory: vi.fn(),
-}
-vi.mock('@/composables/features/chat/useChat', () => ({
-  useChat: () => chatApiMock,
-}))
-vi.mock('@/composables/features/new-task/useNewTaskFlow', () => ({
-  useNewTaskFlow: () => ({ submitFirstMessage: vi.fn(), currentModel: { value: null }, setPendingModel: vi.fn(), currentCwd: ref(null), pendingPreset: ref(null) }),
-  resetNewTaskFlow: vi.fn(),
-}))
-vi.mock('@/api', () => ({
-  project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
-  model: { switchModel: vi.fn() },
-  session: { setThinkingLevel: vi.fn() },
-  composer: { getMentionCandidates: vi.fn().mockResolvedValue([]), getFileCandidates: vi.fn().mockResolvedValue([]) },
-}))
-vi.mock('@/composables/features/settings/useProjectSkills', () => ({
-  useProjectSkills: () => ({ projectSkills: [] }),
-  useGlobalSkills: () => ({ globalSkills: [] }),
-}))
-vi.mock('@/stores/session', () => ({
-  useSessionStore: () => ({ active: undefined, list: [], applySnapshot: vi.fn() }),
-}))
-vi.mock('@/composables/features/sidebar/useSidebar', () => ({
-  useSidebar: () => ({ forkSessionAsk: vi.fn(), forkSession: vi.fn() }),
-}))
+// mock 装配同 fork 族：真实 Composer 树上验证档位派生落到 ThinkingLevelPopover DOM
+vi.mock('@/composables/features/chat/useChat', () => composerChatModule())
+vi.mock('@/composables/features/new-task/useNewTaskFlow', () => composerFlowModule())
+vi.mock('@/api', () => composerApiModule())
+vi.mock('@/composables/features/settings/useProjectSkills', () => composerProjectSkillsModule())
+vi.mock('@/stores/session', () => composerSessionStoreModule())
+vi.mock('@/composables/features/sidebar/useSidebar', () => composerSidebarForkModule())
 
-// ── ComposerInput mock（fork-mode 范式：defineExpose 最小集）──
-const lastInputText = ref('')
-const ComposerInputMock = defineComponent({
-  name: 'ComposerInput',
-  props: {
-    placeholder: { type: String, default: '' },
-    disabled: { type: Boolean, default: false },
-  },
-  emits: {
-    input: (val: string) => {
-      lastInputText.value = val
-      return true
-    },
-    keydown: null,
-    'slash-trigger': null,
-    'file-trigger': null,
-  },
-  setup(_, { expose }) {
-    expose({
-      clear: vi.fn(),
-      setText: vi.fn(),
-      insertSlashChip: vi.fn(),
-      getSegments: () => textToSegments(lastInputText.value),
-      getText: () => lastInputText.value,
-      moveCaretVertical: () => 'edge',
-    })
-    return {}
-  },
-  template: '<div data-testid="composer-input" />',
-})
+// ── ComposerInput mock：helper 键盘交互变体单源（props/expose 面同手写版）──
+const { lastInputText, ComposerInputMock } = makeKeyboardComposerInputMock()
 
 // ── ThinkingLevelPopover 透传探针：把 supportedLevels/level 派生落到 DOM 属性 ──
 const ThinkingLevelProbe = defineComponent({
@@ -98,17 +56,10 @@ const ThinkingLevelProbe = defineComponent({
     '<div data-testid="tlp-probe" :data-supported="supportedLevels === undefined ? \'undef\' : supportedLevels.join(\',\')" :data-level="level" />',
 })
 
-const SIMPLE = defineComponent({ name: 'SimpleStub', template: '<div />' })
 const otherStubs = {
+  ...composerChildStubs,
   ComposerInput: ComposerInputMock,
-  ThinkingLevelPopover: ThinkingLevelProbe,
-  CommandPopover: defineComponent({ name: 'CommandPopover', template: '<div><slot /></div>' }),
-  AddMenuPopover: SIMPLE,
-  ContextChipsBar: SIMPLE,
-  ContextCapacityPopover: SIMPLE,
-  ModelSelectPopover: SIMPLE,
-  RetryIndicator: SIMPLE,
-  QueueBubble: SIMPLE,
+  ThinkingLevelPopover: ThinkingLevelProbe, // 本文件差异化：档位透传探针覆盖 SIMPLE stub
 }
 
 import Composer from '@/components/panel/Composer.vue'
@@ -135,9 +86,7 @@ function mountComposer() {
 
 describe('Composer 档位可用集派生（composer-shell getSupportedLevels，U6 切源）', () => {
   beforeEach(() => {
-    setActivePinia(createPinia())
-    vi.clearAllMocks()
-    lastInputText.value = ''
+    resetComposerMountState(lastInputText)
   })
 
   it('defaultModel 指向 reasoning:true 模型 → ThinkingLevelPopover 收到 supportedLevels=["off","high"]', async () => {

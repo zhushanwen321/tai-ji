@@ -7,8 +7,8 @@
     子行是「调用 + 结果态」，与紧随的 TOOL 结果行配对呈现，非重复渲染。
   -->
   <div
-    class="flex cursor-pointer select-none items-center gap-2 rounded-sm px-2 py-[5px] transition-colors duration-[var(--duration-fast)] ease-[var(--ease)] hover:bg-surface-2"
-    :class="selected ? 'bg-surface-hover hover:bg-surface-hover' : ''"
+    class="flex cursor-pointer select-none items-center gap-2 rounded-sm px-2 py-[5px] transition-colors duration-[var(--duration-fast)] ease-[var(--ease)] hover:bg-surface-hover"
+    :class="selected ? 'text-neutral-fg' : ''"
     :data-testid="`trace-block-row-${parent.seq}-${index}`"
     :data-block-kind="blockBadgeLabel(block)"
     :title="headline || blockBadgeLabel(block)"
@@ -18,14 +18,13 @@
          落在父行 kind badge 正下方 -->
     <span class="w-12 shrink-0" aria-hidden="true" />
     <span
-      class="shrink-0 rounded px-1.5 py-px font-mono text-[length:var(--text-3xs)] tracking-wide"
+      class="shrink-0 rounded px-[7px] py-px font-mono text-[length:var(--text-3xs)]"
       :class="BLOCK_BADGE_CLASS[block.kind]"
     >{{ blockBadgeLabel(block) }}</span>
+    <!-- headline 常态 = neutral-mid（与主行 demo .trow color: mid 同口径），选中范式（Tier B）提 fg + fw-mid -->
     <span
       class="min-w-0 flex-1 truncate text-[length:var(--text-xs)]"
-      :class="[
-        selected ? 'text-accent' : block.kind === 'thinking' ? 'text-neutral-mid' : 'text-neutral-fg',
-      ]"
+      :class="selected ? 'text-neutral-fg [font-weight:var(--fw-mid)]' : 'text-neutral-mid'"
     >{{ headline || blockBadgeLabel(block) }}</span>
     <span
       v-if="resultState"

@@ -58,14 +58,14 @@ describe('LoadPaths', () => {
     expect(wrapper.find('[data-testid="forced-dir-row"]').exists()).toBe(true)
   })
 
-  it('Checkbox 未选态可见（全局 Checkbox.vue !border + neutral-mid 保证）', () => {
+  it('Checkbox 未选态可见（全局 Checkbox.vue !border + border-strong 保证）', () => {
     const wrapper = mountLoadPaths()
     const checkbox = wrapper.find('button[role="checkbox"]')
     expect(checkbox.exists()).toBe(true)
-    // 可见性修复在全局 Checkbox.vue：!border（绕过 renderer 全局 *{border-width:0} unlayered 覆盖）+ border-neutral-mid（亮色）
+    // 可见性修复在全局 Checkbox.vue：!border（绕过 renderer 全局 *{border-width:0} unlayered 覆盖）+ border-border-strong（demo .chk 未选边框档）
     const cls = checkbox.attributes('class') ?? ''
     expect(cls).toContain('!border')
-    expect(cls).toContain('border-neutral-mid')
+    expect(cls).toContain('border-border-strong')
   })
 
   it('点击 ↓ 下移项目组首行后顺序变化（emit update-dirs）', async () => {

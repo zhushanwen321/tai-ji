@@ -6,7 +6,7 @@
  * - 单行：Workflow icon + workflow prefix + name · slug
  * - action / runId / args.task 预览均不展示（非 header 字段）
  * - GUI 渲染（list-tree/progress-bar/...）不再内联展开——迁至 drawer workflow tab / extension 自呈现
- * - running 态双环 loader；failed 降 neutral-mid
+ * - running 态呼吸弧 loader；failed 降 neutral-mid
  * - 点击整行 → openWorkflow(name)（drawer 开 workflow tab）
  *
  * 数据形态：workflow 顶层 input 拍平 schema：action / name / slug / args / runId 都在顶层。
@@ -107,9 +107,9 @@ describe('BlockWorkflow: 标题行字段（v6 §11：prefix + name · slug）', 
     expect(wrapper.text()).not.toContain(longTask)
   })
 
-  it('running 态 header 含双环 loader（animate-loader-spin + accent）', () => {
+  it('running 态 header 含呼吸弧 loader（animate-loader-spin + accent）', () => {
     const wrapper = mountToolBlock(makeWorkflow({ status: 'running' }))
-    // running 态双环 loader
+    // running 态呼吸弧 loader
     expect(wrapper.find('.animate-loader-spin').exists()).toBe(true)
     // 字段仍可见（name）
     expect(wrapper.text()).toContain('email-validation-refactor')

@@ -40,17 +40,20 @@ const ariaLabel = computed(() =>
 </script>
 
 <template>
-  <Button
-    variant="ghost"
-    size="sm"
-    :title="title"
-    :aria-label="ariaLabel"
-    :aria-busy="loading"
-    :class="loading
-      ? '!h-4 !w-4 !gap-0 !p-0 pointer-events-none text-accent'
-      : '!h-4 !w-4 !gap-0 !p-0 text-neutral-dim hover:!bg-transparent hover:text-accent'"
-    @click="$emit('click')"
-  >
+    <!-- 盒尺寸/间距普通类（tw-merge 消解 size="sm" 的 h-9/px-3 与基类 gap-2，无需 important）；
+         hover:!bg-transparent 保留 important：ghost 变体 hover:bg-surface-hover 与覆盖类同特异性，
+         源码顺序不可靠（TrafficLight 缺陷 A 同款先例） -->
+    <Button
+      variant="ghost"
+      size="sm"
+      :title="title"
+      :aria-label="ariaLabel"
+      :aria-busy="loading"
+      :class="loading
+        ? 'h-4 w-4 gap-0 p-0 pointer-events-none text-accent'
+        : 'h-4 w-4 gap-0 p-0 text-neutral-dim hover:!bg-transparent hover:text-accent'"
+      @click="$emit('click')"
+    >
     <Loader2 v-if="loading" class="size-3 animate-spin" />
     <Volume2 v-else class="size-3" />
   </Button>

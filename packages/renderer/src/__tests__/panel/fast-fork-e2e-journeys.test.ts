@@ -11,7 +11,7 @@
  * 名实标注：Turn 点击 → channel signal → Composer watch 的**同屏**联动留 Playwright E2E。
  * 本文件用分段断言拼接覆盖：
  *   - Turn 断言 signal 更新（点 fork 提问按钮 → useForkModeChannel.signal 携带 srcSessionId/fromMessageId）
- *   - Composer 经 triggerEnterForkMode 真实信号驱动进 fork 模式，断言三重视觉
+ *   - Composer 经 triggerEnterForkMode 真实信号驱动进 fork 模式，断言 staging banner 视觉
  *   - handleForkSend 断言 forkSessionAsk（sessionApi.fork + chatApi.submitDelivery 新 session id，u3c/D-10）
  * 非真正跨 mount 实例链通（Turn 与 Composer 未同屏 mount，channel 经 watch 的真实投递未在此验证）。
  *
@@ -29,6 +29,9 @@
  * 三视角规则（TEST-STRATEGY §3）：每条用例至少 1 个用户可见 DOM 断言（.exists()/.text()/.classes()），
  * 纯 toHaveBeenCalled 不计 DoD。
  */
+// helper import 必须先于一切项目内模块（@/api mock factory 在模块图加载期执行，
+// factory 引用的 helper 绑定彼时必须已初始化，否则 TDZ——vi.mock hoisting 约束）
+import { composerChatApiSpy, expectForkModeVisual } from '../helpers/composer-mount'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
@@ -40,7 +43,7 @@ import { textToSegments } from '@taiji/shared'
 // 真实 useForkActions / useSidebar 内部 import { chat as chatApi, session as sessionApi } from '@/api'，
 // 此 mock 让 fork/send/abort 调用可被 spy 断言，组件间交互保持真实。
 // vi.hoisted：mock factory 被 vitest hoist 到文件顶部，引用的 mock 对象也必须 hoisted。
-const { sessionApiMock, chatApiMock, useChatAbortMock } = vi.hoisted(() => ({
+const { sessionApiMock, submitDeliveryMock, useChatAbortMock } = vi.hoisted(() => ({
   sessionApiMock: {
     fork: vi.fn(),
     remove: vi.fn().mockResolvedValue(undefined),
@@ -49,26 +52,25 @@ const { sessionApiMock, chatApiMock, useChatAbortMock } = vi.hoisted(() => ({
     getContext: vi.fn().mockResolvedValue({}),
     setThinkingLevel: vi.fn(async (sessionId: string, level: string) => ({ sessionId, level })),
   },
-  chatApiMock: {
-    send: vi.fn(() => Promise.resolve()),
-    // [u3c/D1] fork 首发走统一提交（clientUuid = appendUser 产物 → 与内核条目 id 同源，D-10）
-    submitDelivery: vi.fn((sessionId: string, _content: string, clientUuid: string) =>
-      Promise.resolve({ clientUuid, state: 'in-flight' as const, lane: 'direct' as const, sessionId }),
-    ),
-    steer: vi.fn(() => Promise.resolve()),
-    followUp: vi.fn(() => Promise.resolve()),
-    abort: vi.fn(() => Promise.resolve()),
-    compact: vi.fn(() => Promise.resolve()),
-  },
+  // [u3c/D1] fork 首发走统一提交（clientUuid = appendUser 产物 → 与内核条目 id 同源，D-10）；
+  // spy 基础清单在 @/api factory 内经 composerChatApiSpy 单例展开（vi.hoisted 早于 import
+  // 初始化，此处不能引用 import 绑定，只有 vi 可用）
+  submitDeliveryMock: vi.fn((sessionId: string, _content: string, clientUuid: string) =>
+    Promise.resolve({ clientUuid, state: 'in-flight' as const, lane: 'direct' as const, sessionId }),
+  ),
   // 软停止上层联动断言锚点（useSidebarSessionActions.onAbortSession → useChat().abort）
   useChatAbortMock: vi.fn(() => Promise.resolve()),
 }))
 vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
   session: sessionApiMock,
-  chat: chatApiMock,
+  // chat 域 = helper spy 单例展开（send/steer/... 与 useChat mock 同源锚点）+ fork 统一提交腿
+  chat: { ...composerChatApiSpy, submitDelivery: submitDeliveryMock },
   model: { switchModel: vi.fn() },
   composer: { getMentionCandidates: vi.fn().mockResolvedValue([]), getFileCandidates: vi.fn().mockResolvedValue([]) },
 }))
+// 断言别名：send 等 spy = helper 单例（@/api chat 域展开同一批 vi.fn）
+const chatApiMock = composerChatApiSpy
+
 // main 合并引入 useProjectSkills/useGlobalSkills（landing skill），与 fork 测试无关，stub 掉
 vi.mock('@/composables/features/settings/useProjectSkills', () => ({
   useProjectSkills: () => ({ projectSkills: [] }),
@@ -133,6 +135,7 @@ const otherComposerStubs = {
   AddMenuPopover: SIMPLE,
   ContextChipsBar: SIMPLE,
   ContextCapacityPopover: SIMPLE,
+  ComposerCapacityBar: SIMPLE,
   ModelSelectPopover: SIMPLE,
   ThinkingLevelPopover: SIMPLE,
   RetryIndicator: SIMPLE,
@@ -209,28 +212,36 @@ afterEach(() => {
 // 真实链通：renderer 壳 useChatViewDeps.onForkAsk → useForkModeChannel signal → Composer.enterForkMode →
 //           handleForkSend → useForkActions.forkSessionAsk → sessionApi.fork + chatApi.submitDelivery
 // ════════════════════════════════════════════════════════════════════════
+
+/** Turn mount（fork-ask 旅程装配单源：provide onForkAsk + HoverCard 内联渲染 stub 组）。 */
+function mountTurnForForkAsk(turn: MessageTurn) {
+  return mount(Turn, {
+    props: { turn, sessionId: 's-src' },
+    // HoverCard 子组件 stub 成内联渲染（绕开 reka-ui HoverCardPortal 在 happy-dom 不渲染）；
+    // fork-ask-btn 现作为 fork split-button 的 hover 第二选项住在 HoverCardContent 内。
+    global: {
+      provide: mockChatProvide({ onForkAsk: onForkAskMock }),
+      stubs: {
+        // Block 不 stub：[actions-anchor] 起 TurnSummary 经 Block 的 #turn-actions 具名插槽
+        // 挂载，stub 不渲染具名插槽会连 fork 按钮一起丢掉
+        ChangeSetCard: true,
+        MarkdownRenderer: true,
+        HoverCard: { template: '<div><slot /></div>' },
+        HoverCardTrigger: { template: '<div><slot /></div>' },
+        HoverCardContent: { template: '<div><slot /></div>' },
+      },
+    },
+  })
+}
+
 describe('E2E-L1-1: fork-ask 完整旅程（Turn → channel → Composer → forkSessionAsk）', () => {
   it('每条 assistant 区有 fork 提问按钮（data-testid 始终在 DOM，spec §1 门控已放开）', () => {
-    const turn = makeTurn([
-      makeAssistant({ id: 'a1', piEntryId: 'pi-a1' }),
-      makeAssistant({ id: 'a2', piEntryId: 'pi-a2' }),
-    ])
-    const wrapper = mount(Turn, {
-      props: { turn, sessionId: 's-src' },
-      // HoverCard 子组件 stub 成内联渲染（绕开 reka-ui HoverCardPortal 在 happy-dom 不渲染）；
-      // fork-ask-btn 现作为 fork split-button 的 hover 第二选项住在 HoverCardContent 内。
-      global: {
-        provide: mockChatProvide({ onForkAsk: onForkAskMock }),
-        stubs: {
-          Block: true,
-          ChangeSetCard: true,
-          MarkdownRenderer: true,
-          HoverCard: { template: '<div><slot /></div>' },
-          HoverCardTrigger: { template: '<div><slot /></div>' },
-          HoverCardContent: { template: '<div><slot /></div>' },
-        },
-      },
-    })
+    const wrapper = mountTurnForForkAsk(
+      makeTurn([
+        makeAssistant({ id: 'a1', piEntryId: 'pi-a1' }),
+        makeAssistant({ id: 'a2', piEntryId: 'pi-a2' }),
+      ]),
+    )
     // 用户可见：summary action 行有 fork 提问按钮（与复制同行，末条 assistant 位 1 组）
     const forkAskBtns = wrapper.findAll('[data-testid="fork-ask-btn"]')
     expect(forkAskBtns.length).toBe(1)
@@ -238,21 +249,7 @@ describe('E2E-L1-1: fork-ask 完整旅程（Turn → channel → Composer → fo
 
   it('点 fork 提问按钮 → deps.onForkAsk(sessionId, message) 回调（channel signal 编排在 renderer 壳）', async () => {
     onForkAskMock.mockClear()
-    const turn = makeTurn([makeAssistant({ id: 'a1', piEntryId: 'pi-a1' })])
-    const wrapper = mount(Turn, {
-      props: { turn, sessionId: 's-src' },
-      global: {
-        provide: mockChatProvide({ onForkAsk: onForkAskMock }),
-        stubs: {
-          Block: true,
-          ChangeSetCard: true,
-          MarkdownRenderer: true,
-          HoverCard: { template: '<div><slot /></div>' },
-          HoverCardTrigger: { template: '<div><slot /></div>' },
-          HoverCardContent: { template: '<div><slot /></div>' },
-        },
-      },
-    })
+    const wrapper = mountTurnForForkAsk(makeTurn([makeAssistant({ id: 'a1', piEntryId: 'pi-a1' })]))
 
     await wrapper.find('[data-testid="fork-ask-btn"]').trigger('click')
     await nextTick()
@@ -261,20 +258,18 @@ describe('E2E-L1-1: fork-ask 完整旅程（Turn → channel → Composer → fo
     expect(onForkAskMock).toHaveBeenCalledWith('s-src', expect.objectContaining({ id: 'a1' }))
   })
 
-  it('Composer 订阅 channel：signal 命中本 session → 进入 fork 模式（三重视觉 DOM 可见）', async () => {
+  it('Composer 订阅 channel：signal 命中本 session → 进入 fork 模式（staging banner DOM 可见）', async () => {
     const wrapper = mount(Composer, { props: { sessionId: 's-src' }, global: { stubs: otherComposerStubs } })
     // 真实信号驱动：channel 模块级单例写入 → Composer 内 watch → enterForkMode
     triggerEnterForkMode('s-src', 'a1')
     await nextTick()
 
-    // 用户可见三重视觉：composer-box 含 fork-mode class
-    const box = wrapper.find('[data-testid="composer-box"]')
-    expect(box.classes()).toContain('fork-mode')
-    // mode-chip DOM 存在
-    expect(wrapper.find('[data-testid="composer-mode-chip"]').exists()).toBe(true)
-    // placeholder 切换为 fork 提问语义（含 fork/提问）
+    // 用户可见形态：staging banner 存在；composer-box 无 fork-mode 染色
+    // （[HISTORICAL] 整框染色档已随 banner 退役，demo：banner 图标是唯一 accent 染色点）
+    expectForkModeVisual(wrapper)
+    // placeholder 静态（[HISTORICAL] staging 换文案档已随 banner 退役，demo 口径）
     const placeholderProp = wrapper.findComponent(ComposerInputMock).props('placeholder') as string
-    expect(/fork|提问/i.test(placeholderProp)).toBe(true)
+    expect(placeholderProp).toContain('描述你想让 AI 做什么')
   })
 
   it('fork 模式下输入 + Enter → forkSessionAsk 被调（sessionApi.fork + chatApi.send 新 session）', async () => {
@@ -296,8 +291,8 @@ describe('E2E-L1-1: fork-ask 完整旅程（Turn → channel → Composer → fo
     const wrapper = mount(Composer, { props: { sessionId: 's-src' }, global: { stubs: otherComposerStubs } })
     triggerEnterForkMode('s-src', 'a1')
     await nextTick()
-    // fork 模式激活：mode-chip DOM 可见
-    expect(wrapper.find('[data-testid="composer-mode-chip"]').exists()).toBe(true)
+    // fork 模式激活：staging banner DOM 可见
+    expect(wrapper.find('[data-testid="composer-mode-banner"]').exists()).toBe(true)
 
     // 输入 fork 提问内容
     wrapper.findComponent(ComposerInputMock).vm.$emit('input', '追问那条回复')
@@ -312,12 +307,12 @@ describe('E2E-L1-1: fork-ask 完整旅程（Turn → channel → Composer → fo
     expect(sessionApiMock.fork.mock.calls[0][0]).toBe('s-src')
     // [u3c/D-10] 统一提交被调，第 1 参 = 新 session id（'s-forked'，非主线 's-src'）；
     // 第 3 参 clientUuid = 本地乐观气泡 id（消除 fork 首发与内核条目 id 异源窗口）
-    expect(chatApiMock.submitDelivery).toHaveBeenCalledTimes(1)
-    expect(chatApiMock.submitDelivery.mock.calls[0][0]).toBe('s-forked')
-    expect(chatApiMock.submitDelivery.mock.calls[0][2]).toMatch(/^u-[0-9a-fA-F-]{36}$/)
+    expect(submitDeliveryMock).toHaveBeenCalledTimes(1)
+    expect(submitDeliveryMock.mock.calls[0][0]).toBe('s-forked')
+    expect(submitDeliveryMock.mock.calls[0][2]).toMatch(/^u-[0-9a-fA-F-]{36}$/)
     expect(chatApiMock.send).not.toHaveBeenCalled()
-    // forkMode 自动复位 false（发送后退出 fork 模式）：mode-chip 消失 + fork-mode class 退场
-    expect(wrapper.find('[data-testid="composer-mode-chip"]').exists()).toBe(false)
+    // forkMode 自动复位 false（发送后退出 fork 模式）：staging banner 消失 + fork-mode class 退场
+    expect(wrapper.find('[data-testid="composer-mode-banner"]').exists()).toBe(false)
     // 用户可见：composer-box 已退出 fork-mode class
     expect(wrapper.find('[data-testid="composer-box"]').classes()).not.toContain('fork-mode')
   })
@@ -369,8 +364,8 @@ describe('E2E-L1-1 侧栏：forkSessionAsk 成功 → appendSession → SessionL
     expect(rows).toHaveLength(2)
     const branchRow = rows.find((r) => r.text().includes('追问那条'))
     expect(branchRow).toBeTruthy()
-    // 分支自身行展示血缘（用户可见 sub 行）
-    expect(branchRow!.text()).toContain('fork 自')
+    // 单行化（demo .si，2026-10-10）：列表行只有标题+时间，血缘归 hover 详情卡
+    expect(branchRow!.text()).not.toContain('fork 自')
     // 聚合容器退役：无 ForkGroup 组件 / 无 fork-group-* testid
     expect(wrapper.findComponent({ name: 'ForkGroup' }).exists()).toBe(false)
     expect(wrapper.find('[data-testid^="fork-group"]').exists()).toBe(false)

@@ -92,6 +92,9 @@ function setup(skillCommands: Array<{ name: string; path: string }> = []) {
 describe("plan(action='enter') — agent 自助进入（plan-mode-agent-enter U1）", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // clearAllMocks 不清 mockImplementation——mkdirSync 的 EEXIST/EACCES 抛错实现
+    // 会跨用例泄漏，显式 reset 回无实现桩
+    vi.mocked(fs.mkdirSync).mockReset();
   });
 
   it("idle 进入：收工具到白名单 + 持久化 isActive=true + tool result 携带只读纪律提示词", async () => {
@@ -102,11 +105,10 @@ describe("plan(action='enter') — agent 自助进入（plan-mode-agent-enter U1
     expect(pi.setActiveTools).toHaveBeenCalledWith(PLAN_MODE_TOOLS);
     // 状态持久化 isActive=true（投影链驱动 GUI 显形的锚点）
     expect(pi.appendEntry).toHaveBeenCalledWith("plan-state", expect.objectContaining({ isActive: true }));
-    // plan 目录创建（.tmp/plans/<slug>，slug 由 requirement 派生）
-    expect(fs.mkdirSync).toHaveBeenCalledWith(
-      expect.stringMatching(/\.tmp[/\\]plans[/\\]/),
-      expect.objectContaining({ recursive: true }),
-    );
+    // 目录落盘（原子唯一性）：plansRoot 父目录 recursive 建立 + 候选目录非 recursive
+    // mkdir 独占创建（已被占用抛 EEXIST 重探）
+    expect(fs.mkdirSync).toHaveBeenCalledWith("/tmp/test-project/.tmp/plans", { recursive: true });
+    expect(fs.mkdirSync).toHaveBeenCalledWith("/tmp/test-project/.tmp/plans/auth");
     // 提示词经 tool result 直返（不经对话流消息注入——对本次调用的直接响应）
     expect(pi.sendMessage).not.toHaveBeenCalled();
     expect(res.details.action).toBe("enter");
@@ -206,5 +208,73 @@ describe("plan(action='enter') — agent 自助进入（plan-mode-agent-enter U1
     const lastEntry = (pi.appendEntry as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[1] as PlanState;
     expect(lastEntry.state).toBe("reviewing");
     expect(lastEntry.isActive).toBe(true);
+  });
+
+  it("纯中文需求两轮进入不互覆：slug 折叠空串回落 untitled，第二轮候选位被占（mkdir 抛 EEXIST）重探落 untitled-2", async () => {
+    const { exec, sessions } = setup();
+    // 原子 mkdir 语义模拟：untitled 目录已被占用 → mkdirSync 抛 EEXIST（existsSync
+    // 预探已退役，冲突信号由 mkdir 自身承载——TOCTOU 竞态修复的机制锚）
+    let untitledTaken = false;
+    vi.mocked(fs.mkdirSync).mockImplementation(((p: fs.PathLike) => {
+      if (untitledTaken && String(p).endsWith("/.tmp/plans/untitled")) {
+        throw Object.assign(new Error("EEXIST: file already exists, mkdir"), { code: "EEXIST" });
+      }
+      return undefined;
+    }) as typeof fs.mkdirSync);
+
+    // 第一轮：目录不存在 → 落 untitled
+    await exec({ action: "enter", requirement: "重构认证模块" });
+    expect((sessions.get("test-session") as PlanState).planFilePath).toBe(
+      "/tmp/test-project/.tmp/plans/untitled/plan.md",
+    );
+
+    // 终局本轮（exited --enter--> 新一轮），untitled 目录已在盘上 = 第一轮已落盘
+    const state = sessions.get("test-session") as PlanState;
+    state.isActive = false;
+    state.state = "exited";
+    untitledTaken = true;
+
+    await exec({ action: "enter", requirement: "重构登录模块" });
+
+    // 第二轮经 EEXIST 重探落 untitled-2：两轮 plan.md 路径不同，不互覆
+    expect((sessions.get("test-session") as PlanState).planFilePath).toBe(
+      "/tmp/test-project/.tmp/plans/untitled-2/plan.md",
+    );
+  });
+
+  it("英文 slug 冲突递增（EEXIST 驱动）：base 与 -2 均被占用 → 落 -3", async () => {
+    const { exec } = setup();
+    vi.mocked(fs.mkdirSync).mockImplementation(((p: fs.PathLike) => {
+      const s = String(p);
+      if (s.includes("implement-user-auth") && !s.endsWith("implement-user-auth-3")) {
+        throw Object.assign(new Error("EEXIST: file already exists, mkdir"), { code: "EEXIST" });
+      }
+      return undefined;
+    }) as typeof fs.mkdirSync);
+
+    await exec({ action: "enter", requirement: "Implement User Auth" });
+
+    const mkdirCalls = (fs.mkdirSync as ReturnType<typeof vi.fn>).mock.calls as Array<[string]>;
+    expect(mkdirCalls.at(-1)?.[0]).toBe("/tmp/test-project/.tmp/plans/implement-user-auth-3");
+  });
+
+  it("非 EEXIST 的 mkdir 失败照常上抛（fail-fast，不吞真实故障）", async () => {
+    const { exec } = setup();
+    vi.mocked(fs.mkdirSync).mockImplementation((() => {
+      throw Object.assign(new Error("EACCES: permission denied, mkdir"), { code: "EACCES" });
+    }) as typeof fs.mkdirSync);
+
+    await expect(exec({ action: "enter", requirement: "r" })).rejects.toThrow(/EACCES/);
+  });
+
+  it("空需求（requirement 省略）走 untitled 目录", async () => {
+    const { exec, sessions } = setup();
+
+    const res = await exec({ action: "enter" });
+
+    expect(res.details.action).toBe("enter");
+    expect((sessions.get("test-session") as PlanState).planFilePath).toBe(
+      "/tmp/test-project/.tmp/plans/untitled/plan.md",
+    );
   });
 });

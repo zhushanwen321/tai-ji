@@ -131,19 +131,19 @@ function pushCommands(sessionId: string, commands: typeof MOCK_CMDS = MOCK_CMDS)
   events.dispatchSession(sessionId, msg)
 }
 
-/** reka-ui PopoverContent teleport 到 body：在 body 内找 item 行（v-for 渲染为 .cmd-row div）。
+/** reka-ui PopoverContent teleport 到 body：在 body 内找 item 行（v-for 渲染为 .pop-item div）。
  *  按 item 列表容器（.max-h-[180px]）定位——不依赖行文本含 /（skill 项显示去掉了 / 前缀）。
- *  [B3] 行从 <Button> 改为纯 div（对齐 demo .cmd-row），选择器同步从 'button' 改为 '.cmd-row'。 */
+ *  行 = 纯 div（demo .pop-item 行），选择器 '.pop-item'。 */
 function bodyItemButtons(): HTMLElement[] {
   const list = document.body.querySelector('.max-h-\\[180px\\]')
-  return Array.from((list ?? document.body).querySelectorAll('.cmd-row'))
+  return Array.from((list ?? document.body).querySelectorAll('.pop-item'))
 }
 
-/** 高亮行下标（模板选中态 = bg-surface 实色 token）。
- *  必须用 classList.contains 逐 token 判定：未选中态含 hover:bg-surface-hover，
+/** 高亮行下标（模板高亮 = demo .pop-item.hot 语言：bg-surface-hover 底 + 前景提 fg）。
+ *  必须用 classList.contains 逐 token 判定：未选中态同样含 hover:bg-surface-hover，
  *  用 className.includes('bg-surface') 会把每一行都判成高亮（假绿）。 */
 function highlightedRowIndex(): number {
-  return bodyItemButtons().findIndex((r) => r.classList.contains('bg-surface'))
+  return bodyItemButtons().findIndex((r) => r.classList.contains('bg-surface-hover'))
 }
 
 describe('CommandPopover slash query 过滤（U6-U8）', () => {
@@ -381,6 +381,7 @@ const composerStubs = {
   AddMenuPopover: AddMenuPopoverStub,
   ContextChipsBar: SIMPLE,
   ContextCapacityPopover: SIMPLE,
+  ComposerCapacityBar: SIMPLE,
   ModelSelectPopover: SIMPLE,
   ThinkingLevelPopover: SIMPLE,
   RetryIndicator: SIMPLE,

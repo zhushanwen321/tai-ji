@@ -12,10 +12,28 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import { getPiSessionsDir, getImageCacheRoot, getImageCacheDir, getSessionArtifactsDir } from '../paths'
+import {
+  getPiSessionsDir,
+  PI_SESSION_TREE_SEGMENTS,
+  getImageCacheRoot,
+  getImageCacheDir,
+  getSessionArtifactsDir,
+} from '../paths'
 
 afterEach(() => {
   vi.unstubAllEnvs()
+})
+
+describe('PI_SESSION_TREE_SEGMENTS', () => {
+  it('三树段字面量：sessions / subagents / btw（布局权威 = runtime pi-paths.ts 三函数，此处登记 SSOT）', () => {
+    expect([...PI_SESSION_TREE_SEGMENTS]).toEqual(['sessions', 'subagents', 'btw'])
+  })
+
+  it('首段与 getPiSessionsDir 树根一致（常量与既有同构推导函数不漂移）', () => {
+    expect(getPiSessionsDir('/tmp/taiji-shared-test-data')).toBe(
+      join('/tmp/taiji-shared-test-data', 'agent', PI_SESSION_TREE_SEGMENTS[0]),
+    )
+  })
 })
 
 describe('getPiSessionsDir', () => {

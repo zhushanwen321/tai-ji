@@ -23,10 +23,33 @@ export interface SubagentEnginesFile {
   updatedAt: number
 }
 
+/**
+ * 引擎可选模型清单条目（engine-provider-unification D5；值形状镜像 =
+ * zcode-subagent-cli preparer listZcodeModels 返回形态）。单源声明：@taiji/shared
+ * protocol 经 type-only 直引 re-export 本类型（无第二份声明，漂移结构性不可能）。
+ */
+export interface SubagentEngineModelInfo {
+  /** 模型全 ref（zcode 形态 providerId/modelId）。 */
+  id: string
+  /** 展示名（如 `ProviderName · model`）；派生源 provider 无名时缺省。 */
+  name?: string
+}
+
 /** getEngineConfig RPC 返回形状（engines.json + config.json defaultEngine 的合成视图）。 */
 export interface SubagentEngineConfigView {
   /** 可选引擎 id（动态发现；engines.json 缺失/损坏时为 ['pi'] 兜底——pi 恒可用）。 */
   engines: string[]
   /** 当前 defaultEngine（config.json 值；缺省 'pi'）。 */
   defaultEngine: string
+  /**
+   * per-engine 可选模型清单（engine-provider-unification D5；目前仅 zcode 引擎有
+   * 派生源——真实 provider_config.json ∪ taiji 同步副本，双源回落内建）。optional：
+   * 旧 runtime / mock 不带时消费方按空表处理。
+   */
+  engineModels?: Record<string, SubagentEngineModelInfo[]>
+  /**
+   * per-engine 默认模型偏好（config.json engineDefaults 键，值 = 模型全 ref）。
+   * optional：旧 runtime / mock 不带时消费方按「无偏好」处理。
+   */
+  engineDefaults?: Record<string, string>
 }

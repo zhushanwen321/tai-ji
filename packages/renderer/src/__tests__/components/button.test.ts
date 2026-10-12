@@ -19,6 +19,7 @@
  */
 import { describe, it, expect } from 'vitest'
 import { buttonVariants } from '@/components/ui/button'
+import { cn } from '@/lib/utils'
 
 describe('buttonVariants base class — Plan 02 按下物理反馈', () => {
   // cva 无参调用：返回 base + defaultVariants(variant=default,size=default) 拼接的 class 字符串。
@@ -40,5 +41,26 @@ describe('buttonVariants base class — Plan 02 按下物理反馈', () => {
     expect(baseClass).not.toContain('transition-colors')
     // 显式属性优于 all（避免 GPU 外属性意外参与动画）
     expect(baseClass).not.toContain('transition-all')
+  })
+})
+
+describe('buttonVariants 图标默认尺寸 — 零特异性契约（svg 尺寸覆盖不被压制）', () => {
+  const baseClass = buttonVariants()
+
+  it('正向：图标默认尺寸经 :where() 整体包裹（生成 :where(.cls svg)，特异性 0,0,0）', () => {
+    expect(baseClass).toContain('[:where(&_svg)]:size-4')
+  })
+
+  it('负向：禁止回退 [&_svg]:size-4 后代选择器（0,1,1 会压制使用方 svg 普通尺寸类，逼使用方散布 ! important）', () => {
+    expect(baseClass).not.toContain('[&_svg]:size-4')
+    // 组装结果任何位置不得产生 important 尺寸类
+    expect(baseClass).not.toContain('!size')
+  })
+
+  it('使用方钮级 [&_svg]:size-[Npx] 覆盖类与基类默认值共存（CSS 特异性恒赢，tw-merge 不丢使用方类）', () => {
+    // Button.vue 组装形态：cn(buttonVariants(...), props.class)，使用方类在后
+    const merged = cn(buttonVariants({ variant: 'ghost' }), 'rounded-sm [&_svg]:size-[13px]')
+    expect(merged).toContain('[&_svg]:size-[13px]')
+    expect(merged).not.toContain('!size')
   })
 })

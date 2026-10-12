@@ -29,7 +29,7 @@ import {
   textToSegments,
 } from '@taiji/shared'
 
-import { deriveToolResultOutputs, isLooseRecord, isPlainRecord } from './apply-entry-utils'
+import { deriveToolResultOutputs, isLooseRecord, isPlainRecord, parseDiffStat } from './apply-entry-utils'
 
 /**
  * [簇 A2] defer 队列 flush 投递确认标记正则（submitQueuedEntry 附加的形态）。
@@ -408,6 +408,8 @@ export function computeToolCallFill(body: PiMessageBody): {
   outputRaw?: string
   isError: boolean
   details?: Record<string, unknown>
+  /** edit 工具 details.diff 的增删行数统计（parseDiffStat 单点解析，live≡reload 同口径）。 */
+  diffStat?: { additions: number; deletions: number }
   /** [W5] toolResult content 的 ImageContent 块（live≡replay：此前仅实时路径可见）。 */
   images?: Array<{ data: string; mimeType: string }>
   /** [D6-⑧] output/outputRaw 被 64KB 累积截断裁剪（ToolCall.outputTruncated 回填源）。 */
@@ -432,11 +434,14 @@ export function computeToolCallFill(body: PiMessageBody): {
   const isError = body.isError === true
   // F1 透传 details（含 __gui__），排除数组形态（迁移前显式判定，关键规则 9 可重开恢复）。
   const details = isPlainRecord(body.details) ? body.details : undefined
+  // edit 工具 diff 统计（write 工具 details 恒 undefined → diffStat 缺省不渲染）。
+  const diffStat = parseDiffStat(details?.diff)
   return {
     output: outputs.output.text,
     ...(outputs.outputRaw !== undefined && { outputRaw: outputs.outputRaw.text }),
     isError,
     details,
+    ...(diffStat !== undefined && { diffStat }),
     images: outputs.images,
     outputTruncated: outputs.output.truncated || (outputs.outputRaw?.truncated ?? false),
     // [chat-flow-timestamp U1] endTime 回填源 = toolResult body.timestamp；缺失/非 number

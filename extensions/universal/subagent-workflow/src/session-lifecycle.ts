@@ -42,7 +42,7 @@ import {
 import { bindNotifyLedgerHost, type NotifyLedgerHost } from "@zhushanwen/subagent-core";
 import { IDENTITY_CUSTOM_TYPE, type SubagentIdentityData } from "@zhushanwen/subagent-core";
 import type { ExecutionMode } from "@zhushanwen/subagent-core";
-import { maybeCleanupExpiredSessionFiles } from "@zhushanwen/subagent-core";
+import { startEngineJournalGcTimer } from "@zhushanwen/subagent-core";
 import { resolvePiSessionScopedDir } from "@zhushanwen/subagent-core";
 // [W1 / D5] session_start 兜底触发点的统一保留维护轮：入口 + record 域目录锚
 // （getSubagentRecordsDir 布局 + ENV_ROOT_CWD 贯穿 env 名单源）+ state 目录分量
@@ -557,7 +557,7 @@ export function bindLedgerHostAndRecover(pi: ExtensionAPI, ctx: ExtensionContext
 
 /**
  * 随迁块 4 的进程级维护三连（各 try-catch「失败记日志不阻断」，设计 §3.4）：
- * 过期 session 文件清理 / ADR-035 manifest tmp 恢复 / ADR-035 worktree reaper 扫描。
+ * 引擎 journal TTL 回收 / ADR-035 manifest tmp 恢复 / ADR-035 worktree reaper 扫描。
  * （[modeless 波5] 原 [E1] sync 批崩溃恢复接线已摘除；[collect 退役] core 侧
  * recoverSyncCollectBatch 方法本体已删——sync 批机制不存在，无恢复面可接线。）
  */
@@ -568,12 +568,16 @@ async function runProcessLevelMaintenance(
   deps: SessionLifecycleDeps,
 ): Promise<void> {
   try {
-    // 递归扫描 <agentDir>/subagents + unlink 超 TTL 跨 session 文件属进程级维护
-    // ——oncePerProcess 守卫防双跑（u-audit-fix）。
-    oncePerProcess("subagent-workflow:cleanup-expired-session-files", () =>
-      maybeCleanupExpiredSessionFiles(agentDir, ctx.cwd));
+    // 引擎 journal TTL 回收（30 天 mtime）+ worktree .patch 孤儿清扫（同 TTL，仅
+    // *.patch 两层枚举——按 branch 命名无会话锚，级联引用并集无锚可达，唯一 mtime
+    // 兜底通道）属进程级维护——oncePerProcess 守卫防双跑（u-audit-fix）。接线即扫
+    // 一次 + 24h 定时复扫（unref 不 hold 进程退出，对齐 main 侧 log-retention 形态）。
+    // 子代理会话文件（*.jsonl / sidecar / manifest / *.events）不在本维护面——回收归
+    // 删主会话级联（runtime session-content-cascade，2026-10-12 裁决）。
+    oncePerProcess("subagent-workflow:engine-journal-gc", () =>
+      startEngineJournalGcTimer(agentDir));
   } catch (err) {
-    logger.warn("[subagents] expired session file cleanup failed", {
+    logger.warn("[subagents] engine journal gc failed", {
       reason: toErrorMessage(err),
     });
   }

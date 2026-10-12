@@ -2,9 +2,11 @@
  * context 用量 journey 集成测试（context-consistency Phase 3.2 层 3）
  * （用例定义：context-consistency-equivalence-test §2 层 3，父文档 §4 A1/A7 自动化）。
  *
- * 三视角中的使用者黑盒视角：mount 真实 ContextCapacityPopover，断言用户可见 DOM 文本
- * （按钮「{used}K · {percent}%」/「—」）。数值文本按组件 formatTokens 实际输出断言
- * （21K/30K，K/M 制），不按设计文档示例字面（「万」制）猜。
+ * 三视角中的使用者黑盒视角：mount 真实容量卡断言用户可见 DOM 文本。数值文本按组件
+ * formatTokens 实际输出断言（21K/30K，K/M 制），不按设计文档示例字面（「万」制）猜。
+ * [迁移来源] ui-optimize 决策 6 退役平铺触发器 ContextCapacityPopover（组件删除）后，
+ * journey 宿主换为 ContextCapacityCard（hover 指标聚合页的容量卡，数字唯一入口），
+ * 断言锚从触发器按钮文字换为卡内全文（used / 使用率格）。
  *
  * journey：
  * - J1 切走再切回：A 真值 → B 无值占位 → 切回 A（RPC 往返期显示分区缓存，无闪横线）
@@ -27,7 +29,7 @@ import * as events from '@taiji/core/transport/api'
 import { __clearSessionCleanupRegistryForTest } from '@/composables/useSessionScopedState'
 import { __clearInFlightContextFetchForTest } from '@/composables/features/model/useContextUsage'
 
-import ContextCapacityPopover from '@/components/panel/ContextCapacityPopover.vue'
+import ContextCapacityCard from '@/components/panel/ContextCapacityCard.vue'
 
 // ── mock 边界：getContext RPC mock 掉（受控 deferred）；门面 session 重指 mock domain ──
 // vitest 注入 VITE_MOCK=true 使 '@/api' 门面默认指向 mock 门面（mock getContext 会返回
@@ -58,9 +60,9 @@ interface PendingRpc {
 let pendingRpcs: PendingRpc[] = []
 const mountedWrappers: VueWrapper[] = []
 
-/** mount 容量按钮组件（挂载即触发恢复腿 getContext(sid)，在途受控）。 */
-function mountPopover(sid: string): VueWrapper {
-  const wrapper = mount(ContextCapacityPopover, { props: { sessionId: sid } })
+/** mount 容量卡组件（挂载即触发恢复腿 getContext(sid)，在途受控）。 */
+function mountCard(sid: string): VueWrapper {
+  const wrapper = mount(ContextCapacityCard, { props: { sessionId: sid } })
   mountedWrappers.push(wrapper)
   return wrapper
 }
@@ -90,9 +92,9 @@ function pushOkFrame(sid: string, used: number, total: number, percent: number):
   })
 }
 
-/** 用户可见断言锚点：容量按钮全文（「{used}K · {percent}%」或「—」）。 */
+/** 用户可见断言锚点：容量卡全文（used「{used}K」/ 使用率「{percent}%」/「—」）。 */
 function capacityText(wrapper: VueWrapper): string {
-  return wrapper.get('[title="上下文容量"]').text()
+  return wrapper.text()
 }
 
 beforeEach(() => {
@@ -115,7 +117,7 @@ afterEach(() => {
 
 describe('J1: 切走再切回——分区缓存无闪横线，恢复腿收敛新值（G1/G2/G3）', () => {
   it('A 真值 → B 无值 → 切回 A 显示缓存 → getContext resolve 后更新（父文档 A1+A7）', async () => {
-    const wrapper = mountPopover('A')
+    const wrapper = mountCard('A')
     await settle()
     // 首拉在途，分区 unknown → 「—」（无假数字）
     expect(capacityText(wrapper)).toContain('—')
@@ -160,7 +162,7 @@ describe('J1: 切走再切回——分区缓存无闪横线，恢复腿收敛新
 describe('J2: 0 帧防御哨兵——全 0 残帧不清显示（D4 journey 级）', () => {
   it('A 视图下喂全 0 帧 → 显示不变 + 哨兵 warn', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    const wrapper = mountPopover('A')
+    const wrapper = mountCard('A')
     await settle()
     pushOkFrame('A', 21000, 600000, 3.5)
     await settle()

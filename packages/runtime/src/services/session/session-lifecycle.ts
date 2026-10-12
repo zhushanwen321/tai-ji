@@ -28,7 +28,8 @@ import { BUILTIN_PRESET_IDS, isBtwVirtualId } from '@taiji/shared'
 // 缺省 clientUuid 生成走 core 唯一入口（禁直调 crypto.randomUUID，secure context/Node 版本防御）
 import { randomUuid } from '@taiji/core/utils/random-uuid'
 // [D6-⑨ u7] 图片缓存目录推导（shared SSOT，含 sessionId 穿越校验——cache 级联删除用）
-import { getImageCacheDir, getSessionArtifactsDir } from '@taiji/shared/paths'
+// 附件目录推导（shared SSOT，同含穿越校验——attachments 级联删除用）
+import { getAttachmentsDir, getImageCacheDir, getSessionArtifactsDir } from '@taiji/shared/paths'
 import type { IProcessManager, IPiEngine } from '../ports/pi-engine.js'
 import type { ILifecycleSessionOps, ISessionRegistry, ISessionRegisterDeps, IManagedSessionRecord, ManagedSession } from './session-internal.js'
 import type { IManagedSessionView, ScannedSession } from './types.js'
@@ -116,7 +117,7 @@ function fireDeathDisposition(sessionId: string, disposition: SessionDeathDispos
 // port 扩展 + 专项测试），不在 review 修复批混入。hydrateBindingMeta 是注册表 SSOT 的
 // 统一回填入口（sidecar-binding-sync 设计文档拍板接线在此），同样随 R3 收口。新写
 // services 代码不得再效仿此处直引 infra。
-import { getSessionsDir } from '../../infra/pi/pi-paths.js'
+import { getPiAgentDir, getSessionsDir } from '../../infra/pi/pi-paths.js'
 // B5 触发面收窄（memory-leak-remediation §3.1 + §3.2-B5，2026-09-15）：真删除路径的
 // plugin sessionData 清理分发（tombstone + 分区摘除 + trash 软删除）。挂点从 removeSessionEntry
 // 汇聚点收窄到本模块 delete——汇聚点四路收殓中三路（pi 崩溃 exit / forceQuit / restore 清场）
@@ -129,6 +130,12 @@ import { cleanupMigrateResidues } from '../../infra/pi/session-file-utils.js'
 // 绑定字段注册表模块（BINDING_FIELDS / hydrateBindingMeta / CREATE_DERIVED_CALLERS SSOT）
 import { hydrateBindingMeta } from '../../infra/pi/session-binding-fields.js'
 import { assertPiSessionFile } from '../../infra/pi/session-attach-assert.js'
+// 删主会话的下挂内容事务性级联（2026-10-12 裁决）：子代理文件族（引用并集防护）+
+// session-view 导出物 + 后台任务 registry 目录 + 主文件 trash 的单一清单入口。
+import { cascadeDeleteSessionContent } from './session-content-cascade.js'
+// A23 级联前置收殓（幂等双跑收口在途收殓；removeSessionEntry 汇聚点的 fire-and-forget
+// 挂点不动——本 import 只是级联内的 await 形态复用同一原语）。
+import { reapSessionBackgroundTasks } from './background-task-reaper.js'
 
 // stripSessionEndEntries / applyHeaderCwdFallback / containsSessionEndLine /
 // SESSION_END_RE / normalizeInactiveSessionFileIfNeeded / get_state 生效值解析与
@@ -905,20 +912,33 @@ export class SessionLifecycle implements ISessionRegistry {
   }
 
   /**
-   * active session 删除路径的主文件清理。
+   * 删除路径的下挂内容级联 + 主文件清理（2026-10-12 裁决扩展，delete 两分支共用）。
    *
-   * 为什么单独成方法：原 delete 内联此块时，与 scanned 分支的 sidecar 清理逻辑重复，
-   * 使 delete 圈复杂度 16 超阈值 15（metrics-gate FAIL）。提取后两分支共用
-   * purgeSessionSidecars，delete 回归纯编排。
-   *
-   * 语义（与提取前 `sessionFilePath && existsSync` 整块守卫等价）：主文件存在时
-   * trash + 清理全部关联产物；主文件不存在（外部已删）时**整体零动作**——
-   * 与 scanned 分支「无条件清孤儿 sidecar」的行为差异见 delete 的 else 分支注释。
+   * 清单与执行顺序的权威在 session-content-cascade.ts（单一清单入口）：引用并集
+   * 判定（fork 共享防护）→ 子代理文件族 → session-view 导出物 → 后台任务 registry
+   * 目录 → trash 主文件 → 主 sidecars。skipIfMainFileMissing 承载两分支的既有语义
+   * 差异：active 分支 true = 主文件不存在（外部已删）时**整体零动作**（原
+   * purgeActiveSessionFile 守卫）；scanned 分支 false = 仍清孤儿 sidecar + A21/A23
+   * （session-view 与后台任务目录不依赖主文件内容）。trash rejection 原样上抛
+   *（G4/P4-1：trash 失败必须经 session-lifecycle 传播——此时下挂已清、本体还在
+   * = 可恢复形态，重试删除即达终态）。
    */
-  private async purgeActiveSessionFile(filePath: string): Promise<void> {
-    if (!existsSync(filePath)) return
-    await this.sessionStore.trash(filePath)
-    this.purgeSessionSidecars(filePath)
+  private async cascadeDeletedSessionContent(sessionId: string, filePath: string, skipIfMainFileMissing: boolean): Promise<void> {
+    await cascadeDeleteSessionContent(
+      {
+        sessionId,
+        sessionFilePath: filePath,
+        agentDir: getPiAgentDir(),
+        sessionsRoot: getSessionsDir(),
+        skipIfMainFileMissing,
+      },
+      {
+        trash: (path) => this.sessionStore.trash(path),
+        purgeMainSidecars: (path) => { this.purgeSessionSidecars(path) },
+        reapBackgroundTasks: reapSessionBackgroundTasks,
+        warn: (message) => console.warn(message),
+      },
+    )
   }
 
   /**
@@ -952,7 +972,8 @@ export class SessionLifecycle implements ISessionRegistry {
     // [chat-html-support §6.7 D7 回收①] 会话产物目录级联（`<dataDir>/artifacts/<sessionId>`，
     // 公式单点 = shared getSessionArtifactsDir，含与 isPiSessionId 同域的 sessionId 穿越
     // 校验）。与上行 cache/images 级联同一落点、同一幂等形态（recursive + force），
-    // best-effort 不阻断删除主链——残留由 artifact-retention 保留期扫描兜底。
+    // best-effort 不阻断删除主链——残留由删会话级联承接（session-content-cascade）；
+    // 外部删除主文件场景接受残留（2026-10-12 裁决：下挂内容回收统一归级联，无保留期扫描兜底）。
     // 目录的创建由 write 工具落盘时承担：真装版 pi write 工具在写入前
     // `mkdir(dir, {recursive:true})`（工具 description 亦声明）——持久源码锚点
     // @earendil-works/pi-coding-agent@0.84.4 dist/core/tools/write.js:22（
@@ -962,6 +983,11 @@ export class SessionLifecycle implements ISessionRegistry {
     // 探针产物在 .tmp 不入库，仓内可复现证据以 dist 锚点为准。
     // 故不实现 runtime 会话激活预建降级。
     try { rmSync(getSessionArtifactsDir(sessionIdFromSessionFilePath(filePath)), { recursive: true, force: true }) } catch { void 0 }
+    // 粘贴图片附件目录级联（`<dataDir>/attachments/<sessionId>`，
+    // shared getAttachmentsDir 含 sessionId 穿越校验）。与上行 cache/images / artifacts
+    // 级联同一落点、同一幂等形态（recursive + force），best-effort 不阻断删除主链
+    // ——delete 是唯一清理点，防孤儿附件目录无上界累积。
+    try { rmSync(getAttachmentsDir(sessionIdFromSessionFilePath(filePath)), { recursive: true, force: true }) } catch { void 0 }
     // W-Runtime4：清理 session 文件头解析缓存（infra session-file-utils 的 filePath 键
     // 派生缓存，非已删的 label 影子缓存）中的 stale 条目（避免无界增长）
     this.sessionStore.invalidateMetaCache(filePath)
@@ -1015,17 +1041,17 @@ export class SessionLifecycle implements ISessionRegistry {
       await this.pm.destroySession(sessionId)
       this.svc.removeSessionEntry(sessionId)
       if (session.sessionFilePath) {
-        await this.purgeActiveSessionFile(session.sessionFilePath)
+        await this.cascadeDeletedSessionContent(sessionId, session.sessionFilePath, true)
       }
     } else {
       const target = this.svc.findScannedSession(sessionId)
       if (!target) throw new Error(`Session ${sessionId} not found`)
       cascadeCwd = target.cwd
       // 与 active 分支的行为差异（既有语义，保持）：主文件不存在（扫描 stale）时仅跳过
-      // trash，孤儿 sidecar 仍无条件清理——不把 existsSync 折进 purgeSessionSidecars，
-      // 否则 active 分支「文件不存在则整体零动作」的语义会被顺带改掉。
-      if (existsSync(target.filePath)) await this.sessionStore.trash(target.filePath)
-      this.purgeSessionSidecars(target.filePath)
+      // trash，孤儿 sidecar / A21 导出物 / A23 后台任务目录仍无条件清理——两分支差异
+      // 经 cascadeDeletedSessionContent 的 skipIfMainFileMissing 显式承载（false =
+      // scanned 语义），清单与顺序仍在 cascade 模块单点。
+      await this.cascadeDeletedSessionContent(sessionId, target.filePath, false)
     }
     // [M4-a / btw-question D4 消费面① + D9④ 线终结] deleteSession 级联支线：删主 →
     // 杀名下全部 btw 线进程 + 删 `btw/<encodeCwd>/<mainSid>/` 线目录（前端虚拟分区清理经

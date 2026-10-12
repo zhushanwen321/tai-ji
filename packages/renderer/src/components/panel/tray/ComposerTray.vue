@@ -1,10 +1,11 @@
+<!-- split-justified: 托盘外壳域（聚合入口判据 + hover/pin/互斥状态机 + B3 第三内容源接线——三件内置面板与 widget 区共用的唯一外壳状态机容器） -->
 <!--
   ComposerTray —— composer 任务托盘外壳（设计 docs/design/composer-task-tray.md——已删除，git 可追溯——
   §3.3 D1/D6/D8/D9/D12 + §3.1 场景 A/C + §3.4 终态数据流 + §3.5 错误规格 + §3.6 探针 P7）。
 
   ── 结构与挂载（D1/D12）──
   挂 `Composer.vue` 的 `.composer-bar` 左簇、AddMenuPopover 之后（`v-if="sessionId"`，landing 态
-  隐藏与 GenStatsTriggers 同判据）；随 Composer 实例化（per-Composer 归属），数据按该 Composer 绑定
+  隐藏与指标聚合按钮同判据——无 session 无任务面）；随 Composer 实例化（per-Composer 归属），数据按该 Composer 绑定
   的 sessionId 过滤——三件计数走 `useTrayCounts(sessionId)`（**唯一实例在本外壳创建**，见文末
   「数据面归属」），widget 走 ViewHostStore 的 per-session 分区，切 session 即跟随。
   条目 = built-in 四件（bash → subagent → workflow → session，固定序恒在最左）+ 协议 widget 区（排序后逐个
@@ -15,7 +16,8 @@
     widget   → TrayWidgetPanel（viewId / meta / guiTree，meta+guiTree 取自外壳 entries 切片）
 
   ── built-in 三态（D7；验收 N2「归零不虚亮」）──
-  running > 0 → 亮计数 + 呼吸点（accent；视觉序与 TrayWidgetButton 同款 [icon][呼吸点][计数]）
+  running > 0 → 亮呼吸点（inline，accent）+ 计数角标（demo .cbtn .badge 形态：右上角胶囊，
+  accent 实底；视觉序与 TrayWidgetButton 同款 [icon][呼吸点][计数角标]）
   有历史无进行中 → dim 常驻（无计数、无呼吸点）
   全无记录 → 该按钮不渲染（DOM 层不存在，而非 opacity:0 —— 归零不虚亮的结构性保证）
 
@@ -66,7 +68,7 @@
     :data-session-id="sessionId"
     role="group"
     :aria-label="t('panel.tray.trayLabel')"
-    class="flex min-w-0 shrink-0 items-center gap-0.5"
+    class="flex min-w-0 shrink-0 items-center gap-[2px]"
   >
     <!-- 序 4 聚合单入口（D6 密度档 `aggregated`）：整个托盘收为「单图标 + 运行数数字角标」一个按钮，
          点击开面板（TrayPanelSurface）内分段展示全部类别（TrayAggregatePanel）+ 插件 toolbar 贡献段；
@@ -94,9 +96,11 @@
           @pointerleave="onHoverEnd"
           @click="onTogglePin(AGGREGATE_PANEL_KEY)"
         >
-          <!-- 单一图标（聚合语义 = layers 层叠面；有进行中时 accent 提亮，无则中性） -->
+          <!-- 单一图标（聚合语义 = layers 层叠面；有进行中时 accent 提亮，无则中性）；
+               stroke 1.6 = demo .cbtn 图标规格（16px stroke 1.6，M4a 决 10 同款） -->
           <Layers
-            class="size-4 shrink-0"
+            class="size-[16px] shrink-0"
+            :stroke-width="1.6"
             :class="aggregateRunningCount > 0 ? 'text-accent' : 'text-neutral-dim'"
             aria-hidden="true"
           />
@@ -107,10 +111,11 @@
             :class="TRAY_PULSE_CLASS"
             aria-hidden="true"
           />
+          <!-- 运行数角标（demo .cbtn .badge 形态：右上角胶囊，accent 实底） -->
           <span
             v-if="aggregateRunningCount > 0"
             data-testid="tray-aggregate-count"
-            :class="[TRAY_ITEM_COUNT_CLASS, 'text-accent']"
+            :class="[TRAY_ITEM_COUNT_CLASS, 'bg-accent', 'text-accent-fg']"
           >{{ aggregateRunningCount }}</span>
         </Button>
       </PopoverAnchor>
@@ -122,6 +127,17 @@
         @interact-outside="onInteractOutside"
         @open-auto-focus="onOpenAutoFocus"
       >
+        <!-- 插件 headerAction 段（demo composer-bar spec §2.1 B3：L2 聚合面 = 定时任务 + 托盘 →
+             layers 单钮，被聚合 clock 的直开动作由面板首段承接——demo TrayPanel ⓪「定时任务
+             入口行」的对位；与左簇挂载点互斥渲染（左簇只在 expanded 挂），同一份数据源）。
+             有可见按钮才出段（hasVisibleHeaderActions 与 HeaderActionsHost 渲染过滤同构），
+             段后发丝分隔与段体一起出现，零声明/全 hidden 不留死分隔。 -->
+        <template v-if="hasHeaderActions">
+          <div class="shrink-0 pb-1 pt-1">
+            <HeaderActionsHost :session-id="sessionId" />
+          </div>
+          <span class="h-px w-full shrink-0 bg-border-strong" aria-hidden="true" />
+        </template>
         <TrayAggregatePanel
           :session-id="sessionId"
           :sections="builtinItems"
@@ -168,11 +184,13 @@
         >
           <component
             :is="item.icon"
-            class="size-4 shrink-0"
+            class="size-[16px] shrink-0"
+            :stroke-width="1.6"
             :class="item.running > 0 ? 'text-accent' : ''"
             aria-hidden="true"
           />
-          <!-- 呼吸点 + 计数：仅「有进行中」渲染（有历史无进行中 → 两者都不出，归零不虚亮） -->
+          <!-- 呼吸点 + 计数：仅「有进行中」渲染（有历史无进行中 → 两者都不出，归零不虚亮）；
+               计数走 demo .cbtn .badge 角标形态（右上角胶囊，accent 实底） -->
           <span
             v-if="item.running > 0"
             data-testid="tray-builtin-pulse"
@@ -182,7 +200,7 @@
           <span
             v-if="item.running > 0"
             data-testid="tray-builtin-count"
-            :class="[TRAY_ITEM_COUNT_CLASS, 'text-accent']"
+            :class="[TRAY_ITEM_COUNT_CLASS, 'bg-accent', 'text-accent-fg']"
           >{{ badgeCount(item) }}</span>
         </Button>
       </PopoverAnchor>
@@ -260,6 +278,11 @@ import { Bot, Layers, SquareTerminal, Waypoints, Workflow } from '@lucide/vue'
 import { VIEW_HOST_SOURCE_KEY, ViewHost } from '@taiji/ui/extension-host'
 import { usePluginToolbarContribution } from '@/components/panel/tray/use-plugin-toolbar'
 import type { ViewCacheEntry } from '@taiji/ui/extension-host'
+import {
+  HEADER_ACTIONS_SOURCE_KEY,
+  hasVisibleHeaderActions,
+} from '@/composables/shell/useExtensionHostBridge'
+import HeaderActionsHost from '@/components/extension/HeaderActionsHost.vue'
 import { Popover, PopoverAnchor } from '@/components/ui/popover'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -399,9 +422,24 @@ const hasTrayItems = computed(() => builtinItems.value.length > 0 || widgetItems
 
 watch(hasTrayItems, (value) => emit('update:hasItems', value), { immediate: true })
 
-/** 插件 toolbar 贡献面 + 聚合入口可见条件（W3a：托盘有条目 或 插件有贡献，两者皆无不留死入口；贡献判定实现见 use-plugin-toolbar） */
+/**
+ * 插件 headerAction 可见面（聚合面板首段的渲染条件；与左簇挂载点互斥——左簇只在
+ * leftCluster==='expanded' 挂 HeaderActionsHost，聚合态同一数据源改由本面板承载，
+ * demo composer-bar spec §2.1 B3「定时任务 + 托盘 → layers 单钮」的入口承接）。
+ */
+const headerActionsSource = inject(HEADER_ACTIONS_SOURCE_KEY, null)
+const hasHeaderActions = computed(() =>
+  !!headerActionsSource && hasVisibleHeaderActions(headerActionsSource, props.sessionId),
+)
+
+/** 插件 toolbar 贡献面 + 聚合入口可见条件（W3a：托盘有条目 / 插件 toolbar 有贡献 /
+ *  headerAction 有入口三者任一，皆无不留死入口；贡献判定实现见 use-plugin-toolbar，
+ *  headerAction 判定 = hasVisibleHeaderActions——与密度状态机的 absent 判据同构，
+ *  缺一会造成「状态机判 aggregated 而聚合钮不渲染」的入口丢失）。 */
 const hasPluginToolbar = usePluginToolbarContribution(() => props.sessionId)
-const showAggregate = computed(() => props.aggregated && (hasTrayItems.value || hasPluginToolbar.value))
+const showAggregate = computed(
+  () => props.aggregated && (hasTrayItems.value || hasPluginToolbar.value || hasHeaderActions.value),
+)
 
 /** 聚合入口运行数（built-in 进行中 + widget 推送中；归零不虚亮由按钮 v-if 统一判定） */
 const aggregateRunningCount = computed(

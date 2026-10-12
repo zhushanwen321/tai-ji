@@ -26,9 +26,9 @@ describe('Card', () => {
     // v6: elevated → bg-surface-2（去 border-border-strong）
     expect(card.classes()).toContain('bg-surface-2')
     expect(card.classes()).not.toContain('border-border-strong')
-    // v6: header bg 浮起（elevated → bg-elevated）
+    // v6: header bg 浮起（elevated → bg-bg-elevated）
     const header = wrapper.find('[data-testid="gui-card"] > div:first-child')
-    expect(header.classes()).toContain('bg-elevated')
+    expect(header.classes()).toContain('bg-bg-elevated')
   })
 
   it('variant=danger → bg-surface + header dot(bg-danger) + badge(失败/b-danger)', () => {
@@ -112,12 +112,12 @@ describe('Card', () => {
     expect(successCard.find('[data-testid="gui-card-dot"]').classes()).toContain('bg-success')
   })
 
-  it('v6: header bg 浮起（default/danger/success→bg-surface-2，elevated→bg-elevated）', () => {
+  it('v6: header bg 浮起（default/danger/success→bg-surface-2，elevated→bg-bg-elevated）', () => {
     const defaultCard = mount(Card, { props: { variant: 'default', header: 'h', body: [] } })
     expect(defaultCard.find('[data-testid="gui-card"] > div:first-child').classes()).toContain('bg-surface-2')
 
     const elevatedCard = mount(Card, { props: { variant: 'elevated', header: 'h', body: [] } })
-    expect(elevatedCard.find('[data-testid="gui-card"] > div:first-child').classes()).toContain('bg-elevated')
+    expect(elevatedCard.find('[data-testid="gui-card"] > div:first-child').classes()).toContain('bg-bg-elevated')
   })
 
   it('header 为 GuiComponent 时递归渲染（dot + badge 仍在 header 容器）', () => {

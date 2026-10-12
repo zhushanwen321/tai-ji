@@ -155,7 +155,7 @@ export interface StagingAction<S extends StagingSource = StagingSource> {
     readonly placeholder: ComputedRef<string | null>
     /** mode-chip 标签的 i18n key（如 panel.composer.forkChip） */
     readonly chipLabelKey: string
-    /** mode-chip 图标组件（GitFork / Upload） */
+    /** staging banner 图标组件（fork = GitBranch / handoff = ArrowRightLeft，demo 权威） */
     readonly chipIcon: Component
   }
 }

@@ -7,18 +7,19 @@
  * 增高路径覆盖；isSessionActive 完成滚动由「trace 折叠 → spacer 变化 → 静默跟随」+ clamp
  * 回声覆盖（D5）。
  *
- * D3 触发矩阵（「跟随」= 贴底则滚底；「标 unread」= 脱离则点亮「回到底部」浮层；所有触发
- * 统一进 follow 原语 followIfStuck——其 rAF 内重读 stickToBottom 的 guard 语义不变）：
+ * D3 触发矩阵（「跟随」= 贴底则滚底；脱离态一律不滚（followIfStuck 的 rAF 重读 guard 内聚）；
+ * 所有触发统一进 follow 原语 followIfStuck。[ui-optimize-unified 决策 12] 旧「标 unread」
+ * 列随未读标记状态链退役——「回到最新」胶囊浮现改由距底几何判定驱动，触发源不再区分
+ * 标记/静默两档，tail/spacer 二分与前插（isPrepend）抑制窗的标记门控一并失去消费方，退役）：
  *
  * | 触发源                                    | 贴底       | 脱离       |
  * |-------------------------------------------|------------|------------|
- * | messages.length watch（store 级）          | 跟随       | 标 unread* |
- * | 末条文本长度 watch（isStreaming 守卫）      | 跟随       | 标 unread  |
- * | tailEl RO 增高（活动条/fork 出现） | 跟随       | 标 unread  |
- * | contentWrapEl RO 其余变化（spacer）         | 跟随       | 不动，不标 |
- * | scrollEl RO（视口 resize）                 | 跟随       | 不动，不标 |
- * | 纯宽度变化（高度未变）                      | 显式 no-op | 不标       |
- * | 尾部新增 user 消息（用户主动发送，见下）     | 跟随       | 强制回底重锚定** |
+ * | messages.length watch（store 级）          | 跟随       | 不滚       |
+ * | 末条文本长度 watch（isStreaming 守卫）      | 跟随       | 不滚       |
+ * | contentWrapEl RO 高度变化（tail/spacer）   | 跟随       | 不滚       |
+ * | scrollEl RO（视口 resize）                 | 跟随       | 不滚       |
+ * | 纯宽度变化（高度未变）                      | 显式 no-op | —          |
+ * | 尾部新增 user 消息（用户主动发送，见下）     | 强制回底重锚定**        |
  *
  *  ** feat-new-message-to-bottom：「不扯用户」保护（INVAR-M4-2′）只约束**到来**的内容
  *  （assistant 流式 / 工具输出 / system notice）——用户在 composer 主动发送的消息是显式
@@ -26,13 +27,10 @@
  *  与后续回复）。本行是唯一绕过 stickToBottom guard 的触发，走 followToBottomForce
  *  （= followToBottom(true)，重置贴底态 + NaN 快照 + 开收敛抑制窗，force 第二合法来源）。
  *
- *  * isPrepend（load-more 前插抑制窗）为真期间：跟随但不标 unread——用户主动翻历史，下方
- *    并无新内容（设计已声明语义差异：现状前插会点亮一次 unread，本矩阵刻意降噪，V9 验收覆盖）。
- *
  * 观察目标：contentWrapEl（Virtualizer + tailEl 的静态无样式 wrapper——spacer 与 tail 高度
- * 都投影到它的盒尺寸）+ scrollEl（滚动视口）。wrap RO 回调内先读 tailEl.offsetHeight 与
- * 上次快照比对区分「tail 变化」与「spacer 变化」（两类变化都会触发 wrap RO，先扣掉 tail
- * 分量）。两 RO 回调均调 notifyRoActivity()（喂 useVirtuaFollow 的 D7② 收敛抑制窗静默计时，
+ * 都投影到它的盒尺寸）+ scrollEl（滚动视口）。wrap RO 回调读 tailEl.offsetHeight 维护
+ * tailHeight 快照（endOffset 数据源）并以高度快照区分「纯宽度变化」（no-op）与真实高度变化。
+ * 两 RO 回调均调 notifyRoActivity()（喂 useVirtuaFollow 的 D7② 收敛抑制窗静默计时，
  * 时机 = 首次 RO 回调，不因双 rAF 拖延）。
  *
  * RO 回调内的跟随一律经 followFromRo() 双 rAF 触发（设计 §4.5 P-timing 降级预案「RO 回调内
@@ -54,18 +52,16 @@ interface MessageStreamFollowTriggerDeps {
    * 内部 optional chaining（?.isStreaming）统一处理（与原 useMessageStreamScroll 同构）。
    */
   lastRenderTurn: ComputedRef<{ isStreaming: boolean } | null>
-  /** load-more 前插抑制窗信号（useLoadMoreHistory.isPrepend）：窗内跟随但不标 unread */
-  isPrepend: Ref<boolean>
   /** 滚动容器 el（scrollEl——视口 resize RO 观察目标） */
   scrollEl: Ref<HTMLElement | null>
   /** follow 原语（useVirtuaFollow.followIfStuck）：全触发的统一入口，guard 在原语内部 */
-  followIfStuck: (opts?: { markUnread?: boolean }) => void
+  followIfStuck: () => void
   /** D7② RO 活动信号（useVirtuaFollow.notifyRoActivity 透传）：重置收敛抑制窗 120ms 静默计时 */
   notifyRoActivity: () => void
   /**
    * 强制回底（useVirtuaFollow.followToBottom(true) 透传）：无视 stickToBottom guard，
    * 重置贴底态 + NaN 快照 + 开收敛抑制窗。唯一调用点 = 尾部新增 user 消息（用户主动发送，
-   * 触发矩阵末行——force 第二合法来源，与「回到底部」浮层点击同级）。
+   * 触发矩阵末行——force 第二合法来源，与「回到最新」胶囊点击同级）。
    */
   followToBottomForce: () => void
 }
@@ -102,31 +98,22 @@ export function useMessageStreamFollowTriggers(deps: MessageStreamFollowTriggerD
   // ── RO 回调双 rAF 触发（P-timing 降级预案，见文件头）────────────────────────
   /** 外层 rAF 句柄（null = 无 pending；连续 RO 触发 cancel 合并，同 U1 pendingRafId 模式） */
   let pendingRoRafId: number | null = null
-  /**
-   * 外层合并的 markUnread sticky 位：同帧多个 RO 回调 cancel-reschedule 时，标记型（tail
-   * 增高）调用不被后到的静默型调用取消丢失（对齐 U1 followIfStuck 的 pendingMarkUnread
-   * 语义：cancel 只收敛滚动，不丢 unread 标记）。
-   */
-  let pendingRoMarkUnread = false
 
   /**
    * RO 回调内的统一 follow 入口：套一层外层 rAF 再调 followIfStuck（双 rAF，再让一帧）。
-   * markUnread 语义逐分支透传（tail/spacer 二分与 isPrepend 门控不变），同帧合并由外层
-   * 句柄 cancel + sticky 位完成。
+   * 同帧合并由外层句柄 cancel 完成（[决策 12] 旧 markUnread sticky 位随标记/静默分档退役——
+   * 合并只剩滚动收敛一义，cancel 不再可能丢失任何标记语义）。
    */
-  function followFromRo(markUnread: boolean): void {
+  function followFromRo(): void {
     if (typeof requestAnimationFrame === 'undefined') {
       // 测试 / SSR 兜底：无 rAF 直调（followIfStuck 内部自有无 rAF 的 microtask 兜底）
-      deps.followIfStuck({ markUnread })
+      deps.followIfStuck()
       return
     }
-    if (markUnread) pendingRoMarkUnread = true
     if (pendingRoRafId !== null) cancelAnimationFrame(pendingRoRafId)
     pendingRoRafId = requestAnimationFrame(() => {
       pendingRoRafId = null
-      const shouldMark = pendingRoMarkUnread
-      pendingRoMarkUnread = false
-      deps.followIfStuck({ markUnread: shouldMark })
+      deps.followIfStuck()
     })
   }
 
@@ -139,7 +126,9 @@ export function useMessageStreamFollowTriggers(deps: MessageStreamFollowTriggerD
 
     if (typeof ResizeObserver === 'undefined') return // happy-dom 无 RO 时 store watch 通路仍有效
 
-    // contentWrapEl RO：spacer 与 tail 高度变化都投影到本元素盒尺寸（D3 触发矩阵 3-6 行）
+    // contentWrapEl RO：spacer 与 tail 高度变化都投影到本元素盒尺寸（D3 触发矩阵 3-4 行）。
+    // [决策 12] tail/spacer 二分与 isPrepend 前插抑制窗随标记分档退役——两类变化统一跟随
+    // （tailHeight 快照照常维护：它是 endOffset 数据源，与本 RO 的触发职责解耦）。
     wrapRo = new ResizeObserver((entries) => {
       deps.notifyRoActivity()
       const last = entries[entries.length - 1]
@@ -151,39 +140,24 @@ export function useMessageStreamFollowTriggers(deps: MessageStreamFollowTriggerD
       prevWrapHeight = wrapHeight
       if (prevTail === null || prevWrap === null) return // 首回调：只建基线
       if (tailH === prevTail && wrapHeight === prevWrap) return // 纯宽度变化（高度未变）→ no-op
-      if (deps.isPrepend.value) {
-        // 前插抑制窗：跟随但不标 unread（用户主动翻历史，下方并无新内容）
-        followFromRo(false)
-        return
-      }
-      if (tailH > prevTail) {
-        // tail 增高：活动条/fork 行出现或长高 = 底部区域新内容 → 标 unread
-        followFromRo(true)
-      } else {
-        // spacer 变化（fence finalize / 图片加载 / 估算收敛 / trace 折叠）→ 静默跟随不标
-        followFromRo(false)
-      }
+      followFromRo()
     })
     if (contentWrapEl.value) wrapRo.observe(contentWrapEl.value)
 
-    // scrollEl RO：视口 resize → 静默跟随（脱离态不标 unread；双 rAF 见文件头 P-timing）
+    // scrollEl RO：视口 resize → 跟随（脱离态不滚由 guard 内聚；双 rAF 见文件头 P-timing）
     scrollRo = new ResizeObserver(() => {
       deps.notifyRoActivity()
-      followFromRo(false)
+      followFromRo()
     })
     if (deps.scrollEl.value) scrollRo.observe(deps.scrollEl.value)
   })
 
   // ── store 级 watch（D3 矩阵前两行；自 useMessageStreamScroll 迁入，语义逐路对齐）──
 
-  // 消息条数变化 → 跟随（新消息 append / load-more 前插——前插抑制窗内跟随但不标 unread）
+  // 消息条数变化 → 跟随（新消息 append / load-more 前插同型）
   watch(
     () => deps.messages.value.length,
     () => {
-      if (deps.isPrepend.value) {
-        deps.followIfStuck({ markUnread: false })
-        return
-      }
       deps.followIfStuck()
     },
   )

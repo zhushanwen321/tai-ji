@@ -3,6 +3,7 @@
  *
  * 激活 session（'API 性能优化'）后 main panel 载入 chat workspace，截 composer-box。
  * baseline: e2e/visual-baselines/composer.spec/composer-default.png（git tracked，Q3/D3）。
+ * 基线环境无关性由 bundled webfont 保证（同 shell.spec.ts 头注，字体变更须全量重录）。
  *
  * activateSession 复用 e2e/v6-shell-baseline.spec.ts 范式。mock 模式（VITE_MOCK=true，无 VITE_E2E）
  * session list 是 fixtureSessions（8 个：5 个演示态 + s3 的 3 个 agent 子会话 s3-c1/c2/c3，
@@ -10,7 +11,7 @@
  * 条目断言依赖 s3 的三个子会话。
  * 运行：npx playwright test e2e/visual/composer.spec.ts --project=visual-chromium
  */
-import { test, expect } from './fixtures/visual-server'
+import { test, expect, fontsReady } from './fixtures/visual-server'
 import type { Page } from '@playwright/test'
 
 /**
@@ -47,20 +48,17 @@ test.describe('visual baseline: composer', () => {
     // parentAgentSessionId='s3' 的子会话 → 托盘必须渲染 session 条目（计数 ● 3）。
     // 托盘条目存在性同时是视觉基线断言对象（底栏重排 + 第 4 件是本次基线变更驱动元素）。
     await expect(page.locator('[data-testid="tray-builtin-button"][data-kind="session"]')).toBeVisible()
-    // settle：等 composer 渲染 + 动画平息
+    // settle：等 composer 渲染 + 动画平息 + bundled 字体就绪
     await page.waitForTimeout(1500)
+    await fontsReady(page)
     await expect(page.getByTestId('composer-box')).toHaveScreenshot('composer-default.png', {
-      // 阈值容忍微小 flaky（字体抗锯齿/caret 闪烁）；真回归远超 1% 仍触发（ERR4）
+      // 阈值容忍微小 flaky（抗锯齿/caret 闪烁）；真回归远超 1% 仍触发（ERR4）
       maxDiffPixelRatio: 0.01,
       caret: 'hide',
-      // [字体 metrics 噪声源排除] placeholder 提示文字整段 mask：各 macOS 版本（本机 vs CI
-      // runner macos-latest）的系统字体 metrics 存在持续性差异，长文案排版（断行位置/字宽）
-      // 随之漂移——2026-09-30 v0.10.6 发布期实测：hint 加长后该段独占 ~2% 像素差（阈值 1%），
-      // CI 恒红而本地恒绿。该区域是纯文案渲染（文案回归由 i18n/行为轨守），非像素断言对象；
-      // composer 布局/托盘/底栏/边框仍全量参与 diff。
-      // [基线权威环境 = CI runner] 本地重录会把本机字体渲染照进基线，push 后 CI 恒红——
-      // 重录必须走 CI 通道（临时 workflow 跑 --update-snapshots + artifact 回传落库），
-      // 禁止本地 --update-snapshots 后直接提交。
+      // [placeholder 文案 mask，双保险] 本轨渲染字体已固定为 bundled webfont（Noto Sans SC
+      // Variable，见 fixtures/visual-server.ts），字体 metrics 的跨环境差异已由字体固定根治；
+      // mask 保留为文案区非像素断言对象的声明（文案回归由 i18n/行为轨守），composer 布局/
+      // 托盘/底栏/边框仍全量参与 diff。
       mask: [page.getByRole('textbox')],
     })
   })

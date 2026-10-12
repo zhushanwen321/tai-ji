@@ -225,9 +225,13 @@ const iconTitle = computed(() =>
 )
 /** 新建会话快捷键显示（跨平台；⌘N / Ctrl+N） */
 const newSessionKbd = computed(() => formatKbd('n'))
-/** chip 基础类（accent 底 = 非默认模式这一状态通道） */
+/**
+ * chip 基础类（accent 底 = 非默认模式这一状态通道）。几何对齐 demo .chip 档
+ * （unpacked.css：min-h 24 / padding 3px 8px / r-sm 6px / 字号 --text-xs 12px）；
+ * accent-soft 底为 real 语义通道（demo 无对话态模式 chip 对应物，登记类推）。
+ */
 const CHIP_CLASS =
-  'relative h-auto min-w-0 shrink gap-1.5 rounded-md px-2 py-1 text-[12px] font-normal [&_svg]:size-3.5'
+  'relative h-auto min-h-6 min-w-0 shrink gap-1.5 rounded-sm px-2 py-[3px] text-[length:var(--text-xs)] font-normal [&_svg]:size-3.5'
 </script>
 
 <template>
@@ -255,13 +259,13 @@ const CHIP_CLASS =
           <span
             v-if="fallbackDisclosure && density !== 'icon'"
             data-testid="preset-chip-fallback"
-            class="shrink-0 text-[10px]"
+            class="shrink-0 text-[length:var(--text-3xs)]"
             :class="isFellBack ? 'text-warn' : 'text-neutral-dim'"
           >{{ fallbackDisclosure }}</span>
           <!-- 信任标记（文本/短名档）：chip 内小后缀 -->
           <span
             v-if="hasReplace && density !== 'icon'"
-            class="shrink-0 text-[10px] text-warn"
+            class="shrink-0 text-[length:var(--text-3xs)] text-warn"
           >{{ t('panel.presetChip.replaceHint') }}</span>
           <!-- 信任标记（纯图标档）：右上角警示色角标（accent 底不参与）；tooltip 保留全名与标记 -->
           <span
@@ -278,16 +282,16 @@ const CHIP_CLASS =
         <div data-testid="preset-chip-popover" class="p-3">
           <div class="flex items-center gap-2">
             <SlidersHorizontal class="size-3.5 shrink-0 text-accent" />
-            <span class="min-w-0 truncate text-[13px] font-medium text-neutral-fg">{{ fullName }}</span>
+            <span class="min-w-0 truncate text-[length:var(--text-sm)] font-medium text-neutral-fg">{{ fullName }}</span>
             <span
               v-if="preset?.builtin"
-              class="shrink-0 rounded-sm border border-border px-1 text-[10px] text-neutral-dim"
+              class="shrink-0 rounded-sm border border-border px-1 text-[length:var(--text-3xs)] text-neutral-dim"
             >{{ t('panel.presetChip.builtin') }}</span>
           </div>
-          <p v-if="preset?.description" class="mt-1.5 text-[11px] text-neutral-mid">
+          <p v-if="preset?.description" class="mt-1.5 text-[length:var(--text-2xs)] text-neutral-mid">
             {{ preset.description }}
           </p>
-          <dl class="mt-2 space-y-1 text-[11px]">
+          <dl class="mt-2 space-y-1 text-[length:var(--text-2xs)]">
             <div class="flex items-center justify-between gap-2">
               <dt class="text-neutral-dim">{{ t('panel.presetChip.toolSurface') }}</dt>
               <dd class="font-mono text-neutral-mid">{{ toolSurface }}</dd>
@@ -307,19 +311,19 @@ const CHIP_CLASS =
           <p
             v-if="fallbackDisclosure"
             data-testid="preset-chip-fallback-popover"
-            class="mt-2 flex items-start gap-1.5 text-[11px]"
+            class="mt-2 flex items-start gap-1.5 text-[length:var(--text-2xs)]"
             :class="isFellBack ? 'text-warn' : 'text-neutral-mid'"
           >
             <TriangleAlert class="mt-px size-3 shrink-0" />
             <span>{{ fallbackDisclosure }}</span>
           </p>
           <!-- 锁定说明：模式 id 在创建时确定、本会话内不可更换（模式定义可在设置页编辑，下次启动生效） -->
-          <p class="mt-2 flex items-start gap-1.5 text-[11px] text-neutral-mid">
+          <p class="mt-2 flex items-start gap-1.5 text-[length:var(--text-2xs)] text-neutral-mid">
             <Lock class="mt-px size-3 shrink-0 text-neutral-dim" />
             <span>{{ t('panel.presetChip.lockNote') }}</span>
           </p>
           <!-- 出口提示（快捷键由全局 keymap 承载；本处只做可达性披露，不新增点击机制） -->
-          <div class="mt-2 border-t border-border pt-2 text-[11px] text-neutral-dim">
+          <div class="mt-2 border-t border-border pt-2 text-[length:var(--text-2xs)] text-neutral-dim">
             <span>{{ t('panel.presetChip.newSession') }}</span>
             <span class="ml-1 font-mono text-neutral-mid">{{ newSessionKbd }}</span>
           </div>

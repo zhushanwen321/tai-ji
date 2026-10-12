@@ -40,8 +40,8 @@
 # 不占用正在跑的 dev app。
 #
 # 用法: bash scripts/verify-plugin-contract.sh
-# 依赖: node >= 22（全局 WebSocket）、curl、lsof、pgrep、pnpm、pi（PATH 或
-#       ~/.nvm/versions/*/bin/pi——session.create spawn 真实 pi 子进程）
+# 依赖: node >= 22（全局 WebSocket）、curl、lsof、pgrep、pnpm、pi（仓库内
+#       node_modules/.bin/pi 优先，缺失回退 PATH——session.create spawn 真实 pi 子进程）
 # 耗时: ~25s
 
 set -euo pipefail
@@ -268,6 +268,18 @@ export async function deactivate() {}
 EOF
 
 # ── 2. 起隔离 runtime（--builtin-plugins-dir 指向 fixture，trusted 形态）──────
+
+# 仓库内 pi 解析优先（原 real-track-failures-after-b2 条目 3）：把 node_modules/.bin
+# 前置 PATH——runtime find-pi-executable 的 PATH 探测将命中仓库 pnpm-lock 钉定版本，
+# 消除落到全局 ~/.nvm/*/bin/pi 的版本错配（旧版 pi 不识别 builtin:codemode 致探针误红）。
+if [ -x "$REPO_ROOT/node_modules/.bin/pi" ]; then
+  export PATH="$REPO_ROOT/node_modules/.bin:$PATH"
+  PI_VERSION="$("$REPO_ROOT/node_modules/.bin/pi" --version 2>/dev/null || echo '<version 探测失败>')"
+  echo -e "${BLUE}[pi] 使用仓库内 pi（version=${PI_VERSION}）${NC}"
+else
+  echo -e "${YELLOW}[WARN] node_modules/.bin/pi 不存在——pi 解析回退 PATH 全局版（版本错配风险）${NC}" >&2
+fi
+
 PORT=""
 for _ in $(seq 1 10); do
   CANDIDATE=$(( (RANDOM % 3000) + 41000 ))

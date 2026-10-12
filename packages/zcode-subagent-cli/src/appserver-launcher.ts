@@ -37,6 +37,14 @@
 //    `node --require <wrapper> <cliPath>` preload 形态（设计 §3.1 方案 E——wrapper
 //    退化为纯 fs-patch preload，argv 与模块标识双双恢复原生）。
 //
+// D3 换轨装载通道（engine-provider-unification §3.3 D3，2026-10-12 A0 实测后）：
+// zcode CLI 0.16.9 的 Provider Registry 个人 provider 供数 = 进程直读真实
+// `~/.zcode/v2/provider_config.json`（HOME 覆写与 env 通道均绕不过，wrapper 补注入
+// cli config 的条目 Registry 不消费）——同一 patch 基建增加该路径分支：命中时返回
+// merge(真实文件实时内容, taiji 同步副本) 的合并 JSON，Registry 直读该路径即读到
+// 合并视图。merge 每次读取重算（事实驱动，无缓存/时间窗）；preparer.ts 的校验链
+// 读取同一 merge 规则（mergePersonalProviderConfig——两侧对账单测锁步）。
+//
 // 源码以内嵌字符串形态进 dist bundle（vendored 面只拷 dist/，独立 .cjs 资产会被
 // vendor 脚本漏掉——字符串常量无此问题），运行时幂等落盘 engineDataDir。
 
@@ -50,7 +58,9 @@ export const ZCODE_APPSERVER_LAUNCHER_NAME = "appserver-launcher.cjs";
 /**
  * wrapper 源码（CJS；内容即版本——修改须同步本常量，落盘端按内容幂等覆盖）。
  * env 契约：ZCODE_ENG_CLI_PATH（zcode.cjs 绝对路径，必填）、
- * ZCODE_ENG_V2_CONFIG（v2 config 路径，缺省 ~/.zcode/v2/config.json）。
+ * ZCODE_ENG_V2_CONFIG（v2 config 路径，缺省 ~/.zcode/v2/config.json）、
+ * ZCODE_ENG_PROVIDER_CONFIG（taiji 同步副本路径——D3 换轨后语义收窄：补注入段
+ * 读取源 + 真实 provider_config.json 拦截分支的副本源；未设 = 拦截分支不激活）。
  */
 export const APPSERVER_LAUNCHER_SOURCE = `'use strict';
 // zcode app-server fs 拦截 wrapper（由 zcode-subagent-cli appserver-launcher 落盘生成）
@@ -60,7 +70,12 @@ const os = require('node:os');
 
 const CLI_PATH = process.env.ZCODE_ENG_CLI_PATH;
 const V2_PATH = process.env.ZCODE_ENG_V2_CONFIG || path.join(os.homedir(), '.zcode', 'v2', 'config.json');
-const PROVIDER_CONFIG_PATH = process.env.ZCODE_ENG_PROVIDER_CONFIG || path.join(os.homedir(), '.zcode', 'v2', 'provider_config.json');
+// 真实 provider_config.json（Registry 直读路径，A0 探针实证）——与 CONFIG_PATH 同款
+// homedir 推导形态，不受 env 重定向（merge 分支要读的正是这个真实路径本身）
+const REAL_PROVIDER_CONFIG_PATH = path.join(os.homedir(), '.zcode', 'v2', 'provider_config.json');
+// taiji 同步副本路径（ZCODE_ENG_PROVIDER_CONFIG 语义收窄；'' = 未设 → merge 分支不激活）
+const PI_SYNCED_PATH = process.env.ZCODE_ENG_PROVIDER_CONFIG || '';
+const PROVIDER_CONFIG_PATH = process.env.ZCODE_ENG_PROVIDER_CONFIG || REAL_PROVIDER_CONFIG_PATH;
 const CONFIG_PATH = path.join(os.homedir(), '.zcode', 'cli', 'config.json');
 
 // 合并形态：真实 cli config 原样（model/plugins/mcp/subagents 等 worker 继承面不变）
@@ -138,11 +153,14 @@ function injectedConfigText() {
       for (const mid of order) {
         if (typeof mid === 'string' && mid !== '' && !(mid in models)) models[mid] = {};
       }
+      // kind 按条目 api.type 派生（D3）：anthropic-messages → anthropic，其余
+      // （openai-chat-completions / api.type 缺席 / 未知值）→ openai-compatible
+      // ——对齐 v2 config.json 既有 kind 两值形态；作用于补注入段全部条目（含透传
+      // 真实条目，anthropic 协议真实条目从旧错配值 openai-compatible 顺带修正）。
+      // 未知协议值错配时请求期协议错误可见（不阻塞注册表装载），真机漂移信号明确
       injectable[id] = {
         name: typeof rule.providerName === 'string' ? rule.providerName : id,
-        // provider_config.json 不携带协议形态——standard-personal 组以 openai-compatible
-        // 为多数先例；错配时请求期协议错误可见（不阻塞注册表装载），真机漂移信号明确
-        kind: 'openai-compatible',
+        kind: api.type === 'anthropic-messages' ? 'anthropic' : 'openai-compatible',
         options: { apiKey: access.apiKey, baseURL: api.baseUrl },
         source: 'custom',
         models: models,
@@ -157,6 +175,77 @@ function injectedConfigText() {
     merged.model = { ...(merged.model || {}), main: v2.model.main };
   }
   return JSON.stringify(merged);
+}
+
+// [merge-fn-start]（对账单测提取锚——appserver-launcher.test.ts 按标记截取本函数
+// eval 执行；preparer.ts mergePersonalProviderConfig 与本函数同规则锁步，改任一侧
+// 须同步另一侧并跑对账单测）
+// merge(真实, 副本)——D3 换轨版规则：
+//   - 副本非对象 → 原样返回 real（副本缺席回落语义；wrapper 侧更早短路，防御形态）
+//   - 真实非对象（ENOENT/损坏）→ 原样返回 copy（副本独有条目为全集：providerRules
+//     仅副本条目 + order 仅副本序，顶层字段随副本保持形态完整）
+//   - providerRules：真实条目整条保留在前，副本独有 id 追加（真实优先 = 同名让位
+//     的运行时第二道防线）；无有效 providerId 的副本条目丢弃，真实条目原样保留
+//   - providerOrder：真实现值序 + 副本独有 id 追加（去重保序）
+//   - 其余字段（含 config 内其他键）取真实现值
+function mergeProviderConfig(realObj, copyObj) {
+  const isRec = (v) => v && typeof v === 'object' && !Array.isArray(v);
+  if (!isRec(copyObj)) return realObj;
+  if (!isRec(realObj)) return copyObj;
+  const cfgOf = (obj) => (isRec(obj.config) ? obj.config : {});
+  const rulesOf = (obj) => {
+    const pcr = cfgOf(obj).providerConfigRules;
+    const r = isRec(pcr) ? pcr.providerRules : undefined;
+    return Array.isArray(r) ? r : [];
+  };
+  const strArr = (v) => (Array.isArray(v) ? v.filter((s) => typeof s === 'string' && s.trim() !== '') : []);
+  const mergedRules = [];
+  const seen = {};
+  for (const rule of rulesOf(realObj)) {
+    mergedRules.push(rule);
+    if (isRec(rule) && typeof rule.providerId === 'string' && rule.providerId !== '') seen[rule.providerId] = true;
+  }
+  for (const rule of rulesOf(copyObj)) {
+    if (!isRec(rule) || typeof rule.providerId !== 'string' || rule.providerId === '') continue;
+    if (seen[rule.providerId]) continue;
+    seen[rule.providerId] = true;
+    mergedRules.push(rule);
+  }
+  const mergedOrder = [];
+  for (const id of strArr(cfgOf(realObj).providerOrder).concat(strArr(cfgOf(copyObj).providerOrder))) {
+    if (mergedOrder.indexOf(id) === -1) mergedOrder.push(id);
+  }
+  const outCfg = Object.assign({}, cfgOf(realObj), {
+    providerOrder: mergedOrder,
+    providerConfigRules: Object.assign(
+      {},
+      isRec(cfgOf(realObj).providerConfigRules) ? cfgOf(realObj).providerConfigRules : {},
+      { providerRules: mergedRules },
+    ),
+  });
+  return Object.assign({}, realObj, { config: outCfg });
+}
+// [merge-fn-end]
+
+// D3 换轨装载通道：命中真实 provider_config.json 的读取重定向为 merge(真实实时
+// 内容, taiji 同步副本)——每次读取重算（事实驱动，无缓存/时间窗，ZCode 端变更
+// 实时生效）。副本缺失/不可读 → null = 调用方短路回原文件（回落真实文件语义，
+// 零行为变化）；env 未设 → null（分支不激活）。读取一律经 readOrig 间接取（防
+// patch 面递归自调用）。
+function mergedProviderConfigText() {
+  if (!PI_SYNCED_PATH) return null;
+  const readOrig = fs.__origReadFileSync || fs.readFileSync;
+  let copyObj;
+  try {
+    copyObj = JSON.parse(readOrig(PI_SYNCED_PATH, 'utf8'));
+  } catch { return null; }
+  if (!copyObj || typeof copyObj !== 'object' || Array.isArray(copyObj)) return null;
+  let realObj = null;
+  try {
+    const parsed = JSON.parse(readOrig(REAL_PROVIDER_CONFIG_PATH, 'utf8'));
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) realObj = parsed;
+  } catch { /* ENOENT/损坏 → 副本独有条目为全集 */ }
+  return JSON.stringify(mergeProviderConfig(realObj, copyObj));
 }
 
 if (!CLI_PATH) {
@@ -182,6 +271,11 @@ if (text !== null) {
       const cur = injectedConfigText();
       if (cur !== null) return shape(rest, cur);
     }
+    // D3 换轨：Registry 直读真实 provider_config.json → merge(真实, 副本) 视图
+    if (typeof p === 'string' && p === REAL_PROVIDER_CONFIG_PATH) {
+      const cur = mergedProviderConfigText();
+      if (cur !== null) return shape(rest, cur);
+    }
     return fs.__origReadFileSync.call(fs, p, ...rest);
   };
   fs.promises.__origReadFile = fs.promises.readFile;
@@ -190,16 +284,26 @@ if (text !== null) {
       const cur = injectedConfigText();
       if (cur !== null) return Promise.resolve(shape(rest, cur));
     }
+    if (typeof p === 'string' && p === REAL_PROVIDER_CONFIG_PATH) {
+      const cur = mergedProviderConfigText();
+      if (cur !== null) return Promise.resolve(shape(rest, cur));
+    }
     return fs.promises.__origReadFile.call(fs.promises, p, ...rest);
   };
   // existsSync 拦截：真实 bundle 的用户 config 读取（loadFileConfig）以 existsSync
   // 为短路门——文件不存在时返回空 config 且 readFileSync 不被调用，GUI-only
-  // 登录宿主（cli/config.json 从未被 CLI 侧写过）上注入只挂在读取面 = 不可见
+  // 登录宿主（cli/config.json 从未被 CLI 侧写过）上注入只挂在读取面 = 不可见。
+  // D3 换轨：真实 provider_config.json 的存在性 = 真实或副本任一存在即 true
+  //（真实缺失 + 副本存在时 Registry 的 existsSync 门不得拦掉 merge 视图读取）
   fs.__origExistsSync = fs.existsSync;
   fs.existsSync = function (p) {
     if (typeof p === 'string' && p === CONFIG_PATH) {
       const cur = injectedConfigText();
       if (cur !== null) return true;
+    }
+    if (typeof p === 'string' && p === REAL_PROVIDER_CONFIG_PATH && PI_SYNCED_PATH) {
+      if (fs.__origExistsSync.call(fs, REAL_PROVIDER_CONFIG_PATH)) return true;
+      return fs.__origExistsSync.call(fs, PI_SYNCED_PATH);
     }
     return fs.__origExistsSync.call(fs, p);
   };

@@ -288,8 +288,10 @@ export interface WorkflowRunPhaseFoldEntry {
 // ── 大字段截断形态（§3.1-4 D4）────────────────────────────────
 
 /**
- * 事件流 RPC 的大字段截断白名单（四个全文载荷字段，逐字对齐设计 §3.1-4 截断清单：
- * agent-started.input / agent-settled.result / run-created.scriptSource / run-created.args）。
+ * 事件流 RPC 的大字段截断白名单（五个全文载荷字段，逐字对齐设计 §3.1-4 截断清单：
+ * agent-started.input / agent-settled.result / run-created.scriptSource /
+ * run-created.args / worker-log 的 entry.message——键名 entryMessage 指向嵌套
+ * entry 内的 message 字段，截断语义与其余四个顶层字段同口径）。
  * 扩缩清单须先改设计表，再同步此处与 workflow-viz-protocol.test.ts 锚定集。
  */
 export const WORKFLOW_RUN_EVENT_TRUNCATED_FIELDS = [
@@ -297,6 +299,7 @@ export const WORKFLOW_RUN_EVENT_TRUNCATED_FIELDS = [
   'result',
   'scriptSource',
   'args',
+  'entryMessage',
 ] as const
 
 /** 截断白名单字段的联合（truncatedFields 数组元素的值域）。 */
@@ -350,7 +353,7 @@ export interface WorkflowRunEventEntryBase { // oe-exempt:20261002:framework:wor
   ts: number
   /** 行级单调序号（1 起严格递增；旧格式行缺失）。 */
   seq?: number
-  /** 本行被截断的大字段名清单（缺省 = 无截断；值域 = 截断白名单四字段）。 */
+  /** 本行被截断的大字段名清单（缺省 = 无截断；值域 = 截断白名单五字段）。 */
   truncatedFields?: WorkflowRunEventTruncatedField[]
 }
 
@@ -495,14 +498,19 @@ export interface WorkflowRunModelOverrideEntry extends WorkflowRunEventEntryBase
 /** `worker-log` 条目（worker 诊断日志帧——不参与生命周期状态机的诊断面）。 */
 export interface WorkflowRunWorkerLogEntry extends WorkflowRunEventEntryBase {
   type: 'worker-log'
-  /** 诊断条目（与 core WorkerLogEntry 同形：level 词表 log/warn/error/info）。 */
+  /**
+   * 诊断条目（与 core WorkerLogEntry 同形：level 词表 log/warn/error/info）。
+   * message 为截断值（白名单键 entryMessage——超 2KB 按字节截断，被截断时经
+   * truncatedFields 标注；截断载荷仅供展示，排障全文读 record 原文）。
+   */
   entry: { level: 'log' | 'warn' | 'error' | 'info'; message: string }
 }
 
 /**
  * record 事件流条目判别联合（事件流 RPC 的行形态；判别键 = type，11 成员跟随
  * core WorkflowRunEvent 词表）。大字段截断语义见各成员注释与信封
- * truncatedFields——四个全文载荷字段（input/result/scriptSource/args）在本协议
+ * truncatedFields——五个全文载荷字段（input/result/scriptSource/args 与
+ * worker-log 的 entry.message，后者按白名单键 entryMessage 标注）在本协议
  * 形态中恒为文本截断值（对象字段 = JSON 序列化文本前缀），被截断者由
  * truncatedFields 逐行标注。
  */

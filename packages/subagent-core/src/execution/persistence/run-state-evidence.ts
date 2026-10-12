@@ -72,8 +72,8 @@ export interface PruneStateDeps { // oe-exempt:20260929:framework:workflow/recor
 //    只走判据①。其镜像代价（崩溃后永不重开的会话 journal 滞留）经维护轮候选数
 //    日志监控——持续增长 = 启用判据②校准的反向触发信号（设计 D5 显式声明）；
 // ③ 清理对象按 run 粒度成对删 state 文件 + journal（<runId>.record.jsonl，存在才
-//    删）；record 域同判据清 <sa-id>.events 事件文件（manifest 不触碰，其独立
-//    30 天 TTL 归 session-file-gc，孤儿判定窗口不漂移）；
+//    删）；record 域同判据清 <sa-id>.events 事件文件（manifest 不触碰——其清理
+//    归删主会话级联随族删，不在本维护轮判据内）；
 // ④ 任何失败不抛（辅助清理降级不拖垮主链）：readdir 失败静默放弃本轮该域，单
 //    run 判定失败按「不可判定 → 跳过」降级（宁保留不误裁——误裁活跃 run 是不可
 //    恢复事故方向），单文件 unlink 失败 warn 留证后继续。
@@ -307,8 +307,8 @@ export interface PruneTerminalRecordEventFilesResult { // oe-exempt:20260929:fra
 /**
  * record 域保留清理（W1 D5：record 事件文件与 run journal 同判据——fold 终态 +
  * 窗口）。运行中/非终态永不清（settled 被 reopened/round-started 清除 = 回边续跑，
- * 保护语义与 fold 投影单源）；manifest（<sa-id>.json）不触碰——其独立 30 天 TTL
- * 归 session-file-gc（孤儿判定窗口与现状不漂移，设计 D2/D5）。
+ * 保护语义与 fold 投影单源）；manifest（<sa-id>.json）不触碰——其清理归删主会话
+ * 级联（随子代理文件族删，runtime session-content-cascade，2026-10-12 裁决）。
  */
 async function pruneTerminalRecordEventFiles(
   recordsDir: string,

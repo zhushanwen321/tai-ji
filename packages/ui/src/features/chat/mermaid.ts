@@ -6,7 +6,7 @@
  * 本文件，占位实现在壳层 provide）。
  *
  * 动态 import mermaid（避免首屏加载 ~3MB），按当前应用主题（[data-theme]）配置
- * themeVariables（对齐项目 design-tokens 冷蓝暗色/亮色，而非 design-visual-explainer 的 teal）。
+ * themeVariables（对齐项目 design-tokens v6 太极纯灰暗/亮两态，而非 design-visual-explainer 的 teal）。
  *
  * 主题机制关键差异（HISTORICAL）：taiji 是应用内 [data-theme] 切换，非系统 prefers-color-scheme。
  * mermaid 的 themeVariables 在 initialize 时固化（颜色 bake 进 SVG path），切主题必须重新 initialize + 重渲染。
@@ -48,49 +48,56 @@ export function getCurrentTheme(): 'dark' | 'light' {
 }
 
 /**
- * 按主题构建 mermaid themeVariables（对齐项目 design-tokens，非 design-visual-explainer 的 teal）。
+ * 按主题构建 mermaid themeVariables（对齐项目 design-tokens v6 太极纯灰体系）。
  * 色值取自 style.css 的暗/亮 CSS 变量（硬编码等效值——mermaid themeVariables 不支持 CSS 变量引用，
  * 颜色 bake 进 SVG，必须用具体色值；与 shiki 双主题 CSS 变量切换机制不同）。
+ *
+ * 映射规则（token 职能 → mermaid 变量）：node 填充 = 表面色（--surface/--surface-2/--bg）、
+ * 边框 = border 系（--border/--border-strong）、文字 = neutral 谱系（--neutral-fg/--neutral-mid）、
+ * 线条/强调 = accent 青玉系（--accent；mermaid base 主题惯例 lineColor 走主色——hairline 0.05
+ * 透明度作为连接线对比不足）。暗块 = style.css :root（玄），亮块 = [data-theme="light"]（皓）；
+ * 黛蓝/暖墨/青墨/朱印 preset（data-theme-preset）不进入本映射——themeVariables 只有暗/亮轴，
+ * preset 差异（主要是 accent 色相）图表侧不跟随。
  */
 export function resolveMermaidThemeVariables(theme: 'dark' | 'light'): Record<string, string> {
   if (theme === 'light') {
     return {
-      fontFamily: "'JetBrains Mono', 'IBM Plex Mono', ui-monospace, monospace",
-      fontSize: '14px',
-      // 亮色：白底节点 + 深色边框/文字（style.css [data-theme=light]）
-      primaryColor: '#ffffff', // --surface
-      primaryBorderColor: '#00000024', // --border-strong
-      primaryTextColor: '#0d0d0f', // --fg
-      secondaryColor: '#f1f3f6', // --surface-2
-      secondaryBorderColor: '#3b82f6', // --accent-hover
-      secondaryTextColor: '#5a5a65', // --muted
-      tertiaryColor: '#f8f9fb', // --bg
-      tertiaryBorderColor: '#00000014', // --border
-      tertiaryTextColor: '#5a5a65',
-      lineColor: '#2563eb', // --accent
+      fontFamily: "'JetBrains Mono', 'IBM Plex Mono', ui-monospace, Menlo, monospace",
+      fontSize: '14px', // --text-base 基准档
+      // 亮色（皓）：纸白底节点 + 墨色文字 + 青玉深档 accent（style.css [data-theme="light"]）
+      primaryColor: '#f7f6f3', // --surface（亮）
+      primaryBorderColor: '#00000024', // --border-strong（亮 rgba(0,0,0,0.14)）
+      primaryTextColor: '#2b2a28', // --neutral-fg（亮）
+      secondaryColor: '#efede9', // --surface-2（亮）
+      secondaryBorderColor: '#43765d', // --accent（亮青玉）
+      secondaryTextColor: '#706e6a', // --neutral-mid（亮）
+      tertiaryColor: '#edebe8', // --bg（亮）
+      tertiaryBorderColor: '#00000012', // --border（亮 rgba(0,0,0,0.07)）
+      tertiaryTextColor: '#706e6a', // --neutral-mid（亮）
+      lineColor: '#43765d', // --accent（亮青玉）
       // note（mermaid note 节点）
-      noteBkgColor: '#f1f3f6',
-      noteTextColor: '#0d0d0f',
-      noteBorderColor: '#3b82f6',
+      noteBkgColor: '#efede9', // --surface-2（亮）
+      noteTextColor: '#2b2a28', // --neutral-fg（亮）
+      noteBorderColor: '#43765d', // --accent（亮青玉）
     }
   }
   return {
-    fontFamily: "'JetBrains Mono', 'IBM Plex Mono', ui-monospace, monospace",
-    fontSize: '14px',
-    // 暗色：深底节点 + 亮色边框/文字（style.css :root，2026-07-09 提亮后色值）
-    primaryColor: '#222329', // --surface
-    primaryBorderColor: '#ffffff26', // --border-strong
-    primaryTextColor: '#f7f8fc', // --fg
-    secondaryColor: '#282930', // --surface-2
-    secondaryBorderColor: '#4f8ef7', // --accent
-    secondaryTextColor: '#a8a8b5', // --muted
-    tertiaryColor: '#1a1b1f', // --bg
-    tertiaryBorderColor: '#ffffff14', // --border
-    tertiaryTextColor: '#a8a8b5',
-    lineColor: '#4f8ef7', // --accent
-    noteBkgColor: '#282930',
-    noteTextColor: '#f7f8fc',
-    noteBorderColor: '#4f8ef7',
+    fontFamily: "'JetBrains Mono', 'IBM Plex Mono', ui-monospace, Menlo, monospace",
+    fontSize: '14px', // --text-base 基准档
+    // 暗色（玄）：深底节点 + 亮文字 + 青玉 accent（style.css :root）
+    primaryColor: '#101010', // --surface
+    primaryBorderColor: '#ffffff21', // --border-strong rgba(255,255,255,0.13)
+    primaryTextColor: '#ececec', // --neutral-fg
+    secondaryColor: '#27272a', // --surface-2
+    secondaryBorderColor: '#7fb89c', // --accent（青玉）
+    secondaryTextColor: '#8a8a8a', // --neutral-mid
+    tertiaryColor: '#1e1e1e', // --bg
+    tertiaryBorderColor: '#ffffff12', // --border rgba(255,255,255,0.07)
+    tertiaryTextColor: '#8a8a8a', // --neutral-mid
+    lineColor: '#7fb89c', // --accent（青玉）
+    noteBkgColor: '#27272a', // --surface-2
+    noteTextColor: '#ececec', // --neutral-fg
+    noteBorderColor: '#7fb89c', // --accent（青玉）
   }
 }
 

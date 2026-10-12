@@ -1,13 +1,16 @@
 /**
  * Turn.vue 首屏冒烟测试（fast-handoff wave）。
  *
- * W4 拆分后 Turn.vue 是编排器：fork/handoff 按钮下沉到 TurnSummary 子组件。
+ * Turn.vue 是编排器：fork/handoff 按钮下沉到 TurnSummary 子组件；[actions-anchor] 起
+ * TurnSummary 经末位 text 块（Block）的 #turn-actions 插槽挂载，悬停区 = text 块本身。
  * 冒烟验证：
- * - TurnSummary 子组件在有 assistant 时渲染（承载 handoff/fork 按钮的 hover actions）
- * - TurnSummary 在无 assistant 时不渲染
+ * - 有 assistant（含 text 块）时锚块包装层存在，TurnSummary 挂载并透传 lastAssistant
+ * - 无 assistant（无 text 块）时无锚块，TurnSummary 不挂载
  *
- * fork/handoff 按钮的 data-testid / disabled 守卫单测在 TurnSummary 维度覆盖（shallowMount 下
- * Turn 内是 stub，断言 testid 无意义）。Turn.vue 维度只校验编排器挂载了正确的子组件。
+ * mount 真实 Block + stub 其余子组件（shallowMount 的 stub 不渲染具名插槽，探不到插槽挂载的
+ * TurnSummary）。fork/handoff 按钮的 data-testid / disabled 守卫单测在 TurnSummary 维度覆盖
+ * （本文件 TurnSummary 以 stub 出现，断言 testid 无意义）。Turn.vue 维度只校验编排挂载了
+ * 正确的子组件。
  *
  * [w6 chat-ui-and-shell T7] ui 包 Turn 经 ChatViewDeps inject 消费依赖，
  * 原 renderer store/composable vi.mock（chatStore/useChat/useSidebar/useTurnElapsed）
@@ -17,7 +20,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
-import { shallowMount } from '@vue/test-utils'
+import { mount } from '@vue/test-utils'
 import type { MessageTurn } from '@/composables/logic/messageTurns'
 import type { Message } from '@taiji/shared'
 import { Turn } from '@taiji/ui'
@@ -46,13 +49,23 @@ function makeTurn(overrides: Partial<MessageTurn> = {}): MessageTurn {
   }
 }
 
-/** shallowMount Turn：provide mock ChatViewDeps（isHandingOff 等守卫断言经 overrides 注入） */
+/** mount Turn（真实 Block）：stub 编排器其余子组件 + provide mock ChatViewDeps */
 function mountTurn(turn: MessageTurn, depsOverrides: Record<string, unknown> = {}) {
-  return shallowMount(Turn, {
+  return mount(Turn, {
     props: { turn, sessionId: 'test-session' },
     global: {
       plugins: [createPinia()],
       provide: mockChatProvide(depsOverrides),
+      stubs: {
+        UserBubble: true,
+        TurnMeta: true,
+        TurnSummary: true,
+        ChangeSetCard: true,
+        MarkdownRenderer: true,
+        TraceCompactorRow: true,
+        BashOutputBlock: true,
+        SystemNotice: true,
+      },
     },
   })
 }
@@ -63,23 +76,19 @@ describe('Turn.vue 冒烟', () => {
     vi.clearAllMocks()
   })
 
-  // （原 5 用例压缩为 2：用例 1/2 断言完全相同、用例 3/4 等价——Turn.vue 维度的独立
-  //  断言点只有「TurnSummary 挂载 + lastAssistant 透传」两相；depsOverrides 未被
-  //  shallowMount 断言消费，已去。）
-  it('有 assistant 时挂载 TurnSummary 并透传 lastAssistant（handoff/fork 按钮宿主）', () => {
+  it('有 assistant 时锚块包装层存在，TurnSummary 挂载并透传 lastAssistant（handoff/fork 按钮宿主）', () => {
     const turn = makeTurn()
     const wrapper = mountTurn(turn)
-    // W4 编排器：handoff/fork 按钮下沉到 TurnSummary 子组件，shallowMount 下以 stub 出现
+    // [actions-anchor] 操作栏插槽包装层挂在末位 text 块行内（group/text）
+    expect(wrapper.find('[data-testid="turn-actions-anchor"]').exists()).toBe(true)
     const summary = wrapper.findComponent({ name: 'TurnSummary' })
     expect(summary.exists()).toBe(true)
     expect(summary.props('lastAssistant')).toEqual(turn.assistants[0])
   })
 
-  it('无 assistant 时 TurnSummary 收到 null lastAssistant（fork/handoff 按钮在子组件内不渲染）', () => {
+  it('无 assistant（无 text 块）时无锚块，TurnSummary 不挂载', () => {
     const wrapper = mountTurn(makeTurn({ assistants: [] }))
-    const summary = wrapper.findComponent({ name: 'TurnSummary' })
-    expect(summary.exists()).toBe(true)
-    // lastAssistant=null → TurnSummary 内部 v-if lastAssistant 守卫不渲染 fork/handoff 按钮
-    expect(summary.props('lastAssistant')).toBeNull()
+    expect(wrapper.find('[data-testid="turn-actions-anchor"]').exists()).toBe(false)
+    expect(wrapper.findComponent({ name: 'TurnSummary' }).exists()).toBe(false)
   })
 })

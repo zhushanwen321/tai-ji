@@ -117,29 +117,42 @@ function onSelect(tpl: BuiltinProviderTemplate): void {
 
 <template>
   <Popover v-model:open="open">
+    <!-- 主行动钮视觉 = demo .btn.solid（accent 实底 + accent-fg 字 + hover accent-hover，h32/r-md/
+         text-sm 档）：class 覆盖 TRIGGER_TEXT_CLASS 的 ghost 文字档（tailwind-merge 同键后赢）。
+         chevron 关闭（demo 主钮无下拉指示），入口菜单（内置模板/自定义）行为不变。 -->
     <PopoverTriggerButton
       data-testid="provider-template-picker"
       :title="t('settings.provider.builtinTemplate.trigger')"
+      :show-chevron="false"
+      class="h-8 gap-[6px] rounded-md bg-accent px-3 text-[length:var(--text-sm)] font-semibold text-accent-fg hover:bg-accent-hover hover:text-accent-fg"
     >
-      <Plus class="size-3.5" />
+      <!-- 加号 14px = demo ProviderSection/McpSection 主钮 `Icon plus :size=14` 权威；值落图标自身
+           单源（Button 基类零特异性后容器级 [&_svg] 覆盖属双轨残留，曾静默压掉旧 size-3.5）。 -->
+      <Plus class="size-[14px]" />
       {{ t('settings.provider.builtinTemplate.trigger') }}
     </PopoverTriggerButton>
     <PopoverContent class="w-72 p-1">
-      <!-- 一级：入口菜单（内置模板（推荐，默认高亮）+ 自定义） -->
+      <!-- 一级：入口菜单（内置模板（推荐，默认高亮）+ 自定义）。默认高亮项 = demo
+           .pop-item.current 中性定位态（border-strong 内嵌描边 + 凹陷档底，不消费 accent），
+           与 POPOVER_LIST_ITEM_ACTIVE_CLASS（ui popover styles.ts）同款语言。
+           底色引 --bg-input 凹陷档：demo --surface-2 = var(--card-inset) 凹陷档，
+           real --surface-2 浮起档（登记见 docs/DESIGN.md §4.1 背景层级）同名分叉，
+           复刻消费点按 demo 渲染方向引凹陷档
+           （与 ExtensionInstallFlow .u-seg 槽底同批先例同款写法）。 -->
       <Button
         variant="ghost"
         data-testid="add-menu-builtin"
-        class="flex h-auto w-full items-center gap-2 rounded-sm bg-surface-2 px-2.5 py-2 text-[13px] text-neutral-fg ring-1 ring-inset ring-accent-ring hover:bg-surface-2"
+        class="flex h-auto w-full items-center gap-2 rounded-sm bg-bg-input px-2.5 py-2 text-[length:var(--text-sm)] text-neutral-fg shadow-[inset_0_0_0_1px_var(--border-strong)] hover:bg-bg-input"
         @click="onMenuBuiltin"
       >
         <Library class="size-4 shrink-0 text-accent" />
         <span class="flex-1 truncate text-left font-medium">{{ t('settings.provider.builtinTemplate.menuBuiltin') }}</span>
-        <span class="shrink-0 rounded-sm bg-accent-soft px-1.5 py-0.5 text-[10px] font-medium text-accent">{{ t('settings.provider.builtinTemplate.menuRecommended') }}</span>
+        <span class="shrink-0 rounded-sm bg-accent-soft px-1.5 py-0.5 text-[length:var(--text-3xs)] font-medium text-accent">{{ t('settings.provider.builtinTemplate.menuRecommended') }}</span>
       </Button>
       <Button
         variant="ghost"
         data-testid="add-menu-custom"
-        class="flex h-auto w-full items-center gap-2 rounded-sm px-2.5 py-2 text-[13px] text-neutral-fg hover:bg-surface-hover"
+        class="flex h-auto w-full items-center gap-2 rounded-sm px-2.5 py-2 text-[length:var(--text-sm)] text-neutral-fg hover:bg-surface-hover"
         @click="onMenuCustom"
       >
         <Pencil class="size-4 shrink-0 text-neutral-dim" />
@@ -153,7 +166,7 @@ function onSelect(tpl: BuiltinProviderTemplate): void {
     <DialogContent data-testid="provider-template-dialog" class="max-w-[720px]">
       <DialogHeader>
         <DialogTitle>{{ t('settings.provider.builtinTemplate.dialogTitle') }}</DialogTitle>
-        <p class="text-[12px] text-neutral-mid">{{ t('settings.provider.builtinTemplate.dialogSubtitle', { count: props.providers.length }) }}</p>
+        <p class="text-[length:var(--text-xs)] text-neutral-mid">{{ t('settings.provider.builtinTemplate.dialogSubtitle', { count: props.providers.length }) }}</p>
         <Input
           v-model="search"
           data-testid="provider-template-search"
@@ -170,7 +183,7 @@ function onSelect(tpl: BuiltinProviderTemplate): void {
           variant="ghost"
           size="sm"
           :data-testid="`picker-tab-${tab.id}`"
-          class="h-auto px-2.5 py-1 text-[12px]"
+          class="h-auto px-2.5 py-1 text-[length:var(--text-xs)]"
           :class="activeTab === tab.id
             ? 'bg-accent-soft text-accent'
             : 'text-neutral-mid hover:text-neutral-fg'"
@@ -195,12 +208,12 @@ function onSelect(tpl: BuiltinProviderTemplate): void {
         >
           <span class="flex items-center gap-2.5">
             <span
-              class="grid size-7 shrink-0 place-items-center rounded-sm text-[13px] font-bold text-white"
+              class="grid size-7 shrink-0 place-items-center rounded-sm text-[length:var(--text-sm)] font-bold text-white"
               :style="{ backgroundColor: brandColor(p.id) }"
             >{{ avatarChar(p) }}</span>
             <span class="min-w-0">
-              <span class="block truncate text-[13px] font-semibold text-neutral-fg">{{ p.name }}</span>
-              <span class="block text-[10px] text-neutral-dim">{{ t('settings.provider.builtinTemplate.modelsSuffix', { count: p.modelCount }) }}</span>
+              <span class="block truncate text-[length:var(--text-sm)] font-semibold text-neutral-fg">{{ p.name }}</span>
+              <span class="block text-[length:var(--text-3xs)] text-neutral-dim">{{ t('settings.provider.builtinTemplate.modelsSuffix', { count: p.modelCount }) }}</span>
             </span>
           </span>
           <span class="flex flex-wrap gap-1">
@@ -214,7 +227,7 @@ function onSelect(tpl: BuiltinProviderTemplate): void {
         </Button>
         <p
           v-if="!filtered.length"
-          class="col-span-3 px-2 py-8 text-center text-[13px] text-neutral-dim"
+          class="col-span-3 px-2 py-8 text-center text-[length:var(--text-sm)] text-neutral-dim"
         >
           {{ t('settings.provider.builtinTemplate.noResult') }}
         </p>

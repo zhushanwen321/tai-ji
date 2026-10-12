@@ -43,7 +43,7 @@
       />
       <span
         data-testid="tray-widget-panel-title"
-        class="min-w-0 truncate font-mono text-[length:var(--text-2xs)] font-medium text-neutral-fg"
+        class="min-w-0 truncate text-[length:var(--text-xs)] text-[color:var(--neutral-fg-2)]"
       >
         {{ displayTitle }}
       </span>
@@ -62,7 +62,7 @@
         >
           <span
             data-testid="tray-widget-panel-progress-fill"
-            class="block h-full rounded-full transition-[width] duration-300"
+            class="block h-full rounded-full transition-[width] duration-300 ease-[var(--ease)]"
             :class="progressFillClass"
             :style="{ width: progressWidth }"
           />

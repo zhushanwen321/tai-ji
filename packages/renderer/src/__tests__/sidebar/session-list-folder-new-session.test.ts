@@ -46,6 +46,9 @@ function findNewSessionButton(wrapper: ReturnType<typeof mountList>) {
 
 beforeEach(() => {
   setActivePinia(createPinia())
+  // N8 A/C 双模式改造后目录操作归 C 分组模式组头承载（A 平铺无组头）——本文件语义即
+  // C 模式组头行为，预置分组模式（与组件 localStorage 持久化键一致）
+  localStorage.setItem('taiji:sidebar-session-mode', 'groups')
 })
 
 describe('SessionList 目录行 + 按钮首屏渲染', () => {

@@ -2,7 +2,7 @@
  * Composer 底栏密度接线测试（D6 修订「三步聚合」版）。
  *
  * 覆盖（三视角，用户可见 DOM 断言优先）：
- * - 使用者（黑盒）：① 实测溢出逐级触发 左簇聚合 → 指标聚合 → 模型+思考聚合（累计）；
+ * - 使用者（黑盒）：① 实测溢出逐级触发 指标聚合 → 左簇聚合 → 模型+思考聚合（累计，右簇先压）；
  *   ② 锚点保护：顶格仍溢出 → 中部让位，`+` 与发送按钮恒在且为首末按钮（零裁剪）；
  *   ③ 不留死入口：托盘全无 + 插件零贡献 → 无聚合入口；`»` Ellipsis 菜单在任何状态都不出现（退役回归）。
  * - 观察者（形态）：底栏 `flex-nowrap`（永不换行）+ 三簇结构；`data-fit` / `data-slot-*` /
@@ -40,6 +40,7 @@ import {
   makeMountPointSource as makeHelperSource,
   toolbarEntry,
 } from './_density-geometry-helper'
+import { HEADER_ACTIONS_SOURCE_KEY } from '@/composables/shell/useExtensionHostBridge'
 import type { UseTrayCountsReturn } from '@/components/panel/tray/useTrayCounts'
 import Composer from '@/components/panel/Composer.vue'
 
@@ -131,6 +132,14 @@ const WIDTH_MATRIX: Array<[number, Record<string, number>]> = [
  * 挂载（空挂载点源）+ 派发一次 fit 几何（左簇宽全文件恒 80）——级数/锚点/fit 回路
  * 用例的共用入口（S4 矩阵用例与插件贡献用例挂载形态不同，不走此口）。
  */
+
+/** 三簇形态断言单源：data-slot-{metrics,left-cluster,model-thinking} 的 expanded/aggregated/absent。 */
+function expectClusterShape(shape: { metrics?: string; leftCluster?: string; modelThinking?: string }) {
+  if (shape.metrics) expect(bar().attributes('data-slot-metrics')).toBe(shape.metrics)
+  if (shape.leftCluster) expect(bar().attributes('data-slot-left-cluster')).toBe(shape.leftCluster)
+  if (shape.modelThinking) expect(bar().attributes('data-slot-model-thinking')).toBe(shape.modelThinking)
+}
+
 async function mountAndFit(avail: number, widths: Record<string, number>): Promise<void> {
   mountComposer(makeMountPointSource(reactive(new Map())))
   await dispatchFitGeometry(avail, 80, widths)
@@ -143,14 +152,38 @@ function makeMountPointSource(partition: Map<string, ViewCacheEntry>): ViewHostS
   return makeHelperSource(SID, partition)
 }
 
+/**
+ * headerAction 数据源替身（B3 聚合面用例：scheduler overlay 直开声明形态——
+ * hasVisibleHeaderActions 判定消费 getDeclarations/getRuntimeState 两面）。
+ */
+function makeHeaderActionSource(hidden = false): object {
+  return {
+    getDeclarations: () => [
+      {
+        pluginId: 'scheduler-manager',
+        contributionId: 'scheduler-manager.open',
+        type: 'headerAction',
+        headerAction: { activation: 'scheduler-overlay', icon: 'clock', title: '定时任务' },
+      },
+    ],
+    getRuntimeState: () => (hidden ? { hidden: true } : undefined),
+    resolveCommandAvailability: () => 'registered',
+    executeCommand: () => true,
+  }
+}
+
 let wrapper: VueWrapper | null = null
 
-function mountComposer(source: ViewHostSource | null): VueWrapper {
+function mountComposer(source: ViewHostSource | null, headerSource?: object | null): VueWrapper {
+  const provide: Record<symbol, unknown> = {}
+  if (source) provide[VIEW_HOST_SOURCE_KEY as symbol] = source
+  if (headerSource) provide[HEADER_ACTIONS_SOURCE_KEY as symbol] = headerSource
   wrapper = mount(Composer, {
     props: { sessionId: SID },
     global: {
       stubs,
-      ...(source ? { provide: { [VIEW_HOST_SOURCE_KEY as symbol]: source } } : {}),
+      // 键是 symbol（Object.keys 不含 symbol，判空用 Reflect.ownKeys）
+      ...(Reflect.ownKeys(provide).length > 0 ? { provide } : {}),
     },
   })
   return wrapper
@@ -232,7 +265,7 @@ describe('底栏三簇与永不换行（D6 硬约束）', () => {
   })
 })
 
-describe('三步聚合：实测溢出 → 状态机 → DOM（累计，左簇 → 指标 → 模型）', () => {
+describe('三步聚合：实测溢出 → 状态机 → DOM（累计，指标 → 左簇 → 模型）', () => {
   it('放得下 → fit 0 全展开：托盘逐件按钮在、无任何聚合入口', async () => {
     await mountAndFit(800, { 0: 300, 1: 200, 2: 150, 3: 120 })
     expect(bar().attributes('data-fit')).toBe('0')
@@ -245,27 +278,28 @@ describe('三步聚合：实测溢出 → 状态机 → DOM（累计，左簇 �
     expect(bar().find('[data-testid="composer-model-thinking-aggregate"]').exists()).toBe(false)
   })
 
-  it('L1 收缩停级 → 左簇聚合（托盘单入口 + 运行数），指标/模型仍展开', async () => {
+  it('L1 收缩停级 → 指标聚合（单图标聚合组件挂载），左簇/模型仍展开', async () => {
     // L0 需求 80+500=580 > 400；L1 需求 80+300=380 ≤ 400 → 停在 L1
     await mountAndFit(400, { 0: 500, 1: 300, 2: 180, 3: 100 })
     expect(bar().attributes('data-fit')).toBe('1')
-    expect(bar().attributes('data-slot-left-cluster')).toBe('aggregated')
+    // 序 2/3 未触发：左簇逐件按钮在（托盘未聚合）、模型完整形态
+    expectClusterShape({ metrics: 'aggregated', leftCluster: 'expanded', modelThinking: 'expanded' })
+    expect(bar().find('[data-testid="composer-metrics-aggregate"]').exists()).toBe(true)
+    expect(bar().findAll('[data-testid="tray-builtin-button"]').length).toBeGreaterThanOrEqual(2)
+    expect(bar().find('[data-testid="tray-aggregate-button"]').exists()).toBe(false)
+    expect(bar().find('[data-testid="composer-model-thinking-aggregate"]').exists()).toBe(false)
+  })
+
+  it('L2 → 左簇聚合（托盘单入口 + 运行数），指标保持聚合、模型仍完整形态', async () => {
+    // L0 580 > 300；L1 380 > 300；L2 80+180=260 ≤ 300 → 停在 L2
+    await mountAndFit(300, { 0: 500, 1: 300, 2: 180, 3: 100 })
+    expect(bar().attributes('data-fit')).toBe('2')
+    expectClusterShape({ metrics: 'aggregated', leftCluster: 'aggregated', modelThinking: 'expanded' })
+    expect(bar().find('[data-testid="composer-metrics-aggregate"]').exists()).toBe(true)
     const aggregate = bar().find('[data-testid="tray-aggregate-button"]')
     expect(aggregate.exists()).toBe(true)
     expect(aggregate.find('[data-testid="tray-aggregate-count"]').text()).toBe('3')
     expect(bar().findAll('[data-testid="tray-builtin-button"]')).toHaveLength(0)
-    // 序 2/3 未触发
-    expect(bar().attributes('data-slot-metrics')).toBe('expanded')
-    expect(bar().attributes('data-slot-model-thinking')).toBe('expanded')
-  })
-
-  it('L2 → 指标聚合（单图标聚合组件挂载），模型仍完整形态', async () => {
-    // L0 580 > 300；L1 380 > 300；L2 260 ≤ 300 → 停在 L2
-    await mountAndFit(300, { 0: 500, 1: 300, 2: 180, 3: 100 })
-    expect(bar().attributes('data-fit')).toBe('2')
-    expect(bar().attributes('data-slot-left-cluster')).toBe('aggregated')
-    expect(bar().attributes('data-slot-metrics')).toBe('aggregated')
-    expect(bar().find('[data-testid="composer-metrics-aggregate"]').exists()).toBe(true)
     expect(bar().attributes('data-slot-model-thinking')).toBe('expanded')
     expect(bar().find('[data-testid="composer-model-thinking-aggregate"]').exists()).toBe(false)
   })
@@ -276,6 +310,35 @@ describe('三步聚合：实测溢出 → 状态机 → DOM（累计，左簇 �
     expect(bar().attributes('data-fit')).toBe('3')
     expect(bar().attributes('data-slot-model-thinking')).toBe('aggregated')
     expect(bar().find('[data-testid="composer-model-thinking-aggregate"]').exists()).toBe(true)
+  })
+
+  it('从宽到窄依次观察到 ①指标聚合 ②左簇聚合 ③模型聚合；回拉变宽还原（B1 次序）', async () => {
+    mountComposer(makeMountPointSource(reactive(new Map())))
+    // 全宽：全展开
+    await dispatchFitGeometry(800, 80, { 0: 500, 1: 300, 2: 180, 3: 100 })
+    expectClusterShape({ metrics: 'expanded', leftCluster: 'expanded' })
+
+    // ① 400px：指标先聚合（右簇先压——信息先让位），左簇未动
+    await dispatchFitGeometry(400, 80, { 0: 500, 1: 300, 2: 180, 3: 100 })
+    expect(bar().attributes('data-fit')).toBe('1')
+    expectClusterShape({ metrics: 'aggregated', leftCluster: 'expanded' })
+
+    // ② 300px：左簇后聚合（指标保持聚合）
+    await dispatchFitGeometry(300, 80, { 0: 500, 1: 300, 2: 180, 3: 100 })
+    expect(bar().attributes('data-fit')).toBe('2')
+    expectClusterShape({ metrics: 'aggregated', leftCluster: 'aggregated' })
+
+    // ③ 250px：模型+思考最后聚合
+    await dispatchFitGeometry(250, 80, { 0: 500, 1: 300, 2: 180, 3: 100 })
+    expect(bar().attributes('data-fit')).toBe('3')
+    expect(bar().attributes('data-slot-model-thinking')).toBe('aggregated')
+
+    // 回拉变宽按档位还原：800px 逐级降回全展开（同宽收敛同档，与收缩方向无关）
+    await dispatchFitGeometry(800, 80, { 0: 500, 1: 300, 2: 180, 3: 100 })
+    expect(bar().attributes('data-fit')).toBe('0')
+    expect(bar().attributes('data-slot-metrics')).toBe('expanded')
+    expect(bar().attributes('data-slot-left-cluster')).toBe('expanded')
+    expect(bar().attributes('data-slot-model-thinking')).toBe('expanded')
   })
 })
 
@@ -332,6 +395,45 @@ describe('S4 模型名零截断 + `»` 退役（构造性回归防线）', () =>
   })
 })
 
+describe('B3 聚合面：headerAction（定时任务钮）随左簇聚合走（demo composer-bar spec §2.1/§4.2）', () => {
+  it('L0 expanded：headerAction 钮在左簇渲染（clock 直开入口在场）', async () => {
+    mountComposer(makeMountPointSource(reactive(new Map())), makeHeaderActionSource())
+    await dispatchTick()
+    expect(bar().attributes('data-slot-left-cluster')).toBe('expanded')
+    expect(bar().find('[data-testid="header-action-scheduler-manager-open"]').exists()).toBe(true)
+  })
+
+  it('L2 aggregated：左簇摘除 headerAction 钮（聚合面板首段承接，面板段断言归 composer-tray.test）', async () => {
+    mountComposer(makeMountPointSource(reactive(new Map())), makeHeaderActionSource())
+    // L0 580 > 300；L1 380 > 300；L2 80+180=260 ≤ 300 → 停在 L2
+    await dispatchFitGeometry(300, 80, { 0: 500, 1: 300, 2: 180, 3: 100 })
+    expect(bar().attributes('data-fit')).toBe('2')
+    expectClusterShape({ leftCluster: 'aggregated' })
+    // 左簇内 headerAction 钮已摘除（入口改由聚合面板承载）
+    expect(bar().find('[data-testid="header-action-scheduler-manager-open"]').exists()).toBe(false)
+    expect(bar().find('[data-testid="tray-aggregate-button"]').exists()).toBe(true)
+  })
+
+  it('托盘全无 + toolbar 零贡献 + headerAction 有入口 → leftCluster 非 absent（第三内容源）', async () => {
+    setTrayCounts(0, 0)
+    mountComposer(makeMountPointSource(reactive(new Map())), makeHeaderActionSource())
+    await dispatchFitGeometry(300, 80, { 0: 500, 1: 300, 2: 180, 3: 100 })
+    // 若无 headerAction 源，此几何下 leftCluster = absent（不留死入口旧行为）；
+    // 有源则聚合入口必须在场——被聚合 clock 的直开动作不因托盘空而丢失
+    expectClusterShape({ leftCluster: 'aggregated' })
+    expect(bar().find('[data-testid="tray-aggregate-button"]').exists()).toBe(true)
+  })
+
+  it('声明运行时 hidden=true → 视为无入口：托盘空 + toolbar 零贡献 → absent', async () => {
+    setTrayCounts(0, 0)
+    // hidden 声明不构成左簇内容（hasVisibleHeaderActions 判定），mountAndFit 的空 provide 路径
+    // 不带 headerSource——为覆盖「hidden 源在场」形态走显式挂载
+    mountComposer(makeMountPointSource(reactive(new Map())), makeHeaderActionSource(true))
+    await dispatchFitGeometry(800, 80, { 0: 300, 1: 200, 2: 150, 3: 120 })
+    expect(bar().attributes('data-slot-left-cluster')).toBe('absent')
+  })
+})
+
 describe('不留死入口（能力标志 → 左簇形态）', () => {
   it('托盘全无条目 + 插件零贡献 → leftCluster absent，任何状态无聚合入口', async () => {
     setTrayCounts(0, 0)
@@ -343,9 +445,9 @@ describe('不留死入口（能力标志 → 左簇形态）', () => {
   })
 
   it('非保护态托盘恒挂载：条目归零→恢复，聚合按钮经 absent 再回来（emitter 存活链）', async () => {
-    // L1 聚合态起步：聚合入口在场
-    await mountAndFit(400, { 0: 500, 1: 300, 2: 180, 3: 100 })
-    expect(bar().attributes('data-slot-left-cluster')).toBe('aggregated')
+    // L2 聚合态起步（左簇聚合生效）：聚合入口在场
+    await mountAndFit(300, { 0: 500, 1: 300, 2: 180, 3: 100 })
+    expectClusterShape({ leftCluster: 'aggregated' })
     expect(bar().find('[data-testid="tray-aggregate-button"]').exists()).toBe(true)
 
     // 条目归零 → has-items false 上抛（托盘外壳未被卸载，emitter 存活）→ leftCluster absent

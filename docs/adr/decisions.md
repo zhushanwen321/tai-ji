@@ -90,7 +90,7 @@ runtime→renderer 的 per-session 消息分发（`packages/runtime/src/services
 事件/RPC 消息类型受 ServerMessageType 联合约束，emit 拼错编译期报错（原 event-bus 文件已随包重构消失，现形态 = protocol.ts 类型定义 + route-inbound 分发，约束精神不变）。
 
 ### ADR-0010 / ADR-0012 Extension UI 独立通道（0012 的 plugin bridge 部分已退役）
-pi extension 的 confirm/select/input 交互走独立 `extension.ui_request`/`extension.ui_timeout` 事件，与 Tool Approval 的 tool_call_pending 语义隔离、错误隔离；该通路的现行形态 = event-adapter 直接消费 pi 事件按结构化字段路由（ADR-0111）。plugin-bridge 已整体退役（插件工具进 pi 通路暂缺，现行登记见 `docs/todo/plugin-tool-access-gap.md`）。登记 C-comm-12。
+pi extension 的 confirm/select/input 交互走独立 `extension.ui_request`/`extension.ui_timeout` 事件，与 Tool Approval 的 tool_call_pending 语义隔离、错误隔离；该通路的现行形态 = event-adapter 直接消费 pi 事件按结构化字段路由（ADR-0111）。plugin-bridge 已整体退役（插件工具进 pi 通路暂缺，原缺口登记已关闭删除，本条即权威记录）。登记 C-comm-12。
 
 ### ADR-0024 FileChanges runtime 解析通道
 event-adapter 在 tool_execution_end 按 write/edit 分派提取 FileChange（参数名 path 为契约权威），bash 不解析、由回合边界 git 对账补齐 delete/bash 变更；runtime 只推 accumulating/ready 两态，审查态归前端。登记 C-comm-04。
@@ -126,7 +126,7 @@ workflow run 生命周期治理（`packages/subagent-core/src/orchestration/run-
 workflow/subagent 域对 pi 边界四支柱（ADR-0064）的同构落地与 schema 传输终态：① **确认式送达平移**——注册操作的终局通知必达，workflow run 成功/失败/取消一律出终局通知（持久账本 + 幂等键，C-ext-19 在 workflow 域的细化）；② **生效回执平移**——schema 强制武装回执：`armed` 事件是引擎自查断言之外的独立信号源（监控信号不与施控同源），宿主等待窗内未收到即 fail-fast；仅 native 引擎、仅 schema 任务上报，emulated 引擎恒不上报（契约义务权威源 [engine-development-guide](../extensions/subagents/engine-development-guide.md) §6 `armed` 行）；③ **契约显式化**——schema 跨进程只经 wire `task.schema` 单字段传输（env 预编码形态 `schemaEnv` 已退役，env 由引擎宿主从 task.schema 派生，resolver 产出侧负断言锁防回流）；扩展加载显式化（`ctx.extensionPaths` 白名单收窄落壳侧 pi-host，argv 镜像机制退役）。**schema 通道终态**：native schema 链保留直传（宿主对 parsedOutput 不做二次校验）、emulated 仿真为退出通道，由 `schemaEnforcement` 能力位声明分流。登记 C-ext-24 / C-ext-25 / C-ext-26。
 
 ### ADR-0094 run/record 介质归位：journal 唯一事实源 + 两条 v2 条目 + 收编统一（2026-09-26）
-workflow run 与 subagent record 的运行态持久化介质收敛（承接 ADR-0091 的事件流 journal，把「权威投影源」升格为「唯一事实源」）：① **journal 唯一事实写**——run 侧既有 `<sessionDir>/workflow-state/<runId>.events.jsonl`，record 侧新增 `<recordsDir>/<sa-id>.events`（无 .jsonl 后缀——既有 .jsonl 扫描器/清理器结构性忽略该文件族；首行 `{"type":"record-journal"}` 头行自描述），两域事件行均携带单调 seq；② **主 session 每实体只写注册 + 终态两条 v2 小条目**（customType 不变、v 升格 2、kind 判别 registered/settled；终态条携带 result 全文与 engineHandle 双键；注册条携带 journalPath 锚点——session-reader workflow 发现链主源）；v1 全量快照 entry（含 eventLog/displayItems 死字节）停写；③ **state/manifest 降级为 journal fold 的物化投影**（可删可重建、读方零改动；.alive 仍是操作租约不计事实源）；record-bound 时物化一次 running manifest（zcode 运行窗口锚定，带锚定就绪检查与写失败降级）；④ **恢复统一为「journal 重放 + 收编」**——「有注册、无终态」的实体经幂等收编入口补追加终态事件（先查双面证据防重复），recoverCrashedRuns 与 abandon 的终局化同走该入口（证据落点对称）；⑤ **清理 = 显式保留窗口（默认 30 天）+ fold 终态资格判据，cap=50 废除**（多 session 分摊误清消除），统一保留维护轮承接 run/record 两域，session-file-gc 对 `*.events` 显式忽略；⑥ **runtime 读路径 = 内存投影**（entry 游标 + journal tail 双增量源单点合并，同实体冲突 journal 胜出；32MB 预检与全文重读退役为旧格式惰性兼容读专属；WS 信号形态不动）。写面检查 `scripts/check-record-write-surface.mjs` 断言面同步（R1-R7：写函数直调 / 两族条目写面白名单 / v1 快照投影构造器与载荷形态拒绝 / 死字节拒绝 / .events 直写拒绝）。条目契约单源 = `packages/subagent-core/src/execution/persistence/record-entry.ts`（subagent-record 族）与 `orchestration/workflow-record-entry.ts`（workflow-record 族）。登记 C-data-20（写面唯一入口口径刷新）。
+workflow run 与 subagent record 的运行态持久化介质收敛（承接 ADR-0091 的事件流 journal，把「权威投影源」升格为「唯一事实源」）：① **journal 唯一事实写**——run 侧既有 `<sessionDir>/workflow-state/<runId>.events.jsonl`，record 侧新增 `<recordsDir>/<sa-id>.events`（无 .jsonl 后缀——既有 .jsonl 扫描器/清理器结构性忽略该文件族；首行 `{"type":"record-journal"}` 头行自描述），两域事件行均携带单调 seq；② **主 session 每实体只写注册 + 终态两条 v2 小条目**（customType 不变、v 升格 2、kind 判别 registered/settled；终态条携带 result 全文与 engineHandle 双键；注册条携带 journalPath 锚点——session-reader workflow 发现链主源）；v1 全量快照 entry（含 eventLog/displayItems 死字节）停写；③ **state/manifest 降级为 journal fold 的物化投影**（可删可重建、读方零改动；.alive 仍是操作租约不计事实源）；record-bound 时物化一次 running manifest（zcode 运行窗口锚定，带锚定就绪检查与写失败降级）；④ **恢复统一为「journal 重放 + 收编」**——「有注册、无终态」的实体经幂等收编入口补追加终态事件（先查双面证据防重复），recoverCrashedRuns 与 abandon 的终局化同走该入口（证据落点对称）；⑤ **清理 = 显式保留窗口（默认 30 天）+ fold 终态资格判据，cap=50 废除**（多 session 分摊误清消除），统一保留维护轮承接 run/record 两域（原 session-file-gc 对 `*.events` 的显式忽略面已随 [ADR-0133] 废弃删除——无 GC 面可忽略，维护轮是唯一窗口判据）；⑥ **runtime 读路径 = 内存投影**（entry 游标 + journal tail 双增量源单点合并，同实体冲突 journal 胜出；32MB 预检与全文重读退役为旧格式惰性兼容读专属；WS 信号形态不动）。写面检查 `scripts/check-record-write-surface.mjs` 断言面同步（R1-R7：写函数直调 / 两族条目写面白名单 / v1 快照投影构造器与载荷形态拒绝 / 死字节拒绝 / .events 直写拒绝）。条目契约单源 = `packages/subagent-core/src/execution/persistence/record-entry.ts`（subagent-record 族）与 `orchestration/workflow-record-entry.ts`（workflow-record 族）。登记 C-data-20（写面唯一入口口径刷新）。
 
 **写面宿主扩充（2026-09-29，resume 修订 D15/D16 落地连带）**：workflow-record 条目写点宿主在原三写点（worker-message-pump.ts / lifecycle.ts / 壳 jsonl-run-store.ts）基础上新增 terminal-actions.ts（D15 终局编排单一入口的注册/终态条目写点）与 resume-run.ts（D16 resume 链注册条目写点）——条目构造仍全走 buildWorkflowRecord*EntryData 意图原语与 appendEntry 通路，写面唯一入口语义不变（宿主清单扩充非写点扩散）；`check-record-write-surface.mjs` R3 白名单同步为五写点宿主。
 
@@ -568,7 +568,7 @@ WorkflowTab 步骤列表的数据源绑定从「workflow-record 全量快照（6
 
 3c. **实施期收窄：读/预检通道准入 = 会话产物子树**（2026-10-05，branch-review dmg-r1-2）——`localFile:servable` / `localFile:read` 两条 IPC 的准入前缀 = 产物子树 `<dataDir>/artifacts/**`（`computeLocalFileReadPrefixes`，`apps/electron/main/utils/local-file-prefixes.ts`），不复用协议 handler 全量白名单。理由：通道入参含模型消息文本承载的路径载荷（html-preview fence = 不可信输入），全量白名单含 `<dataDir>` 整前缀（含 `<dataDir>/agent/auth.json` 等凭据），读/预检面复用全量白名单 = 渲染进程被注入后可直读数据目录内任意文件文本。收窄后越界仍返回 `out_of_whitelist`（不触 fs），消费方回落既有通道（useDetailPane cwd 通道 / 容器降级占位）；三条调用链（容器源码态、挂载前 size 预检、抽屉产物源码读取）全部只消费产物路径，无功能回退。协议 handler（渲染面：图片 / iframe 服务）保持全量白名单不变；谓词函数与检查顺序同源不变，未新增白名单成员、未新增白名单输入方。
 
-4. **产物回收用文件系统级判据**（对齐 `apps/electron/main/images/image-cache.ts` 先例的「判据落文件系统层、不依赖进程级在场集」形态）：① 删会话级联删目录（与既有 `cache/images` 级联同一落点 `session-lifecycle.ts`、同一幂等形态）；② 保留期扫描（默认 7 天，`TAIJI_ARTIFACTS_KEEP_DAYS` 可覆盖；runtime 会话服务内启动扫 + 每日复扫）判据 =「产物目录子树最新文件 mtime 超龄 **且** 目录名 sessionId 在三棵会话树无同名会话文件」。**枚举深度规格另写**（主树 `sessions/<encodeCwd>/*.jsonl` 两层 / subagent `subagents/<encodeCwd>/sessions/*.jsonl` 三层 / btw `btw/<encodeCwd>/<mainSid>/*.jsonl` 三层，逐层 readdir 自实现）——不得照 `image-cache.ts` 的 `isOrphanSessionDir` 单层形态（该先例与生产两层布局失配，缺陷另登记 `docs/todo/image-cache-orphan-depth-mismatch.md`）；文件名 → id 解析用同型 `sessionFileIdFromName`，解析失配（合法 sid 含 `_` / `.`）保守取向为「视为存在、不清」。
+4. **产物回收 = 删会话级联单一通道**（2026-10-12 裁决收口，见 [ADR-0133](#adr-0133-会话下挂内容回收统一归删主会话级联三机制废弃--保留边界2026-10-12-用户裁决)）：删会话级联删目录（与既有 `cache/images` 级联同一落点 `session-lifecycle.ts` purgeSessionSidecars、同一幂等形态 recursive + force）是产物目录的唯一回收机制；外部删除主会话文件场景的残留按裁决接受（无保留期扫描兜底）。main 侧 `image-cache.ts` 的孤儿扫描属 main 资源域，不在级联射程（取舍待 main 域裁决）。
 
 **三条配套**：① **引用语法** = 新 fence info string `html-preview`（首词匹配，内容 = 单行文件路径；空 / 多行 → 卡片降级态「路径非法」），卡片走 Vue 段组件（`HtmlPreviewCard.vue`）不进 v-html / DOMPurify 通道——「用户 HTML 白名单契约」与「预览卡片不经 sanitize 通道」不变量保持；段类型复用 mermaid 同构通道，finalize 仅由 fence 收尾 / 消息 complete 触发（静默 200ms 不提前 finalize——半截路径不产假降级卡片）。② **渲染态** = DetailPane 对 `.html` 新增「预览 | 源码」切换，渲染态为 `<iframe sandbox="allow-scripts" src="local-file:///<百分号编码 abs>?r=<n>">`（无 `allow-same-origin`，文档落 opaque origin，读不到主窗口 DOM / localStorage / cookie；`?r=n` 仅作重导航触发）；CSP meta（`packages/renderer/index.html`）新增 `frame-src 'self' local-file:`。③ **协议响应头** = `protocol.handle('local-file')` 全部响应附加 `Cache-Control: no-store`，`.html` / `.htm` 再附加内容级 CSP（`default-src 'none'` 封网络出站；`script-src 'unsafe-inline' local-file:` 保脚本与相对子资源；指令集不含 opaque origin 下恒不匹配的 `'self'`）——sandbox 管「碰不到主窗口」、文档 CSP 管「连不出网络」双保险。
 
@@ -583,11 +583,11 @@ WorkflowTab 步骤列表的数据源绑定从「workflow-record 全量快照（6
 **要点**：
 1. **单渲染面原则**：内联容器是唯一渲染面。抽屉保留渲染态会造成「同一文件两个渲染入口、两套挂载序列」的双轨；内联容器的展开/源码态已覆盖抽屉渲染态的全部用户价值。`localFile:read` 通道保留（消费方 = 容器源码态 `useChatViewDeps` readArtifact 与 DetailPane 文件树/抽屉源码读取 `useDetailPane` loadPreviewContent——与设计 §6.4 D4「退役的连带回收」同口径；变更集卡入口语义是看 diff，不消费该通道）。
 2. **高度策略降级裁决**：内容高度自适应（iframe 内上报）三条通道均不可行——产物文档内协作脚本不可假设、opaque origin 收不到定向 postMessage、`sandbox` 无 `allow-same-origin` 时 `contentDocument` 恒 null——降级为固定 480px（展开 720px）、超限 iframe 内滚动；升级预案（协议 handler 注入上报脚本）登记设计文档 §6.3。
-3. **流式与降级形态保持**：finalize 仅由 fence 收尾/消息完成触发（静默不提前）；预检三原因降级占位形态延续（文件名 + 原因两行，恢复指引由失败路径表承载）。**S4 验收留痕口径（终态同步 R1 显式声明）**：「链接 → 抽屉源码高亮」为基线行为恢复（file-type 分发与 DetailPane code 类高亮由既有单测承载），**不作独立真机重验**——v16 重验覆盖 A3a/A3b/A5/A8 + A6；产物目录文件场景的链接正向断言受基线 forceDiff 存量缺口阻断（`docs/todo/message-link-artifact-file-force-diff-reject.md`，A20 定性 = 基线存量机制、本分支零触碰），缺口修复后补验。
+3. **流式与降级形态保持**：finalize 仅由 fence 收尾/消息完成触发（静默不提前）；预检三原因降级占位形态延续（文件名 + 原因两行，恢复指引由失败路径表承载）。**S4 验收留痕口径（终态同步 R1 显式声明）**：「链接 → 抽屉源码高亮」为基线行为恢复（file-type 分发与 DetailPane code 类高亮由既有单测承载），**不作独立真机重验**——v16 重验覆盖 A3a/A3b/A5/A8 + A6；产物目录文件场景的链接正向断言已随抽屉入口 cwd 内外分流落地：cwd 外产物文件走 preview 模式、经 `localFile:read` 白名单通道读取（useDetailPane-html 单测承载），不再被 forceDiff 通道拒绝。
 
 **依据**：用户裁决动机 = HTML 交付物在对话流内直接可见可交互，不经点击跳转（交互式图表/自包含组件的核心价值前置呈现）；ADR-0118 方案 A 本就预期「iframe 在 DOM 流内随滚动天然正确」，本裁决是该预期的终态化；已接受代价 = 对话流 turn 虚拟化使旧 turn 容器随滚动卸载/重挂载（脚本重执行，既有虚拟化行为的固有代价，实测无可感知卡顿阈值内）。
 
-**登记**：设计文档 v16（`.tmp/tech-design/chat-html-support.md` §6.3/§6.4）；实施 = u7-inline-refactor 单元（M1.5 批次）；验收 = v16 重跑四项（渲染/观感/安全负面/降级矩阵）+ 打包态，全部通过（2026-10-04）。S4 相对链接场景随之重定义为「链接 → 抽屉源码态（基线行为恢复）」；链接打开产物目录文件被基线 forceDiff 通道拒绝的存量缺口另登记 `docs/todo/message-link-artifact-file-force-diff-reject.md`。
+**登记**：设计文档 v16（`.tmp/tech-design/chat-html-support.md` §6.3/§6.4）；实施 = u7-inline-refactor 单元（M1.5 批次）；验收 = v16 重跑四项（渲染/观感/安全负面/降级矩阵）+ 打包态，全部通过（2026-10-04）。S4 相对链接场景随之重定义为「链接 → 抽屉源码态（基线行为恢复）」；链接打开产物目录文件经抽屉入口 cwd 内外分流走 preview 模式与 `localFile:read` 白名单通道（终态，useDetailPane-html 单测承载）。
 
 ### ADR-0122 事实驱动原则体系：状态、传播、失败、呈现的统一纪律（2026-10-05 用户裁决）
 **决策**：本地 GUI 应用的工程原则体系，总原则 = **事实驱动，不做补偿性猜测**——系统的每一个状态判定都锚定确定性事实（回执到达、断连信号、同步查询返回、磁盘记录）；用时间猜事实、用补偿掩盖丢失、用乐观呈现代替确认的机制一律不建，存量一律清拆。分则按四个层面：
@@ -643,5 +643,52 @@ WorkflowTab 步骤列表的数据源绑定从「workflow-record 全量快照（6
 - **跨端通道（runtime → pi extension）= prompt 斜杠命令出站点**：runtime `client.prompt("/subagent-model <单行 JSON>")` → pi `prompt()` 扩展命令分支（流式中也立即执行；排队路径会拒扩展命令，不可绕行）→ subagent-workflow 进程内编排 → 结果文件 `<subagent 数据根>/model-switch/<requestId>.json` 回执（原子写、网关读后即删、60s 超时 best-effort）。pi 1.0.0 无结构化 RPC 注册面（rpc-mode 命令词表封闭）且上游不 fork/不提 PR——斜杠命令是仓内在产标准通道（三先例：workflow abort / subagents 动作族 / plan abort）；新出站点登记 `.githooks/check_prompt_outposts.py` 白名单。
 - **成员态三态（引擎中立）**：switched（生效值+档位回执）/ not-active（引擎定位不到活跃子进程，已退出成员承接态）/ not-applicable（引擎 capability unsupported，提示性应答非错误，记账照写）+ 失败名单（独立组件，非成员态——转发失败成员的成员标识 + fail-fast 分型；单成员失败不回滚其他成员、不影响 run 级意图写入）。聚合应答恒为「成员态数组 + 失败名单 + 汇总文案」三组件固定结构（前端按成员分项呈现）。run 级全切为 2026-10-05 用户裁决翻转初稿「run 级只记账不转发成员」条款的结果（随持久化裁决一并确认——该反向方案已否决，勿再议）。resume 生效模型三档回落：resume 显式参数 > 持久化覆盖 > run 创建模型。
 
-**登记**：设计 SSOT = `.tmp/tech-design/subagent-model-switch.md`（§5.2 解析链 / §7.1.1 通道机制 / §7.4 三态）；术语投影 = docs/CONTEXT.md「模型覆盖」词条；验收终态 = 5 轮真机验收 degraded 无阻塞缺陷（`.tmp/dev-flow/subagent-model-switch.acceptance/verdict.json`）；验收期遗留裁决项 = `docs/todo/subagent-model-switch-d3-defects.md`。
->>>>>>> feat-workflow-change-model
+**登记**：设计 SSOT = `.tmp/tech-design/subagent-model-switch.md`（§5.2 解析链 / §7.1.1 通道机制 / §7.4 三态）；术语投影 = docs/CONTEXT.md「模型覆盖」词条；验收终态 = 5 轮真机验收 degraded 无阻塞缺陷（`.tmp/dev-flow/subagent-model-switch.acceptance/verdict.json`）；验收期遗留裁决项已全部修复收尾（2026-10-07，终态记录 git 可追溯）。
+
+### ADR-0130 界面视觉令牌体系：五层职能分层 + 令牌名只改值 + 灰阶四档去蓝偏 + 字重三档上移（2026-10-08 用户裁决，ui-optimize-unified）
+
+**决策**：
+- **五层职能分层规则**：明度层级按「读的地方沉下去、操作的地方浮上来」组织，五层自沉到浮 = 窗口壳 `--bg-stage #0a0a0c` → 内容层 `--surface #101010`（对话流/drawer 等阅读区沉底）→ 内容层内次级 `--bg-input #161618` → 框架层 `--bg #1e1e1e`（侧栏与 composer 同层，操作区浮亮）→ 浮层 `--bg-elevated #2b2b2e`；亮色族按镜像规则反向推导，settings 域与派生令牌（`--bg-card`/`--secondary`/`--bg-sunken` 等）随批归层对齐；`--bubble-bg` 不在归层集合（暗族随 `--bg-elevated` 派生、demo 暗族三主题同值，亮族独立 `#fefefe`，见 style.css :root 注释）。
+- **令牌命名裁决 = 保留现行令牌名只改值**：不新增 `--card`/`--card-inset` 等新令牌名——设计表中的此类名是概念层名，实装一律映射到现行令牌改值。理由：同一「对话流卡片底」在改值前后换名字，git 历史里「明度反转」这一行为会被改名噪声淹没，review 与回溯成本上升而用户可感知终态相同。
+- **灰阶四档去蓝偏**：`--neutral-fg #ececec`（正文/侧栏主文字/composer 可操作文字共用正文档，R=G=B 纯中性）+ `--neutral-mid #8a8a8a`（工具行/次要）+ `--neutral-dim #5c5c5c`（时间/元信息）+ `--neutral-faint #45454a`。对比度显式取舍：dim 档对 surface 约 2.8:1、低于 WCAG AA 正文线，仅用于时间戳/元信息等低显著度装饰性文字；工具行落 mid 档（约 5.4:1）。范围 = 暗色族三主题（玄/黛蓝/暖墨）文字档全部重校，亮色族三主题文字档维持现行值（无蓝偏问题），bg 分层经镜像规则核对零 diff。
+- **字重三档上移**：`--fw-text/mid/bold` 400/500/600 → 500/600/700——「档差不变、整体更实」的解读（三档等距上移；mid 不动则 text 与 mid 重合塌成两档）。
+
+**依据**：双向真机实测 + 用户对分层表与灰阶值的逐项裁决（设计包 wave3 §2.1/§2.4）；「正文 ≥12:1 / 工具行 4–6:1 / 元信息 ≥2.8:1」阈值固化为永久单测——亮色族 dim 因维持现行值 #9d9b96（≈2.57）不跑 2.8 阈值，改锚定现行值断言防漂移、改值须先改设计。ADR-0066 的 accent 弱蓝灰补记不受影响（本波未动 accent 与状态色）。
+
+**登记**：值权威 = `packages/renderer/src/style.css`；挂值对照 = `docs/DESIGN.md` §4（CSS_TOKEN_SSOT_CHECK 机器核对两处逐字一致）；阈值单测 = `packages/renderer/src/__tests__/contrast-tokens.test.ts`；设计文档 `.tmp/tech-design/ui-optimize-unified.md`（过程产物不入库），本条即令牌体系裁决的现行登记处。
+
+### ADR-0131 运行态动画与「回到最新」胶囊：文字扫光替换底板扫光（sheen-x 退役）+ 浮现条件改离底一屏（unreadBelow 退役）（2026-10-08 设计落地，ui-optimize-unified 决策 10/12）
+
+**决策**：
+- **文字扫光**：扫光对象 = 执行中行正在发生的内容文字（思考行状态词与预览流、工具行执行命令/摘要），稳定标识（工具名/时间戳/计数）不扫；实现 = `linear-gradient` + `background-clip: text` + 透明字色，base = 行常态字色（dim/mid）、peak = `--neutral-fg`，全令牌化免六主题逐个定值；周期 2.6s、扫程占前 55%；`prefers-reduced-motion` 下退回常态字色。
+- **sheen-x 扫光层退役**：原「icon 底板扫光」（Block 普通工具块与 bash 组头的 `absolute inset-0` 扫光层、style.css `sheen-x` keyframes、`--sheen` 令牌、DESIGN.md 挂值条目）全链删除，退役范围经 grep 穷尽核实零残留。
+- **「回到最新」胶囊浮现条件**：从「非贴底且有未读新内容（unreadBelow）」改为「滚动离底超过一屏」（一屏 = 对话流滚动容器可视高度，virtua 环境以 viewportSize 快照承载）——回看历史（无新内容）也有回底入口；点击平滑回底后消失，生成中自动跟随不变。`unreadBelow` 状态链（ref/置位清除分支/`shouldMarkUnread`）全删。
+
+**依据**：N13 问题陈述 = 底板扫光扫的是静态标识而非正在发生的内容，信息价值错位；N11 问题陈述 = 回看历史后无快捷回底入口，unreadBelow 必要条件直接指向此变更。两处退役范围均实施期 grep 复核零残留消费。
+
+**登记**：实装 = `packages/ui/src/features/chat/Block.vue`（text-sweep 挂点与动画）/ `block-icon.ts` / `packages/renderer/src/style.css` / `packages/renderer/src/composables/panel/useVirtuaFollow.ts`；设计文档 `.tmp/tech-design/ui-optimize-unified.md`（过程产物不入库），本条即两项裁决的现行登记处；运行态观感验收为用户真机自验项（D3 inspect verdict=degraded 无 blockers）。
+
+### ADR-0132 引擎 provider 来源统一：启动时单向同步 pi→zcode（数据目录内副本 + merge 实时视图装载）+ 外部配置零写入（2026-10-12 设计落地，engine-provider-unification）
+
+**决策**：runtime 组合根启动段（`packages/runtime/src/index.ts` 的 `runZcodeProviderStartupSync` 接线点，`sanitizeInvalidProviders` 之后）把 pi 侧 provider 配置单向同步为 zcode 校验源可读的副本——三读取源（models.json / auth.json / catalog 合并视图），其中凭据获取全部经既有凭据 resolver 单通道（机检红线 C-proc-14，`scripts/check-provider-credential-reads.mjs`），映射产物落 `<dataDir>/engines/zcode/pi-synced-provider-config.json`，形态 = 纯 pi 侧产物：providerRules 仅含 pi 映射条目与 zai 关联条目、providerOrder 仅含 pi 追加序，不透传真实文件内容（真实内容合并由读取时 merge 承载）。装载通道 = 两处同规则实装、对账单测锁步：wrapper fs 拦截（`appserver-launcher.ts` `mergeProviderConfig` 分支）与引擎校验链（`preparer.ts` `mergePersonalProviderConfig`）都读同一 merge(真实 `~/.zcode/v2/provider_config.json` 实时内容, 同步副本) 合并视图——真实条目优先、providerOrder = 真实现值序 + 副本独有 id 追加去重保序、每次读取重算无缓存；副本路径经既有 `ZCODE_ENG_PROVIDER_CONFIG` 锚点传递（语义收窄为 taiji 同步副本路径；`zcode-engine.ts` 赋值链与 preparer default 解析走同一 `resolvePersonalProviderConfigPath`），副本缺失/不可读时短路回落真实文件（零行为变化）。**红线：taiji 全程零写入 `~/.zcode/` 任何文件**。家族边界：zcode builtin:/account: 家族不经内容同步；zhipu/zai 系官方 provider（zai-coding-cn/zai）走 token 关联特例——两前置同时成立（ZCode 桌面端 plan 已设置且特有 token 已生成 + taiji 已配 zai 系 provider）时副本生成个人关联条目 id=`zai-coding-plan`（anthropic 网关，baseUrl/模型清单读 zcode 内建目录 coding-plan 条目，apiKey = zcode 侧特有 token 只读引用，pi 原始 key 不参与），任一前置缺失不生成条目 + warn 指引。映射保守纪律（宁缺毋错）：凭据不可得 / 无 zcode 对应协议 / per-model 协议或 baseUrl 差异 / 同名让位（判定源 = 真实 provider_config providerRules、providerOrder、v2 config 字典带 key、cli config 字典按键存在，四源并集任一命中即让位）的条目一律跳过 + warn。失败语义 = 降级不阻断：读取失败保留上次副本产物 + warn、启动不中断；pi 映射条目归零时删除副本、全链回落真实文件。同设计包配置域半边：settings per-engine 默认模型进 `<dataDir>/agent/subagents/config.json` 的 `engineDefaults` 键（新 RPC `session.setSubagentEngineDefaultModel`，写入校验 ref ∈ 引擎模型清单），派发模型解析扩四层：task 显式 > agent frontmatter > engineDefaults > 引擎缺省（pi 路由恒不插层）。
+
+**依据**：pi 与 zcode 的 provider 配置体系完全隔离，zcode 引擎校验源只认 `~/.zcode/v2/provider_config.json`——用户在 taiji 配好的 provider 对 zcode 引擎不可见（显式模型派发 `model_not_available`，而配置明明已配好，错误对用户不可理解）。直写真实文件不采用（taiji 与 ZCode GUI 互为多写方互踩、回滚语义缺失）；独立 env 双源不采用（两处合并逻辑漂移面）；「wrapper 补注入合成条目 → Registry 装载」通道被 A0 探针证伪（zcode 0.16.9 Registry 个人 provider 供数直读真实 provider_config.json，补注入 cli config 的条目不被装载），据此改走 fs 拦截 merge 实时视图——校验链与 Registry 装载链读到同一视图，副本存在期间 ZCode 端配置变更对两消费方实时生效，副本缺失时全链回落现状行为。
+
+**登记**：实装 = `packages/runtime/src/services/zcode-provider-sync.ts`（映射 + 副本编排）/ `zcode-provider-sync-wiring.ts`（启动接线）+ `packages/zcode-subagent-cli/src/preparer.ts` / `appserver-launcher.ts` / `zcode-engine.ts`；未新增约束族（凭据单通道沿既有 C-proc-14/15 机检）；副本落 taiji 数据目录内（数据目录隔离纪律不变）；设计文档 `.tmp/tech-design/engine-provider-unification.md`（过程产物不入库），本条即启动时单向同步决策的现行登记处。
+
+### ADR-0133 会话下挂内容回收统一归删主会话级联：三机制废弃 + 保留边界（2026-10-12 用户裁决）
+
+**决策**：删主会话 = 事务性级联删除其下挂的一切内容（级联清单单一入口 = `packages/runtime/src/services/session/session-content-cascade.ts`：子代理文件族〔.jsonl / sidecar / manifest / .events〕→ session-reader 导出物 → base-tool-enhance 后台任务目录 → trash 主文件，fork 引用并集保护；commit `0c0954508`）。「下挂内容生命周期 ⊆ 主会话生命周期」——下挂内容不再有任何独立回收机制，三条既有独立回收通道废弃删除：
+
+1. **产物目录保留期扫描**（runtime `services/session/artifact-retention.ts`：7 天 mtime + 三树枚举保护，启动扫 + 每日复扫，`TAIJI_ARTIFACTS_KEEP_DAYS` env 通道）——artifacts 回收由级联 purgeSessionSidecars 段承接；startup-background-init 序列 ⑪ 挂载点随之摘除（编号保留不重排）。
+2. **subagent 会话树 TTL GC**（subagent-core `session-file-gc.ts` 的 walkAndClean 族：30 天 mtime + `.alive` 探活 + 孤儿 sidecar/records manifest 清理）——子代理会话文件族回收由级联承接（sidecar 名单迁居 cascade `SUBAGENT_SESSION_SIDECAR_EXTS`）；该文件收缩为 `engine-journal-gc.ts`（引擎 journal TTL 定时器 + worktree `.patch` 孤儿 TTL 清扫，`cleanupExpiredEngineJournals` / `startEngineJournalGcTimer`）。
+3. **session-reader 导出物保留期清扫**（`sweepExpiredSessionViews`：export 写入点顺带 30 天清扫）——session-view 导出物由级联 A21 段承接。
+
+**保留边界（非会话下挂域，不在本裁决射程）**：引擎 journal 30 天 TTL（`engine-journal-gc.ts` → `cleanupExpiredJournals`——journal 是引擎运行证据域，record 主数据死亡对 core 无触发点，无精确回收锚）；worktree `.patch` 回传件 30 天 mtime TTL 孤儿清扫（同文件 `cleanupOrphanWorktreePatches`，接线方传 agentDir 生效——`<sessionsDir>/<branch>.patch` 按 branch 命名、与 `.jsonl` basename 无关联，v2 条目契约不承载 patchFile/branch，级联引用并集〔record id ∪ sessionFile〕无锚可达，与引擎 journal 同性质只能按 mtime 兜底回收；清扫范围仅 subagents 各 enc 段 sessions 目录内的 `*.patch` 两层枚举，级联领地文件族不触碰；超龄后 `record.patchFile` 指针悬空 = 「续聊重建无备份」的既有降级形态承接）；zcode 隔离会话库条目 TTL（引擎侧 sweep，C-data-22——pi 侧 transcript 无独立 TTL 后两域不再有「同窗」绑定，窗口值 30 天维持）；workflow run 孤儿对账与统一保留维护轮（`run-state-evidence.ts`——判据本就以主会话引用集为锚，维持现状）；main 域机制（log-retention / tts-cache 封顶 / gen-stats 窗口 / update 版本封顶 / image-cache 孤儿扫描——属 main 进程资源域，image-cache 孤儿扫描的后续取舍待 main 域裁决）。
+
+**接受残留（显式不回收）**：外部删除主会话文件场景（绕过删除链路的直接 rm）的下挂内容残留；级联枚举/引用扫描失败时保守放弃族删除的残留（宁保留不误删 fork 共享文件）。
+
+**依据**：三条机制都是级联缺失时代的兜底——级联补齐后同一文件族存在两个生命周期权威（TTL 按时间判、级联按归属判），先于级联触发即误删、后于级联触发即死代码；数据目录累积治理由级联单判据承载（原缺口登记已关闭删除，本条即权威记录，branch-review 三树枚举完备性检查提案的前提随扫描废弃消失）。
+
+**登记**：CONTEXT.md「会话产物目录」词条 / data-source-registry.md #8 与 #51 删除通道 / runtime-layering.md 基线债登记 / permanent-session-model 资源生命周期表述同批回写；C-data-22 summary 的「与 pi transcript 同窗」限定随之改写（结构不变，`node scripts/validate-constraints.mjs` 复验）。
+

@@ -21,4 +21,7 @@ export type SessionItemSession = {
   spawnSource?: 'user' | 'agent'
   /** 父 agent session id（U8）：spawnSource='agent' 时由 runtime 注入，右键「查看父 session」用。 */
   parentAgentSessionId?: string
+  /** 会话 JSONL 文件绝对路径（SessionSummary.sessionFile 透传）：右键「导出 JSONL」用。
+   *  缺失 = pi 延迟写入窗口（首条消息前文件未落盘），菜单项禁用。 */
+  sessionFile?: string
 }

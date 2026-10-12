@@ -54,7 +54,7 @@ export function applySystemToDom(
   // fontSize：缺省 medium（D17，与 DEFAULT_SYSTEM 一致）。
   root.dataset.fontSize = s.fontSize ?? 'medium'
 
-  // fontScales：分区字号档位，逐区域回落 DEFAULT_FONT_SCALES（sidebar=large，其余 medium；
+  // fontScales：分区字号档位，逐区域回落 DEFAULT_FONT_SCALES（三区域均 medium；
   // SSOT 在 core，getSystem 浅合并可能产生部分缺省对象，不可假设区域 key 完整）。
   // 档位→倍率映射在 renderer style.css [data-fs-*] 规则。
   root.dataset.fsSidebar = s.fontScales?.sidebar ?? DEFAULT_FONT_SCALES.sidebar

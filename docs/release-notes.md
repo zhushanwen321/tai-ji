@@ -15,6 +15,8 @@ Release note 面向**应用使用者**，两个消费场景共用同一份 body�
 
 `merge/scripts/release.sh` 不指定 `--notes` 时会自动生成草稿：双语三节骨架与全局规范一致，但条目是 conventional commit 原文直出（feat → 新增功能、perf → 功能优化、fix → 修复缺陷、breaking → 重大变更），**没有**全局规范的模糊化、30 字、排序与合并约束，chore/test/docs 类被过滤。脚本会在生成后提醒定稿：按全局规范手写后用 `gh release edit <tag> --notes-file <双语文件>` 覆盖。
 
+**emoji 门禁**：notes 禁用 emoji。release.sh 在每次把 notes 写入 GitHub Release（edit / create）前经 `.githooks/check_doc_emoji.py` 校验，含 emoji 直接 exit 1；检测逻辑单一实现（与 pre-commit 的 README 文档 emoji 检查同一脚本），merge 阶段 5 定稿校验段对已写入 body 复检同一规则。
+
 ## 待发布草稿
 
 > 本节存放**待随下次发版并入正式 release note 的条目草稿**（设计文档验收条款要求的指引先落于此，merge skill 阶段 5 定稿时按全局规范并入，并入后清空本节）。npm 包侧（CHANGELOG / deprecate 文案）随发版流程另行处理，不在本节。

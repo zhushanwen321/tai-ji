@@ -90,7 +90,13 @@
          统一表单 overlay（ui-presentation-protocol D5）：请求到达时 FormOverlay 覆盖
          composer 位置（互斥），对话历史全程可见，composer 消失输入禁止。
          [U7] overlay 移除后 composer 常驻（不再 v-if="!isViewingSubagent"）。 -->
-    <div class="composer-band flex flex-shrink-0 flex-col gap-1.5 px-5 pb-3.5">
+    <!-- 顶缘 0：流滚动区底部 padding 同为 0（MessageStream 贴合裁决），composer 带壳顶缘
+         直接贴合对话流，文字与 composer 间不留底色带（2026-10-11 用户裁决，偏离 demo
+         呼吸间距）；左右 30px 与 MessageStream px-[30px] 同一内容列（Composer.vue 宽度契约
+         「composer 与消息流同宽同缘」，未封顶宽度下 composer 不外扩出消息列）。
+         壳层类链单一来源 = composer-band.ts（BtwPanel 同壳），顶距走 padding 不走 gap——
+         band 内 gap-1.5 是 RetryIndicator/overlay 内部行距，勿混用。 -->
+    <div :class="COMPOSER_BAND_CLASS">
       <!-- [T4] 「引擎恢复中」过渡条（pi 意外退出 → 自动 respawn 窗口）。
            数据源 = chat store respawnPending 分区（与 usePanelView 的 isSessionRespawning
            同源）；此时 panelView.kind 恒为 conversation/trace（respawning 抑制 dead），
@@ -99,7 +105,7 @@
       <div
         v-if="respawnPending"
         data-testid="respawn-pending-bar"
-        class="flex items-center gap-2 rounded-[var(--radius-sm)] border border-warn/40 bg-warn-soft px-3 py-2"
+        class="flex items-center gap-2 rounded-[var(--radius-sm)] border border-[color-mix(in_oklch,var(--warn)_40%,transparent)] bg-warn-soft px-3 py-2"
         role="status"
       >
         <LoaderCircle class="size-3.5 shrink-0 animate-spin text-warn" />
@@ -153,6 +159,7 @@ import { isFormQuestion, isScheduleDraft, type FormQuestion, type ScheduleDraft 
 import MessageStream from './MessageStream.vue'
 import ModeDeclarationRow from './ModeDeclarationRow.vue'
 import Composer from './Composer.vue'
+import { COMPOSER_BAND_CLASS } from './composer-band'
 import PlanModeBar from './plan/PlanModeBar.vue'
 import TraceView from './trace/TraceView.vue'
 import { Button } from '@/components/ui/button'

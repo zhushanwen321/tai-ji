@@ -56,7 +56,7 @@ import type {
   ServerMessageType,
   ToolCall,
 } from '@taiji/shared'
-import { deriveToolResultOutputs } from '../apply-entry-utils'
+import { deriveToolResultOutputs, isPlainRecord, parseDiffStat } from '../apply-entry-utils'
 import type { RetryState, FinalizeReason } from '../store-types'
 import type { MessageEffectContext, MessageEffectHandler } from '../effect-types'
 export type { MessageEffectContext, MessageEffectHandler } from '../effect-types'
@@ -541,6 +541,8 @@ const messageEffects: Partial<Record<ServerMessageType, MessageEffectHandler>> =
     //（纯派生段提取，条件写入语义不变——下方 spread 按字段缺省不触碰既有值）。
     const { hasContent, output, outputRaw, outputTruncated, images } = deriveToolCallEndOverlay(entry.message)
     const details = entry.message.details
+    // edit 工具 diff 统计：与重放路径（reducer computeToolCallFill）同函数同口径（live≡reload）
+    const diffStat = parseDiffStat(isPlainRecord(details) ? details.diff : undefined)
     const isError = entry.message.isError === true
     const next = [...prev]
     const toolCalls = (next[idx].toolCalls ?? []).map((c) =>
@@ -563,6 +565,7 @@ const messageEffects: Partial<Record<ServerMessageType, MessageEffectHandler>> =
           ...(isError && { error: output ?? c.error }),
           endTime: Date.now(),
           ...(details !== undefined && { details: details as Record<string, unknown> }),
+          ...(diffStat !== undefined && { diffStat }),
         })
         : c,
     )

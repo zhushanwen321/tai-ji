@@ -14,6 +14,7 @@
  *
  * 运行：cd packages/runtime && npx vitest run src/infra/pi/__tests__/event-adapter-retry-sound.test.ts
  */
+import { expectCompleteMessage } from './event-adapter-test-helpers'
 import { describe, it, expect } from 'vitest'
 import { translate } from '../event-adapter.js'
 import type { PiAgentEndEvent } from '../pi-protocol.js'
@@ -32,13 +33,9 @@ function agentEndEvent(
   return { type: 'agent_end', messages: [lastMsg], willRetry } as PiAgentEndEvent
 }
 
-/** 从 translate 产物中取 turn-end 的 message.complete 帧。 */
+/** 从 translate 产物中取 turn-end 的 message.complete 帧（共享单源，只取 payload）。 */
 function completeOf(translated: ReturnType<typeof translate>): { payload: Record<string, unknown> } {
-  const turnEnd = translated.find((e) => e.kind === 'turn-end')
-  expect(turnEnd).toBeDefined()
-  const message = (turnEnd as { message: { type: string; payload: Record<string, unknown> } }).message
-  expect(message.type).toBe('message.complete')
-  return message
+  return expectCompleteMessage(translated)
 }
 
 describe('[retry-sound] agent_end willRetry 透传 message.complete payload', () => {

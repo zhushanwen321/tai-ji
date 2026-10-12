@@ -106,7 +106,7 @@ function onDeny(): void {
         <!-- 全选切换 -->
         <label
           data-testid="permission-dialog-toggle-all"
-          class="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-[12px] text-neutral-dim hover:bg-white/[0.04]"
+          class="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-[length:var(--text-xs)] text-neutral-dim hover:bg-[var(--hover-tint)]"
           @click.prevent="toggleAll"
         >
           <Checkbox :model-value="allSelected" />
@@ -116,11 +116,11 @@ function onDeny(): void {
           v-for="perm in permissions"
           :key="perm"
           :data-testid="`permission-item-${perm}`"
-          class="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 transition-colors hover:bg-white/[0.04]"
+          class="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 transition-colors hover:bg-[var(--hover-tint)]"
           @click.prevent="togglePermission(perm)"
         >
           <Checkbox :model-value="selected.includes(perm)" />
-          <span data-testid="permission-item-label" class="font-mono text-[13px] text-neutral-fg">{{ perm }}</span>
+          <span data-testid="permission-item-label" class="font-mono text-[length:var(--text-sm)] text-neutral-fg">{{ perm }}</span>
         </label>
       </div>
 

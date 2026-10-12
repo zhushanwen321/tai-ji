@@ -50,7 +50,7 @@
           :data-state="band.state"
         >
           <span
-            class="absolute top-0.5 left-1 max-w-full overflow-hidden text-[10px] whitespace-nowrap text-neutral-faint"
+            class="absolute top-0.5 left-1 max-w-full overflow-hidden text-[length:var(--text-3xs)] whitespace-nowrap text-neutral-faint"
           >{{ band.phase }}</span>
         </div>
 
@@ -109,7 +109,7 @@
         <span
           v-for="tick in ticks"
           :key="tick.pct"
-          class="absolute top-0 -translate-x-1/2 pt-[3px] font-mono text-[10px] text-neutral-faint"
+          class="absolute top-0 -translate-x-1/2 pt-[3px] font-mono text-[length:var(--text-3xs)] text-neutral-faint"
           :style="{ left: `${tick.pct}%` }"
           data-testid="wfvz-gantt-tick"
         >{{ tick.label }}</span>

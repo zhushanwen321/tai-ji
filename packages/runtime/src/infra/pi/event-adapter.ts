@@ -443,6 +443,44 @@ function toUsageTokens(usage: PiAgentEndEvent['messages'][number]['usage']): {
   }
 }
 
+/**
+ * turn 级 usage 累计（Σ agent_end.messages 中 role='assistant' 的 usage）。
+ *
+ * 徽标 live≡reload 的关键：重放径逐条 assistant 消息求和（core turn-aggregates
+ * Σ usage.outputTokens），live 径此前只取 lastMsg.usage = 末次调用量的结构性缺失在此补齐
+ * ——pi agent_end.messages 携带本次 agent run 全部消息，多 LLM 调用 turn 的每条 assistant
+ * 消息各带自身 usage（pi bundle runLoop newMessages 累积实装；失败 attempt 为空用量，
+ * 计入 0 与重放径 usageField 同值）。只累计 role==='assistant'：toolResult 消息的 usage
+ * 是嵌套 subagent 合并量，重放径不计（usageField 仅 assistant role），此处同口径防双算。
+ * 字段级求和（某字段全程缺省则结果缺该字段，不折 0——D4 无值编码纪律）。
+ */
+function sumTurnUsage(messages: PiAgentEndEvent['messages']): {
+  inputTokens?: number
+  outputTokens?: number
+  totalTokens?: number
+} | undefined {
+  let input = 0
+  let output = 0
+  let total = 0
+  let hasInput = false
+  let hasOutput = false
+  let hasTotal = false
+  for (const m of messages) {
+    if (m.role !== 'assistant') continue
+    const u = m.usage
+    if (!u) continue
+    if (typeof u.input === 'number') { input += u.input; hasInput = true }
+    if (typeof u.output === 'number') { output += u.output; hasOutput = true }
+    if (typeof u.totalTokens === 'number') { total += u.totalTokens; hasTotal = true }
+  }
+  if (!hasInput && !hasOutput && !hasTotal) return undefined
+  return {
+    ...(hasInput ? { inputTokens: input } : {}),
+    ...(hasOutput ? { outputTokens: output } : {}),
+    ...(hasTotal ? { totalTokens: total } : {}),
+  }
+}
+
 /** agent_end — extract stop reason, usage, responseModel, diagnostics, errorMessage, content */
 function handleAgentEnd(event: PiAgentEndEvent, sid: string): PiTranslatedEvent[] {
   // [retry-sound] willRetry 恒读（pi 恒发；degraded 路径同样透传，U3②）
@@ -470,7 +508,9 @@ function handleAgentEnd(event: PiAgentEndEvent, sid: string): PiTranslatedEvent[
       sessionId: sid,
       stopReason,
       willRetry,
-      usage: toUsageTokens(usage),
+      // turn 累计（徽标 live≡reload，见 sumTurnUsage）；sum 空手时回退末次调用量（防御，
+      // 正常 path lastMsg role='assistant' 必被累计覆盖）
+      usage: sumTurnUsage(event.messages) ?? toUsageTokens(usage),
       responseModel,
       diagnostics,
       errorMessage,

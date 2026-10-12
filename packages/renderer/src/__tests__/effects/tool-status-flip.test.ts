@@ -334,13 +334,14 @@ describe('方案 c: mount MessageStream（真 store + 真虚拟滚动层）— t
 
 /* ─────────────────────── 方案 a：mount Block，改 props.tool.status ─────────────────────── */
 describe('方案 a: mount Block 组件 — 翻转 props.tool.status', () => {
-  it('running→completed：双环 loader 消失，无终态 icon（统一交互模式）', async () => {
+  it('running→completed：呼吸弧 loader 消失，无终态 icon（统一交互模式）', async () => {
     const tool = makeTool({ status: 'running' })
     const wrapper = mount(Block, {
       props: { type: 'tool', tool, sessionId: 's1' },
+      global: { provide: mockChatProvide() },
     })
 
-    // running 态：双环 loader 存在
+    // running 态：呼吸弧 loader 存在
     expect(wrapper.findAll('.animate-loader-spin').length).toBeGreaterThan(0)
 
     // 翻转 status → completed
@@ -359,7 +360,7 @@ describe('方案 b: mount Turn 组件 — 翻转 turn.assistants[0].toolCalls[0]
   beforeEach(() => {
     expandedTurns.clear()
   })
-  it('running→completed：Turn 内 Block 双环 loader 消失，无终态 icon', async () => {
+  it('running→completed：Turn 内 Block 呼吸弧 loader 消失，无终态 icon', async () => {
     const tool = makeTool({ status: 'running' })
     const assistant = makeAssistantWithTool(tool)
     const turn = makeTurn(assistant, /* isStreaming */ false)
@@ -383,7 +384,7 @@ describe('方案 b: mount Turn 组件 — 翻转 turn.assistants[0].toolCalls[0]
     await wrapper.find('button.turn-meta').trigger('click')
     await nextTick()
 
-    // running 态断言：双环 loader 存在
+    // running 态断言：呼吸弧 loader 存在
     expect(wrapper.findAll('.animate-loader-spin').length).toBeGreaterThan(0)
 
     // 翻转 status：构造新的 turn prop（不可变更新，模拟 store commitMessages 路径）

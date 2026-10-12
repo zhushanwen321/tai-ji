@@ -2,12 +2,12 @@
 name: taiji
 description: AI Agent 桌面工作台 · 太极纯灰（v6）设计系统
 colors:
-  bg: "#131316"
-  surface: "#1f1f22"
-  fg: "#dedee2"
-  muted: "#96969c"
+  bg: "#1e1e1e"
+  surface: "#101010"
+  fg: "#ececec"
+  muted: "#8a8a8a"
   border: "rgba(255, 255, 255, 0.07)"
-  accent: "#a5adc2"
+  accent: "#7fb89c"
   success: "#78a87e"
   warn: "#b79c54"
   danger: "#bf6b6b"
@@ -21,7 +21,7 @@ typography:
 rounded:
   sm: "6px"
   md: "8px"
-  card: "10px"
+  card: "12px"
   lg: "12px"
 spacing:
   xs: "4px"
@@ -32,7 +32,7 @@ spacing:
 components:
   button-default:
     backgroundColor: "{colors.accent}"
-    textColor: "#1a1a1c"
+    textColor: "#152019"
     rounded: "{rounded.md}"
   button-secondary:
     backgroundColor: "transparent"
@@ -55,7 +55,7 @@ components:
 > - **值真值 = [`packages/renderer/src/style.css`](../packages/renderer/src/style.css) 的 `:root` tokens**（运行时唯一源）。本文件 §4 token 表与它挂值相等检查（pre-commit 检查）。
 > - **本文件（docs/DESIGN.md）= 视觉范式权威 + token 登记对照 + AI / impeccable 视觉上下文入口**。范式冲突以本文件为准；值冲突以 style.css 为准，并回修本文件。
 > - 原 `docs/page-design/` 目录整体退役（2026-09-13）：v6-master-spec.md 与 traffic-light-layout.md 的有价值内容已并入本文件，其余文件（v6-tokens.css / v6-spec-*.html / v6-spec-base.css / 各 demo html 等）已删除，git 可追溯。
-> - 设计演变史见 [docs/design-evolution.md](./design-evolution.md)；demo 活验证在 `.tmp/v6/`。
+> - 设计演变史见 [docs/design-evolution.md](./design-evolution.md)。
 
 ## §1 背景
 
@@ -98,7 +98,7 @@ v6 重构的三个缘由：
 
 | 维度 | 基准 |
 |---|---|
-| 视觉 | demo（`.tmp/v6/`）目标态为 SSOT；三层背景肉眼可辨；impeccable AI slop test 通过；正文全部过 WCAG AA |
+| 视觉 | 令牌/视觉唯一权威 = style.css :root 与本文件 §4 挂值表（CSS_TOKEN_SSOT_CHECK 守护）；三层背景肉眼可辨；impeccable AI slop test 通过；正文全部过 WCAG AA |
 | 架构 | runtime 三层契约名实相符；shared 无运行期实现；IPC 仅 OS 特权；renderer stores 零互相 import |
 | 测试 | coverage 启用进 CI；E2E 双轨进 CI；对话流/session 生命周期/设置持久化有 E2E 覆盖 |
 | 扩展 | builtin tasks plugin 跑通；core 零 tool name 硬编码特判 |
@@ -112,8 +112,8 @@ v6 重构的三个缘由：
 | # | 原则 | 具体含义 |
 |---|------|---------|
 | 1 | **层级代替边框** | 静态容器只用一个表面色，不叠加 border；靠 bg 层级浮起分隔。border 仅保留给浮起可交互容器（popover/dialog/composer）和 focus 态 |
-| 2 | **圆角档位提升** | `--radius-sm` 6px（全局默认档）；卡片 10px；浮层/composer 12px；徽章/pill 999px 胶囊 |
-| 3 | **正文提亮** | `--neutral-dim` 抬亮一档；正文位置统一用 `--neutral-mid`（过 WCAG AA ≥4.5:1）；仅装饰/极弱位置保留 dim/faint |
+| 2 | **圆角档位提升** | `--radius-sm` 6px（全局默认档）；卡片/浮层/composer 12px（demo 卡片形态统一 lg 档，无 10px 档）；徽章/pill 999px 胶囊 |
+| 3 | **正文提亮** | 正文位置统一用 `--neutral-fg`（暗色下 ≈16:1）；工具行/次要落 `--neutral-mid`（~5.4:1，过 AA 大字线）；时间与元信息落 `--neutral-dim`（~2.8:1，低显著度装饰性文字的显式取舍）；仅极弱/装饰位置保留 faint |
 | 4 | **内容收窄** | assistant 居中 720px（整 turn 居中，UserBubble 列内右浮）；设置内容列同 720px 左对齐；Composer 非 landing 对齐同列 |
 | 5 | **彩色降噪** | 保留 git 语义色（M/A/D 降为极小圆点或单字）+ accent + 真 failure 的 danger，其余降灰阶。从色块/pill 降级为极小圆点或单字 badge |
 
@@ -147,14 +147,15 @@ v6 审查发现「被选中」出现三种视觉语言，统一为二分：
 
 **accent-soft 仅留瞬时高亮**（fresh 新增项 / is-current popover 项），不作持久选中态。
 
-**两类已登记例外**（demo 落地取舍，非范式违反）；
+**已登记例外**（demo 落地取舍，非范式违反）；
 〔2026-10-04 三卡化〕原第三条「drawer L1 icon tab 用 bg-surface-hover」例外随 drawer 与 main 同 surface 的前提消失而退役——L1 tab 回归标准 tab 型（bg-elevated + neutral-fg）：
 - **TurnRail mini-map 节点**：active 用 `bg-accent-soft + inset accent-ring`（第三种视觉语言）。理由：mini-map 是「当前位置指示器」语义（非持久选中），且节点极小（224px 浮层内），accent-soft 染底 + ring 提供最强可见性。属瞬时高亮的延伸。
 - **SearchModal sm-item**：用 `bg-surface-hover` + accent 蓝字/蓝 icon（非列表项型默认的 bg-surface）。理由：dialog 底 = surface，sel 用 bg-surface 会同色淹没，改 surface-hover 靠蓝字区分（Linear/Raycast 范式）。
+- **CommandPopover 项**（composer 四路插入浮层候选行）：用 `bg-surface-hover` + `text-neutral-fg`，键盘高亮与 hover 同形态，不染 accent。理由：对齐 demo 插入浮层 `.pop-item.hot` 行语言（`--hover` 底 + 前景提 fg，real `--surface-hover` 同值直引），浮层高亮是「当前项」指示而非持久选中。
 
 ### 3.5 实践原则（2026-08-02 demo 迭代记录在案）
 
-> 以下 8 条来自 `.tmp/v6/` demo 多轮迭代的实际教训，是 §3.1 视觉五原则在具体场景的展开。涉及状态指示的已在 §5.6 / §9 对齐。
+> 以下 8 条来自设计原型阶段多轮迭代的实际教训，是 §3.1 视觉五原则在具体场景的展开。涉及状态指示的已在 §5.6 / §9 对齐。
 
 #### 3.5.1 Token 语义归位，不要「就近借色」
 
@@ -224,33 +225,40 @@ demo 阶段功能做到「可见 + 可交互 + 数据 mock」即够。不接 run
 > **真相源**：[`packages/renderer/src/style.css`](../packages/renderer/src/style.css) 的 `:root`（token 值真值，运行时唯一源）。以下值与该文件逐字对齐，受挂值相等检查保护（pre-commit）；运行时值更新时须同 commit 回写本表。
 > 本节取代 v6-design.md §2 / v6-summary.md §3（两文档已删除，残值并入本文档）与 v6-spec-tokens.html（已删除，2026-09-13 退役，git 可追溯）。
 
-### 4.1 背景层级（阶梯上抬 + 加宽级差，暗端防糊）
+### 4.1 背景层级（五层职能分层：读的地方沉下去，操作的地方浮上来）
 
 ```css
---bg:           #131316;   /* 画布色（侧栏/settings 内容区底）*/
---bg-sunken:    var(--bg); /* 同画布色（语义变更：不往黑推，靠内容卡 surface 浮起分隔）*/
---bg-input:     #17171a;   /* 输入框/凹陷区/实例 tab 非激活底（比 bg 更深）*/
---bg-card:      #1b1b1e;   /* 设置分组卡片（介于 bg 与 surface）*/
---surface:      #1f1f22;   /* 内容卡浮起表面（对话流/右抽屉/底抽屉三卡同色）*/
+--bg-stage:     #0a0a0c;   /* 窗口壳：标题栏底、卡片之间的缝（全场最深）*/
+--bg:           #1e1e1e;   /* 框架层：侧栏/composer/settings 内容区（同层同色）*/
+--bg-sunken:    var(--bg); /* 框架层沉底同值跟随（语义 = 与宿主 --bg 同值）*/
+--bg-input:     #161618;   /* 内容层内次级：代码块/文件 chip 底/实例 tab 非激活底*/
+--surface:      #101010;   /* 内容层：对话流/右抽屉/底抽屉阅读区（沉底，各卡自持 border + shadow）*/
+--bg-card:      #262626;   /* 操作域浮起容器：设置分组卡片等（亮于 --bg 一档）*/
+--bg-elevated:  #2b2b2e;   /* 浮层：hover 详情卡/popover（用户气泡 --bubble-bg 随本层派生，暗族同值；亮族独立 #fefefe）*/
 --surface-2:    #27272a;   /* 次级表面（header 浮起分层 / SegmentedTab 内项 active）*/
---bg-elevated:  #2b2b2e;   /* tab 型选中态浮起 / popover 浮层 */
---surface-hover:#303033;   /* hover 态 */
+--surface-hover:#262629;   /* hover 态 */
 ```
 
-**三层明度**（2026-10-04 三卡化后）：
-- **stage 最深底**：`--bg-stage` `#0a0a0c`（tokens.css 新增，ShellView .stage 引用；三层明度在玄主题下完整保留）。**亮色（皓族）**：`--bg-stage` `#dbd9d4`（TAIJI_PAPER 未定义独立 stage，复用宣纸族最深暖灰；style.css `[data-theme=light]` 覆盖，避免泄漏暗色 #0a0a0c 形成黑框）
-- **画布层**：`--bg` `#131316`（aside/settings 内容区 + 三卡之间的缝）
-- **surface 浮起**：`--surface` `#1f1f22`（对话流 / 右抽屉 / 底抽屉三张内容卡同色共享，各卡自持 border + shadow）
+**五层阶梯**（玄值由深到浅：`#0a0a0c → #101010 → #161618 → #1e1e1e → #2b2b2e`，越浮越亮）：
+- **窗口壳**：`--bg-stage` `#0a0a0c`（ShellView .stage 引用）。**亮色（皓族）**：`--bg-stage` `#dbd9d4`（TAIJI_PAPER 未定义独立 stage，复用宣纸族最深暖灰；style.css `[data-theme=light]` 覆盖，避免泄漏暗色 #0a0a0c 形成黑框）
+- **内容层（沉底）**：`--surface` `#101010`（对话流 / 右抽屉 / 底抽屉三张阅读卡同色共享）；`--bg-input` `#161618` 为其内次级（代码块/文件 chip）
+- **框架层（浮起）**：`--bg` `#1e1e1e`（aside / composer / settings 内容区同层同色）；操作域浮起容器 `--bg-card` `#262626` 亮于本层一档
+- **浮层**：`--bg-elevated` `#2b2b2e`（hover 详情卡 / popover；用户气泡 `--bubble-bg` 随本层派生——demo 暗族三主题 bubble 逐块等于 elevated、无独立档，亮族独立 `#fefefe`）；overlay 遮罩半透明黑（`bg-black/80`）全场最暗，遮罩上面板靠 border + shadow 分离
+- 黛蓝/暖墨暗色 entry 按玄五层骨架 + 各自色相偏移推导（黛蓝 B>R、暖墨 R>B，通道差与各自旧 entry 一致）；亮色族三主题（皓/青墨/朱印）bg 阶梯沿用宣纸镜像（surface 最亮、框架层深一档），青墨/朱印不覆写
+- **亮色（皓族）设置卡双层底**：`--bg-card` `#fcfbf9`（分组卡底，近白纸、亮于页底 `#edebe8`）、`--surface-2` `#efede9`（分组卡头，= demo 亮族 `--card-head`；style.css `[data-theme=light]`）——「卡浮于底」层级在亮色族与暗色族同构（卡底亮于页底，卡头 = 页底色调档）
 
-### 4.2 文字 neutral 谱系（上抬，dim ~4.4:1）
+### 4.2 文字 neutral 谱系（纯中性四档，暗色族三主题统一）
+
+四档全部纯中性去蓝偏（ui-optimize 决策2）：正文/侧栏主文字/composer 可操作文字同落 fg 档（≈16:1），工具行/次要 mid 档，时间与元信息 dim 档，极弱/装饰 faint 档；图标档随 mid 档校准。暗色族三主题（玄/黛蓝/暖墨）文字档统一为同一组值；亮色族三主题文字档维持宣纸墨色不变（无蓝偏问题）。
 
 ```css
---neutral-fg:    #dedee2;  /* 主前景 */
---neutral-mid:   #96969c;  /* 正文（过 AA）*/
---neutral-dim:   #74747a;  /* 次要（提亮一档）*/
---neutral-faint: #46464c;  /* 极弱/装饰 */
---neutral-ico:   #86868c;  /* 图标默认色 */
---neutral-ico-hover: #dedee2;
+--neutral-fg:    #ececec;  /* 主前景 + 正文 */
+--neutral-fg-2:  #d9d9d9;  /* 次级正文（demo --fg-2：正文与工具行之间的强调文字档） */
+--neutral-mid:   #8a8a8a;  /* 工具行/次要（~5.4:1，过 AA 大字线）*/
+--neutral-dim:   #5c5c5c;  /* 时间与元信息（~2.8:1，低显著度装饰性文字的显式取舍）*/
+--neutral-faint: #45454a;  /* 极弱/装饰 */
+--neutral-ico:   #8a8a8a;  /* 图标默认色（随 mid 档校准） */
+--neutral-ico-hover: #ececec;
 
 /* 对话流专属名称色（2026-10-06 对话流视觉裁决）：workflow / subagent 的具体名称——
    暖驼微暖低饱和，不随主色态变化；亮色主题覆盖 #8c6231（对比 5.2:1），preset 不覆盖 */
@@ -268,17 +276,25 @@ demo 阶段功能做到「可见 + 可交互 + 数据 mock」即够。不接 run
 ### 4.4 主色 / 状态色（太极·玄默认：水墨降饱和，克制放开档）
 
 ```css
-/* 主色（玄 = 近无彩度底 + 一枚贯穿全应用的弱蓝灰；彩度「依稀」量级，可寻不与状态色争语义）*/
---accent:        #a5adc2;
---accent-hover:  #b5bdd4;  /* accent 等色相提亮一档（OKLCh dL≈0.052，与其余 preset 同模式） */
+/* 主色（demo 终态职能分色裁决：主行动 = 青玉 A9；链接 = 正蓝；行内代码 = 杏橘 W2——
+   三种彩色职能各自独立令牌，accent 不再兼职链接与行内代码色相）*/
+--accent:        #7fb89c;
+--accent-hover:  #92c7ae;  /* accent 同色相提亮一档（暗色族；亮色族压暗，demo 同构） */
 --accent-soft:   color-mix(in oklch, var(--accent) 10%, transparent);  /* 派生 */
 --accent-ring:   color-mix(in oklch, var(--accent) 30%, transparent);  /* 派生 */
---accent-fg:     #1a1a1c;  /* accent 实色上的文字（玄主题用深字）*/
+--accent-fg:     #152019;  /* accent 实色上的文字；对 #7fb89c 7.38:1 过 AA */
+
+/* 职能分色（demo 终态，各主题独立定值）*/
+--link-c: #4d8dff;   /* 链接正蓝 */
+--code-c: #cf9d78;   /* 行内代码杏橘 W2 */
 
 /* 状态色（水墨降饱和：饱和度/明度 +15~20%，保留水墨感不艳）*/
 --success: #78a87e;  --warn: #b79c54;  --danger: #bf6b6b;
 --info:    #6d99a5;  --reasoning: #8e85ab;
---danger-fg: #f0f0f2;  /* danger 实色上的文字（玄主题用浅字）*/
+--danger-fg: color-mix(in oklch, var(--danger) 12%, #160b0b);
+/* danger 实色上的文字（demo tokens.css 同公式浓度 12%；暗色族 color-mix 中的
+   var(--danger) 每元素解析，随各自 --danger 自动跟随——Chromium 实测行为；
+   亮色族由 [data-theme="light"] 块覆盖为白字 #ffffff，青墨/朱印继承该覆盖）*/
 
 /* soft 派生（自动跟随，主题切换无需单独覆盖）*/
 --success-soft:   color-mix(in oklch, var(--success) 12%, transparent);
@@ -286,7 +302,27 @@ demo 阶段功能做到「可见 + 可交互 + 数据 mock」即够。不接 run
 --danger-soft:    color-mix(in oklch, var(--danger) 12%, transparent);
 --info-soft:      color-mix(in oklch, var(--info) 12%, transparent);
 --reasoning-soft: color-mix(in oklch, var(--reasoning) 12%, transparent);
+
+/* 行内代码（demo R4 弱化终态：底跟 --code-c、字近正文微暖；消费点 = MarkdownRenderer.vue）：
+   底 = code-c 8% 弱化层（暗色族；亮色族 7% 由 light 块重声明），
+   字 = 主前景 85% 混 code-c 15%（demo 令牌名 --fg 在本仓 = --neutral-fg）。
+   color-mix 中的 var() 每元素解析（Chromium 实测），preset 块只覆盖
+   --neutral-fg/--code-c 即自动跟随，全部主题块零重复声明。 */
+--md-code-bg: color-mix(in oklch, var(--code-c) 8%, transparent);   /* 暗色族（玄/黛蓝/暖墨） */
+--md-code-bg: color-mix(in oklch, var(--code-c) 7%, transparent);   /* 亮色族（皓/青墨/朱印，light 块） */
+--md-code-fg: color-mix(in oklch, var(--neutral-fg) 85%, var(--code-c));
 ```
+
+六主题 `--code-c` 颜料挂值（字色 = `--md-code-fg` 公式下于合成底——code-c N% 叠对话流 `--surface`——的 WCAG 对比，§4 场景 2；单测 contrast-tokens.test.ts 同模型断言统一 ≥4:1 线）：
+
+| 主题 | 族 | `--code-c` | 对比 |
+|---|---|---|---|
+| 玄 | 暗 | `#cf9d78` | 13.13:1 |
+| 黛蓝 | 暗 | `#c99e80` | 13.12:1 |
+| 暖墨 | 暗 | `#d4a684` | 13.06:1 |
+| 皓 | 亮 | `#96622f` | 10.65:1 |
+| 青墨 | 亮 | `#92663a` | 10.62:1 |
+| 朱印 | 亮 | `#9a6b40` | 10.50:1 |
 
 ### 4.5 diff 着色（柔化 12%）
 
@@ -297,57 +333,60 @@ demo 阶段功能做到「可见 + 可交互 + 数据 mock」即够。不接 run
 --diff-del-strong: color-mix(in oklch, var(--danger) 45%, transparent);
 ```
 
-### 4.6 字体 / 字号 scale（2026-08-02 整体上移一档 + 自适应）
+### 4.6 字体 / 字号 scale
 
 ```css
 --font-sans: system-ui, 'PingFang SC', 'Helvetica Neue', 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif;
 --font-mono: 'JetBrains Mono', 'IBM Plex Mono', ui-monospace, Menlo, monospace;
 
-/* 字重三档（2026-10-06 对话流视觉裁决）：消费方用 Tailwind 任意值类 [font-weight:var(--fw-*)] */
---fw-text: 400;  /* 日常文字 */
---fw-mid: 500;   /* 中档：行容器 / 组头 */
---fw-bold: 600;  /* 粗体：动作词 / 工具名 */
+/* 字重三档（2026-10-06 对话流视觉裁决 + 整体上移一档 500/600/700）：消费方用 Tailwind 任意值类 [font-weight:var(--fw-*)] */
+--fw-text: 500;  /* 日常文字 */
+--fw-mid: 600;   /* 中档：行容器 / 组头 */
+--fw-bold: 700;  /* 粗体：动作词 / 工具名 */
 
-/* 字号 scale（base 13→14 上移，calc 自适应）*/
+/* 字号 scale：--text-* = 基准px × 用户全局档位 × 分区档位（demo 固定 px，无视口档）*/
 > 2026-08-25：--font-sans 改系统栈，supersede ADR-0019 的 Inter 字体子决策（chat-visual-font-optimize）
---font-scale-u: 1;   /* 用户档位（AppearancePage 选：small 0.929 / medium 1.0 / large 1.143）*/
---font-scale-mq: 1;  /* 视口档位（媒体查询：≥2100px ×1.08 / <1400px ×0.95）*/
---text-3xs: calc(10px * var(--font-scale-u) * var(--font-scale-mq));
---text-2xs: calc(11px * var(--font-scale-u) * var(--font-scale-mq));
---text-xs:   calc(12px * var(--font-scale-u) * var(--font-scale-mq));
---text-sm:   calc(13px * var(--font-scale-u) * var(--font-scale-mq));
---text-base: calc(14px * var(--font-scale-u) * var(--font-scale-mq));
---text-md:   calc(15px * var(--font-scale-u) * var(--font-scale-mq));
+--font-scale-u: 1;   /* 用户全局档位（AppearancePage 选：small 0.929 / medium 1.0 / large 1.143）*/
+--text-3xs: calc(10px * var(--font-scale-u));
+--text-2xs: calc(11px * var(--font-scale-u));
+--text-xs:   calc(12px * var(--font-scale-u));
+--text-sm:   calc(13px * var(--font-scale-u));
+--text-base: calc(14px * var(--font-scale-u));
+--text-md:   calc(15px * var(--font-scale-u));
 ```
 
 ### 4.7 圆角 / 间距 / 阴影 / z-index / 动效
 
 ```css
-/* 圆角 */
---radius-sm: 6px;   --radius: 8px;   --radius-lg: 12px;   --radius-card: 10px;
+/* 圆角（demo 四档；卡片形态统一 lg 档，demo 无 10px 档）*/
+--radius-xs: 4px;   --radius-sm: 6px;   --radius: 8px;   --radius-lg: 12px;   --radius-card: 12px;
 
 /* 间距（4px 栅格）*/
 --space-1:4px; --space-2:8px; --space-3:12px; --space-4:16px;
 --space-6:24px; --space-8:32px; --space-12:48px; --space-16:64px;
 
-/* 阴影 */
+/* 正文级块间节奏（demo N2：对话流块间距令牌；消费点迁移归组件波次）*/
+--blk-gap: 20px;  --blk-gap-tight: 12px;
+
+/* 阴影（demo 三档）*/
 --shadow-1: 0 0 0 1px rgba(0,0,0,0.2);
 --shadow-2: 0 8px 24px rgba(0,0,0,0.4);
+--shadow-3: 0 12px 32px rgba(0,0,0,0.45);   /* 顶级浮层 */
 --shadow-glow: 0 0 0 3px color-mix(in oklch, var(--accent) 25%, transparent);
 
-/* z-index 语义化 */
---z-sticky: 1;  --z-popover: 10;  --z-overlay: 20;  --z-modal: 1000;
+/* z-index 语义化（demo styles #8 梯队：sticky < popover < overlay < hovercard < modal < dialog < toast < banner）*/
+--z-sticky: 1;  --z-popover: 10;  --z-overlay: 20;  --z-hovercard: 500;
+--z-modal: 1000;  --z-dialog: 1100;  --z-toast: 2000;  --z-banner: 2100;
 
-/* 动效 */
+/* 动效（--ease-in/--ease-out = demo E5 抽屉方向缓动：进 out / 出 in）*/
 --ease: cubic-bezier(0.4,0,0.2,1);
+--ease-out: cubic-bezier(0,0,0.2,1);  --ease-in: cubic-bezier(0.4,0,1,1);
+--ease-out-soft: cubic-bezier(0.23,1,0.32,1);  /* 入场类软缓出（内容入场统一缓动：消息块淡入/分区切换/面板方向滑入/空态级联）*/
 --duration-fast: 120ms;  --duration: 200ms;  --duration-slow: 320ms;
 
-/* 执行中工具图标扫光带（2026-10-06 对话流视觉裁决）：暗色亮带 / 亮色主题反转暗带
-   rgba(23,23,26,0.3)，preset 不覆盖；消费点 = sheen-x keyframes（style.css 动画区） */
---sheen: rgba(236, 236, 236, 0.55);
-
-/* 组件尺寸 */
---content-max-w: 720px;  --composer-btn-size: 30px;
+/* 组件尺寸（--content-max-w = demo min(720px,100%)：窄容器自动让位满宽）*/
+--content-max-w: min(720px, 100%);  --content-max-w-wide: 1064px;
+--composer-btn-size: 30px;
 --bash-output-max-height: 240px;  --bar-fill-soft: 55%;
 --block-scroll-max-height: 240px;  /* 展开块统一限高（thinking / bash / 工具输出，BlockScrollBox 消费）；与 --bash-output-max-height 消费域独立 */
 --panel-bg: var(--surface);  /* panel 内 sticky 浮层底色契约 */
@@ -355,35 +394,41 @@ demo 阶段功能做到「可见 + 可交互 + 数据 mock」即够。不接 run
 
 ### 4.8 主题系统（太极阴阳 6 预设）
 
-demo 引入完整多主题系统（spec 无，demo 重大扩展）。机制：改 CSS 变量（resetToken 清空 → writeToken 批量写入），派生色自动跟随。
+机制：CSS 属性选择器覆盖——切换只写 `<html>` 的 `data-theme`（dark/light）与 `data-theme-preset` 两个属性，令牌值全部由 `packages/renderer/src/style.css` 的选择器块静态声明（派生色 `color-mix` 引用基色自动跟随）。
 
-**切换链路**（demo 已接通）：`useTheme.ts` composable（全局共享）持有 `THEMES`（6 主题定义）+ `currentThemeName` ref + `applyTheme(name, theme)` 函数。SystemPage「配色主题」GroupCard 渲染 6 主题列表行（`theme-row` + `theme-swatches` 四色缩略图），**点击即时切换**（调 applyTheme，不走 draft/save），选中态 `bg-surface + accent 字`（列表项型）。TokenDebugPage 也从 useTheme import 同一份数据（保持调试功能）。
+**切换链路**：`applySystemToDom`（`packages/ui/src/features/settings/apply-system-to-dom.ts`）把 SystemSettings 外观偏好写入 DOM 槽位——`theme=system` 经 `matchMedia` 解析为 light/dark，`themePreset` 缺省 `cold-blue`；W4 壳侧 watch store 调用。主题列表渲染 = 设置页 AppearancePage（`packages/renderer/src/components/settings/appearance/AppearancePage.vue`）消费 `useTaijiThemes.ts` 的 `TAIJI_THEMES`（label/preset/swatch 预览色；令牌真值不在其中，真值唯一权威 = style.css，见 style.css 头注释）。
 
-**applyTheme 机制**：先对所有 COLOR_TOKENS(19) + EFFECT_TOKENS(6) 逐个 `removeProperty`（清 inline 值落回 `:root` 默认），再按新主题 entry `setProperty` 写入（entry 没给的 key 保持默认）。每主题覆盖 26 个变量（bg 阶梯 8 + neutral 6 含 ico-hover + accent 3 + 状态 6 + border 3）。
+**选择器块与覆盖面**（按 style.css 现值，非默认主题按块内声明覆盖、块外继承族默认；派生公式 color-mix 中的 var() 每元素解析，preset 只覆盖基色即自动跟随）：
 
-> COLOR_TOKENS(19) = bg 8 + neutral 5(fg/mid/dim/faint/ico) + accent 1 + 状态 5(success/warn/danger/info/reasoning)；EFFECT_TOKENS(6) = border 3 + accent-hover + neutral-ico-hover + danger-fg。主题 entry 覆盖的 neutral 是 6（含 `--neutral-ico-hover`，该变量虽在 EFFECT_TOKENS 数组里，但主题 entry 会覆盖它）。`--accent-fg` 同理：不在两组数组中，但 6 个主题 entry 均包含，write 时 `setProperty` 直接覆盖（当前不残留；若未来新增不含 accent-fg 的主题，需补入 EFFECT_TOKENS reset）。
+| 主题 | 选择器块 | 覆盖变量数与构成 |
+|---|---|---|
+| 玄（暗·默认） | `:root` | 全部默认值，无独立块 |
+| 皓（亮·默认） | `[data-theme="light"]` | 54 = bg 阶梯 8 + bubble 1 + neutral 8（含 name、fg-2）+ border 3 + accent 3 + link-c/code-c 2 + md-code 1（7% 重声明）+ 状态 6（含 danger-fg 白字覆盖）+ 阴影 3 + chart 族 19（--bg-sunken 与 accent-soft/accent-ring/*-soft 派生公式继承 ：root 不重声明） |
+| 黛蓝 / 暖墨 | `:root[data-theme-preset="dailan"/"nuanmo"]` | 38 = bg 阶梯 7 + neutral 7（含 fg-2）+ accent 3 + link-c/code-c 2 + chart 族 19（不覆盖 border/状态色；--bg-sunken/--md-code 继承派生公式不重声明） |
+| 青墨 | `[data-theme="light"][data-theme-preset="qingmo"]` | 24 = accent 3 + link-c/code-c 2 + chart 族 19（宣纸底不换、只换颜料） |
+| 朱印 | `[data-theme="light"][data-theme-preset="zhuyin"]` | 25 = accent 3 + link-c/code-c 2 + danger 1（玫红错开）+ chart 族 19（其余状态色与 light 族默认同值不重声明；--danger-fg 继承 light 块白字覆盖不重声明） |
 
-**阴 · 暗色族（3 个）**——背景近中性，色相只做「依稀相」(S≤6%)，靠明度阶梯说话：
+**阴 · 暗色族（3 个）**——背景近中性，色相只做「依稀相」(S≤6%)，靠明度阶梯说话；彩色职能按 demo 终态三分（主行动青玉 / 链接正蓝 / 行内代码杏橘）：
 | 主题 | accent | 特色 |
 |---|---|---|
-| **太极·玄（默认）** | `#a5adc2` 弱蓝灰 | 暗端防糊，阶梯上抬+加宽级差；唯一贯穿全应用的色相锚点（OKLCh C 0.0315，依稀量级） |
-| 太极·黛蓝 | `#9ca9c9` 依稀蓝相 | S≈8% |
-| 太极·暖墨 | `#cbc3b3` 暖相 | 宣纸暖 |
+| **太极·玄（默认）** | `#7fb89c` 青玉 | demo 终态职能分色锚点：主行动青玉 A9 / 链接正蓝 / 行内代码杏橘 W2 |
+| 太极·黛蓝 | `#7db2a9` 青玉 | 暗 · 依稀蓝相（bg/文字档全值随 demo，蓝相区分玄） |
+| 太极·暖墨 | `#a2b48b` 青玉暖 | 宣纸暖（bg/文字档全值随 demo，暖相区分玄） |
 
-**阳 · 亮色族（3 个）**——宣纸为底，彩色只做小面积 accent（朱印点睛）：
+**阳 · 亮色族（3 个）**——宣纸为底，彩色只做小面积 accent：
 | 主题 | accent | 特色 |
 |---|---|---|
-| **太极·皓** | `#36332f` 墨黑 | 亮·宣纸墨黑 |
-| 太极·青墨 | `#3d6b6b` 花青 | 亮·宣纸花青 |
-| 太极·朱印 | `#9c4335` 朱砂 | 亮·宣纸朱砂（danger 错开玫红 `#b23855` 防撞色）|
+| **太极·皓** | `#43765d` 青玉深 | 亮 · 宣纸墨黑（青玉深颜料；elevated 纯白档） |
+| 太极·青墨 | `#40775f` 青玉 | 亮 · 宣纸花青（青玉系颜料） |
+| 太极·朱印 | `#4d7a63` 青玉 | 亮 · 宣纸朱砂（accent 青玉系；danger 玫红 `#b23855` 防撞色）|
 
-**设计原理**：暗底彩色必须提亮才可读（提亮即荧光），故靠明度阶梯说话而非色相；亮底允许低饱和低明度「颜料 accent」。亮色族共用同一套宣纸阶梯，只换 accent 颜料不换纸。
+**设计原理**：暗底彩色必须提亮才可读（提亮即荧光），故靠明度阶梯说话而非色相；亮底允许低饱和低明度「颜料 accent」。亮色族共用同一套宣纸阶梯，只换颜料不换纸。demo 终态把「主行动 / 链接 / 行内代码」三种职能拆为三个独立令牌（accent / link-c / code-c），色相冲突（青绿主色 vs 蓝链接）由令牌分治而非单色兼职。
 
 ---
 
 ## §5 Design System（组件范式）
 
-> **真相源**：`.tmp/v6/src/styles/base.css`（SSOT 全局范式）+ demo 组件实现。
+> **真相源**：本节范式登记 + 组件实装 = @taiji/ui（packages/ui）；令牌值以 style.css :root 为准（§10 优先级链）。
 
 ### 5.1 `.btn` SSOT（base + 4 variant × 尺寸 + focus + disabled + svg）
 
@@ -518,7 +563,7 @@ lucide-vue 内联 SVG，stroke-width 默认 **1.75**（特殊图标如 checkbox 
 ### 5.8 GroupCard（设置分组卡片）
 
 ```
-.group-card { background: var(--bg-card); border-radius: 10px; padding: 10px; }  /* 去 border */
+.group-card { background: var(--bg-card); border-radius: var(--radius-card); padding: 10px; }  /* 去 border；demo 无 10px 档，卡片 = lg 档 12px */
 .group-head { background: var(--surface-2); padding: 10px 16px; border-top: 1px rgba(255,255,255,0.04); }  /* 首张 border-top:0 */
 ```
 
@@ -535,7 +580,7 @@ demo 用 `@keyframes shimmer`（1.4s ease-in-out infinite，linear-gradient 扫�
 - **骨架行**：`height 10px + radius 999px`（胶囊条），3 行堆叠模拟列表（间距用标准 scale）
 - **骨架卡片**：`bg-card` 卡片 + 内部 shimmer 扫光
 - **loading 防闪**（SearchModal）：`LOADING_DELAY_MS=200`，开扫 200ms 后才显 spinner，防连续输入闪烁
-- **ToolBlock running**：双环 loader（13px，外环 opacity 0.35 + 内环实心，`spin 1.4s`，accent 色），name 染 accent
+- **ToolBlock running**：呼吸弧 loader（13px，淡轨整圈 opacity 0.16 + accent 弧段 `pathLength=100`；三重动画 = 整体 1.15s/圈旋转 `cubic-bezier(.6,.1,.35,.9)` + 弧段 dasharray 16%↔54% 呼吸 2.3s ease-in-out + 弧段 150° 摆动同周期同相；`prefers-reduced-motion` 静态呈「淡轨整圈 + 固定相位弧段」），name 染 accent
 - **TaijiLogo 旋转**：8s（reduced-motion 停），`currentColor` 适配主题
 
 ### 5.11 内联反馈条（v6 不做全局 toast）
@@ -594,9 +639,9 @@ demo 用 `@keyframes shimmer`（1.4s ease-in-out infinite，linear-gradient 扫�
 
 ### 6.1 对话流（assistant 居中 720）
 
-- **MessageStream**：整 turn 居中 `max-w-content-max-w`(720) + `margin:0 auto`；UserBubble 列内右浮（max-w-76%）；隐藏原生滚动条由 TurnRail 接管
+- **MessageStream**：整 turn 居中 `max-w-content-max-w`(720) + `margin:0 auto`；UserBubble 列内右浮（max-width min(72%,64ch) + overflow-wrap:anywhere，编辑态同宽——ui-optimize 决策 8 N3）；隐藏原生滚动条由 TurnRail 接管
 - **TurnMeta**：pill 默认可见（`bg-elevated` 浮起，解决主面板 surface 上「面上面」不可见）；删 turn 间 `hr` 改加大 turn gap；**重试中态**：重试不进 composer——`RetryIndicator.vue` 独立行（RefreshCw + 「重试中 N/M」+ warn 色，`border-warn/35 bg-warn-soft`），TurnMeta 自身只随 streaming 转 accent spinner（无分级配色，2026-09 删 warn/danger 时长三档）〔2026-09-13 自 v6-design.md 并入；2026-09-19 校正归属 + 删分级配色〕
-- **Block·tool**：状态矩阵 collapsed/expanded × running/done/failed；running 双环 loader（13px）；exit≠0 加 mono 标签；**failed 统一不切 icon**（保留原 tool icon，toolName 降 `neutral-mid` 表达，无红框——与 subagent/workflow block 一致）；unfinished 显「未结束」标签〔2026-09-13 自 v6-design.md 并入〕
+- **Block·tool**：状态矩阵 collapsed/expanded × running/done/failed；running 呼吸弧 loader（13px）；exit≠0 加 mono 标签；**failed 统一不切 icon**（保留原 tool icon，toolName 降 `neutral-mid` 表达，无红框——与 subagent/workflow block 一致）；unfinished 显「未结束」标签〔2026-09-13 自 v6-design.md 并入〕
 - **Block·thinking**：收起态 1 行 CSS ellipsis（`text-overflow: ellipsis` 视觉截断，非硬字符数限制）；expanded body 用 `neutral-mid`（过 AA）
 - **Block·bash**：区分 BashOutputBlock（composer `!` 前缀，不可折叠，exit 标签色 0=`success` / N=`warn` / timeout=`dim`）vs tool-bash（嵌 tool 块，`bg-bg-input` 无 border）〔exit 标签色 2026-09-13 自 v6-design.md 并入〕
 - **TurnSummary hover actions 方案 A**：3 个扁平 icon button（Copy / GitFork / HandHelping），无 split-button、无 MD/+Q badge；fork/handoff 点击 = `+Q` 带提问变体进 composer，composer 直接 Enter = 无内容变体〔2026-09-13 自 v6-design.md 并入〕
@@ -607,15 +652,16 @@ demo 用 `@keyframes shimmer`（1.4s ease-in-out infinite，linear-gradient 扫�
   - **landing meta-row**（仅 `variant="landing"` 时渲染，comp-box 内顶部）：ghost chip 行 = directory chip(Folder icon + mono 目录名，空 cwd 时 accent 色) + `meta-sep`(1px border 竖线) + branch chip(GitBranch icon + mono 分支名) + meta-sep + mode chip(SlidersHorizontal icon + 模式名)；chip 样式 h-auto gap-1.5 px-2 py-1 text-xs accent-soft 底 + accent 文字（hover 不变——**颜色即「非默认模式」状态**，见计划 D-8 待产品裁决）。窄窗口下按序退化（目录截断 → 分支截断 → 分支退化图标 → 模式退化纯图标），模式 chip 的「含替换提示词」信任标记**跨档不丢**（文本档 = chip 内后缀；纯图标档 = 右上角警示色角标 + tooltip）
   - **landing 页布局**（LandingView）：`flex items-center justify-center` 垂直水平居中；问候语 h1（22px font-650 neutral-fg，按时段「上午好呀/下午好呀/晚上好呀，有什么想让我帮忙的吗」）+ landing Composer（max-w 720px）
   - **inline chip 四色**（无底无边 + `font-weight 600` + 前缀 icon 13px + × 删除按钮 hover 染 danger-soft）：`file`=success 绿 / `image`=reasoning 紫 / `slash`=reasoning 紫 / `@`=accent 蓝；四色 chip 都有 × 删除按钮
-  - **composer-bar 组成（左→右）**：左簇 = `+`添加 → 任务托盘（下行）/ extension toolbar 挂载点（`composer.toolbar`，无贡献时零 DOM）→ spacer；右簇 = 生成指标(GenStatsTriggers) / 上下文容量(hover popover) / 模型(click popover, 分组+搜索+选中 check) / 思考强度(click popover, 6 档圆点) / send-slot(30×30 accent 圆角矩形 radius 8px + 倾斜箭头)；bar-btn h28 icon 14px；popover 锚点范式见 §5.12
-  - **composer-bar 密度策略（三簇 + 三步聚合 + 锚点保护，D6 修订）**：容器 `flex-nowrap` **永不换行**（发送位右锚不漂移）；`+` 与发送按钮 = **序 0 锚点：任何宽度不退化、不被裁剪**。退化为**累计三步**，全部由 `ResizeObserver` 实测「左右两簇占宽之和 vs 可用宽」逐级触发（[HISTORICAL] 原 640/520 三档固定阈值 tier 轴已退役——固定阈值判不出内容放不放得下，曾导致「放得下也截模型名」）：序 1 左簇（托盘 + 插件 toolbar）收**单图标**聚合按钮（click 弹全图标列表，角标仅运行数数字，禁多 icon 重叠）→ 序 2 指标（容量+速度+缓存）收单图标聚合按钮（**hover** 弹指标聚合页）→ 序 3 模型+思考收单图标聚合按钮（**click** 弹模型列表+思考档位，**hover 行内即切换**）。**模型名只有两态**：完整展示（恒不截断——[HISTORICAL] 原 88px/56px 容器截断态已删）/ 聚合按钮；底栏**无 `»` 省略号入口**（[HISTORICAL] 原溢出菜单已退役：插件 toolbar 并入左簇聚合、指标并入指标聚合）。顶格仍放不下 → **锚点保护**：左簇与指标让位隐藏，只留模型聚合按钮 + 两侧锚点（[HISTORICAL] 原 `justify-end` 左裁 `+` 行为已封死）。纯状态机 `packages/renderer/src/components/panel/composer-density.ts`（fit 级 0–3 → 形态）+ 接线件 `packages/renderer/src/components/panel/tray/use-composer-bar-density.ts`（测量回路）。图标语义硬约束（修订）：聚合入口 = 单图标按钮，**省略号入口不复存在**（原「聚合 = 层叠图标 / 溢出 = 省略号，两者不共用」随溢出语义一并退役）
-  - **composer-bar 任务托盘（ComposerTray）**：`+`添加 之后、spacer 之前的左簇常驻托盘（`v-if="sessionId"`，landing 态隐藏；锚点保护态经 `v-show="!density.anchorProtected"` 样式折叠隐藏——组件恒挂载，保 `update:has-items` emitter 与 `useTrayCounts` 唯一数据面，保护态往返不重订阅/重首拉）。条目 = built-in 四件（后台命令 / 子代理 / 工作流 / 子会话，固定序恒在最左）+ 协议 widget 区（todo / goal known-order 优先，其余按 ViewHostStore 当前插入序；icon / badge / 状态色由 `WidgetMeta` 驱动）。三态：该类有进行中 → accent 计数 + 呼吸点；仅历史 → dim 常驻（无计数）；全无记录 → 不渲染（归零不虚噪）。第 4 件「子会话」= `parentAgentSessionId === 当前 sessionId` 的条目，pin 态行内「打开 / 停止（两段确认）」，行点击跳该子会话——调度模式的观察入口。fit L1（实测左簇放不下）时整托盘 + 插件 toolbar 聚合为**单图标**聚合按钮（角标仅运行数数字，禁多 icon 重叠），面板内分段展示；托盘全无条目且插件零贡献时不渲染（无死入口）。交互：hover icon 160ms 开面板、指针离开 icon+面板整体 240ms 收（移入面板不收起），点击 icon = pin（再点 / Esc / 点面板外解除），同一时刻至多一个面板；面板锚定 icon 上方 400px 宽、max-h 60vh 内滚动，行内操作仅 pin 态渲染，行点击开 drawer 对应 tab 详情（session 行为跳转子会话）。设计文档已删除（git 可追溯；终态以本节与 CONTEXT.md「任务托盘」词条为准）
-  - **contenteditable + slash 触发**：光标位置检测 `/` 或 `#`（行首或空格后）触发 CommandPopover；选中插入 chip + 移除触发文本；IME 守卫见 §5.12
+  - **composer-bar 组成（左→右）**：左簇 = `+`添加 → 任务托盘（下行）/ extension toolbar 挂载点（`composer.toolbar`，无贡献时零 DOM）→ spacer；右簇 = 指标位（fit 0 = 平铺直挂触发器 TTFT/速度/缓存+容量（demo `.mtr-exp` 同款）；L1 起收为指标聚合按钮 `ComposerMetricsAggregate`，单 Gauge 图标，**hover** 弹容量+TTFT+速度+缓存四卡聚合页） / 模型(click popover, 分组+搜索+选中 check) / 思考强度(click popover, 6 档圆点) / send-slot(30×30 accent 圆角矩形 radius 8px + 倾斜箭头)；bar-btn h28 icon 14px；popover 锚点范式见 §5.12
+  - **composer 顶缘容量细条（ComposerCapacityBar，ui-optimize 决策 6 / N7）**：composer-box 顶部 2px 全宽横条（rounded-t-lg 随容器圆角，`absolute inset-x-0 top-0`），常态 `bg-accent-soft`（accent 半透明）、>80% `bg-warn`、>95% `bg-danger`（分档纯函数 `capacityBarClass`，阈值刻意后移于浮层卡内 bar 的 70/90——细条只做「余量将尽」预警）；只显色阶不显数字（数字唯一入口 = 指标聚合按钮 hover 聚合页），aria-label 双语提示当前百分比；无百分比可分档（unknown / no-value / contextWindow 未知）不渲染
+  - **composer-bar 密度策略（三簇 + 三步聚合 + 锚点保护，退化次序 = 指标 → 左簇 → 模型）**：容器 `flex-nowrap` **永不换行**（发送位右锚不漂移）；`+` / btw 与发送按钮 = **序 0 锚点：任何宽度不退化、不被裁剪**。fit 级退化由 `ResizeObserver` 实测「左右两簇占宽之和 vs 可用宽」逐级触发（[HISTORICAL] 原 640/520 三档固定阈值 tier 轴已退役——固定阈值判不出内容放不放得下，曾导致「放得下也截模型名」）：序 1 指标收**单图标**聚合按钮（**hover** 弹指标聚合页；fit 0 保持平铺直挂触发器，demo `.mtr-exp` 同款——右簇信息展示先让位）→ 序 2 左簇（托盘 + 插件 toolbar）收**单图标**聚合按钮（click 弹全图标列表，角标仅运行数数字，禁多 icon 重叠——左簇功能动作后让位）→ 序 3 模型+思考收单图标聚合按钮（**click** 弹模型列表+思考档位，**hover 行内即切换**）。**模型名只有两态**：完整展示（恒不截断——[HISTORICAL] 原 88px/56px 容器截断态已删）/ 聚合按钮；底栏**无 `»` 省略号入口**（[HISTORICAL] 原溢出菜单已退役：插件 toolbar 并入左簇聚合、指标并入指标聚合）。顶格仍放不下 → **锚点保护**：左簇与指标让位隐藏，只留模型聚合按钮 + 两侧锚点（[HISTORICAL] 原 `justify-end` 左裁 `+` 行为已封死）。纯状态机 `packages/renderer/src/components/panel/composer-density.ts`（fit 级 0–3 → 形态）+ 接线件 `packages/renderer/src/components/panel/tray/use-composer-bar-density.ts`（测量回路）。图标语义硬约束（修订）：聚合入口 = 单图标按钮，**省略号入口不复存在**（原「聚合 = 层叠图标 / 溢出 = 省略号，两者不共用」随溢出语义一并退役）
+  - **composer-bar 任务托盘（ComposerTray）**：`+`添加 之后、spacer 之前的左簇常驻托盘（`v-if="sessionId"`，landing 态隐藏；锚点保护态经 `v-show="!density.anchorProtected"` 样式折叠隐藏——组件恒挂载，保 `update:has-items` emitter 与 `useTrayCounts` 唯一数据面，保护态往返不重订阅/重首拉）。条目 = built-in 四件（后台命令 / 子代理 / 工作流 / 子会话，固定序恒在最左）+ 协议 widget 区（todo / goal known-order 优先，其余按 ViewHostStore 当前插入序；icon / badge / 状态色由 `WidgetMeta` 驱动）。三态：该类有进行中 → accent 计数 + 呼吸点；仅历史 → dim 常驻（无计数）；全无记录 → 不渲染（归零不虚噪）。第 4 件「子会话」= `parentAgentSessionId === 当前 sessionId` 的条目，pin 态行内「打开 / 停止（两段确认）」，行点击跳该子会话——调度模式的观察入口。fit L2（实测左簇放不下，指标聚合后仍放不下）时整托盘 + 插件 toolbar 聚合为**单图标**聚合按钮（角标仅运行数数字，禁多 icon 重叠），面板内分段展示；托盘全无条目且插件零贡献时不渲染（无死入口）。交互：hover icon 160ms 开面板、指针离开 icon+面板整体 240ms 收（移入面板不收起），点击 icon = pin（再点 / Esc / 点面板外解除），同一时刻至多一个面板；面板锚定 icon 上方 400px 宽、max-h 60vh 内滚动，行内操作仅 pin 态渲染，行点击开 drawer 对应 tab 详情（session 行为跳转子会话）。设计文档已删除（git 可追溯；终态以本节与 CONTEXT.md「任务托盘」词条为准）
+  - **contenteditable + slash 触发**：光标位置检测 `/` 或 `#`（行首或空格后）触发 CommandPopover；选中插入 chip + 移除触发文本；IME 输入法组合期拦截见 §5.12
   - **comp-box 态**：`.has-input`(2px `color-mix(surface-hover 40%)` 透明微环) / `.focused`(border-accent + 3px accent-ring 外环) / `.staging`(border-accent + 3px ring + bg-accent-soft，独立于焦点)
 - **ContextBar**（composer 上方，goal/todo 摘要 + plugin foot 挂载点）：与 composer 同宽同中线居中；常态归零（无 goal/todo 时整条隐藏）；slim bar 24px `text-2xs neutral-dim`；点击展开 popover（goal 全文 + 3px 进度条 + todo checklist）
 - **TurnRail**（右侧 turn 导航 + 自定义滚动条接管）：spine(`surface-hover` 6px 暗条 340px，点击翻页) + thumb(`accent-soft + 2px accent border-left`，按滚动比例定位 min-h 24px，可拖拽，hover/active 三档色阶详见 §3.5.6)；hover 展开 mini-map(6px→224px，turn 节点两行：user 行 + agent 状态图标行，含**折展 toggle** ChevronUp/Down，active 节点常驻可见 toggle)；**定位 = absolute 于对话流容器右缘 8px**（2026-10-04 三卡化：原 fixed 视口垂直居中不感知底抽屉高度，窗口矮/抽屉高时叠进终端卡——absolute 后随对话流卡 overflow 裁剪，跨区构造性不可能）；active 节点见 §3.4 例外
   > **failed 节点色阶待统一**：§5.6B 规定 error=`--danger`，但 demo `TurnRail.vue` 当前 failed 节点用 `--warn`（`.warn` class，行 179/195/205）。demo 未对齐范式，实施时应按 §5.6B 改为 `--danger`
-- **ChangeSetCard**：去 border 改 `bg-surface` + 10px 圆角；5 态 badge 中 accumulating/ready/partially-reviewed/resolved 4 态用 `*-soft` 底 + 实色字，superseded 例外用 `bg-elevated + neutral-dim`（中性降级态，非彩色语义）
+- **ChangeSetCard**：去 border 改 `bg-surface` + `--radius-card`（12px，demo 卡片档）圆角；5 态 badge 中 accumulating/ready/partially-reviewed/resolved 4 态用 `*-soft` 底 + 实色字，superseded 例外用 `bg-elevated + neutral-dim`（中性降级态，非彩色语义）
 - **PanelHeader**：去 `border-b`，用 `bg-elevated` 浮起分层
 - **goal/todo 回归对话流**（D3）：移除 tasks tab + `HIDDEN_TOOL_NAMES`，走 GuiComponent 统一渲染
 - **通知族二分**（2026-08-19 裁决，2026-09-13 自 design-system.md §2.5 并入；2026-09-18 方案 A 增补「主体有界 + 悬停详情」）：对话流「非对话内容行」按**可交互性**二分，两形态不得混用——
@@ -632,18 +678,20 @@ demo 用 `@keyframes shimmer`（1.4s ease-in-out infinite，linear-gradient 扫�
 ### 6.2 侧栏（3 tab + 容器）
 
 - 底色 `var(--bg)`；SegmentedTab 见 §5.3；SessionItem 选中态见 §5.4
-- **Project 一级导航**（D14）：nav 下方 ProjectSwitcher。**折叠态** = 当前 project 名 + ChevronDown（点击展开列表）；**展开态** = project 列表（popover 范式 bg-elevated + border-strong + shadow-2），每行 project 名 + hover 显删除按钮（Trash icon，danger 色，点击 window.confirm 后 removeProject），底部「+ 新建项目」按钮（点击变 input，Enter 创建 + 设活跃）；选中态 `bg-surface + accent 字`（列表项型）。session 按 workspace（目录）分组，worktree chip 用 `--reasoning` 紫（§3.5.7）
+- **项目锚定分组（R6.2，会话视图内）**：侧栏顶部无独立项目切换条，项目管理 = 会话视图内的项目分组列表。**组头** = 项目名贴左（12.5px fw-mid fg-2，hover 提亮 fg）+「当前」chip（`--sel-bg` tint 底 + `--sel-edge` 内描边胶囊，仅锚定组渲染）+ 会话计数（mono 2xs fg-2，hover/focus-within 让位给操作钮）；操作钮三枚 = 在此项目新建任务（+）/ 重命名 / 删除（20px 视觉 + 24px 热区伪元素，danger 钮 hover 染 danger；默认项目不渲染重命名/删除——nameless 身份是未归类/孤儿聚合判据）。**区域形态 = 缩进左线**（IDE 文件树语言，全无底色）：展开体左缘 2px 细线（当前组 `--sel-edge`、非当前 `--border`）+ 会话行缩进 9px（目录内 21px）；**展开动效** = 展开体常驻 DOM，`grid-template-rows` 0fr↔1fr 真实高度动画 + 内层 opacity 跟进淡入 + visibility 延迟翻转，reduced-motion 即时切换。**组序稳定**（lastUsedAt 倒序 + 默认项目固定最后，锚定切换不重排不置顶）；**新建项目入口** = 区头行内「+」钮（24px，紧贴模式开关左侧、同组 gap 2px），点击后**列表顶部出现草稿输入行**（对齐组头节奏，Enter / 失焦提交非空名 → 锚定新项目并展开空态；空名 / Esc 丢弃草稿不创建）；删除项目接二次确认弹层（文案写明「N 个会话将归回默认项目」），删当前组锚定回落默认项目并展开
+- **SessionList 会话列表 A/C 双模式（R6.2 锚定分组）**：区头行（固定于 ScrollArea 外不随列表滚动）= 「项目与会话」标题 + 全量会话计数（mono dim）+ 右侧工具组（新建项目「+」钮 + **双段图标开关**：List=平铺列表 / Folder=按目录分组，26×24 钮 13px icon，选中态 `--sel-bg` tint 底 + `--sel-edge` 内描边，模式名走 title 悬停；文案 key sidebar.sessionList.header/modeFlat/modeGroup）。**模式持久化** = localStorage `taiji:sidebar-session-mode`（与 useDrawerSplitWidth 等 `taiji:` 前缀 UI 偏好同通道），缺失/非法值回退默认平铺。**A 平铺（默认）= 锚定聚焦**：仅当前组展开，其余组折叠一行；点其他组头 = 切换锚定并展开（唯一项目切换路径），点当前组头 = 折叠/展开翻转。**C 目录分组 = 浏览态**：全部项目组默认展开，组头点击只开合自己、不切换锚定，「当前」chip 只读；组内按 cwd **目录静态标签**分组（Folder 11px icon + mono 2xs 目录名 + 计数，无折叠钮、会话始终可见），目录行 hover 功能钮 = 「+ 在此目录新建会话」恒渲染 + 目录批量删除两段式确认（仅当该分组含此 cwd 全量会话时渲染——removeByCwd 是 cwd 全量删除，防误删其他项目分组内不可见 session）。组内平铺序 = core `sessionsInRuntimeGroupOrder` SSOT（客户端零重排）；归属切分 = `sessionBelongsToProject`（命名项目精确匹配，默认项目聚未归类 + 孤儿，每个 session 恰落一组）
+- **会话行右槽（2026-10-11 用户裁决）**：状态点（7px 单一 icon 范式）自名称左侧移到**右侧时间左边**，名称贴左缩进贴近项目左线；右槽定宽 58px（= 悬停三钮 18px×3 + gap 2×2 预算），点 + 时间右对齐常驻；悬停/聚焦时槽内 meta 淡出、三钮（重命名/删除/归入项目）淡入覆盖槽区——显隐走 opacity 零布局跳动，名称块 flex-1 在槽左缘截断，钮构造性不遮名称；钮 18px 视觉 + after 伪元素外扩 3px = 24px 热区下限口径。子会话计数 chip 在槽外（不受覆盖）
+- **Session hover 详情卡（demo .sess-pop 权威）**：SessionItem 自承载，两模式同样生效——行 hover/focus **立即开**（mouseenter/focusin 同步，无延迟定时），Teleport body + `fixed` 全局浮层（`--z-hovercard` 梯队，固定宽 232px，`bg-bg-elevated + border-strong + radius-lg + shadow-2`），不被侧栏滚动容器裁剪；字段 = 分支 + fork 血缘（有则渲染，GitBranch icon）+ 完整目录 + 末行相对时间 meta（行首 13px 图标 + mono 12px 值），**无消息数**（SessionSummary 无该字段，零新数据通道约束）；定位 = 行右缘外 8px + 视口右缘 clamp（卡体进入即关）
 - **3 tab**（sessions/files/plugins；plugins 为第 3 枚，Puzzle icon，plugin view 收敛于此）
 - 组标题去 uppercase；ForkGroup 去 border 改缩进，分支行单行（序号 pill + 标题 + 时间，不显示状态，§3.5.4）；FileTree 缩进 10px gap 4px
 - SessionList 状态信号见 §5.6A（左未读点 + 右异常 badge）；非列表行场景（GitPanel 等）用 §5.6B 的 7px 圆点
 - **Brand 区**（顶部）：TaijiLogo 28px 旋转（8s，reduced-motion 停，currentColor 适配主题）+ 产品名(base 600) + 版本号(2xs mid) + 可升级按钮（accent + 7px danger 红点角标）
 - **NavItem**：primary(accent 实色 32px) / ghost(透明) 双层级 + `<kbd>` 快捷键标签（`border-strong` 例外保留，物理按键语义）
 - **UserArea**（footer 钉底）：`margin-top:auto` + 20px accent 纯色头像（去装饰渐变）+ 用户名 + 设置齿轮(24px)
-- **QuickComposer**（workspace 快捷新建 spotlight）：SessionList group head hover「+」触发；spotlight 卡片 560px 宽 `bg-elevated + border-strong + shadow-2 + radius-lg`，backdrop `rgba(0,0,0,0.45)`（比 modal 0.8 轻）；预选 cwd chip + branch 去重；Enter 创建 / Esc 取消
 
 ### 6.3 右侧 Drawer（三卡化 + 8 tab）
 
-- **三卡化**（2026-10-04 用户裁决，推翻 D2 一体化生长）：右抽屉是独立内容卡（`--surface` + border + 10px 圆角 + shadow-1），与对话流卡、底抽屉卡并列，卡间缝 = a = 窗口边距 p-1 的 4px（2026-10-04 三轮裁决：横缝/纵缝/状态条间距统一 4px 实际边距，非叠加值）；**对话流卡默认撑满公共容器**（主区除侧栏外全部空间；二轮裁决——原「无 drawer 限宽 75% 居中」行为随卡片化退役，拉开 drawer 才让位）；**PanelHeader 是对话流卡的卡头**（二轮裁决：header 只与对话流构成整体——右抽屉卡有自己的 L1 栏、底抽屉卡有自己的实例切换条）；L1 栏选中态回归标准 tab 型（§3.4，原「bg-surface-hover 例外」随同 surface 前提消失退役）；关闭控件（X）居 L1 栏右簇最右。主面板:drawer 默认宽度比 1:1，可拖拽调整〔2026-09-13 自 v6-design.md 并入〕；宽度拖拽 handle = 卡缝本体（4px 缝内 1px 视觉线，hover `border-strong` / drag `accent`，`cursor: col-resize`）
+- **三卡化**（2026-10-04 用户裁决，推翻 D2 一体化生长）：右抽屉是独立内容卡（`--surface` + border + `--radius-card` 12px 圆角 + shadow-1），与对话流卡、底抽屉卡并列，卡间缝 = a = 窗口边距 p-1 的 4px（2026-10-04 三轮裁决：横缝/纵缝/状态条间距统一 4px 实际边距，非叠加值）；**对话流卡默认撑满公共容器**（主区除侧栏外全部空间；二轮裁决——原「无 drawer 限宽 75% 居中」行为随卡片化退役，拉开 drawer 才让位）；**PanelHeader 是对话流卡的卡头**（二轮裁决：header 只与对话流构成整体——右抽屉卡有自己的 L1 栏、底抽屉卡有自己的实例切换条）；L1 栏选中态回归标准 tab 型（§3.4，原「bg-surface-hover 例外」随同 surface 前提消失退役）；关闭控件（X）居 L1 栏右簇最右。主面板:drawer 默认宽度比 1:1，可拖拽调整〔2026-09-13 自 v6-design.md 并入〕；宽度拖拽 handle = 卡缝本体（4px 缝内 1px 视觉线，hover `border-strong` / drag `accent`，`cursor: col-resize`）
 - **容器归属规则**：内容按形状分家——竖长阅读型归右抽屉、横宽输出流归底抽屉（§6.4）、全画布内容（网页/workflow 图）归浮层（§6.5）；归属声明唯一权威 = 容器注册表（`packages/core/src/domain/drawer/registry.ts`，core 纯数据，ui 层映射图标渲染）
 - **形态 B**：icon 一级 + 各 tab 自治二级（L1 列表由容器注册表驱动，8 条）
   - git/doc：无二级 tab
@@ -660,7 +708,7 @@ demo 用 `@keyframes shimmer`（1.4s ease-in-out infinite，linear-gradient 扫�
 
 ### 6.4 Bottom Drawer（底抽屉）
 
-- **位置**（三卡化）：独立内容卡（`--surface` + border + 10px 圆角 + shadow-1），split 行（对话流卡 + 右抽屉卡）之下、StatusBar 之上，横跨主区全宽；与上方卡列间距 = a = 4px（三轮裁决：与横缝及窗口边距统一）、与 StatusBar 间 4px；composer 在其上沿保持可见、随开合上移。与右抽屉可同时开（一挤宽度、一挤高度互不冲突；右抽屉开着时底抽屉全宽、右抽屉变矮）
+- **位置**（三卡化）：独立内容卡（`--surface` + border + `--radius-card` 12px 圆角 + shadow-1），split 行（对话流卡 + 右抽屉卡）之下、StatusBar 之上，横跨主区全宽；与上方卡列间距 = a = 4px（三轮裁决：与横缝及窗口边距统一）、与 StatusBar 间 4px；composer 在其上沿保持可见、随开合上移。与右抽屉可同时开（一挤宽度、一挤高度互不冲突；右抽屉开着时底抽屉全宽、右抽屉变矮）
 - **高度**：默认 35%；上沿拖拽手柄命中区跨进卡上方缝（4px，视觉线贴卡顶边 1px，hover `border-strong` / drag `accent`）；拖拽 clamp 15%–70%，高度为全局布局值单键持久化（`taiji:bottom-drawer-height`）；窗口过矮时显示期钳制保证对话流 + composer 最小可视区域，不写回持久值
 - **内容**：terminal 唯一内容（不预设 tab 枚举）；终端面板头部一行 = **实例切换条**（tab 条 + 右簇）——多实例：条目切换（tab 范式见 §5.3.1）/ 「+」新建（新建即自动激活并聚焦新实例输入区，2026-10-04 产品裁决）/ tab 内**常驻**关闭叉（最后实例灰置禁用）/ 空态占位（文案如「终端 1」按序号命名）/ 右簇**收起按钮**（收起整个终端区，收起语义非销毁，实例保留、重开走对账恢复，焦点回 composer）；原第二行工具栏（清屏/终止）随 head 一行化移除，清屏功能退役；空态时 xterm 黑块容器不渲染；spawn 失败走 inline 错误条 + 重试，chunk 装载失败走 AsyncErrorFallback
 - **开关**：`` ⌃` ``（before-input-event 窗口级拦截，不经 globalShortcut——失焦无动作）+ **PanelHeader 顶栏终端按钮**（三卡化 2026-10-04 迁入：原 StatusBar 底栏 trailing 落点退役，鼠标路径入口与右抽屉开关同区、居其左；StatusBar 回落「有状态项才显示」纯显隐）；开合态按会话分区、不持久化；终端聚焦时 Esc 归终端输入，关抽屉走 `` ⌃` `` / 顶栏按钮 / 终端头部收起按钮
@@ -678,7 +726,7 @@ demo 用 `@keyframes shimmer`（1.4s ease-in-out infinite，linear-gradient 扫�
 - 左 nav `w-220px bg-sunken` 无 border-r；右内容区底色 `--bg`（卡片才能浮起），内容列 `max-w-content-max-w`(720) **左对齐**（非居中）
 - nav 选中态见 §5.4（列表项型）；nav-brand `uppercase 0.08em`（例外）
 - **11 个 nav 项**（provider/skill/agent/extension/system-prompt/terminal/preset/worktree/update/system/token-debug），每项 icon + label + 可选 count badge（中性圆点 `bg-surface` + `neutral-dim` mono）；hover 右侧显 chevron（链接提示）。注意：`skill` 项的 key 是 `'skill'`，但 demo 渲染的是 `ResourcesPage`（技能资源管理页），无独立 `SkillPage` 组件
-- 11 个 page 分组卡片 `bg-card` + 10px 圆角 + 去 border；行分隔 hairline 0.05；每行 label 加 12px `neutral-mid` 描述
+- 11 个 page 分组卡片 `bg-card` + `--radius-card`（12px）圆角 + 去 border；行分隔 hairline 0.05；每行 label 加 12px `neutral-mid` 描述
 - **ProviderEdit**：展开就地编辑（手风琴，取代 ProviderEditModal 双层 modal）
 - 表单 label 去 uppercase tracking-wider
 - **交互状态机**（有编辑态的页面）：dirty 快照 diff（净零翻转恢复 clean）/ 保存流（mock 延迟 + 已保存反馈）/ 离开检查（dirty 拦截切页 + 放弃先还原快照防重入）/ beforeunload
@@ -739,7 +787,7 @@ demo 用 `@keyframes shimmer`（1.4s ease-in-out infinite，linear-gradient 扫�
 
 | 原语 | v6 视觉 |
 |---|---|
-| card | 去边框靠 bg 层级（bg-card→surface→surface-2）；header 去 border-b 改 bg 浮起；圆角 8-10px；variant 靠 dot+badge |
+| card | 去边框靠 bg 层级（bg-card→surface→surface-2）；header 去 border-b 改 bg 浮起；圆角随卡片档 12px；variant 靠 dot+badge |
 | stats-line | severity 收窄（danger 保留，ok/warn 降中性）；border-l hairline 保留 |
 | progress-bar | fill 柔化 color-mix；done 降中性；圆角 6px |
 | list-tree | 缩进 16px 留白档；icon 12px；status 7px 圆点替换文字 |
@@ -860,7 +908,7 @@ demo 用 `@keyframes shimmer`（1.4s ease-in-out infinite，linear-gradient 扫�
 ```
 style.css（packages/renderer/src/style.css :root，值真值，运行时唯一源）
   > 本文件（docs/DESIGN.md，范式与 token 登记对照）
-  > .tmp/v6/ demo（组件实现活验证）
+  > @taiji/ui（组件实装）
 ```
 
 **冲突处理**：范式冲突以本文件为准；值冲突以 style.css 为准并回修本文件（§4 挂值相等检查，pre-commit 检查）。
@@ -872,36 +920,11 @@ style.css（packages/renderer/src/style.css :root，值真值，运行时唯一�
 | v6-master-spec.md（§1-§9 + 附录 A/B） | 并入本文件 |
 | traffic-light-layout.md | 并入本文件 §11 |
 | v6-tokens.css / v6-spec-*.html / v6-spec-base.css / page-design 各 demo html / 过程文档（review/fix-plan 等） | 已删除（2026-09-13 退役，git 可追溯；裁决收敛进 §9，UI 演变叙事见 design-evolution.md） |
-| `.tmp/v6/` demo | 保留为组件实现活验证 |
+| `.tmp/v6/` demo | gitignored 原型临时产物，不入库不保留；组件实装权威 = @taiji/ui |
 
 ---
 
-## 附录 A：demo 项目结构（`.tmp/v6/`）
-
-完整 Vue 3 可运行参考实现，27 张截图覆盖全部视图。技术栈：原生 CSS + tokens + 迷你组件（刻意不绑 Tailwind/@taiji/ui，真实实施按本文档 §8.4 阶段 C 映射到项目技术栈）。
-
-```
-.tmp/v6/src/
-├─ styles/tokens.css（token SSOT，太极玄定稿）
-├─ styles/base.css（.btn SSOT + 全局重置 + keyframes）
-├─ views/ShellView.vue（三栏布局 + 三层明度 + 折叠态 + landing 条件渲染）
-├─ composables/useStore.ts（状态管理 + landingMode + projects 增删）
-├─ composables/useTheme.ts（6 太极主题定义 + applyTheme 切换机制，全局共享）
-├─ mock/*.ts（9 个 mock 数据文件）
-├─ components/
-│  ├─ shell/（PanelHeader/SplitterHandle/TrafficLight/AppNavControls）
-│  ├─ sidebar/（Sidebar/SegmentedTab/SessionList/ProjectSwitcher[增删project]/PluginPanel/FileTreeView/...）
-│  ├─ chat/（MessageStream/TurnRail[滚动条二合一+折展toggle]/LandingView[landing页]/ToolBlock/ThinkingBlock/ChangeSetCard/...）
-│  ├─ drawer/（SideDrawer/GitPanel/DiffView/DetailPane/TerminalView/BrowserPane/...）
-│  ├─ settings/（SettingsOverlay/GroupCard/ProviderPage/SystemPage[6太极主题]/TokenDebugPage/...11 page）
-│  ├─ overlays/（SearchModal/FormOverlay/ConfirmDialog）
-│  ├─ composer/（Composer[variant双形态+landing meta-row]/CommandPopover/QueueBubble/QuickComposer）
-│  ├─ common/（预留共享控件层，当前为空；UiInput/UiSwitch/SettingRow/SettingsNavItem 等暂在 settings/ 下）
-│  └─ icons/（TaijiLogo 图标组件）
-└─ SETTINGS-DESIGN-CONTEXT.md（设置页实现基准）
-```
-
-## 附录 B：impeccable AI slop 检测清单
+## 附录 A：impeccable AI slop 检测清单
 
 实施时逐项检查：
 - [ ] 产品 UI 无 uppercase tracking-wider 装饰文字
@@ -916,32 +939,33 @@ style.css（packages/renderer/src/style.css :root，值真值，运行时唯一�
 
 ## §11 窗口顶部 Traffic Light 布局
 
-> **本拓扑是 v3 刻意调整形态，不遵循 v6 demo 范式**（原 traffic-light-layout.md 全文并入，2026-08-17 从 AGENTS.md 前端编码规范第 11 条外移）。本节是窗口顶部布局数值的唯一载体——新增或修改任何窗口顶部区域 UI 时，先对照本节数值。
+> 权威源 = Open Design demo `Workbench.vue`（.win-chrome / .panelhead 40px 档）。本节是窗口顶部布局数值的唯一载体——新增或修改任何窗口顶部区域 UI 时，先对照本节数值（ui-replica M2 已按 demo 40px 卡头档对齐）。
 
-v3 重建采用 zcode-demo 拓扑：base 平铺全屏 → sidebar 透明融合 → main 是唯一 float-panel 浮起。traffic light 靠 **aside-region 顶部留白**兼容，而非旧版 padding-left 避让。**2026-08 二次裁决：本拓扑是刻意调整，不遵循 v6 demo**（PanelHeader 调小至 22px 与 trafficlight 行共线对齐、main-panel 与窗口边框间距收紧至 4px、折叠态 chrome 落入 header 等，出自 8c62f64bc/0251b6d40/860ee6007 等 commit）。此前一次裁决曾按「以 v6 demo 为准」回填 v6 拓扑（38px header / trafficLight {16,26} / p-3 / 52px 安全区），后经用户确认刻意调整被误改，已整体恢复。
+拓扑：base 平铺全屏（bg-bg）→ sidebar 透明融合 → main 三卡浮起（对话卡 / 右抽屉卡 / 底抽屉卡，12px 圆角）。traffic light 靠 aside-region 顶部留白兼容。
 
 ### 数值清单
 
-- AppShell `p-1`(4px) 四周统一：上下左右各 4px（紧凑但有呼吸，对称）。注意：左右 4 使 aside 左缘 x=4，与红黄绿 x=8 有 4px 差（红黄绿保持原生位置不动，用户明确不移动 trafficLightPosition）；折叠态 `!gap-0`（aside 归零，padding 保持 p-1 四周 4px，与展开态一致）
-- `.aside-region` 恒定 `padding-top: 44px`(pt-11)（安全区 + 拉开 trafficlight 行与 LOGO 行间距），**三平台统一，全屏也保留**（mac 全屏 hover 时系统下拉覆盖层会落进这块留白）。AppShell py-1 使 aside 顶在窗口 y=4，红黄绿 y=8~20，安全区让出，与 trafficlight 行（nav 按钮 bottom y27）视觉间距约 12px
-- mac 红黄绿位置由主进程 `titleBarStyle:'hidden'` + `trafficLightPosition:{x:8,y:8}` 放到 macOS 原生左上角（**不用 hiddenInset**——inset 模式强制水平内缩，`trafficLightPosition.x` 被系统忽略）；win/linux 自绘圆点 `left:0 top:[4px]`（TrafficLight.vue 挂载于 AsideRegion 内，aside 顶在窗口 y=4，故 top-4 = 窗口 y8，与 mac 同位——y 轴同位；x 轴自绘圆点在 x4，与 mac x8 有 4px 差，同 883 行预期差）。圆点 12px，顶理论 y=8 / **实测中线 y≈15.75**（macOS 渲染亚像素偏置，比理论 y14 低 ~2pt）/ 右缘 x=60
-- app-nav-controls（收起侧栏/←/→）浮在 AppShell 层（aside 外，避免折叠态 overflow-hidden 裁剪），**非折叠态** `left:72px top:5px`（按钮中线 y=5+11=16，对齐红黄绿**实测**中线 ~15.75；红黄绿右缘 60 + 12 呼吸），全屏 `left:8px`（320ms 平移与 traffic-light opacity 同步）。**PanelHeader `h-[22px]` 与 trafficlight 行共线对齐**：main-panel 顶=AppShell p-1(4)+border(1)=y5，h-22 → header bottom y27 = nav 按钮 bottom，内容中线 y16 ≈ 红黄绿实测中线 y15.75（三者顶/底/中线全对齐）。右侧 drawer/git 按钮 `size-[22px]` 适配 22 高 header
-- **折叠态** chrome 迁入 P1 PanelHeader 内（header `pl-[88px]` 让位红黄绿右缘 60），chrome 按钮在 header 中线（header h-22 中线 y16 = 红黄绿中线，无高度差）；AppShell 折叠态 `!gap-0`（强制覆盖 gap-3，padding 保持 p-1）
-- 全屏两态：非全屏（traffic light opacity 1，按钮 left:72px）/ 全屏（opacity 0，按钮左移 left:8px）。**无第三态**，mac 全屏 hover 红黄绿由系统提供，应用不渲染。全屏态 TrafficLight 圆点 `opacity-0 pointer-events-none` 成对（review MF-1：隐形圆点仍可命中会劫持 header chrome 点击）
-- win/linux 走 mimic_mac：自绘彩色圆点放左侧模拟 mac，三平台左上视觉统一（issue #24 复核后维持不变——抱怨全部指向实现缺陷，无推翻形态的新证据；裁决登记 [ADR-0115](./adr/decisions.md)，自绘路径数值见下方「win/linux 自绘窗口外壳」）
-- 唤回侧栏：⌘B + header chrome 按钮（**rail-restore 左缘细条已移除**）
+- AppShell padding = demo `.app { padding: 4px 4px 4px 0 }`：上/右/下 4px、**左 0**（aside 透明融合直接贴窗口左缘，侧栏内容边距由 Sidebar 自持）；`gap-1`(4px) = demo aside 与主面板卡缝（2026-10-11 用户裁决自 gap-2 收窄：侧栏列表容器右侧 padding 同步归零，视觉右边距对齐左边距，缝 4px 与窗口右缘 pr-1 同节奏）；折叠态 `!gap-0`（aside 归零，padding 不变，主面板左缘 = gap 4px）
+- `.aside-region` 恒定 `padding-top: 44px`(pt-11)（安全区 + 拉开 chrome 行与 LOGO 行间距），**三平台统一，全屏也保留**（mac 全屏 hover 时系统下拉覆盖层会落进这块留白）。AppShell py-1 使 aside 顶在窗口 y=4，安全区让出
+- mac 红黄绿位置由主进程 `titleBarStyle:'hidden'` + `trafficLightPosition:{x:8,y:16}`（**不用 hiddenInset**——inset 模式强制水平内缩，`trafficLightPosition.x` 被系统忽略）。y=16 推导：窗口上边距 4 + chat 卡 1px 上边框 + 卡头半高 20 = 卡头几何中心 y25，扣除 macOS 渲染亚像素偏置 ~1.75pt（{8,8} 时代实测：理论中线 y14 → 实测 y15.75）→ y≈16（demo 注释同源推导，真机校准项）。x=8：AppShell 左边距 0 后与 win/linux 自绘圆点完全同位。灯组自身几何由 OS 决定、随系统版本：macOS 26 实测（半高交越法）单颗 ~14px、中心距 23px、灯组右缘 x≈68、中线 y≈22.75；win/linux 自绘圆点与 demo 同几何（12px / 中心距 20px / 右缘 60）
+- win/linux 自绘圆点 `left-2 top-[12px]`（TrafficLight.vue 挂载于 AsideRegion 内，aside 左缘 x0 / 顶 y4 → 窗口 (8,16)，x/y 与 mac `trafficLightPosition:{x:8,y:16}` 同位）。圆点 12px / gap 8px（demo .lights）
+- 窗口 chrome 行（AppNavControls：收起/←/→）浮在 AppShell 层（aside 外，避免折叠态 overflow-hidden 裁剪），钮 32×32（demo `--hb-chrome-btn`，行定高防塌缩）、图标 15px（stroke 折叠 1.6 / 导航 1.8）、行 gap 2px、`top:9px`（中线 y = 9+16 = 25）。**非全屏** transform 平移按平台，平移 = 灯组右缘 + demo .lights margin-right 4 + 行 gap 2（盒距 6px，demo 实测 6.00）− 基准 left 8：mac（灯组右缘 68，OS 实测）→ `translate-x-[66px]`（首钮盒左缘 74）；win/linux（灯组右缘 60）→ `translate-x-[58px]`（首钮盒左缘 66 = demo）；**全屏**无平移（占红黄绿位 x=8，320ms 与 traffic-light opacity 同步）
+- **PanelHeader `h-[40px]`**（demo 40px 卡头单档终态）：main-panel 顶 y4 + chat 卡 1px 上边框 = 卡头顶 y5，40/2 → **中线 y25 = chrome 行中线 = 红黄绿实测中线（16+6+1.75≈23.75，~1px 亚像素余量）三者共线**。内边距 0 14px、行 gap 8px、基色 --mid、字号 14px、底边框 1px --hairline 与对话流分隔（bg-surface 沉底连体）。卡头钮两档：chrome 槽位钮 34×30（demo .pch）+ 新建任务钮 30×30（demo .hdr-fold，仅折叠态）；右簇钮 30×30（demo `--hb-btn`）、图标 17px（`--hb-icon`）。「对话|Trace」分段控件（TraceViewToggle）= demo .seg：凹陷槽 bg-input + 6px 圆角 + 2px 内衬，按钮 26px 高 / 13px 字 / 15px 图标 / 4px 圆角，激活 = sel-bg tint 底 + inset sel-edge 1px 描边 + 600 字重（总高 30px 内收于卡头）
+- **折叠态** chrome 迁入 PanelHeader 头部槽位（header `pl-[88px]` 让位红黄绿灯组，右缘 mac 68 / win-linux 60 见上；全屏态红黄绿 OS 隐藏，pl-3.5（14px））；AppShell 折叠态 `!gap-0`（强制覆盖 gap-1）
+- 三卡缝：卡间缝（对话卡↔右抽屉、split 行↔底抽屉）统一 4px = 窗口边距同值（demo 三卡化裁决），4px 缝即 split-handle 拖拽区，缝内 1px 视觉线 hover/键盘焦点显、drag 染 accent
+- 全屏两态：非全屏（traffic light opacity 1，chrome 行平台平移 mac 66 / 非 mac 58）/ 全屏（opacity 0，行归位 x=8）。**无第三态**，mac 全屏 hover 红黄绿由系统提供，应用不渲染。全屏态 TrafficLight 圆点 `opacity-0 pointer-events-none` 成对（隐形圆点仍可命中会劫持 header chrome 点击）
+- win/linux 走 mimic_mac：自绘彩色圆点放左侧模拟 mac，三平台左上视觉统一（裁决登记 [ADR-0115](./adr/decisions.md)，自绘路径数值见下方「win/linux 自绘窗口外壳」）
+- 唤回侧栏：⌘B + header chrome 按钮
 
 ### win/linux 自绘窗口外壳（frame:false 路径，mac 不适用）
 
-win/linux 是无边框窗口（`frame: false`），系统不提供任何窗口装饰，以下均为应用自理数值；mac 各项由系统绘制或提供，不适用本小节（mac 默认尺寸恒 1200×800，darwin 分支创建参数零改动）。
+win/linux 是无边框窗口（`frame: false`），系统不提供任何窗口装饰，以下均为应用自理数值；mac 各项由系统绘制或提供，不适用本小节（mac 默认尺寸恒 1200×800，darwin 分支创建参数除 trafficLightPosition 外零改动）。
 
-- **自绘圆点交互态**：悬停 = 逐点同色 important 覆盖（红/黄/绿分别为 `hover:!bg-[#ff5f57]` / `hover:!bg-[#febc2e]` / `hover:!bg-[#28c840]`——Button ghost 变体的悬停灰底与覆盖类同特异性，Tailwind 生成顺序不可靠，必须 `!`），悬停浮出的 ×/−/+ 符号由 `[&_svg]:!size-2` 锁定 8px（Button 基础样式 `[&_svg]:size-4` 为 16px，画进 12px 圆点会溢出）；`.traffic-light` 容器声明 `[-webkit-app-region:no-drag]`，叠在拖拽条带之上保住点击命中（圆点组与导航按钮父链均无 drag 声明，点击不受条带影响）
-- **顶部拖拽条带**：`AsideRegion` 内 `absolute inset-x-0 top-0 h-11` + `[-webkit-app-region:drag]`，仅非 mac 渲染（`data-testid="aside-drag-strip"`；mac 顶部拖拽由系统提供，渲染 app-region 会重定义系统拖拽区）。双击条带空白处 = 最大化/还原（drag 区平台原生行为，无需代码）。折叠态分叉（已接受）：aside 折叠 = `flexBasis: 0` + `overflow-hidden`，条带随折叠被裁剪隐藏（与圆点组折叠态隐藏一致），此时拖拽区域缩回主面板 PanelHeader 的 22px 标题栏（不随折叠消失），与 mac「系统拖拽不随折叠消失」形成平台分叉
+- **自绘圆点交互态**：悬停 = 逐点同色 important 覆盖（红/黄/绿分别为 `hover:!bg-[#ff5f57]` / `hover:!bg-[#febc2e]` / `hover:!bg-[#28c840]`——Button ghost 变体的悬停灰底与覆盖类同特异性，Tailwind 生成顺序不可靠，必须 `!`），悬停浮出的 ×/−/+ 符号由 `[&_svg]:!size-2` 锁定 8px（Button 基础样式 `[&_svg]:size-4` 为 16px，画进 12px 圆点会溢出），字形色 `text-black/55`（demo 同值，TrafficLight.vue 符号 svg 类）；`.traffic-light` 容器声明 `[-webkit-app-region:no-drag]`，叠在拖拽条带之上保住点击命中（圆点组与导航按钮父链均无 drag 声明，点击不受条带影响）
+- **顶部拖拽条带**：`AsideRegion` 内 `absolute inset-x-0 top-0 h-11` + `[-webkit-app-region:drag]`，仅非 mac 渲染（`data-testid="aside-drag-strip"`；mac 顶部拖拽由系统提供，渲染 app-region 会重定义系统拖拽区）。双击条带空白处 = 最大化/还原（drag 区平台原生行为，无需代码）。折叠态分叉（已接受）：aside 折叠 = `flexBasis: 0` + `overflow-hidden`，条带随折叠被裁剪隐藏（与圆点组折叠态隐藏一致），此时拖拽区域缩回主面板 PanelHeader 的 40px 标题栏（不随折叠消失），与 mac「系统拖拽不随折叠消失」形成平台分叉
 - **窗口圆角策略**：应用内圆角仅 mac——AppShell 根节点 `rounded-[10px]` 经 setup 期 `detectPlatform()` 类绑定仅 mac 渲染（非 CSS 选择器分支，避免非 mac 首次渲染 rounded 闪现，且组件测试可断言）；Windows 11 = 无边框窗口系统默认圆角（Electron `roundedCorners` 默认值即 `true`）；Windows 10 与 Linux = 方角（OS 能力边界），四角与窗口内容同色、无色差方块。窗口创建**不加任何圆角配置键**——显式 `roundedCorners: true` 是 no-op（默认值即 `true`，行为增量为零：Win11 本就圆角、Win10 键无效果、Linux 键不适用），已否决防复发（[ADR-0116](./adr/decisions.md)）
-- **默认尺寸与持久化**（仅非 mac）：默认尺寸按主屏工作区比例取值 `width = min(1440, round(workArea.width × 0.62))`、`height = min(960, round(workArea.height × 0.75))`，下限 800×600（minWidth/minHeight）；cap 1440×960 取值依据 = 300px 固定侧栏的密度底线（1440 时侧栏占比约 20.8%，超宽默认窗会加重侧栏占比失衡）。尺寸持久化 `<getDataDir()>/window-state.json` 字段恰 `{width, height, isMaximized}`（位置不记忆，Electron 默认居中放置），仅主窗口写入与恢复（create-window IPC 迁移窗口不参与），恢复尺寸 clamp 到当前工作区；语义裁决见 [ADR-0117](./adr/decisions.md)
+- **默认尺寸与持久化**（仅非 mac）：默认尺寸按主屏工作区比例取值 `width = min(1440, round(workArea.width × 0.62))`、`height = min(960, round(workArea.height × 0.75))`，下限 800×600（minWidth/minHeight）；cap 1440×960 取值依据 = 固定侧栏的密度底线（1440 时侧栏占比约 20.8%，超宽默认窗会加重侧栏占比失衡）。尺寸持久化 `<getDataDir()>/window-state.json` 字段恰 `{width, height, isMaximized}`（位置不记忆，Electron 默认居中放置），仅主窗口写入与恢复（create-window IPC 迁移窗口不参与），恢复尺寸 clamp 到当前工作区；语义裁决见 [ADR-0117](./adr/decisions.md)
 
 ### 相关
 
-- v6-spec-shell.html 已删除（2026-09-13 退役，git 可追溯）——v6 demo/spec 的 38px/16,26/52px 拓扑不适用本实现，属刻意偏离
-- 设计决策记录：ADR-0017（旧版 padding-left 方案，**已 Superseded**，档案摘要与原文已删，git 可追溯）；8c62f64bc/0251b6d40/860ee6007（刻意调整序列，现版形态来源）
 - 窗口外壳跨平台决策登记（mimic_mac 维持 / 圆角策略 / 尺寸持久化三字段）：[ADR-0115/0116/0117](./adr/decisions.md)

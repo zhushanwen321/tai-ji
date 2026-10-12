@@ -2,8 +2,8 @@
  * ask-user REAL E2E —— 真实 runtime + pi 子进程 + faux LLM 演员（L2.5 翻轨，2026-09-15）。
  *
  * 验证目标（设计文档 /tmp/e2e-real-test-design-askuser-thinkinglevel.md §3）：
- * - A1 协议透传：真实 ask_user tool 调用 → extension.ui_request 广播
- *   （comment 删除回归核心：askUserQuestions 无 allowComment 字段）+ 回写闭环（pi 恢复 turn）
+ * - A1 协议透传：真实 ask_user tool 调用 → extension.dialog 富交互 form 帧广播
+ *   （comment 删除回归核心：formQuestions 无 allowComment 字段）+ 回写闭环（pi 恢复 turn）
  * - A2 UI 渲染：FormOverlay 在真实 page 渲染（Playwright DOM 断言），
  *   Other 保留（form-option-__other__）+ 页面无 comment 字样
  * - A3 交互回写：Playwright 操作真实 UI（选 Other → 填自由文本 → submit），
@@ -12,14 +12,15 @@
  *   answers 无 __comment key 由 A1 + 组件层 FormOverlay.test.ts 覆盖
  *
  * ── 协议事实（读代码确认，非猜测）──
- * - wire 帧（双形态，event-adapter 互斥 marker 分支）：
- *   - form 帧（现行）：select + UI_FORM_MARKER → tryTranslateFormSelect 透传 payload
- *     { sessionId, requestId, method:'select', form:true, formQuestions, allowCancel }
- *     （builtin ask-user 统一表单协议迁移，uiFormInteract + allowOther 固定 true）
- *   - legacy 帧（版本偏斜窗口旧 npm 扩展仍可能发）：select + ASK_USER_MARKER →
- *     { sessionId, requestId, method:'select', askUser:true, askUserQuestions, allowCancel }
- *   断言按双读兼容：形态判定 form===true || askUser===true，问题列表
- *   formQuestions ?? askUserQuestions（两种帧语义同构，只做形态双读不降断言强度）。
+ * - wire 帧（pi1-adapt U4 起）：runtime 对话框族 WS 广播帧类型 = extension.dialog
+ *   （取代旧 extension.ui_request，packages/shared/src/extension.ts EXTENSION_EVENTS.DIALOG）。
+ *   event-adapter 互斥 marker 分支统一归一为 form 帧：select + UI_FORM_MARKER →
+ *   tryTranslateFormSelect 透传 payload
+ *   { sessionId, requestId, dialogKind:'select', form:true, formQuestions, allowCancel }
+ *   （builtin ask-user 统一表单协议迁移，uiFormInteract + allowOther 固定 true）。
+ *   legacy ASK_USER_MARKER 帧同样在 event-adapter 归一为 form 帧——askUser /
+ *   askUserQuestions 键归一后不出帧（event-adapter-ui-form-marker.test.ts 锚定），
+ *   本 spec 只读 form 形态，问题列表只读 formQuestions。
  * - FormQuestion / AskUserQuestion（@zhushanwen/extension-protocol）：header/question/
  *   context/options/multiSelect/allowOther —— 无 allowComment（commit 74a0b1001 删除
  *   字段 + UI + __comment key）。faux 轨 dev 装配下 mandatory 扩展经源码目录加载
@@ -67,7 +68,7 @@ const ASK_USER_ARGS = {
   }],
 }
 
-/** faux 队列：ask_user toolCall（→ ui_request）→ 回写后 pi 恢复 turn 的 stop 文本 */
+/** faux 队列：ask_user toolCall（→ extension.dialog form 帧）→ 回写后 pi 恢复 turn 的 stop 文本 */
 const FAUX_SCRIPT = [
   { toolCalls: [{ name: 'ask_user', args: ASK_USER_ARGS }] },
   { text: '已收到答复，继续执行。' },
@@ -103,7 +104,7 @@ async function createSession(port: number, dataDir: string): Promise<string> {
  *
  * WS create 后 config.sessions 广播 → sidebar 列表出现该 session → Playwright
  * 点 sidebar 会话列表项（session.switch RPC + panel 绑定）→ composer 出现即 Panel
- * 已挂载该 session（useExtensionUI 订阅 extension.ui_request 就绪）。
+ * 已挂载该 session（useExtensionUI 经 extension.dialog 帧订阅 ui-request 就绪）。
  * 不涉及 OS dialog（dialog 只在新建任务选目录时出现，切已有 session 不需要）。
  */
 async function selectSessionInSidebar(page: import('@playwright/test').Page, label: string): Promise<void> {
@@ -120,15 +121,14 @@ async function selectSessionInSidebar(page: import('@playwright/test').Page, lab
 }
 
 /**
- * 轮询广播事件里第一个 ask-user 富交互请求（extension.ui_request + 富交互标记）。
- * 双读形态判定：form === true（统一表单帧，现行）或 askUser === true（legacy 帧，
- * 版本偏斜窗口旧扩展）——两种帧 event-adapter 侧互斥分支产出，语义同构。
+ * 轮询广播事件里第一个 ask-user 富交互请求（extension.dialog + form 富交互标记）。
+ * runtime 归一后 wire 上只有 form 帧：legacy ASK_USER_MARKER 也在 event-adapter
+ * 归一为 form:true，askUser 键不出帧（event-adapter-ui-form-marker.test.ts 锚定）。
  */
 async function waitForAskUserRequest(events: any[], deadlineMs: number): Promise<any | undefined> {
   while (Date.now() < deadlineMs) {
     const evt = events.find(
-      (e) => e.type === 'extension.ui_request'
-        && (e.payload?.form === true || e.payload?.askUser === true),
+      (e) => e.type === 'extension.dialog' && e.payload?.form === true,
     )
     if (evt) return evt
     await new Promise((r) => setTimeout(r, 1000))
@@ -136,11 +136,11 @@ async function waitForAskUserRequest(events: any[], deadlineMs: number): Promise
   return undefined
 }
 
-/** 找问题列表[0]（formQuestions ?? askUserQuestions 双读；用类型守卫收窄 unknown[]） */
+/** 找问题列表[0]（formQuestions；用类型守卫收窄 unknown[]） */
 function firstQuestion(askUserReq: any): { header?: string; question: string; options?: unknown[] } {
-  const qs = (askUserReq.payload?.formQuestions ?? askUserReq.payload?.askUserQuestions) as unknown[] | undefined
+  const qs = askUserReq.payload?.formQuestions as unknown[] | undefined
   const q = Array.isArray(qs) && qs.length > 0 ? qs[0] : undefined
-  expect(q, 'payload.formQuestions[0] / payload.askUserQuestions[0] 应存在（协议透传）').toBeDefined()
+  expect(q, 'payload.formQuestions[0] 应存在（协议透传）').toBeDefined()
   expect(typeof (q as { question?: unknown }).question).toBe('string')
   return q as { header?: string; question: string; options?: unknown[] }
 }
@@ -158,7 +158,7 @@ function findTurnResumeAfter(events: any[], idx: number): { type: string } | und
 
 // ── A1: 协议透传（comment 删除回归核心） ─────────────────────────────
 
-test('A1: ask_user 调用 → ui_request 广播含 formQuestions/askUserQuestions，问题无 allowComment 字段，回写后 pi 恢复 turn', async () => {
+test('A1: ask_user 调用 → extension.dialog form 帧含 formQuestions，问题无 allowComment 字段，回写后 pi 恢复 turn', async () => {
   test.setTimeout(120_000)
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'taiji-real-askuser-'))
   const { page, cleanup } = await launchRealApp({ dataDir, faux: { responses: FAUX_SCRIPT } })
@@ -187,19 +187,14 @@ test('A1: ask_user 调用 → ui_request 广播含 formQuestions/askUserQuestion
         piLogsTail: readPiLogs(dataDir).slice(-3000),
       })
     }
-    expect(askUserReq, 'faux toolCall ask_user → ui_request 应确定性到达').toBeDefined()
+    expect(askUserReq, 'faux toolCall ask_user → extension.dialog form 帧应确定性到达').toBeDefined()
 
     // ── 断言 1：协议透传结构完整 ──
     const payload = askUserReq!.payload
     expect(payload.sessionId).toBe(sessionId)
-    expect(payload.requestId, 'ui_request 应带 requestId（回写用）').toBeTruthy()
-    expect(payload.method).toBe('select')
-    // 形态双读（不降强度）：统一表单帧 form===true 或 legacy 帧 askUser===true，
-    // event-adapter 互斥 marker 分支保证两键恰一为真
-    expect(
-      payload.form === true || payload.askUser === true,
-      'ui_request 应带富交互标记（form:true 统一表单帧 / askUser:true legacy 帧）',
-    ).toBe(true)
+    expect(payload.requestId, 'dialog 帧应带 requestId（回写用）').toBeTruthy()
+    expect(payload.dialogKind, 'form 帧经 dialogKind 承载交互方法（pi1-adapt U4 taiji 词表）').toBe('select')
+    expect(payload.form, 'form 帧应带富交互标记（runtime 归一单形态，askUser 键不出帧）').toBe(true)
     const q = firstQuestion(askUserReq!)
     expect(q.question.length).toBeGreaterThan(0)
     expect(Array.isArray(q.options) && q.options.length >= 2,
@@ -275,7 +270,7 @@ test('A2: ask-user overlay 真实渲染 — overlay/Other 保留，页面无 com
       listenWs.close()
       writeDiag('askuser-a2-diag.json', { eventCount: events.length, eventTypes: [...new Set(events.map((e) => e.type))] })
     }
-    expect(askUserReq, 'faux toolCall ask_user → ui_request 应确定性到达').toBeDefined()
+    expect(askUserReq, 'faux toolCall ask_user → extension.dialog form 帧应确定性到达').toBeDefined()
     listenWs.close()
 
     // ── 断言 1：overlay 真实渲染在 page DOM ──
@@ -328,7 +323,7 @@ test('A3: 选 Other 填自由文本提交 → overlay 关闭 + pi 恢复 turn（
       listenWs.close()
       writeDiag('askuser-a3-diag.json', { eventCount: events.length, eventTypes: [...new Set(events.map((e) => e.type))] })
     }
-    expect(askUserReq, 'faux toolCall ask_user → ui_request 应确定性到达').toBeDefined()
+    expect(askUserReq, 'faux toolCall ask_user → extension.dialog form 帧应确定性到达').toBeDefined()
 
     // ── 真实 UI 交互：点 Other → 填自由文本 → submit ──
     const q = firstQuestion(askUserReq!)

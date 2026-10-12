@@ -3,9 +3,10 @@
  *
  * 驱动方式：fork/handoff 进入走真实信号链——triggerEnterForkMode / triggerEnterHandoffMode
  * 写 channel signal → Composer 内 watch → staging.enter（与 Sidebar 快捷键同一生产通路）。
- * 模式态断言全部经用户可见 DOM（composer-mode-chip / fork-mode class /
- * fork-send-btn·handoff-send-btn 的 disabled 形态），不经组件 expose（expose 面生产零消费，
- * 已收窄为无）。
+ * 模式态断言全部经用户可见 DOM（composer-mode-banner / fork-send-btn·handoff-send-btn 的
+ * disabled 形态），不经组件 expose（expose 面生产零消费，已收窄为无）。
+ * [HISTORICAL] 断言锚点 composer-mode-chip 与 fork-mode box 染色 class 已随 staging banner
+ * 形态退役（demo 裁决：banner 图标染 accent 是模式在途唯一染色点），模式标识迁至 banner。
  *
  * 覆盖：
  * - U12 forkMode 三重视觉 + chip + placeholder（fork-mode class + mode-chip + placeholder 切换）
@@ -18,15 +19,30 @@
  * useChat spy 句柄经 import { useChat } 取工厂级单例实例断言（与组件拿到的是同一批 vi.fn）。
  * 运行：cd packages/renderer && npx vitest run src/__tests__/panel/composer-fork-mode.test.ts
  */
+// helper import 必须先于一切项目内模块（@/stores 等会在模块图加载期触发 @/api mock
+// factory，factory 引用的 helper 绑定彼时必须已初始化，否则 TDZ——vi.mock hoisting 约束）
+import {
+  composerApiModule,
+  composerChatModule,
+  composerChildStubs,
+  composerForkSessionAskSpy,
+  composerFlowModule,
+  composerProjectSkillsModule,
+  composerSessionStoreModule,
+  composerSidebarForkModule,
+  enterForkMode,
+  expectBannerVisible,
+  expectForkModeVisual,
+  makeKeyboardComposerInputMock,
+  makeTypeAndEnter,
+  resetComposerMountState,
+} from '../helpers/composer-mount'
 import { describe, it, expect, beforeEach, vi, type Mock } from 'vitest'
 import { mount } from '@vue/test-utils'
-import { defineComponent, ref } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
-import { textToSegments } from '@taiji/shared'
 import { useChatStore } from '@/stores/chat'
 import { triggerEnterForkMode } from '@/composables/panel/useForkModeChannel'
 import { triggerEnterHandoffMode } from '@/composables/panel/useHandoffModeChannel'
-import { composerChatModule, composerChildStubs } from '../helpers/composer-mount'
 
 vi.mock('@/composables/features/chat/useChat', () => composerChatModule())
 // spy 句柄：composerChatModule 工厂级单例——此处 useChat() 与组件实例共享同一批 vi.fn
@@ -39,59 +55,17 @@ const chatApi = useChat() as unknown as {
   compact: Mock
 }
 
-vi.mock('@/composables/features/new-task/useNewTaskFlow', () => ({
-  useNewTaskFlow: () => ({ submitFirstMessage: vi.fn(), currentModel: { value: null }, setPendingModel: vi.fn(), currentCwd: ref(null) }),
-  resetNewTaskFlow: vi.fn(),
-}))
-vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
-  model: { switchModel: vi.fn() },
-  session: { setThinkingLevel: vi.fn(async (sessionId: string, level: string) => ({ sessionId, level })) },
-  composer: { getMentionCandidates: vi.fn().mockResolvedValue([]), getFileCandidates: vi.fn().mockResolvedValue([]) },
-}))
+vi.mock('@/composables/features/new-task/useNewTaskFlow', () => composerFlowModule())
+vi.mock('@/api', () => composerApiModule())
 // main 合并引入 useProjectSkills/useGlobalSkills（landing skill），与 fork 测试无关，stub 掉
-vi.mock('@/composables/features/settings/useProjectSkills', () => ({
-  useProjectSkills: () => ({ projectSkills: [] }),
-  useGlobalSkills: () => ({ globalSkills: [] }),
-}))
-vi.mock('@/stores/session', () => ({
-  useSessionStore: () => ({ active: undefined, list: [], applySnapshot: vi.fn() }),
-}))
-// ── mock useSidebar：forkSessionAsk（fork 发送编排断言锚点）──
-const forkSessionAskMock = vi.fn(() => Promise.resolve())
-vi.mock('@/composables/features/sidebar/useSidebar', () => ({
-  useSidebar: () => ({ forkSessionAsk: forkSessionAskMock, forkSession: vi.fn() }),
-}))
+vi.mock('@/composables/features/settings/useProjectSkills', () => composerProjectSkillsModule())
+vi.mock('@/stores/session', () => composerSessionStoreModule())
+// ── mock useSidebar：forkSessionAsk（fork 发送编排断言锚点，helper spy 单例）──
+const forkSessionAskMock = composerForkSessionAskSpy
+vi.mock('@/composables/features/sidebar/useSidebar', () => composerSidebarForkModule())
 
-// ── ComposerInput mock：defineExpose + emit（同 composer-three-states 范式）──
-const lastInputText = ref('')
-const ComposerInputMock = defineComponent({
-  name: 'ComposerInput',
-  props: {
-    placeholder: { type: String, default: '' },
-    disabled: { type: Boolean, default: false },
-  },
-  emits: {
-    input: (val: string) => {
-      lastInputText.value = val
-      return true
-    },
-    keydown: null,
-    'slash-trigger': null,
-    'file-trigger': null,
-  },
-  setup(_, { expose }) {
-    expose({
-      clear: vi.fn(),
-      setText: vi.fn(),
-      insertSlashChip: vi.fn(),
-      getSegments: () => textToSegments(lastInputText.value),
-      getText: () => lastInputText.value,
-      moveCaretVertical: () => 'edge',
-    })
-    return {}
-  },
-  template: '<div data-testid="composer-input" />',
-})
+// ── ComposerInput mock：helper 键盘交互变体单源（props/expose 面同手写版）──
+const { lastInputText, ComposerInputMock } = makeKeyboardComposerInputMock()
 
 const otherStubs = {
   ComposerInput: ComposerInputMock,
@@ -101,9 +75,7 @@ const otherStubs = {
 import Composer from '@/components/panel/Composer.vue'
 
 beforeEach(() => {
-  setActivePinia(createPinia())
-  vi.clearAllMocks()
-  lastInputText.value = ''
+  resetComposerMountState(lastInputText)
 })
 
 function mountComposer(props: { sessionId: string | null; variant?: 'panel' | 'landing' }) {
@@ -122,6 +94,9 @@ function keyEvent(key: string, opts: { meta?: boolean; ctrl?: boolean; shift?: b
   })
 }
 
+/** 「输入 + Enter」驱动（helper 单源，经本文件 harness 的 ComposerInputMock） */
+const typeAndEnter = makeTypeAndEnter(ComposerInputMock)
+
 /** 制造 streaming：真实 chat store 写入 message_start → isGenerating=true → isActive=true */
 function makeStreaming(sid: string): void {
   const chat = useChatStore()
@@ -131,32 +106,25 @@ function makeStreaming(sid: string): void {
   })
 }
 
-// ── U12：forkMode 三重视觉 + chip + placeholder ─────────────────────────
-describe('U12：forkMode 三重视觉 + mode-chip + placeholder 切换', () => {
-  it('channel signal 触发后容器含 fork-mode class + mode-chip DOM', async () => {
+// ── U12：forkMode banner + box 不染色 + placeholder 静态 ────────────────
+describe('U12：forkMode 视觉 = staging banner（box 无染色、placeholder 静态）', () => {
+  it('channel signal 触发后 banner DOM 存在，composer-box 无 fork-mode 染色', async () => {
     const wrapper = mountComposer({ sessionId: 's1' })
-    triggerEnterForkMode('s1', 'm1')
-    await wrapper.vm.$nextTick()
+    await enterForkMode(wrapper, 's1')
 
-    const box = wrapper.find('[data-testid="composer-box"]')
-    // 容器含 fork-mode class（三重视觉之一）
-    expect(box.classes()).toContain('fork-mode')
-    // mode-chip DOM 存在（标识当前为 fork 提问模式）
-    expect(wrapper.find('[data-testid="composer-mode-chip"]').exists()).toBe(true)
+    expectForkModeVisual(wrapper)
   })
 
-  it('fork 模式下 placeholder 切换为 fork 提问文案', async () => {
+  it('fork 模式下 placeholder 保持静态（不换文案）', async () => {
     const wrapper = mountComposer({ sessionId: 's1' })
-    triggerEnterForkMode('s1', 'm1')
-    await wrapper.vm.$nextTick()
+    await enterForkMode(wrapper, 's1')
 
-    // ComposerInput mock 不渲染 placeholder 属性文本，断言 props 透传的 placeholder 变化
+    // ComposerInput mock 不渲染 placeholder 属性文本，断言 props 透传的 placeholder 不变
     const input = wrapper.findComponent(ComposerInputMock)
-    // fork 模式 placeholder 应不同于普通 inputHint（含「提问」/「fork」语义）
+    // [HISTORICAL] staging placeholder 换文案档（forkHint）已随 banner 退役：demo 口径
+    // placeholder 静态，仍为常规 inputHint
     const placeholderProp = input.props('placeholder') as string
-    expect(placeholderProp).not.toContain('描述你想让 AI 做什么')
-    // fork 提问文案应含 fork/提问 语义关键词之一
-    expect(/fork|提问/i.test(placeholderProp)).toBe(true)
+    expect(placeholderProp).toContain('描述你想让 AI 做什么')
   })
 })
 
@@ -164,8 +132,7 @@ describe('U12：forkMode 三重视觉 + mode-chip + placeholder 切换', () => {
 describe('U13：forkMode 下发送 → 调 forkSessionAsk + 自动退出 fork 模式', () => {
   it('fork 模式下发送 → 在新分支提问并退出 fork 模式', async () => {
     const wrapper = mountComposer({ sessionId: 's1' })
-    triggerEnterForkMode('s1', 'm1')
-    await wrapper.vm.$nextTick()
+    await enterForkMode(wrapper, 's1')
 
     // 输入
     wrapper.findComponent(ComposerInputMock).vm.$emit('input', '追问那条回复')
@@ -178,8 +145,8 @@ describe('U13：forkMode 下发送 → 调 forkSessionAsk + 自动退出 fork �
     // forkSessionAsk 被调（而非 send）
     expect(forkSessionAskMock).toHaveBeenCalled()
     expect(chatApi.send).not.toHaveBeenCalled()
-    // 发送后自动退出：模式 chip 消失
-    expect(wrapper.find('[data-testid="composer-mode-chip"]').exists()).toBe(false)
+    // 发送后自动退出：staging banner 消失
+    expectBannerVisible(wrapper, false)
   })
 })
 
@@ -187,28 +154,26 @@ describe('U13：forkMode 下发送 → 调 forkSessionAsk + 自动退出 fork �
 describe('U14：Esc 退出 + 切 session 自动退出 forkMode', () => {
   it('forkMode 下按 Esc → 退出 fork 模式', async () => {
     const wrapper = mountComposer({ sessionId: 's1' })
-    triggerEnterForkMode('s1', 'm1')
-    await wrapper.vm.$nextTick()
-    expect(wrapper.find('[data-testid="composer-mode-chip"]').exists()).toBe(true)
+    await enterForkMode(wrapper, 's1')
+    expectBannerVisible(wrapper, true)
 
     // 按 Esc（经 ComposerInput keydown 事件）
     wrapper.findComponent(ComposerInputMock).vm.$emit('keydown', keyEvent('Escape'))
     await wrapper.vm.$nextTick()
 
-    expect(wrapper.find('[data-testid="composer-mode-chip"]').exists()).toBe(false)
+    expectBannerVisible(wrapper, false)
   })
 
   it('forkMode 下切 session（sessionId 变化）→ 自动退出', async () => {
     const wrapper = mountComposer({ sessionId: 's1' })
-    triggerEnterForkMode('s1', 'm1')
-    await wrapper.vm.$nextTick()
-    expect(wrapper.find('[data-testid="composer-mode-chip"]').exists()).toBe(true)
+    await enterForkMode(wrapper, 's1')
+    expectBannerVisible(wrapper, true)
 
     // 切 session：改 sessionId prop（Composer watch → staging.exit()）
     await wrapper.setProps({ sessionId: 's2' })
     await wrapper.vm.$nextTick()
 
-    expect(wrapper.find('[data-testid="composer-mode-chip"]').exists()).toBe(false)
+    expectBannerVisible(wrapper, false)
   })
 })
 
@@ -220,8 +185,7 @@ describe('U15：streaming 中 fork 模式：Enter 提交 fork 而非 steer，发
     const wrapper = mountComposer({ sessionId: sid })
     expect(useChatStore().isActive(sid)).toBe(true) // 前置：session 确在 streaming
 
-    triggerEnterForkMode(sid, 'm1')
-    await wrapper.vm.$nextTick()
+    await enterForkMode(wrapper, sid)
 
     wrapper.findComponent(ComposerInputMock).vm.$emit('input', 'fork 那条回复去问')
     await wrapper.vm.$nextTick()
@@ -240,8 +204,7 @@ describe('U15：streaming 中 fork 模式：Enter 提交 fork 而非 steer，发
     const sid = 's-stream-btn'
     makeStreaming(sid)
     const wrapper = mountComposer({ sessionId: sid })
-    triggerEnterForkMode(sid, 'm1')
-    await wrapper.vm.$nextTick()
+    await enterForkMode(wrapper, sid)
 
     // staging 完全替换：fork 发送按钮存在，stop 消失（用户决策：需停止时先 Esc 退出 staging）
     expect(wrapper.find('[data-testid="fork-send-btn"]').exists()).toBe(true)
@@ -262,8 +225,7 @@ describe('U15：streaming 中 fork 模式：Enter 提交 fork 而非 steer，发
     const sid = 's-stream-alt'
     makeStreaming(sid)
     const wrapper = mountComposer({ sessionId: sid })
-    triggerEnterForkMode(sid, 'm1')
-    await wrapper.vm.$nextTick()
+    await enterForkMode(wrapper, sid)
 
     wrapper.findComponent(ComposerInputMock).vm.$emit('input', 'alt 提交')
     await wrapper.vm.$nextTick()
@@ -329,8 +291,7 @@ describe('U16：提交守卫——staging 只看 isSending，非 staging 看「�
     const sid = 's-can-submit-4'
     const wrapper = mountComposer({ sessionId: sid })
     // fork 允许空提交（空 content 退化为纯 fork，不发送首条 user）——见 fork-mode.ts allowsEmptySend
-    triggerEnterForkMode(sid, 'm1')
-    await wrapper.vm.$nextTick()
+    await enterForkMode(wrapper, sid)
     expect(wrapper.find('[data-testid="fork-send-btn"]').attributes('disabled')).toBeUndefined()
     // Esc 退 fork → 经 handoff 通道进 handoff（同样允许空 reply）
     wrapper.findComponent(ComposerInputMock).vm.$emit('keydown', keyEvent('Escape'))

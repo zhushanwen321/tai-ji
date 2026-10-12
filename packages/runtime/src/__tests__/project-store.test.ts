@@ -3,7 +3,6 @@
  *
  * 覆盖：
  * - save → load 往返（projects + activeProjectId 持久化）
- * - userOrder 字段 roundtrip（A5：拖拽用户序跨重启不丢，含「未拖动保持无 userOrder」）
  * - 删除的 project 从文件消失（全量替换语义）
  * - 文件损坏 → 空态不抛（INV-1）
  * - flushAll 立即落盘 + 文件内容为 ProjectStoreState 结构
@@ -17,8 +16,8 @@ import { tmpdir } from 'node:os'
 import type { ProjectStoreState, Project } from '@taiji/shared'
 import { ProjectStore } from '../services/project/project-store.js'
 
-function mkProject(id: string, name: string, lastUsedAt = 0, userOrder?: number): Project {
-  return userOrder === undefined ? { id, name, lastUsedAt } : { id, name, lastUsedAt, userOrder }
+function mkProject(id: string, name: string, lastUsedAt = 0): Project {
+  return { id, name, lastUsedAt }
 }
 
 describe('ProjectStore', () => {
@@ -45,27 +44,6 @@ describe('ProjectStore', () => {
     expect(loaded.projects.map((p) => p.id)).toEqual(['proj-a', 'proj-default'])
     expect(loaded.projects[0]!.name).toBe('Alpha')
     expect(loaded.activeProjectId).toBe('proj-a')
-  })
-
-  it('A5 重启持久化：userOrder 随 project 原样 roundtrip（save → flushAll → 新实例 load）', () => {
-    // D7 两段式排序的持久化前提：拖拽赋的用户序跨重启不丢（store 层零转换读写，
-    // 此处锁 runtime 持久化字节不剥字段）
-    const state: ProjectStoreState = {
-      projects: [
-        mkProject('proj-x1', 'X1', 0, 0),
-        mkProject('proj-x2', 'X2', 0, 1),
-        mkProject('proj-a', 'Alpha', 500),
-      ],
-      activeProjectId: 'proj-x1',
-    }
-    store.save(state)
-    store.flushAll()
-
-    const reloaded = new ProjectStore(dir).load()
-    expect(reloaded.projects.find((p) => p.id === 'proj-x1')!.userOrder).toBe(0)
-    expect(reloaded.projects.find((p) => p.id === 'proj-x2')!.userOrder).toBe(1)
-    // 未拖动的自动序项目保持无 userOrder
-    expect(reloaded.projects.find((p) => p.id === 'proj-a')!.userOrder).toBeUndefined()
   })
 
   it('文件内容为 ProjectStoreState 结构（{ projects, activeProjectId }）', () => {

@@ -199,38 +199,45 @@ describe('CollapsibleContent 展开过渡（Plan 01 续）', () => {
 
 // ── 原 overlay-transitions.test.ts 并入（同族过渡原语守卫，共享 DEAD_CLASSES 全集）──
 const styleCss = readFileSync(resolve(__dirname, '../../style.css'), 'utf-8')
+// 浮层四族实现已收敛至 @taiji/ui（renderer components/ui 降级 re-export），守卫随实现走
 const popoverContent = readFileSync(
-  resolve(__dirname, '../../components/ui/popover/PopoverContent.vue'),
+  resolve(__dirname, '../../../../ui/src/primitives/popover/PopoverContent.vue'),
   'utf-8',
 )
 const selectContent = readFileSync(
-  resolve(__dirname, '../../components/ui/select/SelectContent.vue'),
+  resolve(__dirname, '../../../../ui/src/primitives/select/SelectContent.vue'),
   'utf-8',
 )
 const hoverCardContent = readFileSync(
-  resolve(__dirname, '../../components/ui/hover-card/HoverCardContent.vue'),
+  resolve(__dirname, '../../../../ui/src/primitives/hover-card/HoverCardContent.vue'),
   'utf-8',
 )
 const dialogContent = readFileSync(
-  resolve(__dirname, '../../components/ui/dialog/DialogContent.vue'),
+  resolve(__dirname, '../../../../ui/src/primitives/dialog/DialogContent.vue'),
   'utf-8',
 )
 
 describe('浮层进出场过渡原语（Plan 01）', () => {
   describe('style.css 定义 3 个过渡原语类', () => {
-    it('.reka-popover-transition 跟随触发点 scale（消费 --reka-popper-transform-origin）', () => {
+    it('.reka-popover-transition 透明度 + 3px 位移（data-side 定向，进 ease-out 出 ease-in）', () => {
       expect(styleCss).toContain('.reka-popover-transition')
-      expect(styleCss).toContain(
-        'transform-origin: var(--reka-popper-transform-origin, center)',
-      )
+      // spec overlays spec（demo） §2 动效：起止位随 reka data-side 朝锚点一侧偏移 3px
+      expect(styleCss).toContain(".reka-popover-transition[data-side='top'] { --pop-offset: translateY(3px); }")
+      expect(styleCss).toContain(".reka-popover-transition[data-side='bottom'] { --pop-offset: translateY(-3px); }")
       expect(styleCss).toContain('data-state=\'open\'')
       expect(styleCss).toContain('data-state=\'closed\'')
+      // 进 ease-out（基类 transition）/ 出 ease-in（closed 态 timing 覆写）
+      expect(styleCss).toMatch(/\.reka-popover-transition \{[^}]*var\(--ease-out\)/s)
+      expect(styleCss).toMatch(/\.reka-popover-transition\[data-state='closed'\] \{[^}]*var\(--ease-in\)/s)
     })
 
-    it('.reka-dialog-transition 居中缩放（transform 保留 translate 居中）', () => {
+    it('.reka-dialog-transition 统一升入（自下 8px 240ms ease-out-soft，关 150ms 纯淡出）', () => {
       expect(styleCss).toContain('.reka-dialog-transition')
-      expect(styleCss).toContain('translate(-50%, -50%) scale(1)')
-      expect(styleCss).toContain('translate(-50%, -50%) scale(0.96)')
+      // spec overlays spec（demo） §2 动效：入场 240ms --ease-out-soft 自下 8px 升入（translate 保留居中）
+      expect(styleCss).toMatch(/\.reka-dialog-transition\[data-state='open'\] \{[^}]*240ms var\(--ease-out-soft\)/s)
+      expect(styleCss).toContain('translate(-50%, -50%) translateY(8px)')
+      // 关闭 150ms ease-in 整层淡出（closed 态 transform 不带位移 = 盒不起落）
+      expect(styleCss).toMatch(/\.reka-dialog-transition \{[^}]*150ms var\(--ease-in\)/s)
     })
 
     it('.reka-overlay-transition 纯 opacity', () => {
@@ -239,7 +246,7 @@ describe('浮层进出场过渡原语（Plan 01）', () => {
 
     it('@starting-style 提供入场起点（3 个原语类各一）', () => {
       expect(styleCss).toContain('@starting-style')
-      // popover 族入场起点：scale(0.96) opacity 0
+      // popover 族入场起点：锚侧 3px 位移 + opacity 0（spec overlays spec（demo） §2）
       const popoverStart = styleCss.match(
         /@starting-style\s*\{[^}]*\.reka-popover-transition\[data-state='open'\][^}]*\}/s,
       )
