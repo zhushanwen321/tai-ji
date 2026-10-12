@@ -61,12 +61,33 @@ export function activatePlanMode(
   const state = getPlanState(sessions, sessionId, ctx);
   const { requirement, skills, projectDir } = input;
 
+  // slug 折叠后可能为空串（纯中文需求）——回落 "untitled"，保证目录名恒为
+  // <slug> 形态而非退化为 plans 骨架
   const slug = requirement
     ? requirement.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, MAX_SLUG_LENGTH)
-    : "untitled";
+    : "";
+  const baseSlug = slug || "untitled";
 
-  const planDir = path.join(projectDir, ".tmp", "plans", slug);
-  fs.mkdirSync(planDir, { recursive: true });
+  // 目录唯一性：探测与落盘收敛为一次原子操作——候选目录走非 recursive mkdirSync，
+  // 已被占用即抛 EEXIST，catch 后 <base>-2/-3 递增重探。存在性探测（existsSync）与
+  // recursive mkdir 落盘分离会留检查时刻与使用时刻竞态窗口（TOCTOU）：recursive 对
+  // 已存在目录静默成功，两进程并发 enter 可同探同一空位双双落盘、互覆 plan.md。
+  const plansRoot = path.join(projectDir, ".tmp", "plans");
+  fs.mkdirSync(plansRoot, { recursive: true });
+  let planDir = path.join(plansRoot, baseSlug);
+  for (let n = 2; ; n += 1) {
+    try {
+      fs.mkdirSync(planDir);
+      break;
+    } catch (error) {
+      // 仅 EEXIST（候选位被并发方/上一轮抢先命中）递增重探；其余 mkdir 失败
+      //（权限等真实故障）照常上抛，不吞
+      if (!isErrnoWithCode(error, "EEXIST")) {
+        throw error;
+      }
+      planDir = path.join(plansRoot, `${baseSlug}-${n}`);
+    }
+  }
   const planFilePath = path.join(planDir, "plan.md");
 
   state.isActive = true;
@@ -111,4 +132,9 @@ export function activatePlanMode(
   });
 
   return { state, prompt };
+}
+
+/** Node ErrnoException 守卫（断言前先运行时核形状——extensions no-unsafe-cast 纪律） */
+function isErrnoWithCode(error: unknown, code: string): boolean {
+  return typeof error === "object" && error !== null && (error as NodeJS.ErrnoException).code === code;
 }
