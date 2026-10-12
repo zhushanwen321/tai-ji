@@ -72,6 +72,17 @@ describe('W4TC3: UserBubble 展示态', () => {
     expect(bubble.classes()).toContain('[overflow-wrap:anywhere]')
   })
 
+  it('气泡行 self-stretch 占满列宽（百分比 max-width 基准确定，锁 class 机制面）', () => {
+    // 行若回到收缩适配（shrink-to-fit）宽度，气泡 max-width 的 72% 百分比基准 = 行自身
+    // 宽度 → 循环依赖下布局引擎解出的行宽 < 内容单行自然宽，短 CJK+Latin 消息被折成
+    // 「删除 / installe / r」三行（ff4f0bb04）。self-stretch 让行占满列宽、百分比有确定
+    // 基准，气泡恢复内容自适应——删掉该 class 即复发，故与 N3 同形态锁定。
+    const wrapper = mountBubble()
+    const row = wrapper.find('.group\\/ts')
+    expect(row.exists()).toBe(true)
+    expect(row.classes()).toContain('self-stretch')
+  })
+
   it('展示态 hover actions 容器存在（group-hover 可见）', () => {
     const wrapper = mountBubble()
     // hover actions 容器：opacity-0 group-hover:opacity-100
@@ -376,11 +387,14 @@ describe('W4TC3: UserBubble 编辑态', () => {
 
   it('N3 编辑态气泡同宽同纪律：max-width min(72%, 64ch) + overflow-wrap anywhere（锁 class 机制面）', async () => {
     // 设计决策 8 N3「编辑态气泡同宽」：编辑态容器与展示态气泡持同一宽度/折行纪律。
+    // w-full 是编辑态不进「百分比基准循环」的凭据：宽度 100% 基准 = items-end 列
+    // （确定宽），不像展示态行那样依赖内容解宽——与展示态 self-stretch 用例成对。
     const wrapper = mountBubble({ canEdit: true, isSessionEditable: false })
     const actions = wrapper.find('.group\\/user > .opacity-0')
     await actions.findAll('button')[1].trigger('click')
     const editBubble = wrapper.find('.rounded-\\[14px\\]')
     expect(editBubble.exists()).toBe(true)
+    expect(editBubble.classes()).toContain('w-full')
     expect(editBubble.classes()).toContain('max-w-[min(72%,64ch)]')
     expect(editBubble.classes()).toContain('[overflow-wrap:anywhere]')
   })

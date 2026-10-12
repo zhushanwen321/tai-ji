@@ -28,9 +28,14 @@
     <!-- 展示态气泡（group/ts 命名分组：用户时刻悬挂气泡上方右侧，悬停该行 / 键盘焦点进入
          该行时刻才显现——D2 四处时刻槽悬停化之一；悬挂位 = demo .user-bubble .ts
          （right 10px / top -22px，workbench.css），非首轮悬挂进上一轮 20px 边界留白） -->
+    <!-- 行 self-stretch：行是 items-end 列里的收缩适配（shrink-to-fit）flex item，其内在宽度
+         反由气泡的内容贡献决定，而气泡 max-width 又是行宽的 72%——循环依赖下 Chromium 解出
+         的行宽会把气泡压得比内容单行自然宽更窄，造成无谓折行（「删除 Installer」被折成
+         删除/installe/r，headless 复现实测气泡 118.4px < 自然宽 120px）。行占满列宽后
+         百分比有了确定基准，气泡恢复内容自适应；demo 无此问题因 .user-row 是块级全宽 flex。 -->
     <div
       v-else
-      class="group/ts relative flex items-start justify-end"
+      class="group/ts relative flex items-start justify-end self-stretch"
     >
       <!-- 用户时刻（悬挂气泡上方右侧，demo .user-bubble .ts） -->
       <span v-if="turn.user?.timestamp" class="absolute -top-[22px] right-[10px] font-mono text-[length:var(--text-2xs)] text-neutral-dim tabular-nums opacity-0 transition-opacity duration-[var(--duration-fast)] group-hover/ts:opacity-100 group-focus-within/ts:opacity-100" data-testid="user-timestamp">
