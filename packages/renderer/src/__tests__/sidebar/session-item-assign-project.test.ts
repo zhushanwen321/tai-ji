@@ -4,8 +4,8 @@
  * 覆盖（D14 语义修正 2026-08-04 新交互 + 新 emit 契约 setProject）：
  *  - 菜单项 = 「默认项目」（id=''）+ 全部命名 project（空名 project 不出现，按 p.name 过滤）
  *  - 点击选项 emit setProject {sessionId, projectId} 且菜单关闭（归类可逆，无两段确认）
- *  - 当前归属项 accent 高亮：命名归属 → 对应项；未归类（projectId undefined）→ 默认项目项
- *    （review S-2：默认项 id='' 与 undefined 归一匹配）
+ *  - 当前归属项行首勾标 accent（spec 待裁决 3 既定方向：复用右键菜单分组渲染）：命名归属 →
+ *    对应项；未归类（projectId undefined）→ 默认项目项（review S-2：默认项 id='' 与 undefined 归一匹配）
  *  - 未读标记：unread → session-unread-dot（7px accent 圆点叠在 icon 右上角）；非未读 → 无标记
  *
  * 菜单经 reka PopoverPortal teleport 到 body（同 command-popover-landing 范式：
@@ -122,17 +122,23 @@ describe('SessionItem 归入项目菜单（review MF-7）', () => {
     ]
     store.activeProjectId = 'p1'
 
-    // 归属 p1 → Alpha 项 accent
+    // 归属 p1 → Alpha 项行首勾标（spec 待裁决 3 既定方向：浮层复用右键菜单「移动到项目」
+    // 分组渲染——行首 14px 定宽列 + accent Check，行本体保持中性字色）
     let options = await openAssignMenu('p1')
     const alpha = options.find((o) => o.textContent === 'Alpha')!
     const def = options.find((o) => o.textContent === '默认项目')!
-    expect(alpha.className).toContain('text-accent')
-    expect(def.className).not.toContain('text-accent')
+    const alphaCheck = alpha.querySelector('svg')
+    expect(alphaCheck).toBeTruthy()
+    expect(alphaCheck?.classList.contains('text-accent')).toBe(true)
+    expect(def.querySelector('svg')).toBeNull()
+    expect(alpha.className).not.toContain('text-accent')
     document.body.innerHTML = ''
 
-    // 未归类（无 projectId）→ 默认项目项 accent（(undefined || '') === '' 命中）
+    // 未归类（无 projectId）→ 默认项目项勾标（(undefined || '') === '' 命中）
     options = await openAssignMenu()
     const def2 = options.find((o) => o.textContent === '默认项目')!
-    expect(def2.className).toContain('text-accent')
+    const def2Check = def2.querySelector('svg')
+    expect(def2Check).toBeTruthy()
+    expect(def2Check?.classList.contains('text-accent')).toBe(true)
   })
 })

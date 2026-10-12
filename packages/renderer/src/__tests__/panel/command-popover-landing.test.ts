@@ -77,12 +77,12 @@ const SESSION_CMDS = [
   { name: '/fix', description: '修复问题', source: 'skill' },
 ]
 
-/** reka-ui PopoverContent teleport 到 body：在 body 内找命令项行（v-for 渲染为 .cmd-row div）。
+/** reka-ui PopoverContent teleport 到 body：在 body 内找命令项行（v-for 渲染为 .pop-item div）。
  *  按 item 列表容器（.max-h-[180px]）定位——不依赖行文本含 /（skill 项显示去掉了 / 前缀）。
- *  [B3] 行从 <Button> 改为纯 div（对齐 demo .cmd-row），选择器同步从 'button' 改为 '.cmd-row'。 */
+ *  行 = 纯 div（demo .pop-item 行），选择器 '.pop-item'。 */
 function bodyItemButtons(): HTMLElement[] {
   const list = document.body.querySelector('.max-h-\\[180px\\]')
-  return Array.from((list ?? document.body).querySelectorAll('.cmd-row'))
+  return Array.from((list ?? document.body).querySelectorAll('.pop-item'))
 }
 
 beforeEach(() => {

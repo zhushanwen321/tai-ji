@@ -810,21 +810,28 @@ describe('引擎配置（getPiAgentDir 重定向临时目录，锁与原子写�
     writeFileSync(join(piAgentDirRef.dir, 'subagents', 'engines.json'), JSON.stringify({ engines: ['pi', 'codex'] }))
     writeFileSync(join(piAgentDirRef.dir, 'subagents', 'config.json'), JSON.stringify({ defaultEngine: 'codex' }))
     const { records } = makeRecords()
-    expect(await records.getSubagentEngineConfig()).toEqual({ engines: ['pi', 'codex'], defaultEngine: 'codex' })
+    // u7 扩展（engine-provider-unification D5）：reply 恒带 engineModels（zcode 键 =
+    // deriveZcodeEngineModels 双源派生，测试环境读宿主真实 ~/.zcode——不锚内容只锚形态）
+    // 与 engineDefaults（config.json absent → {}）
+    const view = await records.getSubagentEngineConfig()
+    expect(view).toEqual(expect.objectContaining({ engines: ['pi', 'codex'], defaultEngine: 'codex', engineDefaults: {} }))
+    expect(Array.isArray(view.engineModels?.zcode)).toBe(true)
   })
 
   it('[W4] engines.json 缺失：runtime 自身发现回退（回退源单源化，静态 JSON 兜底已删）', async () => {
     const discoverEngines = vi.fn(() => ['zcode', 'custom'])
     const { records } = makeRecords({ discoverEngines })
-    expect(await records.getSubagentEngineConfig()).toEqual({ engines: ['zcode', 'custom'], defaultEngine: 'pi' })
+    const view2 = await records.getSubagentEngineConfig()
+    expect(view2).toEqual(expect.objectContaining({ engines: ['zcode', 'custom'], defaultEngine: 'pi', engineDefaults: {} }))
+    expect(Array.isArray(view2.engineModels?.zcode)).toBe(true)
     expect(discoverEngines).toHaveBeenCalledOnce()
   })
 
   it('[W4] 发现零命中/失败：空清单（不再 [pi] 兜底——静态声明列出的 id 无 bin 可执行）', async () => {
     const zero = makeRecords({ discoverEngines: vi.fn(() => []) })
-    expect(await zero.records.getSubagentEngineConfig()).toEqual({ engines: [], defaultEngine: 'pi' })
+    expect(await zero.records.getSubagentEngineConfig()).toEqual(expect.objectContaining({ engines: [], defaultEngine: 'pi', engineDefaults: {} }))
     const failed = makeRecords({ discoverEngines: vi.fn(() => { throw new Error('discovery down') }) })
-    expect(await failed.records.getSubagentEngineConfig()).toEqual({ engines: [], defaultEngine: 'pi' })
+    expect(await failed.records.getSubagentEngineConfig()).toEqual(expect.objectContaining({ engines: [], defaultEngine: 'pi', engineDefaults: {} }))
   })
 
   it('setSubagentDefaultEngine：未知引擎 throw（GUI 端防呆）', async () => {

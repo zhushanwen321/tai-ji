@@ -6,7 +6,7 @@
  *   选中唯一源 = core drawer 分区 selectedBtwVid（setBtwView 写入，D5 豁免同源）
  * - 使用者（黑盒 DOM）：空态三要素 / 线 chip 渲染与点击切线 / 新建提问 → fork pill 三态 /
  *   切焦点会话线列表不串台 / 加载失败可见可重试 / 创建失败可见可恢复
- * - 观察者（形态）：首屏冒烟（drawer-btw-tab + 头部 + 关键 testid 存在）；Composer 装配
+ * - 观察者（形态）：首屏冒烟（drawer-btw-tab + 无头行 chip 条顶置 + 关键 testid 存在）；Composer 装配
  *   variant=panel + show-btw=false（防递归出 btw 入口，prop 声明归 M3-b，本处只写调用处）
  * - M3-c 行为面：formQuestions 请求 → 内联确认条降档 DOM（问题/选项按钮/Other/text 输入/
  *   Submit 门；纯函数直测归 __tests__/composables/panel/use-btw-interaction.test.ts）
@@ -95,7 +95,7 @@ beforeEach(() => {
 })
 
 describe('BtwPanel 首屏冒烟与线列表（观察者 + 使用者）', () => {
-  it('首屏结构：drawer-btw-tab + 头部线列表标签 + 新建入口 + 空态三要素 DOM 存在', async () => {
+  it('首屏结构：drawer-btw-tab + 空态三要素 DOM 存在；无头行（r5 对齐 demo：chip 条顶置），空态入口唯一 = btw-empty-new', async () => {
     apiMock.list.mockResolvedValue([])
     const wrapper = mountPanel(MAIN_A)
     await settle(wrapper)
@@ -106,12 +106,12 @@ describe('BtwPanel 首屏冒烟与线列表（观察者 + 使用者）', () => {
     const empty = wrapper.find('[data-testid="btw-empty"]')
     expect(empty.exists()).toBe(true)
     expect(empty.text()).toContain('还没有旁路线') // 说明句（空态三要素之一）
-    expect(wrapper.find('[data-testid="btw-new-thread"]').exists()).toBe(true) // 头部入口
+    expect(wrapper.find('[data-testid="btw-new-thread"]').exists()).toBe(false) // 头行已删：空态下无线列表右簇钮
     expect(empty.find('[data-testid="btw-empty-new"]').exists()).toBe(true) // Primary 入口
     expect(wrapper.find('[data-testid="btw-thread-list"]').exists()).toBe(false) // 无线不渲染列表
   })
 
-  it('线列表渲染 chip + 自动选中最新线 + MessageStream/Composer 装配面（D7②）', async () => {
+  it('线列表渲染 chip + 右簇新建钮恒在可视区 + 自动选中最新线 + MessageStream/Composer 装配面（D7②）', async () => {
     apiMock.list.mockResolvedValue([{ vid: 'btw:pi-1' }, { vid: 'btw:pi-2' }])
     const wrapper = mountPanel(MAIN_A)
     await settle(wrapper)
@@ -120,6 +120,9 @@ describe('BtwPanel 首屏冒烟与线列表（观察者 + 使用者）', () => {
     expect(chips).toHaveLength(2)
     expect(chips[0].text()).toContain('pi-1') // 短名 = extractBtwPiSessionId（映射即 extract）
     expect(chips[1].text()).toContain('pi-2')
+
+    // r5 结构对齐：新建入口承载到 chip 行右簇（demo 无头行形态，入口在滚动区外恒可视）
+    expect(wrapper.find('[data-testid="btw-new-thread"]').exists()).toBe(true)
 
     // 默认选中最新线 → 会话区装配到该 vid
     const stream = wrapper.find('[data-testid="btw-stream"]')
@@ -156,7 +159,7 @@ describe('BtwPanel 首屏冒烟与线列表（观察者 + 使用者）', () => {
     expect(wrapper.find('[data-testid="btw-fork-pill"]').exists()).toBe(false)
   })
 
-  it('点击 chip 切线：会话区跟随 + 选中态样式（列表项型 bg-surface+accent）+ 分区同步', async () => {
+  it('点击 chip 切线：会话区跟随 + 选中态样式（itab 胶囊型 border-strong+elevated）+ 分区同步', async () => {
     apiMock.list.mockResolvedValue([{ vid: 'btw:pi-1' }, { vid: 'btw:pi-2' }])
     const wrapper = mountPanel(MAIN_A)
     await settle(wrapper)
@@ -169,8 +172,10 @@ describe('BtwPanel 首屏冒烟与线列表（观察者 + 使用者）', () => {
     expect(wrapper.find('[data-testid="btw-stream"]').attributes('session-id')).toBe('btw:pi-1')
     expect(wrapper.find('[data-testid="btw-composer"]').attributes('session-id')).toBe('btw:pi-1')
     expect(chip1.attributes('aria-pressed')).toBe('true')
-    expect(chip1.classes()).toContain('bg-surface')
-    expect(chip1.classes()).toContain('text-accent')
+    // ui-replica M5：chip 形态对齐 demo .itab 胶囊（选中 border-strong + elevated 底 + fg）
+    expect(chip1.classes()).toContain('border-border-strong')
+    expect(chip1.classes()).toContain('bg-bg-elevated')
+    expect(chip1.classes()).toContain('text-neutral-fg')
     expect(useBtwSelection().selectedBtwVid.value).toBe('btw:pi-1')
   })
 })
@@ -213,9 +218,9 @@ describe('BtwPanel 新建线与 fork pill 三态（D3 口径）', () => {
     expect(err.exists()).toBe(true)
     expect(err.text()).toContain('创建旁路线失败')
     expect(err.text()).toContain('fork source missing')
-    // 失败不锁死入口：按钮未禁用，可直接重试
+    // 失败不锁死入口：按钮未禁用，可直接重试（失败发生在空态，chip 行右簇钮未渲染）
     expect(wrapper.find('[data-testid="btw-empty-new"]').attributes('disabled')).toBeUndefined()
-    expect(wrapper.find('[data-testid="btw-new-thread"]').attributes('disabled')).toBeUndefined()
+    expect(wrapper.find('[data-testid="btw-new-thread"]').exists()).toBe(false)
   })
 })
 
@@ -273,7 +278,6 @@ describe('BtwPanel 焦点绑定（D7②④）与失败路径', () => {
 
     expect(apiMock.list).not.toHaveBeenCalled()
     expect(wrapper.find('[data-testid="btw-empty"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="btw-new-thread"]').attributes('disabled')).toBeDefined()
     expect(wrapper.find('[data-testid="btw-empty-new"]').attributes('disabled')).toBeDefined()
     // 无选中线 → 会话区不装配
     expect(wrapper.find('[data-testid="btw-stream"]').exists()).toBe(false)

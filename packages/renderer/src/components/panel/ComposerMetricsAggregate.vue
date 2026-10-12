@@ -1,38 +1,45 @@
 <!--
-  ComposerMetricsAggregate —— composer 底栏「指标」聚合入口（W3a 三步聚合：左簇 → 指标 → 模型+思考，
-  累计退化；指标档把 容量 + TTFT + 速度 + 缓存 四个数值触发器收为单图标按钮）。
+  ComposerMetricsAggregate —— composer 底栏「指标」聚合入口（三步聚合序：指标 → 左簇 → 模型+思考，
+  累计退化；容量 + TTFT + 速度 + 缓存 四项指标收为单图标按钮）。
 
   形态硬约束（S1–S7）：
-  - 聚合按钮**单一图标**（Gauge），禁多 icon 重叠；
+  - 聚合按钮**单一图标**（Gauge），禁多 icon 重叠；几何对齐 demo .cbtn（30×30 / r-sm /
+    dim → hover surface-hover 底 + fg 提字，workbench.css composer 段）；
   - 指标聚合 = **hover** 弹指标聚合页（HoverCard）——与模型聚合的 click 语义区分；
+    容器对齐 demo .stats-pop（右下锚 10px 间距 / r-lg / border-strong / shadow-2）；
   - 内容 = 四张纯内容卡纵向拼装（ContextCapacityCard + GenStatsTtftCard + GenStatsSpeedCard
-    + GenStatsCacheCard），卡间发丝分隔（token 工具类 h-px bg-border-strong 局部定义，不
-    import 接线层常量）；四卡共享 useGenStats / useContextUsage 分区，与原触发器同源收敛。
+    + GenStatsCacheCard），卡间发丝分隔（对齐 demo .ag-seg 相邻边框 hairline 档：
+    h-px bg-[color:var(--hairline)] 局部定义，不 import 接线层常量）；四卡共享
+    useGenStats / useContextUsage 分区，数据同源。
 
   契约：props = { sessionId: string; modelId?: string }，无 emits。
-  quota 的 hover-enter 查询挂在本触发器上（与原容量触发器同语义——查询触发属「hover 指标 chip」
-  这一交互面；store 全局共享，与卡内展示实例同源收敛）。
+  quota 的 hover-enter 查询挂在 HoverCardTrigger 上——查询触发属「hover 指标入口」这一
+  交互面；store 全局共享，与卡内展示实例同源。
 -->
 <template>
   <HoverCard>
     <HoverCardTrigger as-child>
+      <!-- 钮形态对齐 demo .cbtn（workbench.css composer 段）：30×30 / r-sm / dim，hover
+           surface-hover 底 + fg 提字；Gauge 16px stroke 1.6 同 demo 图标规格 -->
       <Button
         variant="ghost"
         data-testid="composer-metrics-aggregate"
-        class="h-7 gap-1 rounded-sm px-1.5 text-neutral-dim transition-colors hover:text-neutral-mid"
+        class="size-[30px] rounded-sm p-0 text-neutral-dim transition-colors hover:text-neutral-fg"
         :title="t('panel.context.metricsAggregateTitle')"
         @mouseenter="quota.onHoverEnter"
       >
-        <Gauge class="size-4 shrink-0" />
+        <Gauge class="size-[16px] shrink-0" :stroke-width="1.6" />
       </Button>
     </HoverCardTrigger>
-    <HoverCardContent side="top" class="w-[300px] p-0">
+    <!-- 容器对齐 demo .stats-pop：右下锚 + 10px 间距 + r-lg 圆角；宽 300 保留 real
+         四卡布局宽（demo 240 是四行 sr 形态的宽，登记差异） -->
+    <HoverCardContent side="top" align="end" :side-offset="10" class="w-[300px] rounded-lg p-0">
       <ContextCapacityCard :session-id="props.sessionId" :model-id="props.modelId" />
-      <span class="block h-px bg-border-strong" aria-hidden="true" />
+      <span class="block h-px bg-[color:var(--hairline)]" aria-hidden="true" />
       <GenStatsTtftCard :session-id="props.sessionId" :model-id="props.modelId" />
-      <span class="block h-px bg-border-strong" aria-hidden="true" />
+      <span class="block h-px bg-[color:var(--hairline)]" aria-hidden="true" />
       <GenStatsSpeedCard :session-id="props.sessionId" :model-id="props.modelId" />
-      <span class="block h-px bg-border-strong" aria-hidden="true" />
+      <span class="block h-px bg-[color:var(--hairline)]" aria-hidden="true" />
       <GenStatsCacheCard :session-id="props.sessionId" :model-id="props.modelId" />
     </HoverCardContent>
   </HoverCard>

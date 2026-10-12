@@ -111,6 +111,7 @@ const composerStubs = {
   AddMenuPopover: SIMPLE,
   ContextChipsBar: SIMPLE,
   ContextCapacityPopover: SIMPLE,
+  ComposerCapacityBar: SIMPLE,
   ModelSelectPopover: SIMPLE,
   ThinkingLevelPopover: SIMPLE,
   RetryIndicator: SIMPLE,
@@ -423,10 +424,10 @@ function pushCommands(sessionId: string, commands: Array<Record<string, unknown>
   events.dispatchSession(sessionId, msg)
 }
 
-/** reka-ui PopoverContent teleport 到 body：在列表容器内找 .cmd-row 行 */
+/** reka-ui PopoverContent teleport 到 body：在列表容器内找 .pop-item 行 */
 function bodyRows(): HTMLElement[] {
   const list = document.body.querySelector('.max-h-\\[180px\\]')
-  return Array.from((list ?? document.body).querySelectorAll('.cmd-row')) as HTMLElement[]
+  return Array.from((list ?? document.body).querySelectorAll('.pop-item')) as HTMLElement[]
 }
 
 /** SkillInfo fixture（taiji 源候选形状：sourcePath 即 location 权威来源） */

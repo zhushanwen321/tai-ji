@@ -13,8 +13,8 @@
  *   时，所有 text 块 DOM 均存在（含非末位 a1 的 text——防「非末位 text 被折叠隐藏」历史回归），
  *   thinking/tool 节点不存在，.trace 容器恒渲染。
  * - TC-REG-3 样式统一：展开态下所有 text block class 含正文 token 锚点
- *   （text-[length:var(--text-md)] + leading-[1.75]，D5 行类型定档正文档 15px；行高系数化
- *   用户裁决 2026-10-06），不含过程样式
+ *   （text-[length:var(--text-md)] + leading-[1.8]，D5 行类型定档正文档 15px；行高
+ *   ui-optimize-unified 决策 7 调 1.8），不含过程样式
  *   （text-[length:var(--text-sm)] / leading-relaxed）。Block.vue 用 arbitrary value，
  *   禁止字面 'text-md' 子串匹配（TC-M0-4 模式）。
  *
@@ -139,12 +139,13 @@ describe('block-rendering 回归护栏（§8.3）', () => {
     // U2 起 text 块行尾含时刻槽（text-time-slot），textContent 含时刻文本——断言「正文无丢失」用 toContain
     expect(a1TextEl.textContent).toContain('我先读文件')
     // 相对顺序不变：a1 text 在 tool 前
-    const blocksT2 = wrapper.findAll('.trace .trace-blk')
+    // （顶层单元取子选择器：running 工具的 run 组是展开的，成员行嵌套 .trace-blk 会被后代选择器数进来）
+    const blocksT2 = wrapper.findAll('.trace > .trace-blk')
     expect(blocksT2.length).toBe(2)
     expect(blocksT2[0].find('.md-stub').exists()).toBe(true)
     expect(blocksT2[0].find('.md-stub').text()).toBe('我先读文件')
-    expect(blocksT2[1].find('.trace-tool').exists()).toBe(true)
-    // 记录 T2 的 a1 tool DOM 引用（T3 窗口收编 a1 text 后 tool 仍在窗口内）
+    expect(blocksT2[1].find('.trace-run-group').exists()).toBe(true)
+    // 记录 T2 的 run 组 DOM 引用（T3 窗口收编 a1 text 后组仍在窗口内）
     const a1ToolEl = blocksT2[1].element as HTMLElement
 
     // T3：message_start(a2)——a1 text 收编（非末位），visible=[a1 tool, a2 text]
@@ -164,10 +165,10 @@ describe('block-rendering 回归护栏（§8.3）', () => {
         ],
       }),
     })
-    // a1 tool 引用仍同一节点（flatIndex=1 不变，窗口内块零跳变）
-    const blocksT3 = wrapper.findAll('.trace .trace-blk')
+    // a1 的 run 组引用仍同一节点（run head 锚定 key 不变，窗口内单元零跳变）
+    const blocksT3 = wrapper.findAll('.trace > .trace-blk')
     expect(blocksT3.length).toBe(2)
-    expect(blocksT3[0].find('.trace-tool').exists()).toBe(true)
+    expect(blocksT3[0].find('.trace-run-group').exists()).toBe(true)
     expect(blocksT3[0].element).toBe(a1ToolEl)
     // 相对顺序不变：a1 tool 在 a2 text（末位 text = 流式正文）前
     expect(blocksT3[1].find('.md-stub').exists()).toBe(true)
@@ -217,11 +218,12 @@ describe('block-rendering 回归护栏（§8.3）', () => {
     expect(wrapper.find('.trace').text()).toContain('正文A')
     expect(wrapper.find('.trace').text()).toContain('正文B')
     expect(wrapper.find('.trace-think').exists()).toBe(true)
-    expect(wrapper.find('.trace-tool').exists()).toBe(true)
+    // a1 的工具行折进 run 组（grep → 探索组，已完成 → 组默认收起，成员行不在 DOM）
+    expect(wrapper.find('.trace-run-group').exists()).toBe(true)
   })
 
   // TC-REG-3：样式统一——展开态多 assistant，所有 text block 含正文 token 锚点
-  // （text-[length:var(--text-md)] + leading-[1.75]，D5 正文档；行高系数化用户裁决 2026-10-06），
+  // （text-[length:var(--text-md)] + leading-[1.8]，D5 正文档；行高 ui-optimize-unified 决策 7 调 1.8），
   // 不含过程样式（text-sm / leading-relaxed）。
   it('TC-REG-3: 展开态多 assistant — 所有 text block 统一正文样式（token 锚点）', async () => {
     const a1 = msg({
@@ -252,8 +254,8 @@ describe('block-rendering 回归护栏（§8.3）', () => {
     expect(textEls[1].find('.md-stub').text()).toBe('正文B')
     for (const el of textEls) {
       expect(el.classes()).toContain('text-[length:var(--text-md)]')
-      // 行高系数化 leading-[1.75]（用户裁决 2026-10-06，原 leading-7）
-      expect(el.classes()).toContain('leading-[1.75]')
+      // 行高 leading-[1.8]（决策 7：正文行高 1.7/1.75 → 1.8 双生效点同改）
+      expect(el.classes()).toContain('leading-[1.8]')
       expect(el.classes()).not.toContain('text-[length:var(--text-sm)]')
       expect(el.classes()).not.toContain('text-[length:var(--text-base)]')
       expect(el.classes()).not.toContain('leading-relaxed')

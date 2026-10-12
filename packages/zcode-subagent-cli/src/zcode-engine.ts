@@ -93,10 +93,10 @@ import {
   type ZcodeTerminalPayload,
 } from "./parser.ts";
 import {
-  defaultPersonalProviderConfigPath,
   defaultV2ConfigPath,
   listZcodeModels,
   locateZcodeBuiltinCatalog,
+  resolvePersonalProviderConfigPath,
   resolveZcodeMinimalReasoningLevel,
   resolveZcodeModelRef,
   splitZcodeModelRef,
@@ -644,9 +644,12 @@ export class ZcodeEngine implements EnginePort {
     const env = buildAppServerEnv(this.deps.processEnv ?? process.env);
     env.ZCODE_ENG_CLI_PATH = cliPath;
     env.ZCODE_ENG_V2_CONFIG = this.deps.sources?.v2ConfigPath ?? defaultV2ConfigPath();
-    // [D3 顺带发现 6] wrapper 补注入源 = 引擎侧模型校验源同锚（ZcodeSourcePaths
-    // personalProviderConfigPath 单源——两处读同一文件，解析源统一在该锚上收口）
-    env.ZCODE_ENG_PROVIDER_CONFIG = this.deps.sources?.personalProviderConfigPath ?? defaultPersonalProviderConfigPath();
+    // [D3 顺带发现 6 / engine-provider-unification D3 换轨] wrapper 装载通道与引擎侧
+    // 模型校验源同锚——两消费方走 preparer 同一解析函数（显式 sources > taiji 同步
+    // 副本存在 > 真实 provider_config.json；生产 deps.sources 恒 undefined 走 default
+    // 链，回落判定点在该函数内单点收口），env 值 = 同步副本路径：校验链读
+    // merge(真实, 副本) 视图，wrapper 拦截分支读同一 merge 视图——视图统一收口在该锚
+    env.ZCODE_ENG_PROVIDER_CONFIG = resolvePersonalProviderConfigPath(this.deps.sources, engineDataDir);
     // 会话库隔离（设计 zcode-session-db-isolation.md D1/E4）：覆盖式写入隔离库路径，
     // 忽略宿主继承值（用户 shell 的同名 env 不得把我们重定向到别处；配置分层
     // Cli > Env > User 保证 env 压过用户 config 的 storage.sessionDbPath）。同时显式

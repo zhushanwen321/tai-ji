@@ -3,8 +3,9 @@
  *
  * 覆盖：insertSlashChip（skill/slash 分发 + dataset + spacer + 图标注入两路）、insertFileChip
  * （lineRange 序列化 + 选区插入/appendChild 两路）、insertImageBadge（crypto id + metadata）、
- * insertMentionChip（@ chip + # 委托 insertFileChip）、handleBackspaceOnChip（TEXT_NODE offset 0 /
- * spacer 末尾 / 中段 / element 容器 chip / 非 chip / null el / 无选区）。
+ * insertMentionChip（@ chip 结构化 pre/label/× + # 委托 insertFileChip）、just-inserted
+ * 落位反馈（800ms 摘除 + 连续插入顺延，fake timers）、handleBackspaceOnChip（TEXT_NODE
+ * offset 0 / spacer 末尾 / 中段 / element 容器 chip / 非 chip / null el / 无选区）。
  *
  * 运行：cd packages/dom-core && npx vitest run src/composer/input/chip-commands.test.ts
  */
@@ -79,12 +80,19 @@ describe('useComposerChipCommands insertSlashChip', () => {
     expect(newChip.dataset.chipLocation).toBeUndefined()
     // 图标经 renderIcon 透传（第三参 icon 原样传给 insertSkillChip）
     expect(c.callbacks.renderIcon).toHaveBeenCalledWith(expect.any(HTMLElement), 'terminal')
-    // × 删除按钮（aria-label 经 t 注入）
+    // × 删除按钮：原生 button[type=button]（demo chipHtml 同款，键盘可达——原生语义自带，
+    // 不另设 role）；aria-label 经 t 注入；按钮内容为内联 svg X，文本 '×' 已退役
     const xBtn = newChip.querySelector('.chip-x') as HTMLElement
     expect(xBtn).not.toBeNull()
-    expect(xBtn.getAttribute('role')).toBe('button')
+    expect(xBtn.tagName).toBe('BUTTON')
+    expect((xBtn as HTMLButtonElement).type).toBe('button')
+    expect(xBtn.getAttribute('role')).toBeNull()
     expect(xBtn.getAttribute('aria-label')).toBe('composable.removeLabel')
-    expect(xBtn.textContent).toBe('×')
+    const xSvg = xBtn.querySelector('svg')
+    expect(xSvg).not.toBeNull()
+    expect(xSvg?.getAttribute('viewBox')).toBe('0 0 24 24')
+    expect(xSvg?.querySelectorAll('path')).toHaveLength(2)
+    expect(xBtn.textContent).toBe('')
     // 旧破坏性行为已消除：不删光全部 .slash-chip —— 已有命令 chip 与已有 skill chip 均原样保留
     expect(chips.filter((n) => n.dataset.chipType === 'slash')).toHaveLength(1)
     expect(chips.find((n) => n.dataset.chipName === 'cw-cli')).toBeTruthy()
@@ -215,7 +223,7 @@ describe('useComposerChipCommands insertFileChip', () => {
     cleanup?.()
   })
 
-  it('无选区（rangeCount=0）走 appendChild + 无 lineRange：dataset.chipType=file + label=path', () => {
+  it('无选区（rangeCount=0）走 appendChild + 无 lineRange：dataset.chipType=file + label=path + pre($)', () => {
     const c = setup()
     c.insertFileChip('/a/b.ts')
     const chip = c.el.querySelector('.mention-file') as HTMLElement
@@ -223,7 +231,10 @@ describe('useComposerChipCommands insertFileChip', () => {
     expect(chip.dataset.chipType).toBe('file')
     expect(chip.dataset.chipPath).toBe('/a/b.ts')
     expect(chip.dataset.chipLineStart).toBeUndefined()
+    // 前缀符号 pre($) 在 label 之前（实体 chip 形态：mono 元数据层前缀）
+    expect(chip.querySelector('.chip-pre')?.textContent).toBe('$')
     expect(chip.querySelector('.chip-label')?.textContent).toBe('/a/b.ts')
+    expect(chip.firstElementChild?.className).toBe('chip-pre')
     expect(c.callbacks.onChanged).toHaveBeenCalled()
     cleanup = c.cleanup
   })
@@ -308,12 +319,20 @@ describe('useComposerChipCommands insertMentionChip', () => {
     cleanup?.()
   })
 
-  it('@ 类型：mention-at chip + 文本=@{name}', () => {
+  it('@ 类型：mention-at chip + 结构化 pre(@)/label(name)/× 按钮 + 无 dataset（旧通路兼容）', () => {
     const c = setup()
     c.insertMentionChip('@', 'alice')
     const chip = c.el.querySelector('.mention-at') as HTMLElement
     expect(chip).not.toBeNull()
+    // 拍平文本与旧纯 textContent 形态逐字节一致（pre '@' + label 'alice'，svg/× 无文本）——
+    // segment-parse 对无 dataset mention-at 走文本拍平，序列化契约零改动
     expect(chip.textContent).toBe('@alice')
+    // 结构化：pre 前缀 + label（name 不带 @）+ × 删除按钮
+    expect(chip.querySelector('.chip-pre')?.textContent).toBe('@')
+    expect(chip.querySelector('.chip-label')?.textContent).toBe('alice')
+    expect(chip.querySelector('.chip-x')).not.toBeNull()
+    // 保持无 dataset 现状（旧通路历史兼容，设计 F3）
+    expect(chip.dataset.chipType).toBeUndefined()
     cleanup = c.cleanup
   })
 
@@ -440,7 +459,7 @@ describe('useComposerChipCommands insertSessionChip', () => {
     cleanup?.()
   })
 
-  it('class=mention-session + dataset 三件套 + label 文本 + × 按钮 + spacer', () => {
+  it('class=mention-session + dataset 三件套 + label 文本 + pre(#) + × 按钮 + spacer', () => {
     const c = setup()
     c.insertSessionChip('019e-abc-123', 'fix-com 设计讨论')
     const chip = c.el.querySelector('.mention-session') as HTMLElement
@@ -449,6 +468,8 @@ describe('useComposerChipCommands insertSessionChip', () => {
     expect(chip.dataset.chipSessionId).toBe('019e-abc-123')
     expect(chip.dataset.chipLabel).toBe('fix-com 设计讨论')
     expect(chip.contentEditable).toBe('false')
+    // 前缀符号 pre(#) + label（实体 chip 形态）
+    expect(chip.querySelector('.chip-pre')?.textContent).toBe('#')
     expect(chip.querySelector('.chip-label')?.textContent).toBe('fix-com 设计讨论')
     // × 删除按钮（对齐 insertFileChip 结构惯例）
     expect(chip.querySelector('.chip-x')).not.toBeNull()
@@ -489,7 +510,7 @@ describe('useComposerChipCommands insertSubagentChip', () => {
     cleanup?.()
   })
 
-  it('class=mention-at（复用蓝色样式）+ dataset 三件套 + label=@slug + × 按钮（F3 修复）', () => {
+  it('class=mention-at（复用样式）+ dataset 三件套 + pre(@) + label=slug + × 按钮（F3 修复）', () => {
     const c = setup()
     c.insertSubagentChip('sub-1', 'build-api')
     const chip = c.el.querySelector('.mention-at') as HTMLElement
@@ -498,7 +519,11 @@ describe('useComposerChipCommands insertSubagentChip', () => {
     expect(chip.dataset.chipSubagentId).toBe('sub-1')
     expect(chip.dataset.chipSlug).toBe('build-api')
     expect(chip.contentEditable).toBe('false')
-    expect(chip.querySelector('.chip-label')?.textContent).toBe('@build-api')
+    // 前缀符号 pre(@) + label（slug 不带 @，@ 移交 pre 承载——实体 chip 形态）
+    expect(chip.querySelector('.chip-pre')?.textContent).toBe('@')
+    expect(chip.querySelector('.chip-label')?.textContent).toBe('build-api')
+    // 拍平文本不变（pre + label = '@build-api'）
+    expect(chip.textContent).toBe('@build-api')
     // 旧 mention-at 无 × 按钮的问题（F3）在新 chip 修复
     expect(chip.querySelector('.chip-x')).not.toBeNull()
     expect(c.callbacks.onChanged).toHaveBeenCalled()
@@ -524,6 +549,64 @@ describe('useComposerChipCommands insertSubagentChip', () => {
       { type: 'subagent', subagentId: 'sub-1', slug: 'build-api' },
       { type: 'text', text: '汇报进度' },
     ])
+    cleanup = c.cleanup
+  })
+})
+
+// ── 落位反馈（demo 方案 C「插入瞬间」）：just-inserted 淡染 800ms 摘除 ──
+// timer 是 composable 闭包级单例：连续插入时旧 timer 被 clearTimeout 顺延（demo flashTimer
+// 同款语义——前一枚淡染保持到自身被删除或后续无新插入为止）。
+
+describe('useComposerChipCommands just-inserted 落位反馈', () => {
+  let cleanup: () => void
+  beforeEach(() => {
+    window.getSelection()?.removeAllRanges()
+    vi.useFakeTimers()
+    cleanup = () => {}
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+    cleanup?.()
+  })
+
+  it('插入即带 just-inserted，800ms 后摘除', () => {
+    const c = setup()
+    c.insertFileChip('/a.ts')
+    const chip = c.el.querySelector('.mention-file') as HTMLElement
+    expect(chip.classList.contains('just-inserted')).toBe(true)
+    vi.advanceTimersByTime(799)
+    expect(chip.classList.contains('just-inserted')).toBe(true)
+    vi.advanceTimersByTime(1)
+    expect(chip.classList.contains('just-inserted')).toBe(false)
+    cleanup = c.cleanup
+  })
+
+  it('连续插入：新插入顺延旧 timer（前一枚淡染不因 800ms 到期被误摘，demo 同款）', () => {
+    const c = setup()
+    c.insertFileChip('/a.ts')
+    const chipA = c.el.querySelector('.mention-file') as HTMLElement
+    vi.advanceTimersByTime(500)
+    c.insertSessionChip('s1', '会话 A')
+    const chipB = c.el.querySelector('.mention-session') as HTMLElement
+    expect(chipB.classList.contains('just-inserted')).toBe(true)
+    // A 的 800ms 到期（500 + 800 > 800），但 timer 已被 B 的插入 clear——A 不摘、B 到点摘
+    vi.advanceTimersByTime(800)
+    expect(chipA.classList.contains('just-inserted')).toBe(true)
+    expect(chipB.classList.contains('just-inserted')).toBe(false)
+    cleanup = c.cleanup
+  })
+
+  it('slash 替换语义删除旧 chip 后，旧 timer 触发不抛错（对已分离节点摘 class）', () => {
+    const c = setup()
+    c.insertSlashChip('/old')
+    const oldChip = c.el.querySelector('.slash-chip') as HTMLElement
+    expect(oldChip.classList.contains('just-inserted')).toBe(true)
+    c.insertSlashChip('/new') // 替换：旧 chip 出 DOM
+    expect(c.el.contains(oldChip)).toBe(false)
+    // 旧 timer（若未被 clear）触发时对已分离节点操作；此处旧 timer 已被新插入 clear，
+    // 快进验证无异常即收口
+    vi.advanceTimersByTime(1600)
+    expect(c.el.querySelector('.slash-chip')?.classList.contains('just-inserted')).toBe(false)
     cleanup = c.cleanup
   })
 })
@@ -654,5 +737,91 @@ describe('useComposerChipCommands handleBackspaceOnChip', () => {
     const callbacks = makeCallbacks()
     const api = useComposerChipCommands(ref<HTMLDivElement | null>(null), callbacks)
     expect(api.handleBackspaceOnChip()).toBe(false)
+  })
+})
+
+// ── image badge 缩略图加载失败回退（makeImageThumb 的 error 监听器）──
+// src 加载失败（403 白名单 / 文件损坏）→ once error 监听器把 img 原地替换为
+// span.chip-icon.chip-thumb-fallback 占位（内联 lucide Image svg），不留破图。
+
+describe('useComposerChipCommands insertImageBadge 缩略图加载失败回退', () => {
+  let cleanup: () => void
+  beforeEach(() => {
+    window.getSelection()?.removeAllRanges()
+  })
+  afterEach(() => {
+    cleanup?.()
+  })
+
+  it('img error 事件：img 被替换为 chip-thumb-fallback 占位（内联 lucide image svg 三段）', () => {
+    const c = setup()
+    c.insertImageBadge('/tmp/x.png', 'x.png', '截图.png')
+    const img = c.el.querySelector('img.chip-thumb') as HTMLImageElement
+    expect(img).not.toBeNull()
+    img.dispatchEvent(new Event('error'))
+    // img 原地被占位 host 替换
+    expect(c.el.querySelector('img.chip-thumb')).toBeNull()
+    const host = c.el.querySelector('.chip-thumb-fallback') as HTMLElement
+    expect(host).not.toBeNull()
+    expect(host.className).toBe('chip-icon chip-thumb-fallback')
+    expect(host.getAttribute('aria-hidden')).toBe('true')
+    // 占位 svg = lucide Image iconNode 同款（rect + circle + path 三段，12px currentColor）
+    const svg = host.querySelector('svg')
+    expect(svg?.getAttribute('viewBox')).toBe('0 0 24 24')
+    expect(svg?.getAttribute('fill')).toBe('none')
+    expect(svg?.getAttribute('stroke')).toBe('currentColor')
+    expect(svg?.getAttribute('width')).toBe('12')
+    expect(svg?.getAttribute('height')).toBe('12')
+    const rect = svg?.querySelector('rect')
+    expect(rect?.getAttribute('width')).toBe('18')
+    expect(rect?.getAttribute('height')).toBe('18')
+    expect(rect?.getAttribute('x')).toBe('3')
+    expect(rect?.getAttribute('y')).toBe('3')
+    expect(rect?.getAttribute('rx')).toBe('2')
+    expect(rect?.getAttribute('ry')).toBe('2')
+    expect(svg?.querySelector('circle')?.getAttribute('cx')).toBe('9')
+    expect(svg?.querySelector('circle')?.getAttribute('r')).toBe('2')
+    expect(svg?.querySelector('path')?.getAttribute('d')).toBe('m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21')
+    cleanup = c.cleanup
+  })
+})
+
+// ── chip × 按钮点击删除（makeXButton 的 click 监听器，§2e）──
+
+describe('useComposerChipCommands chip × 按钮点击删除', () => {
+  let cleanup: () => void
+  beforeEach(() => {
+    window.getSelection()?.removeAllRanges()
+  })
+  afterEach(() => {
+    cleanup?.()
+  })
+
+  it('file chip × 点击：chip 整块移除 + onChanged，preventDefault 且不冒泡到编辑器根', () => {
+    const c = setup()
+    c.insertFileChip('/a/b.ts')
+    const chip = c.el.querySelector('.mention-file') as HTMLElement
+    const xBtn = chip.querySelector('.chip-x') as HTMLElement
+    // stopPropagation 断言：编辑器根上的 click 监听不收到 × 的点击（防无关 click 逻辑误触）
+    const rootClick = vi.fn()
+    c.el.addEventListener('click', rootClick)
+    const ev = new MouseEvent('click', { bubbles: true, cancelable: true })
+    xBtn.dispatchEvent(ev)
+    expect(c.el.contains(chip)).toBe(false)
+    expect(c.callbacks.onChanged).toHaveBeenCalled()
+    expect(ev.defaultPrevented).toBe(true)
+    expect(rootClick).not.toHaveBeenCalled()
+    cleanup = c.cleanup
+  })
+
+  it('session chip × 点击：chip 移除（makeXButton 各 chip 类型共用通路）', () => {
+    const c = setup()
+    c.insertSessionChip('s-9', '会话 X')
+    const chip = c.el.querySelector('.mention-session') as HTMLElement
+    const xBtn = chip.querySelector('.chip-x') as HTMLElement
+    xBtn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+    expect(c.el.contains(chip)).toBe(false)
+    expect(c.callbacks.onChanged).toHaveBeenCalled()
+    cleanup = c.cleanup
   })
 })

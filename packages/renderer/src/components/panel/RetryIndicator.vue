@@ -11,7 +11,7 @@
 <template>
   <div
     v-if="state"
-    class="mb-1.5 flex items-center gap-2 rounded-md border border-warn/35 bg-warn-soft px-3 py-1.5 text-[length:var(--text-xs)] text-neutral-fg"
+    class="mb-1.5 flex items-center gap-2 rounded-md border border-[color-mix(in_oklch,var(--warn)_35%,transparent)] bg-warn-soft px-3 py-1.5 text-[length:var(--text-xs)] text-neutral-fg"
     :title="state.errorMessage ? t('panel.retryIndicator.lastFailed', { error: state.errorMessage }) : t('panel.retryIndicator.autoRetrying')"
   >
     <RefreshCw class="size-3 shrink-0 animate-spin text-warn" />

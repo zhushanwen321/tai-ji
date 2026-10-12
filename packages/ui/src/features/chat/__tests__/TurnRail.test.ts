@@ -1,5 +1,5 @@
 /**
- * TurnRail 组件测试（TC-w3-1 到 TC-w3-19，w3 wave，共 18 用例，编号缺 TC-w3-6）。
+ * TurnRail 组件测试（TC-w3-1 到 TC-w3-20，w3 wave，共 19 用例，编号缺 TC-w3-6）。
  *
  * 覆盖 IF4 契约：
  * - 渲染：turns=[] 不渲染；否则每个 turn 一个 rail-node 含 dot+摘要+chev
@@ -158,10 +158,11 @@ describe('TurnRail (IF4)', () => {
     expect(nodes[0].classes()).not.toContain('active')
   })
 
-  it('TC-w3-8: agent-icon 颜色反映状态（done=text-neutral-ico / failed=text-warn 常驻 / active=text-accent + loader-spin）', () => {
-    // 灰阶化（W2，§13.2-C + CL5 修正）：
-    // turn0: done（无失败）→ neutral-ico；turn1: failed → warn（常驻哑光金，非 hover）；
-    // turn2: active（sessionActive + 当前激活）→ accent + 双环 loader-spin（span，非 Bot svg）
+  it('TC-w3-8: agent-icon 颜色反映状态（done=text-neutral-ico / failed=text-danger 常驻 / active=呼吸弧 loader-spin + 选中 fg-2 提色）', () => {
+    // 灰阶化（W2，§13.2-C + CL5 修正）+ M3a demo 选中形态（workbench.css .rail-node.on
+    // .rail-row svg：选中节点图标提 fg-2，弧随选中非 accent）：
+    // turn0: done（无失败）→ neutral-ico；turn1: failed → danger（常驻，优先于选中提色）；
+    // turn2: active（sessionActive + 当前激活）→ 呼吸弧 loader-spin（span，非 Bot svg）+ fg-2
     const turns = [
       makeRailTurn(0, { failed: false }),
       makeRailTurn(1, { failed: true }),
@@ -173,11 +174,40 @@ describe('TurnRail (IF4)', () => {
     const icons = wrapper.findAll('[data-testid="rail-agent-icon"]')
     // done turn → text-neutral-ico（完成态中性灰 ICON 色）
     expect(icons[0].classes()).toContain('text-neutral-ico')
-    // failed turn → text-danger（agentIconClass hasFailedTool 分支，v6 视觉重构后 danger 色）
+    // failed turn → text-danger（agentIconClass hasFailedTool 分支，§5.6B 常驻红）
     expect(icons[1].classes()).toContain('text-danger')
-    // active turn → text-accent + animate-loader-spin（双环微缩 loader，进行中信号）
-    expect(icons[2].classes()).toContain('text-accent')
+    // active turn → animate-loader-spin（呼吸弧微缩 loader，进行中信号）+ 选中 fg-2（demo 权威）
     expect(icons[2].classes()).toContain('animate-loader-spin')
+    expect(icons[2].classes()).toContain('text-[color:var(--neutral-fg-2)]')
+  })
+
+  it('TC-w3-20: 选中节点 = demo Tier B 行类范式（无底无框仅文字提亮）：无 elevated 底/inset accent 左标，节点与 agent 摘要提 text-neutral-fg，hover 底为全节点共有', () => {
+    // MF-2-1（r2）：选中范式反向收编——旧形态（bg-bg-elevated 底 + inset 2px accent 左标）
+    // 与 demo 权威相反（workbench.css:727 .rail-node.on{color:var(--fg)} + :291 收编注释
+    // Tier B「无底无框仅文字提亮」）；hover 底 demo .rail-node:hover 无条件命中（含选中项）。
+    const turns = [makeRailTurn(0), makeRailTurn(1), makeRailTurn(2, { failed: true })]
+    const wrapper = mount(TurnRail, {
+      props: defaultProps({ turns, activeTurnIndex: 1, sessionActive: false }),
+    })
+    const nodes = wrapper.findAll('[data-testid="rail-node"]')
+    // 旧范式负断言（防回归）
+    expect(nodes[1].classes()).not.toContain('bg-bg-elevated')
+    expect(nodes[1].classes().some((c) => c.startsWith('shadow-[inset_2px'))).toBe(false)
+    // Tier B 文字提亮：选中节点文字 text-neutral-fg
+    expect(nodes[1].classes()).toContain('text-neutral-fg')
+    // hover 底 = 全节点共有基础类（选中与非选中都在）
+    expect(nodes[0].classes()).toContain('hover:bg-surface-hover')
+    expect(nodes[1].classes()).toContain('hover:bg-surface-hover')
+    // agent 摘要文字：选中节点提 fg（failed 不挡选中提亮——failed 信号由图标 danger 常驻承担）
+    const summaryClasses = (i: number): string[] => {
+      const agentRow = nodes[i].findAll(':scope > div')[1]
+      return agentRow.findAll('span').find((s) => s.classes().includes('flex-1'))!.classes()
+    }
+    expect(summaryClasses(1)).toContain('text-neutral-fg')
+    // 未选中普通摘要 mid；未选中 failed 摘要 mid + hover 提亮（real 超集语义）
+    expect(summaryClasses(0)).toContain('text-neutral-mid')
+    expect(summaryClasses(2)).toContain('text-neutral-mid')
+    expect(summaryClasses(2)).toContain('hover:text-neutral-fg')
   })
 
   it('TC-w3-9: toggle 默认 opacity-0（hover 浮出）；非 active 节点非 hover 时隐藏', () => {

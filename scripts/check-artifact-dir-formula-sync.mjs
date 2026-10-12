@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /**
- * check-artifact-dir-formula-sync.mjs —— 会话产物目录公式双实现对拍守卫。
+ * check-artifact-dir-formula-sync.mjs —— 会话产物目录公式对拍守卫（公式双实现 +
+ * sessionId 校验正则三方）。
  * （设计：.tmp/tech-design/chat-html-support.md §6.7 D7 / §11 检查点 8 / §10 u-artifacts）
  *
  * 背景：产物目录公式 `<dataDir>/artifacts/<sessionId>` 有两份实现，跨包不可 import
@@ -14,6 +15,12 @@
  * 预览 404）。跨包不可 import 不是豁免机检的理由——本守卫与 u1 的
  * check-capability-allowlist-sync.mjs 同为**源文件字面量对拍**形态（强度对称）：
  * 读双侧源文本，提取段名字面量与 sessionId 校验正则字面量，断言逐字一致。
+ *
+ * sessionId 校验正则另对拍第三源（2026-10-11 branch-review minor 残余补登）：runtime
+ * `packages/runtime/src/infra/pi/pi-paths.ts` 的 `PI_SESSION_ID_PATTERN`（`const <名> =
+ * /正则/` 声明形态，isPiSessionId 消费）——该正则决定产物目录名合法性判据（isPiSessionId
+ * 挡虚拟 id / 路径注入），漂移时公式两侧一致也会判错目录名。三方断言 = shared ↔ 镜像 +
+ * shared ↔ runtime（镜像 ↔ runtime 由等价传递覆盖）。
  *
  * 形态照搬 scripts/check-capability-allowlist-sync.mjs（读源文件文本、零散文解析、
  * 提取失败一律 fail、`--self-test` 纯函数自检）。
@@ -32,6 +39,7 @@ import { fail, ok, isFailed, guardExit, extractFunctionBlock } from './lib/guard
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const SHARED_PATHS_SRC = join(ROOT, 'packages', 'shared', 'src', 'paths.ts')
 const SYSTEM_PROMPT_SRC = join(ROOT, 'extensions', 'taiji', 'system-prompt', 'src', 'index.ts')
+const RUNTIME_PI_PATHS_SRC = join(ROOT, 'packages', 'runtime', 'src', 'infra', 'pi', 'pi-paths.ts')
 
 /** 权威侧函数名（shared）。 */
 export const SHARED_FN = 'getSessionArtifactsDir'
@@ -39,6 +47,8 @@ export const SHARED_FN = 'getSessionArtifactsDir'
 export const MIRROR_FN = 'resolveSessionArtifactsDir'
 /** 镜像侧段名常量名。 */
 export const MIRROR_SEGMENT_CONST = 'SESSION_ARTIFACTS_DIR_SEGMENT'
+/** 第三源（runtime pi-paths）sessionId 正则常量名。 */
+export const RUNTIME_PATTERN_CONST = 'PI_SESSION_ID_PATTERN'
 
 /** 函数体截取锚点（含 `export function` 前缀，避免匹配到调用点）。 */
 const SHARED_ANCHOR = `export function ${SHARED_FN}`
@@ -66,6 +76,17 @@ export function extractSessionIdRegex(blockText) {
 export function extractConstLiteral(text, constName) {
   const m = text.match(new RegExp(`const\\s+${constName}\\s*=\\s*'([^']+)'`))
   if (!m) return { error: `未找到 const ${constName} = '<字面量>'（改名 / 形态变化？）` }
+  return { value: m[1] }
+}
+
+/**
+ * 从源文本提取 `const <name> = /正则字面量/` 的正则字面量本体（第三源 runtime
+ * `PI_SESSION_ID_PATTERN` 的声明形态；行尾分号可选）。按行匹配（multiline `$`），
+ * 正则字面量内含未转义 `/` 时提取失败一律 fail（守卫原则：形态变化宁可误报不可漏报）。
+ */
+export function extractConstRegex(text, constName) {
+  const m = text.match(new RegExp(`const\\s+${constName}\\s*=\\s*(/[^/\\n]+/)\\s*;?\\s*$`, 'm'))
+  if (!m) return { error: `未找到 const ${constName} = /正则字面量/ 声明（改名 / 形态变化？）` }
   return { value: m[1] }
 }
 
@@ -111,6 +132,15 @@ export function resolveSessionArtifactsDir(sessionId: string): string {
 }
 function other() {}`
 
+  const runtimeText = `/**
+ * pi 会话 id 合法值域判定。
+ */
+export function isPiSessionId(id: string): boolean {
+  return PI_SESSION_ID_PATTERN.test(id)
+}
+
+const PI_SESSION_ID_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/`
+
   const sb = extractFunctionBlock(sharedText, SHARED_ANCHOR)
   assert(sb.text && sb.text.includes('getSessionArtifactsDir') && !sb.text.includes('nextOne'), '函数块截取到行首 } 为止')
   assert(extractJoinSegment(sb.text).value === 'artifacts', 'shared join 段名提取（注释里的窄集正则不干扰）')
@@ -123,6 +153,13 @@ function other() {}`
   assert(extractSessionIdRegex(mb.text).value === extractSessionIdRegex(sb.text).value, '两侧正则一致（样例）')
   assert(extractConstLiteral(mirrorText, MIRROR_SEGMENT_CONST).value === 'artifacts', '常量段名字面量提取')
   assert(mirrorUsesSegmentConst(mb.text), '镜像侧 join 经常量拼段名')
+
+  assert(
+    extractConstRegex(runtimeText, RUNTIME_PATTERN_CONST).value ===
+      extractSessionIdRegex(sb.text).value,
+    '第三源 const 正则声明提取（.test 调用行不误匹配）',
+  )
+  assert(extractConstRegex('const OTHER = /x/;', RUNTIME_PATTERN_CONST).error !== undefined, '常量名不符报 error')
 
   assert(extractFunctionBlock(sharedText, 'export function missing').error !== undefined, '函数缺失报 error')
   assert(extractJoinSegment('return join(x, y, sessionId)').error !== undefined, '无字面量段名报 error')
@@ -153,7 +190,8 @@ function readTextOrFail(filePath, label) {
 function main() {
   const sharedText = readTextOrFail(SHARED_PATHS_SRC, 'shared paths 源文件')
   const mirrorText = readTextOrFail(SYSTEM_PROMPT_SRC, 'system-prompt 源文件')
-  if (sharedText === null || mirrorText === null) process.exit(1)
+  const runtimeText = readTextOrFail(RUNTIME_PI_PATHS_SRC, 'runtime pi-paths 源文件')
+  if (sharedText === null || mirrorText === null || runtimeText === null) process.exit(1)
 
   const sharedBlock = extractFunctionBlock(sharedText, SHARED_ANCHOR)
   const mirrorBlock = extractFunctionBlock(mirrorText, MIRROR_ANCHOR)
@@ -168,11 +206,13 @@ function main() {
   const sharedRegex = extractSessionIdRegex(sharedBlock.text)
   const mirrorSegment = extractConstLiteral(mirrorText, MIRROR_SEGMENT_CONST)
   const mirrorRegex = extractSessionIdRegex(mirrorBlock.text)
+  const runtimeRegex = extractConstRegex(runtimeText, RUNTIME_PATTERN_CONST)
   for (const [label, r] of [
     ['shared join 段名', sharedSegment],
     ['shared sessionId 正则', sharedRegex],
     [`镜像常量 ${MIRROR_SEGMENT_CONST}`, mirrorSegment],
     ['镜像 sessionId 正则', mirrorRegex],
+    [`runtime ${RUNTIME_PATTERN_CONST} 正则`, runtimeRegex],
   ]) {
     if (r.error) fail(`${label} 提取失败: ${r.error}`)
   }
@@ -191,13 +231,25 @@ function main() {
     )
   }
 
-  // ② sessionId 校验正则字面量一致
+  // ② sessionId 校验正则字面量一致（shared ↔ 镜像）
   if (sharedRegex.value === mirrorRegex.value) {
     ok(`sessionId 校验正则字面量一致（${sharedRegex.value}）`)
   } else {
     fail(
       `sessionId 校验正则漂移: shared=${sharedRegex.value} vs 镜像=${mirrorRegex.value}` +
         `——恢复动作：人工核对两侧正则（规则须与 isPiSessionId 同域：允许 . 与 _，禁 :）`,
+    )
+  }
+
+  // ②b sessionId 校验正则三方之 shared ↔ runtime（镜像 ↔ runtime 由等价传递覆盖；
+  // 该正则同时是产物目录名合法性判据 isPiSessionId 的源头，漂移即判错目录名）
+  if (sharedRegex.value === runtimeRegex.value) {
+    ok(`runtime ${RUNTIME_PATTERN_CONST} 与 shared sessionId 正则一致（${runtimeRegex.value}）`)
+  } else {
+    fail(
+      `sessionId 校验正则漂移: shared=${sharedRegex.value} vs runtime ${RUNTIME_PATTERN_CONST}=${runtimeRegex.value}` +
+        `——恢复动作：人工核对 ${SHARED_PATHS_SRC} 的 ${SHARED_FN} 内联正则与 ${RUNTIME_PI_PATHS_SRC} 的 ${RUNTIME_PATTERN_CONST}` +
+        `（同域规则：首尾字母数字，中间允许 [A-Za-z0-9._-]，禁 :）`,
     )
   }
 
@@ -213,7 +265,7 @@ function main() {
   }
 
   guardExit(
-    '✓ 产物目录公式双实现对拍通过（段名 + sessionId 校验正则逐字一致）',
+    '✓ 产物目录公式对拍通过（段名 + sessionId 校验正则三方逐字一致）',
     '产物目录公式对拍未通过，按上方 ✗ 明细修复后重跑（每条报错自带恢复动作）',
   )
 }

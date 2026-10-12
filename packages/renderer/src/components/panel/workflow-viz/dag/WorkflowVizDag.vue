@@ -73,7 +73,7 @@
         <text
           v-for="le in conditionalEdges"
           :key="`label-${le.edge.id}`"
-          class="fill-warn text-[10px] font-mono"
+          class="fill-warn text-[length:var(--text-3xs)] font-mono"
           :x="le.labelX"
           :y="le.labelY"
         >

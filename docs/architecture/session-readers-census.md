@@ -42,10 +42,10 @@ grep -rln 'createReadStream' extensions/ --include='*.ts' | grep -v '\.test\.' |
 # R1 · runtime 侧 jsonl 解析原语消费（6 文件）
 grep -rln "utils/jsonl" packages/runtime/src --include='*.ts' | grep -v '\.test\.' | grep -v __tests__ | grep -v 'src/utils/jsonl.ts'
 
-# R2 · runtime 侧提取器/扫描器/header 函数族（39 文件，含消费面委托）
-grep -rln 'FromSessionFile\|scanPiSessions\|scanExternalSessions\|getHistoryFromFilePath\|extractLatestModelFromJsonl\|extractLatestModelChangeFromJsonl\|extractSessionName\|extractSessionOutcome\|scanSessionMeta\|scanSubagentEntries\|scanWorkflowEntries\|scanPlanStateEntries\|readSessionHeader\|parseSessionHeader' packages/runtime/src --include='*.ts' | grep -v '\.test\.' | grep -v __tests__
+# R2 · runtime 侧提取器/扫描器/header 函数族 + 删主会话级联入口（39+1 文件，含消费面委托；`cascadeDeleteSessionContent` 为 2026-10-12 增补锚——session-content-cascade 的 readFileSync 直读形态不被函数族 pattern 覆盖，增补入口标识符保持该读者可检索）
+grep -rln 'FromSessionFile\|scanPiSessions\|scanExternalSessions\|getHistoryFromFilePath\|extractLatestModelFromJsonl\|extractLatestModelChangeFromJsonl\|extractSessionName\|extractSessionOutcome\|scanSessionMeta\|scanSubagentEntries\|scanWorkflowEntries\|scanPlanStateEntries\|readSessionHeader\|parseSessionHeader\|cascadeDeleteSessionContent' packages/runtime/src --include='*.ts' | grep -v '\.test\.' | grep -v __tests__
 
-# R3 · runtime 侧流式逐行扫描（2 文件：usage-stats-service 读者 + logger 写流排除项）
+# R3 · runtime 侧流式逐行扫描（3 文件：usage-stats-service / session-message-count 读者 + logger 写流排除项）
 grep -rln 'createReadStream' packages/runtime/src --include='*.ts' | grep -v '\.test\.' | grep -v __tests__
 # P3 · plugin 族读者（经 runtime session-api readEntries 通道，不经 extensions/ 的 getEntries 锚——2026-09-25 A14 验收补锚）
 grep -rln 'readEntries' resources/plugins --include='*.ts' | grep -v '\.test\.' | grep -v __tests__
@@ -126,6 +126,8 @@ grep -rn 'client\.getEntries(' packages/runtime/src --include='*.ts' | grep -v '
 | `services/session/btw-service.ts` + `btw-fork-exec.ts` | btw 线目录扫描（`readdirSync` + `readSessionHeader`） | 照实 | btw 旁路对话记录 = 独立文件、已发生事实 |
 | `services/session/restore-seeding.ts` + `infra/pi/session-file-streaming.ts` | 归一化管线（session_end 识别 / cwd 修复，分块正序逐行变换原子替换） | 非投影读者 | 逐行透传格式修复，不派生投影、不丢行 |
 | `services/session/import-source-external-file.ts` / `import-source-zcode.ts` / `import-service.ts` + `infra/pi/session-file-external-scan.ts` | 外部 session 导入扫描（`scanPiSessions` 去重双检 / `scanExternalSessions` 轻量提取） | 照实（非投影） | 读外部目录非活跃 session；导入 = 复制事实，撤回机制不触及 |
+| `services/session/session-message-count.ts` | `countSessionMessagesInFile`（createReadStream + readline 流式逐行计数 user/assistant 消息，R3 读者——2026-10-12 分支审查补登，当次 diff 引入） | 照实 | 消息条数 = 已发生事实面（与 usage 统计同口径——对话确实发生过这些条数；悬停详情卡展示用途，不注入模型上下文）；损坏行跳过、ENOENT 归 0 的口径不影响照实判定 | — |
+| `services/session/session-content-cascade.ts` | `cascadeDeleteSessionContent` 删除前的读取点：被删主文件 `readFileSync` 直读枚举 subagent-record 锚（:225 一带）+ 全池 `.jsonl` 引用并集流式扫描（:310 一带）——**readFileSync 直读形态不被 R1-R4 任一函数族锚点覆盖，可检索性由 R2 增补的 `cascadeDeleteSessionContent` 标识符锚承载**（2026-10-12 分支审查补登，当次 diff 引入） | 照实 | 扫描对象 = subagent-record 注册/终态条目（run 真实执行过的事实记录，与 subagent/workflow-extractor 同族同口径）；用途 = 删主会话的 fork 共享防护（引用并集命中即整族保留，宁保留不误删）；与撤回互斥——真删除路径专用（restore 清场 / forceQuit 等存活路径不经本模块），撤回管线不触及该读者 | — |
 | `services/session/events-projection.ts` | record 族投影 entry 源（冷启动腿：`session-records.ts:513` `scanRecordFamilyEntriesFromSessionFile` 流式扫描 → :514 `applyEntryBatch`；活跃腿：get_entries 游标 → :758 `applyEntryBatch`——本文件仅头部注释自述该消费致 R2 锚点命中，自身不调扫描） | 照实 | v2 subagent/workflow 注册/终态条目 = run 真实执行过的事实记录，与 subagent/workflow-extractor、journal-projection 冷启动腿同概念域同口径（扫描不裁剪，照实构造性保持；plan 家族不进投影，无随树腿）；事件源（record 事件文件 / run journal）为 record 域独立文件，不在 pi session `.jsonl` 普查对象内；读取语义落在 session-file-extraction 骨架 + session-records 编排（均已登记），撤回重建经 session-records U6d 全量重喂——零追加单元 |
 
 ### 4.5 消费面委托（锚点命中、自身不读文件）
@@ -146,7 +148,7 @@ grep -rn 'client\.getEntries(' packages/runtime/src --include='*.ts' | grep -v '
 
 ## 6. 设计判定清单之外的新发现读者（已裁决）
 
-以下读者由机器锚点命中、不在 message-revoke 设计 §5 U6 的逐项判定清单内。裁决（2026-09-24 流水线主 agent，依据 = G2 二分准则「未来状态随树 / 已发生事实照实」+ 注入面判定）：**N1-N12 全部维持照实 / 非投影归类，零追加单元**——run / 通知 / bash 执行 / 压缩计数 / trace / fork / btw / 导入均为已发生事实（重建即伪造事实），无一注入模型上下文。附核实项：smart-context 压缩组装的文件重注入（compact-handler `readFileForReinject`）读的是项目源码文件而非 session 数据、且输入 branchEntries 来自活跃路径——撤回后新压缩输入天然不含被撤内容，与撤回零冲突。N13/N14 为分支审查补登（2026-10-01，理由见行内）：两者读取走 getEntries RPC 通道，不在 runtime 侧锚点命令族（E1/R1/R2/R3 重跑均不命中）——登记缺口不被机器锚点拦截，按 C-proc-28 登记义务归类；§2 已补 R4 检索锚（runtime 侧 client.getEntries 通道），该通道后续读者可被检索、不再漏网。N15 为分支审查补登（2026-10-04，理由见行内）：R2 锚点命中面内的存量漏登（非当次 diff 引入），按 C-proc-28 登记义务归类。N16 为分支审查补登（2026-10-07，理由见行内）：当次 diff 引入的新读者（subagent 成员详情的 model_change 尾条目派生），按 C-proc-28 登记义务归类。
+以下读者由机器锚点命中、不在 message-revoke 设计 §5 U6 的逐项判定清单内。裁决（2026-09-24 流水线主 agent，依据 = G2 二分准则「未来状态随树 / 已发生事实照实」+ 注入面判定）：**N1-N12 全部维持照实 / 非投影归类，零追加单元**——run / 通知 / bash 执行 / 压缩计数 / trace / fork / btw / 导入均为已发生事实（重建即伪造事实），无一注入模型上下文。附核实项：smart-context 压缩组装的文件重注入（compact-handler `readFileForReinject`）读的是项目源码文件而非 session 数据、且输入 branchEntries 来自活跃路径——撤回后新压缩输入天然不含被撤内容，与撤回零冲突。N13/N14 为分支审查补登（2026-10-01，理由见行内）：两者读取走 getEntries RPC 通道，不在 runtime 侧锚点命令族（E1/R1/R2/R3 重跑均不命中）——登记缺口不被机器锚点拦截，按 C-proc-28 登记义务归类；§2 已补 R4 检索锚（runtime 侧 client.getEntries 通道），该通道后续读者可被检索、不再漏网。N15 为分支审查补登（2026-10-04，理由见行内）：R2 锚点命中面内的存量漏登（非当次 diff 引入），按 C-proc-28 登记义务归类。N16 为分支审查补登（2026-10-07，理由见行内）：当次 diff 引入的新读者（subagent 成员详情的 model_change 尾条目派生），按 C-proc-28 登记义务归类。2026-10-12 分支审查另补登两读者（当次 diff 引入，不占 N 编号、登记落 §4.4 表）：`session-message-count`（R3 锚命中）与 `session-content-cascade`（readFileSync 直读不被既有锚点覆盖，R2 已增补 `cascadeDeleteSessionContent` 检索锚），均归类照实，判定理由见 §4.4 行内——依据同 N1-N12 口径（已发生事实，无模型注入通道）。
 
 | # | 读者 | 归类（已裁决） | 判定理由 |
 |---|------|----------|------|

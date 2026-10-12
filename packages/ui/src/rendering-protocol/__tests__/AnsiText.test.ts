@@ -161,4 +161,26 @@ describe('AnsiText', () => {
     expect(html).not.toContain('<script>')
     spy.mockRestore()
   })
+
+  // 降级冻结自愈回归：首渲降级（parser 置空 / processedLen=-1）后 content 继续追加，
+  // watch 不得因 !parser 直接 return 冻结在降级文本，须全量重渲染呈现新内容
+  it('降级自愈：首渲降级后追加 content，全量重渲染呈现新内容而非冻结', async () => {
+    const spy = vi.spyOn(AnsiUp.prototype, 'ansi_to_html').mockImplementation(() => {
+      throw new Error('parse fail')
+    })
+    const { content, el } = mountDriven('degraded-head')
+    // 首渲降级：DOM 为转义纯文本
+    expect(el().textContent).toContain('degraded-head')
+
+    // 解析恢复后继续追加：修复前 watch 在 !parser 处冻结（DOM 停留旧文本）；自愈后全量重建
+    spy.mockRestore()
+    content.value = 'degraded-head-tail'
+    await flushPromises()
+    expect(el().textContent).toContain('degraded-head-tail')
+
+    // 自愈后增量管线恢复：同前缀追加 ANSI 段走续喂分支，着色 span 正常生成
+    content.value = `degraded-head-tail${ESC}[31m colored`
+    await flushPromises()
+    expect(el().querySelectorAll('.ansi-red-fg').length).toBeGreaterThan(0)
+  })
 })

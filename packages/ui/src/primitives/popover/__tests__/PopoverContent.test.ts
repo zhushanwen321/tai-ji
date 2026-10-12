@@ -21,8 +21,8 @@ import {
   type UiModalSurfaceRegistration,
 } from '../../../modal-surface-registrar'
 
-/** 挂载 PopoverRoot 宿主（可控 open）+ 捕获桩注册桥 */
-function mountPopoverHost() {
+/** 挂载 PopoverRoot 宿主（可控 open）+ 捕获桩注册桥；contentAttrs 透传给 PopoverContent（$attrs 转发断言用） */
+function mountPopoverHost(contentAttrs: Record<string, unknown> = {}) {
   const registrations: UiModalSurfaceRegistration[] = []
   const open = ref(false)
   const wrapper: VueWrapper = mount(
@@ -30,7 +30,7 @@ function mountPopoverHost() {
       setup() {
         return () =>
           h(PopoverRoot, { open: open.value, 'onUpdate:open': (v: boolean) => { open.value = v } }, {
-            default: () => h(PopoverContent),
+            default: () => h(PopoverContent, contentAttrs),
           })
       },
     }),
@@ -81,5 +81,17 @@ describe('PopoverContent 模态表面注册（§6.7 弹出层族）', () => {
     const rect = registration.rect?.()
     expect(rect, '内容根元素已挂载（portal 渲染）→ 实测矩形').not.toBeNull()
     expect(Object.keys(rect ?? {}).sort()).toEqual(['height', 'width', 'x', 'y'])
+  })
+
+  it('$attrs 转发：data-testid 落到 Portal 内浮层 DOM（Teleport 根不吞 fallthrough attrs）', async () => {
+    const host = mountPopoverHost({ 'data-testid': 'attrs-probe-popover' })
+    wrapper = host.wrapper
+
+    host.open.value = true
+    await nextTick()
+    await nextTick()
+    const floated = document.body.querySelector('[data-testid="attrs-probe-popover"]')
+    expect(floated, 'data-testid 经显式 $attrs 转发落到浮层 DOM（Portal 边界不静默丢弃）').not.toBeNull()
+    expect(floated?.classList.contains('reka-popover-transition'), '落点 = 真正的浮层内容根元素').toBe(true)
   })
 })

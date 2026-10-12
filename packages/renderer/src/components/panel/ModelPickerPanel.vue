@@ -20,7 +20,6 @@ import { Check } from '@lucide/vue'
 import type { ProviderId } from '@taiji/shared'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { SELECTED_ITEM_CLASS } from '@/composables/logic/popover-styles'
 
 export interface ModelPickerModel {
   id: string
@@ -52,6 +51,14 @@ const props = withDefaults(defineProps<{
    * 仅作等值比较（选中值复合串拆段而来的未品牌串即可），不随事件回抛。
    */
   modelValueProviderId?: string
+  /**
+   * 全局默认模型（config.defaults.defaultModel，"provider/modelId" 复合串，与 selected
+   * 同格式；空串/缺省 = 未配置，无行显示标签）。命中行（id + 组 providerId 双匹配，与
+   * isRowSelected 同构）渲染行尾「默认」标签——demo .pt（ComposerBar 模型弹层行尾标签，
+   * demo 对齐）；行名 flex-1 吸收剩余空间后标签紧贴行尾。
+   * 自建分组无 provider 语义的消费方（ScheduleForm 直挂）不传 = 无标签，行为不变。
+   */
+  defaultModel?: string
   /** 候选池是否非空——区分「无候选」与「搜索无结果」两种空态（缺省从 groups 派生） */
   hasCandidates?: boolean
   /** 列表项 data-testid 前缀（消费方自定义，便于各自回归断言） */
@@ -64,6 +71,7 @@ const props = withDefaults(defineProps<{
 }>(), {
   modelValue: '',
   modelValueProviderId: undefined,
+  defaultModel: '',
   hasCandidates: undefined,
   itemTestIdPrefix: 'model-picker-item',
   hoverSelect: false,
@@ -109,6 +117,21 @@ function isRowSelected(model: ModelPickerModel, group: ModelPickerGroup): boolea
   return props.modelValueProviderId !== undefined ? group.providerId === props.modelValueProviderId : true
 }
 
+/** defaultModel 复合串拆段（"provider/modelId"，与 selected 同格式；无 '/' 时按裸 id 全局匹配） */
+const defaultModelParts = computed<{ id: string; providerId?: string } | null>(() => {
+  const v = props.defaultModel
+  if (!v) return null
+  const i = v.lastIndexOf('/')
+  return i > 0 ? { providerId: v.slice(0, i), id: v.slice(i + 1) } : { id: v }
+})
+
+/** 行默认判定：与 isRowSelected 同构的双匹配（同 short-id 多 provider 不双行标默认）。 */
+function isDefaultModel(model: ModelPickerModel, group: ModelPickerGroup): boolean {
+  const d = defaultModelParts.value
+  if (!d || model.id !== d.id) return false
+  return d.providerId !== undefined ? group.providerId === d.providerId : true
+}
+
 function onPick(model: ModelPickerModel, group: ModelPickerGroup): void {
   emit('update:modelValue', { id: model.id, ...(group.providerId !== undefined ? { providerId: group.providerId } : {}) })
 }
@@ -121,26 +144,27 @@ function onRowEnter(model: ModelPickerModel, group: ModelPickerGroup): void {
 
 <template>
   <div class="flex flex-col" data-testid="model-picker-panel">
-    <!-- 搜索 -->
-    <div class="border-b border-border p-2">
+    <!-- 搜索（real 功能面：demo 模型弹层无搜索框；输入槽形态对齐 demo .tsearch——
+         card-inset 凹陷底 + r-xs 圆角 + 8px 水平内边距 + fs-md 字号，M4c） -->
+    <div class="border-b border-hairline p-1">
       <Input
         v-model="query"
         data-testid="model-picker-search"
         :placeholder="t('panel.modelSelect.searchPlaceholder')"
-        class="h-7 bg-surface-2 text-[12px]"
+        class="h-7 rounded-[var(--radius-xs)] bg-bg-input px-2 text-[length:var(--text-xs)]"
       />
     </div>
 
-    <!-- 分组列表 -->
-    <div class="max-h-[280px] overflow-y-auto py-1" data-testid="model-picker-list">
+    <!-- 分组列表（demo 行语言 = .pop-item：min-h 28 / 5px 8px 内边距 / r-sm 圆角 /
+         fs-md 字号 / mid 字 hover 提 fg；max-h 滚动列表 real 独有，模型池可超一屏） -->
+    <div class="max-h-[280px] overflow-y-auto" data-testid="model-picker-list">
       <div
         v-for="group in filteredGroups"
         :key="group.provider || '__ungrouped__'"
-        class="py-1"
       >
         <div
           v-if="group.provider"
-          class="px-2.5 pb-1 pt-2 font-mono text-[10px] uppercase tracking-[0.08em] text-neutral-dim"
+          class="px-2 pb-[4px] pt-[6px] font-mono text-[length:var(--text-3xs)] uppercase tracking-[0.08em] text-neutral-dim"
         >
           {{ group.provider }}
         </div>
@@ -149,14 +173,25 @@ function onRowEnter(model: ModelPickerModel, group: ModelPickerGroup): void {
           :key="model.id"
           variant="ghost"
           :data-testid="`${itemTestIdPrefix}-${model.id}`"
-          class="flex w-full items-center gap-2 rounded-none px-2.5 py-[7px] text-[13px] text-neutral-mid hover:bg-surface-hover hover:text-neutral-fg"
-          :class="isRowSelected(model, group) && SELECTED_ITEM_CLASS"
+          class="flex min-h-[28px] w-full items-center gap-2 rounded-sm px-2 py-[5px] font-normal text-[length:var(--text-xs)] text-neutral-mid hover:bg-surface-hover hover:text-neutral-fg"
           @click="onPick(model, group)"
           @pointerenter="onRowEnter(model, group)"
         >
+          <!-- 行名不截断（demo .pop-item white-space:nowrap，弹层宽随最长行增长；Button 基类自带 nowrap） -->
           <span class="flex-1 text-left">{{ model.name ?? model.id }}</span>
+          <!-- 行尾「默认」标签（demo .pt 四值口径：margin-left auto / font-mono / fs-xs /
+               dim——fs-xs 在 real 字号链 = --text-3xs，demo tokens.css --text-3xs: var(--fs-xs)
+               同名映射；行名 flex-1 吸收剩余空间后 ml-auto 无剩余可分，标签紧贴行尾）。
+               命中判定 = defaultModel 双匹配，数据源语义见 defaultModel prop 注释。 -->
+          <span
+            v-if="isDefaultModel(model, group)"
+            data-testid="model-picker-default-tag"
+            class="ml-auto shrink-0 font-mono text-[length:var(--text-3xs)] text-neutral-dim"
+          >{{ t('panel.modelSelect.defaultTag') }}</span>
+          <!-- 选中指示 = 行尾对勾显隐（demo R3：弹层行不进选中范式，行无底/框/字色选中态） -->
           <Check
-            class="size-[13px] text-accent opacity-0"
+            class="size-[13px] shrink-0 opacity-0"
+            :stroke-width="2.2"
             :class="isRowSelected(model, group) && 'opacity-100'"
           />
         </Button>
@@ -165,7 +200,7 @@ function onRowEnter(model: ModelPickerModel, group: ModelPickerGroup): void {
       <div
         v-if="filteredGroups.length === 0"
         data-testid="model-picker-empty"
-        class="px-2.5 py-3 text-center text-[12px] text-neutral-dim"
+        class="px-2 py-3 text-center text-[length:var(--text-xs)] text-neutral-dim"
       >
         {{ hasAnyCandidate ? t('panel.modelSelect.noMatch') : t('panel.modelSelect.noModel') }}
       </div>

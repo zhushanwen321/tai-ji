@@ -328,7 +328,7 @@ async function onToggleDefault(checked: boolean | string): Promise<void> {
         ref="chipRootRef"
         data-testid="chip-preset"
         variant="ghost"
-        class="relative h-auto min-w-0 shrink gap-1.5 rounded-md px-2 py-1 text-[12px] font-normal [&_svg]:size-3.5"
+        class="relative h-auto min-h-6 min-w-0 shrink gap-1.5 rounded-sm px-2 py-[3px] text-[length:var(--text-xs)] font-normal [&_svg]:size-3.5"
         :class="
           accent
             ? 'bg-accent-soft text-accent hover:bg-accent-soft'
@@ -346,7 +346,7 @@ async function onToggleDefault(checked: boolean | string): Promise<void> {
         <!-- 信任标记（文本/短名档）：chip 内小后缀 -->
         <span
           v-if="hasReplace && chipDensity !== 'icon'"
-          class="shrink-0 text-[10px] text-warn"
+          class="shrink-0 text-[length:var(--text-3xs)] text-warn"
         >{{ replaceHint }}</span>
         <!-- 信任标记（纯图标档）：右上角警示色角标 + tooltip（accent 底不参与）；刻意不用 accent 描边 -->
         <span
@@ -363,20 +363,20 @@ async function onToggleDefault(checked: boolean | string): Promise<void> {
         />
       </Button>
     </PopoverTrigger>
-    <PopoverContent side="top" align="start" :collision-padding="8" :side-offset="8" class="w-[280px] p-0">
+    <PopoverContent side="top" align="start" :collision-padding="8" :side-offset="10" class="w-[280px] p-0">
       <!-- head：透明背景 + border-b 分割，与 DirSelectPopover 搜索框区 / BranchSelectPopover 标题栏
            的头部样式对齐（三者头部都无背景色，靠 border-b 分割，露出 PopoverContent 的 bg-elevated）。
            历史背景：曾用 bg-surface-2 给头部加深色块，视觉上像粗边框/双层条带，与 dir/branch 头部
            透明背景不一致，故去掉对齐。 -->
       <div
-        class="flex items-center justify-between border-b border-border px-3 py-2 font-mono text-[10px] text-neutral-dim"
+        class="flex items-center justify-between border-b border-hairline px-2 pt-1.5 pb-1 font-mono text-[length:var(--text-3xs)] tracking-[0.08em] uppercase text-neutral-dim"
       >
         <span>{{ t('newTask.presetSelect.title') }}</span>
       </div>
       <!-- 预设列表（PopoverListItem：与 DirSelect/BranchSelect 列表项统一选择态视觉范式——
            selected 走 surface-2 + accent inset ring + 尾部 Check，不再用 RadioGroup 自绘圆点。
            取舍：一致性优先于 RadioGroup 的标准 ↑↓ 键盘导航；单选语义靠 selected + click 实现） -->
-      <div v-if="presets.length === 0" class="px-2.5 py-3 text-[12px] text-neutral-dim">
+      <div v-if="presets.length === 0" class="px-2.5 py-3 text-[length:var(--text-xs)] text-neutral-dim">
         {{ emptyHint }}
       </div>
       <PopoverListItem
@@ -389,21 +389,21 @@ async function onToggleDefault(checked: boolean | string): Promise<void> {
       >
         <span class="flex min-w-0 flex-1 flex-col items-start gap-0.5">
           <span class="truncate text-neutral-fg">{{ preset.name }}</span>
-          <span v-if="preset.description" class="truncate text-[11px] text-neutral-dim">
+          <span v-if="preset.description" class="truncate text-[length:var(--text-2xs)] text-neutral-dim">
             {{ preset.description }}
           </span>
         </span>
       </PopoverListItem>
       <!-- 设为默认（分隔线 + Checkbox）。已是默认时 disabled：全局默认至少一个，不能取消到空，只能选其他预设替代 -->
-      <div class="flex items-center gap-2 border-t border-border px-2.5 py-2">
+      <div class="flex items-center gap-2 border-t border-hairline px-2.5 py-2">
         <Checkbox
           :model-value="isDefaultChecked"
           :disabled="isDefaultChecked"
           data-testid="checkbox-set-default"
           @update:model-value="onToggleDefault"
         />
-        <span class="text-[12px] text-neutral-mid">{{ t('newTask.presetSelect.setAsDefault') }}</span>
-        <span v-if="isDefaultChecked" class="text-[10px] text-neutral-dim">· {{ t('newTask.presetSelect.alreadyDefault') }}</span>
+        <span class="text-[length:var(--text-xs)] text-neutral-mid">{{ t('newTask.presetSelect.setAsDefault') }}</span>
+        <span v-if="isDefaultChecked" class="text-[length:var(--text-3xs)] text-neutral-dim">· {{ t('newTask.presetSelect.alreadyDefault') }}</span>
       </div>
     </PopoverContent>
   </Popover>
@@ -414,13 +414,13 @@ async function onToggleDefault(checked: boolean | string): Promise<void> {
       <Button
         data-testid="chip-preset-locked"
         variant="ghost"
-        class="h-auto cursor-default gap-1.5 px-2 py-1 text-[12px] text-neutral-dim hover:bg-transparent hover:text-neutral-dim [&_svg]:size-3.5"
+        class="h-auto cursor-default gap-1.5 px-2 py-[3px] text-[length:var(--text-xs)] text-neutral-dim hover:bg-transparent hover:text-neutral-dim [&_svg]:size-3.5"
       >
         <Lock class="shrink-0" />
         <span class="font-mono">{{ lockedPresetName }}</span>
       </Button>
     </HoverCardTrigger>
-    <HoverCardContent side="top" class="max-w-[280px] px-2.5 py-1.5 text-[11px] text-neutral-mid">
+    <HoverCardContent side="top" class="max-w-[280px] px-2.5 py-1.5 text-[length:var(--text-2xs)] text-neutral-mid">
       {{ lockedTooltip }}
     </HoverCardContent>
   </HoverCard>

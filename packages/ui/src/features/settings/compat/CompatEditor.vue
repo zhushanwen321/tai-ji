@@ -8,13 +8,13 @@
   <div class="compat-editor flex flex-col gap-3 py-2">
     <!-- 国产模型预设（一键配置）：按 api 类型过滤显示 -->
     <div v-if="presets.length" class="flex flex-wrap items-center gap-1.5 border-b border-border pb-2">
-      <span class="text-[10px] text-neutral-dim">{{ t('settings.compat.presetLabel') }}</span>
+      <span class="text-[length:var(--text-3xs)] text-neutral-dim">{{ t('settings.compat.presetLabel') }}</span>
       <Button
         v-for="p in presets"
         :key="p.id"
         variant="ghost"
         size="sm"
-        class="h-6 rounded-sm border border-border px-2 text-[10px] text-neutral-fg hover:border-accent hover:bg-accent-soft hover:text-accent"
+        class="h-6 rounded-sm border border-border px-2 text-[length:var(--text-3xs)] text-neutral-fg hover:border-accent hover:bg-accent-soft hover:text-accent"
         :title="t(`settings.compat.preset.${p.id}.hint`)"
         @click="applyPreset(p)"
       >
@@ -23,13 +23,13 @@
     </div>
 
     <!-- 无字段兜底（理论上不会触发，所有 api 类型都有字段）-->
-    <p v-if="!essentialFields.length && !advancedFields.length" class="text-[11px] text-neutral-mid">
+    <p v-if="!essentialFields.length && !advancedFields.length" class="text-[length:var(--text-2xs)] text-neutral-mid">
       {{ t('settings.compat.noEssential') }}
     </p>
 
     <!-- 关键字段区（essential，始终露出）-->
     <div v-if="essentialFields.length" class="flex flex-col gap-2">
-      <span class="text-[11px] font-semibold text-neutral-mid">{{ t('settings.compat.essential') }}</span>
+      <span class="text-[length:var(--text-2xs)] font-semibold text-neutral-mid">{{ t('settings.compat.essential') }}</span>
       <CompatField
         v-for="f in essentialFields"
         :key="f.field"
@@ -43,7 +43,7 @@
     <div v-if="advancedFields.length">
       <Button
         variant="ghost"
-        class="h-auto p-0 text-[11px] text-accent hover:bg-transparent hover:underline"
+        class="h-auto p-0 text-[length:var(--text-2xs)] text-accent hover:bg-transparent hover:underline"
         :aria-expanded="showAdvanced"
         @click="showAdvanced = !showAdvanced"
       >
@@ -65,7 +65,7 @@
     <Button
       v-if="hasValue"
       variant="ghost"
-      class="h-auto p-0 text-[11px] text-danger hover:bg-transparent hover:underline"
+      class="h-auto p-0 text-[length:var(--text-2xs)] text-danger hover:bg-transparent hover:underline"
       @click="clearAll"
     >
       {{ t('settings.compat.clearAll') }}

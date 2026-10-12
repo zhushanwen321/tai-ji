@@ -40,8 +40,8 @@ vi.mock("@zhushanwen/subagent-core/execution/worktree/worktree-manager.ts", () =
     registerPid = vi.fn();
   },
 }));
-vi.mock("@zhushanwen/subagent-core/execution/persistence/session-file-gc.ts", () => ({
-  maybeCleanupExpiredSessionFiles: vi.fn(),
+vi.mock("@zhushanwen/subagent-core/execution/persistence/engine-journal-gc.ts", () => ({
+  startEngineJournalGcTimer: vi.fn(),
 }));
 
 // seam 组（第 1 组 describe）直接 import session-lifecycle——它消费的默认实现走
@@ -134,6 +134,9 @@ import { ENV_ROOT_CWD, getSubagentRecordsDir, resolvePiSessionScopedDir, STATE_D
 import type { WorkflowRun as WorkflowRunType } from "@zhushanwen/subagent-core/orchestration/models/workflow-run.ts";
 // 保留窗口 env 通道仅测试消费，深路径直取（对齐 retention 测试先例）
 import { STATE_TTL_MS_ENV } from "@zhushanwen/subagent-core/execution/persistence/run-state-evidence.ts";
+// engine journal gc 抛错条的观察面：深路径直取 mock 实例（文件顶部 vi.mock 同路径——
+// 同一 mock 实例，被测 barrel import 归一到同一物理模块）
+import { startEngineJournalGcTimer } from "@zhushanwen/subagent-core/execution/persistence/engine-journal-gc.ts";
 // 通知账本重置导出（beforeEach 显式清空，对齐 index-session-start 先例）
 import { _resetNotifyLedgerForTest } from "@zhushanwen/subagent-core/execution/notify/notify-ledger.ts";
 import { WorkflowRun } from "@zhushanwen/subagent-core";
@@ -571,6 +574,44 @@ describe("setupSessionLifecycle — bootstrap seam（设计 §3.1）", () => {
     expect(initArg.mainSessionFile).toBe("/home/user/.pi/agent/sessions/seam.jsonl");
   });
 
+  it("engine journal gc 抛错不阻断 session_start（catch 记日志，manifest tmp sweep 等后续维护仍执行）", async () => {
+    // 进程级维护首段（engine journal gc 接线）的失败语义面：startEngineJournalGcTimer
+    // 同步抛错 → runProcessLevelMaintenance 首段 catch 吞掉（失败记日志不阻断），
+    // 后续维护（manifest tmp sweep / rebuildIndexes / worktree scan）与装配回传照常。
+    const gcMock = vi.mocked(startEngineJournalGcTimer);
+    gcMock.mockImplementation(() => {
+      throw new Error("gc timer boom");
+    });
+    try {
+      const { pi } = createFakePi();
+      const fakeService = {
+        initSession: vi.fn(),
+        recoverManifestTmpFiles: vi.fn(async () => ({ deleted: 0, recovered: 0 })),
+        rebuildIndexes: vi.fn(() => 0),
+      };
+      const result = await setupSessionLifecycle(pi, createFakeCtx("session-gc-fail-1"), {
+        worktreeManager: { scan: vi.fn(async () => {}) },
+        createServices: vi.fn(() => ({
+          service: fakeService,
+          modelService: {
+            initModel: vi.fn(),
+            reloadGlobalConfig: vi.fn(() => ({ status: "absent", config: { version: 1, maxConcurrent: 6 } })),
+          },
+          reused: false,
+        })) as unknown as SessionLifecycleDeps["createServices"],
+      });
+
+      // catch 不阻断：装配结果照常回传 + 后续维护接线仍执行
+      expect(result.storeHealthy).toBe(true);
+      expect(result.sessionId).toBe("session-gc-fail-1");
+      expect(fakeService.recoverManifestTmpFiles).toHaveBeenCalledTimes(1);
+      expect(fakeService.rebuildIndexes).toHaveBeenCalledTimes(1);
+    } finally {
+      // 恢复无实现形态（vi.clearAllMocks 只清调用记录不清 implementation，须显式还原）
+      gcMock.mockReset();
+    }
+  });
+
   it("mainSessionFile 真布局按 id 解析命中：sessions/<encoded-cwd>/<ts>_<sessionId>.jsonl（U20——不再扫 agentDir 上级与目录根）", async () => {
     // pi 实装布局（config.js getSessionsDir + session-manager.js newSession）：
     // session 文件落 <agentDir>/sessions/<encoded-cwd>/ 子目录，文件名
@@ -731,7 +772,7 @@ function seedTerminalRunFootprint(
 }
 
 /** 预置 record 域终态事件文件（头行 + created + settled 帧；帧格式与 record-events
- *  词表同源）+ manifest（<sa-id>.json 不触碰——独立 TTL 归 session-file-gc）。 */
+ *  词表同源）+ manifest（<sa-id>.json 不触碰——清理归删主会话级联）。 */
 function seedTerminalRecordFootprint(
   recordsDir: string,
   id: string,

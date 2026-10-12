@@ -129,6 +129,16 @@ const MUTATION_RPC_REGISTRY: readonly MutationRegistryEntry[] = [
     replyKey: 'session.subagentDefaultEngineSet',
     effectiveFields: ['engineId'],
   },
+  {
+    // engine-provider-unification D5：per-engine 默认模型偏好写入（config.json
+    // engineDefaults 键）。原样存储（写入校验只拒绝非法 ref，不变换合法值）；
+    // reply 回显 engineId/modelRef——setSubagentDefaultEngine 同款先例。
+    type: 'session.setSubagentEngineDefaultModel',
+    branch: 'verbatim',
+    contract: 'echo-value',
+    replyKey: 'session.subagentEngineDefaultModelSet',
+    effectiveFields: ['engineId', 'modelRef'],
+  },
   // ── 分支二（config 域）：偏好组 setter——set 原值落盘 + reply 读回生效值，全部亲读核实：
   // config-preferences / smart-context-config / rename-config / system-prompt-terminal /
   // retry-config 各 message handler；renameMode/retry 等的非法值归一在 helper 层拒绝或归一，

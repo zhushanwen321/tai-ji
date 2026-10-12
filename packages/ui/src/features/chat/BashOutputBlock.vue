@@ -7,7 +7,8 @@
     - bashStart 创建 streaming 态 system 消息（loading，显示 spinner + 取消按钮）
     - bashResult 锢定该消息更新为 complete 态（显示 output + exitCode 标签）
 
-    视觉定位：极简风（无边框/无浅底，对齐 trace block 的 trace-blk py-2 样式），
+    视觉定位：极简风（无边框/无浅底，对齐 trace 块过程行节奏——块间间距唯一权威 =
+    Turn.vue trace 相邻选择器（决策 4 两档 12/20px），trace 块自身已不携带 py 节奏 padding），
     与普通 system 提示行（SystemNotice）区分靠 header 的 command + exit 标签等语义标识，
     不再靠卡片背景。与 toolCall 互斥（bash 不走工具链，不挂 assistant turn）。
 
@@ -15,7 +16,7 @@
     BashOutputBlock 作为 Virtualizer 子项挂载后由 virtua 统一接管测高，无需注册 useResizeReport。
 
     灰阶化（main-fusion W4 / §13.2-D）：terminal 图标改 neutral-ico，streaming 态改用本分支
-    双环 loader-spin（复用 Block.vue 的 RUNNING_LOADER_SVG + animate-loader-spin），timeout/
+    呼吸弧 loader（复用 Block.vue 的 RUNNING_LOADER_SVG + animate-loader-spin），timeout/
     cancelled 改 neutral-dim，exit 0 保留 success（唯一彩色例外，成功确认语义），exit N 改 warn
     （哑光金，bash exit N 是用户命令失败非致命，不该用 danger 红告警权重）。取消按钮/输出文本/
     截断标记/空输出占位全切到 neutral-* 谱系。结构层零改动（bashExecution 消费 /
@@ -38,7 +39,7 @@
         >{{ t('panel.message.bashNoContext') }}</span>
       </div>
       <div class="flex shrink-0 items-center gap-1.5">
-        <!-- 灰阶化（§13.2-D）：streaming 态改用本分支双环 loader-spin（复用 Block.vue RUNNING_LOADER_SVG +
+        <!-- 灰阶化（§13.2-D）：streaming 态改用本分支呼吸弧 loader（复用 Block.vue RUNNING_LOADER_SVG +
              animate-loader-spin，accent 蓝），替代 main 的 Loader2 animate-spin -->
         <span
           v-if="isStreaming"

@@ -182,10 +182,9 @@ describe("registerPlanCommand", () => {
   it("enters plan mode with slugified path", async () => {
     await handler("Implement User Auth", ctx);
 
-    expect(fs.mkdirSync).toHaveBeenCalledWith(
-      "/tmp/test-project/.tmp/plans/implement-user-auth",
-      { recursive: true },
-    );
+    // 目录落盘（原子唯一性）：plansRoot 父目录 recursive 建立 + 候选目录非 recursive mkdir
+    expect(fs.mkdirSync).toHaveBeenCalledWith("/tmp/test-project/.tmp/plans", { recursive: true });
+    expect(fs.mkdirSync).toHaveBeenCalledWith("/tmp/test-project/.tmp/plans/implement-user-auth");
     expect(pi.setActiveTools).toHaveBeenCalledWith(["read", "bash", "grep", "find", "ls", "plan", "ask_user"]);
     expect(pi.sendMessage).toHaveBeenCalledWith(...planContextMessage(expect.stringContaining("[PLAN MODE]")));
     expect(pi.sendMessage).toHaveBeenCalledWith(...planContextMessage(expect.stringContaining("Implement User Auth")));
@@ -207,20 +206,14 @@ describe("registerPlanCommand", () => {
   it("handles special characters in requirement for slug", async () => {
     await handler("Fix bug #123: 中文标题!", ctx);
 
-    expect(fs.mkdirSync).toHaveBeenCalledWith(
-      expect.stringContaining("/.tmp/plans/fix-bug-123"),
-      { recursive: true },
-    );
+    expect(fs.mkdirSync).toHaveBeenCalledWith(expect.stringContaining("/.tmp/plans/fix-bug-123"));
   });
 
   it("uses 'untitled' slug when no args", async () => {
     // No existing plans (readdirSync returns [])
     await handler("", ctx);
 
-    expect(fs.mkdirSync).toHaveBeenCalledWith(
-      "/tmp/test-project/.tmp/plans/untitled",
-      { recursive: true },
-    );
+    expect(fs.mkdirSync).toHaveBeenCalledWith("/tmp/test-project/.tmp/plans/untitled");
   });
 
   it("超长 requirement 进入：state/entry 按 64KB 封顶，提示词仍携带全文（MF-1-3）", async () => {

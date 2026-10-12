@@ -102,12 +102,12 @@ harness 必备能力（业务价值视角，2026-09-12 用户裁决）：
 | system-prompt-trace | taiji:system-prompt 留痕 | 观测/调试 |
 | 用量统计页 | Settings → 用量 W1-W5 | 配额敏感用户 |
 | 视觉细节与动画 | 过渡动画、traffic light 布局数值；跨平台窗口外壳（win/linux 自绘圆点交互态/拖拽条带/圆角策略/窗口尺寸持久化） | 全体但纯视觉 |
-| 生成指标触发器（gen-stats） | composer 工具带速度 t/s · 缓存命中率 · TTFT 首字延迟三触发器 + 浮层 p50 聚合（`GenStatsTriggers` + runtime gen-stats 管道，设计 docs/design/composer-genstats-ttft.md） | 观测敏感用户（挂掉仅指标缺失，对话主链路不受影响——gen-stats 接入点均降级边界 + warn 日志） |
+| 生成指标（gen-stats） | composer 指标聚合按钮 hover 聚合页：速度 t/s · 缓存命中率 · TTFT 首字延迟 p50 聚合（`ComposerMetricsAggregate` + runtime gen-stats 管道，设计 docs/design/composer-genstats-ttft.md） | 观测敏感用户（挂掉仅指标缺失，对话主链路不受影响——gen-stats 接入点均降级边界 + warn 日志） |
 | Mock 开发轨 | VITE_MOCK 拦截层 | 仅开发者 |
 
 已移除条目（2026-09-12 用户裁决，功能已不存在）：双 Panel / split mode（UI 无活跃实现，仅 store 层 PanelTree 类型残留）；cw-tool / coding-workflow。
 
-已移除条目（2026-10-04 用户裁决「直接废除 bridge」，功能已不存在）：plugin-bridge（插件工具接入 pi 的通路暂缺，见 docs/todo/plugin-tool-access-gap.md）。
+已移除条目（2026-10-04 用户裁决「直接废除 bridge」，功能已不存在）：plugin-bridge（插件工具接入 pi 的通路暂缺）。
 
 ## 6. 引擎与 extension 分级表
 

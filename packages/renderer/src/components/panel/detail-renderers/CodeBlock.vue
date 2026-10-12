@@ -24,7 +24,7 @@
   <!-- shiki 未就绪/高亮失败降级：纯文本插值（XSS 安全） -->
   <pre
     v-else
-    class="shiki-codeblock whitespace-pre-wrap break-all rounded p-2 font-mono text-[length:var(--text-xs)] leading-[1.5] text-neutral-fg/90"
+    class="shiki-codeblock whitespace-pre-wrap break-all rounded p-2 font-mono text-[length:var(--text-xs)] leading-[1.5] text-[color-mix(in_oklch,var(--neutral-fg)_90%,transparent)]"
   >{{ code }}</pre>
 </template>
 

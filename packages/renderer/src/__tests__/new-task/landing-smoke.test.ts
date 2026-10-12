@@ -91,6 +91,17 @@ describe('首屏冒烟（渲染 gate）', () => {
     expect(wrapper.find('[data-testid="chip-branch"]').exists()).toBe(true)
   })
 
+  it('首屏级联入场类挂载（demo 裁决 9A 可落部分：问候语 → composer 卡片两档）', () => {
+    const wrapper = mount(Landing, {
+      props: { sessionId: 's1', currentCwd: '/repo', gitBranch: 'main' },
+    })
+    // 级联档类：问候语首档 + composer 卡片次档（动画参数在 scoped CSS，DOM 断言挂载点）
+    expect(wrapper.find('h1.landing-cascade-greet').exists()).toBe(true)
+    expect(wrapper.find('.landing-cascade-composer [data-testid="composer-box"]').exists()).toBe(
+      true,
+    )
+  })
+
   it('directory chip 文案取末段目录名（与 flow 真源一致）', () => {
     flowMock.currentCwd.value = '/Users/zsw/Code/taiji'
     const wrapper = mount(Landing, {

@@ -126,6 +126,35 @@ describe('useDetailPane · .html 恢复源码分发（渲染态退役）', () =>
   })
 })
 
+describe('useDetailPane · drawer 入口位置分流（forceDiff 仅限 cwd 内）', () => {
+  it('产物目录绝对路径经 drawer 入口 → preview + localFile:read，不发 git.getDiff', async () => {
+    const sid = 's1'
+    const path = '/Users/demo/.taiji-dev/artifacts/s1/report.html'
+    mockLocalFileRead.mockResolvedValue({ ok: true, content: '<html>artifact</html>', truncated: false })
+
+    useSideDrawer().open('detail', { filePath: path })
+    const state = await openPane(sid, null)
+
+    expect(state.value.viewMode).toBe('preview')
+    expect(state.value.content).toBe('<html>artifact</html>')
+    expect(mockLocalFileRead).toHaveBeenCalledWith(path)
+    // 分流防误伤断言：cwd 外不走 forceDiff 的 diff 加载（免必空的 git diff 往返）
+    expect(mockGitGetDiff).not.toHaveBeenCalled()
+  })
+
+  it('cwd 内绝对路径经 drawer 入口 → forceDiff 语义保持（diff 模式）', async () => {
+    const sid = 's1'
+    const path = '/Users/demo/proj/docs/report.html'
+    mockGitGetDiff.mockResolvedValue({ patch: 'diff --git a/docs/report.html b/docs/report.html\n@@ -1 +1 @@\n-a\n+b', binary: false })
+
+    useSideDrawer().open('detail', { filePath: path })
+    const state = await openPane(sid, null)
+
+    expect(state.value.viewMode).toBe('diff')
+    expect(mockGitGetDiff).toHaveBeenCalled()
+  })
+})
+
 describe('useDetailPane · 产物目录文件读取（白名单通道保留，§6.9 D9）', () => {
   it('cwd 外绝对路径（产物目录）→ localFile:read 读内容，不落 file.read cwd 守门', async () => {
     const sid = 's1'

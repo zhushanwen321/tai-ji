@@ -28,15 +28,17 @@ const styleCss = read('src/style.css')
 const PULSE_ANIM = 'animate-[pulse-dot_1.8s_ease-in-out_infinite]'
 
 describe('plan 04 删除常驻装饰性动画', () => {
-  it('TC1: SegmentedTab 无 pulse-dot / motion-reduce 动画 class，badge 本体已移除，count 数字渲染存在', () => {
-    // [HISTORICAL] badge 本体断言随 sidebar-tab-count-restore 决策 1 改写：原断言守护的
-    // 静态 badge 蓝点已被该设计显式移除，改为守护「badge 已移除 + count 数字渲染存在」。
+  it('TC1: SegmentedTab 无 pulse-dot / motion-reduce 动画 class，badge 与 count 数字均已移除（demo .vtab 文字 tab）', () => {
+    // [HISTORICAL] badge 本体断言随 sidebar-tab-count-restore 决策 1 改写；2026-10 M1 视觉
+    // 复刻随 demo .vtab 文字 tab 对齐，count 数字渲染一并退役，改为守护「无 badge/无数字 +
+    // label 直出」形态。
     expect(segmentedTab).not.toContain(PULSE_ANIM)
     expect(segmentedTab).not.toContain('motion-reduce:animate-none')
     // badge 本体已移除（静态蓝点随数字恢复设计一并删除）
     expect(segmentedTab).not.toContain('absolute right-1 top-1 size-[7px] rounded-full bg-accent')
-    // count 数字渲染存在
-    expect(segmentedTab).toContain('v-if="tab.count > 0"')
+    // count 数字不再渲染（文字 tab 形态），label 直出
+    expect(segmentedTab).not.toContain('v-if="tab.count > 0"')
+    expect(segmentedTab).toContain('{{ tab.label }}')
   })
 
   it('TC2: SessionItem running 态保留旋转动画（7px spinning icon 范式）', () => {
@@ -45,10 +47,12 @@ describe('plan 04 删除常驻装饰性动画', () => {
     expect(sessionItem).toContain('animate-spin')
   })
 
-  it('TC3: composer-shell isActive 分支为静态 ring（无 steer-breathe，border+shadow 保留）', () => {
+  it('TC3: composer-shell isActive 分支为静态 ring（无 steer-breathe，accent 边 + accent-ring 保留）', () => {
     expect(composerShell).not.toContain('animate-steer-breathe')
-    // M2a-01：活跃态外环 token 化（--shadow-glow 随主题，替代旧硬编码冷蓝 rgba）
-    expect(composerShell).toContain('border-[var(--accent)] shadow-[var(--shadow-glow)]')
+    // M2a-01 活跃态外环 token 化；[670f9086d glow 降档裁决 2026-10-11] steer 档由
+    // --shadow-glow 3px/25% 降为 2px --accent-ring——断言跟随现行降档形态，
+    // 锁定意图不变：isActive 分支无动画装饰、静态 accent ring（边 + 环）在场。
+    expect(composerShell).toContain('border-[var(--accent)] shadow-[0_0_0_2px_var(--accent-ring)]')
   })
 
   it('TC4: sessionStatus waiting 对齐静态范式（animation 为空串，无 animate-wiggle）', () => {

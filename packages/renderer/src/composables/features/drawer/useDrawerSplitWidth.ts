@@ -16,7 +16,8 @@
  *   显示期 clamp 同范式）；未测得（0）时按纯比例走，观察器就绪后校正；
  * - 有 drawer：drawer 占 drawerPct%（默认 50），main 占剩侧（模板侧 calc(100% - drawerPct% - 4px)），
  *   margin 0 贴左；内容列恒撑满；
- * - 开合时双侧 width transition（margin 两态恒 0，无值可过渡）；
+ * - 开合时双侧 width transition（margin 两态恒 0，无值可过渡）；ease 恒 --ease（E5 分向
+ *   缓动只属显隐层——DrawerPanel Transition / 底抽屉内容层 Transition，壳层不消费方向）；
  * - 拖动（pointer capture 跟手，拖动期间 transition:none）/ 键盘微调调整 drawerPct，
  *   clamp [DRAWER_MIN_PCT, DRAWER_MAX_PCT]，localStorage 持久化。
  *
@@ -78,11 +79,11 @@ export function useDrawerSplitWidth(splitAreaEl: Ref<HTMLElement | null>, drawer
   const isDragging = ref(false)
   const drawerPct = ref<number>(loadDrawerPct())
 
-  /** main/drawer 双侧过渡类：拖动期间移除 transition 保证跟手，其余时间 width 过渡 */
+  /** main/drawer 双侧过渡类：拖动期间移除 transition 保证跟手，其余时间 width 过渡。
+   *  ease 恒 --ease（demo workbench.css .right-pane 壳层权威；E5 分向缓动只属显隐层——
+   *  DrawerPanel Transition 与底抽屉内容层 Transition，本层不消费方向） */
   const splitTransitionClass = computed(() =>
-    isDragging.value
-      ? ''
-      : 'transition-[width] duration-[var(--duration-slow)] ease-[var(--ease)]',
+    isDragging.value ? '' : `transition-[width] duration-[var(--duration-slow)] ease-[var(--ease)]`,
   )
 
   /** split-area 实测宽度（px）：内容列 60%↔撑满 的派生输入。未测得（0，观察器就绪前/
@@ -114,18 +115,24 @@ export function useDrawerSplitWidth(splitAreaEl: Ref<HTMLElement | null>, drawer
   })
 
   /** 内容列宽度令牌（--content-max-w 派生单处）：split 态恒撑满（panel 被挤窄后不再按
-   *  比例收，D10 下限语义）；standalone = 60%，实测 60% 值低于绝对下限时改撑满 */
+   *  比例收，D10 下限语义）；standalone = 60%，实测 60% 值低于绝对下限时改撑满；
+   *  standalone 两分支均套 demo 阅读列语义 cap `min(720px, …)`（demo .chat-scroll > *
+   *  的 --content-max-w = min(720px,100%)）——panel 宽 <1200 时 60% 实算低于下限走撑满，
+   *  撑满若不封顶会在常规窗口产出远超 720 的通栏正文列，故撑满同样封 720。 */
   const contentColMaxW = computed<string>(() => {
     if (drawerOpen.value) return '100%'
     const w = splitAreaWidthPx.value
-    if (w > 0 && (w * CONTENT_COL_PCT) / PCT_SCALE < CONTENT_COL_MIN_PX) return '100%'
-    return `${CONTENT_COL_PCT}%`
+    const belowFloor = w > 0 && (w * CONTENT_COL_PCT) / PCT_SCALE < CONTENT_COL_MIN_PX
+    return belowFloor
+      ? `min(${CONTENT_COL_MIN_PX}px, 100%)`
+      : `min(${CONTENT_COL_MIN_PX}px, ${CONTENT_COL_PCT}%)`
   })
 
   /**
    * main-area 动态样式（宽度模型 SSOT，模板直连）：
    * - standalone：width 100% 撑满公共容器 + margin 0；--content-max-w 派生内容列宽
-   *   （60% 或下限触发后的 100%），对话流/composer 内容列经 .content-col 消费居中；
+   *   （60% 或下限触发后的撑满，均封 demo 阅读列 720 cap，见 contentColMaxW），对话流/composer
+   *   内容列经 .content-col 消费居中；
    * - split：width calc(100% - drawerPct% - 4px) + margin 0 贴左（4px = 卡缝宽 a，
    *   与窗口边距 p-1 同值；handle 即缝本体；drawer 卡占 drawerPct%）。
    */
@@ -252,11 +259,13 @@ export function useBottomDrawerHeight(
     return `${bottomOpen.value ? pct : 0}%`
   })
 
-  /** 高度过渡（沿用现有 transition 体系加纵轴）：拖动期间移除过渡保证跟手 */
+  /** 高度过渡（沿用现有 transition 体系加纵轴）：拖动期间移除过渡保证跟手。
+   *  ease 恒 --ease（demo workbench.css .bottom-pane 壳层权威；E5 分向缓动只属显隐层，
+   *  同横轴 splitTransitionClass） */
   const bottomTransitionClass = computed(() =>
     isBottomDragging.value
       ? ''
-      : 'transition-[height] duration-[var(--duration-slow)] ease-[var(--ease)]',
+      : `transition-[height] duration-[var(--duration-slow)] ease-[var(--ease)]`,
   )
 
   /** 上沿手柄拖动（pointer capture：同横轴，拖出元素外仍跟手；jsdom 兼容可选调用） */
@@ -293,6 +302,7 @@ export function useBottomDrawerHeight(
   }
 
   return {
+    heightPct,
     bottomHeightStyle,
     isBottomDragging,
     bottomTransitionClass,

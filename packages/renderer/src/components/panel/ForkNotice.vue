@@ -18,7 +18,7 @@
   <div class="fork-notice content-col flex items-center gap-2 rounded-[var(--radius)] bg-info-soft px-3 py-1.5 animate-notice-in motion-reduce:animate-none">
     <GitFork class="size-3.5 shrink-0 text-info" />
     <span class="min-w-0 flex-1 truncate text-[length:var(--text-sm)] leading-snug text-neutral-fg">
-      {{ prefix }}<span v-if="label" class="font-[550]">{{ label }}</span>
+      {{ prefix }}<span v-if="label" class="[font-weight:var(--fw-mid)]">{{ label }}</span>
     </span>
     <!-- 查看链接：sessionDeleted 时降级为纯文本 span（不可点，无交互语义） -->
     <!-- [P4] 文案区分：有 preview（fork-ask）→ viewBranch（"查看分支"）；纯 fork → view（"查看"）。 -->

@@ -3,20 +3,22 @@
  *
  * 覆盖（三视角，用户可见 DOM 断言优先）：
  * - P1 组件黑盒·四类状态各自渲染：compacting（manual→压缩中 / threshold→自动压缩）、
- *   bash（正在执行 + elapsed mono meta，命令原文在悬停详情）、thinking（turn=dispatching→思考中…）、
+ *   bash（正在执行 + elapsed mono meta，命令原文在悬停详情）、waiting（turn=dispatching→
+ *   三点等待行「等待响应」，demo chat spec 裁决 3A）、thinking（subagentThinking→思考中…）、
  *   settling（turn=settling 且无 compacting/bash→行出现，R3-U1；文案复用 dispatching key，
  *   P-1 探针 V8 校准点）
  * - P1.5 组件黑盒·横线分隔行族（compacting 行自通栏带降级回归本族 / A4+A7）：四行同构
  *   （system-notice + content-col 保留，行内左右各一条渐隐 hairline）、待发 chip count =
  *   内核投递投影里「非 direct 且未 delivered」条目数（[u3c/D7] 单源化——原 useCompactQueue
  *   未提交条目口径随队列退役，口径唯一定义点 = core deliveryQueueEntries（U20 下沉））、
- *   count=0 隐藏 chip、bash/thinking/settling 行同构形态
+ *   count=0 隐藏 chip、bash/waiting/thinking/settling 行同构形态
  * - P2 组件黑盒·优先级堆叠：compacting + bash 并存 → 两行且 compacting 在上；
- *   thinking 与 compacting/bash 互斥（「无以上但有 dispatching turn」才显示）；
+ *   waiting/thinking 与 compacting/bash 互斥（「无以上但有 dispatching turn / subagentThinking」
+ *   才显示，dispatching 归三点等待行）；
  *   settling 与 compacting 并存 → 仅 compacting 行（同档位幂等，不重复堆叠）；
  *   turn=generating 不渲染行（streaming 本体由 TurnMeta「工作中」承担，D6 活动条列）
  * - P3 组件黑盒·全 idle 不渲染（G3：无占用 = 无活动条）
- * - P4 MessageStream 集成·迁移收口：TurnMeta 旧 dispatching 占位不再渲染 + thinking 行接管；
+ * - P4 MessageStream 集成·迁移收口：TurnMeta 旧 dispatching 占位不再渲染 + 三点等待行接管；
  *   executingBash 瞬时行迁入（bashStart 帧驱动）；fork notice 与活动条的文档流定位顺序
  *   （活动条在前——ForkNotice 为文档流 block，按文档序自然堆叠）
  * - P5 i18n key 完整：行文案 + 待发 chip + bash 详情等 key 在 zh/en locale 均定义
@@ -115,10 +117,10 @@ describe('ActivityStrip · 四类状态各自渲染（P1）', () => {
     const wrapper = await mountStrip({ occupancy: { turn: 'idle', compacting: true, bash: false } })
     const row = wrapper.find('[data-testid="activity-strip-row-compacting"]')
     expect(row.exists()).toBe(true)
-    // 用户可见文案（zh-CN）+ spinner（Loader2 animate-spin）；行内左右各一条渐隐 hairline
+    // 用户可见文案（zh-CN）+ 呼吸弧（animate-loader-spin，M3c demo .run-ic 复刻）；行内左右各一条渐隐 hairline
     //（断言随 6d6ebb905 渐变 hairline 形态更新，形态细节断言见下方「横线分隔行族」describe）
     expect(wrapper.find('[data-testid="activity-strip-text-compacting"]').text()).toBe('压缩中')
-    expect(row.find('.animate-spin').exists()).toBe(true)
+    expect(row.find('.animate-loader-spin').exists()).toBe(true)
     expect(row.findAll('.h-px').length).toBe(2)
     wrapper.unmount()
   })
@@ -174,12 +176,16 @@ describe('ActivityStrip · 四类状态各自渲染（P1）', () => {
     document.querySelector('[data-testid="activity-strip-detail-bash"]')?.remove()
   })
 
-  it('turn=dispatching →「思考中…」行（occupancy 权威投影，替代原 TurnMeta 占位）', async () => {
+  it('turn=dispatching → 三点等待行（demo chat spec 裁决 3A：等待首包阶段，accent 圆点 ×3 错峰跳动）', async () => {
     const wrapper = await mountStrip({ occupancy: { turn: 'dispatching', compacting: false, bash: false } })
-    const row = wrapper.find('[data-testid="activity-strip-row-thinking"]')
+    const row = wrapper.find('[data-testid="activity-strip-row-waiting"]')
     expect(row.exists()).toBe(true)
-    expect(wrapper.find('[data-testid="activity-strip-text-thinking"]').text()).toBe('思考中…')
-    expect(row.find('.animate-spin').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="activity-strip-text-waiting"]').text()).toBe('等待响应')
+    // 三点（.wait-dots 容器 + 3 个 i 圆点），不渲染呼吸弧——首包到达后由 TurnMeta「工作中」行接棒
+    const dots = wrapper.find('[data-testid="activity-strip-dots-waiting"]')
+    expect(dots.exists()).toBe(true)
+    expect(dots.findAll('i')).toHaveLength(3)
+    expect(row.find('.animate-loader-spin').exists()).toBe(false)
     wrapper.unmount()
   })
 
@@ -189,7 +195,7 @@ describe('ActivityStrip · 四类状态各自渲染（P1）', () => {
     expect(row.exists()).toBe(true)
     // 文案复用 dispatching key「思考中…」（P-1 探针 V8 校准点：P95 > 2s 常态化则换「收尾中…」）
     expect(wrapper.find('[data-testid="activity-strip-text-settling"]').text()).toBe('思考中…')
-    expect(row.find('.animate-spin').exists()).toBe(true)
+    expect(row.find('.animate-loader-spin').exists()).toBe(true)
     wrapper.unmount()
   })
 
@@ -227,17 +233,16 @@ describe('ActivityStrip · 横线分隔行族形态（compacting 降级回归 + 
       expect(line.classes()).toContain('flex-1')
       expect(line.classes()).toContain(FADE_LINE_CLASS)
     }
-    // spinner：13px + stroke 2.2 + neutral-mid（原通栏带 size-3.5 text-accent 作废）
-    const spinner = row.find('.animate-spin')
-    expect(spinner.exists()).toBe(true)
-    expect(spinner.classes()).toContain('size-[13px]')
-    expect(spinner.classes()).toContain('text-neutral-mid')
-    expect(spinner.attributes('stroke-width')).toBe('2.2')
-    // 主文案（文本容器首个 span）：text-sm / neutral-fg / 550
+    // 呼吸弧：15px + accent（M3c demo .run-ic 复刻，替换原 Loader2 13px neutral-mid spinner）
+    const loader = row.find('.animate-loader-spin')
+    expect(loader.exists()).toBe(true)
+    expect(loader.classes()).toContain('size-[15px]')
+    expect(loader.classes()).toContain('text-accent')
+    // 主文案（文本容器首个 span）：text-base / neutral-mid / fw-mid（demo .think .t-name）
     const main = row.find('[data-testid="activity-strip-text-compacting"] > span')
-    expect(main.classes()).toContain('text-[length:var(--text-sm)]')
-    expect(main.classes()).toContain('text-neutral-fg')
-    expect(main.classes()).toContain('font-[550]')
+    expect(main.classes()).toContain('text-[length:var(--text-base)]')
+    expect(main.classes()).toContain('text-neutral-mid')
+    expect(main.classes()).toContain('[font-weight:var(--fw-mid)]')
     wrapper.unmount()
   })
 
@@ -291,14 +296,13 @@ describe('ActivityStrip · 横线分隔行族形态（compacting 降级回归 + 
     for (const line of bashLines) {
       expect(line.classes()).toContain(FADE_LINE_CLASS)
     }
-    // spinner 13px / stroke 2.2 / neutral-mid
-    const spinner = bashRow.find('.animate-spin')
-    expect(spinner.classes()).toContain('size-[13px]')
-    expect(spinner.attributes('stroke-width')).toBe('2.2')
-    // 主文案 text-sm/fg/550；方案 A 后无内联命令（命令在悬停详情），行内仅短语 + elapsed meta
+    // 呼吸弧 15px / accent（M3c）
+    const loader = bashRow.find('.animate-loader-spin')
+    expect(loader.classes()).toContain('size-[15px]')
+    // 主文案 text-base/mid/fw-mid（M3c demo .think .t-name）；方案 A 后无内联命令（命令在悬停详情），行内仅短语 + elapsed meta
     const main = bashRow.find('[data-testid="activity-strip-text-bash"] > span')
-    expect(main.classes()).toContain('text-[length:var(--text-sm)]')
-    expect(main.classes()).toContain('font-[550]')
+    expect(main.classes()).toContain('text-[length:var(--text-base)]')
+    expect(main.classes()).toContain('[font-weight:var(--fw-mid)]')
     expect(bashRow.find('[data-testid="activity-strip-text-bash"] .font-mono').exists()).toBe(true)
 
     wrapper.unmount()
@@ -330,12 +334,12 @@ describe('ActivityStrip · 优先级堆叠与互斥（P2）', () => {
     wrapper.unmount()
   })
 
-  it('compacting 时 turn=dispatching → 只渲染 compacting 行（thinking 不与压缩行重复堆叠）', async () => {
+  it('compacting 时 turn=dispatching → 只渲染 compacting 行（等待行不与压缩行重复堆叠）', async () => {
     const wrapper = await mountStrip({ occupancy: { turn: 'dispatching', compacting: true, bash: false } })
     const rows = wrapper.findAll('[data-testid^="activity-strip-row-"]')
     expect(rows).toHaveLength(1)
     expect(rows[0].attributes('data-testid')).toBe('activity-strip-row-compacting')
-    expect(wrapper.find('[data-testid="activity-strip-row-thinking"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="activity-strip-row-waiting"]').exists()).toBe(false)
     wrapper.unmount()
   })
 
@@ -383,7 +387,7 @@ describe('ActivityStrip × MessageStream 集成 · 迁移收口（P4）', () => 
     return wrapper
   }
 
-  it('dispatching 空窗：TurnMeta 旧占位不再渲染 + ActivityStrip thinking 行接管', async () => {
+  it('dispatching 空窗：TurnMeta 旧占位不再渲染 + ActivityStrip 三点等待行接管（裁决 3A）', async () => {
     // store 取用必须在 mountStream 之后（mount 时 app 安装新 pinia 并 setActivePinia，
     // 先取会拿到 beforeEach 的旧实例，写入不传导——同既有集成测试 P3 模式）
     const wrapper = await mountStream(SID)
@@ -396,9 +400,9 @@ describe('ActivityStrip × MessageStream 集成 · 迁移收口（P4）', () => 
 
     // 旧渲染点清理：空 turn 不再渲染 TurnMeta 占位（原 isPendingPlaceholder「思考中」+ spinner）
     expect(wrapper.find('[data-testid^="turn-meta-"]').exists()).toBe(false)
-    // 新渲染位：对话流尾部活动条 thinking 行
-    expect(wrapper.find('[data-testid="activity-strip-row-thinking"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="activity-strip-text-thinking"]').text()).toBe('思考中…')
+    // 新渲染位：对话流尾部活动条三点等待行（「已发送、等待首个 token」阶段）
+    expect(wrapper.find('[data-testid="activity-strip-row-waiting"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="activity-strip-text-waiting"]').text()).toBe('等待响应')
     wrapper.unmount()
   })
 
@@ -461,7 +465,7 @@ describe('ActivityStrip · i18n key 完整（P5）', () => {
   const ZH_MESSAGE: Record<string, unknown> = zhPanel.message
   const EN_MESSAGE: Record<string, unknown> = enPanel.message
 
-  it('compressing/autoCompressing/compactingQueueChip/executingBash/executingBashElapsed/bashCommandLabel/dispatching 在 zh/en locale 均定义', () => {
+  it('compressing/autoCompressing/compactingQueueChip/executingBash/executingBashElapsed/bashCommandLabel/dispatching/waitingResponse 在 zh/en locale 均定义', () => {
     for (const key of [
       'compressing',
       'autoCompressing',
@@ -470,6 +474,7 @@ describe('ActivityStrip · i18n key 完整（P5）', () => {
       'executingBashElapsed',
       'bashCommandLabel',
       'dispatching',
+      'waitingResponse',
     ]) {
       expect(ZH_MESSAGE[key], `panel.message.${key} 缺 zh-CN 定义`).toEqual(expect.any(String))
       expect(EN_MESSAGE[key], `panel.message.${key} 缺 en-US 定义`).toEqual(expect.any(String))

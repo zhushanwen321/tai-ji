@@ -26,46 +26,51 @@
 <template>
   <Popover v-model:open="open">
     <PopoverTrigger as-child>
+      <!-- 钮形态对齐 demo .cbtn / .agg-mt（workbench.css composer 段）：30×30 / r-sm /
+           dim → hover surface-hover 底 + fg 提字；Boxes 16px stroke 1.6 同 demo 图标规格。
+           弹层本体形态归下一波次（M4b），本波只动主条触发钮。 -->
       <Button
         variant="ghost"
         data-testid="composer-model-thinking-aggregate"
-        class="h-7 gap-1 rounded-sm px-1.5 text-neutral-fg transition-colors"
+        class="size-[30px] rounded-sm p-0 text-neutral-dim transition-colors hover:text-neutral-fg"
         :title="t('panel.modelSelect.modelThinkingAggregateTitle')"
       >
-        <Boxes class="size-4 shrink-0" />
+        <Boxes class="size-[16px] shrink-0" :stroke-width="1.6" />
       </Button>
     </PopoverTrigger>
-    <PopoverContent side="top" class="w-[240px] p-0">
-      <!-- 上半：模型选择（hover 选择开启——hover 即切，不关弹层） -->
+    <!-- 容器对齐同簇 ModelSelectPopover/ThinkingLevelPopover：右锚（align end）/ 锚距 10px /
+         r-lg 圆角；p-0 下首尾元素与 12px 圆角无冲突（首元素搜索区自带 p-1 且透明底，
+         尾元素档位行 rounded-sm + py-1 收在圆角弧线内），无需 overflow-hidden -->
+    <PopoverContent side="top" align="end" :side-offset="10" class="w-[240px] rounded-lg p-0">
+      <!-- 上半：模型选择（hover 选择开启——hover 即切，不关弹层）。
+           defaultModel 透传驱动行尾「默认」标签（demo 聚合页弹层 .pt 同构，M4b 形态波） -->
       <ModelPickerPanel
         :groups="pickerGroups"
         :model-value="bareModelId(props.selected)"
         :model-value-provider-id="selectedProviderId"
+        :default-model="defaultModel"
         :has-candidates="hasAnyModel"
         hover-select
         @hover-select="onHoverModel"
         @update:model-value="onPickModel"
       />
       <span class="block h-px bg-border-strong" aria-hidden="true" />
-      <!-- 下半：思考档位行（radio 圆点 + 显示 label + Check 选中态；可用集与 ThinkingLevelPopover 同源） -->
+      <!-- 下半：思考档位行（显示 label + 行尾 Check 选中态；可用集与 ThinkingLevelPopover 同源；
+           行语言与其逐字一致——demo R3：弹层行不进选中范式，无底/框/字色选中态与行首圆点） -->
       <div class="py-1" data-testid="model-thinking-level-list">
         <Button
           v-for="opt in availableOptions"
           :key="opt.level"
           variant="ghost"
           :data-testid="'thinking-level-row-' + opt.level"
-          class="flex w-full items-center gap-2 rounded-none px-2.5 py-2 text-[13px] text-neutral-mid hover:bg-surface-hover hover:text-neutral-fg"
-          :class="opt.level === currentLevelKey && 'bg-accent-soft text-accent hover:bg-accent-soft hover:text-accent'"
+          class="flex min-h-[28px] w-full items-center gap-2 rounded-sm px-2 py-[5px] font-normal text-[length:var(--text-xs)] text-neutral-mid hover:bg-surface-hover hover:text-neutral-fg"
           @pointerenter="onHoverLevel(opt)"
           @click="onPickLevel(opt)"
         >
-          <span
-            class="size-[7px] shrink-0 rounded-full"
-            :class="opt.level === currentLevelKey ? 'bg-accent' : 'bg-neutral-dim'"
-          />
           <span class="flex-1 text-left">{{ getDisplayLabel(opt.level, props.levelMap, t) }}</span>
           <Check
-            class="size-[13px] text-accent transition-opacity"
+            class="size-[13px] shrink-0 transition-opacity"
+            :stroke-width="2.2"
             :class="opt.level === currentLevelKey ? 'opacity-100' : 'opacity-0'"
           />
         </Button>
@@ -116,7 +121,7 @@ const { t } = useI18n()
 const open = ref(false)
 
 // ── 模型面（与 ModelSelectPopover 同源数据面；聚合页不限定 provider）──
-const { pickerGroups, hasAnyModel, resolveProviderId } = useModelPickerData()
+const { pickerGroups, hasAnyModel, defaultModel, resolveProviderId } = useModelPickerData()
 
 /** 当前选中裸 id（hover 去重与高亮同用此值，复合串先拆段） */
 const selectedBare = computed(() => bareModelId(props.selected))

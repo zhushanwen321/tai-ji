@@ -50,14 +50,14 @@
         :data-line="line.newNo ?? ''"
       >
         <!-- 行号槽：oldNo / newNo。newNo 可点击注入该行 file 引用（FR-5） -->
-        <span class="w-10 shrink-0 select-none px-1 text-right text-neutral-dim/60">{{ line.oldNo ?? '' }}</span>
+        <span class="w-10 shrink-0 select-none px-1 text-right text-[color-mix(in_oklch,var(--neutral-dim)_60%,transparent)]">{{ line.oldNo ?? '' }}</span>
         <span
           v-if="line.newNo !== undefined"
-          class="w-10 shrink-0 cursor-pointer select-none px-1 text-right text-neutral-dim/60 transition-colors hover:text-accent"
+          class="w-10 shrink-0 cursor-pointer select-none px-1 text-right text-[color-mix(in_oklch,var(--neutral-dim)_60%,transparent)] transition-colors hover:text-accent"
           :title="t('panel.detail.injectFileRef')"
           @click="onLineClick(line)"
         >{{ line.newNo }}</span>
-        <span v-else class="w-10 shrink-0 select-none px-1 text-right text-neutral-dim/60"></span>
+        <span v-else class="w-10 shrink-0 select-none px-1 text-right text-[color-mix(in_oklch,var(--neutral-dim)_60%,transparent)]"></span>
         <!-- +/- 符号槽 -->
         <span class="w-4 shrink-0 select-none text-center" :class="signClass(line)">{{ sign(line) }}</span>
         <!-- 代码内容：shiki 高亮片段 v-html，降级纯文本。
@@ -67,7 +67,7 @@
         <span
           v-if="line.html"
           class="diff-code min-w-0 flex-1 whitespace-pre-wrap break-all"
-          :class="line.type === 'context' ? 'text-neutral-fg/80' : ''"
+          :class="line.type === 'context' ? 'text-[color-mix(in_oklch,var(--neutral-fg)_80%,transparent)]' : ''"
           v-html="line.html"
         />
         <!-- eslint-enable vue/no-v-html -->
@@ -169,7 +169,7 @@ function sign(line: RenderedLine): string {
 function signClass(line: RenderedLine): string {
   if (line.type === 'add') return 'text-success'
   if (line.type === 'del') return 'text-danger'
-  return 'text-neutral-dim/40'
+  return 'text-[color-mix(in_oklch,var(--neutral-dim)_40%,transparent)]'
 }
 function lineRowClass(line: RenderedLine): string {
   if (line.type === 'add') return 'bg-diff-add-bg'
@@ -178,9 +178,9 @@ function lineRowClass(line: RenderedLine): string {
   return ''
 }
 function textContentClass(line: RenderedLine): string {
-  if (line.type === 'add') return 'text-success/90'
-  if (line.type === 'del') return 'text-danger/90'
-  return 'text-neutral-fg/80'
+  if (line.type === 'add') return 'text-[color-mix(in_oklch,var(--success)_90%,transparent)]'
+  if (line.type === 'del') return 'text-[color-mix(in_oklch,var(--danger)_90%,transparent)]'
+  return 'text-[color-mix(in_oklch,var(--neutral-fg)_80%,transparent)]'
 }
 /**
  * 字符级 diff segment 着色：

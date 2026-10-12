@@ -790,6 +790,35 @@ else
 fi
 
 # ============================================================================
+# 视口字号自动档禁令检查（font-scale-mq / 字号 @media 不复发）
+# ============================================================================
+
+FONT_SCALE_CHECKER=".githooks/check_font_scale_viewport.py"
+FONT_SCALE_FILES="packages/renderer/src/style.css packages/mobile-renderer/src/styles/tokens.css docs/DESIGN.md"
+
+if [ "$SKIP_ALL_CHECKS" != "1" ]; then
+    # 仅当三个字号 token 权威文件之一变更时才检查（R1 惯例：不设独立 SKIP 开关）
+    FONT_SCALE_CHANGED=$(echo "$STAGED_FILES" | grep -E "^packages/renderer/src/style\.css$|^packages/mobile-renderer/src/styles/tokens\.css$|^docs/DESIGN\.md$" || true)
+    if [ -n "$FONT_SCALE_CHANGED" ]; then
+        echo -e "${BLUE}[INFO] 运行视口字号自动档禁令检查...${NC}"
+
+        if [ ! -f "$FONT_SCALE_CHECKER" ]; then
+            echo -e "${YELLOW}[WARN] 找不到检查脚本 $FONT_SCALE_CHECKER${NC}"
+        else
+            python3 "$FONT_SCALE_CHECKER"
+            EXIT_CODE=$?
+
+            if [ $EXIT_CODE -ne 0 ]; then
+                echo ""
+                echo -e "${RED}[ERROR] 视口字号自动档禁令检查失败：字号 token 文件出现视口驱动字号缩放${NC}"
+                echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
+                exit 1
+            fi
+        fi
+    fi
+fi
+
+# ============================================================================
 # Renderer 依赖完整性检查（import vs package.json）
 # ============================================================================
 
@@ -1649,14 +1678,15 @@ ${STAGED_DELETED}"
         echo -e "${GREEN}[OK] 无 capability 清单/渲染白名单文件变更，跳过清单对拍检查${NC}"
     fi
 
-    # 产物目录公式双实现对拍检查（chat-html-support §6.7 D7 / §11 检查点 8 / §10 u-artifacts，
+    # 产物目录公式对拍检查（chat-html-support §6.7 D7 / §11 检查点 8 / §10 u-artifacts，
     # 按路径触发）：shared getSessionArtifactsDir 与 system-prompt 包内镜像推导（
     # SESSION_ARTIFACTS_DIR_SEGMENT + resolveSessionArtifactsDir）的**段名字面量与 sessionId
-    # 校验正则字面量**对拍（读双侧源文件文本，零散文解析；与 u1 的 capability 清单对拍同型）。
-    # 两侧任一漂移 = agent 收到的路径与实际目录不符（写偏或预览 404），仅此检查红灯。
-    # 触发面：检查脚本自身 / shared paths 源 / system-prompt 源（文件被删除也必须触发，脚本对
-    # 文件缺失自带 fail 分支）。不设独立 SKIP_* 开关（R1 后惯例，总开关 SKIP_ALL_CHECKS 兜底）。
-    if echo "$PI_SYNC_TRIGGER_FILES" | grep -qE "^scripts/check-artifact-dir-formula-sync\.mjs$|^packages/shared/src/paths\.ts$|^extensions/taiji/system-prompt/src/index\.ts$"; then
+    # 校验正则字面量**对拍（读源文件文本，零散文解析；与 u1 的 capability 清单对拍同型）。
+    # 任一漂移 = agent 收到的路径与实际目录不符（写偏或预览 404），仅此检查红灯。
+    # 触发面：检查脚本自身 / shared paths 源 / system-prompt 源 / runtime pi-paths 第三源
+    # （sessionId 正则三方对拍的第三源；文件被删除也必须触发，脚本对文件缺失自带 fail
+    # 分支）。不设独立 SKIP_* 开关（R1 后惯例，总开关 SKIP_ALL_CHECKS 兜底）。
+    if echo "$PI_SYNC_TRIGGER_FILES" | grep -qE "^scripts/check-artifact-dir-formula-sync\.mjs$|^packages/shared/src/paths\.ts$|^extensions/taiji/system-prompt/src/index\.ts$|^packages/runtime/src/infra/pi/pi-paths\.ts$"; then
         echo -e "${BLUE}[INFO] 产物目录公式文件有变更，运行公式对拍检查...${NC}"
         if [ ! -f "scripts/check-artifact-dir-formula-sync.mjs" ]; then
             echo -e "${RED}[ERROR] 找不到 scripts/check-artifact-dir-formula-sync.mjs（D7 对拍机器检查交付物缺失）${NC}"

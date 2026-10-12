@@ -18,7 +18,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises, type VueWrapper } from '@vue/test-utils'
-import { defineComponent, ref } from 'vue'
+import { defineComponent, nextTick, ref } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import { composerChildStubs } from '../helpers/composer-mount'
 
@@ -146,11 +146,23 @@ function mountSessionItem(id: string, label: string) {
 describe('Composer session 引用注入（S1-S3 · spy 层链路）', () => {
   it('S1 sidebar 点击 → store → panel Composer watch 消费 insertSessionChip(refSessionId, label)', async () => {
     sessionState.active = { id: 's-cur', cwd: '/p' }
-    const { spy } = mountComposer({ sessionId: 's-cur', variant: 'panel' })
+    mountComposer({ sessionId: 's-cur', variant: 'panel' })
     const store = composerInjectionStore
 
+    // 首用例一次性异步初始化（mock RPC resolve 回写 ref）触发 Composer 重渲染；VTU 对显式组件
+    // stub 每次 transform 生成新拷贝（稳定性靠 per-mount transform 缓存），同用例第二次 mount
+    // （下方 SessionItem）重置缓存后，该重渲染会把 CommandPopover stub 换成新拷贝 → slot 里的
+    // ComposerInput 实例替换（模板 ref 正确重绑到新实例，注入链路不受影响）。此处先把重建关在
+    // 交互之前，断言改持重建后当前实例的 spy——断言语义不变：当前输入区收到 session chip。
+    await flushPromises()
+    const spy = inputSpies.at(-1)
+    if (!spy) throw new Error('ComposerInput spy 未生成')
+
     const item = mountSessionItem('s-ref', '被引用会话')
-    await item.find('[data-testid="quote-to-composer-btn"]').trigger('click')
+    await item.find('.session-item').trigger('contextmenu')
+    await nextTick()
+    await nextTick()
+    document.body.querySelector('[data-testid="session-quote-item"]')!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     await flushPromises()
 
     expect(spy.insertSessionChip).toHaveBeenCalledOnce()
@@ -164,7 +176,10 @@ describe('Composer session 引用注入（S1-S3 · spy 层链路）', () => {
     const { spy } = mountComposer({ sessionId: null, variant: 'landing' })
 
     const item = mountSessionItem('s-ref', 'landing 引用')
-    await item.find('[data-testid="quote-to-composer-btn"]').trigger('click')
+    await item.find('.session-item').trigger('contextmenu')
+    await nextTick()
+    await nextTick()
+    document.body.querySelector('[data-testid="session-quote-item"]')!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     await flushPromises()
 
     expect(spy.insertSessionChip).toHaveBeenCalledWith('s-ref', 'landing 引用')
@@ -177,7 +192,10 @@ describe('Composer session 引用注入（S1-S3 · spy 层链路）', () => {
     const store = composerInjectionStore
 
     const item = mountSessionItem('s-ref', '会话 A')
-    await item.find('[data-testid="quote-to-composer-btn"]').trigger('click')
+    await item.find('.session-item').trigger('contextmenu')
+    await nextTick()
+    await nextTick()
+    document.body.querySelector('[data-testid="session-quote-item"]')!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     await flushPromises()
     expect(spy.insertSessionChip).toHaveBeenCalledOnce()
     expect(store.pendingInjection.value).toBeNull()

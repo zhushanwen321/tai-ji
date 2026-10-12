@@ -22,6 +22,13 @@ export interface SystemSettings {
    * 缺省 medium（×1）。区域子树内 --text-* 链乘以对应 --font-scale-<region>。
    */
   fontScales?: FontScales
+  /**
+   * [一次性迁移标记] 分区字号默认档位迁移（sidebar 旧默认 large → medium）。
+   * system-storage.getSystem 读到未标记的存量数据时执行迁移：等于旧默认（large）的
+   * sidebar 档回落 DEFAULT_FONT_SCALES.sidebar，并置位本标记（随既有启动写回落盘）。
+   * 置位后用户显式选择的 large 不再被改写（尊重显式选择）。
+   */
+  fontScalesDefaultMigrated?: boolean
   /** 后台完成提示音开关 */
   completionSound?: boolean
   /**
@@ -49,9 +56,9 @@ export interface FontScales {
 }
 
 /**
- * 分区字号默认档位（SSOT）：sidebar=大（×1.15），chat/drawer=标准（×1）。
+ * 分区字号默认档位（SSOT）：三区域均标准（×1）。
  *
- * 三处消费点必须都从这里取缺省值，禁止再写死 'medium' 字面量：
+ * 三处消费点必须都从这里取缺省值，禁止写死档位字面量：
  *   1. DEFAULT_SYSTEM.fontScales（新用户 / 无 fontScales 存量数据的落库默认）
  *   2. applySystemToDom（ui 包，部分缺省区域的 data-fs-* 回落）
  *   3. AppearancePage 区域 Select（部分缺省区域的显示回落）
@@ -59,7 +66,7 @@ export interface FontScales {
  * 可能缺个别区域 key——故 2/3 的逐区域回落同样必须走本常量，而非假设对象完整。
  */
 export const DEFAULT_FONT_SCALES: Required<FontScales> = {
-  sidebar: 'large',
+  sidebar: 'medium',
   chat: 'medium',
   drawer: 'medium',
 }

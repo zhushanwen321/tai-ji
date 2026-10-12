@@ -45,8 +45,8 @@ export default {
           '0%, 50%': { opacity: '1' },
           '51%, 100%': { opacity: '0' },
         },
-        // message-stream trace 块 running 态双环 loader（Demo H，普通 tool/subagent/workflow 共用）。
-        // 1.4s 线性旋转，prefers-reduced-motion 由 style.css 全局 @media reduce 兜底。
+        // message-stream trace 块 running 态呼吸弧 loader（Demo H，普通 tool/subagent/workflow 共用）。
+        // 本包 animation 值 = 1.4s 线性旋转，prefers-reduced-motion 由 style.css 全局 @media reduce 兜底。
         'loader-spin': {
           to: { transform: 'rotate(360deg)' },
         },

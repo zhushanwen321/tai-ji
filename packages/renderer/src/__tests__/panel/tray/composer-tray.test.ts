@@ -39,6 +39,7 @@ import { ansiLine, makeEntry, makeWidgetSource } from './tray-view-host-mock'
 import type { MockWidgetSource } from './tray-view-host-mock'
 import { makeTrayCountsStub } from './tray-counts-stub'
 import { __clearSessionCleanupRegistryForTest } from '@/composables/useSessionScopedState'
+import { HEADER_ACTIONS_SOURCE_KEY } from '@/composables/shell/useExtensionHostBridge'
 import ComposerTray from '@/components/panel/tray/ComposerTray.vue'
 import type { TrayBuiltinKind as TrayKind, UseTrayCountsReturn } from '@/components/panel/tray/useTrayCounts'
 import { useSubagentStore } from '@/stores/subagent'
@@ -135,6 +136,28 @@ vi.mock('@/composables/features/sidebar/useSidebar', () => ({
   useSidebar: () => ({ selectSession: selectSessionMock }),
 }))
 
+// ── headerAction 数据源开关（B3 聚合面：聚合面板首段 = 被聚合 clock 直开入口的承接段）。
+//    经 mountTray 的 provide 注入（HEADER_ACTIONS_SOURCE_KEY 消费方 = 外壳 + HeaderActionsHost）；
+//    hasVisibleHeaderActions 纯函数用真实现（对账对象），source stub 经开关切换。 ──
+const headerActionsSwitch = vi.hoisted(() => ({ source: null as object | null }))
+
+/** scheduler 形态的 headerAction source stub（activation=overlay 直开，无 E13/E3 依赖） */
+function makeHeaderActionSource(overrides: { hidden?: boolean } = {}): object {
+  return {
+    getDeclarations: () => [
+      {
+        pluginId: 'scheduler-manager',
+        contributionId: 'scheduler-manager.open',
+        type: 'headerAction',
+        headerAction: { activation: 'scheduler-overlay', icon: 'clock', title: '定时任务' },
+      },
+    ],
+    getRuntimeState: () => (overrides.hidden ? { hidden: true } : undefined),
+    resolveCommandAvailability: () => 'registered',
+    executeCommand: () => true,
+  }
+}
+
 const SID = 's-tray-shell'
 const SID2 = 's-tray-shell-2'
 /** fake timers 固定「现在」（bash 行耗时派生确定性） */
@@ -202,9 +225,13 @@ function makeChild(overrides: Partial<SessionSummary> & { id: string }): Session
 let wrapper: VueWrapper | null = null
 
 function mountTray(mock: MockWidgetSource, sessionId = SID, aggregated = false): VueWrapper {
+  const provide: Record<symbol, unknown> = { [VIEW_HOST_SOURCE_KEY as symbol]: mock.source }
+  if (headerActionsSwitch.source) {
+    provide[HEADER_ACTIONS_SOURCE_KEY as symbol] = headerActionsSwitch.source
+  }
   wrapper = mount(ComposerTray, {
     props: { sessionId, aggregated },
-    global: { provide: { [VIEW_HOST_SOURCE_KEY as symbol]: mock.source } },
+    global: { provide },
     attachTo: document.body,
   })
   return wrapper
@@ -313,6 +340,7 @@ beforeEach(() => {
   Object.assign(trayState, createTrayState())
   trayCountsSwitch.useReal = false
   trayCountsSwitch.calls = 0
+  headerActionsSwitch.source = null
   vi.useFakeTimers({ now: FIXED_NOW })
 })
 
@@ -364,8 +392,10 @@ describe('ComposerTray built-in 三态（D7 / N2）', () => {
     expect(button.attributes('data-state')).toBe('running')
     expect(button.find('[data-testid="tray-builtin-count"]').text()).toBe('2')
     expect(button.find('[data-testid="tray-builtin-pulse"]').exists()).toBe(true)
-    // 亮态色（accent 系，非 dim）——归零不虚亮与「有进行中必亮」两面
-    expect(button.find('[data-testid="tray-builtin-count"]').classes()).toContain('text-accent')
+    // 亮态色（角标 = demo .cbtn .badge 形态：accent 实底 + accent-fg 字）——
+    // 归零不虚亮与「有进行中必亮」两面
+    expect(button.find('[data-testid="tray-builtin-count"]').classes()).toContain('bg-accent')
+    expect(button.find('[data-testid="tray-builtin-count"]').classes()).toContain('text-accent-fg')
     expect(button.find('[data-testid="tray-builtin-pulse"]').classes()).toContain('bg-accent')
     // 只有有进行中的那一件变亮，其余仍 dim 常驻
     expect(builtinButton('subagent').attributes('data-state')).toBe('idle')
@@ -454,11 +484,11 @@ describe('ComposerTray hover 时序（D8：160ms 开 / 240ms 收 / 移入面板�
     await builtinButton('bash').trigger('pointerenter')
     await advance(OPEN_MS)
 
-    // 结构不变量：p-1.5 必须在挂 pointerenter 的面板节点上（= 覆盖浮层全幅），
+    // 结构不变量：p-1 必须在挂 pointerenter 的面板节点上（= 覆盖浮层全幅），
     // 留在浮层根上就会形成一圈不会取消收起计时的缺口（U3 根因）
     const panel = layerNode()
-    expect(panel.className).toContain('p-1.5')
-    expect(panelLayerNode().className).not.toContain('p-1.5')
+    expect(panel.className).toContain('p-1')
+    expect(panelLayerNode().className).not.toContain('p-1')
 
     await builtinButton('bash').trigger('pointerleave')
     fire(panel, 'pointerenter')
@@ -735,8 +765,8 @@ describe('ComposerTray widget 区与面板分流', () => {
     expect(panelKeys()).toEqual(['widget:todo'])
 
     const panel = layerNode()
-    expect(panel.className).toContain('p-1.5')
-    expect(panelLayerNode().className).not.toContain('p-1.5')
+    expect(panel.className).toContain('p-1')
+    expect(panelLayerNode().className).not.toContain('p-1')
 
     await row().find('[data-testid="tray-widget-button"][data-widget-key="todo"]').trigger('pointerleave')
     fire(panel, 'pointerenter')
@@ -1111,5 +1141,36 @@ describe('ComposerTray 第 4 件「子会话」（u7）', () => {
     mountTray(makeWidgetSource(SID), SID, true)
     // bash 1 + session 1 = 2
     expect(row().find('[data-testid="tray-aggregate-count"]').text()).toBe('2')
+  })
+})
+
+// ── 聚合面板 headerAction 段（demo composer-bar spec §2.1 B3：L2 聚合面 = 定时任务 + 托盘 →
+//    layers 单钮，被聚合 clock 的直开动作由面板首段承接）──
+
+describe('ComposerTray 聚合面板 headerAction 段（B3 聚合面含定时任务入口）', () => {
+  it('有可见声明 → 面板首段渲染 headerAction 按钮（clock 直开入口随聚合走）', async () => {
+    headerActionsSwitch.source = makeHeaderActionSource()
+    trayState.bashRunning = [makeTask({ taskId: 'bt-1' })]
+    await openAggregatedPanel()
+
+    // HeaderActionsHost 真组件渲染：scheduler overlay 直开按钮（testid 形态 = 声明 id 派生）
+    expect(panelContentNodes('header-action-scheduler-manager-open')).toHaveLength(1)
+  })
+
+  it('声明运行时 hidden=true → 首段不渲染（零声明同款，不留死段）', async () => {
+    headerActionsSwitch.source = makeHeaderActionSource({ hidden: true })
+    trayState.bashRunning = [makeTask({ taskId: 'bt-1' })]
+    await openAggregatedPanel()
+
+    expect(panelContentNodes('header-action-scheduler-manager-open')).toHaveLength(0)
+  })
+
+  it('托盘全无条目 + widget 空 + headerAction 有入口 → 聚合入口仍渲染（左簇第三内容源，入口不丢失）', () => {
+    headerActionsSwitch.source = makeHeaderActionSource()
+    // 三态全空托盘（bash/subagent/workflow/session 全无）+ 空 widget 源
+    mountTray(makeWidgetSource(SID), SID, true)
+
+    // 若无 headerAction 源，此时 showAggregate=false → 聚合钮不存在；有源则必须在场
+    expect(row().find('[data-testid="tray-aggregate-button"]').exists()).toBe(true)
   })
 })

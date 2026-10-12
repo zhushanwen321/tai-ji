@@ -32,6 +32,7 @@ import {
   useComposerBarDensity,
   AGGREGATE_GROUP_CLASS,
   EXPANDED_GROUP_CLASS,
+  EXPANDED_MODEL_THINKING_GROUP_CLASS,
 } from '@/components/panel/tray/use-composer-bar-density'
 import type { ComposerDensityLayout } from '@/components/panel/composer-density'
 
@@ -417,6 +418,12 @@ describe('useComposerBarDensity：导出 class（形态 → class 单点）', ()
     expect(EXPANDED_GROUP_CLASS).toBe('flex items-center gap-0')
     expect(EXPANDED_GROUP_CLASS).not.toContain('truncate')
     expect(EXPANDED_GROUP_CLASS).not.toContain('max-w-')
+  })
+
+  it('展开态模型+思考组容器：行 gap 4px（demo pop-anchor 行距对齐位，r4 视觉对齐）', () => {
+    expect(EXPANDED_MODEL_THINKING_GROUP_CLASS).toBe('flex items-center gap-[4px]')
+    expect(EXPANDED_MODEL_THINKING_GROUP_CLASS).not.toContain('truncate')
+    expect(EXPANDED_MODEL_THINKING_GROUP_CLASS).not.toContain('max-w-')
   })
 
   it('聚合位容器：shrink-0 + min-w-0（单图标按钮不撑宽、不参与截断）', () => {

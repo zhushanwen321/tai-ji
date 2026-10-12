@@ -129,9 +129,11 @@ test('同 token 多处只报一次（去重防刷屏）', () => {
 });
 
 // —— 范围守卫 ——
+// 豁免按路径子串模式判定，断言用模式化路径即可（不指涉具体实现文件的存在）。
 
-test('components/ui/ 内部实现豁免', () => {
-  expect(lintVue('  <Switch class="h-3.5 w-6" />', 'packages/renderer/src/components/ui/switch/Switch.vue')).toHaveLength(0);
+test('原语内部实现豁免（components/ui/ 与 ui 包 primitives/ 模式）', () => {
+  expect(lintVue('  <Switch class="h-3.5 w-6" />', 'src/components/ui/switch/Switch.vue')).toHaveLength(0);
+  expect(lintVue('  <Switch class="h-3.5 w-6" />', 'packages/ui/src/primitives/switch/Switch.vue')).toHaveLength(0);
 });
 
 test('非 .vue 文件不扫', () => {

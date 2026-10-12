@@ -117,7 +117,7 @@ function onClose(viewId: string): void {
       class="flex flex-col items-center justify-center gap-2 py-10 text-center"
     >
       <LayoutGrid class="size-5 text-neutral-dim opacity-40" />
-      <p class="text-[11px] text-neutral-dim opacity-55">暂无插件视图</p>
+      <p class="text-[length:var(--text-2xs)] text-neutral-dim opacity-55">暂无插件视图</p>
     </div>
   </div>
 </template>

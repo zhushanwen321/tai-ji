@@ -22,11 +22,26 @@
  * 回执写，不破坏该 watch 链。
  */
 import { model as modelApi, session as sessionApi } from '@/api'
-import type { ProviderId } from '@taiji/shared'
+import { isBtwVirtualId, type ProviderId } from '@taiji/shared'
 import { useSessionStore } from '@/stores/session'
+import { useBtwSessionStateStore } from '@/stores/btw-session-state'
 
 export function useModel() {
   const sessionStore = useSessionStore()
+  const btwSessionState = useBtwSessionStateStore()
+
+  /**
+   * 切换回执显示态写入（U6 生效值）。btw vid 分支：线是 hidden 会话，
+   * sessionStore.applySnapshot 对列表外 id 静默丢弃——回执改写 btw 线态 store
+   * （显示解析经 resolveComposerSessionState 消费），落点按 id 类别分流。
+   */
+  function applySwitchReceipt(sessionId: string, patch: { modelId?: string; thinkingLevel?: string }): void {
+    if (isBtwVirtualId(sessionId)) {
+      btwSessionState.applyModelState(sessionId, patch)
+      return
+    }
+    sessionStore.applySnapshot(sessionId, patch)
+  }
 
   /**
    * 切换 session 的模型：调 runtime model.switch RPC，以回执生效值写 sessionStore。
@@ -49,9 +64,7 @@ export function useModel() {
     // 回执生效值写显示态（弃请求值乐观写）；无 '/' 的兜底 reply 已在 runtime 侧按
     // 请求值回显（settings-message-handler model.switch case），此处无需再兜底。
     const reply = await modelApi.switchModel(sessionId, provider, modelId)
-    sessionStore.applySnapshot(sessionId, {
-      modelId: `${reply.provider}/${reply.modelId}`,
-    })
+    applySwitchReceipt(sessionId, { modelId: `${reply.provider}/${reply.modelId}` })
   }
 
   /**
@@ -73,7 +86,7 @@ export function useModel() {
    */
   async function setThinkingLevel(sessionId: string, level: string): Promise<void> {
     const reply = await sessionApi.setThinkingLevel(sessionId, level)
-    sessionStore.applySnapshot(sessionId, { thinkingLevel: reply.level })
+    applySwitchReceipt(sessionId, { thinkingLevel: reply.level })
   }
 
   return { switchModel, setThinkingLevel }

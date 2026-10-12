@@ -21,7 +21,9 @@ import {
   DEFAULT_CONFIG,
   getGlobalConfigPath,
   loadGlobalConfig,
+  readEngineDefaults,
   readGlobalConfig,
+  sanitizeEngineDefaults,
   type GlobalConfigReadResult,
 } from "../assembly/config.ts";
 import { ModelConfigService } from "../assembly/model-config-service.ts";
@@ -297,5 +299,99 @@ describe("ModelConfigService.reloadGlobalConfig（设计 D2）", () => {
     expect(service.applyGlobalConfig(failedRead)).toBe(failedRead);
     expect(service.getGlobalConfig().maxConcurrent).toBe(5);
     expect(service.getGlobalConfig().defaultEngine).toBeUndefined();
+  });
+});
+
+// ============================================================
+// engineDefaults 键 sanitize（engine-provider-unification D5）
+// ============================================================
+
+describe("sanitizeEngineDefaults（设计 D5）", () => {
+  it("合法形态透传：Record<engineId, 模型全 ref>（经 loadGlobalConfig 间接覆盖）", () => {
+    writeConfig(
+      tmpDir,
+      JSON.stringify({ version: 1, engineDefaults: { zcode: "zai-coding-plan/GLM-5.3" } }),
+    );
+    const cfg = loadGlobalConfig(tmpDir);
+    expect(cfg.engineDefaults).toEqual({ zcode: "zai-coding-plan/GLM-5.3" });
+  });
+
+  it("非法形态：非对象（字符串/数字/null/数组）→ 整键丢弃（undefined）", () => {
+    expect(sanitizeEngineDefaults("not-an-object")).toBeUndefined();
+    expect(sanitizeEngineDefaults(42)).toBeUndefined();
+    expect(sanitizeEngineDefaults(null)).toBeUndefined();
+    expect(sanitizeEngineDefaults(["zcode", "zai-coding-plan/GLM-5.3"])).toBeUndefined();
+  });
+
+  it("非法形态：值非字符串（数字/对象/null）→ 剔除该条目，合法条目保留", () => {
+    expect(
+      sanitizeEngineDefaults({
+        zcode: "zai-coding-plan/GLM-5.3",
+        brokenNum: 123,
+        brokenObj: { ref: "x/y" },
+        brokenNull: null,
+      }),
+    ).toEqual({ zcode: "zai-coding-plan/GLM-5.3" });
+  });
+
+  it("非法形态：空串/空白值与空白键剔除（沿 sanitizeDefaultEngine 非空判定先例）", () => {
+    expect(sanitizeEngineDefaults({ zcode: "", pi: "   ", "  ": "x/y" })).toEqual({});
+  });
+
+  it("空对象 → 空对象（非 undefined：键存在且合法，无偏好条目是合法形态）", () => {
+    expect(sanitizeEngineDefaults({})).toEqual({});
+  });
+
+  it("经 readGlobalConfig 间接覆盖：坏条目 sanitize 后进 ok 态 config", () => {
+    writeConfig(
+      tmpDir,
+      JSON.stringify({ version: 1, engineDefaults: { zcode: "a/b", bad: 1 } }),
+    );
+    const result = readGlobalConfig(tmpDir);
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    expect(result.config.engineDefaults).toEqual({ zcode: "a/b" });
+  });
+});
+
+// ============================================================
+// readEngineDefaults 派发时点直读（engine-provider-unification D6）
+// ============================================================
+
+describe("readEngineDefaults 派发时点直读（设计 D6）", () => {
+  beforeEach(() => {
+    loggerMock.warn.mockClear();
+  });
+
+  it("直读语义：改盘后再读得新值（零缓存——每次调用读盘）", () => {
+    writeConfig(tmpDir, JSON.stringify({ version: 1, engineDefaults: { zcode: "a/old" } }));
+    expect(readEngineDefaults(tmpDir)).toEqual({ zcode: "a/old" });
+    // 模拟 settings 保存（RPC 写盘）后活跃 session 的下一次派发：不改任何缓存、
+    // 也不重启进程，直接再读——必须拿到新值（D6 场景 S2 的核心断言）
+    writeConfig(tmpDir, JSON.stringify({ version: 1, engineDefaults: { zcode: "a/new" } }));
+    expect(readEngineDefaults(tmpDir)).toEqual({ zcode: "a/new" });
+  });
+
+  it("直读语义：键删除后再读无该条目（偏好清除即生效）", () => {
+    writeConfig(tmpDir, JSON.stringify({ version: 1, engineDefaults: { zcode: "a/old" } }));
+    expect(readEngineDefaults(tmpDir)).toEqual({ zcode: "a/old" });
+    writeConfig(tmpDir, JSON.stringify({ version: 1 }));
+    expect(readEngineDefaults(tmpDir)).toEqual({});
+  });
+
+  it("absent：文件不存在 → {}（无偏好，非故障、无 warn）", () => {
+    expect(readEngineDefaults(tmpDir)).toEqual({});
+    expect(loggerMock.warn).not.toHaveBeenCalled();
+  });
+
+  it("failed：坏 JSON → {}（偏好层降级为无偏好；读失败 warn 由 readGlobalConfig 落）", () => {
+    writeConfig(tmpDir, "{not valid json");
+    expect(readEngineDefaults(tmpDir)).toEqual({});
+    expect(loggerMock.warn).toHaveBeenCalledTimes(1);
+  });
+
+  it("非法条目在直读链同样被 sanitize 剔除", () => {
+    writeConfig(tmpDir, JSON.stringify({ version: 1, engineDefaults: { zcode: "a/b", bad: [] } }));
+    expect(readEngineDefaults(tmpDir)).toEqual({ zcode: "a/b" });
   });
 });

@@ -82,6 +82,35 @@ describe('Ctrl+F 表面内查找（find-in-surface 接线）', () => {
     stop()
   })
 
+  // 大写 'F' 回归：Shift 按下时 e.key 为大写，键名判定须大小写不敏感（漏判即快捷键失灵）
+  it('Shift+Cmd+F（大写 F）：触发查找', () => {
+    appendSurface('overlay')
+    const { stop } = startOrchestrator()
+
+    const e = keyEvent('F', { metaKey: true, shiftKey: true })
+    window.dispatchEvent(e)
+
+    const find = useFindInSurface()
+    expect(e.defaultPrevented).toBe(true)
+    expect(find.isOpen.value).toBe(true)
+    expect(find.surfaceKind.value).toBe('overlay')
+    stop()
+  })
+
+  it('Ctrl+Shift+F（大写 F）：同款触发', () => {
+    appendSurface('overlay')
+    const { stop } = startOrchestrator()
+
+    const e = keyEvent('F', { ctrlKey: true, shiftKey: true })
+    window.dispatchEvent(e)
+
+    const find = useFindInSurface()
+    expect(e.defaultPrevented).toBe(true)
+    expect(find.isOpen.value).toBe(true)
+    expect(find.surfaceKind.value).toBe('overlay')
+    stop()
+  })
+
   it('先行档已消费（defaultPrevented）→ 不动作（不重复开查找）', () => {
     appendSurface('overlay')
     const { stop } = startOrchestrator()

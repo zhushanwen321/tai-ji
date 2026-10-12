@@ -1,22 +1,30 @@
+<!-- split-justified: MCP 表单单一语义域（多传输类型 schema 校验 + 错误三件套 + 滚动定位——校验面围绕同一表单状态机） -->
 <template>
   <Dialog :open="open" @update:open="emit('update:open', $event)">
-    <DialogContent class="max-w-[560px]" data-testid="mcp-form-dialog">
+    <!-- 宽/高 = demo .cpop-lg（min(520px, 100vw-48px) / max-height 82vh 内滚动——保存被拦
+         滚动定位首个出错字段的滚动容器） -->
+    <DialogContent class="max-w-[520px] max-h-[82vh] overflow-y-auto" data-testid="mcp-form-dialog">
       <DialogHeader>
         <DialogTitle>{{ editing ? t('settings.mcp.editServer') : t('settings.mcp.addServer') }}</DialogTitle>
         <DialogDescription>{{ t('settings.mcp.formDesc') }}</DialogDescription>
       </DialogHeader>
 
       <!-- 表单/代码双 tab（D7）：切换保留内容；表单 → 代码自动序列化为包装形态；
-           代码 → 表单解析成功才切换，失败留代码模式并显示解析错误 -->
-      <div class="flex gap-1" role="tablist" data-testid="mcp-form-tabs">
+           代码 → 表单解析成功才切换，失败留代码模式并显示解析错误。
+           形态 = demo .u-seg 分段（hairline 边 / r-md / p 2px / 钮 26px r-sm，
+           选中 = elevated 底 + 正文字 + fw-mid）。
+           槽底引 --bg-input（凹陷档）而非同名 --surface-2：demo --surface-2 = var(--card-inset)
+           为凹陷档，real --surface-2 = #27272a 为浮起档（docs/DESIGN.md §4.1 背景层级登记），
+           同名令牌分叉——demo 复刻消费点按 demo 渲染方向引凹陷档，令牌本体不动 -->
+      <div class="inline-flex gap-[2px] rounded-md border border-hairline bg-bg-input p-[2px]" role="tablist" data-testid="mcp-form-tabs">
         <Button
           v-for="tab in (['form', 'code'] as const)"
           :key="tab"
           type="button"
           role="tab"
           variant="ghost"
-          class="h-7 rounded-[var(--radius-sm)] px-3 text-[12px]"
-          :class="activeTab === tab ? 'bg-surface text-fg' : 'text-neutral-mid hover:text-fg'"
+          class="h-[26px] rounded-[var(--radius-sm)] px-[10px] text-[length:var(--text-xs)] hover:bg-transparent"
+          :class="activeTab === tab ? 'bg-bg-elevated font-semibold text-neutral-fg' : 'text-neutral-mid hover:text-neutral-fg'"
           :aria-selected="activeTab === tab"
           :data-testid="`mcp-form-tab-${tab}`"
           @click="tab === 'code' ? switchToCode() : switchToForm()"
@@ -25,31 +33,32 @@
         </Button>
       </div>
 
-      <!-- 表单模式（D7 字段映射表定死） -->
-      <div v-if="activeTab === 'form'" class="flex flex-col gap-3" data-testid="mcp-form-fields">
+      <!-- 表单模式（D7 字段映射表定死）；字段栈间距 = demo 弹层表单 10px，标签 = .flab（12px/600） -->
+      <div v-if="activeTab === 'form'" class="flex flex-col gap-[10px]" data-testid="mcp-form-fields">
         <div class="flex flex-col gap-1">
-          <Label class="text-[12px] text-neutral-fg" for="mcp-form-name">{{ t('settings.mcp.fieldName') }}</Label>
+          <Label for="mcp-form-name">{{ t('settings.mcp.fieldName') }}</Label>
           <Input
             id="mcp-form-name"
             v-model="name"
             data-testid="mcp-form-name"
             :placeholder="t('settings.mcp.fieldNamePlaceholder')"
             :disabled="!!editing"
-            class="h-8 text-[12px]"
+            :error="!!fieldErrors.name"
           />
-          <p v-if="fieldErrors.name" class="text-[11px] text-danger" data-testid="mcp-form-name-error">{{ fieldErrors.name }}</p>
-          <p v-else-if="editing" class="text-[10px] text-neutral-mid">{{ t('settings.mcp.nameLockedHint') }}</p>
+          <!-- 错误位 = demo .form-err（danger / text-xs / mt 4px，出错字段正下方） -->
+          <p v-if="fieldErrors.name" class="mt-[4px] text-[length:var(--text-xs)] text-danger" data-testid="mcp-form-name-error">{{ fieldErrors.name }}</p>
+          <p v-else-if="editing" class="text-[length:var(--text-sm)] text-neutral-mid">{{ t('settings.mcp.nameLockedHint') }}</p>
         </div>
 
         <div class="flex flex-col gap-1">
-          <Label class="text-[12px] text-neutral-fg">{{ t('settings.mcp.fieldTransport') }}</Label>
+          <Label>{{ t('settings.mcp.fieldTransport') }}</Label>
           <!-- 编辑态可切换（设计 D4/D7 编辑流切换路径；另一类型字段清空 =
                onTransportChange 表单级 + store buildFormConfig 条目键级两级保证） -->
           <Select
             :model-value="transport"
             @update:model-value="onTransportChange"
           >
-            <SelectTrigger class="h-8 w-full text-[12px]" data-testid="mcp-form-transport">
+            <SelectTrigger class="w-full" data-testid="mcp-form-transport">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -62,46 +71,48 @@
         <!-- stdio 字段（命令 / 参数 / 环境变量 / 工作目录） -->
         <template v-if="transport === 'stdio'">
           <div class="flex flex-col gap-1">
-            <Label class="text-[12px] text-neutral-fg" for="mcp-form-command">{{ t('settings.mcp.fieldCommand') }}</Label>
+            <Label for="mcp-form-command">{{ t('settings.mcp.fieldCommand') }}</Label>
             <Input
               id="mcp-form-command"
               v-model="command"
               data-testid="mcp-form-command"
               :placeholder="t('settings.mcp.fieldCommandPlaceholder')"
-              class="h-8 font-mono text-[12px]"
+              class="font-mono"
+              :error="!!fieldErrors.command"
             />
-            <p v-if="fieldErrors.command" class="text-[11px] text-danger" data-testid="mcp-form-command-error">{{ fieldErrors.command }}</p>
-            <p v-else class="text-[10px] text-neutral-mid">{{ t('settings.mcp.fieldCommandHint') }}</p>
+            <p v-if="fieldErrors.command" class="mt-[4px] text-[length:var(--text-xs)] text-danger" data-testid="mcp-form-command-error">{{ fieldErrors.command }}</p>
+            <p v-else class="text-[length:var(--text-sm)] text-neutral-mid">{{ t('settings.mcp.fieldCommandHint') }}</p>
           </div>
           <div class="flex flex-col gap-1">
-            <Label class="text-[12px] text-neutral-fg" for="mcp-form-args">{{ t('settings.mcp.fieldArgs') }}</Label>
+            <Label for="mcp-form-args">{{ t('settings.mcp.fieldArgs') }}</Label>
             <Textarea
               id="mcp-form-args"
               v-model="argsText"
               data-testid="mcp-form-args"
               :placeholder="t('settings.mcp.fieldArgsPlaceholder')"
-              class="min-h-[56px] font-mono text-[12px]"
+              class="min-h-[56px] font-mono"
             />
           </div>
           <div class="flex flex-col gap-1">
-            <Label class="text-[12px] text-neutral-fg" for="mcp-form-env">{{ t('settings.mcp.fieldEnv') }}</Label>
+            <Label for="mcp-form-env">{{ t('settings.mcp.fieldEnv') }}</Label>
             <Textarea
               id="mcp-form-env"
               v-model="envText"
               data-testid="mcp-form-env"
               :placeholder="t('settings.mcp.fieldEnvPlaceholder')"
-              class="min-h-[56px] font-mono text-[12px]"
+              class="min-h-[56px] font-mono"
+              :error="!!fieldErrors.env"
             />
-            <p v-if="fieldErrors.env" class="text-[11px] text-danger" data-testid="mcp-form-env-error">{{ fieldErrors.env }}</p>
+            <p v-if="fieldErrors.env" class="mt-[4px] text-[length:var(--text-xs)] text-danger" data-testid="mcp-form-env-error">{{ fieldErrors.env }}</p>
           </div>
           <div class="flex flex-col gap-1">
-            <Label class="text-[12px] text-neutral-fg" for="mcp-form-cwd">{{ t('settings.mcp.fieldCwd') }}</Label>
+            <Label for="mcp-form-cwd">{{ t('settings.mcp.fieldCwd') }}</Label>
             <Input
               id="mcp-form-cwd"
               v-model="cwd"
               data-testid="mcp-form-cwd"
               :placeholder="t('settings.mcp.fieldCwdPlaceholder')"
-              class="h-8 font-mono text-[12px]"
+              class="font-mono"
             />
           </div>
         </template>
@@ -109,44 +120,45 @@
         <!-- http 字段（URL / 请求头） -->
         <template v-else>
           <div class="flex flex-col gap-1">
-            <Label class="text-[12px] text-neutral-fg" for="mcp-form-url">{{ t('settings.mcp.fieldUrl') }}</Label>
+            <Label for="mcp-form-url">{{ t('settings.mcp.fieldUrl') }}</Label>
             <Input
               id="mcp-form-url"
               v-model="url"
               data-testid="mcp-form-url"
               :placeholder="t('settings.mcp.fieldUrlPlaceholder')"
-              class="h-8 font-mono text-[12px]"
+              class="font-mono"
+              :error="!!fieldErrors.url"
             />
-            <p v-if="fieldErrors.url" class="text-[11px] text-danger" data-testid="mcp-form-url-error">{{ fieldErrors.url }}</p>
+            <p v-if="fieldErrors.url" class="mt-[4px] text-[length:var(--text-xs)] text-danger" data-testid="mcp-form-url-error">{{ fieldErrors.url }}</p>
           </div>
           <div class="flex flex-col gap-1">
-            <Label class="text-[12px] text-neutral-fg" for="mcp-form-headers">{{ t('settings.mcp.fieldHeaders') }}</Label>
+            <Label for="mcp-form-headers">{{ t('settings.mcp.fieldHeaders') }}</Label>
             <Textarea
               id="mcp-form-headers"
               v-model="headersText"
               data-testid="mcp-form-headers"
               :placeholder="t('settings.mcp.fieldHeadersPlaceholder')"
-              class="min-h-[56px] font-mono text-[12px]"
+              class="min-h-[56px] font-mono"
+              :error="!!fieldErrors.headers"
             />
-            <p v-if="fieldErrors.headers" class="text-[11px] text-danger" data-testid="mcp-form-headers-error">{{ fieldErrors.headers }}</p>
+            <p v-if="fieldErrors.headers" class="mt-[4px] text-[length:var(--text-xs)] text-danger" data-testid="mcp-form-headers-error">{{ fieldErrors.headers }}</p>
           </div>
         </template>
 
         <div class="flex flex-col gap-1">
-          <Label class="text-[12px] text-neutral-fg" for="mcp-form-description">{{ t('settings.mcp.fieldDescription') }}</Label>
+          <Label for="mcp-form-description">{{ t('settings.mcp.fieldDescription') }}</Label>
           <Input
             id="mcp-form-description"
             v-model="description"
             data-testid="mcp-form-description"
             :placeholder="t('settings.mcp.fieldDescriptionPlaceholder')"
-            class="h-8 text-[12px]"
           />
         </div>
 
         <div class="flex flex-col gap-1">
-          <Label class="text-[12px] text-neutral-fg">{{ t('settings.mcp.fieldExposure') }}</Label>
+          <Label>{{ t('settings.mcp.fieldExposure') }}</Label>
           <Select :model-value="exposure" @update:model-value="onExposureChange">
-            <SelectTrigger class="h-8 w-full text-[12px]" data-testid="mcp-form-exposure">
+            <SelectTrigger class="w-full" data-testid="mcp-form-exposure">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -156,27 +168,28 @@
               <SelectItem value="hidden">{{ t('settings.mcp.exposureHidden') }}</SelectItem>
             </SelectContent>
           </Select>
-          <p class="text-[10px] leading-relaxed text-neutral-mid" data-testid="mcp-form-exposure-hint">{{ exposureHint }}</p>
+          <p class="text-[length:var(--text-sm)] leading-relaxed text-neutral-mid" data-testid="mcp-form-exposure-hint">{{ exposureHint }}</p>
         </div>
 
         <!-- runtime 保存校验失败的内联显示（ok:false error 透传——校验权威在 runtime，D4） -->
-        <p v-if="serverError" class="text-[11px] text-danger" data-testid="mcp-form-server-error">{{ serverError }}</p>
+        <p v-if="serverError" class="mt-[4px] text-[length:var(--text-xs)] text-danger" data-testid="mcp-form-server-error">{{ serverError }}</p>
       </div>
 
       <!-- 代码模式：textarea + 粘贴解析（单条目形态；表单外键原样保留写入） -->
       <div v-else class="flex flex-col gap-2" data-testid="mcp-form-code">
-        <p class="text-[10px] leading-relaxed text-neutral-mid">{{ t('settings.mcp.codeHint') }}</p>
+        <p class="text-[length:var(--text-sm)] leading-relaxed text-neutral-mid">{{ t('settings.mcp.codeHint') }}</p>
         <Textarea
           v-model="codeText"
           data-testid="mcp-form-code-text"
           :placeholder="t('settings.mcp.codePlaceholder')"
-          class="min-h-[220px] font-mono text-[12px]"
+          class="min-h-[220px] font-mono"
         />
-        <p v-if="codeError" class="text-[11px] text-danger" data-testid="mcp-form-code-error">{{ codeError }}</p>
-        <p v-if="serverError" class="text-[11px] text-danger" data-testid="mcp-form-server-error-code">{{ serverError }}</p>
+        <p v-if="codeError" class="mt-[4px] text-[length:var(--text-xs)] text-danger" data-testid="mcp-form-code-error">{{ codeError }}</p>
+        <p v-if="serverError" class="mt-[4px] text-[length:var(--text-xs)] text-danger" data-testid="mcp-form-server-error-code">{{ serverError }}</p>
       </div>
 
-      <div class="flex justify-end gap-2 pt-2">
+      <!-- 动作区 = demo .cp-actions（justify-end / gap 8px / pt 16px） -->
+      <div class="flex justify-end gap-[8px] pt-[16px]">
         <Button variant="ghost" data-testid="mcp-form-cancel" @click="emit('update:open', false)">
           {{ t('settings.mcp.cancel') }}
         </Button>
@@ -198,7 +211,7 @@
  * 删除后重建）。`type` 三值闭集与形态一致性校验归 runtime（u1 复刻校验权威），本组件把
  * ok:false 的 error 经 serverError 内联显示，不复刻闭集（防双源漂移）。
  */
-import { ref, watch } from 'vue'
+import { ref, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
@@ -466,6 +479,26 @@ function resolveFormCandidate(): { name: string; entry: McpServerEntryValue } {
   return { name: name.value.trim(), entry: built.entry }
 }
 
+/** 表单 tab 校验失败的字段呈现序（demo settings spec §6：滚动定位首个出错字段）。
+ *  元素 id 与模板 input/textarea 的 id 一一对应。 */
+const ERROR_FIELD_ORDER = ['name', 'command', 'url', 'env', 'headers'] as const
+const ERROR_FIELD_ELEMENT_ID: Record<(typeof ERROR_FIELD_ORDER)[number], string> = {
+  name: 'mcp-form-name',
+  command: 'mcp-form-command',
+  url: 'mcp-form-url',
+  env: 'mcp-form-env',
+  headers: 'mcp-form-headers',
+}
+
+/** 保存被拦时滚动定位首个出错字段（弹层 max-h 82vh 内滚动；弹层不关闭）。 */
+function scrollToFirstError(): void {
+  const first = ERROR_FIELD_ORDER.find((key) => fieldErrors.value[key])
+  if (!first) return
+  void nextTick(() => {
+    document.getElementById(ERROR_FIELD_ELEMENT_ID[first])?.scrollIntoView({ block: 'nearest' })
+  })
+}
+
 /** 提交（保存按钮）：当前 tab 内容 → 解析 → 校验 → emit（保存协议调用与损坏拒入处理归 McpSection） */
 function submit(): void {
   fieldErrors.value = {}
@@ -486,5 +519,6 @@ function submit(): void {
     return
   }
   if (nameError) fieldErrors.value.name = nameError
+  scrollToFirstError()
 }
 </script>

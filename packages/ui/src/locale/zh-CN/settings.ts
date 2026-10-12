@@ -8,6 +8,9 @@ export default {
   saved: '已保存',
   // ── 菜单导航（SettingsModal 左导航 + 右详情标题/描述）──
   menu: {
+    groupResources: '模型与资源',
+    groupInputAppearance: '输入与外观',
+    groupEnvSystem: '环境与系统',
     provider: '供应商',
     providerDesc: '配置模型供应商与 API Key',
     skill: '技能',
@@ -34,15 +37,13 @@ export default {
     updateDesc: '配置自动升级与代理设置',
     appearance: '外观',
     appearanceDesc: '主题、配色与分区字号偏好',
-    usage: '用量',
+    usage: '用量统计',
     usageDesc: '查看 Token 用量与会话统计',
     remoteAccess: '远程访问',
     remoteAccessDesc: '从手机浏览器访问 taiji（局域网 / Tailscale）',
   },
   // ── Appearance 页（AppearancePage）──
   appearance: {
-    regionFontTitle: '分区字号',
-    regionFontHint: '按界面区域独立调整字号（×0.9 / ×1.0 / ×1.15 / ×1.3），立即生效',
     region: {
       sidebar: '左侧边栏',
       chat: '对话流',
@@ -74,6 +75,10 @@ export default {
     saveFailed: '保存失败：{reason}',
     loadErrorHint: '读取失败，显示的是默认值',
     loadErrorRetry: '重试',
+    modelLabel: '{engine} 默认模型',
+    modelDesc: '派发该引擎任务未显式指定模型时的补缺值',
+    piModelNote: 'pi 引擎模型由 pi 自身解析（继承主会话模型 > pi 自身缺省）',
+    modelSaveFailed: '保存失败：{reason}',
   },
   // ── SystemPrompt 页（SystemPromptPage）──
   systemPrompt: {
@@ -942,7 +947,6 @@ export default {
     updateSourceAuto: '自动（推荐）',
     updateSourceGithub: 'GitHub',
     updateSourceGitcode: 'GitCode',
-    currentVersionLabel: '当前版本',
     channelHint: 'stable 渠道 · 更新完成后需重启应用生效',
     // 更新设置三字段（autoUpdate/preDownload/updateSource）经 setting-field 收编后的统一 toast；
     // 上方 saved/saveFailed 语义专属 proxy 表单，不混用

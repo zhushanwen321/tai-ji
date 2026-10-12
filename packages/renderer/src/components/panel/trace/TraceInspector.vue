@@ -12,8 +12,9 @@
     与 chat 域内容区同款范式）。
   -->
   <div v-if="row" class="flex h-full min-h-0 flex-col" data-testid="trace-inspector">
-    <!-- head：返回 + badge（block 态为 block 类型）+ 定位 + copy -->
-    <div class="flex flex-shrink-0 items-center gap-2 border-b border-hairline px-2.5 py-2">
+    <!-- head：返回 + badge（block 态为 block 类型）+ 定位 + copy。
+         头行节奏对齐抽屉头行统一内缩（px-3.5 / pt-2 pb-1.5，ui-replica M5）。 -->
+    <div class="flex flex-shrink-0 items-center gap-2 border-b border-hairline px-3.5 pb-1.5 pt-2">
       <Button
         variant="ghost"
         size="sm"
@@ -42,9 +43,9 @@
       </Button>
     </div>
     <!-- sub：来源说明 -->
-    <p class="flex-shrink-0 px-2.5 pb-1.5 pt-1 text-[length:var(--text-2xs)] text-neutral-faint">{{ t('panel.trace.inspectorSubtitle') }}</p>
+    <p class="flex-shrink-0 px-3.5 pb-1.5 pt-1 text-[length:var(--text-2xs)] text-neutral-faint">{{ t('panel.trace.inspectorSubtitle') }}</p>
     <!-- body：两态详情（select-text：全局 user-select:none 的内容区恢复点） -->
-    <div class="min-h-0 flex-1 select-text overflow-y-auto px-2.5 pb-4" data-testid="trace-inspector-body">
+    <div class="min-h-0 flex-1 select-text overflow-y-auto px-3.5 pb-4" data-testid="trace-inspector-body">
       <!-- 损坏行恢复指引（§3.1）：打开 JSONL 所在目录（Electron reveal-in-folder IPC →
            shell.showItemInFolder；路径来自快照 filePath，未落盘/未知时置灰）。
            [RD-2#6] 行号未知（协议/版本漂移防御）：不承诺行定位、不给出打开目录动作 -->
@@ -126,7 +127,7 @@
           <div
             v-for="b in blocks"
             :key="b.key"
-            class="flex cursor-pointer select-none items-center gap-2 rounded-sm px-1.5 py-1 text-[length:var(--text-2xs)] text-neutral-mid hover:bg-surface-2"
+            class="flex cursor-pointer select-none items-center gap-2 rounded-sm px-1.5 py-1 text-[length:var(--text-2xs)] text-neutral-mid hover:bg-surface-hover"
             :data-testid="`trace-inspector-block-${b.index}`"
             @click="selectTraceEntry(props.sessionId, b.key)"
           >

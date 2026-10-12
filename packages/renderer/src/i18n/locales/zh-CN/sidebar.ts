@@ -3,6 +3,9 @@ export default {
   search: '搜索',
   developer: '开发者',
   settingsTitle: '设置',
+  remoteConnect: '远程连接',
+  quickAppearance: '外观快捷设置',
+  quickThemeTitle: '主题',
   selectSessionHint: '选择会话查看文件',
   sessionListLoadFailed: '会话列表加载失败（{error}）',
   switchSessionFailed: '切换会话失败：{msg}',
@@ -56,7 +59,16 @@ export default {
     markDone: '标记完成',
     unmarkDone: '取消标记',
     archived: '已归档',
+    // 悬停详情卡消息计数：末行「时间 · N 条消息」两段，
+    // 文案语气对齐 demo sessions.js msgs 段（'42 条消息'）
+    msgCount: '{count} 条消息',
+    // 导出 JSONL：右键菜单项；unavailable = sessionFile
+    // 缺失（pi 延迟写入窗口）时的禁用态 title 提示
+    exportJsonl: '导出 JSONL',
+    exportJsonlUnavailable: '会话尚未产生记录文件（首条消息落盘后可导出）',
     assignToProject: '归入项目',
+    // 右键菜单「移动到项目」分组标签（demo .ctx-label 权威文案，与 ghost 钮 title 的「归入项目」分开登记）
+    moveToProject: '移动到项目',
     quoteToComposer: '引用到输入区',
     // agent-managed-session U8：agent 创建的 session 标记 badge（语言无关 token，两侧同文案）
     agentBadge: 'AI',
@@ -72,12 +84,23 @@ export default {
     childCount: '{n} 个子会话未完成',
   },
   sessionList: {
-    empty: '暂无会话',
-    newSession: '新建会话',
+    // R6.2 锚定分组（2026-10-11）：区头标题 + 组内空态 + 组头「+」提示；
+    // 原「最近会话」区头与全局空态（empty/newSession）随项目分组形态退役
+    header: '项目与会话',
+    groupEmpty: '暂无会话，点组头「+」在此新建任务',
+    newSessionInProject: '在此项目新建任务',
     newSessionInFolder: '在此目录新建会话',
     deleteFolderConfirm: '确认删除此文件夹下所有会话？',
+    // N8 A/C 双模式（ui-optimize-unified 决策 9）：双段图标开关的模式名（title 悬停提示）
+    modeFlat: '平铺列表',
+    modeGroup: '按目录分组',
   },
   assignProjectFailed: '归入项目失败：{msg}',
+  // 「移动到项目」迁移成功反馈（spec sessions §3.3：点击即迁移 + toast）
+  movedToProject: '已移动到项目「{name}」',
+  // 导出 JSONL 反馈（canceled 静默，无 toast）
+  exportJsonlSuccess: '会话已导出到 {path}',
+  exportJsonlFailed: '导出失败（{code}）：{message}',
   forceQuitFailed: '强制退出失败：{msg}',
   // [投递所有权内核 u3c / D10] 强制退出后 delivery.drain 回收内核未送达条目进 Composer 草稿的显式提示
   forceQuitQueueRecovered: '{count} 条排队消息已收回草稿',
@@ -89,14 +112,20 @@ export default {
     session: '会话',
     file: '文件',
     plugin: '插件',
+    // tablist 容器 aria-label（spec sidebar §3.1）
+    viewLabel: '侧栏视图',
   },
-  projectSwitcher: {
+  // R6.2 锚定分组（原 projectSwitcher.* 键段随卡片网格退役更名：项目管理面 = 会话视图内项目分组）
+  projectGroup: {
     defaultName: '默认项目',
+    currentChip: '当前',
     newProject: '新建项目',
-    namePlaceholder: '项目名称',
+    namePlaceholder: '项目名称，Enter 确认',
+    renameProject: '重命名项目',
     deleteProject: '删除项目',
     deleteTitle: '删除项目',
-    deleteDesc: '确认删除项目「{name}」？该操作不可撤销。',
+    // 二次确认写明后果（spec sidebar §3.7：「N 个会话将归回默认项目，项目本身将被删除」）
+    deleteDesc: '删除项目「{name}」？该项目下 {count} 个会话将归回默认项目，项目本身将被删除。',
     deleteConfirm: '删除',
     cancel: '取消',
   },
@@ -109,12 +138,13 @@ export default {
     hideIgnored: '隐藏忽略文件',
     showIgnored: '显示忽略文件',
     ignoredItem: '忽略项',
-    filterPlaceholder: '过滤文件…',
+    filterPlaceholder: '过滤文件',
     loadingTree: '加载文件树…',
     loadFailed: '加载失败（{reason}）',
     retry: '重试',
     noMatch: '无匹配文件',
     noFile: '暂无文件',
+    clearFilter: '清空过滤',
   },
   renameDialog: {
     title: '重命名会话',

@@ -2,7 +2,7 @@
  * EventAdapter UI_FORM_MARKER 检测路由测试（ui-presentation-protocol u2）。
  *
  * 覆盖（照 plan-review / ask-user 检测测试形态，全部 mock 零真实 pi）：
- * - title=UI_FORM_MARKER 的 select 事件 → 成对产出 extension-ui kind + extension.ui_request
+ * - title=UI_FORM_MARKER 的 select 事件 → 成对产出 extension-ui kind + extension.dialog
  *   广播帧，payload 含 form:true 标记 + formQuestions（守卫过滤后的合法项）+ allowCancel
  * - 消费端守卫失败策略（设计 D2 末条，与 ask-user 整体判否不同）：isFormQuestion 逐项过滤，
  *   混合数组仅保留合法项；全不合法 / 非 JSON / formQuestions 非数组 → 降级普通 select

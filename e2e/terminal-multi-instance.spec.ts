@@ -135,7 +135,7 @@ async function createSession(port: number, id: string, label: string): Promise<s
   return (reply.payload?.session as { id: string }).id
 }
 
-/** 在侧栏选中会话（面板 leaf 绑定该 session → 底抽屉的终端面板随之激活该会话）。 */
+/** 在侧栏选中会话并**等会话激活落地**（面板 leaf 绑定该 session → 底抽屉的终端面板随之激活该会话）。 */
 async function selectSessionInSidebar(page: Page, label: string): Promise<void> {
   const connBanner = page.getByText(/连接中/)
   await connBanner.waitFor({ state: 'hidden', timeout: 45_000 }).catch(() => {})
@@ -143,6 +143,16 @@ async function selectSessionInSidebar(page: Page, label: string): Promise<void> 
   await expect(item).toBeVisible({ timeout: SESSION_VISIBLE_TIMEOUT_MS })
   await item.click()
   await expect(page.getByTestId('composer-box')).toBeVisible({ timeout: SESSION_VISIBLE_TIMEOUT_MS })
+  // 等会话激活落地（T13 竞态修复）：卡头会话标签与底抽屉分区键同 tick 翻转——两者都派生自
+  // panel store 的 leaf.sessionId（core use-session runEntryChain 步 7 syncSessionToPanel 写入，
+  // 前置是 selectSession 步 2 的 switchSession RPC 往返，实测 ~59ms）。不等到翻转就驱动抽屉
+  // 开关（openTerminalDrawer 的 aria-pressed 检查），读到的是**旧会话**分区的开合态；随后新
+  // 会话分区（bottom-drawer control 默认 isOpen:false，per-session 开合记忆）接管 → 抽屉收起、
+  // TerminalView 卸载 → 实例条目断言全落空（本 spec 原 T13 即败于此：期望 1 实得 0，且
+  // runtime 侧 PTY 与实例注册表全程无损——纯 UI 挂载面消失，非条目被清）。
+  await expect(page.getByTestId('panel-session-label')).toHaveText(label, {
+    timeout: SESSION_VISIBLE_TIMEOUT_MS,
+  })
 }
 
 /** 打开底抽屉（StatusBar 终端开关；⌃` 的鼠标等价入口，设计 §3.3 双入口）。幂等。 */
@@ -679,7 +689,8 @@ test('T13: 跨会话不误清——A 双实例切 B 触发对账后切回 A，�
     await runInTerminal(h.page, T13_A2.cmd)
     await expectTerminalOutput(h.page, T13_A2.out)
 
-    // 会话 B（无终端）：切换即触发 B 的 terminal.list 对账（会话激活腿）
+    // 会话 B（无终端）：B 的底抽屉分区默认关（per-session 开合记忆，切走即收起）→
+    // 切换后重开抽屉 → TerminalView 挂载激活轮跑 B 的 terminal.list 对账（会话激活腿）
     const sidB = await createSession(h.port, 'create-t13-b', bLabel)
     await selectSessionInSidebar(h.page, bLabel)
     await openTerminalDrawer(h.page)
@@ -688,7 +699,9 @@ test('T13: 跨会话不误清——A 双实例切 B 触发对账后切回 A，�
     const idB1 = await terminalIdAt(h.page, 0)
     expect(idB1.startsWith(`term:${sidB}:`), 'B 显示的是 B 自己的实例').toBe(true)
 
-    // 切回 A：A 的两条实例、编号、历史输出全部保持（对账范围 = 被查会话，不触达 A）
+    // 切回 A：A 的抽屉分区仍开 → 抽屉自动恢复、TerminalView 重挂载激活轮对账恢复条目
+    // （分区与订阅为模块级持有，B 期的视图卸载不释放）。A 的两条实例、编号、历史输出
+    // 全部保持（对账范围 = 被查会话，B 的对账与自动新建不触达 A）。
     await selectSessionInSidebar(h.page, aLabel)
     await openTerminalDrawer(h.page)
     await expectInstanceCount(h.page, 2)

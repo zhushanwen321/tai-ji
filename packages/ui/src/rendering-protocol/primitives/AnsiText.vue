@@ -93,7 +93,14 @@ watch(
   () => textOf(props.content),
   (next, prev) => {
     const el = containerEl.value
-    if (!el || !parser || prev === undefined) return
+    if (!el) return
+    // 降级自愈：首渲解析失败（parser 置空 / processedLen=-1）后 DOM 冻结在降级纯文本，
+    // 后续 content 变化走此分支全量重建恢复渲染与增量管线，否则内容追加被永久冻结。
+    if (!parser || processedLen < 0) {
+      renderFull(next)
+      return
+    }
+    if (prev === undefined) return
     // 追加分支：next 以「已喂入前缀」开头且纯增长 → 只解析 delta 只追加节点。
     // slice(0, processedLen) 而非 prev 全长：正常态两者相等，万一 processedLen 滞后
     // 仍保证 delta 从 parser 真实消费进度切起（DOM 与 parser 状态对齐）。

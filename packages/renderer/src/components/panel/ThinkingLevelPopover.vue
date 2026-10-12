@@ -1,30 +1,37 @@
 <template>
   <!--
     思考等级 popover（draft-composer-states §2c）。
-    触发器按「可操作 = 亮字」口径提亮（正文档色 + 600 字重，与模型触发器同款）；
-    浮层列表保持中性配色，仅选中态走 accent。等级强度靠 popover 内 off→max 的语义表达。
+    触发器对齐 demo `.thinksel`（11px 字号 / r-xs 圆角 / --fw-mid 字重，「可操作 = 亮字」
+    口径与模型触发器同款；经共享组件 PopoverTriggerButton 承载，仅字号差异经 class 覆盖）；
+    浮层列表对齐 demo `.popover right w120` 行语言（.pop-item：
+    min-h 28 / 5px 8px 内边距 / r-sm / fs-md / mid 字 hover 提 fg，无行首档位点——demo 行 =
+    名称 + 选中勾两元素），选中态 = 行尾对勾显隐（demo R3：弹层行不进选中范式，
+    无底/框/字色选中态声明）。
   -->
   <Popover v-model:open="canOpen">
-    <PopoverTrigger as-child>
-      <Button
-        variant="ghost"
-        class="h-7 gap-1 rounded-sm px-2 text-[11px] text-neutral-fg font-semibold transition-colors"
-        :title="t('panel.thinkingLevel.title')"
-      >
-        <!-- U4：切换中（停止态切档要先 ensureActive 拉活）→ 转圈 + 禁止重复开合/点选 -->
-        <LoaderCircle v-if="switching" class="size-3 shrink-0 animate-spin" />
-        <Brain v-else class="size-3 shrink-0" />
-        <span>{{ currentLabel }}</span>
-        <ChevronDown
-          class="ml-px size-[9px] transition-transform duration-[var(--duration)] ease-[var(--ease)]"
-          :class="open && 'rotate-180'"
-        />
-      </Button>
-    </PopoverTrigger>
-    <PopoverContent side="top" class="w-[180px] p-0">
-      <!-- head -->
+    <PopoverTriggerButton
+      :open="open"
+      variant="text"
+      class="text-[length:var(--text-2xs)]"
+      :title="t('panel.thinkingLevel.title')"
+    >
+      <!-- U4：切换中（停止态切档要先 ensureActive 拉活）→ 转圈 + 禁止重复开合/点选 -->
+      <template #leading>
+        <LoaderCircle v-if="switching" class="size-[12px] shrink-0 animate-spin" />
+        <Brain v-else class="size-[12px] shrink-0" />
+      </template>
+      <span>{{ currentLabel }}</span>
+    </PopoverTriggerButton>
+    <!-- 容器对齐 demo `.popover right w120`：右锚 / 锚距 10px / 最小宽 120px / r-lg / 4px 内边距 -->
+    <PopoverContent
+      side="top"
+      align="end"
+      :side-offset="10"
+      class="min-w-[120px] rounded-lg p-1"
+    >
+      <!-- head（demo .pop-head：mono 小写字距标，无底色无分隔边） -->
       <div
-        class="flex items-center justify-between border-b border-border bg-white/[0.015] px-2.5 py-2 font-mono text-[10px] uppercase tracking-[0.08em] text-neutral-dim"
+        class="px-2 pb-[4px] pt-[6px] font-mono text-[length:var(--text-3xs)] uppercase tracking-[0.08em] text-neutral-dim"
       >
         <span>{{ t('panel.thinkingLevel.title') }}</span>
       </div>
@@ -33,17 +40,14 @@
         v-for="opt in availableOptions"
         :key="opt.level"
         variant="ghost"
-        class="flex w-full items-center gap-2 rounded-none px-2.5 py-2 text-[13px] text-neutral-mid hover:bg-surface-hover hover:text-neutral-fg"
-        :class="level === opt.level && 'bg-accent-soft text-accent hover:bg-accent-soft hover:text-accent'"
+        class="flex min-h-[28px] w-full items-center gap-2 rounded-sm px-2 py-[5px] font-normal text-[length:var(--text-xs)] text-neutral-mid hover:bg-surface-hover hover:text-neutral-fg"
         @click="onSelect(opt)"
       >
-        <span
-          class="size-[7px] shrink-0 rounded-full"
-          :class="level === opt.level ? 'bg-accent' : 'bg-neutral-dim'"
-        />
         <span class="flex-1 text-left">{{ getDisplayLabel(opt.level, props.levelMap, t) }}</span>
+        <!-- 选中指示 = 行尾对勾显隐（demo R3：弹层行不进选中范式，行无底/框/字色选中态） -->
         <Check
-          class="size-[13px] text-accent transition-opacity"
+          class="size-[13px] shrink-0 transition-opacity"
+          :stroke-width="2.2"
           :class="level === opt.level ? 'opacity-100' : 'opacity-0'"
         />
       </Button>
@@ -54,9 +58,9 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Check, ChevronDown, LoaderCircle, Brain } from '@lucide/vue'
+import { Check, LoaderCircle, Brain } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { Popover, PopoverContent, PopoverTriggerButton } from '@/components/ui/popover'
 import {
   currentThinkingLevelKey,
   availableThinkingLevelOptions,

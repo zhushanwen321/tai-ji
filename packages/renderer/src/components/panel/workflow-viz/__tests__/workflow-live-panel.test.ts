@@ -149,7 +149,14 @@ function eventsReply(): {
       },
       { type: 'phase-settled', phase: 'alpha', seq: 4, ts: 1100 },
       { type: 'phase-started', phase: 'beta', seq: 5, ts: 1110 },
-      { type: 'run-settled', outcome: 'done', reason: 'completed', artifactsDir: '/tmp/x', seq: 6, ts: 1200 },
+      {
+        type: 'worker-log',
+        entry: { level: 'warn', message: '诊断行截断前缀…' },
+        truncatedFields: ['entryMessage'],
+        seq: 6,
+        ts: 1150,
+      },
+      { type: 'run-settled', outcome: 'done', reason: 'completed', artifactsDir: '/tmp/x', seq: 7, ts: 1200 },
     ],
   }
 }
@@ -257,7 +264,7 @@ describe('WorkflowLivePanel · workflow tab 三子页（使用者黑盒 + 观察
     expect(wrapper.findAll('[data-testid="l2-tab-agent\\:3"]')).toHaveLength(0) // 无 agent tab
   })
 
-  it('事件流子页：行渲染 + ✂ truncatedFields 标注（D4 截断协议展示面）', async () => {
+  it('事件流子页：行渲染 + ✂ truncatedFields 标注（D4 截断协议展示面，含 worker-log entryMessage 行）', async () => {
     const wrapper = await mountPanel()
     await wrapper.find('[data-testid="wf-viz-subpage-events"]').trigger('click')
     await flushPromises()
@@ -266,13 +273,19 @@ describe('WorkflowLivePanel · workflow tab 三子页（使用者黑盒 + 观察
     const rows = list.findAll('[data-testid^="wf-viz-event-"]').filter(
       (r) => r.attributes('data-testid') !== 'wf-viz-event-truncated',
     )
-    expect(rows.length).toBe(6)
-    // 截断标注行：agent-started 的 input 被截断
+    expect(rows.length).toBe(7)
+    // worker-log 行渲染：截断后的 message 走 summary 行（不进 detail 区）
+    const workerLogRow = list.find('[data-testid="wf-viz-event-worker-log"]')
+    expect(workerLogRow.exists()).toBe(true)
+    expect(workerLogRow.text()).toContain('诊断行截断前缀…')
+    // 截断标注行：agent-started 的 input + worker-log 的 entryMessage
     const truncated = list.findAll('[data-testid="wf-viz-event-truncated"]')
-    expect(truncated).toHaveLength(1)
+    expect(truncated).toHaveLength(2)
     expect(truncated[0].text()).toContain('input')
+    expect(truncated[1].text()).toContain('entryMessage')
     // i18n mock 下 title = key(named) 形态——断言 key 引用 + named 参数双到位
     expect(truncated[0].attributes('title')).toBe('panel.workflowViz.truncatedHint(fields=input)')
+    expect(truncated[1].attributes('title')).toBe('panel.workflowViz.truncatedHint(fields=entryMessage)')
   })
 
   it('事件流错误二分：record_not_found → 静态指引无重试按钮', async () => {

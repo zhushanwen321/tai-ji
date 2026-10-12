@@ -237,3 +237,36 @@ describe('getRunOverride — run 域 journal 覆盖查询', () => {
     expect(RUN_EVENTS_SUFFIX).toBe('.record.jsonl')
   })
 })
+
+describe('resolved 透传（N+1 全目录扫描修复）', () => {
+  it('传入 resolved → 两查询跳过 scanSessions 自扫，定位锚复用调用方解析值', () => {
+    const cwd = '/w/proj'
+    const recordsDir = getSubagentRecordsDir(agentDir, cwd)
+    writeRecordEventsFile(recordsDir, 'sa-1', [overrideEvent(1, 'p-new', 'm-new')])
+    const sessionStore = {
+      // 自扫若被触发必定位失败（空扫描结果）——命中覆盖帧即证明走的是透传锚
+      scanSessions: vi.fn(() => []),
+    } as unknown as ISessionStore
+    const query = createModelOverrideQuery({ sessionStore, agentDir })
+
+    expect(query.getRecordOverride('main-1', 'sa-1', { cwd })).toEqual({ model: 'p-new/m-new' })
+    expect(sessionStore.scanSessions).not.toHaveBeenCalled()
+
+    const sessionFilePath = join(tmpDir, 'sessions', 'main-2.jsonl')
+    mkdirSync(join(tmpDir, 'sessions'), { recursive: true })
+    writeFileSync(sessionFilePath, '')
+    writeRunJournal(join(tmpDir, 'sessions', 'workflow-state'), 'run-9', [
+      { type: 'model-override', seq: 1, ts: 5, model: { provider: 'p-run', modelId: 'm-run' } },
+    ])
+    expect(query.getRunOverride('main-2', 'run-9', { filePath: sessionFilePath })).toEqual({ model: 'p-run/m-run' })
+    expect(sessionStore.scanSessions).not.toHaveBeenCalled()
+  })
+
+  it('resolved 字段缺席（cwd/filePath undefined）→ 按定位失败降级 undefined，不回退自扫', () => {
+    const sessionStore = { scanSessions: vi.fn(() => []) } as unknown as ISessionStore
+    const query = createModelOverrideQuery({ sessionStore, agentDir })
+    expect(query.getRecordOverride('main-1', 'sa-1', {})).toBeUndefined()
+    expect(query.getRunOverride('main-1', 'run-1', {})).toBeUndefined()
+    expect(sessionStore.scanSessions).not.toHaveBeenCalled()
+  })
+})

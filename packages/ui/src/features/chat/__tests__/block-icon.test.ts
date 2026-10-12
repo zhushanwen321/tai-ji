@@ -5,7 +5,7 @@
  * 零 mock，仅改 import path（@/components/.../block-icon → @taiji/ui）。
  */
 import { describe, it, expect } from 'vitest'
-import { Brain, BookOpen, SquareTerminal, Pencil, SquareFunction, Users, ListChecks, AlertTriangle, ArrowRight } from '@lucide/vue'
+import { Lightbulb, BookOpen, SquareTerminal, Pencil, SquareFunction, Users, ListChecks, ArrowRight } from '@lucide/vue'
 import { getBlockIcon, BLOCK_ICON_LUCIDE, RUNNING_LOADER_SVG } from '@taiji/ui'
 
 describe('block-icon.ts', () => {
@@ -15,16 +15,18 @@ describe('block-icon.ts', () => {
     expect(getBlockIcon('workflow', 'running', false, true)).toBe('running')
   })
 
-  it('getBlockIcon: error → failed（覆盖 toolName/isSubagent/isWorkflow）', () => {
-    expect(getBlockIcon('read', 'error', false, false)).toBe('failed')
-    expect(getBlockIcon('subagent', 'error', true, false)).toBe('failed')
+  it('getBlockIcon: error 不换形（demo TurnList.vue:86-89：图标名不随失败态变，失败信号由消费方染 danger）', () => {
+    expect(getBlockIcon('read', 'error', false, false)).toBe('tool-read')
+    expect(getBlockIcon('bash', 'error', false, false)).toBe('tool-bash')
+    expect(getBlockIcon('subagent', 'error', true, false)).toBe('subagent')
+    expect(getBlockIcon('workflow', 'error', false, true)).toBe('workflow')
   })
 
-  it('getBlockIcon: isSubagent → subagent（非 running/error 时）', () => {
+  it('getBlockIcon: isSubagent → subagent（非 running 时）', () => {
     expect(getBlockIcon('subagent', 'completed', true, false)).toBe('subagent')
   })
 
-  it('getBlockIcon: isWorkflow → workflow（非 running/error/subagent 时）', () => {
+  it('getBlockIcon: isWorkflow → workflow（非 running/subagent 时）', () => {
     expect(getBlockIcon('workflow', 'completed', false, true)).toBe('workflow')
   })
 
@@ -43,27 +45,32 @@ describe('block-icon.ts', () => {
     expect(getBlockIcon('read', 'end_not_received', false, false)).toBe('tool-read')
   })
 
-  it('BLOCK_ICON_LUCIDE: 图标映射（subagent=Users, thinking=Brain, failed=AlertTriangle 等）', () => {
+  it('BLOCK_ICON_LUCIDE: 图标映射（subagent=Users, thinking=Lightbulb 等；failed 已删——failed 不换形）', () => {
     expect(BLOCK_ICON_LUCIDE.subagent).toBe(Users)
-    expect(BLOCK_ICON_LUCIDE.thinking).toBe(Brain)
-    expect(BLOCK_ICON_LUCIDE.failed).toBe(AlertTriangle)
+    expect(BLOCK_ICON_LUCIDE.thinking).toBe(Lightbulb)
     expect(BLOCK_ICON_LUCIDE['tool-read']).toBe(BookOpen)
     expect(BLOCK_ICON_LUCIDE['tool-bash']).toBe(SquareTerminal)
     expect(BLOCK_ICON_LUCIDE['tool-edit']).toBe(Pencil)
     expect(BLOCK_ICON_LUCIDE['tool-other']).toBe(SquareFunction)
     expect(BLOCK_ICON_LUCIDE.workflow).toBe(ListChecks)
     expect(BLOCK_ICON_LUCIDE.text).toBe(ArrowRight)
-    // D1 语义变更：bash-group 组头图标 = bash 语义（SquareTerminal，与 tool-bash 同源），
-    // 组身份由「×N」计数前缀承载；组内含 running 成员时图标位由渲染层 RUNNING_LOADER_SVG 顶替
-    expect(BLOCK_ICON_LUCIDE['bash-group']).toBe(SquareTerminal)
+    // run 组块不占独立档：组头图标 = 组类型的语义图标（Block.vue RUN_GROUP_ICON：
+    // 探索→tool-read / 改动→tool-edit / 执行命令→tool-bash），组内含 running 成员时
+    // 图标位由渲染层 RUNNING_LOADER_SVG 顶替——档位数恒 8（不含 running）
+    expect(Object.keys(BLOCK_ICON_LUCIDE)).toHaveLength(8)
   })
 
-  it('RUNNING_LOADER_SVG: 双环 loader（含 svg + circle，外环 r=10 + 内实心 r=3）', () => {
+  it('RUNNING_LOADER_SVG: 呼吸弧 loader（淡轨整圈 .ld-track + accent 弧段 .ld-arc pathLength=100，r=10）', () => {
     expect(RUNNING_LOADER_SVG).not.toBe('')
     expect(RUNNING_LOADER_SVG).toContain('<svg')
     expect(RUNNING_LOADER_SVG).toContain('circle')
+    // 淡轨整圈（stroke 16% 透明度）+ 弧段（pathLength=100 归一，dasharray 呼吸/摆动由
+    // 全局 .ld-arc 类驱动——style.css 动画 SSOT 区）
+    expect(RUNNING_LOADER_SVG).toContain('class="ld-track"')
+    expect(RUNNING_LOADER_SVG).toContain('opacity="0.16"')
+    expect(RUNNING_LOADER_SVG).toContain('class="ld-arc"')
+    expect(RUNNING_LOADER_SVG).toContain('pathLength="100"')
     expect(RUNNING_LOADER_SVG).toContain('r="10"')
-    expect(RUNNING_LOADER_SVG).toContain('r="3"')
     expect(RUNNING_LOADER_SVG).toContain('stroke-width="1.7"')
   })
 })

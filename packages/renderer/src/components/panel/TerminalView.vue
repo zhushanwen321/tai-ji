@@ -32,9 +32,12 @@
       @close="onClose"
       @collapse="onCollapseDrawer"
     />
-    <!-- xterm 挂载点（relative 包裹浮动按钮）。纯黑圆角块嵌在卡片 surface 上；
-         空态（实例 0）时容器透明——黑块仅在有实例时呈现，空态不再悬无内容黑区。 -->
-    <div class="relative m-2 min-h-0 flex-1 rounded" :class="instances.length > 0 ? 'bg-black' : ''">
+    <!-- xterm 挂载点（relative 包裹浮动按钮）。深色圆角块嵌在卡片 surface 上（ui-replica M6
+         对齐 demo .term-body：8px 外缩 + r-sm 圆角 + 内容 12px 内距；底色保 bg-black——xterm
+         canvas 主题背景 #000 为运行时既定配置（terminal-themes.ts），容器改 surface 会与 canvas
+         形成两色缝，待主题底色对齐后随迁）；空态（实例 0）时容器透明——色块仅在有实例时呈现，
+         空态不再悬无内容黑区。 -->
+    <div class="relative m-2 min-h-0 flex-1 rounded-sm" :class="instances.length > 0 ? 'bg-black' : ''">
       <!-- RD-5#2：spawn 失败 inline 错误条（挂载自动新建腿；复用 FileView error 态范式） -->
       <div
         v-if="spawnError"

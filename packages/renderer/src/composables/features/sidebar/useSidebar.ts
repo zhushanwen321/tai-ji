@@ -389,9 +389,9 @@ export function useSidebar() {
     sessionStore.updateProjectId(sessionId, projectId)
   }
 
-  /** 切换折叠态（C）。展开/折叠 toggle，spec §收起态。 */
+  /** 切换折叠态（C）。展开/折叠 toggle，spec §收起态。委托 store 用户意图切换（collapsed 是只读派生，见 stores/sidebar）。 */
   function toggleCollapse(): void {
-    sidebar.collapsed = !sidebar.collapsed
+    sidebar.toggleCollapsed()
   }
 
   /**

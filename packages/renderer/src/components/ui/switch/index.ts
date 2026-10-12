@@ -1,1 +1,1 @@
-export { default as Switch } from './Switch.vue'
+export { Switch } from '@taiji/ui'

@@ -1,6 +1,6 @@
 // src/__tests__/path-encoding.test.ts
 //
-// 锁定 encodeCwd 契约：session-runner 与 session-file-gc 共用此编码，
+// 锁定 encodeCwd 契约：session-runner 与 runtime 删会话级联等消费方共用此编码，
 // 漂移会导致同一 cwd 落到两个不同目录（见 path-encoding.ts 顶部注释）。
 import * as path from "node:path";
 

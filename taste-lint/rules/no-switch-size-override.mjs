@@ -9,7 +9,8 @@
  * 16px thumb 直接刺出）。要小尺寸只能等比 scale-*（transform 连内部几何一起视觉缩放）。
  *
  * 范围：所有 .vue 模板中 PascalCase <Switch> 开标签（含跨行标签）；豁免
- * components/ui/（原语内部实现）与 design-system/components/。
+ * components/ui/、ui 包 primitives/（原语内部实现，Switch 唯一实现在
+ * packages/ui/src/primitives/switch/）与 design-system/components/。
  * 已知盲区（登记不追溯）：:class 绑定的运行时拼接字符串无法静态判定——规则只扫开标签
  * 文本内的静态 class 与字面量；动态拼接覆盖属罕见形态，出现时靠本注释 + Switch.vue
  * [HISTORICAL] 注释人工拦截。
@@ -42,7 +43,7 @@ export default {
     const filename = context.filename || ''
     if (!filename.endsWith('.vue')) return {}
     // 原语内部实现允许自定几何
-    if (filename.includes('components/ui/') || filename.includes('design-system/components/')) return {}
+    if (filename.includes('components/ui/') || filename.includes('/primitives/') || filename.includes('design-system/components/')) return {}
 
     const sourceCode = context.sourceCode || context.getSourceCode()
     const text = sourceCode.getText()

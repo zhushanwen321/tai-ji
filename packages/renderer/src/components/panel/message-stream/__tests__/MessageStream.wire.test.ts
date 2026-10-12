@@ -1,8 +1,8 @@
 /**
  * w4 wave 接线层测试（实际用例：TC-w4-1/2/3/3b/4/6/7/8/9）。
  *
- * 覆盖：Turn.vue 接入 useTurnExpansion（w1）+ 连续同类块独立渲染（合并功能已移除），
- *       MessageStream.vue 挂载 TurnRail（w3）+ 事件路由。
+ * 覆盖：Turn.vue 接入 useTurnExpansion（w1）+ 连续同类 tool 聚 run 分组容器（3646d9d91；
+ *       merged 合并功能已移除），MessageStream.vue 挂载 TurnRail（w3）+ 事件路由。
  *
  * 策略（任务指引「务实优先」）：
  * - TC-w4-1/2/7/8：mount Turn.vue + 真实 useTurnExpansion（无 mock，验端到端接线）
@@ -215,8 +215,11 @@ describe('Turn.vue 接线 useTurnExpansion（w1）', () => {
     expect(wrapperB.findAllComponents({ name: 'Block' }).length).toBe(1)
   })
 
-  it('TC-w4-8: 连续同类 tool 调用 → 每个 block 独立渲染（不再合并）', async () => {
-    // 构造 3 个连续 toolCall（同类型，非失败）→ 不再合并，3 个独立 Block
+  it('TC-w4-8: 连续同类 tool 调用 → 聚进同一 run 分组容器（组内逐行独立），末位 text 独立块', async () => {
+    // 构造 3 个连续 toolCall（同类型 grep ∈ explore 分组名单，非失败）
+    // [3646d9d91 run 类型分组] 断言跟随分组语义：连续同类 tool 聚成 1 个 run-group 容器
+    // （成员行不误合并、text 不被吞的锁定意图不变；旧断言「4 个独立 .trace-blk」对应
+    // 分组功能引入前的逐块渲染形态）
     const tc1 = makeToolCall('tc1')
     const tc2 = makeToolCall('tc2')
     const tc3 = makeToolCall('tc3')
@@ -239,16 +242,24 @@ describe('Turn.vue 接线 useTurnExpansion（w1）', () => {
     // 展开 trace（complete 态需手动展开）
     await wrapper.find('.turn-meta').trigger('click')
     expect(wrapper.find('.trace').exists()).toBe(true)
-    // 不存在 merged 卡片（合并功能已移除）
+    // 不存在 merged 卡片（合并功能已移除；现行聚合形态 = run 分组容器，非 merged 卡）
     expect(wrapper.findAll('[data-testid="merged-block-card"]')).toHaveLength(0)
-    // [block-rendering M0] 3 个连续 tool + 末位 text（不再被 filter，全 inline 就地渲染）各自独立渲染
-    const blocks = wrapper.findAll('.trace-blk')
-    expect(blocks).toHaveLength(4)
-    expect(blocks[0].find('.trace-tool').exists()).toBe(true)
-    expect(blocks[1].find('.trace-tool').exists()).toBe(true)
-    expect(blocks[2].find('.trace-tool').exists()).toBe(true)
-    // 末位 text 在 trace 内（contentBlocks 顺序：3 tool + text）
-    expect(blocks[3].findComponent({ name: 'MarkdownRenderer' }).exists()).toBe(true)
+    // 顶层 = 1 个 run 分组容器（真实 Block 根无 data-type，按现行约定以 .trace-run-group 断言）
+    // + 末位 text 独立块
+    const topBlocks = wrapper.findAll('.trace > .trace-blk')
+    expect(topBlocks).toHaveLength(2)
+    expect(topBlocks[0].find('.trace-run-group').exists()).toBe(true)
+    // 末位 text 在 trace 内（不被分组吞掉）
+    expect(topBlocks[1].findComponent({ name: 'MarkdownRenderer' }).exists()).toBe(true)
+    // 组默认收起（全已完成无 running 成员）；点组头展开 → 3 个成员行各自独立渲染
+    const group = topBlocks[0].find('[data-testid="run-group"]')
+    expect(group.find('[data-testid="run-group-header"]').attributes('aria-expanded')).toBe('false')
+    await group.find('[data-testid="run-group-header"]').trigger('click')
+    const members = group.findAll('.trace-blk')
+    expect(members).toHaveLength(3)
+    expect(members[0].find('.trace-tool').exists()).toBe(true)
+    expect(members[1].find('.trace-tool').exists()).toBe(true)
+    expect(members[2].find('.trace-tool').exists()).toBe(true)
   })
 })
 

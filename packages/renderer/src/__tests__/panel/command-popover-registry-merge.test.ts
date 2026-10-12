@@ -50,10 +50,10 @@ function createSlashSource(): { resolveSlashCommands: (pi: SlashCommandLike[]) =
   return { resolveSlashCommands: (pi) => registry.resolveSlashCommands(pi) }
 }
 
-/** reka-ui PopoverContent teleport 到 body：在 body 内找命令项行（v-for 渲染为 .cmd-row div）。 */
+/** reka-ui PopoverContent teleport 到 body：在 body 内找命令项行（v-for 渲染为 .pop-item div）。 */
 function bodyItemButtons(): HTMLElement[] {
   const list = document.body.querySelector('.max-h-\\[180px\\]')
-  return Array.from((list ?? document.body).querySelectorAll('.cmd-row'))
+  return Array.from((list ?? document.body).querySelectorAll('.pop-item'))
 }
 
 const GLOBAL_SKILLS: SkillInfo[] = [

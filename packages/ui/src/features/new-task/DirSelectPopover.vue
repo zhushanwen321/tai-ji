@@ -141,12 +141,12 @@ const { activeIndex, onKeydown, isActiveItem } = useFlatListNav({
     class="w-[320px] max-h-[420px] overflow-hidden"
     @keydown="onKeydown"
   >
-    <!-- 搜索 input（sticky 顶部，spec §3.2） -->
-    <div class="border-b border-border p-2">
+    <!-- 搜索 input（sticky 顶部，spec §3.2；凹陷底 = demo 弹窗输入语言 --bg-input） -->
+    <div class="border-b border-hairline p-2">
       <Input
         v-model="search"
         :placeholder="t('newTask.dirSelect.searchPlaceholder')"
-        class="h-8 bg-surface-2 text-[13px]"
+        class="h-8 bg-bg-input text-[length:var(--text-sm)]"
       />
     </div>
 
@@ -158,7 +158,7 @@ const { activeIndex, onKeydown, isActiveItem } = useFlatListNav({
         class="flex flex-col items-center gap-2 px-4 py-6 text-center"
       >
         <Folder class="size-5 text-neutral-dim" />
-        <p class="text-[12px] text-neutral-mid">{{ t('newTask.dirSelect.noRecent') }}</p>
+        <p class="text-[length:var(--text-xs)] text-neutral-mid">{{ t('newTask.dirSelect.noRecent') }}</p>
       </div>
 
       <!-- 列表项（非空态）：默认只显目录名，同名时追加 (parent) 消歧 -->
@@ -179,8 +179,8 @@ const { activeIndex, onKeydown, isActiveItem } = useFlatListNav({
         </span>
       </PopoverListItem>
 
-      <!-- 分隔线 -->
-      <div class="my-1 h-px bg-border" />
+      <!-- 分隔线（demo pop-sep 语言：hairline 弱分隔 + 6px 水平缩进） -->
+      <div class="mx-1.5 my-1 border-t border-hairline" />
 
       <!-- 动作项：打开文件夹（空态时即 Primary 入口，spec §6） -->
       <PopoverActionItem

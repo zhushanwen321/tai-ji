@@ -134,6 +134,7 @@ it('首屏渲染：<页面> DOM 含关键交互元素', () => {
 ### C 层：Playwright 像素 diff（CI 内，形态级）
 
 - **机制**：`playwright.config.ts` 的 `visual-chromium` project（testMatch `visual/**`）+ `e2e/visual/` spec + `e2e/visual-baselines/` baseline 快照（**git tracked**，CI/他人 clone 后无 baseline 则 diff 无意义）
+- **字体固定（2026-10-12）**：visual 轨渲染字体 = bundled webfont（`e2e/visual/fixtures/visual-server.ts` 注入 @fontsource-variable/noto-sans-sc 可变字重单源 + `--font-sans` 变量覆盖 + route 本地供给，截图前 `fontsReady` 统一等待）——本机与 runner 渲染同源，本地重录即权威；字体族/包版本变更须全量重录基线一次。实现锚点 = e2e/visual/fixtures/visual-server.ts
 - **双 project 隔离**：electron 行为轨（testIgnore `visual/**`）/ visual-chromium 像素轨（testMatch `visual/**`）互斥，`npx playwright test e2e/visual` 自动只跑像素轨
 - **阈值**：`maxDiffPixelRatio: 0.01`（容忍字体抗锯齿/caret 闪烁 flaky，抓真回归）+ `caret:'hide'`
 - **方法论 [from S2-W3]**：(1) `snapshotDir`/`snapshotPathTemplate` 是 TestProject **直接属性**（与 name/testMatch 同级），不是 `use` 属性——放 project.use 里静默不生效；(2) `toHaveScreenshot(name)` 的 name 必须带 `.png` 扩展名；(3) baseline 必须 git tracked

@@ -96,7 +96,7 @@ describe('U8-B1 agent badge 渲染（SessionItem）', () => {
   it('U8-B1 badge 形态：accent 低饱和小标签（bg-accent-soft + text-accent + 10px），不抢左侧状态 icon（观察者形态）', () => {
     const wrapper = mountItem()
     const badge = wrapper.find('[data-testid="session-agent-badge"]')
-    // 对齐项目 accent 低饱和配对（popover-styles SELECTED_ITEM_CLASS 同源）
+    // accent 低饱和配对 = bg-accent-soft 底 + accent 字（项目 badge 通行形态）
     expect(badge.classes()).toContain('bg-accent-soft')
     expect(badge.classes()).toContain('text-accent')
     // 克制尺寸：10px 小标签，与标题 12px 拉开层级

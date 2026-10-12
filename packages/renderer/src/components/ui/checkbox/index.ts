@@ -1,1 +1,1 @@
-export { default as Checkbox } from './Checkbox.vue'
+export { Checkbox } from '@taiji/ui'

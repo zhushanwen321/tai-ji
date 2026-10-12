@@ -1,0 +1,65 @@
+# 视觉基线常设重录通道（workflow_dispatch 手动触发）。
+# 定位（2026-10-12 视觉轨字体固定落地后更新）：本地与 runner 渲染已同源（visual-chromium 轨
+# 经 e2e/visual/fixtures/visual-server.ts 注入 bundled webfont，基线环境无关性由字体文件本身
+# 保证）——本地重录即权威，本通道退居兜底：字体族/版本变更、或需要在干净 runner 环境批量
+# 重录时使用。
+# 背景（历史）：本地 macOS 与 GitHub runner 的系统中文字体 metrics 曾存在系统差异，本地重录
+# 的基线在 CI 视觉轨恒红（2026-09-30 v0.10.6 发布期 composer 基线事故）；该根因已由字体固定
+# 消除（机制与纪律登记见 docs/TEST-STRATEGY.md「字体固定」条目）。
+#
+# 步骤与 ci.yml e2e-visual job 同款（macos-latest + ELECTRON_SKIP_BINARY_DOWNLOAD +
+# E2E_VISUAL_ONLY），差异仅在 --update-snapshots=all 全量重录。
+#
+# 回传提交入库流程：workflow 跑完 → Run 页面下载 visual-baselines artifact → 解包覆盖
+# 本地 e2e/visual-baselines/ → git commit（message 注明触发原因：字体族/版本变更 /
+# macOS 升级 / 断言面新增等）→ 随分支走常规 PR review（不直接 push main）。
+name: Visual Baseline Recapture
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  recapture:
+    name: Recapture visual baselines (mock)
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright chromium
+        run: npx playwright install chromium
+
+      # --update-snapshots=all：全量重写基线（非仅缺失/失败项），重录语义
+      - name: Recapture visual baselines (mock track)
+        env:
+          # visual 轨只需 chromium + vite（不需要 Electron 构建产物），跳过 globalSetup 的
+          # build:e2e 产物检查（与 ci.yml e2e-visual 同理由）
+          E2E_VISUAL_ONLY: '1'
+        run: npx playwright test e2e/visual --project=visual-chromium --update-snapshots=all
+
+      # 产物供人工回传提交入库（CI 无直接 push 权限，回传走人工 PR，见文件头注释）；
+      # if: always() 保证重录中途出现 diff 失败时产物仍可下载
+      - name: Upload recaptured baselines
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-baselines
+          path: e2e/visual-baselines/
+          retention-days: 14

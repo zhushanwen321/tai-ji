@@ -2,8 +2,9 @@
  * workflow 可视化 U3 两 RPC 契约测试（workflow-visualization 设计 §3.1-4 / §3.1-5，
  * SessionRecords 服务级——经真实 session JSONL fixture + run journal fixture 驱动）：
  *
- * - session.getWorkflowRunEvents：大字段 2KB 截断（input/result/scriptSource/args 四
- *   白名单字段）+ truncatedFields 逐行标注 + 骨架字段透传；record_not_found（无注册
+ * - session.getWorkflowRunEvents：大字段 2KB 截断（input/result/scriptSource/args 与
+ *   worker-log.entry.message 五白名单字段，后者按 entryMessage 键标注）+ truncatedFields
+ *   逐行标注 + 骨架字段透传；record_not_found（无注册
  *   条目 / record 文件已清理）；路径白名单拒绝在事件流结构化闭集（单码）下归并
  *   record_not_found；RPC 通道错误（非 ENOENT fs 错误 / scanSessions 失败）上抛；
  *   oversize 降级（record 文件超 READ_PRECHECK_MAX_BYTES——不全文读取，events 恒空
@@ -169,6 +170,26 @@ describe('session.getWorkflowRunEvents（§3.1-4 事件流拉取）', () => {
     // 未截断行不造 truncatedFields 键（缺省 = 无截断）
     expect(workerLog).not.toHaveProperty('truncatedFields')
     expect(phaseStarted).not.toHaveProperty('truncatedFields')
+  })
+
+  it('worker-log：超长 entry.message 按 entryMessage 键 2KB 截断 + truncatedFields 标注；短行不造键', async () => {
+    writeJournal([
+      { type: 'run-created', seq: 1, ts: 1000, runId: RUN_ID, workflowName: 'flow', argsSummary: 'task=demo' },
+      { type: 'worker-log', seq: 2, ts: 1100, entry: { level: 'warn', message: overThresholdText('w') } },
+      { type: 'worker-log', seq: 3, ts: 1200, entry: { level: 'log', message: 'hi' } },
+    ])
+    const records = makeRecords()
+    const reply: WorkflowRunEventsReply = await records.getWorkflowRunEvents(SID, RUN_ID)
+    if (!('events' in reply)) throw new Error('expected success arm')
+    const logs = reply.events.filter((e): e is Extract<WorkflowRunEventEntry, { type: 'worker-log' }> => e.type === 'worker-log')
+    expect(logs).toHaveLength(2)
+    // 超长行：message 为字节上限内前缀 + level 透传 + truncatedFields 标注白名单键 entryMessage
+    expect(Buffer.byteLength(logs[0]!.entry.message, 'utf8')).toBeLessThanOrEqual(WORKFLOW_RUN_EVENT_TRUNCATE_BYTES)
+    expect(logs[0]!.entry.message.startsWith('w')).toBe(true)
+    expect(logs[0]!.entry.level).toBe('warn')
+    expect(logs[0]!.truncatedFields).toEqual(['entryMessage'])
+    // 短行：原样透传，不造 truncatedFields 键（缺省 = 无截断）
+    expect(logs[1]).toEqual({ type: 'worker-log', ts: 1200, seq: 3, entry: { level: 'log', message: 'hi' } })
   })
 
   it('存量 run-created 行缺 argsSummary：读侧回退空串（不透传 undefined 键，防 renderer 渲染字面 undefined）', async () => {

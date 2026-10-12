@@ -14,9 +14,10 @@
  * - 折叠/展开目录：只渲染 dir 行，不存在同名 file 行（事故根因回归防护）
  * - 文件节点：只渲染 file 行，不存在 dir 行
  * - hint 行（loading/error/empty）：各自渲染，error 行点击 emit toggle（旧递归语义）
- * - 字号一致性（D-007）：dir/file 行 name span 均含 text-[12px]
+ * - 字号一致性（D-007）：dir/file 行 name span 均含 text-[length:var(--text-xs)]（12px 档）
  * - chevron 槽（D-022）：dir 行含 ChevronRight，file 行含空占位
- * - W2 徽章/行数：changeCount/lineStats 全部来自 row（投影预计算，组件不再读 store）
+ * - W2 徽章/行数：childCount/lineStats 全部来自 row（投影预计算，组件不再读 store）
+ * - 长文件名（demo .fname 契约，2026-10-10 裁决）：省略号截断 + title 悬停展示全名
  * - 交互：点 dir → emit toggle；点 file → emit select；selected 控制选中态样式
  *
  * 运行：pnpm --filter @taiji/frontend run test -- src/__tests__/components/FileTreeRow.test.ts
@@ -35,7 +36,7 @@ function makeRow(overrides: Partial<VisibleRow> & Pick<VisibleRow, 'path' | 'typ
     type,
     depth: overrides.depth ?? 0,
     expanded: overrides.expanded ?? false,
-    changeCount: overrides.changeCount ?? 0,
+    childCount: overrides.childCount ?? 0,
     ignored: overrides.ignored ?? false,
     hint: overrides.hint,
     gitStatus: overrides.gitStatus,
@@ -101,12 +102,12 @@ describe('FileTreeRow 视觉一致性（D-007 字号 / D-022 chevron 槽）', ()
     expect(dirRow.classes()).toContain('font-mono')
   })
 
-  it('文件行字号 12px + font-mono', () => {
+  it('文件行字号 12px + font-mono（M1 对齐 demo .frow：字体声明在行容器，name span 继承）', () => {
     const row = makeRow({ path: 'a.ts', type: 'file' })
     const wrapper = mountRow(row)
-    const nameSpan = wrapper.find('[data-testid="file-tree-file-a.ts"] .shrink')
-    expect(nameSpan.classes()).toContain('text-[length:var(--text-xs)]')
-    expect(nameSpan.classes()).toContain('font-mono')
+    const fileRow = wrapper.find('[data-testid="file-tree-file-a.ts"]')
+    expect(fileRow.classes()).toContain('text-[length:var(--text-xs)]')
+    expect(fileRow.classes()).toContain('font-mono')
   })
 
   it('目录行与文件行渲染字号一致（D-007：均 12px，不再 11/12 混用）', () => {
@@ -114,22 +115,30 @@ describe('FileTreeRow 视觉一致性（D-007 字号 / D-022 chevron 槽）', ()
     const fileWrapper = mountRow(makeRow({ path: 'a.ts', type: 'file' }))
 
     const dirRow = dirWrapper.find('[data-testid="file-tree-dir-src"]')
-    const fileNameSpan = fileWrapper.find('[data-testid="file-tree-file-a.ts"] .shrink')
+    const fileRow = fileWrapper.find('[data-testid="file-tree-file-a.ts"]')
     expect(dirRow.classes()).toContain('text-[length:var(--text-xs)]')
     expect(dirRow.classes()).not.toContain('text-[11px]')
-    expect(fileNameSpan.classes()).toContain('text-[length:var(--text-xs)]')
-    expect(fileNameSpan.classes()).not.toContain('text-[11px]')
+    expect(fileRow.classes()).toContain('text-[length:var(--text-xs)]')
+    expect(fileRow.classes()).not.toContain('text-[11px]')
   })
 
-  it('行 padding-left 用单一公式 depth*10+8（D-022，dir/file/hint 行共用投影 depth）', () => {
+  it('行 padding-left 用单一公式 depth*18+8（spec files §4 缩进档 8/26/44/62，dir/file/hint 行共用投影 depth）', () => {
     const dirWrapper = mountRow(makeRow({ path: 'src', type: 'dir', depth: 2 }))
     const dirRow = dirWrapper.find('[data-testid="file-tree-dir-src"]')
-    expect((dirRow.element as HTMLElement).style.paddingLeft).toBe('28px') // 2*10+8（INDENT_STEP v6 14→10）
+    expect((dirRow.element as HTMLElement).style.paddingLeft).toBe('44px') // 2*18+8（demo .frow.ind2）
 
     // hint 行 depth 已由投影 +1（子区占位缩进），组件直接用 row.depth——与旧 childHintPaddingStyle 等价
     const hintWrapper = mountRow(makeRow({ path: 'src', type: 'dir', depth: 2, hint: 'loading' }))
     const hintRow = hintWrapper.find('[data-testid="file-tree-loading-src"]')
-    expect((hintRow.element as HTMLElement).style.paddingLeft).toBe('28px') // 2*10+8
+    expect((hintRow.element as HTMLElement).style.paddingLeft).toBe('44px') // 2*18+8
+  })
+
+  it('缩进四档与 demo .ind0-.ind3 对齐（18px 步进：8/26/44/62）', () => {
+    for (const [depth, expected] of [[0, '8px'], [1, '26px'], [2, '44px'], [3, '62px']] as const) {
+      const wrapper = mountRow(makeRow({ path: 'src', type: 'dir', depth }))
+      const row = wrapper.find('[data-testid="file-tree-dir-src"]')
+      expect((row.element as HTMLElement).style.paddingLeft).toBe(expected)
+    }
   })
 
   it('文件行与目录行同 depth 的 padding-left 一致（icon 垂直对齐前提）', () => {
@@ -156,9 +165,9 @@ describe('FileTreeRow 视觉一致性（D-007 字号 / D-022 chevron 槽）', ()
   })
 })
 
-describe('FileTreeRow W2 目录改动徽章（changeCount 来自投影 row）', () => {
-  it('目录子树有改动文件 → 渲染徽章（含改动数）', () => {
-    const row = makeRow({ path: 'src', type: 'dir', changeCount: 2 })
+describe('FileTreeRow 目录徽标（childCount 来自投影 row，demo .fbadge：是目录即恒渲染）', () => {
+  it('目录行恒渲染徽标，内容 = 可见子项数', () => {
+    const row = makeRow({ path: 'src', type: 'dir', childCount: 2 })
     const wrapper = mountRow(row)
 
     const badge = wrapper.find('[data-testid="file-tree-dir-badge-src"]')
@@ -166,22 +175,24 @@ describe('FileTreeRow W2 目录改动徽章（changeCount 来自投影 row）', 
     expect(badge.text()).toBe('2')
   })
 
-  it('目录子树无改动 → 不渲染徽章', () => {
-    const row = makeRow({ path: 'src', type: 'dir', changeCount: 0 })
+  it('可见子项数 0（空目录 / ignored 目录）也恒渲染徽标（demo：是目录即显）', () => {
+    const row = makeRow({ path: 'src', type: 'dir', childCount: 0 })
     const wrapper = mountRow(row)
 
-    expect(wrapper.find('[data-testid="file-tree-dir-badge-src"]').exists()).toBe(false)
+    const badge = wrapper.find('[data-testid="file-tree-dir-badge-src"]')
+    expect(badge.exists()).toBe(true)
+    expect(badge.text()).toBe('0')
   })
 
-  it('改动数 > 999 → 显 999+', () => {
-    const row = makeRow({ path: 'src', type: 'dir', changeCount: 1000 })
+  it('子项数 > 999 → 显 999+', () => {
+    const row = makeRow({ path: 'src', type: 'dir', childCount: 1000 })
     const wrapper = mountRow(row)
 
     expect(wrapper.find('[data-testid="file-tree-dir-badge-src"]').text()).toBe('999+')
   })
 
-  it('文件行不渲染改动数徽章（changeCount 仅目录行语义）', () => {
-    const row = makeRow({ path: 'a.ts', type: 'file', changeCount: 5 })
+  it('文件行不渲染目录徽标（childCount 仅目录行语义）', () => {
+    const row = makeRow({ path: 'a.ts', type: 'file', childCount: 5 })
     const wrapper = mountRow(row)
 
     expect(wrapper.find('[data-testid="file-tree-dir-badge-a.ts"]').exists()).toBe(false)
@@ -278,20 +289,87 @@ describe('FileTreeRow 交互（emit 路由，不再直调 useFileTree）', () =>
       expect(wrapper.emitted('select')).toBeUndefined()
     }
   })
+
+  it('目录行键盘通道（spec files §3.1）：treeitem 角色 + aria-expanded 同步 + Enter/Space 开合', async () => {
+    const row = makeRow({ path: 'src', type: 'dir', expanded: false })
+    const wrapper = mountRow(row)
+    const dirRow = wrapper.find('[data-testid="file-tree-dir-src"]')
+
+    expect(dirRow.attributes('role')).toBe('treeitem')
+    expect(dirRow.attributes('tabindex')).toBe('0')
+    expect(dirRow.attributes('aria-expanded')).toBe('false')
+
+    await dirRow.trigger('keydown.enter')
+    expect(wrapper.emitted('toggle')).toHaveLength(1)
+    await dirRow.trigger('keydown.space')
+    expect(wrapper.emitted('toggle')).toHaveLength(2)
+
+    // aria-expanded 随投影行 expanded 值同步（展开态行）
+    const openWrapper = mountRow(makeRow({ path: 'src', type: 'dir', expanded: true }))
+    expect(openWrapper.find('[data-testid="file-tree-dir-src"]').attributes('aria-expanded')).toBe('true')
+  })
+
+  it('文件行键盘通道（spec files §3.1）：treeitem 角色 + Enter 打开', async () => {
+    const row = makeRow({ path: 'a.ts', type: 'file' })
+    const wrapper = mountRow(row)
+    const fileRow = wrapper.find('[data-testid="file-tree-file-a.ts"]')
+
+    expect(fileRow.attributes('role')).toBe('treeitem')
+    expect(fileRow.attributes('tabindex')).toBe('0')
+
+    await fileRow.trigger('keydown.enter')
+    expect(wrapper.emitted('select')).toEqual([[row]])
+  })
 })
 
 describe('FileTreeRow 选中态（selected prop，组件零 store 依赖）', () => {
-  it('selected=true 的文件行 → bg-surface + 名称 accent 加粗', () => {
+  it('selected=true 的文件行 → Tier B 无底无框（行级文字提 fg）+ 名称 fg fw-mid（demo .frow.sel 范式）', () => {
     const wrapper = mountRow(makeRow({ path: 'a.ts', type: 'file' }), true)
     const rowEl = wrapper.find('[data-testid="file-tree-file-a.ts"]')
-    expect(rowEl.classes()).toContain('bg-surface')
-    const nameSpan = wrapper.find('[data-testid="file-tree-file-a.ts"] .shrink')
-    expect(nameSpan.classes()).toContain('text-accent')
-    expect(nameSpan.classes()).toContain('font-semibold')
+    expect(rowEl.classes()).not.toContain('bg-bg-elevated')
+    expect(rowEl.classes()).not.toContain('shadow-[inset_2px_0_0_var(--accent)]')
+    expect(rowEl.classes()).toContain('text-neutral-fg')
+    const nameSpan = wrapper.find('[data-testid="file-tree-file-a.ts"] .fname')
+    expect(nameSpan.classes()).toContain('text-neutral-fg')
+    expect(nameSpan.classes()).toContain('[font-weight:var(--fw-mid)]')
   })
 
   it('selected=false → 无选中态样式', () => {
     const wrapper = mountRow(makeRow({ path: 'a.ts', type: 'file' }), false)
-    expect(wrapper.find('[data-testid="file-tree-file-a.ts"]').classes()).not.toContain('bg-surface')
+    expect(wrapper.find('[data-testid="file-tree-file-a.ts"]').classes()).not.toContain('text-neutral-fg')
+    const nameSpan = wrapper.find('[data-testid="file-tree-file-a.ts"] .fname')
+    expect(nameSpan.classes()).not.toContain('text-neutral-fg')
+  })
+})
+
+describe('FileTreeRow 长文件名（demo .fname 契约，2026-10-10 裁决：ellipsis 截断 + title 悬停展示全名）', () => {
+  it('文件行 name span 单层 ellipsis 截断 + title 展示全名', () => {
+    const row = makeRow({ path: 'src/very-long-file-name.ts', type: 'file' })
+    const wrapper = mountRow(row)
+    const nameSpan = wrapper.find('[data-testid="file-tree-file-src/very-long-file-name.ts"] .fname')
+
+    expect(nameSpan.exists()).toBe(true)
+    expect(nameSpan.classes()).toContain('text-ellipsis')
+    expect(nameSpan.classes()).toContain('overflow-hidden')
+    expect(nameSpan.classes()).toContain('whitespace-nowrap')
+    expect(nameSpan.attributes('title')).toBe('very-long-file-name.ts')
+  })
+
+  it('目录行 name span 同契约（ellipsis + title）', () => {
+    const row = makeRow({ path: 'src/very-long-dir-name', type: 'dir' })
+    const wrapper = mountRow(row)
+    const nameSpan = wrapper.find('[data-testid="file-tree-dir-src/very-long-dir-name"] .fname')
+
+    expect(nameSpan.exists()).toBe(true)
+    expect(nameSpan.classes()).toContain('text-ellipsis')
+    expect(nameSpan.attributes('title')).toBe('very-long-dir-name')
+  })
+
+  it('marquee 契约类已卸载（fname-scroll/fname-roll/hover 滚动类零残留）', () => {
+    const wrapper = mountRow(makeRow({ path: 'src', type: 'dir' }))
+    expect(wrapper.html()).not.toContain('fname-scroll')
+    expect(wrapper.html()).not.toContain('fname-roll')
+    expect(wrapper.html()).not.toContain('hover:text-clip')
+    expect(wrapper.html()).not.toContain('container-type')
   })
 })

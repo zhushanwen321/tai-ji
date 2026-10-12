@@ -22,9 +22,9 @@
 //
 // 落点裁决（D3）：`<recordsDir>/<sa-id>.events`（与 manifest 同目录同主名，寻址 =
 // 注册条目 id 直接定址，无需扫描）。无 .jsonl 后缀的结构性收益：session-reader
-// 的 .jsonl 扫描、session-file-gc 的 .jsonl TTL 清理、runtime legacy 目录扫描全部
-// 结构性忽略该文件族（「被忽略或被误读」两类风险一次排空）。清理归统一保留
-// 通道（D5），session-file-gc 对 *.events 显式忽略（U5）。
+// 的 .jsonl 扫描与 runtime legacy 目录扫描全部结构性忽略该文件族（「被忽略或被
+// 误读」两类风险一次排空）。清理归删主会话级联（runtime session-content-cascade，
+// 2026-10-12 裁决；统一保留维护轮不再是其回收通道）。
 //
 // tail 增量读取（offset 续读 / 完整行边界 / 坏行宽容）不在本模块——event-tail.ts
 // 是域无关的 tail 原语层，本模块只提供 parseRecordEventFileLine 行解析器注入。

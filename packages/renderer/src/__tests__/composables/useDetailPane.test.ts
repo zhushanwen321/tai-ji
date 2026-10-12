@@ -33,9 +33,13 @@ vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects:
   file: { read: (...args: unknown[]) => mockFileRead(...(args as [string, string?])) },
   git: { getDiff: (...args: unknown[]) => mockGitGetDiff(...(args as [string, string])) },
 }))
-// sessionStore.list 查 cwd（sessionCwd），此处给空列表即可（测试不涉及图片 URL）
+// sessionStore.list 查 cwd（sessionCwd）：默认空列表（session 不在册 → cwd null → 位置分流
+// 走 cwd 外/preview 分支）；需要 cwd 内分支的用例（双通道 forceDiff 位置分流）向
+// mockSessionList push { id, cwd } 注入。工厂内的箭头函数延迟读取数组引用（工厂执行时不解引用，
+// 无 TDZ 问题），与下方 mockFileRead/mockGitGetDiff 同款模式。
+const mockSessionList: Array<{ id: string; cwd?: string }> = []
 vi.mock('@/stores/session', () => ({
-  useSessionStore: () => ({ list: [] }),
+  useSessionStore: () => ({ list: mockSessionList }),
 }))
 
 import { useDetailPane, __loadTokenKeyCountForTest } from '@/composables/features/file-tree/useDetailPane'
@@ -73,6 +77,7 @@ const PATCH =
 beforeEach(() => {
   setActivePinia(createPinia())
   vi.clearAllMocks()
+  mockSessionList.length = 0
   resetSideDrawer()
 })
 
@@ -484,6 +489,10 @@ describe('useDetailPane 变更集卡入口（detailFilePath）', () => {
   it('双通道同 tick 注入（消息链接 = selectFile + detailFilePath）→ forceDiff 升级生效、不新增 tab', async () => {
     const sid = 's1'
     const path = 'src/link.ts'
+    // [位置分流 useDetailPane] 注入在册 session cwd：路径为 cwd 内相对形态（resolvePreviewPath
+    // 的 relative 非 null）→ drawer 通道按位置分流走 cwd 内分支，forceDiff 升级生效（旧实现
+    // forceDiff 无条件生效，位置分流后 cwd 外/session 不在册走 preview——本用例锁定 cwd 内分支）
+    mockSessionList.push({ id: sid, cwd: '/proj' })
     // overlay 未刷新（无 gitOverlay 记录）——forceDiff 是唯一 diff 依据
     mockGitGetDiff.mockResolvedValueOnce({ patch: PATCH, binary: false })
 

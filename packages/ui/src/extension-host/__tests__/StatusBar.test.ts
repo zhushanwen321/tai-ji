@@ -4,7 +4,7 @@
  * 覆盖用例（design-review TC-1~TC-5，C3 契约 + A4 对齐）：
  *  - TC-1 两 scope 渲染：per-session 在前 + global 在后，A4 排序（left/right 两段，
  *    段内 priority 降序），alignment=right 项右推（AC5）
- *  - A4-1 容器视觉：26px 高 bg-elevated text-xs + 溢出横向滚动
+ *  - A4-1 容器视觉：26px 高 bg-bg-elevated text-[length:var(--text-2xs)]（11px 档）+ 溢出横向滚动
  *  - A4-2 状态点五色：ok=success / warn=warn / danger=danger / neutral=neutral-ico /
  *    plugin-src=accent（spec §2 A4）
  *  - A4-3 无 status 项不渲染状态点
@@ -85,15 +85,15 @@ describe('StatusBar', () => {
     expect(items[1]!.classes()).not.toContain('ml-auto')
   })
 
-  it('A4-1 容器视觉：26px 高 bg-elevated text-xs + 溢出横向滚动', async () => {
+  it('A4-1 容器视觉：26px 高 bg-bg-elevated text-[length:var(--text-2xs)] + 溢出横向滚动', async () => {
     const { source } = makeSource()
     const wrapper = mountBar(source)
     await wrapper.vm.$nextTick()
 
     const bar = wrapper.find('[data-testid="status-bar"]')
     expect(bar.classes()).toContain('h-[26px]')
-    expect(bar.classes()).toContain('bg-elevated')
-    expect(bar.classes()).toContain('text-xs')
+    expect(bar.classes()).toContain('bg-bg-elevated')
+    expect(bar.classes()).toContain('text-[length:var(--text-2xs)]')
     // 溢出：容器横向滚动（overflow-x-auto）
     expect(bar.classes()).toContain('overflow-x-auto')
   })

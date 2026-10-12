@@ -62,11 +62,11 @@ provide(NewTaskDepsKey, deps)
 const flow = deps.flow
 const toastError = deps.toast.error
 
-/** [D9] landing 输入卡固定窄宽：根元素局部覆写全局令牌 --content-max-w（值同全局 720px）。
- *  main-area 恒把该令牌覆写为 100%（useDrawerSplitWidth），全局封顶在此被解除——landing
- *  内容列不加本覆写会被撑满。覆写后 composer 实宽 = min(0.6 × W − 48px, 720px)；
+/** [D9] landing 输入卡固定窄宽：根元素局部覆写全局令牌 --content-max-w（demo 阅读列形态
+ *  min(720px, 100%)——窄容器自动让位满宽）。main-area 恒把该令牌覆写为 100%
+ *  （useDrawerSplitWidth），全局封顶在此被解除——landing 内容列不加本覆写会被撑满；
  *  覆写手段与 main-area 的 100% 覆写同族（局部覆写全局令牌，不新造机制/令牌）。 */
-const LANDING_CONTENT_MAX_W = '720px'
+const LANDING_CONTENT_MAX_W = 'min(720px, 100%)'
 
 /**
  * [perf-landing 跳转先行] 首发提交飞行中（flow.isInflight = createInFlight，submitFirstMessage
@@ -289,7 +289,7 @@ function onPresetSelect(payload: { presetId: string }): void {
 <template>
   <div
     data-testid="new-task-landing"
-    class="relative flex min-h-0 flex-1 flex-col items-center justify-center gap-8 overflow-hidden p-6"
+    class="relative flex min-h-0 flex-1 flex-col items-center justify-center gap-4 overflow-hidden p-6"
     :style="{ '--content-max-w': LANDING_CONTENT_MAX_W }"
   >
 
@@ -311,7 +311,7 @@ function onPresetSelect(payload: { presetId: string }): void {
       <Button
         data-testid="new-task-cancel-create"
         variant="ghost"
-        class="h-auto gap-1.5 px-3 py-1.5 text-[12px] text-neutral-mid hover:bg-surface-hover hover:text-neutral-fg disabled:pointer-events-none disabled:opacity-50"
+        class="h-auto gap-1.5 px-3 py-1.5 text-[length:var(--text-xs)] text-neutral-mid hover:bg-surface-hover hover:text-neutral-fg disabled:pointer-events-none disabled:opacity-50"
         :disabled="isCancelling"
         @click="onCancelCreate"
       >
@@ -324,8 +324,9 @@ function onPresetSelect(payload: { presetId: string }): void {
          v-show 切 display:none/'' 不改变原有布局（若用普通 div 包裹会多一层 flex item 断 gap）。 -->
     <div v-show="!isCreating" class="contents">
 
-    <!-- 问候语（22px / weight 650 / --fg，spec §3.1） -->
-    <h1 class="z-10 text-center text-[22px] font-[650] text-neutral-fg">
+    <!-- 问候语（22px / --fg，spec §3.1；字重 demo 为 650 无独立档，归展示级 bold 档）；
+         landing-cascade 首项（级联入场见文件尾 scoped 注释） -->
+    <h1 class="landing-cascade-greet z-10 text-center text-[22px] font-bold text-neutral-fg">
       {{ greetingPrefix }}，{{ t('app.greetingPrompt') }}
     </h1>
 
@@ -334,7 +335,7 @@ function onPresetSelect(payload: { presetId: string }): void {
       v-if="historyError"
       data-testid="retry-history"
       variant="secondary"
-      class="z-10 h-auto gap-1.5 px-3 py-1.5 text-[12px] text-neutral-mid hover:bg-surface-hover hover:text-neutral-fg [&_svg]:size-3.5"
+      class="z-10 h-auto gap-1.5 px-3 py-1.5 text-[length:var(--text-xs)] text-neutral-mid hover:bg-surface-hover hover:text-neutral-fg [&_svg]:size-3.5"
       @click="onRetry"
     >
       <RefreshCw class="shrink-0" />
@@ -346,7 +347,7 @@ function onPresetSelect(payload: { presetId: string }): void {
          使该形态从未生效。--bg-input + --border + --radius-lg）。
          spec §3.1：chip 是 composer 卡片顶部元信息行，非悬空 → 经 #meta-row slot 注入。
          landing 态 session 真源用 flow（composerSid），props 作 fallback。 -->
-    <Composer variant="landing" :session-id="composerSid">
+    <Composer variant="landing" :session-id="composerSid" class="landing-cascade-composer">
       <template #meta-row>
         <!-- 首行三 chip（目录 ｜ 分支 ｜ 模式；设计 §7.4）：容器 nowrap + overflow-hidden，
              各 chip min-w-0；截断优先级 = 目录截断(110px) → 分支截断(76px) → 分支退化为图标
@@ -359,14 +360,14 @@ function onPresetSelect(payload: { presetId: string }): void {
               <Button
                 data-testid="chip-directory"
                 variant="ghost"
-                class="h-auto min-w-0 shrink-0 gap-1.5 px-2 py-1 text-[12px] text-neutral-mid hover:bg-surface-hover hover:text-neutral-fg [&_svg]:size-3.5"
+                class="h-auto min-h-6 min-w-0 shrink-0 gap-1.5 rounded-sm px-2 py-[3px] font-normal text-[length:var(--text-xs)] text-neutral-mid hover:bg-surface-hover hover:text-neutral-fg [&_svg]:size-3.5"
                 :class="{ '!text-accent': !cwd }"
               >
                 <Folder class="shrink-0" />
                 <span class="max-w-[110px] truncate font-mono">{{ dirLabel }}</span>
               </Button>
             </PopoverTrigger>
-            <PopoverContent side="top" :collision-padding="8" class="w-[320px] p-0">
+            <PopoverContent side="top" :side-offset="10" :collision-padding="8" class="w-[320px] p-0">
               <DirSelectPopover
                 :current-cwd="currentCwd ?? null"
                 @select="onSelectWorkspace"
@@ -381,13 +382,13 @@ function onPresetSelect(payload: { presetId: string }): void {
               <Button
                 data-testid="chip-branch"
                 variant="ghost"
-                class="h-auto min-w-0 shrink-[8] gap-1.5 px-2 py-1 text-[12px] text-neutral-mid hover:bg-surface-hover hover:text-neutral-fg [&_svg]:size-3.5"
+                class="h-auto min-h-6 min-w-0 shrink-[8] gap-1.5 rounded-sm px-2 py-[3px] font-normal text-[length:var(--text-xs)] text-neutral-mid hover:bg-surface-hover hover:text-neutral-fg [&_svg]:size-3.5"
               >
                 <GitFork class="shrink-0" />
                 <span class="max-w-[76px] min-w-0 truncate font-mono">{{ branch || t('newTask.landing.gitRepo') }}</span>
               </Button>
             </PopoverTrigger>
-            <PopoverContent side="top" :collision-padding="8" class="w-[420px] p-0">
+            <PopoverContent side="top" :side-offset="10" :collision-padding="8" class="w-[420px] p-0">
               <BranchSelectPopover
                 :mode="flow.mode?.value === 'bare-workspace' ? 'bare-workspace' : 'plain-repo'"
                 :cwd="cwd ?? ''"
@@ -432,3 +433,26 @@ function onPresetSelect(payload: { presetId: string }): void {
     </div><!-- /v-show 内容态（display:contents 包裹） -->
   </div>
 </template>
+
+<style scoped>
+/* 首屏级联入场（demo shell/chat spec 裁决 9A 可落部分）：问候语 → composer 卡片依次淡入上浮
+   （位移 10px、软缓出，参数 = demo unpacked.css 空态入场段实装：300ms/项、次项延迟 100ms——
+   spec 文本「260ms/步进 40ms」与 demo 实装 CSS 有口径漂移，视觉权威按 demo 实装取值，
+   漂移已登记 shell 域对齐报告）。示例/最近会话分区 real 无对应产品功能（chat 域已登记不造）。
+   挂载即播一次（CSS 动画随挂载播、无循环；创建失败回显不重播）；no-preference 包裹 =
+   prefers-reduced-motion 用户直接满态呈现（无动画无位移）。 */
+@media (prefers-reduced-motion: no-preference) {
+  .landing-cascade-greet {
+    animation: landing-cascade-in 300ms var(--ease-out-soft) both;
+  }
+  .landing-cascade-composer {
+    animation: landing-cascade-in 300ms var(--ease-out-soft) 100ms both;
+  }
+}
+@keyframes landing-cascade-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+}
+</style>

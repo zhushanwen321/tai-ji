@@ -35,8 +35,8 @@ vi.mock("@zhushanwen/subagent-core/execution/worktree/worktree-manager.ts", () =
     registerPid = vi.fn();
   },
 }));
-vi.mock("@zhushanwen/subagent-core/execution/persistence/session-file-gc.ts", () => ({
-  maybeCleanupExpiredSessionFiles: vi.fn(),
+vi.mock("@zhushanwen/subagent-core/execution/persistence/engine-journal-gc.ts", () => ({
+  startEngineJournalGcTimer: vi.fn(),
 }));
 vi.mock("@zhushanwen/subagent-core/execution/assembly/model-config-service.ts", () => ({
   ModelConfigService: class {

@@ -26,7 +26,13 @@
  * 3. assistant → 归当前 turn（无则自启 user:null turn，首条 assistant 边缘保留）
  * 4. inline notice（bashExecution 存在 或 liveOnly===true）→ 归当前 turn 的 notices 列表
  *    （按到达序追加末尾，不切断 turn、不出独立渲染项）；无当前 turn 时退化为独立 static 项
- * 5. 其余可见 system（compactionSummary/branchSummary/可见 custom/通用 system）→ 边界：
+ * 5. background-bash 结构化完成通知（display 非 false 且 details 可解析，解析器即判定 SSOT）→
+ *    边界 + 收纳附着（specs/chat/system-notices.md §3）：关闭当前 turn 后挂入 pending 待附
+ *    缓冲——后续 assistant 开新 turn（或规则 2 开 trigger turn）时按到达序注入该组
+ *    foldedNotices（settle 后收进轮头行，渲染层按轮工作态切换外部行/折叠标签两种形态）；
+ *    下一条是 user / 其余可见 system / 数组结束（agent 空闲无宿主轮）→ 以独立 static 项
+ *    外部行落位（边界 1：无 settle 时机不收纳，消息不丢）
+ * 6. 其余可见 system（compactionSummary/branchSummary/可见 custom/通用 system）→ 边界：
  *    独立 systemNotice 项 + 关闭当前 turn（现状语义）
  * 隐藏非完成通知消息（如 todo-context，display:false）透明：不参与边界、不产出渲染项
  * （现状 = 分组前被过滤；消息仍在 store——渲染过滤不丢消息，AGENTS.md 规则 9）。
@@ -39,6 +45,7 @@
 import {
   COMPLETE_NOTIFY_CUSTOM_TYPES,
   normalizeContent,
+  parseBackgroundBashDetails,
   SUBAGENT_TOOL_NAMES,
   WORKFLOW_TOOL_NAMES,
 } from '@taiji/shared'
@@ -48,6 +55,9 @@ import type { NotifySummary } from './notify-summary'
 
 // D5 边界聚合投影的公开类型（消费方：Turn.vue / 测试）；派生实现与判据在 ./notify-summary
 export type { NotifyOutcome, NotifySummary } from './notify-summary'
+// 收纳完成通知明细行（specs/chat/system-notices.md §3.4）：类型与派生单点同在 ./notify-summary
+export { deriveFoldedNoticeRows } from './notify-summary'
+export type { FoldedNoticeRow, FoldedNoticeType } from './notify-summary'
 
 /** 一个渲染回合：起点 user + 其后的 assistant 消息序列 */
 export interface MessageTurn {
@@ -69,6 +79,12 @@ export interface MessageTurn {
    *  纯派生值（可随时从 hiddenNotifies 重建），渲染层零解析零回扫。
    *  undefined = 非边界 turn 或无可聚合载荷。 */
   notifySummary?: NotifySummary
+  /** 被收纳完成通知本体（specs/chat/system-notices.md §3，bg-notice-fold-into-meta）：三通道
+   *  完成通知（background-bash 结构化行 / subagent / workflow / managed 隐藏本体）按到达序
+   *  原地搬家附着到宿主响应轮（规则 2 与规则 5 收纳分支），settle 后收进轮头行——渲染层
+   *  经 deriveFoldedNoticeRows 派生明细行，本体自身不渲染。undefined = 本轮无收纳通知。
+   *  纯派生值（成员引用即输入），增量签名随动。 */
+  foldedNotices?: Message[]
   /** 文本是否正在流式生成（turn 级信号，最后一条 assistant 处于 streaming 或 subagent 强制态）。
    *  语义仅「文本正在流式生成」——驱动 Loader 转圈、streaming 光标、计时器、滚动跟随。
    *  ask-user 等待期间 message 已 complete → false，但对话仍在进行中（该信号由 session 级
@@ -142,7 +158,9 @@ export interface TurnRenderCache {
   /** 与 turnObjects 一一对应：各 turn 在源数组中的最早成员下标（尾部快车道 D-4 三车道的
    *  重受影响区起点）。该下标具有「分组状态归零」性质：全量分组处理到此处时 current 必为
    *  null（起点消息只可能是 user 锚 / 隐藏完成通知边界 / assistant 自启——三者都以
-   *  openTurn 动作起始，见 groupRenderInput），因此子数组从该处重跑与全量路径逐字一致。 */
+   *  openTurn 动作起始，见 groupRenderInput），因此子数组从该处重跑与全量路径逐字一致。
+   *  [收纳附着] 规则 5 收纳分支经 pending 附着的 bash 通知下标小于 turn 开启下标——
+   *  attachPendingBash 把组起始下标回拉至 pending 首条，归零性质对折叠成员同样成立。 */
   turnStartOffsets: number[]
   /** 上次整体产出（快路径直接复用；含非 turn 项——systemNotice/bashExecution 一并缓存） */
   cachedItems: RenderItem[]
@@ -166,10 +184,14 @@ interface TurnGroup {
   /** turn 内 notice（D4 规则 4），按到达序追加；undefined = 尚无 notice（输出形态同历史 turn） */
   notices?: Message[]
   /** 被隐藏的完成通知本体（D5 载体）：规则 2 开/复用 trigger turn 时压入，连续边界折叠
-   *  复用组时累积追加。**不进渲染项**（本体仍不渲染），只服务 notifySummary 派生与增量
+   *  复用组时累积追加。**本体不渲染**（隐藏语义保持），只服务 notifySummary 派生与增量
    *  复用键；命名与 notices（字面仅差一词）刻意区分语义：notices = 要渲染的 turn 内
    *  notice，hiddenNotifies = 已消费为边界语义的完成通知（本体不渲染）。 */
   hiddenNotifies?: Message[]
+  /** 被收纳完成通知本体（specs/chat/system-notices.md §3）：规则 2 隐藏通知 + 规则 5 收纳
+   *  分支的 background-bash 结构化行，按到达序累积。**bash 行是可见消息**——宿主轮工作态
+   *  由渲染层以其渲染临时外部行，settle 后切换为折叠标签（数据原地搬家不复制）。 */
+  foldedNotices?: Message[]
   /** hiddenNotifies 的聚合派生值（D5）：每次压入后同步重算（组内条数极少，重算成本可忽略），
    *  两个 MessageTurn 构造点直接读取该字段——派生单点收敛在 ./notify-summary，无第二份聚合逻辑。 */
   notifySummary?: NotifySummary
@@ -190,6 +212,16 @@ function isHiddenCompleteNotify(msg: Message): boolean {
   )
 }
 
+/** background-bash 结构化完成通知判定（specs/chat/system-notices.md 规则 5 收纳分支触发器）：
+ *  可见 system 消息且 details 经 shared 单点解析命中（解析器即判定 SSOT——与 SystemNotice
+ *  结构化行渲染同一入口，无第二份形状判定；display:false 形态由规则 2/透明分支先行拦截，
+ *  本判定只服务可见行）。解析 null（旧 session 无 details / 畸形载荷）→ 落规则 6 兜底原文行
+ *  （现状语义，不收纳）。导出供渲染层过滤 foldedNotices 中的 bash 行（工作态临时外部行），
+ *  判定单点不复制。 */
+export function isBashCompleteNotice(msg: Message): boolean {
+  return msg.display !== false && parseBackgroundBashDetails(msg.details) !== null
+}
+
 /** inline notice 判定（D4 规则 4）：bash 执行记录（有 bashExecution 字段）或 liveOnly
  *  消息（stream_warn 非终结提示——pi 静默卡死健康警告 / busy 拒绝等，无 entry 无 replay
  *  对应物，W2 创建点打标）→ turn 内部语义，不切断 turn。 */
@@ -201,10 +233,20 @@ function isInlineNotice(msg: Message): boolean {
 // 判据/去重/耗时聚合的实现在 ./notify-summary（载荷解析聚合轴，与分组轴分离）；
 // 本文件只负责：规则 2 分支压入通知本体 + 旁挂派生值（分组状态机的一部分）。
 
-/** 隐藏完成通知累积载体（D5 规则 2）：压入通知本体 + 同步重算聚合派生值。 */
+/** 隐藏完成通知累积载体（D5 规则 2）：压入通知本体 + 同步重算聚合派生值。本体同时进
+ *  foldedNotices（收纳明细行的数据源，specs/chat/system-notices.md §3）——hiddenNotifies
+ *  是聚合轴的输入，foldedNotices 是展示轴的输入，同一消息两处引用（原地搬家不复制）。 */
 function appendHiddenNotify(msg: Message, group: TurnGroup): void {
   ;(group.hiddenNotifies ??= []).push(msg)
+  ;(group.foldedNotices ??= []).push(msg)
   group.notifySummary = deriveNotifySummary(group.hiddenNotifies)
+}
+
+/** background-bash 完成通知收纳附着（规则 5 收纳分支）：本体压入 foldedNotices（到达序）。
+ *  bash 行是可见消息、不进 hiddenNotifies——聚合轴（notify-summary 解析族）不消费 bash 载荷，
+ *  混入会把 bash details 误判为解析失败推高 neutralCount。 */
+function appendBashNotice(msg: Message, group: TurnGroup): void {
+  ;(group.foldedNotices ??= []).push(msg)
 }
 
 /** turn 未被填实（无 user、无 assistant、无 notice）→ 折叠候选。实际只可能是未被后续
@@ -221,6 +263,9 @@ function isEmptyTurn(g: TurnGroup): boolean {
  *  current 开启期间无其他槽位压栈（notice 挂 current 不出槽位），末位槽位即 current 的
  *  turn 槽位——groups/slots 成对弹出安全，groups 末位守卫为防御性断言。
  *  starts 与 groups 同步弹出（保持与 turnObjects 对齐的起始下标不变量）。
+ *  [收纳折叠边界] 被折叠空组携带的 background-bash 通知是可见消息（规则 5 收纳分支附着，
+ *  宿主轮未及填实即遇下一边界）——弹出前以其落位独立 static 项（渲染过滤不丢消息，规则 9；
+ *  隐藏通知本体保持不渲染，D5 契约不变）。
  *  返回 null（关闭后无当前 turn）——返回值形式让调用点直接 `current = closeTurn(...)`，
  *  赋值对 TS CFA 可见（跨函数的外部 let 窄化不追踪）。 */
 function closeTurn(
@@ -233,6 +278,12 @@ function closeTurn(
     groups.pop()
     starts.pop()
     slots.pop()
+    // 折叠组携带的 bash 行在其原槽位落位 static（pop 之后再 push——槽位序即流序）
+    for (const msg of turn.foldedNotices ?? []) {
+      if (isBashCompleteNotice(msg)) {
+        slots.push({ slot: 'static', item: { kind: 'systemNotice', message: msg } })
+      }
+    }
   }
   return null
 }
@@ -275,6 +326,105 @@ function appendInlineNotice(
   return current
 }
 
+/** 规则 5 收纳分支的待附缓冲成员：bash 完成通知 + 其源数组下标（附着回拉组起始下标用） */
+interface PendingBashNotice {
+  msg: Message
+  index: number
+}
+
+/** pending bash 行落位独立 static 外部行（边界 1：agent 空闲无宿主轮不收纳；不丢消息）。
+ *  清空由调用方传入的缓冲数组原地完成（groupRenderInput 持有该数组引用）。 */
+function flushPendingBashAsStatic(
+  pendingBashNotices: PendingBashNotice[],
+  slots: GroupSlot[],
+): void {
+  for (const p of pendingBashNotices) {
+    slots.push({ slot: 'static', item: { kind: 'systemNotice', message: p.msg } })
+  }
+  pendingBashNotices.length = 0
+}
+
+/** pending bash 行按到达序注入宿主轮（数据原地搬家，settle 后收进轮头行）；
+ *  组起始下标回拉至 pending 首条下标（重跑等价性，见 groupRenderInput 的 pendingBashNotices 注）。 */
+function attachPendingBashToGroup(
+  group: TurnGroup,
+  pendingBashNotices: PendingBashNotice[],
+  groupsRef: TurnGroup[],
+  startsRef: number[],
+): void {
+  if (pendingBashNotices.length === 0) return
+  for (const p of pendingBashNotices) appendBashNotice(p.msg, group)
+  const gi = groupsRef.indexOf(group)
+  const firstIndex = pendingBashNotices[0].index
+  if (gi >= 0 && firstIndex < (startsRef[gi] ?? Number.POSITIVE_INFINITY)) {
+    startsRef[gi] = firstIndex
+  }
+  pendingBashNotices.length = 0
+}
+
+/** 规则 3 分支体：assistant 归 current（无则自启 user:null turn——首条 assistant 边缘保留）。
+ *  pending bash 行的宿主轮就此确定：先注入再归成员（foldedNotices 保持到达序）。 */
+function appendAssistantEntry(
+  msg: Message,
+  current: TurnGroup | null,
+  groups: TurnGroup[],
+  slots: GroupSlot[],
+  starts: number[],
+  index: number,
+  pendingBashNotices: PendingBashNotice[],
+): TurnGroup {
+  if (pendingBashNotices.length > 0) {
+    current ??= openTurn(null, undefined, groups, slots, starts, index)
+    attachPendingBashToGroup(current, pendingBashNotices, groups, starts)
+  }
+  current ??= openTurn(null, undefined, groups, slots, starts, index)
+  current.assistants.push(msg)
+  return current
+}
+
+/** 规则 2 分支体：隐藏完成通知 → turn 边界（D3）。连续边界折叠：current 已是未填实 trigger
+ *  turn 时复用该组（trigger 单值常量，取最新语义天然成立），不再压新组；此分支 current
+ *  为 null 或已填实（非空），closeTurn 无可折叠，直接开新 trigger turn。先注入 pending
+ *  bash 行（到达序在前），再压入本隐藏通知（D5 聚合载体 + 收纳明细行）。 */
+function appendHiddenNotifyBoundary(
+  msg: Message,
+  current: TurnGroup | null,
+  groups: TurnGroup[],
+  slots: GroupSlot[],
+  starts: number[],
+  index: number,
+  pendingBashNotices: PendingBashNotice[],
+): TurnGroup {
+  if (current === null || !isEmptyTurn(current)) {
+    current = openTurn(null, 'bg-notify', groups, slots, starts, index)
+  }
+  attachPendingBashToGroup(current, pendingBashNotices, groups, starts)
+  appendHiddenNotify(msg, current)
+  return current
+}
+
+/** 规则 5 收纳分支体（specs/chat/system-notices.md §3）：background-bash 结构化完成通知。
+ *  current 为未填实 trigger turn（同批完成通知收敛同一宿主轮）→ 直接附着该组；否则
+ *  关闭当前 turn 挂入 pending——宿主轮出现（assistant / 规则 2）即注入，user / 其余
+ *  可见 system / 数组结束（agent 空闲无 settle 时机）→ 落位独立 static 外部行。 */
+function collectBashCompleteNotice(
+  msg: Message,
+  current: TurnGroup | null,
+  groups: TurnGroup[],
+  slots: GroupSlot[],
+  starts: number[],
+  index: number,
+  pendingBashNotices: PendingBashNotice[],
+): TurnGroup | null {
+  if (current !== null && isEmptyTurn(current)) {
+    appendBashNotice(msg, current)
+    return current
+  }
+  current = closeTurn(current, groups, slots, starts)
+  pendingBashNotices.push({ msg, index })
+  return current
+}
+
 /**
  * 扁平消息（全量数组，含 display:false）→ 渲染槽位序列 + turn 成员组。
  * 分组规则 v2 见文件头「分组规则」节（conversation-turn-attribution §3.3 D3/D4）。
@@ -297,46 +447,56 @@ function groupRenderInput(
   const groups: TurnGroup[] = []
   const starts: number[] = []
   let current: TurnGroup | null = null
+  // 规则 5 收纳分支的待附缓冲（specs/chat/system-notices.md §3）：bash 完成通知到达时宿主轮
+  // 未出现 → 持有；宿主轮开启（assistant 自启 / 规则 2 trigger turn）→ 按到达序注入该组。
+  // 不变量：pending 非空 ⇒ current === null（入队前必经 closeTurn 归零，出队口全数清空）。
+  // 携带源数组下标：附着发生在宿主轮开启之后，而开启下标 > pending 下标——turnStartOffsets
+  // 的「分组状态归零」不变量（尾部快车道从该下标重跑与全量逐字一致）要求组起始下标覆盖
+  // 全部成员，附着时回拉至 pending 首条下标。
+  const pendingBashNotices: PendingBashNotice[] = []
 
   for (let i = from; i < messages.length; i++) {
     const msg = messages[i]
     if (msg.role === 'user') {
-      // 规则 1：user 锚 → 开新 turn（挂起的空 trigger turn 折叠不产出）
+      // 规则 1：user 锚 → 开新 turn（挂起的空 trigger turn 折叠不产出；pending bash 无宿主
+      // 轮 → 落位外部行，随后到达的用户消息不被误认为宿主）
       current = closeTurn(current, groups, slots, starts)
+      flushPendingBashAsStatic(pendingBashNotices, slots)
       current = openTurn(msg, undefined, groups, slots, starts, i)
     } else if (msg.role === 'assistant') {
-      // 规则 3：assistant 归 current（无则自启 user:null turn——首条 assistant 边缘保留）
-      current ??= openTurn(null, undefined, groups, slots, starts, i)
-      current.assistants.push(msg)
+      // 规则 3（分支体见 appendAssistantEntry）
+      current = appendAssistantEntry(msg, current, groups, slots, starts, i, pendingBashNotices)
     } else if (isHiddenCompleteNotify(msg)) {
-      // 规则 2：隐藏完成通知 → turn 边界（D3）。连续边界折叠：current 已是未填实 trigger
-      // turn 时复用该组（trigger 单值常量，取最新语义天然成立），不再压新组；此分支 current
-      // 为 null 或已填实（非空），closeTurn 无可折叠，直接开新 trigger turn。
-      if (current === null || !isEmptyTurn(current)) {
-        current = openTurn(null, 'bg-notify', groups, slots, starts, i)
-      }
-      // D5 聚合载体：本体压入该组 hiddenNotifies 并同步派生 notifySummary（连续折叠复用组
-      // 时累积追加；跨组不重复计量——assistant 填实后收起属独立事件，两行各计一次）
-      appendHiddenNotify(msg, current)
+      // 规则 2（分支体见 appendHiddenNotifyBoundary）
+      current = appendHiddenNotifyBoundary(msg, current, groups, slots, starts, i, pendingBashNotices)
     } else if (msg.display === false) {
       // 隐藏非完成通知消息（todo-context 等）透明：不参与边界、不产出渲染项——现状语义
       // 原样保留。消息仍在 store，不丢。
       continue
+    } else if (isBashCompleteNotice(msg)) {
+      // 规则 5 收纳分支（分支体见 collectBashCompleteNotice）
+      current = collectBashCompleteNotice(msg, current, groups, slots, starts, i, pendingBashNotices)
     } else if (isInlineNotice(msg)) {
-      // 规则 4：inline notice → 归当前 turn 内部（分支体见 appendInlineNotice）。
+      // 规则 4：inline notice → 归当前 turn 内部（分支体见 appendInlineNotice）；
+      // 无当前 turn 退化为独立 static 项——pending bash 行先落位（保持流序）
+      if (current === null) flushPendingBashAsStatic(pendingBashNotices, slots)
       current = appendInlineNotice(msg, current, slots)
     } else {
-      // 规则 5：其余可见 system → boundary：独立 systemNotice 项 + 关闭当前 turn（现状语义）。
+      // 规则 6：其余可见 system → boundary：独立 systemNotice 项 + 关闭当前 turn（现状语义）。
       // else 即「非 user/assistant 且非上述属性」兜底分支：现状唯一合法值是 role === 'system'
       // （compactionSummary/branchSummary/可见 custom/通用 system）。刻意不做显式 system 判定后
       // 丢弃——类型外 role（未来扩展）兜底渲染为 systemNotice 可见可发现，静默丢弃会违背
       // 「渲染过滤不丢消息」语义（AGENTS.md 规则 9）。bashExecution 此分支不可达（规则 4 已收）。
+      // pending bash 行先落位（到达序在先）。
       current = closeTurn(current, groups, slots, starts)
+      flushPendingBashAsStatic(pendingBashNotices, slots)
       slots.push({ slot: 'static', item: { kind: 'systemNotice', message: msg } })
     }
   }
-  // 数组结束时仍挂起的空 trigger turn 不产出（空 turn 折叠）
+  // 数组结束时仍挂起的空 trigger turn 不产出（空 turn 折叠——其附着的 bash 行经 closeTurn
+  // 落位外部行）；pending 余量 = agent 空闲到达的通知，落位外部行（边界 1）
   closeTurn(current, groups, slots, starts)
+  flushPendingBashAsStatic(pendingBashNotices, slots)
   return { slots, groups, starts }
 }
 
@@ -351,10 +511,13 @@ function computeIsStreaming(
   return forceWorking || last?.status === 'streaming'
 }
 
-/** turn 派生字段：是否含可折叠块（thinking/toolCalls） */
-function computeHasFoldable(assistants: Message[]): boolean {
-  return assistants.some(
-    (m) => (m.thinking?.length ?? 0) > 0 || (m.toolCalls?.length ?? 0) > 0,
+/** turn 派生字段：是否含可折叠块（thinking/toolCalls）——被收纳完成通知同样构成展开入口
+ *  （specs/chat/system-notices.md §3.4：展开区首行起为收纳明细行），计入口径与块同权。 */
+function computeHasFoldable(assistants: Message[], foldedNotices?: Message[]): boolean {
+  return (
+    assistants.some(
+      (m) => (m.thinking?.length ?? 0) > 0 || (m.toolCalls?.length ?? 0) > 0,
+    ) || (foldedNotices?.length ?? 0) > 0
   )
 }
 
@@ -367,24 +530,26 @@ function signatureEquals(a: Message[], b: Message[]): boolean {
   return true
 }
 
-/** turn 组成员引用签名（[user?, ...assistants, ...notices, ...hiddenNotifies]；首条 assistant
- *  自启/触发 turn 无 user 位，notice / 隐藏完成通知追加改变签名触发重建）。尾部快车道与
+/** turn 组成员引用签名（[user?, ...assistants, ...notices, ...foldedNotices]；首条 assistant
+ *  自启/触发 turn 无 user 位，notice / 完成通知附着改变签名触发重建）。尾部快车道与
  *  全量重扫共用同一构造。
- *  hiddenNotifies 纳入签名（D5 等价性义务）：其引用变化 = notifySummary 派生输入变化，
- *  复用判定必须重建——签名未变则聚合值必然不变（成员引用相等 = 内容相等，ADR-0039）。 */
+ *  foldedNotices 纳入签名（D5 等价性义务 + 收纳附着）：其为 hiddenNotifies 的超集（同一
+ *  消息引用两处同步追加），签名未变则 notifySummary 与收纳明细行必然不变（成员引用相等 =
+ *  内容相等，ADR-0039）。 */
 function turnSignature(g: TurnGroup): Message[] {
   return [
     ...(g.user ? [g.user] : []),
     ...g.assistants,
     ...(g.notices ?? []),
-    ...(g.hiddenNotifies ?? []),
+    ...(g.foldedNotices ?? []),
   ]
 }
 
 /** turn 对象解析（尾部快车道与全量重扫共用的复用判定）：abs = 该组在 turnObjects 全序
- *  中的绝对下标。同位置签名逐引用对齐 → 复用上次 turn 对象。成员（含 notices/hiddenNotifies）
- *  未变 → hasFoldable/user/assistants/notices/trigger/notifySummary 必然不变，只需校正
- *  isStreaming（末位地位变化 / forceWorking 翻转会让上次值过期，不可变替换）。否则整组重建。 */
+ *  中的绝对下标。同位置签名逐引用对齐 → 复用上次 turn 对象。成员（含 notices/foldedNotices）
+ *  未变 → hasFoldable/user/assistants/notices/trigger/notifySummary/foldedNotices 必然不变，
+ *  只需校正 isStreaming（末位地位变化 / forceWorking 翻转会让上次值过期，不可变替换）。
+ *  否则整组重建。 */
 function reuseOrRebuildTurn(
   cache: TurnRenderCache,
   sig: Message[],
@@ -406,8 +571,9 @@ function reuseOrRebuildTurn(
     notices: g.notices,
     trigger: g.trigger,
     notifySummary: g.notifySummary,
+    foldedNotices: g.foldedNotices,
     isStreaming: computeIsStreaming(g.assistants, isLastTurn, forceWorking),
-    hasFoldable: computeHasFoldable(g.assistants),
+    hasFoldable: computeHasFoldable(g.assistants, g.foldedNotices),
   }
 }
 
@@ -674,8 +840,9 @@ export function toRenderItems(
     notices: g.notices,
     trigger: g.trigger,
     notifySummary: g.notifySummary,
+    foldedNotices: g.foldedNotices,
     isStreaming: computeIsStreaming(g.assistants, i === groups.length - 1, forceWorking),
-    hasFoldable: computeHasFoldable(g.assistants),
+    hasFoldable: computeHasFoldable(g.assistants, g.foldedNotices),
   }))
   return slots.map((s): RenderItem =>
     s.slot === 'turn' ? { kind: 'turn', turn: turns[s.group] } : s.item,

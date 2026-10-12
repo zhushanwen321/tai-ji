@@ -89,6 +89,12 @@ export interface SessionHandlerContext extends MessageHandlerContext {
     revokeMessage?(sessionId: string, targetId: string): Promise<SessionRevokeMessageReply>
     getWorkflowRunEvents?(sessionId: string, runId: string): Promise<WorkflowRunEventsReply>
     getWorkflowDag?(sessionId: string, runId: string): Promise<WorkflowDagReply>
+    /**
+     * 会话消息条数（悬停详情卡消息计数）：SessionRecords
+     * 路径解析 + session-message-count 流式计数的转发面。可选成员形态对齐 getPlanState
+     * 先例——缺省仅出现在测试最小 mock 中，case 内判空走 *_unsupported 防御分支。
+     */
+    getMessageCount?(sessionId: string): Promise<number>
   }
   /** fast-handoff 编排层（session.handoff 路由用）。可选：未注入时该 case 报 unsupported。 */
   handoffService?: HandoffService
@@ -181,6 +187,7 @@ export class SessionMessageHandler {
     'session.getSubagentStreamState': (msg, ws) => this.handleSessionGetSubagentStreamState(msg, ws),
     'session.getSubagentEngineConfig': (msg, ws) => this.handleSessionGetSubagentEngineConfig(msg, ws),
     'session.setSubagentDefaultEngine': (msg, ws) => this.handleSessionSetSubagentDefaultEngine(msg, ws),
+    'session.setSubagentEngineDefaultModel': (msg, ws) => this.handleSessionSetSubagentEngineDefaultModel(msg, ws),
     'session.getWorkflows': (msg, ws) => this.handleSessionGetWorkflows(msg, ws),
     'session.getAgentCallHistory': (msg, ws) => this.handleSessionGetAgentCallHistory(msg, ws),
     'session.getAgentCallFilePath': (msg, ws) => this.handleSessionGetAgentCallFilePath(msg, ws),
@@ -197,6 +204,8 @@ export class SessionMessageHandler {
     'session.fetchCurrentSystemPrompt': (msg, ws) => this.handleSessionFetchCurrentSystemPrompt(msg, ws),
     'session.getCommands': (msg, ws) => this.handleSessionGetCommands(msg, ws),
     'session.getContext': (msg, ws) => this.handleSessionGetContext(msg, ws),
+    // 悬停详情卡消息计数（通道 2）：按需拉取（悬停时拉即最新，拉为主、推补充第一原则，无订阅）。
+    'session.getMessageCount': (msg, ws) => this.handleSessionGetMessageCount(msg, ws),
     'session.getGenStats': (msg, ws) => this.handleSessionGetGenStats(msg, ws),
     'session.rename': (msg, ws) => this.handleSessionRename(msg, ws),
     'session.setProject': (msg, ws) => this.handleSessionSetProject(msg, ws),
@@ -643,6 +652,14 @@ export class SessionMessageHandler {
     return this.ctx.reply(ws, msg.id, 'session.subagentDefaultEngineSet', { engineId: msg.payload.engineId })
   }
 
+  // engine-provider-unification D5：per-engine 默认模型偏好写入（写入校验 + 同锁 RMW 在
+  // session-records；reply 回显 engineId/modelRef——mutation 分支二原样存储）
+  private async handleSessionSetSubagentEngineDefaultModel(msg: Extract<ClientMessage, { type: 'session.setSubagentEngineDefaultModel' }>, ws: WsType): Promise<void> {
+    const { engineId, modelRef } = msg.payload
+    await this.ctx.sessionService.setSubagentEngineDefaultModel(engineId, modelRef)
+    return this.ctx.reply(ws, msg.id, 'session.subagentEngineDefaultModelSet', { engineId, modelRef })
+  }
+
   private async handleSessionGetWorkflows(msg: Extract<ClientMessage, { type: 'session.getWorkflows' }>, ws: WsType): Promise<void> {
     // [RT-4#8] oversize 透传：语义同 handleSessionGetSubagents。
     // [待裁决项 4] found 透传：语义同 handleSessionGetSubagents。
@@ -908,6 +925,28 @@ export class SessionMessageHandler {
     const { sessionId } = msg.payload
     const payload = await this.ctx.sessionService.fetchContext(sessionId)
     return this.ctx.reply(ws, msg.id, 'context.update', payload ? { sessionId, ...payload } : { sessionId })
+  }
+
+  // ── 悬停详情卡消息计数 ──
+
+  private async handleSessionGetMessageCount(msg: Extract<ClientMessage, { type: 'session.getMessageCount' }>, ws: WsType): Promise<void> {
+    // renderer 悬停会话行时按需拉取（拉为主、推补充第一原则——不做订阅/推送）。handler 只
+    // 透传：路径解析 + 流式计数全在 SessionRecords.getMessageCount（对齐 getPlanState 消费
+    // 形态）。文件不存在（pi 延迟写入窗口）service 侧归 0；其余读失败走 reportFailure →
+    // error envelope，renderer 收 error 后计数段占位不渲染。
+    const { sessionId } = msg.payload
+    const svc = this.ctx.sessionService
+    if (!svc.getMessageCount) {
+      // SessionService 未组装转发（仅测试最小 mock 形态，对齐 getPlanState 防御分支口径）
+      // → 显式报错不留静默。
+      return this.ctx.sendError(ws, 'message_count_unsupported', 'message count reader not available', msg.id, { sessionId })
+    }
+    try {
+      const count = await svc.getMessageCount(sessionId)
+      return this.ctx.reply(ws, msg.id, 'session.getMessageCount', { sessionId, count })
+    } catch (e) {
+      return this.reportFailure(ws, msg.id, 'message_count_failed', e, { scope: 'session.getMessageCount', sessionId })
+    }
   }
 
   private async handleSessionRename(msg: Extract<ClientMessage, { type: 'session.rename' }>, ws: WsType): Promise<void> {

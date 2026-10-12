@@ -159,7 +159,7 @@ function sourceLabel(source: string): string {
       </DialogHeader>
 
       <!-- 加载中 -->
-      <div v-if="loading" class="flex items-center gap-2 py-8 text-[12px] text-neutral-mid">
+      <div v-if="loading" class="flex items-center gap-2 py-8 text-[length:var(--text-xs)] text-neutral-mid">
         <Loader2 class="size-4 animate-spin" />
         {{ t('settings.loadPaths.importFromAgents.loading') }}
       </div>
@@ -168,7 +168,7 @@ function sourceLabel(source: string): string {
       <div
         v-else-if="error"
         data-testid="preview-error"
-        class="flex items-center gap-1.5 rounded-md border border-danger/30 bg-danger-soft px-3 py-2 text-[12px] text-danger"
+        class="flex items-center gap-1.5 rounded-md border border-[color-mix(in_oklch,var(--danger)_30%,transparent)] bg-danger-soft px-3 py-2 text-[length:var(--text-xs)] text-danger"
       >
         <AlertTriangle class="size-4 shrink-0" />
         <span class="truncate">{{ error }}</span>
@@ -179,7 +179,7 @@ function sourceLabel(source: string): string {
         <div
           v-if="preview.parseError"
           data-testid="preview-parse-error"
-          class="flex items-start gap-1.5 rounded-md border border-warn/30 bg-warn-soft px-3 py-2 text-[12px] text-warn"
+          class="flex items-start gap-1.5 rounded-md border border-[color-mix(in_oklch,var(--warn)_30%,transparent)] bg-warn-soft px-3 py-2 text-[length:var(--text-xs)] text-warn"
         >
           <AlertTriangle class="size-4 shrink-0 mt-0.5" />
           <span>{{ t('settings.provider.importPreview.parseError', { message: preview.parseError }) }}</span>
@@ -189,7 +189,7 @@ function sourceLabel(source: string): string {
         <div
           v-if="preview.warnings?.length"
           data-testid="preview-top-warnings"
-          class="flex items-start gap-1.5 rounded-md border border-warn/30 bg-warn-soft px-3 py-2 text-[12px] text-warn"
+          class="flex items-start gap-1.5 rounded-md border border-[color-mix(in_oklch,var(--warn)_30%,transparent)] bg-warn-soft px-3 py-2 text-[length:var(--text-xs)] text-warn"
         >
           <AlertTriangle class="size-4 shrink-0 mt-0.5" />
           <ul class="flex flex-col gap-0.5">
@@ -198,7 +198,7 @@ function sourceLabel(source: string): string {
         </div>
 
         <!-- 空列表（组 1 与组 2 均为空才显示空态；任一组有数据则渲染对应组） -->
-        <div v-if="!preview.providers.length && !preview.orphanCredentials?.length" class="py-8 text-center text-[12px] text-neutral-mid">
+        <div v-if="!preview.providers.length && !preview.orphanCredentials?.length" class="py-8 text-center text-[length:var(--text-xs)] text-neutral-mid">
           {{ t('settings.providerEdit.noModels') }}
         </div>
 
@@ -206,14 +206,14 @@ function sourceLabel(source: string): string {
         <div v-else class="flex flex-col gap-1.5">
         <!-- 组 1：Pi models.json 中的供应商（为空整组跳过，不影响组 2 渲染） -->
         <template v-if="preview.providers.length">
-        <div class="flex items-center gap-1.5 pt-1 text-[11px] font-medium text-neutral-fg" data-testid="group-1-title">
+        <div class="flex items-center gap-1.5 pt-1 text-[length:var(--text-2xs)] font-medium text-neutral-fg" data-testid="group-1-title">
           {{ t('settings.provider.importPreview.groupModels') }}
         </div>
         <div
           v-for="p in preview.providers"
           :key="p.id"
           data-testid="preview-provider-item"
-          class="rounded-card bg-card px-3 py-2 text-[12px]"
+          class="rounded-card bg-bg-card px-3 py-2 text-[length:var(--text-xs)]"
           :class="{ 'opacity-70': p.conflict === 'duplicate-id' }"
         >
           <div class="flex items-center gap-2">
@@ -224,20 +224,20 @@ function sourceLabel(source: string): string {
               @update:model-value="onToggle(p.id, $event)"
             />
             <span class="font-mono text-neutral-fg">{{ p.id }}</span>
-            <span class="rounded-sm bg-surface px-1.5 py-0.5 text-[10px] text-neutral-mid">{{ p.protocol }}</span>
+            <span class="rounded-sm bg-surface px-1.5 py-0.5 text-[length:var(--text-3xs)] text-neutral-mid">{{ p.protocol }}</span>
             <span class="text-neutral-dim">{{ t('settings.provider.modelsCount', { count: p.modelCount }) }}</span>
 
             <!-- 凭据形态徽章（wave 4 import-credential-types）：plaintext 不渲染，其余四态多态徽章 -->
             <span
               v-if="p.credentialType === 'env'"
               data-testid="credential-badge-env"
-              class="rounded-sm bg-info-soft px-1.5 py-0.5 text-[10px] text-info"
+              class="rounded-sm bg-info-soft px-1.5 py-0.5 text-[length:var(--text-3xs)] text-info"
               :title="t('settings.provider.importPreview.credentialEnvHint', { var: p.envVarName })"
             >$ENV</span>
             <span
               v-else-if="p.credentialType === 'missing'"
               data-testid="credential-badge-missing"
-              class="flex items-center gap-0.5 rounded-sm bg-warn-soft px-1.5 py-0.5 text-[10px] text-warn"
+              class="flex items-center gap-0.5 rounded-sm bg-warn-soft px-1.5 py-0.5 text-[length:var(--text-3xs)] text-warn"
               :title="t('settings.provider.importPreview.keyNotExtracted')"
             >
               <KeyRound class="size-3" />
@@ -246,18 +246,18 @@ function sourceLabel(source: string): string {
             <span
               v-else-if="p.credentialType === 'oauth'"
               data-testid="credential-badge-oauth"
-              class="rounded-sm bg-accent-soft px-1.5 py-0.5 text-[10px] text-accent-fg"
+              class="rounded-sm bg-accent-soft px-1.5 py-0.5 text-[length:var(--text-3xs)] text-accent-fg"
             >{{ t('settings.provider.importPreview.credentialOauth') }}</span>
             <span
               v-else-if="p.credentialType === 'command'"
               data-testid="credential-badge-command"
-              class="rounded-sm bg-danger-soft px-1.5 py-0.5 text-[10px] text-danger"
+              class="rounded-sm bg-danger-soft px-1.5 py-0.5 text-[length:var(--text-3xs)] text-danger"
               :title="t('settings.provider.importPreview.credentialCommandHint')"
             >{{ t('settings.provider.importPreview.credentialCommand') }}</span>
             <span
               v-else-if="p.credentialType === 'env-bundle'"
               data-testid="credential-badge-env-bundle"
-              class="rounded-sm bg-warn-soft px-1.5 py-0.5 text-[10px] text-warn"
+              class="rounded-sm bg-warn-soft px-1.5 py-0.5 text-[length:var(--text-3xs)] text-warn"
               :title="t('settings.provider.importPreview.credentialEnvBundleHint')"
             >{{ t('settings.provider.importPreview.credentialEnvBundle') }}</span>
 
@@ -265,7 +265,7 @@ function sourceLabel(source: string): string {
             <span
               v-if="p.conflict === 'duplicate-id'"
               data-testid="conflict-badge"
-              class="rounded-sm bg-warn-soft px-1.5 py-0.5 text-[10px] text-warn"
+              class="rounded-sm bg-warn-soft px-1.5 py-0.5 text-[length:var(--text-3xs)] text-warn"
             >
               {{ t('settings.provider.importPreview.conflict') }}
             </span>
@@ -277,13 +277,13 @@ function sourceLabel(source: string): string {
               variant="ghost"
               size="dense"
               data-testid="warnings-toggle"
-              class="h-5 px-1 text-[11px] text-neutral-mid hover:text-neutral-fg"
+              class="h-5 px-1 text-[length:var(--text-2xs)] text-neutral-mid hover:text-neutral-fg"
               @click="toggleWarnings(p.id)"
             >
               <component :is="expandedWarnings.has(p.id) ? ChevronDown : ChevronRight" class="size-3" />
               {{ t('settings.provider.importPreview.warnings') }} ({{ p.warnings.length }})
             </Button>
-            <ul v-if="expandedWarnings.has(p.id)" class="mt-1 list-disc pl-4 text-[11px] text-warn">
+            <ul v-if="expandedWarnings.has(p.id)" class="mt-1 list-disc pl-4 text-[length:var(--text-2xs)] text-warn">
               <li v-for="(w, i) in p.warnings" :key="i">{{ w }}</li>
             </ul>
           </div>
@@ -292,14 +292,14 @@ function sourceLabel(source: string): string {
 
         <!-- 组 2（sa3 F1 · B.6）：Pi auth.json 中的额外凭据（孤儿凭据，匹配到内置模板） -->
         <div v-if="preview.orphanCredentials?.length" data-testid="orphan-group" class="flex flex-col gap-1.5">
-          <div class="flex items-center gap-1.5 pt-2 text-[11px] font-medium text-neutral-fg" data-testid="group-2-title">
+          <div class="flex items-center gap-1.5 pt-2 text-[length:var(--text-2xs)] font-medium text-neutral-fg" data-testid="group-2-title">
             {{ t('settings.provider.importPreview.groupOrphans') }}
           </div>
           <div
             v-for="o in preview.orphanCredentials"
             :key="o.providerId"
             data-testid="preview-orphan-item"
-            class="rounded-card bg-card px-3 py-2 text-[12px]"
+            class="rounded-card bg-bg-card px-3 py-2 text-[length:var(--text-xs)]"
           >
             <div class="flex items-center gap-2">
               <Checkbox
@@ -312,14 +312,14 @@ function sourceLabel(source: string): string {
               <!-- 内置模板徽章 -->
               <span
                 data-testid="orphan-builtin-badge"
-                class="rounded-sm bg-info-soft px-1.5 py-0.5 text-[10px] text-info"
+                class="rounded-sm bg-info-soft px-1.5 py-0.5 text-[length:var(--text-3xs)] text-info"
               >{{ t('settings.provider.importPreview.orphanBuiltinBadge') }}</span>
               <!-- 凭据类型徽章（六态全覆盖） -->
               <span
                 v-for="b in [orphanBadge(o)]"
                 :key="b.testid"
                 :data-testid="b.testid"
-                class="rounded-sm px-1.5 py-0.5 text-[10px]"
+                class="rounded-sm px-1.5 py-0.5 text-[length:var(--text-3xs)]"
                 :class="b.cls"
                 :title="b.title"
               >{{ b.label }}</span>
@@ -330,7 +330,7 @@ function sourceLabel(source: string): string {
                 variant="ghost"
                 size="dense"
                 data-testid="orphan-expand-toggle"
-                class="ml-auto h-5 px-1 text-[11px] text-neutral-mid hover:text-neutral-fg"
+                class="ml-auto h-5 px-1 text-[length:var(--text-2xs)] text-neutral-mid hover:text-neutral-fg"
                 @click="toggleOrphanExpand(o.providerId)"
               >
                 <component :is="expandedOrphans.has(o.providerId) ? ChevronDown : ChevronRight" class="size-3" />
@@ -339,15 +339,15 @@ function sourceLabel(source: string): string {
 
             <!-- 展开：内置 model 列表 + 模型来源说明（B.6） -->
             <div v-if="expandedOrphans.has(o.providerId)" data-testid="orphan-models-expand" class="mt-1 pl-6">
-              <div class="text-[11px] text-neutral-mid">{{ t('settings.provider.importPreview.orphanModelsCount', { count: o.modelCount }) }}</div>
+              <div class="text-[length:var(--text-2xs)] text-neutral-mid">{{ t('settings.provider.importPreview.orphanModelsCount', { count: o.modelCount }) }}</div>
               <div class="mt-1 flex max-h-24 flex-wrap gap-1 overflow-y-auto">
                 <span
                   v-for="m in o.modelNames"
                   :key="m"
-                  class="rounded-sm bg-surface px-1.5 py-0.5 font-mono text-[10px] text-neutral-dim"
+                  class="rounded-sm bg-surface px-1.5 py-0.5 font-mono text-[length:var(--text-3xs)] text-neutral-dim"
                 >{{ m }}</span>
               </div>
-              <div class="mt-1 text-[11px] text-neutral-dim">{{ t('settings.provider.importPreview.orphanModelsHint') }}</div>
+              <div class="mt-1 text-[length:var(--text-2xs)] text-neutral-dim">{{ t('settings.provider.importPreview.orphanModelsHint') }}</div>
             </div>
 
             <!-- 孤儿凭据警告（可展开） -->
@@ -356,13 +356,13 @@ function sourceLabel(source: string): string {
                 variant="ghost"
                 size="dense"
                 data-testid="orphan-warnings-toggle"
-                class="h-5 px-1 text-[11px] text-neutral-mid hover:text-neutral-fg"
+                class="h-5 px-1 text-[length:var(--text-2xs)] text-neutral-mid hover:text-neutral-fg"
                 @click="toggleWarnings(o.providerId)"
               >
                 <component :is="expandedWarnings.has(o.providerId) ? ChevronDown : ChevronRight" class="size-3" />
                 {{ t('settings.provider.importPreview.warnings') }} ({{ o.warnings.length }})
               </Button>
-              <ul v-if="expandedWarnings.has(o.providerId)" class="mt-1 list-disc pl-4 text-[11px] text-warn">
+              <ul v-if="expandedWarnings.has(o.providerId)" class="mt-1 list-disc pl-4 text-[length:var(--text-2xs)] text-warn">
                 <li v-for="(w, i) in o.warnings" :key="i">{{ w }}</li>
               </ul>
             </div>
@@ -370,14 +370,14 @@ function sourceLabel(source: string): string {
           <!-- 底部常驻提示（B.6）：凭据与定义分离，模型来自内置 catalog -->
           <div
             data-testid="orphan-bottom-hint"
-            class="rounded-md border border-info/30 bg-info-soft px-3 py-1.5 text-[11px] text-info"
+            class="rounded-md border border-info/30 bg-info-soft px-3 py-1.5 text-[length:var(--text-2xs)] text-info"
           >
             {{ t('settings.provider.importPreview.orphanModelsHint') }}
           </div>
         </div>
 
         <!-- 底部统计 -->
-        <div class="flex flex-wrap gap-3 pt-1 text-[11px] text-neutral-mid">
+        <div class="flex flex-wrap gap-3 pt-1 text-[length:var(--text-2xs)] text-neutral-mid">
           <span>{{ t('settings.provider.importPreview.statImportable', { count: statImportable }) }}</span>
           <span>{{ t('settings.provider.importPreview.statConflict', { count: statConflict }) }}</span>
           <span>{{ t('settings.provider.importPreview.statKeyMissing', { count: statKeyMissing }) }}</span>

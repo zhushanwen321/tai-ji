@@ -155,6 +155,7 @@ const stubs = {
   AddMenuPopover: SIMPLE,
   ContextChipsBar: SIMPLE,
   ContextCapacityPopover: SIMPLE,
+  ComposerCapacityBar: SIMPLE,
   ModelSelectPopover: SIMPLE,
   ThinkingLevelPopover: SIMPLE,
   RetryIndicator: SIMPLE,

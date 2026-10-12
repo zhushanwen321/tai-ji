@@ -106,6 +106,7 @@ const otherStubs = {
   AddMenuPopover: SIMPLE,
   ContextChipsBar: SIMPLE,
   ContextCapacityPopover: SIMPLE,
+  ComposerCapacityBar: SIMPLE,
   ModelSelectPopover: SIMPLE,
   RetryIndicator: SIMPLE,
   QueueBubble: SIMPLE,

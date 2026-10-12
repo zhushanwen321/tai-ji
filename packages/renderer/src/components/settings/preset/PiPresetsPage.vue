@@ -13,7 +13,8 @@
         <p class="desc">{{ t('settings.preset.pageDesc') }}</p>
       </div>
       <div class="head-actions">
-        <Button size="dense" class="rounded-sm text-[12px]" @click="onCreate">
+        <!-- demo .btn.solid：h32 / px12 / gap6 / 13px + plus 14px -->
+        <Button class="h-8 gap-[6px] px-[12px] text-[length:var(--text-sm)]" @click="onCreate">
           <Plus class="size-3.5" />
           {{ t('settings.preset.new') }}
         </Button>
@@ -23,11 +24,11 @@
     <!-- 加载失败提示（S-RN-7：消费 loadError 错误态） -->
     <div
       v-if="loadError"
-      class="flex items-center gap-2 rounded-sm border border-border bg-surface px-3 py-2 text-[12px] text-danger"
+      class="flex items-center gap-2 rounded-sm border border-border bg-surface px-3 py-2 text-[length:var(--text-xs)] text-danger"
     >
       <AlertCircle class="size-3.5 shrink-0" />
       <span class="flex-1">{{ loadError }}</span>
-      <Button variant="ghost" size="dense" class="rounded-sm text-[11px]" @click="retryLoad">
+      <Button variant="ghost" size="dense" class="rounded-sm text-[length:var(--text-2xs)]" @click="retryLoad">
         {{ t('common.retry') }}
       </Button>
     </div>
@@ -48,91 +49,86 @@
           @mode-update="onModeUpdate"
         />
 
-        <!-- 模式提示词两卡（替换 / 追加）。数据面 preset.prompt，保存走 preset.update；
-             上限是两段合计，故两卡共用下方一行合计计数（禁止分卡各自计数）。 -->
+        <!-- 模式提示词两节（替换 / 追加）。数据面 preset.prompt，保存走 preset.update；
+             上限是两段合计，故两节共用下方一行合计计数（禁止分节各自计数）。
+             形态 = demo PresetSection：预设盒内 border-t hairline 分节，flab 标题 + 右侧开关同行。 -->
         <div
           v-if="promptDrafts[preset.id]"
-          class="flex flex-col gap-3 border-t border-border px-3 py-3"
+          class="flex flex-col gap-[10px] border-t border-hairline px-3 pb-3 pt-[10px]"
           data-testid="preset-prompt-section"
         >
-          <!-- 替换卡（红字警示；保存二次确认由共用写盘闸判定，E2） -->
-          <GroupCard>
-            <template #head>
-              <h3 class="text-[12px] font-semibold text-neutral-fg">{{ t('settings.preset.promptReplaceTitle') }}</h3>
-            </template>
-            <template #actions>
+          <!-- 替换节（警示 danger；保存二次确认由共用写盘闸判定，E2） -->
+          <section class="flex flex-col">
+            <div class="flex items-center gap-2">
+              <h3 class="text-[length:var(--text-xs)] font-semibold text-neutral-fg-2">{{ t('settings.preset.promptReplaceTitle') }}</h3>
+              <span class="flex-1" />
               <Switch
                 data-testid="preset-prompt-replace-switch"
                 :model-value="promptDrafts[preset.id].replaceEnabled"
                 @update:model-value="(v) => onToggleSegment(preset.id, 'replace', v === true)"
               />
-            </template>
-            <div class="px-4 py-3">
-              <p
-                data-testid="preset-prompt-replace-warning"
-                class="mb-2 flex items-start gap-1.5 text-[11px] leading-relaxed text-danger"
-              >
-                <AlertTriangle class="mt-px size-3.5 shrink-0" />
-                <span>{{ t('settings.preset.promptReplaceWarning') }}</span>
-              </p>
-              <Label class="mb-1 block text-[11px] text-neutral-dim">{{ t('settings.preset.promptReplaceLabel') }}</Label>
-              <Textarea
-                v-model="promptDrafts[preset.id].replaceText"
-                data-testid="preset-prompt-replace-input"
-                :disabled="!promptDrafts[preset.id].replaceEnabled"
-                :placeholder="t('settings.preset.promptReplacePlaceholder')"
-                class="min-h-[120px] resize-y font-mono text-[12px]"
-              />
-              <div class="mt-1 flex items-center justify-end gap-1.5">
-                <Button data-testid="preset-prompt-replace-discard" variant="danger" size="dense" :disabled="!segmentDirty(preset.id, 'replace')" @click="discardPromptCard(preset.id, 'replace')">
-                  {{ t('settings.preset.promptDiscard') }}
-                </Button>
-                <Button data-testid="preset-prompt-replace-reset" variant="secondary" size="dense" :disabled="!segmentDirty(preset.id, 'replace')" @click="resetReplaceCard(preset.id)">
-                  {{ t('settings.preset.promptRestoreDefault') }}
-                </Button>
-                <Button data-testid="preset-prompt-replace-save" size="dense" :disabled="!segmentDirty(preset.id, 'replace')" @click="onSavePrompt(preset.id)">
-                  {{ t('settings.preset.promptSave') }}
-                </Button>
-              </div>
             </div>
-          </GroupCard>
+            <p
+              data-testid="preset-prompt-replace-warning"
+              class="mt-[4px] flex items-start gap-1.5 text-[length:var(--text-sm)] leading-relaxed text-danger"
+            >
+              <AlertTriangle class="mt-px size-3.5 shrink-0" />
+              <span>{{ t('settings.preset.promptReplaceWarning') }}</span>
+            </p>
+            <Label class="mb-1 mt-[6px] block text-[length:var(--text-xs)] text-neutral-fg-2">{{ t('settings.preset.promptReplaceLabel') }}</Label>
+            <Textarea
+              v-model="promptDrafts[preset.id].replaceText"
+              data-testid="preset-prompt-replace-input"
+              :disabled="!promptDrafts[preset.id].replaceEnabled"
+              :placeholder="t('settings.preset.promptReplacePlaceholder')"
+              class="min-h-[56px] resize-y font-mono"
+            />
+            <div class="mt-1 flex items-center justify-end gap-1.5">
+              <Button data-testid="preset-prompt-replace-discard" variant="danger" size="dense" :disabled="!segmentDirty(preset.id, 'replace')" @click="discardPromptCard(preset.id, 'replace')">
+                {{ t('settings.preset.promptDiscard') }}
+              </Button>
+              <Button data-testid="preset-prompt-replace-reset" variant="secondary" size="dense" :disabled="!segmentDirty(preset.id, 'replace')" @click="resetReplaceCard(preset.id)">
+                {{ t('settings.preset.promptRestoreDefault') }}
+              </Button>
+              <Button data-testid="preset-prompt-replace-save" size="dense" :disabled="!segmentDirty(preset.id, 'replace')" @click="onSavePrompt(preset.id)">
+                {{ t('settings.preset.promptSave') }}
+              </Button>
+            </div>
+          </section>
 
-          <!-- 追加卡（保存入口与替换卡共用闸门——写盘 payload 恒含两段） -->
-          <GroupCard>
-            <template #head>
-              <h3 class="text-[12px] font-semibold text-neutral-fg">{{ t('settings.preset.promptAppendTitle') }}</h3>
-            </template>
-            <template #actions>
+          <!-- 追加节（保存入口与替换节共用闸门——写盘 payload 恒含两段） -->
+          <section class="flex flex-col">
+            <div class="flex items-center gap-2">
+              <h3 class="text-[length:var(--text-xs)] font-semibold text-neutral-fg-2">{{ t('settings.preset.promptAppendTitle') }}</h3>
+              <span class="flex-1" />
               <Switch
                 data-testid="preset-prompt-append-switch"
                 :model-value="promptDrafts[preset.id].appendEnabled"
                 @update:model-value="(v) => onToggleSegment(preset.id, 'append', v === true)"
               />
-            </template>
-            <div class="px-4 py-3">
-              <p class="mb-2 text-[11px] leading-relaxed text-neutral-mid">{{ t('settings.preset.promptAppendHint') }}</p>
-              <Label class="mb-1 block text-[11px] text-neutral-dim">{{ t('settings.preset.promptAppendLabel') }}</Label>
-              <Textarea
-                v-model="promptDrafts[preset.id].appendText"
-                data-testid="preset-prompt-append-input"
-                :disabled="!promptDrafts[preset.id].appendEnabled"
-                :placeholder="t('settings.preset.promptAppendPlaceholder')"
-                class="min-h-[120px] resize-y font-mono text-[12px]"
-              />
-              <div class="mt-1 flex items-center justify-end gap-1.5">
-                <Button data-testid="preset-prompt-append-discard" variant="danger" size="dense" :disabled="!segmentDirty(preset.id, 'append')" @click="discardPromptCard(preset.id, 'append')">
-                  {{ t('settings.preset.promptDiscard') }}
-                </Button>
-                <Button data-testid="preset-prompt-append-save" size="dense" :disabled="!segmentDirty(preset.id, 'append')" @click="onSavePrompt(preset.id)">
-                  {{ t('settings.preset.promptSave') }}
-                </Button>
-              </div>
             </div>
-          </GroupCard>
+            <p class="mt-[4px] text-[length:var(--text-sm)] leading-relaxed text-neutral-mid">{{ t('settings.preset.promptAppendHint') }}</p>
+            <Label class="mb-1 mt-[6px] block text-[length:var(--text-xs)] text-neutral-fg-2">{{ t('settings.preset.promptAppendLabel') }}</Label>
+            <Textarea
+              v-model="promptDrafts[preset.id].appendText"
+              data-testid="preset-prompt-append-input"
+              :disabled="!promptDrafts[preset.id].appendEnabled"
+              :placeholder="t('settings.preset.promptAppendPlaceholder')"
+              class="min-h-[56px] resize-y font-mono"
+            />
+            <div class="mt-1 flex items-center justify-end gap-1.5">
+              <Button data-testid="preset-prompt-append-discard" variant="danger" size="dense" :disabled="!segmentDirty(preset.id, 'append')" @click="discardPromptCard(preset.id, 'append')">
+                {{ t('settings.preset.promptDiscard') }}
+              </Button>
+              <Button data-testid="preset-prompt-append-save" size="dense" :disabled="!segmentDirty(preset.id, 'append')" @click="onSavePrompt(preset.id)">
+                {{ t('settings.preset.promptSave') }}
+              </Button>
+            </div>
+          </section>
 
-          <!-- 两卡共用一行合计计数（上限 = 两段合计 16000，非每段各自） -->
+          <!-- 两节共用一行合计计数（上限 = 两段合计 16000，非每段各自；demo = srow-desc mono 13px） -->
           <div class="flex items-center justify-end">
-            <span data-testid="preset-prompt-combined-count" class="font-mono text-[10px] text-neutral-dim">
+            <span data-testid="preset-prompt-combined-count" class="font-mono text-[length:var(--text-sm)] text-neutral-fg-2">
               {{ t('settings.preset.promptCombinedCount', { count: combinedCount(preset.id), max: maxLength }) }}
             </span>
           </div>
@@ -175,7 +171,6 @@ import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import { ConfirmDialog } from '@/components/ui/dialog'
-import { GroupCard } from '@taiji/ui/features/settings'
 import { usePresetStore } from '@/stores/preset'
 import { usePiPresets } from '@/composables/features/settings/usePiPresets'
 import { useToast } from '@/composables/useToast'

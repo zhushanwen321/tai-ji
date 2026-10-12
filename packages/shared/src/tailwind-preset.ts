@@ -34,6 +34,7 @@ export default {
         },
         neutral: {
           fg: 'var(--neutral-fg)',
+          'fg-2': 'var(--neutral-fg-2)', // 次级正文档（demo --fg-2；真值源 style.css --neutral-fg-2，两壳 tokens 均定义）
           mid: 'var(--neutral-mid)',
           dim: 'var(--neutral-dim)',
           faint: 'var(--neutral-faint)',
@@ -85,20 +86,29 @@ export default {
         input: 'var(--input)',
         ring: 'var(--ring)',
       },
+      // 裸 `border` 工具类的默认色（demo 语义 = 全部裸边框走 --border 令牌，亮暗主题自动跟随）。
+      // 不映射时 Tailwind 缺省 DEFAULT = gray-200，裸 `border` 全部渲染成亮灰线（与暗色主题断裂）。
+      // 覆盖缺省 DEFAULT 不影响 `...theme('colors')` 展开产生的 border-<color> 具名工具类；
+      // renderer 侧 borderColor.hairline 扩展点经深合并叠加，不受此处影响。
+      borderColor: {
+        DEFAULT: 'var(--border)',
+      },
       fontFamily: {
         sans: ['var(--font-sans)'],
         mono: ['JetBrains Mono', 'IBM Plex Mono', 'ui-monospace', 'Menlo', 'monospace'],
       },
       borderRadius: {
+        xs: 'var(--radius-xs)', // 微件档 4px（seg 项/滚动条 thumb/badge 内件；demo --r-xs 同档，收敛组件 rounded-[4px] 任意值）
         sm: '6px', // v6 升档（对应 --radius-sm）
         DEFAULT: '8px', // 按钮/卡片默认档（对应 --radius）
         md: '8px',
         lg: '12px', // 面板/弹层（对应 --radius-lg）
-        card: '10px', // v6 新增：卡片容器（对应 --radius-card）
+        card: 'var(--radius-card)', // 卡片容器（真值源 style.css --radius-card = 12px，此处只映射）
       },
       boxShadow: {
         1: 'var(--shadow-1)',
         2: 'var(--shadow-2)',
+        3: 'var(--shadow-3)',
         glow: 'var(--shadow-glow)',
       },
     },

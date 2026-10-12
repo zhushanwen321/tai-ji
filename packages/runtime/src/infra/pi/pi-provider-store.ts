@@ -93,6 +93,11 @@ export interface PiModelsConfig {
   providers: Record<string, PiProviderConfig>
 }
 
+// services 层消费面别名（pi 词汇边界：PiXxx 类型只许 infra/pi 内部命名，消费方
+// 经别名取只读快照视图——readModels/getProviderConfig 返回值的引用形态）
+export type ProviderConfigView = PiProviderConfig
+export type ModelsConfigView = PiModelsConfig
+
 export type { PiSettings } from './pi-settings-store.js'
 
 // ── 缓存 ─────────────────────────────────────────────────────

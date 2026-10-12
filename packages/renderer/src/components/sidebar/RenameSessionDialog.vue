@@ -21,7 +21,7 @@
           <p
             v-if="hasVisibleError"
             id="rename-session-label-message"
-            class="text-[12px] font-medium text-danger"
+            class="text-[length:var(--text-xs)] font-medium text-danger"
           >
             {{ visibleError }}
           </p>

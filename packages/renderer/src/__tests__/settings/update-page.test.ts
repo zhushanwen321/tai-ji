@@ -79,11 +79,11 @@ describe('UpdatePage 自动更新卡', () => {
     // 自动更新开关存在
     const sw = wrapper.find('[data-testid="switch-auto-update"]')
     expect(sw.exists()).toBe(true)
-    // 当前版本 pill 存在（含版本号 + 渠道文案）
+    // 当前版本 pill 存在（[w3] demo 版本行形态：pill 只含版本号，渠道文案在同行 desc）
     const pill = wrapper.find('[data-testid="current-version-pill"]')
     expect(pill.exists()).toBe(true)
     expect(pill.text()).toContain('v0.0.0-test')
-    expect(pill.text()).toContain('stable 渠道')
+    expect(wrapper.text()).toContain('stable 渠道')
     // UpdateCheckCard 内嵌渲染（检查更新状态机在自动更新卡内）
     expect(wrapper.find('[data-testid="settings-update-check"]').exists()).toBe(true)
   })

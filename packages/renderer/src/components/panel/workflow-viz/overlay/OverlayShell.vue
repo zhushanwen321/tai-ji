@@ -34,7 +34,7 @@
   >
     <section
       ref="panelRef"
-      class="relative flex h-[88%] w-[92%] flex-col overflow-hidden rounded-lg border border-hairline bg-surface shadow-2 outline-none"
+      class="relative flex h-[88%] w-[92%] flex-col overflow-hidden rounded-lg border border-hairline bg-surface shadow-3 outline-none"
       role="dialog"
       aria-modal="true"
       :aria-label="label"

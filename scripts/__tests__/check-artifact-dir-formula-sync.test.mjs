@@ -19,10 +19,12 @@ import {
   SHARED_FN,
   MIRROR_FN,
   MIRROR_SEGMENT_CONST,
+  RUNTIME_PATTERN_CONST,
   extractFunctionBlock,
   extractJoinSegment,
   extractSessionIdRegex,
   extractConstLiteral,
+  extractConstRegex,
   mirrorUsesSegmentConst,
 } from '../check-artifact-dir-formula-sync.mjs'
 import { createMirrorRoot, installGuardIntoMirror } from './helpers/guard-mirror.mjs'
@@ -72,6 +74,22 @@ describe('提取器纯函数', () => {
     expect(mirrorUsesSegmentConst(block.text)).toBe(true)
     expect(mirrorUsesSegmentConst(`return path.join(resolveDataDir(), 'artifacts', sessionId)`)).toBe(false)
   })
+
+  it('第三源 const 正则声明提取（runtime 声明形态；.test 调用行不误匹配；带分号兼容）', () => {
+    const runtime = [
+      'export function isPiSessionId(id: string): boolean {',
+      `  return ${RUNTIME_PATTERN_CONST}.test(id)`,
+      '}',
+      '',
+      `const ${RUNTIME_PATTERN_CONST} = ${DEFAULT_REGEX}`,
+    ].join('\n')
+    expect(extractConstRegex(runtime, RUNTIME_PATTERN_CONST).value).toBe(DEFAULT_REGEX)
+    expect(extractConstRegex(`const ${RUNTIME_PATTERN_CONST} = ${DEFAULT_REGEX};`, RUNTIME_PATTERN_CONST).value).toBe(
+      DEFAULT_REGEX,
+    )
+    expect(extractConstRegex('const OTHER = /x/;', RUNTIME_PATTERN_CONST).error).toBeDefined()
+    expect(extractConstRegex('export const x = 1', RUNTIME_PATTERN_CONST).error).toBeDefined()
+  })
 })
 
 // ── fixture 生成（源文件真实形态：函数块 + 常量）────────────────────────
@@ -102,16 +120,27 @@ const mirrorSystemPromptSrc = ({ segmentConst = 'artifacts', regex = DEFAULT_REG
     ``,
   ].join('\n')
 
+const runtimePiPathsSrc = ({ regex = DEFAULT_REGEX } = {}) =>
+  [
+    'export function isPiSessionId(id: string): boolean {',
+    `  return ${RUNTIME_PATTERN_CONST}.test(id)`,
+    '}',
+    ``,
+    `const ${RUNTIME_PATTERN_CONST} = ${regex}`,
+    ``,
+  ].join('\n')
+
 /**
  * tmp mirror 工厂：目录布局对齐守卫 ROOT 相对路径（packages/shared/src、extensions/taiji/
- * system-prompt/src）。overrides 覆盖任一侧公式（漂移注入点），missing 指定不落盘的文件。
- * root/落盘/清理/守卫副本装置见 guard-mirror.mjs。
+ * system-prompt/src、packages/runtime/src/infra/pi）。overrides 覆盖任一侧公式（漂移
+ * 注入点），missing 指定不落盘的文件。root/落盘/清理/守卫副本装置见 guard-mirror.mjs。
  */
-function makeMirror({ shared = {}, mirror = {}, missing = [] } = {}) {
+function makeMirror({ shared = {}, mirror = {}, runtime = {}, missing = [] } = {}) {
   const { root, writeAt, cleanup } = createMirrorRoot('artifact-formula-fx-')
   const files = {
     'packages/shared/src/paths.ts': sharedPathsSrc(shared),
     'extensions/taiji/system-prompt/src/index.ts': mirrorSystemPromptSrc(mirror),
+    'packages/runtime/src/infra/pi/pi-paths.ts': runtimePiPathsSrc(runtime),
   }
   for (const [rel, content] of Object.entries(files)) {
     if (missing.includes(rel)) continue
@@ -122,14 +151,15 @@ function makeMirror({ shared = {}, mirror = {}, missing = [] } = {}) {
 }
 
 describe('CLI 集成（守卫脚本 × tmp mirror）', () => {
-  it('两侧一致 → exit 0，三条比较逐一报一致', () => {
+  it('三方一致 → exit 0，各条比较逐一报一致（含 runtime 第三源）', () => {
     const fx = makeMirror()
     try {
       const r = fx.run()
       expect(r.status).toBe(0)
-      expect(r.stdout).toContain('✓ 产物目录公式双实现对拍通过')
+      expect(r.stdout).toContain('✓ 产物目录公式对拍通过')
       expect(r.stdout).toContain("段名字面量一致（'artifacts'")
       expect(r.stdout).toContain(`sessionId 校验正则字面量一致（${DEFAULT_REGEX}）`)
+      expect(r.stdout).toContain(`runtime ${RUNTIME_PATTERN_CONST} 与 shared sessionId 正则一致（${DEFAULT_REGEX}）`)
       expect(r.stdout).toContain(`镜像 ${MIRROR_FN} 经 ${MIRROR_SEGMENT_CONST} 拼段名`)
     } finally {
       fx.cleanup()
@@ -172,6 +202,19 @@ describe('CLI 集成（守卫脚本 × tmp mirror）', () => {
     }
   })
 
+  it('漂移红（runtime 第三源 sessionId 正则不一致）→ exit 1（证明 ②b 非恒绿）', () => {
+    const fx = makeMirror({ runtime: { regex: '/^[A-Za-z0-9_-]+$/' } })
+    try {
+      const r = fx.run()
+      expect(r.status).toBe(1)
+      expect(r.stderr).toContain(`vs runtime ${RUNTIME_PATTERN_CONST}=/^[A-Za-z0-9_-]+$/`)
+      expect(r.stderr).toContain('pi-paths.ts')
+      expect(r.stderr).toContain('恢复动作')
+    } finally {
+      fx.cleanup()
+    }
+  })
+
   it('比对面文件缺失 → exit 1，报缺失路径与迁移同步指引（提取失败一律 fail）', () => {
     const fx = makeMirror({ missing: ['packages/shared/src/paths.ts'] })
     try {
@@ -182,12 +225,23 @@ describe('CLI 集成（守卫脚本 × tmp mirror）', () => {
       fx.cleanup()
     }
   })
+
+  it('第三源文件缺失 → exit 1，报 runtime pi-paths 缺失路径（三方对拍含第三源）', () => {
+    const fx = makeMirror({ missing: ['packages/runtime/src/infra/pi/pi-paths.ts'] })
+    try {
+      const r = fx.run()
+      expect(r.status).toBe(1)
+      expect(r.stderr).toContain('runtime pi-paths 源文件 缺失')
+    } finally {
+      fx.cleanup()
+    }
+  })
 })
 
-describe('真实仓库源文件（守卫对实际交付面非恒绿的反面：当前两侧一致）', () => {
+describe('真实仓库源文件（守卫对实际交付面非恒绿的反面：当前三方一致）', () => {
   it('直跑真实守卫 → exit 0', () => {
     const r = spawnSync(process.execPath, [SCRIPT], { cwd: REPO_ROOT, encoding: 'utf-8' })
     expect(r.status).toBe(0)
-    expect(r.stdout).toContain('✓ 产物目录公式双实现对拍通过')
+    expect(r.stdout).toContain('✓ 产物目录公式对拍通过')
   })
 })

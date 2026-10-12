@@ -5,16 +5,21 @@
     - 常驻右侧窄条，hover 弹出全 turn 列表浮层（mini-map + 快速跳转）
     - 窄条上有 viewport indicator 标记当前 turn 在窄条上的纵向位置
     - 浮层内每个节点两行：user 行（User 图标 + user 文本）+ agent 行（Bot 图标 + agent 摘要）
-    - 状态融入 Bot 图标颜色（失败 danger 红常驻 / 进行中 accent + loader-spin / 完成中性灰 ico）
+    - 状态融入 Bot 图标颜色（失败 danger 红常驻 / 进行中 accent + 呼吸弧 / 完成中性灰 ico）
     - toggle 按钮 hover 浮出（渐进披露），active 节点常驻可见，垂直居中于节点右侧
 
-    状态色（W2，§13.2-C + §5.6B failed=danger）：
-    - failed 图标常驻 text-danger（非 hover 渐显——rail 是全局导航，一眼可辨失败位置；§5.6B 统一 error=danger，推翻早期 CL5 的 warn 取舍）
-    - failed 文本 text-neutral-mid（hover 升 text-neutral-fg）
-    - active 图标 text-accent + 双环 loader-spin 微缩（复用 Block.vue 的 RUNNING_LOADER_SVG）
-    - done 图标 text-neutral-ico；user 行图标 text-neutral-ico，文本 text-neutral-fg
-    - chevron text-neutral-dim
-    - spine/viewport/panel 的 bg-surface-hover/border-accent/bg-accent-soft 保留（中性灰+accent，不冲突）
+    状态与选中形态（M3a demo 权威，workbench.css .rail 族 + 文件尾「选中态单一范式」）：
+    - spine 常驻 surface-hover 窄条；viewport indicator = fg-2 左描边 + fg 14% 底（中性，
+      demo .rail-viewport——原 accent 形态被 demo 权威覆盖）
+    - 浮层面板 = bg-elevated + 1px border-strong 硬边界 + shadow-2（demo .rail-panel）
+    - 节点 = 6px 圆角（--radius-sm）4×6 padding，行 12px 字号 1.35 行高（demo .rail-row）
+    - 节点 hover = surface-hover 底（全节点统一——demo .rail-node:hover 无条件命中，
+      选中项 hover 同样给临时反馈底；Tier B 选中规则只管文字提亮，与 hover 底不冲突）
+    - 选中节点（.on）= demo Tier B 行类范式：无底无框仅文字提亮（workbench.css:749
+      .si.on,.frow.sel,.rail-node.on{color:var(--fg)} + :291 收编注释），节点文字提为
+      text-neutral-fg；图标提为 fg-2（demo .rail-node.on .rail-row svg——呼吸弧行图标
+      同为 fg-2，非 accent）
+    - failed 图标常驻 text-danger（real 超集语义 §5.6B，优先于选中提色）
 
     设计约束：
     - 纯展示组件，turns/activeTurnIndex/sessionActive/expandedTurns 全由父组件传入
@@ -25,65 +30,69 @@
   <div
     v-if="turns.length > 0"
     data-testid="turn-rail"
-    class="turn-rail group absolute top-1/2 right-2 z-20 h-[340px] w-1.5 -translate-y-1/2 transition-[width] duration-[var(--duration)] ease-[var(--ease)] hover:w-56 before:absolute before:-left-1.5 before:top-0 before:bottom-0 before:w-3 before:content-['']"
+    class="turn-rail group absolute top-1/2 right-2 z-[var(--z-sticky)] h-[340px] w-[6px] -translate-y-1/2 transition-[width] duration-[var(--duration)] ease-[var(--ease)] hover:w-[224px] before:absolute before:-left-[6px] before:top-0 before:bottom-0 before:w-[12px] before:content-['']"
   >
     <!-- 常驻窄条 spine：未 hover 时唯一可见区域。bg-surface-hover 保证在 bg 上明确可见（L1 入口可发现性）。 -->
-    <div class="rail-spine absolute bottom-0 left-0 top-0 w-1.5 rounded-full bg-surface-hover" />
+    <div class="rail-spine absolute bottom-0 left-0 top-0 w-[6px] rounded-full bg-surface-hover" />
 
-    <!-- viewport indicator：标记当前 turn 在窄条上的纵向位置（mini-map 高亮） -->
+    <!-- viewport indicator：标记当前视口在窄条上的纵向位置（mini-map 高亮）。
+         中性配色（demo .rail-viewport）：fg-2 左描边 + fg 14% 弱底，不占用 accent 信号。 -->
     <div
-      class="rail-viewport absolute left-0 w-1.5 rounded-full border-l-2 border-accent bg-accent/20"
+      class="rail-viewport absolute left-0 w-[6px] rounded-full border-l-2 border-[color:var(--neutral-fg-2)] bg-[color-mix(in_oklch,var(--neutral-fg)_14%,transparent)]"
       :style="viewportStyle"
     />
 
     <!-- hover 展开浮层（常驻 DOM，靠 group-hover 切换可见性，避免 SSR/动画抖动）。
-         区分度：bg-bg-elevated（浮起面板语义，与画布 bg 亮度差 Δ17）+ ring 硬边界（不依赖阴影方向）。
-         去掉 backdrop-blur（不透明底上零效果）。 -->
+         demo .rail-panel：bg-bg-elevated（浮起面板语义）+ 1px border-strong 硬边界 +
+         shadow-2。去掉 backdrop-blur（不透明底上零效果）。 -->
     <div
-      class="rail-panel absolute bottom-0 left-3 right-0 top-0 translate-x-2 rounded-lg bg-bg-elevated p-2 opacity-0 shadow-2 ring-1 ring-border-strong pointer-events-none transition-[transform,opacity] group-hover:translate-x-0 group-hover:opacity-100 group-hover:pointer-events-auto"
+      class="rail-panel absolute bottom-0 left-[12px] right-0 top-0 translate-x-2 rounded-lg border border-border-strong bg-bg-elevated p-2 opacity-0 shadow-2 pointer-events-none transition-[transform,opacity] group-hover:translate-x-0 group-hover:opacity-100 group-hover:pointer-events-auto"
     >
       <!-- 节点列表（铺满 rail 浮层，超出靠浮层自身高度滚动） -->
-      <div class="rail-list flex max-h-full flex-col gap-0.5 overflow-y-auto">
+      <div class="rail-list flex max-h-full flex-col gap-[2px] overflow-y-auto">
         <div
           v-for="(turn, idx) in turns"
           :key="turnStableId(turn)"
           data-testid="rail-node"
-          class="group/rail-node rail-node relative flex cursor-pointer select-none flex-col gap-0.5 rounded px-1.5 py-1 transition-colors hover:bg-surface-hover"
-          :class="idx === activeTurnIndex ? 'active bg-accent-soft ring-1 ring-inset ring-accent-ring' : ''"
+          class="group/rail-node rail-node relative flex cursor-pointer select-none flex-col gap-[2px] rounded-sm px-[6px] py-[4px] transition-colors hover:bg-surface-hover"
+          :class="idx === activeTurnIndex ? 'active text-neutral-fg' : ''"
           @click="emit('jump', idx)"
         >
-          <!-- user 行：User 图标（text-neutral-ico）+ user 文本（text-neutral-fg）。
-               无 user 时整行省略（首条 assistant 边缘 turn）。 -->
-          <div v-if="turn.user" class="flex min-w-0 items-center gap-1.5">
-            <User class="size-3 shrink-0 text-neutral-ico" />
-            <span class="flex-1 truncate pr-6 text-[length:var(--text-xs)] leading-tight text-neutral-fg">
+          <!-- user 行：User 图标 + user 文本（text-neutral-fg）。
+               无 user 时整行省略（首条 assistant 边缘 turn）。
+               图标色（demo .rail-node.on .rail-row svg）：选中节点提为 fg-2，否则 neutral-ico。 -->
+          <div v-if="turn.user" class="flex min-w-0 items-center gap-[6px]">
+            <User class="size-[12px] shrink-0" :class="idx === activeTurnIndex ? 'text-[color:var(--neutral-fg-2)]' : 'text-neutral-ico'" />
+            <span class="flex-1 truncate pr-6 text-[length:var(--text-xs)] leading-[1.35] text-neutral-fg">
               {{ railMemoFor(turn).userSummary || ' ' }}
             </span>
           </div>
-          <!-- agent 行：状态图标（failed=danger 常驻 / active=accent loader-spin / done=neutral-ico）+ agent 摘要。
-               failed 文本 text-neutral-mid（hover 升 text-neutral-fg），其余 text-neutral-mid。
+          <!-- agent 行：状态图标（failed=danger 常驻 / 选中=fg-2 呼吸弧或 Bot / 其余=neutral-ico Bot）+ agent 摘要。
+               failed 文本未选中时 text-neutral-mid（hover 升 text-neutral-fg）；选中节点提
+               text-neutral-fg（demo Tier B）；其余未选中 text-neutral-mid。
                agent 摘要文本优先（content 截断），空则 fallback 计数（N thoughts · M tools）。
                摘要全空时只在占位门开（isPlaceholderVisible = sessionActive ∧ 真末位）显「进行中…」——
                本意覆盖 pending turn（streaming 刚起 / ask-user 表单等待）；原裸判据「无 agent 内容」
                把已完结 user-only turn（命令取消 / 纯 notify 命令）也算进来致永久占位，故加门收敛；
                门关的 user-only turn 走空格 fallback（D2，与 user 行同款 `|| ' '`），不谎报进行中。 -->
-          <div class="flex min-w-0 items-center gap-1.5">
-            <!-- active 态：双环 loader-spin（微缩，复用 Block.vue 的 RUNNING_LOADER_SVG，accent 蓝）。
+          <div class="flex min-w-0 items-center gap-[6px]">
+            <!-- active 态：呼吸弧（微缩，复用 Block.vue 的 RUNNING_LOADER_SVG）。
+                 图标色随选中节点提为 fg-2（demo .rail-node.on .rail-row svg 对弧同样生效）。
                  loader 判据 isActiveTurn = sessionActive ∧ 视口位（activeTurnIndex），与占位判据
                  （sessionActive ∧ 真末位）有意分离：上滑时占位留在末位节点、loader 随视口走，
                  两判据同门反而错（占位会被视口态压空串，streaming/ask-user 等待击穿）。 -->
             <!-- eslint-disable-next-line vue/no-v-html -- hardcoded constant from block-icon.ts -->
-            <span v-if="isActiveTurn(turn, idx)" data-testid="rail-agent-icon" class="inline-flex size-3 shrink-0 items-center justify-center text-accent animate-loader-spin" v-html="RUNNING_LOADER_SVG" />
-            <!-- 非 active 态：Bot 图标（failed=danger 常驻 / done=neutral-ico） -->
+            <span v-if="isActiveTurn(turn, idx)" data-testid="rail-agent-icon" class="inline-flex size-[12px] shrink-0 items-center justify-center text-[color:var(--neutral-fg-2)] animate-loader-spin" v-html="RUNNING_LOADER_SVG" />
+            <!-- 非 active 态：Bot 图标（failed=danger 常驻 / 其余 neutral-ico；选中提 fg-2） -->
             <Bot
               v-else
               data-testid="rail-agent-icon"
-              class="size-3 shrink-0 transition-colors"
-              :class="railMemoFor(turn).iconClass"
+              class="size-[12px] shrink-0 transition-colors"
+              :class="agentRowIconClass(turn, idx)"
             />
             <span
-              class="flex-1 truncate pr-6 text-[length:var(--text-xs)] leading-tight transition-colors"
-              :class="railMemoFor(turn).failed ? 'text-neutral-mid hover:text-neutral-fg' : 'text-neutral-mid'"
+              class="flex-1 truncate pr-6 text-[length:var(--text-xs)] leading-[1.35] transition-colors"
+              :class="agentSummaryClass(turn, idx)"
             >
               {{ railMemoFor(turn).agentSummary || (isPlaceholderVisible(turn, idx) ? t('panel.message.railInProgress') : ' ') }}
             </span>
@@ -91,7 +100,8 @@
           <!-- 折展 toggle 按钮：hover/focus 浮出（渐进披露），active 节点常驻可见（用户决策）。
                图标语义：ChevronDown=折叠态（向下展开）/ ChevronUp=展开态（向上收起），直观不混语义。
                chevron 用 text-neutral-dim（中性灰，不抢视觉）。
-               「当前位置」标记不再借用 chevron 方向，由节点底色 bg-accent-soft + ring 独立承担。 -->
+               「当前位置」标记不再借用 chevron 方向，选中态由 demo Tier B 文字提亮承担
+               （节点 text-neutral-fg + 图标 fg-2，无底无框）。 -->
           <Button
             variant="ghost"
             size="icon"
@@ -102,8 +112,8 @@
             :disabled="sessionActive"
             @click.stop="emit('toggle', idx)"
           >
-            <ChevronUp v-if="isTurnExpanded(idx)" class="size-3" />
-            <ChevronDown v-else class="size-3" />
+            <ChevronUp v-if="isTurnExpanded(idx)" class="size-[12px]" />
+            <ChevronDown v-else class="size-[12px]" />
           </Button>
         </div>
       </div>
@@ -175,8 +185,32 @@ function isTurnExpanded(idx: number): boolean {
 }
 
 /**
+ * agent 行 Bot 图标色（M3a demo 形态，workbench.css .rail-node.on .rail-row svg）：
+ * 选中节点图标提为 fg-2；failed danger 常驻优先于选中提色（real 超集语义 §5.6B）。
+ * 纯展示派生：只读 memo 与 activeTurnIndex，无副作用。
+ */
+function agentRowIconClass(turn: MessageTurn, idx: number): string {
+  const memo = railMemoFor(turn)
+  if (memo.failed) return memo.iconClass
+  return idx === props.activeTurnIndex ? 'text-[color:var(--neutral-fg-2)]' : memo.iconClass
+}
+
+/**
+ * agent 行摘要文字色（demo Tier B 行类文字提亮 + real 超集语义）：
+ * 选中节点 → text-neutral-fg（Tier B「无底无框仅文字提亮」，demo workbench.css:749
+ * .rail-node.on{color:var(--fg)}——span 有自有 mid 色不吃节点继承，须显式提亮）；
+ * 未选中 failed → text-neutral-mid + hover 提亮；未选中普通 → text-neutral-mid
+ * （demo .rail-row span）。failed 状态信号由图标 danger 常驻承担，选中时文字照常提亮。
+ * 纯展示派生：只读 memo 与 activeTurnIndex，无副作用。
+ */
+function agentSummaryClass(turn: MessageTurn, idx: number): string {
+  if (idx === props.activeTurnIndex) return 'text-neutral-fg'
+  return railMemoFor(turn).failed ? 'text-neutral-mid hover:text-neutral-fg' : 'text-neutral-mid'
+}
+
+/**
  * 判断指定 turn 是否为「激活态」（sessionActive 且当前激活）。
- * 激活态用 loader-spin 双环图标（accent 蓝），非激活态用 Bot 图标按 agentIconClass 着色。
+ * 激活态用呼吸弧图标（随选中节点 fg-2 提色），非激活态用 Bot 图标按 agentRowIconClass 着色。
  */
 function isActiveTurn(_turn: MessageTurn, idx: number): boolean {
   return props.sessionActive && idx === props.activeTurnIndex

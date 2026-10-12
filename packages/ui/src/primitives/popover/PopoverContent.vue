@@ -9,14 +9,26 @@ import { registerUiModalSurface, uiSurfaceRectOf } from '../../modal-surface-reg
 
 /**
  * PopoverContent —— composer 工具区浮层原语。
- * 默认冷蓝浮层样式（bg-elevated/border-strong/shadow-2），向上开由调用方传 side="top"。
+ * 默认浮层样式（bg-elevated/border-strong/shadow-2），向上开由调用方传 side="top"。
  * sideOffset 默认 6（draft .pop.float: bottom calc(100% + 6px)）。
- * z-index 1100 与 SelectContent 统一，高于 Dialog(1000)，确保嵌在 Dialog 内的 Popover 不被压住。
+ * z-index = --z-dialog(1100) 与 SelectContent 统一，高于 Dialog(--z-modal 1000)，
+ * 确保嵌在 Dialog 内的 Popover 不被压住（demo .pg-set .sel-pop 同消费 --z-dialog 档；
+ * demo 梯队 --z-popover(10) 只服务无嵌套场景的页内弹层，此处不降档防破坏嵌套消费方）。
+ * 形态对照 demo：浮层底 --elevated + 边框 --border-strong + 阴影 --shadow-2 与
+ * workbench.css .composer .popover / overlay.css .ctxmenu 一致；圆角取菜单族 --r-md(8px)
+ * （composer 域弹层卡 demo 为 --r-lg 12px，归 M4b 域内经 class 追加）；容器 p-0 为既有
+ * 契约（demo padding 4px 由消费方 p-1 自控，AddMenuPopover 等已自带）。
+ *
+ * inheritAttrs=false + $attrs 手动绑到内部 reka PopoverContent：本封装模板单根是
+ * PopoverPortal（渲染为 Teleport，非普通元素根），Vue 对 Teleport 根不继承 fallthrough
+ * attrs——消费方传的 data-testid / 额外事件监听（如面板 hover 开关）会在 Portal 边界
+ * 被静默丢弃（Vue "Extraneous non-props attributes" 警告），显式转发后落到真正的浮层 DOM。
  */
 const props = withDefaults(
   defineProps<PopoverContentProps & { class?: HTMLAttributes['class'] }>(),
   { sideOffset: 6 },
 )
+defineOptions({ inheritAttrs: false })
 const emits = defineEmits<PopoverContentEmits>()
 
 const delegatedProps = reactiveOmit(props, 'class')
@@ -47,10 +59,10 @@ onBeforeUnmount(disposeSurfaceRegistration)
   <PopoverPortal>
     <PopoverContent
       ref="contentRef"
-      v-bind="forwarded"
+      v-bind="{ ...forwarded, ...$attrs }"
       :class="
         cn(
-          'z-[1100] min-w-[240px] rounded-md border border-border-strong bg-bg-elevated p-0 text-neutral-fg shadow-2 outline-none reka-popover-transition',
+          'z-[var(--z-dialog)] min-w-[240px] rounded-md border border-border-strong bg-bg-elevated p-0 text-neutral-fg shadow-2 outline-none reka-popover-transition',
           props.class,
         )
       "

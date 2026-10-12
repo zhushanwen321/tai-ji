@@ -1160,6 +1160,8 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
   async getSubagentEngineConfig(): Promise<SubagentEngineConfigView> { return this.records.getSubagentEngineConfig() }
   /** [U7] 设置默认引擎（带跨进程锁的 RMW + 原子写，实现迁 session-records.ts）。 */
   async setSubagentDefaultEngine(engineId: string): Promise<void> { return this.records.setSubagentDefaultEngine(engineId) }
+  /** engine-provider-unification D5：per-engine 默认模型偏好写入（同锁 RMW，实现迁 session-records.ts）。 */
+  async setSubagentEngineDefaultModel(engineId: string, modelRef: string): Promise<void> { return this.records.setSubagentEngineDefaultModel(engineId, modelRef) }
   /** workflow 列表（冷启动磁盘扫描，实现迁 session-records.ts）。 */
   async getWorkflows(sessionId: string): Promise<OversizeAwareResult<WorkflowRunRecord>> { return this.records.getWorkflows(sessionId) }
 
@@ -1169,6 +1171,12 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
    * 与 live 投影同一份派生代码）。
    */
   async getPlanState(sessionId: string): Promise<PlanStateView> { return this.records.getPlanState(sessionId) }
+
+  /**
+   * 会话消息条数（悬停详情卡消息计数，通道 2）：对称 getPlanState 转发形态，实现迁
+   * session-records.ts（路径解析 + session-message-count 流式计数）。
+   */
+  async getMessageCount(sessionId: string): Promise<number> { return this.records.getMessageCount(sessionId) }
 
   /**
    * session-trace 台账全量拉取（RPC 混合路由 → 文件降级 → empty 空态）。

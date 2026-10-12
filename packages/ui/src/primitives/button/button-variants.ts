@@ -6,7 +6,13 @@ import { cva } from 'class-variance-authority'
 // Button.vue 又 from '.' 取 variants 会闭合环）。原导出位置经 index.ts
 // `export *` 保持不变，外部消费方 import 路径零变化。
 export const buttonVariants = cva(
-  'inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0',
+  // 焦点双环阴影 = DESIGN.md §.btn 明文刻意值（内环 2px accent、外环 4px black/0.4
+  // 亮色底可见性衬底），非默认 ring 系——字面色保留。
+  // 图标默认尺寸 = :where() 整体零特异性（生成 `:where(.cls svg)`，特异性 0,0,0）：
+  // 使用方在 svg 上写的任何普通尺寸类（size-[17px] 等，0,1,0）结构性恒赢，禁止再退回
+  // [&_svg]:size-4 式后代选择器（0,1,1）——它会压制单点尺寸类，逼使用方散布 ! important。
+  // size-4 字面保留 rem 缩放语义（未显式指定尺寸的图标仍随根字号 1rem）。
+  'inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-[background-color,color,border-color,transform] duration-[var(--duration-fast)] ease-[var(--ease)] active:scale-[0.97] focus-visible:outline-none focus-visible:shadow-[0_0_0_2px_var(--accent),0_0_0_4px_rgba(0,0,0,0.4)] disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [:where(&_svg)]:size-4 [&_svg]:shrink-0',
   {
     variants: {
       variant: {
@@ -15,6 +21,10 @@ export const buttonVariants = cva(
           'bg-transparent border border-border text-neutral-fg hover:bg-surface-hover',
         ghost: 'hover:bg-surface-hover',
         danger: 'text-danger hover:bg-danger-soft',
+        // 危险实底钮（demo pages.css .btn.danger-solid：--danger 底 + --danger-fg 字 + hover
+        // brightness 1.1）；消费方 = ConfirmDialog 危险确认分支等需要重钮权重的危险动作
+        'danger-solid':
+          'bg-danger text-[color:var(--danger-fg)] hover:brightness-110',
       },
       size: {
         default: 'h-9 px-4 py-2',

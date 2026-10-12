@@ -16,11 +16,11 @@
       data-testid="trace-stats"
     >
       <span>{{ t('panel.trace.entriesCount', { count: stats.total }) }}</span>
-      <span aria-hidden="true" class="text-neutral-faint">·</span>
+      <span aria-hidden="true" class="text-[color:var(--neutral-fg-2)]">·</span>
       <span>{{ t('panel.trace.inContextCount', { count: stats.inContext }) }}</span>
-      <span aria-hidden="true" class="text-neutral-faint">·</span>
+      <span aria-hidden="true" class="text-[color:var(--neutral-fg-2)]">·</span>
       <span>{{ t('panel.trace.compactionCount', { count: stats.compactions }) }}</span>
-      <span aria-hidden="true" class="text-neutral-faint">·</span>
+      <span aria-hidden="true" class="text-[color:var(--neutral-fg-2)]">·</span>
       <span
         data-testid="trace-stats-prompt"
         :title="stats.promptVersion === null ? t('panel.trace.systemNoTraceHint') : undefined"
@@ -58,19 +58,25 @@
     </div>
     <!-- 控制行：chips + 搜索 + context toggle -->
     <div class="flex flex-wrap items-center gap-1.5">
+      <!-- demo .tchip：常态即 fw-mid（选中辨识交给范式块，消除选中瞬间字重跳变的布局抖动）；
+           hover 纯提字色（hover:bg-transparent 压掉 ghost variant 自带 hover 底）；
+           选中 = demo Tier A 状态件范式（--sel-bg accent tint 底 + 1px --sel-edge 内描边）。 -->
       <Button
         v-for="chip in chips"
         :key="chip.key"
         variant="ghost"
         size="sm"
-        class="h-5 rounded-full px-2.5 text-[length:var(--text-2xs)]"
-        :class="chip.active ? 'bg-bg-elevated text-neutral-fg hover:bg-bg-elevated' : 'text-neutral-dim hover:text-neutral-fg'"
+        class="h-5 rounded-full px-2.5 font-semibold text-[length:var(--text-2xs)]"
+        :class="chip.active
+          ? 'bg-[var(--sel-bg)] text-neutral-fg [font-weight:var(--fw-mid)] shadow-[inset_0_0_0_1px_var(--sel-edge)] hover:bg-[var(--sel-bg)]'
+          : 'text-neutral-dim hover:bg-transparent hover:text-neutral-fg'"
         :data-testid="`trace-chip-${chip.key}`"
         @click="emit('toggle-group', chip.key)"
       >
-        {{ chip.label }}<span class="ml-1 font-mono text-[length:var(--text-3xs)] text-neutral-faint">{{ chip.count }}</span>
+        {{ chip.label }}<span class="ml-1 font-mono text-[length:var(--text-3xs)] text-[color:var(--neutral-fg-2)]">{{ chip.count }}</span>
       </Button>
-      <div class="ml-1 flex min-w-[110px] flex-1 items-center gap-1.5 rounded-sm border border-transparent bg-bg-input px-2 py-1 focus-within:border-accent-ring">
+      <!-- demo .tsearch：凹陷底 + r-xs 4px + 聚焦零边界（光标即反馈；键盘走全局 :focus-visible 环） -->
+      <div class="ml-1 flex min-w-[110px] flex-1 items-center gap-1.5 rounded-[var(--radius-xs)] border border-transparent bg-bg-input px-2 py-[3px] focus-within:border-transparent">
         <Search class="size-3 shrink-0 text-neutral-dim" />
         <Input
           v-model="searchModel"
@@ -81,7 +87,7 @@
         />
       </div>
       <div
-        class="flex cursor-pointer select-none items-center gap-1.5 rounded-sm px-1 py-0.5 text-[length:var(--text-2xs)]"
+        class="flex cursor-pointer select-none items-center gap-1.5 rounded-[var(--radius-xs)] px-1 py-0.5 text-[length:var(--text-2xs)]"
         :class="contextOnly ? 'text-neutral-fg' : 'text-neutral-dim hover:text-neutral-fg'"
         :title="t('panel.trace.contextOnlyHint')"
         data-testid="trace-context-toggle"

@@ -42,7 +42,7 @@ export interface KillableChild {
 }
 
 // 毫秒→秒换算（SIGKILL 升级 warn 日志的秒数显示）。文件内私有定义：工程内 MS_PER_SECOND
-// 惯例是各使用文件私有常量（execution-record / lifecycle-manager / session-file-gc /
+// 惯例是各使用文件私有常量（execution-record / lifecycle-manager / engine-journal-gc /
 // session-runner 四处先例），无共享导出源可 import，保持同惯例不另立导出点。
 const MS_PER_SECOND = 1_000;
 

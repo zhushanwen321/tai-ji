@@ -15,6 +15,8 @@ import { mount } from '@vue/test-utils'
 import { h } from 'vue'
 import { Block } from '@taiji/ui'
 import type { ToolCall } from '@taiji/shared'
+// Block setup 顶部经 useChatViewDeps inject 壳依赖（ui-optimize-unified N1 起），直接 mount 必须注入 mock deps
+import { mockChatProvide } from '@/__tests__/helpers/chat-view-deps'
 
 /**
  * thinking 块现在走 MarkdownRenderer（W2），测试环境 stub 掉它避免依赖
@@ -47,20 +49,20 @@ describe('Block working 态 · thinking 块', () => {
   it('U1: working=true → 内容在 header 行内联显示（plain text，非 .trace-think-body）', () => {
     const wrapper = mount(Block, {
       props: { type: 'thinking', content: LONG_THINKING, working: true },
-      global: { stubs: { MarkdownRenderer: mdStub } },
+      global: { provide: mockChatProvide(), stubs: { MarkdownRenderer: mdStub } },
     })
     // streaming 进行中：内容在 header 行内联显示（截断预览），无独立 body div
     expect(wrapper.find('.stub-md-render').exists()).toBe(false)
     // 内容以截断形式出现在 header 行（previewText 截断到 60 字符）
     expect(wrapper.text()).toContain(LONG_THINKING.slice(0, 60))
-    // 收起预览前缀 · 不应出现（streaming 态用无前缀的内联预览）
-    expect(wrapper.text()).not.toContain('·')
+    // 分隔点 · 常驻（M3b demo 复刻：demo 思考行运行/完成两态都是「思考(中) · <预览>」句式）
+    expect(wrapper.text()).toContain('·')
   })
 
   it('U2: working=false → 仅预览行（截断 60 字符）', () => {
     const wrapper = mount(Block, {
       props: { type: 'thinking', content: LONG_THINKING, working: false, collapsed: true },
-      global: { stubs: { MarkdownRenderer: mdStub } },
+      global: { provide: mockChatProvide(), stubs: { MarkdownRenderer: mdStub } },
     })
     // 展开态容器不存在 = 收起
     expect(wrapper.find('.stub-md-render').exists()).toBe(false)
@@ -71,7 +73,7 @@ describe('Block working 态 · thinking 块', () => {
   it('U3: working=true 点击 header 不切换折叠态（内容仍在 header 行内联）', async () => {
     const wrapper = mount(Block, {
       props: { type: 'thinking', content: LONG_THINKING, working: true },
-      global: { stubs: { MarkdownRenderer: mdStub } },
+      global: { provide: mockChatProvide(), stubs: { MarkdownRenderer: mdStub } },
     })
     const header = wrapper.find('.cursor-pointer')
     expect(header.exists()).toBe(true)
@@ -84,7 +86,7 @@ describe('Block working 态 · thinking 块', () => {
   it('U4: working=false 点击 header 可 toggle', async () => {
     const wrapper = mount(Block, {
       props: { type: 'thinking', content: '短推理', working: false, collapsed: true },
-      global: { stubs: { MarkdownRenderer: mdStub } },
+      global: { provide: mockChatProvide(), stubs: { MarkdownRenderer: mdStub } },
     })
     const header = wrapper.find('.cursor-pointer')
     expect(wrapper.find('.stub-md-render').exists()).toBe(false) // 初始收起
@@ -99,10 +101,12 @@ describe('Block working 态 · tool 块', () => {
   it('U5: working=true completed 默认 1 行收起（header 含 toolName+argPath，详情点击展开）', () => {
     const wrapper = mount(Block, {
       props: { type: 'tool', tool: makeTool({ status: 'completed' }), working: true },
+      global: { provide: mockChatProvide() },
     })
-    // header 行含工具名 + 参数路径（1 行摘要可见）
+    // header 行含工具名 + 参数路径（N1 basename chip：文本=basename，完整路径在 chip title 悬停）
     expect(wrapper.text()).toContain('edit')
-    expect(wrapper.text()).toContain('src/App.vue')
+    expect(wrapper.text()).toContain('App.vue')
+    expect(wrapper.find('[data-testid="tool-file-chip"]').attributes('title')).toBe('src/App.vue')
     // 详情区 output 默认收起（不在 DOM）
     expect(wrapper.text()).not.toContain('done')
     // 点击展开
@@ -115,6 +119,7 @@ describe('Block working 态 · tool 块', () => {
   it('U6: working=false completed 默认收起，点击展开', async () => {
     const wrapper = mount(Block, {
       props: { type: 'tool', tool: makeTool({ status: 'completed' }), working: false },
+      global: { provide: mockChatProvide() },
     })
     // 初始收起：output 不在 DOM
     expect(wrapper.text()).not.toContain('done')
@@ -124,14 +129,16 @@ describe('Block working 态 · tool 块', () => {
     expect(wrapper.text()).toContain('done')
   })
 
-  it('U7: working=false running 默认 1 行收起，header 含双环 loader 指示（Demo H）', () => {
+  it('U7: working=false running 默认 1 行收起，header 含呼吸弧 loader 指示（Demo H）', () => {
     const wrapper = mount(Block, {
       props: { type: 'tool', tool: makeTool({ status: 'running', output: undefined }), working: false },
+      global: { provide: mockChatProvide() },
     })
-    // header 行含工具名 + 参数 + 双环 loader（1 行即可观察进度）
+    // header 行含工具名 + 参数（N1 basename chip）+ 呼吸弧 loader（1 行即可观察进度）
     expect(wrapper.text()).toContain('edit')
-    expect(wrapper.text()).toContain('src/App.vue')
-    // Demo H：running 态双环 loader（animate-loader-spin + text-accent），无旧脉冲点
+    expect(wrapper.text()).toContain('App.vue')
+    expect(wrapper.find('[data-testid="tool-file-chip"]').attributes('title')).toBe('src/App.vue')
+    // Demo H：running 态呼吸弧 loader（animate-loader-spin + text-accent），无旧脉冲点
     expect(wrapper.find('.animate-loader-spin').exists()).toBe(true)
     expect(wrapper.find('.animate-working-pulse').exists()).toBe(false)
     // 详情区默认收起（running 不再强制展开）
@@ -143,6 +150,7 @@ describe('Block working 态 · tool 块', () => {
   it('U8: 失败 tool 终态挂载默认展开（error-visibility M1 §3.3.1 选项 A），点击可收起（Demo H：无鲜红框，AlertTriangle ICON）', async () => {
     const wrapper = mount(Block, {
       props: { type: 'tool', tool: makeTool({ status: 'error', output: 'command failed' }), working: false },
+      global: { provide: mockChatProvide() },
     })
     // Demo H：鲜红框已删（无 border-danger / bg-danger-soft）
     expect(wrapper.find('.border-danger').exists()).toBe(false)
@@ -163,10 +171,12 @@ describe('Block working 态 · end_not_received（未收到结果）', () => {
   it('U12: end_not_received header 显工具名（subtle 色），不走红框，不强制展开', () => {
     const wrapper = mount(Block, {
       props: { type: 'tool', tool: makeTool({ status: 'end_not_received', output: undefined }), working: false },
+      global: { provide: mockChatProvide() },
     })
-    // header 含工具名 + 参数路径（1 行摘要）
+    // header 含工具名 + 参数路径（N1 basename chip：文本=basename，完整路径在 chip title 悬停）
     expect(wrapper.text()).toContain('edit')
-    expect(wrapper.text()).toContain('src/App.vue')
+    expect(wrapper.text()).toContain('App.vue')
+    expect(wrapper.find('[data-testid="tool-file-chip"]').attributes('title')).toBe('src/App.vue')
     // 不走红框（border-danger 不存在）
     expect(wrapper.find('.border-danger').exists()).toBe(false)
     // 详情区默认收起（mt-1.font-mono 是展开体，end_not_received 不强制展开）
@@ -183,6 +193,7 @@ describe('Block working 态 · end_not_received（未收到结果）', () => {
         tool: makeTool({ status: 'end_not_received', output: 'partial output', startTime: 1000, endTime: 2000 }),
         working: false,
       },
+      global: { provide: mockChatProvide() },
     })
     const header = wrapper.find('.cursor-pointer')
     // 初始收起：output 不在 DOM

@@ -37,7 +37,11 @@ export default {
         // [chat-flow-polish] sidebar running/waiting badge 呼吸（复用全局 pulse-dot keyframes）
         'pulse-dot': 'pulse-dot 2s ease-in-out infinite',
         blink: 'blink 1s step-end infinite',
-        'loader-spin': 'loader-spin 1.4s linear infinite',
+        // running 呼吸弧整体旋转（ui-optimize-unified 决策 11 / N14）：1.15s/圈非线性
+        // 缓动（每圈快-慢节奏），与 .ld-arc 弧段呼吸/摆动（style.css 全局动画原语）
+        // 叠成三重动画。消费点 = chat 域 7 处 RUNNING_LOADER_SVG 挂点（grep 穷尽核实
+        // 无其他借用者，改参数无外溢）。
+        'loader-spin': 'loader-spin 1.15s cubic-bezier(.6,.1,.35,.9) infinite',
         'ask-user-slide-up': 'ask-user-slide-up var(--duration-slow) var(--ease)',
         'pulse-strong': 'pulse-strong 1.4s ease-in-out infinite',
         'notice-in': 'notice-in 200ms var(--ease)',

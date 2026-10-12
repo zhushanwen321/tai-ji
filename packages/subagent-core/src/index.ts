@@ -301,7 +301,10 @@ export {
   type GlobalConfigReadResult,
 } from "./execution/assembly/config.ts";
 export { isResumable } from "./execution/lifecycle/lifecycle-predicates.ts";
-export { maybeCleanupExpiredSessionFiles } from "./execution/persistence/session-file-gc.ts";
+export {
+  cleanupExpiredEngineJournals,
+  startEngineJournalGcTimer,
+} from "./execution/persistence/engine-journal-gc.ts";
 export { createUiRequestHandlerForMode } from "./execution/ui/ui-request-handler-factory.ts";
 export { WorktreeManager } from "./execution/worktree/worktree-manager.ts";
 export { SubprocessAgentRunner } from "./execution/assembly/subprocess-agent-runner.ts";

@@ -1,6 +1,6 @@
 # TODO：MCP 会话内生效与 pi 升级跟随（I2 / I4 / 方案 D / type 闭集 / subagent 旗标——pi-mcp-management 增量裁决观察项）
 
-状态：观察中——五项均按「触发条件出现才重评」管理，触发前不行动；前三项为待裁决取舍（同触发链），第四项为 pi 升级维护义务，第五项为 subagent 能力扩展观察项。源自 pi-mcp-management 设计增量裁决（§3.1 增量表 I2/I4、§3.2 方案 D、§3.3 D4、§5 U1 辐射面），随该设计交付登记。
+状态：观察中——五项均按「触发条件出现才重评」管理，触发前不行动；前三项为待裁决取舍（同触发链），第四项已由 PS-72 机器门禁承载，第五项为 subagent 能力扩展观察项。源自 pi-mcp-management 设计增量裁决（§3.1 增量表 I2/I4、§3.2 方案 D、§3.3 D4、§5 U1 辐射面），随该设计交付登记。
 
 ## 背景
 
@@ -34,7 +34,7 @@ pi-mcp-management 已交付「写文件、新会话生效」的 MCP 管理模型
 
 义务内容：taiji 保存校验的 `type` 合法值闭集（`"stdio"` / `"http"` / `"streamable-http"`，落点 `packages/runtime/src/infra/pi/pi-mcp-store.ts` 的 `MCP_TYPE_VALUES`）对齐的是 pi 实装校验器 `validateMcpServerConfig` 的 type 分支条件，非文档化承诺。pi 版本升级若扩展 `type` 合法枚举（`sse` → `streamable-http` 的演化史证明该枚举会变），taiji 闭集不同步即误拦 pi 实际接受的粘贴条目。
 
-**执行点**：pi 升级 PR 必查 pi `validateMcpServerConfig` 的 type 分支条件与 taiji 闭集一致性（对齐 C-proc-08 版本门禁的探针重验惯例）。落地形态 = 并入 `scripts/check-pi-semantics.mjs` 探针族；当前尚未并入，pi 升级 PR 人工必查，并入后本条改为机器门禁承载。
+**承载（终态）**：已由 `docs/pi-semantics.json` PS-72 机器门禁承载——probe guard = `packages/runtime/src/infra/pi/__tests__/pi-mcp-store.test.ts` 的 type 闭集断言 + pi 实装对拍；`scripts/check-pi-semantics.mjs` 的 verifiedWith 门禁在 pi 升级时强制重验（对齐 C-proc-08 版本门禁惯例），pi 升级 PR 不再需要人工必查。
 
 ## 5. U1：subagent 模板 `builtin:mcp` 旗标重评
 

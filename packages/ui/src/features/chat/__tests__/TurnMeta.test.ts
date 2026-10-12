@@ -2,9 +2,11 @@
  * TurnMeta.vue 组件测试（W4TC1/W4TC2）。
  *
  * 覆盖：
- * - W4TC1: 思考/工具计数段为纯文本段（mono + text-neutral-dim，无 pill 底色/圆角/图标；
- *   无底色单行六段形态——用户裁决 2026-10-06）
- * - W4TC2: sticky + streaming 状态（sticky 已移除；状态字恒 text-neutral-dim，spinner 恒 accent）
+ * - W4TC1: 思考/工具计数段为 chipn chip（mono + text-neutral-mid + hairline 边框 6px 圆角，
+ *   无 rounded-full pill / 无加粗——M3a demo 权威 .workmeta .chipn 形态，覆盖 2026-10-06
+ *   纯文本段裁决，登记于 .tmp/ui-replica/reports/m3a-turn-skeleton.md 决策清单）
+ * - W4TC2: sticky + streaming 状态（sticky 已移除；状态字恒 text-neutral-dim；
+ *   运行态指示 = 呼吸弧 loader（animate-loader-spin，M3a 换持平 demo run-ic），恒 accent）
  *
  * W1 main-fusion 后：TurnMeta 直接调 useTurnExpansion（共享 store），不再走 expanded prop / update:expanded emit。
  * 测试需 setActivePinia + 传 turnIndex/sessionId，chevron 展开态通过 store 预置 isExpanded(sid, idx) 驱动。
@@ -87,7 +89,7 @@ function mountMeta(props: {
   })
 }
 
-describe('W4TC1: TurnMeta 计数段纯文本化（用户裁决 2026-10-06）', () => {
+describe('W4TC1: TurnMeta 计数段 chipn chip 化（M3a demo 权威）', () => {
   it('i18n panel.message.working 在 zh/en 语言文件均定义（zh 工作中 / en Working…）', () => {
     const zh = readFileSync(resolve(__dirname, '../../../locale/zh-CN/panel.ts'), 'utf8')
     const en = readFileSync(resolve(__dirname, '../../../locale/en-US/panel.ts'), 'utf8')
@@ -95,38 +97,42 @@ describe('W4TC1: TurnMeta 计数段纯文本化（用户裁决 2026-10-06）', (
     expect(en).toContain("working: 'Working…'")
   })
 
-  it('thinkCount 段为纯文本段：mono + text-neutral-dim，无 pill 底色/圆角/加粗（用户裁决 2026-10-06）', () => {
+  it('thinkCount 段为 chipn chip：mono + text-neutral-mid + hairline 边框（M3a demo .chipn 形态）', () => {
     const wrapper = mountMeta({ thinkCount: 3, toolCount: 0 })
     const seg = wrapper.find('.badge-think')
     expect(seg.exists()).toBe(true)
-    // 与区间/tokens 段同构：mono + neutral-dim + tabular-nums
+    // chip 形态：mono + mid 色 + tabular-nums + hairline 边框 + bg-input 底
     expect(seg.classes()).toContain('font-mono')
-    expect(seg.classes()).toContain('text-neutral-dim')
+    expect(seg.classes()).toContain('text-neutral-mid')
     expect(seg.classes()).toContain('tabular-nums')
-    // 去 pill 化：无底色、无圆角、无加粗
+    expect(seg.classes()).toContain('border-hairline')
+    expect(seg.classes()).toContain('bg-bg-input')
+    // 非 rounded-full pill、无加粗
     expect(seg.classes()).not.toContain('bg-surface-2')
     expect(seg.classes()).not.toContain('rounded-full')
     expect(seg.classes()).not.toContain('font-medium')
-    // 用户可见 DOM：`·` 分隔符起头 + 计数值
-    expect(seg.text()).toContain('·')
+    // 用户可见 DOM：计数值（chipn 无 `·` 前缀——demo chip 为独立边框件）
     expect(seg.text()).toContain('3')
+    expect(seg.text()).not.toContain('·')
   })
 
-  it('toolCount 段为纯文本段：mono + text-neutral-dim，无 pill 底色/圆角/加粗（用户裁决 2026-10-06）', () => {
+  it('toolCount 段为 chipn chip：mono + text-neutral-mid + hairline 边框（M3a demo .chipn 形态）', () => {
     const wrapper = mountMeta({ thinkCount: 0, toolCount: 5 })
     const seg = wrapper.find('.badge-tool')
     expect(seg.exists()).toBe(true)
-    // 与区间/tokens 段同构：mono + neutral-dim + tabular-nums
+    // chip 形态：mono + mid 色 + tabular-nums + hairline 边框 + bg-input 底
     expect(seg.classes()).toContain('font-mono')
-    expect(seg.classes()).toContain('text-neutral-dim')
+    expect(seg.classes()).toContain('text-neutral-mid')
     expect(seg.classes()).toContain('tabular-nums')
-    // 去 pill 化：无底色、无圆角、无加粗
+    expect(seg.classes()).toContain('border-hairline')
+    expect(seg.classes()).toContain('bg-bg-input')
+    // 非 rounded-full pill、无加粗
     expect(seg.classes()).not.toContain('bg-surface-2')
     expect(seg.classes()).not.toContain('rounded-full')
     expect(seg.classes()).not.toContain('font-medium')
-    // 用户可见 DOM：`·` 分隔符起头 + 计数值
-    expect(seg.text()).toContain('·')
+    // 用户可见 DOM：计数值（chipn 无 `·` 前缀）
     expect(seg.text()).toContain('5')
+    expect(seg.text()).not.toContain('·')
   })
 
   it('turn-meta 按钮文字：完成态显示「已工作」+ elapsed', () => {
@@ -178,10 +184,10 @@ describe('W4TC2: TurnMeta sticky + streaming 状态', () => {
     expect(wrapper.find('.sticky').exists()).toBe(false)
   })
 
-  it('streaming 态 + isWorkingTurn → Loader2 spinner 存在染 accent；状态字不染 accent（用户裁决 2026-10-06：状态字恒 text-neutral-dim）', () => {
+  it('streaming 态 + isWorkingTurn → 呼吸弧 loader 存在染 accent；状态字不染 accent（用户裁决 2026-10-06：状态字恒 text-neutral-dim）', () => {
     const wrapper = mountMeta({ isWorkingTurn: true, isStreaming: true })
-    // spinner 存在，交互指示保留 accent
-    const spinner = wrapper.find('.animate-spin')
+    // loader 存在（M3a：Loader2 换呼吸弧 RUNNING_LOADER_SVG + animate-loader-spin），交互指示保留 accent
+    const spinner = wrapper.find('.animate-loader-spin')
     expect(spinner.exists()).toBe(true)
     expect(spinner.classes()).toContain('text-accent')
     // 状态字恒暗灰 mono，working 态不再 accent
@@ -192,9 +198,9 @@ describe('W4TC2: TurnMeta sticky + streaming 状态', () => {
     expect(status.classes()).toContain('font-mono')
   })
 
-  it('完成态 → 无 spinner + 状态字 text-neutral-dim（用户裁决 2026-10-06：状态字去彩色）', () => {
+  it('完成态 → 无 loader + 状态字 text-neutral-dim（用户裁决 2026-10-06：状态字去彩色）', () => {
     const wrapper = mountMeta({ isWorkingTurn: false, isStreaming: false })
-    expect(wrapper.find('.animate-spin').exists()).toBe(false)
+    expect(wrapper.find('.animate-loader-spin').exists()).toBe(false)
     expect(wrapper.find('.tm-status').classes()).toContain('text-neutral-dim')
     expect(wrapper.find('.tm-status').classes()).not.toContain('bg-surface-2')
   })
@@ -318,16 +324,127 @@ describe('u3 remove-turn-progress-bar: TurnMeta 已生成 token 数', () => {
 describe('长时生成分级配色已删除（回归锚点）', () => {
   const LONG_RUNS = ['6m 12s', '34m 50s']
 
-  it.each(LONG_RUNS)('超长时长 %s 仍用中性配色（无 text-warn / text-danger；elapsed 段统一 text-neutral-dim——用户裁决 2026-10-06）', (elapsed) => {
+  it.each(LONG_RUNS)('超长时长 %s 仍用中性配色（无 text-warn / text-danger；状态段统一 text-neutral-dim——用户裁决 2026-10-06）', (elapsed) => {
     const wrapper = mountMeta({ isWorkingTurn: true, isStreaming: true, elapsed })
     const elapsedEl = wrapper.find('.elapsed')
     expect(elapsedEl.text()).toBe(elapsed)
-    // elapsed 随状态段统一暗灰（text-neutral-dim 在父段 .tm-status 上，继承生效）
+    // 状态段（.tm-status）随 M3a 保持暗灰底色（demo .workmeta dim 标签）；elapsed 强调走 mid
+    // 色 + fw-mid（demo .workmeta b），warn/danger 分级配色不回归
     expect(wrapper.find('.tm-status').classes()).toContain('text-neutral-dim')
     expect(elapsedEl.classes().some((c) => c.includes('warn') || c.includes('danger'))).toBe(false)
-    const spinner = wrapper.find('.animate-spin')
+    const spinner = wrapper.find('.animate-loader-spin')
     expect(spinner.exists()).toBe(true)
     expect(spinner.classes()).toContain('text-accent')
     expect(spinner.classes().some((c) => c.includes('warn') || c.includes('danger'))).toBe(false)
+  })
+})
+
+// ═════════════════════════════════════════════════════════
+// [bg-notice-fold specs/chat/system-notices.md §3.3/§3.5] settle 收纳折叠标签：
+// 落成态状态字换为「已处理 …」分段（发生序去重 + · 连接），失败词标跨类型累计；
+// 工作态维持「工作中」（临时外部行由 Turn 渲染，两形态不重复出现）。
+// ui 包 i18n mock 回 key 本体（vitest.setup.ts），文案断言锚定键名 + 分段结构。
+// ═════════════════════════════════════════════════════════
+import type { FoldedNoticeRow } from '@taiji/core/domain/chat'
+
+function foldedRow(over: Partial<FoldedNoticeRow> = {}): FoldedNoticeRow {
+  return {
+    type: 'bash',
+    summary: 'pnpm test',
+    fullText: 'pnpm test',
+    outcome: 'success',
+    id: 'task-1',
+    ...over,
+  }
+}
+
+describe('bg-notice-fold: TurnMeta settle 收纳折叠标签', () => {
+  it('落成态：分段标签渲染 + 失败词标 + 类型词 testid（ui i18n mock 回 key）', () => {
+    const turn = makeTurn()
+    const wrapper = mount(TurnMeta, {
+      props: {
+        turn,
+        isWorkingTurn: false,
+        isStreaming: false,
+        thinkCount: 0,
+        toolCount: 0,
+        elapsed: '4s',
+        startedAt: NOW,
+        endedAt: NOW + 4000,
+        isLive: false,
+        turnIndex: turn.index,
+        turnKey: turnStableId(turn),
+        sessionId: SID,
+        foldedRows: [
+          foldedRow({ type: 'bash', outcome: 'success', id: 't1' }),
+          foldedRow({ type: 'bash', outcome: 'failed', id: 't2', summary: 'lint' }),
+          foldedRow({ type: 'subagent', outcome: 'success', id: 'sa-1', summary: 'reviewer' }),
+        ],
+      },
+      global: { provide: mockChatProvide() },
+    })
+    const lbl = wrapper.find('.lbl')
+    // 分段 = 发生序去重（bash 只一段）+ · 分隔；键名即文案源（ui mock 回 key）
+    expect(lbl.text()).toContain('panel.message.noticeFoldedBash')
+    expect(lbl.text()).toContain('panel.message.noticeFoldedSubagent')
+    expect(lbl.text()).toContain('·')
+    // 类型词 testid（bash/subagent 两段；同类型去重后不重复）
+    expect(wrapper.findAll('[data-testid="turn-meta-folded-type-bash"]')).toHaveLength(1)
+    expect(wrapper.find('[data-testid="turn-meta-folded-type-subagent"]').exists()).toBe(true)
+    // 失败词标（1 项失败，跨类型累计）+ warn 档
+    const failTag = wrapper.find('[data-testid="turn-meta-folded-failed"]')
+    expect(failTag.exists()).toBe(true)
+    expect(failTag.text()).toContain('panel.message.noticeFoldFailedTag')
+    expect(failTag.classes()).toContain('text-warn')
+    // elapsed 段保留（收纳标签只替换状态字，时长沿用）
+    expect(wrapper.find('.elapsed').text()).toBe('4s')
+  })
+
+  it('落成态全成功：无失败词标', () => {
+    const turn = makeTurn()
+    const wrapper = mount(TurnMeta, {
+      props: {
+        turn,
+        isWorkingTurn: false,
+        isStreaming: false,
+        thinkCount: 0,
+        toolCount: 0,
+        elapsed: '2s',
+        startedAt: NOW,
+        endedAt: NOW + 2000,
+        isLive: false,
+        turnIndex: turn.index,
+        turnKey: turnStableId(turn),
+        sessionId: SID,
+        foldedRows: [foldedRow({ outcome: 'success' })],
+      },
+      global: { provide: mockChatProvide() },
+    })
+    expect(wrapper.find('[data-testid="turn-meta-folded-failed"]').exists()).toBe(false)
+  })
+
+  it('工作态：状态字维持「工作中」（key），折叠分段与失败词标都不渲染', () => {
+    const turn = makeTurn()
+    const wrapper = mount(TurnMeta, {
+      props: {
+        turn,
+        isWorkingTurn: true,
+        isStreaming: true,
+        thinkCount: 0,
+        toolCount: 0,
+        elapsed: '2s',
+        startedAt: NOW,
+        endedAt: NOW + 2000,
+        isLive: true,
+        turnIndex: turn.index,
+        turnKey: turnStableId(turn),
+        sessionId: SID,
+        foldedRows: [foldedRow({ outcome: 'failed' })],
+      },
+      global: { provide: mockChatProvide() },
+    })
+    expect(wrapper.find('.lbl').text()).toBe('panel.message.working')
+    expect(wrapper.find('[data-testid="turn-meta-folded-type-bash"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="turn-meta-folded-failed"]').exists()).toBe(false)
   })
 })

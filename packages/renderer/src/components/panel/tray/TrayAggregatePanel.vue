@@ -26,24 +26,27 @@
     class="flex min-h-0 w-full flex-1 flex-col"
   >
     <ScrollArea class="min-h-0 flex-1">
-      <div class="flex flex-col gap-2 p-0.5">
+      <!-- 段间 hairline 分隔（demo .tray-seg + .tray-seg { border-top: 1px solid var(--hairline) }） -->
+      <div class="flex flex-col divide-y divide-hairline">
         <!-- built-in 各类别段（顺序 = 外壳 built-in 固定序 bash → subagent → workflow → session） -->
         <section
           v-for="section in sections"
           :key="section.kind"
           :data-testid="`tray-aggregate-section-${section.kind}`"
-          class="flex flex-col gap-0.5"
+          class="flex flex-col gap-0.5 pb-1 pt-1"
         >
+          <!-- 段头（demo .tray-seg-h：mono 10px uppercase、tracking 0.08em、dim；
+               内边距 3/6/5、图标 12px、计数 --fg-2 / 进行中 accent） -->
           <div
-            class="flex shrink-0 items-center gap-1.5 px-1 pb-1 font-mono text-[length:var(--text-2xs)] uppercase tracking-[0.06em] text-neutral-dim"
+            class="flex shrink-0 items-center gap-1.5 px-1.5 pb-[5px] pt-[3px] font-mono text-[length:var(--text-3xs)] uppercase tracking-[0.08em] text-neutral-dim"
           >
-            <component :is="section.icon" class="size-3.5 shrink-0" aria-hidden="true" />
+            <component :is="section.icon" class="size-[13px] shrink-0" aria-hidden="true" />
             <span class="min-w-0 flex-1 truncate">{{ t(`panel.tray.title.${section.kind}`) }}</span>
             <!-- 段头计数：进行中 / 全量（与段内面板 tab 计数同源，不是第二口径） -->
             <span
               :data-testid="`tray-aggregate-count-${section.kind}`"
               class="shrink-0 tabular-nums"
-              :class="section.running > 0 ? 'text-accent' : ''"
+              :class="section.running > 0 ? 'text-accent' : 'text-[color:var(--neutral-fg-2)]'"
             >{{ section.running }}/{{ section.total }}</span>
           </div>
           <div :class="[SEGMENT_HEIGHT_CLASS, 'flex min-h-0 flex-col']">
@@ -62,10 +65,10 @@
           v-for="widget in widgets"
           :key="widget.viewId"
           :data-testid="`tray-aggregate-widget-${widget.viewId}`"
-          class="flex flex-col gap-0.5"
+          class="flex flex-col gap-0.5 pb-1 pt-1"
         >
           <div
-            class="flex shrink-0 items-center gap-1.5 px-1 pb-1 font-mono text-[length:var(--text-2xs)] uppercase tracking-[0.06em] text-neutral-dim"
+            class="flex shrink-0 items-center gap-1.5 px-1.5 pb-[5px] pt-[3px] font-mono text-[length:var(--text-3xs)] uppercase tracking-[0.08em] text-neutral-dim"
           >
             <span class="min-w-0 flex-1 truncate">{{ widget.entry.meta?.title ?? widget.viewId }}</span>
           </div>

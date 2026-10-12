@@ -188,8 +188,8 @@ export interface SettingsTransport {
   // ── 用量 / 子代理引擎 ──
   /** 用量统计（session JSONL 扫描聚合） */
   getUsageStats(): Promise<UsageStatsResult>
-  /** 子代理引擎清单 + 当前默认引擎 */
-  getSubagentEngineConfig(): Promise<{ engines: string[]; defaultEngine: string }>
+  /** 子代理引擎清单 + 当前默认引擎 + per-engine 模型清单/默认模型偏好（D5 扩展，两键 optional） */
+  getSubagentEngineConfig(): Promise<ServerMessageMap['session.subagentEngineConfig']>
 
   // ── coding-plan 额度 ──
   /** 读缓存不发起请求（无缓存返回 { data: null, lastFetchAt: null }） */
@@ -266,6 +266,14 @@ export interface SettingsTransport {
   // ── 子代理引擎 ──
   /** 设置全局默认子代理引擎（写 config.json，新 session 生效） */
   setSubagentDefaultEngine(engineId: string): Promise<{ engineId: string }>
+  /**
+   * 设置 per-engine 默认模型偏好（engine-provider-unification D5：写 config.json
+   * engineDefaults 键，runtime 写入前校验 modelRef ∈ 该引擎模型清单；reply = engineId/modelRef 回显）。
+   */
+  setSubagentEngineDefaultModel(
+    engineId: string,
+    modelRef: string,
+  ): Promise<ServerMessageMap['session.subagentEngineDefaultModelSet']>
 
   // ── OAuth ──
   /** 启动 OAuth flow（device/callback；started=false + error = 启动失败） */

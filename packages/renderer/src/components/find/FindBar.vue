@@ -10,7 +10,7 @@
 <template>
   <div
     v-if="find.isOpen.value && find.surfaceKind.value === surfaceKind"
-    class="absolute right-2 top-2 z-[var(--z-popover)] flex items-center gap-1 rounded-md border border-border bg-elevated p-1 shadow-[var(--shadow-1)]"
+    class="absolute right-2 top-2 z-[var(--z-popover)] flex items-center gap-1 rounded-md border border-border bg-bg-elevated p-1 shadow-[var(--shadow-1)]"
     role="search"
     data-testid="find-bar"
     @keydown.stop

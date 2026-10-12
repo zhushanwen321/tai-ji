@@ -232,6 +232,23 @@ describe('PanelContainer 单 panel + Drawer 壳路径（AC9/AC12 冒烟载体）
     expect(wrapper.find('[data-testid="drawer-panel"]').exists()).toBe(false)
     expect(wrapper.findAll('[data-testid="panel"]')).toHaveLength(1)
   }, 60_000)
+
+  // R3 抽屉域焦点收敛（MF-1-51）：抽屉挂载层（drawer-area = 右抽屉 FindBar surface）持
+  // input 聚焦零框作用域，双属性同压——MF-1-71 后全局 Input 聚焦走 outline 通道，
+  // shadow-none（压 ring/box-shadow 通道）单独压不住 outline，漏一即穿。class 存在性断言 =
+  // 作用域契约断言（jsdom 不加载 Tailwind CSS；作用域定义面就是挂载元素类串本身）。
+  it('R3 抽屉域焦点作用域：drawer-area 根 input 聚焦零边界双属性类在位（outline-none + shadow-none）', async () => {
+    const panel = usePanelStore()
+    panel.loadSession(ROOT_PANEL_ID, 'sess-focus-scope')
+    openDrawerTab('git')
+
+    const wrapper = await mountContainer()
+    await nextTick()
+
+    const area = wrapper.find('[data-testid="drawer-area"]')
+    expect(area.classes()).toContain('[&_input:focus-visible]:outline-none')
+    expect(area.classes()).toContain('[&_input:focus-visible]:shadow-none')
+  }, 60_000)
 })
 
 // 首屏冒烟（TC1）：DrawerPanel 探针 stub 仅本用例覆盖——断言壳派发的 sessionId 落进
@@ -261,9 +278,17 @@ describe('PanelContainer 首屏冒烟（TC1）', () => {
     const handle = wrapper.find('[data-testid="drawer-resize-handle"]')
     expect(handle.exists()).toBe(true)
     expect(handle.attributes('role')).toBe('separator')
+    // aria 值三件套（demo spec §3.2 键盘微调可达性）：钳制区间 20–60 + 当前值（spec drawers spec（demo） §3.2）
+    expect(handle.attributes('aria-valuemin')).toBe('20')
+    expect(handle.attributes('aria-valuemax')).toBe('60')
+    expect(Number(handle.attributes('aria-valuenow'))).toBeGreaterThanOrEqual(20)
+    expect(Number(handle.attributes('aria-valuenow'))).toBeLessThanOrEqual(60)
     // main-area + drawer-area 双区域挂载（手写 flex，宽度拆分）
     expect(wrapper.find('[data-testid="main-area"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="drawer-area"]').exists()).toBe(true)
+    // 壳层 width 过渡 ease 恒 --ease（demo workbench.css .right-pane 权威；E5 分向缓动只属
+    // 显隐层）。classes() 数组元素全等断言：分向 ease-out/ease-in 类回归即红
+    expect(wrapper.find('[data-testid="main-area"]').classes()).toContain('ease-[var(--ease)]')
     // DrawerPanel 探针收到壳派发的 sessionId（分区键跟随 panel）
     expect(wrapper.find('[data-testid="drawer-panel"]').attributes('data-session-id')).toBe('sess-tc1')
   }, 60_000)
@@ -299,6 +324,8 @@ describe('PanelContainer 壳行为迁移（旧 side-drawer.test.ts 行为断言�
     await wrapper.find('[data-testid="drawer-close"]').trigger('click')
     await nextTick()
     expect(wrapper.find('[data-testid="drawer-panel"]').exists()).toBe(false)
+    // 壳层过渡 ease 不随开合方向变化（恒 --ease；E5 分向缓动只属显隐层）
+    expect(wrapper.find('[data-testid="main-area"]').classes()).toContain('ease-[var(--ease)]')
   }, 60_000)
 
   it('点 drawer-close 关闭后焦点回 composer（§6.7 焦点契约右抽屉鼠标通道，TerminalToggleButton（终端开关）同款）', async () => {
@@ -509,7 +536,8 @@ describe('PanelContainer 动态宽度（feat-chat-flow-width）', () => {
       // 不是卡容器——留白在卡内两侧，卡与 header 横跨全宽
       expect(mainStyle).toContain('margin-left: 0')
       expect(mainStyle).toContain('margin-right: 0')
-      expect(mainStyle).toContain('--content-max-w: 60%')
+      // 60% 比例外再封 demo 阅读列 720 cap（min(720px, 60%)——1600×60%=960 ≥ 720 → 实际生效 720）
+      expect(mainStyle).toContain('--content-max-w: min(720px, 60%)')
       expect(areaWidth(wrapper, 'drawer-area')).toBe('0%')
       expect(wrapper.find('[data-testid="drawer-resize-handle"]').exists()).toBe(false)
     } finally {
@@ -517,8 +545,8 @@ describe('PanelContainer 动态宽度（feat-chat-flow-width）', () => {
     }
   }, 60_000)
 
-  it('无 drawer 窄 panel：60% 实算低于 720px 下限 → 内容列撑满（--content-max-w: 100%）', async () => {
-    // 1000 × 60% = 600 < 720 → 下限触发撑满（drawer 挤窄后恒撑满同因）
+  it('无 drawer 窄 panel：60% 实算低于 720px 下限 → 内容列撑满封 720（min(720px, 100%)）', async () => {
+    // 1000 × 60% = 600 < 720 → 下限触发撑满（drawer 挤窄后恒撑满同因）；撑满封 demo 720 cap
     const restoreRect = stubAllElementRects(1000)
     try {
       const panel = usePanelStore()
@@ -528,7 +556,7 @@ describe('PanelContainer 动态宽度（feat-chat-flow-width）', () => {
       await nextTick()
 
       expect(areaWidth(wrapper, 'main-area')).toBe('100%')
-      expect(areaStyle(wrapper, 'main-area')).toContain('--content-max-w: 100%')
+      expect(areaStyle(wrapper, 'main-area')).toContain('--content-max-w: min(720px, 100%)')
     } finally {
       restoreRect()
     }
@@ -657,10 +685,10 @@ describe('PanelContainer 动态宽度（feat-chat-flow-width）', () => {
 
     const wrapper = await mountContainer()
     await nextTick()
-    // standalone：卡撑满（未 stub rect → 宽度未测得，内容列走纯比例分支 60%）
+    // standalone：卡撑满（未 stub rect → 宽度未测得，内容列走纯比例分支 60% 封 720）
     expect(areaWidth(wrapper, 'main-area')).toBe('100%')
     expect(areaStyle(wrapper, 'main-area')).toContain('margin-left: 0')
-    expect(areaStyle(wrapper, 'main-area')).toContain('--content-max-w: 60%')
+    expect(areaStyle(wrapper, 'main-area')).toContain('--content-max-w: min(720px, 60%)')
 
     // 打开 drawer：main 收缩到拆分比例（margin 恒 0 贴左），内容列改撑满
     // [HISTORICAL] 用例原名含「+ layout 事件派发」：taiji:splitter-layout 已随消费方
