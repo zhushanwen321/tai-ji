@@ -28,7 +28,8 @@ import { BUILTIN_PRESET_IDS, isBtwVirtualId } from '@taiji/shared'
 // 缺省 clientUuid 生成走 core 唯一入口（禁直调 crypto.randomUUID，secure context/Node 版本防御）
 import { randomUuid } from '@taiji/core/utils/random-uuid'
 // [D6-⑨ u7] 图片缓存目录推导（shared SSOT，含 sessionId 穿越校验——cache 级联删除用）
-import { getImageCacheDir, getSessionArtifactsDir } from '@taiji/shared/paths'
+// 附件目录推导（shared SSOT，同含穿越校验——attachments 级联删除用）
+import { getAttachmentsDir, getImageCacheDir, getSessionArtifactsDir } from '@taiji/shared/paths'
 import type { IProcessManager, IPiEngine } from '../ports/pi-engine.js'
 import type { ILifecycleSessionOps, ISessionRegistry, ISessionRegisterDeps, IManagedSessionRecord, ManagedSession } from './session-internal.js'
 import type { IManagedSessionView, ScannedSession } from './types.js'
@@ -982,6 +983,11 @@ export class SessionLifecycle implements ISessionRegistry {
     // 探针产物在 .tmp 不入库，仓内可复现证据以 dist 锚点为准。
     // 故不实现 runtime 会话激活预建降级。
     try { rmSync(getSessionArtifactsDir(sessionIdFromSessionFilePath(filePath)), { recursive: true, force: true }) } catch { void 0 }
+    // 粘贴图片附件目录级联（`<dataDir>/attachments/<sessionId>`，
+    // shared getAttachmentsDir 含 sessionId 穿越校验）。与上行 cache/images / artifacts
+    // 级联同一落点、同一幂等形态（recursive + force），best-effort 不阻断删除主链
+    // ——delete 是唯一清理点，防孤儿附件目录无上界累积。
+    try { rmSync(getAttachmentsDir(sessionIdFromSessionFilePath(filePath)), { recursive: true, force: true }) } catch { void 0 }
     // W-Runtime4：清理 session 文件头解析缓存（infra session-file-utils 的 filePath 键
     // 派生缓存，非已删的 label 影子缓存）中的 stale 条目（避免无界增长）
     this.sessionStore.invalidateMetaCache(filePath)
