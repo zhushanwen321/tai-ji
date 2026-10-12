@@ -59,6 +59,10 @@ export default {
     markDone: '标记完成',
     unmarkDone: '取消标记',
     archived: '已归档',
+    // 导出 JSONL（ui-replica-demo-fidelity 通道 1）：右键菜单项；unavailable = sessionFile
+    // 缺失（pi 延迟写入窗口）时的禁用态 title 提示
+    exportJsonl: '导出 JSONL',
+    exportJsonlUnavailable: '会话尚未产生记录文件（首条消息落盘后可导出）',
     assignToProject: '归入项目',
     // 右键菜单「移动到项目」分组标签（demo .ctx-label 权威文案，与 ghost 钮 title 的「归入项目」分开登记）
     moveToProject: '移动到项目',
@@ -91,6 +95,9 @@ export default {
   assignProjectFailed: '归入项目失败：{msg}',
   // 「移动到项目」迁移成功反馈（spec sessions §3.3：点击即迁移 + toast）
   movedToProject: '已移动到项目「{name}」',
+  // 导出 JSONL 反馈（ui-replica-demo-fidelity 通道 1；canceled 静默，无 toast）
+  exportJsonlSuccess: '会话已导出到 {path}',
+  exportJsonlFailed: '导出失败（{code}）：{message}',
   forceQuitFailed: '强制退出失败：{msg}',
   // [投递所有权内核 u3c / D10] 强制退出后 delivery.drain 回收内核未送达条目进 Composer 草稿的显式提示
   forceQuitQueueRecovered: '{count} 条排队消息已收回草稿',

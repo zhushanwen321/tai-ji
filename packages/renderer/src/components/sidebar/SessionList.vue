@@ -128,6 +128,7 @@
             @navigate-parent="emit('navigateParent', $event)"
             @abort="emit('abort', $event)"
             @force-quit="emit('forceQuit', $event)"
+            @export-jsonl="emit('exportJsonl', $event)"
           />
           <div
             v-if="!pg.items.length"
@@ -232,6 +233,7 @@
                   @navigate-parent="emit('navigateParent', $event)"
                   @abort="emit('abort', $event)"
                   @force-quit="emit('forceQuit', $event)"
+                  @export-jsonl="emit('exportJsonl', $event)"
                 />
               </div>
             </div>
@@ -307,6 +309,9 @@ const emit = defineEmits<{
   navigateParent: [parentAgentSessionId: string]
   /** 强制退出（两段确认后）：透传 SessionItem 的 forceQuit，Sidebar 接 sessionApi.forceQuit */
   forceQuit: [sessionId: string]
+  /** 导出 JSONL（ui-replica-demo-fidelity 通道 1）：透传 SessionItem 的 exportJsonl，
+   *  Sidebar 接 exportSessionJsonl IPC + toast。 */
+  exportJsonl: [payload: { sessionId: string; sessionFile?: string; suggestedName?: string }]
 }>()
 
 // 滚动宿主（EdgeFade scrollerEl）：reka ScrollArea 在 slot 内容与真滚动 viewport 之间有

@@ -155,7 +155,7 @@ export { OUTBOUND_FRAME_WARN_BYTES, OUTBOUND_FRAME_TRUNCATE_BYTES, RING_BUDGET_B
 // Electron IPC 通道名 SSOT（u-foundation：renderer-log 上报通道 D2 /
 // image-cache 落盘通道族首成员 D6-⑨）；既有通道仍内联于 preload/main 不在此收敛，
 // 存量边界说明见 ipc-channels.ts 头注释。
-export { RENDERER_LOG, IMAGE_CACHE_WRITE, DEBUG_RUN_LOG_RETENTION, DIAGNOSTICS_EXPORT_BUNDLE, LOCAL_FILE_SERVABLE, LOCAL_FILE_READ } from './ipc-channels'
+export { RENDERER_LOG, IMAGE_CACHE_WRITE, DEBUG_RUN_LOG_RETENTION, DIAGNOSTICS_EXPORT_BUNDLE, SESSION_EXPORT_JSONL, LOCAL_FILE_SERVABLE, LOCAL_FILE_READ } from './ipc-channels'
 // local-file 预检 / 源码读取通道 payload 类型（chat-html-support §6.9 D9：preload 两文件 /
 // renderer lib/ipc / main local-file-prefixes 四方共用同一形态声明——C-comm-22 唯一类型源）。
 export type {
@@ -186,6 +186,13 @@ export {
   type DiagnosticExportSummary,
   type DiagnosticExportError,
   type DiagnosticExportBundleResult,
+} from './ipc-payloads'
+// session:export-jsonl 通道契约（ui-replica-demo-fidelity 通道 1：请求 payload / 三态返回
+// 类型——main handler、preload ElectronAPI 与 renderer 域函数三方共用同一形态声明，防漂移）。
+export type {
+  SessionJsonlExportPayload,
+  SessionJsonlExportError,
+  SessionJsonlExportResult,
 } from './ipc-payloads'
 // browser:shields 遮蔽面上报通道契约（display-containers §6.7：payload 形状 /
 // ShieldFace 单项——preload ElectronAPI 签名、renderer ipc 封装与聚合上报、

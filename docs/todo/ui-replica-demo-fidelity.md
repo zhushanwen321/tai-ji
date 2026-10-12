@@ -1,12 +1,8 @@
 # demo 复刻波待立项数据通道
 
-状态：已关闭，仅余 2 项待立项（2026-10-12 通道 3/4 落地关闭——本文件主体 = 下方 2 项待立项数据通道；已裁决与登记型条目收编于文末「已裁决/登记即关闭」，完整历史 = 本文件 git 历史）。复刻 = Open Design 项目 f7a69696 的 taiji-vue-app 高保真 demo 为唯一视觉权威；登记来源：ui-replica 会话（令牌地基 Wave1 + M0-M9 十模块复刻 + 视觉对比修复三轮 + review-fix-loop）。
+状态：已关闭，仅余 1 项待立项（2026-10-12 通道 1/3/4 落地关闭——本文件主体 = 下方 1 项待立项数据通道；已裁决与登记型条目收编于文末「已裁决/登记即关闭」，完整历史 = 本文件 git 历史）。复刻 = Open Design 项目 f7a69696 的 taiji-vue-app 高保真 demo 为唯一视觉权威；登记来源：ui-replica 会话（令牌地基 Wave1 + M0-M9 十模块复刻 + 视觉对比修复三轮 + review-fix-loop）。
 
-## 待立项数据通道（2 项）
-
-### 1. 会话导出 JSONL
-
-demo 有 mock 导出项，real 任何入口均无该功能；需新增 JSONL 导出数据通道（2026-10-10 用户十项裁决 #4 会话右键菜单信息架构落地时的残留缺口，R6.2 项目锚定分组复刻沿用该登记）。
+## 待立项数据通道（1 项）
 
 ### 2. 悬停详情卡消息计数
 
@@ -16,6 +12,7 @@ demo 悬停详情卡末行 = 「时间 · 消息数」两段（Sidebar.vue `card
 
 ### 待立项通道关闭（2026-10-12 落地）
 
+- **通道 1 · 会话导出 JSONL（已落地）**：会话右键菜单新增「导出 JSONL」项（SessionItemContextMenu，紧随「标记完成」= demo 归档/导出相邻 IA；sessionFile 缺失 = pi 延迟写入窗口 → 菜单项禁用态 + title 提示——缺失是可预知的静态数据态，不为已知不可用的动作走失败 IPC）。数据通道 = 新增 `session:export-jsonl` IPC（shared 通道常量 + payload/result 三态契约：exported 带 path/bytes / canceled 静默 / error 带 EPATH/EINVALID/EDIALOG/fs errno）：main 侧复制前先校验 renderer 半可信源路径位于会话文件三棵树 `<piAgentDir>/sessions|subagents|btw` 之内（piAgentDir 经 `@taiji/shared/paths` getPiAgentDir 与 runtime pi-paths.ts 同源推导，越界拒绝报 EPATH 不 fallback），再弹保存对话框（默认名 = 会话 label 经 basename 剥目录 + 非法字符清洗 + .jsonl 后缀，空值回退 sessionId）+ `fs.promises.copyFile` 直复制（不读入内存缓冲，会话文件可达数十 MB）。落点 = `apps/electron/main/sessions/session-export-ipc.ts`（ipc-handlers 聚合点注册）+ preload `exportSessionJsonl` + renderer 域函数 `api/domains/session-export.ts` + SessionItem → SessionList → Sidebar → useSidebarSessionActions 事件链（成功/失败 toast，canceled 静默对齐 DiagnosticsExportAction 口径）；i18n key `sidebar.sessionItem.exportJsonl` / `exportJsonlUnavailable` / `sidebar.exportJsonlSuccess` / `exportJsonlFailed` zh/en 双侧。
 - **通道 3 · composer image 徽章真图缩略图（已落地）**：行内 image badge 与上下文行 image chip 的 lead 均为 16px 真图缩略（demo `.ichip .thumb` / `.ctxchip .thumb` 四值：16px / r-3.5px / object-fit cover / flex none）。数据通道 = 既有 local-file:// 协议复用（未新开通路）：暂存图落盘 attachments/tmpdir（白名单内），URL 构造收敛 `@taiji/shared` `localFileUrl` 单点；加载失败回退 ImageIcon 占位不留破图。落点 = dom-core chip-commands `makeImageThumb`（行内 badge）+ renderer ContextChipsBar（上下文档）+ core context-chips 派生带 path。
 - **通道 4 · 模型弹层 .pt 行尾标签（已落地）**：模型弹层命中 `config.defaults.defaultModel` 的行渲染行尾「默认」标签（demo `.pt` 四值：margin-left auto / font-mono / fs-xs→`--text-3xs` / dim），i18n key `panel.modelSelect.defaultTag` zh/en 双侧。落点 = ModelPickerPanel `defaultModel` prop（双匹配与 isRowSelected 同构）+ ModelSelectPopover / ModelThinkingAggregate 数据面透传；ScheduleForm 直挂面不传（无 demo 权威，行为不变）。demo mock 的「高速/视觉」tag 是 mock 专属人肉标注（real 无数据源），不做编造，空 tag 为合法态。
 

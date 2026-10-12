@@ -21,6 +21,7 @@ import type { Ref } from 'vue'
 import { useChat } from '@/composables/features/chat/useChat'
 import { session as sessionApi } from '@/api'
 import { delivery } from '@/api/domains/delivery'
+import { exportSessionJsonl } from '@/api/domains/session-export'
 import { composerInjectionStore } from '@/composables/panel/composer-injection-store'
 import { useSearchModalDeps } from '@/composables/features/search/useSearchModalDeps'
 import { useSideDrawer } from '@/composables/features/drawer/useSideDrawer'
@@ -243,6 +244,22 @@ export function useSidebarSessionActions(options: UseSidebarSessionActionsOption
     void loadSessions()
   }
 
+  /**
+   * 导出会话 JSONL（ui-replica-demo-fidelity 通道 1，SessionItemContextMenu 两段无确认
+   * 单击 emit）：payload 原样交 main 侧 IPC（源路径三树校验 + 保存对话框 + copyFile 都在
+   * main）。三态永不 reject（shared SessionJsonlExportResult 契约，无需 catch）：
+   * exported → 成功 toast（含保存路径）；error → 错误 toast（含错误码）；canceled → 静默
+   * （用户取消对话框 = 导出未发生，与 DiagnosticsExportAction 同口径）。
+   */
+  async function onExportSessionJsonl(payload: { sessionId: string; sessionFile?: string; suggestedName?: string }): Promise<void> {
+    const res = await exportSessionJsonl(payload)
+    if (res.status === 'exported') {
+      toastInfo(t('sidebar.exportJsonlSuccess', { path: res.path }))
+    } else if (res.status === 'error') {
+      toastError(t('sidebar.exportJsonlFailed', { code: res.error.code, message: res.error.message }))
+    }
+  }
+
   /** [w5] SearchModal deps 组装（SearchDeps 壳适配）+ drawer/toast 接线（C-NT-3/C-W4-5）：file 跳转开 detail tab；confirm 失败 toast（复用顶部 toastError）。 */
   const searchDeps = useSearchModalDeps({
     selectSession,
@@ -265,6 +282,7 @@ export function useSidebarSessionActions(options: UseSidebarSessionActionsOption
     onForceQuitSession,
     onConfirmRename,
     onAssignProject,
+    onExportSessionJsonl,
     onRetryLoadSessions,
     searchDeps,
     onOpenSearchDrawer,

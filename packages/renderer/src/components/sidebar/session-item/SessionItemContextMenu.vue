@@ -18,8 +18,9 @@
       <slot />
     </ContextMenuTrigger>
     <!-- 右键菜单（2026-10-10 入口重设计后恒有内容：标记完成/引用到输入区 + 移动到项目
-         分组；查看父/停止/强制退出按条件插入）。跳转/停止/退出逻辑由上层接线，
-         本组件只保证事件链 emit navigateParent / abort / forceQuit。 -->
+         分组；导出 JSONL（2026-10-12 立项落地）/查看父/停止/强制退出按条件插入）。
+         跳转/停止/退出/导出逻辑由上层接线，本组件只保证事件链 emit navigateParent /
+         abort / forceQuit / exportJsonl。 -->
     <ContextMenuPortal>
       <ContextMenuContent
         ref="menuContentRef"
@@ -41,6 +42,22 @@
         >
           <Archive :class="markedDone ? 'fill-current' : ''" />
           <span>{{ markedDone ? t('sidebar.sessionItem.unmarkDone') : t('sidebar.sessionItem.markDone') }}</span>
+        </ContextMenuItem>
+        <!-- 导出 JSONL（ui-replica-demo-fidelity 通道 1，2026-10-12 立项落地；demo 菜单
+             归档/导出相邻，紧随标记完成）。sessionFile 缺失（pi 延迟写入窗口，首条消息前
+             文件未落盘）→ 禁用态：缺失是可预知的静态数据态（SessionSummary 快照已含该
+             信息），禁用即最短反馈路径，不为已知不可用的动作走一轮失败 IPC。导出经
+             emit exportJsonl 上层接线（SessionList → Sidebar → useSidebarSessionActions，
+             toast 反馈与 abort/forceQuit 同通道）。 -->
+        <ContextMenuItem
+          data-testid="session-export-jsonl-item"
+          class="flex h-[28px] w-full cursor-pointer select-none items-center gap-[8px] rounded-sm px-[9px] text-[length:var(--text-xs)] text-neutral-fg outline-none hover:bg-surface-hover hover:text-neutral-fg data-[highlighted]:bg-surface-hover data-[highlighted]:text-neutral-fg data-[disabled]:pointer-events-none data-[disabled]:text-neutral-dim [&_svg]:size-[13px]"
+          :disabled="!sessionFile"
+          :title="sessionFile ? undefined : t('sidebar.sessionItem.exportJsonlUnavailable')"
+          @select="onExportJsonl"
+        >
+          <FileDown />
+          <span>{{ t('sidebar.sessionItem.exportJsonl') }}</span>
         </ContextMenuItem>
         <!-- 引用到输入区（自 ghost 层迁入 2026-10-10）：四符号体系 §3.1.2 侧边栏直引 G2 入口，
              经 composerInjectionStore 一次性通道（语义同原 ghost 钮，landing 态 target=new）。 -->
@@ -98,8 +115,9 @@
              demo .ctxmenu button 同参（demo overlays spec §6 + §5.6 验收：项目名距菜单左缘
              ≈35px = 菜单 p4 + 行 px9 + 勾标列 14 + gap 8）。归属判定与 ghost
              Popover 同口径（projectId || '' 归一，review S-2）；归类动作 emit setProject
-             复用 SessionItem 既有出站链（D14）。行操作组（重命名/归档/导出 JSONL/删除）
-             不在菜单承载（收敛 hover ghost 层），差异登记同上。 -->
+             复用 SessionItem 既有出站链（D14）。行操作组中「导出 JSONL」已于 2026-10-12
+             立项进菜单（ui-replica-demo-fidelity 通道 1，紧随标记完成 = demo 归档/导出
+             相邻 IA）；重命名/删除仍归 ghost 层。 -->
         <!-- sep：demo .ctxmenu .sep = height 1px + margin 4px 6px + var(--hairline)；bg-hairline
              无对应工具类规则（config 只扩展 borderColor.hairline），曾渲染透明分隔线。 -->
         <ContextMenuSeparator class="my-1 mx-[6px] h-px bg-[var(--hairline)]" />
@@ -131,7 +149,8 @@
 <script setup lang="ts">
 import { computed, ref, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Archive, Check, CornerLeftUp, Power, Quote, Square } from '@lucide/vue'
+import { Archive, Check, CornerLeftUp, FileDown, Power, Quote, Square } from '@lucide/vue'
+import type { SessionJsonlExportPayload } from '@taiji/shared'
 import {
   ContextMenuRoot,
   ContextMenuTrigger,
@@ -160,6 +179,9 @@ const props = defineProps<{
   canStop: boolean
   /** 当前归属 project id（undefined = 未归类，归一空串后与默认项目项命中勾标，review S-2） */
   projectId?: string
+  /** 会话 JSONL 文件绝对路径（SessionSummary.sessionFile 透传）：
+   *  「导出 JSONL」的 payload 源；缺失（pi 延迟写入窗口）→ 菜单项禁用。 */
+  sessionFile?: string
 }>()
 
 const emit = defineEmits<{
@@ -173,6 +195,10 @@ const emit = defineEmits<{
   /** 归入项目（D14 语义修正）：payload 单对象（规则 #1）。projectId 空串 = 归回默认项目。
    *  与 ghost Popover 的 setProject 同链路（SessionItem 透传 → Sidebar → useSidebar）。 */
   setProject: [{ sessionId: string; projectId: string }]
+  /** 导出 JSONL（ui-replica-demo-fidelity 通道 1）：payload 单对象（规则 #1），即 main
+   *  侧 IPC 请求体（源路径三树校验 + 保存对话框 + copyFile 都在 main）。IPC 调用与
+   *  toast 反馈由上层接线（Sidebar → useSidebarSessionActions）。 */
+  exportJsonl: [payload: SessionJsonlExportPayload]
 }>()
 
 const { t } = useI18n()
@@ -264,5 +290,15 @@ function onViewParent(): void {
   const parent = props.parentAgentSessionId
   if (!parent) return
   emit('navigateParent', parent)
+}
+
+/** 导出 JSONL（单段确认，无破坏性不进两段式）：payload = main 侧 IPC 请求体原形
+ *  （suggestedName = 会话 label——非法文件名字符清洗在 main 侧做，不双份实现）。 */
+function onExportJsonl(): void {
+  emit('exportJsonl', {
+    sessionId: props.sessionId,
+    sessionFile: props.sessionFile,
+    suggestedName: `${props.sessionLabel}.jsonl`,
+  })
 }
 </script>

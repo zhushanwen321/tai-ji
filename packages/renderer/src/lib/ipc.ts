@@ -7,7 +7,7 @@
  *
  * 依赖方向：无下游（读全局 window.electronAPI，类型经 declare global 自动可用）
  */
-import type { LatestReleaseInfo, UpdateStage, UpdateSettings, UpdateErrorPayload, ProxyTestResult, LaunchResult, UpdateCheckResult, UpdateInstallResult, RendererLogPayload, DiagnosticExportBundlePayload, DiagnosticExportBundleResult, RemoteAccessInfo, RemoteAccessToggleResult, ShieldsFacesPayload, OverlayContentKind, LocalFileServableReason, LocalFileServableResult, LocalFileReadReason, LocalFileReadResult } from '@taiji/shared'
+import type { LatestReleaseInfo, UpdateStage, UpdateSettings, UpdateErrorPayload, ProxyTestResult, LaunchResult, UpdateCheckResult, UpdateInstallResult, RendererLogPayload, DiagnosticExportBundlePayload, DiagnosticExportBundleResult, SessionJsonlExportPayload, SessionJsonlExportResult, RemoteAccessInfo, RemoteAccessToggleResult, ShieldsFacesPayload, OverlayContentKind, LocalFileServableReason, LocalFileServableResult, LocalFileReadReason, LocalFileReadResult } from '@taiji/shared'
 import type { ImageCacheWritePort } from '@taiji/core'
 
 /** preload 注入的 electronAPI（web/mock / node 测试环境为 undefined——后者连
@@ -547,6 +547,21 @@ export function exportDiagnosticBundle(
   payload?: DiagnosticExportBundlePayload,
 ): Promise<DiagnosticExportBundleResult> {
   return api?.exportDiagnosticBundle?.(payload) ?? Promise.resolve({ status: 'canceled' })
+}
+
+// ── 会话 JSONL 导出（ui-replica-demo-fidelity 待立项通道 1）──────────────
+
+/**
+ * 导出会话 JSONL（main 校验源路径位于会话文件三棵树后弹保存对话框，copyFile 直复制）。
+ * 三态永不 reject（main 侧零 rejection 契约，见 shared SessionJsonlExportResult）：
+ * exported（含产物路径与字节数）/ canceled（用户取消保存对话框）/ error（含具体错误码）。
+ * 无 IPC（web/mock 无 preload，含旧 preload 未暴露该方法的降级面）返回 canceled——
+ * 没有保存对话框可弹 = 导出未发生，调用方（useSidebarSessionActions）对 canceled 静默。
+ */
+export function exportSessionJsonl(
+  payload: SessionJsonlExportPayload,
+): Promise<SessionJsonlExportResult> {
+  return api?.exportSessionJsonl?.(payload) ?? Promise.resolve({ status: 'canceled' })
 }
 
 // ── 图片缓存写 port（D6-⑨，MF-7 装配点）────────

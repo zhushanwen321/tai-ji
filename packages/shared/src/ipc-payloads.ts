@@ -198,6 +198,53 @@ export type DiagnosticExportBundleResult =
   | { status: 'canceled' }
   | { status: 'error'; error: DiagnosticExportError }
 
+// ── 会话 JSONL 导出（SESSION_EXPORT_JSONL = 'session:export-jsonl' invoke 通道）
+//    [ui-replica-demo-fidelity 待立项通道 1，2026-10-12 立项] ─────────────────────
+
+/**
+ * 会话 JSONL 导出请求 payload（renderer → main）。
+ *
+ * sessionFile 来自 renderer 持有的 SessionSummary.sessionFile（活跃 session 来自 pi
+ * get_state，持久化 session 来自磁盘扫描），是**半可信输入**——main 侧复制前必须校验
+ * 其位于会话文件三棵树 `<piAgentDir>/sessions|subagents|btw` 之内，越界拒绝不 fallback。
+ * 缺失 = pi 延迟写入窗口（首条消息前文件未落盘，规则 #6），renderer 菜单项禁用；
+ * main 侧仍按畸形 payload 防御（报错可消费，不静默）。
+ */
+export interface SessionJsonlExportPayload {
+  /** 目标会话 id（日志归因 + suggestedName 缺省回退，不参与源路径推导） */
+  sessionId: string
+  /** 会话 JSONL 绝对路径（SessionSummary.sessionFile；main 侧三树校验的校验对象） */
+  sessionFile?: string
+  /** 保存对话框默认文件名（renderer 侧建议值 = 会话 label；main 侧清洗后使用，不盲信） */
+  suggestedName?: string
+}
+
+/** 导出失败明细（对齐 DiagnosticExportError 形态：具体 errno，不吞成布尔）。 */
+export interface SessionJsonlExportError {
+  /** 错误码：EPATH（源路径越界三树）/ EINVALID（payload 畸形缺 sessionFile）/
+   *  EDIALOG（保存对话框失败）/ fs errno（如 ENOENT / EACCES）；其余归一 EUNKNOWN */
+  code: string
+  message: string
+}
+
+/**
+ * 会话 JSONL 导出结果（SESSION_EXPORT_JSONL invoke 返回值）。
+ *
+ * **零 rejection 面**（对齐 DiagnosticExportBundleResult 先例）：用户取消保存对话框返回
+ * canceled；校验拒绝/复制失败返回 error（含具体错误码）——handler 全路径不向 renderer 抛
+ * invoke rejection，调用方按 status 三态分支。
+ */
+export type SessionJsonlExportResult =
+  | {
+    status: 'exported'
+    /** 产物 JSONL 绝对路径（用户自选保存位置） */
+    path: string
+    /** 复制字节数（源文件大小） */
+    bytes: number
+  }
+  | { status: 'canceled' }
+  | { status: 'error'; error: SessionJsonlExportError }
+
 // ── shieldsView 遮蔽面上报（browser:shields invoke 通道，display-containers §6.7）──
 
 /** 几何矩形（视口坐标 CSS px，getBoundingClientRect 同空间；view rect 链同一坐标系） */

@@ -60,6 +60,10 @@ export default {
     markDone: 'Mark done',
     unmarkDone: 'Unmark done',
     archived: 'Archived',
+    // Export JSONL (ui-replica-demo-fidelity channel 1): context-menu item; unavailable =
+    // disabled-state title shown when sessionFile is missing (pi lazy-write window)
+    exportJsonl: 'Export JSONL',
+    exportJsonlUnavailable: 'No session file yet (available after the first message is written)',
     assignToProject: 'Assign to project',
     // Context-menu "Move to project" group label (demo .ctx-label authoritative copy; kept
     // separate from the ghost button title "Assign to project")
@@ -95,6 +99,9 @@ export default {
   assignProjectFailed: 'Failed to assign to project: {msg}',
   // "Move to project" success feedback (sessions spec §3.3: move + toast on click)
   movedToProject: 'Moved to project "{name}"',
+  // Export JSONL feedback (ui-replica-demo-fidelity channel 1; canceled is silent — no toast)
+  exportJsonlSuccess: 'Session exported to {path}',
+  exportJsonlFailed: 'Export failed ({code}): {message}',
   forceQuitFailed: 'Failed to force quit: {msg}',
   // [delivery-ownership kernel u3c / D10] explicit toast after forceQuit drains undelivered kernel entries into the Composer draft
   forceQuitQueueRecovered: '{count} queued message moved back to draft | {count} queued messages moved back to draft',

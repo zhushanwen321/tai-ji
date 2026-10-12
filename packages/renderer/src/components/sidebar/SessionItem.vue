@@ -22,10 +22,12 @@
     :can-force-quit="canForceQuit"
     :can-stop="canStop"
     :project-id="session.projectId"
+    :session-file="session.sessionFile"
     @navigate-parent="emit('navigateParent', $event)"
     @abort="emit('abort', $event)"
     @force-quit="emit('forceQuit', $event)"
     @set-project="emit('setProject', $event)"
+    @export-jsonl="emit('exportJsonl', $event)"
   >
     <!-- 激活态 = demo .si.on（workbench.css 文件尾 Tier B）：无底无框，仅行文字提亮 fg；
          非激活行不加行级色（标题色三级范式：普通 fg-2 由 Display 的 .nm 分支承载，
@@ -158,6 +160,9 @@ const emit = defineEmits<{
   abort: [sessionId: string]
   /** 强制退出（两段确认后 emit）：杀 pi 进程 + stopped 收敛，上层接 RPC。 */
   forceQuit: [sessionId: string]
+  /** 导出 JSONL（ui-replica-demo-fidelity 通道 1）：透传 ContextMenu 的 exportJsonl
+   *  （payload = main 侧 IPC 请求体），Sidebar 接 exportSessionJsonl IPC + toast。 */
+  exportJsonl: [payload: { sessionId: string; sessionFile?: string; suggestedName?: string }]
 }>()
 
 /** dead session（进程已退出）置灰，仍可点击（点击触发 restore 重开） */
