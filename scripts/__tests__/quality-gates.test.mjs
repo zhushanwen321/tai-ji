@@ -6,12 +6,16 @@
  * 同样注入，不写盘读盘）。
  */
 import { describe, it, expect } from 'vitest'
+import { mkdtempSync, rmSync, realpathSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { delimiter, dirname, join } from 'node:path'
 import {
   parseGateArgs,
   resolveBase,
   buildCoverageCommand,
   buildMetricsCommand,
   buildTypecheckSteps,
+  buildGateEnv,
   hasExecutableLines,
   judgeNoLcov,
   runGates,
@@ -279,5 +283,36 @@ describe('hasExecutableLines：可执行行口径单元矩阵', () => {
     expect(hasExecutableLines('export function f() {}\n', 'a.ts')).toBe(true)
     expect(hasExecutableLines('export class C {}\n', 'a.ts')).toBe(true)
     expect(hasExecutableLines('export enum E { A }\n', 'a.ts')).toBe(true)
+  })
+})
+
+describe('buildGateEnv：门禁子进程 PATH 自举', () => {
+  it('存在的候选目录（PNPM_HOME）追加到现有 PATH 尾部，原 PATH 顺序保持、其余 env 透传', () => {
+    const pnpmHome = mkdtempSync(join(tmpdir(), 'quality-gates-env-'))
+    try {
+      const env = buildGateEnv({ PATH: '/usr/bin:/bin', PNPM_HOME: pnpmHome, MY_FLAG: '1' })
+      expect(env.PATH.split(delimiter).slice(0, 2)).toEqual(['/usr/bin', '/bin'])
+      expect(env.PATH.split(delimiter)).toContain(pnpmHome)
+      expect(env.MY_FLAG).toBe('1')
+    } finally {
+      rmSync(pnpmHome, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    }
+  })
+  it('PATH 已含的目录不重复追加', () => {
+    const pnpmHome = mkdtempSync(join(tmpdir(), 'quality-gates-env-'))
+    try {
+      const env = buildGateEnv({ PATH: `/usr/bin${delimiter}${pnpmHome}`, PNPM_HOME: pnpmHome })
+      expect(env.PATH.split(delimiter).filter((d) => d === pnpmHome)).toHaveLength(1)
+    } finally {
+      rmSync(pnpmHome, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    }
+  })
+  it('不存在的候选目录不追加', () => {
+    const env = buildGateEnv({ PATH: '/usr/bin', PNPM_HOME: join(tmpdir(), 'quality-gates-nonexistent-xyz') })
+    expect(env.PATH.split(delimiter)).not.toContain(join(tmpdir(), 'quality-gates-nonexistent-xyz'))
+  })
+  it('真实环境：运行中 node 的真实 bin 目录（symlink 解析后）必在自举后的 PATH 中', () => {
+    const nodeRealBinDir = dirname(realpathSync(process.execPath))
+    expect(buildGateEnv().PATH.split(delimiter)).toContain(nodeRealBinDir)
   })
 })

@@ -28,8 +28,9 @@
  *         2 = 用法/环境错误（py 实体缺失、base 无法解析、py 工具错误）
  */
 import { execFileSync, spawnSync } from 'node:child_process'
-import { existsSync, readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs'
+import { delimiter, dirname, join } from 'node:path'
+import { homedir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { resolve } from 'node:path'
 
@@ -257,16 +258,63 @@ export function judgeNoLcov(report, readHead) {
   return { violations, exempt }
 }
 
+/**
+ * 门禁子进程 PATH 自举（node 版本管理器环境兜底）。quality-gates 常被非交互宿主
+ * （workflow / 编辑器任务面板）spawn，其 PATH 可能缺 nvm/volta 等版本管理器的 bin
+ * 目录——pnpm/npx/fallow 全部 spawnSync ENOENT，typecheck 四门 + coverage/metrics
+ * 门齐挂（2026-10-12 dev-merge gates round 2 实例）。自举依据：本脚本能跑起来 =
+ * process.execPath 的 node 一定存在，其 symlink 解析后的真实 bin 目录（nvm 形态）
+ * 就是全套 node 工具链所在；另补 pnpm 官方默认安装位。
+ * 追加（不前置）到现有 PATH 尾部——调用方显式配置的工具链恒优先，自举只兜底缺漏。
+ */
+export function buildGateEnv(baseEnv = process.env) {
+  const existing = splitPath(baseEnv.PATH)
+  const extra = candidateToolBinDirs(baseEnv).filter((dir) => isDirectory(dir) && !existing.includes(dir))
+  return { ...baseEnv, PATH: [...existing, ...extra].join(delimiter) }
+}
+
+function splitPath(pathValue) {
+  return String(pathValue || '').split(delimiter).filter(Boolean)
+}
+
+/** node 工具链候选目录（按命中可靠性排序；存在性过滤在 buildGateEnv 统一做）。 */
+function candidateToolBinDirs(baseEnv) {
+  const candidates = []
+  // execPath 未解析形态（homebrew shim 目录等，已在 PATH 时被去重过滤）
+  candidates.push(dirname(process.execPath))
+  try {
+    // symlink 解析后的真实 node 所在 bin 目录（nvm/volta 形态，pnpm/npm/npx/corepack 同目录）
+    candidates.push(dirname(realpathSync(process.execPath)))
+  } catch {
+    // node 实体被移除等边缘情形：跳过该候选
+  }
+  if (baseEnv.PNPM_HOME) candidates.push(String(baseEnv.PNPM_HOME))
+  candidates.push(join(homedir(), 'Library', 'pnpm')) // pnpm 官方 mac 安装位
+  candidates.push(join(homedir(), '.local', 'share', 'pnpm')) // pnpm 官方 linux 安装位
+  return candidates
+}
+
+function isDirectory(dir) {
+  try {
+    return statSync(dir).isDirectory()
+  } catch {
+    return false
+  }
+}
+
 /** 组装真实依赖（测试注入点：runGates 的全部 IO 经 deps）。 */
 export function createDefaultDeps(cwd = process.cwd()) {
   const root = execFileSync('git', ['rev-parse', '--show-toplevel'], {
     cwd, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'],
   }).trim()
+  // 门禁子进程统一用自举后的 env：typecheck 的 pnpm/npx 直接受益；coverage-gate.py /
+  // metrics-gate.py 以 {**os.environ} 继承本 env，其内部的 npx vitest / fallow 同样受益
+  const gateEnv = buildGateEnv()
   return {
     root,
     git: (args) => execFileSync('git', args, { cwd: root, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] }),
-    exec: (cmd, args, relCwd) => spawnSync(cmd, args, { cwd: join(root, relCwd), encoding: 'utf-8' }),
-    runPython: (args) => spawnSync(args[0], args.slice(1), { cwd: root, encoding: 'utf-8' }),
+    exec: (cmd, args, relCwd) => spawnSync(cmd, args, { cwd: join(root, relCwd), encoding: 'utf-8', env: gateEnv }),
+    runPython: (args) => spawnSync(args[0], args.slice(1), { cwd: root, encoding: 'utf-8', env: gateEnv }),
     exists: (rel) => existsSync(join(root, rel)),
     readJson: (rel) => {
       try {
@@ -360,6 +408,7 @@ function runTypecheckGates(deps, gates) {
 function typecheckFailDetail(step, r) {
   if (r.status === null && r.error) {
     return `命令无法执行：${step.cmd} 不在 PATH 或不可执行（${r.error.message}）。` +
+      `注：脚本已把 node 实际安装位（含 symlink 解析）与 pnpm 官方目录追加进 PATH，仍未找到。` +
       `恢复：确保 pnpm/npx 在 PATH 中（node 版本管理器环境需先加载，如 nvm.sh）`
   }
   return tailLines((r.stderr || '') + (r.stdout || ''), 30)
