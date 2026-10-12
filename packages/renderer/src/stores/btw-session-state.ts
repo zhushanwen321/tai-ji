@@ -15,6 +15,8 @@
  *
  * mainSid 绑定：btw.list / btw.create reply 的 mainSid（BtwPanel 拉取/建线时写入），
  * 供回退解析「该线归属哪个主会话」——vid 本身只编码线的 pi 会话 id，不含主会话。
+ *
+ * 数据登记：docs/architecture/data-source-registry.md 主表 #63（C-data-02）。
  */
 import { defineStore } from 'pinia'
 import { isBtwVirtualId } from '@taiji/shared'

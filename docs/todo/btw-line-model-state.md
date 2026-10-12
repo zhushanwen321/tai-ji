@@ -11,6 +11,7 @@
   - store 只持「线自身切换回执」真值（useModel switchModel / setThinkingLevel 回执生效值，按 id 类别分流写入）；
   - 显示解析 = 线回执 → 主会话态回退（维度级合并）。回退依据 = fork 继承事实：线 spawn 用 `model: undefined + inheritSessionModel: true`（btw-line-spawn-options.ts），未切换过的维度真值 ≡ 主会话创建线当时值；
   - vid → mainSid 绑定由 BtwPanel loadThreads / createThread 写入。
+  - 显示态 store 已按 C-data-02 登记 `docs/architecture/data-source-registry.md` 主表 #63（2026-10-12 dev-merge branch-review 补登）——本条 todo 承载的权威通路缺口状态不变。
 
 ## 已知缺口（近似态覆盖不到的形态）
 
