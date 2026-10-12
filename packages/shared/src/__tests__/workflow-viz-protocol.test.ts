@@ -4,7 +4,7 @@
  * 验证四层：
  * ① DAG RPC 错误码四枚举与 §3.1-5 逐字对齐（快照式锚定 + 类型级双向穷举）+
  *    reply 判别 union 两臂（成功 / 结构化错误）；
- * ② 事件流截断形态与 §3.1-4 逐字对应（白名单四字段 + 2KB 阈值 + truncatedFields
+ * ② 事件流截断形态与 §3.1-4 逐字对应（白名单五字段 + 2KB 阈值 + truncatedFields
  *    标注形态）+ 事件条目判别联合（跟随 core WorkflowRunEvent 词表）；
  * ③ fold 透出字段（WorkflowAgentCall.attempts/lastRetry + WorkflowRunRecord.phases/
  *    argsSummary）纯加法在盘、既有契约字段不回退；
@@ -75,10 +75,11 @@ const DAG_ERROR_CODES = [
 ] as const
 
 /**
- * §3.1-4 截断白名单四字段（逐字）：agent-started.input / agent-settled.result /
- * run-created.scriptSource / run-created.args。
+ * §3.1-4 截断白名单五字段（逐字）：agent-started.input / agent-settled.result /
+ * run-created.scriptSource / run-created.args / worker-log 的 entry.message
+ * （键名 entryMessage 指向嵌套 entry 内的 message 字段）。
  */
-const TRUNCATED_FIELD_NAMES = ['input', 'result', 'scriptSource', 'args'] as const
+const TRUNCATED_FIELD_NAMES = ['input', 'result', 'scriptSource', 'args', 'entryMessage'] as const
 
 /** §3.1-2① record 事件词表（跟随 core WorkflowRunEvent 联合 11 成员——subagent-model-switch 增 model-override 记账帧）。 */
 const EVENT_TYPE_NAMES = [
@@ -171,7 +172,7 @@ describe('session.getWorkflowRunEvents 协议契约（U2，设计 §3.1-4 SSOT�
     expectTypeOf<EventsErrArm['sessionId']>().toEqualTypeOf<string>()
   })
 
-  it('截断形态：白名单四字段与 §3.1-4 截断清单逐字一致（快照式锚定 + 类型域穷举）', () => {
+  it('截断形态：白名单五字段与 §3.1-4 截断清单逐字一致（快照式锚定 + 类型域穷举）', () => {
     expect([...WORKFLOW_RUN_EVENT_TRUNCATED_FIELDS]).toEqual([...TRUNCATED_FIELD_NAMES])
     expectTypeOf<WorkflowRunEventEntry['truncatedFields']>().toEqualTypeOf<
       (typeof TRUNCATED_FIELD_NAMES)[number][] | undefined

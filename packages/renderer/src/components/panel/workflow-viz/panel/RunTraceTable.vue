@@ -133,14 +133,12 @@ function stoppedColorOf(runStatus: WorkflowRunStatus, outcome: WorkflowRunOutcom
 }
 
 /**
- * 派生态 → 状态点着色（查表全枚举 WorkflowCallDerivedStatus 五值——嵌套三元链的
- * 平铺替代，retrying 与 running 同 accent）。
+ * 派生态 → 状态点着色（dot 仅非活态渲染：running/retrying 活态走 Loader2 转圈分支，
+ * 不落 dot 表——查表键 = dot 可达三态，嵌套三元链的平铺替代）。
  */
-const STATUS_DOT_CLASS: Record<TraceRow['view']['status'], string> = {
+const STATUS_DOT_CLASS: Record<Exclude<TraceRow['view']['status'], 'running' | 'retrying'>, string> = {
   done: 'bg-success',
   failed: 'bg-danger',
-  retrying: 'bg-accent',
-  running: 'bg-accent',
   pending: 'bg-neutral-dim opacity-40',
 }
 
@@ -148,8 +146,9 @@ const rows = computed<TraceRow[]>(() =>
   props.calls.map((call) => {
     const view = deriveCallView(call, props.runStatus)
     const stoppedColor = view.stoppedInFlight ? stoppedColorOf(props.runStatus, props.runOutcome) : ''
-    const isLiveRunning = view.status === 'running' || view.status === 'retrying'
-    return { call, view, isLiveRunning, dotClass: STATUS_DOT_CLASS[view.status], stoppedColorClass: stoppedColor }
+    const status = view.status
+    const isLiveRunning = status === 'running' || status === 'retrying'
+    return { call, view, isLiveRunning, dotClass: isLiveRunning ? '' : STATUS_DOT_CLASS[status], stoppedColorClass: stoppedColor }
   }),
 )
 

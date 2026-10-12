@@ -1891,7 +1891,7 @@ export type WorkflowRunEventsErrorCode = 'record_not_found'
  * session.getWorkflowRunEvents 的 reply（workflow-visualization 设计 §3.1-4 D4）。
  *
  * 成功形态：{ sessionId, runId, events }——单 run 事件流原文行（大字段截断形态见
- * WorkflowRunEventEntry：四字段 2KB 截断 + truncatedFields 逐行标注）。oversize
+ * WorkflowRunEventEntry：五字段 2KB 截断 + truncatedFields 逐行标注）。oversize
  * （[RT-4#8] 同款降级标志，与 session.workflows 形态一致）：record 文件超
  * READ_PRECHECK_MAX_BYTES（32MB，D5 预检族）时 runtime 不全文读取（worker-log 行数
  * 无上界 + workflowUpdate 信号 force 重拉放大读面），events 恒空数组 + oversize=true
