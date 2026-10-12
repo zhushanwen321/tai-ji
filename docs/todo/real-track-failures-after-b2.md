@@ -1,6 +1,6 @@
 # B2 D3 A7 real 轨三组失败登记（归因完成，非 B2 引入，待人工复核）
 
-- 状态：条目 1 已修（2026-10-12，见下）；未解决项余三条（非 B2 引入的既有/环境失败，登记待人工定责复跑）
+- 状态：条目 1 已修（2026-10-12，见下）、条目 4 已修且 real 轨实跑确认绿（2026-10-12，本条关闭）；未解决项余两条（非 B2 引入的既有/环境失败，登记待人工定责复跑）
 - 发现时点：2026-10-07 B2 subagent-stream-chunk D3 验收 A7（G3 real 轨）
 - B2 无交集佐证（确定性）：`git diff 4bc83d6d6..HEAD` 不含 ask-user 扩展 / event-adapter / btw 链路 / verify-plugin-contract.sh / find-pi-executable / process-manager 任何文件；同窗口 B2 触及的等价性轨（EQUIV-01 76 用例、EQUIV-05）与行为轨（mock 58 用例）全绿。
 
@@ -22,9 +22,10 @@
 - 归因：harness 的 pi 解析落到 PATH 全局版（环境敏感），解析链与脚本均不在 B2 改动面
 - 处置建议：契约脚本起 runtime 时应显式注入仓库 resources/pi 解析优先（或清理 PATH 全局 pi 干扰）；mock 残留已排除（无 marker / 无 .bak / 无回执，三证核过）
 
-## 4. TERMINAL-01 T13 跨会话不误清（定责完成：分支既有缺陷，非 B2）
+## 4. TERMINAL-01 T13 跨会话不误清——已修且 real 轨实跑确认绿（2026-10-12）
 
-- 症状：切回 A 后 terminal-instance-item 期望 1 实得 0（B 侧 terminal.list 对账后 A 条目丢失）
-- 定责实验（决定性）：在 B2 基线 commit 4bc83d6d6 的分离 worktree（real bundle）复跑 T13 **同样失败**——失败先于 B2 全部改动存在
-- 复现：HEAD 与 4bc83d6d6 均 2/2 稳定复现（非时序抖动）
-- 处置建议：回溯 4bc83d6d6 之前触及 terminal.list 对账范围/会话激活腿的提交（132803b43 等 ui-redesign 线合并窗口嫌疑）；B2 的清理编排接线只挂 delete 链与 subagent 分区键，不在终端域
+- 症状：terminal-instance-item 期望 1 实得 0（登记原表述「切回 A 后 A 条目丢失」；实测失败点在切 B 后的 B 期条目断言，尚未走到切回）
+- 定责实验（决定性）：在 B2 基线 commit 4bc83d6d6 的分离 worktree（real bundle）复跑 T13 **同样失败**——失败先于 B2 全部改动存在；HEAD 与 4bc83d6d6 均 2/2 稳定复现（非时序抖动）
+- 根因（e2e harness 与会话激活的竞态，产品侧无缺陷、零改动）：底抽屉开合态是 per-session 分区（`packages/core/src/domain/bottom-drawer/control.ts`，新会话默认关；core 单测 control.test.ts「A 开底抽屉、切 B 默认关、切回 A 仍开」显式钉住该语义，右抽屉同款）。`selectSession`（core use-session）经步 2 switchSession RPC 往返后才在 runEntryChain 步 7 syncSessionToPanel 翻转分区键（实测点击后 ~59ms）；原 harness `selectSessionInSidebar` 只等 composer-box 可见（点击前就已可见，即时通过），`openTerminalDrawer` 的 aria-pressed 检查恒落在翻转前、读到旧会话（A）分区的「开」→ 误判无需开；随后 B 的关分区接管 → 抽屉收起、TerminalView 卸载 → 条目断言全落空。诊断实测（50ms 采样时间线）：点击后 59ms 头部会话标签与 aria-pressed 同 tick 翻转、286ms 条目消失（视图卸载）、397ms 抽屉关毕；B 期 30s 窗口内 runtime PTY 与实例注册表全程无损（runtime 日志无 exit/destroySessionPties、无 B spawn；renderer 无 terminal.list 失败告警）——「A 条目丢失」实为终端面板未挂载，非条目被清，登记原表述的归因不成立
+- 修复（仅 `e2e/terminal-multi-instance.spec.ts`）：`selectSessionInSidebar` 追加等 panel 卡头会话标签（`panel-session-label`，与底抽屉分区键同 tick 翻转、同派生自 leaf.sessionId）落到目标会话后再返回；T13 断言零改动——B 期重开抽屉走挂载激活轮对账（空清单自动新建 B 默认实例），切回 A 抽屉经 A 的开分区自动恢复、重挂载对账还原 A 的两条条目与历史输出，被保护的「跨会话不误清」不变量照常受验
+- 验证（2026-10-12）：real bundle 空载串行实跑——terminal-multi-instance 全 spec（T1/T2/T4/T8/T9/T10/T13）7 passed，T13 单独复跑 2/2 绿；runtime terminal-message-handler + terminal-service 套件 64 绿、renderer use-terminal 套件 107 绿。环境备注：验证跑带 `DISABLE_AUTO_UPDATE=true` 抑制 oh-my-zsh 升级提示吃键入字符的噪音（该提示当日到期触发，曾使诊断跑在 A 期输出断言处假失败）
