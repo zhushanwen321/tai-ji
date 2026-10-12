@@ -237,6 +237,8 @@ export { mandatoryExtensions }
 // 它们依赖 node:os / node:path，而本 barrel 被 renderer（浏览器）整包 import。
 // Node-only 消费方（main/runtime）从子路径 import：'@taiji/shared/paths'
 export * from './file-tree'
+// local-file:// 协议 URL 构造（浏览器安全纯函数；本体不进 paths.ts——见该模块 barrel 注释）
+export * from './local-file-url'
 export type { RecentWorkspaceRecord } from './workspace'
 export type { Project, ProjectStoreState } from './project'
 export type { SubagentRecord, SubagentStatus, ClosedDisplayStatus, SubagentModelOverrideStatus, SubagentRecentEffectiveModel } from './subagent'

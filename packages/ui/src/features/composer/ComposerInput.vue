@@ -386,6 +386,16 @@ onMounted(() => {
   width: 12px;
   height: 12px;
 }
+/* image badge lead 缩略图（demo .ichip .thumb 权威四值：16px / r-3.5px / object-fit cover /
+   flex none）；加载失败回退 span.chip-icon 内 ImageIcon 占位（dom-core makeImageThumb 产物，
+   复用上方 .chip-icon 12px 规格）——demo 对齐，登记 docs/todo/ui-replica-demo-fidelity.md 收口记录 */
+.composer-input :deep(.mention-chip .chip-thumb) {
+  width: 16px;
+  height: 16px;
+  border-radius: 3.5px;
+  object-fit: cover;
+  flex: none;
+}
 .composer-input :deep(.slash-chip .chip-label),
 .composer-input :deep(.mention-chip .chip-label) {
   min-width: 0;

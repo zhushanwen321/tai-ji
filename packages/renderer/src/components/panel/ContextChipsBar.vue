@@ -27,7 +27,21 @@
       :title="item.name"
       class="group inline-flex h-[22px] max-w-[min(200px,100%)] shrink-0 items-center gap-[5px] whitespace-nowrap rounded-[var(--chip-r)] border border-[color:var(--chip-border)] bg-[var(--chip-bg)] pl-[7px] pr-[5px] text-[length:var(--text-xs)] text-neutral-mid transition-colors duration-[var(--duration-fast)]"
     >
-      <component :is="iconFor(item)" class="size-3 shrink-0 text-neutral-dim" />
+      <!-- image lead = 16px 真图缩略（demo .ctxchip .thumb 四值：16px / r-3.5px /
+           object-fit cover / flex none），经 local-file:// 通道加载（attachments/tmpdir
+           白名单落点）；加载失败回退 ImageIcon 占位不留破图（demo 对齐，登记见 docs/todo/ui-replica-demo-fidelity.md）。
+           items 形状 = core AttachedContextItem（type 恒 'image'，refreshAttachedItems 唯一
+           构造点），v-else 即失败回退占位——[HISTORICAL] 原 iconFor 的 FileText/'@'/'#'
+           分支无构造方，随类型单源化收窄删除 -->
+      <img
+        v-if="!failedIds.has(item.id)"
+        :src="localFileUrl(item.path)"
+        :alt="item.name"
+        data-testid="context-chip-thumb"
+        class="size-4 shrink-0 rounded-[3.5px] object-cover"
+        @error="markFailed(item.id)"
+      />
+      <ImageIcon v-else class="size-3 shrink-0 text-neutral-dim" />
       <span class="min-w-0 truncate">{{ item.name }}</span>
       <Button
         variant="ghost"
@@ -42,25 +56,27 @@
 </template>
 
 <script setup lang="ts">
-import { markRaw } from 'vue'
+import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { FileText, Image as ImageIcon, X } from '@lucide/vue'
+import { Image as ImageIcon, X } from '@lucide/vue'
+import type { AttachedContextItem } from '@taiji/core/domain/composer'
+import { localFileUrl } from '@taiji/shared'
 import { Button } from '@/components/ui/button'
 
-/** 单条已附上下文（由父组件从 segments 派生：image → {id:path,name,type:'image'}） */
-interface AttachedContextItem {
-  id: string
-  name: string
-  type: '@' | '#' | 'image'
-}
-
+/** 单条已附上下文形状单源 = core AttachedContextItem（path = 图片磁盘路径，缩略图 src 源） */
 defineProps<{ items: AttachedContextItem[] }>()
 const emit = defineEmits<{ (e: 'remove', id: string): void }>()
 
 const { t } = useI18n()
 
-function iconFor(item: AttachedContextItem) {
-  return item.type === 'image' ? markRaw(ImageIcon) : markRaw(FileText)
+/** 加载失败项 id 集（onerror 置位 → 该 chip 回退 ImageIcon 占位；不可变更新驱动重渲）。
+ *  失败标记不随 items 清理：id 是 uuid 恒不复用，失败态对已删除 id 残留无观测面。 */
+const failedIds = ref<Set<string>>(new Set())
+
+function markFailed(id: string): void {
+  const next = new Set(failedIds.value)
+  next.add(id)
+  failedIds.value = next
 }
 
 /** 移除某条已附上下文：转发给父组件 emit('remove', id)，父组件定位 DOM 节点移除 */

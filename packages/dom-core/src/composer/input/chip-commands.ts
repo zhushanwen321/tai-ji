@@ -13,11 +13,63 @@
  */
 import { type Ref } from 'vue'
 import { randomUuid } from '@taiji/core'
+import { localFileUrl } from '@taiji/shared'
 import { removeChipNode, isSpacerNode, placeCursorAfter } from './input-dom'
 import type { ChipCallbacks } from './types'
 
 /** 落位反馈淡染时长（demo 方案 C「插入瞬间」权威定值 800ms，样式侧 --sel-bg/--sel-edge 染色） */
 const JUST_INSERTED_FLASH_MS = 800
+
+/**
+ * image badge 的 lead 缩略图构造（模块级纯 DOM 工厂，无闭包状态；demo chipHtml image 分支
+ * `<img class="thumb">`，workbench.css .ichip .thumb 四值由壳层 ComposerInput 样式承载：
+ * 16px / r-3.5px / object-fit cover / flex none）。
+ * src 经 localFileUrl（shared 单点构造）走 local-file:// 协议（main protocol.handle 白名单：
+ * attachments / tmpdir 两落点均放行）；加载失败（403 白名单 / 文件损坏）回退 ImageIcon
+ * 占位 svg（12px，与 .chip-icon 规格一致，包 span.chip-icon 复用既有样式），不留破图。
+ */
+function makeImageThumb(path: string, displayName: string): HTMLElement {
+  const img = document.createElement('img')
+  img.className = 'chip-thumb'
+  img.src = localFileUrl(path)
+  img.alt = displayName
+  img.addEventListener(
+    'error',
+    () => {
+      // 回退占位：span.chip-icon（既有 12px 容器样式）+ lucide image 内联 svg。
+      // lucide path 权威 = @lucide/vue Image iconNode（rect+circle+path 三段）；手动 DOM
+      // 无法经 renderIcon 注入（SLASH_ICON_COMPONENTS 查表无 image key），内联手写同款。
+      const host = document.createElement('span')
+      host.className = 'chip-icon chip-thumb-fallback'
+      host.setAttribute('aria-hidden', 'true')
+      const SVG_NS = 'http://www.w3.org/2000/svg'
+      const svg = document.createElementNS(SVG_NS, 'svg')
+      svg.setAttribute('viewBox', '0 0 24 24')
+      svg.setAttribute('fill', 'none')
+      svg.setAttribute('stroke', 'currentColor')
+      svg.setAttribute('stroke-width', '2')
+      svg.setAttribute('stroke-linecap', 'round')
+      svg.setAttribute('stroke-linejoin', 'round')
+      svg.setAttribute('width', '12')
+      svg.setAttribute('height', '12')
+      const rect = document.createElementNS(SVG_NS, 'rect')
+      for (const [k, v] of [['width', '18'], ['height', '18'], ['x', '3'], ['y', '3'], ['rx', '2'], ['ry', '2']] as const) {
+        rect.setAttribute(k, v)
+      }
+      const circle = document.createElementNS(SVG_NS, 'circle')
+      circle.setAttribute('cx', '9')
+      circle.setAttribute('cy', '9')
+      circle.setAttribute('r', '2')
+      const pathEl = document.createElementNS(SVG_NS, 'path')
+      pathEl.setAttribute('d', 'm21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21')
+      svg.append(rect, circle, pathEl)
+      host.appendChild(svg)
+      img.replaceWith(host)
+    },
+    { once: true },
+  )
+  return img
+}
 
 export function useComposerChipCommands(
   elRef: Ref<HTMLDivElement | null>,
@@ -246,7 +298,8 @@ export function useComposerChipCommands(
     onChanged()
   }
 
-  /** 插入图片 badge（Cmd/Ctrl+V 富呈现通路）。 */
+  /** 插入图片 badge（Cmd/Ctrl+V 富呈现通路）。
+   *  lead = 16px 真图缩略（demo .ichip .thumb；demo 对齐，登记见 docs/todo/ui-replica-demo-fidelity.md），见 makeImageThumb。 */
   function insertImageBadge(path: string, fileName: string, displayName: string, needsMigrate: boolean = false): void {
     const el = getEl()
     if (!el) return
@@ -266,6 +319,7 @@ export function useComposerChipCommands(
     chip.dataset.chipNeedsMigrate = needsMigrate ? 'true' : 'false'
     // title 全名（spec §2）：其余 chip 类均有 title，本类曾是唯一漏项（S-A3），悬停兜底长名截断
     chip.title = displayName
+    chip.appendChild(makeImageThumb(path, displayName))
     const label = document.createElement('span')
     label.className = 'chip-label'
     label.textContent = displayName

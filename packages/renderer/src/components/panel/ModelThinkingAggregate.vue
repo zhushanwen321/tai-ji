@@ -42,11 +42,13 @@
          r-lg 圆角；p-0 下首尾元素与 12px 圆角无冲突（首元素搜索区自带 p-1 且透明底，
          尾元素档位行 rounded-sm + py-1 收在圆角弧线内），无需 overflow-hidden -->
     <PopoverContent side="top" align="end" :side-offset="10" class="w-[240px] rounded-lg p-0">
-      <!-- 上半：模型选择（hover 选择开启——hover 即切，不关弹层） -->
+      <!-- 上半：模型选择（hover 选择开启——hover 即切，不关弹层）。
+           defaultModel 透传驱动行尾「默认」标签（demo 聚合页弹层 .pt 同构，M4b 形态波） -->
       <ModelPickerPanel
         :groups="pickerGroups"
         :model-value="bareModelId(props.selected)"
         :model-value-provider-id="selectedProviderId"
+        :default-model="defaultModel"
         :has-candidates="hasAnyModel"
         hover-select
         @hover-select="onHoverModel"
@@ -119,7 +121,7 @@ const { t } = useI18n()
 const open = ref(false)
 
 // ── 模型面（与 ModelSelectPopover 同源数据面；聚合页不限定 provider）──
-const { pickerGroups, hasAnyModel, resolveProviderId } = useModelPickerData()
+const { pickerGroups, hasAnyModel, defaultModel, resolveProviderId } = useModelPickerData()
 
 /** 当前选中裸 id（hover 去重与高亮同用此值，复合串先拆段） */
 const selectedBare = computed(() => bareModelId(props.selected))

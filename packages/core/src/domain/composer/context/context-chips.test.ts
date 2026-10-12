@@ -59,9 +59,10 @@ describe('useComposerContextChips refreshAttachedItems（segments 快照复用�
     const { getSegments, api } = setup()
     api.refreshAttachedItems()
     expect(getSegments).toHaveBeenCalledTimes(1)
+    // path 随行透传（ContextChipsBar 真图缩略 local-file src 源）
     expect(api.attachedItems.value).toEqual([
-      { id: 'img-1', name: '截图-a', type: 'image' },
-      { id: 'img-2', name: '截图-b', type: 'image' },
+      { id: 'img-1', name: '截图-a', path: '/tmp/a.png', type: 'image' },
+      { id: 'img-2', name: '截图-b', path: '/tmp/b.png', type: 'image' },
     ])
   })
 
@@ -70,8 +71,8 @@ describe('useComposerContextChips refreshAttachedItems（segments 快照复用�
     api.refreshAttachedItems(makeSegments())
     expect(getSegments).not.toHaveBeenCalled()
     expect(api.attachedItems.value).toEqual([
-      { id: 'img-1', name: '截图-a', type: 'image' },
-      { id: 'img-2', name: '截图-b', type: 'image' },
+      { id: 'img-1', name: '截图-a', path: '/tmp/a.png', type: 'image' },
+      { id: 'img-2', name: '截图-b', path: '/tmp/b.png', type: 'image' },
     ])
   })
 
@@ -95,8 +96,8 @@ describe('useComposerContextChips refreshAttachedItems（segments 快照复用�
     expect(api.attachedItems.value).toEqual([])
     api.refreshAttachedItems(makeSegments())
     expect(api.attachedItems.value).toEqual([
-      { id: 'img-1', name: '截图-a', type: 'image' },
-      { id: 'img-2', name: '截图-b', type: 'image' },
+      { id: 'img-1', name: '截图-a', path: '/tmp/a.png', type: 'image' },
+      { id: 'img-2', name: '截图-b', path: '/tmp/b.png', type: 'image' },
     ])
   })
 })

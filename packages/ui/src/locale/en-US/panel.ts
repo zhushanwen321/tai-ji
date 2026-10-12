@@ -499,6 +499,8 @@ export default {
     searchPlaceholder: 'Search models…',
     noMatch: 'No matching models',
     placeholder: '\u2026',
+    // Model popover row-end "default" tag (demo .pt): shown on the row matching config.defaults.defaultModel
+    defaultTag: 'Default',
     // Model + thinking aggregate entry (W3a single-icon button; click opens model list + thinking levels) title
     modelThinkingAggregateTitle: 'Model · Thinking',
   },

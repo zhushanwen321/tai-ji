@@ -51,6 +51,14 @@ const props = withDefaults(defineProps<{
    * 仅作等值比较（选中值复合串拆段而来的未品牌串即可），不随事件回抛。
    */
   modelValueProviderId?: string
+  /**
+   * 全局默认模型（config.defaults.defaultModel，"provider/modelId" 复合串，与 selected
+   * 同格式；空串/缺省 = 未配置，无行显示标签）。命中行（id + 组 providerId 双匹配，与
+   * isRowSelected 同构）渲染行尾「默认」标签——demo .pt（ComposerBar 模型弹层行尾标签，
+   * demo 对齐，登记见 docs/todo/ui-replica-demo-fidelity.md）；行名 flex-1 吸收剩余空间后标签紧贴行尾。
+   * 自建分组无 provider 语义的消费方（ScheduleForm 直挂）不传 = 无标签，行为不变。
+   */
+  defaultModel?: string
   /** 候选池是否非空——区分「无候选」与「搜索无结果」两种空态（缺省从 groups 派生） */
   hasCandidates?: boolean
   /** 列表项 data-testid 前缀（消费方自定义，便于各自回归断言） */
@@ -63,6 +71,7 @@ const props = withDefaults(defineProps<{
 }>(), {
   modelValue: '',
   modelValueProviderId: undefined,
+  defaultModel: '',
   hasCandidates: undefined,
   itemTestIdPrefix: 'model-picker-item',
   hoverSelect: false,
@@ -106,6 +115,21 @@ const filteredGroups = computed<ModelPickerGroup[]>(() => {
 function isRowSelected(model: ModelPickerModel, group: ModelPickerGroup): boolean {
   if (model.id !== props.modelValue) return false
   return props.modelValueProviderId !== undefined ? group.providerId === props.modelValueProviderId : true
+}
+
+/** defaultModel 复合串拆段（"provider/modelId"，与 selected 同格式；无 '/' 时按裸 id 全局匹配） */
+const defaultModelParts = computed<{ id: string; providerId?: string } | null>(() => {
+  const v = props.defaultModel
+  if (!v) return null
+  const i = v.lastIndexOf('/')
+  return i > 0 ? { providerId: v.slice(0, i), id: v.slice(i + 1) } : { id: v }
+})
+
+/** 行默认判定：与 isRowSelected 同构的双匹配（同 short-id 多 provider 不双行标默认）。 */
+function isDefaultModel(model: ModelPickerModel, group: ModelPickerGroup): boolean {
+  const d = defaultModelParts.value
+  if (!d || model.id !== d.id) return false
+  return d.providerId !== undefined ? group.providerId === d.providerId : true
 }
 
 function onPick(model: ModelPickerModel, group: ModelPickerGroup): void {
@@ -155,6 +179,15 @@ function onRowEnter(model: ModelPickerModel, group: ModelPickerGroup): void {
         >
           <!-- 行名不截断（demo .pop-item white-space:nowrap，弹层宽随最长行增长；Button 基类自带 nowrap） -->
           <span class="flex-1 text-left">{{ model.name ?? model.id }}</span>
+          <!-- 行尾「默认」标签（demo .pt 四值口径：margin-left auto / font-mono / fs-xs /
+               dim——fs-xs 在 real 字号链 = --text-3xs，demo tokens.css --text-3xs: var(--fs-xs)
+               同名映射；行名 flex-1 吸收剩余空间后 ml-auto 无剩余可分，标签紧贴行尾）。
+               命中判定 = defaultModel 双匹配，数据源语义见 defaultModel prop 注释。 -->
+          <span
+            v-if="isDefaultModel(model, group)"
+            data-testid="model-picker-default-tag"
+            class="ml-auto shrink-0 font-mono text-[length:var(--text-3xs)] text-neutral-dim"
+          >{{ t('panel.modelSelect.defaultTag') }}</span>
           <!-- 选中指示 = 行尾对勾显隐（demo R3：弹层行不进选中范式，行无底/框/字色选中态） -->
           <Check
             class="size-[13px] shrink-0 opacity-0"

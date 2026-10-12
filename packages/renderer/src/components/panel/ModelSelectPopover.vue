@@ -40,6 +40,7 @@
         :groups="pickerGroups"
         :model-value="bareModelId(selectedValue)"
         :model-value-provider-id="selectedProviderId"
+        :default-model="defaultModel"
         :has-candidates="hasAnyModel"
         @update:model-value="onPickFromPanel"
       />
@@ -86,8 +87,9 @@ const settingsStore = getSettingsStore()
 const { open, canOpen } = useSwitchingGatedPopoverOpen(() => props.switching)
 
 // 数据面（分组 / enabled 过滤 / pickerGroups / 反查）在 model-picker-data——
-// 顶层绑定名保持 groups（既有测试经 vm.groups 断言分组形状，语义不漂移）
-const { groups, hasAnyModel, pickerGroups } = useModelPickerData(() => props.providerFilter)
+// 顶层绑定名保持 groups（既有测试经 vm.groups 断言分组形状，语义不漂移）。
+// defaultModel（config.defaults.defaultModel）透传 panel 驱动行尾「默认」标签（demo .pt）。
+const { groups, hasAnyModel, pickerGroups, defaultModel } = useModelPickerData(() => props.providerFilter)
 
 /** 当前选中值（纯受控：直接用 props，不存本地副本，避免 watch 拉回导致 UI 闪退） */
 const selectedValue = computed(() => props.selected ?? '')

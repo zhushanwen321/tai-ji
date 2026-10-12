@@ -487,6 +487,8 @@ export default {
     searchPlaceholder: '搜索模型…',
     noMatch: '无匹配模型',
     placeholder: '\u2026',
+    // 模型弹层行尾「默认」标签（demo .pt）：命中 config.defaults.defaultModel 的行显示
+    defaultTag: '默认',
     // 模型聚合入口（W3a 单图标聚合按钮，click 出模型列表+思考档位）title
     modelThinkingAggregateTitle: '模型 · 思考等级',
   },

@@ -5,7 +5,7 @@
  * 提取到 composable 以满足 Composer.vue <script setup> 行数上限（300 行）。
  *
  * 数据流：
- * - segments（image 段）→ attachedItems（{id=segment.id, name, type:'image'}）→ ContextChipsBar :items
+ * - segments（image 段）→ attachedItems（{id=segment.id, name, path, type:'image'}）→ ContextChipsBar :items
  * - ContextChipsBar @remove(id) → onRemoveContextChip → ComposerInput.removeImageChip(chipId) → refreshAttachedItems
  *
  * [HISTORICAL] chip id 曾用 path，但同一文件附两次时 path 重复导致 Vue :key 冲突（删除不可靠）。
@@ -31,17 +31,27 @@ interface ComposerInputInstance {
   removeImageChip(chipId: string): void
 }
 
+/** 单条已附上下文（ContextChipsBar props 形状）。path = 图片磁盘绝对路径（16px 真图缩略
+ *  经 local-file:// 通道加载用；demo .ctxchip .thumb，demo 对齐，登记见 docs/todo/ui-replica-demo-fidelity.md）。 */
+export interface AttachedContextItem {
+  id: string
+  name: string
+  path: string
+  type: 'image'
+}
+
 /**
  * @param inputRef ComposerInput 实例 ref（getSegments / removeImageChip 经 defineExpose 暴露）
  */
 export function useComposerContextChips(inputRef: Ref<ComposerInputInstance | null>) {
   /** ContextChipsBar 数据源：从 segments 派生的 image chips */
-  const attachedItems = ref<Array<{ id: string; name: string; type: 'image' }>>([])
+  const attachedItems = ref<AttachedContextItem[]>([])
 
   /**
    * 从输入区 segments 刷新 image chips（input 变化 / chip 删除后调）。
    * attachedItems 内部字段名保持 `name`（ContextChipsBar 消费），值从 segment.displayName
-   * 派生（用户可读名）；segment 的 fileName（磁盘全名）对 chip 行展示无意义，不暴露。
+   * 派生（用户可读名）；path 随行透传（缩略图 src 源）；segment 的 fileName（磁盘全名）
+   * 对 chip 行展示无意义，不暴露。
    * @param segments 调用方已持有的 segments 快照（可选）——Composer onInputChange 与
    * selectedSkillNames 共用同一次 getSegments 遍历（同帧 DOM 无写，复用恒等价）；
    * 未传时自行读取（chip 删除 / drop 等无既有快照的调用点走读取分支）。
@@ -52,7 +62,7 @@ export function useComposerContextChips(inputRef: Ref<ComposerInputInstance | nu
       .filter(
         (s): s is Extract<Segment, { type: 'image' }> => s.type === 'image',
       )
-      .map((s) => ({ id: s.id, name: s.displayName, type: 'image' as const }))
+      .map((s) => ({ id: s.id, name: s.displayName, path: s.path, type: 'image' as const }))
   }
 
   /** ContextChipsBar × 删除回调：用 chipId（segment.id）定位 DOM 中 image chip 移除并刷新 */
