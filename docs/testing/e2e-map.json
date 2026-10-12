@@ -84,7 +84,8 @@
         "packages/ui/src/**",
         "packages/mobile-renderer/src/styles/**",
         "e2e/visual/**",
-        "e2e/visual-baselines/**"
+        "e2e/visual-baselines/**",
+        "scripts/token-consume-check.mjs"
       ],
       "layer": "L1",
       "assets": [
@@ -99,6 +100,10 @@
         {
           "kind": "harness",
           "ref": "e2e/visual/fixtures/visual-server.ts"
+        },
+        {
+          "kind": "harness",
+          "ref": "scripts/token-consume-check.mjs"
         }
       ],
       "trigger": "always",
@@ -106,7 +111,7 @@
       "run": "npx playwright test --project=visual-chromium",
       "owner": "packages/renderer",
       "authority": "docs/TEST-STRATEGY.md#c-层playwright-像素-diffci-内形态级",
-      "note": "baseline 锚定 e2e/visual-baselines/（git tracked 数据文件，非可执行资产，不入 assets）；收录清单外的磁盘补全项：visual 轨在 AGENTS.md e2e 执行准则中与 smoke 同列 L1 CI 固定环节，故按 always/L1 登记。[2026-09-16 composer-task-tray 补 scope] 增补 `e2e/visual-baselines/**`：baseline 目录本身不是资产（不登记 assets），但 `e2e/` 是 asset 族看护根，基线 PNG 变更属本 rule 的触发面却没有 coverage → 按 --check 口径是漏登记（本次更新 composer 基线时实跑检出）。补 scope 而非登记 asset（资产 = 可执行 e2e 本体，基线是快照数据）。[2026-09-16 composer-task-tray 补 scope ②] 增补 `packages/ui/src/**`：本轨断言与截图子树消费的 @taiji/ui 组件都落 packages/ui——8 个渲染原语（ansi-text / card / stats-line / progress-bar / list-tree / columns / group / tab-bar，`packages/ui/src/rendering-protocol/primitives/`）、composer-box 输入区 `features/composer/ComposerInput.vue`、drawer 容器 `features/drawer/DrawerPanel.vue`；改这些组件会在像素层直接击穿本轨基线却圈不到本 rule（同批缺口：该目录此前不在任何 rule 的 scope 内）。补 scope 即把「@taiji/ui 组件形态变更」纳入触发面。（归属澄清：shell 容器 app-shell / app-shell-aside / app-shell-main 属 renderer 的 `packages/renderer/src/components/shell/`，composer-box 本体在 renderer 的 `packages/renderer/src/components/panel/Composer.vue`——这两处由 scope 内既有的 `packages/renderer/src/**` 覆盖，不在 packages/ui。）[2026-10-06 ui-signal-density D3] accent 令牌值变更（#cfcfd4 → #a5adc2 弱蓝灰，OKLCh C 0.0068 → 0.0315）触发本轨基线重录：shell-default / composer-default 两张基线的截图范围含 accent 用色与布局变化区，diff 超阈值走 CI 通道重录（基线权威环境 = CI runner，禁本地 --update-snapshots 后提交）；人审 diff 范围 = 布局尺寸变化区 + accent 用色变化区，版面结构区不得有意外 diff（设计 §4.1 V9⑤）。[2026-10-06 ui-signal-density D3 补 scope ③] 增补 `packages/mobile-renderer/src/styles/**`：该目录是 renderer `style.css` tokens 段的镜像宿主（`tokens.css`，头注释自述真值源仍是 renderer style.css、改动须同步两处）——令牌镜像值变更与桌面令牌同属视觉触发面（accent 值变更触发本轨基线重录，见上段），归属本 rule 而非行为轨（E2E-MOCK-01 / E2E-ELECTRON-01：令牌值变更不改行为）。镜像与桌面的逐字一致由 `packages/renderer/src/__tests__/mobile-token-mirror-parity.test.ts` 单测承载（该目录此前不在任何 rule 的 scope 内，`packages/mobile-renderer/**` 整包其余子目录仍无 coverage——本条只登记镜像宿主 styles 目录）。[2026-10-12 视觉轨字体固定] 基线环境无关性改由 bundled webfont 保证（e2e/visual/fixtures/visual-server.ts 注入 @fontsource-variable/noto-sans-sc + --font-sans 覆盖 + route 本地供给，机制与纪律登记见 docs/TEST-STRATEGY.md「字体固定」条目）：本机与 runner 渲染同源，本地 --update-snapshots=all 重录即权威，上文 [2026-10-06 ui-signal-density D3] 段所载「基线权威环境 = CI runner、禁本地重录后提交」纪律废止；字体族/包版本变更须全量重录一次，常设重录 workflow（.github/workflows/visual-baseline-recapture.yml）退居兜底。随批重录两张基线（bundled 字体渲染）并复跑绿。"
+      "note": "baseline 锚定 e2e/visual-baselines/（git tracked 数据文件，非可执行资产，不入 assets）；收录清单外的磁盘补全项：visual 轨在 AGENTS.md e2e 执行准则中与 smoke 同列 L1 CI 固定环节，故按 always/L1 登记。[2026-09-16 composer-task-tray 补 scope] 增补 `e2e/visual-baselines/**`：baseline 目录本身不是资产（不登记 assets），但 `e2e/` 是 asset 族看护根，基线 PNG 变更属本 rule 的触发面却没有 coverage → 按 --check 口径是漏登记（本次更新 composer 基线时实跑检出）。补 scope 而非登记 asset（资产 = 可执行 e2e 本体，基线是快照数据）。[2026-09-16 composer-task-tray 补 scope ②] 增补 `packages/ui/src/**`：本轨断言与截图子树消费的 @taiji/ui 组件都落 packages/ui——8 个渲染原语（ansi-text / card / stats-line / progress-bar / list-tree / columns / group / tab-bar，`packages/ui/src/rendering-protocol/primitives/`）、composer-box 输入区 `features/composer/ComposerInput.vue`、drawer 容器 `features/drawer/DrawerPanel.vue`；改这些组件会在像素层直接击穿本轨基线却圈不到本 rule（同批缺口：该目录此前不在任何 rule 的 scope 内）。补 scope 即把「@taiji/ui 组件形态变更」纳入触发面。（归属澄清：shell 容器 app-shell / app-shell-aside / app-shell-main 属 renderer 的 `packages/renderer/src/components/shell/`，composer-box 本体在 renderer 的 `packages/renderer/src/components/panel/Composer.vue`——这两处由 scope 内既有的 `packages/renderer/src/**` 覆盖，不在 packages/ui。）[2026-10-06 ui-signal-density D3] accent 令牌值变更（#cfcfd4 → #a5adc2 弱蓝灰，OKLCh C 0.0068 → 0.0315）触发本轨基线重录：shell-default / composer-default 两张基线的截图范围含 accent 用色与布局变化区，diff 超阈值走 CI 通道重录（基线权威环境 = CI runner，禁本地 --update-snapshots 后提交）；人审 diff 范围 = 布局尺寸变化区 + accent 用色变化区，版面结构区不得有意外 diff（设计 §4.1 V9⑤）。[2026-10-06 ui-signal-density D3 补 scope ③] 增补 `packages/mobile-renderer/src/styles/**`：该目录是 renderer `style.css` tokens 段的镜像宿主（`tokens.css`，头注释自述真值源仍是 renderer style.css、改动须同步两处）——令牌镜像值变更与桌面令牌同属视觉触发面（accent 值变更触发本轨基线重录，见上段），归属本 rule 而非行为轨（E2E-MOCK-01 / E2E-ELECTRON-01：令牌值变更不改行为）。镜像与桌面的逐字一致由 `packages/renderer/src/__tests__/mobile-token-mirror-parity.test.ts` 单测承载（该目录此前不在任何 rule 的 scope 内，`packages/mobile-renderer/**` 整包其余子目录仍无 coverage——本条只登记镜像宿主 styles 目录）。[2026-10-12 视觉轨字体固定] 基线环境无关性改由 bundled webfont 保证（e2e/visual/fixtures/visual-server.ts 注入 @fontsource-variable/noto-sans-sc + --font-sans 覆盖 + route 本地供给，机制与纪律登记见 docs/TEST-STRATEGY.md「字体固定」条目）：本机与 runner 渲染同源，本地 --update-snapshots=all 重录即权威，上文 [2026-10-06 ui-signal-density D3] 段所载「基线权威环境 = CI runner、禁本地重录后提交」纪律废止；字体族/包版本变更须全量重录一次，常设重录 workflow（.github/workflows/visual-baseline-recapture.yml）退居兜底。随批重录两张基线（bundled 字体渲染）并复跑绿。[2026-10-13 token-consume 断言对齐 + 补登记] Composer 断言 varName `--bg-input` → `--bg`：U4「composer joins frame layer, --composer-bg retired」设计变更后 composer-box 背景消费框架层 `--bg`（Composer.vue `bg-bg` 类），检查断言未跟随致 CI visual 轨假红；同批把 `scripts/token-consume-check.mjs` 补进 scope + assets（kind=harness，visual 轨配套检查脚本本体——此前落 scripts/ 看护根内却无 coverage，--staged 防漏拦截检出）。"
     },
     {
       "id": "E2E-MOCK-01",

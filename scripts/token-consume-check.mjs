@@ -43,7 +43,7 @@ const KILL_GRACE_MS = 2000
 const ASSERTIONS = [
   { label: 'AppShell', selector: '.app-shell', prop: 'backgroundColor', varName: '--bg', firstScreen: true, required: true },
   { label: 'Sidebar', selector: '.sidebar .text-neutral-fg', prop: 'color', varName: '--neutral-fg', firstScreen: true, required: true },
-  { label: 'Composer', selector: '.composer-box', prop: 'backgroundColor', varName: '--bg-input', firstScreen: true, required: true },
+  { label: 'Composer', selector: '.composer-box', prop: 'backgroundColor', varName: '--bg', firstScreen: true, required: true },
   { label: 'MessageStream', selector: '.message-stream .text-accent, .message-stream [class*="text-accent"]', prop: 'color', varName: '--accent', firstScreen: true, required: false },
   { label: 'Settings', selector: '[role="dialog"]', prop: 'backgroundColor', varName: '--surface', firstScreen: false, required: false },
 ]
