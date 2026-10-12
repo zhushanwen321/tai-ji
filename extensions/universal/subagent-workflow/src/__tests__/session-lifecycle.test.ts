@@ -40,8 +40,8 @@ vi.mock("@zhushanwen/subagent-core/execution/worktree/worktree-manager.ts", () =
     registerPid = vi.fn();
   },
 }));
-vi.mock("@zhushanwen/subagent-core/execution/persistence/session-file-gc.ts", () => ({
-  maybeCleanupExpiredSessionFiles: vi.fn(),
+vi.mock("@zhushanwen/subagent-core/execution/persistence/engine-journal-gc.ts", () => ({
+  startEngineJournalGcTimer: vi.fn(),
 }));
 
 // seam 组（第 1 组 describe）直接 import session-lifecycle——它消费的默认实现走
@@ -731,7 +731,7 @@ function seedTerminalRunFootprint(
 }
 
 /** 预置 record 域终态事件文件（头行 + created + settled 帧；帧格式与 record-events
- *  词表同源）+ manifest（<sa-id>.json 不触碰——独立 TTL 归 session-file-gc）。 */
+ *  词表同源）+ manifest（<sa-id>.json 不触碰——清理归删主会话级联）。 */
 function seedTerminalRecordFootprint(
   recordsDir: string,
   id: string,

@@ -971,7 +971,8 @@ export class SessionLifecycle implements ISessionRegistry {
     // [chat-html-support §6.7 D7 回收①] 会话产物目录级联（`<dataDir>/artifacts/<sessionId>`，
     // 公式单点 = shared getSessionArtifactsDir，含与 isPiSessionId 同域的 sessionId 穿越
     // 校验）。与上行 cache/images 级联同一落点、同一幂等形态（recursive + force），
-    // best-effort 不阻断删除主链——残留由 artifact-retention 保留期扫描兜底。
+    // best-effort 不阻断删除主链——残留由删会话级联承接（session-content-cascade）；
+    // 外部删除主文件场景接受残留（2026-10-12 裁决：下挂内容回收统一归级联，无保留期扫描兜底）。
     // 目录的创建由 write 工具落盘时承担：真装版 pi write 工具在写入前
     // `mkdir(dir, {recursive:true})`（工具 description 亦声明）——持久源码锚点
     // @earendil-works/pi-coding-agent@0.84.4 dist/core/tools/write.js:22（

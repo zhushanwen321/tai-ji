@@ -10,8 +10,9 @@
 // 全族已退场（③）——收条由 `record-settled` / `record-round-idle` 事件帧承载，
 // StateMarker 只剩内存收条词汇（折叠投影 stateMarkerFromFold 的产物形态）。
 //
-// GC：session-file-gc 的 sidecar 名单已含本扩展名（孤儿绑定随 TTL 清理；jsonl
-// 删除链同步同删——I-16 已销账，GC 领地批次落地）。
+// 清理：`.record-binding` 随子代理会话文件族归删主会话级联删除（runtime
+// session-content-cascade 的 sidecar 名单含本扩展名；外部删除主文件场景接受残留，
+// 2026-10-12 裁决——无孤儿 TTL 清理通道）。
 
 
 import * as fs from "node:fs";

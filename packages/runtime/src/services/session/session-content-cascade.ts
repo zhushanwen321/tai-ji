@@ -23,8 +23,8 @@
  *
  * 失败语义：每项删除 best-effort try/catch 但**失败必须汇总出声**（warn 逐项 +
  * 结束汇总计数），禁静默吞。枚举/并集扫描失败（读错误、坏行、oversize）=「引用
- * 状态不可知」≠「无引用」——保守放弃子代理族删除（宁保留，残留由 session-file-gc
- * TTL 兜底），与 collectAliveWorkflowRunReferences 的「缺席只延后删除」方向相反：
+ * 状态不可知」≠「无引用」——保守放弃子代理族删除（宁保留，残留按裁决接受——
+ * 无保留期扫描兜底，2026-10-12），与 collectAliveWorkflowRunReferences 的「缺席只延后删除」方向相反：
  * 那边缺席 → 观察期不删；这边缺席 → 若照删即误删共享文件，故必须反转。
  *
  * 已有级联（不重做，本模块之外）：主文件+sidecars / btw 线目录（closeAllForMain）/
@@ -47,8 +47,8 @@ type SubagentRecordEntry = SubagentRecordRegisteredEntryData | SubagentRecordSet
 
 /**
  * 子代理会话文件族 sidecar 扩展名名单（现役 .record-binding + 旧终态/探活兼容名）。
- * 与 session-file-gc.ts 的清理名单同源语义（那边按孤儿 TTL 清，这边按归属级联删），
- * 两处名单漂移由本注释锚定：增删 sidecar 名两处同步。
+ * 本名单是这些 sidecar 的唯一删除面（删主会话级联；外部删除主文件场景接受残留，
+ * 2026-10-12 裁决）——增删 sidecar 名在本名单同步。
  */
 const SUBAGENT_SESSION_SIDECAR_EXTS: readonly string[] = [
   '.record-binding',
@@ -170,7 +170,7 @@ export async function cascadeDeleteSessionContent(
     if (union === null) {
       const msg = `[session-content-cascade] reference union scan failed for ${sessionId}; ` +
         `keeping ALL subagent families (reference state unknown — never delete on unknown), ` +
-        `residuals will age out via session-file-gc TTL. Fix: inspect the sessions pool for unreadable/corrupt .jsonl files.`
+        `residuals are accepted (no retention sweep by ruling 2026-10-12). Fix: inspect the sessions pool for unreadable/corrupt .jsonl files.`
       deps.warn(msg)
       failures.push('reference union scan failed (all subagent families kept)')
     } else {

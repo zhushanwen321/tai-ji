@@ -138,9 +138,6 @@ import { ProjectStore } from './services/project/project-store.js'
 import { ImportService } from './services/session/import-service.js'
 import { ExternalFileImportSource } from './services/session/import-source-external-file.js'
 import { ZcodeImportSource } from './services/session/import-source-zcode.js'
-// chat-html-support（§6.7 D7 回收②）：产物目录保留期扫描（启动扫 + 每日复扫）装配入口——
-// 经后台初始化序列 ⑪（startArtifactRetention dep）触发一次。
-import { startArtifactRetention } from './services/session/artifact-retention.js'
 import type { SessionImportSource } from './services/session/import-source.js'
 // zcode 源默认库 = 宿主 HOME 下 zcode 会话库动态推导（zcode-session-source 与引擎包
 // db-path.ts 同源 SDK 常量，session-reader-shared-core U10 起唯一承载）
@@ -1765,10 +1762,6 @@ async function main(): Promise<void> {
     broadcastAppInfo: () => server.broadcastAppInfo(),
     skillRegistry,
     pluginService,
-
-    // chat-html-support（§6.7 D7 回收②）：产物目录保留期扫描启动（启动扫 + 每日复扫）——
-    // 经后台序列 ⑪ 触发一次；实现落 runtime 会话服务，无需组合根装配。
-    startArtifactRetention,
     // u5（crash-forensics D3）：收割完成 promise 交付（reattach 编排的唯一消费方）。
     onOrphanReapChainScheduled: (completion) => {
       orphanReapChain = completion

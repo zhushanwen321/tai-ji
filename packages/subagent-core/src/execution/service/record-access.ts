@@ -164,9 +164,8 @@ export class RecordAccess {
 
   /** 启动清扫：manifest tmp 残留（崩溃打断的原子写留下的 *.json.tmp.<pid>）静默删除
    *  ——[U4c / D6] tmp 恢复已退役（manifest 是可丢可重建缓存，promote 语义失效）。
-   *  幂等，不 throw。ADR-035 启动清扫接线——session_start 每次都调（与
-   *  maybeCleanupExpiredSessionFiles 一致）。manifestStore 保持 private 封装，本方法
-   *  是公开入口。 */
+   *  幂等，不 throw。ADR-035 启动清扫接线——session_start 每次都调（无残留时
+   *  零删）。manifestStore 保持 private 封装，本方法是公开入口。 */
   async recoverManifestTmpFiles(): Promise<{ deleted: number; recovered: number }> {
     try {
       const deleted = await this.deps.getManifestStore().sweepTmpFiles();
