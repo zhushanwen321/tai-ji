@@ -47,10 +47,12 @@ describe('plan 04 删除常驻装饰性动画', () => {
     expect(sessionItem).toContain('animate-spin')
   })
 
-  it('TC3: composer-shell isActive 分支为静态 ring（无 steer-breathe，border+shadow 保留）', () => {
+  it('TC3: composer-shell isActive 分支为静态 ring（无 steer-breathe，accent 边 + accent-ring 保留）', () => {
     expect(composerShell).not.toContain('animate-steer-breathe')
-    // M2a-01：活跃态外环 token 化（--shadow-glow 随主题，替代旧硬编码冷蓝 rgba）
-    expect(composerShell).toContain('border-[var(--accent)] shadow-[var(--shadow-glow)]')
+    // M2a-01 活跃态外环 token 化；[670f9086d glow 降档裁决 2026-10-11] steer 档由
+    // --shadow-glow 3px/25% 降为 2px --accent-ring——断言跟随现行降档形态，
+    // 锁定意图不变：isActive 分支无动画装饰、静态 accent ring（边 + 环）在场。
+    expect(composerShell).toContain('border-[var(--accent)] shadow-[0_0_0_2px_var(--accent-ring)]')
   })
 
   it('TC4: sessionStatus waiting 对齐静态范式（animation 为空串，无 animate-wiggle）', () => {
