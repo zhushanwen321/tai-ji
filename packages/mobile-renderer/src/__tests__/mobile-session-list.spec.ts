@@ -265,7 +265,7 @@ describe('MobileSessionList 动作菜单 backdrop（点击关闭）', () => {
     const wrapper = mountList()
     // dead 分流（A3）：click 不切入，弹引导菜单
     await wrapper.get('[data-testid="mobile-session-item-s-dead-menu"]').trigger('click')
-    expect(wrapper.get('[data-testid="mobile-session-menu-backdrop"]').exists()).toBe(true)
+    expect(wrapper.get('[data-testid="mobile-session-menu-backdrop"]').element).toBeTruthy()
     // 点击 backdrop 关闭菜单
     await wrapper.get('[data-testid="mobile-session-menu-backdrop"]').trigger('click')
     expect(wrapper.find('[data-testid="mobile-session-menu-backdrop"]').exists()).toBe(false)
@@ -278,7 +278,7 @@ describe('MobileSessionList 动作菜单 backdrop（点击关闭）', () => {
     await wrapper.get('[data-testid="mobile-session-item-s-menu-rename"]').trigger('click')
     await wrapper.get('[data-testid="mobile-session-menu-rename"]').trigger('click')
     // 二级表单 backdrop 可见，一级菜单已随 openRename 收起
-    expect(wrapper.get('[data-testid="mobile-session-rename-backdrop"]').exists()).toBe(true)
+    expect(wrapper.get('[data-testid="mobile-session-rename-backdrop"]').element).toBeTruthy()
     expect(wrapper.find('[data-testid="mobile-session-menu-backdrop"]').exists()).toBe(false)
     await wrapper.get('[data-testid="mobile-session-rename-backdrop"]').trigger('click')
     expect(wrapper.find('[data-testid="mobile-session-rename-backdrop"]').exists()).toBe(false)

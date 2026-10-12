@@ -137,7 +137,7 @@ describe('NewTaskSheet backdrop 遮罩（点击关闭）', () => {
   it('open=true：backdrop 渲染，点击 emit close', async () => {
     const wrapper = mountSheet(true)
     const backdrop = wrapper.get('[data-testid="new-task-backdrop"]')
-    expect(backdrop.exists()).toBe(true)
+    expect(backdrop.element).toBeTruthy()
     await backdrop.trigger('click')
     expect(wrapper.emitted('close')).toBeTruthy()
     wrapper.unmount()
