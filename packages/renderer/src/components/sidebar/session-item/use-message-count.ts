@@ -10,18 +10,23 @@
  * renderer 收 null 显示占位（计数段不渲染，不闪 0）。
  */
 import { command, RPC_BACKSTOP_TIMEOUT_MS } from '@taiji/core/transport/api'
+import { createInflightDedup } from '@taiji/core/foundation/create-inflight-dedup'
 
 /** 拉取目标的最小形状 = SessionItemSession 的 id + lastActiveAt 投影（函数签名内联对象类型——单实现无接口抽象） */
 
 // @data-owner #62 —— #62 会话消息计数的 renderer 悬停卡缓存（单一写入口 = fetchSessionMessageCount
 // 成功分支；权威源 = pi session JSONL 经 runtime 流式计数，本缓存只是 lastActiveAt 键控的
-// 读穿 memo，失效键未变即复用；条目无删除通道——上界 = 悬停过的会话数，登记表主表 #62 行）
+// 读穿 memo，失效键未变即复用；条目无删除通道——上界 = 悬停过的会话数，登记表主表 #62 行）。
+// C-data-18 三分裁决 = 保留手写：非 in-flight 去重族（无并发去重语义），非 KV 单键族
+// （纯内存读穿 memo，无 KV 持久化生命周期骨架，不适用 createKVSlot），属三分处置
+// 「对抗外部异步真值（保留）」类——lastActiveAt 失效键键控的按需重拉即其全部机制。
 const messageCountCache = new Map<string, { count: number; lastActiveAt: number }>()
 
 // taste:allow-no-data-owner W24-EX-C（已登记 data-source-registry §4 ⑧ 补登 2026-10-12）：
 // getMessageCount 悬停拉取的 in-flight 去重簿记（Promise 句柄，非 GUI 数据本体——计数
-// 数据本体在上方 messageCountCache），settle 即自清，对照 useGenStats inflightGenStatsFetch 先例
-const inflightFetches = new Map<string, Promise<number | null>>()
+// 数据本体在上方 messageCountCache）。createInflightDedup 收编（C-data-18：同 key 并发
+// 异步去重禁再手写 Map+Promise 同构实现），settle 即清与引用比对防误删由 factory 内建。
+const inflightFetches = createInflightDedup<number | null>()
 
 /**
  * 取会话消息计数：缓存命中（lastActiveAt 未变）直接返回；否则经 in-flight 去重拉取。
@@ -30,21 +35,16 @@ const inflightFetches = new Map<string, Promise<number | null>>()
 export function fetchSessionMessageCount(target: { id: string; lastActiveAt: number }): Promise<number | null> {
   const cached = messageCountCache.get(target.id)
   if (cached && cached.lastActiveAt === target.lastActiveAt) return Promise.resolve(cached.count)
-  const inflight = inflightFetches.get(target.id)
-  if (inflight) return inflight
-  const fetchPromise = (async (): Promise<number | null> => {
+  const { promise } = inflightFetches.run(target.id, async () => {
     try {
       const reply = await command('session.getMessageCount', { sessionId: target.id }, RPC_BACKSTOP_TIMEOUT_MS)
       messageCountCache.set(target.id, { count: reply.count, lastActiveAt: target.lastActiveAt })
       return reply.count
     } catch {
       return null
-    } finally {
-      inflightFetches.delete(target.id)
     }
-  })()
-  inflightFetches.set(target.id, fetchPromise)
-  return fetchPromise
+  })
+  return promise
 }
 
 /** 测试隔离钩子：清模块级缓存与 in-flight 表（防用例间残留）。生产代码禁止调用。 */
