@@ -926,7 +926,8 @@ async function main(): Promise<Record<string, unknown>> {
       const sm = await world.run("node", [SMOKE_SCRIPT, "--json"], { timeoutMs: 300_000 });
       let smJson: { status?: unknown; reason?: unknown; entryCount?: unknown } | null = null;
       try {
-        smJson = JSON.parse(sm.stdout) as typeof smJson;
+        // catch 分支必 throw，此处实指非空载荷；as 非 null 形态让控制流收窄生效
+        smJson = JSON.parse(sm.stdout) as { status?: unknown; reason?: unknown; entryCount?: unknown };
       } catch {
         throw new Error(`pi-extension-smoke --json 输出解析失败：\n${tailLines(`${sm.stderr}\n${sm.stdout}`, 15)}\n按输出处置后重新发起本 workflow`);
       }
