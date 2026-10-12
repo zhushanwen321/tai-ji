@@ -29,6 +29,10 @@ defineOptions({ inheritAttrs: false })
 // 用 --z-dialog 是其单一语义；real 的 --z-dialog(1100) 档被嵌套弹层（Popover/Select）与
 // ui-request band（AP-2：浮于 modal 之上）占用，DialogContent 升档会破坏 band 语义。
 // 进出场过渡参数见 style.css .reka-dialog-transition（demo rmodal-in 0.16s 档）。
+// 轨道钉为 grid-cols-[minmax(0,1fr)]：auto 轨道会被网格项的 min-content 撑破内容盒——
+// 内容里的 nowrap 长文本（如 worktree modal 的仓库路径 truncate 行，truncate 不减少其对
+// 父级内在宽度的贡献）会把整层面板内容撑宽、吃掉右侧 padding；minmax(0,1fr) 使轨道
+// 恒等于内容盒且可收缩，超宽内容退化为在自身盒内截断。
 
 const props = defineProps<DialogContentProps & { class?: HTMLAttributes["class"]; hideClose?: boolean }>()
 const emits = defineEmits<DialogContentEmits>()
@@ -62,7 +66,7 @@ onBeforeUnmount(disposeSurfaceRegistration)
       v-bind="mergedAttrs"
       :class="
         cn(
-          'fixed left-1/2 top-1/2 z-[var(--z-modal)] grid w-full max-w-lg gap-4 border border-hairline bg-bg-elevated p-[20px] shadow-[var(--shadow-3)] select-text reka-dialog-transition rounded-lg',
+          'fixed left-1/2 top-1/2 z-[var(--z-modal)] grid w-full grid-cols-[minmax(0,1fr)] max-w-lg gap-4 border border-hairline bg-bg-elevated p-[20px] shadow-[var(--shadow-3)] select-text reka-dialog-transition rounded-lg',
           props.class,
         )"
     >
