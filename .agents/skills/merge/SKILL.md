@@ -406,7 +406,7 @@ done
 cd $WS_ROOT/main && bash .agents/skills/merge/scripts/release.sh
 ```
 
-从 conventional commits 自动生成 Release Notes 草稿（双语三节结构：feat → 新增功能、perf → 功能优化、fix → 修复缺陷、breaking → 重大变更；条目为 commit 原文，须按全局规范 `~/.agents/guide/release-notes.md` 定稿）并创建/更新 GitHub Release。也可指定 tag 和 notes 文件：`cd $WS_ROOT/main && bash .agents/skills/merge/scripts/release.sh v0.6.5 --notes ./my-notes.md`。
+从 conventional commits 自动生成 Release Notes 草稿（双语三节结构：feat → 新增功能、perf → 功能优化、fix → 修复缺陷、breaking → 重大变更；条目为 commit 原文，须按全局规范 `~/.agents/guide/release-notes.md` 定稿）并创建/更新 GitHub Release。也可指定 tag 和 notes 文件：`cd $WS_ROOT/main && bash .agents/skills/merge/scripts/release.sh v0.6.5 --notes ./my-notes.md`。**notes emoji 门禁**：release.sh 在每次把 notes 写入 GitHub Release（edit / create）前经 `.githooks/check_doc_emoji.py` 校验，含 emoji 直接 exit 1（fail-closed：检测脚本缺失同样拦截）；流程末尾的定稿校验段（下方代码块）对已写入的 release body 复检同一规则。
 
 > **notes 写入语义**：release.sh 仅在创建 / Draft 态重写 notes；release 已发布（非 draft）且现有 notes 已含 `<!-- LANG:` 语言标记（视为已定稿）时不会被覆盖重写——已定稿 release 需改动手动执行 `gh release edit <tag> --notes-file <双语文件>`。
 
@@ -446,6 +446,16 @@ if ! echo "$RELEASE_BODY" | grep -q '<!-- LANG:zh -->'; then
 fi
 
 echo "✓ Release Notes 双语格式校验通过"
+
+# 校验 Release Notes 不含 emoji（与 release.sh 写入前门禁同一实现，
+# 检测逻辑 SSOT = .githooks/check_doc_emoji.py）
+echo "$RELEASE_BODY" > /tmp/release-notes-emoji-check.md
+if ! python3 .githooks/check_doc_emoji.py /tmp/release-notes-emoji-check.md; then
+  echo "ERROR: Release Notes 含 emoji（禁止）——删除 emoji 后 gh release edit 重写"
+  rm -f /tmp/release-notes-emoji-check.md
+  exit 1
+fi
+rm -f /tmp/release-notes-emoji-check.md
 ```
 
 如果校验失败，需要编辑 release 添加双语标记：

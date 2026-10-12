@@ -199,6 +199,22 @@ notes_finalized() {
     printf '%s' "$body" | grep -q '<!-- LANG:'
 }
 
+# Release notes emoji 门禁：写入 GitHub Release 前校验 notes 不含装饰 emoji。
+# 检测逻辑单一实现 = .githooks/check_doc_emoji.py（与 pre-commit 文档 emoji 检查同一脚本），
+# 禁止复制第二份正则。fail-closed：脚本缺失按门禁失败处理，不静默放行。
+ensure_notes_no_emoji() {
+    local notes_file="$1"
+    local checker="$MAIN_WT/.githooks/check_doc_emoji.py"
+    if [[ ! -f "$checker" ]]; then
+        echo -e "${RED}Error: emoji 检测脚本缺失: $checker（门禁 fail-closed，禁止放行）${NC}"
+        exit 1
+    fi
+    if ! python3 "$checker" "$notes_file"; then
+        echo -e "${RED}Error: Release notes 含 emoji（禁止）。删除 emoji 或改为文字表述后重跑${NC}"
+        exit 1
+    fi
+}
+
 EXISTING_RELEASE=$(gh release view "$TAG" --repo "$GH_REPO" --json isDraft,id,body,assets --jq '.' 2>/dev/null || echo "")
 
 if [[ -n "$EXISTING_RELEASE" ]]; then
@@ -220,6 +236,7 @@ if [[ -n "$EXISTING_RELEASE" ]]; then
         else
             echo "  更新已有 Release notes"
         fi
+        ensure_notes_no_emoji "$FINAL_NOTES_FILE"
         gh release edit "$TAG" --repo "$GH_REPO" --notes-file "$FINAL_NOTES_FILE" 2>&1 || true
     fi
 
@@ -257,6 +274,7 @@ else
             echo "  如需修改: gh release edit $TAG --repo $GH_REPO --notes-file <双语文件>"
         else
             echo "  Release 已存在，更新 notes"
+            ensure_notes_no_emoji "$FINAL_NOTES_FILE"
             gh release edit "$TAG" --repo "$GH_REPO" --notes-file "$FINAL_NOTES_FILE" 2>&1 || true
         fi
         if [[ "$IS_DRAFT" == "true" ]]; then
@@ -267,6 +285,7 @@ else
     else
         echo -e "  ${YELLOW}⚠️  CI 未创建 Release，手动创建（将无构建产物）${NC}"
         echo -e "  ${YELLOW}如需构建产物: gh workflow run release.yml --repo $GH_REPO${NC}"
+        ensure_notes_no_emoji "$FINAL_NOTES_FILE"
         RELEASE_URL=$(gh release create "$TAG" --repo "$GH_REPO" \
             --title "$TAG" \
             --notes-file "$FINAL_NOTES_FILE" \
