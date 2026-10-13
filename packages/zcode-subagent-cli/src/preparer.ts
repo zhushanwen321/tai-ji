@@ -505,6 +505,71 @@ function defaultProviderForShortName(
 }
 
 /**
+ * account 家族直通（2026-10-13 用户裁决：zai 系走 account provider 配置；launcher
+ * wrapper 对内建目录读取注入 entitled 绕过外部 spawn 装载门——app-server 注册表
+ * 装载判据 = access.entitled === true，目录构建的账号条目默认非 entitled）。account
+ * 凭据由 zcode CLI 账号体系自解析（credentials.json 登录态），不经个人 provider 表
+ * ——校验降为目录存在性：规则存在 + 模型在清单内 → 原样放行（大小写保留，注册表
+ * 匹配不敏感）。目录定位失败/不可读/规则缺失/模型不在清单 → model_not_available。
+ */
+function resolveAccountModelRef(wanted: string, wantedProvider: string, sources?: ZcodeSourcePaths): string {
+  const catalogPath = locateZcodeBuiltinCatalog(sources);
+  if (catalogPath === undefined) {
+    throw new ZcodePrepareError(
+      "model_not_available",
+      `account 模型 "${wanted}" 无法校验：内建目录定位失败（ZCODE_BUILTIN_PROVIDER_CONFIG_FILE 与 runtime/provider 扫描均未命中）。`,
+    );
+  }
+  let catalog: unknown;
+  try {
+    catalog = JSON.parse(fs.readFileSync(catalogPath, "utf8"));
+  } catch (err) {
+    throw new ZcodePrepareError(
+      "model_not_available",
+      `account 模型 "${wanted}" 无法校验：内建目录不可读（${err instanceof Error ? err.message : String(err)}）。`,
+    );
+  }
+  const accountRule = findAccountProviderRule(catalog, wantedProvider);
+  if (accountRule === undefined) {
+    throw new ZcodePrepareError(
+      "model_not_available",
+      `未知 account provider "${wantedProvider}"（内建目录无此规则）。恢复指引：改用目录内 account:* 规则（如 account:zai-individual-coding-plan / account:bigmodel-individual-coding-plan）。`,
+    );
+  }
+  assertAccountModelKnown(accountRule, wanted, wantedProvider);
+  return wanted;
+}
+
+/** 内建目录 providerRules 内查找 account 规则（无规则段/无匹配/条目非对象 → undefined）。 */
+function findAccountProviderRule(catalog: unknown, wantedProvider: string): Record<string, unknown> | undefined {
+  const catalogRules =
+    isRecord(catalog) && isRecord(catalog["config"]) && isRecord(catalog["config"]["providerConfigRules"])
+      ? catalog["config"]["providerConfigRules"]["providerRules"]
+      : undefined;
+  const accountRule = Array.isArray(catalogRules)
+    ? catalogRules.find((r) => isRecord(r) && r["providerId"] === wantedProvider)
+    : undefined;
+  return isRecord(accountRule) ? accountRule : undefined;
+}
+
+/**
+ * account 模型清单校验（builtinModelIds 优先、personalModelIds 兜底；清单缺席或
+ * 空 = 不设限放行——目录未枚举模型时交由 app-server 注册表实况裁决）。不在清单
+ * → model_not_available（列该 account provider 可用模型）。
+ */
+function assertAccountModelKnown(accountRule: Record<string, unknown>, wanted: string, wantedProvider: string): void {
+  const accountConfig = isRecord(accountRule["config"]) ? accountRule["config"] : {};
+  const modelIds = accountConfig["builtinModelIds"] ?? accountConfig["personalModelIds"];
+  const short = modelShort(wanted);
+  if (Array.isArray(modelIds) && modelIds.length > 0 && !modelIds.includes(short)) {
+    throw new ZcodePrepareError(
+      "model_not_available",
+      `未知模型 "${short}"（account provider ${wantedProvider} 下可用: ${modelIds.join(", ")}）。`,
+    );
+  }
+}
+
+/**
  * 解析并校验模型引用 → 规范化全名 `provider/model`；**缺席输入返回空串**（调用方
  * 在 create 帧省略 model 键——CLI 缺省解析，缺席语义显式化，禁伪造兜底 id）。
  *
@@ -537,52 +602,9 @@ export function resolveZcodeModelRef(requested: string | undefined, sources?: Zc
 
   if (wanted === undefined) return "";
 
-  // account 家族直通（2026-10-13 用户裁决：zai 系走 account provider 配置；launcher
-  // wrapper 对内建目录读取注入 entitled 绕过外部 spawn 装载门——app-server 注册表
-  // 装载判据 = access.entitled === true，目录构建的账号条目默认非 entitled）。account
-  // 凭据由 zcode CLI 账号体系自解析（credentials.json 登录态），不经个人 provider 表
-  // ——校验降为目录存在性：规则存在 + 模型在清单内 → 原样放行（大小写保留，注册表
-  // 匹配不敏感）。
   const wantedProvider = wanted.includes("/") ? providerOf(wanted) : undefined;
   if (wantedProvider !== undefined && wantedProvider.startsWith("account:")) {
-    const catalogPath = locateZcodeBuiltinCatalog(sources);
-    if (catalogPath === undefined) {
-      throw new ZcodePrepareError(
-        "model_not_available",
-        `account 模型 "${wanted}" 无法校验：内建目录定位失败（ZCODE_BUILTIN_PROVIDER_CONFIG_FILE 与 runtime/provider 扫描均未命中）。`,
-      );
-    }
-    let catalog: unknown;
-    try {
-      catalog = JSON.parse(fs.readFileSync(catalogPath, "utf8"));
-    } catch (err) {
-      throw new ZcodePrepareError(
-        "model_not_available",
-        `account 模型 "${wanted}" 无法校验：内建目录不可读（${err instanceof Error ? err.message : String(err)}）。`,
-      );
-    }
-    const catalogRules = isRecord(catalog) && isRecord(catalog["config"]) && isRecord(catalog["config"]["providerConfigRules"])
-      ? catalog["config"]["providerConfigRules"]["providerRules"]
-      : undefined;
-    const accountRule = Array.isArray(catalogRules)
-      ? catalogRules.find((r) => isRecord(r) && r["providerId"] === wantedProvider)
-      : undefined;
-    if (!isRecord(accountRule)) {
-      throw new ZcodePrepareError(
-        "model_not_available",
-        `未知 account provider "${wantedProvider}"（内建目录无此规则）。恢复指引：改用目录内 account:* 规则（如 account:zai-individual-coding-plan / account:bigmodel-individual-coding-plan）。`,
-      );
-    }
-    const accountConfig = isRecord(accountRule["config"]) ? accountRule["config"] : {};
-    const modelIds = accountConfig["builtinModelIds"] ?? accountConfig["personalModelIds"];
-    const short = modelShort(wanted);
-    if (Array.isArray(modelIds) && modelIds.length > 0 && !modelIds.includes(short)) {
-      throw new ZcodePrepareError(
-        "model_not_available",
-        `未知模型 "${short}"（account provider ${wantedProvider} 下可用: ${modelIds.join(", ")}）。`,
-      );
-    }
-    return wanted;
+    return resolveAccountModelRef(wanted, wantedProvider, sources);
   }
 
   const provider = wanted.includes("/")

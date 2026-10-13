@@ -108,6 +108,8 @@ interface ScenarioOverrides {
   readResult?: unknown;
   /** 多会话用例：不覆盖 createResult/readResult（fake 缺省每会话独立 sess_<id> + read {messages:[]}）。 */
   distinctSessionIds?: boolean;
+  /** 内建目录源覆盖（缺省 absent 文件——reasoningLevel 值域解析降级为不携带）。 */
+  builtinCatalogPath?: string;
 }
 
 /** 建一个连到 fake 的引擎（scenario 文件随 env 固化进子进程；每测试独立 state 文件）。 */
@@ -138,7 +140,11 @@ function makeEngine(overrides: ScenarioOverrides = {}): EngineHandle_ {
   const deps: ZcodeEngineDeps = {
     engineDataDir: () => dataDir,
     cliPath: FAKE_CLI,
-    sources: { v2ConfigPath: v2Path, personalProviderConfigPath: personalPath, builtinCatalogPath: path.join(tmpRoot, "absent-catalog.json") },
+    sources: {
+      v2ConfigPath: v2Path,
+      personalProviderConfigPath: personalPath,
+      builtinCatalogPath: overrides.builtinCatalogPath ?? path.join(tmpRoot, "absent-catalog.json"),
+    },
     processEnv: {
       PATH: process.env.PATH ?? "",
       HOME: "/fake-host-home",
@@ -551,6 +557,89 @@ describe("事件流与回调时点（缺省 appserver 路径）", () => {
     expect(outcome.sessionId).toBe(GOLDEN_SESSION_ID);
     expect(handle.data.sessionRef).toEqual({ sessionId: GOLDEN_SESSION_ID, dbPath: expectedSessionDbPath() });
   }, 15_000);
+});
+
+// ============================================================
+// reasoningLevel 择档（目录值域 × thinkingLevel——2026-10-13 探针实测驱动）
+// ============================================================
+// 值域来源 = preparer.resolveZcodeReasoningValues（目录 modelRules 匹配 modelId）；
+// 择档语义：无 thinkingLevel → 首值（最小档，现状保形）；显式 thinkingLevel 精确
+// 命中 → 用之；不命中 → 非最小档末值（请求了思考 = reasoning 开；plan 网关对部分
+// 模型拒收 disabled——域与接受面漂移时显式意图走非最小档）。
+
+/** 写一个 reasoning 目录（单通配规则命中全部模型；values 即值域；tmpRoot 每用例独立）。 */
+function writeReasoningCatalog(values: string[]): string {
+  const catalogPath = path.join(tmpRoot, "reasoning-catalog.json");
+  writeJson(catalogPath, {
+    config: {
+      modelConfigRules: {
+        modelRules: [{ modelMatch: ".*", config: { optionSpecs: { reasoningLevel: { values } } } }],
+      },
+    },
+  });
+  return catalogPath;
+}
+
+describe("reasoningLevel 择档（目录值域 × thinkingLevel）", () => {
+  it("无 thinkingLevel → 值域首值（最小档，现状保形）", async () => {
+    const { engine, stateFile, workspace } = makeEngine({ builtinCatalogPath: writeReasoningCatalog(["disabled", "low", "high"]) });
+    await engine.run(makeTask({ cwd: workspace }), makeCtx());
+    const create = sentFrames(stateFile, "session/create")[0];
+    expect(create.params["model"]).toEqual({
+      providerId: PROVIDER,
+      modelId: "m1",
+      options: { reasoningLevel: "disabled" },
+    });
+  }, 15_000);
+
+  it("thinkingLevel 精确命中值域 → create 帧用请求档", async () => {
+    const { engine, stateFile, workspace } = makeEngine({ builtinCatalogPath: writeReasoningCatalog(["disabled", "low", "high"]) });
+    await engine.run(makeTask({ cwd: workspace, thinkingLevel: "high" }), makeCtx());
+    const create = sentFrames(stateFile, "session/create")[0];
+    expect(create.params["model"]).toEqual({
+      providerId: PROVIDER,
+      modelId: "m1",
+      options: { reasoningLevel: "high" },
+    });
+    expect(create.params["thoughtLevel"]).toBe("high");
+  }, 15_000);
+
+  it("thinkingLevel 不在值域 → 非最小档末值（显式思考意图不落 disabled）", async () => {
+    const { engine, stateFile, workspace } = makeEngine({ builtinCatalogPath: writeReasoningCatalog(["disabled", "low", "high"]) });
+    await engine.run(makeTask({ cwd: workspace, thinkingLevel: "xhigh" }), makeCtx());
+    const create = sentFrames(stateFile, "session/create")[0];
+    expect(create.params["model"]).toEqual({
+      providerId: PROVIDER,
+      modelId: "m1",
+      options: { reasoningLevel: "high" },
+    });
+  }, 15_000);
+
+  it("值域单值且请求档不在域 → 落回唯一值（非最小档为空不越域）", async () => {
+    const { engine, stateFile, workspace } = makeEngine({ builtinCatalogPath: writeReasoningCatalog(["enabled"]) });
+    await engine.run(makeTask({ cwd: workspace, thinkingLevel: "high" }), makeCtx());
+    const create = sentFrames(stateFile, "session/create")[0];
+    expect(create.params["model"]).toEqual({
+      providerId: PROVIDER,
+      modelId: "m1",
+      options: { reasoningLevel: "enabled" },
+    });
+  }, 15_000);
+
+  it("值域 per-engine 记忆化：目录文件删除后重复 run 仍携带同档（不重读目录）", async () => {
+    const catalogPath = writeReasoningCatalog(["disabled", "low", "high"]);
+    const { engine, stateFile, workspace } = makeEngine({ builtinCatalogPath: catalogPath });
+    await engine.run(makeTask({ cwd: workspace }), makeCtx());
+    fs.rmSync(catalogPath); // 记忆化生效则第二 run 不重读已删除的目录
+    await engine.run(makeTask({ cwd: workspace }), makeCtx());
+    const creates = sentFrames(stateFile, "session/create");
+    expect(creates).toHaveLength(2);
+    expect(creates[1]?.params["model"]).toEqual({
+      providerId: PROVIDER,
+      modelId: "m1",
+      options: { reasoningLevel: "disabled" },
+    });
+  }, 20_000);
 });
 
 // ============================================================
