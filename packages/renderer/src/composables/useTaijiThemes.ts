@@ -38,8 +38,8 @@ export interface TaijiTheme {
 /** 6 太极主题（顺序：3 暗 + 3 亮，与 demo themeEntries 一致） */
 export const TAIJI_THEMES: TaijiTheme[] = [
   {
-    label: '太极 · 玄（暗 · 弱蓝灰 · 默认）',
-    shortName: '玄',
+    label: '太极 · 玄青（暗 · 弱蓝灰 · 默认）',
+    shortName: '玄青',
     theme: 'dark',
     preset: '',
     dark: true,
@@ -62,8 +62,8 @@ export const TAIJI_THEMES: TaijiTheme[] = [
     swatch: ['#cbc3b3', '#e2dfdb', '#221f1d', '#161413'],
   },
   {
-    label: '太极 · 皓（亮 · 宣纸墨黑 · 默认）',
-    shortName: '皓',
+    label: '太极 · 皓白（亮 · 宣纸墨黑 · 默认）',
+    shortName: '皓白',
     theme: 'light',
     preset: '',
     dark: false,
