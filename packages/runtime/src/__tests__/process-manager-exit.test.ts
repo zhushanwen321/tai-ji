@@ -96,6 +96,9 @@ vi.mock('../infra/logger.js', () => ({
   createPiSessionLog: () => ({ write: vi.fn(), end: vi.fn() }),
   // u5b D6-④：rpc-client 新增 import 的内存快照采集（mock 面随源码 import 面同步）
   captureMemorySnapshot: () => ({ rss: 1, heapUsed: 2, heapTotal: 3, external: 4 }),
+  // signal-forensics（process-manager 退出链 import）的落点门：测试态恒 false——
+  // 无落点不采样，exit 主链的 Map 清理/回调通知不受取证影响
+  isPiCrashLogEnabled: () => false,
 }))
 
 // ── Helpers ──────────────────────────────────────────────────────

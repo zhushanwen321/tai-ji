@@ -54,6 +54,8 @@ const DESIGN_EVENT_LINE = [
 const IMPLEMENTED_EXTRA_EVENTS = [
   // message-bus publish 序列化失败丢帧（与 registry-miss 同为核心链整帧丢弃的台账对称收尾）
   'frame-unserializable',
+  // 受管 pi 意外退出（exit_converge）时的信号发送方归因转储（signal-forensics.ts）
+  'signal-forensics',
 ]
 const DESIGN_REASON_LINE = [
   'extension-stale-ctx',
