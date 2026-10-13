@@ -414,24 +414,12 @@ export function locateZcodeBuiltinCatalog(sources?: ZcodeSourcePaths): string | 
  * 返回其 values[0]（各家族首值均为最小档：disabled/low/none——显式模型不携带
  * options 时对端对必需模型直接拒收，值域供数使显式模型可用且默认轻推理）。
  * 目录缺失/无匹配/无值域 → undefined（不携带，行为与未实现等价）。
+ *
+ * [2026-10-13] 最小档 = 全量值域首值——解析链单一化（resolveZcodeReasoningValues），
+ * 消除目录读取 + modelRules 提取的双实现（重复克隆回归防线）。
  */
 export function resolveZcodeMinimalReasoningLevel(modelRef: string, sources?: ZcodeSourcePaths): string | undefined {
-  const catalogPath = locateZcodeBuiltinCatalog(sources);
-  if (catalogPath === undefined) return undefined;
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(fs.readFileSync(catalogPath, "utf8"));
-  } catch {
-    return undefined;
-  }
-  const modelId = modelShort(modelRef);
-  const rules = (parsed as Record<string, unknown>)["config"];
-  const modelRules =
-    isRecord(rules) && isRecord(rules["modelConfigRules"])
-      ? rules["modelConfigRules"]["modelRules"]
-      : undefined;
-  if (!Array.isArray(modelRules)) return undefined;
-  return lastMatchingReasoningValues(modelRules, modelId)?.[0];
+  return resolveZcodeReasoningValues(modelRef, sources)?.[0];
 }
 
 /** [resolveZcodeMinimalReasoningLevel 拆分] 末个匹配 modelMatch 的

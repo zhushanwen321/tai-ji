@@ -537,45 +537,35 @@ describe("resolveZcodeModelRef account 家族直通", () => {
     return { personalProviderConfigPath: personalPath, ...(catalogPath !== undefined ? { builtinCatalogPath: catalogPath } : {}) };
   }
 
+  /** 写一个 account 目录（providerRules 单规则形态；name 区分用例文件）。 */
+  function writeAccountCatalog(name: string, rules: Array<Record<string, unknown>>): string {
+    const catalogPath = path.join(tmpRoot, name);
+    writeJson(catalogPath, { config: { providerConfigRules: { providerRules: rules } } });
+    return catalogPath;
+  }
+
   it("模型在 builtinModelIds 内 → 原样放行（account id 不在个人 provider 表也可用；大小写保留）", () => {
-    const catalogPath = path.join(tmpRoot, "account-catalog.json");
-    writeJson(catalogPath, {
-      config: {
-        providerConfigRules: {
-          providerRules: [
-            { providerId: ACCOUNT_PROVIDER, config: { builtinModelIds: ["GLM-5.3-Flash", "GLM-5.3"] } },
-          ],
-        },
-      },
-    });
+    const catalogPath = writeAccountCatalog("account-catalog.json", [
+      { providerId: ACCOUNT_PROVIDER, config: { builtinModelIds: ["GLM-5.3-Flash", "GLM-5.3"] } },
+    ]);
     expect(resolveZcodeModelRef(`${ACCOUNT_PROVIDER}/GLM-5.3-Flash`, accountSources(catalogPath))).toBe(
       `${ACCOUNT_PROVIDER}/GLM-5.3-Flash`,
     );
   });
 
   it("builtinModelIds 缺席 → personalModelIds 兜底判清单", () => {
-    const catalogPath = path.join(tmpRoot, "account-personal-ids-catalog.json");
-    writeJson(catalogPath, {
-      config: {
-        providerConfigRules: {
-          providerRules: [{ providerId: ACCOUNT_PROVIDER, config: { personalModelIds: ["M2-Plan"] } }],
-        },
-      },
-    });
+    const catalogPath = writeAccountCatalog("account-personal-ids-catalog.json", [
+      { providerId: ACCOUNT_PROVIDER, config: { personalModelIds: ["M2-Plan"] } },
+    ]);
     expect(resolveZcodeModelRef(`${ACCOUNT_PROVIDER}/M2-Plan`, accountSources(catalogPath))).toBe(
       `${ACCOUNT_PROVIDER}/M2-Plan`,
     );
   });
 
   it("模型不在清单 → model_not_available（列该 account provider 可用模型）", () => {
-    const catalogPath = path.join(tmpRoot, "account-miss-model-catalog.json");
-    writeJson(catalogPath, {
-      config: {
-        providerConfigRules: {
-          providerRules: [{ providerId: ACCOUNT_PROVIDER, config: { builtinModelIds: ["GLM-5.3-Flash"] } }],
-        },
-      },
-    });
+    const catalogPath = writeAccountCatalog("account-miss-model-catalog.json", [
+      { providerId: ACCOUNT_PROVIDER, config: { builtinModelIds: ["GLM-5.3-Flash"] } },
+    ]);
     try {
       resolveZcodeModelRef(`${ACCOUNT_PROVIDER}/nope`, accountSources(catalogPath));
       expect.unreachable("should throw");
@@ -589,28 +579,18 @@ describe("resolveZcodeModelRef account 家族直通", () => {
   });
 
   it("清单为空数组 → 不设限放行（目录未枚举模型交注册表实况裁决）", () => {
-    const catalogPath = path.join(tmpRoot, "account-empty-list-catalog.json");
-    writeJson(catalogPath, {
-      config: {
-        providerConfigRules: {
-          providerRules: [{ providerId: ACCOUNT_PROVIDER, config: { builtinModelIds: [] } }],
-        },
-      },
-    });
+    const catalogPath = writeAccountCatalog("account-empty-list-catalog.json", [
+      { providerId: ACCOUNT_PROVIDER, config: { builtinModelIds: [] } },
+    ]);
     expect(resolveZcodeModelRef(`${ACCOUNT_PROVIDER}/Anything-Model`, accountSources(catalogPath))).toBe(
       `${ACCOUNT_PROVIDER}/Anything-Model`,
     );
   });
 
   it("目录无此 account 规则 → model_not_available（含可用规则指引）", () => {
-    const catalogPath = path.join(tmpRoot, "account-other-rule-catalog.json");
-    writeJson(catalogPath, {
-      config: {
-        providerConfigRules: {
-          providerRules: [{ providerId: "account:other-plan", config: { builtinModelIds: ["M1"] } }],
-        },
-      },
-    });
+    const catalogPath = writeAccountCatalog("account-other-rule-catalog.json", [
+      { providerId: "account:other-plan", config: { builtinModelIds: ["M1"] } },
+    ]);
     try {
       resolveZcodeModelRef(`${ACCOUNT_PROVIDER}/GLM-5.3-Flash`, accountSources(catalogPath));
       expect.unreachable("should throw");
