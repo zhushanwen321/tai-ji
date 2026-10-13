@@ -10,6 +10,9 @@
  * - onScrollOffset：**滚到顶自动续载**（2026-09-19 会话实证：历史预算按字节收窗后，重会话
  *   一页仅 1–2 轮，靠手动点按钮翻页体验支撑不了）——偏移触顶且用户已脱离锚定时自动再拉一页，
  *   顶部条退化为「正在续载 / 还有更早」的进度位（按钮保留，作为触顶信号不可达时的兜底）。
+ * - slowLine：**慢网兜底细线**（OpenDesign specs/chat/history-load-and-run-grouping.md §2.2）——
+ *   加载启动 150ms 未完成才置 true（快载零指示防闪烁），完成即置 false；消费方
+ *   （MessageStream .hist-line-sweep）渲染 2px accent 横扫细线并承担 160ms 淡出。
  * - loadMoreError：[RD-1#4] 上一次「加载更早」失败态——失败时 truncated 窗口不变（与「已到头」
  *   在状态上不可区分），旧实现只 console.warn + finally 复位 loading，用户侧症状 = 「点了没反应、
  *   无失败提示」。现由对话流顶部条渲染可重试错误行（LoadMoreErrorBar）；成功 / 切换 session 复位。
@@ -42,6 +45,14 @@ export const TOP_AUTO_LOAD_THRESHOLD_PX = 64
  */
 export const LOAD_MORE_ERROR_ROW_HEIGHT = 32
 
+/**
+ * [hist-line] 慢网兜底细线的显隐延迟（ms）：加载启动后超过该时长仍未完成才显示细线
+ * （OpenDesign specs/chat/history-load-and-run-grouping.md §2.2）。快载（<150ms）全程
+ * 零指示防闪烁——真实侧 cursor 翻页多为快载，细线只在慢网/大页时兜底显形。
+ * 完成后的 160ms opacity 淡出不由本常量承担（CSS transition，见 MessageStream .hist-line-sweep）。
+ */
+export const SLOW_LINE_DELAY_MS = 150
+
 export function useLoadMoreHistory(
   sessionId: () => string,
   /** 列表项数 getter（顶部条占位判据：无条目时条不渲染，占位归 0） */
@@ -63,6 +74,9 @@ export function useLoadMoreHistory(
   loadMoreError: Ref<boolean>
   /** [RD-1#4] virta startMargin：顶部条占位（含失败重试行增补） */
   topBarReservedHeight: ComputedRef<number>
+  /** [hist-line] 慢网兜底细线显隐（spec §2.2）：加载启动 150ms 未完成才 true，
+   *  完成（成功/失败）即 false；淡出由消费方 CSS transition 承担。 */
+  slowLine: Ref<boolean>
 } {
   const { loadMoreHistory, hasMoreHistory: checkHasMore } = useChat()
   /** 「加载更早」loading 状态 */
@@ -73,9 +87,24 @@ export function useLoadMoreHistory(
   const showLoadMore = computed(() => checkHasMore(sessionId()))
   /** [RD-1#4] 上一次「加载更早」失败（true = 顶部条渲染可重试错误行；窗口状态未变） */
   const loadMoreError = ref(false)
+  /** [hist-line] 慢网兜底细线显隐（spec §2.2）：见 SLOW_LINE_DELAY_MS */
+  const slowLine = ref(false)
+  /** 细线显隐定时器句柄（加载收敛 / 切 session 时清除，防过期回调改写新会话状态） */
+  let slowLineTimer: ReturnType<typeof setTimeout> | null = null
+  function clearSlowLineTimer(): void {
+    if (slowLineTimer !== null) {
+      clearTimeout(slowLineTimer)
+      slowLineTimer = null
+    }
+  }
 
   // 失败态不跨 session 残留：切走再切回不应看到上一个 session 的失败行
-  watch(sessionId, () => { loadMoreError.value = false })
+  watch(sessionId, () => {
+    loadMoreError.value = false
+    // 延迟落盘的加载不属于新会话：细线状态与未触发的显隐定时器一并复位
+    clearSlowLineTimer()
+    slowLine.value = false
+  })
 
   async function handleLoadMore(): Promise<void> {
     if (loadingMore.value || !showLoadMore.value) return
@@ -83,6 +112,9 @@ export function useLoadMoreHistory(
     //   会保持滚动位置相对末尾不变（即插入的历史不把视口往下推）。
     isPrepend.value = true
     loadingMore.value = true
+    // [hist-line] 慢网兜底：150ms 未完成才置 true（快载零指示防闪烁，spec §2.2）。
+    // 真实侧 cursor 翻页通常快载——细线是慢网/大页兜底，不是常态指示。
+    slowLineTimer = setTimeout(() => { slowLine.value = true }, SLOW_LINE_DELAY_MS)
     try {
       const ok = await loadMoreHistory(sessionId())
       // loadMoreHistory 内部更新窗口状态（truncated=false 时 showLoadMore 收敛消失）
@@ -93,6 +125,9 @@ export function useLoadMoreHistory(
       // 落 loadMoreError 由顶部条渲染可重试错误行；成功即清除上次失败态。
       loadMoreError.value = !ok
     } finally {
+      clearSlowLineTimer()
+      // 细线立即翻 false，160ms opacity 淡出由消费方 CSS transition 承担（spec §2.2）
+      slowLine.value = false
       isPrepend.value = false
       loadingMore.value = false
     }
@@ -135,5 +170,6 @@ export function useLoadMoreHistory(
     onScrollOffset,
     loadMoreError,
     topBarReservedHeight,
+    slowLine,
   }
 }
