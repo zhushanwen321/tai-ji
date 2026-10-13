@@ -41,6 +41,11 @@ export default {
   },
   // ── Appearance page (AppearancePage) ──
   appearance: {
+    quickTheme: 'Theme',
+    quickChatFont: 'Chat font size',
+    tagDefault: 'Default',
+    tagDark: 'Dark',
+    tagLight: 'Light',
     regionFontTitle: 'Per-region font size',
     regionFontHint: 'Adjust font size per UI region (×0.9 / ×1.0 / ×1.15 / ×1.3), applies instantly',
     region: {

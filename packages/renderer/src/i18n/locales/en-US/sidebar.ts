@@ -3,6 +3,7 @@ export default {
   search: 'Search',
   developer: 'Developer',
   settingsTitle: 'Settings',
+  appearanceTitle: 'Appearance',
   selectSessionHint: 'Select a session to view files',
   sessionListLoadFailed: 'Failed to load sessions ({error})',
   switchSessionFailed: 'Failed to switch session: {msg}',

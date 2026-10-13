@@ -3,6 +3,7 @@ export default {
   search: '搜索',
   developer: '开发者',
   settingsTitle: '设置',
+  appearanceTitle: '外观',
   selectSessionHint: '选择会话查看文件',
   sessionListLoadFailed: '会话列表加载失败（{error}）',
   switchSessionFailed: '切换会话失败：{msg}',

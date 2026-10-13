@@ -14,63 +14,77 @@
       </div>
     </header>
 
-    <!-- 外观模式 + 全局字号（自 SystemAppearanceSection 迁入） -->
+    <!-- 外观模式 + 全局字号（segmented 平铺：三/三值域闭合，比 Select 少一层浮层；
+         视觉同 sidebar SegmentedTab 范式：凹陷槽 bg-bg-input + active 浮起） -->
     <GroupCard :title="t('settings.system.appearance')">
       <div class="px-2.5 pt-1 pb-2">
         <SettingRow :label="t('settings.system.appearance')" :desc="t('settings.system.appearanceDesc')">
-          <Select
-            :model-value="system.theme"
-            @update:model-value="onThemeSelect"
-          >
-            <SelectTrigger class="h-8 w-[200px] px-2 text-xs">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="light">{{ t('settings.system.themeLight') }}</SelectItem>
-              <SelectItem value="dark">{{ t('settings.system.themeDark') }}</SelectItem>
-              <SelectItem value="system">{{ t('settings.system.themeSystem') }}</SelectItem>
-            </SelectContent>
-          </Select>
+          <div class="flex w-[200px] gap-0.5 rounded-lg bg-bg-input p-[3px]" data-testid="appearance-mode-seg">
+            <Button
+              v-for="m in THEME_MODES"
+              :key="m"
+              variant="ghost"
+              class="h-7 flex-1 justify-center rounded-sm px-1 text-xs"
+              :class="(system.theme ?? 'dark') === m
+                ? 'bg-bg-elevated text-neutral-fg hover:bg-bg-elevated hover:text-neutral-fg'
+                : 'text-neutral-mid hover:bg-transparent hover:text-neutral-fg'"
+              :data-testid="`appearance-mode-${m}`"
+              :aria-pressed="(system.theme ?? 'dark') === m"
+              @click="onThemeSelect(m)"
+            >
+              {{ t(m === 'light' ? 'settings.system.themeLight' : m === 'dark' ? 'settings.system.themeDark' : 'settings.system.themeSystem') }}
+            </Button>
+          </div>
         </SettingRow>
         <SettingRow :label="t('settings.system.fontSize')" :desc="t('settings.system.fontSizeDesc')">
-          <Select
-            :model-value="system.fontSize ?? 'medium'"
-            @update:model-value="onFontSizeSelect"
-          >
-            <SelectTrigger class="h-8 w-[200px] px-2 text-xs">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="small">{{ t('settings.system.fontSmall') }}</SelectItem>
-              <SelectItem value="medium">{{ t('settings.system.fontMedium') }}</SelectItem>
-              <SelectItem value="large">{{ t('settings.system.fontLarge') }}</SelectItem>
-            </SelectContent>
-          </Select>
+          <div class="flex w-[200px] gap-0.5 rounded-lg bg-bg-input p-[3px]" data-testid="appearance-fs-global-seg">
+            <Button
+              v-for="fs in FONT_SIZE_OPTIONS"
+              :key="fs"
+              variant="ghost"
+              class="h-7 flex-1 justify-center rounded-sm px-1 text-xs"
+              :class="(system.fontSize ?? 'medium') === fs
+                ? 'bg-bg-elevated text-neutral-fg hover:bg-bg-elevated hover:text-neutral-fg'
+                : 'text-neutral-mid hover:bg-transparent hover:text-neutral-fg'"
+              :data-testid="`appearance-fs-global-${fs}`"
+              :aria-pressed="(system.fontSize ?? 'medium') === fs"
+              @click="onFontSizeSelect(fs)"
+            >
+              {{ t(fs === 'small' ? 'settings.system.fontSmall' : fs === 'medium' ? 'settings.system.fontMedium' : 'settings.system.fontLarge') }}
+            </Button>
+          </div>
         </SettingRow>
       </div>
     </GroupCard>
 
-    <!-- 配色主题（太极 · 即时切换，自 SystemAppearanceSection 迁入） -->
+    <!-- 配色主题（太极 · 即时切换）：紧凑 2 列网格卡（2 字名 + 角标 + swatch 条），
+         完整 label 收进 title（hover tooltip），点击即生效 -->
     <GroupCard :title="t('settings.system.themePresetTitle')">
       <p class="mt-1.5 mb-2 mx-2.5 text-xs text-neutral-mid">{{ t('settings.system.themePresetHint') }}</p>
-      <div class="flex flex-col gap-0.5 px-2.5 pb-2.5">
+      <div class="grid grid-cols-2 gap-2 px-2.5 pb-2.5">
         <Button
           v-for="th in TAIJI_THEMES"
           :key="th.label"
           variant="ghost"
           type="button"
-          class="theme-row flex items-center justify-between rounded-md px-3 py-2.5 text-neutral-fg cursor-pointer transition-colors hover:bg-surface-hover"
-          :class="th.label === currentTheme.label ? 'bg-surface text-accent hover:bg-surface' : ''"
+          class="theme-card flex flex-col items-start gap-2 rounded-md border px-3 py-2.5 text-left transition-colors"
+          :class="th.label === currentTheme.label
+            ? 'border-accent bg-surface hover:bg-surface'
+            : 'border-border hover:bg-surface-hover'"
+          :title="th.label"
           :aria-pressed="th.label === currentTheme.label"
           :data-testid="`appearance-theme-${th.preset}`"
           @click="applyTaijiTheme(th)"
         >
-          <span class="text-sm font-medium">{{ th.label }}</span>
+          <span class="flex w-full items-center justify-between gap-1">
+            <span class="text-sm font-medium text-neutral-fg">{{ th.shortName }}</span>
+            <span class="text-[length:var(--text-2xs)] text-neutral-mid">{{ themeTag(th) }}</span>
+          </span>
           <span class="flex gap-1">
             <span
               v-for="(c, i) in th.swatch"
               :key="i"
-              class="size-4 rounded-full border border-border"
+              class="size-3.5 rounded-full border border-border"
               :style="{ background: c }"
             />
           </span>
@@ -204,6 +218,12 @@ function onRegionScaleSelect(region: 'sidebar' | 'chat' | 'drawer', value: unkno
 const currentTheme = computed<TaijiTheme>(() => resolveTaijiTheme(props.system))
 function applyTaijiTheme(th: TaijiTheme): void {
   emit('update', { theme: th.theme, themePreset: th.preset })
+}
+
+/** 主题卡角标：默认 preset 显「默认」，其余按亮/暗族显「亮/暗」（名已统一 2 字，角标补族别） */
+function themeTag(th: TaijiTheme): string {
+  if (th.preset === '') return t('settings.appearance.tagDefault')
+  return th.dark ? t('settings.appearance.tagDark') : t('settings.appearance.tagLight')
 }
 
 // ── 分区字号（setSystem 浅合并，须回传完整 fontScales 对象）──

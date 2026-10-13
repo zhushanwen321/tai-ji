@@ -41,6 +41,11 @@ export default {
   },
   // ── Appearance 页（AppearancePage）──
   appearance: {
+    quickTheme: '主题',
+    quickChatFont: '对话流字号',
+    tagDefault: '默认',
+    tagDark: '暗',
+    tagLight: '亮',
     regionFontTitle: '分区字号',
     regionFontHint: '按界面区域独立调整字号（×0.9 / ×1.0 / ×1.15 / ×1.3），立即生效',
     region: {

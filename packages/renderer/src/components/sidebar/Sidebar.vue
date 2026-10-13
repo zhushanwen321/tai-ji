@@ -143,6 +143,8 @@
       <div class="mt-auto flex items-center gap-2 rounded-md px-2 py-2 text-[length:var(--text-xs)] text-neutral-mid transition-colors hover:bg-surface-hover">
         <span class="size-5 shrink-0 rounded-full bg-accent" />
         <span class="flex-1 truncate text-neutral-fg">{{ t('sidebar.developer') }}</span>
+        <!-- 外观快捷入口（主题色块 + 对话流字号 popover，chat-flow-text-color 同批） -->
+        <AppearanceQuickButton />
         <Button
           variant="ghost"
           class="grid size-6 shrink-0 place-items-center rounded-sm p-0 text-neutral-dim transition-colors hover:bg-surface-hover hover:text-neutral-fg [&_svg]:size-[14px]"
@@ -190,6 +192,7 @@ import { useSessionDerivations } from '@/composables/features/chat/useSessionDer
 import SegmentedTab from './SegmentedTab.vue'
 import SessionList from './SessionList.vue'
 import UpdateButton from './UpdateButton.vue'
+import AppearanceQuickButton from './AppearanceQuickButton.vue'
 import Brand from './Brand.vue'
 import ProjectSwitcher from './ProjectSwitcher.vue'
 import FileView from './FileView.vue'
