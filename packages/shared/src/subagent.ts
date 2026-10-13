@@ -246,19 +246,30 @@ export interface SubagentRecentEffectiveModel {
  * 'cancelled' / failed→'failed' / done→'completed'，「deriveClosedDisplay 改 stopReason
  * 派生」），closedReason 字段同时保留作诊断位）。
  *
- * 派生规则与 extension 侧两处实现同构（三处一致，改任一处须同步其余两处）：
+ * 同构成败推导的单一权威在 subagent-core：deriveOutcome/projectOutcome
+ * （packages/subagent-core/src/execution/persistence/execution-record.ts）。两处消费方
+ * 均只读 record.outcome（notify() 投影边界按 deriveOutcome 物化），不再手写同构派生，
+ * 手写回写由 derive-closed-display-parity 系列测试拦截：
  * - TUI 渲染：extensions/universal/subagent-workflow/src/interface/gui/bg-notify-render.ts
- *   renderRecordLines 的 verb 派发（cancelled / gc+error → failed / finished）
- * - LLM 通知文案：extensions/universal/subagent-workflow/src/execution/notifier.ts
- *   buildLlmContent 的 closed 分支（cancelled / gc+error → failed / completed）
+ *   renderRecordLines 的 verb 派发（cancelled → cancelled / failed → failed / 其余 → finished）
+ * - LLM 通知文案：packages/subagent-core/src/execution/notify/notifier.ts
+ *   buildLlmContent 的 closed 分支（cancelled / failed / completed 三态分流）
  *
- * 两个关键点（勿回退成「error 有值即 failed」的旧规则）：
- * - closedReason 缺失兜底 'gc'（对齐 extension 侧 `record.closedReason ?? "gc"`）：
- *   legacy 无 closedReason 的失败终态（error 有值）同样判 failed
+ * 本函数与 deriveOutcome 是两个消费域的有意分工，非同构副本（各有注释与测试锚定，
+ * 互不需同步）：本函数服务 runtime stopReason/显示侧，deriveOutcome 服务通知与 TUI
+ * 文案侧。前缀分支一致（cancelled → cancelled；gc + error → failed；无 error →
+ * done/completed）；分歧仅在 parent-* 与 user-close 加 error 输入：
+ * - 本函数判 done：级联关闭（disposeAllRecords）会合成 error: "closed due to
+ *   parent-fork" 等，这是正常关闭语义而非 subagent 自身失败——runtime 侧不把
+ *   正常级联关闭显示为失败；
+ * - deriveOutcome 判 failed（subagent-core D6 显式取舍：父进程关闭时子 agent 未完成
+ *   即失败，勿当 bug 改回）——通知文案语义。
+ *
+ * 本函数两个关键点（勿回退成「error 有值即 failed」的旧规则）：
+ * - closedReason 缺失兜底 'gc'：legacy 无 closedReason 的失败终态（error 有值）同样
+ *   判 failed
  * - closedReason 为 parent-fork / parent-new / parent-shutdown / user-close 且 error
- *   有值判 done：级联关闭（disposeAllRecords）会合成 error: "closed due to parent-fork"
- *   等，这是正常关闭语义而非 subagent 自身失败——若按 error 即 failed，taiji
- *   会把正常级联关闭显示为失败（与 TUI/LLM 文案显示 finished 分叉）
+ *   有值判 done（理由见上分歧说明）
  */
 export type ClosedDisplayStatus = 'done' | 'failed' | 'cancelled'
 

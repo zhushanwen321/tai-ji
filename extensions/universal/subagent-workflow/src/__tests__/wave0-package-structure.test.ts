@@ -3,7 +3,8 @@
  *
  * 验证新包 @zhushanwen/pi-subagent-workflow 的结构完整性：
  * - index.ts 导出工厂函数
- * - 3 tool + 2 command 注册正确
+ * - 7 tool（subagent 三件 + subagents + workflow 两件 + workflow-script）+ 2 command 注册正确
+ *   （D3 工具拆分后的终态注册面；本文件 wave0 时点的原始目标为 3 tool，断言段 AC-1.1 为权威）
  * - 目录结构符合三层架构
  *
  * （历史上含「挂载后暴露跨扩展编程 API」断言——该编程入口已随嵌套 workflow()

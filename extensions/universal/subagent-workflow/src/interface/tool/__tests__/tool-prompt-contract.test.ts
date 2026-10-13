@@ -198,6 +198,8 @@ describe("旧名残留负锚（U-B1）：声明面源文件零旧工具名指引
  *      action:'start' 文本锚——拆分后必填性由 schema required 表达，运行时语义锚保留）
  *  A14 model CASE-SENSITIVE + Resolution order（三层优先级链是功能语义）
  *  A15 idleTimeoutMs 缺省 300000 + TAIJI_SUBAGENT_IDLE_TIMEOUT_MS env 覆盖链
+ *  A16 messageParam.interrupt "Deprecated, no effect" —— 退役参数兼容语义锚
+ *      （存量调用防 schema 报错；manage/message schema 兼容语义锚用例承载）
  * 单源化负锚（D1：跨工具通用纪律只在注入段说一次）：
  *  A17 description/guidelines 零 poll/bash sleep/busy-wait；注入段含规则
  * subagent_message / subagent_manage 侧新增锚：

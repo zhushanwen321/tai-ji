@@ -1,4 +1,4 @@
-// src/interface/__tests__/tool-subagents.test.ts
+// src/interface/tool/__tests__/tool-subagents.test.ts
 //
 // u2 契约测试：`subagents` 批量 tool（schema 平铺 D2 / handler 转译 D3 / 错误规格 D9 /
 // 集合收录 D1 / 渲染不构造 __gui__ D8）。

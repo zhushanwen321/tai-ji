@@ -157,7 +157,7 @@ function toInlinePromptValue(value: string): string {
  *   exposure:deferred 工具（session_read 等）经 tool_search 的按需激活链路不可达。
  *   恒带不带开关条件：与 builtin:codemode 同理，spawn 参数与 settings.json 双通道
  *   条件同步会出现不一致窗口。仅主 agent 模板装载（subagent 工具面是显式白名单语义，
- *   无检索需求；防误传导断言见本包与 pi-subagent-cli 两处测试）。
+ *   无检索需求；防误传导断言见本包、pi-subagent-cli 与 runtime spawn-markers 三处测试）。
  * - --approve：强制信任 cwd——RPC 模式无交互 UI，pi 原生信任流程在 hasUI=false 时
  *   默认拒绝会导致 <cwd>/.pi/ 下的 skill 被跳过；实际主要信任项目级 .pi/skills。
  *   TODO(follow-up): Project Trust UI 落地后移除全局 --approve。
