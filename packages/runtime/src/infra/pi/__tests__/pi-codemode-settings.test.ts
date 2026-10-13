@@ -201,6 +201,7 @@ describe('ensureToolSearchDefaultEntry · D4 幂等追加（追加不覆盖 / �
     ['["+codemode"] → 追加到尾部（组合根常规形态：两系统级默认条目共存）', ['+codemode'], ['+codemode', '+tool_search']],
     ['["-read","+codemode"] 用户混合条目 → 追加不覆盖（用户条目原样保留、顺序不变）', ['-read', '+codemode'], ['-read', '+codemode', '+tool_search']],
     ['[42, "+codemode"] 坏值元素原样保留（不代偿用户数据，解析时才 filter）', [42, '+codemode'], [42, '+codemode', '+tool_search']],
+    ['["+","-"] 单字符坏条目剥前缀后为空名，不命中 → 追加（hasToolSearchEntry：空名 modifier 不算已含）', ['+', '-'], ['+', '-', '+tool_search']],
   ] as const)('%s', (_label, seedValue, expected) => {
     seed(seedValue)
     ensureToolSearchDefaultEntry()

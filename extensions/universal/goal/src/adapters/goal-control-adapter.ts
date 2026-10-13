@@ -342,7 +342,7 @@ export function registerGoalControlTool(pi: ExtensionAPI, session: GoalSession):
 		exposure: "deferred",
 		description: `管理当前会话的目标（goal）。目标用于追踪需要完成验证的复杂工作。动作：create（创建）| complete（完成）| report_blocked（阻塞报告）——各参数必填性与用法见 schema 字段说明，触发纪律见 guidelines。
 
-控制权归属：pause/resume 和 budget 变更由用户经 /goal 命令控制，你不能修改。若有预算，complete 时在总结里报告最终 token 用量。`,
+控制权归属：pause/resume 和 budget 变更由用户经 /goal 命令控制，你不能修改。`,
 		promptSnippet:
 			"用 goal_control 管理会话目标：为复杂多步骤工作主动 create（含 slug + objective + successCriteria），达成时 complete（含满足每条 successCriteria 的 evidence），穷尽方案后 report_blocked（含 reason）。",
 		// promptGuidelines：进 system prompt guidelines 段（强信号位）。

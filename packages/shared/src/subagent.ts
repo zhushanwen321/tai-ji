@@ -1,13 +1,17 @@
 /**
  * Subagent 数据模型 —— 从主 session JSONL 的 subagent toolCall/toolResult 提取。
  *
- * 数据来源：pi-subagent-workflow 扩展注册的 `subagent` tool。主 agent 调用该 tool
- * 时，扩展 spawn 一个子 agent（独立 pi session，JSONL 落在
+ * 数据来源：pi-subagent-workflow 扩展注册的 subagent 工具族（tool-declaration-slimming
+ * D3 拆分后 = `subagent_start`（主 agent 手动派发）/ `subagent_manage`（list/cancel/close）/
+ * `subagent_message`（message/fork-from））。主 agent 调用 `subagent_start` 时，扩展
+ * spawn 一个子 agent（独立 pi session，JSONL 落在
  * `<dataDir>/agent/subagents/<encodeCwd(mainCwd)>/sessions/*.jsonl`）。
  *
- * toolCall 携带 action=start + startParam{task, slug, agent?, model?, thinkingLevel?, fork?, worktree?, ...}；
+ * start toolCall 携带 startParam{task, slug, agent?, model?, thinkingLevel?, fork?, worktree?, ...}；
  * toolResult 携带 subagentId + sessionFile + bgResponse|listResponse。
  * runtime 的 subagent-extractor 从主 session JSONL 配对解析出 SubagentRecord[]。
+ * 拆分前历史会话为旧名 `subagent` 的 action=start 调用形态，解析侧按旧形态兼容读
+ * （SUBAGENT_TOOL_NAMES 保留旧名键控，见 constants.ts）。
  *
  * 2026-07-13 对齐 pi-subagent-workflow feat-ask-user-gui 分支：
  * - 新增 slug（短标签 ≤20 字符，必填，区分并发 subagent）
@@ -164,7 +168,7 @@ export interface SubagentRecord {
    * 「有 result=完成」展示。旧 entry 携带的该键在 runtime 投影层被忽略（读侧容忍）。 */
   /**
    * record 来源身份（H2 W1，设计 subagent-workflow-record-unification §3.3 D1）：
-   * 'tool' = 主 agent 经 subagent 工具手动派发；'workflow' = workflow 脚本 agent()
+   * 'tool' = 主 agent 经 subagent_start 工具手动派发；'workflow' = workflow 脚本 agent()
    * 派发（生产写入方 W2 接线，W1 契约与过滤面先行）。缺省（undefined，存量 record
    * 与未透传的投影）= 'tool' 语义，消费方零迁移——renderer 侧栏计数 / 后台工作指示
    * 按 `origin === 'workflow'` 负向过滤。

@@ -122,4 +122,4 @@ VERDICT=PASS
 ## 7. Blockers（清单外疑似风险面，待主 agent 裁决）
 
 1. **subagent-workflow `notifyDone`**（`src/interface/helpers.ts` :150 `pi.sendMessage`，调用链 `src/index.ts` :248 `onRunDone`）：workflow 完成链路异步触发，不在 pi `emit()` catch 内、无自有 try/catch——session 替换窗口 stale 即同 E1 机制崩 pi。同链路家族的 `session-lifecycle.ts` sendDelivery 依赖注入封装同判。超出本单元授权包清单（structured-output / pending-notifications），未改动，建议作为后续单元接入 `guardStaleCtx`。
-   **【已收口 2026-09-09】**两处均已接入 `guardStaleCtx`（`subagent-workflow:notifyDone` / `subagent-workflow:sendDelivery`，stale 静默语义判定见 §4），单测 `src/__tests__/notify-stale-guard.test.ts` 锁定 stale 静默 / 非 stale 上抛 / 正常路径透传三面。
+   **【已收口 2026-09-09】**两处均已接入 `guardStaleCtx`（`subagent-workflow:notifyDone` / `subagent-workflow:sendDelivery`，stale 静默语义判定见 §4），单测锁定 stale 静默 / 非 stale 上抛 / 正常路径透传三面——现役载体 = subagent-workflow 包 `src/__tests__/session-lifecycle.test.ts`（sendDelivery 守卫组）与 `src/__tests__/workflow-notify.test.ts`（notifyDone 守卫组），用例均标注出自 notify-stale-guard。

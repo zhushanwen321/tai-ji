@@ -1,7 +1,8 @@
 // 提示词质量回归：goal_control tool 声明按 D1 三层分工单源化后（设计
 // tool-declaration-slimming.md §3.3 D1），本测试锁定单源分布——
 // - description：功能定位 + action 枚举 + 控制权归属（不再复述各 action 触发纪律
-//   与预算策略——纪律单源在 promptGuidelines，字段语义单源在 schema 字段说明）
+//   与预算策略（含设预算与报告最终 token 用量）——纪律单源在 promptGuidelines，
+//   字段语义单源在 schema 字段说明）
 // - promptGuidelines：使用纪律唯一承载位（create/complete/report_blocked 何时调用、
 //   budget 何时可设）
 // - runtime 错误文案：'Correct:' 纠正正例（schema 为扁平 Type.Object + action 字段级
@@ -38,9 +39,9 @@ describe("goal_control description — 功能定位 + action 枚举 + 控制权�
 		expect(DESCRIPTION).toContain("create（创建）| complete（完成）| report_blocked（阻塞报告）");
 	});
 
-	it("含 pause-resume-budget 归用户 + 报告最终 token 用量", () => {
+	it("含 pause-resume-budget 归用户；报告预算纪律不复述（D1 单源在 guidelines）", () => {
 		expect(DESCRIPTION).toContain("pause/resume 和 budget 变更由用户经 /goal 命令控制");
-		expect(DESCRIPTION).toContain("报告最终 token 用量");
+		expect(DESCRIPTION).not.toContain("报告最终 token 用量");
 	});
 
 	it("不含 Examples JSON 正例段 + 不含 Don't 段", () => {
@@ -74,9 +75,12 @@ describe("goal_control promptGuidelines — 使用纪律唯一承载位（锚词
 		expect(ADAPTER_SRC).toContain("/goal resume or /goal clear");
 	});
 
-	it("含 complete 主动触发纪律（objective 实际达成 + evidence 对照每条 successCriteria）", () => {
+	it("含 complete 主动触发纪律（objective 实际达成 + evidence 对照每条 successCriteria）+ 报告预算纪律锚", () => {
 		expect(ADAPTER_SRC).toMatch(/complete:.*proactively call.*objective is actually achieved/s);
 		expect(ADAPTER_SRC).toContain("Evidence must meet every successCriteria condition");
+		// 报告预算纪律的唯一承载位锚（description 侧负断言见上组——删 guidelines 此句而
+		// 不删 description 侧时本锚防静默丢失）
+		expect(ADAPTER_SRC).toContain("report the final token usage in your summary");
 	});
 
 	it("含 report_blocked 主动触发纪律（穷尽方案 + 不反复报告）", () => {

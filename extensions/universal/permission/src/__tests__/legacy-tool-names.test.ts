@@ -1,7 +1,7 @@
 /**
  * 旧工具名精确规则迁移测试（tool-declaration-slimming D3 / U-B1 验收条款②）。
  *
- * 表驱动五分支：
+ * 表驱动六用例（五分支 + 分支5b 反向混合集）：
  *  1. 精确旧名展开——subagent → start/manage/message、workflow → run/control，
  *     展开顺序承重（D3 契约①），pattern/action/source/description 保留；
  *  2. wildcard 不动——'*' 与其他含通配形态的 tool 一律原样；
@@ -11,7 +11,9 @@
  *  5. 混合 wildcard 场景保序——经真实 matcher（matchNonBashTool，last-match-wins）
  *     断言「新名调用在迁移后规则集上的结论 = 迁移前旧名调用在原规则集上的结论；
  *     wildcard 对各调用的结论迁移前后不变」。旧名调用在迁移后不可达（旧工具名不再
- *     注册，D3「旧名不保留别名」），不对其迁移后结论作断言。
+ *     注册，D3「旧名不保留别名」），不对其迁移后结论作断言；
+ *  5b. 反向混合集（wildcard deny 在前、精确 allow 在后）——与分支5互为镜像，
+ *     区分度弱，承重位置锚 = 精确条目仍在 wildcard 之前。
  *
  * 匹配器行为注释：matchNonBashTool 的 tool 字段经 wildcardToRegExp 全锚定匹配
  * （精确名 = 精确匹配，'*' = 匹配全部）；pattern 对 path 匹配（path 缺省时对
@@ -32,7 +34,7 @@ function userRule(overrides: Partial<Rule> & { id: string; tool: string }): Rule
 	};
 }
 
-describe("旧工具名精确规则迁移（D3）— 表驱动五分支", () => {
+describe("旧工具名精确规则迁移（D3）— 表驱动六用例（五分支 + 分支5b 反向混合集）", () => {
 	it("分支1：精确旧名展开（subagent 三条 + workflow 两条，展开顺序承重，其余字段保留）", () => {
 		const rules: Rule[] = [
 			userRule({ id: "user-1", tool: "subagent", pattern: "*", action: "deny", description: "no subagent" }),

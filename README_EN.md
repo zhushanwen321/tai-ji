@@ -98,8 +98,8 @@ Dispatch independent tasks to subagents running in parallel, or compose multi-st
 ### Workbench integration
 Sidebar file tree (smooth on large directories + git badges), drawer terminal (per-session state), Git/worktree management, and a built-in browser pane.
 
-### 20 built-in extensions
-Agent capabilities are implemented through the pi extension mechanism, covering permissions, scheduled tasks, context compaction, structured output, and more. 16 are usable standalone outside taiji. See the [extension development guide](docs/extensions/development-guide.md).
+### 19 built-in extensions
+Agent capabilities are implemented through the pi extension mechanism, covering permissions, scheduled tasks, context compaction, structured output, and more. 19 extensions ship bundled with the app (15 universal + 4 TaiJi-integration-specific); 16 of the universal extensions are usable standalone outside taiji. See the [extension development guide](docs/extensions/development-guide.md).
 
 ---
 
