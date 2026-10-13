@@ -88,14 +88,14 @@ describe('applySystemToDom', () => {
     expect(doc.documentElement.dataset.fsDrawer).toBe('large')
   })
 
-  it('fontScales 缺省/部分缺省 → 逐区域回落 DEFAULT_FONT_SCALES（sidebar=large，chat=small，drawer=medium）', () => {
+  it('fontScales 缺省/部分缺省 → 逐区域回落 DEFAULT_FONT_SCALES（sidebar=medium，chat=small，drawer=medium）', () => {
     const doc: any = (globalThis as any).document
     applySystemToDom(makeSystem({ fontScales: { chat: 'large' } }))
-    expect(doc.documentElement.dataset.fsSidebar).toBe('large') // 默认大（产品决策：sidebar 默认大）
+    expect(doc.documentElement.dataset.fsSidebar).toBe('medium') // 默认标准（对齐 main bc16c0e10：sidebar 默认 medium）
     expect(doc.documentElement.dataset.fsChat).toBe('large')
     expect(doc.documentElement.dataset.fsDrawer).toBe('medium')
     applySystemToDom(makeSystem())
-    expect(doc.documentElement.dataset.fsSidebar).toBe('large')
+    expect(doc.documentElement.dataset.fsSidebar).toBe('medium')
     expect(doc.documentElement.dataset.fsChat).toBe('small') // chat-font-default-small：chat 默认小档
     expect(doc.documentElement.dataset.fsDrawer).toBe('medium')
   })

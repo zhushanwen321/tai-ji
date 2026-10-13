@@ -56,7 +56,7 @@ export interface FontScales {
 }
 
 /**
- * 分区字号默认档位（SSOT）：sidebar=大（×1.15），chat=小（×0.9，chat-font-default-small：
+ * 分区字号默认档位（SSOT）：sidebar=标准（×1），chat=小（×0.9，chat-font-default-small：
  * 长文阅读场景用户裁决默认小档），drawer=标准（×1）。
  *
  * 三处消费点必须都从这里取缺省值，禁止写死档位字面量：
@@ -67,7 +67,7 @@ export interface FontScales {
  * 可能缺个别区域 key——故 2/3 的逐区域回落同样必须走本常量，而非假设对象完整。
  */
 export const DEFAULT_FONT_SCALES: Required<FontScales> = {
-  sidebar: 'large',
+  sidebar: 'medium',
   chat: 'small',
   drawer: 'medium',
 }
