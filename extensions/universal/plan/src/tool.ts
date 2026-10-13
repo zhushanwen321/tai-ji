@@ -1278,6 +1278,9 @@ export function registerPlanTool(
   pi.registerTool({
     name: "plan",
     label: "Plan Mode",
+    // deferred（tool-declaration-slimming D4）：不常驻声明，tool_search 命中即激活；
+    // 迁移写入的 +tool_search 条目（runtime pi-codemode-settings）承载检索入口
+    exposure: "deferred",
     // 串行声明（D-B1-4）：全部 action 就地突变共享 PlanState，声明串行消除并行交错类
     //（A1 死锁机理的调度半边）。pi 声明粒度是工具级——同批任一 sequential 工具
     // 使整批工具顺序执行。pi 实装锚点（1.0.0 复核）：dist/core/extensions/types.d.ts
@@ -1287,11 +1290,13 @@ export function registerPlanTool(
     // executeToolCallsSequential）。单行回退通道 = 移除本声明即回默认并行。
     executionMode: "sequential",
     description:
-      "Manages plan mode lifecycle (enter, template selection, document registration, review, state transitions). " +
-      "NOT for writing document content — write documents via the bash tool (e.g. cat heredoc). " +
-      "Actions: enter, select-template, register-doc, submit-review, complete, abort.",
+      "Manages plan mode lifecycle. " +
+      "Actions: enter, select-template, register-doc, submit-review, complete, abort — per-action parameter requirements are in the schema fields below, and the post-enter workflow is injected when plan mode starts.",
     parameters: Type.Object({
-      action: StringEnum(PLAN_ACTIONS, { description: "Action to perform" }),
+      action: StringEnum(PLAN_ACTIONS, {
+        description:
+          "Action to perform. enter=start plan mode (requirement + optional skills); select-template=pick a plan template; register-doc=register a written document (re-call after revisions to bump version); submit-review=request user review (selfReview required); complete=user approved — pick execution method and exit; abort=cancel plan mode.",
+      }),
       requirement: Type.Optional(Type.String({ description: "Plan requirement / task description (for enter)" })),
       skills: Type.Optional(Type.Array(Type.String(), { description: "Skill names to mount (for enter; omit to use the template-discovery flow)" })),
       templateName: Type.Optional(Type.String({ description: "Template name (for select-template)" })),
@@ -1308,35 +1313,18 @@ export function registerPlanTool(
       ),
     }),
     promptSnippet:
+      // D1 单源化后 snippet 只承载「何时进入 + 与 bash 的分工纪律」——进入后的完整
+      // 工作流（Phase B/C/C.5/D、register-doc/submit-review 时机、re-submit 纪律）
+      // 由 plan-mode 注入段（prompts.ts buildPlanModePrompt）单源承载，此处不复述。
       "## Entering plan mode\n" +
       "For large-scale refactoring, cross-module changes, or other high-risk work, proactively enter plan mode yourself: " +
       "plan(action='enter', requirement='<what the user wants>', skills=[...]). Plan mode is read-only for source code — " +
       "you read code and write plan documents, then the user reviews before any implementation. No user confirmation is needed to enter.\n" +
       "\n" +
-      "## When to use this tool vs the bash tool\n" +
-      "Use 'plan' tool ONLY for plan mode state management:\n" +
-      "- enter — enter plan mode (self-service; requirement + optional skills)\n" +
-      "- select-template — template selection\n" +
-      "- register-doc — register a produced document (call after writing each deliverable; re-call after revisions to bump its version)\n" +
-      "- submit-review — all documents done, request user review (selfReview is REQUIRED: your self-review conclusions first)\n" +
-      "- complete — user approved plan, choose the execution method and exit plan mode\n" +
-      "- abort — cancel plan mode\n" +
-      "\n" +
-      "Use the bash tool for ALL document content: writing files, updating chapters (e.g. cat heredoc).\n" +
-      "\n" +
-      "## End-to-end workflow example\n" +
-      "1. plan(action='enter', requirement='add dark mode') — you (the agent) enter plan mode\n" +
-      "2. Explore codebase (read, grep, bash) — brainstorming\n" +
-      "3. Write each document, then plan(action='register-doc', fileName='...') for it\n" +
-      "4. Self-review (coverage / assumptions / completeness / acceptance), fix issues, then\n" +
-      "   plan(action='submit-review', selfReview='<your self-review conclusions>') — user reviews in the review UI or conversation\n" +
-      "5. Address revision comments (rewrite + re-register), redo the self-review for the revised documents, re-submit until approved\n" +
-      "6. plan(action='complete') — choose the execution method and exit plan mode\n" +
-      "\n" +
-      "When the user asks to re-submit the plan review (e.g. a re-submit notice), call plan(action='submit-review', selfReview='...') immediately — carry back your previous self-review verbatim when the documents are unchanged.\n" +
-      "\n" +
-      "❌ plan(action='complete') to 'write the plan' — WRONG, write documents via the bash tool\n" +
-      "✅ plan(action='complete') AFTER documents are written AND user approves",
+      "## Scope discipline\n" +
+      "Use the plan tool ONLY for plan mode state management (Actions: enter, select-template, register-doc, submit-review, complete, abort). " +
+      "It is NOT for writing document content — use the bash tool for ALL document content: writing files, updating chapters (e.g. cat heredoc). " +
+      "After entering, follow the injected plan-mode workflow (Deliverable Discipline + Phase C.5 self-review) step by step.",
     renderResult(
       result: { content: Array<{ type: string; text?: string }>; details?: PlanDetails },
       options: unknown,

@@ -256,19 +256,16 @@ export function registerTodoTool(
 			"\n- list: 查看全部 todo" +
 			"\n- add: 批量添加 todo（texts 数组）" +
 			"\n- update: 按 id 更新 todo——status 和/或 text；批量用 updates[]" +
-			"\n- delete: 按 id 删除 todo（ids 数组）" +
-			"\n\n规则：" +
-			"\n- 同一时间只有一个 todo 处于 in_progress" +
-			"\n- 完成一个 todo 立即标记 completed，不要攒到最后批量标记" +
-			"\n- 未真正完成不得标记 completed：被阻塞或测试失败时保持 in_progress" +
-			"\n- 列表保持聚焦：建议 todo 总数不超过 10 个，细粒度步骤优先合并" +
-			"\n- 旧任务全部 completed 后再 add 会自动清理旧列表，直接添加新任务即可",
+			"\n- delete: 按 id 删除 todo（ids 数组）",
 		promptSnippet: "用 todo 跟踪多步骤工作；记得为验证步骤（测试、类型检查）单独建 todo。",
 		promptGuidelines: [
-			"[Usage] 多步骤工作（3+步）时使用，AI 自发创建，无需用户触发",
+			// D1 单源化：guidelines 是 todo 使用纪律的唯一承载位（原 description「规则：」段
+			// 的五条纪律已迁入，description 只留功能定位与动作清单）。
+			"[Usage] 多步骤工作（3+步）时使用，AI 自发创建，无需用户触发；同一时间只有一个 todo 处于 in_progress",
 			"[验证任务] 为测试 / 类型检查等验证步骤单独建 todo，完成前确保验证通过",
+			"[完成纪律] 完成一个 todo 立即标记 completed，不要攒到最后批量标记；未真正完成（被阻塞或测试失败）不得标记 completed，保持 in_progress",
 			"[批量优先] 完成多项任务时使用 updates[] 批量更新，减少工具调用次数",
-			"[自动闭合] 全部完成后自动清理，无需手动 delete",
+			"[自动闭合] 旧任务全部 completed 后再 add 会自动清理旧列表，直接添加新任务即可，无需手动 delete",
 			"[规模控制] todo 总数建议不超过 10 个；超过时合并细粒度步骤或 delete 掉不再需要的项",
 			"[Not for] 单步操作、简单对话",
 		],

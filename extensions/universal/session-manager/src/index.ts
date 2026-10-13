@@ -177,6 +177,9 @@ function registerSessionTool<S extends TObject>(pi: ExtensionAPI, cfg: SessionTo
 	pi.registerTool({
 		name: cfg.name,
 		label: cfg.label,
+		// deferred（tool-declaration-slimming D4）：六件套整体不常驻声明，tool_search
+		// 命中即激活；迁移写入的 +tool_search 条目（runtime pi-codemode-settings）承载检索入口
+		exposure: "deferred",
 		description: cfg.description,
 		parameters: cfg.parameters,
 		async execute(
@@ -222,7 +225,7 @@ export default function sessionManagerExtension(pi: ExtensionAPI): void {
 		name: "create_managed_session",
 		label: "Create Managed Session",
 		description:
-			"Create a new agent-managed session in the specified working directory. Optionally provide an initial prompt, which is sent immediately (new sessions are always idle, so it is delivered directly). Returns a session ID, initial status and willNotify: when a prompt is provided, exactly one completion notification is delivered to this session after that run finishes (see pending_notifications, type 'session'); without a prompt willNotify is false and no completion notification is sent. Terminal session death is notified once regardless. Requires the taiji desktop runtime; standalone pi CLI will time out.",
+			"Create a new agent-managed session in a working directory. An optional initial prompt is delivered immediately (new sessions are always idle). Returns session ID, initial status, and willNotify: with a prompt, exactly one completion notification is delivered to this session when that run finishes (see pending_notifications, type 'session'); without a prompt, no completion notification. Terminal session death is notified once regardless. Requires the taiji desktop runtime (times out in standalone pi).",
 		parameters: CreateManagedSessionParams,
 		action: "create",
 		toParams: (p) => ({
@@ -253,7 +256,7 @@ export default function sessionManagerExtension(pi: ExtensionAPI): void {
 		name: "send_to_session",
 		label: "Send to Session",
 		description:
-			"Send a prompt/message to an existing managed session. The message is asynchronously queued: if the target session is busy (generating/compacting/running bash) it is delivered at its next turn boundary, and {queued: true} is returned immediately. Returns willNotify: exactly one completion notification is delivered to this session when the queued message is consumed and that run finishes (several queued messages merge into a single notification with a count). On synchronous failure the tool call fails with an error (check get_session_status, then retry). Requires the taiji desktop runtime; standalone pi CLI will time out.",
+			"Send a prompt/message to an existing managed session. The message is queued asynchronously: if the target session is busy (generating/compacting/running bash) it is delivered at its next turn boundary and {queued: true} returns immediately. willNotify: exactly one completion notification is delivered to this session when the queued message is consumed and that run finishes (several queued messages merge into a single notification with a count). On synchronous failure the tool call errors (check get_session_status, then retry). Requires the taiji desktop runtime (times out in standalone pi).",
 		parameters: SendToSessionParams,
 		action: "send",
 		toParams: (p) => ({ sessionId: p.sessionId, prompt: p.prompt, notifyId: newNotifyId() }),
@@ -270,7 +273,7 @@ export default function sessionManagerExtension(pi: ExtensionAPI): void {
 	registerSessionTool(pi, {
 		name: "read_session_history",
 		label: "Read Session History",
-		description: "Read the conversation history of a managed session. Optionally limit to the last N turns. Requires the taiji desktop runtime; standalone pi CLI will time out.",
+		description: "Read the conversation history of a managed session. Optionally limit to the last N turns. Requires the taiji desktop runtime (times out in standalone pi).",
 		parameters: ReadSessionHistoryParams,
 		action: "history",
 		toParams: (p) => ({ sessionId: p.sessionId, tailTurns: p.tailTurns }),
@@ -279,7 +282,7 @@ export default function sessionManagerExtension(pi: ExtensionAPI): void {
 	registerSessionTool(pi, {
 		name: "list_my_sessions",
 		label: "List My Sessions",
-		description: "List all sessions managed by the current agent. Returns session IDs, labels, and statuses. Requires the taiji desktop runtime; standalone pi CLI will time out.",
+		description: "List all sessions managed by the current agent. Returns session IDs, labels, and statuses. Requires the taiji desktop runtime (times out in standalone pi).",
 		parameters: ListMySessionsParams,
 		action: "list",
 		toParams: () => ({}),
@@ -302,7 +305,7 @@ export default function sessionManagerExtension(pi: ExtensionAPI): void {
 	registerSessionTool(pi, {
 		name: "get_session_status",
 		label: "Get Session Status",
-		description: "Get the current status of a managed session (active, idle, error, etc.) and its model info. Requires the taiji desktop runtime; standalone pi CLI will time out.",
+		description: "Get the current status of a managed session (active, idle, error, etc.) and its model info. Requires the taiji desktop runtime (times out in standalone pi).",
 		parameters: GetSessionStatusParams,
 		action: "status",
 		toParams: (p) => ({ sessionId: p.sessionId }),
@@ -311,7 +314,7 @@ export default function sessionManagerExtension(pi: ExtensionAPI): void {
 	registerSessionTool(pi, {
 		name: "abort_session",
 		label: "Abort Session",
-		description: "Abort a running managed session. The session stops processing; its final status will be 'stopped'. Requires the taiji desktop runtime; standalone pi CLI will time out.",
+		description: "Abort a running managed session. The session stops processing; its final status will be 'stopped'. Requires the taiji desktop runtime (times out in standalone pi).",
 		parameters: AbortSessionParams,
 		action: "abort",
 		toParams: (p) => ({ sessionId: p.sessionId }),

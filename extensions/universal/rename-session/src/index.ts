@@ -77,11 +77,15 @@ function registerRenameSessionTool(pi: ExtensionAPI): void {
 	pi.registerTool({
 		name: "rename_session",
 		label: "Rename Session",
+		// deferred（tool-declaration-slimming D4）：不常驻声明，tool_search 命中即激活；
+		// 迁移写入的 +tool_search 条目（runtime pi-codemode-settings）承载检索入口
+		exposure: "deferred",
 		description:
-			"Rename the current session with a short, descriptive title. Call this proactively once the session's purpose is clear (typically after the first exchange), or whenever the user asks to name or rename the session. The title is a slug-style phrase: noun or gerund phrase, 3-6 words, same language as the conversation, no trailing punctuation, no full sentences. Replaces any existing session name.",
+			"Rename the current session. Call this proactively once the session's purpose is clear (typically after the first exchange), or whenever the user asks to name or rename the session. Replaces any existing session name.",
 		parameters: Type.Object({
 			title: Type.String({
-				description: "New session title. Slug-style phrase (e.g. '修复登录超时', 'refactor-config-loader'), 3-6 words, no trailing punctuation.",
+				description:
+					"New session title. A slug-style phrase — noun or gerund phrase, 3-6 words, same language as the conversation, no trailing punctuation, no full sentences (e.g. '修复登录超时', 'refactor-config-loader').",
 			}),
 		}),
 		async execute(

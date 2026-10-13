@@ -1,14 +1,15 @@
-// 提示词质量回归：goal_control tool description + runtime 错误文案必须是
-// "可纠正的行为约束器"，而非干巴巴的错误。
+// 提示词质量回归：goal_control tool 声明按 D1 三层分工单源化后（设计
+// tool-declaration-slimming.md §3.3 D1），本测试锁定单源分布——
+// - description：功能定位 + action 枚举 + 控制权归属（不再复述各 action 触发纪律
+//   与预算策略——纪律单源在 promptGuidelines，字段语义单源在 schema 字段说明）
+// - promptGuidelines：使用纪律唯一承载位（create/complete/report_blocked 何时调用、
+//   budget 何时可设）
+// - runtime 错误文案：'Correct:' 纠正正例（schema 为扁平 Type.Object + action 字段级
+//   union，字段全部 Optional——缺失必填由 handler 运行时校验兜底）
 //
-// agent（LLM）唯一能看到的 tool 元信息就是 description + 报错文案。description 用中文
-// 重写（动作 create/complete/report_blocked + 规则 + §2.5 终态语义），删除英文 Examples/Don't
-// 段；runtime throw 保留 .trim() 空串校验 + 'Correct:' 纠正正例（schema 为扁平 Type.Object
-// + action 字段级 union，字段全部 Optional——缺失必填由 handler 运行时校验兜底）。
-//
-// 本测试用源码断言（读 .ts 文件文本）锁定这些约束，防止后续重构把中文语义/纠错文案/
-// union 结构删掉。读源码而非 import，避免 mock 链（goal-control-adapter.ts 依赖
-// pi-ai/typebox/pi-tui/ExtensionAPI 等值导入）。
+// 本测试用源码断言（读 .ts 文件文本）锁定这些约束，防止后续重构把单源分布改回
+// 多层复述、或把纠错文案删掉。读源码而非 import，避免 mock 链（goal-control-adapter.ts
+// 依赖 pi-ai/typebox/pi-tui/ExtensionAPI 等值导入）。
 
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -31,27 +32,56 @@ function extractDescription(src: string): string {
 
 const DESCRIPTION = extractDescription(ADAPTER_SRC);
 
-describe("goal_control description — 中文化 + 动作覆盖", () => {
-	it("含管理目标总述 + complete 须满足每条 successCriteria 条件", () => {
+describe("goal_control description — 功能定位 + action 枚举 + 控制权归属", () => {
+	it("含管理目标总述 + 三动作枚举（create/complete/report_blocked）", () => {
 		expect(DESCRIPTION).toContain("管理当前会话的目标");
-		expect(DESCRIPTION).toContain("满足每条 successCriteria 条件");
+		expect(DESCRIPTION).toContain("create（创建）| complete（完成）| report_blocked（阻塞报告）");
 	});
-});
 
-describe("goal_control description — §2.5 终态语义", () => {
-	it("create 失败提示 / complete 报告 token / pause-resume-budget 归用户 / 不反复报告阻塞", () => {
-		expect(DESCRIPTION).toContain("请让用户运行 /goal resume 或 /goal clear");
-		expect(DESCRIPTION).toContain("报告最终 token 用量");
+	it("含 pause-resume-budget 归用户 + 报告最终 token 用量", () => {
 		expect(DESCRIPTION).toContain("pause/resume 和 budget 变更由用户经 /goal 命令控制");
-		expect(DESCRIPTION).toContain("不要反复报告同一阻塞");
+		expect(DESCRIPTION).toContain("报告最终 token 用量");
 	});
-});
 
-describe("goal_control description — 删除 Examples/Don't 英文段", () => {
 	it("不含 Examples JSON 正例段 + 不含 Don't 段", () => {
 		// Examples 段已删，description 不再含裸 JSON 正例
 		expect(DESCRIPTION).not.toContain('{"action":"create"');
 		expect(DESCRIPTION).not.toMatch(/Don't/);
+	});
+});
+
+describe("goal_control description — D1 单源化（不复述纪律与字段语义）", () => {
+	it("不再复述各 action 触发纪律（纪律单源在 promptGuidelines）", () => {
+		// create/complete/report_blocked 的触发条件只在 guidelines；
+		// 完成门槛（successCriteria 逐条满足）只在 schema successCriteria 说明
+		expect(DESCRIPTION).not.toContain("琐碎的单步任务");
+		expect(DESCRIPTION).not.toContain("仅在穷尽替代方案后使用");
+		expect(DESCRIPTION).not.toContain("满足每条 successCriteria 条件");
+	});
+
+	it("不再复述预算策略段（budget 纪律单源在 promptGuidelines）", () => {
+		expect(DESCRIPTION).not.toContain("默认不设 tokenBudget");
+		expect(DESCRIPTION).not.toContain("切勿自行决定");
+	});
+});
+
+describe("goal_control promptGuidelines — 使用纪律唯一承载位（锚词保留清单）", () => {
+	it("含 promptGuidelines 字段 + create 主动触发纪律（复杂多步骤才建 + 已有目标不建）", () => {
+		expect(ADAPTER_SRC).toMatch(/promptGuidelines:\s*\[/);
+		expect(ADAPTER_SRC).toMatch(
+			/create: proactively start a goal for complex, multi-step work/s,
+		);
+		expect(ADAPTER_SRC).toContain("/goal resume or /goal clear");
+	});
+
+	it("含 complete 主动触发纪律（objective 实际达成 + evidence 对照每条 successCriteria）", () => {
+		expect(ADAPTER_SRC).toMatch(/complete:.*proactively call.*objective is actually achieved/s);
+		expect(ADAPTER_SRC).toContain("Evidence must meet every successCriteria condition");
+	});
+
+	it("含 report_blocked 主动触发纪律（穷尽方案 + 不反复报告）", () => {
+		expect(ADAPTER_SRC).toMatch(/report_blocked:.*proactively call.*≥3 distinct alternative approaches/s);
+		expect(ADAPTER_SRC).toContain("do not repeatedly report the same blocker");
 	});
 });
 
@@ -60,15 +90,6 @@ describe("goal_control schema — 扁平 Type.Object（OpenAI 兼容）+ handler
 		expect(ADAPTER_SRC).toMatch(/Type\.Union\(/);
 		expect(ADAPTER_SRC).toContain("additionalProperties: false");
 		expect(ADAPTER_SRC).not.toMatch(/timeBudgetMinutes/);
-	});
-});
-
-describe("goal_control promptGuidelines — complete/report_blocked 主动触发引导", () => {
-	it("含 promptGuidelines 字段 + complete/report_blocked 主动触发信号", () => {
-		expect(ADAPTER_SRC).toMatch(/promptGuidelines:\s*\[/);
-		expect(ADAPTER_SRC).toMatch(/complete:.*proactively call.*objective is actually achieved/s);
-		expect(ADAPTER_SRC).toMatch(/report_blocked:.*proactively call.*≥3 distinct alternative approaches/s);
-		expect(ADAPTER_SRC).toContain("do not repeatedly report the same blocker");
 	});
 });
 
@@ -93,19 +114,22 @@ describe("goal_control 描述修正（A1/slug optional）", () => {
 	});
 });
 
-describe("goal_control budget 默认策略锁定（S-8：三层信号冗余，防回滚无声）", () => {
-	// 新增的 budget-policy prompt 文本散落在三处（description 段 / promptGuidelines 项 /
-	// tokenBudget 参数 description），任一处被回滚都应触发测试失败——这是 prompt-lock 的核心诉求。
-	it("description 模板含中文 '默认不设 tokenBudget' 预算策略段", () => {
-		expect(DESCRIPTION).toContain("默认不设 tokenBudget");
-	});
-
-	it("promptGuidelines budget 项含英文 'never set tokenBudget on your own initiative'", () => {
+describe("goal_control budget 纪律单源化（S-8 替换：三层冗余锁 → 单源分布锁）", () => {
+	// D1 单源化后预算策略纪律只在 promptGuidelines 一处；description 与 tokenBudget
+	// 参数说明不再复述纪律（schema 只留字段语义「默认不设」+ 指引）。
+	// 任一层回填复述 = 违反单源化，本组负断言红灯。
+	it("promptGuidelines budget 条含纪律锚词（never set on own initiative + 先问用户）", () => {
 		expect(ADAPTER_SRC).toContain("never set tokenBudget on your own initiative");
+		expect(ADAPTER_SRC).toContain("ask the user before creating the goal");
 	});
 
-	it("tokenBudget 参数 description 含 '默认不设' + '切勿自行决定设置预算'", () => {
-		// 参数 schema description 是第三层信号（与上面两层对齐，三层冗余，见 adapter 源码注释）
-		expect(ADAPTER_SRC).toMatch(/tokenBudget:[\s\S]*?默认不设[\s\S]*?切勿自行决定设置预算/);
+	it("description 不含预算策略段（不复述）", () => {
+		expect(DESCRIPTION).not.toContain("仅在用户明确要求");
+		expect(DESCRIPTION).not.toContain("获得明确同意");
+	});
+
+	it("tokenBudget 参数 description 只留字段语义（默认不设 + 指引，不含纪律复述）", () => {
+		expect(ADAPTER_SRC).toMatch(/tokenBudget:[\s\S]*?默认不设/);
+		expect(ADAPTER_SRC).not.toMatch(/tokenBudget:[\s\S]*?切勿自行决定设置预算/);
 	});
 });
