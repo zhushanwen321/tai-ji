@@ -23,7 +23,7 @@
 当前最新版本：**v0.11.1**（[查看全部版本](https://github.com/zhushanwen321/tai-ji/releases)）。安装后 app 内会自动检测新版本，提示一键升级。
 
 <!-- INSTALL:BEGIN -->
-<!-- 本区块内的版本号由 .agents/skills/merge/scripts/update-readme-install.mjs 在每次正式发布后自动替换；区块外的版本号不会被打扰。 -->
+<!-- 本区块内的版本号由 .agents/skills/merge/scripts/update-readme-install.mjs 在每次正式发布后自动替换；区块外仅上方「当前最新版本」行会同步更新，其余内容不会被打扰。 -->
 
 <details>
 <summary><b>国内下载（GitCode 镜像，~15 MB/s）</b></summary>

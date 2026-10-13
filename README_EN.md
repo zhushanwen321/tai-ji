@@ -23,7 +23,7 @@ TaiJi is an AI Agent desktop workbench (macOS / Windows / Linux) that puts multi
 Current latest version: **v0.11.1** ([view all releases](https://github.com/zhushanwen321/tai-ji/releases)). After installation, the app automatically checks for new versions and offers a one-click upgrade.
 
 <!-- INSTALL:BEGIN -->
-<!-- Version numbers inside this block are replaced automatically by .agents/skills/merge/scripts/update-readme-install.mjs after each official release; version numbers outside the block are left untouched. -->
+<!-- Version numbers inside this block are replaced automatically by .agents/skills/merge/scripts/update-readme-install.mjs after each official release; outside the block only the "Current latest version" line above is updated along with it, all other content is left untouched. -->
 
 <details>
 <summary><b>Mainland China download (GitCode mirror, ~15 MB/s)</b></summary>
