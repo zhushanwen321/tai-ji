@@ -25,34 +25,46 @@
     <GroupCard>
       <div class="px-[10px] pt-[4px] pb-[8px]">
         <SettingRow :label="t('settings.system.appearance')" :desc="t('settings.system.appearanceDesc')">
-          <Select
-            :model-value="system.theme"
-            @update:model-value="onThemeSelect"
-          >
-            <SelectTrigger class="w-[200px]">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="light">{{ t('settings.system.themeLight') }}</SelectItem>
-              <SelectItem value="dark">{{ t('settings.system.themeDark') }}</SelectItem>
-              <SelectItem value="system">{{ t('settings.system.themeSystem') }}</SelectItem>
-            </SelectContent>
-          </Select>
+          <!-- 外观模式 segmented 平铺：三值域闭合，比 Select 少一层浮层；
+               视觉同 sidebar SegmentedTab 范式（凹陷槽 bg-bg-input + active 浮起）。
+               点击仍走 onThemeSelect 运行时守卫（isThemeMode 收窄后才 emit），非模板 as 断言。 -->
+          <div class="flex w-[200px] gap-0.5 rounded-lg bg-bg-input p-[3px]" data-testid="appearance-mode-seg">
+            <Button
+              v-for="m in THEME_MODES"
+              :key="m"
+              variant="ghost"
+              type="button"
+              class="h-7 flex-1 justify-center rounded-sm px-1 text-[length:var(--text-xs)]"
+              :class="(system.theme ?? 'dark') === m
+                ? 'bg-bg-elevated text-neutral-fg hover:bg-bg-elevated hover:text-neutral-fg'
+                : 'text-neutral-mid hover:bg-transparent hover:text-neutral-fg'"
+              :data-testid="`appearance-mode-${m}`"
+              :aria-pressed="(system.theme ?? 'dark') === m"
+              @click="onThemeSelect(m)"
+            >
+              {{ t(m === 'light' ? 'settings.system.themeLight' : m === 'dark' ? 'settings.system.themeDark' : 'settings.system.themeSystem') }}
+            </Button>
+          </div>
         </SettingRow>
         <SettingRow :label="t('settings.system.fontSize')" :desc="t('settings.system.fontSizeDesc')">
-          <Select
-            :model-value="system.fontSize ?? 'medium'"
-            @update:model-value="onFontSizeSelect"
-          >
-            <SelectTrigger class="w-[200px]">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="small">{{ t('settings.system.fontSmall') }}</SelectItem>
-              <SelectItem value="medium">{{ t('settings.system.fontMedium') }}</SelectItem>
-              <SelectItem value="large">{{ t('settings.system.fontLarge') }}</SelectItem>
-            </SelectContent>
-          </Select>
+          <!-- 全局字号 segmented：三档值域闭合，同上范式；点击走 onFontSizeSelect 运行时守卫。 -->
+          <div class="flex w-[200px] gap-0.5 rounded-lg bg-bg-input p-[3px]" data-testid="appearance-fs-global-seg">
+            <Button
+              v-for="fs in FONT_SIZE_OPTIONS"
+              :key="fs"
+              variant="ghost"
+              type="button"
+              class="h-7 flex-1 justify-center rounded-sm px-1 text-[length:var(--text-xs)]"
+              :class="(system.fontSize ?? 'medium') === fs
+                ? 'bg-bg-elevated text-neutral-fg hover:bg-bg-elevated hover:text-neutral-fg'
+                : 'text-neutral-mid hover:bg-transparent hover:text-neutral-fg'"
+              :data-testid="`appearance-fs-global-${fs}`"
+              :aria-pressed="(system.fontSize ?? 'medium') === fs"
+              @click="onFontSizeSelect(fs)"
+            >
+              {{ t(fs === 'small' ? 'settings.system.fontSmall' : fs === 'medium' ? 'settings.system.fontMedium' : 'settings.system.fontLarge') }}
+            </Button>
+          </div>
         </SettingRow>
         <SettingRow
           v-for="region in FONT_REGIONS"
