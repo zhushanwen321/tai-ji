@@ -15,7 +15,9 @@
  *   freshRows=null 降级（两桶空 + freshSnapshotAvailable=false）；
  * - captureSignalForensics：编排全链（环历史 diff + lstart 补采 + 台账事件字段 +
  *   detailPath）；新快照失败降级不抛；
- * - reportPiExitSignalForensics：logger 未启用时结构性 no-op（无落点不采样）；
+ * - reportPiExitSignalForensics：logger 门控两态——未启用结构性 no-op（无落点不采样），
+ *   启用时真实采集落盘（生效态同时是 mock 路径正确性的对照面：no-op 态真门控也关，
+ *   无法区分死 mock）；
  * - writeForensicsDetailFile：真实写 tmp 数据目录，返回相对 detailPath。
  *
  * 运行：cd packages/runtime && npx vitest run src/infra/pi/__tests__/signal-forensics.test.ts
@@ -28,9 +30,19 @@ import type { CrashJournalEvent, CrashJournalWriter } from '@taiji/shared'
 
 /** logger 门控可翻转（reportPiExitSignalForensics 的 no-op / 生效两态测试）。 */
 const loggerGate = vi.hoisted(() => ({ enabled: false }))
-vi.mock('../logger.js', () => ({
+// SUT（infra/pi/signal-forensics.ts）import 的 '../logger.js' 从 infra/pi/ 出发 =
+// infra/logger.ts；本文件在 __tests__/ 一层，mock 必须以 '../../logger.js' 指向同一
+// 模块——写浅一层会解析到不存在的 infra/pi/logger.ts，成为死 mock（门控静默失效）。
+vi.mock('../../logger.js', () => ({
   isPiCrashLogEnabled: () => loggerGate.enabled,
 }))
+
+/** 生效态测试替身：reportPiExitSignalForensics 硬接线真实 listAllProcesses，经模块 mock 注入。 */
+const listAllProcessesStub = vi.hoisted(() => vi.fn<() => Promise<string>>())
+vi.mock('../process-table-ring.js', async importOriginal => {
+  const actual = await importOriginal<typeof import('../process-table-ring.js')>()
+  return { ...actual, listAllProcesses: listAllProcessesStub }
+})
 
 import {
   buildDigest,
@@ -464,6 +476,41 @@ describe('reportPiExitSignalForensics', () => {
       await new Promise(r => setTimeout(r, 50))
       // no-op = 连 logs 目录都不创建（writeForensicsDetailFile 的 mkdir 未被触达）
       expect(existsSync(join(dataDir, 'logs'))).toBe(false)
+    } finally {
+      if (prev === undefined) delete process.env.TAIJI_AGENT_DATA_DIR
+      else process.env.TAIJI_AGENT_DATA_DIR = prev
+      rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    }
+  })
+
+  it('logger 启用时真实采集落盘（gate 生效态，对照面证明 mock 真实拦截）', async () => {
+    loggerGate.enabled = true
+    listAllProcessesStub.mockResolvedValue(psStdout(freshRows()))
+    // report 入口不注入 now：归因窗口相对真实时钟计算，环样本须压在真实 deathAt 窗口内
+    const deathAt = Date.now()
+    const ring = new ProcessTableRing({ intervalMs: 0, now: () => deathAt })
+    ring.push(psStdout(preDeathRows()), deathAt - 1_000)
+    const dataDir = mkdtempSync(join(tmpdir(), 'sigf-enabled-'))
+    const prev = process.env.TAIJI_AGENT_DATA_DIR
+    process.env.TAIJI_AGENT_DATA_DIR = dataDir
+    try {
+      reportPiExitSignalForensics({
+        sessionId: 'sess-enabled',
+        deadPid: DEAD_PID,
+        exitCode: 143,
+        ring,
+      })
+      await vi.waitFor(() => {
+        expect(readdirSync(join(dataDir, 'logs')).some(f => f.startsWith('signal-forensics-'))).toBe(true)
+      })
+      const fileName = readdirSync(join(dataDir, 'logs')).find(f => f.startsWith('signal-forensics-'))
+      expect(fileName).toBeDefined()
+      expect(fileName).toContain('sess-enabled')
+      const written = JSON.parse(readFileSync(join(dataDir, 'logs', fileName!), 'utf8').trim()) as SignalForensicsRecord
+      expect(written.sessionId).toBe('sess-enabled')
+      expect(written.signalGuess).toBe('SIGTERM')
+      // 环 diff 真实执行：死亡前窗口在场的发送方在替身快照中缺席 → vanished
+      expect(written.vanishedSenders.map(c => c.pid)).toContain(KILLER_PID)
     } finally {
       if (prev === undefined) delete process.env.TAIJI_AGENT_DATA_DIR
       else process.env.TAIJI_AGENT_DATA_DIR = prev

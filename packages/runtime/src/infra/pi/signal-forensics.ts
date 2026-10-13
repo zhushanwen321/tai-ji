@@ -42,7 +42,7 @@ import { getDataDir } from '@taiji/shared/paths'
 import { getCrashJournal } from '../crash-journal.js'
 import { isPiCrashLogEnabled } from '../logger.js'
 // 采样原语（ps 解析 + 滚动环）独立文件：signal-forensics 只消费环，不含 OS 枚举细节
-import { listAllProcesses, parseProcessTable, ProcessTableRing, readProcessStartTime, type ProcessRow } from './process-table-ring.js'
+import { listAllProcesses, parseProcessTable, ProcessTableRing, readProcessStartTime, type ProcessRow, type RingSample } from './process-table-ring.js'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 常量（禁裸字面量；env 可调，0 = 关闭对应机制）
@@ -193,6 +193,133 @@ export interface ClassifyResult { // oe-exempt:20261014:framework:归因分类�
   freshSnapshotAvailable: boolean
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// classifySenders 的内聚步骤（私有 helper；主函数只做编排——排除集/窗口 seen map/
+// fresh 快照索引/连坐视图/候选分流/排序各有单一职责，行为与拆分前逐分支等价）。
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** 窗口 seen map 条目：首见/末见时刻 + 末见命令行（进程可能被 pid 复用，末见命令行为准）。 */
+interface WindowSeenEntry {
+  row: ProcessRow
+  firstSeenAt: number
+  lastSeenAt: number
+}
+
+/** 排除集：INIT_PID / runtime 自身 / 死亡 pi 自身——它们不可能是信号发送方。 */
+function buildExcludedPids(ownPid: number, deadPid: number | null | undefined): Set<number> {
+  const excluded = new Set<number>([INIT_PID, ownPid])
+  if (deadPid != null) excluded.add(deadPid)
+  return excluded
+}
+
+/** 窗口内出现过的 pid → 首见/末见时刻 + 末见命令行（末样本的命令行为准）。 */
+function buildWindowSeenMap(
+  windowSamples: readonly RingSample[],
+  excluded: ReadonlySet<number>,
+): Map<number, WindowSeenEntry> {
+  const seen = new Map<number, WindowSeenEntry>()
+  for (const sample of windowSamples) {
+    for (const row of sample.rows.values()) {
+      if (excluded.has(row.pid)) continue
+      const prev = seen.get(row.pid)
+      if (prev === undefined) {
+        seen.set(row.pid, { row, firstSeenAt: sample.at, lastSeenAt: sample.at })
+      } else {
+        prev.lastSeenAt = Math.max(prev.lastSeenAt, sample.at)
+        prev.row = row
+      }
+    }
+  }
+  return seen
+}
+
+/** 死亡即时快照 → pid → 行 映射（null 透传 = 快照采集失败，调用方降级）。 */
+function buildFreshRowMap(freshRows: ProcessRow[] | null): Map<number, ProcessRow> | null {
+  return freshRows === null ? null : new Map(freshRows.map(r => [r.pid, r]))
+}
+
+/** 兄弟受管 pi 的死亡时刻存活视图（连坐视图；快照缺失时无法确认存活，一律记死亡）。 */
+function buildSiblingStatuses(
+  managedPids: readonly number[] | undefined,
+  excluded: ReadonlySet<number>,
+  freshMap: ReadonlyMap<number, ProcessRow> | null,
+): SiblingPiStatus[] {
+  return (managedPids ?? [])
+    .filter(pid => !excluded.has(pid))
+    .map(pid => ({ pid, aliveAtDeath: freshMap?.has(pid) ?? false }))
+}
+
+/** 候选分流中间态（ring diff 与 fresh-only 两路汇合后统一排序封顶）。 */
+interface CandidateBuckets {
+  vanished: SenderCandidate[]
+  presentAll: SenderCandidate[]
+}
+
+/** 环窗口 diff：窗口在场进程按死亡时存活与否分流（vanished 全收；present 见桶注释）。 */
+function classifyRingSeenCandidates(
+  seen: ReadonlyMap<number, WindowSeenEntry>,
+  freshMap: ReadonlyMap<number, ProcessRow>,
+  managedSet: ReadonlySet<number>,
+): CandidateBuckets {
+  const buckets: CandidateBuckets = { vanished: [], presentAll: [] }
+  for (const [pid, info] of seen) {
+    const alive = freshMap.has(pid)
+    const candidate: SenderCandidate = {
+      pid,
+      ppid: info.row.ppid,
+      command: info.row.command,
+      firstSeenAt: info.firstSeenAt,
+      lastSeenAt: info.lastSeenAt,
+      vanished: !alive,
+      tier: commandTier(info.row.command),
+      startedAt: null,
+    }
+    if (alive) {
+      // present 桶只收启发式命中（'other' 太噪；但 'other' 消失仍进 vanished 桶）；
+      // 受管 pi 不进 present（见 classifySenders 的 managedSet 注释）
+      if (candidate.tier !== 'other' && !managedSet.has(pid)) buckets.presentAll.push(candidate)
+    } else {
+      buckets.vanished.push(candidate)
+    }
+  }
+  return buckets
+}
+
+/**
+ * fresh-only 候选：死亡即时快照在场、环内窗口从未采样到——两次采样间隔（~intervalMs）
+ * 内新起的进程，贴近死亡的强指纹，进 present 桶（环观测字段为 null，不伪装）。
+ */
+function collectFreshOnlyPresent(
+  freshMap: ReadonlyMap<number, ProcessRow>,
+  seen: ReadonlyMap<number, WindowSeenEntry>,
+  excluded: ReadonlySet<number>,
+  managedSet: ReadonlySet<number>,
+): SenderCandidate[] {
+  const freshOnly: SenderCandidate[] = []
+  for (const freshRow of freshMap.values()) {
+    if (seen.has(freshRow.pid) || excluded.has(freshRow.pid) || managedSet.has(freshRow.pid)) continue
+    const tier = commandTier(freshRow.command)
+    if (tier === 'other') continue
+    freshOnly.push({
+      pid: freshRow.pid,
+      ppid: freshRow.ppid,
+      command: freshRow.command,
+      firstSeenAt: null,
+      lastSeenAt: null,
+      vanished: false,
+      tier,
+      startedAt: null,
+    })
+  }
+  return freshOnly
+}
+
+/** 候选排序：tier 权重升序 → lastSeenAt 降序（越晚死前活动越可疑）。 */
+function compareBySuspicion(a: SenderCandidate, b: SenderCandidate): number {
+  return TIER_RANK[a.tier] - TIER_RANK[b.tier]
+    || (b.lastSeenAt ?? -1) - (a.lastSeenAt ?? -1)
+}
+
 /**
  * 从环历史 + 死亡即时快照 diff 出候选发送方（纯函数，无 I/O）。
  *
@@ -213,34 +340,13 @@ export function classifySenders(input: ClassifyInput): ClassifyResult {
   const windowFromAt = input.deathAt - windowMs
   const windowSamples = input.ring.samplesInWindow(windowFromAt, input.deathAt)
 
-  const excluded = new Set<number>([INIT_PID, input.ownPid])
-  if (input.deadPid != null) excluded.add(input.deadPid)
+  const excluded = buildExcludedPids(input.ownPid, input.deadPid)
   // 受管 pi 集合：连坐视图（siblings）单独覆盖，不进 present 候选——runtime 自己的
   // 子进程不是发送方；但**不**排除出 vanished：兄弟 pi 同秒消失正是连坐证据。
   const managedSet = new Set<number>(input.managedPids ?? [])
-
-  // 窗口内出现过的 pid → 首见/末见时刻 + 最后一条命令行（进程可能被 pid 复用，末见命令行为准）
-  const seen = new Map<number, { row: ProcessRow; firstSeenAt: number; lastSeenAt: number }>()
-  for (const sample of windowSamples) {
-    for (const row of sample.rows.values()) {
-      if (excluded.has(row.pid)) continue
-      const prev = seen.get(row.pid)
-      if (prev === undefined) {
-        seen.set(row.pid, { row, firstSeenAt: sample.at, lastSeenAt: sample.at })
-      } else {
-        prev.lastSeenAt = Math.max(prev.lastSeenAt, sample.at)
-        prev.row = row
-      }
-    }
-  }
-
-  const freshMap = input.freshRows === null
-    ? null
-    : new Map(input.freshRows.map(r => [r.pid, r]))
-
-  const siblings: SiblingPiStatus[] = (input.managedPids ?? [])
-    .filter(pid => !excluded.has(pid))
-    .map(pid => ({ pid, aliveAtDeath: freshMap?.has(pid) ?? false }))
+  const seen = buildWindowSeenMap(windowSamples, excluded)
+  const freshMap = buildFreshRowMap(input.freshRows)
+  const siblings = buildSiblingStatuses(input.managedPids, excluded, freshMap)
 
   if (freshMap === null) {
     return {
@@ -254,58 +360,15 @@ export function classifySenders(input: ClassifyInput): ClassifyResult {
     }
   }
 
-  const vanished: SenderCandidate[] = []
-  const presentAll: SenderCandidate[] = []
-  for (const [pid, info] of seen) {
-    const alive = freshMap.has(pid)
-    const tier = commandTier(info.row.command)
-    const candidate: SenderCandidate = {
-      pid,
-      ppid: info.row.ppid,
-      command: info.row.command,
-      firstSeenAt: info.firstSeenAt,
-      lastSeenAt: info.lastSeenAt,
-      vanished: !alive,
-      tier,
-      startedAt: null,
-    }
-    if (alive) {
-      // present 桶只收启发式命中（'other' 太噪；但 'other' 消失仍进 vanished 桶）；
-      // 受管 pi 不进 present（见 managedSet 注释）
-      if (tier !== 'other' && !managedSet.has(pid)) presentAll.push(candidate)
-    } else {
-      vanished.push(candidate)
-    }
-  }
-
-  // fresh-only pid：死亡即时快照在场、环内窗口从未采样到——两次采样间隔（~intervalMs）
-  // 内新起的进程，贴近死亡的强指纹，进 present 桶（环观测字段为 null，不伪装）。
-  for (const freshRow of freshMap.values()) {
-    if (seen.has(freshRow.pid) || excluded.has(freshRow.pid) || managedSet.has(freshRow.pid)) continue
-    const tier = commandTier(freshRow.command)
-    if (tier === 'other') continue
-    presentAll.push({
-      pid: freshRow.pid,
-      ppid: freshRow.ppid,
-      command: freshRow.command,
-      firstSeenAt: null,
-      lastSeenAt: null,
-      vanished: false,
-      tier,
-      startedAt: null,
-    })
-  }
-
-  const bySuspicion = (a: SenderCandidate, b: SenderCandidate): number =>
-    TIER_RANK[a.tier] - TIER_RANK[b.tier]
-    || (b.lastSeenAt ?? -1) - (a.lastSeenAt ?? -1)
+  const { vanished, presentAll } = classifyRingSeenCandidates(seen, freshMap, managedSet)
+  presentAll.push(...collectFreshOnlyPresent(freshMap, seen, excluded, managedSet))
 
   return {
     windowFromAt,
     windowMs,
     samplesInWindow: windowSamples.length,
-    vanished: vanished.sort(bySuspicion).slice(0, MAX_VANISHED_RECORDS),
-    suspiciousPresent: presentAll.sort(bySuspicion).slice(0, MAX_PRESENT_RECORDS),
+    vanished: vanished.sort(compareBySuspicion).slice(0, MAX_VANISHED_RECORDS),
+    suspiciousPresent: presentAll.sort(compareBySuspicion).slice(0, MAX_PRESENT_RECORDS),
     siblings,
     freshSnapshotAvailable: true,
   }
