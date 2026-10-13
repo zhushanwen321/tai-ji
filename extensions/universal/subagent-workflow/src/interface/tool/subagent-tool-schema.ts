@@ -58,7 +58,11 @@ export const SubagentParams = Type.Object({
     description: 'Agent ref: absolute path to an agent .md file — usually a <location> from <available_subagents>, but ANY absolute .md path works if the file is a readable agent definition (the list is not required). Relative paths and bare names are rejected. If omitted, defaults to "general-purpose" — a generic agent that inherits the main agent\'s model and project context.',
   })),
   model: Type.Optional(Type.String({
-    description: 'Model override in "provider/modelId" format. CASE-SENSITIVE: the string must equal a registry entry exactly, including letter case (e.g. "zai-coding-cn/GLM-5.3-Flash", NOT "zai-coding-cn/glm-5.3-flash"). A non-exact match is rejected immediately with "Did you mean" suggestions — retry with the exact suggested string; the system never auto-corrects your input. Resolution order (top wins): (1) this param, (2) agent .md frontmatter model, (3) the main agent\'s current model (zero-config default). An explicit model (param or frontmatter) that is missing or unauthorized THROWS — there is no silent fallback to the main model. Omit this param to inherit the main model.',
+    // 缺省继承主 agent 的纪律句已删（tool-declaration-slimming D1 单源化：缺省继承
+    // 属跨工具通用纪律，收敛到 <available_subagents> 注入段（subagent-list-injector.ts
+    // SUBAGENT_DISPATCH_SHARED_RULES）说一次，原文见 git 历史。Resolution order
+    // 是本参数的功能语义（三层优先级链），保留。
+    description: 'Model override in "provider/modelId" format. CASE-SENSITIVE: the string must equal a registry entry exactly, including letter case (e.g. "zai-coding-cn/GLM-5.3-Flash", NOT "zai-coding-cn/glm-5.3-flash"). A non-exact match is rejected immediately with "Did you mean" suggestions — retry with the exact suggested string; the system never auto-corrects your input. Resolution order (top wins): (1) this param, (2) agent .md frontmatter model, (3) the main agent\'s current model (zero-config default). An explicit model (param or frontmatter) that is missing or unauthorized THROWS — there is no silent fallback to the main model.',
   })),
   thinkingLevel: Type.Optional(StringEnum(THINKING_ORDER, {
     description: "Thinking depth override (derived from THINKING_ORDER SSOT, includes 'max'). Omit to default to the model's highest available level (not the main agent's level).",

@@ -42,6 +42,11 @@ const TOOL_WORKFLOW_SCRIPT_SRC = readFileSync(
   join(__dirname, "../tool-workflow-script.ts"),
   "utf-8",
 );
+// 跨工具通用纪律的收敛点（tool-declaration-slimming D1 单源化终态的注入段侧锚源）。
+const SUBAGENT_LIST_INJECTOR_SRC = readFileSync(
+  join(__dirname, "../../../injectors/subagent-list-injector.ts"),
+  "utf-8",
+);
 
 /** 提取 description: `...` 模板字符串的原始内容。 */
 function extractDescription(src: string): string {
@@ -218,6 +223,18 @@ describe("subagent tool description — 行为约束器（非功能说明书）"
     const apSection = nextSection > -1 ? afterAp.slice(0, nextSection) : afterAp;
     expect(apSection).toMatch(/list.*nested.*listParam|listParam.*nested/i);
   });
+
+  it("勿等待纪律单源化：description 不含 poll/等待指引，规则只在注入段说一次（D1）", () => {
+    // tool-declaration-slimming D1 信息单源化：「结果自动通知送达、勿 bash sleep/
+    // busy-wait/poll 等待」是 subagent/subagents/workflow 三工具共享的调度纪律，
+    // 收敛到 <available_subagents> 注入段（subagent-list-injector.ts
+    // SUBAGENT_DISPATCH_SHARED_RULES）说一次。description「After launching」节只保留
+    // subagent 特有语义（Auto-injected completion 即确认 / untrusted 警告 / 截断取回
+    // 指针）；Auto-injected 关键词断言由 subagent-actions.test.ts 承接。
+    expect(DESCRIPTION).not.toMatch(/bash sleep|busy-wait|bash-sleeping|polling/i);
+    expect(SUBAGENT_LIST_INJECTOR_SRC).toContain("busy-wait, or poll");
+    expect(SUBAGENT_LIST_INJECTOR_SRC).toContain("SUBAGENT_DISPATCH_SHARED_RULES");
+  });
 });
 
 describe("subagent tool runtime handler — 错误文案含纠正正例", () => {
@@ -326,14 +343,21 @@ describe("U1: workflow tool prompt mentions built-in workflows", () => {
     expect(TOOL_WORKFLOW_SCRIPT_SRC).toContain("NEVER generate");
   });
 
-  it("promptGuidelines + parameter description 标注 budget 默认不限制（B/C：除非用户要求否则别设）", () => {
-    // budget 是 run 级参数，运行时 maxTokens===undefined → 不限制（budget.ts isExceeded 守卫）。
-    // 但 call shape 示例展示了 tokens/time 字段，LLM 会误以为每次都该填。
-    // promptGuidelines 必须明确 "Do NOT set ... unless user explicitly requests",
-    // parameter description 同步标 "omit = unlimited"，双重约束压过示例的反引导。
+  it("跨工具预算/模型/勿等待纪律单源化：工具文案零残留，规则只在注入段说一次（D1）", () => {
+    // tool-declaration-slimming D1 信息单源化：tokens/time「仅用户明确要求才设」、
+    // model/thinkingLevel「缺省继承主 agent」与「勿 poll/bash sleep 等待」原在本工具
+    // promptGuidelines 与 schema 说明重复陈述，现收敛到 <available_subagents> 注入段
+    // （subagent-list-injector.ts SUBAGENT_DISPATCH_SHARED_RULES）说一次——工具声明
+    // 文案零残留 + 注入段含规则。call shape 示例里的 tokens/time 字段展示保留（参数
+    // 存在性由 schema 承载，何时设由注入段纪律约束）。
     const guidelines = promptGuidelinesText(TOOL_WORKFLOW_SRC);
-    expect(guidelines).toContain("Do NOT set tokens/time unless the user explicitly requests");
-    expect(TOOL_WORKFLOW_SRC).toContain("omit = unlimited (default)");
+    expect(guidelines).not.toContain("Do NOT set tokens/time unless the user explicitly requests");
+    expect(TOOL_WORKFLOW_SRC).not.toContain("omit = unlimited (default)");
+    expect(TOOL_WORKFLOW_SRC).not.toContain("Omit to inherit the main agent's model");
+    expect(guidelines).not.toContain("bash sleep or poll status");
+    expect(SUBAGENT_LIST_INJECTOR_SRC).toContain("busy-wait, or poll");
+    expect(SUBAGENT_LIST_INJECTOR_SRC).toContain("explicitly requests a limit");
+    expect(SUBAGENT_LIST_INJECTOR_SRC).toContain("inherit the main agent's model");
   });
 });
 

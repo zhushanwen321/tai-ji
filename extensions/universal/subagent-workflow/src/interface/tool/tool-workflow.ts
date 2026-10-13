@@ -108,17 +108,25 @@ const WorkflowParams = Type.Object({
         "the differing fields listed. Omit to reuse the original args.",
     }),
   ),
-  tokens: Type.Optional(Type.Number({ description: "Max token budget — ONLY set when user explicitly requests a limit; omit = unlimited (default). For resume: the token budget applied to the resumed execution (tokens already spent by the run are counted against it)" })),
-  time: Type.Optional(Type.Number({ description: `Max time budget in ms — ONLY set when user explicitly requests a limit; omit = unlimited (default; hard ceiling ${MAX_TIMER_DELAY_MS} ms — larger values fail fast at entry). For resume: the budget applied to the resumed execution (active time already spent by the run is counted against it; suspended time is not)` })),
+  tokens: Type.Optional(Type.Number({
+    // 预算纪律句已删（tool-declaration-slimming D1 单源化→注入段
+    // SUBAGENT_DISPATCH_SHARED_RULES，原文见 git 历史）；
+    // resume 分支是本参数的功能语义，保留。
+    description: "Max token budget. For resume: the token budget applied to the resumed execution (tokens already spent by the run are counted against it)",
+  })),
+  time: Type.Optional(Type.Number({
+    description: `Max time budget in ms (hard ceiling ${MAX_TIMER_DELAY_MS} ms — larger values fail fast at entry). For resume: the budget applied to the resumed execution (active time already spent by the run is counted against it; suspended time is not)`,
+  })),
   error: Type.Optional(
     Type.String({ description: "Error/reason message (optional, used with abort)" }),
   ),
   model: Type.Optional(Type.String({
+    // 缺省继承主 agent 的纪律句已删（D1 单源化→注入段）；
+    // run 级 override 作用域 / resume 语义 / user override 优先级是本参数功能语义，保留。
     description:
       "Run-level model override in 'provider/modelId' format. When set, all agents spawned by this run inherit it by default (unless a per-call agent() opts.model is set). " +
       "Also accepted on action:\"resume\" — recorded as the run's user override (same channel as a panel switch) and drives all re-dispatched steps. " +
-      "A user-issued runtime model override (panel model switch / /subagent-model command) takes precedence over this parameter — user override wins over any explicitly scripted model. " +
-      "Omit to inherit the main agent's model.",
+      "A user-issued runtime model override (panel model switch / /subagent-model command) takes precedence over this parameter — user override wins over any explicitly scripted model.",
   })),
   thinkingLevel: Type.Optional(StringEnum(THINKING_ORDER, {
     description: "Run-level thinkingLevel override (off/minimal/low/medium/high/xhigh/max). All agents in this run inherit it by default. Omit to default each agent to its model's highest available level.",
@@ -230,7 +238,8 @@ export function registerWorkflowTool(
       "script file (script header has @pi-meta parameters + usage + phases). Do NOT use " +
       "workflow-script generate for patterns already covered by available workflows.",
       "run: pass the workflow ref as name — normally the <location> absolute .js path from <available_workflows>, but any absolute .js path with a valid @pi-meta also works (the list is not required). Bare names and relative paths are rejected with a not-found error listing locations.",
-      "DO NOT bash sleep or poll status after starting — results appear automatically via notifyDone.",
+      // 勿等待条已删（tool-declaration-slimming D1 单源化→<available_subagents> 注入段
+      // SUBAGENT_DISPATCH_SHARED_RULES，原文见 git 历史）。
       "Runs are one-shot: there is no pause — to stop a run early use abort; for a fresh result start a new run. " +
       "resume is ONLY for runs whose status is interrupted (crash or session-switch during execution): it replays " +
       "completed calls from the record at zero token cost and continues where the run stopped. " +
@@ -246,8 +255,8 @@ export function registerWorkflowTool(
       "- status: {\"action\":\"status\"}. " +
       "- abort: {\"action\":\"abort\",\"runId\":\"<id>\"} (optional: {\"error\":\"<reason>\"}). " +
       "- resume: {\"action\":\"resume\",\"runId\":\"<id>\",\"args\":{...},\"tokens\":N,\"time\":N,\"model\":\"<provider/modelId>\"} — args/tokens/time/model optional.",
-      "Budget: Do NOT set tokens/time unless the user explicitly requests a limit. Built-in workflows run unlimited by default.",
-      "Model/thinkingLevel: omit by default (inherit main agent's model). Only set model/thinkingLevel when the user explicitly requests a specific model or thinking depth for this run. " +
+      // 预算纪律条整条与模型缺省继承条前半句已删（D1 单源化→注入段，原文见 git 历史）。
+      // Note 后半（user override 优先级 + 排障指引）是 workflow 特有功能语义，保留：
       "Note: a user-issued runtime model override (panel switch / /subagent-model) takes precedence over the model parameter — an explicitly scripted thinkingLevel still applies " +
       "(explicit levels outrank the override's inline level). If a run's explicitly scripted model seems ignored, " +
       "check for an active user override (run journal model-override frame) before assuming a resolution bug.",

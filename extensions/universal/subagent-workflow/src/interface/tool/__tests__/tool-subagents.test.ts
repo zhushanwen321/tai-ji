@@ -38,6 +38,11 @@ import { captureTool } from "./capture-tool.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TOOL_SRC = readFileSync(join(__dirname, "../tool-subagents.ts"), "utf-8");
+// 跨工具通用纪律的收敛点（tool-declaration-slimming D1 单源化终态的注入段侧锚源）。
+const SUBAGENT_LIST_INJECTOR_SRC = readFileSync(
+  join(__dirname, "../../../injectors/subagent-list-injector.ts"),
+  "utf-8",
+);
 
 // ── 注册面最小类型（单层 cast：目标类型全必填，非 no-unsafe-cast 命中的全可选结构断言）──
 
@@ -228,13 +233,23 @@ describe("schema 契约：一跳扁平 + tasks 必填（D2）", () => {
     expect(TOOL_SRC).not.toContain("isGuiCapable");
   });
 
-  it("promptGuidelines 含分工句/调用正例/预算默认（弱模型结构信号依赖面）", () => {
+  it("promptGuidelines 含分工句/调用正例；跨工具纪律单源化零残留（D1）", () => {
     const tool = captureSubagentsTool({ isProcessing: false }, makeRegistry());
     const guidelines = tool.promptGuidelines.join("\n");
     expect(guidelines).toContain("2+ independent tasks in one dispatch");
     expect(guidelines).toContain('{"tasks":[');
-    expect(guidelines).toContain("Do NOT set tokens/time unless the user explicitly requests");
     expect(guidelines).toContain("workflow tool");
+    // tool-declaration-slimming D1 单源化终态：勿等待/预算/模型缺省继承三类跨工具
+    // 通用纪律不在本工具 promptGuidelines 重复——收敛到 <available_subagents> 注入段
+    // （subagent-list-injector.ts SUBAGENT_DISPATCH_SHARED_RULES）说一次。
+    expect(guidelines).not.toContain("Do NOT poll after starting");
+    expect(guidelines).not.toContain("Do NOT set tokens/time unless the user explicitly requests");
+    expect(guidelines).not.toContain("Model/thinkingLevel: omit by default");
+    expect(guidelines).not.toContain("Omit to inherit the main agent's model");
+    expect(SUBAGENT_LIST_INJECTOR_SRC).toContain("SUBAGENT_DISPATCH_SHARED_RULES");
+    expect(SUBAGENT_LIST_INJECTOR_SRC).toContain("busy-wait, or poll");
+    expect(SUBAGENT_LIST_INJECTOR_SRC).toContain("explicitly requests a limit");
+    expect(SUBAGENT_LIST_INJECTOR_SRC).toContain("inherit the main agent's model");
   });
 });
 

@@ -98,16 +98,23 @@ const SubagentsParams = Type.Object({
     maxLength: SLUG_MAX_LENGTH,
   })),
   model: Type.Optional(Type.String({
+    // 缺省继承主 agent 的纪律句已删（D1 单源化→注入段，见
+    // subagent-list-injector.ts SUBAGENT_DISPATCH_SHARED_RULES）；批内继承 run 级值是
+    // 本参数的功能语义，保留。
     description:
-      "Run-level model override in 'provider/modelId' format; every member of the batch inherits it. " +
-      "Omit to inherit the main agent's model.",
+      "Run-level model override in 'provider/modelId' format; every member of the batch inherits it.",
   })),
   thinkingLevel: Type.Optional(StringEnum(THINKING_ORDER, {
     description:
       "Run-level thinking depth for every member. Omit to default each agent to its model's highest available level.",
   })),
-  tokens: Type.Optional(Type.Number({ description: "Max token budget for the whole batch — ONLY set when the user explicitly requests a limit; omit = unlimited (default)" })),
-  time: Type.Optional(Type.Number({ description: `Max time budget in ms for the whole batch — ONLY set when the user explicitly requests a limit; omit = unlimited (default; hard ceiling ${MAX_TIMER_DELAY_MS} ms — larger values fail fast at entry)` })),
+  tokens: Type.Optional(Type.Number({
+    // 预算纪律句已删（D1 单源化→注入段）：跨工具预算纪律说一次，原文见 git 历史。
+    description: "Max token budget for the whole batch.",
+  })),
+  time: Type.Optional(Type.Number({
+    description: `Max time budget in ms for the whole batch (hard ceiling ${MAX_TIMER_DELAY_MS} ms — larger values fail fast at entry).`,
+  })),
 });
 
 export type SubagentsToolParams = Static<typeof SubagentsParams>;
@@ -270,12 +277,12 @@ export function registerSubagentsTool(
     promptGuidelines: [
       "PRIORITY: 2+ independent tasks in one dispatch (results combined by you afterwards) → call `subagents` ONCE with the tasks array — do NOT issue N separate `subagent` starts and do NOT hand-build a workflow.",
       "One-shot batch members: message/fork-from a batch member is not supported; to redo or extend a member's work, dispatch a new task (run the failed/extra task alone in a second batch).",
-      "Do NOT poll after starting — the batch result arrives as a single completion notification carrying every member's summary (plus optional aggregate).",
+      // 勿等待条 / 预算纪律条 / 模型缺省继承条 三条已删（tool-declaration-slimming D1
+      // 单源化→<available_subagents> 注入段 SUBAGENT_DISPATCH_SHARED_RULES 说一次，
+      // 原文见 git 历史；零残留由 tool-subagents.test.ts 单源化终态断言锁定）。
       "Call shape (JSON): {\"tasks\":[\"<task 1>\",\"<task 2>\"],\"agents\":\"<abs .md path or comma-separated list>\",\"aggregate\":false,\"slug\":\"<short label>\"}. tasks is required and every element must be a complete self-contained task prompt.",
       "agents: one path applies to all tasks; N paths map one-to-one onto tasks and N must equal tasks.length (a mismatch fails the run). Omit for the default executor.",
       "slug: pass a short kebab-case label when you run more than one batch — it identifies the batch on the conversation block and in the run list.",
-      "Budget: Do NOT set tokens/time unless the user explicitly requests a limit. Batches run unlimited by default.",
-      "Model/thinkingLevel: omit by default (inherit the main agent's model). Only set them when the user explicitly requests a specific model or thinking depth for this batch.",
       "Anti-patterns: nesting the tasks under an 'args' key (they are top-level), dispatching dependent steps in one batch (chain them across messages or use the workflow tool), and treating batch results as verified without checking them.",
       "Run control (status/abort) lives in the workflow tool — use the runId printed in this tool's output.",
     ],
