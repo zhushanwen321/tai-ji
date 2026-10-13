@@ -23,6 +23,9 @@
 //  Q5  "Use ONLY when" + "Do NOT use" —— 调用门槛与边界段
 //  Q6  validate.ts 三个 Correct 正例锚（runtime 友好纠错，未改动）
 //  Q7  示例必须与契约一致：options 元素必须 {label, description} 对象形态
+//  Q8  "mutually exclusive" —— 一问题一决策、选项互斥的提问纪律（单句并入推荐项
+//      段落；U-A1 压缩曾删原纪律句，选项级互斥语义由 InputSchema options 字段说明
+//      承载，问题级「one question = one decision」唯一承载点 = description 此句）
 
 import { readFileSync } from "node:fs";
 import { dirname,join } from "node:path";
@@ -85,6 +88,13 @@ describe("ask_user description — 调用信号保留（不要破坏亮点）", 
 
 	it("保留 'Do NOT use' 边界段", () => {
 		expect(DESCRIPTION).toContain("Do NOT use");
+	});
+
+	it("保留 'mutually exclusive' 提问纪律（Q8：一问题一决策、选项互斥）", () => {
+		// 问题级纪律没有 runtime 校验可拦（validate 只查结构），弱模型把多个决策
+		// 塞进一个 question、或选项互斥性存疑时只有这条声明面约束。
+		expect(DESCRIPTION).toContain("mutually exclusive");
+		expect(DESCRIPTION).toContain("one decision");
 	});
 });
 

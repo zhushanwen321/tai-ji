@@ -741,3 +741,30 @@ describe('session_read schema 快照（D4：不加任何工具参数，逐字节
     expect(Check(schema, { action: 'outline', session: 'e6c96' })).toBe(true)
   })
 })
+
+// ---------------------------------------------------------------------------
+// D2 锚词保留清单（index.ts guidelines 上方注释登记的清单在此逐词 grep 锚定）
+// ---------------------------------------------------------------------------
+
+describe('session_read 锚词保留清单（D2：guidelines 纪律逐词锚定）', () => {
+  // SCHEMA_SNAPSHOT 只逐字节锚 parameters schema，不覆盖 guidelines——本块是
+  // guidelines 锚词的机器防线：弱模型回归（P7/PB-weak）后对本工具声明面的
+  // 再压缩 / 措辞改动，逐词红灯迫使有意确认。清单与 index.ts 注释登记一致：
+  //   1. "Progressive reading"   —— 阅读纪律 outline → expand → detail
+  //   2. "Never read raw .jsonl" —— 禁直读原始 session 文件
+  //   3. "sa- ids route"         —— zcode 路由对 LLM 的唯一可见面（U9）
+  //   4. "👉 recovery hint"      —— 错误面恢复指针契约
+  //   5. "doctor"                —— 环境自检入口（另被上方快照 action 枚举间接锚定）
+  it('guidelines 5 锚词逐个在位（缺一词即红）', () => {
+    const registerTool = vi.fn()
+    const pi = { registerTool, registerCommand: vi.fn(), addAutocompleteProvider: vi.fn(), on: vi.fn() }
+    ;(sessionReaderExtension as unknown as (p: unknown) => void)(pi)
+    const toolDef = registerTool.mock.calls[0][0] as { promptGuidelines: string[] }
+    const guidelines = toolDef.promptGuidelines.join('\n')
+    expect(guidelines).toContain('Progressive reading')
+    expect(guidelines).toContain('Never read raw .jsonl')
+    expect(guidelines).toContain('sa- ids route')
+    expect(guidelines).toContain('👉 recovery hint')
+    expect(guidelines).toContain('doctor')
+  })
+})

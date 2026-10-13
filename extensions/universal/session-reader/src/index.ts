@@ -148,7 +148,10 @@ const guidelines = [
   // tool-declaration-slimming D1 终态：纪律单点——action 逐个复述条已删（功能语义在
   // schema action 枚举说明一处）；跨工具规则不在本工具重复（收敛点 = 注入段）。
   // 锚词保留清单：Progressive reading / Never read raw .jsonl / sa- ids route /
-  // 👉 recovery hint / doctor（契约测试 zcode-routing + tool-prompt 契约 grep 锚定）。
+  // 👉 recovery hint / doctor——机器锚定唯一落点 = zcode-routing.test.ts 的锚词
+  // 保留清单 describe（逐词 toContain）；doctor 另被该文件 SCHEMA_SNAPSHOT 的
+  // action 枚举间接锚定。tool-prompt 契约不锚本工具 guidelines（其 A8 是 subagent
+  // 工具内指向本工具的交叉引用，非本清单的锚）。
   'Progressive reading: outline (~1500 tokens) → expand (one turn) → detail; defaults omit toolResult/thinking noise.',
   'find first (uuid fragment / name); TUI #references are full uuids. Never read raw .jsonl—use this tool.',
   // zcode 路由（U9）对 LLM 的唯一可见面：sa-id 输入自动路由，无需任何参数；首遇

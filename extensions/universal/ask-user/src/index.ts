@@ -236,7 +236,7 @@ export default function (pi: ExtensionAPI): void {
 
 Do NOT use this tool to outsource judgment you should make — if you can form a defensible recommendation from the codebase, proceed and state your choice. Not for trivia answerable by reading code/docs, simple confirmations (plain text suffices), or free-form/long-form input — it returns short selections only.
 
-If you recommend an option, prefix its label with "(Recommended)" and list it first.
+If you recommend an option, prefix its label with "(Recommended)" and list it first. One question = one decision with mutually exclusive options.
 
 Example:
 {"questions":[{"header":"DB","question":"Which database?","context":"Need ACID + JSON columns.","options":[{"label":"(Recommended) Postgres","description":"Mature, strong consistency."},{"label":"SQLite","description":"Zero-ops, embedded."}]},{"header":"Region","question":"Which region?","options":[{"label":"us-east-1","description":"..."},{"label":"eu-west-1","description":"..."}]}]}
