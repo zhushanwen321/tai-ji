@@ -16,7 +16,7 @@ import type { SubagentEnginesFile } from "@zhushanwen/extension-protocol";
 
 import { configureCore, resetCoreForTests } from "../../../core/host-services.ts";
 import type { DiscoveryRoot } from "../../../core/host-services.ts";
-import { clearEngines, getEngine, hasEngine, listEngines, registerEngine } from "../registry.ts";
+import { clearEngines, engineProcessModelOfDescriptor, getEngine, hasEngine, listEngines, registerEngine } from "../registry.ts";
 import type { EnginePort } from "../port.ts";
 import { getEnginesFilePath, syncEnginesFile, type SyncEnginesFileOptions } from "../engine-discovery.ts";
 
@@ -189,6 +189,8 @@ describe("manifest schema 字段级解析", () => {
     expect(entry.descriptor.manifest).toEqual({
       displayName: "Foo Engine",
       modelCatalog: { dynamic: false, models: [{ id: "m1", aliases: ["one"], canonicalRef: "prov/m1" }] },
+      // 进程形态同源进 descriptor（parseProcessModel 归一值，恒填充——声明缺席也填缺省）。
+      processModel: "per-window",
     });
   });
 
@@ -205,6 +207,15 @@ describe("manifest schema 字段级解析", () => {
     expect(byId.get("pm-default")).toBe("per-window");
     expect(byId.get("pm-invalid")).toBe("per-window");
     expect(collectedLogs.some((l) => l.level === "warn" && l.message.includes("processModel"))).toBe(true);
+    // 条目↔描述符同源一致（声明值/缺省值/非法值三态）：descriptor.manifest.processModel
+    // 恒等于 entry.processModel——曾因装配遗漏本字段，声明 shared-service 的引擎被
+    // engineProcessModelOfDescriptor 误判 per-window（chat 直派 engine_window_scoped、
+    // workflow 每 run 冷启新进程），本断言封死该回归口。
+    for (const entry of result.discovered) {
+      expect(entry.descriptor.kind).toBe("cli");
+      expect(entry.descriptor.manifest?.processModel).toBe(entry.processModel);
+      expect(engineProcessModelOfDescriptor(entry.descriptor)).toBe(entry.processModel);
+    }
   });
 
   it("bin 解析：manifest bin = package.json bin map 的 key → 入口绝对路径", () => {

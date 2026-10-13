@@ -77,7 +77,7 @@ export interface CliEngineDescriptor {
    * 不 throw（§3.5.3 代理形态：缺包/坏包的失败推迟到首次协议调用）。
    */
   portFactory: EngineFactory;
-  /** manifest 快照余项（modelCatalog/displayName；capabilities 已提升为直读字段）。 */
+  /** manifest 快照余项（modelCatalog/displayName/processModel；capabilities 已提升为直读字段）。 */
   manifest?: Omit<EngineManifestSnapshot, "capabilities">;
   /**
    * 引擎包版本面（package.json `version`，发现器装配时盖章；L3 显式配置无
@@ -338,7 +338,7 @@ function stableDescriptorKey(value: unknown): string {
  *   - command + args（spawn 面：bin 路径与启动参数）
  *   - capabilities（能力位——引擎包升级改能力面时标识必须变化，触发 dispose 换新
  *     实例，否则与「真换引擎」场景自相矛盾）
- *   - manifest 余项（modelCatalog + displayName——manifest 派生版本面）
+ *   - manifest 余项（modelCatalog + displayName + processModel——manifest 派生版本面）
  *   - packageVersion（package.json version——包版本面：升级即使 bin/capabilities
  *     碰巧全同也要换新实例，防旧单例跑旧代码）
  * portFactory 闭包不参与比较：每次 discovery 重跑都是新函数实例，但等价标识下其
