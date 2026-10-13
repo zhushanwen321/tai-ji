@@ -444,7 +444,12 @@ function lastMatchingReasoningValues(modelRules: readonly unknown[], modelId: st
     if (typeof match !== "string") continue;
     let re: RegExp;
     try {
-      re = new RegExp(match);
+      // 大小写不敏感（2026-10-13 探针实测）：目录规则用小写词干（glm-5\.3-flash），
+      // 模型 id 保留包侧大小写（GLM-5.3-Flash）——敏感匹配只命中通配 ".*" 的
+      // [disabled,enabled] 域，错过专用规则真实域 [low,high,max]，发出的档位被
+      // app-server 注册表拒收（reasoning-level-not-supported）。app-server 侧
+      // 注册表匹配是不敏感的，与它对齐。
+      re = new RegExp(match, "i");
     } catch {
       continue;
     }
@@ -455,6 +460,31 @@ function lastMatchingReasoningValues(modelRules: readonly unknown[], modelId: st
     if (vals.length > 0) values = vals;
   }
   return values;
+}
+
+/**
+ * 模型 reasoning 值域全量（create 帧 model.options.reasoningLevel 的择档域；
+ * 2026-10-13 探针实测驱动）：目录通配规则的值域可能与 plan 网关服务端实际接受面
+ * 漂移（GLM-5.3-Flash 目录域含 disabled，服务端拒收）——显式 thinkingLevel 参与
+ * 择档时需要全域而非只首值（引擎侧 reasoningLevelFor 消费）。
+ */
+export function resolveZcodeReasoningValues(modelRef: string, sources?: ZcodeSourcePaths): string[] | undefined {
+  const catalogPath = locateZcodeBuiltinCatalog(sources);
+  if (catalogPath === undefined) return undefined;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(fs.readFileSync(catalogPath, "utf8"));
+  } catch {
+    return undefined;
+  }
+  const modelId = modelShort(modelRef);
+  const rules = (parsed as Record<string, unknown>)["config"];
+  const modelRules =
+    isRecord(rules) && isRecord(rules["modelConfigRules"])
+      ? rules["modelConfigRules"]["modelRules"]
+      : undefined;
+  if (!Array.isArray(modelRules)) return undefined;
+  return lastMatchingReasoningValues(modelRules, modelId);
 }
 
 /**
@@ -506,6 +536,54 @@ export function resolveZcodeModelRef(requested: string | undefined, sources?: Zc
   }
 
   if (wanted === undefined) return "";
+
+  // account 家族直通（2026-10-13 用户裁决：zai 系走 account provider 配置；launcher
+  // wrapper 对内建目录读取注入 entitled 绕过外部 spawn 装载门——app-server 注册表
+  // 装载判据 = access.entitled === true，目录构建的账号条目默认非 entitled）。account
+  // 凭据由 zcode CLI 账号体系自解析（credentials.json 登录态），不经个人 provider 表
+  // ——校验降为目录存在性：规则存在 + 模型在清单内 → 原样放行（大小写保留，注册表
+  // 匹配不敏感）。
+  const wantedProvider = wanted.includes("/") ? providerOf(wanted) : undefined;
+  if (wantedProvider !== undefined && wantedProvider.startsWith("account:")) {
+    const catalogPath = locateZcodeBuiltinCatalog(sources);
+    if (catalogPath === undefined) {
+      throw new ZcodePrepareError(
+        "model_not_available",
+        `account 模型 "${wanted}" 无法校验：内建目录定位失败（ZCODE_BUILTIN_PROVIDER_CONFIG_FILE 与 runtime/provider 扫描均未命中）。`,
+      );
+    }
+    let catalog: unknown;
+    try {
+      catalog = JSON.parse(fs.readFileSync(catalogPath, "utf8"));
+    } catch (err) {
+      throw new ZcodePrepareError(
+        "model_not_available",
+        `account 模型 "${wanted}" 无法校验：内建目录不可读（${err instanceof Error ? err.message : String(err)}）。`,
+      );
+    }
+    const catalogRules = isRecord(catalog) && isRecord(catalog["config"]) && isRecord(catalog["config"]["providerConfigRules"])
+      ? catalog["config"]["providerConfigRules"]["providerRules"]
+      : undefined;
+    const accountRule = Array.isArray(catalogRules)
+      ? catalogRules.find((r) => isRecord(r) && r["providerId"] === wantedProvider)
+      : undefined;
+    if (!isRecord(accountRule)) {
+      throw new ZcodePrepareError(
+        "model_not_available",
+        `未知 account provider "${wantedProvider}"（内建目录无此规则）。恢复指引：改用目录内 account:* 规则（如 account:zai-individual-coding-plan / account:bigmodel-individual-coding-plan）。`,
+      );
+    }
+    const accountConfig = isRecord(accountRule["config"]) ? accountRule["config"] : {};
+    const modelIds = accountConfig["builtinModelIds"] ?? accountConfig["personalModelIds"];
+    const short = modelShort(wanted);
+    if (Array.isArray(modelIds) && modelIds.length > 0 && !modelIds.includes(short)) {
+      throw new ZcodePrepareError(
+        "model_not_available",
+        `未知模型 "${short}"（account provider ${wantedProvider} 下可用: ${modelIds.join(", ")}）。`,
+      );
+    }
+    return wanted;
+  }
 
   const provider = wanted.includes("/")
     ? providerOf(wanted)

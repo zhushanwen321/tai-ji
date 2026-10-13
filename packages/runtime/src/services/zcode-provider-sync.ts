@@ -110,6 +110,10 @@ type ZaiOfficialProviderId = (typeof ZAI_OFFICIAL_PROVIDER_IDS)[number]
 /** 关联条目固定 id（个人条目形态——zcode Registry 对外部 spawn 只装载个人 provider）。 */
 const ZAI_LINKED_ENTRY_ID = 'zai-coding-plan'
 
+// key 来源优先级（2026-10-13 修订）：pi 侧活凭据（resolveProviderCredential，与 pi 侧
+// plan 配额同源同活）> ZCode 端 builtin token（桌面端登录派生，可能过期/被吊销）。
+// 实测：builtin token 已 401 时 pi 侧 key 同端点仍 200。
+
 /** pi 侧 provider id → zcode 家族（决定 v2 builtin 条目与目录 coding-plan 条目的配对）。 */
 const ZAI_FAMILY_OF: Readonly<Record<ZaiOfficialProviderId, 'bigmodel' | 'zai'>> = {
   'zai-coding-cn': 'bigmodel',
@@ -378,11 +382,13 @@ export interface ZaiCodingPlanCatalogEntry { // oe-exempt:20261012:framework:映
   readonly modelIds: readonly string[]
 }
 
-/** zai 特例输入（编排层读好 v2 token 与目录条目后传入；纯函数不做 IO）。 */
+/** zai 特例输入（编排层读好 pi 侧凭据、v2 token 与目录条目后传入；纯函数不做 IO）。 */
 export interface ZaiLinkedEntryInput { // oe-exempt:20261012:framework:映射链形态/ports 契约,单实现常态(类型契约先行)
   /** pi 侧已配判定的 resolver 存在性结果（per zai 系 id）。 */
   readonly piConfigured: Readonly<Record<ZaiOfficialProviderId, boolean>>
-  /** v2 config.json builtin 条目特有 token（apiKey 非空才有值；只读引用）。 */
+  /** pi 侧 zai 系凭据（resolver 明文解析产物；关联条目 key 的首选源——与 pi 侧 plan 配额同源同活）。 */
+  readonly piCredentials: Readonly<Partial<Record<ZaiOfficialProviderId, string>>>
+  /** v2 config.json builtin 条目特有 token（apiKey 非空才有值；只读引用；回落源——桌面端 token 可能过期/被吊销）。 */
   readonly builtinTokens: Readonly<Partial<Record<'bigmodel' | 'zai', string>>>
   /** zcode-builtin.json coding-plan 目录条目（per 家族；定位失败整族缺键）。 */
   readonly catalogEntries: Readonly<Partial<Record<'bigmodel' | 'zai', ZaiCodingPlanCatalogEntry>>>
@@ -401,7 +407,10 @@ export type ZaiLinkedEntryResult =
 export function buildZaiLinkedEntry(input: ZaiLinkedEntryInput): ZaiLinkedEntryResult {
   for (const piId of ZAI_OFFICIAL_PROVIDER_IDS) {
     const family = ZAI_FAMILY_OF[piId]
-    const token = input.builtinTokens[family]
+    // key 首选 pi 侧活凭据（与 pi 侧 plan 配额同源同活）；ZCode 端 builtin token 回落
+    // （桌面端登录派生，可能过期/被服务端吊销——2026-10-13 本机实测：token 401 时
+    // pi 侧 key 同端点 200）。
+    const token = input.piCredentials[piId] ?? input.builtinTokens[family]
     const catalog = input.catalogEntries[family]
     if (!input.piConfigured[piId] || token === undefined || catalog === undefined) continue
 
@@ -454,8 +463,8 @@ export function buildZaiLinkedEntry(input: ZaiLinkedEntryInput): ZaiLinkedEntryR
   const firstFamily = ZAI_FAMILY_OF[first]
   const missing = !input.piConfigured[first]
     ? `pi 侧未配置 ${first}（到 taiji settings 配置后重启生效）`
-    : input.builtinTokens[firstFamily] === undefined
-      ? 'ZCode 桌面端未完成 zai plan 设置（特有 token 未生成，请提前在 ZCode 端设置）'
+    : input.piCredentials[first] === undefined && input.builtinTokens[firstFamily] === undefined
+      ? `zai 关联凭据缺失：pi 侧 ${first} 凭据解析失败（形态不支持或为空），且 ZCode 桌面端 plan token 未生成（任一可用即可生成关联条目）`
       : 'zcode-builtin.json coding-plan 条目不可得（定位失败或形态变更），关联条目不生成'
   return {
     skip: { providerId: ZAI_LINKED_ENTRY_ID, rule: 'no-credential', detail: `zai 关联前置不齐备：${missing}` },
@@ -932,6 +941,16 @@ export async function syncZcodeProviders(deps: ZcodeProviderSyncDeps): Promise<Z
       'zai-coding-cn': deps.credentialResolver.hasProviderCredential('zai-coding-cn'),
       'zai': deps.credentialResolver.hasProviderCredential('zai'),
     },
+    // key 首选 pi 侧活凭据（resolver 明文解析；ZCode builtin token 回落——实测桌面端
+    // token 会过期/被吊销而副本随 runtime 启动才重同步，pi 侧 key 与 plan 配额同源同活）。
+    piCredentials: await (async () => {
+      const resolved: Partial<Record<ZaiOfficialProviderId, string>> = {}
+      for (const id of ZAI_OFFICIAL_PROVIDER_IDS) {
+        const credential = await deps.credentialResolver.resolveProviderCredential(id)
+        if (credential !== undefined && 'key' in credential) resolved[id] = credential.key
+      }
+      return resolved
+    })(),
     builtinTokens: tokens,
     catalogEntries,
     occupiedProviderIds: occupied.all,

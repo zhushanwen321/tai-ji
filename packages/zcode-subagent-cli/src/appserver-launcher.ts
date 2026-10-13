@@ -253,12 +253,82 @@ if (!CLI_PATH) {
   process.exit(2);
 }
 
+// [2026-10-13 account 直通] 内建目录读取拦截：给 zhipu-account 条目注入 entitled:true。
+// app-server 注册表装载判据 = access.entitled === true，外部 spawn 从目录构建的账号
+// 条目默认非 entitled（YXe 硬编码 !1）→ plan 家族引用一律「不存在 Model」。用户裁决：
+// zai 系走 account provider 配置并绕过该限制——patch 只发生在本 wrapper 的读取返回值，
+// ZCode.app 磁盘文件零触碰。null = 目录无 zhipu-account 条目（无需 patch）。
+let CATALOG_PATH = process.env.ZCODE_BUILTIN_PROVIDER_CONFIG_FILE || null;
+const __catalogPatchCache = new Map();
+function catalogPatchText(path) {
+  if (__catalogPatchCache.has(path)) return __catalogPatchCache.get(path);
+  let result = null;
+  try {
+    const readOrig = fs.__origReadFileSync || fs.readFileSync;
+    const parsed = JSON.parse(readOrig(path, 'utf8'));
+    const rules = parsed && parsed.config && parsed.config.providerConfigRules
+      && Array.isArray(parsed.config.providerConfigRules.providerRules)
+      ? parsed.config.providerConfigRules.providerRules : null;
+    let touched = 0;
+    if (rules) for (const rule of rules) {
+      const acc = rule && rule.config && rule.config.access;
+      if (acc && acc.type === 'zhipu-account' && acc.entitled !== true) { acc.entitled = true; touched++; }
+    }
+    result = touched > 0 ? JSON.stringify(parsed) : null;
+  } catch { result = null; }
+  __catalogPatchCache.set(path, result);
+  return result;
+}
+
+// [2026-10-13 account 直通②] CLI bundle 源码内存补丁：外部 spawn 的账号条目构建
+// 硬编码 entitled:!1（YXe），数据面注入（目录 entitled 字段）被其无视——按用户裁决
+// 改 zcode 源码绕过：拦截 CLI bundle 源码读取，内存替换该字面量为 !0（ZCode.app
+// 磁盘文件零触碰；锚串含 ]]:[] 尾缀唯一命中 YXe 构造，另一处同名条件逻辑不受影响）。
+// 锚不命中（上游混淆形态变化）→ 原文透出：仅 account 家族继续被拒，个人 provider
+// 不受影响。
+const __cliPatchCache = new Map();
+function patchedCliSource(path) {
+  if (__cliPatchCache.has(path)) return __cliPatchCache.get(path);
+  let result = null;
+  try {
+    const readOrig = fs.__origReadFileSync || fs.readFileSync;
+    const src = readOrig(path, 'utf8');
+    // 版本鲁棒锚（2026-10-13 修订）：minified 标识符（Uk/I3 等）随 zcode 重新打包
+    // 漂移，属性名（zcodeBuiltinProviders / zhipu-account / entitled）是数据/契约
+    // 真名不被混淆——以属性名定位 + 600 字符窗口内把账号条目构建的 entitled:!1
+    // 翻转为 !0。窗口零命中 = 上游形态漂移 → 原文透出 + stderr warn（漂移可见，
+    // 进 app-server stderr 日志），个人 provider 不受影响。
+    const anchorIdx = src.indexOf('zcodeBuiltinProviders.entries()');
+    if (anchorIdx >= 0) {
+      const window = src.slice(anchorIdx, Math.min(src.length, anchorIdx + 600));
+      if (window.indexOf('zhipu-account') >= 0 && window.indexOf('entitled:!1') >= 0) {
+        result = src.slice(0, anchorIdx)
+          + window.split('entitled:!1').join('entitled:!0')
+          + src.slice(anchorIdx + 600);
+      }
+    }
+    if (result === null) {
+      process.stderr.write('[zcode-launcher] account bypass: CLI bundle anchor not found (zcode upstream shape drifted?) - account family stays gated, personal providers unaffected\\n');
+    }
+  } catch { result = null; }
+  __cliPatchCache.set(path, result);
+  return result;
+}
+
 const text = injectedConfigText();
-if (text !== null) {
+const catalogPatch = catalogPatchText();
+if (text !== null || catalogPatch !== null) {
   // encoding 归一（Node 别名面）：'utf8'/'utf-8'/大小写变体统一按 string 返回——
   // 真实 bundle 的 config 读取恰用 'utf-8' 形态，仅匹配 'utf8' 会错回 Buffer
   // （当下游不只 JSON.parse 而做字符串运算时即 TypeError）
   const shape = (args, value) => {
+    const enc = args[0];
+    const e = typeof enc === 'string' ? enc
+      : (enc && typeof enc === 'object' && typeof enc.encoding === 'string' ? enc.encoding : undefined);
+    if (e !== undefined && String(e).toLowerCase().replace(/-/g, '') === 'utf8') return value;
+    return Buffer.from(value);
+  };
+  const catalogShape = (args, value) => {
     const enc = args[0];
     const e = typeof enc === 'string' ? enc
       : (enc && typeof enc === 'object' && typeof enc.encoding === 'string' ? enc.encoding : undefined);
@@ -276,6 +346,17 @@ if (text !== null) {
       const cur = mergedProviderConfigText();
       if (cur !== null) return shape(rest, cur);
     }
+    // account 直通：内建目录读取 → zhipu-account 注入 entitled:true。按文件名匹配
+    // （app-server 按 ZCODE_BASE_URL 自派生 endpoint 目录，读路径≠env 定位路径）。
+    if (typeof p === 'string' && p.endsWith('zcode-builtin.json')) {
+      const cur = catalogPatchText(p);
+      if (cur !== null) return catalogShape(rest, cur);
+    }
+    // account 直通②：CLI bundle 源码 → YXe entitled:!1 内存翻转为 !0
+    if (typeof p === 'string' && p === CLI_PATH) {
+      const cur = patchedCliSource(p);
+      if (cur !== null) return cur;
+    }
     return fs.__origReadFileSync.call(fs, p, ...rest);
   };
   fs.promises.__origReadFile = fs.promises.readFile;
@@ -288,8 +369,33 @@ if (text !== null) {
       const cur = mergedProviderConfigText();
       if (cur !== null) return Promise.resolve(shape(rest, cur));
     }
+    if (typeof p === 'string' && p.endsWith('zcode-builtin.json')) {
+      const cur = catalogPatchText(p);
+      if (cur !== null) return Promise.resolve(catalogShape(rest, cur));
+    }
+    if (typeof p === 'string' && p === CLI_PATH) {
+      const cur = patchedCliSource(p);
+      if (cur !== null) return Promise.resolve(cur);
+    }
     return fs.promises.__origReadFile.call(fs.promises, p, ...rest);
   };
+  // [account 直通② 载体] .js 扩展处理器挂钩：Node 对 CJS 入口源码的读取走原生
+  // internalModuleReadFile 通道，fs 猴补丁不可见——CLI bundle 源码补丁改在扩展
+  // 处理器层拦截（仅命中 CLI_PATH；其余文件全权委托原 handler，零额外开销）。
+  const __Module = require('node:module');
+  const __origJsHandler = __Module._extensions['.js'];
+  __Module._extensions['.js'] = function (mod, filename) {
+    if (CLI_PATH && filename === CLI_PATH) {
+      const patched = patchedCliSource(filename);
+      if (patched !== null) {
+        let src = patched.charCodeAt(0) === 0xfeff ? patched.slice(1) : patched;
+        if (src.startsWith('#!')) src = src.slice(src.indexOf('\\n') + 1);
+        return mod._compile(src, filename);
+      }
+    }
+    return __origJsHandler(mod, filename);
+  };
+
   // existsSync 拦截：真实 bundle 的用户 config 读取（loadFileConfig）以 existsSync
   // 为短路门——文件不存在时返回空 config 且 readFileSync 不被调用，GUI-only
   // 登录宿主（cli/config.json 从未被 CLI 侧写过）上注入只挂在读取面 = 不可见。
@@ -356,6 +462,7 @@ if (!process.env.ZCODE_BUILTIN_PROVIDER_CONFIG_FILE) {
     }
   } catch { /* provider 目录缺失/不可读 → 不设键 */ }
   if (located) process.env.ZCODE_BUILTIN_PROVIDER_CONFIG_FILE = located;
+  CATALOG_PATH = process.env.ZCODE_BUILTIN_PROVIDER_CONFIG_FILE;
   // endpoint origin 对齐（2026-09-29 迁移同步）：CLI 按 ZCODE_BASE_URL 派生 active
   // 目录路径（sha256(origin) 前缀）；GUI 安装的目录在 refresh 控制文件的 endpointKey
   // 下（如 https://zcode.z.ai），与 CLI 缺省 origin（bigmodel.cn）不同——不注入则
