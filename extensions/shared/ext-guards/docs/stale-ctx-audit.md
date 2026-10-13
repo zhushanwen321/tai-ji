@@ -37,7 +37,6 @@
 | **scheduler** | runtime.ts tick（setInterval 回调内 `onAfterTick → ctx.ui` / dispatch → `pi.sendMessage`） | **迁移**（共享守卫替换原地实现） | 既有已验证范式（G1+F2+retireStaleTimer），迁移语义等价对照见 §5 |
 | **structured-output** | loop-gate.ts terminal 的 `ctx.abort()`/`ctx.shutdown()`（无防御）；workflow-hook.ts :249 `pi.sendUserMessage`（try/catch 有痕降级）；loop-gate forceExit setTimeout（只 `process.stderr.write` + `process.exit`） | **接入**（loop-gate terminal）；**排除**（workflow-hook、forceExit timer） | abort/shutdown 在 assertActive 面且无任何 try/catch（async handler 内 throw = 无人接 rejection）；workflow-hook 的 turn_end 已有 try/catch + writeSteerFailedLog（无崩溃面；守卫「非 stale 上抛」语义在此处会把有痕降级恶化为崩溃，不接入是行为保持）；forceExit timer 不触碰 pi/ctx |
 | **pending-notifications** | events.on 回调内 `pi.appendEntry`（经 safeAppendEntry） | **排除** | 包内 `safeAppendEntry` 已 try/catch 静默兜底（注释明言 stale 场景）；events.on 订阅经 pi tracked subscription 在 session 替换时自动退订（W4 注释实锚 loader.js:338-341）——双防线已覆盖，无无人接抛错路径 |
-| **cw-tool** | cw-runner.ts :180 setTimeout | **排除** | timer 回调只置本地 `timedOut` 标志 + `combined.abort()`（AbortController），不触碰任何 pi/ctx API，无 stale 面 |
 | **goal** | src/adapters/command-adapter.ts :381（/goal command handler 内 followUp）；src/adapters/event-handlers/agent-end.ts :179 `pi.appendEntry`（agent_end handler 内） | **排除**（普查实证后无需接入） | command handler = 同步上下文（同 plan command 排除理由）；agent_end handler 在 pi `emit()` 的 try/catch 内（§1 实证）——stale throw 被 pi 捕获转 emitError，非崩溃面 |
 | **base-tool-enhance** | src/background/notify.ts :154 `pi.sendMessage`（任务完成通知）；exit-collector.ts 的 ChildProcess `child.on("exit")` 监听 | **排除** | sendTaskFinishedMessage 已有 try/catch（注释明言「旧 bus 已 dispose（session 替换毫秒窗口）——降级日志，不中断后续通知」）；exit 边沿链路经同一 handleTaskExit 入口，回调链全模块级（task-store / notify 均模块级单例，无实例级 ctx/pi 捕获——pi 引用经 D17 refreshPiReference 刷新，session 替换不产生 stale 捕获） |
 | **cache-probe** | before_agent_start / before_provider_request handler 内多处 `pi.appendEntry` | **排除** | 全部调用点已有 try/catch（appendErr 兜底 + stderr 诊断），且在 pi emit() catch 之内——双覆盖 |
@@ -122,5 +121,5 @@ VERDICT=PASS
 
 ## 7. Blockers（清单外疑似风险面，待主 agent 裁决）
 
-1. **subagent-workflow `notifyDone`**（`src/interface/helpers.ts` :150 `pi.sendMessage`，调用链 `src/index.ts` :248 `onRunDone`）：workflow 完成链路异步触发，不在 pi `emit()` catch 内、无自有 try/catch——session 替换窗口 stale 即同 E1 机制崩 pi。同链路家族的 `session-lifecycle.ts` sendDelivery 依赖注入封装同判。超出本单元授权包清单（structured-output / pending-notifications / cw-tool），未改动，建议作为后续单元接入 `guardStaleCtx`。
+1. **subagent-workflow `notifyDone`**（`src/interface/helpers.ts` :150 `pi.sendMessage`，调用链 `src/index.ts` :248 `onRunDone`）：workflow 完成链路异步触发，不在 pi `emit()` catch 内、无自有 try/catch——session 替换窗口 stale 即同 E1 机制崩 pi。同链路家族的 `session-lifecycle.ts` sendDelivery 依赖注入封装同判。超出本单元授权包清单（structured-output / pending-notifications），未改动，建议作为后续单元接入 `guardStaleCtx`。
    **【已收口 2026-09-09】**两处均已接入 `guardStaleCtx`（`subagent-workflow:notifyDone` / `subagent-workflow:sendDelivery`，stale 静默语义判定见 §4），单测 `src/__tests__/notify-stale-guard.test.ts` 锁定 stale 静默 / 非 stale 上抛 / 正常路径透传三面。

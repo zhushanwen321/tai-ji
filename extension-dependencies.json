@@ -277,17 +277,6 @@
       ]
     },
     {
-      "name": "@zhushanwen/pi-cw-tool",
-      "directory": "extensions/universal/cw-tool",
-      "dependsOn": [
-        {
-          "package": "@zhushanwen/pi-ext-guards",
-          "type": "package",
-          "reason": "代码层静态 import toErrorMessage/isEnoentError（src/cw-runner.ts、src/cw-spawn.ts top-level import，ext-simplify-18 D1/D3 采用批），缺失时模块加载即抛 Cannot find module，是强依赖"
-        }
-      ]
-    },
-    {
       "name": "@zhushanwen/pi-session-reader",
       "directory": "extensions/universal/session-reader",
       "dependsOn": [

@@ -193,6 +193,9 @@ export default function sessionReaderExtension(pi: ExtensionAPI): void {
   pi.registerTool({
     name: 'session_read',
     label: 'Session Reader',
+    // deferred（tool-declaration-slimming D4）：不常驻声明，tool_search 命中即激活；
+    // 迁移写入的 +tool_search 条目（runtime pi-codemode-settings）承载检索入口
+    exposure: 'deferred',
     description,
     parameters: SessionReadSchema,
     promptGuidelines: guidelines,

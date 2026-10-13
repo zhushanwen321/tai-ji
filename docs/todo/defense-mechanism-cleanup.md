@@ -18,7 +18,7 @@
 
 - 引擎链（pi-rpc / subagent-core / pi-subagent-cli / subagent-engine-sdk）：workflow agent() 自动重试、worker 重建矩阵、引擎初建自动重建、resume 锁重试、get-state 握手重试、kill 链 grace 阶梯（SIGKILL 直杀）、crash 重建常量——全删；失败单次终态化显式上报。
 - runtime 内核（runtime / session-delivery / shared）：RPC pending 墙钟分级、迟到响应丢弃、pi-respawn 自动恢复、abort-liveness 阶梯、idle-pi-reaper 整模块、WS 心跳/认证/linger 墙钟、relay 握手/grace/孤儿时序、watchdog 定时触发、requireCommand 轮询、session-records 15s 定时对账、notify-claims TTL sweep、bg_reconcile 节流、git/file/logger 杂项墙钟、RECLAIM 旋钮与激活超时死常量——全删；reconcile 事件触发路径、pollTimer（ADR-0075 拉取真理通道）保留。
-- extensions：cw-tool / rename-session / permission 默认墙钟、session-manager SELECT_TIMEOUT 表、bte 2s 轮询器（改 exit 事件边沿收尾 exit-collector.ts）、scheduler widget 保活帧（唯一理由 = reaper 防御，陪葬退役）——全删。
+- extensions：rename-session / permission 默认墙钟、session-manager SELECT_TIMEOUT 表、bte 2s 轮询器（改 exit 事件边沿收尾 exit-collector.ts）、scheduler widget 保活帧（唯一理由 = reaper 防御，陪葬退役）——全删。
 - 前端/平台（apps/electron / core / renderer）：重启稳定窗、renderer 崩溃自动 reload + 熔断（改静态错误页 + 手动重试）、端口释放猜等、重启延迟猜等——全删。
 - Wave 2-C2 批次（追加裁决残留项，2026-10-05 落地）：
   - notify 看门狗重投（`subagent-core/execution/notify/notify-ledger.ts`）：NOTIFY_WATCHDOG_MS=120s 看门狗定时器 + NOTIFY_REDELIVERY_MAX_ATTEMPTS=5 重投上限 + abandoned 放弃终态族（生产/消费/compaction 补写/恢复跳过全链）——全删；语义终态 = 通知 sent 后无回执不重投（通知可能丢失是已接受代价），settled 边沿投递、回执对账、notifyId 幂等、重启恢复重放保留。

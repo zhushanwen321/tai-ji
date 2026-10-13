@@ -93,7 +93,7 @@ function readPkgIfExists(rel) {
 }
 const pkgJsons = [];
 // extensions 分组布局（taiji/universal，2026-08-22 目录重组）：分组目录 + shared 库 + 顶层
-// 兜底（未来新增分组单点追加）。旧一层扫描在重组后漏掉全部分组包（cw-tool 死警告根因）。
+// 兜底（未来新增分组单点追加）。旧一层扫描在重组后漏掉全部分组包，此为根因防御。
 for (const base of ['extensions/taiji', 'extensions/universal', 'extensions', 'packages', 'apps']) {
   for (const name of listDirs(base)) {
     if (base === 'extensions' && ['shared', 'taiji', 'universal'].includes(name)) continue; // 分组目录/shared 单独扫
