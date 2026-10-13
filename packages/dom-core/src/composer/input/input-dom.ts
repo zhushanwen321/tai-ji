@@ -451,14 +451,19 @@ export function isSpacerNode(node: Node | null): boolean {
   return t === '\u00A0' || t === '\u200B' || t === ''
 }
 
-/** 把光标定位到指定节点之后 */
+/** 把光标定位到指定节点之后（Selection.collapse 单次写入——removeAllRanges+addRange 的
+ *  「先清空再重建」两段式会重置 macOS IME 组字上下文（chip 插入后首中文字符裸插问题的
+ *  成因之一，用户报告 2026-10-13），单次 collapse 无空档通知） */
 export function placeCursorAfter(node: Node): void {
-  const range = document.createRange()
-  range.setStartAfter(node)
-  range.collapse(true)
   const sel = window.getSelection()
-  sel?.removeAllRanges()
-  sel?.addRange(range)
+  if (!sel) return
+  const parent = node.parentNode
+  if (!parent) return
+  const idx = Array.prototype.indexOf.call(parent.childNodes, node)
+  // 塌陷到「父节点 + node 后一个索引位」（与旧 setStartAfter 边界语义逐点一致）：
+  // 勿塌进文本节点内部（node, length）——后续 insertNode 在该边界上会分裂文本节点、
+  // 留下空文本残余（DOM 结构漂移，TreeWalker/getSegments 与测试 lastChild 假设双输）
+  sel.collapse(parent, idx + 1)
 }
 
 /**

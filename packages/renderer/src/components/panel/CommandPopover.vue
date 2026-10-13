@@ -37,8 +37,13 @@
     - skill 类命令未选中时图标 text-reasoning（紫）；选中随行色（中性前景）
     - 命令名 font-semibold（非 mono）+ middot · 分隔符（命令名与描述间；demo .ii-desc
       无分隔符且左对齐 16px，real 描述列右对齐——排版差异保留）
-    - 容器 = demo .popover 档：p-1 衬垫（4px 配 rounded-lg 12px 圆角成「衬垫」语言）+
-      border-strong 边 / bg-elevated 底 / shadow-2 投影（PopoverContent 基类自带）/ 锚距 10px
+    - 容器 = composer 同源底色（用户裁决 2026-10-13 demo 方案 A）：bg-bg + border（--border 7%）
+      覆写 PopoverContent 基类的 bg-elevated/border-strong（cn/twMerge 同组覆盖），浮层与
+      composer 底/边/圆角同源，仅靠 shadow-2 投影浮起；锚距 10px
+    - 行 @mousedown.prevent：点击浮层行不再夺焦（mousedown 默认行为 = 移焦点，会先把
+      contenteditable 置盲 → 确认链再 focus 回拉）。焦点稳定是 IME 首字失效修复的半边
+      （另一半在 dom-core 选区写入单次化）：macOS IME 的组字上下文在「焦点往返 + 选区
+      重建」同帧连击后不重臂，下一个按键不走 compositionstart 直接裸插字符
   -->
   <Popover v-model:open="controlledOpen">
     <!-- anchor：composer-box 本身（由调用方通过 slot 传入），仅作定位/宽度锚源，
@@ -56,7 +61,8 @@
       align="start"
       :side-offset="10"
       :collision-padding="8"
-      class="w-[var(--reka-popper-anchor-width)] max-w-[calc(100vw-16px)] overflow-hidden rounded-lg p-1"
+      class="w-[var(--reka-popper-anchor-width)] max-w-[calc(100vw-16px)] overflow-hidden rounded-lg border-border bg-bg p-1"
+      @mousedown.prevent
       @open-auto-focus.prevent
     >
       <!-- 以下四态行（加载失败重试 / 无结果 / 加载中 / 通用无匹配）为 real 扩展态
