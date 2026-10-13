@@ -20,6 +20,11 @@
 // mcp_servers 提示词节 + direct 档首 prompt 延迟，subagent 消费 MCP 工具为零证据
 // 场景不预付）——本文件 subagent 段快照不含该 token，与 pi-subagent-cli 测试同为
 // 「subagent 不受传导」回归锚。
+// [HISTORICAL] 第四处有意偏离：tool-declaration-slimming D4 起主 agent 模板基座再恒带
+// `--extension builtin:tool-search`（settings `+tool_search`——启动迁移写入 defaultTools
+// 的条目——只能激活已注册工具；内置 tool-search 扩展惰性注册 tool_search，-ne 下不显式
+// 装载则迁移条目无消费方，exposure:deferred 工具经 tool_search 的按需激活链路不可达，
+// 见 spawn-args.ts 注释）；subagent 模板不加（显式白名单语义无检索需求）。
 
 import { describe, expect, it, vi, afterEach } from 'vitest'
 
@@ -39,10 +44,10 @@ import {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('buildPiMainAgentArgs（主 agent 模板）', () => {
-  it('最小参数：基座 = --mode rpc --no-extensions --approve + builtin:codemode（D8）+ builtin:mcp（P11 配套，仅主模板）', () => {
+  it('最小参数：基座 = --mode rpc --no-extensions --approve + builtin:codemode（D8）+ builtin:mcp（P11 配套）+ builtin:tool-search（D4 配套，后两者仅主模板）', () => {
     expect(buildPiMainAgentArgs({}, undefined)).toEqual([
       '--mode', 'rpc', '--no-extensions', '--approve',
-      '--extension', 'builtin:codemode', '--extension', 'builtin:mcp',
+      '--extension', 'builtin:codemode', '--extension', 'builtin:mcp', '--extension', 'builtin:tool-search',
     ])
   })
 
@@ -84,7 +89,7 @@ describe('buildPiMainAgentArgs（主 agent 模板）', () => {
     const args = buildPiMainAgentArgs({ skillPaths: ['/s1', '/s2'], extensionPaths: ['/e1', '/e2'] }, undefined)
     expect(args).toEqual([
       '--mode', 'rpc', '--no-extensions', '--approve',
-      '--extension', 'builtin:codemode', '--extension', 'builtin:mcp',
+      '--extension', 'builtin:codemode', '--extension', 'builtin:mcp', '--extension', 'builtin:tool-search',
       '--skill', '/s1', '--skill', '/s2',
       '--extension', '/e1', '--extension', '/e2',
     ])
@@ -149,7 +154,7 @@ describe('buildPiMainAgentArgs（主 agent 模板）', () => {
     )
     expect(args).toEqual([
       '--mode', 'rpc', '--no-extensions', '--approve',
-      '--extension', 'builtin:codemode', '--extension', 'builtin:mcp',
+      '--extension', 'builtin:codemode', '--extension', 'builtin:mcp', '--extension', 'builtin:tool-search',
       '--model', 'prov/mid',
       '--system-prompt', '\nsys',
       '--append-system-prompt', '\napp',
@@ -233,6 +238,11 @@ describe('buildPiSubagentSpawnArgs（subagent 模板）', () => {
   it('回归锚：subagent 模板不含 builtin:mcp（P11 仅主模板装载——subagent 装载会引入 N×M 连接放大与启动延迟，设计 §5 U1 辐射面裁决；本断言防未来误传导）', () => {
     const args = buildPiSubagentSpawnArgs(baseParams)
     expect(args).not.toContain('builtin:mcp')
+  })
+
+  it('回归锚：subagent 模板不含 builtin:tool-search（仅主模板装载——subagent 工具面为显式白名单语义、无 tool_search 检索需求；本断言防未来误传导）', () => {
+    const args = buildPiSubagentSpawnArgs(baseParams)
+    expect(args).not.toContain('builtin:tool-search')
   })
 
   it('快照锚定：典型全参数集 argv 形态（--no-extensions 等基座 flag 已退役由引擎侧拼装；D8 起尾部恒带 builtin:codemode）', () => {

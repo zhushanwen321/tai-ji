@@ -150,6 +150,14 @@ function toInlinePromptValue(value: string): string {
  *   N 个并行 subagent × M 个启用服务器的连接放大 + mcp_servers 提示词节 + direct 档
  *   首 prompt 延迟，且 subagent 消费 MCP 工具为零证据场景，不预付；重评登记 docs/todo/）。
  *   无启用服务器的会话零成本（pi 实装保证）。
+ * - --extension builtin:tool-search（恒带，tool-declaration-slimming D4 配套）：内置
+ *   tool-search 扩展把 tool_search 注册为 defaultActive:false 的惰性工具，激活通道 =
+ *   settings.json defaultTools `+tool_search` 条目（启动迁移写入）或 --tools，而
+ *   defaultTools 只能激活已注册工具——-ne 下不显式装载则该条目无消费方，
+ *   exposure:deferred 工具（session_read 等）经 tool_search 的按需激活链路不可达。
+ *   恒带不带开关条件：与 builtin:codemode 同理，spawn 参数与 settings.json 双通道
+ *   条件同步会出现不一致窗口。仅主 agent 模板装载（subagent 工具面是显式白名单语义，
+ *   无检索需求；防误传导断言见本包与 pi-subagent-cli 两处测试）。
  * - --approve：强制信任 cwd——RPC 模式无交互 UI，pi 原生信任流程在 hasUI=false 时
  *   默认拒绝会导致 <cwd>/.pi/ 下的 skill 被跳过；实际主要信任项目级 .pi/skills。
  *   TODO(follow-up): Project Trust UI 落地后移除全局 --approve。
@@ -158,7 +166,7 @@ function toInlinePromptValue(value: string): string {
 export function buildPiMainAgentArgs(options: PiMainAgentSpawnOptions, model: string | undefined): string[] {
   const args = [
     '--mode', 'rpc', '--no-extensions', '--approve',
-    '--extension', 'builtin:codemode', '--extension', 'builtin:mcp',
+    '--extension', 'builtin:codemode', '--extension', 'builtin:mcp', '--extension', 'builtin:tool-search',
   ]
   if (model) args.push('--model', model)
   // --system-prompt: 替换 pi 核心系统提示词（身份/工具列表/指引/pi 文档路径 4 段）。
