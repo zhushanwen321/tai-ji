@@ -155,8 +155,8 @@ function subagentsStartupText(
   return [
     `Started batch '${slug}' (${runId}) as workflow run '${scriptName}' — ${taskCount} subagents dispatched in parallel (allSettled).`,
     "Results arrive as ONE notification when the run settles. Do NOT poll.",
-    `If no notification arrives well past the expected duration, make a SINGLE status check: workflow tool with runId ${runId} (recovery exit, not a poll loop).`,
-    `To abort: workflow tool, action abort, runId ${runId}`,
+    `If no notification arrives well past the expected duration, make a SINGLE status check: workflow_control {"action":"status"} with runId ${runId} (recovery exit, not a poll loop).`,
+    `To abort: workflow_control {"action":"abort","runId":"${runId}"}`,
   ].join("\n");
 }
 
@@ -261,20 +261,22 @@ export function registerSubagentsTool(
   pi.registerTool({
     name: "subagents",
     label: "Subagents (batch)",
+    // tool-declaration-slimming U-C1 R1 裁决：低频批量入口延迟加载（defer 名单工具）。
+    exposure: "deferred",
     description:
       "Spawn multiple subagents in ONE call, collect all results together — for N INDEPENDENT tasks.\n" +
       "Each member is a one-shot batch member: you cannot message or continue it (re-dispatch instead). Results arrive as ONE notification when the whole batch settles (not per member).\n" +
-      "Single subagent you can message later: `subagent` tool. Dependent tasks (step 2 needs step 1's result): `workflow` tool — batch members never see each other's results.",
+      "Single subagent you can message later: `subagent_message` tool. Dependent tasks (step 2 needs step 1's result): `workflow_run` tool — batch members never see each other's results.",
     promptSnippet: "Dispatch N independent subagent tasks in one batch",
     promptGuidelines: [
-      "PRIORITY: 2+ independent tasks in one dispatch (results combined by you afterwards) → call `subagents` ONCE with the tasks array — do NOT issue N separate `subagent` starts and do NOT hand-build a workflow.",
+      "PRIORITY: 2+ independent tasks in one dispatch (results combined by you afterwards) → call `subagents` ONCE with the tasks array — do NOT issue N separate subagent_start calls and do NOT hand-build a workflow.",
       "One-shot batch members: message/fork-from is not supported; to redo or extend a member's work, dispatch a new task in a second batch.",
       // 勿等待条 / 预算纪律条 / 模型缺省继承条 三条已删（tool-declaration-slimming D1
       // 单源化→<available_subagents> 注入段 SUBAGENT_DISPATCH_SHARED_RULES 说一次，
       // 原文见 git 历史；零残留由 tool-subagents.test.ts 单源化终态断言锁定）。
       "Call shape (JSON): {\"tasks\":[\"<task 1>\",\"<task 2>\"],\"agents\":\"<abs .md path(s)>\",\"aggregate\":false,\"slug\":\"<label>\"} — tasks required, every element a complete self-contained prompt.",
-      "Anti-patterns: nesting tasks under an 'args' key (top-level); dispatching dependent steps in one batch (chain across messages or use the `workflow` tool); treating batch results as verified without checking.",
-      "Run control (status/abort) lives in the `workflow` tool — use the runId printed in this tool's output.",
+      "Anti-patterns: nesting tasks under an 'args' key (top-level); dispatching dependent steps in one batch (chain across messages or use the `workflow_run` tool); treating batch results as verified without checking.",
+      "Run control (status/abort) lives in the `workflow_control` tool — use the runId printed in this tool's output.",
     ],
     parameters: SubagentsParams,
 

@@ -4,7 +4,9 @@ import { taijiTestConfig } from "../../../test-guard/factory.ts"
 
 export default taijiTestConfig({
   test: {
-    include: ["tests/**/*.test.ts"],
+    // tests/** 既有契约族 + src/__tests__/**（tool-declaration-slimming U-B1：
+    // cross-package-contract 落 src/__tests__/，任务书 testCommand 字面路径）
+    include: ["tests/**/*.test.ts", "src/__tests__/**/*.test.ts"],
   },
   resolve: {
     alias: {

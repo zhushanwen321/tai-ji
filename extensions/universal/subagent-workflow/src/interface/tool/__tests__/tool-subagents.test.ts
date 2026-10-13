@@ -185,9 +185,9 @@ describe("schema 契约：一跳扁平 + tasks 必填（D2）", () => {
     expect(tool.label.length).toBeGreaterThan(0);
     expect(tool.description).toContain("one-shot batch member");
     expect(tool.description).toContain("ONE notification");
-    // 分工句（D5①）：单数 tool 指路 + 依赖链场景指路 workflow
-    expect(tool.description).toContain("`subagent` tool");
-    expect(tool.description).toContain("`workflow` tool");
+    // 分工句（D5① + D3 拆分新名）：单数续聊指路 subagent_message + 依赖链场景指路 workflow_run
+    expect(tool.description).toContain("`subagent_message` tool");
+    expect(tool.description).toContain("`workflow_run` tool");
   });
 
   it("参数全平铺：无 action 分发、无 args 嵌套、无嵌套 object 参数", () => {
@@ -238,7 +238,8 @@ describe("schema 契约：一跳扁平 + tasks 必填（D2）", () => {
     const guidelines = tool.promptGuidelines.join("\n");
     expect(guidelines).toContain("2+ independent tasks in one dispatch");
     expect(guidelines).toContain('{"tasks":[');
-    expect(guidelines).toContain("`workflow` tool");
+    expect(guidelines).toContain("`workflow_run` tool");
+    expect(guidelines).toContain("`workflow_control` tool");
     // tool-declaration-slimming D1 单源化终态：勿等待/预算/模型缺省继承三类跨工具
     // 通用纪律不在本工具 promptGuidelines 重复——收敛到 <available_subagents> 注入段
     // （subagent-list-injector.ts SUBAGENT_DISPATCH_SHARED_RULES）说一次。
@@ -319,11 +320,10 @@ describe("handler 组装：runWorkflow('fan-out') 确定性映射（D3）", () =
     const text = result.content[0].text;
     expect(text).toContain("Started batch 'foo-tri-review' (wf-1700000000000-abcd) as workflow run 'fan-out' — 2 subagents dispatched in parallel (allSettled).");
     expect(text).toContain("Results arrive as ONE notification when the run settles. Do NOT poll.");
-    expect(text).toContain("make a SINGLE status check: workflow tool with runId wf-1700000000000-abcd (recovery exit, not a poll loop).");
-    expect(text).toContain("To abort: workflow tool, action abort, runId wf-1700000000000-abcd");
-    // status/abort 不复制：本 tool 无 action 参数（schema 已断言），文案只指路 workflow tool
-    expect(text).not.toContain('"action":"status"');
-    expect(text).not.toContain('"action":"abort"');
+    expect(text).toContain('make a SINGLE status check: workflow_control {"action":"status"} with runId wf-1700000000000-abcd (recovery exit, not a poll loop).');
+    expect(text).toContain('To abort: workflow_control {"action":"abort","runId":"wf-1700000000000-abcd"}');
+    // status/abort 不复制：本 tool 无 action 参数（schema 已断言），文案只指路
+    // workflow_control 的 action 调用形态（D3 拆分新名）
   });
 });
 

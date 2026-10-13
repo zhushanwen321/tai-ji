@@ -192,7 +192,7 @@ describe("formatWorkflowList", () => {
 		// guide 段硬编码（锁文本）：期望值不插值生产常量——改写 WORKFLOW_LIST_GUIDE
 		// 即红灯，避免「两侧同源插值」下文案漂移无守卫
 		expect(out).toBe(
-			`\n\n<available_workflows>\nThe following workflows are available. Do NOT call list to discover available workflows — they are listed below; use list only for running state. All listed workflows run directly via action:run — do NOT use workflow-script generate for any listed workflow. For parameter details, read the <location> script file (script header has @pi-meta parameters + usage). For 2+ independent tasks dispatched together, prefer the \`subagents\` tool — it drives the fan-out workflow for you.\n  <workflow><name>chain</name><description>三步链</description><location>/workflows/chain.js</location></workflow>\n</available_workflows>`,
+			`\n\n<available_workflows>\nThe following workflows are available. Do NOT call list to discover available workflows — they are listed below; use list only for running state. All listed workflows run directly via the workflow_run tool — do NOT use workflow-script generate for any listed workflow. For parameter details, read the <location> script file (script header has @pi-meta parameters + usage). For 2+ independent tasks dispatched together, prefer the \`subagents\` tool — it drives the fan-out workflow for you.\n  <workflow><name>chain</name><description>三步链</description><location>/workflows/chain.js</location></workflow>\n</available_workflows>`,
 		);
 	});
 
@@ -204,7 +204,7 @@ describe("formatWorkflowList", () => {
 
 	it("引导语通用化：不写死内置 workflow 名，含 info 回收指引", () => {
 		const out = formatWorkflowList([{ name: "chain", description: "d", path: "/workflows/chain.js" }], { guide: WORKFLOW_LIST_GUIDE });
-		expect(out).toContain("All listed workflows run directly via action:run");
+		expect(out).toContain("All listed workflows run directly via the workflow_run tool");
 		expect(out).toContain("read the <location> script file");
 		// 通用化约束：引导语不点名具体 workflow（名字由 @pi-meta 动态注入，
 		// 写死内置名会在新增/移除 workflow 时与列表漂移）
@@ -243,7 +243,7 @@ describe("formatAgentList CA2 快照（agent guide 壳自有文案唯一字节�
 		// guide 段硬编码（锁文本）：期望值不插值生产常量——改写 SUBAGENT_LIST_GUIDE
 		// 即红灯，避免「两侧同源插值」下文案漂移无守卫
 		expect(out).toBe(
-			`\n\n<available_subagents>\nThe following subagents are available. PRIORITY: when a task involves reading 3+ files, writing 100+ lines, parallel research, or specialized review, delegate to a matching subagent FIRST instead of doing it yourself — this keeps your context focused on orchestration. Do NOT call list to discover available subagents; use list only for running state. When using the subagent tool, pass the <location> path from this list as the agent param (usually the right choice); an absolute .md path outside this list also works if the file is a readable agent definition. If no agent matches your task, omit agent (a general-purpose agent is used) and put all role-specific instructions in the task text.\n${expectedItems.join("\n")}\n</available_subagents>`,
+			`\n\n<available_subagents>\nThe following subagents are available. PRIORITY: when a task involves reading 3+ files, writing 100+ lines, parallel research, or specialized review, delegate to a matching subagent FIRST instead of doing it yourself — this keeps your context focused on orchestration. Do NOT call list to discover available subagents; use list only for running state. When using the subagent_start tool, pass the <location> path from this list as the agent param (usually the right choice); an absolute .md path outside this list also works if the file is a readable agent definition. If no agent matches your task, omit agent (a general-purpose agent is used) and put all role-specific instructions in the task text.\n${expectedItems.join("\n")}\n</available_subagents>`,
 		);
 
 		// location 前缀替换（资产来源迁移：pi-sw 安装目录 → core 包）后其余字节零变化

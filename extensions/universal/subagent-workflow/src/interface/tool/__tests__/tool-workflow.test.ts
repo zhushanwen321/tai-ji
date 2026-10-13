@@ -145,7 +145,7 @@ interface StatusToolView extends CapturedTool { // oe-exempt:20260927:wip:test f
 
 /** 注册层黑盒 capture（actionStatus/actionAbort 未导出，经 execute 唯一入口；
  *  fake pi 捕获单点见 capture-tool.ts，此处只留差异面：runs Map + 泛型 view）。 */
-function captureRegisteredTool<T extends CapturedTool>(runs: Map<string, WorkflowRun>): T {
+function captureRegisteredTool<T extends CapturedTool>(runs: Map<string, WorkflowRun>, toolName: string): T {
   const deps = {
     runs,
     // status/abort 路径只触 store.stateFilePath（RunSummary 宿主扩展字段）
@@ -155,7 +155,7 @@ function captureRegisteredTool<T extends CapturedTool>(runs: Map<string, Workflo
   const guard: ReentryGuardRef = { isProcessing: false };
   return captureTool<T>(
     (pi) => registerWorkflowTool(pi as never, deps as never, guard),
-    "workflow",
+    toolName,
   );
 }
 
@@ -214,7 +214,7 @@ describe("actionStatus 输出形态（LLM 可见文本锁）", () => {
   });
 
   it("runs 为空 → 固定空态文案 + 空 runs details", async () => {
-    const tool = captureRegisteredTool<StatusToolView>(new Map());
+    const tool = captureRegisteredTool<StatusToolView>(new Map(), "workflow_control");
     const r = await tool.execute("id", { action: "status" }, undefined, undefined, {});
     expect(r.content).toEqual([{ type: "text", text: "No workflows in current session." }]);
     expect(r.details).toMatchObject({ action: "status", runs: [] });
@@ -249,7 +249,7 @@ describe("actionStatus 输出形态（LLM 可见文本锁）", () => {
       [doneFailed.runId, doneFailed],
       [doneCompleted.runId, doneCompleted],
     ]);
-    const tool = captureRegisteredTool<StatusToolView>(runs);
+    const tool = captureRegisteredTool<StatusToolView>(runs, "workflow_control");
     const r = await tool.execute("id", { action: "status" }, undefined, undefined, {});
 
     expect(r.content).toEqual([
@@ -297,7 +297,7 @@ describe("actionStatus 输出形态（LLM 可见文本锁）", () => {
 
 describe("details 形状（execute 级无 GUI attach）", () => {
   it("RPC ctx → details 不含 __gui__ 键（workflow tool 不构造 GUI 描述符）", async () => {
-    const tool = captureRegisteredTool<Record<string, unknown>>(new Map());
+    const tool = captureRegisteredTool<Record<string, unknown>>(new Map(), "workflow_control");
     const r = await tool.execute("id", { action: "status" }, undefined, undefined, {
       mode: "rpc",
       hasUI: true,
@@ -310,11 +310,12 @@ describe("details 形状（execute 级无 GUI attach）", () => {
 // W4b 错误路径 throw 语义（原 tool-workflow-throw-paths.test.ts）
 // ══════════════════════════════════════════════════════════════
 
-/** throw-paths 专用 capture wrapper（差异面：deps 实参 + reentry guard 可注入占用态）。 */
-function captureWorkflowTool(deps: unknown, reentryRef: ReentryGuardRef): CapturedTool {
+/** throw-paths 专用 capture wrapper（差异面：deps 实参 + reentry guard 可注入占用态；
+ *  D3 拆分后按 toolName 取 workflow_run / workflow_control）。 */
+function captureWorkflowTool(deps: unknown, reentryRef: ReentryGuardRef, toolName: string): CapturedTool {
   return captureTool(
     (pi) => registerWorkflowTool(pi as never, deps as never, reentryRef),
-    "workflow",
+    toolName,
   );
 }
 
@@ -327,7 +328,7 @@ function scriptRegistry(parameters?: object): Record<string, unknown> {
 
 describe("W4b: workflow tool 错误路径 throw 语义", () => {
   it("not_found：abort 目标 runId 不存在 → throw（pi catch 后置 isError:true）", async () => {
-    const tool = captureWorkflowTool(makeDeps(stubRegistry()), { isProcessing: false });
+    const tool = captureWorkflowTool(makeDeps(stubRegistry()), { isProcessing: false }, "workflow_control");
     await expect(
       tool.execute("id", { action: "abort", runId: "no-such-run" }, undefined, undefined, {}),
     ).rejects.toThrow(
@@ -351,9 +352,9 @@ describe("W4b: workflow tool 错误路径 throw 语义", () => {
         }),
       }),
     );
-    const tool = captureWorkflowTool(deps, { isProcessing: false });
+    const tool = captureWorkflowTool(deps, { isProcessing: false }, "workflow_run");
     await expect(
-      tool.execute("id", { action: "run", name: "/tmp/no-such-workflow.js" }, undefined, undefined, {}),
+      tool.execute("id", { name: "/tmp/no-such-workflow.js" }, undefined, undefined, {}),
     ).rejects.toThrow("Workflow '/tmp/no-such-workflow.js' not found.");
     // 未假启动：runs 注册表不出现该 run
     expect(deps.runs).toBeInstanceOf(Map);
@@ -362,7 +363,7 @@ describe("W4b: workflow tool 错误路径 throw 语义", () => {
 
   it("reentry-busy：guard 占用 → throw REENTRY_BUSY_MESSAGE，且 guard 状态不被污染", async () => {
     const guard: ReentryGuardRef = { isProcessing: true };
-    const tool = captureWorkflowTool(makeDeps(stubRegistry()), guard);
+    const tool = captureWorkflowTool(makeDeps(stubRegistry()), guard, "workflow_control");
     await expect(
       tool.execute("id", { action: "status" }, undefined, undefined, {}),
     ).rejects.toThrow(REENTRY_BUSY_MESSAGE);
@@ -378,17 +379,17 @@ describe("W4b: workflow tool 错误路径 throw 语义", () => {
         required: ["task"],
       }),
     );
-    const tool = captureWorkflowTool(deps, { isProcessing: false });
+    const tool = captureWorkflowTool(deps, { isProcessing: false }, "workflow_run");
     await expect(
       tool.execute(
         "id",
-        { action: "run", name: "/abs/demo-wf.js", task: "do work" },
+        { name: "/abs/demo-wf.js", task: "do work" },
         undefined,
         undefined,
         {},
       ),
     ).rejects.toThrow(
-      /Detected task at top level — they belong inside 'args'\. Correct: \{"action":"run","name":"\/abs\/demo-wf\.js","args":\{"task": "<value>"\}\}/,
+      /Detected task at top level — they belong inside 'args'\. Correct: \{"name":"\/abs\/demo-wf\.js","args":\{"task": "<value>"\}\}/,
     );
   });
 
@@ -400,12 +401,12 @@ describe("W4b: workflow tool 错误路径 throw 语义", () => {
         required: ["task"],
       }),
     );
-    const tool = captureWorkflowTool(deps, { isProcessing: false });
+    const tool = captureWorkflowTool(deps, { isProcessing: false }, "workflow_run");
     const longSlug = "a".repeat(SLUG_MAX_LENGTH + 1);
     await expect(
       tool.execute(
         "id",
-        { action: "run", name: "/abs/demo-wf.js", slug: longSlug, args: {} },
+        { name: "/abs/demo-wf.js", slug: longSlug, args: {} },
         undefined,
         undefined,
         {},
@@ -423,13 +424,13 @@ describe("W4b: workflow tool 错误路径 throw 语义", () => {
         required: ["task"],
       }),
     );
-    const tool = captureWorkflowTool(deps, { isProcessing: false });
+    const tool = captureWorkflowTool(deps, { isProcessing: false }, "workflow_run");
     // LLM 对「跑久一点」完全可能生成 1e12——超 2^31-1 的典型形态（schema Type.Number
     // 直通无上界，用户入口 fail-fast 不依赖 lifecycle 内层 assertSafeTimerDelay）
     await expect(
       tool.execute(
         "id",
-        { action: "run", name: "/abs/demo-wf.js", args: { task: "do work" }, time: 1_000_000_000_000 },
+        { name: "/abs/demo-wf.js", args: { task: "do work" }, time: 1_000_000_000_000 },
         undefined,
         undefined,
         {},
@@ -454,11 +455,11 @@ describe("W4b: workflow tool 错误路径 throw 语义", () => {
           required: ["task"],
         }),
       );
-      const tool = captureWorkflowTool(deps, { isProcessing: false });
+      const tool = captureWorkflowTool(deps, { isProcessing: false }, "workflow_run");
       await expect(
         tool.execute(
           "id",
-          { action: "run", name: "/abs/demo-wf.js", args: { task: "do work" }, ...params },
+          { name: "/abs/demo-wf.js", args: { task: "do work" }, ...params },
           undefined,
           undefined,
           {},
@@ -472,7 +473,7 @@ describe("W4b: workflow tool 错误路径 throw 语义", () => {
   it("throw 后 reentry guard 经 finally 正常释放（成功路径回归）", async () => {
     // abort not_found throw 穿透 execute try/finally：guard 必须复位，否则后续命令全部 busy
     const guard: ReentryGuardRef = { isProcessing: false };
-    const tool = captureWorkflowTool(makeDeps(stubRegistry()), guard);
+    const tool = captureWorkflowTool(makeDeps(stubRegistry()), guard, "workflow_control");
     await expect(
       tool.execute("id", { action: "abort", runId: "no-such-run" }, undefined, undefined, {}),
     ).rejects.toThrow(/not found/);
@@ -509,7 +510,7 @@ describe("D8 创建期模型拒单", () => {
     // setModelConfigService 无复位面，单例 set 后 null 分支不可再达。
     const deps = depsWithScripts([SCRIPT]);
     await actionRun(
-      { action: "run", name: "/abs/chain.js", args: {}, model: "prov1/typo" } as never,
+      { name: "/abs/chain.js", args: {}, model: "prov1/typo" } as never,
       deps as never,
       undefined,
     );
@@ -523,7 +524,7 @@ describe("D8 创建期模型拒单", () => {
     ]);
     const deps = depsWithScripts([SCRIPT]);
     const err = await actionRun(
-      { action: "run", name: "/abs/chain.js", args: {}, model: "prov1/typo" } as never,
+      { name: "/abs/chain.js", args: {}, model: "prov1/typo" } as never,
       deps as never,
       undefined,
     ).catch((e: unknown) => e as Error);
@@ -541,7 +542,7 @@ describe("D8 创建期模型拒单", () => {
     setCatalogService([{ provider: "prov1", id: "good-a" }]);
     const deps = depsWithScripts([SCRIPT]);
     const err = await actionRun(
-      { action: "run", name: "/abs/chain.js", args: {}, model: "retired/m1" } as never,
+      { name: "/abs/chain.js", args: {}, model: "retired/m1" } as never,
       deps as never,
       undefined,
     ).catch((e: unknown) => e as Error);
@@ -556,7 +557,7 @@ describe("D8 创建期模型拒单", () => {
     setCatalogService([{ provider: "prov1", id: "good-a" }]);
     const deps = depsWithScripts([SCRIPT]);
     await actionRun(
-      { action: "run", name: "/abs/chain.js", args: {}, model: "prov1/good-a" } as never,
+      { name: "/abs/chain.js", args: {}, model: "prov1/good-a" } as never,
       deps as never,
       undefined,
     );
@@ -592,7 +593,7 @@ describe("D4-1 按名解析退役（fake registry）", () => {
       loadAll: vi.fn().mockResolvedValue([chain]),
     });
     const err = await actionRun(
-      { action: "run", name: "chain" } as never,
+      { name: "chain" } as never,
       makeDeps(registry) as never,
       undefined,
     ).catch((e: unknown) => e as Error);
@@ -615,7 +616,7 @@ describe("D4-1 按名解析退役（fake registry）", () => {
       loadAll: vi.fn().mockResolvedValue([byPath]),
     });
     await actionRun(
-      { action: "run", name: "/abs/demo.js" } as never,
+      { name: "/abs/demo.js" } as never,
       makeDeps(registry) as never,
       undefined,
     );
@@ -633,7 +634,7 @@ describe("D4-1 按名解析退役（fake registry）", () => {
     });
     await expect(
       actionRun(
-        { action: "run", name: "ghost" } as never,
+        { name: "ghost" } as never,
         makeDeps(registry) as never,
         undefined,
       ),
@@ -646,7 +647,7 @@ describe("D4-1 按名解析退役（fake registry）", () => {
       loadAll: vi.fn().mockResolvedValue([makeScript("chain", "/builtin/workflows/chain.js")]),
     });
     const err = await actionRun(
-      { action: "run", name: "no-such" } as never,
+      { name: "no-such" } as never,
       makeDeps(registry) as never,
       undefined,
     ).catch((e: unknown) => e as Error);
@@ -688,7 +689,7 @@ describe("D4-1 按名解析退役（真 registry：WorkflowScriptRegistryImpl + 
 
     await expect(
       actionRun(
-        { action: "run", name: "chain" } as never,
+        { name: "chain" } as never,
         makeDeps(registry as unknown as Record<string, unknown>) as never,
         undefined,
       ),
@@ -704,7 +705,7 @@ describe("D4-1 按名解析退役（真 registry：WorkflowScriptRegistryImpl + 
       npmDirs: [],
     });
     const result = await actionRun(
-      { action: "run", name: join(fixtureDir, "ws", ".pi", "workflows", "chain.js") } as never,
+      { name: join(fixtureDir, "ws", ".pi", "workflows", "chain.js") } as never,
       makeDeps(registry as unknown as Record<string, unknown>) as never,
       undefined,
     );
@@ -742,7 +743,7 @@ describe("run 启动文案全文锚定（LLM 可见文本锁）", () => {
 
   it("含 slug → 'name · slug (runId)' + 防轮询段（逐字 toBe）", async () => {
     const result = await actionRun(
-      { action: "run", name: "/abs/demo.js", slug: "tri-review" } as never,
+      { name: "/abs/demo.js", slug: "tri-review" } as never,
       makeDeps(demoRegistry()) as never,
       undefined,
     );
@@ -754,7 +755,7 @@ describe("run 启动文案全文锚定（LLM 可见文本锁）", () => {
 
   it("不含 slug → 'name (runId)' 无 · 段（逐字 toBe）", async () => {
     const result = await actionRun(
-      { action: "run", name: "/abs/demo.js" } as never,
+      { name: "/abs/demo.js" } as never,
       makeDeps(demoRegistry()) as never,
       undefined,
     );
@@ -780,7 +781,7 @@ describe("run details.stateFile = store.stateFilePath(runId)（行为级等值�
       store: storeRef,
     };
     const result = await actionRun(
-      { action: "run", name: "/abs/demo.js" } as never,
+      { name: "/abs/demo.js" } as never,
       deps as never,
       undefined,
     );
@@ -831,7 +832,7 @@ describe("abort 转移文案全文锚定（LLM 可见文本锁）", () => {
       status: "running",
       startedAt: "2026-01-01T00:00:00.000Z",
     });
-    const tool = captureRegisteredTool<AbortToolView>(new Map([[run.runId, run]]));
+    const tool = captureRegisteredTool<AbortToolView>(new Map([[run.runId, run]]), "workflow_control");
 
     const r = await tool.execute("id", { action: "abort", runId: run.runId }, undefined, undefined, {});
     expect(r.content[0]?.text).toBe("Workflow 'demo-wf' (wf-1719500000000-a1b2c3): running → done (aborted)");
@@ -849,7 +850,7 @@ describe("abort 转移文案全文锚定（LLM 可见文本锁）", () => {
       status: "running",
       startedAt: "2026-01-01T00:00:00.000Z",
     });
-    const tool = captureRegisteredTool<AbortToolView>(new Map([[run.runId, run]]));
+    const tool = captureRegisteredTool<AbortToolView>(new Map([[run.runId, run]]), "workflow_control");
 
     const r = await tool.execute("id", { action: "abort", runId: run.runId }, undefined, undefined, {});
     expect(r.content[0]?.text).toBe("Workflow 'cleanup-wf' (wf-1719600000000-z9y8x7): running → running");
@@ -897,7 +898,7 @@ describe("TC3i: 宿主 TOOL_TOP_LEVEL reservedKeys 接线锚（M-3 回归）", (
     // 合法调用不误报
     expect(
       findFlattenedArgKeys(
-        { action: "run", name: "mywf", args: { name: "x" } },
+        { name: "mywf", args: { name: "x" } },
         synthetic,
         OPT,
       ),
@@ -932,40 +933,43 @@ function textOf(component: unknown): string {
   return "";
 }
 
-describe("renderCall 标题行：displayWorkflowName 短名 + runId/slug 不受影响", () => {
-  const tool = captureWorkflowTool(makeDeps(stubRegistry()), { isProcessing: false });
+describe("renderCall 标题行：displayWorkflowName 短名 + runId/slug 不受影响（D3 拆分后）", () => {
+  const runTool = captureWorkflowTool(makeDeps(stubRegistry()), { isProcessing: false }, "workflow_run");
+  const controlTool = captureWorkflowTool(makeDeps(stubRegistry()), { isProcessing: false }, "workflow_control");
   const theme = makeRenderTheme();
+  type RenderCallOf = (args: Record<string, unknown>, theme: unknown) => unknown;
+  const renderCallOf = (tool: CapturedTool): RenderCallOf =>
+    (tool as unknown as { renderCall: RenderCallOf }).renderCall;
 
-  it("绝对路径 name → basename 短名（去 .js、去目录）", () => {
-    const out = textOf(
-      (tool as unknown as { renderCall: (args: Record<string, unknown>, theme: unknown) => unknown })
-        .renderCall({ action: "run", name: "/home/u/wf/batch-report.js" }, theme),
-    );
-    expect(out).toMatch(/batch-report<\/accent>/); // name 落在 accent 段收口前（前缀空格也在段内）
+  it("workflow_run：绝对路径 name → basename 短名（去 .js、去目录）", () => {
+    const out = textOf(renderCallOf(runTool)({ name: "/home/u/wf/batch-report.js" }, theme));
+    expect(out).toContain("workflow_run");
+    expect(out).toContain("batch-report"); // name 落在 accent 段（前缀空格也在段内）
     expect(out).not.toContain("/home/u/wf/");
     expect(out).not.toContain(".js");
   });
 
-  it("runId / slug 后缀不受短名影响（runId 截断预览 + slug 全文）", () => {
+  it("workflow_run：slug 后缀不受短名影响（slug 全文；runId 属 control 不在此渲染）", () => {
     const out = textOf(
-      (tool as unknown as { renderCall: (args: Record<string, unknown>, theme: unknown) => unknown })
-        .renderCall(
-          { action: "run", name: "/home/u/wf/batch-report.js", slug: "nightly", runId: "wf-run-0123456789" },
-          theme,
-        ),
+      renderCallOf(runTool)({ name: "/home/u/wf/batch-report.js", slug: "nightly" }, theme),
     );
     // 短名 + slug 全文在位
     expect(out).toContain("batch-report");
     expect(out).toContain("nightly");
-    // runId 只出截断预览（ID_PREVIEW_LENGTH = 8 → "wf-run-0"），不泄漏全文
+  });
+
+  it("workflow_control：action + runId 截断预览（ID_PREVIEW_LENGTH = 8）", () => {
+    const out = textOf(
+      renderCallOf(controlTool)({ action: "abort", runId: "wf-run-0123456789" }, theme),
+    );
+    expect(out).toContain("workflow_control");
+    expect(out).toContain("abort");
     expect(out).toContain("wf-run-0");
     expect(out).not.toContain("wf-run-0123456789");
   });
 
-  it("缺 name（status 等无参 action）不崩、不出短名", () => {
-    expect(() =>
-      (tool as unknown as { renderCall: (args: Record<string, unknown>, theme: unknown) => unknown })
-        .renderCall({ action: "status" }, theme),
-    ).not.toThrow();
+  it("缺 name（run）/缺 action（control）不崩", () => {
+    expect(() => renderCallOf(runTool)({}, theme)).not.toThrow();
+    expect(() => renderCallOf(controlTool)({}, theme)).not.toThrow();
   });
 });

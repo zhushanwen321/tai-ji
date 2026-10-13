@@ -43,19 +43,20 @@ import { createResourceListInjector } from "./resource-list-injector.ts";
  * 动态指引经 task 文本 / appendSystemPrompt 参数承载。
  */
 export const SUBAGENT_LIST_GUIDE =
-	"The following subagents are available. PRIORITY: when a task involves reading 3+ files, writing 100+ lines, parallel research, or specialized review, delegate to a matching subagent FIRST instead of doing it yourself — this keeps your context focused on orchestration. Do NOT call list to discover available subagents; use list only for running state. When using the subagent tool, pass the <location> path from this list as the agent param (usually the right choice); an absolute .md path outside this list also works if the file is a readable agent definition. If no agent matches your task, omit agent (a general-purpose agent is used) and put all role-specific instructions in the task text.";
+	"The following subagents are available. PRIORITY: when a task involves reading 3+ files, writing 100+ lines, parallel research, or specialized review, delegate to a matching subagent FIRST instead of doing it yourself — this keeps your context focused on orchestration. Do NOT call list to discover available subagents; use list only for running state. When using the subagent_start tool, pass the <location> path from this list as the agent param (usually the right choice); an absolute .md path outside this list also works if the file is a readable agent definition. If no agent matches your task, omit agent (a general-purpose agent is used) and put all role-specific instructions in the task text.";
 
 /**
  * 跨工具通用调度纪律（tool-declaration-slimming D1 信息单源化：这些规则曾重复出现在
- * subagent / subagents / workflow 三工具的 description / schema 字段说明 /
- * promptGuidelines 里——「勿 poll 等待」讲三遍、「tokens/time 仅用户明确要求才设」写
- * 四份、「model 缺省继承主 agent」三处。现收敛到本常量，随 <available_subagents> 段
- * 每 turn 注入说一次；工具声明文案零残留由契约测试锁定（tool-prompt-contract.test.ts
- * 单源化终态断言）。bash 的「DO NOT bash sleep」族是 taiji 自写契约锚词（功能契约
- * 非教学冗余），不属本收敛面、保留在 bash 工具文案内。
+ * subagent 组（subagent_start/manage/message）/ subagents / workflow 组（workflow_run/
+ * workflow_control）的 description / schema 字段说明 / promptGuidelines 里——「勿 poll
+ * 等待」讲三遍、「tokens/time 仅用户明确要求才设」写四份、「model 缺省继承主 agent」
+ * 三处。现收敛到本常量，随 <available_subagents> 段每 turn 注入说一次；工具声明文案
+ * 零残留由契约测试锁定（tool-prompt-contract.test.ts 单源化终态断言）。bash 的
+ * 「DO NOT bash sleep」族是 taiji 自写契约锚词（功能契约非教学冗余），不属本收敛面、
+ * 保留在 bash 工具文案内。
  */
 export const SUBAGENT_DISPATCH_SHARED_RULES =
-	"Cross-tool dispatch rules (subagent, subagents, workflow tools): " +
+	"Cross-tool dispatch rules (subagent_start, subagent_manage, subagent_message, subagents, workflow_run, workflow_control tools): " +
 	"background dispatches auto-deliver results via a completion notification that wakes your next turn — do NOT bash sleep, busy-wait, or poll while waiting; do useful non-overlapping work, otherwise stop. " +
 	"tokens/time budgets: omit unless the user explicitly requests a limit (default = unlimited). " +
 	"model/thinkingLevel: omit by default (inherit the main agent's model; thinkingLevel defaults to each model's highest available level) — set them only when the user explicitly requests a specific model or thinking depth.";

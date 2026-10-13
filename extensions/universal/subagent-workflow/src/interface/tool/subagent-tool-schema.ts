@@ -1,6 +1,13 @@
 // src/interface/tool/subagent-tool-schema.ts
 //
-// `subagent` 工具的参数 schema 纯常量叶子（零运行时依赖）。
+// subagent 工具组的参数 schema 纯常量叶子（零运行时依赖）。
+//
+// tool-declaration-slimming D3 拆分终态：按动作拆为三个工具（拆分前是 6 action 拍平 21 参数的单一工具）
+// 拆为三工具，schema 各自真实反映必填性：
+//   - `subagent_start`  → SubagentStartParams（task/slug 必填 + 13 个 start 场景可选字段）
+//   - `subagent_manage` → SubagentManageParams（action: list/cancel/close）
+//   - `subagent_message`→ SubagentMessageParams（action: message/fork-from）
+// manage/message 内部保留小 action 枚举是 D3 范围裁决（参数同构、条件必填失真可忽略）。
 //
 // 抽取自 subagent-tool.ts（跨包契约另一半）：subagent-tool 依赖树沉重（pi SDK /
 // handler / render 链），structured-output 侧的跨包契约测试若从它 import schema
@@ -26,34 +33,18 @@ import { SLUG_MAX_LENGTH } from "@zhushanwen/subagent-core";
 
 export { SLUG_MAX_LENGTH };
 
-// Params schema（跨包契约测试的真实 typebox 校验入口）。
-//
-// action:"start" 的 16 字段（task/slug/agent/model/...）拍平在顶层，不再用 startParam
-// 嵌套容器包。原因：弱模型（GLM/DeepSeek）信任 schema 结构信号 > 文本信号，经常省略
-// startParam 嵌套层把 task/slug 直接平铺到顶层导致调用失败。拍平后 schema 结构与模型
-// 的自然倾向一致，消除这层误用。task/slug 必填性由 startHandler runtime 校验（flat
-// JSON Schema 无法表达「action 条件必填」）。
-//
-// TODO(long-term, option-A): listParam/cancelParam 仍标 Optional 也是 flat JSON Schema
-// 表达「action 分发条件必填」的妥协——长期方案是拆成 3 个独立 tool
-// （subagent_start / subagent_list / subagent_cancel），让每个 tool 的 schema 真实
-// 反映必填性。勿在此基础上继续堆 action 条件逻辑——要加就拆 tool。
-export const SubagentParams = Type.Object({
-  action: StringEnum(["start", "list", "cancel", "message", "close", "fork-from"], {
-    description: "Operation: 'start' runs a subagent, 'list' shows subagents, 'cancel' stops a background one, 'message' sends a follow-up, 'close' archives (recoverable), 'fork-from' spawns a new subagent from older history (restart recovery).",
+// ── subagent_start：task/slug 必填由 schema 表达（拆分收益本体，D3）──
+
+export const SubagentStartParams = Type.Object({
+  task: Type.String({
+    description: "The task to execute. Throws if missing or whitespace-only.",
   }),
-  // ── action:"start" fields (flattened to top level). task/slug REQUIRED for start. ──
-  // Missing/empty task or slug throws at runtime (startHandler — error carries a
-  // Correct example). (flat JSON Schema can't express conditional requirement — see TODO.)
-  task: Type.Optional(Type.String({
-    description: "REQUIRED for action:'start'. The task to execute. Throws if missing or whitespace-only.",
-  })),
-  slug: Type.Optional(Type.String({
+  slug: Type.String({
     description:
-      "REQUIRED for action:'start'. Short label (≤35 chars), e.g. 'fix-login'. " +
+      "Short label (≤35 chars), e.g. 'fix-login'. " +
       "Shown in TUI to distinguish concurrent subagents.",
     maxLength: SLUG_MAX_LENGTH,
-  })),
+  }),
   agent: Type.Optional(Type.String({
     description: 'Agent ref: absolute path to an agent .md file — usually a <location> from <available_subagents>, but ANY absolute .md path works. Relative paths and bare names are rejected. Omit for the default general-purpose agent.',
   })),
@@ -104,6 +95,14 @@ export const SubagentParams = Type.Object({
   // 管道），单数 start 不再有通知路由选项。旧调用形态（显式带 collect）不会被 pi 参数校验
   // 拒绝（typebox Object 不产 additionalProperties → 未知字段静默放行），迁移期提示见
   // subagent-tool.ts 的 promptGuidelines。
+});
+
+// ── subagent_manage：list / cancel / close 三管理动作 ──
+
+export const SubagentManageParams = Type.Object({
+  action: StringEnum(["list", "cancel", "close"], {
+    description: "Operation: 'list' shows subagents, 'cancel' stops a background one, 'close' archives (recoverable).",
+  }),
   // action:"list" → listParam OPTIONAL (all fields optional, defaults apply). Ignored by other actions.
   listParam: Type.Optional(Type.Object({
     includeFinished: Type.Optional(Type.Boolean({
@@ -117,12 +116,30 @@ export const SubagentParams = Type.Object({
       description: "Max items to return. Default 20, clamped to [1, 100].",
     })),
   })),
-  // action:"cancel" → cancelParam.subagentId REQUIRED (startHandler throws if missing).
+  // action:"cancel" → cancelParam.subagentId REQUIRED (handler throws if missing).
   cancelParam: Type.Optional(Type.Object({
     subagentId: Type.String({
       description: "REQUIRED for action:'cancel'. The subagentId to cancel. Only background subagents are cancellable.",
     }),
   })),
+  // action:"close" → closeParam.subagentId REQUIRED. 归档（archived）：列表隐藏、可寻回、
+  // 非终态化（[U5 §3.2.5]）。idle 立即归档；running 默认等当前轮收口后归档（closeHandler 分流）。
+  closeParam: Type.Optional(Type.Object({
+    subagentId: Type.String({
+      description: "REQUIRED for action:'close'. The subagentId to close (running or idle). Archives the record: hidden from list, recoverable, not terminal.",
+    }),
+    force: Type.Optional(Type.Boolean({
+      description: "true = terminate immediately even mid-round (work lost). false (default) = let the round finish; idle closes immediately regardless.",
+    })),
+  })),
+});
+
+// ── subagent_message：message / fork-from 两续聊动作 ──
+
+export const SubagentMessageParams = Type.Object({
+  action: StringEnum(["message", "fork-from"], {
+    description: "Operation: 'message' sends a follow-up to a subagent, 'fork-from' spawns a new subagent from older history (restart recovery).",
+  }),
   // action:"message" → messageParam.subagentId + text REQUIRED. Any reachable subagent works —
   // running joins the in-flight round（D2 打断入队）；idle transparently revives on the same
   // session file（[U4 §3.2.3] 万物可续）。engine 能力轴 gate 保留（core messageHandler 入口）。
@@ -140,16 +157,6 @@ export const SubagentParams = Type.Object({
       // [H1 U6 / D2] 参数已退役（messageHandler 零消费）：在途轮存在即打断入队，
       // 不区分抢占/排队——字段保留防存量调用 schema 报错，description 据实声明 no-op。
       description: "Deprecated, no effect: a message to a running subagent always interrupts its in-flight round; idle starts a new round.",
-    })),
-  })),
-  // action:"close" → closeParam.subagentId REQUIRED. 归档（archived）：列表隐藏、可寻回、
-  // 非终态化（[U5 §3.2.5]）。idle 立即归档；running 默认等当前轮收口后归档（closeHandler 分流）。
-  closeParam: Type.Optional(Type.Object({
-    subagentId: Type.String({
-      description: "REQUIRED for action:'close'. The subagentId to close (running or idle). Archives the record: hidden from list, recoverable, not terminal.",
-    }),
-    force: Type.Optional(Type.Boolean({
-      description: "true = terminate immediately even mid-round (work lost). false (default) = let the round finish; idle closes immediately regardless.",
     })),
   })),
   // action:"fork-from" → forkFromParam.sourceSubagentId REQUIRED ([v8.5 B] 断联恢复通道).
