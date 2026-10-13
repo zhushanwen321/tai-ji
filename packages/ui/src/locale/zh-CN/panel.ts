@@ -175,6 +175,9 @@ export default {
     runGroupEdit: '改动',
     runGroupExec: '执行命令',
     runGroupSteps: '{count} 步',
+    // [run-group] 里程碑徽标（spec §3.6）：当前唯一信号 = 首个改动（core 结构派生，
+    // 全 turn 第一个 completed 的 edit/write；语义里程碑需上游显式信号，不关键词派生）
+    runGroupMileFirstEdit: '首个改动',
     bashCancelled: '已取消',
     bashTimeout: '已超时',
     bashOutputTruncated: '输出已截断',

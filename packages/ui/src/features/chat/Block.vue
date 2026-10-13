@@ -43,15 +43,15 @@
              baseline（MF-1-34，workbench.css:348 align-items:baseline），图标保持
              self-center（demo .sicon align-self:center）。 -->
         <div class="flex items-baseline gap-[8px] min-h-[1.5rem]">
-          <!-- 运行→完成图标交叉切换（动效裁决 2A 出半，demo .tico 同参）：运行呼吸弧 150ms
-               ease-in 淡出、完成图标 200ms 带自下 4px 落位淡入（scoped 尾部 tico 过渡类）；
-               reduced-motion 走 style.css 全局兜底。 -->
-          <Transition mode="out-in" name="tico">
-            <span v-if="thinkingSweeping" class="inline-flex size-[15px] shrink-0 self-center items-center justify-center text-accent">
-              <span class="inline-flex size-full items-center justify-center animate-loader-spin" v-html="RUNNING_LOADER_SVG" /> <!-- eslint-disable-line vue/no-v-html -- hardcoded constant from block-icon.ts -->
-            </span>
-            <component :is="BLOCK_ICON_LUCIDE.thinking" v-else class="size-[15px] shrink-0 self-center text-reasoning [stroke-width:1.6]" />
-          </Transition>
+          <!-- 运行→完成图标切换：[HISTORICAL] 曾用 Vue Transition 的 out-in 模式（过渡名 tico）
+               做交叉切换（动效裁决 2A 出半），2026-10 移除：Vue 3.5.39 下 out-in leave 完成后
+               enter 不触发（调度 bug，内容永久空白），vue_rules_checker 已禁该写法，同构踩坑
+               见 DrawerPanel/Sidebar/SettingsModal 三处先例（稳定性优先，瞬时切换）。scoped
+               尾部 tico 过渡类随本移除删除。reduced-motion 语义随之自然成立（无动画可停）。 -->
+          <span v-if="thinkingSweeping" class="inline-flex size-[15px] shrink-0 self-center items-center justify-center text-accent">
+            <span class="inline-flex size-full items-center justify-center animate-loader-spin" v-html="RUNNING_LOADER_SVG" /> <!-- eslint-disable-line vue/no-v-html -- hardcoded constant from block-icon.ts -->
+          </span>
+          <component :is="BLOCK_ICON_LUCIDE.thinking" v-else class="size-[15px] shrink-0 self-center text-reasoning [stroke-width:1.6]" />
           <!-- 状态词 label：思考进行中跑文字扫光（决策 10）。生命周期 = 块级（thinkingEnd 未填），
                非消息级 working——思考完结后消息仍在流式（工具执行中），扫光随思考完结熄灭。
                base 覆盖为 mid 档对齐 BLOCK_LABEL_CLASS 常态字色（reduced-motion 停帧态 = 常态色，
@@ -175,15 +175,23 @@
              同 tool/thinking 行）。组头文字（「N 步 · 耗时」计数/耗时口径）是稳定标识，不跑文字扫光。
              行文字不染 accent（demo 运行态 = 仅呼吸弧图标 accent，文字保持行层级 mid，
              workbench.css .tool .t-name），与普通 tool 行运行态同款。 -->
-        <Transition mode="out-in" name="tico">
-          <span v-if="group.hasRunning" class="inline-flex size-[15px] shrink-0 self-center items-center justify-center text-accent">
-            <span class="inline-flex size-full items-center justify-center animate-loader-spin" v-html="RUNNING_LOADER_SVG" /> <!-- eslint-disable-line vue/no-v-html -- hardcoded constant from block-icon.ts -->
-          </span>
-          <component :is="BLOCK_ICON_LUCIDE[RUN_GROUP_ICON[group.base]]" v-else :class="[BLOCK_ICON_CLASS, 'self-center']" />
-        </Transition>
+        <span v-if="group.hasRunning" class="inline-flex size-[15px] shrink-0 self-center items-center justify-center text-accent">
+          <span class="inline-flex size-full items-center justify-center animate-loader-spin" v-html="RUNNING_LOADER_SVG" /> <!-- eslint-disable-line vue/no-v-html -- hardcoded constant from block-icon.ts -->
+        </span>
+        <component :is="BLOCK_ICON_LUCIDE[RUN_GROUP_ICON[group.base]]" v-else :class="[BLOCK_ICON_CLASS, 'self-center']" />
         <span class="shrink-0 whitespace-nowrap text-left transition-opacity duration-[var(--duration-fast)] group-hover/bgroup:opacity-80">{{ t(RUN_GROUP_LABEL_KEY[group.base]) }}</span>
         <!-- 同名组序号（demo `.rg-seq`）：第二个「探索」起显示「 · 2」，同类型的多段在回看时可区分 -->
         <span v-if="group.seq > 1" class="shrink-0 whitespace-nowrap font-mono text-[length:var(--text-sm)] text-neutral-dim">· {{ group.seq }}</span>
+        <!-- 里程碑徽标（demo spec §3.6 `.rg-badge`，位于序号与统计段之间）：core 结构派生的信号
+             聚合上组头（当前 = 首个改动），无则不渲染。视觉 = accent 低饱和 pill（字 accent /
+             边 accent-ring 30% / 底 accent-soft 10%，SessionItemDisplay agent badge 同族），
+             pop 200ms 入场动效见 scoped `.trace-run-group .rg-badge`。 -->
+        <span
+          v-for="mile in group.miles"
+          :key="mile"
+          data-testid="run-group-mile"
+          class="rg-badge shrink-0 whitespace-nowrap rounded-full border border-accent-ring bg-accent-soft px-[7px] font-mono text-[length:var(--text-xs)] text-accent"
+        >{{ t(RUN_GROUP_MILE_LABEL_KEY[mile]) }}</span>
         <span class="min-w-0 truncate text-left font-mono text-[length:var(--text-sm)] text-neutral-dim transition-opacity duration-[var(--duration-fast)] group-hover/bgroup:opacity-80">{{ groupStatText }}</span>
         <!-- 失败段 chip 化（demo failtag 形态：workbench.css .failtag = 11px fw-mid danger +
              danger-soft 底 + r-xs 4px + 1px 6px 内边距） -->
@@ -218,12 +226,10 @@
           class="group/wf flex min-w-0 cursor-pointer select-none items-baseline gap-[8px] text-[length:var(--text-base)] [font-weight:var(--fw-mid)] text-neutral-dim"
           @click="openWorkflowDrawer"
         >
-          <!-- running 态 loader（呼吸弧 + accent），其余走 list-checks ICON（tico 交叉过渡）；
-               failed 图标染 danger（与普通 tool 行同款，demo .line.subagent.failed .sicon 形态家族） -->
-          <Transition mode="out-in" name="tico">
-            <span v-if="isRunning" class="inline-flex size-[15px] shrink-0 self-center items-center justify-center text-accent animate-loader-spin" v-html="RUNNING_LOADER_SVG" /> <!-- eslint-disable-line vue/no-v-html -- hardcoded constant from block-icon.ts -->
-            <component :is="BLOCK_ICON_LUCIDE.workflow" v-else :class="[headerIconClass, 'self-center']" />
-          </Transition>
+          <!-- running 态 loader（呼吸弧 + accent），其余走 list-checks ICON（瞬时切换，tico
+               交叉过渡已移除，见 thinking 行 [HISTORICAL]）；failed 图标染 danger（与普通 tool 行同款，demo .line.subagent.failed .sicon 形态家族） -->
+          <span v-if="isRunning" class="inline-flex size-[15px] shrink-0 self-center items-center justify-center text-accent animate-loader-spin" v-html="RUNNING_LOADER_SVG" /> <!-- eslint-disable-line vue/no-v-html -- hardcoded constant from block-icon.ts -->
+          <component :is="BLOCK_ICON_LUCIDE.workflow" v-else :class="[headerIconClass, 'self-center']" />
           <span :class="[BLOCK_LABEL_CLASS, 'transition-opacity duration-[var(--duration-fast)] group-hover/wf:opacity-80']">{{ t('panel.message.workflow') }}</span>
           <!-- name 染对话流专属名称色 --name（2026-10-06 裁决）；slug 降行层级灰（与「子代理」等标签同色 --neutral-mid） -->
           <span v-if="workflowFields.nameShort" class="shrink-0 whitespace-nowrap font-mono text-[length:var(--text-sm)] text-[color:var(--name)] transition-opacity duration-[var(--duration-fast)] group-hover/wf:opacity-80" :title="workflowFields.name">{{ workflowFields.nameShort }}</span>
@@ -267,16 +273,15 @@
           @click="toggleTool"
         >
           <!-- running 态 loader（呼吸弧 + accent），其余走 BLOCK_ICON_LUCIDE[iconKind]
-               （tico 交叉过渡，动效裁决 2A 出半）。
+               （瞬时切换；tico 交叉过渡已随 Vue 3.5.39 out-in 调度 bug 移除，见 thinking 行
+               [HISTORICAL]）。
                [M3b demo 复刻]（workbench.css .tool/.run-ic）：行文字恒行层级 mid 不随状态染色
                （demo .tool .t-name 恒 mid，无 accent/danger 文字态），状态色只落在图标——
                running = accent 呼吸弧、failed = danger（.line.subagent.failed .sicon）。 -->
-          <Transition mode="out-in" name="tico">
-            <span v-if="isRunning" class="inline-flex size-[15px] shrink-0 self-center items-center justify-center text-accent">
-              <span class="inline-flex size-full items-center justify-center animate-loader-spin" v-html="RUNNING_LOADER_SVG" /> <!-- eslint-disable-line vue/no-v-html -- hardcoded constant from block-icon.ts -->
-            </span>
-            <component :is="headerBlockIcon" v-else :class="[headerIconClass, 'self-center']" />
-          </Transition>
+          <span v-if="isRunning" class="inline-flex size-[15px] shrink-0 self-center items-center justify-center text-accent">
+            <span class="inline-flex size-full items-center justify-center animate-loader-spin" v-html="RUNNING_LOADER_SVG" /> <!-- eslint-disable-line vue/no-v-html -- hardcoded constant from block-icon.ts -->
+          </span>
+          <component :is="headerBlockIcon" v-else :class="[headerIconClass, 'self-center']" />
           <span class="shrink-0 normal-case tracking-normal transition-opacity duration-[var(--duration-fast)] group-hover/tool:opacity-80">{{ toolName }}</span>
           <!-- running + 有流式输出：单行尾行视口（同 thinking header 结构：leading-normal
                字体无关行高 + mr-auto 短行左贴/溢出钉右 + 纵向状态机滑入）；否则静态 shortenForHeader。
@@ -418,7 +423,7 @@ import type { GuiComponent } from '@zhushanwen/extension-protocol'
 import { extractGui } from '@zhushanwen/extension-protocol'
 import type { MessageStatus, ToolCall } from '@taiji/shared'
 import { SUBAGENT_TOOL_NAMES, WORKFLOW_TOOL_NAMES, displayWorkflowName } from '@taiji/shared'
-import type { FlatBlock, RunGroupBase } from '@taiji/core/domain/chat'
+import type { FlatBlock, RunGroupBase, RunGroupMile } from '@taiji/core/domain/chat'
 import { lookupWorkflowRun, openWorkflow } from '@taiji/core/domain/drawer'
 import { AnsiText, GuiComponentRenderer } from '../../rendering-protocol'
 import MarkdownRenderer from './MarkdownRenderer.vue'
@@ -456,14 +461,16 @@ const props = defineProps<{
   thinkingEnd?: number
   /** tool_call 数据（type==='tool' 时必填） */
   tool?: ToolCall
-  /** run 组块数据（type==='run-group' 时由 Turn.vue 透传；组块数据契约 base/seq/members/header/hasRunning）。
-   *  base/seq 与 header 三条口径（count/durationMs/failedCount）由 core groupToolRuns 一次算好。 */
+  /** run 组块数据（type==='run-group' 时由 Turn.vue 透传；组块数据契约 base/seq/members/header/hasRunning/miles）。
+   *  base/seq 与 header 三条口径（count/durationMs/failedCount）由 core groupToolRuns 一次算好；
+   *  miles = 里程碑徽标（§3.6，core 结构派生），空/缺省 = 无则不显示。 */
   group?: {
     base: RunGroupBase
     seq: number
     members: FlatBlock[]
     header: { count: number; durationMs: number; failedCount: number }
     hasRunning: boolean
+    miles?: RunGroupMile[]
   }
   /** thinking 块初始折叠态（来自 ThinkingBlock.collapsed，默认收起） */
   collapsed?: boolean
@@ -735,6 +742,12 @@ const RUN_GROUP_LABEL_KEY: Record<RunGroupBase, string> = {
   exec: 'panel.message.runGroupExec',
 }
 
+/** 里程碑 → 徽标文案（ui locale）。当前唯一信号 firstEdit（首个改动）——信号来源与「语义里程碑
+ *  不关键词派生」的裁决见 core RunGroupMile 类型注释。 */
+const RUN_GROUP_MILE_LABEL_KEY: Record<RunGroupMile, string> = {
+  firstEdit: 'panel.message.runGroupMileFirstEdit',
+}
+
 /**
  * 组头统计段「N 步 · 耗时」：耗时只在 ≥1s 时显示（不足 1s 的秒数对回看没有信息量，demo `.rg-stat`
  * 同口径）。耗时口径 = 组内已完成成员合计（core 侧算好），running 成员不计入。
@@ -863,26 +876,15 @@ const testId = computed(() => {
 @keyframes fchip-roll-x { to { transform: translateX(min(0px, calc(304px - 100%))); } }
 @media (prefers-reduced-motion: reduce) { .tool-file-chip:hover .fchip-roll { animation: none; } }
 
-/* 运行→完成图标交叉切换（动效裁决 2A 出半，demo workbench.css .tico 同参）：运行图标 150ms
-   ease-in 淡出（先出）、完成图标 200ms --ease-out-soft 带自下 4px 落位淡入（后入，out-in）。
-   消费点 = thinking / bash-group / workflow / tool 四处行头 loader↔静态图标（模板 Transition
-   name="tico"）。--ease-out-soft 令牌待 tokens 域补登记，fallback --ease-out 就近生效。
-   reduced-motion 由 style.css 全局兜底（duration 0.01ms 瞬切）。escape hatch：Vue Transition
-   类用 scoped 表达（block-expand 同先例）。 */
-.tico-enter-active {
-  transition:
-    opacity 200ms var(--ease-out-soft, var(--ease-out)),
-    transform 200ms var(--ease-out-soft, var(--ease-out));
-}
-.tico-leave-active {
-  transition: opacity 150ms var(--ease-in);
-}
-.tico-enter-from {
-  opacity: 0;
-  transform: translateY(4px);
-}
-.tico-leave-to {
-  opacity: 0;
-}
+/* run 组头里程碑徽标入场（demo spec §3.5/§3.6 workbench.css .rg-badge + rg-badge-pop 同参）：
+   opacity 0→1 + scale 0.6→1，200ms --ease-out-soft，backwards 填充（挂载帧即取 from 态，
+   无闪烁）。徽标挂 v-for 上——首个改动完成、组首次渲染时元素插入，动画自然播一次。
+   escape hatch 同 fchip-roll-x：keyframes + 后代选择器（Tailwind 无法表达 scale+opacity
+   组合的入场帧），仅本组件单消费点。reduced-motion 显式停播（demo 同档；全局 0.01ms
+   兜底只会瞬切终态，此处显式声明降级语义）。 */
+.trace-run-group .rg-badge { animation: run-group-badge-pop 200ms var(--ease-out-soft, var(--ease-out)) backwards; }
+@keyframes run-group-badge-pop { from { opacity: 0; transform: scale(0.6); } }
+@media (prefers-reduced-motion: reduce) { .trace-run-group .rg-badge { animation: none; } }
+
 </style>
 

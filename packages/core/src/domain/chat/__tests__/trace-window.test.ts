@@ -854,3 +854,82 @@ describe('flattenTurnBlocks 展开段 memo', () => {
     expect(flat2[0]!.block).not.toBe(flat1[0]!.block)
   })
 })
+
+describe('run 类型分组 groupToolRuns: 里程碑徽标（spec §3.6）', () => {
+  it('首个 completed edit → 所在 edit 组挂 firstEdit，其余组不挂', () => {
+    const tools = [
+      makeTool({ id: 'r0', toolName: 'read', input: { path: '/x' } }),
+      makeTool({ id: 'e0', toolName: 'edit', input: { path: '/x' } }),
+      makeTool({ id: 'w1', toolName: 'write', input: { path: '/y' } }),
+      makeTool({ id: 'b2' }),
+    ]
+    const units = groupOf(flatOfTools(tools))
+    const groups = units.filter(isGroup) as RunGroupBlock[]
+    // 首个改动锚点 = e0；w1 与 e0 同组合并不重复挂徽标
+    expect(groups.map((g) => `${g.base}:${g.miles.join(',')}`)).toEqual(['explore:', 'edit:firstEdit', 'exec:'])
+  })
+
+  it('首个改动 = 第一个 completed：首个 edit 为 error 时不标，标在第一个 completed 上', () => {
+    const tools = [
+      makeTool({ id: 'e0', toolName: 'edit', status: 'error' }),
+      makeTool({ id: 'e1', toolName: 'edit' }),
+    ]
+    const g = groupOf(flatOfTools(tools))[0] as RunGroupBlock
+    expect(g.miles).toEqual(['firstEdit'])
+    expect(g.members.map((m) => (m.block.ref as ToolCall).id)).toEqual(['e0', 'e1'])
+  })
+
+  it('running edit（未完成）不标：回合仍在写首个改动时零徽标', () => {
+    const tools = [
+      makeTool({ id: 'e0', toolName: 'edit', status: 'running' }),
+      makeTool({ id: 'e1', toolName: 'edit', status: 'running' }),
+    ]
+    const g = groupOf(flatOfTools(tools))[0] as RunGroupBlock
+    expect(g.miles).toEqual([])
+  })
+
+  it('无改动类工具 → 无徽标（探索/执行组不挂）', () => {
+    const tools = [
+      makeTool({ id: 'r0', toolName: 'read', input: { path: '/x' } }),
+      makeTool({ id: 'b1' }),
+    ]
+    const groups = groupOf(flatOfTools(tools)).filter(isGroup) as RunGroupBlock[]
+    expect(groups.every((g) => g.miles.length === 0)).toBe(true)
+  })
+
+  it('窗口化防假呈现：首个 edit 被收编出窗 → 可见组不挂徽标', () => {
+    // [edit0 ✓, bash×5] W=3：可见 = flatIndex 最大的 3 个 completed（bash）→ edit0 出窗、
+    // 其组不渲染；可见 exec 组不是首个改动所在组 → 无徽标
+    const tools = [
+      makeTool({ id: 'e0', toolName: 'edit' }),
+      ...Array.from({ length: 5 }, (_, i) => makeTool({ id: `b${i + 1}` })),
+    ]
+    const groups = groupOf(flatOfTools(tools), 3).filter(isGroup) as RunGroupBlock[]
+    expect(groups.every((g) => g.miles.length === 0)).toBe(true)
+  })
+
+  it('窗口化防假呈现（同族 Cases）：首个 edit 出窗、更晚 edit 组在窗内 → 更晚组也不挂', () => {
+    // [edit0 ✓, bash×4, edit5 ✓] W=3：可见 = [b3, b4, edit5] → exec 组 + edit 组（成员 e5）。
+    // 首个改动锚点 = e0（flatIndex 0），不在可见 edit 组成员内 → 不挂（朴素实现会把 e5 误标）
+    const tools = [
+      makeTool({ id: 'e0', toolName: 'edit' }),
+      ...Array.from({ length: 4 }, (_, i) => makeTool({ id: `b${i + 1}` })),
+      makeTool({ id: 'e5', toolName: 'edit' }),
+    ]
+    const units = groupOf(flatOfTools(tools), 3)
+    const groups = units.filter(isGroup) as RunGroupBlock[]
+    expect(groups.map((g) => g.base)).toEqual(['exec', 'edit'])
+    expect(groups.every((g) => g.miles.length === 0)).toBe(true)
+  })
+
+  it('历史展开（takeover 全量）路径同样挂徽标', () => {
+    const tools = [
+      makeTool({ id: 'r0', toolName: 'read', input: { path: '/x' } }),
+      makeTool({ id: 'e1', toolName: 'edit' }),
+    ]
+    const flat = flatOfTools(tools)
+    const visible = computeTraceWindow(flat, { windowSize: W, takeover: true }).visible
+    const groups = groupToolRuns(visible, flat).filter(isGroup) as RunGroupBlock[]
+    expect(groups.map((g) => `${g.base}:${g.miles.join(',')}`)).toEqual(['explore:', 'edit:firstEdit'])
+  })
+})

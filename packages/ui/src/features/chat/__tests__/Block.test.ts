@@ -18,7 +18,7 @@ import { mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
 import { Block } from '@taiji/ui'
 import type { MessageStatus, ToolCall } from '@taiji/shared'
-import type { RunGroupBase } from '@taiji/core/domain/chat'
+import type { RunGroupBase, RunGroupMile } from '@taiji/core/domain/chat'
 import zhPanel from '../../../locale/zh-CN/panel'
 import enPanel from '../../../locale/en-US/panel'
 import { MdStub, AnsiStub, GuiStub, makeToolCall, mountToolBlock, mockChatProvide } from './helpers'
@@ -891,10 +891,10 @@ describe('ui-optimize-unified 决策 10 修正: thinking 扫光生命周期（�
 // 成员默认收起态、两步路径、failed 成员默认展开。
 // ═════════════════════════════════════════════════════════════════
 
-/** 组块 fixture：ToolCall[] → Turn.vue 组分支透传的 group prop 形态（base/seq/members/header/hasRunning）。 */
+/** 组块 fixture：ToolCall[] → Turn.vue 组分支透传的 group prop 形态（base/seq/members/header/hasRunning/miles）。 */
 function makeRunGroupProp(
   tools: ToolCall[],
-  opts: { base?: RunGroupBase; seq?: number } = {},
+  opts: { base?: RunGroupBase; seq?: number; miles?: RunGroupMile[] } = {},
 ) {
   return {
     base: opts.base ?? ('exec' as RunGroupBase),
@@ -911,6 +911,8 @@ function makeRunGroupProp(
       failedCount: tools.filter((t) => t.status === 'error').length,
     },
     hasRunning: tools.some((t) => t.status === 'running'),
+    // miles 缺省不入键（对齐「字段缺席即无徽标」的生产路径；显式传 [] 走另一分支）
+    ...(opts.miles ? { miles: opts.miles } : {}),
   }
 }
 
@@ -970,6 +972,49 @@ describe('run 类型分组: Block 组块', () => {
     expect(headerText).toContain('panel.message.runGroupSteps')
     expect(headerText).toContain('1') // 1 步
     expect(headerText).not.toContain('400ms')
+  })
+
+  it('里程碑徽标（§3.6）：miles 非空 → 组头渲染 run-group-mile（文案键 + accent 低饱和 pill 类），空/缺省 → 不渲染', () => {
+    const withMile = mountRunGroup(
+      makeRunGroupProp([makeToolCall({ id: 'e0', toolName: 'edit', input: { path: '/x' }, startTime: 0, endTime: 800 })], {
+        base: 'edit',
+        miles: ['firstEdit'],
+      }),
+    )
+    const badge = withMile.find('[data-testid="run-group-mile"]')
+    expect(badge.exists()).toBe(true)
+    expect(badge.text()).toContain('panel.message.runGroupMileFirstEdit')
+    // demo .rg-badge 视觉：mono + accent 字 / accent-ring 边 / accent-soft 底 / pill 圆角
+    expect(badge.classes()).toContain('rg-badge') // scoped 动效钩子（pop 200ms）
+    expect(badge.classes()).toContain('font-mono')
+    expect(badge.classes()).toContain('text-accent')
+    expect(badge.classes()).toContain('border-accent-ring')
+    expect(badge.classes()).toContain('bg-accent-soft')
+    expect(badge.classes()).toContain('rounded-full')
+
+    // 无徽标两种输入（缺省字段 / 空数组）都不渲染
+    expect(mountRunGroup(makeRunGroupProp([makeToolCall({ id: 'b0', toolName: 'bash', input: { command: 'a' } })])).find('[data-testid="run-group-mile"]').exists()).toBe(false)
+    expect(mountRunGroup(makeRunGroupProp([makeToolCall({ id: 'b0', toolName: 'bash', input: { command: 'a' } })], { miles: [] })).find('[data-testid="run-group-mile"]').exists()).toBe(false)
+  })
+
+  it('里程碑徽标位置：位于序号之后、统计段之前（demo .rg-head 元素序：dot/图标 → 名 → 序号 → badge* → stat）', () => {
+    const wrapper = mountRunGroup(
+      makeRunGroupProp([makeToolCall({ id: 'e0', toolName: 'edit', input: { path: '/x' } })], {
+        base: 'edit',
+        seq: 2,
+        miles: ['firstEdit'],
+      }),
+    )
+    const header = wrapper.find('[data-testid="run-group-header"]').element
+    const badge = wrapper.find('[data-testid="run-group-mile"]').element
+    // 序号「· 2」在徽标之前（同组多段时序号仍紧邻组名）
+    const seqEl = [...header.children].find((el) => el.textContent?.includes('· 2'))
+    expect(seqEl).toBeTruthy()
+    expect(seqEl!.compareDocumentPosition(badge) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    // 统计段（mono 的「N 步」span）在徽标之后
+    const statEl = [...header.children].find((el) => el.textContent?.includes('panel.message.runGroupSteps'))
+    expect(statEl).toBeTruthy()
+    expect(badge.compareDocumentPosition(statEl!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 
   it('failedCount=0 → 失败段不渲染（组行不虚构失败）', () => {
@@ -1067,5 +1112,8 @@ describe('run 类型分组: Block 组块', () => {
     expect(enPanel.message.runGroupEdit).toBe('Edits')
     expect(enPanel.message.runGroupExec).toBe('Commands')
     expect(enPanel.message.runGroupSteps).toBe('{count} steps')
+    // 里程碑徽标（§3.6）：信号来源 = core 结构派生（首个 completed edit/write）
+    expect(zhPanel.message.runGroupMileFirstEdit).toBe('首个改动')
+    expect(enPanel.message.runGroupMileFirstEdit).toBe('First edit')
   })
 })

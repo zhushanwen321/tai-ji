@@ -178,6 +178,10 @@ export default {
     runGroupEdit: 'Edits',
     runGroupExec: 'Commands',
     runGroupSteps: '{count} steps',
+    // [run-group] milestone badge (spec §3.6): the only signal today = first edit (core structural
+    // derivation: the turn's first completed edit/write; semantic milestones need an explicit
+    // upstream tag and are deliberately not keyword-derived)
+    runGroupMileFirstEdit: 'First edit',
     bashCancelled: 'cancelled',
     bashTimeout: 'timeout',
     bashOutputTruncated: 'Output truncated',

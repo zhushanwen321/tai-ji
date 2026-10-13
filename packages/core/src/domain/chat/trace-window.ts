@@ -224,6 +224,19 @@ function countFailedOutsideVisible(blocks: FlatBlock[], visibleSet: Set<number>)
 export type RunGroupBase = 'explore' | 'edit' | 'exec'
 
 /**
+ * 里程碑徽标类型（demo spec §3.6 的 tool row `mile` 契约在 real 侧的落地形态）。
+ *
+ * 信号来源裁决（与分组判定同族的原则——零内容解析、零启发式）：
+ * - `firstEdit`（首个改动）= 全 turn 第一个 status==='completed' 的 edit/write 工具行。
+ *   纯结构信号（工具类型 + 状态 + 次序），不读参数、不读输出。
+ * - 语义里程碑（demo 示例的「测试通过」等）**不派生**：判定它需要解析 bash 参数/输出
+ *   （关键词启发式）——正是 spec v4 废除、AGENTS.md 事实驱动原则禁止的乐观呈现。
+ *   待上游显式信号（pi tool details 带标注）出现时按同契约扩展本联合类型，
+ *   不做「先从输出里猜」的中间态。
+ */
+export type RunGroupMile = 'firstEdit'
+
+/**
  * 类型判定表（唯一维护点）：名单与 pi 内置工具注册表对齐（shared BUILTIN_TOOLS 的 7 个内置工具
  * 全覆盖，pi 0.84.1 实装锚点见该常量注释）。
  *
@@ -244,6 +257,26 @@ const TOOL_RUN_BASE: Map<string, RunGroupBase> = new Map(
     RUN_GROUP_TOOLS[base].map((name): [string, RunGroupBase] => [name, base]),
   ),
 )
+
+/** edit 组工具名集合（里程碑判定用：首个改动 = 第一个 completed 的改动类工具行）。 */
+const EDIT_TOOLS: ReadonlySet<string> = new Set(RUN_GROUP_TOOLS.edit)
+
+/**
+ * 首个改动里程碑的锚点：flatBlocks 全序列中第一个 status==='completed' 的 edit/write 行 flatIndex。
+ * 无（无改动 / 改动全 error / 无 completed）→ null。
+ *
+ * 在 flatBlocks（全序列）而非 visible（窗口切片）上判定：窗口化后首个 edit 可能被收编出窗，
+ * 此时承载它的组根本不渲染——锚点缺失自然无徽标，不会出现「把段内第一个可见 edit 误标成
+ * 首个改动」的假呈现。
+ */
+function firstEditFlatIndex(flatBlocks: FlatBlock[]): number | null {
+  for (const fb of flatBlocks) {
+    if (fb.block.kind !== 'tool') continue
+    const tool = fb.block.ref as ToolCall
+    if (tool.status === 'completed' && EDIT_TOOLS.has(tool.toolName)) return fb.flatIndex
+  }
+  return null
+}
 
 /**
  * run 组块：`groupToolRuns` 输出的新序列单元，不是 FlatBlock（组块没有单一 flatIndex）。
@@ -269,6 +302,9 @@ export interface RunGroupBlock {
   /** 组内是否含 status==='running' 的成员（放接口顶层——它是渲染信号不是计数口径，不入 header）。
    *  渲染层据此给组头套执行态视觉：loader 图标 + 挂载即展开。 */
   hasRunning: boolean
+  /** 里程碑徽标（demo spec §3.6）：成员命中结构确定性信号时聚合上组头，无则空数组（无则不显示）。
+    当前唯一信号 = firstEdit（首个改动），判定口径见 RunGroupMile 注释。 */
+  miles: RunGroupMile[]
   /** 段首锚定 key（run head）：members[0] 在 flatBlocks 全序列中所属连续同类型段的段首 flatIndex。
    *  对窗口滑动（段首成员被收编出窗）与段尾延长（running 并入）两个生长方向都稳定——窗口滑动
    *  不改段首在 flatBlocks 里的位置、段尾延长也不改段首，故 :key 不抖（remount = 展开态丢 + 滚动锚点跳）。 */
@@ -314,13 +350,14 @@ function runHeadIndex(
   return head
 }
 
-/** 组块构建：三条计数口径 + hasRunning 一次算好 + 段首锚定 key。 */
+/** 组块构建：三条计数口径 + hasRunning 一次算好 + 段首锚定 key + 里程碑徽标。 */
 function buildRunGroup(
   base: RunGroupBase,
   seq: number,
   members: FlatBlock[],
   flatBlocks: FlatBlock[],
   positionByFlatIndex: Map<number, number>,
+  firstEditIndex: number | null,
 ): RunGroupBlock {
   let durationMs = 0
   let failedCount = 0
@@ -331,6 +368,10 @@ function buildRunGroup(
     if (status === 'error') failedCount += 1
     if (status === 'running') hasRunning = true
   }
+  // 里程碑聚合（demo「聚合挂组头徽标」）：锚点行是本组成员才挂——首个 edit 被窗口收编出窗时
+  // 其组不渲染，锚点行不在任何可见组成员内，徽标自然不出现（无假呈现）。
+  const miles: RunGroupMile[] =
+    firstEditIndex !== null && members.some((m) => m.flatIndex === firstEditIndex) ? ['firstEdit'] : []
   return {
     kind: 'run-group',
     base,
@@ -339,6 +380,7 @@ function buildRunGroup(
     header: { count: members.length, durationMs, failedCount },
     hasRunning,
     headFlatIndex: runHeadIndex(members[0], base, flatBlocks, positionByFlatIndex),
+    miles,
   }
 }
 
@@ -364,6 +406,8 @@ export function isRunGroupBlock(unit: TraceRenderUnit): unit is RunGroupBlock {
  *   回看历史时组头就是该段的标题）。
  * - 组成员不在可见序列时（工作 turn 的 W 窗口把 error 成员剔出可见、前后两段按假邻接合并）：
  *   合并后的组只统计可见成员，被剔除的 error 由 TraceCompactorRow 的全局 failedCount 报告。
+ * - 里程碑徽标（§3.6）：结构信号在 flatBlocks 全序列一次预计算后聚合上组头——锚点行不在可见
+ *   组成员内（被窗口收编）则徽标不出现，窗口化不产生假呈现。
  * - 组块排序位置 = members[0] 在输入序列中的位置；输出保持输入序列原序。空输入 → 返回 []。
  */
 export function groupToolRuns(visible: FlatBlock[], flatBlocks: FlatBlock[]): TraceRenderUnit[] {
@@ -371,6 +415,8 @@ export function groupToolRuns(visible: FlatBlock[], flatBlocks: FlatBlock[]): Tr
   // 段首回查用的位置表：一次构建 O(n)，组数 × 线性查找的二次复杂度不再出现。
   const positionByFlatIndex = new Map<number, number>()
   for (let i = 0; i < flatBlocks.length; i++) positionByFlatIndex.set(flatBlocks[i].flatIndex, i)
+  // 首个改动锚点：全序列一次预计算（O(n)），组构建时 O(1) 判定。
+  const firstEditIndex = firstEditFlatIndex(flatBlocks)
 
   const seqOf = new Map<RunGroupBase, number>()
   let members: FlatBlock[] = []
@@ -380,7 +426,7 @@ export function groupToolRuns(visible: FlatBlock[], flatBlocks: FlatBlock[]): Tr
     if (base === null) return
     const seq = (seqOf.get(base) ?? 0) + 1
     seqOf.set(base, seq)
-    units.push(buildRunGroup(base, seq, members, flatBlocks, positionByFlatIndex))
+    units.push(buildRunGroup(base, seq, members, flatBlocks, positionByFlatIndex, firstEditIndex))
     members = []
     base = null
   }
