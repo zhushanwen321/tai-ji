@@ -909,6 +909,23 @@ describe("TC3i: 宿主 TOOL_TOP_LEVEL reservedKeys 接线锚（M-3 回归）", (
 });
 
 // ══════════════════════════════════════════════════════════════
+// WorkflowRunParams.name 必填性源码锚（tool-declaration-slimming D3 run 侧锁）。
+//
+// SW 包内 vitest 把 typebox alias 到 mock（丢 required），schema 对象断言在本包
+// 环境无防线价值——name 必填性走源码负锚（与 tool-subagents.test.ts tasks 负锚
+// 同款形态）：name 未经 Type.Optional 包裹，误改 Optional 即红。
+// actionRun 的 `if (!name) throw` 是运行时兜底，不替代声明面（拍平老路回归时
+// 声明面先劣化，本锚在文本层先亮）。
+// ══════════════════════════════════════════════════════════════
+
+describe("WorkflowRunParams.name 必填性源码锚（D3 必填性真实化 run 侧锁）", () => {
+  it("name 未经 Type.Optional 包裹（schema 声明面必填性防回归）", () => {
+    expect(TOOL_WORKFLOW_SRC).toContain("name: Type.String(");
+    expect(TOOL_WORKFLOW_SRC).not.toContain("name: Type.Optional(");
+  });
+});
+
+// ══════════════════════════════════════════════════════════════
 // renderCall 标题行（displayWorkflowName 短名 + runId/slug 不受影响）
 // ══════════════════════════════════════════════════════════════
 //

@@ -2,7 +2,8 @@
  * subagent-workflow Extension — Factory（extension 装配点）
  *
  * 合并 @zhushanwen/pi-subagents + @zhushanwen/pi-workflow 为统一包。
- * 注册项：4 tool（subagent + subagents + workflow + workflow-script）+ 3 command（subagents + workflows + subagent-model）
+ * 注册项：7 tool（subagent_start / subagent_manage / subagent_message + subagents
+ * + workflow_run / workflow_control + workflow-script）+ 3 command（subagents + workflows + subagent-model）
  * + messageRenderer（subagent-bg-notify）+ session 事件。
  *
  * 包内结构（执行运行时已迁 packages/subagent-core，本包只留注册面与宿主适配）：
@@ -229,7 +230,13 @@ export default function subagentsWorkflowExtension(pi: ExtensionAPI): void {
   process.on("beforeExit", reapSpawnedChildrenOnShutdown);
 
   // ════════════════════════════════════════════════════════════
-  //  Tools（3 个）+ Commands（3 个）—— 注册面
+  //  Tools（7 个）+ Commands（3 个）—— 注册面盘点
+  //
+  //  全包 7 tool：本段注册 4（workflow_run + workflow_control 经 registerWorkflowTool、
+  //  subagents 经 registerSubagentsTool、workflow-script 经 registerWorkflowScriptTool）；
+  //  其余 3（subagent_start / subagent_manage / subagent_message 经 registerSubagentTool）
+  //  在上方「subagents 域」段（factory 期）注册。3 command：subagents / subagent-model
+  //  同在 subagents 域段，workflows 在本段段尾。
   //
   //  lazyDeps / isScriptRunning / registry 由 workflow-events.ts 装配结果提供。
   //  guard：workflow tool 与 subagents（批量派发入口）共用同一 guard——两者是同一条

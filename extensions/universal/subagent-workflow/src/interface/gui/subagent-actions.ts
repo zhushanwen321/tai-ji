@@ -6,8 +6,10 @@
 // list 投影）在 core @zhushanwen/subagent-core/execution/assembly/subagent-actions-core，
 // 六 handler + 领域类型消费方经 core barrel import；行为快照等值锚定见 core
 // __tests__/subagent-actions-core.test.ts（期望值硬编码自迁移前实测输出，含错误
-// 文案逐字锚）。参数提取位于 subagent-tool.ts executeSubagent（action 路由 /
-// listParam / cancelParam 解包 / skillPath-cwd 路径检查）。本壳只做渲染：
+// 文案逐字锚）。参数提取位于 subagent-tool.ts 三入口 execute（D3 拆分终态）：
+// executeSubagentStart（无 action 路由；skillPath-cwd 路径检查）/ executeSubagentManage
+//（isManageAction 守卫 + listParam/cancelParam/closeParam 解包）/ executeSubagentMessage
+//（isMessageAction 守卫 + messageParam/forkFromParam 解包）。本壳只做渲染：
 // adapter（领域对象 → {content, details}）+ buildGuiComponent（GUI 协议组件）。
 //
 // content（JSON 字符串）给 LLM，details（SubagentToolResult）给 renderResult，同源同处生成。

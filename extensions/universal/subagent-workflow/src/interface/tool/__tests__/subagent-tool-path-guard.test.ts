@@ -5,7 +5,7 @@
 // 闸。schema pattern（^/）经 pi agent-loop 运行时强校验已是强制（PS-20：
 // agent-loop.js:403-404 → validation.js:247-273），工具层守卫定位 = defense-in-depth
 // + schema 表达力缺口——`..` 穿越语义超出 pattern 能力（^/ 放行 "/a/../b"），
-// 守卫在 executeSubagent start 分支 immediate throw（与 action 枚举守卫同风格）。
+// 守卫在 executeSubagentStart immediate throw（与 action 枚举守卫同风格）。
 //
 // 本文件锁住：
 //   1. skillPath / cwd 含 `..` 穿越段 → 同步 reject，service.execute 零触达
@@ -16,7 +16,7 @@
 // execute 回调直接调用（D3 拆分：registerSubagentTool 注册三工具，start 守卫在
 // subagent_start 的 execute）。
 // SubagentService 经单例访问器槽注入 fake（setSubagentService，globalThis 槽——
-// executeSubagent 内 getSubagentService() 读同一槽，「守卫拒绝时 service.execute
+// executeSubagentStart 内 getSubagentService() 读同一槽，「守卫拒绝时 service.execute
 // 零触达」的承重断言不依赖整类 mock）；pi-ai/typebox 桩改共享桩
 // （src/__tests__/mocks/runtime-stubs.ts，async 工厂 + 动态 import，消费约定见
 // 桩 module 头注）。
@@ -97,7 +97,7 @@ describe("subagent_start 路径守卫（skillPath/cwd：绝对路径 + 禁 .. �
   beforeEach(() => {
     vi.clearAllMocks();
     mockServiceExecute.mockResolvedValue(stubHandle());
-    // 经真实单例访问器注入 fake service（executeSubagent 内 getSubagentService 读同槽）
+    // 经真实单例访问器注入 fake service（executeSubagentStart 内 getSubagentService 读同槽）
     setSubagentService({ execute: mockServiceExecute, getCollectSyncDefault: () => "async" } as never);
     execute = captureStartExecute();
   });
