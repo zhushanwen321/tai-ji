@@ -1,7 +1,7 @@
 /**
  * toolcall status 翻转 UI 回归测试。
  *
- * 验证：tool.status running→completed 后，DOM 上 .animate-loader-spin 消失（统一交互模式：无终态 icon）。
+ * 验证：tool.status running→completed 后，DOM 上运行动效图标（data-running-icon）消失（统一交互模式：无终态 icon）。
  * 覆盖三层链路：
  * - 方案 a：mount Block，改 props.tool.status（叶子组件单元回归）
  * - 方案 b：mount Turn，改 turn.assistants[0].toolCalls[0].status（单 turn 链路回归）
@@ -334,21 +334,21 @@ describe('方案 c: mount MessageStream（真 store + 真虚拟滚动层）— t
 
 /* ─────────────────────── 方案 a：mount Block，改 props.tool.status ─────────────────────── */
 describe('方案 a: mount Block 组件 — 翻转 props.tool.status', () => {
-  it('running→completed：呼吸弧 loader 消失，无终态 icon（统一交互模式）', async () => {
+  it('running→completed：运行动效图标消失，无终态 icon（统一交互模式）', async () => {
     const tool = makeTool({ status: 'running' })
     const wrapper = mount(Block, {
       props: { type: 'tool', tool, sessionId: 's1' },
       global: { provide: mockChatProvide() },
     })
 
-    // running 态：呼吸弧 loader 存在
-    expect(wrapper.findAll('.animate-loader-spin').length).toBeGreaterThan(0)
+    // running 态：专属动效图标存在（RunningBlockIcon）
+    expect(wrapper.findAll('[data-running-icon]').length).toBeGreaterThan(0)
 
     // 翻转 status → completed
     await wrapper.setProps({ tool: { ...tool, status: 'completed', output: 'file content' } })
 
     // 断言：loader 消失，无终态 Check icon（统一交互模式：无末尾 icon）
-    expect(wrapper.findAll('.animate-loader-spin')).toHaveLength(0)
+    expect(wrapper.findAll('[data-running-icon]')).toHaveLength(0)
     expect(wrapper.find('svg.lucide-check').exists()).toBe(false)
   })
 })
@@ -360,7 +360,7 @@ describe('方案 b: mount Turn 组件 — 翻转 turn.assistants[0].toolCalls[0]
   beforeEach(() => {
     expandedTurns.clear()
   })
-  it('running→completed：Turn 内 Block 呼吸弧 loader 消失，无终态 icon', async () => {
+  it('running→completed：Turn 内 Block 运行动效图标消失，无终态 icon', async () => {
     const tool = makeTool({ status: 'running' })
     const assistant = makeAssistantWithTool(tool)
     const turn = makeTurn(assistant, /* isStreaming */ false)
@@ -384,8 +384,8 @@ describe('方案 b: mount Turn 组件 — 翻转 turn.assistants[0].toolCalls[0]
     await wrapper.find('button.turn-meta').trigger('click')
     await nextTick()
 
-    // running 态断言：呼吸弧 loader 存在
-    expect(wrapper.findAll('.animate-loader-spin').length).toBeGreaterThan(0)
+    // running 态断言：专属动效图标存在（RunningBlockIcon）
+    expect(wrapper.findAll('[data-running-icon]').length).toBeGreaterThan(0)
 
     // 翻转 status：构造新的 turn prop（不可变更新，模拟 store commitMessages 路径）
     const tool2: ToolCall = { ...tool, status: 'completed', output: 'file content' }
@@ -395,7 +395,7 @@ describe('方案 b: mount Turn 组件 — 翻转 turn.assistants[0].toolCalls[0]
     await nextTick()
 
     // 断言：loader 消失，无终态 Check icon（统一交互模式：无末尾 icon）
-    expect(wrapper.findAll('.animate-loader-spin')).toHaveLength(0)
+    expect(wrapper.findAll('[data-running-icon]')).toHaveLength(0)
   })
 })
 
@@ -428,7 +428,7 @@ describe('方案 c（叶子）: traceBlocks 响应式验证（不可变替换翻
     })
     await wrapper.find('button.turn-meta').trigger('click')
     await nextTick()
-    expect(wrapper.findAll('.animate-loader-spin').length).toBeGreaterThan(0)
+    expect(wrapper.findAll('[data-running-icon]').length).toBeGreaterThan(0)
 
     // 不可变替换（与方案 b 同）
     const tool2: ToolCall = { ...tool, status: 'completed', output: 'done' }
@@ -436,7 +436,7 @@ describe('方案 c（叶子）: traceBlocks 响应式验证（不可变替换翻
     await wrapper.setProps({ turn: { ...turn, assistants: [a2] } })
     await nextTick()
 
-    expect(wrapper.findAll('.animate-loader-spin')).toHaveLength(0)
+    expect(wrapper.findAll('[data-running-icon]')).toHaveLength(0)
   })
 })
 

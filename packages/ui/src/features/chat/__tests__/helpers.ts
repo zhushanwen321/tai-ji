@@ -108,13 +108,18 @@ export function makeToolCall(over: Partial<ToolCall> = {}): ToolCall {
 
 /** mount Block 工具分支（stub 掉 Gui/Ansi/Md 子渲染，隔离 header/交互断言）。
  *  extraProps：追加 props 覆写（如 sessionId——workflow chips 反查按块归属 session 分区）。
+ *  provideOverrides：ChatViewDeps 字段覆写（如 toolDetailRenderer——tool-detail-rich 路由）。
  *  provide mockChatProvide：Block 经 useChatViewDeps inject 消费壳依赖（ui-optimize-unified
  *  N1 文件 chip 起），直接 mount 必须注入 mock deps——与 Turn 链测试的 provide 口径一致。 */
-export function mountToolBlock(tool: ToolCall, extraProps: Record<string, unknown> = {}) {
+export function mountToolBlock(
+  tool: ToolCall,
+  extraProps: Record<string, unknown> = {},
+  provideOverrides: Partial<ChatViewDeps> = {},
+) {
   return mount(Block, {
     props: { type: 'tool', tool, ...extraProps },
     global: {
-      provide: mockChatProvide(),
+      provide: mockChatProvide(provideOverrides),
       stubs: {
         GuiComponentRenderer: GuiStub,
         AnsiText: AnsiStub,

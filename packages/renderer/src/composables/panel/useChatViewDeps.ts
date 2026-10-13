@@ -46,6 +46,7 @@ import { resolveVirtualSessionId } from '@taiji/shared'
 import { useFileSearch } from '@/composables/features/search/useFileSearch'
 import { useToast } from '@/composables/useToast'
 import { triggerEnterForkMode } from '@/composables/panel/useForkModeChannel'
+import ToolDetailRenderer from '@/components/panel/detail-renderers/ToolDetailRenderer.vue'
 import { triggerEnterHandoffMode } from '@/composables/panel/useHandoffModeChannel'
 import { renderMarkdownSegments } from '@taiji/ui/features/chat/markdown'
 import {
@@ -329,5 +330,10 @@ export function useChatViewDeps(
     streamingFenceSilenceMs: STREAMING_FENCE_SILENCE_MS,
     renderMermaid: (source: string, theme: 'dark' | 'light') => renderMermaid(source, theme),
     toMarkdown: (msg: Message): string => assistantToMarkdown(msg),
+
+    // [tool-detail-rich] 工具展开细节富渲染（read 代码块 / write git diff / edit patch）：
+    // renderer 实现（复用 DiffView/parseDiff/extToLang/gitApi），ui 只路由；optional 字段，
+    // 测试 mock 壳不提供时 Block 回退纯文本输出。
+    toolDetailRenderer: ToolDetailRenderer,
   }
 }

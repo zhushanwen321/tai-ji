@@ -15,7 +15,8 @@
  */
 import type { InjectionKey } from 'vue'
 import { inject } from 'vue'
-import type { FileNode, Message, Segment, ChangeSetStatus } from '@taiji/shared'
+import type { Component } from 'vue'
+import type { FileNode, Message, Segment, ChangeSetStatus, ToolCall } from '@taiji/shared'
 import type { IncrementalMarkdownCache, IncrementalMarkdownResult, MarkdownSegment } from './markdown-types'
 
 /** drawer 打开参数（按 tab 携带不同上下文） */
@@ -158,6 +159,15 @@ export interface ChatViewDeps {
   renderMermaid: (source: string, theme: 'dark' | 'light') => Promise<{ svg: string }>
   /** 把 assistant 消息转为 markdown（copy-as-MD 功能，依赖 i18n 文案） */
   toMarkdown: (message: Message) => string
+  /**
+   * [tool-detail-rich] 工具展开细节富渲染组件（renderer 提供，ui 只路由不实现）：
+   * read → 行号 gutter 代码块（shiki）；write → 懒加载 git diff（新文件回退全增 diff）；
+   * edit → details.diff unified patch 直嗂 DiffView。ui 侧仅对 read/write/edit 三类
+   * 非失败且有内容的工具路由（Block.vue hasRichDetail），字段缺席（测试 mock 壳 /
+   * 未接壳的宿主）→ 回退既有纯文本输出渲染。
+   * optional，同 sessionCwdOf 族：缺席即回退，不阻断 ChatView 其余功能。
+   */
+  toolDetailRenderer?: Component<{ tool: ToolCall; sessionId?: string | null }>
 }
 
 /** ChatViewDeps inject token（InjectionKey 保类型安全） */

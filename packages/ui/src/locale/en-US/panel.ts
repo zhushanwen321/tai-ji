@@ -178,6 +178,10 @@ export default {
     runGroupEdit: 'Edits',
     runGroupExec: 'Commands',
     runGroupSteps: '{count} steps',
+    // [tool-detail-rich] tool detail rich-render labels (renderer ToolDetailRenderer)
+    toolDetailNewFile: 'New file',
+    toolDetailGitDiff: 'vs git HEAD',
+    toolDetailDiffLoading: 'Loading diff…',
     // [run-group] milestone badge (spec §3.6): the only signal today = first edit (core structural
     // derivation: the turn's first completed edit/write; semantic milestones need an explicit
     // upstream tag and are deliberately not keyword-derived)

@@ -15,7 +15,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mount } from '@vue/test-utils'
-import { nextTick } from 'vue'
+import { nextTick, h } from 'vue'
 import { Block } from '@taiji/ui'
 import type { MessageStatus, ToolCall } from '@taiji/shared'
 import type { RunGroupBase, RunGroupMile } from '@taiji/core/domain/chat'
@@ -169,6 +169,33 @@ describe('error-visibility M1: failed tool header danger + 终态展开（TC1-3�
     // unfinished 不标红（区别于 failed）
     expectToolHeaderNeutral(wrapper)
   })
+
+  it('[tool-detail-rich] 壳注入 toolDetailRenderer + edit 有 details.diff → 展开区走富渲染分支（纯文本输出不渲染）', async () => {
+    const DetailStub = {
+      name: 'ToolDetailRendererStub',
+      props: { tool: { type: Object, required: true }, sessionId: { type: String, default: null } },
+      setup: () => () => h('div', { 'data-testid': 'tool-detail-stub' }),
+    }
+    const wrapper = mountToolBlock(
+      makeToolCall({ toolName: 'edit', input: { path: 'foo.ts' }, output: 'Successfully replaced 1 block(s)', details: { patch: '@@ -1,1 +1,2 @@\n a\n+b' } }),
+      {},
+      // 第三个参数：overrides 注入 toolDetailRenderer
+      { toolDetailRenderer: DetailStub as never },
+    )
+    // 默认收起（completed 非失败），点击 header 展开
+    await wrapper.find('[data-testid="tool-block-header"]').trigger('click')
+    expect(wrapper.find('[data-testid="tool-detail-stub"]').exists()).toBe(true)
+    // 纯文本输出区（.tool-result）被富渲染分支替换（v-else-if 链序：gui → rich → text）
+    expect(wrapper.find('.tool-result').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('[tool-detail-rich] 壳未注入（默认 mock deps）→ read 展开维持纯文本兑底（回归保护）', async () => {
+    const wrapper = mountToolBlock(makeToolCall({ toolName: 'read', output: 'const a = 1' }))
+    await wrapper.find('[data-testid="tool-block-header"]').trigger('click')
+    expect(wrapper.find('.tool-result').exists()).toBe(true)
+    wrapper.unmount()
+  })
 })
 
 /* ── D5 行类型定档（M3b demo 复刻修订）：工具行 = 14px（--text-base，demo .line fs-lg）
@@ -184,13 +211,14 @@ describe('D5 行类型定档: completed tool header 染 neutral-mid', () => {
     expect(header.classes()).not.toContain('text-neutral-fg')
   })
 
-  it('running tool 行文字恒 text-neutral-mid，accent 只在呼吸弧 loader（M3b demo 形态：.run-ic 独占状态色）', () => {
+  it('running tool 行文字恒 text-neutral-mid，accent 只在专属动效图标（M3b demo 形态：状态色独占图标位）', () => {
     const wrapper = mountToolBlock(makeToolCall({ status: 'running' }))
     const header = wrapper.find('[data-testid="tool-block-header"]')
     expect(header.classes()).toContain('text-neutral-mid')
     expect(header.classes()).not.toContain('text-accent')
-    // accent 常驻 loader 容器（外层 span text-accent 内层 animate-loader-spin）
-    expect(header.find('.text-accent .animate-loader-spin').exists()).toBe(true)
+    // 专属动效款（RunningBlockIcon）：trace 块不再用全类型共用 loader，按 toolName 路由
+    // （fixture 默认 read → 纵向扫描）
+    expect(header.find('[data-running-icon="tool-read"]').exists()).toBe(true)
   })
 })
 
@@ -1022,7 +1050,7 @@ describe('run 类型分组: Block 组块', () => {
     expect(wrapper.find('[data-testid="run-group-failed"]').exists()).toBe(false)
   })
 
-  it('hasRunning 执行态视觉：true → 组头 loader（accent 容器 + animate-loader-spin + svg）+ 行文字恒 text-neutral-mid；false → 静态图标 + text-neutral-mid', () => {
+  it('hasRunning 执行态视觉：true → 组头专属动效款（tool-bash 光标闪烁）+ 行文字恒 text-neutral-mid；false → 静态图标 + text-neutral-mid', () => {
     const runningWrapper = mountRunGroup(makeRunGroupProp([
       makeToolCall({ id: 'b0', toolName: 'bash', input: { command: 'a' }, startTime: 0, endTime: 1000 }),
       makeToolCall({ id: 'b1', toolName: 'bash', input: { command: 'b' }, status: 'running', startTime: 2000 }),
@@ -1031,16 +1059,14 @@ describe('run 类型分组: Block 组块', () => {
     // 行文字不染 accent（demo 运行态 = 状态色只在图标，.tool .t-name 恒 mid）
     expect(runningHeader.classes()).toContain('text-neutral-mid')
     expect(runningHeader.classes()).not.toContain('text-accent')
-    // loader 形态与其余执行中块同款：RUNNING_LOADER_SVG 塞进 accent 容器 + animate-loader-spin 旋转
-    expect(runningHeader.find('.text-accent .animate-loader-spin').exists()).toBe(true)
-    const loader = runningHeader.find('.animate-loader-spin')
-    expect(loader.find('svg').exists()).toBe(true)
+    // 组头动效 = 组类别同款（exec → tool-bash 光标闪烁，RUN_GROUP_RUNNING_ICON）
+    expect(runningHeader.find('[data-running-icon="tool-bash"]').exists()).toBe(true)
 
     const doneWrapper = mountBashPairGroup()
     const doneHeader = doneWrapper.find('[data-testid="run-group-header"]')
     expect(doneHeader.classes()).toContain('text-neutral-mid')
     expect(doneHeader.classes()).not.toContain('text-accent')
-    expect(doneHeader.find('.animate-loader-spin').exists()).toBe(false)
+    expect(doneHeader.find('[data-running-icon]').exists()).toBe(false)
   })
 
   it('默认开合：组内有 running 成员 → 挂载即展开（成员行在场）；全已完成 → 挂载即收起', () => {

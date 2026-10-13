@@ -81,7 +81,10 @@ SPLIT_JUSTIFIED_SCAN_LINES = 30
 # 编码规范 escape hatch（Tailwind 无法表达的场景），与 MainPanel 多值 shadow 同类。
 # 单组件样式归 scoped（多组件共享原语 popover/dialog/overlay 才进 style.css 全局层，
 # 见 check_css_tokens.py ALLOWED_GLOBAL_ANIMATION_CLASSES 判据）。
-STYLE_SCOPED_WHITELIST: list[str] = ['shell/MainPanel.vue', 'sidebar/UpdateButton.vue', 'settings/SettingsModal.vue', 'collapsible/CollapsibleContent.vue', 'sidebar/Sidebar.vue', 'features/chat/Block.vue']
+# [2026-10 trace 块动效] RunningBlockIcon.vue（每类活动专属运行动效）：纯动效组件——
+# scoped CSS 全部为动画本体（keyframes + offset-path path() + conic/mask 几何），
+# Tailwind 无法表达 scoped-keyframe 引用与 offset-path 路径的组合；Block.vue .text-sweep 同族先例。
+STYLE_SCOPED_WHITELIST: list[str] = ['shell/MainPanel.vue', 'sidebar/UpdateButton.vue', 'settings/SettingsModal.vue', 'collapsible/CollapsibleContent.vue', 'sidebar/Sidebar.vue', 'features/chat/Block.vue', 'features/chat/RunningBlockIcon.vue']
 
 # CSS 选择器检测正则
 RE_STYLE_SELECTOR = re.compile(r'^[.\w\-]+[\s,]*\{')

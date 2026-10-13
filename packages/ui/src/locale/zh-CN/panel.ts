@@ -175,6 +175,11 @@ export default {
     runGroupEdit: '改动',
     runGroupExec: '执行命令',
     runGroupSteps: '{count} 步',
+    // [tool-detail-rich] 工具展开富渲染标签（renderer ToolDetailRenderer 消费）：
+    // write 懒加载 git diff 后的二分标注——空 patch = untracked = 新文件；非空 = 相对 HEAD 的累计差异。
+    toolDetailNewFile: '新文件',
+    toolDetailGitDiff: '相对 git HEAD',
+    toolDetailDiffLoading: '加载 diff…',
     // [run-group] 里程碑徽标（spec §3.6）：当前唯一信号 = 首个改动（core 结构派生，
     // 全 turn 第一个 completed 的 edit/write；语义里程碑需上游显式信号，不关键词派生）
     runGroupMileFirstEdit: '首个改动',

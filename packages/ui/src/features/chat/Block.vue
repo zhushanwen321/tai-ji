@@ -48,9 +48,7 @@
                enter 不触发（调度 bug，内容永久空白），vue_rules_checker 已禁该写法，同构踩坑
                见 DrawerPanel/Sidebar/SettingsModal 三处先例（稳定性优先，瞬时切换）。scoped
                尾部 tico 过渡类随本移除删除。reduced-motion 语义随之自然成立（无动画可停）。 -->
-          <span v-if="thinkingSweeping" class="inline-flex size-[15px] shrink-0 self-center items-center justify-center text-accent">
-            <span class="inline-flex size-full items-center justify-center animate-loader-spin" v-html="RUNNING_LOADER_SVG" /> <!-- eslint-disable-line vue/no-v-html -- hardcoded constant from block-icon.ts -->
-          </span>
+          <RunningBlockIcon v-if="thinkingSweeping" kind="thinking" />
           <component :is="BLOCK_ICON_LUCIDE.thinking" v-else class="size-[15px] shrink-0 self-center text-reasoning [stroke-width:1.6]" />
           <!-- 状态词 label：思考进行中跑文字扫光（决策 10）。生命周期 = 块级（thinkingEnd 未填），
                非消息级 working——思考完结后消息仍在流式（工具执行中），扫光随思考完结熄灭。
@@ -175,9 +173,7 @@
              同 tool/thinking 行）。组头文字（「N 步 · 耗时」计数/耗时口径）是稳定标识，不跑文字扫光。
              行文字不染 accent（demo 运行态 = 仅呼吸弧图标 accent，文字保持行层级 mid，
              workbench.css .tool .t-name），与普通 tool 行运行态同款。 -->
-        <span v-if="group.hasRunning" class="inline-flex size-[15px] shrink-0 self-center items-center justify-center text-accent">
-          <span class="inline-flex size-full items-center justify-center animate-loader-spin" v-html="RUNNING_LOADER_SVG" /> <!-- eslint-disable-line vue/no-v-html -- hardcoded constant from block-icon.ts -->
-        </span>
+        <RunningBlockIcon v-if="group.hasRunning" :kind="RUN_GROUP_RUNNING_ICON[group.base]" />
         <component :is="BLOCK_ICON_LUCIDE[RUN_GROUP_ICON[group.base]]" v-else :class="[BLOCK_ICON_CLASS, 'self-center']" />
         <span class="shrink-0 whitespace-nowrap text-left transition-opacity duration-[var(--duration-fast)] group-hover/bgroup:opacity-80">{{ t(RUN_GROUP_LABEL_KEY[group.base]) }}</span>
         <!-- 同名组序号（demo `.rg-seq`）：第二个「探索」起显示「 · 2」，同类型的多段在回看时可区分 -->
@@ -228,7 +224,7 @@
         >
           <!-- running 态 loader（呼吸弧 + accent），其余走 list-checks ICON（瞬时切换，tico
                交叉过渡已移除，见 thinking 行 [HISTORICAL]）；failed 图标染 danger（与普通 tool 行同款，demo .line.subagent.failed .sicon 形态家族） -->
-          <span v-if="isRunning" class="inline-flex size-[15px] shrink-0 self-center items-center justify-center text-accent animate-loader-spin" v-html="RUNNING_LOADER_SVG" /> <!-- eslint-disable-line vue/no-v-html -- hardcoded constant from block-icon.ts -->
+          <RunningBlockIcon v-if="isRunning" kind="workflow" />
           <component :is="BLOCK_ICON_LUCIDE.workflow" v-else :class="[headerIconClass, 'self-center']" />
           <span :class="[BLOCK_LABEL_CLASS, 'transition-opacity duration-[var(--duration-fast)] group-hover/wf:opacity-80']">{{ t('panel.message.workflow') }}</span>
           <!-- name 染对话流专属名称色 --name（2026-10-06 裁决）；slug 降行层级灰（与「子代理」等标签同色 --neutral-mid） -->
@@ -278,9 +274,7 @@
                [M3b demo 复刻]（workbench.css .tool/.run-ic）：行文字恒行层级 mid 不随状态染色
                （demo .tool .t-name 恒 mid，无 accent/danger 文字态），状态色只落在图标——
                running = accent 呼吸弧、failed = danger（.line.subagent.failed .sicon）。 -->
-          <span v-if="isRunning" class="inline-flex size-[15px] shrink-0 self-center items-center justify-center text-accent">
-            <span class="inline-flex size-full items-center justify-center animate-loader-spin" v-html="RUNNING_LOADER_SVG" /> <!-- eslint-disable-line vue/no-v-html -- hardcoded constant from block-icon.ts -->
-          </span>
+          <RunningBlockIcon v-if="isRunning" :kind="toolRunningKind" />
           <component :is="headerBlockIcon" v-else :class="[headerIconClass, 'self-center']" />
           <span class="shrink-0 normal-case tracking-normal transition-opacity duration-[var(--duration-fast)] group-hover/tool:opacity-80">{{ toolName }}</span>
           <!-- running + 有流式输出：单行尾行视口（同 thinking header 结构：leading-normal
@@ -384,6 +378,12 @@
               <div v-if="guiComponent" :class="toolResultClass">
                 <GuiComponentRenderer :component="guiComponent" />
               </div>
+              <!-- [tool-detail-rich] read/write/edit 经壳注入组件富渲染（diff / 行号代码块）。
+                   水平滚动自管理（BlockScrollBox 仅 overflow-y）；壳未注入（mock 壳）或非三类
+                   工具 → 走下方纯文本兑底。 -->
+              <BlockScrollBox v-else-if="hasRichDetail">
+                <component :is="chatViewDeps.toolDetailRenderer" :tool="tool!" :session-id="sessionId" />
+              </BlockScrollBox>
               <!-- 文本 / ANSI / JSON 输出：统一块内滚动（G5/D6） -->
               <BlockScrollBox v-else>
                 <div :class="toolResultClass">
@@ -430,8 +430,9 @@ import MarkdownRenderer from './MarkdownRenderer.vue'
 import BlockSubagent from './BlockSubagent.vue'
 import BlockScrollBox from './BlockScrollBox.vue'
 import ToolResultImages from './ToolResultImages.vue'
-import type { BlockIconKind } from './block-icon'
-import { BLOCK_ICON_CLASS, BLOCK_ICON_LUCIDE, BLOCK_LABEL_CLASS, RUNNING_LOADER_SVG, getBlockIcon } from './block-icon'
+import RunningBlockIcon from './RunningBlockIcon.vue'
+import type { BlockIconKind, RunningIconKind } from './block-icon'
+import { BLOCK_ICON_CLASS, BLOCK_ICON_LUCIDE, BLOCK_LABEL_CLASS, getBlockIcon } from './block-icon'
 import { MS_PER_SECOND, formatClock, formatDuration, formatJsonIfValid, shortenForHeader, tailLines, stripAnsi } from './format-utils'
 // primitives 直接路径（不经 @taiji/ui 顶层 barrel）：chat 组件被 barrel 再导出，
 // barrel 自引用会闭合一族循环依赖环（详见 BashOutputBlock.vue 同款注释）
@@ -609,6 +610,26 @@ const { metaItems } = useToolMeta({
   isFailed,
 })
 
+/**
+ * [tool-detail-rich] 富渲染路由谓词（壳注入 toolDetailRenderer 后，read/write/edit 三类
+ * 非失败工具展开区改走富渲染，其余工具维持纯文本）：
+ * - read：output 即文件内容，有值即可渲染（失败态在上方短路——错误信息不走代码渲染）；
+ * - edit：pi details.patch（unified patch；details.diff 是展示格式不可用）存在才路由
+ *  （历史会话缺字段回退纯文本）；
+ * - write：input.content（写入全文）存在才路由（git diff 由壳组件内懒加载）。
+ */
+const hasRichDetail = computed(() => {
+  if (!chatViewDeps.toolDetailRenderer || isFailed.value) return false
+  const name = toolName.value
+  if (name === 'read') return !!displayContent.value
+  if (name === 'edit') return typeof props.tool?.details?.patch === 'string'
+  if (name === 'write') {
+    const input = props.tool?.input as Record<string, unknown> | undefined
+    return typeof input?.content === 'string'
+  }
+  return false
+})
+
 /** bash 展开后去掉行数统计（命令+output 已完整展示，行数无参考价值） */
 const filteredMetaItems = computed(() => {
   if (!isBashTool.value) return metaItems.value
@@ -619,12 +640,25 @@ const filteredMetaItems = computed(() => {
 const isSubagent = computed(() => SUBAGENT_TOOL_NAMES.has(toolName.value))
 const isWorkflow = computed(() => WORKFLOW_TOOL_NAMES.has(toolName.value))
 
-/** 普通 tool header 的块类型 ICON（running 用 loader，其余走 BLOCK_ICON_LUCIDE） */
+/** 普通 tool header 的块类型 ICON（running 用 RunningBlockIcon，其余走 BLOCK_ICON_LUCIDE） */
 const headerBlockIcon = computed(() => {
   const kind = getBlockIcon(toolName.value, props.tool?.status ?? 'completed', false, false)
-  // running 态走模板的 loader 分支（v-if isRunning），不走此 computed
+  // running 态走模板的 RunningBlockIcon 分支（v-if isRunning），不走此 computed
   return kind === 'running' ? BLOCK_ICON_LUCIDE['tool-other'] : BLOCK_ICON_LUCIDE[kind]
 })
+
+/** 工具名 → 运行中动效 kind（RunningBlockIcon 消费；grep/find 探索单列透镜扫掠，
+ *  未命中工具走 tool-other 字形呼吸兜底。与 block-icon TOOL_ICON_MAP 同构但独立声明——
+ *  本表键值语义是「动效档」而非「图标档」，两表各自服务动效/静态 SSOT） */
+const TOOL_RUNNING_KIND: Record<string, RunningIconKind> = {
+  read: 'tool-read',
+  bash: 'tool-bash',
+  edit: 'tool-edit',
+  write: 'tool-edit',
+  grep: 'tool-grep',
+  find: 'tool-grep',
+}
+const toolRunningKind = computed<RunningIconKind>(() => TOOL_RUNNING_KIND[toolName.value] ?? 'tool-other')
 
 /** header 图标状态色（[M3b demo 复刻] workbench.css）：状态色只落图标不落行文字——
  *  running 走模板 loader 分支（accent 呼吸弧，行文字恒 mid），failed 图标染 danger
@@ -740,6 +774,14 @@ const RUN_GROUP_LABEL_KEY: Record<RunGroupBase, string> = {
   explore: 'panel.message.runGroupExplore',
   edit: 'panel.message.runGroupEdit',
   exec: 'panel.message.runGroupExec',
+}
+
+/** 组类型 → 组头运行中动效 kind（RunningBlockIcon；组头动效 = 组类别同款——探索扫描 /
+ *  改动描线 / 命令光标闪烁，与成员行各自动效同源，不新开动画） */
+const RUN_GROUP_RUNNING_ICON: Record<RunGroupBase, RunningIconKind> = {
+  explore: 'tool-read',
+  edit: 'tool-edit',
+  exec: 'tool-bash',
 }
 
 /** 里程碑 → 徽标文案（ui locale）。当前唯一信号 firstEdit（首个改动）——信号来源与「语义里程碑
