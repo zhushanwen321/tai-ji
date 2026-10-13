@@ -82,7 +82,7 @@ const WORKFLOW_CONTROL_ACTIONS: readonly WorkflowControlAction[] = [
 
 const WorkflowRunParams = Type.Object({
   name: Type.String(
-    { description: "Workflow ref: absolute path to a .js script — normally a <location> from <available_workflows>, but ANY absolute .js path declaring @pi-meta kind:\"workflow\" works. Relative paths and bare names are rejected." },
+    { description: "Absolute path to a .js script — normally a <location> from <available_workflows>; ANY absolute .js path declaring @pi-meta kind:\"workflow\" works. Relative paths and bare names are rejected." },
   ),
   slug: Type.Optional(
     Type.String({
@@ -111,7 +111,9 @@ const WorkflowRunParams = Type.Object({
       "A user-issued runtime override (panel switch / /subagent-model) wins over this parameter and over any explicitly scripted model.",
   })),
   thinkingLevel: Type.Optional(StringEnum(THINKING_ORDER, {
-    description: "Run-level thinkingLevel override (off/minimal/low/medium/high/xhigh/max) — all agents in the run inherit it. Omit for each agent's model's highest available level.",
+    // 枚举值由 schema 自身的 enum 承载（不重复列举）；「user override 不改显式 scripted
+    // level」的优先级事实随 D1 单源化从 promptGuidelines Note 条迁入本字段说明。
+    description: "Run-level thinkingLevel override — all agents in the run inherit it. Omit for each agent's model's highest available level. A user-issued runtime override (panel switch / /subagent-model) does not change an explicitly scripted level (explicit levels outrank the override's inline level).",
   })),
 });
 
@@ -122,11 +124,11 @@ const WorkflowControlParams = Type.Object({
   ),
   args: Type.Optional(
     Type.Record(Type.String(), Type.Unknown(), {
-      description: "For resume: optional — when passed, must deep-equal the original args (except the internal _runId key); a mismatch is rejected with the differing fields listed. Omit to reuse the original args.",
+      description: "For resume: optional — when passed, must deep-equal the original args (except internal _runId); mismatch rejected with the differing fields listed. Omit to reuse the original args.",
     }),
   ),
   tokens: Type.Optional(Type.Number({
-    // 预算纪律句已删（tool-declaration-slimming D1 单源化→注入段）；
+    // 预算纪律句已删（D1 单源化→注入段）；
     // resume 分支是本参数的功能语义，保留。
     description: "Max token budget. For resume: applied to the resumed execution (tokens already spent count against it)",
   })),
@@ -137,11 +139,10 @@ const WorkflowControlParams = Type.Object({
     Type.String({ description: "Error/reason message (optional, with abort)" }),
   ),
   model: Type.Optional(Type.String({
-    // 缺省继承主 agent 的纪律句已删（D1 单源化→注入段）；
-    // resume 的 user override 通道是本参数功能语义，保留。
+    // 缺省继承纪律句已删（D1 单源化→注入段）；user override 优先级在 workflow_run 的
+    // model 字段说明一处（跨工具通用规则单源），此处只留 resume 分支功能语义。
     description:
-      "Recorded as the resumed run's model override (same channel as a panel switch), driving all re-dispatched steps. " +
-      "A user-issued runtime override (panel switch / /subagent-model) wins over this parameter and over any explicitly scripted model.",
+      "Resumed run's model override (same channel as a panel switch), driving all re-dispatched steps.",
   })),
 });
 
@@ -251,12 +252,11 @@ export function registerWorkflowTool(
       // 已删（收敛点 = <available_subagents> 注入段 SUBAGENT_DISPATCH_SHARED_RULES）；args
       // 平铺检测 / model override 通道的功能语义在 schema 字段说明一处，不在此复述。
       // 锚词保留清单见 __tests__/tool-prompt-contract.test.ts 头注。
-      "PRIORITY: 'workflow' / 'run workflow' → call workflow_run FIRST — listed workflows run directly.",
-      "Refs/descriptions come from <available_workflows> (injected each turn). For parameter details, read the <location> script file (its header has @pi-meta parameters + usage + phases).",
-      "Call shape (JSON): {\"name\":\"<script>\",\"args\":{...},\"tokens\":N,\"time\":N,\"model\":\"<provider/modelId>\",\"thinkingLevel\":\"<level>\"}.",
-      "Note: a user-issued runtime model override (panel switch / /subagent-model) takes precedence over the model parameter (an explicitly scripted thinkingLevel still applies — explicit levels outrank the override's inline level). If a run's scripted model seems ignored, check for an active user override before assuming a resolution bug.",
+      "PRIORITY: 'workflow' / 'run workflow' → call workflow_run FIRST.",
+      "Refs come from <available_workflows>; for parameter details read the <location> script file (@pi-meta header: parameters + usage + phases).",
+      "Call shape (JSON): {\"name\":\"<script>\",\"args\":{...}} (+ optional tokens/time/model/thinkingLevel).",
       "Anti-patterns: flattening args sub-fields (task/items/...) to the top level — they belong inside args.",
-      "CRITICAL: for orchestration patterns ALWAYS use workflow_run with the <location> absolute path of the matching listed workflow — NEVER use workflow-script action:generate to recreate patterns already covered by available workflows; generate is ONLY for novel patterns.",
+      "CRITICAL: for orchestration patterns ALWAYS use workflow_run with the listed workflow's <location> path — NEVER use workflow-script action:generate to recreate covered patterns; generate is ONLY for novel patterns.",
     ],
     parameters: WorkflowRunParams,
 
@@ -307,16 +307,17 @@ export function registerWorkflowTool(
     name: "workflow_control",
     label: "Workflow Control",
     description:
-      "Control workflow runs: status (list runs), abort (stop a run), resume (continue an interrupted run).\n" +
-      "resume replays completed calls at zero token cost and continues — ONLY for interrupted runs (crash or session-switch); for a settled run start a new one via `workflow_run`.\n" +
-      "Runs are one-shot (no pause): stop early with abort; a fresh result means a new run.",
+      "Control workflow runs: status (list), abort (stop a run), resume (continue an interrupted run).\n" +
+      "Runs are one-shot (no pause): stop early with abort; for a settled run start a new one via `workflow_run`.",
     promptSnippet: "Check, abort, or resume workflow runs",
     promptGuidelines: [
-      "Runs are one-shot — no pause: stop early with abort; a fresh result means a new run. resume is ONLY for interrupted runs (crash or session-switch): it replays completed calls at zero token cost and continues. Do NOT resume a settled (done/failed/cancelled) run — start a new run via `workflow_run`.",
+      // D1 单源化终态：一次性生命周期与 resume 资格语义已在 description 说一遍，此处只留
+      // 调用形状与「不得 resume 已终态 run」的纪律条（锚词清单见 tool-prompt-contract.test.ts）。
+      "resume is ONLY for interrupted runs (crash or session-switch): it replays completed calls at zero token cost and continues. Do NOT resume a settled (done/failed/cancelled) run — start a new run via `workflow_run`.",
       "Call shapes (JSON): " +
       "- status: {\"action\":\"status\"}. " +
-      "- abort: {\"action\":\"abort\",\"runId\":\"<id>\"} (optional: {\"error\":\"<reason>\"}). " +
-      "- resume: {\"action\":\"resume\",\"runId\":\"<id>\",\"args\":{...},\"tokens\":N,\"time\":N,\"model\":\"<provider/modelId>\"} — args/tokens/time/model optional.",
+      "- abort: {\"action\":\"abort\",\"runId\":\"<id>\"}. " +
+      "- resume: {\"action\":\"resume\",\"runId\":\"<id>\"} (+ optional args/tokens/time/model).",
     ],
     parameters: WorkflowControlParams,
 

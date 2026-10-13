@@ -240,13 +240,13 @@ A subagent MAY call \`subagent_start\` itself (environment shows "Depth: N/10"; 
     name: "subagent_manage",
     label: "Subagent Manage",
     promptSnippet: "List, cancel, or close subagents",
+    // D1 单源化终态：字段级功能语义（合法值/缺省/拒绝条件）在 schema 字段说明一处；
+    // description 只留调用形状正例（锚词清单 B1）。
     description: `Manage existing subagents (running or idle).
 
-## Call shapes (JSON)
-
-- {"action":"list","listParam":{"includeFinished":true,"limit":20}} — all listParam fields optional; defaults apply.
-- {"action":"cancel","cancelParam":{"subagentId":"sa-..."}} — only background subagents are cancellable.
-- {"action":"close","closeParam":{"subagentId":"sa-...","force":false}} — archives (recoverable); a running subagent finishes the round first unless force:true.`,
+- {"action":"list","listParam":{"includeFinished":true,"limit":20}}
+- {"action":"cancel","cancelParam":{"subagentId":"sa-..."}}
+- {"action":"close","closeParam":{"subagentId":"sa-...","force":false}}`,
     executionMode: "sequential",
     parameters: SubagentManageParams,
     renderCall: manageRenderCall,
@@ -258,12 +258,11 @@ A subagent MAY call \`subagent_start\` itself (environment shows "Depth: N/10"; 
     name: "subagent_message",
     label: "Subagent Message",
     promptSnippet: "Send a follow-up to a subagent, or fork-from an older one's history",
+    // D1 单源化终态：同 manage——schema 承载字段语义，description 只留调用形状正例（B1）。
     description: `Continue a subagent: send a follow-up message, or restart from an older one's inherited history.
 
-## Call shapes (JSON)
-
-- {"action":"message","messageParam":{"subagentId":"sa-...","text":"continue with X"}} — works on any subagent in this session tree, running or idle (idle revives in place).
-- {"action":"fork-from","forkFromParam":{"sourceSubagentId":"sa-...","prompt":"continue"}} — restart recovery: spawns a NEW subagent inheriting the old history via --fork. Pi-engine subagents only.`,
+- {"action":"message","messageParam":{"subagentId":"sa-...","text":"continue with X"}}
+- {"action":"fork-from","forkFromParam":{"sourceSubagentId":"sa-...","prompt":"continue"}}`,
     executionMode: "sequential",
     parameters: SubagentMessageParams,
     renderCall: messageRenderCall,

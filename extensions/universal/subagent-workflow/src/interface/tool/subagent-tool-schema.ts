@@ -166,7 +166,7 @@ export const SubagentMessageParams = Type.Object({
   // reopen）由 core forkFromHandler 守卫链文案承载（D1，同 messageParam），此处不重复。
   forkFromParam: Type.Optional(Type.Object({
     sourceSubagentId: Type.String({
-      description: "REQUIRED for action:'fork-from'. The OLD subagentId whose history the new subagent inherits. Works for any idle record (disconnected, finished, or closed).",
+      description: "REQUIRED for action:'fork-from'. The OLD subagentId whose history the new subagent inherits (pi engines only). Works for any idle record (disconnected, finished, or closed).",
     }),
     prompt: Type.Optional(Type.String({
       description: "Continuation instruction. Omitted = standard handover frame (reconstruct done/remaining, continue). Whitespace-only treated as omitted.",
