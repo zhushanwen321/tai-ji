@@ -2,9 +2,10 @@
 /**
  * 更新 README 安装段的版本号（merge skill 阶段 6.5 第 2 步调用）。
  *
- * 只替换 README.md / README_EN.md 中 `<!-- INSTALL:BEGIN -->` … `<!-- INSTALL:END -->`
- * 区块内的版本号 token（`v0.9.13` / `0.9.13` 两种形态），区块外内容零打扰——
- * README 正文是人工维护的 SSOT，本脚本只做机械的版本号推进。
+ * 替换 README.md / README_EN.md 中两类版本号：① `<!-- INSTALL:BEGIN -->` …
+ * `<!-- INSTALL:END -->` 区块内的版本号 token（`v0.9.13` / `0.9.13` 两种形态）；
+ * ② 区块外正文的「当前最新版本 / Current latest version」行的 `**vX.Y.Z**`。
+ * 除这两处外零打扰——README 正文是人工维护的 SSOT，本脚本只做机械的版本号推进。
  *
  * 用法：node .agents/skills/merge/scripts/update-readme-install.mjs <version>
  *   <version>  如 0.9.14 或 v0.9.14（v 前缀可选，内部归一）。
@@ -26,6 +27,13 @@ const README_FILES = ['README.md', 'README_EN.md'];
 
 const BEGIN = '<!-- INSTALL:BEGIN -->';
 const END = '<!-- INSTALL:END -->';
+
+// 区块外正文「当前最新版本」行锚（中英页各一）：只命中行首措辞后的首个 **vX.Y.Z**，
+// 行内其余内容（链接、说明文字）不动。正式版三段口径与 bumpVersions 一致。
+const LATEST_LINE_PATTERNS = [
+  /^(当前最新版本：\*\*)v\d+\.\d+\.\d+(\*\*)/m,
+  /^(Current latest version: \*\*)v\d+\.\d+\.\d+(\*\*)/m,
+];
 
 const arg = process.argv[2];
 if (!arg) {
@@ -55,6 +63,18 @@ function bumpVersions(block) {
   return { out, total };
 }
 
+function bumpLatestVersionLine(content) {
+  let total = 0;
+  const out = LATEST_LINE_PATTERNS.reduce(
+    (acc, re) => acc.replace(re, (_match, pre, post) => {
+      total += 1;
+      return `${pre}v${version}${post}`;
+    }),
+    content,
+  );
+  return { out, total };
+}
+
 let failed = false;
 for (const file of README_FILES) {
   const path = join(repoRoot, file);
@@ -73,16 +93,22 @@ for (const file of README_FILES) {
     continue;
   }
   const before = content.slice(beginIdx + BEGIN.length, endIdx);
-  const { out, total } = bumpVersions(before);
+  const { out: blockOut, total: blockTotal } = bumpVersions(before);
+  const full = content.slice(0, beginIdx + BEGIN.length) + blockOut + content.slice(endIdx);
+  const { out: fullOut, total: lineTotal } = bumpLatestVersionLine(full);
+  const total = blockTotal + lineTotal;
   if (total === 0) {
-    console.log(`[warn] ${file} 区块内未找到任何版本号 token——检查区块内容是否被误改。`);
+    console.log(`[warn] ${file} 未找到任何版本号 token——检查区块内容与正文版本行是否被误改。`);
     continue;
   }
-  if (before === out) {
+  if (blockTotal > 0 && lineTotal === 0) {
+    console.warn(`[warn] ${file} 正文「当前最新版本」行未命中锚（措辞被改？）——人工核对该行版本，防漂移复发。`);
+  }
+  if (fullOut === content) {
     console.log(`[ok] ${file} 已是 v${version}（${total} 处版本号，无变化）`);
     continue;
   }
-  writeFileSync(path, content.slice(0, beginIdx + BEGIN.length) + out + content.slice(endIdx));
+  writeFileSync(path, fullOut);
   console.log(`[ok] ${file} 版本号已更新为 v${version}（${total} 处）`);
 }
 

@@ -49,6 +49,25 @@ _collect_process_tree() {
 #   提示档（仅 cwd 挂靠：编辑器 / AI 会话 bash）：不阻塞删除，但删除后其命令将失效。
 # 返回值：0 = 可删（无阻塞进程，或 force=true 且阻塞进程已全部终止）；
 #         1 = 存在未终止的阻塞进程，调用方应拒绝删除。
+# 宿主链 / 自身祖先链判定：命中即从阻塞清单剔除，永不自动终止。
+# 判据与 dev-merge.sh classify_occupants 对齐（命令名 zcode-cli/ZCode*/Claude* 前缀，
+# 或命令行含 /.zcode/ 路径的 MCP 子进程），外加本脚本的自身祖先链。
+# 误判成宿主（不杀）的代价远小于漏判（杀宿主 = 杀死发起本脚本的会话自身，
+# v0.11.1 阶段 7 实际发生两次），宽容方向固定，不追求精确。
+_is_host_or_self_pid() {
+    local target="$1" p="$$"
+    while [[ -n "$p" && "$p" != "1" && "$p" != "0" ]]; do
+        [[ "$p" == "$target" ]] && return 0
+        p="$(ps -o ppid= -p "$p" 2>/dev/null | tr -d ' ')"
+    done
+    local cmdline base
+    cmdline="$(ps -p "$target" -o command= 2>/dev/null || true)"
+    [[ "$cmdline" == *"zcode-cli"* || "$cmdline" == *"/.zcode/"* ]] && return 0
+    base="${cmdline%% *}"
+    [[ "$(basename "$base" 2>/dev/null)" =~ ^(zcode-cli|ZCode|Claude) ]] && return 0
+    return 1
+}
+
 check_resident_processes() {
     local wt_path="$1"
     local force="${2:-false}"
@@ -73,7 +92,24 @@ check_resident_processes() {
         esac
     done < <(lsof -F pf +D "$wt_path" 2>/dev/null)
 
-    local p
+    # 宿主链 / 自身祖先链剔除：先于一切终止逻辑，保证 force 路径永不触碰宿主进程。
+    # 这些进程持有的多为 cwd/只读句柄，不阻断删除；若剔除后无剩余阻塞进程则直接放行
+    local new_blocked="" host_exempt="" p
+    for p in $blocked; do
+        if _is_host_or_self_pid "$p"; then
+            host_exempt="$host_exempt $p"
+        else
+            new_blocked="$new_blocked $p"
+        fi
+    done
+    blocked="$new_blocked"
+    if [[ -n "$host_exempt" ]]; then
+        echo "  WARN: 以下宿主链/自身进程持有句柄，不阻塞删除、永不自动终止:"
+        for p in $host_exempt; do
+            echo "    PID $p — $(ps -p "$p" -o command= 2>/dev/null | cut -c1-100)"
+        done
+    fi
+
     for p in $blocked; do
         echo "  阻塞删除: PID $p — $(ps -p "$p" -o command= 2>/dev/null | cut -c1-100)"
     done
