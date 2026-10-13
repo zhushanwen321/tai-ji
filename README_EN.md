@@ -8,7 +8,7 @@
   <a href="README.md">简体中文</a> | <a href="README_EN.md">English</a> | <a href="https://github.com/zhushanwen321/tai-ji/releases">Download</a>
 </p>
 
-TaiJi is an AI Agent desktop workbench (macOS / Windows / Linux) that puts multiple AI sessions in a single window: run several tasks side by side, watch the AI think, edit files, and run commands as it happens, and fork a session to retry whenever a reply goes the wrong way. Built on the [pi](https://github.com/badlogic/pi-mono) agent kernel, with 17 extensions bundled and ready out of the box.
+TaiJi is an AI Agent desktop workbench (macOS / Windows / Linux) that puts multiple AI sessions in a single window: run several tasks side by side, watch the AI think, edit files, and run commands as it happens, and fork a session to retry whenever a reply goes the wrong way. Built on the [pi](https://github.com/badlogic/pi-mono) agent kernel, with 19 extensions bundled and ready out of the box.
 
 <p align="center">
   <img src="docs/assets/screenshot/screenshot.png" alt="TaiJi main window: multi-session sidebar and live agent conversation stream with thinking, tool calls, and file edits" width="900" />
@@ -140,7 +140,7 @@ Agent capabilities are implemented through the pi extension mechanism, covering 
 
 ## Extension Ecosystem
 
-TaiJi's Agent capabilities are implemented through the pi extension mechanism; source lives in [`extensions/`](extensions/) (20 `@zhushanwen/pi-*` packages + the `shared/` library), 17 of which ship bundled with the app.
+TaiJi's Agent capabilities are implemented through the pi extension mechanism; source lives in [`extensions/`](extensions/) (20 `@zhushanwen/pi-*` packages + the `shared/` library), 19 of which ship bundled with the app.
 
 The following 16 extensions are usable standalone outside taiji (all published to npm, or loadable via `--extension`):
 
@@ -161,6 +161,7 @@ The following 16 extensions are usable standalone outside taiji (all published t
 | [`pi-base-tool-enhance`](extensions/universal/base-tool-enhance/README.md) | Bash tool enhancement |
 | [`pi-plan`](extensions/universal/plan/README.md) | Lightweight plan mode |
 | [`pi-cache-probe`](extensions/universal/cache-probe/README.md) | Cache prefix fingerprint collection |
+| [`pi-provider-live-sync`](extensions/universal/provider-live-sync/README.md) | Provider config real-time sync |
 
 The remaining 4 (`agent-ext` / `msg-id-mapper` / `system-prompt` / `system-prompt-trace`, npm package names have `pi-` prefix) are taiji-integration-specific, source code under `extensions/taiji/`. For extension development, see [docs/extensions/development-guide.md](docs/extensions/development-guide.md).
 

@@ -16,15 +16,15 @@
  *   走 record 回放）、注入安全（workerData.scriptPath 定位 _shared，不回退当前目录）
  *   与脚本可探索性（@pi-meta 进可用 workflow 清单）——走 workflow 管道使批量派发
  *   继承持久化、journal、GUI 投影与断点恢复全套能力。
- * - 无 action 分发：status/abort 不复制，直接指路 workflow tool（runId 同体系）。
+ * - 无 action 分发：status/abort 不复制，直接指路 workflow_control（runId 同体系）。
  * - 无 args 嵌套：tasks/agents/aggregate/... 全在顶层（弱模型信任 schema 结构信号，
- *   两跳转译是事故高发区——对照 workflow tool 的 name+args 形态）。
+ *   两跳转译是事故高发区——对照 workflow_run 的 name+args 形态）。
  * - 批量成员是一次性成员：不可 message/续聊（workflow-origin record 由 messageHandler
  *   拒绝），结果在 run 收口时以一条通知（notifyDone）到达。
  * - 不构造 `details.__gui__`：GUI 挂载按 WORKFLOW_TOOL_NAMES 集合分流，批量块走
  *   workflow 块分支（恒折叠单行 + openWorkflowDrawer）；`__gui__` 的渲染点在普通
  *   tool 分支（v-else）的展开区内，isWorkflow 分支无展开路径不消费——构造即死代码
- *   （D8 裁决；workflow tool 的 `__gui__` 死构造已随之删除，isWorkflow 集合内工具零消费）。
+ *   （D8 裁决；workflow_run 的 `__gui__` 死构造已随之删除，isWorkflow 集合内工具零消费）。
  *
  * 层归属：Interface。依赖 Pi SDK + core lifecycle/registry + reentry-guard。
  */
@@ -64,7 +64,7 @@ import type { RunStartDetails, WorkflowToolResult } from "./tool-result.ts";
  *
  * 常量而非参数：subagents tool 的契约就是「把 tasks 透传给 fan-out 模板」——参数化会让
  * 工具的语义随脚本漂移（对照 D3「执行管道唯一」）。脚本按名经 registry 解析
- * （内置名优先链与 workflow tool actionRun 同一条，见 plan U2「复刻既有加载路径」）。
+ * （内置名优先链与 workflow_run actionRun 同一条，见 plan U2「复刻既有加载路径」）。
  */
 export const FAN_OUT_SCRIPT_NAME = "fan-out";
 
@@ -182,7 +182,7 @@ export async function runSubagentsBatch(
     );
   }
 
-  // slug 运行时护栏（与 workflow tool actionRun 对称的纵深防御；schema maxLength 是第一道关卡）
+  // slug 运行时护栏（与 workflow_run actionRun 对称的纵深防御；schema maxLength 是第一道关卡）
   const providedSlug = params.slug?.trim();
   assertSlugWithinLimit(providedSlug, ["tri-review", "scan-docs"]);
   // 缺省（或空白）时 handler 生成 fan-out-<时间短码>：受益面 = 状态面（drawer run header /
@@ -196,7 +196,7 @@ export async function runSubagentsBatch(
   assertEntryTimeBudget(time);
 
   // 执行体脚本按固定内置名解析（registry.get 精确名匹配；脚本名是工具自带常量
-  // FAN_OUT_SCRIPT_NAME 而非用户参数——workflow tool actionRun 的按名解析已退役
+  // FAN_OUT_SCRIPT_NAME 而非用户参数——workflow_run actionRun 的按名解析已退役
   // 走 getPath 单通道，本工具不允许换脚本，无 getPath 回落需求）。
   const script = await deps.registry.get(FAN_OUT_SCRIPT_NAME);
   if (!script || !script.available) {
@@ -248,8 +248,8 @@ export async function runSubagentsBatch(
  *
  * @param pi ExtensionAPI
  * @param deps LauncherDeps（LifecycleDeps + registry）
- * @param reentryRef reentry guard。**与 workflow tool 共用同一实例**（index.ts
- *   factory 内创建的单例）——两者是同一条 runWorkflow 管道的入口，共用守卫避免
+ * @param reentryRef reentry guard。**与 workflow_run/workflow_control 共用同一实例**（index.ts
+ *   factory 内创建的单例）——三者是同一条 runWorkflow 管道的入口，共用守卫避免
  *   双 guard 语义漂移；workflow-script tool 的 isScriptRunning 是另一套 flag，
  *   与本 guard 无关。
  */
@@ -290,7 +290,7 @@ export function registerSubagentsTool(
       // throw（W4b 契约）：pi 只对 execute throw 置 isError:true，返回值里的 isError
       // 被 agent-loop 丢弃——错误一律 throw（abort 前置判定收敛在 tool-shared）。
       assertNotAborted(signal);
-      // reentry guard：与 workflow tool 共用（acquire 失败时尚未持有 guard，throw 前无需 release）
+      // reentry guard：与 workflow_run/workflow_control 共用（acquire 失败时尚未持有 guard，throw 前无需 release）
       if (!acquireReentryGuard(reentryRef)) {
         throw new Error(REENTRY_BUSY_MESSAGE);
       }
@@ -302,7 +302,7 @@ export function registerSubagentsTool(
     },
 
     renderCall(args: Record<string, unknown>, theme: Theme, _context?: unknown) {
-      // 单行标题：subagents <N tasks> · <slug>（TUI 惯例同 workflow tool 的 renderCall）
+      // 单行标题：subagents <N tasks> · <slug>（TUI 惯例同 workflow_run 的 renderCall）
       const count = Array.isArray(args.tasks) ? args.tasks.length : 0;
       const bulk = count > 0 ? ` ${count} tasks` : "";
       const slug = optionSlugSuffix(args.slug, theme);

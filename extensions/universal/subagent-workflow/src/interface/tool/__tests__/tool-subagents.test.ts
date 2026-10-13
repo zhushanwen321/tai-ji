@@ -425,7 +425,7 @@ describe("错误规格（D9）", () => {
 });
 
 // ══════════════════════════════════════════════════════════════
-describe("reentry guard：与 workflow tool 共用同一实例", () => {
+describe("reentry guard：与 workflow_run/workflow_control 共用同一实例", () => {
   it("guard 被占用 → throw busy 文案，且不触达 runWorkflow", async () => {
     const tool = captureSubagentsTool({ isProcessing: true }, makeRegistry());
     await expect(

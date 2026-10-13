@@ -8,7 +8,7 @@
   <a href="README.md">简体中文</a> ｜ <a href="README_EN.md">English</a> ｜ <a href="https://github.com/zhushanwen321/tai-ji/releases">下载安装</a>
 </p>
 
-太极是一个 AI Agent 桌面工作台（macOS / Windows / Linux）。它把多个 AI 会话放进同一个窗口，你可以同时推进多个任务，实时看到 AI 的思考、文件编辑和命令执行过程，随时分叉重试。基于 [pi](https://github.com/badlogic/pi-mono) agent 内核，内置 21 个扩展（16 个通用扩展随应用打包，5 个为 TaiJi 集成专用），支持接入各类模型服务。
+太极是一个 AI Agent 桌面工作台（macOS / Windows / Linux）。它把多个 AI 会话放进同一个窗口，你可以同时推进多个任务，实时看到 AI 的思考、文件编辑和命令执行过程，随时分叉重试。基于 [pi](https://github.com/badlogic/pi-mono) agent 内核，内置 19 个扩展（15 个通用扩展随应用打包，4 个为 TaiJi 集成专用），支持接入各类模型服务。
 
 <p align="center">
   <img src="docs/assets/screenshot/screenshot.png" alt="太极 TaiJi 主界面：侧栏多会话管理与 Agent 对话流，思考、工具调用、文件编辑实时可见" width="900" />
@@ -98,8 +98,8 @@ Invoke-WebRequest -Uri "https://github.com/zhushanwen321/tai-ji/releases/downloa
 ### 工作台集成
 侧栏文件树（大目录流畅 + git 标记）、抽屉终端（每会话独立现场）、Git/worktree 管理、内置浏览器面板。
 
-### 21 个内置扩展
-Agent 能力通过 pi 扩展机制实现，涵盖权限控制、定时任务、上下文压缩、结构化输出等。16 个通用扩展可脱离 taiji 独立使用，5 个为 TaiJi 集成专用，详见[扩展开发指南](docs/extensions/development-guide.md)。
+### 19 个内置扩展
+Agent 能力通过 pi 扩展机制实现，涵盖权限控制、定时任务、上下文压缩、结构化输出等。19 个扩展随应用打包（15 个通用扩展 + 4 个 TaiJi 集成专用），16 个通用扩展均可脱离 taiji 独立使用，详见[扩展开发指南](docs/extensions/development-guide.md)。
 
 ---
 
@@ -140,7 +140,7 @@ Agent 能力通过 pi 扩展机制实现，涵盖权限控制、定时任务、�
 
 ## 扩展生态
 
-taiji 的 Agent 能力通过 pi 扩展机制实现，源码在 [`extensions/`](extensions/)（21 个 `@zhushanwen/pi-*` 包 + `shared/` 共享库），其中 16 个通用扩展随应用打包，5 个为 TaiJi 集成专用。
+taiji 的 Agent 能力通过 pi 扩展机制实现，源码在 [`extensions/`](extensions/)（20 个 `@zhushanwen/pi-*` 包 + `shared/` 共享库），其中 19 个随应用打包（15 个通用扩展 + 4 个 TaiJi 集成专用）。
 
 以下 16 个扩展可脱离 taiji 独立使用（全部经 npm 发布，也可 `--extension` 直接加载）：
 

@@ -80,7 +80,7 @@ btw 旁路提问（主对话旁开 drawer 辅助对话流）的会话形态定�
 
 **不采用**：各层各自「再讲一遍更保险」的写作方式（三层重复是声明量臃肿的主因）；全部使用指导移 system prompt 注入段的重写形态（注入段随子代理清单等动态内容每 turn 变化，会把稳定的工具声明区变成频变区、破坏 prompt cache——外部同类系统的实测教训；且等于重写全部工具声明，成本远超压缩收益）。
 
-**登记**：实装 = `extensions/universal/subagent-workflow/src/index.ts`（注入段常量）+ 各 extension 工具定义文件；基线对比口径 = `.tmp/tool-size-audit/baseline.mts`（过程产物不入库）。效果：声明量最大的五个工具（subagent 组 / session_read / workflow 组 / ask_user / subagents）合计约 35.8K 字符压缩至约 19.2K 字符（u-a1 落地实测，commit `af1d02ea6`），逐项落入设计目标区间。设计文档 `.tmp/tech-design/tool-declaration-slimming.md`（过程产物不入库），本条即该裁决的现行登记处。
+**登记**：实装 = `extensions/universal/subagent-workflow/src/index.ts`（注入段常量）+ 各 extension 工具定义文件；基线对比口径 = `.tmp/tool-size-audit/baseline.mts`（过程产物不入库）。效果：声明量最大的五个工具（subagent 组 / session_read / workflow 组 / ask_user / subagents）合计约 35.8K 字符压缩至约 22.2K 字符（u-a1 落地实测，commit `af1d02ea6`），逐项落入设计目标区间。设计文档 `.tmp/tech-design/tool-declaration-slimming.md`（过程产物不入库），本条即该裁决的现行登记处。
 
 ### ADR-0135 subagent/workflow 工具拆分粒度与 permission 旧名规则迁移（2026-10-13 设计裁决，tool-declaration-slimming D3）
 

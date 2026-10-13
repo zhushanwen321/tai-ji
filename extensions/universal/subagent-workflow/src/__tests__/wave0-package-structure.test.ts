@@ -61,8 +61,8 @@ describe("wave-0: package structure merge", { timeout: 30000 }, () => {
     mod.default(mounted.api);
   });
 
-  it("AC-1.1: registers 6 tools (subagent 组三件 + subagents + workflow 组两件 + workflow-script)", () => {
-    // D3 拆分后 6 tools: subagent_start/manage/message (from subagents) + subagents +
+  it("AC-1.1: registers 7 tools (subagent 组三件 + subagents + workflow 组两件 + workflow-script)", () => {
+    // D3 拆分后 7 tools: subagent_start/manage/message (from subagents) + subagents +
     // workflow_run/workflow_control + workflow-script
     expect(mounted.tools).toContain("subagent_start");
     expect(mounted.tools).toContain("subagent_manage");

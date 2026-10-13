@@ -93,8 +93,8 @@ export const SubagentStartParams = Type.Object({
   })),
   // [collect 退役] collect 参数已删除——批量编排的唯一入口是 `subagents` tool（fan-out run
   // 管道），单数 start 不再有通知路由选项。旧调用形态（显式带 collect）不会被 pi 参数校验
-  // 拒绝（typebox Object 不产 additionalProperties → 未知字段静默放行），迁移期提示见
-  // subagent-tool.ts 的 promptGuidelines。
+  // 拒绝（typebox Object 不产 additionalProperties → 未知字段静默放行），通知路由不再生效；
+  // 声明层无迁移期提示（原 description 的退役说明已随声明压缩删除，未在其他层重新承载）。
 });
 
 // ── subagent_manage：list / cancel / close 三管理动作 ──
