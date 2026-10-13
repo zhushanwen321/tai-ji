@@ -696,6 +696,23 @@ export interface Message {
    */
   endedAt?: number
   /**
+   * 该 assistant 消息的文本流已定稿（chat-flow-text-color D1）。
+   *
+   * 只对 live assistant 气泡有意义：pi 回合 =「assistant 消息 → 工具 → assistant 消息 → …」
+   * 循环，live 气泡的 status 要到回合级 message.complete 才整体收口（registry.ts
+   * message.complete handler），期间早己写完的中间消息一直挂着 status:'streaming'——
+   * 若 UI 颜色直接跟 status，长工具回合中已定稿正文会一直灰。本字段由
+   * message.message_end（assistant role）当下写入，是「该消息文本不再增长」的确定性事
+   * 实标记；status 不动（sealed guard isLastAssistantStreaming 依赖 streaming 态定位
+   * 工具事件属主，提前翻 complete 会丢 tool_execution_* 帧）。
+   *
+   * 写入点唯一：core registry message.message_end（按位置标记——live 气泡 id 是 runtime
+   * 随机 a-uuid（event-adapter assistantTurnStart），与 pi entry 的原生 message.id 不相交，
+   * 无法按 id 匹配；pi 串行协议下 end 时刻的末条 streaming assistant 即属主）。
+   * reload 基线消息不设置（status 已是 complete，消费侧无需本字段）。
+   */
+  textFinalized?: boolean
+  /**
    * 该 assistant 消息产生的文件变更集合（flow-2 FileChanges 通道）。
    * runtime 经 pi 工具事件解析后推送，变更集卡（W11 WP-L3-11）据此渲染。
    * 仅 assistant 消息有值；user/system 消息不设置。

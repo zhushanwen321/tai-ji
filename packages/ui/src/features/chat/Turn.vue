@@ -120,7 +120,8 @@
              assistant timestamp]。block.ref 即「身份+内容」——text 是 normalizeContent 字符串、
              thinking/tool 是块对象引用（D-1 不可变语义下内容/status/id 变化 = 新对象替换，引用入键即
              覆盖 08 §3.3.1 键清单的 thinking.id / tool.id / content / tool.status）；working/streaming
-             由 assistantStatus 派生。刻意不含 Block 本地折叠 ref（thinkingCollapsed/toolCollapsed）——
+             按 textFinalized 逐消息派生（chat-flow-text-color D1，见 unitBlockProps 注释），
+             textFinalized 入 deps（定稿标记落地时触发重渲染翻白）。刻意不含 Block 本地折叠 ref（thinkingCollapsed/toolCollapsed）——
              v-memo deps 在父组件渲染作用域求值，无法引用子组件私有 ref；折叠由 Block 自身响应式驱动
              （实例经 :key 保活，v-memo 不 gate 子组件内部更新）。sessionId 不入键：跨 session 时
              renderKey 不同 → Turn 实例整体重建，不存在同实例跨 session 复用。 -->
@@ -454,7 +455,9 @@ function unitKey(unit: TraceRenderUnit): number {
 /**
  * v-memo deps（按单元类型二选一，见模板注释）。
  * 组块五项 = D1 契约字面（hasRunning = 组头执行态视觉的切换信号，running 成员全部完成时
- * loader ↔ 静态图标翻转）；普通块五项 = W21 D-4 既有键清单原样迁移。
+ * loader ↔ 静态图标翻转）；普通块六项 = W21 D-4 既有键清单 + textFinalized
+ * （chat-flow-text-color D1：mid-turn 气泡定稿标记落地时要触发重渲染翻白，不入键则
+ * memo 命中旧 props、颜色滞留 streaming 灰到回合收口）。
  * deps 在父组件渲染作用域求值（assistantById 为 computed，此处取 .value）。
  */
 function unitMemoDeps(unit: TraceRenderUnit): unknown[] {
@@ -473,6 +476,7 @@ function unitMemoDeps(unit: TraceRenderUnit): unknown[] {
     unit.block.kind === 'thinking' ? (unit.block.ref as ThinkingBlock).collapsed : undefined,
     assistantById.value.get(unit.assistantId)?.error,
     assistantById.value.get(unit.assistantId)?.timestamp,
+    assistantById.value.get(unit.assistantId)?.textFinalized,
   ]
 }
 
@@ -519,17 +523,24 @@ function kindBlockProps(
  * status/error/timestamp（D8 形态原样迁移）；bash 组块走 type='bash-group' + group 数据
  * （header 三条口径由 core 一次算好）。经 v-bind 展开收敛到单 Block 元素——vue/valid-v-memo
  * 禁止 template v-for 子元素挂 v-memo，双分支无法各自带 memo（vue eslint 规则 + 编译器语义）。
+ *
+ * working/streaming（chat-flow-text-color D1）：按「该消息文本是否仍在写」逐消息派生，
+ * 不再直接跟 assistantStatus——pi 回合 =「assistant 消息 → 工具 → assistant 消息 → …」
+ * 循环，mid-turn 气泡的 status 要到回合级 message.complete 才收口，直接跟 status 会让
+ * 长工具回合中已写完的正文/思考块一直处于 streaming 视觉（正文灰、思考块尾窗模式）。
+ * 事实源 = core message_end 写入的 textFinalized（确定性事件边沿，非时间推测）。
  */
 function unitBlockProps(unit: TraceRenderUnit): BlockUnitProps {
   if (isBashGroupBlock(unit)) {
     return { type: 'bash-group', group: { members: unit.members, header: unit.header, hasRunning: unit.hasRunning } }
   }
   const assistant = assistantById.value.get(unit.assistantId)
+  const textLive = unit.assistantStatus === 'streaming' && !assistant?.textFinalized
   return {
     type: unit.block.kind,
     ...kindBlockProps(unit.block.kind, unit.block.ref),
-    working: unit.assistantStatus === 'streaming',
-    streaming: unit.assistantStatus === 'streaming',
+    working: textLive,
+    streaming: textLive,
     status: unit.assistantStatus,
     error: assistant?.error,
     messageTimestamp: assistant?.timestamp,
