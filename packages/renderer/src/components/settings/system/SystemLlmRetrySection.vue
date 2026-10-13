@@ -1,6 +1,10 @@
 <template>
+  <!-- [w2] demo 对照：SystemSection.vue「LLM 调用」卡——数字输入 UiInput w72/w88 + srow-desc
+       单位后缀；折叠头 = chevron-right 12px 旋转 90° + text-sm neutral-mid；预览/生效提示 =
+       srow-desc（text-sm，卡内 fg-2）；保存行 = 提示左 · tag ok · spacer · btn solid h32 右。
+       warning 行内标注为 real 功能（demo 无对应物），保留。 -->
   <GroupCard :title="t('settings.system.llmRetryTitle')">
-    <div class="px-2.5 pt-1 pb-2" data-testid="llm-retry-section">
+    <div class="px-[10px] pt-[4px] pb-[8px]" data-testid="llm-retry-section">
       <!-- 基础区三键（D5）：enabled / maxRetries / baseDelayMs（秒输入，内部存 ms） -->
       <SettingRow :label="t('settings.system.llmRetryEnable')" :desc="t('settings.system.llmRetryEnableDesc')">
         <Switch
@@ -10,7 +14,7 @@
         />
       </SettingRow>
       <SettingRow :label="t('settings.system.llmRetryMaxRetriesLabel')" :desc="t('settings.system.llmRetryMaxRetriesDesc')">
-        <span v-if="warnings.maxRetries" class="text-[11px] text-warn" data-testid="llm-retry-warn-maxRetries">
+        <span v-if="warnings.maxRetries" class="text-[length:var(--text-2xs)] text-warn" data-testid="llm-retry-warn-maxRetries">
           {{ warnings.maxRetries }}
         </span>
         <Input
@@ -20,13 +24,13 @@
           :min="0"
           :max="20"
           :step="1"
-          class="h-8 w-[72px] px-2 text-right font-mono text-xs"
+          class="w-[72px]"
           :class="invalidFields.has('maxRetries') ? 'border-warn' : ''"
         />
-        <span class="text-neutral-dim text-xs">{{ t('settings.system.llmRetryUnitTimes') }}</span>
+        <span class="text-[length:var(--text-sm)] text-neutral-fg-2">{{ t('settings.system.llmRetryUnitTimes') }}</span>
       </SettingRow>
       <SettingRow :label="t('settings.system.llmRetryBaseDelayLabel')" :desc="t('settings.system.llmRetryBaseDelayDesc')">
-        <span v-if="warnings.baseDelayMs" class="text-[11px] text-warn" data-testid="llm-retry-warn-baseDelayMs">
+        <span v-if="warnings.baseDelayMs" class="text-[length:var(--text-2xs)] text-warn" data-testid="llm-retry-warn-baseDelayMs">
           {{ warnings.baseDelayMs }}
         </span>
         <Input
@@ -36,36 +40,36 @@
           :min="0"
           :max="600"
           :step="1"
-          class="h-8 w-[72px] px-2 text-right font-mono text-xs"
+          class="w-[72px]"
           :class="invalidFields.has('baseDelayMs') ? 'border-warn' : ''"
         />
-        <span class="text-neutral-dim text-xs">{{ t('settings.system.llmRetryUnitSec') }}</span>
+        <span class="text-[length:var(--text-sm)] text-neutral-fg-2">{{ t('settings.system.llmRetryUnitSec') }}</span>
       </SettingRow>
 
-      <!-- 高级折叠区（D5）：provider 层三键，默认收起 -->
+      <!-- 高级折叠区（D5）：provider 层三键，默认收起（demo：chevron-right 旋转 90° + text-sm neutral-mid） -->
       <Collapsible v-model:open="advancedOpen" class="border-t border-hairline" data-testid="llm-retry-advanced">
-        <div class="flex items-center px-1.5 py-2.5">
+        <div class="flex items-center px-[6px] py-[10px]">
           <CollapsibleTrigger as-child>
             <Button
               variant="ghost"
               size="sm"
-              class="h-auto gap-1.5 px-2 text-[12px] text-muted hover:text-fg"
+              class="h-auto gap-1.5 px-2 text-[length:var(--text-sm)] text-neutral-mid hover:text-neutral-fg"
               data-testid="llm-retry-advanced-toggle"
             >
-              <ChevronDown
-                class="size-3.5 shrink-0 transition-transform duration-150"
-                :class="advancedOpen ? 'rotate-180' : ''"
+              <ChevronRight
+                class="size-[12px] shrink-0 transition-transform duration-[var(--duration-fast)]"
+                :class="advancedOpen ? 'rotate-90' : ''"
               />
               {{ t('settings.system.llmRetryAdvancedTitle') }}
             </Button>
           </CollapsibleTrigger>
         </div>
         <CollapsibleContent>
-          <p class="px-1.5 pb-1 text-[11px] text-neutral-mid" data-testid="llm-retry-advanced-hint">
+          <p class="px-1.5 pb-1 text-[length:var(--text-sm)] text-neutral-fg-2" data-testid="llm-retry-advanced-hint">
             {{ t('settings.system.llmRetryAdvancedHint') }}
           </p>
           <SettingRow :label="t('settings.system.llmRetryProviderMaxRetriesLabel')" :desc="t('settings.system.llmRetryProviderMaxRetriesDesc')">
-            <span v-if="warnings['provider.maxRetries']" class="text-[11px] text-warn" data-testid="llm-retry-warn-provider-maxRetries">
+            <span v-if="warnings['provider.maxRetries']" class="text-[length:var(--text-2xs)] text-warn" data-testid="llm-retry-warn-provider-maxRetries">
               {{ warnings['provider.maxRetries'] }}
             </span>
             <Input
@@ -76,12 +80,12 @@
               :max="10"
               :step="1"
               :placeholder="t('settings.system.llmRetryEmptyAsZero')"
-              class="h-8 w-[88px] px-2 text-right font-mono text-xs"
+              class="w-[88px]"
               :class="invalidFields.has('provider.maxRetries') ? 'border-warn' : ''"
             />
           </SettingRow>
           <SettingRow :label="t('settings.system.llmRetryProviderTimeoutLabel')" :desc="t('settings.system.llmRetryProviderTimeoutDesc')">
-            <span v-if="warnings['provider.timeoutMs']" class="text-[11px] text-warn" data-testid="llm-retry-warn-provider-timeoutMs">
+            <span v-if="warnings['provider.timeoutMs']" class="text-[length:var(--text-2xs)] text-warn" data-testid="llm-retry-warn-provider-timeoutMs">
               {{ warnings['provider.timeoutMs'] }}
             </span>
             <Input
@@ -92,12 +96,12 @@
               :max="600"
               :step="1"
               :placeholder="t('settings.system.llmRetryTimeoutPlaceholder')"
-              class="h-8 w-[88px] px-2 text-right font-mono text-xs"
+              class="w-[88px]"
               :class="invalidFields.has('provider.timeoutMs') ? 'border-warn' : ''"
             />
           </SettingRow>
           <SettingRow :label="t('settings.system.llmRetryProviderMaxDelayLabel')" :desc="t('settings.system.llmRetryProviderMaxDelayDesc')">
-            <span v-if="warnings['provider.maxRetryDelayMs']" class="text-[11px] text-warn" data-testid="llm-retry-warn-provider-maxRetryDelayMs">
+            <span v-if="warnings['provider.maxRetryDelayMs']" class="text-[length:var(--text-2xs)] text-warn" data-testid="llm-retry-warn-provider-maxRetryDelayMs">
               {{ warnings['provider.maxRetryDelayMs'] }}
             </span>
             <Input
@@ -107,7 +111,7 @@
               :min="0"
               :max="3600"
               :step="1"
-              class="h-8 w-[88px] px-2 text-right font-mono text-xs"
+              class="w-[88px]"
               :class="invalidFields.has('provider.maxRetryDelayMs') ? 'border-warn' : ''"
             />
           </SettingRow>
@@ -115,31 +119,32 @@
       </Collapsible>
 
       <!-- 预览行（G3）：随输入实时重算指数退避后果 -->
-      <p data-testid="llm-retry-preview" class="border-t border-hairline px-1.5 pt-2 text-xs leading-relaxed text-neutral-dim">
+      <p data-testid="llm-retry-preview" class="border-t border-hairline px-1.5 pt-2.5 pb-1 text-[length:var(--text-sm)] leading-relaxed text-neutral-fg-2">
         {{ previewText }}
       </p>
 
-      <!-- 显式保存 + 生效范围固定提示（D6） -->
-      <div class="flex items-center gap-3 px-1.5 pt-2">
+      <!-- 显式保存 + 生效范围固定提示（D6）；demo 行序 = 提示左 · tag ok · spacer · 保存钮右 -->
+      <div class="flex items-center gap-[16px] border-t border-hairline px-[6px] py-[10px]">
+        <span class="text-[length:var(--text-sm)] text-neutral-fg-2" data-testid="llm-retry-effective-hint">
+          {{ t('settings.system.llmRetryEffectiveHint') }}
+        </span>
+        <span
+          v-if="configured"
+          class="inline-flex h-[18px] items-center rounded-full bg-accent-soft px-[7px] text-[length:var(--text-2xs)] font-semibold text-accent"
+          data-testid="llm-retry-configured-badge"
+        >
+          {{ t('settings.system.llmRetryConfiguredBadge') }}
+        </span>
+        <span class="flex-1"></span>
         <Button
           size="sm"
-          class="h-7 px-3 text-[12px]"
+          class="h-[32px] px-[12px] text-[length:var(--text-sm)]"
           data-testid="llm-retry-save-btn"
           :disabled="saving"
           @click="onSave"
         >
           {{ t('settings.system.llmRetrySave') }}
         </Button>
-        <span class="text-[11px] text-neutral-mid" data-testid="llm-retry-effective-hint">
-          {{ t('settings.system.llmRetryEffectiveHint') }}
-        </span>
-        <span
-          v-if="configured"
-          class="rounded-sm border border-border bg-surface-2 px-1.5 py-0.5 text-[11px] text-neutral-mid"
-          data-testid="llm-retry-configured-badge"
-        >
-          {{ t('settings.system.llmRetryConfiguredBadge') }}
-        </span>
       </div>
     </div>
   </GroupCard>
@@ -154,7 +159,7 @@
  */
 import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ChevronDown } from '@lucide/vue'
+import { ChevronRight } from '@lucide/vue'
 import { Switch } from '@/components/ui/switch'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'

@@ -61,7 +61,7 @@
         </Button>
       </span>
       <span
-        class="shrink-0 self-center opacity-0 transition-opacity duration-150 group-hover:opacity-100"
+        class="shrink-0 self-center opacity-0 transition-opacity duration-[var(--duration-fast)] group-hover:opacity-100"
         :title="t('panel.queueBubble.cancelQueued')"
         :data-testid="`queue-cancel-anchor-${row.clientUuid}`"
       >

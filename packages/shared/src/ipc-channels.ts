@@ -70,6 +70,19 @@ export const DEBUG_RUN_LOG_RETENTION = 'debug:run-log-retention' as const
 export const DIAGNOSTICS_EXPORT_BUNDLE = 'diagnostics:export-bundle' as const
 
 /**
+ * 会话 JSONL 导出通道（2026-10-12 立项）。
+ *
+ * invoke 通道：renderer（SessionItemContextMenu 右键菜单「导出 JSONL」）经此委托 main 把
+ * 该会话的 pi session JSONL 文件复制到用户自选位置——main 先弹保存对话框（用户确认落点，
+ * 对齐 DIAGNOSTICS_EXPORT_BUNDLE 先例），取消返回 { status: 'canceled' }；源路径为
+ * renderer 半可信输入，main 侧必须先校验位于会话文件三棵树
+ * `<piAgentDir>/sessions|subagents|btw` 之内（SessionJsonlExportResult 三态契约见
+ * ipc-payloads.ts；校验失败拒绝并报错，不 fallback）。选冒号式 `session:*`：对齐
+ * 'diagnostics:*' / 'image-cache:*' 领域族惯例，后续同族会话通道沿用该前缀。
+ */
+export const SESSION_EXPORT_JSONL = 'session:export-jsonl' as const
+
+/**
  * local-file servable 预检通道 [chat-html-support §6.9 D9，ADR-0118 第 3 条]。
  *
  * invoke 通道：renderer（内联预览容器 HtmlPreviewInline 经 deps `probeArtifact?` 挂载前

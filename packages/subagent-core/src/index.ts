@@ -32,7 +32,7 @@
 // 0.4.0 = 首个公开发布的收敛收口面（0.3.0 为 2026-08-30 裁决的跳号占位，永不单独
 // 发布；+ minor changeset 收口面落本号）；与 package.json version 的一致性由
 // src/__tests__/smoke.test.ts 动态守护，改版本须两处同步。
-export const CORE_PACKAGE_VERSION = "1.4.0";
+export const CORE_PACKAGE_VERSION = "1.5.0";
 
 // ── 宿主端口接线面（core/）────────────────────────────────────
 // HostServices：dataRoot / log / discoveryRoots 端口 + configureCore 注入；
@@ -301,7 +301,10 @@ export {
   type GlobalConfigReadResult,
 } from "./execution/assembly/config.ts";
 export { isResumable } from "./execution/lifecycle/lifecycle-predicates.ts";
-export { maybeCleanupExpiredSessionFiles } from "./execution/persistence/session-file-gc.ts";
+export {
+  cleanupExpiredEngineJournals,
+  startEngineJournalGcTimer,
+} from "./execution/persistence/engine-journal-gc.ts";
 export { createUiRequestHandlerForMode } from "./execution/ui/ui-request-handler-factory.ts";
 export { WorktreeManager } from "./execution/worktree/worktree-manager.ts";
 export { SubprocessAgentRunner } from "./execution/assembly/subprocess-agent-runner.ts";

@@ -1,5 +1,11 @@
 # @zhushanwen/pi-structured-output
 
+## 6.1.1
+
+### Patch Changes
+
+- 0c4bec66e: chore: refresh dependency range (triggered by @zhushanwen/pi-ext-guards@0.4.3 → @zhushanwen/pi-ext-guards@0.4.4)
+
 ## 6.1.0
 
 ### Minor Changes

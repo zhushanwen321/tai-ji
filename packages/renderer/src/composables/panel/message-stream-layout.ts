@@ -18,7 +18,7 @@
  * 强绑定 DOM：ActivityStrip compacting 行（四行共用同一结构，[2026-09-16 系统通知渲染升级 U5]）——
  * `system-notice content-col flex min-w-0 items-center gap-2 py-1.5`，内含
  * `h-px flex-1` 渐变横线 ×2（`bg-[image:linear-gradient(...)]`，色标 `var(--border-strong)` 18%/82%）+
- * `size-[13px]` stroke 2.2 spinner + `text-[length:var(--text-sm)] font-[550]` 主文案 +
+ * `size-[13px]` stroke 2.2 spinner + `text-[length:var(--text-sm)] [font-weight:var(--fw-mid)]` 主文案 +
  * `rounded-[4px] border border-border-strong px-1.5 leading-[1.8]` 待发 chip
  * （`font-mono text-[length:var(--text-3xs)]`，`panel.message.compactingQueueChip`）。
  *   计算值（检查点 1：jsdom 无真实布局，dev 断言实测校准位）= py-1.5(6px×2) + 内容行
@@ -36,7 +36,7 @@ export const COMPACTING_NOTICE_HEIGHT = 32
  * executing bash 瞬时行占位高度（D3 增强规格后与 compacting 行同款新值）。
  * 强绑定 DOM：ActivityStrip bash 行（与 compacting 行共用同一行结构：`system-notice content-col
  * flex min-w-0 items-center gap-2 py-1.5` + 两条 `h-px flex-1` 渐变横线 + `size-[13px]` spinner +
- * `text-[length:var(--text-sm)] font-[550]` 主文案 + `font-mono text-[length:var(--text-2xs)]`
+ * `text-[length:var(--text-sm)] [font-weight:var(--fw-mid)]` 主文案 + `font-mono text-[length:var(--text-2xs)]`
  * elapsed meta（方案 A：命令在悬停详情，无 chip 分支））→ 计算值 = py-1.5(12px) + 主文案 text-sm×1.5(≈19.5px) ≈ 31.5 → 32px
  * （检查点 1 dev 断言实测校准位，±1px 容差）。[notice-family-phrase-detail 2026-09-18
  * 方案 A] 命令原文移入悬停详情后行内只剩短语 + elapsed mono meta（text-2xs 行高 ≤ 主文案，

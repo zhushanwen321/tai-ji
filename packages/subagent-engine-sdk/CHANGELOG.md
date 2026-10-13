@@ -1,5 +1,11 @@
 # @zhushanwen/subagent-engine-sdk
 
+## 0.10.1
+
+### Patch Changes
+
+- 0c4bec66e: Unify zcode synced provider config path segments behind the SDK path helpers so the CLI and runtime resolve the same locations; kill-chain inherits the shared errno predicate.
+
 ## 0.10.0
 
 ### Minor Changes

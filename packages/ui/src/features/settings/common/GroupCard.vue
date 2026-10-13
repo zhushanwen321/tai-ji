@@ -3,8 +3,8 @@
  * GroupCard —— 设置分组卡片。
  *
  * 范式：
- * - bg-card + 圆角 var(--radius-card)，去 border（靠 surface 浮起分层，不叠 border）
- * - header 浮起分层：bg-surface-2 + 顶部 1px 极淡高光（rgba 0.04）
+ * - --bg-card 底色 + 圆角 var(--radius-card)，去 border（靠 surface 浮起分层，不叠 border）
+ * - header 浮起分层：bg-surface-2 + 顶部 1px 极淡高光（--hairline）
  * - header 左侧 title / actions slot；右侧 actions slot + 可选折叠按钮
  * - body 为默认 slot
  * - 多个 GroupCard 之间 space-4 留白（由 :where 兄弟选择器提供）
@@ -73,11 +73,11 @@ function toggle(): void {
   gap: var(--space-3);
   padding: 10px 16px;
   background: var(--surface-2);
-  border-top: 1px solid rgba(255, 255, 255, 0.04);
+  border-top: 1px solid var(--hairline);
 }
-.group-head:first-child {
-  border-top: 0;
-}
+/* 「仅页面首卡去线」由消费域承接（SettingsModal 共享块
+   `.content-col-inner .group-card:first-of-type .group-head`，demo pages.css 同规）：
+   组件内置 first-child 去线会误伤每张卡的组头（demo 仅首卡去线），不在此做 */
 .head-left {
   display: flex;
   align-items: center;

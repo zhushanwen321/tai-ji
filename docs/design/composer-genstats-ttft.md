@@ -1,5 +1,13 @@
 # Composer TTFT 首字延迟展示 设计
 
+> **形态退役标注（2026-10-08，ui-optimize-unified 决策 6）**：本文档设计的展示载体
+> `GenStatsTriggers.vue`（TTFT/速度/缓存平铺触发器）已随该决策退役删除（组件文件已删，
+> git 可追溯）；TTFT 现行展示宿主 = `GenStatsTtftCard`，经 `ComposerMetricsAggregate`
+> hover 指标聚合页挂载（容量/TTFT/速度/缓存四卡，发丝分隔）。现行形态见
+> docs/DESIGN.md §6.1（composer-bar 组成行）与 docs/CONTEXT.md「Composer 工具条」词条。本文档的
+> 数据管道/采样/存储/协议机制（§3.2–§3.4）仍现行有效；下文提及 GenStatsTriggers 处
+> 均指该已退役的历史形态。
+
 ## 1 背景 / 目标
 
 composer 右下工具带（`Composer.vue` composer-bar）已展示生成指标双触发器：TOKEN 速度（t/s）+ 缓存命中率（%）。速度窗口口径**刻意排除了 provider 首包延迟段**（`event-interpreter-gen-stats.ts` D1 注释：锚点选 assistant `message_start` 到达，不把 TTFT 敏感度引入速度语义）——被剥掉的「请求发出 → 首个 token」正是用户体感最敏感的一段。
@@ -13,7 +21,7 @@ composer 右下工具带（`Composer.vue` composer-bar）已展示生成指标�
 
 ## 2 现状问题
 
-- 数据管道已成熟：`LlmWindowSampler`（采样）→ `GenStatsSample` → `GenStatsService`（落盘 + 聚合）→ `GenStatsFrame`（`session.stats_update` / `session.getGenStats`）→ `useGenStats` → `GenStatsTriggers`（展示）。TTFT 只需沿此管道平推一层，无新管道。
+- 数据管道已成熟：`LlmWindowSampler`（采样）→ `GenStatsSample` → `GenStatsService`（落盘 + 聚合）→ `GenStatsFrame`（`session.stats_update` / `session.getGenStats`）→ `useGenStats` → 展示层（时为 `GenStatsTriggers`，已退役；现行 = 聚合页 `GenStatsTtftCard`）。TTFT 只需沿此管道平推一层，无新管道。
 - 缺口 ①：pi 原生 `turn_start` 事件（每 LLM 请求前发出，agent-loop.js 内层循环逐请求 emit）被 `event-adapter.ts` 的 `NULL_EVENTS` 丢弃，runtime 无「请求起算」锚点。
 - 缺口 ②：adapter 把 `text_start` / `toolcall_start` 等首输出子类型转 noop，interpreter 收不到「首个 token」信号（纯 tool_call 响应无 text_delta）。
 - 缺口 ③：`GenStatsSample` / 存储 / `GenStatsFrame` / 展示层均无 ttft 字段。
@@ -22,7 +30,7 @@ composer 右下工具带（`Composer.vue` composer-bar）已展示生成指标�
 
 ### 3.1 展示（renderer）
 
-- `GenStatsTriggers.vue` 在现有速度触发器**左侧**插入 TTFT 触发器（组件内顺序：TTFT · 速度 · 缓存），沿用同一条 `v-if="sessionId"` landing 隐藏判据、同一套 HoverCard 结构。
+- `GenStatsTriggers.vue`（已退役，现行宿主 = `GenStatsTtftCard` 于指标聚合页）在现有速度触发器**左侧**插入 TTFT 触发器（组件内顺序：TTFT · 速度 · 缓存），沿用同一条 `v-if="sessionId"` landing 隐藏判据、同一套 HoverCard 结构。
 - 触发器文本：`ttftMs < 1000` → `820ms`；`≥ 1000` → `1.2s`（1 位小数，去尾 0）；null → `—`（灰）。等宽数字，不加图标。
 - 三档语义色（延迟反向指标）：`< 1500ms` success · `1500–3000ms` warn · `> 3000ms` danger；null 恒中性灰。阈值为**初值**（有 cacheRatio 三档色先例，无历史校准源），重审触发 = 用户反馈显示档位与体感系统性不符（同速度口径 D1 重审模式）。
 - 浮层（hover，与速度浮层同构）：head = 「首字延迟 TTFT」+ 模型名；2×2 四行 = 本次 / 今日 p50 / 近 7 天 p50 / 近 30 天 p50；无帧显「暂无数据」；**有帧但值全 null 时行值显 `—`（两态区分，同构速度浮层）**；底部口径 note。
@@ -101,7 +109,7 @@ S1/S2/S3 落 U4；S4 落 U1+U3（恢复路径协议 + 服务回填）；S5 落 U
 | U1 契约根 | shared `GenStatsTtft` + `GenStatsFrame.ttft` + runtime `GenStatsSample.ttftMs` + `PiTranslatedEvent` 两个新 kind（`llm-request-start` / `llm-first-output`）+ 协议断言测试 | `packages/shared/src/gen-stats.ts`、`packages/shared/src/__tests__/gen-stats.test.ts`、`packages/runtime/src/services/session/types.ts` |
 | U2 采样 | adapter：`turn_start` 出 NULL_EVENTS + 首输出子类型产 `llm-first-output`；`LlmWindowSampler` 双锚 + first-wins；interpreter 挂点（`llm-request-start` / `llm-first-output` 分发 + 未识别 kind warn 检查） | `packages/runtime/src/infra/pi/event-adapter.ts`、`packages/runtime/src/services/session/event-interpreter-gen-stats.ts`、`packages/runtime/src/services/session/event-interpreter.ts` + 各自测试 |
 | U3 存储聚合 | `TtftRecord` + **校验签名参数化（元组长度入参，默认 2）+ service 侧 `appendRecord`/`entriesSince` 泛型化（禁 `as` 绕过）** + ttft 文件读写 + `aggregateTtft`（p50）+ service 逐字段判定 / current 槽 / composeFrame | `packages/runtime/src/services/session/gen-stats-store.ts`、`gen-stats-service.ts` + 测试 |
-| U4 展示 | TTFT 触发器（速度左侧）+ 浮层 + 三档色 + 格式化 + i18n 双侧 + 挂载顺序断言 | `packages/renderer/src/components/panel/GenStatsTriggers.vue`、`packages/renderer/src/i18n/locales/{zh-CN,en-US}/panel.ts`、`packages/renderer/src/__tests__/panel/gen-stats-*` |
+| U4 展示 | TTFT 触发器（速度左侧）+ 浮层 + 三档色 + 格式化 + i18n 双侧 + 挂载顺序断言 | `packages/renderer/src/components/panel/GenStatsTriggers.vue`（已随 ui-optimize 决策 6 退役，现行宿主 = `GenStatsTtftCard`，经 `ComposerMetricsAggregate` 聚合页挂载）、`packages/renderer/src/i18n/locales/{zh-CN,en-US}/panel.ts`、`packages/renderer/src/__tests__/panel/gen-stats-*` |
 
 依赖：U1 →（U2 ∥ U3 ∥ U4），深度 2。测试分层遵循 `docs/TEST-STRATEGY.md`；全部 vitest、经 `taijiTestConfig` 防线（fs-guard 白名单内 mkdtemp 自建自删）。
 

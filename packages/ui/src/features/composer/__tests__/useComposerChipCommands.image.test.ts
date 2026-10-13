@@ -109,6 +109,45 @@ describe('TC6: insertImageBadge DOM 结构', () => {
   })
 })
 
+describe('image badge lead 缩略图（demo .ichip .thumb，demo 对齐）', () => {
+  beforeEach(() => {
+    document.body.innerHTML = ''
+  })
+
+  it('badge 内渲染 img.chip-thumb（src = local-file:// 编码路径 + alt 用户可读名），位次在 label 前', () => {
+    const { el, chipCommands } = setupChipCommands()
+    chipCommands.insertImageBadge('/tmp/我的 截图.png', 'x-uuid.png', '截图.png')
+
+    const chip = el.querySelector('.image-chip') as HTMLElement
+    const img = chip.querySelector('img.chip-thumb') as HTMLImageElement
+    expect(img).toBeTruthy()
+    // local-file:// 协议（main protocol.handle 白名单通道），路径段整体 encodeURIComponent
+    expect(img.src).toBe('local-file:///' + encodeURIComponent('/tmp/我的 截图.png'))
+    expect(img.alt).toBe('截图.png')
+    // lead 位次：label 之前（demo chipHtml lead + nm + x 顺序）
+    expect(img.nextElementSibling?.classList.contains('chip-label')).toBe(true)
+  })
+
+  it('img 加载失败（error 事件）→ 回退 ImageIcon 占位（span.chip-icon 内联 svg），不留破图', () => {
+    const { el, chipCommands } = setupChipCommands()
+    chipCommands.insertImageBadge('/tmp/missing.png', 'missing.png', 'missing.png')
+
+    const img = el.querySelector('img.chip-thumb') as HTMLImageElement
+    expect(img).toBeTruthy()
+    img.dispatchEvent(new Event('error'))
+
+    // img 被占位 svg 替换：span.chip-icon.chip-thumb-fallback 内 12px svg（lucide image 同款三段）
+    const fallback = el.querySelector('.chip-thumb-fallback') as HTMLElement
+    expect(fallback).toBeTruthy()
+    expect(el.querySelector('img.chip-thumb')).toBeNull()
+    const svg = fallback.querySelector('svg')
+    expect(svg).toBeTruthy()
+    expect(svg?.getAttribute('width')).toBe('12')
+    // 占位复用 chip-icon 容器（壳层既有 12px 规格样式）
+    expect(fallback.classList.contains('chip-icon')).toBe(true)
+  })
+})
+
 describe('TC7: getSegmentsFromEl image 分支', () => {
   beforeEach(() => {
     document.body.innerHTML = ''

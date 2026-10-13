@@ -93,10 +93,11 @@ test.describe('GUI 组件渲染 E2E', () => {
       await turnMeta.click()
     }
 
-    // 组头分支（ui-signal-density §4.2 设计 v7 要求）：连续 bash 折组后须先点组头展开成员行，
-    // 才能定位到成员 tool-block-header；本 mock 序列只有一个 read 工具不成组，防御性分支。
-    const groupHeader = page.getByTestId('bash-group-header')
-    if ((await groupHeader.count()) > 0) {
+    // 组头分支（run 类型分组）：工具行按类型折进 run 组，read 单成员也成「探索 1 步」组，
+    // 组收起时成员行不在 DOM，须先点组头展开；组内含 running 成员时挂载即展开（aria-expanded=true），
+    // 此时再点会收起——按 aria-expanded 判定，不无条件点。
+    const groupHeader = page.getByTestId('run-group-header')
+    if ((await groupHeader.count()) > 0 && (await groupHeader.first().getAttribute('aria-expanded')) === 'false') {
       await groupHeader.first().click()
     }
 

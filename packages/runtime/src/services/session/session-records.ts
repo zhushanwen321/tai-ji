@@ -12,7 +12,7 @@
  *   会话 oversize 分流走旧格式惰性兼容读路径）、getPlanState（冷启动磁盘扫描不变）、
  *   getSubagentHistory/getAgentCall*（record.sessionFile 直读）、
  *   workflowAction/subagentAction（经扩展 slash command 的生命周期/定向消息操作）、
- *   U7 引擎配置三方法（engines.json/config.json 读写）。
+ *   U7 引擎配置方法族（engines.json/config.json 读写；D5 扩 per-engine 默认模型）。
  *
  * 订阅接线（D2③「S5/S6 后订阅者换成 record 模块自身」）：组装根（Facade 构造器）
  * 先调 subscribe(lifecycle)——注册顺序在 projection（播种）之后、reconciler 对账之前，
@@ -24,6 +24,7 @@
  * 不变，transport/index.ts 组合根经 Facade 委托到达——u-s5 同款形态）。
  */
 import { readFileSync, statSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import type {
   SubagentRecord,
@@ -40,16 +41,27 @@ import {
   WORKFLOW_RECORD_CUSTOM_TYPE,
   getSubagentRecordsDir,
   STATE_DIR_NAME,
+  readGlobalConfig,
 } from '@zhushanwen/subagent-core'
 import { extractPlanStateFromSessionFile, scanPlanStateEntries, INACTIVE_PLAN_STATE_VIEW } from './plan-state-extractor.js'
+// 悬停详情卡消息计数（通道 2）：流式计数会话 JSONL 的用户+助手消息条数
+import { countSessionMessagesInFile } from './session-message-count.js'
 // PLAN_STATE_CUSTOM_TYPE canonical = extension-protocol legacy-entries（D-B4-1 从 shared
 // constants 迁出——plan-state entry 契约与 legacy 读取同域单源；包依赖，与下方 engines
 // 契约同引法）
-import type { SubagentEngineConfigView, SubagentEnginesFile } from '@zhushanwen/extension-protocol'
+import type { SubagentEngineConfigView, SubagentEnginesFile, SubagentEngineModelInfo } from '@zhushanwen/extension-protocol'
+// engine-provider-unification D5：zcode 模型清单派生（u1-sync，双源回落内建——真实
+// provider_config.json ∪ taiji 同步副本，任一源不可读按空集继续）
+import { deriveZcodeEngineModels } from '../zcode-provider-sync.js'
+import type { ZcodeProviderSyncPaths } from '../zcode-provider-sync.js'
 import { SUBAGENTS_ENGINES_FILENAME, PLAN_STATE_CUSTOM_TYPE } from '@zhushanwen/extension-protocol'
 // paths.ts 是 Node-only 模块，刻意不从 shared barrel 导出（见 shared/src/index.ts L32 注释），
 // Node 端从子路径 import
 import { getDataDir } from '@taiji/shared/paths'
+// zcode 同步副本段常量单源（SDK zcode-db-paths.ts）——与引擎读侧（zcode-subagent-cli
+// preparer 解析链）同源 import；SDK 是跨包契约根，不违 C-ext-13 的「runtime 不 import
+// 引擎包」红线（relay-registry.ts 同款先例）
+import { ZCODE_PI_SYNCED_PROVIDER_CONFIG_SEGMENTS } from '@zhushanwen/subagent-engine-sdk'
 import type { IProcessManager, IPiEngine } from '../ports/pi-engine.js'
 import { getHistoryFromFilePath, type HistoryFileReadResult } from '../session-history.js'
 import { extractSubagentsFromSessionFile } from './subagent-extractor.js'
@@ -64,6 +76,8 @@ import { extractWorkflowsFromSessionFile } from './workflow-extractor.js'
 import { scanRecordFamilyEntriesFromSessionFile } from './session-file-extraction.js'
 // run 详情侧逐成员透传（覆盖状态 + 最近生效值分发到 agentCalls，subagent-model-switch §9）
 import { projectSubagentModelDetailIntoRuns } from './workflow-record-projection.js'
+// 覆盖查询定位锚透传形态（N+1 全目录扫描修复：调用方一次解析、链内透传）
+import type { SessionMetaRef } from './model-override-query.js'
 import { SessionEventProjection } from './events-projection.js'
 // [event-push-channel] journal 事件推送消费方注册（constructor 内 setJournalReportSink）
 import { setJournalReportSink } from './journal-report-router.js'
@@ -274,6 +288,15 @@ export interface SessionRecordsDeps {
    */
   discoverEngines?(): string[]
   /**
+   * engine-provider-unification D5：zcode 模型清单派生源路径（真实 provider_config.json
+   * 与 taiji 同步副本——deriveZcodeEngineModels 消费）。缺省 = 真实 ~/.zcode/v2/
+   * provider_config.json + <dataDir>/engines/zcode/pi-synced-provider-config.json
+   * （副本段常量单源 = SDK zcode-db-paths.ts ZCODE_PI_SYNCED_PROVIDER_CONFIG_SEGMENTS，
+   * 与 zcode-subagent-cli preparer 解析链同源 import——SDK 契约根，不违 C-ext-13）。
+   * 测试注入隔离真实 ~/.zcode 树（缺省会读到宿主真实配置，断言不可控）。
+   */
+  zcodeModelListPaths?: Pick<ZcodeProviderSyncPaths, 'realProviderConfigPath' | 'syncedCopyPath'>
+  /**
    * [A1 接线] session cwd 查询（subagentAction 的 skill 注入 project 扫描基准，
    * skill-reload-nondestructive D7）——与 SkillRegistry.getSessionCwd 同源（lifecycle
    * 视图 cwd）。可选窄接口（形态对齐 SkillRegistrySessionService.getSessionCwd 先例，
@@ -290,13 +313,30 @@ export interface SessionRecordsDeps {
    * 窄接口面 = gateway 的查询两方法（结构同形，gateway 实装天然满足）。
    */
   modelOverrideQuery?: {
-    getRecordOverride(sessionId: string, recordId: string): SubagentModelOverrideStatus | undefined
-    getRunOverride(sessionId: string, runId: string): SubagentModelOverrideStatus | undefined
+    getRecordOverride(sessionId: string, recordId: string, resolved?: SessionMetaRef): SubagentModelOverrideStatus | undefined
+    getRunOverride(sessionId: string, runId: string, resolved?: SessionMetaRef): SubagentModelOverrideStatus | undefined
   }
 }
 
 /** JSON 落盘缩进（全仓 JSON_INDENT = 2 约定）。 */
 const JSON_INDENT = 2
+
+/**
+ * config.json 锁内读取（引擎配置两 RMW 方法共用的读半段）：无文件 / 坏 JSON /
+ * 非对象形态（合法 JSON 但标量/数组——JSON.parse 不抛错，后续属性赋值会炸）一律
+ * 归 {} 新建基底——「坏 JSON → 新建」语义的完整覆盖（setSubagentDefaultEngine
+ * docstring 先例；非对象形态属实现遗漏，D5 单元补齐）。
+ */
+function readConfigJsonForRmw(configPath: string): Record<string, unknown> {
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(configPath, 'utf8'))
+    return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : {}
+  } catch {
+    return {}
+  }
+}
 
 /**
  * [enhanceSubagentDetails 拆分] record 级覆盖状态判据：workflow origin 成员跳过
@@ -307,9 +347,10 @@ function recordModelOverride(
   sessionId: string,
   query: SessionRecordsDeps['modelOverrideQuery'],
   record: SubagentRecord,
+  resolved?: SessionMetaRef,
 ): SubagentModelOverrideStatus | undefined {
   if (query === undefined || record.origin === 'workflow') return undefined
-  return query.getRecordOverride(sessionId, record.subagentId)
+  return query.getRecordOverride(sessionId, record.subagentId, resolved)
 }
 
 /**
@@ -860,12 +901,18 @@ export class SessionRecords {
     const frames: string[] = []
 
     if (subagentsDifferFromPublished(cache.subagents, cache.publishedSubagents)) {
+      // 覆盖查询定位锚一次解析透传（SessionMetaRef）：原逐 record 查询各扫一遍全目录
+      // → 整帧一次；解析结果仅本帧内使用，不回写缓存。
+      const target = this.deps.sessionStore.scanSessions({ force: true }).find((s) => s.id === sessionId)
+      const resolved: SessionMetaRef | undefined = target !== undefined
+        ? { cwd: target.cwd, filePath: target.filePath }
+        : undefined
       bus.publish(sessionId, {
         type: 'session.subagents',
         // 详情载荷增强（覆盖状态 + 最近生效值）在帧构造点施放——派生缓存（cache.subagents）
         // 保持纯投影产物，增强不回写缓存、不参与水位 diff（覆盖写入的 runtime 感知走
         // record 事件流 → 投影变化 → 水位 diff → 本帧构造时读最新值的时序）。
-        payload: { sessionId, subagents: this.enhanceSubagentDetails(sessionId, Array.from(cache.subagents.values())) },
+        payload: { sessionId, subagents: this.enhanceSubagentDetails(sessionId, Array.from(cache.subagents.values()), resolved) },
       })
       cache.publishedSubagents = new Map(cache.subagents) // publish 完成即推进（镜像当前派生 id 集）
       frames.push('session.subagents')
@@ -957,8 +1004,9 @@ export class SessionRecords {
     sessionId: string,
     query: SessionRecordsDeps['modelOverrideQuery'],
     record: SubagentRecord,
+    resolved?: SessionMetaRef,
   ): SubagentRecord {
-    const override = recordModelOverride(sessionId, query, record)
+    const override = recordModelOverride(sessionId, query, record, resolved)
     const recent = recordRecentEffectiveModel(record)
     if (override === undefined && recent === undefined) return record
     return {
@@ -985,12 +1033,20 @@ export class SessionRecords {
    * 被原样写 undefined / 展开丢光原字段）。同款「惰性 slice + 全索引写」模式在
    * workflow-record-projection.ts projectSubagentModelDetailIntoRuns 有第二处实装
    * （dmg-r2-1 修复同型丢 run），两处注释互引防第三份手写副本。
+   *
+   * resolved = 调用方一次解析的 session 定位锚（SessionMetaRef）：逐 record 的覆盖
+   * 查询共用同一锚（传入则跳过查询内 scanSessions 全目录扫描），N 条详情载荷组装
+   * 场景整帧只扫一次（缺省 undefined = 各查询自扫，现行为不变）。
    */
-  private enhanceSubagentDetails(sessionId: string, records: SubagentRecord[]): SubagentRecord[] {
+  private enhanceSubagentDetails(
+    sessionId: string,
+    records: SubagentRecord[],
+    resolved?: SessionMetaRef,
+  ): SubagentRecord[] {
     const query = this.deps.modelOverrideQuery
     let enhanced: SubagentRecord[] | null = null
     for (let i = 0; i < records.length; i++) {
-      const enhancedRecord = this.enhanceOneSubagentRecord(sessionId, query, records[i]!)
+      const enhancedRecord = this.enhanceOneSubagentRecord(sessionId, query, records[i]!, resolved)
       // 引用相等 = 本条无增强项；仅「惰性数组未建立」时可跳过（零拷贝快路径）——
       // enhanced 建立后每个后续索引（含未命中项）必须显式写回，跳过 = dmg-r2-1 同型
       // 丢 record（首命中项之后的索引从返回列表丢失）。
@@ -1026,11 +1082,28 @@ export class SessionRecords {
       const { records, oversize } = extractSubagentsFromSessionFile(target.filePath)
       if (oversize) this.warnOversizeOnce(sessionId, 'subagents')
       // 详情载荷增强与投影分支同构（分叉态重载消费不因巨文件降级缺字段）。
-      return { records: this.enhanceSubagentDetails(sessionId, records), oversize, found: true }
+      // resolved 透传：target 已在手，覆盖查询不再二次全目录扫描。
+      return {
+        records: this.enhanceSubagentDetails(
+          sessionId,
+          records,
+          { cwd: target.cwd, filePath: target.filePath },
+        ),
+        oversize,
+        found: true,
+      }
     }
     const cache = this.ensureRecordEntriesCache(sessionId)
     const projection = this.ensureProjection(sessionId, cache)
-    return { records: this.enhanceSubagentDetails(sessionId, Array.from(projection.subagents.values())), oversize: false, found: true }
+    return {
+      records: this.enhanceSubagentDetails(
+        sessionId,
+        Array.from(projection.subagents.values()),
+        { cwd: target.cwd, filePath: target.filePath },
+      ),
+      oversize: false,
+      found: true,
+    }
   }
 
   /**
@@ -1069,8 +1142,15 @@ export class SessionRecords {
 
   /**
    * [U7] 子代理引擎配置视图：engines.json（extension 权威写入的动态引擎列表）+
-   * config.json defaultEngine（extension ModelConfigService 读同一文件）。
+   * config.json defaultEngine/engineDefaults（extension ModelConfigService 读同一文件）。
    * 纯磁盘读取，Settings 冷启动（无活跃 session）也可用。
+   *
+   * engine-provider-unification D5 扩展：reply 增 engineModels（per-engine 可选模型
+   * 清单——目前仅 zcode 有派生源，deriveZcodeEngineModels 双源回落内建：副本存在 →
+   * 副本派生；副本缺失 → 回落真实 ~/.zcode/v2/provider_config.json）与 engineDefaults
+   *（per-engine 默认模型偏好）。config.json 读取改经 readGlobalConfig（u5 sanitize
+   * 单源——engineDefaults 条目级清洗内建；缺失/坏 JSON 缺省语义与旧手读形态一致：
+   * defaultEngine 缺省 'pi'、engineDefaults 缺省空表）。
    *
    * 回退链（[W4] 冷启动回退源单源化，设计 §3.4 投影面表）：engines.json 缺失/损坏
    * → **runtime 自身三级发现**（discoverEngines 回退，与派发同源）。不保留静态 JSON
@@ -1094,17 +1174,32 @@ export class SessionRecords {
     if (engines === undefined) {
       engines = this.readDiscoveredEnginesFallback()
     }
-    let defaultEngine = 'pi'
-    try {
-      const conf = JSON.parse(readFileSync(join(subagentsDir, 'config.json'), 'utf8')) as { defaultEngine?: unknown }
-      if (typeof conf.defaultEngine === 'string' && conf.defaultEngine.trim() !== '') {
-        defaultEngine = conf.defaultEngine.trim()
-      }
-    } catch (e) {
-      // 无 config / 坏 JSON → 缺省 pi（extension 侧同缺省语义）
-      console.warn(`[session-service] read subagents config.json failed, defaulting engine to pi: ${toErrorMessage(e)}`)
+    // config.json 经 readGlobalConfig 三态读取（defaultEngine/engineDefaults 同一次读取，
+    // sanitize 单源）；absent（无配置文件，首次安装常态）/failed（坏 JSON，readGlobalConfig
+    // 侧已落 warn）均取缺省——与旧手读 catch 容错语义一致
+    const read = readGlobalConfig(getPiAgentDir())
+    const defaultEngine = read.status === 'ok' && read.config.defaultEngine !== undefined
+      ? read.config.defaultEngine
+      : 'pi'
+    const engineDefaults = read.status === 'ok' && read.config.engineDefaults !== undefined
+      ? read.config.engineDefaults
+      : {}
+    // zcode 模型清单：每次调用现派生（拉为主，无缓存）；ZcodeEngineModelEntry 与
+    // SubagentEngineModelInfo 字段一致（id/name），结构兼容直传
+    const engineModels: Record<string, SubagentEngineModelInfo[]> = {
+      zcode: deriveZcodeEngineModels(this.zcodeModelListPaths()),
     }
-    return { engines, defaultEngine }
+    return { engines, defaultEngine, engineModels, engineDefaults }
+  }
+
+  /**
+   * zcode 模型清单派生路径（deps 注入优先，缺省同源拼装）。
+   */
+  private zcodeModelListPaths(): Pick<ZcodeProviderSyncPaths, 'realProviderConfigPath' | 'syncedCopyPath'> {
+    return this.deps.zcodeModelListPaths ?? {
+      realProviderConfigPath: join(homedir(), '.zcode', 'v2', 'provider_config.json'),
+      syncedCopyPath: join(getDataDir(), ...ZCODE_PI_SYNCED_PROVIDER_CONFIG_SEGMENTS),
+    }
   }
 
   /**
@@ -1139,19 +1234,56 @@ export class SessionRecords {
     }
     const configPath = join(getPiAgentDir(), 'subagents', 'config.json')
     withFileLockSync(configPath, () => {
-      let conf: Record<string, unknown> = {}
-      try {
-        conf = JSON.parse(readFileSync(configPath, 'utf8')) as Record<string, unknown>
-      } catch {
-        // 无既有配置 → 新建（extension 读侧对缺字段的容忍与 DEFAULT_CONFIG 对齐）
-        conf = {}
-      }
+      // 无既有配置 / 坏 JSON / 非对象 → 新建（extension 读侧对缺字段的容忍与 DEFAULT_CONFIG 对齐）
+      const conf = readConfigJsonForRmw(configPath)
       if (conf['defaultEngine'] === engineId) return
       conf['defaultEngine'] = engineId
       // subagents 目录无需再建：withFileLockSync 取锁前已兜底 mkdir dirname(configPath)
       // （无锁时代这行 mkdir 承重，引入锁后成为死代码）。原子写单点走 fs-utils.atomicWrite
       // （tmp+rename）；写失败时 .tmp 残留不被清理——与 ext-config-rmw ext-config
       // 先例同款取舍，磁盘孤儿文件无害，不在此另复制一份清理逻辑
+      atomicWrite(configPath, JSON.stringify(conf, null, JSON_INDENT), `${process.pid}-${Date.now()}`)
+    })
+  }
+
+  /**
+   * engine-provider-unification D5：设置 per-engine 默认模型偏好（config.json
+   * engineDefaults 键，值 = 模型全 ref）。写入前校验 modelRef ∈ 该引擎模型清单
+   * （清单派生与 reply 同源同函数——写入时点校验保证当时有效；provider 事后被删/
+   * 禁的失效偏好不自动清理（D5 减法裁决），派发第四层显式报错 + 指引重选）。
+   *
+   * 🔒 同锁 RMW（与 setSubagentDefaultEngine 同款）：config.json.lock 全程持
+   * withFileLockSync，既有 engineDefaults 条目经 readGlobalConfig 取 sanitize 后
+   * 合法值（u5 sanitizeEngineDefaults 内建——坏条目剔除不连坐），未知字段原样保留。
+   * 锁失败 fail-fast（ELOCKED），经 RPC 错误通路返回 GUI。
+   */
+  async setSubagentEngineDefaultModel(engineId: string, modelRef: string): Promise<void> {
+    const view = await this.getSubagentEngineConfig()
+    const models = view.engineModels?.[engineId]
+    if (models === undefined) {
+      throw new Error(
+        `engine '${engineId}' has no selectable model list (per-engine default model applies to engines with a model list; ` +
+        `recovery: check the engine and provider/model in taiji settings)`,
+      )
+    }
+    if (!models.some((m) => m.id === modelRef)) {
+      throw new Error(
+        `unknown model '${modelRef}' for engine '${engineId}' (available: ${models.map((m) => m.id).join(', ')}) — ` +
+        `recovery: check the provider/model in taiji settings and pick a model from the list`,
+      )
+    }
+    const configPath = join(getPiAgentDir(), 'subagents', 'config.json')
+    withFileLockSync(configPath, () => {
+      // 无既有配置 / 坏 JSON / 非对象 → 新建（与 setSubagentDefaultEngine 同款取舍）
+      const conf = readConfigJsonForRmw(configPath)
+      // 既有偏好经 readGlobalConfig sanitize 后取用（用户手编脏条目不连坐合法偏好）；
+      // 其余字段原样保留（defaultEngine/maxConcurrent/未知键）
+      const read = readGlobalConfig(getPiAgentDir())
+      const existing = read.status === 'ok' ? read.config.engineDefaults : undefined
+      const defaults: Record<string, string> = { ...(existing ?? {}) }
+      if (defaults[engineId] === modelRef) return
+      defaults[engineId] = modelRef
+      conf['engineDefaults'] = defaults
       atomicWrite(configPath, JSON.stringify(conf, null, JSON_INDENT), `${process.pid}-${Date.now()}`)
     })
   }
@@ -1182,11 +1314,14 @@ export class SessionRecords {
     // 逐成员携带（最近生效值源 = 成员 SubagentRecord 的增强产物——先经
     // enhanceSubagentDetails 取成员派生值，再由 projectSubagentModelDetailIntoRuns
     // 按 (parentRunId, stepIndex) 圈定权威成员分发到 agentCalls；聚合面不取单一值）。
+    // resolved 透传：target 已在手，两处增强链共用同一锚（整帧一次解析，不再逐条自扫）。
+    const resolved: SessionMetaRef = { cwd: target.cwd, filePath: target.filePath }
     const workflows = projectSubagentModelDetailIntoRuns(
       sessionId,
       Array.from(projection.workflows.values()),
-      this.enhanceSubagentDetails(sessionId, Array.from(projection.subagents.values())),
+      this.enhanceSubagentDetails(sessionId, Array.from(projection.subagents.values()), resolved),
       this.deps.modelOverrideQuery,
+      resolved,
     )
     return { records: workflows, oversize: false, found: true }
   }
@@ -1207,6 +1342,21 @@ export class SessionRecords {
     const target = this.deps.sessionStore.scanSessions({ force: true }).find((s) => s.id === sessionId)
     if (!target) return INACTIVE_PLAN_STATE_VIEW
     return extractPlanStateFromSessionFile(target.filePath)
+  }
+
+  /**
+   * 获取 session 的对话消息条数（悬停详情卡消息计数，
+   * 供 session.getMessageCount RPC handler 调用）。
+   *
+   * 路径解析与 getPlanState 同款（scanSessions force 单 session 路径解析口径——刚落盘
+   * session 在 TTL 窗口内不静默返回空；文件不存在 = pi 延迟写入窗口，session 不在册
+   * 同语义）。计数 = countSessionMessagesInFile 流式统计（大文件恒定内存），非对话
+   * entry（toolResult/system/compaction/usage 等）不计入，口径证据见该模块头注释。
+   */
+  async getMessageCount(sessionId: string): Promise<number> {
+    const target = this.deps.sessionStore.scanSessions({ force: true }).find((s) => s.id === sessionId)
+    if (!target) return 0
+    return countSessionMessagesInFile(target.filePath)
   }
 
   /**

@@ -80,6 +80,9 @@ import type { AgentOutcome } from "../engine/types.ts";
 // 错误文案的缺省时长基准（[R4] 唯一消费主体随域迁入本聚合）。
 import { DEFAULT_IDLE_TIMEOUT_MS } from "../lifecycle/lifecycle-manager.ts";
 import type { ModelConfigService } from "../assembly/model-config-service.ts";
+// [D6 四层优先级] engineDefaults 派发时点直读（u5 readEngineDefaults——不经
+// ModelConfigService.globalConfig 进程缓存，settings 保存后活跃 session 派发即可读新值）。
+import { readEngineDefaults } from "../assembly/config.ts";
 import type { AgentConfig, ModelInfo, ResolvedModel } from "../assembly/model-resolver.ts";
 import type { NotifyHost } from "../notify/notify-host.ts";
 import type { RecordStore } from "../persistence/record-store.ts";
@@ -531,9 +534,14 @@ export class RunOrchestration {
    *     失败的跨引擎候选提示，D2-4）；
    *   - 非 pi：跳过 pi registry，model 按目标引擎校验（同步期 throw，record 创建前
    *     ——场景 2 错误；ctxModel 不透传，缺省语义归引擎，D2-1③）。
-   * [u-h2 D2-1③] 非 pi 的 model 源 = 调用参数 > agent .md frontmatter（作者声明不
+   * [u-h2 D2-1③] 非 pi 的 model 源 = 调用参数 > agent .md frontmatter（作者显式声明不
    * 忽略）——frontmatter 声明须真正透传给引擎（taskSpec.model 消费 opts.model），
    * 不能只进 record 留痕；无显式 model 时引擎落自身缺省（validateModel(undefined) 裁决）。
+   * [engine-provider-unification D6] 非 pi 解析式扩为四层：task 显式 > agent frontmatter
+   * > settings 用户偏好（engineDefaults[engineId]，派发时点直读磁盘）> 引擎缺省（全
+   * 缺席 → undefined，create 帧省略 model 键，引擎自解析）。偏好层排在 frontmatter 之后
+   * （作者显式声明不被全局偏好压掉——既有层序保持）；偏好补缺值经 stampEngineOnRecordOpts
+   * 写入 record.opts.model 后与显式指定同形（record 消费方只关心「用了哪个模型」）。
    */
   private async resolveIdentityForRoute(
     opts: ExecuteOptions,
@@ -541,7 +549,13 @@ export class RunOrchestration {
     route: EngineRouteResult,
   ): Promise<{ isPiRoute: boolean; engineModel: string | undefined; identity: ResolvedIdentity }> {
     const isPiRoute = route.engineId === DEFAULT_ENGINE_ID;
-    const engineModel = isPiRoute ? undefined : (opts.model ?? preIdentity.agentConfig?.model);
+    // pi 路由恒 undefined（pi 链自有三层解析，taiji 级偏好无意义——D6 不采用段）；
+    // ?? 链惰性求值：前两层任一在场时不触盘（直读仅服务偏好补缺场景）。
+    const engineModel = isPiRoute
+      ? undefined
+      : (opts.model ??
+        preIdentity.agentConfig?.model ??
+        readEngineDefaults(this.deps.getModelService().getAgentDir())[route.engineId]);
     const identity = isPiRoute
       ? await this.deps.resolveIdentity(opts, preIdentity)
       : this.deps.resolveIdentityForEngine(

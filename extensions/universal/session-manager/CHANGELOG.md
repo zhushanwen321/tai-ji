@@ -1,5 +1,11 @@
 # @zhushanwen/pi-session-manager
 
+## 0.3.2
+
+### Patch Changes
+
+- 0c4bec66e: chore: refresh dependency range (triggered by @zhushanwen/extension-protocol@0.19.0 → @zhushanwen/extension-protocol@0.20.0, @zhushanwen/pi-ext-guards@0.4.3 → @zhushanwen/pi-ext-guards@0.4.4, @zhushanwen/pi-notify-ledger-host@0.3.1 → @zhushanwen/pi-notify-ledger-host@0.3.2, @zhushanwen/subagent-core@1.4.0 → @zhushanwen/subagent-core@1.5.0)
+
 ## 0.3.1
 
 ### Patch Changes

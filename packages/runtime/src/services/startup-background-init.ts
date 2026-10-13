@@ -54,13 +54,6 @@ export interface StartupBackgroundDeps {
   skillRegistry: SkillRegistry
   pluginService: PluginService
   /**
-   * 产物目录保留期扫描（chat-html-support §6.7 D7 回收②）：启动扫 + 每日复扫定时器。
-   * 可选成员保证既有测试构造点不破；undefined = 跳过（行为不变）。装配 = runtime 会话服务
-   * 的 `startArtifactRetention`（services/session/artifact-retention.ts），由组合根注入——
-   * 本模块只在后台序列 ⑪ 触发一次。
-   */
-  startArtifactRetention?: () => void
-  /**
    * 孤儿收殓完成 promise 交付回调（crash-forensics-and-watchdog D3，u5）。定时器调度后
    * 同步调用一次，参数 = 「5s 延迟 + 孤儿 pi 收殓 + 后台任务收殓」全链 settle 的 promise
    * （永不 reject——既有 catch 链尾部 resolve）。消费方 = reattach 编排（live 孤儿未收割完
@@ -180,17 +173,8 @@ export async function runStartupBackgroundInit(deps: StartupBackgroundDeps): Pro
   // 后台初始化耗时分解探针（06 §5 m-7）：listen 后各段（改造前这些段全部堆在 listen 前）。
   console.log(`[runtime] background init breakdown: migrationA=${(tMigA - tBg).toFixed(1)}ms migrateBuiltin=${(tMigB - tMigA).toFixed(1)}ms autoUpgrade=${(tAutoUpgrade - tMigB).toFixed(1)}ms piVersion=${(tPiVersion - tAutoUpgrade).toFixed(1)}ms skillInit=${(tSkillInit - tPiVersion).toFixed(1)}ms plugins=${(tPlugins - tSkillInit).toFixed(1)}ms total=${(tPlugins - tBg).toFixed(1)}ms`)
 
-  // ⑪ 产物目录保留期扫描（chat-html-support §6.7 D7 回收②）：启动扫 + 每日复扫定时器
-  // （节奏照搬 main 侧 log-retention.ts 模式，落点在 runtime 会话服务）。同步返回无异步面，
-  // 定时器 unref；单次扫描异常在闭包内消化。缺省（undefined）= 跳过（行为不变）。
-  if (deps.startArtifactRetention) {
-    try {
-      deps.startArtifactRetention()
-    // eslint-disable-next-line taste/no-silent-catch -- best-effort：保留期扫描失败仅 warn，不阻塞启动序列（残留仅是磁盘垃圾，下拍/下次启动重试）
-    } catch (e) {
-      console.warn('[runtime] artifact retention start failed:', e)
-    }
-  }
+  // ⑪ 产物目录保留期扫描已废弃（2026-10-12 用户裁决：会话下挂内容回收统一归删主会话
+  // 级联 session-content-cascade）——步骤保留编号占位说明去向，其余步骤编号不重排（历史锚点）。
 
   // 后台初始化耗时分解探针（06 §5 m-7）：listen 后各段（改造前这些段全部堆在 listen 前）。
 }
@@ -198,7 +182,7 @@ export async function runStartupBackgroundInit(deps: StartupBackgroundDeps): Pro
 /**
  * ⑧ + ⑧b 启动期磁盘残留清扫：两者同为「目录级兜底清扫、失败仅 warn 不影响主流程」的
  * 一档关注点，收敛在独立函数承载（runStartupBackgroundInit 保持串行链编排骨架）。
- * 同步执行，编排位置在 ⑦b 之后、⑪ 之前（本步骤不参与后台耗时分解探针）。
+ * 同步执行，编排位置在 ⑦b 之后（本步骤不参与后台耗时分解探针）。
  */
 function cleanupStartupResidue(): void {
   // ⑧ sessions 目录残留清扫（W3 `.tmp-migrate-`/`.tmp-import-` 崩溃残留 + 缓存治理 U9

@@ -45,6 +45,9 @@ export type {
   SubagentSetModelReply, SubagentChatSetModelReply,
   SubagentSetModelEffectiveReply, SubagentSetModelRecordedReply,
   SubagentSetModelAggregateReply, SubagentSetModelMemberState, SubagentSetModelMemberFailure,
+  // 引擎默认模型族（engine-provider-unification D5）：setSubagentEngineDefaultModel 的
+  // reply 具名类型 + per-engine 模型清单条目（core api 域 / settings UI 跨包具名消费）
+  SubagentEngineDefaultModelMutationReply, SubagentEngineModelInfo,
 } from './protocol'
 // 消息撤回（U3）：__taiji_nav__ 信令命令名常量——U4 runtime 编排跨包消费；
 // 本文件对 protocol.ts 是显式 allowlist（非 export *），漏登记会使常量对下游不可达。
@@ -152,7 +155,7 @@ export { OUTBOUND_FRAME_WARN_BYTES, OUTBOUND_FRAME_TRUNCATE_BYTES, RING_BUDGET_B
 // Electron IPC 通道名 SSOT（u-foundation：renderer-log 上报通道 D2 /
 // image-cache 落盘通道族首成员 D6-⑨）；既有通道仍内联于 preload/main 不在此收敛，
 // 存量边界说明见 ipc-channels.ts 头注释。
-export { RENDERER_LOG, IMAGE_CACHE_WRITE, DEBUG_RUN_LOG_RETENTION, DIAGNOSTICS_EXPORT_BUNDLE, LOCAL_FILE_SERVABLE, LOCAL_FILE_READ } from './ipc-channels'
+export { RENDERER_LOG, IMAGE_CACHE_WRITE, DEBUG_RUN_LOG_RETENTION, DIAGNOSTICS_EXPORT_BUNDLE, SESSION_EXPORT_JSONL, LOCAL_FILE_SERVABLE, LOCAL_FILE_READ } from './ipc-channels'
 // local-file 预检 / 源码读取通道 payload 类型（chat-html-support §6.9 D9：preload 两文件 /
 // renderer lib/ipc / main local-file-prefixes 四方共用同一形态声明——C-comm-22 唯一类型源）。
 export type {
@@ -183,6 +186,13 @@ export {
   type DiagnosticExportSummary,
   type DiagnosticExportError,
   type DiagnosticExportBundleResult,
+} from './ipc-payloads'
+// session:export-jsonl 通道契约（请求 payload / 三态返回
+// 类型——main handler、preload ElectronAPI 与 renderer 域函数三方共用同一形态声明，防漂移）。
+export type {
+  SessionJsonlExportPayload,
+  SessionJsonlExportError,
+  SessionJsonlExportResult,
 } from './ipc-payloads'
 // browser:shields 遮蔽面上报通道契约（display-containers §6.7：payload 形状 /
 // ShieldFace 单项——preload ElectronAPI 签名、renderer ipc 封装与聚合上报、
@@ -234,6 +244,8 @@ export { mandatoryExtensions }
 // 它们依赖 node:os / node:path，而本 barrel 被 renderer（浏览器）整包 import。
 // Node-only 消费方（main/runtime）从子路径 import：'@taiji/shared/paths'
 export * from './file-tree'
+// local-file:// 协议 URL 构造（浏览器安全纯函数；本体不进 paths.ts——见该模块 barrel 注释）
+export * from './local-file-url'
 export type { RecentWorkspaceRecord } from './workspace'
 export type { Project, ProjectStoreState } from './project'
 export type { SubagentRecord, SubagentStatus, ClosedDisplayStatus, SubagentModelOverrideStatus, SubagentRecentEffectiveModel } from './subagent'
@@ -362,7 +374,7 @@ export {
   WORKFLOW_RUN_OUTCOME_LABELS,
   WORKFLOW_RUN_OUTCOME_COVERAGE_LOCK,
 } from './workflow'
-// [可视化 U2] workflow-visualization 协议冻结段的运行时常量（截断白名单四字段 /
+// [可视化 U2] workflow-visualization 协议冻结段的运行时常量（截断白名单五字段 /
 // 截断阈值 / 事件类型全集 + 反向完备编译锁）——消费入口经包根导出面（同上先例）。
 export {
   WORKFLOW_RUN_EVENT_TRUNCATED_FIELDS,

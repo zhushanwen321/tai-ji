@@ -7,6 +7,8 @@
  *   3. 产物文件不存在 → readPreloadedUpdate 返回 null + 清除
  *   4. 完整性校验（size / sha256）失败 → 返回 null + 清除
  *   5. 完整性校验通过 → 返回 filePath
+ *   6. 版本封顶清扫（2026-10-12 裁决，缺口 3）：4 包删最老 / ≤3 不删 /
+ *      版本解析失败不删 / 非包文件零触碰 / 刚登记产物保护 / 清扫异常不阻断主流程
  *
  * Mock 策略参考 orchestrator.test.ts：
  *   - 用真实 fs（临时目录），经 TAIJI_AGENT_DATA_DIR 重定向 getPreloadedUpdateFile()
@@ -39,6 +41,23 @@ import type { LatestReleaseInfo, ReleaseAsset } from '@taiji/shared'
 // 赋值仍放最前（无害），下方模块经动态 import 在 env 就绪后加载。
 const TMP_DATA_DIR = mkdtempSync(path.join(tmpdir(), 'preloaded-update-'))
 process.env.TAIJI_AGENT_DATA_DIR = TMP_DATA_DIR
+
+// 版本封顶清扫的故障注入开关（仅 readdirSync 包装层消费；false = 全量透传真实实现）。
+// vi.hoisted：vi.mock 工厂被提升到 import 之前执行，共享状态须同批提升。
+const sweepFault = vi.hoisted(() => ({ readdirShouldThrow: false }))
+
+// readdirSync 可注入失败（清扫异常不阻断主流程用例）；默认透传真实实现，其余 fs API 全真实。
+// 形态对齐 update/__tests__/manual-claim.test.ts 的 node:fs 部分 mock 范式。
+vi.mock('node:fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs')>()
+  const wrapped = (...args: Parameters<typeof actual.readdirSync>) => {
+    if (sweepFault.readdirShouldThrow) {
+      throw new Error('mock readdir failure (sweep fault injection)')
+    }
+    return actual.readdirSync(...args)
+  }
+  return { ...actual, readdirSync: wrapped as typeof actual.readdirSync }
+})
 
 interface PreloadedUpdateModule {
   writePreloadedUpdate: (release: LatestReleaseInfo, filePath: string) => void
@@ -83,6 +102,12 @@ function makeRelease(version = '0.9.0', asset?: Partial<ReleaseAsset>): LatestRe
   }
 }
 
+
+/** 0.9.x 系列产物存活断言单源（清扫后仍应在盘的一组）。 */
+function expectInstallersKept(paths: string[]): void {
+  for (const p of paths) expect(existsSync(p)).toBe(true)
+}
+
 describe('preloaded-update (预下载产物元信息 SSOT)', () => {
   let mod: PreloadedUpdateModule
   let originalPlatform: PropertyDescriptor | undefined
@@ -123,6 +148,15 @@ describe('preloaded-update (预下载产物元信息 SSOT)', () => {
       closeSync(fd)
     }
     createdFiles.push(filePath)
+    return filePath
+  }
+
+  /** 在升级工作目录（update/）内创建安装包文件，返回绝对路径（afterEach 随目录整体清理） */
+  function createInstallerInUpdateDir(name: string): string {
+    const dir = path.join(TMP_DATA_DIR, 'update')
+    mkdirSync(dir, { recursive: true })
+    const filePath = path.join(dir, name)
+    writeFileSync(filePath, `installer payload: ${name}`)
     return filePath
   }
 
@@ -349,5 +383,121 @@ describe('preloaded-update (预下载产物元信息 SSOT)', () => {
     expect(existsSync(PRELOADED_UPDATE_FILE)).toBe(true)
     expect(warnSpy).toHaveBeenCalled()
     warnSpy.mockRestore()
+  })
+
+  // ── 版本封顶清扫（2026-10-12 用户裁决，缺口 3：保留最新 3 个，超过删最老）──
+  describe('版本封顶清扫（writePreloadedUpdate 成功落登记后）', () => {
+    it('4 个安装包 → 最老被删，保留最新 3 个，登记不受影响', () => {
+      // 版本组刻意跨 9/10 数字边界（0.9.9 < 0.9.10）：字符串序会误删 0.9.12，
+      // 断言删 0.9.9 即证明按真实 semver 排序
+      const v0909 = createInstallerInUpdateDir('TaiJi-0.9.9-mac-arm64.dmg')
+      const v0910 = createInstallerInUpdateDir('TaiJi-0.9.10-mac-arm64.dmg')
+      const v0911 = createInstallerInUpdateDir('TaiJi-0.9.11-mac-arm64.dmg')
+      const v0912 = createInstallerInUpdateDir('TaiJi-0.9.12-mac-arm64.dmg')
+
+      mod.writePreloadedUpdate(makeRelease('0.9.12'), v0912)
+
+      expect(existsSync(v0909)).toBe(false)
+      expect(existsSync(v0910)).toBe(true)
+      expect(existsSync(v0911)).toBe(true)
+      expect(existsSync(v0912)).toBe(true)
+      // 主流程不受清扫影响：登记照常落盘
+      expect(existsSync(PRELOADED_UPDATE_FILE)).toBe(true)
+    })
+
+    it('≤3 个安装包 → 无删除', () => {
+      const v090 = createInstallerInUpdateDir('TaiJi-0.9.0-mac-arm64.dmg')
+      const v091 = createInstallerInUpdateDir('TaiJi-0.9.1-mac-arm64.dmg')
+
+      mod.writePreloadedUpdate(makeRelease('0.9.1'), v091)
+
+      expect(existsSync(v090)).toBe(true)
+      expect(existsSync(v091)).toBe(true)
+    })
+
+    it('版本解析不出的文件跳过不删（无法参与排序的宁可不删）', () => {
+      // 无版本段（共享类型注释中的旧命名示例）与 2 段版本：均不命中安装包正则
+      const noVersion = createInstallerInUpdateDir('TaiJi-mac-arm64.dmg')
+      const twoSegment = createInstallerInUpdateDir('TaiJi-1.2-mac-arm64.dmg')
+      const v090 = createInstallerInUpdateDir('TaiJi-0.9.0-mac-arm64.dmg')
+      const v091 = createInstallerInUpdateDir('TaiJi-0.9.1-mac-arm64.dmg')
+      const v092 = createInstallerInUpdateDir('TaiJi-0.9.2-mac-arm64.dmg')
+      const v093 = createInstallerInUpdateDir('TaiJi-0.9.3-mac-arm64.dmg')
+
+      mod.writePreloadedUpdate(makeRelease('0.9.3'), v093)
+
+      // 4 个可排序包照常封顶：最老的 0.9.0 被删
+      expect(existsSync(v090)).toBe(false)
+      expectInstallersKept([v091, v092, v093])
+      // 版本解析不出的文件一律保留
+      expect(existsSync(noVersion)).toBe(true)
+      expect(existsSync(twoSegment)).toBe(true)
+    })
+
+    it('非包文件零触碰：json/log/脚本/.downloading 临时件/子目录内容均保留', () => {
+      const updateDir = path.join(TMP_DATA_DIR, 'update')
+      mkdirSync(updateDir, { recursive: true })
+      writeFileSync(path.join(updateDir, 'update-error.log'), 'err log')
+      writeFileSync(path.join(updateDir, 'updater.sh'), '#!/bin/bash\n')
+      writeFileSync(path.join(updateDir, 'resume-state.json'), '{}')
+      // .downloading 临时件：后缀不同，不入安装包判定（锚定首尾的正则不命中）
+      const tempFile = createInstallerInUpdateDir('TaiJi-0.8.5-mac-arm64.dmg.downloading')
+      // 子目录内的同名安装包不参与清扫（不递归）
+      const subDir = path.join(updateDir, 'pending')
+      mkdirSync(subDir, { recursive: true })
+      const nestedInstaller = path.join(subDir, 'TaiJi-0.8.0-mac-arm64.dmg')
+      writeFileSync(nestedInstaller, 'nested')
+
+      const v090 = createInstallerInUpdateDir('TaiJi-0.9.0-mac-arm64.dmg')
+      const v091 = createInstallerInUpdateDir('TaiJi-0.9.1-mac-arm64.dmg')
+      const v092 = createInstallerInUpdateDir('TaiJi-0.9.2-mac-arm64.dmg')
+      const v093 = createInstallerInUpdateDir('TaiJi-0.9.3-mac-arm64.dmg')
+
+      mod.writePreloadedUpdate(makeRelease('0.9.3'), v093)
+
+      // 封顶清扫照常发生
+      expect(existsSync(v090)).toBe(false)
+      expect(existsSync(v093)).toBe(true)
+      // 非包文件 + 临时件 + 子目录内容全部保留
+      expect(existsSync(path.join(updateDir, 'update-error.log'))).toBe(true)
+      expect(existsSync(path.join(updateDir, 'updater.sh'))).toBe(true)
+      expect(existsSync(path.join(updateDir, 'resume-state.json'))).toBe(true)
+      expect(existsSync(tempFile)).toBe(true)
+      expect(existsSync(nestedInstaller)).toBe(true)
+    })
+
+    it('刚登记的产物即使版本最老也不被清扫删除（含刚下载的）', () => {
+      const v091 = createInstallerInUpdateDir('TaiJi-0.9.1-mac-arm64.dmg')
+      const v092 = createInstallerInUpdateDir('TaiJi-0.9.2-mac-arm64.dmg')
+      const v093 = createInstallerInUpdateDir('TaiJi-0.9.3-mac-arm64.dmg')
+      // 登记一个版本最老的产物（重装/降级场景）：本轮超限集合只有它自己
+      const v090 = createInstallerInUpdateDir('TaiJi-0.9.0-mac-arm64.dmg')
+
+      mod.writePreloadedUpdate(makeRelease('0.9.0'), v090)
+
+      // 刚登记的产物受保护不删（否则登记立即指向已删除文件）
+      expect(existsSync(v090)).toBe(true)
+      expectInstallersKept([v091, v092, v093])
+      expect(existsSync(PRELOADED_UPDATE_FILE)).toBe(true)
+    })
+
+    it('清扫内部异常只 warn，不阻断 writePreloadedUpdate 主流程', () => {
+      const content = 'sweep-fault content'
+      const release = makeRelease('0.9.0', { size: content.length, sha256: sha256Hex(content) })
+      const filePath = createProductFile('mac.dmg', content)
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      sweepFault.readdirShouldThrow = true
+      try {
+        // 清扫在 readdirSync 即失败 → best-effort warn，登记主流程不受影响
+        expect(() => mod.writePreloadedUpdate(release, filePath)).not.toThrow()
+      } finally {
+        sweepFault.readdirShouldThrow = false
+        warnSpy.mockRestore()
+      }
+      expect(existsSync(PRELOADED_UPDATE_FILE)).toBe(true)
+      const parsed = JSON.parse(readFileSync(PRELOADED_UPDATE_FILE, 'utf-8')) as Record<string, unknown>
+      expect(parsed.version).toBe('0.9.0')
+      expect(parsed.filePath).toBe(filePath)
+    })
   })
 })

@@ -38,7 +38,7 @@
  * [领地说明] 接线件落在 `panel/tray/` 下（u6b 领地 = Composer.vue 底栏区 + tray/**）；底栏其余部分
  * 未抽离是为了控制 Composer.vue 的 script 行数余量（该文件已贴 300 行硬门禁）。
  */
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { ComputedRef, Ref } from 'vue'
 import {
   COMPOSER_DENSITY_MAX_FIT_DEGRADATION,
@@ -50,6 +50,10 @@ import type {
   ComposerFitDegradationLevel,
 } from '@/components/panel/composer-density'
 import { usePluginToolbarContribution } from './use-plugin-toolbar'
+import {
+  HEADER_ACTIONS_SOURCE_KEY,
+  hasVisibleHeaderActions,
+} from '@/composables/shell/useExtensionHostBridge'
 
 /** 左右两簇的 data 属性（fit 测量定位用；中簇是可压缩占位，不参与需求宽） */
 const CLUSTER_LEFT_SELECTOR = '[data-composer-cluster="left"]'
@@ -59,12 +63,49 @@ const CLUSTER_RIGHT_SELECTOR = '[data-composer-cluster="right"]'
 let warnedNoResizeObserver = false
 
 /**
- * 展开态分组容器类（未聚合时的子组容器：模型+思考、指标三触发器平铺）。
+ * 展开态分组容器类（模型+思考组的展开态容器：模型名完整展示 + 思考档位按钮平铺）。
  * [HISTORICAL] 原有 MERGED_CHIP_CLASS（合流单 chip）/ MODEL_MERGED_CHIP_CLASS（88px 截断）/
  * MODEL_SIMPLIFIED_CHIP_CLASS（56px 截断）/ MERGED_CHIP_SEPARATOR_CLASS（发丝分隔）已随
  * tier 合流态与截断态删除——模型名非聚合态恒完整展示，分组视觉仅剩本展开态容器。
  */
 export const EXPANDED_GROUP_CLASS = 'flex items-center gap-0'
+
+/**
+ * 展开态模型+思考组容器类：demo `.composer-row` 行 gap 4px 的对齐位（模型触发器 ↔ 思考触发器
+ * 之间 4px，r4 视觉对齐——两组件贴在 flex 子层的 pop-anchor 里，demo 靠行 gap 天然得到 4px，
+ * real 的组容器原复用 gap-0 使两触发器贴死）。指标展开组保持 `EXPANDED_GROUP_CLASS`（gap-0，
+ * demo `.mtr` gap:0 同款，chips 相邻由各自 px 内边距撑开）。
+ */
+export const EXPANDED_MODEL_THINKING_GROUP_CLASS = 'flex items-center gap-[4px]'
+
+/**
+ * 右簇组容器 / btw 左距的档位条件值（r4 视觉对齐；demo 权威值来自活实例探针——demo 的
+ * 4/8/12px 由「零宽 pop-anchor 仍占行内 gap 位」这一结构事实叠出，real 是 v-if 摘除元素，
+ * 故按档位补差值；landing（无 session）恢复 8px 基准）：
+ * - 模型+思考组：展开（panel）= 行 gap 4px 对齐位 + mr-4（demo「思考档位 ↔ 发送」12px =
+ *   行 gap 4 + 空 agg-mt 锚位 gap 4 + send 自身 ml 4，real 无零宽锚位，右距补 4；landing
+ *   demo 本就 8px = gap 4 + ml 4，不加右距）；聚合 = 聚合容器 + ml-8（demo L3 Gauge↔Boxes
+ *   12px = 行 gap 4 + mt-exp 两个零宽锚位的 gap 4×2，real 补 8），此时发送位恢复相邻 8px。
+ * - btw 左距（demo fit2/3「+ ↔ btw」8px）：左簇聚合档下 Clock 的零宽 pop-anchor 仍在 demo
+ *   行内，real 的 headerAction 是 v-if 摘除（无零宽占位），聚合档给 btw 补 4px 左距。
+ */
+export function useComposerSpacingClasses(
+  sessionId: Ref<string | null>,
+  density: ComputedRef<ComposerDensityLayout>,
+): { modelThinkingGroupClass: ComputedRef<string>; btwSpacingClass: ComputedRef<string | undefined> } {
+  const modelThinkingGroupClass = computed(() => {
+    if (density.value.slots.modelThinking === 'aggregated') {
+      return `${AGGREGATE_GROUP_CLASS} ml-[8px]`
+    }
+    return sessionId.value
+      ? `${EXPANDED_MODEL_THINKING_GROUP_CLASS} mr-[4px]`
+      : EXPANDED_MODEL_THINKING_GROUP_CLASS
+  })
+  const btwSpacingClass = computed(() =>
+    density.value.slots.leftCluster === 'aggregated' ? 'ml-[4px]' : undefined,
+  )
+  return { modelThinkingGroupClass, btwSpacingClass }
+}
 
 /**
  * ── btw 按钮退化序登记（btw-question D7，M3-b）─────────────────────────────
@@ -73,7 +114,7 @@ export const EXPANDED_GROUP_CLASS = 'flex items-center gap-0'
  * 登记位 = **序 0（不退化）**，与 `+` / 发送位同档：
  *
  * - 徽标（badge）是后台回复的唯一通知载体（PRODUCT 原则 2「通知驱动，不打扰」），
- *   任何密度档都必须在场——隐藏即漏看；故不入三步聚合（左簇→指标→模型+思考）的收敛面。
+ *   任何密度档都必须在场——隐藏即漏看；故不入三步聚合（指标→左簇→模型+思考）的收敛面。
  * - 按钮形态不随密度档变化（纯 icon + 角标，无可压缩内容）→ **不设状态机槽位**
  *   （`composer-density.ts` 是只读纯状态机，不感知 btw——本单元领地边界）；其宽度需求
  *   计入左簇实测（`CLUSTER_LEFT` ResizeObserver 观测），溢出时由实测收敛回路让位。
@@ -138,6 +179,15 @@ export function useComposerBarDensity(sessionId: Ref<string | null>): UseCompose
    * （内层 computed 惰性：sid 空时不触发挂载点查询，与旧短路行为等价）。
    */
   const pluginToolbarHasContribution = usePluginToolbarContribution(() => sessionId.value ?? '')
+  /**
+   * 插件 headerAction 可见入口面（左簇内容三源之一；demo composer-bar spec §2.1 B3——L2 聚合面
+   * 含定时任务钮，其存在性必须参与「左簇有无内容」判定，否则托盘空 + toolbar 零贡献时聚合
+   * 入口不渲染、被聚合 clock 直开动作丢失）。判定纯函数与渲染过滤同构（bridge 单份）。
+   */
+  const headerActionsSource = inject(HEADER_ACTIONS_SOURCE_KEY, null)
+  const hasHeaderActionEntries = computed(
+    () => !!headerActionsSource && !!sessionId.value && hasVisibleHeaderActions(headerActionsSource, sessionId.value),
+  )
   const pluginToolbarContributionCount = computed(() =>
     sessionId.value && pluginToolbarHasContribution.value ? 1 : 0,
   )
@@ -147,6 +197,7 @@ export function useComposerBarDensity(sessionId: Ref<string | null>): UseCompose
       {
         pluginToolbarContributionCount: pluginToolbarContributionCount.value,
         hasTrayItems: hasTrayItems.value,
+        hasHeaderActionEntries: hasHeaderActionEntries.value,
       },
       fitLevel.value,
       anchorProtected.value,
@@ -276,9 +327,10 @@ export function useComposerBarDensity(sessionId: Ref<string | null>): UseCompose
     passCount = 0
   })
 
-  // 托盘条目面 / 插件贡献变化会改左簇占宽（散图标 ↔ 聚合 ↔ 缺席），重新判一次
+  // 托盘条目面 / 插件贡献 / headerAction 声明面变化会改左簇占宽（散图标 ↔ 聚合 ↔ 缺席），重新判一次
   watch(hasTrayItems, () => scheduleFitPass())
   watch(pluginToolbarContributionCount, () => scheduleFitPass())
+  watch(hasHeaderActionEntries, () => scheduleFitPass())
 
   return {
     barRef,

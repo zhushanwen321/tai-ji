@@ -21,7 +21,7 @@
       <p data-testid="inbound-frame-dropped-title" class="text-[12.5px] font-medium leading-snug text-neutral-fg">
         {{ title }}
       </p>
-      <p data-testid="inbound-frame-dropped-hint" class="mt-1 select-text text-[12px] leading-snug text-neutral-fg opacity-70">
+      <p data-testid="inbound-frame-dropped-hint" class="mt-1 select-text text-[length:var(--text-xs)] leading-snug text-neutral-fg opacity-70">
         {{ hint }}
       </p>
     </div>

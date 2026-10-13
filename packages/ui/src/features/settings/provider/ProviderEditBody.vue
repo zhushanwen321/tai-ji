@@ -16,7 +16,7 @@
     <div class="flex flex-col gap-4 px-5 py-4">
       <!-- 名称 -->
       <div>
-        <Label class="mb-1.5 block text-[11px] font-semibold text-neutral-mid">{{ t('settings.providerEdit.fieldName') }}</Label>
+        <Label class="mb-1.5 block text-[length:var(--text-2xs)] font-semibold text-neutral-mid">{{ t('settings.providerEdit.fieldName') }}</Label>
         <Input
           v-model="form.name"
           data-testid="provider-edit-name"
@@ -26,8 +26,8 @@
 
       <!-- 类型 + 端点（D5 派生展示，逻辑见 provider-catalog-display.ts）：catalog 类型为只读派生文案、端点为「自定义网关」可选框；custom 照旧（provider 级 api/baseUrl 是定义权威） -->
       <div data-testid="provider-edit-type-field">
-        <Label class="mb-1.5 block text-[11px] font-semibold text-neutral-mid">{{ t('settings.providerEdit.fieldType') }}<span v-if="!isCatalog" class="normal-case tracking-normal">{{ t('settings.providerEdit.fieldTypeHint') }}</span></Label>
-        <p v-if="isCatalog" data-testid="provider-edit-api-derived" class="text-[12px] text-neutral-fg">{{ catalogApiText }}</p>
+        <Label class="mb-1.5 block text-[length:var(--text-2xs)] font-semibold text-neutral-mid">{{ t('settings.providerEdit.fieldType') }}<span v-if="!isCatalog" class="normal-case tracking-normal">{{ t('settings.providerEdit.fieldTypeHint') }}</span></Label>
+        <p v-if="isCatalog" data-testid="provider-edit-api-derived" class="text-[length:var(--text-xs)] text-neutral-fg">{{ catalogApiText }}</p>
         <Select v-else v-model="form.api">
           <SelectTrigger class="h-9">
             <SelectValue :placeholder="t('settings.providerEdit.selectTypePlaceholder')" />
@@ -41,28 +41,28 @@
       </div>
 
       <div>
-        <Label class="mb-1.5 block text-[11px] font-semibold text-neutral-mid">{{ isCatalog ? t('settings.providerEdit.fieldEndpoint') : t('settings.providerEdit.fieldBaseUrl') }}</Label>
+        <Label class="mb-1.5 block text-[length:var(--text-2xs)] font-semibold text-neutral-mid">{{ isCatalog ? t('settings.providerEdit.fieldEndpoint') : t('settings.providerEdit.fieldBaseUrl') }}</Label>
         <template v-if="isCatalog">
           <Input :model-value="endpointDraft" data-testid="provider-edit-endpoint" :placeholder="t('settings.providerEdit.fieldEndpointPlaceholder')" @update:model-value="onEndpointInput" />
-          <p class="mt-1 text-[10px] text-neutral-dim" data-testid="provider-edit-endpoint-hint">{{ endpointHint }}</p>
+          <p class="mt-1 text-[length:var(--text-3xs)] text-neutral-dim" data-testid="provider-edit-endpoint-hint">{{ endpointHint }}</p>
         </template>
         <template v-else>
           <Input v-model="form.baseUrl" placeholder="https://api.anthropic.com" />
-          <p class="mt-1 text-[10px] text-neutral-dim">{{ t('settings.providerEdit.baseUrlKeepHint') }}</p>
+          <p class="mt-1 text-[length:var(--text-3xs)] text-neutral-dim">{{ t('settings.providerEdit.baseUrlKeepHint') }}</p>
         </template>
       </div>
 
       <!-- 凭证区（B-1：按 authMethod 条件化——oauth → OAuth 状态区 + 形态切换；
            api_key / env_var / ambient → 现有 API Key 输入不变。切换经确认弹窗，I9 双凭据互斥） -->
       <div v-if="isOauthForm" data-testid="provider-credential-oauth">
-        <Label class="mb-1.5 block text-[11px] font-semibold text-neutral-mid">
+        <Label class="mb-1.5 block text-[length:var(--text-2xs)] font-semibold text-neutral-mid">
           {{ t('settings.providerEdit.credentialLabel') }}
         </Label>
         <div class="flex flex-wrap items-center gap-2">
           <span
             v-if="oauthPresent"
             data-testid="oauth-status-loggedin"
-            class="flex items-center gap-1.5 text-[12px] font-medium text-success"
+            class="flex items-center gap-1.5 text-[length:var(--text-xs)] font-medium text-success"
           >
             <span class="size-1.5 rounded-full bg-success" />
             {{ t('settings.providerEdit.credentialOauthLoggedIn') }}
@@ -70,12 +70,12 @@
           <span
             v-else
             data-testid="oauth-status-not-loggedin"
-            class="text-[12px] font-medium text-warn"
+            class="text-[length:var(--text-xs)] font-medium text-warn"
           >{{ t('settings.providerEdit.credentialOauthNotLoggedIn') }}</span>
           <span class="flex-1" />
           <Button
             variant="secondary"
-            class="h-7 px-2.5 text-[11px] text-neutral-mid"
+            class="h-7 px-2.5 text-[length:var(--text-2xs)] text-neutral-mid"
             data-testid="oauth-relogin-btn"
             @click="emit('oauthLogin')"
           >
@@ -85,17 +85,17 @@
                RPC 编排在父组件（ui 零 renderer import），经 @oauth-logout 上抛。 -->
           <Button
             variant="ghost"
-            class="h-7 px-2.5 text-[11px] text-neutral-dim"
+            class="h-7 px-2.5 text-[length:var(--text-2xs)] text-neutral-dim"
             data-testid="oauth-logout-btn"
             @click="emit('oauthLogout')"
           >
             {{ t('settings.providerEdit.credentialOauthLogout') }}
           </Button>
         </div>
-        <p class="mt-1 text-[10px] text-neutral-dim">{{ t('settings.providerEdit.credentialOauthHint') }}</p>
+        <p class="mt-1 text-[length:var(--text-3xs)] text-neutral-dim">{{ t('settings.providerEdit.credentialOauthHint') }}</p>
         <Button
           variant="ghost"
-          class="mt-1.5 h-auto p-0 text-[11px] text-accent hover:bg-transparent hover:underline"
+          class="mt-1.5 h-auto p-0 text-[length:var(--text-2xs)] text-accent hover:bg-transparent hover:underline"
           data-testid="auth-switch-to-apikey"
           @click="requestAuthSwitch('api_key')"
         >
@@ -103,7 +103,7 @@
         </Button>
       </div>
       <div v-else data-testid="provider-credential-apikey">
-        <Label class="mb-1.5 block text-[11px] font-semibold text-neutral-mid">
+        <Label class="mb-1.5 block text-[length:var(--text-2xs)] font-semibold text-neutral-mid">
           {{ t('settings.providerEdit.fieldApiKey') }}
           <span class="normal-case tracking-normal">{{ t('settings.providerEdit.apiKeyHint') }}</span>
         </Label>
@@ -135,13 +135,13 @@
             <Trash2 class="size-4" />
           </Button>
         </div>
-        <p class="mt-1 text-[10px] text-neutral-dim">
+        <p class="mt-1 text-[length:var(--text-3xs)] text-neutral-dim">
           {{ t('settings.providerEdit.apiKeyNoteKeep') }}{{ provider?.apiKeySet ? t('settings.providerEdit.apiKeyNoteClear') : '' }}
         </p>
         <Button
           v-if="oauthSupported"
           variant="ghost"
-          class="mt-1.5 h-auto p-0 text-[11px] text-accent hover:bg-transparent hover:underline"
+          class="mt-1.5 h-auto p-0 text-[length:var(--text-2xs)] text-accent hover:bg-transparent hover:underline"
           data-testid="auth-switch-to-oauth"
           @click="requestAuthSwitch('oauth')"
         >
@@ -151,7 +151,7 @@
 
       <!-- authHeader 开关 -->
       <div class="flex items-center justify-between">
-        <Label class="text-[11px] font-semibold text-neutral-mid">
+        <Label class="text-[length:var(--text-2xs)] font-semibold text-neutral-mid">
           {{ t('settings.providerEdit.fieldAuthHeader') }}
           <span class="normal-case tracking-normal">{{ t('settings.providerEdit.authHeaderHint') }}</span>
         </Label>
@@ -165,7 +165,7 @@
 
       <!-- headers 行编辑 -->
       <div data-testid="headers-editor">
-        <Label class="mb-1.5 block text-[11px] font-semibold text-neutral-mid">
+        <Label class="mb-1.5 block text-[length:var(--text-2xs)] font-semibold text-neutral-mid">
           {{ t('settings.providerEdit.customHeaders') }}
           <span class="normal-case tracking-normal">{{ t('settings.providerEdit.customHeadersHint') }}</span>
         </Label>
@@ -178,13 +178,13 @@
             <Input
               v-model="row.key"
               :placeholder="t('settings.providerEdit.headerKeyPlaceholder')"
-              class="h-8 flex-1 text-[12px]"
+              class="h-8 flex-1 text-[length:var(--text-xs)]"
               @update:model-value="syncHeadersFromRows"
             />
             <Input
               v-model="row.value"
               :placeholder="t('settings.providerEdit.headerValuePlaceholder')"
-              class="h-8 flex-1 text-[12px]"
+              class="h-8 flex-1 text-[length:var(--text-xs)]"
               @update:model-value="syncHeadersFromRows"
             />
             <Button
@@ -199,7 +199,7 @@
         </div>
         <Button
           variant="ghost"
-          class="mt-1.5 h-auto p-0 text-[11px] text-accent hover:bg-transparent hover:underline"
+          class="mt-1.5 h-auto p-0 text-[length:var(--text-2xs)] text-accent hover:bg-transparent hover:underline"
           @click="addHeader"
         >
           {{ t('settings.providerEdit.addHeader') }}
@@ -232,19 +232,19 @@
       <template v-if="isCatalog">
         <!-- builtin 只读列表（徽章「内置」；编辑/删除按钮刻意缺席——C4 边界） -->
         <div class="px-5 py-4" data-testid="provider-models-builtin">
-          <Label class="mb-1.5 block text-[11px] font-semibold text-neutral-mid">
+          <Label class="mb-1.5 block text-[length:var(--text-2xs)] font-semibold text-neutral-mid">
             {{ t('settings.providerEdit.builtinModelsLabel') }}
           </Label>
-          <p class="mb-2 text-[10px] text-neutral-dim">{{ t('settings.providerEdit.catalogModelsMixedHint') }}</p>
+          <p class="mb-2 text-[length:var(--text-3xs)] text-neutral-dim">{{ t('settings.providerEdit.catalogModelsMixedHint') }}</p>
           <ul v-if="builtinModels.length" class="flex flex-col gap-1">
             <li
               v-for="m in builtinModels"
               :key="m.id"
               data-testid="builtin-model-row"
-              class="flex items-center gap-1.5 rounded-sm bg-surface px-2.5 py-1 text-[12px] text-neutral-mid"
+              class="flex items-center gap-1.5 rounded-sm bg-surface px-2.5 py-1 text-[length:var(--text-xs)] text-neutral-mid"
             >
               <span class="font-medium text-neutral-fg">{{ m.name || m.id }}</span>
-              <span class="text-[10px] text-neutral-dim">{{ m.id }}</span>
+              <span class="text-[length:var(--text-3xs)] text-neutral-dim">{{ m.id }}</span>
               <span
                 data-testid="model-badge-builtin"
                 class="ml-auto shrink-0 rounded-sm bg-surface-hover px-1.5 py-0.5 text-[9px] font-medium text-neutral-mid"
@@ -295,11 +295,11 @@
       data-testid="provider-save-bar"
       class="sticky bottom-0 flex items-center gap-2 border-t border-border bg-surface px-5 py-3"
     >
-      <span class="flex items-center gap-1.5 text-[12px] font-semibold text-warn">
+      <span class="flex items-center gap-1.5 text-[length:var(--text-xs)] font-semibold text-warn">
         <span class="size-1.5 rounded-full bg-warn" />
         {{ t('settings.provider.unsavedBadge') }}
       </span>
-      <span v-if="actionError" class="flex-1 truncate text-[12px] text-danger">{{ actionError }}</span>
+      <span v-if="actionError" class="flex-1 truncate text-[length:var(--text-xs)] text-danger">{{ actionError }}</span>
       <span v-else class="flex-1" />
       <Button
         variant="ghost"

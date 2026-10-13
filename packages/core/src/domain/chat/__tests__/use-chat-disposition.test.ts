@@ -394,7 +394,7 @@ describe('pi1-disposition-chat-flow U2⑤：受理回执前不上屏（ADR-0122 
   })
 })
 
-describe('pi1-disposition-chat-flow：断连未确认终局呈现（command-pi-restart-response-loss 终局③）', () => {
+describe('pi1-disposition-chat-flow：断连未确认终局呈现（命令终局事件化 终局③）', () => {
   beforeEach(() => {
     resetChatModuleStateForTest()
     resetDeliveryProjectionForTest()

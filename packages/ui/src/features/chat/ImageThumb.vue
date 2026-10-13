@@ -11,7 +11,7 @@
       v-if="!failed && path"
       :src="thumbSrc"
       :alt="displayName"
-      class="image-thumb mr-1 max-w-[120px] max-h-[80px] rounded-md border border-[var(--border-neutral-dim)] object-cover align-middle"
+      class="image-thumb mr-1 max-w-[120px] max-h-[80px] rounded-md border border-neutral-dim object-cover align-middle"
       @error="onError"
     />
     <!-- 降级 badge：复用 file badge 的绿色 token + 间距/字号（Turn.vue:82-96），视觉同族。
@@ -30,6 +30,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { Image as ImageIcon } from '@lucide/vue'
+import { localFileUrl } from '@taiji/shared'
 
 /**
  * image segment 缩略图 props。
@@ -45,10 +46,10 @@ const props = defineProps<{
 const failed = ref(false)
 
 /**
- * 图片 URL：local-file:// 协议 + encodeURIComponent 编码路径（处理中文/空格）。
- * main.ts 的 protocol.handle('local-file') 拦截并 decodeURIComponent 还原。
+ * 图片 URL：local-file:// 协议（main.ts 的 protocol.handle('local-file') 拦截并还原）。
+ * URL 构造收敛 shared localFileUrl 单点（与 composer 缩略图同通道，防格式漂移）。
  */
-const thumbSrc = computed(() => 'local-file:///' + encodeURIComponent(props.path))
+const thumbSrc = computed(() => localFileUrl(props.path))
 
 /** img onerror：白名单 403 / 文件损坏 → 标记失败降级 badge */
 function onError(): void {

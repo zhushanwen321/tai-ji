@@ -13,69 +13,31 @@
  * flow mock 带 pendingPreset（landing 态 launchConfigView 解析消费），相对 helper 的
  * composerFlowModule 为超集。ComposerInput stub 暴露 insertFileChip spy。
  */
+// helper import 必须先于一切项目内模块（@/stores 等会在模块图加载期触发 @/api mock
+// factory，factory 引用的 helper 绑定彼时必须已初始化，否则 TDZ——vi.mock hoisting 约束）
+import {
+  composerApiModule,
+  composerChatModule,
+  composerChatStoreModule,
+  composerChildStubs,
+  composerFlowModule,
+  composerSessionStoreModule,
+} from '../helpers/composer-mount'
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
-import { defineComponent, ref } from 'vue'
+import { defineComponent } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
-import { composerChildStubs } from '../helpers/composer-mount'
 
-// ── mock composable / api（防真依赖构造报错）──
-vi.mock('@/composables/features/chat/useChat', () => ({
-  useChat: () => ({
-    send: vi.fn(),
-    steer: vi.fn(),
-    followUp: vi.fn(),
-    abort: vi.fn(),
-    compact: vi.fn(),
-    editAndResend: vi.fn(),
-    hydrateHistory: vi.fn(),
-  }),
-}))
-vi.mock('@/composables/features/new-task/useNewTaskFlow', () => ({
-  useNewTaskFlow: () => ({
-    startFlow: vi.fn(),
-    submitFirstMessage: vi.fn(),
-    currentModel: { value: null },
-    setPendingModel: vi.fn(),
-    state: { value: 'idle' },
-    currentSessionId: { value: null },
-    currentCwd: ref(null), // W4：useProjectSkills(flow.currentCwd) watch 需要真 ref，非裸对象
-    pendingPreset: ref(null), // landing 态 launchConfigView 解析消费
-  }),
-  resetNewTaskFlow: vi.fn(),
-}))
-vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
-  model: { switchModel: vi.fn() },
-  session: { setThinkingLevel: vi.fn(async (sessionId: string, level: string) => ({ sessionId, level })) },
-  composer: {
-    getMentionCandidates: vi.fn().mockResolvedValue([]),
-    getFileCandidates: vi.fn().mockResolvedValue([]),
-  },
-  config: {
-    // W4：useGlobalSkills/useProjectSkills 调用
-    getGlobalSkills: vi.fn().mockResolvedValue([]),
-    getProjectSkills: vi.fn().mockResolvedValue([]),
-    onSkillCacheInvalidated: () => () => {},
-  },
-}))
+// ── mock composable / api（防真依赖构造报错，工厂收编 helpers/composer-mount.ts：
+//     flow mock 的 currentCwd/pendingPreset 在 helper 工厂内已是真 ref，W4 约束保持）──
+vi.mock('@/composables/features/chat/useChat', () => composerChatModule())
+vi.mock('@/composables/features/new-task/useNewTaskFlow', () => composerFlowModule())
+vi.mock('@/api', () => composerApiModule())
+// file 注入链路用真实 composerInjectionStore 单例（见下方 import）——mock 只隔离外围依赖
 
 // ── mock store（commandStore / chat / session / settings）──
-vi.mock('@/stores/chat', () => ({
-  useChatStore: () => ({
-    isStreaming: ref(false),
-    isActive: () => false,
-    getRetryState: () => undefined,
-    isCompacting: () => false,
-    // [u6b] 发送位四态渲染即读 occupancy 投影（sendButtonState ← effectivePhase），mock 需提供
-    sessionPhase: () => ({ turn: 'idle', compacting: false, bash: false }),
-    // [session-dead C1 方案一] Composer 挂 TurnProgressBar 读 turn 进展派生，新读口 mock 跟随
-    getMessages: () => [],
-    getOccupancy: () => ({ turn: 'idle', compacting: false, bash: false }),
-  }),
-}))
-vi.mock('@/stores/session', () => ({
-  useSessionStore: () => ({ active: undefined, list: [], applySnapshot: vi.fn() }),
-}))
+vi.mock('@/stores/chat', () => composerChatStoreModule())
+vi.mock('@/stores/session', () => composerSessionStoreModule())
 
 // ── ComposerInput mock：defineExpose 暴露 insertFileChip spy（U6-U9 mock 层）──
 let composerInputSpies: Array<{ insertFileChip: ReturnType<typeof vi.fn> }> = []

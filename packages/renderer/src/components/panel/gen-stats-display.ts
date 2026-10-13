@@ -1,32 +1,32 @@
 /**
- * gen-stats-display —— GenStats 触发器（底栏文本 chip）与两张指标卡（浮层内容）共用的显示纯函数。
+ * gen-stats-display —— GenStats 指标卡（浮层内容：TTFT / 速度 / 缓存）共用的显示纯函数。
  *
- * 为什么独立成模块（深模块纪律，防两处复制）：W3a 把 GenStatsTriggers 的两个 HoverCardContent
- * 拆成 GenStatsSpeedCard / GenStatsCacheCard 后，触发器与卡片要显示**同一口径**的归因文案、
- * 语义色分档与数值格式——协议漂移兜底（RD-2#7 未知 reason 的 default 分支）这类修复若存在
- * 两份拷贝，必然漏改一处产生口径漂移。故：三档阈值 / 归因 label / 数值格式收敛于此，
- * 触发器与卡片只各自保留「自己的布局 + 着色映射」。
+ * 为什么独立成模块（深模块纪律，防多处复制）：各指标卡要显示**同一口径**的归因文案、语义色
+ * 分档与数值格式——协议漂移兜底（RD-2#7 未知 reason 的 default 分支）这类修复若存在多份拷贝，
+ * 必然漏改一处产生口径漂移。故：阈值 / 归因 label / 数值格式收敛于此，各卡只保留
+ * 「自己的布局 + 着色映射」。
  *
  * 零 vue 组件依赖（纯函数 + 类型），i18n 经参数注入（getDisplayLabel 同款注入范式）。
  */
 import type { GenStatsCacheMiss } from '@taiji/shared'
 
-/** 缓存命中率语义色三档阈值（设计 §3.1：≥80 success / 50–80 warn / <50 danger） */
+/** 缓存命中率语义色三档阈值（demo ComposerBar cacheCls 对齐：≥80 success / 50–80 中性 /
+ *  <50 warn——中档是「正常波动」非告警，低档才值得提醒，均非 danger 级） */
 const CACHE_SUCCESS_THRESHOLD = 80
 const CACHE_WARN_THRESHOLD = 50
 
-/** 缓存命中率的语义色档（neutral = 无值 / 归因态，非故障） */
+/** 缓存命中率的语义色档（neutral = 无值 / 归因态 / 50–80 中性档） */
 export type CacheTier = 'success' | 'warn' | 'danger' | 'neutral'
 
 /** 数值 → 语义色档（null = 无数据 → neutral；归因态由调用方强制 neutral） */
 export function cacheTierOf(v: number | null | undefined): CacheTier {
   if (v == null) return 'neutral'
   if (v >= CACHE_SUCCESS_THRESHOLD) return 'success'
-  if (v >= CACHE_WARN_THRESHOLD) return 'warn'
-  return 'danger'
+  if (v >= CACHE_WARN_THRESHOLD) return 'neutral'
+  return 'warn'
 }
 
-/** 档 → 前景色 token 工具类（触发器与卡片行共用；hover 变体只在触发器上拼接） */
+/** 档 → 前景色 token 工具类（指标卡行共用） */
 export const CACHE_TIER_TEXT_CLASS: Record<CacheTier, string> = {
   success: 'text-success',
   warn: 'text-warn',
@@ -68,17 +68,16 @@ export function cachePercentDisplay(v: number | null | undefined): string {
   return v == null ? '—' : `${v}%`
 }
 
-/** 速度统一显示：null →「—」，否则「N t/s」（触发器与浮层四行同口径） */
+/** 速度统一显示：null →「—」，否则「N t/s」（浮层四行同口径） */
 export function formatSpeed(v: number | null | undefined): string {
   return v == null ? '—' : `${v} t/s`
 }
 
-// ── TTFT（composer-genstats-ttft U4，设计 §3.1；自 GenStatsTriggers 普通 script 下沉）──
+// ── TTFT（composer-genstats-ttft U4，设计 §3.1）──
 
 /**
- * TTFT 展示纯函数与阈值常量（composer-genstats-ttft U4，设计 §3.1）——经普通 script 块
- * 命名导出供单测直连（照 AsyncErrorFallback.vue 双 script 块先例；数值格式化与三档色
- * 判定不依赖组件实例/reactive 状态，抽纯函数是实施计划 U4 的显式要求）。
+ * TTFT 展示纯函数与阈值常量（composer-genstats-ttft U4，设计 §3.1）——命名导出供单测直连；
+ * 数值格式化与三档色判定不依赖组件实例/reactive 状态。
  */
 
 /** 三档语义色阈值（ms，延迟反向指标）。**初值**——无历史校准源（cacheRatio 三档色先例），
@@ -94,7 +93,7 @@ const TTFT_SECONDS_ROUNDING_STEP_MS = 100
 const TENTHS_PER_SECOND = 10
 
 /** TTFT 时长格式化（设计 §3.1）：<1000ms → 整数毫秒「820ms」；≥1000 →「1.2s」（1 位小数
- *  四舍五入、去尾 0：1000 →「1s」）。null 判定归调用方（触发器/浮层行显「—」，无值纪律
+ *  四舍五入、去尾 0：1000 →「1s」）。null 判定归调用方（浮层行显「—」，无值纪律
  *  null 禁 ?? 0）。 */
 export function formatTtftDuration(ms: number): string {
   if (ms < TTFT_SECONDS_DISPLAY_THRESHOLD_MS) return `${ms}ms`
@@ -114,10 +113,12 @@ export function ttftTier(ms: number | null): TtftTier {
 }
 
 /** 档位 → 触发器 class 映射。字面量静态串（Tailwind JIT 按源码扫描生成类；模板字符串
- *  拼接动态类名不在扫描集，样式会静默丢失——映射表而非 `text-${tier}` 拼接）。 */
+ *  拼接动态类名不在扫描集，样式会静默丢失——映射表而非 `text-${tier}` 拼接）。
+ *  仅前景色档，无 hover 类：demo 权威 .mchip 无任何 :hover 规则（悬停即开浮层，
+ *  触发器本身零反馈），hover 覆盖由消费方 `hover:bg-transparent` 压 Button ghost 底。 */
 export const TTFT_TRIGGER_TIER_CLASSES: Record<TtftTier, string> = {
-  success: 'text-success hover:text-success',
-  warn: 'text-warn hover:text-warn',
-  danger: 'text-danger hover:text-danger',
-  neutral: 'text-neutral-dim hover:text-neutral-mid',
+  success: 'text-success',
+  warn: 'text-warn',
+  danger: 'text-danger',
+  neutral: 'text-neutral-dim',
 }

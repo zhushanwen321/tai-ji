@@ -2,7 +2,9 @@
   <!--
     TrafficLight · 跨平台窗口控制
     - mac：空占位 div（保留 .traffic-light 定位 + opacity transition 语义，红黄绿由 OS 绘制）
-    - win/linux：自绘 3 彩色圆点 mimic mac（mac 原生位置 {8,8}；aside 顶在窗口 y=4，故 left-0=窗口x4（与 mac x8 有 4px 差，同 §11:883 预期差）/ top-[4px]=窗口y8（与 mac 同位）），hover 整组显 close/min/max 符号，点击 IPC 控窗口
+    - win/linux：自绘 3 彩色圆点 mimic mac（AppShell 左 padding 0 后 aside 左缘 = 窗口 x0，left-2 = 窗口 x8，
+      与 mac trafficLightPosition.x=8 完全同位；top-[12px] = 窗口 y16 与 mac trafficLightPosition.y=16 同位），
+      hover 整组显 close/min/max 符号，点击 IPC 控窗口
     全屏态 isFullscreen=true 时 opacity→0 + pointer-events-none（响应式 :class 绑定，替代旧 [data-fullscreen] 祖先选择器），
     mac 系统 hover 浮层独立不参与。
     [review MF-1] pointer-events-none 必须与 opacity-0 成对：仅隐藏视觉时，隐形圆点组
@@ -12,29 +14,30 @@
     保住点击命中（与 PanelHeader 交互元素防误拖语义对齐）。
   -->
   <div
-    class="traffic-light absolute left-0 top-[4px] flex gap-2 z-10 transition-opacity duration-[var(--duration-slow)] ease-[var(--ease)] group [-webkit-app-region:no-drag]"
+    class="traffic-light absolute left-2 top-[12px] flex gap-2 z-10 transition-opacity duration-[var(--duration-slow)] ease-[var(--ease)] group [-webkit-app-region:no-drag]"
     :class="{ 'opacity-0 pointer-events-none': isFullscreen }"
   >
     <template v-if="!isMac">
       <!-- [issue #24 缺陷A] 悬停同色 important 覆盖：旧 hover:bg-transparent 本意压 ghost 灰底，
            却把圆点自身底色一并透明化（悬停即消失）。改为逐点同色 hover:!bg-<色>，important 必须：
            ghost 变体 hover:bg-surface-hover 与覆盖类同特异性，源码顺序不可靠（先例 AppShell !gap-0）。
-           [issue #24 缺陷B] [&_svg]:!size-2 锁图标 8px：Button 基础样式 [&_svg]:size-4（16px）
-           压过 lucide :size=8 属性，16px 图标画在 12px 圆点里溢出变形。 -->
+           [issue #24 缺陷B] 图标锁 size-2：lucide :size=8 属性会被任何 CSS 规则覆盖
+           （属性优先级最低），svg 上普通 size-2 类压住属性即可（Button 基类图标默认规则
+           已零特异性，不与使用方类竞争）。 -->
       <Button
         v-for="dot in dots"
         :key="dot.action"
         variant="ghost"
         :aria-label="dot.label"
         :title="dot.label"
-        class="tl-dot h-3 w-3 grid place-items-center rounded-full p-0 [&_svg]:!size-2"
+        class="tl-dot h-3 w-3 grid place-items-center rounded-full p-0"
         :class="[dot.bgClass, dot.hoverBgClass]"
         @click="onAction(dot.action)"
       >
         <component
           :is="dot.icon"
           :size="8"
-          class="text-black/55 opacity-0 transition-opacity duration-[var(--duration-fast)] group-hover:opacity-100"
+          class="size-2 text-black/55 opacity-0 transition-opacity duration-[var(--duration-fast)] group-hover:opacity-100"
         />
       </Button>
     </template>

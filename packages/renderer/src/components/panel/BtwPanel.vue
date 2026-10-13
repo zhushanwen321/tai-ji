@@ -23,23 +23,10 @@
 -->
 <template>
   <div class="flex h-full min-h-0 flex-col" data-testid="drawer-btw-tab">
-    <!-- 头部：线列表标签 + 新建入口 -->
-    <div class="flex shrink-0 items-center gap-1.5 bg-surface-2 px-2.5 py-1.5">
-      <MessagesSquare class="size-3.5 shrink-0 text-neutral-dim" />
-      <span class="min-w-0 truncate text-[length:var(--text-xs)] font-medium text-neutral-fg">
-        {{ t('btw.panel.threadsTitle') }}
-      </span>
-      <Button
-        variant="ghost"
-        class="ml-auto h-6 gap-1 rounded px-2 text-[length:var(--text-2xs)]"
-        :disabled="!sessionId || state.creating"
-        data-testid="btw-new-thread"
-        @click="createThread"
-      >
-        <Plus class="size-3" />
-        <span>{{ state.creating ? t('btw.panel.creating') : t('btw.panel.newThread') }}</span>
-      </Button>
-    </div>
+    <!-- 无恒渲染标题行（r5 视觉对齐 demo BtwPanel：二级 chip 条直接顶置，demo 面板无头行）。
+         「新建提问」入口承载 = 空态 Primary 钮 + 有线态 chip 行右簇固定钮（demo 入口在
+         composer 左簇弹层，real panel composer 禁 btw 递归入口故面板内承载；
+         chip 行形态 = 实例条范式「左簇 tab 可横滚 + 右簇恒在可视区」）。 -->
 
     <!-- 内联错误条（P2 降级：可见失败 + 不拖垮面板；恢复动作见下方重试） -->
     <div
@@ -69,14 +56,14 @@
       </Button>
     </div>
 
-    <!-- 空态（无线且加载未出错）：图标 + 说明 + Primary 入口（空态三要素） -->
+    <!-- 空态（无线且加载未出错）：图标 + 说明 + Primary 入口（空态三要素；demo .empty 文字形态） -->
     <div
       v-if="!state.loadError && !state.loading && state.threads.length === 0"
       class="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 p-4 text-center"
       data-testid="btw-empty"
     >
-      <MessagesSquare class="size-6 text-neutral-dim opacity-40" />
-      <p class="text-[length:var(--text-xs)] text-neutral-dim opacity-70">{{ t('btw.panel.emptyList') }}</p>
+      <MessagesSquare class="size-6 text-neutral-dim opacity-40" stroke-width="1.6" />
+      <p class="text-[length:var(--text-xs)] text-neutral-mid">{{ t('btw.panel.emptyList') }}</p>
       <Button
         variant="default"
         class="h-7 gap-1 rounded px-3 text-[length:var(--text-xs)]"
@@ -89,28 +76,57 @@
       </Button>
     </div>
 
-    <!-- 有线：chip 行（线列表）+ 当前线会话区 -->
+    <!-- 有线：chip 行（线列表）+ 当前线会话区。
+         chip 行形态对齐 demo .itabs（实例 tab 条共用范式）：底部 hairline 分隔 +
+         可横滚 scrollbar 隐藏；chip = itab 胶囊（border + bg-input + mono 2xs；
+         选中 border-strong + elevated + fg，非激活 hover 提亮）。real 线无关闭动作
+         （demo itab 关闭叉无对应功能），不渲染叉。
+         右簇固定「新建提问」钮（r5 结构对齐 demo 无头行形态后的入口承载；
+         在滚动区外恒在可视区，TerminalInstanceBar 同款左右簇范式）。 -->
     <template v-else-if="state.threads.length > 0">
-      <div class="flex shrink-0 gap-1 overflow-x-auto px-2 py-1.5" data-testid="btw-thread-list">
-        <Button
-          v-for="thread in state.threads"
-          :key="thread.vid"
-          variant="ghost"
-          class="h-6 shrink-0 rounded-full px-2 font-mono text-[length:var(--text-2xs)]"
-          :class="thread.vid === selectedVid ? 'bg-surface text-accent' : 'text-neutral-dim hover:text-neutral-fg'"
-          :aria-pressed="thread.vid === selectedVid"
-          data-testid="btw-thread-chip"
-          :data-vid="thread.vid"
-          @click="selectThread(thread.vid)"
+      <div
+        class="flex shrink-0 items-center gap-0.5 border-b border-hairline py-1 pl-1 pr-[2px]"
+        data-testid="btw-thread-bar"
+      >
+        <div
+          class="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          data-testid="btw-thread-list"
         >
-          <!-- badge 待处理态 per-line 挂点（D8 终态机驱动；聚合面 = composer btw 按钮 Σ） -->
-          <span
-            v-if="isBtwPending(thread.vid)"
-            class="size-1.5 shrink-0 rounded-full bg-warn"
-            data-testid="btw-thread-pending"
-            :title="t('btw.interaction.pendingLabel')"
-          />
-          {{ shortVid(thread.vid) }}
+          <Button
+            v-for="thread in state.threads"
+            :key="thread.vid"
+            variant="ghost"
+            class="h-6 shrink-0 rounded-sm border px-2 font-mono text-[length:var(--text-2xs)] duration-[var(--duration-fast)] ease-[var(--ease-out)]"
+            :class="
+              thread.vid === selectedVid
+                ? 'border-border-strong bg-bg-elevated text-neutral-fg hover:bg-bg-elevated'
+                : 'border-border bg-bg-input text-neutral-mid hover:bg-surface-hover hover:text-neutral-fg'
+            "
+            :aria-pressed="thread.vid === selectedVid"
+            data-testid="btw-thread-chip"
+            :data-vid="thread.vid"
+            @click="selectThread(thread.vid)"
+          >
+            <!-- badge 待处理态 per-line 挂点（D8 终态机驱动；聚合面 = composer btw 按钮 Σ） -->
+            <span
+              v-if="isBtwPending(thread.vid)"
+              class="size-1.5 shrink-0 rounded-full bg-warn"
+              data-testid="btw-thread-pending"
+              :title="t('btw.interaction.pendingLabel')"
+            />
+            <!-- 标签截断对齐 demo .itab-lbl 口径：max-w 128px 省略 + Button title 显全名（spec §3.4） -->
+            <span class="min-w-0 max-w-[128px] truncate">{{ shortVid(thread.vid) }}</span>
+          </Button>
+        </div>
+        <Button
+          variant="ghost"
+          class="h-6 shrink-0 gap-1 rounded px-1.5 text-[length:var(--text-2xs)]"
+          :disabled="!sessionId || state.creating"
+          data-testid="btw-new-thread"
+          @click="createThread"
+        >
+          <Plus class="size-3" />
+          <span>{{ state.creating ? t('btw.panel.creating') : t('btw.panel.newThread') }}</span>
         </Button>
       </div>
 
@@ -130,11 +146,15 @@
           :session-id="selectedVid"
           data-testid="btw-stream"
         />
-        <!-- M3-c 交互闭环（D8 降级路径唯一形态：drawer 内联确认条，富表单降档；五类请求
-             按 vid 路由本面板，主视图三模态面零浮出）。Guard 子组件包全部风险渲染——
-             异常由 onErrorCaptured 在本组件收口（return false 不外溢主面板，P2 隔离），
-             错误条 + 重试在 Guard 外恒可达。 -->
-        <div v-if="selectedVid" class="flex shrink-0 flex-col gap-1.5 px-2 pb-1.5" data-testid="btw-interaction">
+        <!-- composer band 壳（与 Panel.vue 主面板同壳，类链单一来源 composer-band.ts）：
+             左右缘与 MessageStream 内容列对齐（Composer.vue 宽度契约「composer 与消息流
+             同宽同缘」），composer 不再贴边满宽；band gap-1.5 承接交互降档行行距，
+             无交互时带内仅 composer（空闲几何与主面板一致）。
+             M3-c 交互闭环（D8 降级路径唯一形态：drawer 内联确认条，富表单降档；五类请求
+             按 vid 路由本面板，主视图三模态面零浮出）。Guard 为无 DOM 渲染哨兵，包全部
+             风险渲染——异常由 onErrorCaptured 在本组件收口（return false 不外溢主面板，
+             P2 隔离），错误条 + 重试在 Guard 外恒可达。 -->
+        <div v-if="selectedVid" :class="COMPOSER_BAND_CLASS" data-testid="btw-interaction">
           <BtwInteractionGuard :key="interactionKey">
             <!-- 终态机失效支行内提示（失效支单入口 invalidateBtwRequests——事件帧一路：badge 清 + 表单撤下 + 本提示同拍收口，D-B2-3） -->
             <div v-if="expiredNotice" class="flex items-center gap-1.5 rounded bg-danger-soft px-2.5 py-1.5 text-[length:var(--text-2xs)] text-danger" data-testid="btw-request-expired">
@@ -220,14 +240,14 @@
             <span>{{ t('btw.interaction.error') }}</span>
             <Button variant="ghost" class="ml-auto h-5 shrink-0 rounded px-1.5 text-[length:var(--text-2xs)]" data-testid="btw-interaction-retry" @click="retryInteraction">{{ t('common.retry') }}</Button>
           </div>
+          <Composer
+            v-if="selectedVid"
+            :session-id="selectedVid"
+            variant="panel"
+            :show-btw="false"
+            data-testid="btw-composer"
+          />
         </div>
-        <Composer
-          v-if="selectedVid"
-          :session-id="selectedVid"
-          variant="panel"
-          :show-btw="false"
-          data-testid="btw-composer"
-        />
       </div>
     </template>
   </div>
@@ -244,11 +264,13 @@ import { isBtwPending } from '@/composables/panel/btw-pending-bookkeeping'
 import { useBtwPanelSurface } from '@/composables/panel/useBtwTabData'
 import { useBtwInteraction } from '@/composables/panel/useBtwInteraction'
 import { useSessionScopedState } from '@/composables/useSessionScopedState'
+import { useBtwSessionStateStore } from '@/stores/btw-session-state'
 import { setBtwView, useBtwSelection, getBoundSessionId } from '@taiji/core/domain/drawer'
 import { isBtwVirtualId, extractBtwPiSessionId } from '@taiji/shared'
 import type { ServerMessageMap } from '@taiji/shared'
 import MessageStream from '@/components/panel/MessageStream.vue'
 import Composer from '@/components/panel/Composer.vue'
+import { COMPOSER_BAND_CLASS } from '@/components/panel/composer-band'
 
 // btw 具名类型走 indexed-access（shared 包出口选择性 re-export 未挂具名——M2-a 登记的
 // SegmentsMetadataEntry 同款惯例，SSOT = shared protocol.ts）
@@ -261,6 +283,9 @@ const props = defineProps<{
 }>()
 
 const { t } = useI18n()
+
+/** 线模型显示态 store（vid→mainSid 绑定写入方；读取方 = composer-shell 解析支） */
+const btwSessionState = useBtwSessionStateStore()
 
 /** per-main-session 面板状态（ADR-0049 Map 分区；切 sid 不丢、切回恢复，异步回写用 updateFor） */
 // @data-owner #44 —— #44 btw 线列表的 renderer 面板消费分区（btw.list 拉取 reply 喂入，
@@ -323,6 +348,8 @@ async function loadThreads(captured: string): Promise<void> {
       s.loading = false
       s.threads = threads
     })
+    // vid → 主会话绑定（btw 线模型显示态回退解析的钥匙，见 btw-session-state store 头注释）
+    for (const th of threads) btwSessionState.bindMainSid(th.vid, captured)
     autoSelect(captured, threads)
   } catch (e) {
     scoped.updateFor(captured, (s) => {
@@ -373,6 +400,7 @@ async function createThread(): Promise<void> {
         s.threads = [...s.threads, { vid: reply.vid }]
       }
     })
+    btwSessionState.bindMainSid(reply.vid, captured)
     if (canWriteSelection(captured)) setBtwView(reply.vid)
   } catch (e) {
     scoped.updateFor(captured, (s) => {

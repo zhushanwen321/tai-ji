@@ -222,6 +222,31 @@ describe('dispatchMessageEvent 流式 contentBlocks 填充', () => {
     expect(tc.output).toBe('ok done\n')
   })
 
+  // ── [diff-stat-chip] edit 工具 diff 统计：live overlay 腿（与 reducer computeToolCallFill 同口径）──
+  it('tool_call_end：edit details.diff → tc.diffStat 写入（live 腿与 reload 同口径）', () => {
+    const ctx = makeCtx()
+    dispatchMessageEvent(ctx, SID, msg('message.message_start', { messageId: 'a1' }))
+    dispatchMessageEvent(ctx, SID, msg('message.tool_call_start', { entry: toolCallEntry({ toolCallId: 'tc1', toolName: 'edit', arguments: { path: '/a.ts' } }) }))
+    const diff = '+ 3 const b = 2\n  1 ctx\n- 2 const b = old\n+ 5 const c = 3'
+    dispatchMessageEvent(ctx, SID, msg('message.tool_call_end', {
+      entry: toolResultEntry({
+        toolCallId: 'tc1', toolName: 'edit', content: 'Successfully replaced 1 block(s)', isError: false,
+        details: { diff, patch: '---', firstChangedLine: 3 },
+      }),
+    }))
+    const tc = lastAssistant(ctx).toolCalls![0]
+    expect(tc.diffStat).toEqual({ additions: 2, deletions: 1 })
+  })
+
+  it('tool_call_end：无 details（write / 畸形帧）→ tc.diffStat 缺省（渲染侧不显示统计段）', () => {
+    const ctx = makeCtx()
+    dispatchMessageEvent(ctx, SID, msg('message.message_start', { messageId: 'a1' }))
+    dispatchMessageEvent(ctx, SID, msg('message.tool_call_start', { entry: toolCallEntry({ toolCallId: 'tc1', toolName: 'write', arguments: { path: '/a.ts' } }) }))
+    dispatchMessageEvent(ctx, SID, msg('message.tool_call_end', { entry: toolResultEntry({ toolCallId: 'tc1', toolName: 'write', content: 'ok', isError: false }) }))
+    const tc = lastAssistant(ctx).toolCalls![0]
+    expect('diffStat' in tc).toBe(false)
+  })
+
   it('sealed guard：finalizeSession 收口后 text_delta 幂等丢弃（D-010）', () => {
     const ctx = makeCtx()
     dispatchMessageEvent(ctx, SID, msg('message.message_start', { messageId: 'a1' }))

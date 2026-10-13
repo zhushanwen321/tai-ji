@@ -7,7 +7,7 @@
  *    style.css 的 [data-theme-preset="dailan"/"nuanmo"/"qingmo"/"zhuyin"] 规则覆盖 :root token。
  *
  * 太极主题映射（与 style.css 的 preset 规则严格对应）：
- * - 玄（暗·弱蓝灰·默认） → theme=dark,    preset=''       （:root 默认，无 preset 覆盖）
+ * - 玄（暗·青玉·默认） → theme=dark,    preset=''       （:root 默认，无 preset 覆盖）
  * - 黛蓝（暗·依稀蓝相）  → theme=dark,    preset='dailan'
  * - 暖墨（暗·宣纸暖相）  → theme=dark,    preset='nuanmo'
  * - 皓（亮·宣纸墨黑）    → theme=light,   preset=''       （[data-theme=light] 默认，无 preset 覆盖）
@@ -15,13 +15,13 @@
  * - 朱印（亮·宣纸朱砂）  → theme=light,   preset='zhuyin'
  *
  * themeSwatch 返回该主题的 4 个代表性色块（accent / fg / surface / bg），用于主题列表行的预览。
- * 取值来源：与 useTheme.ts THEMES 常量逐字对齐（.tmp/v6 真值源），不读运行时 CSS 变量（避免
- * 被页面内临时覆盖的 token 污染预览）。
+ * 取值来源：与 style.css :root（令牌值现行权威源，docs/DESIGN.md §10 优先级链顶端）对齐，
+ * 不读运行时 CSS 变量（避免被页面内临时覆盖的 token 污染预览）。
  */
 import type { SystemSettings } from '@taiji/core'
 
 export interface TaijiTheme {
-  /** 显示名（含性质后缀，与 demo useTheme.ts THEMES 的 key 一致） */
+  /** 显示名（含性质后缀：主题名 + 亮暗 · 色相特征 · 默认标记） */
   label: string
   /** 短名（nav/badge 用，不含括号后缀） */
   shortName: string
@@ -35,15 +35,18 @@ export interface TaijiTheme {
   swatch: [string, string, string, string]
 }
 
-/** 6 太极主题（顺序：3 暗 + 3 亮，与 demo themeEntries 一致） */
+/** 6 太极主题（顺序 = demo 设置区配色主题行权威序，settings-mock.js TAIJI_THEMES：
+ *  玄/黛蓝/暖墨 + 皓/青墨/朱印——亮色组内默认主题皓居首；r5 视觉修复对齐。
+ *  侧栏快捷面板槽位序跟随本清单（单清单两消费方；demo 快捷面板旧序皓收尾与之不同，
+ *  属 demo 两形态自身差异，以设置区序为准）。 */
 export const TAIJI_THEMES: TaijiTheme[] = [
   {
-    label: '太极 · 玄青（暗 · 弱蓝灰 · 默认）',
+    label: '太极 · 玄青（暗 · 青玉 · 默认）',
     shortName: '玄青',
     theme: 'dark',
     preset: '',
     dark: true,
-    swatch: ['#a5adc2', '#dedee2', '#1f1f22', '#131316'],
+    swatch: ['#7fb89c', '#ececec', '#101010', '#1e1e1e'],
   },
   {
     label: '太极 · 黛蓝（暗 · 依稀蓝相）',
@@ -51,7 +54,7 @@ export const TAIJI_THEMES: TaijiTheme[] = [
     theme: 'dark',
     preset: 'dailan',
     dark: true,
-    swatch: ['#9ca9c9', '#dedfe5', '#1e1f25', '#121319'],
+    swatch: ['#7db2a9', '#ececf0', '#0f1016', '#1f2029'],
   },
   {
     label: '太极 · 暖墨（暗 · 宣纸暖相）',
@@ -59,7 +62,7 @@ export const TAIJI_THEMES: TaijiTheme[] = [
     theme: 'dark',
     preset: 'nuanmo',
     dark: true,
-    swatch: ['#cbc3b3', '#e2dfdb', '#221f1d', '#161413'],
+    swatch: ['#a2b48b', '#eceae6', '#100f0e', '#201e1c'],
   },
   {
     label: '太极 · 皓白（亮 · 宣纸墨黑 · 默认）',
@@ -67,7 +70,7 @@ export const TAIJI_THEMES: TaijiTheme[] = [
     theme: 'light',
     preset: '',
     dark: false,
-    swatch: ['#36332f', '#2b2a28', '#f7f6f3', '#edebe8'],
+    swatch: ['#43765d', '#2b2a28', '#f7f6f3', '#edebe8'],
   },
   {
     label: '太极 · 青墨（亮 · 宣纸花青）',
@@ -75,7 +78,7 @@ export const TAIJI_THEMES: TaijiTheme[] = [
     theme: 'light',
     preset: 'qingmo',
     dark: false,
-    swatch: ['#3d6b6b', '#2b2a28', '#f7f6f3', '#edebe8'],
+    swatch: ['#40775f', '#2b2a28', '#f7f6f3', '#edebe8'],
   },
   {
     label: '太极 · 朱印（亮 · 宣纸朱砂）',
@@ -83,7 +86,7 @@ export const TAIJI_THEMES: TaijiTheme[] = [
     theme: 'light',
     preset: 'zhuyin',
     dark: false,
-    swatch: ['#9c4335', '#2b2a28', '#f7f6f3', '#edebe8'],
+    swatch: ['#4d7a63', '#2b2a28', '#f7f6f3', '#edebe8'],
   },
 ]
 

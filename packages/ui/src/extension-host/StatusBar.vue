@@ -13,7 +13,9 @@
  * 根元素常驻（干净安装无插件无 statusline 项时按钮仍可见，防纯键盘不可发现）；否则两 scope
  * 合并后无任何可渲染项时根元素 v-if 隐藏（不占位）。
  *
- * A4 视觉（spec §2 A4）：容器 26px 高 bg-elevated text-xs；每项前置 7px 状态点
+ * A4 视觉（spec §2 A4）：容器 26px 高 bg-elevated text-[length:var(--text-2xs)]
+ * （11px 档，入 --text-* 用户字号缩放链；不用裸 text-xs 预设类——0.75rem 不经
+ * 该链，用户字号/分区档位调不动）；每项前置 7px 状态点
  * （ok=success / warn=warn / danger=danger / neutral=neutral-ico / plugin-src=accent），
  * 无 status 的项不渲染圆点；溢出不换行、容器横向滚动且隐藏滚动条（priority 高优先
  * 可见由段内降序保证——高 priority 靠段首，先进入可见区）。
@@ -77,7 +79,7 @@ const visibleItems = computed<StatusBarEntry[]>(() => {
   <div
     v-if="visibleItems.length > 0 || hasNativeAction()"
     data-testid="status-bar"
-    class="status-bar flex h-[26px] items-center gap-2 overflow-x-auto bg-elevated px-3 text-xs [scrollbar-width:none]"
+    class="status-bar flex h-[26px] items-center gap-2 overflow-x-auto bg-bg-elevated px-3 text-[length:var(--text-2xs)] [scrollbar-width:none]"
   >
     <span
       v-for="item in visibleItems"
@@ -94,7 +96,7 @@ const visibleItems = computed<StatusBarEntry[]>(() => {
       <span
         v-if="item.status"
         data-testid="status-bar-dot"
-        class="mr-1 inline-block size-[7px] shrink-0 rounded-full align-middle"
+        class="mr-1.5 inline-block size-[7px] shrink-0 rounded-full align-middle"
         :class="dotClass(item.status)"
       />
       {{ item.text }}

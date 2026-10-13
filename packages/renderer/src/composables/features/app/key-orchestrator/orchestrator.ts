@@ -67,9 +67,8 @@ function handleEscapeKeydown(e: KeyboardEvent): void {
 
 /**
  * Tab 浮层分支：浮层开着时首末循环（§7.3 随迁保位，W2 随 OverlayShell 归位；面板 ref 经
- * overlay 宿主注入）。Tab 属主 = 最上层表面（2026-10-03 用户裁决；登记
- * docs/todo/display-containers-overlay-tab-ownership.md）：模态/弹层叠在浮层上 → Tab 归
- * 该模态焦点域，陷阱不把焦点拉回浮层面板（双检即 modalSurfaceBlocksEvent，与 Esc 同源）。
+ * overlay 宿主注入）。Tab 属主 = 最上层表面（2026-10-03 用户裁决）：模态/弹层叠在浮层上 →
+ * Tab 归该模态焦点域，陷阱不把焦点拉回浮层面板（双检即 modalSurfaceBlocksEvent，与 Esc 同源）。
  */
 function handleOverlayTabKeydown(e: KeyboardEvent): void {
   if (!getOverlayControlState().isOpen) return
@@ -80,7 +79,8 @@ function handleOverlayTabKeydown(e: KeyboardEvent): void {
 /**
  * Ctrl/Cmd+F 分支：表面内查找（find-in-surface）。归属判定在 useFindInSurface.openFindAtPointer
  * （鼠标悬停优先 → 回退栈序 → 全无不动作）。mod 判定与 useGlobalShortcuts 同款
- * （metaKey||ctrlKey 双平台同触，无需平台分支）；禁 capture——同 Esc 的 xterm 红线。
+ * （metaKey||ctrlKey 双平台同触，无需平台分支）；键名大小写不敏感（Shift 按下时 e.key 为
+ * 大写 'F'，漏判即快捷键失灵）；禁 capture——同 Esc 的 xterm 红线。
  */
 function handleFindShortcutKeydown(e: KeyboardEvent): void {
   if (!(e.metaKey || e.ctrlKey)) return
@@ -104,7 +104,7 @@ function onWindowKeydown(e: KeyboardEvent): void {
     handleOverlayTabKeydown(e)
     return
   }
-  if (e.key === 'f') handleFindShortcutKeydown(e)
+  if (e.key.toLowerCase() === 'f') handleFindShortcutKeydown(e)
 }
 
 /**

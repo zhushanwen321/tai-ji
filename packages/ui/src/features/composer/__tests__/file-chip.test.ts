@@ -59,7 +59,8 @@ describe('W1: insertFileChip 结构化 file chip DOM', () => {
     // dataset 结构化标记
     expect(chip.dataset.chipType).toBe('file')
     expect(chip.dataset.chipPath).toBe('src/foo.ts')
-    // 子元素：chip-label + chip-x
+    // 子元素：chip-pre($) + chip-label + chip-x
+    expect(chip.querySelector('.chip-pre')?.textContent).toBe('$')
     expect(chip.querySelector('.chip-label')).toBeTruthy()
     expect(chip.querySelector('.chip-x')).toBeTruthy()
     // 后跟 ZWSP spacer 文本节点
@@ -97,8 +98,12 @@ describe('W1: insertFileChip 结构化 file chip DOM', () => {
     const chip = document.querySelector('.mention-chip') as HTMLElement
     expect(chip.classList.contains('mention-at')).toBe(true)
     expect(chip.classList.contains('mention-file')).toBe(false)
+    // 拍平文本与旧纯 textContent 形态一致（结构化 pre(@) + label(user)，svg/× 无文本）
     expect(chip.textContent).toBe('@user')
-    // 不设 file 结构化 dataset
+    expect(chip.querySelector('.chip-pre')?.textContent).toBe('@')
+    expect(chip.querySelector('.chip-label')?.textContent).toBe('user')
+    expect(chip.querySelector('.chip-x')).toBeTruthy()
+    // 不设 file 结构化 dataset（旧通路保持无 dataset）
     expect(chip.dataset.chipType).toBeUndefined()
     expect(chip.dataset.chipPath).toBeUndefined()
   })

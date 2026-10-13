@@ -27,11 +27,20 @@
         <span v-else>{{ currentName }}</span>
       </PopoverTriggerButton>
     </slot>
-    <PopoverContent side="top" class="w-[220px] p-0">
+    <!-- 容器对齐 demo `.popover right w190`（workbench.css composer 段）：右锚
+         （align end）/ 锚距 10px / 最小宽 190px / r-lg 圆角 / 4px 内边距（搜索框与行自带的
+         内边距叠在其上）；开合动效走 PopoverContent 基类 reka-popover-transition（style.css） -->
+    <PopoverContent
+      side="top"
+      align="end"
+      :side-offset="10"
+      class="min-w-[190px] rounded-lg p-1"
+    >
       <ModelPickerPanel
         :groups="pickerGroups"
         :model-value="bareModelId(selectedValue)"
         :model-value-provider-id="selectedProviderId"
+        :default-model="defaultModel"
         :has-candidates="hasAnyModel"
         @update:model-value="onPickFromPanel"
       />
@@ -78,8 +87,9 @@ const settingsStore = getSettingsStore()
 const { open, canOpen } = useSwitchingGatedPopoverOpen(() => props.switching)
 
 // 数据面（分组 / enabled 过滤 / pickerGroups / 反查）在 model-picker-data——
-// 顶层绑定名保持 groups（既有测试经 vm.groups 断言分组形状，语义不漂移）
-const { groups, hasAnyModel, pickerGroups } = useModelPickerData(() => props.providerFilter)
+// 顶层绑定名保持 groups（既有测试经 vm.groups 断言分组形状，语义不漂移）。
+// defaultModel（config.defaults.defaultModel）透传 panel 驱动行尾「默认」标签（demo .pt）。
+const { groups, hasAnyModel, pickerGroups, defaultModel } = useModelPickerData(() => props.providerFilter)
 
 /** 当前选中值（纯受控：直接用 props，不存本地副本，避免 watch 拉回导致 UI 闪退） */
 const selectedValue = computed(() => props.selected ?? '')

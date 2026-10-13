@@ -53,7 +53,9 @@ import type { QuotaConfigurePayload } from './quota-types'
 // 直接引用 PlanLifecycleState（canonical = packages/extension-protocol/src/extensions/plan/state-machine，barrel 已 re-export），
 // type-only 零运行时面（shared 不因此获得对该包的运行时依赖；类型解析由 devDependency 承载，
 // plan-protocol.test.ts 的跨包 AssertExact 锁镜像漂移）。
-import type { PlanLifecycleState } from '@zhushanwen/extension-protocol'
+// SubagentEngineModelInfo 同款直引：单源 = extension-protocol subagent-engine 契约面，
+// 消除 shared 侧双声明漂移（engine-provider-unification D5）。
+import type { PlanLifecycleState, SubagentEngineModelInfo } from '@zhushanwen/extension-protocol'
 
 // tts.* 域载荷形状 SSOT 引用（ai-voice-tts 设计 §7.1：域形状归属 tts-types，本文件仅登记 type→payload 映射）
 import type {
@@ -107,6 +109,10 @@ export type UiLocale = 'zh-CN' | 'en-US'
 
 export type ClientMessageType =
   | 'session.create' | 'session.delete' | 'session.deleteByCwd' | 'config.sessions' | 'session.switch' | 'session.restore' | 'session.history' | 'session.getCommands' | 'session.getContext'
+  // 悬停详情卡消息计数：session.getMessageCount 按需拉取
+  // 该会话的对话消息条数（用户+助手），runtime 流式计数 session JSONL，reply 同名
+  //（payload 消费型，session.subscribe 模式）。拉取式（悬停时拉即最新），不做订阅/推送。
+  | 'session.getMessageCount'
   | 'session.compact' | 'session.rename' | 'session.fork' | 'session.setProject'
   // composer-gen-stats（D4）：session.getGenStats 拉该 session
   // 当前模型的速度/缓存命中率快照（恢复腿——切 session 主动拉取，规避 broadcast 早于订阅的时序竞争）。
@@ -139,6 +145,9 @@ export type ClientMessageType =
   | 'session.getPlanState' | 'session.abortPlan'
   // [U7] 子代理引擎配置（Settings 引擎选择器：动态引擎列表 + defaultEngine 读写）
   | 'session.getSubagentEngineConfig' | 'session.setSubagentDefaultEngine'
+  // engine-provider-unification D5：settings per-engine 默认模型写入（engine-provider-unification
+  // 设计 §3.3 D5）。payload：engineId 定位引擎，modelRef = 模型全 ref（zcode 形态 providerId/modelId）。
+  | 'session.setSubagentEngineDefaultModel'
   | 'session.getWorkflows' | 'session.getAgentCallHistory' | 'session.getAgentCallFilePath'
   | 'session.workflowAction' | 'session.subagentAction'
   // workflow 可视化（workflow-visualization 设计 §3.1-4/§3.1-5 / U2 协议冻结）：
@@ -544,6 +553,9 @@ export interface ClientMessageMap {
   'session.history': { sessionId: string; cursor?: string; limitTurns?: number; maxBytes?: number }
   'session.getCommands': { sessionId: string }
   'session.getContext': { sessionId: string }
+  // session.getMessageCount（悬停详情卡消息计数，通道 2）：reply 同名 { sessionId, count }。
+  // 文件不存在（pi 延迟写入窗口）= count 0（非错误）；读文件失败走 error envelope。
+  'session.getMessageCount': { sessionId: string }
   // session.getGenStats（D4）：生成指标恢复腿。
   // reply = session.stats_update payload 同形（无任何数据时 speed/cacheRatio 全 null + model 缺省）。
   'session.getGenStats': { sessionId: string }
@@ -613,6 +625,9 @@ export interface ClientMessageMap {
   // [U7] 子代理引擎配置读写（payload：set 带 engineId；get 无参）
   'session.getSubagentEngineConfig': Record<string, never>
   'session.setSubagentDefaultEngine': { engineId: string }
+  // engine-provider-unification D5：per-engine 默认模型写入（runtime 写 config.json engineDefaults
+  // 键，写入前校验 modelRef ∈ 该引擎模型清单；engineId/modelRef 回显见 mutation reply）。
+  'session.setSubagentEngineDefaultModel': { engineId: string; modelRef: string }
   // workflow 列表/agent call 对话流读取（runtime 直读主 session JSONL + workflow-state JSONL，不依赖扩展）
   'session.getWorkflows': { sessionId: string }
   'session.getAgentCallHistory': { sessionId: string; agentCallSessionId: string }
@@ -1115,8 +1130,11 @@ export type ServerMessageType =
   //（last-value 语义——重连/切回经 stateSnapshot 回放自动恢复）；冷启动/切换首拉走
   // session.getPlanState RPC，reply 复用本 payload。
   | 'session.planState'
-  // [U7] 子代理引擎配置（Settings 引擎选择器；形状 = @zhushanwen/extension-protocol SubagentEngineConfigView，契约 SSOT 在彼处）
+  // [U7] 子代理引擎配置（Settings 引擎选择器；形状 = @zhushanwen/extension-protocol SubagentEngineConfigView 扩展 + engineModels/engineDefaults 两键（engine-provider-unification D5），契约 SSOT 在彼处）
   | 'session.subagentEngineConfig' | 'session.subagentDefaultEngineSet'
+  // engine-provider-unification D5：setSubagentEngineDefaultModel 的 reply type（与 request
+  // 同名配对模式，setSubagentDefaultEngine → subagentDefaultEngineSet 先例）。
+  | 'session.subagentEngineDefaultModelSet'
   // E 方案（subagent-realtime-channel §4.3）：runtime relay tee 产出的 subagent entry 增量帧
   | 'session.subagentEntriesAppended'
   | 'session.workflows' | 'session.agentCallHistory' | 'session.agentCallFilePath'
@@ -1184,6 +1202,8 @@ export type ServerMessageType =
   // w21 data-source-governance：message_end 重构 entry 的实时 feed 载体帧（见 ServerMessageMapBase 条目注释）
   | 'message.message_end'
   | 'session.commands'
+  // session.getMessageCount（悬停详情卡消息计数，通道 2）：同名 reply（sendCommand 按 id resolve）。
+  | 'session.getMessageCount'
   // session.importCandidates / session.import（docs/design/import-session.md（已删除，git 可追溯）§3.3 D5）：reply 与 request
   // 同名（session.subscribe 模式，sendCommand 按 id resolve），payload 见 ServerMessageMapBase。
   | 'session.importCandidates' | 'session.import'
@@ -1756,6 +1776,19 @@ export interface SubagentDefaultEngineMutationReply {
   engineId: string
 }
 
+/** 引擎可选模型清单条目——单源 = @zhushanwen/extension-protocol subagent-engine 契约面
+ *  （顶部 type-only 直引 + 此处 re-export，shared 协议出口对下游形态不变，双声明漂移以
+ *  单源收敛结构性消除）。值形状镜像 = zcode-subagent-cli preparer listZcodeModels 返回形态。
+ *  engine-provider-unification D5：settings per-engine 模型清单与写入校验共用该形态。 */
+export type { SubagentEngineModelInfo }
+
+/** session.setSubagentEngineDefaultModel 的 reply：写 config.json engineDefaults 后的确认回显
+ *  （分支二原样存储，engineId/modelRef 回显必需——setSubagentDefaultEngine reply 同款）。 */
+export interface SubagentEngineDefaultModelMutationReply {
+  engineId: string
+  modelRef: string
+}
+
 /** session.rename 的 reply：回显请求名（原样存储）。本类型同时是广播帧形状（broadcastSessionList）。 */
 export interface SessionRenameMutationReply {
   sessionId: string
@@ -1857,7 +1890,7 @@ export type WorkflowRunEventsErrorCode = 'record_not_found'
  * session.getWorkflowRunEvents 的 reply（workflow-visualization 设计 §3.1-4 D4）。
  *
  * 成功形态：{ sessionId, runId, events }——单 run 事件流原文行（大字段截断形态见
- * WorkflowRunEventEntry：四字段 2KB 截断 + truncatedFields 逐行标注）。oversize
+ * WorkflowRunEventEntry：五字段 2KB 截断 + truncatedFields 逐行标注）。oversize
  * （[RT-4#8] 同款降级标志，与 session.workflows 形态一致）：record 文件超
  * READ_PRECHECK_MAX_BYTES（32MB，D5 预检族）时 runtime 不全文读取（worker-log 行数
  * 无上界 + workflowUpdate 信号 force 重拉放大读面），events 恒空数组 + oversize=true
@@ -2235,6 +2268,10 @@ export interface ServerMessageMapBase {
   // session.commands：pi 扩展命令列表（fetchAndBroadcastCommands 广播）
   // sourceInfo 透传自 pi get_commands 的 RpcSlashCommand（SKILL.md / extension 文件路径等），可选（旧消费方向后兼容）
   'session.commands': { sessionId: string; commands: Array<{ name: string; description?: string; source: string; sourceInfo?: CommandSourceInfo }> }
+  // session.getMessageCount reply（悬停详情卡消息计数，通道 2）：count = 用户+助手消息条数
+  //（runtime 流式计数 session JSONL，口径与 core 对话流 reducer 一致——toolResult/system/
+  // custom 消息与 compaction/usage 等非对话 entry 不计入）；文件缺失（pi 延迟写入窗口）= 0。
+  'session.getMessageCount': { sessionId: string; count: number }
   // session.importCandidates / session.import reply（docs/design/import-session.md（已删除，git 可追溯）§3.3 D5）：
   // 与 ClientMessageMap 同名 request 一一对应；失败走 error envelope（code 见 ImportErrorCode）。
   'session.importCandidates': ImportCandidatesReply
@@ -2261,11 +2298,24 @@ export interface ServerMessageMapBase {
   // truncated：u4b（D5①）巨型 subagent JSONL（高发源）超预检阈值后逆序窗口降级标志
   //（optional——mock / 旧 runtime 不带此键，消费方按 false 处理）。
   'session.subagentHistory': { sessionId: string; subagentId: string; messages: import('./message').Message[]; truncated?: boolean }
-  // [U7] getSubagentEngineConfig 的 reply（engines = extension engines.json 动态清单；形状与 extension-protocol 契约一致）
-  'session.subagentEngineConfig': { engines: string[]; defaultEngine: string }
+  // [U7] getSubagentEngineConfig 的 reply（engines = extension engines.json 动态清单；基础形状 =
+  // @zhushanwen/extension-protocol SubagentEngineConfigView）。engine-provider-unification D5 扩展：
+  // engineModels（per-engine 可选模型清单，值形状 = SubagentEngineModelInfo[]）与 engineDefaults
+  //（per-engine 默认模型偏好，值 = 模型全 ref）。两键 optional——旧 runtime / mock / 广播帧不带时
+  // 消费方按空表与「无偏好」处理（oversize?/found? 同款缺省惯例）；契约 SSOT 仍在 extension-protocol
+  // view，runtime 侧跟随扩展属下游单元连带。
+  'session.subagentEngineConfig': {
+    engines: string[]
+    defaultEngine: string
+    engineModels?: Record<string, SubagentEngineModelInfo[]>
+    engineDefaults?: Record<string, string>
+  }
   // [U7] setSubagentDefaultEngine 的 reply（写 config.json 后确认；新 session 生效）。
   // [C-pi-14/ADR-0065] mutation reply（分支二原样存储）：engineId 回显必需。
   'session.subagentDefaultEngineSet': SubagentDefaultEngineMutationReply
+  // engine-provider-unification D5：setSubagentEngineDefaultModel 的 reply（写 config.json
+  // engineDefaults 键后确认回显）。
+  'session.subagentEngineDefaultModelSet': SubagentEngineDefaultModelMutationReply
   // session.subagentEntriesAppended（E 方案，subagent-realtime-channel §4.3/§6）：runtime relay
   // tee 翻译层产出的 subagent entry 增量帧——子进程 stdout 事件经 event-adapter 独立实例
   // 翻译 + entry 化（与主对话流 message.message_end / tool_call_* 帧的 entry 形态同构，
@@ -3061,6 +3111,8 @@ export interface ReplyPayloadMap {
   'session.getAgentCallHistory': ServerMessageMap['session.agentCallHistory']
   'session.getCommands': ServerMessageMap['session.commands']
   'session.getContext': ServerMessageMap['context.update']
+  // session.getMessageCount：同名 reply（payload 消费型，悬停详情卡消息计数通道 2）。
+  'session.getMessageCount': ServerMessageMap['session.getMessageCount']
   // session.getGenStats：reply = session.stats_update payload 同形（payload 消费型；
   // D4 恢复腿，runtime 侧 modelId 解析降级链权威）。
   'session.getGenStats': ServerMessageMap['session.stats_update']
@@ -3072,6 +3124,9 @@ export interface ReplyPayloadMap {
   'session.getSubagentStreamState': ServerMessageMap['session.getSubagentStreamState']
   'session.getSubagentEngineConfig': ServerMessageMap['session.subagentEngineConfig']
   'session.setSubagentDefaultEngine': ServerMessageMap['session.subagentDefaultEngineSet']
+  // engine-provider-unification D5：per-engine 默认模型写入的 reply（mutation 分支二回显，
+  // 运行时契约测试 MUTATION_RPC_REGISTRY 登记义务在 handler 单元承接）。
+  'session.setSubagentEngineDefaultModel': ServerMessageMap['session.subagentEngineDefaultModelSet']
   'session.getSubagents': ServerMessageMap['session.subagents']
   // plan 模式（D1-⑥ 冷启动首拉）：reply 复用 session.planState 广播 payload（同 getSubagents 先例）
   'session.getPlanState': ServerMessageMap['session.planState']

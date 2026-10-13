@@ -70,7 +70,7 @@ AI 继续干别的；测试在后台跑
 - todo/goal 刻意不进 sidebar：经 `guiSetWidget`（`extension-protocol/src/core/helpers.ts:65-74`，NUL marker 编码）→ pi stdout `extension_ui_request{setWidget}` → EventAdapter（`event-adapter.ts:415-493`）→ WS `extension:widgetGui` → `ViewHostStore`（`view-host-store.ts:95-110`，(sessionId, viewId) 双键分区）→ **composer 任务托盘的 widget 区消费**（widget 区按钮 + 面板；原对话流 pill 形态已于 2026-09-16 退役）。
 - **GuiComponent 词汇表 9 类型全纯展示零交互**（`extension-protocol/src/core/types.ts`；`ListTree.vue` 0 emit）：无 onClick/onSelect/按钮原语；TreeItem.status 三态（running/done/failed）不含 killing/orphaned；无计时原语。事件回传只有 `extension.ui_request` 阻塞模态（confirm/select/input/editor）——不是列表点击。
 - custom 逃生口（`custom` 类型 + `GUI_CUSTOM_REGISTRY_KEY` 编译期注册）机制存在但**生产代码零 provide 者**。
-- **drawer 是硬编码 7-tab 机制**：`core/domain/drawer/types.ts` `SideDrawerTab` 联合类型 + `DrawerPanel.vue` tabs 数组 + `PanelContainer.vue:107-143` v-if chain 三处同步；'drawer.tab' 贡献挂载点仅存在于类型注释、零消费者。
+- **drawer 是硬编码 7-tab 机制**：`core/domain/drawer/types.ts` `SideDrawerTab` 联合类型 + `DrawerPanel.vue` tabs 数组 + `PanelContainer.vue:145-174` v-if chain 三处同步；'drawer.tab' 贡献挂载点仅存在于类型注释、零消费者。
 
 **（已退役）侧栏 Agents tab 二级筛选先例（R4 对齐目标；设计 `subagent-sidebar-filter.md` + 实装 `lib/subagent-bucket.ts`（**现行**，SSOT 模块保留）/ 侧栏筛选条、任务列表与筛选分区 composable（**已随侧栏任务视图退役，2026-09-16**））**：列表顶部迷你凹陷槽三桶（进行中/已结束/全部 + 计数，默认进行中）；分桶判据收独立纯函数 SSOT 模块（禁两处各写 status 判定）；筛选状态经 `useSessionScopedState` 工厂 per-session 分区（**reactive 容器契约**——标量需对象包装且必须 reactive，否则切桶 UI 永不更新；挂载期内记忆、切 tab 卸载重置、不跨启动记忆）；空桶自适应（「进行中」空桶给查看全部一键跳转，全量空态不渲染筛选条）；一级 tab badge 口径与桶判据同源函数（badge 亮 = 默认桶非空，防「badge 点亮而默认视图是历史」语义断裂）；运行中卡片行内两段式 cancel（inline 确认不开弹窗）；三行卡片结构（名称行 + mono 元信息行 + 描述行）——**本设计 item 不照搬三行卡片：采用 SessionItem 两行同构（D10 ⑤，用户裁决：行数精简 + 状态徽标移除）**。
 
@@ -182,7 +182,7 @@ pi 进程（每 session 一个）                     runtime（Node sidecar） 
 - **效果**：「插件规范」落点成立（声明 + L2 宿主机制沿用）；渲染载体升级为原生组件，G2/G3 交互可达；角标与桶判据同源（G1 增强，R4 提为首期）。退役后该口径由托盘 icon 计数承接。
 
 **D5：drawer 接入 = 照 4 点既有范式加第 8 个 tab（选定）**
-- **采用**：① `core/domain/drawer/types.ts` `SideDrawerTab` 加 `'bashTask'` + `DrawerControlState` 加 `selectedBackgroundTaskId?: string`（仿 selectedSubagentId 先例）；② `DrawerPanel.vue` tabs 数组加 TabMeta；③ `PanelContainer.vue:107-143` v-if chain 加 `BackgroundTaskDetailPanel`；④ 列表 item 点击 `openDrawerTab('bashTask', {taskId})`（实施形态：经 `DrawerControlState.selectedBackgroundTaskId` 直写后调 `openDrawerTab('bashTask')`，偏差 #17；OpenDrawerOptions 不扩展 taskId）。
+- **采用**：① `core/domain/drawer/types.ts` `SideDrawerTab` 加 `'bashTask'` + `DrawerControlState` 加 `selectedBackgroundTaskId?: string`（仿 selectedSubagentId 先例）；② `DrawerPanel.vue` tabs 数组加 TabMeta；③ `PanelContainer.vue:145-174` v-if chain 加 `BackgroundTaskDetailPanel`；④ 列表 item 点击 `openDrawerTab('bashTask', {taskId})`（实施形态：经 `DrawerControlState.selectedBackgroundTaskId` 直写后调 `openDrawerTab('bashTask')`，偏差 #17；OpenDrawerOptions 不扩展 taskId）。
 - **不采用**：模态对话框/行内展开（详情信息量大，drawer 是本应用重详情的既有范式——subagent/workflow 同款）。
 - **证据**：drawer 4 点同步范式（R1 审查逐点核实：SideDrawerTab 恰 7 成员/tabs 数组/v-if/兼容层）；`useSideDrawer.ts:79-106` 兼容层；宽度持久化 `useDrawerSplitWidth` 自动承接。
 - **效果**：G2 落点；与 subagent/workflow 详情交互一致，无新学习成本。

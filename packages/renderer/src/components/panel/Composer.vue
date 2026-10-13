@@ -16,6 +16,7 @@
     视觉派生），ComposerInput 从 ui 包渲染（D5 占位：壳内硬编码渲染，P4 ExtensionHost 前不走
     contribution 路由）。子组件（CommandPopover/AddMenu/ModelSelect 等）留壳，不在本 wave 范围。
   -->
+  <!-- 宽度契约：恒 content-col（居中 + 封顶 --content-max-w），与消息列（Turn 根）/FormOverlay 同一内容列——composer 与消息流同宽同缘，overlay 互斥替换不跳变；landing 消费 Landing 根覆写的 --content-max-w=720 阅读列。[HISTORICAL] 曾按 demo .composer 无 max-width 做 panel 全宽（band padding 承接 14px 外距），与消息列 720 居中不同缘，用户裁决回归内容列。 -->
   <div class="composer content-col">
     <!-- retry/queue 指示位（spec C10，#13，composer 上方独立行）：
          auto_retry_end / message_start 到达时 store 自动清 → state=undefined → 组件 v-if 消失 -->
@@ -42,8 +43,8 @@
     >
       <div
         ref="composerBoxRef"
-        class="composer-box relative rounded-lg border bg-[var(--composer-bg)]"
-        :class="[boxClass, focusRingClass]"
+        class="composer-box relative border bg-bg"
+        :class="[boxClass, focusRingClass, boxRadiusClass]"
         data-testid="composer-box"
         @dragover.prevent="onDragOver"
         @dragleave.prevent="onDragLeave"
@@ -59,23 +60,20 @@
           @cancel="onCancelQueueEntry"
           @retry="onRetryQueueEntry"
         />
-        <!-- Staging 模式标识 chip（fork/handoff 统一）：顶部 accent chip 提示当前 staging 类型 + × 退出。
-             经 staging.activeStaging 统一渲染（ADR-0057），退出调 staging.exit() -->
-        <div
-          v-if="staging.activeStaging.value"
-          class="composer-mode-chip mx-2.5 mt-2 flex items-center gap-1.5 rounded-md bg-[var(--accent-soft)] px-2 py-1 text-[length:var(--text-2xs)] font-medium text-[var(--accent)]"
-          :data-testid="staging.activeStaging.value.type === 'fork' ? 'composer-mode-chip' : 'composer-handoff-chip'"
+        <!-- Staging 模式 banner（fork/handoff 统一，demo .mode-banner 形态对齐）：composer-box 顶缘
+             整条横幅，图标染 accent = 模式在途唯一染色点（标题粗体中性 fg，描述 fg-2，× 中性）。
+             [HISTORICAL] 前身 mode-chip（accent-soft 底 + accent 字 + accent × + placeholder/box
+             整框染色）已随 banner 形态整体退役。经 staging.activeStaging 统一渲染（ADR-0057），
+             退出调 staging.exit()（Esc / 发送 / 切 session 三路退出链不变） -->
+        <div v-if="staging.activeStaging.value" class="mx-2 mt-2 flex items-center gap-[8px] rounded-[var(--radius)] border border-border bg-bg-elevated px-2.5 py-[6px]"
+          :data-testid="staging.activeStaging.value.type === 'fork' ? 'composer-mode-banner' : 'composer-handoff-banner'"
         >
-          <component :is="staging.activeStaging.value.visual.chipIcon" class="size-3" />
-          <span class="flex-1">{{ t(staging.activeStaging.value.visual.chipLabelKey) }}</span>
-          <Button
-            variant="ghost"
-            size="icon"
-            class="size-4 rounded-sm p-0 text-[var(--accent)] hover:bg-[var(--accent)] hover:text-accent-fg"
-            :title="staging.activeStaging.value.type === 'fork' ? t('panel.composer.forkExit') : t('panel.composer.handoffExit')"
-            @click="staging.exit"
-          >
-            <X class="size-3" />
+          <component :is="staging.activeStaging.value.visual.chipIcon" class="size-[14px] shrink-0 text-accent" :stroke-width="1.8" />
+          <span class="min-w-0 flex-1 truncate text-[length:var(--text-xs)] text-neutral-fg-2">
+            <span class="text-neutral-fg [font-weight:var(--fw-mid)]">{{ stagingBannerTitle }}</span> · {{ stagingBannerDesc }}
+          </span>
+          <Button variant="ghost" size="icon" class="size-[22px] rounded-[var(--radius-sm)] p-0 text-neutral-dim hover:text-neutral-fg" :title="staging.activeStaging.value.type === 'fork' ? t('panel.composer.forkExit') : t('panel.composer.handoffExit')" @click="staging.exit">
+            <X class="size-[12px]" :stroke-width="2" />
           </Button>
         </div>
         <!-- 顶部元信息行（u4 mode-visibility-chip）：对话态只读模式 chip（**仅非默认模式**渲染，
@@ -105,14 +103,15 @@
           @blur="onBoxFocusOut"
         />
 
-      <!-- 底栏三簇（D6 修订「三步聚合」）：左簇（`+` / 托盘 / 插件 toolbar，shrink-0）· 中簇（可压缩占位）·
-           右簇（指标 / 模型+思考 / 发送位，shrink-0 且发送位右锚）。**flex-nowrap 永不换行**；
-           逐组形态由密度状态机（ResizeObserver 实测两簇占宽 vs 可用宽 → composer-density）驱动，
-           累计三步退化：序 0 发送位/`+` 不退化不裁剪 · 序 1 左簇收**单图标**聚合按钮 · 序 2 指标收
-           单图标聚合按钮（hover 聚合页）· 序 3 模型+思考收单图标聚合按钮（click 弹层 + hover 行内
-           切换；非聚合态模型名**恒完整展示**，无截断态）· 顶格仍溢出 → 锚点保护（中部让位）。
-           禁硬编码 px 断点（判据全在实测回路，`»` 省略号入口已退役）。
-           左右两簇挂 data-composer-cluster：fit 回路据二者占宽之和判「放不放得下」（中簇可压到 0）。 -->
+      <!-- 底栏三簇（「三步聚合」目标次序 = 指标 → 左簇 → 模型）：左簇（`+` / btw / 托盘 /
+           插件 toolbar + headerAction，shrink-0）· 中簇（可压缩占位）· 右簇（指标 / 模型+思考 /
+           发送位，shrink-0 且发送位右锚）。**flex-nowrap 永不换行**；逐组形态由密度状态机
+           （ResizeObserver 实测两簇占宽 vs 可用宽 → composer-density）驱动：序 0 发送位/`+`/btw
+           不退化不裁剪 · 序 1 指标 L1 起收**单图标**聚合按钮（hover 聚合页；右簇信息先让位）·
+           序 2 左簇收**单图标**聚合按钮 · 序 3 模型+思考收单图标聚合按钮（click 弹层 + hover
+           行内切换；非聚合态模型名**恒完整展示**，无截断态）· 顶格仍溢出 → 锚点保护（中部让位）。
+           禁硬编码 px 断点（判据全在实测回路，`»` 省略号入口已退役）。左右两簇挂
+           data-composer-cluster：fit 回路据二者占宽之和判「放不放得下」（中簇可压到 0）。 -->
       <div
         ref="composerBarRef"
         data-testid="composer-bar"
@@ -121,34 +120,35 @@
         :data-slot-left-cluster="density.slots.leftCluster"
         :data-slot-metrics="density.slots.metrics"
         :data-slot-model-thinking="density.slots.modelThinking"
-        class="composer-bar flex flex-nowrap items-center justify-end gap-0 px-2.5 pb-2 mt-1"
+        class="composer-bar flex flex-nowrap items-center justify-end gap-0 px-2.5 pb-2.5 mt-1.5"
       >
-        <!-- 左簇：`+`（序 0，不退化不裁剪）/ btw 旁路提问（序 0，退化序登记见
+        <!-- 左簇（landing 不渲染：demo ComposerBar 同判据「左簇挂载 = 有 session」，空态卸载——
+             r4 landing 对齐修复：原 AddMenuPopover 无 sessionId 守卫，空态左下角多出一颗「+」）：
+             `+`（序 0，不退化不裁剪）/ btw 旁路提问（序 0，退化序登记见
              use-composer-bar-density COMPOSER_BTW_BUTTON_DEGRADATION_ORDER）/ 任务托盘
              （左簇唯一聚合入口：aggregated 时单图标按钮承载托盘分段 + 插件 toolbar）/
              展开态插件 toolbar 挂载点 -->
-        <div data-composer-cluster="left" class="flex min-w-0 shrink-0 items-center gap-0.5">
+        <div v-if="sessionId" data-composer-cluster="left" class="flex min-w-0 shrink-0 items-center gap-[4px]">
           <AddMenuPopover @select="onAddSelect" />
           <!-- plugin headerAction 挂载点（demo 裁决落点 = composer 左簇、「+」之后；用户裁决
                2026-10-06）。显隐由 hidden 管线唯一裁决：无任务插件推 hidden=true → 列表构建层
-               剔除，零 DOM 不渲染；无声明同样零 DOM。
-               密度机不参与（不加 anchorProtected v-show）：锚点保护的职责是折叠托盘聚合入口
-               （受托盘 emitter/数据面唯一实例约束只能折叠不能卸载），headerAction 入口的显隐
-               权威在插件 hidden 推送（hidden=false = 插件要求常驻），密度折叠会让插件显式
-               申报的入口被宽度条件静默吞掉，两套显隐权威冲突时以 hidden 管线为准。 -->
-          <HeaderActionsHost v-if="sessionId" :session-id="sessionId" />
+               剔除，零 DOM 不渲染；无声明同样零 DOM。密度归属（demo composer-bar spec §2.1/§4.2
+               B3：L2 聚合面 = 定时任务 + 托盘 → layers 单钮）：expanded 在左簇渲染；aggregated
+               起摘除、同一挂载点数据源改在托盘聚合面板首段渲染（与插件 toolbar 同构）；
+               anchorProtected 随托盘折叠（L4）。 -->
+          <HeaderActionsHost v-if="sessionId && density.slots.leftCluster === 'expanded'" :session-id="sessionId" />
           <!-- btw 入口（btw-question D7，M3-b）：`+` 之后、托盘之前。show-btw 实例开关
                （false 不出按钮——drawer 内 BtwPanel 的 Composer 传 false 防递归出 btw 入口）；
                无 session 不出（与托盘同判据，badge 数据面需主会话）。点击 = openDrawerTab('btw')，
                badge = useBtwTabData 聚合 Σ unread（清除 = 线内容进视口）。 -->
-          <ComposerBtwButton v-if="showBtw && sessionId" :session-id="sessionId" />
+          <ComposerBtwButton v-if="showBtw && sessionId" :session-id="sessionId" :class="btwSpacingClass" />
           <!-- 任务托盘（设计 docs/design/composer-task-tray.md——已删除，git 可追溯——D1：`+` 之后、composer.toolbar 之前）。
-               挂载/可见拆两层：v-if="sessionId"（landing 态卸载，与 GenStatsTriggers /
-               ContextCapacityPopover 同判据，无 session 无任务面）；锚点保护态 v-show 样式折叠
+               挂载/可见拆两层：v-if="sessionId"（landing 态卸载，与指标聚合按钮同判据，无 session 无任务面）；
+               锚点保护态 v-show 样式折叠
                **不卸载**——`update:has-items` 的 emitter 与 useTrayCounts 数据面唯一实例都活在
                本组件内，保护态阈值附近的宽度抖动（拖拽窗口/分屏）每次 protect/unprotect 往返
                若走 v-if 都会重订阅 + 重首拉。
-               aggregated = 序 1 生效：托盘 + 插件 toolbar 收为**单图标**聚合按钮（角标仅运行数数字，
+               aggregated = 序 2 生效：托盘 + 插件 toolbar 收为**单图标**聚合按钮（角标仅运行数数字，
                禁多 icon 重叠），面板内分段展示。
                **可见性不吃 `leftCluster === 'absent'`**：若按「无条目」卸载托盘，emitter 永冻
                false → 切回有条目会话时托盘永不重挂（e2e workflow-sidebar-sync T2 死锁回归）。
@@ -163,7 +163,7 @@
             @update:has-items="onTrayItemsChange"
           />
           <!-- ExtensionHost composer.toolbar 挂载点（audit §12.1，MountPointRegistry composer.toolbar）。
-               展开态渲染（零贡献时 empty=hidden 零 DOM）；序 1 聚合后本处不渲染，同一挂载点 view
+               展开态渲染（零贡献时 empty=hidden 零 DOM）；序 2 聚合后本处不渲染，同一挂载点 view
                改在托盘聚合面板内渲染（仍是同一份缓存）。[HISTORICAL] `»` Ellipsis 溢出菜单已随
                三步聚合退役（底栏不再有省略号入口）。 -->
           <ViewHost
@@ -177,33 +177,28 @@
         <span class="min-w-0 flex-1" />
 
         <!-- 右簇：指标 / 模型+思考 / 发送位（shrink-0，发送位右锚不漂移） -->
-        <div data-composer-cluster="right" class="flex min-w-0 shrink-0 items-center gap-0">
-          <!-- 序 2：指标（容量 + 速度 + 缓存）。展开 = 三触发器平铺（各自浮层保留为再入路径）；
-               aggregated = **单图标**聚合按钮（hover 弹指标聚合页，容量/速度/缓存三段全量）；
-               absent = 锚点保护让位（不渲染）。landing（无 session）不渲染。 -->
+        <div data-composer-cluster="right" class="flex min-w-0 shrink-0 items-center gap-[4px]">
+          <!-- 序 1：指标（容量 + TTFT + 速度 + 缓存）。expanded（fit 0）= 纯文本触发器平铺
+               （TTFT / 速度 / 缓存 + 容量，各自 hover 浮层保留为再入路径，demo `.mtr-exp` 同款）；
+               aggregated（L1 起，右簇信息先让位）= **单图标**聚合按钮（hover 弹指标聚合页，
+               容量/TTFT/速度/缓存四卡全量）；absent = 锚点保护让位（不渲染）。landing（无 session）不渲染。 -->
           <div
             v-if="sessionId && density.slots.metrics !== 'absent'"
             :class="density.slots.metrics === 'aggregated' ? AGGREGATE_GROUP_CLASS : EXPANDED_GROUP_CLASS"
           >
-            <ComposerMetricsAggregate
-              v-if="density.slots.metrics === 'aggregated'"
-              :session-id="sessionId"
-              :model-id="currentModelId"
-            />
+            <ComposerMetricsAggregate v-if="density.slots.metrics === 'aggregated'" :session-id="sessionId" :model-id="currentModelId" />
             <template v-else>
-              <!-- 生成指标双触发器（composer-gen-stats §3.1：速度 t/s + 缓存命中率 %，位于上下文容量左侧）。
-                   landing（无 session，尚未开始）隐藏：无采样无用量，两项恒「—」横线无信息量。
-                   [HISTORICAL] variant（simplified/iconic 中间态）已随三步聚合退役——收不完就整组聚合。 -->
               <GenStatsTriggers :session-id="sessionId" :model-id="currentModelId" />
-              <!-- 上下文容量（spec §2a：hover 出容量 popover；session 通道订阅 context.update） -->
               <ContextCapacityPopover :session-id="sessionId" :model-id="currentModelId" />
             </template>
           </div>
-          <!-- 序 3：模型 + 推理档位。展开 = 模型名**恒完整展示**（无 88/56px 截断态）+ 档位按钮；
-               aggregated = **单图标**聚合按钮（click 弹模型列表+思考档位，hover 行内即切换，D2）。 -->
-          <div
-            :class="density.slots.modelThinking === 'aggregated' ? AGGREGATE_GROUP_CLASS : EXPANDED_GROUP_CLASS"
-          >
+          <!-- 序 3：模型 + 推理档位。展开 = 模型名**恒完整展示**（无 88/56px 截断态）+ 档位按钮
+               （组容器 = demo 行 gap 4px 对齐位 EXPANDED_MODEL_THINKING_GROUP_CLASS）；
+               aggregated = **单图标**聚合按钮（click 弹模型列表+思考档位，hover 行内即切换，D2），
+               ml-[8px] 还原 demo L3 下「Gauge ↔ Boxes」12px（demo 由 mt-exp 两个零宽 pop-anchor
+               的行 gap 叠出，real 是 v-if 摘除，故补在组容器左距）。
+               组间距条件值见 modelThinkingGroupClass 注释（r4 项 3/4，接线件 useComposerSpacingClasses）。 -->
+          <div :class="modelThinkingGroupClass">
             <ModelThinkingAggregate
               v-if="density.slots.modelThinking === 'aggregated'"
               :selected="currentModelId"
@@ -234,19 +229,19 @@
           v-if="staging.activeStaging.value && !isSending"
           variant="default"
           size="icon"
-          class="ml-1.5 size-[var(--composer-btn-size)] rounded-md bg-accent text-accent-fg transition-colors enabled:hover:bg-accent-hover disabled:bg-transparent disabled:text-[var(--neutral-dim)]"
+          class="ml-[4px] size-[var(--composer-btn-size)] rounded-md bg-accent text-accent-fg transition-colors enabled:hover:bg-accent-hover disabled:bg-accent-soft disabled:text-neutral-mid disabled:opacity-100"
           :disabled="!canSubmit"
           :data-testid="staging.activeStaging.value.type === 'fork' ? 'fork-send-btn' : 'handoff-send-btn'"
           :title="staging.activeStaging.value.type === 'fork' ? t('panel.composer.forkSend') : t('panel.composer.handoffSend')"
           @click="onSendClick"
         >
-          <ArrowUp class="size-[15px]" />
+          <ArrowUp class="size-[16px]" />
         </Button>
         <Button
           v-else-if="sendButtonState === 'stop'"
           variant="ghost"
           size="icon"
-          class="stop-btn ml-1.5 size-[var(--composer-btn-size)] rounded-md bg-surface-hover text-neutral-mid hover:bg-danger-soft hover:text-danger"
+          class="stop-btn ml-[4px] size-[var(--composer-btn-size)] rounded-md bg-surface-hover text-neutral-mid hover:bg-danger-soft hover:text-danger"
           :title="t('panel.composer.stop')"
           @click="onStopClick"
         >
@@ -256,35 +251,56 @@
           v-else-if="sendButtonState === 'queue'"
           variant="default"
           size="icon"
-          class="queue-send-btn relative ml-1.5 size-[var(--composer-btn-size)] rounded-md bg-accent text-accent-fg transition-colors enabled:hover:bg-accent-hover disabled:bg-transparent disabled:text-[var(--neutral-dim)]"
+          class="queue-send-btn relative ml-[4px] size-[var(--composer-btn-size)] rounded-md bg-accent text-accent-fg transition-colors enabled:hover:bg-accent-hover disabled:bg-accent-soft disabled:text-neutral-mid disabled:opacity-100"
           :disabled="!canSubmit"
           :title="canSubmit ? `${t('panel.composer.queueSend')} · ⏎` : t('panel.composer.sendHint')"
           @click="onSendClick"
         >
-          <ArrowUp class="size-[15px]" />
+          <ArrowUp class="size-[16px]" />
           <!-- 时钟角标（D6 场景 1）：排队语义视觉锚点，右上角 1/4 尺寸 -->
-          <Clock class="absolute right-[2px] top-[2px] size-2" aria-hidden="true" />
+          <Clock class="absolute right-[2px] top-[2px] size-[8px]" aria-hidden="true" />
         </Button>
+        <!-- 发送中 spinner = 呼吸弧（chat 域统一 loader 规格同构：15px accent + 三重动画）。
+             svg 骨架与 ui 包 RUNNING_LOADER_SVG 同构（该常量未在 ui 包 exports 白名单，
+             共享需动 package.json 归交接项）；弧段动画原语 .ld-track/.ld-arc 仍由
+             style.css 全局单源承载，此处仅静态属性无独立样式。 -->
         <div
           v-else-if="isSending"
-          class="ml-1.5 grid size-[var(--composer-btn-size)] place-items-center rounded-md bg-accent text-accent-fg"
+          class="ml-[4px] grid size-[var(--composer-btn-size)] place-items-center rounded-md bg-accent text-accent-fg"
           :title="t('panel.composer.sending')"
         >
-          <Loader2 class="size-4 animate-spin" />
+          <span class="inline-block size-[15px] animate-loader-spin" aria-hidden="true">
+            <svg
+              class="size-full"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.7"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <circle class="ld-track" cx="12" cy="12" r="10" opacity="0.16" />
+              <circle class="ld-arc" cx="12" cy="12" r="10" pathLength="100" />
+            </svg>
+          </span>
         </div>
         <Button
           v-else
           variant="default"
           size="icon"
-          class="ml-1.5 size-[var(--composer-btn-size)] rounded-md bg-accent text-accent-fg transition-colors enabled:hover:bg-accent-hover disabled:bg-transparent disabled:text-[var(--neutral-dim)]"
+          class="ml-[4px] size-[var(--composer-btn-size)] rounded-md bg-accent text-accent-fg transition-colors enabled:hover:bg-accent-hover disabled:bg-accent-soft disabled:text-neutral-mid disabled:opacity-100"
           :disabled="!canSubmit"
           :title="canSubmit ? `${t('panel.composer.send')} · ⏎` : t('panel.composer.sendHint')"
           @click="onSendClick"
         >
-          <ArrowUp class="size-[15px]" />
+          <ArrowUp class="size-[16px]" />
         </Button>
         </div>
       </div>
+
+        <!-- 顶缘容量细条（ui-optimize 决策 6 / N7）：2px 色阶预警条，只显分档不显数字
+             （精确读数在指标聚合按钮 hover 页）；数字 aria 提示见组件自身。 -->
+        <ComposerCapacityBar v-if="sessionId" :session-id="sessionId" />
     </div>
     </CommandPopover>
 
@@ -294,7 +310,7 @@
 <script setup lang="ts">
 import { computed, createVNode, nextTick, provide, ref, render, watch, type Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ArrowUp, Clock, Loader2, Square, X } from '@lucide/vue'
+import { ArrowUp, Clock, Square, X } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import { ComposerInput, ComposerInputDepsKey, type ComposerInputDeps } from '@taiji/ui/features/composer'
 import { ViewHost } from '@taiji/ui/extension-host'
@@ -303,11 +319,12 @@ import AddMenuPopover from './AddMenuPopover.vue'
 import ComposerBtwButton from './tray/ComposerBtwButton.vue'
 import ComposerTray from './tray/ComposerTray.vue'
 import CommandPopover from './CommandPopover.vue'
-import ContextCapacityPopover from './ContextCapacityPopover.vue'
-import GenStatsTriggers from './GenStatsTriggers.vue'
 import ModelSelectPopover from './ModelSelectPopover.vue'
 import ThinkingLevelPopover from './ThinkingLevelPopover.vue'
 import ComposerMetricsAggregate from './ComposerMetricsAggregate.vue'
+import ComposerCapacityBar from './ComposerCapacityBar.vue'
+import GenStatsTriggers from './GenStatsTriggers.vue'
+import ContextCapacityPopover from './ContextCapacityPopover.vue'
 import ModelThinkingAggregate from './ModelThinkingAggregate.vue'
 import ContextChipsBar from './ContextChipsBar.vue'
 import RetryIndicator from './RetryIndicator.vue'
@@ -322,9 +339,7 @@ import { useQueueRows } from '@/composables/panel/useQueueRows'
 import { useComposerModeChip } from '@/composables/panel/useComposerModeChip'
 import { useComposerFocusRing } from '@/composables/panel/composer-focus-ring'
 import {
-  useComposerBarDensity,
-  AGGREGATE_GROUP_CLASS,
-  EXPANDED_GROUP_CLASS,
+  useComposerBarDensity, useComposerSpacingClasses, AGGREGATE_GROUP_CLASS, EXPANDED_GROUP_CLASS,
 } from '@/components/panel/tray/use-composer-bar-density'
 import { useComposerShell, createComposerDrafts, type ShellInputInstance } from '@/composables/panel/composer-shell'
 import { useComposerKeydown } from '@/composables/panel/composer-keydown'
@@ -344,11 +359,12 @@ const props = withDefaults(
 )
 
 const { t } = useI18n()
+const sessionIdRef = computed(() => props.sessionId)
 /** 底栏密度接线（D6 修订「三步聚合」）：ResizeObserver 实测溢出 → `density`（逐组形态 / fit 级 / 锚点
  * 保护）；判据与退化序全在 `composer-density.ts` + 本件测量回路，本处零 px 常量（容器 class 见接线件导出）。 */
-const { barRef: composerBarRef, density, onTrayItemsChange } = useComposerBarDensity(
-  computed(() => props.sessionId),
-)
+const { barRef: composerBarRef, density, onTrayItemsChange } = useComposerBarDensity(sessionIdRef)
+// 右簇组容器 / btw 左间距的档位条件值（r4 视觉对齐，判据与 demo 权威值见接线件注释）
+const { modelThinkingGroupClass, btwSpacingClass } = useComposerSpacingClasses(sessionIdRef, density)
 const chatStore = useChatStore()
 const sessionStore = useSessionStore()
 const flow = useNewTaskFlow()
@@ -366,6 +382,10 @@ const { projectSkills } = useProjectSkills(projectSkillsCwd) // W3 ADR-0051：�
 const { globalSkills } = useGlobalSkills() // W4 FR-5：全局 skill（skill 段两态共用）
 const isActive = computed(() => (props.sessionId ? chatStore.isActive(props.sessionId) : false))
 
+/** composer-box 圆角分档（demo 同款）：panel = --radius-lg 12px（workbench.css .composer-box）；
+ *  landing = --radius 8px（unpacked.css .landing .composer，M9 交接项对齐）。 */
+const boxRadiusClass = computed(() => (props.variant === 'landing' ? 'rounded' : 'rounded-lg'))
+
 /** #13 retry 指示位数据源（store 由 W0/#8 维护，不可变 Map 更新触发响应）。[u3c] queueState 已退役：队列区数据源收敛为 session.delivery 帧投影（useQueueRows）。 */
 const retryState = computed(() => (props.sessionId ? chatStore.getRetryState(props.sessionId) : undefined))
 
@@ -375,8 +395,6 @@ const inputRef = ref<InstanceType<typeof ComposerInput> | null>(null)
 const shellInputRef = inputRef as Ref<ShellInputInstance | null>
 // 模板顶层 ref 会被渲染代理解包成值——经普通对象字段中转保活「传引用」语义（通道缺口③，fail-closed 见 CommandPopover）
 const shellInputHolder = { ref: shellInputRef }
-
-const sessionIdRef = computed(() => props.sessionId)
 
 /**
  * U4「切换中」（设计 §5.1 U4 语义②③）：core 的 `switching` 是**每实例**瞬态真值，
@@ -475,6 +493,8 @@ const {
   canSubmit,
   boxClass,
   placeholder,
+  stagingBannerTitle,
+  stagingBannerDesc,
   // bash 态（draft.trimStart().startsWith('!')，core dispatch/bash.ts isBashMode 同源判定）：
   // 传 ComposerInput suppressTriggers——bash 模式下 $/#/@/ 全部不触发浮层（设计 D6 豁免）
   isBashMode,

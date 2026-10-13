@@ -7,7 +7,7 @@
  * - 等价性：展开/折叠/过滤/showIgnored/nodeStates 组合下，投影产出的 VisibleRow 列表
  *   （顺序 + 缩进深度 + 行类型）与旧递归渲染（FileView.visibleNodes + FileTreeRow 递归）
  *   的节点集合完全一致——reference 实现逐行复刻旧代码语义
- * - 字段映射：changeCount（预聚合 Map）/gitStatus/lineStats/expanded/ignored 正确投影
+ * - 字段映射：childCount（可见子项数）/gitStatus/lineStats/expanded/ignored 正确投影
  * - hint 行：loading/error/empty 三类占位行（旧递归的 nodeStates 子区渲染）
  * - 纯函数幂等：同树同过滤同展开 → 同输出（plan 验收「投影纯函数单测」）
  * - 性能量级：万级节点单次投影产出全部可见行；getNodeState 只按需调用（展开目录数），
@@ -113,18 +113,22 @@ function legacyVisibleRows(
   return out
 }
 
-/** 用 store 状态驱动投影（与 FileView computed 相同的调用形态：per-session getter 传参） */
-function project(store: ReturnType<typeof useFileTreeStore>, sid = 's1'): VisibleRow[] {
-  return projectVisibleRows(
-    (s) => store.getTree(s),
-    (s) => store.getExpanded(s),
-    (s) => store.getGitOverlay(s),
-    (s) => store.getDirChangeCounts(s),
+/** projectVisibleRows 参数序列单源（per-session getter 传参；getNodeState 可注入 spy）。 */
+function projectArgs(store: ReturnType<typeof useFileTreeStore>, sid: string, getNodeState?: (s: string, path: string) => unknown) {
+  return [
+    (s: string) => store.getTree(s),
+    (s: string) => store.getExpanded(s),
+    (s: string) => store.getGitOverlay(s),
     store.filterText,
     store.showIgnored,
     sid,
-    (s, path) => store.getNodeState(s, path),
-  )
+    getNodeState ?? ((s: string, path: string) => store.getNodeState(s, path)),
+  ] as const
+}
+
+/** 用 store 状态驱动投影（与 FileView computed 相同的调用形态：per-session getter 传参） */
+function project(store: ReturnType<typeof useFileTreeStore>, sid = 's1'): VisibleRow[] {
+  return projectVisibleRows(...projectArgs(store, sid))
 }
 
 function briefs(rows: VisibleRow[]): RowBrief[] {
@@ -184,20 +188,28 @@ describe('projectVisibleRows 等价性（旧递归渲染节点集合，顺序 + 
 })
 
 describe('projectVisibleRows 字段映射（徽章/角标/行数从分桶投影）', () => {
-  it('changeCount 来自预聚合 Map（与 getDirChangeCount 同值），文件行恒 0', () => {
+  it('childCount = 目录可见直接子项数（showIgnored 过滤同口径），文件行恒 0', () => {
     const store = useFileTreeStore()
-    setupTree(store, [])
-    store.setGitOverlay('s1', [
-      { path: 'src/a.ts', xyCode: ' M', status: 'modified' },
-      { path: 'src/utils/b.ts', xyCode: 'A ', status: 'added' },
-      { path: 'README.md', xyCode: 'M ', status: 'modified' },
-    ])
+    setupTree(store, ['src']) // 展开 src → src/empty 行进入投影
+
     const rows = project(store)
     const src = rows.find((r) => r.path === 'src')!
-    expect(src.changeCount).toBe(2) // src/a.ts + src/utils/b.ts
-    expect(src.changeCount).toBe(store.getDirChangeCount('s1', 'src'))
+    const empty = rows.find((r) => r.path === 'src/empty')!
     const readme = rows.find((r) => r.path === 'README.md')!
-    expect(readme.changeCount).toBe(0) // 文件行不投影目录计数
+    // 默认 showIgnored=false：src 直接子项 a.ts/utils/empty/ignored-dir，过滤 ignored-dir → 3
+    expect(src.childCount).toBe(3)
+    expect(empty.childCount).toBe(0) // 空目录 = 0（demo .fbadge：是目录即恒渲染，0 也显）
+    expect(readme.childCount).toBe(0) // 文件行不投影子项数
+
+    // showIgnored=true：ignored-dir 计入 → 4
+    store.toggleShowIgnored()
+    expect(project(store).find((r) => r.path === 'src')!.childCount).toBe(4)
+  })
+
+  it('未加载 children 的目录 childCount 恒 0（懒加载诚实值）', () => {
+    const store = useFileTreeStore()
+    store.setTree('s1', [{ path: 'lazy', name: 'lazy', type: 'dir' }])
+    expect(project(store).find((r) => r.path === 'lazy')!.childCount).toBe(0)
   })
 
   it('gitStatus 整对象 + lineStats 映射（tracked → add/del；untracked+size → size；无标注 → undefined）', () => {
@@ -353,7 +365,6 @@ describe('projectVisibleRows 性能量级（万级节点，替代旧 per-row 12 
       (s) => store.getTree(s),
       (s) => store.getExpanded(s),
       (s) => (s === 's1' ? countingOverlay : store.getGitOverlay(s)),
-      (s) => store.getDirChangeCounts(s),
       store.filterText,
       store.showIgnored,
       's1',
@@ -376,16 +387,7 @@ describe('projectVisibleRows 性能量级（万级节点，替代旧 per-row 12 
     store.addExpanded('s1', 'big/nested')
 
     const spy = vi.fn((s: string, p: string) => store.getNodeState(s, p))
-    const rows = projectVisibleRows(
-      (s) => store.getTree(s),
-      (s) => store.getExpanded(s),
-      (s) => store.getGitOverlay(s),
-      (s) => store.getDirChangeCounts(s),
-      store.filterText,
-      store.showIgnored,
-      's1',
-      spy,
-    )
+    const rows = projectVisibleRows(...projectArgs(store, 's1', spy))
     expect(rows).toHaveLength(20002) // big + 10000 files + nested + 10000 files，全部展开
     // 只对 2 个已展开目录调用（loading/error hint 判定），不做 20002 次 per-row 状态读取
     expect(spy).toHaveBeenCalledTimes(2)

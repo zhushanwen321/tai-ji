@@ -8,6 +8,9 @@ export default {
   saved: 'Saved',
   // ── Menu navigation (SettingsModal left nav + right detail title/desc) ──
   menu: {
+    groupResources: 'Models & Resources',
+    groupInputAppearance: 'Input & Appearance',
+    groupEnvSystem: 'Environment & System',
     provider: 'Provider',
     providerDesc: 'Configure model providers and API keys',
     skill: 'Skill',
@@ -34,20 +37,14 @@ export default {
     updateDesc: 'Configure auto-update and proxy settings',
     appearance: 'Appearance',
     appearanceDesc: 'Theme, colors and per-region font size',
-    usage: 'Usage',
+    usage: 'Usage Statistics',
     usageDesc: 'View token usage and session statistics',
     remoteAccess: 'Remote Access',
     remoteAccessDesc: 'Access taiji from a mobile browser (LAN / Tailscale)',
   },
   // ── Appearance page (AppearancePage) ──
   appearance: {
-    quickTheme: 'Theme',
     quickChatFont: 'Chat font size',
-    tagDefault: 'Default',
-    tagDark: 'Dark',
-    tagLight: 'Light',
-    regionFontTitle: 'Per-region font size',
-    regionFontHint: 'Adjust font size per UI region (×0.9 / ×1.0 / ×1.15 / ×1.3), applies instantly',
     region: {
       sidebar: 'Left sidebar',
       chat: 'Chat stream',
@@ -79,6 +76,10 @@ export default {
     saveFailed: 'Save failed: {reason}',
     loadErrorHint: 'Failed to load; showing defaults',
     loadErrorRetry: 'Retry',
+    modelLabel: '{engine} default model',
+    modelDesc: 'Fallback when dispatching this engine without an explicit model',
+    piModelNote: 'The pi engine resolves its model itself (inherits main session model > pi default)',
+    modelSaveFailed: 'Save failed: {reason}',
   },
   // ── SystemPrompt page (SystemPromptPage) ──
   systemPrompt: {
@@ -948,7 +949,6 @@ export default {
     updateSourceAuto: 'Auto (recommended)',
     updateSourceGithub: 'GitHub',
     updateSourceGitcode: 'GitCode',
-    currentVersionLabel: 'Current Version',
     channelHint: 'stable channel · restart the app for the update to take effect',
     // Module-standard toasts for the three update-settings fields (autoUpdate/preDownload/updateSource)
     // after the setting-field migration; the saved/saveFailed keys above stay proxy-form-specific

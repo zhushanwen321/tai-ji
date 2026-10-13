@@ -15,20 +15,21 @@
 -->
 <template>
   <div class="flex h-full min-h-0 flex-col" data-testid="drawer-workflow-tab">
-    <!-- 空态：未选中 workflow -->
+    <!-- 空态：未选中 workflow（demo .empty 文字形态） -->
     <div
       v-if="!workflow"
       class="flex h-full flex-col items-center justify-center gap-2 p-4 text-center"
       data-testid="drawer-workflow-empty"
     >
-      <Workflow class="size-6 text-neutral-dim opacity-40" />
-      <p class="text-[length:var(--text-xs)] text-neutral-dim opacity-70">{{ t('panel.sideDrawer.noWorkflow') }}</p>
-      <p class="text-[length:var(--text-2xs)] text-neutral-dim opacity-50">{{ t('panel.sideDrawer.workflowHint') }}</p>
+      <Workflow class="size-6 text-neutral-dim opacity-40" stroke-width="1.6" />
+      <p class="text-[length:var(--text-xs)] text-neutral-mid">{{ t('panel.sideDrawer.noWorkflow') }}</p>
+      <p class="text-[length:var(--text-2xs)] text-neutral-dim">{{ t('panel.sideDrawer.workflowHint') }}</p>
     </div>
 
     <template v-else>
-      <!-- header：workflow 名 + slug + 中止（running 态 Abort 两段式） -->
-      <div class="flex shrink-0 items-center gap-2 border-b border-hairline px-3 py-2">
+      <!-- header：workflow 名 + slug + 中止（running 态 Abort 两段式）。
+           头行节奏与 SubagentTab 同款（px-3.5 / pt-2 pb-1.5，抽屉头行统一内缩）。 -->
+      <div class="flex shrink-0 items-center gap-2 border-b border-hairline px-3.5 pb-1.5 pt-2">
         <Workflow class="size-[15px] shrink-0 text-neutral-dim" />
         <!-- 详情层展示 workflow 脚本全路径（scriptPath；旧 run 缺该字段回落 scriptName 短名） -->
         <span
@@ -66,7 +67,7 @@
                 <span v-if="runModelDisplay.label" class="max-w-[140px] truncate">{{ runModelDisplay.label }}</span>
                 <span
                   v-if="runModelDisplay.overridden"
-                  class="shrink-0 rounded-sm border border-accent/40 px-1 text-[length:var(--text-3xs)] text-accent"
+                  class="shrink-0 rounded-sm border border-[color-mix(in_oklch,var(--accent)_40%,transparent)] px-1 text-[length:var(--text-3xs)] text-accent"
                   data-testid="drawer-workflow-override-badge"
                 >{{ t('panel.sideDrawer.subagentOverrideBadge') }}</span>
                 <ChevronDown class="size-3 shrink-0 opacity-60" />
@@ -100,7 +101,7 @@
             <div
               v-if="hasExplicitPhases"
               class="flex items-center gap-1.5 rounded-sm px-1 py-1"
-              :class="group.phaseStatus === 'running' ? 'bg-accent/10' : ''"
+              :class="group.phaseStatus === 'running' ? 'bg-accent-soft' : ''"
             >
               <span class="size-1.5 shrink-0 rounded-full" :class="phaseDotClass(group.phaseStatus)" />
               <span class="text-[length:var(--text-3xs)] font-medium text-neutral-dim">{{ group.phase }}</span>

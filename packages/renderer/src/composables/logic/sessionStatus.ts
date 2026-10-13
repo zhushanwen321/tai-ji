@@ -84,7 +84,7 @@ export const STATUS_ICON: Record<
   working: { icon: 'RefreshCw', color: 'text-accent', animation: 'animate-spin' },
   waiting: { icon: 'Wrench', color: 'text-warn', animation: '' },
   retrying: { icon: 'Zap', color: 'text-warn', animation: 'animate-pulse-strong' },
-  done: { icon: 'CheckCircle2', color: 'text-success', animation: '' },
+  done: { icon: 'Check', color: 'text-accent', animation: '' },
   stopped: { icon: 'Ban', color: 'text-neutral-mid', animation: '' },
   error: { icon: 'AlertCircle', color: 'text-danger', animation: '' },
 }

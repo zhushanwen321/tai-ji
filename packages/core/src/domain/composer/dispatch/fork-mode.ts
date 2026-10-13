@@ -63,7 +63,7 @@ export interface ForkDeps {
   // ── 跨域能力（W3 迁移：去掉 renderer import，改为 deps 注入）──
   /** i18n 翻译（原 vue-i18n useI18n → t） */
   t: (key: string, params?: Record<string, unknown>) => string
-  /** fork mode-chip 图标（原 @lucide/vue GitFork） */
+  /** fork banner 图标（demo 权威 git-branch；[HISTORICAL] 前身 GitFork 随 banner 图标裁决纠正） */
   forkChipIcon: Component
   /** fork+send 编排（原 useSidebar forkSessionAsk；features 层跨 api + stores） */
   forkSessionAsk: (
@@ -126,6 +126,9 @@ export function useComposerForkMode(
     // forkSessionAsk 的空 content 守卫会退化为纯 fork（不发送首条 user）。
     allowsEmptySend: true,
     // fork-ask 是前端编排的 fork+send，无独立 inflight 可取消 → isInProgress/abort 缺省
+    // [HISTORICAL] activeBoxClass 的整框 accent 染色串已随 staging banner 形态退役（demo 裁决：
+    // banner 图标染 accent 是模式在途的唯一染色点）——renderer/mobile-renderer 均不再消费
+    // boxClass 派生视图（现消费方仅本域派生视图测试），字段与串保留 = 派生视图契约未删，非生效样式。
     activeBoxClass:
       'fork-mode border-[var(--accent)] shadow-[0_0_0_3px_var(--accent-ring,rgba(79,142,247,0.45))] bg-[var(--accent-soft)]',
     placeholderKey: 'panel.composer.forkHint',

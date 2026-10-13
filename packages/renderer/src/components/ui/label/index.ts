@@ -1,1 +1,1 @@
-export { default as Label } from "./Label.vue"
+export { Label } from '@taiji/ui'

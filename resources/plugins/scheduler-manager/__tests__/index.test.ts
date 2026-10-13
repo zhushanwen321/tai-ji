@@ -10,7 +10,7 @@
  * ④ 生命周期拆镜（onDidDestroySession → teardownMirror 后失效信号冻结）
  * ⑤ 恢复窗口写路径两支用户文案（写成功提示 restore 副作用 / 写抛错提示手动打开）
  * ⑥ onDidActivateSession 焦点切换（focusSessionId → 写命令链指向新会话 +
- *    ensureMirror 为新 sid 补挂）
+ *    ensureMirror 为新 sid 补挂 + 恢复超时失败态的激活重拉自愈）
  * ⑦ 展示层三态分支（已过期「即将触发」两态文案 / 上次成败标记 + 失败原因行 /
  *    成功标记且无原因行——经首拉推树断言）
  * ⑧ 撤回信号镜像重建（'taiji:revoked' → 丢弃累计 + 全量重拉，折叠不含被撤任务；
@@ -746,6 +746,32 @@ describe('onDidActivateSession: 焦点切换 + ensureMirror 补挂', () => {
     // 焦点已切换：写命令链指向 s-2
     await h.handlers.get('scheduler-manager.toggle')?.({ id: 'aaaa1111', enabled: false })
     expect(h.sendCalls.at(-1)?.sessionId).toBe('s-2')
+  })
+
+  it('恢复超时后 didActivate：失败态镜像重置预算重拉成功，任务列表回归', async () => {
+    const h = await setup({
+      readScript: [
+        // 兜底建镜首拉 + 恢复窗口 5 次重试全败（共 6 次），第 7 次（激活触发）成功
+        ...Array.from({ length: 1 + READ_RETRY_MAX }, () => new Error('SESSION_NOT_ACTIVE: no live pi')),
+        { sessionFile: SESSION_FILE, entries: [upsertEntry('aaaabbbb', true, 'e1')], leafEntryId: 'e1' },
+      ],
+    })
+    vi.mocked(h.api.sessions.get).mockResolvedValue(makeSession({ status: 'active' }))
+
+    // 冷启动兜底建镜：重试预算耗尽 → 文案停「恢复超时」（前置自证）
+    await vi.advanceTimersByTimeAsync(READ_DEBOUNCE_MS)
+    await vi.advanceTimersByTimeAsync(READ_RETRY_MS * READ_RETRY_MAX)
+    expect(h.readCalls).toHaveLength(1 + READ_RETRY_MAX)
+    expect(ansiLines(h.lastTree())).toEqual(['会话恢复超时，请从侧栏重新打开该会话'])
+
+    // 用户从侧栏重新打开该会话 → didActivate（会话激活完成后投递，进程必已就绪）
+    h.activateSession(makeSession())
+    await vi.advanceTimersByTimeAsync(READ_DEBOUNCE_MS)
+
+    // 失败态镜像重置预算重拉成功：失败文案清除，任务列表/徽标回归
+    expect(h.readCalls).toHaveLength(1 + READ_RETRY_MAX + 1)
+    expect(ansiLines(h.lastTree())).toEqual([])
+    expect(lastHeaderAction(h.api).badge).toBe('1')
   })
 })
 

@@ -1,66 +1,87 @@
 <!--
   Settings · 远程访问页。
   开关（切换弹「重启 runtime 生效」确认，确认后 main 自动重启 runtime 并返回最新连接信息）
-  + 连接入口（链接 + 二维码 + 复制 + 轮换 token）+ Tailscale 跨网指引（折叠）。
-  关态时入口/指引区块隐藏，只留开关区。数据流单向：本页持 info 单一状态，
+  + 连接入口（链接 + 二维码 + 复制 + 轮换 token）+ Tailscale 跨网指引。
+  关态时入口/指引卡隐藏，只留开关卡。数据流单向：本页持 info 单一状态，
   ConnectionEntrySection 为纯展示子组件。
 -->
 <template>
-  <div class="flex max-w-[860px] flex-col gap-3">
+  <!--
+    [w3b] demo 对照：RemoteAccessSection.vue 三卡（.gcard 结构）——
+    开关卡 = 卡头 gc-title + gc-sub（enableDesc）+ tight body + SettingRow（启用 Switch）；
+    连接入口卡 = 卡头 gc-title + actions 轮换钮（demo .btn.secondary + icon 14px），E5 显形条保留
+    （real 功能结构，warn 软底令牌 + 13px 文案）；Tailscale 指引卡 = demo 无折叠（static body desc）。
+    关态时入口/指引卡隐藏，只留开关卡。容器不设 gap：卡间距由 GroupCard 相邻 margin（16px）承担。
+    数据流单向：本页持 info 单一状态，ConnectionEntrySection 为纯展示子组件。
+  -->
+  <div class="flex flex-col">
     <!-- 卡 1：开关 -->
-    <div class="rounded-md border border-border bg-bg">
-      <div class="px-4 pb-3 pt-3">
-        <h3 class="text-[13px] font-medium text-fg">{{ t('settings.remoteAccess.enableTitle') }}</h3>
-        <p class="mt-0.5 text-[11px] text-muted">{{ t('settings.remoteAccess.enableDesc') }}</p>
+    <GroupCard>
+      <template #head>
+        <div class="gc-head-text">
+          <h3 class="gc-title">{{ t('settings.remoteAccess.enableTitle') }}</h3>
+          <p class="gc-sub">{{ t('settings.remoteAccess.enableDesc') }}</p>
+        </div>
+      </template>
+      <div class="px-[10px] pt-[4px] pb-[8px]">
+        <SettingRow :label="t('settings.remoteAccess.enableLabel')">
+          <Switch
+            data-testid="remote-access-switch"
+            :model-value="info.enabled"
+            :disabled="toggling"
+            @update:model-value="onSwitchIntent"
+          />
+        </SettingRow>
       </div>
-      <div class="flex items-center justify-between border-t border-border px-4 py-3">
-        <Label class="text-[12px] text-fg">{{ t('settings.remoteAccess.enableLabel') }}</Label>
-        <Switch
-          data-testid="remote-access-switch"
-          :model-value="info.enabled"
-          :disabled="toggling"
-          @update:model-value="onSwitchIntent"
-        />
-      </div>
-    </div>
+    </GroupCard>
 
     <!-- 卡 2：连接入口 + 轮换（开态渲染；关态隐藏） -->
-    <div v-if="info.enabled" class="rounded-md border border-border bg-bg" data-testid="remote-access-entry">
-      <div class="flex items-center justify-between px-4 pb-1 pt-3">
-        <div>
-          <h3 class="text-[13px] font-medium text-fg">{{ t('settings.remoteAccess.entryTitle') }}</h3>
+    <GroupCard v-if="info.enabled" data-testid="remote-access-entry">
+      <template #head>
+        <div class="gc-head-text">
+          <h3 class="gc-title">{{ t('settings.remoteAccess.entryTitle') }}</h3>
         </div>
+      </template>
+      <template #actions>
         <Button
           variant="secondary"
-          size="dense"
-          class="h-8 px-3 text-[11px]"
+          class="h-[32px] px-[12px] text-[length:var(--text-sm)] [&_svg]:size-[14px]"
           :disabled="rotating"
           data-testid="remote-access-rotate"
           @click="onRotate"
         >
-          <Loader2 v-if="rotating" class="size-3.5 animate-spin" />
-          <RefreshCw v-else class="size-3.5" />
+          <Loader2 v-if="rotating" class="animate-spin" />
+          <RefreshCw v-else />
           {{ t('settings.remoteAccess.rotate') }}
         </Button>
+      </template>
+      <div class="p-[12px_16px]">
+        <!-- 移动壳 dist 缺失显形（E5）：enabled 但产物缺失时 runtime 静态面已禁用，手机端 404 -->
+        <div
+          v-if="!info.mobileDistReady"
+          role="alert"
+          class="mb-[8px] flex items-start gap-2 rounded-sm bg-warn-soft px-3 py-2"
+          data-testid="remote-access-dist-missing"
+        >
+          <AlertTriangle class="mt-0.5 size-[14px] shrink-0 text-warn" />
+          <p class="text-[length:var(--text-sm)] leading-[1.55] text-warn">{{ distMissingText }}</p>
+        </div>
+        <ConnectionEntrySection :info="info" />
       </div>
-      <!-- 移动壳 dist 缺失显形（E5）：enabled 但产物缺失时 runtime 静态面已禁用，手机端 404 -->
-      <div
-        v-if="!info.mobileDistReady"
-        role="alert"
-        class="mx-4 mb-1 flex items-start gap-2 rounded-sm bg-warn-soft px-3 py-2"
-        data-testid="remote-access-dist-missing"
-      >
-        <AlertTriangle class="mt-0.5 size-3.5 shrink-0 text-warn" />
-        <p class="text-[11px] leading-relaxed text-warn">{{ distMissingText }}</p>
-      </div>
-      <ConnectionEntrySection :info="info" class="border-t border-border" />
-    </div>
+    </GroupCard>
 
-    <!-- 卡 3：跨网络 Tailscale 指引（开态渲染；折叠收起，零代码指引） -->
-    <GroupCard v-if="info.enabled" collapsible :title="t('settings.remoteAccess.tailscaleTitle')">
-      <p class="px-4 pb-3 pt-1 text-[11px] leading-relaxed text-muted" data-testid="remote-access-tailscale-hint">
-        {{ t('settings.remoteAccess.tailscaleHint') }}
-      </p>
+    <!-- 卡 3：跨网络 Tailscale 指引（开态渲染；demo 无折叠形态，static body） -->
+    <GroupCard v-if="info.enabled">
+      <template #head>
+        <div class="gc-head-text">
+          <h3 class="gc-title">{{ t('settings.remoteAccess.tailscaleTitle') }}</h3>
+        </div>
+      </template>
+      <div class="p-[12px_16px]">
+        <p class="text-[length:var(--text-sm)] leading-[1.55] text-[color:var(--neutral-fg-2)]" data-testid="remote-access-tailscale-hint">
+          {{ t('settings.remoteAccess.tailscaleHint') }}
+        </p>
+      </div>
     </GroupCard>
 
     <!-- 开关切换确认（重启 runtime 生效；取消则开关回弹，不落地） -->
@@ -79,10 +100,10 @@ import { onMounted, ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { AlertTriangle, Loader2, RefreshCw } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
-import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { GroupCard } from '@taiji/ui/features/settings'
-import ConfirmDialog from '@/components/ui/dialog/ConfirmDialog.vue'
+import SettingRow from '../SettingRow.vue'
+import { ConfirmDialog } from '@/components/ui/dialog'
 import { useToast } from '@/composables/useToast'
 import ConnectionEntrySection from './ConnectionEntrySection.vue'
 import {

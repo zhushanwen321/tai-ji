@@ -1,7 +1,7 @@
 // apps/electron/preload/preload.ts
 import { contextBridge, ipcRenderer } from 'electron'
-import type { LatestReleaseInfo, UpdateStage, UpdateSettings, UpdateErrorPayload, ProxyTestResult, LaunchResult, UpdateCheckResult, UpdateInstallResult, RendererLogPayload, ImageCacheWritePayload, ImageCacheWriteResult, DebugRunLogRetentionResult, DiagnosticExportBundlePayload, DiagnosticExportBundleResult, RemoteAccessInfo, RemoteAccessToggleResult, ShieldsFacesPayload, OverlayContentKind, LocalFileServableResult, LocalFileReadResult } from '@taiji/shared'
-import { RENDERER_LOG, IMAGE_CACHE_WRITE, DEBUG_RUN_LOG_RETENTION, DIAGNOSTICS_EXPORT_BUNDLE, LOCAL_FILE_SERVABLE, LOCAL_FILE_READ } from '@taiji/shared'
+import type { LatestReleaseInfo, UpdateStage, UpdateSettings, UpdateErrorPayload, ProxyTestResult, LaunchResult, UpdateCheckResult, UpdateInstallResult, RendererLogPayload, ImageCacheWritePayload, ImageCacheWriteResult, DebugRunLogRetentionResult, DiagnosticExportBundlePayload, DiagnosticExportBundleResult, SessionJsonlExportPayload, SessionJsonlExportResult, RemoteAccessInfo, RemoteAccessToggleResult, ShieldsFacesPayload, OverlayContentKind, LocalFileServableResult, LocalFileReadResult } from '@taiji/shared'
+import { RENDERER_LOG, IMAGE_CACHE_WRITE, DEBUG_RUN_LOG_RETENTION, DIAGNOSTICS_EXPORT_BUNDLE, SESSION_EXPORT_JSONL, LOCAL_FILE_SERVABLE, LOCAL_FILE_READ } from '@taiji/shared'
 
 // local-file 预检 / 源码读取的 payload 类型（LocalFileServableResult / LocalFileReadResult）
 // 定义 SSOT = `packages/shared/src/ipc-payloads.ts`（C-comm-22 唯一类型源），本文件只 import
@@ -287,6 +287,14 @@ export interface ElectronAPI { // oe-exempt:20261003:framework:类型契约先�
    * / error 携带具体 errno），调用方（u3b）按 status 分支展示。
    */
   exportDiagnosticBundle(payload?: DiagnosticExportBundlePayload): Promise<DiagnosticExportBundleResult>
+  // ── 会话 JSONL 导出 ───────────
+  /**
+   * 导出会话 JSONL：main 校验源路径位于会话文件三棵树（`<piAgentDir>/sessions|subagents|btw`）
+   * 后弹保存对话框（用户确认落点），fs.promises.copyFile 直复制。永不 reject——返回三态
+   * （exported 携带产物路径与字节数 / canceled 用户取消 / error 携带具体错误码），调用方按
+   * status 分支展示。
+   */
+  exportSessionJsonl(payload: SessionJsonlExportPayload): Promise<SessionJsonlExportResult>
 }
 
 contextBridge.exposeInMainWorld('electronAPI', {
@@ -455,4 +463,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // ── 诊断包导出（crash-forensics §3.3 D6；通道名经 shared SSOT 常量）──
   exportDiagnosticBundle: (payload?: DiagnosticExportBundlePayload) =>
     ipcRenderer.invoke(DIAGNOSTICS_EXPORT_BUNDLE, payload),
+  // ── 会话 JSONL 导出（通道名经 shared SSOT 常量）──
+  exportSessionJsonl: (payload: SessionJsonlExportPayload) =>
+    ipcRenderer.invoke(SESSION_EXPORT_JSONL, payload),
 } satisfies ElectronAPI)

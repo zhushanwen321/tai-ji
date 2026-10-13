@@ -188,7 +188,7 @@ pi 引擎单次工具调用的记录。是数据模型的最小单位（bash、r
 上下文窗口管理动作。当 session 的 token 使用量接近上限时，压缩历史消息以腾出空间。压缩后 session 继续，不新建。是 session 级操作，非破坏性的。
 
 ### Context Window
-session 的 token 预算。由底层模型决定上限（如 200K tokens），composer 工具条的 `ContextCapacityPopover` 展示用量（hover 出容量 popover，session 通道订阅 `context.update`，`packages/renderer/src/components/panel/Composer.vue`）。Compaction 的触发条件就是 Context Window 接近满。
+session 的 token 预算。由底层模型决定上限（如 200K tokens），composer 指标聚合按钮的 hover 聚合页展示用量（容量卡 `ContextCapacityCard`，session 通道订阅 `context.update`；composer 顶缘另有 2px 容量细条给三段色阶预警）。Compaction 的触发条件就是 Context Window 接近满。
 
 ### Session Context
 session 的语义内容——对话历史、项目知识（AGENTS.md 等）、skill/agent 注入的提示词。是 agent 能感知到的全部信息。Session Context 的 token 占用量受 Context Window 上限约束。
@@ -214,7 +214,7 @@ HTML 预览块在对话流中的渲染载体为**内联预览容器**（v16，AD
 DetailPane 对 HTML 文件的 iframe 预览形态（v16 前与「源码态」相对、可切换）——v16 已退役（ADR-0119）：DetailPane 对 `.html` 恢复 shiki 源码高亮，机制规格（`sandbox="allow-scripts"` iframe、无 `allow-same-origin` 落 opaque origin、servable 预检、URL 百分号编码、`?r=n` 刷新）整体平移至内联预览容器承载。现役「源码态」= 容器头部切换（iframe 卸载、内容经 `localFile:read` 读取走 shiki 高亮）与 DetailPane 源码高亮。
 
 ### 会话产物目录
-`<dataDir>/artifacts/<sessionId>/`——HTML 产物落点。它在 local-file 白名单内（`<dataDir>` 前缀成员），因此预览无需任何白名单放宽。随会话删除级联删除，超龄（默认 7 天，`TAIJI_ARTIFACTS_KEEP_DAYS` 可覆盖）由保留期扫描按文件系统级判据回收（ADR-0118）。
+`<dataDir>/artifacts/<sessionId>/`——HTML 产物落点。它在 local-file 白名单内（`<dataDir>` 前缀成员），因此预览无需任何白名单放宽。随会话删除级联删除（唯一回收通道，ADR-0118 / ADR-0133）；外部删除主会话文件场景的残留按裁决接受。
 
 **代码映射**: `packages/shared/src/paths.ts` 的 `getSessionArtifactsDir`（公式单点，含 sessionId 穿越校验）；system-prompt 扩展侧以镜像推导（不 import shared——包边界 + 运行时门禁）。
 
@@ -573,7 +573,7 @@ taiji 管理的 extension 存储目录（`<dataDir>/extensions/`，本地/Git �
 runtime 侧服务模块（`packages/runtime/src/services/extension-service.ts`，接口 `IExtensionService`），管理 pi extension 生命周期：发现扫描（用户安装目录 `<dataDir>/extensions/`、npm 目录 `<dataDir>/npm/`）、settings.json `packages[]` 与 `disabled-packages.json` 启停管理、npm / 本地目录 / Git 三种安装来源、将 extension 路径注入 pi 进程启动参数。builtin pi-extensions 的打包内置清单 SSOT = `packages/shared/src/mandatory-extensions.json`（infrastructure 组不可禁、feature 组可禁）。
 
 ### Plugin
-taiji 自己的插件系统，由 PluginService 统一管理（`packages/runtime/src/services/plugin-service/`，接口 `IPluginService`）。宿主双轨：trusted 插件共享 Worker Thread（≤10 插件/Worker，`plugin-host.ts`），sandbox 插件独占 fork 子进程（`plugin-host-process.ts`，`ELECTRON_RUN_AS_NODE=1`）。使用 agentAPI（非 pi ExtensionAPI）。数据（storage KV、权限授予）存储在 `<dataDir>/plugins/` 下。与 pi Extension 是完全不同的概念。插件工具接入 pi 的通路暂缺，见 [docs/todo/plugin-tool-access-gap.md](todo/plugin-tool-access-gap.md)。
+taiji 自己的插件系统，由 PluginService 统一管理（`packages/runtime/src/services/plugin-service/`，接口 `IPluginService`）。宿主双轨：trusted 插件共享 Worker Thread（≤10 插件/Worker，`plugin-host.ts`），sandbox 插件独占 fork 子进程（`plugin-host-process.ts`，`ELECTRON_RUN_AS_NODE=1`）。使用 agentAPI（非 pi ExtensionAPI）。数据（storage KV、权限授予）存储在 `<dataDir>/plugins/` 下。与 pi Extension 是完全不同的概念。插件工具接入 pi 的通路暂缺。
 
 **避免使用**: "扩展"（Extension）——Extension 指 pi 的扩展，Plugin 指 taiji 的插件。
 
@@ -601,7 +601,7 @@ taiji 的运行时状态可视化。现行形态 = 单组件 `StatusBar`（`pack
 > **术语演进（2026-09 核对）**：旧「三区域」模型（Input Toolbar / Session Strip / Global Statusbar）已不成立——窗口底部的独立全局状态栏不存在，global scope 状态项并入 per-panel StatusBar 聚合；原 Input Toolbar 的职责由 composer 内置工具条承载（见下），plugin 另可经 `composer.toolbar` 挂载点贡献视图（ViewHost，`view-id="composer.toolbar"`）。
 
 ### Composer 工具条
-composer（Panel zone ④）内底部的展示型工具带（`packages/renderer/src/components/panel/Composer.vue`）：生成指标（`GenStatsTriggers`：速度 t/s + 缓存命中率 + TTFT 首字延迟（首字延迟 = 请求发出 → 首个输出 token 到达，p50 聚合））、上下文容量（`ContextCapacityPopover`，`context.update` 通道）、模型切换（`ModelSelectPopover`）、思考档位（`ThinkingLevelPopover`）、发送位四态（send/stop/queue/spinner）。renderer 内置组件，非 statusline 数据面。
+composer（Panel zone ④）内底部的展示型工具带（`packages/renderer/src/components/panel/Composer.vue`）：指标聚合按钮（`ComposerMetricsAggregate`，hover 弹聚合页——容量（`ContextCapacityCard`，`context.update` 通道）+ 速度 t/s + 缓存命中率 + TTFT 首字延迟（首字延迟 = 请求发出 → 首个输出 token 到达，p50 聚合））、模型切换（`ModelSelectPopover`）、思考档位（`ThinkingLevelPopover`）、发送位四态（send/stop/queue/spinner）；composer 顶缘另有 2px 容量细条（`ComposerCapacityBar`，三段色阶预警）。renderer 内置组件，非 statusline 数据面。
 
 > **命中率归因降噪（2026-09-19）**：缓存命中率 `current` 是「本会话最近一次 LLM 请求」的单样本口径，任何一次 total miss 都会显示 0%。已知成因的 0%（会话首请求 `cold-start` / 空闲超 5min provider TTL `idle-expiry` / compaction 后前缀重建 `context-rewrite`）改为渲染成因文案（`cacheRatio.currentMiss`，中性色 + 浮层说明行），未知成因的 0%（如服务端淘汰）**保留原值三档色**——降噪只覆盖预期内 miss，不吞真信号；provider 从未上报 cache 字段时命中率为「无数据」（null，显示「—」）而非 0%。
 

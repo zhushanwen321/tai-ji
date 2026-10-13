@@ -68,7 +68,7 @@ taiji 作为 Electron 桌面应用，**直接以 npm 依赖形式引入该包即
 | `ProviderInfo` 内置/自定义区分字段 | **无**。所有 provider 平等存储 | 若要区分「内置预设」与「用户自定义」，需加 `source: 'builtin' \| 'custom'` |
 | 当前模型在 composer 上的展示 | `ModelSelectPopover.vue` trigger 已显示当前 model 名（不显示 provider 名），click 弹切换列表 | 已有 click 行为，需在外层包 HoverCard 加 hover 浮层 |
 | 上下文区域 chip 模式 | 分散在 `composer-box` 内：Fork chip / meta-row slot / ContextChipsBar / 工具条（Capacity / Model / Thinking / Send） | hover 浮层挂在工具条最自然 |
-| 现有 hover 范例 | `ContextCapacityPopover.vue`（HoverCard + 进度条分档配色 + 2×2 stats grid） | **直接复用视觉模式**，配色/字号/布局/动画完全对齐 |
+| 现有 hover 范例 | `ContextCapacityPopover.vue`（已随 ui-optimize-unified 决策 6 退役删除，git 可追溯；现行 hover 载体 = `ComposerMetricsAggregate` 指标聚合页，容量内容卡 = `ContextCapacityCard`，HoverCard + 进度条分档配色模式延续） | **直接复用视觉模式**，配色/字号/布局/动画完全对齐 |
 | 设计 tokens | 暗色冷蓝优先（`--bg #1a1b1f` / `--accent #4f8ef7`），浮层用 `--bg-elevated #313239 + --border-strong + --shadow-2` | demo 严格按 tokens |
 
 ### 1.3 数据流缺口（关键障碍）
@@ -314,7 +314,7 @@ interface QuotaState {
 ```
 
 数据流（hover 触发模式，非订阅广播）：
-- **首屏快速展示**：`ContextCapacityPopover` hover-enter 时先调 `quota.getCached(providerId)` 读缓存即时填充浮层（避免空白等待）
+- **首屏快速展示**：指标聚合按钮（`ComposerMetricsAggregate`）hover-enter 时先调 `quota.getCached(providerId)` 读缓存即时填充浮层（避免空白等待）
 - **主动查询**：紧接着调 `quota.fetch(providerId)` 触发实际 HTTP 查询，runtime 返回最新结果后更新 store，浮层响应式刷新
 - **失败降级**：`quota.fetch` 失败时 runtime 返回旧缓存值（不抛错），前端无感知地展示旧数据；错误只在 runtime logger 落盘
 - composer 浮层从 `quotaStore.byProvider.get(currentProviderId)` 读数据
@@ -347,7 +347,7 @@ interface QuotaState {
 
 #### 2.2.6 Composer hover 浮层设计（合并到 ContextCapacity）
 
-**挂载点**：`ContextCapacityPopover.vue`（已有 hover 浮层）。在现有「上下文容量」浮层内追加 Coding Plan 区，**不新建浮层、不挂 model chip**。Model chip 回归纯模型切换。
+**挂载点**：指标聚合页 hover 浮层内的容量卡 `ContextCapacityCard`（宿主 `ComposerMetricsAggregate`；原 `ContextCapacityPopover.vue` 已随 ui-optimize-unified 决策 6 退役删除，浮层内容逻辑整体迁移至该卡）。在「上下文容量」区内追加 Coding Plan 区，**不新建浮层、不挂 model chip**。Model chip 回归纯模型切换。
 
 **设计理由**：容量与额度都是「用量」类信息，聚合在一个浮层比分散在两个 chip 更合理——用户心智模型是「这次对话消耗了多少资源」，上下文 token 和 coding-plan 配额是同一关切。
 
@@ -384,7 +384,7 @@ grid-template-columns: 32px 1fr 32px 52px;
 
 **未配置态**：provider 未启用 coding-plan 查询时，浮层**只保留容量区**，不渲染 divider + section-label + 三窗口行。浮层自然比已配置态矮一截——这是预期行为，不强求等高。footer 文案改为「<Provider名> 无 Coding Plan」+ 「配置」按钮（跳转 Settings → Provider 编辑）。**[HISTORICAL] 本段已被 coding-plan-quota-config-ux.md（已删，git 可追溯） 补齐（D11）**：原文只描述了未配置态的该入口；失败态（已启用但查询失败）同样需要它——「已启用但凭证缺失」的 provider 必有 matchedProviderId，只会拿到「刷新」，而刷新在凭证缺失时只会再失败一次，形成死路，故失败态 footer 同时给「刷新」与「配置」两个入口。
 
-**数据源**：`ContextCapacityPopover.vue` hover-enter 时触发查询：
+**数据源**：`ComposerMetricsAggregate` 聚合按钮 hover-enter 时触发查询：
 - 容量区（现有）：`context.update` / `session.state_changed` → `inputTokens / contextLimit / usagePercent`（已有订阅）
 - Coding Plan 区（新增）：hover-enter 时先读 `quota.getCached` 即时填充，再调 `quota.fetch` 触发查询刷新。session 切换模型时，hover 重新触发查新 provider 的额度
 

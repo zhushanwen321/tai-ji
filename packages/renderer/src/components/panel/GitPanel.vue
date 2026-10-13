@@ -13,10 +13,11 @@
   commit message 用本地 ui 原语（components/ui）Input（§6.3 点1，禁止原生 input）。
 -->
 <template>
-  <!-- 冲突态 danger 左竖条（原 FR-12 item 2，draft-companion-zones §2） -->
+  <!-- 冲突态 danger 左竖条（原 FR-12 item 2，draft-companion-zones §2）。
+       ui-replica M5：面板内边距对齐 demo .panel（12px = p-3）。 -->
   <section
     v-if="result?.isRepo"
-    class="relative flex h-full flex-col gap-1.5 overflow-hidden p-2 text-[length:var(--text-xs)]"
+    class="relative flex h-full flex-col gap-1.5 overflow-hidden p-3 text-[length:var(--text-xs)]"
     :class="result.hasConflict ? 'bg-danger-soft' : ''"
   >
     <div
@@ -50,12 +51,18 @@
     <!-- 错误提示（操作失败 inline 回显） -->
     <p v-if="error" class="rounded-sm bg-danger-soft px-2 py-1 text-[length:var(--text-2xs)] text-danger">{{ error }}</p>
 
-    <!-- 文件列表（点击跳转 detail tab 查看 diff：selectFile 选中 + 注入 detail tab + drawer 切 detail） -->
-    <ul v-if="result.files.length" class="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto">
+    <!-- 文件列表（点击跳转 detail tab 查看 diff：selectFile 选中 + 注入 detail tab + drawer 切 detail）。
+         行形态对齐 demo .frow：padding 6px 8px、路径 mono 2xs neutral-fg；行真实可点（跳 detail）
+         故保留 hover 反馈，hover 底用 demo hover 词汇 surface-hover。
+         顶缘 EdgeFade（spec §3.5 五个可滚动面板）：外层 div 承滚动（EdgeFade 须作滚动容器
+         首子元素），内层 ul 承列表语义——div 内嵌 ul 替代 ul 自滚，避免 div 直插 ul 的非法嵌套。 -->
+    <div v-if="result.files.length" class="flex min-h-0 flex-1 flex-col overflow-y-auto" data-testid="git-file-scroll">
+      <EdgeFade />
+      <ul class="flex flex-col gap-0.5">
       <li
         v-for="f in result.files"
         :key="f.path"
-        class="group/li flex cursor-pointer select-none items-center gap-2 rounded-sm px-1 py-0.5 hover:bg-surface-2"
+        class="group/li flex cursor-pointer select-none items-center gap-2 rounded-sm px-2 py-1.5 hover:bg-surface-hover"
         :title="t('panel.git.viewDiff', { path: f.path })"
         @click="onFileClick(f.path)"
       >
@@ -63,7 +70,7 @@
           class="w-4 shrink-0 text-center font-mono text-[length:var(--text-3xs)] font-semibold"
           :class="statusBadgeClass(f.status)"
         >{{ statusBadge(f.status) }}</span>
-        <span class="min-w-0 flex-1 truncate text-neutral-dim">{{ f.path }}</span>
+        <span class="min-w-0 flex-1 truncate font-mono text-[length:var(--text-2xs)] text-neutral-fg">{{ f.path }}</span>
         <Button
           variant="ghost"
           data-testid="git-inject-file"
@@ -75,6 +82,7 @@
         </Button>
       </li>
     </ul>
+    </div>
 
     <!-- 操作区（适配 340px 紧凑宽度：Input 独占一行，按钮一行） -->
     <div class="flex flex-col gap-1.5">
@@ -137,6 +145,7 @@ import { useI18n } from 'vue-i18n'
 import { GitBranch, RefreshCw, Quote, CircleAlert } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { EdgeFade } from '@/components/ui/edge-fade'
 import { useGitStatusOrFail, type GitState } from '@/composables/features/file-tree/useGitStatus'
 import { useFileTreeStore } from '@/stores/fileTree'
 import { useSideDrawer } from '@/composables/features/drawer/useSideDrawer'

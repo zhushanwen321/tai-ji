@@ -6,7 +6,7 @@
  * - readRunEvents：单 run 事件流原文行（WorkflowRunEventEntry 判别联合）。行解析
  *   复用 events-projection 的 parseWorkflowRunEventFileLine（与活体投影 tailer 同一
  *   解析原语 + 同一坏行宽容语义——禁新写解析，任务书红线）；大字段 2KB 截断
- *   （shared WORKFLOW_RUN_EVENT_TRUNCATE_BYTES 单源常量，四字段白名单）+ 每行
+ *   （shared WORKFLOW_RUN_EVENT_TRUNCATE_BYTES 单源常量，五字段白名单）+ 每行
  *   truncatedFields 标注。截断载荷仅供展示（D12 防误用边界：resume 的 $ARGS 恢复
  *   与 args 一致性校验在引擎侧读 record 原文全文字段，不经本通道）。record 文件超
  *   READ_PRECHECK_MAX_BYTES（32MB，D5 预检族）时降级——不全文读取（worker-log 行数
@@ -230,14 +230,25 @@ function projectRunSettled(event: Extract<WorkflowRunEvent, { type: 'run-settled
   }
 }
 
-/** worker-log 条目：worker 日志行透传（无截断面）。 */
+/**
+ * worker-log 条目：诊断行透传，message 按 entryMessage 白名单键截断（无上界 string
+ * ——单条可达 MB 级，对齐结构化字段截断口径；截断后经 truncatedFields 标注）。
+ */
 function projectWorkerLog(event: Extract<WorkflowRunEvent, { type: 'worker-log' }>): WorkflowRunEventEntry {
-  return { type: 'worker-log', ...eventEnvelope(event), entry: event.entry }
+  const truncatedFields: WorkflowRunEventTruncatedField[] = []
+  const message = truncateTextPayload(event.entry.message, 'entryMessage', truncatedFields)
+  return {
+    type: 'worker-log',
+    ...eventEnvelope(event),
+    entry: { level: event.entry.level, message: message ?? '' }, // ?? ''：类型收窄残留回退（core 契约 message 必填，undefined 分支不可达）——对齐 shared 必填契约，防序列化丢键渲染字面 undefined
+    ...(truncatedFields.length > 0 ? { truncatedFields } : {}),
+  }
 }
 
 /**
- * core 事件 → shared 条目映射（逐成员载荷透传；input/result/scriptSource/args 四
- * 大字段按白名单截断并标注）。词表/字段形态跟随 core WorkflowRunEvent 联合与
+ * core 事件 → shared 条目映射（逐成员载荷透传；input/result/scriptSource/args 与
+ * worker-log.entry.message（键 entryMessage）五大字段按白名单截断并标注）。词表/
+ * 字段形态跟随 core WorkflowRunEvent 联合与
  * shared WorkflowRunEventEntry u2 冻结契约（两端的覆盖编译锁守漂移）。
  * 本函数只做类型分派；每型字段形态自成一族投影函数，拆开各自演化。
  */

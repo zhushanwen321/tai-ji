@@ -5,18 +5,25 @@
   轮换按钮由父层（RemoteAccessPage）编排——token 变化经 props 流入，本组件自动重渲染。
 -->
 <template>
-  <div class="flex flex-col gap-3 px-4 py-3">
+  <!--
+    [w3b] demo 对照：RemoteAccessSection.vue 连接入口卡体（.gcard-body 内 .srow 行节奏）——
+    警告行 = srow（warn 图标 16px + desc 13px fg-2，无软底）；地址行 = srow（label + Select w320）；
+    二维码行 = srow align-start（140px 方块 r-md border + 内衬 8px；右侧 mono 链接行 + 复制钮
+    .btn.secondary + desc）；提示/防火墙行 = srow desc。text-muted/text-fg 为 preset 无映射的
+    无效工具类（静默 inherit），本波顺手换确定形态。
+  -->
+  <div class="flex flex-col">
     <!-- 警告文案（太极纯灰 warn 语义 token，不硬编码颜色） -->
     <div
-      class="flex items-start gap-2 rounded-sm bg-warn-soft px-3 py-2"
+      class="flex items-start gap-[16px] px-[6px] py-[10px]"
       data-testid="remote-access-warning"
     >
-      <AlertTriangle class="mt-0.5 size-3.5 shrink-0 text-warn" />
-      <p class="text-[11px] leading-relaxed text-warn">{{ t('settings.remoteAccess.warning') }}</p>
+      <AlertTriangle class="mt-[2px] size-[16px] shrink-0 text-warn" />
+      <p class="text-[length:var(--text-sm)] text-[color:var(--neutral-fg-2)]">{{ t('settings.remoteAccess.warning') }}</p>
     </div>
 
-    <!-- 空态：无 LAN 候选（runtime 未运行/重启中）——不产死链接 -->
-    <p v-if="info.urls.length === 0" class="text-[11px] text-muted" data-testid="remote-access-no-urls">
+    <!-- 空态：无 LAN 候选（runtime 未运行/重启中）——不产死链接（demo 卡内空态行：desc p 8px 6px） -->
+    <p v-if="info.urls.length === 0" class="border-t border-hairline px-[6px] py-[8px] text-[length:var(--text-sm)] text-[color:var(--neutral-fg-2)]" data-testid="remote-access-no-urls">
       {{ t('settings.remoteAccess.noUrls') }}
     </p>
 
@@ -24,10 +31,9 @@
       <!-- 多地址切换（多网卡场景；单地址不渲染选择器）。
            下拉项文本 = url + Tailscale 项标注后缀——SelectItemText 的 textContent 即
            SelectValue 触发器显示文本，后缀形态让关闭态也能看出选中的是 Tailscale 地址 -->
-      <div v-if="info.urls.length > 1" class="flex items-center justify-between">
-        <Label class="text-[12px] text-fg">{{ t('settings.remoteAccess.addressLabel') }}</Label>
+      <SettingRow v-if="info.urls.length > 1" :label="t('settings.remoteAccess.addressLabel')">
         <Select :model-value="selectedUrl" @update:model-value="(v) => (selectedUrl = String(v))">
-          <SelectTrigger class="h-8 w-[240px] px-2 font-mono text-[11px]" data-testid="remote-access-url-select">
+          <SelectTrigger class="w-[320px] font-mono" data-testid="remote-access-url-select">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -36,63 +42,61 @@
             </SelectItem>
           </SelectContent>
         </Select>
-      </div>
+      </SettingRow>
 
       <!-- 选中 Tailscale 地址的使用前提（选中态提示；单 tailscale 地址无下拉也渲染） -->
       <p
         v-if="selectedKind === 'tailscale'"
-        class="text-[11px] leading-relaxed text-muted"
+        class="flex min-h-[44px] items-center border-t border-hairline px-[6px] py-[10px] text-[length:var(--text-sm)] text-[color:var(--neutral-fg-2)]"
         data-testid="remote-access-tailscale-selected-hint"
       >
         {{ t('settings.remoteAccess.tailscaleSelectedHint') }}
       </p>
 
-      <div class="flex items-start gap-4">
-        <!-- 二维码（qrcode toDataURL 自绘 img，不引 vue 包装依赖）；生成失败/在途渲染占位提示 -->
-        <div class="shrink-0 rounded-sm border border-border bg-white p-1.5">
+      <!-- 二维码行（demo srow align-start gap 16px；qrcode toDataURL 自绘 img，不引 vue 包装依赖）；
+           生成失败/在途渲染占位提示。二维码底白 = 内容语义色例外条款（点阵黑白是内容本身） -->
+      <div class="flex items-start gap-[16px] border-t border-hairline px-[6px] py-[10px]">
+        <div class="h-[140px] w-[140px] shrink-0 rounded-md border border-border bg-white p-[8px]" :aria-label="t('settings.remoteAccess.qrAlt')">
           <img
             v-if="qrDataUrl"
             :src="qrDataUrl"
             :alt="t('settings.remoteAccess.qrAlt')"
-            class="size-[140px] block"
+            class="block size-full"
             data-testid="remote-access-qr"
           >
           <div
             v-else
-            class="flex size-[140px] items-center justify-center p-2"
+            class="flex size-full items-center justify-center"
             data-testid="remote-access-qr-placeholder"
           >
-            <p class="text-center text-[11px] leading-relaxed text-muted">
+            <p class="text-center text-[length:var(--text-2xs)] leading-[1.55] text-[color:var(--neutral-fg-2)]">
               {{ t('settings.remoteAccess.qrFailed') }}
             </p>
           </div>
         </div>
 
         <!-- 链接 + 复制 -->
-        <div class="flex min-w-0 flex-1 flex-col gap-2">
+        <div class="flex min-w-0 flex-1 flex-col gap-[8px]">
           <p
-            class="break-all rounded-sm border border-border-strong bg-bg-input px-2 py-1.5 font-mono text-[11px] leading-relaxed text-fg"
+            class="break-all font-mono text-[length:var(--text-sm)] text-[color:var(--neutral-fg-2)]"
             data-testid="remote-access-url"
           >{{ fullUrl }}</p>
-          <div>
-            <Button
-              variant="secondary"
-              size="dense"
-              class="h-8 px-3 text-[11px]"
-              :data-testid="copied ? 'remote-access-copied' : 'remote-access-copy'"
-              @click="onCopy"
-            >
-              <component :is="copied ? Check : Copy" class="size-3.5" />
-              {{ copied ? t('settings.remoteAccess.copied') : t('settings.remoteAccess.copyLink') }}
-            </Button>
-          </div>
-          <p class="text-[11px] leading-relaxed text-muted">{{ t('settings.remoteAccess.entryDesc') }}</p>
+          <Button
+            variant="secondary"
+            class="h-[32px] self-start px-[12px] text-[length:var(--text-sm)] [&_svg]:size-[14px]"
+            :data-testid="copied ? 'remote-access-copied' : 'remote-access-copy'"
+            @click="onCopy"
+          >
+            <component :is="copied ? Check : Copy" />
+            {{ copied ? t('settings.remoteAccess.copied') : t('settings.remoteAccess.copyLink') }}
+          </Button>
+          <p class="text-[length:var(--text-sm)] text-[color:var(--neutral-fg-2)]">{{ t('settings.remoteAccess.entryDesc') }}</p>
         </div>
       </div>
     </template>
 
     <!-- 防火墙授权提示（OS 级行为说明；非 macOS 用户看到亦无害，不做平台分支） -->
-    <p class="text-[11px] leading-relaxed text-muted">{{ t('settings.remoteAccess.firewallHint') }}</p>
+    <p class="border-t border-hairline px-[6px] py-[10px] text-[length:var(--text-sm)] text-[color:var(--neutral-fg-2)]">{{ t('settings.remoteAccess.firewallHint') }}</p>
   </div>
 </template>
 
@@ -102,8 +106,8 @@ import { useI18n } from 'vue-i18n'
 import { AlertTriangle, Check, Copy } from '@lucide/vue'
 import QRCode from 'qrcode'
 import { Button } from '@/components/ui/button'
-import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import SettingRow from '../SettingRow.vue'
 import { useCopy } from '@/composables/panel/useCopy'
 import type { RemoteAccessInfo } from '@taiji/shared'
 

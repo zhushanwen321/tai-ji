@@ -93,7 +93,7 @@
     <!-- 登录墙提示（spec §4.2：检测 401/403 → 醒目提示条 + 系统浏览器出口）-->
     <div
       v-if="loginRequired"
-      class="flex flex-shrink-0 items-center gap-2 border-b border-warn/30 bg-warn/10 px-3 py-2"
+      class="flex flex-shrink-0 items-center gap-2 border-b border-[color-mix(in_oklch,var(--warn)_30%,transparent)] bg-[color-mix(in_oklch,var(--warn)_10%,transparent)] px-3 py-2"
       data-testid="browser-login-wall"
     >
       <AlertCircle class="size-4 flex-shrink-0 text-warn" />

@@ -196,7 +196,7 @@ onUnmounted(disposeSurfaceRegistration)
       <span
         v-if="currentRequest.title"
         data-testid="companion-band-title"
-        class="text-[13px] font-medium text-neutral-fg"
+        class="text-[length:var(--text-sm)] font-medium text-neutral-fg"
       >{{ currentRequest.title }}</span>
       <!-- minimize（收起）：未收起且已知 method 时可见 -->
       <Button
@@ -222,7 +222,7 @@ onUnmounted(disposeSurfaceRegistration)
       <p
         v-if="currentRequest.message"
         data-testid="companion-band-message"
-        class="text-[13px] leading-1.5 text-neutral-mid"
+        class="text-[length:var(--text-sm)] leading-1.5 text-neutral-mid"
       >
         {{ currentRequest.message }}
       </p>
@@ -244,7 +244,7 @@ onUnmounted(disposeSurfaceRegistration)
           :aria-checked="selectValue === opt.value"
           :class="[
             'flex cursor-pointer items-start gap-2 rounded px-2.5 py-1.5 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-accent',
-            selectValue === opt.value ? 'bg-accent-soft' : 'hover:bg-white/[0.04]',
+            selectValue === opt.value ? 'bg-accent-soft' : 'hover:bg-[var(--hover-tint)]',
           ]"
           @click="selectValue = opt.value"
           @keydown.enter="selectValue = opt.value"
@@ -258,8 +258,8 @@ onUnmounted(disposeSurfaceRegistration)
           />
           <div class="flex min-w-0 flex-1 flex-col">
             <div class="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-              <span data-testid="companion-select-option-label" class="text-[13px] leading-1.5 text-neutral-fg">{{ opt.label }}</span>
-              <span v-if="opt.description" class="text-[12px] leading-1.5 text-neutral-dim">{{ opt.description }}</span>
+              <span data-testid="companion-select-option-label" class="text-[length:var(--text-sm)] leading-1.5 text-neutral-fg">{{ opt.label }}</span>
+              <span v-if="opt.description" class="text-[length:var(--text-xs)] leading-1.5 text-neutral-dim">{{ opt.description }}</span>
             </div>
           </div>
         </div>
@@ -278,7 +278,7 @@ onUnmounted(disposeSurfaceRegistration)
           v-model="inputValue"
           rows="6"
           data-testid="companion-editor"
-          class="font-mono text-[12px]"
+          class="font-mono text-[length:var(--text-xs)]"
         />
         <Input
           v-else
@@ -295,7 +295,7 @@ onUnmounted(disposeSurfaceRegistration)
       <p
         v-else
         data-testid="companion-band-unknown"
-        class="text-[13px] text-neutral-dim"
+        class="text-[length:var(--text-sm)] text-neutral-dim"
       >
         {{ currentRequest.method }}
       </p>

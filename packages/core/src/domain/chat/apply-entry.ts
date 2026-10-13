@@ -383,6 +383,8 @@ function fillHostToolCall(host: Message, matched: ToolCall, body: PiMessageBody)
     ...(fill.outputTruncated && { outputTruncated: true }),
     ...(fill.isError && { status: 'error' as const }),
     ...(fill.details !== undefined && { details: fill.details }),
+    // edit 工具 diff 统计（computeToolCallFill 单点解析，live≡reload 同口径）
+    ...(fill.diffStat !== undefined && { diffStat: fill.diffStat }),
     ...(fill.images !== undefined && { images: fill.images }),
     // [chat-flow-timestamp U1] endTime 权威回填（= toolResult body.timestamp，缺失不设字段）：
     // live（tool_call_end/message_end 帧经 commitToolResultMessage）与 reload（replayEntries）

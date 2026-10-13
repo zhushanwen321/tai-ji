@@ -16,6 +16,7 @@
  *
  * 运行：cd packages/renderer && npx vitest run src/composables/features/file-tree/__tests__/useDetailPane-html.test.ts
  */
+import { apiProjectMock } from '@/__tests__/helpers/api-facade-mock'
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { ref, nextTick } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
@@ -26,7 +27,7 @@ const mockServable = vi.fn()
 const mockLocalFileRead = vi.fn()
 
 vi.mock('@/api', () => ({
-  project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
+  project: apiProjectMock(),
   file: { read: (...args: unknown[]) => mockFileRead(...(args as [string, string?])) },
   git: { getDiff: (...args: unknown[]) => mockGitGetDiff(...(args as [string, string])) },
 }))
@@ -123,6 +124,35 @@ describe('useDetailPane · .html 恢复源码分发（渲染态退役）', () =>
 
     expect(state.value.kind).toBe('code')
     expect(state.value.viewMode).toBe('diff')
+  })
+})
+
+describe('useDetailPane · drawer 入口位置分流（forceDiff 仅限 cwd 内）', () => {
+  it('产物目录绝对路径经 drawer 入口 → preview + localFile:read，不发 git.getDiff', async () => {
+    const sid = 's1'
+    const path = '/Users/demo/.taiji-dev/artifacts/s1/report.html'
+    mockLocalFileRead.mockResolvedValue({ ok: true, content: '<html>artifact</html>', truncated: false })
+
+    useSideDrawer().open('detail', { filePath: path })
+    const state = await openPane(sid, null)
+
+    expect(state.value.viewMode).toBe('preview')
+    expect(state.value.content).toBe('<html>artifact</html>')
+    expect(mockLocalFileRead).toHaveBeenCalledWith(path)
+    // 分流防误伤断言：cwd 外不走 forceDiff 的 diff 加载（免必空的 git diff 往返）
+    expect(mockGitGetDiff).not.toHaveBeenCalled()
+  })
+
+  it('cwd 内绝对路径经 drawer 入口 → forceDiff 语义保持（diff 模式）', async () => {
+    const sid = 's1'
+    const path = '/Users/demo/proj/docs/report.html'
+    mockGitGetDiff.mockResolvedValue({ patch: 'diff --git a/docs/report.html b/docs/report.html\n@@ -1 +1 @@\n-a\n+b', binary: false })
+
+    useSideDrawer().open('detail', { filePath: path })
+    const state = await openPane(sid, null)
+
+    expect(state.value.viewMode).toBe('diff')
+    expect(mockGitGetDiff).toHaveBeenCalled()
   })
 })
 

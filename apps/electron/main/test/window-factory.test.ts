@@ -7,9 +7,10 @@
  *
  * 覆盖：
  *  - title：prod 'TaiJi' / dev 'TaiJi dev'（dev 实例区分，见 window-factory createWindow）
- *  - mac titleBarStyle 'hidden' + trafficLightPosition {x:8,y:8}（红黄绿原生左上角，
- *    圆点中线 ≈y15.75，与 AppNavControls / PanelHeader 22px 行共线对齐——刻意调整形态，非 v6 demo）
- *  - win/linux frame:false（renderer TrafficLight 自绘圆点 mimic mac）
+ *  - mac titleBarStyle 'hidden' + trafficLightPosition {x:8,y:16}（ui-replica M2 demo 40px 卡头档：
+ *    窗口上边距 4 + 卡头半高 20 = 中线 y24，扣 macOS 渲染偏置 ~1.75pt 推导 y≈16，与 AppNavControls
+ *    top9 + 32/2 中线 y25 共线；真机校准项）
+ *  - win/linux frame:false（renderer TrafficLight 自绘圆点 mimic mac，left-2 = x8 与 mac 同位）
  *
  * 运行：cd apps/electron/main && npx vitest run test/window-factory.test.ts
  */
@@ -68,9 +69,9 @@ describe('window-factory: D-6 窗口级拓扑配置', () => {
     expect(source).toContain("title: deps.isDev ? 'TaiJi dev' : 'TaiJi'")
   })
 
-  it('mac：titleBarStyle hidden + trafficLightPosition {x:8,y:8}（红黄绿与 22px header 行共线）', () => {
+  it('mac：titleBarStyle hidden + trafficLightPosition {x:8,y:16}（demo 40px 卡头档，与 chrome 行中线共线）', () => {
     expect(source).toContain("titleBarStyle: 'hidden' as const")
-    expect(source).toContain('trafficLightPosition: { x: 8, y: 8 }')
+    expect(source).toContain('trafficLightPosition: { x: 8, y: 16 }')
   })
 
   it('win/linux：frame:false（renderer TrafficLight 自绘圆点 mimic mac）', () => {

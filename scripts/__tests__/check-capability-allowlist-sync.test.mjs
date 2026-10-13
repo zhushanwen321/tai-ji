@@ -15,7 +15,6 @@
  * （ci.yml「Test - scripts guards」逐文件列举同款口径。）
  */
 import { describe, it, expect } from 'vitest'
-import { spawnSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -25,7 +24,7 @@ import {
   extractArrayConst,
   extractRecordValues,
 } from '../check-capability-allowlist-sync.mjs'
-import { createMirrorRoot, installGuardIntoMirror } from './helpers/guard-mirror.mjs'
+import { createMirrorRoot, expectGuardDirectRunPasses, writeFilesAndInstallGuard } from './helpers/guard-mirror.mjs'
 
 const TEST_DIR = dirname(fileURLToPath(import.meta.url))
 const SCRIPT = join(TEST_DIR, '..', 'check-capability-allowlist-sync.mjs')
@@ -129,11 +128,7 @@ function makeMirror({
       allowAria,
     }),
   }
-  for (const [rel, content] of Object.entries(files)) {
-    if (missing.includes(rel)) continue
-    writeAt(rel, content)
-  }
-  const run = installGuardIntoMirror(root, SCRIPT)
+  const run = writeFilesAndInstallGuard(root, writeAt, files, { missing, script: SCRIPT })
   return { root, run, cleanup }
 }
 
@@ -238,8 +233,6 @@ describe('CLI 集成（守卫脚本 × tmp mirror）', () => {
 
 describe('真实仓库源文件（守卫对实际交付面非恒绿的反面：当前两侧一致）', () => {
   it('直跑真实守卫 → exit 0', () => {
-    const r = spawnSync(process.execPath, [SCRIPT], { cwd: REPO_ROOT, encoding: 'utf-8' })
-    expect(r.status).toBe(0)
-    expect(r.stdout).toContain('✓ capability 清单对拍守卫通过')
+    expectGuardDirectRunPasses(SCRIPT, '✓ capability 清单对拍守卫通过')
   })
 })

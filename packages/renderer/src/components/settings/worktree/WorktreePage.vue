@@ -17,20 +17,21 @@
     <div
       v-if="loadError"
       data-testid="worktree-load-error"
-      class="flex items-center gap-2 px-4 text-[11px] text-warn"
+      class="flex items-center gap-2 px-4 text-[length:var(--text-2xs)] text-warn"
     >
       <AlertTriangle class="size-3.5 shrink-0" />
       <span>{{ t('settings.worktree.loadErrorHint') }}</span>
       <Button
         variant="ghost"
         size="sm"
-        class="h-5 px-1.5 text-[11px] text-accent"
+        class="h-5 px-1.5 text-[length:var(--text-2xs)] text-accent"
         data-testid="worktree-load-retry"
         @click="loadConfig"
       >{{ t('settings.worktree.loadErrorRetry') }}</Button>
     </div>
 
-    <!-- Section 1：普通 git 仓库 -->
+    <!-- Section 1：普通 git 仓库。卡体 = demo .gcard-body.tight（4px 10px 8px）+ SettingRow（.srow 行范式：
+         label 14px/600 左 · desc 13px 右下，控件右置；首行无分隔线由 first:border-t-0 提供） -->
     <GroupCard>
       <template #head>
         <div class="gc-head-text">
@@ -38,46 +39,37 @@
           <p class="gc-sub">{{ t('settings.worktree.sectionPlainRepoDesc') }}</p>
         </div>
       </template>
-      <div>
+      <div class="px-[10px] pb-[8px] pt-[4px]">
         <!-- 专用目录 -->
-        <div class="flex items-center justify-between px-4 py-3">
-          <div class="flex flex-col gap-0.5">
-            <Label class="text-[12px] text-neutral-fg">{{ t('settings.worktree.worktreeRootDir') }}</Label>
-            <span class="text-[10px] text-neutral-mid">{{ t('settings.worktree.worktreeRootDirHint') }}</span>
-          </div>
-          <div class="flex items-center gap-2">
-            <Input
-              v-model="worktreeRootDir"
-              data-testid="worktree-root-dir-input"
-              :placeholder="t('settings.worktree.worktreeRootDirPlaceholder')"
-              class="h-8 w-[240px] text-[12px]"
-              :disabled="rootDirBusy || loadError"
-              @blur="onSaveWorktreeRootDir"
-            />
-            <Button
-              variant="ghost"
-              class="h-8 px-2 text-[11px] text-accent hover:bg-transparent hover:underline"
-              disabled
-              :title="t('settings.worktree.browseComingSoon')"
-            >
-              {{ t('settings.worktree.browse') }}
-            </Button>
-          </div>
-        </div>
+        <SettingRow :label="t('settings.worktree.worktreeRootDir')" :desc="t('settings.worktree.worktreeRootDirHint')">
+          <Input
+            v-model="worktreeRootDir"
+            data-testid="worktree-root-dir-input"
+            :placeholder="t('settings.worktree.worktreeRootDirPlaceholder')"
+            class="w-[240px] font-mono"
+            :disabled="rootDirBusy || loadError"
+            @blur="onSaveWorktreeRootDir"
+          />
+          <!-- 浏览 = demo .btn.secondary（描边 32px；disabled 持久化，功能位保留） -->
+          <Button
+            variant="secondary"
+            class="h-8 px-[12px] text-[length:var(--text-sm)]"
+            disabled
+            :title="t('settings.worktree.browseComingSoon')"
+          >
+            {{ t('settings.worktree.browse') }}
+          </Button>
+        </SettingRow>
         <!-- 初始化脚本 -->
-        <div class="flex items-center justify-between border-t border-border px-4 py-3">
-          <div class="flex flex-col gap-0.5">
-            <Label class="text-[12px] text-neutral-fg">{{ t('settings.worktree.setupScript') }}</Label>
-            <span class="text-[10px] text-neutral-mid">{{ t('settings.worktree.setupScriptHint') }}</span>
-          </div>
+        <SettingRow :label="t('settings.worktree.setupScript')" :desc="t('settings.worktree.setupScriptHint')">
           <Input
             v-model="setupScript"
             :placeholder="t('settings.worktree.setupScriptPlaceholder')"
-            class="h-8 w-[280px] text-[12px]"
+            class="w-[280px] font-mono"
             :disabled="setupScriptBusy || loadError"
             @blur="onSaveSetupScript"
           />
-        </div>
+        </SettingRow>
       </div>
     </GroupCard>
 
@@ -89,44 +81,38 @@
           <p class="gc-sub">{{ t('settings.worktree.sectionBareWorkspaceDesc') }}</p>
         </div>
       </template>
-      <div>
+      <div class="px-[10px] pb-[8px] pt-[4px]">
         <!-- 初始化脚本 -->
-        <div class="flex items-center justify-between px-4 py-3">
-          <div class="flex flex-col gap-0.5">
-            <Label class="text-[12px] text-neutral-fg">{{ t('settings.worktree.bareSetupScript') }}</Label>
-            <span class="text-[10px] text-neutral-mid">{{ t('settings.worktree.bareSetupScriptHint') }}</span>
-          </div>
+        <SettingRow :label="t('settings.worktree.bareSetupScript')" :desc="t('settings.worktree.bareSetupScriptHint')">
           <Input
             v-model="bareSetupScript"
             :placeholder="t('settings.worktree.bareSetupScriptPlaceholder')"
-            class="h-8 w-[280px] text-[12px]"
+            class="w-[280px] font-mono"
             :disabled="bareSetupScriptBusy || loadError"
             @blur="onSaveBareSetupScript"
           />
-        </div>
-        <!-- 超时时间 -->
-        <div class="flex items-center justify-between border-t border-border px-4 py-3">
-          <div class="flex flex-col gap-0.5">
-            <Label class="text-[12px] text-neutral-fg">{{ t('settings.worktree.timeout') }}</Label>
-            <span class="text-[10px] text-neutral-mid">{{ t('settings.worktree.timeoutHint') }}</span>
-          </div>
+        </SettingRow>
+        <!-- 超时时间（校验反馈 danger text-xs 在输入下方——demo settings spec §6 三件套统一
+             小字档；demo 的「秒」后缀依赖新增 i18n key，
+             locale 文件不在本波清单——不造词，单位说明由 hint 承载） -->
+        <SettingRow :label="t('settings.worktree.timeout')" :desc="t('settings.worktree.timeoutHint')">
           <div class="flex flex-col items-end gap-1">
             <Input
               v-model.number="timeout"
               type="number"
               data-testid="worktree-timeout-input"
               :placeholder="t('settings.worktree.timeoutPlaceholder')"
-              class="h-8 w-[120px] text-[12px]"
+              class="w-[120px]"
               min="1"
               max="3600"
               :disabled="timeoutBusy || loadError"
               @blur="onSaveTimeout"
             />
-            <span v-if="timeoutInvalid" data-testid="worktree-timeout-error" class="text-[11px] text-danger">
+            <span v-if="timeoutInvalid" data-testid="worktree-timeout-error" class="text-[length:var(--text-xs)] text-danger">
               {{ inlineText(timeoutInvalid) }}
             </span>
           </div>
-        </div>
+        </SettingRow>
       </div>
     </GroupCard>
 
@@ -138,27 +124,23 @@
           <p class="gc-sub">{{ t('settings.worktree.sectionGeneralDesc') }}</p>
         </div>
       </template>
-      <div>
-        <!-- 默认基分支 -->
-        <div class="flex items-center justify-between px-4 py-3">
-          <div class="flex flex-col gap-0.5">
-            <Label class="text-[12px] text-neutral-fg">{{ t('settings.worktree.defaultBaseBranch') }}</Label>
-            <span class="text-[10px] text-neutral-mid">{{ t('settings.worktree.defaultBaseBranchHint') }}</span>
-          </div>
+      <div class="px-[10px] pb-[8px] pt-[4px]">
+        <!-- 默认基分支（校验反馈位形态同超时行） -->
+        <SettingRow :label="t('settings.worktree.defaultBaseBranch')" :desc="t('settings.worktree.defaultBaseBranchHint')">
           <div class="flex flex-col items-end gap-1">
             <Input
               v-model="defaultBaseBranch"
               data-testid="worktree-base-branch-input"
               :placeholder="t('settings.worktree.defaultBaseBranchPlaceholder')"
-              class="h-8 w-[200px] text-[12px]"
+              class="w-[200px] font-mono"
               :disabled="baseBranchBusy || loadError"
               @blur="onSaveDefaultBaseBranch"
             />
-            <span v-if="baseBranchInvalid" data-testid="worktree-base-branch-error" class="text-[11px] text-danger">
+            <span v-if="baseBranchInvalid" data-testid="worktree-base-branch-error" class="text-[length:var(--text-xs)] text-danger">
               {{ inlineText(baseBranchInvalid) }}
             </span>
           </div>
-        </div>
+        </SettingRow>
       </div>
     </GroupCard>
   </div>
@@ -170,8 +152,8 @@ import { useI18n } from 'vue-i18n'
 import { AlertTriangle } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import { GroupCard } from '@taiji/ui/features/settings'
+import SettingRow from '../SettingRow.vue'
 import { getSettingsTransport } from '@taiji/core'
 import { createSettingFieldGroup } from '@/composables/features/settings/setting-field'
 

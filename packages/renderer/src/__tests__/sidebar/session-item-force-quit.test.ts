@@ -90,8 +90,10 @@ describe('强制退出菜单条件渲染（SessionItem）', () => {
     await openContextMenu(wrapper)
 
     expect(findForceQuitItem()).toBeNull()
-    // Portal 整块不渲染（非 agent session 且不可强退时无任何菜单项）
-    expect(document.body.querySelector('[data-testid="session-context-menu"]')).toBeNull()
+    // 2026-10-10 入口重设计：菜单恒渲染（标记完成/引用到输入区/移动到项目分组常驻），
+    // 但条件项（强退/停止/查看父）仍按状态缺席
+    expect(document.body.querySelector('[data-testid="session-context-menu"]')).not.toBeNull()
+    expect(document.body.querySelector('[data-testid="session-mark-done-item"]')).not.toBeNull()
   })
 
   it('agent-spawned session（有父 id）→ 「查看父 session」与「强制退出」两项并存（条件组合）', async () => {

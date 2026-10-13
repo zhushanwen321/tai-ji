@@ -95,10 +95,11 @@ describe('W4TC4: TurnSummary 基本渲染', () => {
 })
 
 describe('W4TC4: TurnSummary hover actions', () => {
-  it('有 lastAssistant 时 hover actions 容器存在 + 5 并列按钮渲染', () => {
+  it('有 lastAssistant 时 hover actions chip 本体存在 + 5 并列按钮渲染', () => {
     const wrapper = mountSummary()
-    // hover actions 容器存在（opacity-0 group-hover:opacity-100）
-    const actionsDiv = wrapper.find('.turn-summary .mt-1\\.5')
+    // [actions-anchor] 组件根 = chip 本体（显隐门控与悬浮定位在 Block.vue 的插槽包装层，
+    // 本组件维度只验 chip 与按钮形态）
+    const actionsDiv = wrapper.find('.turn-summary')
     expect(actionsDiv.exists()).toBe(true)
     // 5 个并列按钮：复制 / 复制MD / 朗读 / fork / handoff（无两层 hover 变体）
     const buttons = actionsDiv.findAll('button')
@@ -151,7 +152,7 @@ describe('W4TC4: TurnSummary hover actions', () => {
     expect(wrapper.find('[data-testid="fork-ask-btn"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="handoff-ask-btn"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="speak-btn"]').exists()).toBe(true)
-    const actionsDiv = wrapper.find('.turn-summary .mt-1\\.5')
+    const actionsDiv = wrapper.find('.turn-summary')
     expect(actionsDiv.findAll('button').length).toBe(3)
   })
 })
@@ -173,7 +174,7 @@ describe('block-rendering M0: TurnSummary 去内容化', () => {
     })
     expect(wrapper.find('.turn-summary').exists()).toBe(true)
     // 5 操作按钮：复制 / 复制MD / 朗读 / fork / handoff
-    const actionsDiv = wrapper.find('.turn-summary .mt-1\\.5')
+    const actionsDiv = wrapper.find('.turn-summary')
     expect(actionsDiv.findAll('button').length).toBe(5)
   })
 })

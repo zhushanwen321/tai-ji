@@ -8,15 +8,19 @@ import { cn } from '../../lib/utils'
 
 /**
  * Checkbox —— 勾选原语（reka-ui CheckboxRoot 封装）。
- * 替代 SkillPage/AgentPage 加载路径的裸 <input type=checkbox>。
- * 样式：size-4 / 未选态 border neutral-mid。
- * 三层 !important 绕过 renderer 全局 unlayered `*` 规则（CSS Cascade Layers：unlayered
+ * 替代各加载路径的裸 <input type=checkbox>。
+ * 形态对齐 demo pages.css .chk：16×16（size-[16px] 绝对 px，html 14px 基准下 size-4
+ * 只渲染 14px，免疫字号档缩放）/ 圆角 --radius-xs（4px，demo r-xs）/ 未选态
+ * border-border-strong + bg-bg-input 凹陷档底 / 选中 bg-accent + border-accent +
+ * Check --accent-fg（六主题跟随，白字在浅 accent 主题上勾色反转）。
+ * 焦点 = 全局焦点语言 outline 2px var(--focus-ring)（焦点指示唯一令牌，= accent 别名）
+ * 内缩 1px（demo workbench.css A2 通道），外扩 ring 会让 16px 微件在密集列表里碰撞邻行。
+ * 热区 = ::after inset -4px 外扩点击区（demo .chk 同机制），父级 relative 承载。
+ * 三层 !important 绕过宿主全局 unlayered 规则（CSS Cascade Layers：unlayered
  * 压过 Tailwind 的 @layer base/utilities）：
  *   - !border（width 1px）：否则 `*{border-width:0}` 把宽度塌成 0
  *   - !border-solid（style solid）：否则 `border-style` 默认 none——CSS 规则 none 时
  *     border-width 被强制 computed 为 0（不论设多少），这才是未选态隐形的真根因
- *   - border-neutral-mid：未选态亮色（border-strong 太弱）
- * 选中 bg-accent + border-accent。Check icon 白色。
  */
 const props = withDefaults(
   defineProps<CheckboxRootProps & { class?: HTMLAttributes['class'] }>(),
@@ -28,17 +32,20 @@ const forwarded = useForwardPropsEmits(delegatedProps, emits)
 </script>
 
 <template>
+  <!-- 热区类走静态 class（after:content-[''] 的引号在 :class 的 JS 表达式语境无法落字，
+       Switch.vue 同款先例）；与 :class 由 Vue 标准合并 -->
   <CheckboxRoot
     v-bind="forwarded"
+    class="after:absolute after:-inset-[4px] after:content-['']"
     :class="
       cn(
-        'peer size-4 shrink-0 rounded-sm !border !border-solid border-neutral-mid bg-transparent outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50 data-[state=checked]:border-accent data-[state=checked]:bg-accent data-[state=unchecked]:border-neutral-mid data-[state=unchecked]:bg-transparent',
+        'peer relative size-[16px] shrink-0 rounded-[4px] !border !border-solid border-border-strong bg-bg-input outline-none transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-[color:var(--focus-ring)] focus-visible:-outline-offset-1 disabled:cursor-not-allowed disabled:opacity-50 data-[state=checked]:border-accent data-[state=checked]:bg-accent data-[state=unchecked]:border-border-strong data-[state=unchecked]:bg-bg-input',
         props.class,
       )
     "
   >
     <CheckboxIndicator class="flex items-center justify-center text-current">
-      <Check class="size-3 text-white" />
+      <Check class="size-3 text-accent-fg" />
     </CheckboxIndicator>
   </CheckboxRoot>
 </template>

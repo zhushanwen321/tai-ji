@@ -40,9 +40,6 @@ export default {
     toggleSidebarAria: '切换侧栏',
     back: '后退',
     forward: '前进',
-    workingDir: '工作目录',
-    branch: '分支',
-    copySessionFile: '复制 session 文件路径',
     // plugin 顶栏按钮区（HeaderActionsHost，E13 三态 tooltip；plugin-header-action-modal-points AP-1）
     pluginActionExtensionNotLoaded: '本会话未加载所需扩展',
     pluginActionRestoring: '会话恢复中，暂无法判定',
@@ -68,10 +65,20 @@ export default {
     forkChip: '将发到新分支 · 与主线隔离',
     forkSend: 'fork 并发送',
     forkExit: '退出 fork 模式',
+    // staging banner 两段文案（demo .mode-banner 形态：粗体标题 + 「 · 」+ 描述）。
+    // [HISTORICAL] 前身 mode-chip 单 key 标签（forkChip/handoffChip）+ placeholder 换文案
+    // （forkHint/handoffHint）呈现通道已随 banner 形态退役（demo：图标染 accent 唯一染色点）
+    forkBannerTitle: 'Fork 新分支',
+    forkBannerDesc: '当前输入将发到新分支，与主线隔离',
     handoffHint: '输入内容将作为新 session 的首条消息发送给 AI（可选）…（⏎ 交接并发送，Esc 退出）',
     handoffChip: '交接到新 session · 当前输入将发送到新会话',
     handoffSend: '交接并发送到新 session',
     handoffExit: '退出交接模式',
+    handoffBannerTitle: 'Handoff 交接',
+    handoffBannerDesc: '发送后将生成会话摘要，交接给新会话继续',
+    // handoff 入口/发送守卫 toast（handoff-mode.ts enterGuard/beforeSend：源 session 流式中拦截）。
+    // [HISTORICAL] key 自 D8 泛化即被引用但双侧 locale 漏定义（toast 显裸 key），同批补齐
+    handoffBusy: '当前会话正在处理中，暂无法交接',
     bashPlaceholder: '运行 bash 命令…（!! 前缀排除出上下文）',
     // composer 命令动作表复制反馈（composer-pi-shortcuts 决策 4 / §3.5）
     copyLastReply: '已复制最后回复',
@@ -96,6 +103,9 @@ export default {
     blockScrollExpandAll: '展开全部',
     // 过程块（第三族）header 前缀与细节条：前缀是「块类型标记」，细节条是技术统计
     thinkingBlock: '思考',
+    // N6 思考行时长（ui-optimize-unified 决策 8）：摘要行尾槽「持续了 Ns」，mono dim，
+    // duration 由 ThinkingBlock.startTime/endTime 差推导（缺值不渲染本段）
+    thinkingDuration: '持续了 {duration}',
     subagent: '子代理',
     metaLines: '{n} 行',
     metaChars: '{n} 字符',
@@ -133,6 +143,7 @@ export default {
     respawnRetry: '重试恢复',
     respawnRetryFailed: '恢复失败，请稍后重试或新建会话',
     dispatching: '思考中…',
+    waitingResponse: '等待响应',
     railInProgress: '进行中…',
     // [RD-2#1 渲染错误边界] 单条渲染失败占位行 + 重试入口；全局渲染异常上屏 toast
     itemRenderFailed: '本条渲染失败',
@@ -142,7 +153,7 @@ export default {
     toastDropped: '还有 {count} 条通知未显示',
     toastDroppedDismiss: '关闭折叠通知提示',
     startConversation: '开始对话，或从左侧选择一个会话',
-    scrollToBottom: '回到底部',
+    scrollToBottom: '回到最新',
     // [system-notice-rendering-upgrade U3] 压缩完成行拆两段（D3）：主文案只留短语，
     // tokens 从文案拆出为钉右 mono meta（compactedTokens 去括号）
     compacted: '已压缩上下文',
@@ -157,10 +168,13 @@ export default {
     traceExpandAll: '展开全部（{count} 步）',
     traceCollapse: '恢复精简',
     traceFailed: '含 {count} 次失败',
-    // [ui-signal-density D1 U3] bash 组块组头文案（Block.vue 组分支消费）：zh 按设计字面
-    // 「{count} 个连续 bash · 共 {duration}」；失败分句复用 traceFailed（组行尾「· 含 M 次失败」），
-    // 不另开键——语义域同属失败计数句式（设计降级路径条的 key 归属裁决）
-    traceBashSummary: '{count} 个连续 bash · 共 {duration}',
+    // [run-group] run 类型分组组头（Block.vue 组分支消费）：类型名按设计字面（探索 / 改动 /
+    // 执行命令），统计段 = 「{count} 步」+ 耗时（≥1s 才拼，渲染层拼装）；失败分句复用 traceFailed
+    // （组行尾「· 含 M 次失败」），不另开键——语义域同属失败计数句式。
+    runGroupExplore: '探索',
+    runGroupEdit: '改动',
+    runGroupExec: '执行命令',
+    runGroupSteps: '{count} 步',
     bashCancelled: '已取消',
     bashTimeout: '已超时',
     bashOutputTruncated: '输出已截断',
@@ -185,6 +199,33 @@ export default {
     // [system-notice-rendering-upgrade U6] 边界行失败分句（D5「· M 失败」，Turn.vue 消费）：
     // 专用键不复用 traceFailed（「含 {count} 次失败」属 TraceCompactorRow 收编行句式，两者语义域不同）
     turnTriggerBgNotifyFailed: '{count} 失败',
+    // [bg-notice-fold specs/chat/system-notices.md §3.3] settle 收纳后轮头行折叠标签：按类型
+    // 分段（发生序去重，「·」连接，耗时沿用 elapsed 段单数字）。托管会话为第四成员，折叠词
+    // 待用户裁决（spec §6），暂按 fold-into-meta demo 提案值落地
+    noticeFoldedBash: '已处理后台任务',
+    noticeFoldedSubagent: '已处理 Subagent',
+    noticeFoldedWorkflow: '已处理 Workflow',
+    noticeFoldedManagedSession: '已处理托管会话',
+    // 折叠行失败词标（warn 色胶囊，不展开也可扫到异常终态）
+    noticeFoldFailedTag: '{count} 项失败',
+    // 类型词（解释卡词头 / 展开明细行类型列）
+    noticeTypeBash: '后台任务',
+    noticeTypeSubagent: 'Subagent',
+    noticeTypeWorkflow: 'Workflow',
+    noticeTypeManagedSession: '托管会话',
+    // 类型词解释卡词义（§3.5：一句词义 + 该类型汇总）
+    noticeTypeDescBash: '后台命令：在你确认前已在后台启动的 shell 命令，完成时以通知到达，本轮结束时收进这条摘要。',
+    noticeTypeDescSubagent: '后台子代理：独立运行的子代理任务，完成后汇报结果。',
+    noticeTypeDescWorkflow: '后台 workflow：多步编排运行，完成后汇报整体结果。',
+    noticeTypeDescManagedSession: '托管子会话：由主会话托管运行的子会话，终态以通知到达。',
+    // 解释卡该类型汇总（失败 K 仅在 K>0 时追加拼接）
+    noticeTypeSummaryOk: '{total} 条 · 成功 {ok}',
+    noticeTypeSummaryFail: '失败 {failed}',
+    // 展开明细行状态词（bash 用 exit N 字面量；timeout 与非 bash 类型用词）
+    noticeStatusSuccess: '成功',
+    noticeStatusFailed: '失败',
+    noticeStatusNeutral: '已取消',
+    noticeStatusTimeout: '超时',
     // [W4 turn-attribution] bash 执行中瞬时行前缀（MessageStream.vue → ActivityStrip 行）
     executingBash: '正在执行',
     // [notice-family-phrase-detail 2026-09-18 方案 A] bash 执行行 elapsed meta——命令移入悬停
@@ -224,8 +265,10 @@ export default {
     unavailableTitle: 'Git 不可用，无法读取仓库状态',
   },
   context: {
-    // 指标聚合入口（W3a 单图标聚合按钮，hover 出容量+速度+缓存聚合页）title
+    // 指标聚合入口（W3a 单图标聚合按钮；ui-optimize 决策 6 起对所有 fit 级常驻，hover 出容量+TTFT+速度+缓存四卡聚合页）title
     metricsAggregateTitle: '指标',
+    // 顶缘容量细条（ui-optimize 决策 6 / N7）可访问性提示（aria-label；细条只给色阶不显数字）
+    capacityBarHint: '上下文用量 {percent}%',
     capacity: '上下文容量',
     used: '已用',
     total: '总量',
@@ -234,7 +277,7 @@ export default {
     unknown: '未知',
     noCodingPlan: '无 Coding Plan',
     configureCodingPlan: '配置',
-    // coding-plan 额度查询（ContextCapacityPopover + useQuotaDisplay）
+    // coding-plan 额度查询（ContextCapacityCard + useQuotaDisplay）
     quotaQuerying: '查询中…',
     noQuotaData: '暂无额度数据',
     noCodingPlanData: '无 Coding Plan 数据',
@@ -444,6 +487,8 @@ export default {
     searchPlaceholder: '搜索模型…',
     noMatch: '无匹配模型',
     placeholder: '\u2026',
+    // 模型弹层行尾「默认」标签（demo .pt）：命中 config.defaults.defaultModel 的行显示
+    defaultTag: '默认',
     // 模型聚合入口（W3a 单图标聚合按钮，click 出模型列表+思考档位）title
     modelThinkingAggregateTitle: '模型 · 思考等级',
   },

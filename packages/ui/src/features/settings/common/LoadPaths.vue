@@ -12,21 +12,21 @@
   -->
   <section data-testid="load-paths">
     <div class="mb-1.5 flex items-baseline gap-2">
-      <h3 class="text-[12px] font-medium text-neutral-fg">{{ t('settings.loadPaths.title') }}</h3>
-      <span class="text-[11px] text-neutral-mid">{{ t('settings.loadPaths.priorityHint') }}</span>
+      <h3 class="text-[length:var(--text-xs)] font-medium text-neutral-fg">{{ t('settings.loadPaths.title') }}</h3>
+      <span class="text-[length:var(--text-2xs)] text-neutral-mid">{{ t('settings.loadPaths.priorityHint') }}</span>
     </div>
 
     <!-- RD-4#1 保存失败常驻态：红字标注当前显示的是最近落盘值（不得只靠 toast，toast 会自动消失） -->
     <p
       v-if="saveError"
       data-testid="load-paths-save-error"
-      class="mb-1.5 flex items-center gap-1 text-[11px] text-danger"
+      class="mb-1.5 flex items-center gap-1 text-[length:var(--text-2xs)] text-danger"
     >
       <AlertCircle class="size-3 shrink-0" />
       {{ t('settings.loadPaths.saveErrorHint') }}
     </p>
 
-    <div class="overflow-hidden rounded-card bg-card">
+    <div class="overflow-hidden rounded-card bg-bg-card">
       <div
         v-for="scope in SCOPES"
         :key="scope"
@@ -39,16 +39,16 @@
           :class="{ 'border-t border-border': scope === 'global' }"
           :data-testid="`group-head-${scope}`"
         >
-          <span class="text-[12px] font-semibold text-neutral-fg">
+          <span class="text-[length:var(--text-xs)] font-semibold text-neutral-fg">
             {{ scope === 'project' ? t('settings.loadPaths.groupProject') : t('settings.loadPaths.groupGlobal') }}
           </span>
           <span
-            class="rounded-full px-1.5 py-0.5 font-mono text-[10px]"
+            class="rounded-full px-1.5 py-0.5 font-mono text-[length:var(--text-3xs)]"
             :class="scope === 'project' ? 'bg-accent-soft text-accent' : 'bg-surface text-neutral-mid'"
           >
             {{ scope === 'project' ? t('settings.loadPaths.scopeProject') : t('settings.loadPaths.scopeGlobal') }}
           </span>
-          <span class="ml-auto font-mono text-[10px] text-neutral-dim">
+          <span class="ml-auto font-mono text-[length:var(--text-3xs)] text-neutral-dim">
             {{ scope === 'project' ? 'projectPaths' : 'globalPaths' }}
           </span>
         </div>
@@ -59,7 +59,7 @@
             v-for="dir in forcedDirs"
             :key="`forced:${dir}`"
             data-testid="forced-dir-row"
-            class="flex items-center gap-2 border-t border-border px-3 py-2 text-[12px]"
+            class="flex items-center gap-2 border-t border-border px-3 py-2 text-[length:var(--text-xs)]"
           >
             <Checkbox
               :model-value="true"
@@ -69,7 +69,7 @@
             />
             <span class="flex-1 truncate font-mono text-neutral-fg opacity-60">{{ dir }}</span>
             <Lock class="size-3.5 shrink-0 text-neutral-dim" />
-            <span class="rounded-full bg-surface-2 px-1.5 py-0.5 font-mono text-[10px] text-neutral-dim">
+            <span class="rounded-full bg-surface-2 px-1.5 py-0.5 font-mono text-[length:var(--text-3xs)] text-neutral-dim">
               {{ t('settings.loadPaths.systemTag') }}
             </span>
           </div>
@@ -81,7 +81,7 @@
           :key="dir.path"
           data-testid="dir-row"
           :data-scope="scope"
-          class="flex items-center gap-2 border-t border-border px-3 py-2 text-[12px]"
+          class="flex items-center gap-2 border-t border-border px-3 py-2 text-[length:var(--text-xs)]"
         >
           <Checkbox
             :model-value="dir.enabled"
@@ -134,7 +134,7 @@
             v-model="newPath[scope]"
             :data-testid="`new-path-input-${scope}`"
             :placeholder="scope === 'project' ? './relative/or/~/or/abs/path' : '/abs/or/~/path'"
-            class="h-8 min-w-[180px] flex-1 font-mono text-[12px]"
+            class="h-8 min-w-[180px] flex-1 font-mono text-[length:var(--text-xs)]"
             :error="!!pathError[scope]"
             :disabled="disabled"
             @keydown.enter="onAddPath(scope)"
@@ -161,7 +161,7 @@
           <p
             v-if="pathError[scope]"
             :data-testid="`path-error-${scope}`"
-            class="flex w-full items-center gap-1 text-[11px] text-danger"
+            class="flex w-full items-center gap-1 text-[length:var(--text-2xs)] text-danger"
           >
             <AlertCircle class="size-3 shrink-0" />
             {{ pathError[scope] }}
@@ -179,8 +179,8 @@
       @import="onImportFromAgents"
     />
 
-    <p v-if="kind === 'agent'" class="mt-1.5 text-[11px] text-neutral-dim">{{ t('settings.loadPaths.agentRestartHint') }}</p>
-    <p v-else-if="kind === 'extension'" class="mt-1.5 text-[11px] text-neutral-dim">{{ t('settings.loadPaths.extensionLoadOrderHint') }}</p>
+    <p v-if="kind === 'agent'" class="mt-1.5 text-[length:var(--text-2xs)] text-neutral-dim">{{ t('settings.loadPaths.agentRestartHint') }}</p>
+    <p v-else-if="kind === 'extension'" class="mt-1.5 text-[length:var(--text-2xs)] text-neutral-dim">{{ t('settings.loadPaths.extensionLoadOrderHint') }}</p>
   </section>
 </template>
 

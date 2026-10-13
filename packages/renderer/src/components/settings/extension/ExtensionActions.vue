@@ -13,12 +13,13 @@
         @update:model-value="onToggle(ext, $event)"
       />
       <!-- toggle 中：短暂 loading 反馈（开关乐观已滑动，spinner 表示正在持久化 + 重扫刷新列表） -->
-      <Loader2 v-if="toggling.has(ext.name)" class="size-3.5 shrink-0 animate-spin text-neutral-mid" />
-      <!-- 升级按钮（仅 user 层 + user-installed 来源扩展显示；builtin 由 runtime 自动升级） -->
+      <Loader2 v-if="toggling.has(ext.name)" class="size-[12px] shrink-0 animate-spin text-neutral-mid" />
+      <!-- 升级按钮（仅 user 层 + user-installed 来源扩展显示；builtin 由 runtime 自动升级）。
+           [w3b] demo .btn.icon：28px 方钮 / r-md / neutral-mid / hover surface-hover+fg / icon 14px -->
       <Button
         v-if="ext.layer !== 'builtin' && ext.source === 'user-installed'"
         variant="ghost"
-        class="size-7 shrink-0 rounded-sm p-0 text-neutral-dim hover:bg-accent-soft hover:text-accent [&_svg]:size-3.5"
+        class="h-[28px] w-[28px] shrink-0 rounded-md p-0 text-neutral-mid hover:bg-surface-hover hover:text-neutral-fg [&_svg]:size-[14px]"
         :title="t('settings.extension.upgradeTitle')"
         :disabled="upgrading.has(ext.name)"
         @click="onUpgrade(ext.name)"
@@ -26,11 +27,11 @@
         <Loader2 v-if="upgrading.has(ext.name)" class="animate-spin" />
         <ArrowUpCircle v-else />
       </Button>
-      <!-- 卸载按钮（仅 user 层可卸；builtin 不可卸载，discovery 来源不经此入口） -->
+      <!-- 卸载按钮（仅 user 层可卸；builtin 不可卸载，discovery 来源不经此入口）；demo danger-hover:hover = danger -->
       <Button
         v-if="ext.layer !== 'builtin' && ext.source !== 'discovery'"
         variant="ghost"
-        class="size-7 shrink-0 rounded-sm p-0 text-neutral-dim hover:bg-danger-soft hover:text-danger [&_svg]:size-3.5"
+        class="h-[28px] w-[28px] shrink-0 rounded-md p-0 text-neutral-mid hover:bg-surface-hover hover:text-danger [&_svg]:size-[14px]"
         :title="t('settings.extension.uninstallTitle')"
         @click="confirmTarget = ext.name"
       >
@@ -38,8 +39,8 @@
       </Button>
     </div>
     <!-- 操作失败就近反馈（非静默吞，AGENTS.md 规则 #3） -->
-    <div v-if="error" class="flex max-w-[220px] items-center gap-1 text-[10px] text-danger">
-      <AlertCircle class="size-3 shrink-0" />
+    <div v-if="error" class="flex max-w-[220px] items-center gap-1 text-[length:var(--text-2xs)] text-danger">
+      <AlertCircle class="size-[12px] shrink-0" />
       <span class="truncate">{{ error }}</span>
     </div>
 

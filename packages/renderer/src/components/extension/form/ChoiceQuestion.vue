@@ -128,7 +128,7 @@ function onOtherEnter(e: KeyboardEvent): void {
         'flex cursor-pointer items-start gap-2 rounded px-2.5 py-1.5 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-accent',
         isSelected(optValue(opt.label))
           ? 'bg-accent-soft'
-          : 'hover:bg-white/[0.04]',
+          : 'hover:bg-[var(--hover-tint)]',
       ]"
       @click="toggleOption(optValue(opt.label))"
       @keydown.enter="toggleOption(optValue(opt.label))"
@@ -156,12 +156,12 @@ function onOtherEnter(e: KeyboardEvent): void {
         <div class="flex flex-wrap items-baseline gap-x-2 gap-y-1">
           <span
             data-testid="form-option-label"
-            class="text-[13px] font-normal leading-1.5 text-neutral-fg"
+            class="text-[length:var(--text-sm)] font-normal leading-1.5 text-neutral-fg"
           >{{ opt.label }}</span>
           <span
             v-if="opt.description"
             data-testid="form-option-desc"
-            class="text-[12px] leading-1.5 text-neutral-dim"
+            class="text-[length:var(--text-xs)] leading-1.5 text-neutral-dim"
           >{{ opt.description }}</span>
         </div>
       </div>
@@ -178,7 +178,7 @@ function onOtherEnter(e: KeyboardEvent): void {
     :aria-checked="isOtherSelected()"
     :class="[
       'flex cursor-pointer items-start gap-2 rounded px-2.5 py-1.5 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-accent',
-      isOtherSelected() ? 'bg-accent-soft' : 'hover:bg-white/[0.04]',
+      isOtherSelected() ? 'bg-accent-soft' : 'hover:bg-[var(--hover-tint)]',
     ]"
     @click="toggleOption(OTHER_VALUE)"
     @keydown.enter="toggleOption(OTHER_VALUE)"
@@ -199,7 +199,7 @@ function onOtherEnter(e: KeyboardEvent): void {
       ]"
     />
     <div class="flex min-w-0 flex-1 flex-col">
-      <span class="text-[13px] font-normal leading-1.5 text-neutral-fg">{{ t('extensionUI.other') }}</span>
+      <span class="text-[length:var(--text-sm)] font-normal leading-1.5 text-neutral-fg">{{ t('extensionUI.other') }}</span>
       <!-- 选中时展开输入框（独立成行，自动聚焦）。
            @keydown.stop 阻止冒泡到卡片容器；Enter 单独处理（IME 守卫后上抛） -->
       <Input

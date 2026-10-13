@@ -1,5 +1,11 @@
 # @zhushanwen/zcode-subagent-cli
 
+## 0.7.0
+
+### Minor Changes
+
+- 0c4bec66e: Provider startup sync: pi provider configuration is mapped into zcode's config at spawn time, and real provider_config.json reads are intercepted to serve a merged (real + injected) view so credentials and model entries stay consistent across both engines.
+
 ## 0.6.0
 
 ### Minor Changes

@@ -103,6 +103,9 @@ export function useModelPickerData(
     hasAnyModel: ComputedRef<boolean>
     /** ModelPickerPanel 分组形状（providerId 随组） */
     pickerGroups: ComputedRef<PickerGroupRef[]>
+    /** 全局默认模型（config.defaults.defaultModel，"provider/modelId" 复合串；空串 = 未配置）。
+     *  消费方透传给 ModelPickerPanel 的 defaultModel prop 驱动行尾「默认」标签（demo .pt）。 */
+    defaultModel: ComputedRef<string>
     /** 裸 modelId → providerId 反查（undefined = 反查失败，消费方静默忽略）。
      *  [顺带发现 7] 同 short-id 多 provider 时反查首中不保证是被点行——主路径消费
      *  panel 事件携带的组级 providerId，本函数仅兜底无 providerId 的自建分组形态。 */
@@ -124,6 +127,7 @@ export function useModelPickerData(
     groups,
     hasAnyModel: computed(() => groups.value.length > 0),
     pickerGroups: computed(() => toPickerGroups(groups.value)),
+    defaultModel: computed(() => settingsStore.defaultModel.value),
     resolveProviderId,
   }
 }

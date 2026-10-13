@@ -14,17 +14,25 @@ import { cn } from '../../lib/utils'
 import { registerUiModalSurface, uiSurfaceRectOf } from '../../modal-surface-registrar'
 
 /**
- * SelectContent —— 下拉浮层。样式与 PopoverContent 对齐（冷蓝暗色 elevated 浮层）。
+ * SelectContent —— 下拉浮层。样式与 PopoverContent 对齐（elevated 浮层）。
  * 默认 popper 模式：position="popper"，跟随触发器对齐。
  *
- * z-index 取 1100：高于 Dialog（z-1000），保证嵌在 Dialog 内的 Select（如
- * ProviderEditModal 类型/上下文/思考策略）下拉时不被 DialogContent 压住。
- * 与 PopoverContent 同属「浮层」层级，统一规则。
+ * z-index = --z-dialog(1100)：demo .pg-set .sel-pop 同消费 var(--z-dialog)（tokens.css
+ * 梯队注释：dialog 档承载「浮于 modal 的浮层」）。高于 DialogContent（--z-modal 1000），
+ * 保证嵌在 Dialog 内的 Select（如 ProviderEditModal 类型/上下文/思考策略）下拉时不被压住。
+ * sideOffset 4px：demo .sel-pop top calc(100% + 4px) 实测锚距。
+ *
+ * inheritAttrs=false + $attrs 手动绑到内部 reka SelectContent：本封装模板单根是
+ * SelectPortal（渲染为 Teleport，非普通元素根），Vue 对 Teleport 根不继承 fallthrough
+ * attrs——消费方传的 data-testid / 额外事件监听会在 Portal 边界被静默丢弃（Vue
+ * "Extraneous non-props attributes" 警告），显式转发后落到真正的浮层 DOM（与 PopoverContent
+ * 已修形态一致）。
  */
 const props = withDefaults(
   defineProps<SelectContentProps & { class?: HTMLAttributes['class'] }>(),
-  { position: 'popper', sideOffset: 6 },
+  { position: 'popper', sideOffset: 4 },
 )
+defineOptions({ inheritAttrs: false })
 const emits = defineEmits<SelectContentEmits>()
 const delegatedProps = reactiveOmit(props, 'class')
 const forwarded = useForwardPropsEmits(delegatedProps, emits)
@@ -54,15 +62,15 @@ onBeforeUnmount(disposeSurfaceRegistration)
   <SelectPortal>
     <SelectContent
       ref="contentRef"
-      v-bind="forwarded"
+      v-bind="{ ...forwarded, ...$attrs }"
       :class="
         cn(
-          'relative z-[1100] max-h-[var(--reka-select-content-available-height)] min-w-[var(--reka-select-trigger-width)] overflow-hidden rounded-md border border-border-strong bg-bg-elevated text-neutral-fg shadow-2 outline-none reka-popover-transition',
+          'relative z-[var(--z-dialog)] max-h-[var(--reka-select-content-available-height)] min-w-[var(--reka-select-trigger-width)] overflow-hidden rounded-md border border-border-strong bg-bg-elevated text-neutral-fg shadow-2 outline-none reka-popover-transition',
           props.class,
         )
       "
     >
-      <SelectViewport class="p-1">
+      <SelectViewport class="p-[4px]">
         <slot />
       </SelectViewport>
     </SelectContent>

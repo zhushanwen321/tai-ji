@@ -10,17 +10,17 @@
   <div class="flex flex-col gap-4">
     <!-- 工具访问策略（surface-2 浮起容器，v6 §5.8 mode-block） -->
     <div class="flex flex-col gap-2 rounded bg-surface-2 p-3">
-      <Label class="flex items-center gap-1.5 text-[11px] font-semibold text-neutral-fg">
+      <Label class="flex items-center gap-1.5 text-[length:var(--text-2xs)] font-semibold text-neutral-fg">
         {{ t('settings.preset.toolMode') }}
         <!-- 只读徽章：内置预设 disabled 时显示，替代旧 opacity-50 的隐式只读视觉 -->
-        <span v-if="disabled" class="rounded-sm bg-surface px-1.5 py-0.5 text-[11px] font-normal normal-case tracking-normal text-neutral-dim">{{ t('settings.preset.readonlyBadge') }}</span>
+        <span v-if="disabled" class="rounded-sm bg-surface px-1.5 py-0.5 text-[length:var(--text-2xs)] font-normal normal-case tracking-normal text-neutral-dim">{{ t('settings.preset.readonlyBadge') }}</span>
       </Label>
       <div class="flex items-center gap-1">
         <Button
           v-for="m in TOOL_MODES"
           :key="m.value"
           variant="ghost"
-          class="h-8 rounded-sm px-3 text-[11px]"
+          class="h-8 rounded-sm px-3 text-[length:var(--text-2xs)]"
           :class="preset.toolMode === m.value ? 'bg-surface-hover text-neutral-fg shadow-[inset_0_0_0_1px_var(--accent-ring)]' : 'text-neutral-mid hover:bg-surface hover:text-neutral-fg'"
           :disabled="disabled"
           @click="onToolModeChange(m.value)"
@@ -30,7 +30,7 @@
       </div>
       <!-- allowlist/denylist：先一行策略语义说明（denylist 勾选=禁用，与 allowlist 相反），再 checkbox 列表 -->
       <div v-if="preset.toolMode === 'allowlist' || preset.toolMode === 'denylist'">
-        <p class="mb-2 text-[11px] text-neutral-dim">
+        <p class="mb-2 text-[length:var(--text-2xs)] text-neutral-dim">
           {{ preset.toolMode === 'allowlist' ? t('settings.preset.allowlistHint') : t('settings.preset.denylistHint') }}
         </p>
         <div class="flex flex-wrap gap-2">
@@ -45,32 +45,32 @@
               :disabled="disabled"
               @update:model-value="(checked) => onToolToggle(tool, checked === true)"
             />
-            <span class="text-[11px] text-neutral-fg">{{ tool }}</span>
+            <span class="text-[length:var(--text-2xs)] text-neutral-fg">{{ tool }}</span>
             <span
-              class="text-[11px]"
+              class="text-[length:var(--text-2xs)]"
               :class="isDefaultEnabled(tool) ? 'text-success' : 'text-neutral-dim'"
             >{{ isDefaultEnabled(tool) ? t('settings.preset.defaultOn') : t('settings.preset.defaultOff') }}</span>
           </Label>
         </div>
       </div>
       <!-- all/none：无可勾选清单，显式说明当前策略语义（旧版直接不渲染，用户不知道策略含义） -->
-      <p v-else class="text-[11px] italic text-neutral-dim">
+      <p v-else class="text-[length:var(--text-2xs)] italic text-neutral-dim">
         {{ preset.toolMode === 'all' ? t('settings.preset.allListHint') : t('settings.preset.noneListHint') }}
       </p>
     </div>
 
     <!-- 扩展访问策略（surface-2 浮起容器，v6 §5.8 mode-block） -->
     <div class="flex flex-col gap-2 rounded bg-surface-2 p-3">
-      <Label class="flex items-center gap-1.5 text-[11px] font-semibold text-neutral-fg">
+      <Label class="flex items-center gap-1.5 text-[length:var(--text-2xs)] font-semibold text-neutral-fg">
         {{ t('settings.preset.extensionMode') }}
-        <span v-if="disabled" class="rounded-sm bg-surface px-1.5 py-0.5 text-[11px] font-normal normal-case tracking-normal text-neutral-dim">{{ t('settings.preset.readonlyBadge') }}</span>
+        <span v-if="disabled" class="rounded-sm bg-surface px-1.5 py-0.5 text-[length:var(--text-2xs)] font-normal normal-case tracking-normal text-neutral-dim">{{ t('settings.preset.readonlyBadge') }}</span>
       </Label>
       <div class="flex items-center gap-1">
         <Button
           v-for="m in EXT_MODES"
           :key="m.value"
           variant="ghost"
-          class="h-8 rounded-sm px-3 text-[11px]"
+          class="h-8 rounded-sm px-3 text-[length:var(--text-2xs)]"
           :class="preset.extensionMode === m.value ? 'bg-surface-hover text-neutral-fg shadow-[inset_0_0_0_1px_var(--accent-ring)]' : 'text-neutral-mid hover:bg-surface hover:text-neutral-fg'"
           :disabled="disabled"
           @click="onExtModeChange(m.value)"
@@ -79,11 +79,11 @@
         </Button>
       </div>
       <div v-if="preset.extensionMode === 'allowlist' || preset.extensionMode === 'denylist'">
-        <p class="mb-2 text-[11px] text-neutral-dim">
+        <p class="mb-2 text-[length:var(--text-2xs)] text-neutral-dim">
           {{ preset.extensionMode === 'allowlist' ? t('settings.preset.allowlistHint') : t('settings.preset.denylistHint') }}
         </p>
         <div class="flex flex-wrap gap-2">
-          <div v-if="!availableExtensions.length" class="text-[11px] text-neutral-mid">
+          <div v-if="!availableExtensions.length" class="text-[length:var(--text-2xs)] text-neutral-mid">
             {{ t('settings.preset.noExtensions') }}
           </div>
           <Label
@@ -97,11 +97,11 @@
               :disabled="disabled"
               @update:model-value="(checked) => onExtToggle(ext.name, checked === true)"
             />
-            <span class="text-[11px] text-neutral-fg">{{ ext.displayName }}</span>
+            <span class="text-[length:var(--text-2xs)] text-neutral-fg">{{ ext.displayName }}</span>
           </Label>
         </div>
       </div>
-      <p v-else class="text-[11px] italic text-neutral-dim">
+      <p v-else class="text-[length:var(--text-2xs)] italic text-neutral-dim">
         {{ preset.extensionMode === 'all' ? t('settings.preset.allListHint') : t('settings.preset.noneListHint') }}
       </p>
     </div>

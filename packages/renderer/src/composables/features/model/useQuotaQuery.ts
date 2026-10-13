@@ -41,7 +41,7 @@ const t = i18n.global.t as (key: string) => string
 
 /**
  * quota 失败 reason → 用户可读简短文案（写入 store.error，panel 显示「查询失败：{error}」）。
- * 供 useQuotaQuery 与 ContextCapacityPopover 的 refresh 路径共用。
+ * 供 useQuotaQuery 与 ContextCapacityCard 的 refresh 路径共用。
  */
 export function quotaFailReasonText(reason: QuotaFetchFailureReason): string {
   return t(QUOTA_FAIL_REASON_KEYS[reason])

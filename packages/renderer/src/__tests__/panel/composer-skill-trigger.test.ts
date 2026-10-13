@@ -27,6 +27,8 @@ import { createPinia, setActivePinia } from 'pinia'
 import * as events from '@taiji/core/transport/api'
 import { provideSettingsTransport } from '@taiji/core'
 import { makeSettingsTransportStub } from '../helpers/settings-transport-stub'
+import { composerFlowModule } from '../helpers/composer-mount'
+import { apiProjectMock } from '@/__tests__/helpers/api-facade-mock'
 import type { ServerMessage } from '@taiji/shared'
 import type { SkillInfo } from '@taiji/shared'
 
@@ -42,13 +44,10 @@ vi.mock('@/composables/features/chat/useChat', () => ({
     hydrateHistory: vi.fn(),
   }),
 }))
-vi.mock('@/composables/features/new-task/useNewTaskFlow', () => ({
-  useNewTaskFlow: () => ({ submitFirstMessage: vi.fn(), currentModel: { value: null }, currentCwd: ref(null), setPendingModel: vi.fn(), pendingPreset: ref(null) }),
-  resetNewTaskFlow: vi.fn(),
-}))
+vi.mock('@/composables/features/new-task/useNewTaskFlow', () => composerFlowModule())
 // P7 用：getProjectSkills 可控 mock（vi.hoisted 提升供断言/改返回值）
 const getProjectSkillsMock = vi.hoisted(() => vi.fn().mockResolvedValue([]))
-vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
+vi.mock('@/api', () => ({ project: apiProjectMock(),
   model: { switchModel: vi.fn() },
   session: { setThinkingLevel: vi.fn(async (sessionId: string, level: string) => ({ sessionId, level })), getCommands: vi.fn().mockResolvedValue({ sessionId: '', commands: [] }) },
   composer: {
@@ -111,6 +110,7 @@ const composerStubs = {
   AddMenuPopover: SIMPLE,
   ContextChipsBar: SIMPLE,
   ContextCapacityPopover: SIMPLE,
+  ComposerCapacityBar: SIMPLE,
   ModelSelectPopover: SIMPLE,
   ThinkingLevelPopover: SIMPLE,
   RetryIndicator: SIMPLE,
@@ -423,10 +423,10 @@ function pushCommands(sessionId: string, commands: Array<Record<string, unknown>
   events.dispatchSession(sessionId, msg)
 }
 
-/** reka-ui PopoverContent teleport 到 body：在列表容器内找 .cmd-row 行 */
+/** reka-ui PopoverContent teleport 到 body：在列表容器内找 .pop-item 行 */
 function bodyRows(): HTMLElement[] {
   const list = document.body.querySelector('.max-h-\\[180px\\]')
-  return Array.from((list ?? document.body).querySelectorAll('.cmd-row')) as HTMLElement[]
+  return Array.from((list ?? document.body).querySelectorAll('.pop-item')) as HTMLElement[]
 }
 
 /** SkillInfo fixture（taiji 源候选形状：sourcePath 即 location 权威来源） */

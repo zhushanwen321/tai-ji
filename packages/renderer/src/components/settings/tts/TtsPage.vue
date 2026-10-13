@@ -9,7 +9,7 @@
   「保存并测试」合成固定样句走 useTtsPlayer 的 settings-tts-test 通道（全局互斥，§7.5 要点 4）。
 -->
 <template>
-  <div data-testid="tts-page" class="flex max-w-[860px] flex-col gap-3">
+  <div data-testid="tts-page" class="flex flex-col">
     <header class="page-head">
       <div class="head-text">
         <h1 class="title">{{ t('settings.menu.tts') }}</h1>
@@ -21,11 +21,17 @@
     <div
       v-if="capsFailed"
       data-testid="tts-caps-failed"
-      class="flex items-center gap-2 rounded-md border border-warn/40 bg-warn-soft px-3 py-2 text-[12px] text-neutral-fg"
+      class="mb-[16px] flex items-center gap-2 rounded-md border border-[color-mix(in_oklch,var(--warn)_40%,transparent)] bg-warn-soft px-3 py-2 text-[length:var(--text-sm)] text-neutral-fg"
     >
       <AlertTriangle class="size-4 shrink-0 text-warn" aria-hidden="true" />
       <span class="flex-1">{{ t('settings.tts.capsFailedHint') }}</span>
-      <Button variant="secondary" size="dense" data-testid="tts-caps-retry" :disabled="loading" @click="reload">
+      <Button
+        variant="secondary"
+        class="h-[32px] px-[12px] text-[length:var(--text-sm)]"
+        data-testid="tts-caps-retry"
+        :disabled="loading"
+        @click="reload"
+      >
         {{ t('settings.tts.retry') }}
       </Button>
     </div>
@@ -38,14 +44,15 @@
           <p class="gc-sub">{{ t('settings.tts.enabledDesc') }}</p>
         </div>
       </template>
-      <div class="flex items-center justify-between px-4 py-3">
-        <Label class="text-[11px] text-neutral-dim" for="tts-enabled-switch">{{ t('settings.tts.enabledLabel') }}</Label>
-        <Switch
-          id="tts-enabled-switch"
-          data-testid="tts-enabled-switch"
-          :model-value="speechEnabled"
-          @update:model-value="onToggleEnabled"
-        />
+      <div class="px-[10px] pb-[8px] pt-[4px]">
+        <SettingRow :label="t('settings.tts.enabledLabel')">
+          <Switch
+            id="tts-enabled-switch"
+            data-testid="tts-enabled-switch"
+            :model-value="speechEnabled"
+            @update:model-value="onToggleEnabled"
+          />
+        </SettingRow>
       </div>
     </GroupCard>
 
@@ -56,39 +63,42 @@
           <h3 class="gc-title">{{ t('settings.tts.providerSection') }}</h3>
         </div>
       </template>
-      <div class="flex flex-wrap items-center gap-3 px-4 py-3">
-        <Select v-model="providerModel" :disabled="capsFailed">
-          <SelectTrigger
-            id="tts-provider-select"
-            data-testid="tts-provider-select"
-            class="h-8 w-[220px] text-[13px]"
-          >
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem
-              v-for="pid in PROVIDER_IDS"
-              :key="pid"
-              :value="pid"
-              :data-testid="`tts-provider-option-${pid}`"
+      <div class="px-[10px] pb-[8px] pt-[4px]">
+        <SettingRow :label="t('settings.tts.providerSection')">
+          <Select v-model="providerModel" :disabled="capsFailed">
+            <SelectTrigger
+              id="tts-provider-select"
+              data-testid="tts-provider-select"
+              class="w-[320px]"
             >
-              {{ t(`settings.tts.providerName.${pid}`) }}
-            </SelectItem>
-          </SelectContent>
-        </Select>
-        <span
-          data-testid="tts-provider-key-status"
-          class="flex items-center gap-1.5 text-[12px]"
-          :class="activeMeta.hasApiKey ? 'text-success' : 'text-neutral-dim'"
-        >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem
+                v-for="pid in PROVIDER_IDS"
+                :key="pid"
+                :value="pid"
+                :data-testid="`tts-provider-option-${pid}`"
+              >
+                {{ t(`settings.tts.providerName.${pid}`) }}
+              </SelectItem>
+            </SelectContent>
+          </Select>
+        </SettingRow>
+        <!-- Key 状态行（demo srow：8px 状态点 + 状态文本 + 右侧 mono t-note 协议形态） -->
+        <div class="flex min-h-[44px] items-center gap-4 border-t border-hairline px-[6px] py-[10px]">
           <span
-            class="size-[7px] shrink-0 rounded-full"
-            :class="activeMeta.hasApiKey ? 'bg-success' : 'bg-neutral-dim opacity-40'"
+            class="size-[8px] shrink-0 rounded-full"
+            :class="activeMeta.hasApiKey ? 'bg-success' : 'bg-[var(--neutral-faint)]'"
             aria-hidden="true"
           />
-          {{ activeMeta.hasApiKey ? t('settings.tts.keyConfigured') : t('settings.tts.keyNotConfigured') }}
-        </span>
-        <span class="font-mono text-[10px] text-neutral-dim">{{ protocolLabel(activeProvider) }}</span>
+          <span
+            data-testid="tts-provider-key-status"
+            class="text-[length:var(--text-sm)] text-[color:var(--neutral-fg-2)]"
+          >{{ activeMeta.hasApiKey ? t('settings.tts.keyConfigured') : t('settings.tts.keyNotConfigured') }}</span>
+          <span class="flex-1" />
+          <span class="shrink-0 font-mono text-[length:var(--text-2xs)] text-[color:var(--neutral-fg-2)]">{{ protocolLabel(activeProvider) }}</span>
+        </div>
       </div>
     </GroupCard>
 
@@ -109,15 +119,15 @@
       @key-blur="onKeyBlur(activeProvider)"
     />
 
-    <!-- 操作行：额度说明（§5.2 第 5 点原文）+ 保存 / 保存并测试 -->
-    <div class="flex items-end gap-2">
-      <p class="flex-1 text-[11px] leading-relaxed text-neutral-dim">{{ t('settings.tts.quotaNote') }}</p>
-      <Button variant="secondary" size="dense" data-testid="tts-save" :disabled="saving || capsFailed || !activeForm" @click="save">
+    <!-- 操作行（demo：pt 12px / 说明 srow-desc flex-1 / secondary 保存 + solid 保存并测试） -->
+    <div class="flex items-center gap-[8px] pt-[12px]">
+      <p class="min-w-0 flex-1 text-[length:var(--text-sm)] text-neutral-mid">{{ t('settings.tts.quotaNote') }}</p>
+      <Button variant="secondary" class="h-[32px] px-[12px] text-[length:var(--text-sm)]" data-testid="tts-save" :disabled="saving || capsFailed || !activeForm" @click="save">
         {{ t('settings.tts.save') }}
       </Button>
       <Button
         v-if="testState === 'idle'"
-        size="dense"
+        class="h-[32px] px-[12px] text-[length:var(--text-sm)]"
         data-testid="tts-save-and-test"
         :disabled="saving || capsFailed || !activeForm"
         @click="saveAndTest"
@@ -127,13 +137,13 @@
       <Button
         v-else-if="testState === 'loading'"
         variant="secondary"
-        size="dense"
+        class="h-[32px] px-[12px] text-[length:var(--text-sm)]"
         data-testid="tts-test-loading"
         @click="player.stop()"
       >
         {{ t('settings.tts.testing') }}
       </Button>
-      <Button v-else variant="secondary" size="dense" data-testid="tts-test-stop" @click="player.stop()">
+      <Button v-else variant="secondary" class="h-[32px] px-[12px] text-[length:var(--text-sm)]" data-testid="tts-test-stop" @click="player.stop()">
         {{ t('settings.tts.stopTest') }}
       </Button>
     </div>
@@ -145,13 +155,13 @@ import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { AlertTriangle } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
-import { Label } from '@/components/ui/label'
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { GroupCard } from '@taiji/ui/features/settings'
 import { tts } from '@/api'
 import { useToast } from '@/composables/useToast'
 import { SETTINGS_TTS_TEST_MESSAGE_ID, useTtsPlayer } from '@/composables/features/chat/useTtsPlayer'
+import SettingRow from '../SettingRow.vue'
 import TtsProviderForm from './TtsProviderForm.vue'
 import { buildConfig, emptyFormState, formStateFromConfig, type TtsProviderFormState } from './tts-form-model'
 import { useTtsSpeechEnabled } from './use-tts-enabled'

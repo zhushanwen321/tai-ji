@@ -644,7 +644,7 @@ describe('useComposerKeydown', () => {
       const emptyRow = document.body.querySelector('[data-testid="cmd-popover-empty"]')
       expect(emptyRow).not.toBeNull()
       expect(emptyRow!.textContent).toContain('无匹配项')
-      expect(document.body.querySelectorAll('.cmd-row')).toHaveLength(0) // 确无候选（自检）
+      expect(document.body.querySelectorAll('.pop-item')).toHaveLength(0) // 确无候选（自检）
 
       const e = dispatchEnter()
 
@@ -680,7 +680,7 @@ describe('useComposerKeydown', () => {
       const row = document.body.querySelector('[data-testid="cmd-popover-empty"]')
       expect(row).not.toBeNull()
       expect(row!.textContent).toContain('无匹配项')
-      expect(document.body.querySelectorAll('.cmd-row')).toHaveLength(0)
+      expect(document.body.querySelectorAll('.pop-item')).toHaveLength(0)
       expect(document.body.querySelector('[data-testid="cmd-popover-loading"]')).toBeNull()
 
       const enter = new KeyboardEvent('keydown', { key: 'Enter', cancelable: true })
@@ -725,12 +725,12 @@ describe('useComposerKeydown', () => {
       await popoverWrapper.setProps({ open: true })
       await flushPromises()
       await nextTick()
-      expect(document.body.querySelectorAll('.cmd-row')).toHaveLength(1) // 造态自检：候选已到位
+      expect(document.body.querySelectorAll('.pop-item')).toHaveLength(1) // 造态自检：候选已到位
 
       await popoverWrapper.setProps({ query: 'zzz' })
       await nextTick()
 
-      expect(document.body.querySelectorAll('.cmd-row')).toHaveLength(0)
+      expect(document.body.querySelectorAll('.pop-item')).toHaveLength(0)
       const row = document.body.querySelector('[data-testid="cmd-popover-empty"]')
       expect(row).not.toBeNull()
       expect(row!.textContent).toContain('无匹配项')
@@ -793,7 +793,7 @@ describe('useComposerKeydown', () => {
         setupChain(true)
         await flushPromises()
         await nextTick()
-        expect(document.body.querySelectorAll('.cmd-row').length).toBeGreaterThan(0) // 造态自检：候选非空
+        expect(document.body.querySelectorAll('.pop-item').length).toBeGreaterThan(0) // 造态自检：候选非空
 
         const bubbleSpy = vi.fn()
         target.addEventListener('keydown', bubbleSpy) // 注册在 composer 分发器之后：不截断则必被调用
@@ -812,7 +812,7 @@ describe('useComposerKeydown', () => {
       setupChain(true, { query: 'zzz' })
       await flushPromises()
       await nextTick()
-      expect(document.body.querySelectorAll('.cmd-row')).toHaveLength(0) // 造态自检：确为空候选
+      expect(document.body.querySelectorAll('.pop-item')).toHaveLength(0) // 造态自检：确为空候选
 
       const bubbleSpy = vi.fn()
       target.addEventListener('keydown', bubbleSpy)

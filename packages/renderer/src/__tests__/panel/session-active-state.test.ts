@@ -96,8 +96,10 @@ describe('E1: 提交后空窗期 pending 态（核心 bug 回归）', () => {
     // pending → 左侧 hollow icon（accent 空心圆）
     const icon = wrapper.find('[data-testid="session-icon"]')
     expect(icon.exists()).toBe(true)
-    expect(icon.find('.border-accent').exists()).toBe(true)
-    expect(icon.find('.animate-spin').exists()).toBe(false)
+    // pending → hollow icon 本体持 accent 空心圆（2026-10-11 状态点右移后 session-icon
+    // 即状态元素本体，非包裹容器）
+    expect(icon.classes()).toContain('border-accent')
+    expect(icon.classes()).not.toContain('animate-spin')
 
     // 清理 pendingSend timer 避免 leak
     chat.clearPendingSend('s1')
@@ -133,8 +135,10 @@ describe('E2: 非焦点 session 提交后 pending 态（activeId 限定已移除
     })
     const icon = wrapper.find('[data-testid="session-icon"]')
     expect(icon.exists()).toBe(true)
-    expect(icon.find('.border-accent').exists()).toBe(true)
-    expect(icon.find('.animate-spin').exists()).toBe(false)
+    // pending → hollow icon 本体持 accent 空心圆（2026-10-11 状态点右移后 session-icon
+    // 即状态元素本体，非包裹容器）
+    expect(icon.classes()).toContain('border-accent')
+    expect(icon.classes()).not.toContain('animate-spin')
 
     chat.clearPendingSend('B')
   })

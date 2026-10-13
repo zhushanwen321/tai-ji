@@ -65,11 +65,24 @@ const OVERRIDE_TAIL_WINDOW_BYTES = OVERRIDE_TAIL_WINDOW_KB * BYTES_PER_KB
  */
 const RUN_ID_PATTERN = /^[\w-]{1,128}$/
 
+/**
+ * session 定位锚透传形态（调用方已持有 session meta 时随查询传入——跳过查询内的
+ * scanSessions({ force: true }) 全目录扫描；N 条详情载荷组装场景每帧只解析一次）。
+ * 字段语义与 resolveSessionMeta 返回值同形：cwd 定位 record 域 recordsDir，
+ * filePath 定位 run 域 workflow-state；字段缺席/undefined 由各查询方法按定位失败
+ * 降级 undefined（与 scanSessions 无命中同判）。
+ */
+export interface SessionMetaRef {
+  cwd?: string
+  filePath?: string
+}
+
 /** modelOverrideQuery 窄口（session-records deps / workflow-record-projection 入参同形；
- *  覆盖状态查询的唯一入口——切换网关不承载查询，M1-3 收敛）。 */
+ *  覆盖状态查询的唯一入口——切换网关不承载查询，M1-3 收敛）。resolved 为 additive
+ *  可选参：传入 = 复用调用方已解析的 session 定位锚，缺省 = 查询内自扫（现行为）。 */
 export interface ModelOverrideQuery {
-  getRecordOverride(sessionId: string, recordId: string): SubagentModelOverrideStatus | undefined
-  getRunOverride(sessionId: string, runId: string): SubagentModelOverrideStatus | undefined
+  getRecordOverride(sessionId: string, recordId: string, resolved?: SessionMetaRef): SubagentModelOverrideStatus | undefined
+  getRunOverride(sessionId: string, runId: string, resolved?: SessionMetaRef): SubagentModelOverrideStatus | undefined
 }
 
 export interface ModelOverrideQueryDeps { // oe-exempt:20261006:framework:查询工厂依赖注入面（SessionService 装配注入，单实现常态）
@@ -144,8 +157,8 @@ function resolveSessionMeta(
  */
 export function createModelOverrideQuery(deps: ModelOverrideQueryDeps): ModelOverrideQuery {
   return {
-    getRecordOverride(sessionId, recordId) {
-      const { cwd } = resolveSessionMeta(deps.sessionStore, sessionId)
+    getRecordOverride(sessionId, recordId, resolved) {
+      const { cwd } = resolved ?? resolveSessionMeta(deps.sessionStore, sessionId)
       if (typeof cwd !== 'string') return undefined
       let filePath: string
       try {
@@ -166,8 +179,8 @@ export function createModelOverrideQuery(deps: ModelOverrideQueryDeps): ModelOve
       return toOverrideStatus(frame.ref, frame.thinkingLevel)
     },
 
-    getRunOverride(sessionId, runId) {
-      const { filePath } = resolveSessionMeta(deps.sessionStore, sessionId)
+    getRunOverride(sessionId, runId, resolved) {
+      const { filePath } = resolved ?? resolveSessionMeta(deps.sessionStore, sessionId)
       if (typeof filePath !== 'string') return undefined
       // 非法 runId：warn 留痕后按无覆盖降级（对齐 record id rejected 先例）；
       // wire 入口侧的输入校验归 gateway TARGET_ID_PATTERN，本处为路径直拼前的

@@ -23,9 +23,9 @@
  * - 路径穿越防护：非法 sessionId 向上抛（IPC 壳层兜底降级，不落盘）
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, dirname } from 'node:path'
 import { getImageCacheDir, getImageCacheRoot } from '@taiji/shared/paths'
 import {
   deleteSessionImageCache,
@@ -63,6 +63,8 @@ const OTHER_FILE = `${OTHER_TS}_${OTHER_UUID}.jsonl`
 const ORPHAN_TS = '2026-09-03T15-00-00-000Z'
 const ORPHAN_UUID = '01a0679f-03e7-715c-a291-a7378a6460e1'
 const ORPHAN_FILE = `${ORPHAN_TS}_${ORPHAN_UUID}.jsonl`
+/** 生产两层布局的 encodeCwd 层（pi 按 cwd 自动分子目录，shared paths.ts 目录树注释）。 */
+const ENCODED_CWD = '--Users-demo-project'
 
 let root: string
 let sessionsDir: string
@@ -176,11 +178,15 @@ describe('新→旧有序落盘、超帽即停（注入小帽）', () => {
 
 describe('孤儿扫描（启动清扫通道②）', () => {
   it('mtime 超 30 天 + sessions 无对应文件 → 判死删目录；活 session / 新鲜孤儿保留', () => {
-    // 活 session：sessions 目录有生产同构 `<ts>_<uuid>.jsonl` 主文件 + sidecar
-    writeFileSync(join(sessionsDir, ALIVE_FILE), '{}\n')
-    writeFileSync(join(sessionsDir, ALIVE_SIDECAR), '{}\n')
+    // 活 session：生产同构两层嵌套 `sessions/<encodeCwd>/<ts>_<uuid>.jsonl` 主文件 + sidecar；
+    // cache 目录做旧 40 天——「保留」断言必须真正走过孤儿判据路径（新鲜 mtime 防线不构成证明）
+    const aliveDir = join(sessionsDir, ENCODED_CWD)
+    mkdirSync(aliveDir, { recursive: true })
+    writeFileSync(join(aliveDir, ALIVE_FILE), '{}\n')
+    writeFileSync(join(aliveDir, ALIVE_SIDECAR), '{}\n')
     mkdirSync(cacheDirOf(ALIVE_UUID), { recursive: true })
     writeFileSync(join(cacheDirOf(ALIVE_UUID), 'a.png'), 'x')
+    utimesSync(cacheDirOf(ALIVE_UUID), epochSecondsAgo(40), epochSecondsAgo(40))
     // 死 session：sessions 无对应文件 + 目录 mtime 40 天前
     mkdirSync(cacheDirOf('dead-old'), { recursive: true })
     writeFileSync(join(cacheDirOf('dead-old'), 'b.png'), 'x')
@@ -201,7 +207,8 @@ describe('孤儿扫描（启动清扫通道②）', () => {
   it('判据按文件名末段 `_` 后 uuid 段比对（U2）：目录名为 <ts>_<uuid> 旧错误派生形态时仍判死', () => {
     // sessions 有 ALIVE_FILE；cache 目录名若是整段 <ts>_<uuid>（旧「剥 .jsonl 全名」派生
     // 形态），按 uuid 段比对不命中 → 判死删。证明判据不是文件名前缀 startsWith。
-    writeFileSync(join(sessionsDir, ALIVE_FILE), '{}\n')
+    mkdirSync(join(sessionsDir, ENCODED_CWD), { recursive: true })
+    writeFileSync(join(sessionsDir, ENCODED_CWD, ALIVE_FILE), '{}\n')
     const legacyDerivedName = `${ALIVE_TS}_${ALIVE_UUID}`
     mkdirSync(cacheDirOf(legacyDerivedName), { recursive: true })
     writeFileSync(join(cacheDirOf(legacyDerivedName), 'b.png'), 'x')
@@ -212,11 +219,42 @@ describe('孤儿扫描（启动清扫通道②）', () => {
     expect(existsSync(cacheDirOf(legacyDerivedName))).toBe(false)
   })
 
+  it('解析失配保守匹配：真 sid 含 `_` 时按「首个 `_` 后全串」命中即保护', () => {
+    // cache 目录名 `abc_def-uuid`（含 `_`）：末段解析得 `def-uuid` 不等；失配通道按
+    // 「首个 `_` 后全串」= `abc_def-uuid` 相等 → 保守保护不清
+    const underscoreSid = 'abc_def-0199-2'
+    mkdirSync(join(sessionsDir, ENCODED_CWD), { recursive: true })
+    writeFileSync(join(sessionsDir, ENCODED_CWD, `${OTHER_TS}_${underscoreSid}.jsonl`), '{}\n')
+    mkdirSync(cacheDirOf(underscoreSid), { recursive: true })
+    writeFileSync(join(cacheDirOf(underscoreSid), 'd.png'), 'x')
+    utimesSync(cacheDirOf(underscoreSid), epochSecondsAgo(40), epochSecondsAgo(40))
+
+    const result = scanOrphanImageCaches({ dataDir: root, sessionsDir })
+    expect(result.removed).not.toContain(underscoreSid)
+    expect(existsSync(cacheDirOf(underscoreSid))).toBe(true)
+  })
+
   it('sessions 目录整体不存在 → 孤儿判据放行不了（判据不可用时不误删）', () => {
     mkdirSync(cacheDirOf('no-sessions-dir'), { recursive: true })
     const missing = join(root, 'sessions-missing')
     const result = scanOrphanImageCaches({ dataDir: root, sessionsDir: missing })
     expect(result.removed).not.toContain('no-sessions-dir')
+  })
+
+  it('sessions 条目探测失败（非 ENOENT，如 EACCES）→ 保守放行不判死（与 readdir 失败同口径）', () => {
+    // sessions 目录保持可读（顶层 readdir 成功）但去 x 位 → 条目 statSync EACCES：
+    // 条目状态未知不得当「无保护证据」判死删缓存，必须按「可能存在会话文件」保守放行
+    mkdirSync(cacheDirOf('stat-eacces-protected'), { recursive: true })
+    writeFileSync(join(cacheDirOf('stat-eacces-protected'), 'f.png'), 'x')
+    utimesSync(cacheDirOf('stat-eacces-protected'), epochSecondsAgo(40), epochSecondsAgo(40))
+    chmodSync(sessionsDir, 0o444)
+    try {
+      const result = scanOrphanImageCaches({ dataDir: root, sessionsDir })
+      expect(result.removed).not.toContain('stat-eacces-protected')
+      expect(existsSync(cacheDirOf('stat-eacces-protected'))).toBe(true)
+    } finally {
+      chmodSync(sessionsDir, 0o755)
+    }
   })
 })
 
@@ -224,10 +262,10 @@ describe('缺省 sessionsDir 推导 = <dataDir>/agent/sessions（U1，方案 B �
   it('不传 sessionsDir：走 <dataDir>/agent/sessions 真实层级；pi/sessions 旧布局诱饵不得误活', () => {
     const dd = mkdtempSync(join(tmpdir(), 'taiji-image-cache-dd-'))
     try {
-      // 真实层级（方案 B：agent 直下）：含一个无关 session 文件（目录可列举、孤儿目标 id 不在其中）
+      // 真实层级（方案 B：agent 直下，生产两层嵌套）：含一个无关 session 文件（目录可列举、孤儿目标 id 不在其中）
       const realSessions = join(dd, 'agent', 'sessions')
-      mkdirSync(realSessions, { recursive: true })
-      writeFileSync(join(realSessions, OTHER_FILE), '{}\n')
+      mkdirSync(join(realSessions, ENCODED_CWD), { recursive: true })
+      writeFileSync(join(realSessions, ENCODED_CWD, OTHER_FILE), '{}\n')
       // 旧布局诱饵（U1 锁向，dev-0.9.17 布局改版后反转）：孤儿目标的同构文件名放在
       // pi/sessions——推导若错查旧层会误判活而不删，removed 断言即红
       const baitDir = join(dd, 'pi', 'sessions')
@@ -256,7 +294,8 @@ describe('全局软上限 512MB（只清孤儿判死目录，mtime 老→新）'
   it('超帽：孤儿老目录先清、孤儿新目录次之、活 session 目录豁免；回落帽下即停', () => {
     // 独立 dataDir（capRoot）隔离：三个 session 各 600B——orphan-old（40 天）、
     // orphan-mid（10 天）、活 session（40 天，生产同构文件名 fixture）
-    writeFileSync(join(capSessionsDir, CAP_FILE), '{}\n')
+    mkdirSync(join(capSessionsDir, ENCODED_CWD), { recursive: true })
+    writeFileSync(join(capSessionsDir, ENCODED_CWD, CAP_FILE), '{}\n')
     for (const [sid, ageDays] of [['orphan-old', 40], ['orphan-mid', 10], [CAP_UUID, 40]] as const) {
       mkdirSync(capCacheDirOf(sid), { recursive: true })
       writeFileSync(join(capCacheDirOf(sid), 'img.png'), 'x'.repeat(600))
@@ -290,7 +329,8 @@ describe('session 删除级联（通道①）', () => {
   it('端到端（U3）：构造 <ts>_<uuid>.jsonl 文件名 → 派生 uuid → 删除后 cache 目录消失', () => {
     // runtime 删除链同构编排：session 文件（生产同构名）→ sessionIdFromSessionFilePath
     // 派生 → deleteSessionImageCache 命中 renderer 写入的 cache 目录（目录名 = 纯 uuid）
-    const filePath = join(sessionsDir, ALIVE_FILE)
+    const filePath = join(sessionsDir, ENCODED_CWD, ALIVE_FILE)
+    mkdirSync(dirname(filePath), { recursive: true })
     writeFileSync(filePath, '{}\n')
     const derived = sessionIdFromSessionFilePath(filePath)
     expect(derived).toBe(ALIVE_UUID) // 纯 uuid 段（= header id），非 <ts>_<uuid> 全名

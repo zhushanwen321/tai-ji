@@ -14,6 +14,7 @@ import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import SessionItem from '@/components/sidebar/SessionItem.vue'
 import { useChatStore } from '@/stores/chat'
+import { markUnread, clearUnread } from '@/composables/useSessionMarkers'
 import { DOT_CLASS, deriveStatus, STATUS_ICON } from '@/composables/logic/sessionStatus'
 import type { DerivedStatus } from '@/types'
 
@@ -97,10 +98,11 @@ describe('session status icons extended states', () => {
         status: 'streaming',
       },
     })
-    // streaming → 左侧 spinning icon（旋转箭头）
+    // streaming → 右槽 spinning icon（旋转箭头；2026-10-11 裁决状态点右移，session-icon
+    // 本体即状态元素）
     const icon = wrapper.find('[data-testid="session-icon"]')
     expect(icon.exists()).toBe(true)
-    expect(icon.find('.animate-spin').exists()).toBe(true)
+    expect(icon.classes()).toContain('animate-spin')
   })
 
   it('waiting 状态 SessionItem 渲染 waiting … badge', () => {
@@ -113,7 +115,7 @@ describe('session status icons extended states', () => {
     })
     const icon = wrapper.find('[data-testid="session-icon"]')
     expect(icon.exists()).toBe(true)
-    expect(icon.find('.bg-warn').exists()).toBe(true)
+    expect(icon.classes()).toContain('bg-warn')
   })
 
   it('error 状态 SessionItem 渲染 ! 胶囊 badge（danger，需用户介入）', () => {
@@ -127,7 +129,7 @@ describe('session status icons extended states', () => {
     // error → danger 实心圆 icon
     const icon = wrapper.find('[data-testid="session-icon"]')
     expect(icon.exists()).toBe(true)
-    expect(icon.find('.bg-danger').exists()).toBe(true)
+    expect(icon.classes()).toContain('bg-danger')
   })
 
   it('done / stopped 状态 SessionItem 无 badge（仅耗时文字）', () => {
@@ -157,11 +159,33 @@ describe('session status icons extended states', () => {
         status: 'dead',
       },
     })
-    // dead → 左侧 neutral-dim 实心圆 50%，整行 opacity-50
+    // dead → 右槽 neutral-dim 实心圆 50%，整行 opacity-50
     const icon = wrapper.find('[data-testid="session-icon"]')
     expect(icon.exists()).toBe(true)
-    expect(icon.find('.bg-neutral-dim').exists()).toBe(true)
-    expect(icon.find('.opacity-50').exists()).toBe(true)
+    expect(icon.classes()).toContain('bg-neutral-dim')
+    expect(icon.classes()).toContain('opacity-50')
     expect(wrapper.find('.session-item').classes()).toContain('opacity-50')
+  })
+
+  it('未读替换式：unread 时左侧渲染单一 accent 实心点，状态 icon 被替换不叠加', () => {
+    markUnread('1')
+    try {
+      const wrapper = mount(SessionItem, {
+        props: {
+          session: { id: '1', label: 'x', cwd: '/a', lastActiveAt: 0, status: 'active' },
+          active: false,
+          status: 'done',
+        },
+      })
+      // 用户可见 DOM：未读点本体 = accent 实心圆（unread 时 session-icon testid 被
+      // session-unread-dot 替换持有——单一 icon 范式，替换而非叠加）
+      const dot = wrapper.find('[data-testid="session-unread-dot"]')
+      expect(dot.exists()).toBe(true)
+      expect(dot.classes()).toContain('bg-accent')
+      // done 的 success 点不再渲染（叠加式两点同尺寸 7px 盖不全，左下会露出底层点月牙边）
+      expect(wrapper.find('[data-testid="session-icon"].bg-success').exists()).toBe(false)
+    } finally {
+      clearUnread('1')
+    }
   })
 })

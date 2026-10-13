@@ -8,11 +8,11 @@
  * POPOVER_LIST_ITEM_ACTIVE_CLASS 已在 styles.ts，零新增样式常量，CT-5）。
  *
  * 统一 DirSelectPopover（workspace 项）与 BranchSelectPopover（branch 项）逐字相同的
- * Button markup：基础类 + hover 高亮 + 选中高亮（surface-2 + accent ring）+ 选中态 Check。
+ * Button markup：基础类 + hover 高亮 + 选中高亮（surface-2 底 + 中性 border-strong 内嵌描边）+ 选中态 Check。
  *
  * 两种高亮（均由调用方计算后传入）：
  * - active：键盘/鼠标导航焦点项 → surface-hover 底（isActiveItem）
- * - selected：当前已选值（当前 cwd / 当前分支）→ surface-2 + accent inset ring（Card-Active）
+ * - selected：当前已选值（当前 cwd / 当前分支）→ surface-2 底 + 中性 border-strong 内嵌描边（Card-Active）
  *
  * slot default = label 区（cwd 双行 / branch + dirty subline），自外层定义；
  * 命中 selected 时尾部渲染 Check（accent 色）。
@@ -30,7 +30,7 @@ const props = withDefaults(
   defineProps<{
     /** 是否为键盘/鼠标导航焦点项（hover 底色高亮） */
     active?: boolean
-    /** 是否为当前已选值（Card-Active：surface-2 + accent ring + 尾部 Check） */
+    /** 是否为当前已选值（Card-Active：surface-2 底 + 中性 border-strong 内嵌描边 + 尾部 Check） */
     selected?: boolean
     /** 测试锚点（data-testid） */
     testId?: string
@@ -66,7 +66,7 @@ const emit = defineEmits<{
     <slot />
     <Check
       v-if="props.selected"
-      class="size-4 shrink-0 text-accent"
+      class="shrink-0 text-accent"
     />
   </Button>
 </template>

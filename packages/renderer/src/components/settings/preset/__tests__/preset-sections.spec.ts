@@ -101,8 +101,8 @@ describe('PresetListSection（列表卡片 + 展开态 + 摘要 + 操作按钮�
     // 两个预设名称都渲染
     expect(text).toContain('内置完整')
     expect(text).toContain('我的预设')
-    // 内置徽章只出现在内置卡；默认徽章只出现在默认卡（defaultPresetId=custom:1）
-    expect(wrapper.findAll('.bg-surface').some((el) => el.text() === '内置')).toBe(true)
+    // 内置徽章只出现在内置卡（w1 复刻：demo .tag.warn = bg-warn-soft）；默认徽章只出现在默认卡（defaultPresetId=custom:1）
+    expect(wrapper.findAll('.bg-warn-soft').some((el) => el.text() === '内置')).toBe(true)
     expect(wrapper.findAll('.bg-accent-soft').some((el) => el.text() === '默认')).toBe(true)
   })
 

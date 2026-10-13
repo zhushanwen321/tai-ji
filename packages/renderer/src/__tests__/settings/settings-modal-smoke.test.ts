@@ -51,6 +51,7 @@ import { settingsModalApiModule } from '../helpers/settings-modal-api-mock'
 import { inMemoryStorage } from '../helpers/platform-storage-stub'
 import SettingsModal from '@/components/settings/SettingsModal.vue'
 import SettingsResourcePage from '@/components/settings/resource/SettingsResourcePage.vue'
+import ProviderPage from '@/components/settings/provider/ProviderPage.vue'
 import { makeQuotaModuleStub } from '@taiji/core/testing'
 import type { SkillDirConfig } from '@taiji/shared'
 import { useToast } from '@/composables/useToast'
@@ -110,7 +111,7 @@ describe('SettingsModal 首屏冒烟（AC12 渲染 gate）', () => {
 })
 
 describe('SettingsModal 懒加载挂载即 open 的 open 语义（W31 review major-1 回归防护）', () => {
-  it('挂载即 open=true：refreshProviders 被调用 + 首个 nav 项获得焦点', async () => {
+  it('挂载即 open=true：refreshProviders 被调用 + 焦点落点 = 顶栏关闭钮（demo settings spec §3.1）', async () => {
     provideMockPlatform()
     // refreshProviders → getSettingsTransport().listProviders()（模块级单例）→ spy 在此
     const listProvidersSpy = vi.fn(async () => ({ providers: [] }))
@@ -123,10 +124,51 @@ describe('SettingsModal 懒加载挂载即 open 的 open 语义（W31 review maj
 
     // ① open 语义：providers 快照刷新被触发（settings-lifecycle「打开 modal 时刷新」契约）
     expect(listProvidersSpy).toHaveBeenCalledTimes(1)
-    // ② 焦点语义：nextTick 后首个 nav 项（provider）获得焦点（键盘可达性）
-    const firstNav = document.body.querySelector<HTMLElement>('[data-testid="settings-nav-provider"]')
-    expect(firstNav).not.toBeNull()
-    expect(document.activeElement).toBe(firstNav)
+    // ② 焦点语义：nextTick 后焦点落在顶栏关闭钮（demo 锚定行为；Tab 不会游走到被遮住的背景控件）
+    const closeBtn = document.body.querySelector<HTMLElement>('[data-testid="settings-close-btn"]')
+    expect(closeBtn).not.toBeNull()
+    expect(document.activeElement).toBe(closeBtn)
+  })
+})
+
+describe('SettingsModal 分区切换 v-show 常挂载语义（demo settings spec §2/§3.3 裁决 6A）', () => {
+  /** 点击 nav 分区项（DOM 级 click，与真机同路径） */
+  async function clickNav(testid: string): Promise<void> {
+    const btn = document.body.querySelector<HTMLElement>(`[data-testid="settings-nav-${testid}"]`)
+    expect(btn).toBeTruthy()
+    btn!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await flushPromises()
+  }
+
+  it('切走再切回：ProviderPage 组件实例保留（v-show 常挂载非销毁重建，已填表单态不丢）', async () => {
+    provideMockPlatform()
+    provideSettingsTransport(makeSettingsTransportStub())
+
+    const wrapper = mountOpenModalWithSpyToasts()
+    await flushPromises()
+
+    const providerBefore = wrapper.findComponent(ProviderPage)
+    expect(providerBefore.exists()).toBe(true)
+
+    // 切到 skill：两个分区 div 都常挂载（v-show），可见态恰一个且随激活位移
+    await clickNav('skill')
+    const providerDuring = wrapper.findComponent(ProviderPage)
+    expect(providerDuring.exists()).toBe(true)
+    // 实例身份 = $.uid（内部实例 id，挂载一次生成一次；v-if 重建形态下会换新，断言即红）
+    expect(providerDuring.vm.$.uid).toBe(providerBefore.vm.$.uid)
+    const visibleDivs = (): HTMLElement[] =>
+      [...document.body.querySelectorAll<HTMLElement>('.content-col-inner .sec-fade')]
+        .filter((d) => d.style.display !== 'none')
+    expect(document.body.querySelectorAll('.content-col-inner .sec-fade').length).toBe(2)
+    expect(visibleDivs().length).toBe(1)
+
+    // 切回 provider：实例未变 + 可见态切回 provider
+    await clickNav('provider')
+    const providerAfter = wrapper.findComponent(ProviderPage)
+    expect(providerAfter.exists()).toBe(true)
+    expect(providerAfter.vm.$.uid).toBe(providerBefore.vm.$.uid)
+    expect(visibleDivs().length).toBe(1)
+    expect(providerAfter.element.closest('.sec-fade.on')).not.toBeNull()
   })
 })
 

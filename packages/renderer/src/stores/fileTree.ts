@@ -133,7 +133,7 @@ interface LineStats { // oe-exempt:20261003:framework:类型契约先行——�
 /**
  * [W28/D-7.2] 可见行数据结构（09 文档 §3.3.2 定案 + 审查修正）。
  * 供 virtua 虚拟滚动消费的扁平行——树仍是 SSOT，本行是渲染投影：
- * depth/expanded/changeCount/gitStatus/lineStats 全部在投影时预计算，
+ * depth/expanded/childCount/gitStatus/lineStats 全部在投影时预计算，
  * 替代旧递归 FileTreeRow 的 per-row computed（旧实现每行 12 个 computed）。
  *
  * hint 字段为审查修正扩展（09 文档草案未建模，代码现实要求保留）：
@@ -151,8 +151,8 @@ export interface VisibleRow { // oe-exempt:20261003:framework:类型契约先行
   depth: number
   /** 目录是否展开（从 expandedPaths 投影） */
   expanded: boolean
-  /** 目录子树改动数（从预聚合 Map 投影，替代 per-row computed） */
-  changeCount: number
+  /** 目录可见直接子项数（投影时按 showIgnored 过滤计数；未加载 children / 文件行恒 0） */
+  childCount: number
   /** 文件角标（从 gitOverlay 投影） */
   gitStatus?: GitFileStatus
   /** 行数 +N −M（投影时算好） */
@@ -195,7 +195,7 @@ export function visibleRowKey(row: VisibleRow): string {
  *
  * E7-a 更新策略：调用方（FileView）用 computed 包裹，依赖分桶后的细粒度 getter——
  * 展开/折叠/过滤/overlay 变化各触发一次全量重投影（O(可见行)，懒加载下是「已加载」子集）。
- * [W28 审查 Fix-2] gitOverlay/dirChangeCounts 同样走 per-session getter 传参（与 getExpanded
+ * [W28 审查 Fix-2] gitOverlay 走 per-session getter 传参（与 getExpanded
  * 同款分桶）：computed 只追踪本 sid 分桶 key，异 sid overlay 回写（split mode 多面板
  * git.status）不触发本 sid 重投影——依赖 store 侧 setGitOverlay/rebuildDirChangeCounts
  * 用响应式 Map 的 keyed set（不再整体替换外层 ref）。
@@ -203,7 +203,6 @@ export function visibleRowKey(row: VisibleRow): string {
  * @param getTree 取 session 树（computed 内读 store.getTree 触发响应式）
  * @param getExpanded 取 session 展开态 Set
  * @param getGitOverlay 取 session overlay 分桶（无则 undefined；与 getExpanded 同款细粒度分桶）
- * @param getDirChangeCounts 取 session 预聚合分桶（同 getGitOverlay）
  * @param filterText 过滤关键词（原始输入，内部 trim/lower）
  * @param showIgnored 是否显示忽略项
  * @param sid 目标 session
@@ -213,7 +212,6 @@ export function projectVisibleRows(
   getTree: (sid: string) => FileNode[] | undefined,
   getExpanded: (sid: string) => Set<string>,
   getGitOverlay: (sid: string) => Map<string, GitFileStatus> | undefined,
-  getDirChangeCounts: (sid: string) => Map<string, number> | undefined,
   filterText: string,
   showIgnored: boolean,
   sid: string,
@@ -225,7 +223,6 @@ export function projectVisibleRows(
   const q = filterText.trim().toLowerCase()
   const expanded = getExpanded(sid)
   const overlay = getGitOverlay(sid)
-  const counts = getDirChangeCounts(sid)
 
   const rows: VisibleRow[] = []
 
@@ -241,6 +238,12 @@ export function projectVisibleRows(
     return undefined
   }
 
+  /** 目录可见直接子项（showIgnored 过滤同口径——徽标计数与展开子层共用单一实现） */
+  function visibleChildrenOf(node: FileNode): FileNode[] {
+    if (node.type !== 'dir' || !node.children) return []
+    return showIgnored ? node.children : node.children.filter((c) => !c.ignored)
+  }
+
   function makeRow(node: FileNode, depth: number): VisibleRow {
     return {
       path: node.path,
@@ -248,7 +251,7 @@ export function projectVisibleRows(
       type: node.type,
       depth,
       expanded: node.type === 'dir' && expanded.has(node.path),
-      changeCount: node.type === 'dir' ? (counts?.get(node.path) ?? 0) : 0,
+      childCount: visibleChildrenOf(node).length,
       gitStatus: overlay?.get(node.path),
       lineStats: lineStatsOf(node),
       ignored: node.ignored ?? false,
@@ -272,7 +275,7 @@ export function projectVisibleRows(
       type: 'dir',
       depth,
       expanded: true,
-      changeCount: 0,
+      childCount: 0,
       ignored: false,
       hint,
     }
@@ -293,9 +296,7 @@ export function projectVisibleRows(
         continue
       }
       if (node.children) {
-        const visibleChildren = showIgnored
-          ? node.children
-          : node.children.filter((c) => !c.ignored)
+        const visibleChildren = visibleChildrenOf(node)
         if (visibleChildren.length === 0) {
           rows.push(makeHint('empty', node.path, depth + 1))
           continue
@@ -326,6 +327,8 @@ export const useFileTreeStore = defineStore('fileTree', () => {
    * [W15/D-7.1] 目录改动数预聚合：sessionId → dirPath → count。
    * 随 setGitOverlay 一次 O(n) 构建（n=改动文件数），行级读取 O(1)——
    * 消除旧 getDirChangeCount 的 per-directory-row O(n) 前缀扫描（D 个目录行 × N 个改动文件 = O(D×N)）。
+   * [2026-10-10 徽标退役] 目录徽标已按 demo 改向改显可见子项数（VisibleRow.childCount），
+   * 本预聚合机制暂无 UI 消费方（机制去留待登记裁决）。
    */
   const dirChangeCounts: Ref<Map<string, Map<string, number>>> = ref(new Map())
   /** 显示忽略项开关（D-020，默认 false） */

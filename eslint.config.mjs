@@ -92,6 +92,19 @@ export default [
       'max-lines': 'off',
     },
   },
+  // chat 展示三件（Turn 轮次聚合 / Block 块渲染 / MarkdownRenderer 分通道净化渲染）：
+  // 职责内聚（轮次聚合、块类型分发、markdown 渲染管线各自唯一实现），行数超 500，
+  // 拆分属独立重构任务（文件头注释已登记）。短期 max-lines override 避免阻塞，长期应拆分。
+  {
+    files: [
+      'packages/ui/src/features/chat/Turn.vue',
+      'packages/ui/src/features/chat/Block.vue',
+      'packages/ui/src/features/chat/MarkdownRenderer.vue',
+    ],
+    rules: {
+      'max-lines': 'off',
+    },
+  },
   // [HISTORICAL] runtime 的 .cjs 文件（plugin-esm-loader.cjs 等）是 Node CJS 模块，
   // require() 是唯一导入方式——no-require-imports 规则对 .cjs 是误报（2026-08-05 添加，
   // sandbox ESM loader 落地时确认：tsup entry 直接打包 .cjs 源文件，无 TS 转换层）。
@@ -116,6 +129,11 @@ export default [
       // 机制入列时统计行越过 500）。职责内聚，拆分 = stream 回调按帧族重组，属独立
       // 重构任务。短期 max-lines override 避免阻塞，长期应拆分。
       'packages/core/src/domain/chat/useChat.ts',
+      // zcode provider 启动同步模块聚合点（engine-provider-unification 单元 1：映射纯
+      // 函数 + zai 关联特例 + 让位四源 + 编排落盘 + settings 清单派生 + zcode 侧文件读取，
+      // 设计文档指定单文件）。职责内聚（同一同步链的生成侧全量实装），拆分 = 按 zcode
+      // 读侧 / 纯映射 / 编排三段重组，属独立重构任务。短期 override 避免阻塞，长期应拆分。
+      'packages/runtime/src/services/zcode-provider-sync.ts',
     ],
     rules: {
       'max-lines': 'off',

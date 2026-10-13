@@ -17,39 +17,41 @@
         type="text"
         :placeholder="t('settings.tts.pronunciationFromPlaceholder')"
         :disabled="disabled"
-        class="h-8 flex-1 text-[12px]"
+        class="flex-1"
       />
-      <span class="text-[12px] text-neutral-dim" aria-hidden="true">&rarr;</span>
+      <span class="text-[length:var(--text-sm)] text-neutral-mid" aria-hidden="true">&rarr;</span>
       <Input
         v-model="modelValue[i]!.to"
         :data-testid="`tts-pronunciation-to-${i}`"
         type="text"
         :placeholder="t('settings.tts.pronunciationToPlaceholder')"
         :disabled="disabled"
-        class="h-8 flex-1 text-[12px]"
+        class="flex-1"
       />
+      <!-- 删除钮 = demo .btn.icon（28px 方钮 / mid / hover 提亮） -->
       <Button
         variant="ghost"
         size="icon"
-        class="size-7 shrink-0 text-neutral-dim hover:text-neutral-fg"
+        class="h-[28px] w-[28px] shrink-0 text-neutral-mid hover:text-neutral-fg [&_svg]:size-[14px]"
         :data-testid="`tts-pronunciation-remove-${i}`"
         :title="t('settings.tts.removeRule')"
         :aria-label="t('settings.tts.removeRule')"
         :disabled="disabled"
         @click="removeRow(i)"
       >
-        <X class="size-[14px]" />
+        <X />
       </Button>
     </div>
     <div>
+      <!-- 添加钮 = demo .btn.secondary（h32 / px12 / 13px / gap 6px） -->
       <Button
         variant="secondary"
-        size="dense"
+        class="h-[32px] gap-[6px] px-[12px] text-[length:var(--text-sm)] [&_svg]:size-[14px]"
         :data-testid="`tts-pronunciation-add-${testid}`"
         :disabled="disabled"
         @click="addRow"
       >
-        <Plus class="mr-1 size-[14px]" />
+        <Plus />
         {{ t('settings.tts.addRule') }}
       </Button>
     </div>

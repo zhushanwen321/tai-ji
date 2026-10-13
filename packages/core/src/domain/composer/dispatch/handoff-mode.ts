@@ -168,6 +168,9 @@ export function useComposerHandoffMode(
     // handoff turn 在源 session 跑：isInProgress 读 deps.isHandingOff(srcSessionId)
     isInProgress: (source) => deps.isHandingOff(source.srcSessionId),
     abort: abortHandoffAction,
+    // [HISTORICAL] activeBoxClass 的整框 accent 染色串已随 staging banner 形态退役（demo 裁决：
+    // banner 图标染 accent 是模式在途的唯一染色点）——renderer/mobile-renderer 均不再消费
+    // boxClass 派生视图（现消费方仅本域派生视图测试），字段与串保留 = 派生视图契约未删，非生效样式。
     activeBoxClass:
       'handoff-mode border-[var(--accent)] shadow-[0_0_0_3px_var(--accent-ring,rgba(79,142,247,0.45))] bg-[var(--accent-soft)]',
     placeholderKey: 'panel.composer.handoffHint',

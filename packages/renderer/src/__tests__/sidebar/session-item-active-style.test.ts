@@ -1,11 +1,11 @@
 /**
- * 会话条目激活态样式测试（用户裁决 2026-10-06：对齐 demo .sess.is-active 形态）。
+ * 会话条目激活态样式测试（demo .si.on 终态：workbench.css 文件尾「选中态两级范式」Tier B——
+ * 无底无框，仅行文字提亮 fg；hover 底恒在（demo .si:hover 恒有背景，与激活态不排他））。
  *
  * 三视角（TEST-STRATEGY §3）：
- *  - 构建者白盒：active prop 驱动根节点激活类分支（bg-accent-soft + inset 竖条）
- *  - 使用者黑盒：激活条目标题文字可见且为中性色
- *  - 观察者形态：激活态 = accent 浅底（bg-accent-soft）+ 左侧 2px accent 竖条
- *    （inset shadow，不占布局）+ 标题中性色（不再 text-accent）
+ *  - 构建者白盒：active prop 驱动根节点类分支（激活无选中底/框）
+ *  - 使用者黑盒：激活条目标题文字可见且为提亮的中性色
+ *  - 观察者形态：激活态 = 无 bg-bg-elevated、无 accent 竖条/描边 + 行文字 text-neutral-fg
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/sidebar/session-item-active-style.test.ts
  */
@@ -37,16 +37,16 @@ beforeEach(() => {
   setActivePinia(createPinia())
 })
 
-describe('会话条目激活态样式（用户裁决 2026-10-06，对齐 demo .sess.is-active）', () => {
-  it('激活条目：根节点带 accent 浅底（bg-accent-soft）与左侧 2px accent 竖条（inset shadow，不占布局）', () => {
+describe('会话条目激活态样式（demo .si.on Tier B：无底无框仅文字提亮）', () => {
+  it('激活条目：根节点无选中底与竖条（行类不画选中框），保留行文字提亮', () => {
     const wrapper = mountItem(true)
     const root = wrapper.find('.session-item')
-    expect(root.classes()).toContain('bg-accent-soft')
-    expect(root.classes()).toContain('shadow-[inset_2px_0_0_var(--accent)]')
-    expect(root.classes()).not.toContain('hover:bg-surface-hover')
+    expect(root.classes()).not.toContain('bg-bg-elevated')
+    expect(root.classes()).not.toContain('shadow-[inset_2px_0_0_var(--accent)]')
+    expect(root.classes()).toContain('text-neutral-fg')
   })
 
-  it('激活条目标题文字为中性色 text-neutral-fg，不再染 accent（使用者黑盒，用户可见 DOM）', () => {
+  it('激活条目标题文字为提亮中性色 text-neutral-fg（使用者黑盒，用户可见 DOM）', () => {
     const wrapper = mountItem(true)
     const title = wrapper.findAll('span').find((s) => s.text() === 'Active Session')
     expect(title).toBeTruthy()
@@ -55,10 +55,9 @@ describe('会话条目激活态样式（用户裁决 2026-10-06，对齐 demo .s
     expect(titleRow.className).not.toContain('text-accent')
   })
 
-  it('非激活条目无 accent 浅底（hover 底生效路径不变）', () => {
+  it('非激活条目：无选中文字提亮，行根恒挂 hover 底（demo .si:hover 恒有背景）', () => {
     const wrapper = mountItem(false)
     const root = wrapper.find('.session-item')
-    expect(root.classes()).not.toContain('bg-accent-soft')
     expect(root.classes()).toContain('hover:bg-surface-hover')
   })
 })

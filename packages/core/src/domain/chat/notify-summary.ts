@@ -11,7 +11,9 @@
  * （本文件）→ NotifySummary → Turn.vue 渲染。
  */
 import {
+  COMPLETE_NOTIFY_CUSTOM_TYPES,
   deriveClosedDisplay,
+  parseBackgroundBashDetails,
   parseBgNotifyDetails,
   parseWorkflowResultNotify,
 } from '@taiji/shared'
@@ -205,4 +207,134 @@ export function deriveNotifySummary(hiddenNotifies: Message[]): NotifySummary | 
   const durationMs = aggregateNotifyDuration(records)
   if (durationMs !== undefined) summary.durationMs = durationMs
   return summary
+}
+
+// ── 完成通知收纳明细行（specs/chat/system-notices.md §3.4，bg-notice-fold-into-meta）──────
+// settle 收纳后 TurnMeta 展开区的逐条明细行数据。与 NotifySummary 同属「载荷解析聚合轴」：
+// 判据/字段读取全部收敛在解析单点（shared 三 parser + 上方 managed 解析），渲染层零解析。
+
+/** 收纳明细行的通知类型（三通道 + 托管会话第四成员） */
+export type FoldedNoticeType = 'bash' | 'subagent' | 'workflow' | 'managed'
+
+/** 一条被收纳完成通知的明细行视图（展开区一行 = 图标 → 类型词 → 摘要 → 状态 → 耗时 → id） */
+export interface FoldedNoticeRow {
+  type: FoldedNoticeType
+  /** 一行摘要（bash = 命令原文 / subagent = agent 名 / workflow = run 名 / managed = notifyId）；
+   *  解析不出语义字段的兜底 = 空串（行内摘要列留白，不冒充内容） */
+  summary: string
+  /** 悬停全文（subagent = result/error 全文；bash = 命令原文；其余回退 summary） */
+  fullText: string
+  /** 三态判定：成功 / 失败 / 中性（timeout、cancelled、判据不可得——不冒充成功） */
+  outcome: NotifyOutcome
+  /** bash 专有：exitCode（timeout 语义为 null）与 endReason——状态列显 `exit N` / 超时词 */
+  exitCode?: number | null
+  endReason?: 'natural' | 'timeout'
+  /** 耗时 ms（bash / subagent 有；workflow / managed 无时间字段 → undefined 不显） */
+  durationMs?: number
+  /** 任务身份（bash taskId / subagent record id / workflow runId / managed notifyId） */
+  id: string
+}
+
+/** 单条 background-bash 完成通知 → 明细行（解析 null 返回 null，消费侧跳过——消息另有
+ *  兜底原文行通道，本函数不负责）。outcome 判据与 SystemNotice bashNotice 同口径：
+ *  exit 0 成功 / exit N 失败 / timeout 与 exitCode 缺失中性（外部行现状不 warn，同档）。 */
+function bashNoticeRow(msg: Message): FoldedNoticeRow | null {
+  const bash = parseBackgroundBashDetails(msg.details)
+  if (!bash) return null
+  let outcome: NotifyOutcome
+  if (bash.endReason === 'timeout' || bash.exitCode === null) {
+    outcome = 'neutral'
+  } else if (bash.exitCode === 0) {
+    outcome = 'success'
+  } else {
+    outcome = 'failed'
+  }
+  return {
+    type: 'bash',
+    summary: bash.command,
+    fullText: bash.command,
+    outcome,
+    exitCode: bash.exitCode,
+    endReason: bash.endReason,
+    durationMs: bash.durationMs,
+    id: bash.taskId,
+  }
+}
+
+/** 单条 subagent-bg-notify 通知消息 → 明细行列表（单条 / batch 展开与 D5 同口径；
+ *  解析失败返回空列表）。summary 取 agent 名，result/error 全文进 fullText 悬停。 */
+function subagentNoticeRows(msg: Message): FoldedNoticeRow[] {
+  const details = parseBgNotifyDetails(msg.details)
+  if (!details) return []
+  const items = 'batch' in details ? details.items : [details]
+  return items.map((record) => ({
+    type: 'subagent' as const,
+    summary: record.agent,
+    fullText: record.result ?? record.error ?? record.agent,
+    outcome: judgeBgNotifyRecord(record),
+    durationMs:
+      record.endedAt !== undefined && record.startedAt <= record.endedAt
+        ? record.endedAt - record.startedAt
+        : undefined,
+    id: record.id,
+  }))
+}
+
+/** 单条 workflow-result 通知消息 → 明细行（解析 null 返回 null）。summary 取 run 名
+ *  （旧载荷缺失回退空串，不回退 runId——id 列已单列，摘要列不重复技术键）。 */
+function workflowNoticeRow(msg: Message): FoldedNoticeRow | null {
+  const notify = parseWorkflowResultNotify(msg.details)
+  if (!notify) return null
+  return {
+    type: 'workflow',
+    summary: notify.name ?? '',
+    fullText: notify.name ?? notify.runId,
+    outcome: notify.outcome === 'completed' ? 'success' : notify.outcome,
+    id: notify.runId,
+  }
+}
+
+/** 单条 managed-session-notify 通知消息 → 明细行（解析 null 返回 null）。 */
+function managedNoticeRow(msg: Message): FoldedNoticeRow | null {
+  const parsed = parseManagedSessionNotify(msg.details)
+  if (!parsed) return null
+  return {
+    type: 'managed',
+    summary: parsed.notifyId,
+    fullText: parsed.notifyId,
+    outcome: parsed.outcome,
+    id: parsed.notifyId,
+  }
+}
+
+/**
+ * 被收纳完成通知消息列表 → 展开明细行（specs/chat/system-notices.md §3.4）。
+ * 输入 = MessageTurn.foldedNotices（分组层按到达序附着，消息原地搬家不复制不转换）；
+ * 输出序 = 输入序（batch 形态原地展开成员序）。bash 消息解析失败时跳过（消息保持
+ * 现状外部行渲染，不产生明细行——与「外部行是临时形态、失败降级回外部」一致）。
+ * 纯函数：相同输入相同输出，无副作用。
+ */
+export function deriveFoldedNoticeRows(messages: Message[]): FoldedNoticeRow[] {
+  const rows: FoldedNoticeRow[] = []
+  for (const msg of messages) {
+    if (msg.role !== 'system') continue
+    const custom = msg.customType
+    if (custom === WORKFLOW_RESULT_CUSTOM_TYPE) {
+      const row = workflowNoticeRow(msg)
+      if (row) rows.push(row)
+      continue
+    }
+    if (custom === 'managed-session-notify') {
+      const row = managedNoticeRow(msg)
+      if (row) rows.push(row)
+      continue
+    }
+    if (custom !== undefined && COMPLETE_NOTIFY_CUSTOM_TYPES.has(custom)) {
+      rows.push(...subagentNoticeRows(msg))
+      continue
+    }
+    const row = bashNoticeRow(msg)
+    if (row) rows.push(row)
+  }
+  return rows
 }

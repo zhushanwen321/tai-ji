@@ -91,7 +91,7 @@
 
 **本次摸底的两个决定性新事实**（改变修复形态）：
 
-- **pi RPC 有能力面**：`get_available_models`（`rpc-mode.js:380-382`）返回 `{ models: Model[] }`，Model 含 `reasoning: boolean`（pi-ai `types.d.ts:667`）与 `thinkingLevelMap`（:672）；`get_available_thinking_levels`（:398-400）返回当前模型档位集。taiji runtime 的 rpc-client 从未封装调用（零命中）。renderer 的模型清单与档位可用集完全来自用户配置聚合（`provider-config-helper.ts:268-373` 聚合 models.json ∪ builtin-providers.json ∪ extras；runtime 无任何读 pi 合并清单的代码；档位由 `model-thinking.ts:144-152` 读 config 值 → `ThinkingLevelPopover.vue:101-104` 本地推算），**全程不经 pi**。
+- **pi RPC 有能力面**：`get_available_models`（`rpc-mode.js:380-382`）返回 `{ models: Model[] }`，Model 含 `reasoning: boolean`（pi-ai `types.d.ts:667`）与 `thinkingLevelMap`（:672）；`get_available_thinking_levels`（:398-400）返回当前模型档位集。taiji runtime 的 rpc-client 从未封装调用（零命中）。renderer 的模型清单与档位可用集完全来自用户配置聚合（`provider-config-helper.ts:268-373` 聚合 models.json ∪ builtin-providers.json ∪ extras；runtime 无任何读 pi 合并清单的代码；档位由 `model-thinking.ts:144-152` 读 config 值 → `ThinkingLevelPopover.vue:122-124` 本地推算），**全程不经 pi**。
 - **差分探针已有雏形**：`scripts/diff-probe-thinking.mjs` 直接 import pi-ai 的 `getSupportedThinkingLevels` 与 taiji 的 `resolveAvailableLevels` 逐模型比对——证明 runtime 侧可以零复制地复用 pi-ai 同源函数；但该脚本无任何自动调用方（不在 package.json scripts、CI、hook）。
 
 ### 2.3 同构性论证：四条判据逐条命中

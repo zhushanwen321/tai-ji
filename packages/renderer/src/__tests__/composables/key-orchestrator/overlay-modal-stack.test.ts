@@ -1,7 +1,6 @@
 /**
  * 编排器单测族 · 浮层 × 模态叠开组合的 Tab 属主与 Esc 递进（2026-10-03 用户裁决「Tab 只在
- * 最上层 overlay 生效；每层可 Esc 关、每次只关最上面一层」；登记
- * docs/todo/display-containers-overlay-tab-ownership.md；对账 §6.7 模态共存守卫 / §8.2 S3+S8）。
+ * 最上层 overlay 生效；每层可 Esc 关、每次只关最上面一层」；对账 §6.7 模态共存守卫 / §8.2 S3+S8）。
  *
  * S3 断言半边（单测承载，真实事件序 = dispatchEvent + await nextTick，禁 mock 时序）：
  * - 浮层 + 模态（⌘K 搜索族形态）同开 → Tab 不被浮层陷阱捕获（模态焦点域属主——焦点留在

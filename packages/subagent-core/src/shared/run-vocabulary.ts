@@ -5,7 +5,7 @@
 //
 // 为什么下沉：这些名字原先定义在 `orchestration/run-events.ts` 与
 // `orchestration/models/types.ts`，但消费方大量在 `execution/`（manifest-store /
-// state-marker / run-state-evidence / pi-host-run-store / session-file-gc /
+// state-marker / run-state-evidence / pi-host-run-store /
 // workflow-dispatch / subagent-actions-core）——「持久化层读编排层的词汇」构成
 // execution → orchestration 反向边。词汇本身是纯数据（无编排行为），下沉到 shared
 // 直接消边，零语义变更。

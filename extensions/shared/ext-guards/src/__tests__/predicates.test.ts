@@ -1,14 +1,16 @@
 // src/__tests__/predicates.test.ts
 //
-// isRecord / isEnoentError / isSubagentProcess 单测（ext-simplify-17 D3/D2/D4 新导出）：
+// isRecord / isEnoentError / isErrnoWithCode / isSubagentProcess 单测
+//（ext-simplify-17 D3/D2/D4 新导出 + isErrnoWithCode errno 守卫上收）：
 //   - isRecord 排数组严版：数组必须 false（钉值，防回退到允数组宽版）
 //   - isEnoentError scheduler 严版：仅 Error 子类 + code === "ENOENT" 才 true，
 //     非 Error 对象带 code 是宽版才接受的形态，严版必须 false
+//   - isErrnoWithCode：isEnoentError 的 code 参数化形态，收窄纪律同源
 //   - isSubagentProcess 三态 + env 注入隔离 + 旧键宁缺勿污钉值（D4 重锚定）
 
 import { describe, expect, it } from "vitest";
 
-import { isEnoentError, isRecord, isSubagentProcess } from "../index.ts";
+import { isEnoentError, isErrnoWithCode, isRecord, isSubagentProcess } from "../index.ts";
 
 describe("isRecord", () => {
 	it("对象 true", () => {
@@ -55,6 +57,32 @@ describe("isEnoentError", () => {
 
 	it("undefined false", () => {
 		expect(isEnoentError(undefined)).toBe(false);
+	});
+});
+
+describe("isErrnoWithCode", () => {
+	it("Error 带 code=期望值 true（Node fs 错误的构造形态）", () => {
+		expect(isErrnoWithCode(Object.assign(new Error("exists"), { code: "EEXIST" }), "EEXIST")).toBe(
+			true,
+		);
+	});
+
+	it("code 为其他值 false", () => {
+		expect(isErrnoWithCode(Object.assign(new Error("exists"), { code: "EEXIST" }), "EACCES")).toBe(
+			false,
+		);
+	});
+
+	it("普通 Error false（无 code 属性）", () => {
+		expect(isErrnoWithCode(new Error("x"), "EEXIST")).toBe(false);
+	});
+
+	it("非 Error 对象带同名 code false（与 isEnoentError 同一严版口径）", () => {
+		expect(isErrnoWithCode({ code: "EEXIST" }, "EEXIST")).toBe(false);
+	});
+
+	it("undefined false", () => {
+		expect(isErrnoWithCode(undefined, "EEXIST")).toBe(false);
 	});
 });
 

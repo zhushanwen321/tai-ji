@@ -3,7 +3,7 @@
     容器组件 · message-stream（panel/spec.md zone ②，draft-message-stream）。
     读 chat store 按 sessionId 分区的消息 → groupTurns 分回合 → 渲染 Turn 列表。
     auto-scroll（spec §8.5 + G2-007）：stickToBottom 判定，上滚脱离锚定不强制拉回，
-    非贴底有新内容显「回到底部」浮层，点浮层平滑滚回并恢复锚定。
+    滚动离底超过一屏显「回到最新」胶囊（决策 12，未读条件已退役），点胶囊平滑滚回并恢复锚定。
     用户主动发送（composer 直发 / steer·followUp 投递 / defer flush / 编辑重发）例外：
     尾部新增 user 消息时强制回底重锚定（feat-new-message-to-bottom，见
     useMessageStreamFollowTriggers 触发矩阵末行）。
@@ -23,10 +23,36 @@
 
     <div
       ref="scrollEl"
-      class="message-stream relative flex-1 overflow-y-auto px-5 pt-[var(--message-stream-pad-top)] pb-[8px]"
+      class="message-stream relative flex-1 overflow-y-auto px-[30px]"
       :style="{ overflowAnchor: 'none' }"
       @wheel="onWheel"
     >
+    <!-- 顶缘渐焦（demo chat spec 裁决 4B）：滚动容器第一个子元素挂载（sticky 钉顶 + 负 margin
+         净高 0 不参与布局，不扰动 virtua 测量），自驱动离顶（scrollTop>4）显隐 + 容器顶部 mask，
+         消费方零配置。降级：reduced-motion 关过渡 / reduced-transparency 整体摘除（组件内置）。
+         [贴顶前提] 滚动容器禁设顶部 padding——sticky 正常流位置会被压到 padding 之下，滚过
+         padding 前带悬浮于视口中部（顶缘露出未处理区）；顶部留白由下方 spacer 承载
+         （2026-10-11 修法 A 裁决）。 -->
+    <EdgeFade />
+    <!-- [hist-line] 加载更早历史的慢网兜底细线（OpenDesign specs/chat/history-load-and-run-grouping.md
+         §2.2 复刻）：加载启动 150ms 未完成才显示（快载零指示防闪烁），2px --accent 横扫 1.05s
+         循环，插入完成 160ms opacity 淡出。sticky 钉滚动视口顶（同 EdgeFade 顶缘层、z 高一级）、
+         净高 0 不参与 virtua 测量、pointer-events-none 不阻交互。常驻挂载只翻 opacity 类——
+         淡出依赖 transition，条件挂载会瞬跳。横向取消息列同宽：repo 无 demo 阅读列封顶，
+         无需负 margin 满宽（亦可避免撑出横向滚动条）。reduced-motion 降级 = 停扫静态线 + 透明度 0.6。
+         [ld-cv 豁免登记] spec §2.1 同文的「历史轮块挂 content-visibility 压舱」不引入：本流经
+         virtua <Virtualizer> 窗口化渲染，视口外轮次块根本不挂载（严格强于 content-visibility
+         的「挂载但跳过渲染」），渲染成本压舱目标已由更强架构覆盖，ld-cv 在此冗余。 -->
+    <div data-testid="history-load-line" aria-hidden="true" class="pointer-events-none sticky top-0 z-[4] h-0 max-w-none">
+      <i
+        class="hist-line-sweep absolute inset-x-0 top-0 block h-0.5 overflow-hidden transition-opacity duration-[160ms] ease-[var(--ease-out)]"
+        :class="slowLine ? 'is-on opacity-100 motion-reduce:opacity-60' : 'opacity-0'"
+      ></i>
+    </div>
+    <!-- 顶部留白 spacer：EdgeFade 的 sticky 正常流位置因此与视口顶重合（滚动 1px 带即贴顶）。
+         virtua 每次滚动沿 offsetParent 链重测 container 偏移，前置兄弟高度自然计入，
+         startMargin 无需感知本 spacer。 -->
+    <div class="h-[var(--message-stream-pad-top)]" aria-hidden="true"></div>
     <!-- 空态欢迎语（G2-004）：独立于虚拟列表，作为 scrollEl 直接子节点撑满视口。
          Virtualizer 在 :data 为空时 scrollSize=0，空态放 Virtualizer 外层 absolute inset-0 即可。 -->
     <div v-if="renderItems.length === 0" class="absolute inset-0 flex flex-col items-center justify-center gap-2 text-center">
@@ -158,17 +184,23 @@
     </div>
     </div>
 
-    <!-- 回到底部浮层：非贴底且有未读新内容时显示（showJumpButton），点之平滑滚回并恢复锚定 -->
+    <!-- 回到最新胶囊（N11/决策12）：滚动离底超过一屏即浮现（showJumpButton 距底几何判定），
+         点之平滑滚回并恢复锚定（force 同步清零距底快照 → 胶囊即时消失）。
+         形态 = demo .to-latest：elevated 浮层底 + border-strong 边 + shadow-2 + 12px/600 字重 +
+         0.02em 字距 + hover 提边框色（无底色反馈）；浮现 = opacity + 6px 上浮（demo .18s，
+         取令牌 --duration）；图标 13px（demo .to-latest .sicon）= svg 普通尺寸类（Button 基类
+         图标默认规则已零特异性，普通类结构性恒赢，无需 important）。 -->
     <Transition name="fade">
       <Button
         v-if="showJumpButton"
-        variant="default"
-        size="icon"
-        class="absolute bottom-4 left-1/2 z-10 size-9 -translate-x-1/2 rounded-full shadow-lg"
+        variant="secondary"
+        size="sm"
+        class="absolute bottom-4 left-1/2 z-10 h-7 -translate-x-1/2 rounded-full border-border-strong bg-[var(--bg-elevated)] px-3.5 text-[length:var(--text-xs)] font-semibold tracking-[0.02em] shadow-[var(--shadow-2)] hover:!border-neutral-dim hover:!bg-transparent"
         :title="t('panel.message.scrollToBottom')"
-        @click="followToBottom(true)"
+        @click="followToBottom(true, true)"
       >
-        <ChevronDown class="size-4" />
+        <ChevronDown class="size-[13px]" stroke-width="2" />
+        <span>{{ t('panel.message.scrollToBottom') }}</span>
       </Button>
     </Transition>
 
@@ -191,14 +223,14 @@ import { computed, nextTick, onMounted, provide, ref, shallowRef, watch } from '
 import { useI18n } from 'vue-i18n'
 import { ChevronDown, Sparkles } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
+import { EdgeFade } from '@/components/ui/edge-fade'
 import { Virtualizer, type VirtualizerHandle } from 'virtua/vue'
 import { useChatStore } from '@/stores/chat'
 import ModeDeclarationRow from './ModeDeclarationRow.vue'
 // [u5 mode-declaration-row] 首次 connected 自动拉取 preset（冷启动直进非默认模式会话时 store
 // 为空会误报「模式已删除」）：MessageStream 是会话面板常驻挂载点，在此安装幂等单例。
 import { installPresetAutoLoad } from '@/composables/features/settings/usePiPresets'
-// [u8-pi-respawn] 恢复提示条重试按钮的手动恢复（crash-resilience D7 熔断后的用户出口）：
-// RPC + revive + toast 指引自本容器拆至 composables/panel/useSessionRespawnRetry.ts。
+// [u8-pi-respawn] 恢复提示条重试（说明见 useSessionRespawnRetry 调用处注释）。
 import { useSessionRespawnRetry } from '@/composables/panel/useSessionRespawnRetry'
 import { getExecutingBash } from '@taiji/core'
 import { useVirtuaFollow } from '@/composables/panel/useVirtuaFollow'
@@ -230,12 +262,8 @@ import { useSessionActive } from '@/composables/panel/useSessionActive'
 import { useMessageStreamFollowTriggers } from '@/composables/panel/useMessageStreamFollowTriggers'
 import { useMessageStreamRail } from '@/composables/panel/useMessageStreamRail'
 import { useStreamingPin } from '@/composables/panel/useStreamingPin'
-// [u6a] 两常量的消费点已迁 ActivityStrip；ESTIMATED_TURN_HEIGHT / LOAD_MORE_RESERVED_HEIGHT
-// 同源（virta 布局常量族）。
-import {
-  ESTIMATED_TURN_HEIGHT,
-  LOAD_MORE_RESERVED_HEIGHT,
-} from '@/composables/panel/message-stream-layout'
+// [u6a] 两常量的消费点已迁 ActivityStrip；与 ESTIMATED_TURN_HEIGHT 同源（virta 布局常量族）。
+import { ESTIMATED_TURN_HEIGHT, LOAD_MORE_RESERVED_HEIGHT } from '@/composables/panel/message-stream-layout'
 
 const props = defineProps<{
   sessionId: string
@@ -255,7 +283,7 @@ const chat = useChatStore()
 /** W4 H4 + cw wave w3 / IF8：加载更多历史 loading + isPrepend（virta :shift 信号）+ handler
  *  + [scroll-top-auto-load] onScrollOffset（触顶自动续载，底部条退化为进度位/兜底）
  *  + [RD-1#4] loadMoreError（上次失败态 → 顶部条渲染可重试错误行 LoadMoreErrorBar）。 */
-const { loadingMore, showLoadMore, handleLoadMore, isPrepend, onScrollOffset, loadMoreError, topBarReservedHeight } =
+const { loadingMore, showLoadMore, handleLoadMore, isPrepend, onScrollOffset, loadMoreError, topBarReservedHeight, slowLine } =
   useLoadMoreHistory(() => props.sessionId, () => streamItems.value.length)
 
 // [u8-pi-respawn] 恢复提示条重试（crash-resilience D7 熔断后的用户出口）——实现见
@@ -402,8 +430,10 @@ const { pinnedIndexes } = useStreamingPin({
 /** [cw wave w3] auto-scroll follow 状态机（D1/D2/D7）：onScroll 复合判据
  *  （INVAR-M4-2′）/ onWheel 恒即时脱离 / followIfStuck rAF 重读 guard。virta 单一 scrollTop owner。 */
 // [U4 护栏⑦] dev-only 贴底跟随断言包装（生产透传零开销；spec 详见 usePinBottomGuard.ts 头注释）。
-// [D2 数学不变量] endOffset = tailEl 实测总高：scrollEl pt-20 + pb-8 = 28px 与 virtua
-// viewportSize 不含 padding 的 28px 扣除精确抵消 → offset=tailHeight 落点即真实底部（改任一 padding 必复核）。
+// [D2 数学不变量] endOffset = tailEl 实测总高：滚动容器纵向 padding（pt 令牌；底部 padding
+// 已随 2026-10-11 贴合裁决移除——composer 带壳顶缘与流底缘 0 间距）参与 virtua viewportSize
+// 扣除与 scrollToIndex 落点公式——viewportSize 按 content-box 测量随 padding 自动重算，
+// 落点偏差由 BOTTOM_THRESHOLD 吸收（改任一纵向 padding 必复核 useVirtuaFollow D2 推导并真机复验贴底）。
 const { stickToBottom, showJumpButton, onScroll, onWheel, followIfStuck, followToBottom, onSessionRebuild, notifyRoActivity } =
   usePinBottomGuard({
     follow: useVirtuaFollow({
@@ -417,10 +447,11 @@ const { stickToBottom, showJumpButton, onScroll, onWheel, followIfStuck, followT
 
 // [D3/D5] 跟随触发编排（RO 兜底网 + store watch，useMessageStreamScroll 继任；≤300 行规范拆出）。
 // followToBottomForce：用户主动发送（尾部新增 user 消息）强制回底重锚定（feat-new-message-to-bottom）。
+// [决策 12] isPrepend 不再传入：前插抑制窗的标记门控随未读标记链路退役（isPrepend 仍服务
+// Virtualizer :shift 与触顶续载，见 useLoadMoreHistory）。
 const { contentWrapEl, tailEl, tailHeight } = useMessageStreamFollowTriggers({
   messages: currentMessages,
   lastRenderTurn,
-  isPrepend,
   scrollEl,
   followIfStuck,
   notifyRoActivity,
@@ -489,18 +520,40 @@ watch(
 </script>
 
 <style scoped>
-/* message-stream 滚动条（draft） */
+/* message-stream 滚动条（M3c demo 复刻 .chat-scroll::-webkit-scrollbar：thumb faint 档 +
+   r-xs 圆角，hover 提到 dim 档） */
 .message-stream::-webkit-scrollbar { width: 8px; }
 .message-stream::-webkit-scrollbar-thumb {
-  background: var(--border-strong);
-  border-radius: 4px;
+  background: var(--neutral-faint);
+  border-radius: var(--radius-xs);
 }
 .message-stream::-webkit-scrollbar-thumb:hover { background: var(--neutral-dim); }
+
+/* [hist-line] 慢网兜底细线横扫芯（demo .hist-line i::after + @keyframes hist-line-sweep）：
+   Tailwind 无法表达 content + translateX keyframes 组合，按 AGENTS.md escape hatch 入 scoped
+   （伪元素选择器）。常驻 translateX(-100%) 藏于线框左侧外；.is-on 才扫（1.05s linear
+   infinite，demo 同参）；显隐 opacity 走模板 Tailwind 类（scoped 禁写普通选择器）。 */
+.hist-line-sweep::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--accent);
+  transform: translateX(-100%);
+}
+.hist-line-sweep.is-on::after { animation: hist-line-sweep 1.05s linear infinite; }
+@keyframes hist-line-sweep { from { transform: translateX(-100%); } to { transform: translateX(100%); } }
+/* reduced-motion：style.css 全局兜底只把动画瞬切到终态（translateX(100%) = 芯飞出右侧不可见），
+   此处显式停扫并把芯归位为静态条（demo §2.2 降级档：静态低透明度细线；透明度降档在模板
+   motion-reduce:opacity-60） */
+@media (prefers-reduced-motion: reduce) {
+  .hist-line-sweep.is-on::after { animation: none; transform: none; }
+}
 
 /* [cw wave w3 / design §4.11] overflow-anchor:none 移到 scrollEl 的 inline :style
    （vue_rules_checker 不允许 scoped CSS 写非动画/伪元素属性，inline style 绕过检查且语义等价）。 */
 
-/* 回到底部浮层过渡 */
-.fade-enter-active, .fade-leave-active { transition: opacity var(--duration-fast) ease; }
-.fade-enter-from, .fade-leave-to { opacity: 0; }
+/* 回到最新胶囊过渡（demo .to-latest：opacity + 6px 上浮；时长取令牌 --duration，
+   translate(-50%,…) 与胶囊 -translate-x-1/2 同含 x 分量，矩阵插值不跳位） */
+.fade-enter-active, .fade-leave-active { transition: opacity var(--duration) ease, transform var(--duration) ease; }
+.fade-enter-from, .fade-leave-to { opacity: 0; transform: translate(-50%, 6px); }
 </style>

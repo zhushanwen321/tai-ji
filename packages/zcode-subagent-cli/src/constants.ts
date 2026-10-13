@@ -10,7 +10,8 @@
 // 随 2026-09 会话库隔离设计独立于宿主库（隔离路径契约见 db-path.ts 的
 // zcodeSessionDbPath/zcodeDbPathAllowlist；路径段常量 SSOT 已收编至
 // @zhushanwen/subagent-engine-sdk zcode-db-paths.ts，本文件不再持有
-// ZCODE_HOST_DB_SUFFIX——引擎包与 zcode-session-source 读侧（runtime 经其消费）同源 import）。
+// ZCODE_HOST_DB_SUFFIX 与 ZCODE_PI_SYNCED_PROVIDER_CONFIG_SEGMENTS——引擎包
+// 与 runtime 读/写侧同源 import SDK 常量，禁止本地再持同形字面量）。
 
 /** zcode 引擎的 registry key。 */
 export const ZCODE_ENGINE_ID = "zcode";

@@ -184,7 +184,7 @@ function summaryOf(e: WorkflowRunEventEntry): string {
   }
 }
 
-/** 大字段截断文本提取（D4 截断白名单四字段的展示值——判别联合逐 type 显式读取，无断言）。 */
+/** 大字段截断文本提取（D4 截断白名单五字段中进 detail 区的展示值——判别联合逐 type 显式读取，无断言；worker-log 的截断 message 走 summary 行，不进 detail）。 */
 function detailOf(e: WorkflowRunEventEntry): string | undefined {
   switch (e.type) {
     case 'agent-started':

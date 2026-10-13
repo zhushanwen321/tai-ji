@@ -19,12 +19,14 @@
  *   见 composables/panel/useQueueRows.ts）；本文件的残留职责仅剩「撤销/回收文本回输入区」。
  *
  * 视觉派生（D1「视觉派生留壳」）：useComposerBoxClass + useComposerModeVisual 的逻辑并入本文件
- * （boxClass 三级链：staging > bash > 流式 steer 呼吸 > 聚焦 ring；placeholder 三级链：
- * staging > bash > steerHint > inputHint），删除原 2 文件（无独立复用点，仅 Composer.vue 消费）。
+ * （boxClass 链：bash > 流式 steer 呼吸 > has-input 微环；placeholder 链：bash > steerHint >
+ * inputHint），删除原 2 文件（无独立复用点，仅 Composer.vue 消费）。
+ * [HISTORICAL] 两链的 staging 档（整框 accent 染色 / forkHint·handoffHint 换文案）已随 staging
+ * banner 形态退役（demo 裁决：banner 图标染 accent 是模式在途的唯一染色点），见派生定义处。
  */
 import { computed, onMounted, reactive, type ComputedRef, type Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { GitFork, Upload } from '@lucide/vue'
+import { ArrowRightLeft, GitBranch } from '@lucide/vue'
 import type { ProviderId, Segment } from '@taiji/shared'
 import { normalizeContent } from '@taiji/shared'
 import {
@@ -52,6 +54,10 @@ import {
 } from '@taiji/dom-core/composer/input'
 import { useChatStore } from '@/stores/chat'
 import { useSessionStore } from '@/stores/session'
+import {
+  useBtwSessionStateStore,
+  resolveComposerSessionState,
+} from '@/stores/btw-session-state'
 import { usePresetStore } from '@/stores/preset'
 import { getSettingsStore } from '@taiji/core'
 import { useChat } from '@/composables/features/chat/useChat'
@@ -171,6 +177,7 @@ export function useComposerShell(params: ComposerShellParams) {
   const { t } = useI18n()
   const chatStore = useChatStore()
   const sessionStore = useSessionStore()
+  const btwSessionState = useBtwSessionStateStore()
   const presetStore = usePresetStore()
   const settingsStore = getSettingsStore()
   const flow = useNewTaskFlow()
@@ -196,11 +203,15 @@ export function useComposerShell(params: ComposerShellParams) {
     exitStagingMode,
     getStagingConfig,
   } = useComposerModelThinking(sessionIdRef, {
-    getSessionState: (sid: string) => {
-      const s = sessionStore.list.find((x) => x.id === sid)
-      if (!s) return null
-      return { modelId: s.modelId, thinkingLevel: s.thinkingLevel }
-    },
+    getSessionState: (sid: string) =>
+      // btw vid 走线态解析（线回执 → 主会话回退，见 btw-session-state store 头注释）；
+      // 非 vid 行为不变（主列表直查）。
+      resolveComposerSessionState(
+        sid,
+        sessionStore.list,
+        (vid) => btwSessionState.modelByVid[vid],
+        (vid) => btwSessionState.mainSidByVid[vid],
+      ),
     defaultModel: computed(() => settingsStore.defaultModel.value),
     currentModel: flow.currentModel,
     // [U4r2] 显式 preset 选择进 chip 侧 resolve 输入（D1 pending 三兄弟补齐）：flow
@@ -291,7 +302,9 @@ export function useComposerShell(params: ComposerShellParams) {
     exitStagingMode,
     getStagingConfig,
     t: t as (key: string, params?: Record<string, unknown>) => string,
-    forkChipIcon: GitFork,
+    // fork banner 图标（demo 权威 = git-branch，demo ComposerBar.vue:450 / composer-chips spec §4；
+    // GitBranch 是本应用分支语义既有图标语言——SessionItem/GitPanel 在用）
+    forkChipIcon: GitBranch,
     forkSessionAsk: sidebar.forkSessionAsk,
     toastError,
     forkEnterSignal,
@@ -310,7 +323,8 @@ export function useComposerShell(params: ComposerShellParams) {
     exitStagingMode,
     getStagingConfig,
     t: t as (key: string, params?: Record<string, unknown>) => string,
-    handoffChipIcon: Upload,
+    // handoff banner 图标（demo 权威 = arrow-right-left；[HISTORICAL] 前身 Upload 随 mode-chip 形态退役）
+    handoffChipIcon: ArrowRightLeft,
     toastError,
     isHandingOff: (sid: string) => chatStore.isHandingOff(sid),
     isSessionActive: (sid: string) => !!sid && chatStore.isActive(sid),
@@ -408,30 +422,45 @@ export function useComposerShell(params: ComposerShellParams) {
   })
 
   // ── 视觉派生（原 useComposerBoxClass + useComposerModeVisual 合并，D1 留壳）──
-  const stagingBoxClass = computed(() => staging.activeStaging.value?.visual.boxClass.value ?? '')
-  const stagingPlaceholder = computed(() => staging.activeStaging.value?.visual.placeholder.value ?? null)
-  /** composer-box class 三级链：staging > bash（accent 边 + ring）> 流式 steer 呼吸 > has-input 微环；发送中叠半透明。
-   *  分支 token 同口径（has-input = 2px surface-hover/40 微环，不改 border；
-   *  rgba(255,255,255,0.04) 硬编码已废弃） */
+  /** composer-box class 链：bash（accent 边 + ring）> 流式 steer 呼吸 > has-input 微环；发送中叠半透明。
+   *  档位经 2026-10-11 用户裁决降一档（demo 无对应形态、贴合 R3 无缝输入原则收紧）：
+   *  steer = accent 边 + 2px accent-ring（原 --shadow-glow 3px/25%）；has-input = 2px
+   *  surface-hover/25% 微环（原 40%，不改 border）；bash 特殊模式档保持强提示不动。
+   *  rgba(255,255,255,0.04) 硬编码已废弃。
+   *  [HISTORICAL] staging 整框染色档（accent 边 + 3px ring + accent-soft 底）已随 staging banner
+   *  形态退役（demo 裁决：banner 图标染 accent 是模式在途的唯一染色点，文字/×/box 均中性）——
+   *  staging 活跃时 box 回归链上下一档（bash/steer/has-input 判定不变）。 */
   const boxClass = computed<Array<string | false>>(() => [
-    stagingBoxClass.value
-      || (isBashMode.value
-        ? 'composer-bash-mode border-[var(--accent)] shadow-[0_0_0_3px_var(--accent-ring)]'
-        : isActive.value
-          ? 'border-[var(--accent)] shadow-[var(--shadow-glow)]'
-          : hasInput.value
-            ? 'shadow-[0_0_0_2px_color-mix(in_oklch,var(--surface-hover)_40%,transparent)]'
-            : ''),
+    isBashMode.value
+      ? 'composer-bash-mode border-[var(--accent)] shadow-[0_0_0_3px_var(--accent-ring)]'
+      : isActive.value
+        ? 'border-[var(--accent)] shadow-[0_0_0_2px_var(--accent-ring)]'
+        : hasInput.value
+          ? 'shadow-[0_0_0_2px_color-mix(in_oklch,var(--surface-hover)_25%,transparent)]'
+          : '',
     isSending.value && 'opacity-[0.55]',
   ])
-  const placeholder = computed(
-    () =>
-      stagingPlaceholder.value
-      ?? (isBashMode.value
-        ? t('panel.composer.bashPlaceholder')
-        : isActive.value
-          ? t('panel.composer.steerHint')
-          : t('panel.composer.inputHint')),
+  /** placeholder 链：bash > steerHint > inputHint。
+   *  [HISTORICAL] staging 换文案档（forkHint/handoffHint）已随 staging banner 退役
+   *  （demo placeholder 静态）；core visual.placeholder 派生保留但 renderer 不再消费。 */
+  const placeholder = computed(() =>
+    isBashMode.value
+      ? t('panel.composer.bashPlaceholder')
+      : isActive.value
+        ? t('panel.composer.steerHint')
+        : t('panel.composer.inputHint'),
+  )
+  /** Staging banner 两段文案（fork/handoff 分流，demo 权威形态 = 粗体标题 + 「 · 」+ 描述；
+   *  key 为 banner 形态新增，zh/en 双侧见 @taiji/ui locale panel.composer）。 */
+  const stagingBannerTitle = computed(() =>
+    staging.activeStaging.value?.type === 'fork'
+      ? t('panel.composer.forkBannerTitle')
+      : t('panel.composer.handoffBannerTitle'),
+  )
+  const stagingBannerDesc = computed(() =>
+    staging.activeStaging.value?.type === 'fork'
+      ? t('panel.composer.forkBannerDesc')
+      : t('panel.composer.handoffBannerDesc'),
   )
 
   // ── 发送分流（core dispatch/send；[u3c/D1] 统一分发器：staging > canSend 守卫 >
@@ -594,6 +623,9 @@ export function useComposerShell(params: ComposerShellParams) {
     // 视觉
     boxClass,
     placeholder,
+    // staging banner 两段文案（Composer.vue 模板消费，fork/handoff 分流见派生处）
+    stagingBannerTitle,
+    stagingBannerDesc,
   }
 }
 

@@ -16,7 +16,9 @@
  * 注入（clarify C1 D1），core 不再 import useImageAttachment。paste 通路（占位 badge 插入 +
  * 异步回填/降级编排）保留，仅 IPC 调用上移壳层。
  *
- * 行为约定（byte-for-byte 与原 useContenteditableInput 一致，CRITICAL）：
+ * 行为约定（CRITICAL）：
+ * - IME 组词中（composing.value）onInput 不序列化（emitInput）不触发检测，空态同步
+ *   （syncEmpty）与光标锚复位照跑——isEmpty 须跟随组词期真实 DOM；compositionend 统一处理
  * - IME 组合中（composing.value / e.isComposing）不拦截 Enter
  * - Shift+Enter → insertLineBreak + onInput + scrollCursorIntoView
  * - Enter（无 shift）→ emit('keydown', e)
@@ -206,9 +208,17 @@ export function useContenteditableInput(
     // 单次全文遍历复用（性能 A 档）：syncEmpty 判空与 emitInput 消费同一 text 快照。
     // 两者之间原本就无 DOM 写（syncEmpty 只赋 isEmpty ref），同帧读取恒等价。
     const text = getText()
+    // 空态同步先于 IME 守卫（S-B1）：isEmpty 只做空态判定、不含触发/序列化语义，组词期
+    // 也必须跟随真实 DOM 内容——否则组词期 isEmpty 停留旧值，placeholder（is-empty 类
+    // 驱动）与显在的组词假文本瞬态重叠（demo 用 CSS :empty 伪类原生机制无此瞬态）。
     syncEmpty(text)
-    emitInput(text)
     preferredCaretX = null
+    // IME 组词守卫（demo onInput 首行同款）：组词期间每次按键都会派发 input 事件，
+    // 此时不序列化（emitInput）也不跑五路触发检测（组词中的假文本不构成触发），统一由
+    // onCompositionEnd（先复位 composing 再调本函数）收口处理。空态同步与光标锚复位
+    // 不在守卫之内——见上。接线：ComposerInput.vue `@compositionstart="composing = true"`。
+    if (composing.value) return
+    emitInput(text)
     // bash 豁免短路（设计 D6）：bash 态（!/!! 前缀）下符号全是命令语法成分，
     // 全部触发回调发 null（关闭浮层语义）且不做检测；draft 同步（emitInput）不受影响
     if (shouldSuppressTriggers?.()) {

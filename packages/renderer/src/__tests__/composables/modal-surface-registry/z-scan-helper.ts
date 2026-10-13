@@ -5,7 +5,7 @@
  * - 三类字面形态 + CSS 声明形：class token 形（形如 z 方括号 var 形）/ 裸数字 class 形 /
  *   inline style zIndex 形 / 样式表 z-index 声明形；
  * - `var(--z-*)` 按全仓 .css 的 `--z-*: <n>` token 表解析成数值，**解析值 ≥ 1000 才入基线**
- *   （--z-overlay: 20 故 PlanCommentPopover 的低 z 面不入基线；HoverCard z-[90] 同理豁免）；
+ *   （--z-overlay: 20 故 PlanCommentPopover 的低 z 面不入基线；HoverCard --z-hovercard: 500 同理豁免）；
  * - 注释/散文行按行首/行尾注释标记过滤（仓内有三处文档注释提及 z 字面量、非表面）；
  * - 排除：测试文件（*.test.* / *.spec.* / __tests__）、node_modules/dist 等产物目录、
  *   登记表模块自身（manifest 字面量是数据不是表面）。

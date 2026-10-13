@@ -21,6 +21,7 @@ export {
   registerModalSurface,
   anyModalSurfaceYieldsEsc,
   anyModalSurfaceYieldsCmdW,
+  otherSurfaceYieldsEsc,
   openShieldingSurfaces,
   isModalSurfaceOpen,
   resetModalSurfaceRegistry,

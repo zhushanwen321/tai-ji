@@ -1,5 +1,11 @@
 # @zhushanwen/extension-protocol
 
+## 0.20.0
+
+### Minor Changes
+
+- 0c4bec66e: Add per-engine default model RPC contract: getSubagentEngineConfig reply now carries engineModels/engineDefaults, and setSubagentEngineDefaultModel is registered as a new engine protocol method. SubagentEngineModelInfo is unified into this package as the single source (type-only re-exports for downstream packages).
+
 ## 0.19.0
 
 ### Minor Changes

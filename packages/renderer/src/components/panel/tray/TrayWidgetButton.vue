@@ -41,9 +41,10 @@
   超长 truncate 至 BADGE_MAX_CHARS 字符，全文进 badge 的 title（§3.5）
 
   ── status 视觉（D4：running=accent+呼吸点 / done=success / failed=danger / idle=dim）──
-  视觉序列 = `[icon][呼吸点（仅 running，size-1.5 + animate-pulse，与统一表单 overlay
-  同款）][badge 计数]`（外壳 built-in 三件按同序镜像 → §3.1 场景 A 的「icon + mono 计数 +
-  呼吸点」同视觉语言）。
+  视觉序列 = `[icon][呼吸点（仅 running，size-[6px] + animate-pulse，与统一表单 overlay
+  同款）][badge 计数角标]`（badge 走 demo .cbtn .badge 角标形态 = 右上角胶囊，色取 status
+  tone 文字档；外壳 built-in 三件按同序镜像 → §3.1 场景 A 的「icon + mono 计数 + 呼吸点」
+  同视觉语言）。
   icon 与 badge 同取状态色；idle 走 neutral-dim；v1 旧 extension 无 status 时 icon 继承按钮
   中性色（常态 dim、交互提亮）。归零不虚亮：非 running 不渲染任何呼吸点元素。
 -->
@@ -65,13 +66,13 @@
     <!-- icon 区（fallback 链产物：自定义形状 svg 或 lucide 组件二选一） -->
     <span
       data-testid="tray-widget-icon"
-      class="flex size-4 shrink-0 items-center justify-center"
+      class="flex size-[16px] shrink-0 items-center justify-center"
       :class="toneClass"
     >
       <svg
         v-if="icon.kind === 'paths'"
         data-testid="tray-widget-icon-paths"
-        class="size-4"
+        class="size-[16px]"
         viewBox="0 0 24 24"
         fill="none"
         stroke="currentColor"

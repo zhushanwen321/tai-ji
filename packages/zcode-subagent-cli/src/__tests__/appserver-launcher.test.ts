@@ -3,7 +3,8 @@
 // 防线背景：wrapper 的失效模式是静默的（曾出过首调走未赋值 __origReadFileSync
 // 导致拦截整体失效的 bug——56a49ad4c），本文件用「落盘产物 + 探针 fake CLI」的
 // 真进程集成形态锚定核心语义：v2 注入优先合并、existsSync 拦截（GUI-only 宿主）、
-// encoding 归一、no-patch 分支、透传不受影响。
+// encoding 归一、no-patch 分支、透传不受影响、D3 换轨的 provider_config merge
+// 拦截（含双实装对账——launcher 内嵌 JS × preparer TS 逐字节锁步）。
 
 import * as childProcess from "node:child_process";
 import * as fs from "node:fs";
@@ -17,14 +18,17 @@ import {
   ZCODE_APPSERVER_LAUNCHER_NAME,
   ensureAppServerLauncher,
 } from "../appserver-launcher.ts";
+import { mergePersonalProviderConfig } from "../preparer.ts";
 
-// 探针 fake CLI：以 wrapper 注入后的 fs 形态读取 CONFIG_PATH 的各种调用形态并
-// 落盘 state（wrapper 对它 import() 启动——与真实 zcode.cjs 同入口形态）
+// 探针 fake CLI：以 wrapper 注入后的 fs 形态读取 CONFIG_PATH / 真实
+// provider_config.json（D3 换轨拦截路径）的各种调用形态并落盘 state（wrapper 对它
+// import() 启动——与真实 zcode.cjs 同入口形态）
 const PROBE_SOURCE = `'use strict';
 const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 const CONFIG = path.join(os.homedir(), '.zcode', 'cli', 'config.json');
+const PC = path.join(os.homedir(), '.zcode', 'v2', 'provider_config.json');
 const OTHER = path.join(os.homedir(), '.probe-other.txt');
 const STATE = process.env.ZCODE_PROBE_STATE;
 function grab(v) {
@@ -38,6 +42,7 @@ async function main() {
   out.existsConfig = fs.existsSync(CONFIG);
   out.existsMissing = fs.existsSync(path.join(os.homedir(), '.no-such-file'));
   out.existsOther = fs.existsSync(OTHER);
+  out.pcExists = fs.existsSync(PC);
   const tries = (label, fn) => {
     try { out[label] = grab(fn()); } catch (err) { out[label] = { kind: 'error', code: err && err.code }; }
   };
@@ -46,7 +51,11 @@ async function main() {
   tries('syncUtf8Obj', () => fs.readFileSync(CONFIG, { encoding: 'utf-8' }));
   tries('syncNoEnc', () => fs.readFileSync(CONFIG));
   tries('syncOther', () => fs.readFileSync(OTHER, 'utf8'));
+  tries('pcSyncUtf8Dash', () => fs.readFileSync(PC, 'utf-8'));
+  tries('pcSyncNoEnc', () => fs.readFileSync(PC));
   out.promiseUtf8Dash = await fs.promises.readFile(CONFIG, 'utf-8').then(
+    (v) => grab(v), (err) => ({ kind: 'error', code: err && err.code }));
+  out.pcPromiseUtf8 = await fs.promises.readFile(PC, 'utf8').then(
     (v) => grab(v), (err) => ({ kind: 'error', code: err && err.code }));
   fs.writeFileSync(STATE, JSON.stringify(out));
 }
@@ -64,12 +73,17 @@ interface ProbeState {
   existsConfig: boolean;
   existsMissing: boolean;
   existsOther: boolean;
+  /** 真实 provider_config.json 的 existsSync 结果（D3 拦截分支） */
+  pcExists: boolean;
   syncUtf8: { kind: string; text?: string; code?: string };
   syncUtf8Dash: { kind: string; text?: string; code?: string };
   syncUtf8Obj: { kind: string; text?: string; code?: string };
   syncNoEnc: { kind: string; text?: string; code?: string };
   syncOther: { kind: string; text?: string; code?: string };
+  pcSyncUtf8Dash: { kind: string; text?: string; code?: string };
+  pcSyncNoEnc: { kind: string; text?: string; code?: string };
   promiseUtf8Dash: { kind: string; text?: string; code?: string };
+  pcPromiseUtf8: { kind: string; text?: string; code?: string };
   [k: string]: unknown;
 }
 
@@ -84,8 +98,20 @@ interface HomeSpec {
   realRaw?: string;
   /** cli config 对象形态；undefined = 不布置该文件（GUI-only 宿主） */
   real?: unknown;
-  /** provider_config.json 对象形态（D3 顺带发现 6 补注入源）；undefined = 不布置 */
+  /** provider_config.json 对象形态（D3 顺带发现 6 补注入源 + D3 换轨拦截的真实侧）；undefined = 不布置 */
   providerConfig?: unknown;
+  /** provider_config.json 原文（与 providerConfig 互斥——D3 拦截零变化断言的字节级锚点） */
+  providerConfigRaw?: string;
+  /** taiji 同步副本对象形态（D3 换轨：env 指向 engineDataDir 下独立副本路径） */
+  syncedCopy?: unknown;
+  /** 副本原文（损坏形态；与 syncedCopy 互斥） */
+  syncedCopyRaw?: string;
+  /**
+   * ZCODE_ENG_PROVIDER_CONFIG 显式值：undefined = 缺省（布置了副本 → 副本路径，
+   * 否则真实 provider_config 路径——既有补注入行为）；null = 不设该 env
+   *（D3 拦截分支不激活态）。
+   */
+  providerConfigEnv?: string | null;
   /** 显式预设 ZCODE_BUILTIN_PROVIDER_CONFIG_FILE；缺省 = spawn env 不设该键 */
   builtinProviderEnv?: string;
 }
@@ -108,10 +134,26 @@ function setupHome(spec: HomeSpec): {
   if (spec.v2Raw !== undefined) fs.writeFileSync(v2Path, spec.v2Raw);
   else if (spec.v2 !== undefined) fs.writeFileSync(v2Path, JSON.stringify(spec.v2, null, 2));
   const providerConfigPath = path.join(home, ".zcode", "v2", "provider_config.json");
-  if (spec.providerConfig !== undefined) {
+  if (spec.providerConfigRaw !== undefined) {
+    fs.mkdirSync(path.dirname(providerConfigPath), { recursive: true });
+    fs.writeFileSync(providerConfigPath, spec.providerConfigRaw);
+  } else if (spec.providerConfig !== undefined) {
     fs.mkdirSync(path.dirname(providerConfigPath), { recursive: true });
     fs.writeFileSync(providerConfigPath, JSON.stringify(spec.providerConfig, null, 2));
   }
+  // taiji 同步副本：与真实 provider_config 分置两路径（D3 换轨语义收窄——env 指
+  // 副本，真实路径由 wrapper 按 homedir 推导独立拦截）
+  const copyPath = path.join(engineDataDir, "engines", "zcode", "pi-synced-provider-config.json");
+  if (spec.syncedCopyRaw !== undefined || spec.syncedCopy !== undefined) {
+    fs.mkdirSync(path.dirname(copyPath), { recursive: true });
+    if (spec.syncedCopyRaw !== undefined) fs.writeFileSync(copyPath, spec.syncedCopyRaw);
+    else fs.writeFileSync(copyPath, JSON.stringify(spec.syncedCopy, null, 2));
+  }
+  const providerConfigEnv = spec.providerConfigEnv !== undefined
+    ? spec.providerConfigEnv
+    : (spec.syncedCopy !== undefined || spec.syncedCopyRaw !== undefined)
+      ? copyPath
+      : providerConfigPath;
   const cliConfig = path.join(cliDir, "config.json");
   if (spec.realRaw !== undefined) fs.writeFileSync(cliConfig, spec.realRaw);
   else if (spec.real !== undefined) fs.writeFileSync(cliConfig, JSON.stringify(spec.real, null, 2));
@@ -137,7 +179,7 @@ function setupHome(spec: HomeSpec): {
           HOME: home,
           ZCODE_ENG_CLI_PATH: probePath,
           ZCODE_ENG_V2_CONFIG: v2Path,
-          ZCODE_ENG_PROVIDER_CONFIG: providerConfigPath,
+          ...(providerConfigEnv === null ? {} : { ZCODE_ENG_PROVIDER_CONFIG: providerConfigEnv }),
           ZCODE_PROBE_STATE: statePath,
           ...explicit,
         } as NodeJS.ProcessEnv,
@@ -269,6 +311,55 @@ describe("provider_config 补注入（D3 顺带发现 6：引擎校验源个人 
     expect(injected.provider["p-in-v2"]).toEqual(providerEntry("v2-key"));
   });
 
+  it("kind 按条目 api.type 派生（D3）：anthropic-messages → anthropic，openai-chat-completions → openai-compatible（透传真实条目同受派生）", () => {
+    // 守卫语义：合成 CLI 条目的协议形态必须与 providerRules 条目 api.type 一致
+    // （v2 config.json kind 两值形态）——anthropic 协议条目落 openai-compatible 即
+    // 注册表协议错配（请求期才暴露）。透传真实条目（provider_config.json 既有
+    // anthropic 协议条目）同受派生 = D3 波及面登记的行为变化（错配顺带修正）。
+    const rule = (id: string, name: string, apiType: string) => ({
+      providerId: id,
+      providerName: name,
+      config: {
+        group: "standard-personal",
+        access: { type: "api-key", apiKey: `sk-${id}` },
+        api: { type: apiType, baseUrl: `https://${id}.test/v1` },
+        modelOrder: ["m1"],
+      },
+    });
+    const h = setupHome({
+      v2: { provider: { "p-in-v2": providerEntry("v2-key") } },
+      real: {},
+      providerConfig: {
+        schemaVersion: 1,
+        config: {
+          providerConfigRules: {
+            providerRules: [
+              rule("anthropic-real", "AnthropicRelay", "anthropic-messages"),
+              rule("openai-real", "OpenaiRelay", "openai-chat-completions"),
+            ],
+          },
+          modelConfigRules: { providerModelRules: [] },
+        },
+      },
+    });
+    const res = h.run();
+    expect(res.status).toBe(0);
+    const injected = JSON.parse(h.state().syncUtf8.text!) as {
+      provider: Record<string, { name: string; kind: string; options: { apiKey: string; baseURL: string }; source: string; models: Record<string, unknown> }>;
+    };
+    // 两种协议各得其所
+    expect(injected.provider["anthropic-real"].kind).toBe("anthropic");
+    expect(injected.provider["openai-real"].kind).toBe("openai-compatible");
+    // anthropic 条目全形状：除 kind 派生外合成形状与 openai 条目同构
+    expect(injected.provider["anthropic-real"]).toEqual({
+      name: "AnthropicRelay",
+      kind: "anthropic",
+      options: { apiKey: "sk-anthropic-real", baseURL: "https://anthropic-real.test/v1" },
+      source: "custom",
+      models: { m1: {} },
+    });
+  });
+
   it("providerRules 与 v2 同 id → 不重复合成（v2 整条优先）；provider_config 缺失 → 静默降级（v2 注入不受影响）", () => {
     const rule = {
       providerId: "shared-p",
@@ -294,6 +385,209 @@ describe("provider_config 补注入（D3 顺带发现 6：引擎校验源个人 
     expect(r2.status).toBe(0);
     const injected2 = JSON.parse(h2.state().syncUtf8.text!) as { provider: Record<string, unknown> };
     expect(injected2.provider["v2-only"]).toEqual(providerEntry("k"));
+  });
+});
+
+describe("provider_config 拦截（D3 换轨：Registry 直读路径 → merge 视图）", () => {
+  const pcRule = (id: string, key: string, models: string[]) => ({
+    providerId: id,
+    providerName: id,
+    config: {
+      group: "standard-personal",
+      access: { type: "api-key", apiKey: key },
+      api: { baseUrl: `https://${id}.test/v1` },
+      personalModelIds: models,
+    },
+  });
+
+  it("命中路径返回 merge 产物：真实条目优先（同名副本让位）+ 副本独有追加 + order 去重保序 + 其余字段取真实", () => {
+    const h = setupHome({
+      v2: { provider: { p1: providerEntry("k1") } },
+      real: {},
+      providerConfig: {
+        schemaVersion: 7,
+        topReal: "keep",
+        config: {
+          providerOrder: ["real-a", "real-b"],
+          otherCfg: 1,
+          providerConfigRules: {
+            otherPcr: true,
+            providerRules: [pcRule("real-a", "key-a", ["m-a"]), pcRule("real-b", "key-b", ["m-b"])],
+          },
+        },
+      },
+      syncedCopy: {
+        schemaVersion: 9,
+        config: {
+          // copy-c 在前 + real-b 交错 + copy-d——合并后应 = 真实现值序前缀 + 副本独有追加
+          providerOrder: ["copy-c", "real-b", "copy-d"],
+          providerConfigRules: {
+            providerRules: [
+              pcRule("real-b", "copy-key-b", ["copy-m-b"]),
+              pcRule("copy-c", "key-c", ["m-c"]),
+              pcRule("copy-d", "key-d", ["m-d"]),
+            ],
+          },
+        },
+      },
+    });
+    const res = h.run();
+    expect(res.status).toBe(0);
+    const st = h.state();
+    expect(st.pcExists).toBe(true);
+    expect(JSON.parse(st.pcSyncUtf8Dash.text as string)).toEqual({
+      schemaVersion: 7,
+      topReal: "keep",
+      config: {
+        providerOrder: ["real-a", "real-b", "copy-c", "copy-d"],
+        otherCfg: 1,
+        providerConfigRules: {
+          otherPcr: true,
+          providerRules: [
+            pcRule("real-a", "key-a", ["m-a"]),
+            pcRule("real-b", "key-b", ["m-b"]),
+            pcRule("copy-c", "key-c", ["m-c"]),
+            pcRule("copy-d", "key-d", ["m-d"]),
+          ],
+        },
+      },
+    });
+  });
+
+  it("真实缺失而副本存在 → existsSync true + 副本独有条目为全集（整体返回副本内容）", () => {
+    const copy = {
+      schemaVersion: 1,
+      config: {
+        providerOrder: ["copy-c"],
+        providerConfigRules: { providerRules: [pcRule("copy-c", "key-c", ["m-c"])] },
+      },
+    };
+    // providerConfig 不布置 → 真实 provider_config.json 缺失
+    const h = setupHome({ v2: { provider: { p1: providerEntry("k1") } }, real: {}, syncedCopy: copy });
+    const res = h.run();
+    expect(res.status).toBe(0);
+    const st = h.state();
+    expect(st.pcExists).toBe(true);
+    expect(JSON.parse(st.pcSyncUtf8Dash.text as string)).toEqual(copy);
+  });
+
+  it("env 未设 → 分支不激活（零行为变化）：真实文件原字节透传；真实缺失时 existsSync 原生 false + ENOENT", () => {
+    const raw = '{"schemaVersion":1,"config":{"providerOrder":["x"],"providerConfigRules":{"providerRules":[]}}}';
+    const h1 = setupHome({
+      v2: { provider: { p1: providerEntry("k1") } },
+      real: {},
+      providerConfigRaw: raw,
+      providerConfigEnv: null,
+    });
+    const r1 = h1.run();
+    expect(r1.status).toBe(0);
+    const st1 = h1.state();
+    expect(st1.pcSyncUtf8Dash.text).toBe(raw);
+    expect(st1.pcExists).toBe(true);
+
+    const h2 = setupHome({ v2: { provider: { p1: providerEntry("k1") } }, real: {}, providerConfigEnv: null });
+    const r2 = h2.run();
+    expect(r2.status).toBe(0);
+    const st2 = h2.state();
+    expect(st2.pcExists).toBe(false);
+    expect(st2.pcSyncUtf8Dash.code).toBe("ENOENT");
+  });
+
+  it("副本缺失（env 指向不存在路径）→ 短路回原文件（零行为变化，原字节透传）", () => {
+    const raw = '{"schemaVersion":1,"config":{"providerOrder":["x"]}}';
+    const h = setupHome({
+      v2: { provider: { p1: providerEntry("k1") } },
+      real: {},
+      providerConfigRaw: raw,
+      providerConfigEnv: path.join(tmpRoot, "absent-copy.json"),
+    });
+    const res = h.run();
+    expect(res.status).toBe(0);
+    const st = h.state();
+    expect(st.pcSyncUtf8Dash.text).toBe(raw);
+    expect(st.pcExists).toBe(true);
+  });
+
+  it("副本损坏（JSON 不可解析）→ 同副本缺失语义：短路回原文件字节", () => {
+    const raw = '{"schemaVersion":1,"config":{"providerOrder":["x"]}}';
+    const h = setupHome({
+      v2: { provider: { p1: providerEntry("k1") } },
+      real: {},
+      providerConfigRaw: raw,
+      syncedCopyRaw: "{broken-json",
+    });
+    const res = h.run();
+    expect(res.status).toBe(0);
+    expect(h.state().pcSyncUtf8Dash.text).toBe(raw);
+  });
+
+  it("PC 读取 encoding 归一（同 CONFIG_PATH 语义）：utf-8 → string、无 encoding → Buffer（内容一致）、promises 同则", () => {
+    const real = { schemaVersion: 1, config: { providerOrder: ["real-a"], providerConfigRules: { providerRules: [pcRule("real-a", "key-a", ["m-a"])] } } };
+    const copy = { schemaVersion: 1, config: { providerOrder: ["copy-c"], providerConfigRules: { providerRules: [pcRule("copy-c", "key-c", ["m-c"])] } } };
+    const h = setupHome({ v2: { provider: { p1: providerEntry("k1") } }, real: {}, providerConfig: real, syncedCopy: copy });
+    const res = h.run();
+    expect(res.status).toBe(0);
+    const st = h.state();
+    expect(st.pcSyncUtf8Dash.kind).toBe("string");
+    expect(st.pcPromiseUtf8.kind).toBe("string");
+    expect(st.pcSyncNoEnc.kind).toBe("buffer");
+    expect(JSON.parse(st.pcSyncNoEnc.text as string)).toEqual(JSON.parse(st.pcSyncUtf8Dash.text as string));
+  });
+});
+
+describe("merge 对账（launcher 内嵌 JS × preparer TS——D3 双实装逐字节锁步）", () => {
+  /** 从落盘 launcher 产物按标记截取内嵌 mergeProviderConfig 并 eval（真实执行内嵌
+   * 函数本体，非复制源——launcher 改动漏同步 preparer 时此处红灯）。 */
+  function loadLauncherMerge(): (real: unknown, copy: unknown) => unknown {
+    const engineDataDir = fs.mkdtempSync(path.join(tmpRoot, "eng-"));
+    const src = fs.readFileSync(ensureAppServerLauncher(engineDataDir), "utf8");
+    const start = src.indexOf("// [merge-fn-start]");
+    const end = src.indexOf("// [merge-fn-end]");
+    expect(start, "launcher 产物含 [merge-fn-start] 标记").toBeGreaterThanOrEqual(0);
+    expect(end, "launcher 产物含 [merge-fn-end] 标记").toBeGreaterThan(start);
+    return new Function(`${src.slice(start, end)}\nreturn mergeProviderConfig;`)() as (real: unknown, copy: unknown) => unknown;
+  }
+
+  const rule = (id: string, key: string) => ({
+    providerId: id,
+    providerName: id,
+    config: { access: { type: "api-key", apiKey: key }, personalModelIds: [`${id}-m`] },
+  });
+  const conf = (ids: string[], order: string[]) => ({
+    schemaVersion: 1,
+    config: { providerOrder: order, providerConfigRules: { providerRules: ids.map((id) => rule(id, `key-${id}`)) } },
+  });
+
+  it("组合矩阵（双全/真实缺/副本缺/同名冲突/order 交错/非对象标量）：输出 JSON 逐字节相等", () => {
+    const jsMerge = loadLauncherMerge();
+    const cases: Array<{ name: string; real: unknown; copy: unknown }> = [
+      { name: "双全", real: conf(["a", "b"], ["a", "b"]), copy: conf(["c", "d"], ["c", "d"]) },
+      { name: "真实缺（ENOENT/损坏态）", real: undefined, copy: conf(["c"], ["c"]) },
+      { name: "副本缺（非对象）", real: conf(["a"], ["a"]), copy: undefined },
+      { name: "同名冲突", real: conf(["a", "b"], ["a", "b"]), copy: conf(["b", "y"], ["y", "b"]) },
+      { name: "order 交错", real: conf(["a", "b"], ["a", "b"]), copy: conf(["b", "c", "a"], ["b", "c", "a"]) },
+      { name: "真实为非对象标量", real: 42, copy: conf(["c"], ["c"]) },
+      { name: "副本为非对象标量", real: conf(["a"], ["a"]), copy: "garbage" },
+    ];
+    for (const c of cases) {
+      expect(JSON.stringify(jsMerge(c.real, c.copy)), c.name).toBe(JSON.stringify(mergePersonalProviderConfig(c.real, c.copy)));
+    }
+  });
+
+  it("规则锚定（防双实装同错）：同名真实优先/order 前缀追加去重/其余字段取真实/真实缺返回副本整体", () => {
+    const real = { schemaVersion: 7, topReal: "r", config: { providerOrder: ["a", "b"], otherCfg: 1, providerConfigRules: { otherPcr: true, providerRules: [rule("a", "ra"), rule("b", "rb")] } } };
+    const copy = { schemaVersion: 9, config: { providerOrder: ["c", "b", "a"], providerConfigRules: { providerRules: [rule("b", "cb"), rule("c", "cc"), { noId: true }] } } };
+    expect(mergePersonalProviderConfig(real, copy)).toEqual({
+      schemaVersion: 7,
+      topReal: "r",
+      config: {
+        providerOrder: ["a", "b", "c"],
+        otherCfg: 1,
+        providerConfigRules: { otherPcr: true, providerRules: [rule("a", "ra"), rule("b", "rb"), rule("c", "cc")] },
+      },
+    });
+    // 真实缺 → 副本整体（schemaVersion 等顶层字段随副本）
+    expect(mergePersonalProviderConfig(undefined, copy)).toEqual(copy);
   });
 });
 

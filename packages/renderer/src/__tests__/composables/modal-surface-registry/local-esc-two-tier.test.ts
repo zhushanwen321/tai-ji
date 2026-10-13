@@ -2,8 +2,10 @@
  * 局部表面两档对照基线（display-containers §6.7 局部表面 Esc 消费方登记 / §8.2 验收条款 2）。
  *
  * 对账语义（§6.7 R6 判据轴：按相对编排器执行序分档）：
- * - **先行档六成员**（CommandPopover / AmbiguousFilePopover / ScheduleForm / PlanCommentPopover /
- *   useFlatListNav / ProjectSwitcher 创建输入）：消费即 preventDefault（defaultPrevented 约定）——逐成员真实事件驱动断言；
+ * - **先行档八成员**（CommandPopover / AmbiguousFilePopover / ScheduleForm / PlanCommentPopover /
+ *   useFlatListNav / SessionList 创建输入 / ProjectGroup 重命名输入 / FindBar）：消费即
+ *   preventDefault（defaultPrevented 约定）——逐成员真实事件驱动断言（输入框两成员的事件驱动
+ *   覆盖在 session-list-project-groups.test.ts 的 Esc 取消用例）；
  * - **后行档 SessionList**（window bubble 注册晚于编排器，preventDefault 不可达）：入聚合让位
  *   （yieldsEsc ✓），开合态绑定**删除确认态本体**（SessionItem 后代确认态 ∪ folderConfirmingCwd）
  *   ——反向断言 escCount 广播计数器不参与聚合（误绑 = 全局 Esc 死键）。
@@ -52,15 +54,16 @@ const EXPECTED_IDS = [
   'find-bar',
   'flat-list-nav',
   'plan-comment-popover',
-  'project-switcher-create-input',
+  'project-group-rename-input',
   'schedule-form',
   'session-list-confirm',
+  'session-list-create-input',
 ]
 
 describe('两档登记清单 ↔ §6.7 扫描清单全等（守卫类）', () => {
-  it('八成员基线全等：七先行档 prevent-default + 一后行档 aggregate-yield', () => {
+  it('九成员基线全等：八先行档 prevent-default + 一后行档 aggregate-yield', () => {
     expect(LOCAL_ESC_CONSUMERS.map((e) => e.id).sort()).toEqual(EXPECTED_IDS)
-    expect(LOCAL_ESC_CONSUMERS.filter((e) => e.tier === 'first')).toHaveLength(7)
+    expect(LOCAL_ESC_CONSUMERS.filter((e) => e.tier === 'first')).toHaveLength(8)
     expect(LOCAL_ESC_CONSUMERS.filter((e) => e.tier === 'second')).toHaveLength(1)
     for (const entry of LOCAL_ESC_CONSUMERS) {
       expect(entry.contract).toBe(entry.tier === 'first' ? 'prevent-default' : 'aggregate-yield')
@@ -297,6 +300,9 @@ describe('后行档契约：SessionList 确认态本体入聚合（yieldsEsc 让
   it('folder 确认态开着 → 聚合让位；无确认态时 escCount 广播不误绑（反向断言）', async () => {
     const wrapper = mountList()
     await nextTick()
+    // N8 A/C 双模式（U15 改造）：folder 删除确认态本体移至 C 分组模式组头——切 groups 取确认态载体
+    await wrapper.find('[data-testid="session-mode-groups"]').trigger('click')
+    await nextTick()
     expect(anyModalSurfaceYieldsEsc(), '挂载未确认 ⇒ 不让位').toBe(false)
 
     // 反向断言：Esc 广播计数器自增（无确认态）不得触发让位——误绑计数器 = 全局 Esc 死键
@@ -309,6 +315,7 @@ describe('后行档契约：SessionList 确认态本体入聚合（yieldsEsc 让
     expect(wrapper.find('[data-testid="folder-delete-btn"]').attributes('title')).toBe('确认删除此文件夹下所有会话？')
     expect(anyModalSurfaceYieldsEsc(), '确认态本体开着 ⇒ 让位').toBe(true)
     wrapper.unmount()
+    window.localStorage.removeItem('taiji:sidebar-session-mode')
   })
 
   it('SessionItem 后代删除确认态开着 → 聚合让位（N 后代确认态聚合谓词）', async () => {
@@ -347,6 +354,9 @@ describe('后行档契约：SessionList 确认态本体入聚合（yieldsEsc 让
 
     const wrapper = mountList()
     await nextTick()
+    // N8 A/C 双模式（U15 改造）：确认态载体在 C 分组模式组头——切 groups 后走原事件序断言
+    await wrapper.find('[data-testid="session-mode-groups"]').trigger('click')
+    await nextTick()
     await wrapper.find('[data-testid="folder-delete-btn"]').trigger('click')
     expect(wrapper.find('[data-testid="folder-delete-btn"]').attributes('title')).toBe('确认删除此文件夹下所有会话？')
 
@@ -362,5 +372,6 @@ describe('后行档契约：SessionList 确认态本体入聚合（yieldsEsc 让
 
     window.removeEventListener('keydown', onOrchestratorKeydown)
     wrapper.unmount()
+    window.localStorage.removeItem('taiji:sidebar-session-mode')
   })
 })

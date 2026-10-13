@@ -541,8 +541,8 @@ describe('D13 合规断言（drawer 面板）', () => {
   it('D13④ L2 tab 选中色 = bg-bg-elevated（§3.4 tab 型规则），未选中不带该类', async () => {
     const wrapper = await mountPanel(viewOf())
     const tabs = wrapper.findAll('[data-testid="plan-docs-tab"]')
-    expect(tabs[0]!.classes()).toContain('bg-bg-elevated')
-    expect(tabs[0]!.classes()).toContain('text-neutral-fg')
+    // 选中 = bg-bg-elevated + text-neutral-fg（§3.4 tab 型规则，语义同 ui TabBar 契约）
+    expect(tabs[0]!.classes()).toEqual(expect.arrayContaining(['bg-bg-elevated', 'text-neutral-fg']))
     expect(tabs[0]!.classes()).not.toContain('bg-surface-hover')
     expect(tabs[1]!.classes()).not.toContain('bg-bg-elevated')
     wrapper.unmount()

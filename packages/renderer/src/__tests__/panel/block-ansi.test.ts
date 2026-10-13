@@ -12,6 +12,8 @@ import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { Block } from '@taiji/ui'
 import type { ToolCall } from '@taiji/shared'
+// Block setup 顶部经 useChatViewDeps inject 壳依赖（ui-optimize-unified N1 起），直接 mount 必须注入 mock deps
+import { mockChatProvide } from '@/__tests__/helpers/chat-view-deps'
 
 function makeTool(over: Partial<ToolCall> = {}): ToolCall {
   return {
@@ -29,6 +31,8 @@ function makeTool(over: Partial<ToolCall> = {}): ToolCall {
 async function mountExpanded(tool: ToolCall) {
   const wrapper = mount(Block, {
     props: { type: 'toolCall', tool },
+    // Block setup 顶部经 useChatViewDeps inject 壳依赖（ui-optimize-unified N1 起），直接 mount 必须注入 mock deps
+    global: { provide: mockChatProvide() },
   })
   // tool 详情默认收起（toolCollapsed=true），点击 header 展开
   const header = wrapper.find('.cursor-pointer')

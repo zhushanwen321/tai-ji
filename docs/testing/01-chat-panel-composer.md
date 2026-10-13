@@ -309,7 +309,7 @@ Composer 是消息输入核心组件，有两种 variant：
 
 ## 2. 组件结构概述
 
-`Composer.vue`（`data-testid="composer-box"`，variant=landing|panel）是容器，内部组合：RetryIndicator / QueueBubble（排队与重试指示）、`CommandPopover`（slash/mention/file 浮层，portal 到 body）、ContextChipsBar（已附上下文 chip 行）、`ComposerInput`（contenteditable 输入区，位于 `packages/ui/src/features/composer/`，内含插入的 slash chip 与 mention chip）、工具条（AddMenuPopover / ContextCapacityPopover / ModelSelectPopover / ThinkingLevelPopover）。landing 态还有 meta-row chip 行（见 [01-chat-panel-composer.md](./01-chat-panel-composer.md)）。
+`Composer.vue`（`data-testid="composer-box"`，variant=landing|panel）是容器，内部组合：RetryIndicator / QueueBubble（排队与重试指示）、`CommandPopover`（slash/mention/file 浮层，portal 到 body）、ContextChipsBar（已附上下文 chip 行）、`ComposerInput`（contenteditable 输入区，位于 `packages/ui/src/features/composer/`，内含插入的 slash chip 与 mention chip）、工具条（AddMenuPopover / ComposerMetricsAggregate 指标聚合 / ModelSelectPopover / ThinkingLevelPopover）+ composer 顶缘容量细条（`ComposerCapacityBar`，`data-testid="composer-capacity-bar"`）。landing 态还有 meta-row chip 行（见 [01-chat-panel-composer.md](./01-chat-panel-composer.md)）。
 
 发送位四态（sendButtonState，与内核 holdReasonOf 判定序同构：compacting → bash → settling → turn 活跃）：compacting（任意 turn）→ queue 按钮（↑ 时钟角标，title="排队发送 · ⏎"）；turn=dispatching/generating（无 compacting）→ stop 按钮（title="停止"）；turn=settling 单独 → stop / settling+bash → queue；bash 且 turn 不活跃 → queue；全 idle → send 按钮（title="发送 · ⏎" / "输入内容后发送"）。发送中（isSending 受理往返）→ spinner。手动 /compact 期间不锁输入（压缩期输入/发送由投递内核 queued 车道承接）。
 
@@ -321,7 +321,7 @@ testid 以组件 template 内 data-testid 属性为准。
 |--------|--------------|
 | `composer-box` | 恒显（composer 容器） |
 | *(密度类)* | 见 §3.1 单点登记（`composer-bar` / `composer-metrics-aggregate` / `composer-model-thinking-aggregate`）；本表不重复登记，避免两处漂移 |
-| `composer-mode-chip` / `composer-handoff-chip` | 仅 fork / handoff staging 态（与「模式」概念无关，是 staging chip 的历史命名） |
+| `composer-mode-banner` / `composer-handoff-banner` | 仅 fork / handoff staging 态（staging 模式横幅，demo `.mode-banner` 形态；2026-10-11 前身为 `composer-mode-chip` / `composer-handoff-chip`，已随 banner 形态退役） |
 | `fork-send-btn` / `handoff-send-btn` | staging 态发送位 |
 
 ### 3.1 底栏密度 / 任务托盘 / 模式可见性 testid（u6 / u4 / u5 落地）
@@ -335,7 +335,7 @@ testid 以组件 template 内 data-testid 属性为准。
 | testid | 所在组件 | 触发/可见条件 |
 |--------|---------|--------------|
 | `composer-bar` | Composer.vue | 恒显；容器 `flex-nowrap`（永不换行）；`data-fit`（0–3）/ `data-anchor-protected` / `data-slot-left-cluster` / `data-slot-metrics` / `data-slot-model-thinking` 与状态机输出同步（形态断言首选用 data 属性） |
-| `composer-metrics-aggregate` | ComposerMetricsAggregate.vue | 序 2 生效（`data-slot-metrics === 'aggregated'`，实测指标放不下）；单图标指标聚合按钮（hover 弹聚合页） |
+| `composer-metrics-aggregate` | ComposerMetricsAggregate.vue | 序 1 生效（`data-slot-metrics === 'aggregated'`，实测四枚平铺指标放不下；fit 0 保持平铺直挂触发器）；仅锚点保护态（`data-anchor-protected` / `data-slot-metrics === 'absent'`）隐藏；单图标指标聚合按钮（hover 弹聚合页） |
 | `composer-model-thinking-aggregate` | ModelThinkingAggregate.vue | 序 3 生效（`data-slot-model-thinking === 'aggregated'`，实测完整模型名+档位放不下）；单图标模型聚合按钮（click 弹层，hover 行内切换） |
 | [HISTORICAL] `composer-overflow-menu` / `composer-overflow-capacity-metrics` / `composer-capacity-merged` / `composer-model-merged` | — | 已随三步聚合退役（`»` 入口与合流/截断态删除，2026-09-25）——存量测试/脚本再遇这些 id 即为旧代码 |
 
@@ -346,7 +346,7 @@ testid 以组件 template 内 data-testid 属性为准。
 | `composer-tray` | 有 sessionId（panel 态）；landing 态不渲染 |
 | `tray-builtin-button` | built-in 每件一个（`data-kind` = `bash` / `subagent` / `workflow` / `session`，`data-state` = `running` / `idle`） |
 | `tray-builtin-pulse` / `tray-builtin-count` | 该类有进行中（`running > 0`）才渲染（归零不虚亮） |
-| `tray-aggregate-button` | fit L1 生效（实测左簇放不下，`data-slot-left-cluster === 'aggregated'`）且（托盘有条目 或 插件 toolbar 有贡献）；聚合入口 = **单图标** + 运行数数字角标（禁多 icon 重叠） |
+| `tray-aggregate-button` | fit L2 生效（实测左簇放不下，`data-slot-left-cluster === 'aggregated'`）且（托盘有条目 或 插件 toolbar 有贡献）；聚合入口 = **单图标** + 运行数数字角标（禁多 icon 重叠） |
 | `tray-aggregate-pulse` / `tray-aggregate-count` | 聚合态且有运行中 |
 | `tray-aggregate-panel` / `tray-aggregate-section-{kind}` / `tray-aggregate-count-{kind}` | 聚合面板内分段展示全部类别 |
 | `tray-session-panel` / `tray-session-header` / `tray-session-row` / `tray-session-dot` / `tray-session-meta` / `tray-session-empty` | 第 4 件「子会话」面板（扁平列表，非分桶槽）：数据 = `parentAgentSessionId === 当前 sessionId`；行内操作仅 pin 态（打开 / 停止两段确认，停止 testid = `tray-session-stop` 与确认态 `tray-session-stop-confirm`） |
@@ -761,8 +761,8 @@ Composer.onSend(segments)（send 显式接收 sessionId——双 panel 各自绑
 
 | 条目类型 | 出站形态 | 终局凭据 | 空窗计时器 |
 |---------|---------|---------|-----------|
-| 命令条目（识别命中） | 不尾附投递标记（裸命令文本） | disposition=handled 即终局——内核经 WS `session.deliveryHandled { sessionId, clientUuid }` 一对一通知，前端静默回滚三件套（移除乐观气泡 + 清空空窗计时器 + 递减在途计数），无错误提示 | 不挂（pendingSend 空窗计时器对命令条目豁免——D14③ 三闸联动之一，另两闸 = sendCommand 不限时 + 内核 settle 兜底不武装） |
-| 普通消息（未识别 `/` 前缀 / skill / prompt 模板） | 注标出站（形态与送达回执链路零变化） | message_end 回执命中（既有链路） | 30s 空窗不变 |
+| 命令条目（识别命中） | 不尾附投递标记（裸命令文本） | disposition=handled 即终局——内核经 WS `session.deliveryHandled { sessionId, clientUuid }` 一对一通知，前端静默回滚三件套（移除乐观气泡 + 清 dispatching 占位（clearPendingSend，纯 Set 操作）+ 递减在途计数），无错误提示 | 不挂（pendingSend 30s 空窗计时器已随 ADR-0122 整体退役，所有条目均不再挂墙钟计时器） |
+| 普通消息（未识别 `/` 前缀 / skill / prompt 模板） | 注标出站（形态与送达回执链路零变化） | message_end 回执命中（既有链路） | 不挂（同上，计时器已随 ADR-0122 退役） |
 
 命令条目终局凭据丢失时的兜底链路：
 - 断线窗口通知丢失 / runtime 重启 → `session.delivery` 快照孤儿对账（D1⑤）静默清除；操作域仅限受理回执登记的命令条目（普通条目清除会在快照先于回执窗口删掉已送达气泡）。

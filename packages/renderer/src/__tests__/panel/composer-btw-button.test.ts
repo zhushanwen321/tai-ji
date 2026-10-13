@@ -22,7 +22,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
-import { computed, defineComponent, nextTick, reactive, ref } from 'vue'
+import { computed, nextTick, reactive, ref } from 'vue'
 import type { Ref } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import type { Message } from '@taiji/shared'
@@ -81,14 +81,11 @@ vi.mock('@/api', () => composerApiModuleWithChatAndBtw())
 
 // ── 子组件 stub（AddMenuPopover 保持真实：`+` 首位是「既有布局不破坏」断言对象）──
 const { ComposerInputMock } = makeComposerInputMock()
-// GenStatsTriggers 专属空 stub（composerChildStubs 未覆盖的本文件特例）
-const SIMPLE = defineComponent({ name: 'SimpleStub', template: '<div />' })
 // 从共享 stub 剔除 AddMenuPopover（保持真实），其余兄弟子组件转发 composerChildStubs
 const { AddMenuPopover: _addMenuPopoverReal, ...childStubs } = composerChildStubs
 const stubs = {
   ComposerInput: ComposerInputMock,
   ...childStubs,
-  GenStatsTriggers: SIMPLE,
 }
 
 const SID = 's-btw-btn'

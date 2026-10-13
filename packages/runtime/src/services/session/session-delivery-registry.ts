@@ -149,7 +149,7 @@ export interface SessionDeliveryRegistry {
   /** 对账器入口（五触发点共用；内部自行节流与幂等） */
   reconcile(sessionId: string, trigger: ReconcileTrigger): Promise<void>
   /**
-   * pi 断连事件输入（ADR-0122 命令终局事件化的断连腿，command-pi-restart-response-loss）：
+   * pi 断连事件输入（ADR-0122 命令终局事件化的断连腿）：
    * pi 进程退出/断连时由 onSessionExit 链调用（removeSessionEntry 与 MessageBus 清理之前，
    * 通知必须仍可达订阅者）。挂起的在途投递批量转显式失败终局：撤销待收回条目按撤销意图
    * 兑现（文本随进程死亡离场）；其余 in-flight 条目转 failed + message.error 逐条显式

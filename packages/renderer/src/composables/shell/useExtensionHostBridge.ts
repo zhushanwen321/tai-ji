@@ -193,6 +193,25 @@ export interface HeaderActionsSource {
 export const HEADER_ACTIONS_SOURCE_KEY: InjectionKey<HeaderActionsSource> = Symbol('header-actions-source')
 
 /**
+ * 「当前 session 下是否存在至少一个可见 headerAction 按钮」判定（composer 左簇密度聚合用：
+ * L2 起左簇聚合时 headerAction 入口从左簇摘除、改在托盘聚合面板首段渲染——聚合面板段的
+ * 发丝分隔线需要「有可见按钮才出段」的同源判定，见 ComposerTray）。
+ *
+ * 判定条件与 `HeaderActionsHost` 的按钮渲染过滤（toHeaderActionButton 返回 null 的分支）
+ * **保持字面同构**：声明缺省 / 运行时 hidden=true / （非 overlay 直开且）无 commandId 三者
+ * 皆不可见；E13/E3 簿记只影响 disabled/tooltip 不影响可见性，不在此复制。两处若增删可见性
+ * 条件必须同批改（composer-tray 聚合面板段用例钉住对账）。
+ */
+export function hasVisibleHeaderActions(source: HeaderActionsSource, sessionId: string): boolean {
+  return [...source.getDeclarations()].some((decl) => {
+    const ha = decl.headerAction
+    if (!ha) return false
+    if (source.getRuntimeState(sessionId, decl.contributionId)?.hidden === true) return false
+    return ha.activation === 'scheduler-overlay' || !!ha.commandId
+  })
+}
+
+/**
  * E13 判定的最小读取面（会话命令分区；结构契约而非 pinia store 全型——纯函数直测
  * 只需 getCommands，test-coverage SG-2 补防线时提出）。
  */

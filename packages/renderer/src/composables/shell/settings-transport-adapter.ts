@@ -99,6 +99,7 @@ export function createSettingsTransport(): SettingsTransport {
     setSmartContextExcludedModels: (models) => settings.setSmartContextExcludedModels(models),
     setCodemodeEnabled: (enabled) => settings.setCodemodeEnabled(enabled),
     setSubagentDefaultEngine: (engineId) => session.setSubagentDefaultEngine(engineId),
+    setSubagentEngineDefaultModel: (engineId, modelRef) => session.setSubagentEngineDefaultModel(engineId, modelRef),
     oauthLogin: (providerId) => config.oauthLogin(providerId),
     oauthCancel: (providerId) => config.oauthCancel(providerId),
     oauthLogout: (providerId) => config.oauthLogout(providerId),

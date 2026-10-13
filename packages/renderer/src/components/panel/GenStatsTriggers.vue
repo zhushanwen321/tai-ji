@@ -3,8 +3,12 @@
     composer-gen-stats 三触发器（D4/D5 + 归因降噪 2026-09-19 D-A + composer-genstats-ttft U4）。
     组件内顺序（左→右）：TTFT 首字延迟 · TOKEN 速度（t/s）· 缓存命中率（%），整组位于
     上下文容量触发器左侧。独立判定 null →「—」（无值编码纪律：null=无数据，0=真实测量值，D4）。
+    空值不占位（2026-10-11 用户裁决，对齐 landing 无数据不渲染的形态）：某触发器无值
+    （null 且非归因态）时整钮不渲染——新会话/新旁路线首 turn 前底栏不再出现「— — —」；
+    有值/归因态（成因文案是待读信号）照常显示。
     语义色三档（项目语义色 token，纯灰体系既有档）：
-      命中率（正向）：≥80 success · 50–80 warn · <50 danger；
+      命中率（正向）：≥80 success · 50–80 中性（dim）· <50 warn（demo cacheCls 对齐——
+      中档是正常波动非告警）；
       TTFT（反向延迟）：<1500ms success · 1500–3000ms warn · >3000ms danger（阈值为初值，
       无历史校准源，重审触发 = 用户反馈档位与体感系统性不符，设计 §3.1）；null 恒中性灰。
     归因降噪（2026-09-19 D-A）：帧带 cacheRatio.currentMiss 时本次触发器显成因文案（中性色，
@@ -20,14 +24,14 @@
     model 校验兜底全在 composable）。
   -->
   <div class="flex items-center gap-0">
-    <!-- TTFT 触发器（速度左侧，composer-genstats-ttft） -->
-    <HoverCard>
+    <!-- TTFT 触发器（速度左侧，composer-genstats-ttft）；null 不渲染（空值不占位裁决） -->
+    <HoverCard v-if="ttftCurrent != null">
       <HoverCardTrigger as-child>
         <Button
           variant="ghost"
           :class="
             cn(
-              'h-7 gap-1 rounded-sm px-2 text-[11px] transition-colors',
+              'h-7 gap-1 rounded-[var(--radius-xs)] px-2 text-[length:var(--text-2xs)] transition-colors hover:bg-transparent',
               ttftTriggerClass,
             )
           "
@@ -36,21 +40,25 @@
           <span class="tabular-nums" data-testid="genstats-ttft-value">{{ ttftDisplay }}</span>
         </Button>
       </HoverCardTrigger>
+      <!-- 右下锚（demo .stats-pop：right:0 + bottom:calc(100%+10px)）：align="end" +
+           side-offset 10px，三触发器浮层同规格 -->
       <HoverCardContent
         side="top"
-        class="w-[260px] p-0"
+        align="end"
+        :side-offset="10"
+        class="w-[248px] p-0"
         data-testid="genstats-ttft-popover"
       >
         <GenStatsTtftCard :session-id="props.sessionId" :model-id="props.modelId" />
       </HoverCardContent>
     </HoverCard>
 
-    <!-- 速度触发器（只留数值） -->
-    <HoverCard>
+    <!-- 速度触发器（只留数值）；null 不渲染 -->
+    <HoverCard v-if="speedCurrent != null">
       <HoverCardTrigger as-child>
         <Button
           variant="ghost"
-          class="h-7 gap-1 rounded-sm px-2 text-[11px] text-neutral-dim transition-colors hover:text-neutral-mid"
+          class="h-7 gap-1 rounded-[var(--radius-xs)] px-2 text-[length:var(--text-2xs)] text-neutral-dim transition-colors hover:bg-transparent"
           :title="t('panel.context.genStatsSpeedTitle')"
         >
           <span class="tabular-nums" data-testid="genstats-speed-value">{{ speedDisplay }}</span>
@@ -58,18 +66,20 @@
       </HoverCardTrigger>
       <HoverCardContent
         side="top"
-        class="w-[260px] p-0"
+        align="end"
+        :side-offset="10"
+        class="w-[248px] p-0"
       >
         <GenStatsSpeedCard :session-id="props.sessionId" :model-id="props.modelId" />
       </HoverCardContent>
     </HoverCard>
 
-    <!-- 缓存命中率触发器（归因态仍显成因文案，优先级高于精简） -->
-    <HoverCard>
+    <!-- 缓存命中率触发器（归因态仍显成因文案，优先级高于精简）；null 且非归因态不渲染 -->
+    <HoverCard v-if="cacheCurrent != null || cacheMiss != null">
       <HoverCardTrigger as-child>
         <Button
           variant="ghost"
-          :class="cn('h-7 gap-1 rounded-sm px-2 text-[11px] transition-colors', cacheTriggerClass)"
+          :class="cn('h-7 gap-1 rounded-[var(--radius-xs)] px-2 text-[length:var(--text-2xs)] transition-colors hover:bg-transparent', cacheTriggerClass)"
           :title="t('panel.context.genStatsCacheTitle')"
         >
           <span class="tabular-nums" data-testid="genstats-cache-value">{{ cacheDisplay }}</span>
@@ -77,28 +87,15 @@
       </HoverCardTrigger>
       <HoverCardContent
         side="top"
-        class="w-[260px] p-0"
+        align="end"
+        :side-offset="10"
+        class="w-[248px] p-0"
       >
         <GenStatsCacheCard :session-id="props.sessionId" :model-id="props.modelId" />
       </HoverCardContent>
     </HoverCard>
   </div>
 </template>
-
-<script lang="ts">
-/**
- * TTFT 展示纯函数与阈值常量已下沉 gen-stats-display.ts（与 speed/cache 同居：GenStatsTtftCard
- * 与本触发器共用，模块下沉避免 card ↔ triggers 循环 import）。此处**再导出**保持单测直连
- * 本 SFC 的既有导入面不变（gen-stats-triggers.test.ts；照 AsyncErrorFallback.vue 双 script 块先例）。
- */
-export {
-  TTFT_WARN_THRESHOLD_MS,
-  TTFT_DANGER_THRESHOLD_MS,
-  formatTtftDuration,
-  ttftTier,
-  TTFT_TRIGGER_TIER_CLASSES,
-} from './gen-stats-display'
-</script>
 
 <script setup lang="ts">
 import { computed, toRef } from 'vue'
@@ -149,19 +146,20 @@ const ttftDisplay = computed(() => (ttftCurrent.value == null ? '—' : formatTt
 const ttftTriggerClass = computed(() => TTFT_TRIGGER_TIER_CLASSES[ttftTier(ttftCurrent.value)])
 
 /** 速度触发器：current →「N t/s」，null →「—」（与卡内四行同口径，formatSpeed 共用） */
-const speedDisplay = computed(() => formatSpeed(frame.value?.speed.current))
+const speedCurrent = computed(() => frame.value?.speed.current ?? null)
+const speedDisplay = computed(() => formatSpeed(speedCurrent.value))
 
 const cacheCurrent = computed(() => frame.value?.cacheRatio.current ?? null)
 
 /** 归因态（runtime 已归因的「预期内 0%」）→ 触发器中性色 + 成因文案 */
 const cacheMiss = computed(() => frame.value?.cacheRatio.currentMiss ?? null)
 
-/** 触发器色：归因态 / 无值 → 中性；否则数值三档色（hover 同色，语义色下 hover 不改档） */
+/** 触发器色：归因态 / 无值 → 中性；否则数值三档色（仅前景档——demo 权威触发器 hover
+ *  零反馈，悬停即开浮层，hover 底由按钮静态串 hover:bg-transparent 压掉） */
 const cacheTriggerClass = computed(() => {
   const tier: CacheTier = cacheMiss.value ? 'neutral' : cacheTierOf(cacheCurrent.value)
-  if (tier === 'neutral') return 'text-neutral-dim hover:text-neutral-mid'
-  const cls = CACHE_TIER_TEXT_CLASS[tier]
-  return `${cls} hover:${cls}`
+  if (tier === 'neutral') return 'text-neutral-dim'
+  return CACHE_TIER_TEXT_CLASS[tier]
 })
 
 /** 触发器显示：归因态 → 成因文案（「空闲过期」等）；否则数值（null →「—」） */

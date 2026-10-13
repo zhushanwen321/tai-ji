@@ -29,8 +29,9 @@ describe('AddMenuPopover（TC4 slice5）', () => {
     wrapper = mount(AddMenuPopover)
     ;(wrapper.vm as unknown as { open: boolean }).open = true
     await wrapper.vm.$nextTick()
-    // PopoverContent teleport 到 body；命令项容器 w-[208px]，按钮按 v-for 顺序
-    const list = document.body.querySelector('.w-\\[208px\\]') ?? document.body
+    // PopoverContent teleport 到 body；命令项容器 min-w-[160px]（M4c demo .popover 基形态宽），
+    // 按钮按 v-for 顺序
+    const list = document.body.querySelector('.min-w-\\[160px\\]') ?? document.body
     return Array.from(list.querySelectorAll('button'))
   }
 

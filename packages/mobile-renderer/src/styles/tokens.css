@@ -41,6 +41,7 @@
 
   /* ── 文字（neutral 谱系，上抬，dim 对比度 ~4.4:1）────────── */
   --neutral-fg: #dedee2;        /* 主前景 */
+  --neutral-fg-2: #d9d9d9;      /* 次级正文（demo --fg-2：正文与工具行之间的强调文字档） */
   --neutral-mid: #96969c;       /* 正文（过 AA） */
   --neutral-dim: #74747a;       /* 次要（提亮一档） */
   --neutral-faint: #46464c;     /* 极弱/装饰 */
@@ -52,12 +53,12 @@
   --border-strong: rgba(255, 255, 255, 0.13);
   --hairline: rgba(255, 255, 255, 0.05); /* 行分隔 / drawer L1 栏底线 */
 
-  /* ── 主色（玄：近无彩度画布上的一枚弱蓝灰 accent，ui-signal-density D3 定稿）── */
-  --accent: #a5adc2;
-  --accent-hover: #b5bdd4;      /* accent 等色相提亮一档（OKLCh dL≈0.052，与其余 preset 同模式） */
+  /* ── 主色（demo 终态职能分色：主行动 = 青玉 A9；与桌面 accent 族镜像同步）── */
+  --accent: #7fb89c;
+  --accent-hover: #92c7ae;      /* accent 同色相提亮一档（暗色族；亮色族 hover 压暗，demo 同构） */
   --accent-soft: color-mix(in oklch, var(--accent) 10%, transparent);
   --accent-ring: color-mix(in oklch, var(--accent) 30%, transparent); /* 选中态内描边（Card-Active），见 design-system §2 */
-  --accent-fg: #1a1a1c;         /* accent 实色上的文字（玄主题用深字）；对 #a5adc2 对比 7.74:1 过 AA（D3 门禁） */
+  --accent-fg: #152019;         /* accent 实色上的文字；对 #7fb89c 7.38:1 过 AA */
 
   /* ── 状态色（水墨降饱和，克制放开档）────────────────── */
   --success: #78a87e;
@@ -78,20 +79,24 @@
   --font-sans: system-ui, 'PingFang SC', 'Helvetica Neue', 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif;
   --font-mono: 'JetBrains Mono', 'IBM Plex Mono', ui-monospace, Menlo, monospace;
 
-  /* 字号 scale（v6 §4：calc 自适应，2026-08-02 整体上移一档 base 13→14）
-   * 自适应公式：calc(Npx × --font-scale-u × --font-scale-mq)
-   *   --font-scale-u：用户档位（data-font-size 映射，见下方选择器）
-   *   --font-scale-mq：视口媒体查询自动档位（见文件底部 @media） */
+  /* 字号 scale：--text-* = 基准px × 用户档位（demo 固定 px，无视口档）
+   *   --font-scale-u：用户档位（data-font-size 映射，见下方选择器） */
   --font-scale-u: 1;
-  --font-scale-mq: 1;
-  --text-3xs: calc(10px * var(--font-scale-u) * var(--font-scale-mq));
-  --text-2xs: calc(11px * var(--font-scale-u) * var(--font-scale-mq));
-  --text-xs: calc(12px * var(--font-scale-u) * var(--font-scale-mq));
-  --text-sm: calc(13px * var(--font-scale-u) * var(--font-scale-mq));
-  --text-base: calc(14px * var(--font-scale-u) * var(--font-scale-mq));
-  --text-md: calc(15px * var(--font-scale-u) * var(--font-scale-mq));
+  --text-3xs: calc(10px * var(--font-scale-u));
+  --text-2xs: calc(11px * var(--font-scale-u));
+  --text-xs: calc(12px * var(--font-scale-u));
+  --text-sm: calc(13px * var(--font-scale-u));
+  --text-base: calc(14px * var(--font-scale-u));
+  --text-md: calc(15px * var(--font-scale-u));
 
-  /* ── 圆角（v6：sm 6px / 8px / lg 12px / card 10px）───────── */
+  /* 字重三档（与 renderer style.css 同值；@taiji/ui 类串经 [font-weight:var(--fw-*)]
+     消费，缺失会回退浏览器默认 400） */
+  --fw-text: 500;               /* 日常文字 */
+  --fw-mid: 600;                /* 中档：行容器 / 组头 */
+  --fw-bold: 700;               /* 粗体：动作词 / 工具名 */
+
+  /* ── 圆角（v6：xs 4px / sm 6px / 8px / lg 12px / card 10px）───────── */
+  --radius-xs: 4px;             /* 微件：seg 项/badge 内件/popover trigger */
   --radius-sm: 6px;             /* 输入框/标签 */
   --radius: 8px;                /* 按钮/卡片（默认）*/
   --radius-card: 10px;          /* 卡片容器 */
@@ -118,7 +123,9 @@
   --z-sticky: 1;
   --z-popover: 10;
   --z-overlay: 20;
+  --z-hovercard: 500;           /* hover 详情卡（demo 梯队：hovercard 不压 modal、与 dialog 分档） */
   --z-modal: 1000;
+  --z-dialog: 1100;
   --bash-output-max-height: 240px;
   /* 展开块统一限高（消费域 = BlockScrollBox：thinking 展开区 / bash 凹槽输出区 / 非 bash
      工具输出区；与 --bash-output-max-height 同量级、消费域独立互不替代）。
@@ -161,6 +168,7 @@
   --popover-foreground: var(--neutral-fg);
   --input: var(--border);              /* border-input */
   --ring: var(--accent);               /* ring-ring（focus，主色）*/
+  --focus-ring: var(--accent);         /* 焦点指示色别名（@taiji/ui 表单原语 :focus-visible outline 通道） */
 
   /* ── 视口安全区（A16：刘海屏/Home Indicator 避让）──────────
      env() 消费唯一定义点：组件经 Tailwind arbitrary value（如
@@ -188,6 +196,7 @@
   --composer-bg: #ffffff;
 
   --neutral-fg: #2b2a28;
+  --neutral-fg-2: #3a3936;
   --neutral-mid: #706e6a;
   --neutral-dim: #9d9b96;
   --neutral-faint: #c7c5c0;
@@ -198,12 +207,12 @@
   --border-strong: rgba(0, 0, 0, 0.14);
   --hairline: rgba(0, 0, 0, 0.05);
 
-  /* 墨黑 accent（宣纸上的深颜料） */
-  --accent: #36332f;
-  --accent-hover: #494641;
+  /* 青玉 accent（宣纸上的深颜料，demo 终态职能分色；亮色族 hover 压暗一档） */
+  --accent: #43765d;
+  --accent-hover: #386650;
   --accent-soft: color-mix(in oklch, var(--accent) 10%, transparent);
   --accent-ring: color-mix(in oklch, var(--accent) 30%, transparent);
-  --accent-fg: #f5f4f1;
+  --accent-fg: #f2f7f4;
 
   /* 状态色（亮色族 TAIJI_STATES_LIGHT：宣纸上的沉稳颜料） */
   --success: #368047;
@@ -232,12 +241,4 @@
 
 :root[data-font-size="large"] {
   --font-scale-u: 1.143;
-}
-
-/* 视口自适应字号（与 --font-scale-mq 配合：大屏放大、小屏收缩） */
-@media (min-width: 2100px) {
-  :root { --font-scale-mq: 1.08; }
-}
-@media (max-width: 1399px) {
-  :root { --font-scale-mq: 0.95; }
 }

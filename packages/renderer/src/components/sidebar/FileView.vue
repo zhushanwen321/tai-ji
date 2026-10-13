@@ -1,6 +1,6 @@
 <template>
   <!--
-    展示组件 · 文件视图（#4，draft-five-states §B）。
+    展示组件 · 文件视图（#4，draft-five-states spec（demo）§B）。
     [W28/D-7.2] 树形递归渲染 → 扁平可见行（projectVisibleRows）+ virtua 虚拟滚动：
     - 树数据仍是 SSOT（fileTreeStore 4 facet 不变），本组件持有唯一「树→可见行」投影 computed
     - FileTreeRow 改纯行组件（收 VisibleRow），展开/选中交互在本层编排（useFileTree + useSideDrawer）
@@ -15,50 +15,58 @@
     - 编排走 useFileTree（loadTree/expandNode/collapseNode/selectFile/setFilter）
     - sessionId 由 Sidebar 注入（当前 active session），切 session 触发 loadTree
   -->
-  <div class="flex h-full min-h-0 flex-col gap-0.5 px-1" data-testid="file-view-root">
-    <!-- 头部：当前 session 标签 + 分支（左）× showIgnored 开关（右），同一行。
-         D-020/D-004：忽略项开关从过滤框下方上移至此（与会话名同行：会话名左、忽略项右）。 -->
-    <div v-if="sessionLabel" class="flex items-center gap-2 px-2 py-1.5">
-      <div class="min-w-0 flex-1 truncate font-mono text-[length:var(--text-3xs)] text-neutral-mid">
-        <span class="text-neutral-fg">{{ sessionLabel }}</span>
-        <span v-if="branch" class="opacity-60"> · </span>
-        <span v-if="branch" class="text-accent">{{ branch }}</span>
-      </div>
+  <!-- 根容器即滚动内容节（demo .side-scroll padding 2px 6px 8px：pt-0.5 = 顶 2px、
+       px-1.5 = 左右 6px、pb-[8px] = 底 8px；与 SegmentedTab mb-2 折算联动核算见 MF 登记） -->
+  <div class="flex h-full min-h-0 flex-col px-1.5 pt-0.5 pb-[8px]" data-testid="file-view-root">
+    <!-- fv-head（demo 形态）：session 标题（13px fw-mid fg）+ 分支行（mono 11px fg-2——
+         信息文字不占 accent，workbench.css .fv-branch 语义），块底 hairline 分隔。
+         内缩 = demo 阶梯（head 18px / tools 16px / 树行 14px）：根 px-1.5(6px) +
+         head px-[12px] = 18px。D-020/D-004：忽略项开关移入下方 fv-tools 行（与过滤框同行，demo 同构）。 -->
+    <div v-if="sessionLabel" class="mb-[8px] border-b border-hairline px-[12px] pb-[8px] pt-0.5">
+      <div class="min-w-0 truncate text-[length:var(--text-sm)] [font-weight:var(--fw-mid)] text-neutral-fg">{{ sessionLabel }}</div>
+      <div v-if="branch" class="mt-0.5 truncate font-mono text-[length:var(--text-2xs)] text-neutral-fg-2">{{ branch }}</div>
+    </div>
+
+    <!-- fv-tools（demo 形态）：忽略项开关 + 过滤框同一行（gap 6px）。内缩 = 根 6px + px-[10px] = 16px 阶梯档。 -->
+    <div class="flex items-center gap-[6px] px-[10px] pb-[8px]">
       <Button
         variant="ghost"
-        class="h-5 shrink-0 gap-1 rounded-sm px-1.5 text-[length:var(--text-3xs)]"
+        class="h-[24px] shrink-0 gap-1 rounded-sm px-[7px] text-[length:var(--text-2xs)] [&_svg]:size-[15px]"
         :class="store.showIgnored ? 'text-accent' : 'text-neutral-dim'"
         :title="store.showIgnored ? t('sidebar.fileView.hideIgnored') : t('sidebar.fileView.showIgnored')"
+        :aria-pressed="store.showIgnored"
         data-testid="file-show-ignored-toggle"
         @click="onToggleShowIgnored"
       >
-        <EyeOff v-if="store.showIgnored" class="size-3" />
-        <Eye v-else class="size-3" />
+        <EyeOff v-if="store.showIgnored" />
+        <Eye v-else />
         <span>{{ t('sidebar.fileView.ignoredItem') }}</span>
       </Button>
-    </div>
-
-    <!-- 过滤框：实时按 path 模糊匹配（store.filterText，useFileTree.setFilter 驱动） -->
-    <div class="relative px-2 pb-1.5">
-      <!-- 图标按 input(h-6=24px) 高度居中：top-3(12px)=input 中心，再 -translate-y-1/2。
-           不能用 top-1/2：容器有 pb-1.5(底部6px) 无顶部 padding，容器 box 高 30px，
-           top-1/2=15px 会让图标相对整个容器居中而偏低 3px（padding/2）。 -->
-      <Search class="pointer-events-none absolute left-4 top-3 size-3 -translate-y-1/2 text-neutral-dim" />
-      <Input
-        :model-value="filterDisplay"
-        class="h-6 pl-6 pr-2 text-[length:var(--text-2xs)]"
-        :placeholder="t('sidebar.fileView.filterPlaceholder')"
-        data-testid="file-filter-input"
-        @focus="filterFocused = true"
-        @blur="filterFocused = false"
-        @update:model-value="onFilter"
-      />
+      <!-- 过滤框（demo .fv-filter）：左 7px 12px 图标 + h-6 凹陷输入（bg-input/hairline 边）。
+           容器即 input 高度，图标直接 top-1/2 居中。Input 原语默认 rounded-md(8px)/
+           placeholder mid/border-input(0.07)，此处覆写为 demo 值（r-sm 6px / dim / hairline 0.05）。 -->
+      <div class="relative min-w-0 flex-1">
+        <Search class="pointer-events-none absolute left-[7px] top-1/2 size-[12px] -translate-y-1/2 text-neutral-dim" />
+        <Input
+          :model-value="filterDisplay"
+          class="h-[24px] rounded-sm border-hairline pl-[24px] pr-[8px] text-[length:var(--text-xs)] placeholder:text-neutral-dim"
+          :placeholder="t('sidebar.fileView.filterPlaceholder')"
+          data-testid="file-filter-input"
+          @focus="filterFocused = true"
+          @blur="filterFocused = false"
+          @update:model-value="onFilter"
+        />
+      </div>
     </div>
 
     <!-- 滚动区：仅承载树（加载/错误/空态）。virtua Virtualizer 必须是其 parentElement
          （ScrollAreaViewport）的直接子节点——滚动容器由 virtua 从 parentElement 探测，
-         中间不能有包装 div（探针实证，MessageStream 同结构）。三态与树互为 v-if/v-else 链。 -->
-    <ScrollArea class="min-h-0 flex-1" horizontal>
+         中间不能有包装 div（探针实证，MessageStream 同结构）。三态与树互为 v-if/v-else 链。
+         顶缘渐焦（侧栏 spec（demo）§3.1）：滚动宿主显式传入（reka 封装在挂载点与真滚动
+         viewport 之间有内部 wrapper，parentElement 探测不成立），显隐/mask 自驱动，
+         与 Virtualizer 互为兄弟节点，不破坏「直接子节点」探测前提。 -->
+    <ScrollArea ref="treeScrollArea" class="min-h-0 flex-1">
+      <EdgeFade :scroller-el="treeScrollerEl" />
       <!-- 加载态（loadTree 在途） -->
       <div
         v-if="rootState.status === 'loading'"
@@ -66,7 +74,7 @@
         data-testid="file-loading"
       >
         <Loader2 class="size-4 animate-spin text-neutral-dim opacity-60" />
-        <p class="text-[length:var(--text-2xs)] text-neutral-dim opacity-60">{{ t('sidebar.fileView.loadingTree') }}</p>
+        <p class="text-[length:var(--text-xs)] text-neutral-dim opacity-60">{{ t('sidebar.fileView.loadingTree') }}</p>
       </div>
 
       <!-- 错误态（loadTree 失败，可重试） -->
@@ -76,31 +84,56 @@
         data-testid="file-error"
       >
         <AlertCircle class="size-5 text-danger opacity-60" />
-        <p class="text-[length:var(--text-2xs)] text-neutral-mid">{{ t('sidebar.fileView.loadFailed', { reason: rootState.reason ?? 'unknown' }) }}</p>
-        <Button variant="ghost" class="h-6 text-[length:var(--text-2xs)] text-accent" data-testid="file-retry" @click="retry">{{ t('sidebar.fileView.retry') }}</Button>
+        <p class="text-[length:var(--text-xs)] text-neutral-mid">{{ t('sidebar.fileView.loadFailed', { reason: rootState.reason ?? 'unknown' }) }}</p>
+        <Button variant="ghost" class="h-6 text-[length:var(--text-xs)] text-accent" data-testid="file-retry" @click="retry">{{ t('sidebar.fileView.retry') }}</Button>
       </div>
 
-      <!-- 空态：loaded 但无节点（空目录 cwd）或过滤无匹配（E7-c：投影空 → 维持既有空态） -->
+      <!-- 空态两分支（E7-c：投影空）：
+           hasFilter = demo .ftree-empty 权威形态（横排 space-between、
+           padding 14px 10px、--text-xs dim 文案、无图标；demo 文件树空态附「清空过滤」
+           一键恢复按钮 = fileFilter('') + showIgnored(true)，映射到既有 setFilter/toggleShowIgnored
+           通道，见 onClearFilter）；
+           空目录（cwd 无节点）= demo 无对应权威形态，保留 real 纵排图标+文案并在此登记差异。 -->
+      <div
+        v-else-if="visibleRows.length === 0 && hasFilter"
+        class="flex items-center justify-between gap-2 px-[10px] py-[14px]"
+        data-testid="file-empty"
+      >
+        <span class="text-[length:var(--text-xs)] text-neutral-dim">{{ t('sidebar.fileView.noMatch') }}</span>
+        <Button
+          variant="secondary"
+          class="h-auto rounded-sm border-border-strong bg-surface-hover px-[10px] py-[3px] text-[length:var(--text-xs)] text-neutral-fg"
+          data-testid="file-clear-filter"
+          @click="onClearFilter"
+        >
+          {{ t('sidebar.fileView.clearFilter') }}
+        </Button>
+      </div>
       <div
         v-else-if="visibleRows.length === 0"
         class="flex flex-col items-center justify-center gap-2 py-10 text-center"
-        data-testid="file-empty"
+        data-testid="file-empty-dir"
       >
-        <component :is="hasFilter ? SearchX : FolderOpen" class="size-5 text-neutral-dim opacity-50" />
-        <p class="text-[length:var(--text-2xs)] text-neutral-dim opacity-55">{{ hasFilter ? t('sidebar.fileView.noMatch') : t('sidebar.fileView.noFile') }}</p>
+        <FolderOpen class="size-5 text-neutral-dim opacity-50" />
+        <p class="text-[length:var(--text-xs)] text-neutral-dim opacity-55">{{ t('sidebar.fileView.noFile') }}</p>
       </div>
 
-      <!-- 文件树：virtua 挂扁平行（可见行 = projectVisibleRows 投影；itemProps 宽度 max-content
-           使长文件名撑开横向滚动，minWidth 100% 保短行 hover 铺满容器——实测量化见 W28 汇报探针）。
+      <!-- 文件树：virtua 挂扁平行（可见行 = projectVisibleRows 投影）。2026-10-10 用户裁决
+           （「长文件名不做横向滚动，用省略号+悬停展示」）落定 demo .fname 契约：行宽 = 100%
+           容器宽，名称超宽省略号截断 + title 悬停展示全名（FileTreeRow .fname 承接）；
+           原 max-content 整树横滚架构退役（旧互斥登记作废）。
            注意：<template #default> 内禁止放注释/文本节点——virtua 的 item key 提取要求 slot 返回
            恰好 1 个 vnode（P(): e.length===1 才取 e[0].key），注释节点会 fallback 索引 key。 -->
+      <!-- role=tree（files spec（demo）§2 ftree 树语义容器）：经 attrs 透传落到 Virtualizer 根 div
+           （virtua 未关 inheritAttrs），行级 role=treeitem 由 FileTreeRow 承载。 -->
       <Virtualizer
         v-else
-        class="mt-1"
+        role="tree"
         :data="visibleRows"
         :item-size="ROW_HEIGHT_ESTIMATE"
-        :item-props="() => ({ style: { width: 'max-content', minWidth: '100%' } })"
+        :item-props="() => ({ style: { width: '100%' } })"
         :key="props.sessionId"
+        :scroll-ref="treeScrollerEl"
       >
         <template #default="{ item }">
           <FileTreeRow
@@ -119,9 +152,10 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onBeforeUnmount, toRef } from 'vue'
 import { Virtualizer } from 'virtua/vue'
-import { FolderOpen, Search, SearchX, Loader2, AlertCircle, Eye, EyeOff } from '@lucide/vue'
+import { FolderOpen, Search, Loader2, AlertCircle, Eye, EyeOff } from '@lucide/vue'
 import { useI18n } from 'vue-i18n'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { EdgeFade } from '@/components/ui/edge-fade'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import FileTreeRow from './FileTreeRow.vue'
@@ -149,7 +183,16 @@ const selectedPath = computed(() => store.getSelectedPath(props.sessionId))
 const { loadTree, setFilter, setupInvalidation, toggleShowIgnored, expandNode, collapseNode, selectFile } = useFileTree()
 const drawer = useSideDrawer()
 
-/** virtua item-size 初始估算（px）：行高 = py-0.5(4px) + 单行内容 ≈ 24px，挂载后 ResizeObserver 实测校正 */
+// 滚动宿主（EdgeFade scrollerEl）：同 SessionList——reka ScrollArea 内部 wrapper 使
+// parentElement 探测不成立，从 ScrollArea expose 显式取 viewport 元素
+//（expose 链两层解包：ScrollArea.viewportEl（自动解包的 ref）→ Viewport 实例.viewportElement）
+const treeScrollerEl = ref<HTMLElement | undefined>(undefined)
+const treeScrollArea = ref<{ viewportEl: { viewportElement: HTMLElement } | null } | null>(null)
+onMounted(() => {
+  treeScrollerEl.value = treeScrollArea.value?.viewportEl?.viewportElement ?? undefined
+})
+
+/** virtua item-size 初始估算（px）：树行已按 demo .frow 定高 24px（FileTreeRow h-[24px]），与实测一致 */
 const ROW_HEIGHT_ESTIMATE = 24
 
 /** 跨 store 失效 unwatch 句柄（onBeforeUnmount 清理，W6 #3.11） */
@@ -161,7 +204,7 @@ const rootState = computed(() => store.getNodeState(props.sessionId, ''))
 /**
  * [W28/D-7.2] 唯一「树 → 可见行」投影 computed（E7-a：computed 缓存投影，依赖分桶后的
  * 细粒度 getter——展开/折叠/过滤/overlay 变化触发一次 O(可见行) 重投影）。
- * [W28 审查 Fix-2] overlay/counts 走 per-session getter（getGitOverlay/getDirChangeCounts，
+ * [W28 审查 Fix-2] overlay 走 per-session getter（getGitOverlay，
  * 与 getExpanded 同款分桶）——只追踪本 sid 分桶 key，异 sid git.status 回写不触发重算
  * （split mode 多面板隔离；store 侧 setGitOverlay 已改 keyed set 支撑）。
  * 语义与旧递归渲染逐行等价（顶层过滤 + 展开 DFS + loading/error/empty 占位行）。
@@ -171,7 +214,6 @@ const visibleRows = computed<VisibleRow[]>(() =>
     (sid) => store.getTree(sid),
     (sid) => store.getExpanded(sid),
     (sid) => store.getGitOverlay(sid),
-    (sid) => store.getDirChangeCounts(sid),
     store.filterText,
     store.showIgnored,
     props.sessionId,
@@ -211,6 +253,17 @@ watch(
 function onFilter(value: string | number): void {
   filterDisplay.value = String(value)
   setFilter(String(value))
+}
+
+/**
+ * 清空过滤（demo .ftree-empty 的「清空过滤」一键恢复）：
+ * demo 语义 = fileFilter('') + showIgnored(true)——复用 onFilter('') 通道（防抖提交一致）；
+ * showIgnored 走 toggleShowIgnored 通道但加守卫只在关闭态触发（toggle 直调会把已开启的
+ * 忽略项误关，偏离 demo 的「设为 true」语义）。
+ */
+function onClearFilter(): void {
+  onFilter('')
+  if (!store.showIgnored) toggleShowIgnored()
 }
 
 /** 错误态重试：重 loadTree（useFileTree 内 loaded 复用，error 态会重发） */

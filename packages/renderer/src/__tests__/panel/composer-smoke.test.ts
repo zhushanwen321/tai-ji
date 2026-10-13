@@ -16,13 +16,13 @@
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/panel/composer-smoke.test.ts
  */
+import { composerApiModule, makeComposerInputMock } from '../helpers/composer-mount'
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { defineComponent, ref } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import { stashOrphanedDraft, __resetOrphanedDraftForTesting } from '@taiji/core/domain/composer'
 import Panel from '@/components/panel/Panel.vue'
-import { makeComposerInputMock } from '../helpers/composer-mount'
 
 // ── useNewTaskFlow mock：Landing + Composer 的 session/cwd/branch/模型真源 ──
 // （currentCwd 不入 hoisted 块——W4 要求真 ref，由工厂执行期内联 ref 注入）
@@ -123,12 +123,9 @@ vi.mock('@/composables/features/chat/useChat', () => ({
 vi.mock('@/composables/useToast', () => ({
   useToast: () => toastMock,
 }))
-vi.mock('@/api', () => ({ project: { load: vi.fn().mockResolvedValue({ projects: [], activeProjectId: '' }), save: vi.fn().mockResolvedValue(undefined) },
+vi.mock('@/api', () => ({
+  ...composerApiModule(),
   chat: { send: chatApiMock.send },
-  model: { switchModel: vi.fn() },
-  session: { setThinkingLevel: vi.fn() },
-  composer: { getMentionCandidates: vi.fn().mockResolvedValue([]), getFileCandidates: vi.fn().mockResolvedValue([]) },
-  config: { getGlobalSkills: vi.fn().mockResolvedValue([]), getProjectSkills: vi.fn().mockResolvedValue([]), onSkillCacheInvalidated: () => () => {} },
 }))
 vi.mock('@/stores/session', () => ({
   useSessionStore: () => ({ active: undefined, list: [], applySnapshot: vi.fn(), revive: vi.fn() }),
@@ -155,6 +152,7 @@ const stubs = {
   AddMenuPopover: SIMPLE,
   ContextChipsBar: SIMPLE,
   ContextCapacityPopover: SIMPLE,
+  ComposerCapacityBar: SIMPLE,
   ModelSelectPopover: SIMPLE,
   ThinkingLevelPopover: SIMPLE,
   RetryIndicator: SIMPLE,

@@ -1,5 +1,11 @@
 # @zhushanwen/subagent-core
 
+## 1.5.0
+
+### Minor Changes
+
+- 0c4bec66e: Dispatch now resolves model selection through a four-layer priority (explicit override, engine default, task preset, session model), engineDefaults keys are sanitized at write time and read directly at dispatch, and standalone reclamation mechanisms superseded by session-delete cascade are retired.
+
 ## 1.4.0
 
 ### Minor Changes

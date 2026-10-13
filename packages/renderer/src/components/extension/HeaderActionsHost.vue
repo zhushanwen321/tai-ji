@@ -4,8 +4,12 @@
   消费 ContributionRegistry 的 headerAction 声明（经 bridge 的响应式声明镜像）+
   HeaderActionStore per-session 运行时镜像（badge/tooltip/disabled，#42）渲染按钮组。
   插入点（用户裁决 2026-10-06）：Composer 左簇、「+」（AddMenuPopover）之后、btw 按钮
-  （ComposerBtwButton）之前；按钮与左簇相邻 icon-btn 同规格（size-[28px] rounded-sm，
-  对齐 ComposerBtwButton / AddMenu 触发器形态），composer 底栏非 drag 区无 app-region 类。
+  （ComposerBtwButton）之前；按钮与左簇相邻 icon-btn 同规格（size-[30px] rounded-sm，
+  对齐 demo .cbtn 30×30 / ComposerBtwButton 同款），composer 底栏非 drag 区无 app-region 类。
+
+  密度归属（demo composer-bar spec §2.1/§4.2 B3）：挂载条件在消费方（Composer 左簇只在
+  leftCluster==='expanded' 渲染）；L2 起聚合，同一挂载点数据源改在托盘聚合面板首段渲染
+  （ComposerTray）——入口随聚合走，不因宽度退化丢失。
 
   - badge ≤4 字符宿主截断，全文进 tooltip（AP-1 徽标契约）
   - E13 三态灰置：registered 可点 / unregistered 灰置+tooltip / unknown 保持上次值
@@ -30,17 +34,25 @@
       :key="b.key"
       variant="ghost"
       size="icon"
-      class="relative size-[28px] shrink-0 rounded-sm text-neutral-dim transition-colors hover:bg-surface-hover hover:text-neutral-mid disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-neutral-mid"
+      class="relative size-[30px] shrink-0 rounded-sm text-neutral-dim transition-colors hover:bg-surface-hover hover:text-neutral-fg disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-neutral-mid"
       :data-testid="b.testid"
       :disabled="b.disabled"
       :title="b.tooltip"
       :aria-label="b.tooltip"
       @click="b.onClick()"
     >
-      <component :is="b.icon" class="size-4" />
+      <!-- 图标 16px 固定（demo .cbtn 图标规格；rem 类会随 --font-scale 视口档缩放偏离 demo 值）。
+           stroke-width 1.6 与全仓 lucide 图标统一细线口径（demo 同款）；b.icon 恒为 lucide
+           组件（HEADER_ACTION_ICONS 映射表 + Puzzle fallback），插件不投递自带上色 SVG。 -->
+      <component :is="b.icon" class="size-[16px]" :stroke-width="1.6" />
+      <!-- 角标形态 = TRAY_ITEM_COUNT_CLASS 同款（demo .cbtn .badge：-3px 外扩 / 14px 高 /
+           px 3px / 胶囊 / mono 10px / fw-mid），单点消费 tray-item-button.ts 共享常量防漂移；
+           配色走中性 quiet 档（demo workbench.css .badge-quiet：hover 底 + mid 字；spec
+           composer spec（demo） §4 / composer #8——accent 实底只给未读类需关注态（btw 未读角标），
+           headerAction 计数是一般计数不走 accent） -->
       <span
         v-if="b.badge"
-        class="absolute -right-1.5 -top-1.5 inline-flex h-3 min-w-3 items-center justify-center rounded-full bg-accent px-1 font-mono text-[9px] font-semibold leading-none text-accent-fg ring-1 ring-bg"
+        :class="[TRAY_ITEM_COUNT_CLASS, 'bg-surface-hover', 'text-neutral-mid']"
       >{{ b.badge }}</span>
     </Button>
   </template>
@@ -53,6 +65,7 @@ import type { Component } from 'vue'
 import { Button } from '@/components/ui/button'
 import { useI18n } from 'vue-i18n'
 import { openSchedulerTab } from '@/components/panel/workflow-viz/overlay/workflow-viz-overlay'
+import { TRAY_ITEM_COUNT_CLASS } from '@/components/panel/tray/tray-item-button'
 import { HEADER_ACTIONS_SOURCE_KEY } from '@/composables/shell/useExtensionHostBridge'
 import type {
   HeaderActionCommandAvailability,
