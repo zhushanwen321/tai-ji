@@ -1,11 +1,11 @@
 /**
- * 会话条目激活态样式测试（demo .si.on 终态：workbench.css 文件尾「选中态两级范式」Tier B——
- * 无底无框，仅行文字提亮 fg；hover 底恒在（demo .si:hover 恒有背景，与激活态不排他））。
+ * 会话条目激活态样式测试（用户裁决 2026-10-13 demo 选型：选中 = 悬停同色实底 bg-surface-hover
+ * + 行文字提亮 fg，无竖条无描边——选中强度 ≥ hover，同底靠字色拉开）。
  *
  * 三视角（TEST-STRATEGY §3）：
- *  - 构建者白盒：active prop 驱动根节点类分支（激活无选中底/框）
+ *  - 构建者白盒：active prop 驱动根节点类分支（激活挂 bg-surface-hover）
  *  - 使用者黑盒：激活条目标题文字可见且为提亮的中性色
- *  - 观察者形态：激活态 = 无 bg-bg-elevated、无 accent 竖条/描边 + 行文字 text-neutral-fg
+ *  - 观察者形态：激活态 = 无 accent 竖条/描边/elevated 底 + bg-surface-hover + text-neutral-fg
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/sidebar/session-item-active-style.test.ts
  */
@@ -37,11 +37,13 @@ beforeEach(() => {
   setActivePinia(createPinia())
 })
 
-describe('会话条目激活态样式（demo .si.on Tier B：无底无框仅文字提亮）', () => {
-  it('激活条目：根节点无选中底与竖条（行类不画选中框），保留行文字提亮', () => {
+describe('会话条目激活态样式（选中 = 悬停同色实底 + 文字提亮）', () => {
+  it('激活条目：根节点挂 bg-surface-hover（与 hover 同色实底），无竖条/elevated 底，保留行文字提亮', () => {
     const wrapper = mountItem(true)
     const root = wrapper.find('.session-item')
+    expect(root.classes()).toContain('bg-surface-hover')
     expect(root.classes()).not.toContain('bg-bg-elevated')
+    expect(root.classes()).not.toContain('bg-accent-soft')
     expect(root.classes()).not.toContain('shadow-[inset_2px_0_0_var(--accent)]')
     expect(root.classes()).toContain('text-neutral-fg')
   })

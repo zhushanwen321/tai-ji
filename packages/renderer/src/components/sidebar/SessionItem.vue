@@ -31,16 +31,16 @@
     @set-project="emit('setProject', $event)"
     @export-jsonl="emit('exportJsonl', $event)"
   >
-    <!-- 激活态 = demo .si.on（workbench.css 文件尾 Tier B）：无底无框，仅行文字提亮 fg；
-         非激活行不加行级色（标题色三级范式：普通 fg-2 由 Display 的 .nm 分支承载，
-         hover 只变背景不变字色——demo .si:hover 仅 background） -->
+    <!-- 激活态（用户裁决 2026-10-13 demo 选型）：选中 = 悬停同色实底（bg-surface-hover）+ 行文字
+         提亮 fg，无竖条无描边——选中强度 ≥ hover（两者同底，字色 fg > fg-2 拉开），普通行不加行级色
+         （标题色三级范式：普通 fg-2 由 Display 的 .nm 分支承载，hover 只变背景不变字色） -->
     <div
       ref="rootEl"
       role="button"
       tabindex="0"
       class="session-item group/item relative flex cursor-pointer select-none items-center gap-[8px] rounded-sm px-[8px] py-[7px] transition-colors duration-[var(--duration-fast)] ease-[var(--ease-out)] hover:bg-surface-hover"
       :class="[
-        active ? 'text-neutral-fg' : '',
+        active ? 'bg-surface-hover text-neutral-fg' : '',
         isDead ? 'opacity-50' : '',
       ]"
       :aria-label="ariaLabel"
