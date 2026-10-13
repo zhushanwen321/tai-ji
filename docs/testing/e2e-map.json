@@ -2248,7 +2248,7 @@
       "run": "bash scripts/check-version-changes.sh",
       "owner": "scripts/",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
-      "note": "无 vitest 测试资产，run = 脚本干跑（git diff range 缺省对工作区，空改动输出空列表 exit 0）"
+      "note": "无 vitest 测试资产，run = 脚本干跑（git diff range 缺省 main..HEAD（merge 时传 merge commit range），空改动输出空列表 exit 0）"
     }
   ]
 }
