@@ -232,9 +232,9 @@ export default function (pi: ExtensionAPI): void {
 		// tool-declaration-slimming D1 终态：调用信号 + 一个正例 + 结构反例在 description
 		// 一处；参数功能语义在 InputSchema 字段说明（types.ts）；promptGuidelines 层删除
 		// （原 6 条与 description/schema 逐条重复）。锚词保留清单见 __tests__/prompt-quality.test.ts 头注。
-		description: `Ask the user to resolve ambiguity you cannot resolve yourself. Use ONLY when ALL hold: (1) ≥2 reasonable approaches exist, (2) you already gathered context (read/grep) and it is still genuinely ambiguous, (3) picking wrong means redoing real work.
+		description: `Ask the user to resolve ambiguity you cannot resolve. Use ONLY when ALL hold: (1) ≥2 reasonable approaches exist, (2) you already gathered context (read/grep) and it is still genuinely ambiguous, (3) picking wrong means redoing real work.
 
-Do NOT use this tool to outsource judgment you should make — if you can form a defensible recommendation from the codebase, proceed and state your choice. Not for trivia answerable by reading code/docs, simple confirmations (plain text suffices), or free-form/long-form input — it returns short selections only.
+Do NOT use this tool to outsource judgment you should make — if you can form a defensible recommendation from the codebase, proceed and state it. Not for trivia answerable by reading code/docs, simple confirmations (plain text suffices), or free-form input — it returns short selections only.
 
 If you recommend an option, prefix its label with "(Recommended)" and list it first. One question = one decision with mutually exclusive options.
 
