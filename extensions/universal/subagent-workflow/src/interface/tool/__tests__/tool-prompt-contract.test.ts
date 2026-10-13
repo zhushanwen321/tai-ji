@@ -101,136 +101,110 @@ function properties(): Record<string, unknown> {
 }
 
 // ══════════════════════════════════════════════════════════════
-// subagent tool description（原 subagent-tool-prompt.test.ts）
+// subagent tool 声明（tool-declaration-slimming D1 三层分工终态 + D2 锚词保留清单）
 // ══════════════════════════════════════════════════════════════
 
-describe("subagent tool description — 行为约束器（非功能说明书）", () => {
-  it("词数 ≤ 850（高风险 description 密度上限）", () => {
-    // 高风险 tool 的 description 应聚焦约束而非功能铺陈；过长会稀释信号。
-    // 上限演进：400 → 550（补 start/list/cancel 三 action 完整 JSON 正例）→
-    // 650（M2-B3 新增 message/close 两 action + conversation 对话模式 + 例子）→
-    // 800（递归指导：树形判据 + 自包含 task + 独立验收 + fork 成本警告）→
-    // 850（C2 补 sync 批独立判据禁令句——adversarial-review-fixes §3.4：原 description
-    // 未定义 independent 且未交叉引用依赖链禁令，依赖任务入批缺判据拦截）。
-    // 逼近上限时优先精简正文而非再放宽断言。
-    // 每次 action 扩展必然增加必需描述；正例对弱模型首次用对参数的价值 > 节省 description 预算。
-    const words = DESCRIPTION.trim().split(/\s+/).filter(Boolean).length;
-    expect(words).toBeLessThanOrEqual(850);
+/**
+ * 【锚词保留清单 — subagent】（tool-declaration-slimming D2：压缩后的契约 = 逐锚词
+ * grep，替代原逐字断言。每个锚词是一个弱模型回补点，删除前须确认有替代承载）：
+ *
+ * description 层（是什么 + 动作一览 + 边界 + 唯一正例）：
+ *  A1  CRITICAL + sequential + SAME message —— 同消息多调用串行执行语义
+ *  A2  Nested spawning + "Depth: N/10" —— 递归允许 + 深度上限（防错误拒绝嵌套）
+ *  A3  TREE-SHAPED / SELF-CONTAINED / acceptance criteria / safety rail —— 递归判据
+ *  A4  You cannot —— 能力边界（无同步结果 / 无流式输出）
+ *  A5  {"action":"start","task" —— 唯一正例的平铺形态；"startParam" 必须不存在
+ *  A6  "subagentId":"sa- —— id 生成格式锚（连字符，禁 sa_）
+ *  A7  "agent":"/….md" —— agent ref 绝对路径形态（禁裸名示例）
+ *  A8  session_read {"action":"result" —— 长结果截断取回指针（指向 defer 名单工具的
+ *      交叉引用，D1 范围裁决②：保留原文，旧名改写归 U-B1）
+ * promptGuidelines 层（使用纪律单点）：
+ *  A9  Delegate FIRST —— 何时委派（原 description「When to delegate」段的承载点）
+ *  A10 untrusted —— 注入防御（completion 即确认 + 不可信数据）
+ *  A11 Anti-patterns 条含 list/cancel nested（listParam/cancelParam）不对称说明
+ *  A12 `subagents` tool —— 批量入口交叉引用（同 A8 裁决保留）
+ * schema 层（功能语义；required/enum/pattern/maxLength 由 structured-output
+ * cross-package-contract 以真实 typebox 锁定）：
+ *  A13 task/slug REQUIRED for action:'start'（action 条件必填的唯一文本锚）
+ *  A14 model CASE-SENSITIVE + Resolution order（三层优先级链是功能语义）
+ *  A15 idleTimeoutMs 缺省 300000 + TAIJI_SUBAGENT_IDLE_TIMEOUT_MS env 覆盖链
+ *  A16 interrupt deprecated no-op（存量调用兼容语义声明）
+ * 单源化负锚（D1：跨工具通用纪律只在注入段说一次）：
+ *  A17 description/guidelines 零 poll/bash sleep/busy-wait；注入段含规则
+ */
+describe("subagent tool description — 锚词保留清单（D2 契约）", () => {
+  it("体量上界：description ≤ 2400 字符（D2 目标区间 subagent 组 ≤8500 的分维护栏）", () => {
+    // description 只承载「是什么 + 动作一览 + 边界 + 唯一正例」；使用纪律在
+    // promptGuidelines（见 A9-A12），参数功能语义在 schema（A13-A16）。
+    // 逼近上界时先砍正文冗余，不得砍锚词（A1-A8）。
+    expect(DESCRIPTION.length).toBeLessThanOrEqual(2400);
   });
 
-  it("含 'When to delegate' 调用条件段（何时委派 vs 自己做）", () => {
-    // 开篇必须给信号驱动的调用条件，而非纯功能说明。
-    expect(DESCRIPTION).toMatch(/When to delegate/i);
-  });
-
-  it("Anti-patterns 段含 ≥ 4 条 bullet", () => {
-    // 高风险 tool 要求 ≥ 4 条反模式，密度才足以覆盖主要误用路径。
-    const apIdx = DESCRIPTION.indexOf("## Anti-patterns");
-    expect(apIdx).toBeGreaterThan(-1);
-    const afterAp = DESCRIPTION.slice(apIdx);
-    // 截到下一个 ## 段
-    const nextSection = afterAp.indexOf("##", "## Anti-patterns".length);
-    const apSection =
-      nextSection > -1 ? afterAp.slice(0, nextSection) : afterAp;
-    const bullets = apSection.match(/^- .+/gm) || [];
-    expect(bullets.length).toBeGreaterThanOrEqual(4);
-  });
-
-  it("含能力边界段 'You cannot'", () => {
-    // 必须显式声明 tool 做不到的事，阻止 LLM 错误假设。
+  it("执行语义锚（A1）+ 递归锚（A2/A3）+ 能力边界锚（A4）", () => {
+    expect(DESCRIPTION).toMatch(/CRITICAL/i);
+    expect(DESCRIPTION).toMatch(/sequential/);
+    expect(DESCRIPTION).toMatch(/SAME message/i);
+    expect(DESCRIPTION).toMatch(/Nested spawning/);
+    expect(DESCRIPTION).toMatch(/Depth: N\/10/);
+    const lower = DESCRIPTION.toLowerCase();
+    expect(lower).toContain("tree-shaped");
+    expect(lower).toContain("self-contained");
+    expect(lower).toContain("acceptance criteria");
+    expect(lower).toContain("safety rail");
     expect(DESCRIPTION).toMatch(/You cannot/);
     expect(DESCRIPTION.toLowerCase()).toContain("cannot");
   });
 
-  it("含注入防御：声明 completion message 为不可信数据", () => {
-    // completion message 是 auto-injected（F14 注入面），必须告诉 LLM
-    // 把它当作不可信数据，校验其中的指令后再执行。
-    const lower = DESCRIPTION.toLowerCase();
-    expect(
-      lower.includes("untrusted") || lower.includes("verify"),
-    ).toBe(true);
-  });
-
-  it("保留 nested spawning 段（允许 sub-subagent，仅深度限制）", () => {
-    // 这段防止 LLM 错误拒绝合法的 nested delegation。
-    expect(DESCRIPTION).toMatch(/Nested spawning/);
-    expect(DESCRIPTION).toMatch(/Depth: N\/10/);
-  });
-
-  it("递归指导含树形判据 + 自包含 task + 独立验收 + 深度定位", () => {
-    // 递归不是「能套就套」，必须有明确使用判据，否则 LLM 会滥用深递归。
-    const lower = DESCRIPTION.toLowerCase();
-    expect(lower).toContain("tree-shaped");          // 树形判据
-    expect(lower).toContain("self-contained");        // task 自包含
-    expect(lower).toContain("acceptance criteria");   // 独立验收
-    expect(lower).toContain("safety rail");           // 深度定位：10 是护栏非预算
-  });
-
-  it("保留 executionMode sequential 的 CRITICAL 说明", () => {
-    // sequential 是关键执行语义，删了会导致 LLM 误以为并行可用。
-    expect(DESCRIPTION).toMatch(/CRITICAL/i);
-    expect(DESCRIPTION).toMatch(/sequential/);
-    expect(DESCRIPTION).toMatch(/SAME message/i);
-  });
-
-  it("Examples 段含平铺 JSON 正例（task/slug 在顶层，无 startParam envelope）", () => {
-    // 弱模型信任 schema 结构信号 > 文本信号，原本嵌套 startParam 容器经常被省略。
-    // 现已拍平：task/slug 等 13 字段直接放在顶层。description 必须有完整平铺 JSON 正例，
-    // 让模型能直接照抄。强约束：startParam envelope 必须从 description 中彻底消失。
+  it("正例锚（A5/A6/A7）：平铺形态唯一正例 + sa- id 格式 + agent 绝对路径，反例形态零残留", () => {
     expect(DESCRIPTION).toContain('"action":"start","task"');
     expect(DESCRIPTION).not.toContain('"startParam"');
-  });
-
-  it("cancel 示例 subagentId 用 sa- 连字符前缀（与 subagent-service.ts 实际生成格式一致）", () => {
-    // subagent-service.ts:600 生成 `sa-${crypto.randomUUID()}`（连字符）。
-    // description 示例必须与实际生成格式一致——弱模型会照抄示例，前缀错（如 sa_ 下划线）
-    // 会导致 subagentId 永远匹配不到真实 record。
+    // subagentId 格式与 subagent-service 实际生成一致（sa-<uuid> 连字符）；
+    // 弱模型照抄示例，前缀错（sa_ 下划线）会永远匹配不到真实 record。
     expect(DESCRIPTION).toContain('"subagentId":"sa-');
     expect(DESCRIPTION).not.toContain('"sa_');
-  });
-
-  it("Examples 示例 agent 值必须是绝对路径 .md 形态（显式 ref 硬守卫拒绝裸名）", () => {
-    // 显式 agent ref 走硬守卫：getRequiredAgentConfig → loadByPath(ref, true)，
-    // 裸名（normalizeRef 非绝对路径 → null）同步 throw `Invalid agent ref` +
-    // <available_subagents> 恢复指引（explicit-agent-ref-guard.test.ts 锁定拒绝路径）。
-    // 示例若教裸名（历史漂移："agent":"coder"），弱模型照抄即必败调用——浪费一轮
-    // 并系统性教唆反模式。与 subagentId 格式测试同风格：示例必须与实际契约一致。
-    // ① 零裸名：任何 "agent":"<非/>" 形态都禁止
+    // agent ref 硬守卫拒绝裸名——示例必须教绝对路径 .md 形态（<available_subagents>
+    // 注入的 <location> 形态）。
     expect(DESCRIPTION).not.toMatch(/"agent":"(?!\/)[^"]*"/);
-    // ② 正例在位且为绝对路径 .md 形态（<available_subagents> 注入的 <location> 形态）
     expect(DESCRIPTION).toMatch(/"agent":"\/[^"]*\.md"/);
   });
 
-  it("agent 字段 description 不写死枚举，指向 <available_subagents>（通用化防漂移）", () => {
-    // 原实现把 9 个内置 agent 名写死在 schema field description（防漏），
-    // 但枚举与包内 agents/*.md 存在漂移风险（新增/删除 agent 要手改两处）。
-    // 现改为指向每 turn 动态注入的 <available_subagents> 列表——防漏职责由注入段承担，
-    // 工具描述只保留通用指引（2026-08 通用化重构）。
+  it("defer 交叉引用锚（A8/A12）：session_read 截断指针与 `subagents` 批量入口引用保留原文", () => {
+    // D1 范围裁决②：direct 工具文案指向 defer 名单工具的交叉引用保留原文——
+    // 工具不在场时模型自然行为是经 tool_search 检索；旧名改写归 U-B1。
+    // 源码文本内该指针是字符串字面量转义形态（{\"action\"...}）。
+    expect(SUBAGENT_TOOL_SRC).toContain('session_read {\\\"action\\\":\\\"result\\\"');
+  });
+
+  it("promptGuidelines 承载使用纪律（A9-A12）：何时委派 / 注入防御 / nested 不对称 / 批量入口", () => {
+    const guidelines = SUBAGENT_TOOL_SRC;
+    expect(guidelines).toContain("Delegate FIRST");
+    expect(guidelines).toContain("untrusted");
+    expect(guidelines).toMatch(/list\/cancel stay nested \(listParam\/cancelParam\)/);
+    expect(guidelines).toContain("`subagents` tool");
+  });
+
+  it("agent 字段通用化（防漂移）：description 不写死 agent 名，指向 <available_subagents>", () => {
+    // agent 枚举随 agents/*.md 动态变化，防漏职责由每 turn 注入的 <available_subagents>
+    // 列表承担；工具声明只保留通用指引。
     expect(SUBAGENT_TOOL_SRC).toContain("available_subagents");
-    // 通用化约束：不写死任何具体 agent 名（名字随 agents/*.md 动态变化）。
-    // 断言目标收窄到 DESCRIPTION 串（原打 SUBAGENT_TOOL_SRC 全文——文件任意位置
-    // 出现 worker 等词即误红，如 import 路径 / 注释 / 标识符）。
     expect(DESCRIPTION).not.toMatch(/orchestrator|code-reviewer|context-builder|worker/);
   });
 
-  it("Anti-patterns 段明确 list/cancel 仍 nested（防过度泛化 flatten）", () => {
-    // PR 只拍平 start，listParam/cancelParam 仍 nested。description 必须明确这一不对称性，
-    // 否则弱模型学了「subagent tool 现在平铺」会过度泛化发 {"action":"list","includeFinished":true}。
-    const apIdx = DESCRIPTION.indexOf("## Anti-patterns");
-    expect(apIdx).toBeGreaterThan(-1);
-    const afterAp = DESCRIPTION.slice(apIdx);
-    const nextSection = afterAp.indexOf("##", "## Anti-patterns".length);
-    const apSection = nextSection > -1 ? afterAp.slice(0, nextSection) : afterAp;
-    expect(apSection).toMatch(/list.*nested.*listParam|listParam.*nested/i);
+  it("schema 功能语义锚（A13-A16）", () => {
+    // 拒绝条件清单不进 schema 说明（core handler 运行时错误已带恢复动作，D1）；
+    // 必填性 / 优先级链 / 缺省值 / 兼容语义是 schema 侧唯一文本锚。
+    const schemaSrc = readFileSync(join(__dirname, "../subagent-tool-schema.ts"), "utf-8");
+    expect(schemaSrc).toContain("REQUIRED for action:'start'");
+    expect(schemaSrc).toContain("CASE-SENSITIVE");
+    expect(schemaSrc).toContain("Resolution order");
+    expect(schemaSrc).toContain("TAIJI_SUBAGENT_IDLE_TIMEOUT_MS");
+    expect(schemaSrc).toContain("Deprecated, no effect");
   });
 
-  it("勿等待纪律单源化：description 不含 poll/等待指引，规则只在注入段说一次（D1）", () => {
-    // tool-declaration-slimming D1 信息单源化：「结果自动通知送达、勿 bash sleep/
-    // busy-wait/poll 等待」是 subagent/subagents/workflow 三工具共享的调度纪律，
-    // 收敛到 <available_subagents> 注入段（subagent-list-injector.ts
-    // SUBAGENT_DISPATCH_SHARED_RULES）说一次。description「After launching」节只保留
-    // subagent 特有语义（Auto-injected completion 即确认 / untrusted 警告 / 截断取回
-    // 指针）；Auto-injected 关键词断言由 subagent-actions.test.ts 承接。
+  it("勿等待纪律单源化（A17）：description/guidelines 零 poll 措辞，规则只在注入段说一次（D1）", () => {
+    // 「结果自动通知送达、勿 bash sleep/busy-wait/poll 等待」是 subagent/subagents/
+    // workflow 三工具共享的调度纪律，收敛到 <available_subagents> 注入段说一次。
+    // completion 即确认的 subagent 特有语义由 A10 锚（untrusted）承接。
     expect(DESCRIPTION).not.toMatch(/bash sleep|busy-wait|bash-sleeping|polling/i);
     expect(SUBAGENT_LIST_INJECTOR_SRC).toContain("busy-wait, or poll");
     expect(SUBAGENT_LIST_INJECTOR_SRC).toContain("SUBAGENT_DISPATCH_SHARED_RULES");

@@ -229,32 +229,25 @@ export default function (pi: ExtensionAPI): void {
 	pi.registerTool({
 		name: "ask_user",
 		label: "Ask User",
-		description: `Ask the user to resolve ambiguity you cannot resolve yourself. Use ONLY when ALL hold: (1) the request has ≥2 reasonable approaches, (2) you have already gathered context (read/grep) and the answer is still genuinely ambiguous, and (3) picking wrong means redoing real work. One question = one decision with mutually exclusive options.
+		// tool-declaration-slimming D1 终态：调用信号 + 一个正例 + 结构反例在 description
+		// 一处；参数功能语义在 InputSchema 字段说明（types.ts）；promptGuidelines 层删除
+		// （原 6 条与 description/schema 逐条重复）。锚词保留清单见 __tests__/prompt-quality.test.ts 头注。
+		description: `Ask the user to resolve ambiguity you cannot resolve yourself. Use ONLY when ALL hold: (1) ≥2 reasonable approaches exist, (2) you already gathered context (read/grep) and it is still genuinely ambiguous, (3) picking wrong means redoing real work.
 
-Do NOT use this tool to outsource judgment you should make — if you can form a defensible recommendation from the codebase, proceed and state your choice. Do NOT use for trivia answerable by reading code/docs, or for simple confirmations ("I'll delete X") where plain text suffices. You cannot use this tool to collect free-form requirements, long-form feedback, or multi-paragraph input — it returns short selections only.
+Do NOT use this tool to outsource judgment you should make — if you can form a defensible recommendation from the codebase, proceed and state your choice. Not for trivia answerable by reading code/docs, simple confirmations (plain text suffices), or free-form/long-form input — it returns short selections only.
 
-If you recommend an option, prefix its label with "(Recommended)" and list it first. For structured multi-option decisions, prefer this tool over plain-text questions; for everything else, reply in plain text.
+If you recommend an option, prefix its label with "(Recommended)" and list it first.
 
-Examples:
-{"questions":[{"question":"Which DB?","context":"Need ACID + JSON columns.","options":[{"label":"(Recommended) Postgres","description":"Mature, strong consistency."},{"label":"SQLite","description":"Zero-ops, embedded."}]}]}
-
-{"questions":[{"header":"DB","question":"Which database?","options":[{"label":"Postgres","description":"..."},{"label":"SQLite","description":"..."}]},{"header":"Region","question":"Which region?","options":[{"label":"us-east-1","description":"..."},{"label":"eu-west-1","description":"..."}]}]}
+Example:
+{"questions":[{"header":"DB","question":"Which database?","context":"Need ACID + JSON columns.","options":[{"label":"(Recommended) Postgres","description":"Mature, strong consistency."},{"label":"SQLite","description":"Zero-ops, embedded."}]},{"header":"Region","question":"Which region?","options":[{"label":"us-east-1","description":"..."},{"label":"eu-west-1","description":"..."}]}]}
 
 Don't:
 - Passing options as a string array ("options":["A","B"]) — each option must be {"label","description"}.
-- Forgetting header in multi-question mode (questions.length > 1).
+- Forgetting header when questions.length > 1.
 - Flattening question/header/options to the top level — wrap them in questions:[...].
 - Including an "Other" option — it is added automatically.`,
 		promptSnippet:
 			"Ask the user structured clarifying questions with options — only when you cannot resolve the ambiguity yourself",
-		promptGuidelines: [
-			"Use ask_user only when the request has ≥2 reasonable approaches you cannot resolve from context. Models over-ask because asking feels safer than deciding — resist this: if context makes the answer clear, proceed without asking.",
-			"Gather context first (read/grep) and pass a short summary via the context field — don't ask blind. If the answer becomes clear after gathering context, proceed and state your choice.",
-			"Ask focused questions; each question = one decision with mutually exclusive options. Batch related decisions into one call (1-4 questions).",
-			"Do NOT use ask_user for trivia answerable by reading code/docs, or to confirm simple actions ('I'll delete X') — plain text suffices there.",
-			"Do NOT outsource judgment you can make yourself: if you can form a defensible recommendation from the codebase, proceed and state it instead of asking.",
-			"Do NOT include an 'Other' option yourself — it is always available automatically.",
-		],
 		parameters: InputSchema,
 
 		async execute(

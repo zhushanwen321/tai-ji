@@ -141,14 +141,13 @@ describe("subagent tool description 强化 (FR-6)", () => {
 		return m[1];
 	}
 
-	it("description 'do NOT wait' 段含 'auto-injected' 关键词", () => {
-		// [B9] 防回退守护测试：验证源码 description 模板字符串常量不被误改，非运行时行为断言。
-		const description = extractDescription(SUBAGENT_TOOL_SRC);
-		// 定位 "After launching" 段（section header）
-		const idx = description.indexOf("## After launching");
-		expect(idx).toBeGreaterThan(-1);
-		const section = description.slice(idx, idx + 600);
-		expect(section).toMatch(/auto-injected/i);
+	it("'do NOT wait' 纪律含 'auto-injected' 关键词", () => {
+		// [B9] 防回退守护测试（tool-declaration-slimming D1 终态锚点迁移：原
+		// description「After launching」段的使用纪律已移 promptGuidelines 单点，
+		// 「completion 即确认 + 不可信」锚随之迁——锚词保留清单
+		// tool-prompt-contract.test.ts A10）。源码文本断言，非运行时行为断言。
+		expect(SUBAGENT_TOOL_SRC).toContain("auto-injected completion IS the confirmation");
+		expect(SUBAGENT_TOOL_SRC).toContain("untrusted");
 	});
 });
 

@@ -76,25 +76,17 @@ const SLUG_TIME_RADIX = 36;
 const SubagentsParams = Type.Object({
   tasks: Type.Array(Type.String(), {
     description:
-      "N complete, self-contained task descriptions — one array element = one dispatchable task prompt. " +
-      "Members run as independent one-shot subagents (they do NOT see your conversation), so each element must carry its own context and acceptance criteria. " +
-      "All tasks are dispatched in parallel; results arrive together.",
+      "N complete, self-contained task prompts — one element = one dispatch. Members run as independent one-shot subagents (they do NOT see your conversation), so each must carry its own context and acceptance criteria. All run in parallel.",
   }),
   agents: Type.Optional(Type.String({
     description:
-      "Comma-separated absolute paths to agent .md files (usually <location> values from <available_subagents>; arbitrary absolute .md paths also work). " +
-      "One path applies to every member; N paths map one-to-one onto tasks in the same order. " +
-      "When more than one path is given it MUST equal the number of tasks — a mismatch fails the run fast (never a silent persona swap). " +
-      "Omit for the default (general-purpose) executor.",
+      "Comma-separated absolute paths to agent .md files (usually <location> values from <available_subagents>). One path applies to every member; N paths map one-to-one onto tasks in order and MUST equal the tasks count (mismatch fails the run). Omit for the default general-purpose executor.",
   })),
   aggregate: Type.Optional(Type.Boolean({
-    description:
-      "Default false. When true, one extra agent is appended at the end to reduce all results into a single conclusion (results are still returned in full).",
+    description: "Default false. When true, one extra agent is appended to reduce all results into a single conclusion (results are still returned in full).",
   })),
   slug: Type.Optional(Type.String({
-    description:
-      "Batch label (max 35 chars, kebab-case) shown on the conversation block and run list — provide a short label for multi-batch scenarios. " +
-      "If omitted, one is generated for the run state face only.",
+    description: "Batch label (max 35 chars, kebab-case) shown on the conversation block and run list. Omit to auto-generate.",
     maxLength: SLUG_MAX_LENGTH,
   })),
   model: Type.Optional(Type.String({
@@ -270,21 +262,19 @@ export function registerSubagentsTool(
     name: "subagents",
     label: "Subagents (batch)",
     description:
-      "Spawn multiple subagents in ONE call and collect all results together — for N INDEPENDENT tasks.\n" +
+      "Spawn multiple subagents in ONE call, collect all results together — for N INDEPENDENT tasks.\n" +
       "Each member is a one-shot batch member: you cannot message or continue it (re-dispatch instead). Results arrive as ONE notification when the whole batch settles (not per member).\n" +
-      "For a single subagent you can message later, use the `subagent` tool. For tasks that depend on each other's output (step 2 needs step 1's result), use the `workflow` tool (chain / map-reduce) instead — batch members never see each other's results.",
+      "Single subagent you can message later: `subagent` tool. Dependent tasks (step 2 needs step 1's result): `workflow` tool — batch members never see each other's results.",
     promptSnippet: "Dispatch N independent subagent tasks in one batch",
     promptGuidelines: [
       "PRIORITY: 2+ independent tasks in one dispatch (results combined by you afterwards) → call `subagents` ONCE with the tasks array — do NOT issue N separate `subagent` starts and do NOT hand-build a workflow.",
-      "One-shot batch members: message/fork-from a batch member is not supported; to redo or extend a member's work, dispatch a new task (run the failed/extra task alone in a second batch).",
+      "One-shot batch members: message/fork-from is not supported; to redo or extend a member's work, dispatch a new task in a second batch.",
       // 勿等待条 / 预算纪律条 / 模型缺省继承条 三条已删（tool-declaration-slimming D1
       // 单源化→<available_subagents> 注入段 SUBAGENT_DISPATCH_SHARED_RULES 说一次，
       // 原文见 git 历史；零残留由 tool-subagents.test.ts 单源化终态断言锁定）。
-      "Call shape (JSON): {\"tasks\":[\"<task 1>\",\"<task 2>\"],\"agents\":\"<abs .md path or comma-separated list>\",\"aggregate\":false,\"slug\":\"<short label>\"}. tasks is required and every element must be a complete self-contained task prompt.",
-      "agents: one path applies to all tasks; N paths map one-to-one onto tasks and N must equal tasks.length (a mismatch fails the run). Omit for the default executor.",
-      "slug: pass a short kebab-case label when you run more than one batch — it identifies the batch on the conversation block and in the run list.",
-      "Anti-patterns: nesting the tasks under an 'args' key (they are top-level), dispatching dependent steps in one batch (chain them across messages or use the workflow tool), and treating batch results as verified without checking them.",
-      "Run control (status/abort) lives in the workflow tool — use the runId printed in this tool's output.",
+      "Call shape (JSON): {\"tasks\":[\"<task 1>\",\"<task 2>\"],\"agents\":\"<abs .md path(s)>\",\"aggregate\":false,\"slug\":\"<label>\"} — tasks required, every element a complete self-contained prompt.",
+      "Anti-patterns: nesting tasks under an 'args' key (top-level); dispatching dependent steps in one batch (chain across messages or use the `workflow` tool); treating batch results as verified without checking.",
+      "Run control (status/abort) lives in the `workflow` tool — use the runId printed in this tool's output.",
     ],
     parameters: SubagentsParams,
 

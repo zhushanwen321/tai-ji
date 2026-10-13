@@ -12,6 +12,17 @@
 //
 // 本测试用源码断言（读 .ts 文件文本）锁定这些约束，防止后续重构把正例/反例/调用信号
 // 删掉或弱化。读源码而非 import，避免 mock 链（index.ts 依赖 pi-tui/ExtensionAPI 等）。
+//
+// 【锚词保留清单 — ask_user】（tool-declaration-slimming D2：压缩后的契约 = 逐锚词
+// grep，替代原逐字断言。U-A1 终态：promptGuidelines 层已删——原 6 条与 description/
+// InputSchema 字段说明逐条重复；调用信号 + 唯一正例 + 结构反例单点在 description）：
+//  Q1  '"options":[{"label"' —— 单问题正例的对象数组形态（弱模型最高频误用面）
+//  Q2  '"header"' ≥2 —— 批量正例展示条件必填字段
+//  Q3  "(Recommended)" —— 推荐项前缀调用信号
+//  Q4  结构反例 ≥2：string array / Flatten / Other（描述里 Don't 段承载）
+//  Q5  "Use ONLY when" + "Do NOT use" —— 调用门槛与边界段
+//  Q6  validate.ts 三个 Correct 正例锚（runtime 友好纠错，未改动）
+//  Q7  示例必须与契约一致：options 元素必须 {label, description} 对象形态
 
 import { readFileSync } from "node:fs";
 import { dirname,join } from "node:path";

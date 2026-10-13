@@ -686,50 +686,42 @@ describe('pi 穿插不受影响：同 fixture 内 pi 会话读取与 zcode 调�
 // D4 schema 零变化（快照逐字节对照 + 合法形态冒烟）
 // ---------------------------------------------------------------------------
 
-/** `session_read` 输入 schema 的 JSON 序列化快照（U9 改动前从基线实现抓取——D4「schema 零变化」的逐字节锚）。 */
+/** `session_read` 输入 schema 的 JSON 序列化快照（防无意漂移的逐字节锚）。
+ *
+ * 快照锚的意图 = 无意漂移拦截（参数增删 / 文案改动即红，迫使有意确认）；
+ * 有意的声明面压缩须同批重新生成快照。当前快照 = tool-declaration-slimming
+ * U-A1 压缩终态（D1 三层分工：action 功能语义唯一承载点 = 枚举 description；
+ * 工具 description 只留定位 + 边界；guidelines 只留纪律）。重新生成：
+ * tsx 起 extension 捕获 registerTool 的 parameters 后 JSON.stringify。
+ */
 const SCHEMA_SNAPSHOT =
-  '{"type":"object","required":["action"],"properties":{"action":{"type":"string","enum":["find","f'
-    + 'amily","outline","expand","detail","search","export","extract","workflow","result","doctor"],"de'
-    + 'scription":"Action to perform: find (locate session), family (fork/subagent/workflow relations; '
-    + 'recursive=true returns nested execution tree), outline (turn-level overview), expand (single-tur'
-    + 'n entries), detail (full text of turns), search (full-text grep, single session or cross-session'
-    + ' over a comma-separated id list), export (materialize to file), extract (pull user messages / co'
-    + 'mmands / files / commits / tool results by type), workflow (workflow run overview: status/budget'
-    + '/steps; requires session, optional runId focuses one run; step call sessionId jumps to outline/d'
-    + 'etail), result (fetch a subagent session final result text — same content as its completion noti'
-    + 'ce; session = single id or comma-separated batch of at most 10, optional limit caps chars per it'
-    + 'em), doctor (show detected host environment and session-root diagnostics)."},"session":{"type":"'
-    + 'string","description":"Session id, uuid fragment (e.g. e6c96), subagent record id (sa-xxx, preci'
-    + 'se lookup), or absolute .jsonl path (~ or ~/ allowed). Required for family/outline/expand/detail'
-    + '/search/export/extract/workflow/result. result also accepts a comma-separated list of up to 10 i'
-    + 'ds. search also accepts a comma-separated list of up to 10 full ids (from find output) for cross'
-    + '-session search. # prefix auto-stripped."},"query":{"type":"string","description":"find action: '
-    + 'uuid fragment / filename / name keyword / \\"recent\\" (returns most recent N)."},"turns":{"type'
-    + '":"string","description":"detail/extract action: turn range, \\"T013-T015\\" or \\"T013\\"."},"t'
-    + 'urn":{"type":"string","description":"expand action: single turn, \\"T013\\"."},"pattern":{"type"'
-    + ':"string","description":"search action: substring or regex."},"scope":{"type":"string","enum":["'
-    + 'all","user","assistant","toolResult"],"description":"search action: scope filter. Default all."}'
-    + ',"format":{"type":"string","enum":["outline","full","family"],"description":"export action: mate'
-    + 'rialized form. Default outline."},"includeToolResult":{"type":"boolean","description":"detail/ex'
-    + 'port: include toolResult full text. Default false (omitted as noise)."},"includeThinking":{"type'
-    + '":"boolean","description":"detail: include thinking blocks. Default false (omitted as noise)."},'
-    + '"allBranches":{"type":"boolean","description":"outline (and export\'s outline section): include '
-    + 'abandoned side-branches. Not supported by family. Default false."},"granularity":{"type":"string'
-    + '","enum":["turn","entry"],"description":"outline: turn-level or entry-flat. Default turn."},"cwd'
-    + '":{"type":"string","description":"find: filter by cwd. Optional."},"source":{"type":"string","en'
-    + 'um":["main","subagent"],"description":"find and session-resolving actions: filter by source. \\"'
-    + 'main\\" = sessions/, \\"subagent\\" = subagents/. Default both (merged)."},"limit":{"type":"numb'
-    + 'er","minimum":1,"description":"find/search: max results. Default 20. result: max chars per item,'
-    + ' default 8000 (overlong text truncated with a pointer to the full file)."},"what":{"type":"strin'
-    + 'g","enum":["user-messages","commands","files","commits","tool-results"],"description":"extract a'
-    + 'ction: what to extract (required for extract)."},"tool":{"type":"string","description":"extract '
-    + 'action: filter commands/tool-results by tool name (e.g. \\"bash\\")."},"runId":{"type":"string",'
-    + '"description":"workflow action: focus a single run by runId (disambiguate multiple runs). Omit t'
-    + 'o see all run overviews."},"recursive":{"type":"boolean","description":"family action: return ne'
-    + 'sted execution tree (arbitrary-depth subagent↔workflow-call nesting, precise parentRecordId chai'
-    + 'n with flat-fallback for legacy records). Default false (flat family)."},"includeSubagents":{"ty'
-    + 'pe":"boolean","description":"doctor action: also scan the subagent session root (adds its file c'
-    + 'ount). Default false (path and existence only)."}}}';
+  '{"type":"object","required":["action"],"properties":{"action":{"type":"string","enum":["find","famil'
+    + 'y","outline","expand","detail","search","export","extract","workflow","result","doctor"],"descriptio'
+    + 'n":"find (locate session), family (relations; recursive=tree), outline (turn overview), expand (one '
+    + 'turn), detail (full text), search (grep, cross-session, ≤10 ids), export (to file), extract (message'
+    + 's/commands/files/commits/tool results), workflow (run overview), result (subagent final text, batch '
+    + '≤10), doctor (environment diagnostics)."},"session":{"type":"string","description":"Session id, uuid'
+    + ' fragment (e6c96), subagent id (sa-xxx), or .jsonl path. Required by every action except find/doctor'
+    + '; result/search accept ≤10 comma-separated ids. # prefix auto-stripped."},"query":{"type":"string","'
+    + 'description":"find: uuid fragment / filename / name keyword / \\"recent\\" (recent N)."},"turns":{"typ'
+    + 'e":"string","description":"detail/extract: turn range \\"T013-T015\\" or \\"T013\\"."},"turn":{"type":"s'
+    + 'tring","description":"expand: turn \\"T013\\"."},"pattern":{"type":"string","description":"search: sub'
+    + 'string or regex."},"scope":{"type":"string","enum":["all","user","assistant","toolResult"],"descript'
+    + 'ion":"search: filter scope. Default all."},"format":{"type":"string","enum":["outline","full","famil'
+    + 'y"],"description":"export: materialized form. Default outline."},"includeToolResult":{"type":"boolea'
+    + 'n","description":"detail/export: include toolResult text. Default false."},"includeThinking":{"type"'
+    + ':"boolean","description":"detail: include thinking blocks. Default false."},"allBranches":{"type":"b'
+    + 'oolean","description":"outline/export: include abandoned side-branches. Default false."},"granularit'
+    + 'y":{"type":"string","enum":["turn","entry"],"description":"outline: turn-level or entry-flat. Defaul'
+    + 't turn."},"cwd":{"type":"string","description":"find: filter by cwd."},"source":{"type":"string","en'
+    + 'um":["main","subagent"],"description":"\\"main\\" = sessions/, \\"subagent\\" = subagents/. Default both'
+    + '."},"limit":{"type":"number","minimum":1,"description":"find/search: max results (default 20). resul'
+    + 't: max chars per item (default 8000, truncated with pointer)."},"what":{"type":"string","enum":["use'
+    + 'r-messages","commands","files","commits","tool-results"],"description":"extract: what to pull (requi'
+    + 'red)."},"tool":{"type":"string","description":"extract: filter by tool name (e.g. \\"bash\\")."},"runI'
+    + 'd":{"type":"string","description":"workflow: focus one run (omit = all)."},"recursive":{"type":"bool'
+    + 'ean","description":"family: nested execution tree. Default false (flat)."},"includeSubagents":{"type'
+    + '":"boolean","description":"doctor: also scan the subagent session root. Default false."}}}';
 
 describe('session_read schema 快照（D4：不加任何工具参数，逐字节一致）', () => {
   it('TypeBox schema JSON 序列化与基线快照逐字节一致', () => {

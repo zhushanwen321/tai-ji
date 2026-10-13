@@ -87,49 +87,44 @@ const WORKFLOW_ACTIONS: readonly WorkflowAction[] = [
 const WorkflowParams = Type.Object({
   action: StringEnum(WORKFLOW_ACTIONS, { description: "Workflow action to execute" }),
   name: Type.Optional(
-    Type.String({ description: "Workflow ref: absolute path to a .js script — normally the <location> of a workflow from <available_workflows>, but ANY absolute .js path works if the file declares `@pi-meta kind: \"workflow\"` (the list is not required). Relative paths and bare names are rejected (run action)" }),
+    Type.String({ description: "Workflow ref: absolute path to a .js script — normally a <location> from <available_workflows>, but ANY absolute .js path declaring @pi-meta kind:\"workflow\" works. Relative paths and bare names are rejected (run action)" }),
   ),
   slug: Type.Optional(
     Type.String({
-      description:
-        "Short label (max 35 chars) for this run, shown in the TUI to distinguish concurrent runs. " +
-        "If omitted, defaults to the script name.",
+      description: "Short label (max 35 chars) shown in the TUI to distinguish concurrent runs. Defaults to the script name.",
       maxLength: SLUG_MAX_LENGTH,
     }),
   ),
   runId: Type.Optional(
-    Type.String({ description: "Workflow run ID (abort / resume action; find it via action:status)" }),
+    Type.String({ description: "Workflow run ID (abort / resume; find via action:status)" }),
   ),
   args: Type.Optional(
     Type.Record(Type.String(), Type.Unknown(), {
-      description:
-        "Arguments passed to workflow as key-value pairs (run action). For resume: optional — when passed, " +
-        "must deep-equal the run's original args (except the internal _runId key); mismatch is rejected with " +
-        "the differing fields listed. Omit to reuse the original args.",
+      description: "Arguments passed to the workflow (run action). For resume: optional — when passed, must deep-equal the original args (except the internal _runId key); a mismatch is rejected with the differing fields listed. Omit to reuse the original args.",
     }),
   ),
   tokens: Type.Optional(Type.Number({
     // 预算纪律句已删（tool-declaration-slimming D1 单源化→注入段
     // SUBAGENT_DISPATCH_SHARED_RULES，原文见 git 历史）；
     // resume 分支是本参数的功能语义，保留。
-    description: "Max token budget. For resume: the token budget applied to the resumed execution (tokens already spent by the run are counted against it)",
+    description: "Max token budget. For resume: applied to the resumed execution (tokens already spent count against it)",
   })),
   time: Type.Optional(Type.Number({
-    description: `Max time budget in ms (hard ceiling ${MAX_TIMER_DELAY_MS} ms — larger values fail fast at entry). For resume: the budget applied to the resumed execution (active time already spent by the run is counted against it; suspended time is not)`,
+    description: `Max time budget in ms (hard ceiling ${MAX_TIMER_DELAY_MS} ms — larger values fail fast). For resume: applied to the resumed execution (active spent time counts; suspended does not)`,
   })),
   error: Type.Optional(
-    Type.String({ description: "Error/reason message (optional, used with abort)" }),
+    Type.String({ description: "Error/reason message (optional, with abort)" }),
   ),
   model: Type.Optional(Type.String({
     // 缺省继承主 agent 的纪律句已删（D1 单源化→注入段）；
     // run 级 override 作用域 / resume 语义 / user override 优先级是本参数功能语义，保留。
     description:
-      "Run-level model override in 'provider/modelId' format. When set, all agents spawned by this run inherit it by default (unless a per-call agent() opts.model is set). " +
-      "Also accepted on action:\"resume\" — recorded as the run's user override (same channel as a panel switch) and drives all re-dispatched steps. " +
-      "A user-issued runtime model override (panel model switch / /subagent-model command) takes precedence over this parameter — user override wins over any explicitly scripted model.",
+      "Run-level model override in 'provider/modelId' format — all agents spawned by this run inherit it (unless a per-call agent() opts.model is set). " +
+      "Also accepted on resume — recorded as the run's user override (same channel as a panel switch), driving all re-dispatched steps. " +
+      "A user-issued runtime override (panel switch / /subagent-model) wins over this parameter and over any explicitly scripted model.",
   })),
   thinkingLevel: Type.Optional(StringEnum(THINKING_ORDER, {
-    description: "Run-level thinkingLevel override (off/minimal/low/medium/high/xhigh/max). All agents in this run inherit it by default. Omit to default each agent to its model's highest available level.",
+    description: "Run-level thinkingLevel override (off/minimal/low/medium/high/xhigh/max) — all agents in the run inherit it. Omit for each agent's model's highest available level.",
   })),
 });
 
@@ -232,38 +227,21 @@ export function registerWorkflowTool(
       "Replaces workflow + workflow-run tools.",
     promptSnippet: "Run, abort, resume, or check workflow status",
     promptGuidelines: [
-      "PRIORITY: When user says 'workflow', 'run workflow', try run action FIRST.",
-      "All listed workflows run DIRECTLY with action:run — refs/descriptions come from " +
-      "<available_workflows> (injected each turn). For parameter details, read the <location> " +
-      "script file (script header has @pi-meta parameters + usage + phases). Do NOT use " +
-      "workflow-script generate for patterns already covered by available workflows.",
-      "run: pass the workflow ref as name — normally the <location> absolute .js path from <available_workflows>, but any absolute .js path with a valid @pi-meta also works (the list is not required). Bare names and relative paths are rejected with a not-found error listing locations.",
-      // 勿等待条已删（tool-declaration-slimming D1 单源化→<available_subagents> 注入段
-      // SUBAGENT_DISPATCH_SHARED_RULES，原文见 git 历史）。
-      "Runs are one-shot: there is no pause — to stop a run early use abort; for a fresh result start a new run. " +
-      "resume is ONLY for runs whose status is interrupted (crash or session-switch during execution): it replays " +
-      "completed calls from the record at zero token cost and continues where the run stopped. " +
-      "Do NOT resume a settled (done/failed/cancelled) run — start a new run instead.",
-      "resume: pass the SAME args as the original run (they are verified field-by-field; a mismatch is rejected " +
-      "with the differing fields listed). Omit args to reuse the original ones. Changed args = different intent = new run. " +
-      "To resume with a specific model: pass model ('provider/modelId') on the resume itself — it is recorded as the " +
-      "run's user override (same channel as a panel switch), drives all re-dispatched steps, and persists for later " +
-      "resumes without the parameter. Alternatively switch the run's model first (panel selector or /subagent-model) " +
-      "then resume without model — both are the same override channel.",
+      // tool-declaration-slimming D1 终态：使用纪律单点。勿等待条/预算纪律条/模型缺省继承条
+      // 已删（收敛点 = <available_subagents> 注入段 SUBAGENT_DISPATCH_SHARED_RULES）；resume
+      // args 深比对 / model override 通道的功能语义在 schema 字段说明一处，不在此复述。
+      // 锚词保留清单见 __tests__/tool-prompt-contract.test.ts 头注。
+      "PRIORITY: 'workflow' / 'run workflow' → try the run action FIRST — listed workflows run directly with action:run.",
+      "Refs/descriptions come from <available_workflows> (injected each turn). For parameter details, read the <location> script file (its header has @pi-meta parameters + usage + phases).",
+      "Runs are one-shot — no pause: stop early with abort; a fresh result means a new run. resume is ONLY for interrupted runs (crash or session-switch): it replays completed calls at zero token cost and continues. Do NOT resume a settled (done/failed/cancelled) run — start a new run.",
       "Call shapes (JSON): " +
       "- run: {\"action\":\"run\",\"name\":\"<script>\",\"args\":{...},\"tokens\":N,\"time\":N,\"model\":\"<provider/modelId>\",\"thinkingLevel\":\"<level>\"}. " +
       "- status: {\"action\":\"status\"}. " +
       "- abort: {\"action\":\"abort\",\"runId\":\"<id>\"} (optional: {\"error\":\"<reason>\"}). " +
       "- resume: {\"action\":\"resume\",\"runId\":\"<id>\",\"args\":{...},\"tokens\":N,\"time\":N,\"model\":\"<provider/modelId>\"} — args/tokens/time/model optional.",
-      // 预算纪律条整条与模型缺省继承条前半句已删（D1 单源化→注入段，原文见 git 历史）。
-      // Note 后半（user override 优先级 + 排障指引）是 workflow 特有功能语义，保留：
-      "Note: a user-issued runtime model override (panel switch / /subagent-model) takes precedence over the model parameter — an explicitly scripted thinkingLevel still applies " +
-      "(explicit levels outrank the override's inline level). If a run's explicitly scripted model seems ignored, " +
-      "check for an active user override (run journal model-override frame) before assuming a resolution bug.",
-      "Anti-patterns: Flattening args sub-fields (task/items/...) to the top level — they belong inside args. Calling {\"action\":\"run\"} without name.",
-      "CRITICAL: For orchestration patterns, ALWAYS use action:run with the <location> absolute " +
-      "path of the matching listed workflow — NEVER use workflow-script action:generate to recreate patterns " +
-      "already covered by available workflows. workflow-script generate is ONLY for novel patterns.",
+      "Note: a user-issued runtime model override (panel switch / /subagent-model) takes precedence over the model parameter (an explicitly scripted thinkingLevel still applies — explicit levels outrank the override's inline level). If a run's scripted model seems ignored, check for an active user override before assuming a resolution bug.",
+      "Anti-patterns: flattening args sub-fields (task/items/...) to the top level — they belong inside args; calling {\"action\":\"run\"} without name.",
+      "CRITICAL: for orchestration patterns ALWAYS use action:run with the <location> absolute path of the matching listed workflow — NEVER use workflow-script action:generate to recreate patterns already covered by available workflows; generate is ONLY for novel patterns.",
     ],
     parameters: WorkflowParams,
 

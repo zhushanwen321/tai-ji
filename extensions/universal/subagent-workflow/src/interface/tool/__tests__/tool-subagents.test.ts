@@ -238,7 +238,7 @@ describe("schema 契约：一跳扁平 + tasks 必填（D2）", () => {
     const guidelines = tool.promptGuidelines.join("\n");
     expect(guidelines).toContain("2+ independent tasks in one dispatch");
     expect(guidelines).toContain('{"tasks":[');
-    expect(guidelines).toContain("workflow tool");
+    expect(guidelines).toContain("`workflow` tool");
     // tool-declaration-slimming D1 单源化终态：勿等待/预算/模型缺省继承三类跨工具
     // 通用纪律不在本工具 promptGuidelines 重复——收敛到 <available_subagents> 注入段
     // （subagent-list-injector.ts SUBAGENT_DISPATCH_SHARED_RULES）说一次。
