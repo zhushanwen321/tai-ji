@@ -24,6 +24,7 @@ import type {
   CanvasState,
   ReviewDimension,
   ReviewSeverity,
+  SupportRating,
 } from './state.js'
 import type { CanvasError } from './errors.js'
 
@@ -149,6 +150,14 @@ export interface CanvasReviewEntryInput { // oe-exempt:20261015:framework:画布
   /** 引用的图元素 id（必须存在于画布——聚合 2 不变量 1）。 */
   targetId: string
   note: string
+  /**
+   * 支撑度评价（概念 §2.4「边的缺陷经支撑度表达」的写入通道——审查结论随条目落
+   * edge.support，round 由 runtime 按报告轮次注入「审查轮次溯源」）：targetId 须为
+   * 主干边（decompose/resolve，裁决点 R3——论证边不评级），非主干边携带即拒。
+   */
+  supportRating?: SupportRating
+  /** rating='gap' 的缺口清单（「有缺口附清单」词条语义：至少一条）；sufficient/invalid 不带。 */
+  supportGaps?: string[]
 }
 
 export interface CanvasReviewAppendParams { // oe-exempt:20261015:framework:画布域类型契约（数据形状/端口/测试 harness，非抽象接口单实现）
@@ -400,8 +409,10 @@ export function isCanvasReviewRequestParams(v: unknown): v is CanvasReviewReques
 
 const REVIEW_DIMENSIONS = ['completeness', 'necessity', 'support', 'authenticity', 'conflict', 'depth'] as const
 const REVIEW_SEVERITIES = ['must-fix', 'suggestion'] as const
+const SUPPORT_RATINGS = ['sufficient', 'gap', 'invalid'] as const
 
-/** review-append 单条守卫（round 必须为有限数；dimension/severity 词表内）。 */
+/** review-append 单条守卫（round 必须为有限数；dimension/severity/supportRating 词表内；
+ * gap 评价必附缺口清单——「有缺口附清单」词条语义）。 */
 function isCanvasReviewEntryInput(v: unknown): v is CanvasReviewEntryInput {
   return (
     isRecord(v) &&
@@ -411,7 +422,11 @@ function isCanvasReviewEntryInput(v: unknown): v is CanvasReviewEntryInput {
     isStringIn(REVIEW_DIMENSIONS, v.dimension) &&
     isStringIn(REVIEW_SEVERITIES, v.severity) &&
     isStringField(v, 'targetId') &&
-    typeof v.note === 'string'
+    typeof v.note === 'string' &&
+    (v.supportRating === undefined || isStringIn(SUPPORT_RATINGS, v.supportRating)) &&
+    (v.supportGaps === undefined || (Array.isArray(v.supportGaps) && v.supportGaps.every((g): g is string => typeof g === 'string'))) &&
+    (v.supportGaps === undefined || v.supportRating !== undefined) &&
+    (v.supportRating !== 'gap' || (Array.isArray(v.supportGaps) && v.supportGaps.length > 0))
   )
 }
 

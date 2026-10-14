@@ -5,8 +5,9 @@
  * 设计锚点：.tmp/tech-design/problem-solve-canvas.md §3.1(1) + §5-U2；概念文档
  * （不变量与状态机的上游 SSOT）：.tmp/problem-solve-canvas.md §2.3 / §2.4 / §2.5 / §2.7。
  *
- * 本文件零 IO；与 canvas-actions.ts（per-action 状态应用）/ canvas-domain.ts（mutate
- * 主入口门面）构成单向依赖 foundation ← actions ← domain，无环。
+ * 本文件零 IO；与 canvas-actions.ts（per-action 状态应用）/ canvas-review-actions.ts
+ * （审查聚合三动作）/ canvas-domain.ts（mutate 主入口门面）构成单向依赖
+ * foundation ← review-actions ← actions ← domain，无环。
  */
 import {
   ACTION_EVENT_MAP,

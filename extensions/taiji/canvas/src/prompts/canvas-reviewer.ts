@@ -26,7 +26,8 @@ export const REVIEW_DIMENSIONS_GUIDE: ReadonlyArray<{ dim: string; title: string
     dim: "support",
     title: "支撑",
     criteria:
-      "主干边（decompose/resolve）的支撑度是否成立？结论是否有 support/gap 标注的论据链，还是悬空断言？支撑缺口逐条点名。",
+      "主干边（decompose/resolve）的支撑度是否成立？结论是否有 support/gap 标注的论据链，还是悬空断言？支撑缺口逐条点名。" +
+      "对被评价的主干边输出 supportRating（sufficient/gap/invalid）；gap 必附 supportGaps 清单（该边缺什么支撑）。",
   },
   {
     dim: "authenticity",
@@ -89,12 +90,14 @@ export function buildReviewerPrompt(input: ReviewerPromptInput): string {
     input.canvasStateJson,
     "",
     "== 输出契约 ==",
-    "输出一个 JSON 对象：{ entries: [{ id, dimension, severity, targetId, note }] }。",
+    "输出一个 JSON 对象：{ entries: [{ id, dimension, severity, targetId, note, supportRating?, supportGaps? }] }。",
     "- id：本条目唯一 id（rv-<序号> 即可）；",
     "- dimension：六词表之一（completeness/necessity/support/authenticity/conflict/depth）；",
     "- severity：'must-fix'（不修不得收敛）或 'suggestion'（改进建议）；",
     "- targetId：条目指向的图元素 id（节点 / 边 / 评论，必须存在于画布数据中）；",
-    "- note：一句话说清问题与依据（引用 targetId 的内容），可附修复方向。",
+    "- note：一句话说清问题与依据（引用 targetId 的内容），可附修复方向；",
+    "- supportRating：仅当 targetId 是主干边（decompose/resolve）且你在评价该边支撑度时输出（sufficient/gap/invalid）；节点与论证边不评级；",
+    "- supportGaps：supportRating='gap' 时必填（至少一条：该边缺什么支撑）。",
     "没有问题的维度不输出条目；宁缺毋滥，不凑数。",
   ].join("\n")
 }

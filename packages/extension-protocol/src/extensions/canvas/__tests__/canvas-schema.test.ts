@@ -106,6 +106,8 @@ describe('U1 schema 往返：CanvasState 全量快照', () => {
     dirtyPaths: ['o1', 'n-root'],
     review: null,
     converged: false,
+    // canvas.get reply 查询侧派生（wire 形状分叉唯一字段——快照与 marker 工具结果不携带）
+    activeBindings: 1,
     createdAt: '2026-10-14T00:00:00.000Z',
     updatedAt: '2026-10-14T01:00:00.000Z',
   }
@@ -137,6 +139,8 @@ describe('U1 schema 往返：CanvasState 全量快照', () => {
           severity: 'suggestion',
           targetId: 'e1',
           note: '分支过浅',
+          supportRating: 'gap',
+          supportGaps: ['缺一层执行分解'],
         },
       ],
       stopNote: '连续两轮未清零',
@@ -302,5 +306,33 @@ describe('U1 运行时守卫：marker 请求信任边界', () => {
       { action: 'export', params: { canvasId: 'cv', target: { target: 'requirement-card' } } }, // 缺 leafId
     ]
     for (const m of malformed) expect(isCanvasMarkerRequest(m)).toBe(false)
+  })
+})
+
+describe('review-append 支撑度评价字段（概念 §2.4「边的缺陷经支撑度表达」的输入契约）', () => {
+  /** support 维度条目样例（targetId 指主干边）；over 覆盖支撑度字段做正逆例。 */
+  const entry = (over: Record<string, unknown>): unknown => ({
+    id: 're1',
+    round: 1,
+    dimension: 'support',
+    severity: 'must-fix',
+    targetId: 'e-o1',
+    note: '悬空断言',
+    ...over,
+  })
+  const request = (entries: unknown[]): unknown => ({ action: 'review-append', params: { canvasId: 'cv', round: 1, entries } })
+
+  it('合法评价通过守卫：gap 附清单 / sufficient 无清单', () => {
+    expect(isCanvasMarkerRequest(request([entry({ supportRating: 'gap', supportGaps: ['缺性能论据'] })]))).toBe(true)
+    expect(isCanvasMarkerRequest(request([entry({ supportRating: 'sufficient' })]))).toBe(true)
+    expect(isCanvasMarkerRequest(request([entry({ supportRating: 'invalid' })]))).toBe(true)
+  })
+
+  it('畸形评价拒绝：词表外 rating / gap 无清单 / 清单非字符串数组', () => {
+    expect(isCanvasMarkerRequest(request([entry({ supportRating: 'strong' })]))).toBe(false)
+    expect(isCanvasMarkerRequest(request([entry({ supportRating: 'gap' })]))).toBe(false)
+    expect(isCanvasMarkerRequest(request([entry({ supportRating: 'gap', supportGaps: [] })]))).toBe(false)
+    expect(isCanvasMarkerRequest(request([entry({ supportRating: 'gap', supportGaps: [42] })]))).toBe(false)
+    expect(isCanvasMarkerRequest(request([entry({ supportGaps: ['孤儿清单'] })]))).toBe(false)
   })
 })

@@ -10,6 +10,9 @@
  * - runtime canvas.json 加速快照的落盘形状（events.jsonl 为唯一持久权威，
  *   快照可由事件流全量重放推导——U2 落盘契约）
  *
+ * 唯一形状分叉：activeBindings 只在 canvas.get reply 出现（查询侧派生，见字段注释），
+ * 快照与 marker 工具结果不携带。
+ *
  * 时间字段一律 ISO string（不用 Date）——wire 与落盘 JSON 往返无损，序列化即契约。
  */
 
@@ -130,6 +133,10 @@ export interface ReviewEntry { // oe-exempt:20261015:framework:画布域类型�
   /** 引用的图元素 id（节点 / 边 / 评论）。 */
   targetId: string
   note: string
+  /** 随条目写回的支撑度评价输入原文（评价结果落 edge.support；round 溯源取条目 round）。 */
+  supportRating?: SupportRating
+  /** rating='gap' 的缺口清单（与 edge.support.gaps 同源）。 */
+  supportGaps?: string[]
   /**
    * 处置记录（first-writer-wins：已有处置记录后再次 review-resolve = 拒绝 +
    * already_resolved 错误——覆盖会让 R2 审到与登记方实际动作不符的处置表）。
@@ -184,6 +191,15 @@ export interface CanvasState { // oe-exempt:20261015:framework:画布域类型�
   review: ReviewReport | null
   /** 规划收敛终态（converge-check 校验不变量 10 后置位；export 同校验）。 */
   converged: boolean
+  /**
+   * 活跃绑定数（绑定记录 ∩ 存活 session，设计 §3.1(1) 回推节 / §3.1(3) 绑定徽标
+   * 数据源）——canvas.get reply 的查询侧派生值：transport 装配层附加（存活判定经
+   * sessionService，CanvasService 无该依赖），domain 产物与 canvas.json 快照均不含
+   * （绑定是 runtime 内存态、不可由事件流重放推导——落盘会污染「快照可由事件流
+   * 全量重放重建」的唯一权威承诺）。optional = marker 通道（enter/read 工具结果）
+   * 与旧 runtime reply 不携带；消费方缺字段按未知处理（徽标不渲染）。
+   */
+  activeBindings?: number
   createdAt: string
   updatedAt: string
 }

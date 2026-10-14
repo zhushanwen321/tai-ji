@@ -12,7 +12,7 @@
 
 ### 聚合 1：画布（聚合根）
 
-成员：全部图节点（问题 / 方案 / 论据 / 约束四类）、边（六种：decompose / resolve / argue / rebut / constrain / reference，MVP 含前四种 + constrain）、评论（锚定附件）、支撑度（主干边评价值）、方向裁决记录（画布元数据 + 事件留痕，非图节点）、待重审路径集合。
+成员：全部图节点（问题 / 方案 / 论据 / 约束四类；约束类第二版可达——MVP 的 grow 邻接矩阵四条 case 均不产约束节点，无创建通道）、边（六种：decompose / resolve / argue / rebut / constrain / reference，MVP 落地前四种——constrain / reference 第二版，契约词表不预留）、评论（锚定附件）、支撑度（主干边评价值）、方向裁决记录（画布元数据 + 事件留痕，非图节点）、待重审路径集合。
 
 不变量（全部可核对，表外写入 fail-fast 并返回结构化错误码 + 恢复动作文案）：
 
@@ -21,7 +21,7 @@
 3. 任一 question 的 resolve 边中，selected 至多一条；selected 变更产生方案选择事件并留对比理由（换选走同一调用事务内的迁移语义）
 4. rejected 节点不可删除、不可从 rejected 直接转 passed（必须先复活为 draft）
 5. 素材性为 fact 的论据必须携带核实状态（已核实 / 未核实）；未核实论据不得作为 passed 的依据
-6. constrain 边的目标必须是画布内存在的节点（子树锚点）
+6. constrain 边的目标必须是画布内存在的节点（子树锚点）——第二版生效：MVP 契约词表无 constrain 边，此不变量暂无校验对象
 7. 执行叶子 passed 前完成判据必填；dispatched 前必须 passed 且下游产物指针必填
 8. 评论被添加后，响应状态初始为待响应；agent 的采纳 / 反驳留痕前不得转为已响应
 9. 用户改动节点后，从该节点到根的路径必须进入待重审集合（mutate 事务内自动计算传播范围；换选 = 上溯路径 + 旧选中方案整个子树）
@@ -36,10 +36,10 @@
 
 **就绪递归与收敛判据**（自底向上传播，与反向审查同方向）：
 
-- question 就绪 = 存在 selected 方案且该方案子树就绪；或该问题被 rejected/shelved（判定范围外）
+- question 就绪 = 该问题被 rejected/shelved（判定范围外），或其完成路径全部成立：resolve 路径（存在 selected 方案且该方案子树就绪）与 decompose 路径（分解子问题全部就绪）并存时须同时成立；两路皆无 = 悬空问题，不就绪
 - option 就绪 = 无分解子问题，或子问题全部就绪
 - 叶子 = 无分解出边的 selected 方案（结构派生）；执行叶子 = 叶子且被显式标记可派发（规划决策，非结构事实）
-- 规划收敛 = 根就绪 + 全部执行叶子 passed/dispatched + must-fix 清零 + 待重审集合为空（不变量 10）
+- 规划收敛 = 根就绪 + 至少一个执行叶子（防空集 vacuous 收敛——无执行叶子 = 无交付单元，拒绝收敛）+ 全部执行叶子 passed/dispatched + must-fix 清零 + 待重审集合为空（不变量 10）
 
 ### 聚合 2：审查报告（ReviewReport，聚合根）
 
@@ -55,4 +55,4 @@
 
 ### 领域事件
 
-节点历史 = 事件流回放（who / when / why / what）。每个 mutation action 至少产出一个事件（read / list 为查询类不产事件）；事件类型含 CanvasCreated / GrowthDirectionDecided / NodeCreated / NodeModified / StateTransitioned / OptionSelected / NodeDispatched / CommentAdded / CommentResponded / DirtiedPathMarked / ReviewConverged / ReviewMaxRoundsReached / ReviewEscalated。`events.jsonl` 是唯一持久权威，`canvas.json` 快照损坏或不一致时从事件流头全量重放重建。
+节点历史 = 事件流回放（who / when / why / what）。每个 mutation action 至少产出一个事件（read / list 为查询类不产事件）；事件词表 18 值（全量 SSOT = 契约 `CANVAS_EVENT_TYPES`，`packages/extension-protocol/src/extensions/canvas/state.ts`）：主事件族（14 mutation action 各一，映射 = 契约 `ACTION_EVENT_MAP`）CanvasCreated / GrowthDirectionDecided / NodeCreated / NodeModified / StateTransitioned / OptionSelected / NodeDispatched / CommentAdded / CommentResponded / ReviewRequested / ReviewEntryAppended / ReviewEntryResolved / ConvergenceChecked / CanvasExported，附属事件（不独立对应 action）DirtiedPathMarked（待重审标记）与审查终态族 ReviewConverged / ReviewMaxRoundsReached / ReviewEscalated。`events.jsonl` 是唯一持久权威，`canvas.json` 快照损坏或不一致时从事件流头全量重放重建。

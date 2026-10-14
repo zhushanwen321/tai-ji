@@ -6,9 +6,10 @@
  * 上游 SSOT）：.tmp/problem-solve-canvas.md §2.3（就绪递归）/ §2.4（状态机）/
  * §2.5（聚合与不变量）/ §2.7（收敛判据）。
  *
- * 文件分层（依赖单向 foundation ← actions ← 本文件，无环；对外 import 面恒为本文件）：
+ * 文件分层（依赖单向 foundation ← review-actions ← actions ← 本文件，无环；对外 import 面恒为本文件）：
  * - canvas-foundation.ts：错误 / 事件形状 / 图查询 / 状态机 / 就绪递归 / 收敛门禁
- * - canvas-actions.ts：per-action 状态应用（applyCreate / applyByAction）
+ * - canvas-review-actions.ts：审查聚合三动作（review-request / review-append / review-resolve）
+ * - canvas-actions.ts：其余 per-action 状态应用（applyCreate / applyByAction）
  * - 本文件：applyMutation 主入口（主事件排序 + 对账违约 fail-fast）
  *
  * 本目录零 IO（落盘与广播在 canvas-service.ts 编排）——「U2 独立于一切 IO 可穷举单测」

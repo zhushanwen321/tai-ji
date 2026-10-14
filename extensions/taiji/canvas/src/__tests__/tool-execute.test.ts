@@ -210,6 +210,55 @@ describe("canvas_review / canvas_export / canvas_list 转译", () => {
     });
   });
 
+  it("review run：达上限停回（read 后 review.status=max-rounds）→ 短路返回停回说明，不派 reviewer", async () => {
+    await withExtLogEnv("1", async () => {
+      // marker 两跳：review-request（达上限 = 合法终态转移，mutate 成功）→ read（max-rounds 态）
+      harness.selectMock
+        .mockResolvedValueOnce(JSON.stringify({ ok: true, eventId: "e6", evType: "ReviewRequested", summary: "已达轮次上限（5 轮）：已置终态 max-rounds 停回用户" }))
+        .mockResolvedValueOnce(
+          JSON.stringify({
+            canvasId: "c1",
+            name: "多引擎支持",
+            root: { nodeId: "root", statement: "s", criterias: ["c"], scopeExclusions: [] },
+            direction: null,
+            nodes: [],
+            edges: [],
+            comments: [],
+            dirtyPaths: [],
+            review: {
+              status: "max-rounds",
+              round: 5,
+              maxRounds: 5,
+              entries: [],
+              stopNote: "审查已达轮次上限（5 轮）未收敛，停回用户裁决",
+              recoverHint: "升级裁决（扩大审查范围或修改完成判据）后重新发起审查（画布「发起审查」入口，用户操作）",
+            },
+            converged: false,
+            createdAt: "2026-10-15T00:00:00Z",
+            updatedAt: "2026-10-15T00:00:00Z",
+          }),
+        );
+      // service 槽 = 陷阱：停回态下 reviewer 不得被派发（本轮没有开始）
+      const SLOT_KEY = Symbol.for("@zhushanwen/subagent-core.service");
+      const dispatch = vi.fn();
+      (globalThis as Record<symbol, unknown>)[SLOT_KEY] = { executeAndAwait: dispatch };
+      try {
+        const review = toolOf(harness, "canvas_review");
+        const result = (await review.execute("t1", { action: "run", runParams: { canvasId: "c1" } }, undefined, undefined, harness.ctx)) as {
+          content: Array<{ type: string; text: string }>;
+        };
+        const payload = JSON.parse(result.content[0]!.text) as Record<string, unknown>;
+        expect(payload.stopped).toBe(true);
+        expect(payload.status).toBe("max-rounds");
+        expect(String(payload.stopNote)).toContain("轮次上限");
+        expect(String(payload.recoverHint)).toContain("升级裁决");
+        expect(dispatch).not.toHaveBeenCalled();
+      } finally {
+        delete (globalThis as Record<symbol, unknown>)[SLOT_KEY];
+      }
+    });
+  });
+
   it("export 需求卡缺 leafId → 结构化错误；planning-doc 正常映射", async () => {
     await withExtLogEnv("1", async () => {
       harness.selectMock.mockResolvedValue(JSON.stringify({ ok: true, eventId: "e5", evType: "CanvasExported", summary: "x" }));

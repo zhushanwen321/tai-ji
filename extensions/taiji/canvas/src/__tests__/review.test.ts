@@ -114,8 +114,8 @@ describe("轮次与收窄输入", () => {
     expect(r2).toContain("上轮处置表 + 攻击点");
   });
 
-  it("reviewer schema：entries 必填、六维度 enum、severity 两值", () => {
-    const entries = REVIEWER_REPORT_SCHEMA.properties as { entries: { items: { properties: Record<string, { enum?: string[] }> }; type: string } };
+  it("reviewer schema：entries 必填、六维度 enum、severity 两值、supportRating 三值", () => {
+    const entries = REVIEWER_REPORT_SCHEMA.properties as { entries: { items: { properties: Record<string, { enum?: string[]; type?: string }> }; type: string } };
     expect(entries.entries.type).toBe("array");
     expect(entries.entries.items.properties.dimension.enum).toEqual([
       "completeness",
@@ -126,6 +126,8 @@ describe("轮次与收窄输入", () => {
       "depth",
     ]);
     expect(entries.entries.items.properties.severity.enum).toEqual(["must-fix", "suggestion"]);
+    expect(entries.entries.items.properties.supportRating.enum).toEqual(["sufficient", "gap", "invalid"]);
+    expect(entries.entries.items.properties.supportGaps.type).toBe("array");
   });
 });
 
@@ -137,6 +139,20 @@ describe("collectValidEntries（reviewer 产出不信任校验）", () => {
     const { entries, dropped } = collectValidEntries("c1", 1, { entries: [valid, badWord, badShape] });
     expect(entries).toEqual([{ ...valid, round: 1 }]);
     expect(dropped).toBe(2);
+  });
+
+  it("支撑度评价透传：gap 附清单合法收集；gap 无清单 / 词表外 rating / 孤儿清单丢弃计数", () => {
+    const rated = { id: "rv-1", dimension: "support", severity: "must-fix", targetId: "e-o1", note: "悬空", supportRating: "gap", supportGaps: ["缺性能论据"] };
+    const noGaps = { id: "rv-2", dimension: "support", severity: "must-fix", targetId: "e-o1", note: "x", supportRating: "gap" };
+    const badWord = { id: "rv-3", dimension: "support", severity: "must-fix", targetId: "e-o1", note: "x", supportRating: "strong" };
+    const orphan = { id: "rv-4", dimension: "support", severity: "must-fix", targetId: "e-o1", note: "x", supportGaps: ["孤儿"] };
+    const sufficient = { id: "rv-5", dimension: "support", severity: "suggestion", targetId: "e-o1", note: "支撑成立", supportRating: "sufficient" };
+    const { entries, dropped } = collectValidEntries("c1", 2, { entries: [rated, noGaps, badWord, orphan, sufficient] });
+    expect(entries).toEqual([
+      { ...rated, round: 2 },
+      { ...sufficient, round: 2 },
+    ]);
+    expect(dropped).toBe(3);
   });
 
   it("entries 非数组（LLM 畸形输出）→ 全丢弃、dropped=1", () => {

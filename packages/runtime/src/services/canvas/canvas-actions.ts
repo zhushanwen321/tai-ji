@@ -2,9 +2,10 @@
  * CanvasService 领域应用层（problem-solve-canvas U2）——per-action 状态应用与校验。
  *
  * 每个 mutation action 的领域规则（存在性 / 邻接矩阵 / 状态机 / 不变量 fail-fast +
- * 状态变更 + 事件构造）一一对应本文件的一个 applyX 纯函数；live mutate 与崩溃后重建
- * 重放共用（直写 ≡ 重放的构造点）。原语（fail / 图查询 / 状态机 / 待重审标记）来自
- * canvas-foundation.ts，依赖单向：foundation ← 本文件 ← canvas-domain.ts（主入口）。
+ * 状态变更 + 事件构造）一一对应一个 applyX 纯函数（审查三动作在 canvas-review-actions.ts，
+ * 其余在本文件）；live mutate 与崩溃后重建重放共用（直写 ≡ 重放的构造点）。原语
+ * （fail / 图查询 / 状态机 / 待重审标记）来自 canvas-foundation.ts，依赖单向：
+ * foundation ← review-actions ← 本文件 ← canvas-domain.ts（主入口）。
  */
 import type { CanvasActionParams, CanvasActor, CanvasComment, CanvasCreateParams, CanvasEdge, CanvasGrowItem, CanvasNode, CanvasState } from '@zhushanwen/extension-protocol'
 import {
@@ -30,8 +31,7 @@ import {
   type CreateIds,
   type IdGenerator,
 } from './canvas-foundation.js'
-
-const DEFAULT_REVIEW_MAX_ROUNDS = 5
+import { applyReviewAppend, applyReviewRequest, applyReviewResolve } from './canvas-review-actions.js'
 
 function pushEvent(events: CanvasEventBody[], body: CanvasEventBody): void {
   events.push(body)
@@ -413,84 +413,6 @@ function applyCommentRespond(
   draft.updatedAt = at
   pushEvent(events, eventOf('comment-respond', actor, at, eventData({ ...params })))
   return `评论已响应（${params.disposition === 'adopted' ? '采纳' : '反驳'}）：${truncate(params.note)}`
-}
-
-// ── 审查三动作（聚合 2：ReviewReport）────────────────────────
-
-function applyReviewRequest(
-  draft: CanvasState,
-  params: CanvasActionParams['review-request'],
-  actor: CanvasActor,
-  at: string,
-  events: CanvasEventBody[],
-): string {
-  if (!draft.review) {
-    draft.review = { status: 'in-progress', round: 1, maxRounds: DEFAULT_REVIEW_MAX_ROUNDS, entries: [] }
-  } else {
-    if (draft.review.round >= draft.review.maxRounds) {
-      fail('review_max_rounds', `审查已达轮次上限（${draft.review.maxRounds} 轮）`)
-    }
-    draft.review.round += 1
-    draft.review.status = 'in-progress'
-  }
-  // 发起审查 = 当前全部待重审路径进入本轮审查范围（概念 §5.2「下轮审查优先覆盖待重审
-  // 路径」的消费点）：集合清空。这是待重审集合的唯一清除通道——没有它，收敛门禁③
-  // 「待重审空」不可达（词表无 clear-dirty action，属设计内语义而非新增动作）。
-  draft.dirtyPaths = []
-  draft.updatedAt = at
-  pushEvent(events, eventOf('review-request', actor, at, eventData({ ...params })))
-  return `审查已发起（R${draft.review.round}${params.scope ? `，范围：${truncate(params.scope)}` : '，全面审'}）`
-}
-
-function applyReviewAppend(
-  draft: CanvasState,
-  params: CanvasActionParams['review-append'],
-  actor: CanvasActor,
-  at: string,
-  events: CanvasEventBody[],
-): string {
-  if (!draft.review) {
-    draft.review = { status: 'in-progress', round: params.round, maxRounds: DEFAULT_REVIEW_MAX_ROUNDS, entries: [] }
-  }
-  const knownIds = new Set<string>([...draft.nodes.map((n) => n.id), ...draft.edges.map((e) => e.id), ...draft.comments.map((c) => c.id)])
-  for (const entry of params.entries) {
-    // 聚合 2 不变量 1：条目引用的图元素 id 必须存在于画布。
-    if (!knownIds.has(entry.targetId)) fail('entry_ref_missing', `报告条目「${entry.id}」引用的图元素「${entry.targetId}」不存在`)
-  }
-  for (const entry of params.entries) {
-    const existing = draft.review.entries.find((e) => e.id === entry.id)
-    const merged = { ...entry, resolution: existing?.resolution }
-    if (existing) {
-      // 幂等 upsert（同 grow：重试覆盖字段、保留已登记的处置记录）。
-      draft.review.entries[draft.review.entries.indexOf(existing)] = merged
-    } else {
-      draft.review.entries.push(merged)
-    }
-  }
-  draft.updatedAt = at
-  pushEvent(events, eventOf('review-append', actor, at, eventData({ ...params })))
-  return `审查报告 R${params.round} 写回 ${params.entries.length} 条条目`
-}
-
-const RESOLUTION_NOTE_MAX = 20
-
-/** 处置链责任方（设计 §3.1(1)）：主 agent = 执行侧；user = 复核与直接处置；first-writer-wins。 */
-function applyReviewResolve(
-  draft: CanvasState,
-  params: CanvasActionParams['review-resolve'],
-  actor: CanvasActor,
-  at: string,
-  events: CanvasEventBody[],
-): string {
-  const entry = draft.review?.entries.find((e) => e.id === params.entryId)
-  if (!entry) fail('entry_ref_missing', `报告条目「${params.entryId}」不存在：先 canvas_read 取当前审查报告`)
-  if (entry.resolution) {
-    fail('already_resolved', `该条目已由 ${entry.resolution.by === 'user' ? '用户' : 'agent'} 处置（${entry.resolution.disposition}）——first-writer-wins，改判走下一轮审查复审`)
-  }
-  entry.resolution = { disposition: params.disposition, by: actor === 'user' ? 'user' : 'agent', note: params.note }
-  draft.updatedAt = at
-  pushEvent(events, eventOf('review-resolve', actor, at, eventData({ ...params })))
-  return `条目「${truncate(entry.note, RESOLUTION_NOTE_MAX)}」已处置（${params.disposition}）：${truncate(params.note)}`
 }
 
 // ── converge-check / export（不变量 10 三门禁）────────────────

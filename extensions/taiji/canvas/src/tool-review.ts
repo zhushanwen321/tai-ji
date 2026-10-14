@@ -59,6 +59,17 @@ export const CanvasReviewParams = Type.Object({
           severity: StringEnum(["must-fix", "suggestion"], { description: "must-fix blocks convergence until cleared." }),
           targetId: Type.String({ description: "Canvas element id this entry points at (must exist)." }),
           note: Type.String({ description: "Finding + evidence + fix direction." }),
+          supportRating: Type.Optional(
+            StringEnum(["sufficient", "gap", "invalid"], {
+              description:
+                "Support rating for trunk edges (decompose/resolve) only — set when targetId is a trunk edge and the support dimension rates it. Omit otherwise (argument edges are not rated, R3).",
+            }),
+          ),
+          supportGaps: Type.Optional(
+            Type.Array(Type.String(), {
+              description: "Gap list; REQUIRED when supportRating='gap' (at least one item: what support is missing on that edge).",
+            }),
+          ),
         }),
       ),
     }),
@@ -152,6 +163,20 @@ export function registerCanvasReviewTool(
           "review_read_shape_invalid: 画布读取回包不是 CanvasState 形状（runtime 契约漂移）。" +
             "恢复动作：核对 runtime 与 @zhushanwen/pi-canvas 版本一致后重试；详见扩展日志。",
         );
+      }
+      // 停回终态短路（设计 §3.1 失败路径②）：review-request 在达轮次上限时置 max-rounds
+      // 终态 + 停回说明（mutate 本身成功——合法终态转移而非校验失败），本轮没有开始，
+      // 不得再派 reviewer。停回说明结构化可读（stopNote/recoverHint），不解析 summary 文本。
+      if (readReply.review?.status === "max-rounds") {
+        const text = JSON.stringify({
+          ok: true,
+          canvasId: readReply.canvasId,
+          stopped: true,
+          status: readReply.review.status,
+          stopNote: readReply.review.stopNote,
+          recoverHint: readReply.review.recoverHint,
+        });
+        return { content: [{ type: "text" as const, text }], details: undefined };
       }
       const dispatcher = resolveReviewerDispatcher();
       const outcome = await runReviewRound({

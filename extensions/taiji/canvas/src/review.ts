@@ -84,6 +84,18 @@ export const REVIEWER_REPORT_SCHEMA: Record<string, unknown> = {
           severity: { type: "string", enum: ["must-fix", "suggestion"] },
           targetId: { type: "string", description: "The canvas element id (node/edge/comment) this finding points at." },
           note: { type: "string", description: "One-paragraph finding: what is wrong, evidence from the canvas data, fix direction." },
+          supportRating: {
+            type: "string",
+            enum: ["sufficient", "gap", "invalid"],
+            description:
+              "Support rating for trunk edges only: set when this entry targets a decompose/resolve edge and rates its support " +
+              "(sufficient / gap / invalid). Omit for node targets and argue/rebut edges (R3: argument edges are not rated).",
+          },
+          supportGaps: {
+            type: "array",
+            items: { type: "string" },
+            description: "Gap list; REQUIRED (at least one item) when supportRating='gap' — what support is missing on that edge.",
+          },
         },
         required: ["id", "dimension", "severity", "targetId", "note"],
       },
