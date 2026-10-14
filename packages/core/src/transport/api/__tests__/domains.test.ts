@@ -727,6 +727,23 @@ describe('settings 域', () => {
     expect(mockCommand.mock.calls[7][0]).toBe('config.getRenameMode')
   })
 
+  it('rename 标题提示词配置组：renamePrompt / renameMaxLength', async () => {
+    mockCommand.mockResolvedValue({ style: 'slug', instruction: '', corrupted: false })
+    await settings.setRenamePrompt('sentence', 'probe-instruction')
+    expect(mockCommand.mock.calls[0].slice(0, 2)).toEqual([
+      'config.setRenamePrompt',
+      { style: 'sentence', instruction: 'probe-instruction' },
+    ])
+    await settings.getRenamePrompt()
+    expect(mockCommand.mock.calls[1][0]).toBe('config.getRenamePrompt')
+
+    mockCommand.mockResolvedValue({ maxLength: 50 })
+    await settings.setRenameMaxLength(80)
+    expect(mockCommand.mock.calls[2].slice(0, 2)).toEqual(['config.setRenameMaxLength', { maxLength: 80 }])
+    await settings.getRenameMaxLength()
+    expect(mockCommand.mock.calls[3][0]).toBe('config.getRenameMaxLength')
+  })
+
   it('smart-context 配置组', async () => {
     mockCommand.mockResolvedValue({ compactModel: '', thresholds: [] })
     await settings.getSmartContextConfig()

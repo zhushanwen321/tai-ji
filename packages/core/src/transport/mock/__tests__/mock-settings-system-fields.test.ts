@@ -55,6 +55,18 @@ describe('mock settings system 字段（自动重命名）：set 回显 + 写后
     expect(await settings.setRenameModel('claude-sonnet-4.5')).toEqual({ model: 'claude-sonnet-4.5' })
     expect(await settings.getRenameModel()).toEqual({ model: 'claude-sonnet-4.5' })
   })
+
+  it('style / instruction / maxLength 三字段（rename 标题提示词配置）', async () => {
+    expect(await settings.setRenamePrompt('emoji', '🔥 probe')).toEqual({
+      style: 'emoji',
+      instruction: '🔥 probe',
+      corrupted: false,
+    })
+    expect(await settings.getRenamePrompt()).toEqual({ style: 'emoji', instruction: '🔥 probe', corrupted: false })
+
+    expect(await settings.setRenameMaxLength(80)).toEqual({ maxLength: 80 })
+    expect(await settings.getRenameMaxLength()).toEqual({ maxLength: 80 })
+  })
 })
 
 describe('mock settings system 字段（智能上下文）：set 回显 + 写后读回 + 拷贝隔离', () => {
