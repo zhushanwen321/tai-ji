@@ -1003,13 +1003,17 @@ export class ZcodeEngine implements EnginePort {
    * COMMON_THOUGHT_LEVELS 之外的档位出声一行提示（措辞是「若不支持将被忽略/回落」的
    * 或然警告，非无效断言）；是否真不支持由目标模型决定，core 不做权威校验（引擎层
    * 不掌握各模型值域）。
+   *
+   * [2026-10-14 措辞同步] thoughtLevel 下发值已改为「按目录值域解析后的档位」
+   * （reasoning 唯一生效通道，见 buildAppServerCreateParams 头注）：有值域时
+   * off/minimal 归一最小档、非命中档取非最小档末值；无值域时维持恒等透传。
    */
   private warnThoughtLevelUncommon(task: AgentCallOpts, ctx: RunContext): void {
     const thoughtLevel = task.thinkingLevel?.trim();
     if (thoughtLevel === undefined || thoughtLevel === "") return;
     if (COMMON_THOUGHT_LEVELS.includes(thoughtLevel)) return;
     logger.warn(
-      `[zcode-engine] thinkingLevel=${thoughtLevel} 已透传为 thoughtLevel（非常见档位）：若目标模型不支持该档位将被忽略/回落到模型缺省推理档位（常见档位：${COMMON_THOUGHT_LEVELS.join("/")}）；档位是否生效以模型实际行为为准`,
+      `[zcode-engine] thinkingLevel=${thoughtLevel}（非常见档位）→ 按模型 reasoning 值域解析后下发 thoughtLevel（无值域时恒等透传；off/minimal 归一最小档，非命中档取非最小档末值；若目标模型不支持将被忽略/回落到模型缺省推理档位，常见档位：${COMMON_THOUGHT_LEVELS.join("/")}）`,
       { taskId: ctx.taskId },
     );
   }
@@ -1361,7 +1365,19 @@ function appendSchemaRetryDirective(basePrompt: string, validationError: string)
  *  优先），与 strict 键集纪律一致（缺席语义用「键不存在」表达，禁空串哨兵）。
  *  [2026-09-29 account 迁移同步] 显式模型附 model.options.reasoningLevel（目录
  *  modelRules 值域的最小档）：注册表模型普遍要求该选项（缺席 create 即拒收
- *  「Reasoning level is required」），缺省解析路径 CLI 自动补、显式路径须调用方供数。 */
+ *  「Reasoning level is required」），缺省解析路径 CLI 自动补、显式路径须调用方供数。
+ *  [2026-10-14 zcode CLI 协议适配] reasoning 的唯一生效落地通道 = thoughtLevel：
+ *  CLI session/create 处理器把 model 经 formatProtocolModelSelection 转
+ *  "provider/modelId" 字符串时丢弃 model.options（schema Nl 声明并接收、handler
+ *  不透传），档位实际只由独立 thoughtLevel → app.setThoughtLevel 应用（CLI
+ *  listThoughtLevels ≡ 模型 reasoningLevel.values，解析值恒在值域内）。故解析出的
+ *  reasoningLevel 镜像为 thoughtLevel，覆盖两个历史漏发形态：① thinkingLevel 缺席
+ *  （子代理派发默认形态——options 发了也被 CLI 丢，turn 阶段拒
+ *  reasoning-level-missing）；② thinkingLevel=off/minimal（CLI 值域无 off 档，
+ *  透传被跳过后仍 missing——reasoningLevelFor 已把 off 族归一为值域最小档）。
+ *  显式 thinkingLevel 精确命中场景两者同值，行为不变。reasoningLevel 未解析
+ *  （模型无 reasoning 值域 / 无显式模型）时维持 thinkingLevel 透传现状；options
+ *  保留兼容「create 期校验 options」的旧 CLI 代际（双通道任一生效即落地）。 */
 function buildAppServerCreateParams(
   task: AgentCallOpts,
   modelRef: string | undefined,
@@ -1370,8 +1386,14 @@ function buildAppServerCreateParams(
 ): SessionCreateParams {
   const denyTools = (task.denyTools ?? []).filter((t) => typeof t === "string" && t.trim() !== "");
   // thinkingLevel → thoughtLevel（A.2 ① 键集内）：空白串归一为不设键——strict 对象下
-  // 空值键位无语义且防 -32602 变形拒收（与 denyTools 空清单不设键同款纪律）
-  const thoughtLevel = task.thinkingLevel?.trim();
+  // 空值键位无语义且防 -32602 变形拒收（与 denyTools 空清单不设键同款纪律）。
+  // [2026-10-14 zcode CLI 协议适配] 解析出的 reasoningLevel 镜像为 thoughtLevel
+  // （reasoning 唯一生效通道，见函数头注）：reasoningLevelFor 已把 thinkingLevel
+  // 缺席 / off 族 / 非命中档全部归一到值域内，镜像值即意图档位；无值域时回退
+  // thinkingLevel 透传现状。
+  const thoughtLevel = reasoningLevel !== undefined && reasoningLevel !== ""
+    ? reasoningLevel
+    : task.thinkingLevel?.trim();
   const model =
     modelRef !== undefined && modelRef !== ""
       ? {
