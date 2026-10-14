@@ -114,6 +114,8 @@ const RENAME_MODEL_DEFAULT_CONFIG: Record<string, unknown> = {
   mode: 'first-stop',
   maxTitleLength: 50,
   thinkingLevel: 'off',
+  style: 'slug',
+  customInstruction: '',
 }
 
 /** rename-session 配置文件完整路径（${PI_CODING_AGENT_DIR}/config/rename-session-ext-config.json）。 */
@@ -309,7 +311,9 @@ function isValidRenameMaxLength(raw: unknown): raw is number {
 
 /**
  * 读取标题最大长度。文件不存在/坏 JSON/字段非法 → 50（与 extension normalize 回退语义一致）。
- * 不抛错（防御性设计，与 getRenameModel 一致）。
+ * 不抛错（防御性设计，与 getRenameModel 一致）。读失败分通道（对齐 getRenamePrompt 的
+ * 缺失/损坏分通道纪律）：ENOENT = 文件从未配置，正常回退不留痕；非 ENOENT（EACCES/EISDIR
+ * 等 IO 故障、坏 JSON）会掩盖用户已配置的值，先 logger.warn 留痕再回默认（返回语义不变）。
  */
 export function getRenameMaxLength(): number {
   try {
@@ -317,7 +321,13 @@ export function getRenameMaxLength(): number {
     if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return DEFAULT_RENAME_MAX_LENGTH
     const raw = (parsed as Record<string, unknown>)['maxTitleLength']
     return isValidRenameMaxLength(raw) ? raw : DEFAULT_RENAME_MAX_LENGTH
-  } catch {
+  } catch (e: unknown) {
+    const code = (e as NodeJS.ErrnoException).code
+    if (code !== 'ENOENT') {
+      logger.warn(
+        `[rename-session-config] getRenameMaxLength read failed, falling back to default ${DEFAULT_RENAME_MAX_LENGTH}: ${toErrorMessage(e)}`,
+      )
+    }
     return DEFAULT_RENAME_MAX_LENGTH
   }
 }

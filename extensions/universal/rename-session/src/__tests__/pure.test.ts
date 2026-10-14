@@ -208,12 +208,21 @@ describe("cleanTitle", () => {
 // ────────────────────────────────────────────────────
 
 describe("DEFAULT_RENAME_CONFIG", () => {
-	it("默认值：enabled=false / model=空 ref / mode=first-stop / maxTitleLength=50 / thinkingLevel=off", () => {
+	it("默认值：enabled=false / model=空 ref / mode=first-stop / maxTitleLength=50 / thinkingLevel=off / style=slug / customInstruction=空串", () => {
 		expect(DEFAULT_RENAME_CONFIG.enabled).toBe(false);
 		expect(DEFAULT_RENAME_CONFIG.model).toEqual({ type: "ref", ref: "" });
 		expect(DEFAULT_RENAME_CONFIG.mode).toBe("first-stop");
 		expect(DEFAULT_RENAME_CONFIG.maxTitleLength).toBe(50);
 		expect(DEFAULT_RENAME_CONFIG.thinkingLevel).toBe("off");
+		// 三处默认值真相（本常量 / runtime rename-session-config.ts 镜像 / package.json
+		// startupConfig.content）同批收敛的字面值锁定：改任一侧须双侧同步（runtime 测试侧
+		// 以建文件基底断言锁定同值，单侧改动必红）
+		expect(DEFAULT_RENAME_CONFIG.style).toBe("slug");
+		expect(DEFAULT_RENAME_CONFIG.customInstruction).toBe("");
+	});
+
+	it("RENAME_INSTRUCTION_MAX_LENGTH = 2000（与 @taiji/shared 协议字面值同值的手写镜像锁定，改任一侧双侧同步）", () => {
+		expect(RENAME_INSTRUCTION_MAX_LENGTH).toBe(2000);
 	});
 });
 

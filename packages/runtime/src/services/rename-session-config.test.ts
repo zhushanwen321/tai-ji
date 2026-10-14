@@ -5,6 +5,8 @@ import { dirname, join } from 'node:path'
 import { mkdtempSync, rmSync } from 'node:fs'
 import lockfile from 'proper-lockfile'
 import { getAutoRenameEnabled, setAutoRenameEnabled, getAutoRenameEnabledPath, ensureAutoRenameDefault, getRenameModel, setRenameModel, getRenameConfigPath, setRenameConfigLockTimingForTest, getRenameMode, setRenameMode, getRenamePrompt, setRenamePrompt, getRenameMaxLength, setRenameMaxLength } from './rename-session-config.js'
+import { logger } from '../infra/logger.js'
+import { RENAME_INSTRUCTION_MAX_LENGTH } from '@taiji/shared'
 import type { RenameMode } from '@taiji/shared'
 
 describe('auto-rename enabled 标志文件', () => {
@@ -177,16 +179,19 @@ describe('rename-session 模型配置（config/rename-session-ext-config.json）
     expect(getRenameModel()).toBe('p1/m1')
   })
 
-  it('setRenameModel：文件不存在时以默认基底建文件', () => {
+  it('setRenameModel：文件不存在时以默认基底建文件（基底七字段与 extension DEFAULT_RENAME_CONFIG 同批收敛）', () => {
     setRenameModel('p1/m1')
 
     expect(existsSync(configPath())).toBe(true)
     const saved = readRawConfig()
     expect(saved['model']).toEqual({ type: 'ref', ref: 'p1/m1' })
-    // 默认基底字段（与 extension DEFAULT_RENAME_CONFIG 一致）
+    // 默认基底字段（与 extension DEFAULT_RENAME_CONFIG 一致，全字段锁定）
     expect(saved['enabled']).toBe(false)
+    expect(saved['mode']).toBe('first-stop')
     expect(saved['maxTitleLength']).toBe(50)
     expect(saved['thinkingLevel']).toBe('off')
+    expect(saved['style']).toBe('slug')
+    expect(saved['customInstruction']).toBe('')
   })
 
   it('setRenameModel：空串清除回未设置', () => {
@@ -512,6 +517,30 @@ describe('rename-session 标题最大长度（maxTitleLength 字段）', () => {
     expect(getRenameMaxLength()).toBe(80)
   })
 
+  it('getRenameMaxLength：文件不存在（ENOENT）→ 静默回默认 50，不留痕（从未配置属正常回退）', () => {
+    const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {})
+    try {
+      expect(getRenameMaxLength()).toBe(50)
+      expect(warnSpy).not.toHaveBeenCalled()
+    } finally {
+      warnSpy.mockRestore()
+    }
+  })
+
+  it('getRenameMaxLength：非 ENOENT 读失败（EISDIR 等真 IO 故障）→ warn 留痕且返回默认 50', () => {
+    // 把配置路径置换成同名目录：readFileSync(目录) 抛 EISDIR（非 ENOENT），命中读失败留痕分支
+    mkdirSync(configPath(), { recursive: true })
+    const warnSpy = vi.spyOn(logger, 'warn').mockImplementation(() => {})
+    try {
+      expect(getRenameMaxLength()).toBe(50)
+      expect(warnSpy).toHaveBeenCalledTimes(1)
+      expect(warnSpy.mock.calls[0]?.[0]).toContain('getRenameMaxLength')
+      expect(warnSpy.mock.calls[0]?.[0]).toContain('50')
+    } finally {
+      warnSpy.mockRestore()
+    }
+  })
+
   it('setRenameMaxLength：读改写只覆盖 maxTitleLength，保留其他字段 + 合法值往返', () => {
     writeRawConfig({ enabled: true, mode: 'first-stop', model: { type: 'ref', ref: 'p1/m1' } })
     setRenameMaxLength(24)
@@ -527,6 +556,26 @@ describe('rename-session 标题最大长度（maxTitleLength 字段）', () => {
     for (const bad of [30.5, 0, -5, NaN]) {
       setRenameMaxLength(bad as number)
       expect(readRawConfig()['maxTitleLength']).toBe(50)
+    }
+  })
+})
+
+describe('rename 跨包镜像同值锁定（跨包不 import 的手写镜像，改任一侧须双侧同步，对侧测试同值锁定）', () => {
+  it('RENAME_INSTRUCTION_MAX_LENGTH 协议字面值 = 2000（extension pure.ts 手写镜像侧由 pure.test.ts 锁定）', () => {
+    expect(RENAME_INSTRUCTION_MAX_LENGTH).toBe(2000)
+  })
+
+  it('style 词表四值往返 = 协议 RenameStyle 值域（slug/sentence/emoji/custom，与 extension pure.ts RENAME_STYLES 同构）', () => {
+    const tmpRoot = mkdtempSync(join(tmpdir(), 'rename-mirror-test-'))
+    vi.stubEnv('TAIJI_AGENT_DATA_DIR', tmpRoot)
+    try {
+      for (const style of ['slug', 'sentence', 'emoji', 'custom'] as const) {
+        setRenamePrompt(style, '')
+        expect(getRenamePrompt().style).toBe(style)
+      }
+    } finally {
+      vi.unstubAllEnvs()
+      rmSync(tmpRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
     }
   })
 })
