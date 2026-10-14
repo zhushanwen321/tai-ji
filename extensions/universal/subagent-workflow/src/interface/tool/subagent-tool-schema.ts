@@ -148,7 +148,11 @@ export const SubagentMessageParams = Type.Object({
   // 拒绝清单不进 schema 说明——运行时错误本就带恢复动作），此处不重复。
   messageParam: Type.Optional(Type.Object({
     subagentId: Type.String({
-      description: "REQUIRED for action:'message'. The subagentId to message — any subagent in this session tree, running or idle (idle revives on the same id).",
+      // message 的打断/复活副作用在此承载：必填字段的说明是模型填参的必读面，
+      // 不依赖模型去翻 deprecated interrupt 字段（D1 单源化——interrupt 只声明 no-op）。
+      description:
+        "REQUIRED for action:'message'. The subagentId to message — any subagent in this session tree, running or idle. " +
+        "A message to a running subagent interrupts its in-flight round; an idle one revives on the same id and starts a new round.",
     }),
     text: Type.String({
       description: "REQUIRED for action:'message'. The message to send. Whitespace-only throws.",
@@ -156,7 +160,9 @@ export const SubagentMessageParams = Type.Object({
     interrupt: Type.Optional(Type.Boolean({
       // [H1 U6 / D2] 参数已退役（messageHandler 零消费）：在途轮存在即打断入队，
       // 不区分抢占/排队——字段保留防存量调用 schema 报错，description 据实声明 no-op。
-      description: "Deprecated, no effect: a message to a running subagent always interrupts its in-flight round; idle starts a new round.",
+      description:
+        "Deprecated, no effect — kept only so legacy calls pass schema validation. " +
+        "Interrupt/revive semantics live on subagentId above.",
     })),
   })),
   // action:"fork-from" → forkFromParam.sourceSubagentId REQUIRED ([v8.5 B] 断联恢复通道).

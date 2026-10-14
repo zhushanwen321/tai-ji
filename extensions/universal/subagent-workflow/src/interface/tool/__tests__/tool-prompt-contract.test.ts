@@ -206,6 +206,12 @@ describe("旧名残留负锚（U-B1）：声明面源文件零旧工具名指引
  *  B1  message/manage description 含 {"action":"message","messageParam" 与
  *      {"action":"cancel","cancelParam" 调用正例（原单工具 description Actions 一览的
  *      落位点，"subagentId":"sa- id 格式锚随之迁移）
+ *  B2  manage/message promptGuidelines 使用纪律锚：manage 含 "Never guess" + list 先行
+ *      调用形状（subagent_start 侧 A6 的本工具落点）；message 含 session tree 归属
+ *      纪律（nested 经其 parent——归属守卫 record-access 直接父校验的模型可见面）
+ *  B3  schema subagentId 说明含打断/复活副作用（"interrupts its in-flight round" /
+ *      "starts a new round"）——必填字段说明是模型填参必读面，打断语义不依赖
+ *      deprecated interrupt 字段（interrupt 只声明 no-op 本身）
  */
 describe("subagent_start description — 锚词保留清单（D2/D3 契约）", () => {
   it("体量上界：description ≤ 2400 字符（D2 目标区间 subagent 组 ≤8500 的分维护栏）", () => {
@@ -322,6 +328,34 @@ describe("subagent_manage / subagent_message description — call shapes 与 id 
   it("manage/message schema 兼容语义锚（A16）：interrupt deprecated no-op 保留", () => {
     const schemaSrc = readFileSync(join(__dirname, "../subagent-tool-schema.ts"), "utf-8");
     expect(schemaSrc).toContain("Deprecated, no effect");
+  });
+
+  it("manage/message promptGuidelines 使用纪律锚（B2）：list 先行 + session tree 归属", () => {
+    const manageGuidelines = promptGuidelinesText(MANAGE_SECTION);
+    expect(manageGuidelines).toContain("Never guess");
+    // guidelines 源码内 JSON 是转义形态（\"action\"）
+    expect(manageGuidelines).toContain('{\\"action\\":\\"list\\"}');
+    expect(manageGuidelines).toContain("compaction can swallow ids");
+    const messageGuidelines = promptGuidelinesText(MESSAGE_SECTION);
+    expect(messageGuidelines).toContain("Only message subagents you started in this session tree");
+    expect(messageGuidelines).toContain("through its parent");
+  });
+
+  it("message 打断/复活语义锚（B3）：subagentId 必填字段说明承载副作用，interrupt 只声明 no-op", () => {
+    const schemaSrc = readFileSync(join(__dirname, "../subagent-tool-schema.ts"), "utf-8");
+    // 只切 messageParam 块（cancel/close 处有同名 subagentId 声明，不在断言面）
+    const start = schemaSrc.indexOf("messageParam:");
+    const end = schemaSrc.indexOf("forkFromParam:");
+    if (start < 0 || end < 0 || end <= start) throw new Error("messageParam block not found");
+    const block = schemaSrc.slice(start, end);
+    expect(block).toContain("interrupts its in-flight round");
+    expect(block).toContain("starts a new round");
+    expect(block).toContain("revives on the same id");
+    // 单源负锚：语义句不残留在 deprecated interrupt 字段说明里（interrupt 是块内
+    // 最后一个声明，切到块尾即其声明全体）
+    const interruptDecl = block.slice(block.indexOf("interrupt:"));
+    expect(interruptDecl).toContain("Deprecated, no effect");
+    expect(interruptDecl).not.toContain("interrupts its in-flight round");
   });
 
   it("manage/message description 零 poll 措辞（A17 单源化）", () => {

@@ -241,12 +241,16 @@ A subagent MAY call \`subagent_start\` itself (environment shows "Depth: N/10"; 
     label: "Subagent Manage",
     promptSnippet: "List, cancel, or close subagents",
     // D1 单源化终态：字段级功能语义（合法值/缺省/拒绝条件）在 schema 字段说明一处；
-    // description 只留调用形状正例（锚词清单 B1）。
+    // description 只留调用形状正例（锚词清单 B1）；promptGuidelines 只留 id 纪律
+    //（list 先行——subagent_start 侧「Never guess an id」的本工具落点）。
     description: `Manage existing subagents (running or idle).
 
 - {"action":"list","listParam":{"includeFinished":true,"limit":20}}
 - {"action":"cancel","cancelParam":{"subagentId":"sa-..."}}
 - {"action":"close","closeParam":{"subagentId":"sa-...","force":false}}`,
+    promptGuidelines: [
+      "Never guess a subagentId — run {\"action\":\"list\"} first and copy the exact id; compaction can swallow ids, so on an unknown-id error re-list instead of retrying the same id.",
+    ],
     executionMode: "sequential",
     parameters: SubagentManageParams,
     renderCall: manageRenderCall,
@@ -258,11 +262,16 @@ A subagent MAY call \`subagent_start\` itself (environment shows "Depth: N/10"; 
     name: "subagent_message",
     label: "Subagent Message",
     promptSnippet: "Send a follow-up to a subagent, or fork-from an older one's history",
-    // D1 单源化终态：同 manage——schema 承载字段语义，description 只留调用形状正例（B1）。
+    // D1 单源化终态：同 manage——schema 承载字段语义（message 的打断/复活语义在
+    // subagentId 字段说明），description 只留调用形状正例（B1），promptGuidelines
+    // 只留归属纪律。
     description: `Continue a subagent: send a follow-up message, or restart from an older one's inherited history.
 
 - {"action":"message","messageParam":{"subagentId":"sa-...","text":"continue with X"}}
 - {"action":"fork-from","forkFromParam":{"sourceSubagentId":"sa-...","prompt":"continue"}}`,
+    promptGuidelines: [
+      "Only message subagents you started in this session tree — a nested one (started by another subagent) answers through its parent, not you.",
+    ],
     executionMode: "sequential",
     parameters: SubagentMessageParams,
     renderCall: messageRenderCall,
