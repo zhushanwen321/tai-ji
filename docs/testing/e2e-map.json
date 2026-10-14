@@ -2269,6 +2269,27 @@
       "owner": "scripts/",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
       "note": "R2 态（pre-commit 按路径接线，无 CI 固定环节——接线 SSOT = .githooks/install-hooks.sh extension files 白名单段；触发面 = extensions/**/package.json、extensions/**/*.ts、脚本自身；本表登记 run 面 = 脚本自身变更干跑全量 27 包）。无 vitest 测试资产"
+    },
+    {
+      "id": "E2E-PIRES-01",
+      "summary": "resources/pi 外部 symlink 打包互斥检测（codesign bundle 自包含门）：check-pi-resources-links.mjs 干跑自检——目录缺失放行 / 外部 symlink（含断链）拦截 / --fix 递归实体化（环形链接显式报错）。build 脚本链最前与 preflight 检查 7 双挂载同一逻辑源",
+      "scope": [
+        "scripts/check-pi-resources-links.mjs",
+        "scripts/preflight-check.sh"
+      ],
+      "layer": "L1",
+      "assets": [
+        {
+          "kind": "script",
+          "ref": "scripts/check-pi-resources-links.mjs"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "node scripts/check-pi-resources-links.mjs",
+      "owner": "scripts/",
+      "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
+      "note": "R2 态：改脚本本体或 preflight 接线时干跑（当前树 resources/pi 缺失 → exit 0 放行即绿）；dev symlink 形态下红是合法失败（正是脚本职责，--fix 恢复）。行为实测记录见 docs/todo/local-codesign-build-vs-dev-symlink-conflict.md"
     }
   ]
 }
