@@ -126,6 +126,11 @@ import { getPiAgentDir, getSessionsDir } from '../../infra/pi/pi-paths.js'
 import { clearRemovedSessionData } from '../plugin-service/session-data-store.js'
 // create 幂等化（发现 B）：clientUuid 去重登记表（in-flight 共用 Promise + 成功 TTL 保留）
 import { CreateIdempotencyRegistry } from './create-idempotency.js'
+// 画布绑定解绑（problem-solve-canvas U2）：session 真删除路径的解绑分发（模块级单例分发，
+// 同 clearRemovedSessionData 形态——跨服务不构造注入）。挂点收窄到 delete 编排侧：三条
+// session 存活路径（pi 崩溃 / forceQuit / restore 清场）刻意不清——绑定不随 pi 进程死亡
+// 解绑（崩溃后 session 重开即恢复回推）；runtime 重启 = 绑定全清（内存态随进程消亡）。
+import { unbindCanvasOnSessionDeleted } from '../canvas/canvas-service.js'
 import { cleanupMigrateResidues } from '../../infra/pi/session-file-utils.js'
 // 绑定字段注册表模块（BINDING_FIELDS / hydrateBindingMeta / CREATE_DERIVED_CALLERS SSOT）
 import { hydrateBindingMeta } from '../../infra/pi/session-binding-fields.js'
@@ -1088,6 +1093,9 @@ export class SessionLifecycle implements ISessionRegistry {
       // best-effort 降级：清理失败仅留痕，不阻断删除主流程（B5 清理是软增强非删除前置条件）
       console.warn(`[session-lifecycle] plugin sessionData clear failed (sessionId=${sessionId}):`, e)
     }
+    // 画布绑定解绑（problem-solve-canvas U2）：active / scanned 两分支共用的真删除点——
+    // 与 B5 同款挂点形态（模块级分发 + delete 主链段）。纯同步 Map 摘除，无失败形态。
+    unbindCanvasOnSessionDeleted(sessionId)
     // wave:perf-w26（D9-1 delete 失效点）：session 文件已 trash，目录 TTL 快照 1s 内仍含
     // 已删条目——显式失效，删除后立即从侧栏列表消失（05 文档 V5 验收）。
     this.sessionStore.invalidateScanCache()

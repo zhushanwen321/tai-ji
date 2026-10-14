@@ -1,0 +1,561 @@
+/**
+ * CanvasService 领域应用层（problem-solve-canvas U2）——per-action 状态应用与校验。
+ *
+ * 每个 mutation action 的领域规则（存在性 / 邻接矩阵 / 状态机 / 不变量 fail-fast +
+ * 状态变更 + 事件构造）一一对应本文件的一个 applyX 纯函数；live mutate 与崩溃后重建
+ * 重放共用（直写 ≡ 重放的构造点）。原语（fail / 图查询 / 状态机 / 待重审标记）来自
+ * canvas-foundation.ts，依赖单向：foundation ← 本文件 ← canvas-domain.ts（主入口）。
+ */
+import type { CanvasActionParams, CanvasActor, CanvasComment, CanvasCreateParams, CanvasEdge, CanvasGrowItem, CanvasNode, CanvasState } from '@zhushanwen/extension-protocol'
+import {
+  argumentPolarity,
+  CANVAS_NAME_MAX,
+  convergenceBlockers,
+  dirtyEvent,
+  edgeOf,
+  eventData,
+  eventOf,
+  fail,
+  findTrunkCycle,
+  isTransitionAllowed,
+  isTrunkEdge,
+  markDirty,
+  nodeOf,
+  pathToRoot,
+  selectedOptionOf,
+  subtreeOf,
+  truncate,
+  type CanvasEventBody,
+  type CanvasTransformRequest,
+  type CreateIds,
+  type IdGenerator,
+} from './canvas-foundation.js'
+
+const DEFAULT_REVIEW_MAX_ROUNDS = 5
+
+function pushEvent(events: CanvasEventBody[], body: CanvasEventBody): void {
+  events.push(body)
+}
+
+// ── create（不变量 1：根三要素；无 prev 状态，独立于 applyMutation）──
+
+/**
+ * 创建画布（聚合根诞生）。canvasId / rootNodeId 由服务层生成并经 ids 传入（随事件
+ * data.generated 落盘——重放按事件值恢复，不重新生成）。criterias 空数组拒绝：
+ * 根完成判据是收敛判据的存在前提（概念文档「不可砍三样」之首）。
+ */
+export function applyCreate(
+  params: CanvasCreateParams,
+  actor: CanvasActor,
+  at: string,
+  ids: CreateIds,
+): { state: CanvasState; events: CanvasEventBody[]; evType: CanvasEventBody['type']; summary: string } {
+  if (params.statement.trim() === '') fail('invalid_params', '根问题陈述（statement）为空')
+  if (params.criterias.length === 0) fail('invalid_params', '根完成判据（criterias）至少一条——否则收敛无判据（不可砍项）')
+  const state: CanvasState = {
+    canvasId: ids.canvasId,
+    name: params.name?.trim() || truncate(params.statement.trim(), CANVAS_NAME_MAX),
+    root: {
+      nodeId: ids.rootNodeId,
+      statement: params.statement,
+      criterias: [...params.criterias],
+      scopeExclusions: [...params.scopeExclusions],
+    },
+    direction: null,
+    nodes: [{
+      id: ids.rootNodeId,
+      type: 'question',
+      content: params.statement,
+      lifecycle: 'draft',
+      createdAt: at,
+    }],
+    edges: [],
+    comments: [],
+    dirtyPaths: [],
+    review: null,
+    converged: false,
+    createdAt: at,
+    updatedAt: at,
+  }
+  const events: CanvasEventBody[] = [
+    eventOf('create', actor, at, eventData({ ...params }, { canvasId: ids.canvasId, rootNodeId: ids.rootNodeId })),
+  ]
+  return { state, events, evType: events[0]!.type, summary: `画布「${state.name}」已创建：${truncate(params.statement)}` }
+}
+
+// ── 主分发（canvas-domain.applyMutation 的骨架；本文件内聚 per-action 规则）──
+
+export function applyByAction(
+  draft: CanvasState,
+  req: CanvasTransformRequest,
+  actor: CanvasActor,
+  at: string,
+  idGen: IdGenerator,
+  events: CanvasEventBody[],
+): string {
+  switch (req.action) {
+    case 'grow': return applyGrow(draft, req.params, actor, at, events)
+    case 'patch': return applyPatch(draft, req.params, actor, at, events)
+    case 'decide-direction': return applyDecideDirection(draft, req.params, actor, at, events)
+    case 'select': return applySelect(draft, req.params, actor, at, events)
+    case 'transition': return applyTransition(draft, req.params, actor, at, events)
+    case 'comment': return applyComment(draft, req.params, actor, at, idGen, events)
+    case 'comment-respond': return applyCommentRespond(draft, req.params, actor, at, events)
+    case 'review-request': return applyReviewRequest(draft, req.params, actor, at, events)
+    case 'review-append': return applyReviewAppend(draft, req.params, actor, at, events)
+    case 'review-resolve': return applyReviewResolve(draft, req.params, actor, at, events)
+    case 'converge-check': return applyConvergeCheck(draft, actor, at, events)
+    case 'export': return applyExport(draft, req.params, actor, at, events)
+    case 'dispatch': return applyDispatch(draft, req.params, actor, at, events)
+  }
+}
+
+// ── grow（批量原子事务 + 邻接矩阵 + 不变量 2 + 幂等 upsert）──
+
+function applyGrow(
+  draft: CanvasState,
+  params: CanvasActionParams['grow'],
+  actor: CanvasActor,
+  at: string,
+  events: CanvasEventBody[],
+): string {
+  if (params.batch.length === 0) fail('invalid_params', 'grow 批为空：至少一条生长条目')
+  // 原子事务：批内逐条在 draft 副本上应用，任一 fail-fast 即整体拒绝（draft 丢弃，无部分写入）。
+  for (const item of params.batch) {
+    applyGrowItem(draft, item, at)
+  }
+  draft.updatedAt = at
+  pushEvent(events, eventOf('grow', actor, at, eventData({ ...params })))
+  const types = new Set(params.batch.map((i) => i.type))
+  return `新增 ${params.batch.length} 个元素（${[...types].join('/')}）：${truncate(params.reason)}`
+}
+
+/** grow 单条：新节点 + 连接边。节点 id 由 agent 生成（幂等 upsert 键）；边 id 确定性派生
+ * 自节点 id（`e-<节点id>`）——同 id 重试 → 同边 id → upsert 覆盖，整条 item 幂等无副作用。 */
+function applyGrowItem(draft: CanvasState, item: CanvasGrowItem, at: string): void {
+  validateGrowAdjacency(draft, item)
+  const existing = nodeOf(draft, item.id)
+  const node: CanvasNode = {
+    id: item.id,
+    type: item.type,
+    content: item.content,
+    lifecycle: 'draft',
+    createdAt: existing?.createdAt ?? at,
+  }
+  if (item.type === 'argument') {
+    // 素材性：契约缺省 claim；fact 必带核实状态（不变量 5 前半句构造性满足——缺省 false 即已携带）。
+    node.materiality = item.materiality ?? 'claim'
+    node.polarity = item.edgePolarity
+    if (node.materiality === 'fact') node.factVerified = item.factVerified ?? false
+  }
+  if (item.type === 'option' && item.dispatchable === true) {
+    node.dispatchable = true
+  }
+  // 幂等 upsert：同 id 覆盖字段、保留 createdAt（重试 = 相同内容覆盖，状态不变 = 无副作用）。
+  if (existing) {
+    draft.nodes[draft.nodes.indexOf(existing)] = node
+  } else {
+    draft.nodes.push(node)
+  }
+  const edgeId = `e-${item.id}`
+  // 边方向按概念 §2.3 邻接表：主干边（decompose/resolve）= 父/问题 → 新子节点；
+  // 附属边（argue/rebut）= 新 argument 节点 → 被论证 / 被反驳目标。
+  const edge: CanvasEdge = (item.edge === 'decompose' || item.edge === 'resolve')
+    ? { id: edgeId, type: item.edge, from: item.attachTo, to: item.id }
+    : { id: edgeId, type: item.edge, from: item.id, to: item.attachTo }
+  const existingEdge = edgeOf(draft, edgeId)
+  if (existingEdge) {
+    draft.edges[draft.edges.indexOf(existingEdge)] = edge
+  } else {
+    draft.edges.push(edge)
+  }
+  if (item.edge === 'decompose' || item.edge === 'resolve') {
+    const cyclic = findTrunkCycle(draft)
+    if (cyclic) fail('cycle_detected', `该边使主干成环（经节点「${cyclic}」）`)
+  }
+}
+
+/** 邻接合法性（概念 §2.3 边模型，MVP 四种边）：表外组合 invalid_params；端点缺失
+ * node_not_found / edge_not_found。 */
+function validateGrowAdjacency(draft: CanvasState, item: CanvasGrowItem): void {
+  const attachNode = nodeOf(draft, item.attachTo)
+  const attachEdge = attachNode ? undefined : edgeOf(draft, item.attachTo)
+  switch (item.edge) {
+    case 'decompose': {
+      if (item.type !== 'question') fail('invalid_params', `decompose 边的子端必须是 question，收到「${item.type}」`)
+      if (!attachNode) fail('node_not_found', `decompose 父节点「${item.attachTo}」不存在`)
+      if (attachNode.type !== 'question' && attachNode.type !== 'option') {
+        fail('invalid_params', `decompose 父端必须是 question 或 option，收到「${attachNode.type}」`)
+      }
+      return
+    }
+    case 'resolve': {
+      if (item.type !== 'option') fail('invalid_params', `resolve 边的子端必须是 option，收到「${item.type}」`)
+      if (!attachNode) fail('node_not_found', `resolve 所在问题「${item.attachTo}」不存在`)
+      if (attachNode.type !== 'question') fail('invalid_params', `resolve 父端必须是 question，收到「${attachNode.type}」`)
+      return
+    }
+    case 'argue': {
+      if (item.type !== 'argument') fail('invalid_params', `argue 边的起点必须是 argument，收到「${item.type}」`)
+      if (item.edgePolarity === undefined) fail('invalid_params', 'argue 边必带极性（edgePolarity: support | object）')
+      if (!attachNode && !attachEdge) fail('node_not_found', `被论证目标「${item.attachTo}」不存在`)
+      if (attachNode && attachNode.type !== 'question' && attachNode.type !== 'option') {
+        fail('invalid_params', `argue 只论证 question / option / 主干边，收到「${attachNode.type}」`)
+      }
+      if (attachEdge && !isTrunkEdge(attachEdge)) fail('invalid_params', 'argue 指边时只能指主干边（decompose / resolve）')
+      return
+    }
+    case 'rebut': {
+      if (item.type !== 'argument') fail('invalid_params', `rebut 边的起点必须是 argument，收到「${item.type}」`)
+      if (!attachNode) fail('node_not_found', `被反驳论据「${item.attachTo}」不存在`)
+      if (attachNode.type !== 'argument') fail('invalid_params', `rebut 的目标必须是 argument，收到「${attachNode.type}」`)
+      return
+    }
+  }
+}
+
+// ── patch（内容编辑 + root 三要素同步 + 不变量 5/7/9）──────────
+
+function applyPatch(
+  draft: CanvasState,
+  params: CanvasActionParams['patch'],
+  actor: CanvasActor,
+  at: string,
+  events: CanvasEventBody[],
+): string {
+  const node = nodeOf(draft, params.nodeId)
+  if (!node) fail('node_not_found', `待编辑节点「${params.nodeId}」不存在`)
+  const changes: string[] = []
+  if (params.content !== undefined) {
+    node.content = params.content
+    changes.push('内容')
+    if (node.id === draft.root.nodeId) draft.root.statement = params.content
+  }
+  if (params.criterias !== undefined) {
+    if (node.type !== 'option' && node.id !== draft.root.nodeId) {
+      fail('invalid_params', '完成判据只能编辑在根问题或执行叶子（option）上')
+    }
+    if (node.id === draft.root.nodeId) draft.root.criterias = [...params.criterias]
+    else node.criterias = [...params.criterias]
+    changes.push('判据')
+  }
+  if (params.dispatchable !== undefined) {
+    if (node.type !== 'option') fail('invalid_params', '执行叶子标记（dispatchable）只能设在 option 上')
+    node.dispatchable = params.dispatchable
+    changes.push(params.dispatchable ? '标记执行叶子' : '取消执行叶子')
+  }
+  if (params.factVerified !== undefined) {
+    if (node.type !== 'argument' || node.materiality !== 'fact') {
+      fail('invalid_params', '核实状态（factVerified）只能翻转在 fact 论据上')
+    }
+    node.factVerified = params.factVerified
+    changes.push(params.factVerified ? '核实' : '撤销核实')
+  }
+  if (changes.length === 0) fail('invalid_params', 'patch 未携带任何可编辑字段（content / criterias / dispatchable / factVerified 至少一项）')
+  // D9：用户改动 → 上溯路径进待重审（不变量 9）。agent 修复不触发（处置表承载复审范围）。
+  if (actor === 'user') {
+    const added = pathToRoot(draft, node.id)
+    markDirty(draft, added)
+    pushEvent(events, dirtyEvent(draft, 'patch', actor, at, added))
+  }
+  draft.updatedAt = at
+  pushEvent(events, eventOf('patch', actor, at, eventData({ ...params })))
+  return `节点「${truncate(node.content)}」已更新（${changes.join('/')}）：${truncate(params.reason)}`
+}
+
+// ── decide-direction（画布元数据 + 事件留痕，R4：非图节点）────
+
+function applyDecideDirection(
+  draft: CanvasState,
+  params: CanvasActionParams['decide-direction'],
+  actor: CanvasActor,
+  at: string,
+  events: CanvasEventBody[],
+): string {
+  draft.direction = { direction: params.direction, reason: params.reason, decidedAt: at }
+  draft.updatedAt = at
+  pushEvent(events, eventOf('decide-direction', actor, at, eventData({ ...params })))
+  return `生长方向已裁决：${params.direction === 'top-down' ? '自顶向下' : '自底向上'}（${truncate(params.reason)}）`
+}
+
+// ── select（不变量 3：至多一条 selected + 换选迁移 + D9）──────
+
+function applySelect(
+  draft: CanvasState,
+  params: CanvasActionParams['select'],
+  actor: CanvasActor,
+  at: string,
+  events: CanvasEventBody[],
+): string {
+  const question = nodeOf(draft, params.questionId)
+  if (!question || question.type !== 'question') fail('node_not_found', `目标问题「${params.questionId}」不存在或不是 question`)
+  const option = nodeOf(draft, params.optionId)
+  if (!option || option.type !== 'option') fail('node_not_found', `目标方案「${params.optionId}」不存在或不是 option`)
+  if (!draft.edges.some((e) => e.type === 'resolve' && e.from === params.questionId && e.to === params.optionId)) {
+    fail('invalid_params', `方案「${params.optionId}」不是问题「${params.questionId}」的候选（无 resolve 边相连）`)
+  }
+  const current = selectedOptionOf(draft, params.questionId)
+  if (current && current.id !== params.optionId) {
+    if (!params.replace) {
+      fail('selection_conflict', `该问题已选定方案「${truncate(current.content)}」`)
+    }
+    if (params.replace.fromOptionId !== current.id) {
+      fail('invalid_params', `replace.fromOptionId「${params.replace.fromOptionId}」不是该问题当前选定方案「${current.id}」`)
+    }
+    // 换选迁移（同一调用事务内）：先迁出旧 selected 再置新（不变量 3 的迁移语义承载）。
+    current.selected = false
+    current.selectionReason = undefined
+  }
+  option.selected = true
+  option.selectionReason = params.reason
+  // D9：用户选定 → 上溯路径进待重审；换选 → 旧选中方案整个子树一并进入（旧支柱已被换下）。
+  if (actor === 'user') {
+    const added = [...pathToRoot(draft, params.questionId)]
+    if (params.replace) {
+      for (const id of subtreeOf(draft, params.replace.fromOptionId)) {
+        if (!added.includes(id)) added.push(id)
+      }
+    }
+    markDirty(draft, added)
+    pushEvent(events, dirtyEvent(draft, 'select', actor, at, added))
+  }
+  draft.updatedAt = at
+  pushEvent(events, eventOf('select', actor, at, eventData({ ...params })))
+  const verb = params.replace ? '换选' : '选定'
+  return `方案已${verb}：「${truncate(option.content)}」（${truncate(params.reason)}）`
+}
+
+// ── transition（状态机 + 不变量 4/5/7 + 根豁免）──────────────
+
+function applyTransition(
+  draft: CanvasState,
+  params: CanvasActionParams['transition'],
+  actor: CanvasActor,
+  at: string,
+  events: CanvasEventBody[],
+): string {
+  const node = nodeOf(draft, params.nodeId)
+  if (!node) fail('node_not_found', `目标节点「${params.nodeId}」不存在`)
+  if (node.id === draft.root.nodeId && (params.to === 'shelved' || params.to === 'rejected')) {
+    fail('lifecycle_transition_illegal', '根节点不可搁置 / 否决（否则就绪递归对根豁免将使收敛门禁空集通过）')
+  }
+  if (!isTransitionAllowed(node.lifecycle, params.to)) {
+    fail('lifecycle_transition_illegal', `状态机不允许「${node.lifecycle}」→「${params.to}」（rejected / shelved 须先复活为 draft）`)
+  }
+  if (params.to === 'rejected') {
+    if (!params.rejection?.reason) fail('invalid_params', '否决（rejected）必须附否决记录（rejection.reason）——否决分支灰显保留、不可删除')
+    node.rejection = { reason: params.rejection.reason, reviveCondition: params.rejection.reviveCondition }
+  }
+  if (params.to === 'passed') {
+    assertPassable(draft, node)
+  }
+  const from = node.lifecycle
+  node.lifecycle = params.to
+  draft.updatedAt = at
+  pushEvent(events, eventOf('transition', actor, at, eventData({ ...params })))
+  return `节点「${truncate(node.content)}」状态：${from} → ${params.to}（${truncate(params.reason)}）`
+}
+
+/** 不变量 5 + 7：passed 前置——执行叶子判据必填；支撑该节点的 fact 论据必须已核实。 */
+function assertPassable(draft: CanvasState, node: CanvasNode): void {
+  if (node.type === 'option' && node.dispatchable === true && (!node.criterias || node.criterias.length === 0)) {
+    fail('lifecycle_transition_illegal', `执行叶子「${node.id}」passed 前必须填写完成判据（不变量 7）`)
+  }
+  const supporting = draft.edges.filter((e) => e.type === 'argue' && e.to === node.id && argumentPolarity(draft, e.from) === 'support')
+  for (const e of supporting) {
+    const arg = nodeOf(draft, e.from)
+    if (arg && arg.materiality === 'fact' && arg.factVerified !== true) {
+      fail('unverified_fact', `未核实的 fact 论据「${truncate(arg.content)}」不得作为 passed 的依据（不变量 5）`)
+    }
+  }
+}
+
+// ── comment / comment-respond（不变量 8 响应义务）────────────
+
+function applyComment(
+  draft: CanvasState,
+  params: CanvasActionParams['comment'],
+  actor: CanvasActor,
+  at: string,
+  idGen: IdGenerator,
+  events: CanvasEventBody[],
+): string {
+  const anchorNode = nodeOf(draft, params.anchorId)
+  const anchorEdge = anchorNode ? undefined : edgeOf(draft, params.anchorId)
+  if (!anchorNode && !anchorEdge) fail('node_not_found', `评论锚定目标「${params.anchorId}」不存在（节点或边 id）`)
+  const commentId = `${params.anchorId}#c-${idGen.next()}`
+  const comment: CanvasComment = { id: commentId, anchorId: params.anchorId, text: params.text, status: 'pending', createdAt: at }
+  draft.comments.push(comment)
+  // D9：用户评论 = 注入议题 → 锚定目标（节点；锚边取子端）上溯路径进待重审。
+  if (actor === 'user') {
+    const added = pathToRoot(draft, anchorNode ? anchorNode.id : (anchorEdge as CanvasEdge).to)
+    markDirty(draft, added)
+    pushEvent(events, dirtyEvent(draft, 'comment', actor, at, added))
+  }
+  draft.updatedAt = at
+  pushEvent(events, eventOf('comment', actor, at, eventData({ ...params }, { commentId })))
+  return `新评论（锚定「${truncate(params.anchorId)}」）：${truncate(params.text)}`
+}
+
+function applyCommentRespond(
+  draft: CanvasState,
+  params: CanvasActionParams['comment-respond'],
+  actor: CanvasActor,
+  at: string,
+  events: CanvasEventBody[],
+): string {
+  const comment = draft.comments.find((c) => c.id === params.commentId)
+  if (!comment) fail('invalid_params', `评论「${params.commentId}」不存在：先 canvas_read 核对评论 id`)
+  if (comment.status === 'responded') fail('invalid_params', `评论「${comment.id}」已响应（${comment.response?.disposition}）：不得重复响应`)
+  if (params.note.trim() === '') fail('invalid_params', '响应必须留痕（note：采纳的落实说明 / 反驳的理由）——不允许无视')
+  comment.status = 'responded'
+  comment.response = { disposition: params.disposition, note: params.note }
+  draft.updatedAt = at
+  pushEvent(events, eventOf('comment-respond', actor, at, eventData({ ...params })))
+  return `评论已响应（${params.disposition === 'adopted' ? '采纳' : '反驳'}）：${truncate(params.note)}`
+}
+
+// ── 审查三动作（聚合 2：ReviewReport）────────────────────────
+
+function applyReviewRequest(
+  draft: CanvasState,
+  params: CanvasActionParams['review-request'],
+  actor: CanvasActor,
+  at: string,
+  events: CanvasEventBody[],
+): string {
+  if (!draft.review) {
+    draft.review = { status: 'in-progress', round: 1, maxRounds: DEFAULT_REVIEW_MAX_ROUNDS, entries: [] }
+  } else {
+    if (draft.review.round >= draft.review.maxRounds) {
+      fail('review_max_rounds', `审查已达轮次上限（${draft.review.maxRounds} 轮）`)
+    }
+    draft.review.round += 1
+    draft.review.status = 'in-progress'
+  }
+  // 发起审查 = 当前全部待重审路径进入本轮审查范围（概念 §5.2「下轮审查优先覆盖待重审
+  // 路径」的消费点）：集合清空。这是待重审集合的唯一清除通道——没有它，收敛门禁③
+  // 「待重审空」不可达（词表无 clear-dirty action，属设计内语义而非新增动作）。
+  draft.dirtyPaths = []
+  draft.updatedAt = at
+  pushEvent(events, eventOf('review-request', actor, at, eventData({ ...params })))
+  return `审查已发起（R${draft.review.round}${params.scope ? `，范围：${truncate(params.scope)}` : '，全面审'}）`
+}
+
+function applyReviewAppend(
+  draft: CanvasState,
+  params: CanvasActionParams['review-append'],
+  actor: CanvasActor,
+  at: string,
+  events: CanvasEventBody[],
+): string {
+  if (!draft.review) {
+    draft.review = { status: 'in-progress', round: params.round, maxRounds: DEFAULT_REVIEW_MAX_ROUNDS, entries: [] }
+  }
+  const knownIds = new Set<string>([...draft.nodes.map((n) => n.id), ...draft.edges.map((e) => e.id), ...draft.comments.map((c) => c.id)])
+  for (const entry of params.entries) {
+    // 聚合 2 不变量 1：条目引用的图元素 id 必须存在于画布。
+    if (!knownIds.has(entry.targetId)) fail('entry_ref_missing', `报告条目「${entry.id}」引用的图元素「${entry.targetId}」不存在`)
+  }
+  for (const entry of params.entries) {
+    const existing = draft.review.entries.find((e) => e.id === entry.id)
+    const merged = { ...entry, resolution: existing?.resolution }
+    if (existing) {
+      // 幂等 upsert（同 grow：重试覆盖字段、保留已登记的处置记录）。
+      draft.review.entries[draft.review.entries.indexOf(existing)] = merged
+    } else {
+      draft.review.entries.push(merged)
+    }
+  }
+  draft.updatedAt = at
+  pushEvent(events, eventOf('review-append', actor, at, eventData({ ...params })))
+  return `审查报告 R${params.round} 写回 ${params.entries.length} 条条目`
+}
+
+const RESOLUTION_NOTE_MAX = 20
+
+/** 处置链责任方（设计 §3.1(1)）：主 agent = 执行侧；user = 复核与直接处置；first-writer-wins。 */
+function applyReviewResolve(
+  draft: CanvasState,
+  params: CanvasActionParams['review-resolve'],
+  actor: CanvasActor,
+  at: string,
+  events: CanvasEventBody[],
+): string {
+  const entry = draft.review?.entries.find((e) => e.id === params.entryId)
+  if (!entry) fail('entry_ref_missing', `报告条目「${params.entryId}」不存在：先 canvas_read 取当前审查报告`)
+  if (entry.resolution) {
+    fail('already_resolved', `该条目已由 ${entry.resolution.by === 'user' ? '用户' : 'agent'} 处置（${entry.resolution.disposition}）——first-writer-wins，改判走下一轮审查复审`)
+  }
+  entry.resolution = { disposition: params.disposition, by: actor === 'user' ? 'user' : 'agent', note: params.note }
+  draft.updatedAt = at
+  pushEvent(events, eventOf('review-resolve', actor, at, eventData({ ...params })))
+  return `条目「${truncate(entry.note, RESOLUTION_NOTE_MAX)}」已处置（${params.disposition}）：${truncate(params.note)}`
+}
+
+// ── converge-check / export（不变量 10 三门禁）────────────────
+
+function applyConvergeCheck(
+  draft: CanvasState,
+  actor: CanvasActor,
+  at: string,
+  events: CanvasEventBody[],
+): string {
+  const blockers = convergenceBlockers(draft)
+  if (blockers.length > 0) {
+    fail('not_converged', `收敛门禁未通过（${blockers.length} 项）：${blockers.join('；')}`)
+  }
+  // 门禁①：根判据确认（用户点击 converge-check 即确认动作本身）。
+  draft.root.confirmed = true
+  draft.converged = true
+  if (draft.review) {
+    draft.review.status = 'converged'
+    pushEvent(events, { type: 'ReviewConverged', action: 'converge-check', actor, at, data: { canvasId: draft.canvasId } })
+  }
+  draft.updatedAt = at
+  pushEvent(events, eventOf('converge-check', actor, at, eventData({ canvasId: draft.canvasId })))
+  return '规划收敛已确认：三门禁全绿（根判据确认 / 就绪递归成立 / must-fix 清零且待重审为空）'
+}
+
+function applyExport(
+  draft: CanvasState,
+  params: CanvasActionParams['export'],
+  actor: CanvasActor,
+  at: string,
+  events: CanvasEventBody[],
+): string {
+  const blockers = convergenceBlockers(draft)
+  if (blockers.length > 0) {
+    fail('not_converged', `画布未收敛，导出被拒（${blockers.length} 项）：${blockers.join('；')}`)
+  }
+  if (params.target.target === 'requirement-card') {
+    const leaf = nodeOf(draft, params.target.leafId)
+    if (!leaf || leaf.type !== 'option' || leaf.dispatchable !== true) {
+      fail('node_not_found', `需求卡目标「${params.target.leafId}」不存在或不是执行叶子`)
+    }
+  }
+  draft.updatedAt = at
+  pushEvent(events, eventOf('export', actor, at, eventData({ ...params })))
+  return params.target.target === 'planning-doc' ? '方向规划文档已导出' : `需求卡已导出（叶子 ${params.target.leafId}）`
+}
+
+// ── dispatch（不变量 7 + D8）─────────────────────────────────
+
+const DISPATCH_POINTER_MAX = 40
+
+function applyDispatch(
+  draft: CanvasState,
+  params: CanvasActionParams['dispatch'],
+  actor: CanvasActor,
+  at: string,
+  events: CanvasEventBody[],
+): string {
+  const node = nodeOf(draft, params.nodeId)
+  if (!node) fail('node_not_found', `派发目标「${params.nodeId}」不存在`)
+  if (node.type !== 'option' || node.dispatchable !== true) fail('dispatch_blocked', `「${params.nodeId}」不是执行叶子（dispatchable option）`)
+  if (node.lifecycle !== 'passed') fail('dispatch_blocked', `执行叶子「${truncate(node.content)}」未通过审查（当前 ${node.lifecycle}）：先经审查转 passed 再派发`)
+  node.dispatch = { pointer: params.pointer, dispatchedAt: at }
+  draft.updatedAt = at
+  pushEvent(events, eventOf('dispatch', actor, at, eventData({ ...params })))
+  return `执行叶子「${truncate(node.content)}」已派发 → ${truncate(params.pointer, DISPATCH_POINTER_MAX)}`
+}
