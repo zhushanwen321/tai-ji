@@ -630,3 +630,75 @@ taiji 的 assistant 回复朗读能力（ai-voice-tts 设计，P2 辅助功能�
 
 ### settings-tts-test（伪 id）
 设置页「保存并测试」的播放通道：走与朗读按钮完全相同的 `useTtsPlayer.speak`，但用固定伪 messageId（`SETTINGS_TTS_TEST_MESSAGE_ID`）驱动，与对话朗读天然双向互斥（同一全局单例任务态）。
+
+## 画布域（Problem-Solve Canvas）
+
+tech-design-wf 之前的方向规划层：一张人机共编的分层论证图画布——agent 经结构化工具生长（growth），用户在 overlay 画布上裁决（选定 / 否决 / 评论 / 改判据）并回推 agent 响应，反向对抗式审查迭代到 must-fix（必修项）清零即规划收敛，收敛后的执行叶子经需求卡（requirement card）派发给 tech-design-wf。领域结构（两聚合 + 不变量 + 状态机）的登记 SSOT = [domain-model.md](domain-model.md)；本节承载统一语言词条。状态权威 = runtime CanvasService 唯一入口 `mutate`，跨 session 持久落盘 `<dataDir>/canvases/<canvasId>/`。
+
+**代码映射**: 领域核心 `packages/runtime/src/services/canvas/`（聚合根 + 不变量 + 落盘 + 重建）；契约（action 词表 / actor 权限矩阵 / marker）`packages/extension-protocol/src/extensions/canvas/`；agent 工具面 `extensions/taiji/canvas/`（6 工具全 deferred）；GUI `packages/renderer/src/stores/canvas.ts` + `packages/renderer/src/components/canvas/`；wire 登记 `packages/shared/src/protocol.ts`（`canvas.updated` 等）。
+
+### 画布（canvas）
+承载一个问题域完整规划的聚合根：一张图 + 配置 + 历史。**Avoid**: 不叫「白板」「文档」。
+
+### 主干（trunk）
+由分解边与解边构成的层级结构，画布的骨架，无环、唯一根。**Avoid**: 不叫「树干」「大纲」。
+
+### 问题节点（question）
+主干上待解决的子问题实体。**Avoid**: 不叫「任务」「节点」（裸称）。
+
+### 方案节点（option）
+某问题的候选解法实体；候选可并存，至多一个被选定。**Avoid**: 不叫「答案」「行动」。
+
+### 论据（argument）
+对任意图元素的论证实体，带极性（支持 / 反对）与素材性（事实 / 主张）。**Avoid**: 不叫「证据」「反对」（两类型已合并为论据的两个字段）。
+
+### 约束（constraint）
+声明作用范围内须满足的限制条件实体（成本 / 时间 / 风险）。**Avoid**: 不叫「规则」「前提」。
+
+### 评论（comment）
+锚定在节点或边上的批注附件，非图成员；用户添加评论 = 注入议题，agent 必须响应（采纳落实或反驳留理由）后才可转已响应。**Avoid**: 不叫「留言」「消息」。
+
+### 分解边（decompose）
+主干边：父元素（问题或方案）的完成由子问题集的解决构成。**Avoid**: 不叫「拆分」「父子关系」。
+
+### 解边（resolve）
+主干边：问题指向其候选方案；至多一条被选定。**Avoid**: 不叫「实现边」。
+
+### 论证边（argue）
+附属边：论据指向被论证的图元素，带极性。**Avoid**: 不叫「支撑边」（与支撑度撞义）。
+
+### 反驳边（rebut）
+附属边：论据指向论据，论证互驳；对抗式审查的核心动作。**Avoid**: 不叫「攻击边」。
+
+### 约束作用边（constrain）
+附属边：约束指向子树锚点，作用于锚点可达的主干子树。**Avoid**: 不叫「影响边」。
+
+### 引用边（reference）
+附属边：任意元素间的复用指针，无论证语义。**Avoid**: 不叫「链接」。
+
+### 支撑度（support rating）
+主干边上的评价值对象：充分 / 有缺口（附清单）/ 不成立；只评价主干边（分解边 / 解边），论证边不评级。**Avoid**: 不叫「评分」「置信度」。
+
+### 叶子（leaf）
+无分解出边的选定方案（结构派生，非标记）。**Avoid**: 不叫「末端」。
+
+### 执行叶子（dispatchable leaf）
+被显式标记可派发的叶子；画布的原子交付单元。**Avoid**: 不叫「任务节点」。
+
+### 派发（dispatch）
+执行叶子 → 下游（tech-design-wf）的移交动作，登记产物指针；用户拍板动作（agent 工具面不持有）。**Avoid**: 不叫「发布」「移交」。
+
+### 需求卡（requirement card）
+执行叶子的导出翻译格式（目标 / 上溯链 / 已排除方案 / 论据核实态 / 生效约束五要素），对接 tech-design-wf T1 的防腐层。**Avoid**: 不叫「工单」。
+
+### 否决记录（rejection record）
+rejected 节点携带的否决理由与复活条件，不可删除——防 agent 重复提出已否决项。**Avoid**: 不叫「备注」。
+
+### 生长（growth）
+图的构建推进（分解或聚合两个方向；MVP 为自顶向下分解）。**Avoid**: 不叫「编辑」「更新」。
+
+### 规划收敛（planning converged）
+画布终态：must-fix 清零 + 待重审集合为空 + 执行叶子全部 passed/dispatched。**Avoid**: 不叫「完成」（执行完成归下游）。
+
+### 就绪（ready）
+节点规划态的收敛判定（自底向上递归）：问题有选定方案且其子树就绪（或判定范围外）；方案无未决分解子问题。**Avoid**: 不叫「完成」（执行完成归下游）。

@@ -130,6 +130,7 @@ harness 必备能力（业务价值视角，2026-09-12 用户裁决）：
 | smart-context | universal | P2 | 手动 compact 兜底 |
 | structured-output | universal | P2 | workflow 模式依赖 |
 | todo | universal | P2 | 面板能力 |
+| canvas（@zhushanwen/pi-canvas） | taiji | P2 | 问题解决画布（tech-design-wf 之前的方向规划层）；挂掉 = 对话与 subagent/workflow 派发主链完整可用，用户回到无画布状态（同 btw 口径） |
 | cache-probe | universal | P3 | 特定人群 |
 | goal | universal | P3 | 特定人群 |
 | rename-session | universal | P3 | 低频有手动路径 |
