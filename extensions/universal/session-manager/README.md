@@ -29,6 +29,10 @@ agent-managed session pi extension：把 session 的创建/发送/读取/列表/
 pi install npm:@zhushanwen/pi-session-manager
 ```
 
+## 工具激活（deferred）
+
+上表 6 个工具均为 `exposure: "deferred"`——不占常驻工具声明，由 pi 内置 `tool_search` 工具检索命中后按需激活。taiji 宿主内开箱即用（宿主启动时已激活 `tool_search`）；独立 pi 使用需在 `<agentDir>/settings.json`（默认 `~/.pi/agent/settings.json`）加 `"defaultTools": ["+tool_search"]`（`+` 前缀是增量修饰，保留 read/bash/edit/write 默认集）。注意独立 pi 下即便激活，工具功能仍依赖 taiji runtime handler（见上节「运行要求」）。
+
 ## 测试
 
 ```bash

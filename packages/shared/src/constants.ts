@@ -15,21 +15,41 @@ export const DEV_PORT_OFFSET = 100 as const
 // eslint-disable-next-line no-magic-numbers
 export const MAX_PORT = 65535 as const
 
-/** pi-subagents 扩展的 subagent tool 名集合（识别 subagent 调用用，SSOT）。
- *  pi-subagents 通过名为 "subagent" 的 tool 执行子 agent，前端据此判定特殊渲染。
+/** pi-subagents 扩展的 subagent 工具族名集合（识别 subagent 调用用，SSOT）。
+ *  该扩展通过本集合内名字的 tool 执行子 agent，前端据此判定特殊渲染。
+ *  拆分新名（tool-declaration-slimming D3）：subagent_start（委派）/ subagent_manage
+ *  （list/cancel/close）/ subagent_message（message/fork-from）——三工具的 record
+ *  都走 subagent-record 体系（start 派发 + manage 状态迁移 + message 续聊均触发
+ *  record 失效信号），故同集合。
+ *  旧名 'subagent' 保留（tool-declaration-slimming §4 影响面修正声明：历史会话
+ *  toolCall 渲染依赖旧名在集——拆分前落盘的会话按旧名渲染 agentgraph 块）。
  *  刻意不含 'subagents'（批量派发 tool——它跑的是 workflow run 不是 subagent record，
  *  见 WORKFLOW_TOOL_NAMES 注释）；两集合判定并存处（Block.vue isSubagent 分支在前）
  *  双收录会把批量块误路由进 subagent 分支。 */
-export const SUBAGENT_TOOL_NAMES: ReadonlySet<string> = new Set(['subagent'])
+export const SUBAGENT_TOOL_NAMES: ReadonlySet<string> = new Set([
+  'subagent',
+  'subagent_start',
+  'subagent_manage',
+  'subagent_message',
+])
 
 /** pi-subagent-workflow 扩展的 workflow 族 tool 名集合（识别 workflow run 调用用，SSOT）。
- *  workflow 扩展通过名为 "workflow" 的 tool 执行 workflow run，event-interpreter 据此
+ *  该扩展通过本集合内名字的 tool 执行 workflow run，event-interpreter 据此
  *  做 W18 record 失效兜底分类（entry_appended 主信号丢失时的双保险收敛）。
+ *  拆分新名（tool-declaration-slimming D3）：workflow_run（启动）/ workflow_control
+ *  （status/abort/resume）——两者执行的都是 workflow run 域（abort/resume 迁移
+ *  record 状态，触发 record 失效信号），故同集合。
+ *  旧名 'workflow' 保留（同上：历史会话 toolCall 渲染依赖）。
  *  'subagents' = 批量派发入口（N 个独立任务一次派发，handler 转译 runWorkflow("fan-out")）：
  *  执行的是一次性 workflow run（record 快照为 workflow-record entry），故与 'workflow'
  *  同集合——单收录是零 runtime 改动的唯一全对解（D1 裁决：进 SUBAGENT 集合会误触发
  *  subagent-record 失效分支，双收录则两分支双打）。 */
-export const WORKFLOW_TOOL_NAMES: ReadonlySet<string> = new Set(['workflow', 'subagents'])
+export const WORKFLOW_TOOL_NAMES: ReadonlySet<string> = new Set([
+  'workflow',
+  'subagents',
+  'workflow_run',
+  'workflow_control',
+])
 
 /**
  * W16 [D4]：subagent 自描述持久化 entry 的 customType。

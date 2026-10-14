@@ -124,6 +124,15 @@ export interface PiFixtureOptions {
    */
   sessionDir?: string
   /**
+   * 写入临时 agentDir 全局 settings.json 的 defaultTools 字段（pi settings 语义：
+   * `+name` 增量条目 = 默认工具集之上追加激活）。驱动 exposure=deferred 的 extension
+   * 工具时必需——deferred 工具不进模型声明面，脚本化 toolCall 会被 pi 判
+   * "Tool not found"（extension_ui_request 不发出，全链路断流）；预激活与生产 spawn
+   * 经 settings 激活工具（pi-codemode-settings）同一通道。省略 = 不写 settings.json
+   * （既有 agentDir 隔离语义不变）。
+   */
+  agentDefaultTools?: string[]
+  /**
    * faux LLM 轨（L2.5）：提供该字段（含空数组——用例全程无 LLM turn 的场景）即启用
    * 凭证无关装配，与真实 LLM 通道的差异（其余行为逐字节一致）：
    * - 凭证门不要求 REAL 门（FAUX_PI_READY 即可）；跳过凭证文件拷贝（空临时
@@ -302,6 +311,9 @@ export async function spawnPiFixture(options: PiFixtureOptions = {}): Promise<Pi
     fauxScriptEnv = { TAIJI_FAUX_SCRIPT: scriptPath }
   } else if (realGate) {
     realGate.copyCredentialFiles(realGate.piAgentDir(), agentDir)
+  }
+  if (options.agentDefaultTools) {
+    writeFileSync(join(agentDir, 'settings.json'), JSON.stringify({ defaultTools: options.agentDefaultTools }))
   }
   const args = ['--mode', 'rpc', '--session-dir', sessionDir]
   if (model) args.push('--model', model)

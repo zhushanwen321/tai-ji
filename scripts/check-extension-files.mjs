@@ -19,6 +19,8 @@
  * - 目录条目 `src/host/`：递归包含
  * - 精确文件条目 `src/index.ts`
  * - glob 条目（如 src 递归 .ts）：minimatch 语义，globstar 可匹配零层目录
+ * - 否定条目 `!src/__tests__/`：排除规则（发布面收窄），命中即不在白名单；npm 的
+ *   「否定后再包含」多段顺序语义未用，按否定优先的简单子集实现
  * - 无 files 字段的包跳过（npm 默认全打包，不存在漏文件问题）
  *
  * 挂载：pre-commit（install-hooks.sh，extensions/** staged 时触发）+
@@ -39,22 +41,30 @@ const fail = (pkgName, msg) => {
 }
 
 // ── npm files 白名单匹配 ────────────────────────────────────────────
+function matchEntry(relPath, entry) {
+  if (entry.endsWith('/')) {
+    // 目录条目：递归包含
+    return relPath === entry.slice(0, -1) || relPath.startsWith(entry)
+  }
+  if (entry.includes('*')) {
+    // glob 条目：minimatch 语义，**/ 可匹配零层目录，* 不跨目录段
+    const pattern = entry
+      .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+      .replace(/\*\*\//g, '(?:.*/)?')
+      .replace(/\*\*/g, '.*')
+      .replace(/\*/g, '[^/]*')
+    return new RegExp(`^${pattern}$`).test(relPath)
+  }
+  return relPath === entry
+}
+
 function inWhitelist(relPath, files) {
+  // 否定条目（!前缀）优先裁决：命中任一排除规则即不在白名单
   for (const f of files) {
-    if (f.endsWith('/')) {
-      // 目录条目：递归包含
-      if (relPath === f.slice(0, -1) || relPath.startsWith(f)) return true
-    } else if (f.includes('*')) {
-      // glob 条目：minimatch 语义，**/ 可匹配零层目录，* 不跨目录段
-      const pattern = f
-        .replace(/[.+^${}()|[\]\\]/g, '\\$&')
-        .replace(/\*\*\//g, '(?:.*/)?')
-        .replace(/\*\*/g, '.*')
-        .replace(/\*/g, '[^/]*')
-      if (new RegExp(`^${pattern}$`).test(relPath)) return true
-    } else if (relPath === f) {
-      return true
-    }
+    if (f.startsWith('!') && matchEntry(relPath, f.slice(1))) return false
+  }
+  for (const f of files) {
+    if (!f.startsWith('!') && matchEntry(relPath, f)) return true
   }
   return false
 }
@@ -161,12 +171,16 @@ for (const pkgFile of pkgDirs) {
     }
   }
 
-  // 3. 白名单条目真实性：精确/目录条目查磁盘，glob 条目须至少命中一个文件
+  // 3. 白名单条目真实性：精确/目录条目查磁盘，glob 条目须至少命中一个文件；
+  //    否定条目是排除规则不是路径，不做磁盘核对、不参与 glob 命中数统计
   for (const f of pkg.files) {
+    if (f.startsWith('!')) continue
     if (f.includes('*')) continue // glob 条目在下方按命中数统一核查
     if (!existsSync(resolve(pkgDir, f))) missing.add(`files 白名单条目 "${f}" 在磁盘上不存在`)
   }
-  const globHits = new Map(pkg.files.filter((f) => f.includes('*')).map((f) => [f, 0]))
+  const globHits = new Map(
+    pkg.files.filter((f) => !f.startsWith('!') && f.includes('*')).map((f) => [f, 0]),
+  )
   if (globHits.size > 0) {
     for (const file of listDirFiles(pkgDir)) {
       const relFile = rel(file)

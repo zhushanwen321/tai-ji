@@ -19,7 +19,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import planExtension from "../index.js";
 import { PLAN_CONTEXT_CUSTOM_TYPE } from "../state.js";
 
-const captured: { planCtx?: { controllers: Map<string, AbortController> } } = {};
+const captured: { planCtx?: { controllers: Map<string, AbortController>; toolSnapshots: Map<string, string[]> } } = {};
 
 type Handler = (event: unknown, ctx: ExtensionContext) => Promise<unknown> | unknown;
 
@@ -31,6 +31,8 @@ function setup() {
     }),
     sendMessage: vi.fn(),
     setActiveTools: vi.fn(),
+    // 快照式恢复（dmg-r1-2）：session_start 补收拢前记录当前激活集（= pi 重生后默认集）
+    getActiveTools: vi.fn(() => ["read", "bash", "grep"]),
     appendEntry: vi.fn(),
   } as unknown as ExtensionAPI;
 
@@ -283,6 +285,8 @@ describe("session_start hook（E3：按 state 查表恢复）", () => {
     await handlers.get("session_start")!({ type: "session_start" }, ctx);
 
     expect(pi.setActiveTools).toHaveBeenCalled();
+    // 快照式恢复（dmg-r1-2）：补收拢前记录 pi 重生后的默认激活集——退出按它还原
+    expect(captured.planCtx!.toolSnapshots.get("test-session")).toEqual(["read", "bash", "grep"]);
     expect(pi.sendMessage).not.toHaveBeenCalled();
     // 非 reviewing/dispatching 不落盘：E3 resumeHint 只在 reviewing 重挂分支写
     expect(pi.appendEntry).not.toHaveBeenCalled();

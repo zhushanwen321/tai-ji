@@ -1,7 +1,7 @@
 /**
  * [M3 工具适配层] session_read 工具的纯逻辑 handler（design §3.4 接口规格）。
  *
- * 分层约定（同 scheduler/cw-tool）：本文件零 pi 依赖——agentDir 作参数注入，
+ * 分层约定（同 scheduler）：本文件零 pi 依赖——agentDir 作参数注入，
  * 不调用 getAgentDir()，可完全单测；pi 注册与 getAgentDir() 调用在 index.ts。
  *
  * 按 action 分发到 11 条路径，串联基座解析（session-core parse）+ M1 core（tree/turns/render）+ M2 discovery

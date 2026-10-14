@@ -2229,6 +2229,46 @@
       "owner": "packages/runtime",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
       "note": "R2 归宿（pi-mcp-management 设计 §4 e2e 影响面评估：本功能新资产按改动范围触发登记、触发条件必填；S1-S3 为设计验收场景表的真机子集）。asset 锚 = 被验能力本体（BATCH-01 先例——验证剧本未落建，落建后同 commit 回填 spec）；runtime mcp 模块以精确路径 scope 覆盖（pi-mcp-store.ts / pi-mcp-probe.ts），不产生目录级看护根——infra/pi/ 属共享目录，避免泛化（watchedRoots 注释同款考量：孤资产不把整目录逼进登记）。S1/S2 需真实 LLM 与真实 MCP 服务器故 layer=L3、serial=true；S3 为纯前端校验拦截，随 S1 场景顺带执行。mcp-message-handler / spawn-args 等域内改动的回归由既有单测族承担（spawn argv 快照等），不在本 rule 触发面。"
+    },
+    {
+      "id": "E2E-PIPE-12",
+      "summary": "版本处理决策面脚本（扫描本次改动输出需版本处理的包列表，merge skill 阶段 4N 封装引用）：改动后干跑验证脚本可执行与分组扫描逻辑",
+      "scope": [
+        "scripts/check-version-changes.sh"
+      ],
+      "layer": "L1",
+      "assets": [
+        {
+          "kind": "script",
+          "ref": "scripts/check-version-changes.sh"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "bash scripts/check-version-changes.sh",
+      "owner": "scripts/",
+      "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
+      "note": "无 vitest 测试资产，run = 脚本干跑（git diff range 缺省 main..HEAD（merge 时传 merge commit range），空改动输出空列表 exit 0）"
+    },
+    {
+      "id": "E2E-PIPE-13",
+      "summary": "extension npm 发布 files 白名单守卫（import 闭包 ⊆ files 白名单 + pi 资源 ⊆ 白名单 + 条目真实性，防 tarball 缺文件致用户侧 pi update 后 extension 加载崩）",
+      "scope": [
+        "scripts/check-extension-files.mjs"
+      ],
+      "layer": "L1",
+      "assets": [
+        {
+          "kind": "script",
+          "ref": "scripts/check-extension-files.mjs"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "node scripts/check-extension-files.mjs",
+      "owner": "scripts/",
+      "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
+      "note": "R2 态（pre-commit 按路径接线，无 CI 固定环节——接线 SSOT = .githooks/install-hooks.sh extension files 白名单段；触发面 = extensions/**/package.json、extensions/**/*.ts、脚本自身；本表登记 run 面 = 脚本自身变更干跑全量 27 包）。无 vitest 测试资产"
     }
   ]
 }

@@ -21,6 +21,16 @@ Pi rename-session 扩展 — 三种触发模式下自动/自主为会话生成 s
 pi install npm:@zhushanwen/pi-rename-session
 ```
 
+## 工具激活（deferred）
+
+`rename_session` 工具（`agent-tool` 模式注册）为 `exposure: "deferred"`——不占常驻工具声明，由 pi 内置 `tool_search` 工具检索命中后按需激活。taiji 宿主内开箱即用（宿主启动时已激活 `tool_search`）；独立 pi 使用需在 `<agentDir>/settings.json`（默认 `~/.pi/agent/settings.json`）开启：
+
+```json
+{ "defaultTools": ["+tool_search"] }
+```
+
+`+` 前缀是增量修饰（保留 read/bash/edit/write 默认集）。未开启 `tool_search` 时该工具对模型不可见。
+
 ## 配置
 
 配置文件：`<agentDir>/config/rename-session-ext-config.json`（`<agentDir>` 默认 `~/.pi/agent`，`PI_CODING_AGENT_DIR` 可覆盖；taiji 隔离环境为 `~/.taiji/agent`）。

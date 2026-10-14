@@ -12,7 +12,7 @@
 //   不截）、先排后截（乱序输入）、models 段无预算完整渲染；
 // - guide 宿主注入（渲染源码无内嵌平台文案）；
 // - 空态显式（D4-2）：formatEmptyResourceList 形态/转义/去重/空 roots +
-//   既有三 format 空列表返空串判据契约不变；
+//   可选 guide 纪律行（缺省零字节变更）+ 既有三 format 空列表返空串判据契约不变；
 // - summarizeDescription / sortByCodepoint / barrel 逐名探针。
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -409,6 +409,42 @@ describe("empty-state explicit rendering (D4-2)", () => {
 		expect(formatAgentList([], agentOpts)).toBe("");
 		expect(formatWorkflowList([], workflowOpts)).toBe("");
 		expect(formatModelList([], { guide: MODEL_GUIDE })).toBe("");
+	});
+
+	it("guide 参数：空态段 roots 行后渲染纪律行（逐字节；两空格缩进对齐）", () => {
+		const out = formatEmptyResourceList(
+			"agents",
+			["/ws/.agents/agents"],
+			[],
+			"Dispatch rules: do NOT bash sleep or poll while waiting.",
+		);
+		expect(out).toBe(
+			"\n\n<available_subagents>\n" +
+				"  (none discovered; roots: /ws/.agents/agents)\n" +
+				"  Dispatch rules: do NOT bash sleep or poll while waiting.\n" +
+				"</available_subagents>",
+		);
+	});
+
+	it("guide 缺省：输出与既有空态形态逐字节一致（不传 guide 零字节变更）", () => {
+		expect(formatEmptyResourceList("agents", ["/r"])).toBe(
+			formatEmptyResourceList("agents", ["/r"], [], undefined),
+		);
+	});
+
+	it("guide 与 invalids 同传：roots → guide → invalid 行次序（段内行序契约）", () => {
+		const out = formatEmptyResourceList(
+			"workflows",
+			["/ws/.pi/workflows"],
+			[{ path: "/ws/.pi/workflows/broken.js", reason: "no valid resource metadata" }],
+			"rules line",
+		);
+		// 输出以 "\n\n" 前导（衔接宿主 prompt 末尾）：split 后前两行为空串
+		const lines = out.split("\n");
+		expect(lines[3]).toBe("  (none discovered; roots: /ws/.pi/workflows)");
+		expect(lines[4]).toBe("  rules line");
+		expect(lines[5]).toContain("<invalid>");
+		expect(lines[6]).toBe("</available_workflows>");
 	});
 });
 

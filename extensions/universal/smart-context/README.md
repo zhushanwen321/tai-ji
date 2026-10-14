@@ -32,6 +32,16 @@
 pi install npm:@zhushanwen/pi-smart-context
 ```
 
+## 工具激活（deferred）
+
+`compact_context` 工具为 `exposure: "deferred"`——不占常驻工具声明，由 pi 内置 `tool_search` 工具检索命中后按需激活。taiji 宿主内开箱即用（宿主启动时已激活 `tool_search`）；独立 pi 使用需在 `<agentDir>/settings.json`（默认 `~/.pi/agent/settings.json`）开启：
+
+```json
+{ "defaultTools": ["+tool_search"] }
+```
+
+`+` 前缀是增量修饰（保留 read/bash/edit/write 默认集）。未开启 `tool_search` 时该工具对模型不可见。
+
 ## 配置
 
 `<agentDir>/config/smart-context-ext-config.json`（读时热加载）。schema 与示例见 `skills/smart-context-ext-config/SKILL.md`。taiji 桌面端在设置页（系统 → 智能上下文压缩）可视化配置。

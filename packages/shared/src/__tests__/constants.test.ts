@@ -7,7 +7,7 @@
  * 本文件是 testCommand 最后一跳，用例数需 >= wave testCases 数。
  */
 import { describe, it, expect } from 'vitest'
-import { ENV_WHITELIST_PREFIXES, AMBIENT_ENV_NAMES, KNOWN_PI_API_TYPES, ENGINE_ENV_DENY_LIST, PRESET_FALLBACK_ENV_KEYS } from '../constants.js'
+import { ENV_WHITELIST_PREFIXES, AMBIENT_ENV_NAMES, KNOWN_PI_API_TYPES, ENGINE_ENV_DENY_LIST, PRESET_FALLBACK_ENV_KEYS, SUBAGENT_TOOL_NAMES, WORKFLOW_TOOL_NAMES } from '../constants.js'
 
 const AMBIENT_NAMES = [
   'GOOGLE_APPLICATION_CREDENTIALS',
@@ -111,5 +111,30 @@ describe('ENGINE_ENV_DENY_LIST 与预设回落 env 名 SSOT 联动', () => {
       ENGINE_ENV_DENY_LIST,
       'PRESET_FALLBACK_ENV_KEYS.TO 未同步进 ENGINE_ENV_DENY_LIST——同上，改名后忘了同步 deny 面',
     ).toContain(PRESET_FALLBACK_ENV_KEYS.TO)
+  })
+})
+
+describe('SUBAGENT_TOOL_NAMES / WORKFLOW_TOOL_NAMES 工具族键控集合（tool-declaration-slimming §4 影响面修正声明）', () => {
+  // 原因（集合键控防静默退化）：两集合是 agentgraph 渲染分类（assistant-blocks
+  // isAgentgraphToolName）与 record 失效分流（event-interpreter）的键控源——成员被误删
+  // 时新调用静默退化为普通工具块且无报错无红灯。本组断言把「新旧名成员在集」锁成常驻
+  // 防线（首验由 i-a6 真机 DOM 断言一次性承载，此处承接持续锁，先例 =
+  // SUBAGENT_RECORD_CUSTOM_TYPE 双侧字面量锁）。
+  it('新名五成员在集（D3 拆分后调用形态的键控锚，误删即红灯）', () => {
+    expect(SUBAGENT_TOOL_NAMES.has('subagent_start'), 'subagent_start 不在集——新调用 agentgraph 渲染分类静默退化').toBe(true)
+    expect(SUBAGENT_TOOL_NAMES.has('subagent_manage'), 'subagent_manage 不在集——同上').toBe(true)
+    expect(SUBAGENT_TOOL_NAMES.has('subagent_message'), 'subagent_message 不在集——同上').toBe(true)
+    expect(WORKFLOW_TOOL_NAMES.has('workflow_run'), 'workflow_run 不在集——workflow 调用 record 失效分流静默退化').toBe(true)
+    expect(WORKFLOW_TOOL_NAMES.has('workflow_control'), 'workflow_control 不在集——同上').toBe(true)
+  })
+
+  it('旧名成员在集（历史会话 toolCall 渲染依赖，§4 影响面修正声明的保留裁决）', () => {
+    expect(SUBAGENT_TOOL_NAMES.has('subagent')).toBe(true)
+    expect(WORKFLOW_TOOL_NAMES.has('workflow')).toBe(true)
+    expect(WORKFLOW_TOOL_NAMES.has('subagents')).toBe(true)
+  })
+
+  it('SUBAGENT_TOOL_NAMES 刻意不含 subagents（批量派发跑 workflow run，双收录会误路由进 subagent 分支）', () => {
+    expect(SUBAGENT_TOOL_NAMES.has('subagents')).toBe(false)
   })
 })

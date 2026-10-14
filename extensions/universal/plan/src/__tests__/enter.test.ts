@@ -68,6 +68,8 @@ function setup(skillCommands: Array<{ name: string; path: string }> = []) {
     registerTool: vi.fn((tool) => { executeFn = tool.execute; }),
     appendEntry: vi.fn(),
     setActiveTools: vi.fn(),
+    // 快照式恢复（dmg-r1-2）：enter 收拢前记录进入前激活集（getActiveTools）
+    getActiveTools: vi.fn(() => ALL_TOOL_NAMES.filter((n) => n !== "plan")),
     sendMessage: vi.fn(),
     getCommands: vi.fn(() => skillCommands.map((c) => ({ name: c.name, source: "skill", sourceInfo: { path: c.path } }))),
     getAllTools: vi.fn(() => ALL_TOOL_NAMES.map((n) => ({ name: n }))),
@@ -86,7 +88,7 @@ function setup(skillCommands: Array<{ name: string; path: string }> = []) {
 
   const exec = (params: Record<string, unknown>, signal?: AbortSignal) =>
     executeFn!("tc0", params, signal, undefined, ctx);
-  return { pi, sessions: planCtx.states, ctx, exec };
+  return { pi, planCtx, sessions: planCtx.states, ctx, exec };
 }
 
 describe("plan(action='enter') — agent 自助进入（plan-mode-agent-enter U1）", () => {
@@ -98,11 +100,15 @@ describe("plan(action='enter') — agent 自助进入（plan-mode-agent-enter U1
   });
 
   it("idle 进入：收工具到白名单 + 持久化 isActive=true + tool result 携带只读纪律提示词", async () => {
-    const { exec, pi, sessions } = setup();
+    const { exec, pi, planCtx, sessions } = setup();
     const res = await exec({ action: "enter", requirement: "重构 auth 模块" });
 
     // 工具收拢到 plan 白名单
     expect(pi.setActiveTools).toHaveBeenCalledWith(PLAN_MODE_TOOLS);
+    // 快照式恢复记录侧（dmg-r1-2）：收拢前记录进入前激活集（getActiveTools 原样），
+    // 退出按它还原——不按 exposure 档位重建（tool_search 实装 model-only +
+    // defaultActive:false，重建会点名激活它）
+    expect(planCtx.toolSnapshots.get("test-session")).toEqual(ALL_TOOL_NAMES.filter((n) => n !== "plan"));
     // 状态持久化 isActive=true（投影链驱动 GUI 显形的锚点）
     expect(pi.appendEntry).toHaveBeenCalledWith("plan-state", expect.objectContaining({ isActive: true }));
     // 目录落盘（原子唯一性）：plansRoot 父目录 recursive 建立 + 候选目录非 recursive

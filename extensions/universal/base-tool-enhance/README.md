@@ -32,6 +32,8 @@ pi install npm:@zhushanwen/pi-base-tool-enhance
 - `bash_output {task_id?}` —— 省略列出任务（单例表 + registry 终态条目）；指定返回状态与 tail 输出
 - `bash_kill {task_id}` —— 终止后台任务（限本进程任务；跨进程 running 条目由发起进程或 reaper 管理）
 
+`bash_output` / `bash_kill` 为 `exposure: "deferred"`——不占常驻工具声明，由 pi 内置 `tool_search` 工具检索命中后按需激活。taiji 宿主内开箱即用（宿主启动时已激活 `tool_search`）；独立 pi 使用需在 `<agentDir>/settings.json`（默认 `~/.pi/agent/settings.json`）加 `"defaultTools": ["+tool_search"]`（`+` 前缀是增量修饰，保留 read/bash/edit/write 默认集）。未开启 `tool_search` 时这两个工具对模型不可见。
+
 完成通知经 pending-notifications（`type:"bash"`，process 生命周期档）+ sendMessage steer 注入当前 session。
 
 ## 退役条件（sunset）

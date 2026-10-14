@@ -1,5 +1,6 @@
 /**
- * subagent-workflow tool 结果的公共类型（`workflow` 与 `subagents` 两个 tool 共用）。
+ * subagent-workflow tool 结果的公共类型（workflow_run / workflow_control / subagents /
+ * workflow-script 四个 tool 共用）。
  *
  * 此前两文件各自 `export interface ToolResult`（同目录同名异形，`details` 必填/可空
  * 也不同），且各自声明了一份「一次 run 启动回执」的近似形状。本模块把公共底座单点化：
@@ -21,7 +22,7 @@ export interface ToolTextContent {
  * 一次 run 启动回执的公共字段（两侧 details 各自扩展工具特有字段与判别式）。
  *
  * `status` 取并集：`subagents` 只有一个动作、启动即返回，收窄为 `"running"`；
- * `workflow` 的 actionRun 另有 `not_found` / `invalid_args` 两态。
+ * workflow_run 的 actionRun 另有 `not_found` / `invalid_args` 两态。
  */
 export interface RunStartDetails {
   runId: string;

@@ -27,7 +27,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { ListHandlerResult, StartHandlerResult, SubagentService } from "@zhushanwen/subagent-core";
 import { startHandler } from "@zhushanwen/subagent-core";
 import { adapter } from "../interface/gui/subagent-actions.ts";
-import { SubagentParams } from "../interface/tool/subagent-tool-schema.ts";
+import { SubagentManageParams } from "../interface/tool/subagent-tool-schema.ts";
 import { BG_MESSAGE } from "@zhushanwen/subagent-core/execution/assembly/subagent-actions-core.ts";
 import type { ExecutionHandle, SubagentToolDetails } from "@zhushanwen/subagent-core/execution/assembly/types.ts";
 
@@ -141,14 +141,13 @@ describe("subagent tool description 强化 (FR-6)", () => {
 		return m[1];
 	}
 
-	it("description 'do NOT wait' 段含 'auto-injected' 关键词", () => {
-		// [B9] 防回退守护测试：验证源码 description 模板字符串常量不被误改，非运行时行为断言。
-		const description = extractDescription(SUBAGENT_TOOL_SRC);
-		// 定位 "After launching" 段（section header）
-		const idx = description.indexOf("## After launching");
-		expect(idx).toBeGreaterThan(-1);
-		const section = description.slice(idx, idx + 600);
-		expect(section).toMatch(/auto-injected/i);
+	it("'do NOT wait' 纪律含 'auto-injected' 关键词", () => {
+		// [B9] 防回退守护测试（tool-declaration-slimming D1 终态锚点迁移：原
+		// description「After launching」段的使用纪律已移 promptGuidelines 单点，
+		// 「completion 即确认 + 不可信」锚随之迁——锚词保留清单
+		// tool-prompt-contract.test.ts A10）。源码文本断言，非运行时行为断言。
+		expect(SUBAGENT_TOOL_SRC).toContain("auto-injected completion IS the confirmation");
+		expect(SUBAGENT_TOOL_SRC).toContain("untrusted");
 	});
 });
 
@@ -335,12 +334,12 @@ describe("start model 全等回显", () => {
 // 真实 typebox 编译契约由 structured-output cross-package-contract.test.ts 承担）
 // ============================================================
 
-describe("subagent tool schema 面", () => {
+describe("subagent_manage tool schema 面（D3 拆分：listParam 归 manage 工具）", () => {
 	it("listParam.includeWorkflow 声明存在且 optional（D1① 工具契约）", () => {
-		const raw: unknown = JSON.parse(JSON.stringify(SubagentParams));
-		if (!(typeof raw === "object" && raw !== null)) throw new Error("SubagentParams is not an object schema");
+		const raw: unknown = JSON.parse(JSON.stringify(SubagentManageParams));
+		if (!(typeof raw === "object" && raw !== null)) throw new Error("SubagentManageParams is not an object schema");
 		const props = (raw as { properties?: unknown }).properties;
-		if (!(typeof props === "object" && props !== null)) throw new Error("SubagentParams has no properties");
+		if (!(typeof props === "object" && props !== null)) throw new Error("SubagentManageParams has no properties");
 		const listParam = (props as Record<string, unknown>).listParam;
 		if (!(typeof listParam === "object" && listParam !== null)) throw new Error("listParam missing");
 		const listProps = (listParam as { properties?: unknown }).properties;

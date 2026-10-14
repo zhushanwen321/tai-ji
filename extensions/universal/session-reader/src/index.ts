@@ -11,7 +11,7 @@ import { createSessionCommand } from './tui/session-command.js'
 /**
  * pi-session-reader extension 入口（M3 工具适配层）。
  *
- * 分层（同 scheduler/cw-tool）：
+ * 分层（同 scheduler）：
  * - tool-handler.ts：纯逻辑 handler，agentDir 注入，零 pi 依赖，可单测
  * - index.ts（本文件）：pi 依赖层，registerTool + getAgentDir() 调用 + execute 闭包
  *   （错误直接 throw 给 pi——pi-agent-core agent-loop 对 execute throw 置 isError:true，
@@ -37,57 +37,57 @@ const SessionReadSchema = Type.Object({
       'doctor',
     ],
     {
+      // tool-declaration-slimming D1 终态：action 功能语义唯一承载点（工具 description 只留
+      // 一句定位 + 边界；guidelines 只留纪律）。
       description:
-        'Action to perform: find (locate session), family (fork/subagent/workflow relations; recursive=true returns nested execution tree), outline (turn-level overview), expand (single-turn entries), detail (full text of turns), search (full-text grep, single session or cross-session over a comma-separated id list), export (materialize to file), extract (pull user messages / commands / files / commits / tool results by type), workflow (workflow run overview: status/budget/steps; requires session, optional runId focuses one run; step call sessionId jumps to outline/detail), result (fetch a subagent session final result text — same content as its completion notice; session = single id or comma-separated batch of at most 10, optional limit caps chars per item), doctor (show detected host environment and session-root diagnostics).',
+        'find (locate session), family (relations; recursive=tree), outline (turn overview), expand (one turn), detail (full text), search (grep, cross-session, ≤10 ids), export (to file), extract (messages/commands/files/commits/tool results), workflow (run overview), result (subagent final text, batch ≤10), doctor (environment diagnostics).',
     },
   ),
   session: Type.Optional(
     Type.String({
       description:
-        'Session id, uuid fragment (e.g. e6c96), subagent record id (sa-xxx, precise lookup), or absolute .jsonl path (~ or ~/ allowed). Required for family/outline/expand/detail/search/export/extract/workflow/result. result also accepts a comma-separated list of up to 10 ids. search also accepts a comma-separated list of up to 10 full ids (from find output) for cross-session search. # prefix auto-stripped.',
+        'Session id, uuid fragment (e6c96), subagent id (sa-xxx), or .jsonl path. Required by every action except find/doctor; result/search accept ≤10 comma-separated ids. # prefix auto-stripped.',
     }),
   ),
   query: Type.Optional(
     Type.String({
-      description:
-        'find action: uuid fragment / filename / name keyword / "recent" (returns most recent N).',
+      description: 'find: uuid fragment / filename / name keyword / "recent" (recent N).',
     }),
   ),
   turns: Type.Optional(
     Type.String({
-      description: 'detail/extract action: turn range, "T013-T015" or "T013".',
+      description: 'detail/extract: turn range "T013-T015" or "T013".',
     }),
   ),
   turn: Type.Optional(
-    Type.String({ description: 'expand action: single turn, "T013".' }),
+    Type.String({ description: 'expand: turn "T013".' }),
   ),
   pattern: Type.Optional(
-    Type.String({ description: 'search action: substring or regex.' }),
+    Type.String({ description: 'search: substring or regex.' }),
   ),
   scope: Type.Optional(
     StringEnum(['all', 'user', 'assistant', 'toolResult'], {
-      description: 'search action: scope filter. Default all.',
+      description: 'search: filter scope. Default all.',
     }),
   ),
   format: Type.Optional(
     StringEnum(['outline', 'full', 'family'], {
-      description: 'export action: materialized form. Default outline.',
+      description: 'export: materialized form. Default outline.',
     }),
   ),
   includeToolResult: Type.Optional(
     Type.Boolean({
-      description: 'detail/export: include toolResult full text. Default false (omitted as noise).',
+      description: 'detail/export: include toolResult text. Default false.',
     }),
   ),
   includeThinking: Type.Optional(
     Type.Boolean({
-      description: 'detail: include thinking blocks. Default false (omitted as noise).',
+      description: 'detail: include thinking blocks. Default false.',
     }),
   ),
   allBranches: Type.Optional(
     Type.Boolean({
-      description:
-        "outline (and export's outline section): include abandoned side-branches. Not supported by family. Default false.",
+      description: 'outline/export: include abandoned side-branches. Default false.',
     }),
   ),
   granularity: Type.Optional(
@@ -96,12 +96,11 @@ const SessionReadSchema = Type.Object({
     }),
   ),
   cwd: Type.Optional(
-    Type.String({ description: 'find: filter by cwd. Optional.' }),
+    Type.String({ description: 'find: filter by cwd.' }),
   ),
   source: Type.Optional(
     StringEnum(['main', 'subagent'], {
-      description:
-        'find and session-resolving actions: filter by source. "main" = sessions/, "subagent" = subagents/. Default both (merged).',
+      description: '"main" = sessions/, "subagent" = subagents/. Default both.',
     }),
   ),
   limit: Type.Optional(
@@ -110,39 +109,35 @@ const SessionReadSchema = Type.Object({
       // 「无匹配 session」措辞面）；result 消费侧的 resolveResultLimit 防御保留
       //（可单测绕过 schema 的调用形态）。
       minimum: 1,
-      description:
-        'find/search: max results. Default 20. result: max chars per item, default 8000 (overlong text truncated with a pointer to the full file).',
+      description: 'find/search: max results (default 20). result: max chars per item (default 8000, truncated with pointer).',
     }),
   ),
   what: Type.Optional(
     StringEnum(
       ['user-messages', 'commands', 'files', 'commits', 'tool-results'],
       {
-        description: 'extract action: what to extract (required for extract).',
+        description: 'extract: what to pull (required).',
       },
     ),
   ),
   tool: Type.Optional(
     Type.String({
-      description: 'extract action: filter commands/tool-results by tool name (e.g. "bash").',
+      description: 'extract: filter by tool name (e.g. "bash").',
     }),
   ),
   runId: Type.Optional(
     Type.String({
-      description:
-        'workflow action: focus a single run by runId (disambiguate multiple runs). Omit to see all run overviews.',
+      description: 'workflow: focus one run (omit = all).',
     }),
   ),
   recursive: Type.Optional(
     Type.Boolean({
-      description:
-        'family action: return nested execution tree (arbitrary-depth subagent↔workflow-call nesting, precise parentRecordId chain with flat-fallback for legacy records). Default false (flat family).',
+      description: 'family: nested execution tree. Default false (flat).',
     }),
   ),
   includeSubagents: Type.Optional(
     Type.Boolean({
-      description:
-        'doctor action: also scan the subagent session root (adds its file count). Default false (path and existence only).',
+      description: 'doctor: also scan the subagent session root. Default false.',
     }),
   ),
 })
@@ -150,23 +145,26 @@ const SessionReadSchema = Type.Object({
 // ---- guidelines（注入 LLM，design §3.4）----
 
 const guidelines = [
-  'Progressive reading: outline (~1500 token overview) → expand (one turn) → detail (full text). Default omits toolResult/thinking noise.',
-  'find first to locate a session by uuid fragment or name. TUI #references are full uuids.',
-  'outline before detail. Never read raw .jsonl files—use this tool.',
-  'family traces fork parents/children, subagent sessions, and workflow runs.',
+  // tool-declaration-slimming D1 终态：纪律单点——action 逐个复述条已删（功能语义在
+  // schema action 枚举说明一处）；跨工具规则不在本工具重复（收敛点 = 注入段）。
+  // 锚词保留清单：Progressive reading / Never read raw .jsonl / sa- ids route /
+  // 👉 recovery hint / doctor——机器锚定唯一落点 = zcode-routing.test.ts 的锚词
+  // 保留清单 describe（逐词 toContain）；doctor 另被该文件 SCHEMA_SNAPSHOT 的
+  // action 枚举间接锚定。tool-prompt 契约不锚本工具 guidelines（其 A8 是 subagent
+  // 工具内指向本工具的交叉引用，非本清单的锚）。
+  'Progressive reading: outline (~1500 tokens) → expand (one turn) → detail; defaults omit toolResult/thinking noise.',
+  'find first (uuid fragment / name); TUI #references are full uuids. Never read raw .jsonl—use this tool.',
   // zcode 路由（U9）对 LLM 的唯一可见面：sa-id 输入自动路由，无需任何参数；首遇
-  // zcode_* 错误码前先有背景预告（schema 面按设计 D4 零变化，不在此重复）
-  'sa- ids route transparently to pi or zcode engine sessions; sess_ prefixed ids are not accepted—use the sa- id from the completion notice.',
-  'extract what=<type> to pull user messages / commands / files / commits / tool results across turns (optional tool= filter for commands/tool-results).',
-  "workflow action to see workflow run overviews (status/budget/steps). Each step's call sessionId can jump to outline/detail for deep reading.",
-  "result action to fetch a subagent's final result text (same content as its completion notice): session takes a single sa-id/uuid/path or a comma-separated batch of at most 10; optional limit caps chars per item (default 8000, truncated items carry a pointer to the full file).",
-  'Errors carry a 👉 recovery hint—follow it to retry in one step.',
-  'Unsure about the host environment (pure pi vs taiji) or where session roots live? Run action:"doctor" first—it prints the detected environment and every candidate session root.',
+  // zcode_* 错误码前先有背景预告。
+  'sa- ids route transparently to pi or zcode engine sessions; sess_ prefixed ids are not accepted—use the completion-notice sa- id.',
+  'Errors carry a 👉 recovery hint—follow it to retry.',
+  'Unsure about host environment or session roots? Run action:"doctor".',
 ]
 
-// ---- 工具 description（design §3.4，照搬措辞）----
+// ---- 工具 description（tool-declaration-slimming D1 终态：一句定位 + 阅读纪律指针 + 边界；
+// action 一览与参数功能语义唯一承载点 = SessionReadSchema 的 action 枚举说明）----
 
-const description = `Read pi session files (conversation history) by semantic structure instead of raw bytes. Use when you need to review another session, trace a fork/subagent/workflow family, or locate a past decision. Eleven actions: find (locate by name/uuid fragment), family (fork/subagent/workflow relations), outline (turn-level overview, ~1500 token), expand (single-turn entry list), detail (full text of turns), search (full-text grep across a session, or cross-session over a comma-separated id list ≤10 from find output), export (materialize to file), extract (pull user messages / commands / files / commits / tool results by type), workflow (workflow run overview: status/budget/steps, step call sessionId jumps to outline/detail), result (fetch a subagent session final result text, same content as its completion notice; single id or comma-separated batch ≤10, optional limit chars per item default 8000), doctor (show detected host environment and session-root diagnostics). Progressive reading: outline → expand → detail. Do NOT use for the current session (the host provides current-session access) or to edit sessions (pi has /resume /fork).`
+const description = `Read pi session files (conversation history) by semantic structure, not raw bytes. Progressive reading: outline → expand → detail. Do NOT use for the current session (the host provides it) or to edit sessions (pi has /resume /fork).`
 
 /**
  * 已注册过 TUI provider/command 的 pi 实例集合。
@@ -198,6 +196,9 @@ export default function sessionReaderExtension(pi: ExtensionAPI): void {
   pi.registerTool({
     name: 'session_read',
     label: 'Session Reader',
+    // deferred（tool-declaration-slimming D4）：不常驻声明，tool_search 命中即激活；
+    // 迁移写入的 +tool_search 条目（runtime pi-codemode-settings）承载检索入口
+    exposure: 'deferred',
     description,
     parameters: SessionReadSchema,
     promptGuidelines: guidelines,

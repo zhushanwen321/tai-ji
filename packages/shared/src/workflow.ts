@@ -1,8 +1,11 @@
 /**
  * Workflow 数据模型 —— runtime 投影链的 shared 消费契约。
  *
- * 数据来源：pi-subagent-workflow 扩展注册的 `workflow` tool。主 agent 调用该 tool
- * (action=run) 时，扩展在独立 worker 线程执行 workflow run。
+ * 数据来源：pi-subagent-workflow 扩展注册的 workflow 工具族（tool-declaration-slimming
+ * D3 拆分后 = `workflow_run`（启动）/ `workflow_control`（status/abort/resume））。主 agent
+ * 调用 `workflow_run` 时，扩展在独立 worker 线程执行 workflow run。拆分前历史会话为旧名
+ * `workflow` 的 action=run 调用形态，解析侧按旧形态兼容读（WORKFLOW_TOOL_NAMES 保留
+ * 旧名键控，见 constants.ts）。
  *
  * workflow run 的唯一持久化 = record 事件流（`<sessionDir>/workflow-state/
  * <runId>.record.jsonl`，append-only——[D1] record 单源存储收敛，快照文件已删）。

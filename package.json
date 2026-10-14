@@ -24,8 +24,8 @@
     "release:npm": "pnpm --filter @zhushanwen/extension-protocol build && changeset publish",
     "extensions:typecheck": "cd extensions && npx tsc --noEmit",
     "extensions:lint": "node scripts/check-stale-ctx-audit-coverage.mjs && npx eslint extensions/",
-    "extensions:test": "pnpm -r --filter '@zhushanwen/pi-*' test",
-    "extensions:test:isolated": "pnpm -r --filter '@zhushanwen/pi-*' test:isolated",
+    "extensions:test": "pnpm -r --filter '@zhushanwen/pi-*' --workspace-concurrency=1 test",
+    "extensions:test:isolated": "pnpm -r --filter '@zhushanwen/pi-*' --workspace-concurrency=1 test:isolated",
     "gen:builtin-providers": "node packages/runtime/scripts/gen-builtin-providers.mjs",
     "prebuild": "node packages/runtime/scripts/gen-builtin-providers.mjs"
   },

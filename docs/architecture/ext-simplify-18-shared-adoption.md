@@ -18,7 +18,7 @@
 
 ## 2. 现状与证据（全部 20260914 本分支实测）
 
-### 2.1 toErrorMessage 手写残余（extensions 生产代码 26 处 / 11 文件）
+### 2.1 toErrorMessage 手写残余（extensions 生产代码 25 处 / 10 文件）
 
 `rg "instanceof Error \?" extensions -g '!*.test.ts' -g '!extensions/shared/**'` 实测：
 
@@ -31,11 +31,10 @@
 | smart-context | 2 | llm.ts:130 / compact-handler.ts:322 |
 | subagent-workflow | 2 | injectors/model-list-injector.ts:90 / host/inflight-reporter.ts:205 |
 | ask-user | 1 | index.ts:310 |
-| cw-tool | 1 | cw-runner.ts:190 |
 
-26 处中 25 处为逐字同构 `x instanceof Error ? x.message : String(x)`；cache-probe index.ts:66 外层形态 `String(err instanceof Error ? err.message : err)`——内层三元产出 `string | unknown`，非 Error 时 `String(err)`，与 `toErrorMessage` 逐语义等价（同属 25 处）。**排除**：taiji/system-prompt index.ts:250（`${err.name}: ${err.message}` 含 name 前缀，非同构，负面清单）；subagent-workflow bench ×2（`err.stack` 形态 + bench 测试基建非生产）。
+25 处中 24 处为逐字同构 `x instanceof Error ? x.message : String(x)`；cache-probe index.ts:66 外层形态 `String(err instanceof Error ? err.message : err)`——内层三元产出 `string | unknown`，非 Error 时 `String(err)`，与 `toErrorMessage` 逐语义等价（同属 25 处）。**排除**：taiji/system-prompt index.ts:250（`${err.name}: ${err.message}` 含 name 前缀，非同构，负面清单）；subagent-workflow bench ×2（`err.stack` 形态 + bench 测试基建非生产）。
 
-依赖现状（package.json `@zhushanwen/pi-ext-guards`）：permission / structured-output / smart-context / subagent-workflow / rename-session / bte / plan / scheduler / plugin-bridge 已有（9 包）；**session-reader / cache-probe / cw-tool / ask-user 四包需新增依赖 + 根 `extension-dependencies.json` 登记**（该 4 包 json 内亦无 ext-guards 条目，已实测）。注：`check-extension-dependencies.mjs` 不校验 package.json dependencies 与 dependsOn 条目的一致性（现状已知盲区，非本批引入）——V6 人工双核对。
+依赖现状（package.json `@zhushanwen/pi-ext-guards`）：permission / structured-output / smart-context / subagent-workflow / rename-session / bte / plan / scheduler / plugin-bridge 已有（9 包）；**session-reader / cache-probe / ask-user 三包需新增依赖 + 根 `extension-dependencies.json` 登记**（该 3 包 json 内亦无 ext-guards 条目，已实测）。注：`check-extension-dependencies.mjs` 不校验 package.json dependencies 与 dependsOn 条目的一致性（现状已知盲区，非本批引入）——V6 人工双核对。
 
 ### 2.2 isRecord / isPlainObject 副本残余（extensions 8 处，两语义派）
 
@@ -54,12 +53,11 @@
 
 排除：bte spawn-background.ts:283（`isRecordedPidStillOriginal` 前缀撞名，17 号 r1 已核正）；session-reader discovery/subagents.ts:393 `isRecordManifest`（manifest 形状检查非泛用副本，17 号 r2 已裁定）。
 
-### 2.3 isEnoentError 手写残余（2 包 3 处）
+### 2.3 isEnoentError 手写残余（1 包 1 处）
 
-- cw-tool cw-spawn.ts:125,126：`err.code === "ENOENT"` ×2（`child.on("error", (err: NodeJS.ErrnoException))` 回调内，拼 cwd/hint 进错误消息）。
 - rename-session pure.ts:114-115：`const code = (e as NodeJS.ErrnoException).code; if (code !== "ENOENT") throw e`（rmSync 吞 ENOENT 模式；顺带消除一处 `as` 断言，taste/no-unsafe-cast 正向）。
 
-ext-guards 严版（instanceof Error + `'code' in err` + `===`）对两处等价性：Node fs/spawn 错误回调契约恒 Error 子类，宽版对「非 Error 带 code 对象」的接受是防御冗余——与 17 号 D2 对 subagent-workflow 宽版收严同一论证。
+ext-guards 严版（instanceof Error + `'code' in err` + `===`）对该处等价性：Node fs/spawn 错误回调契约恒 Error 子类，宽版对「非 Error 带 code 对象」的接受是防御冗余——与 17 号 D2 对 subagent-workflow 宽版收严同一论证。
 
 ### 2.4 llm-shared parseRef 私有 vs permission 手拆
 
@@ -84,7 +82,7 @@ llm-shared resolve.ts:70 `parseRef(ref)`（私有）：`indexOf("/")` 首斜杠�
 
 ### 3.1 桶 1 · ext-guards 既有导出采用批（ext-guards 零改动）
 
-**D1 `toErrorMessage` 采用批**（零行为变化）。§2.1 全部 26 处机械替换为 `import { toErrorMessage } from "@zhushanwen/pi-ext-guards"`；session-reader / cache-probe / cw-tool / ask-user 四包 package.json 新增依赖（workspace:*）+ 根 `extension-dependencies.json` 各登记一条（17 号 bte 先例）；structured-output loop-gate.ts:44 已 import 者仅补一处（:487）；全仓 26 处所在文件各自 import。
+**D1 `toErrorMessage` 采用批**（零行为变化）。§2.1 全部 25 处机械替换为 `import { toErrorMessage } from "@zhushanwen/pi-ext-guards"`；session-reader / cache-probe / ask-user 三包 package.json 新增依赖（workspace:*）+ 根 `extension-dependencies.json` 各登记一条（17 号 bte 先例）；structured-output loop-gate.ts:44 已 import 者仅补一处（:487）；全仓 25 处所在文件各自 import。
 
 **D2 `isRecord`（及 isPlainObject 归并）采用批**。8 处副本全量迁移至 ext-guards `isRecord`：
 
@@ -95,9 +93,9 @@ llm-shared resolve.ts:70 `parseRef(ref)`（私有）：`indexOf("/")` 首斜杠�
   - **session-reader** core/workflow.ts 12 消费点全部为 `if (!isRecord) return default` 或 `isRecord(x) ? x : default` 形态，数组输入旧路径经字段读 undefined → 嵌套 isRecord(undefined)=false → default，与严版立即 default 同归（r1 主审独立复扫确认隐藏前提成立：normalizeCallStatus 对缺字段返 'pending'（workflow.ts:111-114）、mapBudget 纯字段读（:99-107）、:238 pickSessionRefs 数组路径经 :247 双条件判非 OLD 同归 null）。
   - **smart-context** tool.ts 3 处（`isRecord(x) ? x : {}` / null 链）与 pure.ts 4 处（`continue` / `&&` 前置检查）同上形态，同归。
   smart-context pure.ts/tool.ts 与 system-prompt-trace 的消费语义与 17 号 D4② 已收敛的 smart-context 单键版无耦合，独立迁移。
-- **package.json/登记**：session-reader / cache-probe / cw-tool / ask-user 四包依赖随 D1 新增；**system-prompt-trace 无 toErrorMessage 迁移点（§2.1 变体排除后为 0 处），其 ext-guards 依赖由 D2 引入**（第 5 包）——两批合计 5 包新增依赖 + 根 `extension-dependencies.json` 登记；permission/bte/smart-context/structured-output 已有。
+- **package.json/登记**：session-reader / cache-probe / ask-user 三包依赖随 D1 新增；**system-prompt-trace 无 toErrorMessage 迁移点（§2.1 变体排除后为 0 处），其 ext-guards 依赖由 D2 引入**（第 4 包）——两批合计 4 包新增依赖 + 根 `extension-dependencies.json` 登记；permission/bte/smart-context/structured-output 已有。
 
-**D3 `isEnoentError` 采用批**（零行为变化，§2.3）。cw-tool 两处 `err.code === "ENOENT"` → `isEnoentError(err)`（cw-tool 随 D1 已新增依赖）；rename-session 一处 `(e as NodeJS.ErrnoException).code !== "ENOENT"` → `!isEnoentError(e)`（已有依赖，顺带消 `as` 断言）。
+**D3 `isEnoentError` 采用批**（零行为变化，§2.3）。rename-session 一处 `(e as NodeJS.ErrnoException).code !== "ENOENT"` → `!isEnoentError(e)`（已有依赖，顺带消 `as` 断言）。
 
 ### 3.2 桶 2 · llm-shared 新导出
 
@@ -156,7 +154,7 @@ subagents.ts / find.ts 删本地副本改 import（find.ts 的 `parseHeader` 调
 - V3 三连绿：`pnpm extensions:typecheck && pnpm extensions:lint && pnpm extensions:test`。
 - V4 session-reader 单源化回归：discovery 既有测试全绿 + `readSessionHeaderIdSync` 行为不变（src/__tests__/tool-handler.test.ts:1057-1058 既有用例锚定首行非 header 返 undefined）。
 - V5 检查 T3：直接执行 `node scripts/check-thinking-levels.mjs` 绿；手工构造 THINKING_ORDER 漂移（临时删一个成员）直接跑脚本触发非零退出，还原后绿；再验证 hook 触发面——staged 改动含 `packages/subagent-core/src/shared/model-ref.ts` 时 pre-commit 实际拉起检查（验收时执行并还原不留痕）。
-- V6 依赖登记：`node scripts/check-extension-dependencies.mjs` 通过；5 包（session-reader/cache-probe/cw-tool/ask-user/system-prompt-trace）extension-dependencies.json 条目与 package.json dependencies **双人工核对**（检查不校验两者一致性，已知盲区见 §2.1 注）。
+- V6 依赖登记：`node scripts/check-extension-dependencies.mjs` 通过；4 包（session-reader/cache-probe/ask-user/system-prompt-trace）extension-dependencies.json 条目与 package.json dependencies **双人工核对**（检查不校验两者一致性，已知盲区见 §2.1 注）。
 
 ### 5.2 真机验收（按 AGENTS.md 本地 pi CLI 实测规范，抽验不改行为的通路）
 
@@ -172,14 +170,14 @@ subagents.ts / find.ts 删本地副本改 import（find.ts 的 `parseHeader` 调
 
 | 批次 | 内容 | 性质 |
 |------|------|------|
-| 批次 1 | D1（26 处 toErrorMessage + 4 包依赖/登记）+ D3（isEnoentError 3 处） | 机械，零行为变化 |
+| 批次 1 | D1（25 处 toErrorMessage + 3 包依赖/登记）+ D3（isEnoentError 1 处） | 机械，零行为变化 |
 | 批次 2 | D2（isRecord 8 副本 + system-prompt-trace 依赖/登记 + 2 处 exported 降级 re-export） | 机械 + 论证已含本文档 |
 | 批次 3 | D4（parseModelRef 导出 + permission 采用，**行为微变独立 commit**）+ D6（检查 T3 四件连带：提取正则适配 + self-test / hook 触发面扩面 + 头注释 / C-build-10 登记 / model-ref.ts 注释） | 小新增 |
 | 批次 4 | D5（session-reader 三副本单源） | 包内收敛 |
 
 **收尾义务**：全部批次完成后登记 re-export 别名（structured-output `isPlainObject`）删除时点与各独立立项尾巴（packages 层收敛 / extension-protocol 发布层拆分 / 路径推导归宿 / rawStderr），对齐 17 号惯例——原登记通道 ext-simplify-index 18 号行原档案族已清理，逐条关闭信息以本文档实施终态为承载（r1 影响面 S-2）。
 
-**changeset**：llm-shared **minor**（新导出 parseModelRef）；消费包 patch：permission / session-reader / cache-probe / cw-tool / ask-user / structured-output / smart-context / subagent-workflow / rename-session / system-prompt-trace / bte / subagent-core（注释）。ext-guards / extension-protocol 零改动无 changeset。
+**changeset**：llm-shared **minor**（新导出 parseModelRef）；消费包 patch：permission / session-reader / cache-probe / ask-user / structured-output / smart-context / subagent-workflow / rename-session / system-prompt-trace / bte / subagent-core（注释）。ext-guards / extension-protocol 零改动无 changeset。
 
 ## 7. 风险与回退
 

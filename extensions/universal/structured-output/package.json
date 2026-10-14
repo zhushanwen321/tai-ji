@@ -21,6 +21,7 @@
   "license": "MIT",
   "files": [
     "src/",
+    "!src/__tests__/",
     "index.ts"
   ],
   "dependencies": {
@@ -29,13 +30,20 @@
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "^1.0.0",
-    "typebox": "1.3.27"
+    "typebox": "1.3.27",
+    "@earendil-works/pi-ai": "^1.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@earendil-works/pi-ai": {
+      "optional": true
+    }
   },
   "scripts": {
     "typecheck": "npx tsc --noEmit",
     "test": "vitest run"
   },
   "devDependencies": {
+    "@earendil-works/pi-ai": "1.0.0",
     "@types/node": "^24.0.0",
     "@vitest/coverage-v8": "^4.1.9",
     "vitest": "^4.1.8"

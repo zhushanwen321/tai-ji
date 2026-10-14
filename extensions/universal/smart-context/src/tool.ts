@@ -65,12 +65,11 @@ export interface CompactContextDetails {
 	fellBack: boolean;
 }
 
-/** 工具描述（§3.5：三条件自查引导）。 */
+/** 工具描述（§3.5：三条件自查引导；条件即纪律，无第三层复述——D1 单源化核对通过）。 */
 const TOOL_DESCRIPTION =
 	"压缩当前会话上下文（释放早期对话占用的 token；压缩由配置的模型执行，不会切换你的主模型）。" +
 	"仅在同时满足以下条件时调用：1) 当前任务的一个阶段已完成并验证（如一批文件改完、测试通过）；" +
-	"2) 后续工作不再依赖将被压缩的早期细节；3) 上下文已超过提醒阈值（你会收到 [smart-context 提示]）。" +
-	"若任一条件不满足，不要调用。";
+	"2) 后续工作不再依赖将被压缩的早期细节；3) 上下文已超过提醒阈值（你会收到 [smart-context 提示]）。";
 
 /** CompactionResult → 宽松形状的 guard 转换（onComplete 回调参数消费，避免 cast）。 */
 function toCompactionResultLike(result: unknown): CompactionResultLike {
@@ -143,6 +142,9 @@ export function registerCompactContextTool(
 	pi.registerTool({
 		name: "compact_context",
 		label: "compact_context",
+		// deferred（tool-declaration-slimming D4）：不常驻声明，tool_search 命中即激活；
+		// 迁移写入的 +tool_search 条目（runtime pi-codemode-settings）承载检索入口
+		exposure: "deferred",
 		description: TOOL_DESCRIPTION,
 		parameters: CompactContextParams,
 		execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {

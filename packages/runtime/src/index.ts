@@ -509,8 +509,12 @@ async function main(): Promise<void> {
   syncBundledResources()
   // 清理 settings.json.packages 中泄漏到 pi 全局目录的相对路径项（架构约定 #1 隔离保障）
   cleanLeakedPackages()
-  // codemode 启动迁移（codemode 设计 D1/D2/A1）：defaultTools 字段缺失 → 幂等写
-  // ["+codemode"]，字段存在（任何内容）→ 不碰。置于 cleanLeakedPackages 之后同窗口
+  // 启动迁移（codemode 设计 D1/D2/A1 + tool-declaration-slimming D4），两迁移组合语义：
+  // codemode = defaultTools 字段缺失 → 幂等写 ["+codemode"]，字段存在（任何内容）→ 不碰；
+  // tool_search = 幂等追加——字段缺失 → 写 ["+tool_search"]，字段存在且不含任何 tool_search
+  // 条目（+/-/纯名任一形态都不在场）→ 尾部追加 "+tool_search"，`-tool_search` 视为已含
+  // 不追加（用户关闭不被打回）。两迁移顺序由 runCodemodeStartupMigration 结构性固定
+  // （codemode 在先）。置于 cleanLeakedPackages 之后同窗口
   // （listen 前同步段、先于一切 pi 进程 spawn）。settings.json 损坏时两个启动写点
   // （cleanLeakedPackages 与本迁移）均被 updateSettingsFields 锁内损坏预检统一拒入：
   // 结构化告警含路径与恢复指引，坏文件原样保留（不隔离改名、不空基线写回），修复后

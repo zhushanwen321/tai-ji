@@ -16,15 +16,15 @@
  *   走 record 回放）、注入安全（workerData.scriptPath 定位 _shared，不回退当前目录）
  *   与脚本可探索性（@pi-meta 进可用 workflow 清单）——走 workflow 管道使批量派发
  *   继承持久化、journal、GUI 投影与断点恢复全套能力。
- * - 无 action 分发：status/abort 不复制，直接指路 workflow tool（runId 同体系）。
+ * - 无 action 分发：status/abort 不复制，直接指路 workflow_control（runId 同体系）。
  * - 无 args 嵌套：tasks/agents/aggregate/... 全在顶层（弱模型信任 schema 结构信号，
- *   两跳转译是事故高发区——对照 workflow tool 的 name+args 形态）。
+ *   两跳转译是事故高发区——对照 workflow_run 的 name+args 形态）。
  * - 批量成员是一次性成员：不可 message/续聊（workflow-origin record 由 messageHandler
  *   拒绝），结果在 run 收口时以一条通知（notifyDone）到达。
  * - 不构造 `details.__gui__`：GUI 挂载按 WORKFLOW_TOOL_NAMES 集合分流，批量块走
  *   workflow 块分支（恒折叠单行 + openWorkflowDrawer）；`__gui__` 的渲染点在普通
  *   tool 分支（v-else）的展开区内，isWorkflow 分支无展开路径不消费——构造即死代码
- *   （D8 裁决；workflow tool 的 `__gui__` 死构造已随之删除，isWorkflow 集合内工具零消费）。
+ *   （D8 裁决；workflow_run 的 `__gui__` 死构造已随之删除，isWorkflow 集合内工具零消费）。
  *
  * 层归属：Interface。依赖 Pi SDK + core lifecycle/registry + reentry-guard。
  */
@@ -64,7 +64,7 @@ import type { RunStartDetails, WorkflowToolResult } from "./tool-result.ts";
  *
  * 常量而非参数：subagents tool 的契约就是「把 tasks 透传给 fan-out 模板」——参数化会让
  * 工具的语义随脚本漂移（对照 D3「执行管道唯一」）。脚本按名经 registry 解析
- * （内置名优先链与 workflow tool actionRun 同一条，见 plan U2「复刻既有加载路径」）。
+ * （内置名优先链与 workflow_run actionRun 同一条，见 plan U2「复刻既有加载路径」）。
  */
 export const FAN_OUT_SCRIPT_NAME = "fan-out";
 
@@ -76,38 +76,37 @@ const SLUG_TIME_RADIX = 36;
 const SubagentsParams = Type.Object({
   tasks: Type.Array(Type.String(), {
     description:
-      "N complete, self-contained task descriptions — one array element = one dispatchable task prompt. " +
-      "Members run as independent one-shot subagents (they do NOT see your conversation), so each element must carry its own context and acceptance criteria. " +
-      "All tasks are dispatched in parallel; results arrive together.",
+      "N complete, self-contained task prompts — one element = one dispatch. Members run as independent one-shot subagents (they do NOT see your conversation), so each must carry its own context and acceptance criteria. All run in parallel.",
   }),
   agents: Type.Optional(Type.String({
     description:
-      "Comma-separated absolute paths to agent .md files (usually <location> values from <available_subagents>; arbitrary absolute .md paths also work). " +
-      "One path applies to every member; N paths map one-to-one onto tasks in the same order. " +
-      "When more than one path is given it MUST equal the number of tasks — a mismatch fails the run fast (never a silent persona swap). " +
-      "Omit for the default (general-purpose) executor.",
+      "Comma-separated absolute paths to agent .md files (usually <location> values from <available_subagents>). One path applies to every member; N paths map one-to-one onto tasks in order and MUST equal the tasks count (mismatch fails the run). Omit for the default general-purpose executor.",
   })),
   aggregate: Type.Optional(Type.Boolean({
-    description:
-      "Default false. When true, one extra agent is appended at the end to reduce all results into a single conclusion (results are still returned in full).",
+    description: "Default false. When true, one extra agent is appended to reduce all results into a single conclusion (results are still returned in full).",
   })),
   slug: Type.Optional(Type.String({
-    description:
-      "Batch label (max 35 chars, kebab-case) shown on the conversation block and run list — provide a short label for multi-batch scenarios. " +
-      "If omitted, one is generated for the run state face only.",
+    description: "Batch label (max 35 chars, kebab-case) shown on the conversation block and run list. Omit to auto-generate.",
     maxLength: SLUG_MAX_LENGTH,
   })),
   model: Type.Optional(Type.String({
+    // 缺省继承主 agent 的纪律句已删（D1 单源化→注入段，见
+    // subagent-list-injector.ts SUBAGENT_DISPATCH_SHARED_RULES）；批内继承 run 级值是
+    // 本参数的功能语义，保留。
     description:
-      "Run-level model override in 'provider/modelId' format; every member of the batch inherits it. " +
-      "Omit to inherit the main agent's model.",
+      "Run-level model override in 'provider/modelId' format; every member of the batch inherits it.",
   })),
   thinkingLevel: Type.Optional(StringEnum(THINKING_ORDER, {
     description:
       "Run-level thinking depth for every member. Omit to default each agent to its model's highest available level.",
   })),
-  tokens: Type.Optional(Type.Number({ description: "Max token budget for the whole batch — ONLY set when the user explicitly requests a limit; omit = unlimited (default)" })),
-  time: Type.Optional(Type.Number({ description: `Max time budget in ms for the whole batch — ONLY set when the user explicitly requests a limit; omit = unlimited (default; hard ceiling ${MAX_TIMER_DELAY_MS} ms — larger values fail fast at entry)` })),
+  tokens: Type.Optional(Type.Number({
+    // 预算纪律句已删（D1 单源化→注入段）：跨工具预算纪律说一次，原文见 git 历史。
+    description: "Max token budget for the whole batch.",
+  })),
+  time: Type.Optional(Type.Number({
+    description: `Max time budget in ms for the whole batch (hard ceiling ${MAX_TIMER_DELAY_MS} ms — larger values fail fast at entry).`,
+  })),
 });
 
 export type SubagentsToolParams = Static<typeof SubagentsParams>;
@@ -156,8 +155,8 @@ function subagentsStartupText(
   return [
     `Started batch '${slug}' (${runId}) as workflow run '${scriptName}' — ${taskCount} subagents dispatched in parallel (allSettled).`,
     "Results arrive as ONE notification when the run settles. Do NOT poll.",
-    `If no notification arrives well past the expected duration, make a SINGLE status check: workflow tool with runId ${runId} (recovery exit, not a poll loop).`,
-    `To abort: workflow tool, action abort, runId ${runId}`,
+    `If no notification arrives well past the expected duration, make a SINGLE status check: workflow_control {"action":"status"} with runId ${runId} (recovery exit, not a poll loop).`,
+    `To abort: workflow_control {"action":"abort","runId":"${runId}"}`,
   ].join("\n");
 }
 
@@ -183,7 +182,7 @@ export async function runSubagentsBatch(
     );
   }
 
-  // slug 运行时护栏（与 workflow tool actionRun 对称的纵深防御；schema maxLength 是第一道关卡）
+  // slug 运行时护栏（与 workflow_run actionRun 对称的纵深防御；schema maxLength 是第一道关卡）
   const providedSlug = params.slug?.trim();
   assertSlugWithinLimit(providedSlug, ["tri-review", "scan-docs"]);
   // 缺省（或空白）时 handler 生成 fan-out-<时间短码>：受益面 = 状态面（drawer run header /
@@ -197,7 +196,7 @@ export async function runSubagentsBatch(
   assertEntryTimeBudget(time);
 
   // 执行体脚本按固定内置名解析（registry.get 精确名匹配；脚本名是工具自带常量
-  // FAN_OUT_SCRIPT_NAME 而非用户参数——workflow tool actionRun 的按名解析已退役
+  // FAN_OUT_SCRIPT_NAME 而非用户参数——workflow_run actionRun 的按名解析已退役
   // 走 getPath 单通道，本工具不允许换脚本，无 getPath 回落需求）。
   const script = await deps.registry.get(FAN_OUT_SCRIPT_NAME);
   if (!script || !script.available) {
@@ -249,8 +248,8 @@ export async function runSubagentsBatch(
  *
  * @param pi ExtensionAPI
  * @param deps LauncherDeps（LifecycleDeps + registry）
- * @param reentryRef reentry guard。**与 workflow tool 共用同一实例**（index.ts
- *   factory 内创建的单例）——两者是同一条 runWorkflow 管道的入口，共用守卫避免
+ * @param reentryRef reentry guard。**与 workflow_run/workflow_control 共用同一实例**（index.ts
+ *   factory 内创建的单例）——三者是同一条 runWorkflow 管道的入口，共用守卫避免
  *   双 guard 语义漂移；workflow-script tool 的 isScriptRunning 是另一套 flag，
  *   与本 guard 无关。
  */
@@ -262,22 +261,22 @@ export function registerSubagentsTool(
   pi.registerTool({
     name: "subagents",
     label: "Subagents (batch)",
+    // tool-declaration-slimming U-C1 R1 裁决：低频批量入口延迟加载（defer 名单工具）。
+    exposure: "deferred",
     description:
-      "Spawn multiple subagents in ONE call and collect all results together — for N INDEPENDENT tasks.\n" +
+      "Spawn multiple subagents in ONE call, collect all results together — for N INDEPENDENT tasks.\n" +
       "Each member is a one-shot batch member: you cannot message or continue it (re-dispatch instead). Results arrive as ONE notification when the whole batch settles (not per member).\n" +
-      "For a single subagent you can message later, use the `subagent` tool. For tasks that depend on each other's output (step 2 needs step 1's result), use the `workflow` tool (chain / map-reduce) instead — batch members never see each other's results.",
+      "Single subagent you can message later: `subagent_message` tool. Dependent tasks (step 2 needs step 1's result): `workflow_run` tool — batch members never see each other's results.",
     promptSnippet: "Dispatch N independent subagent tasks in one batch",
     promptGuidelines: [
-      "PRIORITY: 2+ independent tasks in one dispatch (results combined by you afterwards) → call `subagents` ONCE with the tasks array — do NOT issue N separate `subagent` starts and do NOT hand-build a workflow.",
-      "One-shot batch members: message/fork-from a batch member is not supported; to redo or extend a member's work, dispatch a new task (run the failed/extra task alone in a second batch).",
-      "Do NOT poll after starting — the batch result arrives as a single completion notification carrying every member's summary (plus optional aggregate).",
-      "Call shape (JSON): {\"tasks\":[\"<task 1>\",\"<task 2>\"],\"agents\":\"<abs .md path or comma-separated list>\",\"aggregate\":false,\"slug\":\"<short label>\"}. tasks is required and every element must be a complete self-contained task prompt.",
-      "agents: one path applies to all tasks; N paths map one-to-one onto tasks and N must equal tasks.length (a mismatch fails the run). Omit for the default executor.",
-      "slug: pass a short kebab-case label when you run more than one batch — it identifies the batch on the conversation block and in the run list.",
-      "Budget: Do NOT set tokens/time unless the user explicitly requests a limit. Batches run unlimited by default.",
-      "Model/thinkingLevel: omit by default (inherit the main agent's model). Only set them when the user explicitly requests a specific model or thinking depth for this batch.",
-      "Anti-patterns: nesting the tasks under an 'args' key (they are top-level), dispatching dependent steps in one batch (chain them across messages or use the workflow tool), and treating batch results as verified without checking them.",
-      "Run control (status/abort) lives in the workflow tool — use the runId printed in this tool's output.",
+      "PRIORITY: 2+ independent tasks in one dispatch (results combined by you afterwards) → call `subagents` ONCE with the tasks array — do NOT issue N separate subagent_start calls and do NOT hand-build a workflow.",
+      "One-shot batch members: message/fork-from is not supported; to redo or extend a member's work, dispatch a new task in a second batch.",
+      // 勿等待条 / 预算纪律条 / 模型缺省继承条 三条已删（tool-declaration-slimming D1
+      // 单源化→<available_subagents> 注入段 SUBAGENT_DISPATCH_SHARED_RULES 说一次，
+      // 原文见 git 历史；零残留由 tool-subagents.test.ts 单源化终态断言锁定）。
+      "Call shape (JSON): {\"tasks\":[\"<task 1>\",\"<task 2>\"],\"agents\":\"<abs .md path(s)>\",\"aggregate\":false,\"slug\":\"<label>\"} — tasks required, every element a complete self-contained prompt.",
+      "Anti-patterns: nesting tasks under an 'args' key (top-level); dispatching dependent steps in one batch (chain across messages or use the `workflow_run` tool); treating batch results as verified without checking.",
+      "Run control (status/abort) lives in the `workflow_control` tool — use the runId printed in this tool's output.",
     ],
     parameters: SubagentsParams,
 
@@ -291,7 +290,7 @@ export function registerSubagentsTool(
       // throw（W4b 契约）：pi 只对 execute throw 置 isError:true，返回值里的 isError
       // 被 agent-loop 丢弃——错误一律 throw（abort 前置判定收敛在 tool-shared）。
       assertNotAborted(signal);
-      // reentry guard：与 workflow tool 共用（acquire 失败时尚未持有 guard，throw 前无需 release）
+      // reentry guard：与 workflow_run/workflow_control 共用（acquire 失败时尚未持有 guard，throw 前无需 release）
       if (!acquireReentryGuard(reentryRef)) {
         throw new Error(REENTRY_BUSY_MESSAGE);
       }
@@ -303,7 +302,7 @@ export function registerSubagentsTool(
     },
 
     renderCall(args: Record<string, unknown>, theme: Theme, _context?: unknown) {
-      // 单行标题：subagents <N tasks> · <slug>（TUI 惯例同 workflow tool 的 renderCall）
+      // 单行标题：subagents <N tasks> · <slug>（TUI 惯例同 workflow_run 的 renderCall）
       const count = Array.isArray(args.tasks) ? args.tasks.length : 0;
       const bulk = count > 0 ? ` ${count} tasks` : "";
       const slug = optionSlugSuffix(args.slug, theme);

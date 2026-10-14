@@ -1,13 +1,17 @@
 /**
  * Subagent 数据模型 —— 从主 session JSONL 的 subagent toolCall/toolResult 提取。
  *
- * 数据来源：pi-subagent-workflow 扩展注册的 `subagent` tool。主 agent 调用该 tool
- * 时，扩展 spawn 一个子 agent（独立 pi session，JSONL 落在
+ * 数据来源：pi-subagent-workflow 扩展注册的 subagent 工具族（tool-declaration-slimming
+ * D3 拆分后 = `subagent_start`（主 agent 手动派发）/ `subagent_manage`（list/cancel/close）/
+ * `subagent_message`（message/fork-from））。主 agent 调用 `subagent_start` 时，扩展
+ * spawn 一个子 agent（独立 pi session，JSONL 落在
  * `<dataDir>/agent/subagents/<encodeCwd(mainCwd)>/sessions/*.jsonl`）。
  *
- * toolCall 携带 action=start + startParam{task, slug, agent?, model?, thinkingLevel?, fork?, worktree?, ...}；
+ * start toolCall 顶层平铺 task/slug/agent/model/...（D3 拆分后无 action 字段、无 startParam 容器）；
  * toolResult 携带 subagentId + sessionFile + bgResponse|listResponse。
  * runtime 的 subagent-extractor 从主 session JSONL 配对解析出 SubagentRecord[]。
+ * 拆分前历史会话为旧名 `subagent` 的 action=start 调用形态，解析侧按旧形态兼容读
+ * （SUBAGENT_TOOL_NAMES 保留旧名键控，见 constants.ts）。
  *
  * 2026-07-13 对齐 pi-subagent-workflow feat-ask-user-gui 分支：
  * - 新增 slug（短标签 ≤20 字符，必填，区分并发 subagent）
@@ -164,7 +168,7 @@ export interface SubagentRecord {
    * 「有 result=完成」展示。旧 entry 携带的该键在 runtime 投影层被忽略（读侧容忍）。 */
   /**
    * record 来源身份（H2 W1，设计 subagent-workflow-record-unification §3.3 D1）：
-   * 'tool' = 主 agent 经 subagent 工具手动派发；'workflow' = workflow 脚本 agent()
+   * 'tool' = 主 agent 经 subagent_start 工具手动派发；'workflow' = workflow 脚本 agent()
    * 派发（生产写入方 W2 接线，W1 契约与过滤面先行）。缺省（undefined，存量 record
    * 与未透传的投影）= 'tool' 语义，消费方零迁移——renderer 侧栏计数 / 后台工作指示
    * 按 `origin === 'workflow'` 负向过滤。
@@ -242,19 +246,30 @@ export interface SubagentRecentEffectiveModel {
  * 'cancelled' / failed→'failed' / done→'completed'，「deriveClosedDisplay 改 stopReason
  * 派生」），closedReason 字段同时保留作诊断位）。
  *
- * 派生规则与 extension 侧两处实现同构（三处一致，改任一处须同步其余两处）：
+ * 同构成败推导的单一权威在 subagent-core：deriveOutcome/projectOutcome
+ * （packages/subagent-core/src/execution/persistence/execution-record.ts）。两处消费方
+ * 均只读 record.outcome（notify() 投影边界按 deriveOutcome 物化），不再手写同构派生，
+ * 手写回写由 derive-closed-display-parity 系列测试拦截：
  * - TUI 渲染：extensions/universal/subagent-workflow/src/interface/gui/bg-notify-render.ts
- *   renderRecordLines 的 verb 派发（cancelled / gc+error → failed / finished）
- * - LLM 通知文案：extensions/universal/subagent-workflow/src/execution/notifier.ts
- *   buildLlmContent 的 closed 分支（cancelled / gc+error → failed / completed）
+ *   renderRecordLines 的 verb 派发（cancelled → cancelled / failed → failed / 其余 → finished）
+ * - LLM 通知文案：packages/subagent-core/src/execution/notify/notifier.ts
+ *   buildLlmContent 的 closed 分支（cancelled / failed / completed 三态分流）
  *
- * 两个关键点（勿回退成「error 有值即 failed」的旧规则）：
- * - closedReason 缺失兜底 'gc'（对齐 extension 侧 `record.closedReason ?? "gc"`）：
- *   legacy 无 closedReason 的失败终态（error 有值）同样判 failed
+ * 本函数与 deriveOutcome 是两个消费域的有意分工，非同构副本（各有注释与测试锚定，
+ * 互不需同步）：本函数服务 runtime stopReason/显示侧，deriveOutcome 服务通知与 TUI
+ * 文案侧。前缀分支一致（cancelled → cancelled；gc + error → failed；无 error →
+ * done/completed）；分歧仅在 parent-* 与 user-close 加 error 输入：
+ * - 本函数判 done：级联关闭（disposeAllRecords）会合成 error: "closed due to
+ *   parent-fork" 等，这是正常关闭语义而非 subagent 自身失败——runtime 侧不把
+ *   正常级联关闭显示为失败；
+ * - deriveOutcome 判 failed（subagent-core D6 显式取舍：父进程关闭时子 agent 未完成
+ *   即失败，勿当 bug 改回）——通知文案语义。
+ *
+ * 本函数两个关键点（勿回退成「error 有值即 failed」的旧规则）：
+ * - closedReason 缺失兜底 'gc'：legacy 无 closedReason 的失败终态（error 有值）同样
+ *   判 failed
  * - closedReason 为 parent-fork / parent-new / parent-shutdown / user-close 且 error
- *   有值判 done：级联关闭（disposeAllRecords）会合成 error: "closed due to parent-fork"
- *   等，这是正常关闭语义而非 subagent 自身失败——若按 error 即 failed，taiji
- *   会把正常级联关闭显示为失败（与 TUI/LLM 文案显示 finished 分叉）
+ *   有值判 done（理由见上分歧说明）
  */
 export type ClosedDisplayStatus = 'done' | 'failed' | 'cancelled'
 

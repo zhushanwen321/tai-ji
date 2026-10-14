@@ -153,11 +153,13 @@ export function registerWorkflowScriptTool(
   pi.registerTool({
     name: "workflow-script",
     label: "Workflow Script",
+    // tool-declaration-slimming U-C1 R1 裁决：低频脚本管理面延迟加载（defer 名单工具）。
+    exposure: "deferred",
     description:
       "Manage workflow scripts: generate (AI creates tmp script), lint (static check), " +
       "save (tmp→permanent), delete, list. Before generating a new script, use action:list " +
       "to check if an available workflow already " +
-      "covers the use case. Replaces workflow-generate + workflow-lint tools.",
+      "covers the use case.",
     promptSnippet: "Generate, lint, save, delete, or list workflow scripts",
     promptGuidelines: [
       "generate: AI writes a tmp workflow script to .pi/workflows/.tmp/. Declare metadata as a /* @pi-meta */ YAML block comment (name/description/phases required; parameters JSON Schema + usage markdown optional). NOT a const meta variable. Generate round-trip-validates the YAML and reports line/col on error (common pitfall: patternProperties regex must use double backslash \\d, not \d).",
@@ -167,11 +169,11 @@ export function registerWorkflowScriptTool(
       "list: Show all available workflow scripts with source tags. " +
       "Use this to discover available workflows (see <available_workflows> injection) " +
       "and user-generated scripts before starting a run. After listing, start a script via " +
-      "the workflow tool with action:run and the script name.",
+      "the `workflow_run` tool with the script name.",
       "CRITICAL ANTI-PATTERN: NEVER generate scripts for patterns already covered by available " +
-      "workflows. These are BUILT-IN — use the workflow tool with action:run directly. " +
+      "workflows. These are BUILT-IN — run them directly via `workflow_run`. " +
       "generate is for NOVEL orchestration patterns ONLY. When in doubt, action:list first, " +
-      "then action:run — not action:generate.",
+      "then run — not action:generate.",
     ],
     parameters: WorkflowScriptParams,
 
@@ -254,7 +256,7 @@ export function actionGenerate(params: ScriptParams): WorkflowScriptExecuteResul
     content: [
       {
         type: "text",
-        text: `Generated workflow script: ${filePath}\nName: ${name}\nReady to run via the workflow tool.`,
+        text: `Generated workflow script: ${filePath}\nName: ${name}\nReady to run via the \`workflow_run\` tool.`,
       },
     ],
     details: { action: "generate", path: filePath, name, status: "ready" },

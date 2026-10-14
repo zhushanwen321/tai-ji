@@ -1,18 +1,16 @@
 /**
- * Workflow Extension — workflow tool（4 actions，FR-5 tool 收口）。
+ * Workflow Extension — workflow 工具组（tool-declaration-slimming D3 拆分终态）。
  *
- * 合并原 tool-workflow.ts + tool-workflow-run.ts 为单 tool。
+ * 拆为两工具（命名与 schedule_control 同族）：
+ * - `workflow_run`：registry.getPath → runWorkflow（直接启动，无需用户确认；name 必填
+ *   由 schema 表达）
+ * - `workflow_control`（action: status/abort/resume）：status 列出 runs（deps.runs）、
+ *   abort 调 abortRun、resume 调 resumeRun（interrupted 态 run 断点续跑，D14 args
+ *   校验在入口）
  *
- * Actions:
- * - run: registry.getPath → runWorkflow（直接启动，无需用户确认）
- * - status: 列出 runs（deps.runs）
- * - abort: 调 abortRun
- * - resume: 调 resumeRun（interrupted 态 run 断点续跑，D14 args 校验在入口）
- *
- * **restart 不包含**（D-9 废弃）；**pause 不包含**（一次性生命周期——run 不可
- * 挂起，提前停止用 abort，要新结果开新 run）。**resume 是中断恢复不是挂起恢复**：
- * 仅 interrupted 态 run 可续（崩溃收编 / terminate 被动失联后的断点续跑，
- * workflow-run-resume-revision U3/D14），不是把活跃 run 暂停再继续。
+ * **resume 是中断恢复不是挂起恢复**：仅 interrupted 态 run 可续（崩溃收编 / terminate
+ * 被动失联后的断点续跑，workflow-run-resume-revision U3/D14），不是把活跃 run 暂停再继续。
+ * 一次性生命周期：run 不可挂起（pause 已废弃），提前停止用 abort，要新结果开新 run。
  *
  * 层归属：Interface。依赖 Pi SDK + Engine lifecycle/launcher + helpers。
  */
@@ -68,74 +66,99 @@ import {
   throwPrefixed,
 } from "./tool-shared.ts";
 
-// ── Parameter schema ─────────────────────────────────────────
+// ── Parameter schema（D3 拆分：workflow_run + workflow_control）─────────────
 
-/** workflow tool 的全部 action 枚举值（单一真相源）。 */
-export type WorkflowAction =
-  | "run"
+/** workflow_control 工具的 action 枚举值（单一真相源；run 拆出为独立工具无 action）。 */
+export type WorkflowControlAction =
   | "status"
   | "abort"
   | "resume";
 
-const WORKFLOW_ACTIONS: readonly WorkflowAction[] = [
-  "run",
+const WORKFLOW_CONTROL_ACTIONS: readonly WorkflowControlAction[] = [
   "status",
   "abort",
   "resume",
 ];
 
-const WorkflowParams = Type.Object({
-  action: StringEnum(WORKFLOW_ACTIONS, { description: "Workflow action to execute" }),
-  name: Type.Optional(
-    Type.String({ description: "Workflow ref: absolute path to a .js script — normally the <location> of a workflow from <available_workflows>, but ANY absolute .js path works if the file declares `@pi-meta kind: \"workflow\"` (the list is not required). Relative paths and bare names are rejected (run action)" }),
+const WorkflowRunParams = Type.Object({
+  name: Type.String(
+    { description: "Absolute path to a .js script — normally a <location> from <available_workflows>; ANY absolute .js path declaring @pi-meta kind:\"workflow\" works. Relative paths and bare names are rejected." },
   ),
   slug: Type.Optional(
     Type.String({
-      description:
-        "Short label (max 35 chars) for this run, shown in the TUI to distinguish concurrent runs. " +
-        "If omitted, defaults to the script name.",
+      description: "Short label (max 35 chars) shown in the TUI to distinguish concurrent runs. Defaults to the script name.",
       maxLength: SLUG_MAX_LENGTH,
     }),
   ),
-  runId: Type.Optional(
-    Type.String({ description: "Workflow run ID (abort / resume action; find it via action:status)" }),
-  ),
   args: Type.Optional(
     Type.Record(Type.String(), Type.Unknown(), {
-      description:
-        "Arguments passed to workflow as key-value pairs (run action). For resume: optional — when passed, " +
-        "must deep-equal the run's original args (except the internal _runId key); mismatch is rejected with " +
-        "the differing fields listed. Omit to reuse the original args.",
+      description: "Arguments passed to the workflow.",
     }),
   ),
-  tokens: Type.Optional(Type.Number({ description: "Max token budget — ONLY set when user explicitly requests a limit; omit = unlimited (default). For resume: the token budget applied to the resumed execution (tokens already spent by the run are counted against it)" })),
-  time: Type.Optional(Type.Number({ description: `Max time budget in ms — ONLY set when user explicitly requests a limit; omit = unlimited (default; hard ceiling ${MAX_TIMER_DELAY_MS} ms — larger values fail fast at entry). For resume: the budget applied to the resumed execution (active time already spent by the run is counted against it; suspended time is not)` })),
-  error: Type.Optional(
-    Type.String({ description: "Error/reason message (optional, used with abort)" }),
-  ),
+  tokens: Type.Optional(Type.Number({
+    // 预算纪律句已删（tool-declaration-slimming D1 单源化→注入段
+    // SUBAGENT_DISPATCH_SHARED_RULES，原文见 git 历史）。
+    description: "Max token budget.",
+  })),
+  time: Type.Optional(Type.Number({
+    description: `Max time budget in ms (hard ceiling ${MAX_TIMER_DELAY_MS} ms — larger values fail fast).`,
+  })),
   model: Type.Optional(Type.String({
+    // 缺省继承主 agent 的纪律句已删（D1 单源化→注入段）；
+    // run 级 override 作用域 / user override 优先级是本参数功能语义，保留。
     description:
-      "Run-level model override in 'provider/modelId' format. When set, all agents spawned by this run inherit it by default (unless a per-call agent() opts.model is set). " +
-      "Also accepted on action:\"resume\" — recorded as the run's user override (same channel as a panel switch) and drives all re-dispatched steps. " +
-      "A user-issued runtime model override (panel model switch / /subagent-model command) takes precedence over this parameter — user override wins over any explicitly scripted model. " +
-      "Omit to inherit the main agent's model.",
+      "Run-level model override in 'provider/modelId' format — all agents spawned by this run inherit it (unless a per-call agent() opts.model is set). " +
+      "A user-issued runtime override (panel switch / /subagent-model) wins over this parameter and over any explicitly scripted model.",
   })),
   thinkingLevel: Type.Optional(StringEnum(THINKING_ORDER, {
-    description: "Run-level thinkingLevel override (off/minimal/low/medium/high/xhigh/max). All agents in this run inherit it by default. Omit to default each agent to its model's highest available level.",
+    // 枚举值由 schema 自身的 enum 承载（不重复列举）；「user override 不改显式 scripted
+    // level」的优先级事实随 D1 单源化从 promptGuidelines Note 条迁入本字段说明。
+    description: "Run-level thinkingLevel override — all agents in the run inherit it. Omit for each agent's model's highest available level. A user-issued runtime override (panel switch / /subagent-model) does not change an explicitly scripted level (explicit levels outrank the override's inline level).",
   })),
 });
 
-type WorkflowToolParams = Static<typeof WorkflowParams>;
+const WorkflowControlParams = Type.Object({
+  action: StringEnum(WORKFLOW_CONTROL_ACTIONS, { description: "Control operation: 'status' lists runs, 'abort' stops one, 'resume' continues an interrupted run" }),
+  runId: Type.Optional(
+    Type.String({ description: "Workflow run ID (abort / resume; find via action:status)" }),
+  ),
+  args: Type.Optional(
+    Type.Record(Type.String(), Type.Unknown(), {
+      description: "For resume: optional — when passed, must deep-equal the original args (except internal _runId); mismatch rejected with the differing fields listed. Omit to reuse the original args.",
+    }),
+  ),
+  tokens: Type.Optional(Type.Number({
+    // 预算纪律句已删（D1 单源化→注入段）；
+    // resume 分支是本参数的功能语义，保留。
+    description: "Max token budget. For resume: applied to the resumed execution (tokens already spent count against it)",
+  })),
+  time: Type.Optional(Type.Number({
+    description: `Max time budget in ms (hard ceiling ${MAX_TIMER_DELAY_MS} ms — larger values fail fast). For resume: applied to the resumed execution (active spent time counts; suspended does not)`,
+  })),
+  error: Type.Optional(
+    Type.String({ description: "Error/reason message (optional, with abort)" }),
+  ),
+  model: Type.Optional(Type.String({
+    // 缺省继承纪律句已删（D1 单源化→注入段）；user override 优先级在 workflow_run 的
+    // model 字段说明一处（跨工具通用规则单源），此处只留 resume 分支功能语义。
+    description:
+      "Resumed run's model override (same channel as a panel switch), driving all re-dispatched steps.",
+  })),
+});
+
+type WorkflowRunToolParams = Static<typeof WorkflowRunParams>;
+type WorkflowControlToolParams = Static<typeof WorkflowControlParams>;
 
 // ── Constants ────────────────────────────────────────────────
 
 /**
- * tool 自身顶层键（workflow params schema 键）——workflow 参数名与 tool 键撞名时
- * （如 workflow 声明参数 name），顶层同名键是 tool 参数而非平铺（m6 评审 M-3）。
- * 未来新增 tool 顶层键需同步此集合。
+ * tool 自身顶层键（workflow_run / workflow_control 两 schema 键的合集）——workflow
+ * 参数名与 tool 键撞名时（如 workflow 声明参数 name），顶层同名键是 tool 参数而非
+ * 平铺（m6 评审 M-3）。合集形态：run 与 control 各自的键集都是本集合子集，两工具
+ * 共享同一 reservedKeys 注入（超集无害——reservedKeys 只做撞名豁免，不做校验）。
  *
  * D9 下沉后作为 core args-meta 的 reservedKeys 注入（ArgMetaOptions）——core 缺省
- * 空集，不注入则撞名保护失效（run 调用顶层必有 action/name，会被误判平铺）。
+ * 空集，不注入则撞名保护失效（run 调用顶层必有 name，会被误判平铺）。
  * export 供 detectors.test 复用同一集合防漂移。
  */
 export const TOOL_TOP_LEVEL = new Set([
@@ -181,7 +204,7 @@ interface RunSummary {
 // ── Tool result types ──
 
 /**
- * Discriminated union of `workflow` tool `details` payloads.
+ * Discriminated union of the workflow tools'（workflow_run / workflow_control）`details` payloads.
  *
  * Discriminant: `action`. Each action's details shape is explicitly typed so
  * downstream consumers (structured-output) can narrow without unsafe casts.
@@ -192,24 +215,25 @@ export type WorkflowToolDetails =
   | { action: "abort"; runId: string; status: string; reason?: string }
   | ({ action: "resume"; runId: string } & RunStartDetails);
 
-/** Result returned by the `workflow` tool's execute（公共骨架见 tool-result.ts）。 */
+/** Result returned by the workflow tools' execute（公共骨架见 tool-result.ts）。 */
 type WorkflowExecuteResult = WorkflowToolResult<WorkflowToolDetails | undefined>;
 
 // ── Tool registration ────────────────────────────────────────
 
 /**
- * 注册 workflow tool（4 actions: run / status / abort / resume；pause 已随一次性
- * 生命周期移除——enum 拒绝由 pi 核心校验拦截，见 F3。resume = interrupted 态断点
- * 续跑，不是挂起恢复）。
+ * 注册 workflow 工具组（tool-declaration-slimming D3 拆分：workflow_run +
+ * workflow_control，命名与 schedule_control 同族）。签名不变、内部注册两工具——
+ * 组合根（index.ts）零改动。
+ *
+ * run 与 control 共用同一 reentryRef（与拆分前单工具 4 action 共用一 guard 语义
+ * 一致：abort/resume 与 run 同占守卫，双 guard 语义漂移不引入）。reentryRef 是
+ * factory 级单例（index.ts 在 factory 内创建），跨 session 共享。当前 Pi 运行时
+ * 单 session 串行（同一时刻只有一个 active session），跨 session 不会并发触发
+ * workflow action，故共享无竞态。若未来支持多 session 并发，需改为 per-session guard。
  *
  * @param pi ExtensionAPI
  * @param deps LauncherDeps（LifecycleDeps + registry）
- * @param reentryRef reentry guard。仅 workflow tool 使用——workflow-script tool
- *   有独立的 isScriptRunning flag（见 registerWorkflowScriptTool），不共用此 guard。
- *   注意：reentryRef 是 factory 级单例（index.ts 在 factory 内创建），跨 session 共享。
- *   当前 Pi 运行时单 session 串行（同一时刻只有一个 active session），跨 session
- *   不会并发触发 workflow action，故共享无竞态。若未来支持多 session 并发，需改为
- *   per-session guard。
+ * @param reentryRef reentry guard
  */
 export function registerWorkflowTool(
   pi: ExtensionAPI,
@@ -217,72 +241,103 @@ export function registerWorkflowTool(
   reentryRef: ReentryGuardRef,
 ): void {
   pi.registerTool({
-    name: "workflow",
-    label: "Workflow",
+    name: "workflow_run",
+    label: "Workflow Run",
     description:
-      "Execute and control workflows: run (start), status, abort, resume (continue an interrupted run).\n" +
-      "Replaces workflow + workflow-run tools.",
-    promptSnippet: "Run, abort, resume, or check workflow status",
+      "Execute a workflow: start a listed workflow script directly (runs in background; results auto-delivered).\n" +
+      "Run control (status/abort/resume) lives in the `workflow_control` tool.",
+    promptSnippet: "Run a workflow",
     promptGuidelines: [
-      "PRIORITY: When user says 'workflow', 'run workflow', try run action FIRST.",
-      "All listed workflows run DIRECTLY with action:run — refs/descriptions come from " +
-      "<available_workflows> (injected each turn). For parameter details, read the <location> " +
-      "script file (script header has @pi-meta parameters + usage + phases). Do NOT use " +
-      "workflow-script generate for patterns already covered by available workflows.",
-      "run: pass the workflow ref as name — normally the <location> absolute .js path from <available_workflows>, but any absolute .js path with a valid @pi-meta also works (the list is not required). Bare names and relative paths are rejected with a not-found error listing locations.",
-      "DO NOT bash sleep or poll status after starting — results appear automatically via notifyDone.",
-      "Runs are one-shot: there is no pause — to stop a run early use abort; for a fresh result start a new run. " +
-      "resume is ONLY for runs whose status is interrupted (crash or session-switch during execution): it replays " +
-      "completed calls from the record at zero token cost and continues where the run stopped. " +
-      "Do NOT resume a settled (done/failed/cancelled) run — start a new run instead.",
-      "resume: pass the SAME args as the original run (they are verified field-by-field; a mismatch is rejected " +
-      "with the differing fields listed). Omit args to reuse the original ones. Changed args = different intent = new run. " +
-      "To resume with a specific model: pass model ('provider/modelId') on the resume itself — it is recorded as the " +
-      "run's user override (same channel as a panel switch), drives all re-dispatched steps, and persists for later " +
-      "resumes without the parameter. Alternatively switch the run's model first (panel selector or /subagent-model) " +
-      "then resume without model — both are the same override channel.",
-      "Call shapes (JSON): " +
-      "- run: {\"action\":\"run\",\"name\":\"<script>\",\"args\":{...},\"tokens\":N,\"time\":N,\"model\":\"<provider/modelId>\",\"thinkingLevel\":\"<level>\"}. " +
-      "- status: {\"action\":\"status\"}. " +
-      "- abort: {\"action\":\"abort\",\"runId\":\"<id>\"} (optional: {\"error\":\"<reason>\"}). " +
-      "- resume: {\"action\":\"resume\",\"runId\":\"<id>\",\"args\":{...},\"tokens\":N,\"time\":N,\"model\":\"<provider/modelId>\"} — args/tokens/time/model optional.",
-      "Budget: Do NOT set tokens/time unless the user explicitly requests a limit. Built-in workflows run unlimited by default.",
-      "Model/thinkingLevel: omit by default (inherit main agent's model). Only set model/thinkingLevel when the user explicitly requests a specific model or thinking depth for this run. " +
-      "Note: a user-issued runtime model override (panel switch / /subagent-model) takes precedence over the model parameter — an explicitly scripted thinkingLevel still applies " +
-      "(explicit levels outrank the override's inline level). If a run's explicitly scripted model seems ignored, " +
-      "check for an active user override (run journal model-override frame) before assuming a resolution bug.",
-      "Anti-patterns: Flattening args sub-fields (task/items/...) to the top level — they belong inside args. Calling {\"action\":\"run\"} without name.",
-      "CRITICAL: For orchestration patterns, ALWAYS use action:run with the <location> absolute " +
-      "path of the matching listed workflow — NEVER use workflow-script action:generate to recreate patterns " +
-      "already covered by available workflows. workflow-script generate is ONLY for novel patterns.",
+      // tool-declaration-slimming D1 终态：使用纪律单点。勿等待条/预算纪律条/模型缺省继承条
+      // 已删（收敛点 = <available_subagents> 注入段 SUBAGENT_DISPATCH_SHARED_RULES）；args
+      // 平铺检测 / model override 通道的功能语义在 schema 字段说明一处，不在此复述。
+      // 锚词保留清单见 __tests__/tool-prompt-contract.test.ts 头注。
+      "PRIORITY: 'workflow' / 'run workflow' → call workflow_run FIRST.",
+      "Refs come from <available_workflows>; for parameter details read the <location> script file (@pi-meta header: parameters + usage + phases).",
+      "Call shape (JSON): {\"name\":\"<script>\",\"args\":{...}} (+ optional tokens/time/model/thinkingLevel).",
+      "Anti-patterns: flattening args sub-fields (task/items/...) to the top level — they belong inside args.",
+      "CRITICAL: for orchestration patterns ALWAYS use workflow_run with the listed workflow's <location> path — NEVER use workflow-script action:generate to recreate covered patterns; generate is ONLY for novel patterns.",
     ],
-    parameters: WorkflowParams,
+    parameters: WorkflowRunParams,
 
     async execute(
       _toolCallId: string,
-      params: WorkflowToolParams,
+      params: WorkflowRunToolParams,
       signal: AbortSignal | undefined,
       _onUpdate: unknown,
       _ctx: ExtensionContext,
     ): Promise<WorkflowExecuteResult> {
- // P1-2: Honor abort signal up-front
+      // P1-2: Honor abort signal up-front
       // throw（W4b）：pi 只对 execute throw 置 isError:true，返回值里的 isError
       // 被 agent-loop 丢弃（agent-loop.js:453-483）——文案原样进 toolResult。
       // abort 前置判定收敛在 tool-shared（三处 tool 同源）。
       assertNotAborted(signal);
- // P1-6: Reentry guard（acquire 失败时尚未持有 guard，throw 前无需 release）
+      // P1-6: Reentry guard（acquire 失败时尚未持有 guard，throw 前无需 release）
+      if (!acquireReentryGuard(reentryRef)) {
+        throw new Error(REENTRY_BUSY_MESSAGE);
+      }
+      try {
+        // workflow 块分支（WORKFLOW_TOOL_NAMES 集合分流）恒折叠单行不消费 __gui__
+        // （D8 裁决），details 不构造 GUI 描述符。
+        return await actionRun(params, deps, signal);
+      } finally {
+        releaseReentryGuard(reentryRef);
+      }
+    },
+
+    renderCall(args: Record<string, unknown>, theme: Theme, _context?: unknown) {
+      // workflow ref 是绝对路径，标题行显示取 basename 短名（displayWorkflowName，
+      // 与 subagent 标题行的 displayAgentName 对称）；slug 不受影响。
+      const name = args.name ? ` ${displayWorkflowName(String(args.name))}` : "";
+      // run 可选 slug：在 name 后追加 · slug（accent 色）
+      const slug = optionSlugSuffix(args.slug, theme);
+      return new Text(
+        theme.fg("toolTitle", theme.bold("workflow_run ")) +
+          theme.fg("accent", name) +
+          slug,
+        0,
+        0,
+      );
+    },
+
+    renderResult: renderTextResult,
+  });
+
+  pi.registerTool({
+    name: "workflow_control",
+    label: "Workflow Control",
+    description:
+      "Control workflow runs: status (list), abort (stop a run), resume (continue an interrupted run).\n" +
+      "Runs are one-shot (no pause): stop early with abort; for a settled run start a new one via `workflow_run`.",
+    promptSnippet: "Check, abort, or resume workflow runs",
+    promptGuidelines: [
+      // D1 单源化终态：一次性生命周期与 resume 资格语义已在 description 说一遍，此处只留
+      // 调用形状与「不得 resume 已终态 run」的纪律条（锚词清单见 tool-prompt-contract.test.ts）。
+      "resume is ONLY for interrupted runs (crash or session-switch): it replays completed calls at zero token cost and continues. Do NOT resume a settled (done/failed/cancelled) run — start a new run via `workflow_run`.",
+      "Call shapes (JSON): " +
+      "- status: {\"action\":\"status\"}. " +
+      "- abort: {\"action\":\"abort\",\"runId\":\"<id>\"}. " +
+      "- resume: {\"action\":\"resume\",\"runId\":\"<id>\"} (+ optional args/tokens/time/model).",
+    ],
+    parameters: WorkflowControlParams,
+
+    async execute(
+      _toolCallId: string,
+      params: WorkflowControlToolParams,
+      signal: AbortSignal | undefined,
+      _onUpdate: unknown,
+      _ctx: ExtensionContext,
+    ): Promise<WorkflowExecuteResult> {
+      assertNotAborted(signal);
       if (!acquireReentryGuard(reentryRef)) {
         throw new Error(REENTRY_BUSY_MESSAGE);
       }
       try {
         let result: WorkflowExecuteResult;
-        // 断言为 WorkflowAction 联合——typebox Static 推断为 any，显式标注让 default
-        // 分支的 never 穷尽检查生效（新增 action 时 tsc 报错强制补 case）。
-        const action = params.action as WorkflowAction;
+        // 断言为 WorkflowControlAction 联合——typebox Static 推断退化为 string，显式
+        // 标注让 default 分支的 never 穷尽检查生效（新增 action 时 tsc 报错强制补 case）。
+        const action = params.action as WorkflowControlAction;
         switch (action) {
-          case "run":
-            result = await actionRun(params, deps, signal);
-            break;
           case "status":
             result = actionStatus(deps);
             break;
@@ -293,7 +348,7 @@ export function registerWorkflowTool(
             result = await actionResume(params, deps);
             break;
           default: {
-            // Exhaustiveness check — 新增 WorkflowAction 成员时未补 case，tsc 在此报错。
+            // Exhaustiveness check — 新增 WorkflowControlAction 成员时未补 case，tsc 在此报错。
             const _exhaustive: never = action;
             throw new Error(`Unknown action: ${String(_exhaustive)}`);
           }
@@ -308,17 +363,10 @@ export function registerWorkflowTool(
 
     renderCall(args: Record<string, unknown>, theme: Theme, _context?: unknown) {
       const action = String(args.action ?? "");
-      // workflow ref 是绝对路径，标题行显示取 basename 短名（displayWorkflowName，
-      // 与 subagent 标题行的 displayAgentName 对称）；runId/slug 不受影响。
-      const name = args.name ? ` ${displayWorkflowName(String(args.name))}` : "";
-      // run action 可选 slug：在 name 后追加 · slug（accent 色）
-      const slug = optionSlugSuffix(args.slug, theme);
       const runId = args.runId ? ` ${String(args.runId).slice(0, ID_PREVIEW_LENGTH)}` : "";
       return new Text(
-        theme.fg("toolTitle", theme.bold("workflow ")) +
+        theme.fg("toolTitle", theme.bold("workflow_control ")) +
           theme.fg("muted", action) +
-          theme.fg("accent", name) +
-          slug +
           theme.fg("dim", runId),
         0,
         0,
@@ -332,14 +380,14 @@ export function registerWorkflowTool(
 // ── run action ───────────────────────────────────────────────
 
 export async function actionRun(
-  params: WorkflowToolParams,
+  params: WorkflowRunToolParams,
   deps: LauncherDeps,
   signal: AbortSignal | undefined,
 ): Promise<WorkflowExecuteResult> {
   const name = params.name;
   if (!name) {
     throw new Error(
-      "run requires 'name' parameter (an absolute .js path, e.g. a <location> from <available_workflows>). Correct: {\"action\":\"run\",\"name\":\"<ref>\"}",
+      "run requires 'name' parameter (an absolute .js path, e.g. a <location> from <available_workflows>). Correct: {\"name\":\"<ref>\"}",
     );
   }
   // 弱模型常见误用（P0 静默失败）：把 task/items 等 args 子字段平铺到 workflow params
@@ -387,7 +435,7 @@ export async function actionRun(
   if (flattened.length > 0) {
     throw new Error(
       `Detected ${flattened.join(", ")} at top level — they belong inside 'args'. ` +
-      `Correct: {"action":"run","name":"${name}","args":{${flattened.map((k) => `"${k}": "<value>"`).join(", ")}}}`,
+      `Correct: {"name":"${name}","args":{${flattened.map((k) => `"${k}": "<value>"`).join(", ")}}}`,
     );
   }
   // slug 运行时护栏（与 subagent startHandler 对称的纵深防御；schema maxLength 是第一道关卡）
@@ -502,7 +550,7 @@ export function displayStatusOf(run: WorkflowRun): "running" | "interrupted" | "
 
 // 一次性生命周期：abort 是唯一的提前停止方式（pause/resume 已随 D-2 移除）。
 async function actionAbort(
-  params: WorkflowToolParams,
+  params: WorkflowControlToolParams,
   deps: LauncherDeps,
 ): Promise<WorkflowExecuteResult> {
   const runId = params.runId;
@@ -564,7 +612,7 @@ async function actionAbort(
  * pi 置 isError:true）。
  */
 export async function actionResume(
-  params: WorkflowToolParams,
+  params: WorkflowControlToolParams,
   deps: LauncherDeps,
 ): Promise<WorkflowExecuteResult> {
   const runId = params.runId;

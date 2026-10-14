@@ -1,14 +1,19 @@
 /**
- * goal_control prompt guidance — successCriteria 三层引导文本独立 prompt-lock
+ * goal_control prompt guidance — successCriteria 粒度约束的单源分布锁（D1）
  *
- * W1（plan U24）：粒度约束分布在三层，每层独立锁死，删掉任一层约束本文件对应 describe 必红：
+ * 设计 tool-declaration-slimming.md §3.3 D1（信息单源化）落地后，粒度约束的承载
+ * 分布从「三层重复」收敛为「单源 + 指向」：
  * 1. 参数层：GoalControlParams.successCriteria 的 schema description（导出对象直读）
- * 2. 工具层：registerGoalControlTool 工具 description 的 create 段（源码文本切片）
- * 3. guidelines 层：promptGuidelines 的 create 条目（源码文本按赋值块切片）
+ *    ——粒度约束的唯一承载位（1~8 条 / 单行 / 高层终态条件 / 只引用不复制 / 禁止倾倒）
+ * 2. 工具层：registerGoalControlTool 工具 description（源码文本切片）——只留动作
+ *    枚举与指向，**不复述**粒度约束（负断言）
+ * 3. guidelines 层：promptGuidelines 的 create 条目（源码文本按赋值块切片）——只留
+ *    触发纪律（何时建/何时不建），**不复述**粒度约束（负断言）
  *
  * 为什么源码文本断言：description / promptGuidelines 内联在 registerGoalControlTool、
  * 未导出常量；按变量边界切片（marker 定位 + 范围内断言），禁止跨块 [\s\S]*? 全文穿越——
  * 否则删掉某层约束后其余层文本仍能命中，测试假绿（review 发现的历史缺陷）。
+ * 负断言同样按切片范围生效：回填复述 = 违反单源化，对应 describe 必红。
  */
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -46,8 +51,6 @@ const PARAM_DESCRIPTION =
 // ── 第 2 层切片：工具 description 模板字面量（"description: `" 到闭合反引号）──
 
 const TOOL_DESCRIPTION = sliceBetween(ADAPTER_SRC, "description: `", "`");
-// create 段：从 "- create：" 行首到 "- complete：" 行首（同在 description 块内）
-const TOOL_DESCRIPTION_CREATE_SEGMENT = sliceBetween(TOOL_DESCRIPTION, "- create：", "- complete：");
 
 // ── 第 3 层切片：promptGuidelines 赋值块 ─────────────────────
 // 闭合 "]" 不能用 indexOf 找——块内 guideline 文本自身含 "string[]" 的 "]"，
@@ -76,9 +79,9 @@ if (CREATE_GUIDELINE_LINE === undefined) {
 	throw new Error('create guideline line not found in promptGuidelines block of goal-control-adapter.ts');
 }
 
-// ── 第 1 层：successCriteria 参数 schema description ─────────
+// ── 第 1 层：successCriteria 参数 schema description（粒度约束唯一承载位）──
 
-describe("第 1 层：successCriteria 参数 schema description（粒度约束）", () => {
+describe("第 1 层：successCriteria 参数 schema description（粒度约束唯一承载位）", () => {
 	it("schema 结构为 string[]（type: array + items type: string）", () => {
 		expect(successCriteriaSchema.type).toBe("array");
 		expect(successCriteriaSchema.items.type).toBe("string");
@@ -108,38 +111,38 @@ describe("第 1 层：successCriteria 参数 schema description（粒度约束�
 	});
 });
 
-// ── 第 2 层：工具 description create 段 ─────────────────────
+// ── 第 2 层：工具 description —— 单源化后只留枚举 + 指向，不复述粒度约束 ──
 
-describe("第 2 层：工具 description create 段（粒度约束）", () => {
-	it("create 段含 successCriteria 条数约束（3~8 条高层终态条件）", () => {
-		expect(TOOL_DESCRIPTION_CREATE_SEGMENT).toContain("successCriteria");
-		expect(TOOL_DESCRIPTION_CREATE_SEGMENT).toMatch(/3~8\s*条/);
-		expect(TOOL_DESCRIPTION_CREATE_SEGMENT).toContain("高层终态条件");
+describe("第 2 层：工具 description（单源化：枚举 + 指向，不复述）", () => {
+	it("description 含 action 枚举与 schema 字段说明指向", () => {
+		expect(TOOL_DESCRIPTION).toContain("create（创建）| complete（完成）| report_blocked（阻塞报告）");
+		expect(TOOL_DESCRIPTION).toContain("见 schema 字段说明");
 	});
 
-	it("create 段含细粒度清单只引用不复制语义", () => {
-		expect(TOOL_DESCRIPTION_CREATE_SEGMENT).toContain("细粒度检查清单放 todo/plan");
-		expect(TOOL_DESCRIPTION_CREATE_SEGMENT).toContain("只引用不复制");
-	});
-
-	it("create 段含禁止倾倒完整规格语义", () => {
-		expect(TOOL_DESCRIPTION_CREATE_SEGMENT).toContain("禁止倾倒完整规格");
+	it("description 不复述粒度约束（负断言：回填即红）", () => {
+		expect(TOOL_DESCRIPTION).not.toMatch(/3~8\s*条/);
+		expect(TOOL_DESCRIPTION).not.toContain("细粒度检查清单放 todo/plan");
+		expect(TOOL_DESCRIPTION).not.toContain("只引用不复制");
+		expect(TOOL_DESCRIPTION).not.toContain("禁止倾倒完整规格");
 	});
 });
 
-// ── 第 3 层：promptGuidelines create 条目 ────────────────────
+// ── 第 3 层：promptGuidelines create 条目 —— 触发纪律，不复述粒度约束 ──
 
-describe("第 3 层：promptGuidelines create 条目（粒度约束）", () => {
-	it("create 条目含 3~8 条高层终态条件 + string[] 语义", () => {
-		expect(CREATE_GUIDELINE_LINE).toMatch(/3~8 high-level terminal conditions as string\[\]/);
+describe("第 3 层：promptGuidelines create 条目（触发纪律，不复述粒度约束）", () => {
+	it("create 条目含主动触发纪律（复杂多步骤工作 + 值得追踪自查）", () => {
+		expect(CREATE_GUIDELINE_LINE).toMatch(/proactively start a goal for complex, multi-step work/);
+		expect(CREATE_GUIDELINE_LINE).toContain("is this worth tracking to completion with verification?");
 	});
 
-	it("create 条目含细粒度清单只引用不复制语义（reference, do not copy）", () => {
-		expect(CREATE_GUIDELINE_LINE).toContain("Fine-grained checklists belong in todo/plan");
-		expect(CREATE_GUIDELINE_LINE).toContain("reference them, do not copy");
+	it("create 条目含禁止场景纪律（琐碎任务/已有目标不建 + 恢复指引）", () => {
+		expect(CREATE_GUIDELINE_LINE).toContain("trivial single-step tasks");
+		expect(CREATE_GUIDELINE_LINE).toContain("/goal resume or /goal clear");
 	});
 
-	it("create 条目含禁止倾倒完整规格语义（Do NOT dump full specs）", () => {
-		expect(CREATE_GUIDELINE_LINE).toContain("Do NOT dump full specs into successCriteria");
+	it("create 条目不复述粒度约束（负断言：回填即红）", () => {
+		expect(CREATE_GUIDELINE_LINE).not.toMatch(/3~8 high-level terminal conditions as string\[\]/);
+		expect(CREATE_GUIDELINE_LINE).not.toContain("Fine-grained checklists belong in todo/plan");
+		expect(CREATE_GUIDELINE_LINE).not.toContain("Do NOT dump full specs into successCriteria");
 	});
 });

@@ -229,8 +229,9 @@ function runSync(options: RunSyncOptions): SingleResult {
 
 ## 4. 后台异步执行与结果通知
 
-后台子代理的完成通知经 subagent tool 的 `collect` 参数（`"async"` 逐个通知 / `"sync"` 全批收集）
-与 pending-notifications 扩展投递——参数语义以 subagent tool schema description 为准，实现见
+后台子代理的完成通知经 pending-notifications 扩展投递（确认式送达语义见下方引注）。
+旧 subagent 工具的 `collect` 批量收集参数已随 D3 工具拆分退役删除——批量编排的唯一入口是
+`subagents` 工具（fan-out run 管道），单数 `subagent_start` 无通知路由选项。实现见
 `packages/subagent-core` 与 `extensions/universal/pending-notifications` 源码。本指南不维护
 内部状态文件布局文档（历史版本的 tmpdir 布局与 watcher 机制章节因无对应实现已删除，git 可
 追溯）——布局与机制以源码为准。

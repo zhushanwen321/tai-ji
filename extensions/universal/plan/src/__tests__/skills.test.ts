@@ -158,6 +158,8 @@ describe("E1 fail-fast via /plan handler", () => {
       }),
       appendEntry: vi.fn(),
       setActiveTools: vi.fn(),
+      // 快照式恢复（dmg-r1-2）：enter 收拢前记录进入前激活集（getActiveTools）
+      getActiveTools: vi.fn(() => ALL_TOOL_NAMES.filter((n) => n !== "plan")),
       sendMessage: vi.fn(),
       getCommands: vi.fn(() => SKILL_COMMANDS),
       getAllTools: vi.fn(() => ALL_TOOL_NAMES.map((n) => ({ name: n }))),

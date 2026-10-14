@@ -112,6 +112,10 @@ export function createBashOutputToolDefinition() {
 	return {
 		name: "bash_output",
 		label: "bash_output",
+		// deferred（tool-declaration-slimming D4）：不常驻声明，tool_search 命中即激活；
+		// 迁移写入的 +tool_search 条目（runtime pi-codemode-settings）承载检索入口。
+		// as const：函数返回宽类型对象字面量，防 exposure 宽化为 string
+		exposure: "deferred" as const,
 		description: BASH_OUTPUT_DESCRIPTION,
 		parameters: bashOutputSchema,
 		async execute(

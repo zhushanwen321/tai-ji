@@ -5,16 +5,18 @@
 // 闸。schema pattern（^/）经 pi agent-loop 运行时强校验已是强制（PS-20：
 // agent-loop.js:403-404 → validation.js:247-273），工具层守卫定位 = defense-in-depth
 // + schema 表达力缺口——`..` 穿越语义超出 pattern 能力（^/ 放行 "/a/../b"），
-// 守卫在 executeSubagent start 分支 immediate throw（与 action 枚举守卫同风格）。
+// 守卫在 executeSubagentStart immediate throw（与 action 枚举守卫同风格）。
 //
 // 本文件锁住：
 //   1. skillPath / cwd 含 `..` 穿越段 → 同步 reject，service.execute 零触达
 //   2. skillPath / cwd 相对路径 → 同步 reject
 //   3. 合法绝对路径放行 → 参数原样透传 service.execute（守卫零误伤对照）
 //
-// harness（[u-5b / A-V3] 改写）：registerSubagentTool 后捕获 execute 回调直接调用。
+// harness（[u-5b / A-V3] 改写）：registerSubagentTool 后按名捕获 subagent_start 的
+// execute 回调直接调用（D3 拆分：registerSubagentTool 注册三工具，start 守卫在
+// subagent_start 的 execute）。
 // SubagentService 经单例访问器槽注入 fake（setSubagentService，globalThis 槽——
-// executeSubagent 内 getSubagentService() 读同一槽，「守卫拒绝时 service.execute
+// executeSubagentStart 内 getSubagentService() 读同一槽，「守卫拒绝时 service.execute
 // 零触达」的承重断言不依赖整类 mock）；pi-ai/typebox 桩改共享桩
 // （src/__tests__/mocks/runtime-stubs.ts，async 工厂 + 动态 import，消费约定见
 // 桩 module 头注）。
@@ -59,22 +61,24 @@ function resetServiceSlot(): void {
 
 type ExecuteCb = (...args: unknown[]) => Promise<unknown>;
 
-/** 注册 tool 并捕获 execute 回调（sdk-contract 同款）。 */
-function captureExecute(): ExecuteCb {
+/** 注册工具组并按名捕获 subagent_start 的 execute 回调。 */
+function captureStartExecute(): ExecuteCb {
   let captured: ExecuteCb | undefined;
   const pi = mockExtensionApi({
     registerTool: (tool: unknown) => {
-      captured = (tool as { execute: ExecuteCb }).execute;
+      if ((tool as { name?: string }).name === "subagent_start") {
+        captured = (tool as { execute: ExecuteCb }).execute;
+      }
     },
   });
   registerSubagentTool(pi);
-  if (!captured) throw new Error("subagent tool not registered");
+  if (!captured) throw new Error("subagent_start tool not registered");
   return captured;
 }
 
-/** 合法 start 入参基线（守卫测试只变动 skillPath/cwd 字段）。 */
+/** 合法 start 入参基线（守卫测试只变动 skillPath/cwd 字段；start 工具无 action 字段）。 */
 function baseParams(over: Record<string, unknown> = {}): Record<string, unknown> {
-  return { action: "start", task: "guard task", slug: "path-guard", ...over };
+  return { task: "guard task", slug: "path-guard", ...over };
 }
 
 /** 合法 execute 返回值 stub（放行路径 adapter 包装用）。 */
@@ -87,15 +91,15 @@ function stubHandle() {
   };
 }
 
-describe("subagent tool 路径守卫（skillPath/cwd：绝对路径 + 禁 .. 穿越）", () => {
+describe("subagent_start 路径守卫（skillPath/cwd：绝对路径 + 禁 .. 穿越）", () => {
   let execute: ExecuteCb;
 
   beforeEach(() => {
     vi.clearAllMocks();
     mockServiceExecute.mockResolvedValue(stubHandle());
-    // 经真实单例访问器注入 fake service（executeSubagent 内 getSubagentService 读同槽）
+    // 经真实单例访问器注入 fake service（executeSubagentStart 内 getSubagentService 读同槽）
     setSubagentService({ execute: mockServiceExecute, getCollectSyncDefault: () => "async" } as never);
-    execute = captureExecute();
+    execute = captureStartExecute();
   });
 
   afterEach(() => {
