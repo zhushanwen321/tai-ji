@@ -328,7 +328,7 @@ bash scripts/apply-version.sh \
 验证：
 ```bash
 cd $WS_ROOT/main
-git diff -- extensions/*/package.json extensions/shared/*/package.json packages/*/package.json | grep '^[+-]  "version"'
+git diff -- extensions/universal/*/package.json extensions/taiji/*/package.json extensions/shared/*/package.json packages/*/package.json | grep '^[+-]  "version"'
 git diff --name-only | grep CHANGELOG
 ls .changeset/*.md 2>/dev/null | grep -v README.md && echo "⚠️ 未消费的 changeset 残留" || echo "✓ changeset 全消费"
 ```
@@ -343,8 +343,10 @@ SLUG="<本次发布主题-kebab>"   # 人工定，来自 PR 标题
 STAMP=$(date +%Y%m%d-%H%M)
 
 # git 关键操作纪律见阶段 4 顶部 [MANDATORY]：单命令 + 重定向 + 显式退出码 + tag 指向 push 前核对
-git add extensions/*/package.json extensions/shared/*/package.json packages/*/package.json \
-        '**/CHANGELOG.md'
+# ⚠️ extensions 包在两层目录下（universal/taiji 分组），glob 必须写两层——zsh 零匹配会中止整条命令
+#    另加 .changeset 记录 apply-version 消费掉的 changeset 删除，避免脏工作区
+git add extensions/universal/*/package.json extensions/taiji/*/package.json extensions/shared/*/package.json packages/*/package.json \
+        '**/CHANGELOG.md' .changeset
 git commit -m "chore: version bump — <包与版本摘要>" > /tmp/merge-4n-commit.log 2>&1; echo "exit=$?"; tail -5 /tmp/merge-4n-commit.log
 
 # npm-* tag（不绑单一版本号，多包不同步时不误导；release-npm.yml 不从 tag 解析版本）
