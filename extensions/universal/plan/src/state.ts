@@ -128,6 +128,11 @@ export type PlanSessionMap = Map<string, PlanState>;
  * （taiji GUI 宿主有 degraded 恢复按钮，不自动重挂审批；独立 pi 无按钮保留 steer）——
  * 第四消费方，同帧失效约束随登记面扩展。
  *
+ * canvas 消费方（problem-solve-canvas U4，2026-10-14）：extensions/taiji/canvas 的
+ * src/host.ts isTaijiGuiHost 同谓词（env + ctx.mode === "rpc"）门控全部六工具的
+ * select 前置宿主检测——第五消费方，同帧失效约束随登记面扩展；该 env 拆专用宿主
+ * 信号时 canvas 谓词一并迁移（登记互指见 canvas host.ts 文件头）。
+ *
  * 放本叶模块（D-B1-7 随 isTaijiGuiHost 收敛迁入，原 tool.ts）：宿主判定信号与
  * per-session 注册表/挂起原语同域承载，不经 tool.js 大模块中转。
  */
