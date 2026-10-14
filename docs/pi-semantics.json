@@ -1651,5 +1651,57 @@
       "note": "消费方：model-switch 设计 §9 文件地图「最近生效值」派生读取（仅 pi 成员执行，runtime subagent 详情载荷组装路径）。pi 升级时重验：sdk.js createAgentSession 的 !hasExistingSession 分支是否仍首条写 model_change（grep dist/core/sdk.js appendModelChange）"
     },
     "verifiedWith": "1.0.0"
+  },
+  {
+    "id": "PS-78",
+    "claim": "tool_search 激活通道语义（tool-declaration-slimming D4 承重）：内置 tool-search 扩展把 tool_search 注册为 defaultActive:false——注册不激活，激活三通道 = --tools allowlist / settings.json defaultTools / setActiveTools（扩展源注释自述）。defaultTools 只能激活已注册工具：configuredDefaultToolNames（getDefaultTools 解析产物）经 sdk.js 变为 initialActiveToolNames 传入 AgentSession → _buildRuntime activeToolNames → _refreshToolRegistry，最终声明面 _applyToolLoadout 只遍历 _toolRegistry 已注册名——未注册名（如 -ne 下未装载 builtin:tool-search 时的 +tool_search 条目）在 registry 查不到即静默跳过，条目无消费方、无报错（探针结论①「未知名静默忽略」：tool_search 未注册时 +tool_search 条目不产生任何工具声明；承重面 = taiji 主 agent spawn 恒带 --extension builtin:tool-search 使迁移条目有消费方，孙进程模板不装载 → 条目在孙进程无效果，ADR-0136 终态零波及）。taiji 启动迁移写入侧（幂等追加 +tool_search、负条目视为已含即用户永久关闭）与 pi 解析侧的闭环 = 落盘值经 resolveDefaultToolSet 解析后必含 tool_search",
+    "piAnchor": [
+      {
+        "pkg": "pi-coding-agent",
+        "distPath": "dist/extensions/tool-search/index.js",
+        "symbol": "createToolSearchExtension",
+        "note": ":1-7 头部注释自述「registered inactive. Activate it with --tools, the defaultTools setting, or setActiveTools()」；:11 registerTool({..., defaultActive: false})——exposure 未设即默认 direct（declarable，可被 defaultTools/--tools 点名激活）【行号锚基于 pi@1.0.0 实装实测】"
+      },
+      {
+        "pkg": "pi-coding-agent",
+        "distPath": "dist/core/sdk.js",
+        "symbol": "createAgentSession 的 configuredDefaultToolNames → initialActiveToolNames 链",
+        "note": ":143-148（configuredDefaultToolNames = settingsManager.getDefaultTools()；initialActiveToolNames = options.tools ?? noTools 分支 ?? configuredDefaultToolNames ?? DEFAULT_TOOL_NAMES，恒非 undefined）→ :301 传入 AgentSession 构造【行号锚基于 pi@1.0.0 实装实测】"
+      },
+      {
+        "pkg": "pi-coding-agent",
+        "distPath": "dist/core/agent-session.js",
+        "symbol": "_buildRuntime / _refreshToolRegistry（activeToolNames → 声明面）",
+        "note": ":196-210 构造路径 _buildRuntime({activeToolNames: _initialActiveToolNames})；_refreshToolRegistry :2820 nextActiveToolNames 取 options.activeToolNames——registry 未含的名单最终在 _applyToolLoadout 被静默跳过（见 PS-79 锚）【行号锚基于 pi@1.0.0 实装实测】"
+      }
+    ],
+    "guard": {
+      "type": "probe",
+      "test": "packages/runtime/src/infra/pi/__tests__/pi-codemode-settings.test.ts"
+    },
+    "verifiedWith": "1.0.0"
+  },
+  {
+    "id": "PS-79",
+    "claim": "ToolExposure 分级与 setActiveTools 声明语义（tool-declaration-slimming D4 承重）：ToolExposure 五档 direct/model-only/codemode/deferred/hidden——direct/model-only 注册即激活（defaultActive!==false 时）、声明给模型；codemode/deferred 注册不激活、不进每轮 tools 数组（deferred 的激活通道 = tool_search 检索命中）；hidden 注册但不可达（激活无效）。setActiveTools 点名即声明：_applyToolLoadout 对点名名单只过滤 hidden（exposure!=='hidden' 即进声明集）且未注册名静默跳过（registry.get 查不到返回空）——即 deferred 工具一旦被点名（如全量 getAllTools 恢复、PLAN_MODE_TOOLS 收拢）即重新常驻声明给模型，D4 削减被击穿；taiji 侧工具集恢复/禁用动作（plan 退出 restoreFullToolSet、ask-user disableAskUser）必须按 ToolInfo.exposure 过滤只点名 direct/model-only。构造期激活恢复不可达（探针结论②）：_restoreToolsFromTranscript 从 transcript 末条 system message 的 toolsAdded 恢复激活集，但仅当 config.initialActiveToolNames === undefined 时调用——SDK 入口（createAgentSession）三路兜底恒传非 undefined 值，taiji 全走 SDK 入口 → fork/resume 进程重建后先前激活的 deferred 工具必然退场，需重新 tool_search 检索一次恢复",
+    "piAnchor": [
+      {
+        "pkg": "pi-coding-agent",
+        "distPath": "dist/core/extensions/types.d.ts",
+        "symbol": "ToolExposure / ToolInfo / ToolDefinition.exposure / ToolDefinition.defaultActive",
+        "note": "ToolExposure :373-388（五档语义 doc 注释：direct/model-only activated when registered; deferred like codemode but tool search can find it; hidden activating has no effect）；ToolInfo :1531-1537（getAllTools 返回值含 exposure 字段）；ToolDefinition.exposure :464-466 / defaultActive :471-476【行号锚基于 pi@1.0.0 实装实测】"
+      },
+      {
+        "pkg": "pi-coding-agent",
+        "distPath": "dist/core/agent-session.js",
+        "symbol": "_applyToolLoadout / _isDeclarable / _isActivatedOnRegistration / _restoreToolsFromTranscript",
+        "note": "_applyToolLoadout :1119-1124（flat Registry.get(name) 短路跳过未注册名；_getToolExposure(name)!=='hidden' 之外全进声明集——点名即激活）；_isDeclarable :2856-2859（仅 direct/model-only）；_isActivatedOnRegistration :2861-2863（declarable ∧ defaultActive!==false）；构造 :201-209（initialActiveToolNames===undefined 才 :208 调 _restoreToolsFromTranscript）+ _restoreToolsFromTranscript :1331-1340（toolsAdded 恢复）【行号锚基于 pi@1.0.0 实装实测】"
+      }
+    ],
+    "guard": {
+      "type": "probe",
+      "test": "extensions/universal/plan/src/__tests__/tool.test.ts"
+    },
+    "verifiedWith": "1.0.0"
   }
 ]

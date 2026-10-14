@@ -164,10 +164,21 @@ type PlanDetails =
 
 // ── Helpers ────────────────────────────────────────────────────────
 
-/** Restore the default full tool set after exiting plan mode. */
+/**
+ * Restore the default full tool set after exiting plan mode.
+ *
+ * D4（tool-declaration-slimming）：恢复 = pi 注册即激活的默认集（direct / model-only），
+ * 不含 deferred / codemode / hidden。pi 语义（dist/core/extensions/types.d.ts ToolExposure）：
+ * setActiveTools 点名即声明给模型（_applyToolLoadout 只滤 hidden）——若按 getAllTools()
+ * 全量点名，defer 名单与 tool_search 会随 plan 进出重新常驻，静默击穿 D4 削减目标；
+ * deferred 工具的激活通道是 tool_search 检索命中，恢复默认集后回到该通道。
+ */
 function restoreFullToolSet(pi: ExtensionAPI): void {
-  const allToolNames = pi.getAllTools().map((t: { name: string }) => t.name);
-  pi.setActiveTools(allToolNames);
+  const toolNames = pi
+    .getAllTools()
+    .filter((t: { name: string; exposure: string }) => t.exposure === "direct" || t.exposure === "model-only")
+    .map((t: { name: string }) => t.name);
+  pi.setActiveTools(toolNames);
 }
 
 /**

@@ -42,7 +42,7 @@ interface RegisteredTool {
 interface MockPi {
 	tool?: RegisteredTool;
 	registerTool(tool: RegisteredTool): void;
-	getAllTools(): { name: string }[];
+	getAllTools(): { name: string; exposure?: string }[];
 	activeTools?: string[] | null;
 	setActiveTools(names: string[]): void;
 	// session_start handler：factory 注册 ask_user channel handler 时调用（透传功能）。
@@ -57,7 +57,10 @@ const getTool = (overrides: Partial<MockPi> = {}): RegisteredTool => {
 			this.tool = tool;
 		},
 		getAllTools() {
-			return [{ name: "ask_user" }, { name: "other_tool" }];
+			return [
+				{ name: "ask_user", exposure: "direct" },
+				{ name: "other_tool", exposure: "direct" },
+			];
 		},
 		setActiveTools(names) {
 			this.activeTools = names;
@@ -226,7 +229,13 @@ describe("execute — headless (FR-8 / AC-7)", () => {
 	it("I-6: headless disables ask_user tool via setActiveTools (收尾先于 throw)", async () => {
 		let captured: string[] | null = null;
 		const tool2 = getTool({
-			getAllTools: () => [{ name: "ask_user" }, { name: "other" }],
+			// ToolInfo 形态（含 exposure）：混入 deferred 工具锚定 D4——禁用动作不得把
+			// defer 名单点名激活（setActiveTools 点名即声明给模型）
+			getAllTools: () => [
+				{ name: "ask_user", exposure: "direct" },
+				{ name: "other", exposure: "direct" },
+				{ name: "plan", exposure: "deferred" },
+			],
 			setActiveTools: (names: string[]) => {
 				captured = names;
 			},
@@ -236,6 +245,8 @@ describe("execute — headless (FR-8 / AC-7)", () => {
 		).rejects.toThrow();
 		expect(captured).not.toContain("ask_user");
 		expect(captured).toContain("other");
+		// D4 回归锚：deferred 工具不随禁用动作常驻
+		expect(captured).not.toContain("plan");
 	});
 });
 
@@ -818,7 +829,10 @@ describe("execute — RPC mode (uiFormInteract via select channel)", () => {
 	it("R-10: select 回显 payload（echo，旧 taiji 宿主）→ channel-error throw 带升级指引 + 工具禁用", async () => {
 		let capturedActive: string[] | null = null;
 		const tool = getTool({
-			getAllTools: () => [{ name: "ask_user" }, { name: "other" }],
+			getAllTools: () => [
+				{ name: "ask_user", exposure: "direct" },
+				{ name: "other", exposure: "direct" },
+			],
 			setActiveTools: (names: string[]) => {
 				capturedActive = names;
 			},

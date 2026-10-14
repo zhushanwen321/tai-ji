@@ -58,6 +58,11 @@ import { updatePlanWidget } from "../widget.js";
 
 /** Build a fake pi + ctx and capture the execute callback from registerTool. */
 const ALL_TOOL_NAMES = ["read", "bash", "grep", "find", "ls", "plan", "write", "edit"];
+// D4 回归锚素材：注册全集混含 deferred 工具（对齐实装——plan 工具自身 exposure:"deferred"）
+// 与 tool_search；退出恢复集必须排除它们（restoreFullToolSet 只恢复注册即激活的默认集）
+const DEFERRED_TOOL_NAMES = ["plan", "tool_search"];
+/** 退出恢复集（D4 断言期望值）：direct 全量 = 注册即激活的默认集 */
+const RESTORED_TOOL_NAMES = ALL_TOOL_NAMES.filter((n) => !DEFERRED_TOOL_NAMES.includes(n));
 
 function setup() {
   // 单 ctx 对象（D-B4-3）：sessions/controllers 别名 = planCtx 两表（同对象），用例断言不变
@@ -67,7 +72,12 @@ function setup() {
     registerTool: vi.fn((tool) => { executeFn = tool.execute; }),
     appendEntry: vi.fn(),
     setActiveTools: vi.fn(),
-    getAllTools: vi.fn(() => ALL_TOOL_NAMES.map((n) => ({ name: n }))),
+    getAllTools: vi.fn(() =>
+      [...ALL_TOOL_NAMES, "tool_search"].map((n) => ({
+        name: n,
+        exposure: DEFERRED_TOOL_NAMES.includes(n) ? "deferred" : "direct",
+      })),
+    ),
   } as unknown as Parameters<typeof registerPlanTool>[0];
   registerPlanTool(pi, planCtx);
 
@@ -346,7 +356,11 @@ describe("registerPlanTool", () => {
       const res = await exec({ action: "complete" });
       expect(res.details.action).toBe("complete");
       expect(res.details.execMode).toBe("execute");
-      expect(pi.setActiveTools).toHaveBeenCalledWith(ALL_TOOL_NAMES);
+      // D4 回归锚：退出恢复 = 注册即激活的 direct 集，不含 deferred（plan）与 tool_search
+      expect(pi.setActiveTools).toHaveBeenCalledWith(RESTORED_TOOL_NAMES);
+      const restored = (pi.setActiveTools as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[0] as string[];
+      expect(restored).not.toContain("tool_search");
+      expect(restored).not.toContain("plan");
       expect(handlePlanComplete).toHaveBeenCalled();
       // 内部路径显示为相对路径（A2 边界判断正向：projectDir 后紧随分隔符才切）
       expect(res.details.planFilePath).toBe(".tmp/plans/auth/plan.md");
@@ -388,7 +402,7 @@ describe("registerPlanTool", () => {
       expect(res.details.execMode).toBe("execute");
       expect(ctx.ui.select).not.toHaveBeenCalled(); // 不进任何 select（noOp 软门修复）
       expect(detectExecSkills).not.toHaveBeenCalled(); // 选择已预定，跳过 skill 扫描
-      expect(pi.setActiveTools).toHaveBeenCalledWith(ALL_TOOL_NAMES);
+      expect(pi.setActiveTools).toHaveBeenCalledWith(RESTORED_TOOL_NAMES);
       expect(handlePlanComplete).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.anything(), "execute", undefined);
     });
 
@@ -635,7 +649,7 @@ describe("registerPlanTool", () => {
       });
       const res = await exec({ action: "abort" });
       expect(res.details.action).toBe("abort");
-      expect(pi.setActiveTools).toHaveBeenCalledWith(ALL_TOOL_NAMES);
+      expect(pi.setActiveTools).toHaveBeenCalledWith(RESTORED_TOOL_NAMES);
       expect(sessions.has("test-session")).toBe(false);
       expect(updatePlanWidget).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ isActive: false, state: "exited" }));
       // 终态矩阵：reset entry 落 isActive=false + state='exited' + skills/selfReview 清空 + docs 保留
@@ -659,7 +673,7 @@ describe("registerPlanTool", () => {
       // ok:false 不落盘（completed 终态不被覆写为 exited）
       expect(pi.appendEntry).not.toHaveBeenCalled();
       // ④ 工具集照常幂等恢复（D-B1-1：ok:false → ①③④⑤照常，已恢复则 no-op）
-      expect(pi.setActiveTools).toHaveBeenCalledWith(ALL_TOOL_NAMES);
+      expect(pi.setActiveTools).toHaveBeenCalledWith(RESTORED_TOOL_NAMES);
     });
 
     it("idle 常态格 abort → warn 纠偏文案、不落盘（D-B1-1 行为变更：噪音 exited entry 消灭，V1 ⑧ 锚）", async () => {
@@ -672,7 +686,7 @@ describe("registerPlanTool", () => {
       // 行为变更核心断言：不落 exited 噪音 entry
       expect(pi.appendEntry).not.toHaveBeenCalled();
       // ④ 幂等恢复（idle 格工具集已全量，重设 = 可观察零变化）
-      expect(pi.setActiveTools).toHaveBeenCalledWith(ALL_TOOL_NAMES);
+      expect(pi.setActiveTools).toHaveBeenCalledWith(RESTORED_TOOL_NAMES);
       expect(sessions.has("test-session")).toBe(true); // 无 reset（缓存不动）
     });
 
@@ -692,7 +706,7 @@ describe("registerPlanTool", () => {
         "plan-state",
         expect.objectContaining({ isActive: false, state: "completed" }),
       );
-      expect(pi.setActiveTools).toHaveBeenCalledWith(ALL_TOOL_NAMES);
+      expect(pi.setActiveTools).toHaveBeenCalledWith(RESTORED_TOOL_NAMES);
       expect(sessions.has("test-session")).toBe(false); // 清洗后缓存清理（重开经 entry 恢复正常态）
     });
 

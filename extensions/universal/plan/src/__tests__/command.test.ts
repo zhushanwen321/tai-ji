@@ -28,6 +28,9 @@ import type { PlanAbortControllers } from "../state.js";
 import { createPlanCtx, freshPendingSelect, MAX_PLAN_REQUIREMENT_LENGTH, PLAN_CONTEXT_CUSTOM_TYPE } from "../state.js";
 
 const ALL_TOOL_NAMES = ["read", "bash", "grep", "find", "ls", "plan", "write", "edit"];
+// D4：plan / tool_search 注册为 deferred（对齐实装），退出恢复集排除它们
+const DEFERRED_TOOL_NAMES = ["plan", "tool_search"];
+const RESTORED_TOOL_NAMES = ALL_TOOL_NAMES.filter((n) => !DEFERRED_TOOL_NAMES.includes(n));
 
 function createMocks() {
   let capturedHandler: (args: string, ctx: ExtensionContext) => Promise<void>;
@@ -41,7 +44,12 @@ function createMocks() {
     setActiveTools: vi.fn(),
     sendMessage: vi.fn(),
     getCommands: vi.fn(() => []),
-    getAllTools: vi.fn(() => ALL_TOOL_NAMES.map((n) => ({ name: n }))),
+    getAllTools: vi.fn(() =>
+      [...ALL_TOOL_NAMES, "tool_search"].map((n) => ({
+        name: n,
+        exposure: DEFERRED_TOOL_NAMES.includes(n) ? "deferred" : "direct",
+      })),
+    ),
   } as unknown as ExtensionAPI;
 
   const ctx = {
@@ -98,8 +106,8 @@ describe("registerPlanCommand", () => {
   it("abort（idle 常态格）: warn 纠偏文案 + 幂等退出——不落盘、工具集幂等恢复（D-B1-1 单入口守卫极性，原 info no-op 取消）", async () => {
     await handler("abort", ctx);
     expect((ctx as ReturnType<typeof createMocks>["ctx"]).ui.notify).toHaveBeenCalledWith("No active plan mode.", "warning");
-    // ④ 工具集照常幂等恢复（idle 格已是全量，重设全量 = 可观察零变化）
-    expect(pi.setActiveTools).toHaveBeenCalledWith(ALL_TOOL_NAMES);
+    // ④ 工具集照常幂等恢复（idle 格已是默认集，重设 = 可观察零变化；D4：恢复集不含 deferred）
+    expect(pi.setActiveTools).toHaveBeenCalledWith(RESTORED_TOOL_NAMES);
     // ② 跳过：idle 删 exit 边后 ok:false 不落盘（无噪音 exited entry）
     expect(pi.appendEntry).not.toHaveBeenCalled();
   });

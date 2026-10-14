@@ -541,7 +541,7 @@ extension 工具注册定义（`registerTool`）的 `exposure` 字段取 `deferr
 
 ### tool_search（pi 内置工具检索）
 
-pi 内置扩展提供的工具检索工具：BM25 排序（Okapi BM25），检索文本覆盖工具 name、description、schema 字段说明与参数名、namespace 描述。模型调用 `tool_search {"query": "..."}` 命中 [deferred](#deferredextension-工具可达性分级) 工具时该工具加入激活集、下一轮可用，返回结果列出已加载的工具；无命中返回空结果（模型自然回落 bash 等在场工具，行为与无检索工具时一致）。启用形态 = settings.json `defaultTools` 的 `+tool_search` 条目（[工具增量条目](#工具增量条目name---name-语法)语法），经启动迁移默认启用（复用 codemode 迁移通道：幂等追加、`-tool_search` 视为已含即用户永久关闭；写入单点 `packages/runtime/src/infra/pi/pi-codemode-settings.ts`）。settings.json 全 pi 进程共享，孙进程（extension 白名单只装载 structured-output）同样激活该工具，检索候选近乎空集、无功能损失（波及裁决 [ADR-0136](adr/decisions.md)）。
+pi 内置扩展提供的工具检索工具：BM25 排序（Okapi BM25），检索文本覆盖工具 name、description、schema 字段说明与参数名、namespace 描述。模型调用 `tool_search {"query": "..."}` 命中 [deferred](#deferredextension-工具可达性分级) 工具时该工具加入激活集、下一轮可用，返回结果列出已加载的工具；无命中返回空结果（模型自然回落 bash 等在场工具，行为与无检索工具时一致）。启用形态 = settings.json `defaultTools` 的 `+tool_search` 条目（[工具增量条目](#工具增量条目name---name-语法)语法），经启动迁移默认启用（复用 codemode 迁移通道：幂等追加、`-tool_search` 视为已含即用户永久关闭；写入单点 `packages/runtime/src/infra/pi/pi-codemode-settings.ts`）。settings.json 全 pi 进程共享，但孙进程模板不装载 `builtin:tool-search`（pi-subagent-cli spawn-args 恒带 `--no-extensions` + 显式 extension 白名单；pi-rpc 子代理模板只带 `builtin:codemode`）——tool_search 在孙进程未注册，`+tool_search` 条目无消费方（pi 语义：defaultTools 只能激活已注册工具），零声明零成本（[ADR-0136](adr/decisions.md) 终态：零波及；回归锚 `packages/pi-rpc/src/__tests__/spawn-args.test.ts` 的 not.toContain('builtin:tool-search') 断言）。
 
 **代码映射**: pi builtin extension（实装 `dist/extensions/tool-search/`）；taiji 侧迁移写点 `packages/runtime/src/infra/pi/pi-codemode-settings.ts`。
 

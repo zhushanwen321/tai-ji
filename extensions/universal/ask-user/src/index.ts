@@ -36,11 +36,18 @@ import { validateInput } from "./validate";
  */
 type ExecuteResult = AgentToolResult<AskUserDetails>;
 
-/** 禁用 ask_user 工具（headless / RPC 通道不可用时调用，防 LLM 反复重试）。 */
+/**
+ * 禁用 ask_user 工具（headless / RPC 通道不可用时调用，防 LLM 反复重试）。
+ *
+ * 重设基础 = pi 注册即激活的默认集（direct / model-only，D4 tool-declaration-slimming）：
+ * deferred / codemode 工具不随禁用动作点名激活（setActiveTools 点名即声明给模型，
+ * 全量点名会把 defer 名单重新常驻，击穿 D4）。
+ */
 function disableAskUser(pi: ExtensionAPI): void {
 	pi.setActiveTools(
 		pi
 			.getAllTools()
+			.filter((t: { name: string; exposure: string }) => t.exposure === "direct" || t.exposure === "model-only")
 			.map((t: { name: string }) => t.name)
 			.filter((n: string) => n !== "ask_user"),
 	);
