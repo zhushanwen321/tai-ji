@@ -59,8 +59,9 @@ export class ProcessManager implements IProcessManager {
   private piVersionFailedAt: number | null = null
   /**
    * 滚动进程表环（signal-forensics）：受管 pi 意外退出时的发送方归因历史源。
-   * 构造零 I/O 零定时器（懒启动）；start 点在 createSession（spawn 前），stop 点在
-   * 受管 pi 清零（destroySession / destroyAll / exit 收敛后）。
+   * 构造零 I/O 零定时器（懒启动）；start 点在 createSession（restart 分支的
+   * destroySession 之后、spawn 前，入册后再幂等重申一次），stop 点在受管 pi 清零
+   * （destroySession / destroyAll / exit 收敛后）。
    */
   private readonly processTableRing: ProcessTableRing
 
@@ -179,14 +180,17 @@ export class ProcessManager implements IProcessManager {
     // pi 会话启动门禁（见方法上方 JSDoc）：损坏时零副作用拒绝，进程未 spawn。
     this.assertSettingsReadableForSpawn()
 
-    // 信号取证环启动（幂等）：必须先于 spawn——spawn 即崩的死亡（startup crash）
-    // 同样需要死亡前窗口的进程表样本，环空窗越短归因面越全。intervalMs=0（env 关闭）
-    // 时 start 为 no-op，采集退化为死亡即时单帧快照。
-    this.processTableRing.start()
-
     if (this.processes.has(sessionId)) {
       await this.destroySession(sessionId)
     }
+
+    // 信号取证环启动（幂等）：先于 spawn——spawn 即崩的死亡（startup crash）同样
+    // 需要死亡前窗口的进程表样本，环空窗越短归因面越全。位置必须在 restart 分支
+    // （destroySession）之后：destroySession 尾部在受管 pi 清零时停环，若先 start
+    // 再 destroy，单 session 重启路径下环被停掉后无人再 start，整个新进程生命周期
+    // 零采样（MF-3）。此处的 start 在 destroy 停环之后执行即完成再武装；
+    // intervalMs=0（env 关闭）时 start 为 no-op，采集退化为死亡即时单帧快照。
+    this.processTableRing.start()
 
     const piPath = await this.getPiPath()
 
@@ -303,6 +307,10 @@ export class ProcessManager implements IProcessManager {
       createdAt: Date.now(),
     })
     this.clientToId.set(client, sessionId)
+    // 入册后幂等重申环启动：上方 pre-spawn start 与入册之间隔着 spawn await，若此间
+    // 其他 session 的死亡收敛把受管计数降到 0 触发停环，此处重申使「有受管 pi 在册
+    // ⇒ 环在转」在每个加册点后结构性成立（start 幂等，已在转时零副作用）。
+    this.processTableRing.start()
 
     return client
   }
