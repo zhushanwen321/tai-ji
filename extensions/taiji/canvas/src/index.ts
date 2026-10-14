@@ -38,6 +38,15 @@ export default function canvasExtension(pi: ExtensionAPI): void {
       "Use when the user asks to plan / think through / break down a problem before execution: the canvas is a human-agent co-edited argument map the user watches and rules on in the taiji GUI. " +
       "After entering, the user's GUI decisions (selections / vetoes / comments) arrive as canvas event notifications — always canvas_read the current state before responding. " +
       "Requires the taiji desktop runtime (errors out in standalone pi).",
+    // deferred 形态下 snippet 是 system prompt 工具索引里的唯一入口信号（D3-A1
+    // 验收发现：缺 snippet 时自然语言驱动模型不会 tool_search 画布工具）——
+    // plan promptSnippet 同款「主动进入」引导
+    promptSnippet:
+      "## Entering canvas mode\n" +
+      "When the user asks to plan / think through / break down a problem before execution, proactively enter canvas mode yourself: " +
+      "canvas_enter(statement='<root problem>', criterias=[...], scope=[...]). The canvas is a human-agent co-edited argument map — " +
+      "you grow and argue options on it, the user watches and rules on selections/vetoes in the taiji GUI. " +
+      "No user confirmation is needed to enter; to open an existing canvas pass canvasId from canvas_list.",
     parameters: CanvasEnterParams,
   });
 
@@ -49,6 +58,7 @@ export default function canvasExtension(pi: ExtensionAPI): void {
       "Reason fields are mandatory (audit trail); always canvas_read first and edit the CURRENT state. " +
       "Structural guarantee: user-side rulings arrive as notifications, agent-side edits never self-notify. " +
       "Requires the taiji desktop runtime (errors out in standalone pi).",
+    promptSnippet: "Grow / patch / select / transition / comment-respond on a canvas (one tool, five actions)",
     parameters: CanvasEditParams,
   });
 
@@ -60,6 +70,7 @@ export default function canvasExtension(pi: ExtensionAPI): void {
       "The read-before-act discipline entry: respond to canvas event notifications and edit the canvas only after reading the current state. " +
       "Also the reviewer subagent's query surface. " +
       "Requires the taiji desktop runtime (errors out in standalone pi).",
+    promptSnippet: "Read the current canvas state (full or one subtree) before acting on canvas events",
     parameters: CanvasReadParams,
   });
 
@@ -70,6 +81,7 @@ export default function canvasExtension(pi: ExtensionAPI): void {
       "Run the canvas adversarial review loop: run (dispatch one reviewer subagent over the six-dimension checklist — completeness / necessity / support / authenticity / conflict / depth — and write the report back; R2+ pass scope to re-review only the resolution table), append (reviewer report write path), resolve (register one entry's disposition: accepted / deferred / rejected-with-reason — the fix side's duty after repairing). " +
       "must-fix entries block convergence until cleared. " +
       "Requires the taiji desktop runtime (errors out in standalone pi).",
+    promptSnippet: "Run the adversarial review loop, append a reviewer report, or resolve one review entry",
     parameters: CanvasReviewParams,
   });
 
@@ -80,6 +92,7 @@ export default function canvasExtension(pi: ExtensionAPI): void {
       "Export a converged canvas: 'planning-doc' (full direction-planning document) or 'requirement-card' (one execution leaf, pass leafId). " +
       "Rejected with not_converged until the canvas has converged (must-fix cleared, no dirty paths, root criterias confirmed). " +
       "Requires the taiji desktop runtime (errors out in standalone pi).",
+    promptSnippet: "Export a converged canvas as a planning doc or a requirement card",
     parameters: CanvasExportParams,
   });
 
@@ -90,6 +103,7 @@ export default function canvasExtension(pi: ExtensionAPI): void {
       "List all problem-solving canvases (id, name, statement, converged flag, open must-fix count, review status). " +
       "The canvasId source for canvas_enter's open form. " +
       "Requires the taiji desktop runtime (errors out in standalone pi).",
+    promptSnippet: "List all canvases (id, name, converged flag, open must-fix count)",
     parameters: CanvasListParams,
   });
 }

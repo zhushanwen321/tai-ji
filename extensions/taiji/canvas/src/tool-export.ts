@@ -46,13 +46,14 @@ export function exportRequestOf(
 
 export function registerCanvasExportTool(
   pi: ExtensionAPI,
-  cfg: { name: string; label: string; description: string; parameters: typeof CanvasExportParams },
+  cfg: { name: string; label: string; description: string; promptSnippet: string; parameters: typeof CanvasExportParams },
 ): void {
   pi.registerTool({
     name: cfg.name,
     label: cfg.label,
     exposure: "deferred",
     description: cfg.description,
+    promptSnippet: cfg.promptSnippet,
     parameters: cfg.parameters,
     async execute(
       _toolCallId: string,

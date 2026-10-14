@@ -19,13 +19,14 @@ export const CanvasReadParams = Type.Object({
 
 export function registerCanvasReadTool(
   pi: ExtensionAPI,
-  cfg: { name: string; label: string; description: string; parameters: typeof CanvasReadParams },
+  cfg: { name: string; label: string; description: string; promptSnippet: string; parameters: typeof CanvasReadParams },
 ): void {
   pi.registerTool({
     name: cfg.name,
     label: cfg.label,
     exposure: "deferred",
     description: cfg.description,
+    promptSnippet: cfg.promptSnippet,
     parameters: cfg.parameters,
     async execute(
       _toolCallId: string,

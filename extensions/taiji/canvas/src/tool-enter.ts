@@ -57,6 +57,7 @@ export interface EnterToolConfig { // oe-exempt:20261015:framework:画布域类�
   name: string;
   label: string;
   description: string;
+  promptSnippet: string;
   parameters: typeof CanvasEnterParams;
 }
 
@@ -119,9 +120,12 @@ export function registerCanvasEnterTool(pi: ExtensionAPI, cfg: EnterToolConfig):
   pi.registerTool({
     name: cfg.name,
     label: cfg.label,
-    // deferred（设计：画布是低频入口，不设常驻 direct；tool_search 命中即激活）
+    // deferred（设计：画布是低频入口，不设常驻 direct；tool_search 命中即激活）。
+    // promptSnippet = deferred 形态下模型唯一的入口信号（pi agent-session 把
+    // snippet 收进 system prompt 工具索引；description 须 tool_search 命中后才可见）
     exposure: "deferred",
     description: cfg.description,
+    promptSnippet: cfg.promptSnippet,
     parameters: cfg.parameters,
     async execute(
       _toolCallId: string,

@@ -163,13 +163,14 @@ export function editRequestOf(
 
 export function registerCanvasEditTool(
   pi: ExtensionAPI,
-  cfg: { name: string; label: string; description: string; parameters: typeof CanvasEditParams },
+  cfg: { name: string; label: string; description: string; promptSnippet: string; parameters: typeof CanvasEditParams },
 ): void {
   pi.registerTool({
     name: cfg.name,
     label: cfg.label,
     exposure: "deferred",
     description: cfg.description,
+    promptSnippet: cfg.promptSnippet,
     parameters: cfg.parameters,
     async execute(
       _toolCallId: string,

@@ -88,13 +88,14 @@ export const CanvasReviewParams = Type.Object({
 
 export function registerCanvasReviewTool(
   pi: ExtensionAPI,
-  cfg: { name: string; label: string; description: string; parameters: typeof CanvasReviewParams },
+  cfg: { name: string; label: string; description: string; promptSnippet: string; parameters: typeof CanvasReviewParams },
 ): void {
   pi.registerTool({
     name: cfg.name,
     label: cfg.label,
     exposure: "deferred",
     description: cfg.description,
+    promptSnippet: cfg.promptSnippet,
     parameters: cfg.parameters,
     async execute(
       _toolCallId: string,
