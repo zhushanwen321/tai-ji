@@ -80,11 +80,10 @@ const PUBLISHED_REGISTRY_PACKAGES = new Set([
   '@zhushanwen/pi-msg-id-mapper',
   '@zhushanwen/pi-system-prompt',
   '@zhushanwen/pi-system-prompt-trace',
-  // extensions/universal 组（17）
+  // extensions/universal 组（16）
   '@zhushanwen/pi-ask-user',
   '@zhushanwen/pi-base-tool-enhance',
   '@zhushanwen/pi-cache-probe',
-  '@zhushanwen/pi-cw-tool',
   '@zhushanwen/pi-goal',
   '@zhushanwen/pi-pending-notifications',
   '@zhushanwen/pi-permission',

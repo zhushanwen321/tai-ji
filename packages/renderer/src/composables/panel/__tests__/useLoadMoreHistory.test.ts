@@ -13,11 +13,11 @@
  * - 无更早历史（showLoadMore=false）不触发；
  * - 加载中不重入（单一守卫源在 handleLoadMore）。
  */
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { ref } from 'vue'
+import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
+import { nextTick, ref } from 'vue'
 
 const { loadMoreHistoryMock, hasMoreRef } = vi.hoisted(() => ({
-  loadMoreHistoryMock: vi.fn<() => Promise<void>>(),
+  loadMoreHistoryMock: vi.fn<() => Promise<boolean>>(),
   hasMoreRef: { value: true },
 }))
 
@@ -28,7 +28,7 @@ vi.mock('@/composables/features/chat/useChat', () => ({
   }),
 }))
 
-import { useLoadMoreHistory, TOP_AUTO_LOAD_THRESHOLD_PX } from '../useLoadMoreHistory'
+import { useLoadMoreHistory, TOP_AUTO_LOAD_THRESHOLD_PX, SLOW_LINE_DELAY_MS } from '../useLoadMoreHistory'
 
 /** 可控 resolve 的 deferred（验证加载中防重入 + isPrepend 生命周期）。 */
 function deferred(): { promise: Promise<void>; resolve: () => void } {
@@ -47,7 +47,7 @@ function setup(): ReturnType<typeof useLoadMoreHistory> {
 describe('onScrollOffset（触顶自动续载）', () => {
   beforeEach(() => {
     loadMoreHistoryMock.mockReset()
-    loadMoreHistoryMock.mockResolvedValue(undefined)
+    loadMoreHistoryMock.mockResolvedValue(true)
     hasMoreRef.value = true
   })
 
@@ -97,10 +97,88 @@ describe('onScrollOffset（触顶自动续载）', () => {
   })
 })
 
+describe('slowLine（慢网兜底细线，OpenDesign spec §2.2）', () => {
+  beforeEach(() => {
+    loadMoreHistoryMock.mockReset()
+    loadMoreHistoryMock.mockResolvedValue(true)
+    hasMoreRef.value = true
+    vi.useFakeTimers()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('快载（<150ms 完成）全程不显示细线（零指示防闪烁）', async () => {
+    const loadMore = setup()
+    await loadMore.handleLoadMore()
+    vi.advanceTimersByTime(SLOW_LINE_DELAY_MS + 200)
+    expect(loadMore.slowLine.value).toBe(false)
+  })
+
+  it('慢载（>150ms 未完成）显示细线；完成后立即复位（160ms 淡出由 CSS 承担）', async () => {
+    const d = deferred()
+    loadMoreHistoryMock.mockReturnValueOnce(d.promise)
+    const loadMore = setup()
+
+    void loadMore.handleLoadMore()
+    vi.advanceTimersByTime(SLOW_LINE_DELAY_MS - 1)
+    expect(loadMore.slowLine.value).toBe(false)
+    vi.advanceTimersByTime(1)
+    expect(loadMore.slowLine.value).toBe(true)
+
+    d.resolve()
+    await d.promise
+    await Promise.resolve() // 让 handleLoadMore 的 finally 落地
+    expect(loadMore.slowLine.value).toBe(false)
+  })
+
+  it('加载失败同样收敛细线（失败态由 loadMoreError 错误行显形，细线不残留）', async () => {
+    loadMoreHistoryMock.mockResolvedValueOnce(false)
+    const loadMore = setup()
+
+    void loadMore.handleLoadMore()
+    vi.advanceTimersByTime(SLOW_LINE_DELAY_MS + 1)
+    expect(loadMore.slowLine.value).toBe(true)
+
+    await Promise.resolve() // 加载 promise 链落地
+    await Promise.resolve() // handleLoadMore 的 await nextTick + finally 落地
+    expect(loadMore.slowLine.value).toBe(false)
+    expect(loadMore.loadMoreError.value).toBe(true)
+  })
+
+  it('切 session 分区隔离：新会话不为在途加载背书，迟到收敛写回原分区（ADR-0049）', async () => {
+    const d = deferred()
+    loadMoreHistoryMock.mockReturnValueOnce(d.promise)
+    const sessionId = ref('s1')
+    const loadMore = useLoadMoreHistory(() => sessionId.value)
+
+    void loadMore.handleLoadMore()
+    vi.advanceTimersByTime(SLOW_LINE_DELAY_MS + 1)
+    expect(loadMore.slowLine.value).toBe(true)
+
+    // 切 sid：消费面 computed 读新分区（全新态）——s1 的在途加载与细线对 s2 不可见
+    sessionId.value = 's2'
+    await nextTick()
+    expect(loadMore.slowLine.value).toBe(false)
+
+    d.resolve()
+    await d.promise
+    await Promise.resolve() // handleLoadMore 的 finally（updateFor('s1')）落地
+    // 迟到收敛写回 s1 分区：s2 视图仍干净
+    expect(loadMore.slowLine.value).toBe(false)
+
+    // 切回 s1：分区已被迟到收敛复位（无细线残留）
+    sessionId.value = 's1'
+    await nextTick()
+    expect(loadMore.slowLine.value).toBe(false)
+  })
+})
+
 describe('handleLoadMore（载荷与 isPrepend 生命周期）', () => {
   beforeEach(() => {
     loadMoreHistoryMock.mockReset()
-    loadMoreHistoryMock.mockResolvedValue(undefined)
+    loadMoreHistoryMock.mockResolvedValue(true)
     hasMoreRef.value = true
   })
 
@@ -125,5 +203,22 @@ describe('handleLoadMore（载荷与 isPrepend 生命周期）', () => {
     await loadMore.handleLoadMore()
     expect(loadMoreHistoryMock).toHaveBeenCalledTimes(1)
     expect(loadMoreHistoryMock).toHaveBeenCalledWith('s1')
+  })
+
+  it('失败态按分区归属：切走再切回仍见本 session 的失败行，不跨 session 泄漏（ADR-0049）', async () => {
+    loadMoreHistoryMock.mockResolvedValueOnce(false)
+    const sessionId = ref('s1')
+    const loadMore = useLoadMoreHistory(() => sessionId.value)
+
+    await loadMore.handleLoadMore()
+    expect(loadMore.loadMoreError.value).toBe(true)
+
+    sessionId.value = 's2'
+    await nextTick()
+    expect(loadMore.loadMoreError.value).toBe(false) // s2 分区无失败
+
+    sessionId.value = 's1'
+    await nextTick()
+    expect(loadMore.loadMoreError.value).toBe(true) // s1 自己的失败仍在（顶部条可重试）
   })
 })

@@ -17,7 +17,7 @@
            显式整类重写而非追加 text-danger——同特异性 text 色工具类由样式表序裁决，不可靠）。
            行内垂直对齐 baseline（MF-1-34 同族：demo .line align-items:baseline 对全部行级
            形态生效，subagent 行同属 .line），图标保持 self-center（demo .sicon align-self:center）。 -->
-      <span v-if="isRunning" class="inline-flex size-[15px] shrink-0 self-center items-center justify-center text-accent animate-loader-spin" v-html="RUNNING_LOADER_SVG" /> <!-- eslint-disable-line vue/no-v-html -- hardcoded constant from block-icon.ts -->
+      <RunningBlockIcon v-if="isRunning" kind="subagent" />
       <component
         :is="BLOCK_ICON_LUCIDE.subagent"
         v-else
@@ -59,7 +59,8 @@ import { useI18n } from 'vue-i18n'
 import type { ToolCall } from '@taiji/shared'
 import { subagentVirtualId } from '@taiji/shared'
 import { openSubagent } from '@taiji/core/domain/drawer'
-import { BLOCK_ICON_CLASS, BLOCK_ICON_LUCIDE, BLOCK_LABEL_CLASS, RUNNING_LOADER_SVG } from './block-icon'
+import { BLOCK_ICON_CLASS, BLOCK_ICON_LUCIDE, BLOCK_LABEL_CLASS } from './block-icon'
+import RunningBlockIcon from './RunningBlockIcon.vue'
 
 const props = defineProps<{
   tool: ToolCall

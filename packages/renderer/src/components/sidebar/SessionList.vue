@@ -1,18 +1,22 @@
 <template>
   <!--
     展示组件 · 会话列表（R6.2 锚定分组形态，demo Sidebar.vue sessions 视图权威）。
-    区头「项目与会话」+ 总会话计数 + 双段模式开关，下方为项目分组列表：
-    - 平铺模式 = 锚定聚焦：仅当前组展开（左缘细线 + 会话行缩进表达归属），其余组折叠
-      一行；点其他组头 = 切换锚定并展开（唯一项目切换路径），点当前组头 = 折叠/展开翻转。
-    - 目录模式 = 浏览态：全部项目组默认展开，组头只开合自己、不切换锚定，「当前」chip
-      只读；组内按 cwd 目录静态标签分组（标签无折叠钮，会话始终可见）。目录行悬停操作
-      （目录内新建 / 批量删除）为 real 独有功能性入口（demo mock 无对应物，已登记差异）。
+    区头「项目与会话」+ 总会话计数 + 双段模式开关，下方为：
+    - 默认项目区（用户裁决 2026-10-13 方案 A）：默认项目 = 未归类收件箱，不展示项目框——
+      平铺模式 = 置顶平铺会话区（无组头/无左线/无缩进）；目录模式 = 置顶目录标签序列
+      （无组头包裹）。空区不渲染；不可锚定（恒可见，无需组头）。
+    - 命名项目组：保持 ProjectGroup 框（组头 + 左线 + 缩进）。平铺模式 = 锚定聚焦：
+      仅当前组展开，其余组折叠一行；点其他组头 = 切换锚定并展开（唯一项目切换路径），
+      点当前组头 = 折叠/展开翻转。目录模式 = 浏览态：全部组默认展开，组头只开合自己、
+      不切换锚定，「当前」chip 只读；组内按 cwd 目录静态标签分组（SessionDirLabel，
+      与默认项目目录区共用同一实现）。目录行悬停操作（目录内新建 / 批量删除）为
+      real 独有功能性入口。
     分组规则 SSOT = sessionBelongsToProject（默认项目聚合未归类 + 孤儿）；组序 SSOT =
-    projectStore.orderedProjects（lastUsedAt 稳定序 + 默认项目固定最后，锚定切换不重排）。
-    组内平铺序 = runtime 组序展平（sessionsInRuntimeGroupOrder，客户端零重排）。
+    projectStore.orderedProjects（lastUsedAt 稳定序 + 默认项目固定最后，锚定切换不重排；
+    默认区置顶是纯视图层拆分，不改组序）。组内平铺序 = runtime 组序展平。
     新建项目入口 = 区头行内「+」钮（紧贴模式开关左侧，用户裁决 2026-10-11）：点击后列表
     顶部出现草稿输入行，Enter 确认 → 锚定新项目并展开空态（空名 / Esc 丢弃草稿）。
-    空组显示「暂无会话，点组头「+」在此新建任务」（缩进对齐左线内侧）。
+    空命名组显示「暂无会话，点组头「+」在此新建任务」（缩进对齐左线内侧）。
   -->
   <div class="session-list flex h-full min-h-0 flex-col">
     <!-- 区头（demo .sess-head：gap 6px / padding 8px 10px 5px；lbl 12px mid、count mono 11px fg-2、
@@ -94,12 +98,39 @@
           @blur="onDraftBlur"
         />
       </div>
-      <!-- 平铺模式：锚定聚焦（当前组展开 + 左缘细线，位置不重排；其余组恒折叠一行） -->
+      <!-- 平铺模式：默认项目平铺区（置顶）+ 命名项目锚定分组 -->
       <template v-if="mode === 'flat'">
-        <!-- 会话行缩进（demo .pgi .si）：行内左距 9px 与目录标签对齐；作用到 ProjectGroup
+        <!-- 默认项目平铺区（用户裁决 2026-10-13 方案 A）：默认项目 = 未归类收件箱，
+             不展示项目组框（无组头/无左线/无缩进），session 直接平铺在列表顶部；
+             空区不渲染。命名项目组照旧（锚定展开 + 折叠一行）。 -->
+        <div
+          v-if="defaultZone && defaultZone.items.length"
+          class="flex flex-col"
+          data-testid="default-project-flat-zone"
+        >
+          <SessionItem
+            v-for="s in defaultZone.items"
+            :key="s.id"
+            :session="s"
+            :active="s.id === activeId"
+            :status="statusOf(s.id)"
+            :child-count="childCountOf(s)"
+            :parent-label="parentLabelOf(s)"
+            @select="emit('select', $event)"
+            @rename="emit('rename', $event)"
+            @delete="emit('delete', $event)"
+            @set-project="emit('setProject', $event)"
+            @navigate-parent="emit('navigateParent', $event)"
+            @abort="emit('abort', $event)"
+            @force-quit="emit('forceQuit', $event)"
+            @export-jsonl="emit('exportJsonl', $event)"
+          />
+        </div>
+        <!-- 命名项目组（锚定聚焦：当前组展开 + 左缘细线，位置不重排；其余组恒折叠一行）。
+             会话行缩进（demo .pgi .si）：行内左距 9px 与目录标签对齐；作用到 ProjectGroup
              槽内直接子 .session-item（任意变体替代 scoped 后代选择器） -->
         <ProjectGroup
-          v-for="pg in projectGroups"
+          v-for="pg in namedGroups"
           :key="pg.id"
           :project-id="pg.id"
           :name="pg.name"
@@ -139,11 +170,46 @@
           </div>
         </ProjectGroup>
       </template>
-      <!-- 目录模式：浏览态（全部项目组默认展开，组头只开合不切换锚定）+ 目录静态标签分组 -->
+      <!-- 目录模式：默认项目目录区（置顶，无组框）+ 命名项目组（浏览态） -->
       <template v-else>
-        <!-- 目录内会话行再深一级（demo .pgi .gi .si = 21px），任意变体替代 scoped 后代选择器 -->
+        <!-- 默认项目：无组头，目录标签直接平铺在列表顶部（用户裁决 2026-10-13：
+             默认项目不展示项目 item；目录模式下同样不给框，标签自描述无需包裝） -->
+        <template v-if="defaultZone">
+          <template v-for="g in defaultZone.dirs" :key="g.cwd">
+            <SessionDirLabel
+              :cwd="g.cwd"
+              :count="g.sessions.length"
+              :confirming="folderConfirmingCwd === g.cwd"
+              :delete-available="isFolderDeleteAvailable(defaultZone, g.cwd)"
+              @new-in-folder="emit('newSessionInFolder', $event)"
+              @remove-click="onFolderRemoveClick"
+              @leave="onFolderMouseLeave"
+            />
+            <div class="gi">
+              <SessionItem
+                v-for="s in g.sessions"
+                :key="s.id"
+                :session="s"
+                :active="s.id === activeId"
+                :status="statusOf(s.id)"
+                :child-count="childCountOf(s)"
+                :parent-label="parentLabelOf(s)"
+                @select="emit('select', $event)"
+                @rename="emit('rename', $event)"
+                @delete="emit('delete', $event)"
+                @set-project="emit('setProject', $event)"
+                @navigate-parent="emit('navigateParent', $event)"
+                @abort="emit('abort', $event)"
+                @force-quit="emit('forceQuit', $event)"
+                @export-jsonl="emit('exportJsonl', $event)"
+              />
+            </div>
+          </template>
+        </template>
+        <!-- 命名项目组：全部默认展开，组头只开合不切换锚定 + 目录静态标签分组。
+             目录内会话行再深一级（demo .pgi .gi .si = 21px），任意变体替代 scoped 后代选择器 -->
         <ProjectGroup
-          v-for="pg in projectGroups"
+          v-for="pg in namedGroups"
           :key="pg.id"
           :project-id="pg.id"
           :name="pg.name"
@@ -165,56 +231,20 @@
             {{ t('sidebar.sessionList.groupEmpty') }}
           </div>
           <template v-else>
-            <!-- 目录静态标签（demo .gh.gh-static：无折叠钮、会话始终可见，归属靠缩进表达）。
-                 行内悬停操作（+ 新建 / 批量删除）= real 独有功能性入口。group/folder 命名
-                 group 只放在标签行上（Tailwind 命名 group 是「任意层级祖先」匹配，容器带它会令
-                 hover 组内任意 SessionItem 时也触发 folder 按钮，破坏单行独立 hover 语义）。 -->
+            <!-- 目录静态标签（SessionDirLabel，与默认项目目录区共用同一实现）：
+                 group/folder 命名 group 在标签行组件内（Tailwind 命名 group 是「任意层级祖先」
+                 匹配，容器带它会令 hover 组内任意 SessionItem 时也触发 folder 按钮，
+                 破坏单行独立 hover 语义）。 -->
             <div v-for="g in pg.dirs" :key="g.cwd" class="grp">
-              <div class="group/folder flex items-center gap-[6px] pr-[8px] pl-[9px] pt-[9px] pb-[4px]">
-                <Folder class="size-[11px] shrink-0 text-neutral-dim" />
-                <span class="min-w-0 truncate font-mono text-[length:var(--text-2xs)] text-neutral-dim">
-                  {{ dirNameOf(g.cwd) }}
-                </span>
-                <span class="ml-auto font-mono text-[length:var(--text-2xs)] text-neutral-fg-2">{{ g.sessions.length }}</span>
-                <!-- folder 行操作区：+ 新建（非破坏性，恒渲染）与批量删除（两段式确认）。
-                     右贴由计数 span 的 ml-auto 承接；hover 显隐。
-                     [review MF-2] 删除按钮仅当组内可见数 = 该 cwd 全量数时渲染：
-                     removeByCwd 是 cwd 全量删除（项目无关），按项目分组隐藏了部分 session 时
-                     点删除会误删用户不可见的其他 project session；+ 按钮无此守卫。 -->
-                <div
-                  class="flex items-center gap-1"
-                  data-testid="folder-actions"
-                  :class="folderConfirmingCwd === g.cwd ? '' : 'opacity-0 group-hover/folder:opacity-100'"
-                  @mouseleave="onFolderMouseLeave(g.cwd)"
-                >
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    data-testid="folder-new-session-btn"
-                    class="size-[22px] rounded-sm border border-border-strong bg-surface text-neutral-mid hover:bg-surface-hover hover:text-neutral-fg"
-                    :title="t('sidebar.sessionList.newSessionInFolder')"
-                    @click.stop="emit('newSessionInFolder', g.cwd)"
-                  >
-                    <Plus class="size-[13px]" />
-                  </Button>
-                  <Button
-                    v-if="isFolderDeleteAvailable(pg, g.cwd)"
-                    variant="ghost"
-                    size="icon"
-                    data-testid="folder-delete-btn"
-                    :class="folderConfirmingCwd === g.cwd
-                      ? 'size-[22px] rounded-sm border border-danger bg-danger text-neutral-fg'
-                      : 'size-[22px] rounded-sm border border-border-strong bg-surface text-neutral-mid hover:bg-surface-hover hover:text-danger'"
-                    :title="folderConfirmingCwd === g.cwd
-                      ? t('sidebar.sessionList.deleteFolderConfirm')
-                      : t('sidebar.sessionItem.delete')"
-                    @click.stop="onFolderRemoveClick(g.cwd)"
-                  >
-                    <Check v-if="folderConfirmingCwd === g.cwd" class="size-[13px]" />
-                    <Trash2 v-else class="size-[13px]" />
-                  </Button>
-                </div>
-              </div>
+              <SessionDirLabel
+                :cwd="g.cwd"
+                :count="g.sessions.length"
+                :confirming="folderConfirmingCwd === g.cwd"
+                :delete-available="isFolderDeleteAvailable(pg, g.cwd)"
+                @new-in-folder="emit('newSessionInFolder', $event)"
+                @remove-click="onFolderRemoveClick"
+                @leave="onFolderMouseLeave"
+              />
               <!-- 目录内会话行（再深一级缩进）：每条 session 渲染 SessionItem（扁平列表：
                    fork 分支 / agent 子会话均按一般 session 各占一行，侧栏不做父子聚合——D9）。 -->
               <div class="gi">
@@ -266,19 +296,19 @@ import type { SessionGroup, SessionSummary } from '@taiji/shared'
 import type { DerivedStatus } from '@/types'
 import { computed, onBeforeUnmount, onMounted, provide, ref, watch, type Ref } from 'vue'
 import { useEventListener } from '@vueuse/core'
-import { Plus, Folder, Trash2, Check, List } from '@lucide/vue'
+import { Plus, Folder, List } from '@lucide/vue'
 import { useI18n } from 'vue-i18n'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { ConfirmDialog } from '@/components/ui/dialog'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { EdgeFade } from '@/components/ui/edge-fade'
-import { dirNameOf } from '@taiji/ui'
 import { isSessionCompleted } from '@/composables/logic/sessionStatus'
 import { registerModalSurface } from '@/composables/features/app/modal-surface-registry'
 import { useProjectStore } from '@/stores/project'
 import { useProjectGroups, type ProjectGroupVM, type SidebarSessionMode } from '@/composables/features/sidebar/useProjectGroups'
 import ProjectGroup from './ProjectGroup.vue'
+import SessionDirLabel from './SessionDirLabel.vue'
 import SessionItem from './SessionItem.vue'
 
 const { t } = useI18n()
@@ -459,6 +489,16 @@ const {
   mode,
   onNewSession: () => emit('newSession'),
 })
+
+/**
+ * 默认项目区 vs 命名项目组（用户裁决 2026-10-13 方案 A：默认项目不展示项目框）。
+ * 默认项目 = 未归类收件箱：平铺模式渲染为置顶平铺区（无组头/左线/缩进），目录模式
+ * 渲染为置顶目录标签序列（无组头包裹）；命名项目组保持 ProjectGroup 框。组序 SSOT
+ * 不动（orderedProjects 默认项目仍固定最后），拆分纯视图层：区置顶 = 渲染位置，
+ * 非重排。默认组不可锚定（无组头）也不需要——它恒展开可见。
+ */
+const defaultZone = computed(() => projectGroups.value.find((pg) => pg.isDefault))
+const namedGroups = computed(() => projectGroups.value.filter((pg) => !pg.isDefault))
 
 watch(escCount, () => {
   if (folderConfirmingCwd.value) folderConfirmingCwd.value = null

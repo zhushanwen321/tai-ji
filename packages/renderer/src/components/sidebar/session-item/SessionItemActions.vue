@@ -8,7 +8,8 @@
   -->
   <!-- 位置 = Display 右槽覆盖层（2026-10-11 用户裁决：absolute inset-0 覆盖「点 + 时间」
        定宽槽、justify-end 贴右；槽定宽 58px 由 Display 声明，名称在槽左缘截断构造性不受遮）。
-       钮序 = 重命名 → 删除 → 归入项目（demo 重设计 2026-10-10）。删除走两段式确认。
+       钮序 = 重命名 → 归入项目 → 删除（用户裁决 2026-10-13：破坏性操作移至视线动线末端，
+       误触路径最长）。删除走两段式确认。
        三钮 tabindex=-1（spec §3.4：键盘不走悬停钮，走行 Tab → Enter/Space → ContextMenu
        右键菜单通道）+ @pointerdown.stop（demo 同款：按下不触发行侧副作用）。
        钮 18px 视觉（缩宽裁决）+ after 伪元素外扩 3px = 24px 热区下限口径（同 .pp-act 技法）。 -->
@@ -27,21 +28,6 @@
       @pointerdown.stop
     >
       <Pencil class="size-[12px]" />
-    </Button>
-    <Button
-      variant="ghost"
-      size="icon"
-      tabindex="-1"
-      class="relative size-[18px] rounded-sm after:absolute after:inset-[-3px] after:content-['']"
-      :class="confirming
-        ? 'bg-danger text-neutral-fg'
-        : 'text-neutral-dim hover:bg-surface-hover hover:text-danger'"
-      :title="confirming ? t('sidebar.sessionItem.deleteConfirm') : t('sidebar.sessionItem.delete')"
-      @click.stop="onRemoveClick"
-      @pointerdown.stop
-    >
-      <Check v-if="confirming" class="size-[12px]" />
-      <Trash2 v-else class="size-[12px]" />
     </Button>
     <!-- 归入项目（D14 语义修正 2026-08-04）：Popover 浮层列全部 project，点击即归类。
          归类可逆（可再点其他 project / 默认项目），无需两段确认。
@@ -85,6 +71,22 @@
         </div>
       </PopoverContent>
     </Popover>
+    <!-- 删除（两段确认）——钮序末位（用户裁决 2026-10-13：破坏性操作最右） -->
+    <Button
+      variant="ghost"
+      size="icon"
+      tabindex="-1"
+      class="relative size-[18px] rounded-sm after:absolute after:inset-[-3px] after:content-['']"
+      :class="confirming
+        ? 'bg-danger text-neutral-fg'
+        : 'text-neutral-dim hover:bg-surface-hover hover:text-danger'"
+      :title="confirming ? t('sidebar.sessionItem.deleteConfirm') : t('sidebar.sessionItem.delete')"
+      @click.stop="onRemoveClick"
+      @pointerdown.stop
+    >
+      <Check v-if="confirming" class="size-[12px]" />
+      <Trash2 v-else class="size-[12px]" />
+    </Button>
   </div>
 </template>
 

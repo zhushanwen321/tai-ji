@@ -22,7 +22,9 @@ import { registerUiModalSurface } from "../../modal-surface-registrar"
 defineOptions({ inheritAttrs: false })
 
 // 形态对照 demo（pages.css .pg-set .croot/.cpop 确认弹窗 + overlay.css .rmodal 大 modal）：
-// 盒底 = 浮层级 --bg-elevated（demo 两 modal 一致，「遮罩上的面板不沉入内容层」归层原则）；
+// 盒底 = --bg（composer 同源档，2026-10-14 全族迁移；[HISTORICAL] 曾为浮层级 --bg-elevated，
+// 「遮罩上的面板不沉入内容层」归层原则改由 bg-black/80 遮罩 + shadow-3 承载——遮罩把身后
+// 内容压暗后，--bg 盒面相对身后仍呈浮起）；
 // 边框 = --hairline（.rmodal-box 档）；阴影 = --shadow-3；圆角 --radius-lg 12px（去 sm:
 // 前缀——demo 无条件圆角，窄窗不该塌成直角）；内边距 20px（.cpop padding）；遮罩
 // bg-black/80 + blur 4px 与 demo .cmask 同值。z-index 走 --z-modal(1000)：demo .rmodal
@@ -66,7 +68,7 @@ onBeforeUnmount(disposeSurfaceRegistration)
       v-bind="mergedAttrs"
       :class="
         cn(
-          'fixed left-1/2 top-1/2 z-[var(--z-modal)] grid w-full grid-cols-[minmax(0,1fr)] max-w-lg gap-4 border border-hairline bg-bg-elevated p-[20px] shadow-[var(--shadow-3)] select-text reka-dialog-transition rounded-lg',
+          'fixed left-1/2 top-1/2 z-[var(--z-modal)] grid w-full grid-cols-[minmax(0,1fr)] max-w-lg gap-4 border border-hairline bg-bg p-[20px] shadow-[var(--shadow-3)] select-text reka-dialog-transition rounded-lg',
           props.class,
         )"
     >

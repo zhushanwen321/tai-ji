@@ -1,4 +1,4 @@
-// src/interface/__tests__/tool-subagents.test.ts
+// src/interface/tool/__tests__/tool-subagents.test.ts
 //
 // u2 契约测试：`subagents` 批量 tool（schema 平铺 D2 / handler 转译 D3 / 错误规格 D9 /
 // 集合收录 D1 / 渲染不构造 __gui__ D8）。
@@ -38,6 +38,11 @@ import { captureTool } from "./capture-tool.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TOOL_SRC = readFileSync(join(__dirname, "../tool-subagents.ts"), "utf-8");
+// 跨工具通用纪律的收敛点（tool-declaration-slimming D1 单源化终态的注入段侧锚源）。
+const SUBAGENT_LIST_INJECTOR_SRC = readFileSync(
+  join(__dirname, "../../../injectors/subagent-list-injector.ts"),
+  "utf-8",
+);
 
 // ── 注册面最小类型（单层 cast：目标类型全必填，非 no-unsafe-cast 命中的全可选结构断言）──
 
@@ -180,9 +185,9 @@ describe("schema 契约：一跳扁平 + tasks 必填（D2）", () => {
     expect(tool.label.length).toBeGreaterThan(0);
     expect(tool.description).toContain("one-shot batch member");
     expect(tool.description).toContain("ONE notification");
-    // 分工句（D5①）：单数 tool 指路 + 依赖链场景指路 workflow
-    expect(tool.description).toContain("`subagent` tool");
-    expect(tool.description).toContain("`workflow` tool");
+    // 分工句（D5① + D3 拆分新名）：单数续聊指路 subagent_message + 依赖链场景指路 workflow_run
+    expect(tool.description).toContain("`subagent_message` tool");
+    expect(tool.description).toContain("`workflow_run` tool");
   });
 
   it("参数全平铺：无 action 分发、无 args 嵌套、无嵌套 object 参数", () => {
@@ -228,13 +233,24 @@ describe("schema 契约：一跳扁平 + tasks 必填（D2）", () => {
     expect(TOOL_SRC).not.toContain("isGuiCapable");
   });
 
-  it("promptGuidelines 含分工句/调用正例/预算默认（弱模型结构信号依赖面）", () => {
+  it("promptGuidelines 含分工句/调用正例；跨工具纪律单源化零残留（D1）", () => {
     const tool = captureSubagentsTool({ isProcessing: false }, makeRegistry());
     const guidelines = tool.promptGuidelines.join("\n");
     expect(guidelines).toContain("2+ independent tasks in one dispatch");
     expect(guidelines).toContain('{"tasks":[');
-    expect(guidelines).toContain("Do NOT set tokens/time unless the user explicitly requests");
-    expect(guidelines).toContain("workflow tool");
+    expect(guidelines).toContain("`workflow_run` tool");
+    expect(guidelines).toContain("`workflow_control` tool");
+    // tool-declaration-slimming D1 单源化终态：勿等待/预算/模型缺省继承三类跨工具
+    // 通用纪律不在本工具 promptGuidelines 重复——收敛到 <available_subagents> 注入段
+    // （subagent-list-injector.ts SUBAGENT_DISPATCH_SHARED_RULES）说一次。
+    expect(guidelines).not.toContain("Do NOT poll after starting");
+    expect(guidelines).not.toContain("Do NOT set tokens/time unless the user explicitly requests");
+    expect(guidelines).not.toContain("Model/thinkingLevel: omit by default");
+    expect(guidelines).not.toContain("Omit to inherit the main agent's model");
+    expect(SUBAGENT_LIST_INJECTOR_SRC).toContain("SUBAGENT_DISPATCH_SHARED_RULES");
+    expect(SUBAGENT_LIST_INJECTOR_SRC).toContain("busy-wait, or poll");
+    expect(SUBAGENT_LIST_INJECTOR_SRC).toContain("explicitly requests a limit");
+    expect(SUBAGENT_LIST_INJECTOR_SRC).toContain("inherit the main agent's model");
   });
 });
 
@@ -304,11 +320,10 @@ describe("handler 组装：runWorkflow('fan-out') 确定性映射（D3）", () =
     const text = result.content[0].text;
     expect(text).toContain("Started batch 'foo-tri-review' (wf-1700000000000-abcd) as workflow run 'fan-out' — 2 subagents dispatched in parallel (allSettled).");
     expect(text).toContain("Results arrive as ONE notification when the run settles. Do NOT poll.");
-    expect(text).toContain("make a SINGLE status check: workflow tool with runId wf-1700000000000-abcd (recovery exit, not a poll loop).");
-    expect(text).toContain("To abort: workflow tool, action abort, runId wf-1700000000000-abcd");
-    // status/abort 不复制：本 tool 无 action 参数（schema 已断言），文案只指路 workflow tool
-    expect(text).not.toContain('"action":"status"');
-    expect(text).not.toContain('"action":"abort"');
+    expect(text).toContain('make a SINGLE status check: workflow_control {"action":"status"} with runId wf-1700000000000-abcd (recovery exit, not a poll loop).');
+    expect(text).toContain('To abort: workflow_control {"action":"abort","runId":"wf-1700000000000-abcd"}');
+    // status/abort 不复制：本 tool 无 action 参数（schema 已断言），文案只指路
+    // workflow_control 的 action 调用形态（D3 拆分新名）
   });
 });
 
@@ -410,7 +425,7 @@ describe("错误规格（D9）", () => {
 });
 
 // ══════════════════════════════════════════════════════════════
-describe("reentry guard：与 workflow tool 共用同一实例", () => {
+describe("reentry guard：与 workflow_run/workflow_control 共用同一实例", () => {
   it("guard 被占用 → throw busy 文案，且不触达 runWorkflow", async () => {
     const tool = captureSubagentsTool({ isProcessing: true }, makeRegistry());
     await expect(

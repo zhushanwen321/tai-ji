@@ -3,12 +3,18 @@
  *
  * [u3b/D1 降级] 本表**不再是投递决策**：lane 判定（direct/steer/queued）已收归 runtime
  * 投递所有权内核（单一判定源 = runtime 权威 occupancy 投影 + 内核队列态），renderer 发送
- * 链统一 delivery.submit，不做任何车道判定。本函数保留的唯一职责 = **发送位按钮形态的
- * UI 预测**——Composer 发送位按 sessionPhase 预测「提交即送达 / 排队 / 停止」的按钮形态
- * （send/stop/queue），供壳层渲染；真实车道以 session.delivery 帧的 lane 字段为准
- * （提交后帧到达即校正预测偏差，渲染层不依赖本预测的正确性）。
+ * 链统一 delivery.submit，不做任何车道判定。本函数保留的唯一职责 = **⏎ 提交车道的
+ * UI 预测**——Composer 键盘分发按 sessionPhase 预测「本次 Enter 直达 / 并入当前回合 /
+ * 排队」（direct/steer/queued），供 composer-keydown 的 Alt+⏎ 分流用；真实车道以
+ * session.delivery 帧的 lane 字段为准（提交后帧到达即校正预测偏差）。
  *
- * 保留原六行表语义作预测依据（与 runtime 内核判定同构——同读 occupancy 三维投影、
+ * **与发送位按钮形态是两个问题**（2026-10 用户裁决）：按钮回答「现在能中止什么」
+ * （忙 → 终止钮；压缩期 → 中止压缩流程，派生见 renderer composer-shell 的 sendButtonState /
+ * sendButtonStopTarget），本表回答「这条消息走哪条车道」（compacting → queued 排队）。
+ * 两者故意分立——a46f6fd7b 曾以「按钮跟随 lane」收敛（compacting → queue 按钮）修形态漂移，
+ * 代价是压缩期 composer 失去全部中止能力；现由分立消除混谈，各自单一派生。
+ *
+ * 保留原六行表语义作车道预测依据（与 runtime 内核判定同构——同读 occupancy 三维投影、
  * 同 hold 优先判定序：任一 hold 维度先于活跃 turn 判，对齐 laneOf/holdReasonOf。
  * generating∧compacting 组合现实可达——compacting-start 只 patch compacting 不动 turn——
  * 对该组合权威 lane 为 queued，故 compacting 必须先于 turn 活跃集判定）：
@@ -41,8 +47,10 @@ export const IDLE_SESSION_PHASE: SessionPhase = { turn: 'idle', compacting: fals
 export type SendRoute = 'direct' | 'steer' | 'queued'
 
 /**
- * 发送位四态预测表（六行，语义见文件头注）。纯函数、零副作用——只做按钮形态预测，
+ * ⏎ 提交车道预测表（六行，语义见文件头注）。纯函数、零副作用——只做 Enter 车道预测，
  * 投递行为与本表返回值无关（内核 lane 判定权威，session.delivery 帧 lane 字段校正）。
+ * 注意：本表**不**预测发送位按钮形态（按钮 = 「现在能中止什么」，压缩期为 stop，派生在
+ * renderer composer-shell）——两问题分立，见文件头注。
  *
  * 判定序与 runtime laneOf 同构：先 hold（任一不可收维度 → queued；内部序 compacting →
  * bash → settling 对齐 holdReasonOf，三者同返回值故序不影响行为，仅保持同构可读），

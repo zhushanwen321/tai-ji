@@ -16,16 +16,12 @@ export const ScheduleParams = Type.Object({
 
 export type ScheduleParamsT = Static<typeof ScheduleParams>
 
+// D1 单源化：guidelines 只承载使用纪律（何时调用 / 结果复述 / 撤销方式）；
+// 参数格式与默认值（duration/cron、kind、expires、model 语义）单源在 ScheduleParams
+// 字段说明，此处不再复述；「会话内存活」等行为边界在工具 description。
 export const scheduleGuidelines = [
-  'This tool creates the scheduled task immediately. It does NOT open a confirmation form and does NOT ask the user to confirm in chat — the created task is active as soon as the call returns.',
-  'Only call this tool when the user asks to create a scheduled task AND the timing is already expressed (a duration like 5m/2h/1d, an explicit wall-clock time, or a cron expression).',
-  'If the timing or the reminder content is missing or ambiguous, first clarify it with the user (the ask-user tool or a question in chat) — never guess a schedule and never create the task silently.',
-  'The task only fires while this session stays open (it is a session-scoped reminder, not a system cron job); mention that when it matters.',
-  'Schedule accepts duration (5m, 2h, 1d) for interval-based or cron expression for time-based.',
-  'Default kind is recurring. Set kind="once" for one-time reminders.',
-  'model accepts a scoped model id (provider/model) the task runs with; omit it to follow the session\'s current model.',
-  'After creation, the response includes the task id and next run time(s). Repeat the schedule, the next run time, and the task id back to the user so they can verify or undo it.',
-  'Default expiry is 7 days. Use expires="never" for long-term tasks.',
+  'Only call this tool when the user asks to create a scheduled task AND the timing is already expressed (a duration, an explicit wall-clock time, or a cron expression); if the timing or the reminder content is missing or ambiguous, clarify with the user first (ask-user tool or chat) — never guess a schedule and never create the task silently.',
+  'After creation, repeat the schedule, the next run time(s), and the task id back to the user so they can verify or undo it.',
   'To undo a task, use schedule_control delete (or toggle it off) — do not create a duplicate instead.',
 ]
 
@@ -93,18 +89,21 @@ export async function handleSchedule(
 // ── schedule_control tool ──
 
 export const ScheduleControlParams = Type.Object({
-  action: Type.Union([Type.Literal('list'), Type.Literal('toggle'), Type.Literal('delete'), Type.Literal('run')], { description: 'Action to perform.' }),
+  action: Type.Union([Type.Literal('list'), Type.Literal('toggle'), Type.Literal('delete'), Type.Literal('run')], {
+    description:
+      'Action to perform. run dispatches the task now: the message is sent immediately via steer (interrupting the current turn if the agent is busy).',
+  }),
   id: Type.Optional(Type.String({ description: 'Task id. Required for toggle/delete/run.' })),
   enabled: Type.Optional(Type.Boolean({ description: 'Target enabled state. Required for toggle.' })),
 })
 
 export type ScheduleControlParamsT = Static<typeof ScheduleControlParams>
 
+// D1 单源化：action 枚举与 run 的派发语义在 ScheduleControlParams.action 字段说明，
+// guidelines 只留操作纪律（先 list 拿 id、暂停优先 toggle）。
 export const controlGuidelines = [
-  'Use action="list" to see all scheduled tasks.',
   'After listing, use the returned id for toggle/delete/run.',
   'Prefer toggle(enabled=false) over delete for temporary pauses.',
-  'action="run" dispatches the task now: the message is sent immediately via steer (interrupting the current turn if the agent is busy).',
 ]
 
 export async function handleScheduleControl(service: SchedulerService, params: ScheduleControlParamsT) {

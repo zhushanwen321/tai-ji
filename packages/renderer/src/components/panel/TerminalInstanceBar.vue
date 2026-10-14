@@ -15,7 +15,8 @@
   - emits：select(terminalId) / create() / close(terminalId) / collapse()。
 
   tab 范式（DESIGN §3.4 tab 型统一 + 实例 tab 条范式，2026-10-04）：
-  - 非激活 bg-input + border-border；激活 bg-elevated + border-strong + neutral-fg；
+  - 非激活 bg-input + border-border；激活 bg-surface-hover solid hover tone + border-border
+    + neutral-fg（2026-10-14 全族迁移：旧激活 bg-elevated + border-strong 浮层档退役）；
   - 关闭叉**常驻**（旧「hover 才显现」形态因可发现性差被用户裁决推翻），命中 20px；
   - 最后实例关闭禁用：灰置 + tooltip 明示（不再半透明伪装可点）——UI 供养规则而非域不变量；
   - tab 条 overflow-x-auto：多实例不把右簇挤出可视区（对齐 detail 文件 tab 条既有行为）。
@@ -60,7 +61,7 @@
         class="flex max-w-[160px] shrink-0 items-center gap-0.5 rounded-sm border py-0.5 pl-1 pr-[3px] transition-colors duration-[var(--duration-fast)] ease-[var(--ease-out)]"
         :class="
           isActive(inst)
-            ? 'border-border-strong bg-bg-elevated'
+            ? 'border-border bg-surface-hover'
             : 'border-border bg-bg-input hover:bg-surface-hover'
         "
       >

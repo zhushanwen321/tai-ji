@@ -4,7 +4,9 @@
 // 本文件锚定：① 权威函数行为；② core 侧消费方（execution/notify/notifier.ts buildLlmContent）
 // 源码不得写回手写同构 switch。
 // [u1-move 拆分] 壳侧消费方（interface/gui/bg-notify-render.ts renderRecordLines）的守卫段
-// 随壳件留守 pi extension 包：src/__tests__/derive-closed-display-parity-interface.test.ts。
+// 随壳件留守 pi extension 包，内联于
+// extensions/universal/subagent-workflow/src/__tests__/bg-notify-render.test.ts
+// （CONSUMER_SOURCE 锚定消费方源码 + LEGACY_DERIVATION_TOKENS 拦截同构 switch 写回）。
 
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";

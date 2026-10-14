@@ -11,6 +11,9 @@
  *   门禁（U7 登记，guard probe 指向本文件）自动重验。
  * - ensureCodemodeDefaultEntry：字段存在性判定（undefined/null 写默认；任何已配置值含
  *   空数组/坏值不碰）+ 幂等 + 用户字段零触碰。
+ * - ensureToolSearchDefaultEntry（tool-declaration-slimming D4）：幂等追加——不含任何
+ *   tool_search 条目（+tool_search/-tool_search/纯名任一形态）才追加；**负条目视为已含**
+ *   （用户关闭不被打回）；追加不覆盖已有内容；字段缺失写默认；坏值不碰 + 幂等。
  * - setCodemodeEntry：开（移负条目 + 幂等判激活）/ 关（移正条目与纯名 + 负条目占位）+
  *   规范化（非数组坏值视为显式配置动作覆盖为增量表达）+ 混合纯名边界 + 用户条目保留。
  * - getSettingsCorruption：两形态（raw 预检非法 JSON / .corrupt- 副本）+ 每次现查 +
@@ -23,7 +26,8 @@
  * - PiCodemodeSettings.getEnabled：读侧归一——损坏经 readSettings 抛
  *   SettingsCorruptedError，本类捕获转译错误态信封（enabled=false + corruption 载荷），
  *   读取路径零隔离、修复文件后无需失效动作即恢复。
- * - runCodemodeStartupMigration：损坏拒入不阻塞启动；未损坏幂等写入。
+ * - runCodemodeStartupMigration：损坏拒入不阻塞启动；未损坏幂等写入；两迁移序列
+ *   （codemode 先、tool_search 后）顺序约束与互不挤占。
  *
  * 运行：pnpm -C packages/runtime test pi-codemode-settings pi-settings-store
  */
@@ -35,7 +39,9 @@ import {
   CODEMODE_DEFAULT_ENTRY,
   CODEMODE_DISABLE_ENTRY,
   PI_DEFAULT_TOOL_NAMES,
+  TOOL_SEARCH_DEFAULT_ENTRY,
   ensureCodemodeDefaultEntry,
+  ensureToolSearchDefaultEntry,
   isCodemodeActive,
   PiCodemodeSettings,
   resolveDefaultToolSet,
@@ -184,6 +190,68 @@ describe('ensureCodemodeDefaultEntry · 字段存在性判定 + 幂等', () => {
   })
 })
 
+// ── 2b. tool_search 启动迁移（tool-declaration-slimming D4：幂等追加，负条目视为已含）──
+
+describe('ensureToolSearchDefaultEntry · D4 幂等追加（追加不覆盖 / 负条目不追加 / 已含不重复）', () => {
+  it.each([
+    // 追加分支：不含任何 tool_search 条目 → 追加，已有内容零覆盖
+    ['字段缺失 → 写 ["+tool_search"]（D2 缺省写入同口径；生产路径 codemode 迁移在先走追加分支）', undefined, ['+tool_search']],
+    ['null = 未配置 → 写 ["+tool_search"]', null, ['+tool_search']],
+    ['[] 空数组 → 追加（D4：不复用「字段未设置才写」，空集实例同样激活）', [], ['+tool_search']],
+    ['["+codemode"] → 追加到尾部（组合根常规形态：两系统级默认条目共存）', ['+codemode'], ['+codemode', '+tool_search']],
+    ['["-read","+codemode"] 用户混合条目 → 追加不覆盖（用户条目原样保留、顺序不变）', ['-read', '+codemode'], ['-read', '+codemode', '+tool_search']],
+    ['[42, "+codemode"] 坏值元素原样保留（不代偿用户数据，解析时才 filter）', [42, '+codemode'], [42, '+codemode', '+tool_search']],
+    ['["+","-"] 单字符坏条目剥前缀后为空名，不命中 → 追加（hasToolSearchEntry：空名 modifier 不算已含）', ['+', '-'], ['+', '-', '+tool_search']],
+  ] as const)('%s', (_label, seedValue, expected) => {
+    seed(seedValue)
+    ensureToolSearchDefaultEntry()
+    expect(onDisk().defaultTools).toEqual(expected)
+  })
+
+  it.each([
+    // 已含分支（D4 关键语义）：任一形态在场即不动
+    ['["+tool_search"] 已含 → 不重复追加', ['+tool_search']],
+    ['["tool_search"] 纯名已含 → 不重复追加（pi：任一纯名 = 整体替换默认集）', ['tool_search']],
+    ['["+codemode","tool_search"] 混合含纯名 → 不追加', ['+codemode', 'tool_search']],
+    ['["-tool_search"] 用户关闭态 → 不追加（关闭不被打回：追加到负条目尾部会覆盖关闭意图）', ['-tool_search']],
+    ['["-tool_search","-read"] 混合负条目 → 不追加', ['-tool_search', '-read']],
+    ['["+tool_search","-tool_search"] → 已含不追加（pi 按序解析后 tool_search 关，忠实用户落盘值）', ['+tool_search', '-tool_search']],
+  ] as const)('%s', (_label, seedValue) => {
+    seed(seedValue)
+    ensureToolSearchDefaultEntry()
+    expect(onDisk().defaultTools).toEqual(seedValue)
+  })
+
+  it('非数组坏值 → 不碰（尊重已配置，与 codemode 迁移同构）', () => {
+    seed('bad')
+    ensureToolSearchDefaultEntry()
+    expect(onDisk().defaultTools).toBe('bad')
+  })
+
+  it('重复调用幂等（写后文件字节稳定）', () => {
+    seed(['+codemode'])
+    ensureToolSearchDefaultEntry()
+    const after1 = readFileSync(settingsPath, 'utf-8')
+    ensureToolSearchDefaultEntry()
+    expect(readFileSync(settingsPath, 'utf-8')).toBe(after1)
+  })
+
+  it('只动 tools 域：用户其他字段逐字节保留（字段域 merge）', () => {
+    seed(['+codemode'], { defaultModel: 'keep-me', packages: ['p1'] })
+    ensureToolSearchDefaultEntry()
+    const disk = onDisk()
+    expect(disk.defaultTools).toEqual(['+codemode', '+tool_search'])
+    expect(disk.defaultModel).toBe('keep-me')
+    expect(disk.packages).toEqual(['p1'])
+  })
+
+  it('落盘值经 pi 解析语义激活 tool_search（落盘 ⇄ 解析闭环，P2 前提）', () => {
+    seed(['+codemode'])
+    ensureToolSearchDefaultEntry()
+    expect(resolveDefaultToolSet(onDisk().defaultTools)).toContain('tool_search')
+  })
+})
+
 // ── 3. 开关写入（目标 3：D2 开关打开/关闭语义表）─────────────────────────────
 
 describe('setCodemodeEntry(true) · 开关打开', () => {
@@ -265,6 +333,10 @@ describe('开关写入常量契约', () => {
   it('默认条目为增量语法、占位为负条目（D2：增量条目，不整组覆盖）', () => {
     expect(CODEMODE_DEFAULT_ENTRY).toBe('+codemode')
     expect(CODEMODE_DISABLE_ENTRY).toBe('-codemode')
+  })
+
+  it('tool_search 迁移条目为增量语法（tool-declaration-slimming D4）', () => {
+    expect(TOOL_SEARCH_DEFAULT_ENTRY).toBe('+tool_search')
   })
 })
 
@@ -356,17 +428,29 @@ describe('getSettingsCorruption · 两形态 + 每次现查 + 不触发隔离', 
 
 // ── 5. 组合根启动迁移入口（目标 5：损坏跳过 + 告警；未损坏写入）──────────────
 
-describe('runCodemodeStartupMigration · 组合根启动序列编排', () => {
-  it('未损坏 + 字段缺失 → 幂等默认写入', () => {
+describe('runCodemodeStartupMigration · 组合根启动序列编排（codemode 先、tool_search 后）', () => {
+  it('未损坏 + 字段缺失 → codemode 默认条目 + tool_search 追加（顺序约束：反序则 codemode 的「字段存在即尊重」被挤占）', () => {
     seed(undefined)
     runCodemodeStartupMigration()
-    expect(onDisk().defaultTools).toEqual(['+codemode'])
+    expect(onDisk().defaultTools).toEqual(['+codemode', '+tool_search'])
   })
 
-  it('未损坏 + 已配置（关闭态）→ 不碰', () => {
+  it('未损坏 + codemode 关闭态 → codemode 不被打回；tool_search 照常追加', () => {
     seed(['-codemode'])
     runCodemodeStartupMigration()
-    expect(onDisk().defaultTools).toEqual(['-codemode'])
+    expect(onDisk().defaultTools).toEqual(['-codemode', '+tool_search'])
+  })
+
+  it('未损坏 + 用户已关闭 tool_search → 迁移不追加（负条目 = 已含）；codemode 迁移尊重已配置字段不碰', () => {
+    seed(['-tool_search'])
+    runCodemodeStartupMigration()
+    expect(onDisk().defaultTools).toEqual(['-tool_search'])
+  })
+
+  it('未损坏 + 两默认条目已在场 → 全幂等不动', () => {
+    seed(['+codemode', '+tool_search'])
+    runCodemodeStartupMigration()
+    expect(onDisk().defaultTools).toEqual(['+codemode', '+tool_search'])
   })
 
   it('损坏 → 跳过迁移（文件不被触碰）+ 结构化告警含路径与恢复指引', () => {

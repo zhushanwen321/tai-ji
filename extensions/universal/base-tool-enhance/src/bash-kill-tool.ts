@@ -54,6 +54,8 @@ export function createBashKillToolDefinition() {
 	return {
 		name: "bash_kill",
 		label: "bash_kill",
+		// deferred（tool-declaration-slimming D4）：同 bash_output；as const 防宽化为 string
+		exposure: "deferred" as const,
 		description: BASH_KILL_DESCRIPTION,
 		parameters: bashKillSchema,
 		async execute(

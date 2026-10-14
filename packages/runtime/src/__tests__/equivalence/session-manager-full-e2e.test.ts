@@ -152,6 +152,12 @@ async function runFullChain(options: ChainOptions = {}): Promise<FullChain> {
     extensions: [EXTENSION_PATH],
     sessionDir,
     commandTimeoutMs: STEP_TIMEOUT_MS,
+    // create_managed_session 自 tool-declaration-slimming D4 起 exposure=deferred（不进
+    // 模型声明面），faux 脚本直呼工具名会被 pi 判 "Tool not found"——extension_ui_request
+    // 不发出、全链路断流。经全局 settings defaultTools 预激活（'+name' 增量条目，与生产
+    // spawn 经 settings 激活工具同通道）；tool_search 检索发现路径不是本文件被测对象
+    // （marker 通道闭环），其行为由 pi-codemode-settings.test.ts 覆盖。
+    agentDefaultTools: ['+create_managed_session'],
     fauxResponses: [
       {
         toolCalls: [

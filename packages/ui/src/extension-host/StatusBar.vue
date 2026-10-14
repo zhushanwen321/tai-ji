@@ -79,7 +79,7 @@ const visibleItems = computed<StatusBarEntry[]>(() => {
   <div
     v-if="visibleItems.length > 0 || hasNativeAction()"
     data-testid="status-bar"
-    class="status-bar flex h-[26px] items-center gap-2 overflow-x-auto bg-bg-elevated px-3 text-[length:var(--text-2xs)] [scrollbar-width:none]"
+    class="status-bar flex h-[26px] items-center gap-2 overflow-x-auto bg-bg-card px-3 text-[length:var(--text-2xs)] [scrollbar-width:none]"
   >
     <span
       v-for="item in visibleItems"

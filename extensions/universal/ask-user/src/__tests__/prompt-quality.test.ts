@@ -12,6 +12,20 @@
 //
 // 本测试用源码断言（读 .ts 文件文本）锁定这些约束，防止后续重构把正例/反例/调用信号
 // 删掉或弱化。读源码而非 import，避免 mock 链（index.ts 依赖 pi-tui/ExtensionAPI 等）。
+//
+// 【锚词保留清单 — ask_user】（tool-declaration-slimming D2：压缩后的契约 = 逐锚词
+// grep，替代原逐字断言。U-A1 终态：promptGuidelines 层已删——原 6 条与 description/
+// InputSchema 字段说明逐条重复；调用信号 + 唯一正例 + 结构反例单点在 description）：
+//  Q1  '"options":[{"label"' —— 单问题正例的对象数组形态（弱模型最高频误用面）
+//  Q2  '"header"' ≥2 —— 批量正例展示条件必填字段
+//  Q3  "(Recommended)" —— 推荐项前缀调用信号
+//  Q4  结构反例 ≥2：string array / Flatten / Other（描述里 Don't 段承载）
+//  Q5  "Use ONLY when" + "Do NOT use" —— 调用门槛与边界段
+//  Q6  validate.ts 三个 Correct 正例锚（runtime 友好纠错，未改动）
+//  Q7  示例必须与契约一致：options 元素必须 {label, description} 对象形态
+//  Q8  "mutually exclusive" —— 一问题一决策、选项互斥的提问纪律（单句并入推荐项
+//      段落；U-A1 压缩曾删原纪律句，选项级互斥语义由 InputSchema options 字段说明
+//      承载，问题级「one question = one decision」唯一承载点 = description 此句）
 
 import { readFileSync } from "node:fs";
 import { dirname,join } from "node:path";
@@ -74,6 +88,13 @@ describe("ask_user description — 调用信号保留（不要破坏亮点）", 
 
 	it("保留 'Do NOT use' 边界段", () => {
 		expect(DESCRIPTION).toContain("Do NOT use");
+	});
+
+	it("保留 'mutually exclusive' 提问纪律（Q8：一问题一决策、选项互斥）", () => {
+		// 问题级纪律没有 runtime 校验可拦（validate 只查结构），弱模型把多个决策
+		// 塞进一个 question、或选项互斥性存疑时只有这条声明面约束。
+		expect(DESCRIPTION).toContain("mutually exclusive");
+		expect(DESCRIPTION).toContain("one decision");
 	});
 });
 

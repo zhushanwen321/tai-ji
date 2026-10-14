@@ -533,6 +533,18 @@ pi settings.json 的默认工具集字段（数组，settings-manager 解析后�
 
 **代码映射**: `packages/runtime/src/infra/pi/pi-codemode-settings.ts` 的 `resolveDefaultToolSet`（语义表驱动单测 `__tests__/pi-codemode-settings.test.ts`；pi 语义门禁登记 docs/pi-semantics.json PS-70）。
 
+### deferred（extension 工具可达性分级）
+
+extension 工具注册定义（`registerTool`）的 `exposure` 字段取 `deferred` 档（pi `ToolExposure` 五档 `direct / model-only / codemode / deferred / hidden` 之一）时的行为：该工具**不声明给模型**（不进每轮请求的 tools 数组），被 pi 内置 [tool_search](#tool_searchpi-内置工具检索) 检索命中后加入激活集，下一轮起模型可直接调用。跨进程边界：fork/resume 后先前激活的 deferred 工具退场（pi 构造期激活恢复分支不可达），再次需要时重新检索一次即恢复。taiji 现状分级：低频工具（session_read、plan、goal_control、schedule 族、compact_context、rename_session、bash_output、bash_kill、session-manager 六件套、subagents、workflow-script）为 deferred，高频工具（bash、todo、ask_user、pending_notifications、subagent 三件套、workflow 两件、structured-output）保持 direct。与 [暴露档位（exposure）](#暴露档位exposure) 词条的边界：彼处管 MCP 服务器工具的 per-server 档位（mcp.json 条目字段），本词条管 taiji extension 工具注册定义的 exposure——两处档位语义同源（pi 同一 `ToolExposure` 类型）但载体与配置入口不同。defer 名单归属与启用机制决策：[ADR-0136](adr/decisions.md)；能力分级：[FEATURE-PRIORITIES.md](FEATURE-PRIORITIES.md)「工具延迟加载」条目（P2）。
+
+**代码映射**: defer 名单各工具的注册定义（`extensions/universal/*/src/`）。
+
+### tool_search（pi 内置工具检索）
+
+pi 内置扩展提供的工具检索工具：BM25 排序（Okapi BM25），检索文本覆盖工具 name、description、schema 字段说明与参数名、namespace 描述。模型调用 `tool_search {"query": "..."}` 命中 [deferred](#deferredextension-工具可达性分级) 工具时该工具加入激活集、下一轮可用，返回结果列出已加载的工具；无命中返回空结果（模型自然回落 bash 等在场工具，行为与无检索工具时一致）。启用形态 = settings.json `defaultTools` 的 `+tool_search` 条目（[工具增量条目](#工具增量条目name---name-语法)语法），经启动迁移默认启用（复用 codemode 迁移通道：幂等追加、`-tool_search` 视为已含即用户永久关闭；写入单点 `packages/runtime/src/infra/pi/pi-codemode-settings.ts`）。settings.json 全 pi 进程共享，但孙进程模板不装载 `builtin:tool-search`（pi-subagent-cli spawn-args 恒带 `--no-extensions` + 显式 extension 白名单；pi-rpc 子代理模板只带 `builtin:codemode`）——tool_search 在孙进程未注册，`+tool_search` 条目无消费方（pi 语义：defaultTools 只能激活已注册工具），零声明零成本（[ADR-0136](adr/decisions.md) 终态：零波及；回归锚 `packages/pi-rpc/src/__tests__/spawn-args.test.ts` 的 not.toContain('builtin:tool-search') 断言）。
+
+**代码映射**: pi builtin extension（实装 `dist/extensions/tool-search/`）；taiji 侧迁移写点 `packages/runtime/src/infra/pi/pi-codemode-settings.ts`。
+
 ### 乐观更新协议
 「乐观写本地 → await 持久化 → 失败回滚后 rethrow」的唯一实现（`packages/core/src/foundation/optimistic-update.ts`，提供 `runOptimisticUpdate`/`optimisticUpdate`/`refCell` 三形态）；错误映射到既有错误面（toast / actionError / saveError 标志）由调用方或字段 module 承接。RPC 设置项字段编排（`setting-field` module）与 settings 域全部乐观写现场均收编于此协议。**Avoid**：手写 prev/rollback 快照样板、组件内 try/catch 回滚、置标志式失败语义。
 

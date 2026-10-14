@@ -42,7 +42,7 @@
         class="flex shrink-0 cursor-pointer select-none items-center gap-0.5 rounded-sm border py-0.5 pl-1.5 pr-[3px] font-mono text-[length:var(--text-2xs)] transition-colors duration-[var(--duration-fast)] ease-[var(--ease-out)]"
         :class="
           tab.path === activePath
-            ? 'border-border-strong bg-bg-elevated text-neutral-fg'
+            ? 'border-border bg-surface-hover text-neutral-fg'
             : 'border-border bg-bg-input text-neutral-mid hover:bg-surface-hover hover:text-neutral-fg'
         "
         :title="tab.path"

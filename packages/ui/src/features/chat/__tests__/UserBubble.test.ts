@@ -10,13 +10,18 @@
  * - [MF-2] submitEdit 编辑含命令的消息后 prompt 中命令只出现一次
  * - [chat-flow-timestamp U2] turn.user.timestamp 行尾时刻（设计 §3 A4）：展示态 user-timestamp 槽显本地时刻；
  *   编辑态不渲染该槽
+ * - [user-bubble-edit-composer] hover actions 摆位（气泡下方流内固定槽位，非气泡内 absolute）+
+ *   编辑态富编辑器注入路径（ChatViewDeps.editComposerRenderer：segments 回填 / submit 经双发锁
+ *   收口链调 editAndResend / cancel 收口 / 空稿守卫；未注入 = Textarea 回退，存量用例即回退路径）
  *
  * 运行：cd packages/ui && npx vitest run src/features/chat/__tests__/UserBubble.test.ts
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount } from '@vue/test-utils'
+import { defineComponent, h } from 'vue'
 import { UserBubble, ChatViewDepsKey } from '@taiji/ui'
 import type { MessageTurn } from '@taiji/core/domain/chat'
+import type { ChatViewDeps } from '@taiji/ui'
 import type { Message, Segment } from '@taiji/shared'
 import { buildSkillMarker, segmentsToPrompt, segmentsToText } from '@taiji/shared'
 import { createMockDeps, mockChatProvide } from './helpers'
@@ -39,7 +44,7 @@ function mountBubble(props: {
   sessionId?: string
   canEdit?: boolean
   isSessionEditable?: boolean
-} = {}) {
+} = {}, deps: Partial<ChatViewDeps> = {}) {
   return mount(UserBubble, {
     props: {
       turn: props.turn ?? makeTurn(),
@@ -48,7 +53,7 @@ function mountBubble(props: {
       isSessionEditable: props.isSessionEditable ?? false,
     },
     global: {
-      provide: mockChatProvide(),
+      provide: mockChatProvide(deps),
       stubs: { MarkdownRenderer: true, ImageThumb: true },
     },
   })
@@ -109,6 +114,179 @@ describe('W4TC3: UserBubble 展示态', () => {
     const wrapper = mountBubble({ canEdit: true, isSessionEditable: true })
     const actions = wrapper.find('.group\\/user > .opacity-0')
     expect(actions.findAll('button').length).toBe(2)
+  })
+})
+
+// ── [user-bubble-edit-composer] hover actions 摆位：气泡下方流内固定槽位（2026-10 用户裁决）──
+// 原形态 = absolute bottom-0 right-0 钉在气泡右下角**内侧**（压气泡内容）；现形态 = 气泡行
+// 之后的常驻流内行（mt-1 + h-6），显隐仍走 opacity 零布局跳动。
+describe('[user-bubble-edit-composer] hover actions 位于气泡下方固定槽位', () => {
+  it('actions DOM 序在气泡行之后（下方固定位置，不在气泡框内）', () => {
+    const wrapper = mountBubble()
+    const root = wrapper.find('.group\\/user').element
+    const children = Array.from(root.children)
+    const bubbleIdx = children.findIndex((el) => el.classList.contains('group/ts'))
+    const actionsIdx = children.findIndex(
+      (el) => el.getAttribute('data-testid') === 'user-bubble-actions',
+    )
+    expect(bubbleIdx).toBeGreaterThanOrEqual(0)
+    expect(actionsIdx).toBeGreaterThan(bubbleIdx)
+  })
+
+  it('槽位为流内常驻行：非 absolute 定位，mt-1 + h-6 固定高度（零布局跳动）', () => {
+    const wrapper = mountBubble()
+    const actions = wrapper.find('[data-testid="user-bubble-actions"]')
+    expect(actions.exists()).toBe(true)
+    expect(actions.classes()).not.toContain('absolute')
+    expect(actions.classes()).toContain('mt-1')
+    expect(actions.classes()).toContain('h-6')
+    // 显隐机制不变：默认 opacity-0 + pointer-events-none，悬停/焦点两翼显现
+    expect(actions.classes()).toContain('opacity-0')
+    expect(actions.classes()).toContain('pointer-events-none')
+    expect(actions.classes()).toContain('group-hover/user:opacity-100')
+    expect(actions.classes()).toContain('group-focus-within/user:opacity-100')
+  })
+})
+
+// ── [user-bubble-edit-composer] 编辑态富编辑器注入路径（ChatViewDeps.editComposerRenderer）──
+// deps 提供注入组件 → 渲染注入组件（简化版 composer：ComposerInput + CommandPopover）；
+// 未提供（本 describe 之外的存量用例）= Textarea 回退路径，行为不变。
+describe('[user-bubble-edit-composer] UserBubble 编辑态富编辑器注入路径', () => {
+  /** 注入组件 stub：透传 props，submit/cancel 经按钮触发（契约见 EditComposerProps） */
+  const EditStub = defineComponent({
+    name: 'EditComposerStub',
+    props: {
+      sessionId: { type: String, required: true },
+      messageId: { type: String, required: true },
+      segments: { type: Array, required: true },
+      disabled: { type: Boolean, default: false },
+    },
+    emits: ['submit', 'cancel'],
+    setup(_props, { emit }) {
+      return () =>
+        h('div', { 'data-testid': 'edit-composer-stub' }, [
+          h('button', {
+            'data-testid': 'stub-submit',
+            onClick: () => emit('submit', [{ type: 'text', text: 'edited text' }]),
+          }),
+          h('button', { 'data-testid': 'stub-cancel', onClick: () => emit('cancel') }),
+        ])
+    },
+  })
+
+  /** 进入编辑态（点 hover actions 第 2 个按钮 = 编辑） */
+  async function enterEdit(wrapper: ReturnType<typeof mountBubble>): Promise<void> {
+    const actions = wrapper.find('.group\\/user > .opacity-0')
+    await actions.findAll('button')[1].trigger('click')
+  }
+
+  it('deps 提供 editComposerRenderer → 编辑态渲染注入组件（非 textarea 回退）', async () => {
+    const wrapper = mountBubble(
+      { canEdit: true, isSessionEditable: false },
+      { editComposerRenderer: EditStub },
+    )
+    await enterEdit(wrapper)
+    expect(wrapper.find('[data-testid="edit-composer-stub"]').exists()).toBe(true)
+    expect(wrapper.find('textarea').exists()).toBe(false)
+  })
+
+  it('注入组件收到 segments 回填 + sessionId/messageId 契约字段', async () => {
+    const turn = makeTurn({
+      user: {
+        id: 'u1',
+        role: 'user',
+        content: [
+          { type: 'text', text: '总结' },
+          { type: 'slash', name: 'compact' },
+        ],
+        status: 'complete',
+        timestamp: NOW,
+      },
+    })
+    const wrapper = mountBubble(
+      { turn, canEdit: true, isSessionEditable: false },
+      { editComposerRenderer: EditStub },
+    )
+    await enterEdit(wrapper)
+    const stub = wrapper.findComponent({ name: 'EditComposerStub' })
+    expect(stub.props('sessionId')).toBe('s1')
+    expect(stub.props('messageId')).toBe('u1')
+    expect(stub.props('segments')).toEqual([
+      { type: 'text', text: '总结' },
+      { type: 'slash', name: 'compact' },
+    ])
+  })
+
+  it('string content（reload 单文档态）→ segments 补 text 段回填（不回退空编辑框）', async () => {
+    const wrapper = mountBubble(
+      { canEdit: true, isSessionEditable: false },
+      { editComposerRenderer: EditStub },
+    )
+    await enterEdit(wrapper)
+    const stub = wrapper.findComponent({ name: 'EditComposerStub' })
+    expect(stub.props('segments')).toEqual([{ type: 'text', text: 'hello world' }])
+  })
+
+  it('注入组件 submit(segments) → editAndResend(sid, msgId, segments) + 编辑态收口', async () => {
+    const editAndResend = vi.fn()
+    const wrapper = mountBubble(
+      { canEdit: true, isSessionEditable: false },
+      { editComposerRenderer: EditStub, editAndResend },
+    )
+    await enterEdit(wrapper)
+    await wrapper.find('[data-testid="stub-submit"]').trigger('click')
+    expect(editAndResend).toHaveBeenCalledTimes(1)
+    expect(editAndResend).toHaveBeenCalledWith('s1', 'u1', [{ type: 'text', text: 'edited text' }])
+    // 收口：编辑态退出（注入组件卸载）
+    expect(wrapper.find('[data-testid="edit-composer-stub"]').exists()).toBe(false)
+  })
+
+  it('注入组件 cancel → 编辑态退出 + emit edit-state-change false', async () => {
+    const wrapper = mountBubble(
+      { canEdit: true, isSessionEditable: false },
+      { editComposerRenderer: EditStub },
+    )
+    await enterEdit(wrapper)
+    await wrapper.find('[data-testid="stub-cancel"]').trigger('click')
+    expect(wrapper.find('[data-testid="edit-composer-stub"]').exists()).toBe(false)
+    const events = wrapper.emitted('edit-state-change')!
+    expect(events[events.length - 1]).toEqual([{ editing: false, turnKey: 'u1' }])
+  })
+
+  it('[D3] isPendingSend=true → submit 早退：编辑态保持 + 不调 editAndResend（双发锁同链）', async () => {
+    const editAndResend = vi.fn()
+    const wrapper = mountBubble(
+      { canEdit: true, isSessionEditable: false },
+      { editComposerRenderer: EditStub, editAndResend, isPendingSend: () => true },
+    )
+    await enterEdit(wrapper)
+    await wrapper.find('[data-testid="stub-submit"]').trigger('click')
+    expect(editAndResend).not.toHaveBeenCalled()
+    // 编辑态保持（草稿不丢，提交收口后可重试）
+    expect(wrapper.find('[data-testid="edit-composer-stub"]').exists()).toBe(true)
+  })
+
+  it('空稿 submit（segments 序列化为空）→ 早退不收口（与 Textarea 回退路径同语义）', async () => {
+    const editAndResend = vi.fn()
+    const EmptyStub = defineComponent({
+      name: 'EmptySubmitStub',
+      emits: ['submit', 'cancel'],
+      setup(_props, { emit }) {
+        return () =>
+          h('button', {
+            'data-testid': 'stub-submit-empty',
+            onClick: () => emit('submit', [{ type: 'text', text: '   ' }]),
+          })
+      },
+    })
+    const wrapper = mountBubble(
+      { canEdit: true, isSessionEditable: false },
+      { editComposerRenderer: EmptyStub, editAndResend },
+    )
+    await enterEdit(wrapper)
+    await wrapper.find('[data-testid="stub-submit-empty"]').trigger('click')
+    expect(editAndResend).not.toHaveBeenCalled()
+    expect(wrapper.find('[data-testid="stub-submit-empty"]').exists()).toBe(true)
   })
 })
 
@@ -389,14 +567,19 @@ describe('W4TC3: UserBubble 编辑态', () => {
     // 设计决策 8 N3「编辑态气泡同宽」：编辑态容器与展示态气泡持同一宽度/折行纪律。
     // w-full 是编辑态不进「百分比基准循环」的凭据：宽度 100% 基准 = items-end 列
     // （确定宽），不像展示态行那样依赖内容解宽——与展示态 self-stretch 用例成对。
+    // [user-bubble-edit-composer] 宽度纪律挂编辑态**外层容器**（富编辑器/Textarea 回退
+    // 两条分支共用同一几何壳，盒子视觉由分支各自承载）——内层盒子只留视觉 class。
     const wrapper = mountBubble({ canEdit: true, isSessionEditable: false })
     const actions = wrapper.find('.group\\/user > .opacity-0')
     await actions.findAll('button')[1].trigger('click')
+    // 外层容器 = 根列的第一个（且编辑态下唯一）流内子元素
+    const editRoot = wrapper.find('.group\\/user').element.firstElementChild!
+    expect(editRoot.className).toContain('w-full')
+    expect(editRoot.className).toContain('max-w-[min(72%,64ch)]')
+    expect(editRoot.className).toContain('[overflow-wrap:anywhere]')
+    // 回退路径盒子视觉仍在（accent 边 + 14px 圆角）
     const editBubble = wrapper.find('.rounded-\\[14px\\]')
     expect(editBubble.exists()).toBe(true)
-    expect(editBubble.classes()).toContain('w-full')
-    expect(editBubble.classes()).toContain('max-w-[min(72%,64ch)]')
-    expect(editBubble.classes()).toContain('[overflow-wrap:anywhere]')
   })
 
   it('编辑态取消 → emit edit-state-change false', async () => {

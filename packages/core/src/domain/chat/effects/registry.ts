@@ -312,6 +312,31 @@ function deriveToolCallEndOverlay(message: PiMessageEntry['message']): {
   }
 }
 
+/**
+ * 标记末条 streaming assistant 的文本已定稿（chat-flow-text-color D1）。
+ *
+ * 调用时机 = message.message_end（assistant role）当下：pi 串行协议下此刻该消息的
+ * text_delta 已全部到达，此后不会再增长。live 气泡 id 是 runtime 随机 a-uuid
+ * （event-adapter assistantTurnStart），与 pi entry 的原生 message.id 不相交，无法按
+ * id 匹配——按位置标记：末条 status:'streaming' 且未标记的 assistant 即属主
+ * （start/end 严格成对按序到达，同一时刻至多一个未标记的 streaming 气泡）。
+ *
+ * 为什么不改 status：sealed guard isLastAssistantStreaming（D-010）依赖末条 assistant
+ * 处于 streaming 态定位 tool_execution_* 帧属主，提前翻 complete 会静默丢工具事件。
+ * 消费方 = ui Turn.vue unitBlockProps（正文颜色/思考块渲染粒度按本字段派生）。
+ */
+function markStreamingAssistantTextFinalized(ctx: Pick<MessageEffectContext, 'messages'>, sid: string): void {
+  const prev = ctx.messages.value.get(sid)?.value ?? []
+  for (let i = prev.length - 1; i >= 0; i--) {
+    const m = prev[i]
+    if (m?.role !== 'assistant' || m.status !== 'streaming' || m.textFinalized) continue
+    const next = [...prev]
+    next[i] = { ...m, textFinalized: true }
+    commitMessages(ctx.messages, sid, next)
+    return
+  }
+}
+
 const messageEffects: Partial<Record<ServerMessageType, MessageEffectHandler>> = {
   // ── 主流式生命周期（chunk 创建/收口 + isGenerating 派生）──
   'message.message_start': (ctx, sid, payload) => {
@@ -594,6 +619,12 @@ const messageEffects: Partial<Record<ServerMessageType, MessageEffectHandler>> =
     // 首次投递后二次 no-op），对齐 event-adapter handleMessageEnd「toolResult 与
     // tool_execution_end 的回填，去重/合并归 core store 的 reducer 接入层编排」的职责划分。
     ctx.applyEntryFrame(sid, entry as PiEntry)
+    // [chat-flow-text-color D1] assistant 消息文本定稿事实标记：mid-turn 气泡的 status
+    // 要到回合级 message.complete 才收口，UI 颜色若直接跟 status，长工具回合中已写完
+    // 的正文一直灰。此处按位置给 live 气泡打 textFinalized（status 不动，理由见 helper 注释）。
+    if ((entry as PiMessageEntry).message?.role === 'assistant') {
+      markStreamingAssistantTextFinalized(ctx, sid)
+    }
     // [steer-bubble u1 / D1+D2] 腿 2：user role 时做投递确认/兜底消费（reducer 喂入
     // 无条件保留在前——腿 2 只是 overlay 显示侧的补充裁决，异常路径不阻断权威喂入）。
     if ((entry as PiMessageEntry).message?.role === 'user') {

@@ -107,10 +107,11 @@ describe('BlockWorkflow: 标题行字段（v6 §11：prefix + name · slug）', 
     expect(wrapper.text()).not.toContain(longTask)
   })
 
-  it('running 态 header 含呼吸弧 loader（animate-loader-spin + accent）', () => {
+  it('running 态 header 含专属动效图标（workflow 连线行进，RunningBlockIcon）', () => {
     const wrapper = mountToolBlock(makeWorkflow({ status: 'running' }))
-    // running 态呼吸弧 loader
-    expect(wrapper.find('.animate-loader-spin').exists()).toBe(true)
+    // running 态专属动效（不再用全类型共用 loader）
+    expect(wrapper.find('[data-running-icon="workflow"]').exists()).toBe(true)
+    expect(wrapper.find('.animate-loader-spin').exists()).toBe(false)
     // 字段仍可见（name）
     expect(wrapper.text()).toContain('email-validation-refactor')
   })

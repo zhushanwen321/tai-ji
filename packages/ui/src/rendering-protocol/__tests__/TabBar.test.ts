@@ -1,6 +1,7 @@
 /**
  * TabBar 组件测试（W2 · v6 连体 pill 范式 + 协议 v1.1 容器化 sections）。
- * v6：bg-bg-input 容器 + active bg-bg-elevated+neutral-fg，去 accent-soft/border-b。
+ * v6：bg-bg-input 容器 + active bg-surface-hover+neutral-fg（2026-10-14 全族迁移：旧
+ * active bg-bg-elevated 浮层档退役，选中态 = solid hover tone），去 accent-soft/border-b。
  * 容器化（设计 §3.3 D5 / §3.5）：渲染 active section、点击只切本地序号不回传、
  * 后续推送不重置本地选择（探针 P5）、sections 非法或渲染器缺位时退化纯展示 + warn。
  * 容器化用例经 GuiComponentRenderer 挂载（= 应用路径：渲染器 provide 自身），
@@ -63,8 +64,9 @@ describe('TabBar', () => {
     const tabs = wrapper.findAll('.tab-bar__tab')
     expect(tabs).toHaveLength(3)
 
-    // v6: active tab 用 bg-bg-elevated + text-neutral-fg（去 bg-accent-soft + text-accent）
-    expect(tabs[0].classes()).toContain('bg-bg-elevated')
+    // v6: active tab 用 bg-surface-hover + text-neutral-fg（去 bg-accent-soft + text-accent；
+    // 2026-10-14 全族迁移：旧 bg-bg-elevated 退役）
+    expect(tabs[0].classes()).toContain('bg-surface-hover')
     expect(tabs[0].classes()).toContain('text-neutral-fg')
     expect(tabs[0].classes()).not.toContain('bg-accent-soft')
     // done tab 有绿点
@@ -118,8 +120,8 @@ describe('TabBar', () => {
     const tabs = wrapper.findAll('.tab-bar__tab')
     expect(tabs).toHaveLength(2)
     // active 由推送值单方决定（现状语义）
-    expect(tabs[1].classes()).toContain('bg-bg-elevated')
-    expect(tabs[0].classes()).not.toContain('bg-bg-elevated')
+    expect(tabs[1].classes()).toContain('bg-surface-hover')
+    expect(tabs[0].classes()).not.toContain('bg-surface-hover')
     // 无点击态样式（旧 extension 的 tab-bar 不可被染上可点视觉）
     expect(tabs[0].classes()).not.toContain('cursor-pointer')
     expect(tabs[1].classes()).not.toContain('cursor-pointer')
@@ -127,8 +129,8 @@ describe('TabBar', () => {
 
     // 点击不改写视觉（无本地切换）
     await tabs[0].trigger('click')
-    expect(wrapper.findAll('.tab-bar__tab')[1].classes()).toContain('bg-bg-elevated')
-    expect(wrapper.findAll('.tab-bar__tab')[0].classes()).not.toContain('bg-bg-elevated')
+    expect(wrapper.findAll('.tab-bar__tab')[1].classes()).toContain('bg-surface-hover')
+    expect(wrapper.findAll('.tab-bar__tab')[0].classes()).not.toContain('bg-surface-hover')
   })
 })
 
@@ -160,7 +162,7 @@ describe('TabBar 容器化（sections，协议 v1.1）', () => {
         ),
       },
     })
-    expect(pushedSecond.findAll('.tab-bar__tab')[1].classes()).toContain('bg-bg-elevated')
+    expect(pushedSecond.findAll('.tab-bar__tab')[1].classes()).toContain('bg-surface-hover')
     expect(pushedSecond.find('[data-testid="gui-tab-bar-section"]').text()).toContain('t2')
 
     const noActive = mount(GuiComponentRenderer, {
@@ -171,7 +173,7 @@ describe('TabBar 容器化（sections，协议 v1.1）', () => {
         ),
       },
     })
-    expect(noActive.findAll('.tab-bar__tab')[0].classes()).toContain('bg-bg-elevated')
+    expect(noActive.findAll('.tab-bar__tab')[0].classes()).toContain('bg-surface-hover')
     expect(noActive.find('[data-testid="gui-tab-bar-section"]').text()).toContain('t1')
   })
 
@@ -187,8 +189,8 @@ describe('TabBar 容器化（sections，协议 v1.1）', () => {
     await wrapper.findAll('.tab-bar__tab')[1].trigger('click')
 
     const tabs = wrapper.findAll('.tab-bar__tab')
-    expect(tabs[1].classes()).toContain('bg-bg-elevated')
-    expect(tabs[0].classes()).not.toContain('bg-bg-elevated')
+    expect(tabs[1].classes()).toContain('bg-surface-hover')
+    expect(tabs[0].classes()).not.toContain('bg-surface-hover')
     const section = wrapper.find('[data-testid="gui-tab-bar-section"]')
     expect(section.text()).toContain('t2')
     expect(section.text()).not.toContain('t1')
@@ -218,7 +220,7 @@ describe('TabBar 容器化（sections，协议 v1.1）', () => {
 
     // 组件未重建（同一 DOM 元素）→ 本地选择保持（仍渲染第二段新内容）
     expect(wrapper.find('[data-testid="gui-tab-bar"]').element).toBe(barElement)
-    expect(wrapper.findAll('.tab-bar__tab')[1].classes()).toContain('bg-bg-elevated')
+    expect(wrapper.findAll('.tab-bar__tab')[1].classes()).toContain('bg-surface-hover')
     const section = wrapper.find('[data-testid="gui-tab-bar-section"]')
     expect(section.text()).toContain('t2-new')
     expect(section.text()).not.toContain('t1-new')
@@ -242,7 +244,7 @@ describe('TabBar 容器化（sections，协议 v1.1）', () => {
 
     const tabs = wrapper.findAll('.tab-bar__tab')
     expect(tabs).toHaveLength(2)
-    expect(tabs[1].classes()).toContain('bg-bg-elevated')
+    expect(tabs[1].classes()).toContain('bg-surface-hover')
     expect(wrapper.find('[data-testid="gui-tab-bar-section"]').text()).toContain('t2x')
   })
 
@@ -281,7 +283,7 @@ describe('TabBar 容器化（sections，协议 v1.1）', () => {
 
     // 点击不产生本地切换（退化态无本地 active）
     await tabs[1].trigger('click')
-    expect(wrapper.findAll('.tab-bar__tab')[1].classes()).not.toContain('bg-bg-elevated')
+    expect(wrapper.findAll('.tab-bar__tab')[1].classes()).not.toContain('bg-surface-hover')
 
     // 同形态重复推送不重复出声（防 warn 刷屏）
     await wrapper.setProps({

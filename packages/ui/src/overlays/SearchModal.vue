@@ -35,7 +35,7 @@
       aria-modal="true"
       :aria-label="t('search.title')"
       tabindex="-1"
-      class="relative w-full max-w-[620px] overflow-hidden rounded-lg border bg-bg-elevated shadow-2 outline-none"
+      class="relative w-full max-w-[620px] overflow-hidden rounded-lg border bg-bg shadow-2 outline-none"
       @click.stop
       @keydown="onGlobalKeydown"
     >

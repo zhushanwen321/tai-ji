@@ -3,9 +3,13 @@
 // （schema 扁平化后字段全 Optional，见 tool.ts 头注释），双形陷阱
 // （text/texts、id/ids）的 throw 要带 Correct 纠错正例让模型自我纠正。
 //
-// 本测试用源码文本断言锁定这些约束，防止后续重构把纠错文案删掉或弱化。读源码而非
-// import，避免 mock 链（tool.ts 依赖 typebox/ExtensionAPI/Theme 等值导入）。参考
-// subagent-workflow 的 prompt 回归范式。
+// D1 单源化（tool-declaration-slimming.md §3.3）后 description 只承载功能定位与
+// 动作清单；原「规则：」段的五条使用纪律已迁入 promptGuidelines（唯一纪律承载位），
+// 本测试同步把纪律断言锚到 guidelines 区。
+//
+// 本测试用源码文本断言锁定这些约束，防止后续重构把纠错文案删掉或弱化、或把纪律
+// 回填进 description 造成双源。读源码而非 import，避免 mock 链（tool.ts 依赖
+// typebox/ExtensionAPI/Theme 等值导入）。参考 subagent-workflow 的 prompt 回归范式。
 
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -33,9 +37,9 @@ function extractDescriptionRegion(src: string): string {
 
 const DESCRIPTION_REGION = extractDescriptionRegion(TOOL_SRC);
 
-// ── description 中文版（T7/TC9）──────────────────────
+// ── description 中文版（T7/TC9；D1 单源化：定位 + 动作清单）──────────────
 
-describe("todo description — 中文版（动作 + 规则）", () => {
+describe("todo description — 中文版（功能定位 + 动作清单）", () => {
 	it("开篇是中文定位语", () => {
 		expect(DESCRIPTION_REGION).toContain("管理当前会话的 todo 列表");
 	});
@@ -52,26 +56,17 @@ describe("todo description — 中文版（动作 + 规则）", () => {
 		expect(DESCRIPTION_REGION).not.toMatch(/clear/i);
 	});
 
-	it("含「规则：」三条核心行为准则", () => {
-		expect(DESCRIPTION_REGION).toContain("规则：");
-		expect(DESCRIPTION_REGION).toContain("同一时间只有一个 todo 处于 in_progress");
-		expect(DESCRIPTION_REGION).toContain("完成一个 todo 立即标记 completed");
-		expect(DESCRIPTION_REGION).toContain("未真正完成不得标记 completed");
-	});
-
-	it("含规模控制规则（建议不超过 10 个）", () => {
-		expect(DESCRIPTION_REGION).toContain("建议 todo 总数不超过 10 个");
-		expect(DESCRIPTION_REGION).toContain("细粒度步骤优先合并");
-	});
-
-	it("含 auto-GC 行为说明（旧任务全部 completed 后 add 自动清理）", () => {
-		expect(DESCRIPTION_REGION).toContain("旧任务全部 completed 后再 add 会自动清理旧列表");
-	});
-
 	it("已删除旧英文 Examples 段与 Don't 段", () => {
 		expect(DESCRIPTION_REGION).not.toContain("Available actions");
 		expect(DESCRIPTION_REGION).not.toContain("Don't");
 		expect(DESCRIPTION_REGION).not.toContain("Examples");
+	});
+
+	it("D1 单源化：description 不复述使用纪律（纪律单源在 promptGuidelines）", () => {
+		expect(DESCRIPTION_REGION).not.toContain("规则：");
+		expect(DESCRIPTION_REGION).not.toContain("同一时间只有一个 todo 处于 in_progress");
+		expect(DESCRIPTION_REGION).not.toContain("立即标记 completed");
+		expect(DESCRIPTION_REGION).not.toContain("不超过 10 个");
 	});
 });
 
@@ -95,10 +90,10 @@ describe("todo runtime — throw 含 Correct 纠错正例", () => {
 	});
 });
 
-// ── promptSnippet / promptGuidelines（verification guidance）──
+// ── promptSnippet / promptGuidelines（D1 单源化后的纪律承载位）──
 // DESCRIPTION_REGION 截取止于 promptSnippet:，不含这两个字段，故对完整 TOOL_SRC 断言。
 
-describe("todo tool prompt — snippet & guidelines", () => {
+describe("todo tool prompt — snippet & guidelines（使用纪律唯一承载位）", () => {
 	it("promptSnippet 为中文精简版（验证步骤引导）", () => {
 		expect(TOOL_SRC).toContain("用 todo 跟踪多步骤工作");
 		expect(TOOL_SRC).toContain("验证步骤");
@@ -109,11 +104,17 @@ describe("todo tool prompt — snippet & guidelines", () => {
 	});
 
 	it("promptGuidelines 含 [自动闭合] / [批量优先] 核心条目", () => {
-		expect(TOOL_SRC).toContain("[自动闭合] 全部完成后自动清理");
+		expect(TOOL_SRC).toContain("[自动闭合] 旧任务全部 completed 后再 add 会自动清理旧列表");
 		expect(TOOL_SRC).toContain("[批量优先] 完成多项任务时使用 updates[] 批量更新");
 	});
 
 	it("promptGuidelines 含 [规模控制] 条目（不超过 10 个）", () => {
 		expect(TOOL_SRC).toContain("[规模控制] todo 总数建议不超过 10 个");
+	});
+
+	it("promptGuidelines 承接原 description 规则段的三条核心行为准则（迁移锚）", () => {
+		expect(TOOL_SRC).toContain("同一时间只有一个 todo 处于 in_progress");
+		expect(TOOL_SRC).toContain("立即标记 completed，不要攒到最后批量标记");
+		expect(TOOL_SRC).toContain("未真正完成（被阻塞或测试失败）不得标记 completed");
 	});
 });

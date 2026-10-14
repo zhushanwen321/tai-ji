@@ -25,7 +25,7 @@
       <ContextMenuContent
         ref="menuContentRef"
         data-testid="session-context-menu"
-        class="z-[var(--z-popover)] min-w-[148px] rounded-md border border-border-strong bg-bg-elevated p-[4px] text-neutral-fg shadow-2 outline-none"
+        class="z-[var(--z-popover)] min-w-[148px] rounded-md border border-border bg-bg p-[4px] text-neutral-fg shadow-2 outline-none"
         :collision-padding="8"
       >
         <!-- 标记完成（自 ghost 层迁入 2026-10-10）：toggle 模块级 markers 集合，

@@ -16,6 +16,10 @@ import { buildOutboundChildEnv } from '../spawn-env.js'
 import { findPiExecutable } from './find-pi-executable.js'
 import { getRelaySpawnEnv } from '../relay/relay-env.js'
 import { getCrashJournal } from '../crash-journal.js'
+// 信号取证（signal-forensics）：受管 pi 意外退出（exit_converge）时的发送方归因。
+// 环先于 spawn 起、随受管 pi 清零停——采样成本只发生在「有 pi 在跑」的窗口。
+import { ProcessTableRing } from './process-table-ring.js'
+import { reportPiExitSignalForensics } from './signal-forensics.js'
 // W9（设计 §3.7 Electron 打包态）：staged 引擎根推导 + pi 子进程注入（ROOTS +
 // 打包态执行器两键）；构造期补齐 runtime 自身发现面的 L1 env（打包态无 node_modules）
 import {
@@ -53,6 +57,13 @@ export class ProcessManager implements IProcessManager {
   private piVersionCache: string | null = null
   /** 最近一次版本探测失败时刻（缓存治理 1-7：失败负缓存，成功后清空）。 */
   private piVersionFailedAt: number | null = null
+  /**
+   * 滚动进程表环（signal-forensics）：受管 pi 意外退出时的发送方归因历史源。
+   * 构造零 I/O 零定时器（懒启动）；start 点在 createSession（restart 分支的
+   * destroySession 之后、spawn 前，入册后再幂等重申一次），stop 点在受管 pi 清零
+   * （destroySession / destroyAll / exit 收敛后）。
+   */
+  private readonly processTableRing: ProcessTableRing
 
   constructor(private readonly projectRoot: string) {
     // 懒初始化：不在构造函数中执行同步 I/O，避免阻塞事件循环
@@ -62,6 +73,7 @@ export class ProcessManager implements IProcessManager {
     // existsSync 一次 stat（engine-roots 推导），量级远低于「懒初始化」要规避的
     // pi 路径扫描，且必须早于任何引擎发现调用点。
     ensureRuntimeEngineRootsEnv(projectRoot)
+    this.processTableRing = new ProcessTableRing()
   }
 
   /**
@@ -172,6 +184,14 @@ export class ProcessManager implements IProcessManager {
       await this.destroySession(sessionId)
     }
 
+    // 信号取证环启动（幂等）：先于 spawn——spawn 即崩的死亡（startup crash）同样
+    // 需要死亡前窗口的进程表样本，环空窗越短归因面越全。位置必须在 restart 分支
+    // （destroySession）之后：destroySession 尾部在受管 pi 清零时停环，若先 start
+    // 再 destroy，单 session 重启路径下环被停掉后无人再 start，整个新进程生命周期
+    // 零采样（MF-3）。此处的 start 在 destroy 停环之后执行即完成再武装；
+    // intervalMs=0（env 关闭）时 start 为 no-op，采集退化为死亡即时单帧快照。
+    this.processTableRing.start()
+
     const piPath = await this.getPiPath()
 
     // Inject discovered pi directory into PATH so spawn('pi', ...) resolves
@@ -245,6 +265,23 @@ export class ProcessManager implements IProcessManager {
       // 走到此处 = pi 进程自发退出（intentional destroy 已被上方 clientToId 无条目守卫拦截），
       // 记录退出码与收敛链，供事后从 exit 143 类死亡回溯发起方。
       console.warn(`[process-manager] session ${currentId} process exited unexpectedly (code: ${code}) (kill_source=exit_converge | who: pi exited on its own (crash / external kill), not an intentional destroy | chain: exit event -> exitCallbacks -> upper onSessionExit convergence (persist stopped + occupancy reset + session.exited))`)
+      // 信号取证（signal-forensics）：exit_converge = 非 intentional destroy 的意外
+      // 退出，正是外部 SIGTERM 类死亡（exit 129/143 族）的归因面。K8 日志回答
+      // 「怎么死」，本调用回答「谁杀的」——fire-and-forget 全路径不抛（观测增强不得
+      // 影响下方 exitCallbacks 收敛链）；logger 未初始化时结构性 no-op。须在 map 清理
+      // 前取 managedPids（连坐视图需要此刻仍在册的其他受管 pi）。
+      const exitingEntry = this.processes.get(currentId)
+      reportPiExitSignalForensics({
+        sessionId: currentId,
+        deadPid: client.pid ?? null,
+        exitCode: code,
+        uptimeMs: exitingEntry !== undefined ? Date.now() - exitingEntry.createdAt : null,
+        managedPids: [...this.processes.entries()]
+          .filter(([id, p]) => id !== currentId && !p.client.exited)
+          .map(([, p]) => p.client.pid)
+          .filter((pid): pid is number => typeof pid === 'number'),
+        ring: this.processTableRing,
+      })
       this.processes.delete(currentId)
       this.clientToId.delete(client)
       // 命名消歧：this.exitCallbacks 是 ProcessManager 的 Set<(sessionId, code, stderr) => void>
@@ -260,6 +297,8 @@ export class ProcessManager implements IProcessManager {
           console.error(`[process-manager] session ${currentId} exit callback failed:`, toErrorMessage(e))
         }
       }
+      // 退出收敛后同判一次清零（exit 路径不经 destroySession，环不会自行停）
+      if (this.processes.size === 0) this.processTableRing.stop()
     })
 
     this.processes.set(sessionId, {
@@ -268,6 +307,10 @@ export class ProcessManager implements IProcessManager {
       createdAt: Date.now(),
     })
     this.clientToId.set(client, sessionId)
+    // 入册后幂等重申环启动：上方 pre-spawn start 与入册之间隔着 spawn await，若此间
+    // 其他 session 的死亡收敛把受管计数降到 0 触发停环，此处重申使「有受管 pi 在册
+    // ⇒ 环在转」在每个加册点后结构性成立（start 幂等，已在转时零副作用）。
+    this.processTableRing.start()
 
     return client
   }
@@ -329,6 +372,8 @@ export class ProcessManager implements IProcessManager {
     } catch (e) {
       console.warn(`[process-manager] [PROCESS-LEAK-RISK] kill failed for session ${sessionId}:`, toErrorMessage(e))
     }
+    // 受管 pi 清零 → 采样环停（空闲 runtime 零开销；样本保留，若随后又有 spawn 重启环）
+    if (this.processes.size === 0) this.processTableRing.stop()
   }
 
   /**
@@ -358,6 +403,8 @@ export class ProcessManager implements IProcessManager {
       console.warn(`[process-manager] destroyAll killing ${ids.length} session(s) [${ids.join(', ')}] (kill_source=destroy_all | who: runtime shutdown / sessionService.destroyAll | chain: fan-out per-session SIGTERM destroy)`)
     }
     await Promise.allSettled(ids.map(id => this.destroySession(id)))
+    // 批量销毁后受管 pi 必清零（destroySession 内已逐个判停；此处兜底幂等）
+    this.processTableRing.stop()
   }
 
   /** Check if the subprocess for a session is still running. */

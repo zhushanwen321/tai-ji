@@ -390,16 +390,17 @@ function cleanExpiredLogs(): void {
     return
   }
   for (const name of entries) {
-    // 只清理已知前缀的日志文件（runtime-* / pi-*.jsonl / pi-crash-*.log / plugin-crash-*.log）。
-    // pi-crash-* 靠 pi- 前缀覆盖；plugin-crash-*（u5b D6-⑤，plugin worker 崩溃取证）
-    // 是新写入面，写入与清理通道同步落地（D6-⑦：有写入无清理 = 新债）。
-    // runtime-uncaught-<date>.log（uncaught-policy 的 appendProcessEscapeLog 逃逸取证，
-    // 非本模块产出）也由 runtime- 前缀覆盖——appendFileSync 逐事件直写、无常驻 fd，
-    // unlink 语义安全。
+    // 只清理本模块产出的日志文件（runtime-* / pi-*.jsonl / pi-crash-*.log / plugin-crash-*.log /
+    // signal-forensics-*.jsonl）。pi-crash-* 靠 pi- 前缀覆盖；plugin-crash-*（u5b D6-⑤，
+    // plugin worker 崩溃取证）是新写入面，写入与清理通道同步落地（D6-⑦：有写入无清理 =
+    // 新债）；signal-forensics-*（2026-10-13 信号归因取证，infra/pi/signal-forensics.ts
+    // 自写不入 logger 流）同理同步登记。runtime-uncaught-<date>.log（uncaught-policy 的
+    // appendProcessEscapeLog 逃逸取证，非本模块产出）也由 runtime- 前缀覆盖——
+    // appendFileSync 逐事件直写、无常驻 fd，unlink 语义安全。
     // 固定名 stderr 文件（electron-runtime-stderr.log / zcode-appserver-stderr.log）
     // 不匹配任何前缀，天然不进超龄清单（writer 持有型 append fd 的 unlink 会造成
     // 「写成功、盘上无文件」的静默丢失；其治理归 writer 侧 size 轮转）。
-    if (!name.startsWith('runtime-') && !name.startsWith('pi-') && !name.startsWith('plugin-crash-')) continue
+    if (!name.startsWith('runtime-') && !name.startsWith('pi-') && !name.startsWith('plugin-crash-') && !name.startsWith('signal-forensics-')) continue
     const full = join(logsDir, name)
     try {
       if (statSync(full).mtimeMs < cutoff) {

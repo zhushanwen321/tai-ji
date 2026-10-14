@@ -356,9 +356,25 @@ export class MessageDispatcher {
    * （session-service gate.configure 接线），成功路径终态 reason 写 'Convergence abort (auto)'
    * ——收敛环掐的是 runtime 自动收敛的补发 turn，终态/日志不得谎报用户操作语义。
    * aborted 完成帧广播两种 source 均保持不变（前端 no-op，U2 明确不动广播逻辑）。
+   *
+   * [compaction-cancel] 压缩取消形态（source='user' ∧ 入口态 isCompacting ∧ ¬isGenerating）：
+   * composer 发送位在压缩期是「终止压缩」钮（2026-10 用户裁决），点击走本方法。此时没有
+   * turn 在中止（pi compact() 自身已先 abort 过回合；idle 手动 /compact 更无回合），用户
+   * 中止的是压缩流程本身——成功路径因此**不写 stopped 终态**（会话仍存活且空闲，写了会在
+   * 重启/重扫后把健康会话误标成 stopped + 骗出一个 restore 入口）、**不广播
+   * message.complete{aborted}**（无流式实体可收口，帧语义谎报「回合被中止」）。占用
+   * idle 复位与 abort-idle 对账保持（压缩期排队的消息立即投出，compacting 维度由 pi
+   * compaction_end{aborted} 事件复位）。入口态在 await 前快照——compaction_end 事件与 RPC
+   * reply 的到达序不定，await 后读 isCompacting 会漂移。
    */
   async abort(sessionId: string, source: AbortSource = 'user'): Promise<void> {
     const client = this.getClientOrThrow(sessionId)
+    // [compaction-cancel] 中止意图快照先于 await 取（事件流与 RPC reply 到达序不定，await 后
+    // 读 isCompacting 会因 compaction_end 已处理而漂移）。压缩期无 turn 在跑（isGenerating=false）
+    // 时用户的「停止」中止的是压缩流程而非回合——成功路径走压缩取消语义（见方法头注）。
+    const activeAtEntry = this.svc.getSessionByClient(client)
+    const compactionCancel =
+      source === 'user' && !!activeAtEntry && activeAtEntry.isCompacting && !activeAtEntry.isGenerating
     try {
       await client.abort()
     } catch (e) {
@@ -394,8 +410,17 @@ export class MessageDispatcher {
     const active = this.svc.getSessionByClient(client)
     if (active) {
       // occupancy #9（D2 迁移）：abort 成功 → 'idle' 行（与上方的 message.complete{aborted}
-      // 收口对称）。isGenerating=false 由原语 flags 派生。
+      // 收口对称）。isGenerating=false 由原语 flags 派生。compacting 维度不在此行复位
+      // （'idle' 行只动 turn）——由 pi compaction_end{aborted} 事件的 'compacting-end'
+      // 转移复位（压缩取消与压缩成功/失败同路，三路对称）。
       applySessionOccupancyTransition(active, this.messageBus, 'idle')
+    }
+    // [compaction-cancel] 压缩取消：无 turn 被中止（入口态 ¬isGenerating）→ 不写 stopped
+    // 终态、不广播 message.complete{aborted}（理由见方法头注）；占用复位与队列 flush 保持。
+    if (compactionCancel) {
+      console.warn(`[message-dispatcher] compaction cancel accepted (no turn in flight), sid=${sessionId}`)
+      void this.delivery?.reconcile(sessionId, 'abort-idle')
+      return
     }
     // W4：abort 写 stopped 终态。[U2] reason 按发起方分型：收敛环 re-abort（restore-abort
     // 收敛环掐补发 turn / 掐 idle pi）是 runtime 自动收敛而非用户操作，写区分性文案——

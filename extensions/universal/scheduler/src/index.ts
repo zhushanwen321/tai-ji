@@ -256,13 +256,14 @@ export default function schedulerExtension(pi: ExtensionAPI): void {
   pi.registerTool({
     name: 'schedule',
     label: 'Schedule',
+    // deferred（tool-declaration-slimming D4）：不常驻声明，tool_search 命中即激活；
+    // 迁移写入的 +tool_search 条目（runtime pi-codemode-settings）承载检索入口
+    exposure: 'deferred',
     description:
       'Create a scheduled task that fires a message at intervals or cron schedule. ' +
-      'The task is created immediately (no confirmation form). Call it only when the user ' +
-      'has already expressed the timing; if the timing or the reminder content is missing ' +
-      'or ambiguous, clarify with the user first — never guess a schedule. The task only ' +
-      'fires while this session stays open. The response includes the task id and next run ' +
-      'time(s); repeat them back to the user so the task is easy to verify or undo.',
+      'The task is created immediately (no confirmation form). It is a session-scoped reminder, ' +
+      'not a system cron job — it only fires while this session stays open. ' +
+      'The response includes the task id and next run time(s).',
     parameters: ScheduleParams,
     promptGuidelines: scheduleGuidelines,
     async execute(
@@ -284,6 +285,8 @@ export default function schedulerExtension(pi: ExtensionAPI): void {
   pi.registerTool({
     name: 'schedule_control',
     label: 'Schedule Control',
+    // deferred（tool-declaration-slimming D4）：同 schedule
+    exposure: 'deferred',
     description: 'Manage scheduled tasks: list, toggle, delete, or run immediately.',
     parameters: ScheduleControlParams,
     promptGuidelines: controlGuidelines,

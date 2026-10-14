@@ -2,7 +2,7 @@
  * useLoadMoreHistory —— 「加载更早」游标翻页的 loading 状态 + handler + 触顶自动加载（从 MessageStream.vue 拆出）。
  *
  * 职责（单一变化轴「load-more 交互态」，原 misplaced 在容器组件 MessageStream.vue 内）：
- * - loadingMore：加载中 ref（驱动按钮 disabled + spinner + 文案切换）。
+ * - loadingMore：加载中状态（驱动按钮 disabled + spinner + 文案切换）。
  * - showLoadMore：是否还有更早历史可加载（[u6] 由 store 截断窗口状态 truncated 派生，非默认 true）。
  * - handleLoadMore：防重入的加载调用（loadingMore/showLoadMore 守卫）——[u6] 走
  *   useChat.loadMoreHistory 游标翻页（D4 中期形态，原 getFullHistory
@@ -10,9 +10,19 @@
  * - onScrollOffset：**滚到顶自动续载**（2026-09-19 会话实证：历史预算按字节收窗后，重会话
  *   一页仅 1–2 轮，靠手动点按钮翻页体验支撑不了）——偏移触顶且用户已脱离锚定时自动再拉一页，
  *   顶部条退化为「正在续载 / 还有更早」的进度位（按钮保留，作为触顶信号不可达时的兜底）。
+ * - slowLine：**慢网兜底细线**（OpenDesign specs/chat/history-load-and-run-grouping.md §2.2）——
+ *   加载启动 150ms 未完成才置 true（快载零指示防闪烁），完成即置 false；消费方
+ *   （MessageStream .hist-line-sweep）渲染 2px accent 横扫细线并承担 160ms 淡出。
  * - loadMoreError：[RD-1#4] 上一次「加载更早」失败态——失败时 truncated 窗口不变（与「已到头」
  *   在状态上不可区分），旧实现只 console.warn + finally 复位 loading，用户侧症状 = 「点了没反应、
- *   无失败提示」。现由对话流顶部条渲染可重试错误行（LoadMoreErrorBar）；成功 / 切换 session 复位。
+ *   无失败提示」。现由对话流顶部条渲染可重试错误行（LoadMoreErrorBar）。
+ *
+ * **per-session 隔离（ADR-0049 Map 分区范式，2026-10 审查迁移）**：loadingMore / isPrepend /
+ * loadMoreError / slowLine 全部收进 useSessionScopedState 分区——切 sid 天然隔离（不再用
+ * 实例级 ref + watch(sessionId) 手动复位）；跨 await 的收敛一律 `updateFor(sidAtStart)`
+ * 写回**发起时**的分区，迟到落盘不污染新会话（M1 竞态的结构性消除）；session 删除经
+ * cleanup 注册表清分区，迟到写对已删分区 no-op（updateFor 契约）。失败态按分区归属：
+ * 切走再切回仍见该 session 自己的失败行（可重试），不跨 session 泄漏。
  *
  * 滚动锚定（P-paging 前半）：handleLoadMore 期间 isPrepend=true 喂 `<Virtualizer :shift>`，
  * virtua 按列表**末尾**保位（reverse scroll adjustment）——prepend 插入的更早历史不把
@@ -23,8 +33,9 @@
  *
  * @param sessionId 当前 session id getter
  */
-import { computed, nextTick, ref, watch, type ComputedRef, type Ref } from 'vue'
+import { computed, nextTick, reactive, type ComputedRef, type Ref } from 'vue'
 import { useChat } from '@/composables/features/chat/useChat'
+import { useSessionScopedState } from '@/composables/useSessionScopedState'
 import { LOAD_MORE_RESERVED_HEIGHT } from './message-stream-layout'
 
 /**
@@ -41,6 +52,26 @@ export const TOP_AUTO_LOAD_THRESHOLD_PX = 64
  * 与 LOAD_MORE_RESERVED_HEIGHT 同族但独立：无失败行时占位不变（0 增补）。
  */
 export const LOAD_MORE_ERROR_ROW_HEIGHT = 32
+
+/**
+ * [hist-line] 慢网兜底细线的显隐延迟（ms）：加载启动后超过该时长仍未完成才显示细线
+ * （OpenDesign specs/chat/history-load-and-run-grouping.md §2.2）。快载（<150ms）全程
+ * 零指示防闪烁——真实侧 cursor 翻页多为快载，细线只在慢网/大页时兜底显形。
+ * 完成后的 160ms opacity 淡出不由本常量承担（CSS transition，见 MessageStream .hist-line-sweep）。
+ */
+export const SLOW_LINE_DELAY_MS = 150
+
+/** per-session 分区态（reactive 容器，useSessionScopedState 响应式契约要求） */
+interface LoadMorePartition {
+  /** 加载中（防重入 + 按钮 spinner） */
+  loadingMore: boolean
+  /** [cw wave w3 / IF8] 顶部插入信号（驱动 `<Virtualizer :shift>` 保位） */
+  isPrepend: boolean
+  /** [RD-1#4] 上一次「加载更早」失败（顶部条渲染可重试错误行） */
+  loadMoreError: boolean
+  /** [hist-line] 慢网兜底细线显隐（spec §2.2） */
+  slowLine: boolean
+}
 
 export function useLoadMoreHistory(
   sessionId: () => string,
@@ -59,42 +90,75 @@ export function useLoadMoreHistory(
   isPrepend: Ref<boolean>
   /** 滚动位置信号入口（MessageStream 的 virtua @scroll 透传 offset）——触顶自动续载判定点。 */
   onScrollOffset: (offset: number, isDetached: boolean) => void
-  /** [RD-1#4] 上一次「加载更早」失败（顶部条渲染可重试错误行；成功/切 session 复位） */
+  /** [RD-1#4] 上一次「加载更早」失败（顶部条渲染可重试错误行；按分区归属本 session） */
   loadMoreError: Ref<boolean>
   /** [RD-1#4] virta startMargin：顶部条占位（含失败重试行增补） */
   topBarReservedHeight: ComputedRef<number>
+  /** [hist-line] 慢网兜底细线显隐（spec §2.2）：加载启动 150ms 未完成才 true，
+   *  完成（成功/失败）即 false；淡出由消费方 CSS transition 承担。 */
+  slowLine: Ref<boolean>
 } {
   const { loadMoreHistory, hasMoreHistory: checkHasMore } = useChat()
-  /** 「加载更早」loading 状态 */
-  const loadingMore = ref(false)
-  /** [cw wave w3 / IF8] 顶部插入信号：handleLoadMore 期间 true，驱动 `<Virtualizer :shift>` 保位 */
-  const isPrepend = ref(false)
+
+  // [ADR-0049 迁移] per-session 交互态 = Map 分区；init 必须 reactive（工厂响应式契约：
+  // plain object 的 mutate 不触发下游 computed）
+  const state = useSessionScopedState<LoadMorePartition>(computed(() => sessionId()), () =>
+    reactive({
+      loadingMore: false,
+      isPrepend: false,
+      loadMoreError: false,
+      slowLine: false,
+    }),
+  )
+
   /** 是否有更早历史可加载（store 截断窗口 truncated 派生，非默认 true） */
   const showLoadMore = computed(() => checkHasMore(sessionId()))
-  /** [RD-1#4] 上一次「加载更早」失败（true = 顶部条渲染可重试错误行；窗口状态未变） */
-  const loadMoreError = ref(false)
 
-  // 失败态不跨 session 残留：切走再切回不应看到上一个 session 的失败行
-  watch(sessionId, () => { loadMoreError.value = false })
+  // 消费面 computed：读当前 sid 分区（切 sid 自动切视图，无需手动复位）
+  const loadingMore = computed(() => state.current.value.loadingMore)
+  const isPrepend = computed(() => state.current.value.isPrepend)
+  const loadMoreError = computed(() => state.current.value.loadMoreError)
+  const slowLine = computed(() => state.current.value.slowLine)
 
   async function handleLoadMore(): Promise<void> {
     if (loadingMore.value || !showLoadMore.value) return
-    // [cw wave w3 / IF8] 顶部插入信号前置 true：virtua :shift=true 期间，renderItems 变长
-    //   会保持滚动位置相对末尾不变（即插入的历史不把视口往下推）。
-    isPrepend.value = true
-    loadingMore.value = true
+    // [ADR-0049 M1 竞态] 捕获发起时 sid：跨 await 的全部落盘走 updateFor 写回原分区，
+    // 切 sid 后的迟到收敛不写入新分区（updateFor 对已删分区 no-op，防僵尸写回）。
+    const sidAtStart = sessionId()
+    state.update((s) => {
+      // [cw wave w3 / IF8] 顶部插入信号前置 true：virtua :shift=true 期间，renderItems 变长
+      //   会保持滚动位置相对末尾不变（即插入的历史不把视口往下推）。
+      s.isPrepend = true
+      s.loadingMore = true
+    })
+    // [hist-line] 慢网兜底：150ms 未完成才置 true（快载零指示防闪烁，spec §2.2）。
+    // 定时器自中和：settle 后触发即 no-op——不持共享句柄，跨 session 并发加载互不误清。
+    let settled = false
+    setTimeout(() => {
+      if (settled) return
+      state.updateFor(sidAtStart, (s) => {
+        s.slowLine = true
+      })
+    }, SLOW_LINE_DELAY_MS)
     try {
-      const ok = await loadMoreHistory(sessionId())
       // loadMoreHistory 内部更新窗口状态（truncated=false 时 showLoadMore 收敛消失）
       // 等 virtua 处理完 data length change（vue 响应式 → Virtualizer watch data.length），
       // shift=true 在此窗口内生效后才能翻 false，否则后到的高度变化（RO 测量）失去保位。
+      const ok = await loadMoreHistory(sidAtStart)
       await nextTick()
       // [RD-1#4] 失败显形：返回 false 时窗口状态未变（用户无法从 UI 推断失败），
-      // 落 loadMoreError 由顶部条渲染可重试错误行；成功即清除上次失败态。
-      loadMoreError.value = !ok
+      // 落 loadMoreError 由顶部条渲染可重试错误行；成功即清除本 session 上次失败态。
+      state.updateFor(sidAtStart, (s) => {
+        s.loadMoreError = !ok
+      })
     } finally {
-      isPrepend.value = false
-      loadingMore.value = false
+      settled = true
+      // 细线立即翻 false，160ms opacity 淡出由消费方 CSS transition 承担（spec §2.2）
+      state.updateFor(sidAtStart, (s) => {
+        s.slowLine = false
+        s.isPrepend = false
+        s.loadingMore = false
+      })
     }
   }
 
@@ -107,7 +171,8 @@ export function useLoadMoreHistory(
    *   底的强滚尚未落地且 stickToBottom 被 force 置 true，不会白拉一页历史。
    * - offset ≤ THRESHOLD：触顶判定；续载后 virtua :shift 保位把 offset 抬到阈值以上，
    *   天然节流为「每次主动上滑至顶拉一页」。
-   * 防重入直接复用 handleLoadMore 自身的 loadingMore/showLoadMore 守卫（单一状态源）。
+   * 防重入直接复用 handleLoadMore 自身的 loadingMore/showLoadMore 守卫（单一状态源，
+   * per-session 分区各守各的）。
    */
   function onScrollOffset(offset: number, isDetached: boolean): void {
     if (!isDetached) return
@@ -135,5 +200,6 @@ export function useLoadMoreHistory(
     onScrollOffset,
     loadMoreError,
     topBarReservedHeight,
+    slowLine,
   }
 }

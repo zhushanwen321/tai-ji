@@ -2,11 +2,13 @@
  * PiCodemodeSettings — settings.json tools 域（defaultTools 字段）的 infra 字段域模块
  * （codemode 设计 D1/D2：启动迁移 + 开关写入共用的唯一写点）。
  *
- * 职责三件：
+ * 职责四件：
  *   1. 激活集解析（resolveDefaultToolSet / isCodemodeActive）——复刻 pi 1.0.0 实装语义，
  *      供读侧显示判定（开关显示开/关）；
  *   2. 启动迁移（ensureCodemodeDefaultEntry）——字段缺失时幂等写默认条目；
- *   3. 开关写入（setCodemodeEntry）——负条目占位 + 只增删 codemode 相关系目。
+ *   3. 开关写入（setCodemodeEntry）——负条目占位 + 只增删 codemode 相关系目；
+ *   4. tool_search 启动迁移（ensureToolSearchDefaultEntry）——幂等追加条目
+ *      （tool-declaration-slimming D4：-tool_search 视为已含，用户关闭不被打回）。
  *
  * 全部写入经 updateSettingsFields('tools', …)（跨进程锁 + 字段域 merge，settings.json
  * 三方共享：taiji 各字段域 / pi 子进程 / 用户手工编辑），绝不直写文件。
@@ -53,6 +55,12 @@ export const CODEMODE_DEFAULT_ENTRY = '+codemode'
 
 /** 关闭态占位条目（D2：负条目占位——字段保留 + codemode 关闭跨重启持久的唯一同时满足形态）。 */
 export const CODEMODE_DISABLE_ENTRY = '-codemode'
+
+/** tool_search 工具名（pi builtin tool-search extension 注册名，BM25 检索入口，P2）。 */
+export const TOOL_SEARCH_TOOL_NAME = 'tool_search'
+
+/** 启动迁移写入的默认条目（tool-declaration-slimming D4：增量语法追加）。 */
+export const TOOL_SEARCH_DEFAULT_ENTRY = '+tool_search'
 
 /** pi DEFAULT_TOOL_NAMES 同构（settings-manager.js:35）。 */
 export const PI_DEFAULT_TOOL_NAMES = ['read', 'bash', 'edit', 'write'] as const
@@ -120,6 +128,50 @@ export function ensureCodemodeDefaultEntry(): void {
 }
 
 /**
+ * 含 tool_search 条目判定（tool-declaration-slimming D4）：`+tool_search` / `-tool_search`
+ * / 纯名 `tool_search` 任一形态在场即「已含」。非字符串元素跳过（与 pi 解析语义一致：
+ * 解析前剥除，不参与条目匹配）；`+`/`-` 单字符坏条目剥前缀后为空名，不命中。
+ */
+function hasToolSearchEntry(entries: unknown[]): boolean {
+  return entries.some(entry => {
+    if (typeof entry !== 'string') return false
+    const name = isToolModifier(entry) ? entry.slice(1) : entry
+    return name === TOOL_SEARCH_TOOL_NAME
+  })
+}
+
+/**
+ * 启动迁移幂等追加（tool-declaration-slimming D4）：defaultTools 不含任何 tool_search
+ * 条目（三种形态任一都不在场）→ 追加 "+tool_search"；已含任一形态 → 不动。
+ *
+ * - **"-tool_search" 视为已含**（用户经 settings 手工写入负条目 = 唯一关闭形态，不被
+ *   打回）：pi 按条目顺序应用增删（resolveDefaultToolSet 同构），把 "+tool_search" 追加
+ *   到负条目尾部会覆盖用户的关闭意图，故负条目在场时永不追加。
+ * - **不复用 codemode 迁移的「字段未设置才写」判定**——沿用该判定则已有 defaultTools
+ *   内容的实例（存量实例几乎全部如此）永不激活 tool_search。
+ * - 字段缺失（undefined/null）→ 写 ["+tool_search"]（与 codemode D2 缺省写入同口径）；
+ *   组合根序列 codemode 迁移在先（见 runCodemodeStartupMigration），生产路径多走数组
+ *   追加分支，本分支保证函数单独调用时同样自洽。
+ * - 非数组坏值 → 不碰（尊重已配置，与 codemode 迁移同构；pi 侧解析为空激活集）。
+ *
+ * 经 updateSettingsFields('tools', …)（跨进程锁 + 字段域 merge），用户其他条目与其他
+ * 字段零触碰；settings.json 损坏拒入语义同 ensureCodemodeDefaultEntry（store 层统一预检）。
+ */
+export function ensureToolSearchDefaultEntry(): void {
+  updateSettingsFields('tools', (s: PiSettings) => {
+    if (!Array.isArray(s.defaultTools)) {
+      if (isFieldUnset(s.defaultTools)) {
+        s.defaultTools = [TOOL_SEARCH_DEFAULT_ENTRY]
+      }
+      return
+    }
+    if (!hasToolSearchEntry(s.defaultTools)) {
+      s.defaultTools = [...s.defaultTools, TOOL_SEARCH_DEFAULT_ENTRY]
+    }
+  })
+}
+
+/**
  * 开关写入（D2 语义表）。用户非 codemode 条目始终原样保留；重复调用幂等。
  *
  * - **开**：非法形态值（非数组）→ 显式配置动作，规范化覆盖为 ["+codemode"]；数组 →
@@ -155,10 +207,17 @@ export function setCodemodeEntry(enabled: boolean): void {
 }
 
 /**
- * 组合根启动迁移入口（codemode 设计 D1/D2/A1：listen 前同步段、与 cleanLeakedPackages
- * 同窗口、先于一切 pi 进程 spawn）。损坏 → updateSettingsFields 锁内预检拒入（结构化
- * 告警由 store 层落，含路径与恢复指引）+ 本层 catch 留痕不阻塞启动（沿 cleanLeakedPackages
- * ES1 风格，修复后重启自动补跑幂等迁移）；未损坏 → 幂等默认写入。
+ * 组合根启动迁移入口（codemode 设计 D1/D2/A1 + tool-declaration-slimming D4：listen 前
+ * 同步段、与 cleanLeakedPackages 同窗口、先于一切 pi 进程 spawn）。
+ *
+ * **顺序约束：codemode 迁移在先、tool_search 迁移在后**——两迁移共享 defaultTools 字段，
+ * 字段缺失时 codemode 先写 ["+codemode"]，tool_search 迁移在其上追加；反序则 tool_search
+ * 先写字段、codemode 的「字段存在即尊重」判定把 codemode 永久落下。顺序由本入口结构性
+ * 固定，调用方只经此入口触发启动迁移。
+ *
+ * 损坏 → updateSettingsFields 锁内预检拒入（结构化告警由 store 层落，含路径与恢复指引）
+ * + 本层 catch 留痕不阻塞启动（沿 cleanLeakedPackages ES1 风格，修复后重启自动补跑幂等
+ * 迁移）；未损坏 → 幂等写入。
  */
 export function runCodemodeStartupMigration(): void {
   try {
@@ -169,6 +228,13 @@ export function runCodemodeStartupMigration(): void {
     // 损坏拒入（SettingsWriteRejectedError）同样走此处：store 层已落结构化告警，
     // 本条留痕补「迁移被跳过、重启自动补跑」的后果说明。
     console.warn('[pi-codemode-settings] codemode 启动迁移失败（不阻塞启动，下次启动重试幂等）:', e)
+  }
+  try {
+    ensureToolSearchDefaultEntry()
+  } catch (e) {
+    // 同上降级口径（tool-declaration-slimming D4 / P2）：tool_search 缺失只损失检索
+    // 入口，deferred 工具退化为不可达，不阻塞启动主路径。
+    console.warn('[pi-codemode-settings] tool_search 启动迁移失败（不阻塞启动，下次启动重试幂等）:', e)
   }
 }
 

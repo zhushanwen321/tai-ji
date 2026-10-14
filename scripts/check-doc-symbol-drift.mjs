@@ -396,6 +396,7 @@ const COMMENT_DOC_REF_EXEMPT = new Map([
   ['apps/electron/main/diagnostics/export-diagnostic-bundle.ts::summary.md', '运行时生成物文件名（诊断 zip 内置 summary.md，代码自身生成），非 docs 引用'],
   ['*::aggregated.md', 'zsw review-fix-loop 工作流脚本（.zcode/workflow-drafts，gitignored 产物目录）自述其产物文件名，非本仓 docs 引用'],
   ['*::delivery-ownership-kernel.md', '投递所有权内核设计文档为 dev-flow 工作流产物（.tmp/dev-flow/，按规不入库）；决策沉淀 ADR-0074，设计章节锚点（§/D 编号）指工作盘文档'],
+  ['*::tool-declaration-slimming.md', '工具声明精简设计文档为 tech-design 工作流产物（.tmp/tech-design/，按规不入库）；决策沉淀 ADR-0134/0135/0136，设计章节锚点（§/D 编号）指工作盘文档（同 delivery-ownership-kernel 先例）'],
 ])
 
 /**

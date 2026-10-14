@@ -1012,3 +1012,51 @@ describe('[actions-anchor] 操作栏只挂末位 text 块', () => {
     expect(wrapper.findAll('[data-testid="turn-actions-anchor"]').length).toBe(0)
   })
 })
+
+// ─── 正文颜色逐消息派生（chat-flow-text-color D1）─────────────────────────────
+// pi 回合 =「assistant 消息 → 工具 → assistant 消息 → …」循环，mid-turn 气泡的 status
+// 要到回合级 message.complete 才收口；streaming prop 若直接跟 status，长工具回合中已
+// 写完的正文一直滞留 streaming 灰。此处断言 Turn 的派生：streaming = status streaming
+// 且未 textFinalized（事实源 = core message_end 打标，见 registry markStreamingAssistantTextFinalized）。
+describe('正文颜色逐消息派生（chat-flow-text-color D1）', () => {
+  function makeTextTurn(status: Message['status'], textFinalized?: boolean): MessageTurn {
+    const assistant: Message = {
+      id: 'a1',
+      role: 'assistant',
+      content: '分析正文',
+      status,
+      timestamp: NOW,
+      ...(textFinalized !== undefined && { textFinalized }),
+    }
+    return {
+      index: 1,
+      user: { id: 'u1', role: 'user', content: 'hi', status: 'complete', timestamp: NOW },
+      assistants: [assistant],
+      isStreaming: status === 'streaming',
+      hasFoldable: false,
+    }
+  }
+  const mountAndProbe = (turn: MessageTurn) =>
+    mount(Turn, {
+      props: { turn, sessionId: SID, isLastTurn: true },
+      global: {
+        provide: mockChatProvide({}),
+        stubs: { UserBubble: true, TurnMeta: true, TurnSummary: true, ChangeSetCard: true, Block: BlockStub },
+      },
+    })
+
+  it('streaming 且未定稿 → streaming=true（写作中的灰）', () => {
+    const wrapper = mountAndProbe(makeTextTurn('streaming'))
+    expect(wrapper.find('.trace-blk[data-type="text"]').attributes('data-streaming')).toBe('true')
+  })
+
+  it('streaming 但已 textFinalized → streaming=false（mid-turn 定稿翻白）', () => {
+    const wrapper = mountAndProbe(makeTextTurn('streaming', true))
+    expect(wrapper.find('.trace-blk[data-type="text"]').attributes('data-streaming')).toBe('false')
+  })
+
+  it('complete 回归锚 → streaming=false', () => {
+    const wrapper = mountAndProbe(makeTextTurn('complete'))
+    expect(wrapper.find('.trace-blk[data-type="text"]').attributes('data-streaming')).toBe('false')
+  })
+})

@@ -74,9 +74,17 @@ SPLIT_JUSTIFIED_SCAN_LINES = 30
 # 驱动 + @starting-style 的展开淡入过渡。tailwindcss-animate 插件未安装，
 # data-[state]:animate-* 死类不生成 CSS；@starting-style + [data-state] 属性选择器
 # 是 Tailwind 无法表达的，属 AGENTS.md 前端编码规范 escape hatch（与 MainPanel 多值 shadow 同类）。
+# [HISTORICAL] Block.vue 的 .text-sweep（执行中文字扫光，ui-optimize-unified 决策 10/N13）：
+# background-clip:text + 透明字色 + 变量参数化渐变（--sweep-base 缺省 dim、label 处覆写 mid）
+# + 250% 背景尺寸 + 全局 text-sweep keyframes 引用的多属性组合，Tailwind 任意值内联需 6 类 ×
+# 5 消费点且 motion-reduce 变体逐点易漏（文件内 escape hatch 注释同论证）。属 AGENTS.md 前端
+# 编码规范 escape hatch（Tailwind 无法表达的场景），与 MainPanel 多值 shadow 同类。
 # 单组件样式归 scoped（多组件共享原语 popover/dialog/overlay 才进 style.css 全局层，
 # 见 check_css_tokens.py ALLOWED_GLOBAL_ANIMATION_CLASSES 判据）。
-STYLE_SCOPED_WHITELIST: list[str] = ['shell/MainPanel.vue', 'sidebar/UpdateButton.vue', 'settings/SettingsModal.vue', 'collapsible/CollapsibleContent.vue', 'sidebar/Sidebar.vue']
+# [2026-10 trace 块动效] RunningBlockIcon.vue（每类活动专属运行动效）：纯动效组件——
+# scoped CSS 全部为动画本体（keyframes + offset-path path() + conic/mask 几何），
+# Tailwind 无法表达 scoped-keyframe 引用与 offset-path 路径的组合；Block.vue .text-sweep 同族先例。
+STYLE_SCOPED_WHITELIST: list[str] = ['shell/MainPanel.vue', 'sidebar/UpdateButton.vue', 'settings/SettingsModal.vue', 'collapsible/CollapsibleContent.vue', 'sidebar/Sidebar.vue', 'features/chat/Block.vue', 'features/chat/RunningBlockIcon.vue']
 
 # CSS 选择器检测正则
 RE_STYLE_SELECTOR = re.compile(r'^[.\w\-]+[\s,]*\{')

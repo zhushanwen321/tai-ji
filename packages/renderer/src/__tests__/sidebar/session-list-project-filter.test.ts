@@ -76,9 +76,15 @@ function setupProjects(activeId: string, names: Array<[string, string]>): Return
   return store
 }
 
-/** 定位某项目的分组容器（组体常驻 DOM，text() 断言按组隔离，不受折叠态影响） */
+/** 定位某项目的分组容器（组体常驻 DOM，text() 断言按组隔离，不受折叠态影响）。
+ *  [2026-10-13 方案 A] 默认项目不再渲染 ProjectGroup（无组框）——本 helper 仅适用命名项目。 */
 function groupOf(wrapper: ReturnType<typeof mountList>, projectId: string) {
   return wrapper.find(`[data-testid="project-group"][data-project-id="${projectId}"]`)
+}
+
+/** 定位默认项目平铺区（置顶、无组框；用户裁决 2026-10-13：默认项目 = 未归类收件箱） */
+function defaultZoneOf(wrapper: ReturnType<typeof mountList>) {
+  return wrapper.find('[data-testid="default-project-flat-zone"]')
 }
 
 beforeEach(() => {
@@ -88,15 +94,18 @@ beforeEach(() => {
 })
 
 describe('SessionList: 项目锚定分组（全部项目并列，按 projectId 切分）', () => {
-  it('默认项目组 = 未归类 + 孤儿聚合；归属现存命名 project 的 session 落各自组（不重不漏）', () => {
+  it('默认项目区（平铺置顶）= 未归类 + 孤儿聚合；归属现存命名 project 的 session 落各自组（不重不漏）', () => {
     // proj-b 不存在（sc 的归属是孤儿）；proj-a 存在（sa/sd 正常归属）
     setupProjects(DEFAULT_PROJECT_ID, [['proj-a', 'Alpha']])
     const wrapper = mountList()
 
-    const defaultGroup = groupOf(wrapper, DEFAULT_PROJECT_ID)
-    expect(defaultGroup.text()).toContain('会话 sb') // 未归类
-    expect(defaultGroup.text()).toContain('会话 sc') // 孤儿（归属已删 proj-b）不丢失可见性
-    expect(defaultGroup.text()).not.toContain('会话 sa')
+    const zone = defaultZoneOf(wrapper)
+    expect(zone.exists()).toBe(true)
+    expect(zone.text()).toContain('会话 sb') // 未归类
+    expect(zone.text()).toContain('会话 sc') // 孤儿（归属已删 proj-b）不丢失可见性
+    expect(zone.text()).not.toContain('会话 sa')
+    // 默认项目不渲染 ProjectGroup（无组框，用户裁决 2026-10-13）
+    expect(groupOf(wrapper, DEFAULT_PROJECT_ID).exists()).toBe(false)
 
     const projA = groupOf(wrapper, 'proj-a')
     expect(projA.text()).toContain('会话 sa')
@@ -105,22 +114,24 @@ describe('SessionList: 项目锚定分组（全部项目并列，按 projectId �
     expect(projA.text()).not.toContain('会话 sc')
   })
 
-  it('同 cwd 混合归属精确切分：/repo 组的三个 session 分落三处归属（sa→proj-a，sb→默认，sc→proj-b）', () => {
+  it('同 cwd 混合归属精确切分：/repo 组的三个 session 分落三处归属（sa→proj-a，sb→默认区，sc→proj-b）', () => {
     setupProjects(DEFAULT_PROJECT_ID, [['proj-a', 'Alpha'], ['proj-b', 'Beta']])
     const wrapper = mountList()
 
-    expect(groupOf(wrapper, DEFAULT_PROJECT_ID).text()).toContain('会话 sb')
+    expect(defaultZoneOf(wrapper).text()).toContain('会话 sb')
     expect(groupOf(wrapper, 'proj-a').text()).toContain('会话 sa')
     expect(groupOf(wrapper, 'proj-b').text()).toContain('会话 sc')
   })
 
-  it('组头计数 = 组内实际会话数（用户可见 DOM：计数与组内行数一致）', () => {
+  it('组头计数 = 组内实际会话数（用户可见 DOM：计数与组内行数一致）；默认区无计数 chip、行数 = 归属数', () => {
     setupProjects(DEFAULT_PROJECT_ID, [['proj-a', 'Alpha'], ['proj-b', 'Beta']])
     const wrapper = mountList()
 
     expect(groupOf(wrapper, 'proj-a').find('[data-testid="project-group-count"]').text()).toBe('2') // sa + sd
     expect(groupOf(wrapper, 'proj-b').find('[data-testid="project-group-count"]').text()).toBe('1') // sc
-    expect(groupOf(wrapper, DEFAULT_PROJECT_ID).find('[data-testid="project-group-count"]').text()).toBe('1') // sb
+    // 默认项目区无组头（无计数 chip）；平铺行数 = 归属数（sb）
+    expect(defaultZoneOf(wrapper).find('[data-testid="project-group-count"]').exists()).toBe(false)
+    expect(defaultZoneOf(wrapper).findAll('.session-item')).toHaveLength(1)
   })
 
   it('命名项目无任何归属 session → 组内空态（「点组头「+」在此新建任务」）', () => {
@@ -135,16 +146,19 @@ describe('SessionList: 项目锚定分组（全部项目并列，按 projectId �
     expect(emptyGroup.find('[data-testid="project-group-empty"]').text()).toContain('新建任务')
   })
 
-  it('「当前」chip 只渲染在锚定组；组序默认项目固定最后（用户裁决：兜底聚合恒在尾部）', () => {
+  it('「当前」chip 只渲染在锚定命名组；默认项目不渲染组（平铺区置顶、无框）', () => {
     setupProjects('proj-a', [['proj-a', 'Alpha'], ['proj-b', 'Beta']])
     const wrapper = mountList()
 
     expect(groupOf(wrapper, 'proj-a').find('[data-testid="project-group-current-chip"]').exists()).toBe(true)
     expect(groupOf(wrapper, 'proj-b').find('[data-testid="project-group-current-chip"]').exists()).toBe(false)
-    expect(groupOf(wrapper, DEFAULT_PROJECT_ID).find('[data-testid="project-group-current-chip"]').exists()).toBe(false)
-
-    const ids = wrapper.findAll('[data-testid="project-group"]').map((g) => g.attributes('data-project-id'))
-    expect(ids[ids.length - 1]).toBe(DEFAULT_PROJECT_ID)
+    // 默认项目无组（无 chip 可言）；平铺区在 DOM 序上先于全部命名组（置顶）
+    expect(groupOf(wrapper, DEFAULT_PROJECT_ID).exists()).toBe(false)
+    const zone = defaultZoneOf(wrapper)
+    expect(zone.exists()).toBe(true)
+    const firstGroup = wrapper.find('[data-testid="project-group"]')
+    const all = Array.from(wrapper.element.querySelectorAll('*'))
+    expect(all.indexOf(zone.element)).toBeLessThan(all.indexOf(firstGroup.element))
   })
 })
 

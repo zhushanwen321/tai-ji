@@ -7,8 +7,9 @@
     不再独立占位：悬停区 = text 块行本身（group/text 门控在 Block 的插槽包装层），悬浮位 =
     text 块上方右侧（块间留白 + 左对齐邻块的行尾空区，不遮正文）。按钮是 text 块的 DOM 子孙，
     鼠标从正文移入按钮期间 group/text 悬停态经 DOM 祖先传递保持不熄灭。
-    本组件只渲染 chip 本体：不透明底（bg-bg-elevated + hairline 边 + 圆角 + shadow-2，同
-    TurnRail/PopoverContent 浮层范式），透明底会让按钮图标直接叠压其覆盖区文字。
+    本组件只渲染 chip 本体：不透明底（bg-bg + border 边 + 圆角 + shadow-2，2026-10-13
+    用户裁决 demo 方案 A 全族迁移后的 PopoverContent 同源档；[HISTORICAL] 曾为 bg-bg-elevated
+    + border-strong 浮层档），透明底会让按钮图标直接叠压其覆盖区文字。
     fork/handoff useTurnActions 在内部调用，不冒泡。
   -->
   <!--
@@ -19,7 +20,7 @@
   -->
   <div
     v-if="lastAssistant"
-    class="turn-summary flex items-center gap-0.5 rounded-md border border-border-strong bg-bg-elevated p-0.5 shadow-2"
+    class="turn-summary flex items-center gap-0.5 rounded-md border border-border bg-bg p-0.5 shadow-2"
   >
     <!-- 复制（纯文本）-->
     <Button

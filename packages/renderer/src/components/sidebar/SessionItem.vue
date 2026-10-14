@@ -31,16 +31,16 @@
     @set-project="emit('setProject', $event)"
     @export-jsonl="emit('exportJsonl', $event)"
   >
-    <!-- 激活态 = demo .si.on（workbench.css 文件尾 Tier B）：无底无框，仅行文字提亮 fg；
-         非激活行不加行级色（标题色三级范式：普通 fg-2 由 Display 的 .nm 分支承载，
-         hover 只变背景不变字色——demo .si:hover 仅 background） -->
+    <!-- 激活态（用户裁决 2026-10-13 demo 选型）：选中 = 悬停同色实底（bg-surface-hover）+ 行文字
+         提亮 fg，无竖条无描边——选中强度 ≥ hover（两者同底，字色 fg > fg-2 拉开），普通行不加行级色
+         （标题色三级范式：普通 fg-2 由 Display 的 .nm 分支承载，hover 只变背景不变字色） -->
     <div
       ref="rootEl"
       role="button"
       tabindex="0"
       class="session-item group/item relative flex cursor-pointer select-none items-center gap-[8px] rounded-sm px-[8px] py-[7px] transition-colors duration-[var(--duration-fast)] ease-[var(--ease-out)] hover:bg-surface-hover"
       :class="[
-        active ? 'text-neutral-fg' : '',
+        active ? 'bg-surface-hover text-neutral-fg' : '',
         isDead ? 'opacity-50' : '',
       ]"
       :aria-label="ariaLabel"
@@ -66,16 +66,16 @@
     </div>
   </SessionItemContextMenu>
 
-  <!-- hover 详情卡（demo .sess-pop 形态：fixed 232px / elevated 底 / border-strong / radius-lg
-       / shadow-2 / 行间 hairline 分隔 / 行首 13px 图标 + mono 值 + 末行时间 meta / opacity+
-       translateX dur-fast ease-out 进出过渡 / z-hovercard 梯队 / mouseenter 立即开 + 卡体
-       进入即关） -->
+  <!-- hover 详情卡（2026-10-13 用户裁决 demo 方案 A 全族迁移后：fixed 232px / bg-bg 底
+       （composer 同源档，旧 elevated 浮层档退役）/ border / radius-lg / shadow-2 / 行间
+       hairline 分隔 / 行首 13px 图标 + mono 值 + 末行时间 meta / opacity+ translateX
+       dur-fast ease-out 进出过渡 / z-hovercard 梯队 / mouseenter 立即开 + 卡体进入即关） -->
   <Teleport to="body">
     <Transition name="sess-pop">
       <div
         v-if="detailVisible"
         data-testid="session-detail-card"
-        class="fixed z-[var(--z-hovercard)] w-[232px] rounded-lg border border-border-strong bg-bg-elevated px-3 py-2 text-neutral-fg shadow-2"
+        class="fixed z-[var(--z-hovercard)] w-[232px] rounded-lg border border-border bg-bg px-3 py-2 text-neutral-fg shadow-2"
         :style="detailStyle"
         @pointerenter="onDetailLeave"
       >

@@ -42,10 +42,10 @@ describe('getSystem 分区字号默认档位一次性迁移', () => {
     expect(system.fontScalesDefaultMigrated).toBe(true)
   })
 
-  it('无存量数据 → 新默认 medium 生效', async () => {
+  it('无存量数据 → 新默认生效（sidebar=medium，chat=small，drawer=medium）', async () => {
     const system = await getSystem(new InMemoryStorage())
     expect(system.fontScales?.sidebar).toBe('medium')
-    expect(system.fontScales?.chat).toBe('medium')
+    expect(system.fontScales?.chat).toBe('small') // chat-font-default-small：chat 默认小档
     expect(system.fontScales?.drawer).toBe('medium')
   })
 

@@ -42,8 +42,9 @@ export interface DiscoveredEngine {
   /**
    * manifest `processModel` 解析产物（缺省归一 'per-window'；pi-workflow-run-resource-model
    * §3.3 决策 3）。宿主实例管理分流读位：per-window → 窗口作用域实例；shared-service →
-   * registry 单例（现状路径）。挂在条目级而非 descriptor——descriptor 归注册表消费，
-   * 分流判据属发现产物（接线单元自条目读取）。
+   * registry 单例（现状路径）。同源同值三处分发：本条目字段 + descriptor.manifest
+   * （读位 = engineProcessModelOfDescriptor）+ RemoteEngine 快照，漂移由扫描一致性
+   * 测试兜底。
    */
   processModel: EngineProcessModel;
   /** L3 显式 config（initialize.engineConfig 透传；L1/L2 manifest 发现无此项）。 */
@@ -218,6 +219,13 @@ function buildManifestCliDescriptor(params: {
     manifest: {
       ...(modelCatalog !== undefined ? { modelCatalog } : {}),
       ...(displayName !== undefined ? { displayName } : {}),
+      // 进程形态声明同源进 descriptor（读位 = engineProcessModelOfDescriptor → 宿主
+      // 实例管理分流：per-window → getEngine 只读代理/窗口实例；shared-service →
+      // registry 单例）。取 manifestSnapshot.processModel——与 RemoteEngine 快照同一
+      // 来源同一值（parseProcessModel 归一值，恒有定义）；条目/描述符/快照三处一致
+      // 由扫描一致性测试兜底（曾因本字段缺席，声明 shared-service 的引擎被判
+      // per-window：chat 直派 engine_window_scoped、workflow 每 run 冷启新进程）。
+      processModel: manifestSnapshot.processModel,
     },
   };
 }

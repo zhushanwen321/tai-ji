@@ -81,17 +81,17 @@ describe('AppearancePage 渲染 gate', () => {
     expect(document.body.innerHTML).toContain('--bg')
   })
 
-  it('玄主题行渲染：label 含「青玉」、swatch 第一格 = demo 终态青玉 #7fb89c（V4⑤ 单测侧落点）', async () => {
+  it('玄青主题行渲染：label 含「青玉」+ 2 字短名（主题名统一 2 字裁决）、swatch 第一格 = demo 终态青玉 #7fb89c（V4⑤ 单测侧落点）', async () => {
     wrapper = mountPage()
     await flushPromises()
-    // 玄 preset='' → testid 回落 theme（模板 `appearance-theme-${th.preset || th.theme}`，qs chip 同款）
+    // 玄青 preset='' → testid 回落 theme（模板 `appearance-theme-${th.preset || th.theme}`，qs chip 同款）
     const xuan = document.body.querySelector<HTMLElement>('[data-testid="appearance-theme-dark"]')
-    expect(xuan, '玄主题按钮应存在').toBeTruthy()
-    // 玄/皓 preset 均为空串，回落后 testid 不撞名（玄=dark、皓=light 各唯一）
+    expect(xuan, '玄青主题按钮应存在').toBeTruthy()
+    // 玄青/皓白 preset 均为空串，回落后 testid 不撞名（玄青=dark、皓白=light 各唯一）
     expect(document.body.querySelectorAll('[data-testid="appearance-theme-dark"]')).toHaveLength(1)
     expect(document.body.querySelector('[data-testid="appearance-theme-light"]')).toBeTruthy()
-    // label 与 demo 文案一致：色相描述 = 青玉（与 swatch 首格 #7fb89c 名实一致）
-    expect(xuan!.textContent).toContain('太极 · 玄（暗 · 青玉 · 默认）')
+    // label = 2 字主题名裁决（玄青）+ demo 色相描述青玉（与 swatch 首格 #7fb89c 名实一致）
+    expect(xuan!.textContent).toContain('太极 · 玄青（暗 · 青玉 · 默认）')
     expect(xuan!.textContent).not.toContain('纯灰')
     // swatch 第一格（accent 位）= demo 终态职能分色青玉值；style 序列化形态按环境可能是 hex 或 rgb
     const firstSwatchStyle = xuan!.querySelector('span[style]')?.getAttribute('style') ?? ''
@@ -100,15 +100,8 @@ describe('AppearancePage 渲染 gate', () => {
 })
 
 describe('AppearancePage Select 载荷守卫（reka Select 交互 → update emit）', () => {
-  // reka Select 真实交互（pointerdown 开下拉 + option 点选）单源在 helpers/reka-select-harness
-  // （原 pickOption/openDropdown 与 update-page-source.test.ts 逐字重复，收敛为 pickRekaOption）
-
-  /** 按显示文案定位 SelectTrigger（theme/fontSize 的 trigger 无 testid，以 SelectValue 文案锚定） */
-  function findTriggerByText(text: string): HTMLElement {
-    const btn = wrapper!.findAll('button').find((b) => b.text() === text)
-    expect(btn, `trigger showing "${text}" should exist`).toBeTruthy()
-    return btn!.element as HTMLElement
-  }
+  // reka Select 真实交互（pointerdown 开下拉 + option 点选）单源在 helpers/reka-select-harness。
+  // [appearance-grid 外观模式/全局字号已改 segmented（值域闭合字面量直调），仅分区字号仍走 Select]
 
   function lastUpdate(): Record<string, unknown> {
     const emitted = (wrapper as any).emitted('update')
@@ -116,17 +109,23 @@ describe('AppearancePage Select 载荷守卫（reka Select 交互 → update emi
     return emitted.at(-1)[0]
   }
 
-  it('外观模式 Select：点「浅色」→ emit update {theme:"light"}（isThemeMode 守卫收窄后放行）', async () => {
-    wrapper = mountPage() // DEFAULT_SYSTEM theme=dark → trigger 显示「深色」
+  it('外观模式 segmented：点「浅色」→ emit update {theme:"light"}（字面量直调，isThemeMode 守卫仍收窄）', async () => {
+    wrapper = mountPage() // DEFAULT_SYSTEM theme=dark → 深色 active
     await flushPromises()
-    await pickRekaOption(findTriggerByText('深色'), '浅色')
+    const light = document.body.querySelector<HTMLElement>('[data-testid="appearance-mode-light"]')
+    expect(light, '浅色段点应存在').toBeTruthy()
+    light!.click()
+    await flushPromises()
     expect(lastUpdate()).toEqual({ theme: 'light' })
   })
 
-  it('全局字号 Select：点「大」→ emit update {fontSize:"large"}', async () => {
-    wrapper = mountPage() // fontSize=medium → trigger 显示「中」
+  it('全局字号 segmented：点「大」→ emit update {fontSize:"large"}', async () => {
+    wrapper = mountPage() // fontSize=medium → 中 active
     await flushPromises()
-    await pickRekaOption(findTriggerByText('中'), '大')
+    const large = document.body.querySelector<HTMLElement>('[data-testid="appearance-fs-global-large"]')
+    expect(large, '「大」段点应存在').toBeTruthy()
+    large!.click()
+    await flushPromises()
     expect(lastUpdate()).toEqual({ fontSize: 'large' })
   })
 

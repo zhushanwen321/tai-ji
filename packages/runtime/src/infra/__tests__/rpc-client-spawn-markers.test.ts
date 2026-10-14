@@ -142,11 +142,13 @@ describe('A · RpcClient.start：argv 无 --session-dir + 清单落盘（集成�
     })
     try {
       expect(capturedSpawnArgs).not.toContain('--session-dir')
-      // B1 不动 argv 其他部分：两类 flag 全量透传原样（--extension 首两个值恒为基座
-      // builtin:codemode——codemode 设计 D8，与 builtin:mcp——pi-mcp-management P11
-      // 配套，仅主 agent 模板装载；白名单路径在其后）
+      // B1 不动 argv 其他部分：两类 flag 全量透传原样（--extension 前三个值恒为基座
+      // builtin:codemode——codemode 设计 D8、builtin:mcp——pi-mcp-management P11 配套、
+      // builtin:tool-search——tool-declaration-slimming D4 配套，均仅主 agent 模板装载；
+      // 白名单路径在其后）
       expect(flagValues(capturedSpawnArgs, '--extension')).toEqual([
-        'builtin:codemode', 'builtin:mcp', stagedDev, dataDirNpm, userHomePi, userProjectPi, userAgents,
+        'builtin:codemode', 'builtin:mcp', 'builtin:tool-search',
+        stagedDev, dataDirNpm, userHomePi, userProjectPi, userAgents,
       ])
       expect(flagValues(capturedSpawnArgs, '--skill')).toEqual([stagedSkill, userAgents])
       // 清单 = staged 子集（保序：skill 在前），用户三来源（~/.pi、项目 .pi、~/.agents）全排除

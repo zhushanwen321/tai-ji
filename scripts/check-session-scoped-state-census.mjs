@@ -42,7 +42,9 @@ const SKIP_DIRS = new Set(['node_modules', 'dist', 'build', 'coverage', 'test-re
  * [display-containers §7.1 u-w1-core] 新增 bottom-drawer/control.ts（底抽屉 per-session
  * 开合分区，bindDrawerSessionId 同款模块级单例）。
  * [quality-gates，main 线 5c190c7bb] 新增 BtwPanel.vue / useBtwTabData.ts 两处（非本设计引入，
- * 快照增量对账用注记——免翻 commit message 即可解释 21-13-6=2 差值）。 */
+ * 快照增量对账用注记——免翻 commit message 即可解释 21-13-6=2 差值）。
+ * [branch-review-minors 清算，dev-0.11.2 线] 新增 useLoadMoreHistory.ts（ADR-0049 存量迁移：
+ * slowLine/loadMoreError 等实例级 + watch(sessionId) 复位态转 Map 分区，updateFor 捕获 sid）。 */
 export const CENSUS_SNAPSHOT = {
   'packages/core/src/domain/bottom-drawer/control.ts': 1,
   'packages/core/src/domain/drawer/control.ts': 1,
@@ -62,6 +64,7 @@ export const CENSUS_SNAPSHOT = {
   'packages/renderer/src/composables/features/trace/useSessionTrace.ts': 1,
   'packages/renderer/src/composables/panel/composer-shell.ts': 1,
   'packages/renderer/src/composables/panel/useBtwTabData.ts': 1,
+  'packages/renderer/src/composables/panel/useLoadMoreHistory.ts': 1,
   'packages/renderer/src/composables/panel/useSkillNoticeStream.ts': 1,
   'packages/renderer/src/stores/plan-store.ts': 1,
   'packages/ui/src/extension-host/dialog-request-queue.ts': 1,

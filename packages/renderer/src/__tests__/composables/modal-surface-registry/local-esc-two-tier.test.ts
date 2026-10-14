@@ -93,6 +93,8 @@ describe('两档登记清单 ↔ §6.7 扫描清单全等（守卫类）', () =>
       // §6.7 所有权第 2 层：输入编辑态消费方（各有真实 Esc 语义，不入两档）
       'packages/core/src/domain/composer/dispatch/staging-mode.ts': '第 2 层输入编辑态（staging handleEsc）',
       'packages/renderer/src/components/panel/BrowserPane.vue': '第 2 层输入编辑态（浮层地址栏 @keydown.escape 回填放弃）',
+      'packages/renderer/src/components/panel/message-stream/UserBubbleEditComposer.vue':
+        '第 2 层输入编辑态（编辑态 Esc 取消编辑；CommandPopover 开启时先经已登记 command-popover 成员消费，组件级 Esc 仅浮层关闭时可达）',
       // 模态内消费方：仅模态开着时可达，编排器经聚合让位不参与
       'packages/renderer/src/components/settings/system/SystemShortcutSection.vue': '模态内消费方（改键录制）',
       // 未收编模态族：模态自消费 + 聚合让位（modal-surface-registry 登记表成员）

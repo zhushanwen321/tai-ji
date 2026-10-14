@@ -144,26 +144,38 @@ describe("/workflows command contract [MANDATORY]", () => {
 // ============================================================
 // subagent tool 契约
 // ============================================================
+// D3 拆分：registerSubagentTool 一次注册三工具——按名捕获的 helper。
+type RegisteredToolView = { name: string; parameters: unknown; execute: unknown; renderCall: unknown; renderResult: unknown }; // oe-exempt:20260930:test:test double shape for tool capture (test infra)
+function captureSubagentTools(): RegisteredToolView[] {
+  const tools: RegisteredToolView[] = [];
+  const pi = mockExtensionApi({
+    registerTool: (tool: unknown) => { tools.push(tool as RegisteredToolView); },
+  });
+  registerSubagentTool(pi);
+  return tools;
+}
+function captureSubagentToolByName(toolName: string): RegisteredToolView {
+  const tools = captureSubagentTools();
+  const named = tools.find((t) => t.name === toolName);
+  if (!named) throw new Error(`tool not registered: ${toolName} (got ${tools.map((t) => t.name).join(", ")})`);
+  return named;
+}
+
 describe("subagent tool contract [MANDATORY]", () => {
-  it("registers a tool named 'subagent' with a parameters schema", () => {
-    let registeredTool: { name: string; parameters: unknown } | undefined;
-    const pi = mockExtensionApi({
-      registerTool: (tool: unknown) => { registeredTool = tool as { name: string; parameters: unknown }; },
-    });
-    registerSubagentTool(pi);
-    expect(registeredTool?.name).toBe("subagent");
-    expect(registeredTool?.parameters).toBeDefined();
+  it("registers subagent_start / subagent_manage / subagent_message with parameters schemas (D3 拆分)", () => {
+    const tools = captureSubagentTools();
+    expect(tools.map((t) => t.name).sort()).toEqual(["subagent_manage", "subagent_message", "subagent_start"]);
+    for (const tool of tools) {
+      expect(tool.parameters).toBeDefined();
+    }
   });
 
-  it("tool has execute, renderCall, renderResult callbacks", () => {
-    let registeredTool: Record<string, unknown> | undefined;
-    const pi = mockExtensionApi({
-      registerTool: (tool: unknown) => { registeredTool = tool as Record<string, unknown>; },
-    });
-    registerSubagentTool(pi);
-    expect(typeof registeredTool?.execute).toBe("function");
-    expect(typeof registeredTool?.renderCall).toBe("function");
-    expect(typeof registeredTool?.renderResult).toBe("function");
+  it("each tool has execute, renderCall, renderResult callbacks", () => {
+    for (const tool of captureSubagentTools()) {
+      expect(typeof tool.execute).toBe("function");
+      expect(typeof tool.renderCall).toBe("function");
+      expect(typeof tool.renderResult).toBe("function");
+    }
   });
 
   // SDK 契约：ToolDefinition.execute 是 5 参数 (toolCallId, params, signal, onUpdate, ctx)。
@@ -171,13 +183,7 @@ describe("subagent tool contract [MANDATORY]", () => {
   // 此测试验证 ctx.model 被 plumb 到 service.execute 的 ctxModel 参数。
   // 回归保护：subagent-tool.ts execute 把 _ctx?.model 传给 startHandler 的第 5 参 ctxModel。
   it("execute passes ctx.model as ctxModel (SDK 5-param contract)", async () => {
-    let capturedExecute: ((...args: never[]) => Promise<unknown>) | undefined;
-    const pi = mockExtensionApi({
-      registerTool: (tool: unknown) => {
-        capturedExecute = (tool as { execute: (...args: never[]) => Promise<unknown> }).execute;
-      },
-    });
-    registerSubagentTool(pi);
+    const capturedExecute = captureSubagentToolByName("subagent_start").execute as (...args: never[]) => Promise<unknown>;
     expect(capturedExecute).toBeDefined();
 
     mockServiceExecute.mockReset();
@@ -190,9 +196,9 @@ describe("subagent tool contract [MANDATORY]", () => {
     const ctxModel = { id: "test-model", name: "Test", provider: "test", reasoning: false };
     const ctx = { model: ctxModel } as object;
 
-    await capturedExecute!(
+    await capturedExecute(
       "call-1",
-      { action: "start", task: "test task", slug: "test-slug" },
+      { task: "test task", slug: "test-slug" },
       undefined,
       undefined,
       ctx,
@@ -210,13 +216,7 @@ describe("subagent tool contract [MANDATORY]", () => {
   // service.execute。若任一字段在 handler 内漏传（如重构改名/删行），子 agent 静默丢失隔离模式。
   // 此测试锁住「顶层 fork/worktree/cwd → service.execute 同名参数」端到端透传（拍平后无 startParam envelope）。
   it("execute plumbs top-level fork/worktree/cwd to service.execute (chain contract)", async () => {
-    let capturedExecute: ((...args: never[]) => Promise<unknown>) | undefined;
-    const pi = mockExtensionApi({
-      registerTool: (tool: unknown) => {
-        capturedExecute = (tool as { execute: (...args: never[]) => Promise<unknown> }).execute;
-      },
-    });
-    registerSubagentTool(pi);
+    const capturedExecute = captureSubagentToolByName("subagent_start").execute as (...args: never[]) => Promise<unknown>;
     expect(capturedExecute).toBeDefined();
 
     mockServiceExecute.mockReset();
@@ -227,10 +227,9 @@ describe("subagent tool contract [MANDATORY]", () => {
       details: { slug: "iso-work" },
     });
 
-    await capturedExecute!(
+    await capturedExecute(
       "call-fork-wt",
       {
-        action: "start",
         task: "isolated work",
         slug: "iso-work",
         fork: true,

@@ -87,6 +87,8 @@ function setup(initialState?: PlanState) {
     }),
     appendEntry: vi.fn(),
     setActiveTools: vi.fn(),
+    // 快照式恢复（dmg-r1-2）：enter 收拢前记录进入前激活集（getActiveTools）
+    getActiveTools: vi.fn(() => ALL_TOOL_NAMES.filter((n) => n !== "plan")),
     sendMessage: vi.fn(),
     notify: vi.fn(),
     getCommands: vi.fn(() => []),

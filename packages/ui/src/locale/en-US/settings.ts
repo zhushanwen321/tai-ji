@@ -44,6 +44,7 @@ export default {
   },
   // ── Appearance page (AppearancePage) ──
   appearance: {
+    quickChatFont: 'Chat font size',
     region: {
       sidebar: 'Left sidebar',
       chat: 'Chat stream',

@@ -2,13 +2,27 @@
 
 Pi 的 subagent + workflow 合并包：任务委派 + 多 agent 编排（chain / parallel / scatter-gather / map-reduce），单包统一执行链 + 分层配额（ADR-030）。
 
-## 工具面（3 tools）
+## 工具面（7 tools）
 
 | 工具 | action 集合 | 关键参数 |
 |------|------------|---------|
-| `subagent` | `start` / `list` / `cancel` / `message` / `close` / `fork-from`（6 个） | start：`task` + `slug`（≤35 字符）必填，`agent`（.md 绝对路径，缺省 general-purpose）、`model`、`engine`、`fork`、`worktree`、`collect`、`maxTurns`、`idleTimeoutMs` 等 16 字段拍平顶层；`message` / `close` / `cancel` / `fork-from`：`subagentId` 必填（`message` 另需 `text`） |
-| `workflow` | `run` / `status` / `abort`（3 个） | 见「Workflow 生命周期」节 |
+| `subagent_start` | —（单动作） | `task` + `slug`（≤35 字符）必填，`agent`（.md 绝对路径，缺省 general-purpose）、`model`、`engine`、`fork`、`worktree`、`maxTurns`、`idleTimeoutMs` 等 start 场景可选字段 |
+| `subagent_manage` | `list` / `cancel` / `close`（3 个） | `cancel` / `close`：`subagentId` 必填 |
+| `subagent_message` | `message` / `fork-from`（2 个） | `message`：`subagentId` + `text` 必填；`fork-from`：`sourceSubagentId` 必填 |
+| `subagents` | —（单动作，批量派发，deferred 延迟加载） | `tasks` 必填（每元素一个自包含任务 prompt，全部并行、结果一条通知收口），可选 `agents`（逗号分隔 .md 绝对路径，单值或与 tasks 一一对应）、`aggregate`、`slug`、`model` 等；run 级状态控制走 `workflow_control` |
+| `workflow_run` | —（单动作） | `name`（`.js` 绝对路径）+ 可选 `args` / 预算，见「Workflow 生命周期」节 |
+| `workflow_control` | `status` / `abort` / `resume`（3 个） | `abort` / `resume`：`runId` 必填，见「Workflow 生命周期」节 |
 | `workflow-script` | `generate` / `lint` / `save` / `delete` / `list`（5 个） | `generate`：`script` + `name`（可选 `description`）；`save`：`name`（可 `newName` 改名）；`lint` / `delete`：`name` |
+
+## 工具激活（deferred）
+
+`subagents` / `workflow-script` 两工具注册为 `exposure: "deferred"`——不占常驻工具声明，由 pi 内置 `tool_search` 工具检索命中后按需激活。taiji 宿主内开箱即用（宿主启动时已激活 `tool_search`）；独立 pi 使用需在 `<agentDir>/settings.json`（默认 `~/.pi/agent/settings.json`）开启：
+
+```json
+{ "defaultTools": ["+tool_search"] }
+```
+
+`+` 前缀是增量修饰（保留 read/bash/edit/write 默认集）。未开启 `tool_search` 时这两个工具对模型不可见。
 
 ## 内置 Agents
 
@@ -44,7 +58,7 @@ orchestrator 是纯协调器角色：拆解任务 → 委派 subagent → 汇总
 **工具约束（C1/D-5）**：内置模板不携带 `tools:` frontmatter 白名单，subagent 不以 `--tools` 白名单启动——工具约束回归宿主默认工具面，orchestrator 靠角色职责（职责边界段）约束自身只做协调。想要白名单的用户在 `<workspace>/.agents/agents/` 放同名 `.md` 覆写（发现优先级 project 级最高，稳定遮蔽内置），或临时用 pi CLI 的 `--tools` 白名单验证：
 
 ```bash
-pi --tools todo,goal_control,workflow,subagent,ask_user
+pi --tools todo,goal_control,workflow_run,subagent_start,ask_user
 ```
 
 > **依赖**：需先安装本包及相关扩展
@@ -61,7 +75,7 @@ pi --tools todo,goal_control,workflow,subagent,ask_user
 
 ## Workflow 生命周期
 
-Workflow run 有两类结束形态：**终局**（`done`，outcome 区分 done / failed / cancelled / time_limited——成败已定）与**中断**（`interrupted` 暂停态——执行被打断但可续跑）。`workflow` tool 共 4 个 action：`run` / `status` / `abort` / `resume`。run 的 `name` 接受 `<available_workflows>` 列出的 workflow 名（内置 chain / parallel / map-reduce / scatter-gather / review-fix-loop 或已保存脚本）或 `.js` 绝对路径。
+Workflow run 有两类结束形态：**终局**（`done`，outcome 区分 done / failed / cancelled / time_limited——成败已定）与**中断**（`interrupted` 暂停态——执行被打断但可续跑）。`workflow_run` 启动 run；`workflow_control` 共 3 个 action：`status` / `abort` / `resume`。run 的 `name` 仅接受 `.js` 绝对路径（通常是 `<available_workflows>` 条目的 `<location>`；任意声明 `@pi-meta kind:"workflow"` 的绝对 `.js` 路径均可），裸名 / 相对路径拒绝（`not_found`，拒单文案列全部可用条目及 location，按 location 重试即可）。
 
 - **abort（主动取消）**：`{"action":"abort","runId":"<id>"}`（可选 `"error":"<reason>"`）→ `cancelled` 终局。要新结果就重新 run
 - **resume（断点续跑）**：`{"action":"resume","runId":"<id>"}`（可选 args 校验一致性与时间预算）——对 interrupted run 从断点恢复：已完成的调用回放缓存零 token、未完成的按三档恢复（会话完整 → 捞回结果；请求未完成 → 同会话续写；会话不在 → 整跑）；`/workflows resume <id>` 同能力

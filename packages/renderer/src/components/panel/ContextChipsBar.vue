@@ -45,7 +45,7 @@
       <span class="min-w-0 truncate">{{ item.name }}</span>
       <Button
         variant="ghost"
-        class="-mr-[2px] grid size-3.5 shrink-0 place-items-center rounded-[3px] p-0 text-neutral-dim transition-colors duration-[var(--duration-fast)] hover:bg-bg-elevated hover:text-neutral-fg"
+        class="-mr-[2px] grid size-3.5 shrink-0 place-items-center rounded-[3px] p-0 text-neutral-dim transition-colors duration-[var(--duration-fast)] hover:bg-surface-hover hover:text-neutral-fg"
         :title="t('panel.contextChips.removeFromContext')"
         @click.stop="onRemove(item.id)"
       >

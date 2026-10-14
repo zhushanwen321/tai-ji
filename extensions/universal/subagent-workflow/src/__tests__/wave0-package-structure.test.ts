@@ -3,7 +3,8 @@
  *
  * 验证新包 @zhushanwen/pi-subagent-workflow 的结构完整性：
  * - index.ts 导出工厂函数
- * - 3 tool + 2 command 注册正确
+ * - 7 tool（subagent 三件 + subagents + workflow 两件 + workflow-script）+ 2 command 注册正确
+ *   （D3 工具拆分后的终态注册面；本文件 wave0 时点的原始目标为 3 tool，断言段 AC-1.1 为权威）
  * - 目录结构符合三层架构
  *
  * （历史上含「挂载后暴露跨扩展编程 API」断言——该编程入口已随嵌套 workflow()
@@ -61,12 +62,17 @@ describe("wave-0: package structure merge", { timeout: 30000 }, () => {
     mod.default(mounted.api);
   });
 
-  it("AC-1.1: registers 3 tools (subagent + workflow + workflow-script)", () => {
-    // 3 tools: subagent (from subagents) + workflow + workflow-script (from workflow)
-    expect(mounted.tools).toContain("subagent");
-    expect(mounted.tools).toContain("workflow");
+  it("AC-1.1: registers 7 tools (subagent 组三件 + subagents + workflow 组两件 + workflow-script)", () => {
+    // D3 拆分后 7 tools: subagent_start/manage/message (from subagents) + subagents +
+    // workflow_run/workflow_control + workflow-script
+    expect(mounted.tools).toContain("subagent_start");
+    expect(mounted.tools).toContain("subagent_manage");
+    expect(mounted.tools).toContain("subagent_message");
+    expect(mounted.tools).toContain("subagents");
+    expect(mounted.tools).toContain("workflow_run");
+    expect(mounted.tools).toContain("workflow_control");
     expect(mounted.tools).toContain("workflow-script");
-    expect(mounted.tools.length).toBeGreaterThanOrEqual(3);
+    expect(mounted.tools.length).toBeGreaterThanOrEqual(7);
   });
 
   it("AC-1.1: registers 2 commands (subagents + workflows)", () => {

@@ -36,6 +36,7 @@ import {
 	type PermissionConfig,
 	type Rule,
 } from "./types.js";
+import { migrateLegacyToolRules } from "./rules/legacy-tool-names.js";
 
 /** llm-shared 泛型 config 的包名（决定文件名 permission-ext-config.json，llm-shared getConfigPath 追加 -ext-config.json 后缀）。 */
 const CONFIG_PKG = "permission";
@@ -139,11 +140,18 @@ function warnLegacyConfigIfExists(): void {
 /**
  * 加载配置：文件缺失时创建默认配置文件并返回默认值；
  * 坏 JSON / normalize 失败回落默认值（onWarning 回调）。mtime+size 缓存由 llm-shared 提供。
+ *
+ * 返回前应用旧工具名精确规则迁移（rules/legacy-tool-names.ts，tool-declaration-slimming
+ * D3：subagent/workflow 拆分改名后，持久化的旧名精确规则原地展开为新名规则——
+ * 原地替换保序 + makeNextIdCounter 新 id + 幂等；只内存展开，不回写落盘，加载路径纯读）。
+ * 所有配置消费方（pipeline / rule-editor / statusline / commands）都经本入口取 config，
+ * 迁移单点在此即全消费面生效。
  */
 export function loadAndWatchConfig(onWarning?: (msg: string) => void): PermissionConfig {
 	const configPath = getConfigPath();
 	ensureConfigFile(configPath, onWarning);
-	return loadConfig(CONFIG_PKG, DEFAULT_CONFIG, normalizeConfig, onWarning);
+	const config = loadConfig(CONFIG_PKG, DEFAULT_CONFIG, normalizeConfig, onWarning);
+	return { ...config, userRules: migrateLegacyToolRules(config.userRules) };
 }
 
 // ──────────────────────── 保存（原子写） ────────────────────────

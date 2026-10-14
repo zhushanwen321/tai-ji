@@ -1,5 +1,8 @@
 // 跨包契约测试（MF-6）：structured-output ↔ subagent-workflow
 //
+// 落点 = src/__tests__/（tool-declaration-slimming U-B1：任务书 testCommand 的字面
+// 路径；vitest include 双目录 tests/** + src/__tests__/** 同包覆盖）
+//
 // 两包是独立 npm 包不能直接 import（发布产物里跨包相对 import 悬空）——env 名 /
 // schema 大小上限等契约常量各自保留副本，本文件在测试期动态 import SW 侧源码叶子
 // 模块，锁「字节相等」防止任一端静默改名/改值（漂移守卫）。
@@ -21,7 +24,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { describe, expect, it, vi } from "vitest";
 
-import { ENV_SCHEMA, SO_SCHEMA_SIZE_WARN_BYTES } from "../src/index.js";
+import { ENV_SCHEMA, SO_SCHEMA_SIZE_WARN_BYTES } from "../../src/index.js";
 
 // 本包 vitest alias 把 "typebox" 指向本地 mock；createRequire 走 node 解析绕过
 // alias 拿真实 typebox（v1 系，npm 包名 typebox；require(esm) 返回模块命名空间）。
@@ -52,7 +55,7 @@ async function dynamicImportRelative(spec: string): Promise<unknown> {
  * 叶子；硬拒线消费方为 pi 侧 spawn-args.ts applySchemaEnvToChildEnv）。
  */
 const SW_SCHEMA_ENV_CANDIDATES = [
-	"../../../../packages/pi-subagent-cli/src/constants.ts",
+	"../../../../../packages/pi-subagent-cli/src/constants.ts",
 ];
 
 async function tryImportSwSchemaEnv(): Promise<Record<string, unknown> | undefined> {
@@ -92,10 +95,10 @@ describe("cross-package contract: schema env（structured-output ↔ pi-subagent
 // ── ② SW tool schema 常量校验（真实 typebox 构造 + 编译，mock 失真对照基准）────────────
 
 /** SW 侧 schema 叶子候选路径（相对本文件）。SW 侧调整叶子布局时在此追加候选。 */
-const SW_TOOL_SCHEMA_CANDIDATES = ["../../subagent-workflow/src/interface/tool/subagent-tool-schema.ts"];
+const SW_TOOL_SCHEMA_CANDIDATES = ["../../../subagent-workflow/src/interface/tool/subagent-tool-schema.ts"];
 
 /**
- * 动态 import SW schema 叶子，拿真实 typebox 构造的 SubagentParams。
+ * 动态 import SW schema 叶子，拿真实 typebox 构造的 Subagent*Params（D3 拆分三 schema）。
  *
  * 关键通路：SW 叶子经 `import { Type } from "typebox"` 构造 schema，而本包 vitest
  * alias 会把 "typebox" 劫持到本地 mock（丢 options / 不生成 required）——先用
@@ -109,7 +112,7 @@ async function importSwSubagentSchema(): Promise<Record<string, unknown> | undef
 			vi.doMock("typebox", () => REAL_TYPEBOX);
 			try {
 				const mod = (await dynamicImportRelative(spec)) as Record<string, unknown>;
-				const schema = mod.SubagentParams;
+				const schema = mod.SubagentStartParams;
 				if (schema !== null && typeof schema === "object" && "properties" in schema) return mod;
 			} finally {
 				vi.doUnmock("typebox");
@@ -127,13 +130,13 @@ interface SchemaView {
 	required?: unknown;
 }
 
-function asSchemaView(schema: unknown): SchemaView {
+function asSchemaView(schema: unknown, label: string): SchemaView {
 	if (schema === null || typeof schema !== "object") {
-		throw new Error("SW SubagentParams is not an object schema");
+		throw new Error(`SW ${label} is not an object schema`);
 	}
 	const rec = schema as Record<string, unknown>;
 	if (rec.properties === null || typeof rec.properties !== "object") {
-		throw new Error("SW SubagentParams has no properties");
+		throw new Error(`SW ${label} has no properties`);
 	}
 	return { properties: rec.properties as SchemaView["properties"], required: rec.required };
 }
@@ -144,10 +147,10 @@ function expectDescription(props: SchemaView["properties"], key: string): void {
 	expect(typeof desc === "string" && desc.length > 0, `properties.${key}.description preserved as non-empty string`).toBe(true);
 }
 
-describe("cross-package contract: SW subagent tool schema（真实 typebox 校验）", () => {
+describe("cross-package contract: SW subagent tool schema（真实 typebox 校验，D3 拆分后）", () => {
 	let mod: Record<string, unknown> | undefined;
 
-	it("SW 叶子定位 + 真实 typebox 构造形态存活（required/description/enum/pattern/maxLength）", async (ctx) => {
+	it("SW 叶子定位 + 真实 typebox 构造形态存活：subagent_start 必填性真实化（required=[task,slug]）", async (ctx) => {
 		mod = await importSwSubagentSchema();
 		if (!mod) {
 			// SW 侧叶子未就位（subagent-tool-schema.ts 被移动/改名）时的降级 skip；
@@ -155,63 +158,85 @@ describe("cross-package contract: SW subagent tool schema（真实 typebox 校�
 			ctx.skip();
 			return;
 		}
-		const schema = asSchemaView(mod.SubagentParams);
+		const start = asSchemaView(mod.SubagentStartParams, "SubagentStartParams");
 
-		// required 存活：真实 Type.Object 收集非 Optional 字段；mock 构造无 required 键。
-		// 精确断言（非仅「存在」）：顶层唯一必填是 action，改必填集必须同时改本断言。
-		expect(schema.required, "SubagentParams.required preserved by real typebox").toEqual(["action"]);
-
-		// action：枚举 + description（StringEnum 的 options 在 mock pi-ai/SW mock 下均被丢弃，
-		// 真实 pi-ai StringEnum 才保留——本断言即「SO 环境解析到真实 pi-ai」的间接守卫）
-		// 6 值含 fork-from（SW v8.5 断联恢复通道；schema 合法扩展 action 时同步本断言）
-		expect(schema.properties.action?.enum).toEqual(["start", "list", "cancel", "message", "close", "fork-from"]);
-		expectDescription(schema.properties, "action");
+		// required 存活（D3 拆分收益本体）：task/slug 是真实必填（原单工具 21 可选拍平
+		// 下 schema 表达不了）。精确断言：改必填集必须同时改本断言。
+		expect(start.required, "SubagentStartParams.required = [task, slug]（拆分必填性真实化）").toEqual(["task", "slug"]);
 
 		// start 路径类参数：pattern ^/（R6 加入的绝对路径约束）+ description
-		expect(schema.properties.skillPath?.pattern, "skillPath.pattern preserved").toBe("^/");
-		expect(schema.properties.cwd?.pattern, "cwd.pattern preserved").toBe("^/");
-		expectDescription(schema.properties, "skillPath");
-		expectDescription(schema.properties, "cwd");
+		expect(start.properties.skillPath?.pattern, "skillPath.pattern preserved").toBe("^/");
+		expect(start.properties.cwd?.pattern, "cwd.pattern preserved").toBe("^/");
+		expectDescription(start.properties, "skillPath");
+		expectDescription(start.properties, "cwd");
 
 		// slug maxLength 与 SW 侧 SLUG_MAX_LENGTH 常量联动（抽叶子后同址）
-		expect(schema.properties.slug?.maxLength, "slug.maxLength === SLUG_MAX_LENGTH").toBe(mod.SLUG_MAX_LENGTH);
+		expect(start.properties.slug?.maxLength, "slug.maxLength === SLUG_MAX_LENGTH").toBe(mod.SLUG_MAX_LENGTH);
 		expect(mod.SLUG_MAX_LENGTH).toBe(35);
-		expectDescription(schema.properties, "slug");
-		expectDescription(schema.properties, "task");
+		expectDescription(start.properties, "slug");
+		expectDescription(start.properties, "task");
 
 		// thinkingLevel 枚举 = THINKING_ORDER SSOT（叶子从 shared/model-ref 派生）
-		expect(schema.properties.thinkingLevel?.enum).toEqual(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
+		expect(start.properties.thinkingLevel?.enum).toEqual(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
 
-		// 嵌套对象 required 存活：messageParam.subagentId/text 非 Optional → 嵌套 required
-		const messageParam = schema.properties.messageParam as SchemaView | undefined;
-		expect(messageParam?.required, "nested messageParam.required preserved").toEqual(["subagentId", "text"]);
 		// 30s：本用例承担 SW schema 叶子的首载 transform（动态 import TS 源 + 真实
 		// typebox/pi-ai 依赖链），CI 冷缓存下超 vitest 默认 5s 实测两连红（本地暖
 		// 缓存 510ms）；后续用例复用模块缓存不受影响。
 	}, 30_000);
 
-	it("真实 typebox 编译成功 + Check 行为正确（合法通过 / 非法 action 与缺 required 被拒）", async (ctx) => {
+	it("subagent_manage / subagent_message：action 小枚举 + 嵌套 required 存活（D3 范围裁决）", async (ctx) => {
 		if (!mod) mod = await importSwSubagentSchema();
 		if (!mod) {
 			ctx.skip();
 			return;
 		}
-		const compiled = REAL_TYPEBOX_COMPILE.Compile(mod.SubagentParams);
-		expect(typeof compiled.Check).toBe("function");
-		// 合法最小 args 通过（action:"list" 无必填 param）
-		expect(compiled.Check({ action: "list" })).toBe(true);
-		// 非法 action 被枚举拒绝
-		expect(compiled.Check({ action: "bogus" })).toBe(false);
-		// 缺 required 被拒
-		expect(compiled.Check({})).toBe(false);
+		const manage = asSchemaView(mod.SubagentManageParams, "SubagentManageParams");
+		// manage 顶层唯一必填是 action（小枚举保留是 D3 范围裁决：参数同构、条件必填失真可忽略）
+		expect(manage.required).toEqual(["action"]);
+		expect(manage.properties.action?.enum).toEqual(["list", "cancel", "close"]);
+		// 嵌套对象 required 存活：cancelParam.subagentId / closeParam.subagentId 非 Optional
+		expect((manage.properties.cancelParam as SchemaView | undefined)?.required).toEqual(["subagentId"]);
+		expect((manage.properties.closeParam as SchemaView | undefined)?.required).toEqual(["subagentId"]);
+
+		const message = asSchemaView(mod.SubagentMessageParams, "SubagentMessageParams");
+		expect(message.required).toEqual(["action"]);
+		expect(message.properties.action?.enum).toEqual(["message", "fork-from"]);
+		// messageParam.subagentId/text 非 Optional → 嵌套 required
+		expect((message.properties.messageParam as SchemaView | undefined)?.required).toEqual(["subagentId", "text"]);
+		expect((message.properties.forkFromParam as SchemaView | undefined)?.required).toEqual(["sourceSubagentId"]);
+		// interrupt 退役参数兼容语义（存量调用防 schema 报错）保留
+		const messageParamProps = (message.properties.messageParam as SchemaView | undefined)?.properties;
+		if (messageParamProps === undefined) throw new Error("messageParam has no properties");
+		expectDescription(messageParamProps, "interrupt");
+	});
+
+	it("真实 typebox 编译成功 + Check 行为正确（start 缺 slug 被拒 / manage 最小合法 / 非法 action 拒）", async (ctx) => {
+		if (!mod) mod = await importSwSubagentSchema();
+		if (!mod) {
+			ctx.skip();
+			return;
+		}
+		const startCompiled = REAL_TYPEBOX_COMPILE.Compile(mod.SubagentStartParams);
+		expect(typeof startCompiled.Check).toBe("function");
+		// 拆分收益的行为面：task/slug 缺一即拒（原单工具 schema 下 {"task":"..."} 可过校验）
+		expect(startCompiled.Check({ task: "t", slug: "s" })).toBe(true);
+		expect(startCompiled.Check({ task: "t" })).toBe(false);
+		expect(startCompiled.Check({ slug: "s" })).toBe(false);
+		expect(startCompiled.Check({})).toBe(false);
 		// skillPath 相对穿越被 pattern ^/ 拒绝；绝对路径通过
-		expect(compiled.Check({ action: "start", skillPath: "../etc" })).toBe(false);
-		expect(compiled.Check({ action: "start", skillPath: "/abs/skills/x" })).toBe(true);
+		expect(startCompiled.Check({ task: "t", slug: "s", skillPath: "../etc" })).toBe(false);
+		expect(startCompiled.Check({ task: "t", slug: "s", skillPath: "/abs/skills/x" })).toBe(true);
+
+		const manageCompiled = REAL_TYPEBOX_COMPILE.Compile(mod.SubagentManageParams);
+		// 合法最小 args 通过（action:"list" 无必填 param）
+		expect(manageCompiled.Check({ action: "list" })).toBe(true);
+		expect(manageCompiled.Check({ action: "bogus" })).toBe(false);
+		expect(manageCompiled.Check({})).toBe(false);
 	});
 
 	it("对照：mock typebox 构造确实丢 required/description（本组断言对 mock 失真敏感的自校验）", async () => {
 		// SW 包内 mock（零依赖文件，SO 环境可加载）：Type.String 丢 options、Optional 只加标记
-		const swMock = (await dynamicImportRelative("../../subagent-workflow/mocks/typebox.ts")) as {
+		const swMock = (await dynamicImportRelative("../../../subagent-workflow/mocks/typebox.ts")) as {
 			Type: Record<string, (...args: unknown[]) => unknown>;
 		};
 		const swBuilt = swMock.Type.Object({ action: swMock.Type.String({ description: "op", pattern: "^/" }) }) as SchemaView;
@@ -239,30 +264,29 @@ describe("cross-package contract: SW subagent tool schema（真实 typebox 校�
 // 失真再重，也影响不到这里的端到端判定。
 import { validateToolArguments } from "@earendil-works/pi-ai";
 
-describe("cross-package contract: pi-ai validateToolArguments 真实 SDK 冒烟（SW schema）", () => {
+describe("cross-package contract: pi-ai validateToolArguments 真实 SDK 冒烟（SW schema，D3 拆分后）", () => {
 	/** pi-ai Tool 形态的最小 stub（只需 name/parameters 参与校验）。 */
-	function swTool(mod: Record<string, unknown>): { name: string; description: string; parameters: unknown } {
-		return { name: "subagent", description: "cross-package contract probe", parameters: mod.SubagentParams };
+	function swTool(mod: Record<string, unknown>, name: string, params: unknown): { name: string; description: string; parameters: unknown } {
+		return { name, description: "cross-package contract probe", parameters: params };
 	}
-	function toolCall(args: Record<string, unknown>): { type: "toolCall"; id: string; name: string; arguments: Record<string, unknown> } {
-		return { type: "toolCall", id: "probe-1", name: "subagent", arguments: args };
+	function toolCall(args: Record<string, unknown>, name: string): { type: "toolCall"; id: string; name: string; arguments: Record<string, unknown> } {
+		return { type: "toolCall", id: "probe-1", name, arguments: args };
 	}
 
-	it("合法 args 通过（action=list / start+绝对 skillPath）", async (ctx) => {
+	it("subagent_start 合法 args 通过（task+slug+绝对 skillPath）", async (ctx) => {
 		const mod = await importSwSubagentSchema();
 		if (!mod) {
 			ctx.skip();
 			return;
 		}
-		const tool = swTool(mod);
-		expect(validateToolArguments(tool, toolCall({ action: "list" }))).toEqual({ action: "list" });
-		expect(validateToolArguments(tool, toolCall({ action: "start", skillPath: "/abs/skills/x" }))).toEqual({
-			action: "start",
-			skillPath: "/abs/skills/x",
-		});
+		const tool = swTool(mod, "subagent_start", mod.SubagentStartParams);
+		expect(validateToolArguments(tool, toolCall({ task: "t", slug: "s" }, "subagent_start"))).toEqual({ task: "t", slug: "s" });
+		expect(
+			validateToolArguments(tool, toolCall({ task: "t", slug: "s", skillPath: "/abs/skills/x" }, "subagent_start")),
+		).toEqual({ task: "t", slug: "s", skillPath: "/abs/skills/x" });
 	});
 
-	it("非法 action 被拒，错误文案为 pi-ai 实装指纹形态", async (ctx) => {
+	it("subagent_start 缺 slug 被拒（拆分必填性在 pi 层校验器下生效——原单工具放行的形态）", async (ctx) => {
 		const mod = await importSwSubagentSchema();
 		if (!mod) {
 			ctx.skip();
@@ -270,17 +294,16 @@ describe("cross-package contract: pi-ai validateToolArguments 真实 SDK 冒烟�
 		}
 		let message = "";
 		try {
-			validateToolArguments(swTool(mod), toolCall({ action: "bogus" }));
-			expect.unreachable("illegal action must be rejected");
+			validateToolArguments(swTool(mod, "subagent_start", mod.SubagentStartParams), toolCall({ task: "t" }, "subagent_start"));
+			expect.unreachable("missing slug must be rejected");
 		} catch (err) {
 			message = err instanceof Error ? err.message : String(err);
 		}
-		// 指纹：pi-ai validation.js 的错误头 + 指向违规字段
-		expect(message).toMatch(/^Validation failed for tool "subagent"/);
-		expect(message).toContain("action");
+		expect(message).toMatch(/^Validation failed for tool "subagent_start"/);
+		expect(message).toContain("slug");
 	});
 
-	it("缺 required（无 action）被拒，错误指向 action", async (ctx) => {
+	it("subagent_start skillPath 相对穿越被拒（R6 pattern ^/ 在真实 typebox + pi-ai 校验器下生效）", async (ctx) => {
 		const mod = await importSwSubagentSchema();
 		if (!mod) {
 			ctx.skip();
@@ -288,29 +311,40 @@ describe("cross-package contract: pi-ai validateToolArguments 真实 SDK 冒烟�
 		}
 		let message = "";
 		try {
-			validateToolArguments(swTool(mod), toolCall({}));
-			expect.unreachable("missing required action must be rejected");
-		} catch (err) {
-			message = err instanceof Error ? err.message : String(err);
-		}
-		expect(message).toMatch(/^Validation failed for tool "subagent"/);
-		expect(message).toContain("action");
-	});
-
-	it("skillPath 相对穿越被拒（R6 pattern ^/ 在真实 typebox + pi-ai 校验器下生效）", async (ctx) => {
-		const mod = await importSwSubagentSchema();
-		if (!mod) {
-			ctx.skip();
-			return;
-		}
-		let message = "";
-		try {
-			validateToolArguments(swTool(mod), toolCall({ action: "start", skillPath: "../etc/passwd" }));
+			validateToolArguments(
+				swTool(mod, "subagent_start", mod.SubagentStartParams),
+				toolCall({ task: "t", slug: "s", skillPath: "../etc/passwd" }, "subagent_start"),
+			);
 			expect.unreachable("traversal skillPath must be rejected");
 		} catch (err) {
 			message = err instanceof Error ? err.message : String(err);
 		}
-		expect(message).toMatch(/^Validation failed for tool "subagent"/);
+		expect(message).toMatch(/^Validation failed for tool "subagent_start"/);
 		expect(message).toContain("skillPath");
+	});
+
+	it("subagent_manage / subagent_message 最小合法形态通过 + 非法 action 被拒", async (ctx) => {
+		const mod = await importSwSubagentSchema();
+		if (!mod) {
+			ctx.skip();
+			return;
+		}
+		const manageTool = swTool(mod, "subagent_manage", mod.SubagentManageParams);
+		expect(validateToolArguments(manageTool, toolCall({ action: "list" }, "subagent_manage"))).toEqual({ action: "list" });
+
+		const messageTool = swTool(mod, "subagent_message", mod.SubagentMessageParams);
+		expect(
+			validateToolArguments(messageTool, toolCall({ action: "message", messageParam: { subagentId: "sa-1", text: "go" } }, "subagent_message")),
+		).toEqual({ action: "message", messageParam: { subagentId: "sa-1", text: "go" } });
+
+		let message = "";
+		try {
+			validateToolArguments(messageTool, toolCall({ action: "start" }, "subagent_message"));
+			expect.unreachable("illegal action must be rejected");
+		} catch (err) {
+			message = err instanceof Error ? err.message : String(err);
+		}
+		expect(message).toMatch(/^Validation failed for tool "subagent_message"/);
+		expect(message).toContain("action");
 	});
 });

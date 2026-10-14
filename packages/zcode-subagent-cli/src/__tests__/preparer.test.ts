@@ -19,6 +19,7 @@ import {
   resolvePersonalProviderConfigPath,
   resolveZcodeMinimalReasoningLevel,
   resolveZcodeModelRef,
+  resolveZcodeReasoningValues,
 } from "../preparer.ts";
 
 /** 副本语境恢复指引句（§5 单元 3 文案修复——四处 throw 公共尾句的断言锚点）。 */
@@ -405,6 +406,47 @@ describe("resolveZcodeMinimalReasoningLevel（目录值域）", () => {
   });
 });
 
+describe("resolveZcodeReasoningValues（目录值域全量）", () => {
+  let catalogPath: string;
+
+  beforeEach(() => {
+    catalogPath = path.join(tmpRoot, "values-catalog.json");
+    // 目录规则小写词干 × 模型 id 包侧大小写——不敏感匹配对齐 app-server 注册表
+    writeJson(catalogPath, {
+      config: {
+        modelConfigRules: {
+          modelRules: [
+            { modelMatch: ".*", config: { optionSpecs: { reasoningLevel: { values: ["disabled", "enabled"] } } } },
+            { modelMatch: ".*glm-5\\.3-flash(?:[.\\-:/\\[].*)?", config: { optionSpecs: { reasoningLevel: { values: ["low", "high", "max"] } } } },
+            { modelMatch: ".*no-values.*", config: { optionSpecs: { maxOutputTokens: { max: 1 } } } },
+          ],
+        },
+      },
+    });
+  });
+
+  it("命中规则 → 值域全量（非只首值）；大小写不敏感（目录小写词干 × 包侧大小写 id）", () => {
+    const sources = { builtinCatalogPath: catalogPath };
+    expect(resolveZcodeReasoningValues(`${PROVIDER_A}/GLM-5.3-Flash`, sources)).toEqual(["low", "high", "max"]);
+    expect(resolveZcodeReasoningValues(`${PROVIDER_B}/mimo-v2.6-pro`, sources)).toEqual(["disabled", "enabled"]);
+    // 命中但无值域的规则不参与 → 落回通配规则值域（与 minimal 版同语义，全量口径）
+    expect(resolveZcodeReasoningValues(`${PROVIDER_B}/no-values-x`, sources)).toEqual(["disabled", "enabled"]);
+  });
+
+  it("目录缺失 / JSON 损坏 / 无 modelConfigRules / modelRules 非数组 → undefined", () => {
+    expect(resolveZcodeReasoningValues(`${PROVIDER_A}/m1`, { builtinCatalogPath: path.join(tmpRoot, "absent.json") })).toBeUndefined();
+    const broken = path.join(tmpRoot, "broken-catalog.json");
+    fs.writeFileSync(broken, "{not json");
+    expect(resolveZcodeReasoningValues(`${PROVIDER_A}/m1`, { builtinCatalogPath: broken })).toBeUndefined();
+    const noRules = path.join(tmpRoot, "no-rules-catalog.json");
+    writeJson(noRules, { config: {} });
+    expect(resolveZcodeReasoningValues(`${PROVIDER_A}/m1`, { builtinCatalogPath: noRules })).toBeUndefined();
+    const badRules = path.join(tmpRoot, "bad-rules-catalog.json");
+    writeJson(badRules, { config: { modelConfigRules: { modelRules: "nope" } } });
+    expect(resolveZcodeReasoningValues(`${PROVIDER_A}/m1`, { builtinCatalogPath: badRules })).toBeUndefined();
+  });
+});
+
 // ── locateZcodeBuiltinCatalog 目录定位（显式源 > env > runtime/provider 扫描）──
 // env 全局污染防护：本 describe 用例独占 ZCODE_BUILTIN_PROVIDER_CONFIG_FILE 的
 // save/delete/restore（其余 describe 一律走显式 sources，不受影响）。
@@ -466,6 +508,122 @@ describe("locateZcodeBuiltinCatalog（目录定位三源）", () => {
   it("provider 根目录缺失 → undefined（reasoningLevel 解析降级为不携带）", () => {
     zcHomeRef.current = path.join(tmpRoot, "empty-home");
     expect(locateZcodeBuiltinCatalog()).toBeUndefined();
+  });
+});
+
+// ── account 家族直通（2026-10-13 用户裁决）：account 凭据由 zcode CLI 账号体系
+// 自解析，不经个人 provider 表——校验降为目录存在性：规则存在 + 模型在清单内 →
+// 原样放行（大小写保留）。env 全局污染防护同 locate describe：独占
+// ZCODE_BUILTIN_PROVIDER_CONFIG_FILE 的 save/delete/restore + zcHomeRef 归位。
+describe("resolveZcodeModelRef account 家族直通", () => {
+  const ACCOUNT_PROVIDER = "account:zai-individual-coding-plan";
+  let savedCatalogEnv: string | undefined;
+
+  beforeEach(() => {
+    savedCatalogEnv = process.env[CATALOG_ENV_KEY];
+    delete process.env[CATALOG_ENV_KEY];
+  });
+
+  afterEach(() => {
+    if (savedCatalogEnv === undefined) {
+      delete process.env[CATALOG_ENV_KEY];
+    } else {
+      process.env[CATALOG_ENV_KEY] = savedCatalogEnv;
+    }
+    zcHomeRef.current = undefined;
+  });
+
+  function accountSources(catalogPath?: string): { personalProviderConfigPath: string; builtinCatalogPath?: string } {
+    return { personalProviderConfigPath: personalPath, ...(catalogPath !== undefined ? { builtinCatalogPath: catalogPath } : {}) };
+  }
+
+  /** 写一个 account 目录（providerRules 单规则形态；name 区分用例文件）。 */
+  function writeAccountCatalog(name: string, rules: Array<Record<string, unknown>>): string {
+    const catalogPath = path.join(tmpRoot, name);
+    writeJson(catalogPath, { config: { providerConfigRules: { providerRules: rules } } });
+    return catalogPath;
+  }
+
+  it("模型在 builtinModelIds 内 → 原样放行（account id 不在个人 provider 表也可用；大小写保留）", () => {
+    const catalogPath = writeAccountCatalog("account-catalog.json", [
+      { providerId: ACCOUNT_PROVIDER, config: { builtinModelIds: ["GLM-5.3-Flash", "GLM-5.3"] } },
+    ]);
+    expect(resolveZcodeModelRef(`${ACCOUNT_PROVIDER}/GLM-5.3-Flash`, accountSources(catalogPath))).toBe(
+      `${ACCOUNT_PROVIDER}/GLM-5.3-Flash`,
+    );
+  });
+
+  it("builtinModelIds 缺席 → personalModelIds 兜底判清单", () => {
+    const catalogPath = writeAccountCatalog("account-personal-ids-catalog.json", [
+      { providerId: ACCOUNT_PROVIDER, config: { personalModelIds: ["M2-Plan"] } },
+    ]);
+    expect(resolveZcodeModelRef(`${ACCOUNT_PROVIDER}/M2-Plan`, accountSources(catalogPath))).toBe(
+      `${ACCOUNT_PROVIDER}/M2-Plan`,
+    );
+  });
+
+  it("模型不在清单 → model_not_available（列该 account provider 可用模型）", () => {
+    const catalogPath = writeAccountCatalog("account-miss-model-catalog.json", [
+      { providerId: ACCOUNT_PROVIDER, config: { builtinModelIds: ["GLM-5.3-Flash"] } },
+    ]);
+    try {
+      resolveZcodeModelRef(`${ACCOUNT_PROVIDER}/nope`, accountSources(catalogPath));
+      expect.unreachable("should throw");
+    } catch (err) {
+      expect(err).toBeInstanceOf(ZcodePrepareError);
+      const e = err as ZcodePrepareError;
+      expect(e.code).toBe("model_not_available");
+      expect(e.message).toContain("未知模型");
+      expect(e.message).toContain("GLM-5.3-Flash");
+    }
+  });
+
+  it("清单为空数组 → 不设限放行（目录未枚举模型交注册表实况裁决）", () => {
+    const catalogPath = writeAccountCatalog("account-empty-list-catalog.json", [
+      { providerId: ACCOUNT_PROVIDER, config: { builtinModelIds: [] } },
+    ]);
+    expect(resolveZcodeModelRef(`${ACCOUNT_PROVIDER}/Anything-Model`, accountSources(catalogPath))).toBe(
+      `${ACCOUNT_PROVIDER}/Anything-Model`,
+    );
+  });
+
+  it("目录无此 account 规则 → model_not_available（含可用规则指引）", () => {
+    const catalogPath = writeAccountCatalog("account-other-rule-catalog.json", [
+      { providerId: "account:other-plan", config: { builtinModelIds: ["M1"] } },
+    ]);
+    try {
+      resolveZcodeModelRef(`${ACCOUNT_PROVIDER}/GLM-5.3-Flash`, accountSources(catalogPath));
+      expect.unreachable("should throw");
+    } catch (err) {
+      const e = err as ZcodePrepareError;
+      expect(e.code).toBe("model_not_available");
+      expect(e.message).toContain("未知 account provider");
+    }
+  });
+
+  it("目录不可读（JSON 损坏）→ model_not_available（内建目录不可读）", () => {
+    const catalogPath = path.join(tmpRoot, "account-broken-catalog.json");
+    fs.writeFileSync(catalogPath, "{broken json");
+    try {
+      resolveZcodeModelRef(`${ACCOUNT_PROVIDER}/GLM-5.3-Flash`, accountSources(catalogPath));
+      expect.unreachable("should throw");
+    } catch (err) {
+      const e = err as ZcodePrepareError;
+      expect(e.code).toBe("model_not_available");
+      expect(e.message).toContain("内建目录不可读");
+    }
+  });
+
+  it("目录定位失败（无显式源 + env 未注入 + home 扫描不命中）→ model_not_available（内建目录定位失败）", () => {
+    zcHomeRef.current = path.join(tmpRoot, "empty-home");
+    try {
+      resolveZcodeModelRef(`${ACCOUNT_PROVIDER}/GLM-5.3-Flash`, accountSources());
+      expect.unreachable("should throw");
+    } catch (err) {
+      const e = err as ZcodePrepareError;
+      expect(e.code).toBe("model_not_available");
+      expect(e.message).toContain("内建目录定位失败");
+    }
   });
 });
 

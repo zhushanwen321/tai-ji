@@ -83,7 +83,7 @@ export interface RenderContext {
 /**
  * renderCall：tool 标题行（agent + model + thinking 等级，不变信息）。
  *
- *   "subagent worker · glm-5.2 · high"
+ *   "subagent_start coder · glm-5.2 · high"
  *
  * model/thinkingLevel 由调用方（subagent-tool.ts 的闭包）预解析后传入，
  * 因为 renderCall 在 execute 前调用，但 model 解析是同步的（只读配置）。
@@ -98,10 +98,12 @@ export function renderSubagentCall(
   resolved?: { model: string; thinkingLevel?: string },
 ): Component {
   const t = theme as ThemeLike;
-  // args 结构（拍平后）：{ action:"start", agent, task, slug, ... }（见 subagent-tool.ts schema）。
-  // 13 字段直接在顶层，extractAgentName / slug / task 都从 args 顶层提取，
+  // args 结构（拆分后 subagent_start 的平铺形态）：{ task, slug, agent, ... }（见
+  // subagent-tool-schema.ts SubagentStartParams）。14 字段直接在顶层，extractAgentName /
+  // slug / task 都从 args 顶层提取，
   // 对齐 nicobailon 的 renderCall 多行布局。agent ref 是绝对路径，显示取 basename 短名
   // （displayAgentName）；extractAgentName 原值另被 subagent-tool 的 resolveModel 消费，不动。
+  // 本函数只服务 subagent_start（manage/message 两工具用各自的轻量 actionToolRenderCall）。
   const agent = displayAgentName(extractAgentName(args));
   // slug：从顶层 args 提取（必填字段），非空时在 agent 后用 · 分隔展示。
   // 断言目标含必填 slug 字段（in 守卫已确认存在），对齐 format.ts extractAgentName 先例。
@@ -110,8 +112,8 @@ export function renderSubagentCall(
     : undefined;
   const slugStr = typeof slug === "string" ? slug.trim() : "";
   const parts = slugStr
-    ? [`${t.fg("toolTitle", t.bold("subagent "))}${t.fg("accent", agent)}${t.fg("dim", " · ")}${t.fg("accent", slugStr)}`]
-    : [`${t.fg("toolTitle", t.bold("subagent "))}${t.fg("accent", agent)}`];
+    ? [`${t.fg("toolTitle", t.bold("subagent_start "))}${t.fg("accent", agent)}${t.fg("dim", " · ")}${t.fg("accent", slugStr)}`]
+    : [`${t.fg("toolTitle", t.bold("subagent_start "))}${t.fg("accent", agent)}`];
 
   // model + thinking——完整 provider/model（accent 色），thinking 保持 dim。
   // 不去 provider 前缀——provider 是模型来源的关键信息，感知「用错模型」需要完整路径。

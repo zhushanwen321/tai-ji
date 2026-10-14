@@ -310,6 +310,12 @@ event handler（如 `tool_execution_end`）中向 LLM 注入提示词/通知消�
 
 > 决策追溯：初始裁决记录 pi-ext-019（已压缩，见 [adr/archive-digest.md](./adr/archive-digest.md)；structured-output-redesign §7 补记 C 同为 git 历史可追溯）。
 
+### 跨包隐式契约：permission 旧名展开表 ↔ subagent-workflow 工具注册名 [强制]
+
+`permission` 扩展的旧工具名迁移表 `LEGACY_TOOL_NAME_EXPANSION`（extensions/universal/permission/src/rules/legacy-tool-names.ts）硬编码展开 `subagent` → `subagent_start`/`subagent_manage`/`subagent_message`、`workflow` → `workflow_run`/`workflow_control`——展开目标名与 subagent-workflow 的工具注册名互为跨包隐式契约，两包间无 import 依赖，漂移不产生任何编译/加载报错。
+
+**因此 subagent-workflow 工具再拆分/改名时必须同步该展开表**：用户权限规则按工具名精确匹配并持久化落盘，展开表与注册名失配时失配后果 = 旧名 deny 规则静默退化成 ask/AI 分类（无报错）。同步 = 被拆/改名的现行注册名进旧名 key、拆分/改名后的新注册名进展开目标。
+
 ## 禁止使用已废弃的 Pi SDK namespace [MANDATORY]
 
 **唯一正确的 namespace**：`@earendil-works/pi-*`（`pi-coding-agent`、`pi-tui`、`pi-ai`、`pi-agent-core` 四个包）。

@@ -34,6 +34,21 @@
          padding 前带悬浮于视口中部（顶缘露出未处理区）；顶部留白由下方 spacer 承载
          （2026-10-11 修法 A 裁决）。 -->
     <EdgeFade />
+    <!-- [hist-line] 加载更早历史的慢网兜底细线（OpenDesign specs/chat/history-load-and-run-grouping.md
+         §2.2 复刻）：加载启动 150ms 未完成才显示（快载零指示防闪烁），2px --accent 横扫 1.05s
+         循环，插入完成 160ms opacity 淡出。sticky 钉滚动视口顶（同 EdgeFade 顶缘层、z 高一级）、
+         净高 0 不参与 virtua 测量、pointer-events-none 不阻交互。常驻挂载只翻 opacity 类——
+         淡出依赖 transition，条件挂载会瞬跳。横向取消息列同宽：repo 无 demo 阅读列封顶，
+         无需负 margin 满宽（亦可避免撑出横向滚动条）。reduced-motion 降级 = 停扫静态线 + 透明度 0.6。
+         [ld-cv 豁免登记] spec §2.1 同文的「历史轮块挂 content-visibility 压舱」不引入：本流经
+         virtua <Virtualizer> 窗口化渲染，视口外轮次块根本不挂载（严格强于 content-visibility
+         的「挂载但跳过渲染」），渲染成本压舱目标已由更强架构覆盖，ld-cv 在此冗余。 -->
+    <div data-testid="history-load-line" aria-hidden="true" class="pointer-events-none sticky top-0 z-[4] h-0 max-w-none">
+      <i
+        class="hist-line-sweep absolute inset-x-0 top-0 block h-0.5 overflow-hidden transition-opacity duration-[160ms] ease-[var(--ease-out)]"
+        :class="slowLine ? 'is-on opacity-100 motion-reduce:opacity-60' : 'opacity-0'"
+      ></i>
+    </div>
     <!-- 顶部留白 spacer：EdgeFade 的 sticky 正常流位置因此与视口顶重合（滚动 1px 带即贴顶）。
          virtua 每次滚动沿 offsetParent 链重测 container 偏移，前置兄弟高度自然计入，
          startMargin 无需感知本 spacer。 -->
@@ -268,7 +283,7 @@ const chat = useChatStore()
 /** W4 H4 + cw wave w3 / IF8：加载更多历史 loading + isPrepend（virta :shift 信号）+ handler
  *  + [scroll-top-auto-load] onScrollOffset（触顶自动续载，底部条退化为进度位/兜底）
  *  + [RD-1#4] loadMoreError（上次失败态 → 顶部条渲染可重试错误行 LoadMoreErrorBar）。 */
-const { loadingMore, showLoadMore, handleLoadMore, isPrepend, onScrollOffset, loadMoreError, topBarReservedHeight } =
+const { loadingMore, showLoadMore, handleLoadMore, isPrepend, onScrollOffset, loadMoreError, topBarReservedHeight, slowLine } =
   useLoadMoreHistory(() => props.sessionId, () => streamItems.value.length)
 
 // [u8-pi-respawn] 恢复提示条重试（crash-resilience D7 熔断后的用户出口）——实现见
@@ -513,6 +528,26 @@ watch(
   border-radius: var(--radius-xs);
 }
 .message-stream::-webkit-scrollbar-thumb:hover { background: var(--neutral-dim); }
+
+/* [hist-line] 慢网兜底细线横扫芯（demo .hist-line i::after + @keyframes hist-line-sweep）：
+   Tailwind 无法表达 content + translateX keyframes 组合，按 AGENTS.md escape hatch 入 scoped
+   （伪元素选择器）。常驻 translateX(-100%) 藏于线框左侧外；.is-on 才扫（1.05s linear
+   infinite，demo 同参）；显隐 opacity 走模板 Tailwind 类（scoped 禁写普通选择器）。 */
+.hist-line-sweep::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--accent);
+  transform: translateX(-100%);
+}
+.hist-line-sweep.is-on::after { animation: hist-line-sweep 1.05s linear infinite; }
+@keyframes hist-line-sweep { from { transform: translateX(-100%); } to { transform: translateX(100%); } }
+/* reduced-motion：style.css 全局兜底只把动画瞬切到终态（translateX(100%) = 芯飞出右侧不可见），
+   此处显式停扫并把芯归位为静态条（demo §2.2 降级档：静态低透明度细线；透明度降档在模板
+   motion-reduce:opacity-60） */
+@media (prefers-reduced-motion: reduce) {
+  .hist-line-sweep.is-on::after { animation: none; transform: none; }
+}
 
 /* [cw wave w3 / design §4.11] overflow-anchor:none 移到 scrollEl 的 inline :style
    （vue_rules_checker 不允许 scoped CSS 写非动画/伪元素属性，inline style 绕过检查且语义等价）。 */

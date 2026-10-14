@@ -18,7 +18,9 @@
 //   形态下输出逐字节等价」（CA2 快照验收前提）。
 // - 空态显式化（D4-2）：subagents/workflows 两段新增空发现态渲染
 //   formatEmptyResourceList（(none discovered; roots: ...)）——条目 format
-//   函数空列表仍返回空串（判据契约），空态接管在工厂层（resource-list-injector）。
+//   函数空列表仍返回空串（判据契约），空态接管在工厂层（resource-list-injector）；
+//   空态段可携带宿主注入的纪律行（guide 可选参数——清单为零但工具可用时
+//   跨工具调度纪律不随清单消失）。
 // 设计锚点：红线 5（ModelEntry 守卫）与红线 7（分段条目预算），见上方差异定约。
 
 import { escapeXml, renderXmlSection } from "./xml-injection.ts";
@@ -260,21 +262,32 @@ function compareByCodepoint(a: string, b: string): number {
  * - invalids（P5 D4-3）：非空时在空态行后追加 invalid 具名上报行——
  *   「条目为零」与「存在损坏文件」两个事实同段呈现（衔接点：空态文本
  *   附近，与条目段的 invalid 行形态逐字一致，共用 invalidResourceLines）；
+ * - guide（可选，宿主注入）：空态段在 roots 行后渲染的纪律行——承载与
+ *   清单在场与否无关、但工具仍可用就必须注入的跨工具调度纪律（如勿
+ *   poll 等待/预算缺省），零条目环境下不随清单消失。原样渲染不
+ *   escapeXml（与 renderXmlSection 的 guide 同信任级：宿主注入文案，
+ *   条目段的 guide 即此处理）；缺省不渲染（无纪律注入面的宿主保持
+ *   纯「没有 + 去哪找」形态）；
  * - 空 roots 返回空串（不注入）：无清单可渲染时不输出 "roots: )" 空括号
- *   （约定根恒在生产不可达，纯防御分支——invalid 同随不渲染）。
+ *   （约定根恒在生产不可达，纯防御分支——invalid 与 guide 同随不渲染）。
  */
 export function formatEmptyResourceList(
   kind: "agents" | "workflows",
   roots: string[],
   invalids: readonly InvalidResource[] = [],
+  guide?: string,
 ): string {
   const unique = [...new Set(roots)];
   if (unique.length === 0) return "";
   const tag = kind === "agents" ? "available_subagents" : "available_workflows";
-  // 骨架手写不走 renderXmlSection：其 guide 必填，而空态段无引导语——
-  // agent 只需知道「没有 + 去哪找」，guide 行是条目段的消费语义
+  // 骨架手写不走 renderXmlSection：其 guide 必填，而空态段无路由引导语——
+  // 「以下条目可用」式引导在零条目下是假话，guide 参数只承载与清单在场
+  // 与否无关的纪律行（见上方 doc 注释 guide 条目）。
   const line = `  (none discovered; roots: ${unique.map(escapeXml).join(", ")})`;
-  return [`\n\n<${tag}>`, line, ...invalidResourceLines(invalids), `</${tag}>`].join("\n");
+  const lines = [`\n\n<${tag}>`, line];
+  if (guide !== undefined) lines.push(`  ${guide}`);
+  lines.push(...invalidResourceLines(invalids), `</${tag}>`);
+  return lines.join("\n");
 }
 
 /**
