@@ -34,6 +34,7 @@ import { closeOverlay, getOverlayControlState, openBrowser } from '@taiji/core/d
 import {
   closeWorkflowVizOverlay,
   closeWorkflowVizOverlayForSession,
+  openCanvasTab,
   openSchedulerTab,
   openWorkflowVizOverlay,
   overlayDag,
@@ -487,6 +488,85 @@ describe('scheduler 一级 tab（Host 挂载门控 + tab 状态机，scheduler �
     expect(isOverlayOpen()).toBe(true)
     closeWorkflowVizOverlayForSession(SID)
     expect(isOverlayOpen()).toBe(false)
+  })
+})
+
+describe('canvas 一级 tab（problem-solve-canvas §3.1(3)：画布跨 session，scheduler 双入口先例平移）', () => {
+  it('canvas 直达打开（kind 直达）：overlay 面板呈现 + canvas 占位 pane 在场 + runs/scheduler body 不在场 + header 换画布标题', async () => {
+    const wrapper = mount(WorkflowVizOverlayHost)
+
+    openCanvasTab('cvs-1')
+    await flushPromises()
+
+    expect(getOverlayControlState().current).toEqual({ kind: 'canvas', payload: { canvasId: 'cvs-1' } })
+    expect(wrapper.find('[data-testid="wfvz-overlay-panel"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="wfvz-overlay-canvas-pane"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="wfvz-overlay-dag-pane"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="wfvz-overlay-live-pane"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="wfvz-overlay-scheduler-pane"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="wfvz-overlay-canvas-title"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('tab 切换互不串扰：workflow 开着切 canvas 再切回——core 内容 kind 不变（workflow），DAG 区随 tab 卸载/还原', async () => {
+    await seedRecords([makeRun('wf-1', 's1')])
+    const wrapper = mount(WorkflowVizOverlayHost)
+
+    openWorkflowVizOverlay(SID, 'wf-1')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="wfvz-overlay-dag-pane"]').exists()).toBe(true)
+
+    // 切 canvas：runs body 卸载、canvas 占位在场；core 内容仍是 workflow（tab 只切展示维度）
+    await wrapper.find('[data-testid="wfvz-overlay-tab-canvas"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="wfvz-overlay-canvas-pane"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="wfvz-overlay-dag-pane"]').exists()).toBe(false)
+    expect(currentRun()).toEqual({ sessionId: SID, runId: 'wf-1' })
+
+    // 切回 runs：DAG 区还原
+    await wrapper.find('[data-testid="wfvz-overlay-tab-runs"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="wfvz-overlay-dag-pane"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="wfvz-overlay-canvas-pane"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('tab 切换互不串扰：canvas 直达开着切 scheduler——scheduler pane 替换 canvas 占位，再点 canvas 段还原', async () => {
+    const wrapper = mount(WorkflowVizOverlayHost)
+
+    openCanvasTab('cvs-1')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="wfvz-overlay-canvas-pane"]').exists()).toBe(true)
+
+    await wrapper.find('[data-testid="wfvz-overlay-tab-scheduler"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="wfvz-overlay-scheduler-pane"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="wfvz-overlay-canvas-pane"]').exists()).toBe(false)
+
+    await wrapper.find('[data-testid="wfvz-overlay-tab-canvas"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="wfvz-overlay-canvas-pane"]').exists()).toBe(true)
+    expect(overlayTab.value).toBe('canvas')
+    wrapper.unmount()
+  })
+
+  it('关闭复位对 canvas 内容同构：关（任意通道）→ overlayTab 复位 runs；重开由入口定', () => {
+    openCanvasTab('cvs-1')
+    expect(overlayTab.value).toBe('canvas')
+    closeOverlay()
+    expect(overlayTab.value).toBe('runs')
+
+    openCanvasTab('cvs-1')
+    expect(overlayTab.value).toBe('canvas')
+    closeWorkflowVizOverlay()
+    expect(overlayTab.value).toBe('runs')
+  })
+
+  it('session 删除级联对 canvas 内容不关（画布跨 session 无会话归属——级联判据不适用）', () => {
+    openCanvasTab('cvs-1')
+    closeWorkflowVizOverlayForSession(SID)
+    expect(isOverlayOpen()).toBe(true)
+    expect(getOverlayControlState().current?.kind).toBe('canvas')
   })
 })
 

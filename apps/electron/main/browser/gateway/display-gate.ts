@@ -37,10 +37,11 @@ export interface DisplayRect { // oe-exempt:20261003:framework:类型契约先�
 export type { ShieldFace, OverlayContentKind } from '@taiji/shared'
 import type { ShieldFace, ShieldRect, OverlayContentKind } from '@taiji/shared'
 
-// 浮层内容种类（core overlay 域同词表；scheduler = 定时任务 tab 整合 2026-10-06——
-//  非 browser 内容谓词恒假，view 照常隐藏）：词表单源 = @taiji/shared
+// 浮层内容种类（core overlay 域同词表；scheduler = 定时任务 tab 整合 2026-10-06；
+// canvas = 问题解决画布 tab（problem-solve-canvas §3.1(3)）——非 browser 内容谓词恒假，
+// view 照常隐藏）：词表单源 = @taiji/shared
 // OverlayContentKind（browser:overlay-state payload 契约四方共用），经上方 re-export
-// 保持既有导入路径（browser-view-manager / 测试）不变；下 :parse 校验的运行时三值
+// 保持既有导入路径（browser-view-manager / 测试）不变；下 :parse 校验的运行时词值
 // 检查保留——进程边界防线上类型不替代运行时校验。
 
 /** 浮层开合态（renderer 经 IPC 上报；view 显示收口的事实源之一） */
@@ -140,8 +141,21 @@ export function parseOverlayDisplayState(payload: unknown): OverlayDisplayState 
   if (!payload.open) {
     return { ...CLOSED_OVERLAY }
   }
-  if (payload.content !== 'browser' && payload.content !== 'workflow' && payload.content !== 'scheduler') {
-    throw new Error(`[browser:overlay-state] content must be "browser" | "workflow" | "scheduler" when open, got ${String(payload.content)}`)
+  if (
+    payload.content !== 'browser'
+    && payload.content !== 'workflow'
+    && payload.content !== 'scheduler'
+    && payload.content !== 'canvas'
+  ) {
+    throw new Error(`[browser:overlay-state] content must be "browser" | "workflow" | "scheduler" | "canvas" when open, got ${String(payload.content)}`)
+  }
+  // canvas 内容跨 session 无会话归属（problem-solve-canvas D4/D7）——sessionId 恒 null；
+  // 其余三类内容都持发起 sessionId（非空 string，谓词事实源语义不变）
+  if (payload.content === 'canvas') {
+    if (payload.sessionId !== null) {
+      throw new Error('[browser:overlay-state] sessionId must be null for canvas content')
+    }
+    return { open: true, content: payload.content, sessionId: null }
   }
   if (typeof payload.sessionId !== 'string' || payload.sessionId.length === 0) {
     throw new Error('[browser:overlay-state] sessionId must be a non-empty string when open')

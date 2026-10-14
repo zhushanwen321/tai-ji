@@ -28,7 +28,13 @@ export function useBrowserOverlayStateSync(): void {
     const cur = current.value
     void browserSetOverlayState(
       isOpen.value && cur !== null
-        ? { open: true, content: cur.kind, sessionId: cur.payload.sessionId }
+        ? {
+          open: true,
+          content: cur.kind,
+          // canvas 内容跨 session 无会话归属（problem-solve-canvas D4/D7）——上报 null；
+          // 其余三类载荷都持发起 sessionId
+          sessionId: cur.kind === 'canvas' ? null : cur.payload.sessionId,
+        }
         : { open: false, content: null, sessionId: null },
     ).catch((e: unknown) => {
       // 上报是事件提示（主进程谓词收敛仍有 rect/错误/shields 触发面）；非法 payload reject

@@ -22,8 +22,9 @@
  *   丢弃，对齐 store D11①）+ parse_failed 重试（失败不缓存故可重试）。
  * - session 删除关 overlay（D11⑤）：closeWorkflowVizOverlayForSession 供
  *   useSidebar.deleteSession 编排链经 SessionCleanupHooks.closeWorkflowOverlay 调用。
- * - overlay 一级 tab（scheduler 整合，2026-10-06 用户裁决）：overlayTab 展示态（开合态/
- *   内容 SSOT 在 core，tab 是本模块的展示维度）+ openSchedulerTab / setOverlayTab 写入口
+ * - overlay 一级 tab（scheduler 整合，2026-10-06 用户裁决；canvas 画布 tab，
+ *   problem-solve-canvas §3.1(3)）：overlayTab 展示态（开合态/内容 SSOT 在 core，tab 是
+ *   本模块的展示维度）+ openSchedulerTab / openCanvasTab / setOverlayTab 写入口
  *   + 关闭任意通道复位 watch + SCHEDULER_MODAL_VIEW_ID 单源（ViewHost 分区键）。
  */
 import { ref, watch } from 'vue'
@@ -36,6 +37,7 @@ import {
 import {
   closeOverlay,
   getOverlayControlState,
+  openCanvasOverlay,
   openOverlay,
   openSchedulerOverlay,
 } from '@taiji/core/domain/overlay'
@@ -56,8 +58,8 @@ export const overlayDagError = ref<WorkflowVizDagLoadError | null>(null)
 
 // ── overlay 一级 tab（scheduler 整合进浮层，2026-10-06 用户裁决）─────────────────────
 
-/** 浮层一级 tab：'runs' = DAG + 实况 dock（现状 body）；'scheduler' = 定时任务面板（ViewHost 消费插件树）。 */
-export type OverlayTab = 'runs' | 'scheduler'
+/** 浮层一级 tab：'runs' = DAG + 实况 dock（现状 body）；'scheduler' = 定时任务面板（ViewHost 消费插件树）；'canvas' = 问题解决画布（problem-solve-canvas §3.1(3)，tab body 挂载分支归 u-canvas-pane）。 */
+export type OverlayTab = 'runs' | 'scheduler' | 'canvas'
 
 // taste:allow-no-data-owner W24-EX-B（模块级单例 UI 瞬态，补登 §4 ⑧ 2026-10-06）：overlay 一级 tab 槽
 /** 浮层一级 tab 展示态（开合态/内容 SSOT 在 core，tab 是 renderer 展示维度——壳经 Host 受控透传）。 */
@@ -71,7 +73,8 @@ export const overlayTab = ref<OverlayTab>('runs')
 export { SCHEDULER_MODAL_VIEW_ID } from '@zhushanwen/extension-protocol'
 
 // overlay 关闭（任意通道：Esc 编排器直关 core 开合态 / 壳 close / 会话删除级联）→ tab 复位
-// 'runs'；下次打开由入口显式置位（openWorkflowVizOverlay→'runs' / openSchedulerTab→'scheduler'）。
+// 'runs'；下次打开由入口显式置位（openWorkflowVizOverlay→'runs' / openSchedulerTab→'scheduler'
+// / openCanvasTab→'canvas'）。
 // flush sync：复位锚在「关闭发生」时刻而非渲染 tick——状态级不变量（关 = tab 归位），无渲染顺序依赖。
 watch(
   () => getOverlayControlState().isOpen,
@@ -126,6 +129,18 @@ export function openSchedulerTab(sessionId: string): void {
   if (!sessionId) return
   openSchedulerOverlay(sessionId)
   overlayTab.value = 'scheduler'
+}
+
+/**
+ * 打开浮层问题解决画布 tab（canvas 直达入口，problem-solve-canvas §3.1(3)，对齐
+ * openSchedulerTab 先例）：core 换内容 canvas kind + tab 置 canvas。画布跨 session
+ * 共享，载荷只有 canvasId——消费方 = 托盘列表行点击（u-tray-entry 接线）与创建后
+ * 自动唤起（u-canvas-store，边界归其领地）。
+ */
+export function openCanvasTab(canvasId: string): void {
+  if (!canvasId) return
+  openCanvasOverlay(canvasId)
+  overlayTab.value = 'canvas'
 }
 
 /** tab 切换（壳 tab 条点击接线）：只写 renderer tab 展示维度，不改 core 开合态/内容。 */

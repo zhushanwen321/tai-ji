@@ -7,15 +7,18 @@
   结构与分层（display-containers §6.5/§7.3）：面板 + 遮罩 + 两通道关闭（点遮罩 /
   按钮）+ Tab 焦点陷阱注册 + IME 守卫 + 焦点契约（打开 focus 面板 / 关闭回 composer）
   全部归 OverlayShell；本组件是挂进壳标题栏 slot 与 body 的 workflow 内容层。
-  header 双态（scheduler 整合一级 tab，2026-10-06 用户裁决）：tab=runs = 六元素行
+  header 三态（scheduler 整合一级 tab，2026-10-06 用户裁决；canvas 画布 tab，
+  problem-solve-canvas §3.1(3)）：tab=runs = 六元素行
   （图标 + workflow 名 + slug + 状态 pill + errorCode + 已用时长，关闭钮归壳不计入
   元素数；v5 终裁参数信息不进 header——workflow-overlay-refine D2）；tab=scheduler =
-  Clock + 定时任务标题。body 顶部一级 tab 条（TraceViewToggle 分段范式；「运行」tab
+  Clock + 定时任务标题；tab=canvas = 画布图标 + 画布标题（run 元素整体让位，同
+  scheduler 形态）。body 顶部一级 tab 条（TraceViewToggle 分段范式；「运行」tab
   按 run 缺省禁用——scheduler 直达打开本浮层可以没有 run 数据），tab=runs 时 body
   纵向两段（workflow-overlay-refine D1，份额 1.6:1）：上区 DAG（WorkflowVizDag
   画布 / DAG 不可得降级列表 / 解析中 / 未匹配实例分组 + 左下角 D4 状态图例（仅画布
   就绪时在场，dot 类与节点同源 dag/tone.ts、pointer-events-none 不拦截画布交互），
-  全宽）+ 下区 dock（slot——U5 多级 tab 面板填充位，全宽）；tab=scheduler 时 body =
+  全宽）+ 下区 dock（slot——U5 多级 tab 面板填充位，全宽）；tab=canvas 时 body =
+  CanvasPane（挂载分支归 u-canvas-pane，本单元占位空态）；tab=scheduler 时 body =
   ViewHost（消费 scheduler-manager 插件推树，viewId 单源 SCHEDULER_MODAL_VIEW_ID；
   树未到 empty=hidden 零 DOM）。tab 是受控 prop
   （SSOT 在控制器 workflow-viz-overlay.ts，Host 透传 + update:tab 写回），壳纯展示
@@ -52,9 +55,10 @@
     :close-label="t('panel.workflowViz.overlayClose')"
     @close="close"
   >
-    <!-- 标题栏 slot 双态：runs = 图标 + workflow 名 + slug + 状态 pill + errorCode + 已用时长
+    <!-- 标题栏 slot 三态：runs = 图标 + workflow 名 + slug + 状态 pill + errorCode + 已用时长
          （关闭按钮归壳，恒在最右；D2 v5 终裁不展示 args）；scheduler = Clock + 定时任务标题
-         （run 元素整体让位——run 数据不属 scheduler 内容） -->
+         （run 元素整体让位——run 数据不属 scheduler 内容）；canvas = 画布图标 + 画布标题
+         （run 元素整体让位——run 数据不属 canvas 内容，problem-solve-canvas §3.1(3)） -->
     <template #title>
       <template v-if="tab === 'scheduler'">
         <Clock class="size-[15px] shrink-0 text-neutral-dim" aria-hidden="true" />
@@ -62,6 +66,13 @@
           class="min-w-0 shrink-0 font-mono text-[length:var(--text-xs)] font-semibold text-neutral-fg"
           data-testid="wfvz-overlay-scheduler-title"
         >{{ t('panel.workflowViz.overlayTabScheduler') }}</span>
+      </template>
+      <template v-else-if="tab === 'canvas'">
+        <Network class="size-[15px] shrink-0 text-neutral-dim" aria-hidden="true" />
+        <span
+          class="min-w-0 shrink-0 font-mono text-[length:var(--text-xs)] font-semibold text-neutral-fg"
+          data-testid="wfvz-overlay-canvas-title"
+        >{{ t('panel.workflowViz.overlayTabCanvas') }}</span>
       </template>
       <template v-else>
         <Workflow class="size-[15px] shrink-0 text-neutral-dim" aria-hidden="true" />
@@ -258,6 +269,14 @@
           <slot />
         </section>
       </div>
+      <!-- tab=canvas：问题解决画布（problem-solve-canvas §3.1(3)）。body 挂载分支
+           （<CanvasPane :canvas-id> + 异步导入）归 u-canvas-pane——本单元先落占位空态
+           （tab 可切换直达、壳门控/直达入口/i18n 本单元就位），不写死组件引用 -->
+      <div
+        v-else-if="tab === 'canvas'"
+        class="flex min-h-0 flex-1 flex-col"
+        data-testid="wfvz-overlay-canvas-pane"
+      />
       <!-- tab=scheduler：定时任务面板（viewId 单源常量 = 控制器 SCHEDULER_MODAL_VIEW_ID，
            树未到 = hidden 零 DOM，容器仍锚定内容区形态） -->
       <div
@@ -273,7 +292,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Clock, Workflow } from '@lucide/vue'
+import { Clock, Network, Workflow } from '@lucide/vue'
 import { WORKFLOW_RUN_OUTCOME_LABELS, type WorkflowAgentCall, type WorkflowDag, type WorkflowRunRecord } from '@taiji/shared'
 import { Button } from '@/components/ui/button'
 import { ViewHost } from '@taiji/ui/extension-host'
@@ -332,10 +351,11 @@ const { t } = useI18n()
 
 // ── 一级 tab 条（scheduler 整合）：分段定义（序 = 缺省视图优先）──
 
-/** tab 词条 + 图标（TraceViewToggle 分段范式）。 */
+/** tab 词条 + 图标（TraceViewToggle 分段范式；canvas 段 = 问题解决画布，problem-solve-canvas §3.1(3)）。 */
 const tabSegments = computed<Array<{ value: OverlayTab; label: string; icon: typeof Workflow }>>(() => [
   { value: 'runs', label: t('panel.workflowViz.overlayTabRuns'), icon: Workflow },
   { value: 'scheduler', label: t('panel.workflowViz.overlayTabScheduler'), icon: Clock },
+  { value: 'canvas', label: t('panel.workflowViz.overlayTabCanvas'), icon: Network },
 ])
 
 /** tab 点击（禁用判据在入口守卫，不依赖浏览器对 disabled 按钮的点击抑制）：无 run 时「运行」不可进。 */
