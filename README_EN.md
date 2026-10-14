@@ -99,7 +99,7 @@ Dispatch independent tasks to subagents running in parallel, or compose multi-st
 Sidebar file tree (smooth on large directories + git badges), drawer terminal (per-session state), Git/worktree management, and a built-in browser pane.
 
 ### 19 built-in extensions
-Agent capabilities are implemented through the pi extension mechanism, covering permissions, scheduled tasks, context compaction, structured output, and more. 19 extensions ship bundled with the app (15 universal + 4 TaiJi-integration-specific); 16 of the universal extensions are usable standalone outside taiji. See the [extension development guide](docs/extensions/development-guide.md).
+Agent capabilities are implemented through the pi extension mechanism, covering permissions, scheduled tasks, context compaction, structured output, and more. 19 extensions ship bundled with the app (15 universal + 4 TaiJi-integration-specific); 16 of the universal extensions are usable standalone outside taiji (9 of the packages mark low-frequency tools `exposure: "deferred"`, activated on demand via pi's built-in `tool_search` — standalone pi users must add `"defaultTools": ["+tool_search"]` to `settings.json`, see each package README). See the [extension development guide](docs/extensions/development-guide.md).
 
 ---
 
@@ -142,7 +142,7 @@ Agent capabilities are implemented through the pi extension mechanism, covering 
 
 TaiJi's Agent capabilities are implemented through the pi extension mechanism; source lives in [`extensions/`](extensions/) (20 `@zhushanwen/pi-*` packages + the `shared/` library), 19 of which ship bundled with the app.
 
-The following 16 extensions are usable standalone outside taiji (all published to npm, or loadable via `--extension`):
+The following 16 extensions are usable standalone outside taiji (all published to npm, or loadable via `--extension`). Note: 9 of the packages mark low-frequency tools `exposure: "deferred"` — they activate on demand via pi's built-in `tool_search`. Standalone pi users must add `"defaultTools": ["+tool_search"]` to `<agentDir>/settings.json` (default `~/.pi/agent/settings.json`; the `+` prefix keeps the default tool set), otherwise these tools stay invisible to the model — activation instructions live in each package README's "Tool activation (deferred)" section:
 
 | Extension | Purpose |
 |------|------|
