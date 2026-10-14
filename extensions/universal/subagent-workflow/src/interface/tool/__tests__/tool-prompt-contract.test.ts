@@ -286,6 +286,15 @@ describe("subagent_start description — 锚词保留清单（D2/D3 契约）", 
       "(subagent_start, subagent_manage, subagent_message, subagents, workflow_run, workflow_control tools)",
     );
   });
+
+  it("空态也承载调度纪律：工厂 emptyGuide 接 SUBAGENT_DISPATCH_SHARED_RULES（零 agent 环境纪律不消失）", () => {
+    // formatAgentList 空列表返回空串、空态段由工厂 formatEmptyResourceList 接管——
+    // 工厂配置不传 emptyGuide 时 SUBAGENT_DISPATCH_SHARED_RULES 在零 agent 环境
+    // 零承载（D1 单源化被击穿：勿 poll 等待/预算纪律随清单一起消失）。
+    // 锚生产 config 的接线形态；空态段行为级断言在 injectors 域
+    // workflow-list-injector.test.ts（agent 空态注入含纪律关键词）。
+    expect(SUBAGENT_LIST_INJECTOR_SRC).toContain("emptyGuide: SUBAGENT_DISPATCH_SHARED_RULES");
+  });
 });
 
 // ══════════════════════════════════════════════════════════════

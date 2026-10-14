@@ -14,16 +14,17 @@
  *   不阻断、缓存保持 null）；before_agent_start 读缓存渲染注入、miss（session_start
  *   未触发/缓存被清）则 fallback 重新发现+赋值，空发现渲染空态段（D4-2：(none
  *   discovered; roots: ...)，不再整段消失；invalids 随段具名呈现——D4-3 损坏文件
- *   不静默），任何异常被吞掉（记日志）不阻断 agent turn；session_shutdown 清缓存。
+ *   不静默；config.emptyGuide 随段注入——纪律行与清单在场与否无关），任何异常被吞掉（记日志）不阻断 agent turn；session_shutdown 清缓存。
  *   pi 支持 async handler，同一 event 多 handler 链式（前者返回的 systemPrompt 作
  *   后者输入）。
  *
  * 两实例的真差异经 config 参数化承载：kind（发现种类 + discoveryRoots 宿主槽位）/
  * parse（单文件内容 → entry；workflow 侧 description 截断内聚于其 parse）/ format
- * （entries → XML 注入段；guide 文案差异内聚于各自 format）/ includeTmp（workflow 侧
- * 覆盖 .pi/workflows/.tmp/ generate 产物）/ logTag（错误日志前缀，保持既有可检索性）；
- * assemble（agent 侧真差异：装配循环覆写——U11 下沉 core discoverAgents 后工厂不重复
- * 装配语义，parse 不参与）。
+ * （entries → XML 注入段；guide 文案差异内聚于各自 format）/ emptyGuide（空态段
+ * 纪律行；agent 侧传 SUBAGENT_DISPATCH_SHARED_RULES，workflow 侧不传）/ includeTmp
+ * （workflow 侧覆写 .pi/workflows/.tmp/ generate 产物）/ logTag（错误日志前缀，
+ * 保持既有可检索性）；assemble（agent 侧真差异：装配循环覆写——U11 下沉 core
+ * discoverAgents 后工厂不重复装配语义，parse 不参与）。
  *
  * model-list-injector 不参与本工厂：数据源是 ModelRegistry 内存快照（真差异，无文件
  * 发现与缓存生命周期），见该文件头注释。
@@ -90,6 +91,14 @@ export interface ResourceListInjectorConfig<TEntry extends ResourceListEntry> {
 	 * 实例的 format 决定（workflow 实例透传 core formatWorkflowList 的 invalids 选项）。
 	 */
 	format(entries: TEntry[], invalids: readonly InvalidResource[]): string;
+	/**
+	 * 空态段纪律行（可选，宿主注入）：零条目时空态段在 roots 行后渲染的
+	 * 引导文案——承载与清单在场与否无关、但工具仍可用就必须注入的跨工具
+	 * 调度纪律（agent 侧 = SUBAGENT_DISPATCH_SHARED_RULES：direct 派发不经
+	 * 清单路由，零 agent 环境下纪律仍需有承载点）。缺省空态段保持纯
+	 * 「没有 + 去哪找」形态（workflow 侧不传）。
+	 */
+	emptyGuide?: string;
 	/** workflow 侧真差异：包含 .pi/workflows/.tmp/（workflow-script generate 产物）。 */
 	includeTmp?: boolean;
 }
@@ -137,8 +146,8 @@ export function createResourceListInjector<TEntry extends ResourceListEntry>(
 	 * 不消费）。空发现（format 返回空串——core formatXxxList 空列表的判据契约）
 	 * 不再让注入段整段消失，改渲染空态段（D4-2）：agent 可区分「功能关闭」与
 	 * 「确实没有」，roots 清单供自救；invalids 随空态段具名呈现（D4-3——条目为零
-	 * 与存在损坏文件两个事实同段）。非空路径 format 输出原样缓存（invalids 缺省
-	 * 逐字节零变更）。
+	 * 与存在损坏文件两个事实同段）；emptyGuide（若有）随空态段注入——纪律与
+	 * 清单在场与否无关。非空路径 format 输出原样缓存（invalids 缺省逐字节零变更）。
 	 */
 	function setCache(
 		result: ResourceDiscoveryResult<TEntry> | null,
@@ -156,6 +165,7 @@ export function createResourceListInjector<TEntry extends ResourceListEntry>(
 					config.kind,
 					discoveryRootDirs(workspaceRoot, config.kind, config.includeTmp === true),
 					result.invalids,
+					config.emptyGuide,
 				);
 	}
 

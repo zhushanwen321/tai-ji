@@ -36,7 +36,7 @@ import {
 // 被测工厂 + 生产模块导出（parse/guide/单例接线）
 import { createResourceListInjector } from "../resource-list-injector.ts";
 import { parseWorkflowMeta, setupWorkflowListInjector, WORKFLOW_LIST_GUIDE } from "../workflow-list-injector";
-import { SUBAGENT_LIST_GUIDE } from "../subagent-list-injector";
+import { SUBAGENT_DISPATCH_SHARED_RULES, SUBAGENT_LIST_GUIDE } from "../subagent-list-injector";
 
 // ── 稳定 spy（vi.hoisted 保证 resetModules 后引用不变）──
 const spies = vi.hoisted(() => ({ discoverResources: vi.fn(), getCachedFileContent: vi.fn() }));
@@ -75,6 +75,8 @@ function makeAgentInjector() {
 		format: (agents, _invalids) => formatAgentList(agents, { guide: SUBAGENT_LIST_GUIDE }),
 		assemble: (workspaceRoot) =>
 			discoverAgents(workspaceRoot, getHostServices().discoveryRoots?.()?.agents ?? []),
+		// 空态纪律行（dmg-r1-6）：与生产 config 同款接线——空态断言经本复刻驱动
+		emptyGuide: SUBAGENT_DISPATCH_SHARED_RULES,
 	});
 }
 
@@ -480,6 +482,11 @@ describe("agent injector session 级缓存（assemble 路径工厂直测，与 w
 		expect(r1?.systemPrompt).toContain("<available_subagents>");
 		expect(r1?.systemPrompt).toContain("(none discovered; roots: ");
 		expect(r1?.systemPrompt).toContain("/ws/.agents/agents");
+		// dmg-r1-6：零 agent 环境下 D1 单源化的跨工具调度纪律仍随空态段注入
+		// （direct 派发不经清单路由，纪律承载点不能随清单消失）
+		expect(r1?.systemPrompt).toContain("do NOT bash sleep, busy-wait, or poll");
+		expect(r1?.systemPrompt).toContain("omit unless the user explicitly requests a limit");
+		expect(r1?.systemPrompt).toContain("inherit the main agent's model");
 		expect(r2?.systemPrompt).toBe(r1?.systemPrompt);
 	});
 

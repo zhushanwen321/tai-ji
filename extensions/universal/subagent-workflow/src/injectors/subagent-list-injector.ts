@@ -83,6 +83,10 @@ const injector = createResourceListInjector<AgentEntry>({
 			workspaceRoot,
 			getHostServices().discoveryRoots?.()?.agents ?? [],
 		),
+	// 空态也承载调度纪律：direct 派发不经清单路由（缺省 general-purpose agent），
+	// 零 agent 环境下 D1 单源化的纪律（勿 poll 等待/预算缺省）仍需注入点——
+	// 只传纪律不传路由引导（「以下 subagent 可用」在零条目下是假话）。
+	emptyGuide: SUBAGENT_DISPATCH_SHARED_RULES,
 });
 
 /** 注册 session 生命周期 handler，注入 `<available_subagents>` 段（三 handler 语义见工厂）。 */
