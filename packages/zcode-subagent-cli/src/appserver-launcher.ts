@@ -98,7 +98,7 @@ function injectedConfigText() {
   let v2 = {};
   try { v2 = JSON.parse(readOrig(V2_PATH, 'utf8')); }
   catch (err) {
-    // ENOENT = 桌面端未登录（正常 no-patch，静默）；其他失败（JSON 损坏/权限）
+    // ENOENT = 桌面端未登录（正常 no-patch，不构成错误；跳过决策由安装门日志承载）；其他失败（JSON 损坏/权限）
     // 出声——否则排障会被原生「请登录」报错误导，与真因（文件损坏）不符
     if (!err || err.code !== 'ENOENT') {
       process.stderr.write('[zcode-launcher] v2 config 读取失败(' + ((err && err.code) || (err && err.message) || 'unknown') + '): ' + V2_PATH + '——凭据注入未生效\\n');
@@ -258,6 +258,8 @@ if (!CLI_PATH) {
 // 条目默认非 entitled（YXe 硬编码 !1）→ plan 家族引用一律「不存在 Model」。用户裁决：
 // zai 系走 account provider 配置并绕过该限制——patch 只发生在本 wrapper 的读取返回值，
 // ZCode.app 磁盘文件零触碰。null = 目录无 zhipu-account 条目（无需 patch）。
+// 本函数必须以定位后的真实路径调用（安装门传 CATALOG_PATH）——无参调用会在读文件
+// 时抛错被 catch 恒返 null，曾致纯 account 宿主补丁层静默不安装（见安装门处注释）。
 let CATALOG_PATH = process.env.ZCODE_BUILTIN_PROVIDER_CONFIG_FILE || null;
 const __catalogPatchCache = new Map();
 function catalogPatchText(path) {
@@ -315,9 +317,87 @@ function patchedCliSource(path) {
   return result;
 }
 
+// 内建 provider 配置定位（漂移面②）：3.12.x 起配置文件挪位 + CLI 依赖宿主注入
+// ZCODE_BUILTIN_PROVIDER_CONFIG_FILE 直接定位；ZCode 桌面 spawn 链自带该键，
+// 本 wrapper 链需自给。显式传入优先 → v2 runtime 目录下平台目录（精确
+// <plat>-<arch> 优先，Rust arch 变体如 darwin-aarch64 字典序跟后）× 版本目录
+// （semver 最大）的 endpoint-*/zcode-builtin.json → 都找不到则不设键，让 CLI
+// 原生报错透出（错误文案含恢复指引）。
+// [位置：安装门之前] 定位/env 推导必须先于安装门判定完成——catalogPatchText
+// 需要定位后的真实路径参与门判定。曾因门先于定位执行且无参调用，
+// fs.readFileSync(undefined) 抛错被 catch 恒返 null → 门退化为 text!==null，
+// 纯 account 宿主（v2 无凭据条目 → text=null）下补丁层静默不安装、account
+// 直通整体失效且零日志（2026-10 回归修复）。
+if (!process.env.ZCODE_BUILTIN_PROVIDER_CONFIG_FILE) {
+  let located = null;
+  try {
+    const providerRoot = path.join(os.homedir(), '.zcode', 'v2', 'runtime', 'provider');
+    // 平台目录双命名：Node 形态 <plat>-<arch>（darwin-arm64）与桌面 app 的 Rust
+    // arch 命名（darwin-aarch64/linux-x86_64）并存——按平台前缀收集子目录，
+    // 精确形态排最先（向后兼容自建布局），Rust 变体按字典序跟后逐个尝试
+    const exact = process.platform + '-' + process.arch;
+    const platDirs = fs.readdirSync(providerRoot, { withFileTypes: true })
+      .filter((d) => d.isDirectory() && d.name.startsWith(process.platform + '-'))
+      .map((d) => d.name)
+      .sort((a, b) => {
+        if ((a === exact) !== (b === exact)) return a === exact ? -1 : 1;
+        return a < b ? -1 : a > b ? 1 : 0;
+      });
+    const byVerDesc = (a, b) => {
+      const pa = a.split('.'), pb = b.split('.');
+      for (let i = 0; i < 3; i++) {
+        const na = parseInt(pa[i], 10) || 0, nb = parseInt(pb[i], 10) || 0;
+        if (na !== nb) return nb - na;
+      }
+      return 0;
+    };
+    for (const plat of platDirs) {
+      const rtRoot = path.join(providerRoot, plat);
+      let vers = [];
+      try { vers = fs.readdirSync(rtRoot).filter((v) => /^\\d+\\.\\d+/.test(v)).sort(byVerDesc); } catch { /* 平台目录不可读 → 试下一个 */ }
+      for (const ver of vers) {
+        const verDir = path.join(rtRoot, ver);
+        let endpoints = [];
+        try { endpoints = fs.readdirSync(verDir).filter((e) => e.startsWith('endpoint-')).sort(); } catch { /* 版本目录不可读 → 跳过 */ }
+        for (const ep of endpoints) {
+          const candidate = path.join(verDir, ep, 'zcode-builtin.json');
+          if (fs.existsSync(candidate)) { located = candidate; break; }
+        }
+        if (located) break;
+      }
+      if (located) break;
+    }
+  } catch { /* provider 目录缺失/不可读 → 不设键 */ }
+  if (located) process.env.ZCODE_BUILTIN_PROVIDER_CONFIG_FILE = located;
+  CATALOG_PATH = process.env.ZCODE_BUILTIN_PROVIDER_CONFIG_FILE || null;
+  // endpoint origin 对齐（2026-09-29 迁移同步）：CLI 按 ZCODE_BASE_URL 派生 active
+  // 目录路径（sha256(origin) 前缀）；GUI 安装的目录在 refresh 控制文件的 endpointKey
+  // 下（如 https://zcode.z.ai），与 CLI 缺省 origin（bigmodel.cn）不同——不注入则
+  // active 路径算到不存在的目录，触发无谓的联网重装尝试。从已定位目录的邻位控制
+  // 文件读出 origin 注入（无硬编码）；显式 env 优先，不覆盖。
+  if (located && !process.env.ZCODE_BASE_URL && !process.env.ZCODE_ENDPOINT_ORIGIN) {
+    try {
+      const ctlPath = path.join(path.dirname(located), 'zcode-builtin-refresh.json');
+      const ctlText = fs.__origReadFileSync
+        ? fs.__origReadFileSync.call(fs, ctlPath, 'utf8')
+        : fs.readFileSync(ctlPath, 'utf8');
+      const ctl = JSON.parse(ctlText);
+      if (ctl && typeof ctl.endpointKey === 'string' && ctl.endpointKey.indexOf('http') === 0) {
+        process.env.ZCODE_BASE_URL = ctl.endpointKey;
+      }
+    } catch { /* 控制文件缺失/损坏 → 不注入（CLI 用缺省 origin 派生） */ }
+  }
+}
+
+// 安装门：任一 patch 源可用即安装拦截层；决策两态都出声（装了哪些 patch / 为何
+// 跳过）——补丁层的失效形态是静默的（account 直通失效 = plan 家族报「不存在
+// Model」而无任何日志），跳过同样必须留痕。
 const text = injectedConfigText();
-const catalogPatch = catalogPatchText();
+const catalogPatch = CATALOG_PATH !== null ? catalogPatchText(CATALOG_PATH) : null;
 if (text !== null || catalogPatch !== null) {
+  process.stderr.write('[zcode-launcher] 补丁层已安装: cli-config-inject=' + (text !== null ? 'on' : 'off')
+    + ', catalog-entitled=' + (catalogPatch !== null ? 'on' : 'off')
+    + ', provider-merge=' + (PI_SYNCED_PATH ? 'armed' : 'off') + ', cli-source-bypass=armed\\n');
   // encoding 归一（Node 别名面）：'utf8'/'utf-8'/大小写变体统一按 string 返回——
   // 真实 bundle 的 config 读取恰用 'utf-8' 形态，仅匹配 'utf8' 会错回 Buffer
   // （当下游不只 JSON.parse 而做字符串运算时即 TypeError）
@@ -413,73 +493,12 @@ if (text !== null || catalogPatch !== null) {
     }
     return fs.__origExistsSync.call(fs, p);
   };
-}
-
-// 内建 provider 配置定位（漂移面②）：3.12.x 起配置文件挪位 + CLI 依赖宿主注入
-// ZCODE_BUILTIN_PROVIDER_CONFIG_FILE 直接定位；ZCode 桌面 spawn 链自带该键，
-// 本 wrapper 链需自给。显式传入优先 → v2 runtime 目录下平台目录（精确
-// <plat>-<arch> 优先，Rust arch 变体如 darwin-aarch64 字典序跟后）× 版本目录
-// （semver 最大）的 endpoint-*/zcode-builtin.json → 都找不到则不设键，让 CLI
-// 原生报错透出（错误文案含恢复指引）。
-if (!process.env.ZCODE_BUILTIN_PROVIDER_CONFIG_FILE) {
-  let located = null;
-  try {
-    const providerRoot = path.join(os.homedir(), '.zcode', 'v2', 'runtime', 'provider');
-    // 平台目录双命名：Node 形态 <plat>-<arch>（darwin-arm64）与桌面 app 的 Rust
-    // arch 命名（darwin-aarch64/linux-x86_64）并存——按平台前缀收集子目录，
-    // 精确形态排最先（向后兼容自建布局），Rust 变体按字典序跟后逐个尝试
-    const exact = process.platform + '-' + process.arch;
-    const platDirs = fs.readdirSync(providerRoot, { withFileTypes: true })
-      .filter((d) => d.isDirectory() && d.name.startsWith(process.platform + '-'))
-      .map((d) => d.name)
-      .sort((a, b) => {
-        if ((a === exact) !== (b === exact)) return a === exact ? -1 : 1;
-        return a < b ? -1 : a > b ? 1 : 0;
-      });
-    const byVerDesc = (a, b) => {
-      const pa = a.split('.'), pb = b.split('.');
-      for (let i = 0; i < 3; i++) {
-        const na = parseInt(pa[i], 10) || 0, nb = parseInt(pb[i], 10) || 0;
-        if (na !== nb) return nb - na;
-      }
-      return 0;
-    };
-    for (const plat of platDirs) {
-      const rtRoot = path.join(providerRoot, plat);
-      let vers = [];
-      try { vers = fs.readdirSync(rtRoot).filter((v) => /^\\d+\\.\\d+/.test(v)).sort(byVerDesc); } catch { /* 平台目录不可读 → 试下一个 */ }
-      for (const ver of vers) {
-        const verDir = path.join(rtRoot, ver);
-        let endpoints = [];
-        try { endpoints = fs.readdirSync(verDir).filter((e) => e.startsWith('endpoint-')).sort(); } catch { /* 版本目录不可读 → 跳过 */ }
-        for (const ep of endpoints) {
-          const candidate = path.join(verDir, ep, 'zcode-builtin.json');
-          if (fs.existsSync(candidate)) { located = candidate; break; }
-        }
-        if (located) break;
-      }
-      if (located) break;
-    }
-  } catch { /* provider 目录缺失/不可读 → 不设键 */ }
-  if (located) process.env.ZCODE_BUILTIN_PROVIDER_CONFIG_FILE = located;
-  CATALOG_PATH = process.env.ZCODE_BUILTIN_PROVIDER_CONFIG_FILE;
-  // endpoint origin 对齐（2026-09-29 迁移同步）：CLI 按 ZCODE_BASE_URL 派生 active
-  // 目录路径（sha256(origin) 前缀）；GUI 安装的目录在 refresh 控制文件的 endpointKey
-  // 下（如 https://zcode.z.ai），与 CLI 缺省 origin（bigmodel.cn）不同——不注入则
-  // active 路径算到不存在的目录，触发无谓的联网重装尝试。从已定位目录的邻位控制
-  // 文件读出 origin 注入（无硬编码）；显式 env 优先，不覆盖。
-  if (located && !process.env.ZCODE_BASE_URL && !process.env.ZCODE_ENDPOINT_ORIGIN) {
-    try {
-      const ctlPath = path.join(path.dirname(located), 'zcode-builtin-refresh.json');
-      const ctlText = fs.__origReadFileSync
-        ? fs.__origReadFileSync.call(fs, ctlPath, 'utf8')
-        : fs.readFileSync(ctlPath, 'utf8');
-      const ctl = JSON.parse(ctlText);
-      if (ctl && typeof ctl.endpointKey === 'string' && ctl.endpointKey.indexOf('http') === 0) {
-        process.env.ZCODE_BASE_URL = ctl.endpointKey;
-      }
-    } catch { /* 控制文件缺失/损坏 → 不注入（CLI 用缺省 origin 派生） */ }
-  }
+} else {
+  process.stderr.write('[zcode-launcher] 补丁层未安装(跳过): 无凭据可注入(v2 config 无 provider 条目)'
+    + (CATALOG_PATH !== null
+      ? '; 内建目录已定位但无 zhipu-account 条目需补(目录读取原生透出)'
+      : '; 内建目录未定位(env 未设且自定位未命中)')
+    + '\\n');
 }
 
 // 上游 provider bootstrap 以 argv[1] 为入口锚，从该路径邻近定位 CLI 内建

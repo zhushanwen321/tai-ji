@@ -563,9 +563,10 @@ describe("事件流与回调时点（缺省 appserver 路径）", () => {
 // reasoningLevel 择档（目录值域 × thinkingLevel——2026-10-13 探针实测驱动）
 // ============================================================
 // 值域来源 = preparer.resolveZcodeReasoningValues（目录 modelRules 匹配 modelId）；
-// 择档语义：无 thinkingLevel → 首值（最小档，现状保形）；显式 thinkingLevel 精确
-// 命中 → 用之；不命中 → 非最小档末值（请求了思考 = reasoning 开；plan 网关对部分
-// 模型拒收 disabled——域与接受面漂移时显式意图走非最小档）。
+// 择档语义：无 thinkingLevel → 首值（最小档，现状保形）；off 族（off/minimal，显式
+// 禁思考/最省）→ 恒首值（最小档，不落非最小档回退——意图反转回归锁定）；显式
+// thinkingLevel 精确命中 → 用之；其余不命中 → 非最小档末值（请求了思考 = reasoning
+// 开；plan 网关对部分模型拒收 disabled——域与接受面漂移时显式意图走非最小档）。
 
 /** 写一个 reasoning 目录（单通配规则命中全部模型；values 即值域；tmpRoot 每用例独立）。 */
 function writeReasoningCatalog(values: string[]): string {
@@ -612,6 +613,41 @@ describe("reasoningLevel 择档（目录值域 × thinkingLevel）", () => {
       providerId: PROVIDER,
       modelId: "m1",
       options: { reasoningLevel: "high" },
+    });
+  }, 15_000);
+
+  it("thinkingLevel=off 且值域不含 off → 最小档（显式禁思考绝不落非最小档末值——意图反转回归锁定）", async () => {
+    // 值域 ['low','high','max']：回归前 off 非精确命中 → 落非最小档末值 'max'
+    // （不思考被发成最强思考）；修复后 off 族短路值域首值
+    const { engine, stateFile, workspace } = makeEngine({ builtinCatalogPath: writeReasoningCatalog(["low", "high", "max"]) });
+    await engine.run(makeTask({ cwd: workspace, thinkingLevel: "off" }), makeCtx());
+    const create = sentFrames(stateFile, "session/create")[0];
+    expect(create.params["model"]).toEqual({
+      providerId: PROVIDER,
+      modelId: "m1",
+      options: { reasoningLevel: "low" },
+    });
+  }, 15_000);
+
+  it("thinkingLevel=minimal 且值域不含 minimal → 最小档（off 族同款短路，最省意图不升级）", async () => {
+    const { engine, stateFile, workspace } = makeEngine({ builtinCatalogPath: writeReasoningCatalog(["disabled", "low", "high"]) });
+    await engine.run(makeTask({ cwd: workspace, thinkingLevel: "minimal" }), makeCtx());
+    const create = sentFrames(stateFile, "session/create")[0];
+    expect(create.params["model"]).toEqual({
+      providerId: PROVIDER,
+      modelId: "m1",
+      options: { reasoningLevel: "disabled" },
+    });
+  }, 15_000);
+
+  it("thinkingLevel=off 精确命中值域 → 请求档原样（精确命中语义不变）", async () => {
+    const { engine, stateFile, workspace } = makeEngine({ builtinCatalogPath: writeReasoningCatalog(["off", "low", "high"]) });
+    await engine.run(makeTask({ cwd: workspace, thinkingLevel: "off" }), makeCtx());
+    const create = sentFrames(stateFile, "session/create")[0];
+    expect(create.params["model"]).toEqual({
+      providerId: PROVIDER,
+      modelId: "m1",
+      options: { reasoningLevel: "off" },
     });
   }, 15_000);
 
