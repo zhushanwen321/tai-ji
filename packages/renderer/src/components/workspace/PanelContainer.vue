@@ -65,11 +65,13 @@
       >
         <!-- header 是对话流卡的组成部分（2026-10-04 用户裁决：header 只与对话流构成整体，
              不再横跨抽屉卡）——右抽屉卡有自己的 L1 栏，底抽屉卡有自己的实例切换条。
-             [shell 域对齐 demo spec §3.5 + 审计 R11] 卡头只显会话级控件：目录/分支次要行与
-             .jsonl 文件名按钮已移除（sessionDir/gitBranch 仍供 Panel 消费）。 -->
+             [shell 域对齐 demo spec §3.5 + 审计 R11] 卡头只显会话级控件：目录/分支次要行
+             保持移除（sessionDir/gitBranch 仍供 Panel 消费）；.jsonl 文件名按钮按
+             2026-10-14 用户裁决回归（sessionFileOf 供给）。 -->
         <PanelHeader
           :session-label="sessionLabelOf(leaf)"
           :session-id="leaf.sessionId ?? undefined"
+          :session-file="sessionFileOf(leaf)"
           :status="statusOf(leaf)"
           @toggle-drawer="onDrawerToggle()"
         />
@@ -378,6 +380,9 @@ function sessionLabelOf(l: PanelLeaf): string {
 }
 function sessionDirOf(l: PanelLeaf): string {
   return l.sessionId ? session.list.find((s) => s.id === l.sessionId)?.cwd ?? '' : ''
+}
+function sessionFileOf(l: PanelLeaf): string | undefined {
+  return l.sessionId ? session.list.find((s) => s.id === l.sessionId)?.sessionFile : undefined
 }
 function gitBranchOf(l: PanelLeaf): string | undefined {
   return l.sessionId ? session.list.find((s) => s.id === l.sessionId)?.gitBranch : undefined

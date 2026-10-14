@@ -1,11 +1,11 @@
 /**
- * PanelHeader 组件单测：卡头控件构成（demo shell spec §3.5 + 审计 R11）。
+ * PanelHeader 组件单测：卡头控件构成（demo shell spec §3.5 + 审计 R11 + 2026-10-14 裁决回归）。
  *
  * 覆盖：
- * - R11 回归防线：卡头只留会话级控件——.jsonl 文件名按钮与目录/分支次要行不渲染
- *   （「卡头是当前会话身份位，只显会话名」；session 磁盘路径复用入口归详情抽屉/右键菜单）
- * - 会话名显示：sessionLabel / 空态回落「新任务」（demo /new 空态 h1 同语义）
- * - i18n 契约（折叠态 chrome 槽位文案）
+ * - 卡头身份位：只显会话名；目录/分支次要行按 R11 移除不回归（R11-2）
+ * - session JSONL 文件名按钮（2026-10-14 用户裁决回归；R11 曾移除并登记待裁决）：
+ *   短文件名展示 / 点击复制绝对路径 / sessionFile 缺失不渲染 / 右侧按钮组最前
+ * - i18n 契约（copySessionFile 双语 + 折叠态 chrome 槽位文案）
  *
  * 三视角（AGENTS.md 测试规范 #5-8）：
  * - 构建者：props 驱动（sessionLabel/status/sessionId）
@@ -39,6 +39,10 @@ vi.mock('@/composables/effects/usePlatformChrome', async () => {
   }
 })
 
+/** session JSONL 磁盘绝对路径 fixture（短名 = id 前 8 位 + .jsonl，与 formatShortSessionFile 同源） */
+const SESSION_FILE_PATH =
+  '/Users/u/.taiji/agent/sessions/cwd-hash/2026-07-09T11-16-46-632Z_019f4698-2fa8-791c-858f-d02ba39d9676.jsonl'
+
 function mountHeader(overrides: Record<string, unknown> = {}) {
   return mount(PanelHeader, {
     props: {
@@ -56,7 +60,7 @@ beforeEach(() => {
   localStorage.removeItem('taiji:side-collapsed')
 })
 
-describe('PanelHeader 卡头构成（demo spec §3.5 + 审计 R11 回归防线）', () => {
+describe('PanelHeader 卡头构成（demo spec §3.5 + 审计 R11 + 2026-10-14 裁决回归）', () => {
   it('U1: 有 sessionLabel 时显示会话名', () => {
     const wrapper = mountHeader({ sessionLabel: '修复登录 bug' })
     expect(wrapper.find('[data-testid="panel-session-label"]').text()).toBe('修复登录 bug')
@@ -67,9 +71,43 @@ describe('PanelHeader 卡头构成（demo spec §3.5 + 审计 R11 回归防线�
     expect(wrapper.find('[data-testid="panel-session-label"]').text()).toContain('新建任务')
   })
 
-  it('R11-1: .jsonl 文件名按钮不再上卡头（存储实现细节不占主 chrome）', () => {
+  it('R11-1（裁决回归）: sessionFile 存在 → .jsonl 文件名按钮渲染短文件名', () => {
+    const wrapper = mountHeader({ sessionFile: SESSION_FILE_PATH })
+    const el = wrapper.find('[data-testid="panel-session-file"]')
+    expect(el.exists()).toBe(true)
+    // 短文件名 = id 前 8 位 + .jsonl（formatShortSessionFile 同源口径）
+    expect(el.text()).toContain('019f4698.jsonl')
+    // title 提示复制语义（i18n key panel.header.copySessionFile）
+    expect(el.attributes('title')).toBe('复制 session 文件路径')
+  })
+
+  it('R11-1b: 点击文件名 → clipboard.writeText 收到 JSONL 绝对路径（非短名）', async () => {
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText: vi.fn().mockResolvedValue(undefined) },
+      writable: true,
+      configurable: true,
+    })
+    const wrapper = mountHeader({ sessionFile: SESSION_FILE_PATH })
+    await wrapper.find('[data-testid="panel-session-file"]').trigger('click')
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith(SESSION_FILE_PATH)
+  })
+
+  it('R11-1c: sessionFile 缺失（pi 延迟写入窗口，规则 #6）→ 按钮不渲染', () => {
     const wrapper = mountHeader()
     expect(wrapper.find('[data-testid="panel-session-file"]').exists()).toBe(false)
+  })
+
+  it('R11-1d: 文件名按钮在右侧按钮组内且在 drawer 开关之前', () => {
+    const wrapper = mountHeader({ sessionFile: SESSION_FILE_PATH })
+    const fileBtn = wrapper.find('[data-testid="panel-session-file"]')
+    const drawerBtn = wrapper.find('[data-testid="drawer-toggle"]')
+    const rightGroup = wrapper.find('.ml-auto')
+    expect(rightGroup.exists()).toBe(true)
+    expect(rightGroup.element.contains(fileBtn.element)).toBe(true)
+    // DOM 顺序：文件名按钮在前（右侧按钮组最前，同旧版落位）
+    expect(fileBtn.element.compareDocumentPosition(drawerBtn.element as Node)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    )
   })
 
   it('R11-2: 目录/分支次要行不再上卡头（三重重复形态移除，只显会话名）', () => {

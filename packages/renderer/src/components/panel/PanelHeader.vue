@@ -3,10 +3,11 @@
     展示组件 · panel-header（ui-replica M2：demo Workbench.vue .panelhead 40px 档形态）。
     demo 权威值（.app 变量 --hb-*）：卡头高 40（N16 单档终态）、内边距 0 14px、行 gap 8px、
     基色 --mid、字号 14px、底边框 1px --hairline 与对话流分隔（bg 沉底与对话流连成一体）。
-    布局（demo shell spec §3.5 卡头构成 + 审计 R11）：状态图标 + 会话名 + ... +
-    [对话/Trace|终端|drawer]——卡头只留会话级控件；目录/分支次要行与 .jsonl 文件名按钮
-    已按 R11 移除（目录/分支在侧栏组头与 hover 卡承载；session 磁盘路径的复用入口待归
-    详情抽屉/右键菜单，shell 域只做移除）。
+    布局（demo shell spec §3.5 卡头构成 + 审计 R11 + 2026-10-14 用户裁决）：状态图标 + 会话名 + ... +
+    [jsonl|对话/Trace|终端|drawer]——卡头只留会话级控件。目录/分支次要行按 R11 移除不回归
+    （目录/分支在侧栏组头与 hover 卡承载）；.jsonl 文件名按钮按裁决恢复（R11 曾移除并登记
+    「复用入口待归详情抽屉/右键菜单」，裁决结果：一键复制 JSONL 绝对路径属高频会话级操作，
+    回归卡头右侧按钮组最前）。
     折叠态：收起/←/→ 三钮迁入卡头最左 chrome 槽位（34 宽 × 30 高，demo .pch）+ 新建任务钮（demo .hdr-fold）；
     非全屏 pl-[88px] 让位红黄绿（右缘 60），全屏态 pl-3.5。唤回侧栏靠 ⌘B + chrome 按钮。
     中线几何：main-panel 顶 y4（AppShell 上内边距）+ chat 卡 1px 上边框 = 卡头顶 y5，
@@ -90,6 +91,21 @@
     </div>
 
     <div class="ml-auto flex items-center gap-2 [-webkit-app-region:no-drag]">
+      <!-- session JSONL 文件名（id 前 8 位 + .jsonl）：点击复制磁盘真实绝对路径（2026-10-14
+           用户裁决回归，见头注）。路径为空（pi 延迟写入窗口，规则 #6）时不渲染。放右侧按钮组最前。
+           [U7] overlay 移除后恒用主 sessionFile（不再有 overlaySessionFile 两态）。 -->
+      <Button
+        v-if="sessionFile"
+        variant="ghost"
+        data-testid="panel-session-file"
+        class="h-5 shrink-0 gap-1 rounded-sm px-1 font-mono text-[length:var(--text-2xs)] text-neutral-dim hover:bg-surface-hover hover:text-neutral-fg [-webkit-app-region:no-drag]"
+        :title="t('panel.header.copySessionFile')"
+        @click="copy(sessionFile, 'file')"
+      >
+        <Check v-if="copied === 'file'" class="size-3 text-accent" />
+        <FileText v-else class="size-3 opacity-60" />
+        <span>{{ shortFileName }}</span>
+      </Button>
       <!-- session-trace（D5a）：「对话 | Trace」SegmentedTab。视图态 per-session 分区（store
            view 字段），切换仅切 main 区渲染分支，不重建数据（A42）。
            landing（无 session）恒渲染但 disabled（demo Workbench.vue 卡头分段
@@ -135,12 +151,14 @@
  
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { PanelLeftOpen, PanelLeftClose, PanelRight, ArrowLeft, ArrowRight, Plus, RefreshCw, ArrowUpCircle, Hourglass, Wrench, Zap, Ban, AlertCircle, Check } from '@lucide/vue'
+import { PanelLeftOpen, PanelLeftClose, PanelRight, ArrowLeft, ArrowRight, Plus, RefreshCw, ArrowUpCircle, Hourglass, Wrench, Zap, Ban, AlertCircle, FileText, Check } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import { useNavigationStore } from '@/stores/navigation'
 import { useSidebarStore } from '@/stores/sidebar'
 import { useSidebar } from '@/composables/features/sidebar/useSidebar'
 import { usePlatformChrome } from '@/composables/effects/usePlatformChrome'
+import { useCopy } from '@/composables/panel/useCopy'
+import { formatShortSessionFile } from '@/composables/logic/session-file-format'
 import TerminalToggleButton from './TerminalToggleButton.vue'
 import { useSessionTrace, setTraceView, type TraceMainView } from '@/composables/features/trace/useSessionTrace'
 import TraceViewToggle from './trace/TraceViewToggle.vue'
@@ -152,6 +170,8 @@ const props = defineProps<{
   sessionLabel: string
   /** 当前 session id（ExtensionHost panel.header 挂载点 ViewHost 路由键） */
   sessionId?: string
+  /** session JSONL 绝对路径（pi 延迟写入窗口可能为空，为空不渲染文件名按钮） */
+  sessionFile?: string
   status: DerivedStatus
 }>()
 
@@ -188,6 +208,12 @@ const showChrome = computed(() => sidebar.collapsed)
 
 /** 当前状态对应的语义图标配置（icon / color / animation） */
 const iconConfig = computed(() => STATUS_ICON[props.status])
+
+/** session JSONL 短文件名（id 前 8 位 + .jsonl）；sessionFile 为空时返回空串 */
+const shortFileName = computed(() => (props.sessionFile ? formatShortSessionFile(props.sessionFile) : ''))
+
+/** 复制反馈（点击文件名后 1.2s 显示 Check 图标） */
+const { copied, copy } = useCopy()
 
 /** lucide 图标名 → 组件映射 */
 const ICON_COMPONENTS: Record<string, unknown> = {
