@@ -16,6 +16,7 @@ import rollingRestart from './en-US/rollingRestart'
 import plan from './en-US/plan'
 import btw from './en-US/btw'
 import workflowViz from './en-US/workflow-viz'
+import canvas from './en-US/canvas'
 import find from './en-US/find'
 
 export default {
@@ -25,11 +26,11 @@ export default {
   settings,
   sidebar,
   // tray.ts 只含 tray 子树，展开并入 panel 命名空间（运行时 key = panel.tray.*；
-  // tray.ts 只含 tray 子树，展开并入 panel 命名空间（运行时 key = panel.tray.*；
   // 顶层键唯一性约束下不能并列两个 panel 键）。panel 本体文案经 ui locale 域文件
   // 下沉迁移自 @taiji/ui/locale，tray 子树留守本壳（无 ui 组件消费）。workflow-viz.ts
-  // 同款并入（运行时 key = panel.workflowViz.*——workflow-visualization U4 组件文案）
-  panel: { ...panel, ...tray, ...workflowViz },
+  // 同款并入（运行时 key = panel.workflowViz.*）；canvas.ts 同款并入
+  // （运行时 key = panel.canvas.*——problem-solve-canvas U7 组件文案）
+  panel: { ...panel, ...tray, ...workflowViz, ...canvas },
   workspace,
   newTask,
   shell,

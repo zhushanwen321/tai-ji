@@ -269,14 +269,17 @@
           <slot />
         </section>
       </div>
-      <!-- tab=canvas：问题解决画布（problem-solve-canvas §3.1(3)）。body 挂载分支
-           （<CanvasPane :canvas-id> + 异步导入）归 u-canvas-pane——本单元先落占位空态
-           （tab 可切换直达、壳门控/直达入口/i18n 本单元就位），不写死组件引用 -->
+      <!-- tab=canvas：问题解决画布（problem-solve-canvas §3.1(3)）。CanvasPane 异步导入
+           （defineAsyncComponent，与 workflow 壳主 chunk 解耦）；canvasId 读 core 开合态
+           单例（当前内容 kind='canvas' 的载荷——SSOT 在 core/domain/overlay，本壳纯透传）。
+           空载荷防御：canvasId 缺席不挂载（Tab 切换瞬态无内容帧零 DOM） -->
       <div
         v-else-if="tab === 'canvas'"
         class="flex min-h-0 flex-1 flex-col"
         data-testid="wfvz-overlay-canvas-pane"
-      />
+      >
+        <CanvasPane v-if="canvasPaneId" :key="canvasPaneId" :canvas-id="canvasPaneId" />
+      </div>
       <!-- tab=scheduler：定时任务面板（viewId 单源常量 = 控制器 SCHEDULER_MODAL_VIEW_ID，
            树未到 = hidden 零 DOM，容器仍锚定内容区形态） -->
       <div
@@ -290,13 +293,14 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, defineAsyncComponent } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Clock, Network, Workflow } from '@lucide/vue'
 import { WORKFLOW_RUN_OUTCOME_LABELS, type WorkflowAgentCall, type WorkflowDag, type WorkflowRunRecord } from '@taiji/shared'
 import { Button } from '@/components/ui/button'
 import { ViewHost } from '@taiji/ui/extension-host'
 import { formatCompactDuration, MS_PER_SECOND } from '@/lib/duration-format'
+import { useOverlayControl } from '@taiji/core/domain/overlay'
 import OverlayShell from './OverlayShell.vue'
 import WorkflowVizDag from '../dag/WorkflowVizDag.vue'
 import { dotTone } from '../dag/tone'
@@ -304,6 +308,9 @@ import { SCHEDULER_MODAL_VIEW_ID, type OverlayTab } from './workflow-viz-overlay
 import type { WorkflowUnmatchedInstance } from '../blueprint-match'
 import type { WorkflowVizDagClickPayload, WorkflowVizDagNodeStatus } from '../dag/types'
 import type { WorkflowVizDagLoadError } from './types'
+
+// CanvasPane 异步导入（problem-solve-canvas §3.1(3)：画布主体与 workflow 壳主 chunk 解耦）
+const CanvasPane = defineAsyncComponent(() => import('../../../canvas/CanvasPane.vue'))
 
 const props = withDefaults(
   defineProps<{
@@ -348,6 +355,14 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
+
+// 当前 canvas 内容载荷（core 开合态单例读——本壳只在 tab==='canvas' 时消费其 canvasId）
+const { current: overlayContent } = useOverlayControl()
+
+const canvasPaneId = computed<string>(() => {
+  const cur = overlayContent.value
+  return cur !== null && cur.kind === 'canvas' ? cur.payload.canvasId : ''
+})
 
 // ── 一级 tab 条（scheduler 整合）：分段定义（序 = 缺省视图优先）──
 
