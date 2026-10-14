@@ -52,7 +52,6 @@ interface RenameSessionConfig {
 
 > taiji 设置页（独立「会话重命名」菜单页）只暴露 first-prompt / first-stop 两档触发模式；
 > `agent-tool` 与 prompt 配置仍可经 pi CLI / 手改配置文件使用（底层 rename_session 工具保留）。
-```
 
 ### ModelSelector（仅支持 ref 精确指定）
 
