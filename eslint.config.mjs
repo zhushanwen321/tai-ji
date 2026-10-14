@@ -37,6 +37,10 @@ export default [
       'apps/electron/preload/preload.js',
       'apps/electron/resources/pi/**',
       'apps/electron/resources/extensions/**',
+      // taiji 插件（PluginService trusted 系）构建产物目录（如 scheduler-manager）：bundle 会把
+      // 依赖闭包内未被插件自身消费的库代码（barrel 导出的常量族）一并打入，产物态「定义未使用」
+      // 是 bundler 固有形态非源码问题——与上方 extensions/engines staging 产物同族排除
+      'resources/plugins/**',
       // [W11] 引擎包 staging 产物（bundle-extensions esbuild 输出，gitignored 构建产物）
       'apps/electron/resources/engines/**',
       // .taiji-harness 是设计文档/骨架代码（spec/plan/code-skeleton），非项目源码，不参与 lint
