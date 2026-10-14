@@ -41,7 +41,7 @@
  * 若落在非视口会计入；视口内重放/到达由视口清除支收敛）——对齐 PanelContainer AC-13 未读
  * 先例的取口径。
  */
-import { computed, defineComponent, inject, onErrorCaptured, reactive, ref, watch } from 'vue'
+import { computed, defineComponent, onErrorCaptured, reactive, ref, watch } from 'vue'
 import type { ComputedRef, Ref } from 'vue'
 import { isBtwVirtualId, extractBtwPiSessionId } from '@taiji/shared'
 import { disposeLruEntry, isVirtualKeyOf } from '@taiji/core'
@@ -61,8 +61,6 @@ import { onGlobalType } from '@taiji/core/transport/api'
 import { useSessionEvents } from '@/composables/features/chat/useSessionEvents'
 import type { ServerMessageMap } from '@taiji/shared'
 import {
-  STATUS_BAR_SOURCE_KEY,
-  VIEW_HOST_SOURCE_KEY,
   convertToDialogRequest,
   createUiResponseTransport,
 } from '@taiji/ui/extension-host'
@@ -502,16 +500,16 @@ export function useBtwTabData(sidRef: Ref<string | null>): UseBtwTabDataReturn {
 }
 
 
-// ── M3-c 面板侧表面编排（BtwPanel setup 调用）：失效提示 + 第四面状态区 + 错误边界 ──
+// ── M3-c 面板侧表面编排（BtwPanel setup 调用）：失效提示 + 错误边界 ──
 
 /**
  * 接线 drawer 面板的交互表面（BtwPanel setup 同步调用）：
  * - 失效行内提示读取/关闭（终态机失效支——事件帧失效一路的提示半边，badge 清 + 撤下
  *   同源于 invalidateBtwRequests 单入口）；
- * - 第四面状态区（setStatus/setWidget 的 per-session 源读 vid 分区；inject 缺失静默空态；
- *   toolbar/tab-bar 无 session 帧不在路由面——V4⑤ 结论）；
  * - 运行期错误边界：onErrorCaptured 绑定调用方组件实例（BtwPanel），Guard 子组件为全部
  *   风险渲染提供子实例——异常收口为行内错误条 + 重试（key 重挂），不外溢主面板（P2 隔离）。
+ * - [状态区退役 2026-10-15 用户裁决] 原「第四面状态区」（setStatus/setWidget per-session
+ *   源读 vid 分区渲染）整体移除——btw 线状态区恒空，扩展状态不进旁路线面板。
  */
 export function useBtwPanelSurface(vidRef: Ref<string | null>) {
   /** 失效行内提示（终态机失效支；关闭经导出 setter，不回灌待处理） */
@@ -522,45 +520,11 @@ export function useBtwPanelSurface(vidRef: Ref<string | null>) {
     if (vidRef.value) clearBtwExpiredNotice(vidRef.value)
   }
 
-  // ── 第四面状态区（非模态 extension GUI 的 drawer 归属；inject 缺失静默空态）──
-  const statusBarSource = inject(STATUS_BAR_SOURCE_KEY, null)
-  const viewHostSource = inject(VIEW_HOST_SOURCE_KEY, null)
-  const statusEntries = computed(() => {
-    const vid = vidRef.value
-    if (!vid || !statusBarSource) return []
-    return statusBarSource.getItems('per-session', vid)
-  })
-  /** setWidget 文本行（widget lines；结构化 widgetGui 组件不在本状态区降级渲染——偏差登记） */
-  const widgetLines = computed<string[]>(() => {
-    const vid = vidRef.value
-    if (!vid || !viewHostSource) return []
-    const out: string[] = []
-    for (const viewId of viewHostSource.getViewIds(vid)) {
-      const entry = viewHostSource.getView(vid, viewId)
-      if (!entry) continue
-      for (const comp of entry.guiTree) {
-        if (comp.type === 'ansi-text' && 'lines' in comp.props && Array.isArray(comp.props.lines)) {
-          for (const line of comp.props.lines) {
-            if (typeof line === 'string') out.push(line)
-          }
-        }
-      }
-    }
-    return out
-  })
-  const STATUS_DOT_CLASS: Record<string, string> = {
-    ok: 'bg-success',
-    warn: 'bg-warn',
-    danger: 'bg-danger',
-    neutral: 'bg-neutral-faint',
-    'plugin-src': 'bg-accent',
-  }
-  function statusDotClass(status: string): string {
-    return STATUS_DOT_CLASS[status] ?? 'bg-neutral-faint'
-  }
+  // ── [状态区退役 2026-10-15 用户裁决] 原「第四面状态区」（setStatus/setWidget per-session
+  //    源渲染）已整体移除——btw 状态区恒空，STATUS_BAR/VIEW_HOST 源不再被 btw 面板消费。
 
   // ── 运行期错误边界（P2 降级隔离：btw 交互异常不外溢主面板，单线失败 = 行内错误+可重试）──
-  // ec 链从出错实例的 parent 起走（Vue handleError）：Guard 子树（确认条/状态区/失效提示，
+  // ec 链从出错实例的 parent 起走（Vue handleError）：Guard 子树（确认条/失效提示，
   // 全部风险渲染均在 Guard slot 内求值）出错 → 本组件 ec 收口，return false 阻止向 Panel/
   // App 冒泡；MessageStream/Composer 不在 Guard 内，其错误行为与改造前一致。
   const interactionError = ref(false)
@@ -586,9 +550,6 @@ export function useBtwPanelSurface(vidRef: Ref<string | null>) {
   return {
     expiredNotice,
     dismissExpired,
-    statusEntries,
-    widgetLines,
-    statusDotClass,
     interactionError,
     interactionKey,
     retryInteraction,

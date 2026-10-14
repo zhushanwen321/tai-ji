@@ -44,6 +44,7 @@ import type {
   ScannedSkillInfo,
   ScannedAgentInfo,
   RenameMode,
+  RenameStyle,
   UsageStatsResult,
   UiLocale,
   Segment,
@@ -1794,7 +1795,7 @@ const mockWorktreePrefs = {
   timeout: MOCK_WORKTREE_TIMEOUT_SECONDS,
   baseBranch: '',
 }
-const mockAutoRenamePrefs = { enabled: false, mode: 'first-stop' as RenameMode, model: '' }
+const mockAutoRenamePrefs = { enabled: false, mode: 'first-stop' as RenameMode, model: '', style: 'slug' as RenameStyle, instruction: '', maxLength: 50 }
 const mockSmartContextPrefs = {
   enabled: false,
   compactModel: '',
@@ -1867,6 +1868,21 @@ export const settings = {
   async setRenameMode(mode: RenameMode): Promise<ServerMessageMap['config.renameMode']> {
     mockAutoRenamePrefs.mode = mode
     return { mode }
+  },
+  async getRenamePrompt(): Promise<ServerMessageMap['config.renamePrompt']> {
+    return { style: mockAutoRenamePrefs.style, instruction: mockAutoRenamePrefs.instruction, corrupted: false }
+  },
+  async setRenamePrompt(style: RenameStyle, instruction: string): Promise<ServerMessageMap['config.renamePrompt']> {
+    mockAutoRenamePrefs.style = style
+    mockAutoRenamePrefs.instruction = instruction
+    return { style, instruction, corrupted: false }
+  },
+  async getRenameMaxLength(): Promise<ServerMessageMap['config.renameMaxLength']> {
+    return { maxLength: mockAutoRenamePrefs.maxLength }
+  },
+  async setRenameMaxLength(maxLength: number): Promise<ServerMessageMap['config.renameMaxLength']> {
+    mockAutoRenamePrefs.maxLength = maxLength
+    return { maxLength }
   },
   async getRenameModel(): Promise<ServerMessageMap['config.renameModel']> {
     return { model: mockAutoRenamePrefs.model }

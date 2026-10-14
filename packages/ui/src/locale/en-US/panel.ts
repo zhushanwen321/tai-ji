@@ -40,6 +40,8 @@ export default {
     toggleSidebarAria: 'Toggle sidebar',
     back: 'Back',
     forward: 'Forward',
+    // Session JSONL filename button (PanelHeader, restored by user ruling 2026-10-14): click copies absolute disk path
+    copySessionFile: 'Copy session file path',
     // Plugin header action buttons (HeaderActionsHost, E13 tri-state tooltip; plugin-header-action-modal-points AP-1)
     pluginActionExtensionNotLoaded: 'Required extension not loaded in this session',
     pluginActionRestoring: 'Session restoring, availability unknown',

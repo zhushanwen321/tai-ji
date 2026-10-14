@@ -16,7 +16,9 @@
           },
           "mode": "first-stop",
           "maxTitleLength": 50,
-          "thinkingLevel": "off"
+          "thinkingLevel": "off",
+          "style": "slug",
+          "customInstruction": ""
         }
       }
     ]

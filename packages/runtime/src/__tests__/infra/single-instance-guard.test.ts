@@ -6,7 +6,7 @@
  * 预登记窗口拒绝（pid 存活但未 listen）、stale 放行接管（pid 死亡）、损坏文件不阻塞、
  * 同端口去重、登记文件内容与权限。
  */
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { mkdtemp, writeFile, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -28,6 +28,37 @@ async function withTmpDataDir(fn: (dir: string) => Promise<void>): Promise<void>
 }
 
 describe('probeSingleInstance', () => {
+  it('缺失即常态：首启无标记文件 → 放行且零留痕（ENOENT 不走异常通道）', async () => {
+    await withTmpDataDir(async (dir) => {
+      const debugSpy = vi.spyOn(console, 'debug').mockImplementation(() => {})
+      try {
+        const result = await probeSingleInstance(dir, fakeProbe([3210]))
+        expect(result.blocked).toBe(false)
+        expect(result.holder).toBeUndefined()
+        // 缺失是设计内常态（首启无登记 / 骤死残留不清理）：不产生任何 debug 留痕，
+        // 区别于损坏/读取异常（那些才是异常态，须留痕）
+        expect(debugSpy).not.toHaveBeenCalled()
+      } finally {
+        debugSpy.mockRestore()
+      }
+    })
+  })
+
+  it('损坏 JSON 留痕（区别于缺失静默）：debug 被调用且不阻塞启动', async () => {
+    await withTmpDataDir(async (dir) => {
+      const debugSpy = vi.spyOn(console, 'debug').mockImplementation(() => {})
+      try {
+        await writeFile(join(dir, RUNTIME_INSTANCE_FILE), '{not-json')
+        const result = await probeSingleInstance(dir, fakeProbe([]))
+        expect(result.blocked).toBe(false)
+        expect(debugSpy).toHaveBeenCalledTimes(1)
+        expect(String(debugSpy.mock.calls[0]?.[0])).toContain('corrupt')
+      } finally {
+        debugSpy.mockRestore()
+      }
+    })
+  })
+
   it('无任何标记文件 → 放行（blocked=false, 无 holder）', async () => {
     await withTmpDataDir(async (dir) => {
       const result = await probeSingleInstance(dir, fakeProbe([3210]))

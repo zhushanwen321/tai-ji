@@ -192,6 +192,10 @@ export class SettingsMessageHandler {
     'config.getRenameModel': (msg, ws) => this.renameConfigHandler.handle(msg, ws),
     'config.setRenameMode': (msg, ws) => this.renameConfigHandler.handle(msg, ws),
     'config.getRenameMode': (msg, ws) => this.renameConfigHandler.handle(msg, ws),
+    'config.setRenamePrompt': (msg, ws) => this.renameConfigHandler.handle(msg, ws),
+    'config.getRenamePrompt': (msg, ws) => this.renameConfigHandler.handle(msg, ws),
+    'config.setRenameMaxLength': (msg, ws) => this.renameConfigHandler.handle(msg, ws),
+    'config.getRenameMaxLength': (msg, ws) => this.renameConfigHandler.handle(msg, ws),
     // ── smart context 域（smart-context-config-message-handler.ts）──
     'config.getSmartContextConfig': (msg, ws) => this.smartContextConfigHandler.handle(msg, ws),
     'config.setSmartContextEnabled': (msg, ws) => this.smartContextConfigHandler.handle(msg, ws),

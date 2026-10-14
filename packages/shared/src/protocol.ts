@@ -235,6 +235,8 @@ export type ClientMessageType =
   | 'config.setAutoRenameEnabled' | 'config.getAutoRenameEnabled'
   | 'config.setRenameModel' | 'config.getRenameModel'
   | 'config.setRenameMode' | 'config.getRenameMode'
+  | 'config.setRenamePrompt' | 'config.getRenamePrompt'
+  | 'config.setRenameMaxLength' | 'config.getRenameMaxLength'
   | 'config.getSmartContextConfig'
   | 'config.setSmartContextEnabled'
   | 'config.setSmartContextCompactModel'
@@ -471,6 +473,30 @@ export type BatchDeleteResult = {
  * package.json startupConfig.content / runtime rename-session-config.ts 镜像）。
  */
 export type RenameMode = 'first-prompt' | 'first-stop' | 'agent-tool'
+
+/**
+ * rename-session 标题提示词风格（设计 rename-prompt-config）。与 extension 侧
+ * extensions/universal/rename-session/src/pure.ts 的 RenameStyle 值域同构——跨包不 import，
+ * 本处是协议层声明，供 runtime settings 通路（config.get/setRenamePrompt）与 renderer
+ * RenameSessionPage 消费。三处默认值真相同批收敛（extension pure.ts DEFAULT /
+ * runtime rename-session-config.ts 镜像 / 本协议类型）。
+ *
+ * custom = 用户自定义自由文本（customInstruction 字段承载，空串回落内置 slug 默认）；
+ * 其余枚举值 = extension 内置词表（随 extension 版本升级自动跟随）。
+ */
+export type RenameStyle = 'slug' | 'sentence' | 'emoji' | 'custom'
+
+/**
+ * config.renamePrompt 的 reply 形状（具名 interface：mutation-reply-contract 清单守卫的
+ * 单行提取器取不到多行内联形状，多字段 reply 按既有惯例用具名声明承载字段断言）。
+ */
+export interface RenamePromptReply {
+  style: RenameStyle
+  /** 自定义指令自由文本（仅 style=custom 时被 extension 消费；空串 = 内置默认）。 */
+  instruction: string
+  /** 配置文件 JSON 损坏已回退默认（文件不存在 = 从未配置，非损坏）。 */
+  corrupted: boolean
+}
 
 // ── plugin headerAction 帧载荷（plugin-header-action-modal-points AP-1）──
 
@@ -904,6 +930,14 @@ export interface ClientMessageMap {
   'config.setRenameMode': { mode: RenameMode }
   /** config.getRenameMode：读取自动重命名触发模式（前端读取）。 */
   'config.getRenameMode': Record<string, never>
+  /** config.setRenamePrompt：设置自动重命名标题提示词（style + 自定义指令合并写入，runtime 单次原子 RMW 两字段）。 */
+  'config.setRenamePrompt': { style: RenameStyle; instruction: string }
+  /** config.getRenamePrompt：读取自动重命名标题提示词配置（前端读取；corrupted = 配置文件 JSON 损坏已回退默认）。 */
+  'config.getRenamePrompt': Record<string, never>
+  /** config.setRenameMaxLength：设置标题最大长度（正整数，非法值由 runtime 侧归一为默认 50）。 */
+  'config.setRenameMaxLength': { maxLength: number }
+  /** config.getRenameMaxLength：读取标题最大长度（前端读取）。 */
+  'config.getRenameMaxLength': Record<string, never>
   /** config.getSmartContextConfig：读取智能上下文压缩配置（前端读取）。 */
   'config.getSmartContextConfig': Record<string, never>
   /** config.setSmartContextEnabled：设置智能上下文压缩开关（前端写入）。 */
@@ -1276,6 +1310,8 @@ export type ServerMessageType =
   | 'config.autoRenameEnabled'
   | 'config.renameModel'
   | 'config.renameMode'
+  | 'config.renamePrompt'
+  | 'config.renameMaxLength'
   | 'config.smartContextConfig'
   | 'config.smartContextEnabled'
   | 'config.smartContextCompactModel'
@@ -2586,6 +2622,10 @@ export interface ServerMessageMapBase {
   'config.renameModel': { model: string }
   /** config.renameMode：config.getRenameMode / config.setRenameMode 的 reply（归一后生效值，默认 first-stop）。 */
   'config.renameMode': { mode: RenameMode }
+  /** config.renamePrompt：config.getRenamePrompt / config.setRenamePrompt 的 reply（归一后生效值；instruction 为自定义自由文本，仅 style=custom 时生效）。 */
+  'config.renamePrompt': RenamePromptReply
+  /** config.renameMaxLength：config.getRenameMaxLength / config.setRenameMaxLength 的 reply（归一后生效值，默认 50）。 */
+  'config.renameMaxLength': { maxLength: number }
   /** config.smartContextConfig：config.getSmartContextConfig 的 reply（compactModel 为 "provider/modelId" 复合串，空串 = 未设置；thresholds 为 token 绝对数）。 */
   'config.smartContextConfig': {
     enabled: boolean
@@ -3195,6 +3235,10 @@ export interface ReplyPayloadMap {
   'config.getRenameModel': ServerMessageMap['config.renameModel']
   'config.setRenameMode': ServerMessageMap['config.renameMode']
   'config.getRenameMode': ServerMessageMap['config.renameMode']
+  'config.setRenamePrompt': ServerMessageMap['config.renamePrompt']
+  'config.getRenamePrompt': ServerMessageMap['config.renamePrompt']
+  'config.setRenameMaxLength': ServerMessageMap['config.renameMaxLength']
+  'config.getRenameMaxLength': ServerMessageMap['config.renameMaxLength']
   'config.getSmartContextConfig': ServerMessageMap['config.smartContextConfig']
   'config.setSmartContextEnabled': ServerMessageMap['config.smartContextEnabled']
   'config.setSmartContextCompactModel': ServerMessageMap['config.smartContextCompactModel']

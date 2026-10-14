@@ -27,6 +27,7 @@ import type {
   ProviderSource,
   QuotaConfigurePayload,
   RenameMode,
+  RenameStyle,
   SetProviderData,
   SkillDirConfig,
   SystemPromptConfig,
@@ -55,6 +56,7 @@ describe('settings-transport-adapter · @/api 门面八元全量转发矩阵（u
   const PROBE_PID = 'probe-provider' as ProviderId
   const PROBE_SOURCE: ProviderSource = 'pi'
   const PROBE_RENAME_MODE: RenameMode = 'first-stop'
+  const PROBE_RENAME_STYLE: RenameStyle = 'slug'
   const PROBE_DIRS: SkillDirConfig[] = [{ path: 'probe/dir', enabled: true, scope: 'project' }]
   const PROBE_SYSTEM_PROMPT: SystemPromptConfig = {
     version: 1,
@@ -153,6 +155,8 @@ describe('settings-transport-adapter · @/api 门面八元全量转发矩阵（u
     getAutoRenameEnabled: fwd('settings', 'getAutoRenameEnabled', [], (t) => t.getAutoRenameEnabled()),
     getRenameMode: fwd('settings', 'getRenameMode', [], (t) => t.getRenameMode()),
     getRenameModel: fwd('settings', 'getRenameModel', [], (t) => t.getRenameModel()),
+    getRenamePrompt: fwd('settings', 'getRenamePrompt', [], (t) => t.getRenamePrompt()),
+    getRenameMaxLength: fwd('settings', 'getRenameMaxLength', [], (t) => t.getRenameMaxLength()),
     getSmartContextConfig: fwd('settings', 'getSmartContextConfig', [], (t) => t.getSmartContextConfig()),
     getCodemodeEnabled: fwd('settings', 'getCodemodeEnabled', [], (t) => t.getCodemodeEnabled()),
     getUsageStats: fwd('usage', 'getUsageStats', [], (t) => t.getUsageStats()),
@@ -200,6 +204,10 @@ describe('settings-transport-adapter · @/api 门面八元全量转发矩阵（u
     ),
     setRenameMode: fwd('settings', 'setRenameMode', [PROBE_RENAME_MODE], (t, mode) => t.setRenameMode(mode)),
     setRenameModel: fwd('settings', 'setRenameModel', ['probe-model'], (t, model) => t.setRenameModel(model)),
+    setRenamePrompt: fwd('settings', 'setRenamePrompt', [PROBE_RENAME_STYLE, 'probe-instruction'], (t, style, instruction) =>
+      t.setRenamePrompt(style, instruction),
+    ),
+    setRenameMaxLength: fwd('settings', 'setRenameMaxLength', [50], (t, maxLength) => t.setRenameMaxLength(maxLength)),
     setSmartContextEnabled: fwd('settings', 'setSmartContextEnabled', [true], (t, enabled) =>
       t.setSmartContextEnabled(enabled),
     ),

@@ -32,10 +32,12 @@ import {
   type ProviderId,
   type LlmRetryConfig,
   type RenameMode,
+  type RenameStyle,
   type CodemodeEnabledResult,
   type CodemodeSetEnabledResult,
 } from '@taiji/shared'
 import type { IConfigService } from '../interfaces.js'
+import type { RenamePromptSnapshot } from './rename-session-config.js'
 import type { IConfigStore } from './ports/config.js'
 import type { AuthStorage, CredentialWriter } from './auth/auth-storage.js'
 import type { DirScopes } from './skill-dir-config.js'
@@ -60,6 +62,10 @@ import {
   setRenameModel as setRenameModelImpl,
   getRenameMode as getRenameModeImpl,
   setRenameMode as setRenameModeImpl,
+  getRenamePrompt as getRenamePromptImpl,
+  setRenamePrompt as setRenamePromptImpl,
+  getRenameMaxLength as getRenameMaxLengthImpl,
+  setRenameMaxLength as setRenameMaxLengthImpl,
 } from './rename-session-config.js'
 import {
   getSmartContextConfig as getSmartContextConfigImpl,
@@ -382,6 +388,26 @@ export class ConfigService implements IConfigService {
   /** 设置 rename 触发模式（读改写 extension 配置文件的 mode 字段，非法值归一默认，保留其他字段）。 */
   setRenameMode(mode: RenameMode): void {
     setRenameModeImpl(mode)
+  }
+
+  /** 读取 rename 标题提示词快照（style + 自定义指令 + corrupted；extension 配置文件，字段非法回退默认）。 */
+  getRenamePrompt(): RenamePromptSnapshot {
+    return getRenamePromptImpl()
+  }
+
+  /** 设置 rename 标题提示词（合并覆盖 style + customInstruction 两字段，单次原子 RMW；非法值归一，返回生效值）。 */
+  setRenamePrompt(style: RenameStyle, instruction: string): RenamePromptSnapshot {
+    return setRenamePromptImpl(style, instruction)
+  }
+
+  /** 读取标题最大长度（extension 配置文件 maxTitleLength，缺失/非法回默认 50）。 */
+  getRenameMaxLength(): number {
+    return getRenameMaxLengthImpl()
+  }
+
+  /** 设置标题最大长度（读改写 maxTitleLength 字段；非法值归一默认 50）。 */
+  setRenameMaxLength(maxLength: number): void {
+    setRenameMaxLengthImpl(maxLength)
   }
 
   /** 读取智能上下文压缩配置快照（extension 配置文件，字段非法回退默认值）。 */

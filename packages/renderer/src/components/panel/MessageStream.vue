@@ -13,7 +13,12 @@
     单一 scrollTop owner：滚动测量/窗口化/视口锚定补偿（$fixScrollJump）全交 virtua，
     应用层只持领域语义（useVirtuaFollow 状态机 / streaming pin / rail jump / 瞬时块定位）。
   -->
-  <div class="relative flex min-h-0 flex-1 flex-col">
+  <!-- 对话流字号域挂点（chat-font-scope 2026-10-15 用户裁决「所有对话流一套设置」）：
+       本组件是对话流的唯一渲染体（主面板 / drawer subagent tab / btw 线 / workflow overlay
+       agent 详情四处消费），根节点挂 [data-fs-scope="chat"] 使流内文字恒跟 fontScales.chat
+       档位——嵌套在 drawer/sidebar 区域 scope 内时最近声明胜出（style.css 分区字号槽位），
+       抽屉 chrome（头栏/列表等）仍跟 drawer 档位。新对话流宿主零配置继承本语义。 -->
+  <div class="relative flex min-h-0 flex-1 flex-col" data-fs-scope="chat">
     <!-- [u5 mode-declaration-row] 模式声明行：锚在流顶**滚动容器之外**（不随滚动消失）。
          数据 = session.launchPresetId + preset store 派生（零新 entry 类型 / 0 token）；
          E7 三态降级在 ModeDeclarationRow 内（未加载/加载失败 → 不渲染）。 -->
