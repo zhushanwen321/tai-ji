@@ -5,10 +5,13 @@ import { createPinia } from 'pinia'
 import i18n from './i18n'
 import App from './App.vue'
 import { provideDevMode, setImageCacheWritePort } from '@taiji/core'
+import { getOverlayControlState } from '@taiji/core/domain/overlay'
 import { resolvePlatform } from './platform/resolve-platform'
 import { initExtensionHostBridge, getExtensionBus } from './composables/shell/useExtensionHostBridge'
 import { initPermissionRequest } from './composables/shell/usePermissionRequest'
 import { installRendererErrorReporting } from './boot/error-reporter'
+import { registerCanvasOverlayBridge } from './composables/use-canvas-sync'
+import { openCanvasTab } from './components/panel/workflow-viz/overlay/workflow-viz-overlay'
 import { getImageCacheWritePort } from './lib/ipc'
 import './style.css'
 
@@ -30,6 +33,22 @@ resolvePlatform()
 // reconcile 发生前（hydrate 在连接建立 + session 切入后才跑，bootstrap 期注入必然先行）；
 // web/mock 无 port → core 缺省 no-op（组件降级形态）。
 setImageCacheWritePort(getImageCacheWritePort())
+
+// canvas 自动唤起桥装配（problem-solve-canvas §3.1(3)，u-canvas-store）：store/sync 不
+// import overlay 模块，唤起动作与开合态读取经本注入缝接线——openCanvasTab（core 换内容
+// + renderer tab 置位的直达入口）注入唤起通道，快照读 core 开合态单例（reactive 源，
+// use-canvas-sync 的关闭打标 watch 依赖随读取建立）。
+registerCanvasOverlayBridge({
+  openCanvas: openCanvasTab,
+  snapshot: () => {
+    const s = getOverlayControlState()
+    return {
+      isOpen: s.isOpen,
+      kind: s.current?.kind ?? null,
+      canvasId: s.current?.kind === 'canvas' ? s.current.payload.canvasId : null,
+    }
+  },
+})
 
 const app = createApp(App)
 // 全局错误捕获三件套（D2）：errorHandler/window error/unhandledrejection
