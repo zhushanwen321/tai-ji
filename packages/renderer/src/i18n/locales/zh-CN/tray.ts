@@ -17,12 +17,13 @@ export default {
   tray: {
     /** 托盘 icon 行的 aria-label（整行为一个语义组；各 icon 另有 title.<kind>） */
     trayLabel: '任务托盘',
-    /** 四件标题（面板 aria-label；外壳 icon 的 title/aria 复用） */
+    /** 五件标题（面板 aria-label；外壳 icon 的 title/aria 复用） */
     title: {
       bash: '后台命令',
       subagent: '子代理',
       workflow: '工作流',
       session: '子会话',
+      canvas: '画布',
     },
     /** 分桶视图标签（runningProcess 仅 bash 使用，见文件头词表裁决；[两视图裁决 2026-09-16] subagent 无第三桶） */
     bucket: {
@@ -104,6 +105,40 @@ export default {
       stopConfirm: '确认停止',
       stopFailed: '停止子会话失败：{msg}',
       openFailed: '打开子会话失败：{msg}',
+    },
+    /**
+     * 第 5 件「画布」（u-tray-entry，problem-solve-canvas §3.1(3)）。
+     * 阶段徽标是派生展示值（生长中 / 审查中 / 已收敛），派生口径见 TrayCanvasPanel 文件头；
+     * 创建走三要素表单 modal（缺一拒绝 = 不变量 1 前置校验，缺失文案逐项指明）。
+     */
+    canvas: {
+      /** 段头摘要（{total} 张 · {active} 进行中——进行中 = 未收敛） */
+      header: '{total} 张画布 · {active} 进行中',
+      empty: '暂无画布，点下方按钮新建',
+      create: '新建画布',
+      /** 阶段徽标（派生值词表） */
+      phase: {
+        growing: '生长中',
+        reviewing: '审查中',
+        converged: '已收敛',
+      },
+      mustFix: '待修复 {count}',
+      /** 缺失项列表分隔符（zh 顿号 / en 逗号——join 前取词） */
+      listSep: '、',
+      missing: '缺少：{items}',
+      createFailed: '创建画布失败：{msg}',
+      form: {
+        title: '新建画布',
+        description: '问题解决画布的三要素：问题陈述、完成判据、范围与排除项——缺一不可',
+        statement: '问题陈述',
+        statementPlaceholder: '要解决的核心问题，一句话说清',
+        criterias: '完成判据（每行一条）',
+        criteriasPlaceholder: '可证伪的完成判据，一行一条',
+        scopeExclusions: '范围与排除项（每行一条）',
+        scopeExclusionsPlaceholder: '明确不做什么，一行一条',
+        submit: '创建画布',
+        cancel: '取消',
+      },
     },
   },
 }

@@ -22,6 +22,7 @@ export default {
       subagent: 'Subagents',
       workflow: 'Workflows',
       session: 'Child sessions',
+      canvas: 'Canvases',
     },
     /** Bucket view labels (runningProcess is bash-only, see header note; two-view ruling 2026-09-16: no third bucket) */
     bucket: {
@@ -102,6 +103,41 @@ export default {
       stopConfirm: 'Confirm stop',
       stopFailed: 'Failed to stop child session: {msg}',
       openFailed: 'Failed to open child session: {msg}',
+    },
+    /**
+     * Fifth entry "canvases" (u-tray-entry, problem-solve-canvas §3.1(3)).
+     * Phase badges are derived display values (growing / reviewing / converged); derivation
+     * rules live in TrayCanvasPanel's header comment. Creation goes through the three-element
+     * form modal (all required = invariant-1 pre-check; the missing list names each item).
+     */
+    canvas: {
+      /** Header summary ({total} canvases · {active} in progress — active = not converged) */
+      header: '{total} canvases · {active} in progress',
+      empty: 'No canvases yet — create one below',
+      create: 'New canvas',
+      /** Phase badges (derived value vocabulary) */
+      phase: {
+        growing: 'Growing',
+        reviewing: 'In review',
+        converged: 'Converged',
+      },
+      mustFix: '{count} to fix',
+      /** Missing-item list separator (zh uses a dun-hao mark, en uses a comma — read before join) */
+      listSep: ', ',
+      missing: 'Missing: {items}',
+      createFailed: 'Failed to create canvas: {msg}',
+      form: {
+        title: 'New canvas',
+        description: 'The three elements of a problem-solving canvas: statement, criterias, scope exclusions — all required',
+        statement: 'Problem statement',
+        statementPlaceholder: 'The core problem to solve, in one sentence',
+        criterias: 'Completion criterias (one per line)',
+        criteriasPlaceholder: 'Falsifiable completion criterias, one per line',
+        scopeExclusions: 'Scope exclusions (one per line)',
+        scopeExclusionsPlaceholder: 'State what is explicitly out of scope, one per line',
+        submit: 'Create canvas',
+        cancel: 'Cancel',
+      },
     },
   },
 }
