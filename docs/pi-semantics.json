@@ -1660,7 +1660,7 @@
         "pkg": "pi-coding-agent",
         "distPath": "dist/extensions/tool-search/index.js",
         "symbol": "createToolSearchExtension",
-        "note": ":1-7 头部注释自述「registered inactive. Activate it with --tools, the defaultTools setting, or setActiveTools()」；:11 registerTool({..., defaultActive: false})——exposure 未设即默认 direct（declarable，可被 defaultTools/--tools 点名激活）【行号锚基于 pi@1.0.0 实装实测】"
+        "note": ":1-7 头部注释自述「registered inactive. Activate it with --tools, the defaultTools setting, or setActiveTools()」；:11 registerTool({..., defaultActive: false})——definition 顶层 exposure:\"model-only\"（dist/extensions/tool-search/tool.js:172，registerTool {...definition, defaultActive:false} spread 后注册产物即 model-only，_getToolExposure 的 ?? \"direct\" 兜底不触发）；model-only 可被 defaultTools/--tools/setActiveTools 点名激活、声明给模型、脚本不可调【行号锚基于 pi@1.0.0 实装实测】"
       },
       {
         "pkg": "pi-coding-agent",
