@@ -10,8 +10,8 @@ import {
   REVIEWER_REPORT_SCHEMA,
   buildReviewerTask,
   collectValidEntries,
+  currentReviewRound,
   isCanvasStateReply,
-  nextReviewRound,
   renderResolutionTable,
   resolveReviewerDispatcher,
   runReviewRound,
@@ -63,15 +63,25 @@ describe("resolveReviewerDispatcher（service 槽）", () => {
 });
 
 describe("轮次与收窄输入", () => {
-  it("nextReviewRound：从未审查 = R1；已有报告轮次 +1", () => {
-    expect(nextReviewRound(makeState())).toBe(1);
+  it("currentReviewRound：read 回包的 review.round 即本轮轮次（run 链路 read 发生在 review-request 之后）；从未审查 = R1", () => {
+    // 从未审查（read 无 review 聚合）= R1
+    expect(currentReviewRound(makeState())).toBe(1);
+    // GUI 双跳第二跳：user 发起 R1（尚无报告条目）→ agent run 的 read = round 1（不再 +1）
     expect(
-      nextReviewRound(
+      currentReviewRound(
+        makeState({
+          review: { status: "in-progress", round: 1, maxRounds: 5, entries: [] },
+        }),
+      ),
+    ).toBe(1);
+    // runtime 推进到 R2 后的 read = round 2
+    expect(
+      currentReviewRound(
         makeState({
           review: { status: "in-progress", round: 2, maxRounds: 5, entries: [] },
         }),
       ),
-    ).toBe(3);
+    ).toBe(2);
   });
 
   it("renderResolutionTable：条目 × 处置状态逐条渲染；未处置显式标注", () => {
@@ -220,7 +230,31 @@ describe("runReviewRound（编排主体）", () => {
     expect(opts.schema).toBe(REVIEWER_REPORT_SCHEMA);
   });
 
-  it("R2+：轮次推进 + scope 收窄进 task", async () => {
+  it("R1 run（GUI 双跳第二跳：round=1 且尚无报告条目）→ 报告标 R1（不超前一轮），prompt 为全面审", async () => {
+    const append = makeAppend();
+    let capturedTask = "";
+    const dispatch: ReviewerDispatchPort = {
+      executeAndAwait: async (opts) => {
+        capturedTask = opts.task;
+        return { parsedOutput: { entries: [] } };
+      },
+    };
+    const outcome = await runReviewRound({
+      // run 链路时序：read 发生在 review-request 之后——input.state 是发起后形态
+      //（user 发起 R1 → 回推 → agent run；R1 尚无报告条目）
+      state: makeState({
+        review: { status: "in-progress", round: 1, maxRounds: 5, entries: [] },
+      }),
+      dispatch,
+      appendWriteBack: append.append,
+    });
+    expect(outcome.round).toBe(1);
+    expect(capturedTask).toContain("R1 全面审查");
+    // 全 clean 轮：零条目不写回（append 不被调用）
+    expect(append.calls).toHaveLength(0);
+  });
+
+  it("R2 run（runtime 已推进 round=2）→ 报告标 R2，scope 收窄 + 上轮处置表进 task", async () => {
     const append = makeAppend();
     let capturedTask = "";
     const dispatch: ReviewerDispatchPort = {
@@ -231,15 +265,21 @@ describe("runReviewRound（编排主体）", () => {
     };
     const outcome = await runReviewRound({
       state: makeState({
-        review: { status: "in-progress", round: 1, maxRounds: 5, entries: [] },
+        review: {
+          status: "in-progress",
+          round: 2,
+          maxRounds: 5,
+          entries: [{ id: "rv-1", round: 1, dimension: "support", severity: "must-fix", targetId: "n1", note: "悬空断言" }],
+        },
       }),
       scope: "只审处置表",
       dispatch,
       appendWriteBack: append.append,
     });
     expect(outcome.round).toBe(2);
+    expect(capturedTask).toContain("R2 复审");
     expect(capturedTask).toContain("只审处置表");
-    // 全 clean 轮：零条目不写回（append 不被调用）
+    expect(capturedTask).toContain("[rv-1]");
     expect(append.calls).toHaveLength(0);
   });
 

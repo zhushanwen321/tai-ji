@@ -1,13 +1,18 @@
 /**
- * 审查循环终态与支撑度写回（一致性修复 r1）。
- * - 设计 §3.1 失败路径②：审查达轮次上限 → 终态 max-rounds + 停回说明 +
- *   ReviewMaxRoundsReached 留痕 → 用户升级裁决后可再发起（ReviewEscalated 留痕）；
- *   agent 停回后再发起 = review_max_rounds 拒绝（错误 → 恢复动作闭环）。
+ * 审查循环轮次语义与终态、支撑度写回。
+ * - 轮次口径（一轮 = 一循环）：发起 → reviewer 报告写回（review-append）→ 处置为
+ *   一轮；当前轮无报告条目时再发起 = 同一轮重发（GUI 双跳：user 发起 → 回推 →
+ *   agent run 再发起），round 不动、不消耗 maxRounds 预算。
+ * - 设计 §3.1 失败路径②：审查达轮次上限（完成的循环数用尽预算）→ 终态 max-rounds +
+ *   停回说明 + ReviewMaxRoundsReached 留痕 → 用户升级裁决放行恰一轮（round+1 且
+ *   maxRounds 同步抬升 + ReviewEscalated 留痕，放行后即回 in-progress）——升级后的
+ *   轮次可被 agent run 的 review-request 正常开始；agent 停回后再发起 =
+ *   review_max_rounds 拒绝（错误 → 恢复动作闭环）。
  * - 概念 §2.4「边的缺陷经支撑度表达」：review-append 条目附带支撑度评价落 edge.support
  *   （主干边限定——裁决点 R3；gap 附清单——「有缺口附清单」词条）。
- * - 直写 ≡ 重放：终态 / 升级 / 支撑度均经 events.jsonl 主事件确定性重放（附属事件
- *   ReviewMaxRoundsReached / ReviewEscalated 不参与重放，重放由 review-request /
- *   review-append 主事件分支承载）。
+ * - 直写 ≡ 重放：轮次推进 / 终态 / 升级 / 支撑度均经 events.jsonl 主事件确定性重放
+ *   （附属事件 ReviewMaxRoundsReached / ReviewEscalated 不参与重放，重放由
+ *   review-request / review-append 主事件分支承载）。
  */
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
@@ -31,19 +36,55 @@ function readLines(dir: string, canvasId: string): PersistedLine[] {
     .split('\n').filter((l) => l.trim() !== '').map((l) => JSON.parse(l) as PersistedLine)
 }
 
-/** 推进到审查轮次上限：5 次发起（R1 建立 + 4 次推进）→ round = maxRounds = 5。 */
-function exhaustRounds(svc: CanvasService, canvasId: string): void {
+/** 完成一轮：发起（round = 当前轮）+ 报告写回（当前轮有条目 = 轮次完成判据）。 */
+function completeRound(svc: CanvasService, canvasId: string, targetId: string): void {
+  expectOk(svc.mutate({ action: 'review-request', params: { canvasId } }, 'agent'))
+  const review = svc.readState(canvasId).review
+  expect(review).toBeDefined()
+  if (!review) throw new Error('review 聚合缺失：review-request 未生效')
+  const round = review.round
+  expectOk(svc.mutate({
+    action: 'review-append',
+    params: { canvasId, round, entries: [{ id: `re-r${round}`, round, dimension: 'completeness', severity: 'must-fix', targetId, note: `R${round} 报告条目` }] },
+  }, 'review'))
+}
+
+/** 推进到审查轮次上限：完成 5 轮循环（发起 + 报告写回各 5 次）→ round = maxRounds = 5。 */
+function exhaustRounds(svc: CanvasService, canvasId: string, targetId: string): void {
   for (let i = 0; i < 5; i++) {
-    expectOk(svc.mutate({ action: 'review-request', params: { canvasId } }, 'agent'))
+    completeRound(svc, canvasId, targetId)
   }
 }
+
+describe('轮次口径（一轮 = 一循环：GUI 双跳 / 重发不虚增轮次）', () => {
+  it('当前轮无报告条目时再发起 = 同一轮重发（round 不动，不消耗预算）——GUI 链路 user 发起 + agent run 两跳计一轮', () => {
+    const h = makeService()
+    try {
+      const c = growCanvas(h.svc, createCanvas(h.svc))
+      // GUI 双跳：user 发起（WS mutate）→ 回推 → agent run 再发起（marker mutate）
+      expectOk(h.svc.mutate({ action: 'review-request', params: { canvasId: c.canvasId } }, 'user'))
+      expect(c.state().review?.round).toBe(1)
+      expectOk(h.svc.mutate({ action: 'review-request', params: { canvasId: c.canvasId } }, 'agent'))
+      expect(c.state().review?.round).toBe(1)
+      // R1 报告写回后，下一次发起才推进 R2
+      expectOk(h.svc.mutate({
+        action: 'review-append',
+        params: { canvasId: c.canvasId, round: 1, entries: [{ id: 're-r1', round: 1, dimension: 'completeness', severity: 'must-fix', targetId: c.q1, note: 'R1 报告' }] },
+      }, 'review'))
+      expectOk(h.svc.mutate({ action: 'review-request', params: { canvasId: c.canvasId } }, 'agent'))
+      expect(c.state().review?.round).toBe(2)
+    } finally {
+      h.dispose()
+    }
+  })
+})
 
 describe('审查终态 max-rounds（设计 §3.1 失败路径②：置终态 + 停回说明 + 留痕）', () => {
   it('达上限再发起 = 合法终态转移（非校验失败）：status=max-rounds + stopNote/recoverHint + ReviewMaxRoundsReached 事件 + round 不动 + dirtyPaths 不清（本轮未开始）', () => {
     const h = makeService()
     try {
       const c = growCanvas(h.svc, createCanvas(h.svc))
-      exhaustRounds(h.svc, c.canvasId)
+      exhaustRounds(h.svc, c.canvasId, c.q1)
       expect(c.state().review?.status).toBe('in-progress')
       // 用户改动造待重审（达上限分支不得消费——审查没有开始）
       expectOk(h.svc.mutate({ action: 'patch', params: { canvasId: c.canvasId, nodeId: c.q1, content: '补丁后表述', reason: '修订' } }, 'user'))
@@ -68,7 +109,7 @@ describe('审查终态 max-rounds（设计 §3.1 失败路径②：置终态 + �
     const h = makeService()
     try {
       const c = growCanvas(h.svc, createCanvas(h.svc))
-      exhaustRounds(h.svc, c.canvasId)
+      exhaustRounds(h.svc, c.canvasId, c.q1)
       expectOk(h.svc.mutate({ action: 'review-request', params: { canvasId: c.canvasId } }, 'agent'))
       const reply = h.svc.mutate({ action: 'review-request', params: { canvasId: c.canvasId } }, 'agent')
       expectRejected(reply, 'review_max_rounds')
@@ -79,11 +120,11 @@ describe('审查终态 max-rounds（设计 §3.1 失败路径②：置终态 + �
     }
   })
 
-  it('停回后 user 再发起 = 升级裁决 → 放行 R6 + ReviewEscalated 留痕 + 停回说明清除 + 待重审随发起消费', () => {
+  it('停回后 user 再发起 = 升级裁决 → 放行 R6（maxRounds 同步抬升）+ ReviewEscalated 留痕 + 停回说明清除 + 待重审随发起消费；升级后 agent run 的 review-request 可正常开始（同一轮重发不触发上限）', () => {
     const h = makeService()
     try {
       const c = growCanvas(h.svc, createCanvas(h.svc))
-      exhaustRounds(h.svc, c.canvasId)
+      exhaustRounds(h.svc, c.canvasId, c.q1)
       expectOk(h.svc.mutate({ action: 'review-request', params: { canvasId: c.canvasId } }, 'agent'))
       expect(c.state().review?.status).toBe('max-rounds')
       const reply = h.svc.mutate({ action: 'review-request', params: { canvasId: c.canvasId, scope: '升级裁决：聚焦换选风险' } }, 'user')
@@ -91,23 +132,35 @@ describe('审查终态 max-rounds（设计 §3.1 失败路径②：置终态 + �
       const review = c.state().review
       expect(review?.status).toBe('in-progress')
       expect(review?.round).toBe(6)
+      expect(review?.maxRounds).toBe(6)
       expect(review?.stopNote).toBeUndefined()
       expect(review?.recoverHint).toBeUndefined()
       expect(c.state().dirtyPaths).toHaveLength(0)
       expect(readLines(h.dir, c.canvasId).map((l) => l.type)).toContain('ReviewEscalated')
+      // 升级轮可执行：GUI 链路回推后 agent run 的 review-request（R6 尚无报告条目 =
+      // 同一轮重发）不再被 max-rounds 拦截，reviewer 可派发
+      const agentRun = h.svc.mutate({ action: 'review-request', params: { canvasId: c.canvasId } }, 'agent')
+      expect(agentRun.ok).toBe(true)
+      expect(c.state().review?.round).toBe(6)
+      expect(c.state().review?.status).toBe('in-progress')
     } finally {
       h.dispose()
     }
   })
 
-  it('升级后再达上限 → 可再次停回（升级裁决无预算上限——轮次上限是引擎参数，用户裁决优先）', () => {
+  it('升级后再达上限 → 可再次停回（升级裁决无预算上限——每次升级恰放行一轮，轮次上限是引擎参数，用户裁决优先）', () => {
     const h = makeService()
     try {
       const c = growCanvas(h.svc, createCanvas(h.svc))
-      exhaustRounds(h.svc, c.canvasId)
+      exhaustRounds(h.svc, c.canvasId, c.q1)
       expectOk(h.svc.mutate({ action: 'review-request', params: { canvasId: c.canvasId } }, 'agent'))
       expectOk(h.svc.mutate({ action: 'review-request', params: { canvasId: c.canvasId } }, 'user'))
       expect(c.state().review?.round).toBe(6)
+      // R6 报告写回（轮次完成）后，再发起立即再停回
+      expectOk(h.svc.mutate({
+        action: 'review-append',
+        params: { canvasId: c.canvasId, round: 6, entries: [{ id: 're-r6', round: 6, dimension: 'completeness', severity: 'must-fix', targetId: c.q1, note: 'R6 报告' }] },
+      }, 'review'))
       expectOk(h.svc.mutate({ action: 'review-request', params: { canvasId: c.canvasId } }, 'user'))
       expect(c.state().review?.status).toBe('max-rounds')
       expect(c.state().review?.round).toBe(6)
@@ -120,12 +173,14 @@ describe('审查终态 max-rounds（设计 §3.1 失败路径②：置终态 + �
     const h = makeService()
     try {
       const c = growCanvas(h.svc, createCanvas(h.svc))
-      exhaustRounds(h.svc, c.canvasId)
+      exhaustRounds(h.svc, c.canvasId, c.q1)
       expectOk(h.svc.mutate({ action: 'review-request', params: { canvasId: c.canvasId } }, 'agent'))
       expectOk(h.svc.mutate({ action: 'review-request', params: { canvasId: c.canvasId } }, 'user'))
+      expectOk(h.svc.mutate({ action: 'review-request', params: { canvasId: c.canvasId } }, 'agent'))
       const directWrite = h.svc.readState(c.canvasId)
       expect(directWrite.review?.status).toBe('in-progress')
       expect(directWrite.review?.round).toBe(6)
+      expect(directWrite.review?.maxRounds).toBe(6)
       const reborn = new CanvasService({ canvasesDir: h.dir, generateId: (): string => 'replay-unused-id' })
       try {
         expect(reborn.readState(c.canvasId)).toEqual(directWrite)

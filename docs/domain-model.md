@@ -45,6 +45,8 @@
 
 成员：轮次、条目（must-fix / suggestion 两级，经图元素 id 引用）、处置记录（采纳 / 登记后做 / 拒绝留理由，first-writer-wins——已有处置记录的条目再次处置被拒绝并报错误码）、终态（converged / max-rounds / escalated / stuck 四值，除 converged 外全部附停回说明与恢复动作建议）。
 
+**轮次口径（一轮 = 一循环）**：一轮 = 一次完整审查循环（发起 → reviewer 报告写回 → 处置）。当前轮已有报告条目 = 轮次完成；未完成时再发起 = 同一轮重发（GUI 发起链路 user 发起 → 回推 → agent run 再发起两跳计一轮），不推进轮次、不消耗轮次预算。maxRounds 按完成的审查循环计数；达上限后再发起置终态 max-rounds 停回，用户升级裁决放行恰一轮（round+1 且 maxRounds 同步抬升，ReviewEscalated 事件留痕，放行后即回 in-progress——escalated 不驻留 status；stuck 为词表值，MVP 无触发路径）。
+
 不变量：
 
 1. 条目引用的图元素 id 必须存在于画布

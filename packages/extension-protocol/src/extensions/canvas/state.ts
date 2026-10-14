@@ -117,7 +117,11 @@ export type ReviewDimension =
 /** 条目分级：must-fix 清零不收敛；suggestion 处置制（三选一）。 */
 export type ReviewSeverity = 'must-fix' | 'suggestion'
 
-/** 审查终态族（对齐 review-fix-loop 终态集；除 converged 外全部停回用户）。 */
+/** 审查终态族（对齐 review-fix-loop 终态集；除 converged 外全部停回用户）。
+ * 各值的驻留口径：converged / max-rounds 驻留于 status；escalated 不驻留——升级经
+ * ReviewEscalated 事件留痕，放行后即回 in-progress（每次升级裁决恰放行一轮，轮次
+ * 预算随放行抬升）；stuck 为终态族词表值，MVP 无触发路径（reviewer 派发失败经
+ * 错误显式上报，不落聚合终态）。 */
 export type ReviewReportStatus = 'in-progress' | 'converged' | 'max-rounds' | 'escalated' | 'stuck'
 
 /** 处置三选一（采纳 / 登记后做 / 拒绝留理由）。 */

@@ -17,6 +17,14 @@ import { edgeOf, eventData, eventOf, fail, isTrunkEdge, truncate, type CanvasEve
 /** 审查循环轮次上限（审查引擎参数，对齐 review-fix-loop 的 maxRounds；非画布生长预算）。 */
 export const DEFAULT_REVIEW_MAX_ROUNDS = 5
 
+/** 轮次完成判据（一轮 = 一循环：发起 → reviewer 报告写回 → 处置）：当前轮已有报告
+ * 条目 = 已完成。尚无条目 = 本轮未完成——再发起是同一轮的重发（GUI 双跳的第二跳：
+ * user 发起 → 回推 → agent run 再发起），不推进轮次、不消耗轮次预算（maxRounds 按
+ * 完成的审查循环计数——设计 §3.1:173 GUI 链路一次循环计一轮，R1 全面审语义由此保持）。 */
+function roundHasReport(review: NonNullable<CanvasState['review']>): boolean {
+  return review.entries.some((e) => e.round === review.round)
+}
+
 export function applyReviewRequest(
   draft: CanvasState,
   params: CanvasActionParams['review-request'],
@@ -30,18 +38,23 @@ export function applyReviewRequest(
     // 停回终态下的再发起 = 升级裁决通道（设计 §3.1 失败路径②「用户升级裁决后可再发起」）：
     // 仅 user 放行——达上限后继续审查是用户裁决；agent 再发起 = review_max_rounds 拒绝，
     // 恢复文案指向 GUI 重新发起（错误 → 恢复动作闭环）。ReviewEscalated 留痕（概念 §2.6）。
+    // 轮次预算随放行同步抬升（maxRounds = round）：只 round+1 不抬预算会使
+    // round > maxRounds 恒成立，升级后的一切 review-request 立即再置 max-rounds
+    // ——升级轮永远无法实际执行。每次升级裁决恰放行一轮（用户裁决优先于引擎参数）。
     if (actor !== 'user') {
       fail('review_max_rounds', `审查已达轮次上限（${draft.review.maxRounds} 轮）停回中，agent 不得自主继续：由用户升级裁决后在画布重新发起`)
     }
     draft.review.round += 1
+    draft.review.maxRounds = draft.review.round
     draft.review.status = 'in-progress'
     draft.review.stopNote = undefined
     draft.review.recoverHint = undefined
-    events.push({ type: 'ReviewEscalated', action: 'review-request', actor, at, data: { canvasId: draft.canvasId, round: draft.review.round } })
-  } else if (draft.review.round >= draft.review.maxRounds) {
-    // 达轮次上限（设计 §3.1 失败路径② + 聚合 2 不变量 2）：置终态 max-rounds + 停回说明
-    // 与恢复动作建议，ReviewMaxRoundsReached 留痕；不进入新一轮（round 不动、dirtyPaths
-    // 不清——本轮未开始，待重审路径保留到升级放行时随发起消费）。
+    events.push({ type: 'ReviewEscalated', action: 'review-request', actor, at, data: { canvasId: draft.canvasId, round: draft.review.round, maxRounds: draft.review.maxRounds } })
+  } else if (roundHasReport(draft.review) && draft.review.round >= draft.review.maxRounds) {
+    // 达轮次上限（设计 §3.1 失败路径② + 聚合 2 不变量 2）：上一轮已完成（有报告）且
+    // 轮次预算用尽 → 置终态 max-rounds + 停回说明与恢复动作建议，ReviewMaxRoundsReached
+    // 留痕；不进入新一轮（round 不动、dirtyPaths 不清——本轮未开始，待重审路径保留到
+    // 升级放行时随发起消费）。
     draft.review.status = 'max-rounds'
     draft.review.stopNote = `审查已达轮次上限（${draft.review.maxRounds} 轮）未收敛，停回用户裁决`
     draft.review.recoverHint = '升级裁决（扩大审查范围或修改完成判据）后重新发起审查（画布「发起审查」入口，用户操作）'
@@ -49,10 +62,13 @@ export function applyReviewRequest(
     events.push({ type: 'ReviewMaxRoundsReached', action: 'review-request', actor, at, data: { canvasId: draft.canvasId, round: draft.review.round, maxRounds: draft.review.maxRounds } })
     events.push(eventOf('review-request', actor, at, eventData({ ...params })))
     return `审查已达轮次上限（${draft.review.maxRounds} 轮）：已置终态 max-rounds 停回用户——${draft.review.recoverHint}`
-  } else {
+  } else if (roundHasReport(draft.review)) {
+    // 上一轮已完成 → 推进新一轮。
     draft.review.round += 1
     draft.review.status = 'in-progress'
   }
+  // 其余情形：当前轮尚无报告条目 → 同一轮再发起（重发 / GUI 双跳的第二跳），round
+  // 不动。
   // 发起审查 = 当前全部待重审路径进入本轮审查范围（概念 §5.2「下轮审查优先覆盖待重审
   // 路径」的消费点）：集合清空。这是待重审集合的唯一清除通道——没有它，收敛门禁③
   // 「待重审空」不可达（词表无 clear-dirty action，属设计内语义而非新增动作）。

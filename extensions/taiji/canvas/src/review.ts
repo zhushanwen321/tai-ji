@@ -117,9 +117,11 @@ export function isCanvasStateReply(v: unknown): v is CanvasState {
   );
 }
 
-/** 下一个审查轮次：审查报告聚合的「当前/最近轮次」+ 1；从未审查 = R1。 */
-export function nextReviewRound(state: CanvasState): number {
-  return (state.review?.round ?? 0) + 1;
+/** 本轮审查轮次：run 链路的 read 发生在 review-request 之后，review.round 已是本轮
+ * 轮次（runtime 侧一轮 = 一循环：当前轮无报告条目时再发起不推进轮次——GUI 双跳的
+ * 第二跳与重发都不虚增轮次）；从未审查（read 无 review 聚合）= R1。 */
+export function currentReviewRound(state: CanvasState): number {
+  return state.review?.round ?? 1;
 }
 
 /** 上轮处置表渲染（R2+ prompt 的收窄输入：条目 × 处置状态）。 */
@@ -194,7 +196,7 @@ export async function runReviewRound(input: {
   dispatch: ReviewerDispatchPort;
   appendWriteBack: (params: CanvasReviewAppendParams) => Promise<void>;
 }): Promise<ReviewRunOutcome> {
-  const round = nextReviewRound(input.state);
+  const round = currentReviewRound(input.state);
   const task = buildReviewerTask(input.state, round, input.scope);
   const result = await input.dispatch.executeAndAwait({
     task,
