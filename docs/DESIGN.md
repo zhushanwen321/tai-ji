@@ -558,7 +558,7 @@ hover 时右侧整单元（badge/耗时）`visibility:hidden` 让位 ghost 操�
 | block header / header | 14px |
 | 操作按钮 | 16px |
 
-lucide-vue 内联 SVG，stroke-width 默认 **1.75**（特殊图标如 checkbox 勾/install icon 可加粗到 2-3）。block icon：thinking=Brain / tool-bash=SquareTerminal / tool 兜底=SquareFunction / subagent=Bot / workflow=Workflow。
+lucide-vue 内联 SVG，stroke-width 默认 **2**（lucide 默认值，`BLOCK_ICON_CLASS` 未覆写；RUNNING_LOADER_SVG=1.7、分隔行族=2.2；特殊图标如 checkbox 勾/install icon 可加粗到 2-3）。block icon：thinking=Brain / tool-read=BookOpen / tool-bash=SquareTerminal / bash-group=SquareTerminal / tool-edit=Pencil / tool 兜底=SquareFunction / subagent=Users / workflow=ListChecks。
 
 ### 5.8 GroupCard（设置分组卡片）
 
