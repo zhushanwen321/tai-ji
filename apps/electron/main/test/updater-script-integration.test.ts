@@ -210,16 +210,27 @@ function killGroup(child: ChildProcess): void {
 
 /**
  * 轮询等条件成立，超时抛错（快速失败暴露问题，不挂死整个 run）。
- * 默认 15s：dmg 解包链（hdiutil create/attach/ditto，批次 3）单用例实测 ~8s，
- * 全量 run 并发负载下 8s 会误报超时（成功路径立即返回，超时只影响失败路径速度）。
+ * 默认 30s：本文件 waitFor 目标全部是 hdiutil/ ditto 真实进程链。实测就位耗时分布
+ * （2026-10-14，TAIJI_WAIT_DEBUG 采集）：空载与包级全量满载（89 文件并发）均在 2-6s
+ * （S1 staging 就位：空载 5.3s / 满载 3.7s）。曾发生 15s 超时 flake（实测分布 2.5x+
+ * 偏离）→ 归因系统级瞬态卡顿（hdiutil 排队/换页类），非包内并发所致；预算取 5x 实测
+ * 上界吸收尖峰。成本仅真死锁时失败报告晚 15s（成功路径立即返回，超时只影响失败速度）；
+ * 超时错误消息携带实际等待时长，未来 flake 可即时归因（贴预算 = 系统尖峰再现；数量级
+ * 偏离 = 真退化另查）。
  */
-async function waitFor(desc: string, cond: () => boolean, timeoutMs = 15_000): Promise<void> {
+async function waitFor(desc: string, cond: () => boolean, timeoutMs = 30_000): Promise<void> {
   const start = Date.now()
   while (!cond()) {
     if (Date.now() - start > timeoutMs) {
-      throw new Error(`waitFor 超时: ${desc}`)
+      // 超时错误携带实际等待时长：满载 flake 归因需要分布数据，只有预算数字无法区分「贴近预算的偶发」与「数量级偏离的真退化」
+      throw new Error(`waitFor 超时: ${desc}（等待 ${( (Date.now() - start) / 1000).toFixed(1)}s > 预算 ${timeoutMs / 1000}s）`)
     }
     await new Promise((r) => setTimeout(r, 50))
+  }
+  // 采集模式：TAIJI_WAIT_DEBUG=1 时打印每个 waitFor 的实际耗时（供满载耗时分布采集；
+  // 平时零输出不污染 CI 日志。预算校准依据与 flake 归因见 docs/TROUBLESHOOTING.md 常见问题 §30）
+  if (process.env.TAIJI_WAIT_DEBUG) {
+    console.log(`[waitFor] ${desc}: ${((Date.now() - start) / 1000).toFixed(2)}s（预算 ${timeoutMs / 1000}s）`)
   }
 }
 

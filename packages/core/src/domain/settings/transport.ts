@@ -52,6 +52,7 @@ import type {
   ServerMessageMap,
   ProviderId,
   RenameMode,
+  RenameStyle,
   UsageStatsResult,
   PiLaunchPreset,
   NormalizedQuotaRow,
@@ -180,6 +181,10 @@ export interface SettingsTransport {
   getAutoRenameEnabled(): Promise<ServerMessageMap['config.autoRenameEnabled']>
   getRenameMode(): Promise<ServerMessageMap['config.renameMode']>
   getRenameModel(): Promise<ServerMessageMap['config.renameModel']>
+  /** rename 标题提示词快照（corrupted = 配置文件 JSON 损坏已回退默认） */
+  getRenamePrompt(): Promise<ServerMessageMap['config.renamePrompt']>
+  /** 标题最大长度（归一后生效值，默认 50） */
+  getRenameMaxLength(): Promise<ServerMessageMap['config.renameMaxLength']>
   /** 智能上下文压缩配置全量（compactModel 空串 = 未设置；thresholds 为 token 绝对数） */
   getSmartContextConfig(): Promise<ServerMessageMap['config.smartContextConfig']>
   /** codemode 开关（corruption 非空 = settings.json 损坏错误态；reply 为 shared codemode payload 原样） */
@@ -253,6 +258,10 @@ export interface SettingsTransport {
   setRenameMode(mode: RenameMode): Promise<ServerMessageMap['config.renameMode']>
   /** rename 标题生成模型（"provider/modelId"，空串 = 清除回未设置） */
   setRenameModel(model: string): Promise<ServerMessageMap['config.renameModel']>
+  /** rename 标题提示词（style + 自定义指令合并写入，reply 归一生效值） */
+  setRenamePrompt(style: RenameStyle, instruction: string): Promise<ServerMessageMap['config.renamePrompt']>
+  /** 标题最大长度（正整数，非法值由 runtime 归一默认 50） */
+  setRenameMaxLength(maxLength: number): Promise<ServerMessageMap['config.renameMaxLength']>
   setSmartContextEnabled(enabled: boolean): Promise<ServerMessageMap['config.smartContextEnabled']>
   /** 压缩模型（"provider/modelId"，空串 = 跟随当前会话模型） */
   setSmartContextCompactModel(model: string): Promise<ServerMessageMap['config.smartContextCompactModel']>

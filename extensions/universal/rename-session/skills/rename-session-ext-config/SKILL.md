@@ -45,8 +45,13 @@ interface RenameSessionConfig {
   mode: "first-prompt" | "first-stop" | "agent-tool";  // 触发模式，默认 "first-stop"
   maxTitleLength: number;  // 标题最大长度（Unicode 码点），默认 50
   thinkingLevel: ModelThinkingLevel;  // 标题 LLM 的 thinking 级别，默认 "off"
+  style: "slug" | "sentence" | "emoji" | "custom";  // 标题提示词风格，默认 "slug"
+  customInstruction: string;  // 自定义提示词自由文本（仅 custom 生效），默认 ""
 }
 ```
+
+> taiji 设置页（独立「会话重命名」菜单页）只暴露 first-prompt / first-stop 两档触发模式；
+> `agent-tool` 与 prompt 配置仍可经 pi CLI / 手改配置文件使用（底层 rename_session 工具保留）。
 
 ### ModelSelector（仅支持 ref 精确指定）
 
@@ -66,10 +71,17 @@ interface RenameSessionConfig {
 
 标题 LLM 的 thinking 级别，枚举 `off` / `minimal` / `low` / `medium` / `high` / `xhigh` / `max`（pi 的 `ModelThinkingLevel`）。默认 `"off"`：直接透传给 llm-shared，由 llm-shared 映射为不传 reasoning（provider 默认行为）；`minimal`~`max` 透传给 reasoning（provider 不支持时静默忽略）。缺失或非法值回落 `"off"`。
 
+### style + customInstruction（标题提示词风格）
+
+- `style` 枚举 `slug` / `sentence` / `emoji` / `custom`，默认 `"slug"`（现状行为，零迁移）：非 custom 枚举由内置词表（llm.ts `BUILTIN_TEMPLATES`）承载 user 指令，随 extension 版本升级自动跟随；`custom` 消费 `customInstruction`（taiji 设置页「会话重命名」可视化配置的写入面）
+- `customInstruction`：自定义自由文本，**空串/全空白回落内置 slug 默认**（「空 = 内置默认」语义，不要把默认文本写死进配置）；超 2000 码点防御截断（与 runtime 写侧/runtime RENAME_INSTRUCTION_MAX_LENGTH 同限）
+- systemPrompt 分流：非 custom → slug 风格 systemPrompt（与词表自洽）；custom 且指令非空 → 「只输出标题文本」通用骨架（风格权威 = 用户指令，消解双处风格冲突）
+- 缺失/非法 `style` 回落 `"slug"`；非 string `customInstruction` 回落空串（粒度容错，坏字段不影响其他字段）
+
 ## 默认值
 
 ```json
-{ "enabled": false, "model": { "type": "ref", "ref": "" }, "mode": "first-stop", "maxTitleLength": 50, "thinkingLevel": "off" }
+{ "enabled": false, "model": { "type": "ref", "ref": "" }, "mode": "first-stop", "maxTitleLength": 50, "thinkingLevel": "off", "style": "slug", "customInstruction": "" }
 ```
 
 ## 配置示例

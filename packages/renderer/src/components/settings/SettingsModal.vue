@@ -139,6 +139,7 @@
               <PluginContributionsPage v-else-if="view === 'extension-contributions'" @back="extensionView = 'main'" />
               <SystemPage v-else-if="view === 'system'" :system="system" @update="onSystemUpdate" />
               <SystemPromptPage v-else-if="view === 'system-prompt'" />
+              <RenameSessionPage v-else-if="view === 'rename-session'" />
               <TerminalPage v-else-if="view === 'terminal'" :is-active="activeView === 'terminal'" />
               <McpSection v-else-if="view === 'mcp'" />
               <PiPresetsPage v-else-if="view === 'preset'" />
@@ -160,7 +161,7 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useEventListener } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
-import { Settings, Sparkles, Bot, Blocks, SlidersHorizontal, ScrollText, TerminalSquare, GitBranch, ClipboardList, Server, Volume2, X, Download, Palette, ChartColumn, ArrowLeft, ArrowRight, PanelLeftClose, Wifi, type LucideIcon } from '@lucide/vue'
+import { Settings, Sparkles, Bot, Blocks, SlidersHorizontal, ScrollText, Tag, TerminalSquare, GitBranch, ClipboardList, Server, Volume2, X, Download, Palette, ChartColumn, ArrowLeft, ArrowRight, PanelLeftClose, Wifi, type LucideIcon } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
 import { registerModalSurface, otherSurfaceYieldsEsc } from '@/composables/features/app/modal-surface-registry'
 import { detectPlatform } from '@/composables/effects/usePlatformChrome'
@@ -176,6 +177,7 @@ import ExtensionPage from './extension/ExtensionPage.vue'
 import PluginContributionsPage from './extension/PluginContributionsPage.vue'
 import SystemPage from './system/SystemPage.vue'
 import SystemPromptPage from './system/SystemPromptPage.vue'
+import RenameSessionPage from './rename-session/RenameSessionPage.vue'
 import TerminalPage from './terminal/TerminalPage.vue'
 import McpSection from './mcp/McpSection.vue'
 import WorktreePage from './worktree/WorktreePage.vue'
@@ -208,6 +210,7 @@ const navGroups = [
     items: [
       { id: 'appearance', labelKey: 'settings.menu.appearance', icon: Palette },
       { id: 'system-prompt', labelKey: 'settings.menu.systemPrompt', icon: ScrollText },
+      { id: 'rename-session', labelKey: 'settings.menu.sessionRename', icon: Tag },
       { id: 'tts', labelKey: 'settings.menu.tts', icon: Volume2 },
       { id: 'terminal', labelKey: 'settings.menu.terminal', icon: TerminalSquare },
     ],
@@ -270,7 +273,7 @@ watch(activeView, (view) => {
 // demo P2「限宽双实现」收敛值）· 其余 --content-max-w 720）
 const contentMaxWidth = computed(() => {
   if (activeMenu.value === 'usage') return 'var(--content-max-w-wide)'
-  if (activeMenu.value === 'mcp' || activeMenu.value === 'system-prompt') return '860px'
+  if (activeMenu.value === 'mcp' || activeMenu.value === 'system-prompt' || activeMenu.value === 'rename-session') return '860px'
   return 'var(--content-max-w)'
 })
 

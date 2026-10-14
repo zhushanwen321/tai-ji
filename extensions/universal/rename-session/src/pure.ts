@@ -18,6 +18,20 @@ import {
 export type RenameMode = "first-prompt" | "first-stop" | "agent-tool";
 
 /**
+ * 标题提示词风格枚举（设计 rename-prompt-config）：slug/sentence/emoji = 内置词表（随 extension
+ * 版本升级自动跟随），custom = 用户自定义自由文本（customInstruction 承载，空串回落内置 slug）。
+ * 与 @taiji/shared RenameStyle 值域同构（跨包不 import，本包 role=universal）。
+ */
+export type RenameStyle = "slug" | "sentence" | "emoji" | "custom";
+
+/**
+ * 自定义标题提示词长度上限（Unicode 码点数）——与 @taiji/shared RENAME_INSTRUCTION_MAX_LENGTH
+ * 同值（跨包不 import 的镜像，改值须双侧同步）。三消费点：本包 normalize 防御截断 /
+ * runtime setRenamePrompt 写侧归一 / renderer 编辑器计数。
+ */
+export const RENAME_INSTRUCTION_MAX_LENGTH = 2000;
+
+/**
  * rename-session 配置 schema（落盘到 `<agentDir>/config/rename-session-ext-config.json`，路径由 llm-shared 推导）。
  *
  * 收口自旧版 pure.ts 的 `RenameConfig`（switchFilePath/maxTitleLength/renameInstruction 硬编码常量）：
@@ -25,7 +39,11 @@ export type RenameMode = "first-prompt" | "first-stop" | "agent-tool";
  *   auto-rename-enabled flag 文件（live 覆盖源，存在即开，见下方 [COMPAT] 契约）
  * - model 从「搭便车 ctx.model」改为独立 `ModelSelector`（仅支持 ref 精确指定；空 ref 跟随会话主模型，见 llm.ts 的空 ref fallback）
  * - maxTitleLength 保留（默认 50）
- * - renameInstruction 不进配置（i18n 留未来），由代码常量 RENAME_INSTRUCTION 承载
+ * - style + customInstruction：标题提示词风格（rename-prompt-config 设计）：非 custom 枚举 =
+ *   内置词表（llm.ts BUILTIN_TEMPLATES，随版本升级），custom = 自定义自由文本（空串回落
+ *   内置 slug 默认）。GUI 配置页（taiji RenameSessionPage）经 runtime config.get/setRenamePrompt
+ *   读写，pi CLI 用户亦可直接改本文件
+ * - renameInstruction 内置默认由代码常量 RENAME_INSTRUCTION 承载（llm.ts）
  * - mode：first-prompt 首条 user 消息触发 / first-stop 首个成功 round 末触发（默认，现状）/
  *   agent-tool 不自动生成、注册 rename_session 工具由 agent 自主改名
  */
@@ -39,6 +57,13 @@ export interface RenameSessionConfig {
 	/** 标题最大长度（Unicode 码点数）。 */
 	maxTitleLength: number;
 	/**
+	 * 标题提示词风格（默认 "slug"，现状行为）。非 custom 枚举由 llm.ts BUILTIN_TEMPLATES
+	 * 提供词表；custom 消费 customInstruction（空串回落内置 slug 默认）。
+	 */
+	style: RenameStyle;
+	/** 自定义标题提示词自由文本（仅 style=custom 时生效；超长由 normalize 防御截断）。 */
+	customInstruction: string;
+	/**
 	 * 标题生成 LLM 的 thinking 级别（字符串透传；合法档位按模型 supportedLevels 在调用点判定）。
 	 * 默认 "off"：不传 pi-ai reasoning（provider 默认行为，与旧版本一致）；
 	 * "minimal"~"max" 透传给 SimpleStreamOptions.reasoning（provider 不支持时静默忽略）。
@@ -51,6 +76,9 @@ export interface RenameSessionConfig {
 /** 合法触发模式清单（与 RenameMode 一致；normalize 校验用）。Set 免 as 断言。 */
 const RENAME_MODES: ReadonlySet<string> = new Set(["first-prompt", "first-stop", "agent-tool"]);
 
+/** 合法提示词风格清单（与 RenameStyle 一致；normalize 校验用）。 */
+const RENAME_STYLES: ReadonlySet<string> = new Set(["slug", "sentence", "emoji", "custom"]);
+
 /**
  * 类型谓词：unknown 是否为合法触发模式（normalizeRenameConfig 校验用，单点断言）。
  * Set.has 运行时兜底 + 类型收窄，调用方无需再断言。
@@ -59,13 +87,20 @@ function isRenameMode(raw: unknown): raw is RenameMode {
 	return typeof raw === "string" && RENAME_MODES.has(raw);
 }
 
-/** 默认配置：关闭、空 ref（跟随会话主模型，见 llm.ts 的空 ref fallback）、first-stop 触发、标题上限 50、不启用 thinking。 */
+/** 类型谓词：unknown 是否为合法提示词风格（与 isRenameMode 同款范式，单点断言）。 */
+function isRenameStyle(raw: unknown): raw is RenameStyle {
+	return typeof raw === "string" && RENAME_STYLES.has(raw);
+}
+
+/** 默认配置：关闭、空 ref（跟随会话主模型，见 llm.ts 的空 ref fallback）、first-stop 触发、标题上限 50、不启用 thinking、slug 内置风格、无自定义指令。 */
 export const DEFAULT_RENAME_CONFIG: RenameSessionConfig = {
 	enabled: false,
 	model: { type: "ref", ref: "" },
 	mode: "first-stop",
 	maxTitleLength: 50,
 	thinkingLevel: "off",
+	style: "slug",
+	customInstruction: "",
 };
 
 /** llm-shared loadConfig/saveConfig 的包名（决定文件名 rename-session-ext-config.json，llm-shared getConfigPath 追加 -ext-config.json 后缀）。 */
@@ -145,7 +180,18 @@ export function normalizeRenameConfig(raw: unknown): RenameSessionConfig {
 
 	const thinkingLevel = normalizeThinkingLevel(obj.thinkingLevel) ?? DEFAULT_RENAME_CONFIG.thinkingLevel;
 
-	return { enabled, model, mode, maxTitleLength, thinkingLevel };
+	// style 逐字段校验：旧 config 无字段 / 非法值 → 默认 slug（零迁移，现状行为）
+	const style = isRenameStyle(obj.style) ? obj.style : DEFAULT_RENAME_CONFIG.style;
+
+	// customInstruction：非字符串 → 空串；超长防御截断（码点数，与 runtime 写侧归一同限）
+	const rawInstruction = typeof obj.customInstruction === "string" ? obj.customInstruction : "";
+	const instructionChars = Array.from(rawInstruction);
+	const customInstruction =
+		instructionChars.length > RENAME_INSTRUCTION_MAX_LENGTH
+			? instructionChars.slice(0, RENAME_INSTRUCTION_MAX_LENGTH).join("")
+			: rawInstruction;
+
+	return { enabled, model, mode, maxTitleLength, thinkingLevel, style, customInstruction };
 }
 
 /**

@@ -32,12 +32,20 @@
  *
  * 退出码：0 = 通过；1 = 存在 fail。
  */
-import { readFileSync, existsSync } from 'node:fs'
-import { dirname, join, resolve } from 'node:path'
-import { fileURLToPath, pathToFileURL } from 'node:url'
-import { fail, ok, isFailed, guardExit, extractFunctionBlock } from './lib/guard-report.mjs'
+import { join } from 'node:path'
+import {
+  fail,
+  ok,
+  guardExit,
+  exitIfFailed,
+  readSourcesOrFail,
+  runSelfTest,
+  repoRootFrom,
+  isDirectRun,
+  extractFunctionBlock,
+} from './lib/guard-report.mjs'
 
-const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
+const ROOT = repoRootFrom(import.meta.url)
 const UI_HTML_PREVIEW_PATH_SRC = join(ROOT, 'packages', 'ui', 'src', 'features', 'chat', 'html-preview-path.ts')
 const SANITIZE_SRC = join(ROOT, 'packages', 'ui', 'src', 'features', 'chat', 'markdown-sanitize.ts')
 const UI_MARKDOWN_LINKS_SRC = join(ROOT, 'packages', 'ui', 'src', 'features', 'chat', 'markdown-links.ts')
@@ -75,17 +83,10 @@ export function missingFoldAnchors(bodyText) {
 }
 
 // ── --self-test：纯函数轻量自检（不触真实仓库文件）────────────────────
+// assert 骨架与尾部出口收敛在 scripts/lib/guard-report.mjs 的 runSelfTest；断言体按
+// 检查组拆三函数（函数体提取 / 漂移与退化检出 / 提取失败形态）。
 
-function selfTest() {
-  const assert = (cond, name) => {
-    if (!cond) {
-      console.error(`  ✗ self-test: ${name}`)
-      process.exitCode = 1
-    } else {
-      console.log(`  ✓ self-test: ${name}`)
-    }
-  }
-
+function selfTestSampleTexts() {
   const bodyOf = (anchor) => `${anchor}(base: string, rel: string): string {
   const joined = rel.startsWith('/') ? rel : \`\${base}/\${rel}\`
   const parts: string[] = []
@@ -100,19 +101,28 @@ function selfTest() {
   return \`/\${parts.join('/')}\`
 }
 function nextOne() {}`
+  return {
+    uiText: bodyOf(UI_ANCHOR),
+    rendererText: bodyOf(RENDERER_ANCHOR),
+    uiLinksText: bodyOf(UI_LINKS_ANCHOR),
+  }
+}
 
-  const uiText = bodyOf(UI_ANCHOR)
-  const rendererText = bodyOf(RENDERER_ANCHOR)
-  const uiLinksText = bodyOf(UI_LINKS_ANCHOR)
-
+function selfTestExtraction(assert) {
+  const { uiText } = selfTestSampleTexts()
   const uiBody = extractFunctionBody(uiText, UI_ANCHOR)
   assert(!uiBody.error && uiBody.text.includes("rel.startsWith('/')"), '函数体提取（含折叠拼接）')
   assert(!uiBody.text.includes(UI_ANCHOR), '签名行已剥（对拍对象不含声明行）')
   assert(!uiBody.text.includes('nextOne'), '截取到行首 } 为止（不吞后续函数）')
+}
 
-  // 三份同款 → 逐字一致 + 锚点全在场
+function selfTestDriftDetection(assert) {
+  const { uiText, rendererText, uiLinksText } = selfTestSampleTexts()
+  const uiBody = extractFunctionBody(uiText, UI_ANCHOR)
   const rendererBody = extractFunctionBody(rendererText, RENDERER_ANCHOR)
   const uiLinksBody = extractFunctionBody(uiLinksText, UI_LINKS_ANCHOR)
+
+  // 三份同款 → 逐字一致 + 锚点全在场
   assert(
     uiBody.text === rendererBody.text && uiBody.text === uiLinksBody.text,
     '三份同款样例逐字一致',
@@ -127,33 +137,26 @@ function nextOne() {}`
   // 一致退化样例：三份同款但删掉 `..` 折叠 → 语义锚点断言拦截
   const degenerateBody = uiBody.text.replace("if (seg === '..') {\n      parts.pop()\n      continue\n    }", "if (seg === '..') continue")
   assert(missingFoldAnchors(degenerateBody).length > 0, '一致退化样例被语义锚点断言拦截')
+}
 
-  // 提取失败形态
+function selfTestErrors(assert) {
   assert(extractFunctionBody('const x = 1', UI_ANCHOR).error !== undefined, 'anchor 缺失报 error')
   assert(extractFunctionBody(`${UI_ANCHOR}(base: string, rel: string): string {\n  return rel\n`, UI_ANCHOR).error !== undefined, '无行首闭合报 error')
   assert(stripSignatureHead('nosignature') === '', '无换行块剥签名得空串')
-
-  if (process.exitCode === 1) {
-    console.error('posix-resolve-mirror-sync self-test 未通过')
-    process.exit(1)
-  }
-  console.log('✓ posix-resolve-mirror-sync self-test 全部通过')
-  process.exit(0)
 }
 
-if (process.argv.includes('--self-test')) selfTest()
+function selfTestCases(assert) {
+  selfTestExtraction(assert)
+  selfTestDriftDetection(assert)
+  selfTestErrors(assert)
+}
+
+if (process.argv.includes('--self-test')) runSelfTest('posix-resolve-mirror-sync', selfTestCases)
 
 // ── main()：CLI 直跑才执行 ──────────────────────────────────────────
 
-// 呈报骨架（✓/✗ 行 + 失败旗标 + 汇总出口）与 scripts 家族共享：scripts/lib/guard-report.mjs
-
-function readTextOrFail(filePath, label) {
-  if (!existsSync(filePath)) {
-    fail(`${label} 缺失: ${filePath}——恢复动作：确认文件未被移动 / 删除（迁移时同步本守卫路径常量）`)
-    return null
-  }
-  return readFileSync(filePath, 'utf-8')
-}
+// 呈报骨架（✓/✗ 行 + 失败旗标 + 汇总出口 + 源文件读取 + self-test 骨架）与 scripts 家族
+// 共享：scripts/lib/guard-report.mjs
 
 /** 基准 ↔ 镜像逐字对拍（一致 ok / 漂移 fail 带恢复动作）。 */
 function compareWithBaseline(baselineBody, mirrorBody, mirrorLabel, baselineLabel, mirrorSrc) {
@@ -169,10 +172,11 @@ function compareWithBaseline(baselineBody, mirrorBody, mirrorLabel, baselineLabe
 }
 
 function main() {
-  const uiText = readTextOrFail(UI_HTML_PREVIEW_PATH_SRC, 'ui html-preview-path 源文件')
-  const rendererText = readTextOrFail(SANITIZE_SRC, 'renderer markdown-sanitize 源文件')
-  const uiLinksText = readTextOrFail(UI_MARKDOWN_LINKS_SRC, 'ui markdown-links 源文件')
-  if (uiText === null || rendererText === null || uiLinksText === null) process.exit(1)
+  const [uiText, rendererText, uiLinksText] = readSourcesOrFail([
+    [UI_HTML_PREVIEW_PATH_SRC, 'ui html-preview-path 源文件'],
+    [SANITIZE_SRC, 'renderer markdown-sanitize 源文件'],
+    [UI_MARKDOWN_LINKS_SRC, 'ui markdown-links 源文件'],
+  ])
 
   const uiBody = extractFunctionBody(uiText, UI_ANCHOR)
   const rendererBody = extractFunctionBody(rendererText, RENDERER_ANCHOR)
@@ -185,10 +189,7 @@ function main() {
   for (const [label, body, src] of extracted) {
     if (body.error) fail(`${label} 提取失败: ${body.error}——恢复动作：核对 ${src} 函数形态（闭合 '}' 须在行首）`)
   }
-  if (isFailed()) {
-    console.error('POSIX resolve 镜像对拍：函数体提取失败，按上方 ✗ 修复后重跑')
-    process.exit(1)
-  }
+  exitIfFailed('POSIX resolve 镜像对拍：函数体提取失败，按上方 ✗ 修复后重跑')
 
   // ① 折叠语义锚点在场（防三份一致删空 / 退化的对拍盲区）
   const baselineLabel = `ui ${UI_ANCHOR}`
@@ -212,5 +213,4 @@ function main() {
   )
 }
 
-const isMain = process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href
-if (isMain) main()
+if (isDirectRun(import.meta.url)) main()

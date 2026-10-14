@@ -40,6 +40,8 @@ export default {
     toggleSidebarAria: '切换侧栏',
     back: '后退',
     forward: '前进',
+    // session JSONL 文件名按钮（PanelHeader，2026-10-14 用户裁决回归）：点击复制磁盘绝对路径
+    copySessionFile: '复制 session 文件路径',
     // plugin 顶栏按钮区（HeaderActionsHost，E13 三态 tooltip；plugin-header-action-modal-points AP-1）
     pluginActionExtensionNotLoaded: '本会话未加载所需扩展',
     pluginActionRestoring: '会话恢复中，暂无法判定',

@@ -117,6 +117,8 @@ export function makeSettingsTransportStub(overrides: SettingsTransportStubOverri
     getAutoRenameEnabled: vi.fn(async () => ({ enabled: false })),
     getRenameMode: vi.fn(async () => ({ mode: 'first-stop' as const })),
     getRenameModel: vi.fn(async () => ({ model: '' })),
+    getRenamePrompt: vi.fn(async () => ({ style: 'slug' as const, instruction: '', corrupted: false })),
+    getRenameMaxLength: vi.fn(async () => ({ maxLength: 50 })),
     getSmartContextConfig: vi.fn(async () => ({
       enabled: false,
       compactModel: '',
@@ -153,6 +155,8 @@ export function makeSettingsTransportStub(overrides: SettingsTransportStubOverri
     setAutoRenameEnabled: vi.fn(async (enabled) => ({ enabled })),
     setRenameMode: vi.fn(async (mode) => ({ mode })),
     setRenameModel: vi.fn(async (model) => ({ model })),
+    setRenamePrompt: vi.fn(async (style, instruction) => ({ style, instruction, corrupted: false })),
+    setRenameMaxLength: vi.fn(async (maxLength) => ({ maxLength })),
     setSmartContextEnabled: vi.fn(async (enabled) => ({ enabled })),
     setSmartContextCompactModel: vi.fn(async (model) => ({ model })),
     setSmartContextThresholds: vi.fn(async (thresholds) => ({ thresholds })),

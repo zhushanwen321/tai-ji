@@ -415,6 +415,27 @@ describe('MessageStream.vue 首屏冒烟（mount 真组件，验 TurnRail 接线
     wrapper.unmount()
   })
 
+  it('TC-w4-9c: 根节点自挂 data-fs-scope=chat（对话流字号域单点挂点，chat-font-scope）——主面板/drawer subagent/btw/workflow agent 详情四处消费同款，抽屉内嵌对话流恒跟 chat 档', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+
+    const wrapper = mount(MessageStream, {
+      props: { sessionId: 'sess-fs-scope' },
+      attachTo: document.body,
+      global: { plugins: [pinia] },
+    })
+    await nextTick()
+
+    // 观察者断言：流根元素自挂 chat 字号域属性。组件根为 fragment（dev 模式模板顶部
+    // 注释节点参与根判定），wrapper.attributes() 读到的是挂载容器非流根，须经 DOM 查询
+    // 断言真实流根——删除该属性即抽屉内对话流回落 drawer 档，此断言拦截。
+    const scopeHost = wrapper.find('[data-fs-scope="chat"]')
+    expect(scopeHost.exists()).toBe(true)
+    expect(scopeHost.classes()).toContain('relative') // 命中的是流根 div（非容器误命中）
+
+    wrapper.unmount()
+  })
+
   it('TC-w4-9b: mount MessageStream 后 TurnRail emit jump/toggle 经模板 @jump/@toggle 路由（验 emit 接线）', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)

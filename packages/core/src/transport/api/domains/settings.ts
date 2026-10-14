@@ -20,6 +20,7 @@ import type {
   CodemodeEnabledResult,
   CodemodeSetEnabledResult,
   RenameMode,
+  RenameStyle,
   ServerMessageMap,
 } from '@taiji/shared'
 
@@ -146,6 +147,34 @@ export async function setRenameMode(mode: RenameMode): Promise<RenameModeReply> 
 /** 读取 rename 触发模式（归一后生效值，默认 first-stop）。 */
 export async function getRenameMode(): Promise<RenameModeReply> {
   return command('config.getRenameMode', {}, RPC_BACKSTOP_TIMEOUT_MS)
+}
+
+/** rename 标题提示词配置 reply 类型（style + 自定义指令 + corrupted 标记）。 */
+export type RenamePromptReply = ServerMessageMap['config.renamePrompt']
+/** 标题最大长度配置 reply 类型。 */
+export type RenameMaxLengthReply = ServerMessageMap['config.renameMaxLength']
+
+/**
+ * 设置 rename 标题提示词（style + 自定义指令合并写入，runtime 单次原子 RMW 两字段；
+ * 非法值由 runtime 侧归一，reply 返回归一后生效值）。
+ */
+export async function setRenamePrompt(style: RenameStyle, instruction: string): Promise<RenamePromptReply> {
+  return command('config.setRenamePrompt', { style, instruction }, RPC_BACKSTOP_TIMEOUT_MS)
+}
+
+/** 读取 rename 标题提示词配置（corrupted = 配置文件 JSON 损坏已回退默认）。 */
+export async function getRenamePrompt(): Promise<RenamePromptReply> {
+  return command('config.getRenamePrompt', {}, RPC_BACKSTOP_TIMEOUT_MS)
+}
+
+/** 设置标题最大长度（正整数，非法值由 runtime 侧归一为默认 50）。 */
+export async function setRenameMaxLength(maxLength: number): Promise<RenameMaxLengthReply> {
+  return command('config.setRenameMaxLength', { maxLength }, RPC_BACKSTOP_TIMEOUT_MS)
+}
+
+/** 读取标题最大长度（归一后生效值，默认 50）。 */
+export async function getRenameMaxLength(): Promise<RenameMaxLengthReply> {
+  return command('config.getRenameMaxLength', {}, RPC_BACKSTOP_TIMEOUT_MS)
 }
 
 /** 读取智能上下文压缩配置全量（compactModel 空串 = 未设置；thresholds 为 token 绝对数）。 */

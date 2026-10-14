@@ -137,6 +137,19 @@ describe('BtwPanel 首屏冒烟与线列表（观察者 + 使用者）', () => {
     expect(wrapper.find('[data-testid="btw-empty"]').exists()).toBe(false)
   })
 
+  it('对话流字号域（chat-font-scope）：composer 带挂 data-fs-scope=chat——btw 输入区跟 chat 档非 drawer chrome', async () => {
+    apiMock.list.mockResolvedValue([{ vid: 'btw:pi-1' }])
+    const wrapper = mountPanel(MAIN_A)
+    await settle(wrapper)
+
+    // composer 带（含内联确认条）跟 chat 档：与主面板 composer（main-area chat scope 内）同语义。
+    // 流根的 chat scope 归 MessageStream 组件本体（wire 测试 TC-w4-9c 已断真实组件）——
+    // 本套件 MessageStream 为透传 attrs 的 stub div，组件内部属性不在断言面。
+    const band = wrapper.find('[data-testid="btw-interaction"]')
+    expect(band.exists()).toBe(true)
+    expect(band.attributes('data-fs-scope')).toBe('chat')
+  })
+
   it('列表携带的线（非本运行创建）不渲染 fork pill——btw.list 无 forkState，结构上不可回填', async () => {
     apiMock.list.mockResolvedValue([{ vid: 'btw:pi-1' }, { vid: 'btw:pi-2' }])
     const wrapper = mountPanel(MAIN_A)

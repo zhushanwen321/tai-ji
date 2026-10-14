@@ -42,7 +42,7 @@ grep -rln 'createReadStream' extensions/ --include='*.ts' | grep -v '\.test\.' |
 # R1 · runtime 侧 jsonl 解析原语消费（6 文件）
 grep -rln "utils/jsonl" packages/runtime/src --include='*.ts' | grep -v '\.test\.' | grep -v __tests__ | grep -v 'src/utils/jsonl.ts'
 
-# R2 · runtime 侧提取器/扫描器/header 函数族 + 删主会话级联入口（39+1 文件，含消费面委托；`cascadeDeleteSessionContent` 为 2026-10-12 增补锚——session-content-cascade 的 readFileSync 直读形态不被函数族 pattern 覆盖，增补入口标识符保持该读者可检索）
+# R2 · runtime 侧提取器/扫描器/header 函数族 + 删主会话级联入口（42 文件，含消费面委托；`cascadeDeleteSessionContent` 为 2026-10-12 增补锚——session-content-cascade 的 readFileSync 直读形态不被函数族 pattern 覆盖，增补入口标识符保持该读者可检索）
 grep -rln 'FromSessionFile\|scanPiSessions\|scanExternalSessions\|getHistoryFromFilePath\|extractLatestModelFromJsonl\|extractLatestModelChangeFromJsonl\|extractSessionName\|extractSessionOutcome\|scanSessionMeta\|scanSubagentEntries\|scanWorkflowEntries\|scanPlanStateEntries\|readSessionHeader\|parseSessionHeader\|cascadeDeleteSessionContent' packages/runtime/src --include='*.ts' | grep -v '\.test\.' | grep -v __tests__
 
 # R3 · runtime 侧流式逐行扫描（3 文件：usage-stats-service / session-message-count 读者 + logger 写流排除项）

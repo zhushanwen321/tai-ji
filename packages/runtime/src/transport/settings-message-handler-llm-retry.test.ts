@@ -10,6 +10,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { SettingsMessageHandler, type SettingsHandlerContext } from './settings-message-handler.js'
 import type { ClientMessage, LlmRetryConfig, ServerMessage } from '@taiji/shared'
+import { sendConfigGet, TEST_WS as WS } from './__tests__/helpers/settings-handler-send.js'
 
 const SNAPSHOT = {
   config: { enabled: true, maxRetries: 2, baseDelayMs: 3000, provider: { maxRetries: 0, maxRetryDelayMs: 60000 } } as LlmRetryConfig,
@@ -50,20 +51,12 @@ function mockCtx() {
   return { ctx: ctx as unknown as SettingsHandlerContext, replies, broadcasts, configService }
 }
 
-const WS = {} as never
-
 describe('SettingsMessageHandler · config.getRetryConfig', () => {
   it('reply config.retryConfig 透传 { config, configured } 形状', async () => {
     const { ctx, replies } = mockCtx()
-    const handler = new SettingsMessageHandler(ctx)
-    const handled = await handler.handleSettingsMessage(
-      { type: 'config.getRetryConfig', payload: {}, id: 'm1' } as unknown as ClientMessage,
-      WS,
-    )
-    expect(handled).toBe(true)
-    expect(replies).toHaveLength(1)
-    expect(replies[0]).toMatchObject({ type: 'config.retryConfig', id: 'm1' })
-    expect(replies[0].payload).toEqual(SNAPSHOT)
+    const reply = await sendConfigGet(ctx, replies, 'config.getRetryConfig')
+    expect(reply).toMatchObject({ type: 'config.retryConfig', id: 'm1' })
+    expect(reply.payload).toEqual(SNAPSHOT)
   })
 })
 

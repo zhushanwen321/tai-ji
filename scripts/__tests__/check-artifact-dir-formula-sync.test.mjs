@@ -19,11 +19,15 @@ import {
   MIRROR_FN,
   MIRROR_SEGMENT_CONST,
   RUNTIME_PATTERN_CONST,
+  SHARED_TREE_CONST,
+  RUNTIME_TREE_FNS,
   extractFunctionBlock,
   extractJoinSegment,
   extractSessionIdRegex,
   extractConstLiteral,
   extractConstRegex,
+  extractConstStringArray,
+  extractTreeRootSegment,
   mirrorUsesSegmentConst,
 } from '../check-artifact-dir-formula-sync.mjs'
 import { expectGuardDirectRunPasses, makeGuardMirror } from './helpers/guard-mirror.mjs'
@@ -88,11 +92,42 @@ describe('提取器纯函数', () => {
     expect(extractConstRegex('const OTHER = /x/;', RUNTIME_PATTERN_CONST).error).toBeDefined()
     expect(extractConstRegex('export const x = 1', RUNTIME_PATTERN_CONST).error).toBeDefined()
   })
+
+  it('树段常量数组提取 + runtime 布局函数树根段对位提取（第四组对拍提取器）', () => {
+    const shared = `export const ${SHARED_TREE_CONST} = ['sessions', 'subagents', 'btw'] as const`
+    expect(extractConstStringArray(shared, SHARED_TREE_CONST).value).toEqual(['sessions', 'subagents', 'btw'])
+    const runtime = [
+      `export function ${RUNTIME_TREE_FNS[0]}(): string {`,
+      `  return join(getPiAgentDir(), 'sessions')`,
+      `}`,
+      ``,
+      `export function ${RUNTIME_TREE_FNS[1]}(mainCwd: string): string {`,
+      `  return join(getPiAgentDir(), 'subagents', encodeCwd(mainCwd), 'sessions')`,
+      `}`,
+      ``,
+      `export function ${RUNTIME_TREE_FNS[2]}(): string {`,
+      `  return join(getPiAgentDir(), 'btw')`,
+      `}`,
+    ].join('\n')
+    for (const fn of RUNTIME_TREE_FNS) {
+      const block = extractFunctionBlock(runtime, `export function ${fn}`)
+      expect(block.error).toBeUndefined()
+      expect(extractTreeRootSegment(block.text).error).toBeUndefined()
+    }
+    expect(extractTreeRootSegment(`  return join(getPiAgentDir(), 'btw')`).value).toBe('btw')
+    // 子代理函数取首段 'subagents'，不误取内层 'sessions'
+    const subBlock = extractFunctionBlock(runtime, `export function ${RUNTIME_TREE_FNS[1]}`)
+    expect(extractTreeRootSegment(subBlock.text).value).toBe('subagents')
+    expect(extractConstStringArray('const OTHER = 1', SHARED_TREE_CONST).error).toBeDefined()
+    expect(extractTreeRootSegment('return join(other(), x)').error).toBeDefined()
+  })
 })
 
 // ── fixture 生成（源文件真实形态：函数块 + 常量）────────────────────────
 
-const sharedPathsSrc = ({ segment = 'artifacts', regex = DEFAULT_REGEX } = {}) =>
+const DEFAULT_TREE_SEGMENTS = ['sessions', 'subagents', 'btw']
+
+const sharedPathsSrc = ({ segment = 'artifacts', regex = DEFAULT_REGEX, treeSegments = DEFAULT_TREE_SEGMENTS } = {}) =>
   [
     `export function ${SHARED_FN}(sessionId: string, dataDir?: string): string {`,
     `  if (!${regex}.test(sessionId)) {`,
@@ -101,6 +136,10 @@ const sharedPathsSrc = ({ segment = 'artifacts', regex = DEFAULT_REGEX } = {}) =
     `  return join(dataDir ?? getDataDir(), '${segment}', sessionId)`,
     `}`,
     ``,
+    // treeSegments = null 注入「常量缺席」形态（守卫第四组提取失败一律 fail）
+    ...(treeSegments
+      ? [`export const ${SHARED_TREE_CONST} = [${treeSegments.map((s) => `'${s}'`).join(', ')}] as const`, '']
+      : []),
   ].join('\n')
 
 const mirrorSystemPromptSrc = ({ segmentConst = 'artifacts', regex = DEFAULT_REGEX, useConst = true } = {}) =>
@@ -118,14 +157,26 @@ const mirrorSystemPromptSrc = ({ segmentConst = 'artifacts', regex = DEFAULT_REG
     ``,
   ].join('\n')
 
-const runtimePiPathsSrc = ({ regex = DEFAULT_REGEX } = {}) =>
+const runtimePiPathsSrc = ({ regex = DEFAULT_REGEX, treeSegments = DEFAULT_TREE_SEGMENTS } = {}) =>
   [
     'export function isPiSessionId(id: string): boolean {',
     `  return ${RUNTIME_PATTERN_CONST}.test(id)`,
     '}',
-    ``,
+    '',
     `const ${RUNTIME_PATTERN_CONST} = ${regex}`,
-    ``,
+    '',
+    `export function ${RUNTIME_TREE_FNS[0]}(): string {`,
+    `  return join(getPiAgentDir(), '${treeSegments[0]}')`,
+    `}`,
+    '',
+    `export function ${RUNTIME_TREE_FNS[1]}(mainCwd: string): string {`,
+    `  return join(getPiAgentDir(), '${treeSegments[1]}', encodeCwd(mainCwd), 'sessions')`,
+    `}`,
+    '',
+    `export function ${RUNTIME_TREE_FNS[2]}(): string {`,
+    `  return join(getPiAgentDir(), '${treeSegments[2]}')`,
+    `}`,
+    '',
   ].join('\n')
 
 /**
@@ -206,6 +257,29 @@ describe('CLI 集成（守卫脚本 × tmp mirror）', () => {
       expect(r.stderr).toContain(`vs runtime ${RUNTIME_PATTERN_CONST}=/^[A-Za-z0-9_-]+$/`)
       expect(r.stderr).toContain('pi-paths.ts')
       expect(r.stderr).toContain('恢复动作')
+    } finally {
+      fx.cleanup()
+    }
+  })
+
+  it('漂移红（runtime btw 树根段与 shared 常量第三位不一致）→ exit 1（证明 ④ 非恒绿）', () => {
+    const fx = makeMirror({ runtime: { treeSegments: ['sessions', 'subagents', 'btw-lines'] } })
+    try {
+      const r = fx.run()
+      expect(r.status).toBe(1)
+      expect(r.stderr).toContain(`pi 会话树段漂移: ${SHARED_TREE_CONST}[2]='btw' vs runtime ${RUNTIME_TREE_FNS[2]}()='btw-lines'`)
+      expect(r.stderr).toContain('恢复动作')
+    } finally {
+      fx.cleanup()
+    }
+  })
+
+  it('漂移红（shared 树段常量缺席）→ exit 1（第四组提取失败一律 fail）', () => {
+    const fx = makeMirror({ shared: { treeSegments: null } })
+    try {
+      const r = fx.run()
+      expect(r.status).toBe(1)
+      expect(r.stderr).toContain(`shared ${SHARED_TREE_CONST} 提取失败`)
     } finally {
       fx.cleanup()
     }
