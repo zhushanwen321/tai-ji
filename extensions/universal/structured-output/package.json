@@ -21,6 +21,7 @@
   "license": "MIT",
   "files": [
     "src/",
+    "!src/__tests__/",
     "index.ts"
   ],
   "dependencies": {

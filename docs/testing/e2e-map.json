@@ -2249,6 +2249,26 @@
       "owner": "scripts/",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
       "note": "无 vitest 测试资产，run = 脚本干跑（git diff range 缺省 main..HEAD（merge 时传 merge commit range），空改动输出空列表 exit 0）"
+    },
+    {
+      "id": "E2E-PIPE-13",
+      "summary": "extension npm 发布 files 白名单守卫（import 闭包 ⊆ files 白名单 + pi 资源 ⊆ 白名单 + 条目真实性，防 tarball 缺文件致用户侧 pi update 后 extension 加载崩）",
+      "scope": [
+        "scripts/check-extension-files.mjs"
+      ],
+      "layer": "L1",
+      "assets": [
+        {
+          "kind": "script",
+          "ref": "scripts/check-extension-files.mjs"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "node scripts/check-extension-files.mjs",
+      "owner": "scripts/",
+      "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
+      "note": "R2 态（pre-commit 按路径接线，无 CI 固定环节——接线 SSOT = .githooks/install-hooks.sh extension files 白名单段；触发面 = extensions/**/package.json、extensions/**/*.ts、脚本自身；本表登记 run 面 = 脚本自身变更干跑全量 27 包）。无 vitest 测试资产"
     }
   ]
 }
