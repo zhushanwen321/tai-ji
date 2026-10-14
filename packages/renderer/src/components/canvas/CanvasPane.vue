@@ -8,8 +8,8 @@
   （无乐观回显：成功才呈现，失败 toast + 原因）。
 
   数据链：useCanvasSync()（窗口级单例订阅 + 拉取收敛）→ canvasStore；本组件挂载/换画布
-  即 loadCanvas。绑定徽标数据缝：活跃绑定集合无 wire 字段（契约缺口，deviations 申报）
-  ——count 恒 null 不渲染徽标（事实驱动⑨未知不呈现），契约补字段后此处单点接线。
+  即 loadCanvas。绑定徽标数据源 = canvas.get reply 的 activeBindings（活跃绑定集合
+  = 绑定记录 ∩ 存活 session 的查询侧派生）；缺字段按未知处理（不渲染）。
   组件异步导入：WorkflowVizOverlay canvas body 分支（defineAsyncComponent）。
 -->
 <template>
@@ -163,11 +163,12 @@ const phaseDotClass = computed(() => {
 })
 
 /**
- * 绑定徽标数据缝：活跃绑定集合（绑定记录 ∩ 存活 session）是 runtime 内存态，
- * CanvasState 契约未含派生字段（缺口已申报 deviations，建议契约层补
- * activeBindings 类字段）——null = 通道未接入，徽标不渲染（未知不呈现）。
+ * 绑定徽标数据源：活跃绑定集合（绑定记录 ∩ 存活 session）随 canvas.get reply 的
+ * activeBindings 字段到达（transport 查询侧派生，CanvasState 契约注释）；广播失效
+ * 重拉链路天然刷新。reply 缺字段（marker 通道形态 / 旧 runtime）按未知处理——
+ * 徽标不渲染（事实驱动⑨未知不呈现）。
  */
-const activeBindingCount = computed<number | null>(() => null)
+const activeBindingCount = computed<number | null>(() => state.value?.activeBindings ?? null)
 
 // ── mutate 执行（无乐观回显：成功等广播刷新，失败 toast + 原因）──────────────
 

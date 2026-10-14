@@ -46,6 +46,11 @@ describe('快照 + 重放 ≡ 直写', () => {
       expect(c.state().dirtyPaths.length).toBeGreaterThan(0)
       const directWrite = h.svc.readState(c.canvasId)
       expect(existsSync(join(h.dir, c.canvasId, 'canvas.json'))).toBe(true)
+      // 形状分叉守护：activeBindings（绑定徽标的 canvas.get 查询侧派生，transport 附加）
+      // 不得进快照——绑定是 runtime 内存态，落盘会污染「快照可由事件流全量重放推导」
+      // 的唯一权威承诺（CanvasState.activeBindings 契约注释）
+      const snapState = (JSON.parse(readFileSync(join(h.dir, c.canvasId, 'canvas.json'), 'utf-8')) as { state: Record<string, unknown> }).state
+      expect(snapState).not.toHaveProperty('activeBindings')
 
       // 新实例（模拟 runtime 重启）从磁盘重建
       const reborn = new CanvasService({ canvasesDir: h.dir, generateId: (): string => 'replay-unused-id' })

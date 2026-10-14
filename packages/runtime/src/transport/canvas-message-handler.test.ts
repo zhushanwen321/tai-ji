@@ -418,7 +418,7 @@ describe('广播 payload 形状（canvas.updated 全局通道）', () => {
 // ── WS RPC 面（canvas.list / canvas.get / mutate 失败腿）─────────
 
 describe('canvas.* RPC 面', () => {
-  it('canvas.list → CanvasListReply；canvas.get → CanvasState；get 未知画布 → canvas_not_found error envelope（hint 恢复动作）', async () => {
+  it('canvas.list → CanvasListReply；canvas.get → CanvasState（含 activeBindings 绑定徽标派生）；get 未知画布 → canvas_not_found error envelope（hint 恢复动作）', async () => {
     const h = makeHarness()
     trackDir(h.canvasesDir)
     const canvasId = await createBoundCanvas(h)
@@ -433,12 +433,39 @@ describe('canvas.* RPC 面', () => {
     const state = h.reply.mock.calls[0][3] as CanvasState
     expect(state.canvasId).toBe(canvasId)
     expect(state.root.statement).toBe('多引擎支持怎么落地')
+    // 绑定在册（sid-agent）但 client 不存在 → 活跃交集 0（徽标「当前无 agent 在响应」
+    // 的数据源——绑定记录 ∩ 存活 session，设计 §3.1(3)）
+    expect(state.activeBindings).toBe(0)
 
     h.reply.mockClear()
     h.sendError.mockClear()
     await h.handler.handleCanvasMessage(canvasWsMsg('canvas.get', { canvasId: 'cvs-missing' }), ws)
     expect(h.reply).not.toHaveBeenCalled()
     expect(h.sendError).toHaveBeenCalledWith(ws, 'canvas_not_found', expect.any(String), 'rpc-1', expect.objectContaining({ hint: expect.stringContaining('canvas_list') }))
+  })
+
+  it('canvas.get activeBindings 派生：绑定 ∩ 存活 client（存活计 1 / exited 不计 / 解绑归零）', async () => {
+    const h = makeHarness()
+    trackDir(h.canvasesDir)
+    const canvasId = await createBoundCanvas(h)
+
+    // 存活 client 在册 → 活跃交集 1
+    h.clients.set('sid-agent', makeFakeClient())
+    h.reply.mockClear()
+    await h.handler.handleCanvasMessage(canvasWsMsg('canvas.get', { canvasId }), ws)
+    expect((h.reply.mock.calls[0][3] as CanvasState).activeBindings).toBe(1)
+
+    // pi 已退出（exited）→ 绑定在册不等于活跃：排除（生死二态，无宽限窗）
+    h.clients.set('sid-agent', makeFakeClient({ exited: true }))
+    h.reply.mockClear()
+    await h.handler.handleCanvasMessage(canvasWsMsg('canvas.get', { canvasId }), ws)
+    expect((h.reply.mock.calls[0][3] as CanvasState).activeBindings).toBe(0)
+
+    // session 真删除解绑 → 交集空
+    h.canvasService.unbindSession('sid-agent')
+    h.reply.mockClear()
+    await h.handler.handleCanvasMessage(canvasWsMsg('canvas.get', { canvasId }), ws)
+    expect((h.reply.mock.calls[0][3] as CanvasState).activeBindings).toBe(0)
   })
 
   it('canvas.mutate 领域拒绝 → reply 失败腿结构化错误（selection_conflict：一问双选定）', async () => {

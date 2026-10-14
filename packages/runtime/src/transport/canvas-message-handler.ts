@@ -108,7 +108,13 @@ export class CanvasMessageHandler {
     // 领域拒绝（canvas_not_found / node_not_found）→ error envelope（code + hint 恢复动作）；
     // 基础设施失败（磁盘 IO）上抛走 server 兜底。
     try {
-      return this.ctx.reply(ws, msg.id, 'canvas.get', this.ctx.canvasService.readState(msg.payload.canvasId))
+      const state = this.ctx.canvasService.readState(msg.payload.canvasId)
+      // 绑定徽标数据源（设计 §3.1(3)）：活跃绑定数随全量视图附加（查询侧派生，不落盘——
+      // CanvasState.activeBindings 契约注释；空集合 0 = 徽标明示「当前无 agent 在响应」）。
+      return this.ctx.reply(ws, msg.id, 'canvas.get', {
+        ...state,
+        activeBindings: this.activeBoundClients(msg.payload.canvasId).length,
+      })
     } catch (e: unknown) {
       if (isCanvasDomainError(e)) {
         // taste:allow-outbound-without-session-id — canvas.get 跨 session 画布查询，画布不属任何 session（与 canvas.updated 同一全局语义），错误帧无会话归属可关联
@@ -250,19 +256,33 @@ export class CanvasMessageHandler {
   // ── 回推派发（WS mutate actor=user 成功腿）──────────────────────
 
   /**
-   * 对画布活跃绑定集合逐个回推（现成 client 直取，不经 ensureActive——防拉活已关 session
-   * 的 pi，见类头注释）。死亡 session 跳过 + info 留痕（生死二态，不区分退出原因、不设宽限窗）。
-   * prompt fire-and-forget：失败 warn（首败显式上报，不重试——ADR-0122 手动恢复口径；
-   * 排队语义由 pi send 队列承担，不新增等待/合并机制）。
+   * 活跃绑定集合（设计 §3.1(1)：绑定记录 ∩ 存活 session）——回推派发与绑定徽标
+   * （canvas.get 的 activeBindings 派生）共用的单一交集判定，返回 sid + 现成 client
+   * 对。存活 = client 存在且未退出（进程生死二态，ADR-0122，不区分退出原因、不设宽限窗）；
+   * 绑定在册但不存活的 session 排除并留痕（这正是徽标显示「无 agent 在响应」的原因
+   * 留痕——绑定不随 pi 崩溃解绑，session 重开即恢复回推）。
    */
-  private pushToBoundSessions(canvasId: string, reply: Extract<CanvasMutateReply, { ok: true }>): void {
-    const text = canvasNotifyText(reply.summary, canvasId)
+  private activeBoundClients(canvasId: string): Array<{ sid: string; client: NonNullable<ReturnType<ISessionService['getRpcClient']>> }> {
+    const out: Array<{ sid: string; client: NonNullable<ReturnType<ISessionService['getRpcClient']>> }> = []
     for (const sid of this.ctx.canvasService.getBoundSessions(canvasId)) {
       const client = this.ctx.sessionService.getRpcClient(sid)
       if (!client || client.exited) {
-        console.info(`[canvas] 回推跳过死亡 session（canvasId=${canvasId} session=${sid}）——绑定不随 pi 崩溃解绑，session 重开即恢复回推`)
+        console.info(`[canvas] 绑定 session 不存活，活跃交集排除（canvasId=${canvasId} session=${sid}）——绑定不随 pi 崩溃解绑，session 重开即恢复回推`)
         continue
       }
+      out.push({ sid, client })
+    }
+    return out
+  }
+
+  /**
+   * 对画布活跃绑定集合逐个回推（现成 client 直取，不经 ensureActive——防拉活已关 session
+   * 的 pi，见类头注释）。prompt fire-and-forget：失败 warn（首败显式上报，不重试——
+   * ADR-0122 手动恢复口径；排队语义由 pi send 队列承担，不新增等待/合并机制）。
+   */
+  private pushToBoundSessions(canvasId: string, reply: Extract<CanvasMutateReply, { ok: true }>): void {
+    const text = canvasNotifyText(reply.summary, canvasId)
+    for (const { sid, client } of this.activeBoundClients(canvasId)) {
       void client.prompt(text).catch((e: unknown) => {
         console.warn(`[canvas] 回推 prompt 失败（canvasId=${canvasId} session=${sid}）：${toErrorMessage(e)}`)
       })

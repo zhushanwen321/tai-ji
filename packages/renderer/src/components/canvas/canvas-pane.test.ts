@@ -264,7 +264,7 @@ describe('CanvasPane 选定交互走 mutate（无乐观回显）', () => {
 })
 
 describe('CanvasBindingBadge（绑定徽标状态）', () => {
-  it('count=null（契约通道未接入）不渲染徽标——未知不呈现', () => {
+  it('count=null（reply 缺字段兼容）不渲染徽标——未知不呈现', () => {
     const wrapper = mount(CanvasBindingBadge, { props: { count: null } })
     expect(wrapper.find('[data-testid="canvas-binding-badge"]').exists()).toBe(false)
   })
@@ -284,7 +284,25 @@ describe('CanvasBindingBadge（绑定徽标状态）', () => {
     expect(badge.text()).toBe('2 个会话在响应')
   })
 
-  it('画布头部：通道缺失时徽标不出现（数据缝单点，契约补字段后接线）', async () => {
+  it('画布头部接线：activeBindings 随 canvas.get reply 到达——空集合明示「当前无 agent 在响应」', async () => {
+    currentState = makeState({ activeBindings: 0 })
+    const wrapper = await mountPane()
+    const badge = wrapper.find('[data-testid="canvas-binding-badge"]')
+    expect(badge.exists()).toBe(true)
+    expect(badge.attributes('data-binding')).toBe('none')
+    expect(badge.text()).toBe('当前无 agent 在响应')
+  })
+
+  it('画布头部接线：非空集合徽标显示在响应会话数', async () => {
+    currentState = makeState({ activeBindings: 2 })
+    const wrapper = await mountPane()
+    const badge = wrapper.find('[data-testid="canvas-binding-badge"]')
+    expect(badge.attributes('data-binding')).toBe('active')
+    expect(badge.text()).toBe('2 个会话在响应')
+  })
+
+  it('画布头部：reply 缺 activeBindings 字段（marker 通道形态 / 旧 runtime）徽标不出现——未知不呈现', async () => {
+    // makeState 默认不带 activeBindings（optional 字段缺失）
     const wrapper = await mountPane()
     expect(wrapper.find('[data-testid="canvas-binding-badge"]').exists()).toBe(false)
   })
