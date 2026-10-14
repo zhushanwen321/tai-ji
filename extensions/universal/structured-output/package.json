@@ -29,7 +29,13 @@
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "^1.0.0",
-    "typebox": "1.3.27"
+    "typebox": "1.3.27",
+    "@earendil-works/pi-ai": "^1.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@earendil-works/pi-ai": {
+      "optional": true
+    }
   },
   "scripts": {
     "typecheck": "npx tsc --noEmit",
