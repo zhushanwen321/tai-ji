@@ -7,7 +7,7 @@
  * spawn 一个子 agent（独立 pi session，JSONL 落在
  * `<dataDir>/agent/subagents/<encodeCwd(mainCwd)>/sessions/*.jsonl`）。
  *
- * start toolCall 携带 startParam{task, slug, agent?, model?, thinkingLevel?, fork?, worktree?, ...}；
+ * start toolCall 顶层平铺 task/slug/agent/model/...（D3 拆分后无 action 字段、无 startParam 容器）；
  * toolResult 携带 subagentId + sessionFile + bgResponse|listResponse。
  * runtime 的 subagent-extractor 从主 session JSONL 配对解析出 SubagentRecord[]。
  * 拆分前历史会话为旧名 `subagent` 的 action=start 调用形态，解析侧按旧形态兼容读
