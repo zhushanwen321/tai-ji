@@ -7,7 +7,7 @@ import { isRecord } from "@zhushanwen/pi-ext-guards";
 import { getLogger } from "@zhushanwen/pi-extension-logger";
 import { callLLM, joinTextBlocks, resolveModel } from "@zhushanwen/pi-llm-shared";
 
-import { type RenameSessionConfig, cleanTitle, truncateCodePoints } from "./pure.js";
+import { type RenameSessionConfig, type RenameStyle, cleanTitle, truncateCodePoints } from "./pure.js";
 
 const logger = getLogger("rename-session");
 
@@ -31,6 +31,55 @@ export const RENAME_SYSTEM_PROMPT =
  */
 export const RENAME_INSTRUCTION =
 	"根据以上对话，为这个会话生成一个 slug 式标题。要求：\n- 名词或动名词词组，例：「修复登录超时」「重构配置加载」「refactor-config-loader」\n- 反例（错误）：「我帮你修复了登录 bug」「This session is about fixing bugs」\n- 英文小写 kebab-case，中文直接用词组，不要句号\n使用对话所用的语言。只输出标题文本。";
+
+/**
+ * 「完整短句」风格内置词表（rename-prompt-config 设计）：不超过 20 字的完整短句，概括任务
+ * 目标或结果。与 slug 风格同为 user 指令形态（追加在对话末尾），正反例锚定与 RENAME_INSTRUCTION 同范式。
+ */
+export const SENTENCE_INSTRUCTION =
+	"根据以上对话，为这个会话生成一个简短标题：一个不超过 20 字的完整短句，概括本次任务的目标或结果，不加句尾标点。反例（错误）：「重构」。使用对话所用的语言。只输出标题文本。";
+
+/**
+ * 「Emoji 点缀」风格内置词表（rename-prompt-config 设计）：以贴切 emoji 开头 + 不超过 15 字
+ * 词组或短句。正例锚定输出形态，避免模型漏掉 emoji 或输出多行。
+ */
+export const EMOJI_INSTRUCTION =
+	"根据以上对话，为这个会话生成一个标题：以一个贴切的 emoji 开头，后接不超过 15 字的词组或短句。例：「🔧 重构配置加载」「🐛 修复登录超时」。使用对话所用的语言。只输出标题文本。";
+
+/**
+ * 自定义指令时的通用 systemPrompt 骨架（rename-prompt-config 设计）：只保留「你是标题生成器 +
+ * 只输出标题文本」的输出契约，剥离 slug 风格细节——避免「system 说 slug、user 自定义说短句」
+ * 的风格冲突（用户自定义指令时唯一风格权威 = 用户指令）。
+ */
+export const GENERIC_SYSTEM_PROMPT =
+	"你是会话标题生成器。根据对话生成一个简短标题，只输出标题文本。";
+
+/**
+ * 内置风格词表（rename-prompt-config 设计）：style 非 custom 时的 user 指令映射。
+ * custom 不在此表（消费 config.customInstruction，空串回落 slug 默认）。
+ */
+export const BUILTIN_TEMPLATES: Readonly<Record<Exclude<RenameStyle, "custom">, string>> = {
+	slug: RENAME_INSTRUCTION,
+	sentence: SENTENCE_INSTRUCTION,
+	emoji: EMOJI_INSTRUCTION,
+};
+
+/**
+ * 按配置解析生效的标题提示词（rename-prompt-config 设计核心收敛点）：
+ * - 非 custom 枚举风格 → BUILTIN_TEMPLATES 词表 + RENAME_SYSTEM_PROMPT（slug 约束与词表自洽）
+ * - custom 且自定义指令非空 → 自定义指令 + GENERIC_SYSTEM_PROMPT（风格权威 = 用户指令，
+ *   system 降级为输出契约骨架，消解双处风格冲突）
+ * - custom 但自定义指令为空（含全空白）→ 回落 slug 默认（与「空 = 内置默认」语义一致）
+ */
+export function resolveTitlePrompt(config: RenameSessionConfig): { systemPrompt: string; instruction: string } {
+	if (config.style === "custom" && config.customInstruction.trim() !== "") {
+		return { systemPrompt: GENERIC_SYSTEM_PROMPT, instruction: config.customInstruction };
+	}
+	// custom 但自定义指令为空（含全空白）→ 回落 slug 默认（「空 = 内置默认」语义）；
+	// 其余枚举 → 词表直查（Record 键完备，无 fallback 分支）
+	const style: Exclude<RenameStyle, "custom"> = config.style === "custom" ? "slug" : config.style;
+	return { systemPrompt: RENAME_SYSTEM_PROMPT, instruction: BUILTIN_TEMPLATES[style] };
+}
 
 // ──────────────────────── 纯函数 ────────────────────────
 
@@ -283,11 +332,15 @@ export async function callRenameLLM(
 	}
 	const finalText = extractFinalText(finalMessage);
 
+	// 提示词解析（rename-prompt-config）：内置风格 → 词表 + slug system；custom 非空 →
+	// 自定义指令 + 通用骨架 system（风格权威 = 用户指令）。事件面 live 读 config 后每次调用重解析。
+	const { systemPrompt, instruction } = resolveTitlePrompt(config);
+
 	// 两段输入信号各截断 4000 码点（成本可控，标题语义足够）
 	const messages = buildTitleMessages(
 		truncateForTitle(userPrompt),
 		truncateForTitle(finalText),
-		RENAME_INSTRUCTION,
+		instruction,
 	);
 
 	// debug 内省：日志与 callLLM 收到的是同一 messages 对象，日志内容即 LLM 收到的内容；
@@ -300,7 +353,7 @@ export async function callRenameLLM(
 	const sessionId = ctx.sessionManager.getSessionId();
 	const result = await callLLM(ctx, {
 		model,
-		systemPrompt: RENAME_SYSTEM_PROMPT,
+		systemPrompt,
 		messages,
 		// 输出预算必须覆盖「thinking + 标题」两部分：thinking 计入 maxTokens 的模型
 		//（StepFun step-5-preview 实测 thinking 600-1500 tokens 且不可禁用/不可压低，

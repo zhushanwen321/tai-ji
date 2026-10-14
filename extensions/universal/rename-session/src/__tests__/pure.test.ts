@@ -8,6 +8,7 @@ import { clearConfigCache, getConfigPath } from "@zhushanwen/pi-llm-shared";
 
 import {
 	DEFAULT_RENAME_CONFIG,
+	RENAME_INSTRUCTION_MAX_LENGTH,
 	cleanTitle,
 	countSuccessfulAssistantReplies,
 	countUserMessages,
@@ -238,6 +239,8 @@ describe("normalizeRenameConfig", () => {
 			mode: "first-prompt",
 			maxTitleLength: 30,
 			thinkingLevel: "high",
+			style: "emoji",
+			customInstruction: "自定义指令",
 		};
 		expect(normalizeRenameConfig(cfg)).toEqual(cfg);
 	});
@@ -266,6 +269,8 @@ describe("normalizeRenameConfig", () => {
 			mode: "first-stop",
 			maxTitleLength: 20,
 			thinkingLevel: "off",
+			style: "slug",
+			customInstruction: "",
 		});
 	});
 
@@ -330,7 +335,42 @@ describe("normalizeRenameConfig", () => {
 			mode: "first-stop",
 			maxTitleLength: 20,
 			thinkingLevel: "off",
+			style: "slug",
+			customInstruction: "",
 		});
+	});
+
+	// ── style + customInstruction（rename-prompt-config 设计）──
+
+	it("style 四个合法值（slug/sentence/emoji/custom）→ 原样保留", () => {
+		for (const style of ["slug", "sentence", "emoji", "custom"] as const) {
+			expect(normalizeRenameConfig({ style }).style).toBe(style);
+		}
+	});
+
+	it("style 缺失/非法 → 默认 slug（零迁移，现状行为）", () => {
+		expect(normalizeRenameConfig({}).style).toBe("slug");
+		expect(normalizeRenameConfig({ style: "fancy" }).style).toBe("slug");
+		expect(normalizeRenameConfig({ style: 42 }).style).toBe("slug");
+		expect(normalizeRenameConfig({ style: null }).style).toBe("slug");
+	});
+
+	it("customInstruction 非 string → 空串；合法值原样保留", () => {
+		expect(normalizeRenameConfig({ customInstruction: 42 }).customInstruction).toBe("");
+		expect(normalizeRenameConfig({ customInstruction: null }).customInstruction).toBe("");
+		expect(normalizeRenameConfig({ customInstruction: "生成标题" }).customInstruction).toBe("生成标题");
+	});
+
+	it("customInstruction 超长防御截断（码点数，不劈开代理对）", () => {
+		const long = "a".repeat(RENAME_INSTRUCTION_MAX_LENGTH + 10);
+		expect(Array.from(normalizeRenameConfig({ customInstruction: long }).customInstruction)).toHaveLength(
+			RENAME_INSTRUCTION_MAX_LENGTH,
+		);
+		// emoji 星面字符（占 2 UTF-16 码元）按码点截断后仍可无损重组（无未配对代理残留）
+		const emojiPad = "😀".repeat(RENAME_INSTRUCTION_MAX_LENGTH + 1);
+		const truncated = normalizeRenameConfig({ customInstruction: emojiPad }).customInstruction;
+		expect(Array.from(truncated)).toHaveLength(RENAME_INSTRUCTION_MAX_LENGTH);
+		expect(Array.from(truncated).join("")).toBe(truncated);
 	});
 });
 
@@ -427,6 +467,8 @@ describe("loadRenameConfig / saveRenameConfig", () => {
 			mode: "first-prompt" as const,
 			maxTitleLength: 30,
 			thinkingLevel: "off",
+			style: "custom" as const,
+			customInstruction: "自定义指令文本",
 		};
 		const saveResult = saveRenameConfig(cfg);
 		expect(saveResult.success).toBe(true);
@@ -441,6 +483,8 @@ describe("loadRenameConfig / saveRenameConfig", () => {
 			mode: "agent-tool",
 			maxTitleLength: 50,
 			thinkingLevel: "off",
+			style: "slug",
+			customInstruction: "",
 		});
 		const filePath = path.join(tmpAgentDir, "config", "rename-session-ext-config.json");
 		expect(fs.existsSync(filePath)).toBe(true);
