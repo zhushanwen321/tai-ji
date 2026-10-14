@@ -9,9 +9,10 @@
  *
  * - 无 drawer：main 卡撑满公共容器（width 100% + margin 0），卡内内容列（对话流 +
  *   composer，消费 .content-col 的 max-width: var(--content-max-w)）限宽为 panel 的
- *   CONTENT_COL_PCT%（60%）并居中——留白在卡内而非卡外（2026-10-06 用户裁决：60% 的
- *   作用对象是内容列，不是卡容器）；
- * - 内容列比例宽带绝对值下限：60% 实算低于 CONTENT_COL_MIN_PX 即改撑满（panel 被
+ *   CONTENT_COL_PCT%（2/3）并居中——留白在卡内而非卡外（2026-10-06 用户裁决：比例的
+ *   作用对象是内容列，不是卡容器；2026-10-14 用户修订：60%→2/3 且比例分支不再封 720——
+ *   720 cap 在宽窗下把对话流钉在约半宽，与「2/3 左右」预期不符）；
+ * - 内容列比例宽带绝对值下限：2/3 实算低于 CONTENT_COL_MIN_PX 即改撑满（panel 被
  *   drawer 挤窄后恒撑满同因）。实测来源 = split-area 宽（ResizeObserver，与纵轴
  *   显示期 clamp 同范式）；未测得（0）时按纯比例走，观察器就绪后校正；
  * - 有 drawer：drawer 占 drawerPct%（默认 50），main 占剩侧（模板侧 calc(100% - drawerPct% - 4px)），
@@ -53,11 +54,13 @@ const KEYBOARD_STEP_PCT = 2
 /** 小数 → 百分比换算因子（no-magic-numbers） */
 const PCT_SCALE = 100
 
-/** standalone 内容列占比（ui-signal-density D10：对话流 + composer 内容列 = panel 宽的 3/5） */
-const CONTENT_COL_PCT = 60
-/** 内容列比例宽生效的绝对值下限（px）：60% 实算低于下限即改撑满——panel 被 drawer 挤窄后
+/** standalone 内容列占比（ui-signal-density D10：对话流 + composer 内容列 = panel 宽的
+ *  2/3；2026-10-14 用户修订 60%→2/3，比例分支同时摘除 720 cap） */
+const CONTENT_COL_PCT = 66.7
+/** 内容列比例宽生效的绝对值下限（px）：2/3 实算低于下限即改撑满——panel 被 drawer 挤窄后
  *  恒撑满同因（2026-10-06 用户裁决）。值 = 全局 --content-max-w 默认（style.css 720px，
- *  settings / landing / composer 同锚的既有内容列口径） */
+ *  settings / landing / composer 同锚的既有内容列口径）；与 2/3 在 panel 宽 1080 处连续
+ *  （1080 × 2/3 ≈ 720），越窄比例分支越宽至下限、撑满分支封同一值，切换无跳变 */
 const CONTENT_COL_MIN_PX = 720
 
 function clampDrawerPct(v: number): number {
@@ -86,7 +89,7 @@ export function useDrawerSplitWidth(splitAreaEl: Ref<HTMLElement | null>, drawer
     isDragging.value ? '' : `transition-[width] duration-[var(--duration-slow)] ease-[var(--ease)]`,
   )
 
-  /** split-area 实测宽度（px）：内容列 60%↔撑满 的派生输入。未测得（0，观察器就绪前/
+  /** split-area 实测宽度（px）：内容列 2/3↔撑满 的派生输入。未测得（0，观察器就绪前/
    *  jsdom 无回调）时按纯比例走，ResizeObserver 首次回调后校正——范式同纵轴
    *  useBottomDrawerHeight 的显示期 clamp（实测驱动派生，非时间推测） */
   const splitAreaWidthPx = ref(0)
@@ -115,23 +118,23 @@ export function useDrawerSplitWidth(splitAreaEl: Ref<HTMLElement | null>, drawer
   })
 
   /** 内容列宽度令牌（--content-max-w 派生单处）：split 态恒撑满（panel 被挤窄后不再按
-   *  比例收，D10 下限语义）；standalone = 60%，实测 60% 值低于绝对下限时改撑满；
-   *  standalone 两分支均套 demo 阅读列语义 cap `min(720px, …)`（demo .chat-scroll > *
-   *  的 --content-max-w = min(720px,100%)）——panel 宽 <1200 时 60% 实算低于下限走撑满，
-   *  撑满若不封顶会在常规窗口产出远超 720 的通栏正文列，故撑满同样封 720。 */
+   *  比例收，D10 下限语义）；standalone = 2/3 纯比例（2026-10-14 修订：不封 720——封顶会在
+   *  宽窗把对话流钉回约半宽），实测 2/3 值低于绝对下限时改撑满；
+   *  撑满分支仍封 720（panel 宽 <1080 时 2/3 实算低于下限走撑满，撑满若不封顶会在
+   *  常规窗口产出远超 720 的通栏正文列）。 */
   const contentColMaxW = computed<string>(() => {
     if (drawerOpen.value) return '100%'
     const w = splitAreaWidthPx.value
     const belowFloor = w > 0 && (w * CONTENT_COL_PCT) / PCT_SCALE < CONTENT_COL_MIN_PX
     return belowFloor
       ? `min(${CONTENT_COL_MIN_PX}px, 100%)`
-      : `min(${CONTENT_COL_MIN_PX}px, ${CONTENT_COL_PCT}%)`
+      : `${CONTENT_COL_PCT}%`
   })
 
   /**
    * main-area 动态样式（宽度模型 SSOT，模板直连）：
    * - standalone：width 100% 撑满公共容器 + margin 0；--content-max-w 派生内容列宽
-   *   （60% 或下限触发后的撑满，均封 demo 阅读列 720 cap，见 contentColMaxW），对话流/composer
+   *   （2/3 纯比例，或下限触发后的撑满封 720，见 contentColMaxW），对话流/composer
    *   内容列经 .content-col 消费居中；
    * - split：width calc(100% - drawerPct% - 4px) + margin 0 贴左（4px = 卡缝宽 a，
    *   与窗口边距 p-1 同值；handle 即缝本体；drawer 卡占 drawerPct%）。

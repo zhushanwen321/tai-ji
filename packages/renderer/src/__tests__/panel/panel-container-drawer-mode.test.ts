@@ -11,7 +11,8 @@
  *   tab 按钮断言收拢在「注册表契约」用例（右抽屉终态 8 成员，其余用例只断言被测 tab）
  * - drawerOpen=true：DrawerPanel 在 drawer-area wrapper 内挂载（feat-chat-flow-width 手写
  *   flex 布局，替换 reka-ui Splitter：无 drawer main 卡撑满、卡内内容列（对话流 + composer）
- *   限宽 60% 居中（ui-signal-density D10 2026-10-06 修订，720px 下限后撑满）、
+ *   限宽 2/3 居中（ui-signal-density D10 2026-10-06 修订 + 2026-10-14 用户修订 60%→2/3、
+ *   比例分支摘除 720 cap；720px 下限后撑满）、
  *   有 drawer 双侧 width 动画、handle 拖动/键盘调整 + localStorage 持久化，见下方「动态宽度」describe）
  * - drawerOpen=false：DrawerPanel aside 卸载，drawer-area 收缩为 0%（width 动画承载者常驻）
  * - close 按钮关闭 → drawer 卸载（旧 side-drawer.test.ts 行为迁移；ESC 已随
@@ -490,7 +491,7 @@ describe('PanelContainer unread badge 壳侧补回（AC-13，旧 SideDrawer 逻�
   }, 60_000)
 })
 
-// ── 动态宽度（feat-chat-flow-width）：无 drawer 卡撑满 + 内容列 60%（720px 下限撑满）/ 有 drawer 拆分 + 拖动/键盘/持久化 ──
+// ── 动态宽度（feat-chat-flow-width）：无 drawer 卡撑满 + 内容列 2/3（720px 下限撑满）/ 有 drawer 拆分 + 拖动/键盘/持久化 ──
 
 /** jsdom 无布局：mock splitArea rect（默认宽 1000px，右缘 x=1000），drawer 宽 = (right - clientX)/width */
 function mockSplitAreaRect(wrapper: Awaited<ReturnType<typeof mountContainer>>, width = 1000): void {
@@ -521,8 +522,8 @@ function areaStyle(wrapper: Awaited<ReturnType<typeof mountContainer>>, testid: 
 }
 
 describe('PanelContainer 动态宽度（feat-chat-flow-width）', () => {
-  it('无 drawer：main-area 撑满 + 内容列 60% 居中（宽 panel），drawer-area 0%，无 resize handle', async () => {
-    // 1600 × 60% = 960 ≥ 720 下限 → 比例分支（挂载期测量读取，rect 须先于 mount 就位）
+  it('无 drawer：main-area 撑满 + 内容列 2/3 居中（宽 panel），drawer-area 0%，无 resize handle', async () => {
+    // 1600 × 2/3 ≈ 1067 ≥ 720 下限 → 比例分支（挂载期测量读取，rect 须先于 mount 就位）
     const restoreRect = stubAllElementRects(1600)
     try {
       const panel = usePanelStore()
@@ -533,12 +534,12 @@ describe('PanelContainer 动态宽度（feat-chat-flow-width）', () => {
 
       expect(areaWidth(wrapper, 'main-area')).toBe('100%')
       const mainStyle = areaStyle(wrapper, 'main-area')
-      // 撑满语义（D10 2026-10-06 修订）：60% 作用对象是卡内内容列（对话流 + composer），
+      // 撑满语义（D10 2026-10-06 修订）：比例作用对象是卡内内容列（对话流 + composer），
       // 不是卡容器——留白在卡内两侧，卡与 header 横跨全宽
       expect(mainStyle).toContain('margin-left: 0')
       expect(mainStyle).toContain('margin-right: 0')
-      // 60% 比例外再封 demo 阅读列 720 cap（min(720px, 60%)——1600×60%=960 ≥ 720 → 实际生效 720）
-      expect(mainStyle).toContain('--content-max-w: min(720px, 60%)')
+      // 2/3 纯比例不封顶（2026-10-14 修订：720 cap 曾把宽窗对话流钉在约半宽）
+      expect(mainStyle).toContain('--content-max-w: 66.7%')
       expect(areaWidth(wrapper, 'drawer-area')).toBe('0%')
       expect(wrapper.find('[data-testid="drawer-resize-handle"]').exists()).toBe(false)
     } finally {
@@ -546,8 +547,8 @@ describe('PanelContainer 动态宽度（feat-chat-flow-width）', () => {
     }
   }, 60_000)
 
-  it('无 drawer 窄 panel：60% 实算低于 720px 下限 → 内容列撑满封 720（min(720px, 100%)）', async () => {
-    // 1000 × 60% = 600 < 720 → 下限触发撑满（drawer 挤窄后恒撑满同因）；撑满封 demo 720 cap
+  it('无 drawer 窄 panel：2/3 实算低于 720px 下限 → 内容列撑满封 720（min(720px, 100%)）', async () => {
+    // 1000 × 2/3 ≈ 667 < 720 → 下限触发撑满（drawer 挤窄后恒撑满同因）；撑满封 720 cap
     const restoreRect = stubAllElementRects(1000)
     try {
       const panel = usePanelStore()
@@ -677,16 +678,16 @@ describe('PanelContainer 动态宽度（feat-chat-flow-width）', () => {
     expect(areaWidth(wrapper, 'drawer-area')).toBe('60%')
   }, 60_000)
 
-  it('开合切换：drawer 打开后 main 从撑满（内容列 60%）动画到拆分比例（内容列恒撑满），断言终态', async () => {
+  it('开合切换：drawer 打开后 main 从撑满（内容列 2/3）动画到拆分比例（内容列恒撑满），断言终态', async () => {
     const panel = usePanelStore()
     panel.loadSession(ROOT_PANEL_ID, 's-width-toggle')
 
     const wrapper = await mountContainer()
     await nextTick()
-    // standalone：卡撑满（未 stub rect → 宽度未测得，内容列走纯比例分支 60% 封 720）
+    // standalone：卡撑满（未 stub rect → 宽度未测得，内容列走纯比例分支 2/3）
     expect(areaWidth(wrapper, 'main-area')).toBe('100%')
     expect(areaStyle(wrapper, 'main-area')).toContain('margin-left: 0')
-    expect(areaStyle(wrapper, 'main-area')).toContain('--content-max-w: min(720px, 60%)')
+    expect(areaStyle(wrapper, 'main-area')).toContain('--content-max-w: 66.7%')
 
     // 打开 drawer：main 收缩到拆分比例（margin 恒 0 贴左），内容列改撑满
     // [HISTORICAL] 用例原名含「+ layout 事件派发」：taiji:splitter-layout 已随消费方

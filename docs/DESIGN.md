@@ -114,7 +114,7 @@ v6 重构的三个缘由：
 | 1 | **层级代替边框** | 静态容器只用一个表面色，不叠加 border；靠 bg 层级浮起分隔。border 仅保留给浮起可交互容器（popover/dialog/composer）和 focus 态 |
 | 2 | **圆角档位提升** | `--radius-sm` 6px（全局默认档）；卡片/浮层/composer 12px（demo 卡片形态统一 lg 档，无 10px 档）；徽章/pill 999px 胶囊 |
 | 3 | **正文提亮** | 正文位置统一用 `--neutral-fg`（暗色下 ≈16:1）；工具行/次要落 `--neutral-mid`（~5.4:1，过 AA 大字线）；时间与元信息落 `--neutral-dim`（~2.8:1，低显著度装饰性文字的显式取舍）；仅极弱/装饰位置保留 faint |
-| 4 | **内容收窄** | assistant 居中 720px（整 turn 居中，UserBubble 列内右浮）；设置内容列同 720px 左对齐；Composer 非 landing 对齐同列 |
+| 4 | **内容收窄** | assistant 居中 720px（整 turn 居中，UserBubble 列内右浮）；设置内容列同 720px 左对齐；Composer 非 landing 对齐同列。例外：对话卡内内容列宽由 PanelContainer 派生（卡宽 2/3，720px 下限后撑满——feat-chat-flow-width，2026-10-14 修订；720 为窄卡下限与全局 token 口径） |
 | 5 | **彩色降噪** | 保留 git 语义色（M/A/D 降为极小圆点或单字）+ accent + 真 failure 的 danger，其余降灰阶。从色块/pill 降级为极小圆点或单字 badge |
 
 ### 3.2 impeccable 禁令（违反必返工）
@@ -637,9 +637,9 @@ demo 用 `@keyframes shimmer`（1.4s ease-in-out infinite，linear-gradient 扫�
 
 > v6-spec-*.html 已删除（2026-09-13 退役，git 可追溯）。本节给架构关键决策。
 
-### 6.1 对话流（assistant 居中 720）
+### 6.1 对话流（内容列 2/3 派生，720 阅读列口径）
 
-- **MessageStream**：整 turn 居中 `max-w-content-max-w`(720) + `margin:0 auto`；UserBubble 列内右浮（max-width min(72%,64ch) + overflow-wrap:anywhere，编辑态同宽——ui-optimize 决策 8 N3）；隐藏原生滚动条由 TurnRail 接管
+- **MessageStream**：整 turn 居中 `max-w-content-max-w`（卡内由 PanelContainer 派生注入：卡宽 2/3，窄卡 720px 下限后撑满、drawer 挤窄恒撑满——派生单处 `useDrawerSplitWidth`；全局 token 720 仍为 settings/landing/窄卡口径） + `margin:0 auto`；UserBubble 列内右浮（max-width min(72%,64ch) + overflow-wrap:anywhere，编辑态同宽——ui-optimize 决策 8 N3）；隐藏原生滚动条由 TurnRail 接管
 - **TurnMeta**：pill 默认可见（`bg-elevated` 浮起，解决主面板 surface 上「面上面」不可见）；删 turn 间 `hr` 改加大 turn gap；**重试中态**：重试不进 composer——`RetryIndicator.vue` 独立行（RefreshCw + 「重试中 N/M」+ warn 色，`border-warn/35 bg-warn-soft`），TurnMeta 自身只随 streaming 转 accent spinner（无分级配色，2026-09 删 warn/danger 时长三档）〔2026-09-13 自 v6-design.md 并入；2026-09-19 校正归属 + 删分级配色〕
 - **Block·tool**：状态矩阵 collapsed/expanded × running/done/failed；running 呼吸弧 loader（13px）；exit≠0 加 mono 标签；**failed 统一不切 icon**（保留原 tool icon，toolName 降 `neutral-mid` 表达，无红框——与 subagent/workflow block 一致）；unfinished 显「未结束」标签〔2026-09-13 自 v6-design.md 并入〕
 - **Block·thinking**：收起态 1 行 CSS ellipsis（`text-overflow: ellipsis` 视觉截断，非硬字符数限制）；expanded body 用 `neutral-mid`（过 AA）
