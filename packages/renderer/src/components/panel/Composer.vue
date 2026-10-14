@@ -65,7 +65,7 @@
              [HISTORICAL] 前身 mode-chip（accent-soft 底 + accent 字 + accent × + placeholder/box
              整框染色）已随 banner 形态整体退役。经 staging.activeStaging 统一渲染（ADR-0057），
              退出调 staging.exit()（Esc / 发送 / 切 session 三路退出链不变） -->
-        <div v-if="staging.activeStaging.value" class="mx-2 mt-2 flex items-center gap-[8px] rounded-[var(--radius)] border border-border bg-bg-elevated px-2.5 py-[6px]"
+        <div v-if="staging.activeStaging.value" class="mx-2 mt-2 flex items-center gap-[8px] rounded-[var(--radius)] border border-border bg-bg-card px-2.5 py-[6px]"
           :data-testid="staging.activeStaging.value.type === 'fork' ? 'composer-mode-banner' : 'composer-handoff-banner'"
         >
           <component :is="staging.activeStaging.value.visual.chipIcon" class="size-[14px] shrink-0 text-accent" :stroke-width="1.8" />
@@ -308,11 +308,11 @@
 </template>
 
 <script setup lang="ts">
-import { computed, createVNode, nextTick, provide, ref, render, watch, type Ref } from 'vue'
+import { computed, nextTick, ref, watch, type Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ArrowUp, Clock, Square, X } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
-import { ComposerInput, ComposerInputDepsKey, type ComposerInputDeps } from '@taiji/ui/features/composer'
+import { ComposerInput } from '@taiji/ui/features/composer'
 import { ViewHost } from '@taiji/ui/extension-host'
 import HeaderActionsHost from '@/components/extension/HeaderActionsHost.vue'
 import AddMenuPopover from './AddMenuPopover.vue'
@@ -345,8 +345,7 @@ import { useComposerShell, createComposerDrafts, type ShellInputInstance } from 
 import { useComposerKeydown } from '@/composables/panel/composer-keydown'
 import { useCompositionFlag } from '@/composables/panel/composition-flag'
 import type { DraftStore } from '@taiji/dom-core/composer/input'
-import { handleImagePaste } from '@/composables/panel/useImageAttachment'
-import { SLASH_ICON_COMPONENTS } from '@/composables/slashIcons'
+import { provideComposerInputDeps } from '@/composables/panel/composer-input-deps'
 
 const props = withDefaults(
   defineProps<{
@@ -602,19 +601,7 @@ async function onSendClick(): Promise<void> {
 }
 
 // ── ui ComposerInput deps 注入（ADR-0058：pasteImage/renderIcon/t 三壳层能力）──
-const composerInputDeps: ComposerInputDeps = {
-  pasteImage: handleImagePaste,
-  // renderIcon：图标查找 + vue render 内聚在壳层（dom-core 零 vue render，ADR-0058 边界）。
-  // 返回 true = 已渲染图标（dom-core 侧挂载 host），false = 无图标不渲染。
-  renderIcon: (host: HTMLElement, iconKey?: string) => {
-    const Comp = iconKey
-      ? SLASH_ICON_COMPONENTS[iconKey as keyof typeof SLASH_ICON_COMPONENTS]
-      : undefined
-    if (!Comp) return false
-    render(createVNode(Comp, { size: 12 }), host)
-    return true
-  },
-  t: (key: string) => t(key),
-}
-provide(ComposerInputDepsKey, composerInputDeps)
+// 共享装配器（user-bubble-edit-composer）：底部 composer 与消息流内用户气泡编辑框
+// （简化版 composer）复用同一 ComposerInput，deps 实现单点在此，防两份 renderIcon 漂移。
+provideComposerInputDeps()
 </script>

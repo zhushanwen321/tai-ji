@@ -47,6 +47,9 @@ import { useFileSearch } from '@/composables/features/search/useFileSearch'
 import { useToast } from '@/composables/useToast'
 import { triggerEnterForkMode } from '@/composables/panel/useForkModeChannel'
 import ToolDetailRenderer from '@/components/panel/detail-renderers/ToolDetailRenderer.vue'
+// [user-bubble-edit-composer] 用户气泡编辑态富编辑器（简化版 composer：ComposerInput +
+// CommandPopover，无 +/左簇/右簇）——ui UserBubble 经 ChatViewDeps.editComposerRenderer 路由
+import UserBubbleEditComposer from '@/components/panel/message-stream/UserBubbleEditComposer.vue'
 import { triggerEnterHandoffMode } from '@/composables/panel/useHandoffModeChannel'
 import { renderMarkdownSegments } from '@taiji/ui/features/chat/markdown'
 import {
@@ -335,5 +338,8 @@ export function useChatViewDeps(
     // renderer 实现（复用 DiffView/parseDiff/extToLang/gitApi），ui 只路由；optional 字段，
     // 测试 mock 壳不提供时 Block 回退纯文本输出。
     toolDetailRenderer: ToolDetailRenderer,
+    // [user-bubble-edit-composer] 用户气泡编辑态 = 简化版 composer（富编辑器）。optional 字段：
+    // 移动壳/测试 mock 壳不 provide 时 UserBubble 回退纯 Textarea 编辑器（存量行为）。
+    editComposerRenderer: UserBubbleEditComposer,
   }
 }

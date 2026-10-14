@@ -168,6 +168,33 @@ export interface ChatViewDeps {
    * optional，同 sessionCwdOf 族：缺席即回退，不阻断 ChatView 其余功能。
    */
   toolDetailRenderer?: Component<{ tool: ToolCall; sessionId?: string | null }>
+  /**
+   * [user-bubble-edit-composer] 用户气泡编辑态的富编辑器组件（renderer 提供，ui 只路由）。
+   * 编辑态 = 简化版 composer：ComposerInput（contenteditable，slash chip + @/#/$ 引用 chip +
+   * image chip）+ CommandPopover（四符号候选浮层），不渲染 + 按钮 / 底栏左簇 / 右簇。
+   * 置于 renderer 的原因：CommandPopover 与 useCommandPopoverTrigger 深耦合 renderer stores
+   * （command/session/subagent store、useFileSearch、pickFile IPC），ui 禁反向依赖 renderer。
+   * optional，同 toolDetailRenderer：缺席（测试 mock 壳 / 移动壳未接）→ UserBubble 回退
+   * 既有纯 Textarea 编辑器（移植债登记处），不阻断 ChatView 其余功能。
+   */
+  editComposerRenderer?: Component<EditComposerProps>
+}
+
+/**
+ * 编辑态富编辑器组件契约（editComposerRenderer 的 props/emits 形状声明）。
+ * 组件内部自行 provide ComposerInputDepsKey（与 Composer.vue / MobileComposer 同契约），
+ * 挂载即 setSegments(props.segments) 真 chip 还原；提交经 emit('submit', segments)
+ * 交还 UserBubble（双发锁 + editAndResend 收口链在 ui 侧单点）。
+ */
+export interface EditComposerProps {
+  /** 目标会话 id（CommandPopover session 通道 + 图片持久化目录） */
+  sessionId: string
+  /** 被编辑的 user message id（提交时 editAndResend 的定位锚） */
+  messageId: string
+  /** 原消息 segments（挂载后整框回填为真 chip，非序列化标记文本） */
+  segments: Segment[]
+  /** 提交在途（isPendingSend）→ 输入区禁用 + 发送钮禁用（双发锁透传，语义同 Composer isSending） */
+  disabled?: boolean
 }
 
 /** ChatViewDeps inject token（InjectionKey 保类型安全） */
