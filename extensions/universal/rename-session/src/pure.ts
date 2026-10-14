@@ -185,9 +185,10 @@ export function normalizeRenameConfig(raw: unknown): RenameSessionConfig {
 
 	// customInstruction：非字符串 → 空串；超长防御截断（码点数，与 runtime 写侧归一同限）
 	const rawInstruction = typeof obj.customInstruction === "string" ? obj.customInstruction : "";
+	const instructionChars = Array.from(rawInstruction);
 	const customInstruction =
-		Array.from(rawInstruction).length > RENAME_INSTRUCTION_MAX_LENGTH
-			? Array.from(rawInstruction).slice(0, RENAME_INSTRUCTION_MAX_LENGTH).join("")
+		instructionChars.length > RENAME_INSTRUCTION_MAX_LENGTH
+			? instructionChars.slice(0, RENAME_INSTRUCTION_MAX_LENGTH).join("")
 			: rawInstruction;
 
 	return { enabled, model, mode, maxTitleLength, thinkingLevel, style, customInstruction };
