@@ -2,14 +2,15 @@
 
 Pi 的 subagent + workflow 合并包：任务委派 + 多 agent 编排（chain / parallel / scatter-gather / map-reduce），单包统一执行链 + 分层配额（ADR-030）。
 
-## 工具面（6 tools）
+## 工具面（7 tools）
 
 | 工具 | action 集合 | 关键参数 |
 |------|------------|---------|
 | `subagent_start` | —（单动作） | `task` + `slug`（≤35 字符）必填，`agent`（.md 绝对路径，缺省 general-purpose）、`model`、`engine`、`fork`、`worktree`、`maxTurns`、`idleTimeoutMs` 等 start 场景可选字段 |
 | `subagent_manage` | `list` / `cancel` / `close`（3 个） | `cancel` / `close`：`subagentId` 必填 |
 | `subagent_message` | `message` / `fork-from`（2 个） | `message`：`subagentId` + `text` 必填；`fork-from`：`sourceSubagentId` 必填 |
-| `workflow_run` | —（单动作） | `name`（workflow 名或 .js 绝对路径）+ 可选 `args` / 预算，见「Workflow 生命周期」节 |
+| `subagents` | —（单动作，批量派发，deferred 延迟加载） | `tasks` 必填（每元素一个自包含任务 prompt，全部并行、结果一条通知收口），可选 `agents`（逗号分隔 .md 绝对路径，单值或与 tasks 一一对应）、`aggregate`、`slug`、`model` 等；run 级状态控制走 `workflow_control` |
+| `workflow_run` | —（单动作） | `name`（`.js` 绝对路径）+ 可选 `args` / 预算，见「Workflow 生命周期」节 |
 | `workflow_control` | `status` / `abort` / `resume`（3 个） | `abort` / `resume`：`runId` 必填，见「Workflow 生命周期」节 |
 | `workflow-script` | `generate` / `lint` / `save` / `delete` / `list`（5 个） | `generate`：`script` + `name`（可选 `description`）；`save`：`name`（可 `newName` 改名）；`lint` / `delete`：`name` |
 
@@ -64,7 +65,7 @@ pi --tools todo,goal_control,workflow_run,subagent_start,ask_user
 
 ## Workflow 生命周期
 
-Workflow run 有两类结束形态：**终局**（`done`，outcome 区分 done / failed / cancelled / time_limited——成败已定）与**中断**（`interrupted` 暂停态——执行被打断但可续跑）。`workflow_run` 启动 run；`workflow_control` 共 3 个 action：`status` / `abort` / `resume`。run 的 `name` 接受 `<available_workflows>` 列出的 workflow 名（内置 chain / parallel / map-reduce / scatter-gather / review-fix-loop 或已保存脚本）或 `.js` 绝对路径。
+Workflow run 有两类结束形态：**终局**（`done`，outcome 区分 done / failed / cancelled / time_limited——成败已定）与**中断**（`interrupted` 暂停态——执行被打断但可续跑）。`workflow_run` 启动 run；`workflow_control` 共 3 个 action：`status` / `abort` / `resume`。run 的 `name` 仅接受 `.js` 绝对路径（通常是 `<available_workflows>` 条目的 `<location>`；任意声明 `@pi-meta kind:"workflow"` 的绝对 `.js` 路径均可），裸名 / 相对路径拒绝（`not_found`，拒单文案列全部可用条目及 location，按 location 重试即可）。
 
 - **abort（主动取消）**：`{"action":"abort","runId":"<id>"}`（可选 `"error":"<reason>"`）→ `cancelled` 终局。要新结果就重新 run
 - **resume（断点续跑）**：`{"action":"resume","runId":"<id>"}`（可选 args 校验一致性与时间预算）——对 interrupted run 从断点恢复：已完成的调用回放缓存零 token、未完成的按三档恢复（会话完整 → 捞回结果；请求未完成 → 同会话续写；会话不在 → 整跑）；`/workflows resume <id>` 同能力
