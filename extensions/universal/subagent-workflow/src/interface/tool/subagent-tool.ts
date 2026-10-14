@@ -24,7 +24,7 @@ import { isAbsolute } from "node:path";
 import { Text, type Component } from "@earendil-works/pi-tui";
 import type { AgentToolResult, ExtensionAPI, ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
 import { getLogger } from "@zhushanwen/pi-extension-logger";
-import type { Static } from "typebox";
+import type { Static, TSchema } from "typebox";
 
 import { getSubagentService } from "@zhushanwen/subagent-core";
 import type { SubagentService, SubagentToolResult } from "@zhushanwen/subagent-core";
@@ -52,13 +52,14 @@ import { toErrorMessage } from "@zhushanwen/pi-ext-guards";
 // ============================================================
 
 /**
- * execute 回调的 params 类型由各 schema 经 Static 投影得出。
+ * execute 回调的统一形状（三工具共用，仅 params 类型随 schema 变——泛型单点消除了
+ * D3 拆分时三份逐字同构副本）。params 类型由各 schema 经 Static 投影得出。
  * typebox v1 的 StringEnum 在 Static 投影下退化为 string（非字面量联合），
  * 由下方 is*Action 类型守卫收窄到字面量联合后再 switch。
  */
-type SubagentStartExecuteCb = (
+type SubagentExecuteCb<P extends TSchema> = (
   toolCallId: string,
-  params: Static<typeof SubagentStartParams>,
+  params: Static<P>,
   signal: AbortSignal | undefined,
   onUpdate?: (partialResult: AgentToolResult<SubagentToolResult>) => void,
   // ctx 在 SDK 契约里必填；此处保持 optional 以兼容 onUpdate? 在前（TS 参数顺序约束），
@@ -66,21 +67,9 @@ type SubagentStartExecuteCb = (
   ctx?: ExtensionContext,
 ) => Promise<AgentToolResult<SubagentToolResult>>;
 
-type SubagentManageExecuteCb = (
-  toolCallId: string,
-  params: Static<typeof SubagentManageParams>,
-  signal: AbortSignal | undefined,
-  onUpdate?: (partialResult: AgentToolResult<SubagentToolResult>) => void,
-  ctx?: ExtensionContext,
-) => Promise<AgentToolResult<SubagentToolResult>>;
-
-type SubagentMessageExecuteCb = (
-  toolCallId: string,
-  params: Static<typeof SubagentMessageParams>,
-  signal: AbortSignal | undefined,
-  onUpdate?: (partialResult: AgentToolResult<SubagentToolResult>) => void,
-  ctx?: ExtensionContext,
-) => Promise<AgentToolResult<SubagentToolResult>>;
+type SubagentStartExecuteCb = SubagentExecuteCb<typeof SubagentStartParams>;
+type SubagentManageExecuteCb = SubagentExecuteCb<typeof SubagentManageParams>;
+type SubagentMessageExecuteCb = SubagentExecuteCb<typeof SubagentMessageParams>;
 
 type SubagentRenderCallCb = (args: unknown, theme: Theme, ctx: RenderContext) => Component;
 

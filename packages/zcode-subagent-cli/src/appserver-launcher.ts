@@ -405,14 +405,9 @@ if (text !== null || catalogPatch !== null) {
   // encoding 归一（Node 别名面）：'utf8'/'utf-8'/大小写变体统一按 string 返回——
   // 真实 bundle 的 config 读取恰用 'utf-8' 形态，仅匹配 'utf8' 会错回 Buffer
   // （当下游不只 JSON.parse 而做字符串运算时即 TypeError）
+  // shape 同时服务四处 patch 源（config / provider merge / 内建目录 / ——encoding 归一
+  // 语义相同，单副本：目录条目曾另持逐字重复副本 catalogShape，已并回本函数）
   const shape = (args, value) => {
-    const enc = args[0];
-    const e = typeof enc === 'string' ? enc
-      : (enc && typeof enc === 'object' && typeof enc.encoding === 'string' ? enc.encoding : undefined);
-    if (e !== undefined && String(e).toLowerCase().replace(/-/g, '') === 'utf8') return value;
-    return Buffer.from(value);
-  };
-  const catalogShape = (args, value) => {
     const enc = args[0];
     const e = typeof enc === 'string' ? enc
       : (enc && typeof enc === 'object' && typeof enc.encoding === 'string' ? enc.encoding : undefined);
@@ -434,7 +429,7 @@ if (text !== null || catalogPatch !== null) {
     // （app-server 按 ZCODE_BASE_URL 自派生 endpoint 目录，读路径≠env 定位路径）。
     if (typeof p === 'string' && p.endsWith('zcode-builtin.json')) {
       const cur = catalogPatchText(p);
-      if (cur !== null) return catalogShape(rest, cur);
+      if (cur !== null) return shape(rest, cur);
     }
     // account 直通②：CLI bundle 源码 → YXe entitled:!1 内存翻转为 !0
     if (typeof p === 'string' && p === CLI_PATH) {
@@ -455,7 +450,7 @@ if (text !== null || catalogPatch !== null) {
     }
     if (typeof p === 'string' && p.endsWith('zcode-builtin.json')) {
       const cur = catalogPatchText(p);
-      if (cur !== null) return Promise.resolve(catalogShape(rest, cur));
+      if (cur !== null) return Promise.resolve(shape(rest, cur));
     }
     if (typeof p === 'string' && p === CLI_PATH) {
       const cur = patchedCliSource(p);
