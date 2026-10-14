@@ -35,15 +35,17 @@ export const RENAME_INSTRUCTION =
 /**
  * 「完整短句」风格内置词表（rename-prompt-config 设计）：不超过 20 字的完整短句，概括任务
  * 目标或结果。与 slug 风格同为 user 指令形态（追加在对话末尾），正反例锚定与 RENAME_INSTRUCTION 同范式。
+ * 仅 BUILTIN_TEMPLATES 消费（renderer 侧是跨包字面量对拍测试，不 import 本模块）。
  */
-export const SENTENCE_INSTRUCTION =
+const SENTENCE_INSTRUCTION =
 	"根据以上对话，为这个会话生成一个简短标题：一个不超过 20 字的完整短句，概括本次任务的目标或结果，不加句尾标点。反例（错误）：「重构」。使用对话所用的语言。只输出标题文本。";
 
 /**
  * 「Emoji 点缀」风格内置词表（rename-prompt-config 设计）：以贴切 emoji 开头 + 不超过 15 字
  * 词组或短句。正例锚定输出形态，避免模型漏掉 emoji 或输出多行。
+ * 仅 BUILTIN_TEMPLATES 消费（同 SENTENCE_INSTRUCTION，renderer 侧字面量对拍不 import）。
  */
-export const EMOJI_INSTRUCTION =
+const EMOJI_INSTRUCTION =
 	"根据以上对话，为这个会话生成一个标题：以一个贴切的 emoji 开头，后接不超过 15 字的词组或短句。例：「🔧 重构配置加载」「🐛 修复登录超时」。使用对话所用的语言。只输出标题文本。";
 
 /**

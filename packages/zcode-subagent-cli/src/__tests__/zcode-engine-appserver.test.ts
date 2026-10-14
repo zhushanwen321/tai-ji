@@ -586,41 +586,37 @@ function writeReasoningCatalog(values: string[]): string {
   return catalogPath;
 }
 
+/**
+ * 择档用例共用骨架：写目录 → 跑一轮 → 断言 create 帧 model.options.reasoningLevel 与
+ * 镜像 thoughtLevel 同为 expected（reasoning 唯一生效通道是 thoughtLevel，两处必须同值）。
+ */
+async function expectReasoningPick(
+  catalogValues: string[],
+  thinkingLevel: string | undefined,
+  expected: string,
+): Promise<void> {
+  const { engine, stateFile, workspace } = makeEngine({ builtinCatalogPath: writeReasoningCatalog(catalogValues) });
+  await engine.run(makeTask({ cwd: workspace, thinkingLevel }), makeCtx());
+  const create = sentFrames(stateFile, "session/create")[0];
+  expect(create.params["model"]).toEqual({
+    providerId: PROVIDER,
+    modelId: "m1",
+    options: { reasoningLevel: expected },
+  });
+  expect(create.params["thoughtLevel"]).toBe(expected);
+}
+
 describe("reasoningLevel 择档（目录值域 × thinkingLevel）", () => {
   it("无 thinkingLevel → 值域首值（最小档）且镜像到 thoughtLevel（CLI 只认 thoughtLevel 通道）", async () => {
-    const { engine, stateFile, workspace } = makeEngine({ builtinCatalogPath: writeReasoningCatalog(["disabled", "low", "high"]) });
-    await engine.run(makeTask({ cwd: workspace }), makeCtx());
-    const create = sentFrames(stateFile, "session/create")[0];
-    expect(create.params["model"]).toEqual({
-      providerId: PROVIDER,
-      modelId: "m1",
-      options: { reasoningLevel: "disabled" },
-    });
-    expect(create.params["thoughtLevel"]).toBe("disabled");
+    await expectReasoningPick(["disabled", "low", "high"], undefined, "disabled");
   }, 15_000);
 
   it("thinkingLevel 精确命中值域 → create 帧用请求档", async () => {
-    const { engine, stateFile, workspace } = makeEngine({ builtinCatalogPath: writeReasoningCatalog(["disabled", "low", "high"]) });
-    await engine.run(makeTask({ cwd: workspace, thinkingLevel: "high" }), makeCtx());
-    const create = sentFrames(stateFile, "session/create")[0];
-    expect(create.params["model"]).toEqual({
-      providerId: PROVIDER,
-      modelId: "m1",
-      options: { reasoningLevel: "high" },
-    });
-    expect(create.params["thoughtLevel"]).toBe("high");
+    await expectReasoningPick(["disabled", "low", "high"], "high", "high");
   }, 15_000);
 
   it("thinkingLevel 不在值域 → 非最小档末值且镜像到 thoughtLevel（显式思考意图不落 disabled）", async () => {
-    const { engine, stateFile, workspace } = makeEngine({ builtinCatalogPath: writeReasoningCatalog(["disabled", "low", "high"]) });
-    await engine.run(makeTask({ cwd: workspace, thinkingLevel: "xhigh" }), makeCtx());
-    const create = sentFrames(stateFile, "session/create")[0];
-    expect(create.params["model"]).toEqual({
-      providerId: PROVIDER,
-      modelId: "m1",
-      options: { reasoningLevel: "high" },
-    });
-    expect(create.params["thoughtLevel"]).toBe("high");
+    await expectReasoningPick(["disabled", "low", "high"], "xhigh", "high");
   }, 15_000);
 
   it("thinkingLevel=off 且值域不含 off → 最小档且镜像到 thoughtLevel（off 透传会被 CLI 跳过后 reasoning 仍 missing——生产事故锁定）", async () => {
@@ -628,51 +624,19 @@ describe("reasoningLevel 择档（目录值域 × thinkingLevel）", () => {
     // （不思考被发成最强思考）；修复后 off 族短路值域首值。
     // [2026-10-14] thoughtLevel 同步镜像首值——CLI 值域无 off 档，透传 "off" 会被
     // listThoughtLevels 校验跳过 → 会话档位空 → turn 阶段 reasoning-level-missing。
-    const { engine, stateFile, workspace } = makeEngine({ builtinCatalogPath: writeReasoningCatalog(["low", "high", "max"]) });
-    await engine.run(makeTask({ cwd: workspace, thinkingLevel: "off" }), makeCtx());
-    const create = sentFrames(stateFile, "session/create")[0];
-    expect(create.params["model"]).toEqual({
-      providerId: PROVIDER,
-      modelId: "m1",
-      options: { reasoningLevel: "low" },
-    });
-    expect(create.params["thoughtLevel"]).toBe("low");
+    await expectReasoningPick(["low", "high", "max"], "off", "low");
   }, 15_000);
 
   it("thinkingLevel=minimal 且值域不含 minimal → 最小档且镜像到 thoughtLevel（off 族同款短路，最省意图不升级）", async () => {
-    const { engine, stateFile, workspace } = makeEngine({ builtinCatalogPath: writeReasoningCatalog(["disabled", "low", "high"]) });
-    await engine.run(makeTask({ cwd: workspace, thinkingLevel: "minimal" }), makeCtx());
-    const create = sentFrames(stateFile, "session/create")[0];
-    expect(create.params["model"]).toEqual({
-      providerId: PROVIDER,
-      modelId: "m1",
-      options: { reasoningLevel: "disabled" },
-    });
-    expect(create.params["thoughtLevel"]).toBe("disabled");
+    await expectReasoningPick(["disabled", "low", "high"], "minimal", "disabled");
   }, 15_000);
 
   it("thinkingLevel=off 精确命中值域 → 请求档原样且镜像到 thoughtLevel（精确命中语义不变）", async () => {
-    const { engine, stateFile, workspace } = makeEngine({ builtinCatalogPath: writeReasoningCatalog(["off", "low", "high"]) });
-    await engine.run(makeTask({ cwd: workspace, thinkingLevel: "off" }), makeCtx());
-    const create = sentFrames(stateFile, "session/create")[0];
-    expect(create.params["model"]).toEqual({
-      providerId: PROVIDER,
-      modelId: "m1",
-      options: { reasoningLevel: "off" },
-    });
-    expect(create.params["thoughtLevel"]).toBe("off");
+    await expectReasoningPick(["off", "low", "high"], "off", "off");
   }, 15_000);
 
   it("值域单值且请求档不在域 → 落回唯一值且镜像到 thoughtLevel（非最小档为空不越域）", async () => {
-    const { engine, stateFile, workspace } = makeEngine({ builtinCatalogPath: writeReasoningCatalog(["enabled"]) });
-    await engine.run(makeTask({ cwd: workspace, thinkingLevel: "high" }), makeCtx());
-    const create = sentFrames(stateFile, "session/create")[0];
-    expect(create.params["model"]).toEqual({
-      providerId: PROVIDER,
-      modelId: "m1",
-      options: { reasoningLevel: "enabled" },
-    });
-    expect(create.params["thoughtLevel"]).toBe("enabled");
+    await expectReasoningPick(["enabled"], "high", "enabled");
   }, 15_000);
 
   it("无值域（目录缺失）→ thoughtLevel 维持 thinkingLevel 透传且 model 无 options（现状保形）", async () => {

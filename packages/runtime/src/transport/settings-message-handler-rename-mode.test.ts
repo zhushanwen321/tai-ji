@@ -10,6 +10,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { SettingsMessageHandler, type SettingsHandlerContext } from './settings-message-handler.js'
 import type { ClientMessage, RenameMode, ServerMessage } from '@taiji/shared'
+import { sendConfigGet, TEST_WS as WS } from './__tests__/helpers/settings-handler-send.js'
 
 function mockCtx() {
   const replies: ServerMessage[] = []
@@ -44,20 +45,12 @@ function mockCtx() {
   return { ctx: ctx as unknown as SettingsHandlerContext, replies, configService }
 }
 
-const WS = {} as never
-
 describe('SettingsMessageHandler · config.getRenameMode', () => {
   it('reply config.renameMode 透传 { mode }（默认 first-stop）', async () => {
     const { ctx, replies } = mockCtx()
-    const handler = new SettingsMessageHandler(ctx)
-    const handled = await handler.handleSettingsMessage(
-      { type: 'config.getRenameMode', payload: {}, id: 'm1' } as unknown as ClientMessage,
-      WS,
-    )
-    expect(handled).toBe(true)
-    expect(replies).toHaveLength(1)
-    expect(replies[0]).toMatchObject({ type: 'config.renameMode', id: 'm1' })
-    expect(replies[0].payload).toEqual({ mode: 'first-stop' })
+    const reply = await sendConfigGet(ctx, replies, 'config.getRenameMode')
+    expect(reply).toMatchObject({ type: 'config.renameMode', id: 'm1' })
+    expect(reply.payload).toEqual({ mode: 'first-stop' })
     expect(ctx.sendError).not.toHaveBeenCalled()
   })
 })
@@ -105,15 +98,9 @@ describe('SettingsMessageHandler · config.getRenamePrompt', () => {
       instruction: '自定义指令',
       corrupted: false,
     }))
-    const handler = new SettingsMessageHandler(ctx)
-    const handled = await handler.handleSettingsMessage(
-      { type: 'config.getRenamePrompt', payload: {}, id: 'm1' } as unknown as ClientMessage,
-      WS,
-    )
-    expect(handled).toBe(true)
-    expect(replies).toHaveLength(1)
-    expect(replies[0]).toMatchObject({ type: 'config.renamePrompt', id: 'm1' })
-    expect(replies[0].payload).toEqual({ style: 'custom', instruction: '自定义指令', corrupted: false })
+    const reply = await sendConfigGet(ctx, replies, 'config.getRenamePrompt')
+    expect(reply).toMatchObject({ type: 'config.renamePrompt', id: 'm1' })
+    expect(reply.payload).toEqual({ style: 'custom', instruction: '自定义指令', corrupted: false })
     expect(ctx.sendError).not.toHaveBeenCalled()
   })
 })
@@ -143,14 +130,9 @@ describe('SettingsMessageHandler · config.get/setRenameMaxLength', () => {
   it('get：reply config.renameMaxLength 透传 { maxLength }', async () => {
     const { ctx, replies, configService } = mockCtx()
     ;(configService as Record<string, unknown>)['getRenameMaxLength'] = vi.fn(() => 24)
-    const handler = new SettingsMessageHandler(ctx)
-    const handled = await handler.handleSettingsMessage(
-      { type: 'config.getRenameMaxLength', payload: {}, id: 'm1' } as unknown as ClientMessage,
-      WS,
-    )
-    expect(handled).toBe(true)
-    expect(replies[0]).toMatchObject({ type: 'config.renameMaxLength', id: 'm1' })
-    expect(replies[0].payload).toEqual({ maxLength: 24 })
+    const reply = await sendConfigGet(ctx, replies, 'config.getRenameMaxLength')
+    expect(reply).toMatchObject({ type: 'config.renameMaxLength', id: 'm1' })
+    expect(reply.payload).toEqual({ maxLength: 24 })
     expect(ctx.sendError).not.toHaveBeenCalled()
   })
 

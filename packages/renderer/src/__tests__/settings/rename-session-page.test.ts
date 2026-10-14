@@ -46,6 +46,34 @@ async function pickOption(labels: HTMLElement[], text: string): Promise<void> {
   await flushPromises()
 }
 
+/** 指令计数用例共用：custom 风格（空指令）挂载，返回页面 wrapper。 */
+async function mountCustomInstructionPage(): Promise<NonNullable<ReturnType<typeof pageWrapper>>> {
+  settingsMock.getRenamePrompt.mockResolvedValue({ style: 'custom', instruction: '', corrupted: false })
+  await mountSection()
+  return pageWrapper()!
+}
+
+/**
+ * 指令计数用例共用骨架：写入文本 → 断言计数文案、警示样式与保存键禁用态
+ * （overLimit = 码点数超 2000 的期望形态）。
+ */
+async function assertCharCountState(
+  w: NonNullable<ReturnType<typeof pageWrapper>>,
+  text: string,
+  expectedCount: string,
+  overLimit: boolean,
+): Promise<void> {
+  await w.find('[data-testid="rename-instruction-input"]').setValue(text)
+  expect(w.find('[data-testid="rename-instruction-charcount"]').text()).toContain(expectedCount)
+  if (overLimit) {
+    expect(w.find('[data-testid="rename-instruction-charcount"]').classes()).toContain('text-warn')
+    expect(w.find('[data-testid="rename-prompt-save"]').attributes('disabled')).toBeDefined()
+  } else {
+    expect(w.find('[data-testid="rename-instruction-charcount"]').classes()).not.toContain('text-warn')
+    expect(w.find('[data-testid="rename-prompt-save"]').attributes('disabled')).toBeUndefined()
+  }
+}
+
 beforeEach(() => {
   seedStore()
 })
@@ -220,37 +248,22 @@ describe('标题提示词卡（风格 + 自定义指令 + 显式保存）', () =
   })
 
   it('超长指令：计数警示 + 保存禁用（2000 上限）', async () => {
-    settingsMock.getRenamePrompt.mockResolvedValue({ style: 'custom', instruction: '', corrupted: false })
-    await mountSection()
-    const w = pageWrapper()!
-    await w.find('[data-testid="rename-instruction-input"]').setValue('a'.repeat(2001))
-    expect(w.find('[data-testid="rename-instruction-charcount"]').text()).toContain('2001/2000')
-    expect(w.find('[data-testid="rename-instruction-charcount"]').classes()).toContain('text-warn')
-    expect(w.find('[data-testid="rename-prompt-save"]').attributes('disabled')).toBeDefined()
+    const w = await mountCustomInstructionPage()
+    await assertCharCountState(w, 'a'.repeat(2001), '2001/2000', true)
   })
 
   it('emoji 按码点计数（与 runtime/extension 口径对齐）：1001 个 emoji 可保存、计数为码点数', async () => {
-    settingsMock.getRenamePrompt.mockResolvedValue({ style: 'custom', instruction: '', corrupted: false })
-    await mountSection()
-    const w = pageWrapper()!
+    const w = await mountCustomInstructionPage()
     // 1001 个 emoji 的 UTF-16 .length = 2002（旧口径误判超限），码点数 1001 ≤ 2000 → 可保存
-    await w.find('[data-testid="rename-instruction-input"]').setValue('🔧'.repeat(1001))
-    expect(w.find('[data-testid="rename-instruction-charcount"]').text()).toContain('1001/2000')
-    expect(w.find('[data-testid="rename-instruction-charcount"]').classes()).not.toContain('text-warn')
-    expect(w.find('[data-testid="rename-prompt-save"]').attributes('disabled')).toBeUndefined()
+    await assertCharCountState(w, '🔧'.repeat(1001), '1001/2000', false)
     await w.find('[data-testid="rename-prompt-save"]').trigger('click')
     await flushPromises()
     expect(settingsMock.setRenamePrompt).toHaveBeenCalledWith('custom', '🔧'.repeat(1001))
   })
 
   it('emoji 码点上限：2001 个 emoji（码点数超 2000）计数警示 + 保存禁用', async () => {
-    settingsMock.getRenamePrompt.mockResolvedValue({ style: 'custom', instruction: '', corrupted: false })
-    await mountSection()
-    const w = pageWrapper()!
-    await w.find('[data-testid="rename-instruction-input"]').setValue('🔧'.repeat(2001))
-    expect(w.find('[data-testid="rename-instruction-charcount"]').text()).toContain('2001/2000')
-    expect(w.find('[data-testid="rename-instruction-charcount"]').classes()).toContain('text-warn')
-    expect(w.find('[data-testid="rename-prompt-save"]').attributes('disabled')).toBeDefined()
+    const w = await mountCustomInstructionPage()
+    await assertCharCountState(w, '🔧'.repeat(2001), '2001/2000', true)
   })
 
   it('getRenamePrompt 读失败：横幅可见 + 卡 2 风格/textarea/保存禁用；重试成功后恢复并回填快照', async () => {

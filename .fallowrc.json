@@ -48,7 +48,11 @@
     "@taiji/runtime"
   ],
   "usedClassMembers": [
-    "getStreamSink"
+    "getStreamSink",
+    "getRenamePrompt",
+    "setRenamePrompt",
+    "getRenameMaxLength",
+    "setRenameMaxLength"
   ],
   "health": {
     "maxCyclomatic": 15,
