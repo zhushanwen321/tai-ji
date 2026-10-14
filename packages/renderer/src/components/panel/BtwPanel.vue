@@ -154,7 +154,10 @@
              按 vid 路由本面板，主视图三模态面零浮出）。Guard 为无 DOM 渲染哨兵，包全部
              风险渲染——异常由 onErrorCaptured 在本组件收口（return false 不外溢主面板，
              P2 隔离），错误条 + 重试在 Guard 外恒可达。 -->
-        <div v-if="selectedVid" :class="COMPOSER_BAND_CLASS" data-testid="btw-interaction">
+        <!-- composer 带跟 chat 档位（chat-font-scope）：主面板 composer 恒在 main-area
+             chat scope 内，btw 线的 composer + 内联确认条同语义（对话流配套输入区，
+             非 drawer chrome）——上方 MessageStream 已自挂同款 scope。 -->
+        <div v-if="selectedVid" :class="COMPOSER_BAND_CLASS" data-fs-scope="chat" data-testid="btw-interaction">
           <BtwInteractionGuard :key="interactionKey">
             <!-- 终态机失效支行内提示（失效支单入口 invalidateBtwRequests——事件帧一路：badge 清 + 表单撤下 + 本提示同拍收口，D-B2-3） -->
             <div v-if="expiredNotice" class="flex items-center gap-1.5 rounded bg-danger-soft px-2.5 py-1.5 text-[length:var(--text-2xs)] text-danger" data-testid="btw-request-expired">

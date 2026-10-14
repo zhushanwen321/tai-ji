@@ -20,6 +20,9 @@ export interface SystemSettings {
   /**
    * 分区字号档位（sidebar/chat/drawer 三区域独立缩放；档位→倍率映射见 style.css data-fs-* 规则）。
    * 缺省 medium（×1）。区域子树内 --text-* 链乘以对应 --font-scale-<region>。
+   * 语义分区（chat-font-scope）：chat = 对话流域——MessageStream 根自挂 data-fs-scope="chat"，
+   * 嵌套在 drawer 内的对话流（subagent tab / btw 线 / workflow agent 详情）恒跟 chat 档；
+   * drawer/sidebar = 区域 chrome（头栏/列表/详情/文档等非对话流文字）。
    */
   fontScales?: FontScales
   /**
