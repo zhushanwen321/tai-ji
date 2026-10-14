@@ -1,5 +1,11 @@
 # @zhushanwen/subagent-core
 
+## 1.5.1
+
+### Patch Changes
+
+- 993ee907f: Fix engine descriptor assembly dropping the manifest `processModel` declaration: engines declaring `shared-service` (zcode) were misjudged as `per-window`, so direct subagent dispatch failed with `engine_window_scoped` and workflow members cold-started a fresh engine process per run instead of sharing the registry singleton.
+
 ## 1.5.0
 
 ### Minor Changes

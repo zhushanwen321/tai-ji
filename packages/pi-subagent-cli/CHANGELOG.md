@@ -1,5 +1,11 @@
 # @zhushanwen/pi-subagent-cli
 
+## 0.7.2
+
+### Patch Changes
+
+- 993ee907f: chore: refresh dependency range (triggered by @zhushanwen/pi-rpc@1.2.0 → @zhushanwen/pi-rpc@1.3.0)
+
 ## 0.7.1
 
 ### Patch Changes

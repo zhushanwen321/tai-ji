@@ -1,5 +1,11 @@
 # @zhushanwen/pi-ask-user
 
+## 7.3.8
+
+### Patch Changes
+
+- 993ee907f: Slim the ask_user tool declaration: the description is tightened to one example plus structural anti-examples, and the promptGuidelines layer is removed because every guideline duplicated the description or schema field text — same calling discipline, fewer standing prompt tokens.
+
 ## 7.3.7
 
 ### Patch Changes

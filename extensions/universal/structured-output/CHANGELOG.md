@@ -1,5 +1,11 @@
 # @zhushanwen/pi-structured-output
 
+## 6.1.2
+
+### Patch Changes
+
+- 993ee907f: Keep test files out of the npm package: the cross-package contract test now lives under `src/__tests__/`, so the publish surface excludes that directory (the shipped file imported vitest and resolved cross-package paths that do not exist in the published tarball).
+
 ## 6.1.1
 
 ### Patch Changes

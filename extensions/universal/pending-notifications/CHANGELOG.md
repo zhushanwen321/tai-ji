@@ -1,5 +1,11 @@
 # @zhushanwen/pi-pending-notifications
 
+## 0.8.5
+
+### Patch Changes
+
+- 993ee907f: Trim the pending_notifications description by dropping the internal state-maintenance note (EventBus/session-entries bookkeeping is invisible to callers), as part of the tool-declaration slimming pass.
+
 ## 0.8.4
 
 ### Patch Changes

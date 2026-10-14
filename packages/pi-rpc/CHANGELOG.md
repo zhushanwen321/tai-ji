@@ -1,5 +1,11 @@
 # @zhushanwen/pi-rpc
 
+## 1.3.0
+
+### Minor Changes
+
+- 993ee907f: Main-agent spawn template now loads the builtin tool-search extension (`--extension builtin:tool-search`), enabling on-demand activation of exposure-deferred tools via tool_search; the subagent template keeps the explicit whitelist.
+
 ## 1.2.0
 
 ### Minor Changes
