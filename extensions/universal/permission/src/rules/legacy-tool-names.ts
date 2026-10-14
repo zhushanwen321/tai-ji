@@ -23,6 +23,12 @@
  *  - 幂等：新名不在旧名集合中，已迁移的配置再次加载零变化。
  *  - 只在内存展开（loadAndWatchConfig 读时迁移），不回写落盘——加载路径保持纯读；
  *    用户下次经 rule-editor 保存时自然持久化新名形态。
+ *
+ * 跨包契约登记：本表展开目标名与 subagent-workflow 的工具注册名互为跨包隐式契约
+ * （两包无 import 依赖，漂移零报错）——SW 工具再拆分/改名须同步本表（旧名进 key、
+ * 新名进展开目标），失配后果 = 旧名 deny 规则静默退化成 ask/AI 分类。登记条目见
+ * docs/extensions/extension-conventions.md「跨包隐式契约：permission 旧名展开表
+ * ↔ subagent-workflow 工具注册名」。
  */
 
 import type { Rule } from "../types.js";
