@@ -2289,7 +2289,7 @@
       "run": "node scripts/check-pi-resources-links.mjs",
       "owner": "scripts/",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
-      "note": "R2 态：改脚本本体或 preflight 接线时干跑（当前树 resources/pi 缺失 → exit 0 放行即绿）；dev symlink 形态下红是合法失败（正是脚本职责，--fix 恢复）。行为实测记录见 docs/todo/local-codesign-build-vs-dev-symlink-conflict.md"
+      "note": "R2 态：改脚本本体或 preflight 接线时干跑（当前树 resources/pi 缺失 → exit 0 放行即绿）；dev symlink 形态下红是合法失败（正是脚本职责，--fix 恢复）。判定与恢复见 docs/TROUBLESHOOTING.md 常见问题 §29"
     }
   ]
 }

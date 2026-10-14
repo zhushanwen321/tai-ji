@@ -228,7 +228,7 @@ async function waitFor(desc: string, cond: () => boolean, timeoutMs = 30_000): P
     await new Promise((r) => setTimeout(r, 50))
   }
   // 采集模式：TAIJI_WAIT_DEBUG=1 时打印每个 waitFor 的实际耗时（供满载耗时分布采集；
-  // 平时零输出不污染 CI 日志。用于 docs/todo/updater-script-integration-flaky-timeout.md 的预算校准）
+  // 平时零输出不污染 CI 日志。预算校准依据与 flake 归因见 docs/TROUBLESHOOTING.md 常见问题 §30）
   if (process.env.TAIJI_WAIT_DEBUG) {
     console.log(`[waitFor] ${desc}: ${((Date.now() - start) / 1000).toFixed(2)}s（预算 ${timeoutMs / 1000}s）`)
   }

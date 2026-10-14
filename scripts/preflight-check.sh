@@ -248,7 +248,7 @@ fi
 # [HISTORICAL] 此处曾有「git check-ignore 命中的 symlink 跳过」豁免——其假设
 # （gitignored 的 dev 缓存 symlink「不进 git，非打包风险」）是错的：electron-builder
 # extraResources 从磁盘拷贝而非 git，gitignored symlink 恰是本地打包的头号风险源
-# （2026-10 codesign 构建事故，登记于 docs/todo/local-codesign-build-vs-dev-symlink-conflict.md）。
+# （2026-10 codesign 构建事故，判定与恢复见 docs/TROUBLESHOOTING.md 常见问题 §29）。
 echo ""
 echo -e "${BLUE}[7/10] resources/pi symlink check...${NC}"
 PI_LINK_CHECK="$(to_native_path "$PROJECT_ROOT/scripts/check-pi-resources-links.mjs")"
