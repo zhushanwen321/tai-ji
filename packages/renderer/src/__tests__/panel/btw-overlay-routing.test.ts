@@ -9,7 +9,8 @@
  *   主 band 原样保留（提交态 per-vid/实例隔离）。
  * - 终态机四行：应答清 / 撤回·失效清 + 行内提示 / 回收提醒置位清 / 未读归 useBtwTabData
  *   既有族（本文件不重复）；重试仅限投递失败态（未送达保持挂起）；已终结应答丢弃 + 提示失效。
- * - 第四面：setStatus/setWidget 的 per-session 源读 vid 分区 → 线面板状态区可见。
+ * - 状态区退役（2026-10-15 用户裁决）：setStatus/setWidget per-session 源存在也不渲染——
+ *   btw 状态区恒空（原「第四面状态区」移除，扩展状态行不进旁路线面板）。
  * - 运行期错误边界：确认条子树渲染异常被 BtwPanel onErrorCaptured 收口（行内错误 + 可重试，
  *   不外溢）。
  * - 并发排序：跨通道按 receivedAt 取最早，应答后晋升下一条。
@@ -24,7 +25,7 @@
 import { composerApiModuleActualWithBtw, composerBtwApiMock } from '../helpers/composer-mount'
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, flushPromises, enableAutoUnmount } from '@vue/test-utils'
-import { nextTick, ref, effectScope } from 'vue'
+import { defineComponent, nextTick, ref, effectScope } from 'vue'
 import type { Ref } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import { InternalEventBus } from '@taiji/core'
@@ -455,8 +456,8 @@ describe('并发排序（多请求并发呈现有序，D8）', () => {
   })
 })
 
-describe('⑤ 第四面：非模态 extension GUI 状态区 drawer 归属', () => {
-  it('setStatus 条目 + setWidget 文本行按 vid 分区现线面板状态区（主 chrome 不动）', async () => {
+describe('⑤ 状态区退役（2026-10-15 用户裁决）：extension GUI 状态不进 btw 面板', () => {
+  it('per-vid setStatus 条目 + setWidget 文本行存在也不渲染——状态区恒空（主面板托盘形态不受影响）', async () => {
     const statusSource = {
       getItems: (scope: 'global' | 'per-session', sessionId?: string) =>
         scope === 'per-session' && sessionId === VID
@@ -475,6 +476,8 @@ describe('⑤ 第四面：非模态 extension GUI 状态区 drawer 归属', () =
           : undefined,
       getViewIds: (sid: string) => (sid === VID ? ['w1'] : []),
     }
+    // 选中一条线：状态区退役的断言面在 composer 带（btw-interaction）内，非空态非澄清命中
+    apiMock.list.mockResolvedValue([{ vid: VID }])
     const w = mount(BtwPanel, {
       props: { sessionId: MAIN },
       global: {
@@ -486,24 +489,34 @@ describe('⑤ 第四面：非模态 extension GUI 状态区 drawer 归属', () =
     })
     await settle(w)
 
-    const strip = w.find('[data-testid="btw-status-strip"]')
-    expect(strip.exists()).toBe(true)
-    expect(strip.text()).toContain('构建中 3/5')
-    expect(strip.text()).toContain('todo: 2 done')
+    // 非空澄清：composer 带已渲染（selectedVid 命中），退役断言非真空命中
+    expect(w.find('[data-testid="btw-interaction"]').exists()).toBe(true)
+    // 状态区三 testid 全域不存在（数据源有数据也不渲染——退役非空态）
+    expect(w.find('[data-testid="btw-status-strip"]').exists()).toBe(false)
+    expect(w.find('[data-testid="btw-status-item"]').exists()).toBe(false)
+    expect(w.find('[data-testid="btw-widget-line"]').exists()).toBe(false)
+    expect(w.text()).not.toContain('构建中 3/5')
+    expect(w.text()).not.toContain('todo: 2 done')
+    // 面板本身健康（装配面不因退役受损）
+    expect(w.find('[data-testid="drawer-btw-tab"]').exists()).toBe(true)
   })
 })
 
 describe('⑤ 运行期错误边界：btw 交互异常不外溢主面板', () => {
-  it('状态区数据源渲染抛错 → BtwPanel ec 收口：行内错误条 + 重试可达，面板根不倒', async () => {
-    const throwingSource = {
-      getItems: () => {
-        throw new Error('status source corrupt')
-      },
-    }
+  it('Guard 子树渲染抛错 → BtwPanel ec 收口：行内错误条 + 重试可达，面板根不倒（状态区已退役，注入点 = Guard stub）', async () => {
     const w = mount(BtwPanel, {
       props: { sessionId: MAIN },
       global: {
-        provide: { [STATUS_BAR_SOURCE_KEY as symbol]: throwingSource },
+        stubs: {
+          // 按组件名命中 BtwInteractionGuard（option name）：setup 即抛 = Guard 子树渲染异常
+          // （状态区移除后，错误注入不再依赖 extension 数据源，直接模拟子树抛错）
+          BtwInteractionGuard: defineComponent({
+            name: 'BtwInteractionGuard',
+            setup() {
+              throw new Error('guard subtree render corrupt')
+            },
+          }),
+        },
       },
     })
     await settle(w)

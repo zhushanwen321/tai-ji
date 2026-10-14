@@ -37,7 +37,8 @@ export default {
     truncated: '快照截断（进行中 turn 未完整带入）',
     none: '无快照（源快照不可用）',
   },
-  // M3-c 交互闭环（D8 降级路径：drawer 内联确认条 + 失效提示 + 第四面状态区）
+  // M3-c 交互闭环（D8 降级路径：drawer 内联确认条 + 失效提示；第四面状态区已随
+  // 2026-10-15 用户裁决退役——btw 状态区恒空，无对应文案键）
   interaction: {
     // 终态机失效支行内提示（失效支单入口 invalidateBtwRequests——事件帧一路：撤下 + badge 清 + 本提示同拍收口，D-B2-3）
     expiredNotice: '请求已失效',
