@@ -15,7 +15,7 @@
     <div
       v-if="droppedCount > 0"
       data-testid="toast-overflow-summary"
-      class="pointer-events-auto flex w-fit max-w-[min(360px,100%)] items-center gap-1.5 rounded-lg border border-border bg-bg-elevated py-1.5 pl-3 pr-1.5 text-[length:var(--text-2xs)] text-neutral-mid shadow-2"
+      class="pointer-events-auto flex w-fit max-w-[min(360px,100%)] items-center gap-1.5 rounded-lg border border-border bg-bg py-1.5 pl-3 pr-1.5 text-[length:var(--text-2xs)] text-neutral-mid shadow-2"
     >
       <span data-testid="toast-overflow-text" class="select-text">{{ t('panel.message.toastDropped', { count: droppedCount }) }}</span>
       <Button
@@ -35,7 +35,7 @@
     <div
       v-for="t in toasts"
       :key="t.id"
-      class="pointer-events-auto flex w-fit max-w-[min(360px,100%)] items-start gap-2.5 rounded-lg border border-border bg-bg-elevated py-2.5 pl-3 pr-2 shadow-2"
+      class="pointer-events-auto flex w-fit max-w-[min(360px,100%)] items-start gap-2.5 rounded-lg border border-border bg-bg py-2.5 pl-3 pr-2 shadow-2"
       :class="toastClass(t.type)"
       @mouseenter="pause(t.id)"
       @mouseleave="resume(t.id)"
@@ -148,12 +148,14 @@ const disposeSurfaceRegistration = registerModalSurface({
 onBeforeUnmount(disposeSurfaceRegistration)
 
 /**
- * toast 类型 → 边框强调色（背景统一 bg-bg-elevated，克制：色彩只落在 icon 与正文）。
+ * toast 类型 → 边框强调色（背景统一 bg-bg，克制：色彩只落在 icon 与正文）。
  * 取用来源登记（两权威分工）：
- * - 卡形态（底色 bg-bg-elevated / 常态边框 border-border / 圆角 rounded-lg / 阴影 shadow-2 /
+ * - 卡形态（底色 bg-bg / 常态边框 border-border / 圆角 rounded-lg / 阴影 shadow-2 /
  *   卡宽 max-w / padding）= demo 基元页 .pg-prim .toast 族；类型边框 = color-mix(warn/danger
  *   40%, transparent)（demo .toast.t-error/.t-warning 同参——tailwind preset 色值为裸 var()，
  *   /N 透明度修饰符零生成，故走 color-mix 任意值类）。
+ *   [HISTORICAL] 底色曾为 bg-bg-elevated 浮层档，2026-10-13 用户裁决 demo 方案 A 全族
+ *   迁移后与 PopoverContent 同源（composer 同源档 bg-bg + border）。
  * - 容器定位（absolute 右上，有意偏离 demo 底部居中 fixed，理由见文件头定位契约）/ 堆叠
  *   gap-2 / 进出场动效（opacity + translateY(8px)）= demo 真宿主 ToastHost.vue。
  */

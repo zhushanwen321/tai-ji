@@ -21,7 +21,7 @@
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/components/MessageStream-truncated-bar.test.ts
  */
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import type { Message } from '@taiji/shared'
@@ -213,6 +213,80 @@ describe('MessageStream 截断顶部条（u4d）', () => {
 
     expect(wrapper.find('[data-testid="load-more-error-bar"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="truncated-history-bar"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+})
+
+/** fake timers 下的微任务冲刷（handleLoadMore：await loadMoreHistory → await nextTick → finally）。
+  本地 flushPromises 用 setTimeout(0)，假计时器下永不触发，故不可复用。 */
+async function flushMicro(): Promise<void> {
+  await Promise.resolve()
+  await Promise.resolve()
+  await vi.advanceTimersByTimeAsync(1)
+}
+
+describe('MessageStream 慢网兜底细线（hist-line，OpenDesign spec §2.2）', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    loadMoreHistoryMock.mockReset()
+    hasMoreMock.value = false
+    vi.useFakeTimers()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('慢载（>150ms 未完成）：细线带 is-on 显形；完成后摘除（160ms 淡出由 CSS transition 承担）', async () => {
+    const store = useChatStore()
+    store.hydrate(SID, [makeMsg('m1')])
+    store.setHistoryWindow(SID, { truncated: true, loadedTurns: 20, totalTurnsEstimate: 42 })
+    hasMoreMock.value = true
+    let resolveLoad!: (v: boolean) => void
+    loadMoreHistoryMock.mockReturnValueOnce(
+      new Promise<boolean>((r) => {
+        resolveLoad = r
+      }),
+    )
+
+    const wrapper = mountStream()
+    const line = wrapper.find('[data-testid="history-load-line"]')
+    const sweep = line.find('i')
+    // 常驻挂载（淡出依赖 transition，不条件挂载）；未加载时零指示
+    expect(line.exists()).toBe(true)
+    expect(line.classes()).toContain('pointer-events-none')
+    expect(line.classes()).toContain('sticky')
+    expect(sweep.classes()).not.toContain('is-on')
+    expect(sweep.classes()).toContain('opacity-0')
+
+    await wrapper.find('[data-testid="load-more-history"]').trigger('click')
+    await vi.advanceTimersByTimeAsync(149)
+    expect(sweep.classes()).not.toContain('is-on') // 150ms 阈值内不显
+    await vi.advanceTimersByTimeAsync(2)
+    expect(sweep.classes()).toContain('is-on') // 超 150ms 慢载显形
+    expect(sweep.classes()).toContain('opacity-100')
+
+    resolveLoad(true)
+    await flushMicro()
+    expect(sweep.classes()).not.toContain('is-on') // 完成即复位
+    expect(sweep.classes()).toContain('opacity-0')
+    wrapper.unmount()
+  })
+
+  it('快载（<150ms 完成）：细线全程不显（零指示防闪烁）', async () => {
+    const store = useChatStore()
+    store.hydrate(SID, [makeMsg('m1')])
+    store.setHistoryWindow(SID, { truncated: true, loadedTurns: 20, totalTurnsEstimate: 42 })
+    hasMoreMock.value = true
+    loadMoreHistoryMock.mockResolvedValue(true)
+
+    const wrapper = mountStream()
+    await wrapper.find('[data-testid="load-more-history"]').trigger('click')
+    await vi.advanceTimersByTimeAsync(300)
+
+    const sweep = wrapper.find('[data-testid="history-load-line"] i')
+    expect(sweep.classes()).not.toContain('is-on')
+    expect(sweep.classes()).toContain('opacity-0')
     wrapper.unmount()
   })
 })

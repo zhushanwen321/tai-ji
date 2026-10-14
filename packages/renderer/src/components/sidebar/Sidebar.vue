@@ -26,11 +26,12 @@
         </template>
       </Brand>
 
-      <!-- 新建任务（demo .newtask：elevated 卡主操作，中性底——用户裁决 2026-10-06）。
+      <!-- 新建任务（demo .newtask：卡主操作，中性浮起底——用户裁决 2026-10-06；2026-10-14
+           全族迁移：旧 bg-bg-elevated 浮层档 → bg-bg-card 操作域浮起档）。
            快捷键提示并入 :title（demo data-tip 悬停形态），不渲染常驻 kbd。 -->
       <Button
         variant="ghost"
-        class="mx-[10px] mt-[2px] mb-[4px] flex h-auto justify-start gap-[8px] rounded border border-hairline bg-bg-elevated px-[10px] py-[8px] text-[length:var(--text-sm)] [font-weight:var(--fw-mid)] text-neutral-fg transition-colors hover:bg-bg-elevated hover:border-border-strong"
+        class="mx-[10px] mt-[2px] mb-[4px] flex h-auto justify-start gap-[8px] rounded border border-hairline bg-bg-card px-[10px] py-[8px] text-[length:var(--text-sm)] [font-weight:var(--fw-mid)] text-neutral-fg transition-colors hover:bg-bg-card hover:border-border-strong"
         :title="`${t('sidebar.newTask')} · ${formatKbd('n')}`"
         @click="onNewSession"
       >
@@ -185,8 +186,9 @@
                 <Palette :stroke-width="1.6" />
               </Button>
             </PopoverTrigger>
-            <!-- 外观快捷面板 = demo .qs-panel（workbench.css:209-218）：212px 浮层卡（elevated 底 +
-                 border-strong + r-lg + shadow-3），头「主题」（11px）+ 双列色卡 chip（外框主题底 +
+            <!-- 外观快捷面板 = demo .qs-panel（workbench.css:209-218）：212px 浮层卡（2026-10-13
+                 用户裁决 demo 方案 A 全族迁移：bg-bg + border 同源档，旧 elevated 底 + border-strong
+                 退役 / r-lg / shadow-3），头「主题」（11px）+ 双列色卡 chip（外框主题底 +
                  内点 accent）；选中态 = demo Tier A 范式（--sel-bg accent tint 底 + inset 1px
                  --sel-edge 描边）；左对齐锚钮 + 底距钮顶 8px（demo placeQs 公式）；hover 开 +
                  离开 260ms 延迟关（demo qsEnter/qsLeave 同款）；z 取 demo --z-hovercard 档 -->
@@ -194,7 +196,7 @@
               side="top"
               align="start"
               :side-offset="8"
-              class="z-[var(--z-hovercard)] w-[212px] min-w-[212px] rounded-[var(--radius-lg)] border-border-strong p-[10px] shadow-3 ![transition-property:none]"
+              class="z-[var(--z-hovercard)] w-[212px] min-w-[212px] rounded-[var(--radius-lg)] border-border p-[10px] shadow-3 ![transition-property:none]"
               data-testid="sidebar-quick-appearance-panel"
               @open-auto-focus="onQuickThemeOpenAutoFocus"
               @mouseenter="quickThemeCancelClose"
@@ -222,6 +224,27 @@
                     <i class="block size-[6px] rounded-full" :style="{ background: th.swatch[0] }" />
                   </span>
                   <span class="min-w-0 truncate">{{ th.shortName }}</span>
+                </Button>
+              </div>
+              <!-- 对话流字号快捷段（chat-flow-text-color 同批：字号/主题快调，分支合并折入）：
+                   chat 分区 4 档 segmented，写 settings.fontScales.chat（SSOT 回落 DEFAULT_FONT_SCALES），
+                   DOM 同步由 applySystemToDom 承接。选中态同面板 Tier A 语言。 -->
+              <div class="mb-[6px] mt-[10px] px-[2px] text-[length:var(--text-2xs)] [font-weight:var(--fw-mid)] tracking-[0.05em] text-neutral-dim">{{ t('settings.appearance.quickChatFont') }}</div>
+              <div class="flex gap-[2px] rounded-[var(--radius-sm)] bg-bg-input p-[3px]" data-testid="sidebar-quick-chat-font">
+                <Button
+                  v-for="tier in FONT_SCALE_TIERS"
+                  :key="tier"
+                  type="button"
+                  variant="ghost"
+                  class="h-[24px] flex-1 justify-center rounded-[var(--radius-xs)] px-[4px] text-[length:var(--text-2xs)] transition-colors duration-[var(--duration-fast)] ease-[var(--ease-out)]"
+                  :class="chatTier === tier
+                    ? 'bg-surface-hover text-neutral-fg shadow-[inset_0_0_0_1px_var(--sel-edge)] [font-weight:var(--fw-mid)] hover:bg-surface-hover hover:text-neutral-fg'
+                    : 'font-normal text-neutral-mid hover:bg-transparent hover:text-neutral-fg'"
+                  :data-testid="`sidebar-quick-chat-${tier}`"
+                  :aria-pressed="chatTier === tier"
+                  @click="applyChatTier(tier)"
+                >
+                  {{ t(`settings.appearance.${TIER_LABEL_KEYS[tier]}`) }}
                 </Button>
               </div>
             </PopoverContent>
@@ -279,6 +302,7 @@ import { SearchModal } from '@taiji/ui'
 import { PluginViewContainer } from '@taiji/ui/extension-host'
 import { useSearchModal, getSettingsStore } from '@taiji/core'
 import { TAIJI_THEMES, resolveTaijiTheme, type TaijiTheme } from '@/composables/useTaijiThemes'
+import { DEFAULT_FONT_SCALES, type FontScaleTier } from '@taiji/core'
 import { useSessionStore } from '@/stores/session'
 import { useSidebarStore } from '@/stores/sidebar'
 import { useSidebar } from '@/composables/features/sidebar/useSidebar'
@@ -381,6 +405,27 @@ const currentTheme = computed(() => resolveTaijiTheme(settingsStore.system.value
 async function applyTheme(th: TaijiTheme): Promise<void> {
   try {
     await settingsStore.setSystem({ theme: th.theme, themePreset: th.preset })
+  } catch (e) {
+    toastError(e instanceof Error ? e.message : String(e))
+  }
+}
+
+// ── 对话流字号快捷段（chat-flow-text-color 同批，分支合并折入快捷面板）──
+/** chat 分区档位显示回落（SSOT = DEFAULT_FONT_SCALES，浅合并可能缺 key） */
+const chatTier = computed<FontScaleTier>(
+  () => settingsStore.system.value.fontScales?.chat ?? DEFAULT_FONT_SCALES.chat,
+)
+const FONT_SCALE_TIERS: readonly FontScaleTier[] = ['small', 'medium', 'large', 'xlarge']
+/** tier → i18n 档位文案键（tierXLarge 等既有 ui locale 键复用，不新增词表） */
+const TIER_LABEL_KEYS: Record<FontScaleTier, string> = {
+  small: 'tierSmall',
+  medium: 'tierMedium',
+  large: 'tierLarge',
+  xlarge: 'tierXLarge',
+}
+async function applyChatTier(tier: FontScaleTier): Promise<void> {
+  try {
+    await settingsStore.setSystem({ fontScales: { ...settingsStore.system.value.fontScales, chat: tier } })
   } catch (e) {
     toastError(e instanceof Error ? e.message : String(e))
   }

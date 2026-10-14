@@ -14,13 +14,17 @@ import { cn } from '../../lib/utils'
 import { registerUiModalSurface, uiSurfaceRectOf } from '../../modal-surface-registrar'
 
 /**
- * SelectContent —— 下拉浮层。样式与 PopoverContent 对齐（elevated 浮层）。
+ * SelectContent —— 下拉浮层。样式与 PopoverContent 对齐（composer 同源底色，
+ * 2026-10-13 用户裁决 demo 方案 A 全族迁移）。
  * 默认 popper 模式：position="popper"，跟随触发器对齐。
  *
  * z-index = --z-dialog(1100)：demo .pg-set .sel-pop 同消费 var(--z-dialog)（tokens.css
  * 梯队注释：dialog 档承载「浮于 modal 的浮层」）。高于 DialogContent（--z-modal 1000），
  * 保证嵌在 Dialog 内的 Select（如 ProviderEditModal 类型/上下文/思考策略）下拉时不被压住。
  * sideOffset 4px：demo .sel-pop top calc(100% + 4px) 实测锚距。
+ * [HISTORICAL] 底色/边框曾为 elevated + border-strong 浮层档（反向对比度 + 与已迁移的
+ * CommandPopover 不一致），随本次全族迁移切换为 bg-bg + border；--bg-elevated token
+ * 本身保留（segmented active 凹陷槽范式等非浮层消费方不变）。
  *
  * inheritAttrs=false + $attrs 手动绑到内部 reka SelectContent：本封装模板单根是
  * SelectPortal（渲染为 Teleport，非普通元素根），Vue 对 Teleport 根不继承 fallthrough
@@ -65,7 +69,7 @@ onBeforeUnmount(disposeSurfaceRegistration)
       v-bind="{ ...forwarded, ...$attrs }"
       :class="
         cn(
-          'relative z-[var(--z-dialog)] max-h-[var(--reka-select-content-available-height)] min-w-[var(--reka-select-trigger-width)] overflow-hidden rounded-md border border-border-strong bg-bg-elevated text-neutral-fg shadow-2 outline-none reka-popover-transition',
+          'relative z-[var(--z-dialog)] max-h-[var(--reka-select-content-available-height)] min-w-[var(--reka-select-trigger-width)] overflow-hidden rounded-md border border-border bg-bg text-neutral-fg shadow-2 outline-none reka-popover-transition',
           props.class,
         )
       "

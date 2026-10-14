@@ -785,6 +785,16 @@ export class RpcClient implements IPiEngine {
   }
 
   /**
+   * pi 子进程 pid（spawn 后非 null；未 spawn / 已退出后 proc 置空的形态为 null）。
+   *
+   * 消费方 = 信号取证（signal-forensics）：意外退出时记录「死亡主语」pid，供
+   * 进程表 diff 排除自身与候选发送方定位。只读暴露，无写点。
+   */
+  get pid(): number | null {
+    return this.proc?.pid ?? null
+  }
+
+  /**
    * 最近一次 pi 双向活动时刻（ms epoch，idle-pi-reclamation D1 空闲信号）。
    * 只读暴露：消费方（reaper 判定）只读，刷新统一走 RpcClient 内部 touch 点与
    * touchActivity()——写点集中可审计，防止空闲时钟被随意重置。

@@ -46,7 +46,7 @@ const emit = defineEmits<{
       class="group h-auto gap-[5px] rounded-sm border px-1 py-[3px] pl-2 text-[var(--text-xs)] font-normal transition-colors [&_svg]:size-[11px]"
       :class="
         tab.viewId === modelValue
-          ? 'border-border-strong bg-bg-elevated text-neutral-fg hover:bg-bg-elevated'
+          ? 'border-border bg-surface-hover text-neutral-fg hover:bg-surface-hover'
           : 'border-border bg-bg-input text-neutral-dim hover:bg-surface-2 hover:text-neutral-fg'
       "
       @click="emit('update:modelValue', tab.viewId)"

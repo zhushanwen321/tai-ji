@@ -2,12 +2,13 @@
 <template>
   <!--
     容器组件 · composer（panel/spec.md zone ④，draft-composer-states）。
-    发送位四态（u6b / D6 表）：send（↑ idle 直发）/ stop（■ turn 活跃 dispatching|generating 无 compacting；settling 单独）/
-    queue（↑ 时钟角标：compacting 任意 turn 组合（与内核 hold 判定序同构）/bash/settling+bash，点击统一提交——排队 lane 由内核裁定）/
+    发送位四态（u6b / D6 表）：send（↑ idle 直发）/ stop（■ turn 活跃 dispatching|generating 无 compacting；settling 单独；
+    **compacting 任意 turn 组合——中止压缩流程**）/ queue（↑ 时钟角标：bash、settling+bash，点击统一提交——排队 lane 由内核裁定）/
     spinner（isSending）。staging 模式优先（fork/handoff）。
     steer/followUp/queued 路由：⏎/Alt+⏎ 全部汇入统一发送分发器（D6，composer-shell
     sendRoute——turn 活跃→steer、占用→queued、idle→direct），Alt+⏎ 在 steer 路由行保留
-    followUp 语义。
+    followUp 语义。**按钮形态与 Enter 车道分立**：压缩期按钮是「终止压缩」（中止入口），⏎ 仍走
+    内核 queued 排队（compaction-end flush）——两问题不混谈（2026-10 用户裁决）。
     staging 优先（fork/handoff，与视觉层 boxClass/placeholder 优先级对齐）：staging 活跃时 ⏎/Alt+⏎
       均提交 staging（发送位也替换为 staging 发送按钮，streaming 中同样生效）；handoff 的
       streaming 拦截在 enterHandoffMode/handleHandoffSend（isSessionActive 守卫）。
@@ -65,7 +66,7 @@
              [HISTORICAL] 前身 mode-chip（accent-soft 底 + accent 字 + accent × + placeholder/box
              整框染色）已随 banner 形态整体退役。经 staging.activeStaging 统一渲染（ADR-0057），
              退出调 staging.exit()（Esc / 发送 / 切 session 三路退出链不变） -->
-        <div v-if="staging.activeStaging.value" class="mx-2 mt-2 flex items-center gap-[8px] rounded-[var(--radius)] border border-border bg-bg-elevated px-2.5 py-[6px]"
+        <div v-if="staging.activeStaging.value" class="mx-2 mt-2 flex items-center gap-[8px] rounded-[var(--radius)] border border-border bg-bg-card px-2.5 py-[6px]"
           :data-testid="staging.activeStaging.value.type === 'fork' ? 'composer-mode-banner' : 'composer-handoff-banner'"
         >
           <component :is="staging.activeStaging.value.visual.chipIcon" class="size-[14px] shrink-0 text-accent" :stroke-width="1.8" />
@@ -218,11 +219,13 @@
           </div>
 
           <!-- 发送位四态（u6b / D6 表「发送位」列·序 0 不退化）：staging（fork/handoff，含 streaming 中）→
-             staging send / queue（compacting 任意 turn 组合（含 generating∧compacting——与内核 holdReasonOf 判定序同构，
-             消除旧「按钮 stop 但 Enter 排队」形态漂移）/ bash、settling+bash）→ ↑ 带时钟角标（可点入队，flush 于占用
-             解除后自动投递）/ stop（turn 活跃 dispatching|generating 无 compacting；settling 单独）→ ■ /
-             S5 sending→spinner / 全 idle→send。
-             派生源 = shell sendButtonState（与分发器 sendRoute 同源 effectivePhase，不漂移）。
+             stop（■ 中止：turn 活跃 dispatching|generating 无 compacting；settling 单独；**compacting 任意 turn 组合——
+             点击中止压缩流程，title 分型「终止压缩」**）/ queue（bash、settling+bash）→ ↑ 带时钟角标（可点入队，flush 于占用
+             解除后自动投递）/ S5 sending→spinner / 全 idle→send。
+             派生源 = shell sendButtonState（与分发器 sendRoute 同源 effectivePhase）。
+             **按钮形态与 Enter 车道故意分立**（2026-10 用户裁决）：按钮回答「现在能中止什么」（忙 → 终止钮，
+             压缩期中止对象是压缩流程本身），Enter 回答「消息走哪条车道」（compacting → 内核 queued 排队，
+             compaction-end flush）——压缩期排队提交走 ⏎，按钮位专作中止入口，不再二选一。
              staging 优先于 stop（用户决策）：streaming 中提交 fork 合法（对源只读）；需停止时
              先 Esc 退出 staging 再点 stop。staging 发送中（isSending）仍走 spinner。 -->
         <Button
@@ -242,7 +245,7 @@
           variant="ghost"
           size="icon"
           class="stop-btn ml-[4px] size-[var(--composer-btn-size)] rounded-md bg-surface-hover text-neutral-mid hover:bg-danger-soft hover:text-danger"
-          :title="t('panel.composer.stop')"
+          :title="sendButtonStopTarget === 'compacting' ? t('panel.composer.stopCompacting') : t('panel.composer.stop')"
           @click="onStopClick"
         >
           <Square class="size-[13px]" />
@@ -308,11 +311,11 @@
 </template>
 
 <script setup lang="ts">
-import { computed, createVNode, nextTick, provide, ref, render, watch, type Ref } from 'vue'
+import { computed, nextTick, ref, watch, type Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ArrowUp, Clock, Square, X } from '@lucide/vue'
 import { Button } from '@/components/ui/button'
-import { ComposerInput, ComposerInputDepsKey, type ComposerInputDeps } from '@taiji/ui/features/composer'
+import { ComposerInput } from '@taiji/ui/features/composer'
 import { ViewHost } from '@taiji/ui/extension-host'
 import HeaderActionsHost from '@/components/extension/HeaderActionsHost.vue'
 import AddMenuPopover from './AddMenuPopover.vue'
@@ -345,8 +348,7 @@ import { useComposerShell, createComposerDrafts, type ShellInputInstance } from 
 import { useComposerKeydown } from '@/composables/panel/composer-keydown'
 import { useCompositionFlag } from '@/composables/panel/composition-flag'
 import type { DraftStore } from '@taiji/dom-core/composer/input'
-import { handleImagePaste } from '@/composables/panel/useImageAttachment'
-import { SLASH_ICON_COMPONENTS } from '@/composables/slashIcons'
+import { provideComposerInputDeps } from '@/composables/panel/composer-input-deps'
 
 const props = withDefaults(
   defineProps<{
@@ -444,7 +446,8 @@ const popoverQuery = computed(() => {
 const selectedSkillNames = ref<string[]>([])
 
 const isSending = ref(false)
-// [u6b] 本地 isCompacting computed 已退役：压缩维度唯一读口 = shell sendButtonState（与 sendRoute 同源）
+// [u6b] 本地 isCompacting computed 已退役：压缩维度唯一读口 = shell sendButtonState / sendButtonStopTarget
+// （与 sendRoute 同源 effectivePhase；压缩期按钮 = stop 且 stopTarget='compacting'，title 分型「终止压缩」）
 
 // composer-box 容器 ref（拖拽落位 + 视觉）——先声明，再喂给 shell
 const composerBoxRef = ref<HTMLElement | null>(null)
@@ -490,6 +493,7 @@ const {
   restoreToDraft,
   sendRoute,
   sendButtonState,
+  sendButtonStopTarget,
   canSubmit,
   boxClass,
   placeholder,
@@ -576,13 +580,18 @@ const onKeydown = useComposerKeydown({
 })
 
 /**
- * stop 按钮点击：先尝试取消进行中的 staging 操作（handoff inflight），否则普通 LLM turn abort。
+ * stop 按钮点击：先尝试取消进行中的 staging 操作（handoff inflight），否则 abort。
+ * abort 的中止对象由 runtime 权威态判定（renderer 只表达「停止」意图）：
+ * - isCompacting ∧ ¬isGenerating（压缩期，sendButtonStopTarget='compacting'）→ 中止压缩流程
+ *   （pi session.abort → abortCompaction，runtime 走压缩取消语义：不写 stopped 终态、
+ *   不广播 message.complete，队列经 abort-idle 对账立即 flush）
+ * - 否则 → 中止当前 LLM turn（既有语义）
  * 在 Composer 包一层而非改 useComposerSubmit——避免影响其他消费方（onAbort 语义保持「取消 LLM turn」）。
  */
 async function onStopClick(): Promise<void> {
   // staging 操作进行中（handoff inflight）→ 取消 staging（abortHandoff 乐观清 handingOff + RPC 中断）
   if (props.sessionId && await staging.abortIfInProgress(props.sessionId)) return
-  // 否则普通 LLM turn abort
+  // 否则 abort（中止对象 = 压缩流程 / 当前回合，由 runtime 按权威态判定）
   await onAbort()
 }
 
@@ -602,19 +611,7 @@ async function onSendClick(): Promise<void> {
 }
 
 // ── ui ComposerInput deps 注入（ADR-0058：pasteImage/renderIcon/t 三壳层能力）──
-const composerInputDeps: ComposerInputDeps = {
-  pasteImage: handleImagePaste,
-  // renderIcon：图标查找 + vue render 内聚在壳层（dom-core 零 vue render，ADR-0058 边界）。
-  // 返回 true = 已渲染图标（dom-core 侧挂载 host），false = 无图标不渲染。
-  renderIcon: (host: HTMLElement, iconKey?: string) => {
-    const Comp = iconKey
-      ? SLASH_ICON_COMPONENTS[iconKey as keyof typeof SLASH_ICON_COMPONENTS]
-      : undefined
-    if (!Comp) return false
-    render(createVNode(Comp, { size: 12 }), host)
-    return true
-  },
-  t: (key: string) => t(key),
-}
-provide(ComposerInputDepsKey, composerInputDeps)
+// 共享装配器（user-bubble-edit-composer）：底部 composer 与消息流内用户气泡编辑框
+// （简化版 composer）复用同一 ComposerInput，deps 实现单点在此，防两份 renderIcon 漂移。
+provideComposerInputDeps()
 </script>

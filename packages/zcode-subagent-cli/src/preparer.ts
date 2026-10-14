@@ -414,8 +414,49 @@ export function locateZcodeBuiltinCatalog(sources?: ZcodeSourcePaths): string | 
  * 返回其 values[0]（各家族首值均为最小档：disabled/low/none——显式模型不携带
  * options 时对端对必需模型直接拒收，值域供数使显式模型可用且默认轻推理）。
  * 目录缺失/无匹配/无值域 → undefined（不携带，行为与未实现等价）。
+ *
+ * [2026-10-13] 最小档 = 全量值域首值——解析链单一化（resolveZcodeReasoningValues），
+ * 消除目录读取 + modelRules 提取的双实现（重复克隆回归防线）。
  */
 export function resolveZcodeMinimalReasoningLevel(modelRef: string, sources?: ZcodeSourcePaths): string | undefined {
+  return resolveZcodeReasoningValues(modelRef, sources)?.[0];
+}
+
+/** [resolveZcodeMinimalReasoningLevel 拆分] 末个匹配 modelMatch 的
+ * reasoningLevel.values（regex 编译失败/无值域的条目跳过，后写覆盖前写）。 */
+function lastMatchingReasoningValues(modelRules: readonly unknown[], modelId: string): string[] | undefined {
+  let values: string[] | undefined;
+  for (const rule of modelRules) {
+    if (!isRecord(rule)) continue;
+    const match = rule["modelMatch"];
+    if (typeof match !== "string") continue;
+    let re: RegExp;
+    try {
+      // 大小写不敏感（2026-10-13 探针实测）：目录规则用小写词干（glm-5\.3-flash），
+      // 模型 id 保留包侧大小写（GLM-5.3-Flash）——敏感匹配只命中通配 ".*" 的
+      // [disabled,enabled] 域，错过专用规则真实域 [low,high,max]，发出的档位被
+      // app-server 注册表拒收（reasoning-level-not-supported）。app-server 侧
+      // 注册表匹配是不敏感的，与它对齐。
+      re = new RegExp(match, "i");
+    } catch {
+      continue;
+    }
+    if (!re.test(modelId)) continue;
+    const spec = (rule["config"] as Record<string, unknown> | undefined)?.["optionSpecs"];
+    const level = isRecord(spec) ? spec["reasoningLevel"] : undefined;
+    const vals = isRecord(level) ? strArray(level["values"]) : [];
+    if (vals.length > 0) values = vals;
+  }
+  return values;
+}
+
+/**
+ * 模型 reasoning 值域全量（create 帧 model.options.reasoningLevel 的择档域；
+ * 2026-10-13 探针实测驱动）：目录通配规则的值域可能与 plan 网关服务端实际接受面
+ * 漂移（GLM-5.3-Flash 目录域含 disabled，服务端拒收）——显式 thinkingLevel 参与
+ * 择档时需要全域而非只首值（引擎侧 reasoningLevelFor 消费）。
+ */
+export function resolveZcodeReasoningValues(modelRef: string, sources?: ZcodeSourcePaths): string[] | undefined {
   const catalogPath = locateZcodeBuiltinCatalog(sources);
   if (catalogPath === undefined) return undefined;
   let parsed: unknown;
@@ -431,30 +472,7 @@ export function resolveZcodeMinimalReasoningLevel(modelRef: string, sources?: Zc
       ? rules["modelConfigRules"]["modelRules"]
       : undefined;
   if (!Array.isArray(modelRules)) return undefined;
-  return lastMatchingReasoningValues(modelRules, modelId)?.[0];
-}
-
-/** [resolveZcodeMinimalReasoningLevel 拆分] 末个匹配 modelMatch 的
- * reasoningLevel.values（regex 编译失败/无值域的条目跳过，后写覆盖前写）。 */
-function lastMatchingReasoningValues(modelRules: readonly unknown[], modelId: string): string[] | undefined {
-  let values: string[] | undefined;
-  for (const rule of modelRules) {
-    if (!isRecord(rule)) continue;
-    const match = rule["modelMatch"];
-    if (typeof match !== "string") continue;
-    let re: RegExp;
-    try {
-      re = new RegExp(match);
-    } catch {
-      continue;
-    }
-    if (!re.test(modelId)) continue;
-    const spec = (rule["config"] as Record<string, unknown> | undefined)?.["optionSpecs"];
-    const level = isRecord(spec) ? spec["reasoningLevel"] : undefined;
-    const vals = isRecord(level) ? strArray(level["values"]) : [];
-    if (vals.length > 0) values = vals;
-  }
-  return values;
+  return lastMatchingReasoningValues(modelRules, modelId);
 }
 
 /**
@@ -472,6 +490,71 @@ function defaultProviderForShortName(
   });
   if (ordered !== undefined) return ordered;
   return withKey[0]![0];
+}
+
+/**
+ * account 家族直通（2026-10-13 用户裁决：zai 系走 account provider 配置；launcher
+ * wrapper 对内建目录读取注入 entitled 绕过外部 spawn 装载门——app-server 注册表
+ * 装载判据 = access.entitled === true，目录构建的账号条目默认非 entitled）。account
+ * 凭据由 zcode CLI 账号体系自解析（credentials.json 登录态），不经个人 provider 表
+ * ——校验降为目录存在性：规则存在 + 模型在清单内 → 原样放行（大小写保留，注册表
+ * 匹配不敏感）。目录定位失败/不可读/规则缺失/模型不在清单 → model_not_available。
+ */
+function resolveAccountModelRef(wanted: string, wantedProvider: string, sources?: ZcodeSourcePaths): string {
+  const catalogPath = locateZcodeBuiltinCatalog(sources);
+  if (catalogPath === undefined) {
+    throw new ZcodePrepareError(
+      "model_not_available",
+      `account 模型 "${wanted}" 无法校验：内建目录定位失败（ZCODE_BUILTIN_PROVIDER_CONFIG_FILE 与 runtime/provider 扫描均未命中）。`,
+    );
+  }
+  let catalog: unknown;
+  try {
+    catalog = JSON.parse(fs.readFileSync(catalogPath, "utf8"));
+  } catch (err) {
+    throw new ZcodePrepareError(
+      "model_not_available",
+      `account 模型 "${wanted}" 无法校验：内建目录不可读（${err instanceof Error ? err.message : String(err)}）。`,
+    );
+  }
+  const accountRule = findAccountProviderRule(catalog, wantedProvider);
+  if (accountRule === undefined) {
+    throw new ZcodePrepareError(
+      "model_not_available",
+      `未知 account provider "${wantedProvider}"（内建目录无此规则）。恢复指引：改用目录内 account:* 规则（如 account:zai-individual-coding-plan / account:bigmodel-individual-coding-plan）。`,
+    );
+  }
+  assertAccountModelKnown(accountRule, wanted, wantedProvider);
+  return wanted;
+}
+
+/** 内建目录 providerRules 内查找 account 规则（无规则段/无匹配/条目非对象 → undefined）。 */
+function findAccountProviderRule(catalog: unknown, wantedProvider: string): Record<string, unknown> | undefined {
+  const catalogRules =
+    isRecord(catalog) && isRecord(catalog["config"]) && isRecord(catalog["config"]["providerConfigRules"])
+      ? catalog["config"]["providerConfigRules"]["providerRules"]
+      : undefined;
+  const accountRule = Array.isArray(catalogRules)
+    ? catalogRules.find((r) => isRecord(r) && r["providerId"] === wantedProvider)
+    : undefined;
+  return isRecord(accountRule) ? accountRule : undefined;
+}
+
+/**
+ * account 模型清单校验（builtinModelIds 优先、personalModelIds 兜底；清单缺席或
+ * 空 = 不设限放行——目录未枚举模型时交由 app-server 注册表实况裁决）。不在清单
+ * → model_not_available（列该 account provider 可用模型）。
+ */
+function assertAccountModelKnown(accountRule: Record<string, unknown>, wanted: string, wantedProvider: string): void {
+  const accountConfig = isRecord(accountRule["config"]) ? accountRule["config"] : {};
+  const modelIds = accountConfig["builtinModelIds"] ?? accountConfig["personalModelIds"];
+  const short = modelShort(wanted);
+  if (Array.isArray(modelIds) && modelIds.length > 0 && !modelIds.includes(short)) {
+    throw new ZcodePrepareError(
+      "model_not_available",
+      `未知模型 "${short}"（account provider ${wantedProvider} 下可用: ${modelIds.join(", ")}）。`,
+    );
+  }
 }
 
 /**
@@ -506,6 +589,11 @@ export function resolveZcodeModelRef(requested: string | undefined, sources?: Zc
   }
 
   if (wanted === undefined) return "";
+
+  const wantedProvider = wanted.includes("/") ? providerOf(wanted) : undefined;
+  if (wantedProvider !== undefined && wantedProvider.startsWith("account:")) {
+    return resolveAccountModelRef(wanted, wantedProvider, sources);
+  }
 
   const provider = wanted.includes("/")
     ? providerOf(wanted)

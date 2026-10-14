@@ -5,8 +5,9 @@ import {
   SquareTerminal,
   Pencil,
   SquareFunction,
+  Search,
   Users,
-  ListChecks,
+  Workflow,
   ArrowRight,
 } from '@lucide/vue'
 import type { ToolCallStatus } from '@taiji/shared'
@@ -20,23 +21,35 @@ import type { ToolCallStatus } from '@taiji/shared'
  * failed 不换形（demo TurnList.vue:86-89 权威：图标名不随失败态变，仅由消费方
  * headerIconClass 把原工具图标染 danger——原 'failed'→AlertTriangle 换形枚举已删）。
  *
- * BLOCK_ICON_LUCIDE 是 H 最终图标（lightbulb/book-open/square-terminal/pencil/users/
- * list-checks/arrow-right），统一规格 14×14 / stroke-width 1.7 / currentColor。
- * running 态不走该映射，消费方改用 RUNNING_LOADER_SVG（呼吸弧 loader，三重动画 + accent 蓝）。
+ * BLOCK_ICON_LUCIDE 是 H 最终图标（lightbulb/book-open/square-terminal/pencil/search/users/
+ * workflow/arrow-right），统一规格 14×14 / stroke-width 1.7 / currentColor。
+ * running 态不走该映射，消费方改用 RunningBlockIcon 动效组件（每类活动专属动效，
+ * 字形保留 + accent 动效元素——双环/呼吸弧全类型共用 loader 退役，见 RunningBlockIcon.vue）。
  *
  * 归属：本文件是图标决策的 SSOT（IF1/IF2 契约）。消费方拿 BlockIconKind 后，running 用
- * RUNNING_LOADER_SVG，其余用 BLOCK_ICON_LUCIDE[kind]。
+ * toolName → 动效 kind 映射（Block.vue TOOL_RUNNING_KIND），其余用 BLOCK_ICON_LUCIDE[kind]。
  */
 export type BlockIconKind =
-  | 'thinking' | 'tool-read' | 'tool-bash' | 'tool-edit' | 'tool-other'
+  | 'thinking' | 'tool-read' | 'tool-bash' | 'tool-edit' | 'tool-grep' | 'tool-other'
   | 'subagent' | 'workflow' | 'running' | 'text'
 
-/** toolName → tool 细分类映射（未命中的 toolName 走 'tool-other'） */
+/**
+ * 运行中动效 kind（RunningBlockIcon 消费；与静态档一一对应 + thinking 轨道点）。
+ * 独立类型 = 消费方映射表（Block.vue TOOL_RUNNING_KIND / RUN_GROUP_RUNNING_ICON）的键域约束。
+ */
+export type RunningIconKind =
+  | 'thinking' | 'tool-read' | 'tool-bash' | 'tool-edit' | 'tool-grep'
+  | 'subagent' | 'workflow' | 'tool-other'
+
+/** toolName → tool 细分类映射（未命中的 toolName 走 'tool-other'）。grep/find 探索类
+ *  单列 tool-grep（Search 字形 + 透镜扫掠动效），不再落 SquareFunction 兜底。 */
 const TOOL_ICON_MAP: Record<string, BlockIconKind> = {
   read: 'tool-read',
   bash: 'tool-bash',
   edit: 'tool-edit',
   write: 'tool-edit',
+  grep: 'tool-grep',
+  find: 'tool-grep',
 }
 
 /**
@@ -61,28 +74,33 @@ export function getBlockIcon(
 }
 
 /**
- * BlockIconKind → lucide 组件映射（不含 running——running 用 RUNNING_LOADER_SVG）。
- * Demo H 最终值：thinking=lightbulb（TurnList.vue:73 静止态；running 态呼吸弧由消费方
- * RUNNING_LOADER_SVG 承担）/ tool-read=book-open / tool-bash=square-terminal /
- * tool-edit=pencil / tool-other=square-function / subagent=users / workflow=list-checks /
- * text=arrow-right。
+ * BlockIconKind → lucide 组件映射（不含 running——running 用 RunningBlockIcon 动效组件）。
+ * tool-read=book-open / tool-bash=square-terminal / tool-edit=pencil / tool-grep=search /
+ * tool-other=square-function / subagent=users / text=arrow-right。
+ * workflow=workflow（lucide Workflow 双节点连线，与 composer slash 菜单 slash-icons.ts 同款——
+ * 原独立档 list-checks 与菜单图标不一致，统一到同源字形）。
  * run 组块（run 类型分组）不占独立档：组头图标 = 组类型的语义图标（探索→tool-read /
  * 改动→tool-edit / 执行命令→tool-bash，映射在 Block.vue 的 RUN_GROUP_ICON），组身份由
- * 「类型名 + N 步」文案承载，行内有 running 成员时图标位让给 RUNNING_LOADER_SVG。
+ * 「类型名 + N 步」文案承载，行内有 running 成员时图标位让给 RunningBlockIcon 动效款
+ * （组头动效 = 组类别同款，见 RunningBlockIcon）。
  */
 export const BLOCK_ICON_LUCIDE: Record<Exclude<BlockIconKind, 'running'>, Component> = {
   thinking: Lightbulb,
   'tool-read': BookOpen,
   'tool-bash': SquareTerminal,
   'tool-edit': Pencil,
+  'tool-grep': Search,
   'tool-other': SquareFunction,
   subagent: Users,
-  workflow: ListChecks,
+  workflow: Workflow,
   text: ArrowRight,
 }
 
 /**
  * running 态呼吸弧 loader SVG（ui-optimize-unified 决策 11 / N14）。
+ * [2026-10 trace 块动效退役] trace 块行头的 running 态已改用 RunningBlockIcon 动效组件
+ * （每类活动专属动效，字形保留 + accent 动效元素）；本常量仅存 TurnRail / BashOutputBlock
+ * 两个非块头消费点（rail 位置/通知位不与块动效同屏争抢），不再新增消费点。
  * 淡轨整圈 circle r=10 opacity 0.16 + accent 弧段 circle r=10 pathLength=100，
  * viewBox 0 0 24 24，stroke currentColor stroke-width 1.7 / linecap round / linejoin round。
  * 颜色唯一 accent（消费方 text-accent 继承 currentColor），不加发光与缩放脉冲。

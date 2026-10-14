@@ -29,6 +29,7 @@ const path = require('node:path');
 const os = require('node:os');
 const CONFIG = path.join(os.homedir(), '.zcode', 'cli', 'config.json');
 const PC = path.join(os.homedir(), '.zcode', 'v2', 'provider_config.json');
+const CATALOG = process.env.ZCODE_BUILTIN_PROVIDER_CONFIG_FILE || null;
 const OTHER = path.join(os.homedir(), '.probe-other.txt');
 const STATE = process.env.ZCODE_PROBE_STATE;
 function grab(v) {
@@ -57,6 +58,11 @@ async function main() {
     (v) => grab(v), (err) => ({ kind: 'error', code: err && err.code }));
   out.pcPromiseUtf8 = await fs.promises.readFile(PC, 'utf8').then(
     (v) => grab(v), (err) => ({ kind: 'error', code: err && err.code }));
+  if (CATALOG) {
+    // 内建目录读取（endswith('zcode-builtin.json') 拦截分支——wrapper 安装补丁层后
+    // 应返回 entitled:true 的补丁视图；未安装时原文透出）
+    tries('catalogUtf8', () => fs.readFileSync(CATALOG, 'utf8'));
+  }
   fs.writeFileSync(STATE, JSON.stringify(out));
 }
 main().then(() => process.exit(0), (err) => {
@@ -84,6 +90,8 @@ interface ProbeState {
   pcSyncNoEnc: { kind: string; text?: string; code?: string };
   promiseUtf8Dash: { kind: string; text?: string; code?: string };
   pcPromiseUtf8: { kind: string; text?: string; code?: string };
+  /** 内建目录读取（catalogUtf8：ZCODE_BUILTIN_PROVIDER_CONFIG_FILE 指向的 zcode-builtin.json；env 未设时字段缺省） */
+  catalogUtf8?: { kind: string; text?: string; code?: string };
   [k: string]: unknown;
 }
 
@@ -659,6 +667,80 @@ describe("内建 provider 配置定位（env 补齐）", () => {
     const res = h.run();
     expect(res.status).toBe(0);
     expect(h.state().builtinProviderEnv).toBe(null);
+  });
+});
+
+describe("安装门（catalog 定位先于门判定——纯 account 宿主回归锁定）", () => {
+  /** zhipu-account 内建目录 fixture（entitled 形态可参数化）。 */
+  function writeAccountCatalog(entitled: boolean): { path: string; patched: unknown } {
+    const access = { type: "zhipu-account", entitled };
+    const catalog = {
+      config: {
+        providerConfigRules: {
+          providerRules: [{ providerId: "zhipu", providerName: "Zhipu", config: { access } }],
+        },
+      },
+    };
+    const p = path.join(tmpRoot, `catalog-${entitled}`, "zcode-builtin.json");
+    fs.mkdirSync(path.dirname(p), { recursive: true });
+    fs.writeFileSync(p, JSON.stringify(catalog));
+    // wrapper 补丁视图：catalogPatchText 原地翻转后重序列化（同形状，entitled:true）
+    const patched = {
+      config: {
+        providerConfigRules: {
+          providerRules: [{ providerId: "zhipu", providerName: "Zhipu", config: { access: { ...access, entitled: true } } }],
+        },
+      },
+    };
+    return { path: p, patched };
+  }
+
+  it("text=null（v2 无凭据）而目录有 zhipu-account 条目 → 补丁层仍安装：目录读取返回 entitled:true + 安装决策出声", () => {
+    // 纯 account 宿主形态：v2 不布置 → injectedConfigText() === null。回归前安装门
+    // 退化为 text!==null（catalogPatchText 无参调用恒 null）→ 补丁层静默不安装、
+    // entitled 原样透出、plan 家族「不存在 Model」且零日志
+    const cat = writeAccountCatalog(false);
+    const h = setupHome({ builtinProviderEnv: cat.path });
+    const res = h.run();
+    expect(res.status).toBe(0);
+    const st = h.state();
+    expect(st.catalogUtf8!.kind).toBe("string");
+    expect(JSON.parse(st.catalogUtf8!.text!)).toEqual(cat.patched);
+    expect(res.stderr).toContain("补丁层已安装");
+    expect(res.stderr).toContain("cli-config-inject=off");
+    expect(res.stderr).toContain("catalog-entitled=on");
+  });
+
+  it("text=null 且目录未定位 → 跳过决策出声（为何跳过可见），原生行为透出", () => {
+    // 无 v2、无 runtime 目录、无显式 env —— 跳过不再静默（决策日志留痕）
+    const h = setupHome({});
+    const res = h.run();
+    expect(res.status).toBe(0);
+    expect(res.stderr).toContain("补丁层未安装");
+    expect(res.stderr).toContain("内建目录未定位");
+    expect(res.stderr).not.toContain("补丁层已安装");
+    expect(h.state().syncUtf8.code).toBe("ENOENT");
+  });
+
+  it("text=null 且目录已定位但无 zhipu-account 条目 → 跳过（原因=无条目需补），目录读取原生透出", () => {
+    const p = path.join(tmpRoot, "no-account", "zcode-builtin.json");
+    fs.mkdirSync(path.dirname(p), { recursive: true });
+    fs.writeFileSync(p, "{}");
+    const h = setupHome({ builtinProviderEnv: p });
+    const res = h.run();
+    expect(res.status).toBe(0);
+    expect(res.stderr).toContain("补丁层未安装");
+    expect(res.stderr).toContain("无 zhipu-account 条目");
+    expect(h.state().catalogUtf8!.text).toBe("{}");
+  });
+
+  it("text 非 null（v2 有凭据）→ 安装日志标明 cli-config-inject=on（决策可见性）", () => {
+    const h = setupHome({ v2: { provider: { p1: providerEntry("k1") } }, real: {} });
+    const res = h.run();
+    expect(res.status).toBe(0);
+    expect(res.stderr).toContain("补丁层已安装");
+    expect(res.stderr).toContain("cli-config-inject=on");
+    expect(res.stderr).toContain("catalog-entitled=off");
   });
 });
 

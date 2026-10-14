@@ -332,8 +332,11 @@ export function useContenteditableInput(
     range.setStart(node, symbolStart)
     range.setEnd(node, offset)
     range.deleteContents()
-    sel.removeAllRanges()
-    sel.addRange(range)
+    // 选区写入单次化（IME 首字失效修复另一半，用户报告 2026-10-13）：删完后 range 两端点
+    // 已重合，直接 Selection.collapse() 一次到位。旧写法 removeAllRanges()+addRange() 会让
+    // 选区先整体清空再重建（两次通知 + 空档），与紧随其后的 chip 插入选区写入叠加，macOS
+    // IME 的组字上下文不重臂 → 确认 skill 后首个中文键不走 compositionstart 裸插字母。
+    sel.collapse(range.startContainer, range.startOffset)
     return true
   }
 

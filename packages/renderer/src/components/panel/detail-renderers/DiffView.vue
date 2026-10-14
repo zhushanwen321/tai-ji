@@ -52,7 +52,7 @@
         <!-- 行号槽：oldNo / newNo。newNo 可点击注入该行 file 引用（FR-5） -->
         <span class="w-10 shrink-0 select-none px-1 text-right text-[color-mix(in_oklch,var(--neutral-dim)_60%,transparent)]">{{ line.oldNo ?? '' }}</span>
         <span
-          v-if="line.newNo !== undefined"
+          v-if="line.newNo !== undefined && injectable"
           class="w-10 shrink-0 cursor-pointer select-none px-1 text-right text-[color-mix(in_oklch,var(--neutral-dim)_60%,transparent)] transition-colors hover:text-accent"
           :title="t('panel.detail.injectFileRef')"
           @click="onLineClick(line)"
@@ -111,12 +111,18 @@ import { extToLang } from '@/composables/logic/file-type'
 
 const { t } = useI18n()
 
-const props = defineProps<{
+const props = withDefaults(
+  defineProps<{
   /** unified diff patch 文本（git.getDiff 返回） */
   patch: string
   /** 文件路径（用于推断 shiki 语言；从 patch 内 +++ b/xxx 也可，但 path 更可靠） */
   path?: string
-}>()
+  /** newNo 是否可点击注入 #file:L 引用（FR-5）：DetailPane 上下文可注入；trace 块内
+   *  复用时（tool-detail-rich）无注入收口，传 false 关闭可点击 affordance */
+  injectable?: boolean
+}>(),
+  { injectable: true },
+)
 
 /**
  * FR-5: 行号点击注入该行 file chip 到 composer。
@@ -129,8 +135,8 @@ const emit = defineEmits<{
 /**
  * 行号点击：emit 行引用信息（FR-5）。仅用 newNo（改动后行号）。
  * 纯删除行（newNo undefined）不可点击注入——该行在新文件已不存在，注入 :L<oldNo>
- * 语义错误（指向被删行）。模板 v-if="line.newNo !== undefined" 已挡住删除行渲染可点击 span，
- * 此处 return 是防御性兜底。
+ * 语义错误（指向被删行）。模板 v-if="line.newNo !== undefined && injectable" 已挡住删除行
+ * 与 injectable=false（trace 块复用）的渲染，此处 return 是防御性兑底。
  */
 function onLineClick(line: { oldNo?: number; newNo?: number }): void {
   if (!props.path) return

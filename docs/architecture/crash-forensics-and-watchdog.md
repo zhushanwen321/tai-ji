@@ -103,7 +103,7 @@ pi 崩溃（exit 1）
 
 ### 3.3 关键决策与权衡
 
-**本章结论**：10 个决策——D1 登记双文件（条件信号事件化）、D2 评估器（暗债从根源修复）、D3 checkpoint 自动恢复、D4 看门狗采样与降级、D5 滚动重启执行链、D6 诊断导出、D7 tee size 轮转、D8 入站 parse 检查、D9 两个 supersession/检查裁决、D10 崩溃时刻机器面关联取证（v12 增）。
+**本章结论**：11 个决策——D1 登记双文件（条件信号事件化）、D2 评估器（暗债从根源修复）、D3 checkpoint 自动恢复、D4 看门狗采样与降级、D5 滚动重启执行链、D6 诊断导出、D7 tee size 轮转、D8 入站 parse 检查、D9 两个 supersession/检查裁决、D10 崩溃时刻机器面关联取证（v12 增）、D11 死亡信号发送方归因（v13 增）。
 
 ---
 
@@ -246,6 +246,13 @@ pi 崩溃（exit 1）
 - **不采用**：常驻 `log stream` sidecar——崩溃是稀有事件，常驻进程 + 持续 CPU 不成比例，且需完整生命周期管理；`log show` 按崩溃时刻一次性采样（1-5s）在 fire-and-forget 下可忽略。登记事件枚举扩值（crash-correlation 事件）——20 值封闭枚举扩值需 D1 schema 块同步，而关联证据的完整形态是文本块（不适合结构化行），落 pi-crash log + 既有 crash 行带 machinePiDigest 已覆盖机查/人查两面。
 - **效果**：下次同类连坐崩溃，pi-crash log 自带凶器相关性证据（同秒 Electron 退出行 + 幸存者进程表），归因无需人工重放统一日志；#16（E2 型连坐）的登记输入多携带机器面摘要，人工复审与后续评估器增强都有锚。
 
+**D11：死亡信号发送方归因（v13 增，signal-forensics）**
+
+- **背景（2026-10-13 连坐复发 + 归因面缺口）**：session 01a132f3 与兄弟 session 01a132f0 的 pi 在**同一毫秒**（01:51:49.322Z）收到外部 SIGTERM，双双以 exit 143 优雅退出（pi rpc-mode 自带 `shutdown(143, signal)` 处理器），第三个兄弟 session 的 pi 毫发无伤；runtime 侧 kill_source=exit_converge（「pi exited on its own」）确认非 App 主动杀。D10 的快照/日志关联只回答「死状 + 同秒连坐」，「谁发的信号」仍缺——三条确定性路线全部被封：① macOS 不为普通 kill(2) 记系统日志（崩溃处理器 log show 关联只捞到 mDNSResponder 的 STOP 行）；② EndpointSecurity 的 AUE_kill 审计需 Apple 特批 entitlement（第三方不可得）；③ Darwin ptrace 无 PTRACE_GETSIGINFO（信号投递 stop 拿不到 siginfo.si_pid）。本决策把不可确定的归因变成可机器复核的候选集。
+- **采用**：最佳努力 + 强指纹路线，两个新文件（infra/pi/process-table-ring.ts + signal-forensics.ts），全部 best-effort 不影响 exit 主链。① **滚动进程表环**：受管 pi 存活期间以固定间隔（默认 1.5s，env TAIJI_SIGNAL_WATCH_INTERVAL_MS 可调、0=关闭）采样 `ps -axo pid=,ppid=,command=`，有界环缓冲（默认 40 样本 ≈60s，env 可调）；定时器 unref、上一次采样未回不重叠、ps 失败跳过本次仅累计 failures。start 挂 process-manager createSession（**先于 spawn**——spawn 即崩的死亡也要有窗口样本），stop 挂受管 pi 清零（destroySession / destroyAll / exit 收敛后）——空闲 runtime 零采样开销。② **死亡即时转储**：exit_converge 时同步取环内死亡前窗口（默认 30s）样本 + 异步取一帧新快照，diff 出两类候选发送方——**vanished**（窗口内任一样本在场 ∧ 新快照不在场 = 短命发送方/一次性 kill 脚本的强指纹）与 **suspiciousPresent**（仍存活 ∧ 命令行命中启发式：kill 族工具 / 引用 pi 二进制或 --mode rpc / 交互 shell；含 fresh-only pid——环内未采样到、仅见于死亡即时快照的最后 ~1.5s 内新进程）。受管 pi 不进 present（runtime 自己的子进程不是发送方，存活状态由 siblings 连坐视图单独承载）但**保留** vanished（兄弟 pi 同秒消失正是连坐证据）。头部候选补采 `ps -p <pid> -o lstart=`（启动时刻贴近死亡时刻 = 强信号）。③ **落盘双写**：crash 台账 `signal-forensics` 事件（D1 schema 扩展值 22 值之一，pid/ppid/exitCode/uptimeSec/detailPath 复用既有扩展字段登记面 + ≤2KB digest 三级降级保可解析）+ 全量记录 JSONL 追加到 `<dataDir>/logs/signal-forensics-<date>-<sid>.jsonl`（logger.ts cleanExpiredLogs 同前缀白名单同步登记，D6-⑦ 有写入就有清理）。**采样门同 D10**：logger 未启用（无落点）时结构性 no-op——单测环境零副作用，生产恒采集。
+- **不采用**：EndpointSecurity 审计（entitlement 不可得，见背景③）；ptrace 读 si_pid（Darwin 无 GETSIGINFO，读 tracee 内存找 siginfo 属脆弱黑魔法）；常驻进程 watcher/sidecar（同 D10 理由：崩溃稀有事件，常驻代价不成比例）；把候选集当自动定罪（note 字段显式声明 best-effort 语义——候选是给人/评估器复核的线索，不是证据链闭环）。
+- **效果**：下次同类外部 SIGTERM，死亡瞬间即持有机器可复核的候选发送方集（pid/ppid/cmdline/生灭时刻/兄弟连坐视图），把 D10 的「凶器相关性」从同秒连坐视图推进到发送方候选集；原理性极限（环间隔内生灭 <1.5s 的短命发送方可能两次采样都不在场而漏采）在模块头显式声明，fail-safe 方向宁漏不错——本模块只读进程表，不向任何进程发信号。
+
 ### 3.4 探针清单（运行时断言，准则 7）
 
 | # | 断言 | 状态 | 失败降级 |
@@ -346,6 +353,7 @@ pi 崩溃（exit 1）
 - v10（2026-09-13）：文档整合 Batch 4-I1——吸收 crash-resilience.md（v11）独有档案为新附录 D，该文档与 crash-resilience.impl-plan.md 删除（git 可追溯），正文引用逐处挂溯源标注。
 - v11（2026-09-13）：**D5 在途上报通道 oe-audit 坍缩（裸 TUI 闪框事故触发）**。审计报告 `.tmp/over-engineering-audit/over-engineering-audit-20260913-095736.md`（用户裁决全量执行）。要点：**送达可靠层立论改写**（原「旧版 extension/runtime 版本错配」被同 bundle 发布 + pi 随 runtime 退出销毁两条事实证伪——erss 兜底对象收敛为 reporter 放弃/通道结构性故障，缺席语义②④ 同步改写）；**重试改有界**（初始上报失败重试「直至成功一次」→ 累计 30 次放弃，对齐 plugin-bridge MAX_SYNC_ATTEMPTS 形态；60s 窗口覆盖 R2 attach 竞态，放弃走 absent-report errs 推迟）；**mode 门控**（inflight-reporter 与 plugin-bridge 的 marker-select 通道仅 rpc 模式启动——裸 pi TUI 下 marker select 无拦截方弹真框，2026-09-12 无限闪框事故根因；ask-user `ctx.mode === "rpc"` 二值判定同款先例，plugin-bridge 门控点收敛在 callBridge 入口兼覆盖 observe 转发）；**协议面坍缩**（删 `kind: initial/delta` 死字段——runtime 侧 applyReport 不读、reporter 自认等价，连同 INFLIGHT_REPORT_KINDS / InFlightReportKind / initialAcked 状态机 / isSubagentInFlightReport 的 kind 值域分支）；**死代码清除**（inflight-mirror.resetFor 孪生方法——与 presetZero 逐字同款且生产零调用；lastReportAt 死字段——生产零读者；InFlightListener 死参数——签名改无参）；**引擎槽删除**（EnginePort.inFlightSnapshot? 四段零调用链：port 可选成员 + zcode 实现 + rolling-restart 注入槽 + 求值分支 + zcode-engine-inflight.test，见 §3.3 D5 zcode 侧注记）。估算净删 ~150 行 + 1 协议常量 + 2 API + 1 状态机。**A4 验收影响注记**：镜像重建断言（reattach 后 extension 重载初始上报）行为不变——mode 门控不影响 rpc 模式（runtime 恒 rpc spawn），有界重试不影响正常路径（attach 竞态毫秒级自愈远早于 60s 窗口）。
 - v12（2026-09-20）：**D10 崩溃时刻机器面关联取证（crash-correlation，2026-09-20 连坐崩溃实证触发）**。某 session pi 四次 SIGTERM 死亡（exit 143）人工取证定位到「他进程按模式扫杀全部 taiji 形态 pi」的连坐形态后，把归因证据采集自动化：①同发布面 pi 快照（ps 过滤 taiji 二进制名）——rpc-client 写 crash log 快照 section + session-service 的 pi crash 登记行带 machinePiDigest 扩展字段（schema 登记表追加，14 主字段不变）；②统一日志关联采样（`log show` ±5s，darwin-only）——runningboardd 退出/mDNSResponder 断连/launchd 信号三类证据行补写进同一 pi-crash log。采样门 = crash log sink 启用态（无 sink 不采样）；`log stream` 常驻 sidecar 与登记枚举扩值不采用（理由见 D10）。新模块 packages/runtime/src/infra/crash-correlation.ts，接线点 rpc-client.writeCrashLogIfNeeded / session-service onSessionExit 登记行。
+- v13（2026-10-13）：**D11 死亡信号发送方归因（signal-forensics，2026-10-13 连坐复发触发）**。session 01a132f3 与兄弟 01a132f0 的 pi 在同一毫秒（01:51:49.322Z）收到外部 SIGTERM 双双 exit 143，kill_source=exit_converge 确认非 App 主动杀，但「谁发的信号」三条确定性路线全被封（macOS 不记 kill(2) 系统日志 / EndpointSecurity 需 Apple 特批 entitlement / Darwin ptrace 无 PTRACE_GETSIGINFO）。采用「最佳努力 + 强指纹」：① 滚动进程表环（process-table-ring.ts，受管 pi 存活期间 1.5s 间隔 ps 采样、有界 40 样本、unref 不重叠、start 先于 spawn / stop 挂受管 pi 清零）；② 死亡即时转储（signal-forensics.ts，exit_converge 时环历史 30s 窗口 + 一帧新快照 diff 出 vanished / suspiciousPresent 两类候选发送方，受管 pi 不进 present 但保留 vanished 作连坐证据，fresh-only 新进程入 present，头部候选补采 lstart）；③ 落盘双写（台账 signal-forensics 事件——schema 21→22 值扩展、既有扩展字段复用、≤2KB digest 三级降级 + 全量记录 JSONL，cleanExpiredLogs 同前缀白名单同步登记）。采样门同 D10（logger 无落点不采样）。不采用：ES entitlement / ptrace si_pid / 常驻 watcher / 候选集自动定罪。接线点 process-manager exit handler（exit_converge 分支）+ createSession；RpcClient 增 pid getter 作死亡主语。
 
 ## 附录 D：崩溃韧性防线档案（迁自 crash-resilience.md，该文档已删除 git 可追溯）
 

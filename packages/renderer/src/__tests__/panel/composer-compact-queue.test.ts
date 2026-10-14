@@ -6,6 +6,9 @@
  * - 发送：占用期（compacting）Enter / 发送按钮 → 与 idle 同路径的**统一提交**（useChat.send
  *   → 乐观气泡 + delivery.submit），lane 由 runtime 内核判定（queued/steer 由内核承接）；
  *   占用期不再有 `/`·`!` 例外拒绝分支（命令文本与 idle 态同语义，bash/slash 守卫不变）。
+ *   [2026-10 用户裁决] 压缩期**发送位按钮**是「终止压缩」（stop，点击 → abort 中止压缩
+ *   流程，见 composer-send-button-states.test.ts）——排队提交改由 ⏎ 承担（本文件 TC11/
+ *   TC18 的 Enter 路径不变：内核 queued 车道 + compaction-end flush）。
  * - 队列区：数据源 = session.delivery 帧投影（core getDeliveryProjectionRef），真 QueueBubble
  *   渲染 → 行可见 + 状态 chip（排队中/投递中/发送失败）
  * - × 撤销：真 QueueBubble 点击 → useQueueRows.onCancelEntry → delivery.cancel RPC；
@@ -122,7 +125,7 @@ async function typeAndEnter(
 }
 
 describe('Composer compact 期间发送（u3c/D1：统一提交，占用不拦截）', () => {
-  it('TC11: compact 期间 ⏎ → 走统一提交（useChat.send）+ 输入清空 + 发送位 queue 态', async () => {
+  it('TC11: compact 期间 ⏎ → 走统一提交（useChat.send）+ 输入清空 + 发送位 stop 态（title=终止压缩）', async () => {
     const chat = useChatStore()
     chat.setOccupancy('s1', { turn: 'idle', compacting: true, bash: false })
     const wrapper = mountComposer({ sessionId: 's1' })
@@ -132,42 +135,47 @@ describe('Composer compact 期间发送（u3c/D1：统一提交，占用不拦�
     expect(chatApiMock.send).toHaveBeenCalledWith('s1', textToSegments('hello'))
     // 输入已清空（clearInput → ComposerInput.clear）
     expect(wrapper.findComponent(ComposerInputMock).vm.clear).toHaveBeenCalled()
-    // DOM：发送位为 queue 态（时钟角标按钮）
-    expect(wrapper.find('.queue-send-btn').exists()).toBe(true)
+    // DOM：发送位为 stop 态（按钮 = 中止入口；排队由 ⏎ 承担，两问题分立——2026-10 用户裁决）
+    expect(wrapper.find('.stop-btn').exists()).toBe(true)
+    expect(wrapper.find('.stop-btn').attributes('title')).toBe('终止压缩')
+    expect(wrapper.find('.queue-send-btn').exists()).toBe(false)
   })
 
-  it('TC12: compact 期间发送按钮点击 → 统一提交（按钮可点非 spinner，title=排队发送 · ⏎）', async () => {
+  it('TC12: compact 期间发送位按钮点击 → abort（中止压缩流程，不再充当提交入口）', async () => {
+    // 按钮位在压缩期是「终止压缩」：排队提交走 ⏎（TC11），按钮点击走 onStopClick → abort。
     const chat = useChatStore()
     chat.setOccupancy('s1', { turn: 'idle', compacting: true, bash: false })
     const wrapper = mountComposer({ sessionId: 's1' })
     await typeText(wrapper, 'world')
 
-    const sendBtn = wrapper.find('.queue-send-btn')
-    expect(sendBtn.exists()).toBe(true)
-    expect(sendBtn.attributes('title')).toBe('排队发送 · ⏎')
-    expect(sendBtn.attributes('disabled')).toBeUndefined()
+    const stopBtn = wrapper.find('.stop-btn')
+    expect(stopBtn.exists()).toBe(true)
+    expect(stopBtn.attributes('title')).toBe('终止压缩')
+    expect(stopBtn.attributes('disabled')).toBeUndefined()
 
-    await sendBtn.trigger('click')
+    await stopBtn.trigger('click')
     await wrapper.vm.$nextTick()
     await wrapper.vm.$nextTick()
 
-    expect(chatApiMock.send).toHaveBeenCalledWith('s1', textToSegments('world'))
+    expect(chatApiMock.abort).toHaveBeenCalled()
+    expect(chatApiMock.send).not.toHaveBeenCalled()
   })
 
-  it('TC17: compact 态无输入 → 发送按钮 disabled + title=sendHint + 点击不提交', async () => {
+  it('TC17: compact 态无输入 → 发送位 stop 仍可点（canSubmit 不拦停止），点击 → abort', async () => {
     const chat = useChatStore()
     chat.setOccupancy('s1', { turn: 'idle', compacting: true, bash: false })
     const wrapper = mountComposer({ sessionId: 's1' })
     await wrapper.vm.$nextTick()
 
-    const sendBtn = wrapper.find('[title="输入内容后发送"]')
-    expect(sendBtn.exists()).toBe(true)
-    expect(sendBtn.attributes('disabled')).toBeDefined()
+    const stopBtn = wrapper.find('.stop-btn')
+    expect(stopBtn.exists()).toBe(true)
+    expect(stopBtn.attributes('disabled')).toBeUndefined()
 
-    await sendBtn.trigger('click')
+    await stopBtn.trigger('click')
     await wrapper.vm.$nextTick()
     await wrapper.vm.$nextTick()
 
+    expect(chatApiMock.abort).toHaveBeenCalled()
     expect(chatApiMock.send).not.toHaveBeenCalled()
   })
 

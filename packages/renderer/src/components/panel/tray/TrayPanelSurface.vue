@@ -8,8 +8,10 @@
     同款）：固定宽 400px 在视口 < ~416px 时右侧被裁（reka 碰撞位移也救不回一个比视口还宽的面板），
     上限收到视口 −16px 后面板自身收窄即可完整落在视口内；`min-w-0` 解掉包装层 `min-w-[240px]`
     在极窄视口下反过来压过 max-width 的优先级问题（min-width 在 CSS 里胜出）。
-  - 浮层容器形态对齐 demo .popover / .tray-pop（M4b）：bg-elevated 浮层档 + border-strong 边 +
-    圆角 rounded-lg（12px，demo --r-lg）+ shadow-2（原语基类已带）+ 内边距 p-1（4px）；
+  - 浮层容器形态（2026-10-13 用户裁决 demo 方案 A 全族迁移后）：底/边随 PopoverContent
+    基类 = bg-bg + border（composer 同源档，旧 bg-elevated 浮层档 + border-strong 边退役——
+    elevated 容器比行 hover 的 surface-hover 亮，hover 行反而变更暗）+ 圆角 rounded-lg
+    （12px，demo --r-lg）+ shadow-2（原语基类已带）+ 内边距 p-1（4px）；
   - 内容区固定高 h-[340px]（小屏 max-h 60vh 兜底）：切内部 tab 容器不塌缩，hover 态指针不
     落空（面板收起的根因消除）；宽高不随 demo 收窄（固定 400×340 是本仓 hover 稳定性的
     既有裁决，demo 无固定宽高对应物）；

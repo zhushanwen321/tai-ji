@@ -287,6 +287,9 @@ export class RunOrchestration {
       // 链）的窗口 = chat record 轮次，其窗口实例挂载归 U3 接线；窗口键 undefined =
       // 解析单点内透传 registry（shared-service 保形 + per-window 引擎不被创建成
       // 无人登记的孤儿实例），U3 接线后改为携带轮窗口键。
+      // [2026-10-13 进程形态修复] shared-service 引擎（zcode）已经由 descriptor
+      // 装配修复（processModel 同源进 manifest）在透传路径直通单例；本处 U3 接线的
+      // 剩余场景 = 未来「每窗口一份」的非 pi 引擎接入 chat 直派时才需要。
       probe: (engineId) => resolveWorkflowWindowEnginePort(undefined, engineId).probe(),
       // [W3] chat 域 pi 路由 = registry cli 形态 port（协议客户端）——inproc DI 实例
       // 随 inproc pi 引擎目录 删除消亡，chat 与 run 域同路（G1 单一 CLI 形态）。

@@ -86,6 +86,9 @@ vi.mock('../infra/pi/pi-provider-store.js', async (importOriginal) => {
 vi.mock('../infra/logger.js', () => ({
   createPiSessionLog: () => ({ write: vi.fn(), end: vi.fn() }),
   captureMemorySnapshot: () => ({ rss: 1, heapUsed: 2, heapTotal: 3, external: 4 }),
+  // signal-forensics（process-manager 退出链 import）的落点门：测试态恒 false——
+  // 无落点不采样，exit 主链的 Map 清理/回调通知不受取证影响
+  isPiCrashLogEnabled: () => false,
 }))
 
 // ── Tests ────────────────────────────────────────────────────────

@@ -9,7 +9,7 @@
   <div class="min-w-0 flex-1 overflow-y-auto" data-testid="wf-viz-trace-table">
     <!-- 列头行 -->
     <div
-      class="grid items-center gap-x-2 px-2 py-[5px] sticky top-0 z-10 border-b border-hairline bg-bg-elevated text-[length:var(--text-3xs)] text-neutral-dim"
+      class="grid items-center gap-x-2 px-2 py-[5px] sticky top-0 z-10 border-b border-hairline bg-bg text-[length:var(--text-3xs)] text-neutral-dim"
       :style="traceGridStyle"
     >
       <span>#</span>

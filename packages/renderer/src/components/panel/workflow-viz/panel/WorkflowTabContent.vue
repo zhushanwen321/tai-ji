@@ -7,7 +7,7 @@
   -->
   <div class="flex min-h-0 min-w-0 flex-1 flex-col">
     <!-- 子页切换器（D6 升格分段器：凹陷槽容器 + 选中态胶囊——DESIGN §5.3 SegmentedTab
-         既有范式，容器 bg-bg-input / 选中 bg-bg-elevated 中性浮起；切换逻辑零改动） -->
+         既有范式，容器 bg-bg-input / 选中 bg-surface-hover solid hover tone（2026-10-14 全族迁移，旧 bg-bg-elevated 退役）；切换逻辑零改动） -->
     <div class="shrink-0 px-2 py-1.5">
       <div class="inline-flex gap-0.5 rounded-lg bg-bg-input p-[3px]" data-testid="wf-viz-subpage-switch">
         <Button
@@ -19,7 +19,7 @@
           :data-active="subpage === page ? 'true' : 'false'"
           class="h-6 rounded-sm px-3 text-[length:var(--text-3xs)]"
           :class="subpage === page
-            ? 'bg-bg-elevated text-neutral-fg hover:bg-bg-elevated'
+            ? 'bg-surface-hover text-neutral-fg hover:bg-surface-hover'
             : 'text-neutral-dim hover:bg-transparent hover:text-neutral-fg'"
           @click="subpage = page"
         >

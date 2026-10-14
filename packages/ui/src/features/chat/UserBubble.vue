@@ -3,25 +3,47 @@
     UserBubble：用户气泡（展示态/编辑态 + skill/file/image badge + hover actions）。
     从 Turn.vue 拆出。emit edit-state-change 通知父组件（MessageStream.onEditStateChange 按 turnKey 身份持有钉扎状态）。
   -->
-  <!-- user 区：编辑态切 textarea，展示态气泡 + hover actions。
-       relative + actions 绝对定位（M3a 轮次节奏）：hover actions 悬浮于气泡右下角内
-       （bottom-0 right-0），不再常驻占流内高度——用户气泡→轮头距离 = 根容器 gap 12px
-       （demo .blk:has(+ .blk-compact) 紧凑档）。悬浮区内 hover 经 DOM 祖先传递保持
-       group/user 悬停态，按钮可达。 -->
+  <!-- user 区：编辑态 = 简化版 composer（富编辑器经 ChatViewDeps.editComposerRenderer 注入，
+       见 chat-view-deps 契约；未注入的宿主回退纯 Textarea 编辑器）；展示态气泡 + hover actions。
+       hover actions = 气泡下方流内固定槽位（mt-1 + h-6 常驻行，opacity 淡入淡出——2026-10 用户裁决：
+       按钮在气泡框外下方固定位置，不在气泡内部；悬浮区内 hover 经 DOM 祖先传递保持 group/user
+       悬停态，按钮可达）。槽位常驻使气泡→轮头距离 = mt-1(4) + 24 + 轮 gap(12) ≈ 40px
+       （原 12px 紧凑档的成本，据此裁决接受）。 -->
   <div class="group/user relative flex flex-col items-end">
-    <!-- 编辑态：编辑后 fork 新会话 -->
+    <!-- 编辑态：编辑后 fork 新会话。外层容器只管宽度纪律（N3：气泡→编辑器等宽过渡不跳变），
+         盒子视觉由两条分支各自承载（富编辑器 = 原编辑态壳视觉 accent 边 + ring；回退 = 同款壳）。 -->
     <div
       v-if="isEditingThisUser"
-      class="w-full max-w-[min(72%,64ch)] min-w-0 [overflow-wrap:anywhere] rounded-[14px] border border-accent bg-bg-input p-2 shadow-[0_0_0_3px_color-mix(in_oklch,var(--accent)_22%,transparent)]"
+      class="w-full max-w-[min(72%,64ch)] min-w-0 [overflow-wrap:anywhere]"
     >
-      <Textarea v-model="draftText" class="min-h-[64px] border-0 bg-transparent px-1 text-[length:var(--text-base)] leading-[1.55] focus-visible:ring-0" />
-      <div class="mt-1.5 flex items-center justify-between px-1">
-        <span class="text-[length:var(--text-xs)] text-neutral-dim">{{ t('panel.message.editAfterReplace') }}</span>
-        <div class="flex gap-1.5">
-          <Button variant="ghost" size="sm" class="h-7" @click="cancelEdit">{{ t('panel.message.cancel') }}</Button>
-          <Button variant="default" size="sm" class="h-7 gap-1" :disabled="!draftText.trim()" @click="submitEdit">
-            <ArrowRight class="size-3.5" /> {{ t('panel.composer.send') }}
-          </Button>
+      <!-- 富编辑器路径（editComposerRenderer 注入）：简化版 composer——ComposerInput
+           （contenteditable：slash chip + @/#/$ 引用 chip + image chip）+ CommandPopover
+           四符号候选浮层，无 + 按钮 / 底栏左簇 / 右簇。提交经 @submit 回传 segments。 -->
+      <component
+        :is="chatViewDeps.editComposerRenderer"
+        v-if="chatViewDeps.editComposerRenderer"
+        :session-id="sessionId"
+        :message-id="turn.user!.id"
+        :segments="editSegments"
+        :disabled="isPendingSend(sessionId)"
+        @submit="onEditorSubmit"
+        @cancel="cancelEdit"
+      />
+      <!-- 回退路径（测试 mock 壳 / 移动壳未注入）：纯 Textarea 编辑器。行为与富编辑器
+           提交链同构（双发锁早退 + rebuild 启发式重建 segments），存量测试锁此路径。 -->
+      <div
+        v-else
+        class="rounded-[14px] border border-accent bg-bg-input p-2 shadow-[0_0_0_3px_color-mix(in_oklch,var(--accent)_22%,transparent)]"
+      >
+        <Textarea v-model="draftText" class="min-h-[64px] border-0 bg-transparent px-1 text-[length:var(--text-base)] leading-[1.55] focus-visible:ring-0" />
+        <div class="mt-1.5 flex items-center justify-between px-1">
+          <span class="text-[length:var(--text-xs)] text-neutral-dim">{{ t('panel.message.editAfterReplace') }}</span>
+          <div class="flex gap-1.5">
+            <Button variant="ghost" size="sm" class="h-7" @click="cancelEdit">{{ t('panel.message.cancel') }}</Button>
+            <Button variant="default" size="sm" class="h-7 gap-1" :disabled="!draftText.trim()" @click="submitEdit">
+              <ArrowRight class="size-3.5" /> {{ t('panel.composer.send') }}
+            </Button>
+          </div>
         </div>
       </div>
     </div>
@@ -123,11 +145,15 @@
       </div>
     </div>
     <!-- hover actions：复制常驻 hover；编辑仅 AI 停止（非活跃态）时显示；撤回单入口（D6，路由判定在 core）。
-         悬浮于气泡右下角内（不占流内高度，见根注释）；默认 pointer-events-none，悬停/焦点
-         才可命中（消除原「隐形按钮拦截点击」形态）。 -->
+         流内固定槽位（2026-10 用户裁决）：常驻于气泡行下方（mt-1 + h-6），不占气泡内部、
+         不悬浮遮挡轮头；显隐走 opacity 零布局跳动（槽位恒在，悬停/键盘焦点才可命中——
+         pointer-events 默认 none 消除「隐形按钮拦截点击」形态）。DOM 序在气泡行之后 =
+         「下方固定位置」的结构保证（测试锁 .group/user > [data-testid=user-bubble-actions]
+         晚于 .group/ts 出现）。 -->
     <div
       v-if="!isEditingThisUser"
-      class="absolute bottom-0 right-0 flex items-center gap-0.5 opacity-0 pointer-events-none transition-opacity duration-[var(--duration-fast)] group-hover/user:opacity-100 group-hover/user:pointer-events-auto group-focus-within/user:opacity-100 group-focus-within/user:pointer-events-auto"
+      data-testid="user-bubble-actions"
+      class="mt-1 flex h-6 items-center gap-0.5 opacity-0 pointer-events-none transition-opacity duration-[var(--duration-fast)] group-hover/user:opacity-100 group-hover/user:pointer-events-auto group-focus-within/user:opacity-100 group-focus-within/user:pointer-events-auto"
     >
       <Button
         variant="ghost"
@@ -179,7 +205,7 @@ import { Textarea } from '../../primitives/textarea'
 import { turnStableId } from '@taiji/core/domain/chat'
 import type { MessageTurn } from '@taiji/core/domain/chat'
 import type { Segment } from '@taiji/shared'
-import { normalizeContent, needsBoundarySpace, normalizeSegmentOrder } from '@taiji/shared'
+import { normalizeContent, needsBoundarySpace, normalizeSegmentOrder, segmentsToText, textToSegments } from '@taiji/shared'
 import { rebuildSegmentsWithEditedText } from '../../lib/segment-rebuild'
 import { useCopy } from './composables/useCopy'
 import { formatClock } from './format-utils'
@@ -239,6 +265,18 @@ const userSegments = computed<Segment[]>(() => {
   const content = props.turn.user?.content
   if (Array.isArray(content)) return content
   return []
+})
+
+/**
+ * 编辑回填用 segments（user-bubble-edit-composer）：array content 原样透传；**string
+ * content（reload 侧单文档态）补 text 段**——富编辑器 setSegments 只认 Segment[]，
+ * 直传 userSegments（string 态恒 []）会把原文丢成空编辑框。textToSegments 是 shared
+ * 单点（纯文本 → 单 text 段），不在此复制。
+ */
+const editSegments = computed<Segment[]>(() => {
+  const content = props.turn.user?.content
+  if (Array.isArray(content)) return content
+  return typeof content === 'string' ? textToSegments(content) : []
 })
 
 /**
@@ -334,11 +372,32 @@ function startEdit(): void {
   //    「从 Segment[] 重建 chip」的完整优化项经评估延期未实施（重审条件 = 用户反馈编辑重发体验）。
   // 坑：勿在此做「标记文本还原成 chip」的局部修复——提交侧 segment-rebuild 已按「剥离与保留段
   // 重复的序列化文本」收口防标记翻倍，回填侧另造一套还原会形成两套口径。
+  // [user-bubble-edit-composer] draftText 现只服务回退路径（未注入 editComposerRenderer 的
+  // 宿主）：富编辑器路径自带 setSegments 真 chip 还原，草稿真源在编辑框 DOM 内，不经本 ref。
   draftText.value = normalizeContent(props.turn.user.content)
 }
 
 function cancelEdit(): void {
   editingUserId.value = null
+}
+
+/**
+ * 富编辑器提交（editComposerRenderer 注入路径）：编辑框产出真 segments（chip 即段，
+ * 无序列化标记文本）→ 直提 editAndResend，与主 composer send 同契约（core useChat
+ * editAndResend 签名即 Segment[]；segmentsToText 内部 slash 归位，chip 在 DOM 尾部也
+ * 序列化到行首，提交顺序无虞）。
+ * 与回退路径 submitEdit 同一收口链：
+ * ① 空稿守卫（segmentsToText 序列化 trim 为空 = 无可提交内容 → 保持编辑态不收口）；
+ * ② [D3] 双发锁早退（提交在途 → 忽略，编辑态保持、草稿不丢——与 submitEdit 同序）；
+ * ③ editingUserId=null 收口 → editAndResend（截断 + 重发）。
+ */
+function onEditorSubmit(segments: Segment[]): void {
+  const user = props.turn.user
+  if (!user) return
+  if (!segmentsToText(segments).trim()) return
+  if (isPendingSend(props.sessionId)) return
+  editingUserId.value = null
+  void editAndResend(props.sessionId, user.id, segments)
 }
 
 async function submitEdit(): Promise<void> {

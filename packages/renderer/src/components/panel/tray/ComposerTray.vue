@@ -33,8 +33,9 @@
   锚定 icon 上方（side="top"）、宽 400px、内容区固定高 h-[340px]（小屏 max-h 60vh 兜底）内
   滚动——固定高使切内部 tab 时容器不塌缩，hover 态指针不落空（面板收起的根因消除）；浮层
   样式沿用仓内 popover 范式
-  （PopoverContent：bg-elevated + border-strong + shadow-2 + radius-md；锚点范式见 docs/DESIGN.md
-  §5.12）。面板本身不设宽度/高度（尺寸由外壳承载，见两面板组件头注契约）。
+  （PopoverContent：bg-bg + border + shadow-2 + radius-md，2026-10-13 用户裁决 demo 方案 A
+  全族迁移后的 composer 同源档，旧 bg-elevated + border-strong 浮层档退役；锚点范式见
+  docs/DESIGN.md §5.12）。面板本身不设宽度/高度（尺寸由外壳承载，见两面板组件头注契约）。
   [探针 P7 真机复核，阶段 5] 若窗口最小宽度下 reka Popover 翻转/裁剪异常，降级预案 = 手写
   anchored 浮层（absolute 相对按钮容器，bottom: calc(100% + 6px)，同 §5.12 锚点范式）；降级只换
   浮层实现，本文件的状态机与两面板契约不动。

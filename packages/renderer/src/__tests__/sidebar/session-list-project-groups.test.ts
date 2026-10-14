@@ -125,15 +125,15 @@ describe('组头操作（hover 动作钮，demo .pgh-acts）', () => {
     expect(store.projects.find((p) => p.id === 'proj-a')!.name).toBe('Alpha 改')
   })
 
-  it('默认项目组无重命名/删除钮（nameless 身份守卫，组件侧双保险）', () => {
+  it('默认项目不渲染组框（用户裁决 2026-10-13 方案 A：无组头即无重命名/删除/新建钮，会话在置顶平铺区）', () => {
     setupProjects(DEFAULT_PROJECT_ID)
     const wrapper = mountList()
-    const group = groupOf(wrapper, DEFAULT_PROJECT_ID)
 
-    expect(group.find('[data-testid="project-group-rename"]').exists()).toBe(false)
-    expect(group.find('[data-testid="project-group-delete"]').exists()).toBe(false)
-    // 非破坏性的「+」恒渲染
-    expect(group.find('[data-testid="project-group-new-task"]').exists()).toBe(true)
+    // 默认项目无 ProjectGroup：nameless 身份的重命名/删除守卫不再经由组件渲染面表达
+    expect(wrapper.find(`[data-testid="project-group"][data-project-id="${DEFAULT_PROJECT_ID}"]`).exists()).toBe(false)
+    // 会话在置顶平铺区可见（无组框）
+    expect(wrapper.find('[data-testid="default-project-flat-zone"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="default-project-flat-zone"]').findAll('.session-item').length).toBeGreaterThan(0)
   })
 
   it('删除：ConfirmDialog 确认（文案写明归回后果）→ removeProject；删当前组锚定回落默认', async () => {

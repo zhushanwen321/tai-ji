@@ -44,6 +44,7 @@ export default {
   },
   // ── Appearance 页（AppearancePage）──
   appearance: {
+    quickChatFont: '对话流字号',
     region: {
       sidebar: '左侧边栏',
       chat: '对话流',

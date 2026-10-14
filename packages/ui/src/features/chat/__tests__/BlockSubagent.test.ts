@@ -229,12 +229,13 @@ describe('BlockSubagent: 点击行为（开 drawer subagent tab）', () => {
 })
 
 describe('BlockSubagent: running / failed / unfinished 态', () => {
-  it('running 态渲染呼吸弧 loader（animate-loader-spin + text-accent）', () => {
+  it('running 态渲染专属动效图标（subagent 在线脉冲，RunningBlockIcon）', () => {
     const wrapper = mount(BlockSubagent, {
       props: { tool: makeSubagent({ status: 'running' }) },
     })
-    expect(wrapper.find('.animate-loader-spin.text-accent').exists()).toBe(true)
-    // 不再有旧的脉冲点 / reasoning 紫
+    expect(wrapper.find('[data-running-icon="subagent"]').exists()).toBe(true)
+    // 不再有旧的同质 loader / 脉冲点 / reasoning 紫
+    expect(wrapper.find('.animate-loader-spin').exists()).toBe(false)
     expect(wrapper.find('.animate-working-pulse').exists()).toBe(false)
     expect(wrapper.find('.bg-reasoning').exists()).toBe(false)
   })
@@ -247,8 +248,8 @@ describe('BlockSubagent: running / failed / unfinished 态', () => {
     // 不应渲染旧的进度字段
     expect(text).not.toContain('turn ')
     expect(text).not.toContain('tokens')
-    // loader 仍在
-    expect(wrapper.find('.animate-loader-spin').exists()).toBe(true)
+    // 专属动效图标仍在（RunningBlockIcon subagent 在线脉冲）
+    expect(wrapper.find('[data-running-icon="subagent"]').exists()).toBe(true)
   })
 
   it('failed 态整行降 neutral-dim（不切 icon，颜色表达）', () => {

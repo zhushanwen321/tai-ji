@@ -136,12 +136,12 @@ describe('Block working 态 · tool 块', () => {
     expect(wrapper.text()).toContain('done')
   })
 
-  it('U7: working=false running 默认 1 行收起，header 含呼吸弧 loader 指示（Demo H）', () => {
+  it('U7: working=false running 默认 1 行收起，header 含专属动效图标（RunningBlockIcon）', () => {
     const wrapper = mountToolBlock(makeTool({ status: 'running', output: undefined }), false)
-    // header 行含工具名 + 参数（N1 basename chip）+ 呼吸弧 loader（1 行即可观察进度）
+    // header 行含工具名 + 参数（N1 basename chip）+ 专属动效图标（1 行即可观察进度）
     expectToolHeaderBasenames(wrapper)
-    // Demo H：running 态呼吸弧 loader（animate-loader-spin + text-accent），无旧脉冲点
-    expect(wrapper.find('.animate-loader-spin').exists()).toBe(true)
+    // running 态专属动效图标（RunningBlockIcon，不再用全类型共用 loader），无旧脉冲点
+    expect(wrapper.find('[data-running-icon]').exists()).toBe(true)
     expect(wrapper.find('.animate-working-pulse').exists()).toBe(false)
     // 详情区默认收起（running 不再强制展开）
     // output undefined 不会渲染 result 区，验证 argPath 详情行不在 DOM（mt-1.font-mono 是展开体）

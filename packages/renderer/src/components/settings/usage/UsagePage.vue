@@ -137,7 +137,7 @@
             :data-testid="`usage-metric-${m}`"
             class="h-[26px] whitespace-nowrap rounded-[var(--radius-sm)] px-[10px] text-[length:var(--text-xs)] hover:bg-transparent"
             :class="filter.metric === m
-              ? 'bg-bg-elevated font-semibold text-neutral-fg'
+              ? 'bg-surface-hover font-semibold text-neutral-fg'
               : 'text-neutral-mid'"
             @click="filter.metric = m"
           >
@@ -153,7 +153,7 @@
             variant="ghost"
             class="h-[26px] whitespace-nowrap rounded-[var(--radius-sm)] px-[10px] text-[length:var(--text-xs)] hover:bg-transparent"
             :class="filter.range === r
-              ? 'bg-bg-elevated font-semibold text-neutral-fg'
+              ? 'bg-surface-hover font-semibold text-neutral-fg'
               : 'text-neutral-mid'"
             @click="filter.range = r"
           >

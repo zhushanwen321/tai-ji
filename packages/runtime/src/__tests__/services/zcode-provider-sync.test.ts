@@ -486,6 +486,7 @@ describe('collectZcodeOccupiedProviderIds：让位四源谓词', () => {
 describe('buildZaiLinkedEntry：zai 关联特例', () => {
   const stdZaiInput = () => ({
     piConfigured: { 'zai-coding-cn': true, 'zai': false },
+    piCredentials: {},
     builtinTokens: { bigmodel: 'special-token-49chars' },
     catalogEntries: {
       bigmodel: {
@@ -497,7 +498,14 @@ describe('buildZaiLinkedEntry：zai 关联特例', () => {
     occupiedProviderIds: new Set<string>(),
   })
 
-  it('前置两条件齐备 → 生成 id=zai-coding-plan 关联条目（baseUrl/模型清单读目录、apiKey 只读引用特有 token）', () => {
+  it('pi 侧凭据存在 → 优先用作 apiKey（不用 builtin token）', () => {
+    const result = buildZaiLinkedEntry({ ...stdZaiInput(), piCredentials: { 'zai-coding-cn': 'pi-live-key' } })
+    expect('entry' in result).toBe(true)
+    if (!('entry' in result)) throw new Error('unreachable')
+    expect(result.entry.config.access).toEqual({ type: 'api-key', apiKey: 'pi-live-key' })
+  })
+
+  it('pi 侧凭据缺席 → 回落 builtin token（既有形态保形）', () => {
     const result = buildZaiLinkedEntry(stdZaiInput())
     expect('entry' in result).toBe(true)
     if (!('entry' in result)) throw new Error('unreachable')
@@ -516,11 +524,11 @@ describe('buildZaiLinkedEntry：zai 关联特例', () => {
     expect(result.skip.detail.includes('taiji settings')).toBe(true)
   })
 
-  it('缺 ZCode 端特有 token（v2 builtin 条目 apiKey 空）→ 不生成 + 指引提前设置', () => {
+  it('pi 侧凭据与 ZCode 端 token 双缺 → 不生成 + 指引任一可用即可', () => {
     const result = buildZaiLinkedEntry({ ...stdZaiInput(), builtinTokens: {} })
     expect('skip' in result).toBe(true)
     if (!('skip' in result)) throw new Error('unreachable')
-    expect(result.skip.detail.includes('ZCode')).toBe(true)
+    expect(result.skip.detail.includes('任一可用即可')).toBe(true)
   })
 
   it('目录 coding-plan 条目不可得 → 不生成', () => {
@@ -538,6 +546,7 @@ describe('buildZaiLinkedEntry：zai 关联特例', () => {
   it('两家族同时满足 → 取声明序首个（zai-coding-cn → bigmodel）', () => {
     const result = buildZaiLinkedEntry({
       piConfigured: { 'zai-coding-cn': true, 'zai': true },
+      piCredentials: {},
       builtinTokens: { bigmodel: 'bm-token', zai: 'zai-token' },
       catalogEntries: {
         bigmodel: { baseUrl: 'https://open.bigmodel.cn/api/anthropic', modelIds: ['GLM-5.3'] },

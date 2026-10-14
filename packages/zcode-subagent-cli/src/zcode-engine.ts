@@ -97,7 +97,7 @@ import {
   listZcodeModels,
   locateZcodeBuiltinCatalog,
   resolvePersonalProviderConfigPath,
-  resolveZcodeMinimalReasoningLevel,
+  resolveZcodeReasoningValues,
   resolveZcodeModelRef,
   splitZcodeModelRef,
   type ZcodeSourcePaths,
@@ -128,6 +128,15 @@ const PROBE_VERSION_TIMEOUT_MS = 15_000;
  * 真实值域，禁止硬编码枚举做拒收或映射；不在此列的档位只触发一行提示（warnThoughtLevelUncommon）。
  */
 const COMMON_THOUGHT_LEVELS: readonly string[] = ["low", "high", "max"];
+
+/**
+ * off 族档位（THINKING_ORDER 全 7 档中「禁思考/最省」的两端，与 subagent 工具
+ * schema 暴露给 LLM 的词表一致）：reasoning 择档对这两值短路到目录值域最小档。
+ * 「非最小档末值」回退是为「请求了思考」的档位设计的（请求思考 = reasoning 开），
+ * off 族落该回退会把「不思考」反转成最强思考（值域 ['low','high','max'] 时
+ * off → 'max' 的意图反转，2026-10 回归修复——改造前非精确命中恒为最小档）。
+ */
+const OFF_FAMILY_THINKING_LEVELS: ReadonlySet<string> = new Set(["off", "minimal"]);
 
 /** ZcodeEngine 构造依赖（全部可注入——测试不依赖真机 CLI/真凭据）。 */
 export interface ZcodeEngineDeps {
@@ -451,7 +460,7 @@ export class ZcodeEngine implements EnginePort {
     // 值域解析——per-modelRef 记忆化，目录在进程生命周期内视为静态）。
     const reasoningLevel =
       modelRef !== undefined && modelRef !== ""
-        ? this.minimalReasoningFor(modelRef)
+        ? this.reasoningLevelFor(modelRef, task.thinkingLevel)
         : undefined;
     const createParams = buildAppServerCreateParams(task, modelRef, cwd, reasoningLevel);
 
@@ -866,17 +875,34 @@ export class ZcodeEngine implements EnginePort {
     return listZcodeModels(this.deps.sources);
   }
 
-  /** 显式模型的最小 reasoning 档（目录 modelRules 值域；per-modelRef 记忆化——
+  /** 模型 reasoning 值域缓存（目录 modelRules 值域；per-modelRef 记忆化——
    *  目录文件在引擎进程生命周期内视为静态，重复 run 不重读）。 */
-  private readonly reasoningMemo = new Map<string, string | undefined>();
+  private reasoningMemo = new Map<string, string[] | undefined>();
 
-  private minimalReasoningFor(modelRef: string): string | undefined {
+  /**
+   * create 帧模型 reasoning 档择选（目录值域域内择档；2026-10-13 探针实测驱动）：
+   * - 无 thinkingLevel：目录值域首值（最小档，现状保形——轻推理默认）；
+   * - off 族（off/minimal，显式禁思考/最省）：恒值域首值（最小档）——绝不落
+   *   非最小档末值回退（那是「请求思考」档位的回退，off 族落之即意图反转）；
+   * - 其余 thinkingLevel：精确命中值域 → 用之；值域无精确名 → 取非最小档末值
+   *   （请求了思考 = reasoning 开；plan 网关对部分模型拒收 disabled——目录域含
+   *   disabled 但服务端只认非最小档，域与接受面漂移时显式意图走非最小档）。
+   */
+  private reasoningLevelFor(modelRef: string, thinkingLevel: string | undefined): string | undefined {
     const memoKey = `${locateZcodeBuiltinCatalog(this.deps.sources) ?? "none"}|${modelRef}`;
-    const hit = this.reasoningMemo.get(memoKey);
-    if (hit !== undefined || this.reasoningMemo.has(memoKey)) return hit;
-    const level = resolveZcodeMinimalReasoningLevel(modelRef, this.deps.sources);
-    this.reasoningMemo.set(memoKey, level);
-    return level;
+    const memoHit = this.reasoningMemo.get(memoKey);
+    const domain = memoHit !== undefined || this.reasoningMemo.has(memoKey)
+      ? memoHit
+      : resolveZcodeReasoningValues(modelRef, this.deps.sources);
+    this.reasoningMemo.set(memoKey, domain);
+    if (domain === undefined || domain.length === 0) return undefined;
+    const requested = thinkingLevel?.trim();
+    if (requested === undefined || requested === "") return domain[0];
+    if (domain.includes(requested)) return requested;
+    // off 族短路最小档（必须在非最小档末值回退之前——见 OFF_FAMILY_THINKING_LEVELS 注）
+    if (OFF_FAMILY_THINKING_LEVELS.has(requested)) return domain[0];
+    const nonMinimal = domain.slice(1);
+    return nonMinimal.length > 0 ? nonMinimal[nonMinimal.length - 1] : domain[0];
   }
 
   /**

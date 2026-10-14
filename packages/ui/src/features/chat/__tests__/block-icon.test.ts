@@ -5,7 +5,7 @@
  * 零 mock，仅改 import path（@/components/.../block-icon → @taiji/ui）。
  */
 import { describe, it, expect } from 'vitest'
-import { Lightbulb, BookOpen, SquareTerminal, Pencil, SquareFunction, Users, ListChecks, ArrowRight } from '@lucide/vue'
+import { Lightbulb, BookOpen, SquareTerminal, Pencil, SquareFunction, Search, Users, Workflow, ArrowRight } from '@lucide/vue'
 import { getBlockIcon, BLOCK_ICON_LUCIDE, RUNNING_LOADER_SVG } from '@taiji/ui'
 
 describe('block-icon.ts', () => {
@@ -30,11 +30,13 @@ describe('block-icon.ts', () => {
     expect(getBlockIcon('workflow', 'completed', false, true)).toBe('workflow')
   })
 
-  it('getBlockIcon: toolName 映射（read→tool-read, bash→tool-bash, edit/write→tool-edit）', () => {
+  it('getBlockIcon: toolName 映射（read→tool-read, bash→tool-bash, edit/write→tool-edit, grep/find→tool-grep）', () => {
     expect(getBlockIcon('read', 'completed', false, false)).toBe('tool-read')
     expect(getBlockIcon('bash', 'completed', false, false)).toBe('tool-bash')
     expect(getBlockIcon('edit', 'completed', false, false)).toBe('tool-edit')
     expect(getBlockIcon('write', 'completed', false, false)).toBe('tool-edit')
+    expect(getBlockIcon('grep', 'completed', false, false)).toBe('tool-grep')
+    expect(getBlockIcon('find', 'completed', false, false)).toBe('tool-grep')
   })
 
   it('getBlockIcon: 未知 toolName → tool-other', () => {
@@ -51,13 +53,15 @@ describe('block-icon.ts', () => {
     expect(BLOCK_ICON_LUCIDE['tool-read']).toBe(BookOpen)
     expect(BLOCK_ICON_LUCIDE['tool-bash']).toBe(SquareTerminal)
     expect(BLOCK_ICON_LUCIDE['tool-edit']).toBe(Pencil)
+    expect(BLOCK_ICON_LUCIDE['tool-grep']).toBe(Search)
     expect(BLOCK_ICON_LUCIDE['tool-other']).toBe(SquareFunction)
-    expect(BLOCK_ICON_LUCIDE.workflow).toBe(ListChecks)
+    expect(BLOCK_ICON_LUCIDE.workflow).toBe(Workflow)
     expect(BLOCK_ICON_LUCIDE.text).toBe(ArrowRight)
     // run 组块不占独立档：组头图标 = 组类型的语义图标（Block.vue RUN_GROUP_ICON：
     // 探索→tool-read / 改动→tool-edit / 执行命令→tool-bash），组内含 running 成员时
-    // 图标位由渲染层 RUNNING_LOADER_SVG 顶替——档位数恒 8（不含 running）
-    expect(Object.keys(BLOCK_ICON_LUCIDE)).toHaveLength(8)
+    // 图标位由渲染层 RunningBlockIcon 动效款顶替——档位数恒 9（不含 running；
+    // tool-grep 探索档 + workflow 统一到 composer Workflow 字形为本批新增）
+    expect(Object.keys(BLOCK_ICON_LUCIDE)).toHaveLength(9)
   })
 
   it('RUNNING_LOADER_SVG: 呼吸弧 loader（淡轨整圈 .ld-track + accent 弧段 .ld-arc pathLength=100，r=10）', () => {

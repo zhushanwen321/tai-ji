@@ -68,7 +68,7 @@
             type="button"
             role="tab"
             class="h-[26px] rounded-[var(--radius-sm)] px-[10px] text-[length:var(--text-xs)] hover:bg-transparent"
-            :class="activeSource === tab.id ? 'bg-bg-elevated font-semibold text-neutral-fg' : 'text-neutral-mid hover:text-neutral-fg'"
+            :class="activeSource === tab.id ? 'bg-surface-hover font-semibold text-neutral-fg' : 'text-neutral-mid hover:text-neutral-fg'"
             :aria-selected="activeSource === tab.id"
             @click="activeSource = tab.id"
           >{{ t(tab.labelKey) }}</Button>

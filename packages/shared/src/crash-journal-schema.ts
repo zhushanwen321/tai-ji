@@ -29,8 +29,9 @@
 export type CrashJournalLayer = 'pi' | 'runtime' | 'renderer' | 'main' | 'plugin-worker'
 
 /**
- * 事件名（闭合枚举：设计 D1 schema event 行 20 值 + 实装扩展 frame-unserializable，
- * 共 21 值；设计行内顺序保持逐字一致，扩展值随 frame-truncated 同族紧随其位）。
+ * 事件名（闭合枚举：设计 D1 schema event 行 20 值 + 实装扩展 frame-unserializable
+ * / signal-forensics，共 22 值；设计行内顺序保持逐字一致，扩展值随 frame-truncated
+ * 同族紧随其位）。
  */
 export type CrashJournalEventName =
   | 'crash'
@@ -52,6 +53,7 @@ export type CrashJournalEventName =
   | 'inbound-frame-dropped'
   | 'frame-truncated'
   | 'frame-unserializable'
+  | 'signal-forensics'
   | 'registry-miss'
   | 'watermark-daily'
   | 'trigger-review'
@@ -240,6 +242,7 @@ export const CRASH_JOURNAL_EVENTS = [
   'inbound-frame-dropped',
   'frame-truncated',
   'frame-unserializable',
+  'signal-forensics',
   'registry-miss',
   'watermark-daily',
   'trigger-review',
