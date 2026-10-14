@@ -334,7 +334,7 @@ function handleEnterPlanMode(
   // 进入核心收敛到 enter.ts（plan(enter) tool 与 slash 命令共用）；本入口只负责
   // flag 解析/校验（上方）与提示词投递（下方 sendMessage custom message 注入）。
   // state 由 activatePlanMode 就地改 + persist（getPlanState 缓存同一对象）。
-  const { state: activated, prompt } = activatePlanMode(pi, planCtx.states, sessionId, ctx, {
+  const { state: activated, prompt } = activatePlanMode(pi, planCtx, sessionId, ctx, {
     requirement,
     skills: resolved,
     projectDir: ctx.cwd,

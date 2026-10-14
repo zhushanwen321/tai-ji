@@ -39,18 +39,15 @@ type ExecuteResult = AgentToolResult<AskUserDetails>;
 /**
  * 禁用 ask_user 工具（headless / RPC 通道不可用时调用，防 LLM 反复重试）。
  *
- * 重设基础 = pi 注册即激活的默认集（direct / model-only，D4 tool-declaration-slimming）：
- * deferred / codemode 工具不随禁用动作点名激活（setActiveTools 点名即声明给模型，
- * 全量点名会把 defer 名单重新常驻，击穿 D4）。
+ * 快照式（D4 tool-declaration-slimming 修订）：基底 = 当前激活集（getActiveTools），
+ * 排除 ask_user 的动作叠加其上——不点任何原本未激活的工具。pi 语义
+ * （setActiveTools 点名即声明给模型，agent-session _applyToolLoadout 只滤 hidden）：
+ * 若按 getAllTools() 全量点名，defer 名单与未 opt-in 的 tool_search（实装
+ * model-only 档 + defaultActive:false 注册）会被点名激活，击穿「未开启 tool_search
+ * 时这些工具对模型不可见」的前提。
  */
 function disableAskUser(pi: ExtensionAPI): void {
-	pi.setActiveTools(
-		pi
-			.getAllTools()
-			.filter((t: { name: string; exposure: string }) => t.exposure === "direct" || t.exposure === "model-only")
-			.map((t: { name: string }) => t.name)
-			.filter((n: string) => n !== "ask_user"),
-	);
+	pi.setActiveTools(pi.getActiveTools().filter((n: string) => n !== "ask_user"));
 }
 
 /** 构造 cancelled 结果（用户取消 / abort 共用；错误路径已改为 throw，不走此函数）。 */

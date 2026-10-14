@@ -203,7 +203,7 @@ export function freshPendingSelect(
  * 单 ctx 对象（D-B4-3，批次 4 注册表签名收敛）：既有 per-session Map 注册表从散参签名
  * （sessions + controllers 两表逐层直传）收敛为本载体——states（per-session 生命周期态
  * 缓存）+ controllers（挂起 select 注册表，值 = PendingSelect 含解散来源槽位）两表收敛，
- * 「解散挂起 select」做成其方法（dissolveAll——exitPlanMode 入口打 'self'；'external'
+ * 「解散挂起 select」做成其方法（dissolveAll——exitPlanMode 入口打 'self' 标；'external'
  * 留给不经入口的外部解散显式打标）。widget.ts 无 per-session 存量（直调 ctx.ui.*），
  * 不在收敛面——GUI 侧呈现态是 renderer 派生投影。
  */
@@ -212,6 +212,12 @@ export interface PlanCtx {
   states: PlanSessionMap;
   /** 挂起 select 注册表（E10，值 = PendingSelect 含解散来源槽位） */
   controllers: PlanAbortControllers;
+  /**
+   * per-session 工具集快照（进入收拢前记录，退出还原——快照式恢复语义见
+   * snapshotActiveTools / restoreActiveTools 两函数）。禁入 PlanState/entry：
+   * pi 激活集是进程内存态，跨重启无意义（重启后由 session_start 补收拢前重建）。
+   */
+  toolSnapshots: Map<string, string[]>;
   /**
    * 解散全部挂起 select：markDissolved 一次打标 + controller.abort（E10 因果链：打标
    * 先行保证等待归口读到来源）+ 注册表清空（不留已 dissolved 的条目）。单活跃 session
@@ -226,6 +232,7 @@ export function createPlanCtx(): PlanCtx {
   const planCtx: PlanCtx = {
     states: new Map(),
     controllers: new Map(),
+    toolSnapshots: new Map(),
     dissolveAll(source) {
       for (const pending of planCtx.controllers.values()) {
         pending.markDissolved(source);
@@ -235,6 +242,38 @@ export function createPlanCtx(): PlanCtx {
     },
   };
   return planCtx;
+}
+
+/**
+ * 收拢前记录进入前工具集快照（快照式恢复的记录侧，D4 修订 dmg-r1-2）。
+ *
+ * 为什么快照式取代「按 exposure 档位过滤重建默认集」：过滤重建依赖档位分类与
+ * 「注册即激活」假设——tool_search 实装（pi tool-search/index.js）以
+ * exposure:"model-only" + defaultActive:false 注册（model-only 档但注册不激活），
+ * 过滤器会把它点名进恢复集，而 setActiveTools 点名即声明给模型（pi
+ * agent-session _applyToolLoadout 只滤 hidden）——未 opt-in tool_search 的独立 pi
+ * 一次 plan 进出即把它常驻激活，击穿 D4 削减目标。快照式直接还原进入前事实，
+ * 宿主内外一致、不依赖任何档位分类。
+ *
+ * 覆盖式写入：activatePlanMode 的 isActive 幂等守卫保证进入时上一轮必已经过退出
+ * 消费，正常路径无旧值可覆盖；异常残留（退出路径异常格未消费）由新值覆盖兜底。
+ */
+export function snapshotActiveTools(pi: ExtensionAPI, planCtx: PlanCtx, sessionId: string): void {
+  planCtx.toolSnapshots.set(sessionId, pi.getActiveTools());
+}
+
+/**
+ * 退出还原进入前工具集（快照式恢复的消费侧）。消费式：读后清槽——重复退出不再
+ * 用已消费的旧快照覆盖用户此后激活的工具。
+ *
+ * 快照缺失（本进程无进入记录：从未进入的幂等退出等）时跳过、不动当前集——
+ * 没有事实依据时不按推测重建（此时工具集未被本扩展收拢过，保持现状即正确）。
+ */
+export function restoreActiveTools(pi: ExtensionAPI, planCtx: PlanCtx, sessionId: string): void {
+  const snapshot = planCtx.toolSnapshots.get(sessionId);
+  if (snapshot === undefined) return;
+  planCtx.toolSnapshots.delete(sessionId);
+  pi.setActiveTools(snapshot);
 }
 
 /**

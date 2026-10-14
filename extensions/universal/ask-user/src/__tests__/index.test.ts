@@ -43,6 +43,8 @@ interface MockPi {
 	tool?: RegisteredTool;
 	registerTool(tool: RegisteredTool): void;
 	getAllTools(): { name: string; exposure?: string }[];
+	/** 当前激活集（快照式禁用的基底，dmg-r1-2）；缺省 = 全部 direct 工具激活 */
+	getActiveTools(): string[];
 	activeTools?: string[] | null;
 	setActiveTools(names: string[]): void;
 	// session_start handler：factory 注册 ask_user channel handler 时调用（透传功能）。
@@ -61,6 +63,9 @@ const getTool = (overrides: Partial<MockPi> = {}): RegisteredTool => {
 				{ name: "ask_user", exposure: "direct" },
 				{ name: "other_tool", exposure: "direct" },
 			];
+		},
+		getActiveTools() {
+			return ["ask_user", "other_tool"];
 		},
 		setActiveTools(names) {
 			this.activeTools = names;
@@ -229,12 +234,16 @@ describe("execute — headless (FR-8 / AC-7)", () => {
 	it("I-6: headless disables ask_user tool via setActiveTools (收尾先于 throw)", async () => {
 		let captured: string[] | null = null;
 		const tool2 = getTool({
-			// ToolInfo 形态（含 exposure）：混入 deferred 工具锚定 D4——禁用动作不得把
-			// defer 名单点名激活（setActiveTools 点名即声明给模型）
+			// 快照式禁用基底（dmg-r1-2）：getActiveTools = 当前激活集；getAllTools 注册全集
+			// 含未激活的 plan(deferred) 与 tool_search(model-only + defaultActive:false，pi
+			// tool-search/index.js 实装)——禁用动作不得把它们点名激活（setActiveTools
+			// 点名即声明给模型）
+			getActiveTools: () => ["ask_user", "other"],
 			getAllTools: () => [
 				{ name: "ask_user", exposure: "direct" },
 				{ name: "other", exposure: "direct" },
 				{ name: "plan", exposure: "deferred" },
+				{ name: "tool_search", exposure: "model-only" },
 			],
 			setActiveTools: (names: string[]) => {
 				captured = names;
@@ -245,8 +254,10 @@ describe("execute — headless (FR-8 / AC-7)", () => {
 		).rejects.toThrow();
 		expect(captured).not.toContain("ask_user");
 		expect(captured).toContain("other");
-		// D4 回归锚：deferred 工具不随禁用动作常驻
+		// D4 回归锚：未激活工具不随禁用动作常驻——含 model-only 档但 defaultActive:false
+		// 的 tool_search（按档位过滤重建会点名激活它，快照式基底天然不含）
 		expect(captured).not.toContain("plan");
+		expect(captured).not.toContain("tool_search");
 	});
 });
 
@@ -829,6 +840,7 @@ describe("execute — RPC mode (uiFormInteract via select channel)", () => {
 	it("R-10: select 回显 payload（echo，旧 taiji 宿主）→ channel-error throw 带升级指引 + 工具禁用", async () => {
 		let capturedActive: string[] | null = null;
 		const tool = getTool({
+			getActiveTools: () => ["ask_user", "other"],
 			getAllTools: () => [
 				{ name: "ask_user", exposure: "direct" },
 				{ name: "other", exposure: "direct" },

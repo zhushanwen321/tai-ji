@@ -58,11 +58,17 @@ import { updatePlanWidget } from "../widget.js";
 
 /** Build a fake pi + ctx and capture the execute callback from registerTool. */
 const ALL_TOOL_NAMES = ["read", "bash", "grep", "find", "ls", "plan", "write", "edit"];
-// D4 回归锚素材：注册全集混含 deferred 工具（对齐实装——plan 工具自身 exposure:"deferred"）
-// 与 tool_search；退出恢复集必须排除它们（restoreFullToolSet 只恢复注册即激活的默认集）
-const DEFERRED_TOOL_NAMES = ["plan", "tool_search"];
-/** 退出恢复集（D4 断言期望值）：direct 全量 = 注册即激活的默认集 */
-const RESTORED_TOOL_NAMES = ALL_TOOL_NAMES.filter((n) => !DEFERRED_TOOL_NAMES.includes(n));
+// D4 回归锚素材（对齐 pi 实装档位，快照式恢复 dmg-r1-2）：plan = deferred（tool.ts
+// 注册档位）；tool_search = model-only + defaultActive:false 注册（pi tool-search/
+// index.js:11）——model-only 档但注册不进默认激活集（agent-session _isDefaultActive：
+// defaultActive !== false 才默认激活），setActiveTools 点名即声明（_applyToolLoadout 只滤
+// hidden），恢复集点名它 = 未 opt-in 的独立 pi 上常驻激活它
+const TOOL_SEARCH = "tool_search";
+/**
+ * 独立 pi 进入 plan 前的默认激活集（getActiveTools 语义）：direct 全量——
+ * 不含 plan（deferred）与 tool_search（model-only + defaultActive:false）
+ */
+const DEFAULT_ACTIVE_TOOLS = ALL_TOOL_NAMES.filter((n) => n !== "plan");
 
 function setup() {
   // 单 ctx 对象（D-B4-3）：sessions/controllers 别名 = planCtx 两表（同对象），用例断言不变
@@ -72,10 +78,11 @@ function setup() {
     registerTool: vi.fn((tool) => { executeFn = tool.execute; }),
     appendEntry: vi.fn(),
     setActiveTools: vi.fn(),
+    getActiveTools: vi.fn(() => [...DEFAULT_ACTIVE_TOOLS]),
     getAllTools: vi.fn(() =>
-      [...ALL_TOOL_NAMES, "tool_search"].map((n) => ({
+      [...ALL_TOOL_NAMES, TOOL_SEARCH].map((n) => ({
         name: n,
-        exposure: DEFERRED_TOOL_NAMES.includes(n) ? "deferred" : "direct",
+        exposure: n === "plan" ? "deferred" : n === TOOL_SEARCH ? "model-only" : "direct",
       })),
     ),
   } as unknown as Parameters<typeof registerPlanTool>[0];
@@ -351,16 +358,22 @@ describe("registerPlanTool", () => {
     });
 
     it("resets state and restores tools on execute — exec_chosen 边（dispatching→completed 终局）", async () => {
-      const { exec, ctx, pi } = setup();
+      const { exec, ctx, pi, planCtx } = setup();
+      // 进入前快照（独立 pi 默认激活集——记录侧由 activatePlanMode / session_start 承载，
+      // 此处预置模拟「进入时已记录」；enter→退出全链闭环锚在 command.test.ts abort 联动用例）
+      planCtx.toolSnapshots.set("test-session", [...DEFAULT_ACTIVE_TOOLS]);
       (ctx.ui.select as ReturnType<typeof vi.fn>).mockResolvedValue("Execute");
       const res = await exec({ action: "complete" });
       expect(res.details.action).toBe("complete");
       expect(res.details.execMode).toBe("execute");
-      // D4 回归锚：退出恢复 = 注册即激活的 direct 集，不含 deferred（plan）与 tool_search
-      expect(pi.setActiveTools).toHaveBeenCalledWith(RESTORED_TOOL_NAMES);
+      // D4 回归锚（快照式恢复 dmg-r1-2）：恢复集 = 进入前快照，不是按 exposure 档位重建——
+      // 快照未含 tool_search（model-only + defaultActive:false，注册不激活）则恢复后仍不含
+      expect(pi.setActiveTools).toHaveBeenLastCalledWith(DEFAULT_ACTIVE_TOOLS);
       const restored = (pi.setActiveTools as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[0] as string[];
-      expect(restored).not.toContain("tool_search");
+      expect(restored).not.toContain(TOOL_SEARCH);
       expect(restored).not.toContain("plan");
+      // 消费式清槽：退出后快照不再持有（重复退出不得用旧快照覆盖此后的激活）
+      expect(planCtx.toolSnapshots.has("test-session")).toBe(false);
       expect(handlePlanComplete).toHaveBeenCalled();
       // 内部路径显示为相对路径（A2 边界判断正向：projectDir 后紧随分隔符才切）
       expect(res.details.planFilePath).toBe(".tmp/plans/auth/plan.md");
@@ -395,14 +408,16 @@ describe("registerPlanTool", () => {
     });
 
     it("headless (!hasUI) defaults to execute without any select (D4 三路分流第 1 路)", async () => {
-      const { exec, ctx, pi } = setup();
+      const { exec, ctx, pi, planCtx } = setup();
       ctx.hasUI = false;
+      planCtx.toolSnapshots.set("test-session", [...DEFAULT_ACTIVE_TOOLS]);
       const res = await exec({ action: "complete" });
       expect(res.details.action).toBe("complete");
       expect(res.details.execMode).toBe("execute");
       expect(ctx.ui.select).not.toHaveBeenCalled(); // 不进任何 select（noOp 软门修复）
       expect(detectExecSkills).not.toHaveBeenCalled(); // 选择已预定，跳过 skill 扫描
-      expect(pi.setActiveTools).toHaveBeenCalledWith(RESTORED_TOOL_NAMES);
+      // 快照式恢复：还原进入前快照（快照未含 tool_search 则恢复后仍不含）
+      expect(pi.setActiveTools).toHaveBeenLastCalledWith(DEFAULT_ACTIVE_TOOLS);
       expect(handlePlanComplete).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.anything(), "execute", undefined);
     });
 
@@ -635,7 +650,7 @@ describe("registerPlanTool", () => {
   // --- abort ---
   describe("abort", () => {
     it("resets state and cleans up session — exit 边（活跃族非终态→exited）", async () => {
-      const { exec, pi, sessions, ctx } = setup();
+      const { exec, pi, sessions, planCtx } = setup();
       // Pre-populate a session（工具层 abort 走 exitPlanMode 单入口——命令层 abort 联动的顺序断言在 command.test.ts）
       sessions.set("test-session", {
         ...DEFAULT_PLAN_STATE,
@@ -647,9 +662,16 @@ describe("registerPlanTool", () => {
         docs: [{ fileName: "design.md", absPath: "/tmp/design.md", sourceSkill: "tech-design", version: 1 }],
         state: "reviewing",
       });
+      // 进入前快照（真实场景由 activatePlanMode / session_start 记录，此处预置）
+      planCtx.toolSnapshots.set("test-session", [...DEFAULT_ACTIVE_TOOLS]);
       const res = await exec({ action: "abort" });
       expect(res.details.action).toBe("abort");
-      expect(pi.setActiveTools).toHaveBeenCalledWith(RESTORED_TOOL_NAMES);
+      // 快照式恢复（dmg-r1-2）：还原进入前快照——快照未含 tool_search/plan 则恢复后仍不含
+      expect(pi.setActiveTools).toHaveBeenLastCalledWith(DEFAULT_ACTIVE_TOOLS);
+      const restored = (pi.setActiveTools as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[0] as string[];
+      expect(restored).not.toContain(TOOL_SEARCH);
+      expect(restored).not.toContain("plan");
+      expect(planCtx.toolSnapshots.has("test-session")).toBe(false);
       expect(sessions.has("test-session")).toBe(false);
       expect(updatePlanWidget).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ isActive: false, state: "exited" }));
       // 终态矩阵：reset entry 落 isActive=false + state='exited' + skills/selfReview 清空 + docs 保留
@@ -659,8 +681,8 @@ describe("registerPlanTool", () => {
       expect(entry.skills).toEqual([]);
     });
 
-    it("终态上 abort → 幂等退出：warn 纠偏 + 不覆写 completed、不落盘 + ④工具集幂等恢复（D-B1-1 守卫极性）", async () => {
-      const { exec, pi, sessions } = setup();
+    it("终态上 abort → 幂等退出：warn 纠偏 + 不覆写 completed、不落盘 + ④无快照不动工具集（D-B1-1 守卫极性）", async () => {
+      const { exec, pi, sessions, planCtx } = setup();
       sessions.set("test-session", {
         ...DEFAULT_PLAN_STATE,
         isActive: false,
@@ -672,8 +694,10 @@ describe("registerPlanTool", () => {
       expect(res.content[0].text).toContain("Plan mode is not active");
       // ok:false 不落盘（completed 终态不被覆写为 exited）
       expect(pi.appendEntry).not.toHaveBeenCalled();
-      // ④ 工具集照常幂等恢复（D-B1-1：ok:false → ①③④⑤照常，已恢复则 no-op）
-      expect(pi.setActiveTools).toHaveBeenCalledWith(RESTORED_TOOL_NAMES);
+      // ④ 快照式幂等（D-B1-1：ok:false → ①③④⑤照常）：终态格从未收拢（快照已随上轮
+      // 退出消费）→ 无快照即 no-op，不按 exposure 档位推测重建（分类漂移会击穿 D4）
+      expect(pi.setActiveTools).not.toHaveBeenCalled();
+      expect(planCtx.toolSnapshots.has("test-session")).toBe(false);
     });
 
     it("idle 常态格 abort → warn 纠偏文案、不落盘（D-B1-1 行为变更：噪音 exited entry 消灭，V1 ⑧ 锚）", async () => {
@@ -685,13 +709,13 @@ describe("registerPlanTool", () => {
       expect(res.content[0].text).toBe("No active plan mode.");
       // 行为变更核心断言：不落 exited 噪音 entry
       expect(pi.appendEntry).not.toHaveBeenCalled();
-      // ④ 幂等恢复（idle 格工具集已全量，重设 = 可观察零变化）
-      expect(pi.setActiveTools).toHaveBeenCalledWith(RESTORED_TOOL_NAMES);
+      // ④ 幂等恢复：从未进入 = 无快照 = 不动当前集（可观察零变化）
+      expect(pi.setActiveTools).not.toHaveBeenCalled();
       expect(sessions.has("test-session")).toBe(true); // 无 reset（缓存不动）
     });
 
     it("坏数据格·终态残留（isActive=true + state=completed）abort → 清洗 entry（终态值不变 + isActive=false，不覆写为 exited）", async () => {
-      const { exec, pi, sessions } = setup();
+      const { exec, pi, sessions, planCtx } = setup();
       sessions.set("test-session", {
         ...DEFAULT_PLAN_STATE,
         isActive: true, // 坏格：伪 active 投影
@@ -699,6 +723,8 @@ describe("registerPlanTool", () => {
         state: "completed",
         docs: [{ fileName: "design.md", absPath: "/tmp/plans/auth/design.md", sourceSkill: "", version: 1 }],
       });
+      // isActive=true 意味着本进程内收拢发生过（进入或 session_start 补收拢）→ 快照在
+      planCtx.toolSnapshots.set("test-session", [...DEFAULT_ACTIVE_TOOLS]);
       const res = await exec({ action: "abort" });
       expect(res.details).toEqual({ action: "review-error", reason: "inactive" });
       // 清洗例外：唯一保留的落盘——isActive 投影复位 + state 取当前终态值（completed 不被 exited 覆写）
@@ -706,7 +732,9 @@ describe("registerPlanTool", () => {
         "plan-state",
         expect.objectContaining({ isActive: false, state: "completed" }),
       );
-      expect(pi.setActiveTools).toHaveBeenCalledWith(RESTORED_TOOL_NAMES);
+      // 快照存在即还原并清槽（收拢态工具集随清洗退出回到进入前状态）
+      expect(pi.setActiveTools).toHaveBeenLastCalledWith(DEFAULT_ACTIVE_TOOLS);
+      expect(planCtx.toolSnapshots.has("test-session")).toBe(false);
       expect(sessions.has("test-session")).toBe(false); // 清洗后缓存清理（重开经 entry 恢复正常态）
     });
 

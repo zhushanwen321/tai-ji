@@ -12,6 +12,7 @@ import {
   isTaijiGuiHost,
   persistPlanState,
   reconstructPlanState,
+  snapshotActiveTools,
 } from "./state.js";
 import { registerPlanTool } from "./tool.js";
 import { updatePlanWidget } from "./widget.js";
@@ -39,6 +40,9 @@ export default function planExtension(pi: ExtensionAPI) {
     updatePlanWidget(ctx, state);
     // If plan mode was active, re-restrict tools to the plan-mode set (includes bash — file-write constraints come from the injected plan mode prompt)
     if (state.isActive) {
+      // 补收拢前先记快照（快照式恢复语义，state.ts snapshotActiveTools）：pi 重生后
+      // 激活集即默认集——本进程内「进入 plan 前」状态的最好近似，退出时按它还原
+      snapshotActiveTools(pi, planCtx, sessionId);
       pi.setActiveTools(PLAN_MODE_TOOLS);
 
       // E3 按 state 查表恢复（D5/D9④）：挂起交互点（审批 select / 执行方式 form）随 pi
@@ -146,5 +150,6 @@ export default function planExtension(pi: ExtensionAPI) {
     const sessionId = ctx.sessionManager.getSessionId();
     planCtx.states.delete(sessionId);
     planCtx.controllers.delete(sessionId);
+    planCtx.toolSnapshots.delete(sessionId);
   });
 }

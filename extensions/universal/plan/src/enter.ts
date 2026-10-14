@@ -13,8 +13,8 @@ export type { SkillResolution } from "@zhushanwen/pi-exec-skills";
 
 import { buildPlanModePrompt } from "./prompts.js";
 import type { SkillRef } from "./prompts.js";
-import type { PlanSessionMap, PlanState } from "./state.js";
-import { applyPlanEvent, capPlanRequirement, clearRoundFields, getPlanState, persistPlanState, PLAN_MODE_TOOLS } from "./state.js";
+import type { PlanCtx, PlanState } from "./state.js";
+import { applyPlanEvent, capPlanRequirement, clearRoundFields, getPlanState, persistPlanState, PLAN_MODE_TOOLS, snapshotActiveTools } from "./state.js";
 import { updatePlanWidget } from "./widget.js";
 
 export const MAX_SLUG_LENGTH = 30;
@@ -54,12 +54,12 @@ export interface ActivatePlanModeOutcome {
  */
 export function activatePlanMode(
   pi: ExtensionAPI,
-  sessions: PlanSessionMap,
+  planCtx: PlanCtx,
   sessionId: string,
   ctx: ExtensionContext,
   input: ActivatePlanModeInput,
 ): ActivatePlanModeOutcome {
-  const state = getPlanState(sessions, sessionId, ctx);
+  const state = getPlanState(planCtx.states, sessionId, ctx);
   const { requirement, skills, projectDir } = input;
 
   // slug 折叠后可能为空串（纯中文需求）——回落 "untitled"，保证目录名恒为
@@ -121,7 +121,10 @@ export function activatePlanMode(
 
   persistPlanState(pi, state);
   updatePlanWidget(ctx, state);
-  // 收拢工具到 plan 模式白名单（含 bash——文件写约束来自下方注入的只读纪律提示词）
+  // 收拢工具到 plan 模式白名单（含 bash——文件写约束来自下方注入的只读纪律提示词）；
+  // 收拢前先记进入前激活集快照——退出（complete/abort）按快照还原进入前状态，
+  // 不按 exposure 档位分类重建（快照式恢复语义见 state.ts snapshotActiveTools）
+  snapshotActiveTools(pi, planCtx, sessionId);
   pi.setActiveTools(PLAN_MODE_TOOLS);
 
   const prompt = buildPlanModePrompt({

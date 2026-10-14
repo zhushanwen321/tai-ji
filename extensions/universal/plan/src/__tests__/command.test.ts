@@ -28,9 +28,12 @@ import type { PlanAbortControllers } from "../state.js";
 import { createPlanCtx, freshPendingSelect, MAX_PLAN_REQUIREMENT_LENGTH, PLAN_CONTEXT_CUSTOM_TYPE } from "../state.js";
 
 const ALL_TOOL_NAMES = ["read", "bash", "grep", "find", "ls", "plan", "write", "edit"];
-// D4：plan / tool_search 注册为 deferred（对齐实装），退出恢复集排除它们
-const DEFERRED_TOOL_NAMES = ["plan", "tool_search"];
-const RESTORED_TOOL_NAMES = ALL_TOOL_NAMES.filter((n) => !DEFERRED_TOOL_NAMES.includes(n));
+// 对齐 pi 实装档位（快照式恢复 dmg-r1-2）：plan = deferred（tool.ts 注册档位）；
+// tool_search = model-only + defaultActive:false 注册（pi tool-search/index.js:11）——
+// model-only 档但注册不进默认激活集，恢复集点名它 = 未 opt-in 的独立 pi 常驻激活它
+const TOOL_SEARCH = "tool_search";
+/** 独立 pi 进入 plan 前的默认激活集（getActiveTools 语义）：不含 plan 与 tool_search */
+const DEFAULT_ACTIVE_TOOLS = ALL_TOOL_NAMES.filter((n) => n !== "plan");
 
 function createMocks() {
   let capturedHandler: (args: string, ctx: ExtensionContext) => Promise<void>;
@@ -42,12 +45,13 @@ function createMocks() {
     }),
     appendEntry: vi.fn(),
     setActiveTools: vi.fn(),
+    getActiveTools: vi.fn(() => [...DEFAULT_ACTIVE_TOOLS]),
     sendMessage: vi.fn(),
     getCommands: vi.fn(() => []),
     getAllTools: vi.fn(() =>
-      [...ALL_TOOL_NAMES, "tool_search"].map((n) => ({
+      [...ALL_TOOL_NAMES, TOOL_SEARCH].map((n) => ({
         name: n,
-        exposure: DEFERRED_TOOL_NAMES.includes(n) ? "deferred" : "direct",
+        exposure: n === "plan" ? "deferred" : n === TOOL_SEARCH ? "model-only" : "direct",
       })),
     ),
   } as unknown as ExtensionAPI;
@@ -103,11 +107,12 @@ describe("registerPlanCommand", () => {
 
   // --- abort subcommand ---
 
-  it("abort（idle 常态格）: warn 纠偏文案 + 幂等退出——不落盘、工具集幂等恢复（D-B1-1 单入口守卫极性，原 info no-op 取消）", async () => {
+  it("abort（idle 常态格）: warn 纠偏文案 + 幂等退出——不落盘、无快照不动工具集（D-B1-1 单入口守卫极性，原 info no-op 取消）", async () => {
     await handler("abort", ctx);
     expect((ctx as ReturnType<typeof createMocks>["ctx"]).ui.notify).toHaveBeenCalledWith("No active plan mode.", "warning");
-    // ④ 工具集照常幂等恢复（idle 格已是默认集，重设 = 可观察零变化；D4：恢复集不含 deferred）
-    expect(pi.setActiveTools).toHaveBeenCalledWith(RESTORED_TOOL_NAMES);
+    // ④ 快照式幂等（dmg-r1-2）：idle 格从未进入（无快照）→ no-op——不按 exposure
+    // 档位推测重建（tool_search 实装 model-only + defaultActive:false，重建会点名激活它）
+    expect(pi.setActiveTools).not.toHaveBeenCalled();
     // ② 跳过：idle 删 exit 边后 ok:false 不落盘（无噪音 exited entry）
     expect(pi.appendEntry).not.toHaveBeenCalled();
   });
@@ -161,6 +166,14 @@ describe("registerPlanCommand", () => {
     );
     // 注册表条目已清理
     expect(controllers.has("test-session")).toBe(false);
+    // D4 回归锚·enter→abort 快照闭环（dmg-r1-2）：进入时收拢前记录的快照 = 进入前默认
+    // 激活集（getActiveTools，不含 tool_search——model-only + defaultActive:false 注册不
+    // 激活）；退出还原同一集合，不按 exposure 档位重建（重建会点名激活 tool_search）
+    expect(pi.setActiveTools).toHaveBeenCalledTimes(1);
+    expect(pi.setActiveTools).toHaveBeenCalledWith(DEFAULT_ACTIVE_TOOLS);
+    const restored = (pi.setActiveTools as ReturnType<typeof vi.fn>).mock.calls[0][0] as string[];
+    expect(restored).not.toContain(TOOL_SEARCH);
+    expect(restored).not.toContain("plan");
   });
 
   // --- status subcommand ---

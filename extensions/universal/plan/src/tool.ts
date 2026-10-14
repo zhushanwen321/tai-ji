@@ -40,6 +40,7 @@ import {
   planDocsFingerprint,
   persistPlanState,
   resetPlanState,
+  restoreActiveTools,
 } from "./state.js";
 import { listTemplates } from "./templates.js";
 import { updatePlanWidget } from "./widget.js";
@@ -163,23 +164,6 @@ type PlanDetails =
   | ReviewErrorDetails;
 
 // ── Helpers ────────────────────────────────────────────────────────
-
-/**
- * Restore the default full tool set after exiting plan mode.
- *
- * D4（tool-declaration-slimming）：恢复 = pi 注册即激活的默认集（direct / model-only），
- * 不含 deferred / codemode / hidden。pi 语义（dist/core/extensions/types.d.ts ToolExposure）：
- * setActiveTools 点名即声明给模型（_applyToolLoadout 只滤 hidden）——若按 getAllTools()
- * 全量点名，defer 名单与 tool_search 会随 plan 进出重新常驻，静默击穿 D4 削减目标；
- * deferred 工具的激活通道是 tool_search 检索命中，恢复默认集后回到该通道。
- */
-function restoreFullToolSet(pi: ExtensionAPI): void {
-  const toolNames = pi
-    .getAllTools()
-    .filter((t: { name: string; exposure: string }) => t.exposure === "direct" || t.exposure === "model-only")
-    .map((t: { name: string }) => t.name);
-  pi.setActiveTools(toolNames);
-}
 
 /**
  * Relative path from project dir。
@@ -416,7 +400,7 @@ function executeEnter(
     resolved = resolution.resolved;
   }
 
-  const { prompt } = activatePlanMode(pi, planCtx.states, sessionId, ctx, {
+  const { prompt } = activatePlanMode(pi, planCtx, sessionId, ctx, {
     requirement,
     skills: resolved,
     projectDir: ctx.cwd,
@@ -516,8 +500,8 @@ const EXIT_INACTIVE_MESSAGE =
  *   投影复位是用户级恢复通道（免覆写与投影清洗正交可分），state 值按当前态分派
  *   （终态残留取当前终态值不变、idle 残留落 'exited'，resetPlanState 既有 terminal
  *   参数直接承载）；
- * ③ widget 更新 ④ 工具集恢复（单份实现；ok:false 时同样执行——幂等恢复，已恢复则 no-op）
- * ⑤ 反馈文案。
+ * ③ widget 更新 ④ 工具集恢复（快照消费还原，单份实现；ok:false 时同样执行——幂等
+ *   恢复：快照存在即还原并清槽，已消费/从未收拢则 no-op）⑤ 反馈文案。
  * 守卫极性统一「ok:false → warn + 幂等退出」：退出是用户显式意图，非活跃态下退出
  * 即目标态；①③④⑤照常（解散残余挂起正是消灭「卡在等待应答」形态的动作）。
  * ① 的承载 = PlanCtx.dissolveAll（D-B4-3 单 ctx 对象方法——批次 1 的内联遍历打标
@@ -548,9 +532,9 @@ export function exitPlanMode(
     updatedState = resetPlanState(pi, planCtx.states, sessionId, ctx, terminal);
   }
 
-  // ③ widget 更新 ④ 工具集恢复（幂等：已恢复则 no-op）
+  // ③ widget 更新 ④ 工具集恢复（快照消费还原；幂等：已消费/从未收拢则 no-op）
   updatePlanWidget(ctx, updatedState);
-  restoreFullToolSet(pi);
+  restoreActiveTools(pi, planCtx, sessionId);
 
   // ⑤ 反馈
   if (!moved.ok) {
@@ -1257,8 +1241,8 @@ async function executeComplete(
     );
   }
 
-  // Restore full tool set
-  restoreFullToolSet(pi);
+  // Restore the pre-entry tool set (snapshot consumed & restored — restoreActiveTools is a no-op when there is no snapshot)
+  restoreActiveTools(pi, planCtx, sessionId);
 
   // Execute completion handler (steer/goalInit delivery)
   const goalOutcome = handlePlanComplete(pi, ctx, state, chosenMode, choice.skillEntryPath);
