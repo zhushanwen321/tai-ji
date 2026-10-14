@@ -48,6 +48,10 @@ export default {
   composer: {
     send: 'Send',
     stop: 'Stop',
+    // Stop-button title during compaction (send slot stop state + stopTarget='compacting'):
+    // aborts the compaction run, distinct from 'Stop' (aborts the turn) — the button answers
+    // "what can be aborted right now"
+    stopCompacting: 'Stop compaction',
     queueSend: 'Queue to send',
     sending: 'Sending…',
     sendBusy: 'Session is busy, please wait before sending',

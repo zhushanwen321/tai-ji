@@ -200,6 +200,40 @@ describe('message-dispatcher bus integration', () => {
     }))
   })
 
+  // ── [compaction-cancel] 压缩期中止（composer 发送位「终止压缩」钮，2026-10 用户裁决）──
+
+  it('abort 压缩期（isCompacting ∧ ¬isGenerating）→ 压缩取消语义：零 stopped 终态 + 零 message.complete', async () => {
+    // 用户中止的是压缩流程而非回合：会话仍存活且空闲，写 stopped 会在重启/重扫后误标 +
+    // 骗出 restore 入口；无流式实体可收口，message.complete{aborted} 帧语义谎报。
+    const { dispatcher, svc, messageBus, abortFn } = makeMocks({ isCompacting: true })
+    await dispatcher.abort('s1')
+    expect(abortFn).toHaveBeenCalled() // pi 侧 abortCompaction 仍经 session.abort 执行
+    expect(svc.persistSessionOutcome).not.toHaveBeenCalled()
+    const types = messageBus.publish.mock.calls.map(([, m]) => (m as { type: string }).type)
+    expect(types).not.toContain('message.complete')
+    expect(types).not.toContain('message.error')
+  })
+
+  it('abort generating∧compacting（turn 在跑）→ 保持既有 turn abort 语义（stopped + message.complete）', async () => {
+    // 阈值自动压缩与 turn 并存时点击停止 = 中止回合（pi compact 自身已 abort 过回合），
+    // 终态与收口帧必须照旧——压缩取消语义只覆盖「无 turn 在跑」形态。
+    const { dispatcher, svc, messageBus } = makeMocks({ isGenerating: true, isCompacting: true })
+    await dispatcher.abort('s1')
+    expect(svc.persistSessionOutcome).toHaveBeenCalledWith('s1', 'stopped', 'User aborted')
+    expect(messageBus.publish).toHaveBeenCalledWith('s1', expect.objectContaining({
+      type: 'message.complete',
+      payload: expect.objectContaining({ sessionId: 's1', stopReason: 'aborted' }),
+    }))
+  })
+
+  it('abort 压缩期但 source=convergence → 不走压缩取消语义（收敛环保持 stopped 终态）', async () => {
+    // 压缩取消语义仅限 source='user'（composer/sidebar 停止路径）；收敛环/静默 abort 的
+    // 诊断终态不受按钮形态变化影响。
+    const { dispatcher, svc } = makeMocks({ isCompacting: true })
+    await dispatcher.abort('s1', 'convergence')
+    expect(svc.persistSessionOutcome).toHaveBeenCalledWith('s1', 'stopped', 'Convergence abort (auto)')
+  })
+
   // ── sendBash paths ──
 
   it('sendBash ensureActive fail → bus.publish(message.error) + 回执 rejected（未执行，不 throw）', async () => {

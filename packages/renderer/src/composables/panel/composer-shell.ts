@@ -339,16 +339,19 @@ export function useComposerShell(params: ComposerShellParams) {
 
   const hasInput = computed(() => draft.value.trim().length > 0)
 
-  // ── D6 发送路由（u5b）+ 发送位四态（u6b）：sessionPhase（occupancy 投影）单一派生 ──
+  // ── D6 发送路由（u5b）+ 发送位四态（u6b）：sessionPhase（occupancy 投影）单一派生 ─
   // 数据源 = chat store sessionPhase（session.occupancy 帧驱动 + stateSnapshot 快照恢复）。
-  // 发送位四态（D6 表「发送位」列）与 ActivityStrip 从同一真值取数，与分发器行为同源不漂移。
+  // 发送位四态（D6 表「发送位」列）与 ActivityStrip 从同一真值取数（不双真源）；与 ⏎ 分发器
+  // 的关系见下方「故意分立」注——同源 ≠ 同输出。
   //
   // turn 活跃判定取**并集**：occupancy 权威投影 ∨ 本地乐观视图（isActive = streaming 实体
   // ∨ 乐观 pendingSend）。本地 send 的乐观置位先于 runtime occupancy 广播（RPC RTT 窗口），
   // 只看投影会让窗口内 Enter 落 direct 被 canSend 守卫拦死（死键回退）——并集保持现状
   // isActive→steer 语义；settling/compacting/bash 维度无本地乐观源，由权威帧独占。
   // sendRoute（三值浓缩）与发送位（需原始 turn/compacting/bash 维度细分——如 settling 单独
-  // vs settling+compacting 的 stop/queue 分档）共用同一 effective phase，不双真源。
+  // vs settling+bash 的 stop/queue 分档）共用同一 effective phase，不双真源。**两者输出故意
+  // 分立**（2026-10 用户裁决）：压缩期 sendRoute=queued（⏎ 排队）而发送位=stop（按钮中止
+  // 压缩）——按钮与 Enter 回答不同问题，派生处分叉不等于漂移（详见 sendButtonState 注释）。
   const effectivePhase = computed<SessionPhase>(() => {
     const sid = sessionIdRef.value
     if (!sid) return IDLE_SESSION_PHASE // landing（无 session）无 occupancy 记录 → 全 idle
@@ -361,12 +364,18 @@ export function useComposerShell(params: ComposerShellParams) {
 
   /**
    * [u6b] 发送位四态（D6 表「发送位」列）：send（↑ 直发）/ stop（■ 中止）/ queue（↑ 带时钟
-   * 角标排队）。派生自与 sendRoute 同源的 effectivePhase，判定序与内核 holdReasonOf 同构
-   * （compacting → bash → settling，活跃 turn 最后）：
-   * - compacting（任意 turn，含 generating/settling 组合）→ queue：内核 hold 首判 compacting
-   *   （期间提交一律 queued，compaction-end flush），按钮形态跟随权威 lane——修复旧行为
-   *   「generating∧compacting 按钮显示 stop 但 Enter 实际排队」的形态漂移
-   *   [compaction-input-unlock]；turn 回 generating 后（压缩结束）自然回落 stop
+   * 角标排队）。派生自与 sendRoute 同源的 effectivePhase。
+   *
+   * **按钮形态与 Enter 车道是两个问题**（2026-10 用户裁决，修 a46f6fd7b 的过度收敛）：
+   * - 按钮回答「现在能中止什么」——压缩期（任意 turn 组合，含 generating/settling）→ stop，
+   *   点击中止**压缩流程**（复用 abort 链路：pi session.abort → abortCompaction）。压缩期
+   *   从不渲染 queue 按钮——排队提交走 ⏎（内核 queued 车道 + compaction-end flush，车道
+   *   判定见 sendRoute），按钮位是中止入口而非第二提交入口。
+   * - Enter 回答「这条消息走哪条车道」——由 resolveSendRoute 独占（compacting → queued）。
+   * 两者故意分立：a46f6fd7b 曾把 compacting 归 queue 以「对齐内核 holdReasonOf」修按钮/
+   * Enter 漂移，代价是压缩期 composer 失去全部中止能力（阈值自动压缩的 stop 一并消失），
+   * 用户裁决恢复「忙 → 终止钮」直觉（与执行中同构）；漂移根源（按钮语义 vs 车道语义混谈）
+   * 由本分立消除，而非再次二选一。
    * - turn ∈ {dispatching, generating}（无 compacting）→ stop（turn 活跃，点击 abort）
    * - settling 分档：单独 → stop（收尾期可中止）；settling + bash → queue（turn 不活跃 +
    *   其他维度忙；D6 表未单列 settling+bash，按同构归 queue，登记 impl-plan 偏差表）
@@ -375,10 +384,25 @@ export function useComposerShell(params: ComposerShellParams) {
    */
   const sendButtonState = computed<'send' | 'stop' | 'queue'>(() => {
     const phase = effectivePhase.value
-    if (phase.compacting) return 'queue'
+    if (phase.compacting) return 'stop'
     if (phase.turn === 'dispatching' || phase.turn === 'generating') return 'stop'
     if (phase.turn === 'settling') return phase.bash ? 'queue' : 'stop'
     return phase.bash ? 'queue' : 'send'
+  })
+
+  /**
+   * stop 态的中止目标（按钮 title 分型；非空 ⇔ sendButtonState === 'stop'）：
+   * - 'compacting'：压缩期——点击中止压缩流程。runtime 侧对 "isCompacting ∧ ¬isGenerating"
+   *   的 abort 走压缩取消语义（不写 stopped 终态、不广播 message.complete，见
+   *   message-dispatcher.abort 的 compaction-cancel 分支）。
+   * - 'turn'：执行中——点击中止当前回合（既有 abort 语义）。
+   * 判定序与 sendButtonState 同形（compacting 优先），防两处派生漂移。
+   */
+  const sendButtonStopTarget = computed<'compacting' | 'turn' | null>(() => {
+    const phase = effectivePhase.value
+    if (phase.compacting) return 'compacting'
+    if (phase.turn === 'dispatching' || phase.turn === 'generating' || phase.turn === 'settling') return 'turn'
+    return null
   })
 
   // ── bash 命令模式（core dispatch/bash；sendBash 注入）──
@@ -618,6 +642,8 @@ export function useComposerShell(params: ComposerShellParams) {
     // Alt+⏎ 的 followUp 保留语义按它分流（composer-keydown）。
     sendRoute,
     sendButtonState,
+    // stop 态中止目标（按钮 title 分型：compacting=终止压缩 / turn=停止；null=非 stop 态）
+    sendButtonStopTarget,
     // 派生状态
     canSubmit,
     // 视觉

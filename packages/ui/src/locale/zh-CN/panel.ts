@@ -48,6 +48,9 @@ export default {
   composer: {
     send: '发送',
     stop: '停止',
+    // 压缩期终止钮 title（发送位 stop 态 + stopTarget='compacting'）：点击中止压缩流程，
+    // 与执行中的「停止」（中止回合）区分——按钮回答「现在能中止什么」
+    stopCompacting: '终止压缩',
     queueSend: '排队发送',
     sending: '发送中…',
     sendBusy: '会话正在处理中，请稍候再发送',
