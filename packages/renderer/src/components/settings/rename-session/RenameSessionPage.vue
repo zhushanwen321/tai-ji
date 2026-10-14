@@ -2,9 +2,10 @@
   Settings · SessionRename 菜单页（rename-prompt-config 设计）。
   双卡片：基本设置（开关/触发模式/标题模型/最大长度，逐字段即时持久化）/ 标题提示词
   （风格 Select + 自定义指令 Textarea，显式保存三键 + 可折叠内置默认参考区）。
-  数据层：SettingsTransport seam（config.get/setRenamePrompt 等四键 + 既有三键迁移自 SystemAutoRenameSection）。
-  范式参照 SystemPromptPage.vue（显式保存 + corrupted 提示 + 参考折叠区）；卡 1 沿用原 Section 的
-  SettingRow + setting-field 逐字段乐观更新范式（行为不变迁移，交互无回归）。
+  数据层：SettingsTransport seam（config.get/setRenamePrompt 等四键）。
+  范式参照 SystemPromptPage.vue（显式保存 + corrupted 提示 + 参考折叠区）；卡 1 用
+  SettingRow + setting-field 逐字段乐观更新范式，卡 2 快照读取同注册进字段组 load 归并
+  （读失败与卡 1 同禁用链）。
 -->
 <template>
   <div data-testid="rename-session-page" class="flex max-w-[860px] flex-col gap-3">
@@ -162,7 +163,7 @@
             data-testid="rename-instruction-charcount"
             class="font-mono text-[10px] text-neutral-dim"
             :class="{ 'text-warn': instructionOverLimit }"
-          >{{ instructionDisplay.length }}/{{ RENAME_INSTRUCTION_MAX_LENGTH }}</span>
+          >{{ instructionCount }}/{{ RENAME_INSTRUCTION_MAX_LENGTH }}</span>
           <div class="flex items-center gap-1.5">
             <Button
               data-testid="rename-prompt-discard"
@@ -352,7 +353,11 @@ const instructionPlaceholder = computed(() =>
 
 const styleExample = computed(() => STYLE_EXAMPLES[promptStyle.value])
 
-const instructionOverLimit = computed(() => customDraft.value.length > RENAME_INSTRUCTION_MAX_LENGTH)
+// 字数/超限按 Unicode 码点计数，与 runtime normalizeRenameInstruction、extension
+// normalizeRenameConfig 同口径（UTF-16 .length 把 surrogate pair 记 2 字元，含 emoji 的
+// 指令会被前端提前误判超限）
+const instructionCount = computed(() => Array.from(instructionDisplay.value).length)
+const instructionOverLimit = computed(() => instructionCount.value > RENAME_INSTRUCTION_MAX_LENGTH)
 
 const promptDirty = computed(
   () => promptStyle.value !== savedPrompt.value.style || customDraft.value !== savedPrompt.value.instruction,
@@ -386,9 +391,13 @@ function resetPrompt(): void {
   customDraft.value = ''
 }
 
-// ── 加载（卡 1 字段组归并 + 卡 2 快照）──
+// ── 加载（卡 1 字段组归并 + 卡 2 快照同归并）──
 
-async function loadConfig(): Promise<void> {
+// 卡 2 快照读取注册进字段组归并：读失败与卡 1 字段同样置 loadError——卡 2 控件随禁用链
+// 不可操作、loadErrorHint 横幅与重试入口生效，避免快照停留假默认值时用户的保存动作把
+// 已存 customInstruction 静默清空（C-proc-21）。catch 保留错误原文 toast，rethrow 交
+// loadAll 归并置 loadError
+group.registerLoader(async () => {
   try {
     const res = await transport.getRenamePrompt()
     promptCorrupted.value = res.corrupted
@@ -397,8 +406,12 @@ async function loadConfig(): Promise<void> {
     savedPrompt.value = { style: res.style, instruction: res.instruction }
   } catch (e) {
     error(e instanceof Error ? e.message : String(e))
+    throw e
   }
-  // 三个卡 1 字段独立加载（便捷 load 已注册进 group），任一失败即置 loadError（loadAll 归并）
+})
+
+async function loadConfig(): Promise<void> {
+  // 三个卡 1 字段（便捷 load）+ 卡 2 快照（上方注册 loader）并行归并，任一失败置 loadError
   await group.loadAll()
 }
 

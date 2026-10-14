@@ -1,21 +1,19 @@
 /**
  * RenameSessionPage 测试（rename-prompt-config，三视角）。
  *
- * 迁移自 system-page-rename-model.test.ts（SystemAutoRenameSection 已整体迁入本页并删除），
- * 新增标题提示词卡（风格 Select + 自定义指令 + 显式保存三键 + 参考折叠区）覆盖。
- *
  * 覆盖：
  *  - 首屏冒烟：页头 + 卡 1（开关/触发模式/模型/最大长度）+ 卡 2（风格/textarea）用户可见 DOM；
  *  - 触发模式：agent-tool 从 GUI 移除（下拉不含「agent 自主命名」）；首值回填；点选调 setRenameMode；
- *  - 标题模型（迁移）：列表内 ref 显示模型名 / stale ref + （不可用）/ 未设置显示跟随；
+ *  - 标题模型：列表内 ref 显示模型名 / stale ref + （不可用）/ 未设置显示跟随；
  *    auto-rename 开关联动 disabled；下拉凭证过滤 + 点选 setRenameModel 收复合串；
  *  - 标题最大长度：默认 50；点选 80 → setRenameMaxLength(80)；
  *  - 标题提示词卡：slug 预览只读 + 三键禁用；custom 回填可编辑；编辑 → dirty → 保存调
- *    setRenamePrompt + 快照归零；放弃还原快照；恢复默认改草稿不写盘；超长禁存 + 计数警示；
+ *    setRenamePrompt + 快照归零；放弃还原快照；恢复默认改草稿不写盘；超长禁存 + 计数警示
+ *    （码点口径，含 emoji surrogate pair 边界）；getRenamePrompt 读失败禁用链 + 重试恢复；
  *    corrupted 提示条；参考折叠区内容（用户可见断言）。
  *
  * mock 策略：setupSystemPageTest 单源（pinia/store/seam mock 注入 + toast/ipc mock），
- * mount 分级同旧文件：冒烟走 mountPage（全页编排回归锚），交互走 mountSection 直挂本页。
+ * mount 分级：冒烟走 mountPage（全页编排回归锚），交互走 mountSection 直挂本页。
  *
  * 运行：pnpm --filter @taiji/frontend run test -- src/__tests__/settings/rename-session-page.test.ts
  */
@@ -229,6 +227,47 @@ describe('标题提示词卡（风格 + 自定义指令 + 显式保存）', () =
     expect(w.find('[data-testid="rename-instruction-charcount"]').text()).toContain('2001/2000')
     expect(w.find('[data-testid="rename-instruction-charcount"]').classes()).toContain('text-warn')
     expect(w.find('[data-testid="rename-prompt-save"]').attributes('disabled')).toBeDefined()
+  })
+
+  it('emoji 按码点计数（与 runtime/extension 口径对齐）：1001 个 emoji 可保存、计数为码点数', async () => {
+    settingsMock.getRenamePrompt.mockResolvedValue({ style: 'custom', instruction: '', corrupted: false })
+    await mountSection()
+    const w = pageWrapper()!
+    // 1001 个 emoji 的 UTF-16 .length = 2002（旧口径误判超限），码点数 1001 ≤ 2000 → 可保存
+    await w.find('[data-testid="rename-instruction-input"]').setValue('🔧'.repeat(1001))
+    expect(w.find('[data-testid="rename-instruction-charcount"]').text()).toContain('1001/2000')
+    expect(w.find('[data-testid="rename-instruction-charcount"]').classes()).not.toContain('text-warn')
+    expect(w.find('[data-testid="rename-prompt-save"]').attributes('disabled')).toBeUndefined()
+    await w.find('[data-testid="rename-prompt-save"]').trigger('click')
+    await flushPromises()
+    expect(settingsMock.setRenamePrompt).toHaveBeenCalledWith('custom', '🔧'.repeat(1001))
+  })
+
+  it('emoji 码点上限：2001 个 emoji（码点数超 2000）计数警示 + 保存禁用', async () => {
+    settingsMock.getRenamePrompt.mockResolvedValue({ style: 'custom', instruction: '', corrupted: false })
+    await mountSection()
+    const w = pageWrapper()!
+    await w.find('[data-testid="rename-instruction-input"]').setValue('🔧'.repeat(2001))
+    expect(w.find('[data-testid="rename-instruction-charcount"]').text()).toContain('2001/2000')
+    expect(w.find('[data-testid="rename-instruction-charcount"]').classes()).toContain('text-warn')
+    expect(w.find('[data-testid="rename-prompt-save"]').attributes('disabled')).toBeDefined()
+  })
+
+  it('getRenamePrompt 读失败：横幅可见 + 卡 2 风格/textarea/保存禁用；重试成功后恢复并回填快照', async () => {
+    settingsMock.getRenamePrompt.mockRejectedValue(new Error('rpc down'))
+    await mountSection()
+    const w = pageWrapper()!
+    expect(w.find('[data-testid="rename-load-error"]').exists()).toBe(true)
+    expect(w.find('[data-testid="rename-prompt-style"]').attributes('disabled')).toBeDefined()
+    expect(w.find('[data-testid="rename-instruction-input"]').attributes('disabled')).toBeDefined()
+    expect(w.find('[data-testid="rename-prompt-save"]').attributes('disabled')).toBeDefined()
+
+    settingsMock.getRenamePrompt.mockResolvedValue({ style: 'custom', instruction: '已存指令', corrupted: false })
+    await w.find('[data-testid="rename-load-retry"]').trigger('click')
+    await flushPromises()
+    expect(w.find('[data-testid="rename-load-error"]').exists()).toBe(false)
+    expect((w.find('[data-testid="rename-instruction-input"]').element as HTMLTextAreaElement).value).toBe('已存指令')
+    expect(w.find('[data-testid="rename-instruction-input"]').attributes('disabled')).toBeUndefined()
   })
 
   it('corrupted：提示条渲染', async () => {
