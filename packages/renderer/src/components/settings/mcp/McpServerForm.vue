@@ -24,7 +24,7 @@
           role="tab"
           variant="ghost"
           class="h-[26px] rounded-[var(--radius-sm)] px-[10px] text-[length:var(--text-xs)] hover:bg-transparent"
-          :class="activeTab === tab ? 'bg-bg-elevated font-semibold text-neutral-fg' : 'text-neutral-mid hover:text-neutral-fg'"
+          :class="activeTab === tab ? 'bg-surface-hover font-semibold text-neutral-fg' : 'text-neutral-mid hover:text-neutral-fg'"
           :aria-selected="activeTab === tab"
           :data-testid="`mcp-form-tab-${tab}`"
           @click="tab === 'code' ? switchToCode() : switchToForm()"

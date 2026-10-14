@@ -37,9 +37,11 @@
     - skill 类命令未选中时图标 text-reasoning（紫）；选中随行色（中性前景）
     - 命令名 font-semibold（非 mono）+ middot · 分隔符（命令名与描述间；demo .ii-desc
       无分隔符且左对齐 16px，real 描述列右对齐——排版差异保留）
-    - 容器 = composer 同源底色（用户裁决 2026-10-13 demo 方案 A）：bg-bg + border（--border 7%）
-      覆写 PopoverContent 基类的 bg-elevated/border-strong（cn/twMerge 同组覆盖），浮层与
-      composer 底/边/圆角同源，仅靠 shadow-2 投影浮起；锚距 10px
+    - 容器 = composer 同源底色（用户裁决 2026-10-13 demo 方案 A）：bg-bg + border（--border 7%）。
+      PopoverContent 基类已随全族迁移切换到同源档（bg-bg + border），本处显式类为同值冗余——
+      twMerge 无冲突，保留作裁决落点（基类若再变，消费侧仍钉在方案 A）；行高亮 surface-hover
+      比容器亮（正确方向；旧 elevated 容器下 hover 行反而更暗，反向对比度即本次迁移动因）；
+      锚距 10px
     - 行 @mousedown.prevent：点击浮层行不再夺焦（mousedown 默认行为 = 移焦点，会先把
       contenteditable 置盲 → 确认链再 focus 回拉）。焦点稳定是 IME 首字失效修复的半边
       （另一半在 dom-core 选区写入单次化）：macOS IME 的组字上下文在「焦点往返 + 选区

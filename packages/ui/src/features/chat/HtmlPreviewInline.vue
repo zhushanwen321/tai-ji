@@ -78,7 +78,7 @@
               variant="ghost"
               size="sm"
               class="h-5 rounded-sm px-1.5 text-[length:var(--text-2xs)]"
-              :class="viewMode === 'preview' ? 'bg-bg-elevated text-neutral-fg' : 'text-neutral-mid'"
+              :class="viewMode === 'preview' ? 'bg-surface-hover text-neutral-fg' : 'text-neutral-mid'"
               data-testid="html-preview-tab-preview"
               @click="showPreview"
             >{{ t('panel.htmlPreview.tabPreview') }}</Button>
@@ -86,7 +86,7 @@
               variant="ghost"
               size="sm"
               class="h-5 rounded-sm px-1.5 text-[length:var(--text-2xs)]"
-              :class="viewMode === 'source' ? 'bg-bg-elevated text-neutral-fg' : 'text-neutral-mid'"
+              :class="viewMode === 'source' ? 'bg-surface-hover text-neutral-fg' : 'text-neutral-mid'"
               data-testid="html-preview-tab-source"
               @click="showSource"
             >{{ t('panel.htmlPreview.tabSource') }}</Button>

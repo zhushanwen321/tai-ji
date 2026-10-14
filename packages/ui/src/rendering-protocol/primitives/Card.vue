@@ -38,10 +38,11 @@ const cardBgClass = computed(() =>
   props.variant === 'elevated' ? 'bg-surface-2' : 'bg-surface',
 )
 
-/** v6：header bg 浮起（default/danger/success→bg-surface-2，elevated→bg-bg-elevated；
- *  原 `bg-elevated` 是 preset 无映射的死类（模块地图 X1），从未生成过规则） */
+/** v6：header bg 浮起（default/danger/success→bg-surface-2，elevated→bg-bg-card；
+ *  2026-10-14 全族迁移：原 `bg-bg-elevated` 浮层档退役；更早的 `bg-elevated` 是 preset
+ *  无映射的死类（模块地图 X1），从未生成过规则） */
 const headerBgClass = computed(() =>
-  props.variant === 'elevated' ? 'bg-bg-elevated' : 'bg-surface-2',
+  props.variant === 'elevated' ? 'bg-bg-card' : 'bg-surface-2',
 )
 
 /** v6：header dot 色（default/elevated=neutral-ico，danger/success=对应色） */

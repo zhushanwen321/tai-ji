@@ -234,7 +234,7 @@ demo 阶段功能做到「可见 + 可交互 + 数据 mock」即够。不接 run
 --bg-input:     #161618;   /* 内容层内次级：代码块/文件 chip 底/实例 tab 非激活底*/
 --surface:      #101010;   /* 内容层：对话流/右抽屉/底抽屉阅读区（沉底，各卡自持 border + shadow）*/
 --bg-card:      #262626;   /* 操作域浮起容器：设置分组卡片等（亮于 --bg 一档）*/
---bg-elevated:  #2b2b2e;   /* 浮层：hover 详情卡/popover（用户气泡 --bubble-bg 随本层派生，暗族同值；亮族独立 #fefefe）*/
+--bg-elevated:  #2b2b2e;   /* 浮层档（2026-10-13 用户裁决 demo 方案 A 后：popover/hover 卡族已迁 composer 同源档 bg-bg + border，本档现存消费方 = segmented active 凹陷槽浮起 / dialog / 内联浮面；用户气泡 --bubble-bg 随本层派生，暗族同值；亮族独立 #fefefe）*/
 --surface-2:    #27272a;   /* 次级表面（header 浮起分层 / SegmentedTab 内项 active）*/
 --surface-hover:#262629;   /* hover 态 */
 ```
@@ -243,7 +243,7 @@ demo 阶段功能做到「可见 + 可交互 + 数据 mock」即够。不接 run
 - **窗口壳**：`--bg-stage` `#0a0a0c`（ShellView .stage 引用）。**亮色（皓族）**：`--bg-stage` `#dbd9d4`（TAIJI_PAPER 未定义独立 stage，复用宣纸族最深暖灰；style.css `[data-theme=light]` 覆盖，避免泄漏暗色 #0a0a0c 形成黑框）
 - **内容层（沉底）**：`--surface` `#101010`（对话流 / 右抽屉 / 底抽屉三张阅读卡同色共享）；`--bg-input` `#161618` 为其内次级（代码块/文件 chip）
 - **框架层（浮起）**：`--bg` `#1e1e1e`（aside / composer / settings 内容区同层同色）；操作域浮起容器 `--bg-card` `#262626` 亮于本层一档
-- **浮层**：`--bg-elevated` `#2b2b2e`（hover 详情卡 / popover；用户气泡 `--bubble-bg` 随本层派生——demo 暗族三主题 bubble 逐块等于 elevated、无独立档，亮族独立 `#fefefe`）；overlay 遮罩半透明黑（`bg-black/80`）全场最暗，遮罩上面板靠 border + shadow 分离
+- **浮层**：`--bg-elevated` `#2b2b2e`（hover 详情卡 / popover；用户气泡 `--bubble-bg` 随本层派生——demo 暗族三主题 bubble 逐块等于 elevated、无独立档，亮族独立 `#fefefe`）；**2026-10-13 用户裁决 demo 方案 A 后该族已全迁 composer 同源档**（`--bg` + `--border` + shadow-2，elevated 比行高亮 surface-hover 亮会致 hover 行反向变暗，见 §5.12；本档现存消费方 = segmented active 凹陷槽浮起 / dialog / 内联浮面）；overlay 遮罩半透明黑（`bg-black/80`）全场最暗，遮罩上面板靠 border + shadow 分离
 - 黛蓝/暖墨暗色 entry 按玄五层骨架 + 各自色相偏移推导（黛蓝 B>R、暖墨 R>B，通道差与各自旧 entry 一致）；亮色族三主题（皓/青墨/朱印）bg 阶梯沿用宣纸镜像（surface 最亮、框架层深一档），青墨/朱印不覆写
 - **亮色（皓族）设置卡双层底**：`--bg-card` `#fcfbf9`（分组卡底，近白纸、亮于页底 `#edebe8`）、`--surface-2` `#efede9`（分组卡头，= demo 亮族 `--card-head`；style.css `[data-theme=light]`）——「卡浮于底」层级在亮色族与暗色族同构（卡底亮于页底，卡头 = 页底色调档）
 
@@ -491,7 +491,7 @@ hover: text-neutral-fg
 ```
 容器: 无底无边（tab 自持底色；tab 条超宽时 overflow-x-auto，动作簇 shrink-0 恒在可视区）
 tab 非激活: bg-bg-input + border-border + text-neutral-mid（hover: bg-surface-2 + text-neutral-fg）
-tab 激活:   bg-bg-elevated + border-border-strong + text-neutral-fg
+tab 激活:   bg-surface-hover + border-border + text-neutral-fg（2026-10-14 全族迁移：旧 bg-bg-elevated + border-border-strong 退役，选中态 = solid hover tone，同 SessionItem 10-13 裁决_pattern）
 关闭叉:     常驻（不 hover 显现），命中 ≥20px，hover 染 danger-soft/danger；
             不可关闭场景灰置禁用（disabled + tooltip 明示，不半透明伪装可点）
 pin:        不设（2026-10-04 用户裁决全链移除）
@@ -616,7 +616,7 @@ demo 用 `@keyframes shimmer`（1.4s ease-in-out infinite，linear-gradient 扫�
 
 **IME 检查**：Composer 的 `isComposing` 期间不拦截回车（中文/日文输入法 composing 态不发送）。
 
-**composer-bar popover 锚点范式**：absolute 相对 composer-bar，`bottom: calc(100% + 6px)`，`z-modal`，`bg-elevated + border-strong + shadow-2 + radius-lg`。popover open 时触发按钮 `.bar-btn--active` = `accent-soft 底 + accent 字`（锁高亮）。
+**composer-bar popover 锚点范式**：absolute 相对 composer-bar，`bottom: calc(100% + 6px)`，`z-modal`，`bg-bg + border + shadow-2 + radius-lg`（2026-10-13 用户裁决 demo 方案 A：composer 同源底/边、仅靠投影浮起——旧 `bg-elevated + border-strong` 规格退役，elevated 容器下 surface-hover 行高亮反而更暗成反向对比度；CommandPopover 首发落地后 PopoverContent/HoverCardContent/SelectContent 原语默认类同批切换，全族浮层一致）。popover open 时触发按钮 `.bar-btn--active` = `accent-soft 底 + accent 字`（锁高亮）。
 
 ### 5.13 标签族语义四分 + 空状态三要素〔2026-09-13 自 design-system.md 并入〕
 
@@ -646,7 +646,7 @@ demo 用 `@keyframes shimmer`（1.4s ease-in-out infinite，linear-gradient 扫�
 - **Block·bash**：区分 BashOutputBlock（composer `!` 前缀，不可折叠，exit 标签色 0=`success` / N=`warn` / timeout=`dim`）vs tool-bash（嵌 tool 块，`bg-bg-input` 无 border）〔exit 标签色 2026-09-13 自 v6-design.md 并入〕
 - **TurnSummary hover actions 方案 A**：3 个扁平 icon button（Copy / GitFork / HandHelping），无 split-button、无 MD/+Q badge；fork/handoff 点击 = `+Q` 带提问变体进 composer，composer 直接 Enter = 无内容变体〔2026-09-13 自 v6-design.md 并入〕
 - **Block·subagent/workflow**：collapsed only，点击 → drawer tab
-- **UserBubble**：删 border，仅 `bg-surface-hover`；删 pending 态（迁 QueueBubble 内嵌）
+- **UserBubble**：删 border，仅 `bg-surface-hover`；删 pending 态（迁 QueueBubble 内嵌）；**hover actions = 气泡下方流内固定槽位**（`mt-1` + `h-6` 常驻行，opacity 淡入淡出零布局跳动——2026-10 用户裁决：按钮在气泡框外下方固定位置，不在气泡内部；原 12px 紧凑档节奏推为 ≈40px 的成本据此接受）；**编辑态 = 简化版 composer**（`ChatViewDeps.editComposerRenderer` 注入 renderer 件：ComposerInput contenteditable 富文本 + slash/`@`/`#`/`$` 引用 chip + CommandPopover 四符号候选浮层，不渲染 `+` 按钮/底栏左簇/右簇；未注入宿主回退纯 Textarea）〔2026-10 user-bubble-edit-composer〕
 - **Composer**：6 区（QueueBubble / staging chip / inline chip bar / landing meta / input / composer-bar）；宽度对齐 720 居中
   - **variant 双形态**：`variant="panel"`（正常态，固定 workspace 底部）vs `variant="landing"`（landing 态，垂直水平居中 + meta-row slot）；landing 触发：新建任务按钮设 `landingMode=true`，发送消息后 `landingMode=false` 切回 panel
   - **landing meta-row**（仅 `variant="landing"` 时渲染，comp-box 内顶部）：ghost chip 行 = directory chip(Folder icon + mono 目录名，空 cwd 时 accent 色) + `meta-sep`(1px border 竖线) + branch chip(GitBranch icon + mono 分支名) + meta-sep + mode chip(SlidersHorizontal icon + 模式名)；chip 样式 h-auto gap-1.5 px-2 py-1 text-xs accent-soft 底 + accent 文字（hover 不变——**颜色即「非默认模式」状态**，见计划 D-8 待产品裁决）。窄窗口下按序退化（目录截断 → 分支截断 → 分支退化图标 → 模式退化纯图标），模式 chip 的「含替换提示词」信任标记**跨档不丢**（文本档 = chip 内后缀；纯图标档 = 右上角警示色角标 + tooltip）
@@ -671,7 +671,7 @@ demo 用 `@keyframes shimmer`（1.4s ease-in-out infinite，linear-gradient 扫�
   | 通知卡片 | 可交互（含链接/关闭按钮的 transient 反馈，如 ForkNotice） | bg-soft（语义色 12% 透明）单手段分隔无 border + `--radius` + `px-3 py-1.5` + text-sm |
   | 横线分隔行 | 静态元信息（无点击交互入口；悬停只读详情为方案 A 唯一例外），如 SystemNotice / 活动条行 | 无底色无框，两侧 `h-px` 横线（`border-strong` 色阶两端渐隐）+ 主文案 text-sm/fg/550（**恒为有界短语**）+ 居中 13px 图标（stroke 2.2，色=中性 / accent[background-bash 结构化行]）+ mono meta 钉右（text-2xs/500/tabular-nums/neutral-dim）+ py-1.5；语义色落 meta：成功绿 / 失败 warn 两档（后台任务边界行为族内例外——Turn.vue 的图标三态 + 状态点三色承载语义，meta 保持 neutral） |
 
-  **主体有界 + 悬停详情（2026-09-18 方案 A 裁决）**：横线分隔行主体只承载有界短语（i18n 文案 + 语义 meta）；无界载荷——background-bash 命令原文、超 40 字符的兜底 system 原文——一律移入 HoverCard 悬停详情（`bg-elevated + border-strong + shadow-2`，宽 `min(520px,85vw)`，mono 全文 + 事实片段 + 复制按钮；活动条 bash 执行行同构）。行内不再渲染命令/长文原文——长载荷把 flex-1 横线挤成几像素残端或零宽的形态塌缩自此结构性杜绝，横线长度不随载荷波动；background-bash「后台」chip 随短语语义并入退役；活动条 bash 行以 elapsed mono meta（「已 Ns」）维持执行期观察。「静态无交互」判据收窄为「无点击交互入口」——悬停只读详情（+复制）为族内唯一例外。裁决背景：长命令（如 `cd … && timeout 1200 npx vitest run`）使两侧渐隐横线塌成残端/归零，与 trigger 行的仪式形态同屏不同相。
+  **主体有界 + 悬停详情（2026-09-18 方案 A 裁决）**：横线分隔行主体只承载有界短语（i18n 文案 + 语义 meta）；无界载荷——background-bash 命令原文、超 40 字符的兜底 system 原文——一律移入 HoverCard 悬停详情（`bg-bg + border + shadow-2`，2026-10-13 方案 A 全族迁移后随 HoverCardContent 原语默认类，宽 `min(520px,85vw)`，mono 全文 + 事实片段 + 复制按钮；活动条 bash 执行行同构）。行内不再渲染命令/长文原文——长载荷把 flex-1 横线挤成几像素残端或零宽的形态塌缩自此结构性杜绝，横线长度不随载荷波动；background-bash「后台」chip 随短语语义并入退役；活动条 bash 行以 elapsed mono meta（「已 Ns」）维持执行期观察。「静态无交互」判据收窄为「无点击交互入口」——悬停只读详情（+复制）为族内唯一例外。裁决背景：长命令（如 `cd … && timeout 1200 npx vitest run`）使两侧渐隐横线塌成残端/归零，与 trigger 行的仪式形态同屏不同相。
 
   共同约束：宽度一律 `mx-auto max-w-[var(--content-max-w)]` 与对话流内容列同体系；动效 `notice-in` 200ms（-4px translateY 淡入）+ `motion-reduce:animate-none`；通知卡片内文字链接用 accent 色 + hover 下划线，**不用 hover 底色**（soft 底卡片内再叠 hover 底 = 卡中卡）。裁决背景：ForkNotice 早期实现为 border + bg-info-soft 双分隔 + 全宽（848px vs turn 720px），critique 后收敛。
 
@@ -681,7 +681,7 @@ demo 用 `@keyframes shimmer`（1.4s ease-in-out infinite，linear-gradient 扫�
 - **项目锚定分组（R6.2，会话视图内）**：侧栏顶部无独立项目切换条，项目管理 = 会话视图内的项目分组列表。**组头** = 项目名贴左（12.5px fw-mid fg-2，hover 提亮 fg）+「当前」chip（`--sel-bg` tint 底 + `--sel-edge` 内描边胶囊，仅锚定组渲染）+ 会话计数（mono 2xs fg-2，hover/focus-within 让位给操作钮）；操作钮三枚 = 在此项目新建任务（+）/ 重命名 / 删除（20px 视觉 + 24px 热区伪元素，danger 钮 hover 染 danger；默认项目不渲染重命名/删除——nameless 身份是未归类/孤儿聚合判据）。**区域形态 = 缩进左线**（IDE 文件树语言，全无底色）：展开体左缘 2px 细线（当前组 `--sel-edge`、非当前 `--border`）+ 会话行缩进 9px（目录内 21px）；**展开动效** = 展开体常驻 DOM，`grid-template-rows` 0fr↔1fr 真实高度动画 + 内层 opacity 跟进淡入 + visibility 延迟翻转，reduced-motion 即时切换。**组序稳定**（lastUsedAt 倒序 + 默认项目固定最后，锚定切换不重排不置顶）；**新建项目入口** = 区头行内「+」钮（24px，紧贴模式开关左侧、同组 gap 2px），点击后**列表顶部出现草稿输入行**（对齐组头节奏，Enter / 失焦提交非空名 → 锚定新项目并展开空态；空名 / Esc 丢弃草稿不创建）；删除项目接二次确认弹层（文案写明「N 个会话将归回默认项目」），删当前组锚定回落默认项目并展开
 - **SessionList 会话列表 A/C 双模式（R6.2 锚定分组）**：区头行（固定于 ScrollArea 外不随列表滚动）= 「项目与会话」标题 + 全量会话计数（mono dim）+ 右侧工具组（新建项目「+」钮 + **双段图标开关**：List=平铺列表 / Folder=按目录分组，26×24 钮 13px icon，选中态 `--sel-bg` tint 底 + `--sel-edge` 内描边，模式名走 title 悬停；文案 key sidebar.sessionList.header/modeFlat/modeGroup）。**模式持久化** = localStorage `taiji:sidebar-session-mode`（与 useDrawerSplitWidth 等 `taiji:` 前缀 UI 偏好同通道），缺失/非法值回退默认平铺。**A 平铺（默认）= 锚定聚焦**：仅当前组展开，其余组折叠一行；点其他组头 = 切换锚定并展开（唯一项目切换路径），点当前组头 = 折叠/展开翻转。**C 目录分组 = 浏览态**：全部项目组默认展开，组头点击只开合自己、不切换锚定，「当前」chip 只读；组内按 cwd **目录静态标签**分组（Folder 11px icon + mono 2xs 目录名 + 计数，无折叠钮、会话始终可见），目录行 hover 功能钮 = 「+ 在此目录新建会话」恒渲染 + 目录批量删除两段式确认（仅当该分组含此 cwd 全量会话时渲染——removeByCwd 是 cwd 全量删除，防误删其他项目分组内不可见 session）。组内平铺序 = core `sessionsInRuntimeGroupOrder` SSOT（客户端零重排）；归属切分 = `sessionBelongsToProject`（命名项目精确匹配，默认项目聚未归类 + 孤儿，每个 session 恰落一组）
 - **会话行右槽（2026-10-11 用户裁决）**：状态点（7px 单一 icon 范式）自名称左侧移到**右侧时间左边**，名称贴左缩进贴近项目左线；右槽定宽 58px（= 悬停三钮 18px×3 + gap 2×2 预算），点 + 时间右对齐常驻；悬停/聚焦时槽内 meta 淡出、三钮（重命名/删除/归入项目）淡入覆盖槽区——显隐走 opacity 零布局跳动，名称块 flex-1 在槽左缘截断，钮构造性不遮名称；钮 18px 视觉 + after 伪元素外扩 3px = 24px 热区下限口径。子会话计数 chip 在槽外（不受覆盖）
-- **Session hover 详情卡（demo .sess-pop 权威）**：SessionItem 自承载，两模式同样生效——行 hover/focus **立即开**（mouseenter/focusin 同步，无延迟定时），Teleport body + `fixed` 全局浮层（`--z-hovercard` 梯队，固定宽 232px，`bg-bg-elevated + border-strong + radius-lg + shadow-2`），不被侧栏滚动容器裁剪；字段 = 分支 + fork 血缘（有则渲染，GitBranch icon）+ 完整目录 + 末行相对时间 meta（行首 13px 图标 + mono 12px 值），**无消息数**（SessionSummary 无该字段，零新数据通道约束）；定位 = 行右缘外 8px + 视口右缘 clamp（卡体进入即关）
+- **Session hover 详情卡（demo .sess-pop 权威）**：SessionItem 自承载，两模式同样生效——行 hover/focus **立即开**（mouseenter/focusin 同步，无延迟定时），Teleport body + `fixed` 全局浮层（`--z-hovercard` 梯队，固定宽 232px，`bg-bg + border + radius-lg + shadow-2`，2026-10-13 方案 A 全族迁移后随 HoverCardContent 原语默认类），不被侧栏滚动容器裁剪；字段 = 分支 + fork 血缘（有则渲染，GitBranch icon）+ 完整目录 + 末行相对时间 meta（行首 13px 图标 + mono 12px 值），**无消息数**（SessionSummary 无该字段，零新数据通道约束）；定位 = 行右缘外 8px + 视口右缘 clamp（卡体进入即关）
 - **3 tab**（sessions/files/plugins；plugins 为第 3 枚，Puzzle icon，plugin view 收敛于此）
 - 组标题去 uppercase；ForkGroup 去 border 改缩进，分支行单行（序号 pill + 标题 + 时间，不显示状态，§3.5.4）；FileTree 缩进 10px gap 4px
 - SessionList 状态信号见 §5.6A（左未读点 + 右异常 badge）；非列表行场景（GitPanel 等）用 §5.6B 的 7px 圆点

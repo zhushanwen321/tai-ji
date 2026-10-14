@@ -32,7 +32,7 @@
  * D13 合规清单索引（S13 降级兑现，11 项逐条落位——本文件 = 状态带/审批条/文案侧）：
  * ①「评论草稿」标题去 uppercase → plan-docs-panel.test.ts「D13 合规断言（drawer 面板）」；
  * ② 评论计数图标/角标非 warn 色 → 本文件；③ sourceSkill 只留 meta chip →
- * plan-docs-panel.test.ts L2 tab 渲染；④ L2 tab 选中 bg-bg-elevated → plan-docs-panel.test.ts；
+ * plan-docs-panel.test.ts L2 tab 渲染；④ L2 tab 选中 bg-surface-hover（2026-10-14 全族迁移）→ plan-docs-panel.test.ts；
  * ⑤ 三处小字去 opacity 叠乘 → 本文件（降级提示）+ plan-docs-panel.test.ts（pending/空态提示）；
  * ⑥ 退出键 padding 收敛进按钮尺寸体系 → 本文件；⑦ 0 草稿不渲染评论计数键 → 本文件；
  * ⑧ 文案去「左区」布局黑话 → 本文件静态断言；⑨ em dash 改写 → 本文件静态断言；

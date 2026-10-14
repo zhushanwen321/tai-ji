@@ -43,10 +43,10 @@
     />
 
     <!-- hover 展开浮层（常驻 DOM，靠 group-hover 切换可见性，避免 SSR/动画抖动）。
-         demo .rail-panel：bg-bg-elevated（浮起面板语义）+ 1px border-strong 硬边界 +
-         shadow-2。去掉 backdrop-blur（不透明底上零效果）。 -->
+         2026-10-13 用户裁决 demo 方案 A 全族迁移：bg-bg（composer 同源档，旧 elevated
+         浮层档退役）+ 1px border 边 + shadow-2。去掉 backdrop-blur（不透明底上零效果）。 -->
     <div
-      class="rail-panel absolute bottom-0 left-[12px] right-0 top-0 translate-x-2 rounded-lg border border-border-strong bg-bg-elevated p-2 opacity-0 shadow-2 pointer-events-none transition-[transform,opacity] group-hover:translate-x-0 group-hover:opacity-100 group-hover:pointer-events-auto"
+      class="rail-panel absolute bottom-0 left-[12px] right-0 top-0 translate-x-2 rounded-lg border border-border bg-bg p-2 opacity-0 shadow-2 pointer-events-none transition-[transform,opacity] group-hover:translate-x-0 group-hover:opacity-100 group-hover:pointer-events-auto"
     >
       <!-- 节点列表（铺满 rail 浮层，超出靠浮层自身高度滚动） -->
       <div class="rail-list flex max-h-full flex-col gap-[2px] overflow-y-auto">

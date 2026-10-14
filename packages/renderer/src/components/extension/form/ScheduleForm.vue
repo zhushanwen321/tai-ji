@@ -311,7 +311,7 @@ defineExpose({ canSubmit, submit })
           <Clock class="size-3 shrink-0 text-neutral-ico" aria-hidden="true" />
           <span class="text-[length:var(--text-2xs)] font-semibold tracking-[0.04em] text-neutral-dim">{{ t('extensionUI.scheduleCreateTimeLabel') }}</span>
           <span class="flex-1" />
-          <div class="flex gap-0.5 rounded-sm bg-surface-2 p-0.5" role="radiogroup" :aria-label="t('extensionUI.scheduleCreateModeLabel')">
+          <div class="flex gap-0.5 rounded-sm bg-bg-input p-0.5" role="radiogroup" :aria-label="t('extensionUI.scheduleCreateModeLabel')">
             <Button
               v-for="k in KIND_OPTIONS"
               :key="k.value"
@@ -320,7 +320,7 @@ defineExpose({ canSubmit, submit })
               :aria-pressed="kind === k.value"
               :class="[
                 'px-3 py-1 text-[length:var(--text-xs)] transition-colors',
-                kind === k.value ? 'bg-bg-elevated font-medium text-neutral-fg' : 'text-neutral-dim hover:text-neutral-mid',
+                kind === k.value ? 'bg-surface-hover font-medium text-neutral-fg' : 'text-neutral-dim hover:text-neutral-mid',
               ]"
               @click="switchKind(k.value)"
             >{{ t(k.labelKey) }}</Button>

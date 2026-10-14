@@ -66,16 +66,16 @@
     </div>
   </SessionItemContextMenu>
 
-  <!-- hover 详情卡（demo .sess-pop 形态：fixed 232px / elevated 底 / border-strong / radius-lg
-       / shadow-2 / 行间 hairline 分隔 / 行首 13px 图标 + mono 值 + 末行时间 meta / opacity+
-       translateX dur-fast ease-out 进出过渡 / z-hovercard 梯队 / mouseenter 立即开 + 卡体
-       进入即关） -->
+  <!-- hover 详情卡（2026-10-13 用户裁决 demo 方案 A 全族迁移后：fixed 232px / bg-bg 底
+       （composer 同源档，旧 elevated 浮层档退役）/ border / radius-lg / shadow-2 / 行间
+       hairline 分隔 / 行首 13px 图标 + mono 值 + 末行时间 meta / opacity+ translateX
+       dur-fast ease-out 进出过渡 / z-hovercard 梯队 / mouseenter 立即开 + 卡体进入即关） -->
   <Teleport to="body">
     <Transition name="sess-pop">
       <div
         v-if="detailVisible"
         data-testid="session-detail-card"
-        class="fixed z-[var(--z-hovercard)] w-[232px] rounded-lg border border-border-strong bg-bg-elevated px-3 py-2 text-neutral-fg shadow-2"
+        class="fixed z-[var(--z-hovercard)] w-[232px] rounded-lg border border-border bg-bg px-3 py-2 text-neutral-fg shadow-2"
         :style="detailStyle"
         @pointerenter="onDetailLeave"
       >

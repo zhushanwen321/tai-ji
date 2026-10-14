@@ -60,7 +60,7 @@
   <div v-else data-testid="plan-docs-panel" class="flex h-full min-h-0 flex-col overflow-hidden">
     <!-- L2 横排文档 tab（demo doc-tabs 形态）：fileName ellipsis 截断（title 全名）+
          version meta + 修订中圆点；sourceSkill 只留 meta 行一份（D13③，删 tab chip 重复）；
-         降级单文件条目无 version（D4）。D13④ 选中态 = bg-bg-elevated 中性浮起（§3.4 tab 型规则） -->
+         降级单文件条目无 version（D4）。D13④ 选中态 = bg-surface-hover solid hover tone（§3.4 tab 型规则；2026-10-14 全族迁移，旧 bg-bg-elevated 浮层档退役） -->
     <div
       role="tablist"
       data-testid="plan-docs-tabs"
@@ -75,7 +75,7 @@
         class="h-auto max-w-[200px] shrink-0 justify-start gap-1.5 rounded-t-[var(--radius-sm)] rounded-b-none px-3 py-2 font-normal text-[length:var(--text-xs)]"
         :class="
           doc.absPath === selectedDoc?.absPath
-            ? 'bg-bg-elevated text-neutral-fg'
+            ? 'bg-surface-hover text-neutral-fg'
             : 'text-neutral-dim hover:text-neutral-mid'
         "
         :aria-selected="doc.absPath === selectedDoc?.absPath"

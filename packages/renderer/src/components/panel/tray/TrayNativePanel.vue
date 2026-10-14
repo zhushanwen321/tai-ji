@@ -62,7 +62,7 @@
           :data-testid="`tray-panel-tab-${item}`" :data-active="activeBucket === item ? 'true' : 'false'"
           :class="cn('h-6 flex-1 justify-center gap-[3px] rounded-[4px] px-1 text-xs font-normal',
             activeBucket === item
-              ? 'bg-bg-elevated text-neutral-fg hover:bg-bg-elevated hover:text-neutral-fg'
+              ? 'bg-surface-hover text-neutral-fg hover:bg-surface-hover hover:text-neutral-fg'
               : 'text-neutral-dim hover:bg-transparent hover:text-neutral-fg')"
           @click="setBucket(item)"
         >
@@ -250,7 +250,9 @@
  * min-h-0 超出滚动；浮层宽 400px 由外壳承载（D8 + 固定高裁决 2026-09-16）。
  *
  * ── 形态 ──
- * - 分桶 tab（凹陷槽范式：外槽 bg-bg-input + active bg-bg-elevated 浮起），计数与行集同源
+ * - 分桶 tab（凹陷槽范式：外槽 bg-bg-input + active bg-surface-hover 浮起——2026-10-14
+ *   全族迁移：旧 active bg-bg-elevated 浮层档退役，选中态改 solid hover tone，同 SessionItem
+ *   10-13 裁决_pattern），计数与行集同源
  *   （tab 数字恒等于列表条数）：三件均两视图「进行中 / 已结束」——[两视图裁决 2026-09-16]
  *   subagent 的「已收起」桶自托盘退役（「已收起」机制已全链路删除，已结束桶判据 =
  *   !isRunningProjection）；

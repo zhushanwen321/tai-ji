@@ -96,7 +96,7 @@
     </template>
 
     <!-- 一级 tab 条（scheduler 整合 2026-10-06）：TraceViewToggle 分段范式（凹陷槽 bg-bg-input
-         + active 浮起 bg-bg-elevated）。无 run 时「运行」禁用（灰置）——scheduler 直达打开
+         + active 浮起 bg-surface-hover solid hover tone，2026-10-14 全族迁移旧 bg-bg-elevated 退役）。无 run 时「运行」禁用（灰置）——scheduler 直达打开
          本浮层可以没有 run 数据；tab SSOT 在控制器（Host 受控透传），壳只上抛切换意图 -->
     <nav
       class="ml-3 mt-2 flex flex-none items-center gap-0.5 self-start rounded-md bg-bg-input p-[2px]"
@@ -110,7 +110,7 @@
         size="sm"
         class="h-[18px] gap-1 rounded-sm px-2.5 text-[length:var(--text-2xs)]"
         :class="tab === seg.value
-          ? 'bg-bg-elevated text-neutral-fg hover:bg-bg-elevated'
+          ? 'bg-surface-hover text-neutral-fg hover:bg-surface-hover'
           : 'text-neutral-dim hover:bg-transparent hover:text-neutral-fg'"
         :disabled="seg.value === 'runs' && run === null"
         :aria-selected="tab === seg.value"

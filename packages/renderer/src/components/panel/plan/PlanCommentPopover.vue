@@ -17,7 +17,7 @@
       v-if="sel"
       ref="popEl"
       data-testid="plan-comment-popover"
-      class="fixed z-[var(--z-overlay)] rounded-[var(--radius)] border border-border-strong bg-bg-elevated p-1 shadow-2"
+      class="fixed z-[var(--z-overlay)] rounded-[var(--radius)] border border-border bg-bg p-1 shadow-2"
       :style="{ left: `${pos.x}px`, top: `${pos.y}px` }"
     >
       <!-- 浮条态：单按钮胶囊（demo sel-pop 形态） -->

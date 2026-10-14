@@ -20,7 +20,7 @@
  *   本面板滚动到草稿列表（挂载补消费 + 已挂载 watch 消费 + consumed 防重滚 + 空草稿 no-op）
  * - D13 合规断言（视觉/文案合规包，S13 降级兑现——本文件锁①③④⑤⑩⑪的面板/浮层侧）：
  *   ①「评论草稿」标题无 uppercase/tracking-wider；③ sourceSkill 只留 meta chip 一份；
- *   ④ L2 tab 选中色 = bg-bg-elevated；⑤ 小字无 opacity 叠乘；⑩ 空态图标 +「输入 /plan
+ *   ④ L2 tab 选中色 = bg-surface-hover（2026-10-14 全族迁移）；⑤ 小字无 opacity 叠乘；⑩ 空态图标 +「输入 /plan
  *   开始规划」；⑪ 草稿列表区划选不弹评论浮条 + 浮层 Esc 可关（清单全表见
  *   plan-mode-bar.test.ts 头部 D13 索引）
  *
@@ -538,13 +538,14 @@ describe('D13 合规断言（drawer 面板）', () => {
     wrapper.unmount()
   })
 
-  it('D13④ L2 tab 选中色 = bg-bg-elevated（§3.4 tab 型规则），未选中不带该类', async () => {
+  it('D13④ L2 tab 选中色 = bg-surface-hover（§3.4 tab 型规则），未选中不带该类', async () => {
     const wrapper = await mountPanel(viewOf())
     const tabs = wrapper.findAll('[data-testid="plan-docs-tab"]')
-    // 选中 = bg-bg-elevated + text-neutral-fg（§3.4 tab 型规则，语义同 ui TabBar 契约）
-    expect(tabs[0]!.classes()).toEqual(expect.arrayContaining(['bg-bg-elevated', 'text-neutral-fg']))
-    expect(tabs[0]!.classes()).not.toContain('bg-surface-hover')
-    expect(tabs[1]!.classes()).not.toContain('bg-bg-elevated')
+    // 选中 = bg-surface-hover + text-neutral-fg（§3.4 tab 型规则，语义同 ui TabBar 契约；
+    // 2026-10-14 全族迁移：旧 bg-bg-elevated 退役，选中态 = solid hover tone）
+    expect(tabs[0]!.classes()).toEqual(expect.arrayContaining(['bg-surface-hover', 'text-neutral-fg']))
+    expect(tabs[0]!.classes()).not.toContain('bg-bg-elevated')
+    expect(tabs[1]!.classes()).not.toContain('bg-surface-hover')
     wrapper.unmount()
   })
 

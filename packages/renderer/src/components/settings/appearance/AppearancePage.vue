@@ -36,7 +36,7 @@
               type="button"
               class="h-7 flex-1 justify-center rounded-sm px-1 text-[length:var(--text-xs)]"
               :class="(system.theme ?? 'dark') === m
-                ? 'bg-bg-elevated text-neutral-fg hover:bg-bg-elevated hover:text-neutral-fg'
+                ? 'bg-surface-hover text-neutral-fg hover:bg-surface-hover hover:text-neutral-fg'
                 : 'text-neutral-mid hover:bg-transparent hover:text-neutral-fg'"
               :data-testid="`appearance-mode-${m}`"
               :aria-pressed="(system.theme ?? 'dark') === m"
@@ -56,7 +56,7 @@
               type="button"
               class="h-7 flex-1 justify-center rounded-sm px-1 text-[length:var(--text-xs)]"
               :class="(system.fontSize ?? 'medium') === fs
-                ? 'bg-bg-elevated text-neutral-fg hover:bg-bg-elevated hover:text-neutral-fg'
+                ? 'bg-surface-hover text-neutral-fg hover:bg-surface-hover hover:text-neutral-fg'
                 : 'text-neutral-mid hover:bg-transparent hover:text-neutral-fg'"
               :data-testid="`appearance-fs-global-${fs}`"
               :aria-pressed="(system.fontSize ?? 'medium') === fs"
