@@ -10,7 +10,7 @@ Electron + Vue 3 + Node.js Runtime 的 AI Agent 桌面工作台。架构分层�
 
 ## 文档索引
 
-**重要文档资产（2026-09-13 收尾）**：根目录只留 `AGENTS.md` + 2 个 README；一级资产全大写命名收在 `docs/` 下。下表前 8 行是资产登记（读取阶段 + 更新触发）——closeout 文档同步纪律见 dev-flow `flow/acceptance.md` 收尾节；本表即资产清单 SSOT。
+**重要文档资产（2026-09-13 收尾）**：根目录只留 `AGENTS.md` + 2 个 README；一级资产全大写命名收在 `docs/` 下。下表前 9 行是资产登记（读取阶段 + 更新触发）——closeout 文档同步纪律见 dev-flow `flow/acceptance.md` 收尾节；本表即资产清单 SSOT。
 
 | 文档 | 主题 | 谁在什么阶段读 | 什么触发时同 commit 更新 |
 |------|------|---------------|------------------------|
