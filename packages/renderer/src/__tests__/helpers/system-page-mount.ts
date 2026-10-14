@@ -31,12 +31,16 @@ export function createSettingsApiMocks() {
     setRenameModel: vi.fn(),
     getRenameMode: vi.fn(),
     setRenameMode: vi.fn(),
+    getRenamePrompt: vi.fn(),
+    setRenamePrompt: vi.fn(),
+    getRenameMaxLength: vi.fn(),
+    setRenameMaxLength: vi.fn(),
     getSmartContextConfig: vi.fn(),
     setSmartContextEnabled: vi.fn(),
     setSmartContextCompactModel: vi.fn(),
     setSmartContextThresholds: vi.fn(),
     setSmartContextExcludedModels: vi.fn(),
-    // 消费方：SystemAutoRenameSection / SystemSmartContextSection（SystemPage mount 时消费，缺导出即 "No export defined"）
+    // 消费方：SystemSmartContextSection（SystemPage mount 时消费，缺导出即 "No export defined"）；rename 相关桩另供 RenameSessionPage 测试经 settings-transport-stub 覆盖
   }
 }
 
@@ -167,6 +171,10 @@ export function resetSettingsApiMocks(m: SettingsApiMocks): void {
   m.setRenameModel.mockResolvedValue({ model: '' })
   m.getRenameMode.mockResolvedValue({ mode: 'first-stop' })
   m.setRenameMode.mockResolvedValue({ mode: 'first-stop' })
+  m.getRenamePrompt.mockResolvedValue({ style: 'slug', instruction: '', corrupted: false })
+  m.setRenamePrompt.mockResolvedValue({ style: 'slug', instruction: '', corrupted: false })
+  m.getRenameMaxLength.mockResolvedValue({ maxLength: 50 })
+  m.setRenameMaxLength.mockResolvedValue({ maxLength: 50 })
   m.getSmartContextConfig.mockResolvedValue(smartContextFixture())
   m.setSmartContextCompactModel.mockResolvedValue({ model: '' })
   m.setSmartContextThresholds.mockResolvedValue({ thresholds: [...SMART_CONTEXT_DEFAULT_THRESHOLDS] })
