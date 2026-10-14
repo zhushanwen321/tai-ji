@@ -98,6 +98,8 @@ function collectCandidates(
       const raw = JSON.parse(instanceRaw) as Partial<RuntimeInstanceRecord>
       if (isValidPort(raw.port)) candidates.set(raw.port, { pid: typeof raw.pid === 'number' ? raw.pid : undefined, source: 'runtime-instance.json' })
     } catch (error) {
+      // 降级策略：best-effort 解析——损坏文件按无候选继续（文件是 probe 候选来源而非
+      // 权威，端口探活才是判定），留痕后不阻塞启动。
       console.debug('[runtime] single-instance guard: runtime-instance.json corrupt (treated as absent):', error)
     }
   }

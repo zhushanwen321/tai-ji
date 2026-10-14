@@ -123,6 +123,7 @@ export const SYSTEM_PROMPT_MAX_LENGTH = 16000 as const
  * 三处消费：renderer 编辑器计数 / runtime setRenamePrompt 归一截断 / extension normalize
  * 防御截断。输入段自身另有 4000 码点截断（extension llm.ts），本上限约束的是配置面。
  */
+// eslint-disable-next-line no-magic-numbers -- rename-prompt-config 设计标定上限，依据见上方 JSDoc
 export const RENAME_INSTRUCTION_MAX_LENGTH = 2000 as const
 
 /**
