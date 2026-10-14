@@ -1,6 +1,6 @@
 # dev 提速 symlink 形态与本地签名构建互斥
 
-状态：已修复关闭（2026-10-14：构建入口互斥检测落地，`pnpm build` 与 preflight 双挂载；复发时按「现象」判定、「恢复」处置）。
+状态：已修复关闭（2026-10-14：构建入口互斥检测落地，`build`/`build:dir` 公共前置 `build:pre` 与 preflight 双挂载；复发时按「现象」判定、「恢复」处置）。
 
 ## 现象
 
@@ -24,7 +24,7 @@ find <builder-output>/TaiJi.app -type l
 
 逻辑单一源 = `scripts/check-pi-resources-links.mjs`（Node 跨平台），双挂载：
 
-- **构建入口**：`apps/electron/package.json` 的 `build` 脚本最前 `node ../../scripts/check-pi-resources-links.mjs &&`——本地 `pnpm build` 直接触发，发现外部 symlink 即拦截并给恢复指引（CI 上无 symlink，零影响）。
+- **构建入口**：`apps/electron/package.json` 的 `build:pre` 公共前置脚本（`build` 与 `build:dir` 共用）最前 `node ../../scripts/check-pi-resources-links.mjs &&`——本地 `pnpm build` / `build:dir` 直接触发，发现外部 symlink 即拦截并给恢复指引（CI 上无 symlink，零影响）。
 - **preflight 检查 7**：改为调用同一脚本（错误豁免已删，附 [HISTORICAL] 注释）。
 
 脚本语义：`resources/pi` 缺失 → 放行（CI fresh checkout / 未 stage 常态）；symlink 目标解析后落在 `resources/pi` 内部 → 放行；否则（含断链）→ 拦截。`--fix` 将外部 symlink 替换为真实复制（递归实体化，断链报错、环形链接显式报错并建议清缓存重跑 prepare、失败清理半成品、修毕复检）。
