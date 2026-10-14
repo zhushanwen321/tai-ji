@@ -391,17 +391,23 @@ export function useComposerShell(params: ComposerShellParams) {
   })
 
   /**
-   * stop 态的中止目标（按钮 title 分型；非空 ⇔ sendButtonState === 'stop'）：
-   * - 'compacting'：压缩期——点击中止压缩流程。runtime 侧对 "isCompacting ∧ ¬isGenerating"
-   *   的 abort 走压缩取消语义（不写 stopped 终态、不广播 message.complete，见
-   *   message-dispatcher.abort 的 compaction-cancel 分支）。
-   * - 'turn'：执行中——点击中止当前回合（既有 abort 语义）。
-   * 判定序与 sendButtonState 同形（compacting 优先），防两处派生漂移。
+   * stop 态的中止目标（按钮 title 分型）。判定序**有意不与 sendButtonState 同形**——
+   * 对齐 runtime abort 的 compaction-cancel 门（message-dispatcher.abort：source='user'
+   * ∧ isCompacting ∧ ¬isGenerating 才走压缩取消语义；settling → isGenerating=false，
+   * 见 event-interpreter 占用→flags 映射），保证「title 说终止压缩 ⇔ runtime 真走压缩取消」：
+   * - dispatching/generating → 'turn'：isGenerating=true，abort 是回合中止；即便 compacting
+   *   同真（threshold turn 内压缩），title 标「终止压缩」即谎报（2026-10 审查修正）。
+   * - 'compacting'：压缩期且 turn 非生成中（idle 手动 /compact、settling+overflow）——
+   *   点击中止压缩流程（不写 stopped 终态、不广播 message.complete）。
+   * - 'turn'：settling 单独——点击中止当前回合（既有 abort 语义）。
+   * 与 sendButtonState 的关系：stop/queue 全集内非空，唯一错位 settling+bash
+   * （state='queue' 而 target='turn'）——title 仅 stop 态渲染消费，错位无行为影响。
    */
   const sendButtonStopTarget = computed<'compacting' | 'turn' | null>(() => {
     const phase = effectivePhase.value
+    if (phase.turn === 'dispatching' || phase.turn === 'generating') return 'turn'
     if (phase.compacting) return 'compacting'
-    if (phase.turn === 'dispatching' || phase.turn === 'generating' || phase.turn === 'settling') return 'turn'
+    if (phase.turn === 'settling') return 'turn'
     return null
   })
 

@@ -147,7 +147,7 @@ describe('slowLine（慢网兜底细线，OpenDesign spec §2.2）', () => {
     expect(loadMore.loadMoreError.value).toBe(true)
   })
 
-  it('切 session 复位：延迟落盘的加载不属于新会话（细线 + 未触发定时器一并清）', async () => {
+  it('切 session 分区隔离：新会话不为在途加载背书，迟到收敛写回原分区（ADR-0049）', async () => {
     const d = deferred()
     loadMoreHistoryMock.mockReturnValueOnce(d.promise)
     const sessionId = ref('s1')
@@ -157,13 +157,21 @@ describe('slowLine（慢网兜底细线，OpenDesign spec §2.2）', () => {
     vi.advanceTimersByTime(SLOW_LINE_DELAY_MS + 1)
     expect(loadMore.slowLine.value).toBe(true)
 
+    // 切 sid：消费面 computed 读新分区（全新态）——s1 的在途加载与细线对 s2 不可见
     sessionId.value = 's2'
-    await nextTick() // watch（pre flush）落地
+    await nextTick()
     expect(loadMore.slowLine.value).toBe(false)
 
     d.resolve()
     await d.promise
-    await Promise.resolve()
+    await Promise.resolve() // handleLoadMore 的 finally（updateFor('s1')）落地
+    // 迟到收敛写回 s1 分区：s2 视图仍干净
+    expect(loadMore.slowLine.value).toBe(false)
+
+    // 切回 s1：分区已被迟到收敛复位（无细线残留）
+    sessionId.value = 's1'
+    await nextTick()
+    expect(loadMore.slowLine.value).toBe(false)
   })
 })
 
@@ -195,5 +203,22 @@ describe('handleLoadMore（载荷与 isPrepend 生命周期）', () => {
     await loadMore.handleLoadMore()
     expect(loadMoreHistoryMock).toHaveBeenCalledTimes(1)
     expect(loadMoreHistoryMock).toHaveBeenCalledWith('s1')
+  })
+
+  it('失败态按分区归属：切走再切回仍见本 session 的失败行，不跨 session 泄漏（ADR-0049）', async () => {
+    loadMoreHistoryMock.mockResolvedValueOnce(false)
+    const sessionId = ref('s1')
+    const loadMore = useLoadMoreHistory(() => sessionId.value)
+
+    await loadMore.handleLoadMore()
+    expect(loadMore.loadMoreError.value).toBe(true)
+
+    sessionId.value = 's2'
+    await nextTick()
+    expect(loadMore.loadMoreError.value).toBe(false) // s2 分区无失败
+
+    sessionId.value = 's1'
+    await nextTick()
+    expect(loadMore.loadMoreError.value).toBe(true) // s1 自己的失败仍在（顶部条可重试）
   })
 })

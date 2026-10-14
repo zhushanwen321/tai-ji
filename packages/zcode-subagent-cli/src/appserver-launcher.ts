@@ -262,6 +262,9 @@ if (!CLI_PATH) {
 // 时抛错被 catch 恒返 null，曾致纯 account 宿主补丁层静默不安装（见安装门处注释）。
 let CATALOG_PATH = process.env.ZCODE_BUILTIN_PROVIDER_CONFIG_FILE || null;
 const __catalogPatchCache = new Map();
+// 跳过决策归因（2026-10 审查补）：catalogPatchText 把「无条目需补」与「读取/解析失败
+// （文件缺失/损坏）」都折成 null，跳过日志若不区分会把损坏态误报成「无条目」，排障被误导
+const __catalogPatchStatus = new Map(); // path -> 'no-entries' | 'unreadable'
 function catalogPatchText(path) {
   if (__catalogPatchCache.has(path)) return __catalogPatchCache.get(path);
   let result = null;
@@ -277,7 +280,8 @@ function catalogPatchText(path) {
       if (acc && acc.type === 'zhipu-account' && acc.entitled !== true) { acc.entitled = true; touched++; }
     }
     result = touched > 0 ? JSON.stringify(parsed) : null;
-  } catch { result = null; }
+    __catalogPatchStatus.set(path, 'no-entries');
+  } catch { result = null; __catalogPatchStatus.set(path, 'unreadable'); }
   __catalogPatchCache.set(path, result);
   return result;
 }
@@ -496,7 +500,9 @@ if (text !== null || catalogPatch !== null) {
 } else {
   process.stderr.write('[zcode-launcher] 补丁层未安装(跳过): 无凭据可注入(v2 config 无 provider 条目)'
     + (CATALOG_PATH !== null
-      ? '; 内建目录已定位但无 zhipu-account 条目需补(目录读取原生透出)'
+      ? (__catalogPatchStatus.get(CATALOG_PATH) === 'unreadable'
+        ? '; 内建目录已定位但 catalog 读取/解析失败(文件缺失或损坏，排障入口: zcode-builtin.json——非「无条目」)'
+        : '; 内建目录已定位但无 zhipu-account 条目需补(目录读取原生透出)')
       : '; 内建目录未定位(env 未设且自定位未命中)')
     + '\\n');
 }

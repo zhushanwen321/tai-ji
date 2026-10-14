@@ -3,8 +3,9 @@
  *
  * 背景（2026-10-13 01a132f3 事故）：该 session 的 pi 进程于 01:51:49.322Z 与兄弟
  * session 01a132f0 的 pi 在**同一毫秒**收到外部 SIGTERM，pi 的 rpc-mode 信号处理器
- * （pi-coding-agent dist/modes/rpc/rpc-mode.js：`shutdown(signal === "SIGHUP" ? 129
- * : 143, signal)`）以 exit 143 优雅退出。D10 的机器面快照只回答「死状 + 同秒连坐」，
+ * （pi-coding-agent@1.0.0 dist/modes/rpc/rpc-mode.js:283：`shutdown(signal === "SIGHUP"
+ * ? 129 : 143, signal)`，语义登记 PS-80 @ docs/pi-semantics.json，探针
+ * pi-semantics-signal-exit-codes.test.ts 守漂移）以 exit 143 优雅退出。D10 的机器面快照只回答「死状 + 同秒连坐」，
  * 「谁发的信号」缺归因面——且三条确定性路线全部被封：
  *   ① macOS 不为普通 kill(2) 记系统日志（崩溃处理器 log show 关联只捞到 mDNS STOP）；
  *   ② EndpointSecurity 的 AUE_kill 审计需 Apple 特批 entitlement（第三方不可得）；

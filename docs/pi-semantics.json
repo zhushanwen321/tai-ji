@@ -1703,5 +1703,22 @@
       "test": "extensions/universal/plan/src/__tests__/tool.test.ts"
     },
     "verifiedWith": "1.0.0"
+  },
+  {
+    "id": "PS-80",
+    "claim": "rpc-mode 信号处理器信号→退出码映射：SIGHUP→129、其余信号（SIGTERM/SIGINT 等）→143，经 shutdown(exitCode, signal) 优雅退出——signal-forensics 把 exit 143 读作「外部 SIGTERM」的归因前提（crash-forensics §3.3 D10 延伸面）",
+    "piAnchor": [
+      {
+        "pkg": "pi-coding-agent",
+        "distPath": "dist/modes/rpc/rpc-mode.js",
+        "symbol": "信号处理器的 shutdown 调用",
+        "note": ":283 void shutdown(signal === \"SIGHUP\" ? 129 : 143, signal)【行号锚基于 pi@1.0.0 实装实测】"
+      }
+    ],
+    "guard": {
+      "type": "probe",
+      "test": "packages/runtime/src/infra/pi/__tests__/pi-semantics-signal-exit-codes.test.ts"
+    },
+    "verifiedWith": "1.0.0"
   }
 ]

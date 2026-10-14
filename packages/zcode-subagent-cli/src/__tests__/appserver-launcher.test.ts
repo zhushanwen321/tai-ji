@@ -734,6 +734,20 @@ describe("安装门（catalog 定位先于门判定——纯 account 宿主回�
     expect(h.state().catalogUtf8!.text).toBe("{}");
   });
 
+  it("catalog JSON 损坏 → 跳过原因标「读取/解析失败」而非「无条目」（排障不误导）", () => {
+    // 2026-10 审查补：损坏态与无条目态同归 null，日志不分会让排障往「目录没装账号」
+    // 方向查而错过文件本身的问题
+    const p = path.join(tmpRoot, "corrupt-catalog", "zcode-builtin.json");
+    fs.mkdirSync(path.dirname(p), { recursive: true });
+    fs.writeFileSync(p, "{ not json");
+    const h = setupHome({ builtinProviderEnv: p });
+    const res = h.run();
+    expect(res.status).toBe(0);
+    expect(res.stderr).toContain("补丁层未安装");
+    expect(res.stderr).toContain("读取/解析失败");
+    expect(res.stderr).not.toContain("无 zhipu-account 条目");
+  });
+
   it("text 非 null（v2 有凭据）→ 安装日志标明 cli-config-inject=on（决策可见性）", () => {
     const h = setupHome({ v2: { provider: { p1: providerEntry("k1") } }, real: {} });
     const res = h.run();

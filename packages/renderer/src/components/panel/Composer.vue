@@ -447,7 +447,8 @@ const selectedSkillNames = ref<string[]>([])
 
 const isSending = ref(false)
 // [u6b] 本地 isCompacting computed 已退役：压缩维度唯一读口 = shell sendButtonState / sendButtonStopTarget
-// （与 sendRoute 同源 effectivePhase；压缩期按钮 = stop 且 stopTarget='compacting'，title 分型「终止压缩」）
+// （与 sendRoute 同源 effectivePhase；压缩期按钮 = stop，title 分型见 sendButtonStopTarget——
+//   仅 turn 非生成中的压缩（idle /compact、settling+overflow）标「终止压缩」，生成中压缩标「停止」）
 
 // composer-box 容器 ref（拖拽落位 + 视觉）——先声明，再喂给 shell
 const composerBoxRef = ref<HTMLElement | null>(null)
@@ -582,7 +583,8 @@ const onKeydown = useComposerKeydown({
 /**
  * stop 按钮点击：先尝试取消进行中的 staging 操作（handoff inflight），否则 abort。
  * abort 的中止对象由 runtime 权威态判定（renderer 只表达「停止」意图）：
- * - isCompacting ∧ ¬isGenerating（压缩期，sendButtonStopTarget='compacting'）→ 中止压缩流程
+ * - isCompacting ∧ ¬isGenerating（= sendButtonStopTarget='compacting'：idle /compact、
+ *   settling+overflow；生成中压缩 isGenerating=true → 归回合中止，title=停止）→ 中止压缩流程
  *   （pi session.abort → abortCompaction，runtime 走压缩取消语义：不写 stopped 终态、
  *   不广播 message.complete，队列经 abort-idle 对账立即 flush）
  * - 否则 → 中止当前 LLM turn（既有语义）

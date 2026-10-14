@@ -149,11 +149,12 @@ watch(
 )
 
 /* ── read：剥截断脚注 + 起始行号 ──
- * pi read 输出尾部可能带三类续读提示（读源 pi-coding-agent read.js）：
- * [Showing lines A-B of C. Use offset=N to continue.] / [N more lines in file. ...] /
- * [Line N is X, exceeds Y limit. ...]——全部移为块内底部收口行，代码区只留纯内容。 */
+ * pi read 输出尾部可能带三类续读提示（读源 pi-coding-agent read.js:131/:134/:139）：
+ * [Showing lines A-B of C. Use offset=N to continue.]（行数上限）/
+ * [Showing lines A-B of C (50.0KB limit). Use offset=N to continue.]（字节上限变体，of N 后带括号注记）/
+ * [N more lines in file. ...] / [Line N is X, exceeds Y limit. ...]——全部移为块内底部收口行，代码区只留纯内容。 */
 const FOOTER_RES: readonly RegExp[] = [
-  /\n?\[Showing lines \d+-\d+ of \d+\.[^\]]*\]\s*$/,
+  /\n?\[Showing lines \d+-\d+ of \d+(?: \([^)]*\))?\.[^\]]*\]\s*$/,
   /\n?\[\d+ more lines in file\.[^\]]*\]\s*$/,
   /\n?\[Line \d+ is [^\]]*exceeds[^\]]*\]\s*$/,
 ]

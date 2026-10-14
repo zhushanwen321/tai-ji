@@ -3,19 +3,21 @@
  *
  * 发送位按 sendButtonState（shell effectivePhase 派生）渲染。**按钮形态与 Enter 车道是两个
  * 问题**（2026-10 用户裁决）：按钮回答「现在能中止什么」（忙 → 终止钮；压缩期 → 中止压缩
- * 流程，title=「终止压缩」），Enter 回答「消息走哪条车道」（sendRoute，compacting →
+ * 流程，title 分型：turn 非生成中=「终止压缩」（runtime 走压缩取消）、生成中压缩=「停止」
+ * （abort 归回合中止）），Enter 回答「消息走哪条车道」（sendRoute，compacting →
  * queued 排队——断言见 composer-compact-queue.test.ts TC11）。
  * | 行 | sessionPhase                              | 发送位          |
  * |----|-------------------------------------------|-----------------|
  * | 1  | 全 idle                                    | ↑ send          |
  * | 2  | turn=dispatching/generating（无 compacting）| ■ stop          |
- * | 3  | turn=generating + compacting（threshold）   | ■ stop（中止压缩）|
- * | 4  | turn=settling                              | 单独→stop；+compacting→stop（中止压缩）|
+ * | 3  | turn=generating + compacting（threshold）   | ■ stop（title=停止：回合中止）|
+ * | 4  | turn=settling                              | 单独→stop；+compacting→stop（终止压缩）|
  * | 5  | turn=idle + compacting（手动 /compact）     | ■ stop（中止压缩）|
  * | 6  | bash=true 且 turn=idle                     | ↑ queue          |
  *
  * 覆盖（三视角，用户可见 DOM 断言优先）：
- * - 六行逐一 DOM 断言（含 settling 分档两形态；压缩期三行 3/4b/5 一律 stop + title=终止压缩）
+ * - 六行逐一 DOM 断言（含 settling 分档两形态；压缩期三行 3/4b/5 一律 stop，title 分型：
+ *   3=停止（生成中压缩 abort 归回合中止）、4b/5=终止压缩（runtime compaction-cancel））
  * - queue 态角标 title（「排队发送 · ⏎」）/ Clock aria-hidden（现由 bash 行承载）/ stop / send title
  * - 压缩期 stop 不随输入禁用（⏎ 仍走排队提交，按钮与输入正交）
  * - ActivityStrip（u6a）与发送位同屏共存不互扰（同 wrapper 双组件 + 同一 chat store 真值）
@@ -129,18 +131,20 @@ describe('D6 发送位四态（六行逐一 DOM 断言）', () => {
     expectSendButtonState(wrapper, 'stop')
   })
 
-  it('行 3：turn=generating + compacting（threshold turn 内压缩）→ ■ stop（title=终止压缩，点击中止压缩流程）', () => {
+  it('行 3：turn=generating + compacting（threshold turn 内压缩）→ ■ stop（title=停止：isGenerating=true，abort 归回合中止）', () => {
     // [compaction-input-unlock 演进 / 2026-10 用户裁决] 旧断言 queue（compacting hold 优先，
     // 修「按钮 stop 但 Enter 排队」漂移）——代价是压缩期 composer 失去全部中止能力（连阈值
     // 自动压缩的 stop 一并消失）。现按钮回答「现在能中止什么」：压缩期 = 中止压缩流程
     // （onStopClick → abort → pi session.abort → abortCompaction）；Enter 车道仍走 sendRoute
     // 的 queued 排队（compaction-end flush，断言见 composer-compact-queue.test.ts TC11）
     // ——按钮与 Enter 两问题分立，漂移根源（混谈）消除而非再次二选一。
+    // [2026-10 审查修正] title 分型对齐 runtime compaction-cancel 门：本行 isGenerating=true，
+    // abort 语义是回合中止（写 stopped 终态）而非压缩取消——title=「停止」，不再谎报「终止压缩」。
     const chat = useChatStore()
     chat.setOccupancy('s3', { turn: 'generating', compacting: true, bash: false })
     const wrapper = mountComposer({ sessionId: 's3' })
     expectSendButtonState(wrapper, 'stop')
-    expect(wrapper.find('.stop-btn').attributes('title')).toBe('终止压缩')
+    expect(wrapper.find('.stop-btn').attributes('title')).toBe('停止')
   })
 
   it('行 4：turn=settling 单独 → ■ stop（收尾期可中止）', () => {

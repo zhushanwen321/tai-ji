@@ -125,6 +125,18 @@ describe('ToolDetailRenderer — read 分支（行号代码块 + 截断脚注剥
     wrapper.unmount()
   })
 
+  it('字节上限变体脚注 [Showing lines ... (50.0KB limit). ...] 同样剥离（pi read.js:134，of N 后带括号注记）', async () => {
+    const output = 'const a = 1\nconst b = 2\n\n[Showing lines 1-2 of 200 (50.0KB limit). Use offset=3 to continue.]'
+    const wrapper = mountRenderer(makeTool({ toolName: 'read', input: { path: '/tmp/foo.ts' }, output }))
+    await flushPromises()
+    // 修复前正则 of \d+\. 对「of 200 (50.0KB limit).」不匹配 → 脚注滞留代码区
+    expect(wrapper.find('[data-testid="read-code-footer"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="read-code-footer"]').text()).toContain('50.0KB limit')
+    expect(wrapper.find('[data-testid="read-code-footer"]').text()).toContain('Use offset=3')
+    expect(wrapper.text()).toContain('const a = 1')
+    wrapper.unmount()
+  })
+
   it('input.offset 分段读 → 起始行号透传（counterReset 内联样式）', async () => {
     const wrapper = mountRenderer(
       makeTool({ toolName: 'read', input: { path: '/tmp/foo.ts', offset: 21 }, output: 'const x = 21' }),
