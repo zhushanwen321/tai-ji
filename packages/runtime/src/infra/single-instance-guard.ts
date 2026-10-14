@@ -84,19 +84,12 @@ function readCandidateText(file: string, label: string): string | null {
 }
 
 /**
- * 探活同数据目录是否已有活 runtime 实例。
- *
- * @param dataDir 数据目录（getDataDir() 结果）
- * @param deps 可注入探活实现
- * @returns blocked=true 表示活实例在场，调用方应 fail-fast（含 holder 定位信息）
+ * 候选收集：本机制登记（instance.json，优先——含 pid 可直接定位持有者）+ Electron supervisor
+ * 通道（兼容未写登记文件的旧版/安装版实例），同端口去重（instance.json 先到先占）。
  */
-export async function probeSingleInstance(
+function collectCandidates(
   dataDir: string,
-  deps: InstanceGuardDeps = {},
-): Promise<InstanceGuardProbeResult> {
-  const isReachable = deps.isPortReachable ?? defaultIsPortReachable
-  const isPidAlive = deps.isPidAlive ?? defaultIsPidAlive
-  // 候选按优先级收集（instance.json 优先——含 pid 可直接定位持有者）；同端口去重。
+): Map<number, { pid?: number; source: 'runtime-instance.json' | 'runtime.port' }> {
   const candidates = new Map<number, { pid?: number; source: 'runtime-instance.json' | 'runtime.port' }>()
   // 候选 1：本机制登记（缺失 = 首启/清理后，常态静默；损坏 = 异常态，留痕但不阻塞）
   const instanceRaw = readCandidateText(path.join(dataDir, RUNTIME_INSTANCE_FILE), 'runtime-instance.json')
@@ -114,7 +107,23 @@ export async function probeSingleInstance(
     const parsed = parseInt(portRaw.trim(), 10)
     if (isValidPort(parsed) && !candidates.has(parsed)) candidates.set(parsed, { source: 'runtime.port' })
   }
-  for (const [port, meta] of candidates) {
+  return candidates
+}
+
+/**
+ * 探活同数据目录是否已有活 runtime 实例。
+ *
+ * @param dataDir 数据目录（getDataDir() 结果）
+ * @param deps 可注入探活实现
+ * @returns blocked=true 表示活实例在场，调用方应 fail-fast（含 holder 定位信息）
+ */
+export async function probeSingleInstance(
+  dataDir: string,
+  deps: InstanceGuardDeps = {},
+): Promise<InstanceGuardProbeResult> {
+  const isReachable = deps.isPortReachable ?? defaultIsPortReachable
+  const isPidAlive = deps.isPidAlive ?? defaultIsPidAlive
+  for (const [port, meta] of collectCandidates(dataDir)) {
     if (await isReachable(port)) {
       return { blocked: true, holder: { port, pid: meta.pid, source: meta.source, reachable: true } }
     }
