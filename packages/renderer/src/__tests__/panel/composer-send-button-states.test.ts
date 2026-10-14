@@ -1,20 +1,23 @@
 /**
  * Composer 发送位四态测试（session-occupancy u6b / D6 表「发送位」列）。
  *
- * 发送位按 sendButtonState（shell effectivePhase 派生，与分发器 sendRoute 同源）渲染：
+ * 发送位按 sendButtonState（shell effectivePhase 派生）渲染。**按钮形态与 Enter 车道是两个
+ * 问题**（2026-10 用户裁决）：按钮回答「现在能中止什么」（忙 → 终止钮；压缩期 → 中止压缩
+ * 流程，title=「终止压缩」），Enter 回答「消息走哪条车道」（sendRoute，compacting →
+ * queued 排队——断言见 composer-compact-queue.test.ts TC11）。
  * | 行 | sessionPhase                              | 发送位          |
  * |----|-------------------------------------------|-----------------|
  * | 1  | 全 idle                                    | ↑ send          |
  * | 2  | turn=dispatching/generating（无 compacting）| ■ stop          |
- * | 3  | turn=generating + compacting（threshold）   | ↑ queue（compacting hold 优先，[compaction-input-unlock]）|
- * | 4  | turn=settling                              | 单独→stop；+compacting→queue |
- * | 5  | turn=idle + compacting                     | ↑ queue（时钟角标）|
+ * | 3  | turn=generating + compacting（threshold）   | ■ stop（中止压缩）|
+ * | 4  | turn=settling                              | 单独→stop；+compacting→stop（中止压缩）|
+ * | 5  | turn=idle + compacting（手动 /compact）     | ■ stop（中止压缩）|
  * | 6  | bash=true 且 turn=idle                     | ↑ queue          |
  *
  * 覆盖（三视角，用户可见 DOM 断言优先）：
- * - 六行逐一 DOM 断言（含 settling 分档两形态与 threshold 行 3 的「compacting 优先于
- *   turn 活跃——与内核 holdReasonOf 判定序同构，形态随权威 lane」）
- * - queue 态角标 title（「排队发送 · ⏎」）/ Clock aria-hidden / stop / send title
+ * - 六行逐一 DOM 断言（含 settling 分档两形态；压缩期三行 3/4b/5 一律 stop + title=终止压缩）
+ * - queue 态角标 title（「排队发送 · ⏎」）/ Clock aria-hidden（现由 bash 行承载）/ stop / send title
+ * - 压缩期 stop 不随输入禁用（⏎ 仍走排队提交，按钮与输入正交）
  * - ActivityStrip（u6a）与发送位同屏共存不互扰（同 wrapper 双组件 + 同一 chat store 真值）
  * - CompactQueueBadge / 专属 i18n key / testid 零残留（源码 grep 断言，C-proc-10）
  *
@@ -126,14 +129,18 @@ describe('D6 发送位四态（六行逐一 DOM 断言）', () => {
     expectSendButtonState(wrapper, 'stop')
   })
 
-  it('行 3：turn=generating + compacting（threshold turn 内压缩）→ ↑ queue（compacting hold 优先——内核 lane 权威，修复 stop/Enter 排队漂移）', () => {
-    // [compaction-input-unlock] 旧断言 ■ stop（turn 活跃优先）与真实车道漂移：内核
-    // holdReasonOf 首判 compacting（期间提交一律 queued），Enter/Alt+Enter 实际排队。
-    // 按钮形态改与权威 lane 同构；turn 回 generating（压缩结束）后自然回落 stop（行 2）。
+  it('行 3：turn=generating + compacting（threshold turn 内压缩）→ ■ stop（title=终止压缩，点击中止压缩流程）', () => {
+    // [compaction-input-unlock 演进 / 2026-10 用户裁决] 旧断言 queue（compacting hold 优先，
+    // 修「按钮 stop 但 Enter 排队」漂移）——代价是压缩期 composer 失去全部中止能力（连阈值
+    // 自动压缩的 stop 一并消失）。现按钮回答「现在能中止什么」：压缩期 = 中止压缩流程
+    // （onStopClick → abort → pi session.abort → abortCompaction）；Enter 车道仍走 sendRoute
+    // 的 queued 排队（compaction-end flush，断言见 composer-compact-queue.test.ts TC11）
+    // ——按钮与 Enter 两问题分立，漂移根源（混谈）消除而非再次二选一。
     const chat = useChatStore()
     chat.setOccupancy('s3', { turn: 'generating', compacting: true, bash: false })
     const wrapper = mountComposer({ sessionId: 's3' })
-    expectSendButtonState(wrapper, 'queue')
+    expectSendButtonState(wrapper, 'stop')
+    expect(wrapper.find('.stop-btn').attributes('title')).toBe('终止压缩')
   })
 
   it('行 4：turn=settling 单独 → ■ stop（收尾期可中止）', () => {
@@ -143,18 +150,22 @@ describe('D6 发送位四态（六行逐一 DOM 断言）', () => {
     expectSendButtonState(wrapper, 'stop')
   })
 
-  it('行 4 分档：turn=settling + compacting（overflow）→ ↑ queue', () => {
+  it('行 4 分档：turn=settling + compacting（overflow）→ ■ stop（title=终止压缩）', () => {
     const chat = useChatStore()
     chat.setOccupancy('s4b', { turn: 'settling', compacting: true, bash: false })
     const wrapper = mountComposer({ sessionId: 's4b' })
-    expectSendButtonState(wrapper, 'queue')
+    expectSendButtonState(wrapper, 'stop')
+    expect(wrapper.find('.stop-btn').attributes('title')).toBe('终止压缩')
   })
 
-  it('行 5：turn=idle + compacting → ↑ queue（时钟角标）', () => {
+  it('行 5：turn=idle + compacting（手动 /compact）→ ■ stop（title=终止压缩）', () => {
+    // 手动 /compact 全窗口可中止：旧行为此处也是 queue（idle+compacting），用户无任何
+    // composer 内中止入口——本行是修复的主场景（终止压缩 ≠ 排队发送）。
     const chat = useChatStore()
     chat.setOccupancy('s5', { turn: 'idle', compacting: true, bash: false })
     const wrapper = mountComposer({ sessionId: 's5' })
-    expectSendButtonState(wrapper, 'queue')
+    expectSendButtonState(wrapper, 'stop')
+    expect(wrapper.find('.stop-btn').attributes('title')).toBe('终止压缩')
   })
 
   it('行 6：bash=true 且 turn=idle → ↑ queue', () => {
@@ -166,10 +177,11 @@ describe('D6 发送位四态（六行逐一 DOM 断言）', () => {
 })
 
 describe('queue 态角标 / title / aria 语义', () => {
-  it('queue 态：title=「排队发送 · ⏎」，Clock 角标 aria-hidden', async () => {
+  it('queue 态（bash 行承载）：title=「排队发送 · ⏎」，Clock 角标 aria-hidden', async () => {
+    // queue 态现只覆盖 bash / settling+bash（压缩期是 stop）——时钟角标语义由 bash 行断言
     const chat = useChatStore()
-    chat.setOccupancy('q1', { turn: 'idle', compacting: true, bash: false })
-    const wrapper = mountComposer({ sessionId: 'q1' })
+    chat.setOccupancy('qb1', { turn: 'idle', compacting: false, bash: true })
+    const wrapper = mountComposer({ sessionId: 'qb1' })
     wrapper.findComponent(ComposerInputMock).vm.$emit('input', 'hello')
     await wrapper.vm.$nextTick()
     const btn = wrapper.find('.queue-send-btn')
@@ -180,16 +192,32 @@ describe('queue 态角标 / title / aria 语义', () => {
     expect(clock.attributes('aria-hidden')).toBe('true')
   })
 
-  it('queue 态无输入：disabled + title=sendHint（守卫语义与 send 态一致）', () => {
+  it('压缩期 stop 态：title=「终止压缩」，有输入也不禁用（停止与输入正交），点击 → abort', async () => {
+    const chat = useChatStore()
+    chat.setOccupancy('q1', { turn: 'idle', compacting: true, bash: false })
+    const wrapper = mountComposer({ sessionId: 'q1' })
+    wrapper.findComponent(ComposerInputMock).vm.$emit('input', 'hello')
+    await wrapper.vm.$nextTick()
+    const btn = wrapper.find('.stop-btn')
+    expect(btn.attributes('title')).toBe('终止压缩')
+    // 有输入不禁用：⏎ 仍走排队提交（内核 queued 车道），按钮与输入内容正交
+    expect(btn.attributes('disabled')).toBeUndefined()
+    await btn.trigger('click')
+    expect(chatApiMock.abort).toHaveBeenCalled()
+  })
+
+  it('压缩期无输入：stop 仍可点（canSubmit 不拦停止），点击 → abort', async () => {
     const chat = useChatStore()
     chat.setOccupancy('q2', { turn: 'idle', compacting: true, bash: false })
     const wrapper = mountComposer({ sessionId: 'q2' })
-    const btn = wrapper.find('.queue-send-btn')
-    expect(btn.attributes('disabled')).toBeDefined()
-    expect(btn.attributes('title')).toBe('输入内容后发送')
+    const btn = wrapper.find('.stop-btn')
+    expect(btn.exists()).toBe(true)
+    expect(btn.attributes('disabled')).toBeUndefined()
+    await btn.trigger('click')
+    expect(chatApiMock.abort).toHaveBeenCalled()
   })
 
-  it('stop 态：title=「停止」，点击 → abort（abort 语义保持）', async () => {
+  it('stop 态（执行中无 compacting）：title=「停止」，点击 → abort（abort 语义保持）', async () => {
     const chat = useChatStore()
     chat.setOccupancy('q3', { turn: 'generating', compacting: false, bash: false })
     const wrapper = mountComposer({ sessionId: 'q3' })
@@ -199,25 +227,26 @@ describe('queue 态角标 / title / aria 语义', () => {
     expect(chatApiMock.abort).toHaveBeenCalled()
   })
 
-  it('settling+compacting queue 态：title 同 queue 语义（角标随分档出现）', () => {
+  it('settling+compacting stop 态：title=「终止压缩」', () => {
     const chat = useChatStore()
     chat.setOccupancy('q4', { turn: 'settling', compacting: true, bash: false })
     const wrapper = mountComposer({ sessionId: 'q4' })
-    const btn = wrapper.find('.queue-send-btn')
+    const btn = wrapper.find('.stop-btn')
     expect(btn.exists()).toBe(true)
-    expect(btn.find('svg.lucide-clock').exists()).toBe(true)
+    expect(btn.attributes('title')).toBe('终止压缩')
   })
 })
 
 describe('ActivityStrip 与发送位同屏共存不互扰（u6a + u6b）', () => {
-  it('compacting 期：活动条 compacting 行 + 发送位 queue 态同时渲染（同一 chat store 真值）', () => {
+  it('compacting 期：活动条 compacting 行 + 发送位 stop 态（title=终止压缩）同时渲染（同一 chat store 真值）', () => {
     const chat = useChatStore()
     chat.setOccupancy('co1', { turn: 'idle', compacting: true, bash: false })
     const wrapper = mountStripAndComposer('co1')
     // 活动条：压缩行可见（G3 单一展示位）
     expect(wrapper.find('[data-testid="activity-strip-row-compacting"]').exists()).toBe(true)
-    // 发送位：queue 态（与活动条独立渲染位，互不吞没）
-    expectSendButtonState(wrapper, 'queue')
+    // 发送位：stop 态（中止入口在按钮位，与活动条独立渲染位，互不吞没）
+    expectSendButtonState(wrapper, 'stop')
+    expect(wrapper.find('.stop-btn').attributes('title')).toBe('终止压缩')
   })
 
   it('占用解除（全 idle）：活动条消失 + 发送位回归 send 态（两组件同步复位）', async () => {
@@ -225,7 +254,7 @@ describe('ActivityStrip 与发送位同屏共存不互扰（u6a + u6b）', () =>
     chat.setOccupancy('co2', { turn: 'idle', compacting: true, bash: false })
     const wrapper = mountStripAndComposer('co2')
     expect(wrapper.find('[data-testid="activity-strip"]').exists()).toBe(true)
-    expectSendButtonState(wrapper, 'queue')
+    expectSendButtonState(wrapper, 'stop')
 
     chat.setOccupancy('co2', { turn: 'idle', compacting: false, bash: false })
     await wrapper.vm.$nextTick()
