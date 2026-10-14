@@ -112,8 +112,6 @@ export default {
   renameSession: {
     cardBasicTitle: 'Basic',
     cardBasicSub: 'Switch, trigger timing and title model',
-    autoRenameSession: 'Auto Rename Session',
-    autoRenameDesc: 'Generate session titles automatically at the selected timing',
     triggerMode: 'Trigger Mode',
     triggerModeHint: 'On first request: generated as soon as the first message is sent; After first reply: based on the first request and the final reply (default)',
     triggerModeFirstPrompt: 'On first request',
@@ -689,8 +687,6 @@ export default {
     soundDefault: 'System default',
     soundPreview: 'Preview',
     soundPreviewing: 'Previewing…',
-    autoRenameSession: 'Auto Rename Session',
-    autoRenameDesc: 'Auto-name sessions by topic at the selected timing',
     renameModelUnavailable: '(unavailable)',
     smartContextTitle: 'Smart Context Compression',
     smartContextEnable: 'Enable smart compression',

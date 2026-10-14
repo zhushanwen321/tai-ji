@@ -112,8 +112,6 @@ export default {
   renameSession: {
     cardBasicTitle: '基本设置',
     cardBasicSub: '开关、触发时机与标题生成模型',
-    autoRenameSession: '自动重命名会话',
-    autoRenameDesc: '按所选时机自动生成会话标题',
     triggerMode: '触发模式',
     triggerModeHint: '首次请求时：首条消息发出即生成，不等回复；首轮回复完成：基于首条请求与最终回复生成（默认）',
     triggerModeFirstPrompt: '首次请求时',
@@ -688,8 +686,6 @@ export default {
     soundDefault: '系统默认',
     soundPreview: '试听',
     soundPreviewing: '试听中…',
-    autoRenameSession: '会话自动重命名',
-    autoRenameDesc: '按所选时机自动用主题给会话命名',
     renameModelUnavailable: '（不可用）',
     smartContextTitle: '智能上下文压缩',
     smartContextEnable: '启用智能压缩',
