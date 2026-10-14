@@ -12,7 +12,7 @@
  * 但拿到的是 ManagedSession 实例,可读写字段(lastActiveAt / isGenerating)。
  */
 import type { ServerMessage, PiMessageEntry, PiToolCallEntryForm } from '@taiji/shared'
-import type { SessionManagerAction } from '@zhushanwen/extension-protocol'
+import type { SessionManagerAction, CanvasMarkerAction } from '@zhushanwen/extension-protocol'
 import type { ScannedSessionMeta } from '../ports/session.js'
 
 /**
@@ -422,6 +422,8 @@ export type PiTranslatedEvent =
   | { kind: 'extension-ui'; requestId: string; sessionId: string; method: string; payload: Record<string, unknown> }
   /** session-manager 请求（select + SESSION_MANAGER_MARKER）—— interpreter fire-and-forget 路由到 SessionManagerHandler。 */
   | { kind: 'session-manager-ui'; requestId: string; sessionId: string; action: SessionManagerAction | '__malformed__'; params: Record<string, unknown> }
+  /** canvas 请求（select + CANVAS_MARKER）—— interpreter fire-and-forget 路由到 CanvasMessageHandler（session-manager 同款形态，problem-solve-canvas U3）。 */
+  | { kind: 'canvas-ui'; requestId: string; sessionId: string; action: CanvasMarkerAction | '__malformed__'; params: Record<string, unknown> }
   /** thinking_level_changed —— interpreter 回写 session 缓存（与 session.thinkingLevelSet WS 帧成对）。 */
   | { kind: 'thinking-level'; level: string | undefined }
   /** session_info_changed —— interpreter 回写 session label 缓存（与 session.renamed WS 帧成对）。 */
