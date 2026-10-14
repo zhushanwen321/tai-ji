@@ -94,3 +94,80 @@ describe('SettingsMessageHandler · config.setRenameMode', () => {
     expect(replies[1].payload).toEqual({ mode: 'first-prompt' })
   })
 })
+
+// ── config.get/setRenamePrompt（rename-prompt-config 设计）──
+
+describe('SettingsMessageHandler · config.getRenamePrompt', () => {
+  it('reply config.renamePrompt 透传快照（style/instruction/corrupted）', async () => {
+    const { ctx, replies, configService } = mockCtx()
+    ;(configService as Record<string, unknown>)['getRenamePrompt'] = vi.fn(() => ({
+      style: 'custom',
+      instruction: '自定义指令',
+      corrupted: false,
+    }))
+    const handler = new SettingsMessageHandler(ctx)
+    const handled = await handler.handleSettingsMessage(
+      { type: 'config.getRenamePrompt', payload: {}, id: 'm1' } as unknown as ClientMessage,
+      WS,
+    )
+    expect(handled).toBe(true)
+    expect(replies).toHaveLength(1)
+    expect(replies[0]).toMatchObject({ type: 'config.renamePrompt', id: 'm1' })
+    expect(replies[0].payload).toEqual({ style: 'custom', instruction: '自定义指令', corrupted: false })
+    expect(ctx.sendError).not.toHaveBeenCalled()
+  })
+})
+
+describe('SettingsMessageHandler · config.setRenamePrompt', () => {
+  it('成功：调 setRenamePrompt(style, instruction) + reply 透传归一生效值', async () => {
+    const { ctx, replies, configService } = mockCtx()
+    ;(configService as Record<string, unknown>)['setRenamePrompt'] = vi.fn(() => ({
+      style: 'slug',
+      instruction: '',
+      corrupted: false,
+    }))
+    const handler = new SettingsMessageHandler(ctx)
+    const handled = await handler.handleSettingsMessage(
+      { type: 'config.setRenamePrompt', payload: { style: 'sentence', instruction: '短句指令' }, id: 'm2' } as unknown as ClientMessage,
+      WS,
+    )
+    expect(handled).toBe(true)
+    expect((configService as unknown as Record<string, ReturnType<typeof vi.fn>>)['setRenamePrompt']).toHaveBeenCalledWith('sentence', '短句指令')
+    expect(replies).toHaveLength(1)
+    expect(replies[0]).toMatchObject({ type: 'config.renamePrompt', id: 'm2' })
+    expect(ctx.sendError).not.toHaveBeenCalled()
+  })
+})
+
+describe('SettingsMessageHandler · config.get/setRenameMaxLength', () => {
+  it('get：reply config.renameMaxLength 透传 { maxLength }', async () => {
+    const { ctx, replies, configService } = mockCtx()
+    ;(configService as Record<string, unknown>)['getRenameMaxLength'] = vi.fn(() => 24)
+    const handler = new SettingsMessageHandler(ctx)
+    const handled = await handler.handleSettingsMessage(
+      { type: 'config.getRenameMaxLength', payload: {}, id: 'm1' } as unknown as ClientMessage,
+      WS,
+    )
+    expect(handled).toBe(true)
+    expect(replies[0]).toMatchObject({ type: 'config.renameMaxLength', id: 'm1' })
+    expect(replies[0].payload).toEqual({ maxLength: 24 })
+    expect(ctx.sendError).not.toHaveBeenCalled()
+  })
+
+  it('set：调 setRenameMaxLength(payload.maxLength) + reply 读回生效值', async () => {
+    const { ctx, replies, configService } = mockCtx()
+    let stored = 50
+    ;(configService as Record<string, unknown>)['getRenameMaxLength'] = vi.fn(() => stored)
+    ;(configService as Record<string, unknown>)['setRenameMaxLength'] = vi.fn((n: number) => { stored = n })
+    const handler = new SettingsMessageHandler(ctx)
+    const handled = await handler.handleSettingsMessage(
+      { type: 'config.setRenameMaxLength', payload: { maxLength: 80 }, id: 'm2' } as unknown as ClientMessage,
+      WS,
+    )
+    expect(handled).toBe(true)
+    expect((configService as unknown as Record<string, ReturnType<typeof vi.fn>>)['setRenameMaxLength']).toHaveBeenCalledWith(80)
+    expect(replies[0]).toMatchObject({ type: 'config.renameMaxLength', id: 'm2' })
+    expect(replies[0].payload).toEqual({ maxLength: 80 })
+    expect(ctx.sendError).not.toHaveBeenCalled()
+  })
+})

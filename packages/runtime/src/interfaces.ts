@@ -37,6 +37,7 @@ import type {
   ProviderId,
   LlmRetryConfig,
   RenameMode,
+  RenameStyle,
   CodemodeEnabledResult,
   CodemodeSetEnabledResult,
   SendPromptReason,
@@ -644,6 +645,14 @@ export interface IConfigService {
   getRenameMode(): RenameMode
   /** 设置 rename 触发模式（读改写 extension 配置文件的 mode 字段，非法值归一默认，保留其他字段）。 */
   setRenameMode(mode: RenameMode): void
+  /** 读取 rename 标题提示词快照（style + 自定义指令 + corrupted；extension 配置文件，字段非法回退默认）。 */
+  getRenamePrompt(): import('./services/rename-session-config.js').RenamePromptSnapshot
+  /** 设置 rename 标题提示词（合并覆盖 style + customInstruction 两字段，单次原子 RMW；非法值归一，返回生效值）。 */
+  setRenamePrompt(style: RenameStyle, instruction: string): import('./services/rename-session-config.js').RenamePromptSnapshot
+  /** 读取标题最大长度（extension 配置文件 maxTitleLength，缺失/非法回默认 50）。 */
+  getRenameMaxLength(): number
+  /** 设置标题最大长度（读改写 maxTitleLength 字段；非法值归一默认 50）。 */
+  setRenameMaxLength(maxLength: number): void
   /** 读取智能上下文压缩配置快照（extension 配置文件，字段非法回退默认值）。 */
   getSmartContextConfig(): import('./services/smart-context-config.js').SmartContextConfigSnapshot
   /** 设置智能上下文压缩开关（读改写 extension 配置文件的 enabled 字段，保留其他字段）。 */

@@ -20,7 +20,8 @@
  */
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import type { RenameMode } from '@taiji/shared'
+import type { RenameMode, RenameStyle } from '@taiji/shared'
+import { RENAME_INSTRUCTION_MAX_LENGTH } from '@taiji/shared'
 import { getPiAgentDir } from '../infra/pi/pi-paths.js'
 import { logger } from '../infra/logger.js'
 import type { SyncFileLockOptions } from '../utils/file-lock.js'
@@ -212,5 +213,123 @@ export function setRenameMode(mode: RenameMode): void {
   const normalized = isRenameMode(mode) ? mode : DEFAULT_RENAME_MODE
   writeRenameField((base) => {
     base['mode'] = normalized
+  })
+}
+
+// ── rename-session 标题提示词（config 的 style + customInstruction 字段，合并读写）──
+// 设计 rename-prompt-config：GUI 配置页一次 load/save 全量（对齐 SystemPromptPage 显式保存范式），
+// 故 get 返回快照、set 合并写两字段（单次 RMW 原子生效，避免逐字段双写中间态）。
+
+/** style 缺失/非法时的回退默认（与 extension DEFAULT_RENAME_CONFIG.style 一致，旧 config 零迁移）。 */
+const DEFAULT_RENAME_STYLE: RenameStyle = 'slug'
+
+/** 合法风格清单（与 extension pure.ts RenameStyle 值域一致；Set 免 as 断言）。 */
+const RENAME_STYLES: ReadonlySet<RenameStyle> = new Set<RenameStyle>(['slug', 'sentence', 'emoji', 'custom'])
+
+/** style 值域 guard（与 extension isRenameStyle 同构；读取回退与写入归一共用）。 */
+function isRenameStyle(raw: unknown): raw is RenameStyle {
+  return typeof raw === 'string' && RENAME_STYLES.has(raw as RenameStyle)
+}
+
+/** instruction 写侧归一：非字符串 → 空串；超 RENAME_INSTRUCTION_MAX_LENGTH 码点防御截断（与 extension normalize 同限）。 */
+function normalizeRenameInstruction(raw: unknown): string {
+  const s = typeof raw === 'string' ? raw : ''
+  const chars = Array.from(s)
+  return chars.length > RENAME_INSTRUCTION_MAX_LENGTH ? chars.slice(0, RENAME_INSTRUCTION_MAX_LENGTH).join('') : s
+}
+
+/** rename 标题提示词快照（config.getRenamePrompt 的 reply 形状；corrupted 语义与 getSystemPrompt 对齐）。 */
+export interface RenamePromptSnapshot {
+  style: RenameStyle
+  /** 自定义指令自由文本（仅 style=custom 时被 extension 消费；空串 = 内置默认）。 */
+  instruction: string
+  /** 配置文件 JSON 损坏已回退默认（文件不存在 = 从未配置，非损坏）。 */
+  corrupted: boolean
+}
+
+/** 损坏回退快照（读取路径共用）。 */
+const CORRUPTED_RENAME_PROMPT: RenamePromptSnapshot = {
+  style: DEFAULT_RENAME_STYLE,
+  instruction: '',
+  corrupted: true,
+}
+
+/**
+ * 读取 rename 标题提示词配置。文件不存在 = 从未配置（corrupted:false，默认值）；
+ * 坏 JSON / 非 object / 读失败 = corrupted:true（防御回默认，不拖垮页面）。
+ * 字段级回退：style 非法 → slug；customInstruction 非法/缺失 → 空串（坏字段不影响其他字段，
+ * 与 extension normalizeRenameConfig 的粒度容错一致）。
+ */
+export function getRenamePrompt(): RenamePromptSnapshot {
+  if (!existsSync(getRenameConfigPath())) {
+    return { style: DEFAULT_RENAME_STYLE, instruction: '', corrupted: false }
+  }
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(getRenameConfigPath(), 'utf-8'))
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+      return CORRUPTED_RENAME_PROMPT
+    }
+    const obj = parsed as Record<string, unknown>
+    return {
+      style: isRenameStyle(obj['style']) ? obj['style'] : DEFAULT_RENAME_STYLE,
+      instruction: normalizeRenameInstruction(obj['customInstruction']),
+      corrupted: false,
+    }
+  } catch {
+    return CORRUPTED_RENAME_PROMPT
+  }
+}
+
+/**
+ * 设置 rename 标题提示词（读改写，合并覆盖 style + customInstruction 两字段，保留其他字段）。
+ * style 非法归一 slug；instruction 非字符串归一空串、超长截断（extension 读侧同限，写侧先归一
+ * 保证 reply 回读值 = 生效值）。单次 RMW 原子写（与 setRenameModel 共用同一把锁，D1e）。
+ * 生效时点：extension 事件面 live 读 config，写入后下一次 rename 触发即生效，无需重启。
+ * 返回归一后生效值（renderer 保存成功后回填，与 setRenameMode 的 reply 语义一致）。
+ */
+export function setRenamePrompt(style: RenameStyle, instruction: string): RenamePromptSnapshot {
+  const normalizedStyle = isRenameStyle(style) ? style : DEFAULT_RENAME_STYLE
+  const normalizedInstruction = normalizeRenameInstruction(instruction)
+  writeRenameField((base) => {
+    base['style'] = normalizedStyle
+    base['customInstruction'] = normalizedInstruction
+  })
+  return { style: normalizedStyle, instruction: normalizedInstruction, corrupted: false }
+}
+
+// ── rename-session 标题最大长度（config 的 maxTitleLength 字段）──
+
+/** maxTitleLength 缺失/非法时的回退默认（与 extension DEFAULT_RENAME_CONFIG.maxTitleLength 一致）。 */
+const DEFAULT_RENAME_MAX_LENGTH = 50
+
+/** maxTitleLength 值域 guard：正整数（小数/0/负数/非数字均非法，与 extension normalize 同判）。 */
+function isValidRenameMaxLength(raw: unknown): raw is number {
+  return typeof raw === 'number' && Number.isInteger(raw) && raw > 0
+}
+
+/**
+ * 读取标题最大长度。文件不存在/坏 JSON/字段非法 → 50（与 extension normalize 回退语义一致）。
+ * 不抛错（防御性设计，与 getRenameModel 一致）。
+ */
+export function getRenameMaxLength(): number {
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(getRenameConfigPath(), 'utf-8'))
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return DEFAULT_RENAME_MAX_LENGTH
+    const raw = (parsed as Record<string, unknown>)['maxTitleLength']
+    return isValidRenameMaxLength(raw) ? raw : DEFAULT_RENAME_MAX_LENGTH
+  } catch {
+    return DEFAULT_RENAME_MAX_LENGTH
+  }
+}
+
+/**
+ * 设置标题最大长度（读改写，只覆盖 maxTitleLength 字段，保留其他字段）。
+ * 非法值归一为 50（extension 读侧同回默认，写进去也不生效，不如归一）。
+ * 锁协议与 setRenameModel 共用同一把锁（同一文件，D1e）。
+ */
+export function setRenameMaxLength(maxLength: number): void {
+  const normalized = isValidRenameMaxLength(maxLength) ? maxLength : DEFAULT_RENAME_MAX_LENGTH
+  writeRenameField((base) => {
+    base['maxTitleLength'] = normalized
   })
 }

@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { mkdtempSync, rmSync } from 'node:fs'
 import lockfile from 'proper-lockfile'
-import { getAutoRenameEnabled, setAutoRenameEnabled, getAutoRenameEnabledPath, ensureAutoRenameDefault, getRenameModel, setRenameModel, getRenameConfigPath, setRenameConfigLockTimingForTest, getRenameMode, setRenameMode } from './rename-session-config.js'
+import { getAutoRenameEnabled, setAutoRenameEnabled, getAutoRenameEnabledPath, ensureAutoRenameDefault, getRenameModel, setRenameModel, getRenameConfigPath, setRenameConfigLockTimingForTest, getRenameMode, setRenameMode, getRenamePrompt, setRenamePrompt, getRenameMaxLength, setRenameMaxLength } from './rename-session-config.js'
 import type { RenameMode } from '@taiji/shared'
 
 describe('auto-rename enabled 标志文件', () => {
@@ -382,5 +382,151 @@ describe('rename-session-ext-config 写锁（D1e 跨进程锁）', () => {
     setRenameModel('first/m')
     expect(existsSync(configPath())).toBe(true)
     expect(getRenameModel()).toBe('first/m')
+  })
+})
+
+describe('rename-session 标题提示词（style + customInstruction 合并读写，rename-prompt-config）', () => {
+  let tmpRoot: string
+  const configPath = () => join(tmpRoot, 'agent', 'config', 'rename-session-ext-config.json')
+
+  /** 写入原始配置 JSON（预建目录）。 */
+  function writeRawConfig(raw: unknown): void {
+    mkdirSync(dirname(configPath()), { recursive: true })
+    writeFileSync(configPath(), typeof raw === 'string' ? raw : JSON.stringify(raw, null, 2), 'utf-8')
+  }
+
+  /** 读回配置 JSON（parse 后对象）。 */
+  function readRawConfig(): Record<string, unknown> {
+    return JSON.parse(readFileSync(configPath(), 'utf-8')) as Record<string, unknown>
+  }
+
+  beforeEach(() => {
+    tmpRoot = mkdtempSync(join(tmpdir(), 'rename-prompt-test-'))
+    vi.stubEnv('TAIJI_AGENT_DATA_DIR', tmpRoot)
+  })
+
+  afterEach(() => {
+    vi.unstubAllEnvs()
+    rmSync(tmpRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+  })
+
+  it('getRenamePrompt：文件不存在 = 从未配置（corrupted:false，默认 slug + 空指令）', () => {
+    expect(getRenamePrompt()).toEqual({ style: 'slug', instruction: '', corrupted: false })
+  })
+
+  it('getRenamePrompt：正常文件读出 style + customInstruction', () => {
+    writeRawConfig({ style: 'sentence', customInstruction: '' })
+    expect(getRenamePrompt()).toEqual({ style: 'sentence', instruction: '', corrupted: false })
+    writeRawConfig({ style: 'custom', customInstruction: '生成不超过 12 字的中文标题' })
+    expect(getRenamePrompt()).toEqual({ style: 'custom', instruction: '生成不超过 12 字的中文标题', corrupted: false })
+  })
+
+  it('getRenamePrompt：坏 JSON / 非 object → corrupted:true 防御回默认（不抛错）', () => {
+    writeRawConfig('{ not valid json')
+    expect(getRenamePrompt()).toEqual({ style: 'slug', instruction: '', corrupted: true })
+    writeRawConfig([1, 2])
+    expect(getRenamePrompt().corrupted).toBe(true)
+  })
+
+  it('getRenamePrompt：字段级回退（style 非法 → slug；instruction 非法 → 空串；corrupted 不误报）', () => {
+    writeRawConfig({ style: 'weird', customInstruction: 42 })
+    const snap = getRenamePrompt()
+    expect(snap.style).toBe('slug')
+    expect(snap.instruction).toBe('')
+    expect(snap.corrupted).toBe(false)
+  })
+
+  it('setRenamePrompt：合并写两字段，保留其他字段（含 model/maxTitleLength/未知字段）', () => {
+    writeRawConfig({ enabled: true, mode: 'first-prompt', model: { type: 'ref', ref: 'p1/m1' }, maxTitleLength: 30, futureField: { a: 1 } })
+    const applied = setRenamePrompt('custom', '自定义指令')
+
+    expect(applied).toEqual({ style: 'custom', instruction: '自定义指令', corrupted: false })
+    const saved = readRawConfig()
+    expect(saved['style']).toBe('custom')
+    expect(saved['customInstruction']).toBe('自定义指令')
+    expect(saved['model']).toEqual({ type: 'ref', ref: 'p1/m1' })
+    expect(saved['enabled']).toBe(true)
+    expect(saved['maxTitleLength']).toBe(30)
+    expect(saved['futureField']).toEqual({ a: 1 })
+  })
+
+  it('setRenamePrompt：文件不存在时以默认基底建文件', () => {
+    setRenamePrompt('emoji', '')
+
+    expect(existsSync(configPath())).toBe(true)
+    const saved = readRawConfig()
+    expect(saved['style']).toBe('emoji')
+    expect(saved['customInstruction']).toBe('')
+    expect(saved['enabled']).toBe(false)
+  })
+
+  it('setRenamePrompt：非法 style 归一 slug；非 string instruction 归一空串（reply = 生效值）', () => {
+    const applied = setRenamePrompt('fancy' as unknown as ReturnType<typeof getRenamePrompt>['style'], undefined as unknown as string)
+    expect(applied).toEqual({ style: 'slug', instruction: '', corrupted: false })
+    expect(readRawConfig()['style']).toBe('slug')
+  })
+
+  it('setRenamePrompt：超长 instruction 防御截断（与 extension normalize 同限 2000 码点）', () => {
+    const long = 'a'.repeat(2500)
+    const applied = setRenamePrompt('custom', long)
+    expect(Array.from(applied.instruction)).toHaveLength(2000)
+    expect(Array.from(readRawConfig()['customInstruction'] as string)).toHaveLength(2000)
+  })
+})
+
+describe('rename-session 标题最大长度（maxTitleLength 字段）', () => {
+  let tmpRoot: string
+  const configPath = () => join(tmpRoot, 'agent', 'config', 'rename-session-ext-config.json')
+
+  function writeRawConfig(raw: unknown): void {
+    mkdirSync(dirname(configPath()), { recursive: true })
+    writeFileSync(configPath(), typeof raw === 'string' ? raw : JSON.stringify(raw, null, 2), 'utf-8')
+  }
+
+  function readRawConfig(): Record<string, unknown> {
+    return JSON.parse(readFileSync(configPath(), 'utf-8')) as Record<string, unknown>
+  }
+
+  beforeEach(() => {
+    tmpRoot = mkdtempSync(join(tmpdir(), 'rename-maxlen-test-'))
+    vi.stubEnv('TAIJI_AGENT_DATA_DIR', tmpRoot)
+  })
+
+  afterEach(() => {
+    vi.unstubAllEnvs()
+    rmSync(tmpRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+  })
+
+  it('getRenameMaxLength：文件不存在 / 字段非法 / 坏 JSON → 默认 50（与 extension normalize 同语义）', () => {
+    expect(getRenameMaxLength()).toBe(50)
+    writeRawConfig({ maxTitleLength: 30.5 })
+    expect(getRenameMaxLength()).toBe(50)
+    writeRawConfig({ maxTitleLength: 0 })
+    expect(getRenameMaxLength()).toBe(50)
+    writeRawConfig('{ bad')
+    expect(getRenameMaxLength()).toBe(50)
+  })
+
+  it('getRenameMaxLength：正常文件读出值', () => {
+    writeRawConfig({ maxTitleLength: 80 })
+    expect(getRenameMaxLength()).toBe(80)
+  })
+
+  it('setRenameMaxLength：读改写只覆盖 maxTitleLength，保留其他字段 + 合法值往返', () => {
+    writeRawConfig({ enabled: true, mode: 'first-stop', model: { type: 'ref', ref: 'p1/m1' } })
+    setRenameMaxLength(24)
+
+    const saved = readRawConfig()
+    expect(saved['maxTitleLength']).toBe(24)
+    expect(saved['enabled']).toBe(true)
+    expect(saved['model']).toEqual({ type: 'ref', ref: 'p1/m1' })
+    expect(getRenameMaxLength()).toBe(24)
+  })
+
+  it('setRenameMaxLength：非法值（小数/0/负数/非数字）归一默认 50', () => {
+    for (const bad of [30.5, 0, -5, NaN]) {
+      setRenameMaxLength(bad as number)
+      expect(readRawConfig()['maxTitleLength']).toBe(50)
+    }
   })
 })
