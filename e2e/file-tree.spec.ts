@@ -147,16 +147,16 @@ test.describe('文件树 E2E', () => {
     await expect(page.getByTestId('file-tree-file-package.json')).toBeVisible()
   })
 
-  test('D-020 showIgnored: 开关切换 → ignored 节点瞬时显示/隐藏（前端 computed 过滤，无重拉闪烁）', async ({ page }) => {
+  test('D-020 修订（2026-10-15 全量显示）: ignored 节点恒显 + 未跟踪文件名非 fg（跟踪态双色）', async ({ page }) => {
     await gotoFileTree(page)
-    // 默认 showIgnored=false：node_modules 被前端 computed 过滤（数据在 store 但不渲染）
-    await expect(page.getByTestId('file-tree-dir-node_modules')).toHaveCount(0)
-    // 点「忽略项」开关 → 纯前端 computed 切换，无网络重拉
-    await page.getByTestId('file-show-ignored-toggle').click()
-    // showIgnored=true：node_modules 立即出现（mock MOCK_IGNORED 始终返回并标 ignored=true）
+    // 全量显示：ignored 目录 node_modules 无需开关直接可见（开关已退役，无网络重拉差异）
     await expect(page.getByTestId('file-tree-dir-node_modules')).toBeVisible({ timeout: 5_000 })
-    // 再点关掉 → 立即隐藏
-    await page.getByTestId('file-show-ignored-toggle').click()
-    await expect(page.getByTestId('file-tree-dir-node_modules')).toHaveCount(0)
+    // 未跟踪文件 untracked.log（gitStatus '??'）→ 文件名无 fg（继承行基线 mid）
+    const untrackedName = page.getByTestId('file-tree-file-untracked.log').locator('.fname')
+    await expect(untrackedName).toBeVisible()
+    await expect(untrackedName).not.toHaveClass(/text-neutral-fg/)
+    // 跟踪态文件 README.md（'R'）→ 文件名 fg
+    const trackedName = page.getByTestId('file-tree-file-README.md').locator('.fname')
+    await expect(trackedName).toHaveClass(/text-neutral-fg/)
   })
 })

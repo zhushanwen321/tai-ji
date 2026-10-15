@@ -8,7 +8,7 @@
  * 使 E2E 能验证角标渲染（git overlay per-path 挂载）。
  *
  * ignore 策略：与 real FileService 一致——始终返回 ignored 节点并标 ignored=true，
- * 前端按 showIgnored 开关做本地 computed 过滤。
+ * 前端全量显示（2026-10-15 裁决：showIgnored 过滤开关退役，跟踪态由文件名颜色区分）。
  */
 import type { FileNode } from '@taiji/shared'
 
@@ -53,7 +53,7 @@ const MOCK_TREE: FileNode[] = [
   { path: 'package.json', name: 'package.json', type: 'file', size: 200 },
 ]
 
-/** mock 被忽略的文件 fixture（始终返回并标 ignored=true，前端按 showIgnored 开关过滤） */
+/** mock 被忽略的文件 fixture（始终返回并标 ignored=true，前端全量显示、未跟踪色区分） */
 const MOCK_IGNORED: FileNode[] = [
   { path: 'node_modules', name: 'node_modules', type: 'dir' },
   { path: 'dist', name: 'dist', type: 'dir' },
@@ -77,7 +77,7 @@ export const file = {
   async tree(_sessionId: string): Promise<FileNode[]> {
     await sleep(TIMING.ack)
     const nodes = MOCK_TREE.map(cloneNode)
-    // 始终追加 ignored 节点并标 ignored=true（与 real FileService 契约一致，灰斜体渲染 / 本地过滤）
+    // 始终追加 ignored 节点并标 ignored=true（与 real FileService 契约一致，全量显示 / 未跟踪色渲染）
     for (const ig of MOCK_IGNORED) {
       nodes.push({ ...ig, ignored: true })
     }

@@ -35,7 +35,7 @@
       <span>{{ t('sidebar.fileTree.loadFailed') }}</span>
     </div>
 
-    <!-- 已加载空目录（全部子项被 showIgnored 过滤后也视为空） -->
+    <!-- 已加载空目录（children=[]；[2026-10-15] ignored 不再过滤，空 hint 仅真空目录） -->
     <div
       v-else-if="row.hint === 'empty'"
       class="py-1 pr-2 font-mono text-[length:var(--text-3xs)] text-neutral-dim italic"
@@ -108,7 +108,7 @@
       <span
         class="fname block min-w-0 overflow-hidden whitespace-nowrap text-ellipsis"
         :class="[
-          row.ignored ? 'text-neutral-dim italic' : '',
+          fnameColorClass,
           selected ? 'text-neutral-fg [font-weight:var(--fw-mid)]' : '',
         ]"
         :title="row.name"
@@ -179,6 +179,19 @@ const rowPaddingStyle = computed(() => ({
 
 /** git overlay 角标（从投影 row.gitStatus 取，非 node 字段） */
 const gitStatus = computed(() => props.row.gitStatus?.status)
+
+/**
+ * 文件名双色（2026-10-15 用户裁决：文件树全量显示，git 跟踪态用颜色区分）：
+ * - 跟踪态（gitStatus 缺省或非 untracked，且非 gitignore 命中）→ 顶格白 fg；
+ * - 未跟踪（gitStatus untracked `??` / gitignore 命中 ignored）→ 行基线 mid（原文件名色）。
+ * gitStatus 缺省（非 git 仓库 / overlay 未回）→ 全部视作跟踪态（基线白，非仓库无降级感）；
+ * git 跟踪但匹配 .gitignore 的罕见形态按未跟踪处理（与角标 overlay 同源近似，登记取舍）。
+ * selected 覆盖 fg + fw-mid（交互态优先，同 demo .frow.sel）。
+ * 目录行不参与双色（ignored 目录维持 dim italic 原样）。
+ */
+const fnameColorClass = computed(() =>
+  props.row.gitStatus?.status === 'untracked' || props.row.ignored ? '' : 'text-neutral-fg',
+)
 
 const gitBadge = computed(() => {
   switch (gitStatus.value) {

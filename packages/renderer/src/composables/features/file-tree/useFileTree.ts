@@ -4,7 +4,7 @@
  * 职责（单一变化轴「文件树用户交互编排」）：
  * - loadTree：首加载（api/domains/file.tree + git.status overlay 并行）+ 展开态 rehydrate（D-019）
  * - expandNode：展开/折叠（loaded 复用缓存 / loading 幂等去重 / error 重试 / stale 丢弃）
- * - selectFile / toggleShowIgnored：薄包装 store action
+ * - selectFile：薄包装 store action（[2026-10-15 退役] toggleShowIgnored 随 showIgnored 开关删除）
  * - setFilter：200ms trailing debounce 后透传 store（[W15/D-7.1] 过滤防抖）
  *
  * [K-9] 跨 store 失效编排（W6 起，W19/D-9 改 ready 帧驱动）：setupInvalidation 经共享 helper
@@ -73,7 +73,8 @@ export function useFileTree() {
     }
 
     // 未缓存 → 并行拉取（file.tree + git.status overlay 独立，Promise.allSettled）
-    // file.tree 始终返回 ignored 节点（标 ignored=true），前端按 store.showIgnored 本地过滤
+    // file.tree 始终返回 ignored 节点（标 ignored=true）；前端全量显示，跟踪态由颜色区分
+    // （FileTreeRow fnameColorClass，2026-10-15 全量显示裁决）
     store.setNodeState(sessionId, '', { status: 'loading' })
     const [treeResult, overlayResult] = await Promise.allSettled([
       fileApi.tree(sessionId),
@@ -186,11 +187,6 @@ export function useFileTree() {
     }, FILTER_DEBOUNCE_MS)
   }
 
-  /** 切换 showIgnored（D-020，W7 UI 接此） */
-  function toggleShowIgnored(): void {
-    store.toggleShowIgnored()
-  }
-
   /**
    * rehydrate 展开态（D-019）。
    * 切回 session 时，对 expandedPaths 中记录的路径，若节点已是 loaded 则保持展开；
@@ -242,7 +238,6 @@ export function useFileTree() {
     collapseNode,
     selectFile,
     setFilter,
-    toggleShowIgnored,
     setupInvalidation,
   }
 }

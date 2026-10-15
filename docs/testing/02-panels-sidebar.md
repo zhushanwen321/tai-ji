@@ -7,7 +7,7 @@
 ---
 
 
-> 覆盖：全项目文件树懒加载、过滤、git 角标、showIgnored 开关、展开态恢复
+> 覆盖：全项目文件树懒加载、过滤、git 角标、ignored 全量显示（跟踪态双色，2026-10-15）、展开态恢复
 >
 > 这是**测试覆盖最完整**的功能：11 个 E2E 用例已落地（`e2e/file-tree.spec.ts`）。
 >
@@ -21,7 +21,7 @@
 切到「文件」tab → 加载顶层 + 一级子目录（D-009 懒加载）
 点目录展开 → 加载该目录单层（expand，缓存复用）
 输入关键词 → 实时过滤节点
-点「忽略项」开关 → 显示/隐藏 ignored 节点（node_modules 等）
+ignored 节点（node_modules 等）恒显（2026-10-15 全量显示裁决）：未跟踪文件名基线灰、跟踪文件名顶格白，ignored 目录维持灰斜体
 点文件 → 打开 SideDrawer detail 预览（见 02-panels-sidebar.md）
 切 session 再切回 → 展开态恢复（expandedPaths 持久）
 ```
@@ -40,7 +40,6 @@ testid 以组件 template 内 data-testid 属性为准（下表均已核实有�
 |--------|---------|--------------|
 | `file-view-root` | FileView.vue | 文件 tab 激活 + 有 session 时恒显 |
 | `file-filter-input` | FileView.vue | 恒显（过滤输入框，滚动区外固定） |
-| `file-show-ignored-toggle` | FileView.vue | 恒显（showIgnored 开关，头部行） |
 | `file-loading` | FileView.vue | 加载中 |
 | `file-error` | FileView.vue | 加载失败 |
 | `file-retry` | FileView.vue | 加载失败时的「重试」按钮 |
@@ -48,7 +47,7 @@ testid 以组件 template 内 data-testid 属性为准（下表均已核实有�
 | `file-tree-dir-{path}` | FileTreeRow.vue | 目录节点（path 如 `src`、`src/utils`） |
 | `file-tree-loading-{path}` | FileTreeRow.vue | 该目录展开加载中（子节点异步加载态） |
 | `file-tree-error-{path}` | FileTreeRow.vue | 该目录展开加载失败（点击 = 折叠父目录，旧递归语义） |
-| `file-tree-empty-{path}` | FileTreeRow.vue | 该目录已加载空（含全部子项被 showIgnored 过滤） |
+| `file-tree-empty-{path}` | FileTreeRow.vue | 该目录已加载空（2026-10-15 起 ignored 不过滤，仅真空目录） |
 | `file-tree-file-{path}` | FileTreeRow.vue | 文件节点（path 如 `README.md`、`src/index.ts`） |
 | `chevron-slot` | FileTreeRow.vue | 展开/折叠箭头（每个节点都有，无 path 后缀，E2E 查询时需限定父节点） |
 | `file-view-no-session` | Sidebar.vue | 无活跃 session 时 |
@@ -109,7 +108,7 @@ file-filter-input input → store.setFilter(query)（useFileTree 200ms 防抖提
 |------|------|
 | `MOCK_TREE` | 顶层：src / README.md / package.json / untracked.log / node_modules(ignored) |
 | MOCK_TREE src 子项 | index.ts / new-feature.ts / existing.ts / utils/ |
-| `MOCK_IGNORED` | node_modules / dist / .env（始终返回并标 ignored=true，前端 showIgnored 开关控制显隐） |
+| `MOCK_IGNORED` | node_modules / dist / .env（始终返回并标 ignored=true，前端全量显示、未跟踪色区分） |
 | `fixtureGitStatus` | src/new-feature.ts=added(A) / README.md=modified(M) / 其他 |
 | `file.read` mock | 按扩展名返回内容（.ts 含 'export function'；含 `<script>` 路径用于 XSS 测试） |
 | `git.getDiff` mock | 按路径返回 patch（含 'diff --git'；含 `<script>` 用于 XSS） |
@@ -194,7 +193,7 @@ async function gotoFileTree(page: import('@playwright/test').Page): Promise<void
 | T4.1 | 过滤命中 | `file-tree-file-README.md` 可见 / `file-tree-file-package.json` count=0 | 输入 'readme' 后只 README 命中 |
 | T4.2 | 无匹配 → 空态 | `file-empty` | 输入 'zzz_no_match_zzz' 显示空态 |
 | T4.5 | 清空 → 恢复完整树 | `file-tree-file-package.json` | 清空过滤后恢复 |
-| D-020 | showIgnored 开关 | `file-tree-dir-node_modules` | 默认隐藏（前端 computed 过滤）；开关开后瞬时可见，无重新拉取闪烁 |
+| D-020 | 全量显示 + 跟踪态双色（2026-10-15 修订） | `file-tree-dir-node_modules` | ignored 目录恒显（灰斜体不变）；未跟踪文件名基线灰、跟踪文件名 fg |
 
 ### 8.4 完整 E2E 代码（现有，可作其他功能 E2E 的参考模板）
 
@@ -263,13 +262,13 @@ test.describe('文件树 E2E', () => {
     await expect(page.getByTestId('file-empty')).toBeVisible()
   })
 
-  test('D-020 showIgnored: 开关切换 → ignored 节点瞬时显示/隐藏（前端 computed 过滤，无重新拉取闪烁）', async ({ page }) => {
+  test('D-020 修订（2026-10-15 全量显示）: ignored 节点恒显 + 未跟踪文件名非 fg（跟踪态双色）', async ({ page }) => {
     await gotoFileTree(page)
-    // 默认被前端 computed 过滤（store 含 ignored 节点但不渲染）
-    await expect(page.getByTestId('file-tree-dir-node_modules')).toHaveCount(0)
-    await page.getByTestId('file-show-ignored-toggle').click()
-    // 纯前端切换，瞬时可见
+    // 全量显示：ignored 目录 node_modules 无需开关直接可见
     await expect(page.getByTestId('file-tree-dir-node_modules')).toBeVisible({ timeout: 5_000 })
+    // 未跟踪文件 untracked.log → 文件名无 fg；跟踪态文件 README.md → 文件名 fg
+    await expect(page.getByTestId('file-tree-file-untracked.log').locator('.fname')).not.toHaveClass(/text-neutral-fg/)
+    await expect(page.getByTestId('file-tree-file-README.md').locator('.fname')).toHaveClass(/text-neutral-fg/)
   })
 
   // ... 完整 11 用例见 e2e/file-tree.spec.ts

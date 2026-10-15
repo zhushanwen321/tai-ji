@@ -140,9 +140,6 @@ export default {
     emptyDir: '(empty directory)',
   },
   fileView: {
-    hideIgnored: 'Hide ignored files',
-    showIgnored: 'Show ignored files',
-    ignoredItem: 'Ignored',
     filterPlaceholder: 'Filter files…',
     loadingTree: 'Loading file tree…',
     loadFailed: 'Load failed ({reason})',

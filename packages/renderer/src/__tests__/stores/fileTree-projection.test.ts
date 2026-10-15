@@ -4,9 +4,9 @@
  * [W28/D-7.2] projectVisibleRows 投影单测（09 文档 §3.3.2 + §5 D-7.2 验收）。
  *
  * 覆盖：
- * - 等价性：展开/折叠/过滤/showIgnored/nodeStates 组合下，投影产出的 VisibleRow 列表
+ * - 等价性：展开/折叠/过滤/nodeStates 组合下，投影产出的 VisibleRow 列表
  *   （顺序 + 缩进深度 + 行类型）与旧递归渲染（FileView.visibleNodes + FileTreeRow 递归）
- *   的节点集合完全一致——reference 实现逐行复刻旧代码语义
+ *   的节点集合完全一致——reference 实现逐行复刻旧代码语义（ignored 全量显示语义已同步）
  * - 字段映射：childCount（可见子项数）/gitStatus/lineStats/expanded/ignored 正确投影
  * - hint 行：loading/error/empty 三类占位行（旧递归的 nodeStates 子区渲染）
  * - 纯函数幂等：同树同过滤同展开 → 同输出（plan 验收「投影纯函数单测」）
@@ -74,11 +74,11 @@ interface RowBrief {
   kind: string
 }
 
-/** reference：逐行复刻旧递归渲染（FileView.visibleNodes 顶层裁 + FileTreeRow 递归）语义 */
+/** reference：逐行复刻旧递归渲染（FileView.visibleNodes 顶层裁 + FileTreeRow 递归）语义
+ * （[2026-10-15] showIgnored 维度随开关退役移除——ignored 节点全量显示） */
 function legacyVisibleRows(
   nodes: FileNode[],
   expanded: Set<string>,
-  showIgnored: boolean,
   q: string,
   nodeStates: Map<string, NodeState>,
 ): RowBrief[] {
@@ -97,7 +97,7 @@ function legacyVisibleRows(
           continue
         }
         if (node.children) {
-          const vc = showIgnored ? node.children : node.children.filter((c) => !c.ignored)
+          const vc = node.children
           if (vc.length === 0) {
             out.push({ path: node.path, depth: depth + 1, kind: 'empty' })
             continue
@@ -107,7 +107,7 @@ function legacyVisibleRows(
       }
     }
   }
-  let top = showIgnored ? nodes : nodes.filter((n) => !n.ignored)
+  let top = nodes
   if (q) top = top.filter((n) => nodeMatchesFilter(n, q.toLowerCase())) // 旧 FileView 先 trim().toLowerCase()
   walk(top, 0)
   return out
@@ -120,7 +120,6 @@ function projectArgs(store: ReturnType<typeof useFileTreeStore>, sid: string, ge
     (s: string) => store.getExpanded(s),
     (s: string) => store.getGitOverlay(s),
     store.filterText,
-    store.showIgnored,
     sid,
     getNodeState ?? ((s: string, path: string) => store.getNodeState(s, path)),
   ] as const
@@ -153,7 +152,6 @@ describe('projectVisibleRows 等价性（旧递归渲染节点集合，顺序 + 
     ['src', 'src/utils', 'node_modules', 'src/empty', 'nonexistent'], // 含已删路径（graceful）
   ]
   const filters = ['', 'b', 'README', 'utils', 'zzz_no_match']
-  const showIgnoreds = [false, true]
   const nodeStateCombos: Array<Map<string, NodeState>> = [
     new Map(),
     new Map([['src', { status: 'loading' }]]),
@@ -165,30 +163,27 @@ describe('projectVisibleRows 等价性（旧递归渲染节点集合，顺序 + 
 
   for (const expanded of expandedCombos) {
     for (const q of filters) {
-      for (const showIgnored of showIgnoreds) {
-        for (const states of nodeStateCombos) {
-          it(`等价：expanded=[${expanded.join(',') || '-'}] q='${q}' showIgnored=${showIgnored} states=[${[...states.keys()].join(',') || '-'}]`, () => {
-            const store = useFileTreeStore()
-            setupTree(store, expanded)
-            store.setFilter(q)
-            if (showIgnored) store.toggleShowIgnored()
-            for (const [path, state] of states) {
-              store.setNodeState('s1', path, state)
-            }
+      for (const states of nodeStateCombos) {
+        it(`等价：expanded=[${expanded.join(',') || '-'}] q='${q}' states=[${[...states.keys()].join(',') || '-'}]`, () => {
+          const store = useFileTreeStore()
+          setupTree(store, expanded)
+          store.setFilter(q)
+          for (const [path, state] of states) {
+            store.setNodeState('s1', path, state)
+          }
 
-            const rows = project(store)
-            expect(briefs(rows)).toEqual(
-              legacyVisibleRows(TREE, new Set(expanded), showIgnored, q, states),
-            )
-          })
-        }
+          const rows = project(store)
+          expect(briefs(rows)).toEqual(
+            legacyVisibleRows(TREE, new Set(expanded), q, states),
+          )
+        })
       }
     }
   }
 })
 
 describe('projectVisibleRows 字段映射（徽章/角标/行数从分桶投影）', () => {
-  it('childCount = 目录可见直接子项数（showIgnored 过滤同口径），文件行恒 0', () => {
+  it('childCount = 目录可见直接子项数（ignored 全量计入），文件行恒 0', () => {
     const store = useFileTreeStore()
     setupTree(store, ['src']) // 展开 src → src/empty 行进入投影
 
@@ -196,14 +191,10 @@ describe('projectVisibleRows 字段映射（徽章/角标/行数从分桶投影�
     const src = rows.find((r) => r.path === 'src')!
     const empty = rows.find((r) => r.path === 'src/empty')!
     const readme = rows.find((r) => r.path === 'README.md')!
-    // 默认 showIgnored=false：src 直接子项 a.ts/utils/empty/ignored-dir，过滤 ignored-dir → 3
-    expect(src.childCount).toBe(3)
+    // src 直接子项 a.ts/utils/empty/ignored-dir 全量计入（ignored 不过滤）→ 4
+    expect(src.childCount).toBe(4)
     expect(empty.childCount).toBe(0) // 空目录 = 0（demo .fbadge：是目录即恒渲染，0 也显）
     expect(readme.childCount).toBe(0) // 文件行不投影子项数
-
-    // showIgnored=true：ignored-dir 计入 → 4
-    store.toggleShowIgnored()
-    expect(project(store).find((r) => r.path === 'src')!.childCount).toBe(4)
   })
 
   it('未加载 children 的目录 childCount 恒 0（懒加载诚实值）', () => {
@@ -238,7 +229,6 @@ describe('projectVisibleRows 字段映射（徽章/角标/行数从分桶投影�
   it('expanded/ignored/type/depth 投影正确（含 hint 行 depth = 目录 depth+1）', () => {
     const store = useFileTreeStore()
     setupTree(store, ['src', 'src/utils'])
-    store.toggleShowIgnored() // ignored 子项可见，才能断言 ignored 标记投影
     const rows = project(store)
     const src = rows.find((r) => r.path === 'src')!
     expect(src.expanded).toBe(true)
@@ -366,7 +356,6 @@ describe('projectVisibleRows 性能量级（万级节点，替代旧 per-row 12 
       (s) => store.getExpanded(s),
       (s) => (s === 's1' ? countingOverlay : store.getGitOverlay(s)),
       store.filterText,
-      store.showIgnored,
       's1',
       nodeStateSpy,
     )
