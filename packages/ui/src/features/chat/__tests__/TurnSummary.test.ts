@@ -2,8 +2,8 @@
  * TurnSummary.vue 组件测试（W4TC4 + ai-voice-tts §5.1 朗读按钮）。
  *
  * 覆盖：
- * - W4TC4: TurnSummary 拆分后渲染一致（summary + streaming cursor + hover actions 复制MD/朗读/fork/handoff；
- *   2026-10-15 纯文本复制退役，复制仅 Markdown 档）
+ * - W4TC4: TurnSummary 拆分后渲染一致（summary + streaming cursor + hover actions 复制/朗读/fork/handoff；
+ *   复制 = 末条 assistant 正文，仅 text 不含思考/工具分区，2026-10-15 裁决）
  * - [block-rendering M0] 去内容化：根 v-if 从 summaryText 改 lastAssistant（纯工具 turn 出现操作栏，
  *   预期行为变更）；streaming 光标迁移到 Turn.vue streaming-tail（TC-M0-2 在 turn-working 覆盖）；
  *   text-neutral-* 切色迁移到 Block.vue text 分支（TC-M0-4）
@@ -91,7 +91,7 @@ describe('W4TC4: TurnSummary 基本渲染', () => {
       turn: makeTurn({ assistants: [{ id: 'a1', role: 'assistant', content: '', status: 'complete', timestamp: NOW }] }),
     })
     expect(wrapper.find('.turn-summary').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="copy-markdown-btn"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="copy-btn"]').exists()).toBe(true)
   })
 })
 
@@ -102,7 +102,7 @@ describe('W4TC4: TurnSummary hover actions', () => {
     // 本组件维度只验行与按钮形态）
     const actionsDiv = wrapper.find('.turn-summary')
     expect(actionsDiv.exists()).toBe(true)
-    // 4 个并列按钮：复制MD / 朗读 / fork / handoff（无两层 hover 变体）
+    // 4 个并列按钮：复制 / 朗读 / fork / handoff（无两层 hover 变体）
     const buttons = actionsDiv.findAll('button')
     expect(buttons.length).toBe(4)
   })
@@ -112,17 +112,31 @@ describe('W4TC4: TurnSummary hover actions', () => {
     expect(wrapper.find('[data-testid="fork-ask-btn"]').exists()).toBe(false)
   })
 
-  it('纯文本复制按钮退役（2026-10-15 裁决：仅保留 Markdown 复制档）', () => {
-    const wrapper = mountSummary()
-    expect(wrapper.find('[data-testid="copy-btn"]').exists()).toBe(false)
-  })
-
-  it('copy-markdown-btn 为唯一复制按钮（MD 徽标随冗余删除，落点语义由 title 承载）', () => {
-    const wrapper = mountSummary()
-    const mdBtn = wrapper.find('[data-testid="copy-markdown-btn"]')
-    expect(mdBtn.exists()).toBe(true)
-    // MD 徽标已删：按钮内只有 Copy/Check 图标，无文字角标
-    expect(mdBtn.text()).toBe('')
+  it('copy-btn 为唯一复制按钮，载荷 = 末条 assistant 正文（仅 text，不含思考/工具分区，2026-10-15 裁决）', async () => {
+    const writeText = vi.fn(async (_text: string) => {})
+    vi.spyOn(navigator.clipboard, 'writeText').mockImplementation(writeText)
+    const last: Message = {
+      id: 'a1',
+      role: 'assistant',
+      status: 'complete',
+      timestamp: NOW,
+      content: '正文第一行\n\n正文第二行',
+      thinking: [{ id: 'th-1', content: '内部推理，不应出现在复制载荷', collapsed: true }],
+      toolCalls: [
+        { id: 'tc-1', toolName: 'bash', input: { cmd: 'ls' }, status: 'completed', startTime: 0, output: 'file-a.txt' },
+      ],
+    }
+    const wrapper = mountSummary({ lastAssistant: last })
+    const btn = wrapper.find('[data-testid="copy-btn"]')
+    expect(btn.exists()).toBe(true)
+    // MD 徽标已随三分区展平退役：按钮内只有 Copy/Check 图标，无文字角标
+    expect(btn.text()).toBe('')
+    await btn.trigger('click')
+    expect(writeText).toHaveBeenCalledTimes(1)
+    const payload = writeText.mock.calls[0]?.[0] ?? ''
+    expect(payload).toBe('正文第一行\n\n正文第二行')
+    expect(payload).not.toContain('内部推理')
+    expect(payload).not.toContain('file-a.txt')
   })
 
   it('fork-ask-btn 存在（fork 进 composer 模式）', () => {

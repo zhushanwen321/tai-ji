@@ -1,6 +1,6 @@
 <template>
   <!--
-    TurnSummary：hover actions 操作栏（复制MD/朗读/fork/handoff）。从 Turn.vue 拆出。
+    TurnSummary：hover actions 操作栏（复制/朗读/fork/handoff）。从 Turn.vue 拆出。
     [block-rendering M0] 去内容化：不再渲染正文文字（text 全 inline 到 turn 内容区统一正文样式）
     与 streaming 光标（迁移到 Turn.vue trace 容器末尾 streaming-tail）。
     [actions-anchor] 本组件由 Turn.vue 经末位 text 块（Block.vue）的 #turn-actions 插槽挂载：
@@ -11,27 +11,29 @@
     fork/handoff useTurnActions 在内部调用，不冒泡。
   -->
   <!--
-    hover actions（4 个并列按钮：复制MD / 朗读 / fork / handoff），挂载位见根注释。
-    复制仅保留 Markdown 档（2026-10-15 用户裁决：纯文本复制退役，MD 徽标字样随冗余删除——
-    单一复制入口无需区分标注，落点语义由 title 承载）。
+    hover actions（4 个并列按钮：复制 / 朗读 / fork / handoff），挂载位见根注释。
+    复制 = 末条 assistant 正文（仅 text，不含思考/工具分区，2026-10-15 用户裁决——
+    原 assistantToMarkdown 三分区展平随本裁决整体退役）。
     fork/handoff 点击进 composer staging 模式：可输入文本带上发送，也可不输入直接提交（空提交≈
     原后台 fork/handoff，由 forkSessionAsk/handoff 空 content 守卫实现）。
-    非 subagent session：4 按钮全显；subagent session：复制MD/朗读（无 fork/handoff）。
+    非 subagent session：4 按钮全显；subagent session：复制/朗读（无 fork/handoff）。
   -->
   <div
     v-if="lastAssistant"
     class="turn-summary flex items-center gap-0.5"
   >
-    <!-- 复制（Markdown 档，唯一复制入口）：2026-10-15 用户裁决——纯文本复制与 MD 徽标退役 -->
+    <!-- 复制：末条 assistant 正文（仅 text，不含思考/工具分区，2026-10-15 用户裁决）。
+         正文即 markdown 源——MarkdownRenderer 渲染态与复制内容一致；原 assistantToMarkdown
+         （思考引用块 + 工具代码块 + 正文三分区）随本裁决整体退役（messageFormat.ts 已删）。 -->
     <Button
       variant="ghost"
       size="icon"
       class="size-6 text-neutral-dim hover:text-neutral-fg"
-      data-testid="copy-markdown-btn"
-      :title="t('panel.message.copyMarkdown')"
-      @click="copy(assistantToMarkdown(lastAssistant), aiMdKey)"
+      data-testid="copy-btn"
+      :title="t('panel.message.copy')"
+      @click="copy(summaryText, aiCopyKey)"
     >
-      <Check v-if="copied === aiMdKey" class="size-3 text-success" />
+      <Check v-if="copied === aiCopyKey" class="size-3 text-success" />
       <Copy v-else class="size-3" />
     </Button>
     <!-- 朗读：状态机（ai-voice-tts §5.1）idle Volume2 → loading Loader2 旋转（可点，点击=取消）
@@ -91,7 +93,7 @@ import { Check, Copy, GitFork, HandHelping, Loader2, Square, Volume2 } from '@lu
 // barrel 自引用会闭合一族循环依赖环（详见 BashOutputBlock.vue 同款注释）
 import { Button } from '../../primitives/button'
 import type { MessageTurn } from '@taiji/core/domain/chat'
-import type { Message } from '@taiji/shared'
+import { normalizeContent, type Message } from '@taiji/shared'
 import { useCopy } from './composables/useCopy'
 import { isSubagentVirtualId } from '../../lib/subagent-id'
 import { useChatViewDeps } from './chat-view-deps'
@@ -110,8 +112,6 @@ const deps = useChatViewDeps()
  *  统一进 composer staging 模式（原 +Q 路径），主操作（后台 fork/handoff）由空提交守卫实现。 */
 function onForkAsk(msg: Message): void { deps.onForkAsk(props.sessionId, msg) }
 function onHandoffAsk(msg: Message): void { deps.onHandoffAsk(props.sessionId, msg) }
-/** copy-as-markdown（经 deps.toMarkdown 桥接 renderer messageFormat） */
-function assistantToMarkdown(msg: Message): string { return deps.toMarkdown(msg) }
 
 /** 朗读态（ai-voice-tts §5.1 状态机）：数据源 deps.speakStateOf（renderer useTtsPlayer
  *  全局单例任务态按 messageId 投影，D11——切 session 回来按钮仍显示正确播放态）。
@@ -148,5 +148,17 @@ const isHandingOff = computed(() => deps.isHandingOff(props.sessionId))
 
 /** 复制反馈 */
 const { copied, copy } = useCopy()
-const aiMdKey = computed(() => `md-${props.turn.index}`)
+const aiCopyKey = computed(() => `ai-${props.turn.index}`)
+
+/**
+ * 复制内容 = 末条 assistant 正文（normalizeContent(msg.content)，仅 text——不含思考/工具分区，
+ * 2026-10-15 用户裁决）。读既有 lastAssistant prop（Turn.vue 单点推导后传入），
+ * 「末条 assistant」语义变化时只改 Turn.vue 一处；该 prop 同时承托复制/朗读/fork/handoff。
+ */
+const summaryText = computed(() => {
+  const last = props.lastAssistant
+  if (!last?.content) return ''
+  const text = normalizeContent(last.content)
+  return text.trim() ? text : ''
+})
 </script>

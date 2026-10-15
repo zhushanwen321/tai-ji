@@ -96,9 +96,6 @@ export default {
     inProgress: '（进行中）',
     expandReasoning: '展开推理',
     collapseReasoning: '收起推理',
-    toolFailed: '（失败）',
-    toolNoResult: '（未收到结果）',
-    thinkingHeader: '## 思考',
     expand: '展开',
     collapse: '收起',
     // [system-notice-rendering-upgrade U3] 展开块内滚动信息条与展开按钮（BlockScrollBox 消费，U7）：
@@ -119,7 +116,6 @@ export default {
     imagePlaceholderDetail: '该会话图片缓存已达上限（64MB），历史图片仍可见，新图片显示占位',
     imageUnavailable: '图片不可用',
     workflow: '工作流',
-    copyMarkdown: '复制为 Markdown',
     forkAsk: 'fork 提问（在新分支追问，与主线隔离）',
     forkFailed: 'fork 后台失败：{error}',
     handoffAsk: '交接并备注（输入内容将作为新 session 的首条消息）',

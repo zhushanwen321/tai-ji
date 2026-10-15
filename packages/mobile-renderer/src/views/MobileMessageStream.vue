@@ -14,7 +14,7 @@
 //    message complete ∨ token 静默 ≥ 阈值，谓词注入字段已随审计候选 18 收单删除）
 // ② 惰性（D10 移动壳无接管态——turn 展开分区只留展开集合，接管读写恒 false/no-op，
 //    与 ui 组件侧原兜底行为等价）：isTakeover/setTakeover
-// ③ no-op（hover 入口触屏不可见，remote-use-mobile D7（移动壳 v1 功能集裁定）hover actions 行）：onForkAsk/onHandoffAsk/editAndResend/toMarkdown
+// ③ no-op（hover 入口触屏不可见，remote-use-mobile D7（移动壳 v1 功能集裁定）hover actions 行）：onForkAsk/onHandoffAsk/editAndResend
 // ④ no-op + remote-use-mobile D7 登记（diff 详情/文件树面板族 Phase 2 行）：openDrawer/onFileClick +
 //    loadFileCandidates（空数组——路径链接化降级普通文本，env 白名单同步空集）
 // ⑤ 占位降级：renderMermaid 返回占位 svg（MarkdownRenderer 期望 {svg} 结构，纯 no-op 破图；
@@ -97,8 +97,6 @@ const deps: ChatViewDeps = {
     void source
     return renderMermaidPlaceholder(t('mobile.mermaid.placeholder'))
   },
-  // copy-as-MD 无消费者（remote-use-mobile D7 hover 全族），不可达
-  toMarkdown: () => '',
 }
 
 provide(ChatViewDepsKey, deps)

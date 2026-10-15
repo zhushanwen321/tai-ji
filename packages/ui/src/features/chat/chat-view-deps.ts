@@ -157,8 +157,6 @@ export interface ChatViewDeps {
   streamingFenceSilenceMs: number
   /** 渲染 mermaid 为 SVG（renderer 壳 renderMermaid，依赖 mermaid 库） */
   renderMermaid: (source: string, theme: 'dark' | 'light') => Promise<{ svg: string }>
-  /** 把 assistant 消息转为 markdown（copy-as-MD 功能，依赖 i18n 文案） */
-  toMarkdown: (message: Message) => string
   /**
    * [tool-detail-rich] 工具展开细节富渲染组件（renderer 提供，ui 只路由不实现）：
    * read → 行号 gutter 代码块（shiki）；write → 懒加载 git diff（新文件回退全增 diff）；

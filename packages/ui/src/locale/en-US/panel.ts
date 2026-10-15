@@ -98,9 +98,6 @@ export default {
     inProgress: '(in progress)',
     expandReasoning: 'Expand reasoning',
     collapseReasoning: 'Collapse reasoning',
-    toolFailed: '(failed)',
-    toolNoResult: '(no result)',
-    thinkingHeader: '## Thinking',
     expand: 'Expand',
     collapse: 'Collapse',
     // [system-notice-rendering-upgrade U3] scroll-box info bar + expand button (consumed by
@@ -123,7 +120,6 @@ export default {
     imagePlaceholderDetail: 'This session image cache reached its limit (64MB). Existing images stay visible; new images show a placeholder',
     imageUnavailable: 'Image unavailable',
     workflow: 'Workflow',
-    copyMarkdown: 'Copy as Markdown',
     forkAsk: 'Fork to ask (ask in a new branch, isolated from main line)',
     forkFailed: 'Fork to background failed: {error}',
     handoffAsk: 'Hand off with note (your text becomes the first message in the new session)',
