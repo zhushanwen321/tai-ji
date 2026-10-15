@@ -134,6 +134,7 @@
           <WorkflowVizDag
             :dag="dag"
             :node-states="nodeStates"
+            :instances-by-node="instancesByNode"
             :run-status="run?.status"
             :run-outcome="run?.outcome"
             :active-phase="activePhase"
@@ -303,6 +304,11 @@ const props = withDefaults(
     nodeStates?: Record<string, WorkflowVizDagNodeStatus>
     /** 当前 phase 分区（已派生输入，透传画布）。 */
     activePhase?: string | null
+    /**
+     * 执行实例挂接映射（已派生输入，透传画布——匹配单处在容器 Host，D2 产物
+     * byNode：节点实例行渲染 + 增高节点布局高度表的数据源）。
+     */
+    instancesByNode?: Map<string, WorkflowAgentCall[]>
     /**
      * 未匹配实例（已派生输入——匹配单处在容器 Host，D2⑥ 零命中/歧义不静默丢弃；
      * 壳按 phase 分组渲染画布下方的指定分组，命中数/歧义标注随行）。

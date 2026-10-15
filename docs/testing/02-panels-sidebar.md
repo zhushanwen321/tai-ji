@@ -1186,7 +1186,7 @@ ForkGroup（当前会话的「本会话的分支」折叠区）已整体退役�
 | overlay 壳 | `wfvz-overlay` / `wfvz-overlay-header` / `wfvz-overlay-close` | 壳与两通道关闭（点遮罩/按钮；Esc 归编排器，display-containers §7.5） |
 | 浮层浏览器 | `browser-overlay-title` / `browser-pane` / `browser-vp` / `browser-create-error` / `browser-error` | BrowserPane 挂浮层壳（u-w2-browser-mount）：标题栏 URL / 面板 / 浮层视口 rect 同步观测目标 / 两类错误占位（创建失败 vs 页面加载失败） |
 | DAG 画布 | `wfvz-overlay-dag-pane` / `wfvz-overlay-dag-loading` / `wfvz-overlay-dag-fallback` / `wfvz-overlay-dag-error-code` | 画布三态互斥（就绪/降级/解析中） |
-| 节点 | `wfvz-dag-node-<id>` / `wfvz-dag-node-error` | 节点卡片与节点级渲染边界占位 |
+| 节点 | `wfvz-dag-node-<id>` / `wfvz-dag-node-error` | 节点卡片与节点级渲染边界占位；≥2 执行实例的节点含实例行（`wfvz-dag-instance-<callId>` + `data-wfvz-instance` 点击锚，2026-10 正交路由重做同批：节点标题单实例直接用实例 agent 名、边横竖折线、打开 fit 居中） |
 | 未匹配分组 | `wfvz-overlay-unmatched` / `wfvz-overlay-unmatched-group-<phase>` / `wfvz-overlay-unmatched-item` | D2⑥ 指定分组（不静默丢弃） |
 | 实况面板 | `wf-viz-live-panel` / `wf-viz-trace-table` / `wf-viz-trace-row-<id>` / `wf-viz-trace-empty` | workflow tab 实例 trace |
 | 事件流 | 事件流子页（RunEventStream）含截断标注与错误二分形态 | record 原文（2KB 截断 + truncatedFields） |

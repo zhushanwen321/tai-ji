@@ -39,6 +39,7 @@
       :active-phase="activePhase"
       :elapsed-ms="elapsedMs"
       :unmatched="unmatchedInstances"
+      :instances-by-node="matchResult?.byNode"
       @close="closeWorkflowVizOverlay"
       @select="onSelect"
       @retry-dag="retryDagParse"
@@ -208,8 +209,9 @@ const elapsedMs = computed<number | undefined>(() => {
 
 // ── 事件接线 ─────────────────────────────────────────────────────────────────
 
-/** DAG 点击：phase 语义开 phase tab；agent 语义开该节点首个挂接实例的钻取（多实例节点
- *  取列表首个；pending/无 sessionId 实例由 openAgentTab 内部守卫 no-op）。 */
+/** DAG 点击：phase 语义开 phase tab；agent 语义开挂接实例的钻取——实例行点击带
+ *  callId 钻取该实例（多实例节点点具体行看具体 agent），节点其余区域取首个挂接实例
+ *  （pending/无 sessionId 实例由 openAgentTab 内部守卫 no-op）。 */
 function onSelect(payload: WorkflowVizDagClickPayload): void {
   if (payload.semantic === 'phase') {
     panelRef.value?.openPhaseTab(payload.phase)
@@ -218,7 +220,10 @@ function onSelect(payload: WorkflowVizDagClickPayload): void {
   const dag = overlayDag.value
   const run = runRecord.value
   if (dag === null || run === null) return
-  const call = matchResult.value?.byNode.get(payload.nodeId)?.[0]
+  const calls = matchResult.value?.byNode.get(payload.nodeId)
+  const call = payload.callId !== undefined
+    ? (calls?.find((c) => c.id === payload.callId) ?? calls?.[0])
+    : calls?.[0]
   if (call !== undefined) panelRef.value?.openAgentTab(call)
 }
 
