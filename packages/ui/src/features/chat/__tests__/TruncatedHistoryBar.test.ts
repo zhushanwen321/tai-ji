@@ -18,6 +18,7 @@ vi.mock('vue-i18n', async () => {
   return i18nMock({
     'panel.message.loadedRecentTurns': '已加载最近 {count} 轮',
     'panel.message.loadEarlier': '加载更早',
+    'panel.message.loadingMore': '正在续载…',
     'common.loading': '加载中…',
   })
 })
@@ -49,7 +50,7 @@ describe('TruncatedHistoryBar 历史预算截断顶部条（u4d）', () => {
     const wrapper = mount(TruncatedHistoryBar, { props: { loadedTurns: 20, loading: true } })
     const btn = wrapper.find('[data-testid="load-more-history"]')
     expect(btn.attributes('disabled')).toBeDefined()
-    expect(btn.text()).toContain('加载中…')
+    expect(btn.text()).toContain('正在续载…')
     expect(btn.find('.animate-spin').exists()).toBe(true)
     await btn.trigger('click')
     expect(wrapper.emitted('load')).toBeUndefined()

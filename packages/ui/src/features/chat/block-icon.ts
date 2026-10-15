@@ -2,6 +2,7 @@ import type { Component } from 'vue'
 import {
   Lightbulb,
   BookOpen,
+  ChevronRight,
   SquareTerminal,
   Pencil,
   SquareFunction,
@@ -30,7 +31,7 @@ import type { ToolCallStatus } from '@taiji/shared'
  * toolName → 动效 kind 映射（Block.vue TOOL_RUNNING_KIND），其余用 BLOCK_ICON_LUCIDE[kind]。
  */
 export type BlockIconKind =
-  | 'thinking' | 'tool-read' | 'tool-bash' | 'tool-edit' | 'tool-grep' | 'tool-other'
+  | 'thinking' | 'tool-read' | 'tool-bash' | 'tool-cmd' | 'tool-edit' | 'tool-grep' | 'tool-other'
   | 'subagent' | 'workflow' | 'running' | 'text'
 
 /**
@@ -42,10 +43,14 @@ export type RunningIconKind =
   | 'subagent' | 'workflow' | 'tool-other'
 
 /** toolName → tool 细分类映射（未命中的 toolName 走 'tool-other'）。grep/find 探索类
- *  单列 tool-grep（Search 字形 + 透镜扫掠动效），不再落 SquareFunction 兜底。 */
+ *  单列 tool-grep（Search 字形 + 透镜扫掠动效），不再落 SquareFunction 兜底。
+ *  bash 静态字形 = tool-cmd（裸 › 提示符，2026-10-15 裁决 ③B：成员/单行 bash 抽象化，
+ *  波及组内外所有 bash 行——本映射是全局 SSOT）；running 动效不经此表（走 Block.vue
+ *  TOOL_RUNNING_KIND，bash 仍 'tool-bash' 方框终端 + 光标闪烁）；exec 组头静态仍
+ *  tool-bash（RUN_GROUP_ICON 独立映射，不动）。 */
 const TOOL_ICON_MAP: Record<string, BlockIconKind> = {
   read: 'tool-read',
-  bash: 'tool-bash',
+  bash: 'tool-cmd',
   edit: 'tool-edit',
   write: 'tool-edit',
   grep: 'tool-grep',
@@ -75,7 +80,8 @@ export function getBlockIcon(
 
 /**
  * BlockIconKind → lucide 组件映射（不含 running——running 用 RunningBlockIcon 动效组件）。
- * tool-read=book-open / tool-bash=square-terminal / tool-edit=pencil / tool-grep=search /
+ * tool-read=book-open / tool-cmd=chevron-right（bash 静态字形，2026-10-15 裁决 ③B）/
+ * tool-bash=square-terminal（exec 组头保留方框终端）/ tool-edit=pencil / tool-grep=search /
  * tool-other=square-function / subagent=users / text=arrow-right。
  * workflow=workflow（lucide Workflow 双节点连线，与 composer slash 菜单 slash-icons.ts 同款——
  * 原独立档 list-checks 与菜单图标不一致，统一到同源字形）。
@@ -88,6 +94,7 @@ export const BLOCK_ICON_LUCIDE: Record<Exclude<BlockIconKind, 'running'>, Compon
   thinking: Lightbulb,
   'tool-read': BookOpen,
   'tool-bash': SquareTerminal,
+  'tool-cmd': ChevronRight,
   'tool-edit': Pencil,
   'tool-grep': Search,
   'tool-other': SquareFunction,

@@ -908,7 +908,7 @@ pnpm dev
 | 步骤 | 操作 | 期望 |
 |------|------|------|
 | 1 | 激活真实 session，发消息 | user 气泡立即出现，pi 开始流式回复 |
-| 2 | 观察 thinking 块 | 紫色斜体 thinking 出现，逐步追加，结束后可折叠 |
+| 2 | 观察 thinking 块 | thinking 行出现（lightbulb 图标染中性灰 + 「思考」label），逐步追加，结束后可折叠 |
 | 3 | 观察 tool call | pi 调真实工具（read/bash/edit），Block 显示工具名 + 输入 + 输出 |
 | 4 | 观察文本流 | assistant 文本逐字追加，streaming 光标闪烁 |
 | 5 | 观察 fileChanges | 变更集卡出现，列出真实改动文件（git status 对账） |

@@ -31,6 +31,7 @@ import { historyWindowFromReply } from './truncated-window'
 import { isVirtualKey } from './lru'
 import { disposeImageCacheForSession } from './image-cache'
 import { toErrorMessage } from '../../utils/error-message'
+import { randomUuid } from '../../utils/random-uuid'
 import type { EnsureStreamSubDeps, SessionStoreLike, UseChatDeps } from './use-chat-types'
 import type { DeliveryFrameEntry, DeliveryCancelReply, DeliverySubmitReply } from './api-port'
 import type { RevokeMessageErrorCode } from '@taiji/shared'
@@ -989,7 +990,10 @@ export function createUseChat(deps: UseChatDeps) {
     // clientUuid 前移生成（u-<uuid>）：作为 submitSegments 的条目 id（session.delivery 帧 /
     // 送达回执标记 / morph 的身份锚 + clientUuid ↔ pi userEntryId 映射），受理确认后同一 id
     // 上屏气泡（appendUser 显式 id 入参，气泡 id = 内核条目 id 契约不变）。
-    const clientUuid = `u-${crypto.randomUUID()}`
+    // randomUuid（secure-context 安全包装）：移动壳经 LAN http 访问时 isSecureContext=false，
+    // 直调 crypto.randomUUID 为 undefined 抛 TypeError → send 恒 false（移动端「未送达」）。
+    // crypto.randomUUID 是 secure-context-only API，一切非 https 环境的调用点必须走本包装。
+    const clientUuid = `u-${randomUuid()}`
     ensureStreamSubscription(sid, chat, session, subDeps)
     // S4：复用调用方算过的 promptText，避免 submitSegments 内部再调一次 segmentsToPrompt。
     const reply = await submitSegments(sid, segments, clientUuid, promptText)

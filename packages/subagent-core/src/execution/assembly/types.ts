@@ -20,7 +20,7 @@ import type { ModelInfo } from "./model-resolver.ts";
 import type { ExecutionStatus, RecordOrigin, ClosedReason, ExecutionOutcome, ProjectedOutcome, ExternalState, ExecutionMode, StopReason } from "../domain/record-types.ts";
 // [subagent-model-switch §6.2] SubagentRecord.modelOverride 的载荷类型（与
 // ExecutionRecord.modelOverride 同源——领域词汇权威在 domain/record-model.ts）。
-import type { ModelOverride } from "../domain/record-model.ts";
+import type { ModelOverride, SubagentModelSource } from "../domain/record-model.ts";
 
 
 
@@ -338,6 +338,12 @@ export interface ExecuteOptions {
   slug: string;
   agent?: string;
   model?: string;
+  /**
+   * 派发期模型来源（record.modelSource 盖章源——resolveIdentityForRoute/
+   * resolveWorkflowIdentity 四层解析产物；stampEngineOnRecordOpts 写入 recordOpts 后
+   * 经 createRecordForMode 落 record）。undefined = 未标注（存量调用方/pi 路由未指定）。
+   */
+  modelSource?: SubagentModelSource;
   thinkingLevel?: string;
   skillPath?: string;
   appendSystemPrompt?: string[];

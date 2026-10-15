@@ -119,15 +119,16 @@ describe('U7 首屏冒烟：fork 按钮恒渲染（门控已放宽）', () => {
       makeAssistant({ id: 'a2', content: '第二条回复' }),
     ])
     const wrapper = mountTurn(turn, 's-idle')
-    // fork 统一为 fork-ask-btn（与复制/复制MD/朗读/handoff 并列同行）
+    // fork 统一为 fork-ask-btn（与复制MD/朗读/handoff 并列同行）
     expect(wrapper.findAll('[data-testid="fork-background-btn"]').length).toBe(0)
     expect(wrapper.findAll('[data-testid="fork-ask-btn"]').length).toBe(1)
-    // fork 按钮与复制按钮在同一容器（action 行，5 个并列按钮：ai-voice-tts §5.1 朗读按钮加入后；
-    // [actions-anchor] 起 .turn-summary = 操作栏 chip 本体，定位与显隐在 Block 的插槽包装层）
+    // fork 按钮与复制按钮在同一容器（action 行，4 个并列按钮：纯文本复制已退役，
+    // 2026-10-15 裁决；[actions-anchor] 起 .turn-summary = 操作栏行本体，定位与显隐在
+    // Block 的插槽包装层）
     const actionRow = wrapper.find('.turn-summary')
     expect(actionRow.exists()).toBe(true)
     expect(actionRow.find('[data-testid="fork-ask-btn"]').exists()).toBe(true)
-    expect(actionRow.findAll('button').length).toBe(5)
+    expect(actionRow.findAll('button').length).toBe(4)
   })
 })
 

@@ -558,7 +558,7 @@ hover 时右侧整单元（badge/耗时）`visibility:hidden` 让位 ghost 操�
 | block header / header | 14px |
 | 操作按钮 | 16px |
 
-lucide-vue 内联 SVG，stroke-width 默认 **2**（lucide 默认值，`BLOCK_ICON_CLASS` 未覆写；RUNNING_LOADER_SVG=1.7、分隔行族=2.2；特殊图标如 checkbox 勾/install icon 可加粗到 2-3）。block icon：thinking=Brain / tool-read=BookOpen / tool-bash=SquareTerminal / bash-group=SquareTerminal / tool-edit=Pencil / tool 兜底=SquareFunction / subagent=Users / workflow=ListChecks。
+lucide-vue 内联 SVG，stroke-width 默认 **1.6**（`BLOCK_ICON_CLASS` 覆写；RUNNING_LOADER_SVG=1.7、分隔行族=2.2；特殊图标如 checkbox 勾/install icon 可加粗到 2-3）。block icon：thinking=Lightbulb（染 `--neutral-ico`，2026-10-15 去紫裁决）/ tool-read=BookOpen / tool-cmd=ChevronRight（bash 成员/单行静态字形，2026-10-15 裁决）/ tool-bash=SquareTerminal（exec 组头）/ tool-edit=Pencil / tool-grep=Search / tool 兜底=SquareFunction / subagent=Users / workflow=Workflow；run 组头图标 = 组类别语义图标（探索→tool-read / 改动→tool-edit / 执行命令→tool-bash，RUN_GROUP_ICON）。
 
 ### 5.8 GroupCard（设置分组卡片）
 

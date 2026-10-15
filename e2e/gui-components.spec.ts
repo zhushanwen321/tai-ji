@@ -94,8 +94,8 @@ test.describe('GUI 组件渲染 E2E', () => {
     }
 
     // 组头分支（run 类型分组）：工具行按类型折进 run 组，read 单成员也成「探索 1 步」组，
-    // 组收起时成员行不在 DOM，须先点组头展开；组内含 running 成员时挂载即展开（aria-expanded=true），
-    // 此时再点会收起——按 aria-expanded 判定，不无条件点。
+    // 挂载一律收起（2026-10-15 ①A 裁决：running 组也不例外，成员行不在 DOM，须先点组头展开）——
+    // 按 aria-expanded 判定，不无条件点。
     const groupHeader = page.getByTestId('run-group-header')
     if ((await groupHeader.count()) > 0 && (await groupHeader.first().getAttribute('aria-expanded')) === 'false') {
       await groupHeader.first().click()

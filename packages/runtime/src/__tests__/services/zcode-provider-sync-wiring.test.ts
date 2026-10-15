@@ -10,8 +10,6 @@
  * 3. 摘要日志三态：written（条目数 + 落盘路径）/ skipped-empty（删旧副本回落真实文件）。
  *
  * fixture 经 mkdtempSync 自建（os.tmpdir()），零接触真实 ~/.zcode / ~/.taiji / ~/.pi。
- * 说明：locateBuiltinCatalog 走缺省宿主扫描（只读），其结果不参与本组断言——zai 前置的
- * builtinTokens/piConfigured 均由 fixture 恒 false 控制，宿主目录形态不影响断言值。
  *
  * 运行：cd packages/runtime && npx vitest run src/__tests__/services/zcode-provider-sync-wiring.test.ts
  */
@@ -67,7 +65,6 @@ function makeDeps(input: WiringDepsInput = {}): ZcodeProviderStartupSyncDeps {
         if (input.credentialThrows) throw new Error('resolver exploded (fixture)')
         return input.credentials?.[id] ?? undefined
       },
-      hasProviderCredential: () => false,
       resolveProviderBaseUrl: id => input.providers?.[id]?.baseUrl,
     },
     paths,

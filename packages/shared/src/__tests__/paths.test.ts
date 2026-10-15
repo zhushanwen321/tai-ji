@@ -13,6 +13,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import {
+  encodeCwd,
   getPiSessionsDir,
   PI_SESSION_TREE_SEGMENTS,
   getImageCacheRoot,
@@ -107,5 +108,23 @@ describe('getSessionArtifactsDir', () => {
         /invalid sessionId \(path traversal blocked\)/,
       )
     }
+  })
+})
+
+describe('encodeCwd', () => {
+  it('posix：去首斜杠 + `/` 归并为 `-`，双 `--` 包裹', () => {
+    expect(encodeCwd('/Users/x/proj')).toBe('--Users-x-proj--')
+    expect(encodeCwd('/Users/x/Code/my-proj')).toBe('--Users-x-Code-my-proj--')
+  })
+
+  it('win：盘符冒号与反斜杠各替换为一个 `-`（与 pi 原生编码产物一致）', () => {
+    expect(encodeCwd('C:\\Users\\x\\proj')).toBe('--C--Users-x-proj--')
+  })
+
+  it('归并有损（字面 `-` 与分隔符产物不可区分）→ 只保证正向单射：同 cwd 恒同目录名', () => {
+    // 正向确定性是 main 侧会话项目 .tmp 准入正向对拍的前提（反向解码有歧义，禁止依赖）
+    const cwd = '/Users/x/Code/my-proj'
+    expect(encodeCwd(cwd)).toBe(encodeCwd(cwd))
+    expect(encodeCwd('/Users/x/Code/my/proj')).toBe(encodeCwd('/Users/x/Code/my-proj'))
   })
 })

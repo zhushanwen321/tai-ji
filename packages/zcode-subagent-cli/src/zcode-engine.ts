@@ -100,6 +100,7 @@ import {
   resolveZcodeReasoningValues,
   resolveZcodeModelRef,
   splitZcodeModelRef,
+  translatePiModelRefToZcode,
   type ZcodeSourcePaths,
 } from "./preparer.ts";
 import { ensureAppServerLauncher } from "./appserver-launcher.ts";
@@ -873,6 +874,18 @@ export class ZcodeEngine implements EnginePort {
   /** [U7] 模型可发现性：provider_config 个人 provider 聚合（注册表实况对齐源），失败安全返回清单本身可能为空。 */
   listModels(): Array<{ id: string; name?: string }> {
     return listZcodeModels(this.deps.sources);
+  }
+
+  /**
+   * [engine-ref-translation D1] 派发期模型 ref 翻译（EnginePort 可选成员实装）：
+   * pi 词汇 ref → zcode 原生 ref（zai-coding-cn/* → account:bigmodel-individual-*
+   * 大小写归一，2026-10-14 用户裁决），其余透传。编排层在 record stamp 前调用——
+   * record/上报面呈现实际发给引擎的 ref；翻译失败抛错 = 显式失败（不静默回落）。
+   * 幂等：翻译产物（account:/个人 id）再入恒等，引擎内 resolveZcodeModelRef 的
+   * 同名翻译分支零冲突。
+   */
+  translateModelRef(modelRef: string): string {
+    return translatePiModelRefToZcode(modelRef, this.deps.sources);
   }
 
   /** 模型 reasoning 值域缓存（目录 modelRules 值域；per-modelRef 记忆化——

@@ -42,6 +42,7 @@ import { LOAD_MORE_RESERVED_HEIGHT } from './message-stream-layout'
  * 触顶自动续载阈值（px）：滚动偏移 ≤ 该值即视为「已到顶」。
  * 44（LOAD_MORE_RESERVED_HEIGHT）× 1.5 ≈ 66——取 64 给用户 ~20px 提前量：滚到顶部条附近
  * 就开始续载，不必精确停在 0；又不会在离顶一屏时误触发。
+ * [2026-10-15 pill 化] 条区仍 44（pill 自然高 = pt-3 12 + h-8 32），阈值语义不变，常量不动。
  */
 export const TOP_AUTO_LOAD_THRESHOLD_PX = 64
 

@@ -229,6 +229,22 @@ export interface EnginePort {
   validateModel?(modelRef: EngineModelSelectorInput): { canonicalRef: string };
 
   /**
+   * [engine-ref-translation D1] 可选面：派发期模型 ref 翻译（2026-10-14 用户裁决）。
+   *
+   * pi 词汇 ref → 引擎原生 ref（zcode 实装：`zai-coding-cn/*` →
+   * `account:bigmodel-individual-coding-plan/*`，模型段大小写归一——同一「智谱 GLM
+   * coding plan」通道在两个引擎世界的名字互译；其余 provider 两世界 1:1 原样，不在
+   * 表内原样透传）。幂等契约：翻译产物再入恒等（引擎内 validateModel/run prepare
+   * 的同名翻译分支零冲突）。无跨世界等价表的引擎省略本成员（pi 不实现）。
+   *
+   * 错误语义：翻译不可达（目标通道缺失 / 模型无等价）同步 throw = 显式失败
+   * （首败即停，错误自带恢复指引），禁静默回落、禁伪造兑底。消费点：
+   * resolveIdentityForRoute 四层解析后、validateModel 与 record stamp 前——record/
+   * 上报面呈现实际发给引擎的 ref（UI 跟随事实）。
+   */
+  translateModelRef?(modelRef: string): string;
+
+  /**
    * [subagent-model-switch §7.3] 可选面：执行中模型热切换（协议 setModel 正向方法的
    * 宿主侧承载，经 EngineClient 协议帧转发引擎）。实现 = cli 形态引擎的 RemoteEngine
    * 按 manifest `capabilities.setModel === "native"` 条件实现（非 native 引擎成员

@@ -15,8 +15,11 @@ import { describe, it, expect, vi } from 'vitest'
 import path from 'node:path'
 import { homedir } from 'node:os'
 import {
+  collectSessionTmpEncodeCwdDirs,
   computeLocalFilePrefixes,
   computeLocalFileReadPrefixes,
+  isPathUnderSessionTmp,
+  probeLocalFileServable,
   readLocalFileContent,
   MAX_LOCAL_FILE_READ_BYTES,
 } from '../utils/local-file-prefixes'
@@ -326,5 +329,107 @@ describe('computeLocalFileReadPrefixes: 读/预检 IPC 通道准入收窄', () =
       readFileSync: () => new TextEncoder().encode('<h1>hi</h1>'),
     })
     expect(result).toEqual({ ok: true, content: '<h1>hi</h1>', truncated: false })
+  })
+})
+
+describe('会话项目 .tmp/ 子树准入（ADR-0118 决策②代价修订 3d）', () => {
+  // 语义场景：应用有过 cwd = PROJECT_CWD 的会话（sessions 目录里有对应 encodeCwd 子目录）
+  const SESSION_DIRS = new Set(['--Users-tester-Code-my-project--'])
+
+  describe('isPathUnderSessionTmp: encodeCwd 正向对拍', () => {
+    it('会话项目 .tmp 子树内命中（文件 / 嵌套 / 目录自身形态）', () => {
+      expect(isPathUnderSessionTmp(`${PROJECT_CWD}/.tmp/demo.html`, SESSION_DIRS)).toBe(true)
+      expect(isPathUnderSessionTmp(`${PROJECT_CWD}/.tmp/a/b.html`, SESSION_DIRS)).toBe(true)
+      expect(isPathUnderSessionTmp(`${PROJECT_CWD}/.tmp`, SESSION_DIRS)).toBe(true)
+    })
+
+    it('项目根其它路径 / 相似名项目 / 目录集为空 → 不命中', () => {
+      expect(isPathUnderSessionTmp(`${PROJECT_CWD}/README.md`, SESSION_DIRS)).toBe(false)
+      // 目录名精确比对（encodeCwd 全串相等），非前缀匹配——相似名项目不误伤
+      expect(isPathUnderSessionTmp('/Users/tester/Code/my-project2/.tmp/x.html', new Set(['--Users-tester-Code-my-project--']))).toBe(false)
+      expect(isPathUnderSessionTmp(`${PROJECT_CWD}/.tmp/x.html`, new Set())).toBe(false)
+    })
+
+    it('`.`/`..` 已在 resolve 层折叠：折叠后脱离 .tmp 前缀的最终形态不命中', () => {
+      // 谓词入口职责 = 接收规范化后形态；这里直接给折叠产物（等价 probeLocalFileServable 内部行为）
+      expect(isPathUnderSessionTmp('/Users/tester/secrets.txt', SESSION_DIRS)).toBe(false)
+      // .tmp 内再套 .tmp 的边界逐段对拍（内层候选 cwd 不在目录集则不命中）
+      expect(isPathUnderSessionTmp(`${PROJECT_CWD}/.tmp/.tmp/x.html`, SESSION_DIRS)).toBe(true)
+    })
+
+    it('归并歧义上界：字面 `-` 项目与 `/` 归并项目同目录名时双候选都命中（有界过近似，仍限于真实会话目录集）', () => {
+      const dirs = new Set(['--Users-tester-Code-my-proj--'])
+      expect(isPathUnderSessionTmp('/Users/tester/Code/my/proj/.tmp/x.html', dirs)).toBe(true)
+      expect(isPathUnderSessionTmp('/Users/tester/Code/my-proj/.tmp/x.html', dirs)).toBe(true)
+    })
+  })
+
+  describe('collectSessionTmpEncodeCwdDirs', () => {
+    it('只认 `--...--` 形态子项，其余文件/目录忽略', () => {
+      const dirs = collectSessionTmpEncodeCwdDirs('/sessions', {
+        readdirSync: () => ['--Users-tester-Code-my-project--', '--Users-tester-Code-other--', 'loose-file.jsonl', '.DS_Store'],
+      })
+      expect([...dirs].sort()).toEqual(['--Users-tester-Code-my-project--', '--Users-tester-Code-other--'])
+    })
+
+    it('ENOENT 静默空集（无会话目录 = 无会话项目）；其它异常空集 + onError 旁路', () => {
+      const enoent = Object.assign(new Error('x'), { code: 'ENOENT' })
+      const onErr = vi.fn()
+      expect(collectSessionTmpEncodeCwdDirs('/sessions', { readdirSync: () => { throw enoent } }, onErr)).toEqual(new Set())
+      expect(onErr).not.toHaveBeenCalled()
+
+      const eaccs = Object.assign(new Error('x'), { code: 'EACCES' })
+      expect(collectSessionTmpEncodeCwdDirs('/sessions', { readdirSync: () => { throw eaccs } }, onErr)).toEqual(new Set())
+      expect(onErr).toHaveBeenCalledWith(eaccs, '/sessions')
+    })
+  })
+
+  describe('probeLocalFileServable / readLocalFileContent 接入', () => {
+    it('会话项目 .tmp 文件 servable=true（预检 + 读通道正向不回归）', () => {
+      const stat = vi.fn(() => ({ isDirectory: () => false, size: 5 }))
+      const probe = probeLocalFileServable(`${PROJECT_CWD}/.tmp/demo.html`, packagedPrefixes(), { statSync: stat }, SESSION_DIRS)
+      expect(probe.servable).toBe(true)
+      expect(probe.resolvedPath).toBe(`${PROJECT_CWD}/.tmp/demo.html`)
+
+      const read = vi.fn(() => new TextEncoder().encode('<p>demo</p>'))
+      const result = readLocalFileContent(
+        `${PROJECT_CWD}/.tmp/demo.html`,
+        computeLocalFileReadPrefixes(DATA_DIR),
+        { statSync: stat, readFileSync: read },
+        SESSION_DIRS,
+      )
+      expect(result).toEqual({ ok: true, content: '<p>demo</p>', truncated: false })
+    })
+
+    it('目录集外路径依旧 out_of_whitelist 且不触 fs（越界不触 fs 性质保持）', () => {
+      const stat = vi.fn()
+      for (const p of ['/etc/passwd', `${HOME}/.ssh/id_rsa`, '/Users/other-proj/.tmp/x.html']) {
+        const probe = probeLocalFileServable(p, packagedPrefixes(), { statSync: stat }, SESSION_DIRS)
+        expect(probe).toEqual({ servable: false, reason: 'out_of_whitelist', resolvedPath: '' })
+      }
+      expect(stat).not.toHaveBeenCalled()
+    })
+
+    it('数据目录凭据不经会话 .tmp 通道放行（3d 不扩大 3c 收窄面的结论）', () => {
+      const stat = vi.fn()
+      const read = vi.fn()
+      // encodeCwd(DATA_DIR) 不在目录集 → auth.json 仍被拒；即使目录集含它，读通道也只该
+      // 覆盖 .tmp 段——双重断言锁定「凭据面不回归」
+      const result = readLocalFileContent(
+        `${DATA_DIR}/agent/auth.json`,
+        computeLocalFileReadPrefixes(DATA_DIR),
+        { statSync: stat, readFileSync: read },
+        new Set([...SESSION_DIRS, '--Users-tester-.taiji--']),
+      )
+      expect(result).toEqual({ ok: false, reason: 'out_of_whitelist' })
+      expect(stat).not.toHaveBeenCalled()
+      expect(read).not.toHaveBeenCalled()
+    })
+
+    it('sessionTmpDirs 缺省时行为与旧签名完全一致（可选参数向后兼容）', () => {
+      const stat = vi.fn(() => ({ isDirectory: () => false, size: 1 }))
+      expect(probeLocalFileServable(`${DATA_DIR}/artifacts/s1/a.html`, packagedPrefixes(), { statSync: stat }).servable).toBe(true)
+      expect(probeLocalFileServable('/etc/passwd', packagedPrefixes(), { statSync: stat }).servable).toBe(false)
+    })
   })
 })

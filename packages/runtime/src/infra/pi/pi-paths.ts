@@ -27,6 +27,7 @@ import {
   getExtensionsDir as sharedGetExtensionsDir,
   getNpmDir as sharedGetNpmDir,
   getTmpDir as sharedGetTmpDir,
+  encodeCwd,
 } from '@taiji/shared/paths'
 import { join } from 'node:path'
 
@@ -125,17 +126,13 @@ export function getAgentsDir(): string {
 }
 
 /**
- * 编码 cwd 为目录名（复刻 pi-subagent-workflow 的 path-encoding.ts）。
- *
- * 规则：'--' + cwd 去掉首斜杠 + 所有 / \ : 替换为 - + '--'
- * 例：/Users/x/proj → --Users-x-proj--
- *     C:\Users\x\proj → --C--Users-x-proj--（盘符冒号与反斜杠各替换为一个 -）
+ * 编码 cwd 为目录名（pi 布局 SSOT = @taiji/shared/paths encodeCwd，本处仅 re-export 保持
+ * 既有 import 面；规则与例见 shared 实现——main 侧会话项目 .tmp 准入接入时两份平行
+ * 实现收敛为单源）。
  *
  * 用于定位 subagent session 目录：<piAgentDir>/subagents/<encodeCwd(cwd)>/sessions/
  */
-export function encodeCwd(cwd: string): string {
-  return '--' + cwd.replace(/^[/\\]/, '').replace(/[/\\:]/g, '-') + '--'
-}
+export { encodeCwd }
 
 /**
  * 获取 subagent session 目录路径。

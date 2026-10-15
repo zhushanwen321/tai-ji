@@ -30,6 +30,13 @@
  * - 边：sequence（词法序相邻单元，并行组扇出/扇入）/ dataflow（上游返回值
  *   变量被下游实参引用）/ conditional（if/三元直接环绕的调用点，谓词原文随
  *   边）/ loop-back（循环体回边，loops[] 同时承载循环体节点集）。
+ * - 不可区分调用点合并（解析产物收尾）：同 (phase, templateName, kind) 的调用点
+ *   在 D2 实例匹配与视图两侧天然不可区分（同 phase 等值 + 同模板正则 + 字面段总
+ *   长相等恒并列），保留多个只会互致歧义——任一实例命中并列候选即判歧义进未匹配
+ *   分组，该 agent 家族在图上整体失去挂接（实测：helper 投影把「派发 + 原位重试」
+ *   投成两个全通配节点、同模板直呼双节点）。合并语义：组内最前行号者为代表节点，
+ *   边端点重写到代表后走既有 (from,to) 优先级去重，并行组/循环成员 id 同步重映射
+ *   去重；不同 phase / 不同模板不合并——可区分的调用点保持一节点一调用点。
  * - 零调用点脚本（纯门禁）→ nodes 空数组（渲染层出空画布 + 居中摘要提示，设计 §3.1-3）。
  * - 不支持语法 fail-fast：acorn 解析失败与遍历期内部异常均返回结构化错误
  *   `{ code: 'parse_failed', message }`——原生异常不得逃出结构化错误边界
@@ -69,6 +76,7 @@
  */
 
 import * as acorn from "acorn";
+import { collapseDuplicateCallSites } from "./workflow-dag-collapse.ts";
 
 /** DAG 节点类型（跟随 shared WorkflowDagNodeKind）。 */
 export type WorkflowDagNodeKind = "agent" | "script-step"; // oe-exempt:20261002:framework:workflow-viz 协议类型双侧等值跟随（core 为定义源——解析器产物类型；shared 为 u2 协议冻结面、跨包消费契约，core 包不依赖 shared——仓内 SUBAGENT_RECORD_CUSTOM_TYPE 同款先例；改字段须同 commit 双侧同步，等值锁定 = shared 侧扩必选字段而 core 未跟时 runtime 赋值点 typecheck 红（workflow-run-events-reader）+ core 侧构造点受本地接口约束）
@@ -925,13 +933,15 @@ function buildDag(source: string, program: AstNode): WorkflowDag {
   });
 
   const phases: WorkflowDagPhase[] = [...ctx.phaseOrder.entries()].map(([name, order]) => ({ name, order }));
-  return {
+  // 收尾：不可区分调用点合并（同 phase + 同模板收口单代表节点——规则与动因见
+  // workflow-dag-collapse 模块注释与 ADR-0105 补记）
+  return collapseDuplicateCallSites({
     nodes: ctx.nodes,
     edges,
     phases,
     parallelGroups: ctx.parallelGroups.map((nodeIds) => ({ nodeIds })),
     loops,
-  };
+  });
 }
 
 /**

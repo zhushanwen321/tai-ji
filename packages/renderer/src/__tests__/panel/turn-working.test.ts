@@ -478,8 +478,10 @@ describe('Turn · trace 块按 contentBlocks 真实时序渲染', () => {
     // 取顶层单元口径见 expectTraceTopBlocks（组展开时后代选择器会数进成员行）
     const blocks = expectTraceTopBlocks(wrapper, 2)
     expectTextThenRunGroup(blocks)
-    // 组展开后成员行 = 真正的 tool 行（.trace-tool）
-    expect(blocks[1].find('.trace-tool').exists()).toBe(true)
+    // 组挂载一律收起（2026-10-15 ①A 裁决）：成员行不在 DOM，组头在场且 aria-expanded=false
+    // （成员行展开形态 = 真 .trace-tool 行，由 Block.test.ts 展开收起用例承担）
+    expect(blocks[1].find('[data-testid="run-group-header"]').exists()).toBe(true)
+    expect(blocks[1].find('[data-testid="run-group-header"]').attributes('aria-expanded')).toBe('false')
   })
 
   it('U18: streaming→complete 切换后，Turn 尾部 streaming-tail 光标消失', async () => {

@@ -6,7 +6,8 @@
  * 状态本体按 per-session 分区（useSessionScopedState，ADR-0049），与控制态分区同键
  * （drawerSessionKey，control.ts 绑定），但物理独立——控制态只留开合 + activeTab。
  *
- * 写入面 = setSubagentView（coordination.openSubagent 编排调用）；
+ * 写入面 = setSubagentView（coordination.openSubagent 编排调用）/ clearSubagentView
+ * （coordination.clearSubagentSelection 编排调用）；
  * 读取面 = useSubagentSelection（SubagentTab 消费）+ readSubagentSelectionFor
  * （复合谓词 selection/predicates.ts 按 sid 跨域读，getViewedVids 豁免链用）。
  */
@@ -57,6 +58,17 @@ export function setSubagentView(virtualId: string, enteredFrom: 'chat' | 'workfl
   const cur = selection.current.value
   cur.selectedSubagentId = virtualId
   cur.enteredFrom = enteredFrom
+}
+
+/**
+ * 清空 subagent 选中态（tab 全部关闭回空态时由 coordination.clearSubagentSelection 编排调用）。
+ * 不同步 clear 会在分区留残留 vid：组件重挂载时 watch immediate 用残留 id 复活已关闭 tab
+ * 并拉流；重选同一 vid 也不触发 watch（同值写不产生变化边沿）。
+ */
+export function clearSubagentView(): void {
+  const cur = selection.current.value
+  cur.selectedSubagentId = null
+  cur.enteredFrom = null
 }
 
 /** 按 sid 读 subagent 选中态（复合谓词跨域读取用；updateFor 语义：已删 sid 不复活分区） */

@@ -17,7 +17,6 @@ import { describe, it, expect, beforeEach } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { useChatStore } from '@/stores/chat'
 import { findToolCallOwner } from '@taiji/core'
-import { assistantToMarkdown } from '@/composables/logic/messageFormat'
 import { deriveStatus } from '@/composables/logic/sessionStatus'
 import type { Message, ToolCall } from '@taiji/shared'
 
@@ -149,13 +148,6 @@ describe('message.complete — 残留 running toolCall 收口', () => {
 
 describe('end_not_received — 下游消费点', () => {
   beforeEach(() => setActivePinia(createPinia()))
-
-  it('U14: messageFormat 复制为 MD 时 end_not_received 加「（未收到结果）」标注', () => {
-    const tc: ToolCall = { id: 'tc-1', toolName: 'read', input: {}, status: 'end_not_received', startTime: 0 }
-    const msg: Message = { id: 'a1', role: 'assistant', content: '', status: 'complete', toolCalls: [tc], timestamp: 0 }
-    const md = assistantToMarkdown(msg)
-    expect(md).toContain('未收到结果')
-  })
 
   it('U15: deriveStatus 遇 end_not_received 不返回 waiting（已结束，非进行中）', () => {
     const store = useChatStore()

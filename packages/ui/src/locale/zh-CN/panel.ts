@@ -96,9 +96,6 @@ export default {
     inProgress: '（进行中）',
     expandReasoning: '展开推理',
     collapseReasoning: '收起推理',
-    toolFailed: '（失败）',
-    toolNoResult: '（未收到结果）',
-    thinkingHeader: '## 思考',
     expand: '展开',
     collapse: '收起',
     // [system-notice-rendering-upgrade U3] 展开块内滚动信息条与展开按钮（BlockScrollBox 消费，U7）：
@@ -119,7 +116,6 @@ export default {
     imagePlaceholderDetail: '该会话图片缓存已达上限（64MB），历史图片仍可见，新图片显示占位',
     imageUnavailable: '图片不可用',
     workflow: '工作流',
-    copyMarkdown: '复制为 Markdown',
     forkAsk: 'fork 提问（在新分支追问，与主线隔离）',
     forkFailed: 'fork 后台失败：{error}',
     handoffAsk: '交接并备注（输入内容将作为新 session 的首条消息）',
@@ -140,6 +136,9 @@ export default {
     // [u4d-truncated-ui] 历史预算截断顶部条（loadMore 已被 loadEarlier 取代退役）
     loadedRecentTurns: '已加载最近 {count} 轮',
     loadEarlier: '加载更早',
+    // [2026-10-15 pill 化] 续载进度文案：比 common.loading「加载中…」更说清在干什么
+    // （顶部条 pill 的 loading 态；自动续载与手点共用同一状态位）
+    loadingMore: '正在续载…',
     // [u8-pi-respawn] pi 崩溃恢复提示条（D7 / T4 文案）
     respawnPending: '会话引擎异常退出，正在自动恢复…可继续发消息，恢复完成后送达',
     respawnRestored: '会话引擎已从崩溃中恢复。中断的回合未保留；崩溃时进行中的后台任务与子代理已终止、不会自动恢复。可继续发消息。',
@@ -399,6 +398,21 @@ export default {
     // subagent-model-switch §7.1（U1）：subagent / workflow run 执行模型切换。
     subagentOverrideBadge: '用户覆盖中',
     subagentModelSwitchTitle: '切换此子代理的执行模型（无活跃进程时记账，下次执行生效）',
+    subagentModelActual: '当前实际使用模型：{model}',
+    // 嵌套两层（叶键 = SubagentModelSource 值域）：消费点 useSubagentModel.ts 动态拼
+    // `panel.sideDrawer.subagentModelSource[Title].${source}`，扁平键形态解析不到
+    subagentModelSource: {
+      explicit: '派发指定',
+      frontmatter: 'agent 声明',
+      preference: '偏好缺省',
+      default: '引擎缺省',
+    },
+    subagentModelSourceTitle: {
+      explicit: '派发时显式指定了模型（task 参数）',
+      frontmatter: '模型来自 agent .md frontmatter 声明',
+      preference: '未显式指定——由 settings 偏好（per-engine 默认模型）补缺',
+      default: '未指定模型——由引擎自身缺省解析',
+    },
     modelSwitchFailed: '切换模型失败：{msg}',
     modelSwitchMemberFailed: '成员 {member} 切换失败（{reason}）——其他成员不受影响',
     bashTaskRunningFor: '已运行 {duration}',

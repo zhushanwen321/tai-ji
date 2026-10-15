@@ -20,6 +20,7 @@ import {
   resolveZcodeMinimalReasoningLevel,
   resolveZcodeModelRef,
   resolveZcodeReasoningValues,
+  translatePiModelRefToZcode,
 } from "../preparer.ts";
 
 /** 副本语境恢复指引句（§5 单元 3 文案修复——四处 throw 公共尾句的断言锚点）。 */
@@ -227,8 +228,12 @@ describe("resolvePersonalProviderConfigPath（默认解析链：显式 sources >
     // 真实文件条目同样可见——D3 换轨核心：校验链与 Registry 读同一 merge 视图，
     // 「读源 = 副本整体遮蔽真实」的旧语义已退役
     expect(resolveZcodeModelRef("GLM-5.3")).toBe(`${PROVIDER_A}/GLM-5.3`);
-    // 清单聚合 = merge 视图全体（真实条目整条保留在前 → PROVIDER_A 先于副本条目）
-    expect(listZcodeModels().map((m) => m.id)).toEqual([
+    // 清单聚合 = merge 视图全体（真实条目整条保留在前 → PROVIDER_A 先于副本条目）。
+    // builtinCatalogPath 显式指到缺失路径：隔离本机真实内建目录（account 直通家族
+    // 扫描不属本用例变量，裸调会在装有 ZCode 的机器上混入真实 account 条目）
+    expect(
+      listZcodeModels({ builtinCatalogPath: path.join(tmpRoot, "absent-catalog.json") }).map((m) => m.id),
+    ).toEqual([
       `${PROVIDER_A}/GLM-5.3`,
       `${COPY_PROVIDER}/copy-model-x`,
     ]);
@@ -277,7 +282,10 @@ describe("resolvePersonalProviderConfigPath（默认解析链：显式 sources >
     fs.rmSync(realPath);
     writeCopy(dataDir);
     expect(resolveZcodeModelRef("copy-model-x")).toBe(`${COPY_PROVIDER}/copy-model-x`);
-    expect(listZcodeModels().map((m) => m.id)).toEqual([`${COPY_PROVIDER}/copy-model-x`]);
+    // builtinCatalogPath 显式指到缺失路径：隔离本机真实内建目录（同上）
+    expect(
+      listZcodeModels({ builtinCatalogPath: path.join(tmpRoot, "absent-catalog.json") }).map((m) => m.id),
+    ).toEqual([`${COPY_PROVIDER}/copy-model-x`]);
     // 真实侧条目随真实文件缺席而消失
     expect(() => resolveZcodeModelRef("GLM-5.3")).toThrowError(/未知模型/);
   });
@@ -338,19 +346,41 @@ describe("resolvePersonalProviderConfigPath（默认解析链：显式 sources >
 });
 
 describe("listZcodeModels（U7 可发现性）", () => {
-  it("带凭据 provider × 模型清单（无凭据者排除；name = provider 名 · 模型）", () => {
-    const models = listZcodeModels({ personalProviderConfigPath: personalPath });
+  it("带凭据 provider × 模型清单（无凭据者排除；name = provider 名 · 模型；account 直通家族追加）", () => {
+    const catalogPath = path.join(tmpRoot, "list-account-catalog.json");
+    writeJson(catalogPath, {
+      config: {
+        providerConfigRules: {
+          providerRules: [
+            {
+              providerId: "account:bigmodel-individual-coding-plan",
+              providerName: "BigModel Individual Coding Plan",
+              config: { builtinModelIds: ["GLM-5.3", "GLM-5.3-Flash"] },
+            },
+          ],
+        },
+      },
+    });
+    const models = listZcodeModels({ personalProviderConfigPath: personalPath, builtinCatalogPath: catalogPath });
     expect(models.map((m) => m.id)).toEqual([
       `${PROVIDER_A}/GLM-5.3`,
       `${PROVIDER_A}/GLM-5.3-Flash`,
       `${PROVIDER_A}/GLM-5.2`,
       `${PROVIDER_B}/mimo-v2.6-pro`,
+      "account:bigmodel-individual-coding-plan/GLM-5.3",
+      "account:bigmodel-individual-coding-plan/GLM-5.3-Flash",
     ]);
     expect(models[0]?.name).toBe("provider-a · GLM-5.3");
+    expect(models[4]?.name).toBe("BigModel Individual Coding Plan · GLM-5.3");
   });
 
-  it("源缺失 → 空清单（失败安全）", () => {
-    expect(listZcodeModels({ personalProviderConfigPath: path.join(tmpRoot, "absent.json") })).toEqual([]);
+  it("源缺失 → 空清单（失败安全；目录缺失同空）", () => {
+    expect(
+      listZcodeModels({
+        personalProviderConfigPath: path.join(tmpRoot, "absent.json"),
+        builtinCatalogPath: path.join(tmpRoot, "absent-catalog.json"),
+      }),
+    ).toEqual([]);
   });
 });
 
@@ -624,6 +654,101 @@ describe("resolveZcodeModelRef account 家族直通", () => {
       expect(e.code).toBe("model_not_available");
       expect(e.message).toContain("内建目录定位失败");
     }
+  });
+
+  it("个人 provider 全空（无凭据）→ account ref 仍可派发（account 分支先于 withKey 检查，直通语义）", () => {
+    writeJson(personalPath, { schemaVersion: 1, config: { providerOrder: [], providerConfigRules: { providerRules: [] } } });
+    const catalogPath = writeAccountCatalog("account-empty-personal-catalog.json", [
+      { providerId: "account:bigmodel-individual-coding-plan", config: { builtinModelIds: ["GLM-5.3-Flash"] } },
+    ]);
+    expect(
+      resolveZcodeModelRef("account:bigmodel-individual-coding-plan/GLM-5.3-Flash", accountSources(catalogPath)),
+    ).toBe("account:bigmodel-individual-coding-plan/GLM-5.3-Flash");
+  });
+
+  it("翻译通道：zai-coding-cn/* 显式派发经翻译落 account 直通（pi 词汇不进个人表校验）", () => {
+    const catalogPath = writeAccountCatalog("account-translate-catalog.json", [
+      { providerId: "account:bigmodel-individual-coding-plan", config: { builtinModelIds: ["GLM-5.3", "GLM-5.3-Flash"] } },
+    ]);
+    expect(resolveZcodeModelRef("zai-coding-cn/glm-5.3-flash", accountSources(catalogPath))).toBe(
+      "account:bigmodel-individual-coding-plan/GLM-5.3-Flash",
+    );
+  });
+});
+
+// ── 派发期模型 ref 翻译（engine-ref-translation D1，2026-10-14 用户裁决）：
+// zai-coding-cn ↔ account:bigmodel-individual-coding-plan 等价对，其余 1:1 原样。
+describe("translatePiModelRefToZcode", () => {
+  const TARGET = "account:bigmodel-individual-coding-plan";
+
+  function catalogWith(models: string[], providerId = TARGET): string {
+    const p = path.join(tmpRoot, `translate-catalog-${providerId.replace(/[^a-z]/g, "")}-${models.length}.json`);
+    writeJson(p, {
+      config: {
+        providerConfigRules: {
+          providerRules: [{ providerId, providerName: "BigModel Individual Coding Plan", config: { builtinModelIds: models } }],
+        },
+      },
+    });
+    return p;
+  }
+
+  it("zai-coding-cn/* → account:bigmodel-individual-coding-plan/*（模型段大小写归一，返回目录原生拼写）", () => {
+    const catalog = catalogWith(["GLM-5.3", "GLM-5.3-Flash"]);
+    expect(translatePiModelRefToZcode("zai-coding-cn/glm-5.3-flash", { builtinCatalogPath: catalog })).toBe(
+      `${TARGET}/GLM-5.3-Flash`,
+    );
+    expect(translatePiModelRefToZcode("zai-coding-cn/glm-5.3", { builtinCatalogPath: catalog })).toBe(`${TARGET}/GLM-5.3`);
+  });
+
+  it("幂等：翻译产物（account ref）再入恒等；个人 id 与裸 id 原样透传（1:1 通道不翻译）", () => {
+    const catalog = catalogWith(["GLM-5.3-Flash"]);
+    expect(translatePiModelRefToZcode(`${TARGET}/GLM-5.3-Flash`, { builtinCatalogPath: catalog })).toBe(`${TARGET}/GLM-5.3-Flash`);
+    expect(
+      translatePiModelRefToZcode("xiaomi-token-plan-cn/mimo-v2.6-flash", { builtinCatalogPath: catalog }),
+    ).toBe("xiaomi-token-plan-cn/mimo-v2.6-flash");
+    expect(translatePiModelRefToZcode("GLM-5.3", { builtinCatalogPath: catalog })).toBe("GLM-5.3");
+  });
+
+  it("模型无等价 → model_not_available（列目标通道可用清单）", () => {
+    const catalog = catalogWith(["GLM-5.3", "GLM-5.3-Flash"]);
+    try {
+      translatePiModelRefToZcode("zai-coding-cn/glm-4.6v", { builtinCatalogPath: catalog });
+      expect.unreachable("should throw");
+    } catch (err) {
+      const e = err as ZcodePrepareError;
+      expect(e.code).toBe("model_not_available");
+      expect(e.message).toContain("glm-4.6v");
+      expect(e.message).toContain("GLM-5.3-Flash");
+    }
+  });
+
+  it("目标规则缺失 → model_not_available（ZCode 桌面端配置指引）", () => {
+    const catalog = catalogWith(["GLM-5.3"], "account:other-plan");
+    try {
+      translatePiModelRefToZcode("zai-coding-cn/glm-5.3", { builtinCatalogPath: catalog });
+      expect.unreachable("should throw");
+    } catch (err) {
+      const e = err as ZcodePrepareError;
+      expect(e.code).toBe("model_not_available");
+      expect(e.message).toContain("ZCode 桌面端");
+    }
+  });
+
+  it("目录不可读/定位失败 → model_not_available（翻译不可达显式失败，不静默回落）", () => {
+    try {
+      translatePiModelRefToZcode("zai-coding-cn/glm-5.3", { builtinCatalogPath: path.join(tmpRoot, "absent-translate-catalog.json") });
+      expect.unreachable("should throw");
+    } catch (err) {
+      const e = err as ZcodePrepareError;
+      expect(e.code).toBe("model_not_available");
+      expect(e.message).toContain("翻译失败");
+    }
+  });
+
+  it("目标清单为空数组 → 请求拼写直传（不设限，交注册表实况裁决）", () => {
+    const catalog = catalogWith([]);
+    expect(translatePiModelRefToZcode("zai-coding-cn/glm-5.3", { builtinCatalogPath: catalog })).toBe(`${TARGET}/glm-5.3`);
   });
 });
 

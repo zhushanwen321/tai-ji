@@ -55,7 +55,6 @@ export function createMockDeps(overrides: Partial<ChatViewDeps> = {}): ChatViewD
     // （需要静默行为的用例显式覆写）
     streamingFenceSilenceMs: 60_000,
     renderMermaid: vi.fn().mockResolvedValue({ svg: '' }),
-    toMarkdown: vi.fn().mockReturnValue(''),
     ...overrides,
   }
 }

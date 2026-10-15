@@ -12,7 +12,7 @@
  */
 import { describe, it, expect } from 'vitest'
 import { mount } from '@vue/test-utils'
-import type { WorkflowDag, WorkflowDagNode } from '@taiji/shared'
+import type { WorkflowAgentCall, WorkflowDag, WorkflowDagNode } from '@taiji/shared'
 import WorkflowVizDag from '../WorkflowVizDag.vue'
 import type { WorkflowVizDagNodeStatus } from '../../dag/types'
 
@@ -212,13 +212,21 @@ describe('WorkflowVizDag 节点级渲染边界与零节点形态', () => {
   })
 })
 
-describe('WorkflowVizDag 视口水平居中（workflow-overlay-refine D1 / V1-wf③ 上区内容水平对中）', () => {
-  it('无布局环境（jsdom clientWidth 缺失）初始 tx 贴 0，渲染不破坏', () => {
+describe('WorkflowVizDag 视口 fit-to-view（2026-10 用户裁决：默认打开全图居中、四周 FIT_PAD_PX 留白）', () => {
+  /** 解析 viewport transform（jsdom 下数值断言用，避免浮点字面量碎支）。 */
+  function readViewport(wrapper: ReturnType<typeof mountDag>): { k: number; tx: number; ty: number } {
+    const raw = wrapper.find('[data-testid="wfvz-dag-viewport"]').attributes('transform') ?? ''
+    const m = raw.match(/translate\((-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)\) scale\((\d+(?:\.\d+)?)\)/)
+    expect(m).not.toBeNull()
+    return { tx: Number(m?.[1]), ty: Number(m?.[2]), k: Number(m?.[3]) }
+  }
+
+  it('无布局环境（jsdom clientWidth/Height 缺失）退化为 k=1 贴左上，渲染不破坏', () => {
     const wrapper = mountDag()
     expect(wrapper.find('[data-testid="wfvz-dag-viewport"]').attributes('transform')).toBe('translate(0,0) scale(1)')
   })
 
-  it('run 切换重置：tx = (容器宽−画布宽)/2（k 恒 1 无 fit，画布宽 180 = 节点 156 + 分区左右内边距 24）', async () => {
+  it('run 切换重置：内容小于容器 k=1 水平居中（tx=(容器宽−画布宽)/2，单分区宽 180）', async () => {
     const wrapper = mountDag()
     const svg = wrapper.find('[data-testid="wfvz-dag-svg"]').element
     Object.defineProperty(svg, 'clientWidth', { value: 1000 })
@@ -230,11 +238,12 @@ describe('WorkflowVizDag 视口水平居中（workflow-overlay-refine D1 / V1-wf
       loops: [],
     }
     await wrapper.setProps({ dag: solo })
-    // 单分区画布宽 180 → tx = (1000−180)/2 = 410；此前用户 pan 过也在重置中回到居中
-    expect(wrapper.find('[data-testid="wfvz-dag-viewport"]').attributes('transform')).toBe('translate(410,0) scale(1)')
+    const vp = readViewport(wrapper)
+    expect(vp.k).toBe(1)
+    expect(vp.tx).toBeCloseTo((1000 - 180) / 2, 6)
   })
 
-  it('画布宽于容器时 tx 贴 0（不产生负偏移把内容推出左缘）', async () => {
+  it('画布宽于容器：缩放至下限 ZOOM_MIN 后居中（内容完整可达，pan 可平移；不再贴 0 裁切）', async () => {
     const wrapper = mountDag()
     const svg = wrapper.find('[data-testid="wfvz-dag-svg"]').element
     Object.defineProperty(svg, 'clientWidth', { value: 100 })
@@ -246,8 +255,129 @@ describe('WorkflowVizDag 视口水平居中（workflow-overlay-refine D1 / V1-wf
       loops: [],
     }
     await wrapper.setProps({ dag: next })
-    // 两分区画布宽 392 > 容器 100 → tx = max(0, (100−392)/2) = 0
-    expect(wrapper.find('[data-testid="wfvz-dag-viewport"]').attributes('transform')).toBe('translate(0,0) scale(1)')
+    const vp = readViewport(wrapper)
+    expect(vp.k).toBe(0.35)
+    // 内容 392*0.35 超出容器 100 → 居中即轻微负偏移（两侧均匀出界，pan 可达）
+    expect(vp.tx).toBeCloseTo((100 - 392 * 0.35) / 2, 6)
+  })
+
+  it('容器高度参与 fit：竖向超高内容缩至高度内贴边，纵向居中', async () => {
+    const wrapper = mountDag()
+    const svg = wrapper.find('[data-testid="wfvz-dag-svg"]').element
+    Object.defineProperty(svg, 'clientWidth', { value: 1000 })
+    Object.defineProperty(svg, 'clientHeight', { value: 200 })
+    const tall: WorkflowDag = {
+      phases: [{ name: 'col', order: 0 }],
+      nodes: Array.from({ length: 5 }, (_, i) => node({ id: `n${i}`, templateName: `a${i}`, phase: 'col' })),
+      edges: [],
+      parallelGroups: [],
+      loops: [],
+    }
+    await wrapper.setProps({ dag: tall })
+    const vp = readViewport(wrapper)
+    // 高 352 > 容器 200 → k = (200-40)/352，横向内容远小于容器 k 封顶不影响
+    expect(vp.k).toBeCloseTo((200 - 40) / 352, 6)
+    expect(vp.ty).toBeCloseTo(20, 6)
+  })
+})
+
+describe('WorkflowVizDag 执行实例行（实际 agent 画进图，2026-10 用户裁决）', () => {
+  function call(id: number, agent: string, status: WorkflowAgentCall['status'] = 'done'): WorkflowAgentCall {
+    return { id, agent, status }
+  }
+
+  it('恰 1 实例：节点标题 = 实例 agent 名（固定 agent 名，不再露模板通配形）', () => {
+    const wrapper = mountDag(sampleDag(), {
+      instancesByNode: new Map([['n-biz', [call(7, 'reviewer-alpha-r1')]]]),
+    })
+    const node = wrapper.find('[data-testid="wfvz-dag-node-n-biz"]')
+    expect(node.text()).toContain('reviewer-alpha-r1')
+    // 模板名不再是标题（同一信息不双轨；模板名 ≠ 实例名）
+    expect(node.text()).not.toContain('reviewer-biz')
+  })
+
+  it('≥2 实例：标题保持调用点模板名，主体下方每实例一行（agent 名 + 实例状态点）', () => {
+    const wrapper = mountDag(sampleDag(), {
+      nodeStates: { 'n-sec': 'running' },
+      instancesByNode: new Map([
+        ['n-sec', [call(3, 'reviewer-sec-a1-r1'), call(9, 'reviewer-sec-a2-r2', 'running')]],
+      ]),
+    })
+    const node = wrapper.find('[data-testid="wfvz-dag-node-n-biz"]')
+    expect(node.text()).toContain('reviewer-biz')
+    const rowA = wrapper.find('[data-testid="wfvz-dag-instance-3"]')
+    const rowB = wrapper.find('[data-testid="wfvz-dag-instance-9"]')
+    expect(rowA.text()).toContain('reviewer-sec-a1-r1')
+    expect(rowA.attributes('data-state')).toBe('done')
+    expect(rowB.text()).toContain('reviewer-sec-a2-r2')
+    expect(rowB.attributes('data-state')).toBe('running')
+  })
+
+  it('≥2 实例 + 全通配模板 *：标题改用实例派生摘要（首名 +N），不再露零信息通配符', () => {
+    const wildcardDag: WorkflowDag = {
+      phases: [{ name: 'review', order: 0 }],
+      nodes: [node({ id: 'n-w', templateName: '*', phase: 'review' })],
+      edges: [],
+      parallelGroups: [],
+      loops: [],
+    }
+    const wrapper = mountDag(wildcardDag, {
+      nodeStates: { 'n-w': 'running' },
+      instancesByNode: new Map([
+        ['n-w', [call(3, 'reviewer-arch-a1-r1'), call(9, 'reviewer-sec-a1-r1', 'running')]],
+      ]),
+    })
+    const nodeEl = wrapper.find('[data-testid="wfvz-dag-node-n-w"]')
+    // 预算内截断：后缀 +N 恒可见（首名超预算时 … 收敛，总宽 ≤ NAME_MAX_CHARS=18）
+    expect(nodeEl.text()).toContain('reviewer-arch-… +1')
+    expect(nodeEl.text()).not.toContain('*')
+  })
+
+  it('≥2 实例 + 有字面段模板：标题保持模板名（调用点身份可读，实例名在行区）', () => {
+    const wrapper = mountDag(sampleDag(), {
+      nodeStates: { 'n-sec': 'running' },
+      instancesByNode: new Map([
+        ['n-sec', [call(3, 'commit-env-fix-b1'), call(9, 'commit-env-fix-b2', 'running')]],
+      ]),
+    })
+    // sampleDag n-sec 模板名 reviewer-sec（非通配）——标题保持模板，不摘要
+    const node = wrapper.find('[data-testid="wfvz-dag-node-n-sec"]')
+    expect(node.text()).toContain('reviewer-sec')
+    expect(node.text()).not.toContain('+1')
+  })
+
+  it('实例行点击：上抛 agent 语义 + callId（宿主钻取该实例，非盲取首个）', async () => {
+    const wrapper = mountDag(sampleDag(), {
+      nodeStates: { 'n-sec': 'running' },
+      instancesByNode: new Map([
+        ['n-sec', [call(3, 'reviewer-sec-a1-r1'), call(9, 'reviewer-sec-a2-r2', 'running')]],
+      ]),
+    })
+    await wrapper.find('[data-testid="wfvz-dag-instance-9"]').trigger('pointerdown')
+    await wrapper.find('[data-testid="wfvz-dag-instance-9"]').trigger('pointerup')
+    expect(wrapper.emitted('select')?.[0]?.[0]).toEqual({
+      semantic: 'agent',
+      nodeId: 'n-sec',
+      templateName: 'reviewer-sec',
+      phase: 'review',
+      callId: 9,
+    })
+  })
+
+  it('≥2 实例节点增高进布局（rect 高于基准高——实例行画在节点卡片内，不溢出分区）', () => {
+    const wrapper = mountDag(sampleDag(), {
+      instancesByNode: new Map([
+        ['n-sec', [call(3, 'reviewer-sec-a1-r1'), call(9, 'reviewer-sec-a2-r2', 'running')]],
+      ]),
+    })
+    const rect = wrapper.find('[data-testid="wfvz-dag-node-n-sec"] rect')
+    expect(Number(rect.attributes('height'))).toBeGreaterThan(44)
+  })
+
+  it('无实例数据（缺省）：全部节点零实例形态（模板名标题，零实例行 DOM）', () => {
+    const wrapper = mountDag(sampleDag())
+    expect(wrapper.find('[data-testid="wfvz-dag-node-n-biz"]').text()).toContain('reviewer-biz')
+    expect(wrapper.findAll('[data-wfvz-instance]')).toHaveLength(0)
   })
 })
 

@@ -136,6 +136,22 @@ export function getPiSessionsDir(dataDir?: string): string {
 }
 
 /**
+ * 编码 cwd 为 pi session 目录名（pi 布局 SSOT；runtime pi-paths.ts 同名函数已收敛为本实现）。
+ *
+ * 规则：'--' + cwd 去掉首斜杠 + 所有 / \\ : 替换为 - + '--'
+ * 例：/Users/x/proj → --Users-x-proj--
+ *     C:\\Users\\x\\proj → --C--Users-x-proj--（盘符冒号与反斜杠各替换为一个 -）
+ *
+ * 归并是有损的（目录名里的字面 `-` 与分隔符归并产物无法区分），因此**只保证正向单射**：
+ * 已知 cwd 可唯一得目录名，反向解码有歧义——需要「目录名 → cwd」的场景必须走正向对拍
+ * （候选 cwd 只能取自被验路径的结构性前缀，逐候选 encode 后与目录名比对，如 main 侧
+ * local-file 白名单的会话项目 `.tmp/` 子树准入）。
+ */
+export function encodeCwd(cwd: string): string {
+  return '--' + cwd.replace(/^[/\\]/, '').replace(/[/\\:]/g, '-') + '--'
+}
+
+/**
  * pi 会话文件三棵树目录段（`<piAgentDir>/sessions|subagents|btw`）。
  *
  * 布局权威 = runtime pi-paths.ts（getSessionsDir / getSubagentSessionDir /

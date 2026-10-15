@@ -5,7 +5,7 @@
  * 零 mock，仅改 import path（@/components/.../block-icon → @taiji/ui）。
  */
 import { describe, it, expect } from 'vitest'
-import { Lightbulb, BookOpen, SquareTerminal, Pencil, SquareFunction, Search, Users, Workflow, ArrowRight } from '@lucide/vue'
+import { Lightbulb, BookOpen, ChevronRight, SquareTerminal, Pencil, SquareFunction, Search, Users, Workflow, ArrowRight } from '@lucide/vue'
 import { getBlockIcon, BLOCK_ICON_LUCIDE, RUNNING_LOADER_SVG } from '@taiji/ui'
 
 describe('block-icon.ts', () => {
@@ -17,7 +17,7 @@ describe('block-icon.ts', () => {
 
   it('getBlockIcon: error 不换形（demo TurnList.vue:86-89：图标名不随失败态变，失败信号由消费方染 danger）', () => {
     expect(getBlockIcon('read', 'error', false, false)).toBe('tool-read')
-    expect(getBlockIcon('bash', 'error', false, false)).toBe('tool-bash')
+    expect(getBlockIcon('bash', 'error', false, false)).toBe('tool-cmd')
     expect(getBlockIcon('subagent', 'error', true, false)).toBe('subagent')
     expect(getBlockIcon('workflow', 'error', false, true)).toBe('workflow')
   })
@@ -30,9 +30,9 @@ describe('block-icon.ts', () => {
     expect(getBlockIcon('workflow', 'completed', false, true)).toBe('workflow')
   })
 
-  it('getBlockIcon: toolName 映射（read→tool-read, bash→tool-bash, edit/write→tool-edit, grep/find→tool-grep）', () => {
+  it('getBlockIcon: toolName 映射（read→tool-read, bash→tool-cmd, edit/write→tool-edit, grep/find→tool-grep）', () => {
     expect(getBlockIcon('read', 'completed', false, false)).toBe('tool-read')
-    expect(getBlockIcon('bash', 'completed', false, false)).toBe('tool-bash')
+    expect(getBlockIcon('bash', 'completed', false, false)).toBe('tool-cmd')
     expect(getBlockIcon('edit', 'completed', false, false)).toBe('tool-edit')
     expect(getBlockIcon('write', 'completed', false, false)).toBe('tool-edit')
     expect(getBlockIcon('grep', 'completed', false, false)).toBe('tool-grep')
@@ -52,6 +52,7 @@ describe('block-icon.ts', () => {
     expect(BLOCK_ICON_LUCIDE.thinking).toBe(Lightbulb)
     expect(BLOCK_ICON_LUCIDE['tool-read']).toBe(BookOpen)
     expect(BLOCK_ICON_LUCIDE['tool-bash']).toBe(SquareTerminal)
+    expect(BLOCK_ICON_LUCIDE['tool-cmd']).toBe(ChevronRight)
     expect(BLOCK_ICON_LUCIDE['tool-edit']).toBe(Pencil)
     expect(BLOCK_ICON_LUCIDE['tool-grep']).toBe(Search)
     expect(BLOCK_ICON_LUCIDE['tool-other']).toBe(SquareFunction)
@@ -59,9 +60,10 @@ describe('block-icon.ts', () => {
     expect(BLOCK_ICON_LUCIDE.text).toBe(ArrowRight)
     // run 组块不占独立档：组头图标 = 组类型的语义图标（Block.vue RUN_GROUP_ICON：
     // 探索→tool-read / 改动→tool-edit / 执行命令→tool-bash），组内含 running 成员时
-    // 图标位由渲染层 RunningBlockIcon 动效款顶替——档位数恒 9（不含 running；
-    // tool-grep 探索档 + workflow 统一到 composer Workflow 字形为本批新增）
-    expect(Object.keys(BLOCK_ICON_LUCIDE)).toHaveLength(9)
+    // 图标位由渲染层 RunningBlockIcon 动效款顶替——档位数恒 10（不含 running；
+    // tool-grep 探索档 + workflow 统一到 composer Workflow 字形 + tool-cmd bash
+    // 静态抽象档为历批新增）
+    expect(Object.keys(BLOCK_ICON_LUCIDE)).toHaveLength(10)
   })
 
   it('RUNNING_LOADER_SVG: 呼吸弧 loader（淡轨整圈 .ld-track + accent 弧段 .ld-arc pathLength=100，r=10）', () => {

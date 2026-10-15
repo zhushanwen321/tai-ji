@@ -45,6 +45,12 @@ import type {
 } from "./record-types.ts";
 
 /**
+ * 派发期模型来源（本地副本——shared SubagentRecord.modelSource 同语义锚，core 不依赖
+ * @taiji/shared；双侧值域修改须同步）。
+ */
+export type SubagentModelSource = "explicit" | "frontmatter" | "preference" | "default";
+
+/**
  * 未显式指定 agent 时的兜底名。
  *
  * 必须是真实存在、可被 agentRegistry 发现的 agent（用户 agentDir 内置的通用 agent）。
@@ -146,6 +152,14 @@ export interface ExecutionRecord { // oe-exempt:20260930:framework:领域聚合�
    * state-marker）均把空串归一为 undefined。
    */
   readonly model: string | undefined;
+  /**
+   * 派发期模型来源（shared SubagentRecord.modelSource 同语义；本地副本——core 不依赖
+   * @taiji/shared，双侧值域修改须同步）。'explicit' = task 参数显式指定；'frontmatter'
+   * = agent .md 声明；'preference' = settings 偏好补缺；'default' = 引擎/链路自解析
+   * （未指定）。与 model 覆盖（modelOverride/热切）正交——只记 spawn 时点来源。
+   * additive：undefined（存量 record）= 来源未知。创建期确定，不可变。
+   */
+  readonly modelSource?: SubagentModelSource;
   readonly thinkingLevel: string | undefined;
   /**
    * 用户覆盖记账（意图类字段，见 {@link ModelOverride} 语义注释）。
