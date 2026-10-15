@@ -12,11 +12,12 @@
 //     纯 pi 侧产物（不透传真实内容），本文件不写副本只消费——解析链单点 =
 //     resolvePersonalProviderConfigPath（zcode-engine 的 ZCODE_ENG_PROVIDER_CONFIG
 //     env 赋值同函数，两消费方同锚）。
-//     app 3.14.x 起 plan 家族 provider（builtin:/account: 前缀）经账号 entitlement
-//     门控，外部 spawn 的 app-server 注册表只装载个人 provider（实测：显式引用
-//     plan 家族任何 id 一律 Provider Registry 拒绝；个人 provider 的 provider/model
-//     组合可用）。旧源 v2 config.json 的 provider 条目（builtin: plan 家族 + 过期
-//     UUID 清单）与注册表实况不符，不作为校验源；
+//     plan 家族两态（2026-10-13/14 用户裁决）：builtin: 前缀经账号 entitlement 门控，
+//     外部 spawn 的 app-server 注册表不装载，不可作为引擎模型；account: 前缀经
+//     launcher wrapper 对内建目录读取注入 entitled 直通（凭据走 zcode CLI 账号体
+//     系，不经个人 provider 表），可作为引擎模型——resolveAccountModelRef 校验目录
+//     存在性后原样放行。旧源 v2 config.json 的 provider 条目（builtin: plan 家族 +
+//     过期 UUID 清单）与注册表实况不符，不作为校验源；
 //   - **缺席模型（task.model 空）= 返回空串**：create 帧省略 model 键，交给 CLI
 //     自身缺省解析（实测落到 providerOrder 首位的可用模型并自动补齐 reasoning
 //     档位）——不再伪造 plan 家族兜底 id（该 id 在注册表侧已不可用）；
@@ -558,6 +559,82 @@ function assertAccountModelKnown(accountRule: Record<string, unknown>, wanted: s
 }
 
 /**
+ * pi 词汇 → zcode 词汇的派发期翻译表（2026-10-14 用户裁决：engine-ref-translation）。
+ *
+ * 裁决原文：account:bigmodel-individual-coding-plan/* 等同于 pi 中 zai-coding-cn
+ * （同一「智谱 GLM coding plan」通道在两个引擎世界的名字），其余 provider 1:1 完全
+ * 原样映射（id 直传，runtime 同步副本承载）。本表是唯一的跨世界等价对——
+ * zcode 命名空间不出现 pi 词汇 id（ADR-0132 的 zai-coding-plan 关联条目已退役），
+ * GLM plan 凭据完全归 zcode 账号体系，零 key 注入。
+ */
+const PI_TO_ZCODE_PROVIDER_MAP: Readonly<Record<string, string>> = {
+  "zai-coding-cn": "account:bigmodel-individual-coding-plan",
+};
+
+/**
+ * 派发期模型 ref 翻译（engine-ref-translation D1）：pi 词汇 provider 段改写为 zcode
+ * 原生 ref，其余原样透传（幂等——翻译产物再入恒等，account:/个人 id 均不在表内）。
+ *
+ * 模型段大小写归一匹配目标清单（pi 侧小写 id `glm-5.3-flash` vs zcode 目录大写 id
+ * `GLM-5.3-Flash`——同一模型两世界的拼写差）；命中返回目标原生拼写（大小写保留，
+ * 与 account 直通校验同口径）。目标清单缺席/空 = 不设限，按请求拼写直传（与
+ * assertAccountModelKnown「不设限放行」同语义，交由 app-server 注册表实况裁决）。
+ *
+ * 显式失败语义（首败即停）：目录定位失败 / 目标规则缺失 / 模型无等价 → 抛
+ * model_not_available（自带恢复指引），不静默回落、不伪造兜底。调用方：
+ * resolveZcodeModelRef（引擎内，翻译后即走 account 直通校验）与 EnginePort
+ * translateModelRef（编排层 stamp 前调用，record 上报 zcode 原生 ref）。
+ */
+export function translatePiModelRefToZcode(requested: string, sources?: ZcodeSourcePaths): string {
+  if (!requested.includes("/")) return requested;
+  const piProvider = providerOf(requested);
+  const target = PI_TO_ZCODE_PROVIDER_MAP[piProvider];
+  if (target === undefined) return requested;
+
+  const catalogPath = locateZcodeBuiltinCatalog(sources);
+  if (catalogPath === undefined) {
+    throw new ZcodePrepareError(
+      "model_not_available",
+      `模型通道翻译失败：pi 侧 "${piProvider}" 在 zcode 侧对应 ${target}，但内建目录定位失败` +
+        `（ZCODE_BUILTIN_PROVIDER_CONFIG_FILE 与 runtime/provider 扫描均未命中）。` +
+        `恢复指引：确认 ZCode 已安装后重试。`,
+    );
+  }
+  let catalog: unknown;
+  try {
+    catalog = JSON.parse(fs.readFileSync(catalogPath, "utf8"));
+  } catch (err) {
+    throw new ZcodePrepareError(
+      "model_not_available",
+      `模型通道翻译失败：内建目录不可读（${err instanceof Error ? err.message : String(err)}）。`,
+    );
+  }
+  const accountRule = findAccountProviderRule(catalog, target);
+  if (accountRule === undefined) {
+    throw new ZcodePrepareError(
+      "model_not_available",
+      `pi 侧 "${piProvider}" 的 zcode 对应通道 ${target} 不可用（内建目录无此规则）。` +
+        `恢复指引：在 ZCode 桌面端完成该 plan 的账号登录/配置后重试。`,
+    );
+  }
+  const accountConfig = isRecord(accountRule["config"]) ? accountRule["config"] : {};
+  const modelIds = accountConfig["builtinModelIds"] ?? accountConfig["personalModelIds"];
+  if (!Array.isArray(modelIds) || modelIds.length === 0) {
+    return `${target}/${modelShort(requested)}`;
+  }
+  const wanted = modelShort(requested).toLowerCase();
+  const matched = modelIds.find((m) => typeof m === "string" && m.toLowerCase() === wanted);
+  if (matched === undefined) {
+    throw new ZcodePrepareError(
+      "model_not_available",
+      `模型 "${modelShort(requested)}" 在 ${target} 下无等价模型（可用: ${modelIds.filter((m) => typeof m === "string").join(", ")}）。` +
+        `恢复指引：改用上述模型之一，或省略 model 参数走引擎缺省。`,
+    );
+  }
+  return `${target}/${matched}`;
+}
+
+/**
  * 解析并校验模型引用 → 规范化全名 `provider/model`；**缺席输入返回空串**（调用方
  * 在 create 帧省略 model 键——CLI 缺省解析，缺席语义显式化，禁伪造兜底 id）。
  *
@@ -576,14 +653,26 @@ export function resolveZcodeModelRef(requested: string | undefined, sources?: Zc
   const withKey = [...conf.providers.entries()].filter(([, e]) => hasApiKey(e));
   const wanted = requested?.trim() || undefined;
 
+  // 派发期翻译 + account 直通分支（engine-ref-translation D1）先于个人 provider 凭据
+  // 检查：account 族凭据走 zcode CLI 账号体系（不经个人 provider 表），个人 provider
+  // 全空但账号 plan 可用的机器上 account ref 仍可派发（与 2026-10-13 account 直通
+  // 裁决同语义；翻译产物即 account ref，幂等——编排层已翻译的 ref 再入恒等）。
+  if (wanted !== undefined) {
+    const translated = translatePiModelRefToZcode(wanted, sources);
+    const translatedProvider = translated.includes("/") ? providerOf(translated) : undefined;
+    if (translatedProvider !== undefined && translatedProvider.startsWith("account:")) {
+      return resolveAccountModelRef(translated, translatedProvider, sources);
+    }
+  }
+
   if (withKey.length === 0) {
     const hint = wanted ? `model="${wanted}" 不能校验` : "缺省模型解析不能校验";
     throw new ZcodePrepareError(
       "engine_credential_missing",
       `zcode 引擎找不到任何带 apiKey 的个人 provider（${hint}）。已读源：${sourceDesc}。` +
         `恢复指引：在 ZCode 桌面端配置至少一个个人 provider（provider_config.json 内存在` +
-        ` config.access.apiKey 非空条目）后重试；plan 套餐族（builtin:/account: 前缀）经账号` +
-        ` entitlement 门控，外部 spawn 的引擎注册表不装载，不可作为引擎模型。` +
+        ` config.access.apiKey 非空条目）后重试；plan 套餐族中 account: 前缀经账号` +
+        ` entitlement 直通可用（builtin: 前缀不装载，不可作为引擎模型）。` +
         TAIJI_SYNC_GUIDANCE,
     );
   }
@@ -591,9 +680,6 @@ export function resolveZcodeModelRef(requested: string | undefined, sources?: Zc
   if (wanted === undefined) return "";
 
   const wantedProvider = wanted.includes("/") ? providerOf(wanted) : undefined;
-  if (wantedProvider !== undefined && wantedProvider.startsWith("account:")) {
-    return resolveAccountModelRef(wanted, wantedProvider, sources);
-  }
 
   const provider = wanted.includes("/")
     ? providerOf(wanted)
@@ -638,18 +724,65 @@ export function resolveZcodeModelRef(requested: string | undefined, sources?: Zc
 /**
  * 列出当前环境 zcode 引擎实际可用的模型（readPersonalProviderView 解析的校验源内
  * 带 apiKey 的个人 provider × 其模型清单——副本存在时即 merge 视图聚合，与
- * app-server 注册表的装载实况一致）。消费方：EnginePort.listModels（system prompt
- * 引擎段 / GUI）。失败安全：源不可读 → 空清单（可发现性降级不阻塞主流程）。
+ * app-server 注册表的装载实况一致；∪ 内建目录 account: 直通家族——[engine-ref-translation
+ * D3] account 条目凭据走 zcode CLI 账号体系，与 resolveAccountModelRef 同判据枚举，
+ * 与 runtime deriveZcodeEngineModels 的 account 段对账锁步）。失败安全：源不可读 →
+ * 空清单/仅个人清单（可发现性降级不阻塞主流程）。
  */
 export function listZcodeModels(sources?: ZcodeSourcePaths): Array<{ id: string; name?: string }> {
   const { conf } = readPersonalProviderView(sources);
   const out: Array<{ id: string; name?: string }> = [];
+  const seen = new Set<string>();
   for (const [pid, entry] of conf.providers) {
     if (!hasApiKey(entry)) continue;
     const providerName = entry.providerName !== undefined && entry.providerName.trim() !== "" ? entry.providerName.trim() : undefined;
     for (const model of entry.models ?? []) {
+      if (seen.has(`${pid}/${model}`)) continue;
+      seen.add(`${pid}/${model}`);
       out.push({
         id: `${pid}/${model}`,
+        ...(providerName !== undefined ? { name: `${providerName} · ${model}` } : {}),
+      });
+    }
+  }
+  for (const entry of listAccountFamilyModels(sources)) {
+    if (seen.has(entry.id)) continue;
+    seen.add(entry.id);
+    out.push(entry);
+  }
+  return out;
+}
+
+/**
+ * account 直通家族清单（内建目录 providerRules 中 account: 规则 × 其模型清单，
+ * builtinModelIds 优先、personalModelIds 兜底；目录定位失败/不可读 = 安全降级空集）。
+ */
+function listAccountFamilyModels(sources?: ZcodeSourcePaths): Array<{ id: string; name?: string }> {
+  const catalogPath = locateZcodeBuiltinCatalog(sources);
+  if (catalogPath === undefined) return [];
+  let catalog: unknown;
+  try {
+    catalog = JSON.parse(fs.readFileSync(catalogPath, "utf8"));
+  } catch {
+    return [];
+  }
+  const catalogRules =
+    isRecord(catalog) && isRecord(catalog["config"]) && isRecord(catalog["config"]["providerConfigRules"])
+      ? catalog["config"]["providerConfigRules"]["providerRules"]
+      : undefined;
+  if (!Array.isArray(catalogRules)) return [];
+  const out: Array<{ id: string; name?: string }> = [];
+  for (const rule of catalogRules) {
+    if (!isRecord(rule)) continue;
+    const providerId = rule["providerId"];
+    if (typeof providerId !== "string" || !providerId.startsWith("account:")) continue;
+    const cfg = isRecord(rule["config"]) ? rule["config"] : {};
+    const models = Array.isArray(cfg["builtinModelIds"]) ? cfg["builtinModelIds"] : cfg["personalModelIds"];
+    const providerName = typeof rule["providerName"] === "string" && rule["providerName"].trim() !== "" ? rule["providerName"].trim() : undefined;
+    for (const model of Array.isArray(models) ? models : []) {
+      if (typeof model !== "string" || model.trim() === "") continue;
+      out.push({
+        id: `${providerId}/${model}`,
         ...(providerName !== undefined ? { name: `${providerName} · ${model}` } : {}),
       });
     }

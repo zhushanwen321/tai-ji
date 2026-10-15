@@ -3,14 +3,23 @@
  *
  * runtime 启动段把 pi 侧 provider 配置映射为一份 zcode 校验源可读的副本（瘦形态，
  * 2026-10-12 D3 换轨后：纯 pi 侧产物载体，不透传真实文件内容——providerRules 仅含
- * pi 映射条目与 zai 关联条目、providerOrder 仅含 pi 追加序；真实条目的合并在读取时
- * 由 wrapper fs 拦截 merge 完成，本模块只负责生成侧）。
+ * pi 映射条目、providerOrder 仅含 pi 追加序；真实条目的合并在读取时由 wrapper fs
+ * 拦截 merge 完成，本模块只负责生成侧）。
+ *
+ * [engine-ref-translation]（2026-10-14 用户裁决）：pi 的 zai-coding-cn（智谱 GLM
+ * coding plan 通道）不再映射条目进 zcode——它与 zcode 的
+ * account:bigmodel-individual-coding-plan 是同一通道的两个名字，等价由派发期翻译
+ * 承载（zcode-subagent-cli preparer translatePiModelRefToZcode，经
+ * EnginePort.translateModelRef 接线）；GLM plan 凭据完全归 zcode 账号体系，零 key
+ * 注入。其余 provider 1:1 完全原样映射（id/模型清单直传）。ADR-0132 的 zai 关联
+ * 条目（id=zai-coding-plan）及其 2026-10-13 key 来源修订已退役。
  *
  * 分层（映射纯函数零 IO，编排层收敛全部文件访问）：
- *   - mapPiProvidersToZcodeRules / buildZaiLinkedEntry：纯函数（数据进数据出，可字段级断言）
+ *   - mapPiProvidersToZcodeRules：纯函数（数据进数据出，可字段级断言）
  *   - collectZcodeOccupiedProviderIds：让位判定四源并集（读真实 zcode 文件）
  *   - syncZcodeProviders：编排（resolver 单通道取凭据 → 纯映射 → 幂等落盘）
- *   - deriveZcodeEngineModels：settings 模型清单派生（真实 ∪ 副本 id 级聚合，真实优先）
+ *   - deriveZcodeEngineModels：settings 模型清单派生（真实 ∪ 副本 id 级聚合真实优先
+ *     ∪ 内建目录 account: 直通家族）
  *
  * 凭据读取红线（C-proc-14）：pi 侧凭据只经 ProviderCredentialResolver 单通道，
  * 禁止自建解析链（守卫 scripts/check-provider-credential-reads.mjs）。
@@ -81,6 +90,7 @@ export interface ProviderSyncSkip { // oe-exempt:20261012:framework:映射链形
     | 'per-model-mismatch' // ⑤ 模型级 api/baseUrl 覆盖与 provider 级生效值不一致
     | 'no-models' // 边界：过滤白名单/禁用后参与模型为空
     | 'yield-to-zcode' // ⑥ 同名让位（zcode 侧保留）
+    | 'translation-channel' // [engine-ref-translation] pi GLM plan 通道走派发期翻译，不映射条目
   readonly detail: string
 }
 
@@ -101,30 +111,16 @@ const ZCODE_API_TYPE_MAP: Readonly<Record<string, string>> = {
   'anthropic-messages': 'anthropic-messages',
 }
 
-// ── zai 关联特例常量（D4）──
+// ── 翻译通道常量（engine-ref-translation，2026-10-14 用户裁决）──
 
-/** zai 系官方 provider（前置分流：不进通用映射，走 coding-plan 网关关联）。 */
-const ZAI_OFFICIAL_PROVIDER_IDS = ['zai-coding-cn', 'zai'] as const
-type ZaiOfficialProviderId = (typeof ZAI_OFFICIAL_PROVIDER_IDS)[number]
-
-/** 关联条目固定 id（个人条目形态——zcode Registry 对外部 spawn 只装载个人 provider）。 */
-const ZAI_LINKED_ENTRY_ID = 'zai-coding-plan'
-
-// key 来源优先级（2026-10-13 修订）：pi 侧活凭据（resolveProviderCredential，与 pi 侧
-// plan 配额同源同活）> ZCode 端 builtin token（桌面端登录派生，可能过期/被吊销）。
-// 实测：builtin token 已 401 时 pi 侧 key 同端点仍 200。
-
-/** pi 侧 provider id → zcode 家族（决定 v2 builtin 条目与目录 coding-plan 条目的配对）。 */
-const ZAI_FAMILY_OF: Readonly<Record<ZaiOfficialProviderId, 'bigmodel' | 'zai'>> = {
-  'zai-coding-cn': 'bigmodel',
-  'zai': 'zai',
-}
-
-/** v2 config.json 内 zcode 签发特有 token 的条目 id（本机实测形态，D4 前置①）。 */
-const ZCODE_BUILTIN_TOKEN_ENTRY_ID: Readonly<Record<'bigmodel' | 'zai', string>> = {
-  bigmodel: 'builtin:bigmodel-coding-plan',
-  zai: 'builtin:zai-coding-plan',
-}
+/**
+ * pi GLM plan 通道（翻译通道，不进通用映射）：zai-coding-cn 与 zcode 的
+ * account:bigmodel-individual-coding-plan 是同一通道的两个名字，等价由派发期翻译
+ * 承载（zcode-subagent-cli preparer translatePiModelRefToZcode）；在 zcode 造同义
+ * 条目、注入 pi 侧 key 均属退役形态（ADR-0132 zai 关联条目 + 2026-10-13 key 来源
+ * 修订，均已删除）。pi 侧 `zai`（国际 API-key provider）按 1:1 通用映射直传。
+ */
+const TRANSLATION_CHANNEL_PROVIDER_IDS = ['zai-coding-cn'] as const
 
 // ── 依赖注入面 ─────────────────────────────────────────────────
 
@@ -149,8 +145,6 @@ export interface ZcodeProviderSyncDeps { // oe-exempt:20261012:framework:映射�
   readonly isModelsCorrupted: () => boolean
   /** catalog 合并视图单点（getMergedCatalogModels 直传；纯函数注入便于测试）。 */
   readonly getMergedCatalogModels: (providerId: string) => MergedCatalogView | undefined
-  /** zcode-builtin.json 定位覆盖（测试注入；缺省 = locateZcodeBuiltinCatalogSync）。 */
-  readonly locateBuiltinCatalog?: () => string | undefined
   /** 日志通道（缺省 console.warn；skip/让位/中止 warn 全走此处）。 */
   readonly warn?: (message: string) => void
 }
@@ -285,10 +279,8 @@ function modelRulesOf(
   return modelRules
 }
 
-/** 单 provider 映射产物：null = zai 系前置分流（静默跳过，D4）；skip = D2 判定命中；
- *  rule = 正向映射条目（含 per-model 规则）。 */
+/** 单 provider 映射产物：skip = D2 判定命中；rule = 正向映射条目（含 per-model 规则）。 */
 type SingleProviderMapping =
-  | null
   | { readonly skip: ProviderSyncSkip }
   | { readonly rule: ZcodeProviderRule; readonly modelRules: ZcodeProviderModelRule[] }
 
@@ -298,7 +290,15 @@ function mapSingleProviderToZcodeRule(
   cfg: ProviderConfigView,
   input: ProviderMappingInput,
 ): SingleProviderMapping {
-  if ((ZAI_OFFICIAL_PROVIDER_IDS as readonly string[]).includes(id)) return null
+  if ((TRANSLATION_CHANNEL_PROVIDER_IDS as readonly string[]).includes(id)) {
+    return {
+      skip: {
+        providerId: id,
+        rule: 'translation-channel',
+        detail: 'pi GLM plan 通道不映射条目——与 zcode account:bigmodel-individual-coding-plan 的等价由派发期翻译承载（2026-10-14 用户裁决）',
+      },
+    }
+  }
 
   // ① 凭据可得 → 继续（resolver 单通道语义：unsupported 不降级、不映射为 api-key 条目）
   const cred = input.credentials.get(id)
@@ -349,8 +349,8 @@ function mapSingleProviderToZcodeRule(
 
 /**
  * 通用映射纯函数：pi providers → zcode providerRules（D2 判定①-⑥ 逐条，先命中先跳过；
- * 单 provider 判定链在 mapSingleProviderToZcodeRule）。zai 系官方 provider 前置分流（D4），
- * 不经本函数。
+ * 单 provider 判定链在 mapSingleProviderToZcodeRule）。翻译通道（zai-coding-cn）不进
+ * 本函数映射面——等价由派发期翻译承载（engine-ref-translation，2026-10-14 用户裁决）。
  */
 export function mapPiProvidersToZcodeRules(input: ProviderMappingInput): ProviderMappingResult {
   const rules: ZcodeProviderRule[] = []
@@ -360,7 +360,6 @@ export function mapPiProvidersToZcodeRules(input: ProviderMappingInput): Provide
 
   for (const [id, cfg] of Object.entries(input.providers)) {
     const mapped = mapSingleProviderToZcodeRule(id, cfg, input)
-    if (mapped === null) continue
     if ('skip' in mapped) {
       skips.push(mapped.skip)
       continue
@@ -373,105 +372,7 @@ export function mapPiProvidersToZcodeRules(input: ProviderMappingInput): Provide
   return { rules, modelRules, providerOrder, skips }
 }
 
-// ── 纯函数层：zai 关联特例（D4）────────────────────────────────
-
-/** zcode-builtin.json coding-plan 目录条目的提取形态（关联条目 baseUrl/模型清单来源）。 */
-export interface ZaiCodingPlanCatalogEntry { // oe-exempt:20261012:framework:映射链形态/ports 契约,单实现常态(类型契约先行)
-  readonly providerName?: string
-  readonly baseUrl?: string
-  readonly modelIds: readonly string[]
-}
-
-/** zai 特例输入（编排层读好 pi 侧凭据、v2 token 与目录条目后传入；纯函数不做 IO）。 */
-export interface ZaiLinkedEntryInput { // oe-exempt:20261012:framework:映射链形态/ports 契约,单实现常态(类型契约先行)
-  /** pi 侧已配判定的 resolver 存在性结果（per zai 系 id）。 */
-  readonly piConfigured: Readonly<Record<ZaiOfficialProviderId, boolean>>
-  /** pi 侧 zai 系凭据（resolver 明文解析产物；关联条目 key 的首选源——与 pi 侧 plan 配额同源同活）。 */
-  readonly piCredentials: Readonly<Partial<Record<ZaiOfficialProviderId, string>>>
-  /** v2 config.json builtin 条目特有 token（apiKey 非空才有值；只读引用；回落源——桌面端 token 可能过期/被吊销）。 */
-  readonly builtinTokens: Readonly<Partial<Record<'bigmodel' | 'zai', string>>>
-  /** zcode-builtin.json coding-plan 目录条目（per 家族；定位失败整族缺键）。 */
-  readonly catalogEntries: Readonly<Partial<Record<'bigmodel' | 'zai', ZaiCodingPlanCatalogEntry>>>
-  readonly occupiedProviderIds: ReadonlySet<string>
-}
-
-export type ZaiLinkedEntryResult =
-  | { readonly entry: ZcodeProviderRule }
-  | { readonly skip: ProviderSyncSkip }
-
-/**
- * zai 关联条目（D4）：前置两条件（ZCode 端 builtin 条目 apiKey 非空 + pi 侧已配）齐备
- * 才生成；两家族同时满足时取 ZAI_OFFICIAL_PROVIDER_IDS 声明序首个（bigmodel 国内主力
- * 场景优先，裁决记 runlog）。缺任一前置 → 不生成 + warn 指引；同名让位同 ⑥。
- */
-export function buildZaiLinkedEntry(input: ZaiLinkedEntryInput): ZaiLinkedEntryResult {
-  for (const piId of ZAI_OFFICIAL_PROVIDER_IDS) {
-    const family = ZAI_FAMILY_OF[piId]
-    // key 首选 pi 侧活凭据（与 pi 侧 plan 配额同源同活）；ZCode 端 builtin token 回落
-    // （桌面端登录派生，可能过期/被服务端吊销——2026-10-13 本机实测：token 401 时
-    // pi 侧 key 同端点 200）。
-    const token = input.piCredentials[piId] ?? input.builtinTokens[family]
-    const catalog = input.catalogEntries[family]
-    if (!input.piConfigured[piId] || token === undefined || catalog === undefined) continue
-
-    if (input.occupiedProviderIds.has(ZAI_LINKED_ENTRY_ID)) {
-      return {
-        skip: {
-          providerId: ZAI_LINKED_ENTRY_ID,
-          rule: 'yield-to-zcode',
-          detail: 'zcode 侧已有 zai-coding-plan 同名条目，关联条目让位',
-        },
-      }
-    }
-    if (!isUsableUrl(catalog.baseUrl)) {
-      return {
-        skip: {
-          providerId: ZAI_LINKED_ENTRY_ID,
-          rule: 'no-base-url',
-          detail: 'zcode-builtin.json coding-plan 条目缺 baseUrl，关联条目不生成（zcode 目录形态变更？）',
-        },
-      }
-    }
-    if (catalog.modelIds.length === 0) {
-      return {
-        skip: {
-          providerId: ZAI_LINKED_ENTRY_ID,
-          rule: 'no-models',
-          detail: 'zcode-builtin.json coding-plan 条目模型清单为空，关联条目不生成',
-        },
-      }
-    }
-    return {
-      entry: {
-        providerId: ZAI_LINKED_ENTRY_ID,
-        providerName: catalog.providerName !== undefined && catalog.providerName.trim() !== ''
-          ? catalog.providerName
-          : ZAI_LINKED_ENTRY_ID,
-        config: {
-          group: 'standard-personal',
-          access: { type: 'api-key', apiKey: token },
-          api: { type: 'anthropic-messages', baseUrl: catalog.baseUrl },
-          personalModelIds: catalog.modelIds,
-          modelOrder: catalog.modelIds,
-        },
-      },
-    }
-  }
-
-  // 无任何家族满足前置：按主力序给出缺哪个前置的指引（首个 zai 系 id 的缺失面描述）
-  const first = ZAI_OFFICIAL_PROVIDER_IDS[0]
-  const firstFamily = ZAI_FAMILY_OF[first]
-  const missing = !input.piConfigured[first]
-    ? `pi 侧未配置 ${first}（到 taiji settings 配置后重启生效）`
-    : input.piCredentials[first] === undefined && input.builtinTokens[firstFamily] === undefined
-      ? `zai 关联凭据缺失：pi 侧 ${first} 凭据解析失败（形态不支持或为空），且 ZCode 桌面端 plan token 未生成（任一可用即可生成关联条目）`
-      : 'zcode-builtin.json coding-plan 条目不可得（定位失败或形态变更），关联条目不生成'
-  return {
-    skip: { providerId: ZAI_LINKED_ENTRY_ID, rule: 'no-credential', detail: `zai 关联前置不齐备：${missing}` },
-  }
-}
-
-// ── zcode 侧文件读取（让位四源 + zai 前置；ENOENT 与损坏分流见各函数）──────────
+// ── zcode 侧文件读取（让位四源；ENOENT 与损坏分流见各函数）──────────
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v)
@@ -584,34 +485,6 @@ export function collectZcodeOccupiedProviderIds(paths: Pick<ZcodeProviderSyncPat
   return { all, personalConfig, v2WithKey, cliAny }
 }
 
-/**
- * v2 config.json 的 zai 系特有 token（builtin 条目 apiKey 非空才有值；只读引用，D4）。
- * absent = 文件 ENOENT——设计 §2 前提表行 6 / D3 效果段的前置缺失形态（wrapper fs 拦截
- * 整体不安装），编排层须据此 warn 提示，不静默。
- */
-export function readZcodeBuiltinPlanTokens(
-  v2ConfigPath: string,
-): { readonly tokens: Partial<Record<'bigmodel' | 'zai', string>>; readonly readable: boolean; readonly absent: boolean } {
-  const outcome = readJsonFile(v2ConfigPath)
-  if (outcome.state !== 'ok' || !isRecord(outcome.value) || !isRecord(outcome.value['provider'])) {
-    return {
-      tokens: {},
-      readable: outcome.state === 'ok' || outcome.state === 'absent',
-      absent: outcome.state === 'absent',
-    }
-  }
-  const tokens: Partial<Record<'bigmodel' | 'zai', string>> = {}
-  for (const family of ['bigmodel', 'zai'] as const) {
-    const entry = outcome.value['provider'][ZCODE_BUILTIN_TOKEN_ENTRY_ID[family]]
-    if (!isRecord(entry)) continue
-    const options = entry['options']
-    if (isRecord(options) && typeof options['apiKey'] === 'string' && options['apiKey'] !== '') {
-      tokens[family] = options['apiKey']
-    }
-  }
-  return { tokens, readable: true, absent: false }
-}
-
 // ── zcode-builtin.json 定位（与 preparer.ts locateZcodeBuiltinCatalog 同源复制，跨包红线）──
 
 /** semver 数值比较覆盖的版本段数（major.minor.patch，同源 preparer SEMVER_SEGMENTS）。 */
@@ -674,25 +547,6 @@ export function locateZcodeBuiltinCatalogSync(explicitPath?: string): string | u
   return undefined
 }
 
-/** 目录单条 rule 的 coding-plan 提取：access.accountType 匹配家族且 mode=individual-coding-plan
- *  才产出（不匹配返回 undefined，调用方继续扫下一条）。 */
-function codingPlanEntryOfRule(
-  rule: unknown,
-  family: 'bigmodel' | 'zai',
-): ZaiCodingPlanCatalogEntry | undefined {
-  if (!isRecord(rule)) return undefined
-  const cfg = isRecord(rule['config']) ? rule['config'] : undefined
-  if (!cfg) return undefined
-  const access = isRecord(cfg['access']) ? cfg['access'] : undefined
-  if (!access || access['accountType'] !== family || access['mode'] !== 'individual-coding-plan') return undefined
-  const api = isRecord(cfg['api']) ? cfg['api'] : undefined
-  return {
-    providerName: typeof rule['providerName'] === 'string' ? rule['providerName'] : undefined,
-    baseUrl: isRecord(api) && typeof api['baseUrl'] === 'string' ? api['baseUrl'] : undefined,
-    modelIds: strArray(cfg['builtinModelIds']),
-  }
-}
-
 /** v2 config JSON → providerRules 数组（缺键/形变 → undefined）。 */
 function providerRulesOf(value: Record<string, unknown>): readonly unknown[] | undefined {
   const config = value['config']
@@ -700,21 +554,6 @@ function providerRulesOf(value: Record<string, unknown>): readonly unknown[] | u
     ? config['providerConfigRules']['providerRules']
     : undefined
   return Array.isArray(rules) ? rules : undefined
-}
-
-export function readCodingPlanCatalogEntry(
-  catalogPath: string,
-  family: 'bigmodel' | 'zai',
-): ZaiCodingPlanCatalogEntry | undefined {
-  const outcome = readJsonFile(catalogPath)
-  if (outcome.state !== 'ok' || !isRecord(outcome.value)) return undefined
-  const rules = providerRulesOf(outcome.value)
-  if (!rules) return undefined
-  for (const rule of rules) {
-    const entry = codingPlanEntryOfRule(rule, family)
-    if (entry !== undefined) return entry
-  }
-  return undefined
 }
 
 // ── 编排层：启动同步（D1 时机由组合根接线；D7 失败语义）────────
@@ -765,63 +604,34 @@ function collectOccupiedForSync(
   return { data: occupied }
 }
 
-/** zai 关联前置的读取产物（编排层 v2 token + 目录条目打包）。 */
-interface ZaiLinkedCatalogInputs { // oe-exempt:20261012:framework:映射链形态/ports 契约,单实现常态(类型契约先行)
-  readonly tokens: Partial<Record<'bigmodel' | 'zai', string>>
-  readonly catalogEntries: Partial<Record<'bigmodel' | 'zai', ZaiCodingPlanCatalogEntry>>
+/**
+ * v2 config.json 可读性检查（编排前置 warn，非同步输入——engine-ref-translation 后本模块
+ * 不再读 v2 token/目录条目，副本内容与 v2 无关）。v2 缺失 = wrapper 凭据注入整体不安装
+ * （appserver-launcher injectedConfigText 对 ENOENT 返回 null），副本条目仅进校验链不进
+ * Registry——显式 warn 不静默（防该环境失败时无信号可归因）；不可读同 warn（wrapper
+ * 侧 hasKey 判定同样失败，后果同形态）。
+ */
+function checkV2ConfigForSync(deps: ZcodeProviderSyncDeps, warn: (message: string) => void): void {
+  const outcome = readJsonFile(deps.paths.v2ConfigPath)
+  if (outcome.state === 'absent' || outcome.state === 'unreadable') {
+    warn(`[zcode-provider-sync] v2 config.json ${outcome.state === 'absent' ? '缺失' : '不可读'}（${deps.paths.v2ConfigPath}）——wrapper 凭据注入不安装，同步副本条目仅进校验链不进 Registry；ZCode 桌面端完成设置后重启 taiji 生效`)
+  }
 }
 
-/** zai 关联前置读取步（v2 token + 目录条目；v2 unreadable 按 D7④中止——token 引用源失真）。 */
-function readCatalogInputsForSync(
-  deps: ZcodeProviderSyncDeps,
-  warn: (message: string) => void,
-  abort: SyncAbort,
-): SyncStep<ZaiLinkedCatalogInputs> {
-  const { tokens, readable: v2Readable, absent: v2Absent } = readZcodeBuiltinPlanTokens(deps.paths.v2ConfigPath)
-  if (!v2Readable) return { aborted: abort(`v2 config.json 读取异常（${deps.paths.v2ConfigPath}）`) }
-  // 设计 §2 前提表行 6 / D3 效果段：v2 缺失时 wrapper 凭据注入整体不安装（appserver-launcher
-  // injectedConfigText 对 ENOENT 返回 null），副本条目仅进校验链不进 Registry——显式 warn，
-  // 不静默（防 N1/P-cli-eat 在该环境失败时无信号可归因）
-  if (v2Absent) {
-    warn(`[zcode-provider-sync] v2 config.json 缺失（${deps.paths.v2ConfigPath}）——wrapper 凭据注入不安装，同步副本条目仅进校验链不进 Registry；ZCode 桌面端完成设置后该文件自动出现，重启 taiji 生效`)
-  }
-
-  // zcode-builtin.json 定位（deps 注入了 locator 就完全信注入结果——含 undefined =
-  // 定位失败；未注入走本模块同源扫描实现）
-  const catalogPath = deps.locateBuiltinCatalog !== undefined
-    ? deps.locateBuiltinCatalog()
-    : locateZcodeBuiltinCatalogSync()
-  if (catalogPath === undefined) {
-    warn('[zcode-provider-sync] zcode-builtin.json 定位不到，zai 关联条目不生成（zcode 端未安装或目录形态变更）')
-  }
-  const catalogEntries: Partial<Record<'bigmodel' | 'zai', ZaiCodingPlanCatalogEntry>> = {}
-  if (catalogPath !== undefined) {
-    const parsed = readJsonFile(catalogPath)
-    if (parsed.state === 'unreadable') return { aborted: abort(`zcode-builtin.json 读取异常（${catalogPath}）`) }
-    if (parsed.state === 'ok') {
-      for (const family of ['bigmodel', 'zai'] as const) {
-        const entry = readCodingPlanCatalogEntry(catalogPath, family)
-        if (entry !== undefined) catalogEntries[family] = entry
-      }
-    }
-  }
-  return { data: { tokens, catalogEntries } }
-}
-
-/** 凭据单通道解析步（只解析非 zai 系的通用映射候选；zai 系走存在性判定）。 */
+/** 凭据单通道解析步（只解析通用映射候选；翻译通道条目不映射、无凭据需求）。 */
 async function resolveCredentialsForSync(
   deps: ZcodeProviderSyncDeps,
   providers: Record<string, ProviderConfigView>,
 ): Promise<Map<string, ResolvedProviderCredential | undefined>> {
   const credentials = new Map<string, ResolvedProviderCredential | undefined>()
   for (const id of Object.keys(providers)) {
-    if ((ZAI_OFFICIAL_PROVIDER_IDS as readonly string[]).includes(id)) continue
+    if ((TRANSLATION_CHANNEL_PROVIDER_IDS as readonly string[]).includes(id)) continue
     credentials.set(id, await deps.credentialResolver.resolveProviderCredential(id))
   }
   return credentials
 }
 
-/** 落盘载荷（mapping ∪ zai 关联合并后的四数组；skips 随 outcome 出参）。 */
+/** 落盘载荷（纯映射产物四数组；skips 随 outcome 出参）。 */
 interface SyncedCopyPayload { // oe-exempt:20261012:framework:映射链形态/ports 契约,单实现常态(类型契约先行)
   readonly rules: ZcodeProviderRule[]
   readonly modelRules: ZcodeProviderModelRule[]
@@ -829,27 +639,17 @@ interface SyncedCopyPayload { // oe-exempt:20261012:framework:映射链形态/po
   readonly skips: ProviderSyncSkip[]
 }
 
-/** 映射结果与 zai 关联条目合并（正条进 rules/providerOrder；skip 条并入 skips），随后
- *  全量 skip warn（warn 通道同一出口）。 */
-function mergeMappingAndZaiEntry(
-  mapping: ProviderMappingResult,
-  zai: ZaiLinkedEntryResult,
-  warn: (message: string) => void,
-): SyncedCopyPayload {
-  const skips = [...mapping.skips]
-  const rules = [...mapping.rules]
-  const modelRules = [...mapping.modelRules]
-  const providerOrder = [...mapping.providerOrder]
-  if ('entry' in zai) {
-    rules.push(zai.entry)
-    providerOrder.push(ZAI_LINKED_ENTRY_ID)
-  } else {
-    skips.push(zai.skip)
-  }
-  for (const skip of skips) {
+/** 落盘载荷组装（映射产物直通 + skips 全量 warn——warn 通道同一出口）。 */
+function buildSyncPayload(mapping: ProviderMappingResult, warn: (message: string) => void): SyncedCopyPayload {
+  for (const skip of mapping.skips) {
     warn(`[zcode-provider-sync] provider "${skip.providerId}" ${skip.rule}：${skip.detail}`)
   }
-  return { rules, modelRules, providerOrder, skips }
+  return {
+    rules: [...mapping.rules],
+    modelRules: [...mapping.modelRules],
+    providerOrder: [...mapping.providerOrder],
+    skips: mapping.skips,
+  }
 }
 
 /** 落盘条件步（D7）：pi 映射条目（含 zai 关联）空 → 删旧副本回落真实文件并返回
@@ -901,7 +701,7 @@ function writeSyncedCopy(
 
 /**
  * 启动同步编排（async：凭据明文经 resolver 单通道 async 解析）。
- * D7：任何失败中止都保留上次产物（不删不写）；落盘条件 = pi 映射条目（含 zai 关联）非空，
+ * D7：任何失败中止都保留上次产物（不删不写）；落盘条件 = pi 映射条目非空，
  * 空则删旧副本回落真实文件；幂等 = 同字节跳写 + tmp+rename 原子替换。
  * 编排段拆分为上方 *ForSync helpers——调用顺序即原编排时序，中止点逐段保形。
  */
@@ -920,9 +720,7 @@ export async function syncZcodeProviders(deps: ZcodeProviderSyncDeps): Promise<Z
   if ('aborted' in occupiedStep) return occupiedStep.aborted
   const occupied = occupiedStep.data
 
-  const catalogStep = readCatalogInputsForSync(deps, warn, abort)
-  if ('aborted' in catalogStep) return catalogStep.aborted
-  const { tokens, catalogEntries } = catalogStep.data
+  checkV2ConfigForSync(deps, warn)
 
   const credentials = await resolveCredentialsForSync(deps, models.providers)
 
@@ -936,27 +734,7 @@ export async function syncZcodeProviders(deps: ZcodeProviderSyncDeps): Promise<Z
     occupiedProviderIds: occupied.all,
   })
 
-  const zai = buildZaiLinkedEntry({
-    piConfigured: {
-      'zai-coding-cn': deps.credentialResolver.hasProviderCredential('zai-coding-cn'),
-      'zai': deps.credentialResolver.hasProviderCredential('zai'),
-    },
-    // key 首选 pi 侧活凭据（resolver 明文解析；ZCode builtin token 回落——实测桌面端
-    // token 会过期/被吊销而副本随 runtime 启动才重同步，pi 侧 key 与 plan 配额同源同活）。
-    piCredentials: await (async () => {
-      const resolved: Partial<Record<ZaiOfficialProviderId, string>> = {}
-      for (const id of ZAI_OFFICIAL_PROVIDER_IDS) {
-        const credential = await deps.credentialResolver.resolveProviderCredential(id)
-        if (credential !== undefined && 'key' in credential) resolved[id] = credential.key
-      }
-      return resolved
-    })(),
-    builtinTokens: tokens,
-    catalogEntries,
-    occupiedProviderIds: occupied.all,
-  })
-
-  const payload = mergeMappingAndZaiEntry(mapping, zai, warn)
+  const payload = buildSyncPayload(mapping, warn)
 
   const emptyOutcome = removeStaleCopyOrOutcome(deps, payload, abort)
   if (emptyOutcome !== null) return emptyOutcome
@@ -1003,22 +781,30 @@ function readPersonalRules(absPath: string): ModelListEntry[] {
 }
 
 /**
- * settings per-engine 模型清单派生：真实 provider_config.json 条目 ∪ 副本条目，
- * id 级聚合真实优先（同名时真实条目整条胜出——与 D3 merge 视图同语义）；仅聚合带
- * apiKey 的条目（与 zcode 校验链 listZcodeModels 同判据）；任一源不可读按空集继续
- * （查询面失败安全，非同步面）。
+ * settings 模型清单派生路径（个人双源 + 内建目录；deps 注入优先，缺省同源拼装）。
  */
-export function deriveZcodeEngineModels(
-  paths: Pick<ZcodeProviderSyncPaths, 'realProviderConfigPath' | 'syncedCopyPath'>,
-): ZcodeEngineModelEntry[] {
+export interface ZcodeModelListPaths extends Pick<ZcodeProviderSyncPaths, 'realProviderConfigPath' | 'syncedCopyPath'> { // oe-exempt:20261012:framework:清单派生路径契约,单实现常态(类型契约先行)
+  /** 内建目录路径（缺省 = locateZcodeBuiltinCatalogSync 现场定位；测试注入 fixture）。 */
+  readonly builtinCatalogPath?: string
+}
+
+/**
+ * settings per-engine 模型清单派生：真实 provider_config.json 条目 ∪ 副本条目，
+ * id 级聚合真实优先（同名时真实条目整条胜出——与 D3 merge 视图同语义）；个人条目仅
+ * 聚合带 apiKey 的（与 zcode 校验链 listZcodeModels 同判据）；∪ 内建目录 account:
+ * 直通家族（[engine-ref-translation D3] 2026-10-13/14 用户裁决——account 条目凭据走
+ * zcode CLI 账号体系不经个人 provider 表，无 apiKey 过滤；与 preparer listZcodeModels
+ * 的 account 段对账锁步，跨包红线：runtime 不 import zcode-subagent-cli）。
+ * 任一源不可读按空集继续（查询面失败安全，非同步面）。
+ */
+export function deriveZcodeEngineModels(paths: ZcodeModelListPaths): ZcodeEngineModelEntry[] {
   const byId = new Map<string, ModelListEntry>()
   for (const entry of readPersonalRules(paths.realProviderConfigPath)) byId.set(entry.providerId, entry)
   for (const entry of readPersonalRules(paths.syncedCopyPath)) {
     if (!byId.has(entry.providerId)) byId.set(entry.providerId, entry)
   }
   const out: ZcodeEngineModelEntry[] = []
-  for (const entry of byId.values()) {
-    if (entry.apiKey === undefined) continue
+  const push = (entry: ModelListEntry): void => {
     const providerName = entry.providerName !== undefined && entry.providerName.trim() !== ''
       ? entry.providerName.trim()
       : undefined
@@ -1029,5 +815,38 @@ export function deriveZcodeEngineModels(
       })
     }
   }
+  for (const entry of byId.values()) {
+    if (entry.apiKey === undefined) continue
+    push(entry)
+  }
+  for (const entry of readAccountFamilyRules(paths.builtinCatalogPath)) {
+    if (byId.has(entry.providerId)) continue
+    push(entry)
+  }
   return out
+}
+
+/** 内建目录 account: 直通家族规则（与 preparer resolveAccountModelRef 同源判据；失败安全空集）。 */
+function readAccountFamilyRules(builtinCatalogPath?: string): ModelListEntry[] {
+  const catalogPath = builtinCatalogPath ?? locateZcodeBuiltinCatalogSync()
+  if (catalogPath === undefined) return []
+  const outcome = readJsonFile(catalogPath)
+  if (outcome.state !== 'ok' || !isRecord(outcome.value)) return []
+  const rules = providerRulesOf(outcome.value)
+  if (!rules) return []
+  const entries: ModelListEntry[] = []
+  for (const rule of rules) {
+    if (!isRecord(rule)) continue
+    const providerId = rule['providerId']
+    if (typeof providerId !== 'string' || !providerId.startsWith('account:')) continue
+    const cfg = isRecord(rule['config']) ? rule['config'] : {}
+    const builtin = strArray(cfg['builtinModelIds'])
+    const personal = strArray(cfg['personalModelIds'])
+    entries.push({
+      providerId,
+      providerName: typeof rule['providerName'] === 'string' ? rule['providerName'] : undefined,
+      models: builtin.length > 0 ? builtin : personal,
+    })
+  }
+  return entries
 }

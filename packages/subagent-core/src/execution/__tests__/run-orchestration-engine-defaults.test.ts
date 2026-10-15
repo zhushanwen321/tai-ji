@@ -52,10 +52,18 @@ interface CapturedRun { // oe-exempt:20261012:test:测试捕获断言形态
 class CapturingNonPiEngine implements EnginePort {
   readonly runs: CapturedRun[] = [];
 
+  translateModelRef?: (modelRef: string) => string;
+  listModels?: () => Array<{ id: string; name?: string }> | null;
+
   constructor(
     readonly id: string,
     private readonly caps: EngineCapabilities,
-  ) {}
+    private readonly hooks: NonPiHooks = {},
+  ) {
+    // 可选 Port 成员条件挂载（消费方以 typeof 判定——与 zcode 实装同形态）
+    if (hooks.translateModelRef !== undefined) this.translateModelRef = hooks.translateModelRef;
+    if (hooks.listModels !== undefined) this.listModels = hooks.listModels;
+  }
 
   capabilities(): EngineCapabilities {
     return this.caps;
@@ -111,6 +119,24 @@ const NON_PI_ENGINE_ID = "zcode-like";
 /** pi 三层解析（ctxModel 兜底）产物的 join 词形——pi 路由防回归断言的判别值。 */
 const PI_CTX_MODEL_REF = "p/m";
 
+/** 非 pi 引擎可选面钩子（translateModelRef / listModels 条件挂载）。 */
+interface NonPiHooks { // oe-exempt:20261012:test:测试钩子形态
+  translateModelRef?: (modelRef: string) => string;
+  listModels?: () => Array<{ id: string; name?: string }> | null;
+}
+
+/** engine-ref-translation D2 翻译面替身（模拟 zcode 实装形态：pi 词汇 → 引擎原生，其余透传）。 */
+const TRANSLATION_TARGET = "account:bigmodel-individual-coding-plan";
+function translatedEngineHooks(): NonPiHooks {
+  return {
+    translateModelRef: (ref) =>
+      ref.startsWith("zai-coding-cn/")
+        ? `${TRANSLATION_TARGET}/${ref.slice("zai-coding-cn/".length).toUpperCase()}`
+        : ref,
+    listModels: () => [{ id: `${TRANSLATION_TARGET}/GLM-5.3-FLASH` }],
+  };
+}
+
 // ============================================================
 // 环境：tmp agentDir + config.json 偏好写盘 + 双引擎注册 + service 装配
 // ============================================================
@@ -154,7 +180,7 @@ function writeFrontmatterAgent(tmpRoot: string, name: string, model: string): st
   return agentPath;
 }
 
-function makeHarness(engineDefaults?: Record<string, string>): Harness {
+function makeHarness(engineDefaults?: Record<string, string>, engineHooks?: NonPiHooks): Harness {
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "d6-engine-defaults-"));
   // 测试红线：store/引擎数据面不触真实数据目录
   process.env.TAIJI_AGENT_DATA_DIR = path.join(tmpRoot, "engine-data");
@@ -170,7 +196,7 @@ function makeHarness(engineDefaults?: Record<string, string>): Harness {
   const pi = makePi();
   service.initSession({ pi, sessionId: "d6-engine-defaults-it" });
   clearEngines();
-  const nonPi = new CapturingNonPiEngine(NON_PI_ENGINE_ID, plainTaskCaps());
+  const nonPi = new CapturingNonPiEngine(NON_PI_ENGINE_ID, plainTaskCaps(), engineHooks);
   registerEngine(NON_PI_ENGINE_ID, () => nonPi);
   const fakePi = registerFakePiEngine();
   openHarnesses.push({ service, tmpRoot });
@@ -295,6 +321,78 @@ describe("D6 四层优先级：chat 域（run-orchestration）", () => {
 });
 
 // ============================================================
+// engine-ref-translation D2：派发期模型 ref 翻译（chat 域；2026-10-14 用户裁决）
+// ============================================================
+
+describe("engine-ref-translation：chat 域派发期翻译", () => {
+  it("显式 model 经翻译盖章：record/task 均为引擎原生 ref（UI 跟随事实）", async () => {
+    const { service, nonPi, store } = makeHarness(undefined, translatedEngineHooks());
+    const handle = await service.execute({
+      task: "d6 translate explicit",
+      slug: "d6-tr-explicit",
+      engine: NON_PI_ENGINE_ID,
+      model: "zai-coding-cn/glm-5.3-flash",
+    });
+    await vi.waitFor(() => expect(nonPi.runs.length).toBe(1));
+    expect(nonPi.runs[0]!.task.model).toBe(`${TRANSLATION_TARGET}/GLM-5.3-FLASH`);
+    expect(store.getMutable(handle.subagentId)?.model).toBe(`${TRANSLATION_TARGET}/GLM-5.3-FLASH`);
+    nonPi.runs[0]!.settle();
+  });
+
+  it("偏好层翻译后在清单 → 偏好生效且留痕翻译产物", async () => {
+    const { service, nonPi, store } = makeHarness(
+      { [NON_PI_ENGINE_ID]: "zai-coding-cn/glm-5.3-flash" },
+      translatedEngineHooks(),
+    );
+    const handle = await service.execute({
+      task: "d6 translate pref-hit",
+      slug: "d6-tr-pref-hit",
+      engine: NON_PI_ENGINE_ID,
+    });
+    await vi.waitFor(() => expect(nonPi.runs.length).toBe(1));
+    expect(nonPi.runs[0]!.task.model).toBe(`${TRANSLATION_TARGET}/GLM-5.3-FLASH`);
+    expect(store.getMutable(handle.subagentId)?.model).toBe(`${TRANSLATION_TARGET}/GLM-5.3-FLASH`);
+    nonPi.runs[0]!.settle();
+  });
+
+  it("偏好层翻译后不在引擎清单（历史遗留值形态）→ 跳过偏好走引擎缺省 + warn", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    // 遗留值 zai-coding-plan/*（ADR-0132 退役形态）：翻译透传后不在引擎清单
+    const { service, nonPi, store } = makeHarness(
+      { [NON_PI_ENGINE_ID]: "zai-coding-plan/GLM-5.3-Flash" },
+      translatedEngineHooks(),
+    );
+    const handle = await service.execute({
+      task: "d6 translate pref-miss",
+      slug: "d6-tr-pref-miss",
+      engine: NON_PI_ENGINE_ID,
+    });
+    await vi.waitFor(() => expect(nonPi.runs.length).toBe(1));
+    expect("model" in nonPi.runs[0]!.task).toBe(false);
+    expect(store.getMutable(handle.subagentId)?.model).toBeUndefined();
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("跳过偏好层"));
+    warn.mockRestore();
+    nonPi.runs[0]!.settle();
+  });
+
+  it("显式 model 翻译失败 → 派发同步期抛错（首败即停，record 创建前）", async () => {
+    const { service } = makeHarness(undefined, {
+      translateModelRef: () => {
+        throw new Error("[model_not_available] 无等价模型");
+      },
+    });
+    await expect(
+      service.execute({
+        task: "d6 translate fail",
+        slug: "d6-tr-fail",
+        engine: NON_PI_ENGINE_ID,
+        model: "zai-coding-cn/glm-4.6v",
+      }),
+    ).rejects.toThrow(/无等价模型/);
+  });
+});
+
+// ============================================================
 // workflow 域（workflow-dispatch.resolveWorkflowIdentity）——同层序
 // ============================================================
 
@@ -361,6 +459,19 @@ describe("D6 四层优先级：workflow 域（workflow-dispatch）同层序", ()
     // pi 链三层解析落 ctxModel（p/m）；误插偏好层则会出现 prov/pi-pref
 
     fakePi.runs[0]!.settle({ content: "pi wf done" });
+    await pending;
+  });
+
+  it("engine-ref-translation：偏好翻译后在清单 → 偏好生效且留痕翻译产物（与 chat 域同语义）", async () => {
+    const { service, nonPi, store } = makeHarness(
+      { [NON_PI_ENGINE_ID]: "zai-coding-cn/glm-5.3-flash" },
+      translatedEngineHooks(),
+    );
+    const pending = service.executeWorkflowAgent(baseOpts(), "run-d6-tr-wf");
+    await waitForFirstRunModel(nonPi.runs, `${TRANSLATION_TARGET}/GLM-5.3-FLASH`);
+    const running = store.listRunningMutable();
+    expect(running[0]!.model).toBe(`${TRANSLATION_TARGET}/GLM-5.3-FLASH`);
+    nonPi.runs[0]!.settle();
     await pending;
   });
 });

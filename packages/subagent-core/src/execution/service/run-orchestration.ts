@@ -68,6 +68,7 @@ import type { ExecutionNestingContext } from "../engine/common/nesting-guard.ts"
 import { resolveHostPiEnginePort } from "../engine/host/pi-host-binding.ts";
 import { identityEnvelopeOf } from "../engine/port.ts";
 import type { EnginePort, RunContext } from "../engine/port.ts";
+import { resolveEngineModelWithTranslation } from "../engine/model-ref-translation.ts";
 import { executeOptionsToEngineTaskSpec } from "../engine/host-task-spec.ts";
 import { DEFAULT_ENGINE_ID } from "../engine/registry.ts";
 import {
@@ -545,6 +546,10 @@ export class RunOrchestration {
    * 缺席 → undefined，create 帧省略 model 键，引擎自解析）。偏好层排在 frontmatter 之后
    * （作者显式声明不被全局偏好压掉——既有层序保持）；偏好补缺值经 stampEngineOnRecordOpts
    * 写入 record.opts.model 后与显式指定同形（record 消费方只关心「用了哪个模型」）。
+   * [engine-ref-translation D2] 四层产物再经引擎翻译面（EnginePort.translateModelRef）
+   * 改写为引擎原生 ref（zai-coding-cn ↔ account:bigmodel-individual-coding-plan，
+   * 2026-10-14 用户裁决）；显式层翻译失败抛错、偏好层翻译后不在引擎清单则跳过——
+   * 见方法内注释。
    */
   private async resolveIdentityForRoute(
     opts: ExecuteOptions,
@@ -554,11 +559,17 @@ export class RunOrchestration {
     const isPiRoute = route.engineId === DEFAULT_ENGINE_ID;
     // pi 路由恒 undefined（pi 链自有三层解析，taiji 级偏好无意义——D6 不采用段）；
     // ?? 链惰性求值：前两层任一在场时不触盘（直读仅服务偏好补缺场景）。
+    // [engine-ref-translation D2] 四层产物经引擎翻译面改写为引擎原生 ref（共享 helper
+    // resolveEngineModelWithTranslation——与 workflow 域同语义；两层失败语义分立见模块头）。
     const engineModel = isPiRoute
       ? undefined
-      : (opts.model ??
-        preIdentity.agentConfig?.model ??
-        readEngineDefaults(this.deps.getModelService().getAgentDir())[route.engineId]);
+      : resolveEngineModelWithTranslation(
+        route,
+        opts.model ?? preIdentity.agentConfig?.model,
+        readEngineDefaults(this.deps.getModelService().getAgentDir())[route.engineId],
+        (message) => console.warn(message),
+        "run-orchestration",
+      );
     const identity = isPiRoute
       ? await this.deps.resolveIdentity(opts, preIdentity)
       : this.deps.resolveIdentityForEngine(

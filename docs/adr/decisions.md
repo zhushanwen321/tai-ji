@@ -720,3 +720,16 @@ WorkflowTab 步骤列表的数据源绑定从「workflow-record 全量快照（6
 
 **登记**：CONTEXT.md「会话产物目录」词条 / data-source-registry.md #8 与 #51 删除通道 / runtime-layering.md 基线债登记 / permanent-session-model 资源生命周期表述同批回写；C-data-22 summary 的「与 pi transcript 同窗」限定随之改写（结构不变，`node scripts/validate-constraints.mjs` 复验）。
 
+### ADR-0137 引擎模型 ref 派发期翻译：zai-coding-cn ↔ account:bigmodel-individual-coding-plan 等价对 + 其余 1:1 原样（2026-10-14 用户裁决，engine-ref-translation；取代 ADR-0132 的 zai 关联条目特例）
+
+**决策**：pi 与 zcode 是两套独立 provider 词汇，跨引擎等价只在**派发期翻译**表达，禁止在 zcode 命名空间伪造 pi 词汇条目：
+
+1. **翻译对（唯一跨世界等价）**：pi 的 `zai-coding-cn/*`（智谱 GLM coding plan 通道）与 zcode 的 `account:bigmodel-individual-coding-plan/*` 是同一通道的两个名字。派发非 pi 引擎时，四层解析产物（task 显式 > agent frontmatter > engineDefaults 偏好）经引擎翻译面 `EnginePort.translateModelRef`（可选成员）改写为引擎原生 ref；模型段大小写归一（pi 小写 id ↔ zcode 目录大写 id），返回目标目录原生拼写。GLM plan 凭据完全归 zcode 账号体系（account 直通，2026-10-13 裁决），零 key 注入。翻译幂等（产物再入恒等）；record/上报面呈现翻译后 ref（UI 跟随事实）。
+2. **其余 provider 1:1 完全原样映射**：同步副本（ADR-0132 主体）维持直传 pi id/模型清单，不引入等价改写。
+3. **两层失败语义**：显式层（task/frontmatter）翻译失败（目标通道缺失/模型无等价）= 派发同步期显式抛错（首败即停，自带恢复指引，record 创建前）；偏好层（engineDefaults）翻译后不在引擎清单 = 跳过偏好走引擎缺省 + warn（清单漂移不炸派发——历史遗留值如已退役的 `zai-coding-plan/*` 自动降级，settings 页可重选）。清单成员校验仅对实现 listModels 的引擎生效（undefined/null = 无枚举面放行，引擎侧 validateModel 兜底；空数组 = 枚举面在册但当前无可用模型 → 跳过）。
+4. **退役清单**：ADR-0132 的 zai 关联条目特例（同步副本伪造 id=`zai-coding-plan` 个人条目、name 借用用户 plan 名）及其 2026-10-13 key 来源修订（pi 侧活凭据首选——违反「zcode 侧 GLM plan 不随 taiji provider 修改联动」）整体删除；`buildZaiLinkedEntry` / `readZcodeBuiltinPlanTokens` / `readCodingPlanCatalogEntry` 与 v2 token 读取链随拆，zai-coding-cn 在同步侧以 skip=translation-channel 登记（不映射条目）。
+5. **清单面同步扩展**：`listZcodeModels`（引擎）与 `deriveZcodeEngineModels`（runtime settings 派生）追加内建目录 `account:*` 直通家族枚举（无 apiKey 过滤，凭据在 zcode 账号体系；与个人 id 去重个人优先）——settings 页能直接选到用户自己的 plan（zcode 原生 ref），跨包同判据对账锁步。
+
+**依据**：用户裁决原文「派发期翻译是对的。account:bigmodel-individual-coding-plan/* 这个等同于 pi 中 zai-coding-cn，其他的都是 1:1 完全原样映射」——pi 词汇 id（zai-coding-cn）与 zcode 词汇（account:/builtin: 家族）各归其位。ADR-0132 关联条目在 zcode 造 pi 词汇 id 且 name 借用用户 plan 名（身份与名字脱节）、key 来源修订使 zcode GLM 流量凭据随 taiji 改动联动，均与用户心智模型冲突（本机实证：engineDefaults 存 `zai-coding-plan/GLM-5.3-Flash` 压掉 zcode 自身 model.main）。
+
+**登记**：实装 = `packages/zcode-subagent-cli/src/preparer.ts`（`translatePiModelRefToZcode` 翻译单源 + `resolveZcodeModelRef` account 分支前置）+ `zcode-engine.ts`（Port 成员实装）/ `packages/subagent-core/src/execution/engine/model-ref-translation.ts`（派发层共享编排，chat/workflow 两解析点同语义）+ `port.ts`/`registry.ts`（EnginePort.translateModelRef 可选成员）/ `packages/runtime/src/services/zcode-provider-sync.ts`（翻译通道 skip + derive account 段）；ADR-0132 文本保留作历史记录，冲突处以本条为准。
