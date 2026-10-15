@@ -135,10 +135,10 @@ export interface ZcodeProviderSyncPaths { // oe-exempt:20261012:framework:映射
 
 export interface ZcodeProviderSyncDeps { // oe-exempt:20261012:framework:映射链形态/ports 契约,单实现常态(类型契约先行)
   readonly configStore: Pick<IConfigStore, 'readModels' | 'getEnabledModels'>
-  /** pi 凭据唯一通道（C-proc-14）：明文解析（async）+ 存在性（sync，zai 前置）+ provider 级 baseUrl 两级解析 */
+  /** pi 凭据唯一通道（C-proc-14）：明文解析（async）+ provider 级 baseUrl 两级解析。 */
   readonly credentialResolver: Pick<
     IProviderCredentialResolver,
-    'resolveProviderCredential' | 'hasProviderCredential' | 'resolveProviderBaseUrl'
+    'resolveProviderCredential' | 'resolveProviderBaseUrl'
   >
   readonly paths: ZcodeProviderSyncPaths
   /** models.json 损坏降级态判定（D7①：真抛错或损坏态 → 中止保留产物）。 */

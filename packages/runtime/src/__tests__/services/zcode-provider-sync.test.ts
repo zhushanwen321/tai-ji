@@ -1,15 +1,16 @@
 /**
  * zcode provider 启动同步模块测试（engine-provider-unification u1-sync）。
  *
- * 覆盖（对齐设计 §3.3 D2/D4/D7 + 任务书验收条款）：
+ * 覆盖（对齐设计 §3.3 D2/D7 + 任务书验收条款 + engine-ref-translation 2026-10-14 裁决）：
  * 1. 映射纯函数字段级断言：六条参与判定逐条 / 协议映射表 / per-model 差异整条跳过 /
  *    让位四源谓词逐源 / 字段丢弃与清单同序；
- * 2. zai 关联特例：前置两条件（ZCode 端 token + pi 侧已配）齐备生成 / 缺一不生成+warn /
- *    目录条目形态字段引用；
+ * 2. 翻译通道（engine-ref-translation）：zai-coding-cn 不映射条目（skip=translation-channel、
+ *    零 key 注入——等价由派发期翻译承载）；zai 按 1:1 通用映射直传；
  * 3. 副本瘦形态：不含任何真实文件条目、providerOrder 仅 pi 追加序；
  * 4. 落盘条件（pi 映射空 → 删旧副本）与幂等（同输入跳写）；
  * 5. 失败判定四分支（readModels 抛错 / ENOENT 零配置 / provider_config ENOENT / 其余读取异常）；
- * 6. 清单派生：真实 ∪ 副本 id 级聚合、真实优先、ENOENT 空集继续。
+ * 6. 清单派生：真实 ∪ 副本 id 级聚合、真实优先、ENOENT 空集继续，∪ 内建目录 account:
+ *    直通家族（无 apiKey 过滤、与个人 id 去重个人优先）。
  *
  * 全部 fixture 经 mkdtempSync 自建（os.tmpdir()），零接触真实 ~/.zcode / ~/.taiji / ~/.pi。
  *
@@ -81,50 +82,10 @@ function writeCliConfig(ids: string[]): void {
   }))
 }
 
-/** zcode-builtin.json 目录 fixture：bigmodel/zai 家族 coding-plan 条目（本机实测形态）。 */
-function writeBuiltinCatalog(): void {
-  writeFileSync(join(root, 'zcode-builtin.json'), JSON.stringify({
-    config: {
-      providerConfigRules: {
-        providerRules: [
-          {
-            providerId: 'account:bigmodel-individual-coding-plan',
-            providerName: 'BigModel Individual Coding Plan',
-            config: {
-              access: { type: 'zhipu-account', accountType: 'bigmodel', mode: 'individual-coding-plan' },
-              api: { type: 'anthropic-messages', baseUrl: 'https://open.bigmodel.cn/api/anthropic' },
-              builtinModelIds: ['GLM-5.3', 'GLM-5.3-Flash'],
-            },
-          },
-          {
-            providerId: 'account:zai-individual-coding-plan',
-            providerName: 'Z.AI Individual Coding Plan',
-            config: {
-              access: { type: 'zhipu-account', accountType: 'zai', mode: 'individual-coding-plan' },
-              api: { type: 'anthropic-messages', baseUrl: 'https://api.z.ai/api/anthropic' },
-              builtinModelIds: ['GLM-5.3'],
-            },
-          },
-          {
-            providerId: 'account:bigmodel-team-coding-plan',
-            providerName: 'unmatched mode',
-            config: {
-              access: { type: 'zhipu-account', accountType: 'bigmodel', mode: 'team-coding-plan' },
-              api: { type: 'anthropic-messages', baseUrl: 'https://x' },
-              builtinModelIds: ['X'],
-            },
-          },
-        ],
-      },
-    },
-  }))
-}
-
 interface FakeDepsInput { // oe-exempt:20261012:test:测试构造辅助形态
   providers?: Record<string, ProviderConfigView>
   enabledModels?: string[]
   credentials?: Record<string, ResolvedProviderCredential | undefined>
-  configuredIds?: string[]
   baseUrls?: Record<string, string | undefined>
   catalog?: Record<string, readonly MappingModelSource[] | undefined>
   readModelsThrows?: boolean
@@ -144,7 +105,6 @@ function makeDeps(input: FakeDepsInput = {}): ZcodeProviderSyncDeps {
     },
     credentialResolver: {
       resolveProviderCredential: async id => input.credentials?.[id] ?? undefined,
-      hasProviderCredential: id => (input.configuredIds ?? []).includes(id),
       resolveProviderBaseUrl: id => input.baseUrls?.[id],
     },
     paths,
@@ -512,11 +472,10 @@ describe('syncZcodeProviders：编排与瘦副本形态', () => {
     writeRealProviderConfig(['real-provider'], ['real-provider'])
     writeV2Config({
       'v2-provider': { apiKey: 'k' },
-      // zai 前置①：ZCode 端 builtin 条目特有 token（apiKey 非空）
+      // builtin: 条目带 apiKey 才算四源占用（源③判定）
       'builtin:bigmodel-coding-plan': { apiKey: 'special-token-49chars' },
     })
     writeCliConfig(['cli-provider'])
-    writeBuiltinCatalog()
 
     const outcome = await syncZcodeProviders(makeDeps({
       providers: {
@@ -524,7 +483,6 @@ describe('syncZcodeProviders：编排与瘦副本形态', () => {
         'zai-coding-cn': stdProvider(),
       },
       credentials: { 'stepfun': stdCredential() },
-      configuredIds: ['zai-coding-cn'],
       baseUrls: { 'stepfun': 'https://api.stepfun.com/v1' },
     }))
 
@@ -546,7 +504,6 @@ describe('syncZcodeProviders：编排与瘦副本形态', () => {
   })
 
   it('幂等：同输入二次同步跳写（mtime 不变）', async () => {
-    writeBuiltinCatalog()
     const deps = stepfunDeps()
     await syncZcodeProviders(deps)
     const firstMtime = statSync(paths.syncedCopyPath).mtimeMs
@@ -592,7 +549,6 @@ describe('syncZcodeProviders：编排与瘦副本形态', () => {
   })
 
   it('失败分支③：真实 provider_config.json ENOENT = 真实条目空集（非失败）→ 照常落仅含 pi 映射的副本', async () => {
-    writeBuiltinCatalog()
     const outcome = await syncZcodeProviders(stepfunDeps())
     expect(outcome.status).toBe('written')
     expect(outcome.ruleCount).toBe(1)
@@ -617,7 +573,6 @@ describe('syncZcodeProviders：编排与瘦副本形态', () => {
   it('v2 config.json 缺失（absent 态）→ 不中止照常落盘，但 warn 前置提示（§2 前提表行 6 / D3：不静默）', async () => {
     // v2ConfigPath 不写盘（ENOENT = absent 态）——该形态下 wrapper fs 拦截整体不安装，
     // 同步模块必须出声提示此前置，防 N1/P-cli-eat 失败无信号可归因
-    writeBuiltinCatalog()
     const outcome = await syncZcodeProviders(stepfunDeps())
     expect(outcome.status).toBe('written')
     expect(outcome.ruleCount).toBe(1)
@@ -630,7 +585,6 @@ describe('syncZcodeProviders：编排与瘦副本形态', () => {
     const outcome = await syncZcodeProviders(stepfunDeps({
       providers: { 'stepfun': stdProvider(), 'zai-coding-cn': stdProvider() },
       credentials: { 'stepfun': stdCredential() },
-      configuredIds: ['zai-coding-cn'],
     }))
     expect(outcome.status).toBe('written')
     expect(outcome.ruleCount).toBe(1) // 仅 stepfun
