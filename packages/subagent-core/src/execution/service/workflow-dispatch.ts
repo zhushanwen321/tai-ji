@@ -77,6 +77,7 @@ import {
 } from "../engine/routing.ts";
 import { resolveEngineModelWithTranslation } from "../engine/model-ref-translation.ts";
 import type { AgentOutcome } from "../engine/types.ts";
+import type { SubagentModelSource } from "../domain/record-model.ts";
 import type { ModelConfigService } from "../assembly/model-config-service.ts";
 // [engine-provider-unification D6] engineDefaults 派发时点直读（u5 readEngineDefaults
 // ——与 run-orchestration.resolveIdentityForRoute 同源同层序；routeWorkflowEngine 的
@@ -493,16 +494,26 @@ export class WorkflowDispatch {
     // [engine-ref-translation D2] 翻译编排与 chat 域同语义同实现（共享 helper
     // resolveEngineModelWithTranslation——显式层翻译失败抛错；偏好层翻译后不在引擎
     // 清单跳过走引擎缺省 + warn，两层失败语义分立见模块头）。?? 链惰性求值保形：
-    // 前两层任一在场时不触盘读偏好。
-    const engineModel = isPiRoute
+    // 前两层任一在场时不触盘读偏好。pi 路由不进 helper（偏好层不插层 + 无翻译面）。
+    // [subagent-detail-model-info] 来源标注与解析同点判定：pi 路由 = task 显式 ?
+    // explicit : default（frontmatter/偏好层不适用——pi 链自解析）。
+    const resolvedModel = isPiRoute
       ? undefined
       : resolveEngineModelWithTranslation(
         route,
-        opts.model ?? agentConfig?.model,
-        readEngineDefaults(this.deps.getModelService().getAgentDir())[route.engineId],
+        opts.model,
+        agentConfig?.model,
+        () => readEngineDefaults(this.deps.getModelService().getAgentDir())[route.engineId],
         (message) => console.warn(message),
         "workflow-dispatch",
       );
+    const engineModel = resolvedModel?.engineModel;
+    const modelSource: SubagentModelSource = isPiRoute
+      ? (opts.model !== undefined ? "explicit" : "default")
+      : (resolvedModel?.source ?? "default");
+    // [subagent-detail-model-info] execOpts 盖章 modelSource——createRecordForMode
+    // 经 opts 读取落 record（与下方 engineModel 覆写同形留痕）。
+    execOpts.modelSource = modelSource;
     if (isPiRoute) {
       const declaredModel = opts.model ?? agentConfig?.model;
       if (declaredModel !== undefined) {

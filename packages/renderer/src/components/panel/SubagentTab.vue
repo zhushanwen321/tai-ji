@@ -18,9 +18,52 @@
 -->
 <template>
   <div class="flex h-full min-h-0 flex-col" data-testid="drawer-subagent-tab">
-    <!-- 空态：未选中 subagent（selectedSubagentId === null；demo .empty 文字形态） -->
+    <!-- 二级 tab 条（subagent-detail-tabs 2026-10-15）：多 subagent 详情并行保留——
+         打开序排列，激活者高亮；× 关闭（激活者关闭时激活右邻/左邻，store 编排）。
+         视觉范式 = DetailPane 实例 tab 条同款（display-containers §6.3）；单 tab 时
+         不渲染（省垂直空间，与单选历史形态无差异）。 -->
     <div
-      v-if="!selectedSubagentId"
+      v-if="openTabs.length > 1"
+      class="flex shrink-0 items-center gap-0.5 overflow-x-auto border-b border-hairline px-1 py-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      data-testid="drawer-subagent-tab-strip"
+      role="tablist"
+    >
+      <div
+        v-for="tabVid in openTabs"
+        :key="tabVid"
+        data-testid="drawer-subagent-tab-item"
+        :data-vid="tabVid"
+        :data-active="tabVid === activeTab ? 'true' : 'false'"
+        role="tab"
+        tabindex="0"
+        :aria-selected="tabVid === activeTab"
+        class="flex shrink-0 cursor-pointer select-none items-center gap-0.5 rounded-sm border py-0.5 pl-1.5 pr-[3px] font-mono text-[length:var(--text-2xs)] transition-colors duration-[var(--duration-fast)] ease-[var(--ease-out)]"
+        :class="
+          tabVid === activeTab
+            ? 'border-border bg-surface-hover text-neutral-fg'
+            : 'border-border bg-bg-input text-neutral-mid hover:bg-surface-hover hover:text-neutral-fg'
+        "
+        :title="tabLabel(tabVid)"
+        @click="onTabActivate(tabVid)"
+        @keydown.enter.prevent="onTabActivate(tabVid)"
+        @keydown.space.prevent="onTabActivate(tabVid)"
+      >
+        <span class="max-w-36 truncate">{{ tabLabel(tabVid) }}</span>
+        <Button
+          variant="ghost"
+          data-testid="drawer-subagent-tab-close"
+          class="size-5 shrink-0 rounded-[var(--radius-xs)] p-0 text-neutral-dim hover:bg-danger-soft hover:text-danger"
+          :title="t('panel.sideDrawer.close')"
+          @click.stop="onTabClose(tabVid)"
+        >
+          <X class="size-[11px]" stroke-width="1.8" />
+        </Button>
+      </div>
+    </div>
+
+    <!-- 空态：无打开的 subagent tab（activeTab === null；demo .empty 文字形态） -->
+    <div
+      v-if="!activeTab"
       class="flex h-full flex-col items-center justify-center gap-2 p-4 text-center"
       data-testid="drawer-subagent-empty"
     >
@@ -85,7 +128,7 @@
               <Button
                 variant="ghost"
                 class="ml-auto flex shrink-0 items-center gap-1 rounded-sm px-1 font-mono text-[length:var(--text-3xs)] text-neutral-dim transition-colors hover:text-neutral-fg"
-                :title="t('panel.sideDrawer.subagentModelSwitchTitle')"
+                :title="modelTriggerTitle"
                 data-testid="subagent-model-trigger"
               >
                 <span v-if="modelDisplay.label" class="max-w-[160px] truncate">{{ modelDisplay.label }}</span>
@@ -99,6 +142,15 @@
             </PopoverTrigger>
           </template>
         </ModelSelectPopover>
+        <!-- 派发期模型来源标注（subagent-detail-model-info 2026-10-15）：「派发时是指定还是
+             缺省补缺」——与模型覆盖/热切正交（只记 spawn 时点来源）；存量 record 无字段
+             不展示（title 含完整盖章 ref，悬停可见全值）。 -->
+        <span
+          v-if="modelSourceBadge"
+          class="shrink-0 rounded-sm border border-hairline px-1 font-mono text-[length:var(--text-3xs)] leading-4 text-neutral-dim"
+          :title="modelSourceTitle"
+          data-testid="subagent-model-source-badge"
+        >{{ modelSourceBadge }}</span>
         <span
           v-if="switchRecord === null && subagentMeta?.meta"
           class="ml-auto shrink-0 truncate font-mono text-[length:var(--text-3xs)] text-neutral-dim"
@@ -152,7 +204,8 @@
            三段式自带 mainSid 不消费。 -->
       <MessageStream
         v-else
-        :session-id="selectedSubagentId"
+        :key="activeTab"
+        :session-id="activeTab"
         :main-session-id="panelStore.focusedSessionId ?? undefined"
       />
     </template>
@@ -162,7 +215,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { AlertCircle, Bot, ChevronDown, ChevronLeft, Clock } from '@lucide/vue'
+import { AlertCircle, Bot, ChevronDown, ChevronLeft, Clock, X } from '@lucide/vue'
 import { Button } from '@taiji/ui'
 import { useSubagentSelection, openWorkflowInDrawer } from '@taiji/core/domain/drawer'
 import { usePanelStore } from '@/stores/panel'
@@ -185,12 +238,13 @@ import { DEFAULT_ENGINE_ID } from '@/constants/engine-icons'
 // u6.1 chat facet 收口：对话流数据编排（chat store ops 面消费）下沉 composable，
 // 组件只保留 readers 面消费
 import { useSubagentTabData } from '@/composables/panel/useSubagentTabData'
+import { useSubagentDrawerTabs } from '@/composables/panel/useSubagentDrawerTabs'
 // subagent-model-switch §7.1（U1）：执行模型切换（回执写状态禁乐观写）+ 标签读取规则
 // （thinking 槽取值同源 composable 纯函数——热切回执档位优先，回退启动盖章值）
 import {
-  resolveSubagentModelDisplay,
   resolveSubagentThinkingLevel,
   useSubagentModel,
+  useSubagentModelSourceBadge,
 } from '@/composables/features/subagent/useSubagentModel'
 
 const { t } = useI18n()
@@ -199,6 +253,13 @@ const subagentStore = useSubagentStore()
 const workflowStore = useWorkflowStore()
 
 const { selectedSubagentId, enteredFrom } = useSubagentSelection()
+
+/** tab 条文案（agent · slug；record 缺失降级 'subagent'）。 */
+function tabLabel(vid: string): string {
+  const meta = isSubagentVirtualId(vid) ? subagentRecordMeta(vid) : agentCallHeaderMeta(vid)
+  const base = meta?.agent ?? 'subagent'
+  return meta?.slug ? `${base} · ${meta.slug}` : base
+}
 
 // 切换编排（回执写状态在 composable；displayOf 供 thinking 槽与 modelDisplay 消费）
 const { setSubagentModel, displayOf } = useSubagentModel()
@@ -252,7 +313,7 @@ function agentCallHeaderMeta(vid: string): SubagentHeaderMeta | null {
 
 /** 标题栏元信息（响应式：records 变化时重算）。chatMeta = 三段式虚拟 id 的 record；agentcall 两段式 = null。 */
 const subagentMeta = computed<SubagentHeaderMeta | null>(() => {
-  const vid = selectedSubagentId.value
+  const vid = activeTab.value
   if (!vid) return null
   if (isSubagentVirtualId(vid)) return subagentRecordMeta(vid)
   if (isAgentCallVirtualId(vid)) return agentCallHeaderMeta(vid)
@@ -262,7 +323,7 @@ const subagentMeta = computed<SubagentHeaderMeta | null>(() => {
 /** 当前选中的 chat 域 record（对话流与头部元信息语义；agentcall 两段式 = null——
  *  模型切换/标签合成目标见 switchRecord）。 */
 const chatMeta = computed<SubagentRecord | null>(() => {
-  const vid = selectedSubagentId.value
+  const vid = activeTab.value
   if (!vid || !isSubagentVirtualId(vid)) return null
   const record = subagentStore
     .getRecordsBySession(extractMainSessionId(vid))
@@ -278,7 +339,7 @@ const chatMeta = computed<SubagentRecord | null>(() => {
  * 详情增强通道）= null，切换入口降级为 meta 槽纯显示。
  */
 const agentcallRecord = computed<SubagentRecord | null>(() => {
-  const vid = selectedSubagentId.value
+  const vid = activeTab.value
   if (!vid || !isAgentCallVirtualId(vid)) return null
   const call = findAgentCall(extractAgentCallSessionId(vid))
   const recordId = call?.memberRecordId
@@ -299,22 +360,10 @@ const switchRecord = computed<SubagentRecord | null>(() => chatMeta.value ?? age
 /** 切换中（ModelSelectPopover switching 门：禁重复开合与点选） */
 const switching = ref(false)
 
-/**
- * 模型标签显示态（标签读取规则四分支合成，纯函数单源 resolveSubagentModelDisplay）：
- * 各分支语义与优先级链唯一权威 = 其头注释（useSubagentModel.ts），此处不重复罗列，
- * 防双处维护漂移。
- */
-const modelDisplay = computed(() => {
-  const record = switchRecord.value
-  if (record === null) return { label: undefined as string | undefined, overridden: false }
-  return resolveSubagentModelDisplay({
-    display: displayOf(record.subagentId),
-    stampedModel: record.model,
-    modelOverride: record.modelOverride?.model,
-    recentEffectiveModel: record.recentEffectiveModel,
-    recordStatus: record.status,
-  })
-})
+// ── 模型信息展示（subagent-detail-model-info 2026-10-15）：标签四分支合成 + 来源
+// 标注/title 全量下沉 useSubagentModel（模型域单源），组件只保留 readers 消费。
+const { modelDisplay, modelTriggerTitle, modelSourceBadge, modelSourceTitle } =
+  useSubagentModelSourceBadge(computed(() => switchRecord.value), displayOf, t)
 
 /** 点选候选 → subagent.setModel（switchRecord 目标——chat 域 record 或 agentcall 成员
  *  record，recordId 键同源）；回执写状态在 composable（禁乐观写）。 */
@@ -355,6 +404,16 @@ const { loadError, loadSubagentData, stopSubagentStream, recordEngine } = useSub
   noOutcomeText: () => t('panel.sideDrawer.subagentNoOutcome'),
 })
 
+// ── drawer 二级 tab 编排（subagent-detail-tabs 2026-10-15）：状态在 store per-session
+// 分区（组件随 drawer 类型 tab 切换卸载），编排下沉 composable（行数上限合规 + 可测）；
+// 内容数据在 chatStore 按虚拟 id 分区——切 tab 不丢详情。
+const { openTabs, activeTab, activate: onTabActivate, close: onTabClose } = useSubagentDrawerTabs({
+  selectedSubagentId,
+  enteredFrom,
+  labelOf: tabLabel,
+  stopStream: () => stopSubagentStream(),
+})
+
 /**
  * 运行中 coarse 提示可见性（U4 D7）：非 pi 引擎 + 任务真在跑（窄口径同
  * isStreamingSubagent：running 且无轮终 result、非 resumable）。pi 恒 false（D5）。
@@ -362,7 +421,7 @@ const { loadError, loadSubagentData, stopSubagentStream, recordEngine } = useSub
 const coarseHintVisible = computed<boolean>(() => {
   const record = currentRecord.value
   if (!record || recordEngine(record) === DEFAULT_ENGINE_ID) return false
-  return subagentStore.isStreamingSubagent(extractMainSessionId(selectedSubagentId.value ?? ''), record.subagentId)
+  return subagentStore.isStreamingSubagent(extractMainSessionId(activeTab.value ?? ''), record.subagentId)
 })
 
 /** coarse 提示的引擎名（可见时 record.engine 恒非空非 pi） */
@@ -397,7 +456,7 @@ watch(
  * 非 pi 引擎无实时流通道，运行中打开的 tab 内容停在打开时刻——record 跨越收口
  * （running → 非 running）时重拉一次，对话流自动收敛到完整内容。四守卫：
  * cur/prev 任一 null（agentcall / 未选中）跳过；vid 或 subId 变化 = 切换 subagent
- * 跳过（新 vid 由上方 selectedSubagentId watch 负责）；仅 running → 非 running 跨越
+ * 跳过（新 vid 由上方 activeTab watch 负责）；仅 running → 非 running 跨越
  * 触发（打开时已收口由首拉覆盖）；pi 引擎跳过（D5 零变化）。
  * [U8b 两态判据核对] 占用两态下 settle 写 idle——running → idle 即收口跨越，本判据
  * 无需改动即正确触发（idle → running 续轮走 pi 实时流 / 非 pi coarse 轮终再跨越，
@@ -405,7 +464,7 @@ watch(
  */
 watch(
   () => {
-    const vid = selectedSubagentId.value
+    const vid = activeTab.value
     const record = currentRecord.value
     if (!vid || !record) return null
     return { vid, subId: record.subagentId, status: record.status }
@@ -425,9 +484,11 @@ onBeforeUnmount(() => {
 })
 
 function reload(): void {
-  const vid = selectedSubagentId.value
+  const vid = activeTab.value
   if (vid) void loadSubagentData(vid)
 }
+
+
 
 function onBack(): void {
   // 返回 drawer workflow tab（workflow-visualization U6/D1：入口改向后 openWorkflow 语义

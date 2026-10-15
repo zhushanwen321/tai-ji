@@ -11,7 +11,7 @@ import type {
   SubagentRecordSettledEntryData,
 } from "./record-entry.ts";
 import type { StopReason } from "../domain/record-types.ts";
-import type { ExecutionRecord } from "../domain/record-model.ts";
+import type { ExecutionRecord, SubagentModelSource } from "../domain/record-model.ts";
 import type { ManifestRecord } from "./manifest-store.ts";
 import type { RecordEventFoldState, RecordEventInput } from "./record-events.ts";
 import type { SubagentRecord } from "../assembly/types.ts";
@@ -27,7 +27,7 @@ import { resolveEngineRouteId } from "../engine/common/session-view-service.ts";
 
 /** v2 注册条目 data（register 写点；undefined 身份域归一：origin → "tool"、rootSessionId → ""）。 */
 export function toRegisteredEntryData(
-  record: { id: string; agent: string; task: string; slug: string; origin?: string; parentRunId?: string; stepIndex?: number; rootSessionId?: string; parentRecordId?: string; depth: number; startedAt: number },
+  record: { id: string; agent: string; task: string; slug: string; origin?: string; parentRunId?: string; stepIndex?: number; modelSource?: SubagentModelSource; rootSessionId?: string; parentRecordId?: string; depth: number; startedAt: number },
 ): SubagentRecordRegisteredEntryData {
   return {
     v: SUBAGENT_RECORD_ENTRY_VERSION,
@@ -39,6 +39,7 @@ export function toRegisteredEntryData(
     origin: record.origin === "workflow" ? "workflow" : "tool",
     ...(record.parentRunId !== undefined ? { parentRunId: record.parentRunId } : {}),
     ...(record.stepIndex !== undefined ? { stepIndex: record.stepIndex } : {}),
+    ...(record.modelSource !== undefined ? { modelSource: record.modelSource } : {}),
     rootSessionId: record.rootSessionId ?? "",
     ...(record.parentRecordId !== undefined ? { parentRecordId: record.parentRecordId } : {}),
     depth: record.depth,
@@ -56,6 +57,8 @@ export interface SettledEntrySource { // oe-exempt:20261001:framework:v2 终态�
   turnCount: number;
   totalTokens: number;
   model: string | undefined;
+  /** 派发期模型来源（record.modelSource 同域；缺席 = 存量/未知）。 */
+  modelSource?: SubagentModelSource;
   thinkingLevel: string | undefined;
   engine?: string;
   engineHandle?: SubagentRecord["engineHandle"];
@@ -77,6 +80,7 @@ export function settledEntrySourceOf(record: ExecutionRecord): SettledEntrySourc
     turnCount: record.turnCount,
     totalTokens: record.totalTokens,
     model: record.model,
+    modelSource: record.modelSource,
     thinkingLevel: record.thinkingLevel,
     engine: record.engine,
     engineHandle: record.engineHandle,
@@ -99,6 +103,7 @@ export function toSettledEntryData(source: SettledEntrySource, endedAt: number):
     turns: source.turnCount,
     totalTokens: source.totalTokens,
     model: source.model,
+    ...(source.modelSource !== undefined ? { modelSource: source.modelSource } : {}),
     thinkingLevel: source.thinkingLevel,
     ...(source.engine !== undefined ? { engine: source.engine } : {}),
     ...(source.engineHandle !== undefined ? { engineHandle: source.engineHandle } : {}),
@@ -323,6 +328,7 @@ export function buildCreatedEventPayload(
     // 事件流自承载绑定侧的独有字段（.record-binding 退场的前置）：模型/档位/worktree
     // 在创建期已知，写入本事件；缺省不落键（undefined = 未指定语义）。
     ...(record.model !== undefined ? { model: record.model } : {}),
+    ...(record.modelSource !== undefined ? { modelSource: record.modelSource } : {}),
     ...(record.thinkingLevel !== undefined ? { thinkingLevel: record.thinkingLevel } : {}),
     ...(record.hadWorktree === true ? { worktree: true } : {}),
   };

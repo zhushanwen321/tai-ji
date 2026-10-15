@@ -372,7 +372,12 @@ export function projectV2Subagent(
     stopReason: resolveSubagentStopReason(fold, settled, roundIdle, settledEntry),
     turns: stats.turns,
     totalTokens: stats.totalTokens,
-    model: settledEntry?.model,
+    // 模型：settled 条目盖章值优先；running 期回落 created 帧留痕（创建期已知——
+    // [subagent-detail-model-info] 运行中详情也能展示实际模型）。两者皆缺 = 未指定。
+    model: settledEntry?.model ?? fold?.identity?.model,
+    // 派发期模型来源（subagent-detail-model-info 2026-10-15）：三源同值取先，
+    // 全缺（存量 record）= undefined，读侧不展示来源标注。
+    modelSource: settledEntry?.modelSource ?? fold?.identity?.modelSource ?? registered?.modelSource,
     thinkingLevel: settledEntry?.thinkingLevel,
     startedAt,
     endedAt,

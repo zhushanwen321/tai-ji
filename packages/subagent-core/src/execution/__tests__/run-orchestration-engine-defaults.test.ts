@@ -245,21 +245,25 @@ describe("D6 四层优先级：chat 域（run-orchestration）", () => {
 
     // 留痕同形：偏好补缺与显式指定共用同一 record.opts.model 盖章通道
     expect(store.getMutable(handle.subagentId)?.model).toBe("prov/task-model");
+    // [subagent-detail-model-info] 来源标注随层判定：task 显式 = explicit
+    expect(store.getMutable(handle.subagentId)?.modelSource).toBe("explicit");
     nonPi.runs[0]!.settle();
   });
 
   it("形态 2：task 空 + frontmatter 有 → frontmatter 赢过偏好（作者显式声明不被全局偏好压掉）", async () => {
-    const { service, nonPi } = makeHarness({
+    const { service, nonPi, store } = makeHarness({
       [NON_PI_ENGINE_ID]: "prov/pref-model",
     });
     const agentPath = writeFrontmatterAgent(openHarnesses[0]!.tmpRoot, "d6-agent", "prov/front-model");
-    await service.execute({
+    const handle = await service.execute({
       task: "d6 chat form2",
       slug: "d6-form2",
       engine: NON_PI_ENGINE_ID,
       agent: agentPath,
     });
     await waitForFirstRunModel(nonPi.runs, "prov/front-model");
+    // [subagent-detail-model-info] frontmatter 层来源标注
+    expect(store.getMutable(handle.subagentId)?.modelSource).toBe("frontmatter");
     nonPi.runs[0]!.settle();
   });
 
@@ -275,6 +279,8 @@ describe("D6 四层优先级：chat 域（run-orchestration）", () => {
     await waitForFirstRunModel(nonPi.runs, "prov/pref-model");
     // D6 留痕口径：record 消费方只关心「用了哪个模型」，不区分「谁决定的」
     expect(store.getMutable(handle.subagentId)?.model).toBe("prov/pref-model");
+    // [subagent-detail-model-info] 偏好层来源标注
+    expect(store.getMutable(handle.subagentId)?.modelSource).toBe("preference");
     nonPi.runs[0]!.settle();
   });
 
@@ -289,6 +295,8 @@ describe("D6 四层优先级：chat 域（run-orchestration）", () => {
     await vi.waitFor(() => expect(nonPi.runs.length).toBe(1));
     expect("model" in nonPi.runs[0]!.task).toBe(false);
     expect(store.getMutable(handle.subagentId)?.model).toBeUndefined();
+    // [subagent-detail-model-info] 全缺席 = default 来源（未指定也如实标注）
+    expect(store.getMutable(handle.subagentId)?.modelSource).toBe("default");
     nonPi.runs[0]!.settle();
   });
 
@@ -336,6 +344,8 @@ describe("engine-ref-translation：chat 域派发期翻译", () => {
     await vi.waitFor(() => expect(nonPi.runs.length).toBe(1));
     expect(nonPi.runs[0]!.task.model).toBe(`${TRANSLATION_TARGET}/GLM-5.3-FLASH`);
     expect(store.getMutable(handle.subagentId)?.model).toBe(`${TRANSLATION_TARGET}/GLM-5.3-FLASH`);
+    // [subagent-detail-model-info] 翻译不改来源标注：task 显式 = explicit
+    expect(store.getMutable(handle.subagentId)?.modelSource).toBe("explicit");
     nonPi.runs[0]!.settle();
   });
 
@@ -352,6 +362,8 @@ describe("engine-ref-translation：chat 域派发期翻译", () => {
     await vi.waitFor(() => expect(nonPi.runs.length).toBe(1));
     expect(nonPi.runs[0]!.task.model).toBe(`${TRANSLATION_TARGET}/GLM-5.3-FLASH`);
     expect(store.getMutable(handle.subagentId)?.model).toBe(`${TRANSLATION_TARGET}/GLM-5.3-FLASH`);
+    // [subagent-detail-model-info] 偏好补缺来源标注
+    expect(store.getMutable(handle.subagentId)?.modelSource).toBe("preference");
     nonPi.runs[0]!.settle();
   });
 
@@ -370,6 +382,7 @@ describe("engine-ref-translation：chat 域派发期翻译", () => {
     await vi.waitFor(() => expect(nonPi.runs.length).toBe(1));
     expect("model" in nonPi.runs[0]!.task).toBe(false);
     expect(store.getMutable(handle.subagentId)?.model).toBeUndefined();
+    expect(store.getMutable(handle.subagentId)?.modelSource).toBe("default");
     expect(warn).toHaveBeenCalledWith(expect.stringContaining("跳过偏好层"));
     warn.mockRestore();
     nonPi.runs[0]!.settle();
@@ -436,6 +449,7 @@ describe("D6 四层优先级：workflow 域（workflow-dispatch）同层序", ()
     const running = store.listRunningMutable();
     expect(running).toHaveLength(1);
     expect(running[0]!.model).toBe("prov/pref-model");
+    expect(running[0]!.modelSource).toBe("preference");
     nonPi.runs[0]!.settle();
     await pending;
   });

@@ -140,6 +140,9 @@ export default {
     // [u4d-truncated-ui] History budget truncated top bar (loadMore superseded by loadEarlier)
     loadedRecentTurns: 'Loaded recent {count} turns',
     loadEarlier: 'Load earlier',
+    // [2026-10-15 pill redesign] paging progress copy: says what is happening better than
+    // common.loading (pill loading state; auto-continue and manual click share it)
+    loadingMore: 'Loading earlier…',
     // [u8-pi-respawn] pi crash respawn notice bar (D7 / T4)
     respawnPending: 'Session engine exited unexpectedly — auto-recovering… You can keep typing; messages are delivered once recovery completes',
     respawnRestored: 'Session engine recovered from a crash. The interrupted turn was not preserved; background tasks and subagents that were running have been terminated and will not resume automatically. You can continue sending messages.',
@@ -406,6 +409,15 @@ export default {
     // subagent-model-switch §7.1（U1）：subagent / workflow run 执行模型切换。
     subagentOverrideBadge: 'user override',
     subagentModelSwitchTitle: 'Switch execution model of this subagent (recorded when no live process; applies next run)',
+    subagentModelActual: 'Actual model in use: {model}',
+    subagentModelSourceExplicit: 'dispatched',
+    subagentModelSourceFrontmatter: 'agent-declared',
+    subagentModelSourcePreference: 'preference',
+    subagentModelSourceDefault: 'engine default',
+    subagentModelSourceTitleExplicit: 'Model explicitly specified at dispatch (task parameter)',
+    subagentModelSourceTitleFrontmatter: 'Model from agent .md frontmatter declaration',
+    subagentModelSourceTitlePreference: 'Not explicitly specified — filled from settings preference (per-engine default model)',
+    subagentModelSourceTitleDefault: 'No model specified — resolved by the engine default',
     modelSwitchFailed: 'Model switch failed: {msg}',
     modelSwitchMemberFailed: 'Member {member} switch failed ({reason}) — other members unaffected',
     bashTaskRunningFor: 'Running for {duration}',

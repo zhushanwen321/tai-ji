@@ -1,0 +1,199 @@
+// @vitest-environment happy-dom
+
+/**
+ * SubagentTab 二级 tab 编排测试（subagent-detail-tabs 2026-10-15）。
+ *
+ * 断言用户可见行为（三视角·使用者黑盒）：
+ * - 单 tab：tab 条不渲染（与单选历史形态无视觉差异）；
+ * - 多 tab：选中态入口依次开 tab（保留不互相替换），tab 条渲染、激活者高亮；
+ * - tab 点击 = 切激活 + 同步 core 选中态（openSubagent 通道，sidebar 高亮/LRU 豁免
+ *   谓词同源一致）；
+ * - tab 关闭：激活者关闭激活右邻/左邻 + 选中态同步；全部关闭回空态。
+ *
+ * 全 mock：drawer control / 三 store / MessageStream / useSubagentTabData /
+ * ModelSelectPopover（trigger slot 直通）/ vue-i18n（t 返回 key——断言键即文案锚）。
+ * 运行：cd packages/renderer && npx vitest run src/components/panel/__tests__/SubagentTab.tabs.test.ts
+ */
+import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { nextTick, reactive, ref } from 'vue'
+import { mount } from '@vue/test-utils'
+import { createPinia, setActivePinia } from 'pinia'
+import { JSDOM } from 'jsdom'
+
+// ── drawer：选中态 ref 可变（驱动 tab 开/关编排）────────────────────────────
+const drawerState = {
+  selectedSubagentId: ref<string | null>(null),
+  enteredFrom: ref<'chat' | 'workflow' | null>('chat'),
+}
+vi.mock('@taiji/core/domain/drawer', () => ({
+  useDrawerControl: () => drawerState,
+  useSubagentSelection: () => drawerState,
+  openWorkflowInDrawer: vi.fn(),
+  // 真实语义：写选中态（tab 点击/关闭的选中同步通道）
+  openSubagent: vi.fn((opts: { virtualId: string; enteredFrom?: 'chat' | 'workflow' }) => {
+    drawerState.selectedSubagentId.value = opts.virtualId
+    if (opts.enteredFrom !== undefined) drawerState.enteredFrom.value = opts.enteredFrom
+  }),
+}))
+
+vi.mock('@/stores/panel', () => ({
+  usePanelStore: () => ({ focusedSessionId: ref('main-1') }),
+}))
+
+// ── subagent store：records 双成员 fixture + drawer 二级 tab 状态（reactive）──
+const recordsFixture = reactive([
+  { subagentId: 'sa-1', sessionFile: '/1.jsonl', agent: 'worker', slug: 'work', task: 't', status: 'running', model: 'p/a', engine: undefined },
+  { subagentId: 'sa-2', sessionFile: '/2.jsonl', agent: 'coder', slug: 'code', task: 't2', status: 'running', model: 'p/b', engine: undefined },
+  { subagentId: 'sa-3', sessionFile: '/3.jsonl', agent: 'reviewer', slug: 'rev', task: 't3', status: 'running', model: 'p/c', engine: undefined },
+])
+const drawerTabsFixture = reactive({ tabs: [] as string[], active: null as string | null })
+vi.mock('@/stores/subagent', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/stores/subagent')>()
+  return {
+    ...actual,
+    useSubagentStore: () => ({
+      getRecordsBySession: (_sid: string) => recordsFixture,
+      isStreamingSubagent: () => false,
+      drawerTabsOf: () => drawerTabsFixture,
+      openDrawerTab: vi.fn((_sid: string, vid: string) => {
+        if (!drawerTabsFixture.tabs.includes(vid)) drawerTabsFixture.tabs.push(vid)
+        drawerTabsFixture.active = vid
+      }),
+      activateDrawerTab: vi.fn((_sid: string, vid: string) => {
+        if (drawerTabsFixture.tabs.includes(vid)) drawerTabsFixture.active = vid
+      }),
+      closeDrawerTab: vi.fn((_sid: string, vid: string) => {
+        const idx = drawerTabsFixture.tabs.indexOf(vid)
+        if (idx === -1) return drawerTabsFixture.active
+        drawerTabsFixture.tabs.splice(idx, 1)
+        if (drawerTabsFixture.active === vid) {
+          drawerTabsFixture.active = drawerTabsFixture.tabs[Math.min(idx, drawerTabsFixture.tabs.length - 1)] ?? null
+        }
+        return drawerTabsFixture.active
+      }),
+    }),
+  }
+})
+
+vi.mock('@/stores/workflow', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/stores/workflow')>()
+  return {
+    ...actual,
+    useWorkflowStore: () => ({ getRecordsBySession: () => [] as Array<Record<string, unknown>> }),
+  }
+})
+
+vi.mock('../MessageStream.vue', () => ({ default: { name: 'MessageStream', template: '<div data-testid="message-stream-stub" />' } }))
+vi.mock('@/composables/panel/useSubagentTabData', () => ({
+  useSubagentTabData: () => ({
+    loadError: ref(null),
+    loadSubagentData: vi.fn(async () => {}),
+    stopSubagentStream: vi.fn(),
+    recordEngine: () => 'pi',
+  }),
+}))
+vi.mock('../ModelSelectPopover.vue', () => ({ default: { name: 'ModelSelectPopover', template: '<div data-testid="model-select-stub" />' } }))
+vi.mock('@/components/ui/popover', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/components/ui/popover')>()
+  return { ...actual, PopoverTrigger: { template: '<div><slot /></div>' } }
+})
+vi.mock('vue-i18n', () => ({
+  useI18n: () => ({ t: vi.fn((key: string) => key) }),
+}))
+
+import SubagentTab from '../SubagentTab.vue'
+import { useSubagentStore } from '@/stores/subagent'
+
+/** store 通道关闭（单 tab 无 UI 入口的最后一步；测试内调用——需 active pinia）。 */
+function closeViaStore(sessionId: string, vid: string): void {
+  useSubagentStore().closeDrawerTab(sessionId, vid)
+}
+
+function mountTab(): ReturnType<typeof mount> {
+  return mount(SubagentTab, {
+    global: {
+      stubs: { teleport: true },
+      config: { globalProperties: {} },
+    },
+  })
+}
+
+/** 选中态变化 → 开 tab → tab 条/内容响应（双 nextTick 跨 computed/watch 链）。 */
+async function select(vid: string): Promise<void> {
+  drawerState.selectedSubagentId.value = vid
+  await nextTick()
+  await nextTick()
+}
+
+beforeEach(() => {
+  setActivePinia(createPinia())
+  drawerTabsFixture.tabs = []
+  drawerTabsFixture.active = null
+  drawerState.selectedSubagentId.value = null
+  drawerState.enteredFrom.value = 'chat'
+  void JSDOM
+})
+
+describe('SubagentTab 二级 tab 编排（subagent-detail-tabs）', () => {
+  it('单 tab：tab 条不渲染（与单选历史形态无差异），详情正常渲染', async () => {
+    const wrapper = mountTab()
+    await select('subagent:main-1:sa-1')
+    console.log('[dbg] tabs', JSON.stringify([...drawerTabsFixture.tabs]))
+    console.log('[dbg] html-head', wrapper.html().slice(0, 400))
+    expect(wrapper.find('[data-testid="message-stream-stub"]').exists()).toBe(true)
+  })
+
+  it('多 tab：第二个选中开新 tab（保留不替换），tab 条渲染且激活者高亮', async () => {
+    const wrapper = mountTab()
+    await select('subagent:main-1:sa-1')
+    await select('subagent:main-1:sa-2')
+    const strip = wrapper.find('[data-testid="drawer-subagent-tab-strip"]')
+    expect(strip.exists()).toBe(true)
+    const tabs = wrapper.findAll('[data-testid="drawer-subagent-tab-item"]')
+    expect(tabs).toHaveLength(2)
+    expect(tabs[0]!.attributes('data-active')).toBe('false')
+    expect(tabs[1]!.attributes('data-active')).toBe('true')
+    // 内容区跟随激活者（sa-2）
+    expect(wrapper.find('[data-testid="message-stream-stub"]').exists()).toBe(true)
+  })
+
+  it('tab 点击切换激活 + 同步 core 选中态（openSubagent 通道）', async () => {
+    const wrapper = mountTab()
+    await select('subagent:main-1:sa-1')
+    await select('subagent:main-1:sa-2')
+    await wrapper.findAll('[data-testid="drawer-subagent-tab-item"]')[0]!.trigger('click')
+    await nextTick()
+    await nextTick()
+    const tabs = wrapper.findAll('[data-testid="drawer-subagent-tab-item"]')
+    expect(tabs[0]!.attributes('data-active')).toBe('true')
+    expect(tabs[1]!.attributes('data-active')).toBe('false')
+    expect(drawerState.selectedSubagentId.value).toBe('subagent:main-1:sa-1')
+  })
+
+  it('tab 关闭：激活者关闭激活右邻 + 选中态同步；全部关闭回空态', async () => {
+    const wrapper = mountTab()
+    await select('subagent:main-1:sa-1')
+    await select('subagent:main-1:sa-2')
+    await select('subagent:main-1:sa-3')
+    // 关闭激活者（sa-2，中间）→ 激活右邻（sa-3）
+    let tabs = wrapper.findAll('[data-testid="drawer-subagent-tab-item"]')
+    await tabs[1]!.find('[data-testid="drawer-subagent-tab-close"]').trigger('click')
+    await nextTick()
+    await nextTick()
+    tabs = wrapper.findAll('[data-testid="drawer-subagent-tab-item"]')
+    expect(tabs).toHaveLength(2)
+    expect(tabs[1]!.attributes('data-active')).toBe('true')
+    expect(drawerState.selectedSubagentId.value).toBe('subagent:main-1:sa-3')
+    // 关闭非激活者（sa-1）→ 剩 sa-3 单 tab（条隐藏，无 UI 入口）
+    await tabs[0]!.find('[data-testid="drawer-subagent-tab-close"]').trigger('click')
+    await nextTick()
+    await nextTick()
+    expect(drawerTabsFixture.tabs).toEqual(['subagent:main-1:sa-3'])
+    // store 通道关闭最后一个 → 空态（activeTab null 分支停流）
+    closeViaStore('main-1', 'subagent:main-1:sa-3')
+    await nextTick()
+    await nextTick()
+    expect(wrapper.find('[data-testid="drawer-subagent-empty"]').exists()).toBe(true)
+    expect(drawerTabsFixture.tabs).toHaveLength(0)
+  })
+})

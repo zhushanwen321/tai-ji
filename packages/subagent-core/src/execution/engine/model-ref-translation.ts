@@ -22,32 +22,47 @@
 
 import type { EngineRouteResult } from "./routing.ts";
 
+/** 派发期模型来源（与 shared/core 同名词域——本层只消费不定义类型，避免三处漂移）。 */
+export type ResolvedEngineModelSource = "explicit" | "frontmatter" | "preference" | "default";
+
+/** 四层解析 + 翻译产物（engineModel 与来源标注成对返回——record 盖章双字段同源）。 */
+export interface ResolvedEngineModelResult {
+  engineModel: string | undefined;
+  source: ResolvedEngineModelSource;
+}
+
 /**
- * 四层解析的显式/偏好两层 → 翻译后 engineModel（undefined = 引擎缺省）。
- * `explicit` 与 `preference` 由调用方按既有 ?? 链惰性求值纪律取好（前两层任一在场
- * 时不触盘读偏好）；warn 通道由调用方注入（chat/workflow 域各自的日志前缀）。
+ * 四层解析的显式/偏好两层 → 翻译后 engineModel + 来源标注（undefined = 引擎缺省）。
+ * `taskModel` / `frontmatterModel` 由调用方直传；`readPreference` 为 thunk（惰性求值
+ * ——前两层任一在场时不触盘，保持既有 ?? 链纪律）；来源与解析同点判定（显式层命中即
+ * 'explicit'，frontmatter 次之，偏好层 'preference'，全缺席 'default'）——避免
+ * 「解析一处、来源另判」的双处漂移。warn 通道由调用方注入（chat/workflow 域各自
+ * 的日志前缀）。
  */
 export function resolveEngineModelWithTranslation(
   route: EngineRouteResult,
-  explicit: string | undefined,
-  preference: string | undefined,
+  taskModel: string | undefined,
+  frontmatterModel: string | undefined,
+  readPreference: () => string | undefined,
   warn: (message: string) => void,
   logPrefix: string,
-): string | undefined {
+): ResolvedEngineModelResult {
   const translate = (ref: string): string =>
     route.engine.translateModelRef !== undefined ? route.engine.translateModelRef(ref) : ref;
-  if (explicit !== undefined) return translate(explicit);
-  if (preference === undefined) return undefined;
+  if (taskModel !== undefined) return { engineModel: translate(taskModel), source: "explicit" };
+  if (frontmatterModel !== undefined) return { engineModel: translate(frontmatterModel), source: "frontmatter" };
+  const preference = readPreference();
+  if (preference === undefined) return { engineModel: undefined, source: "default" };
   const translated = translate(preference);
   // 清单成员校验仅对「有枚举面」的引擎生效：undefined/null = port 契约的「无自有
-  // 枚举面」形态（放行——引擎侧 validateModel 仍兑底；回归守卫：不可把无面引擎
+  // 枚举面」形态（放行——引擎侧 validateModel 仍兜底；回归守卫：不可把无面引擎
   // 当空清单处理，否则偏好层被误跳过）；空数组 = 枚举面在册但当前无可用模型 → 跳过。
   const list = route.engine.listModels?.();
   const known = list === undefined || list === null || list.some((m) => m.id === translated);
-  if (known) return translated;
+  if (known) return { engineModel: translated, source: "preference" };
   warn(
     `[${logPrefix}] engineDefaults.${route.engineId}="${preference}" 翻译后（${translated}）` +
       `不在引擎模型清单，本派发跳过偏好层走引擎缺省（settings 页可重选）`,
   );
-  return undefined;
+  return { engineModel: undefined, source: "default" };
 }

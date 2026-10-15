@@ -249,7 +249,7 @@ export * from './file-tree'
 export * from './local-file-url'
 export type { RecentWorkspaceRecord } from './workspace'
 export type { Project, ProjectStoreState } from './project'
-export type { SubagentRecord, SubagentStatus, ClosedDisplayStatus, SubagentModelOverrideStatus, SubagentRecentEffectiveModel } from './subagent'
+export type { SubagentRecord, SubagentStatus, SubagentModelSource, ClosedDisplayStatus, SubagentModelOverrideStatus, SubagentRecentEffectiveModel } from './subagent'
 // 远程访问配置契约 SSOT（remote-access.json：main 写入侧与 runtime 握手热读侧共用；
 // 含 IPC 信封类型 RemoteAccessInfo/RemoteAccessToggleResult，main/preload/renderer
 // 三端共同 import；含无策略 shape 谓词（main/runtime 双侧 shape 判据单源）；

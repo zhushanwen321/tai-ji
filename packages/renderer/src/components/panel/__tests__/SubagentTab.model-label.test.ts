@@ -16,7 +16,7 @@
  * 运行：cd packages/renderer && npx vitest run src/components/panel/__tests__/SubagentTab.model-label.test.ts
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { ref } from 'vue'
+import { nextTick, reactive, ref } from 'vue'
 import { mount } from '@vue/test-utils'
 import { JSDOM } from 'jsdom'
 
@@ -41,6 +41,8 @@ vi.mock('@/stores/panel', () => ({
 
 // ── subagent store：records 分区按 fixture 返回（subagentRecord 可变）──────
 let subagentRecordFixture: Record<string, unknown> = {}
+// drawer 二级 tab fixture（reactive——computed 依赖追踪，见 store mock 注释）
+const drawerTabsFixture = reactive({ tabs: [] as string[], active: null as string | null })
 vi.mock('@/stores/subagent', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/stores/subagent')>()
   return {
@@ -48,6 +50,25 @@ vi.mock('@/stores/subagent', async (importOriginal) => {
     useSubagentStore: () => ({
       getRecordsBySession: (_sid: string) => [subagentRecordFixture],
       isStreamingSubagent: () => false,
+      // drawer 二级 tab 状态（subagent-detail-tabs）：reactive fixture——组件 computed
+      // 依赖追踪需要响应式对象（普通对象会让 tab computed 永不失效）。
+      drawerTabsOf: () => drawerTabsFixture,
+      openDrawerTab: vi.fn((_sid: string, vid: string) => {
+        if (!drawerTabsFixture.tabs.includes(vid)) drawerTabsFixture.tabs.push(vid)
+        drawerTabsFixture.active = vid
+      }),
+      activateDrawerTab: vi.fn((_sid: string, vid: string) => {
+        if (drawerTabsFixture.tabs.includes(vid)) drawerTabsFixture.active = vid
+      }),
+      closeDrawerTab: vi.fn((_sid: string, vid: string) => {
+        const idx = drawerTabsFixture.tabs.indexOf(vid)
+        if (idx === -1) return drawerTabsFixture.active
+        drawerTabsFixture.tabs.splice(idx, 1)
+        if (drawerTabsFixture.active === vid) {
+          drawerTabsFixture.active = drawerTabsFixture.tabs[Math.min(idx, drawerTabsFixture.tabs.length - 1)] ?? null
+        }
+        return drawerTabsFixture.active
+      }),
     }),
   }
 })
@@ -123,6 +144,8 @@ function mountTab(): ReturnType<typeof mount> {
 
 beforeEach(() => {
   subagentRecordFixture = baseRecord()
+  drawerTabsFixture.tabs = []
+  drawerTabsFixture.active = null
   drawerState.selectedSubagentId.value = 'subagent:main-1:sa-1'
   // happy-dom 环境缺 window.matchMedia 等时 mount 可能告警，此处不需要真实 DOM 窗口
   // （JSDOM import 仅为显式标注测试环境依赖，防 tree-shake 误删）。
@@ -143,6 +166,21 @@ describe('SubagentTab 模型标签槽（标签读取规则四分支的 DOM 呈�
     expect(trigger.text()).not.toContain('p/user-intent')
     expect(trigger.text()).not.toContain('p/stamped')
     expect(wrapper.find('[data-testid="subagent-override-badge"]').exists()).toBe(true)
+  })
+
+  it('[subagent-detail-model-info] 派发期来源标注：modelSource 在场 → badge 展示对应标注 + title 完整语义', () => {
+    subagentRecordFixture = { ...baseRecord(), modelSource: 'explicit' }
+    const wrapper = mountTab()
+    const badge = wrapper.find('[data-testid="subagent-model-source-badge"]')
+    expect(badge.exists()).toBe(true)
+    // i18n mock 返回 key——键即文案锚（值域四分支各自键位见 locale 文件）
+    expect(badge.text()).toBe('panel.sideDrawer.subagentModelSource.explicit')
+    expect(badge.attributes('title')).toBe('panel.sideDrawer.subagentModelSourceTitle.explicit')
+  })
+
+  it('[subagent-detail-model-info] 存量 record（无 modelSource 字段）→ 来源标注不展示', () => {
+    const wrapper = mountTab()
+    expect(wrapper.find('[data-testid="subagent-model-source-badge"]').exists()).toBe(false)
   })
 
   it('分支② 已记账态（仅覆盖状态在场，无生效值）→ 标签显示覆盖意图值 + badge', () => {

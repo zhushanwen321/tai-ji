@@ -18,7 +18,7 @@
 // Core 层叶子原语：仅依赖 types.ts。零 Pi / Runtime / TUI 依赖。
 
 import type { ClosedReason, ExecutionMode, ExecutionOutcome, ExecutionStatus, ProjectedOutcome, RecordOrigin, StopReason } from "../domain/record-types.ts";
-import type { AgentResult, ExecutionRecord } from "../domain/record-model.ts";
+import type { AgentResult, ExecutionRecord, SubagentModelSource } from "../domain/record-model.ts";
 import type { AgentEvent, AgentEventLogEntry, AgentUsage, AgentUsageTotal, DisplayItem, InternalToolCall, RecordSnapshot, SubagentToolDetails, ToolCall, Turn } from "../assembly/types.ts";
 
 // ============================================================
@@ -146,6 +146,8 @@ export function createRecord(
     agent: string;
     /** [R4/D6-①] 缺席 = 用户未指定模型（条件盖章的调用方不产本键）。 */
     model?: string | undefined;
+    /** 派发期模型来源（ExecutionRecord.modelSource 同域；缺席 = 来源未知——存量调用方零迁移）。 */
+    modelSource?: SubagentModelSource;
     thinkingLevel?: string;
     mode: ExecutionMode;
     task: string;
@@ -176,6 +178,7 @@ export function createRecord(
     id,
     agent: identity.agent,
     model: identity.model,
+    modelSource: identity.modelSource,
     thinkingLevel: identity.thinkingLevel,
     mode: identity.mode,
     task: identity.task,

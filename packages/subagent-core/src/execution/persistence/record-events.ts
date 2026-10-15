@@ -36,6 +36,7 @@ import { getLogger } from "../../core/logger.ts";
 // 共用同一实现体，差异经策略注入——本文件只提供 record 域策略）。
 import { JsonlEventStream } from "../../shared/jsonl-event-stream.ts";
 import type { Epoch, ExecutionMode, ExecutionOutcome, RecordOrigin, StopReason } from "../domain/record-types.ts";
+import type { SubagentModelSource } from "../domain/record-model.ts";
 import type { AbandonedRoundMark, TranscriptRef } from "../domain/record-types.ts";
 
 const eventLogger = getLogger("record-event-journal");
@@ -168,6 +169,8 @@ export interface RecordCreatedEvent extends RecordEventEnvelope { // oe-exempt:2
    * 引擎自身缺省解析）。写入点 = 记录创建，故与 created 事件同生。
    */
   model?: string;
+  /** 派发期模型来源（ExecutionRecord.modelSource 同域；缺席 = 未标注/存量）。 */
+  modelSource?: SubagentModelSource;
   /** 思考档位留痕（同上；undefined = 未指定）。 */
   thinkingLevel?: string;
   /**
