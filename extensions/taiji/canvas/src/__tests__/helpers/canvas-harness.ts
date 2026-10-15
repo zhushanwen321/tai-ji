@@ -1,5 +1,5 @@
-// canvas-harness.ts — pi-canvas 测试共享装配 harness（session-manager 同款样板：
-// registerTool 捕获 + rpc ctx 桩 + select 桩；断言全部留在各测试文件）。
+// canvas-harness.ts —— pi-canvas 测试共享装配 harness（session-manager 同款样板：
+// registerTool 捕获 + before_agent_start 捕获 + rpc ctx 桩 + select 桩；断言全部留在各测试文件）。
 
 import { expect, vi, type Mock } from "vitest";
 
@@ -13,22 +13,38 @@ export interface RegisteredTool { // oe-exempt:20261015:framework:画布域类�
   execute: (...args: unknown[]) => Promise<unknown>;
 }
 
+/** before_agent_start handler 的事件/ctx 最小形态（index.ts 只消费 systemPrompt 与 ctx.mode）。 */
+export interface BeforeAgentStartShape { // oe-exempt:20261015:framework:画布域类型契约（数据形状/端口/测试 harness，非抽象接口单实现）
+  systemPrompt: string;
+}
+
+export type BeforeAgentStartHandler = (
+  event: BeforeAgentStartShape,
+  ctx: { mode: string },
+) => { systemPrompt: string } | undefined;
+
 export interface ToolHarness { // oe-exempt:20261015:framework:画布域类型契约（数据形状/端口/测试 harness，非抽象接口单实现）
   registered: RegisteredTool[];
   selectMock: Mock;
+  /** 捕获的 before_agent_start handler（index.ts 只注册一个；空数组 = 未注册）。 */
+  beforeAgentStartHandlers: BeforeAgentStartHandler[];
   /** rpc 模式 ctx 桩（ui.select → selectMock）。 */
   ctx: { mode: "rpc"; hasUI: true; ui: { select: Mock } };
 }
 
-/** 挂载被测 extension：捕获六工具 + select 桩。 */
+/** 挂载被测 extension：捕获六工具 + before_agent_start + select 桩。 */
 export function mountCanvas(): ToolHarness {
   const registered: RegisteredTool[] = [];
+  const beforeAgentStartHandlers: BeforeAgentStartHandler[] = [];
   registerExtension({
     registerTool: (tool: RegisteredTool) => registered.push(tool),
+    on: (event: string, handler: BeforeAgentStartHandler) => {
+      if (event === "before_agent_start") beforeAgentStartHandlers.push(handler);
+    },
   } as never);
   const selectMock = vi.fn();
   const ctx = { mode: "rpc" as const, hasUI: true as const, ui: { select: selectMock } };
-  return { registered, selectMock, ctx };
+  return { registered, selectMock, beforeAgentStartHandlers, ctx };
 }
 
 /** 按名取已注册工具（缺名 = 注册面回归，直接红）。 */
