@@ -439,6 +439,14 @@ describe('canvas.* RPC 面', () => {
     // 绑定在册（sid-agent）但 client 不存在 → 活跃交集 0（徽标「当前无 agent 在响应」
     // 的数据源——绑定记录 ∩ 存活 session，设计 §3.1(3)）
     expect(state.activeBindings).toBe(0)
+    // 收敛阻断清单（导出面板门禁区②格逐项呈现数据源，CanvasState.convergenceBlockers
+    // 契约注释）：新画布根悬空 + 无执行叶子 → 两类阻断在列
+    expect(state.convergenceBlockers).toEqual(
+      expect.arrayContaining([expect.stringContaining('就绪递归未成立'), expect.stringContaining('没有执行叶子')]),
+    )
+    // 查询侧派生只落在 WS get 附加层：domain 产物（service readState）不含该字段
+    // ——落盘与 marker 工具结果均不携带（契约注释「optional = marker 通道不携带」）
+    expect('convergenceBlockers' in h.canvasService.readState(canvasId)).toBe(false)
 
     h.reply.mockClear()
     h.sendError.mockClear()

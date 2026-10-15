@@ -31,6 +31,19 @@
         />
         <span class="min-w-0">{{ gate.label }}</span>
       </p>
+      <div
+        v-if="blockerList.length > 0"
+        class="flex flex-col gap-1 rounded-sm bg-warn-soft/60 px-2 py-1.5"
+        data-testid="canvas-export-blockers"
+      >
+        <p class="font-mono text-[length:var(--text-3xs)] font-semibold text-warn">{{ t('panel.canvas.gateBlockersTitle') }}</p>
+        <p
+          v-for="blocker in blockerList"
+          :key="blocker"
+          class="text-[length:var(--text-2xs)] leading-relaxed text-neutral-mid"
+          data-testid="canvas-export-blocker"
+        >{{ blocker }}</p>
+      </div>
       <p
         v-if="rejection"
         class="rounded-sm border border-danger bg-danger-soft px-2 py-1.5 text-[length:var(--text-2xs)] leading-relaxed text-danger"
@@ -149,8 +162,9 @@ const LIFECYCLE_KEYS = {
 /**
  * 收敛门禁三门禁投影（编号 = runtime convergenceBlockers 门禁序：①根判据 ②就绪递归
  * ③must-fix+待重审）：①根判据确认 = root.confirmed（契约直读字段）；②就绪递归 = 只
- * 透传 runtime converged 确定性事实、不复刻领域规则（converge-check / export 的结构
- * 化拒绝承载——拒绝文案含完整阻断清单）；③must-fix 清零且待重审空 = 契约投影口径。
+ * 透传 runtime converged 确定性事实、不复刻领域规则，未收敛时逐项清单数据源 =
+ * CanvasState.convergenceBlockers（查询侧派生，缺字段 = marker 通道/旧 runtime，
+ * 退回「由权威校验」措辞形态）；③must-fix 清零且待重审空 = 契约投影口径。
  */
 const gates = computed<Array<{ key: string; ok: boolean; label: string }>>(() => [
   {
@@ -163,9 +177,14 @@ const gates = computed<Array<{ key: string; ok: boolean; label: string }>>(() =>
   {
     key: 'readiness',
     // converged = runtime 已校验全部门禁后置位的确定性事实——据此着色；未收敛时
-    // 就绪递归不渲染红绿（GUI 不复刻领域规则），校验落点 = converge-check/export 拒绝臂。
+    // 就绪递归不渲染红绿（GUI 不复刻领域规则），具体缺什么由阻断清单承载（下方
+    // blockerList；无清单字段的旧形态退回「由权威校验」措辞）。
     ok: props.state.converged,
-    label: t('panel.canvas.gateReadinessRuntime'),
+    label: props.state.converged
+      ? t('panel.canvas.gateReadinessOk')
+      : props.state.convergenceBlockers !== undefined
+        ? t('panel.canvas.gateReadinessBlocked')
+        : t('panel.canvas.gateReadinessRuntime'),
   },
   {
     key: 'clean',
@@ -178,6 +197,12 @@ const gates = computed<Array<{ key: string; ok: boolean; label: string }>>(() =>
           : t('panel.canvas.gateCleanOk'),
   },
 ])
+
+/**
+ * 门禁区逐项清单（runtime convergenceBlockers 的查询侧派生快照；导出前「具体缺
+ * 什么」的权威清单——含就绪类与待重审类，后者与门禁③的计数呈现互补）。
+ */
+const blockerList = computed<string[]>(() => props.state.convergenceBlockers ?? [])
 
 /** 执行叶子清单（实时派生视图）。 */
 const leaves = computed<CanvasNode[]>(() => dispatchableLeavesOf(props.state))

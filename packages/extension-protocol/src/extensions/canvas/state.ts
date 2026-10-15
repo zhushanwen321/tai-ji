@@ -204,6 +204,17 @@ export interface CanvasState { // oe-exempt:20261015:framework:画布域类型�
    * 与旧 runtime reply 不携带；消费方缺字段按未知处理（徽标不渲染）。
    */
   activeBindings?: number
+  /**
+   * 收敛阻断清单（canvas-foundation convergenceBlockers 的现算结果，导出面板
+   * 门禁区②格「规划就绪」的逐项呈现数据源——门禁②的判定是 runtime 领域规则
+   * 不跨 wire，本字段把判定结论（缺什么）随 canvas.get 携带给界面）。与
+   * activeBindings 同款查询侧派生：transport 装配层附加，domain 产物与
+   * canvas.json 快照均不含（纯派生值，落盘即与画布状态二源漂移）。optional =
+   * marker 通道（enter/read 工具结果）与旧 runtime reply 不携带；消费方缺字段
+   * 按未知处理（②格退回「由权威校验」措辞形态）。空数组 = 无阻断（已收敛或
+   * 收敛后再改动时仅剩待重审类条目，与门禁③计数互补）。
+   */
+  convergenceBlockers?: string[]
   createdAt: string
   updatedAt: string
 }

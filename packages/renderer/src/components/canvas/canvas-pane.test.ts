@@ -347,3 +347,29 @@ describe('审查报告 tab 头部结构化计数', () => {
     expect(wrapper.find('[data-testid="canvas-review-entry-counts"]').text()).toBe('条目 2 · 未处置 must-fix 0')
   })
 })
+
+describe('导出面板门禁区阻断清单（门禁②逐项呈现裁决）', () => {
+  it('未收敛且带 convergenceBlockers → 清单逐项呈现（导出前可见具体缺口）', async () => {
+    currentState = makeState({
+      convergenceBlockers: [
+        '就绪递归未成立（根未就绪：存在无选定方案或子树未就绪的问题）',
+        '画布没有执行叶子（无 dispatchable 标记的选定方案），无交付单元',
+      ],
+    })
+    stubCommand()
+    const wrapper = await mountPane()
+    const block = wrapper.find('[data-testid="canvas-export-blockers"]')
+    expect(block.exists()).toBe(true)
+    const items = wrapper.findAll('[data-testid="canvas-export-blocker"]')
+    expect(items).toHaveLength(2)
+    expect(items[0]?.text()).toContain('就绪递归未成立')
+    expect(items[1]?.text()).toContain('没有执行叶子')
+  })
+
+  it('缺 convergenceBlockers 字段（marker 通道形态 / 旧 runtime）→ 清单不渲染，②格退回措辞形态', async () => {
+    currentState = makeState()
+    stubCommand()
+    const wrapper = await mountPane()
+    expect(wrapper.find('[data-testid="canvas-export-blockers"]').exists()).toBe(false)
+  })
+})

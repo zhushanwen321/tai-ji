@@ -44,7 +44,7 @@ import {
   type CanvasMutateReply,
   type CanvasMutateRequest,
 } from '@zhushanwen/extension-protocol'
-import { isCanvasDomainError } from '../services/canvas/canvas-domain.js'
+import { isCanvasDomainError, convergenceBlockers } from '../services/canvas/canvas-domain.js'
 import type { CanvasService, CanvasUpdatedBroadcast } from '../services/canvas/canvas-service.js'
 import type { ISessionService } from '../interfaces.js'
 import { toErrorMessage } from '../utils/errors.js'
@@ -113,9 +113,12 @@ export class CanvasMessageHandler {
       const state = this.ctx.canvasService.readState(msg.payload.canvasId)
       // 绑定徽标数据源（设计 §3.1(3)）：活跃绑定数随全量视图附加（查询侧派生，不落盘——
       // CanvasState.activeBindings 契约注释；空集合 0 = 徽标明示「当前无 agent 在响应」）。
+      // 收敛阻断清单同款查询侧派生（导出面板门禁区②格逐项呈现——门禁②判定是 runtime
+      // 领域规则不跨 wire，结论随本字段携带；CanvasState.convergenceBlockers 契约注释）。
       return this.ctx.reply(ws, msg.id, 'canvas.get', {
         ...state,
         activeBindings: this.activeBoundClients(msg.payload.canvasId).length,
+        convergenceBlockers: convergenceBlockers(state),
       })
     } catch (e: unknown) {
       if (isCanvasDomainError(e)) {

@@ -115,6 +115,8 @@
 | `canvas-export-panel` | 导出 tab 根 |
 | `canvas-export-gates` | 收敛门禁区（三格派生视图 + 拒绝呈现 + 解锁提示） |
 | `canvas-gate-${gate.key}` | 单格门禁（root / readiness / clean 三值；`:data-gate` = ok / blocked） |
+| `canvas-export-blockers` | 门禁区阻断清单块（CanvasState.convergenceBlockers 非空时渲染——导出前逐项可见缺口；缺字段 = marker 通道形态不渲染） |
+| `canvas-export-blocker` | 阻断清单单条（每条 = runtime convergenceBlockers 一项，就绪类与待重审类混合） |
 | `canvas-export-rejection` | 最近一次未收敛拒绝（错误码 + 恢复动作文案，converge-check / export 失败臂） |
 | `canvas-export-unlocked` | 导出解锁提示（state.converged=true） |
 | `canvas-export-planning` | 「导出规划文档」按钮（converged 解锁；时点快照语义） |
