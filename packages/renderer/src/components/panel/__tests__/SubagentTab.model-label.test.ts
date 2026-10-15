@@ -16,7 +16,7 @@
  * 运行：cd packages/renderer && npx vitest run src/components/panel/__tests__/SubagentTab.model-label.test.ts
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { nextTick, reactive, ref } from 'vue'
+import { reactive, ref } from 'vue'
 import { mount } from '@vue/test-utils'
 import { JSDOM } from 'jsdom'
 

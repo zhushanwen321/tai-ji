@@ -143,8 +143,6 @@ describe('SubagentTab 二级 tab 编排（subagent-detail-tabs）', () => {
   it('单 tab：tab 条不渲染（与单选历史形态无差异），详情正常渲染', async () => {
     const wrapper = mountTab()
     await select('subagent:main-1:sa-1')
-    console.log('[dbg] tabs', JSON.stringify([...drawerTabsFixture.tabs]))
-    console.log('[dbg] html-head', wrapper.html().slice(0, 400))
     expect(wrapper.find('[data-testid="message-stream-stub"]').exists()).toBe(true)
   })
 
