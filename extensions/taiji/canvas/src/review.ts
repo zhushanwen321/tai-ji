@@ -11,17 +11,17 @@
  *   canvas 工具的子 pi，其 extension_ui_request 经引擎 ui-request-queue 落
  *   host/askUser 对话框（packages/pi-subagent-cli/src/spawn-runner.ts:15），
  *   到不了 runtime marker 通道。
- * - 落地形态 = 经 globalThis service 槽（GLOBAL_SLOT_KEYS.service，
- *   Symbol.for 单例——本仓 sanctioned 跨扩展通道，ask-user channelHandshake 同款）
- *   调 SubagentService.executeAndAwait：workflow agent() 管线同一 sync-await 派发
- *   原语。reviewer = schema 单发、零工具（比设计「工具面只激活 canvas_read +
- *   review-append」白名单形态更强的构造保证：reviewer 没有任何改图通道）；画布
- *   数据由本扩展经父通道 marker read 取全量内联进 prompt；报告条目在本扩展侧
- *   校验后经 marker review-append 写回（runtime 按 U1 矩阵把 review-append 映射
- *   actor=review——工具面 review-append 写入路径的通道承载）。
+ * - 落地形态 = 经 subagent-core 官方访问器 getSubagentService() 调
+ *   SubagentService.executeAndAwait（Symbol.for 单例 service 槽，访问器解
+ *   {current} 持有者——直读槽值是 D3-A4 实证的断链形态）：workflow agent() 管线
+ *   同一 sync-await 派发原语。reviewer = schema 单发、零工具（比设计「工具面只激活
+ *   canvas_read + review-append」白名单形态更强的构造保证：reviewer 没有任何改图
+ *   通道）；画布数据由本扩展经父通道 marker read 取全量内联进 prompt；报告条目在本
+ *   扩展侧校验后经 marker review-append 写回（runtime 按 U1 矩阵把 review-append
+ *   映射 actor=review——工具面 review-append 写入路径的通道承载）。
  * - 无墙钟超时：executeAndAwait 不传超时（超时默认原则——任务级正常路径不设时限）。
  */
-import { GLOBAL_SLOT_KEYS } from "@zhushanwen/subagent-core";
+import { getSubagentService } from "@zhushanwen/subagent-core";
 import {
   isCanvasReviewAppendParams,
   type CanvasState,
@@ -52,14 +52,21 @@ function isDispatchPort(v: unknown): v is ReviewerDispatchPort {
   return typeof recordOf(v)?.executeAndAwait === "function";
 }
 
-/** 解析 reviewer 派发端口；subagent-workflow 未加载（槽缺位）→ 结构化错误。 */
+/**
+ * 解析 reviewer 派发端口。经 subagent-core 官方访问器 getSubagentService() 读进程
+ * 单例——service 槽值形状是 {current: SubagentService|null} 持有者（生产方
+ * service-bootstrap.ts setSubagentService 只置 .current），直读槽值拿到的是持有者
+ * 而非 service 本体（D3-A4 实证：旧实现直读 + 槽值形状守卫致 review_dispatch_
+ * unavailable 断链，同会话 subagent_manage 经访问器正常）。session_start 前
+ * （current=null）或扩展未加载 → 结构化错误。
+ */
 export function resolveReviewerDispatcher(): ReviewerDispatchPort {
-  const service: unknown = Reflect.get(globalThis, Symbol.for(GLOBAL_SLOT_KEYS.service));
+  const service: unknown = getSubagentService();
   if (!isDispatchPort(service)) {
     throw new Error(
       "review_dispatch_unavailable: 审查编排需要 subagent-workflow 扩展（reviewer 经其 SubagentService 派发），" +
-        "当前进程未发现 service 槽。" +
-        "恢复动作：在 taiji 桌面宿主（subagent-workflow 为 mandatory 扩展）中使用 canvas_review；独立 pi 环境无审查编排。",
+        "当前进程未发现可用的 SubagentService（session_start 前或扩展未加载）。" +
+        "恢复动作：在 taiji 桌面宿主（subagent-workflow 为 mandatory 扩展）中发起会话后再使用 canvas_review；独立 pi 环境无审查编排。",
     );
   }
   return service;

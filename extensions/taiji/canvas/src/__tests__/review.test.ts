@@ -43,21 +43,22 @@ afterEach(() => {
   delete (globalThis as Record<symbol, unknown>)[SLOT_KEY];
 });
 
-describe("resolveReviewerDispatcher（service 槽）", () => {
-  it("槽缺位 → 结构化错误（review_dispatch_unavailable + 恢复动作）", () =>
+describe("resolveReviewerDispatcher（SubagentService 访问器）", () => {
+  it("槽缺位（current=null）→ 结构化错误（review_dispatch_unavailable + 恢复动作）", () =>
     withExtLogEnv(undefined, () => {
       expect(() => resolveReviewerDispatcher()).toThrow(/review_dispatch_unavailable/);
       expect(() => resolveReviewerDispatcher()).toThrow(/恢复动作/);
     }));
 
-  it("槽在但形态漂移（executeAndAwait 非函数）→ 同款结构化错误", () => {
-    (globalThis as Record<symbol, unknown>)[SLOT_KEY] = { nope: true };
+  it("current 形态漂移（executeAndAwait 非函数）→ 同款结构化错误", () => {
+    (globalThis as Record<symbol, unknown>)[SLOT_KEY] = { current: { nope: true } };
     expect(() => resolveReviewerDispatcher()).toThrow(/review_dispatch_unavailable/);
   });
 
-  it("槽在且形态合法 → 返回端口", () => {
+  it("current 形态合法 → 经访问器返回 service 本体（D3-A4：旧 mock 把本体直放槽里，与断链的生产形态不同构）", () => {
     const port: ReviewerDispatchPort = { executeAndAwait: async () => ({}) };
-    (globalThis as Record<symbol, unknown>)[SLOT_KEY] = port;
+    // 生产形状 = {current} 持有者（service-bootstrap.ts setSubagentService 只置 .current）
+    (globalThis as Record<symbol, unknown>)[SLOT_KEY] = { current: port };
     expect(resolveReviewerDispatcher()).toBe(port);
   });
 });
