@@ -1190,7 +1190,8 @@ export default {
     firewallHint: '首次开启时 macOS 可能弹出防火墙授权提示，选择「允许」即可（授权一次，之后不再询问）。',
     tailscaleTitle: '跨网络访问（Tailscale）',
     tailscaleHint: '不在同一网络时可用 Tailscale 组网访问：主机与手机各安装 Tailscale 并登录同一账号，然后把链接中的局域网地址换成 Tailscale 分配的 100.x 地址。',
-    distMissingDev: '移动壳产物缺失，手机端页面将不可用。恢复：运行 pnpm --filter @taiji/mobile-renderer build 后重启应用',
+    // vue-i18n 字面转义：{'@'} 输出 @（裸 @ 会触发 INVALID_LINKED_FORMAT 编译崩溃）
+    distMissingDev: '移动壳产物缺失，手机端页面将不可用。恢复：运行 pnpm --filter {\'@\'}taiji/mobile-renderer build 后重启应用',
     distMissingProd: '安装包缺少移动壳产物，手机端页面不可用，请重新安装最新版本',
   },
   // ── TTS 页（TtsPage，ai-voice-tts 设计 §5.2）──
@@ -1338,13 +1339,14 @@ export default {
     fieldArgs: '参数',
     fieldArgsPlaceholder: '每行一个参数',
     fieldEnv: '环境变量',
-    fieldEnvPlaceholder: '每行 KEY=VALUE，值支持 ${VAR}',
+    // vue-i18n 字面转义：{'{'} / {'}'} 输出 { }（裸 { 会被当占位符起始，非法 token 直接 throw）
+    fieldEnvPlaceholder: '每行 KEY=VALUE，值支持 ${\'{\'}VAR{\'}\'}',
     fieldCwd: '工作目录',
     fieldCwdPlaceholder: '留空使用会话目录',
     fieldUrl: 'URL',
     fieldUrlPlaceholder: 'streamable HTTP 地址，例：https://example.com/mcp',
     fieldHeaders: '请求头',
-    fieldHeadersPlaceholder: '每行 KEY=VALUE，值支持 ${VAR} 与 !command',
+    fieldHeadersPlaceholder: '每行 KEY=VALUE，值支持 ${\'{\'}VAR{\'}\'} 与 !command',
     fieldDescription: '描述',
     fieldDescriptionPlaceholder: '一句话描述（可选），会进入系统提示词',
     fieldExposure: '暴露档位',
@@ -1370,13 +1372,14 @@ export default {
     errEnvBadLine: '环境变量第 {lines} 行格式有误：每行应为 KEY=VALUE',
     errHeadersBadLine: '请求头第 {lines} 行格式有误：每行应为 KEY=VALUE',
     // 代码模式（D7：单条目形态，表单外键原样保留）
-    codeHint: '粘贴单条配置，包装形态 { "名称": { ... } }；表单外键（type / timeout / auth / oauth 等）会原样保留写入',
-    codePlaceholder: '{\n  "名称": { "command": "npx", "args": ["-y", "pkg"] }\n}',
+    // 下方 JSON 示例的花括号必须字面转义（{'{'} / {'}'}），否则消息编译器解析占位符直接 throw（渲染崩溃）
+    codeHint: '粘贴单条配置，包装形态 {\'{\'} "名称": {\'{\'} ... {\'}\'} {\'}\'}；表单外键（type / timeout / auth / oauth 等）会原样保留写入',
+    codePlaceholder: '{\'{\'}\n  "名称": {\'{\'} "command": "npx", "args": ["-y", "pkg"] {\'}\'}\n{\'}\'}',
     errCodeEmpty: '代码为空：请粘贴配置 JSON，或切回表单模式填写',
     errCodeJson: 'JSON 解析失败：{message}',
     errCodeSingle: '只支持单条配置：顶层只能有一个名称键',
-    errCodeWrapperValue: '包装形态的值必须是对象：{ "名称": { ... } }',
-    errCodeBareNeedsWrapper: '添加时请使用包装形态提供服务器名：{ "名称": { ... } }，名称自动取键名',
+    errCodeWrapperValue: '包装形态的值必须是对象：{\'{\'} "名称": {\'{\'} ... {\'}\'} {\'}\'}',
+    errCodeBareNeedsWrapper: '添加时请使用包装形态提供服务器名：{\'{\'} "名称": {\'{\'} ... {\'}\'} {\'}\'}，名称自动取键名',
     errCodeRenameLocked: '编辑态名称锁定，改名 = 删除后重建；请把键名改回「{name}」',
   },
 }

@@ -1191,7 +1191,8 @@ export default {
     firewallHint: 'macOS may show a firewall prompt the first time you enable this. Choose "Allow" (one-time, remembered afterwards).',
     tailscaleTitle: 'Cross-network access (Tailscale)',
     tailscaleHint: 'Off the same network: install Tailscale on both the host and the phone, sign in with the same account, then replace the LAN address in the link with the Tailscale 100.x address.',
-    distMissingDev: 'Mobile shell build is missing; the mobile page will be unavailable. To restore: run pnpm --filter @taiji/mobile-renderer build and restart the app.',
+    // vue-i18n literal escape: {'@'} outputs @ (a bare @ triggers INVALID_LINKED_FORMAT compile crash)
+    distMissingDev: 'Mobile shell build is missing; the mobile page will be unavailable. To restore: run pnpm --filter {\'@\'}taiji/mobile-renderer build and restart the app.',
     distMissingProd: 'The installed package is missing the mobile shell build; the mobile page is unavailable. Please reinstall the latest version.',
   },
   // ── TTS page (TtsPage, ai-voice-tts design §5.2) ──
@@ -1339,13 +1340,14 @@ export default {
     fieldArgs: 'Arguments',
     fieldArgsPlaceholder: 'One argument per line',
     fieldEnv: 'Environment variables',
-    fieldEnvPlaceholder: 'KEY=VALUE per line, values support ${VAR}',
+    // vue-i18n literal escape: {'{'} / {'}'} output { } (a bare { starts a placeholder; an invalid token throws and crashes the render)
+    fieldEnvPlaceholder: 'KEY=VALUE per line, values support ${\'{\'}VAR{\'}\'}',
     fieldCwd: 'Working directory',
     fieldCwdPlaceholder: 'Leave empty to use the session directory',
     fieldUrl: 'URL',
     fieldUrlPlaceholder: 'streamable HTTP URL, e.g. https://example.com/mcp',
     fieldHeaders: 'Headers',
-    fieldHeadersPlaceholder: 'KEY=VALUE per line, values support ${VAR} and !command',
+    fieldHeadersPlaceholder: 'KEY=VALUE per line, values support ${\'{\'}VAR{\'}\'} and !command',
     fieldDescription: 'Description',
     fieldDescriptionPlaceholder: 'One-line description (optional), included in the system prompt',
     fieldExposure: 'Exposure',
@@ -1371,13 +1373,14 @@ export default {
     errEnvBadLine: 'Environment variable line(s) {lines} are malformed: use KEY=VALUE per line',
     errHeadersBadLine: 'Header line(s) {lines} are malformed: use KEY=VALUE per line',
     // Code mode (D7: single-entry shape, form-external keys kept as-is)
-    codeHint: 'Paste a single entry in wrapper form { "Name": { ... } }; form-external keys (type / timeout / auth / oauth, etc.) are kept as-is when written',
-    codePlaceholder: '{\n  "Name": { "command": "npx", "args": ["-y", "pkg"] }\n}',
+    // Braces in the JSON examples below must be literal-escaped ({'{'} / {'}'}); otherwise the message compiler parses them as placeholders and throws (render crash)
+    codeHint: 'Paste a single entry in wrapper form {\'{\'} "Name": {\'{\'} ... {\'}\'} {\'}\'}; form-external keys (type / timeout / auth / oauth, etc.) are kept as-is when written',
+    codePlaceholder: '{\'{\'}\n  "Name": {\'{\'} "command": "npx", "args": ["-y", "pkg"] {\'}\'}\n{\'}\'}',
     errCodeEmpty: 'Code is empty: paste configuration JSON, or switch back to the form tab',
     errCodeJson: 'JSON parsing failed: {message}',
     errCodeSingle: 'Only a single entry is supported: the top level must have exactly one name key',
-    errCodeWrapperValue: 'The wrapper value must be an object: { "Name": { ... } }',
-    errCodeBareNeedsWrapper: 'When adding, use the wrapper form to provide the server name: { "Name": { ... } }; the name is taken from the key',
+    errCodeWrapperValue: 'The wrapper value must be an object: {\'{\'} "Name": {\'{\'} ... {\'}\'} {\'}\'}',
+    errCodeBareNeedsWrapper: 'When adding, use the wrapper form to provide the server name: {\'{\'} "Name": {\'{\'} ... {\'}\'} {\'}\'}; the name is taken from the key',
     errCodeRenameLocked: 'Name is locked while editing; renaming = delete then re-create. Please change the key back to "{name}"',
   },
 }
