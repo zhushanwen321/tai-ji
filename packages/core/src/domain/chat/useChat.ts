@@ -992,7 +992,7 @@ export function createUseChat(deps: UseChatDeps) {
     // 上屏气泡（appendUser 显式 id 入参，气泡 id = 内核条目 id 契约不变）。
     // randomUuid（secure-context 安全包装）：移动壳经 LAN http 访问时 isSecureContext=false，
     // 直调 crypto.randomUUID 为 undefined 抛 TypeError → send 恒 false（移动端「未送达」）。
-    // 本文件此行是 u3b 内核化新增调用点，迁包装时遗漏（全仓唯一残留，2026-10 修复）。
+    // crypto.randomUUID 是 secure-context-only API，一切非 https 环境的调用点必须走本包装。
     const clientUuid = `u-${randomUuid()}`
     ensureStreamSubscription(sid, chat, session, subDeps)
     // S4：复用调用方算过的 promptText，避免 submitSegments 内部再调一次 segmentsToPrompt。

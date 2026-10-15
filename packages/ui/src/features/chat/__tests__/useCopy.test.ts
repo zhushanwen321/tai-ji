@@ -1,10 +1,10 @@
 /**
- * useCopy 行为测试：复制反馈态 + 非安全上下文守卫（移动壳 LAN http 修复回归）。
+ * useCopy 行为测试：复制反馈态 + 非安全上下文守卫（移动壳 LAN http 场景）。
  *
- * - 正常路径：writeText resolve → copied 置 key；失败（reject）静默不置反馈。
+ * - 正常路径：writeText resolve → copied 置 key。
+ * - writeText reject：catch 静默吞错，反馈态照常置位（反馈表示已发起复制，不等待写入结果）。
  * - 非安全上下文（LAN http，如移动壳远程访问）：navigator.clipboard 为 undefined，
- *   同步访问 .writeText 即抛 TypeError（.catch 接不住）——守卫早退必须不抛错、不置
- *   copied 反馈（回归锚：2026-10 fix-remote-control-send-msg）。
+ *   同步访问 .writeText 即抛 TypeError（.catch 接不住）——守卫早退不抛错、不置 copied 反馈。
  */
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { useCopy } from '../composables/useCopy'
