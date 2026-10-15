@@ -141,6 +141,27 @@ describe('createUseChat factory 行为', () => {
     f.dispose()
   })
 
+  it('send 在非 secure context（crypto.randomUUID undefined）下照常提交（移动壳 LAN http P0 回归）', async () => {
+    // 场景：移动壳经 LAN http（http://<lan-ip>:<port>）访问，isSecureContext=false →
+    // crypto.randomUUID 为 undefined（Web API 仅 secure context 暴露）。submitNewMessage
+    // 直调它会在 clientUuid 生成处同步抛 TypeError → send 恒 false（移动端「未送达，请
+    // 检查网络后重试」）。回归锚：clientUuid 必须经 randomUuid secure-context 安全包装
+    // （fallback = crypto.getRandomValues 手拼 v4，无 secure context 限制）。
+    vi.stubGlobal('crypto', {
+      getRandomValues: globalThis.crypto.getRandomValues.bind(globalThis.crypto),
+    })
+    try {
+      const f = makeFixture()
+      await expect(f.useChat.send('s1', textToSegments('hello'))).resolves.toBe(true)
+      expect(f.chatApi.submitDelivery).toHaveBeenCalledTimes(1)
+      const calledUuid = (f.chatApi.submitDelivery.mock.calls[0] as unknown as [string, string, string])[2]
+      expect(calledUuid).toMatch(/^u-[0-9a-fA-F-]{36}$/)
+      f.dispose()
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
   it('busy 期发送不转车道（B 策略退役）：统一 submit 照常提交，由内核判定 lane', async () => {
     const f = makeFixture()
     await f.useChat.send('s2', textToSegments('hi'))
