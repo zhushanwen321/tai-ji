@@ -21,15 +21,24 @@ import {
   bindWorkflowOverlayOpener,
   bindWorkflowRunLookup,
   closeDrawer,
+  clearSubagentSelection,
   lookupWorkflowRun,
   openDrawerTab,
+  openSubagent,
+  selectBackgroundTask,
   openWorkflow,
   openWorkflowInDrawer,
   setDrawerTab,
   toggleDrawer,
   _resetDrawerForTest,
 } from '../coordination'
-import { selectedCommandName, detailFilePath, useWorkflowSelection } from '../selection'
+import {
+  selectedCommandName,
+  detailFilePath,
+  useBashTaskSelection,
+  useSubagentSelection,
+  useWorkflowSelection,
+} from '../selection'
 
 /** 当前测试分区键（每用例新建绑定） */
 let sid: Ref<string | null>
@@ -136,6 +145,54 @@ describe('_resetDrawerForTest 测试隔离', () => {
 
     expect(selectedCommandName.value).toBe(null)
     expect(detailFilePath.value).toBe(null)
+  })
+})
+
+describe('subagent / bashTask 编排入口（选中态落内容域分区 + 切 tab 开 drawer 落控制态）', () => {
+  it('openSubagent = setSubagentView + 切 subagent tab + 开 drawer（D4 enteredFrom 透传）', () => {
+    focusSession('A')
+    const { isOpen, activeTab } = useDrawerControl()
+    const { selectedSubagentId, enteredFrom } = useSubagentSelection()
+
+    openSubagent({ virtualId: 'subagent:A:s1', enteredFrom: 'workflow' })
+    expect(isOpen.value).toBe(true)
+    expect(activeTab.value).toBe('subagent')
+    expect(selectedSubagentId.value).toBe('subagent:A:s1')
+    expect(enteredFrom.value).toBe('workflow')
+
+    // chat 来源：同编排链，enteredFrom='chat'（SubagentTab 返回按钮显隐依据）
+    openSubagent({ virtualId: 'agentcall:acs-1', enteredFrom: 'chat' })
+    expect(selectedSubagentId.value).toBe('agentcall:acs-1')
+    expect(enteredFrom.value).toBe('chat')
+  })
+
+  it('clearSubagentSelection 只清选中态、不动 drawer 开合与 activeTab', () => {
+    focusSession('A')
+    const { isOpen, activeTab } = useDrawerControl()
+    const { selectedSubagentId, enteredFrom } = useSubagentSelection()
+    openSubagent({ virtualId: 'subagent:A:s1', enteredFrom: 'chat' })
+
+    clearSubagentSelection()
+
+    expect(selectedSubagentId.value).toBe(null)
+    expect(enteredFrom.value).toBe(null)
+    expect(isOpen.value).toBe(true) // 不开合 drawer
+    expect(activeTab.value).toBe('subagent') // 不切 tab
+  })
+
+  it('selectBackgroundTask 写选中 id + 切 bashTask tab + 开 drawer；undefined=清选中', () => {
+    focusSession('A')
+    const { isOpen, activeTab } = useDrawerControl()
+    const { selectedBackgroundTaskId } = useBashTaskSelection()
+
+    selectBackgroundTask('task-1')
+    expect(isOpen.value).toBe(true)
+    expect(activeTab.value).toBe('bashTask')
+    expect(selectedBackgroundTaskId.value).toBe('task-1')
+
+    selectBackgroundTask(undefined)
+    expect(selectedBackgroundTaskId.value).toBe(undefined)
+    expect(activeTab.value).toBe('bashTask')
   })
 })
 
