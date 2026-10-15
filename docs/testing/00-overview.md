@@ -15,6 +15,7 @@
 | [visual/vlm-prompt-template.md](./visual/vlm-prompt-template.md) | VLM 视觉验证派发模板（TEST-STRATEGY 引用的 SSOT，独立不并入） | — |
 | [render-sampling.md](./render-sampling.md) | 渲染采样管道（基线采集/真机验收共用：CDP 连接/选择器/注入/等待信号/DOM 采样脚本资产 + 清单表；采样前必读，禁现场重写管道） | 2026-09-19 markdown HTML 支持验收脚本提炼 |
 | [testids-plan.md](./testids-plan.md) | 计划面 data-testid 清单（PlanModeBar / PlanReviewBar / PlanDocsPanel / PlanCommentPopover 四组件；验收剧本 patterns.mjs 锚源） | 2026-09-24 U4b 建账（plan-mode-state-machine） |
+| [testids-canvas.md](./testids-canvas.md) | 画布面 data-testid 清单（CanvasPane / CanvasGraph / CanvasNodeCard / CanvasNodeDetail / CanvasDetailPanel / CanvasArgStrip / CanvasReviewPanel / CanvasExportPanel / CanvasOpDialog / CanvasBindingBadge / TrayCanvasPanel 11 组件） | 2026-10-15 建账（problem-solve-canvas D5 终态同步 F1-27） |
 
 图例：✅ = 可测且稳定 / ⚠️ = 有约束或待补 / ❌ = 不可测（需手工）；**已落地** = spec 文件存在于 `e2e/` 且能跑通。
 

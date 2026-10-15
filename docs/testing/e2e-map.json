@@ -2269,6 +2269,122 @@
       "owner": "scripts/",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
       "note": "R2 态（pre-commit 按路径接线，无 CI 固定环节——接线 SSOT = .githooks/install-hooks.sh extension files 白名单段；触发面 = extensions/**/package.json、extensions/**/*.ts、脚本自身；本表登记 run 面 = 脚本自身变更干跑全量 27 包）。无 vitest 测试资产"
+    },
+    {
+      "id": "E2E-CANVAS-01",
+      "summary": "问题解决画布全交付链零 token 回归族：runtime canvas 服务 + transport handler / extension-protocol canvas 契约 / pi-canvas 扩展 / renderer 画布组件 + store + sync + 托盘面板五层 L1 单测（画布无 e2e spec 与真实 LLM 资产，可持续回归测试由单测族承担）",
+      "scope": [
+        "packages/runtime/src/services/canvas/**",
+        "packages/runtime/src/transport/canvas-message-handler.ts",
+        "packages/renderer/src/components/canvas/**",
+        "packages/renderer/src/stores/canvas.ts",
+        "packages/renderer/src/composables/use-canvas-sync.ts",
+        "packages/renderer/src/components/panel/tray/TrayCanvasPanel.vue",
+        "extensions/taiji/canvas/**",
+        "packages/extension-protocol/src/extensions/canvas/**",
+        "packages/shared/src/protocol.ts"
+      ],
+      "layer": "L1",
+      "assets": [
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/src/services/canvas/__tests__/canvas-invariants.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/src/services/canvas/__tests__/canvas-mutate-matrix.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/src/services/canvas/__tests__/canvas-persistence.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/src/services/canvas/__tests__/canvas-review-loop.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/src/services/canvas/__tests__/canvas-state-machine.test.ts"
+        },
+        {
+          "kind": "harness",
+          "ref": "packages/runtime/src/services/canvas/__tests__/canvas-helpers.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/src/transport/canvas-message-handler.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "packages/extension-protocol/src/extensions/canvas/__tests__/canvas-consistency.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "packages/extension-protocol/src/extensions/canvas/__tests__/canvas-matrix.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "packages/extension-protocol/src/extensions/canvas/__tests__/canvas-schema.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "extensions/taiji/canvas/src/__tests__/available-tools.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "extensions/taiji/canvas/src/__tests__/host.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "extensions/taiji/canvas/src/__tests__/review.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "extensions/taiji/canvas/src/__tests__/tool-execute.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "extensions/taiji/canvas/src/__tests__/tool-registration.test.ts"
+        },
+        {
+          "kind": "harness",
+          "ref": "extensions/taiji/canvas/src/__tests__/helpers/canvas-harness.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "packages/renderer/src/components/canvas/canvas-display.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "packages/renderer/src/components/canvas/canvas-graph.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "packages/renderer/src/components/canvas/canvas-ops.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "packages/renderer/src/components/canvas/canvas-pane.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "packages/renderer/src/components/panel/tray/tray-canvas-panel.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "packages/renderer/src/stores/canvas.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "packages/renderer/src/composables/use-canvas-sync.test.ts"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "cd packages/runtime && npx vitest run src/services/canvas/__tests__/ src/transport/canvas-message-handler.test.ts && cd ../extension-protocol && npx vitest run src/extensions/canvas/__tests__/ && cd ../../extensions/taiji/canvas && npx vitest run && cd ../../../packages/renderer && npx vitest run src/components/canvas/ src/components/panel/tray/tray-canvas-panel.test.ts src/stores/canvas.test.ts src/composables/use-canvas-sync.test.ts src/components/panel/workflow-viz/overlay/__tests__/workflow-viz-overlay.test.ts src/components/panel/workflow-viz/overlay/__tests__/workflow-viz-overlay-host.test.ts",
+      "owner": "packages/runtime",
+      "authority": "docs/domain-model.md",
+      "note": "R2 态（来源 impl-plan §4「e2e 影响面圈定」末行——select-affected-e2e --base 98b1d2ac0 对账 + e2e-map 登记，执行单元 u-integration-acceptance；设计与 impl-plan 档案在 .tmp 不入库，authority 回退画布领域模型 SSOT docs/domain-model.md）。本条为 D5 终态同步登记类批次 F1-50 落地：补登记前零 canvas 条目，--check 绿灯的真实原因 = extensions/taiji/** 不在任何 rule 的 watched root 内，机器门根本不看护该目录。画布无 e2e spec 资产（e2e/ 目录核实零 canvas spec）：设计 §4 验收计划 A1-A4 = L4 agent 真机走查、A5/A7 = 验收期脚本（产物落 .tmp 不入库）、A6a = L1 单测——可持续回归测试由五层 L1 单测族承担（零 token），照 E2E-MOCK-02 引 vitest 文件为 asset 的先例登记 23 件（runtime canvas 服务 5 测试 + canvas-helpers 夹具 + transport canvas handler 1 测试 / extension-protocol canvas 契约 3 测试 / pi-canvas 扩展 5 测试 + canvas-harness 夹具 / renderer 画布组件 4 测试 + 托盘面板 + store + sync composable）。run 另含 overlay 两测试（canvas tab 挂载分支）与托盘族两测试（composer-tray / useTrayCounts 的 canvas 件）——四件落共享目录，经 run 命令执行、不登记为 asset（防聚合泛化，E2E-BATCH-07 先例）。scope 中 packages/runtime/src/**、packages/renderer/src/** 已被 E2E-MOCK-01 / E2E-REAL-01 / E2E-VISUAL-01 / E2E-ELECTRON-01 覆盖（选中的是 playwright 轨），本 rule 按设计 §4 圈定清单显式列出 canvas 精确路径 = canvas 域改动选中本 rule 跑单测族；extensions/taiji/canvas/** 与 packages/extension-protocol/src/extensions/canvas/** 为本 rule 新增看护面（此前无任何 rule 覆盖，--check 对这两目录由「不看护」转为「看护且覆盖」）。packages/shared/src/protocol.ts（canvas.* 消息类型）已被 E2E-BTW-01 / E2E-TERMINAL-01 精确路径覆盖，按圈定清单同登便于 canvas 侧对账。"
     }
   ]
 }
