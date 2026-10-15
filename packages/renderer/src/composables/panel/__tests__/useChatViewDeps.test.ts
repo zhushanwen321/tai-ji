@@ -47,10 +47,6 @@ vi.mock('@taiji/ui/features/chat/markdown-incremental', () => ({
 vi.mock('@taiji/ui/features/chat/mermaid', () => ({
   renderMermaid: vi.fn(async () => ({ svg: '' })),
 }))
-vi.mock('@/composables/logic/messageFormat', () => ({
-  assistantToMarkdown: vi.fn(() => ''),
-}))
-
 /** sessionStore.list fixture：两 session 两 cwd（切 session 断言用） */
 const sessionList = [
   { id: 's1', cwd: '/home/demo/project-a' },

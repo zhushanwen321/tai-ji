@@ -19,11 +19,13 @@
  * 被下一帧 runtime 推送冲掉）。重载后回执态随组件生命周期丢失，标签由详情载荷字段
  * 承接（分支④「最近生效值」——仅活进程在场 / 覆盖状态），见 resolveSubagentModelDisplay。
  */
-import { reactive } from 'vue'
+import { computed, reactive } from 'vue'
+import type { ComputedRef } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { toErrorMessage } from '@taiji/core'
 import { subagent as subagentApi } from '@/api'
 import { useToast } from '@/composables/useToast'
+import type { SubagentRecord } from '@taiji/shared'
 import type {
   ProviderId,
   SubagentChatSetModelReply,
@@ -314,4 +316,50 @@ export function useSubagentModel() {
   }
 
   return { setSubagentModel, displayOf, memberDisplayOf, applyReplyToDisplay }
+}
+
+// ── [subagent-detail-model-info 2026-10-15] 详情页模型信息展示合成 ──────────────
+
+/**
+ * 派发期模型来源展示三元组（SubagentTab header 消费）：触发器 title（切换指引 +
+ * 当前实际盖章 ref 全值——标签可能被截断）、来源标注文案、来源完整语义 title。
+ * 来源字段 = record.modelSource（spawn 时点标注，与 modelOverride/热切正交；
+ * undefined = 存量 record 无字段，三元组全 undefined，消费方不展示）。
+ */
+export function useSubagentModelSourceBadge(
+  record: ComputedRef<SubagentRecord | null>,
+  displayOf: (recordId: string) => SubagentModelDisplayState | undefined,
+  t: (key: string, params?: Record<string, unknown>) => string,
+): {
+  modelDisplay: ComputedRef<SubagentModelDisplay>
+  modelTriggerTitle: ComputedRef<string>
+  modelSourceBadge: ComputedRef<string | undefined>
+  modelSourceTitle: ComputedRef<string | undefined>
+} {
+  // 标签四分支合成（§7.1 读取规则）一并下沉——组件只保留 readers 消费
+  const modelDisplay = computed<SubagentModelDisplay>(() => {
+    const recordValue = record.value
+    if (recordValue === null) return { label: undefined as string | undefined, overridden: false }
+    return resolveSubagentModelDisplay({
+      display: displayOf(recordValue.subagentId),
+      stampedModel: recordValue.model,
+      modelOverride: recordValue.modelOverride?.model,
+      recentEffectiveModel: recordValue.recentEffectiveModel,
+      recordStatus: recordValue.status,
+    })
+  })
+  const modelTriggerTitle = computed<string>(() => {
+    const base = t('panel.sideDrawer.subagentModelSwitchTitle')
+    const actual = record.value?.model
+    return actual !== undefined ? `${base}\n${t('panel.sideDrawer.subagentModelActual', { model: actual })}` : base
+  })
+  const modelSourceBadge = computed<string | undefined>(() => {
+    const source = record.value?.modelSource
+    return source !== undefined ? t(`panel.sideDrawer.subagentModelSource.${source}`) : undefined
+  })
+  const modelSourceTitle = computed<string | undefined>(() => {
+    const source = record.value?.modelSource
+    return source !== undefined ? t(`panel.sideDrawer.subagentModelSourceTitle.${source}`) : undefined
+  })
+  return { modelDisplay, modelTriggerTitle, modelSourceBadge, modelSourceTitle }
 }

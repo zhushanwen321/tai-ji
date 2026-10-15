@@ -32,12 +32,14 @@
       >
         <!-- 摘要行：flex 布局，min-h 锁定高度避免展开时跳动。
              [M3b demo 复刻]（workbench.css .line/.think）：行内间距 gap-[8px]（demo 8px）；
-             图标染 --reasoning（.think .sicon，显式类替换 BLOCK_ICON_CLASS——两者 text 色
-             工具类同特异性，追加不构成可靠覆盖）；行字号继承头部 --text-base（14px =
+             图标染色经显式类替换 BLOCK_ICON_CLASS（两者 text 色工具类同特异性，追加不构成
+             可靠覆盖）：静止态染 --neutral-ico（2026-10-15 裁决 ②A 去紫——原 --reasoning 紫
+             退役，token 本体不动，ANSI magenta / 摘要标题 / skill 徽标等其余消费点不受影响）；
+             行字号继承头部 --text-base（14px =
              demo fs-lg 行级档）。
              [MF-1-28]（demo TurnList.vue:72-73）：running 态 = 呼吸弧 accent（同工具行
              :237 形态，信号源 = thinkingSweeping）；静止态 = lightbulb 15px stroke1.6 染
-             --reasoning。行 hover 反馈（MF-1-4，demo workbench.css:355 .line:hover 只压
+             --neutral-ico。行 hover 反馈（MF-1-4，demo workbench.css:355 .line:hover 只压
              文字段 opacity .8——图标与显形时间戳不参与，hover 类挂行内文字 span 而非行
              容器，同 tool/bash-group/workflow 行）；行内垂直对齐
              baseline（MF-1-34，workbench.css:348 align-items:baseline），图标保持
@@ -49,7 +51,7 @@
                见 DrawerPanel/Sidebar/SettingsModal 三处先例（稳定性优先，瞬时切换）。scoped
                尾部 tico 过渡类随本移除删除。reduced-motion 语义随之自然成立（无动画可停）。 -->
           <RunningBlockIcon v-if="thinkingSweeping" kind="thinking" />
-          <component :is="BLOCK_ICON_LUCIDE.thinking" v-else class="size-[15px] shrink-0 self-center text-reasoning [stroke-width:1.6]" />
+          <component :is="BLOCK_ICON_LUCIDE.thinking" v-else class="size-[15px] shrink-0 self-center text-neutral-ico [stroke-width:1.6]" />
           <!-- 状态词 label：思考进行中跑文字扫光（决策 10）。生命周期 = 块级（thinkingEnd 未填），
                非消息级 working——思考完结后消息仍在流式（工具执行中），扫光随思考完结熄灭。
                base 覆盖为 mid 档对齐 BLOCK_LABEL_CLASS 常态字色（reduced-motion 停帧态 = 常态色，
@@ -120,39 +122,44 @@
          streaming-tail 光标在 Turn.vue trace 容器末尾（跟在所有 block 后，不受 contentBlocks 时序影响）。
          [M2 形态统一] 唯一 error 形态 = 追加形态：content 崩溃前正文保持原色（可为空），
          msg.error 独立 danger 行（错误文本只住 error 字段，永不染红正文）。 -->
-    <div v-else-if="type === 'text'" data-testid="block-text" class="group/text relative flex items-start gap-[8px] text-[length:var(--text-md)] leading-[1.8]" :class="textColorClass">
+    <div v-else-if="type === 'text'" data-testid="block-text" class="group/text relative flex flex-col text-[length:var(--text-md)] leading-[1.8]" :class="textColorClass">
+      <!-- 正文行（原行容器原样下沉一层；textColorClass 上提到外层列容器，继承不变） -->
+      <div class="flex items-start gap-[8px]">
+        <div class="min-w-0 flex-1">
+          <MarkdownRenderer v-if="content" :content="content ?? ''" :session-id="sessionId ?? undefined" :streaming="streaming" />
+          <!-- error 独立 danger 行（AlertCircle + msg.error 文本） -->
+          <div v-if="isAppendError" data-testid="block-text-error" class="mt-1 flex items-start gap-1.5 text-danger">
+            <AlertCircle class="mt-1.5 size-3.5 shrink-0 text-danger" />
+            <span class="min-w-0 flex-1 whitespace-pre-wrap">{{ error }}</span>
+          </div>
+        </div>
+        <!-- text 块行尾时刻（D2 悬停化：原 w-28 固定占位列随悬停化一并移除，正文行恢复满宽；
+             ml-auto 钉行尾，悬停/键盘焦点进入该行才显现） -->
+        <span v-if="messageTimestamp" class="ml-auto shrink-0 self-center font-mono text-[length:var(--text-2xs)] text-neutral-dim tabular-nums opacity-0 transition-opacity duration-[var(--duration-fast)] group-hover/text:opacity-100 group-focus-within/text:opacity-100" data-testid="text-time-slot">{{ formatClock(messageTimestamp) }}</span>
+      </div>
       <!-- [actions-anchor] turn 级 hover actions 挂载位（Turn.vue 经 #turn-actions 插槽注入，
-           仅末位 text 块携带）。悬浮于本块上方右侧：上方是块间留白与左对齐邻块的行尾空区，
-           右侧是正文换行预留的行尾时刻槽，两向均不遮正文。显隐门控挂 group/text——悬停区 =
-           text 块行本身，TurnMeta/过程行/run 组行悬停不触发；pb 桥接正文→按钮的移动空档，
-           按钮作为本行 DOM 子孙，移入按钮期间 group/text 悬停态不丢失。 -->
+           仅末位 text 块携带）。2026-10-15 用户裁决：流内固定槽位 = text 块下部一行，
+           与 UserBubble hover actions 同族形态（原「text 上方右侧」悬浮 chip 退役——
+           透明底不再覆盖任何文字）。常驻 h-6 行占位（opacity 门控显隐，与 UserBubble
+           mt-1+h-6 同参）；悬停区 = 外层 group/text（正文行 + 本行），按钮是本块 DOM
+           子孙，移入按钮期间悬停态经 DOM 祖先传递不丢失。 -->
       <span
         v-if="$slots['turn-actions']"
-        class="absolute bottom-full right-0 z-10 flex pb-1.5 opacity-0 pointer-events-none transition-opacity duration-[var(--duration-fast)] group-hover/text:pointer-events-auto group-hover/text:opacity-100 group-focus-within/text:pointer-events-auto group-focus-within/text:opacity-100"
+        class="mt-1 flex h-6 items-center gap-0.5 opacity-0 pointer-events-none transition-opacity duration-[var(--duration-fast)] group-hover/text:pointer-events-auto group-hover/text:opacity-100 group-focus-within/text:pointer-events-auto group-focus-within/text:opacity-100"
         data-testid="turn-actions-anchor"
       >
         <slot name="turn-actions" />
       </span>
-      <div class="min-w-0 flex-1">
-        <MarkdownRenderer v-if="content" :content="content ?? ''" :session-id="sessionId ?? undefined" :streaming="streaming" />
-        <!-- error 独立 danger 行（AlertCircle + msg.error 文本） -->
-        <div v-if="isAppendError" data-testid="block-text-error" class="mt-1 flex items-start gap-1.5 text-danger">
-          <AlertCircle class="mt-1.5 size-3.5 shrink-0 text-danger" />
-          <span class="min-w-0 flex-1 whitespace-pre-wrap">{{ error }}</span>
-        </div>
-      </div>
-      <!-- text 块行尾时刻（D2 悬停化：原 w-28 固定占位列随悬停化一并移除，正文行恢复满宽；
-           ml-auto 钉行尾，悬停/键盘焦点进入该行才显现） -->
-      <span v-if="messageTimestamp" class="ml-auto shrink-0 self-center font-mono text-[length:var(--text-2xs)] text-neutral-dim tabular-nums opacity-0 transition-opacity duration-[var(--duration-fast)] group-hover/text:opacity-100 group-focus-within/text:opacity-100" data-testid="text-time-slot">{{ formatClock(messageTimestamp) }}</span>
     </div>
 
     <!-- ── run 组块（run 类型分组，demo specs/chat/history-load-and-run-grouping.md §3）：
          连续同类型（探索 / 改动 / 执行命令）的工具行折成一行组头。组资格只看工具类型不看状态，
          组头计数三条口径（N=成员数 / 耗时=已完成成员合计 / M=组内失败数）与 hasRunning 由 core
          groupToolRuns 一次算好（header），本组件零解析。类型判定表见 core RUN_GROUP_TOOLS。
-         展开态：挂载即展开的条件 = 组内有 running 成员（正在发生的组要让用户看见），否则挂载即收起；
-         用户手动开合后以手动为准（本地 ref）。**不做「跑完自动收起」**——status 翻转驱动的开合会让
-         流式中的块高度突变，破坏贴底跟随（同 Block toolCollapsed 挂载快照的既有取舍）。
+         展开态：挂载一律收起（2026-10-15 裁决 ①A：无论什么时候分组的 block 默认折叠、不展开
+         内部 tool call，running 成员也不例外——回看与直播形态一致，进行中信号由组头动效图标 +
+         「N 步」计数承担）；用户手动开合后以手动为准（本地 ref）。**不做 status 驱动的自动开合**——
+         展开/收起翻转会让流式中的块高度突变，破坏贴底跟随（同 Block toolCollapsed 挂载快照的既有取舍）。
          失败不隐瞒：成员含 error 时行尾 traceFailed 段（M = 组内口径，与 TraceCompactorRow 全局
          failedCount 分账）。展开后成员保持各自 1 行收起态（嵌套普通 tool Block 复用既有行形态与
          PR-1 行高不变量），要看某个成员的输出需再点那一行（两步路径）。展开态住组件本地 ref、
@@ -803,10 +810,11 @@ const groupStatText = computed(() => {
 
 /* ── run 组展开态：组件本地 ref，不进 store、不持久化——turn 级展开态（useTurnExpansion /
  *    turn-expansion store）现状也不持久化，不为一个更低层的 UI 态单开持久化先例。
- *    初值 = 挂载快照「组内有 running 成员则展开」（正在发生的组要让用户看见，回看历史时全收起），
- *    此后只由用户点击翻转。**不做 status 驱动的自动收起**：跑完自动收起会让流式中的块高度突变、
- *    破坏贴底跟随（同 toolCollapsed 挂载快照的既有取舍，见该处注释的「被否」一条）。 ── */
-const groupCollapsed = ref(!(props.group?.hasRunning ?? false))
+ *    初值 = 恒收起（2026-10-15 裁决 ①A：原「组内有 running 成员则展开」例外已删——无论什么时候
+ *    默认折叠，回看与直播形态一致），此后只由用户点击翻转。**不做 status 驱动的自动开合**：
+ *    展开/收起翻转会让流式中的块高度突变、破坏贴底跟随（同 toolCollapsed 挂载快照的既有取舍，
+ *    见该处注释的「被否」一条）。 ── */
+const groupCollapsed = ref(true)
 const groupExpanded = computed(() => !groupCollapsed.value)
 
 function toggleGroup(): void {

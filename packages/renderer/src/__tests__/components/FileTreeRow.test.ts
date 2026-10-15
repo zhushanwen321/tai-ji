@@ -338,10 +338,48 @@ describe('FileTreeRow 选中态（selected prop，组件零 store 依赖）', ()
     expect(nameSpan.classes()).toContain('[font-weight:var(--fw-mid)]')
   })
 
-  it('selected=false → 无选中态样式', () => {
+  it('selected=false 的跟踪态文件 → 名称顶格白 fg（2026-10-15 双色基线，行容器仍 mid）', () => {
     const wrapper = mountRow(makeRow({ path: 'a.ts', type: 'file' }), false)
     expect(wrapper.find('[data-testid="file-tree-file-a.ts"]').classes()).not.toContain('text-neutral-fg')
     const nameSpan = wrapper.find('[data-testid="file-tree-file-a.ts"] .fname')
+    expect(nameSpan.classes()).toContain('text-neutral-fg')
+  })
+})
+
+describe('FileTreeRow 文件名双色（2026-10-15 全量显示 + 跟踪态颜色区分裁决）', () => {
+  it('未跟踪（gitStatus untracked）文件 → 名称无 fg（继承行基线 mid）', () => {
+    const row = makeRow({
+      path: 'new.ts',
+      type: 'file',
+      gitStatus: { path: 'new.ts', xyCode: '??', status: 'untracked' },
+    })
+    const nameSpan = mountRow(row).find('[data-testid="file-tree-file-new.ts"] .fname')
+    expect(nameSpan.classes()).not.toContain('text-neutral-fg')
+  })
+
+  it('gitignore 命中（ignored）文件 → 名称无 fg（未跟踪同色档，不再 dim italic）', () => {
+    const row = makeRow({ path: 'tmp/demo.html', type: 'file', ignored: true })
+    const nameSpan = mountRow(row).find('[data-testid="file-tree-file-tmp/demo.html"] .fname')
+    expect(nameSpan.classes()).not.toContain('text-neutral-fg')
+    expect(nameSpan.classes()).not.toContain('italic')
+  })
+
+  it('跟踪态改动文件（gitStatus modified）与无标注文件（非 git 仓库）→ 名称 fg', () => {
+    for (const gitStatus of [
+      { path: 'm.ts', xyCode: ' M', status: 'modified' as const },
+      undefined,
+    ]) {
+      const row = makeRow({ path: 'm.ts', type: 'file', gitStatus })
+      const nameSpan = mountRow(row).find('[data-testid="file-tree-file-m.ts"] .fname')
+      expect(nameSpan.classes()).toContain('text-neutral-fg')
+    }
+  })
+
+  it('ignored 目录行维持 dim italic 原样（双色只改文件行）', () => {
+    const row = makeRow({ path: 'node_modules', type: 'dir', ignored: true, expanded: false })
+    const nameSpan = mountRow(row).find('[data-testid="file-tree-dir-node_modules"] .fname')
+    expect(nameSpan.classes()).toContain('text-neutral-dim')
+    expect(nameSpan.classes()).toContain('italic')
     expect(nameSpan.classes()).not.toContain('text-neutral-fg')
   })
 })

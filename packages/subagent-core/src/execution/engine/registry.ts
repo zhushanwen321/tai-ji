@@ -261,6 +261,9 @@ function readOnlyEngineProxy(id: string, descriptor: CliEngineDescriptor): Engin
     ...(engine.validateModel !== undefined
       ? { validateModel: (modelRef: EngineModelSelectorInput) => engine.validateModel!(modelRef) }
       : {}),
+    ...(engine.translateModelRef !== undefined
+      ? { translateModelRef: (modelRef: string) => engine.translateModelRef!(modelRef) }
+      : {}),
     dispose: () => refuse("dispose"),
   };
 }

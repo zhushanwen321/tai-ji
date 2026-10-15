@@ -9,6 +9,13 @@
  *     session-service 持久化路径，按 sessionId 分区。放行整个 attachments 目录——
  *     全是用户自粘图片非敏感，安全粒度等同 tmpdir；protocol handler 无状态拿不到
  *     session 上下文，无法按 session 推导）
+ *   - 会话项目 `.tmp/` 子树（动态派生成员，2026-10-15 ADR-0118 决策②代价修订 3d）：
+ *     应用全部会话的项目根（session cwd）下的 `.tmp/` 子树。派生不经 renderer
+ *     （决策②否决的 session cwd 动态注册不回归）：main 自有 sessions 目录
+ *     （getPiSessionsDir，`<dataDir>/agent/sessions/<encodeCwd>/`）的 encodeCwd 目录名
+ *     与候选路径做正向对拍（见 isPathUnderSessionTmp）。风险面 = 用过项目集合的 .tmp/
+ *     可读，与 ~/Downloads 既有用户内容成员同粒度（且该 .tmp 本就是对应 session agent
+ *     可全量读写的域）。仅限 `.tmp` 字面量——项目其余路径仍不可预览（已接受代价保留）
  *   - projectRoot（仅 dev + 装配器注入）：worktree 项目根。dev-instance.mjs 装配的
  *     electron cwd/appPath 都指向 apps/electron 子目录，对话流 <img src="docs/...">
  *     等相对路径解析出的项目根下用户文件命中不了前两者——本成员恢复「项目根」语义
@@ -35,9 +42,10 @@
  * 「同一谓词」/ §6.9 D9）。
  */
 import path from 'node:path'
-import { readFileSync as fsReadFileSync, statSync as fsStatSync } from 'node:fs'
+import { readFileSync as fsReadFileSync, readdirSync as fsReaddirSync, statSync as fsStatSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { pathToFileURL } from 'node:url'
+import { encodeCwd } from '@taiji/shared/paths'
 import { expandLocalFilePath } from './path.js'
 import type {
   LocalFileReadReason,
@@ -129,6 +137,84 @@ export function isPathInAllowedPrefixes(filePath: string, allowedPrefixes: reado
   // 前缀匹配（allowedPrefixes 已带 trailing sep）+ 精确匹配（resolved 本身就是允许目录）
   return allowedPrefixes.some(p => resolved.startsWith(p))
     || allowedPrefixes.some(p => resolved + sep === p)
+}
+
+// ── 会话项目 `.tmp/` 子树准入（2026-10-15 ADR-0118 决策②代价修订 3d）──────────────────
+// 「项目目录内 HTML 不可应用内预览」的已接受代价按用户裁决修订：应用全部会话的项目根
+// （session cwd）下的 `.tmp/` 子树加入三面准入（协议 handler / servable 预检 / read 通道）。
+// 成员派生不经 renderer（决策②否决的 session cwd 动态注册不回归——无新 IPC、无注册
+// 时序、无预检对注册依赖）：main 自有 sessions 目录（getPiSessionsDir，
+// `<dataDir>/agent/sessions/<encodeCwd>/`）的 encodeCwd 目录名与候选路径做正向对拍。
+// encodeCwd 把 / \ : 归并为 `-`（不可反向解码），但正向对拍无歧义：候选 cwd 只能取自
+// 被验路径里 `/.tmp/` 边界的前缀段（结构性约束，非任意字符串），逐候选 encode 后比对
+// 目录名集。每次准入现算（readdir 本地 fs µs 级），无缓存无时间平抑面（ADR-0122 事实
+// 驱动：磁盘目录集即事实源，读时直查）。
+
+/** 会话项目准入子树段字面量（单一收口；扩展新子目录改此处 + 同步 ADR/design 注记） */
+const SESSION_PROJECT_TMP_SEGMENT = '.tmp'
+
+/** 目录枚举 fs 切面（缺省 node:fs；单测注入桩） */
+export interface SessionTmpDirFs {
+  readdirSync?: (dir: string) => string[]
+}
+
+function defaultReaddir(dir: string): string[] {
+  return fsReaddirSync(dir)
+}
+
+/**
+ * 收集 sessions 目录下的 encodeCwd 子目录名集（会话项目 `.tmp/` 准入的目录集来源）。
+ *
+ * 只认 `--...--` 形态（encodeCwd 产物）；枚举失败（缺目录 / 权限）→ 空集（准入从紧，
+ * 不构成放行）：ENOENT 静默（无会话目录 = 无会话项目，常态），其余异常经 onError
+ * 旁路出声（与探针异常同一可见性约定，不静默吞掉）。
+ */
+export function collectSessionTmpEncodeCwdDirs(
+  sessionsDir: string,
+  fs: SessionTmpDirFs = {},
+  onError?: (err: unknown, dir: string) => void,
+): ReadonlySet<string> {
+  let entries: string[]
+  try {
+    entries = (fs.readdirSync ?? defaultReaddir)(sessionsDir)
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException)?.code !== 'ENOENT') onError?.(err, sessionsDir)
+    return new Set()
+  }
+  return new Set(entries.filter(e => e.startsWith('--') && e.endsWith('--')))
+}
+
+/**
+ * 规范化后的绝对路径是否落在某会话项目的 `.tmp/` 子树内（encodeCwd 正向对拍）。
+ *
+ * resolvedPath 必须已 path.resolve 规范化（谓词入口职责）——`..` 穿越已在 resolve 层
+ * 折叠，对拍基于最终形态：`<cwd>/.tmp/../../other` 折叠后脱离 `.tmp` 前缀，不误放行。
+ * Windows 形态：path.sep 为 `\` 时按同长斜杠归一副本找边界，原形态与归一形态双候选
+ * 对拍（pi 在 win 上编码的是原生 `\` 路径，候选须复现两种形态）。
+ */
+export function isPathUnderSessionTmp(resolvedPath: string, encodeCwdDirs: ReadonlySet<string>): boolean {
+  if (encodeCwdDirs.size === 0) return false
+  const sep = path.sep
+  const normalized = resolvedPath.split(sep).join('/')
+  const marker = `/${SESSION_PROJECT_TMP_SEGMENT}`
+  const candidates = new Set<string>()
+  let from = 0
+  for (;;) {
+    const i = normalized.indexOf(`${marker}/`, from)
+    if (i === -1) break
+    candidates.add(resolvedPath.slice(0, i))
+    candidates.add(normalized.slice(0, i))
+    from = i + 1
+  }
+  // 目录自身形态 <cwd>/.tmp：让它进入白名单域拿到准确的 is_dir reason（而非 out_of_whitelist）
+  if (normalized.endsWith(marker)) {
+    candidates.add(resolvedPath.slice(0, resolvedPath.length - marker.length))
+    candidates.add(normalized.slice(0, normalized.length - marker.length))
+  }
+  for (const candidate of candidates) {
+    if (encodeCwdDirs.has(encodeCwd(candidate))) return true
+  }
+  return false
 }
 
 /**
@@ -228,14 +314,20 @@ export function buildLocalFileFetchUrl(resolvedPath: string): string {
  * @param rawPath 绝对路径或 `~` 形态路径（IPC 入参）
  * @param allowedPrefixes computeLocalFilePrefixes 产出（已带 trailing path.sep）
  * @param fs 探测切面（缺省 node:fs）
+ * @param sessionTmpDirs 会话项目 `.tmp/` 准入的 encodeCwd 目录集（可省——省略时仅静态前缀集裁决）
  */
 export function probeLocalFileServable(
   rawPath: string,
   allowedPrefixes: readonly string[],
   fs: LocalFileProbeFs = {},
+  sessionTmpDirs?: ReadonlySet<string>,
 ): LocalFileProbeResult {
   const resolvedPath = resolveLocalFilePath(rawPath)
-  if (!isPathInAllowedPrefixes(resolvedPath, allowedPrefixes)) {
+  // 检查顺序是安全性质：静态前缀集与会话项目 .tmp 对拍都属白名单域（纯字符串/目录名集
+  // 运算，不触被验路径的 fs）——两关都过不去才短路 out_of_whitelist，越界路径依旧不触 fs，
+  // 不构成任意路径的存在性探测通道
+  if (!isPathInAllowedPrefixes(resolvedPath, allowedPrefixes)
+    && !(sessionTmpDirs && isPathUnderSessionTmp(resolvedPath, sessionTmpDirs))) {
     return { servable: false, reason: 'out_of_whitelist', resolvedPath: '' }
   }
   let stat: { isDirectory(): boolean; size: number } | undefined
@@ -273,8 +365,9 @@ export function probeLocalFileUrlPathname(
   pathname: string,
   allowedPrefixes: readonly string[],
   fs: LocalFileProbeFs = {},
+  sessionTmpDirs?: ReadonlySet<string>,
 ): LocalFileProbeResult {
-  return probeLocalFileServable(normalizeLocalFileUrlPathname(pathname), allowedPrefixes, fs)
+  return probeLocalFileServable(normalizeLocalFileUrlPathname(pathname), allowedPrefixes, fs, sessionTmpDirs)
 }
 
 // ── local-file 源码内容读取（chat-html-support §8.2 S3「切换『源码』看到 shiki 高亮」）──
@@ -309,13 +402,15 @@ function defaultReadFile(filePath: string): Uint8Array {
  * @param rawPath 绝对路径或 `~` 形态路径（IPC 入参）
  * @param allowedPrefixes 准入前缀集（已带 trailing path.sep，见上方准入域说明）
  * @param fs 探测 / 读取切面（缺省 node:fs）
+ * @param sessionTmpDirs 会话项目 `.tmp/` 准入的 encodeCwd 目录集（可省——省略时仅静态前缀集裁决）
  */
 export function readLocalFileContent(
   rawPath: string,
   allowedPrefixes: readonly string[],
   fs: LocalFileProbeFs & LocalFileReadFs = {},
+  sessionTmpDirs?: ReadonlySet<string>,
 ): LocalFileReadResult {
-  const probe = probeLocalFileServable(rawPath, allowedPrefixes, fs)
+  const probe = probeLocalFileServable(rawPath, allowedPrefixes, fs, sessionTmpDirs)
   if (!probe.servable) return { ok: false, reason: probe.reason ?? 'not_found' }
   try {
     const buf = (fs.readFileSync ?? defaultReadFile)(probe.resolvedPath)

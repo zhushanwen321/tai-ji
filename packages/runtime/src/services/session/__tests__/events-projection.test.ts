@@ -476,6 +476,80 @@ describe('projectV2Subagent（事件源胜出 / 窗外兜底）', () => {
     expect(projectV2Subagent(undefined, undefined, undefined)).toBeNull()
   })
 
+  // ── [subagent-detail-model-info] modelSource 投影 + running 期模型（created 帧回落）──
+
+  it('running 期模型回落 created 帧留痕（settled 条目缺席）+ modelSource 随身份域投影', () => {
+    const fold = {
+      identity: createdEvent('sa-1', 1, { model: 'zai-coding-plan/GLM-5.3', modelSource: 'explicit' }),
+      bound: undefined,
+      round: undefined,
+      epoch: 0,
+      roundIdle: undefined,
+      settled: undefined,
+      reopened: undefined,
+      modelOverride: undefined,
+      lastSeq: 1,
+      lastEvent: undefined,
+    }
+    const record = projectV2Subagent(registered, undefined, fold)!
+    expect(record.status).toBe('running')
+    // running 期实际模型可见（不再等 settled 才透传）
+    expect(record.model).toBe('zai-coding-plan/GLM-5.3')
+    expect(record.modelSource).toBe('explicit')
+  })
+
+  it('modelSource 三源取先：settled 条目 > fold 身份域 > registered 条目；全缺 = undefined', () => {
+    // settled 条目在场 → 条目值胜出
+    const settledWins = projectV2Subagent(
+      registered,
+      { ...settledEntry, modelSource: 'preference' },
+      {
+        identity: createdEvent('sa-1', 1, { model: 'p/m', modelSource: 'explicit' }),
+        bound: undefined,
+        round: undefined,
+        epoch: 0,
+        roundIdle: undefined,
+        settled: undefined,
+        reopened: undefined,
+        modelOverride: undefined,
+        lastSeq: 1,
+        lastEvent: undefined,
+      },
+    )!
+    expect(settledWins.modelSource).toBe('preference')
+
+    // settled 缺席 → fold 身份域
+    const foldWins = projectV2Subagent(
+      registered,
+      undefined,
+      {
+        identity: createdEvent('sa-1', 1, { modelSource: 'frontmatter' }),
+        bound: undefined,
+        round: undefined,
+        epoch: 0,
+        roundIdle: undefined,
+        settled: undefined,
+        reopened: undefined,
+        modelOverride: undefined,
+        lastSeq: 1,
+        lastEvent: undefined,
+      },
+    )!
+    expect(foldWins.modelSource).toBe('frontmatter')
+
+    // fold 缺席（窗外）→ registered 条目兑底
+    const registeredWins = projectV2Subagent(
+      { ...registered, modelSource: 'preference' },
+      undefined,
+      undefined,
+    )!
+    expect(registeredWins.modelSource).toBe('preference')
+
+    // 全缺（存量 record 形态）→ undefined
+    const none = projectV2Subagent(registered, settledEntry, undefined)!
+    expect(none.modelSource).toBeUndefined()
+  })
+
   // [F1-38 轮终形态] v1 语义：轮终翻边写 idle（写侧 markRoundIdle 落 idle + v1
   // 权威词同源）——v2 投影须延续（轮终等待续聊的 record 不得显示 running，否则
   // running + stopReason 矛盾组合且可能被用户误 cancel）。

@@ -37,6 +37,13 @@
 export type SubagentStatus = 'running' | 'idle'
 
 /**
+ * 派发期模型来源（SubagentRecord.modelSource 同语义锚；与 subagent-core 域内本地
+ * 副本逐字段等值——core 不依赖 @taiji/shared，workflow-dag-parser 同款边界，双侧
+ * 值域修改须同步）。
+ */
+export type SubagentModelSource = 'explicit' | 'frontmatter' | 'preference' | 'default'
+
+/**
  * SubagentStatus 值全集（adversarial-review-fixes §3.3 B3；[U6] 两态收窄后 = 两值）。
  *
  * 用途：消费方测试的全集覆盖矩阵数据源——shared 扩枚举时新「进行中类」值会静默落
@@ -108,8 +115,16 @@ export interface SubagentRecord {
   task: string
   /** 当前状态（两态：running=本轮有任务在飞 / idle=可接续聊；legacy 终态值 U6 起解析边界归一） */
   status: SubagentStatus
-  /** 执行所用 model（展示用） */
+  /** 执行所用 model（展示用；running 期经 record-created 帧投影，settled 后为盖章值） */
   model?: string
+  /**
+   * 派发期模型来源标注（subagent-detail-model-info 2026-10-15）：record.model 的来源
+   * ——「派发时是显式指定还是缺省补缺」。与模型覆盖（modelOverride/热切）正交：本字段
+   * 只记录 spawn 时点来源，不随后续切换变化。additive：undefined（存量 record）=
+   * 来源未知，读侧不展示标注。注意：subagent-core 域内有逐字段等值的本地副本
+   * （core 不依赖 @taiji/shared，workflow-dag-parser 同款边界），双侧值域修改须同步。
+   */
+  modelSource?: SubagentModelSource
   /** 思考等级（off/minimal/low/medium/high/xhigh） */
   thinkingLevel?: string
   /** 完成的对话轮数 */

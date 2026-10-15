@@ -636,3 +636,118 @@ describe('subagent store — split 双 session 加载态隔离（P2-3 回归锁�
   })
 })
 
+
+describe('subagent store — drawer 二级 tab 状态族（subagent-detail-tabs）', () => {
+  it('drawerTabsOf 惰性建分区：首次访问返回空分区，二次访问同一对象', () => {
+    const store = useSubagentStore()
+
+    // 首次访问惰性建空分区（Vue reactive Map 语义：首访返回 raw 对象，二次起返回同一响应式 proxy）
+    const first = store.drawerTabsOf('sid-a')
+    expect(first.tabs).toEqual([])
+    expect(first.active).toBeNull()
+
+    const second = store.drawerTabsOf('sid-a')
+    const third = store.drawerTabsOf('sid-a')
+    expect(third).toBe(second)
+    expect(second.tabs).toEqual([])
+  })
+
+  it('openDrawerTab 新开 tab 并激活；重复打开幂等（不重复 push，仅切激活）', () => {
+    const store = useSubagentStore()
+
+    store.openDrawerTab('sid-a', 'vid-1')
+    store.openDrawerTab('sid-a', 'vid-2')
+    let entry = store.drawerTabsOf('sid-a')
+    expect(entry.tabs).toEqual(['vid-1', 'vid-2'])
+    expect(entry.active).toBe('vid-2')
+
+    // 已打开 vid-1 后先切到 vid-2，再「打开」vid-1：不重复 push，仅激活切回
+    store.activateDrawerTab('sid-a', 'vid-2')
+    store.openDrawerTab('sid-a', 'vid-1')
+    entry = store.drawerTabsOf('sid-a')
+    expect(entry.tabs).toEqual(['vid-1', 'vid-2'])
+    expect(entry.active).toBe('vid-1')
+  })
+
+  it('activateDrawerTab 已打开者切换生效；未打开者 tabs 不变', () => {
+    const store = useSubagentStore()
+    store.openDrawerTab('sid-a', 'vid-1')
+
+    store.activateDrawerTab('sid-a', 'vid-1')
+    expect(store.drawerTabsOf('sid-a').active).toBe('vid-1')
+
+    store.activateDrawerTab('sid-a', 'vid-never-opened')
+    const entry = store.drawerTabsOf('sid-a')
+    expect(entry.tabs).toEqual(['vid-1'])
+    expect(entry.active).toBe('vid-1')
+  })
+
+  it('关闭激活 tab：右邻优先激活；无右邻激活左邻', () => {
+    const store = useSubagentStore()
+    store.openDrawerTab('sid-a', 'vid-1')
+    store.openDrawerTab('sid-a', 'vid-2')
+    store.openDrawerTab('sid-a', 'vid-3')
+    store.activateDrawerTab('sid-a', 'vid-1')
+
+    // 关最左激活者 → 右邻 vid-2 激活
+    expect(store.closeDrawerTab('sid-a', 'vid-1')).toBe('vid-2')
+    expect(store.drawerTabsOf('sid-a').tabs).toEqual(['vid-2', 'vid-3'])
+
+    // 关最右激活者（无右邻）→ 左邻 vid-2 激活
+    store.activateDrawerTab('sid-a', 'vid-3')
+    expect(store.closeDrawerTab('sid-a', 'vid-3')).toBe('vid-2')
+    expect(store.drawerTabsOf('sid-a').tabs).toEqual(['vid-2'])
+  })
+
+  it('关闭非激活 tab 激活者不变；关闭不存在的 tab 返回当前激活者', () => {
+    const store = useSubagentStore()
+    store.openDrawerTab('sid-a', 'vid-1')
+    store.openDrawerTab('sid-a', 'vid-2')
+    store.openDrawerTab('sid-a', 'vid-3')
+    store.activateDrawerTab('sid-a', 'vid-1')
+
+    // vid-2 非激活，关闭后激活者仍是 vid-1
+    expect(store.closeDrawerTab('sid-a', 'vid-2')).toBe('vid-1')
+    expect(store.drawerTabsOf('sid-a').tabs).toEqual(['vid-1', 'vid-3'])
+    expect(store.drawerTabsOf('sid-a').active).toBe('vid-1')
+
+    // 不存在的 vid：tabs 与激活者均不变
+    expect(store.closeDrawerTab('sid-a', 'vid-ghost')).toBe('vid-1')
+    expect(store.drawerTabsOf('sid-a').tabs).toEqual(['vid-1', 'vid-3'])
+  })
+
+  it('关到最后一个 tab：返回 null（调用方据此回空态）', () => {
+    const store = useSubagentStore()
+    store.openDrawerTab('sid-a', 'vid-1')
+
+    expect(store.closeDrawerTab('sid-a', 'vid-1')).toBeNull()
+    expect(store.drawerTabsOf('sid-a')).toEqual({ tabs: [], active: null })
+  })
+
+  it('clearSession 释放 tab 分区：再访问是全新空分区', () => {
+    const store = useSubagentStore()
+    store.openDrawerTab('sid-a', 'vid-1')
+    const before = store.drawerTabsOf('sid-a')
+
+    store.clearSession('sid-a')
+
+    const after = store.drawerTabsOf('sid-a')
+    expect(after).not.toBe(before)
+    expect(after).toEqual({ tabs: [], active: null })
+  })
+
+  it('多 session 分区隔离：A 的 tabs 操作不影响 B', () => {
+    const store = useSubagentStore()
+    store.openDrawerTab('sid-a', 'vid-a1')
+    store.openDrawerTab('sid-b', 'vid-b1')
+
+    expect(store.drawerTabsOf('sid-a').tabs).toEqual(['vid-a1'])
+    expect(store.drawerTabsOf('sid-b').tabs).toEqual(['vid-b1'])
+    expect(store.drawerTabsOf('sid-a').active).toBe('vid-a1')
+    expect(store.drawerTabsOf('sid-b').active).toBe('vid-b1')
+
+    store.closeDrawerTab('sid-a', 'vid-a1')
+    expect(store.drawerTabsOf('sid-b').tabs).toEqual(['vid-b1'])
+    expect(store.drawerTabsOf('sid-b').active).toBe('vid-b1')
+  })
+})

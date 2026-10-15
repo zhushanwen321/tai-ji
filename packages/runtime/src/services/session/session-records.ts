@@ -50,10 +50,9 @@ import { countSessionMessagesInFile } from './session-message-count.js'
 // constants 迁出——plan-state entry 契约与 legacy 读取同域单源；包依赖，与下方 engines
 // 契约同引法）
 import type { SubagentEngineConfigView, SubagentEnginesFile, SubagentEngineModelInfo } from '@zhushanwen/extension-protocol'
-// engine-provider-unification D5：zcode 模型清单派生（u1-sync，双源回落内建——真实
-// provider_config.json ∪ taiji 同步副本，任一源不可读按空集继续）
-import { deriveZcodeEngineModels } from '../zcode-provider-sync.js'
-import type { ZcodeProviderSyncPaths } from '../zcode-provider-sync.js'
+// engine-provider-unification D5 + engine-ref-translation D3：zcode 模型清单派生（u1-sync，
+// 真实 provider_config.json ∪ taiji 同步副本 ∪ 内建目录 account: 直通家族，任一源不可读按空集继续）
+import { deriveZcodeEngineModels, locateZcodeBuiltinCatalogSync, type ZcodeModelListPaths } from '../zcode-provider-sync.js'
 import { SUBAGENTS_ENGINES_FILENAME, PLAN_STATE_CUSTOM_TYPE } from '@zhushanwen/extension-protocol'
 // paths.ts 是 Node-only 模块，刻意不从 shared barrel 导出（见 shared/src/index.ts L32 注释），
 // Node 端从子路径 import
@@ -295,7 +294,7 @@ export interface SessionRecordsDeps {
    * 与 zcode-subagent-cli preparer 解析链同源 import——SDK 契约根，不违 C-ext-13）。
    * 测试注入隔离真实 ~/.zcode 树（缺省会读到宿主真实配置，断言不可控）。
    */
-  zcodeModelListPaths?: Pick<ZcodeProviderSyncPaths, 'realProviderConfigPath' | 'syncedCopyPath'>
+  zcodeModelListPaths?: ZcodeModelListPaths
   /**
    * [A1 接线] session cwd 查询（subagentAction 的 skill 注入 project 扫描基准，
    * skill-reload-nondestructive D7）——与 SkillRegistry.getSessionCwd 同源（lifecycle
@@ -1195,10 +1194,11 @@ export class SessionRecords {
   /**
    * zcode 模型清单派生路径（deps 注入优先，缺省同源拼装）。
    */
-  private zcodeModelListPaths(): Pick<ZcodeProviderSyncPaths, 'realProviderConfigPath' | 'syncedCopyPath'> {
+  private zcodeModelListPaths(): ZcodeModelListPaths {
     return this.deps.zcodeModelListPaths ?? {
       realProviderConfigPath: join(homedir(), '.zcode', 'v2', 'provider_config.json'),
       syncedCopyPath: join(getDataDir(), ...ZCODE_PI_SYNCED_PROVIDER_CONFIG_SEGMENTS),
+      builtinCatalogPath: locateZcodeBuiltinCatalogSync(),
     }
   }
 

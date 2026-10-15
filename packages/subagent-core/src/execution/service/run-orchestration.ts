@@ -68,6 +68,8 @@ import type { ExecutionNestingContext } from "../engine/common/nesting-guard.ts"
 import { resolveHostPiEnginePort } from "../engine/host/pi-host-binding.ts";
 import { identityEnvelopeOf } from "../engine/port.ts";
 import type { EnginePort, RunContext } from "../engine/port.ts";
+import type { SubagentModelSource } from "../domain/record-model.ts";
+import { resolveEngineModelWithTranslation } from "../engine/model-ref-translation.ts";
 import { executeOptionsToEngineTaskSpec } from "../engine/host-task-spec.ts";
 import { DEFAULT_ENGINE_ID } from "../engine/registry.ts";
 import {
@@ -473,8 +475,8 @@ export class RunOrchestration {
     // startFirstChatRound 单路径）。worktree 段保持内联：[create-await 竞态守卫]
     // 的「赋值 → 收口检查 → kick-off 同一同步段」实现约束禁止在检查与 kick-off 间
     // 插入 await，不宣 extract。
-    const { isPiRoute, engineModel, identity } = await this.resolveIdentityForRoute(opts, preIdentity, route);
-    const recordOpts: ExecuteOptions = this.stampEngineOnRecordOpts(opts, route, engineModel, isPiRoute);
+    const { isPiRoute, engineModel, modelSource, identity } = await this.resolveIdentityForRoute(opts, preIdentity, route);
+    const recordOpts: ExecuteOptions = this.stampEngineOnRecordOpts(opts, route, engineModel, modelSource, isPiRoute);
     const record = this.deps.createRecordForMode(identity, recordOpts, mode);
     // [collect 退役] 原 sync 路由派发落点（recordOpts.collect === "sync" 时登记进
     // 协调器）已随批机制删除——完成通知恒为逐条 async 投递。
@@ -545,20 +547,37 @@ export class RunOrchestration {
    * 缺席 → undefined，create 帧省略 model 键，引擎自解析）。偏好层排在 frontmatter 之后
    * （作者显式声明不被全局偏好压掉——既有层序保持）；偏好补缺值经 stampEngineOnRecordOpts
    * 写入 record.opts.model 后与显式指定同形（record 消费方只关心「用了哪个模型」）。
+   * [engine-ref-translation D2] 四层产物再经引擎翻译面（EnginePort.translateModelRef）
+   * 改写为引擎原生 ref（zai-coding-cn ↔ account:bigmodel-individual-coding-plan，
+   * 2026-10-14 用户裁决）；显式层翻译失败抛错、偏好层翻译后不在引擎清单则跳过——
+   * 见方法内注释。
    */
   private async resolveIdentityForRoute(
     opts: ExecuteOptions,
     preIdentity: { agent: string; agentConfig: AgentConfig | undefined },
     route: EngineRouteResult,
-  ): Promise<{ isPiRoute: boolean; engineModel: string | undefined; identity: ResolvedIdentity }> {
+  ): Promise<{ isPiRoute: boolean; engineModel: string | undefined; modelSource: SubagentModelSource; identity: ResolvedIdentity }> {
     const isPiRoute = route.engineId === DEFAULT_ENGINE_ID;
     // pi 路由恒 undefined（pi 链自有三层解析，taiji 级偏好无意义——D6 不采用段）；
     // ?? 链惰性求值：前两层任一在场时不触盘（直读仅服务偏好补缺场景）。
-    const engineModel = isPiRoute
+    // [engine-ref-translation D2] 四层产物经引擎翻译面改写为引擎原生 ref（共享 helper
+    // resolveEngineModelWithTranslation——与 workflow 域同语义；两层失败语义分立见模块头）。
+    // [subagent-detail-model-info] 来源标注与解析同点判定：pi 路由 = task 显式 ?
+    // explicit : default（frontmatter/偏好层不适用——pi 链自解析）。
+    const resolvedModel = isPiRoute
       ? undefined
-      : (opts.model ??
-        preIdentity.agentConfig?.model ??
-        readEngineDefaults(this.deps.getModelService().getAgentDir())[route.engineId]);
+      : resolveEngineModelWithTranslation(
+        route,
+        opts.model,
+        preIdentity.agentConfig?.model,
+        () => readEngineDefaults(this.deps.getModelService().getAgentDir())[route.engineId],
+        (message) => console.warn(message),
+        "run-orchestration",
+      );
+    const engineModel = resolvedModel?.engineModel;
+    const modelSource: SubagentModelSource = isPiRoute
+      ? (opts.model !== undefined ? "explicit" : "default")
+      : (resolvedModel?.source ?? "default");
     const identity = isPiRoute
       ? await this.deps.resolveIdentity(opts, preIdentity)
       : this.deps.resolveIdentityForEngine(
@@ -568,7 +587,7 @@ export class RunOrchestration {
         preIdentity.agentConfig,
         opts,
       );
-    return { isPiRoute, engineModel, identity };
+    return { isPiRoute, engineModel, modelSource, identity };
   }
 
   /**
@@ -578,21 +597,27 @@ export class RunOrchestration {
    *     键，undefined 经 JSON 省略）——与旧 pi 主路径 piOpts 剥离语义逐字节一致；
    *   - 非 pi：engine=route.engineId 显式盖章 + model 覆写（frontmatter 声明透传，
    *     u-h2 D2-1③）。路由不换引擎，故 route.engineId 恒等于三层指定的那个 id。
+   *   - [subagent-detail-model-info] 两分支同盖 modelSource（派发期来源标注与 model
+   *     同源同形——record.modelSource 消费方 = 详情页「派发时是指定还是缺省」标注；
+   *     additive 键，与 D5 的 engine 键禁令不冲突）。
    */
   private stampEngineOnRecordOpts(
     opts: ExecuteOptions,
     route: EngineRouteResult,
     engineModel: string | undefined,
+    modelSource: SubagentModelSource,
     isPiRoute: boolean,
   ): ExecuteOptions {
     if (!isPiRoute) {
       return {
         ...opts,
         ...(engineModel !== undefined ? { model: engineModel } : {}),
+        modelSource,
         engine: route.engineId,
       };
     }
-    return opts.engine === undefined ? opts : { ...opts, engine: undefined };
+    if (opts.engine === undefined) return { ...opts, modelSource };
+    return { ...opts, modelSource, engine: undefined };
   }
 
   /**

@@ -56,7 +56,14 @@ export const EXECUTING_BASH_NOTICE_HEIGHT = 32
 export const ESTIMATED_TURN_HEIGHT = 200
 
 /**
- * load-more 按钮预留高度（B2 强绑 DOM：Button h-8 + py-2 ≈ 48px，取 44 为历史值，避免定位回归）。
+ * load-more 顶部条预留高度（B2 强绑 DOM）。
+ * [2026-10-15 pill 化] 形态 = TruncatedHistoryBar pill（h-8 = 32px）+ 壳层 pt-3（12px）=
+ * 自然高 44，与本常量恒等——dev 断言（useConstantHeightAssert）零告警。旧形态 =
+ * Button size="sm"（h-9 = 36px）+ 壳层 py-2（16px）= 52px ≠ 44：断言一直告警，因前置还有
+ * 30px spacer（--message-stream-pad-top）兜底，未致真重叠，但占位契约已漂移（常量注释
+ * 还按 h-8 校准）。改 pill 的 h-/padding/字号或壳层 pt-3 必须重测并同步本常量。
+ * 几何（scrollEl 内，条 abs 随内容滚走）：条底沿 44；首条消息 = spacer 30 + startMargin
+ * 44 = 74 → 条下净空 30px（旧形态 52 → 74 仅 22px）。失败行 +32（LOAD_MORE_ERROR_ROW_HEIGHT）。
  * [cw wave w3] 通过 <Virtualizer :startMargin> 喂入 virta（design §4.11）：virta getItemOffset 已含 startMargin。
  */
 export const LOAD_MORE_RESERVED_HEIGHT = 44

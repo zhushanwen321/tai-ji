@@ -32,7 +32,7 @@ let zcodeCopyPath: string
 
 interface RecordsExtOverride {
   discoverEngines?: () => string[]
-  zcodeModelListPaths?: { realProviderConfigPath: string; syncedCopyPath: string }
+  zcodeModelListPaths?: { realProviderConfigPath: string; syncedCopyPath: string; builtinCatalogPath?: string }
 }
 
 function makeRecords(extOverride?: RecordsExtOverride): SessionRecords {
@@ -42,8 +42,13 @@ function makeRecords(extOverride?: RecordsExtOverride): SessionRecords {
     hasSession: () => false,
     getMessageBus: () => null,
     // [W8] getExtensionPaths 死键已随 deps 面删除（W4 登记的保留期结束）
-    // D5：zcode 模型清单派生源指向 tmp（隔离真实 ~/.zcode/v2/provider_config.json）
-    zcodeModelListPaths: { realProviderConfigPath: zcodeRealPath, syncedCopyPath: zcodeCopyPath },
+    // D5：zcode 模型清单派生源指向 tmp（隔离真实 ~/.zcode/v2/provider_config.json 与
+    // 内建目录 account 直通枚举——[engine-ref-translation D3] 副本注入缺省项）
+    zcodeModelListPaths: {
+      realProviderConfigPath: zcodeRealPath,
+      syncedCopyPath: zcodeCopyPath,
+      builtinCatalogPath: path.join(tmpDataRoot, 'absent-builtin-catalog.json'),
+    },
     ...extOverride,
   })
 }

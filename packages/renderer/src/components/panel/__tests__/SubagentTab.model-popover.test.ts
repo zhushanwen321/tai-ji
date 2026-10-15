@@ -15,7 +15,7 @@
  *   cd packages/renderer && npx vitest run src/components/panel/__tests__/SubagentTab.model-popover.test.ts
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { ref } from 'vue'
+import { nextTick, reactive, ref } from 'vue'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { getSettingsStore } from '@taiji/core'
@@ -40,6 +40,8 @@ vi.mock('@/stores/panel', () => ({
 }))
 
 // ── subagent store：records 分区按 fixture 返回（chat 域 record 视图锚）────
+// drawer 二级 tab fixture（reactive——computed 依赖追踪，见 store mock 注释）
+const drawerTabsFixture = reactive({ tabs: [] as string[], active: null as string | null })
 const subagentRecordFixture: Record<string, unknown> = {
   subagentId: 'sa-1',
   sessionFile: '/sub/sa-1.jsonl',
@@ -57,6 +59,25 @@ vi.mock('@/stores/subagent', async (importOriginal) => {
     useSubagentStore: () => ({
       getRecordsBySession: (_sid: string) => [subagentRecordFixture],
       isStreamingSubagent: () => false,
+      // drawer 二级 tab 状态（subagent-detail-tabs）：reactive fixture——组件 computed
+      // 依赖追踪需要响应式对象（普通对象会让 tab computed 永不失效）。
+      drawerTabsOf: () => drawerTabsFixture,
+      openDrawerTab: vi.fn((_sid: string, vid: string) => {
+        if (!drawerTabsFixture.tabs.includes(vid)) drawerTabsFixture.tabs.push(vid)
+        drawerTabsFixture.active = vid
+      }),
+      activateDrawerTab: vi.fn((_sid: string, vid: string) => {
+        if (drawerTabsFixture.tabs.includes(vid)) drawerTabsFixture.active = vid
+      }),
+      closeDrawerTab: vi.fn((_sid: string, vid: string) => {
+        const idx = drawerTabsFixture.tabs.indexOf(vid)
+        if (idx === -1) return drawerTabsFixture.active
+        drawerTabsFixture.tabs.splice(idx, 1)
+        if (drawerTabsFixture.active === vid) {
+          drawerTabsFixture.active = drawerTabsFixture.tabs[Math.min(idx, drawerTabsFixture.tabs.length - 1)] ?? null
+        }
+        return drawerTabsFixture.active
+      }),
     }),
   }
 })
@@ -96,6 +117,8 @@ let wrapper: ReturnType<typeof mount> | null = null
 
 beforeEach(() => {
   setActivePinia(createPinia())
+  drawerTabsFixture.tabs = []
+  drawerTabsFixture.active = null
   getSettingsStore().models.value = MODELS
   drawerState.selectedSubagentId.value = 'subagent:main-1:sa-1'
 })

@@ -1,15 +1,16 @@
 /**
  * zcode provider 启动同步模块测试（engine-provider-unification u1-sync）。
  *
- * 覆盖（对齐设计 §3.3 D2/D4/D7 + 任务书验收条款）：
+ * 覆盖（对齐设计 §3.3 D2/D7 + 任务书验收条款 + engine-ref-translation 2026-10-14 裁决）：
  * 1. 映射纯函数字段级断言：六条参与判定逐条 / 协议映射表 / per-model 差异整条跳过 /
  *    让位四源谓词逐源 / 字段丢弃与清单同序；
- * 2. zai 关联特例：前置两条件（ZCode 端 token + pi 侧已配）齐备生成 / 缺一不生成+warn /
- *    目录条目形态字段引用；
+ * 2. 翻译通道（engine-ref-translation）：zai-coding-cn 不映射条目（skip=translation-channel、
+ *    零 key 注入——等价由派发期翻译承载）；zai 按 1:1 通用映射直传；
  * 3. 副本瘦形态：不含任何真实文件条目、providerOrder 仅 pi 追加序；
  * 4. 落盘条件（pi 映射空 → 删旧副本）与幂等（同输入跳写）；
  * 5. 失败判定四分支（readModels 抛错 / ENOENT 零配置 / provider_config ENOENT / 其余读取异常）；
- * 6. 清单派生：真实 ∪ 副本 id 级聚合、真实优先、ENOENT 空集继续。
+ * 6. 清单派生：真实 ∪ 副本 id 级聚合、真实优先、ENOENT 空集继续，∪ 内建目录 account:
+ *    直通家族（无 apiKey 过滤、与个人 id 去重个人优先）。
  *
  * 全部 fixture 经 mkdtempSync 自建（os.tmpdir()），零接触真实 ~/.zcode / ~/.taiji / ~/.pi。
  *
@@ -22,7 +23,6 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { ModelsConfigView, ProviderConfigView } from '../../infra/pi/pi-provider-store.js'
 import type { ResolvedProviderCredential } from '../../services/ports/provider-credential-resolver.js'
 import {
-  buildZaiLinkedEntry,
   catalogViewToModelSources,
   collectZcodeOccupiedProviderIds,
   deriveZcodeEngineModels,
@@ -82,50 +82,10 @@ function writeCliConfig(ids: string[]): void {
   }))
 }
 
-/** zcode-builtin.json 目录 fixture：bigmodel/zai 家族 coding-plan 条目（本机实测形态）。 */
-function writeBuiltinCatalog(): void {
-  writeFileSync(join(root, 'zcode-builtin.json'), JSON.stringify({
-    config: {
-      providerConfigRules: {
-        providerRules: [
-          {
-            providerId: 'account:bigmodel-individual-coding-plan',
-            providerName: 'BigModel Individual Coding Plan',
-            config: {
-              access: { type: 'zhipu-account', accountType: 'bigmodel', mode: 'individual-coding-plan' },
-              api: { type: 'anthropic-messages', baseUrl: 'https://open.bigmodel.cn/api/anthropic' },
-              builtinModelIds: ['GLM-5.3', 'GLM-5.3-Flash'],
-            },
-          },
-          {
-            providerId: 'account:zai-individual-coding-plan',
-            providerName: 'Z.AI Individual Coding Plan',
-            config: {
-              access: { type: 'zhipu-account', accountType: 'zai', mode: 'individual-coding-plan' },
-              api: { type: 'anthropic-messages', baseUrl: 'https://api.z.ai/api/anthropic' },
-              builtinModelIds: ['GLM-5.3'],
-            },
-          },
-          {
-            providerId: 'account:bigmodel-team-coding-plan',
-            providerName: 'unmatched mode',
-            config: {
-              access: { type: 'zhipu-account', accountType: 'bigmodel', mode: 'team-coding-plan' },
-              api: { type: 'anthropic-messages', baseUrl: 'https://x' },
-              builtinModelIds: ['X'],
-            },
-          },
-        ],
-      },
-    },
-  }))
-}
-
 interface FakeDepsInput { // oe-exempt:20261012:test:测试构造辅助形态
   providers?: Record<string, ProviderConfigView>
   enabledModels?: string[]
   credentials?: Record<string, ResolvedProviderCredential | undefined>
-  configuredIds?: string[]
   baseUrls?: Record<string, string | undefined>
   catalog?: Record<string, readonly MappingModelSource[] | undefined>
   readModelsThrows?: boolean
@@ -145,13 +105,11 @@ function makeDeps(input: FakeDepsInput = {}): ZcodeProviderSyncDeps {
     },
     credentialResolver: {
       resolveProviderCredential: async id => input.credentials?.[id] ?? undefined,
-      hasProviderCredential: id => (input.configuredIds ?? []).includes(id),
       resolveProviderBaseUrl: id => input.baseUrls?.[id],
     },
     paths,
     isModelsCorrupted: () => input.modelsCorrupted ?? false,
     getMergedCatalogModels: () => undefined,
-    locateBuiltinCatalog: () => (existsFixtureCatalog() ? join(root, 'zcode-builtin.json') : undefined),
     warn: msg => warnings.push(msg),
   }
 }
@@ -164,15 +122,6 @@ function stepfunDeps(over: Parameters<typeof makeDeps>[0] = {}) {
     baseUrls: { 'stepfun': 'https://api.stepfun.com/v1' },
     ...over,
   })
-}
-
-function existsFixtureCatalog(): boolean {
-  try {
-    statSync(join(root, 'zcode-builtin.json'))
-    return true
-  } catch {
-    return false
-  }
 }
 
 /** 通用映射纯函数的最小输入装配（测试逐判定断言用）。 */
@@ -359,7 +308,7 @@ describe('mapPiProvidersToZcodeRules：D2 六条判定', () => {
     expect(result.skips[0]?.rule).toBe('no-models')
   })
 
-  it('zai 系官方 provider（zai-coding-cn / zai）前置分流：不进通用映射', () => {
+  it('翻译通道（zai-coding-cn）不进通用映射；zai（国际 API-key）按 1:1 通用映射直传', () => {
     const result = mapPiProvidersToZcodeRules(stdMappingInput({
       providers: {
         'zai-coding-cn': stdProvider(),
@@ -369,9 +318,14 @@ describe('mapPiProvidersToZcodeRules：D2 六条判定', () => {
         ['zai-coding-cn', stdCredential()],
         ['zai', stdCredential()],
       ]),
+      providerBaseUrlOf: id => (id === 'zai' ? 'https://api.z.ai/v1' : undefined),
     }))
-    expect(result.rules).toHaveLength(0)
-    expect(result.skips).toHaveLength(0)
+    // zai-coding-cn：翻译通道——不产条目、零 key 注入（等价由派发期翻译承载，2026-10-14 裁决）
+    expect(result.rules.map(r => r.providerId)).toEqual(['zai'])
+    expect(result.providerOrder).toEqual(['zai'])
+    expect(result.skips).toEqual([
+      { providerId: 'zai-coding-cn', rule: 'translation-channel', detail: expect.stringContaining('派发期翻译') },
+    ])
   })
 })
 
@@ -481,82 +435,33 @@ describe('collectZcodeOccupiedProviderIds：让位四源谓词', () => {
   })
 })
 
-// ── zai 关联特例（D4）──────────────────────────────────────────────────────
+// ── 翻译通道（engine-ref-translation，2026-10-14 用户裁决）──────────────────────
 
-describe('buildZaiLinkedEntry：zai 关联特例', () => {
-  const stdZaiInput = () => ({
-    piConfigured: { 'zai-coding-cn': true, 'zai': false },
-    piCredentials: {},
-    builtinTokens: { bigmodel: 'special-token-49chars' },
-    catalogEntries: {
-      bigmodel: {
-        providerName: 'BigModel Individual Coding Plan',
-        baseUrl: 'https://open.bigmodel.cn/api/anthropic',
-        modelIds: ['GLM-5.3', 'GLM-5.3-Flash'],
-      },
-    },
-    occupiedProviderIds: new Set<string>(),
+describe('翻译通道：zai-coding-cn 不映射条目（等价由派发期翻译承载）', () => {
+  it('zai-coding-cn → skip=translation-channel（不产条目、零 key 注入）', () => {
+    const result = mapPiProvidersToZcodeRules(stdMappingInput({
+      providers: { 'zai-coding-cn': stdProvider() },
+      credentials: new Map([['zai-coding-cn', stdCredential()]]),
+    }))
+    expect(result.rules).toHaveLength(0)
+    expect(result.providerOrder).toHaveLength(0)
+    expect(result.skips).toEqual([{
+      providerId: 'zai-coding-cn',
+      rule: 'translation-channel',
+      detail: expect.stringContaining('派发期翻译'),
+    }])
   })
 
-  it('pi 侧凭据存在 → 优先用作 apiKey（不用 builtin token）', () => {
-    const result = buildZaiLinkedEntry({ ...stdZaiInput(), piCredentials: { 'zai-coding-cn': 'pi-live-key' } })
-    expect('entry' in result).toBe(true)
-    if (!('entry' in result)) throw new Error('unreachable')
-    expect(result.entry.config.access).toEqual({ type: 'api-key', apiKey: 'pi-live-key' })
-  })
-
-  it('pi 侧凭据缺席 → 回落 builtin token（既有形态保形）', () => {
-    const result = buildZaiLinkedEntry(stdZaiInput())
-    expect('entry' in result).toBe(true)
-    if (!('entry' in result)) throw new Error('unreachable')
-    expect(result.entry.providerId).toBe('zai-coding-plan')
-    expect(result.entry.config.api).toEqual({ type: 'anthropic-messages', baseUrl: 'https://open.bigmodel.cn/api/anthropic' })
-    expect(result.entry.config.access).toEqual({ type: 'api-key', apiKey: 'special-token-49chars' })
-    expect(result.entry.config.personalModelIds).toEqual(['GLM-5.3', 'GLM-5.3-Flash'])
-    expect(result.entry.config.modelOrder).toEqual(['GLM-5.3', 'GLM-5.3-Flash'])
-    expect(result.entry.providerName).toBe('BigModel Individual Coding Plan')
-  })
-
-  it('缺 pi 侧配置 → 不生成 + 指引提示在 taiji 配置', () => {
-    const result = buildZaiLinkedEntry({ ...stdZaiInput(), piConfigured: { 'zai-coding-cn': false, 'zai': false } })
-    expect('skip' in result).toBe(true)
-    if (!('skip' in result)) throw new Error('unreachable')
-    expect(result.skip.detail.includes('taiji settings')).toBe(true)
-  })
-
-  it('pi 侧凭据与 ZCode 端 token 双缺 → 不生成 + 指引任一可用即可', () => {
-    const result = buildZaiLinkedEntry({ ...stdZaiInput(), builtinTokens: {} })
-    expect('skip' in result).toBe(true)
-    if (!('skip' in result)) throw new Error('unreachable')
-    expect(result.skip.detail.includes('任一可用即可')).toBe(true)
-  })
-
-  it('目录 coding-plan 条目不可得 → 不生成', () => {
-    const result = buildZaiLinkedEntry({ ...stdZaiInput(), catalogEntries: {} })
-    expect('skip' in result).toBe(true)
-  })
-
-  it('zcode 侧已有 zai-coding-plan 同名 → 关联条目让位', () => {
-    const result = buildZaiLinkedEntry({ ...stdZaiInput(), occupiedProviderIds: new Set(['zai-coding-plan']) })
-    expect('skip' in result).toBe(true)
-    if (!('skip' in result)) throw new Error('unreachable')
-    expect(result.skip.rule).toBe('yield-to-zcode')
-  })
-
-  it('两家族同时满足 → 取声明序首个（zai-coding-cn → bigmodel）', () => {
-    const result = buildZaiLinkedEntry({
-      piConfigured: { 'zai-coding-cn': true, 'zai': true },
-      piCredentials: {},
-      builtinTokens: { bigmodel: 'bm-token', zai: 'zai-token' },
-      catalogEntries: {
-        bigmodel: { baseUrl: 'https://open.bigmodel.cn/api/anthropic', modelIds: ['GLM-5.3'] },
-        zai: { baseUrl: 'https://api.z.ai/api/anthropic', modelIds: ['GLM-5.3'] },
-      },
-      occupiedProviderIds: new Set<string>(),
-    })
-    if (!('entry' in result)) throw new Error('unreachable')
-    expect(result.entry.config.api.baseUrl).toBe('https://open.bigmodel.cn/api/anthropic')
-    expect(result.entry.config.access.apiKey).toBe('bm-token')
+  it('zai（国际 API-key provider）1:1 原样直传（id/模型清单不变形）', () => {
+    const result = mapPiProvidersToZcodeRules(stdMappingInput({
+      providers: { 'zai': { ...stdProvider(), api: 'anthropic-messages' } },
+      credentials: new Map([['zai', stdCredential()]]),
+      providerBaseUrlOf: id => (id === 'zai' ? 'https://api.z.ai/v1' : undefined),
+    }))
+    expect(result.rules).toHaveLength(1)
+    expect(result.rules[0]?.providerId).toBe('zai')
+    expect(result.rules[0]?.config.personalModelIds).toEqual(['step-2-16k'])
+    expect(result.providerOrder).toEqual(['zai'])
   })
 })
 
@@ -567,11 +472,10 @@ describe('syncZcodeProviders：编排与瘦副本形态', () => {
     writeRealProviderConfig(['real-provider'], ['real-provider'])
     writeV2Config({
       'v2-provider': { apiKey: 'k' },
-      // zai 前置①：ZCode 端 builtin 条目特有 token（apiKey 非空）
+      // builtin: 条目带 apiKey 才算四源占用（源③判定）
       'builtin:bigmodel-coding-plan': { apiKey: 'special-token-49chars' },
     })
     writeCliConfig(['cli-provider'])
-    writeBuiltinCatalog()
 
     const outcome = await syncZcodeProviders(makeDeps({
       providers: {
@@ -579,29 +483,27 @@ describe('syncZcodeProviders：编排与瘦副本形态', () => {
         'zai-coding-cn': stdProvider(),
       },
       credentials: { 'stepfun': stdCredential() },
-      configuredIds: ['zai-coding-cn'],
       baseUrls: { 'stepfun': 'https://api.stepfun.com/v1' },
     }))
 
     expect(outcome.status).toBe('written')
-    expect(outcome.ruleCount).toBe(2) // stepfun 通用映射 + zai-coding-plan 关联
+    expect(outcome.ruleCount).toBe(1) // 仅 stepfun 通用映射（翻译通道不产条目）
 
     const copy = JSON.parse(readFileSync(paths.syncedCopyPath, 'utf-8')) as {
       schemaVersion: number
       config: { providerOrder: string[]; providerConfigRules: { providerRules: Array<{ providerId: string }> } }
     }
     const ruleIds = copy.config.providerConfigRules.providerRules.map(r => r.providerId)
-    expect(ruleIds).toEqual(['stepfun', 'zai-coding-plan'])
+    expect(ruleIds).toEqual(['stepfun'])
     // 瘦形态专项：真实文件条目（四源占用者）不进副本，order 仅 pi 追加序
     expect(ruleIds.includes('real-provider')).toBe(false)
     expect(ruleIds.includes('v2-provider')).toBe(false)
     expect(ruleIds.includes('cli-provider')).toBe(false)
-    expect(copy.config.providerOrder).toEqual(['stepfun', 'zai-coding-plan'])
+    expect(copy.config.providerOrder).toEqual(['stepfun'])
     expect(copy.schemaVersion).toBe(1)
   })
 
   it('幂等：同输入二次同步跳写（mtime 不变）', async () => {
-    writeBuiltinCatalog()
     const deps = stepfunDeps()
     await syncZcodeProviders(deps)
     const firstMtime = statSync(paths.syncedCopyPath).mtimeMs
@@ -647,7 +549,6 @@ describe('syncZcodeProviders：编排与瘦副本形态', () => {
   })
 
   it('失败分支③：真实 provider_config.json ENOENT = 真实条目空集（非失败）→ 照常落仅含 pi 映射的副本', async () => {
-    writeBuiltinCatalog()
     const outcome = await syncZcodeProviders(stepfunDeps())
     expect(outcome.status).toBe('written')
     expect(outcome.ruleCount).toBe(1)
@@ -672,7 +573,6 @@ describe('syncZcodeProviders：编排与瘦副本形态', () => {
   it('v2 config.json 缺失（absent 态）→ 不中止照常落盘，但 warn 前置提示（§2 前提表行 6 / D3：不静默）', async () => {
     // v2ConfigPath 不写盘（ENOENT = absent 态）——该形态下 wrapper fs 拦截整体不安装，
     // 同步模块必须出声提示此前置，防 N1/P-cli-eat 失败无信号可归因
-    writeBuiltinCatalog()
     const outcome = await syncZcodeProviders(stepfunDeps())
     expect(outcome.status).toBe('written')
     expect(outcome.ruleCount).toBe(1)
@@ -681,13 +581,15 @@ describe('syncZcodeProviders：编排与瘦副本形态', () => {
     expect(warnings.some(w => w.includes('同步中止'))).toBe(false)
   })
 
-  it('zcode-builtin.json 定位不到 → 关联条目不生成 + warn，普通条目同步不受影响', async () => {
+  it('翻译通道条目 skip 全量 warn 出声（不映射条目，普通条目同步不受影响）', async () => {
     const outcome = await syncZcodeProviders(stepfunDeps({
-      configuredIds: ['zai-coding-cn'], // pi 侧已配（前置②成立），但目录定位不到
+      providers: { 'stepfun': stdProvider(), 'zai-coding-cn': stdProvider() },
+      credentials: { 'stepfun': stdCredential() },
     }))
     expect(outcome.status).toBe('written')
-    expect(outcome.ruleCount).toBe(1) // 仅 stepfun，无 zai 关联
-    expect(warnings.some(w => w.includes('zcode-builtin.json 定位不到'))).toBe(true)
+    expect(outcome.ruleCount).toBe(1) // 仅 stepfun
+    expect(outcome.skips.some(s => s.rule === 'translation-channel')).toBe(true)
+    expect(warnings.some(w => w.includes('translation-channel'))).toBe(true)
   })
 
   it('skip 记录全部 warn 出声（ baseUrl 缺失示例 = 场景 S3）', async () => {
@@ -738,7 +640,7 @@ describe('deriveZcodeEngineModels：settings 模型清单派生', () => {
       },
     ])
 
-    const models = deriveZcodeEngineModels(paths)
+    const models = deriveZcodeEngineModels({ ...paths, builtinCatalogPath: join(root, 'absent-catalog.json') })
     const ids = models.map(m => m.id)
     // dup 用真实条目（real-model），copy-only 追加
     expect(ids).toContain('dup/real-model')
@@ -754,7 +656,7 @@ describe('deriveZcodeEngineModels：settings 模型清单派生', () => {
       providerId: 'copy-only',
       config: { access: { type: 'api-key', apiKey: 'k' }, personalModelIds: ['m1'], modelOrder: ['m1'] },
     }])
-    const models = deriveZcodeEngineModels(paths)
+    const models = deriveZcodeEngineModels({ ...paths, builtinCatalogPath: join(root, 'absent-catalog.json') })
     expect(models.map(m => m.id)).toEqual(['copy-only/m1'])
   })
 
@@ -765,7 +667,7 @@ describe('deriveZcodeEngineModels：settings 模型清单派生', () => {
       providerName: 'NoKey',
       config: { access: { type: 'api-key', apiKey: '' }, personalModelIds: [], modelOrder: ['from-order'] },
     }])
-    const models = deriveZcodeEngineModels(paths)
+    const models = deriveZcodeEngineModels({ ...paths, builtinCatalogPath: join(root, 'absent-catalog.json') })
     expect(models.map(m => m.id)).toEqual(['with-key/real-model'])
   })
 
@@ -774,8 +676,37 @@ describe('deriveZcodeEngineModels：settings 模型清单派生', () => {
       providerId: 'anon',
       config: { access: { type: 'api-key', apiKey: 'k' }, personalModelIds: ['m1'] },
     }])
-    const models = deriveZcodeEngineModels(paths)
+    const models = deriveZcodeEngineModels({ ...paths, builtinCatalogPath: join(root, 'absent-catalog.json') })
     expect(models[0]).toEqual({ id: 'anon/m1' })
+  })
+
+  it('account 直通家族追加（engine-ref-translation D3）：无 apiKey 过滤、builtinModelIds 优先、与个人 id 去重个人优先', () => {
+    writeRealProviderConfig(['with-key', 'account:bigmodel-individual-coding-plan'])
+    writeCopy([{
+      providerId: 'copy-only',
+      config: { access: { type: 'api-key', apiKey: 'k' }, personalModelIds: ['m1'], modelOrder: ['m1'] },
+    }])
+    const catalogPath = join(root, 'derive-account-catalog.json')
+    writeFileSync(catalogPath, JSON.stringify({
+      config: {
+        providerConfigRules: {
+          providerRules: [
+            { providerId: 'account:bigmodel-individual-coding-plan', providerName: 'BigModel Individual Coding Plan', config: { builtinModelIds: ['GLM-5.3', 'GLM-5.3-Flash'] } },
+            { providerId: 'account:zai-individual-coding-plan', providerName: 'Z.AI Individual Coding Plan', config: { personalModelIds: ['Z-Model'] } },
+          ],
+        },
+      },
+    }))
+    const models = deriveZcodeEngineModels({ ...paths, builtinCatalogPath: catalogPath })
+    const ids = models.map(m => m.id)
+    expect(ids).toContain('with-key/real-model')
+    expect(ids).toContain('copy-only/m1')
+    expect(ids).toContain('account:zai-individual-coding-plan/Z-Model')
+    // account 家族枚举与个人 id 去重（个人表同名 id 在 → account 枚举让位：
+    // 目录模型不出条目，个人条目 real-model 照常在列）
+    expect(ids).toContain('account:bigmodel-individual-coding-plan/real-model')
+    expect(ids.filter(id => id === 'account:bigmodel-individual-coding-plan/GLM-5.3' || id === 'account:bigmodel-individual-coding-plan/GLM-5.3-Flash')).toEqual([])
+    expect(models.find(m => m.id === 'account:zai-individual-coding-plan/Z-Model')?.name).toBe('Z.AI Individual Coding Plan · Z-Model')
   })
 })
 

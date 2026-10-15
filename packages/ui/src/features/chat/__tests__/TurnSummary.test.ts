@@ -2,7 +2,8 @@
  * TurnSummary.vue 组件测试（W4TC4 + ai-voice-tts §5.1 朗读按钮）。
  *
  * 覆盖：
- * - W4TC4: TurnSummary 拆分后渲染一致（summary + streaming cursor + hover actions 复制/MD/朗读/fork/handoff）
+ * - W4TC4: TurnSummary 拆分后渲染一致（summary + streaming cursor + hover actions 复制/朗读/fork/handoff；
+ *   复制 = 末条 assistant 正文，仅 text 不含思考/工具分区，2026-10-15 裁决）
  * - [block-rendering M0] 去内容化：根 v-if 从 summaryText 改 lastAssistant（纯工具 turn 出现操作栏，
  *   预期行为变更）；streaming 光标迁移到 Turn.vue streaming-tail（TC-M0-2 在 turn-working 覆盖）；
  *   text-neutral-* 切色迁移到 Block.vue text 分支（TC-M0-4）
@@ -95,15 +96,15 @@ describe('W4TC4: TurnSummary 基本渲染', () => {
 })
 
 describe('W4TC4: TurnSummary hover actions', () => {
-  it('有 lastAssistant 时 hover actions chip 本体存在 + 5 并列按钮渲染', () => {
+  it('有 lastAssistant 时 hover actions 行本体存在 + 4 并列按钮渲染', () => {
     const wrapper = mountSummary()
-    // [actions-anchor] 组件根 = chip 本体（显隐门控与悬浮定位在 Block.vue 的插槽包装层，
-    // 本组件维度只验 chip 与按钮形态）
+    // [actions-anchor] 组件根 = 行本体（显隐门控与固定槽位在 Block.vue 的插槽包装层，
+    // 本组件维度只验行与按钮形态）
     const actionsDiv = wrapper.find('.turn-summary')
     expect(actionsDiv.exists()).toBe(true)
-    // 5 个并列按钮：复制 / 复制MD / 朗读 / fork / handoff（无两层 hover 变体）
+    // 4 个并列按钮：复制 / 朗读 / fork / handoff（无两层 hover 变体）
     const buttons = actionsDiv.findAll('button')
-    expect(buttons.length).toBe(5)
+    expect(buttons.length).toBe(4)
   })
 
   it('无 lastAssistant 时不渲染 hover actions', () => {
@@ -111,14 +112,31 @@ describe('W4TC4: TurnSummary hover actions', () => {
     expect(wrapper.find('[data-testid="fork-ask-btn"]').exists()).toBe(false)
   })
 
-  it('copy-btn 存在（复制纯文本）', () => {
-    const wrapper = mountSummary()
-    expect(wrapper.find('[data-testid="copy-btn"]').exists()).toBe(true)
-  })
-
-  it('copy-markdown-btn 作为独立按钮存在（复制 Markdown）', () => {
-    const wrapper = mountSummary()
-    expect(wrapper.find('[data-testid="copy-markdown-btn"]').exists()).toBe(true)
+  it('copy-btn 为唯一复制按钮，载荷 = 末条 assistant 正文（仅 text，不含思考/工具分区，2026-10-15 裁决）', async () => {
+    const writeText = vi.fn(async (_text: string) => {})
+    vi.spyOn(navigator.clipboard, 'writeText').mockImplementation(writeText)
+    const last: Message = {
+      id: 'a1',
+      role: 'assistant',
+      status: 'complete',
+      timestamp: NOW,
+      content: '正文第一行\n\n正文第二行',
+      thinking: [{ id: 'th-1', content: '内部推理，不应出现在复制载荷', collapsed: true }],
+      toolCalls: [
+        { id: 'tc-1', toolName: 'bash', input: { cmd: 'ls' }, status: 'completed', startTime: 0, output: 'file-a.txt' },
+      ],
+    }
+    const wrapper = mountSummary({ lastAssistant: last })
+    const btn = wrapper.find('[data-testid="copy-btn"]')
+    expect(btn.exists()).toBe(true)
+    // MD 徽标已随三分区展平退役：按钮内只有 Copy/Check 图标，无文字角标
+    expect(btn.text()).toBe('')
+    await btn.trigger('click')
+    expect(writeText).toHaveBeenCalledTimes(1)
+    const payload = writeText.mock.calls[0]?.[0] ?? ''
+    expect(payload).toBe('正文第一行\n\n正文第二行')
+    expect(payload).not.toContain('内部推理')
+    expect(payload).not.toContain('file-a.txt')
   })
 
   it('fork-ask-btn 存在（fork 进 composer 模式）', () => {
@@ -148,12 +166,12 @@ describe('W4TC4: TurnSummary hover actions', () => {
 
   it('fork/handoff 按钮在 subagent session 隐藏', () => {
     const wrapper = mountSummary({ sessionId: 'subagent:main1:sub1' })
-    // subagent session：复制×2 + 朗读 3 按钮形态（朗读是只读消费，与复制同类可见），无 fork/handoff
+    // subagent session：复制MD + 朗读 2 按钮形态（朗读是只读消费，与复制同类可见），无 fork/handoff
     expect(wrapper.find('[data-testid="fork-ask-btn"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="handoff-ask-btn"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="speak-btn"]').exists()).toBe(true)
     const actionsDiv = wrapper.find('.turn-summary')
-    expect(actionsDiv.findAll('button').length).toBe(3)
+    expect(actionsDiv.findAll('button').length).toBe(2)
   })
 })
 
@@ -173,9 +191,9 @@ describe('block-rendering M0: TurnSummary 去内容化', () => {
       turn: makeTurn({ assistants: [{ id: 'a1', role: 'assistant', content: '', status: 'complete', timestamp: NOW }] }),
     })
     expect(wrapper.find('.turn-summary').exists()).toBe(true)
-    // 5 操作按钮：复制 / 复制MD / 朗读 / fork / handoff
+    // 4 操作按钮：复制MD / 朗读 / fork / handoff
     const actionsDiv = wrapper.find('.turn-summary')
-    expect(actionsDiv.findAll('button').length).toBe(5)
+    expect(actionsDiv.findAll('button').length).toBe(4)
   })
 })
 

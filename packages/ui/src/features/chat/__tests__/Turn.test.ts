@@ -904,7 +904,8 @@ describe('run 类型分组: Turn 组块接线（三路径 + PR-6）', () => {
     })
     const header1 = wrapper.find('[data-testid="run-group-header"]')
     expect(header1.exists()).toBe(true)
-    // 组内含 running 成员 → 挂载即展开（默认开合由 hasRunning 快照决定，非用户点击）
+    // ①A 裁决后挂载一律收起：先手动点开，让成员行进 DOM（用例本意 = key 锚定 + 本地展开态不丢）
+    await header1.trigger('click')
     expect(wrapper.find('[data-testid="run-group"]').findAll('.trace-blk').length).toBe(4)
     const node1 = header1.element
     // 段尾延长：b3 完成、r3→r4 新 running（members 4→5，run head 不变 → key 稳定）
@@ -934,7 +935,8 @@ describe('run 类型分组: Turn 组块接线（三路径 + PR-6）', () => {
     })
     const header1 = wrapper.find('[data-testid="run-group-header"]')
     expect(header1.exists()).toBe(true)
-    // 组内含 running 成员 → 挂载即展开
+    // ①A 裁决后挂载一律收起：先手动点开，让成员行进 DOM（isSameNode 断言前提）
+    await header1.trigger('click')
     expect(wrapper.find('[data-testid="run-group"]').findAll('.trace-blk').length).toBe(5)
     const node1 = header1.element
     // 窗口右滑：b5 完成入池、新 running r 启动 → 窗口=末4：组(b2..b5+running)，members[0] 从 b1 变 b2；

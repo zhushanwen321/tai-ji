@@ -175,12 +175,18 @@
          [D3] 留在 contentWrapEl wrapper 外：absolute 锚定 scrollEl
          （nearest positioned ancestor），wrapper 永不得成为 containing block（见 wrapper 注释）。
          [RD-1#4] 失败重试行（LoadMoreErrorBar）挂在本容器内：失败时多出一行，容器增高，
-         virta startMargin 同步增补（topBarReservedHeight），不与首条消息重叠。 -->
+         virta startMargin 同步增补（topBarReservedHeight），不与首条消息重叠。
+         [2026-10-15 pill 化] 预留区改自然高：pt-3 12px + pill h-8 32px = 44，与
+         LOAD_MORE_RESERVED_HEIGHT 常量恒等（dev 断言零告警）。旧形态 py-2 + Button sm(h-9)
+         实测 52 ≠ 44（断言告警、30px spacer 兜底未致真重叠，但占位契约已漂移）。
+         条（abs，随内容滚走）底沿 44 → 首条消息 = spacer 30 + startMargin 44 = 74，
+         条下净空 30px（旧形态 52 → 74 仅 22px）；pill 另带实色底，滚过顶缘渐焦带时
+         不再与内容糊在一起（几何见 message-stream-layout.ts 常量注释）。 -->
     <div
       v-if="showLoadMore && renderItems.length > 0"
       class="absolute left-5 right-5 top-0 flex flex-col items-center"
     >
-      <div ref="loadMoreEl" class="flex w-full justify-center py-2">
+      <div ref="loadMoreEl" class="flex w-full items-start justify-center pt-3">
         <TruncatedHistoryBar :loaded-turns="loadedTurns" :loading="loadingMore" @load="handleLoadMore" />
       </div>
       <!-- [RD-1#4] 「加载更早」失败显形（loadMoreError）：可重试错误行。失败时 truncated
