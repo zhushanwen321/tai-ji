@@ -517,6 +517,8 @@ WorkflowTab 步骤列表的数据源绑定从「workflow-record 全量快照（6
 
 **登记**：无新约束族；实装 = `packages/subagent-core/src/shared/workflow-dag-parser.ts` + `packages/subagent-core/package.json`（acorn 声明）+ `tsup.config.ts` noExternal 同步。设计文档 `.tmp/tech-design/workflow-visualization.md`（不入库，过程产物）；本条即该决策的现行登记处。
 
+> **补记（2026-10-15，不可区分调用点合并）**：解析产物收尾新增收口规则——同 `(phase, templateName, kind)` 的调用点合并为单代表节点（组内最前行号；边候选端点重映射后走既有 `(from,to)` 优先级去重；并行组/循环成员 id 同步重映射去重；不同 phase / 不同模板不合并）。根因：同 phase 同模板的调用点在 D2 蓝图-实例匹配下天然并列歧义，保留多个只会互致歧义——任一实例命中并列候选即判歧义进「未匹配实例」分组，该 agent 家族在 DAG 图上整体失去挂接（实测形态：① helper 投影把「派发 + 原位重试」投成两个全通配 `*` 节点，review-fix-loop 的 Review 相全部 reviewer 实例歧义；② 同字面模板双直呼节点如 aggregate 派发 + 其重试分支，同族实例全部歧义）。合并后单候选实例正常挂接、节点实例行展示真实 agent 名（2026-10-15 DAG 画布正交路由 + 实例行同批实装）。无合并需求时零开销原样返回。
+
 ### ADR-0106 事件流通道 = 拉模式 RPC + 信号水位 diff 扩维与 worker-log 滞后取舍（2026-10-02 设计裁决，workflow-visualization D4）
 **决策**：workflow run 事件流原文对 renderer 的通道 = 新增 `session.getWorkflowRunEvents(runId)` 拉取 RPC（大字段 2KB 截断 + truncatedFields 标注——input/result/scriptSource/args 四个全文载荷字段；截断形态仅供展示，resume 恢复与 args 一致性校验在引擎侧读 record 原文全文字段，不经本通道）；运行中更新沿用 `workflowUpdate` 信号触发重新拉取（[ADR-0097](#adr-0097-拉为主推补充数据同步第一原则与域同步协议收口2026-09-26-架构裁决)「拉为主推补充」的应用）。信号水位 diff 扩两维——① phases 折叠（纯脚本 phase 转态发信号）② per-ask attempt 计数（重试边沿发信号，`stepStatusFingerprint` 在串各 call status 之外串入 attempts）——修复「纯脚本 phase 推进期间无信号」与「重试窗口内无信号」两个盲区。**已接受代价**：worker-log 行不纳入信号 diff 维度（无 phase 字段、不对应 call 转态、行数无上界——纳入等于把日志打印频率放大为每次信号的全量重新拉取频率），其展示滞后到下一转态信号（转态类事件秒级到达；worker-log 后无转态跟随时可能分钟级）。不做事件边沿级推送（逐条直播属体验增强非结构必需）。
 
