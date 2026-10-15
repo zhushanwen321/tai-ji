@@ -189,13 +189,20 @@ describe('message_end(user) 送达回执（u3b / D2① 泛化，C-data-08 修订
     expect(ctx.inflightOf()).toBe(0) // 1（① 回收）+ 1（② 兜底扣）
   })
 
-  it('AC7: inflight == 0 且无命中 → 帧静默终止（② 早退，无副作用）', () => {
+  it('AC7: inflight == 0 且无命中 → 外来直发入流（③ overlay 投影：canvas 回推等 runtime 注入通知的实时显示，A3 缺口修复）', () => {
     replaceDeliveryProjection(SID, [entry()])
     const ctx = makeCtx()
 
-    expect(() => dispatchMessageEvent(ctx, SID, userEndFrame(SID, 'hi'))).not.toThrow()
+    dispatchMessageEvent(ctx, SID, userEndFrame(SID, '[画布事件通知] 用户选定方案'))
+
+    // 入流：messages 新增 user 消息（overlay 投影；修前该形态静默丢弃、仅切回会话重放可见）
+    const list = ctx.messages.value.get(SID)?.value ?? []
+    expect(list).toHaveLength(1)
+    expect(list[0]?.role).toBe('user')
+    // 权威喂入：reducer buffer 收到同一 entry（applyEntryFrameWithOverlay 内部）
+    expect(ctx.applyEntryFrame).toHaveBeenCalledTimes(1)
+    // 不走 appendUser（那是 ① 回执 morph 段的专用通道）
     expect(ctx.appendUser).not.toHaveBeenCalled()
-    expect(getDeliveryProjection(SID)[0]?.state).toBe('in-flight')
   })
 })
 
