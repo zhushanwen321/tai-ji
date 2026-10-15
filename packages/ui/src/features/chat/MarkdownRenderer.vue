@@ -179,7 +179,9 @@ function handleCodeblockCopy(e: MouseEvent, btn: HTMLElement): void {
     code = ''
   }
   if (code) {
-    navigator.clipboard.writeText(code).catch(() => { /* 剪贴板失败静默 */ })
+    // 非安全上下文（LAN http，如移动壳远程访问）clipboard 为 undefined——同步访问即抛
+    // TypeError（.catch 接不住），守卫后静默降级（is-copied 反馈照常，代价可忽略）。
+    navigator.clipboard?.writeText(code).catch(() => { /* 剪贴板失败静默 */ })
   }
   btn.classList.add('is-copied')
   if (copiedBtn && copiedBtn !== btn) copiedBtn.classList.remove('is-copied')
