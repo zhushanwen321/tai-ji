@@ -64,7 +64,22 @@ const TEST_PATH = new RegExp(`${sep}__tests__${sep}|${sep}e2e${sep}|\\.test\\.|\
  * 仅测试文件存在 `panel.sideDrawer.${k}` / `panel.trace.${k}` / `panel.context.${key}` 形式的
  * 模板拼接，而测试不是消费者，故不为它们开豁免）。
  */
-const ALLOWLIST: readonly { key: string; reason: string }[] = []
+const SUBAGENT_MODEL_SOURCE_REASON =
+  '动态组装可达：packages/renderer/src/composables/features/subagent/useSubagentModel.ts:358 ' +
+  '(`panel.sideDrawer.subagentModelSource.${source}`) 与 :362 ' +
+  '(`panel.sideDrawer.subagentModelSourceTitle.${source}`)，source 取值域 = SubagentModelSource ' +
+  '(packages/shared/src/subagent.ts:44, 即 explicit/frontmatter/preference/default)'
+
+const ALLOWLIST: readonly { key: string; reason: string }[] = [
+  { key: 'panel.sideDrawer.subagentModelSourceExplicit', reason: SUBAGENT_MODEL_SOURCE_REASON },
+  { key: 'panel.sideDrawer.subagentModelSourceFrontmatter', reason: SUBAGENT_MODEL_SOURCE_REASON },
+  { key: 'panel.sideDrawer.subagentModelSourcePreference', reason: SUBAGENT_MODEL_SOURCE_REASON },
+  { key: 'panel.sideDrawer.subagentModelSourceDefault', reason: SUBAGENT_MODEL_SOURCE_REASON },
+  { key: 'panel.sideDrawer.subagentModelSourceTitleExplicit', reason: SUBAGENT_MODEL_SOURCE_REASON },
+  { key: 'panel.sideDrawer.subagentModelSourceTitleFrontmatter', reason: SUBAGENT_MODEL_SOURCE_REASON },
+  { key: 'panel.sideDrawer.subagentModelSourceTitlePreference', reason: SUBAGENT_MODEL_SOURCE_REASON },
+  { key: 'panel.sideDrawer.subagentModelSourceTitleDefault', reason: SUBAGENT_MODEL_SOURCE_REASON },
+]
 
 /** 拍平嵌套 locale 对象为叶子 key 全路径 */
 function flattenLeaves(node: LocaleNode, prefix: string): string[] {
