@@ -93,6 +93,7 @@ export default {
     reviewStatusEscalated: '已升级裁决',
     reviewStatusStuck: '审查受阻',
     reviewRound: 'R{round} / 上限 {max}',
+    reviewEntryCounts: '条目 {total} · 未处置 must-fix {open}',
     reviewRoundTitle: 'R{round} 报告条目',
     severityMustFix: 'must-fix',
     severitySuggestion: 'suggestion',

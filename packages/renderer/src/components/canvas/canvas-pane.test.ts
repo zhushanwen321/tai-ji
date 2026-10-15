@@ -307,3 +307,43 @@ describe('CanvasBindingBadge（绑定徽标状态）', () => {
     expect(wrapper.find('[data-testid="canvas-binding-badge"]').exists()).toBe(false)
   })
 })
+
+describe('审查报告 tab 头部结构化计数', () => {
+  it('计数行 = 条目总数 + 未处置 must-fix 数（摘要条裁决落地：头部只留计数，散文总结只在条目正文）', async () => {
+    currentState = makeState({
+      review: {
+        status: 'in-progress',
+        round: 2,
+        maxRounds: 5,
+        entries: [
+          { id: 'rv-1', round: 1, dimension: 'completeness', severity: 'must-fix', targetId: 'q2', note: '缺一条分支', resolution: { disposition: 'accepted', by: 'agent', note: '已补' } },
+          { id: 'rv-2', round: 2, dimension: 'support', severity: 'must-fix', targetId: 'er-1', note: '支撑缺口未附论据链' },
+          { id: 'rv-3', round: 2, dimension: 'depth', severity: 'suggestion', targetId: 'o2', note: '分支过浅' },
+        ],
+      },
+    })
+    stubCommand()
+    const wrapper = await mountPane()
+    const counts = wrapper.find('[data-testid="canvas-review-entry-counts"]')
+    expect(counts.exists()).toBe(true)
+    // 3 条目中 1 条已处置 → 未处置 must-fix = 1（rv-2；rv-1 已处置不计、rv-3 是 suggestion）
+    expect(counts.text()).toBe('条目 3 · 未处置 must-fix 1')
+  })
+
+  it('已处置 must-fix 与 suggestion 都不计入未处置计数', async () => {
+    currentState = makeState({
+      review: {
+        status: 'in-progress',
+        round: 1,
+        maxRounds: 5,
+        entries: [
+          { id: 'rv-1', round: 1, dimension: 'completeness', severity: 'must-fix', targetId: 'q2', note: '缺分支', resolution: { disposition: 'accepted', by: 'user', note: '已补' } },
+          { id: 'rv-2', round: 1, dimension: 'depth', severity: 'suggestion', targetId: 'o2', note: '过浅' },
+        ],
+      },
+    })
+    stubCommand()
+    const wrapper = await mountPane()
+    expect(wrapper.find('[data-testid="canvas-review-entry-counts"]').text()).toBe('条目 2 · 未处置 must-fix 0')
+  })
+})

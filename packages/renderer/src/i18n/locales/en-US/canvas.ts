@@ -93,6 +93,7 @@ export default {
     reviewStatusEscalated: 'Escalated',
     reviewStatusStuck: 'Stuck',
     reviewRound: 'R{round} / max {max}',
+    reviewEntryCounts: '{total} entries · {open} must-fix open',
     reviewRoundTitle: 'R{round} entries',
     severityMustFix: 'must-fix',
     severitySuggestion: 'suggestion',

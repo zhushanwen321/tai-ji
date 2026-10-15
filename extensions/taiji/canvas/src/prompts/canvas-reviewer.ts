@@ -90,7 +90,7 @@ export function buildReviewerPrompt(input: ReviewerPromptInput): string {
     input.canvasStateJson,
     "",
     "== 输出契约 ==",
-    "输出一个 JSON 对象：{ entries: [{ id, dimension, severity, targetId, note, supportRating?, supportGaps? }] }。",
+    "输出一个 JSON 对象：{ entries: [{ id, dimension, severity, targetId, note, supportRating?, supportGaps? }], summary?: string }。",
     "- id：本条目唯一 id（rv-<序号> 即可）；",
     "- dimension：六词表之一（completeness/necessity/support/authenticity/conflict/depth）；",
     "- severity：'must-fix'（不修不得收敛）或 'suggestion'（改进建议）；",
@@ -98,6 +98,7 @@ export function buildReviewerPrompt(input: ReviewerPromptInput): string {
     "- note：一句话说清问题与依据（引用 targetId 的内容），可附修复方向；",
     "- supportRating：仅当 targetId 是主干边（decompose/resolve）且你在评价该边支撑度时输出（sufficient/gap/invalid）；节点与论证边不评级；",
     "- supportGaps：supportRating='gap' 时必填（至少一条：该边缺什么支撑）。",
+    "- summary：可选的一段话整体判定。整体结论只允许出现在 summary——条目 note 只陈述该条目自身的问题与依据，不得复述整体结论或与其他条目互相重复（同一结论在报告多处出现 = 报告不可读）。",
     "没有问题的维度不输出条目；宁缺毋滥，不凑数。",
   ].join("\n")
 }

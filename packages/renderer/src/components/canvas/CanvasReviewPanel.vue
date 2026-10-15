@@ -28,6 +28,11 @@
         <span class="font-mono text-[length:var(--text-3xs)] text-neutral-dim">
           {{ t('panel.canvas.reviewRound', { round: state.review.round, max: state.review.maxRounds }) }}
         </span>
+        <!-- 结构化计数（摘要条形态：条目总数 / 未处置 must-fix——散文总结只在条目正文，
+             头部不重复文案，canvas-review-tab-summary-duplication 裁决落地） -->
+        <span class="font-mono text-[length:var(--text-3xs)] text-neutral-dim" data-testid="canvas-review-entry-counts">
+          {{ t('panel.canvas.reviewEntryCounts', { total: entryTotal, open: openMustFixCount }) }}
+        </span>
       </div>
       <p v-if="state.review.stopNote" class="rounded-sm border border-warn bg-warn-soft px-2 py-1.5 text-[length:var(--text-2xs)] leading-relaxed text-warn" data-testid="canvas-review-stop-note">
         {{ state.review.stopNote }}
@@ -146,6 +151,12 @@ const entryGroups = computed<Array<{ round: number; entries: ReviewEntry[] }>>((
     .sort((a, b) => b[0] - a[0])
     .map(([round, list]) => ({ round, entries: list }))
 })
+
+/** 头部结构化计数（数据源 = review 聚合投影，与门禁③的 must-fix 开放口径同源）。 */
+const entryTotal = computed(() => props.state.review?.entries.length ?? 0)
+const openMustFixCount = computed(
+  () => (props.state.review?.entries ?? []).filter((e) => e.severity === 'must-fix' && !e.resolution).length,
+)
 
 function resolutionLabel(entry: ReviewEntry): string {
   const disposition = entry.resolution?.disposition
