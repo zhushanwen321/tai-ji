@@ -411,7 +411,10 @@ const SUPPORT_RATINGS = ['sufficient', 'gap', 'invalid'] as const
 
 /** review-append 单条守卫（round 必须为有限数；dimension/severity/supportRating 词表内；
  * gap 评价必附缺口清单、sufficient/invalid 不得夹带清单——「有缺口附清单」词条语义：
- * rating='gap' 的缺口清单至少一条，sufficient/invalid 不带）。 */
+ * rating='gap' 的缺口清单至少一条，sufficient/invalid 不带）。
+ *
+ * 支撑度字段拆两条子守卫（单链 20 分支超 metrics 门禁圈复杂度阈值）：shape 管
+ * 「字段在时的类型/词表」，semantics 管「字段间组合规则」。 */
 function isCanvasReviewEntryInput(v: unknown): v is CanvasReviewEntryInput {
   return (
     isRecord(v) &&
@@ -422,12 +425,24 @@ function isCanvasReviewEntryInput(v: unknown): v is CanvasReviewEntryInput {
     isStringIn(REVIEW_SEVERITIES, v.severity) &&
     isStringField(v, 'targetId') &&
     typeof v.note === 'string' &&
-    (v.supportRating === undefined || isStringIn(SUPPORT_RATINGS, v.supportRating)) &&
-    (v.supportGaps === undefined || (Array.isArray(v.supportGaps) && v.supportGaps.every((g): g is string => typeof g === 'string'))) &&
-    (v.supportGaps === undefined || v.supportRating !== undefined) &&
-    (v.supportRating !== 'gap' || (Array.isArray(v.supportGaps) && v.supportGaps.length > 0)) &&
-    (v.supportGaps === undefined || v.supportRating === 'gap')
+    isReviewSupportShape(v) &&
+    isReviewSupportSemantics(v)
   )
+}
+
+/** 支撑度字段类型面：supportRating 在词表内（可缺省）、supportGaps 为字符串数组（可缺省）。 */
+function isReviewSupportShape(v: Record<string, unknown>): boolean {
+  if (v.supportRating !== undefined && !isStringIn(SUPPORT_RATINGS, v.supportRating)) return false
+  return v.supportGaps === undefined || isStringArray(v.supportGaps)
+}
+
+/** 支撑度字段语义面：「有缺口附清单」——rating='gap' 必附至少一条缺口清单；
+ * gaps 仅随 gap 评价携带（sufficient/invalid 不带；带 gaps 则 rating 必须为 gap）。 */
+function isReviewSupportSemantics(v: Record<string, unknown>): boolean {
+  if (v.supportGaps === undefined) return v.supportRating !== 'gap'
+  if (v.supportRating !== 'gap') return false
+  // Array.isArray 收窄（类型面由 isReviewSupportShape 把关，此处防 null/散型防御性收窄）
+  return Array.isArray(v.supportGaps) && v.supportGaps.length > 0
 }
 
 export function isCanvasReviewAppendParams(v: unknown): v is CanvasReviewAppendParams {
@@ -483,48 +498,36 @@ export function isCanvasEnterParams(v: unknown): v is CanvasEnterParams {
   return keys.length === 1 && keys[0] === 'canvasId' && typeof v.canvasId === 'string'
 }
 
+/** marker action → params 守卫映射（词表全键，缺 action 即类型错误——switch 的
+ * 穷尽性由 Record 键集编译期承载；圈复杂度预算：17 分支 switch 超 metrics 门禁
+ * 阈值，查表分派把分支数压回词表数据）。 */
+const MARKER_PARAMS_GUARDS: Record<CanvasMarkerAction, (v: unknown) => boolean> = {
+  create: isCanvasCreateParams,
+  grow: isCanvasGrowParams,
+  patch: isCanvasPatchParams,
+  'decide-direction': isCanvasDecideDirectionParams,
+  select: isCanvasSelectParams,
+  transition: isCanvasTransitionParams,
+  comment: isCanvasCommentParams,
+  'comment-respond': isCanvasCommentRespondParams,
+  'review-request': isCanvasReviewRequestParams,
+  'review-append': isCanvasReviewAppendParams,
+  'review-resolve': isCanvasReviewResolveParams,
+  'converge-check': isCanvasConvergeCheckParams,
+  export: isCanvasExportParams,
+  dispatch: isCanvasDispatchParams,
+  read: isCanvasReadParams,
+  list: isCanvasListParams,
+  enter: isCanvasEnterParams,
+}
+
 /** marker 通道总守卫：action + params 按 marker 词表分派；表外 action 返回 false
  * （event-adapter / CanvasHandler 据此走结构化错误应答）。 */
 export function isCanvasMarkerRequest(v: unknown): v is CanvasMarkerRequest {
   if (!isRecord(v)) return false
   if (!isStringIn(CANVAS_MARKER_ACTIONS, v.action)) return false
   const action: CanvasMarkerAction = v.action
-  switch (action) {
-    case 'create':
-      return isCanvasCreateParams(v.params)
-    case 'grow':
-      return isCanvasGrowParams(v.params)
-    case 'patch':
-      return isCanvasPatchParams(v.params)
-    case 'decide-direction':
-      return isCanvasDecideDirectionParams(v.params)
-    case 'select':
-      return isCanvasSelectParams(v.params)
-    case 'transition':
-      return isCanvasTransitionParams(v.params)
-    case 'comment':
-      return isCanvasCommentParams(v.params)
-    case 'comment-respond':
-      return isCanvasCommentRespondParams(v.params)
-    case 'review-request':
-      return isCanvasReviewRequestParams(v.params)
-    case 'review-append':
-      return isCanvasReviewAppendParams(v.params)
-    case 'review-resolve':
-      return isCanvasReviewResolveParams(v.params)
-    case 'converge-check':
-      return isCanvasConvergeCheckParams(v.params)
-    case 'export':
-      return isCanvasExportParams(v.params)
-    case 'dispatch':
-      return isCanvasDispatchParams(v.params)
-    case 'read':
-      return isCanvasReadParams(v.params)
-    case 'list':
-      return isCanvasListParams(v.params)
-    case 'enter':
-      return isCanvasEnterParams(v.params)
-  }
+  return MARKER_PARAMS_GUARDS[action](v.params)
 }
 
 /** 材料性守卫（grow item 的 materiality 类型面收窄备用；U2 重建回放读侧消费）。 */

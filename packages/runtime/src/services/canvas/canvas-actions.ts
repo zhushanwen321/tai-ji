@@ -227,42 +227,59 @@ function growItemDivergence(existing: CanvasNode, item: CanvasGrowItem, draft: C
 }
 
 /** 邻接合法性（概念 §2.3 边模型，MVP 四种边）：表外组合 invalid_params；端点缺失
- * node_not_found / edge_not_found。 */
+ * node_not_found / edge_not_found。每种边型的规则拆单条子守卫（各自圈复杂度预算内
+ * ——单 switch 25 分支超 metrics 门禁阈值）。 */
 function validateGrowAdjacency(draft: CanvasState, item: CanvasGrowItem): void {
   const attachNode = nodeOf(draft, item.attachTo)
   const attachEdge = attachNode ? undefined : edgeOf(draft, item.attachTo)
   switch (item.edge) {
-    case 'decompose': {
-      if (item.type !== 'question') fail('invalid_params', `decompose 边的子端必须是 question，收到「${item.type}」`)
-      if (!attachNode) fail('node_not_found', `decompose 父节点「${item.attachTo}」不存在`)
-      if (attachNode.type !== 'question' && attachNode.type !== 'option') {
-        fail('invalid_params', `decompose 父端必须是 question 或 option，收到「${attachNode.type}」`)
-      }
+    case 'decompose':
+      validateDecomposeAdjacency(item, attachNode)
       return
-    }
-    case 'resolve': {
-      if (item.type !== 'option') fail('invalid_params', `resolve 边的子端必须是 option，收到「${item.type}」`)
-      if (!attachNode) fail('node_not_found', `resolve 所在问题「${item.attachTo}」不存在`)
-      if (attachNode.type !== 'question') fail('invalid_params', `resolve 父端必须是 question，收到「${attachNode.type}」`)
+    case 'resolve':
+      validateResolveAdjacency(item, attachNode)
       return
-    }
-    case 'argue': {
-      if (item.type !== 'argument') fail('invalid_params', `argue 边的起点必须是 argument，收到「${item.type}」`)
-      if (item.edgePolarity === undefined) fail('invalid_params', 'argue 边必带极性（edgePolarity: support | object）')
-      if (!attachNode && !attachEdge) fail('node_not_found', `被论证目标「${item.attachTo}」不存在`)
-      if (attachNode && attachNode.type !== 'question' && attachNode.type !== 'option') {
-        fail('invalid_params', `argue 只论证 question / option / 主干边，收到「${attachNode.type}」`)
-      }
-      if (attachEdge && !isTrunkEdge(attachEdge)) fail('invalid_params', 'argue 指边时只能指主干边（decompose / resolve）')
+    case 'argue':
+      validateArgueAdjacency(item, attachNode, attachEdge)
       return
-    }
-    case 'rebut': {
-      if (item.type !== 'argument') fail('invalid_params', `rebut 边的起点必须是 argument，收到「${item.type}」`)
-      if (!attachNode) fail('node_not_found', `被反驳论据「${item.attachTo}」不存在`)
-      if (attachNode.type !== 'argument') fail('invalid_params', `rebut 的目标必须是 argument，收到「${attachNode.type}」`)
+    case 'rebut':
+      validateRebutAdjacency(item, attachNode)
       return
-    }
   }
+}
+
+/** decompose：子端必须 question，父端必须 question / option 且存在。 */
+function validateDecomposeAdjacency(item: CanvasGrowItem, attachNode: CanvasNode | undefined): void {
+  if (item.type !== 'question') fail('invalid_params', `decompose 边的子端必须是 question，收到「${item.type}」`)
+  if (!attachNode) fail('node_not_found', `decompose 父节点「${item.attachTo}」不存在`)
+  if (attachNode.type !== 'question' && attachNode.type !== 'option') {
+    fail('invalid_params', `decompose 父端必须是 question 或 option，收到「${attachNode.type}」`)
+  }
+}
+
+/** resolve：子端必须 option，父端必须存在且为 question。 */
+function validateResolveAdjacency(item: CanvasGrowItem, attachNode: CanvasNode | undefined): void {
+  if (item.type !== 'option') fail('invalid_params', `resolve 边的子端必须是 option，收到「${item.type}」`)
+  if (!attachNode) fail('node_not_found', `resolve 所在问题「${item.attachTo}」不存在`)
+  if (attachNode.type !== 'question') fail('invalid_params', `resolve 父端必须是 question，收到「${attachNode.type}」`)
+}
+
+/** argue：起点必须 argument 且带极性；目标 = question / option 节点或主干边。 */
+function validateArgueAdjacency(item: CanvasGrowItem, attachNode: CanvasNode | undefined, attachEdge: CanvasEdge | undefined): void {
+  if (item.type !== 'argument') fail('invalid_params', `argue 边的起点必须是 argument，收到「${item.type}」`)
+  if (item.edgePolarity === undefined) fail('invalid_params', 'argue 边必带极性（edgePolarity: support | object）')
+  if (!attachNode && !attachEdge) fail('node_not_found', `被论证目标「${item.attachTo}」不存在`)
+  if (attachNode && attachNode.type !== 'question' && attachNode.type !== 'option') {
+    fail('invalid_params', `argue 只论证 question / option / 主干边，收到「${attachNode.type}」`)
+  }
+  if (attachEdge && !isTrunkEdge(attachEdge)) fail('invalid_params', 'argue 指边时只能指主干边（decompose / resolve）')
+}
+
+/** rebut：起点必须 argument，目标必须存在且为 argument。 */
+function validateRebutAdjacency(item: CanvasGrowItem, attachNode: CanvasNode | undefined): void {
+  if (item.type !== 'argument') fail('invalid_params', `rebut 边的起点必须是 argument，收到「${item.type}」`)
+  if (!attachNode) fail('node_not_found', `被反驳论据「${item.attachTo}」不存在`)
+  if (attachNode.type !== 'argument') fail('invalid_params', `rebut 的目标必须是 argument，收到「${attachNode.type}」`)
 }
 
 // ── patch（内容编辑 + root 三要素同步 + 不变量 5/7/9）──────────
@@ -278,31 +295,12 @@ function applyPatch(
   const node = nodeOf(draft, params.nodeId)
   if (!node) fail('node_not_found', `待编辑节点「${params.nodeId}」不存在`)
   const changes: string[] = []
-  if (params.content !== undefined) {
-    node.content = params.content
-    changes.push('内容')
-    if (node.id === draft.root.nodeId) draft.root.statement = params.content
-  }
-  if (params.criterias !== undefined) {
-    if (node.type !== 'option' && node.id !== draft.root.nodeId) {
-      fail('invalid_params', '完成判据只能编辑在根问题或执行叶子（option）上')
-    }
-    if (node.id === draft.root.nodeId) draft.root.criterias = [...params.criterias]
-    else node.criterias = [...params.criterias]
-    changes.push('判据')
-  }
-  if (params.dispatchable !== undefined) {
-    if (node.type !== 'option') fail('invalid_params', '执行叶子标记（dispatchable）只能设在 option 上')
-    node.dispatchable = params.dispatchable
-    changes.push(params.dispatchable ? '标记执行叶子' : '取消执行叶子')
-  }
-  if (params.factVerified !== undefined) {
-    if (node.type !== 'argument' || node.materiality !== 'fact') {
-      fail('invalid_params', '核实状态（factVerified）只能翻转在 fact 论据上')
-    }
-    node.factVerified = params.factVerified
-    changes.push(params.factVerified ? '核实' : '撤销核实')
-  }
+  // per-field 拆子应用函数（各自圈复杂度预算内——单函数 17 分支超 metrics 门禁阈值）；
+  // 字段应用顺序 = 校验顺序 = content → criterias → dispatchable → factVerified（保持）。
+  applyPatchContent(draft, node, params, changes)
+  applyPatchCriterias(draft, node, params, changes)
+  applyPatchDispatchable(node, params, changes)
+  applyPatchFactVerified(node, params, changes)
   if (changes.length === 0) fail('invalid_params', 'patch 未携带任何可编辑字段（content / criterias / dispatchable / factVerified 至少一项）')
   // D9：用户改动 → 上溯路径进待重审（不变量 9）。agent 修复不触发（处置表承载复审范围）。
   if (actor === 'user') {
@@ -313,6 +311,53 @@ function applyPatch(
   draft.updatedAt = at
   pushEvent(events, eventOf('patch', actor, at, eventData({ ...params })))
   return `节点「${truncate(node.content)}」已更新（${changes.join('/')}）：${truncate(params.reason)}`
+}
+
+/** content 字段应用：节点内容 + 根问题时同步 root.statement（元数据镜像，单处）。 */
+function applyPatchContent(
+  draft: CanvasState,
+  node: CanvasNode,
+  params: CanvasActionParams['patch'],
+  changes: string[],
+): void {
+  if (params.content === undefined) return
+  node.content = params.content
+  changes.push('内容')
+  if (node.id === draft.root.nodeId) draft.root.statement = params.content
+}
+
+/** criterias 字段应用：根问题写 root.criterias、执行叶子写节点（不变量 7 的载体域）。 */
+function applyPatchCriterias(
+  draft: CanvasState,
+  node: CanvasNode,
+  params: CanvasActionParams['patch'],
+  changes: string[],
+): void {
+  if (params.criterias === undefined) return
+  if (node.type !== 'option' && node.id !== draft.root.nodeId) {
+    fail('invalid_params', '完成判据只能编辑在根问题或执行叶子（option）上')
+  }
+  if (node.id === draft.root.nodeId) draft.root.criterias = [...params.criterias]
+  else node.criterias = [...params.criterias]
+  changes.push('判据')
+}
+
+/** dispatchable 字段应用：执行叶子标记（只能设在 option 上）。 */
+function applyPatchDispatchable(node: CanvasNode, params: CanvasActionParams['patch'], changes: string[]): void {
+  if (params.dispatchable === undefined) return
+  if (node.type !== 'option') fail('invalid_params', '执行叶子标记（dispatchable）只能设在 option 上')
+  node.dispatchable = params.dispatchable
+  changes.push(params.dispatchable ? '标记执行叶子' : '取消执行叶子')
+}
+
+/** factVerified 字段应用：核实状态翻转（只能设在 fact 论据上——不变量 5）。 */
+function applyPatchFactVerified(node: CanvasNode, params: CanvasActionParams['patch'], changes: string[]): void {
+  if (params.factVerified === undefined) return
+  if (node.type !== 'argument' || node.materiality !== 'fact') {
+    fail('invalid_params', '核实状态（factVerified）只能翻转在 fact 论据上')
+  }
+  node.factVerified = params.factVerified
+  changes.push(params.factVerified ? '核实' : '撤销核实')
 }
 
 // ── decide-direction（画布元数据 + 事件留痕，R4：非图节点）────

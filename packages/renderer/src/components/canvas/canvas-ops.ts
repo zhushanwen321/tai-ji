@@ -58,144 +58,183 @@ export interface CanvasOpSpec { // oe-exempt:20261015:framework:画布域类型�
   replacedOptionId?: string
 }
 
-/** 组装操作对话框规格（上下文切片在此单处解析，提交侧不再反查图）。 */
+/** opSpecOf 的上下文参数（per-kind 构造函数共用形参——签名单点）。 */
+type OpContext = { state: CanvasState; nodeId?: string; entryId?: string; transitionTo?: string }
+
+/** 组装操作对话框规格（上下文切片在此单处解析，提交侧不再反查图）。
+ *  per-kind 子构造函数拆分（单 switch 内联 9 分支 + 字段构造超 metrics 门禁圈复杂度
+ *  阈值）——本函数只做分派，规格细节在各 kind 构造函数。 */
 export function opSpecOf(
   kind: CanvasOpKind,
   ctx: { state: CanvasState; nodeId?: string; entryId?: string; transitionTo?: string },
 ): CanvasOpSpec {
   switch (kind) {
-    case 'select': {
-      const nodeId = ctx.nodeId ?? ''
-      const questionId = questionIdOfOption(ctx.state, nodeId) ?? ''
-      const replaced = selectedOptionIdOf(ctx.state, questionId)
-      return {
-        kind,
-        titleKey: replaced ? 'panel.canvas.op.selectReplaceTitle' : 'panel.canvas.op.selectTitle',
-        submitKey: 'panel.canvas.op.submit',
-        nodeId,
-        questionId,
-        replacedOptionId: replaced ?? undefined,
-        fields: [
-          {
-            key: 'reason',
-            kind: 'textarea',
-            labelKey: 'panel.canvas.op.selectReason',
-            required: true,
-            placeholderKey: 'panel.canvas.op.selectReasonHint',
-          },
-        ],
-      }
-    }
+    case 'select':
+      return selectOpSpec(ctx)
     case 'reject':
-      return {
-        kind,
-        titleKey: 'panel.canvas.op.rejectTitle',
-        submitKey: 'panel.canvas.op.rejectSubmit',
-        nodeId: ctx.nodeId,
-        fields: [
-          { key: 'reason', kind: 'textarea', labelKey: 'panel.canvas.op.rejectReason', required: true, placeholderKey: 'panel.canvas.op.rejectReasonHint' },
-          { key: 'reviveCondition', kind: 'textarea', labelKey: 'panel.canvas.op.reviveCondition', placeholderKey: 'panel.canvas.op.reviveConditionHint' },
-        ],
-      }
+      return rejectOpSpec(ctx)
     case 'transition':
-      return {
-        kind,
-        titleKey: 'panel.canvas.op.transitionTitle',
-        submitKey: 'panel.canvas.op.submit',
-        nodeId: ctx.nodeId,
-        transitionTo: ctx.transitionTo,
-        fields: [
-          { key: 'to', kind: 'select', labelKey: 'panel.canvas.op.transitionTo', required: true, options: transitionOptionsOf(ctx.transitionTo) },
-          { key: 'reason', kind: 'textarea', labelKey: 'panel.canvas.op.transitionReason', required: true },
-        ],
-      }
+      return transitionOpSpec(ctx)
     case 'comment':
-      return {
-        kind,
-        titleKey: 'panel.canvas.op.commentTitle',
-        submitKey: 'panel.canvas.op.commentSubmit',
-        nodeId: ctx.nodeId,
-        fields: [
-          { key: 'text', kind: 'textarea', labelKey: 'panel.canvas.op.commentText', required: true, placeholderKey: 'panel.canvas.op.commentHint' },
-        ],
-      }
-    case 'edit-content': {
-      const node = ctx.state.nodes.find((n) => n.id === ctx.nodeId)
-      return {
-        kind,
-        titleKey: 'panel.canvas.op.editTitle',
-        submitKey: 'panel.canvas.op.submit',
-        nodeId: ctx.nodeId,
-        fields: [
-          { key: 'content', kind: 'textarea', labelKey: 'panel.canvas.op.editContent', required: true, initial: node?.content ?? '' },
-          { key: 'reason', kind: 'text', labelKey: 'panel.canvas.op.editReason', required: true, placeholderKey: 'panel.canvas.op.editReasonHint' },
-        ],
-      }
-    }
-    case 'edit-criterias': {
-      const node = ctx.state.nodes.find((n) => n.id === ctx.nodeId)
-      return {
-        kind,
-        titleKey: 'panel.canvas.op.criteriasTitle',
-        submitKey: 'panel.canvas.op.submit',
-        nodeId: ctx.nodeId,
-        fields: [
-          { key: 'criterias', kind: 'criterias', labelKey: 'panel.canvas.op.criteriasList', required: true, initial: (node?.criterias ?? []).join('\n'), placeholderKey: 'panel.canvas.op.criteriasHint' },
-          { key: 'reason', kind: 'text', labelKey: 'panel.canvas.op.editReason', required: true, placeholderKey: 'panel.canvas.op.editReasonHint' },
-        ],
-      }
-    }
+      return commentOpSpec(ctx)
+    case 'edit-content':
+      return editContentOpSpec(ctx)
+    case 'edit-criterias':
+      return editCriteriasOpSpec(ctx)
     case 'resolve':
-      return {
-        kind,
-        titleKey: 'panel.canvas.op.resolveTitle',
-        submitKey: 'panel.canvas.op.resolveSubmit',
-        entryId: ctx.entryId,
-        fields: [
-          {
-            key: 'disposition',
-            kind: 'select',
-            labelKey: 'panel.canvas.op.resolveDisposition',
-            required: true,
-            options: [
-              { value: 'accepted', labelKey: 'panel.canvas.op.resolveAccepted' },
-              { value: 'deferred', labelKey: 'panel.canvas.op.resolveDeferred' },
-              { value: 'rejected', labelKey: 'panel.canvas.op.resolveRejected' },
-            ],
-          },
-          { key: 'note', kind: 'textarea', labelKey: 'panel.canvas.op.resolveNote', required: true, placeholderKey: 'panel.canvas.op.resolveNoteHint' },
-        ],
-      }
+      return resolveOpSpec(ctx)
     case 'dispatch':
-      return {
-        kind,
-        titleKey: 'panel.canvas.op.dispatchTitle',
-        submitKey: 'panel.canvas.op.dispatchSubmit',
-        nodeId: ctx.nodeId,
-        fields: [
-          { key: 'pointer', kind: 'text', labelKey: 'panel.canvas.op.dispatchPointer', required: true, placeholderKey: 'panel.canvas.op.dispatchPointerHint' },
-        ],
-      }
+      return dispatchOpSpec(ctx)
     case 'decide-direction':
-      return {
-        kind,
-        titleKey: 'panel.canvas.op.directionTitle',
-        submitKey: 'panel.canvas.op.directionSubmit',
-        fields: [
-          {
-            key: 'direction',
-            kind: 'select',
-            labelKey: 'panel.canvas.op.directionChoice',
-            required: true,
-            options: [
-              // 方向词条复用外层画布域（CanvasPane 头部同款，单份不进 op 子树）
-              { value: 'top-down', labelKey: 'panel.canvas.directionTopDown' },
-              { value: 'bottom-up', labelKey: 'panel.canvas.directionBottomUp' },
-            ],
-          },
-          { key: 'reason', kind: 'textarea', labelKey: 'panel.canvas.op.directionReason', required: true },
+      return decideDirectionOpSpec()
+  }
+}
+
+/** select：换选时换提示标题（replaced = 该问题当前选定方案）。 */
+function selectOpSpec(ctx: OpContext): CanvasOpSpec {
+  const nodeId = ctx.nodeId ?? ''
+  const questionId = questionIdOfOption(ctx.state, nodeId) ?? ''
+  const replaced = selectedOptionIdOf(ctx.state, questionId)
+  return {
+    kind: 'select',
+    titleKey: replaced ? 'panel.canvas.op.selectReplaceTitle' : 'panel.canvas.op.selectTitle',
+    submitKey: 'panel.canvas.op.submit',
+    nodeId,
+    questionId,
+    replacedOptionId: replaced ?? undefined,
+    fields: [
+      {
+        key: 'reason',
+        kind: 'textarea',
+        labelKey: 'panel.canvas.op.selectReason',
+        required: true,
+        placeholderKey: 'panel.canvas.op.selectReasonHint',
+      },
+    ],
+  }
+}
+
+function rejectOpSpec(ctx: OpContext): CanvasOpSpec {
+  return {
+    kind: 'reject',
+    titleKey: 'panel.canvas.op.rejectTitle',
+    submitKey: 'panel.canvas.op.rejectSubmit',
+    nodeId: ctx.nodeId,
+    fields: [
+      { key: 'reason', kind: 'textarea', labelKey: 'panel.canvas.op.rejectReason', required: true, placeholderKey: 'panel.canvas.op.rejectReasonHint' },
+      { key: 'reviveCondition', kind: 'textarea', labelKey: 'panel.canvas.op.reviveCondition', placeholderKey: 'panel.canvas.op.reviveConditionHint' },
+    ],
+  }
+}
+
+function transitionOpSpec(ctx: OpContext): CanvasOpSpec {
+  return {
+    kind: 'transition',
+    titleKey: 'panel.canvas.op.transitionTitle',
+    submitKey: 'panel.canvas.op.submit',
+    nodeId: ctx.nodeId,
+    transitionTo: ctx.transitionTo,
+    fields: [
+      { key: 'to', kind: 'select', labelKey: 'panel.canvas.op.transitionTo', required: true, options: transitionOptionsOf(ctx.transitionTo) },
+      { key: 'reason', kind: 'textarea', labelKey: 'panel.canvas.op.transitionReason', required: true },
+    ],
+  }
+}
+
+function commentOpSpec(ctx: OpContext): CanvasOpSpec {
+  return {
+    kind: 'comment',
+    titleKey: 'panel.canvas.op.commentTitle',
+    submitKey: 'panel.canvas.op.commentSubmit',
+    nodeId: ctx.nodeId,
+    fields: [
+      { key: 'text', kind: 'textarea', labelKey: 'panel.canvas.op.commentText', required: true, placeholderKey: 'panel.canvas.op.commentHint' },
+    ],
+  }
+}
+
+function editContentOpSpec(ctx: OpContext): CanvasOpSpec {
+  const node = ctx.state.nodes.find((n) => n.id === ctx.nodeId)
+  return {
+    kind: 'edit-content',
+    titleKey: 'panel.canvas.op.editTitle',
+    submitKey: 'panel.canvas.op.submit',
+    nodeId: ctx.nodeId,
+    fields: [
+      { key: 'content', kind: 'textarea', labelKey: 'panel.canvas.op.editContent', required: true, initial: node?.content ?? '' },
+      { key: 'reason', kind: 'text', labelKey: 'panel.canvas.op.editReason', required: true, placeholderKey: 'panel.canvas.op.editReasonHint' },
+    ],
+  }
+}
+
+function editCriteriasOpSpec(ctx: OpContext): CanvasOpSpec {
+  const node = ctx.state.nodes.find((n) => n.id === ctx.nodeId)
+  return {
+    kind: 'edit-criterias',
+    titleKey: 'panel.canvas.op.criteriasTitle',
+    submitKey: 'panel.canvas.op.submit',
+    nodeId: ctx.nodeId,
+    fields: [
+      { key: 'criterias', kind: 'criterias', labelKey: 'panel.canvas.op.criteriasList', required: true, initial: (node?.criterias ?? []).join('\n'), placeholderKey: 'panel.canvas.op.criteriasHint' },
+      { key: 'reason', kind: 'text', labelKey: 'panel.canvas.op.editReason', required: true, placeholderKey: 'panel.canvas.op.editReasonHint' },
+    ],
+  }
+}
+
+function resolveOpSpec(ctx: OpContext): CanvasOpSpec {
+  return {
+    kind: 'resolve',
+    titleKey: 'panel.canvas.op.resolveTitle',
+    submitKey: 'panel.canvas.op.resolveSubmit',
+    entryId: ctx.entryId,
+    fields: [
+      {
+        key: 'disposition',
+        kind: 'select',
+        labelKey: 'panel.canvas.op.resolveDisposition',
+        required: true,
+        options: [
+          { value: 'accepted', labelKey: 'panel.canvas.op.resolveAccepted' },
+          { value: 'deferred', labelKey: 'panel.canvas.op.resolveDeferred' },
+          { value: 'rejected', labelKey: 'panel.canvas.op.resolveRejected' },
         ],
-      }
+      },
+      { key: 'note', kind: 'textarea', labelKey: 'panel.canvas.op.resolveNote', required: true, placeholderKey: 'panel.canvas.op.resolveNoteHint' },
+    ],
+  }
+}
+
+function dispatchOpSpec(ctx: OpContext): CanvasOpSpec {
+  return {
+    kind: 'dispatch',
+    titleKey: 'panel.canvas.op.dispatchTitle',
+    submitKey: 'panel.canvas.op.dispatchSubmit',
+    nodeId: ctx.nodeId,
+    fields: [
+      { key: 'pointer', kind: 'text', labelKey: 'panel.canvas.op.dispatchPointer', required: true, placeholderKey: 'panel.canvas.op.dispatchPointerHint' },
+    ],
+  }
+}
+
+function decideDirectionOpSpec(): CanvasOpSpec {
+  return {
+    kind: 'decide-direction',
+    titleKey: 'panel.canvas.op.directionTitle',
+    submitKey: 'panel.canvas.op.directionSubmit',
+    fields: [
+      {
+        key: 'direction',
+        kind: 'select',
+        labelKey: 'panel.canvas.op.directionChoice',
+        required: true,
+        options: [
+          // 方向词条复用外层画布域（CanvasPane 头部同款，单份不进 op 子树）
+          { value: 'top-down', labelKey: 'panel.canvas.directionTopDown' },
+          { value: 'bottom-up', labelKey: 'panel.canvas.directionBottomUp' },
+        ],
+      },
+      { key: 'reason', kind: 'textarea', labelKey: 'panel.canvas.op.directionReason', required: true },
+    ],
   }
 }
 
@@ -229,81 +268,119 @@ function parseCriterias(raw: string): string[] {
  * 构造 mutate 请求（actor:user 由调用方附——本函数只产 {action, params}）。
  * required 缺失由对话框拦截；此处空上下文按空串透传（runtime 契约守卫/不变量
  * fail-fast——GUI 侧不复制校验，双通道同构）。
+ * per-kind 子构造函数拆分（单 switch 内联 9 分支 + 参数拼装超 metrics 门禁圈复杂度
+ * 阈值）——本函数只做分派，params 形状细节在各 kind 构造函数（U1 契约对齐不变）。
  */
 export function buildMutateRequest(canvasId: string, spec: CanvasOpSpec, values: CanvasOpValues): CanvasMutateRequest {
-  const nodeId = spec.nodeId ?? ''
   switch (spec.kind) {
-    case 'select': {
-      const params: CanvasActionParams['select'] = {
-        canvasId,
-        questionId: spec.questionId ?? '',
-        optionId: nodeId,
-        reason: values['reason'] ?? '',
-      }
-      if (spec.replacedOptionId) params.replace = { fromOptionId: spec.replacedOptionId }
-      return { action: 'select', params }
-    }
+    case 'select':
+      return selectRequest(canvasId, spec, values)
     case 'reject':
-      return {
-        action: 'transition',
-        params: {
-          canvasId,
-          nodeId,
-          to: 'rejected',
-          rejection: {
-            reason: values['reason'] ?? '',
-            ...(values['reviveCondition'] ? { reviveCondition: values['reviveCondition']! } : {}),
-          },
-          reason: values['reason'] ?? '',
-        },
-      }
+      return rejectRequest(canvasId, spec, values)
     case 'transition':
-      return {
-        action: 'transition',
-        params: {
-          canvasId,
-          nodeId,
-          to: (values['to'] ?? '') as CanvasActionParams['transition']['to'],
-          reason: values['reason'] ?? '',
-        },
-      }
+      return transitionRequest(canvasId, spec, values)
     case 'comment':
-      return { action: 'comment', params: { canvasId, anchorId: nodeId, text: values['text'] ?? '' } }
+      return commentRequest(canvasId, spec, values)
     case 'edit-content':
-      return {
-        action: 'patch',
-        params: { canvasId, nodeId, content: values['content'] ?? '', reason: values['reason'] ?? '' },
-      }
+      return editContentRequest(canvasId, spec, values)
     case 'edit-criterias':
-      return {
-        action: 'patch',
-        params: {
-          canvasId,
-          nodeId,
-          criterias: parseCriterias(values['criterias'] ?? ''),
-          reason: values['reason'] ?? '',
-        },
-      }
+      return editCriteriasRequest(canvasId, spec, values)
     case 'resolve':
-      return {
-        action: 'review-resolve',
-        params: {
-          canvasId,
-          entryId: spec.entryId ?? '',
-          disposition: (values['disposition'] ?? 'accepted') as 'accepted' | 'deferred' | 'rejected',
-          note: values['note'] ?? '',
-        },
-      }
+      return resolveRequest(canvasId, spec, values)
     case 'dispatch':
-      return { action: 'dispatch', params: { canvasId, nodeId, pointer: values['pointer'] ?? '' } }
+      return dispatchRequest(canvasId, spec, values)
     case 'decide-direction':
-      return {
-        action: 'decide-direction',
-        params: {
-          canvasId,
-          direction: (values['direction'] ?? 'top-down') as 'top-down' | 'bottom-up',
-          reason: values['reason'] ?? '',
-        },
-      }
+      return decideDirectionRequest(canvasId, values)
+  }
+}
+
+/** select：换选时附 replace（fromOptionId = 迁移出的旧选定）。 */
+function selectRequest(canvasId: string, spec: CanvasOpSpec, values: CanvasOpValues): CanvasMutateRequest {
+  const params: CanvasActionParams['select'] = {
+    canvasId,
+    questionId: spec.questionId ?? '',
+    optionId: spec.nodeId ?? '',
+    reason: values['reason'] ?? '',
+  }
+  if (spec.replacedOptionId) params.replace = { fromOptionId: spec.replacedOptionId }
+  return { action: 'select', params }
+}
+
+/** reject：transition to=rejected 的 GUI 形态（否决理由入 rejection 记录 + reason 双写留痕）。 */
+function rejectRequest(canvasId: string, spec: CanvasOpSpec, values: CanvasOpValues): CanvasMutateRequest {
+  return {
+    action: 'transition',
+    params: {
+      canvasId,
+      nodeId: spec.nodeId ?? '',
+      to: 'rejected',
+      rejection: {
+        reason: values['reason'] ?? '',
+        ...(values['reviveCondition'] ? { reviveCondition: values['reviveCondition']! } : {}),
+      },
+      reason: values['reason'] ?? '',
+    },
+  }
+}
+
+function transitionRequest(canvasId: string, spec: CanvasOpSpec, values: CanvasOpValues): CanvasMutateRequest {
+  return {
+    action: 'transition',
+    params: {
+      canvasId,
+      nodeId: spec.nodeId ?? '',
+      to: (values['to'] ?? '') as CanvasActionParams['transition']['to'],
+      reason: values['reason'] ?? '',
+    },
+  }
+}
+
+function commentRequest(canvasId: string, spec: CanvasOpSpec, values: CanvasOpValues): CanvasMutateRequest {
+  return { action: 'comment', params: { canvasId, anchorId: spec.nodeId ?? '', text: values['text'] ?? '' } }
+}
+
+function editContentRequest(canvasId: string, spec: CanvasOpSpec, values: CanvasOpValues): CanvasMutateRequest {
+  return {
+    action: 'patch',
+    params: { canvasId, nodeId: spec.nodeId ?? '', content: values['content'] ?? '', reason: values['reason'] ?? '' },
+  }
+}
+
+function editCriteriasRequest(canvasId: string, spec: CanvasOpSpec, values: CanvasOpValues): CanvasMutateRequest {
+  return {
+    action: 'patch',
+    params: {
+      canvasId,
+      nodeId: spec.nodeId ?? '',
+      criterias: parseCriterias(values['criterias'] ?? ''),
+      reason: values['reason'] ?? '',
+    },
+  }
+}
+
+function resolveRequest(canvasId: string, spec: CanvasOpSpec, values: CanvasOpValues): CanvasMutateRequest {
+  return {
+    action: 'review-resolve',
+    params: {
+      canvasId,
+      entryId: spec.entryId ?? '',
+      disposition: (values['disposition'] ?? 'accepted') as 'accepted' | 'deferred' | 'rejected',
+      note: values['note'] ?? '',
+    },
+  }
+}
+
+function dispatchRequest(canvasId: string, spec: CanvasOpSpec, values: CanvasOpValues): CanvasMutateRequest {
+  return { action: 'dispatch', params: { canvasId, nodeId: spec.nodeId ?? '', pointer: values['pointer'] ?? '' } }
+}
+
+function decideDirectionRequest(canvasId: string, values: CanvasOpValues): CanvasMutateRequest {
+  return {
+    action: 'decide-direction',
+    params: {
+      canvasId,
+      direction: (values['direction'] ?? 'top-down') as 'top-down' | 'bottom-up',
+      reason: values['reason'] ?? '',
+    },
   }
 }

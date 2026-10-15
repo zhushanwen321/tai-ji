@@ -94,16 +94,29 @@ export function applyReviewAppend(
     // 时按 params.round 建聚合不变（首轮直写路径）。重放与 live 同一校验（直写 ≡ 重放）。
     fail('invalid_params', `报告轮次（R${params.round}）与当前审查轮次（R${draft.review.round}）不一致：review-append 必须写回当前轮——先 canvas_read 核对审查聚合轮次`)
   }
+  // 校验两段先行（引用完整性 → 支撑度规则），全过才落聚合（任一失败 fail-fast 无部分写入）。
+  validateEntryRefs(draft, params.entries)
+  validateSupportRatings(draft, params.entries)
+  upsertReviewEntries(draft, params)
+  draft.updatedAt = at
+  events.push(eventOf('review-append', actor, at, eventData({ ...params })))
+  return `审查报告 R${params.round} 写回 ${params.entries.length} 条条目`
+}
+
+/** 聚合 2 不变量 1：条目引用的图元素 id 必须存在于画布（节点 / 边 / 评论三类 id 全集）。 */
+function validateEntryRefs(draft: CanvasState, entries: CanvasActionParams['review-append']['entries']): void {
   const knownIds = new Set<string>([...draft.nodes.map((n) => n.id), ...draft.edges.map((e) => e.id), ...draft.comments.map((c) => c.id)])
-  for (const entry of params.entries) {
-    // 聚合 2 不变量 1：条目引用的图元素 id 必须存在于画布。
+  for (const entry of entries) {
     if (!knownIds.has(entry.targetId)) fail('entry_ref_missing', `报告条目「${entry.id}」引用的图元素「${entry.targetId}」不存在`)
   }
-  // 支撑度写回前置校验（概念 §2.4「边的缺陷经支撑度表达」的唯一写入通道——审查结论
-  // 随条目落 edge.support）：评价目标必须是主干边（裁决点 R3：论证边不评级）；
-  // gap 必附缺口清单、sufficient/invalid 不得夹带清单（「有缺口附清单」词条语义，
-  // 与契约守卫同规则双向——重放 / WS 直连不经 marker 守卫，runtime 是唯一防线）。
-  for (const entry of params.entries) {
+}
+
+/** 支撑度写回前置校验（概念 §2.4「边的缺陷经支撑度表达」的唯一写入通道——审查结论
+ * 随条目落 edge.support）：评价目标必须是主干边（裁决点 R3：论证边不评级）；
+ * gap 必附缺口清单、sufficient/invalid 不得夹带清单（「有缺口附清单」词条语义，
+ * 与契约守卫同规则双向——重放 / WS 直连不经 marker 守卫，runtime 是唯一防线）。 */
+function validateSupportRatings(draft: CanvasState, entries: CanvasActionParams['review-append']['entries']): void {
+  for (const entry of entries) {
     if (entry.supportRating === undefined) continue
     const edge = edgeOf(draft, entry.targetId)
     if (!edge || !isTrunkEdge(edge)) {
@@ -116,23 +129,27 @@ export function applyReviewAppend(
       fail('invalid_params', `条目「${entry.id}」支撑度评价为「${entry.supportRating}」不得夹带缺口清单（supportGaps 仅 gap 评价携带：sufficient/invalid 不带）`)
     }
   }
+}
+
+/** 条目落聚合 + 评价写回 edge.support。幂等 upsert（同 grow：重试覆盖字段、保留已
+ * 登记的处置记录）。review 聚合由调用方（applyReviewAppend 首分支）保证已初始化——
+ * 本地 guard 仅为类型收窄（收窄不跨函数边界），运行时不可达。 */
+function upsertReviewEntries(draft: CanvasState, params: CanvasActionParams['review-append']): void {
+  const review = draft.review
+  if (!review) return
   for (const entry of params.entries) {
-    const existing = draft.review.entries.find((e) => e.id === entry.id)
+    const existing = review.entries.find((e) => e.id === entry.id)
     const merged = { ...entry, resolution: existing?.resolution }
     if (existing) {
-      // 幂等 upsert（同 grow：重试覆盖字段、保留已登记的处置记录）。
-      draft.review.entries[draft.review.entries.indexOf(existing)] = merged
+      review.entries[review.entries.indexOf(existing)] = merged
     } else {
-      draft.review.entries.push(merged)
+      review.entries.push(merged)
     }
     if (entry.supportRating !== undefined) {
       const edge = edgeOf(draft, entry.targetId)
       if (edge) edge.support = { rating: entry.supportRating, ...(entry.supportGaps ? { gaps: [...entry.supportGaps] } : {}), round: params.round }
     }
   }
-  draft.updatedAt = at
-  events.push(eventOf('review-append', actor, at, eventData({ ...params })))
-  return `审查报告 R${params.round} 写回 ${params.entries.length} 条条目`
 }
 
 const RESOLUTION_NOTE_MAX = 20
