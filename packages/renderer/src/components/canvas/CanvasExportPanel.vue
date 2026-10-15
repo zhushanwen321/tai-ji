@@ -1,11 +1,13 @@
 <!--
   CanvasExportPanel —— 详情面板·导出 tab（problem-solve-canvas §3.1(3)）。
 
-  收敛门禁与导出解锁：门禁区呈现收敛门禁投影（①根判据确认 ③must-fix 清零+待重审空
-  ——契约直读/投影字段；②就绪递归为 runtime 领域规则，GUI 不复刻，以 converge-check /
-  export 的结构化拒绝为准）+ 最近一次未收敛拒绝的错误码与恢复动作文案（设计「未收敛
-  返回错误码+恢复动作文案呈现在导出面板门禁区」）。converged = true 导出解锁（时点
-  快照语义：导出后再 dispatch 需重新导出覆盖——执行清单为实时派生视图随画布刷新）。
+  收敛门禁与导出解锁：门禁区呈现收敛门禁三门禁投影（编号 = runtime
+  convergenceBlockers 门禁序：①根判据确认 = root.confirmed 契约直读；②就绪递归 =
+  只透传 runtime converged 确定性事实、GUI 不复刻领域规则（校验落点 = converge-check /
+  export 的结构化拒绝——拒绝文案含完整阻断清单）；③must-fix 清零且待重审空 = 契约投影
+  字段）+ 最近一次未收敛拒绝的错误码与恢复动作文案（设计「未收敛返回错误码+恢复动作
+  文案呈现在导出面板门禁区」）。converged = true 导出解锁（时点快照语义：导出后再
+  dispatch 需重新导出覆盖——执行清单为实时派生视图随画布刷新）。
 
   派发段：执行叶子清单（passed 且带判据的已选叶子优先）+ 指针登记（手填下游产物
   位置——D8：派发 = 用户逐叶确认 + 手填指针；已派发叶子显示指针，编辑偏差走待重审）。
@@ -145,9 +147,10 @@ const LIFECYCLE_KEYS = {
 } as const
 
 /**
- * 收敛门禁投影（③格形态）：①根判据确认 = root.confirmed（契约直读字段）；
- * ②must-fix 清零且待重审空 = 契约投影口径；③就绪递归 = runtime 领域规则，GUI 不
- * 复刻（ converge-check / export 的结构化拒绝承载——拒绝文案含完整阻断清单）。
+ * 收敛门禁三门禁投影（编号 = runtime convergenceBlockers 门禁序：①根判据 ②就绪递归
+ * ③must-fix+待重审）：①根判据确认 = root.confirmed（契约直读字段）；②就绪递归 = 只
+ * 透传 runtime converged 确定性事实、不复刻领域规则（converge-check / export 的结构
+ * 化拒绝承载——拒绝文案含完整阻断清单）；③must-fix 清零且待重审空 = 契约投影口径。
  */
 const gates = computed<Array<{ key: string; ok: boolean; label: string }>>(() => [
   {

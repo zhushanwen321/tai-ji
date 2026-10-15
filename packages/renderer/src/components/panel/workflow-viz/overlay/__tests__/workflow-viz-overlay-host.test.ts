@@ -492,7 +492,7 @@ describe('scheduler 一级 tab（Host 挂载门控 + tab 状态机，scheduler �
 })
 
 describe('canvas 一级 tab（problem-solve-canvas §3.1(3)：画布跨 session，scheduler 双入口先例平移）', () => {
-  it('canvas 直达打开（kind 直达）：overlay 面板呈现 + canvas 占位 pane 在场 + runs/scheduler body 不在场 + header 换画布标题', async () => {
+  it('canvas 直达打开（kind 直达）：overlay 面板呈现 + canvas pane 在场且 CanvasPane 真实挂载（core 内容 kind=canvas、canvasId=cvs-1）+ runs/scheduler body 不在场 + header 换画布标题', async () => {
     const wrapper = mount(WorkflowVizOverlayHost)
 
     openCanvasTab('cvs-1')
@@ -501,6 +501,12 @@ describe('canvas 一级 tab（problem-solve-canvas §3.1(3)：画布跨 session�
     expect(getOverlayControlState().current).toEqual({ kind: 'canvas', payload: { canvasId: 'cvs-1' } })
     expect(wrapper.find('[data-testid="wfvz-overlay-panel"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="wfvz-overlay-canvas-pane"]').exists()).toBe(true)
+    // CanvasPane 异步导入（defineAsyncComponent）落定后真实挂载——canvas-pane 为其根元素
+    // testid；挂载即 loadCanvas（host 路径无 canvas RPC mock，transport 不可达走 store
+    // 错误态渲染，根元素仍在——断言坐实「非空 wrapper」）
+    await vi.waitFor(() => {
+      expect(wrapper.find('[data-testid="canvas-pane"]').exists()).toBe(true)
+    })
     expect(wrapper.find('[data-testid="wfvz-overlay-dag-pane"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="wfvz-overlay-live-pane"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="wfvz-overlay-scheduler-pane"]').exists()).toBe(false)
@@ -516,7 +522,7 @@ describe('canvas 一级 tab（problem-solve-canvas §3.1(3)：画布跨 session�
     await flushPromises()
     expect(wrapper.find('[data-testid="wfvz-overlay-dag-pane"]').exists()).toBe(true)
 
-    // 切 canvas：runs body 卸载、canvas 占位在场；core 内容仍是 workflow（tab 只切展示维度）
+    // 切 canvas：runs body 卸载、canvas pane 空 wrapper 在场（core 内容仍 workflow、canvasId 缺席 CanvasPane 不挂载）；tab 只切展示维度
     await wrapper.find('[data-testid="wfvz-overlay-tab-canvas"]').trigger('click')
     await flushPromises()
     expect(wrapper.find('[data-testid="wfvz-overlay-canvas-pane"]').exists()).toBe(true)
@@ -531,7 +537,7 @@ describe('canvas 一级 tab（problem-solve-canvas §3.1(3)：画布跨 session�
     wrapper.unmount()
   })
 
-  it('tab 切换互不串扰：canvas 直达开着切 scheduler——scheduler pane 替换 canvas 占位，再点 canvas 段还原', async () => {
+  it('tab 切换互不串扰：canvas 直达开着切 scheduler——scheduler pane 替换 canvas pane（CanvasPane 随之卸载），再点 canvas 段还原', async () => {
     const wrapper = mount(WorkflowVizOverlayHost)
 
     openCanvasTab('cvs-1')

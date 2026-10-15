@@ -17,8 +17,10 @@
   纵向两段（workflow-overlay-refine D1，份额 1.6:1）：上区 DAG（WorkflowVizDag
   画布 / DAG 不可得降级列表 / 解析中 / 未匹配实例分组 + 左下角 D4 状态图例（仅画布
   就绪时在场，dot 类与节点同源 dag/tone.ts、pointer-events-none 不拦截画布交互），
-  全宽）+ 下区 dock（slot——U5 多级 tab 面板填充位，全宽）；tab=canvas 时 body =
-  CanvasPane（挂载分支归 u-canvas-pane，本单元占位空态）；tab=scheduler 时 body =
+  全宽）+ 下区 dock（slot——U5 多级 tab 面板填充位，全宽）；tab=canvas 时 body 已挂
+  CanvasPane 真实组件（挂载分支归 u-canvas-pane，defineAsyncComponent 异步导入与壳主
+  chunk 解耦，canvasId 读 core 开合态单例、空载荷不挂载——本单元提供 tab 壳与开合态）；
+  tab=scheduler 时 body =
   ViewHost（消费 scheduler-manager 插件推树，viewId 单源 SCHEDULER_MODAL_VIEW_ID；
   树未到 empty=hidden 零 DOM）。tab 是受控 prop
   （SSOT 在控制器 workflow-viz-overlay.ts，Host 透传 + update:tab 写回），壳纯展示

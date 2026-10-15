@@ -413,7 +413,7 @@ describe('WorkflowVizOverlay canvas tab（problem-solve-canvas §3.1(3)，黑盒
     expect(wrapper.find('[data-testid="wfvz-overlay-tab-runs"]').attributes('aria-selected')).toBe('true')
   })
 
-  it('tab=canvas：canvas 占位 pane 在场，runs body（DAG 区 + live dock）与 scheduler pane 均卸载；header 换画布标题（run 六元素让位）', () => {
+  it('tab=canvas：canvas pane 空 wrapper 在场（shell 路径未置 core 开合态、canvasId 缺席 CanvasPane 不挂载），runs body（DAG 区 + live dock）与 scheduler pane 均卸载；header 换画布标题（run 六元素让位）', () => {
     const wrapper = mountOverlay({ dag: SAMPLE_DAG, tab: 'canvas' })
     expect(wrapper.find('[data-testid="wfvz-overlay-canvas-pane"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="wfvz-overlay-dag-pane"]').exists()).toBe(false)

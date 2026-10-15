@@ -194,7 +194,8 @@ import { phaseOfFacts, type CanvasPhase } from '@/components/canvas/canvas-displ
 import type { CanvasListEntry } from '@zhushanwen/extension-protocol'
 
 withDefaults(defineProps<{
-  /** pin 态（外壳管理）：画布面板无行内破坏性操作，占位保持面板 prop 形态一致（无消费） */
+  /** pin 态（外壳统一透传：行内操作仅 pin 态渲染，D8 防误触——托盘段内面板的共同契约；
+   * 画布无行内破坏性操作，唯一动作是打开 overlay，故本面板不消费该值） */
   pinned?: boolean
 }>(), { pinned: false })
 
