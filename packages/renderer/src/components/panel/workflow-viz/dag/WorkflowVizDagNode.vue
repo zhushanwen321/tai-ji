@@ -46,7 +46,7 @@
     />
     <text class="text-[length:var(--text-3xs)] font-semibold fill-[var(--neutral-fg)]" :x="LABEL_X" :y="TITLE_BASELINE_Y">
       <title>{{ titleFull }}</title>
-      {{ truncatedTitle }}
+      {{ titleText }}
     </text>
     <text class="text-[length:var(--text-3xs)] font-mono fill-[var(--neutral-dim)]" :x="LABEL_X" :y="META_BASELINE_Y">{{ kindLabel }} · L{{ node.line }}</text>
     <!-- 执行实例行（≥2 实例时；1 实例已并入标题，0 实例零渲染） -->
@@ -113,21 +113,42 @@ if (!props.node || typeof props.node.id !== 'string' || props.node.id === '') {
   throw new Error('[WorkflowVizDagNode] node prop 违约：缺失或 id 非法')
 }
 
+type InstanceList = WorkflowAgentCall[]
+
+/** 实例行区起渲染的最少实例数（≥MIN_EXTRA_ROWS 才渲染行区；1 实例并入标题不双轨）。 */
+const MIN_EXTRA_ROWS = 2
+
 /** 节点高度（与布局同表：dagNodeHeight 按实例数增高——节点卡片与布局几何单源）。 */
 const height = computed(() => dagNodeHeight(props.instances?.length ?? 0))
 
-/** 恰 1 实例 → 标题即实例 agent 名（固定 agent 名）；其余形态标题 = 调用点模板名。 */
-const titleSource = computed(() => {
-  const list = props.instances
-  return list !== undefined && list.length === 1 ? list[0].agent : props.node.templateName
-})
+/** 标题文本（含截断预算）：恰 1 实例 → 实例 agent 名；全通配模板 '*' 多实例 →
+ *  实例派生摘要「首名截断 +N」（后缀保留预算，计数永不被截掉）；其余 → 模板名。 */
+const titleText = computed(() => formatTitle(props.instances, props.node.templateName))
 
-const truncatedTitle = computed(() => truncate(titleSource.value, NAME_MAX_CHARS))
-const titleFull = computed(() => titleSource.value)
+/** 悬停 tooltip 全名（不经截断预算）。 */
+const titleFull = computed(() => fullTitle(props.instances, props.node.templateName))
 
-/** ≥2 实例才渲染实例行（1 实例已并入标题——同一信息不双轨）。 */
-/** 实例行区起渲染的最少实例数（≥2 才渲染行区；1 实例并入标题不双轨）。 */
-const MIN_EXTRA_ROWS = 2
+/** 全通配模板 + 多实例（标题摘要分支的唯一触发形态；1 实例已并入标题不双轨）。 */
+function isWildcardMultiInstance(list: InstanceList | undefined, templateName: string): list is WorkflowAgentCall[] {
+  return list !== undefined && list.length >= MIN_EXTRA_ROWS && templateName === "*"
+}
+
+function fullTitle(list: InstanceList | undefined, templateName: string): string {
+  if (list !== undefined && list.length === 1) return list[0].agent
+  if (isWildcardMultiInstance(list, templateName)) return `${list[0].agent} +${list.length - 1}`
+  return templateName
+}
+
+function formatTitle(list: InstanceList | undefined, templateName: string): string {
+  if (list !== undefined && list.length === 1) return truncate(list[0].agent, NAME_MAX_CHARS)
+  if (isWildcardMultiInstance(list, templateName)) {
+    const suffix = ` +${list.length - 1}`
+    const first = list[0].agent
+    const room = Math.max(1, NAME_MAX_CHARS - suffix.length - 1)
+    return `${first.length > room ? `${first.slice(0, room)}…` : first}${suffix}`
+  }
+  return truncate(templateName, NAME_MAX_CHARS)
+}
 
 const extraInstances = computed(() => {
   const list = props.instances

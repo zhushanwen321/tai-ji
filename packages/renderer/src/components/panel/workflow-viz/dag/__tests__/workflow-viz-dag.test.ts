@@ -313,6 +313,39 @@ describe('WorkflowVizDag 执行实例行（实际 agent 画进图，2026-10 用�
     expect(rowB.attributes('data-state')).toBe('running')
   })
 
+  it('≥2 实例 + 全通配模板 *：标题改用实例派生摘要（首名 +N），不再露零信息通配符', () => {
+    const wildcardDag: WorkflowDag = {
+      phases: [{ name: 'review', order: 0 }],
+      nodes: [node({ id: 'n-w', templateName: '*', phase: 'review' })],
+      edges: [],
+      parallelGroups: [],
+      loops: [],
+    }
+    const wrapper = mountDag(wildcardDag, {
+      nodeStates: { 'n-w': 'running' },
+      instancesByNode: new Map([
+        ['n-w', [call(3, 'reviewer-arch-a1-r1'), call(9, 'reviewer-sec-a1-r1', 'running')]],
+      ]),
+    })
+    const nodeEl = wrapper.find('[data-testid="wfvz-dag-node-n-w"]')
+    // 预算内截断：后缀 +N 恒可见（首名超预算时 … 收敛，总宽 ≤ NAME_MAX_CHARS=18）
+    expect(nodeEl.text()).toContain('reviewer-arch-… +1')
+    expect(nodeEl.text()).not.toContain('*')
+  })
+
+  it('≥2 实例 + 有字面段模板：标题保持模板名（调用点身份可读，实例名在行区）', () => {
+    const wrapper = mountDag(sampleDag(), {
+      nodeStates: { 'n-sec': 'running' },
+      instancesByNode: new Map([
+        ['n-sec', [call(3, 'commit-env-fix-b1'), call(9, 'commit-env-fix-b2', 'running')]],
+      ]),
+    })
+    // sampleDag n-sec 模板名 reviewer-sec（非通配）——标题保持模板，不摘要
+    const node = wrapper.find('[data-testid="wfvz-dag-node-n-sec"]')
+    expect(node.text()).toContain('reviewer-sec')
+    expect(node.text()).not.toContain('+1')
+  })
+
   it('实例行点击：上抛 agent 语义 + callId（宿主钻取该实例，非盲取首个）', async () => {
     const wrapper = mountDag(sampleDag(), {
       nodeStates: { 'n-sec': 'running' },
