@@ -752,6 +752,24 @@ describe("parseWorkflowDag（scriptSource → WorkflowDag，设计 §3.1-3）", 
       expect(dag.nodes[0]?.phase).toBe("Review");
       // 代表 = 最前行号者（a 先于 b）
       expect(dag.nodes[0]?.line).toBeLessThan(6);
+      // 合并后前向边重映射不产自环（两调用点间的 sequence 边 rep→rep 必须被滤除）
+      expect(dag.edges.filter((e) => e.from === e.to)).toHaveLength(0);
+    });
+
+    it("循环体整体合并为单节点 → 回边成自环，随配对 loop 条目一并剔除（不孤儿化 backEdgeId）", () => {
+      const dag = parseValidatedDag([
+        `while (round < limit) {`,
+        `  await agent({ prompt: "a", description: "worker" });`,
+        `  await agent({ prompt: "b", description: "worker" });`,
+        `  round++;`,
+        `}`,
+      ].join("\n"));
+      expect(dag.nodes).toHaveLength(1);
+      // 自环回边剔除 + 引用它的 loop 条目同步剔除——结构不变量（回边必被 loop 引用 /
+      // loop.backEdgeId 必有对应边）双侧守恒
+      expect(dag.edges.filter((e) => e.from === e.to)).toHaveLength(0);
+      expect(dag.edges.filter((e) => e.kind === "loop-back")).toHaveLength(0);
+      expect(dag.loops).toHaveLength(0);
     });
 
     it("同 phase 同字面模板（aggregate ×2）→ 合并；数据流边重映射到代表并去重", () => {

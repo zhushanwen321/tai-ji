@@ -9,7 +9,9 @@
  * ② 同字面模板双直呼节点——aggregate 派发与其重试分支）。合并语义：组内最前行号者
  * 为代表节点（出现序平局），边端点重写到代表后按 (from,to) 优先级去重（dataflow >
  * conditional > sequence，与解析器候选去重同口径；loop-back 边不参与去重——与
- * loops.backEdgeId 按 loopId 配对引用，删并会孤儿化回边引用），并行组/循环成员 id
+ * loops.backEdgeId 按 loopId 配对引用，删并会孤儿化回边引用），合并产生的自环边丢弃
+ * （前向伪自环直接滤除；合并收敛出的 loop-back 伪自环随配对 loop 条目一并剔除，
+ * 单节点循环体的原生回边自环保留），并行组/循环成员 id
  * 同步重映射去重（保序）。不同 phase / 不同模板不合并——可区分的调用点保持
  * 一节点一调用点。无合并需求时原 dag 原样返回（零开销路径）。
  */
@@ -48,16 +50,29 @@ export function collapseDuplicateCallSites(dag: WorkflowDag): WorkflowDag {
   if (representativeByNodeId.size === 0) return dag;
 
   const remapId = (id: string): string => representativeByNodeId.get(id) ?? id;
-  // 前向边：端点重映射 + 同 (from,to) 优先级收口；loop-back：只重映射不去重
-  // （每条 loop-back 被某 loop.backEdgeId 配对引用——去重会孤儿化引用，结构校验红线）
+  // 前向边：端点重映射 + 同 (from,to) 优先级收口，合并产生的自环丢弃（重映射后两端
+  // 点同节点，边无信息量且会渲染成横穿节点卡片的直线）；loop-back：只重映射不去重
+  // （每条 loop-back 被某 loop.backEdgeId 配对引用——去重会孤儿化引用，结构校验红线）。
+  // loop-back 自环分两态：单节点循环体的回边是解析器原生自环（合法结构，layout 走
+  // 回边总线渲染，保留）；合并把多节点循环体收敛为单代表才产生的自环是伪结构，随其
+  // 配对 loop 条目一并剔除（单删边会孤儿化 backEdgeId 引用）
   const forward = new Map<string, WorkflowDagEdge>();
   const loopBack: WorkflowDagEdge[] = [];
+  const droppedBackEdgeIds = new Set<string>();
   for (const edge of dag.edges) {
-    const remapped: WorkflowDagEdge = { ...edge, from: remapId(edge.from), to: remapId(edge.to) };
+    const from = remapId(edge.from);
+    const to = remapId(edge.to);
+    const remapped: WorkflowDagEdge = { ...edge, from, to };
+    const merged = from !== edge.from || to !== edge.to;
     if (edge.kind === "loop-back") {
+      if (merged && from === to) {
+        droppedBackEdgeIds.add(remapped.id);
+        continue;
+      }
       loopBack.push(remapped);
       continue;
     }
+    if (from === to) continue;
     const key = `${remapped.from}${KEY_SEP}${remapped.to}`;
     const existing = forward.get(key);
     if (existing === undefined || EDGE_PRIORITY[edge.kind] > EDGE_PRIORITY[existing.kind]) {
@@ -71,6 +86,8 @@ export function collapseDuplicateCallSites(dag: WorkflowDag): WorkflowDag {
     edges: [...forward.values(), ...loopBack],
     phases: dag.phases,
     parallelGroups: dag.parallelGroups.map((group) => ({ nodeIds: remapIds(group.nodeIds) })),
-    loops: dag.loops.map((loop) => ({ ...loop, nodeIds: remapIds(loop.nodeIds) })),
+    loops: dag.loops
+      .map((loop) => ({ ...loop, nodeIds: remapIds(loop.nodeIds) }))
+      .filter((loop) => !droppedBackEdgeIds.has(loop.backEdgeId)),
   };
 }
