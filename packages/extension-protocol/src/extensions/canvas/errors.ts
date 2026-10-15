@@ -18,7 +18,8 @@ export interface CanvasError { // oe-exempt:20261015:framework:画布域类型�
 
 /**
  * 错误码词表（封闭 15 值）。分组：
- * - 寻址 / 形状：canvas_not_found / node_not_found / invalid_params / unknown_action
+ * - 寻址 / 形状：canvas_not_found / node_not_found / edge_not_found /
+ *   invalid_params / unknown_action
  * - 权限：actor_not_allowed（矩阵表外组合 fail-fast）
  * - 不变量拦截：selection_conflict（不变量 3 双选定）/ cycle_detected（不变量 2 成环）/
  *   unverified_fact（不变量 5）/ dispatch_blocked（不变量 7）/ not_converged（不变量 10）/

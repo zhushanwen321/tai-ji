@@ -551,12 +551,12 @@
         {
           "package": "@zhushanwen/subagent-core",
           "type": "package",
-          "reason": "代码层静态 import GLOBAL_SLOT_KEYS（src/review.ts top-level import，reviewer 派发经 service 槽 Symbol.for 定位——global-slots 纪律 C-state-20 禁止内联槽键字面量），缺失时模块加载即抛 Cannot find module，是强依赖"
+          "reason": "代码层静态 import getSubagentService 官方访问器（src/review.ts top-level import，reviewer 派发经访问器读 SubagentService 槽）——强依赖，缺失即模块解析失败（Cannot find module）"
         },
         {
           "package": "@zhushanwen/pi-subagent-workflow",
           "type": "runtime",
-          "reason": "代码层零 import——reviewer 派发的运行时载体：canvas_review(run) 经 globalThis service 槽（subagent-workflow 组合根 configureCore 装配的 SubagentService）调 executeAndAwait 派 reviewer；缺失时槽缺位，canvas_review(run) 返回结构化错误（review_dispatch_unavailable），其余五工具不受影响"
+          "reason": "代码层零 import——reviewer 派发的运行时载体：canvas_review(run) 经 getSubagentService() 官方访问器读 globalThis service 槽（槽内 SubagentService 由 subagent-workflow 组合根 configureCore 装配）调 executeAndAwait 派 reviewer；缺失时槽缺位，canvas_review(run) 返回结构化错误（review_dispatch_unavailable），其余五工具不受影响"
         }
       ]
     }

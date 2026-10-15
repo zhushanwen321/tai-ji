@@ -121,8 +121,10 @@ export function registerCanvasEnterTool(pi: ExtensionAPI, cfg: EnterToolConfig):
     name: cfg.name,
     label: cfg.label,
     // deferred（设计：画布是低频入口，不设常驻 direct；tool_search 命中即激活）。
-    // promptSnippet = deferred 形态下模型唯一的入口信号（pi agent-session 把
-    // snippet 收进 system prompt 工具索引；description 须 tool_search 命中后才可见）
+    // promptSnippet = 工具激活后 system prompt 工具索引里的精简条目（pi 1.0.0
+    // system-prompt.js 的 visibleTools 只渲染激活集 snippet，未激活时不进上下文；
+    // tool-search 经 setActiveTools 激活后才进）——deferred 形态的入口可见性由
+    // index.ts 组合根 before_agent_start 注入的 <available_tools> 常驻段承载。
     exposure: "deferred",
     description: cfg.description,
     promptSnippet: cfg.promptSnippet,

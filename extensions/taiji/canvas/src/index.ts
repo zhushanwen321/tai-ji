@@ -63,7 +63,7 @@ export const CANVAS_AVAILABLE_TOOLS: ReadonlyArray<{ name: string; description: 
     description:
       "Read the problem-solving canvas: full state or one subtree (nodes / edges / comments / review report / convergence flags). " +
       "The read-before-act discipline entry: respond to canvas event notifications and edit the canvas only after reading the current state. " +
-      "Also the reviewer subagent's query surface. " +
+      "Agent-side canvas query entry: the reviewer subagent runs with zero tools (canvas data is inlined into the reviewer prompt by this parent extension). " +
       "Requires the taiji desktop runtime (errors out in standalone pi).",
   },
   {

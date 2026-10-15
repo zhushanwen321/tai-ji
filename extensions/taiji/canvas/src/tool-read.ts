@@ -1,8 +1,9 @@
 /**
  * canvas_read —— 查询动词（设计 §3.1(2) 工具面）：读画布全量 / 子树。
  *
- * reviewer subagent 的查询面单独持有本工具（工具级裁剪——若与 edit 合并，
- * reviewer 白名单会拖进改图能力）；响应纪律「先 read 再动」的数据入口。
+ * agent 侧画布查询入口（reviewer 零工具——画布数据经父扩展 marker read 内联进
+ * reviewer prompt；ExecuteOptions 无 tools 通道，结构上无法授工具）；
+ * 响应纪律「先 read 再动」的数据入口。
  */
 import type { ExtensionAPI, ExtensionToolContext } from "@earendil-works/pi-coding-agent";
 import { Type, type Static } from "typebox";
