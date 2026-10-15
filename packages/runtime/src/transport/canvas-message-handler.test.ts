@@ -287,6 +287,9 @@ describe('回推派发（actor=user 成功腿；防回环 actor 维度）', () =
     expect(text).toContain('画布事件通知')
     expect(text).toContain('canvas_read')
     expect(text).toContain(canvasId)
+    // streamingBehavior='followUp' 显式排队（pi 1.0.0 契约：占线且缺省直接 throw——
+    // D3-A3 v6 实证连续裁决高频路径回推静默丢失；followUp = 完成当前响应后依次消化）
+    expect(client.prompt.mock.calls[0][2]).toBe('followUp')
   })
 
   it('防回环：marker 通道（agent actor）mutate 成功 → prompt 零调用', async () => {

@@ -278,12 +278,15 @@ export class CanvasMessageHandler {
   /**
    * 对画布活跃绑定集合逐个回推（现成 client 直取，不经 ensureActive——防拉活已关 session
    * 的 pi，见类头注释）。prompt fire-and-forget：失败 warn（首败显式上报，不重试——
-   * ADR-0122 手动恢复口径；排队语义由 pi send 队列承担，不新增等待/合并机制）。
+   * ADR-0122 手动恢复口径）。streamingBehavior='followUp' 显式排队：pi 1.0.0 契约 = 占线
+   * 且缺省该参数直接 throw「Agent is already processing」（D3-A3 v6 实证：用户连续裁决
+   * 的高频路径下回推静默丢失），followUp 让连续裁决逐条排队、agent 完成当前响应后依次
+   * 消化——不打断进行中的 turn（steer 会中断，通知场景语义不符）。
    */
   private pushToBoundSessions(canvasId: string, reply: Extract<CanvasMutateReply, { ok: true }>): void {
     const text = canvasNotifyText(reply.summary, canvasId)
     for (const { sid, client } of this.activeBoundClients(canvasId)) {
-      void client.prompt(text).catch((e: unknown) => {
+      void client.prompt(text, undefined, 'followUp').catch((e: unknown) => {
         console.warn(`[canvas] 回推 prompt 失败（canvasId=${canvasId} session=${sid}）：${toErrorMessage(e)}`)
       })
     }

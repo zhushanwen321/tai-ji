@@ -164,7 +164,7 @@ OUTPOST_CALLSITES = [
     ),
     (
         "transport/canvas-message-handler.ts",
-        "void client.prompt(text).catch",
+        "void client.prompt(text, undefined, 'followUp').catch",
         "exempt",
         "[problem-solve-canvas D5 回推] 画布事件通知（actor=user 的 mutate 后对活跃绑"
         "定 session 逐个注入）：text = runtime 构造的固定模板事件摘要（「画布事件通"
@@ -172,7 +172,7 @@ OUTPOST_CALLSITES = [
         "前态」），代理构造模板文本非用户自由文本发布；节点标题片段属画布状态回显而"
         "非 composer 出口内容，agent 响应协议不依赖通知全文（先 read 后动，与 renderer"
         "「广播=失效提示」同构）——exempt 豁免；fire-and-forget 失败 warn 不重试"
-        "（ADR-0122）",
+        "（ADR-0122）；第三参 followUp = pi 占线时排队（D3-A3 v6：缺省 throw 静默丢失）",
     ),
 ]
 

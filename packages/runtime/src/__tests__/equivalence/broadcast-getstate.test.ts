@@ -339,9 +339,12 @@ describe.skipIf(!FAUX_PI_READY)(
       const startIdx = fx.collectEvents().length
 
       // 一轮带工具调用的 turn；生产 useChat 发送语义：pendingSend + 乐观 appendUser（overlay 路径）
+      // + inflight 挂账（submit 同轮；user 回执帧落 ② 计数抵消——缺挂账则帧落 ③ 外来入流，
+      // ref 双计 user。2026-10-15 A3 外来入流修复后该场景缺省首次显形）
       const text = 'Use the bash tool to run the command `echo w22-store` and reply with its exact output.'
       store.addPendingSend(sid)
       store.appendUser(sid, textToSegments(text))
+      store.incrementInflight(sid, 1)
       // runTurn 原语取代手工计数基线：空闲起步 prompt → 只等本轮 agent_end
       await fx.runTurn({ message: text }, TURN_TIMEOUT_MS)
 
