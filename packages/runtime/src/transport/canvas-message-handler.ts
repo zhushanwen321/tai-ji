@@ -16,7 +16,10 @@
  * （CanvasService.getBoundSessions ∩ 存活 session）逐个 client.prompt(通知文本)。存活判定 =
  * 现成 client 存在且未退出（进程生死二态，ADR-0122）——**不经 ensureActive**（该入口带崩溃后
  * 懒重生语义，误用会把已关闭 session 的 pi 进程拉活并触发 turn，对用户会话表面的实质副作用）。
- * 逐事件一条通知，不做时间窗聚合（pi send 队列天然串行化，设计 D5）。
+ * 每次 actor=user 的 mutate 事务一条通知（取该次 mutate 的主事件摘要 reply.summary），不做
+ * 时间窗聚合（pi send 队列天然串行化，设计 D5 同口径）。事务边界即通知边界——一次 mutate
+ * 产多条事件时（如 select 带 replace = OptionMigrated + OptionSelected）仍只发一条，多
+ * 事件不放大通知数。
  *
  * 广播接线（broadcastUpdated，server.ts 装配注入 CanvasService.onUpdated）：mutate 成功后经
  * broker 全局广播 {type:'canvas.updated', payload:{canvasId, evType, eventId, summary}}——
@@ -32,7 +35,6 @@
 import type { WebSocket as WsType } from 'ws'
 import type { ClientMessage, ClientMessageType, ServerMessage } from '@taiji/shared'
 import {
-  CANVAS_EVENT_TYPES,
   CANVAS_MARKER_ACTIONS,
   canvasError,
   isCanvasMarkerRequest,
@@ -298,15 +300,11 @@ export class CanvasMessageHandler {
    * canvas.updated 全局广播帧封装（server.ts 装配注入 CanvasService.onUpdated）。
    * payload 无 sessionId（broker.broadcast 契约：`canvas.` 前缀合法全局帧，rollingRestart
    * 先例）；广播只是失效提示（renderer 收到后重新 canvas.get 拉取收敛，ADR-0097 拉为主）。
+   * evType 成员资格由类型系统保证：CanvasUpdatedBroadcast.evType 已收紧为封闭词表
+   * CanvasEventType（canvas-service.ts），值源自 ACTION_EVENT_MAP 表内映射——越界值
+   * 在编译期即不可构造，无需运行时成员资格守卫（M1-1：类型是既有等价保证面）。
    */
   broadcastUpdated(update: CanvasUpdatedBroadcast): void {
-    // evType 收窄守卫：service 层广播回调的 evType 是 string（服务层宽化），wire 契约是
-    // CanvasEventType 封闭词表——值源自 ACTION_EVENT_MAP 表内映射，越界即内部回归，
-    // 拒发 + error 留痕（不广播词表外假值污染消费方 evType 分流）。
-    if (!(CANVAS_EVENT_TYPES as readonly string[]).includes(update.evType)) {
-      console.error(`[canvas] canvas.updated evType「${update.evType}」越界（CANVAS_EVENT_TYPES 词表外）——跳过广播`)
-      return
-    }
     this.ctx.broadcast({
       type: 'canvas.updated',
       id: this.ctx.nextPushId(),

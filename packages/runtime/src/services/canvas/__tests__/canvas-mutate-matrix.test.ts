@@ -13,7 +13,7 @@ import { describe, expect, it } from 'vitest'
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { ACTION_EVENT_MAP, CANVAS_ACTOR_MATRIX, canvasError } from '@zhushanwen/extension-protocol'
-import type { CanvasAction, CanvasActor, CanvasState } from '@zhushanwen/extension-protocol'
+import type { CanvasAction, CanvasActor, CanvasMutateReply, CanvasState } from '@zhushanwen/extension-protocol'
 import { CanvasService } from '../canvas-service.js'
 import { createCanvas, expectOk, expectRejected, growCanvas, makeService, runActionHappyPath, type ServiceHandle } from './canvas-helpers.js'
 
@@ -217,6 +217,98 @@ describe('幂等 upsert（崩溃窗口重试安全）', () => {
       if (!again.ok) expect(again.error.code).toBe('already_resolved')
     } finally {
       h.dispose()
+    }
+  })
+})
+
+describe('reason 留痕纪律（契约「canvas_edit 族共享 reason 强制字段」的运行时落地）', () => {
+  /**
+   * 五个携带 reason 的 action（grow / patch / decide-direction / select / transition）各自的
+   * 最小合法前置 + 空 reason 请求（actor 取权限矩阵合法格；空串与纯空白各覆盖）。
+   * 返回 reply 与拒绝前的事件行数（断言「拒绝 = 无写入」）。
+   */
+  const emptyReasonCases: Array<{
+    name: string
+    run: (h: ServiceHandle) => { reply: CanvasMutateReply; canvasId: string; eventsBefore: number }
+  }> = [
+    {
+      name: 'grow',
+      run: (h) => {
+        const c = createCanvas(h.svc)
+        const eventsBefore = readEvents(h.dir, c.canvasId).length
+        return {
+          canvasId: c.canvasId,
+          eventsBefore,
+          reply: h.svc.mutate({ action: 'grow', params: { canvasId: c.canvasId, batch: [{ id: 'g1', type: 'question', content: '子问题', attachTo: c.rootId, edge: 'decompose' }], reason: '' } }, 'agent'),
+        }
+      },
+    },
+    {
+      name: 'patch',
+      run: (h) => {
+        const c = createCanvas(h.svc)
+        const eventsBefore = readEvents(h.dir, c.canvasId).length
+        return {
+          canvasId: c.canvasId,
+          eventsBefore,
+          reply: h.svc.mutate({ action: 'patch', params: { canvasId: c.canvasId, nodeId: c.rootId, content: '改述后的问题', reason: '   ' } }, 'user'),
+        }
+      },
+    },
+    {
+      name: 'decide-direction',
+      run: (h) => {
+        const c = createCanvas(h.svc)
+        const eventsBefore = readEvents(h.dir, c.canvasId).length
+        return {
+          canvasId: c.canvasId,
+          eventsBefore,
+          reply: h.svc.mutate({ action: 'decide-direction', params: { canvasId: c.canvasId, direction: 'top-down', reason: '' } }, 'user'),
+        }
+      },
+    },
+    {
+      name: 'select',
+      run: (h) => {
+        const c = growCanvas(h.svc, createCanvas(h.svc))
+        const eventsBefore = readEvents(h.dir, c.canvasId).length
+        return {
+          canvasId: c.canvasId,
+          eventsBefore,
+          reply: h.svc.mutate({ action: 'select', params: { canvasId: c.canvasId, questionId: c.q1, optionId: c.o1, reason: '  ' } }, 'user'),
+        }
+      },
+    },
+    {
+      name: 'transition',
+      run: (h) => {
+        const c = createCanvas(h.svc)
+        const eventsBefore = readEvents(h.dir, c.canvasId).length
+        return {
+          canvasId: c.canvasId,
+          eventsBefore,
+          reply: h.svc.mutate({ action: 'transition', params: { canvasId: c.canvasId, nodeId: c.rootId, to: 'under-review', reason: '' } }, 'user'),
+        }
+      },
+    },
+  ]
+
+  it('空 reason（含纯空白）→ invalid_params 且不落任何写入（禁「已更新（内容）：」式残缺 summary 与空 why 留痕）', () => {
+    for (const { name, run } of emptyReasonCases) {
+      const h = makeService()
+      try {
+        const { reply, canvasId, eventsBefore } = run(h)
+        expect(reply.ok, `${name} 空 reason 应被拒绝`).toBe(false)
+        if (!reply.ok) {
+          expect(reply.error.code, `${name} 应报 invalid_params`).toBe('invalid_params')
+          expect(reply.error.message, `${name} 文案应说明留痕纪律`).toContain('留痕')
+          expect(reply.error.recover.length, `${name} 恢复文案非空`).toBeGreaterThan(0)
+        }
+        // 拒绝 = 无写入：事件行数不变（draft 副本整体丢弃）
+        expect(readEvents(h.dir, canvasId), `${name} 拒绝后不得追加事件`).toHaveLength(eventsBefore)
+      } finally {
+        h.dispose()
+      }
     }
   })
 })

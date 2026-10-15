@@ -375,3 +375,52 @@ describe('导出（exports/ 落盘 + 不变量 10 同校验）', () => {
     }
   })
 })
+
+describe('子树读（readState subtree：节点 / 边 / 评论三维过滤）', () => {
+  it('边锚评论随其所在边进入子树读（F1-12：锚点 = 节点 id 或边 id；两端点皆在子树内的边，其评论在）', () => {
+    const h = makeService()
+    try {
+      const c = growCanvas(h.svc, createCanvas(h.svc))
+      // argue 可指主干边（attachTo = 边 id）——grow 一条锚在 e-q1（root →(decompose) q1）上的反论据
+      expectOk(h.svc.mutate({
+        action: 'grow',
+        params: { canvasId: c.canvasId, batch: [{ id: 'a1', type: 'argument', content: '该分解漏了迁移成本维度', attachTo: `e-${c.q1}`, edge: 'argue', edgePolarity: 'object' }], reason: '补反论据' },
+      }, 'agent'))
+      // 对该主干边评论（anchorId = 边 id——applyComment 合法允许）
+      expectOk(h.svc.mutate({ action: 'comment', params: { canvasId: c.canvasId, anchorId: `e-${c.q1}`, text: '这条分解边存疑' } }, 'user'))
+      // 子树读父节点 root（decompose 子树 = {root, q1}；边 e-q1 两端点皆在子树内 → 边与评论都应在）
+      const sub = h.svc.readState(c.canvasId, c.rootId)
+      expect(sub.nodes.map((n) => n.id).sort()).toEqual([c.rootId, c.q1].sort())
+      expect(sub.edges.map((e) => e.id)).toEqual([`e-${c.q1}`])
+      expect(sub.comments.map((cm) => cm.anchorId)).toEqual([`e-${c.q1}`])
+    } finally {
+      h.dispose()
+    }
+  })
+
+  it('逆例：锚点边跨越子树边界时评论不进入（端点在外 = 边本身已被过滤，评论与边同判据）', () => {
+    const h = makeService()
+    try {
+      const c = growCanvas(h.svc, createCanvas(h.svc))
+      // 评论锚在 resolve 边 e-o1（q1 → o1）：root 的 decompose 子树不含 o1，边与评论都不进
+      expectOk(h.svc.mutate({ action: 'comment', params: { canvasId: c.canvasId, anchorId: 'e-o1', text: '这条 resolve 边对比充分吗' } }, 'user'))
+      const sub = h.svc.readState(c.canvasId, c.rootId)
+      expect(sub.edges.map((e) => e.id)).not.toContain('e-o1')
+      expect(sub.comments).toHaveLength(0)
+    } finally {
+      h.dispose()
+    }
+  })
+
+  it('节点锚评论照常进入子树读（锚点在子树内的既有路径零回归）', () => {
+    const h = makeService()
+    try {
+      const c = growCanvas(h.svc, createCanvas(h.svc))
+      expectOk(h.svc.mutate({ action: 'comment', params: { canvasId: c.canvasId, anchorId: c.q1, text: '这里 MECE 吗' } }, 'user'))
+      const sub = h.svc.readState(c.canvasId, c.rootId)
+      expect(sub.comments.map((cm) => cm.anchorId)).toEqual([c.q1])
+    } finally {
+      h.dispose()
+    }
+  })
+})

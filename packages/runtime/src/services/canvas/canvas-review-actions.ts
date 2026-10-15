@@ -87,6 +87,12 @@ export function applyReviewAppend(
 ): string {
   if (!draft.review) {
     draft.review = { status: 'in-progress', round: params.round, maxRounds: DEFAULT_REVIEW_MAX_ROUNDS, entries: [] }
+  } else if (params.round !== draft.review.round) {
+    // 轮次口径确定性（聚合 2「当前轮已有报告条目 = 轮次完成」）：写回必须落在当前轮——
+    // reviewer 自带 round 与当前轮不一致时轮次完成判定失去确定性（roundHasReport 按
+    // entry.round === review.round 判完成，maxRounds 预算按完成的循环计数）。无 review
+    // 时按 params.round 建聚合不变（首轮直写路径）。重放与 live 同一校验（直写 ≡ 重放）。
+    fail('invalid_params', `报告轮次（R${params.round}）与当前审查轮次（R${draft.review.round}）不一致：review-append 必须写回当前轮——先 canvas_read 核对审查聚合轮次`)
   }
   const knownIds = new Set<string>([...draft.nodes.map((n) => n.id), ...draft.edges.map((e) => e.id), ...draft.comments.map((c) => c.id)])
   for (const entry of params.entries) {
@@ -95,8 +101,8 @@ export function applyReviewAppend(
   }
   // 支撑度写回前置校验（概念 §2.4「边的缺陷经支撑度表达」的唯一写入通道——审查结论
   // 随条目落 edge.support）：评价目标必须是主干边（裁决点 R3：论证边不评级）；
-  // gap 必附缺口清单（「有缺口附清单」词条语义，与契约守卫同规则——重放 / WS 直连
-  // 不经 marker 守卫，runtime 是唯一防线）。
+  // gap 必附缺口清单、sufficient/invalid 不得夹带清单（「有缺口附清单」词条语义，
+  // 与契约守卫同规则双向——重放 / WS 直连不经 marker 守卫，runtime 是唯一防线）。
   for (const entry of params.entries) {
     if (entry.supportRating === undefined) continue
     const edge = edgeOf(draft, entry.targetId)
@@ -105,6 +111,9 @@ export function applyReviewAppend(
     }
     if (entry.supportRating === 'gap' && (!entry.supportGaps || entry.supportGaps.length === 0)) {
       fail('invalid_params', `条目「${entry.id}」支撑度评价为 gap 但未附缺口清单（supportGaps 至少一条）——「有缺口附清单」`)
+    }
+    if (entry.supportGaps !== undefined && entry.supportRating !== 'gap') {
+      fail('invalid_params', `条目「${entry.id}」支撑度评价为「${entry.supportRating}」不得夹带缺口清单（supportGaps 仅 gap 评价携带：sufficient/invalid 不带）`)
     }
   }
   for (const entry of params.entries) {

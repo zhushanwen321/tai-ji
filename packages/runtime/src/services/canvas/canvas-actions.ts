@@ -37,6 +37,16 @@ function pushEvent(events: CanvasEventBody[], body: CanvasEventBody): void {
   events.push(body)
 }
 
+/**
+ * canvas_edit 族 reason 留痕纪律（契约文件头「canvas_edit 族共享 reason 强制字段」的
+ * 运行时落地）——空串（含纯空白）fail-fast。空 reason 会产出「已更新（内容）：」式
+ * 残缺 summary 与空 why 留痕（F1-14）；与 comment-respond 的 note、transition 的
+ * rejection.reason 空串校验同口径（契约守卫只查 isString，空串可过——runtime 是防线）。
+ */
+function assertReason(reason: string): void {
+  if (reason.trim() === '') fail('invalid_params', '变更必须留痕（reason：改动理由 / 对比说明）——不允许无理由改动')
+}
+
 // ── create（不变量 1：根三要素；无 prev 状态，独立于 applyMutation）──
 
 /**
@@ -119,6 +129,7 @@ function applyGrow(
   at: string,
   events: CanvasEventBody[],
 ): string {
+  assertReason(params.reason)
   if (params.batch.length === 0) fail('invalid_params', 'grow 批为空：至少一条生长条目')
   // 原子事务：批内逐条在 draft 副本上应用，任一 fail-fast 即整体拒绝（draft 丢弃，无部分写入）。
   for (const item of params.batch) {
@@ -262,6 +273,7 @@ function applyPatch(
   at: string,
   events: CanvasEventBody[],
 ): string {
+  assertReason(params.reason)
   const node = nodeOf(draft, params.nodeId)
   if (!node) fail('node_not_found', `待编辑节点「${params.nodeId}」不存在`)
   const changes: string[] = []
@@ -311,6 +323,7 @@ function applyDecideDirection(
   at: string,
   events: CanvasEventBody[],
 ): string {
+  assertReason(params.reason)
   draft.direction = { direction: params.direction, reason: params.reason, decidedAt: at }
   draft.updatedAt = at
   pushEvent(events, eventOf('decide-direction', actor, at, eventData({ ...params })))
@@ -326,6 +339,7 @@ function applySelect(
   at: string,
   events: CanvasEventBody[],
 ): string {
+  assertReason(params.reason)
   const question = nodeOf(draft, params.questionId)
   if (!question || question.type !== 'question') fail('node_not_found', `目标问题「${params.questionId}」不存在或不是 question`)
   const option = nodeOf(draft, params.optionId)
@@ -373,6 +387,7 @@ function applyTransition(
   at: string,
   events: CanvasEventBody[],
 ): string {
+  assertReason(params.reason)
   const node = nodeOf(draft, params.nodeId)
   if (!node) fail('node_not_found', `目标节点「${params.nodeId}」不存在`)
   if (node.id === draft.root.nodeId && (params.to === 'shelved' || params.to === 'rejected')) {
@@ -523,6 +538,10 @@ function applyDispatch(
   if (!node) fail('node_not_found', `派发目标「${params.nodeId}」不存在`)
   if (node.type !== 'option' || node.dispatchable !== true) fail('dispatch_blocked', `「${params.nodeId}」不是执行叶子（dispatchable option）`)
   if (node.lifecycle !== 'passed') fail('dispatch_blocked', `执行叶子「${truncate(node.content)}」未通过审查（当前 ${node.lifecycle}）：先经审查转 passed 再派发`)
+  // 不变量 7 后半句：下游产物指针必填——空串（含纯空白）= 无指针，dispatched 状态失去
+  // 「派到哪」的解读依据（指针是用户手填的设计文档 / impl-plan 位置）。寻址与 passed
+  // 门槛先行，本校验落状态变更前一步——拒绝即无写入，node.dispatch 不落。
+  if (params.pointer.trim() === '') fail('invalid_params', '派发指针（pointer）为空：下游产物指针必填（设计文档 / impl-plan 位置，用户手填）')
   node.dispatch = { pointer: params.pointer, dispatchedAt: at }
   draft.updatedAt = at
   pushEvent(events, eventOf('dispatch', actor, at, eventData({ ...params })))

@@ -335,4 +335,13 @@ describe('review-append 支撑度评价字段（概念 §2.4「边的缺陷经�
     expect(isCanvasMarkerRequest(request([entry({ supportRating: 'gap', supportGaps: [42] })]))).toBe(false)
     expect(isCanvasMarkerRequest(request([entry({ supportGaps: ['孤儿清单'] })]))).toBe(false)
   })
+
+  it('畸形评价拒绝：sufficient / invalid 夹带缺口清单（字段注释「sufficient/invalid 不带」的反向规则）', () => {
+    expect(isCanvasMarkerRequest(request([entry({ supportRating: 'sufficient', supportGaps: ['多余清单'] })]))).toBe(false)
+    expect(isCanvasMarkerRequest(request([entry({ supportRating: 'invalid', supportGaps: ['多余清单'] })]))).toBe(false)
+    // 正例仍放行：gap 附清单 / sufficient、invalid 无清单
+    expect(isCanvasMarkerRequest(request([entry({ supportRating: 'gap', supportGaps: ['缺性能论据'] })]))).toBe(true)
+    expect(isCanvasMarkerRequest(request([entry({ supportRating: 'sufficient' })]))).toBe(true)
+    expect(isCanvasMarkerRequest(request([entry({ supportRating: 'invalid' })]))).toBe(true)
+  })
 })

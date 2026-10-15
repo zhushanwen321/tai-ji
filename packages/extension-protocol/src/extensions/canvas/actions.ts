@@ -188,8 +188,6 @@ export type CanvasExportTarget =
 export interface CanvasExportParams { // oe-exempt:20261015:framework:画布域类型契约（数据形状/端口/测试 harness，非抽象接口单实现）
   canvasId: string
   target: CanvasExportTarget
-  /** 未收敛调用会被 not_converged 拒绝（不变量 10）；此字段不绕过校验。 */
-  reason?: string
 }
 
 export interface CanvasDispatchParams { // oe-exempt:20261015:framework:画布域类型契约（数据形状/端口/测试 harness，非抽象接口单实现）
@@ -412,7 +410,8 @@ const REVIEW_SEVERITIES = ['must-fix', 'suggestion'] as const
 const SUPPORT_RATINGS = ['sufficient', 'gap', 'invalid'] as const
 
 /** review-append 单条守卫（round 必须为有限数；dimension/severity/supportRating 词表内；
- * gap 评价必附缺口清单——「有缺口附清单」词条语义）。 */
+ * gap 评价必附缺口清单、sufficient/invalid 不得夹带清单——「有缺口附清单」词条语义：
+ * rating='gap' 的缺口清单至少一条，sufficient/invalid 不带）。 */
 function isCanvasReviewEntryInput(v: unknown): v is CanvasReviewEntryInput {
   return (
     isRecord(v) &&
@@ -426,7 +425,8 @@ function isCanvasReviewEntryInput(v: unknown): v is CanvasReviewEntryInput {
     (v.supportRating === undefined || isStringIn(SUPPORT_RATINGS, v.supportRating)) &&
     (v.supportGaps === undefined || (Array.isArray(v.supportGaps) && v.supportGaps.every((g): g is string => typeof g === 'string'))) &&
     (v.supportGaps === undefined || v.supportRating !== undefined) &&
-    (v.supportRating !== 'gap' || (Array.isArray(v.supportGaps) && v.supportGaps.length > 0))
+    (v.supportRating !== 'gap' || (Array.isArray(v.supportGaps) && v.supportGaps.length > 0)) &&
+    (v.supportGaps === undefined || v.supportRating === 'gap')
   )
 }
 

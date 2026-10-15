@@ -358,6 +358,23 @@ describe('不变量 7：执行叶子 passed 前判据必填；dispatched 前必�
       h.dispose()
     }
   })
+
+  it('逆例：pointer 空串（含纯空白）→ invalid_params 且 node.dispatch 不落（不变量 7：下游产物指针必填）', () => {
+    const h = makeService()
+    try {
+      const c = growCanvas(h.svc, createCanvas(h.svc), { o1Dispatchable: true })
+      expect(h.svc.mutate({ action: 'patch', params: { canvasId: c.canvasId, nodeId: c.o1, criterias: ['覆盖率 ≥ 90%'], reason: '补判据' } }, 'user').ok).toBe(true)
+      expect(h.svc.mutate({ action: 'transition', params: { canvasId: c.canvasId, nodeId: c.o1, to: 'under-review', reason: '提案' } }, 'agent').ok).toBe(true)
+      expect(h.svc.mutate({ action: 'transition', params: { canvasId: c.canvasId, nodeId: c.o1, to: 'passed', reason: '审查通过' } }, 'user').ok).toBe(true)
+      const reply = h.svc.mutate({ action: 'dispatch', params: { canvasId: c.canvasId, nodeId: c.o1, pointer: '   ' } }, 'user')
+      expectRejected(reply, 'invalid_params')
+      if (!reply.ok) expect(reply.error.message).toContain('指针')
+      // 拒绝 = 无写入：passed 执行叶子上不得留下空指针 dispatch
+      expect(c.state().nodes.find((n) => n.id === c.o1)?.dispatch).toBeUndefined()
+    } finally {
+      h.dispose()
+    }
+  })
 })
 
 describe('不变量 8：评论初始待响应；留痕前不得转已响应（响应义务）', () => {

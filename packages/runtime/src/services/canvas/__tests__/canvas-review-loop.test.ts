@@ -79,6 +79,40 @@ describe('轮次口径（一轮 = 一循环：GUI 双跳 / 重发不虚增轮次
   })
 })
 
+describe('轮次口径确定性（聚合 2「当前轮已有报告条目 = 轮次完成」：review-append 必须写回当前轮）', () => {
+  it('已有审查聚合时 params.round 与当前轮不符 → invalid_params（恢复文案含当前轮次号）且条目不落；当前轮写回放行', () => {
+    const h = makeService()
+    try {
+      const c = growCanvas(h.svc, createCanvas(h.svc))
+      // 完成 R1（发起 + 报告写回）→ 再次发起推进到 R2（当前轮 = R2）
+      expectOk(h.svc.mutate({ action: 'review-request', params: { canvasId: c.canvasId } }, 'agent'))
+      expectOk(h.svc.mutate({
+        action: 'review-append',
+        params: { canvasId: c.canvasId, round: 1, entries: [{ id: 're-r1', round: 1, dimension: 'completeness', severity: 'must-fix', targetId: c.q1, note: 'R1 报告' }] },
+      }, 'review'))
+      expectOk(h.svc.mutate({ action: 'review-request', params: { canvasId: c.canvasId } }, 'agent'))
+      expect(c.state().review?.round).toBe(2)
+      // R2 进行中携带 R1 轮次写回 → 拒绝（roundHasReport / maxRounds 预算的完成判定须确定性）
+      const reply = h.svc.mutate({
+        action: 'review-append',
+        params: { canvasId: c.canvasId, round: 1, entries: [{ id: 're-late', round: 1, dimension: 'completeness', severity: 'suggestion', targetId: c.q1, note: '迟到的 R1 条目' }] },
+      }, 'review')
+      expectRejected(reply, 'invalid_params')
+      if (!reply.ok) expect(reply.error.message).toContain('R2')
+      // 拒绝 = 无写入：R1 条目仍在、迟到条目未落
+      expect(c.state().review?.entries.map((e) => e.id)).toEqual(['re-r1'])
+      // 当前轮（R2）写回放行
+      expectOk(h.svc.mutate({
+        action: 'review-append',
+        params: { canvasId: c.canvasId, round: 2, entries: [{ id: 're-r2', round: 2, dimension: 'completeness', severity: 'suggestion', targetId: c.q1, note: 'R2 报告' }] },
+      }, 'review'))
+      expect(c.state().review?.entries.map((e) => e.id)).toEqual(['re-r1', 're-r2'])
+    } finally {
+      h.dispose()
+    }
+  })
+})
+
 describe('审查终态 max-rounds（设计 §3.1 失败路径②：置终态 + 停回说明 + 留痕）', () => {
   it('达上限再发起 = 合法终态转移（非校验失败）：status=max-rounds + stopNote/recoverHint + ReviewMaxRoundsReached 事件 + round 不动 + dirtyPaths 不清（本轮未开始）', () => {
     const h = makeService()
@@ -268,6 +302,20 @@ describe('支撑度写回（概念 §2.4：边的缺陷经支撑度表达——r
       expectRejected(appendEntry(h.svc, c.canvasId, { supportRating: 'gap' }), 'invalid_params')
       expectRejected(appendEntry(h.svc, c.canvasId, { supportRating: 'gap', supportGaps: [] }), 'invalid_params')
       // 拒绝 = 整批无部分写入（原子事务）：边与条目均未落
+      expect(c.state().edges.find((e) => e.id === TRUNK_EDGE)?.support).toBeUndefined()
+      expect(c.state().review?.entries ?? []).toHaveLength(0)
+    } finally {
+      h.dispose()
+    }
+  })
+
+  it('sufficient / invalid 夹带清单 → invalid_params（契约守卫反向规则的 runtime 同款防线：WS 直连不经 marker 守卫）', () => {
+    const h = makeService()
+    try {
+      const c = growCanvas(h.svc, createCanvas(h.svc))
+      expectRejected(appendEntry(h.svc, c.canvasId, { supportRating: 'sufficient', supportGaps: ['多余清单'] }), 'invalid_params')
+      expectRejected(appendEntry(h.svc, c.canvasId, { supportRating: 'invalid', supportGaps: ['多余清单'] }), 'invalid_params')
+      // 拒绝 = 无写入：非 gap 评价不得把清单落上边
       expect(c.state().edges.find((e) => e.id === TRUNK_EDGE)?.support).toBeUndefined()
       expect(c.state().review?.entries ?? []).toHaveLength(0)
     } finally {

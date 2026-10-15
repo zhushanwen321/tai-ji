@@ -632,9 +632,14 @@ export class BtwService {
    *（单入口；abort 幂等）→ ③按 cwd+mainSid 推导整目录删除（**不依赖注册表完备**——
    * 不可解析文件的残留目录同样清；路径限定 btw 根内）。
    * best-effort：逐段失败 warn 不上抛（调用方是删除主链，P2 降级隔离；漏删由启动孤儿补账兜底）。
+   *
+   * @returns 本次快照枚举到的线 sessionId 清单（先于逐线关闭捕获）——delete 编排侧
+   *   据此解绑各线画布绑定（F1-11：级联真删除的线与主会话同一解绑规则）。并发双删
+   *   形态（closeLine 返 false）同样在清单内——线已不在，解绑幂等无副作用。
    */
-  async closeAllForMain(mainSid: string, cwd: string): Promise<void> {
-    for (const rec of this.listLines(mainSid)) {
+  async closeAllForMain(mainSid: string, cwd: string): Promise<string[]> {
+    const lines = this.listLines(mainSid)
+    for (const rec of lines) {
       try {
         await this.closeLine(rec.vid)
       } catch (e) {
@@ -651,6 +656,7 @@ export class BtwService {
       // best-effort：删线目录失败不上抛（主删链 P2 降级隔离），漏删由启动孤儿补账兜底
       console.warn(`[btw] closeAllForMain dir removal failed (mainSid=${mainSid}): ${toErrorMessage(e)}`)
     }
+    return lines.map((rec) => rec.vid)
   }
 
   // ── 内部 ──

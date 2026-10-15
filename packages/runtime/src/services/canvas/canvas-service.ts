@@ -30,6 +30,7 @@ import {
   isActionAllowed,
   type CanvasActor,
   type CanvasCreateParams,
+  type CanvasEventType,
   type CanvasExportParams,
   type CanvasListEntry,
   type CanvasListReply,
@@ -80,7 +81,9 @@ export type CanvasMutateResult = CanvasMutateReply & { canvasId?: string }
 
 export interface CanvasUpdatedBroadcast { // oe-exempt:20261015:framework:画布域类型契约（数据形状/端口/测试 harness，非抽象接口单实现）
   canvasId: string
-  evType: string
+  /** 主事件类型（封闭词表 CanvasEventType——renderer 按事件类型分流的键；收紧为词表
+   * 联合后成员资格由 TS 构造性保证，消费侧无需再做成员资格守卫，M1-1）。 */
+  evType: CanvasEventType
   eventId: string
   summary: string
 }
@@ -209,7 +212,10 @@ export class CanvasService {
       ...structuredClone(state),
       nodes: state.nodes.filter((n) => ids.has(n.id)),
       edges: state.edges.filter((e) => ids.has(e.from) && ids.has(e.to)),
-      comments: state.comments.filter((c) => ids.has(c.anchorId)),
+      // 评论锚点 = 节点 id 或边 id（applyComment 两者皆合法）：锚子树内节点，或锚两端点
+      // 都在子树内的边（与上行边过滤同判据——边在则其上的评论在；只按节点 id 过滤会把
+      // 边锚评论静默丢弃，出现「边在、其上的用户评论不在」，F1-12）。
+      comments: state.comments.filter((c) => ids.has(c.anchorId) || state.edges.some((e) => e.id === c.anchorId && ids.has(e.from) && ids.has(e.to))),
     }
     return filtered
   }
@@ -421,7 +427,7 @@ export class CanvasService {
     return `exports/${fileName}`
   }
 
-  private broadcast(canvasId: string, evType: string, eventId: string, summary: string): void {
+  private broadcast(canvasId: string, evType: CanvasEventType, eventId: string, summary: string): void {
     // 同步回调（U3 接 broker.broadcast）；回调异常不阻断 mutate 主链（广播是失效提示，
     // 丢失由下次拉取收敛——ADR-0097 拉为主）。
     try {
@@ -438,8 +444,9 @@ export class CanvasService {
 const activeServices = new Set<CanvasService>()
 
 /**
- * session 真删除的画布解绑分发入口（session-lifecycle.ts delete 编排侧调用——不挂
- * removeSessionEntry 汇聚点，该点同时收 pi 崩溃 / forceQuit / restore 清场三条存活路径）。
+ * session 真删除的画布解绑分发入口（session-lifecycle.ts delete 编排侧调用——主会话自身、
+ * btw 线直删分支、主删级联逐线三处；不挂 removeSessionEntry 汇聚点，该点同时收 pi 崩溃 /
+ * forceQuit / restore 清场三条存活路径）。
  */
 export function unbindCanvasOnSessionDeleted(sessionId: string): void {
   for (const svc of activeServices) {

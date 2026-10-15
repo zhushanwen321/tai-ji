@@ -283,8 +283,12 @@ function resolveCreateEffectiveThinkingLevel(
 export interface BtwCascadeOps {
   /** 关单线（btw.remove 同一原语）：杀进程 + 注册表移除 +（可选）删线文件；未知线返 false。 */
   closeLine(vid: string, opts?: { deleteSessionFile?: boolean }): Promise<boolean>
-  /** 主删级联：关主会话名下全部线 + 删 `btw/<encodeCwd>/<mainSid>/` 线目录（best-effort）。 */
-  closeAllForMain(mainSid: string, cwd: string): Promise<void>
+  /**
+   * 主删级联：关主会话名下全部线 + 删 `btw/<encodeCwd>/<mainSid>/` 线目录（best-effort）。
+   * 返回本次快照枚举到的线 sessionId 清单（枚举先于逐线关闭）——delete 编排侧据此
+   * 解绑各线画布绑定（解绑规则唯一化：级联真删除的线与主会话同一规则，F1-11）。
+   */
+  closeAllForMain(mainSid: string, cwd: string): Promise<string[]>
 }
 
 /** 级联 ops 槽（模块级单例——对照 inflightMirror / userStoppedGate 先例；null = 未接线零变更）。 */
@@ -1032,6 +1036,10 @@ export class SessionLifecycle implements ISessionRegistry {
     // 未注入 ops（存量测试装配）→ fall through 既有两分支，行为零变更。
     if (isBtwLine) {
       await btwOps.closeLine(sessionId, { deleteSessionFile: true })
+      // 画布绑定解绑（problem-solve-canvas F1-11）：btw 线直删 = 该线 session 真删除——
+      // 解绑规则唯一化（「解绑 = 仅 session 真删除」无条件覆盖 btw 线，不因直删分支
+      // 早退而漏解绑）。与主删路径同一点位形态（模块级分发，纯同步 Map 摘除）。
+      unbindCanvasOnSessionDeleted(sessionId)
       return
     }
     // [M4-a] 级联 cwd 解析（两分支各取真值；分支抛出则级联随之跳过——主已删形态由
@@ -1066,7 +1074,14 @@ export class SessionLifecycle implements ISessionRegistry {
     // best-effort：级联失败只 warn 不阻断主删除（P2 降级隔离；漏删残留由启动孤儿补账兜底）。
     if (btwCascadeOps && cascadeCwd !== undefined) {
       try {
-        await btwCascadeOps.closeAllForMain(sessionId, cascadeCwd)
+        const closedLines = await btwCascadeOps.closeAllForMain(sessionId, cascadeCwd)
+        // 画布绑定解绑（problem-solve-canvas F1-11）：随主删被级联真删除的名下 btw 线
+        // 与主会话同一解绑规则——closeAllForMain 返回快照枚举到的线 sessionId 清单，
+        // 逐线解绑（级联失败不上抛：清单拿不到时维持 best-effort 原语义，漏解绑的线
+        // 绑定由活跃交集在回推派发侧排除，不留错误状态）。
+        for (const vid of closedLines) {
+          unbindCanvasOnSessionDeleted(vid)
+        }
       } catch (e: unknown) {
         // best-effort 降级（非吞错）：走到本级联时主 session 本体已 trash/purge 完成，
         // closeAllForMain 是删后辅助腿——上抛只会让已成功的 delete 报成失败返回，还连带跳过
