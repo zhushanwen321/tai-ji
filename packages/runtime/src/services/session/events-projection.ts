@@ -656,9 +656,7 @@ export class SessionEventProjection {
     if (events.length === 0) return true // 坏事件帧：消费但零应用（写侧已获 ack，无丢失面）
     // 缺口判定（无 seq 事件不参与——报告全为无 seq 存量行时直接 fold，状态机幂等）
     const seqs = events.map((e) => (e as { seq?: unknown }).seq).filter((s): s is number => typeof s === 'number')
-    const watermark = domain === 'record'
-      ? (this.sources.recordFolds.get(id)?.lastSeq ?? 0)
-      : (this.sources.runFolds.get(id)?.lastSeq ?? 0)
+    const watermark = domain === 'record' ? (this.sources.recordFolds.get(id)?.lastSeq ?? 0) : (this.sources.runFolds.get(id)?.lastSeq ?? 0)
     const minSeq = seqs.length > 0 ? Math.min(...seqs) : undefined
     if (minSeq !== undefined && minSeq > watermark + 1) {
       // 缺口：从字节偏移补读到文件尾（覆盖报告事件——它们已在盘上），fold 去重

@@ -509,7 +509,7 @@ export class WorkflowDispatch {
         opts.model,
         agentConfig?.model,
         () => readEngineDefaults(this.deps.getModelService().getAgentDir())[route.engineId],
-        (message) => console.warn(message),
+        (message) => logger.warn(message),
         "workflow-dispatch",
       );
     const modelSource: SubagentModelSource = isPiRoute

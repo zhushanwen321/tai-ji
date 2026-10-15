@@ -70,6 +70,7 @@ import { identityEnvelopeOf } from "../engine/port.ts";
 import type { EnginePort, RunContext } from "../engine/port.ts";
 import type { SubagentModelSource } from "../domain/record-model.ts";
 import { resolveEngineModelWithTranslation } from "../engine/model-ref-translation.ts";
+import { getLogger } from "../../core/logger.ts";
 import { executeOptionsToEngineTaskSpec } from "../engine/host-task-spec.ts";
 import { DEFAULT_ENGINE_ID } from "../engine/registry.ts";
 import {
@@ -106,6 +107,8 @@ import { DEFAULT_AGENT_NAME } from "../domain/record-model.ts";
 // [R6/D-R4-4] 跨聚合消费的值语义纯量归一常量叶子文件（聚合→支撑文件方向合法）。
 import { PRIORITY_BACKGROUND } from "./service-constants.ts";
 import type { AgentStreamSink } from "../../shared/agent-stream.ts";
+
+const logger = getLogger("subagents");
 
 /**
  * [R1 打样模式 1] 聚合协作 deps——**全部晚绑定闭包，构造期零求值**。
@@ -571,7 +574,7 @@ export class RunOrchestration {
         opts.model,
         preIdentity.agentConfig?.model,
         () => readEngineDefaults(this.deps.getModelService().getAgentDir())[route.engineId],
-        (message) => console.warn(message),
+        (message) => logger.warn(message),
         "run-orchestration",
       );
     const engineModel = resolvedModel?.engineModel;

@@ -468,10 +468,9 @@ export function resolveZcodeReasoningValues(modelRef: string, sources?: ZcodeSou
   }
   const modelId = modelShort(modelRef);
   const rules = (parsed as Record<string, unknown>)["config"];
-  const modelRules =
-    isRecord(rules) && isRecord(rules["modelConfigRules"])
-      ? rules["modelConfigRules"]["modelRules"]
-      : undefined;
+  const modelRules = isRecord(rules) && isRecord(rules["modelConfigRules"])
+    ? rules["modelConfigRules"]["modelRules"]
+    : undefined;
   if (!Array.isArray(modelRules)) return undefined;
   return lastMatchingReasoningValues(modelRules, modelId);
 }
@@ -481,10 +480,7 @@ export function resolveZcodeReasoningValues(modelRef: string, sources?: ZcodeSou
  * provider（GUI 首选 = CLI 缺省解析的落点，同源对齐）；序内无可用则任意带凭据者。
  * 让位条件（对齐点⑦）不变：显式默认引擎模型配置引入时配置值优先。
  */
-function defaultProviderForShortName(
-  conf: SourceConfig,
-  withKey: Array<[string, ZcodeProviderEntry]>,
-): string {
+function defaultProviderForShortName(conf: SourceConfig, withKey: Array<[string, ZcodeProviderEntry]>): string {
   const ordered = conf.order.find((id) => {
     const entry = conf.providers.get(id);
     return entry !== undefined && hasApiKey(entry);
@@ -531,10 +527,9 @@ function resolveAccountModelRef(wanted: string, wantedProvider: string, sources?
 
 /** 内建目录 providerRules 内查找 account 规则（无规则段/无匹配/条目非对象 → undefined）。 */
 function findAccountProviderRule(catalog: unknown, wantedProvider: string): Record<string, unknown> | undefined {
-  const catalogRules =
-    isRecord(catalog) && isRecord(catalog["config"]) && isRecord(catalog["config"]["providerConfigRules"])
-      ? catalog["config"]["providerConfigRules"]["providerRules"]
-      : undefined;
+  const catalogRules = isRecord(catalog) && isRecord(catalog["config"]) && isRecord(catalog["config"]["providerConfigRules"])
+    ? catalog["config"]["providerConfigRules"]["providerRules"]
+    : undefined;
   const accountRule = Array.isArray(catalogRules)
     ? catalogRules.find((r) => isRecord(r) && r["providerId"] === wantedProvider)
     : undefined;
@@ -596,8 +591,7 @@ export function translatePiModelRefToZcode(requested: string, sources?: ZcodeSou
     throw new ZcodePrepareError(
       "model_not_available",
       `模型通道翻译失败：pi 侧 "${piProvider}" 在 zcode 侧对应 ${target}，但内建目录定位失败` +
-        `（ZCODE_BUILTIN_PROVIDER_CONFIG_FILE 与 runtime/provider 扫描均未命中）。` +
-        `恢复指引：确认 ZCode 已安装后重试。`,
+        `（ZCODE_BUILTIN_PROVIDER_CONFIG_FILE 与 runtime/provider 扫描均未命中）。恢复指引：确认 ZCode 已安装后重试。`,
     );
   }
   let catalog: unknown;
@@ -613,8 +607,7 @@ export function translatePiModelRefToZcode(requested: string, sources?: ZcodeSou
   if (accountRule === undefined) {
     throw new ZcodePrepareError(
       "model_not_available",
-      `pi 侧 "${piProvider}" 的 zcode 对应通道 ${target} 不可用（内建目录无此规则）。` +
-        `恢复指引：在 ZCode 桌面端完成该 plan 的账号登录/配置后重试。`,
+      `pi 侧 "${piProvider}" 的 zcode 对应通道 ${target} 不可用（内建目录无此规则）。恢复指引：在 ZCode 桌面端完成该 plan 的账号登录/配置后重试。`,
     );
   }
   const accountConfig = isRecord(accountRule["config"]) ? accountRule["config"] : {};
@@ -627,8 +620,7 @@ export function translatePiModelRefToZcode(requested: string, sources?: ZcodeSou
   if (matched === undefined) {
     throw new ZcodePrepareError(
       "model_not_available",
-      `模型 "${modelShort(requested)}" 在 ${target} 下无等价模型（可用: ${modelIds.filter((m) => typeof m === "string").join(", ")}）。` +
-        `恢复指引：改用上述模型之一，或省略 model 参数走引擎缺省。`,
+      `模型 "${modelShort(requested)}" 在 ${target} 下无等价模型（可用: ${modelIds.filter((m) => typeof m === "string").join(", ")}）。恢复指引：改用上述模型之一，或省略 model 参数走引擎缺省。`,
     );
   }
   return `${target}/${matched}`;
@@ -680,49 +672,40 @@ export function resolveZcodeModelRef(requested: string | undefined, sources?: Zc
     const hint = wanted ? `model="${wanted}" 不能校验` : "缺省模型解析不能校验";
     throw new ZcodePrepareError(
       "engine_credential_missing",
-      `zcode 引擎找不到任何带 apiKey 的个人 provider（${hint}）。已读源：${sourceDesc}。` +
-        `恢复指引：在 ZCode 桌面端配置至少一个个人 provider（provider_config.json 内存在` +
-        ` config.access.apiKey 非空条目）后重试；plan 套餐族中 account: 前缀经账号` +
-        ` entitlement 直通可用（builtin: 前缀不装载，不可作为引擎模型）。` +
+      `zcode 引擎找不到任何带 apiKey 的个人 provider（${hint}）。已读源：${sourceDesc}。恢复指引：` +
+        `在 ZCode 桌面端配置至少一个个人 provider（provider_config.json 内存在 config.access.apiKey 非空条目）` +
+        `后重试；plan 套餐族中 account: 前缀经账号 entitlement 直通可用（builtin: 前缀不装载，不可作为引擎模型）。` +
         TAIJI_SYNC_GUIDANCE,
     );
   }
 
   if (wanted === undefined) return "";
 
-  const wantedProvider = wanted.includes("/") ? providerOf(wanted) : undefined;
-
-  const provider = wanted.includes("/")
-    ? providerOf(wanted)
-    : defaultProviderForShortName(conf, withKey);
+  const provider = wanted.includes("/") ? providerOf(wanted) : defaultProviderForShortName(conf, withKey);
   const short = modelShort(wanted);
   const entry = conf.providers.get(provider);
   if (!entry) {
     const known = withKey.map(([id]) => id).join(", ");
     throw new ZcodePrepareError(
       "model_not_available",
-      `未知 provider "${provider}"（带凭据的个人 provider: ${known}）。` +
-        `恢复指引：改用上述 provider 之一（全名 provider/model），或在 ZCode 桌面端配置该` +
-        ` provider 后重试；省略 model 参数则走引擎缺省解析（CLI 自身选取可用模型）。` +
-        TAIJI_SYNC_GUIDANCE,
+      `未知 provider "${provider}"（带凭据的个人 provider: ${known}）。恢复指引：改用上述 provider 之一` +
+        `（全名 provider/model），或在 ZCode 桌面端配置该 provider 后重试；省略 model 参数则走引擎缺省解析` +
+        `（CLI 自身选取可用模型）。` + TAIJI_SYNC_GUIDANCE,
     );
   }
   if (!hasApiKey(entry)) {
     throw new ZcodePrepareError(
       "engine_credential_missing",
-      `provider "${provider}" 存在但未配置 apiKey。` +
-        `恢复指引：在 ZCode 桌面端为该 provider 配置凭据，或改用已配凭据的 provider` +
-        `（${withKey.map(([id]) => id).join(", ")}）后重试。` +
-        TAIJI_SYNC_GUIDANCE,
+      `provider "${provider}" 存在但未配置 apiKey。恢复指引：在 ZCode 桌面端为该 provider 配置凭据，` +
+        `或改用已配凭据的 provider（${withKey.map(([id]) => id).join(", ")}）后重试。` + TAIJI_SYNC_GUIDANCE,
     );
   }
   const models = entry.models ?? [];
   if (models.length > 0 && !models.includes(short)) {
     throw new ZcodePrepareError(
       "model_not_available",
-      `未知模型 "${short}"（provider ${provider} 下可用: ${models.join(", ")}）。` +
-        `恢复指引：改用该 provider 下的模型，或在 ZCode 桌面端启用目标模型后重试。` +
-        TAIJI_SYNC_GUIDANCE,
+      `未知模型 "${short}"（provider ${provider} 下可用: ${models.join(", ")}）。恢复指引：改用该 provider 下的模型，` +
+        `或在 ZCode 桌面端启用目标模型后重试。` + TAIJI_SYNC_GUIDANCE,
     );
   }
   return `${provider}/${short}`;
@@ -766,10 +749,9 @@ export function listZcodeModels(sources?: ZcodeSourcePaths): Array<{ id: string;
 
 /** [listAccountFamilyModels 拆分] 内建目录 providerRules 段提取（形态非法 = 空集）。 */
 function readCatalogProviderRules(catalog: unknown): readonly unknown[] {
-  const rules =
-    isRecord(catalog) && isRecord(catalog["config"]) && isRecord(catalog["config"]["providerConfigRules"])
-      ? catalog["config"]["providerConfigRules"]["providerRules"]
-      : undefined;
+  const rules = isRecord(catalog) && isRecord(catalog["config"]) && isRecord(catalog["config"]["providerConfigRules"])
+    ? catalog["config"]["providerConfigRules"]["providerRules"]
+    : undefined;
   return Array.isArray(rules) ? rules : [];
 }
 
