@@ -1,11 +1,11 @@
 /**
- * actor 权限矩阵执行 + 原子事务 + 幂等 upsert + 领域事件对账（problem-solve-canvas U2）。
+ * actor 权限矩阵执行 + 原子事务 + 幂等重试判定 + 领域事件对账（problem-solve-canvas U2）。
  *
  * - 矩阵执行：CANVAS_ACTOR_MATRIX 全 48 格扫描——false 格 fail-fast（actor_not_allowed）、
  *   true 格合法场景执行成功（表外组合在服务入口被拦，对齐「单一词表防两个入口各自发明语义」）。
  * - 原子事务：grow 批内任一校验失败 = 整批拒绝、无部分写入。
- * - 幂等 upsert：grow/patch 节点 id 由 agent 侧生成，写入按 id upsert——崩溃窗口重试不产生
- *   重复节点（apply-then-respond 契约的重试安全半边）。
+ * - 幂等重试判定：grow 节点 id 由 agent 侧生成，同 id 重试按声明一致性判定（一致 = 原样
+ *   保留、分歧 = 拒绝）——崩溃窗口重试不产生重复节点（apply-then-respond 契约的重试安全半边）。
  * - 事件对账：ACTION_EVENT_MAP 每个 mutation action 至少产出一个事件（主事件映射对账
  *   SSOT）；read / list 为查询类不产事件、不在对账范围。
  */

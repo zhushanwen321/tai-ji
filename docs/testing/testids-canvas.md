@@ -6,7 +6,7 @@
 > `src/composables/use-canvas-sync.test.ts` + overlay 两件（资产与触发面登记见 [e2e-map.json](./e2e-map.json) E2E-CANVAS-01）。
 > 本账随 problem-solve-canvas D5 终态同步建立（2026-10-15，登记类批次 F1-27）：设计 §3.1(3) UI 规范要求 testid 全量登记，
 > 建账前 docs/testing 零 canvas 条目。建账实测：模板共 103 处 data-testid（81 静态 + 22 动态绑定），去重 100 个唯一值，
-> 前缀纪律 canvas-* / tray-canvas-* 实测 100/100；其中 33 个值有模块单测断言、67 个仅登记未断言（断言面随各组件测试增量补齐）。
+> 前缀纪律 canvas-* / tray-canvas-* 实测 100/100（下表 99 行：`canvas-zoom-in` / `canvas-zoom-out` 合用一行）；其中 33 个值有模块单测断言、67 个仅登记未断言（断言面随各组件测试增量补齐）。
 > 改 testid 必同步本表 + 清扫指向已删 testid 的悬空引用。
 
 ## 1. CanvasPane.vue（画布 tab 内容根组件；WorkflowVizOverlay canvas body 分支异步挂载）

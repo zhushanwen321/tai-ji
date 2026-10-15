@@ -208,14 +208,18 @@ export class CanvasService {
       throw new CanvasDomainError(canvasError('node_not_found', `子树根「${subtree}」不存在：先取全量后核对节点 id`))
     }
     const ids = subtreeOf(state, subtree)
+    const inSubtreeEdges = state.edges.filter((e) => ids.has(e.from) && ids.has(e.to))
+    const subtreeEdgeIds = new Set(inSubtreeEdges.map((e) => e.id))
     const filtered: CanvasState = {
       ...structuredClone(state),
       nodes: state.nodes.filter((n) => ids.has(n.id)),
-      edges: state.edges.filter((e) => ids.has(e.from) && ids.has(e.to)),
+      edges: inSubtreeEdges,
       // 评论锚点 = 节点 id 或边 id（applyComment 两者皆合法）：锚子树内节点，或锚两端点
       // 都在子树内的边（与上行边过滤同判据——边在则其上的评论在；只按节点 id 过滤会把
-      // 边锚评论静默丢弃，出现「边在、其上的用户评论不在」，F1-12）。
-      comments: state.comments.filter((c) => ids.has(c.anchorId) || state.edges.some((e) => e.id === c.anchorId && ids.has(e.from) && ids.has(e.to))),
+      // 边锚评论静默丢弃，出现「边在、其上的用户评论不在」，F1-12）。子树边 id 预筛为
+      // Set：评论过滤 O(评论数) 而非 O(评论数 × 边数)（N9——500 节点量级 subtree 读
+      // 的热路径，A6b 基线未覆盖 subtree 计时，先消嵌套扫描）。
+      comments: state.comments.filter((c) => ids.has(c.anchorId) || subtreeEdgeIds.has(c.anchorId)),
     }
     return filtered
   }

@@ -120,7 +120,7 @@ export function applyByAction(
   }
 }
 
-// ── grow（批量原子事务 + 邻接矩阵 + 不变量 2 + 幂等 upsert）──
+// ── grow（批量原子事务 + 邻接矩阵 + 不变量 2 + 幂等重试判定）──
 
 function applyGrow(
   draft: CanvasState,
@@ -141,8 +141,9 @@ function applyGrow(
   return `新增 ${params.batch.length} 个元素（${[...types].join('/')}）：${truncate(params.reason)}`
 }
 
-/** grow 单条：新节点 + 连接边。节点 id 由 agent 生成（幂等 upsert 键）；边 id 确定性派生
- * 自节点 id（`e-<节点id>`）——同 id 重试 → 同边 id → upsert 覆盖，整条 item 幂等无副作用。 */
+/** grow 单条：新节点 + 连接边。节点 id 由 agent 生成（幂等重试判定的键）；边 id 确定性
+ * 派生自节点 id（`e-<节点id>`）——同 id 重试按声明一致性判定（下方 growItemDivergence）：
+ * 声明一致 = 原样保留（幂等无副作用），声明分歧 = 拒绝。 */
 function applyGrowItem(draft: CanvasState, item: CanvasGrowItem, at: string): void {
   validateGrowAdjacency(draft, item)
   const existing = nodeOf(draft, item.id)

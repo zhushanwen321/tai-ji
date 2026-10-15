@@ -28,7 +28,8 @@
 export const CANVAS_MARKER = '\x00TAIJI_CANVAS'
 
 /**
- * 16 个 mutate / 查询 action 的运行时集合（与 CanvasAction 类型同源——actions.ts:232 从此派生）。
+ * 16 个 mutate / 查询 action 的运行时集合（与 CanvasAction 类型同源——从本目录
+ * actions.ts 的 CANVAS_ACTIONS 数组派生，不写行号：跨 commit 推移会失准）。
  *
  * 词序按领域生命周期排列：创建 → 生长 → 编辑 → 方向裁决 → 选定 → 状态转移 →
  * 评论 → 评论响应 → 审查三动作 → 收敛确认 → 导出 → 派发 → 查询两类。
