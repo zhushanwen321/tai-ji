@@ -152,8 +152,9 @@ function layoutCluster(phase: string, members: WorkflowDagNode[], x: number, nod
     cursorY += h + NODE_GAP
   }
   const singleNodeMinHeight = CLUSTER_PAD_TOP + CLUSTER_TITLE_H + DAG_NODE_H + CLUSTER_PAD_BOTTOM
-  const contentBottom = placed.length > 0
-    ? placed[placed.length - 1].y + (nodeHeights.get(placed[placed.length - 1].node.id) ?? DAG_NODE_H) + CLUSTER_PAD_BOTTOM
+  const last = placed[placed.length - 1]
+  const contentBottom = last !== undefined
+    ? last.y + last.h + CLUSTER_PAD_BOTTOM
     : singleNodeMinHeight
   const cluster: DagLayoutCluster = {
     phase,
