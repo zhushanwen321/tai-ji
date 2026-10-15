@@ -1,7 +1,7 @@
 <template>
   <!-- [w3b] demo 对照：AgentSection.vue「子代理引擎」卡（gc-title 卡头 + tight body + SettingRow +
-       Select w160）。loadError 行形态与 SystemAutoRenameSection 同族（RD-4#8；卡内 padding 10/8/4
-       绝对 px + text-2xs 令牌），重试钮保持 W2 卡内小钮档。 -->
+       Select w160）。loadError 行形态遵循 RD-4#8（卡内 padding 10/8/4 绝对 px + text-2xs
+       令牌），重试钮保持 W2 卡内小钮档。 -->
   <GroupCard :title="t('settings.subagentEngine.title')">
     <!-- RD-4#8：读配置失败常驻提示（默认值非已存值）+ 重试；控件禁用直到重拉成功 -->
     <div

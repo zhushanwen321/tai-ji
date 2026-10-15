@@ -310,28 +310,28 @@ describe("sanitizeEngineDefaults（设计 D5）", () => {
   it("合法形态透传：Record<engineId, 模型全 ref>（经 loadGlobalConfig 间接覆盖）", () => {
     writeConfig(
       tmpDir,
-      JSON.stringify({ version: 1, engineDefaults: { zcode: "zai-coding-plan/GLM-5.3" } }),
+      JSON.stringify({ version: 1, engineDefaults: { zcode: "prov/plan-model" } }),
     );
     const cfg = loadGlobalConfig(tmpDir);
-    expect(cfg.engineDefaults).toEqual({ zcode: "zai-coding-plan/GLM-5.3" });
+    expect(cfg.engineDefaults).toEqual({ zcode: "prov/plan-model" });
   });
 
   it("非法形态：非对象（字符串/数字/null/数组）→ 整键丢弃（undefined）", () => {
     expect(sanitizeEngineDefaults("not-an-object")).toBeUndefined();
     expect(sanitizeEngineDefaults(42)).toBeUndefined();
     expect(sanitizeEngineDefaults(null)).toBeUndefined();
-    expect(sanitizeEngineDefaults(["zcode", "zai-coding-plan/GLM-5.3"])).toBeUndefined();
+    expect(sanitizeEngineDefaults(["zcode", "prov/plan-model"])).toBeUndefined();
   });
 
   it("非法形态：值非字符串（数字/对象/null）→ 剔除该条目，合法条目保留", () => {
     expect(
       sanitizeEngineDefaults({
-        zcode: "zai-coding-plan/GLM-5.3",
+        zcode: "prov/plan-model",
         brokenNum: 123,
         brokenObj: { ref: "x/y" },
         brokenNull: null,
       }),
-    ).toEqual({ zcode: "zai-coding-plan/GLM-5.3" });
+    ).toEqual({ zcode: "prov/plan-model" });
   });
 
   it("非法形态：空串/空白值与空白键剔除（沿 sanitizeDefaultEngine 非空判定先例）", () => {

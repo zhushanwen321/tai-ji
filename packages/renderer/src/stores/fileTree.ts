@@ -151,7 +151,7 @@ export interface VisibleRow { // oe-exempt:20261003:framework:类型契约先行
   depth: number
   /** 目录是否展开（从 expandedPaths 投影） */
   expanded: boolean
-  /** 目录可见直接子项数（投影时按 showIgnored 过滤计数；未加载 children / 文件行恒 0） */
+  /** 目录可见直接子项数（投影时计数；未加载 children / 文件行恒 0） */
   childCount: number
   /** 文件角标（从 gitOverlay 投影） */
   gitStatus?: GitFileStatus
@@ -160,7 +160,7 @@ export interface VisibleRow { // oe-exempt:20261003:framework:类型契约先行
   ignored: boolean
   /**
    * 子区占位行标记（非节点行）：'loading'（展开在途）/ 'error'（展开失败）/
-   * 'empty'（已加载空目录或全部被 showIgnored 过滤）。仅 hint 行非空。
+   * 'empty'（已加载空目录）。仅 hint 行非空。
    */
   hint?: 'loading' | 'error' | 'empty'
 }
@@ -189,8 +189,10 @@ export function visibleRowKey(row: VisibleRow): string {
  * [W28/D-7.2] 唯一「树 → 可见行」投影点（纯函数，零副作用）。
  *
  * 语义 = 旧递归渲染（FileView.visibleNodes 顶层裁 + FileTreeRow 递归子行）的逐行等价：
- * - 顶层：showIgnored 过滤 + filterText 命中判定（nodeMatchesFilter，仅祖先链保留）；
- * - 子层：showIgnored 过滤，展开目录 DFS 展开（懒加载——未加载 children 不产出子行）；
+ * - 顶层：filterText 命中判定（nodeMatchesFilter，仅祖先链保留）；
+ * - 子层：展开目录 DFS 展开（懒加载——未加载 children 不产出子行）；
+ *   [2026-10-15] ignored 节点不再过滤，全量显示（跟踪态由文件名颜色区分，见
+ *   FileTreeRow fnameColorClass；showIgnored 开关随全量显示裁决退役）。
  * - 已展开目录按 nodeStates 渲染 loading/error/empty 占位行（与旧递归一致）。
  *
  * E7-a 更新策略：调用方（FileView）用 computed 包裹，依赖分桶后的细粒度 getter——
@@ -204,7 +206,6 @@ export function visibleRowKey(row: VisibleRow): string {
  * @param getExpanded 取 session 展开态 Set
  * @param getGitOverlay 取 session overlay 分桶（无则 undefined；与 getExpanded 同款细粒度分桶）
  * @param filterText 过滤关键词（原始输入，内部 trim/lower）
- * @param showIgnored 是否显示忽略项
  * @param sid 目标 session
  * @param getNodeState [审查修正扩展] 取节点加载态（hint 行判定需要；文档草案签名未含）
  */
@@ -213,7 +214,6 @@ export function projectVisibleRows(
   getExpanded: (sid: string) => Set<string>,
   getGitOverlay: (sid: string) => Map<string, GitFileStatus> | undefined,
   filterText: string,
-  showIgnored: boolean,
   sid: string,
   getNodeState: (sid: string, path: string) => NodeState,
 ): VisibleRow[] {
@@ -238,10 +238,10 @@ export function projectVisibleRows(
     return undefined
   }
 
-  /** 目录可见直接子项（showIgnored 过滤同口径——徽标计数与展开子层共用单一实现） */
+  /** 目录可见直接子项（ignored 节点全量显示——徽标计数与展开子层共用单一实现） */
   function visibleChildrenOf(node: FileNode): FileNode[] {
     if (node.type !== 'dir' || !node.children) return []
-    return showIgnored ? node.children : node.children.filter((c) => !c.ignored)
+    return node.children
   }
 
   function makeRow(node: FileNode, depth: number): VisibleRow {
@@ -306,14 +306,14 @@ export function projectVisibleRows(
     }
   }
 
-  let topLevel = showIgnored ? nodes : nodes.filter((n) => !n.ignored)
+  let topLevel = nodes
   if (q) topLevel = topLevel.filter((n) => nodeMatchesFilter(n, q))
   walk(topLevel, 0)
   return rows
 }
 
 export const useFileTreeStore = defineStore('fileTree', () => {
-  // ── State（4 facet per-session + showIgnored + 展示链分区（selectedPaths/detailTabs））──
+  // ── State（4 facet per-session + 展示链分区（selectedPaths/detailTabs））──
 
   /** 文件树缓存：sessionId → 顶层 FileNode[]（dir 的 children 随展开 merge 进去） */
   const tree: Ref<SessionMap<FileNode[]>> = ref(new Map())
@@ -331,8 +331,10 @@ export const useFileTreeStore = defineStore('fileTree', () => {
    * 本预聚合机制暂无 UI 消费方（机制去留待登记裁决）。
    */
   const dirChangeCounts: Ref<Map<string, Map<string, number>>> = ref(new Map())
-  /** 显示忽略项开关（D-020，默认 false） */
-  const showIgnored = ref(false)
+  /**
+   * [2026-10-15 退役] showIgnored 开关已随「文件树全量显示」裁决删除：ignored 节点始终
+   * 显示，跟踪态改由文件名颜色区分（FileTreeRow fnameColorClass）。
+   */
   /**
    * 当前选中文件路径（per-session 分区，W3 display-containers §7.1「selectedPath 串线终局解」）。
    * [HISTORICAL] 旧值是全局单值（单选焦点）：A 会话点文件会被 B 会话的 DetailPane 读到（跨会话
@@ -652,11 +654,6 @@ export const useFileTreeStore = defineStore('fileTree', () => {
     filterText.value = text
   }
 
-  /** 切换 showIgnored 开关（D-020） */
-  function toggleShowIgnored(): void {
-    showIgnored.value = !showIgnored.value
-  }
-
   /**
    * [K-9] 跨 store 失效接口——标相关节点 loaded→invalidated（D-017）。
    * 供 composable 派发（useFileTree.invalidateOnFileChanges watch chat store 后调此），
@@ -700,7 +697,6 @@ export const useFileTreeStore = defineStore('fileTree', () => {
     gitOverlay,
     // [W28/D-7.2] dirChangeCounts 暴露（投影 computed 的依赖源；9 文档「投影函数 + dirChangeCounts 暴露」）
     dirChangeCounts,
-    showIgnored,
     selectedPaths,
     detailTabs,
     filterText,
@@ -730,7 +726,6 @@ export const useFileTreeStore = defineStore('fileTree', () => {
     updateDetailTab,
     setGitOverlay,
     setFilter,
-    toggleShowIgnored,
     invalidate,
     clearSession,
   }

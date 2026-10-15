@@ -42,9 +42,10 @@
          「无 drawer 对话流限宽 3/4」；② SplitterPanel 挂载/卸载瞬时完成 layout 重算，无法做
          开合宽度动画。手写布局能力（ui-signal-density D10 2026-10-06 修订）：无 drawer 时
          main 卡撑满公共容器（width 100% + margin 0），卡内内容列（对话流 + composer，消费
-         .content-col 的 max-width: var(--content-max-w)）限宽 60% 居中——留白在卡内而非卡外；
-         60% 实算低于 720px 下限即撑满，standalone 两分支均封 demo 阅读列 720 cap，drawer 挤窄
-         后恒撑满（派生单处在 useDrawerSplitWidth）；
+         .content-col 的 max-width: var(--content-max-w)）限宽 2/3 居中——留白在卡内而非卡外；
+         2/3 实算低于 720px 下限即撑满（撑满封 720），drawer 挤窄
+         后恒撑满（派生单处在 useDrawerSplitWidth；2026-10-14 用户修订 60%→2/3 且比例分支
+         摘除 720 cap——宽窗下 720 cap 把对话流钉在约半宽）；
          drawer 打开时 main width 动画到拆分比例、内容列恒撑满；handle 拖动（pointer capture
          跟手，拖动期间 transition:none）+ 键盘微调 + localStorage 持久化。
          drawer wrapper 常驻（width 0 ↔ drawerPct%）承载 width 动画；DrawerPanel 内部 aside
@@ -65,11 +66,13 @@
       >
         <!-- header 是对话流卡的组成部分（2026-10-04 用户裁决：header 只与对话流构成整体，
              不再横跨抽屉卡）——右抽屉卡有自己的 L1 栏，底抽屉卡有自己的实例切换条。
-             [shell 域对齐 demo spec §3.5 + 审计 R11] 卡头只显会话级控件：目录/分支次要行与
-             .jsonl 文件名按钮已移除（sessionDir/gitBranch 仍供 Panel 消费）。 -->
+             [shell 域对齐 demo spec §3.5 + 审计 R11] 卡头只显会话级控件：目录/分支次要行
+             保持移除（sessionDir/gitBranch 仍供 Panel 消费）；.jsonl 文件名按钮按
+             2026-10-14 用户裁决回归（sessionFileOf 供给）。 -->
         <PanelHeader
           :session-label="sessionLabelOf(leaf)"
           :session-id="leaf.sessionId ?? undefined"
+          :session-file="sessionFileOf(leaf)"
           :status="statusOf(leaf)"
           @toggle-drawer="onDrawerToggle()"
         />
@@ -379,6 +382,9 @@ function sessionLabelOf(l: PanelLeaf): string {
 function sessionDirOf(l: PanelLeaf): string {
   return l.sessionId ? session.list.find((s) => s.id === l.sessionId)?.cwd ?? '' : ''
 }
+function sessionFileOf(l: PanelLeaf): string | undefined {
+  return l.sessionId ? session.list.find((s) => s.id === l.sessionId)?.sessionFile : undefined
+}
 function gitBranchOf(l: PanelLeaf): string | undefined {
   return l.sessionId ? session.list.find((s) => s.id === l.sessionId)?.gitBranch : undefined
 }
@@ -504,7 +510,7 @@ watch(panelSessionId, () => {
 
 // ── 动态宽度（feat-chat-flow-width）：drawer 开合动画 + 可拖动宽度 ──
 // 宽度模型/拖动/键盘/持久化均在 useDrawerSplitWidth（含替换 reka-ui Splitter 的原因、
-// 内容列 60% + 720px 下限的派生）；模板绑定 splitAreaEl + mainAreaStyle（width + margin +
+// 内容列 2/3 + 720px 下限撑满的派生；2026-10-14 修订 60%→2/3、比例分支摘除 720 cap）；模板绑定 splitAreaEl + mainAreaStyle（width + margin +
 // --content-max-w 内容列令牌）+ drawer 侧 width style + handle 事件。
 const splitAreaEl = ref<HTMLElement | null>(null)
 const {

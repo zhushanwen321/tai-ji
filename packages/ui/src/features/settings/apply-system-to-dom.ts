@@ -11,7 +11,8 @@
  * - themePreset → <html data-theme-preset>（[data-theme-preset] 规则覆盖 --accent；cold-blue 与 :root 默认一致）
  * - fontSize → <html data-font-size>（[data-font-size] 规则调整基础字号，D17）
  * - fontScales → <html data-fs-sidebar/chat/drawer>（[data-fs-*] 规则映射 --font-scale-<region>，
- *   区域根节点 [data-fs-scope] 槽位重声明 --text-* 链实现分区缩放）
+ *   区域根节点 [data-fs-scope] 槽位重声明 --text-* 链实现分区缩放；chat scope 的语义挂点
+ *   = MessageStream 根 + btw composer 带，drawer 内嵌对话流随之跟 chat 档）
  * - locale → 经 deps.setLocale 注入（ui 不持有 i18n 全局实例，W4 壳传入真实 setLocale）
  *
  * SSR 守卫：typeof document === 'undefined' 时早返（不抛错），保证同构安全。

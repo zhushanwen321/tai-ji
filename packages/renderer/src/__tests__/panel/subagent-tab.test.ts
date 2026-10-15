@@ -145,6 +145,9 @@ describe('SubagentTab E-4 接入（entry 帧 + 恒订阅）', () => {
     // 的写入与 SubagentTab 的 useDrawerControl 读到同一分区（renderer 由 useSideDrawer 顶层
     // 绑 focusedSessionId，测试直连 core 域同款手法——panel-container-drawer-mode.test.ts 先例）
     bindDrawerSessionId(ref(MAIN_SID))
+    // [subagent-detail-tabs] drawer 二级 tab 分区键 = focusedSessionId（SubagentTab 消费）——
+    // 与 drawer 选中态分区同 sid 对齐（panel store loadSession 即真实 app 的 useSideDrawer 绑定面）
+    usePanelStore().loadSession(ROOT_PANEL_ID, MAIN_SID)
     vi.stubGlobal('ResizeObserver', NoopResizeObserver)
     HTMLElement.prototype.scrollTo = vi.fn()
     // records 预置（subagentMeta 标题栏读分区；不依赖 session.subagents 推送）
@@ -436,6 +439,8 @@ describe('SubagentTab U4：zcode 终态渲染 + 运行中 coarse 提示', () => 
     vi.clearAllMocks()
     _resetDrawerForTest()
     bindDrawerSessionId(ref(MAIN_SID))
+    // [subagent-detail-tabs] tab 分区键 = focusedSessionId（与 drawer 选中态分区同 sid）
+    usePanelStore().loadSession(ROOT_PANEL_ID, MAIN_SID)
     vi.stubGlobal('ResizeObserver', NoopResizeObserver)
     HTMLElement.prototype.scrollTo = vi.fn()
     useSubagentStore().applyRecords(MAIN_SID, [makeRecord()])
@@ -572,6 +577,8 @@ describe('SubagentTab 非 pi 终态回填（status watch，D2）', () => {
     vi.clearAllMocks()
     _resetDrawerForTest()
     bindDrawerSessionId(ref(MAIN_SID))
+    // [subagent-detail-tabs] tab 分区键 = focusedSessionId（与 drawer 选中态分区同 sid）
+    usePanelStore().loadSession(ROOT_PANEL_ID, MAIN_SID)
     vi.stubGlobal('ResizeObserver', NoopResizeObserver)
     HTMLElement.prototype.scrollTo = vi.fn()
     useSubagentStore().applyRecords(MAIN_SID, [makeRecord({ engine: 'zcode' })])
@@ -694,6 +701,8 @@ describe('SubagentTab [W0/V8] agentcall 标题 meta（findAgentCall 命中合并
     vi.clearAllMocks()
     _resetDrawerForTest()
     bindDrawerSessionId(ref(MAIN_SID))
+    // [subagent-detail-tabs] tab 分区键 = focusedSessionId（与 drawer 选中态分区同 sid）
+    usePanelStore().loadSession(ROOT_PANEL_ID, MAIN_SID)
     vi.stubGlobal('ResizeObserver', NoopResizeObserver)
     HTMLElement.prototype.scrollTo = vi.fn()
     // findAgentCall 读 panelStore.focusedSessionId（agentcall 两段式虚拟 id 不含 mainSid）

@@ -373,6 +373,26 @@ VITE_E2E=true VITE_MOCK=true pnpm run build:e2e
 
 **排障**：e2e/验收任务书含「无 error 级 console」字面判据时，命中本条按归因豁免（带保留通过），豁免须在验收记录留痕（归因 + 功能断言通过证据），禁止静默吞；功能断言同窗失败则不适用本条，按真实缺陷归因。
 
+### 29. 本地签名构建报 `invalid destination for symbolic link in bundle`
+
+**现象**：本地 `pnpm build` / `pnpm build:dir`（electron-builder + codesign）报 codesign `invalid destination for symbolic link in bundle`；CI 不受影响（走真实下载 + dereference 复制）。
+
+**判定**：worktree 的 `apps/electron/resources/pi/` 顶层条目是 git-cwt 创建 worktree 时 symlink 到 workspace 级缓存 `.pi-binary-cache/` 的 dev 提速形态；electron-builder 拷贝源是磁盘而非 git，按链接原样拷进 bundle 后 codesign 以「bundle 必须自包含」拒绝指向外部的链接。构建入口（`build:pre` 公共前置）与 preflight 检查 7 已挂 `scripts/check-pi-resources-links.mjs` 自动拦截，正常应在构建前就红并给恢复指引。
+
+**恢复**：
+
+```bash
+node scripts/check-pi-resources-links.mjs --fix   # 外部 symlink → 真实复制（递归实体化，修毕复检）
+```
+
+替换后重跑构建。下次 git-cwt 创建 worktree 会重建 symlink 形态，签名构建前检测会自动拦截并提示本命令；`--fix` 遇环形链接报错时按提示删除旧缓存目录后重跑 `scripts/prepare-pi-resources.sh`。
+
+### 30. updater-script-integration 测试偶发 waitFor 超时（S1「staging 主二进制就位」）
+
+**判定**：`apps/electron/main/test/updater-script-integration.test.ts` 的 waitFor 预算 = 30s（按 `TAIJI_WAIT_DEBUG=1` 实测耗时分布 2-6s 校准的 5x 上界，吸收系统瞬态尖峰；成本仅真死锁时失败报告晚到，成功路径立即返回）。超时错误消息携带实测等待时长，按它直接归因：贴近 30s = 系统级瞬态尖峰（hdiutil 排队/换页类外部负载），复跑即绿；数量级偏离（分钟级）= 真退化，查 hdiutil/磁盘/被测脚本变更，禁止直接放大预算。
+
+**观测**：`TAIJI_WAIT_DEBUG=1` 打印该文件每次 waitFor 的成功耗时。
+
 ## 环境变量速查
 
 | 变量 | 用途 | 生产默认值 | 开发默认值 |

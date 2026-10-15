@@ -30,12 +30,21 @@
  * 零第三方依赖。退出码：0 = 通过；1 = 存在 fail。提取失败一律 fail（宁可误报不可漏报，
  * 源文件形态变化时红灯提示人工同步）。
  */
-import { readFileSync, existsSync } from 'node:fs'
-import { dirname, join, resolve } from 'node:path'
-import { fileURLToPath, pathToFileURL } from 'node:url'
-import { fail, ok, isFailed, guardExit, reportSetCompare, setDiff } from './lib/guard-report.mjs'
+import { join } from 'node:path'
+import {
+  fail,
+  ok,
+  guardExit,
+  exitIfFailed,
+  readSourcesOrFail,
+  runSelfTest,
+  repoRootFrom,
+  isDirectRun,
+  reportSetCompare,
+  setDiff,
+} from './lib/guard-report.mjs'
 
-const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
+const ROOT = repoRootFrom(import.meta.url)
 const SYSTEM_PROMPT_SRC = join(ROOT, 'extensions', 'taiji', 'system-prompt', 'src', 'index.ts')
 const SANITIZE_SRC = join(ROOT, 'packages', 'ui', 'src', 'features', 'chat', 'markdown-sanitize.ts')
 
@@ -142,17 +151,10 @@ function attrMatches(entry, candidate) {
 }
 
 // ── --self-test：纯函数轻量自检（不触真实仓库文件）────────────────────
+// assert 骨架与尾部出口收敛在 scripts/lib/guard-report.mjs 的 runSelfTest；断言体按
+// 提取器组拆两函数（常量/对象字面量提取 / 差集与匹配语义）。
 
-function selfTest() {
-  const assert = (cond, name) => {
-    if (!cond) {
-      console.error(`  ✗ self-test: ${name}`)
-      process.exitCode = 1
-    } else {
-      console.log(`  ✓ self-test: ${name}`)
-    }
-  }
-
+function selfTestExtraction(assert) {
   const ts1 = `const ALLOWED_TAGS = [\n  'a', 'b', // 'x' 注释里的引号不算成员\n]`
   assert(
     JSON.stringify(extractArrayConst(ts1, 'ALLOWED_TAGS').values) === JSON.stringify(['a', 'b']),
@@ -179,38 +181,35 @@ function selfTest() {
     extractInitializer('const X: readonly string[] = someCall()', 'X').error !== undefined,
     '非字面量初始化报 error',
   )
+}
+
+function selfTestDiffSemantics(assert) {
   const d = setDiff(['a', 'b'], ['b', 'c'])
   assert(JSON.stringify(d.extra) === '["a"]' && JSON.stringify(d.missing) === '["c"]', 'setDiff 双向差异')
   assert(attrMatches('data-*', 'data-x') && !attrMatches('data-*', 'data') && attrMatches('class', 'class'), 'attrMatches 通配/精确')
-
-  if (process.exitCode === 1) {
-    console.error('capability-allowlist-sync self-test 未通过')
-    process.exit(1)
-  }
-  console.log('✓ capability-allowlist-sync self-test 全部通过')
-  process.exit(0)
 }
 
-if (process.argv.includes('--self-test')) selfTest()
+function selfTestCases(assert) {
+  selfTestExtraction(assert)
+  selfTestDiffSemantics(assert)
+}
+
+if (process.argv.includes('--self-test')) runSelfTest('capability-allowlist-sync', selfTestCases)
 
 // ── main()：CLI 直跑才执行 ──────────────────────────────────────────
 
-function readTextOrFail(filePath, label) {
-  if (!existsSync(filePath)) {
-    fail(`${label} 缺失: ${filePath}——恢复动作：确认文件未被移动 / 删除（迁移时同步本守卫路径）`)
-    return null
-  }
-  return readFileSync(filePath, 'utf-8')
-}
+// 呈报骨架（✓/✗ 行 + 失败旗标 + 汇总出口 + 源文件读取 + self-test 骨架）与 scripts 家族
+// 共享：scripts/lib/guard-report.mjs
 
 /**
  * 提取阶段：读两侧源文件 + 抽出全部比对面成员。任一提取失败 → ✗ 明细 + fail-fast
  * （提取失败一律 fail，宁可误报不可漏报）。返回值里的成员集全是已过提取的 values。
  */
 function extractInputsOrFail() {
-  const spText = readTextOrFail(SYSTEM_PROMPT_SRC, 'system-prompt 源文件')
-  const sanitizeText = readTextOrFail(SANITIZE_SRC, '渲染净化源文件')
-  if (spText === null || sanitizeText === null) process.exit(1)
+  const [spText, sanitizeText] = readSourcesOrFail([
+    [SYSTEM_PROMPT_SRC, 'system-prompt 源文件'],
+    [SANITIZE_SRC, '渲染净化源文件'],
+  ])
 
   // 权威侧（渲染管线真实白名单）
   const allowedTags = extractArrayConst(sanitizeText, 'ALLOWED_TAGS')
@@ -229,19 +228,13 @@ function extractInputsOrFail() {
   if (capTags.error) fail(`capability 标签清单提取失败: ${capTags.error}`)
   if (capAttrs.error) fail(`capability 属性清单提取失败: ${capAttrs.error}`)
   if (forbidden.error) fail(`capability 禁用清单提取失败: ${forbidden.error}`)
-  if (isFailed()) {
-    console.error('capability 清单对拍：提取阶段失败，按上方 ✗ 修复后重跑')
-    process.exit(1)
-  }
+  exitIfFailed('capability 清单对拍：提取阶段失败，按上方 ✗ 修复后重跑')
 
   const forbiddenTags = extractSubArrayLiterals(forbidden.text, 'tags')
   const forbiddenAttrs = extractSubArrayLiterals(forbidden.text, 'attributes')
   if (forbiddenTags.error) fail(`CAPABILITY_FORBIDDEN.tags 提取失败: ${forbiddenTags.error}`)
   if (forbiddenAttrs.error) fail(`CAPABILITY_FORBIDDEN.attributes 提取失败: ${forbiddenAttrs.error}`)
-  if (isFailed()) {
-    console.error('capability 清单对拍：禁用清单提取失败，按上方 ✗ 修复后重跑')
-    process.exit(1)
-  }
+  exitIfFailed('capability 清单对拍：禁用清单提取失败，按上方 ✗ 修复后重跑')
 
   return {
     sanitizeText,
@@ -366,5 +359,4 @@ function main() {
   )
 }
 
-const isMain = process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href
-if (isMain) main()
+if (isDirectRun(import.meta.url)) main()

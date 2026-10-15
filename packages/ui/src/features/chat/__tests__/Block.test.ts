@@ -1069,13 +1069,13 @@ describe('run 类型分组: Block 组块', () => {
     expect(doneHeader.find('[data-running-icon]').exists()).toBe(false)
   })
 
-  it('默认开合：组内有 running 成员 → 挂载即展开（成员行在场）；全已完成 → 挂载即收起', () => {
+  it('默认开合（2026-10-15 裁决 ①A）：挂载一律收起——running 组也不例外（成员行不在场，与回看形态一致）；用户点击才展开', () => {
     const running = mountRunGroup(makeRunGroupProp([
       makeToolCall({ id: 'b0', toolName: 'bash', input: { command: 'a' } }),
       makeToolCall({ id: 'b1', toolName: 'bash', input: { command: 'b' }, status: 'running' }),
     ]))
-    expect(running.find('[data-testid="run-group"]').findAll('.trace-blk').length).toBe(2)
-    expect(running.find('[data-testid="run-group-header"]').attributes('aria-expanded')).toBe('true')
+    expect(running.find('[data-testid="run-group"]').findAll('.trace-blk').length).toBe(0)
+    expect(running.find('[data-testid="run-group-header"]').attributes('aria-expanded')).toBe('false')
 
     const done = mountBashPairGroup()
     expect(done.find('[data-testid="run-group"]').findAll('.trace-blk').length).toBe(0)

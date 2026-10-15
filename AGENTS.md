@@ -188,7 +188,7 @@ cw testRunner 的 monorepo 坑已修复（wave design 填 `plan.testCwd: "<子�
 |------|---------|
 | `SKIP_ALL_CHECKS` | 总开关：pre-commit 全部检查 |
 | `SKIP_FRONTEND_LINT` | 前端 ESLint（renderer staged .vue/.ts） |
-| `SKIP_TYPE_CHECK` | 前端 vue-tsc 类型检查（全量 + 测试 tsconfig） |
+| `SKIP_TYPE_CHECK` | 前端 vue-tsc 类型检查（renderer/ui/mobile-renderer 三包全量 + renderer 测试 tsconfig） |
 | `SKIP_EXTENSION_LINT` | extensions ESLint/tsc/manifest/结构一致性/files 白名单四段（2b-2e 共用） |
 | `SKIP_CODE_RULES_CHECK` | vue_rules_checker 代码规范 + vitest 防线挂载检查（共用） |
 | `SKIP_SIDECAR_SESSION_CHECK` | Sidecar session 隔离检查 |

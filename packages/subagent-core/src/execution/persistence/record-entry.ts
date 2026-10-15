@@ -14,6 +14,7 @@
 //（连字符风格）；custom entry 由 pi 写进 session JSONL，不进 LLM context。
 
 import type { ExecutionOutcome, RecordOrigin, StopReason } from "../domain/record-types.ts";
+import type { SubagentModelSource } from "../domain/record-model.ts";
 
 /** 自描述 record entry 的 customType。写点字面量与本常量的等值由
  *  __tests__/record-store.test.ts 断言钉住（消费方引用本常量，勿用裸字符串）。
@@ -56,6 +57,8 @@ export interface SubagentRecordRegisteredEntryData {
   parentRunId?: string;
   /** origin="workflow" 时在 run 内的步骤索引（tool 来源缺省）。 */
   stepIndex?: number;
+  /** 派发期模型来源（engine-ref 时代的运行态展示面；缺席 = 存量/未知）。 */
+  modelSource?: SubagentModelSource;
   /** 根 session id（session 隔离过滤用）。 */
   rootSessionId: string;
   /** 直接父 record id（层级树构建用；顶层缺省）。 */
@@ -87,6 +90,8 @@ export interface SubagentRecordSettledEntryData {
   turns: number;
   totalTokens: number;
   model: string | undefined;
+  /** 派发期模型来源（record.modelSource 同域；缺席 = 存量/未知）。 */
+  modelSource?: SubagentModelSource;
   thinkingLevel: string | undefined;
   engine?: string;
   /**

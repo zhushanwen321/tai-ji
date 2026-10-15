@@ -32,6 +32,8 @@ vi.mock("../pure.js", async (importActual) => {
 import { callLLM, resolveModel } from "@zhushanwen/pi-llm-shared";
 
 import {
+	BUILTIN_TEMPLATES,
+	GENERIC_SYSTEM_PROMPT,
 	RENAME_INSTRUCTION,
 	RENAME_SYSTEM_PROMPT,
 	buildTitleMessages,
@@ -39,6 +41,7 @@ import {
 	extractFinalText,
 	extractUserPromptText,
 	isSubagentSession,
+	resolveTitlePrompt,
 	truncateForTitle,
 } from "../llm.js";
 import { cleanTitle, type RenameSessionConfig } from "../pure.js";
@@ -258,6 +261,44 @@ describe("RENAME_SYSTEM_PROMPT / RENAME_INSTRUCTION", () => {
 	});
 });
 
+// resolveTitlePrompt（rename-prompt-config 设计：风格 → 词表 / custom 自定义，system 骨架分流）
+// ────────────────────────────────────────────────────
+
+describe("resolveTitlePrompt", () => {
+	const baseCfg = { ...BASE_CONFIG };
+
+	it("slug/sentence/emoji → BUILTIN_TEMPLATES 词表 + slug systemPrompt", () => {
+		expect(resolveTitlePrompt({ ...baseCfg, style: "slug" })).toEqual({
+			systemPrompt: RENAME_SYSTEM_PROMPT,
+			instruction: RENAME_INSTRUCTION,
+		});
+		expect(resolveTitlePrompt({ ...baseCfg, style: "sentence" }).instruction).toBe(BUILTIN_TEMPLATES.sentence);
+		expect(resolveTitlePrompt({ ...baseCfg, style: "emoji" }).instruction).toBe(BUILTIN_TEMPLATES.emoji);
+		// 非 custom 风格的 system 恒为 slug 版（词表与 slug 约束自洽）
+		expect(resolveTitlePrompt({ ...baseCfg, style: "sentence" }).systemPrompt).toBe(RENAME_SYSTEM_PROMPT);
+	});
+
+	it("custom 且指令非空 → 自定义指令 + GENERIC_SYSTEM_PROMPT（风格权威 = 用户指令）", () => {
+		const r = resolveTitlePrompt({ ...baseCfg, style: "custom", customInstruction: "生成不超过 12 字的中文标题" });
+		expect(r.instruction).toBe("生成不超过 12 字的中文标题");
+		expect(r.systemPrompt).toBe(GENERIC_SYSTEM_PROMPT);
+	});
+
+	it("custom 但指令为空/全空白 → 回落 slug 默认（「空 = 内置默认」语义）", () => {
+		const r = resolveTitlePrompt({ ...baseCfg, style: "custom", customInstruction: "   " });
+		expect(r.instruction).toBe(RENAME_INSTRUCTION);
+		expect(r.systemPrompt).toBe(RENAME_SYSTEM_PROMPT);
+	});
+
+	it("内置词表非空且含「只输出标题文本」输出契约（防模板回归退化为空串）", () => {
+		for (const t of Object.values(BUILTIN_TEMPLATES)) {
+			expect(t.length).toBeGreaterThan(0);
+			expect(t).toContain("只输出标题文本");
+		}
+		expect(GENERIC_SYSTEM_PROMPT).toContain("只输出标题文本");
+	});
+});
+
 // ────────────────────────────────────────────────────
 // 空 ref fallback（空 ref → ctx.model 跟随会话主模型；非空无效 ref → 静默跳过 + warn）
 // ────────────────────────────────────────────────────
@@ -395,6 +436,8 @@ const BASE_CONFIG: RenameSessionConfig = {
 	mode: "first-stop",
 	maxTitleLength: 50,
 	thinkingLevel: "off",
+	style: "slug",
+	customInstruction: "",
 };
 
 /** 触发 turn 的最终 assistant message（turn_end 的 event.message）——thinking 混排验证只取 text。 */

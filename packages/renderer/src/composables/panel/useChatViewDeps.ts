@@ -25,7 +25,6 @@
  * - renderMarkdownSegments（@taiji/ui/features/chat/markdown，D10 渲染链下沉，含 shiki 高亮 +
  *   路径链接化 + copyLabel 文案注入）→ renderMarkdown
  * - renderMermaid（@taiji/ui/features/chat/mermaid）→ renderMermaid
- * - assistantToMarkdown（messageFormat.ts）→ toMarkdown
  */
 import { computed, onScopeDispose, ref, watch, type ComputedRef, type Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -58,7 +57,6 @@ import {
   STREAMING_FENCE_SILENCE_MS,
 } from '@taiji/ui/features/chat/markdown-incremental'
 import { renderMermaid } from '@taiji/ui/features/chat/mermaid'
-import { assistantToMarkdown } from '@/composables/logic/messageFormat'
 import { collectBasenames, collectFilePaths } from '@/lib/file-basename'
 import { localFileRead, localFileServable } from '@/lib/ipc'
 
@@ -332,7 +330,6 @@ export function useChatViewDeps(
     },
     streamingFenceSilenceMs: STREAMING_FENCE_SILENCE_MS,
     renderMermaid: (source: string, theme: 'dark' | 'light') => renderMermaid(source, theme),
-    toMarkdown: (msg: Message): string => assistantToMarkdown(msg),
 
     // [tool-detail-rich] 工具展开细节富渲染（read 代码块 / write git diff / edit patch）：
     // renderer 实现（复用 DiffView/parseDiff/extToLang/gitApi），ui 只路由；optional 字段，

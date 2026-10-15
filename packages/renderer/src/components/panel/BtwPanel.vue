@@ -154,7 +154,10 @@
              按 vid 路由本面板，主视图三模态面零浮出）。Guard 为无 DOM 渲染哨兵，包全部
              风险渲染——异常由 onErrorCaptured 在本组件收口（return false 不外溢主面板，
              P2 隔离），错误条 + 重试在 Guard 外恒可达。 -->
-        <div v-if="selectedVid" :class="COMPOSER_BAND_CLASS" data-testid="btw-interaction">
+        <!-- composer 带跟 chat 档位（chat-font-scope）：主面板 composer 恒在 main-area
+             chat scope 内，btw 线的 composer + 内联确认条同语义（对话流配套输入区，
+             非 drawer chrome）——上方 MessageStream 已自挂同款 scope。 -->
+        <div v-if="selectedVid" :class="COMPOSER_BAND_CLASS" data-fs-scope="chat" data-testid="btw-interaction">
           <BtwInteractionGuard :key="interactionKey">
             <!-- 终态机失效支行内提示（失效支单入口 invalidateBtwRequests——事件帧一路：badge 清 + 表单撤下 + 本提示同拍收口，D-B2-3） -->
             <div v-if="expiredNotice" class="flex items-center gap-1.5 rounded bg-danger-soft px-2.5 py-1.5 text-[length:var(--text-2xs)] text-danger" data-testid="btw-request-expired">
@@ -162,15 +165,9 @@
               <span>{{ t('btw.interaction.expiredNotice') }}</span>
               <Button variant="ghost" class="ml-auto h-5 shrink-0 rounded px-1.5 text-[length:var(--text-2xs)]" data-testid="btw-request-expired-dismiss" @click="dismissExpired">{{ t('btw.interaction.dismissExpired') }}</Button>
             </div>
-            <!-- 第四面状态区（非模态 extension GUI：setStatus/setWidget 的 per-session 源
-                 读 vid 分区，不落主视图 chrome；toolbar/tab-bar 无 session 帧不在路由面） -->
-            <div v-if="statusEntries.length > 0 || widgetLines.length > 0" class="flex flex-wrap items-center gap-x-3 gap-y-1 rounded bg-surface-hover px-2.5 py-1 text-[length:var(--text-2xs)] text-neutral-dim" data-testid="btw-status-strip">
-              <span v-for="item in statusEntries" :key="item.id" class="flex items-center gap-1" :title="item.tooltip" data-testid="btw-status-item">
-                <i v-if="item.status" class="inline-block size-[5px] rounded-full" :class="statusDotClass(item.status)" />
-                {{ item.text }}
-              </span>
-              <span v-for="(line, i) in widgetLines" :key="`w-${i}`" class="font-mono" data-testid="btw-widget-line">{{ line }}</span>
-            </div>
+            <!-- [状态区退役 2026-10-15 用户裁决] btw 状态区不再渲染 extension GUI 第四面内容
+                 （setStatus/setWidget per-session 源）——btw 线是轻量旁路问答，扩展状态行
+                 （如 todo 扩展的「N/N 全部完成」行）在这里只余噪音；主面板托盘形态不受影响。 -->
             <!-- 内联确认条（五类请求共用；kind 分派，降档形态见 useBtwInteraction 文件头） -->
             <div v-if="active" class="overflow-hidden rounded-lg bg-bg-input" data-testid="btw-inline-confirm">
               <!-- plan 审批降档：三键（修订/执行/搁置）+ 单行意见——键集对齐主审批面
@@ -455,15 +452,13 @@ const {
   cancelActive,
 } = useBtwInteraction(selectedVid)
 
-// ── M3-c：失效提示 / 第四面状态区 / 运行期错误边界（编排下沉 useBtwPanelSurface，
+// ── M3-c：失效提示 / 运行期错误边界（编排下沉 useBtwPanelSurface，
 //    规则：全部风险渲染在 Guard slot 内求值，异常由 surface 注册的 onErrorCaptured 在
-//    本组件收口 return false 不外溢主面板；MessageStream/Composer 不在 Guard 内不受影响）──
+//    本组件收口 return false 不外溢主面板；MessageStream/Composer 不在 Guard 内不受影响；
+//    第四面状态区已随 2026-10-15 用户裁决移除，Guard slot 仅余失效提示 + 内联确认条）──
 const {
   expiredNotice,
   dismissExpired,
-  statusEntries,
-  widgetLines,
-  statusDotClass,
   interactionError,
   interactionKey,
   retryInteraction,

@@ -654,8 +654,9 @@ describe("parseWorkflowDag（scriptSource → WorkflowDag，设计 §3.1-3）", 
       // fast（自带 agent 调用 + 调用候选 grade，span 最小先评估）依赖 grade 录取 → 拒；
       // grade 录取且实现点抑制。判别断言：无 fast("a") 调用点的幻影投影节点（旧代码
       // 在此产 ["a","评审"]；命运循环下两节点均为缺省分区通配——fast 体内自身派发点
-      // 词法收口 + 体内 grade 派发点投影）
-      expectRejectedProjection(dag, 2, { absentTemplateName: "a" });
+      // 词法收口 + 体内 grade 派发点投影）；两实现点同 (缺省分区, '*') 按不可区分
+      // 调用点合并收口为单节点
+      expectRejectedProjection(dag, 1, { absentTemplateName: "a" });
     });
 
     it("候选互调环：命运循环停滞残留全拒（实现点词法收口，调用点零投影）", () => {
@@ -666,8 +667,9 @@ describe("parseWorkflowDag（scriptSource → WorkflowDag，设计 §3.1-3）", 
         `await a("q");`,
       ].join("\n"));
       // a/b 互调（各含自身 agent 调用，均为合格候选）→ 互为未结算依赖 → 停滞 → 全拒；
-      // 实现点词法收口（2 节点，phase("P") 前 → 缺省分区）；a("q") 调用点不产节点
-      expectRejectedProjection(dag, 2, { absentTemplateName: "q" });
+      // 实现点词法收口（phase("P") 前 → 缺省分区）；a("q") 调用点不产节点；两实现点
+      // 同 (缺省分区, '*') 按不可区分调用点合并收口为单节点
+      expectRejectedProjection(dag, 1, { absentTemplateName: "q" });
     });
 
     it("同名多候选声明：全部不投影（实现点保持词法收口）", () => {
@@ -677,8 +679,9 @@ describe("parseWorkflowDag（scriptSource → WorkflowDag，设计 §3.1-3）", 
         `phase("P");`,
         `await h("x");`,
       ].join("\n"));
-      // 两个 h 声明均不录取 → 实现点按词法收口（两节点，均在 phase("P") 之前）；h("x") 调用点不产节点
-      expectRejectedProjection(dag, 2, { everyTemplateName: "*" });
+      // 两个 h 声明均不录取 → 实现点按词法收口（均在 phase("P") 之前）；h("x") 调用点
+      // 不产节点；两实现点同 (缺省分区, '*') 按不可区分调用点合并收口为单节点
+      expectRejectedProjection(dag, 1, { everyTemplateName: "*" });
     });
 
     it("helper 套 helper：内层投影、外层让位（外层体内对内层的调用仍投影，外层调用点不产节点）", () => {
@@ -730,6 +733,88 @@ describe("parseWorkflowDag（scriptSource → WorkflowDag，设计 §3.1-3）", 
         ["fixed", WORKFLOW_DAG_DEFAULT_PHASE],
         ["z", "P"],
       ]);
+    });
+  });
+
+  describe("不可区分调用点合并（同 phase + 同模板 + 同 kind → 代表节点）", () => {
+    it("helper 双调用点（派发 + 原位重试形态）同 phase 同为通配模板 → 合并为单节点（消除 D2 歧义互毒）", () => {
+      const dag = parseValidatedDag([
+        `function dispatch(call, label) {`,
+        `  return agent(call);`,
+        `}`,
+        `phase("Review");`,
+        `const a = dispatch(callA, "x");`,
+        `const b = dispatch(callB, "y");`,
+      ].join("\n"));
+      // 两投影均不可得名（第一实参标识符）→ 双 '*' 保留只会让全部实例歧义进未匹配
+      expect(dag.nodes.length).toBe(1);
+      expect(dag.nodes[0]?.templateName).toBe("*");
+      expect(dag.nodes[0]?.phase).toBe("Review");
+      // 代表 = 最前行号者（a 先于 b）
+      expect(dag.nodes[0]?.line).toBeLessThan(6);
+      // 合并后前向边重映射不产自环（两调用点间的 sequence 边 rep→rep 必须被滤除）
+      expect(dag.edges.filter((e) => e.from === e.to)).toHaveLength(0);
+    });
+
+    it("循环体整体合并为单节点 → 回边成自环，随配对 loop 条目一并剔除（不孤儿化 backEdgeId）", () => {
+      const dag = parseValidatedDag([
+        `while (round < limit) {`,
+        `  await agent({ prompt: "a", description: "worker" });`,
+        `  await agent({ prompt: "b", description: "worker" });`,
+        `  round++;`,
+        `}`,
+      ].join("\n"));
+      expect(dag.nodes).toHaveLength(1);
+      // 自环回边剔除 + 引用它的 loop 条目同步剔除——结构不变量（回边必被 loop 引用 /
+      // loop.backEdgeId 必有对应边）双侧守恒
+      expect(dag.edges.filter((e) => e.from === e.to)).toHaveLength(0);
+      expect(dag.edges.filter((e) => e.kind === "loop-back")).toHaveLength(0);
+      expect(dag.loops).toHaveLength(0);
+    });
+
+    it("同 phase 同字面模板（aggregate ×2）→ 合并；数据流边重映射到代表并去重", () => {
+      const dag = parseValidatedDag([
+        `phase("Aggregate");`,
+        `const a = await agent({ prompt: "p", description: "aggregate" });`,
+        `const b = await agent({ prompt: "q", description: "aggregate" });`,
+        `const c = await agent({ prompt: "c", description: "finalize", extra: a + b });`,
+      ].join("\n"));
+      expect(dag.nodes.map((n) => n.templateName)).toEqual(["aggregate", "finalize"]);
+      // a、b 合并后两条 (rep→finalize) 数据流候选收口为一条
+      const repId = dag.nodes[0]?.id;
+      const forward = dag.edges.filter((e) => e.kind === "dataflow");
+      expect(forward).toHaveLength(1);
+      expect(forward[0]?.from).toBe(repId);
+      expect(forward[0]?.to).toBe(dag.nodes[1]?.id);
+    });
+
+    it("不同 phase 同模板 / 同 phase 不同模板 → 不合并（可区分调用点保持一节点一调用点）", () => {
+      const crossPhase = parseValidatedDag([
+        `phase("R1");`,
+        `await agent({ prompt: "p", description: "review" });`,
+        `phase("R2");`,
+        `await agent({ prompt: "p", description: "review" });`,
+      ].join("\n"));
+      expect(crossPhase.nodes.length).toBe(2);
+      const samePhaseDiffTemplate = parseValidatedDag([
+        `phase("P");`,
+        `await agent({ prompt: "p", description: "review" });`,
+        `await agent({ prompt: "p", description: "fix" });`,
+      ].join("\n"));
+      expect(samePhaseDiffTemplate.nodes.length).toBe(2);
+    });
+
+    it("并行组成员 id 重映射去重（结构不变量由 parseValidatedDag 守恒）", () => {
+      const dag = parseValidatedDag([
+        `phase("P");`,
+        `await parallel([`,
+        `  agent({ prompt: "1", description: "dup" }),`,
+        `  agent({ prompt: "2", description: "dup" }),`,
+        `]);`,
+      ].join("\n"));
+      expect(dag.nodes.length).toBe(1);
+      expect(dag.parallelGroups).toHaveLength(1);
+      expect(dag.parallelGroups[0]?.nodeIds).toEqual([dag.nodes[0]?.id]);
     });
   });
 });

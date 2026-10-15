@@ -68,6 +68,51 @@ function isValidPort(port: unknown): port is number {
 }
 
 /**
+ * 读登记候选文件。缺失（ENOENT，含父目录未建）是设计内常态——首启无登记、正常退出/
+ * 骤死残留刻意不清理（由「pid 已死 → stale 放行接管」语义消化）——故按 null 正常返回，
+ * 不走异常通道不产生留痕。非 ENOENT 读取异常（EACCES 等退化形态）留痕后同样按无候选
+ * 继续：文件是 probe 的候选来源而非权威（端口探活才是判定），不因读文件失败阻塞启动。
+ */
+function readCandidateText(file: string, label: string): string | null {
+  try {
+    return readFileSync(file, 'utf-8')
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null
+    console.debug(`[runtime] single-instance guard: read ${label} failed (treated as absent):`, err)
+    return null
+  }
+}
+
+/**
+ * 候选收集：本机制登记（instance.json，优先——含 pid 可直接定位持有者）+ Electron supervisor
+ * 通道（兼容未写登记文件的旧版/安装版实例），同端口去重（instance.json 先到先占）。
+ */
+function collectCandidates(
+  dataDir: string,
+): Map<number, { pid?: number; source: 'runtime-instance.json' | 'runtime.port' }> {
+  const candidates = new Map<number, { pid?: number; source: 'runtime-instance.json' | 'runtime.port' }>()
+  // 候选 1：本机制登记（缺失 = 首启/清理后，常态静默；损坏 = 异常态，留痕但不阻塞）
+  const instanceRaw = readCandidateText(path.join(dataDir, RUNTIME_INSTANCE_FILE), 'runtime-instance.json')
+  if (instanceRaw !== null) {
+    try {
+      const raw = JSON.parse(instanceRaw) as Partial<RuntimeInstanceRecord>
+      if (isValidPort(raw.port)) candidates.set(raw.port, { pid: typeof raw.pid === 'number' ? raw.pid : undefined, source: 'runtime-instance.json' })
+    } catch (error) {
+      // 降级策略：best-effort 解析——损坏文件按无候选继续（文件是 probe 候选来源而非
+      // 权威，端口探活才是判定），留痕后不阻塞启动。
+      console.debug('[runtime] single-instance guard: runtime-instance.json corrupt (treated as absent):', error)
+    }
+  }
+  // 候选 2：Electron supervisor 通道（兼容未写登记文件的旧版/安装版实例）
+  const portRaw = readCandidateText(path.join(dataDir, SUPERVISOR_PORT_FILE), 'runtime.port')
+  if (portRaw !== null) {
+    const parsed = parseInt(portRaw.trim(), 10)
+    if (isValidPort(parsed) && !candidates.has(parsed)) candidates.set(parsed, { source: 'runtime.port' })
+  }
+  return candidates
+}
+
+/**
  * 探活同数据目录是否已有活 runtime 实例。
  *
  * @param dataDir 数据目录（getDataDir() 结果）
@@ -80,23 +125,7 @@ export async function probeSingleInstance(
 ): Promise<InstanceGuardProbeResult> {
   const isReachable = deps.isPortReachable ?? defaultIsPortReachable
   const isPidAlive = deps.isPidAlive ?? defaultIsPidAlive
-  // 候选按优先级收集（instance.json 优先——含 pid 可直接定位持有者）；同端口去重。
-  const candidates = new Map<number, { pid?: number; source: 'runtime-instance.json' | 'runtime.port' }>()
-  try {
-    const raw = JSON.parse(readFileSync(path.join(dataDir, RUNTIME_INSTANCE_FILE), 'utf-8')) as Partial<RuntimeInstanceRecord>
-    if (isValidPort(raw.port)) candidates.set(raw.port, { pid: typeof raw.pid === 'number' ? raw.pid : undefined, source: 'runtime-instance.json' })
-  } catch (error) {
-    // 降级策略：文件不存在/损坏是常态（正常退出不清理），debug 级留痕后按无候选继续——文件非权威
-    console.debug('[runtime] single-instance guard: read runtime-instance.json failed (treated as absent):', error)
-  }
-  try {
-    const parsed = parseInt(readFileSync(path.join(dataDir, SUPERVISOR_PORT_FILE), 'utf-8').trim(), 10)
-    if (isValidPort(parsed) && !candidates.has(parsed)) candidates.set(parsed, { source: 'runtime.port' })
-  } catch (error) {
-    // 同上：文件非权威，缺失/损坏不阻塞启动
-    console.debug('[runtime] single-instance guard: read runtime.port failed (treated as absent):', error)
-  }
-  for (const [port, meta] of candidates) {
+  for (const [port, meta] of collectCandidates(dataDir)) {
     if (await isReachable(port)) {
       return { blocked: true, holder: { port, pid: meta.pid, source: meta.source, reachable: true } }
     }

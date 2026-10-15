@@ -27,6 +27,8 @@ import {
   type SubagentRecordSettledEntryData,
 } from "../persistence/record-entry.ts";
 import type { SubagentRecord } from "../assembly/types.ts";
+import type { ExecutionRecord } from "../domain/record-model.ts";
+import { buildCreatedEventPayload, toRegisteredEntryData, toSettledEntryData } from "../persistence/record-entry-write.ts";
 import { v2Entries, v2RegisteredEntry, v2SettledEntry } from "./helpers/v2-record-entry.ts";
 
 /** 最小合法 SubagentRecord（缺省 = tool 来源、未收口）。 */
@@ -298,5 +300,81 @@ describe("classifySubagentRecordEntryData（v2-only）", () => {
     });
     expect(classifySubagentRecordEntryData({ v: 3 })).toEqual({ ok: false, reason: "future-v" });
     expect(classifySubagentRecordEntryData({ v: "1" })).toEqual({ ok: false, reason: "future-v" });
+  });
+});
+
+// ── [subagent-detail-model-info] modelSource 写面（直测生产写侧——测试播种 helper
+//    v2-record-entry 不投影该字段，绕开以锁生产行为）─────────────────────────────
+describe("modelSource 写面：注册/终态条目与 created 帧同域投影", () => {
+  it("注册条目：modelSource 在场落键 + 缺省不落键", () => {
+    const entry = toRegisteredEntryData({
+      id: "sa-1",
+      agent: "worker",
+      task: "t",
+      slug: "worker",
+      depth: 0,
+      startedAt: 1000,
+      modelSource: "explicit",
+    });
+    expect(entry.modelSource).toBe("explicit");
+    const revived = JSON.parse(serialize(entry)) as Record<string, unknown>;
+    expect(revived.modelSource).toBe("explicit");
+
+    const noSource = toRegisteredEntryData({
+      id: "sa-2",
+      agent: "worker",
+      task: "t",
+      slug: "worker",
+      depth: 0,
+      startedAt: 1000,
+    });
+    expect("modelSource" in noSource).toBe(false);
+  });
+
+  it("终态条目：SettledEntrySource → 条目投影（缺省不落键）", () => {
+    const entry = toSettledEntryData(
+      {
+        id: "sa-1",
+        status: "idle",
+        turnCount: 1,
+        totalTokens: 42,
+        model: "prov/m1",
+        modelSource: "preference",
+        thinkingLevel: undefined,
+      },
+      2000,
+    );
+    expect(entry.modelSource).toBe("preference");
+    const revived = JSON.parse(serialize(entry)) as Record<string, unknown>;
+    expect(revived.modelSource).toBe("preference");
+
+    const noSource = toSettledEntryData(
+      {
+        id: "sa-2",
+        status: "idle",
+        turnCount: 0,
+        totalTokens: 0,
+        model: undefined,
+        thinkingLevel: undefined,
+      },
+      2000,
+    );
+    expect("modelSource" in noSource).toBe(false);
+  });
+
+  it("created 帧载荷：modelSource 同域（与 model/thinkingLevel 同款缺省不落键）", () => {
+    const payload = buildCreatedEventPayload({
+      startedAt: 1000,
+      id: "sa-1",
+      agent: "worker",
+      task: "t",
+      slug: "worker",
+      origin: "tool",
+      rootSessionId: "root",
+      depth: 0,
+      mode: "background",
+      modelSource: "frontmatter",
+    } as unknown as ExecutionRecord);
+    expect((payload as Record<string, unknown>).modelSource).toBe("frontmatter");
   });
 });

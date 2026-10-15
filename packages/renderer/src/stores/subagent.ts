@@ -23,7 +23,7 @@
  * 现有 import 路径向后兼容。
  */
 import { defineStore } from 'pinia'
-import { computed, getCurrentScope, onScopeDispose } from 'vue'
+import { computed, getCurrentScope, onScopeDispose, reactive } from 'vue'
 import type { ComputedRef } from 'vue'
 import type { SubagentRecord, Message } from '@taiji/shared'
 import { subagentVirtualId } from '@taiji/shared'
@@ -227,10 +227,58 @@ export const useSubagentStore = defineStore('subagent', () => {
     partition.apply(sessionId, list)
   }
 
+  // ── drawer subagent 二级 tab 状态（subagent-detail-tabs 2026-10-15）──
+  /**
+   * 按 sessionId 分区的 drawer 二级 tab 状态（打开过的 subagent 虚拟 id 列表 + 激活者）。
+   * SubagentTab 组件随 drawer 类型 tab 切换卸载，状态必须活在 store（ADR-0049 Map 分区派）；
+   * deleteSession 经 clearSession 精确释放。tab 序 = 打开序；激活者关闭时激活右邻/左邻
+   * （DetailPane 多文件 tab 同款编排）。
+   */
+  const drawerTabs = reactive(new Map<string, { tabs: string[]; active: string | null }>())
+
+  /** 分区读取（惰性建默认空分区；响应式——组件 computed 直接消费）。 */
+  function drawerTabsOf(sessionId: string): { tabs: string[]; active: string | null } {
+    let entry = drawerTabs.get(sessionId)
+    if (entry === undefined) {
+      entry = { tabs: [], active: null }
+      drawerTabs.set(sessionId, entry)
+    }
+    return entry
+  }
+
+  /** 打开 tab（已存在仅激活——选中态入口与 tab 点击共用，幂等）。 */
+  function openDrawerTab(sessionId: string, virtualId: string): void {
+    const entry = drawerTabsOf(sessionId)
+    if (!entry.tabs.includes(virtualId)) entry.tabs.push(virtualId)
+    entry.active = virtualId
+  }
+
+  /** 切换激活 tab（仅已打开者有效）。 */
+  function activateDrawerTab(sessionId: string, virtualId: string): void {
+    const entry = drawerTabsOf(sessionId)
+    if (entry.tabs.includes(virtualId)) entry.active = virtualId
+  }
+
+  /**
+   * 关闭 tab；激活者关闭时激活右邻/左邻。返回关闭后的激活 vid（无 tab 剩余 = null，
+   * 调用方据此停流 + 回空态）。
+   */
+  function closeDrawerTab(sessionId: string, virtualId: string): string | null {
+    const entry = drawerTabsOf(sessionId)
+    const idx = entry.tabs.indexOf(virtualId)
+    if (idx === -1) return entry.active
+    entry.tabs.splice(idx, 1)
+    if (entry.active === virtualId) {
+      entry.active = entry.tabs[Math.min(idx, entry.tabs.length - 1)] ?? null
+    }
+    return entry.active
+  }
+
   /** 清除指定 session 的 subagent 列表分区（deleteSession 调，防泄漏，ADR-0049 AC-8） */
   function clearSession(sessionId: string): void {
     partition.clear(sessionId)
     loadState.clear(sessionId)
+    drawerTabs.delete(sessionId)
   }
 
   /**
@@ -449,6 +497,11 @@ export const useSubagentStore = defineStore('subagent', () => {
     hasRunning,
     applyRecords,
     clearSession,
+    // drawer 二级 tab 状态（subagent-detail-tabs）
+    drawerTabsOf,
+    openDrawerTab,
+    activateDrawerTab,
+    closeDrawerTab,
     // actions
     loadSubagents,
     clearSubagents,

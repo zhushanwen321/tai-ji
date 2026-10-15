@@ -8,7 +8,8 @@
 # 4. electron-builder.yml 结构完整性
 # 5. artifactName 固定名检查（不含 ${version}，支持自动升级 + releases/latest/download 静态 URL）
 # 6. asarUnpack 与 files 一致性（防止 files 排除 dist/runtime）
-# 7. resources/pi 无指向外部绝对路径的 symlink
+# 7. resources/pi 无外部 symlink（含 gitignored 的 dev 缓存链接——electron-builder 从磁盘拷贝，
+#    gitignored 不豁免；逻辑单一源 = scripts/check-pi-resources-links.mjs）
 # 8. 磁盘空间
 # 9. extension-dependencies.json 一致性
 # 10. Provider 凭据读取单通道守卫（C-proc-14/15，runtime 源码约束）
@@ -243,33 +244,15 @@ if [ -f "$EB_YML" ]; then
 fi
 
 # ── 7. resources/pi symlink 检查 ───────────────────────────────────
-# 仅检查 git 跟踪的 symlink（会进产物，危险）。
-# .gitignore 忽略的 symlink 是 setup-worktree.sh 创建的 workspace 共享缓存
-# （指向 .pi-binary-cache/），不进 git，CI 由 prepare-pi-resources.sh 重新准备。
+# 逻辑单一源 = scripts/check-pi-resources-links.mjs（build 脚本链最前也挂同一脚本）。
+# [HISTORICAL] 此处曾有「git check-ignore 命中的 symlink 跳过」豁免——其假设
+# （gitignored 的 dev 缓存 symlink「不进 git，非打包风险」）是错的：electron-builder
+# extraResources 从磁盘拷贝而非 git，gitignored symlink 恰是本地打包的头号风险源
+# （2026-10 codesign 构建事故，判定与恢复见 docs/TROUBLESHOOTING.md 常见问题 §29）。
 echo ""
 echo -e "${BLUE}[7/10] resources/pi symlink check...${NC}"
-
-PI_RES_DIR="$ELECTRON_DIR/resources/pi"
-SYMLINK_FOUND=false
-if [ -d "$PI_RES_DIR" ]; then
-    while IFS= read -r link; do
-        # 跳过 .gitignore 忽略的 dev 缓存 symlink（不进 git，非打包风险）
-        if git check-ignore -q "$link" 2>/dev/null; then
-            continue
-        fi
-        target=$(readlink "$link")
-        echo -e "  ${RED}✗${NC} 发现 symlink: $(basename "$link") -> $target"
-        SYMLINK_FOUND=true
-    done < <(find "$PI_RES_DIR" -maxdepth 1 -type l 2>/dev/null)
-fi
-
-if [ "$SYMLINK_FOUND" = true ]; then
-    echo -e "  ${RED}✗ resources/pi 中存在 symlink，打包后目标路径在用户机器上不存在${NC}"
-    echo -e "  ${YELLOW}  FIX: 用真实目录替换 symlink：cd $PI_RES_DIR && for l in \$(find . -maxdepth 1 -type l); do t=\$(readlink \$l); rm \$l; cp -R \"\$t\" \$(basename \$l); done${NC}"
-    FAILED=1
-else
-    echo -e "  ${GREEN}✓ resources/pi 无 symlink${NC}"
-fi
+PI_LINK_CHECK="$(to_native_path "$PROJECT_ROOT/scripts/check-pi-resources-links.mjs")"
+node "$PI_LINK_CHECK" || FAILED=1
 
 # ── 8. 磁盘空间检查 ────────────────────────────────────────────────
 echo ""

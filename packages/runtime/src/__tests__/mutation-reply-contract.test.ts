@@ -277,6 +277,22 @@ const MUTATION_RPC_REGISTRY: readonly MutationRegistryEntry[] = [
     effectiveFields: ['mode'],
   },
   {
+    // rename-prompt-config：style 非法归一 slug / instruction 超长截断（helper 层），reply 读回归一生效值
+    type: 'config.setRenamePrompt',
+    branch: 'verbatim',
+    contract: 'echo-value',
+    replyKey: 'config.renamePrompt',
+    effectiveFields: ['style', 'instruction'],
+  },
+  {
+    // rename-prompt-config：正整数归一（非法回默认 50），reply 读回生效值
+    type: 'config.setRenameMaxLength',
+    branch: 'verbatim',
+    contract: 'echo-value',
+    replyKey: 'config.renameMaxLength',
+    effectiveFields: ['maxLength'],
+  },
+  {
     type: 'config.setSmartContextEnabled',
     branch: 'verbatim',
     contract: 'echo-value',

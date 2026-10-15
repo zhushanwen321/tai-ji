@@ -4,7 +4,7 @@
     [W28/D-7.2] 树形递归渲染 → 扁平可见行（projectVisibleRows）+ virtua 虚拟滚动：
     - 树数据仍是 SSOT（fileTreeStore 4 facet 不变），本组件持有唯一「树→可见行」投影 computed
     - FileTreeRow 改纯行组件（收 VisibleRow），展开/选中交互在本层编排（useFileTree + useSideDrawer）
-    - 头部（session label + showIgnored 开关）与过滤框移到滚动区外固定——virtua Virtualizer 要求
+    - 头部（session label）与过滤框移到滚动区外固定——virtua Virtualizer 要求
       其 parentElement 即滚动容器且前方无内容（startMargin 动态高度脆弱），过滤器固定可见
       （旧版头部随树滚动，属 D-7.2 结构改动的刻意取舍）
     - 万级目录展开只挂载视口 ± 缓冲的行（探针 P-D7-1：5000 文件目录 DOM 行数 < 200）
@@ -27,21 +27,8 @@
       <div v-if="branch" class="mt-0.5 truncate font-mono text-[length:var(--text-2xs)] text-neutral-fg-2">{{ branch }}</div>
     </div>
 
-    <!-- fv-tools（demo 形态）：忽略项开关 + 过滤框同一行（gap 6px）。内缩 = 根 6px + px-[10px] = 16px 阶梯档。 -->
+    <!-- fv-tools（demo 形态）：过滤框行（原忽略项开关随全量显示裁决退役，2026-10-15）。内缩 = 根 6px + px-[10px] = 16px 阶梯档。 -->
     <div class="flex items-center gap-[6px] px-[10px] pb-[8px]">
-      <Button
-        variant="ghost"
-        class="h-[24px] shrink-0 gap-1 rounded-sm px-[7px] text-[length:var(--text-2xs)] [&_svg]:size-[15px]"
-        :class="store.showIgnored ? 'text-accent' : 'text-neutral-dim'"
-        :title="store.showIgnored ? t('sidebar.fileView.hideIgnored') : t('sidebar.fileView.showIgnored')"
-        :aria-pressed="store.showIgnored"
-        data-testid="file-show-ignored-toggle"
-        @click="onToggleShowIgnored"
-      >
-        <EyeOff v-if="store.showIgnored" />
-        <Eye v-else />
-        <span>{{ t('sidebar.fileView.ignoredItem') }}</span>
-      </Button>
       <!-- 过滤框（demo .fv-filter）：左 7px 12px 图标 + h-6 凹陷输入（bg-input/hairline 边）。
            容器即 input 高度，图标直接 top-1/2 居中。Input 原语默认 rounded-md(8px)/
            placeholder mid/border-input(0.07)，此处覆写为 demo 值（r-sm 6px / dim / hairline 0.05）。 -->
@@ -91,8 +78,7 @@
       <!-- 空态两分支（E7-c：投影空）：
            hasFilter = demo .ftree-empty 权威形态（横排 space-between、
            padding 14px 10px、--text-xs dim 文案、无图标；demo 文件树空态附「清空过滤」
-           一键恢复按钮 = fileFilter('') + showIgnored(true)，映射到既有 setFilter/toggleShowIgnored
-           通道，见 onClearFilter）；
+           一键恢复按钮 = fileFilter('')，映射到既有 setFilter 通道，见 onClearFilter）；
            空目录（cwd 无节点）= demo 无对应权威形态，保留 real 纵排图标+文案并在此登记差异。 -->
       <div
         v-else-if="visibleRows.length === 0 && hasFilter"
@@ -152,7 +138,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onBeforeUnmount, toRef } from 'vue'
 import { Virtualizer } from 'virtua/vue'
-import { FolderOpen, Search, Loader2, AlertCircle, Eye, EyeOff } from '@lucide/vue'
+import { FolderOpen, Search, Loader2, AlertCircle } from '@lucide/vue'
 import { useI18n } from 'vue-i18n'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { EdgeFade } from '@/components/ui/edge-fade'
@@ -180,7 +166,7 @@ const props = defineProps<{
 const store = useFileTreeStore()
 /** 选中行高亮（per-session 选中态，W3 selectedPath 串线终局解——各会话各自的选择互不干扰） */
 const selectedPath = computed(() => store.getSelectedPath(props.sessionId))
-const { loadTree, setFilter, setupInvalidation, toggleShowIgnored, expandNode, collapseNode, selectFile } = useFileTree()
+const { loadTree, setFilter, setupInvalidation, expandNode, collapseNode, selectFile } = useFileTree()
 const drawer = useSideDrawer()
 
 // 滚动宿主（EdgeFade scrollerEl）：同 SessionList——reka ScrollArea 内部 wrapper 使
@@ -215,7 +201,6 @@ const visibleRows = computed<VisibleRow[]>(() =>
     (sid) => store.getExpanded(sid),
     (sid) => store.getGitOverlay(sid),
     store.filterText,
-    store.showIgnored,
     props.sessionId,
     (sid, path) => store.getNodeState(sid, path),
   ),
@@ -257,27 +242,15 @@ function onFilter(value: string | number): void {
 
 /**
  * 清空过滤（demo .ftree-empty 的「清空过滤」一键恢复）：
- * demo 语义 = fileFilter('') + showIgnored(true)——复用 onFilter('') 通道（防抖提交一致）；
- * showIgnored 走 toggleShowIgnored 通道但加守卫只在关闭态触发（toggle 直调会把已开启的
- * 忽略项误关，偏离 demo 的「设为 true」语义）。
+ * 复用 onFilter('') 通道（防抖提交一致）。[2026-10-15] showIgnored 部分随开关退役删除。
  */
 function onClearFilter(): void {
   onFilter('')
-  if (!store.showIgnored) toggleShowIgnored()
 }
 
 /** 错误态重试：重 loadTree（useFileTree 内 loaded 复用，error 态会重发） */
 function retry(): void {
   void loadTree(props.sessionId)
-}
-
-/**
- * 切换 showIgnored：纯前端投影过滤（与过滤框同机制），瞬时无闪烁。
- * tree 已含全部 ignored 节点（后端始终返回并标记），切换只改 store.showIgnored，
- * visibleRows 投影重算，无需重拉。
- */
-function onToggleShowIgnored(): void {
-  toggleShowIgnored()
 }
 
 /**

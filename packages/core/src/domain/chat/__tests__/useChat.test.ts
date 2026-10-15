@@ -137,8 +137,31 @@ describe('createUseChat factory 行为', () => {
     // clientUuid = appendUser 生成的乐观气泡 id（u-<uuid>）——内核条目 id / 帧回执 / morph 身份锚
     const userMsg = f.chatStore.getMessages('s1').find((m) => m.role === 'user')!
     expect(calledUuid).toBe(userMsg.id)
-    expect(calledUuid).toMatch(/^u-[0-9a-fA-F-]{36}$/)
+    // v4 形态断言（8-4-4-4-12 分组 + 版本位 4 + 变体位 8/9/a/b），锚定 fallback 拼装不错位
+    expect(calledUuid).toMatch(/^u-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i)
     f.dispose()
+  })
+
+  it('send 在非 secure context（crypto.randomUUID undefined）下照常提交（移动壳 LAN http 场景）', async () => {
+    // 场景：移动壳经 LAN http（http://<lan-ip>:<port>）访问，isSecureContext=false →
+    // crypto.randomUUID 为 undefined（Web API 仅 secure context 暴露）。submitNewMessage
+    // 直调它会在 clientUuid 生成处同步抛 TypeError → send 恒 false（移动端「未送达，请
+    // 检查网络后重试」）。契约：clientUuid 必须经 randomUuid secure-context 安全包装
+    // （fallback = crypto.getRandomValues 手拼 v4，无 secure context 限制）。
+    vi.stubGlobal('crypto', {
+      getRandomValues: globalThis.crypto.getRandomValues.bind(globalThis.crypto),
+    })
+    try {
+      const f = makeFixture()
+      await expect(f.useChat.send('s1', textToSegments('hello'))).resolves.toBe(true)
+      expect(f.chatApi.submitDelivery).toHaveBeenCalledTimes(1)
+      const calledUuid = (f.chatApi.submitDelivery.mock.calls[0] as unknown as [string, string, string])[2]
+      // 同上：v4 形态断言（getRandomValues 手拼 fallback 必须产出合法 v4）
+      expect(calledUuid).toMatch(/^u-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i)
+      f.dispose()
+    } finally {
+      vi.unstubAllGlobals()
+    }
   })
 
   it('busy 期发送不转车道（B 策略退役）：统一 submit 照常提交，由内核判定 lane', async () => {
@@ -521,8 +544,8 @@ describe('send 定向分流（含 subagent 段）', () => {
     expect(calledSid).toBe('d7')
     // 非纯文本消息（session 段）：u- 标记拼进 prompt（msg-id-mapper 映射通路不变，D8 双标记共存）
     expect(calledContent.startsWith('#sess-1 看看这个')).toBe(true)
-    expect(calledContent).toMatch(/<!--taiji:msg:u-[0-9a-fA-F-]{36}-->$/)
-    expect(calledUuid).toMatch(/^u-[0-9a-fA-F-]{36}$/)
+    expect(calledContent).toMatch(/<!--taiji:msg:u-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}-->$/i)
+    expect(calledUuid).toMatch(/^u-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i)
     expect(f.chatApi.subagentAction).not.toHaveBeenCalled()
     f.dispose()
   })

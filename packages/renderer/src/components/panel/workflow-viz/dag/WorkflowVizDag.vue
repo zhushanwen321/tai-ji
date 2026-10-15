@@ -5,17 +5,21 @@
   结构：phase 分区背景列（WorkflowDagPhase.order 升序）→ 边（顺序/数据流/条件谓词
   标注/循环回边）→ 节点卡片（per-node 包 WorkflowVizDagNodeGuard 节点级边界）。
 
-  交互（原型 04-final-overlay.html 实测形态对齐）：
-  - 缩放：wheel 指数缩放（0.35~2.6），以指针为缩放中心；
-  - 平移：按住拖拽（位移 > 5px 判定 pan，抑制点击误触）；
-  - 点击上抛：agent 节点 → semantic 'agent'；pending/skipped 节点（零实例、无对话
-    可看——skipped = run 终局后零实例）与 phase 分区 → semantic 'phase'
-    （设计 §3.1-2 点击行为边界）。
+  交互：
+  - 视口（2026-10 用户裁决 fit-to-view）：打开/切换 run 时全图缩放到四周留
+    FIT_PAD_PX 空隙并居中（computeFitTransform，内容小于视口不放大 k 封顶 1）；
+    此后滚轮缩放（wheel 指数缩放，以指针为缩放中心）/ 拖拽平移照旧，实例流式
+    到达引起的节点增高不追打 fit（不与用户手势竞争，切 run 时自然重 fit）；
+  - 点击上抛：实例行 → semantic 'agent' + callId（钻取该实例）；agent 节点 →
+    semantic 'agent'；pending/skipped 节点（零实例、无对话可看——skipped = run
+    终局后零实例）与 phase 分区 → semantic 'phase'（设计 §3.1-2 点击行为边界）。
 
   运行实况：节点六态经 props.nodeStates 接收已派生映射（派生单处归 u5，D9 单点
-  实现——本组件不自行判定 retrying/skipped）；run 停止叠加（D9）消费 run 级原始输入
-  （runStatus/runOutcome）归一为 stopTone 传入节点卡片；当前 phase 分区高亮经
-  props.activePhase（已派生，由壳透传）。
+  实现——本组件不自行判定 retrying/skipped）；执行实例经 props.instancesByNode
+  接收已匹配映射（D2 产物，宿主单处派生），用于节点实例行渲染与增高节点的布局
+  高度表；run 停止叠加（D9）消费 run 级原始输入（runStatus/runOutcome）归一为
+  stopTone 传入节点卡片；当前 phase 分区高亮经 props.activePhase（已派生，由壳
+  透传）。
 -->
 <template>
   <div
@@ -99,6 +103,7 @@
               :node="ln.node"
               :status="nodeState(ln.node.id)"
               :stop-tone="stopTone"
+              :instances="instancesByNode?.get(ln.node.id)"
             />
           </WorkflowVizDagNodeGuard>
         </g>
@@ -126,8 +131,8 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import type { WorkflowDag, WorkflowDagEdgeKind, WorkflowRunOutcome, WorkflowRunStatus } from '@taiji/shared'
-import { layoutDag, layoutEdges } from './layout'
+import type { WorkflowAgentCall, WorkflowDag, WorkflowDagEdgeKind, WorkflowRunOutcome, WorkflowRunStatus } from '@taiji/shared'
+import { ZOOM_MIN, computeFitTransform, dagNodeHeight, layoutDag, layoutEdges } from './layout'
 import WorkflowVizDagNode from './WorkflowVizDagNode.vue'
 import WorkflowVizDagNodeGuard from './WorkflowVizDagNodeGuard.vue'
 import type { WorkflowVizDagClickPayload, WorkflowVizDagNodeStatus, WorkflowVizDagStopTone } from './types'
@@ -146,6 +151,12 @@ const props = defineProps<{
   runOutcome?: WorkflowRunOutcome
   /** 当前 phase 分区（已派生；命中分区 accent 描边高亮）。 */
   activePhase?: string | null
+  /**
+   * 执行实例挂接映射（D2 匹配单源 matchInstancesToNodes().byNode，宿主单处派生；
+   * nodeId → 实例列表 taskIndex 升序）。画布消费两处：节点实例行渲染 + 增高节点
+   * 的布局高度表。缺省（数据未就绪）= 全部节点零实例形态（模板名标题、基准高）。
+   */
+  instancesByNode?: Map<string, WorkflowAgentCall[]>
 }>()
 
 const emit = defineEmits<{
@@ -170,11 +181,10 @@ const CLUSTER_TITLE_INSET = 12
 const CLUSTER_TITLE_H_BASE = 20
 const PREDICATE_MAX_CHARS = 16
 
-/** 缩放界限（原型实测手感：0.35 全局概览 ~ 2.6 单节点细节）。 */
-const ZOOM_MIN = 0.35
-const ZOOM_MAX = 2.6
 /** wheel 缩放灵敏度（指数系数，原型同款）。 */
 const ZOOM_WHEEL_FACTOR = 0.0012
+/** wheel 缩放上限（下限 ZOOM_MIN 单处在 layout，fit 与手动缩放共用同值）。 */
+const ZOOM_MAX = 2.6
 /** 拖拽判定阈值（px 位移，超过 = pan 非 click）。 */
 const PAN_THRESHOLD_PX = 5
 
@@ -185,7 +195,23 @@ const vp = reactive({ k: 1, tx: 0, ty: 0 })
 /** dag prop 未就绪（null）时布局用的空 DAG（layoutDag/layoutEdges 均纯函数不 mutate 输入）。 */
 const EMPTY_DAG: WorkflowDag = { nodes: [], edges: [], phases: [], parallelGroups: [], loops: [] }
 
-const layout = computed(() => layoutDag(props.dag ?? EMPTY_DAG))
+/**
+ * 增高节点的布局高度表（≥2 实例的节点按 dagNodeHeight 增高；与节点卡片同一
+ * 高度函数——布局几何与卡片渲染单源，不会出现卡片溢出分区矩形）。
+ */
+/** 触发节点增高的最少实例数（单实例并入标题不增高）。 */
+const TALL_NODE_MIN_INSTANCES = 2
+const nodeHeights = computed(() => {
+  const heights = new Map<string, number>()
+  const byNode = props.instancesByNode
+  if (byNode === undefined) return heights
+  for (const [id, calls] of byNode) {
+    if (calls.length >= TALL_NODE_MIN_INSTANCES) heights.set(id, dagNodeHeight(calls.length))
+  }
+  return heights
+})
+
+const layout = computed(() => layoutDag(props.dag ?? EMPTY_DAG, nodeHeights.value))
 const edges = computed(() => layoutEdges(props.dag ?? EMPTY_DAG, layout.value.nodes))
 const conditionalEdges = computed(() => edges.value.filter((le) => le.edge.kind === 'conditional' && le.edge.predicate))
 const isEmptyDag = computed(() => (props.dag?.nodes.length ?? 0) === 0)
@@ -211,32 +237,35 @@ const stopTone = computed<WorkflowVizDagStopTone>(() => {
   return 'neutral'
 })
 
-// 切换 run（D11：开新 run 切内容）→ 画布视口重置（新蓝图从全局概览起步）
+// 切换 run（D11：开新 run 切内容）→ 画布视口重置为新蓝图的 fit（全图居中、
+// 四周 FIT_PAD_PX 留白；此前用户 pan/zoom 过也在重置中回到 fit）
 watch(() => props.dag, () => {
-  vp.k = 1
-  vp.tx = centeredTx()
-  vp.ty = 0
+  fitView()
 })
 
 /**
- * 初始视口水平居中（workflow-overlay-refine D1 / 走查 edge#12：上区内容水平对中，
- * 全宽上区不留画布贴左的大段右空白）。mock `.dag-stage` 的 justify-content:center
- * 在自绘 SVG 语境的等价实现：内容位置由 viewport transform 决定，居中 = tx 取容器
- * 与画布的半余宽；画布更宽时贴 0（k 恒 1，C1 已关闭——不引入 fit）。容器尺寸无布局
- * 环境（jsdom clientWidth 缺失）→ 0，退化为贴左不破坏渲染。窗口 resize 不追居中：
- * pan 可达且属用户主动交互，不属本机制。
+ * fit-to-view（2026-10 用户裁决，替代原 D1「仅水平居中 k 恒 1」形态——fit 引入后
+ * 全图默认完整可见不裁切）：内容缩放到四周各留 FIT_PAD_PX 空隙后居中；内容小于
+ * 视口不放大（k 封顶 1，文字原生渲染）。容器尺寸无布局环境（jsdom clientWidth
+ * 缺失）→ computeFitTransform 退化 k=1 平移 0，不破坏渲染。窗口 resize 不追 fit：
+ * pan/zoom 可达且属用户主动交互；实例流式到达的节点增高同理不追打（不与用户手势
+ * 竞争，切 run 时自然重 fit）。
  */
-// 中点除数（余宽的一半 = 水平居中偏移）；具名以过 no-magic-numbers
-const HALF = 2
-
-function centeredTx(): number {
-  const containerW = svgRef.value?.clientWidth ?? 0
-  return Math.max(0, (containerW - layout.value.width) / HALF)
+function fitView(): void {
+  const fit = computeFitTransform(
+    svgRef.value?.clientWidth ?? 0,
+    svgRef.value?.clientHeight ?? 0,
+    layout.value.width,
+    layout.value.height,
+  )
+  vp.k = fit.k
+  vp.tx = fit.tx
+  vp.ty = fit.ty
 }
 
-// 打开 overlay 即挂载（壳 v-if dag !== null）→ 初始视口按容器宽居中
+// 打开 overlay 即挂载（壳 v-if dag !== null）→ 初始视口 = 全图 fit 居中
 onMounted(() => {
-  vp.tx = centeredTx()
+  fitView()
 })
 
 // ── 缩放平移（原型 04-final-overlay.html 手法：client 坐标差换算，规避
@@ -299,9 +328,10 @@ function onWheel(e: WheelEvent): void {
 }
 
 /**
- * 点击路由：节点优先，其次 phase 分区。节点按渲染态分语义——pending（运行中零实例）
- * 与 skipped（run 终局后零实例）同为「零实例、无对话可看」，点击均开所属 phase tab
- * 而非落 agent 语义（Host 侧 byNode 空导致静默 no-op，设计 §3.1-2 点击行为边界）。
+ * 点击路由：实例行优先（携带 callId 钻取该实例），其次节点，再次 phase 分区。
+ * 节点按渲染态分语义——pending（运行中零实例）与 skipped（run 终局后零实例）同为
+ * 「零实例、无对话可看」，点击均开所属 phase tab 而非落 agent 语义（Host 侧 byNode
+ * 空导致静默 no-op，设计 §3.1-2 点击行为边界）。
  */
 function routeClick(target: EventTarget | null): void {
   const el = target as Element | null
@@ -314,9 +344,17 @@ function routeClick(target: EventTarget | null): void {
     const state = nodeState(id)
     if (state === 'pending' || state === 'skipped') {
       emit('select', { semantic: 'phase', phase: node.phase })
-    } else {
-      emit('select', { semantic: 'agent', nodeId: id, templateName: node.templateName, phase: node.phase })
+      return
     }
+    const instanceEl = (el as Element).closest('[data-wfvz-instance]')
+    const callId = instanceEl !== null ? Number(instanceEl.getAttribute('data-wfvz-instance')) : NaN
+    emit('select', {
+      semantic: 'agent',
+      nodeId: id,
+      templateName: node.templateName,
+      phase: node.phase,
+      ...(Number.isFinite(callId) ? { callId } : {}),
+    })
     return
   }
   const clusterEl = (el as Element).closest('[data-wfvz-cluster]')

@@ -197,7 +197,7 @@ group.registerLoader(async () => {
   excludedField.reset(cfg.excludedModels)
 })
 
-// 可选模型分组 / sentinel / stale 判定共享实现（与 SystemAutoRenameSection 同源）
+// 可选模型分组 / sentinel / stale 判定共享实现（useAuthedModelGroups composable）
 const { modelGroups, availableValues } = useAuthedModelGroups()
 
 const selectedValue = computed(() => toSelectValue(compactModel.value))

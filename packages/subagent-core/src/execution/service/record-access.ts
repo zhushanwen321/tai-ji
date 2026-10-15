@@ -308,6 +308,10 @@ export class RecordAccess {
       ...(identity.resolved.model !== undefined
         ? { model: joinEngineModelRef(identity.resolved.model) }
         : {}),
+      // [subagent-detail-model-info] 派发期来源标注（opts.modelSource 由路由层
+      // resolveIdentityForRoute/resolveWorkflowIdentity 四层解析产物写入；缺席 =
+      // 未标注——存量调用方与 pi 路由未指定形态零迁移）。
+      ...(opts.modelSource !== undefined ? { modelSource: opts.modelSource } : {}),
       thinkingLevel: identity.resolved.thinkingLevel,
       mode,
       task: opts.task,

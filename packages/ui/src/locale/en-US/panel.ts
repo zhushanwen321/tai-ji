@@ -40,6 +40,8 @@ export default {
     toggleSidebarAria: 'Toggle sidebar',
     back: 'Back',
     forward: 'Forward',
+    // Session JSONL filename button (PanelHeader, restored by user ruling 2026-10-14): click copies absolute disk path
+    copySessionFile: 'Copy session file path',
     // Plugin header action buttons (HeaderActionsHost, E13 tri-state tooltip; plugin-header-action-modal-points AP-1)
     pluginActionExtensionNotLoaded: 'Required extension not loaded in this session',
     pluginActionRestoring: 'Session restoring, availability unknown',
@@ -96,9 +98,6 @@ export default {
     inProgress: '(in progress)',
     expandReasoning: 'Expand reasoning',
     collapseReasoning: 'Collapse reasoning',
-    toolFailed: '(failed)',
-    toolNoResult: '(no result)',
-    thinkingHeader: '## Thinking',
     expand: 'Expand',
     collapse: 'Collapse',
     // [system-notice-rendering-upgrade U3] scroll-box info bar + expand button (consumed by
@@ -121,7 +120,6 @@ export default {
     imagePlaceholderDetail: 'This session image cache reached its limit (64MB). Existing images stay visible; new images show a placeholder',
     imageUnavailable: 'Image unavailable',
     workflow: 'Workflow',
-    copyMarkdown: 'Copy as Markdown',
     forkAsk: 'Fork to ask (ask in a new branch, isolated from main line)',
     forkFailed: 'Fork to background failed: {error}',
     handoffAsk: 'Hand off with note (your text becomes the first message in the new session)',
@@ -142,6 +140,9 @@ export default {
     // [u4d-truncated-ui] History budget truncated top bar (loadMore superseded by loadEarlier)
     loadedRecentTurns: 'Loaded recent {count} turns',
     loadEarlier: 'Load earlier',
+    // [2026-10-15 pill redesign] paging progress copy: says what is happening better than
+    // common.loading (pill loading state; auto-continue and manual click share it)
+    loadingMore: 'Loading earlier…',
     // [u8-pi-respawn] pi crash respawn notice bar (D7 / T4)
     respawnPending: 'Session engine exited unexpectedly — auto-recovering… You can keep typing; messages are delivered once recovery completes',
     respawnRestored: 'Session engine recovered from a crash. The interrupted turn was not preserved; background tasks and subagents that were running have been terminated and will not resume automatically. You can continue sending messages.',
@@ -408,6 +409,22 @@ export default {
     // subagent-model-switch §7.1（U1）：subagent / workflow run 执行模型切换。
     subagentOverrideBadge: 'user override',
     subagentModelSwitchTitle: 'Switch execution model of this subagent (recorded when no live process; applies next run)',
+    subagentModelActual: 'Actual model in use: {model}',
+    // Two nested levels (leaf keys = SubagentModelSource value domain): the consumer
+    // useSubagentModel.ts assembles `panel.sideDrawer.subagentModelSource[Title].${source}`,
+    // which cannot resolve against a flat-key shape
+    subagentModelSource: {
+      explicit: 'dispatched',
+      frontmatter: 'agent-declared',
+      preference: 'preference',
+      default: 'engine default',
+    },
+    subagentModelSourceTitle: {
+      explicit: 'Model explicitly specified at dispatch (task parameter)',
+      frontmatter: 'Model from agent .md frontmatter declaration',
+      preference: 'Not explicitly specified — filled from settings preference (per-engine default model)',
+      default: 'No model specified — resolved by the engine default',
+    },
     modelSwitchFailed: 'Model switch failed: {msg}',
     modelSwitchMemberFailed: 'Member {member} switch failed ({reason}) — other members unaffected',
     bashTaskRunningFor: 'Running for {duration}',

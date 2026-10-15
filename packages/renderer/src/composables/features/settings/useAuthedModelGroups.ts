@@ -1,8 +1,8 @@
 /**
  * useAuthedModelGroups —— 设置页「按 provider 分组的可选模型」共享 composable。
  *
- * 消费方：SystemAutoRenameSection（renameModel）/ SystemSmartContextSection（compactModel），
- * 两处此前各自维护逐字同构的 modelGroups/availableValues/sentinel 逻辑。
+ * 消费方：RenameSessionPage（renameModel）/ SystemSmartContextSection（compactModel），
+ * 共享同一份 modelGroups/availableValues/sentinel 实现。
  *
  * 数据源：settingsStore.providers（全量广播）派生，**不用 settingsStore.models**——
  * 后者是 runtime aggregateModelsWithScoped 产出，被 scopedModels 白名单过滤+重排，

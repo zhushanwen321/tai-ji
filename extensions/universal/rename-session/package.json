@@ -1,6 +1,6 @@
 {
   "name": "@zhushanwen/pi-rename-session",
-  "version": "0.11.2",
+  "version": "0.12.0",
   "type": "module",
   "main": "index.ts",
   "taiji": {
@@ -16,7 +16,9 @@
           },
           "mode": "first-stop",
           "maxTitleLength": 50,
-          "thinkingLevel": "off"
+          "thinkingLevel": "off",
+          "style": "slug",
+          "customInstruction": ""
         }
       }
     ]

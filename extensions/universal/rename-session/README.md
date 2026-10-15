@@ -41,7 +41,9 @@ pi install npm:@zhushanwen/pi-rename-session
   "model": { "type": "ref", "ref": "deepseek/deepseek-chat" },
   "mode": "first-stop",
   "maxTitleLength": 50,
-  "thinkingLevel": "off"
+  "thinkingLevel": "off",
+  "style": "slug",
+  "customInstruction": ""
 }
 ```
 
@@ -52,6 +54,8 @@ pi install npm:@zhushanwen/pi-rename-session
 | `mode` | `"first-prompt" \| "first-stop" \| "agent-tool"` | `"first-stop"` | 触发模式（三值互斥）：首条请求即命名 / 首个成功 round 末命名（现状）/ agent 自主经 `rename_session` 工具命名。事件面每次事件 live 读（GUI 切换对活跃 session 的自动命名即时生效）；工具注册面在 extension 工厂执行时求值（每 session 创建一次——taiji 每 session 一个 pi 进程；原生 pi CLI 同进程 /fork、/session 新建 session 亦重新求值），session 存活期内不回溯（pi 无 unregisterTool），切换后已存活 session 的残留工具由 execute 内 live mode 守卫拒绝并给恢复指引 |
 | `maxTitleLength` | `number` | `50` | 标题最大长度（Unicode 码点数，须正整数） |
 | `thinkingLevel` | `ModelThinkingLevel` | `"off"` | 标题 LLM 的 thinking 级别（`off` = 不传 reasoning，provider 默认） |
+| `style` | `"slug" \| "sentence" \| "emoji" \| "custom"` | `"slug"` | 标题提示词风格：非 custom 枚举 = 内置词表（随版本升级自动跟随）；`custom` = 消费 `customInstruction`（taiji 设置页「会话重命名」可视化配置） |
+| `customInstruction` | `string` | `""` | 自定义标题提示词自由文本（仅 `style: "custom"` 时生效；**空串回落内置 slug 默认**；超 2000 码点防御截断；custom 非空时 systemPrompt 降级为「只输出标题文本」通用骨架，风格权威 = 用户指令） |
 
 文件缺失/坏 JSON 返回默认值，不抛错。改完保存即生效（mtime 读时刷新，每个 `turn_end` / `message_end` 重新 load）。
 

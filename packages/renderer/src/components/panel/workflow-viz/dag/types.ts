@@ -27,7 +27,18 @@ export type WorkflowVizDagNodeStatus =
  * phase 语义」由画布按已派生六态路由（设计 §3.1-2 点击行为边界），非业务派生。
  */
 export type WorkflowVizDagClickPayload =
-  | { semantic: 'agent'; nodeId: string; templateName: string; phase: string }
+  | {
+      semantic: 'agent'
+      nodeId: string
+      templateName: string
+      phase: string
+      /**
+       * 点击命中节点内某个实例行时携带该实例的 call id（WorkflowAgentCall.id）——
+       * 多实例节点点击具体实例直接钻取该 agent；缺省（点节点非实例行）由宿主取
+       * 该节点首个挂接实例。
+       */
+      callId?: number
+    }
   | { semantic: 'phase'; phase: string }
 
 /**

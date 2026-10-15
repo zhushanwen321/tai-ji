@@ -75,8 +75,10 @@ function overThresholdText(pad = 'x'): string {
 const DAG_SCRIPT = [
   'phase("review")',
   'parallel([',
-  '  () => agent("reviewer-security", { prompt: "sec" }),',
-  '  () => agent("reviewer-perf", { prompt: "perf" }),',
+  // 可区分 label：同 phase 无名调用点（双 '*'）会被解析器按不可区分调用点合并收口，
+  // 本测试锚定通道透传形态而非解析器语义（合并在 parser 单测覆盖）
+  '  () => agent("reviewer-security", { prompt: "sec", label: "security" }),',
+  '  () => agent("reviewer-perf", { prompt: "perf", label: "perf" }),',
   '])',
 ].join('\n')
 

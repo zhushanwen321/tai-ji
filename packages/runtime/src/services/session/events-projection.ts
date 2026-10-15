@@ -338,6 +338,25 @@ function resolveSubagentBinding(
 }
 
 /**
+ * [projectV2Subagent 拆分] 模型与派发期来源标注归并：settled 条目盖章值优先，回落
+ * created 帧留痕 / 注册条目（创建期已知）；全缺（存量 record）= undefined。
+ */
+function resolveSubagentModelFields(
+  registered: SubagentRecordRegisteredEntryData | undefined,
+  settledEntry: SubagentRecordSettledEntryData | undefined,
+  fold: RecordEventFoldState | undefined,
+) {
+  return {
+    // 模型：settled 条目盖章值优先；running 期回落 created 帧留痕（创建期已知——
+    // [subagent-detail-model-info] 运行中详情也能展示实际模型）。两者皆缺 = 未指定。
+    model: settledEntry?.model ?? fold?.identity?.model,
+    // 派发期模型来源（subagent-detail-model-info 2026-10-15）：三源同值取先，
+    // 全缺（存量 record）= undefined，读侧不展示来源标注。
+    modelSource: settledEntry?.modelSource ?? fold?.identity?.modelSource ?? registered?.modelSource,
+  }
+}
+
+/**
  * v2 subagent 实体的合并投影（事件源胜出仲裁的核心）。
  *
  * - 身份域：事件 fold 的 record-created（事实源）优先，注册条目兜底（事件源
@@ -362,6 +381,7 @@ export function projectV2Subagent(
   const endedAt = settled?.endedAt ?? settledEntry?.endedAt
   const stats = resolveSubagentStats(settled, roundIdle, settledEntry)
   const binding = resolveSubagentBinding(fold?.bound, settledEntry)
+  const modelFields = resolveSubagentModelFields(registered, settledEntry, fold)
   return {
     subagentId: identity.id,
     sessionFile: binding.sessionFile,
@@ -372,7 +392,8 @@ export function projectV2Subagent(
     stopReason: resolveSubagentStopReason(fold, settled, roundIdle, settledEntry),
     turns: stats.turns,
     totalTokens: stats.totalTokens,
-    model: settledEntry?.model,
+    model: modelFields.model,
+    modelSource: modelFields.modelSource,
     thinkingLevel: settledEntry?.thinkingLevel,
     startedAt,
     endedAt,
@@ -635,9 +656,7 @@ export class SessionEventProjection {
     if (events.length === 0) return true // 坏事件帧：消费但零应用（写侧已获 ack，无丢失面）
     // 缺口判定（无 seq 事件不参与——报告全为无 seq 存量行时直接 fold，状态机幂等）
     const seqs = events.map((e) => (e as { seq?: unknown }).seq).filter((s): s is number => typeof s === 'number')
-    const watermark = domain === 'record'
-      ? (this.sources.recordFolds.get(id)?.lastSeq ?? 0)
-      : (this.sources.runFolds.get(id)?.lastSeq ?? 0)
+    const watermark = domain === 'record' ? (this.sources.recordFolds.get(id)?.lastSeq ?? 0) : (this.sources.runFolds.get(id)?.lastSeq ?? 0)
     const minSeq = seqs.length > 0 ? Math.min(...seqs) : undefined
     if (minSeq !== undefined && minSeq > watermark + 1) {
       // 缺口：从字节偏移补读到文件尾（覆盖报告事件——它们已在盘上），fold 去重

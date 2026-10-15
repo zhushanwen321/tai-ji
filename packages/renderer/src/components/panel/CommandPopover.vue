@@ -177,6 +177,7 @@
 import { computed, inject, onMounted, ref, toRef, watch, type Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { AlertCircle, FolderOpen, LoaderCircle, SearchX } from '@lucide/vue'
+import { Button } from '@/components/ui/button'
 import { Popover, PopoverAnchor, PopoverContent } from '@/components/ui/popover'
 import { SLASH_ICON_COMPONENTS } from '@/composables/slashIcons'
 import { useCommandStore } from '@/composables/features/command/useCommandStore'

@@ -1,6 +1,6 @@
 /**
  * 会话自动重命名配置域 config.* message handler（autoRenameEnabled / renameModel /
- * renameMode 三键 get/set，6 条 case）。
+ * renameMode / renamePrompt / renameMaxLength 五键 get/set，10 条 case）。
  *
  * Extracted from settings-message-handler.ts to reduce file size（该文件同类先例：
  * config-preferences-message-handler.ts 同款 class + handle() switch 形态；case 体自
@@ -44,6 +44,26 @@ export class RenameConfigMessageHandler {
       }
       case 'config.getRenameMode': {
         this.ctx.reply(ws, msg.id, 'config.renameMode', { mode: this.ctx.configService.getRenameMode() })
+        return true
+      }
+      case 'config.setRenamePrompt': {
+        // style/instruction 非法值归一在 helper 层（与 setRenameMode 的归一纪律一致），reply 读回生效值。
+        const applied = this.ctx.configService.setRenamePrompt(msg.payload.style, msg.payload.instruction)
+        this.ctx.reply(ws, msg.id, 'config.renamePrompt', applied)
+        return true
+      }
+      case 'config.getRenamePrompt': {
+        this.ctx.reply(ws, msg.id, 'config.renamePrompt', this.ctx.configService.getRenamePrompt())
+        return true
+      }
+      case 'config.setRenameMaxLength': {
+        // 正整数归一在 helper 层（非法回默认 50），reply 读回生效值。
+        this.ctx.configService.setRenameMaxLength(msg.payload.maxLength)
+        this.ctx.reply(ws, msg.id, 'config.renameMaxLength', { maxLength: this.ctx.configService.getRenameMaxLength() })
+        return true
+      }
+      case 'config.getRenameMaxLength': {
+        this.ctx.reply(ws, msg.id, 'config.renameMaxLength', { maxLength: this.ctx.configService.getRenameMaxLength() })
         return true
       }
       default:

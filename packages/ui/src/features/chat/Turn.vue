@@ -3,7 +3,8 @@
   <!--
     编排器 · Turn（message-stream 单个回合，W4 拆分后）。
     组合 UserBubble + TurnMeta + Block 三个子组件；hover actions 操作栏（TurnSummary）经末位
-    text 块的 #turn-actions 插槽挂载（[actions-anchor]，悬停区 = text 块本身，见下方锚块注释）。
+    text 块的 #turn-actions 插槽挂载（[actions-anchor]，流内固定行 = text 块下部一行，
+    与 UserBubble hover actions 同族，见下方锚块注释）。
     保留：trace 区 Block 编排（窗口化）+ ChangeSetCard。
     [streaming-trace-window window wave] trace 区从双层 v-for 改单层渲染 computeTraceWindow 的 visible；
     收编区（compacted/failed）由 TraceCompactorRow 承载（零 chrome，双态，D5）。
@@ -11,7 +12,8 @@
   -->
   <!-- 根元素 content-col（居中 + 封顶 --content-max-w，720px 内容列原语）：整 turn 居中（spec §6.1 R4）。
        轮次节奏（demo workbench.css 权威值）：gap-[12px] = 用户气泡→轮头 12px 紧凑档（.blk:has(+ .blk-compact)）；
-       pb-5 = 轮边界 20px（--blk-gap，唯一边界贡献——TurnSummary 悬浮化后 trace 无 mb、占位零高度）。
+       pb-5 = 轮边界 20px（--blk-gap，轮边界唯一贡献——trace 无 mb；末位 text 块内的
+       TurnSummary 固定行（h-6+mt-1）只属于锚轮内部节奏，不计入轮边界）。
        [MF-1-33]（demo .blk:last-child margin-bottom:0，workbench.css:314）：末位 turn 去 pb-5——
        末轮底部留白只剩滚动容器的 24px（MessageStream pb-[24px]），非历史轮保持 20px 轮边界。
        [MF-1-35]（demo .blk scroll-margin-top:8px，workbench.css:313）：scrollIntoView 落点让出
@@ -220,8 +222,8 @@
       </div>
 
       <!-- [actions-anchor] 操作栏（TurnSummary）不渲染于 trace 尾部：挂载点 = 末位 text 块的
-           #turn-actions 插槽（上方 Block v-for 内）——悬停区 = text 块本身（TurnMeta/过程行
-           悬停不触发），悬浮位 = text 块上方右侧（不遮正文）。 -->
+           #turn-actions 插槽（上方 Block v-for 内）——悬停区 = text 块行 + 固定行自身
+           （TurnMeta/过程行悬停不触发），流内固定行 = text 块下部一行（不遮正文）。 -->
 
       <!-- 变更集卡（W10，ADR-0024）：mt-3 = 12px 过程行节奏档（demo --blk-gap-tight） -->
       <ChangeSetCard

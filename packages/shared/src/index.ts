@@ -6,6 +6,7 @@ export type {
   BashDispatchReceipt,
   BatchDeleteResult,
   RenameMode,
+  RenameStyle,
   UiLocale,
   SystemPromptConfig,
   CommandSourceInfo,
@@ -142,7 +143,7 @@ export * from './extension'
 export * from './git'
 export * from './plugin'
 
-export { BASE_PORT, DEV_PORT_OFFSET, MAX_PORT, ENV_WHITELIST_PREFIXES, AMBIENT_ENV_NAMES, SUBAGENT_TOOL_NAMES, WORKFLOW_TOOL_NAMES, SUBAGENT_RECORD_CUSTOM_TYPE, PROVIDER_API_TYPES, KNOWN_PI_API_TYPES, SYSTEM_PROMPT_MAX_LENGTH, PRESET_SKILL_DIRS, PRESET_AGENT_DIRS, PRESET_EXTENSION_DIRS, DEFAULT_DISCOVERY_CONFIG, IMAGE_LIMITS, MAX_WS_PAYLOAD_BYTES, PLUGIN_NOTIFY_LIMITS, UI_TOAST_LIMITS, ENGINE_LAUNCH_ENV_KEYS, PRESET_FALLBACK_ENV_KEYS, MAX_SPEAK_CHARS, TTS_CACHE_MAX_FILES, TTS_CACHE_MAX_BYTES } from './constants'
+export { BASE_PORT, DEV_PORT_OFFSET, MAX_PORT, ENV_WHITELIST_PREFIXES, AMBIENT_ENV_NAMES, SUBAGENT_TOOL_NAMES, WORKFLOW_TOOL_NAMES, SUBAGENT_RECORD_CUSTOM_TYPE, PROVIDER_API_TYPES, KNOWN_PI_API_TYPES, SYSTEM_PROMPT_MAX_LENGTH, RENAME_INSTRUCTION_MAX_LENGTH, PRESET_SKILL_DIRS, PRESET_AGENT_DIRS, PRESET_EXTENSION_DIRS, DEFAULT_DISCOVERY_CONFIG, IMAGE_LIMITS, MAX_WS_PAYLOAD_BYTES, PLUGIN_NOTIFY_LIMITS, UI_TOAST_LIMITS, ENGINE_LAUNCH_ENV_KEYS, PRESET_FALLBACK_ENV_KEYS, MAX_SPEAK_CHARS, TTS_CACHE_MAX_FILES, TTS_CACHE_MAX_BYTES } from './constants'
 
 export type { ProviderApiType } from './constants'
 // 崩溃韧性共享契约 SSOT（实施计划 u-foundation：
@@ -248,7 +249,7 @@ export * from './file-tree'
 export * from './local-file-url'
 export type { RecentWorkspaceRecord } from './workspace'
 export type { Project, ProjectStoreState } from './project'
-export type { SubagentRecord, SubagentStatus, ClosedDisplayStatus, SubagentModelOverrideStatus, SubagentRecentEffectiveModel } from './subagent'
+export type { SubagentRecord, SubagentStatus, SubagentModelSource, ClosedDisplayStatus, SubagentModelOverrideStatus, SubagentRecentEffectiveModel } from './subagent'
 // 远程访问配置契约 SSOT（remote-access.json：main 写入侧与 runtime 握手热读侧共用；
 // 含 IPC 信封类型 RemoteAccessInfo/RemoteAccessToggleResult，main/preload/renderer
 // 三端共同 import；含无策略 shape 谓词（main/runtime 双侧 shape 判据单源）；

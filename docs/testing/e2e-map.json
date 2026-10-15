@@ -2385,6 +2385,27 @@
       "owner": "packages/runtime",
       "authority": "docs/domain-model.md",
       "note": "R2 态（来源 impl-plan §4「e2e 影响面圈定」末行——select-affected-e2e --base 98b1d2ac0 对账 + e2e-map 登记，执行单元 u-integration-acceptance；设计与 impl-plan 档案在 .tmp 不入库，authority 回退画布领域模型 SSOT docs/domain-model.md）。本条为 D5 终态同步登记类批次 F1-50 落地：补登记前零 canvas 条目，--check 绿灯的真实原因 = extensions/taiji/** 不在任何 rule 的 watched root 内，机器门根本不看护该目录。画布无 e2e spec 资产（e2e/ 目录核实零 canvas spec）：设计 §4 验收计划 A1-A4 = L4 agent 真机走查、A5/A7 = 验收期脚本（产物落 .tmp 不入库）、A6a = L1 单测——可持续回归测试由五层 L1 单测族承担（零 token），照 E2E-MOCK-02 引 vitest 文件为 asset 的先例登记 23 件（runtime canvas 服务 5 测试 + canvas-helpers 夹具 + transport canvas handler 1 测试 / extension-protocol canvas 契约 3 测试 / pi-canvas 扩展 5 测试 + canvas-harness 夹具 / renderer 画布组件 4 测试 + 托盘面板 + store + sync composable）。run 另含 overlay 两测试（canvas tab 挂载分支）与托盘族两测试（composer-tray / useTrayCounts 的 canvas 件）——四件落共享目录，经 run 命令执行、不登记为 asset（防聚合泛化，E2E-BATCH-07 先例）。scope 中 packages/runtime/src/**、packages/renderer/src/** 已被 E2E-MOCK-01 / E2E-REAL-01 / E2E-VISUAL-01 / E2E-ELECTRON-01 覆盖（选中的是 playwright 轨），本 rule 按设计 §4 圈定清单显式列出 canvas 精确路径 = canvas 域改动选中本 rule 跑单测族；extensions/taiji/canvas/** 与 packages/extension-protocol/src/extensions/canvas/** 为本 rule 新增看护面（此前无任何 rule 覆盖，--check 对这两目录由「不看护」转为「看护且覆盖」）。packages/shared/src/protocol.ts（canvas.* 消息类型）已被 E2E-BTW-01 / E2E-TERMINAL-01 精确路径覆盖，按圈定清单同登便于 canvas 侧对账。"
+    },
+    {
+      "id": "E2E-PIRES-01",
+      "summary": "resources/pi 外部 symlink 打包互斥检测（codesign bundle 自包含门）：check-pi-resources-links.mjs 干跑自检——目录缺失放行 / 外部 symlink（含断链）拦截 / --fix 递归实体化（环形链接显式报错）。build 脚本链最前与 preflight 检查 7 双挂载同一逻辑源",
+      "scope": [
+        "scripts/check-pi-resources-links.mjs",
+        "scripts/preflight-check.sh"
+      ],
+      "layer": "L1",
+      "assets": [
+        {
+          "kind": "script",
+          "ref": "scripts/check-pi-resources-links.mjs"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "node scripts/check-pi-resources-links.mjs",
+      "owner": "scripts/",
+      "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
+      "note": "R2 态：改脚本本体或 preflight 接线时干跑（当前树 resources/pi 缺失 → exit 0 放行即绿）；dev symlink 形态下红是合法失败（正是脚本职责，--fix 恢复）。判定与恢复见 docs/TROUBLESHOOTING.md 常见问题 §29"
     }
   ]
 }

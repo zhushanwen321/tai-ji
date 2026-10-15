@@ -139,6 +139,7 @@
     "vue-i18n": "^10"
   },
   "devDependencies": {
+    "@intlify/message-compiler": "10.0.8",
     "@vitest/coverage-v8": "^4.1.9",
     "@vitejs/plugin-vue": "^6",
     "@vue/test-utils": "^2.4.6",
