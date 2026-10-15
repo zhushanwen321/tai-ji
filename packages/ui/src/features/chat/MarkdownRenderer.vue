@@ -178,6 +178,9 @@ function handleCodeblockCopy(e: MouseEvent, btn: HTMLElement): void {
   } catch {
     code = ''
   }
+  // 非安全上下文（LAN http，如移动壳远程访问）clipboard 为 undefined——同步访问即抛
+  // TypeError（.catch 接不住），守卫早退且不置 is-copied（反馈态须与复制结果一致）。
+  if (code && !navigator.clipboard) return
   if (code) {
     navigator.clipboard.writeText(code).catch(() => { /* 剪贴板失败静默 */ })
   }

@@ -3,7 +3,7 @@
  *
  * crypto.randomUUID 是 Web API，仅在 secure context（https / file:// / localhost）暴露：
  * LAN http 访问（http://<lan-ip>:<port>）下 isSecureContext=false 时该方法为 undefined，
- * 直接调用抛 TypeError（U1.6 真机验收发现的 P0：移动壳首个 RPC 即炸）。桌面无感
+ * 直接调用抛 TypeError（LAN http 下 isSecureContext=false，移动壳首个 RPC 即炸）。桌面无感
  * （file:// 属 secure context）。crypto.getRandomValues 无 secure context 限制，
  * 作为 fallback 手拼 RFC 4122 v4（版本位 / 变体位按 spec 置位）。
  */
