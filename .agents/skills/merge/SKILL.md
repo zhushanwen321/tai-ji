@@ -499,7 +499,7 @@ bash scripts/validate-runtime-bundle.sh
 > CI 的 gitcode-sync job 已于 2026-09-16 移除（runner 跨境直传大附件必然超时，且镜像失败会污染 run conclusion 误导 verify-ci-release.sh）——镜像全部收敛到本阶段本地执行。
 > prerelease（`*-beta.*`，prerelease skill 线）不走本阶段：README 安装段永远指向最新正式版。
 
-**前置 env**：`GITCODE_TOKEN`（本地 `~/.zshrc` 已 export，命令内 `source ~/.zshrc` 取得）；`GITCODE_REPO=qq_18433817/tai-ji`（GitHub variable GITCODE_REPO 的权威值，勿凭记忆写 owner）。
+**前置 env**：`GITCODE_TOKEN`——token 经 zsh 配置链仅交互式 shell 可见（`~/.zshrc` 无显式 export），非交互环境（agent bash）用 `zsh -ic '<命令>'` 载荷执行（v0.11.4 发布实测：直接 bash 载荷 exit 2 且无日志，`zsh -ic` 两次一次成功）；`GITCODE_REPO=qq_18433817/tai-ji`（GitHub variable GITCODE_REPO 的权威值，勿凭记忆写 owner）。
 
 #### 6.5.1 附件镜像（下载 GitHub → 上传 GitCode，幂等可重跑）
 
