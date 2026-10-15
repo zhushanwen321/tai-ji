@@ -20,7 +20,7 @@
  *     的 insertSlashChip/insertSkillChip）——ComposerInput.vue 同款组合，insert 的落位/替换
  *     语义、序列化归首（segmentsToText）、draft 同步（onChanged → emitInput(getText())）全真实
  *   - pendingSlash 经真实 commandStore（requestSlashInjection 写 / clearPendingSlash 清）
- *   - core 单例隔离：beforeEach resetSearchModal()（SM 单例）+ __resetCommandStoreForTesting()
+ *   - core 单例隔离：beforeEach resetSearchModal()（SM 单例）+ __testing.__resetCommandStoreForTesting()
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/composables/useCommandPopoverTrigger.mutual-exclusion.test.ts
  */
@@ -39,7 +39,7 @@ import { segmentsToText } from '@taiji/shared'
 import { useCommandPopoverTrigger } from '@/composables/panel/useCommandPopoverTrigger'
 import {
   useCommandStore,
-  __resetCommandStoreForTesting,
+  __testing,
 } from '@/composables/features/command/useCommandStore'
 
 /**
@@ -137,7 +137,7 @@ describe('useCommandPopoverTrigger SM 互斥（D1 单向状态互斥）', () => 
   beforeEach(() => {
     setActivePinia(createPinia())
     resetSearchModal()
-    __resetCommandStoreForTesting()
+    __testing.__resetCommandStoreForTesting()
   })
   afterEach(() => {
     ctx.dispose()
@@ -185,7 +185,7 @@ describe('useCommandPopoverTrigger D2b 注入前清理（pendingSlash 消费链�
   beforeEach(() => {
     setActivePinia(createPinia())
     resetSearchModal()
-    __resetCommandStoreForTesting()
+    __testing.__resetCommandStoreForTesting()
   })
   afterEach(() => {
     ctx.dispose()

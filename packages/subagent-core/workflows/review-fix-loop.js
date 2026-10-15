@@ -145,11 +145,13 @@ const {
   findNeedsRedesign,
   parseResult,
   normalizeAggregatorResult,
+  buildIssueEntry,
   resolveRunRoot,
   computeOrigin,
   recordDormant,
   inheritCarryoverFields,
   dormantRevivalTitle,
+  applyCarryoverRegression,
   filterActiveIds,
   filterDormantFromRecon,
   landScores,
@@ -1189,27 +1191,17 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
       const activeIds = new Set(filterActiveIds(agg.must_fix_ids));
       const r1IdMap = {};
       for (const entry of agg.must_fix_ids) {
-        const id = typeof entry === "string" ? entry : entry && entry.id;
+        // normalize 契约：must_fix_ids 元素恒为对象（string 已被 normalizeMustFixEntry
+        // 转为 {id, severity:"major"}，畸形条目含空 id 已被 filter(Boolean) 剔除）——
+        // entry.id 直读不设防。下方 !id 仅是廉价防线，权威拦截在 normalize 层（AC1-B1）。
+        const id = entry.id;
         // Object.hasOwn：truthy 查表会让原型链键（"__proto__"/"toString"）误判已登记
         // 而 continue 跳过真实条目（与 utils findIssueKey 同款加固；id 来自 LLM 产出）。
         if (!id || Object.hasOwn(state.issues, id)) continue;
         if (!activeIds.has(id)) continue;
-        const resolved = resolveIssueIdentity(
-          typeof entry === "string" ? { id } : entry,
-          { issues: state.issues, dormant: state.dormant || [] },
-        );
+        const resolved = resolveIssueIdentity(entry, { issues: state.issues, dormant: state.dormant || [] });
         if (resolved.mapped) r1IdMap[id] = resolved.key;
-        state.issues[resolved.key] = {
-          // severity 结构化（5.7）：aggregator 标注 critical/major/minor，converged 终止的
-          // 「无 critical」判定依赖它；旧格式（string）默认 major（must-fix 语义）。
-          firstSeen: 1,
-          severity: typeof entry === "string" ? "major" : (entry.severity || "major"),
-          status: "open",
-          history: [{ round: 1, status: "open" }], fixAttempts: 0,
-          ...(entry && typeof entry === "object" && typeof entry.title === "string" && entry.title ? { title: entry.title } : {}),
-          ...(entry && typeof entry.guidance === "string" && entry.guidance ? { guidance: entry.guidance } : {}),
-          ...(entry && typeof entry.evidence === "string" && entry.evidence ? { evidence: entry.evidence } : {}),
-        };
+        state.issues[resolved.key] = buildIssueEntry(entry, { round: 1 });
       }
       state.idMap = { round: 1, map: r1IdMap };
       // A8：R1 落盘后观测 guidance/evidence 缺失（数据链断点信号）
@@ -1259,7 +1251,7 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
     // newFindings 统计与 needs-redesign/fixAttempts 追踪对 R2+ 新发现生效。
     // rfl 数据链（tier-1 6.1/6.3）：新发现带 origin（computeOrigin：files 与上轮 fix
     // 触碰文件相交 = regression，否则 new；无 files 不可归因 WARN）；重新上报的
-    // dormant 条目 → revived=true 回修复队列；本轮降级条目不建 issue（同 R1 过滤）。
+    // dormant 条目从暂存迁出回修复队列；本轮降级条目不建 issue（同 R1 过滤）。
     // 身份对齐（编号+标题）：LLM 编号跨轮不稳定（紧凑化重排会把新问题排到旧号上、
     // 同题重报会换号），表格号不再直接当清单主键——resolveIssueIdentity 三级对齐后
     // 改键条目记入 state.idMap（本轮表格号→清单键），fix 写入与下轮对账经 translateId
@@ -1274,7 +1266,9 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
       const activeIds = new Set(filterActiveIds(agg.must_fix_ids));
       const roundIdMap = {};
       for (const entry of agg.must_fix_ids) {
-        const id = typeof entry === "string" ? entry : entry && entry.id;
+        // normalize 契约：元素恒对象（同 R1 init 注释）；!id 仅廉价防线，权威拦截在
+        // normalize 层（AC1-B1）
+        const id = entry.id;
         if (!id) continue;
         // exec-review 修复（major-2a）：本轮降级条目（不在 activeIds）对新建与已追踪
         // 转换都不生效——已追踪条目被聚合降级重报 = 聚合撤回本轮判定，不翻 regressed
@@ -1282,10 +1276,7 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
         // 也不落 dormant（在 issues 活跃追踪，recordDormant 的 excludeIds 排除）。
         if (!activeIds.has(id)) continue;
         // 三级身份对齐：resolved.key = 清单键（mapped=true 时 ≠ 表格号，记入 idMap）
-        const resolved = resolveIssueIdentity(
-          typeof entry === "string" ? { id } : entry,
-          { issues: state.issues, dormant: state.dormant || [] },
-        );
+        const resolved = resolveIssueIdentity(entry, { issues: state.issues, dormant: state.dormant || [] });
         if (resolved.mapped) roundIdMap[id] = resolved.key;
         const tracked = state.issues[resolved.key];
         if (tracked) {
@@ -1296,23 +1287,24 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
           if (inheritCarryoverFields(tracked, entry)) {
             log("Carryover fields inherited for " + resolved.key + " (title/severity synced from re-report)");
           }
+          // B5 顺序契约：先继承（上方，title/severity 以本轮为采信源）后转换——
+          // applyCarryoverRegression 内部经 inheritCarryoverFields 同源写 severity（幂等），
+          // 不重复第二份 severity 写法（C2 状态机转移单点化）。
           if (reconCount === 0 && (tracked.status === "fix-attempted" || tracked.status === "fixed")) {
-            tracked.status = "regressed";
-            tracked.fixAttempts = (tracked.fixAttempts || 0) + 1;
-            tracked.openStreak = (tracked.openStreak || 0) + 1;
-            tracked.severity = typeof entry === "string" ? "major" : (entry.severity || "major");
-            tracked.history.push({ round, status: "regressed" });
+            applyCarryoverRegression(tracked, entry, round);
             added++;
           }
           continue;
         }
-        // 复活置位（6.3 delta ③ 的闭环另一半）：dormant 条目以活跃身份重新上报 →
-        // 回修复队列（下方正常建 issue），后续轮 prompt 不再注入它。判定不需要独立
-        // 的标题匹配——resolveIssueIdentity 的 L2 已按标题归一查过 dormant，标题命中
-        // 时 resolved.key 即 dormant 条目的 id（编号或标题命中殊途同归）。
-        const dormantHit = (state.dormant || []).find((d) => d.id === resolved.key && d.revived !== true);
+        // 复活（6.3 delta ③ 的闭环另一半）：dormant 条目以活跃身份重新上报 →
+        // 回修复队列（下方正常建 issue），并从暂存迁出——后续轮 prompt 不再注入它。
+        // 判定不需要独立的标题匹配——resolveIssueIdentity 的 L2 已按标题归一查过
+        // dormant，标题命中时 resolved.key 即 dormant 条目的 id（编号或标题命中殊途同归）。
+        // 迁出（而非置形态 flag）：dormant 列表恒为 pending 单形态，残留已复活条目会让
+        // matchByTitle 对同题产生双命中假歧义（改号重报身份分裂，C1）。
+        const dormantHit = (state.dormant || []).find((d) => d.id === resolved.key);
         if (dormantHit) {
-          dormantHit.revived = true;
+          state.dormant = state.dormant.filter((d) => d !== dormantHit);
           log("Dormant revived: " + resolved.key + " re-reported in round " + round);
         }
         const origin = computeOrigin(entry, {
@@ -1322,18 +1314,7 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
         if (!origin) log("WARN: issue " + resolved.key + " carries no files — origin not attributable");
         const revivedTitle = dormantRevivalTitle(dormantHit, entry);
         if (revivedTitle) log("Dormant revival title inherited for " + resolved.key);
-        state.issues[resolved.key] = {
-          firstSeen: round,
-          severity: typeof entry === "string" ? "major" : (entry.severity || "major"),
-          status: "open", openStreak: 1,
-          history: [{ round, status: "open" }], fixAttempts: 0,
-          ...(typeof entry === "object" && typeof entry.title === "string" && entry.title
-            ? { title: entry.title }
-            : (revivedTitle ? { title: revivedTitle } : {})),
-          ...(origin ? { origin } : {}),
-          ...(typeof entry === "object" && typeof entry.guidance === "string" && entry.guidance ? { guidance: entry.guidance } : {}),
-          ...(typeof entry === "object" && typeof entry.evidence === "string" && entry.evidence ? { evidence: entry.evidence } : {}),
-        };
+        state.issues[resolved.key] = buildIssueEntry(entry, { round, openStreak: 1, origin, revivedTitle });
         added++;
       }
       state.idMap = { round, map: roundIdMap };

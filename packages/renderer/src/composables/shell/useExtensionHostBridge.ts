@@ -192,23 +192,39 @@ export interface HeaderActionsSource {
 
 export const HEADER_ACTIONS_SOURCE_KEY: InjectionKey<HeaderActionsSource> = Symbol('header-actions-source')
 
+/** 可见声明形状（isVisibleHeaderAction type predicate 的收窄产物：headerAction 段非空） */
+type VisibleHeaderActionRecord = ContributionRecord & {
+  headerAction: NonNullable<ContributionRecord['headerAction']>
+}
+
+/**
+ * headerAction 可见性谓词（单点）：声明缺省 / 运行时 hidden=true / （非 overlay 直开且）
+ * 无 commandId 三者皆不可见；E13/E3 簿记只影响 disabled/tooltip 不影响可见性。
+ *
+ * 消费点：HeaderActionsHost 的按钮渲染过滤（toHeaderActionButton 返回 null 的唯一判定源，
+ * 用户直接可见的正确性权威侧）与 hasVisibleHeaderActions（托盘聚合面板段「有可见按钮才
+ * 出段」+ 左簇密度 absent 判据）——可见性条件增删只改本函数，渲染与聚合判定构造性一致。
+ */
+export function isVisibleHeaderAction(
+  decl: ContributionRecord,
+  runtimeState: HeaderActionEntry | undefined,
+): decl is VisibleHeaderActionRecord {
+  const ha = decl.headerAction
+  if (!ha) return false
+  if (runtimeState?.hidden === true) return false
+  return ha.activation === 'scheduler-overlay' || !!ha.commandId
+}
+
 /**
  * 「当前 session 下是否存在至少一个可见 headerAction 按钮」判定（composer 左簇密度聚合用：
  * L2 起左簇聚合时 headerAction 入口从左簇摘除、改在托盘聚合面板首段渲染——聚合面板段的
- * 发丝分隔线需要「有可见按钮才出段」的同源判定，见 ComposerTray）。
- *
- * 判定条件与 `HeaderActionsHost` 的按钮渲染过滤（toHeaderActionButton 返回 null 的分支）
- * **保持字面同构**：声明缺省 / 运行时 hidden=true / （非 overlay 直开且）无 commandId 三者
- * 皆不可见；E13/E3 簿记只影响 disabled/tooltip 不影响可见性，不在此复制。两处若增删可见性
- * 条件必须同批改（composer-tray 聚合面板段用例钉住对账）。
+ * 发丝分隔线需要「有可见按钮才出段」的同源判定，见 ComposerTray）。可见性条件单点 =
+ * isVisibleHeaderAction（与按钮渲染过滤同调），无独立判定副本。
  */
 export function hasVisibleHeaderActions(source: HeaderActionsSource, sessionId: string): boolean {
-  return [...source.getDeclarations()].some((decl) => {
-    const ha = decl.headerAction
-    if (!ha) return false
-    if (source.getRuntimeState(sessionId, decl.contributionId)?.hidden === true) return false
-    return ha.activation === 'scheduler-overlay' || !!ha.commandId
-  })
+  return [...source.getDeclarations()].some((decl) =>
+    isVisibleHeaderAction(decl, source.getRuntimeState(sessionId, decl.contributionId)),
+  )
 }
 
 /**

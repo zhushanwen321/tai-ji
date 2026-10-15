@@ -90,11 +90,11 @@ import * as events from '@taiji/core/transport/api'
 import {
   useExtensionUI,
   formFilter,
-  __resetExtensionBusSubscriptionForTesting,
+  __testing,
 } from '@/composables/useExtensionUI'
 import {
   usePlanStore,
-  __resetPlanReviewColdSinkForTesting,
+  __testing as planStoreTesting,
 } from '@/stores/plan-store'
 import { sendExtensionUIResponse } from '@taiji/core/transport/api/domains/extension'
 
@@ -154,8 +154,8 @@ async function flushAsync(): Promise<void> {
 beforeEach(() => {
   // 模块级 refCount bus 订阅残留重置：不重置则上一用例组件的 handler 仍挂在 Set 里，
   // 事件会写进旧 pinia 的 store 分区，新用例组件读不到（对齐 useExtensionUI.test.ts）
-  __resetExtensionBusSubscriptionForTesting()
-  __resetPlanReviewColdSinkForTesting()
+  __testing.__resetExtensionBusSubscriptionForTesting()
+  planStoreTesting.__resetPlanReviewColdSinkForTesting()
   setActivePinia(createPinia())
   commandMock.mockReset()
   getPendingRequestsMock.mockReset().mockResolvedValue([])

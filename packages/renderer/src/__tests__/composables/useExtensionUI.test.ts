@@ -50,7 +50,7 @@ vi.mock('@/composables/shell/useExtensionHostBridge', async (importOriginal) => 
   }
 })
 
-import { useExtensionUI, formFilter, __resetExtensionBusSubscriptionForTesting } from '@/composables/useExtensionUI'
+import { useExtensionUI, formFilter, __testing } from '@/composables/useExtensionUI'
 import { sendExtensionUIResponse, getPendingRequests } from '@taiji/core/transport/api/domains/extension'
 import type { ExtensionUIRequest } from '@taiji/core/transport/api/domains/extension'
 import { useExtensionUIStore } from '@/stores/extension-ui'
@@ -92,7 +92,7 @@ function emitBusUIRequest(sid: string, request: unknown): void {
 
 beforeEach(() => {
   // 模块级 refCount 订阅残留重置（防跨测试串扰）+ 新 pinia + 新 bus 实例
-  __resetExtensionBusSubscriptionForTesting()
+  __testing.__resetExtensionBusSubscriptionForTesting()
   setActivePinia(createPinia())
   mockBus = new InternalEventBus()
   vi.mocked(sendExtensionUIResponse).mockClear()

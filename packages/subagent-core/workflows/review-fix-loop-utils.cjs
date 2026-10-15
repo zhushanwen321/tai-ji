@@ -704,9 +704,10 @@ function buildR2ReviewPrompt({ header, round, max, roundDir, reportFile, aggPath
       ]
     : [];
   // rfl dormant 复活段（tier-1 6.3 delta ③）：裁决降级条目的复活通道。清单是
-  // 上游 LLM 产出（裁决理由自由文本）——wrapUntrusted 包裹。revived=true 的条目
-  // 已回修复队列，不再注入；全空时无该段（prompt 形状稳定）。动态段内容（T9）。
-  const dormantPending = (dormant || []).filter((d) => d && d.id && d.revived !== true);
+  // 上游 LLM 产出（裁决理由自由文本）——wrapUntrusted 包裹。dormant 列表恒为
+  // pending 单形态（已复活条目在复活点即从暂存迁出），全量注入即可；全空时无
+  // 该段（prompt 形状稳定）。动态段内容（T9）。
+  const dormantPending = (dormant || []).filter((d) => d && d.id);
   const dormantSection = dormantPending.length > 0
     ? [
         "─── DORMANT ISSUES (adjudication-downgraded — revival channel) ────",
@@ -867,7 +868,7 @@ function resolveIssueIdentity(entry, { issues, dormant }) {
   // 无 title 可核 → 沿用该号（该 dormant 条目以活跃身份重报 = 复活，键即 dormant id）；
   // title 不一致 = 新问题冒用 dormant 占号（幽灵复活向量）→ 落 L2/L3 避让。
   // 缺此分支时 L3 会把 dormant 自身的 id 当「被占」避让——复活条目拿到新键，
-  // dormantHit（d.id === resolved.key）miss，revived 永不置位（复活链断裂）。
+  // dormantHit（d.id === resolved.key）miss，复活迁出不发生（复活链断裂）。
   const dormantSelf = (Array.isArray(dormant) ? dormant : []).find((d) => d && d.id === id);
   if (dormantSelf && titlesCompatible(dormantSelf.title, entry.title)) return { key: id, mapped: false };
   // L2：标题归一唯一命中
@@ -917,6 +918,14 @@ function translateReconSets(reconSeen, reconEscalate, reconFixed, idMap, issues)
 }
 
 /**
+ * ── 问题清单状态机 severity 词表（C2 登记，四值）──────────────────
+ * critical | major | minor | unknown。前三值 = 聚合 must-fix 条目的裁决等级
+ *（normalizeSeverity 单点 choke 归一，畸形值回退 major）；unknown = 对账通道
+ * 无 severity 数据的诚实缺省（registerNewFinding 新建条目——reviewer 的
+ * reconciliation 只报 prev_id 不带等级，写 major 会伪造裁决），消费侧按
+ * 「无等级数据」承接（注入段 [unknown] 显示、终态汇总 || "unknown"），
+ * 不得参与 critical/major/minor 的等级比较（如 converged 的「无 critical」判定）。
+ *
  * 5.1 对账驱动纯函数：基于 reviewer 的 reconciliation 声明（结构化）与上轮 state.issues 更新。
  * 判定：fix-attempted 未再现 → fixed；再现 → regressed（fixAttempts+1）；新 ID → open。
  * open/regressed + reconciliation 声明 fixed（verify-first，调用方已过滤 evidence 非空且
@@ -987,6 +996,25 @@ function applyFixedRegression(entry, statusNow, id, seen, round) {
   entry.status = "regressed";
   entry.fixAttempts = (entry.fixAttempts || 0) + 1;
   entry.history.push({ round, status: "regressed" });
+}
+
+/**
+ * 「重报 → regressed」转移（merge 路径唯一实装，C2 状态机转移单点化）：聚合器在
+ * reconCount===0（无对账数据场景，如 doc-reviewer-only 批）时重报 fix-attempted/fixed
+ * 条目 = 修复失败。语义与 merge 原内联块逐字段等价：status→regressed、fixAttempts+1
+ *（修复失败计数，needs-redesign 数据源）、openStreak+1、history 追加；severity 经
+ * inheritCarryoverFields 同源写入（采信本轮显式标注——与延续继承同一权威语义，不在此
+ * 重复第二份 severity 写法）。调用方门控（reconCount===0 且 status ∈ {fix-attempted,
+ * fixed}）在 review-fix-loop.js merge 循环内，本函数无条件转换。与 reconcile 路径的
+ * applyFixAttemptedOutcome/applyFixedRegression 语义同向但进入条件不同（对账通道吃
+ * 裸 prev_id 集合，merge 通道吃归一化富条目），不合并为一张转移表（C2 已裁决）。
+ */
+function applyCarryoverRegression(tracked, entry, round) {
+  tracked.status = "regressed";
+  tracked.fixAttempts = (tracked.fixAttempts || 0) + 1;
+  tracked.openStreak = (tracked.openStreak || 0) + 1;
+  inheritCarryoverFields(tracked, entry);
+  tracked.history.push({ round, status: "regressed" });
 }
 
 // open/regressed 且本轮仍在（seen）→ openStreak +1（跨轮字段）；漏报（未 seen）不增长（保守）。
@@ -1101,11 +1129,13 @@ function normalizeSeverity(x) {
   return (sevRaw === "critical" || sevRaw === "major" || sevRaw === "minor") ? sevRaw : "major";
 }
 
-/** must_fix_ids 单条归一：string 视作 major；object 经结构化校验后透传扩展字段；
- *  畸形条目返回 null（调用方 filter(Boolean) 剔除）。 */
+/** must_fix_ids 单条归一（normalize 契约权威层）：string 视作 major；object 经结构化
+ *  校验后透传扩展字段；畸形条目返回 null（调用方 filter(Boolean) 剔除）。空 id 条目
+ *（{id:""}/""）在本层拒绝（AC1-B1：空 id 不得建卡、不得进 ES3 must-fix 校验）——
+ *  消费侧的 !id 判据只是廉价防线，权威拦截在此单点。 */
 function normalizeMustFixEntry(x) {
-  if (typeof x === "string") return { id: x, severity: "major" };
-  if (!(x && typeof x === "object" && typeof x.id === "string")) return null;
+  if (typeof x === "string") return x.trim() ? { id: x, severity: "major" } : null;
+  if (!(x && typeof x === "object" && typeof x.id === "string" && x.id)) return null;
   const entry = { id: x.id, severity: normalizeSeverity(x) };
   // title（跨轮身份锚点，L1/L2 匹配原料）：string[] 旧格式无 title，保持无键（降级为
   // 纯编号匹配 = 现状行为，可接受）。
@@ -1125,6 +1155,33 @@ function normalizeMustFixEntry(x) {
     entry.adjudication = x.adjudication;
   }
   return entry;
+}
+
+/**
+ * 聚合条目 → 问题清单新建条目（R1 init 与 R2+ merge 共用单点构造，AC1 收敛双写）。
+ * entry = normalizeMustFixEntry 产物（恒对象：severity 恒 ∈ critical|major|minor 非空、
+ * title/guidance/evidence 已 trim 且非空或键缺省）——直读不设防，normalize 是唯一
+ * 防御层。R1/R2+ 建卡字段集差异仅限本函数参数化项（AC1-B4）：
+ * - round：firstSeen 与 history 轮号（R1 恒 1）
+ * - openStreak：R2+ 新建即 1（与 reconcile registerNewFinding 同语义）；R1 不传不落键
+ *   （现状行为保持——后续 accrueOpenStreak 按 (openStreak || 0) + 1 兼容）
+ * - origin：R2+ computeOrigin 产物（"regression"|"new"；R1 不传；undefined 不落键）
+ * - revivedTitle：dormant 复活继承 title——聚合器重报未自带 title 时回填（entry.title 优先）
+ */
+function buildIssueEntry(entry, { round, openStreak, origin, revivedTitle } = {}) {
+  const title = entry.title || revivedTitle;
+  return {
+    firstSeen: round,
+    severity: entry.severity,
+    status: "open",
+    ...(openStreak !== undefined ? { openStreak } : {}),
+    history: [{ round, status: "open" }],
+    fixAttempts: 0,
+    ...(title ? { title } : {}),
+    ...(origin ? { origin } : {}),
+    ...(entry.guidance ? { guidance: entry.guidance } : {}),
+    ...(entry.evidence ? { evidence: entry.evidence } : {}),
+  };
 }
 
 /**
@@ -1310,7 +1367,8 @@ const DORMANT_ADJUDICATIONS = new Set(["downgraded", "unverified"]);
  * @param dormant 现有 dormant 数组（不修改，返回新数组）
  * @param entries normalize 后的聚合条目
  * @param round 当前轮
- * @returns 新 dormant 数组：同 id 重复裁决幂等（round/原因更新，revived 保持）
+ * @returns 新 dormant 数组：同 id 重复裁决幂等（round/原因更新）；列表恒为 pending
+ *          单形态（已复活条目在复活点从暂存迁出，不经本函数回来）
  */
 /** excludeIds 归一为 Set：Set 直用，数组转 Set，其余（undefined 等）空集。 */
 function toIdSet(excludeIds) {
@@ -1344,7 +1402,6 @@ function recordDormant(dormant, entries, round, excludeIds) {
       existing.detail = detail;
       existing.round = round;
       if (title) existing.title = title;
-      // revived 保持——复活状态只由重新上报置位，不因再次降级重置
     } else {
       list.push({
         id: e.id,
@@ -1352,7 +1409,6 @@ function recordDormant(dormant, entries, round, excludeIds) {
         reason: "adjudication-" + e.adjudication,
         detail,
         round,
-        revived: false,
       });
     }
   }
@@ -1365,11 +1421,11 @@ function recordDormant(dormant, entries, round, excludeIds) {
  * title 缺失侧从本轮重报回填；severity 采信本轮显式标注（与 R1/regressed 分支的
  * 「entry.severity || 既有」聚合权威语义一致）。无 title 的延续条目会让跨轮身份锚点
  * 断链（L2 标题对账失配、prev_titles 注入段变 "no title recorded" 空壳）。
+ * 签名收窄（AC1）：tracked/entry 恒对象（tracked 取自 state.issues 活跃条目，entry 经
+ * normalize）——不设对象性防御，normalize 契约是唯一防御层。
  * 原地更新 tracked，返回是否有变更（调用方可记 log）。
  */
 function inheritCarryoverFields(tracked, entry) {
-  if (!tracked || typeof tracked !== "object") return false;
-  if (!entry || typeof entry !== "object") return false;
   let changed = false;
   if (!tracked.title && typeof entry.title === "string" && entry.title) {
     tracked.title = entry.title;
@@ -1386,9 +1442,11 @@ function inheritCarryoverFields(tracked, entry) {
  * dormant 复活条目的 title 继承（wf-1792073055433 空壳缺陷修复）：复活键即 dormant id
  * （resolveIssueIdentity dormant 自识别分支），活跃建卡若聚合器未带 title，从 dormant
  * 条目继承——跨轮身份锚点不断链。聚合器自带 title（或无可继承）返回 undefined。
+ * entry 恒对象（normalize 契约，AC1 签名收窄）；dormantHit 可缺（find 未命中是真实
+ * 运行时形态，保留判空）。
  */
 function dormantRevivalTitle(dormantHit, entry) {
-  if (entry && typeof entry === "object" && typeof entry.title === "string" && entry.title) return undefined;
+  if (typeof entry.title === "string" && entry.title) return undefined;
   if (!dormantHit || typeof dormantHit.title !== "string" || !dormantHit.title) return undefined;
   return dormantHit.title;
 }
@@ -1406,16 +1464,17 @@ function filterActiveIds(entries) {
 
 /**
  * exec-review 修复（对账通道的 dormant 分区）：reconciliation 声明的 prev_id 中，
- * 当前处于 dormant pending（revived=false）的 id 在进入 reconcileIssues 之前剔除。
+ * 当前处于 dormant 暂存的 id 在进入 reconcileIssues 之前剔除。dormant 列表恒为
+ * pending 单形态（已复活条目在复活点即迁出，无形态修饰字段），全量即为 pending 集。
  * 理由：dormant 条目从未进修复队列（filterActiveIds 过滤），reviewer 对它声明
  * not-fixed 是无意义对账（它本来就没修）；若不剔除，reconcileIssues 会为 seen 中
  * 的未追踪 id 无条件新建 open issue——降级条目经对账通道绕过过滤重回修复队列，
  * 与设计 6.3「降级后不再驱动 fix 轮」矛盾。复活通道唯一入口是聚合 must_fix_ids
- * 的活跃重报（merge 分支置位 revived）。
+ * 的活跃重报（merge 分支从暂存迁出）。
  */
 function filterDormantFromRecon(reconSeen, reconEscalate, dormant) {
   const pending = new Set((Array.isArray(dormant) ? dormant : [])
-    .filter((d) => d && typeof d.id === "string" && d.revived !== true)
+    .filter((d) => d && typeof d.id === "string")
     .map((d) => d.id));
   if (pending.size === 0) return { seen: reconSeen, escalate: reconEscalate };
   const seen = new Set([...(reconSeen || [])].filter((id) => !pending.has(id)));
@@ -1975,6 +2034,7 @@ module.exports = {
   translateId,
   translateReconSets,
   reconcileIssues,
+  applyCarryoverRegression,
   normalizeReviewResult,
   normalizeGroupEntry,
   reconcileGroups,
@@ -1983,6 +2043,7 @@ module.exports = {
   findNeedsRedesign,
   parseResult,
   normalizeAggregatorResult,
+  buildIssueEntry,
   resolveRunRoot,
   computeOrigin,
   recordDormant,

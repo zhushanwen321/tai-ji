@@ -5,11 +5,9 @@
  * schedule-create 扩义面职责随 D5 收敛改写）。
  *
  * hasPendingBlockingOverlay 判定键收敛为 form（新 form 帧原生携带 / legacy askUser /
- * scheduleCreate 帧经 useExtensionUI 归一层附加——store 记录入队前必经归一），
- * hasPendingDialog 对称判据（form 类不归 dialog）。本文件锁定：
+ * scheduleCreate 帧经 useExtensionUI 归一层附加——store 记录入队前必经归一）。本文件锁定：
  * - getter 对 legacy scheduler 表单请求（归一后 form + scheduleCreate 双键）的查询结果
  *   （消费方 ①deriveStatus waiting 的数据源）
- * - hasPendingDialog 不把 form 类误归 dialog 类（双 getter 恒不双真）
  * - 裸 legacy 形状（无 form 键、未经归一）不命中 overlay 判定（判定面收敛语义）
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/stores/extension-ui-schedule-create.test.ts
@@ -94,21 +92,3 @@ describe('form 键判定：hasPendingBlockingOverlay 覆盖 legacy scheduler 表
   })
 })
 
-describe('hasPendingDialog 对称判据：form 类不归 dialog 类', () => {
-  it('只有 legacy scheduler 表单请求 → hasPendingDialog false（与 hasPendingBlockingOverlay 不双真）', () => {
-    const store = useExtensionUIStore()
-    store.addRequest('sess-A', makeScheduleCreate({ requestId: 'r1' }))
-
-    expect(store.hasPendingDialog('sess-A')).toBe(false)
-    expect(store.hasPendingBlockingOverlay('sess-A')).toBe(true)
-  })
-
-  it('form 帧同样不归 dialog（对称语义保持）；普通 dialog 归 dialog', () => {
-    const store = useExtensionUIStore()
-    store.addRequest('sess-A', makeForm('r1'))
-    expect(store.hasPendingDialog('sess-A')).toBe(false)
-
-    store.addRequest('sess-A', makeDialog('r2'))
-    expect(store.hasPendingDialog('sess-A')).toBe(true)
-  })
-})

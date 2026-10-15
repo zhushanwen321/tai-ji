@@ -25,13 +25,22 @@
  * （exports require.types）及同基 .d.ts 的导出符号集双向比对，差集非空 = FAIL。
  * `export * from` 无法文本枚举——按依赖闭包守卫同款 fail-closed 处理，直接 FAIL。
  *
+ * 门③ workflows/ 手写声明对导出符号双向对账：./workflows/* 子入口源码直发（不经
+ * tsup，门② 覆盖不到），同名 .cjs + .d.cts 手写声明对（现 review-fix-loop-utils）
+ * 的「module.exports ↔ d.cts 声明」三处同步义务原先纯靠人工——实现改名/删导出而
+ * 声明陈旧时 tsc 按旧声明检查测试静默绿。门③ 解析 cjs module.exports 键集合与
+ * d.cts 运行时声明名（type/interface 无运行时对应物不入集）双向比对，差集非空 =
+ * FAIL（符号级；签名级后置）。d.cts 现行「仅声明测试消费的导出」政策下的存量未
+ * 声明子集经 WORKFLOWS_UNDECLARED_ALLOWED 逐条登记理由后放行。不依赖 dist 构建。
+ *
  * 运行时机：subagent-core build 之后（本脚本只读，不自行 build——dist 缺失即 FAIL，
- * 提示先 `cd packages/subagent-core && pnpm build`）；pre-merge / release 管线可挂。
+ * 提示先 `cd packages/subagent-core && pnpm build`；门③ 不依赖 dist，dist 缺失时
+ * 门① 置红整体退出码但门③ 照常执行）；pre-merge / release 管线可挂。
  * 调用：`node scripts/check-core-dist-gate.mjs`（任意 cwd，路径自 import.meta.url 推导）。
  * 全绿 exit 0；任一 FAIL exit 1。零第三方依赖（node:fs / node:path / node:url）。
  */
-import { existsSync, readFileSync } from 'node:fs'
-import { dirname, join, resolve as resolvePath } from 'node:path'
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
+import { basename, dirname, join, relative, resolve as resolvePath } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -49,6 +58,9 @@ export {
   extractSrcExportNames,
   reportExportDrift,
   gateTwo,
+  extractCjsModuleExportsKeys,
+  extractDctsRuntimeExportNames,
+  gateWorkflowsDeclarationPairs,
 }
 
 let failures = 0
@@ -472,6 +484,181 @@ function gateTwo(pkg, subentries, coreDir = CORE_DIR) {
   for (const sub of subentries) checkSubentryFace(pkg, sub, coreDir)
 }
 
+// ---------- 门③：workflows/ 手写声明对导出符号双向对账 ----------
+
+/**
+ * 「已知未声明豁免登记」（键 = 相对 workflows/ 的 cjs 路径，值 = 允许不在 d.cts 声明的
+ * 导出名集合）。d.cts 现行政策是「仅声明测试消费的导出」（d.cts 头注释自载），cjs 导出
+ * 面 ⊋ d.cts 声明面属政策内存量——逐条登记理由后放行；在 d.cts 补了声明的条目应从此处
+ * 删除（残留条目惰性无害，但登记须保持 = 实际未声明集合的准确清单）。未登记的新增未
+ * 声明导出 → 门③红，强制二选一：补声明，或登记理由。
+ */
+const WORKFLOWS_UNDECLARED_ALLOWED = new Map([
+  [
+    'review-fix-loop-utils.cjs',
+    new Set([
+      // 调度池常量/阈值：仅 check-rfl-parity.mjs（纯 JS require 对账）与 workflow 主脚本
+      // 运行时消费，无 TS 类型消费面——d.cts 政策下无声明义务
+      'SLOW_POOL',
+      'FAST_POOL',
+      'DRIFTER_POOL',
+      'SLOW_PKG_THRESHOLD',
+      'SLOW_CHURN_THRESHOLD',
+      // 仅 workflow 主脚本（review-fix-loop.js）运行时消费，TS 测试未消费——同上无声明义务
+      'computeKnownRemaining',
+    ]),
+  ],
+])
+
+/** 块内容按深度 0 逗号切分（字符串字面量整段跳过、{}[]() 内 depth>0 不切）——嵌套
+ * 字面量值保持单一导出项，不被碎成假键静默入集 */
+function splitTopLevelParts(text) {
+  const parts = []
+  let depth = 0
+  let start = 0
+  let i = 0
+  while (i < text.length) {
+    const c = text[i]
+    if (c === '"' || c === "'" || c === '`') {
+      i = consumeString(text, i).next
+      continue
+    }
+    if (c === '{' || c === '[' || c === '(') depth++
+    else if (c === '}' || c === ']' || c === ')') depth--
+    else if (c === ',' && depth === 0) {
+      parts.push(text.slice(start, i))
+      start = i + 1
+    }
+    i++
+  }
+  parts.push(text.slice(start))
+  return parts
+}
+
+/**
+ * cjs `module.exports = { ... }` 块的导出键集合（短手法标识符 + `key: value` 键；注释
+ * 先剥离）。块缺失 / 花括号未闭合 / 出现块外补充导出（`module.exports.x =` /
+ * `exports.x =`）/ 无法解析的导出项（计算键、展开等）→ problems（fail-closed：宁可
+ * 报错人工看，不静默漏符号）。
+ */
+function extractCjsModuleExportsKeys(cjsRaw, where) {
+  const t = stripComments(cjsRaw)
+  const problems = []
+  const names = new Set()
+  const blockStart = /module\.exports\s*=\s*\{/.exec(t)
+  if (!blockStart) {
+    problems.push(`${where}: 未找到 module.exports = { } 块——导出面无法解析`)
+    return { names, problems }
+  }
+  const open = blockStart.index + blockStart[0].length - 1
+  const close = findBlockClose(t, open)
+  if (close < 0) {
+    problems.push(`${where}: module.exports { } 花括号未闭合——文本解析失败`)
+    return { names, problems }
+  }
+  // 导出项形态：`name`（短手法）或 `"key"/'key': 表达式（导出名 = 键，键须为合法标识符）
+  const keyRe = /^(?:["']?([A-Za-z_$][\w$]*)["']?\s*:|([A-Za-z_$][\w$]*)$)/
+  for (const rawPart of splitTopLevelParts(t.slice(open + 1, close))) {
+    const part = rawPart.trim()
+    if (part === '') continue
+    const km = keyRe.exec(part)
+    if (!km) {
+      problems.push(`${where}: module.exports 内无法解析的导出项「${part}」——文本解析失败`)
+      continue
+    }
+    names.add(km[1] ?? km[2])
+  }
+  if (/^\s*(?:module\.exports\.[A-Za-z_$]|exports\.[A-Za-z_$])\s*=/m.test(t)) {
+    problems.push(
+      `${where}: 存在 module.exports.x = / exports.x = 块外补充导出——请并入 module.exports = { } 单一导出块（本检查只对账单一导出块）`,
+    )
+  }
+  return { names, problems }
+}
+
+/**
+ * d.cts 运行时导出声明名（function/const/let/var/class/enum——运行时有对应物的声明）。
+ * type/interface 是声明文件专属类型基建，无运行时对应物，不入集。出现 `export { }` 块
+ * 或 `export default` → problems（fail-closed：declare 声明形态之外的导出面无法枚举）。
+ */
+function extractDctsRuntimeExportNames(dtsRaw, where) {
+  const t = stripComments(dtsRaw)
+  const problems = []
+  const names = new Set()
+  const declRe =
+    /^export\s+(?:declare\s+)?(?:async\s+)?(?:function\s*\*?|const|let|var|class|enum)\s+([A-Za-z_$][\w$]*)/gm
+  for (const m of t.matchAll(declRe)) names.add(m[1])
+  if (/^export\s*\{/m.test(t)) {
+    problems.push(`${where}: 出现 export { } 块形态——本检查只枚举 export declare/const/function 声明形态，请展开为声明形态或人工核对`)
+  }
+  if (/^export\s+default\b/m.test(t)) {
+    problems.push(`${where}: 出现 export default——运行时导出名无法文本枚举`)
+  }
+  return { names, problems }
+}
+
+/** 递归收集目录下全部 .cjs 文件（含 _shared/ 等子目录；目录不存在返回空） */
+function listCjsFilesDeep(dir) {
+  const out = []
+  let entries
+  try {
+    entries = readdirSync(dir, { withFileTypes: true })
+  } catch {
+    return out
+  }
+  for (const e of entries) {
+    const abs = join(dir, e.name)
+    if (e.isDirectory()) out.push(...listCjsFilesDeep(abs))
+    else if (e.isFile() && e.name.endsWith('.cjs')) out.push(abs)
+  }
+  return out.sort()
+}
+
+/**
+ * 门③：workflows/ 手写声明对（*.cjs + 同名 *.d.cts）导出符号双向对账（符号级）。
+ * 无 .d.cts 的 .cjs 不是手写声明对，不设声明义务；新增声明对自动纳入监测。
+ * 对 workflowsDir 与豁免登记注入（单测 fixture 落 tmpdir 用，CLI 用真实目录 + 默认登记）。
+ */
+function gateWorkflowsDeclarationPairs(workflowsDir, undeclaredAllowed = WORKFLOWS_UNDECLARED_ALLOWED) {
+  console.log('[门③] workflows/ 手写声明对导出符号双向对账（cjs module.exports ↔ d.cts 声明，符号级）')
+  const pairs = listCjsFilesDeep(workflowsDir).filter((f) => existsSync(f.replace(/\.cjs$/, '.d.cts')))
+  if (pairs.length === 0) {
+    console.log('  ⚠ workflows/ 无手写声明对（*.cjs + 同名 *.d.cts）——门③空转（新增声明对自动纳入监测）')
+    return
+  }
+  for (const cjsAbs of pairs) {
+    const cjsKey = relative(workflowsDir, cjsAbs)
+    const cjsRel = join(basename(workflowsDir), cjsKey)
+    const dctsRel = cjsRel.replace(/\.cjs$/, '.d.cts')
+    const cjs = extractCjsModuleExportsKeys(readFileSync(cjsAbs, 'utf8'), cjsRel)
+    const dcts = extractDctsRuntimeExportNames(readFileSync(cjsAbs.replace(/\.cjs$/, '.d.cts'), 'utf8'), dctsRel)
+    const problems = [...cjs.problems, ...dcts.problems]
+    if (problems.length > 0) {
+      for (const p of problems) fail(p)
+      continue
+    }
+    const allowed = undeclaredAllowed.get(cjsKey) ?? new Set()
+    // 陈旧声明方向（d.cts 声明、cjs 已无）：运行时取值即 undefined 而 tsc 按旧声明放行
+    // 测试——本检查要拦的核心静默绿窗口，不设豁免
+    const onlyInDcts = diffSets(dcts.names, cjs.names)
+    // 未声明方向（cjs 导出、d.cts 无声明）：外部 TS 消费者拿 any——豁免登记外必须红
+    const onlyInCjs = diffSets(cjs.names, new Set([...dcts.names, ...allowed]))
+    if (onlyInDcts.length === 0 && onlyInCjs.length === 0) {
+      ok(`${cjsRel} ↔ ${dctsRel}: cjs ${cjs.names.size} 导出 / d.cts ${dcts.names.size} 声明（豁免登记 ${allowed.size}），双向零漂移`)
+      continue
+    }
+    if (onlyInDcts.length > 0) {
+      fail(`${cjsRel}: 仅 d.cts 声明、cjs module.exports 已无（陈旧声明——运行时取值 undefined 而 tsc 静默绿）: ${onlyInDcts.join(', ')}`)
+    }
+    if (onlyInCjs.length > 0) {
+      fail(
+        `${cjsRel}: 仅 cjs 导出、d.cts 未声明且未登记豁免: ${onlyInCjs.join(', ')}` +
+          `——在 d.cts 补声明，或在 WORKFLOWS_UNDECLARED_ALLOWED 登记理由（check-core-dist-gate.mjs）`,
+      )
+    }
+  }
+}
+
 // main()：CLI 直跑才执行（vitest import 纯函数导出时不触发门禁扫描/exit）
 function main() {
   const pkg = loadPkg()
@@ -479,14 +666,15 @@ function main() {
   const { subentries, fatal } = collectSubentries(pkg)
   if (!fatal) gateOne(bundles, subentries)
   gateTwo(pkg, subentries)
+  gateWorkflowsDeclarationPairs(join(CORE_DIR, 'workflows'))
   // ---------- 汇总 ----------
 
 if (failures === 0) {
-  console.log('✓ subagent-core dist 静态门通过（重叠 module 纯度 + 导出面零漂移）')
+  console.log('✓ subagent-core dist 静态门通过（重叠 module 纯度 + 导出面零漂移 + workflows 声明对零漂移）')
   process.exit(0)
 }
 console.error(`✗ subagent-core dist 静态门失败：${failures} 项 FAIL（上方 ✗ 行）`)
-console.error('  排查顺序：① cd packages/subagent-core && pnpm build 后重跑；② 核对 tsup.config.ts 多入口与 package.json exports 一致；③ 重叠 module 可变状态按 globalThis[Symbol.for] 范式迁移（设计 §3.2 B-2）')
+console.error('  排查顺序：① cd packages/subagent-core && pnpm build 后重跑；② 核对 tsup.config.ts 多入口与 package.json exports 一致；③ 重叠 module 可变状态按 globalThis[Symbol.for] 范式迁移（设计 §3.2 B-2）；④ 门③ 差集按输出提示补 d.cts 声明或登记豁免')
 process.exit(1)
 }
 

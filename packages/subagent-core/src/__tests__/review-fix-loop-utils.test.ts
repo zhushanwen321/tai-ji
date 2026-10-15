@@ -35,6 +35,7 @@ import {
   matchByTitle,
   nextFreeId,
   resolveIssueIdentity,
+  applyCarryoverRegression,
   translateId,
   validateFixResult,
   reconcileIssues,
@@ -45,6 +46,7 @@ import {
   findNeedsRedesign,
   parseResult,
   normalizeAggregatorResult,
+  buildIssueEntry,
   resolveRunRoot,
   computeOrigin,
   recordDormant,
@@ -1460,22 +1462,21 @@ describe("B3 recordDormant / filterActiveIds（dormant 落盘 + 消费侧过滤�
     expect(dormant).toHaveLength(2);
     expect(dormant[0]).toEqual({
       id: "MF-D1", reason: "adjudication-downgraded",
-      detail: "no reproducible evidence", round: 1, revived: false,
+      detail: "no reproducible evidence", round: 1,
     });
     expect(dormant[1]).toEqual({
       id: "MF-U1", reason: "adjudication-unverified",
-      detail: "claims test failure", round: 1, revived: false,
+      detail: "claims test failure", round: 1,
     });
   });
 
-  it("B3 同 id 重复裁决幂等（round/原因更新，revived 保持）；纯函数返回新数组不改输入", () => {
+  it("B3 同 id 重复裁决幂等（round/原因更新）；纯函数返回新数组不改输入", () => {
     const first = recordDormant([], entries, 1);
-    first[0].revived = true; // 模拟已复活
     const again = recordDormant(first, [
       { id: "MF-D1", severity: "major", adjudication: "downgraded", note: "still weak" },
     ], 3);
     expect(again).toHaveLength(2);
-    expect(again[0]).toMatchObject({ id: "MF-D1", round: 3, detail: "still weak", revived: true });
+    expect(again[0]).toMatchObject({ id: "MF-D1", round: 3, detail: "still weak" });
     // 输入数组未被修改（纯函数）
     expect(first[0].round).toBe(1);
     expect(first[0].detail).toBe("no reproducible evidence");
@@ -1488,40 +1489,80 @@ describe("B3 recordDormant / filterActiveIds（dormant 落盘 + 消费侧过滤�
   });
 });
 
-describe("B3b 延续条目字段继承（wf-1792073055433 空壳缺陷修复）", () => {
+describe("B3b 延续条目字段继承（wf-1792073055433 空壳缺陷修复；AC1 收窄签名）", () => {
+  const mkTracked = (extra: Record<string, unknown> = {}): { title?: string; severity?: string; [key: string]: unknown } => ({
+    id: "MF-1", status: "open", ...extra,
+  });
   it("inheritCarryoverFields：清单缺 title 时从重报回填（防跨轮身份锚点断链）", () => {
-    const tracked: Record<string, unknown> = { id: "S-1", severity: "major", status: "open" };
+    const tracked = mkTracked({ severity: "major" });
     expect(inheritCarryoverFields(tracked, { id: "S-1", severity: "major", title: "fit 容器尺寸竞态" })).toBe(true);
     expect(tracked.title).toBe("fit 容器尺寸竞态");
   });
 
   it("inheritCarryoverFields：清单已有 title 为权威，重报不覆盖（措辞漂移不污染身份锚点）", () => {
-    const tracked: Record<string, unknown> = { id: "MF-1", title: "原始标题", severity: "major" };
+    const tracked = mkTracked({ title: "原始标题", severity: "major" });
     expect(inheritCarryoverFields(tracked, { id: "MF-1", severity: "major", title: "同题换措辞" })).toBe(false);
     expect(tracked.title).toBe("原始标题");
   });
 
   it("inheritCarryoverFields：severity 采信本轮显式标注（聚合权威语义，与 regressed 分支一致）", () => {
-    const tracked: Record<string, unknown> = { id: "MF-1", title: "t", severity: "minor" };
+    const tracked = mkTracked({ title: "t", severity: "minor" });
     expect(inheritCarryoverFields(tracked, { id: "MF-1", severity: "critical" })).toBe(true);
     expect(tracked.severity).toBe("critical");
     // 相同值不记变更
     expect(inheritCarryoverFields(tracked, { id: "MF-1", severity: "critical" })).toBe(false);
   });
 
-  it("inheritCarryoverFields：非对象重报（旧格式 string 归一后的边界）不动作不挪状态", () => {
-    const tracked: Record<string, unknown> = { id: "MF-1", title: "t", severity: "major" };
-    expect(inheritCarryoverFields(tracked, undefined)).toBe(false);
-    expect(inheritCarryoverFields(undefined, { id: "MF-1" })).toBe(false);
-    expect(tracked).toEqual({ id: "MF-1", title: "t", severity: "major" });
-  });
-
   it("dormantRevivalTitle：聚合器无 title 时从 dormant 条目继承（复活不丢身份锚点）", () => {
     const dormantHit = { id: "MF-D1", title: "callId 静默回退", reason: "adjudication-downgraded" };
     expect(dormantRevivalTitle(dormantHit, { id: "MF-D1", severity: "major" })).toBe("callId 静默回退");
     expect(dormantRevivalTitle(dormantHit, { id: "MF-D1", severity: "major", title: "重报自带" })).toBeUndefined();
-    expect(dormantRevivalTitle(undefined, { id: "MF-D1" })).toBeUndefined();
-    expect(dormantRevivalTitle({ id: "MF-D1" }, { id: "MF-D1" })).toBeUndefined();
+    // dormantHit 未命中（undefined）是真实运行时形态（find miss）
+    expect(dormantRevivalTitle(undefined, { id: "MF-D1", severity: "major" })).toBeUndefined();
+    expect(dormantRevivalTitle({ id: "MF-D1" }, { id: "MF-D1", severity: "major" })).toBeUndefined();
+  });
+});
+
+describe("buildIssueEntry — 聚合条目建卡单点构造（R1 init / R2+ merge 共用，AC1 收敛双写）", () => {
+  const entry = { id: "MF-1", severity: "critical", title: "Null check missing", guidance: "add null check", evidence: "src/a.ts:12" };
+  it("R1 形态：firstSeen=1、无 openStreak/origin 键；severity/title/guidance/evidence 直读（逐字段断言）", () => {
+    expect(buildIssueEntry(entry, { round: 1 })).toEqual({
+      firstSeen: 1,
+      severity: "critical",
+      status: "open",
+      history: [{ round: 1, status: "open" }],
+      fixAttempts: 0,
+      title: "Null check missing",
+      guidance: "add null check",
+      evidence: "src/a.ts:12",
+    });
+  });
+  it("R2+ 形态：openStreak=1、origin 落键；entry.title 优先于 revivedTitle（逐字段断言）", () => {
+    expect(buildIssueEntry(entry, { round: 3, openStreak: 1, origin: "regression", revivedTitle: "old dormant title" })).toEqual({
+      firstSeen: 3,
+      severity: "critical",
+      status: "open",
+      openStreak: 1,
+      history: [{ round: 3, status: "open" }],
+      fixAttempts: 0,
+      title: "Null check missing",
+      origin: "regression",
+      guidance: "add null check",
+      evidence: "src/a.ts:12",
+    });
+  });
+  it("dormant 复活继承：聚合器无 title 时回填 revivedTitle；origin/guidance/evidence 缺省不落键", () => {
+    const out = buildIssueEntry(
+      { id: "MF-7", severity: "major" },
+      { round: 2, openStreak: 1, origin: undefined, revivedTitle: "callId 静默回退" },
+    );
+    expect(out.title).toBe("callId 静默回退");
+    expect("origin" in out).toBe(false);
+    expect("guidance" in out).toBe(false);
+    expect("evidence" in out).toBe(false);
+  });
+  it("R1 无 openStreak 键（现状行为保持——后续 accrueOpenStreak 按 (openStreak || 0) 兼容）", () => {
+    expect("openStreak" in buildIssueEntry(entry, { round: 1 })).toBe(false);
   });
 });
 
@@ -1535,7 +1576,7 @@ describe("B4 buildR2ReviewPrompt dormant 复活段注入", () => {
   it("B4 dormant 非空 → prompt 含 DORMANT 段 + wrapUntrusted 包裹 + 复活条件说明", () => {
     const p = buildR2ReviewPrompt({
       ...baseArgs,
-      dormant: [{ id: "MF-D1", reason: "adjudication-downgraded", detail: "weak evidence", round: 1, revived: false }],
+      dormant: [{ id: "MF-D1", reason: "adjudication-downgraded", detail: "weak evidence", round: 1 }],
     });
     expect(p).toContain("DORMANT ISSUES");
     expect(p).toContain('<untrusted source="dormant">');
@@ -1544,12 +1585,7 @@ describe("B4 buildR2ReviewPrompt dormant 复活段注入", () => {
     expect(p).toContain("Revival rule");
   });
 
-  it("B4 dormant 全部 revived=true 或空 → 无该段（prompt 形状稳定）；revived 条目不注入", () => {
-    const withRevived = buildR2ReviewPrompt({
-      ...baseArgs,
-      dormant: [{ id: "MF-D1", reason: "adjudication-downgraded", detail: "x", round: 1, revived: true }],
-    });
-    expect(withRevived).not.toContain("DORMANT ISSUES");
+  it("B4 dormant 空或缺省 → 无该段（prompt 形状稳定；已复活条目经迁出不在列表）", () => {
     expect(buildR2ReviewPrompt({ ...baseArgs, dormant: [] })).not.toContain("DORMANT ISSUES");
     // 兼容：不传 dormant（undefined）也无该段
     expect(buildR2ReviewPrompt(baseArgs)).not.toContain("DORMANT ISSUES");
@@ -1849,34 +1885,35 @@ describe("D3 R1 空数组说明 + 修复建议必填列（T9 连带）", () => {
 // ── exec-review 复审补充：dormant 对账分区的定向单测 ──────────────
 
 describe("filterDormantFromRecon + applyCleanRoundBackfill 的 dormant 分区", () => {
-  it("pending dormant id 从 seen/escalate 剔除；revived=true 与非 dormant id 保留；空 dormant 原样返回", () => {
+  it("dormant 暂存 id 从 seen/escalate 剔除；非 dormant id 保留；空 dormant 原样返回", () => {
+    // MF-1-2：列表恒 pending 单形态（已复活条目在复活点迁出），全量即为待剔除集
     const dormant = [
-      { id: "MF-D1", reason: "adjudication-downgraded", detail: "x", round: 1, revived: false },
-      { id: "MF-D2", reason: "adjudication-unverified", detail: "y", round: 1, revived: true },
+      { id: "MF-D1", reason: "adjudication-downgraded", detail: "x", round: 1 },
+      { id: "MF-D2", reason: "adjudication-unverified", detail: "y", round: 1 },
     ];
     const seen = new Set(["MF-D1", "MF-D2", "MF-LIVE"]);
     const escalate = new Set(["MF-D1"]);
     const out = filterDormantFromRecon(seen, escalate, dormant);
-    expect([...out.seen].sort()).toEqual(["MF-D2", "MF-LIVE"]); // D1 剔除（pending），D2 revived 保留
+    expect([...out.seen].sort()).toEqual(["MF-LIVE"]); // D1/D2 剔除（暂存），LIVE 保留
     expect([...out.escalate]).toEqual([]); // D1 剔除
     // 空/无 dormant：原引用返回（不新建 Set）
     const empty = filterDormantFromRecon(seen, escalate, []);
     expect(empty.seen).toBe(seen);
   });
 
-  it("clean 轮场景：reconSeen 只含 pending dormant id 时无过滤会新建 issue、有过滤则不建", () => {
+  it("clean 轮场景：reconSeen 只含 dormant 暂存 id 时无过滤会新建 issue、有过滤则不建", () => {
     const state = {
       issues: {},
       knownRemaining: [],
       scores: [],
       fixResults: [],
-      dormant: [{ id: "MF-D1", reason: "adjudication-downgraded", detail: "x", round: 1, revived: false }],
+      dormant: [{ id: "MF-D1", reason: "adjudication-downgraded", detail: "x", round: 1 }],
     };
     // reviewer 在 clean 终止轮对 dormant id 声明 not-fixed（绕过向量）
     const out = applyCleanRoundBackfill(state, { reconSeen: new Set(["MF-D1"]), reconEscalate: new Set(), round: 2, stuckThreshold: 3 });
     // 过滤生效：MF-D1 不经对账通道建 issue（复活唯一入口 = 聚合活跃重报）
     expect(out.state.issues["MF-D1"]).toBeUndefined();
-    expect(out.state.dormant![0].revived).toBe(false);
+    expect(out.state.dormant).toHaveLength(1); // 未复活条目仍留暂存
   });
 });
 
@@ -1910,6 +1947,13 @@ describe("A3 buildFixPrompt 文档总线（per-fixer 文档 + guidance 链说明
 });
 
 describe("A5 normalizeAggregatorResult severity 枚举校验（畸形回退 major）", () => {
+  it("AC1-B1 空 id 条目 normalize 层拒绝（{id:\"\"} 与 \"\" 均剔除——不建卡、不进 ES3）", () => {
+    const r = normalizeAggregatorResult({
+      must_fix: 2, suggestion: 0,
+      must_fix_ids: [{ id: "", severity: "major" }, { id: "MF-1", severity: "major" }, ""],
+    });
+    expect(r!.must_fix_ids).toEqual([{ id: "MF-1", severity: "major" }]);
+  });
   it("A5 畸形 severity（blocker / 空串 / 缺省 / 非字符串）→ 一律回退 major", () => {
     const r = normalizeAggregatorResult({
       must_fix: 4, suggestion: 0,
@@ -2129,7 +2173,7 @@ describe("normTitle / matchByTitle — 标题归一与唯一匹配", () => {
     expect(matchByTitle("null check   IN parser", issues, [])).toEqual({ kind: "issue", id: "MF-1" });
   });
   it("唯一命中 dormant → { kind: dormant, id }", () => {
-    const dormant = [{ id: "MF-7", title: "Missing boundary guard", revived: false }];
+    const dormant = [{ id: "MF-7", title: "Missing boundary guard" }];
     expect(matchByTitle("missing boundary guard", {}, dormant)).toEqual({ kind: "dormant", id: "MF-7" });
   });
   it("短标题（<5 归一长度）不参与匹配（碰撞率高）", () => {
@@ -2184,16 +2228,66 @@ describe("resolveIssueIdentity — 三级身份对齐", () => {
     expect(out.mapped).toBe(true);
   });
   it("L2：编号未命中但标题归一唯一命中 dormant → 沿用 dormant id（同题换号复活走原条目）", () => {
-    const dormant = [{ id: "MF-7", title: "Missing boundary guard", revived: false }];
+    const dormant = [{ id: "MF-7", title: "Missing boundary guard" }];
     const out = resolveIssueIdentity(
       { id: "MF-3", title: "missing boundary guard" },
       { issues: {}, dormant },
     );
     expect(out).toEqual({ key: "MF-7", mapped: true });
   });
+  // MF-1-2（复活即迁出）：dormant 列表恒为 pending 单形态——已复活条目在复活点从
+  // 暂存迁出，不再滞留身份匹配池。以下两用例锁定迁出后的状态形状下身份对齐行为。
+  it("MF-1-2 复活迁出后同题改号重报 → 身份保持（L2 命中原键，不裂成两条）", () => {
+    // 场景：MF-3 曾以 MF-7 号 dormant 后复活（迁出后 dormant 为空），聚合器下轮
+    // 改号 MF-7 重报同题——修复前 dormant 残留 revived 条目时 dormantSelf 命中幽灵
+    // 返回 MF-7，同一问题身份裂成两条（MF-3 + 新建的 MF-7）。
+    const out = resolveIssueIdentity(
+      { id: "MF-7", title: "Missing boundary guard" },
+      { issues: { "MF-3": { status: "open", title: "Missing boundary guard" } }, dormant: [] },
+    );
+    expect(out).toEqual({ key: "MF-3", mapped: true });
+  });
+  it("MF-1-2 matchByTitle 对已迁出 dormant 不再命中（无双命中假歧义）", () => {
+    // 修复前：dormant 残留复活条目时与 issues 同题双命中 → undefined → L3 避让改键。
+    // 迁出后 dormant 为空 → 唯一命中 issues 键。
+    expect(matchByTitle("Missing boundary guard", { "MF-3": { status: "open", title: "Missing boundary guard" } }, []))
+      .toEqual({ kind: "issue", id: "MF-3" });
+  });
   it("L3：全新条目、编号未被占 → 直接用原号（mapped=false，主路径零开销）", () => {
     const out = resolveIssueIdentity({ id: "MF-5", title: "a fresh finding" }, { issues: mkIssues(), dormant: [] });
     expect(out).toEqual({ key: "MF-5", mapped: false });
+  });
+});
+
+describe("applyCarryoverRegression — 「重报 → regressed」转移纯函数（merge 路径单点实装，C2）", () => {
+  const trackedBase = (status: string) => ({
+    firstSeen: 1, severity: "major", status, openStreak: 0,
+    history: [{ round: 1, status: "open" }], fixAttempts: 0,
+  });
+  it("fix-attempted + 重报 → regressed、fixAttempts+1、openStreak+1、history 追加（B1 逐字段等价）", () => {
+    const tracked = trackedBase("fix-attempted");
+    applyCarryoverRegression(tracked, { id: "MF-1", severity: "major" }, 3);
+    expect(tracked.status).toBe("regressed");
+    expect(tracked.fixAttempts).toBe(1);
+    expect(tracked.openStreak).toBe(1);
+    expect(tracked.history).toContainEqual({ round: 3, status: "regressed" });
+  });
+  it("fixed + 重报 → 同样转 regressed（复发同计修复失败，needs-redesign 可达）", () => {
+    const tracked = { ...trackedBase("fixed"), fixAttempts: 1, openStreak: 2, history: [{ round: 1, status: "open" }, { round: 2, status: "fixed" }] };
+    applyCarryoverRegression(tracked, { id: "MF-1", severity: "major" }, 4);
+    expect(tracked.status).toBe("regressed");
+    expect(tracked.fixAttempts).toBe(2);
+    expect(tracked.openStreak).toBe(3);
+  });
+  it("severity 继承：采信本轮显式标注（与延续继承同一权威语义，无第二份 severity 写法）", () => {
+    const tracked = trackedBase("fix-attempted");
+    applyCarryoverRegression(tracked, { id: "MF-1", severity: "critical" }, 2);
+    expect(tracked.severity).toBe("critical");
+  });
+  it("title 清单权威：转换不覆盖既有 title（title 继承只由调用方继承点承担）", () => {
+    const tracked = { ...trackedBase("fix-attempted"), title: "原始标题" };
+    applyCarryoverRegression(tracked, { id: "MF-1", severity: "major", title: "重报换措辞" }, 2);
+    expect(tracked.title).toBe("原始标题");
   });
 });
 

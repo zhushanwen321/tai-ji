@@ -988,7 +988,7 @@
       "run": "node scripts/check-rfl-parity.mjs && cd packages/subagent-core && npx vitest run src/__tests__/review-fix-loop-utils.test.ts src/__tests__/review-fix-loop-script.test.ts",
       "owner": "packages/subagent-core",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
-      "note": "R2 态：循环协议行为由 utils/script 两测试件零 token 锁定（含 disputed 通道用例，经 run 命令执行，不重复登记为 asset——共享基建目录防聚合泛化）；与 zcode 原生版（仓外 ~/.zcode/workflows/review-fix-loop.dwf.ts）的语义同源由 check-rfl-parity.mjs 机器锁步（结构骨架 + planReviewerOrder 行为对账 + 排列不变量，zcode 副本缺失时 SKIP）。真机验证 = 真实 PR 流水线 run（2026-09-23 PR #19 四轮：disputed 通道协议在 R4 首跑收敛，maxRounds 收窄下 round-2 复核 16/16 fixed）"
+      "note": "R2 态：循环协议行为由 utils/script 两测试件零 token 锁定（含 disputed 通道用例，经 run 命令执行，不重复登记为 asset——共享基建目录防聚合泛化）；与 zcode 原生版（仓外 ~/.zcode/workflows/review-fix-loop.dwf.ts）的语义同源由 check-rfl-parity.mjs 机器锁步（结构骨架 = 调度层 7 项标记 + 问题清单层两侧共有标记 normIssueId/titlesCompatible/TITLE_MATCH_MIN + planReviewerOrder 行为对账 + 排列不变量，zcode 副本缺失时 SKIP；问题清单层仅结构标记锁步——延续合并 title 权威 / title 可选性 / 复活模型的两侧语义差异以守卫脚本头部登记清单为准）。真机验证 = 真实 PR 流水线 run（2026-09-23 PR #19 四轮：disputed 通道协议在 R4 首跑收敛，maxRounds 收窄下 round-2 复核 16/16 fixed）"
     },
     {
       "id": "E2E-ZCODE-01",
@@ -2290,6 +2290,36 @@
       "owner": "scripts/",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
       "note": "R2 态：改脚本本体或 preflight 接线时干跑（当前树 resources/pi 缺失 → exit 0 放行即绿）；dev symlink 形态下红是合法失败（正是脚本职责，--fix 恢复）。判定与恢复见 docs/TROUBLESHOOTING.md 常见问题 §29"
+    },
+    {
+      "id": "E2E-PIPE-14",
+      "summary": "review-fix-loop 双平台守卫轨：check-rfl-parity（调度层 + 问题清单层标记锁步 + D1-D4 两侧差异登记清单）与 check-core-dist-gate 门③（cjs module.exports 键集合 ↔ d.cts export declare 函数名双向差集，fail-closed）",
+      "scope": [
+        "scripts/check-rfl-parity.mjs",
+        "scripts/check-core-dist-gate.mjs",
+        "scripts/__tests__/check-core-dist-gate.test.mjs"
+      ],
+      "layer": "L1",
+      "assets": [
+        {
+          "kind": "script",
+          "ref": "scripts/check-rfl-parity.mjs"
+        },
+        {
+          "kind": "script",
+          "ref": "scripts/check-core-dist-gate.mjs"
+        },
+        {
+          "kind": "spec",
+          "ref": "scripts/__tests__/check-core-dist-gate.test.mjs"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "node scripts/check-rfl-parity.mjs && node scripts/check-core-dist-gate.mjs && npx vitest run scripts/__tests__/check-core-dist-gate.test.mjs",
+      "owner": "packages/subagent-core",
+      "authority": "docs/adr/decisions.md",
+      "note": "R2 态：守卫改本体或扩面时实跑三命令全绿（rfl-parity 对真实两侧 exit 0 + 门③双向零漂移 + 门③自测）；问题清单层语义差异（title 权威 / title 可选性 / 复活模型）以守卫脚本头部 D1-D4 登记清单为准"
     }
   ]
 }

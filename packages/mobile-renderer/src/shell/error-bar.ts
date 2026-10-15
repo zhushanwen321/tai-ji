@@ -26,7 +26,10 @@ export function dismissErrorBar(): void {
   errorBarMessage.value = null
 }
 
-/** 测试后门：清空单槽文本（模块级 ref 跨用例隔离；companion-bridge 测试隔离出口委托此实现） */
-export function resetErrorBarForTest(): void {
+/** 清空单槽文本（模块级 ref 跨用例隔离；companion-bridge 测试隔离出口委托此实现） */
+function resetErrorBarForTest(): void {
   errorBarMessage.value = null
 }
+
+/** 测试后门命名空间（生产代码禁止消费，对齐 __testing 先例；MF-1-10 裸导出收编）。 */
+export const __testing = { resetErrorBarForTest }

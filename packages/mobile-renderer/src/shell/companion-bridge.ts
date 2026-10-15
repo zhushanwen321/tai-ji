@@ -10,8 +10,9 @@
 // __tests__/）。本模块只做移动壳裁决：
 // - 简单 dialog 走 CompanionBand（C4 门固定排除面之内）；form/planReview 类请求被同一 C4
 //   门排除出 CompanionBand，由本模块 form 通道承接（MobileFormCard 渲染 + 作答回传），
-//   消费语义与桌面 useExtensionUI 同构：C4 放行面（form ∨ planReview）+ requestId dedup +
-//   per-session Map 分区 + requests-invalidated 失效摘除 + getPendingRequests 快照对账；
+//   通道算法（C4 放行面 form ∨ planReview + requestId dedup + per-session Map 分区 +
+//   requests-invalidated 失效摘除 + getPendingRequests 快照对账）在
+//   @taiji/ui/extension-host createFormRequestChannel 单点（桌面 useExtensionUI 同 factory）；
 // - bus 模块级私有单例（桌面走 getExtensionBus 惰性单例，来源选择是壳裁决）；
 // - 壳层能力回调按移动壳形态注入（remote-use A11/U14）：onPiResponseSettled 不注入
 //   （空操作，对齐「移动壳无 pendingSend 链」）；notifyNotDelivered 注入错误条提示
@@ -30,15 +31,16 @@ import { InternalEventBus, MessageBusBridge } from '@taiji/core/extension-host'
 import type { ExtensionInteractMethod } from '@taiji/shared'
 import {
   createCompanionDialogAdapters,
+  createFormRequestChannel,
   createPermissionRequestController,
   createWsPluginMessageSource,
+  type FormChannelPartitions,
 } from '@taiji/ui/extension-host'
 import type { DialogRequestQueue, PermissionTransport, PermissionRequestState } from '@taiji/ui/extension-host'
-import { getPendingRequests, sendExtensionUIResponse, type ExtensionUIRequest } from '@taiji/core/transport/api/domains/extension'
+import type { ExtensionUIRequest } from '@taiji/core/transport/api/domains/extension'
 import { registerSessionCleanup } from '@taiji/core/foundation/use-session-scoped-state'
-import { isPlanReviewFrame, isRichInteractionFrame } from './form-protocol'
 import { chatStore } from './app-runtime'
-import { showErrorBar, resetErrorBarForTest as resetErrorBarSlotForTest } from './error-bar'
+import { showErrorBar, __testing as errorBarTesting } from './error-bar'
 import { i18n } from '../i18n'
 
 // vue-i18n 的 t 复杂重载收窄为 (key, params?) => string（对齐 app-runtime 同款收窄）
@@ -63,7 +65,7 @@ export const __testing = {
   },
   /** 错误条跨用例隔离：清空单槽文本（error-bar 模块级单例 ref，防错误残留泄漏到后续用例） */
   resetErrorBarForTest(): void {
-    resetErrorBarSlotForTest()
+    errorBarTesting.resetErrorBarForTest()
   },
   /** exited 重置通路跨用例隔离：清空 dialog queue 句柄（模块级 let，防句柄残留跨用例串扰） */
   resetDialogQueueHandleForTest(): void {
@@ -141,26 +143,49 @@ export function useMobilePermissionRequest(): PermissionRequestState {
 
 // ── form/planReview 类请求通道（remote-use-mobile D7（移动壳 v1 功能集裁定）form 行恢复：统一表单 + plan 审批的移动壳消费面）──
 //
-// 消费语义与桌面 useExtensionUI 同构（桌面 per-panel 订阅 + pinia store SSOT；移动壳无
-// pinia，模块级 reactive Map 分区承接，ADR-0049 per-session Map 范式）：
+// 通道算法（C4 富交互门 / 快照对账差集剔除 / 失效摘除 / respond 未送达保留-送达摘除 /
+// 队首读口）已下沉 @taiji/ui/extension-host createFormRequestChannel（双壳单点，桌面
+// useExtensionUI 是同 factory 的 pinia store 分区实现）；本模块只做移动壳装配：
+// - 模块级 reactive Map 分区适配（factory FormChannelPartitions 接口的移动实现——移动壳无
+//   pinia，ADR-0049 per-session Map 范式；桌面 extensionUIStore 是同接口的另一实现）；
 // - 订阅永驻模块级（不随视图挂载/卸载）——切 tab / 切 session 期间到达的请求照常入分区，
-//   视图按 activeSessionId 派生渲染；快照对账（getPendingRequests 差集剔除）由
-//   useMobileFormRequests 在 sid 变化与连接恢复边沿两处触发（桌面 subscribe(sid) 同式）；
+//   视图按 activeSessionId 派生渲染；快照对账由 useMobileFormRequests 在 sid 变化与连接
+//   恢复边沿两处触发（factory reconcile）；
 // - 无 sid 的 ui-request 跳过（C2；同帧 dialog 通道已 warn，此处不重复告警）；
-// - 撤窗语义与桌面 form 链同源：pi 源无超时撤窗广播，失效链
-//   requests-invalidated（turn abort / session 销毁等非 respond 终结）按 requestId 摘除；
-//   plugin 源 form 类帧桌面同样不消费 expired 广播（shell-adapters 反查表只在 dialog
-//   投递流写入，C4 排除帧不落表 → miss noop），移动壳镜像该语义。
+// - 撤窗语义：pi 源无超时撤窗广播，失效链 requests-invalidated（turn abort / session 销毁
+//   等非 respond 终结）按 requestId 摘除（factory invalidate）；plugin 源 form 类帧不消费
+//   expired 广播（shell-adapters 反查表只在 dialog 投递流写入，C4 排除帧不落表 → miss
+//   noop）。
 
 /**
  * per-session form/planReview 请求分区（requestId 全局唯一，跨分区无重叠）。
  * 登记表主表 #53（声明处 @data-owner #53）——runtime 双源（bus ui-request 实时帧 +
- * getPendingRequests 快照）的消费副本，写口 addFormRequest / removeFormRequests /
- * clearFormRequestsForSession 三函数封闭于本模块，清理点 = registerSessionCleanup（删除）
- * + resetCompanionChannelsForExitedSession（exited 分通道重置）。
+ * getPendingRequests 快照）的消费副本，写口经 formPartitions 适配器封闭于本模块，
+ * 清理点 = registerSessionCleanup（删除）+ resetCompanionChannelsForExitedSession
+ * （exited 分通道重置）+ clearAllFormRequests（runtime-unavailable 断连收口）。
  */
-// @data-owner #52 —— 主表 #52 mobile 壳 form/planReview 挂起请求分区（消费副本）
+// @data-owner #53 —— 主表 #53 mobile 壳 form/planReview 挂起请求分区（消费副本）
 const formRequestsBySid = reactive(new Map<string, ExtensionUIRequest[]>())
+
+/** factory FormChannelPartitions 的移动实现（reactive Map 读写全经本适配器；add 带
+ *  requestId dedup——实时帧 + 快照补入双源幂等） */
+const formPartitions: FormChannelPartitions = {
+  get: (sid) => formRequestsBySid.get(sid) ?? [],
+  add: (sid, req) => {
+    const list = formRequestsBySid.get(sid) ?? []
+    if (list.some((r) => r.requestId === req.requestId)) return
+    formRequestsBySid.set(sid, [...list, req])
+  },
+  remove: (sid, requestIds) => {
+    const list = formRequestsBySid.get(sid)
+    if (!list) return
+    const ids = new Set(requestIds)
+    const next = list.filter((r) => !ids.has(r.requestId))
+    if (next.length === list.length) return
+    if (next.length === 0) formRequestsBySid.delete(sid)
+    else formRequestsBySid.set(sid, next)
+  },
+}
 
 /**
  * form 帧的公共读取面：bus ui-request 的 request（core DialogRequest，marker 键由索引签名
@@ -199,33 +224,30 @@ function toMobileFormRequest(sid: string, request: FormFrameSource): ExtensionUI
   }
 }
 
-/** 入分区（requestId dedup：实时帧 + 快照补入双源幂等，桌面 store.addRequest T1 同式） */
-function addFormRequest(sid: string, req: ExtensionUIRequest): void {
-  const list = formRequestsBySid.get(sid) ?? []
-  if (list.some((r) => r.requestId === req.requestId)) return
-  formRequestsBySid.set(sid, [...list, req])
-}
+// 通道装配（算法在 factory；呈现类钩子居本模块——错误条/诊断留痕是移动壳裁决）
+const formChannel = createFormRequestChannel({
+  partitions: formPartitions,
+  // 热帧与快照帧同一适配器（FormFrameSource 是两源结构交集，见上）
+  adaptFrame: toMobileFormRequest,
+  adaptSnapshot: toMobileFormRequest,
+  onRespondExpired: (_sid, requestId) => {
+    // 已终结 requestId 的应答丢弃并留痕（诊断留痕，不占错误条单槽——单槽留给 core 失败面）
+    console.warn('[companion-bridge] form response dropped (request no longer pending):', requestId)
+  },
+  onRespondUndelivered: (_sid, requestId) => {
+    // 未送达：分区条目保留（factory 语义），连接恢复后同 requestId 重发幂等（M1/RD-3#1）
+    console.warn('[companion-bridge] form response not delivered (WS closed), kept for retry:', requestId)
+  },
+})
 
-/** 按 requestId 出分区（失效链 / respond 送达后共用；幂等） */
-function removeFormRequests(sid: string, requestIds: readonly string[]): void {
-  const list = formRequestsBySid.get(sid)
-  if (!list) return
-  const ids = new Set(requestIds)
-  const next = list.filter((r) => !ids.has(r.requestId))
-  if (next.length === list.length) return
-  if (next.length === 0) formRequestsBySid.delete(sid)
-  else formRequestsBySid.set(sid, next)
-}
-
-// 永驻订阅（模块级单次注册）：C4 富交互放行面与桌面 useExtensionUI handler 同式
+// 永驻订阅（模块级单次注册）：C4 门在 factory ingest 内（form ∨ planReview 放行）
 void bus.on('ui-request', (e) => {
   if (!e.sessionId) return
-  if (!isRichInteractionFrame(e.request)) return
-  addFormRequest(e.sessionId, toMobileFormRequest(e.sessionId, e.request))
+  formChannel.ingest(e.sessionId, e.request)
 })
 void bus.on('requests-invalidated', (e) => {
   if (!e.sessionId) return
-  removeFormRequests(e.sessionId, e.requestIds)
+  formChannel.invalidate(e.sessionId, e.requestIds)
 })
 
 // ── session.exited 分通道重置编排（remote-use U6 / D5 exited 分区清理段 + 「exited 清理与
@@ -257,6 +279,19 @@ function clearFormRequestsForSession(sid: string): void {
   formRequestsBySid.delete(sid)
 }
 
+/**
+ * form/planReview 分区全局清空（bootstrap onRuntimeUnavailable 断连收口消费）：对齐桌面
+ * useMessageEffects.handleRuntimeUnavailable 的 extensionUI clearAllPending——runtime 崩溃
+ * / 重启用尽后 runtime pending 内存表已清零，移动壳分区若保留条目，屏上僵尸 form 卡在
+ * WS 重连窗口内提交即假成功（旧 runtime 对已终结 requestId 静默忽略，请求方空等）。
+ * reactive Map 整表替换，派生视图（currentFormRequest 等）自动清空。dialog 通道 queue
+ * 两壳一致不清（dialog 另有确认条重试形态，对齐桌面 clearAllPending 只清 extensionUI
+ * 分区的范围），本出口不扩范围。
+ */
+export function clearAllFormRequests(): void {
+  formRequestsBySid.clear()
+}
+
 // [remote-use U12] form 分区删除路径注册（销毁语义）：session 永久删除时经删除编排
 // （deleteSession → core triggerSessionCleanups）清分区——已删会话的残留请求不再可作答
 // （M8 防御）。与 exited 分通道重置（resetCompanionChannelsForExitedSession，重置语义）
@@ -276,12 +311,12 @@ export function resetCompanionChannelsForExitedSession(sid: string): void {
 }
 
 export type MobileFormRequests = {
-  /** 队首 form 类请求（form 帧 / legacy 归一帧；桌面 currentFormRequest 同式取 first） */
+  /** 队首 form 类请求（form 帧 / legacy 归一帧；factory firstFormRequest 读口派生） */
   currentFormRequest: ComputedRef<ExtensionUIRequest | undefined>
   /** 队首 planReview 审批请求（桌面 PlanReviewBar 消费面的移动形态） */
   currentPlanReviewRequest: ComputedRef<PlanReviewFrameForView | undefined>
   /**
-   * 作答回传（桌面 respond 同构）：result 经 sendExtensionUIResponse（method 透传），
+   * 作答回传（factory respond 核心流）：result 经 sendExtensionUIResponse（method 透传），
    * 未送达（WS 非 OPEN）保留请求可重试（M1/RD-3#1），送达即出分区。请求已终结
    * （失效/已应答）→ 迟到应答丢弃 + console 留痕（诊断留痕，不占错误条单槽）。返回值 =
    * 是否送达，App 编排消费（false → MobileFormCard 内联错误行，回传失败不静默）。
@@ -306,71 +341,42 @@ export type PlanReviewFrameForView = {
 /**
  * form/planReview 通道的会话视图（App.vue 聊天视图编排消费）：
  * - 按 activeSessionId 派生队首请求（无 sid 恒空，分区隔离；切 session 读不同分区）；
- * - 快照对账（差集剔除 + 补入，桌面 subscribe 快照段同式）两处触发：sid 变化（本模块
- *   watch）+ 连接恢复边沿（App.vue watch(isConnected) connected 边沿调 reconcileNow——
- *   静默重连保持视图挂载、sid 不变，断连期间到达的请求经此补挂 / 已终结的经此剔除）；
- *   模块级实时订阅保证不漏帧，快照是权威对账面，不在快照中的旧条目一律移除，空快照也执行。
+ * - 快照对账（factory reconcile：差集剔除 + 富交互帧补入，空快照也剔除）两处触发：
+ *   sid 变化（本模块 watch）+ 连接恢复边沿（App.vue watch(isConnected) connected 边沿调
+ *   reconcileNow——静默重连保持视图挂载、sid 不变，断连期间到达的请求经此补挂 / 已终结
+ *   的经此剔除）；模块级实时订阅保证不漏帧，快照是权威对账面。
  */
 export function useMobileFormRequests(sessionId: Ref<string | null>): MobileFormRequests {
   const currentFormRequest = computed<ExtensionUIRequest | undefined>(() => {
     const sid = sessionId.value
     if (!sid) return undefined
-    return formRequestsBySid.get(sid)?.find((r) => r.form === true)
+    return formChannel.firstFormRequest(sid)
   })
 
   const currentPlanReviewRequest = computed<PlanReviewFrameForView | undefined>(() => {
     const sid = sessionId.value
     if (!sid) return undefined
-    const found = formRequestsBySid.get(sid)?.find(isPlanReviewFrame)
+    const found = formChannel.planReviewRequests(sid)[0]
     return found ? { requestId: found.requestId, ...(found.selfReview !== undefined ? { selfReview: found.selfReview } : {}) } : undefined
   })
 
-  // 快照对账（权威 pending 集；差集剔除调用在补入循环之外——空快照同样执行剔除）
-  function reconcileSnapshot(sid: string): void {
-    void getPendingRequests(sid)
-      .then((pending) => {
-        const keepIds = new Set(pending.filter(isRichInteractionFrame).map((r) => r.requestId))
-        const existing = formRequestsBySid.get(sid) ?? []
-        removeFormRequests(sid, existing.filter((r) => !keepIds.has(r.requestId)).map((r) => r.requestId))
-        for (const req of pending) {
-          if (!isRichInteractionFrame(req)) continue
-          // 快照帧经 runtime {...r,...r.payload} 解包即 view-ready 帧（form:true 原生携带），
-          // 直接入分区（dedup 幂等；receivedAt 语义移动壳无消费面，不搬运）
-          addFormRequest(sid, toMobileFormRequest(sid, req))
-        }
-      })
-      .catch((err) => {
-        console.warn('[companion-bridge] failed to reconcile pending form requests:', err)
-      })
-  }
-
   watch(sessionId, (sid) => {
-    if (sid) reconcileSnapshot(sid)
+    if (sid) formChannel.reconcile(sid)
   }, { immediate: true })
 
   // 连接恢复边沿的对账入口（App.vue watch(isConnected) 消费；sid 为空跳过）
   function reconcileNow(): void {
     const sid = sessionId.value
-    if (sid) reconcileSnapshot(sid)
+    if (sid) formChannel.reconcile(sid)
   }
 
   function respond(requestId: string, result: boolean | string | null): boolean {
     const sid = sessionId.value
     if (!sid) return false
-    const target = (formRequestsBySid.get(sid) ?? []).find((r) => r.requestId === requestId)
-    if (!target) {
-      // 已终结 requestId 的应答丢弃并留痕（诊断留痕，不占错误条单槽——单槽留给 core 失败面）
-      console.warn('[companion-bridge] form response dropped (request no longer pending):', requestId)
-      return false
-    }
-    const delivered = sendExtensionUIResponse(sid, target.requestId, target.dialogKind, result)
-    if (!delivered) {
-      // 未送达：保留分区条目，连接恢复后同 requestId 重发幂等（M1/RD-3#1）
-      console.warn('[companion-bridge] form response not delivered (WS closed), kept for retry:', requestId)
-      return false
-    }
-    removeFormRequests(sid, [requestId])
-    return true
+    // 回传核心流（定位 / 未送达保留 / 送达摘除）与呈现钩子（已终结留痕 / 未送达留痕）
+    // 在 factory + 上方 formChannel 装配段；返回值 = 是否送达，App 编排消费（false →
+    // MobileFormCard 内联错误行，回传失败不静默）
+    return formChannel.respond(sid, requestId, result)
   }
 
   function cancel(requestId: string): void {

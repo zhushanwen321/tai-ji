@@ -108,7 +108,7 @@ import zhPlan from '@/i18n/locales/zh-CN/plan'
 import enPlan from '@/i18n/locales/en-US/plan'
 import { usePlanStore } from '@/stores/plan-store'
 import { useExtensionUIStore } from '@/stores/extension-ui'
-import { isPlanReviewRequest, __resetExtensionBusSubscriptionForTesting } from '@/composables/useExtensionUI'
+import { isPlanReviewRequest, __testing } from '@/composables/useExtensionUI'
 
 const SID = 'sess-mode-bar'
 
@@ -166,7 +166,7 @@ async function flushAsync(): Promise<void> {
 
 beforeEach(() => {
   // 模块级 refCount bus 订阅残留重置（对齐 plan-review-bar.test.ts）
-  __resetExtensionBusSubscriptionForTesting()
+  __testing.__resetExtensionBusSubscriptionForTesting()
   setActivePinia(createPinia())
   commandMock.mockReset()
   getPendingRequestsMock.mockReset().mockResolvedValue([])

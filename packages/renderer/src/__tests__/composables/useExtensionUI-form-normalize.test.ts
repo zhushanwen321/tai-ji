@@ -44,7 +44,7 @@ vi.mock('@/composables/shell/useExtensionHostBridge', async (importOriginal) => 
 import {
   useExtensionUI,
   formFilter,
-  __resetExtensionBusSubscriptionForTesting,
+  __testing,
 } from '@/composables/useExtensionUI'
 import { sendExtensionUIResponse, getPendingRequests } from '@taiji/core/transport/api/domains/extension'
 import { useExtensionUIStore } from '@/stores/extension-ui'
@@ -132,7 +132,7 @@ function runWithScope<T>(fn: () => T): { result: T; dispose: () => void } {
 }
 
 beforeEach(() => {
-  __resetExtensionBusSubscriptionForTesting()
+  __testing.__resetExtensionBusSubscriptionForTesting()
   setActivePinia(createPinia())
   mockBus = new InternalEventBus()
   vi.mocked(sendExtensionUIResponse).mockClear()
@@ -266,9 +266,10 @@ describe('pending 路径（runtime {...r,...r.payload} 解包的 view-ready 帧�
     dispose()
   })
 
-  it('pending 返回无标记普通帧 → 不命中 overlay 队列（C4 语义不扩）', async () => {
-    // 原行为保真：pending 全量入 store（dialog 类供 hasPendingDialog 等消费面查询），
-    // currentFormRequest 只认 form 键
+  it('pending 返回无标记普通帧 → 不命中 overlay 队列且不入 store 分区（快照补入富交互过滤，C4 语义不扩）', async () => {
+    // MF-1-7 收敛后行为（对齐移动侧语义）：快照补入只入富交互帧（factory reconcile 过滤），
+    // 普通 dialog 帧不进 store 分区（分区是富交互请求的权威消费副本——CompanionBand 消费的
+    // 普通 dialog 帧走 bus 直连，不经 store）
     vi.mocked(getPendingRequests).mockResolvedValue([
       mkPlainSelectReq('r-plain') as never as ExtensionUIRequest,
     ])
@@ -278,9 +279,7 @@ describe('pending 路径（runtime {...r,...r.payload} 解包的 view-ready 帧�
     await nextTick()
 
     expect(result.currentFormRequest.value).toBeUndefined()
-    const records = useExtensionUIStore().getRequestsBySession('sessionA')
-    expect(records).toHaveLength(1)
-    expect(records[0].form).toBeUndefined()
+    expect(useExtensionUIStore().getRequestsBySession('sessionA')).toHaveLength(0)
     dispose()
   })
 })

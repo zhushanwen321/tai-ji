@@ -25,7 +25,7 @@ export interface AgentState {
   knownRemaining: string[];
   scores: ScoreEntry[];
   fixResults?: unknown[];
-  dormant?: Array<{ id: string; reason?: string; detail?: string; round?: number; revived?: boolean; [key: string]: unknown }>;
+  dormant?: Array<{ id: string; reason?: string; detail?: string; round?: number; title?: string; [key: string]: unknown }>;
   idMap?: { round?: number; map?: Record<string, string> };
   [key: string]: unknown;
 }
@@ -149,6 +149,11 @@ export declare function reconcileIssues(
     stuckThreshold: number;
   },
 ): { issues: Record<string, IssueEntry>; stuck: boolean; knownRemaining: string[]; [key: string]: unknown };
+export declare function applyCarryoverRegression(
+  tracked: { status?: string; fixAttempts?: number; openStreak?: number; severity?: string; title?: string; history?: Array<{ round?: number; status?: string; [key: string]: unknown }>; [key: string]: unknown },
+  entry: { id: string; severity: string; title?: string; [key: string]: unknown },
+  round: number,
+): void;
 export declare function normalizeReviewResult(raw: unknown): {
   report_file?: string;
   report_content?: string;
@@ -176,7 +181,7 @@ export declare function reconcileGroups(
 export declare function normalizeAggregatorResult(raw: unknown): {
   must_fix: number;
   suggestion: number;
-  must_fix_ids: Array<{ id?: string; issue_id?: string; severity?: string; [key: string]: unknown }>;
+  must_fix_ids: Array<AggMustFixEntry>;
   scores?: ScoreEntry[];
   [key: string]: unknown;
 };
@@ -198,14 +203,28 @@ export declare function recordDormant(
   round: number,
   excludeIds?: unknown[] | Set<unknown>,
 ): Array<{ id: string; [key: string]: unknown }>;
+/** 聚合 must-fix 归一条目（normalizeMustFixEntry 产物，恒对象——消费层契约锚）。 */
+export interface AggMustFixEntry {
+  id: string;
+  severity: string;
+  title?: string;
+  guidance?: string;
+  evidence?: string;
+  [key: string]: unknown;
+}
+
 export declare function inheritCarryoverFields(
-  tracked: Record<string, unknown> | undefined | null,
-  entry: Record<string, unknown> | undefined | null,
+  tracked: { title?: string; severity?: string; [key: string]: unknown },
+  entry: AggMustFixEntry,
 ): boolean;
 export declare function dormantRevivalTitle(
-  dormantHit: { title?: unknown; [key: string]: unknown } | undefined | null,
-  entry: Record<string, unknown> | undefined | null,
+  dormantHit: { title?: string; [key: string]: unknown } | undefined | null,
+  entry: AggMustFixEntry,
 ): string | undefined;
+export declare function buildIssueEntry(
+  entry: AggMustFixEntry,
+  opts?: { round: number; openStreak?: number; origin?: string; revivedTitle?: string },
+): IssueEntry;
 export declare function filterActiveIds(
   entries: Array<{ id?: string; adjudication?: string; [key: string]: unknown }>,
 ): string[];

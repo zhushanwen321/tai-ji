@@ -23,6 +23,7 @@ import { i18n } from './i18n'
 import { createLifecycleEffects } from '@taiji/core'
 import { chatStore, sessionStore } from './shell/app-runtime'
 import {
+  clearAllFormRequests,
   errorBarEffects,
   resetCompanionChannelsForExitedSession,
 } from './shell/companion-bridge'
@@ -39,6 +40,19 @@ import {
 
 // vue-i18n 的 t 复杂重载收窄为 (key, params?) => string（对齐 app-runtime 同款收窄）
 const t = i18n.global.t as (key: string, params?: Record<string, unknown>) => string
+
+/**
+ * 断连/重启用尽的对话流收口（对齐桌面 useMessageEffects.handleRuntimeUnavailable）：
+ * 断连宽限（10s）到期或重连放弃（failed）时，①把在途 streaming 消息落终态、错误作为
+ * assistant 消息插入对话流（项目规则#3：错误必须重置状态）；②清空 form/planReview 挂起
+ * 分区（clearAllFormRequests，对齐桌面 extensionUI clearAllPending——runtime 重启后是全新
+ * 实例，挂起 Promise 不会被 resolve，僵尸 form 卡在 WS 重连窗口内提交即假成功）。不接线 =
+ * 断连后 composer 永久卡「生成中」。模块级提取供 __testing 装配断言消费（shellEffects 同式）。
+ */
+function handleRuntimeUnavailable(reason: 'restart' | 'disconnect'): void {
+  chatStore.finalizeAllStreaming(reason)
+  clearAllFormRequests()
+}
 
 // session 生命周期 core 语义实例（remote-use D5/U6）：exited/restored/restoreFailed 的
 // 最小语义（markSessionError/markDead/流式终结/订阅簿记失效/恢复窗口订阅/revive/重订阅/
@@ -77,8 +91,9 @@ const shellEffects = {
 }
 
 // 测试后门命名空间（生产代码禁止消费，对齐 app-runtime __testing 先例）：
-// 壳 effects 装配断言入口——接线位断言（onSubagents 与壳模块导出同源直挂、非 factory 内）。
-export const __testing = { shellEffects }
+// 壳 effects 装配断言入口——接线位断言（onSubagents 与壳模块导出同源直挂、非 factory 内；
+// onRuntimeUnavailable 与 setConnectionPorts 注入同源、非内联箭头）。
+export const __testing = { shellEffects, handleRuntimeUnavailable }
 
 // bootstrap —— mobile 壳启动编排。
 export async function bootstrap(): Promise<void> {
@@ -133,13 +148,14 @@ export async function bootstrap(): Promise<void> {
     // reject 流入用户可见 UI（列表 loadError role=alert）。透传 key 会把裸 key 直出给用户。
     // i18n.global.t 的复杂重载收窄为 (key, params?) => string（对齐 app-runtime 同款收窄）。
     t: i18n.global.t as (key: string, params?: Record<string, unknown>) => string,
-    // 断连/重启用尽的对话流收口（对齐桌面 useMessageEffects.handleRuntimeUnavailable，减去
-    // extensionUI clearAllPending——移动壳无 extension UI）：断连宽限（10s）到期或重连放弃
-    // （failed）时，把在途 streaming 消息落终态、错误作为 assistant 消息插入对话流（项目
-    // 规则#3：错误必须重置状态）。不接线 = 断连后 composer 永久卡「生成中」。
-    onRuntimeUnavailable: (reason) => {
-      chatStore.finalizeAllStreaming(reason)
-    },
+    // 断连/重启用尽的对话流收口（对齐桌面 useMessageEffects.handleRuntimeUnavailable 双收口
+    // 形态——finalizeAllStreaming + form/planReview 分区清空 clearAllFormRequests，对应桌面
+    // extensionUI clearAllPending；dialog 通道 queue 两壳一致不清）：断连宽限（10s）到期或
+    // 重连放弃（failed）时，把在途 streaming 消息落终态、错误作为 assistant 消息插入对话流
+    // （项目规则#3：错误必须重置状态），并清空 form 挂起分区——runtime 重启后挂起 Promise
+    // 不会被 resolve，僵尸 form 卡在 WS 重连窗口内提交即假成功。不接线 = 断连后 composer
+    // 永久卡「生成中」。
+    onRuntimeUnavailable: handleRuntimeUnavailable,
   })
 
   // 4. core transport/coordination 序列（远程 profile 分支：D4 凭据解析 → ws 连接发起）。

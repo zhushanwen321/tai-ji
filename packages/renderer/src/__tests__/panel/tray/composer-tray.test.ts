@@ -138,7 +138,7 @@ vi.mock('@/composables/features/sidebar/useSidebar', () => ({
 
 // ── headerAction 数据源开关（B3 聚合面：聚合面板首段 = 被聚合 clock 直开入口的承接段）。
 //    经 mountTray 的 provide 注入（HEADER_ACTIONS_SOURCE_KEY 消费方 = 外壳 + HeaderActionsHost）；
-//    hasVisibleHeaderActions 纯函数用真实现（对账对象），source stub 经开关切换。 ──
+//    hasVisibleHeaderActions 纯函数用真实现（可见性条件单点，与面板按钮渲染同源），source stub 经开关切换。 ──
 const headerActionsSwitch = vi.hoisted(() => ({ source: null as object | null }))
 
 /** scheduler 形态的 headerAction source stub（activation=overlay 直开，无 E13/E3 依赖） */

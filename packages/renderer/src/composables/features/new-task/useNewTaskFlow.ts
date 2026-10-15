@@ -64,9 +64,12 @@ export { resetNewTaskFlow } from '@taiji/core'
 let cachedFlow: ReturnType<typeof useCoreNewTaskFlow> | null = null
 
 /** 仅测试用：重置单例（pinia 重建后旧实例捕获的 store 引用失效，beforeEach 调；对齐 core reset 先例）。 */
-export function __resetNewTaskFlowForTesting(): void {
+function __resetNewTaskFlowForTesting(): void {
   cachedFlow = null
 }
+
+/** 测试后门命名空间（生产代码禁止消费，对齐 __testing 先例；MF-1-10 裸导出收编）。 */
+export const __testing = { __resetNewTaskFlowForTesting }
 
 /**
  * [U2d] LaunchConfigPort 壳适配——submit 侧 resolveLaunchConfig 的完整数据基座：

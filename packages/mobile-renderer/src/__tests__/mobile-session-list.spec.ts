@@ -47,7 +47,7 @@ vi.mock('../shell/app-runtime', async () => {
 
 import MobileSessionList from '../views/MobileSessionList.vue'
 import { i18n } from '../i18n'
-import { applySubagentRecords, resetSubagentPartitionsForTest } from '../views/SubagentStatusLine.vue'
+import { applySubagentRecords, __testing } from '../views/SubagentStatusLine.vue'
 import { loadSessions, selectSession, sessionStore } from '../shell/app-runtime'
 
 function mountList() {
@@ -97,7 +97,7 @@ describe('MobileSessionList 会话列表（remote-use-mobile D7 列表行）', (
     testState.chatStore.isGenerating.mockReturnValue(false)
     testState.chatStore.getMessages.mockReturnValue([])
     testState.chatStore.getRetryState.mockReturnValue(undefined)
-    resetSubagentPartitionsForTest()
+    __testing.resetSubagentPartitionsForTest()
     vi.mocked(loadSessions).mockClear()
     vi.mocked(selectSession).mockClear()
     vi.mocked(loadSessions).mockResolvedValue(undefined)
@@ -253,7 +253,7 @@ describe('MobileSessionList 动作菜单 backdrop（点击关闭）', () => {
     testState.chatStore.isGenerating.mockReturnValue(false)
     testState.chatStore.getMessages.mockReturnValue([])
     testState.chatStore.getRetryState.mockReturnValue(undefined)
-    resetSubagentPartitionsForTest()
+    __testing.resetSubagentPartitionsForTest()
     vi.mocked(loadSessions).mockClear()
     vi.mocked(selectSession).mockClear()
     vi.mocked(loadSessions).mockResolvedValue(undefined)

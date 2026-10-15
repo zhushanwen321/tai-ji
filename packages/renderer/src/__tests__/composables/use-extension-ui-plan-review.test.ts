@@ -51,11 +51,11 @@ import {
   formFilter,
   planReviewFilter,
   isPlanReviewRequest,
-  __resetExtensionBusSubscriptionForTesting,
+  __testing,
 } from '@/composables/useExtensionUI'
 import { sendExtensionUIResponse } from '@taiji/core/transport/api/domains/extension'
 import { useExtensionUIStore } from '@/stores/extension-ui'
-import { usePlanStore, __resetPlanReviewColdSinkForTesting } from '@/stores/plan-store'
+import { usePlanStore, __testing as planStoreTesting } from '@/stores/plan-store'
 
 /** 在独立 effectScope 内运行，模拟组件实例生命周期 */
 function runWithScope<T>(fn: () => T): { result: T; dispose: () => void } {
@@ -101,8 +101,8 @@ function emitBusUIRequest(sid: string, request: unknown): void {
 }
 
 beforeEach(() => {
-  __resetExtensionBusSubscriptionForTesting()
-  __resetPlanReviewColdSinkForTesting()
+  __testing.__resetExtensionBusSubscriptionForTesting()
+  planStoreTesting.__resetPlanReviewColdSinkForTesting()
   setActivePinia(createPinia())
   mockBus = new InternalEventBus()
   getPendingRequestsMock.mockReset().mockResolvedValue([])

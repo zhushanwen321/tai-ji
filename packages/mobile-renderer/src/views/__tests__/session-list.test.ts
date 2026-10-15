@@ -42,7 +42,7 @@ vi.mock('@taiji/core/transport/api/domains/chat', async (importOriginal) => {
 
 import MobileSessionList from '../MobileSessionList.vue'
 import { i18n } from '../../i18n'
-import { applySubagentRecords, resetSubagentPartitionsForTest } from '../SubagentStatusLine.vue'
+import { applySubagentRecords, __testing } from '../SubagentStatusLine.vue'
 import {
   chatStore,
   createTurnExpansion,
@@ -100,7 +100,7 @@ beforeEach(() => {
   sessionStore.applySnapshot({ groups: [] })
   sessionStore.setActiveId(null)
   resetChatModuleStateForTest()
-  resetSubagentPartitionsForTest()
+  __testing.resetSubagentPartitionsForTest()
   for (const fn of Object.values(mocks)) fn.mockClear()
 })
 

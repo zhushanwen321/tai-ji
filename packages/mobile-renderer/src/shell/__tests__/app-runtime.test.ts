@@ -29,7 +29,7 @@ import {
 // app-runtime 组装在 vi.mock 注册（hoist 先于全部 import 生效）后解析——transport 出口
 // 已是替身，组装链其余保持真实
 import { __testing, chatStore } from '../app-runtime'
-import { errorBarMessage, resetErrorBarForTest } from '../error-bar'
+import { errorBarMessage, __testing as errorBarTesting } from '../error-bar'
 
 const { mockStreamSubscribe, mockUnsubscribe } = vi.hoisted(() => ({
   mockStreamSubscribe: vi.fn(() => vi.fn()),
@@ -111,7 +111,7 @@ describe('sessionEntry 端口束装配（D2/U5）', () => {
 
 describe('core toast 通道装配（A7/U14）', () => {
   beforeEach(() => {
-    resetErrorBarForTest()
+    errorBarTesting.resetErrorBarForTest()
   })
 
   it('toast 注入 = 错误条通道（非 console）：error 调用即写入错误条单槽', () => {

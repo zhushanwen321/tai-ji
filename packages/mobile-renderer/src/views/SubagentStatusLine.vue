@@ -40,9 +40,12 @@ export function hasRunningSubagents(sessionId: string): boolean {
 }
 
 /** 测试重置（模块级分区单例跨用例残留清零；生产代码禁止消费，对齐 __testing 先例） */
-export function resetSubagentPartitionsForTest(): void {
+function resetSubagentPartitionsForTest(): void {
   recordsBySession.value = new Map()
 }
+
+/** 测试后门命名空间（生产代码禁止消费，对齐 __testing 先例；MF-1-10 裸导出收编） */
+export const __testing = { resetSubagentPartitionsForTest }
 </script>
 
 <script setup lang="ts">
