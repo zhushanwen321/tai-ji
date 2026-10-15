@@ -8,13 +8,16 @@
  * ② `localFile:servable` 预检 IPC（内联预览容器 HtmlPreviewInline 挂载前准入检查，经 deps
  *   probeArtifact?——v16 唯一渲染面）
  * ③ `localFile:read` 源码读取 IPC（容器源码态 + useDetailPane 抽屉产物源码读取）
- *   ②③ 读/预检通道的准入 = 产物子树 getReadChannelPrefixes（收窄面）——通道入参含模型
+ *   ②③ 读/预检通道的准入 = 产物子树 getReadChannelPrefixes + 会话项目 `.tmp/` 子树
+ *   （2026-10-15 ADR-0118 3d，getSessionTmpEncodeCwdDirs 正向对拍）——通道入参含模型
  *   消息文本承载的路径载荷（html-preview fence），全量白名单含 `<dataDir>` 整前缀（含
- *   `<dataDir>/agent/auth.json` 等凭据文件），文本读取/预检面必须限定在实际消费域
- *   `<dataDir>/artifacts/**`
+ *   `<dataDir>/agent/auth.json` 等凭据文件），文本读取/预检面限定在实际消费域
+ *   `<dataDir>/artifacts/**` 与各会话项目 `.tmp/` 子树（后者粒度论证见 ADR 3d）
  *
- * **白名单成员集静态不变**（本设计不新增成员、不新增白名单输入方，§3.5 聚合不变量②）：
- * 产物目录落在既有成员 `<dataDir>` 内，前缀构造仍由 computeLocalFilePrefixes 纯函数裁决。
+ * **白名单成员集**（2026-10-15 ADR-0118 3d 修订）：静态成员集 + 一个动态派生成员——会话
+ * 项目 `.tmp/` 子树（派生自 main 自有 sessions 目录的 encodeCwd 目录名集，正向对拍；输入
+ * 源仍是 main 信任域，renderer 不成为白名单输入方）。静态成员不变量原文：产物目录落在
+ * 既有成员 `<dataDir>` 内，前缀构造仍由 computeLocalFilePrefixes 纯函数裁决。
  *
  * 谓词与协议 handler 复用 utils/local-file-prefixes 的同一模块函数（非两份平行实现）；
  * 本模块只负责「取当次准入前缀」与「IPC 边界输入防御」。
@@ -25,11 +28,12 @@
  */
 import { ipcMain, app } from 'electron'
 import { tmpdir } from 'node:os'
-import { getDataDir } from '@taiji/shared/paths'
+import { getDataDir, getPiSessionsDir } from '@taiji/shared/paths'
 import { LOCAL_FILE_READ, LOCAL_FILE_SERVABLE } from '@taiji/shared'
 import { mainLogger } from '../logs/main-logger.js'
 import { toErrorMessage } from '../utils/error-message.js'
 import {
+  collectSessionTmpEncodeCwdDirs,
   computeLocalFilePrefixes,
   computeLocalFileReadPrefixes,
   probeLocalFileServable,
@@ -67,12 +71,23 @@ export function getAllowedLocalFilePrefixes(isDev: boolean): string[] {
 /**
  * localFile:servable / localFile:read 两条 IPC 通道的当次准入前缀（读/预检收窄面）。
  *
- * 只放行会话产物子树 `<dataDir>/artifacts/**`（computeLocalFileReadPrefixes），不复用
+ * 静态前缀 = 会话产物子树 `<dataDir>/artifacts/**`（computeLocalFileReadPrefixes），不复用
  * 协议 handler 的全量白名单——见文件头「准入分两面」。cwd 外非产物路径拿
  * `out_of_whitelist`，消费方回落既有通道（useDetailPane cwd 通道 / 容器降级占位）。
  */
 function getReadChannelPrefixes(): string[] {
   return computeLocalFileReadPrefixes(getDataDir())
+}
+
+/**
+ * 会话项目 `.tmp/` 准入的 encodeCwd 目录集（每次调用现算——readdir 本地 fs µs 级，
+ * 无缓存无时间平抑面；目录集 = main 自有 sessions 目录事实源，ADR-0118 3d）。
+ * 单一来源：main.ts 协议 handler 与本模块两条 IPC 共用。
+ */
+export function getSessionTmpEncodeCwdDirs(): ReadonlySet<string> {
+  return collectSessionTmpEncodeCwdDirs(getPiSessionsDir(), {}, (err, dir) =>
+    mainLogger.warn(`[main] local-file session-tmp dirs collect failed (${dir}): ${toErrorMessage(err)}`),
+  )
 }
 
 /**
@@ -99,7 +114,7 @@ export function registerLocalFileHandlers(): void {
         // main 日志承载（§6.4 D4 子决策③），与协议 handler 同一旁路形态
         onError: (err, filePath) =>
           mainLogger.warn(`[main] local-file servable probe failed (${filePath}): ${toErrorMessage(err)}`),
-      })
+      }, getSessionTmpEncodeCwdDirs())
       if (!probe.servable) return { servable: false, reason: probe.reason }
       return { servable: true, size: probe.size }
     },
@@ -109,8 +124,8 @@ export function registerLocalFileHandlers(): void {
   // loadPreviewContent；chat-html-support §8.2 S3「切换『源码』看到 shiki 高亮」）。产物目录
   // `<dataDir>/artifacts/<sessionId>` 在 session cwd 外（§6.7 D7），runtime file.read 的
   // cwd 守门对主要产物路径不可达——与 servable 预检同谓词函数（probeLocalFileServable），
-  // 准入前缀集 = 产物子树（读通道收窄，与协议 handler 全量白名单分面）；读取失败不抛错，
-  // 回结构化原因。
+  // 准入前缀集 = 产物子树 + 会话项目 `.tmp/` 子树（读通道收窄，与协议 handler 全量白名单
+  // 分面）；读取失败不抛错，回结构化原因。
   ipcMain.handle(LOCAL_FILE_READ, (_event, rawPath: unknown): LocalFileReadResult => {
     if (typeof rawPath !== 'string' || rawPath.length === 0) {
       return { ok: false, reason: 'out_of_whitelist' }
@@ -118,6 +133,6 @@ export function registerLocalFileHandlers(): void {
     return readLocalFileContent(rawPath, getReadChannelPrefixes(), {
       onError: (err, filePath) =>
         mainLogger.warn(`[main] local-file read probe failed (${filePath}): ${toErrorMessage(err)}`),
-    })
+    }, getSessionTmpEncodeCwdDirs())
   })
 }

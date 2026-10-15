@@ -80,7 +80,7 @@ import { updateOrchestrator } from './update/orchestrator.js'
 import { maybeRollbackInterruptedUpdate, cleanupCompletedUpdate } from './update/update-self-healer.js'
 import { killActiveCurlDownloads } from './update/curl-download.js'
 import { registerIpcHandlers } from './gateway/ipc-handlers.js'
-import { getAllowedLocalFilePrefixes } from './gateway/local-file-handlers.js'
+import { getAllowedLocalFilePrefixes, getSessionTmpEncodeCwdDirs } from './gateway/local-file-handlers.js'
 import {
   buildLocalFileErrorResponse,
   decorateLocalFileResponse,
@@ -387,7 +387,7 @@ app.whenReady().then(async () => {
       // 真因由 main 日志承载（§6.4 D4 子决策③「诊断细分由 main 日志承载」）
       onError: (err, filePath) =>
         mainLogger.warn(`[main] local-file stat failed (${filePath}): ${errorText(err)}`),
-    })
+    }, getSessionTmpEncodeCwdDirs())
     if (!probe.servable) {
       // 可读错误文档（§11 检查点 3）：父页面 opaque origin 读不到状态码，错误文档是
       // 用户在 iframe 内唯一的可见信号；消息不回显路径（无反射注入面）
