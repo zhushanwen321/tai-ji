@@ -30,6 +30,7 @@ import { computed, reactive, watch, type ComputedRef, type Ref } from 'vue'
 import { InternalEventBus, MessageBusBridge } from '@taiji/core/extension-host'
 import type { ExtensionInteractMethod } from '@taiji/shared'
 import {
+  bindSessionFormActions,
   createCompanionDialogAdapters,
   createFormRequestChannel,
   createPermissionRequestController,
@@ -364,24 +365,12 @@ export function useMobileFormRequests(sessionId: Ref<string | null>): MobileForm
     if (sid) formChannel.reconcile(sid)
   }, { immediate: true })
 
-  // 连接恢复边沿的对账入口（App.vue watch(isConnected) 消费；sid 为空跳过）
-  function reconcileNow(): void {
-    const sid = sessionId.value
-    if (sid) formChannel.reconcile(sid)
-  }
+  // 回传/取消/对账的 sid 守卫包装收敛 bindSessionFormActions（双壳同构装配段单点，见 ui
+  // form-request-channel）：回传核心流（定位 / 未送达保留 / 送达摘除）与呈现钩子（已终结
+  // 留痕 / 未送达留痕）在 factory + 上方 formChannel 装配段。respond 返回值 = 是否送达，
+  // App 编排消费（false → MobileFormCard 内联错误行，回传失败不静默）；reconcileNow =
+  // 连接恢复边沿的对账入口（App.vue watch(isConnected) 消费，sid 为空跳过）。
+  const actions = bindSessionFormActions(formChannel, () => sessionId.value)
 
-  function respond(requestId: string, result: boolean | string | null): boolean {
-    const sid = sessionId.value
-    if (!sid) return false
-    // 回传核心流（定位 / 未送达保留 / 送达摘除）与呈现钩子（已终结留痕 / 未送达留痕）
-    // 在 factory + 上方 formChannel 装配段；返回值 = 是否送达，App 编排消费（false →
-    // MobileFormCard 内联错误行，回传失败不静默）
-    return formChannel.respond(sid, requestId, result)
-  }
-
-  function cancel(requestId: string): void {
-    respond(requestId, null)
-  }
-
-  return { currentFormRequest, currentPlanReviewRequest, respond, cancel, reconcileNow }
+  return { currentFormRequest, currentPlanReviewRequest, respond: actions.respond, cancel: actions.cancel, reconcileNow: actions.reconcile }
 }

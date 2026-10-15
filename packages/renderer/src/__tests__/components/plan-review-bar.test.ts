@@ -25,10 +25,8 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, DOMWrapper, type VueWrapper } from '@vue/test-utils'
-import { computed, nextTick } from 'vue'
+import { computed } from 'vue'
 import { effectScope } from 'vue'
-import { createPinia, setActivePinia } from 'pinia'
-import { InternalEventBus } from '@taiji/core'
 import type { PlanStateView } from '@taiji/shared'
 
 // ── mock ⓪：drawer domain（§3.5 草稿回看 openDrawerTab）——spread actual：import 链
@@ -54,35 +52,34 @@ vi.mock('@taiji/core/transport/api', async (importActual) => {
   return { ...actual, command: commandMock, RPC_BACKSTOP_TIMEOUT_MS: 30_000 }
 })
 
-// ── mock ②：extension domain（useExtensionUI 的 WS/RPC 面 + D4③ 冷拉 getPendingRequests）──
-// getPendingRequests 引用外提：冷拉对账双源之一，用例按需改写返回值（默认空快照 = 事实上无挂起）
+// ── mock ②：extension domain（useExtensionUI 的 WS/RPC 面 + D4③ 冷拉 getPendingRequests）
+// 公共四键单源 helpers/use-extension-ui-test-env；onUITimeout 是本文件特有注册表实现
+// （真实语义形态：per-session handler 注册/注销，检测窗用例消费），冷拉快照经
+// getPendingRequestsMock 引用按需改写返回值（默认空快照 = 事实上无挂起）──
 const uiTimeoutHandlers = new Map<string, Array<(requestId: string) => void>>()
-const getPendingRequestsMock = vi.hoisted(() => vi.fn())
-vi.mock('@taiji/core/transport/api/domains/extension', () => ({
-  onUITimeout: (sid: string, handler: (requestId: string) => void) => {
-    const arr = uiTimeoutHandlers.get(sid) ?? []
-    arr.push(handler)
-    uiTimeoutHandlers.set(sid, arr)
-    return () => {
-      const cur = uiTimeoutHandlers.get(sid)
-      if (!cur) return
-      const idx = cur.indexOf(handler)
-      if (idx !== -1) cur.splice(idx, 1)
-      if (cur.length === 0) uiTimeoutHandlers.delete(sid)
-    }
-  },
-  // 返 true = 送达（M1 环 3 后 respond 消费 boolean；「respond 后出队」用例依赖送达态）
-  sendExtensionUIResponse: vi.fn((): boolean => true),
-  onNotify: () => () => {},
-  onExtensions: vi.fn(),
-  getPendingRequests: getPendingRequestsMock,
-}))
+vi.mock('@taiji/core/transport/api/domains/extension', async () => {
+  const { extensionDomainMocks } = await import('../helpers/use-extension-ui-test-env')
+  return {
+    onUITimeout: (sid: string, handler: (requestId: string) => void) => {
+      const arr = uiTimeoutHandlers.get(sid) ?? []
+      arr.push(handler)
+      uiTimeoutHandlers.set(sid, arr)
+      return () => {
+        const cur = uiTimeoutHandlers.get(sid)
+        if (!cur) return
+        const idx = cur.indexOf(handler)
+        if (idx !== -1) cur.splice(idx, 1)
+        if (cur.length === 0) uiTimeoutHandlers.delete(sid)
+      }
+    },
+    ...extensionDomainMocks,
+  }
+})
 
-// ── mock ③：getExtensionBus → 真实 InternalEventBus 实例 ──
-let mockBus: InternalEventBus
+// ── mock ③：getExtensionBus → 真实 InternalEventBus 实例（busSlot 单源 helper）──
 vi.mock('@/composables/shell/useExtensionHostBridge', async (importOriginal) => {
-  const original = await importOriginal<typeof import('@/composables/shell/useExtensionHostBridge')>()
-  return { ...original, getExtensionBus: () => mockBus }
+  const { bridgeModuleMocks } = await import('../helpers/use-extension-ui-test-env')
+  return bridgeModuleMocks(importOriginal)
 })
 
 import PlanReviewBar from '@/components/panel/plan/PlanReviewBar.vue'
@@ -97,8 +94,24 @@ import {
   __testing as planStoreTesting,
 } from '@/stores/plan-store'
 import { sendExtensionUIResponse } from '@taiji/core/transport/api/domains/extension'
+import {
+  busSlot,
+  emitPlanReviewRequest as emitPlanReviewRequestOn,
+  extensionDomainMocks,
+  flushAsync,
+  resetUseExtensionUITestEnv,
+  unmountPortalWrappers,
+} from '../helpers/use-extension-ui-test-env'
+
+// 冷拉对账双源之一的引用别名（用例按需改写返回值，D4③）
+const getPendingRequestsMock = extensionDomainMocks.getPendingRequests
 
 const SID = 'sess-bar'
+
+/** 挂起 planReview 审批请求（bus 取 helper 的 busSlot 当前实例） */
+function emitPlanReviewRequest(requestId = 'pr-1', selfReview?: string): void {
+  emitPlanReviewRequestOn(busSlot.current!, SID, requestId, selfReview)
+}
 
 function viewOf(overrides: Partial<PlanStateView> = {}): PlanStateView {
   return {
@@ -108,24 +121,6 @@ function viewOf(overrides: Partial<PlanStateView> = {}): PlanStateView {
     templateName: 'default',
     ...overrides,
   }
-}
-
-/** 挂起 planReview 审批请求（runtime event-adapter 广播形状，D5）；可带 selfReview（D9③） */
-function emitPlanReviewRequest(requestId = 'pr-1', selfReview?: string): void {
-  mockBus.emit({
-    kind: 'ui-request',
-    sessionId: SID,
-    request: {
-      requestId,
-      pluginId: '',
-      kind: 'select',
-      method: 'select',
-      title: '\x00TAIJI_PLAN_REVIEW:',
-      options: [JSON.stringify({ docs: [], ...(selfReview !== undefined ? { selfReview } : {}) })],
-      planReview: true,
-      ...(selfReview !== undefined ? { selfReview } : {}),
-    },
-  } as never)
 }
 
 /** 挂载注册表：Popover Portal 内容挂在 document.body，用例末尾统一 unmount 清理 */
@@ -145,34 +140,20 @@ function findSelfReviewFull(): DOMWrapper<Element> | null {
   return el ? new DOMWrapper(el) : null
 }
 
-async function flushAsync(): Promise<void> {
-  await nextTick()
-  await Promise.resolve()
-  await nextTick()
-}
-
 beforeEach(() => {
-  // 模块级 refCount bus 订阅残留重置：不重置则上一用例组件的 handler 仍挂在 Set 里，
-  // 事件会写进旧 pinia 的 store 分区，新用例组件读不到（对齐 useExtensionUI.test.ts）
-  __testing.__resetExtensionBusSubscriptionForTesting()
   planStoreTesting.__resetPlanReviewColdSinkForTesting()
-  setActivePinia(createPinia())
   commandMock.mockReset()
-  getPendingRequestsMock.mockReset().mockResolvedValue([])
   openDrawerTabMock.mockReset()
   chatSendMock.mockClear()
   chatAbortMock.mockClear()
-  mockBus = new InternalEventBus()
   uiTimeoutHandlers.clear()
-  vi.mocked(sendExtensionUIResponse).mockClear()
+  // 公共段（refCount bus 订阅残留重置 + 新 pinia/bus + RPC mock 复位）单源 helper：
+  // 不重置订阅则上一用例组件的 handler 仍挂在 Set 里，事件会写进旧 pinia 的 store 分区
+  resetUseExtensionUITestEnv(__testing.__resetExtensionBusSubscriptionForTesting)
 })
 
 afterEach(() => {
-  vi.useRealTimers()
-  while (mountedWrappers.length > 0) {
-    const w = mountedWrappers.pop()
-    w?.unmount()
-  }
+  unmountPortalWrappers(mountedWrappers)
 })
 
 describe('PlanReviewBar 分支公式（D4 单源：ready ⇔ 挂起注册表，presence 语义）', () => {
@@ -251,7 +232,7 @@ describe('PlanReviewBar 分支公式（D4 单源：ready ⇔ 挂起注册表，p
     scope.run(() => useExtensionUI(sidRef, formFilter))
     await flushAsync()
     emitPlanReviewRequest('pr-1')
-    mockBus.emit({
+    busSlot.current!.emit({
       kind: 'ui-request',
       sessionId: SID,
       request: { requestId: 'au-1', pluginId: 'p', kind: 'select', method: 'select', title: 't', askUser: true, askUserQuestions: [] },
@@ -430,7 +411,7 @@ describe('已应答抑制标记 + degraded 组合判定（D4，[ADR-0122] 帧到
     await flushAsync()
     expect(wrapper.find('[data-testid="plan-review-approve"]').exists()).toBe(true)
 
-    mockBus.emit({ kind: 'requests-invalidated', sessionId: SID, requestIds: ['pr-1'], reason: 'turn-aborted' } as never)
+    busSlot.current!.emit({ kind: 'requests-invalidated', sessionId: SID, requestIds: ['pr-1'], reason: 'turn-aborted' } as never)
     await flushAsync()
 
     expect(wrapper.find('[data-testid="plan-review-approve"]').exists()).toBe(false)

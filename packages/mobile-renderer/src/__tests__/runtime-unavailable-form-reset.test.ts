@@ -12,86 +12,44 @@
 //
 // 运行：cd packages/mobile-renderer && npx vitest run src/__tests__/runtime-unavailable-form-reset.test.ts
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
-import { mount } from "@vue/test-utils"
 import { nextTick, ref } from 'vue'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import App from '../App.vue'
 import { __testing as bootstrapTesting } from '../bootstrap'
-import { i18n } from '../i18n'
 import { __testing, useMobileFormRequests } from '../shell/companion-bridge'
-import { chatStore, sessionStore } from '../shell/app-runtime'
-import { hasConnectedOnce, shellConnectionState } from '../shell/connection-view'
+import { chatStore } from '../shell/app-runtime'
+import {
+  cleanupCompanionTestState,
+  emitFormRequest,
+  mountChatView,
+  resetCompanionTestState,
+  singleChoiceRequest,
+} from './helpers/companion-bridge-test-env'
+
+// vi.mock 注册留在本文件（hoist 语义）；工厂体单源在 helpers/companion-bridge-test-env
+vi.mock('@taiji/core/transport/api/domains/extension', async () => {
+  const { extensionDomainMocks } = await import('./helpers/companion-bridge-test-env')
+  return extensionDomainMocks
+})
 
 // vitest 运行时 cwd 即包根（vitest.config.ts 所在目录）
 const pkgRoot = process.cwd()
 
-// vi.hoisted：mock 工厂被 hoist 到 import 前，工厂内引用的变量须经 vi.hoisted 创建
-const { mockSendResponse, mockGetPending } = vi.hoisted(() => ({
-  mockSendResponse: vi.fn(),
-  mockGetPending: vi.fn(),
-}))
-
-vi.mock('@taiji/core/transport/api/domains/extension', () => ({
-  sendExtensionUIResponse: mockSendResponse,
-  getPendingRequests: mockGetPending,
-}))
-
-function mountApp() {
-  return mount(App, { global: { plugins: [i18n] } })
-}
-
-/** 进入聊天视图（connected + hasConnectedOnce + 激活 session + 切 chat tab），mobile-form.spec 同式 */
-async function mountChatView(sessionId: string) {
-  hasConnectedOnce.value = true
-  shellConnectionState.value = 'connected'
-  sessionStore.setActiveId(sessionId)
-  const wrapper = mountApp()
-  await wrapper.get('[data-testid="mobile-tab-chat"]').trigger('click')
-  mockGetPending.mockClear()
-  return wrapper
-}
-
-/** 发一条 bus 归一后的富交互 ui-request 事件（C4 放行面：form ∨ planReview） */
-function emitFormRequest(request: Record<string, unknown>, sessionId = 'sid-unavailable'): void {
-  __testing.mobileExtensionBus.emit({
-    kind: 'ui-request',
-    sessionId,
-    request: { requestId: 'req-1', pluginId: '', kind: 'select', ...request },
-  })
-}
-
 describe('onRuntimeUnavailable 清空 form/planReview 挂起分区（MF-1-3）', () => {
-  let wrapper: ReturnType<typeof mountApp> | null = null
+  let wrapper: Awaited<ReturnType<typeof mountChatView>> | null = null
 
-  beforeEach(() => {
-    mockSendResponse.mockReset().mockReturnValue(true)
-    mockGetPending.mockReset().mockResolvedValue([])
-    __testing.resetFormRequestsForTest()
-    shellConnectionState.value = 'connecting'
-    hasConnectedOnce.value = false
-    sessionStore.setActiveId(null)
+  beforeEach(async () => {
+    await resetCompanionTestState()
   })
 
-  afterEach(() => {
-    wrapper?.unmount()
+  afterEach(async () => {
+    await cleanupCompanionTestState(wrapper)
     wrapper = null
-    __testing.resetFormRequestsForTest()
-    __testing.resetErrorBarForTest()
-    shellConnectionState.value = 'connecting'
-    hasConnectedOnce.value = false
-    sessionStore.setActiveId(null)
-    vi.restoreAllMocks()
   })
 
   it("form 帧在场 → onRuntimeUnavailable('disconnect')：分区清空（B1）+ 卡消失（B1）+ finalizeAllStreaming 收口照常（B2）", async () => {
     wrapper = await mountChatView('sid-unavailable')
-    emitFormRequest({
-      form: true,
-      formQuestions: [
-        { type: 'choice', header: 'db', question: '用哪个数据库？', options: [{ label: 'pg' }, { label: 'mysql' }] },
-      ],
-    })
+    emitFormRequest(__testing.mobileExtensionBus, singleChoiceRequest(), 'sid-unavailable')
     await nextTick()
     expect(wrapper.find('[data-testid="mobile-form-card"]').exists()).toBe(true)
 
@@ -111,7 +69,7 @@ describe('onRuntimeUnavailable 清空 form/planReview 挂起分区（MF-1-3）',
 
   it('planReview 审批帧在场 → onRuntimeUnavailable：审批分区清空 + 审批卡消失（B1）', async () => {
     wrapper = await mountChatView('sid-unavailable')
-    emitFormRequest({ planReview: true, selfReview: '自审结论' })
+    emitFormRequest(__testing.mobileExtensionBus, { planReview: true, selfReview: '自审结论' }, 'sid-unavailable')
     await nextTick()
     expect(wrapper.find('[data-testid="mobile-plan-review"]').exists()).toBe(true)
 

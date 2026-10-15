@@ -192,8 +192,10 @@ export interface HeaderActionsSource {
 
 export const HEADER_ACTIONS_SOURCE_KEY: InjectionKey<HeaderActionsSource> = Symbol('header-actions-source')
 
-/** 可见声明形状（isVisibleHeaderAction type predicate 的收窄产物：headerAction 段非空） */
-type VisibleHeaderActionRecord = ContributionRecord & {
+/** 可见声明形状（isVisibleHeaderAction type predicate 的收窄产物：headerAction 段非空）。
+ * 导出义务：公开签名（type predicate）引用的类型必须可导入，否则 private-type-leaks 检查
+ * 报泄漏。 */
+export type VisibleHeaderActionRecord = ContributionRecord & {
   headerAction: NonNullable<ContributionRecord['headerAction']>
 }
 

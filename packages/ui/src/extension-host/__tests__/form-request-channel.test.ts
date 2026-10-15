@@ -17,7 +17,7 @@
 // 策略：fake partitions（内存 Map + requestId dedup，对齐双壳实现语义）+ vi.mock extension
 // 域断言 getPendingRequests/sendExtensionUIResponse 调用形状。
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { createFormRequestChannel, type FormChannelPartitions } from '../form-request-channel'
+import { createFormRequestChannel, type FormChannelPartitions, type FormRequestChannel, type FormRequestChannelOptions } from '../form-request-channel'
 import type { ExtensionUIRequest } from '@taiji/core/transport/api/domains/extension'
 import type { DialogRequest } from '@taiji/core'
 
@@ -74,13 +74,22 @@ function formFrame(requestId: string): DialogRequest {
 let partitions: ReturnType<typeof fakePartitions>
 let channel: ReturnType<typeof createFormRequestChannel>
 
+/** 装配测试通道（公共 adapt 双源 + 可选钩子/partitions 覆盖；各用例只声明自己观测的面） */
+function makeChannel(
+  hooks: Partial<FormRequestChannelOptions> = {},
+  adaptFrame?: FormRequestChannelOptions['adaptFrame'],
+): FormRequestChannel {
+  return createFormRequestChannel({
+    partitions,
+    adaptFrame: adaptFrame ?? ((sid, req) => formReq(req.requestId, { sessionId: sid })),
+    adaptSnapshot: (sid, req) => ({ ...req, sessionId: sid }),
+    ...hooks,
+  })
+}
+
 beforeEach(() => {
   partitions = fakePartitions()
-  channel = createFormRequestChannel({
-    partitions,
-    adaptFrame: (sid, req) => formReq(req.requestId, { sessionId: sid }),
-    adaptSnapshot: (sid, req) => ({ ...req, sessionId: sid }),
-  })
+  channel = makeChannel()
   mockGetPending.mockReset().mockResolvedValue([])
   mockSendResponse.mockReset().mockReturnValue(true)
 })
@@ -91,11 +100,7 @@ describe('ingest：C4 门 + 适配 + filter 第二道闸', () => {
     channel.ingest('sid-a', dialogFrame('r2'))
     expect(partitions.get('sid-a').map((r) => r.requestId)).toEqual(['r1'])
 
-    const planChannel = createFormRequestChannel({
-      partitions,
-      adaptFrame: (sid, req) => planReq(req.requestId, { sessionId: sid }),
-      adaptSnapshot: (sid, req) => ({ ...req, sessionId: sid }),
-    })
+    const planChannel = makeChannel({}, (sid, req) => planReq(req.requestId, { sessionId: sid }))
     planChannel.ingest('sid-a', { ...dialogFrame('r3'), planReview: true } as DialogRequest)
     expect(partitions.get('sid-a').map((r) => r.requestId)).toEqual(['r1', 'r3'])
   })
@@ -109,12 +114,7 @@ describe('ingest：C4 门 + 适配 + filter 第二道闸', () => {
 
   it('onIngested 钩子在写入后收到适配帧', () => {
     const seen: string[] = []
-    const c = createFormRequestChannel({
-      partitions,
-      adaptFrame: (sid, req) => formReq(req.requestId, { sessionId: sid }),
-      adaptSnapshot: (sid, req) => ({ ...req, sessionId: sid }),
-      onIngested: (_sid, req) => seen.push(req.requestId),
-    })
+    const c = makeChannel({ onIngested: (_sid, req) => seen.push(req.requestId) })
     c.ingest('sid-a', formFrame('r1'))
     c.ingest('sid-a', dialogFrame('r2')) // C4 拒绝，不触发钩子
     expect(seen).toEqual(['r1'])
@@ -126,10 +126,7 @@ describe('invalidate：removed 捕获 + 摘除', () => {
     partitions.add('sid-a', formReq('r1'))
     partitions.add('sid-a', formReq('r2'))
     const seen: Array<{ ids: readonly string[]; removed: readonly string[] }> = []
-    const c = createFormRequestChannel({
-      partitions,
-      adaptFrame: (sid, req) => formReq(req.requestId, { sessionId: sid }),
-      adaptSnapshot: (sid, req) => ({ ...req, sessionId: sid }),
+    const c = makeChannel({
       onInvalidated: (_sid, ids, removed) => seen.push({ ids, removed: removed.map((r) => r.requestId) }),
     })
 
@@ -147,10 +144,7 @@ describe('reconcile：快照差集剔除 + 富交互补入', () => {
   it('空快照也剔除（僵尸请求修剪主算法）；removedIds 随 onSnapshotReconciled 外发', async () => {
     partitions.add('sid-a', formReq('stale'))
     const removedSeen: string[][] = []
-    const c = createFormRequestChannel({
-      partitions,
-      adaptFrame: (sid, req) => formReq(req.requestId, { sessionId: sid }),
-      adaptSnapshot: (sid, req) => ({ ...req, sessionId: sid }),
+    const c = makeChannel({
       onSnapshotReconciled: (_sid, removedIds) => removedSeen.push([...removedIds]),
     })
 
@@ -177,13 +171,11 @@ describe('reconcile：快照差集剔除 + 富交互补入', () => {
 
   it('提供 retainOnly 时走批量路径（不逐条 remove）；RPC 失败 warn 静默不抛', async () => {
     const retainCalls: Array<ReadonlySet<string>> = []
-    const withRetain = createFormRequestChannel({
+    const withRetain = makeChannel({
       partitions: {
         ...partitions,
         retainOnly: (_sid, keepIds) => retainCalls.push(keepIds),
       },
-      adaptFrame: (sid, req) => formReq(req.requestId, { sessionId: sid }),
-      adaptSnapshot: (sid, req) => ({ ...req, sessionId: sid }),
     })
     withRetain.reconcile('sid-a')
     await vi.waitFor(() => expect(retainCalls).toHaveLength(1))
@@ -200,12 +192,7 @@ describe('reconcile：快照差集剔除 + 富交互补入', () => {
 describe('respond：未送达保留 / 送达摘除 / 已终结丢弃', () => {
   it('定位失败 → onRespondExpired + false（分区不动）', () => {
     const expired: string[] = []
-    const c = createFormRequestChannel({
-      partitions,
-      adaptFrame: (sid, req) => formReq(req.requestId, { sessionId: sid }),
-      adaptSnapshot: (sid, req) => ({ ...req, sessionId: sid }),
-      onRespondExpired: (_sid, rid) => expired.push(rid),
-    })
+    const c = makeChannel({ onRespondExpired: (_sid, rid) => expired.push(rid) })
     expect(c.respond('sid-a', 'ghost', 'answer')).toBe(false)
     expect(expired).toEqual(['ghost'])
     expect(mockSendResponse).not.toHaveBeenCalled()
@@ -214,12 +201,7 @@ describe('respond：未送达保留 / 送达摘除 / 已终结丢弃', () => {
   it('未送达 → 分区条目保留（M1/RD-3#1 可重试）+ onRespondUndelivered + false', () => {
     partitions.add('sid-a', formReq('r1'))
     const undelivered: string[] = []
-    const c = createFormRequestChannel({
-      partitions,
-      adaptFrame: (sid, req) => formReq(req.requestId, { sessionId: sid }),
-      adaptSnapshot: (sid, req) => ({ ...req, sessionId: sid }),
-      onRespondUndelivered: (_sid, rid) => undelivered.push(rid),
-    })
+    const c = makeChannel({ onRespondUndelivered: (_sid, rid) => undelivered.push(rid) })
     mockSendResponse.mockReturnValueOnce(false)
     expect(c.respond('sid-a', 'r1', 'answer')).toBe(false)
     expect(undelivered).toEqual(['r1'])
@@ -229,10 +211,7 @@ describe('respond：未送达保留 / 送达摘除 / 已终结丢弃', () => {
   it('送达 → 摘除 + onRespondDelivered（条目与 result 外发）+ true；cancel = respond null', () => {
     partitions.add('sid-a', formReq('r1'))
     const delivered: Array<{ rid: string; result: boolean | string | null }> = []
-    const c = createFormRequestChannel({
-      partitions,
-      adaptFrame: (sid, req) => formReq(req.requestId, { sessionId: sid }),
-      adaptSnapshot: (sid, req) => ({ ...req, sessionId: sid }),
+    const c = makeChannel({
       onRespondDelivered: (_sid, req, result) => delivered.push({ rid: req.requestId, result }),
     })
     expect(c.respond('sid-a', 'r1', 'answer')).toBe(true)

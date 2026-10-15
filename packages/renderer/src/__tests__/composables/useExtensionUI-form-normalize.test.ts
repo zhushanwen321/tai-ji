@@ -15,30 +15,22 @@
  *   · pending 路径——runtime {...r,...r.payload} 解包的 view-ready 帧（form:true 原生
  *     携带）直接入 store（respawn / 切回 session 恢复路径）
  *
+ * 测试环境（mock 注册 / 每用例重置 / scope 运行器）单源在
+ * ../helpers/use-extension-ui-test-env（与 useExtensionUI.test.ts 共享）。
+ *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/composables/useExtensionUI-form-normalize.test.ts
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { effectScope, ref, nextTick } from 'vue'
-import { createPinia, setActivePinia } from 'pinia'
-import { InternalEventBus } from '@taiji/core'
+import { ref, nextTick } from 'vue'
 
-// ── mock extension api domain（WS/RPC 路径保留桩，范式同 useExtensionUI.test.ts）──
-vi.mock('@taiji/core/transport/api/domains/extension', () => ({
-  // 返 true = 送达（M1 环 3 后 respond 消费 boolean）
-  sendExtensionUIResponse: vi.fn((): boolean => true),
-  onNotify: () => () => {},
-  onExtensions: vi.fn(),
-  getPendingRequests: vi.fn().mockResolvedValue([]),
-}))
-
-let mockBus: InternalEventBus
-
+// ── mock 注册（工厂体单源在 helpers/use-extension-ui-test-env，hoist 语义要求注册留本文件）──
+vi.mock('@taiji/core/transport/api/domains/extension', async () => {
+  const { extensionDomainMocks } = await import('../helpers/use-extension-ui-test-env')
+  return extensionDomainMocks
+})
 vi.mock('@/composables/shell/useExtensionHostBridge', async (importOriginal) => {
-  const original = await importOriginal<typeof import('@/composables/shell/useExtensionHostBridge')>()
-  return {
-    ...original,
-    getExtensionBus: () => mockBus,
-  }
+  const { bridgeModuleMocks } = await import('../helpers/use-extension-ui-test-env')
+  return bridgeModuleMocks(importOriginal)
 })
 
 import {
@@ -48,8 +40,17 @@ import {
 } from '@/composables/useExtensionUI'
 import { sendExtensionUIResponse, getPendingRequests } from '@taiji/core/transport/api/domains/extension'
 import { useExtensionUIStore } from '@/stores/extension-ui'
+import {
+  resetUseExtensionUITestEnv,
+  runInExtensionUIScope,
+  emitBusUIRequest,
+} from '../helpers/use-extension-ui-test-env'
 import type { ExtensionUIRequest } from '@taiji/core/transport/api/domains/extension'
 import type { ScheduleDraft } from '@zhushanwen/extension-protocol'
+
+beforeEach(() => {
+  resetUseExtensionUITestEnv(__testing.__resetExtensionBusSubscriptionForTesting)
+})
 
 const draft: ScheduleDraft = {
   kind: 'recurring',
@@ -117,28 +118,6 @@ function mkPlainSelectReq(requestId: string): Record<string, unknown> {
   return { requestId, pluginId: '', kind: 'select', dialogKind: 'select', title: '选择', options: ['a', 'b'] }
 }
 
-function emitBusUIRequest(sid: string, request: unknown): void {
-  mockBus.emit({ kind: 'ui-request', sessionId: sid, request } as never)
-}
-
-/** 在独立 effectScope 内运行（useExtensionUI 注册 watch/onScopeDispose 的生命周期要求） */
-function runWithScope<T>(fn: () => T): { result: T; dispose: () => void } {
-  const scope = effectScope()
-  let result!: T
-  scope.run(() => {
-    result = fn()
-  })
-  return { result, dispose: () => scope.stop() }
-}
-
-beforeEach(() => {
-  __testing.__resetExtensionBusSubscriptionForTesting()
-  setActivePinia(createPinia())
-  mockBus = new InternalEventBus()
-  vi.mocked(sendExtensionUIResponse).mockClear()
-  vi.mocked(getPendingRequests).mockResolvedValue([])
-})
-
 // ── formFilter 判定矩阵（G2 收敛终态：只认 form 键）──────────────────────
 
 describe('formFilter 判定矩阵（判定面收敛：只认 form 键）', () => {
@@ -151,7 +130,7 @@ describe('formFilter 判定矩阵（判定面收敛：只认 form 键）', () =>
   })
 
   it('表单族帧（bus 路径）入 store 后恒带 form 键——formFilter 对 store 记录命中', () => {
-    const { dispose } = runWithScope(() => useExtensionUI(ref('sessionA')))
+    const { dispose } = runInExtensionUIScope(() => useExtensionUI(ref('sessionA')))
     emitBusUIRequest('sessionA', mkAskUserReq('r-ask'))
     emitBusUIRequest('sessionA', mkScheduleCreateReq('r-sc'))
 
@@ -168,7 +147,7 @@ describe('formFilter 判定矩阵（判定面收敛：只认 form 键）', () =>
 
 describe('C4 契约（renderer 只消费 view-ready 帧）', () => {
   it('裸 legacy 键帧（无 form 键，假设性旧 runtime 产物）→ C4 不放行不入 store', () => {
-    const { dispose } = runWithScope(() => useExtensionUI(ref('sessionA')))
+    const { dispose } = runInExtensionUIScope(() => useExtensionUI(ref('sessionA')))
 
     emitBusUIRequest('sessionA', mkBareLegacyAskUserReq('r-bare'))
 
@@ -181,7 +160,7 @@ describe('C4 契约（renderer 只消费 view-ready 帧）', () => {
 
 describe('bus 路径（runtime marker 分支产出的 view-ready 帧入队）', () => {
   it('scheduleCreate 源帧（draft 直挂）→ store 记录 form+scheduleCreate 双键、draft 保真', () => {
-    const { result, dispose } = runWithScope(() => useExtensionUI(ref('sessionA')))
+    const { result, dispose } = runInExtensionUIScope(() => useExtensionUI(ref('sessionA')))
 
     emitBusUIRequest('sessionA', mkScheduleCreateReq('r-sc'))
 
@@ -197,7 +176,7 @@ describe('bus 路径（runtime marker 分支产出的 view-ready 帧入队）', 
   })
 
   it('scheduleCreate 源帧 respond → 扁平 FormResult JSON 回传（今日 ScheduleCreateOverlay 路径等价）', async () => {
-    const { result, dispose } = runWithScope(() => useExtensionUI(ref('sessionA')))
+    const { result, dispose } = runInExtensionUIScope(() => useExtensionUI(ref('sessionA')))
 
     emitBusUIRequest('sessionA', mkScheduleCreateReq('r-sc'))
     const formResult = JSON.stringify({ action: 'create', kind: 'recurring', schedule: '0 9 * * *', prompt: 'p' })
@@ -210,7 +189,7 @@ describe('bus 路径（runtime marker 分支产出的 view-ready 帧入队）', 
   })
 
   it('无标记普通 select 不入 store（CompanionBand 独占，零重叠）', () => {
-    const { dispose } = runWithScope(() => useExtensionUI(ref('sessionA')))
+    const { dispose } = runInExtensionUIScope(() => useExtensionUI(ref('sessionA')))
 
     emitBusUIRequest('sessionA', mkPlainSelectReq('r2'))
 
@@ -219,7 +198,7 @@ describe('bus 路径（runtime marker 分支产出的 view-ready 帧入队）', 
   })
 
   it('双源并存排序：askUser 源与 scheduleCreate 源并存 → 先到先渲染、respond 后接管', () => {
-    const { result, dispose } = runWithScope(() => useExtensionUI(ref('sessionA')))
+    const { result, dispose } = runInExtensionUIScope(() => useExtensionUI(ref('sessionA')))
 
     emitBusUIRequest('sessionA', mkAskUserReq('r-ask'))
     emitBusUIRequest('sessionA', mkScheduleCreateReq('r-sc'))
@@ -241,7 +220,7 @@ describe('pending 路径（runtime {...r,...r.payload} 解包的 view-ready 帧�
     vi.mocked(getPendingRequests).mockResolvedValue([
       mkAskUserReq('r-recover') as never as ExtensionUIRequest,
     ])
-    const { result, dispose } = runWithScope(() => useExtensionUI(ref('sessionA')))
+    const { result, dispose } = runInExtensionUIScope(() => useExtensionUI(ref('sessionA')))
 
     await nextTick()
     await nextTick()
@@ -255,7 +234,7 @@ describe('pending 路径（runtime {...r,...r.payload} 解包的 view-ready 帧�
     vi.mocked(getPendingRequests).mockResolvedValue([
       mkScheduleCreateReq('r-sc-recover') as never as ExtensionUIRequest,
     ])
-    const { result, dispose } = runWithScope(() => useExtensionUI(ref('sessionA')))
+    const { result, dispose } = runInExtensionUIScope(() => useExtensionUI(ref('sessionA')))
 
     await nextTick()
     await nextTick()
@@ -273,7 +252,7 @@ describe('pending 路径（runtime {...r,...r.payload} 解包的 view-ready 帧�
     vi.mocked(getPendingRequests).mockResolvedValue([
       mkPlainSelectReq('r-plain') as never as ExtensionUIRequest,
     ])
-    const { result, dispose } = runWithScope(() => useExtensionUI(ref('sessionA')))
+    const { result, dispose } = runInExtensionUIScope(() => useExtensionUI(ref('sessionA')))
 
     await nextTick()
     await nextTick()

@@ -18,36 +18,16 @@
  * 禁止 node:test / tsx --test。
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { effectScope, ref, nextTick } from 'vue'
-import { createPinia, setActivePinia } from 'pinia'
-import { InternalEventBus } from '@taiji/core'
+import { ref, nextTick } from 'vue'
 
-// ── mock extension api domain ──
-// onUIRequest 已移除（bus 订阅替代）；getPendingRequests/sendExtensionUIResponse 保留 RPC（C3）。
-vi.mock('@taiji/core/transport/api/domains/extension', () => ({
-  // 返 true = 送达（M1 环 3 后 respond 消费 boolean；断连场景用例单独 mockReturnValue(false)）
-  sendExtensionUIResponse: vi.fn((): boolean => true),
-  onNotify: () => () => {},
-  // [B9 agentcall LRU 联动] stores/chat 新装配链（agentcall-lru-linkage → workflow store
-  // → @/api）把 settings.ts 的 re-export `onExtensions = extensionDomain.onExtensions`
-  // 带进本测试模块图——vitest 对 re-export 绑定按具名导入校验，mock 需提供该导出
-  //（本测试不消费它，占位 vi.fn 即可）。
-  onExtensions: vi.fn(),
-  // subscribe 切换 session 时拉取缓存的 pending 请求；测试默认返回空数组
-  getPendingRequests: vi.fn().mockResolvedValue([]),
-}))
-
-// ── mock getExtensionBus（IF1 惰性单例）──
-// 用真实 InternalEventBus 实例（非手写 emitter mock）——验证 emit/on 真实语义。
-// importOriginal 展开保留 useExtensionHostBridge 其他导出（initExtensionHostBridge 等）。
-let mockBus: InternalEventBus
-
+// ── mock 注册（工厂体单源在 helpers/use-extension-ui-test-env，hoist 语义要求注册留本文件）──
+vi.mock('@taiji/core/transport/api/domains/extension', async () => {
+  const { extensionDomainMocks } = await import('../helpers/use-extension-ui-test-env')
+  return extensionDomainMocks
+})
 vi.mock('@/composables/shell/useExtensionHostBridge', async (importOriginal) => {
-  const original = await importOriginal<typeof import('@/composables/shell/useExtensionHostBridge')>()
-  return {
-    ...original,
-    getExtensionBus: () => mockBus,
-  }
+  const { bridgeModuleMocks } = await import('../helpers/use-extension-ui-test-env')
+  return bridgeModuleMocks(importOriginal)
 })
 
 import { useExtensionUI, formFilter, __testing } from '@/composables/useExtensionUI'
@@ -55,16 +35,12 @@ import { sendExtensionUIResponse, getPendingRequests } from '@taiji/core/transpo
 import type { ExtensionUIRequest } from '@taiji/core/transport/api/domains/extension'
 import { useExtensionUIStore } from '@/stores/extension-ui'
 import { useToast } from '@/composables/useToast'
-
-/** 在独立 effectScope 内运行，模拟单 Panel 实例的完整生命周期 */
-function runWithScope<T>(fn: () => T): { result: T; dispose: () => void } {
-  const scope = effectScope()
-  let result!: T
-  scope.run(() => {
-    result = fn()
-  })
-  return { result, dispose: () => scope.stop() }
-}
+import {
+  busSlot,
+  resetUseExtensionUITestEnv,
+  runInExtensionUIScope,
+  emitBusUIRequest,
+} from '../helpers/use-extension-ui-test-env'
 
 // ── 测试数据构造 helper（DialogRequest 形状——runtime event-adapter ASK_USER_MARKER
 //    分支产出的 view-ready 帧：legacy 归一上移 runtime 后 form 键原生携带）──
@@ -85,18 +61,8 @@ function mkDialogReq(requestId: string, dialogKind: 'confirm' | 'select' | 'inpu
   return { requestId, pluginId: 'p', kind: dialogKind, dialogKind, title: 't' }
 }
 
-/** 触发某 session 的 bus ui-request 事件（真实 bus emit） */
-function emitBusUIRequest(sid: string, request: unknown): void {
-  mockBus.emit({ kind: 'ui-request', sessionId: sid, request } as never)
-}
-
 beforeEach(() => {
-  // 模块级 refCount 订阅残留重置（防跨测试串扰）+ 新 pinia + 新 bus 实例
-  __testing.__resetExtensionBusSubscriptionForTesting()
-  setActivePinia(createPinia())
-  mockBus = new InternalEventBus()
-  vi.mocked(sendExtensionUIResponse).mockClear()
-  vi.mocked(getPendingRequests).mockResolvedValue([])
+  resetUseExtensionUITestEnv(__testing.__resetExtensionBusSubscriptionForTesting)
 })
 
 describe('useExtensionUI T1/T2 bus 事件入队与 C4 分流', () => {
@@ -135,7 +101,7 @@ describe('useExtensionUI T1/T2 bus 事件入队与 C4 分流', () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
 
     // 无 sessionId 的 ui-request 事件
-    mockBus.emit({ kind: 'ui-request', request: mkAskUserReq('r-nosid') } as never)
+    busSlot.current!.emit({ kind: 'ui-request', request: mkAskUserReq('r-nosid') } as never)
 
     expect(currentFormRequest.value).toBeUndefined()
     expect(useExtensionUIStore().getRequestsBySession('sessionA')).toHaveLength(0)
@@ -207,7 +173,7 @@ describe('useExtensionUI 快照差集剔除（renderer 僵尸表单修剪，§6.
     // 快照恒为空（A 初始权威快照为空，B 亦空）
     vi.mocked(getPendingRequests).mockResolvedValue([])
     const sid = ref<string | null>('sessionA')
-    const { result, dispose } = runWithScope(() => useExtensionUI(sid))
+    const { result, dispose } = runInExtensionUIScope(() => useExtensionUI(sid))
 
     // 初始订阅拉取空完成
     await nextTick()
@@ -242,7 +208,7 @@ describe('useExtensionUI 快照差集剔除（renderer 僵尸表单修剪，§6.
       s === 'sessionA' ? snapshotA : [],
     )
     const sid = ref<string | null>('sessionA')
-    const { result, dispose } = runWithScope(() => useExtensionUI(sid))
+    const { result, dispose } = runInExtensionUIScope(() => useExtensionUI(sid))
     await nextTick()
     await nextTick()
 
@@ -280,7 +246,7 @@ describe('useExtensionUI 快照差集剔除（renderer 僵尸表单修剪，§6.
       s === 'sessionA' ? snapshotA : [],
     )
     const sid = ref<string | null>('sessionA')
-    const { result, dispose } = runWithScope(() => useExtensionUI(sid))
+    const { result, dispose } = runInExtensionUIScope(() => useExtensionUI(sid))
     await nextTick()
     await nextTick()
 
@@ -312,7 +278,7 @@ describe('useExtensionUI 快照差集剔除（renderer 僵尸表单修剪，§6.
 describe('useExtensionUI T7 同实例切 session 隔离（AC-1/AC-2 bus 版）', () => {
   it('AC-1: 同一实例 sessionId 从 A 切到 B 后 currentFormRequest 变 undefined', async () => {
     const sid = ref<string | null>('sessionA')
-    const { result, dispose } = runWithScope(() => useExtensionUI(sid))
+    const { result, dispose } = runInExtensionUIScope(() => useExtensionUI(sid))
 
     emitBusUIRequest('sessionA', mkAskUserReq('r-a1'))
     expect(result.currentFormRequest.value?.requestId).toBe('r-a1')
@@ -330,7 +296,7 @@ describe('useExtensionUI T7 同实例切 session 隔离（AC-1/AC-2 bus 版）',
       s === 'sessionA' ? ([mkAskUserReq('r-a1')] as never) : [],
     )
     const sid = ref<string | null>('sessionA')
-    const { result, dispose } = runWithScope(() => useExtensionUI(sid))
+    const { result, dispose } = runInExtensionUIScope(() => useExtensionUI(sid))
 
     emitBusUIRequest('sessionA', mkAskUserReq('r-a1'))
     expect(result.currentFormRequest.value?.requestId).toBe('r-a1')
@@ -355,7 +321,7 @@ describe('useExtensionUI T7 同实例切 session 隔离（AC-1/AC-2 bus 版）',
     const pendingBySession: Record<string, ExtensionUIRequest[]> = { sessionA: [], sessionB: [] }
     vi.mocked(getPendingRequests).mockImplementation(async (s: string) => pendingBySession[s] ?? [])
     const sid = ref<string | null>('sessionA')
-    const { result, dispose } = runWithScope(() => useExtensionUI(sid))
+    const { result, dispose } = runInExtensionUIScope(() => useExtensionUI(sid))
 
     sid.value = 'sessionB'
     await nextTick()
@@ -383,7 +349,7 @@ describe('useExtensionUI T7 同实例切 session 隔离（AC-1/AC-2 bus 版）',
 describe('useExtensionUI T8 filter 第二道闸语义', () => {
   it('formFilter 实例放行表单类请求（dialog 不再经 store）', () => {
     const sid = ref<string | null>('shared')
-    const { result: formPanel } = runWithScope(() => useExtensionUI(sid, formFilter))
+    const { result: formPanel } = runInExtensionUIScope(() => useExtensionUI(sid, formFilter))
 
     emitBusUIRequest('shared', mkAskUserReq('r-ask'))
 
@@ -397,9 +363,9 @@ describe('useExtensionUI T8 filter 第二道闸语义', () => {
 
 describe('useExtensionUI T9 模块级 refCount 注册/注销（项目规则 #2）', () => {
   it('多实例订阅共享单次 bus.on；全部 dispose 后不再分发', () => {
-    const onSpy = vi.spyOn(mockBus, 'on')
+    const onSpy = vi.spyOn(busSlot.current!, 'on')
     const sid = ref<string | null>('shared')
-    const insts = [1, 2, 3].map(() => runWithScope(() => useExtensionUI(sid)))
+    const insts = [1, 2, 3].map(() => runInExtensionUIScope(() => useExtensionUI(sid)))
 
     // 3 实例订阅 → ui-request 通道 bus.on 只被调 1 次（refCount 首个注册）；
     // 另 1 次是 P2-2 失效链的模块级单订阅（'requests-invalidated'，永驻不随实例 dispose）
@@ -431,7 +397,7 @@ describe('useExtensionUI T9 模块级 refCount 注册/注销（项目规则 #2�
 describe('useExtensionUI T10 requestId dedup 双通路（bus 帧 + 拉取）', () => {
   it('bus 实时帧先入队，切回拉取同 requestId 不重复入队', async () => {
     const sid = ref<string | null>('sessionA')
-    const { result, dispose } = runWithScope(() => useExtensionUI(sid, formFilter))
+    const { result, dispose } = runInExtensionUIScope(() => useExtensionUI(sid, formFilter))
 
     // 1. bus 实时帧入 r1
     emitBusUIRequest('sessionA', mkAskUserReq('r1'))

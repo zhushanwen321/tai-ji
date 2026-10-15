@@ -20,30 +20,16 @@
  * 运行：cd packages/renderer && npx vitest run src/__tests__/composables/use-extension-ui-plan-review.test.ts
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { effectScope, ref, nextTick } from 'vue'
-import { createPinia, setActivePinia } from 'pinia'
-import { InternalEventBus } from '@taiji/core'
+import { ref, nextTick } from 'vue'
 
-// ── mock extension api domain（照 useExtensionUI.test.ts）──
-const getPendingRequestsMock = vi.hoisted(() => vi.fn())
-
-vi.mock('@taiji/core/transport/api/domains/extension', () => ({
-  // 返 true = 送达（M1 环 3 后 respond 消费 boolean）
-  sendExtensionUIResponse: vi.fn((): boolean => true),
-  onNotify: () => () => {},
-  onExtensions: vi.fn(),
-  getPendingRequests: getPendingRequestsMock,
-}))
-
-// ── mock getExtensionBus：真实 InternalEventBus 实例 ──
-let mockBus: InternalEventBus
-
+// ── mock 注册（工厂体单源在 helpers/use-extension-ui-test-env，hoist 语义要求注册留本文件）──
+vi.mock('@taiji/core/transport/api/domains/extension', async () => {
+  const { extensionDomainMocks } = await import('../helpers/use-extension-ui-test-env')
+  return extensionDomainMocks
+})
 vi.mock('@/composables/shell/useExtensionHostBridge', async (importOriginal) => {
-  const original = await importOriginal<typeof import('@/composables/shell/useExtensionHostBridge')>()
-  return {
-    ...original,
-    getExtensionBus: () => mockBus,
-  }
+  const { bridgeModuleMocks } = await import('../helpers/use-extension-ui-test-env')
+  return bridgeModuleMocks(importOriginal)
 })
 
 import {
@@ -56,16 +42,13 @@ import {
 import { sendExtensionUIResponse } from '@taiji/core/transport/api/domains/extension'
 import { useExtensionUIStore } from '@/stores/extension-ui'
 import { usePlanStore, __testing as planStoreTesting } from '@/stores/plan-store'
-
-/** 在独立 effectScope 内运行，模拟组件实例生命周期 */
-function runWithScope<T>(fn: () => T): { result: T; dispose: () => void } {
-  const scope = effectScope()
-  let result!: T
-  scope.run(() => {
-    result = fn()
-  })
-  return { result, dispose: () => scope.stop() }
-}
+import {
+  busSlot,
+  emitBusUIRequest,
+  extensionDomainMocks,
+  resetUseExtensionUITestEnv,
+  runInExtensionUIScope,
+} from '../helpers/use-extension-ui-test-env'
 
 /** planReview 标记请求（runtime event-adapter 检测 PLAN_REVIEW_MARKER 后的广播形状，D5）；
  *  可带 selfReview（D9③，帧字段与 PlanReviewRequest.selfReview 同名同义） */
@@ -96,22 +79,14 @@ function mkAskUserReq(requestId: string): Record<string, unknown> {
   }
 }
 
-function emitBusUIRequest(sid: string, request: unknown): void {
-  mockBus.emit({ kind: 'ui-request', sessionId: sid, request } as never)
-}
-
 beforeEach(() => {
-  __testing.__resetExtensionBusSubscriptionForTesting()
   planStoreTesting.__resetPlanReviewColdSinkForTesting()
-  setActivePinia(createPinia())
-  mockBus = new InternalEventBus()
-  getPendingRequestsMock.mockReset().mockResolvedValue([])
-  vi.mocked(sendExtensionUIResponse).mockClear()
+  resetUseExtensionUITestEnv(__testing.__resetExtensionBusSubscriptionForTesting)
 })
 
 describe('planReview 分流：C4 放行入 store + 挂起可枚举', () => {
   it('planReview 标记请求入 store（C4 放行），planReviewFilter 实例按 requestId 枚举', () => {
-    const { result, dispose } = runWithScope(() =>
+    const { result, dispose } = runInExtensionUIScope(() =>
       useExtensionUI(ref('sess-A'), planReviewFilter),
     )
     const requests = result.currentPlanReviewRequests
@@ -129,7 +104,7 @@ describe('planReview 分流：C4 放行入 store + 挂起可枚举', () => {
   })
 
   it('formFilter 实例拒绝 planReview 请求（两标记互斥，一请求只归一面）', () => {
-    const { result, dispose } = runWithScope(() =>
+    const { result, dispose } = runInExtensionUIScope(() =>
       useExtensionUI(ref('sess-A'), formFilter),
     )
 
@@ -144,8 +119,8 @@ describe('planReview 分流：C4 放行入 store + 挂起可枚举', () => {
   it('表单请求不进 planReview 枚举（表单类行为无回归）', () => {
     // 两个消费面实例各持各的 filter：planReviewFilter 实例只枚举 planReview；
     // 表单入队回归由 formFilter 实例承载（互斥过滤是设计语义，不是丢失）
-    const review = runWithScope(() => useExtensionUI(ref('sess-A'), planReviewFilter))
-    const form = runWithScope(() => useExtensionUI(ref('sess-A'), formFilter))
+    const review = runInExtensionUIScope(() => useExtensionUI(ref('sess-A'), planReviewFilter))
+    const form = runInExtensionUIScope(() => useExtensionUI(ref('sess-A'), formFilter))
 
     emitBusUIRequest('sess-A', mkAskUserReq('au-1'))
 
@@ -157,7 +132,7 @@ describe('planReview 分流：C4 放行入 store + 挂起可枚举', () => {
   })
 
   it('respond 按 requestId 精确回传 + 出队；payload 原样透传给 sendExtensionUIResponse', () => {
-    const { result, dispose } = runWithScope(() =>
+    const { result, dispose } = runInExtensionUIScope(() =>
       useExtensionUI(ref('sess-A'), planReviewFilter),
     )
 
@@ -180,7 +155,7 @@ describe('planReview 分流：C4 放行入 store + 挂起可枚举', () => {
 
   it('切 session 后枚举读新分区（Map 分区语义）', () => {
     const sid = ref<string | null>('sess-A')
-    const { result, dispose } = runWithScope(() => useExtensionUI(sid, planReviewFilter))
+    const { result, dispose } = runInExtensionUIScope(() => useExtensionUI(sid, planReviewFilter))
 
     emitBusUIRequest('sess-A', mkPlanReviewReq('pr-a'))
     expect(result.currentPlanReviewRequests.value).toHaveLength(1)
@@ -196,7 +171,7 @@ describe('planReview 分流：C4 放行入 store + 挂起可枚举', () => {
 
 describe('pickPlanFields 白名单 selfReview 双入店路径契约（D9③）', () => {
   it('热帧路径：bus → toExtensionUIRequest 白名单搬运携带 selfReview', () => {
-    const { result, dispose } = runWithScope(() =>
+    const { result, dispose } = runInExtensionUIScope(() =>
       useExtensionUI(ref('sess-A'), planReviewFilter),
     )
 
@@ -212,7 +187,7 @@ describe('pickPlanFields 白名单 selfReview 双入店路径契约（D9③）',
   })
 
   it('热帧路径负向：非 string selfReview 不入店（守卫即透传闸）', () => {
-    const { result, dispose } = runWithScope(() =>
+    const { result, dispose } = runInExtensionUIScope(() =>
       useExtensionUI(ref('sess-A'), planReviewFilter),
     )
 
@@ -224,10 +199,10 @@ describe('pickPlanFields 白名单 selfReview 双入店路径契约（D9③）',
   })
 
   it('冷补路径：getPendingRequests 快照全量解包携带 selfReview（切回 session 不丢自审行）', async () => {
-    getPendingRequestsMock.mockResolvedValue([
+    extensionDomainMocks.getPendingRequests.mockResolvedValue([
       { ...mkPlanReviewReq('pr-cold', '冷补自审结论'), receivedAt: Date.now() },
     ])
-    const { result, dispose } = runWithScope(() =>
+    const { result, dispose } = runInExtensionUIScope(() =>
       useExtensionUI(ref('sess-A'), planReviewFilter),
     )
     await Promise.resolve()
@@ -245,7 +220,7 @@ describe('D4 审批窗口漏斗接线（respond/失效置已应答标记；pendi
   it('respond（planReview）→ markPlanReviewAnswered 置已应答标记；非 planReview respond 不置', () => {
     const plan = usePlanStore()
     plan.syncFocus('sess-A') // 窗口位断言读焦点分区（usePlanState 的 syncFocus 义务，本文件直驱）
-    const { result, dispose } = runWithScope(() =>
+    const { result, dispose } = runInExtensionUIScope(() =>
       useExtensionUI(ref('sess-A'), planReviewFilter),
     )
 
@@ -264,10 +239,10 @@ describe('D4 审批窗口漏斗接线（respond/失效置已应答标记；pendi
   it('requestsInvalidated 摘除 planReview → 同置已应答标记（turn abort / /plan abort 解散源）', () => {
     const plan = usePlanStore()
     plan.syncFocus('sess-A')
-    runWithScope(() => useExtensionUI(ref('sess-A'), planReviewFilter))
+    runInExtensionUIScope(() => useExtensionUI(ref('sess-A'), planReviewFilter))
 
     emitBusUIRequest('sess-A', mkPlanReviewReq('pr-1'))
-    mockBus.emit({ kind: 'requests-invalidated', sessionId: 'sess-A', requestIds: ['pr-1'], reason: 'turn-aborted' } as never)
+    busSlot.current!.emit({ kind: 'requests-invalidated', sessionId: 'sess-A', requestIds: ['pr-1'], reason: 'turn-aborted' } as never)
 
     expect(plan.planReviewAckMarked).toBe(true)
   })
@@ -275,7 +250,7 @@ describe('D4 审批窗口漏斗接线（respond/失效置已应答标记；pendi
   it('多挂起异常形态：respond 其中一条 → 镜像按 registry 现值保持 true + 已应答标记置起', () => {
     const plan = usePlanStore()
     plan.syncFocus('sess-A')
-    const { result, dispose } = runWithScope(() =>
+    const { result, dispose } = runInExtensionUIScope(() =>
       useExtensionUI(ref('sess-A'), planReviewFilter),
     )
 

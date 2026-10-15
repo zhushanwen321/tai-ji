@@ -1133,25 +1133,38 @@ function normalizeSeverity(x) {
  *  校验后透传扩展字段；畸形条目返回 null（调用方 filter(Boolean) 剔除）。空 id 条目
  *（{id:""}/""）在本层拒绝（AC1-B1：空 id 不得建卡、不得进 ES3 must-fix 校验）——
  *  消费侧的 !id 判据只是廉价防线，权威拦截在此单点。 */
+/** 非空白字符串守卫：通过返回原值（evidence/guidance/note 原样透传），否则 undefined（不落键）。 */
+function nonBlankString(v) {
+  return typeof v === "string" && v.trim() ? v : undefined;
+}
+
+/** files 字段归一：字符串数组逐条 trim、剔空白项，空数组不落键（返回 undefined）。 */
+function normalizeEntryFiles(files) {
+  if (!Array.isArray(files)) return undefined;
+  const cleaned = files.filter((f) => typeof f === "string" && f.trim()).map((f) => f.trim());
+  return cleaned.length > 0 ? cleaned : undefined;
+}
+
+/** adjudication 合法值表（与聚合 prompt 的 "evidence|unverified|downgraded" 枚举同源）。 */
+const ADJUDICATION_VALUES = ["evidence", "unverified", "downgraded"];
+
 function normalizeMustFixEntry(x) {
   if (typeof x === "string") return x.trim() ? { id: x, severity: "major" } : null;
   if (!(x && typeof x === "object" && typeof x.id === "string" && x.id)) return null;
   const entry = { id: x.id, severity: normalizeSeverity(x) };
   // title（跨轮身份锚点，L1/L2 匹配原料）：string[] 旧格式无 title，保持无键（降级为
   // 纯编号匹配 = 现状行为，可接受）。
-  if (typeof x.title === "string" && x.title.trim()) entry.title = x.title.trim();
+  const title = nonBlankString(x.title);
+  if (title) entry.title = title.trim();
   // A7: files 判空与落地统一 trim——原值含空白路径会与 git 实测路径比对 miss，
   // origin 误判 new（归因失真）。
-  if (Array.isArray(x.files)) {
-    const files = x.files
-      .filter((f) => typeof f === "string" && f.trim())
-      .map((f) => f.trim());
-    if (files.length > 0) entry.files = files;
-  }
+  const files = normalizeEntryFiles(x.files);
+  if (files) entry.files = files;
   for (const k of ["evidence", "guidance", "note"]) {
-    if (typeof x[k] === "string" && x[k].trim()) entry[k] = x[k];
+    const v = nonBlankString(x[k]);
+    if (v !== undefined) entry[k] = v;
   }
-  if (x.adjudication === "evidence" || x.adjudication === "unverified" || x.adjudication === "downgraded") {
+  if (ADJUDICATION_VALUES.includes(x.adjudication)) {
     entry.adjudication = x.adjudication;
   }
   return entry;

@@ -51,6 +51,7 @@ import { useToast } from '@/composables/useToast'
 import type { ExtensionUIRequest } from '@taiji/core/transport/api/domains/extension'
 import {
   createFormRequestChannel,
+  bindSessionFormActions,
   isPlanReviewFrame,
   type FormChannelPartitions,
 } from '@taiji/ui/extension-host'
@@ -466,7 +467,8 @@ export function useExtensionUI(
   })
 
   /**
-   * 用户回复指定请求（按 requestId 精确定位，不假设队首）。
+   * 用户回复指定请求（按 requestId 精确定位，不假设队首）——sid 守卫包装在
+   * bindSessionFormActions（双壳同构装配段收敛单点，见 ui form-request-channel）。
    *
    * 回传核心流（定位 → sendExtensionUIResponse → 未送达保留 store 请求可重试——
    * M1/RD-3#1：断连期点确认＝应答丢失、弹窗消失、pi 侧 Promise 永挂；送达即出队）在
@@ -477,22 +479,13 @@ export function useExtensionUI(
    * 未送达（保持挂起可重试——「重试仅限投递失败态」）或请求已终结（应答丢弃 + 提示
    * 失效，不静默）。消费方（btw 内联确认条）据此决定待处理簿记是否随应答解除。
    */
-  function respond(requestId: string, result: boolean | string | null): boolean {
-    const sid = sessionId.value
-    if (!sid) return false
-    return formChannel.respond(sid, requestId, result)
-  }
-
-  /** 用户取消（等价 respond(requestId, null)） */
-  function cancel(requestId: string): void {
-    respond(requestId, null)
-  }
+  const actions = bindSessionFormActions(formChannel, () => sessionId.value)
 
   return {
     currentFormRequest,
     currentPlanReviewRequests,
-    respond,
-    cancel,
+    respond: actions.respond,
+    cancel: actions.cancel,
   }
 }
 

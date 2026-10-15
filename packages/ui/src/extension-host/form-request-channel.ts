@@ -190,3 +190,42 @@ export function createFormRequestChannel(options: FormRequestChannelOptions): Fo
     },
   }
 }
+
+/** 会话视图作用域的通道动作（bindSessionFormActions 产出，壳会话视图层直接返回消费） */
+export interface SessionFormActions {
+  /** 快照对账（sid 缺省跳过——无会话分区可对账） */
+  reconcile(): void
+  /** 回传（sid 缺省返回 false：无会话不可回传） */
+  respond(requestId: string, result: boolean | string | null): boolean
+  /** 取消（等价 respond(requestId, null)；sid 缺省 no-op） */
+  cancel(requestId: string): void
+}
+
+/**
+ * 会话视图作用域的通道动作绑定（双壳同构装配段收敛）：「当前会话 id 取值 + sid 守卫 +
+ * channel 委托」的 respond/cancel/reconcile 薄包装此前在桌面 useExtensionUI 与移动
+ * companion-bridge 的会话视图层各持逐字节同构副本（gate duplication E 组），收敛为
+ * 本单点——sid 缺省语义（respond 返回 false / reconcile 跳过 / cancel 走 channel.cancel
+ * 的 null 应答）在此单点维护。getSid 由壳注入（两壳均为 `() => sessionId.value` 的
+ * Ref 读口），本模块保持零 Vue 依赖。
+ */
+export function bindSessionFormActions(
+  channel: FormRequestChannel,
+  getSid: () => string | null | undefined,
+): SessionFormActions {
+  return {
+    reconcile(): void {
+      const sid = getSid()
+      if (sid) channel.reconcile(sid)
+    },
+    respond(requestId: string, result: boolean | string | null): boolean {
+      const sid = getSid()
+      if (!sid) return false
+      return channel.respond(sid, requestId, result)
+    },
+    cancel(requestId: string): void {
+      const sid = getSid()
+      if (sid) channel.cancel(sid, requestId)
+    },
+  }
+}

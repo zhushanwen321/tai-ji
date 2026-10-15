@@ -74,9 +74,11 @@ export {
 } from './shell-adapters'
 export {
   createFormRequestChannel,
+  bindSessionFormActions,
   type FormChannelPartitions,
   type FormRequestChannel,
   type FormRequestChannelOptions,
+  type SessionFormActions,
 } from './form-request-channel'
 export {
   formQuestionsOf,
