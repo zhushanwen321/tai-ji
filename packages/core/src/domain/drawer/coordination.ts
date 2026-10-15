@@ -11,7 +11,7 @@
  *
  * 选中态写入编排（display-containers §6.6① 五字段迁出后）：选中态落 selection/<域>
  * 分区、切 tab + 开合落 control——跨两分区的编排收口在本层（control 保持纯控制态，C4）。
- * 各选中态写入面（setSubagentView / setWorkflowView / setBtwView / setBackgroundTaskView）
+ * 各选中态写入面（setSubagentView / clearSubagentView / setWorkflowView / setBtwView / setBackgroundTaskView）
  * 状态本体在 selection/<域>，经 drawer barrel 单一出口（本文件不重复导出，防 export * 同名冲突）。
  *
  * 分层（C4）：单向依赖 control.ts（drawerControl 原语 + getBoundSessionId + getDrawerControlState）
@@ -20,7 +20,7 @@
 import { ref } from 'vue'
 import type { WorkflowRunRecord } from '@taiji/shared'
 import { drawerControl, getDrawerControlState, _resetDrawerControlForTest } from './control'
-import { setSubagentView } from './selection/subagent'
+import { setSubagentView, clearSubagentView } from './selection/subagent'
 import { setWorkflowView } from './selection/workflow'
 import { setBackgroundTaskView } from './selection/bash-task'
 import { selectedCommandName, detailFilePath } from './selection/transient'
@@ -65,6 +65,15 @@ export function setDrawerTab(tab: RightDrawerTab): void {
 export function openSubagent(opts: OpenSubagentOptions): void {
   setSubagentView(opts.virtualId, opts.enteredFrom)
   drawerControl.open('subagent')
+}
+
+/**
+ * 清空 subagent 选中态（drawer 二级 tab 全部关闭回空态时调用，不开合 drawer）。
+ * 与 openSubagent 同为 subagent 选中态的编排级写入入口——空态不同步清空会在分区留
+ * 残留 vid，重挂载复活已关闭 tab / 同值重选不触发 watch。
+ */
+export function clearSubagentSelection(): void {
+  clearSubagentView()
 }
 
 /**

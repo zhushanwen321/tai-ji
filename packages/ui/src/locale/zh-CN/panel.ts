@@ -399,14 +399,20 @@ export default {
     subagentOverrideBadge: '用户覆盖中',
     subagentModelSwitchTitle: '切换此子代理的执行模型（无活跃进程时记账，下次执行生效）',
     subagentModelActual: '当前实际使用模型：{model}',
-    subagentModelSourceExplicit: '派发指定',
-    subagentModelSourceFrontmatter: 'agent 声明',
-    subagentModelSourcePreference: '偏好缺省',
-    subagentModelSourceDefault: '引擎缺省',
-    subagentModelSourceTitleExplicit: '派发时显式指定了模型（task 参数）',
-    subagentModelSourceTitleFrontmatter: '模型来自 agent .md frontmatter 声明',
-    subagentModelSourceTitlePreference: '未显式指定——由 settings 偏好（per-engine 默认模型）补缺',
-    subagentModelSourceTitleDefault: '未指定模型——由引擎自身缺省解析',
+    // 嵌套两层（叶键 = SubagentModelSource 值域）：消费点 useSubagentModel.ts 动态拼
+    // `panel.sideDrawer.subagentModelSource[Title].${source}`，扁平键形态解析不到
+    subagentModelSource: {
+      explicit: '派发指定',
+      frontmatter: 'agent 声明',
+      preference: '偏好缺省',
+      default: '引擎缺省',
+    },
+    subagentModelSourceTitle: {
+      explicit: '派发时显式指定了模型（task 参数）',
+      frontmatter: '模型来自 agent .md frontmatter 声明',
+      preference: '未显式指定——由 settings 偏好（per-engine 默认模型）补缺',
+      default: '未指定模型——由引擎自身缺省解析',
+    },
     modelSwitchFailed: '切换模型失败：{msg}',
     modelSwitchMemberFailed: '成员 {member} 切换失败（{reason}）——其他成员不受影响',
     bashTaskRunningFor: '已运行 {duration}',

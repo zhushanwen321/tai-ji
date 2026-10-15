@@ -8,7 +8,7 @@
  * 内容数据在 chatStore 按虚拟 id 分区——切 tab 不丢详情。
  */
 import { computed, watch, type ComputedRef, type Ref } from 'vue'
-import { openSubagent } from '@taiji/core/domain/drawer'
+import { clearSubagentSelection, openSubagent } from '@taiji/core/domain/drawer'
 import { useSubagentStore } from '@/stores/subagent'
 import { usePanelStore } from '@/stores/panel'
 
@@ -19,7 +19,7 @@ export interface SubagentDrawerTabsDeps { // oe-exempt:20261015:framework:tab �
   enteredFrom: ComputedRef<'chat' | 'workflow' | null> | Ref<'chat' | 'workflow' | null>
   /** tab 文案（agent · slug；组件侧投影注入）。 */
   labelOf: (vid: string) => string
-  /** 停流回调（切 tab 停旧订阅；关闭至空态停流）。 */
+  /** 停流回调（切 tab 停旧订阅；关闭至空态停流——空态时编排同时清 core 选中态）。 */
   stopStream: () => void
 }
 
@@ -59,6 +59,9 @@ export function useSubagentDrawerTabs(deps: SubagentDrawerTabsDeps): {
   function close(vid: string): void {
     const next = subagentStore.closeDrawerTab(focusedSid.value, vid)
     if (next === null) {
+      // 空态同步清 core 选中态：残留 vid 会在组件重挂载时经 watch immediate 复活已关闭
+      // tab 并拉流，且同值重选不触发 watch（无变化边沿）。
+      clearSubagentSelection()
       deps.stopStream()
       return
     }

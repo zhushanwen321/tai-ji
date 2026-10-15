@@ -30,6 +30,7 @@ import { readFileSync, readdirSync } from 'node:fs'
 import { dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import zhPanel from '@taiji/ui/locale/zh-CN/panel'
+import enPanel from '@taiji/ui/locale/en-US/panel'
 import zhSettings from '@taiji/ui/locale/zh-CN/settings'
 import zhComposable from '@taiji/ui/locale/zh-CN/composable'
 
@@ -71,14 +72,14 @@ const SUBAGENT_MODEL_SOURCE_REASON =
   '(packages/shared/src/subagent.ts:44, 即 explicit/frontmatter/preference/default)'
 
 const ALLOWLIST: readonly { key: string; reason: string }[] = [
-  { key: 'panel.sideDrawer.subagentModelSourceExplicit', reason: SUBAGENT_MODEL_SOURCE_REASON },
-  { key: 'panel.sideDrawer.subagentModelSourceFrontmatter', reason: SUBAGENT_MODEL_SOURCE_REASON },
-  { key: 'panel.sideDrawer.subagentModelSourcePreference', reason: SUBAGENT_MODEL_SOURCE_REASON },
-  { key: 'panel.sideDrawer.subagentModelSourceDefault', reason: SUBAGENT_MODEL_SOURCE_REASON },
-  { key: 'panel.sideDrawer.subagentModelSourceTitleExplicit', reason: SUBAGENT_MODEL_SOURCE_REASON },
-  { key: 'panel.sideDrawer.subagentModelSourceTitleFrontmatter', reason: SUBAGENT_MODEL_SOURCE_REASON },
-  { key: 'panel.sideDrawer.subagentModelSourceTitlePreference', reason: SUBAGENT_MODEL_SOURCE_REASON },
-  { key: 'panel.sideDrawer.subagentModelSourceTitleDefault', reason: SUBAGENT_MODEL_SOURCE_REASON },
+  { key: 'panel.sideDrawer.subagentModelSource.explicit', reason: SUBAGENT_MODEL_SOURCE_REASON },
+  { key: 'panel.sideDrawer.subagentModelSource.frontmatter', reason: SUBAGENT_MODEL_SOURCE_REASON },
+  { key: 'panel.sideDrawer.subagentModelSource.preference', reason: SUBAGENT_MODEL_SOURCE_REASON },
+  { key: 'panel.sideDrawer.subagentModelSource.default', reason: SUBAGENT_MODEL_SOURCE_REASON },
+  { key: 'panel.sideDrawer.subagentModelSourceTitle.explicit', reason: SUBAGENT_MODEL_SOURCE_REASON },
+  { key: 'panel.sideDrawer.subagentModelSourceTitle.frontmatter', reason: SUBAGENT_MODEL_SOURCE_REASON },
+  { key: 'panel.sideDrawer.subagentModelSourceTitle.preference', reason: SUBAGENT_MODEL_SOURCE_REASON },
+  { key: 'panel.sideDrawer.subagentModelSourceTitle.default', reason: SUBAGENT_MODEL_SOURCE_REASON },
 ]
 
 /** 拍平嵌套 locale 对象为叶子 key 全路径 */
@@ -181,5 +182,31 @@ describe('locale 反向守卫：panel.* / settings.providerEdit.* / composable.*
         .map((key) => `  - ${key}`)
         .join('\n')}`,
     ).toEqual([])
+  })
+})
+
+/** 按「Allowlist 键形态 = 动态组装可达」的前提，正向断言这些键在真实 locale 消息里可解析出文案 */
+function resolveLocaleKey(messages: unknown, key: string): unknown {
+  const path = key.split('.')
+  return path.slice(1).reduce<unknown>(
+    (node, segment) =>
+      node !== null && typeof node === 'object'
+        ? (node as Record<string, unknown>)[segment]
+        : undefined,
+    messages,
+  )
+}
+
+describe('ALLOWLIST 动态组装键的真实 i18n 解析断言', () => {
+  it.each([
+    ['zh-CN', zhPanel],
+    ['en-US', enPanel],
+  ] as const)('%s：每个动态组装键都解析到非空字符串（防键形态错配退化为显示键名）', (_locale, messages) => {
+    for (const entry of ALLOWLIST) {
+      const resolved = resolveLocaleKey(messages, entry.key)
+      expect(resolved, `key ${entry.key} 在 ${_locale} locale 中不可解析`).toEqual(expect.any(String))
+      expect(resolved as string).not.toBe('')
+      expect(resolved as string).not.toBe(entry.key)
+    }
   })
 })

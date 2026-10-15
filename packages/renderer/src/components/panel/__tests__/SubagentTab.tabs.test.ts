@@ -34,6 +34,11 @@ vi.mock('@taiji/core/domain/drawer', () => ({
     drawerState.selectedSubagentId.value = opts.virtualId
     if (opts.enteredFrom !== undefined) drawerState.enteredFrom.value = opts.enteredFrom
   }),
+  // 真实语义：tab 全关回空态时清 core 选中态（close() 空态分支同步通道）
+  clearSubagentSelection: vi.fn(() => {
+    drawerState.selectedSubagentId.value = null
+    drawerState.enteredFrom.value = null
+  }),
 }))
 
 vi.mock('@/stores/panel', () => ({
@@ -195,5 +200,49 @@ describe('SubagentTab 二级 tab 编排（subagent-detail-tabs）', () => {
     await nextTick()
     expect(wrapper.find('[data-testid="drawer-subagent-empty"]').exists()).toBe(true)
     expect(drawerTabsFixture.tabs).toHaveLength(0)
+  })
+
+  it('关空清选中态（MF-3）：最后一个 tab 关闭后 core 选中态同步清空，重选同一 vid 重开 tab', async () => {
+    // 单 tab 无 UI 关闭入口（tab 条 >1 才渲染）——经编排 composable 直驱同一 close 通道。
+    const stopStream = vi.fn()
+    const { useSubagentDrawerTabs } = await import('@/composables/panel/useSubagentDrawerTabs')
+    const tabsApi = useSubagentDrawerTabs({
+      selectedSubagentId: drawerState.selectedSubagentId,
+      enteredFrom: drawerState.enteredFrom,
+      labelOf: (vid) => vid,
+      stopStream,
+    })
+    await select('subagent:main-1:sa-1')
+    expect([...drawerTabsFixture.tabs]).toEqual(['subagent:main-1:sa-1'])
+    tabsApi.close('subagent:main-1:sa-1')
+    await nextTick()
+    await nextTick()
+    // 空态分支：选中态清空（残留 vid 会经 watch immediate 复活已关 tab 并拉流）+ 停流
+    expect(drawerState.selectedSubagentId.value).toBeNull()
+    expect(drawerTabsFixture.tabs).toHaveLength(0)
+    expect(stopStream).toHaveBeenCalled()
+    // 同值重选：null → vid 有变化边沿，watch 重开 tab（同值 set 不触发 watch 的缺陷不再可达）
+    await select('subagent:main-1:sa-1')
+    expect([...drawerTabsFixture.tabs]).toEqual(['subagent:main-1:sa-1'])
+    expect(drawerTabsFixture.active).toBe('subagent:main-1:sa-1')
+  })
+
+  it('关空→切走→切回（MF-3）：空态后选择其他 vid 再切回，tab 集与选中态无残留错位', async () => {
+    const { useSubagentDrawerTabs } = await import('@/composables/panel/useSubagentDrawerTabs')
+    const tabsApi = useSubagentDrawerTabs({
+      selectedSubagentId: drawerState.selectedSubagentId,
+      enteredFrom: drawerState.enteredFrom,
+      labelOf: (vid) => vid,
+      stopStream: vi.fn(),
+    })
+    await select('subagent:main-1:sa-1')
+    tabsApi.close('subagent:main-1:sa-1')
+    await nextTick()
+    expect(drawerState.selectedSubagentId.value).toBeNull()
+    // 切走（sa-2）→ 切回（sa-1）：两 tab 都按新选择重建，无已关 tab 复活
+    await select('subagent:main-1:sa-2')
+    await select('subagent:main-1:sa-1')
+    expect([...drawerTabsFixture.tabs]).toEqual(['subagent:main-1:sa-2', 'subagent:main-1:sa-1'])
+    expect(drawerTabsFixture.active).toBe('subagent:main-1:sa-1')
   })
 })

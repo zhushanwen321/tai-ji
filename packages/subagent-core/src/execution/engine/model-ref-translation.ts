@@ -53,7 +53,24 @@ export function resolveEngineModelWithTranslation(
   if (frontmatterModel !== undefined) return { engineModel: translate(frontmatterModel), source: "frontmatter" };
   const preference = readPreference();
   if (preference === undefined) return { engineModel: undefined, source: "default" };
-  const translated = translate(preference);
+  // 偏好层失败语义补口（MF-2）：引擎翻译面对历史遗留/清单漂移的偏好值可能抛
+  // model_not_available（zcode 实装 translatePiModelRefToZcode 三处同步 throw）。
+  // 显式层首败即停不变；偏好层按本文件头声明的语义降级——跳过偏好层走引擎缺省
+  // + warn，不炸派发（settings 页可重选）。code 用结构化探测，不 import 具体
+  // 引擎包（core 不依赖引擎实装）。
+  let translated: string;
+  try {
+    translated = translate(preference);
+  } catch (err: unknown) {
+    const code = typeof err === "object" && err !== null && "code" in err ? (err as { code?: unknown }).code : undefined;
+    if (code !== "model_not_available") throw err;
+    warn(
+      `[${logPrefix}] engineDefaults.${route.engineId}="${preference}" 翻译失败` +
+        `（${err instanceof Error ? err.message : String(err)}），本派发跳过偏好层走引擎缺省` +
+        `（settings 页可重选）`,
+    );
+    return { engineModel: undefined, source: "default" };
+  }
   // 清单成员校验仅对「有枚举面」的引擎生效：undefined/null = port 契约的「无自有
   // 枚举面」形态（放行——引擎侧 validateModel 仍兜底；回归守卫：不可把无面引擎
   // 当空清单处理，否则偏好层被误跳过）；空数组 = 枚举面在册但当前无可用模型 → 跳过。

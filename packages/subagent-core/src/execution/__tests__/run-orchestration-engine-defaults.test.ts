@@ -388,6 +388,50 @@ describe("engine-ref-translation：chat 域派发期翻译", () => {
     nonPi.runs[0]!.settle();
   });
 
+  it("偏好层翻译抛 model_not_available（zcode 实装形态：退役模型历史遗留偏好）→ 跳过偏好走引擎缺省 + warn，不炸派发", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    // 模拟 zcode ZcodePrepareError 形态（code 属性承载 model_not_available）：
+    // 偏好值命中 pi 侧已退役模型的翻译失败路径
+    const { service, nonPi, store } = makeHarness(
+      { [NON_PI_ENGINE_ID]: "zai-coding-cn/GLM-4.6V" },
+      {
+        translateModelRef: (ref) => {
+          if (ref.startsWith("zai-coding-cn/")) {
+            throw Object.assign(new Error(`[model_not_available] 模型 "${ref}" 无等价模型`), { code: "model_not_available" });
+          }
+          return ref;
+        },
+      },
+    );
+    const handle = await service.execute({
+      task: "d6 translate pref-throw",
+      slug: "d6-tr-pref-throw",
+      engine: NON_PI_ENGINE_ID,
+    });
+    await vi.waitFor(() => expect(nonPi.runs.length).toBe(1));
+    expect("model" in nonPi.runs[0]!.task).toBe(false);
+    expect(store.getMutable(handle.subagentId)?.model).toBeUndefined();
+    expect(store.getMutable(handle.subagentId)?.modelSource).toBe("default");
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("跳过偏好层"));
+    warn.mockRestore();
+    nonPi.runs[0]!.settle();
+  });
+
+  it("偏好层翻译抛非 model_not_available 错误 → 仍向上传播（首败即停语义仅收窄清单漂移）", async () => {
+    // 断言在 resolveEngineModelWithTranslation 直调面：其他错误码不降级
+    const { resolveEngineModelWithTranslation } = await import("../engine/model-ref-translation.ts");
+    expect(() =>
+      resolveEngineModelWithTranslation(
+        { engineId: NON_PI_ENGINE_ID, engine: { translateModelRef: () => { throw Object.assign(new Error("x"), { code: "engine_credential_missing" }); } } } as never,
+        undefined,
+        undefined,
+        () => "prov/pref",
+        () => {},
+        "test",
+      ),
+    ).toThrow();
+  });
+
   it("显式 model 翻译失败 → 派发同步期抛错（首败即停，record 创建前）", async () => {
     const { service } = makeHarness(undefined, {
       translateModelRef: () => {
