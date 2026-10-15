@@ -188,8 +188,9 @@ export function opSpecOf(
             labelKey: 'panel.canvas.op.directionChoice',
             required: true,
             options: [
-              { value: 'top-down', labelKey: 'panel.canvas.op.directionTopDown' },
-              { value: 'bottom-up', labelKey: 'panel.canvas.op.directionBottomUp' },
+              // 方向词条复用外层画布域（CanvasPane 头部同款，单份不进 op 子树）
+              { value: 'top-down', labelKey: 'panel.canvas.directionTopDown' },
+              { value: 'bottom-up', labelKey: 'panel.canvas.directionBottomUp' },
             ],
           },
           { key: 'reason', kind: 'textarea', labelKey: 'panel.canvas.op.directionReason', required: true },

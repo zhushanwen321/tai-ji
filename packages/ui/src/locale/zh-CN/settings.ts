@@ -821,6 +821,8 @@ export default {
   preset: {
     pageDesc: '管理模式，配置工具、扩展访问策略与提示词',
     groupTitle: '模式',
+    collapse: '收起',
+    expand: '展开',
     new: '新建模式',
     empty: '暂无模式',
     builtin: '内置',

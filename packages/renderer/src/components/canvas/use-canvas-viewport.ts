@@ -3,7 +3,7 @@
  * （problem-solve-canvas §3.1(3) U7；demo v3 视口段内核平移）。
  *
  * 职责：k/tx/ty 三元视口状态 + 滚轮以指针为锚缩放 + 拖拽平移（位移阈值区分单击空白）
- * + fitView 包围盒适配。数值档位 = demo 同值（缩放 [0.28, 1.6]、适配上限 0.92）。
+ * + fitView 包围盒适配 + 用户接管判定。数值档位 = demo 同值（缩放 [0.28, 1.6]、适配上限 0.92）。
  * 纯视图变换，无画布领域语义；bbox 由调用方（布局 computed）注入，随布局重算自动生效。
  */
 import { ref, type Ref } from 'vue'
@@ -37,8 +37,13 @@ export function useCanvasViewport(boundingBox: Ref<ViewportBBox>) {
   const tx = ref(INITIAL_PAN_X)
   const ty = ref(INITIAL_PAN_Y)
   const dragging = ref(false)
-  let fitApplied = false
   let drag: { x: number; y: number; tx: number; ty: number; moved: boolean } | null = null
+
+  /**
+   * 用户是否已接管视口（手动拖拽平移 / 滚轮或按钮缩放 / 手动 fit 任一发生即为 true）。
+   * 接管后自动适配停止——「默认自适应全景，后续由用户自行调整」的切换点。
+   */
+  const userAdjusted = ref(false)
 
   function zoomAt(mx: number, my: number, f: number): void {
     const k2 = Math.min(K_MAX, Math.max(K_MIN, k.value * f))
@@ -47,13 +52,17 @@ export function useCanvasViewport(boundingBox: Ref<ViewportBBox>) {
     k.value = k2
   }
 
+  /** 按钮缩放（右下 +/-）：用户主动操作 → 接管。 */
   function zoomCenter(f: number): void {
+    userAdjusted.value = true
     const el = viewportRef.value
     if (!el) return
     zoomAt(el.clientWidth / MIDPOINT_DIVISOR, el.clientHeight / MIDPOINT_DIVISOR, f)
   }
 
+  /** 滚轮缩放（以指针为锚）：用户主动操作 → 接管。 */
   function onWheel(e: WheelEvent): void {
+    userAdjusted.value = true
     zoomAt(e.offsetX, e.offsetY, Math.exp(-e.deltaY * WHEEL_ZOOM_FACTOR))
   }
 
@@ -67,7 +76,10 @@ export function useCanvasViewport(boundingBox: Ref<ViewportBBox>) {
     if (!drag) return
     const dx = e.clientX - drag.x
     const dy = e.clientY - drag.y
-    if (Math.abs(dx) + Math.abs(dy) > DRAG_MOVE_THRESHOLD) drag.moved = true
+    if (Math.abs(dx) + Math.abs(dy) > DRAG_MOVE_THRESHOLD) {
+      drag.moved = true
+      userAdjusted.value = true
+    }
     tx.value = drag.tx + dx
     ty.value = drag.ty + dy
   }
@@ -80,7 +92,10 @@ export function useCanvasViewport(boundingBox: Ref<ViewportBBox>) {
     return { blankClick }
   }
 
-  /** 包围盒适配（demo fitView：留白、上限 0.92、下限 0.28，内容居中）。 */
+  /**
+   * 包围盒适配（demo fitView：留白、上限 0.92、下限 0.28，内容居中）。
+   * 纯计算不改接管标志——自动适配与手动 fit（组件层 markViewportAdjusted 后调用）共用。
+   */
   function fitView(): void {
     const el = viewportRef.value
     if (!el) return
@@ -95,7 +110,6 @@ export function useCanvasViewport(boundingBox: Ref<ViewportBBox>) {
     k.value = Math.max(K_MIN, fit)
     tx.value = (el.clientWidth - bw * k.value) / MIDPOINT_DIVISOR - b.x1 * k.value
     ty.value = Math.max(FIT_MIN_PAN_Y, (el.clientHeight - bh * k.value) / MIDPOINT_DIVISOR - b.y1 * k.value)
-    fitApplied = true
   }
 
   return {
@@ -110,10 +124,11 @@ export function useCanvasViewport(boundingBox: Ref<ViewportBBox>) {
     onMove,
     onUp,
     fitView,
-    /** 首帧 fit 是否已执行（挂载时执行一次；暴露供组件挂载钩子判定）。 */
-    isFitApplied: () => fitApplied,
-    markFitApplied: (): void => {
-      fitApplied = true
+    /** 用户是否已接管视口（自动适配的停止判据）。 */
+    isViewportAdjusted: (): boolean => userAdjusted.value,
+    /** 标记接管（手动 fit 按钮入口：此后布局变化不再自动重置视口）。 */
+    markViewportAdjusted: (): void => {
+      userAdjusted.value = true
     },
     ZOOM_STEP,
   }

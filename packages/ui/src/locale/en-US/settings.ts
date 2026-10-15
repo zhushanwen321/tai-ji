@@ -822,6 +822,8 @@ export default {
   preset: {
     pageDesc: 'Manage modes, configure tool, extension and prompt access policies',
     groupTitle: 'Modes',
+    collapse: 'Collapse',
+    expand: 'Expand',
     new: 'New Mode',
     empty: 'No modes',
     builtin: 'Built-in',

@@ -132,7 +132,7 @@
     <div class="absolute bottom-3 right-3 z-10 flex flex-col gap-1.5" data-testid="canvas-zoom-controls">
       <Button variant="secondary" size="sm" class="size-8 p-0 font-mono" data-testid="canvas-zoom-in" @click="zoomCenter(ZOOM_STEP)">＋</Button>
       <Button variant="secondary" size="sm" class="size-8 p-0 font-mono" data-testid="canvas-zoom-out" @click="zoomCenter(1 / ZOOM_STEP)">－</Button>
-      <Button variant="secondary" size="sm" class="size-8 p-0 font-mono" :title="t('panel.canvas.fitView')" data-testid="canvas-fit-view" @click="fitView">⤢</Button>
+      <Button variant="secondary" size="sm" class="size-8 p-0 font-mono" :title="t('panel.canvas.fitView')" data-testid="canvas-fit-view" @click="fitViewManual">⤢</Button>
     </div>
   </div>
 </template>
@@ -263,7 +263,8 @@ function observeNodeHeights(): void {
 
 onMounted(() => {
   observeNodeHeights()
-  if (!isFitApplied()) fitView()
+  // 首帧适配（DOM 就绪后；此后布局 bbox 每次变化由下方 watch 继续跟随）
+  if (!isViewportAdjusted()) fitView()
 })
 
 watch(
@@ -273,6 +274,24 @@ watch(
     observeNodeHeights()
   },
 )
+
+/**
+ * 首帧自适应全景：用户未接管视口前，布局 bbox 每次变化（数据装载 / 高度实测
+ * 回填 / 折叠重排）都重新适配全景——fit 不再只依赖挂载单帧。接管后（拖拽 /
+ * 缩放 / 手动 fit）自动适配停止，用户调整优先。
+ */
+watch(
+  () => layout.value.bbox,
+  () => {
+    if (!isViewportAdjusted()) fitView()
+  },
+)
+
+/** 手动 fit（右下按钮）：视口自此归用户接管，后续布局变化不再自动重置。 */
+function fitViewManual(): void {
+  markViewportAdjusted()
+  fitView()
+}
 
 // ── 派发 / 互驳 / 焦点派生 ──────────────────────────────────────────────────
 
@@ -373,7 +392,8 @@ const {
   onMove,
   onUp: viewportUp,
   fitView,
-  isFitApplied,
+  isViewportAdjusted,
+  markViewportAdjusted,
   ZOOM_STEP,
 } = useCanvasViewport(computed(() => layout.value.bbox))
 
@@ -390,6 +410,4 @@ function onUp(e: MouseEvent): void {
     && el.tagName !== 'path'
   if (onBlank) emit('select', null)
 }
-
-defineExpose({ fitView })
 </script>
