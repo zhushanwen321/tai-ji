@@ -228,8 +228,12 @@ describe("resolvePersonalProviderConfigPath（默认解析链：显式 sources >
     // 真实文件条目同样可见——D3 换轨核心：校验链与 Registry 读同一 merge 视图，
     // 「读源 = 副本整体遮蔽真实」的旧语义已退役
     expect(resolveZcodeModelRef("GLM-5.3")).toBe(`${PROVIDER_A}/GLM-5.3`);
-    // 清单聚合 = merge 视图全体（真实条目整条保留在前 → PROVIDER_A 先于副本条目）
-    expect(listZcodeModels().map((m) => m.id)).toEqual([
+    // 清单聚合 = merge 视图全体（真实条目整条保留在前 → PROVIDER_A 先于副本条目）。
+    // builtinCatalogPath 显式指到缺失路径：隔离本机真实内建目录（account 直通家族
+    // 扫描不属本用例变量，裸调会在装有 ZCode 的机器上混入真实 account 条目）
+    expect(
+      listZcodeModels({ builtinCatalogPath: path.join(tmpRoot, "absent-catalog.json") }).map((m) => m.id),
+    ).toEqual([
       `${PROVIDER_A}/GLM-5.3`,
       `${COPY_PROVIDER}/copy-model-x`,
     ]);
@@ -278,7 +282,10 @@ describe("resolvePersonalProviderConfigPath（默认解析链：显式 sources >
     fs.rmSync(realPath);
     writeCopy(dataDir);
     expect(resolveZcodeModelRef("copy-model-x")).toBe(`${COPY_PROVIDER}/copy-model-x`);
-    expect(listZcodeModels().map((m) => m.id)).toEqual([`${COPY_PROVIDER}/copy-model-x`]);
+    // builtinCatalogPath 显式指到缺失路径：隔离本机真实内建目录（同上）
+    expect(
+      listZcodeModels({ builtinCatalogPath: path.join(tmpRoot, "absent-catalog.json") }).map((m) => m.id),
+    ).toEqual([`${COPY_PROVIDER}/copy-model-x`]);
     // 真实侧条目随真实文件缺席而消失
     expect(() => resolveZcodeModelRef("GLM-5.3")).toThrowError(/未知模型/);
   });

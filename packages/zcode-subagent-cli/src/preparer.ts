@@ -635,6 +635,20 @@ export function translatePiModelRefToZcode(requested: string, sources?: ZcodeSou
 }
 
 /**
+ * [resolveZcodeModelRef 拆分] account 族翻译分支（engine-ref-translation D1）：翻译
+ * 产物落在 account: 前缀时做账号 entitlement 直通解析，返回规范化 ref；否则返回
+ * undefined（调用方继续走个人 provider 校验路径）。
+ */
+function translateToAccountModelRef(wanted: string, sources?: ZcodeSourcePaths): string | undefined {
+  const translated = translatePiModelRefToZcode(wanted, sources);
+  const translatedProvider = translated.includes("/") ? providerOf(translated) : undefined;
+  if (translatedProvider !== undefined && translatedProvider.startsWith("account:")) {
+    return resolveAccountModelRef(translated, translatedProvider, sources);
+  }
+  return undefined;
+}
+
+/**
  * 解析并校验模型引用 → 规范化全名 `provider/model`；**缺席输入返回空串**（调用方
  * 在 create 帧省略 model 键——CLI 缺省解析，缺席语义显式化，禁伪造兜底 id）。
  *
@@ -658,11 +672,8 @@ export function resolveZcodeModelRef(requested: string | undefined, sources?: Zc
   // 全空但账号 plan 可用的机器上 account ref 仍可派发（与 2026-10-13 account 直通
   // 裁决同语义；翻译产物即 account ref，幂等——编排层已翻译的 ref 再入恒等）。
   if (wanted !== undefined) {
-    const translated = translatePiModelRefToZcode(wanted, sources);
-    const translatedProvider = translated.includes("/") ? providerOf(translated) : undefined;
-    if (translatedProvider !== undefined && translatedProvider.startsWith("account:")) {
-      return resolveAccountModelRef(translated, translatedProvider, sources);
-    }
+    const accountRef = translateToAccountModelRef(wanted, sources);
+    if (accountRef !== undefined) return accountRef;
   }
 
   if (withKey.length === 0) {
@@ -753,6 +764,35 @@ export function listZcodeModels(sources?: ZcodeSourcePaths): Array<{ id: string;
   return out;
 }
 
+/** [listAccountFamilyModels 拆分] 内建目录 providerRules 段提取（形态非法 = 空集）。 */
+function readCatalogProviderRules(catalog: unknown): readonly unknown[] {
+  const rules =
+    isRecord(catalog) && isRecord(catalog["config"]) && isRecord(catalog["config"]["providerConfigRules"])
+      ? catalog["config"]["providerConfigRules"]["providerRules"]
+      : undefined;
+  return Array.isArray(rules) ? rules : [];
+}
+
+/** [listAccountFamilyModels 拆分] 单条 account: 规则的模型清单展开（追加进 out）。 */
+function pushAccountFamilyRuleModels(
+  rule: unknown,
+  out: Array<{ id: string; name?: string }>,
+): void {
+  if (!isRecord(rule)) return;
+  const providerId = rule["providerId"];
+  if (typeof providerId !== "string" || !providerId.startsWith("account:")) return;
+  const cfg = isRecord(rule["config"]) ? rule["config"] : {};
+  const models = Array.isArray(cfg["builtinModelIds"]) ? cfg["builtinModelIds"] : cfg["personalModelIds"];
+  const providerName = typeof rule["providerName"] === "string" && rule["providerName"].trim() !== "" ? rule["providerName"].trim() : undefined;
+  for (const model of Array.isArray(models) ? models : []) {
+    if (typeof model !== "string" || model.trim() === "") continue;
+    out.push({
+      id: `${providerId}/${model}`,
+      ...(providerName !== undefined ? { name: `${providerName} · ${model}` } : {}),
+    });
+  }
+}
+
 /**
  * account 直通家族清单（内建目录 providerRules 中 account: 规则 × 其模型清单，
  * builtinModelIds 优先、personalModelIds 兜底；目录定位失败/不可读 = 安全降级空集）。
@@ -766,26 +806,9 @@ function listAccountFamilyModels(sources?: ZcodeSourcePaths): Array<{ id: string
   } catch {
     return [];
   }
-  const catalogRules =
-    isRecord(catalog) && isRecord(catalog["config"]) && isRecord(catalog["config"]["providerConfigRules"])
-      ? catalog["config"]["providerConfigRules"]["providerRules"]
-      : undefined;
-  if (!Array.isArray(catalogRules)) return [];
   const out: Array<{ id: string; name?: string }> = [];
-  for (const rule of catalogRules) {
-    if (!isRecord(rule)) continue;
-    const providerId = rule["providerId"];
-    if (typeof providerId !== "string" || !providerId.startsWith("account:")) continue;
-    const cfg = isRecord(rule["config"]) ? rule["config"] : {};
-    const models = Array.isArray(cfg["builtinModelIds"]) ? cfg["builtinModelIds"] : cfg["personalModelIds"];
-    const providerName = typeof rule["providerName"] === "string" && rule["providerName"].trim() !== "" ? rule["providerName"].trim() : undefined;
-    for (const model of Array.isArray(models) ? models : []) {
-      if (typeof model !== "string" || model.trim() === "") continue;
-      out.push({
-        id: `${providerId}/${model}`,
-        ...(providerName !== undefined ? { name: `${providerName} · ${model}` } : {}),
-      });
-    }
+  for (const rule of readCatalogProviderRules(catalog)) {
+    pushAccountFamilyRuleModels(rule, out);
   }
   return out;
 }

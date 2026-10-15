@@ -484,12 +484,17 @@ export class WorkflowDispatch {
    * （孪生守卫等全量裁决在彼执行，本层只补分类化前置拒单）。
    * 范围限定（用户裁决 2026-09-21）：仅 pi 引擎（pi 路由不插偏好层——pi 链自有三层
    * 解析，D6 不采用段；下方 declaredModel 只看两层显式声明，与偏好层无关）。 */
-  private async resolveWorkflowIdentity(
+  /**
+   * [resolveWorkflowIdentity 拆分] 引擎感知 model 解析 + 来源标注判定：pi 路由不进
+   * 翻译 helper（modelSource = task 显式 ? explicit : default）；非 pi 经
+   * resolveEngineModelWithTranslation 四层解析（?? 链惰性求值——前两层任一在场时
+   * 不触盘读偏好），modelSource = resolvedModel?.source ?? "default"。
+   */
+  private resolveWorkflowModel(
     route: EngineRouteResult,
     opts: AgentCallOpts,
-    execOpts: ExecuteOptions,
     agentConfig: AgentConfig | undefined,
-  ): Promise<ResolvedIdentity> {
+  ) {
     const isPiRoute = route.engineId === DEFAULT_ENGINE_ID;
     // [engine-ref-translation D2] 翻译编排与 chat 域同语义同实现（共享 helper
     // resolveEngineModelWithTranslation——显式层翻译失败抛错；偏好层翻译后不在引擎
@@ -507,10 +512,20 @@ export class WorkflowDispatch {
         (message) => console.warn(message),
         "workflow-dispatch",
       );
-    const engineModel = resolvedModel?.engineModel;
     const modelSource: SubagentModelSource = isPiRoute
       ? (opts.model !== undefined ? "explicit" : "default")
       : (resolvedModel?.source ?? "default");
+    return { engineModel: resolvedModel?.engineModel, modelSource };
+  }
+
+  private async resolveWorkflowIdentity(
+    route: EngineRouteResult,
+    opts: AgentCallOpts,
+    execOpts: ExecuteOptions,
+    agentConfig: AgentConfig | undefined,
+  ): Promise<ResolvedIdentity> {
+    const isPiRoute = route.engineId === DEFAULT_ENGINE_ID;
+    const { engineModel, modelSource } = this.resolveWorkflowModel(route, opts, agentConfig);
     // [subagent-detail-model-info] execOpts 盖章 modelSource——createRecordForMode
     // 经 opts 读取落 record（与下方 engineModel 覆写同形留痕）。
     execOpts.modelSource = modelSource;
