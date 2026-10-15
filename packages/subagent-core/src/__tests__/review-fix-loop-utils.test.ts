@@ -48,6 +48,8 @@ import {
   resolveRunRoot,
   computeOrigin,
   recordDormant,
+  inheritCarryoverFields,
+  dormantRevivalTitle,
   filterActiveIds,
   filterDormantFromRecon,
   landScores,
@@ -1483,6 +1485,43 @@ describe("B3 recordDormant / filterActiveIds（dormant 落盘 + 消费侧过滤�
     expect(filterActiveIds(entries)).toEqual(["MF-1"]);
     expect(filterActiveIds([{ id: "X" }, { id: "Y", adjudication: "evidence" }])).toEqual(["X", "Y"]);
     expect(filterActiveIds([])).toEqual([]);
+  });
+});
+
+describe("B3b 延续条目字段继承（wf-1792073055433 空壳缺陷修复）", () => {
+  it("inheritCarryoverFields：清单缺 title 时从重报回填（防跨轮身份锚点断链）", () => {
+    const tracked: Record<string, unknown> = { id: "S-1", severity: "major", status: "open" };
+    expect(inheritCarryoverFields(tracked, { id: "S-1", severity: "major", title: "fit 容器尺寸竞态" })).toBe(true);
+    expect(tracked.title).toBe("fit 容器尺寸竞态");
+  });
+
+  it("inheritCarryoverFields：清单已有 title 为权威，重报不覆盖（措辞漂移不污染身份锚点）", () => {
+    const tracked: Record<string, unknown> = { id: "MF-1", title: "原始标题", severity: "major" };
+    expect(inheritCarryoverFields(tracked, { id: "MF-1", severity: "major", title: "同题换措辞" })).toBe(false);
+    expect(tracked.title).toBe("原始标题");
+  });
+
+  it("inheritCarryoverFields：severity 采信本轮显式标注（聚合权威语义，与 regressed 分支一致）", () => {
+    const tracked: Record<string, unknown> = { id: "MF-1", title: "t", severity: "minor" };
+    expect(inheritCarryoverFields(tracked, { id: "MF-1", severity: "critical" })).toBe(true);
+    expect(tracked.severity).toBe("critical");
+    // 相同值不记变更
+    expect(inheritCarryoverFields(tracked, { id: "MF-1", severity: "critical" })).toBe(false);
+  });
+
+  it("inheritCarryoverFields：非对象重报（旧格式 string 归一后的边界）不动作不挪状态", () => {
+    const tracked: Record<string, unknown> = { id: "MF-1", title: "t", severity: "major" };
+    expect(inheritCarryoverFields(tracked, undefined)).toBe(false);
+    expect(inheritCarryoverFields(undefined, { id: "MF-1" })).toBe(false);
+    expect(tracked).toEqual({ id: "MF-1", title: "t", severity: "major" });
+  });
+
+  it("dormantRevivalTitle：聚合器无 title 时从 dormant 条目继承（复活不丢身份锚点）", () => {
+    const dormantHit = { id: "MF-D1", title: "callId 静默回退", reason: "adjudication-downgraded" };
+    expect(dormantRevivalTitle(dormantHit, { id: "MF-D1", severity: "major" })).toBe("callId 静默回退");
+    expect(dormantRevivalTitle(dormantHit, { id: "MF-D1", severity: "major", title: "重报自带" })).toBeUndefined();
+    expect(dormantRevivalTitle(undefined, { id: "MF-D1" })).toBeUndefined();
+    expect(dormantRevivalTitle({ id: "MF-D1" }, { id: "MF-D1" })).toBeUndefined();
   });
 });
 

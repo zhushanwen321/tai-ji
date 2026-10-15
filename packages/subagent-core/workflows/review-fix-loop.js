@@ -148,6 +148,8 @@ const {
   resolveRunRoot,
   computeOrigin,
   recordDormant,
+  inheritCarryoverFields,
+  dormantRevivalTitle,
   filterActiveIds,
   filterDormantFromRecon,
   landScores,
@@ -1288,6 +1290,12 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
         const tracked = state.issues[resolved.key];
         if (tracked) {
           dormantExcludeIds.add(id); // 翻译后仍在问题清单活跃的表格号 → dormant exclude
+          // 延续条目字段继承（wf-1792073055433 空壳缺陷修复）：重报命中已追踪条目时，
+          // title 缺失侧从本轮重报回填、severity 采信本轮显式标注——防无 title 延续条目
+          // 断跨轮身份锚点（下轮 L2 标题对账失配 → clean 轮无法销账 → 误判 stuck）。
+          if (inheritCarryoverFields(tracked, entry)) {
+            log("Carryover fields inherited for " + resolved.key + " (title/severity synced from re-report)");
+          }
           if (reconCount === 0 && (tracked.status === "fix-attempted" || tracked.status === "fixed")) {
             tracked.status = "regressed";
             tracked.fixAttempts = (tracked.fixAttempts || 0) + 1;
@@ -1312,12 +1320,16 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
           fixImpactFiles: state.fixImpactFiles || [],
         });
         if (!origin) log("WARN: issue " + resolved.key + " carries no files — origin not attributable");
+        const revivedTitle = dormantRevivalTitle(dormantHit, entry);
+        if (revivedTitle) log("Dormant revival title inherited for " + resolved.key);
         state.issues[resolved.key] = {
           firstSeen: round,
           severity: typeof entry === "string" ? "major" : (entry.severity || "major"),
           status: "open", openStreak: 1,
           history: [{ round, status: "open" }], fixAttempts: 0,
-          ...(typeof entry === "object" && typeof entry.title === "string" && entry.title ? { title: entry.title } : {}),
+          ...(typeof entry === "object" && typeof entry.title === "string" && entry.title
+            ? { title: entry.title }
+            : (revivedTitle ? { title: revivedTitle } : {})),
           ...(origin ? { origin } : {}),
           ...(typeof entry === "object" && typeof entry.guidance === "string" && entry.guidance ? { guidance: entry.guidance } : {}),
           ...(typeof entry === "object" && typeof entry.evidence === "string" && entry.evidence ? { evidence: entry.evidence } : {}),

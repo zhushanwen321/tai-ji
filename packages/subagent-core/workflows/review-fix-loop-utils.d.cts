@@ -198,6 +198,14 @@ export declare function recordDormant(
   round: number,
   excludeIds?: unknown[] | Set<unknown>,
 ): Array<{ id: string; [key: string]: unknown }>;
+export declare function inheritCarryoverFields(
+  tracked: Record<string, unknown> | undefined | null,
+  entry: Record<string, unknown> | undefined | null,
+): boolean;
+export declare function dormantRevivalTitle(
+  dormantHit: { title?: unknown; [key: string]: unknown } | undefined | null,
+  entry: Record<string, unknown> | undefined | null,
+): string | undefined;
 export declare function filterActiveIds(
   entries: Array<{ id?: string; adjudication?: string; [key: string]: unknown }>,
 ): string[];

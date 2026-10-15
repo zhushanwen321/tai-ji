@@ -1360,6 +1360,40 @@ function recordDormant(dormant, entries, round, excludeIds) {
 }
 
 /**
+ * 延续条目字段继承（wf-1792073055433 空壳缺陷修复）：聚合器重报已追踪条目时
+ * title/severity 可能缺省（旧格式 string / 对象缺字段）——清单侧已有字段为权威不覆盖，
+ * title 缺失侧从本轮重报回填；severity 采信本轮显式标注（与 R1/regressed 分支的
+ * 「entry.severity || 既有」聚合权威语义一致）。无 title 的延续条目会让跨轮身份锚点
+ * 断链（L2 标题对账失配、prev_titles 注入段变 "no title recorded" 空壳）。
+ * 原地更新 tracked，返回是否有变更（调用方可记 log）。
+ */
+function inheritCarryoverFields(tracked, entry) {
+  if (!tracked || typeof tracked !== "object") return false;
+  if (!entry || typeof entry !== "object") return false;
+  let changed = false;
+  if (!tracked.title && typeof entry.title === "string" && entry.title) {
+    tracked.title = entry.title;
+    changed = true;
+  }
+  if (typeof entry.severity === "string" && entry.severity && tracked.severity !== entry.severity) {
+    tracked.severity = entry.severity;
+    changed = true;
+  }
+  return changed;
+}
+
+/**
+ * dormant 复活条目的 title 继承（wf-1792073055433 空壳缺陷修复）：复活键即 dormant id
+ * （resolveIssueIdentity dormant 自识别分支），活跃建卡若聚合器未带 title，从 dormant
+ * 条目继承——跨轮身份锚点不断链。聚合器自带 title（或无可继承）返回 undefined。
+ */
+function dormantRevivalTitle(dormantHit, entry) {
+  if (entry && typeof entry === "object" && typeof entry.title === "string" && entry.title) return undefined;
+  if (!dormantHit || typeof dormantHit.title !== "string" || !dormantHit.title) return undefined;
+  return dormantHit.title;
+}
+
+/**
  * T6 消费侧过滤（6.3）：剔除降级条目的 id 列表——主循环用它过滤修复队列
  * （不建 issue、不进 ES3 must-fix 校验；fix prompt 的 must-fix 计数以非降级条目为准）。
  */
@@ -1952,6 +1986,8 @@ module.exports = {
   resolveRunRoot,
   computeOrigin,
   recordDormant,
+  inheritCarryoverFields,
+  dormantRevivalTitle,
   filterActiveIds,
   filterDormantFromRecon,
   landScores,
