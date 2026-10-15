@@ -32,12 +32,14 @@
       >
         <!-- 摘要行：flex 布局，min-h 锁定高度避免展开时跳动。
              [M3b demo 复刻]（workbench.css .line/.think）：行内间距 gap-[8px]（demo 8px）；
-             图标染 --reasoning（.think .sicon，显式类替换 BLOCK_ICON_CLASS——两者 text 色
-             工具类同特异性，追加不构成可靠覆盖）；行字号继承头部 --text-base（14px =
+             图标染色经显式类替换 BLOCK_ICON_CLASS（两者 text 色工具类同特异性，追加不构成
+             可靠覆盖）：静止态染 --neutral-ico（2026-10-15 裁决 ②A 去紫——原 --reasoning 紫
+             退役，token 本体不动，ANSI magenta / 摘要标题 / skill 徽标等其余消费点不受影响）；
+             行字号继承头部 --text-base（14px =
              demo fs-lg 行级档）。
              [MF-1-28]（demo TurnList.vue:72-73）：running 态 = 呼吸弧 accent（同工具行
              :237 形态，信号源 = thinkingSweeping）；静止态 = lightbulb 15px stroke1.6 染
-             --reasoning。行 hover 反馈（MF-1-4，demo workbench.css:355 .line:hover 只压
+             --neutral-ico。行 hover 反馈（MF-1-4，demo workbench.css:355 .line:hover 只压
              文字段 opacity .8——图标与显形时间戳不参与，hover 类挂行内文字 span 而非行
              容器，同 tool/bash-group/workflow 行）；行内垂直对齐
              baseline（MF-1-34，workbench.css:348 align-items:baseline），图标保持
@@ -49,7 +51,7 @@
                见 DrawerPanel/Sidebar/SettingsModal 三处先例（稳定性优先，瞬时切换）。scoped
                尾部 tico 过渡类随本移除删除。reduced-motion 语义随之自然成立（无动画可停）。 -->
           <RunningBlockIcon v-if="thinkingSweeping" kind="thinking" />
-          <component :is="BLOCK_ICON_LUCIDE.thinking" v-else class="size-[15px] shrink-0 self-center text-reasoning [stroke-width:1.6]" />
+          <component :is="BLOCK_ICON_LUCIDE.thinking" v-else class="size-[15px] shrink-0 self-center text-neutral-ico [stroke-width:1.6]" />
           <!-- 状态词 label：思考进行中跑文字扫光（决策 10）。生命周期 = 块级（thinkingEnd 未填），
                非消息级 working——思考完结后消息仍在流式（工具执行中），扫光随思考完结熄灭。
                base 覆盖为 mid 档对齐 BLOCK_LABEL_CLASS 常态字色（reduced-motion 停帧态 = 常态色，
@@ -150,9 +152,10 @@
          连续同类型（探索 / 改动 / 执行命令）的工具行折成一行组头。组资格只看工具类型不看状态，
          组头计数三条口径（N=成员数 / 耗时=已完成成员合计 / M=组内失败数）与 hasRunning 由 core
          groupToolRuns 一次算好（header），本组件零解析。类型判定表见 core RUN_GROUP_TOOLS。
-         展开态：挂载即展开的条件 = 组内有 running 成员（正在发生的组要让用户看见），否则挂载即收起；
-         用户手动开合后以手动为准（本地 ref）。**不做「跑完自动收起」**——status 翻转驱动的开合会让
-         流式中的块高度突变，破坏贴底跟随（同 Block toolCollapsed 挂载快照的既有取舍）。
+         展开态：挂载一律收起（2026-10-15 裁决 ①A：无论什么时候分组的 block 默认折叠、不展开
+         内部 tool call，running 成员也不例外——回看与直播形态一致，进行中信号由组头动效图标 +
+         「N 步」计数承担）；用户手动开合后以手动为准（本地 ref）。**不做 status 驱动的自动开合**——
+         展开/收起翻转会让流式中的块高度突变，破坏贴底跟随（同 Block toolCollapsed 挂载快照的既有取舍）。
          失败不隐瞒：成员含 error 时行尾 traceFailed 段（M = 组内口径，与 TraceCompactorRow 全局
          failedCount 分账）。展开后成员保持各自 1 行收起态（嵌套普通 tool Block 复用既有行形态与
          PR-1 行高不变量），要看某个成员的输出需再点那一行（两步路径）。展开态住组件本地 ref、
@@ -803,10 +806,11 @@ const groupStatText = computed(() => {
 
 /* ── run 组展开态：组件本地 ref，不进 store、不持久化——turn 级展开态（useTurnExpansion /
  *    turn-expansion store）现状也不持久化，不为一个更低层的 UI 态单开持久化先例。
- *    初值 = 挂载快照「组内有 running 成员则展开」（正在发生的组要让用户看见，回看历史时全收起），
- *    此后只由用户点击翻转。**不做 status 驱动的自动收起**：跑完自动收起会让流式中的块高度突变、
- *    破坏贴底跟随（同 toolCollapsed 挂载快照的既有取舍，见该处注释的「被否」一条）。 ── */
-const groupCollapsed = ref(!(props.group?.hasRunning ?? false))
+ *    初值 = 恒收起（2026-10-15 裁决 ①A：原「组内有 running 成员则展开」例外已删——无论什么时候
+ *    默认折叠，回看与直播形态一致），此后只由用户点击翻转。**不做 status 驱动的自动开合**：
+ *    展开/收起翻转会让流式中的块高度突变、破坏贴底跟随（同 toolCollapsed 挂载快照的既有取舍，
+ *    见该处注释的「被否」一条）。 ── */
+const groupCollapsed = ref(true)
 const groupExpanded = computed(() => !groupCollapsed.value)
 
 function toggleGroup(): void {

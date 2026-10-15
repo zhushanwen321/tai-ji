@@ -300,7 +300,7 @@ export interface RunGroupBlock {
     failedCount: number
   }
   /** 组内是否含 status==='running' 的成员（放接口顶层——它是渲染信号不是计数口径，不入 header）。
-   *  渲染层据此给组头套执行态视觉：loader 图标 + 挂载即展开。 */
+   *  渲染层据此给组头套执行态视觉：loader 图标（挂载一律收起，2026-10-15 ①A 裁决——展开态只由用户点击驱动）。 */
   hasRunning: boolean
   /** 里程碑徽标（demo spec §3.6）：成员命中结构确定性信号时聚合上组头，无则空数组（无则不显示）。
     当前唯一信号 = firstEdit（首个改动），判定口径见 RunGroupMile 注释。 */
