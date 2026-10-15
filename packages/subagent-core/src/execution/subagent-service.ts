@@ -26,6 +26,7 @@ import type { ExecutionNestingContext } from "./engine/common/nesting-guard.ts";
 // capability 预检等消费已随 R4 域迁 service/run-orchestration.ts +
 // service/workflow-dispatch.ts——壳内零消费（机制注释随消费主体迁移）。
 import { setHostUiRequestEndpoint } from "./engine/host/host-ui-endpoint.ts";
+import { disposeWorkflowWindowEngineState } from "./engine/routing.ts";
 // [W6 宿主面下沉 → W3 纯镜像] killAll / killRecord / register 三函数经
 // spawnedChildren 状态镜像公共面（engine/host/spawned-children.ts）——子进程活在
 // 引擎进程内，本模块只做镜像记账（终止意图位），实际终止经协议 interact cancel/close。
@@ -365,6 +366,13 @@ export class SubagentService {
         this.recordLifecycle.finalizeRecord(record, result, status, closedReason),
       finalizeFailed: (record, err) => this.recordLifecycle.finalizeFailed(record, err),
       finalizeAborted: (record) => this.recordLifecycle.finalizeAborted(record),
+      // [D3-A4 窗口键自管] executeAndAwait one-shot 窗口收尾（runAndFinalize 独占
+      // 路径的 dispose 配对方——record origin=tool 不经 finalizeRun/ChatRounds 的
+      // 窗口 dispose）。fire-and-forget：收尾释放是异步 best-effort（与 ChatRounds
+      // 的 round idle dispose 同款 void 形态），失败留痕不阻塞 record 终态。
+      disposeWindowEngine: (windowKey, reason, context) => {
+        void disposeWorkflowWindowEngineState(windowKey, reason, context);
+      },
       // [2026-09-13 design-code-sync 接线 / modeless 波1 四象限坍缩] 首轮派发回调
       //（本体在 ChatRounds——executeViaEngine 的唯一派发调用点经此编排，G2「经壳
       // 编排」；one-shot 直派回调随分支消亡删除）。

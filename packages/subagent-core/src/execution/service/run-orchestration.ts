@@ -179,6 +179,12 @@ export interface RunOrchestrationDeps {
   readonly finalizeFailed: (record: ExecutionRecord, err: unknown) => Promise<AgentResult>;
   /** [R3 RecordLifecycle 显式接口] 排队中被 abort 的收尾（[U5] cancel 语义 settle）。 */
   readonly finalizeAborted: (record: ExecutionRecord) => Promise<AgentResult>;
+  /** [D3-A4 窗口键自管] executeAndAwait（runAndFinalize 独占路径）的 one-shot 窗口
+   *  引擎收尾：窗口键 = record.id（与 journal taskId 同键）。chat 域轮次 dispose 归
+   *  ChatRounds、workflow 域归 finalizeRun（run.runId）——本路径 record origin=tool
+   *  且不经两者，窗口实例无配对方会永久驻留（孤儿）。fire-and-forget（void），
+   *  幂等（重复收尾构造性 no-op）。 */
+  readonly disposeWindowEngine: (windowKey: string, reason: string, context: string) => void;
   /** [ChatRounds 协作回调 / 2026-09-13 design-code-sync 接线] 首轮派发
    *  （continuationFor ensure + startFirstRound——本体在 ChatRounds；executeViaEngine
    *  消费。[modeless 波1] 四象限（isPiRoute × chatMode）坍缩后的唯一派发路径：
@@ -621,7 +627,14 @@ export class RunOrchestration {
     //（AgentCallOpts.worktree 接受 WorktreeHandle——原 runSpawn 显式传参的协议形态）；
     // checkout 路径经 taskSpecWithModel 的 withWorktreeCwd 合流进 cwd → wire ctx.cwd
     // → 引擎子进程 spawn cwd（隔离生效的承载链）。
-    const engine = this.resolveChatEnginePort();
+    // [D3-A4] 窗口键 = record.id：executeAndAwait 的 one-shot 窗口（与 journal taskId
+    // 同键）。缺省路径（registry 直取）的合法用途仅限同步只读消费（execute 路由的
+    // piEngine probe 输入）——per-window 引擎（pi manifest processModel='per-window'）
+    // 经缺省路径只返回 readOnlyEngineProxy，engine.run() 抛 WindowScopeEngineError
+    // （D3-A4 实证：canvas reviewer 派发断链）；带键路径 = 窗口实例解析单点
+    // get-or-create，probe 与 run 同实例。execute/executeWorkflowAgent 不经本方法
+    // （前者轮内解析、后者调用方传入 route.engine），本方法是 executeAndAwait 独占。
+    const engine = this.resolveChatEnginePort(record.id);
     // journal 接线（D6 第②级，workflow 域专用）：forwardEvents = onEvent
     //（workflow liveRecord 桥接，D-A8）。
     const journal = wireEventJournal({ engineId: engine.id, taskId: record.id, forwardEvents: onEvent });
@@ -654,6 +667,9 @@ export class RunOrchestration {
       result = this.outcomeToAgentResult(record, outcome);
     } catch (err) {
       await journal.close();
+      // [D3-A4] 失败路径同样收窗口：run 前 reject（含 WindowScopeEngineError 等）时
+      // 窗口实例可能已由解析单点 get-or-create 建出，不收即孤儿。
+      this.deps.disposeWindowEngine(record.id, "one-shot-failed", "executeAndAwait runAndFinalize failure cleanup");
       // engine.run prepare 期 reject（进程创建前）→ 合成 failed result + 收尾。
       // swallow（不 re-throw）：sync 调用方拿到合成 failed result，避免异常逃逸到
       // tool 层 + record 卡 running。（[H1 U6] 旧 chatMode 分支 finalizeChatSpawnFailure
@@ -666,6 +682,13 @@ export class RunOrchestration {
 
     // v4 B-1: status 恒为 closed。cancelled 折入 closed（closedReason='cancelled'）。
     await this.settleOneShotOutcome(record, result, signal?.aborted === true);
+    // [D3-A4] one-shot 窗口收尾（record.id 键）：executeAndAwait 语义 = 单次执行等
+    // 结果、无续聊对端（结果直接返回调用方，不经 chat kick-off）——record 终态后窗口
+    // 引擎无消费方，与 ChatRounds 的「round idle dispose」同款（续聊经窗口解析单点
+    // 重建实例）。origin=tool 的 record 不经 finalizeRun（按 run.runId dispose）与
+    // ChatRounds（按 record.id dispose 但只辖 chat 域轮次）——本方法是该窗口的唯一
+    // 配对方。
+    this.deps.disposeWindowEngine(record.id, "one-shot-settled", "executeAndAwait runAndFinalize settle cleanup");
     return result;
   }
 
