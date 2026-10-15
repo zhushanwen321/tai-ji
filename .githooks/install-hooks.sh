@@ -166,7 +166,12 @@ fi
 
 # 获取变更文件
 STAGED_FILES=$(git diff --cached --name-only --diff-filter=ACMR)
-FRONTEND_FILES=$(echo "$STAGED_FILES" | grep "^packages/renderer/src/" || true)
+# [type-gate-coverage 2026-10-15] 前端域 = renderer + ui + mobile-renderer 三包。既有盲区 =
+# ui/mobile 的**测试文件**：renderer 默认 tsconfig 排除测试（typecheck-test 变体只含 renderer
+# 自己的测试），ui src 虽经 renderer include 传递覆盖，但 ui 测试文件（如 UserBubble.test 的
+# EditComposerProps 契约漂移 9 错存量）无任何编译期信号，mobile 全包同理。ESLint 与 vue-tsc
+# 两段同源本变量，随之扩面。
+FRONTEND_FILES=$(echo "$STAGED_FILES" | grep -E "^packages/(renderer|ui|mobile-renderer)/src/" || true)
 EXTENSION_FILES=$(echo "$STAGED_FILES" | grep -E "^extensions/.*\.ts$" | grep -vE "__tests__|\.test\.|/workflows/|/examples/|\.d\.ts$" || true)
 
 # ============================================================================
@@ -291,6 +296,33 @@ if [ -n "$FRONTEND_FILES" ]; then
             fi
 
             echo -e "${GREEN}[OK] vue-tsc 测试类型检查通过${NC}"
+
+            # [type-gate-coverage 2026-10-15] ui / mobile-renderer 两包纳入门禁：堵住既有盲区——
+            # renderer 全量虽经 include 传递覆盖 ui src，但 ui 测试文件不在任何既有运行内
+            # （renderer 默认 tsconfig 排除测试；typecheck-test 变体只含 renderer 自己的测试），
+            # mobile 全包同理。ui 默认 tsconfig include "src"（测试天然含内，无需 renderer 式
+            # typecheck-test 变体）；mobile 同构。实测 ui ~5s / mobile ~3s（warm cache）。
+            echo -e "${BLUE}[INFO] 执行 packages/ui vue-tsc 类型检查...${NC}"
+
+            if ! (cd packages/ui && npx vue-tsc --noEmit 2>&1); then
+                echo ""
+                echo -e "${RED}[ERROR] packages/ui vue-tsc 类型检查失败${NC}"
+                echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
+                exit 1
+            fi
+
+            echo -e "${GREEN}[OK] packages/ui 类型检查通过${NC}"
+
+            echo -e "${BLUE}[INFO] 执行 packages/mobile-renderer vue-tsc 类型检查...${NC}"
+
+            if ! (cd packages/mobile-renderer && npx vue-tsc --noEmit 2>&1); then
+                echo ""
+                echo -e "${RED}[ERROR] packages/mobile-renderer vue-tsc 类型检查失败${NC}"
+                echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
+                exit 1
+            fi
+
+            echo -e "${GREEN}[OK] packages/mobile-renderer 类型检查通过${NC}"
         else
             echo -e "${GREEN}[OK] 无 .vue/.ts 文件变更${NC}"
         fi
