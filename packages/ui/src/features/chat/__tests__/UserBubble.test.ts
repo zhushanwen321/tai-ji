@@ -18,7 +18,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount } from '@vue/test-utils'
-import { defineComponent, h } from 'vue'
+import { defineComponent, h, type PropType } from 'vue'
 import { UserBubble, ChatViewDepsKey } from '@taiji/ui'
 import type { MessageTurn } from '@taiji/core/domain/chat'
 import type { ChatViewDeps } from '@taiji/ui'
@@ -158,7 +158,7 @@ describe('[user-bubble-edit-composer] UserBubble 编辑态富编辑器注入路�
     props: {
       sessionId: { type: String, required: true },
       messageId: { type: String, required: true },
-      segments: { type: Array, required: true },
+      segments: { type: Array as PropType<Segment[]>, required: true },
       disabled: { type: Boolean, default: false },
     },
     emits: ['submit', 'cancel'],
@@ -270,6 +270,12 @@ describe('[user-bubble-edit-composer] UserBubble 编辑态富编辑器注入路�
     const editAndResend = vi.fn()
     const EmptyStub = defineComponent({
       name: 'EmptySubmitStub',
+      props: {
+        sessionId: { type: String, required: true },
+        messageId: { type: String, required: true },
+        segments: { type: Array as PropType<Segment[]>, required: true },
+        disabled: { type: Boolean, default: false },
+      },
       emits: ['submit', 'cancel'],
       setup(_props, { emit }) {
         return () =>

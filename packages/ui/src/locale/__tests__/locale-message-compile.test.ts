@@ -26,15 +26,18 @@ import { enUS, zhCN } from '../index'
 function collectCompileIssues(locale: string, node: unknown, path: string) {
   const issues: { locale: string; path: string; code: number | undefined; message: string }[] = []
   if (typeof node === 'string') {
-    let thrown: CompileError | null = null
+    // 回调内赋值的变量 TS 无法跟踪（收窄成 never），改用数组承载首个错误
+    const errors: CompileError[] = []
     baseCompile(node, {
       location: false,
       jit: true,
       onError: (error) => {
-        thrown ??= error
+        if (errors.length === 0) errors.push(error)
       },
     })
-    if (thrown) issues.push({ locale, path, code: thrown.code, message: thrown.message })
+    if (errors.length > 0) {
+      issues.push({ locale, path, code: errors[0].code, message: errors[0].message })
+    }
     return issues
   }
   if (Array.isArray(node)) {
