@@ -7,9 +7,9 @@
  */
 import { describe, expect, it } from 'vitest'
 import { ACTION_EVENT_MAP, CANVAS_ACTIONS } from '@zhushanwen/extension-protocol'
-import { convergenceBlockers, dispatchableLeaves, isRootReady, pathToRoot, subtreeOf } from '../canvas-domain.js'
+import { convergenceBlockers, dispatchableLeaves, findTrunkCycle, isRootReady, pathToRoot, subtreeOf } from '../canvas-domain.js'
 import { CanvasService } from '../canvas-service.js'
-import { createCanvas, expectRejected, expectThrown, growCanvas, makeService, type ServiceHandle } from './canvas-helpers.js'
+import { createCanvas, expectRejected, expectThrown, growCanvas, makeService, buildAllGreenCanvas, type ServiceHandle } from './canvas-helpers.js'
 
 describe('不变量 1：有且仅有一个根节点，类型 question，带完成判据与范围排除', () => {
   it('正例：create 后根三要素可见（用户可见断言：canvas.get 视图含 statement/criterias/scopeExclusions）', () => {
@@ -73,12 +73,14 @@ describe('不变量 2：主干图（decompose + resolve）无环', () => {
     }
   })
 
-  it('逆例：同批同 id 重复生长形成回路 → cycle_detected，整批拒绝', () => {
+  it('逆例：同批同 id 分歧重声明（历史成环通道）= invalid_params upfront 拒绝，整批不落盘', () => {
     const h = makeService()
     try {
       const c = createCanvas(h.svc)
-      // 每节点至多一条入边（边 id 确定性派生 e-<子id>，upsert 覆盖式重挂）——单条新边
-      // 不可能成环；成环通道 = 同 id 节点的边被后继 item 覆盖后形成回路：x→y + y→x。
+      // 每节点至多一条入边（边 id 确定性派生 e-<子id>，upsert 覆盖式重挂）。历史成环
+      // 通道 = 同 id 节点的边被后继 item 覆盖重挂（x→y + y→x）——F1-9 修复后该通道
+      // 在边覆盖前即被分歧判定拦截（invalid_params），cycle_detected 守卫退为结构性
+      // 兜底（不可达；检测逻辑见下方 findTrunkCycle 纯函数用例）。
       const reply = h.svc.mutate({
         action: 'grow',
         params: {
@@ -91,12 +93,31 @@ describe('不变量 2：主干图（decompose + resolve）无环', () => {
           reason: '构造环',
         },
       }, 'agent')
-      expectRejected(reply, 'cycle_detected')
+      expectRejected(reply, 'invalid_params')
+      if (!reply.ok) expect(reply.error.message).toContain('patch')
       // 原子事务：整批拒绝，x / y 均不得落盘
       const state = h.svc.readState(c.canvasId)
       expect(state.nodes.find((n) => n.id === 'x')).toBeUndefined()
       expect(state.nodes.find((n) => n.id === 'y')).toBeUndefined()
       expect(state.edges.find((e) => e.id === 'e-x')).toBeUndefined()
+    } finally {
+      h.dispose()
+    }
+  })
+
+  it('不变量 2 守卫（findTrunkCycle 纯函数）：合成环即定位环上节点，DAG 返回 null', () => {
+    const h = makeService()
+    try {
+      const c = growCanvas(h.svc, createCanvas(h.svc))
+      const state = structuredClone(c.state())
+      expect(findTrunkCycle(state)).toBeNull()
+      // 合成环：root→q1 已存在，补 q1→root 的 decompose 边（mutate 不可达——分歧判定拦截）
+      state.edges.push({ id: 'e-synthetic-cycle', type: 'decompose', from: 'q1', to: state.root.nodeId })
+      expect(findTrunkCycle(state)).toBe(state.root.nodeId)
+      // 自环同样命中
+      state.edges.pop()
+      state.edges.push({ id: 'e-self-loop', type: 'decompose', from: 'q1', to: 'q1' })
+      expect(findTrunkCycle(state)).toBe('q1')
     } finally {
       h.dispose()
     }
@@ -520,6 +541,24 @@ describe('不变量 10：收敛终态前置 = 待重审空 + must-fix 清零 + �
       expect(state.converged).toBe(true)
       expect(state.root.confirmed).toBe(true)
       expect(state.review?.status).toBe('converged')
+    } finally {
+      h.dispose()
+    }
+  })
+
+  it('export 前置含收敛确认：三门禁全绿但未经 converge-check → not_converged（agent 代执行通道同口径）；确认后导出放行', () => {
+    const h = makeService()
+    try {
+      const c = buildAllGreenCanvas(h.svc, createCanvas(h.svc))
+      expect(convergenceBlockers(c.state())).toHaveLength(0)
+      // 未经收敛确认：agent 通道导出同样拒绝——GUI 门禁①（root.confirmed）与 runtime 同一前置
+      const beforeConfirm = h.svc.mutate({ action: 'export', params: { canvasId: c.canvasId, target: { target: 'planning-doc' } } }, 'agent')
+      expectRejected(beforeConfirm, 'not_converged')
+      if (!beforeConfirm.ok) expect(beforeConfirm.error.message).toContain('收敛确认')
+      // 收敛确认后导出放行
+      expect(h.svc.mutate({ action: 'converge-check', params: { canvasId: c.canvasId } }, 'user').ok).toBe(true)
+      const afterConfirm = h.svc.mutate({ action: 'export', params: { canvasId: c.canvasId, target: { target: 'planning-doc' } } }, 'agent')
+      expect(afterConfirm.ok).toBe(true)
     } finally {
       h.dispose()
     }

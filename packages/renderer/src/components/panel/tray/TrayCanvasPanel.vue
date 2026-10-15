@@ -190,6 +190,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { useToast } from '@/composables/useToast'
 import { useTrayCountsContext } from '@/components/panel/tray/useTrayCounts'
 import { openCanvasTab } from '@/components/panel/workflow-viz/overlay/workflow-viz-overlay'
+import { phaseOfFacts, type CanvasPhase } from '@/components/canvas/canvas-display'
 import type { CanvasListEntry } from '@zhushanwen/extension-protocol'
 
 withDefaults(defineProps<{
@@ -214,8 +215,6 @@ const headerText = computed(() =>
 
 // ── 阶段徽标（派生值非可写状态：由 canvas.list 派生输入计算，见文件头）──
 
-type CanvasPhase = 'growing' | 'reviewing' | 'converged'
-
 /** 阶段点色（色语言 SSOT = 语义色类：活动 accent / 待人 warn / 完成 success） */
 const PHASE_TEXT_KEY: Record<CanvasPhase, string> = {
   growing: 'growing',
@@ -229,10 +228,13 @@ const PHASE_DOT_CLASS: Record<CanvasPhase, string> = {
   converged: 'bg-success',
 }
 
+/** 清单条目适配（全量态适配在 canvas-display 的 canvasPhaseOf——规则单处 = phaseOfFacts）。 */
 function phaseOf(entry: CanvasListEntry): CanvasPhase {
-  if (entry.converged) return 'converged'
-  if (entry.openMustFix > 0 || entry.reviewStatus === 'in-progress') return 'reviewing'
-  return 'growing'
+  return phaseOfFacts({
+    converged: entry.converged,
+    openMustFix: entry.openMustFix,
+    reviewInProgress: entry.reviewStatus === 'in-progress',
+  })
 }
 
 function phaseText(entry: CanvasListEntry): string {

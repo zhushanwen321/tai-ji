@@ -135,12 +135,25 @@ function applyGrow(
 function applyGrowItem(draft: CanvasState, item: CanvasGrowItem, at: string): void {
   validateGrowAdjacency(draft, item)
   const existing = nodeOf(draft, item.id)
+  if (existing) {
+    // 幂等重试判定（设计 §3.1(1)「同 id 重复写入无副作用」的落地）：声明字段（type /
+    // content / argument 内在属性 / 边三要素）与已落盘节点完全一致 = 真重试，原样保留；
+    // 不一致 = 声明分歧，fail-fast 拒绝并指引走 patch。grow 是创建语义——静默覆盖会
+    // 改写内容却不进待重审传播（D9 传播集只覆盖 patch / select / comment），审查过的
+    // 内容被无痕改写。factVerified / dispatchable / criterias 等 patch 可演化的字段
+    // 不参与比对（重试携带的是首次声明值，与演化后值不同属正常）。
+    const divergence = growItemDivergence(existing, item, draft)
+    if (divergence) {
+      fail('invalid_params', `节点「${item.id}」已存在且与本次 grow 声明不一致（${divergence}）：grow 是创建语义，幂等重试须携带与首次完全一致的内容；修改已存在节点请用 patch`)
+    }
+    return
+  }
   const node: CanvasNode = {
     id: item.id,
     type: item.type,
     content: item.content,
     lifecycle: 'draft',
-    createdAt: existing?.createdAt ?? at,
+    createdAt: at,
   }
   if (item.type === 'argument') {
     // 素材性：契约缺省 claim；fact 必带核实状态（不变量 5 前半句构造性满足——缺省 false 即已携带）。
@@ -151,12 +164,8 @@ function applyGrowItem(draft: CanvasState, item: CanvasGrowItem, at: string): vo
   if (item.type === 'option' && item.dispatchable === true) {
     node.dispatchable = true
   }
-  // 幂等 upsert：同 id 覆盖字段、保留 createdAt（重试 = 相同内容覆盖，状态不变 = 无副作用）。
-  if (existing) {
-    draft.nodes[draft.nodes.indexOf(existing)] = node
-  } else {
-    draft.nodes.push(node)
-  }
+  // 新节点直达（已存在节点在上方幂等判定处早退——保留原对象，积累状态不丢失）。
+  draft.nodes.push(node)
   const edgeId = `e-${item.id}`
   // 边方向按概念 §2.3 邻接表：主干边（decompose/resolve）= 父/问题 → 新子节点；
   // 附属边（argue/rebut）= 新 argument 节点 → 被论证 / 被反驳目标。
@@ -170,9 +179,39 @@ function applyGrowItem(draft: CanvasState, item: CanvasGrowItem, at: string): vo
     draft.edges.push(edge)
   }
   if (item.edge === 'decompose' || item.edge === 'resolve') {
+    // 不变量 2 的结构性兜底：新边恒指新节点（无出边）→ 当前 action 面下不可达；同 id
+    // 重挂边（历史成环通道）已被上方分歧判定 upfront 拦截。边重挂类 action 若未来进
+    // 词表，此处即拦截点——检测逻辑由 findTrunkCycle 纯函数单测覆盖（不靠本路径）。
     const cyclic = findTrunkCycle(draft)
     if (cyclic) fail('cycle_detected', `该边使主干成环（经节点「${cyclic}」）`)
   }
+}
+
+/**
+ * grow 重试的声明一致性判定：返回 null = 与首次写入完全一致（幂等重试，原样保留）；
+ * 返回非空字符串 = 分歧描述（调用方 fail-fast）。
+ *
+ * 比对范围 = grow 声明拥有且无其他 action 演化的字段：type / content / argument 的
+ * materiality+polarity（内在属性）/ 连接边三要素（边无变更 action，创建后不可变）。
+ * factVerified / dispatchable / criterias / lifecycle 等 patch 可演化的字段刻意不入
+ * 比对——重试携带的是首次声明值，与演化后值不同是正常形态，纳入会把合法重试误判为分歧。
+ */
+function growItemDivergence(existing: CanvasNode, item: CanvasGrowItem, draft: CanvasState): string | null {
+  if (existing.type !== item.type) return `类型「${existing.type}」与本次声明「${item.type}」不一致`
+  if (existing.content !== item.content) return '内容与首次写入不一致'
+  if (item.type === 'argument') {
+    if (existing.materiality !== (item.materiality ?? 'claim')) return '素材性与首次写入不一致'
+    if (existing.polarity !== item.edgePolarity) return '论据极性与首次写入不一致'
+  }
+  const existingEdge = edgeOf(draft, `e-${item.id}`)
+  if (!existingEdge) return '连接边缺失'
+  const isTrunk = item.edge === 'decompose' || item.edge === 'resolve'
+  const expectFrom = isTrunk ? item.attachTo : item.id
+  const expectTo = isTrunk ? item.id : item.attachTo
+  if (existingEdge.type !== item.edge || existingEdge.from !== expectFrom || existingEdge.to !== expectTo) {
+    return '连接边与首次写入不一致'
+  }
+  return null
 }
 
 /** 邻接合法性（概念 §2.3 边模型，MVP 四种边）：表外组合 invalid_params；端点缺失
@@ -447,8 +486,16 @@ function applyExport(
   events: CanvasEventBody[],
 ): string {
   const blockers = convergenceBlockers(draft)
-  if (blockers.length > 0) {
-    fail('not_converged', `画布未收敛，导出被拒（${blockers.length} 项）：${blockers.join('；')}`)
+  // 导出前置 = converge-check 同门禁（不变量 10）+ 收敛确认已执行（converged 终态）——
+  // 两条表面同一前置：GUI 导出面板门禁①（root.confirmed）与 runtime 同口径，agent 代
+  // 执行导出不因通道不同绕过用户确认（converge-check 按权限矩阵仅 user 可调，其存在
+  // 意义即导出门禁；恢复文案「确认根判据」由此可达——旧实现只查 blocker 集，未经确认
+  // 的画布在 agent 通道可导出，与设计 §3.1(3)「export 内部同校验——未收敛即拒」分裂）。
+  const unconfirmed = !draft.converged
+  if (unconfirmed || blockers.length > 0) {
+    const items = blockers.length > 0 ? [...blockers] : []
+    if (unconfirmed) items.push('尚未执行收敛确认（converge-check：三门禁全绿后用户点「确认收敛」）')
+    fail('not_converged', `画布未收敛，导出被拒（${items.length} 项）：${items.join('；')}`)
   }
   if (params.target.target === 'requirement-card') {
     const leaf = nodeOf(draft, params.target.leafId)

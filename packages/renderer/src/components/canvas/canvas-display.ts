@@ -5,9 +5,9 @@
  * 派生边界（任务书「领域判定规则」条款）：
  * - 阶段枚举（生长中/审查中/已收敛）与未处置 must-fix 计数是**契约明文委托 renderer 的
  *   派生值**（extension-protocol canvas/state.ts CanvasListEntry 注释），此处按契约口径实现；
- * - 就绪递归（收敛门禁②）是 runtime 领域规则，renderer 不复刻——收敛门禁面板只呈现
- *   ①③两格（root.confirmed / must-fix+dirtyPaths 均契约直读字段），门禁②以 runtime
- *   converge-check / export 的结构化拒绝为准（错误 message 已含完整阻断清单）。
+ * - 就绪递归（收敛门禁②）是 runtime 领域规则，renderer 不复刻——收敛门禁面板三门禁
+ *   投影（①root.confirmed ②就绪递归 ③must-fix+dirtyPaths；②只透传 runtime converged
+ *   确定性事实、不着色未收敛态），门禁校验落点 = converge-check / export 的结构化拒绝。
  *
  * 布局（demo v3 内核平移，.tmp/problem-solve-canvas-demo-v3.html layout computed）：
  * 主干定主轴（根在上向下分层），论据收于宿主卡内不占画布位，约束节点不进主干流
@@ -33,13 +33,28 @@ export function openMustFixOf(state: CanvasState): ReviewEntry[] {
 }
 
 /**
- * 阶段派生（契约注释逐字口径）：converged = 已收敛；开放 must-fix 或审查进行中 =
- * 审查中；其余 = 生长中。审查停回终态（max-rounds/escalated/stuck）不属「进行中」。
+ * 阶段派生判据（契约注释逐字口径的最小输入集）：converged = 已收敛；开放 must-fix 或
+ * 审查进行中 = 审查中；其余 = 生长中。审查停回终态（max-rounds/escalated/stuck）不属
+ * 「进行中」。规则单处实现（设计 §3.1(3) 阶段徽标枚举的落点）——全量态（canvasPhaseOf，
+ * 画布头部）与契约清单条目（托盘 phaseOf）两处调用方各自适配输入形状。
  */
-export function canvasPhaseOf(state: CanvasState): CanvasPhase {
-  if (state.converged) return 'converged'
-  if (openMustFixOf(state).length > 0 || state.review?.status === 'in-progress') return 'reviewing'
+export function phaseOfFacts(facts: {
+  converged: boolean
+  openMustFix: number
+  reviewInProgress: boolean
+}): CanvasPhase {
+  if (facts.converged) return 'converged'
+  if (facts.openMustFix > 0 || facts.reviewInProgress) return 'reviewing'
   return 'growing'
+}
+
+/** 阶段派生（全量态适配：画布头部徽标）。 */
+export function canvasPhaseOf(state: CanvasState): CanvasPhase {
+  return phaseOfFacts({
+    converged: state.converged,
+    openMustFix: openMustFixOf(state).length,
+    reviewInProgress: state.review?.status === 'in-progress',
+  })
 }
 
 // ── 图关系投影（节点卡 / 论据条 / 边渲染共用）─────────────────────────────────

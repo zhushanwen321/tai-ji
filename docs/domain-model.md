@@ -24,8 +24,8 @@
 6. constrain 边的目标必须是画布内存在的节点（子树锚点）——第二版生效：MVP 契约词表无 constrain 边，此不变量暂无校验对象
 7. 执行叶子 passed 前完成判据必填；dispatched 前必须 passed 且下游产物指针必填
 8. 评论被添加后，响应状态初始为待响应；agent 的采纳 / 反驳留痕前不得转为已响应
-9. 用户改动节点后，从该节点到根的路径必须进入待重审集合（mutate 事务内自动计算传播范围；换选 = 上溯路径 + 旧选中方案整个子树）
-10. 规划收敛终态的前置 = 待重审集合为空 + must-fix 清零 + 执行叶子全部 passed/dispatched（收敛确认与 export 均校验此不变量）
+9. 用户对节点内容的改动（patch / select / comment）在 mutate 事务内自动计算传播范围进待重审集合：一般改动 = 从该节点上溯到根的路径；换选 = 上溯路径 + 旧选中方案整个子树。dispatch 只在已 passed 的执行叶子上登记下游产物指针、decide-direction 只拍板画布方向元数据，均不改变可审内容，不进传播集
+10. 规划收敛终态的前置 = 待重审集合为空 + must-fix 清零 + 执行叶子全部 passed/dispatched（收敛确认与 export 均校验此不变量；export 另要求收敛确认已执行——converged 终态，GUI 与 agent 代执行两条表面同一前置）
 11. 唯一入口：图元素增删改、状态转移、评价、派发均经画布聚合根的操作（actor 字段区分 user / agent / review；per-action × actor 合法性矩阵在契约模块，表外组合 fail-fast）
 
 **节点状态机**（生命周期 × 派发二维正交，禁止直写状态字段）：
