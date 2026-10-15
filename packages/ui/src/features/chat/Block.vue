@@ -122,30 +122,34 @@
          streaming-tail 光标在 Turn.vue trace 容器末尾（跟在所有 block 后，不受 contentBlocks 时序影响）。
          [M2 形态统一] 唯一 error 形态 = 追加形态：content 崩溃前正文保持原色（可为空），
          msg.error 独立 danger 行（错误文本只住 error 字段，永不染红正文）。 -->
-    <div v-else-if="type === 'text'" data-testid="block-text" class="group/text relative flex items-start gap-[8px] text-[length:var(--text-md)] leading-[1.8]" :class="textColorClass">
+    <div v-else-if="type === 'text'" data-testid="block-text" class="group/text relative flex flex-col text-[length:var(--text-md)] leading-[1.8]" :class="textColorClass">
+      <!-- 正文行（原行容器原样下沉一层；textColorClass 上提到外层列容器，继承不变） -->
+      <div class="flex items-start gap-[8px]">
+        <div class="min-w-0 flex-1">
+          <MarkdownRenderer v-if="content" :content="content ?? ''" :session-id="sessionId ?? undefined" :streaming="streaming" />
+          <!-- error 独立 danger 行（AlertCircle + msg.error 文本） -->
+          <div v-if="isAppendError" data-testid="block-text-error" class="mt-1 flex items-start gap-1.5 text-danger">
+            <AlertCircle class="mt-1.5 size-3.5 shrink-0 text-danger" />
+            <span class="min-w-0 flex-1 whitespace-pre-wrap">{{ error }}</span>
+          </div>
+        </div>
+        <!-- text 块行尾时刻（D2 悬停化：原 w-28 固定占位列随悬停化一并移除，正文行恢复满宽；
+             ml-auto 钉行尾，悬停/键盘焦点进入该行才显现） -->
+        <span v-if="messageTimestamp" class="ml-auto shrink-0 self-center font-mono text-[length:var(--text-2xs)] text-neutral-dim tabular-nums opacity-0 transition-opacity duration-[var(--duration-fast)] group-hover/text:opacity-100 group-focus-within/text:opacity-100" data-testid="text-time-slot">{{ formatClock(messageTimestamp) }}</span>
+      </div>
       <!-- [actions-anchor] turn 级 hover actions 挂载位（Turn.vue 经 #turn-actions 插槽注入，
-           仅末位 text 块携带）。悬浮于本块上方右侧：上方是块间留白与左对齐邻块的行尾空区，
-           右侧是正文换行预留的行尾时刻槽，两向均不遮正文。显隐门控挂 group/text——悬停区 =
-           text 块行本身，TurnMeta/过程行/run 组行悬停不触发；pb 桥接正文→按钮的移动空档，
-           按钮作为本行 DOM 子孙，移入按钮期间 group/text 悬停态不丢失。 -->
+           仅末位 text 块携带）。2026-10-15 用户裁决：流内固定槽位 = text 块下部一行，
+           与 UserBubble hover actions 同族形态（原「text 上方右侧」悬浮 chip 退役——
+           透明底不再覆盖任何文字）。常驻 h-6 行占位（opacity 门控显隐，与 UserBubble
+           mt-1+h-6 同参）；悬停区 = 外层 group/text（正文行 + 本行），按钮是本块 DOM
+           子孙，移入按钮期间悬停态经 DOM 祖先传递不丢失。 -->
       <span
         v-if="$slots['turn-actions']"
-        class="absolute bottom-full right-0 z-10 flex pb-1.5 opacity-0 pointer-events-none transition-opacity duration-[var(--duration-fast)] group-hover/text:pointer-events-auto group-hover/text:opacity-100 group-focus-within/text:pointer-events-auto group-focus-within/text:opacity-100"
+        class="mt-1 flex h-6 items-center gap-0.5 opacity-0 pointer-events-none transition-opacity duration-[var(--duration-fast)] group-hover/text:pointer-events-auto group-hover/text:opacity-100 group-focus-within/text:pointer-events-auto group-focus-within/text:opacity-100"
         data-testid="turn-actions-anchor"
       >
         <slot name="turn-actions" />
       </span>
-      <div class="min-w-0 flex-1">
-        <MarkdownRenderer v-if="content" :content="content ?? ''" :session-id="sessionId ?? undefined" :streaming="streaming" />
-        <!-- error 独立 danger 行（AlertCircle + msg.error 文本） -->
-        <div v-if="isAppendError" data-testid="block-text-error" class="mt-1 flex items-start gap-1.5 text-danger">
-          <AlertCircle class="mt-1.5 size-3.5 shrink-0 text-danger" />
-          <span class="min-w-0 flex-1 whitespace-pre-wrap">{{ error }}</span>
-        </div>
-      </div>
-      <!-- text 块行尾时刻（D2 悬停化：原 w-28 固定占位列随悬停化一并移除，正文行恢复满宽；
-           ml-auto 钉行尾，悬停/键盘焦点进入该行才显现） -->
-      <span v-if="messageTimestamp" class="ml-auto shrink-0 self-center font-mono text-[length:var(--text-2xs)] text-neutral-dim tabular-nums opacity-0 transition-opacity duration-[var(--duration-fast)] group-hover/text:opacity-100 group-focus-within/text:opacity-100" data-testid="text-time-slot">{{ formatClock(messageTimestamp) }}</span>
     </div>
 
     <!-- ── run 组块（run 类型分组，demo specs/chat/history-load-and-run-grouping.md §3）：
