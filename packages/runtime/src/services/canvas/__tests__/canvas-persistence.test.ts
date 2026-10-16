@@ -73,6 +73,95 @@ describe('快照 + 重放 ≡ 直写', () => {
   })
 })
 
+describe('comment 事件重放 ≡ 直写（评论 id 随事件落盘按值恢复）', () => {
+  it('含用户评论的画布重启重建（快照 + 增量重放 / 删快照全量重放）≡ 直写终态，评论 id 逐字还原', () => {
+    const h = makeService()
+    try {
+      const c = createCanvas(h.svc)
+      expectOk(h.svc.mutate({ action: 'comment', params: { canvasId: c.canvasId, anchorId: c.rootId, text: '根判据第二条可量化吗' } }, 'user'))
+      const directWrite = h.svc.readState(c.canvasId)
+      expect(directWrite.comments).toHaveLength(1)
+      // 新实例重建（模拟 runtime 重启）——comment 主事件不经附属事件过滤，重放必触
+      // applyComment 的 id 生成点：按落盘 generated.commentId 恢复，不得触恒抛生成器
+      const reborn = new CanvasService({ canvasesDir: h.dir, generateId: (): string => 'replay-unused-id' })
+      try {
+        const rebornState = reborn.readState(c.canvasId)
+        expect(rebornState).toEqual(directWrite)
+        // 评论 id 逐字还原（`${anchorId}#c-<生成段>` 契约形态，非重造）
+        expect(rebornState.comments[0]!.id).toBe(directWrite.comments[0]!.id)
+      } finally {
+        reborn.dispose()
+      }
+      // 删快照走全量重放分支（create + comment 未跨快照间隔，快照不存在为正常形态：
+      // force 幂等删除——有则删、无则本用例等价于全量重放主链的重复验证）
+      rmSync(join(h.dir, c.canvasId, 'canvas.json'), { force: true })
+      const fullReplay = new CanvasService({ canvasesDir: h.dir, generateId: (): string => 'replay-unused-id' })
+      try {
+        expect(fullReplay.readState(c.canvasId)).toEqual(directWrite)
+      } finally {
+        fullReplay.dispose()
+      }
+    } finally {
+      h.dispose()
+    }
+  })
+
+  it('评论跨快照锚点两侧：锚点前评论由快照承载、锚点后评论走增量重放，重建 ≡ 直写', () => {
+    const h = makeService()
+    try {
+      const c = createCanvas(h.svc)
+      // 锚点前评论（快照将携带其状态，重放循环按 seq 跳过）
+      expectOk(h.svc.mutate({ action: 'comment', params: { canvasId: c.canvasId, anchorId: c.rootId, text: '锚点前的议题' } }, 'user'))
+      // 跨过快照间隔（每轮 user patch 产 2 条事件：附属 + 主）
+      const rounds = Math.ceil((CANVAS_SNAPSHOT_INTERVAL + 3) / 2)
+      for (let i = 0; i < rounds; i++) {
+        expectOk(h.svc.mutate({ action: 'patch', params: { canvasId: c.canvasId, nodeId: c.rootId, content: `改述 v${i}`, reason: 'r' } }, 'user'))
+      }
+      // 锚点后评论（增量重放执行该 comment 行）
+      expectOk(h.svc.mutate({ action: 'comment', params: { canvasId: c.canvasId, anchorId: c.rootId, text: '锚点后的议题' } }, 'user'))
+      const directWrite = h.svc.readState(c.canvasId)
+      expect(directWrite.comments).toHaveLength(2)
+      expect(existsSync(join(h.dir, c.canvasId, 'canvas.json'))).toBe(true)
+      const reborn = new CanvasService({ canvasesDir: h.dir, generateId: (): string => 'replay-unused-id' })
+      try {
+        expect(reborn.readState(c.canvasId)).toEqual(directWrite)
+      } finally {
+        reborn.dispose()
+      }
+    } finally {
+      h.dispose()
+    }
+  })
+
+  it('comment 事件缺生成 id（事件流数据损坏）→ fail-fast 指向权威源，不静默另造 id', () => {
+    const h = makeService()
+    try {
+      const c = createCanvas(h.svc)
+      expectOk(h.svc.mutate({ action: 'comment', params: { canvasId: c.canvasId, anchorId: c.rootId, text: '议题' } }, 'user'))
+      // 手工抹掉 comment 行的 generated（模拟损坏 / 非本服务产出的历史数据）
+      const eventsFile = join(h.dir, c.canvasId, 'events.jsonl')
+      const stripped = readFileSync(eventsFile, 'utf-8')
+        .split('\n').filter((l) => l.trim() !== '')
+        .map((l) => {
+          const ev = JSON.parse(l) as { action?: string; data: Record<string, unknown> }
+          if (ev.action !== 'comment') return l
+          const data = { ...ev.data }
+          delete data.generated
+          return JSON.stringify({ ...ev, data })
+        })
+      writeFileSync(eventsFile, `${stripped.join('\n')}\n`, 'utf-8')
+      const reborn = new CanvasService({ canvasesDir: h.dir, generateId: (): string => 'u' })
+      try {
+        expectThrown(() => reborn.readState(c.canvasId), 'invalid_params')
+      } finally {
+        reborn.dispose()
+      }
+    } finally {
+      h.dispose()
+    }
+  })
+})
+
 describe('崩溃窗口截断重放一致性（锚点对齐守护用例）', () => {
   /** 构造带快照的画布：返回事件流全量行与快照文件路径。 */
   function buildEventStream(dir: string): { canvasId: string; lines: PersistedLine[]; total: number } {

@@ -18,7 +18,7 @@
 
 1. 一张画布有且仅有一个根节点，类型为 question，且带完成判据（可证伪）与范围排除
 2. 主干图（decompose + resolve）无环
-3. 任一 question 的 resolve 边中，selected 至多一条；selected 变更产生方案选择事件并留对比理由（换选走同一调用事务内的迁移语义）
+3. 任一 question 的 resolve 边中，selected 至多一条；selected 变更产生方案选择事件并留对比理由（换选走同一调用事务内的迁移语义）；方案被否决 / 搁置时其 selected 标记同步清除（否决 = 放弃该候选——transition 转移侧清除，事件流重放同函数还原，复活后须重新选定），resolve 路径的「selected 方案」由此恒处于有效生命周期
 4. rejected 节点不可删除、不可从 rejected 直接转 passed（必须先复活为 draft）
 5. 素材性为 fact 的论据必须携带核实状态（已核实 / 未核实）；未核实论据不得作为 passed 的依据
 6. constrain 边的目标必须是画布内存在的节点（子树锚点）——第二版生效：MVP 契约词表无 constrain 边，此不变量暂无校验对象

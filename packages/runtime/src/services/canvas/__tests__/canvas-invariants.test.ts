@@ -6,8 +6,10 @@
  * MVP 边界：constrain / reference 边不在词表（不变量 6 退化为构造性满足，见对应用例）。
  */
 import { describe, expect, it } from 'vitest'
+import { readdirSync } from 'node:fs'
 import { ACTION_EVENT_MAP, CANVAS_ACTIONS } from '@zhushanwen/extension-protocol'
-import { convergenceBlockers, dispatchableLeaves, findTrunkCycle, isRootReady, pathToRoot, subtreeOf } from '../canvas-domain.js'
+import { convergenceBlockers, dispatchableLeaves, findTrunkCycle, isQuestionReady, isRootReady, pathToRoot, subtreeOf } from '../canvas-domain.js'
+import { renderPlanningDoc } from '../canvas-export.js'
 import { CanvasService } from '../canvas-service.js'
 import { createCanvas, expectRejected, expectThrown, growCanvas, makeService, buildAllGreenCanvas, type ServiceHandle } from './canvas-helpers.js'
 
@@ -191,6 +193,54 @@ describe('不变量 3：selected 至多一条；selected 变更产生方案选�
   })
 })
 
+describe('不变量 3 转移侧：否决 / 搁置同步清除 selected（放弃该候选）', () => {
+  it('否决当前选定方案 → selected 清除、该问题不再按 resolve 路径判就绪、导出不显「已选定」；重启重建后清除效果保持（直写 ≡ 重放）', () => {
+    const h = makeService()
+    try {
+      const c = growCanvas(h.svc, createCanvas(h.svc))
+      expect(h.svc.mutate({ action: 'select', params: { canvasId: c.canvasId, questionId: c.q1, optionId: c.o1, reason: '演进性优先' } }, 'user').ok).toBe(true)
+      expect(c.state().nodes.find((n) => n.id === c.o1)?.selected).toBe(true)
+      // 否决链（draft → under-review → rejected，与不变量 4 用例同款合法转移）
+      expect(h.svc.mutate({ action: 'transition', params: { canvasId: c.canvasId, nodeId: c.o1, to: 'under-review', reason: '提案' } }, 'agent').ok).toBe(true)
+      expect(h.svc.mutate({ action: 'transition', params: { canvasId: c.canvasId, nodeId: c.o1, to: 'rejected', rejection: { reason: '成本超预算' }, reason: '用户否决当前选定' } }, 'user').ok).toBe(true)
+      const state = c.state()
+      const o1 = state.nodes.find((n) => n.id === c.o1)
+      expect(o1?.selected).toBe(false)
+      expect(o1?.selectionReason).toBeUndefined()
+      // 就绪递归：q1 的选定已清除且无分解子问题 → 悬空不就绪（收敛门禁②拦截，不得以
+      // 被否决方案继续按 resolve 路径判就绪）
+      expect(isQuestionReady(state, c.q1)).toBe(false)
+      // 导出渲染：否决行保留否决语义（理由可读），不渲染「已选定」
+      const doc = renderPlanningDoc(state, new Date().toISOString())
+      expect(doc).not.toContain('已选定')
+      expect(doc).toContain('成本超预算')
+      // 重启重建：清除效果随事件流还原（重放执行同一 applyTransition 同清除）
+      const reborn = new CanvasService({ canvasesDir: h.dir, generateId: (): string => 'u' })
+      try {
+        expect(reborn.readState(c.canvasId).nodes.find((n) => n.id === c.o1)?.selected).toBe(false)
+      } finally {
+        reborn.dispose()
+      }
+    } finally {
+      h.dispose()
+    }
+  })
+
+  it('搁置当前选定方案 → selected 同步清除（否决 / 搁置同款转移侧语义）', () => {
+    const h = makeService()
+    try {
+      const c = growCanvas(h.svc, createCanvas(h.svc))
+      expect(h.svc.mutate({ action: 'select', params: { canvasId: c.canvasId, questionId: c.q1, optionId: c.o1, reason: 'r1' } }, 'user').ok).toBe(true)
+      expect(h.svc.mutate({ action: 'transition', params: { canvasId: c.canvasId, nodeId: c.o1, to: 'shelved', reason: '暂缓该方案' } }, 'user').ok).toBe(true)
+      const o1 = c.state().nodes.find((n) => n.id === c.o1)
+      expect(o1?.selected).toBe(false)
+      expect(o1?.selectionReason).toBeUndefined()
+    } finally {
+      h.dispose()
+    }
+  })
+})
+
 describe('不变量 4：rejected 节点不可删除、不可从 rejected 直接转 passed', () => {
   it('逆例：rejected → passed 表外转移 → lifecycle_transition_illegal', () => {
     const h = makeService()
@@ -284,6 +334,26 @@ describe('不变量 5：fact 论据必须携带核实状态；未核实论据不
       const a2 = h.svc.readState(c.canvasId).nodes.find((n) => n.id === 'a2')
       expect(a2?.materiality).toBe('claim')
       expect(a2?.factVerified).toBeUndefined()
+    } finally {
+      h.dispose()
+    }
+  })
+})
+
+describe('论据极性纪律：rebut 边必带极性（与 argue 同口径——工具面 edgePolarity REQUIRED 承诺的 runtime 执行点）', () => {
+  it('rebut 缺极性 → invalid_params 且整批不落盘；带极性重试 → 落库', () => {
+    const h = makeService()
+    try {
+      const c = growCanvas(h.svc, createCanvas(h.svc))
+      // 被反驳目标：带极性的 argue 论据（argue 侧极性强制为既有口径）
+      expect(h.svc.mutate({ action: 'grow', params: { canvasId: c.canvasId, batch: [{ id: 'a1', type: 'argument', content: '目标论据', attachTo: c.o1, edge: 'argue', edgePolarity: 'support' }], reason: '落支撑论据' } }, 'agent').ok).toBe(true)
+      // rebut 缺极性：拒绝（工具描述「REQUIRED when edge is argue/rebut」的 runtime 兑现）
+      const rejected = h.svc.mutate({ action: 'grow', params: { canvasId: c.canvasId, batch: [{ id: 'a2', type: 'argument', content: '反驳论据', attachTo: 'a1', edge: 'rebut' }], reason: '反驳目标论据' } }, 'agent')
+      expectRejected(rejected, 'invalid_params')
+      expect(c.state().nodes.some((n) => n.id === 'a2')).toBe(false)
+      // 带极性重试：落库
+      expect(h.svc.mutate({ action: 'grow', params: { canvasId: c.canvasId, batch: [{ id: 'a2', type: 'argument', content: '反驳论据', attachTo: 'a1', edge: 'rebut', edgePolarity: 'object' }], reason: '反驳目标论据' } }, 'agent').ok).toBe(true)
+      expect(c.state().nodes.some((n) => n.id === 'a2')).toBe(true)
     } finally {
       h.dispose()
     }
@@ -599,6 +669,7 @@ describe('不变量 11：唯一入口（图元素增删改 / 状态转移 / 评�
     const methods = Object.getOwnPropertyNames(CanvasService.prototype).sort()
     // 快照即守卫：新增公开方法（尤其第二个写入口）或内部方法时此处红，强制审视唯一入口纪律。
     expect(methods).toEqual([
+      'assertCanvasIdFormat',
       'broadcast',
       'bindSession',
       'canvasDir',
@@ -653,6 +724,36 @@ describe('不变量 11：唯一入口（图元素增删改 / 状态转移 / 评�
       const entry = c.state().review?.entries.find((e) => e.id === 'e1')
       expect(entry?.resolution?.by).toBe('agent')
       expect(entry?.resolution?.disposition).toBe('deferred')
+    } finally {
+      h.dispose()
+    }
+  })
+})
+
+describe('canvasId 格式守卫（落盘寻址边界：生成形态即契约，`../` 等越界形态不入文件路径）', () => {
+  it('越界 / 畸形形态全入口 invalid_params 拒绝，且不在 canvases 根产生任何目录', () => {
+    const h = makeService()
+    try {
+      const evilIds = ['cvs-../../escape', 'cvs-/abs', 'cvs-', '../cvs-x', 'cvs-a/b', 'cvs-a..b']
+      for (const id of evilIds) {
+        // 查询入口（throw 形态）
+        expectThrown(() => h.svc.readState(id), 'invalid_params')
+        // mutate 入口（reply 失败腿形态——领域拒绝不抛）
+        expectRejected(h.svc.mutate({ action: 'patch', params: { canvasId: id, nodeId: 'n1', content: 'x', reason: 'r' } }, 'user'), 'invalid_params')
+        // 绑定入口（throw 形态）
+        expectThrown(() => h.svc.bindSession('sess-a', id), 'invalid_params')
+      }
+      // 零文件系统泄漏：守卫先于一切落盘寻址
+      expect(readdirSync(h.dir)).toEqual([])
+    } finally {
+      h.dispose()
+    }
+  })
+
+  it('合法形态不误拦：格式合法但不存在的 id → canvas_not_found（守卫只拦格式）', () => {
+    const h = makeService()
+    try {
+      expectThrown(() => h.svc.readState('cvs-doesnotexist'), 'canvas_not_found')
     } finally {
       h.dispose()
     }

@@ -46,6 +46,7 @@ export {
   type GeneratedIds,
   type IdGenerator,
   replayIdGenerator,
+  COMMENT_ID_SEPARATOR,
   eventOf,
   eventData,
   type AppliedMutation,

@@ -11,6 +11,7 @@ import type { CanvasActionParams, CanvasActor, CanvasComment, CanvasCreateParams
 import {
   argumentPolarity,
   CANVAS_NAME_MAX,
+  COMMENT_ID_SEPARATOR,
   convergenceBlockers,
   dirtyEvent,
   edgeOf,
@@ -275,9 +276,11 @@ function validateArgueAdjacency(item: CanvasGrowItem, attachNode: CanvasNode | u
   if (attachEdge && !isTrunkEdge(attachEdge)) fail('invalid_params', 'argue 指边时只能指主干边（decompose / resolve）')
 }
 
-/** rebut：起点必须 argument，目标必须存在且为 argument。 */
+/** rebut：起点必须 argument 且带极性（与 argue 同口径——工具面 edgePolarity 的
+ * REQUIRED 承诺在 runtime 的执行点，「论据带极性」统一语言的收口）；目标必须存在且为 argument。 */
 function validateRebutAdjacency(item: CanvasGrowItem, attachNode: CanvasNode | undefined): void {
   if (item.type !== 'argument') fail('invalid_params', `rebut 边的起点必须是 argument，收到「${item.type}」`)
+  if (item.edgePolarity === undefined) fail('invalid_params', 'rebut 边必带极性（edgePolarity: support | object）')
   if (!attachNode) fail('node_not_found', `被反驳论据「${item.attachTo}」不存在`)
   if (attachNode.type !== 'argument') fail('invalid_params', `rebut 的目标必须是 argument，收到「${attachNode.type}」`)
 }
@@ -449,6 +452,15 @@ function applyTransition(
   if (params.to === 'passed') {
     assertPassable(draft, node)
   }
+  // 否决 / 搁置 = 放弃该候选（不变量 3 的转移侧语义）：selected 标记同步清除——被
+  // 否决 / 搁置的方案不得继续以选定身份参与就绪递归（收敛门禁②）与导出渲染；复活为
+  // draft 后须重新 select。重放执行同一函数同清除（StateTransitioned 事件的 params
+  // 确定性重导出该效果，直写 ≡ 重放，无需独立事件）。仅在 selected 命中时覆写，避免
+  // 给全部节点强加 selected: false 的序列化形态。
+  if ((params.to === 'rejected' || params.to === 'shelved') && node.selected === true) {
+    node.selected = false
+    node.selectionReason = undefined
+  }
   const from = node.lifecycle
   node.lifecycle = params.to
   draft.updatedAt = at
@@ -483,7 +495,7 @@ function applyComment(
   const anchorNode = nodeOf(draft, params.anchorId)
   const anchorEdge = anchorNode ? undefined : edgeOf(draft, params.anchorId)
   if (!anchorNode && !anchorEdge) fail('node_not_found', `评论锚定目标「${params.anchorId}」不存在（节点或边 id）`)
-  const commentId = `${params.anchorId}#c-${idGen.next()}`
+  const commentId = `${params.anchorId}${COMMENT_ID_SEPARATOR}${idGen.next()}`
   const comment: CanvasComment = { id: commentId, anchorId: params.anchorId, text: params.text, status: 'pending', createdAt: at }
   draft.comments.push(comment)
   // D9：用户评论 = 注入议题 → 锚定目标（节点；锚边取子端）上溯路径进待重审。

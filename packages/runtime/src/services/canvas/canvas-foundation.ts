@@ -77,6 +77,13 @@ export interface GeneratedIds { // oe-exempt:20261015:framework:画布域类型�
   commentId?: string
 }
 
+/**
+ * comment 评论 id 的锚定分隔符（applyComment 产 `${anchorId}${COMMENT_ID_SEPARATOR}<生成段>`
+ * 契约形态；generated.commentId 落盘完整 id）。写侧（applyComment 拼接）与重放读侧
+ * （按落盘 id 反解生成段）共用本常量——分隔符形态单点定义，两端不得漂移。
+ */
+export const COMMENT_ID_SEPARATOR = '#c-'
+
 export function eventData(params: Record<string, unknown>, generated?: GeneratedIds): Record<string, unknown> {
   return generated ? { ...params, generated } : { ...params }
 }

@@ -52,6 +52,8 @@ import {
   type CanvasEventBody,
   type CanvasTransformRequest,
   type GeneratedIds,
+  type IdGenerator,
+  COMMENT_ID_SEPARATOR,
 } from './canvas-domain.js'
 import { renderPlanningDoc, renderRequirementCard } from './canvas-export.js'
 
@@ -60,6 +62,14 @@ export const CANVAS_SNAPSHOT_INTERVAL = 50
 
 /** canvasId 后缀长度（D7「短随机 id」：8 hex = 32bit 随机空间，MVP 低频产物量级）。 */
 const CANVAS_ID_SUFFIX_LEN = 8
+
+/**
+ * canvasId 生成形态即契约（generateCanvasId 产 `cvs-<随机段>`，随机段为字母数字与
+ * 连字符）。全部外部入口（mutate / readState / bindSession / loadCanvas）在字符串
+ * 触达落盘路径前统一校验——`../` 等寻址越界形态在此拦截（renderer / LLM 经 WS RPC
+ * 与 marker 双通道传入可控字符串，C-comm-16 同族纪律）。
+ */
+const CANVAS_ID_PATTERN = /^cvs-[A-Za-z0-9-]+$/
 
 /** 落盘事件行形状（events.jsonl 每行一个 JSON；seq 从 1 起 per-canvas 单调，eventId = String(seq)）。 */
 export interface CanvasPersistedEvent extends CanvasEventBody { // oe-exempt:20261015:framework:画布域类型契约（数据形状/端口/测试 harness，非抽象接口单实现）
@@ -126,6 +136,19 @@ export class CanvasService {
   // ── mutate 唯一入口 ──────────────────────────────────────────
 
   /**
+   * canvasId 格式守卫（生成形态即契约：generateCanvasId 产 `cvs-<随机段>`，随机段为
+   * 字母数字与连字符）。全部外部入口（mutate / readState / bindSession / loadCanvas）
+   * 统一调用：不匹配 = 非本服务产出的 id，直拼落盘路径可越出 canvases 根寻址（`../`
+   * 形态，renderer / LLM 经 WS RPC 与 marker 双通道可控字符串）——fail-fast
+   * invalid_params，文案指向合法 id 的获取通道。
+   */
+  private assertCanvasIdFormat(canvasId: string): void {
+    if (!CANVAS_ID_PATTERN.test(canvasId)) {
+      throw new CanvasDomainError(canvasError('invalid_params', `canvasId「${canvasId}」格式非法（合法形态 cvs-<id>）：使用 canvas_list / canvas.list 返回的 canvasId`))
+    }
+  }
+
+  /**
    * 聚合根唯一写入入口。同步方法（同步段纪律：矩阵校验 + 领域应用 + 落盘 + 广播全在
    * 同步段内，零 await——「单进程串行化」由单线程同步执行构造性保证）。
    * 领域拒绝（不变量 / 状态机 / 矩阵 / 寻址）→ reply 失败腿；基础设施失败（磁盘 IO）→ throw。
@@ -171,6 +194,10 @@ export class CanvasService {
 
   private mutateTransform(request: CanvasTransformRequest, actor: CanvasActor): CanvasMutateResult {
     const canvasId = request.params.canvasId
+    // 领域拒绝 → reply 失败腿（mutate 纪律，文件头）：格式不合法的 id 不触落盘寻址。
+    if (!CANVAS_ID_PATTERN.test(canvasId)) {
+      return { ok: false, error: canvasError('invalid_params', `canvasId「${canvasId}」格式非法（合法形态 cvs-<id>）：使用 canvas_list / canvas.list 返回的 canvasId`) }
+    }
     const prev = this.states.get(canvasId) ?? this.loadCanvas(canvasId)
     if (!prev) {
       return { ok: false, error: canvasError('canvas_not_found', `画布「${canvasId}」不存在`) }
@@ -201,6 +228,7 @@ export class CanvasService {
 
   /** 画布全量只读视图（返回深拷贝——内存权威不被调用方引用污染）。 */
   readState(canvasId: string, subtree?: string): CanvasReadReply {
+    this.assertCanvasIdFormat(canvasId)
     const state = this.states.get(canvasId) ?? this.loadCanvas(canvasId)
     if (!state) throw new CanvasDomainError(canvasError('canvas_not_found', `画布「${canvasId}」不存在`))
     if (!subtree) return structuredClone(state)
@@ -240,6 +268,7 @@ export class CanvasService {
 
   /** enter 成功登记（幂等：重复 enter 同画布无副作用）。 */
   bindSession(sessionId: string, canvasId: string): void {
+    this.assertCanvasIdFormat(canvasId)
     if (!this.states.has(canvasId) && !this.loadCanvas(canvasId)) {
       throw new CanvasDomainError(canvasError('canvas_not_found', `绑定目标画布「${canvasId}」不存在`))
     }
@@ -328,6 +357,9 @@ export class CanvasService {
 
   /** 单画布重建：快照（可信时）+ 增量事件重放；快照损坏 / 锚点超前一律丢弃走全量重放。 */
   private loadCanvas(canvasId: string): CanvasState | undefined {
+    // 纵深守卫（mutate/readState/bindSession 入口已拦）：loadAll 扫描目录名的直接通道
+    // ——磁盘上的非法目录名（手工放置）在此 fail-fast，由 loadAll 捕获留痕不拖垮启动。
+    this.assertCanvasIdFormat(canvasId)
     const eventsFile = this.eventsPath(canvasId)
     if (!existsSync(eventsFile)) return undefined
     let state: CanvasState | undefined
@@ -393,7 +425,23 @@ export class CanvasService {
     if (!prev) {
       throw new Error(`[canvas-service] 事件流首条非 create（canvasId=${canvasId} seq=${ev.seq}）——画布数据损坏`)
     }
-    const applied = applyMutation(prev, { action: ev.action, params: ev.data } as never, ev.actor, ev.at, replayIdGenerator)
+    // comment 评论 id 随事件落盘（applyComment 产 generated.commentId，完整形态
+    // `${anchorId}${COMMENT_ID_SEPARATOR}<生成段>`）——与 create 分支同款按落盘值
+    // 恢复：生成器返回落盘 id 的生成段，applyComment 的拼接还原原评论 id（直写 ≡
+    // 重放）。生成段 = runtime id（randomUuid / 测试序列，不含分隔符），lastIndexOf
+    // 恒定位 applyComment 写入的分隔符。缺落盘 id / 分隔符缺失 = 事件流数据损坏
+    // fail-fast——静默另造 id 会使重放状态与直写不一致（等价性违约）。
+    let idGen: IdGenerator = replayIdGenerator
+    if (ev.action === 'comment') {
+      const commentId = generated.commentId
+      const sep = commentId !== undefined ? commentId.lastIndexOf(COMMENT_ID_SEPARATOR) : -1
+      if (commentId === undefined || sep < 0 || sep + COMMENT_ID_SEPARATOR.length >= commentId.length) {
+        throw new CanvasDomainError(canvasError('invalid_params', `comment 事件缺生成 id（generated.commentId，canvasId=${canvasId} seq=${ev.seq}）——事件流数据损坏：以 events.jsonl 为准检查该行`))
+      }
+      const generatedSegment = commentId.slice(sep + COMMENT_ID_SEPARATOR.length)
+      idGen = { next: (): string => generatedSegment }
+    }
+    const applied = applyMutation(prev, { action: ev.action, params: ev.data } as never, ev.actor, ev.at, idGen)
     return applied.state
   }
 
