@@ -22,6 +22,9 @@
 
 import type { EngineRouteResult } from "./routing.ts";
 
+/** 生效回执去重（per-engineId 进程级）：翻译面缺席的 warn 只报一次，不逐派发刷屏。 */
+const translationFaceAbsentWarned = new Set<string>();
+
 /** 派发期模型来源（与 shared/core 同名词域——本层只消费不定义类型，避免三处漂移）。 */
 export type ResolvedEngineModelSource = "explicit" | "frontmatter" | "preference" | "default";
 
@@ -49,6 +52,18 @@ export function resolveEngineModelWithTranslation(
 ): ResolvedEngineModelResult {
   const translate = (ref: string): string =>
     route.engine.translateModelRef !== undefined ? route.engine.translateModelRef(ref) : ref;
+  // [engine-ref-translation D5 生效回执] 翻译面缺席时一次告警（per-engine 进程级去
+  // 重）——2026-10-16 修复的直接教训：staged 引擎 cli 形态下 RemoteEngine 未实装
+  // 本成员且无任何信号，修复语义在部署形态整体静默失效。缺席语义不变（恒等透传，
+  // 跨引擎 ref 是否可解析由引擎侧裁决），但必须可观测。
+  if (route.engine.translateModelRef === undefined && !translationFaceAbsentWarned.has(route.engineId)) {
+    translationFaceAbsentWarned.add(route.engineId);
+    warn(
+      `[${logPrefix}] engine '${route.engineId}' has no model translation face ` +
+        `(translateModelRef not implemented; manifest modelTranslation undeclared) — ` +
+        `cross-engine model refs pass through untranslated and may be rejected by the engine`,
+    );
+  }
   if (taskModel !== undefined) return { engineModel: translate(taskModel), source: "explicit" };
   if (frontmatterModel !== undefined) return { engineModel: translate(frontmatterModel), source: "frontmatter" };
   const preference = readPreference();

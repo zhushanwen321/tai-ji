@@ -56,6 +56,13 @@ export interface RemoteEngineManifestSnapshot {
    */
   modelCatalog?: { dynamic: boolean; models: ModelCatalogEntry[] } | null;
   /**
+   * manifest `modelTranslation`（[engine-ref-translation D5] 2026-10-16）：静态跨引擎
+   * 翻译表声明（pi 词汇 provider 段 → 本引擎原生 provider 段）。缺省 undefined =
+   * 无翻译面——构造器据此摘除 translateModelRef 成员（消费方按缺席语义降级 +
+   * 生效回执 warn）。声明表与 in-process 引擎类代码表由对账锁步单测绑定。
+   */
+  modelTranslation?: Record<string, string>;
+  /**
    * manifest `taiji.subagentEngine.processModel`（U0 / 设计 §3.3 决策 3）：宿主实例
    * 管理分流判据（per-window → 窗口作用域实例；shared-service → registry 单例）。
    * 缺省 undefined = 解析层缺省 'per-window'（轻壳是常态）。RemoteEngine 自身不消费
@@ -273,6 +280,37 @@ export class RemoteEngine implements EnginePort {
       // 抛给用户（capabilities 注释的消费点登记）。
       (this as { setModel?: unknown }).setModel = undefined;
     }
+    if (opts.manifest.modelTranslation === undefined) {
+      // [engine-ref-translation D5] translateModelRef 成员同款形态映射：manifest 无
+      // modelTranslation 声明 → 成员**不实现**——消费方
+      // （resolveEngineModelWithTranslation）以 `route.engine.translateModelRef !==
+      // undefined` 探测：缺席 = 翻译恒等透传 + 生效回执 warn（部署形态翻译面缺席
+      // 不再静默——2026-10-16 修复：staged 引擎经 cli descriptor 装载时，此前
+      // RemoteEngine 未实装本成员且无任何信号，偏好层死值直穿引擎侧炸
+      // model_not_available，修复语义在部署形态整体失效）。
+      (this as { translateModelRef?: unknown }).translateModelRef = undefined;
+    }
+  }
+
+  /**
+   * [engine-ref-translation D5] 翻译面（manifest 声明表查表改写，同步无协议）：
+   * ref 含 "/" 时按 provider 段查快照表命中改写、未命中原样透传（幂等——翻译产物
+   * 的 account:/个人 id 不在表内）；模型段原样保留（大小写归一由引擎侧再翻译承担
+   * ——引擎内 resolveZcodeModelRef 的同名翻译分支对翻译产物幂等，且持内建目录
+   * 可做清单校验/大小写归一，代理侧无目录不复制该职责）。
+   *
+   * 与 in-process 引擎类实装（如 zcode translatePiModelRefToZcode）的语义差：
+   * 代理侧纯查表不触目录（无 model_not_available 抛错面）——目录校验失败在引擎
+   * 侧 prepare 期显式报错承接（首败即停语义不变，仅失败时点后移到 record 创建后
+   * ——cli 形态的既有取舍）。声明表缺席时本成员已在构造器摘除（见构造器注释）。
+   */
+  translateModelRef(modelRef: string): string {
+    const table = this.opts.manifest.modelTranslation as Record<string, string>;
+    if (!modelRef.includes("/")) return modelRef;
+    const provider = modelRef.slice(0, modelRef.indexOf("/"));
+    const target = table[provider];
+    if (target === undefined) return modelRef;
+    return `${target}/${modelRef.slice(modelRef.indexOf("/") + 1)}`;
   }
 
   /** 直读 manifest 注册期快照（无缓存——每次调用同值，快照不可变）。 */

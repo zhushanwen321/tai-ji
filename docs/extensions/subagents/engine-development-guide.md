@@ -50,6 +50,7 @@
 | `capabilities` | 必需 | 段缺失 = 全保守值 + warn；缺键/坏值 = 该键保守值 + warn；未知键忽略 + warn（`engine-manifest.ts:84-139`；保守值表 `CONSERVATIVE_CAPABILITIES` :32-44） |
 | `envPrefixes` | 可选 | 非法条目（非 `^[A-Za-z0-9_]+$` / 含 `*` / 命中宿主保留前缀 `TAIJI_` 族）丢弃该前缀 + warn，包仍可用（:142-172；保留字 :23） |
 | `modelCatalog` | 可选 | 缺省（不写该字段）、`null`、对象三态在解析后必须保持可区分，解析器不得归并（:182-207）：缺省/`null` = 不注入（宿主侧表现为「无枚举面」——模型校验整体跳过，该形态必须保持可达）；对象 = `{dynamic(缺省 true), models[]}`，models 键缺失/非数组时归一为 `null` + warn；models 数组存在但条目全无效时保留 `{dynamic, models: []}`——`models: []` 是「有枚举面但为空」的作者显式声明，解析器不得代填 |
+| `modelTranslation` | 可选 | 静态跨引擎翻译表声明（`Record<piProviderId, 本引擎原生 providerId>`，ADR-0138）：声明后 RemoteEngine 构造器装配 `translateModelRef` 成员（纯查表改写 provider 段，同步无协议——大小写归一与目录校验由引擎侧幂等再翻译承担）；缺席 = 成员摘除（消费方 `typeof` 探测，缺席语义 = 恒等透传 + 生效回执 warn）。非法条目（键/值非非空字符串）逐条丢弃 + warn，包仍可用。声明表与 in-process 引擎类代码表（如 zcode preparer `PI_TO_ZCODE_PROVIDER_MAP`）由对账锁步单测绑定，改任一侧须同步另一侧 |
 | `processModel` | 可选 | 进程形态声明（`EngineProcessModel`，SDK `contract-types.ts`），值域 `per-window` / `shared-service`：缺省（未声明）= `per-window`；非法值 warn 回落 `per-window`，包仍可用（解析权威 = `engine-manifest.ts` `parseProcessModel`；解析产物同源挂三处：`DiscoveredEngine.processModel` + `descriptor.manifest.processModel`（宿主形态判定读位 = `engineProcessModelOfDescriptor`）+ RemoteEngine 注册期快照，三处一致由 `engine-discovery-scan.test.ts` 三态断言兜底）。字段语义见下方「进程形态声明」段 |
 | `displayName` / `description` | 可选 | 形态校验，坏值忽略 + warn（`engine-inspect-package.ts:146-161`） |
 
@@ -69,6 +70,7 @@
     "envPrefixes": ["ZCODE_"],
     "capabilities": { "schemaEnforcement": "emulated", "steer": "unsupported", "conversation": "cold", "personaInjection": "prompt", "eventGranularity": "stream", "sandbox": "emulated", "sessionRead": "full", "resume": "cold", "interrupt": "kill-only", "permissionMode": "native", "maxTurns": false, "setModel": "unsupported" },
     "modelCatalog": { "dynamic": true, "models": [] },
+    "modelTranslation": { "zai-coding-cn": "account:zai-individual-coding-plan" },
     "displayName": "zcode",
     "description": "ZCode app-server resident engine (...)"
   }

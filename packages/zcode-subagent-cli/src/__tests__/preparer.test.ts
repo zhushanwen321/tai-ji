@@ -668,18 +668,18 @@ describe("resolveZcodeModelRef account 家族直通", () => {
 
   it("翻译通道：zai-coding-cn/* 显式派发经翻译落 account 直通（pi 词汇不进个人表校验）", () => {
     const catalogPath = writeAccountCatalog("account-translate-catalog.json", [
-      { providerId: "account:bigmodel-individual-coding-plan", config: { builtinModelIds: ["GLM-5.3", "GLM-5.3-Flash"] } },
+      { providerId: "account:zai-individual-coding-plan", config: { builtinModelIds: ["GLM-5.3", "GLM-5.3-Flash"] } },
     ]);
     expect(resolveZcodeModelRef("zai-coding-cn/glm-5.3-flash", accountSources(catalogPath))).toBe(
-      "account:bigmodel-individual-coding-plan/GLM-5.3-Flash",
+      "account:zai-individual-coding-plan/GLM-5.3-Flash",
     );
   });
 });
 
-// ── 派发期模型 ref 翻译（engine-ref-translation D1，2026-10-14 用户裁决）：
-// zai-coding-cn ↔ account:bigmodel-individual-coding-plan 等价对，其余 1:1 原样。
+// ── 派发期模型 ref 翻译（engine-ref-translation D1，2026-10-14 用户裁决；2026-10-16
+// 修订映射目标）：zai-coding-cn ↔ account:zai-individual-coding-plan 等价对，其余 1:1 原样。
 describe("translatePiModelRefToZcode", () => {
-  const TARGET = "account:bigmodel-individual-coding-plan";
+  const TARGET = "account:zai-individual-coding-plan";
 
   function catalogWith(models: string[], providerId = TARGET): string {
     const p = path.join(tmpRoot, `translate-catalog-${providerId.replace(/[^a-z]/g, "")}-${models.length}.json`);
@@ -693,7 +693,7 @@ describe("translatePiModelRefToZcode", () => {
     return p;
   }
 
-  it("zai-coding-cn/* → account:bigmodel-individual-coding-plan/*（模型段大小写归一，返回目录原生拼写）", () => {
+  it("zai-coding-cn/* → account:zai-individual-coding-plan/*（模型段大小写归一，返回目录原生拼写）", () => {
     const catalog = catalogWith(["GLM-5.3", "GLM-5.3-Flash"]);
     expect(translatePiModelRefToZcode("zai-coding-cn/glm-5.3-flash", { builtinCatalogPath: catalog })).toBe(
       `${TARGET}/GLM-5.3-Flash`,
@@ -749,6 +749,29 @@ describe("translatePiModelRefToZcode", () => {
   it("目标清单为空数组 → 请求拼写直传（不设限，交注册表实况裁决）", () => {
     const catalog = catalogWith([]);
     expect(translatePiModelRefToZcode("zai-coding-cn/glm-5.3", { builtinCatalogPath: catalog })).toBe(`${TARGET}/glm-5.3`);
+  });
+
+  it("modelTranslation 对账锁步：manifest 声明表与翻译实现逐键语义一致（2026-10-16 部署形态修复守卫）", async () => {
+    // SSOT = package.json taiji.subagentEngine.modelTranslation（RemoteEngine 代理形态
+    // 的翻译面供数源）；本用例验证实现行为与声明逐键一致——声明漂移/实现漂移任一
+    // 方发生即红（2026-10-16 事故：声明缺失致部署形态翻译面整体静默失效）。
+    const { readFileSync } = await import("node:fs");
+    const { fileURLToPath } = await import("node:url");
+    const pkgPath = fileURLToPath(new URL("../../package.json", import.meta.url));
+    const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as {
+      taiji?: { subagentEngine?: { modelTranslation?: Record<string, string> } };
+    };
+    const declared = pkg.taiji?.subagentEngine?.modelTranslation;
+    expect(declared).toBeDefined();
+    const entries = Object.entries(declared ?? {});
+    expect(entries.length).toBeGreaterThan(0);
+    // 实现侧行为对账：声明表目录空清单形态下（不设限放行），翻译产物 = 声明目标/原模型段
+    const catalog = catalogWith([]);
+    for (const [piProvider, zcodeProvider] of entries) {
+      expect(
+        translatePiModelRefToZcode(`${piProvider}/some-model`, { builtinCatalogPath: catalog }),
+      ).toBe(`${zcodeProvider}/some-model`);
+    }
   });
 });
 

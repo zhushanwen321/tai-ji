@@ -224,6 +224,43 @@ export function parseModelCatalog(
   return { dynamic, models };
 }
 
+/**
+ * modelTranslation 字段级解析（[engine-ref-translation D5] 2026-10-16）：静态跨引擎
+ * 翻译表声明（pi 词汇 provider 段 → 本引擎原生 provider 段）。可选；缺省 = undefined
+ * （无翻译面——RemoteEngine 构造器据此摘除 translateModelRef 成员，消费方按缺席
+ * 语义降级 + 生效回执 warn）。声明形态：对象且键值均非空字符串；非法条目逐条丢弃
+ * + warn（包仍可用——与 envPrefixes 同款宽容度：翻译表缺声明只降级回透传，不致
+ * 引擎不可用）。
+ *
+ * 单源纪律：本表是引擎作者对自身翻译语义的唯一声明位（staged/远程形态的
+ * RemoteEngine 与 runtime 写校验面均消费声明值，不 import 引擎实装）；in-process
+ * 引擎类内的代码表（如 zcode preparer PI_TO_ZCODE_PROVIDER_MAP）是同一语义的执行
+ * 体，与声明表由对账锁步单测绑定（漂移即红）。
+ */
+export function parseModelTranslation(id: string, raw: unknown): Record<string, string> | undefined {
+  if (raw === undefined) return undefined;
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    logger.warn(`[engine-discovery] engine '${id}': modelTranslation must be an object — ignoring (no translation face)`);
+    return undefined;
+  }
+  const v = raw as Record<string, unknown>;
+  const out: Record<string, string> = {};
+  let dropped = 0;
+  for (const [k, val] of Object.entries(v)) {
+    if (k.trim() === "" || typeof val !== "string" || val.trim() === "") {
+      dropped += 1;
+      continue;
+    }
+    out[k] = val;
+  }
+  if (dropped > 0) {
+    logger.warn(
+      `[engine-discovery] engine '${id}': modelTranslation has ${dropped} malformed entr${dropped === 1 ? "y" : "ies"} (key/value must be non-empty strings) — dropping them`,
+    );
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
 /** modelCatalog.dynamic 解析：缺省 true；非 boolean warn 后仍取缺省。 */
 function parseCatalogDynamic(id: string, v: Record<string, unknown>): boolean {
   const rawDynamic = v["dynamic"];

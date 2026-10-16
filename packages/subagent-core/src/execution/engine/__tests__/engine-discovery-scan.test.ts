@@ -340,6 +340,28 @@ describe("manifest schema 字段级解析", () => {
     const result = scanEngines(scanOpts({ roots: [tmpRoot] }));
     expect("displayName" in result.discovered[0].descriptor.manifest!).toBe(false);
   });
+
+  it("modelTranslation：声明 → 注册期快照携带 + RemoteEngine 翻译面实装；非法条目丢弃 + warn", () => {
+    makeEnginePkg(tmpRoot, "mt-ok", {
+      capabilities: FULL_CAPABILITIES,
+      modelTranslation: { "zai-coding-cn": "account:zai-individual-coding-plan", "bad-key": 42 },
+    });
+    makeEnginePkg(tmpRoot, "mt-omitted", { capabilities: FULL_CAPABILITIES });
+    const result = scanEngines(scanOpts({ roots: [tmpRoot] }));
+    const portOf = (id: string) => result.discovered.find((d) => d.id === id)!.descriptor.portFactory();
+
+    // 声明在：快照携带（非法条目逐条丢弃）+ 成员实装且行为 = 查表改写
+    const port = portOf("mt-ok") as { translateModelRef?: (ref: string) => string };
+    expect(typeof port.translateModelRef).toBe("function");
+    expect(port.translateModelRef!("zai-coding-cn/glm-5.3-flash")).toBe(
+      "account:zai-individual-coding-plan/glm-5.3-flash",
+    );
+    expect(collectedLogs.some((l) => l.level === "warn" && l.message.includes("modelTranslation"))).toBe(true);
+
+    // 声明缺席：成员摘除（消费方 typeof 探测缺席语义）
+    const omitted = portOf("mt-omitted") as { translateModelRef?: unknown };
+    expect(typeof omitted.translateModelRef).toBe("undefined");
+  });
 });
 
 // ── 三级搜索路径 ─────────────────────────────────────────────────

@@ -735,3 +735,17 @@ WorkflowTab 步骤列表的数据源绑定从「workflow-record 全量快照（6
 **依据**：用户裁决原文「派发期翻译是对的。account:bigmodel-individual-coding-plan/* 这个等同于 pi 中 zai-coding-cn，其他的都是 1:1 完全原样映射」——pi 词汇 id（zai-coding-cn）与 zcode 词汇（account:/builtin: 家族）各归其位。ADR-0132 关联条目在 zcode 造 pi 词汇 id 且 name 借用用户 plan 名（身份与名字脱节）、key 来源修订使 zcode GLM 流量凭据随 taiji 改动联动，均与用户心智模型冲突（本机实证：engineDefaults 存 `zai-coding-plan/GLM-5.3-Flash` 压掉 zcode 自身 model.main）。
 
 **登记**：实装 = `packages/zcode-subagent-cli/src/preparer.ts`（`translatePiModelRefToZcode` 翻译单源 + `resolveZcodeModelRef` account 分支前置）+ `zcode-engine.ts`（Port 成员实装）/ `packages/subagent-core/src/execution/engine/model-ref-translation.ts`（派发层共享编排，chat/workflow 两解析点同语义）+ `port.ts`/`registry.ts`（EnginePort.translateModelRef 可选成员）/ `packages/runtime/src/services/zcode-provider-sync.ts`（翻译通道 skip + derive account 段）；ADR-0132 文本保留作历史记录，冲突处以本条为准。
+
+### ADR-0138 翻译目标通道修正 + 部署形态翻译面（manifest modelTranslation）+ 生效回执（2026-10-16 用户裁决，engine-ref-translation D5；修订 ADR-0137 的等价对映射目标）
+
+**决策**（三段，同一事故链的修复）：
+
+1. **映射目标修正**：`zai-coding-cn/*` 的 zcode 对应通道由 `account:bigmodel-individual-coding-plan`（ADR-0137 原值）修正为 **`account:zai-individual-coding-plan`**——bigmodel 与 zai 是 zcode 侧两个独立账号家族，pi 侧 `zai-coding-cn` 凭据语义对应 zai 家族；原映射把请求落在未登录/未 entitled 的通道上，本机实测表现为 app-server 侧 `model_request_failed`（`invalid_union headersApplied`）。ADR-0137 其余裁决（派发期翻译、两层失败语义、退役清单、清单面扩展）全部维持，仅等价对的目标端改写。
+2. **部署形态翻译面（RemoteEngine 补成员）**：ADR-0137 的翻译面只在 in-process 引擎类实装，staged 引擎 cli 形态（`TAIJI_AGENT_ENGINE_ROOTS` 发现 → RemoteEngine 代理）的 `translateModelRef` 缺席且无任何信号——2026-10-16 双会话实测：engineDefaults 偏好死值直穿引擎侧炸 `model_not_available`（16 个 subagent 批次全灭）、record 盖章未翻译 ref，修复语义在部署形态整体静默失效。修复 = 引擎 manifest 新增可选段 **`modelTranslation`**（静态翻译表声明，SSOT = `package.json taiji.subagentEngine.modelTranslation`），发现期快照携带（与 capabilities/modelCatalog 同模式：静态声明读快照不握手），RemoteEngine 构造器按声明装配/摘除 `translateModelRef` 成员（纯查表改写 provider 段、模型段原样保留；大小写归一与目录校验由引擎侧幂等再翻译承担——代理侧无内建目录，不复制该职责）。与 validateModel/setModel 同款形态映射：声明缺席 = 成员摘除，消费方 `typeof` 探测缺席语义。in-process 引擎类代码表与 manifest 声明表由对账锁步单测绑定（`preparer.test.ts` modelTranslation 锁步用例）。
+3. **生效回执**：派发层翻译编排（`resolveEngineModelWithTranslation`）发现 `translateModelRef` 缺席时按 engineId 进程级一次告警（`has no model translation face`）——缺席语义（恒等透传）不变，但必须可观测。
+
+**边界（显式不修）**：远程形态 `listModels()` 读 manifest 静态快照（zcode 声明 `dynamic:true, models:[]` → null = 无枚举面）——偏好层清单成员校验在远程形态仍为「放行」，偏好死值的拦截依赖「写入时校验（u7，翻译感知扩展后）+ 引擎侧首败显式报错 + 指引重选」，ADR-0137 偏好层降级语义仅在「有枚举面的引擎/形态」达成；engineDefaults 存量失效自动清理不做（D5 减法裁决维持），后续项登记 `docs/todo/engine-remote-membership-face.md`。
+
+**依据**：2026-10-16 用户裁决原文「全部修复。默认引擎应该用 zai-coding-cn/glm-5.3-flash（期望应该是自动翻译到 account:zai-individual-coding-plan/glm-5.3-flash）」；事故取证 = 双 pi 会话（01a14400 workflow 批次 16 失败 + 01a14414 派发测试 3/4 失败）+ 本机 bundle 指纹（运行版 v0.11.5 已含 ADR-0137 实装但 RemoteEngine 无 translateModelRef、staged manifest 无翻译声明）。
+
+**登记**：实装 = `packages/zcode-subagent-cli/src/preparer.ts`（映射目标）+ `package.json`（modelTranslation 声明）/ `packages/subagent-core/src/execution/engine/engine-manifest.ts`（parseModelTranslation）+ `engine-inspect-package.ts`（快照组装）+ `client/remote-engine.ts`（成员装配/摘除 + 查表实现）+ `model-ref-translation.ts`（生效回执）；engine-development-guide manifest 契约段同批补 modelTranslation 条目。
