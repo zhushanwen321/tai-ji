@@ -986,6 +986,9 @@ describe('run 类型分组: Block 组块', () => {
     expect(headerOf('explore')).toContain('panel.message.runGroupExplore')
     expect(headerOf('edit')).toContain('panel.message.runGroupEdit')
     expect(headerOf('exec')).toContain('panel.message.runGroupExec')
+    // 序号下线（21243ca3a）回归护栏：组名后不得再出现 demo .rg-seq 形态的「· N」序号段
+    // （实测组头文本 = runGroupExplore + runGroupSteps 1 · 4s，· 4s 为合法耗时分隔符，故锚定组名之后的 · N）
+    expect(headerOf('explore')).not.toMatch(/runGroupExplore\s*·\s*\d+/)
   })
 
   it('耗时不足 1s 不显示（统计段只剩步数）', () => {
