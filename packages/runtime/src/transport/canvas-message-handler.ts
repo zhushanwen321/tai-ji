@@ -287,6 +287,10 @@ export class CanvasMessageHandler {
    * 且缺省该参数直接 throw「Agent is already processing」（D3-A3 v6 实证：用户连续裁决
    * 的高频路径下回推静默丢失），followUp 让连续裁决逐条排队、agent 完成当前响应后依次
    * 消化——不打断进行中的 turn（steer 会中断，通知场景语义不符）。
+   * 本调用点是 C-data-25 投递所有权内核发送方封闭清单外的登记豁免：失效提示语义非交互投递
+   * （通知文本只是 agent 重新 canvas_read 的触发器，画布状态权威在 events.jsonl，回推丢失
+   * 不损状态），不经内核提交的理由与丢失恢复路径见约束 C-data-25 及
+   * docs/architecture/pi-boundary-reliability.md 附录 E「canvas 回推」豁免条目。
    */
   private pushToBoundSessions(canvasId: string, reply: Extract<CanvasMutateReply, { ok: true }>): void {
     const text = canvasNotifyText(reply.summary, canvasId)
