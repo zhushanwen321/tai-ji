@@ -286,8 +286,6 @@ export interface RunGroupBlock {
   kind: 'run-group'
   /** 组类型（判定源 RUN_GROUP_TOOLS）：渲染层据此取名与图标 */
   base: RunGroupBase
-  /** 同名组序号（渲染序列内按出现次序递增，1 起；>1 时显示「 · N」，对齐 demo 的 `.rg-seq`） */
-  seq: number
   /** 组成员（连续同类型的可见块，按 flatIndex 升序；组资格只看工具类型，running 也入组） */
   members: FlatBlock[]
   /** 组头聚合（三条计数口径）：值在纯函数侧一次算好，渲染层零解析 */
@@ -353,7 +351,6 @@ function runHeadIndex(
 /** 组块构建：三条计数口径 + hasRunning 一次算好 + 段首锚定 key + 里程碑徽标。 */
 function buildRunGroup(
   base: RunGroupBase,
-  seq: number,
   members: FlatBlock[],
   flatBlocks: FlatBlock[],
   positionByFlatIndex: Map<number, number>,
@@ -375,7 +372,6 @@ function buildRunGroup(
   return {
     kind: 'run-group',
     base,
-    seq,
     members,
     header: { count: members.length, durationMs, failedCount },
     hasRunning,
@@ -397,7 +393,7 @@ export function isRunGroupBlock(unit: TraceRenderUnit): unit is RunGroupBlock {
  *
  * 输入是可见派生序列（Turn.vue visibleBlocks 三分支汇合后的 FlatBlock[]）+ 同源同拍的 flatBlocks
  * （段首回查用）。规则：
- * - 逐块查表：命中类型表 → 与当前组同类型则并入、切型则收拢旧组开新组（同名组序号递增）；
+ * - 逐块查表：命中类型表 → 与当前组同类型则并入、切型则收拢旧组开新组；
  *   未命中（自定义工具 / 子智能体 / workflow）+ 非工具块（thinking / text）→ 先收拢当前组再
  *   原样成行，并打断分组。
  * - 组资格只看工具类型、不看状态：running 与已完成一视同仁（running 不入「独立行」，其进度由
@@ -418,15 +414,12 @@ export function groupToolRuns(visible: FlatBlock[], flatBlocks: FlatBlock[]): Tr
   // 首个改动锚点：全序列一次预计算（O(n)），组构建时 O(1) 判定。
   const firstEditIndex = firstEditFlatIndex(flatBlocks)
 
-  const seqOf = new Map<RunGroupBase, number>()
   let members: FlatBlock[] = []
   let base: RunGroupBase | null = null
 
   const flush = (): void => {
     if (base === null) return
-    const seq = (seqOf.get(base) ?? 0) + 1
-    seqOf.set(base, seq)
-    units.push(buildRunGroup(base, seq, members, flatBlocks, positionByFlatIndex, firstEditIndex))
+    units.push(buildRunGroup(base, members, flatBlocks, positionByFlatIndex, firstEditIndex))
     members = []
     base = null
   }

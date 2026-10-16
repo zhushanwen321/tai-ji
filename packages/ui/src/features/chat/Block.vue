@@ -7,7 +7,7 @@
     - tool：默认 1 行收起（streaming/running 也收起），点击展开详情。failed 终态默认展开（streaming 中失败不 remount，只图标染 danger）。
     - workflow：list-checks ICON + WORKFLOW. prefix + 状态动词 + workflow 名，详情区走 list-tree GUI / 文本。
     - subagent：渲染委托给 BlockSubagent（users ICON + SUBAGENT. prefix + 去卡片化）。
-    - run-group：run 类型分组组块——组头「类型名[ · 序号] + N 步 · 耗时 + 含 M 次失败」，
+    - run-group：run 类型分组组块——组头「类型名 + N 步 · 耗时 + 含 M 次失败」，
       展开后成员行（嵌套递归渲染普通 tool 收起态，SFC 文件名自引用）。
     - 展开块限高：thinking / bash 输出 / 非 bash 工具输出统一走 BlockScrollBox（240px 块内滚动 +
       渐隐提示 + 行区间信息条；bash 命令头保持在滚动区外 = 恒吸顶）；GUI 协议输出自管理高度不包。
@@ -183,9 +183,7 @@
         <RunningBlockIcon v-if="group.hasRunning" :kind="RUN_GROUP_RUNNING_ICON[group.base]" />
         <component :is="BLOCK_ICON_LUCIDE[RUN_GROUP_ICON[group.base]]" v-else :class="[BLOCK_ICON_CLASS, 'self-center']" />
         <span class="shrink-0 whitespace-nowrap text-left transition-opacity duration-[var(--duration-fast)] group-hover/bgroup:opacity-80">{{ t(RUN_GROUP_LABEL_KEY[group.base]) }}</span>
-        <!-- 同名组序号（demo `.rg-seq`）：第二个「探索」起显示「 · 2」，同类型的多段在回看时可区分 -->
-        <span v-if="group.seq > 1" class="shrink-0 whitespace-nowrap font-mono text-[length:var(--text-sm)] text-neutral-dim">· {{ group.seq }}</span>
-        <!-- 里程碑徽标（demo spec §3.6 `.rg-badge`，位于序号与统计段之间）：core 结构派生的信号
+        <!-- 里程碑徽标（demo spec §3.6 `.rg-badge`，位于组名与统计段之间）：core 结构派生的信号
              聚合上组头（当前 = 首个改动），无则不渲染。视觉 = accent 低饱和 pill（字 accent /
              边 accent-ring 30% / 底 accent-soft 10%，SessionItemDisplay agent badge 同族），
              pop 200ms 入场动效见 scoped `.trace-run-group .rg-badge`。 -->
@@ -469,12 +467,11 @@ const props = defineProps<{
   thinkingEnd?: number
   /** tool_call 数据（type==='tool' 时必填） */
   tool?: ToolCall
-  /** run 组块数据（type==='run-group' 时由 Turn.vue 透传；组块数据契约 base/seq/members/header/hasRunning/miles）。
-   *  base/seq 与 header 三条口径（count/durationMs/failedCount）由 core groupToolRuns 一次算好；
+  /** run 组块数据（type==='run-group' 时由 Turn.vue 透传；组块数据契约 base/members/header/hasRunning/miles）。
+   *  base 与 header 三条口径（count/durationMs/failedCount）由 core groupToolRuns 一次算好；
    *  miles = 里程碑徽标（§3.6，core 结构派生），空/缺省 = 无则不显示。 */
   group?: {
     base: RunGroupBase
-    seq: number
     members: FlatBlock[]
     header: { count: number; durationMs: number; failedCount: number }
     hasRunning: boolean

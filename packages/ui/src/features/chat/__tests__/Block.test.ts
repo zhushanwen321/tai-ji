@@ -914,19 +914,18 @@ describe('ui-optimize-unified 决策 10 修正: thinking 扫光生命周期（�
 
 // ═════════════════════════════════════════════════════════════════
 // run 类型分组：Block 组块渲染
-// 组头数据（base/seq + 三条计数口径）由 core groupToolRuns 算好，本文件断言渲染形态：
-// 组头 testid / 组名与序号 / 统计段 / 失败段、默认开合（进行中展开、已完成收起）、
+// 组头数据（base + 三条计数口径）由 core groupToolRuns 算好，本文件断言渲染形态：
+// 组头 testid / 组名 / 统计段 / 失败段、默认开合（进行中展开、已完成收起）、
 // 成员默认收起态、两步路径、failed 成员默认展开。
 // ═════════════════════════════════════════════════════════════════
 
-/** 组块 fixture：ToolCall[] → Turn.vue 组分支透传的 group prop 形态（base/seq/members/header/hasRunning/miles）。 */
+/** 组块 fixture：ToolCall[] → Turn.vue 组分支透传的 group prop 形态（base/members/header/hasRunning/miles）。 */
 function makeRunGroupProp(
   tools: ToolCall[],
-  opts: { base?: RunGroupBase; seq?: number; miles?: RunGroupMile[] } = {},
+  opts: { base?: RunGroupBase; miles?: RunGroupMile[] } = {},
 ) {
   return {
     base: opts.base ?? ('exec' as RunGroupBase),
-    seq: opts.seq ?? 1,
     members: tools.map((tc, i) => ({
       assistantId: 'a1',
       assistantStatus: 'complete' as const,
@@ -979,17 +978,14 @@ describe('run 类型分组: Block 组块', () => {
     expect(wrapper.find('[data-testid="run-group-failed"]').text()).toContain('1') // · 含 M 次失败
   })
 
-  it('组名按 base 走三档（探索 / 改动 / 执行命令），同名组序号 >1 时显示「· N」', () => {
-    const headerOf = (base: RunGroupBase, seq: number) =>
-      mountRunGroup(makeRunGroupProp([makeToolCall({ id: 'r0', toolName: 'read', input: { path: '/x' } })], { base, seq }))
+  it('组名按 base 走三档（探索 / 改动 / 执行命令）', () => {
+    const headerOf = (base: RunGroupBase) =>
+      mountRunGroup(makeRunGroupProp([makeToolCall({ id: 'r0', toolName: 'read', input: { path: '/x' } })], { base }))
         .find('[data-testid="run-group-header"]')
         .text()
-    expect(headerOf('explore', 1)).toContain('panel.message.runGroupExplore')
-    expect(headerOf('edit', 1)).toContain('panel.message.runGroupEdit')
-    expect(headerOf('exec', 1)).toContain('panel.message.runGroupExec')
-    // 首个同名组不带序号（不显示「· 1」），第二个起带「· 2」
-    expect(headerOf('explore', 1)).not.toContain('· 1')
-    expect(headerOf('explore', 2)).toContain('· 2')
+    expect(headerOf('explore')).toContain('panel.message.runGroupExplore')
+    expect(headerOf('edit')).toContain('panel.message.runGroupEdit')
+    expect(headerOf('exec')).toContain('panel.message.runGroupExec')
   })
 
   it('耗时不足 1s 不显示（统计段只剩步数）', () => {
@@ -1025,20 +1021,15 @@ describe('run 类型分组: Block 组块', () => {
     expect(mountRunGroup(makeRunGroupProp([makeToolCall({ id: 'b0', toolName: 'bash', input: { command: 'a' } })], { miles: [] })).find('[data-testid="run-group-mile"]').exists()).toBe(false)
   })
 
-  it('里程碑徽标位置：位于序号之后、统计段之前（demo .rg-head 元素序：dot/图标 → 名 → 序号 → badge* → stat）', () => {
+  it('里程碑徽标位置：位于组名之后、统计段之前（demo .rg-head 元素序：dot/图标 → 名 → badge* → stat）', () => {
     const wrapper = mountRunGroup(
       makeRunGroupProp([makeToolCall({ id: 'e0', toolName: 'edit', input: { path: '/x' } })], {
         base: 'edit',
-        seq: 2,
         miles: ['firstEdit'],
       }),
     )
     const header = wrapper.find('[data-testid="run-group-header"]').element
     const badge = wrapper.find('[data-testid="run-group-mile"]').element
-    // 序号「· 2」在徽标之前（同组多段时序号仍紧邻组名）
-    const seqEl = [...header.children].find((el) => el.textContent?.includes('· 2'))
-    expect(seqEl).toBeTruthy()
-    expect(seqEl!.compareDocumentPosition(badge) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     // 统计段（mono 的「N 步」span）在徽标之后
     const statEl = [...header.children].find((el) => el.textContent?.includes('panel.message.runGroupSteps'))
     expect(statEl).toBeTruthy()

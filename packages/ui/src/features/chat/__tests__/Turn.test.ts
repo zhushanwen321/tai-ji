@@ -839,7 +839,7 @@ describe('run 类型分组: Turn 组块接线（三路径 + PR-6）', () => {
     expect(wrapper.find('[data-testid="trace-compactor"]').exists()).toBe(true) // b0 并入计数
   })
 
-  it('路径 C（历史回合手动展开）：全量序列上混合类型各成一相（探索 / 执行命令 / 改动 / 探索 · 2）', () => {
+  it('路径 C（历史回合手动展开）：全量序列上混合类型各成一相（探索 / 执行命令 / 改动 / 探索 裂为两组）', () => {
     const wrapper = mountTurn({
       turn: makeToolSeqTurn(
         [{ name: 'read' }, { name: 'bash' }, { name: 'edit' }, { name: 'read' }],
