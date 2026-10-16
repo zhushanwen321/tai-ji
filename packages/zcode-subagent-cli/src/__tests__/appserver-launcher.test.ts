@@ -23,6 +23,23 @@ import { mergePersonalProviderConfig } from "../preparer.ts";
 // 探针 fake CLI：以 wrapper 注入后的 fs 形态读取 CONFIG_PATH / 真实
 // provider_config.json（D3 换轨拦截路径）的各种调用形态并落盘 state（wrapper 对它
 // import() 启动——与真实 zcode.cjs 同入口形态）
+
+/** CLI bundle 源码补丁探针（2026-10-16）：把补丁锚点以注释形态内置（锚点判定是纯
+ * 文本匹配），自读 __filename 经 wrapper 拦截 → 记录补丁产物，供两处新改写断言
+ * （standalone 注入 / 认证头端口注入）。 */
+const CLI_PATCH_PROBE_SOURCE = `'use strict';
+const fs = require('node:fs');
+const STATE = process.env.ZCODE_PROBE_STATE;
+// 补丁锚点 fixture（文本匹配用，非执行路径）：
+// startProcessProviderRegistryRuntime:()=>xCt
+// create:r(()=>xCt(z),"create")
+// createZCodeApp:r((
+// Fe.runtime.registryService
+// }),"createZCodeApp")
+const self = fs.readFileSync(process.env.ZCODE_ENG_CLI_PATH, 'utf8');
+fs.writeFileSync(STATE, JSON.stringify({ self }));
+`;
+
 const PROBE_SOURCE = `'use strict';
 const fs = require('node:fs');
 const path = require('node:path');
@@ -224,6 +241,36 @@ afterEach(() => {
 });
 
 describe("wrapper 合并语义（v2 注入优先）", () => {
+  it("CLI 源码补丁：standalone 选项注入 + 认证头端口注入（2026-10-16 真机修复的回归守卫）", () => {
+    const home = fs.mkdtempSync(path.join(tmpRoot, "home-patch-"));
+    const engineDataDir = fs.mkdtempSync(path.join(tmpRoot, "eng-patch-"));
+    fs.mkdirSync(path.join(home, ".zcode", "cli"), { recursive: true });
+    fs.mkdirSync(path.join(home, ".zcode", "v2"), { recursive: true });
+    const cliPath = path.join(tmpRoot, "patchable-cli.cjs");
+    fs.writeFileSync(cliPath, CLI_PATCH_PROBE_SOURCE);
+    const launcher = ensureAppServerLauncher(engineDataDir);
+    const statePath = path.join(tmpRoot, "state-patch.json");
+    const res = childProcess.spawnSync(process.execPath, [launcher], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        ZCODE_ENG_CLI_PATH: cliPath,
+        ZCODE_PROBE_STATE: statePath,
+        HOME: home,
+        TAIJI_AGENT_DATA_DIR: engineDataDir,
+      },
+    });
+    expect(res.status).toBe(0);
+    const recorded = JSON.parse(fs.readFileSync(statePath, "utf8")) as { self: string };
+    // ② standalone 注入：`create:r(()=><fn>(` 调用点尾插 {standalone:{}}
+    expect(recorded.self).toContain(',{standalone:{}}');
+    // ③ 认证头端口注入：app 创建选项对象尾插 registry runtime 的本地端口
+    expect(recorded.self).toContain(',providerRuntimeHeadersPort:Fe.providerRuntimeHeadersPort');
+    // 安装门出声（补丁可观测）
+    expect(res.stderr).toContain("standalone-account=armed");
+    expect(res.stderr).toContain("header-port=armed");
+  });
+
   it("同 id 时 v2 条目整条优先于真实文件（等价复刻 GUI 直传：v2 权威），real 独有条目保留", () => {
     const h = setupHome({
       v2: { provider: { shared: providerEntry("v2-new-key") } },

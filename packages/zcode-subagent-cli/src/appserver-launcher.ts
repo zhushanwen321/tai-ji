@@ -349,6 +349,31 @@ function patchedCliSource(path) {
     if (!standaloneApplied) {
       process.stderr.write('[zcode-launcher] standalone account: CLI bundle anchor not found (zcode upstream shape drifted?) - account family stays host-dependent\\n');
     }
+    // ③ [2026-10-16 standalone account·端口注入] 协议路径的 app 创建（
+    // createZCodeApp:r((ut={})=>INn({...q0c(...)}) 唯一命中）未传
+    // providerRuntimeHeadersPort——app 因此回落 host 请求端口（mai），而 taiji 链上无
+    // 宿主任应答 → zod invalid_union(headersApplied)（②只修了 registry 侧：provider
+    // 已能进注册表，但认证头仍走 host 请求）。本步把 registry runtime 对象上的
+    // providerRuntimeHeadersPort（standalone 模式 = 本地端口）注入该 app 创建选项：
+    // 账号族认证头由本进程本地解析（凭据 = credentials.json 中 ZCode 自有项）。
+    const appAnchor = 'createZCodeApp:r(';
+    let portInjected = false;
+    const appIdx = src.indexOf(appAnchor);
+    if (appIdx >= 0) {
+      const closeAnchor = '}),"createZCodeApp")';
+      const closeIdx = src.indexOf(closeAnchor, appIdx);
+      const regMatch = /([A-Za-z_$][A-Za-z0-9_$]*)\.runtime\.registryService/.exec(src.slice(appIdx, appIdx + 1600));
+      if (closeIdx > appIdx && regMatch) {
+        src = src.slice(0, closeIdx)
+          + ',providerRuntimeHeadersPort:' + regMatch[1] + '.providerRuntimeHeadersPort'
+          + src.slice(closeIdx);
+        portInjected = true;
+      }
+    }
+    if (!portInjected) {
+      process.stderr.write('[zcode-launcher] standalone account: header-port injection anchor not found (zcode upstream shape drifted?) - account auth stays host-dependent\\n');
+    }
+    result = (entitledApplied || standaloneApplied) ? src : null;
     result = (entitledApplied || standaloneApplied) ? src : null;
   } catch { result = null; }
   __cliPatchCache.set(path, result);
@@ -439,7 +464,8 @@ if (text !== null || catalogPatch !== null || cliPatchProbe !== null) {
     + ', catalog-entitled=' + (catalogPatch !== null ? 'on' : 'off')
     + ', provider-merge=' + (PI_SYNCED_PATH ? 'armed' : 'off')
     + ', cli-source-bypass=' + (cliPatchProbe !== null ? 'armed' : 'off')
-    + ', standalone-account=' + (cliPatchStandalone ? 'armed' : 'off') + '\\n');
+    + ', standalone-account=' + (cliPatchStandalone ? 'armed' : 'off')
+    + ', header-port=' + (cliPatchProbe !== null && cliPatchProbe.indexOf('providerRuntimeHeadersPort:') >= 0 ? 'armed' : 'off') + '\\n');
   // encoding 归一（Node 别名面）：'utf8'/'utf-8'/大小写变体统一按 string 返回——
   // 真实 bundle 的 config 读取恰用 'utf-8' 形态，仅匹配 'utf8' 会错回 Buffer
   // （当下游不只 JSON.parse 而做字符串运算时即 TypeError）
