@@ -334,14 +334,35 @@ function patchedCliSource(path) {
       const nameMatch = /^([A-Za-z_$][A-Za-z0-9_$]{0,10})/.exec(src.slice(exportIdx + exportAnchor.length));
       const fnName = nameMatch ? nameMatch[1] : null;
       if (fnName) {
-        const callAnchor = 'create:r(()=>' + fnName + '(';
-        const callIdx = src.indexOf(callAnchor);
-        if (callIdx >= 0) {
-          const argStart = callIdx + callAnchor.length;
-          const closeIdx = src.indexOf(')', argStart);
-          if (closeIdx > argStart) {
-            src = src.slice(0, closeIdx) + ',{standalone:{}}' + src.slice(closeIdx);
-            standaloneApplied = true;
+        // 锚点 A（首选，抗漂移最强）：函数定义默认参数法——
+        // 'function <fnName>(e,t={}){' → 'function <fnName>(e,t={standalone:{}}){'。
+        // 语义：调用方省略第二参（协议路径 xCt(z)）→ t = {standalone:{}}；显式传
+        // {}（skipUserConfig 路径）或 {standalone:{...}}（TUI 路径）不受影响。
+        const defAnchor = 'function ' + fnName + '(';
+        const defIdx = src.indexOf(defAnchor);
+        if (defIdx >= 0) {
+          const paramsEnd = src.indexOf(')', defIdx + defAnchor.length);
+          if (paramsEnd > defIdx) {
+            const params = src.slice(defIdx + defAnchor.length, paramsEnd);
+            if (params.indexOf('={}') >= 0) {
+              src = src.slice(0, defIdx + defAnchor.length)
+                + params.split('={}').join('={standalone:{}}')
+                + src.slice(paramsEnd);
+              standaloneApplied = true;
+            }
+          }
+        }
+        // 锚点 B（回退）：调用点注入 create:r(()=><fn>( → (<arg>,{standalone:{}})
+        if (!standaloneApplied) {
+          const callAnchor = 'create:r(()=>' + fnName + '(';
+          const callIdx = src.indexOf(callAnchor);
+          if (callIdx >= 0) {
+            const argStart = callIdx + callAnchor.length;
+            const closeIdx = src.indexOf(')', argStart);
+            if (closeIdx > argStart) {
+              src = src.slice(0, closeIdx) + ',{standalone:{}}' + src.slice(closeIdx);
+              standaloneApplied = true;
+            }
           }
         }
       }
@@ -495,13 +516,21 @@ function ensureAccountMetadata() {
         }
       }
       if (!identity) continue;
-      let family = '';
-      if (pid.indexOf('account:zai') === 0) family = 'zai';
-      else if (pid.indexOf('account:bigmodel') === 0) family = 'bigmodel';
+      // auth-source：全部从凭据库数据推导（零家族名写死）——扫 oauth:<family>:access_token
+      // 键，若 provider id 以 account:<family> 开头即绑定该家族的 oauth 凭据；否则回落
+      // manual（该身份名下的 plan api-key 存在时）。
       let authSource = '';
-      const oauthKey = family ? ('oauth:' + family + ':access_token') : '';
-      if (oauthKey && typeof creds[oauthKey] === 'string' && creds[oauthKey] !== '') authSource = 'oauth';
-      else if (creds['account-provider:coding-plan:' + pid + ':account:' + encodeURIComponent(identity) + ':api-key']) authSource = 'manual';
+      const oauthPrefix = 'oauth:';
+      const oauthSuffix = ':access_token';
+      for (const k of Object.keys(creds)) {
+        if (k.indexOf(oauthPrefix) !== 0 || k.slice(-oauthSuffix.length) !== oauthSuffix) continue;
+        const fam = k.slice(oauthPrefix.length, k.length - oauthSuffix.length);
+        if (!fam) continue;
+        const token = creds[k];
+        if (typeof token !== 'string' || token === '') continue;
+        if (pid.indexOf('account:' + fam) === 0) { authSource = 'oauth'; break; }
+      }
+      if (!authSource && creds['account-provider:coding-plan:' + pid + ':account:' + encodeURIComponent(identity) + ':api-key']) authSource = 'manual';
       if (!authSource) continue;
       if (creds[idKey] !== identity) { creds[idKey] = identity; added.push(idKey); }
       if (creds[srcKey] !== authSource) { creds[srcKey] = authSource; added.push(srcKey); }
@@ -523,7 +552,7 @@ ensureAccountMetadata();
 const text = injectedConfigText();
 const catalogPatch = CATALOG_PATH !== null ? catalogPatchText(CATALOG_PATH) : null;
 const cliPatchProbe = CLI_PATH ? patchedCliSource(CLI_PATH) : null;
-const cliPatchStandalone = cliPatchProbe !== null && cliPatchProbe.indexOf(',{standalone:{}}') >= 0;
+const cliPatchStandalone = cliPatchProbe !== null && (cliPatchProbe.indexOf('={standalone:{}}') >= 0 || cliPatchProbe.indexOf(',{standalone:{}}') >= 0);
 if (text !== null || catalogPatch !== null || cliPatchProbe !== null) {
   process.stderr.write('[zcode-launcher] 补丁层已安装: cli-config-inject=' + (text !== null ? 'on' : 'off')
     + ', catalog-entitled=' + (catalogPatch !== null ? 'on' : 'off')

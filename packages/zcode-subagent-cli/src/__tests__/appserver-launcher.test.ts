@@ -27,6 +27,20 @@ import { mergePersonalProviderConfig } from "../preparer.ts";
 /** CLI bundle 源码补丁探针（2026-10-16）：把补丁锚点以注释形态内置（锚点判定是纯
  * 文本匹配），自读 __filename 经 wrapper 拦截 → 记录补丁产物，供两处新改写断言
  * （standalone 注入 / 认证头端口注入）。 */
+
+/** 变体形态 CLI 源码（模拟 ZCode 其它版本：minified 名不同、无 create 调用点、变量名不同）
+ * ——验证锚点的版本鲁棒性（① 导出名 + 函数定义默认参数法 ② registry 变量动态提取）。 */
+const CLI_VARIANT_PROBE_SOURCE = `'use strict';
+const fs = require('node:fs');
+const STATE = process.env.ZCODE_PROBE_STATE;
+// startProcessProviderRegistryRuntime:()=>aBc
+// function aBc(e,t={}){return {runtime:{registryService:null}}}
+// zcodeBuiltinProviders.entries()  ...zhipu-account... new Uk({access:new I3({entitled:!1})})
+// createZCodeApp:r(function(ut){return {args:[Rt.runtime.registryService],extra:1}}),"createZCodeApp"),cwd
+const self = fs.readFileSync(process.env.ZCODE_ENG_CLI_PATH, 'utf8');
+fs.writeFileSync(STATE, JSON.stringify({ self }));
+`;
+
 const CLI_PATCH_PROBE_SOURCE = `'use strict';
 const fs = require('node:fs');
 const STATE = process.env.ZCODE_PROBE_STATE;
@@ -241,6 +255,28 @@ afterEach(() => {
 });
 
 describe("wrapper 合并语义（v2 注入优先）", () => {
+  it("补丁锚点版本鲁棒性：minified 名变化 + 无 create 调用点 → 定义默认参数法独立生效；registry 变量动态提取", () => {
+    const home = fs.mkdtempSync(path.join(tmpRoot, "home-var-"));
+    const engineDataDir = fs.mkdtempSync(path.join(tmpRoot, "eng-var-"));
+    fs.mkdirSync(path.join(home, ".zcode", "v2"), { recursive: true });
+    const cliPath = path.join(tmpRoot, "variant-cli.cjs");
+    fs.writeFileSync(cliPath, CLI_VARIANT_PROBE_SOURCE);
+    const launcher = ensureAppServerLauncher(engineDataDir);
+    const statePath = path.join(tmpRoot, "state-var.json");
+    const res = childProcess.spawnSync(process.execPath, [launcher], {
+      encoding: "utf8",
+      env: { ...process.env, ZCODE_ENG_CLI_PATH: cliPath, ZCODE_PROBE_STATE: statePath, HOME: home, TAIJI_AGENT_DATA_DIR: engineDataDir },
+    });
+    expect(res.status).toBe(0);
+    const recorded = JSON.parse(fs.readFileSync(statePath, "utf8")) as { self: string };
+    // 定义默认参数法（锚点 A）：t={} → t={standalone:{}}
+    expect(recorded.self).toContain("function aBc(e,t={standalone:{}}){");
+    // registry 变量动态提取（Rt 而非 Fe）
+    expect(recorded.self).toContain(",providerRuntimeHeadersPort:Rt.providerRuntimeHeadersPort");
+    expect(res.stderr).toContain("standalone-account=armed");
+    expect(res.stderr).toContain("header-port=armed");
+  });
+
   it("standalone 账号元数据键幂等供给：缺键时从 host 态 key 名派生 identity + oauth 认证来源；二次运行不动文件（2026-10-16 真机修复回归）", () => {
     const home = fs.mkdtempSync(path.join(tmpRoot, "home-meta-"));
     const engineDataDir = fs.mkdtempSync(path.join(tmpRoot, "eng-meta-"));
@@ -250,7 +286,7 @@ describe("wrapper 合并语义（v2 注入优先）", () => {
     const PID = "account:bigmodel-individual-coding-plan";
     fs.writeFileSync(credPath, JSON.stringify({
       "oauth:bigmodel:access_token": "enc:v1:fake-oauth-token",
-      [`account-provider:coding-plan:${PID}:account:77301767000095243:api-key`]: "enc:v1:fake-plan-key",
+      [`account-provider:coding-plan:${PID}:account:test-identity-0001:api-key`]: "enc:v1:fake-plan-key",
     }, null, 2));
     // 内建目录 fixture（zhipu-account 规则 → plan provider 清单来源）
     const catalogDir = path.join(tmpRoot, "catalog-meta");
@@ -275,7 +311,7 @@ describe("wrapper 合并语义（v2 注入优先）", () => {
     expect(first.status).toBe(0);
     expect(first.stderr).toContain("account metadata provisioned");
     const after = JSON.parse(fs.readFileSync(credPath, "utf8")) as Record<string, string>;
-    expect(after[`account-provider:${PID}:identity`]).toBe("77301767000095243");
+    expect(after[`account-provider:${PID}:identity`]).toBe("test-identity-0001");
     expect(after[`account-provider:${PID}:auth-source`]).toBe("oauth");
     // 既有键未被动
     expect(after["oauth:bigmodel:access_token"]).toBe("enc:v1:fake-oauth-token");
