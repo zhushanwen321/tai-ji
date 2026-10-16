@@ -5,7 +5,7 @@
 //
 // 本文件属壳侧（shell），不进 core 切面——对 pi SDK 与 pi 宿主协作件
 // （@earendil-works/pi-coding-agent / @zhushanwen/pi-extension-logger /
-// @zhushanwen/pi-pending-notifications / @zhushanwen/session-delivery）的运行时
+// @zhushanwen/pi-pending-notifications / @zhushanwen/pi-delivery-port）的运行时
 // import 收敛在此层，core 闭包（D9 守卫对象）不得出现这些包。
 //
 // 端口语义：

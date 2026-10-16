@@ -48,7 +48,7 @@
         {
           "package": "@zhushanwen/pi-delivery-port",
           "type": "package",
-          "reason": "代码层静态 import getDeliveryPort（src/workflow-notify.ts notifyDone 投递主投；unified-delivery 波 2 切换——C-ext-19 语义由 port 投递日志+notifyId 幂等+差集重放内包），缺失时模块加载即抛 Cannot find module，是强依赖"
+          "reason": "代码层静态 import getDeliveryPort（src/workflow-notify.ts notifyDone 投递主投；src/host/pi-host.ts 访问器本体直传 subagent-core 宿主壳——notify-ports 端口注入通道；unified-delivery 波 2 切换——C-ext-19 语义由 port 投递日志+notifyId 幂等+差集重放内包），缺失时模块加载即抛 Cannot find module，是强依赖"
         }
       ]
     },
@@ -445,7 +445,7 @@
         {
           "package": "@zhushanwen/pi-delivery-port",
           "type": "package",
-          "reason": "代码层静态 import bindDeliveryPort/createPiDeliveryPortHost（src/index.ts session_start 装配点——统一投递端口装配，unified-delivery 设计 §3.7 P6 infrastructure 档必载），缺失时模块加载即抛 Cannot find module，是强依赖"
+          "reason": "代码层静态 import bindDeliveryPort/createPiDeliveryPortHost（src/index.ts session_start 装配点——统一投递端口装配，unified-delivery 设计 §3.7 P6 infrastructure 档必载）+ getDeliveryPort（src/background/notify.ts 完成通知投递、src/background/pending-reconcile.ts 收殓终态补投——共 3 文件 top-level import），缺失时模块加载即抛 Cannot find module，是强依赖"
         }
       ]
     },

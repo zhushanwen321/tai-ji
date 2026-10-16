@@ -5,7 +5,10 @@
 //
 // 装配形态（§3.7）：共享库（非 pi extension）+ 装配点 = @zhushanwen/pi-base-tool-
 // enhance 的 session_start（infrastructure 档必载）。消费方（notifier / session-
-// manager / bash）经 getDeliveryPort() 进程级槽获取（C-ext-06 惯例），无包依赖。
+// manager / bash）经 getDeliveryPort() 进程级槽获取实例（C-ext-06 惯例）。包依赖
+// 分层：extensions 层消费方与本包同层直依（package.json dependencies 声明 +
+// extension-dependencies.json 登记）；packages 层 subagent-core 受 D9 闭包红线
+// 禁 import，经宿主壳注入槽访问器（notify-ports 转写类型）。
 
 export {
   ACK_CUSTOM_TYPE,

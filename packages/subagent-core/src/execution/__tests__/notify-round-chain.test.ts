@@ -20,9 +20,10 @@
 // registerFakePiEngine 协议替身驱动同一链路，断言「通知正文含本轮真实回复（非
 // (empty)）」的行为语义。禁止手工预置 record.result——正文必须从应答 settle 真实流入。
 //
-// 通知域注入内核等价桩（对齐 notify-ledger.test.ts 先例，core 依赖闭包不含
-// session-delivery）：[M3]/[N1] 的「同 id:round dedup 吞第二次」与投递时机治理依赖
-// 内核 dedupe / 合批窗口语义（降级直发无 dedupe 会让 sendMessage 计数翻倍）。
+// 通知域 fake 投递端口（DeliveryPortHandle 替身，core 依赖闭包不含 pi-delivery-
+// port——消费 notify-ports 转写类型）：[M3]/[N1] 的「同 id:round 幂等吞第二次」与
+// merge 判定分流依赖 port.deliver 消费语义（降级直发无 dedupe 会让 sendMessage
+// 计数翻倍）；替身形态（幂等吞 / merge 透传 / 非 merge 受理即注入）见 makeFakePort。
 
 import * as fs from "node:fs";
 import * as os from "node:os";

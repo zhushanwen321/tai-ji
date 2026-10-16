@@ -123,7 +123,8 @@ export function createDiskDeliveryStore(deps: DiskDeliveryStoreDeps): DiskDelive
     try {
       raw = fs.readFileSync(file, 'utf8')
     } catch (err) {
-      // 读取失败按空文件处理（保守方向 = 全部当未投递重放，必达优先于去重）
+      // 读取失败按空文件处理：判重失效（terminalIds 空 → 宁可多投）+ 本轮重放源
+      // 不可用（内存投影全空，loadUndelivered 返回空不重放）；warn 留痕，重启重读自愈。
       log(`[disk-delivery-store] read failed (treated as empty), file=${file}`, err)
       return
     }

@@ -11,20 +11,20 @@
 ### 现状机制
 
 - 到期投递：tick（30s）扫描到期任务 → `backend.sendMessage({ content: task.prompt, customType: '<前缀>dispatched', display: true }, { deliverAs: 'steer', triggerTurn: true })`（`extensions/universal/scheduler/src/runtime.ts:470-473`）——agent 忙时插入当前 run、空闲时开新 turn。
-- 受理即记账：await 返回即推进（recurring 写 advance entry / once 写 delete entry，`runtime.ts:388-390`）；sendMessage 同步抛错 → failed 记账 + pending 保留 → 下个 tick 重试（`runtime.ts:374-376`）。
+- 受理即记账：await 返回即推进（recurring 写 advance entry / once 写 delete entry，`runtime.ts` `onDispatchSuccess` :503-533）；sendMessage 同步抛错 → failed 记账 + pending 保留 → 下个 tick 重试（`runtime.ts` `dispatchTaskInner` catch 段 :474-495）。
 - 该形态是 2026-09-14 用户裁决（`docs/architecture/scheduler-steer-direct-dispatch.md`）：提醒类注入应立即 steer 打断、不需要「必达 + 合批 + 不打断」，据此整体删除投递中间层（防重标记 / TTL / settled 回调 / 内核队列，净删约 -150 行）。
 - 调度记账（runCount / nextRunAt）走 scheduler 自有 append-only 存储，与投递通道解耦。
 
 ### port 后形态
 
-dispatch 改为 `port.deliver({ payload: custom, timing: 'steer', id })`：受理前 appendEntry 写投递日志 → 内核受理 → `pi.sendMessage({ deliverAs: 'steer', triggerTurn: true })`（`extensions/shared/delivery-port/src/delivery-port.ts:220-229`）——注入参数与现状逐字一致；新增投递日志与 ack 两类 plain entry（不进 LLM 上下文）、送达回执（message_end + details.deliveryId 命中）、pi 崩溃重启后 session_start 差集重放、提交侧 compaction 等待。
+dispatch 改为 `port.deliver({ payload: custom, timing: 'steer', id })`：受理前 appendEntry 写投递日志 → 内核受理 → `pi.sendMessage({ deliverAs: 'steer', triggerTurn: true })`（`extensions/shared/delivery-port/src/delivery-port.ts:240-248`）——注入参数与现状逐字一致；新增投递日志与 ack 两类 plain entry（不进 LLM 上下文）、送达回执（message_end + details.deliveryId 命中）、pi 崩溃重启后 session_start 差集重放、提交侧 compaction 等待。
 
 ### 行为变化
 
 1. 注入形态零变化（同参数直达同一 pi API）；scheduler 的 customType 不在 port 默认合批组（subagent-bg-notify），按批组隔离规则恒逐条（`delivery-port.ts:24-25`）——与现状「无合批」一致。
 2. 失败语义出现分叉需裁决：port 缺省 retain（留账重投）与 scheduler 既有「failed 记账 + 下个 tick 重试」构成双通道重试——选 forget 则耐久收益打折；选 retain 则「受理即记账」时点须从「sendMessage 返回」改为「deliver 返回 accepted」，并接受 port 层重投（scheduler 无感知，表现为提醒延迟送达而非丢失）。
 3. 幂等键陷阱（迁移必须处理）：port 的 id 参与判重且已完结 id 恒吞（`extensions/shared/delivery-port/src/types.ts:40`）——taskId 每轮 dispatch 恒定，直接作 id 会从第二轮起被判重吞掉、该任务此后永不再提醒；须改为每轮唯一（taskId + runCount 之类）。
-4. compaction 窗口行为变化：现状手动 compaction 窗口内到期的 dispatch 走 pi `sendCustomMessage` 的 triggerTurn 分支，该分支无 isCompacting 检查、直接 `_runAgentPrompt` 与进行中的 compaction 并发（pi 实装核实；unified-delivery 设计 §3.8 登记的危险形态）——port 提交侧 isIdle 等待可消除该窗口。
+4. compaction 窗口行为变化：现状手动 compaction 窗口内到期的 dispatch 走 pi `sendCustomMessage` 的 triggerTurn 分支，该分支无 isCompacting 检查、直接 `_runAgentPrompt` 与进行中的 compaction 并发（pi 实装核实；unified-delivery 设计 §3.8 登记的危险形态）——port 提交侧 compaction 等待可消除该窗口（compaction 事件标记挂起）。
 
 ### 收益
 
@@ -55,7 +55,7 @@ dispatch 改为 `port.deliver({ payload: custom, timing: 'steer', id })`：受�
 
 ### port 后形态（假设迁移）
 
-port 通道模型只有两档：`DeliveryTiming = 'steer' | 'followUp'`（`extensions/shared/delivery-port/src/types.ts:26`），且 `triggerTurn` 恒 true（`types.ts:117`、`pi-host.ts:44`）——nextTurn 不在枚举内。迁移只能走 steer 档：agent 忙时在下一轮边界注入（早于「下一次用户 prompt」）；agent 空闲时 triggerTurn:true 自起新 run。
+port 通道模型只有两档：`DeliveryTiming = 'steer' | 'followUp'`（`extensions/shared/delivery-port/src/types.ts:26`），且 `triggerTurn` 恒 true（`types.ts:125`、`delivery-port/src/pi-host.ts:44`）——nextTurn 不在枚举内。迁移只能走 steer 档：agent 忙时在下一轮边界注入（早于「下一次用户 prompt」）；agent 空闲时 triggerTurn:true 自起新 run。
 
 ### 行为变化
 
@@ -63,7 +63,7 @@ port 通道模型只有两档：`DeliveryTiming = 'steer' | 'followUp'`（`exten
 
 1. 空闲期通知自起新 run——直接回归 D4① 修复的故事 C（通知 run 与用户消息竞争 prompt 提交，后到者被 pi 拒绝）。
 2. 忙期注入时点从「下一次用户 prompt」提前到「下一轮工具边界」——通知出现在 run 中间，与「随下一次 prompt 注入、作为上下文被消费」的语义不同。
-3. 任务书核查项「nextTurn 语义能否由 timing=steer + 合批窗口等价承载」——**不能**：①合批窗口只对默认通道组（subagent-bg-notify）生效，smart-context 的 customType 属外部通道组，批组隔离规则下恒逐条、merge:true 不得覆盖（`delivery-port.ts:24-25`、`:347-350`）；②合批控制「一次出站几条」，不控制「注入时机 / 是否自起 run」——nextTurn 的核心语义（常驻至被消费、不自起 run、空闲不注入）在两档模型里无承载位置。
+3. 任务书核查项「nextTurn 语义能否由 timing=steer + 合批窗口等价承载」——**不能**：①合批窗口只对默认通道组（subagent-bg-notify）生效，smart-context 的 customType 属外部通道组，批组隔离规则下恒逐条、merge:true 不得覆盖（`delivery-port.ts:24-25`、`:380-385`）；②合批控制「一次出站几条」，不控制「注入时机 / 是否自起 run」——nextTurn 的核心语义（常驻至被消费、不自起 run、空闲不注入）在两档模型里无承载位置。
 
 ### 收益
 
