@@ -1458,12 +1458,12 @@ describe("startup fail-fast (ADR-0003 D6)", () => {
 
       const st = JSON.parse(readFileSync(join(outcome.runDir!, "state.json"), "utf8")) as {
         issues: Record<string, { origin?: string; guidance?: string; evidence?: string; status: string }>;
-        dormant: Array<{ id: string; reason: string; detail: string; round: number; revived: boolean }>;
+        dormant: Array<{ id: string; reason: string; detail: string; round: number }>;
       };
 
       // ① 消费侧过滤（间接+直接双证）：run 到达 clean = R1 fix 只修 MF-1 而
       // mustFixIds=filterActiveIds=[MF-1]（若降级条目未过滤，ES3 判 MF-D1 漏修 →
-      // fix-failure，R3 不可达）；直接证 = dormant 有 MF-D1 落盘（见④）。
+      // fix-failure，R3 不可达）；直接证 = R2 prompt 注入 dormant 段（见③）。
       // ⑥（旧格式回归由现有 e2e 用例守护——本用例全部新格式）
       expect(st.issues["MF-1"]).toMatchObject({
         guidance: "fix boundary in parser",
@@ -1476,15 +1476,15 @@ describe("startup fail-fast (ADR-0003 D6)", () => {
       expect(st.issues["N-1"]).toMatchObject({ origin: "regression", guidance: "restore guard" });
       expect(st.issues["N-2"]).toMatchObject({ origin: "new", evidence: "stale doc" });
 
-      // ④ 复活闭环：MF-D1 revived=true 且回修复队列（issues 有它）
-      const dormantD1 = st.dormant.find((d) => d.id === "MF-D1");
-      expect(dormantD1).toBeDefined();
-      expect(dormantD1!.reason).toBe("adjudication-downgraded");
-      expect(dormantD1!.detail).toBe("claim contradicts known facts"); // detail=note（裁决理由优先）
-      expect(dormantD1!.revived).toBe(true);
+      // ④ 复活闭环（migrate-out 语义，ADR-0139）：MF-D1 以活跃身份重报 → 在复活点
+      // 从 dormant 迁出（列表恒 pending 单形态，无 revived 形态标志），回修复队列。
+      // 落盘字段形态（reason=adjudication-* / detail=note 优先）由 subagent-core B3
+      // 单测覆盖；本 e2e 经 ③ 的 R2 prompt 注入段间接验证。
+      expect(st.dormant.find((d) => d.id === "MF-D1")).toBeUndefined();
       expect(st.issues["MF-D1"]).toBeDefined(); // 复活回修复队列
 
-      // ③ R2 review prompt 含 dormant 清单；R3 prompt 不再注入（revived=true 过滤）
+      // ③ R2 review prompt 含 dormant 清单（MF-D1 尚未复活）；R3 prompt 不再注入
+      //（已迁出 → dormant 空 → 无该段）
       const { prompts, kinds, schemas } = runner.stats();
       const reviewPrompts = prompts.filter((_, i) => kinds[i] === "review");
       expect(reviewPrompts[1]).toContain("DORMANT ISSUES");
@@ -1685,15 +1685,14 @@ describe("startup fail-fast (ADR-0003 D6)", () => {
 
       const st = JSON.parse(readFileSync(join(outcome.runDir!, "state.json"), "utf8")) as {
         issues: Record<string, { status: string; history: Array<{ round: number; status: string }> }>;
-        dormant: Array<{ id: string; revived: boolean }>;
+        dormant: Array<{ id: string }>;
       };
 
       // major-1 回归：reviewer 对 dormant id（MF-D1）声明 not-fixed 不经对账通道建
       // issue（复活唯一入口 = 聚合活跃重报）——issues 无 MF-D1，dormant 记录保持
+      // pending 形态（无复活触发即不迁出）
       expect(st.issues["MF-D1"]).toBeUndefined();
-      const dormantD1 = st.dormant.find((d) => d.id === "MF-D1");
-      expect(dormantD1).toBeDefined();
-      expect(dormantD1!.revived).toBe(false);
+      expect(st.dormant.find((d) => d.id === "MF-D1")).toBeDefined();
 
       // major-2a 回归：已追踪条目（MF-1）被 R2 聚合降级重报 → 不翻 regressed
       //（对账 fixed 声明是权威转换：fix-attempted → fixed，history R2 fixed）
