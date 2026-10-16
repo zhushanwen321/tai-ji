@@ -440,12 +440,16 @@ describe("失败保留策略（onFailure 覆写）", () => {
 		vi.useRealTimers();
 	});
 
-	it("显式 forget 首败即弃：discard 终局列落盘、settled 边沿不重投、重放不复活", () => {
+	it("显式 forget 首败即弃（真注入 throw）：discard 终局列落盘、settled 边沿不重投、重放不复活", () => {
 		const h = makeHost({ bg: false });
-		h.sendThrows.value = true;
+		h.sendThrows.value = true; // 注入通道全程 throw
 		const port = createDeliveryPort(h.host);
 		expect(port.deliver(defaultEnvelope({ id: "fg-1" }), { onFailure: "forget" }).kind).toBe("accepted");
-		expect(h.sent).toHaveLength(0); // 首败（注入 throw）
+		// 提交链两段：首投被 commitAsBatch 注入闸门 hold（设计内等待，不计首败、无终局落盘）
+		// → 窗口结束 kernel.flush() 重提 → 真注入 throw（首败语义生效）：forget → discard。
+		// settleRejected=1 锚定 discard 由真注入失败触发（hold 路径不计数）。
+		expect(h.sent).toHaveLength(0);
+		expect(port.metrics().settleRejected).toBe(1);
 		// forget → 内核 store.discard → ack entry outcome:"discarded"（持久终局列）
 		const acks = h.ackEntries();
 		expect(acks).toHaveLength(1);
@@ -461,23 +465,44 @@ describe("失败保留策略（onFailure 覆写）", () => {
 		expect(h.sent).toHaveLength(0);
 	});
 
-	it("显式 forget 经合批窗口路径同样透传（窗口到期提交时消费策略）", () => {
-		const h = makeHost({ bg: true });
-		h.sendThrows.value = true;
+	it("提交窗 hold 拒不计首败：forget 条目不被 discard、留册，窗口结束重提送达成功", () => {
+		const h = makeHost({ bg: false });
 		const port = createDeliveryPort(h.host);
-		port.deliver(defaultEnvelope({ id: "fg-2" }), { onFailure: "forget" });
-		expect(h.sent).toHaveLength(0); // 窗口缓冲期不注入
-		vi.advanceTimersByTime(60_000); // 窗口到期 → 提交内核 → 注入 throw → forget
-		expect(h.sent).toHaveLength(0);
-		expect(h.ackEntries()[0]!["data"]).toMatchObject({ id: "fg-2", outcome: "discarded" });
+		// 默认通道 bg=false → 直通 → commitAsBatch 提交窗：首投被注入闸门 hold（设计内等待）
+		expect(port.deliver(defaultEnvelope({ id: "hd-1" }), { onFailure: "forget" }).kind).toBe("accepted");
+		// 窗口结束 kernel.flush() 重提 → 送达成功（旧实现此处 hold 被误计首败 → discard 永久丢弃）
+		expect(h.sent).toHaveLength(1);
+		expect(h.sent[0].message.details).toMatchObject({ deliveryId: "hd-1" });
+		expect(h.ackEntries()).toHaveLength(0); // 无 discard 终局（条目全程未失败）
+		expect(port.metrics().settleRejected).toBe(0); // hold 不计注入失败
+		const firstFailWarns = h.warn.mock.calls.filter((c) => String(c[0]).includes("first-failure"));
+		expect(firstFailWarns).toHaveLength(0); // 无首败 warn（hold 走设计内等待留痕）
+		// 送达正常终局
+		h.injectAndEmit(h.sent[0].message);
+		expect(h.ackEntries()[0]!["data"]).toEqual({ v: 2, id: "hd-1" });
 	});
 
-	it("缺省（不传 onFailure）注入 throw 保持 retain 留守重投", () => {
+	it("提交窗 hold 拒对 retain 条目同样不计首败：留守不重复计数，重提送达正常终局", () => {
+		const h = makeHost({ bg: true });
+		const port = createDeliveryPort(h.host);
+		port.deliver(defaultEnvelope({ id: "hd-r" })); // 缺省 retain
+		expect(h.sent).toHaveLength(0); // 窗口缓冲期不注入
+		vi.advanceTimersByTime(60_000); // 窗口到期 → commitAsBatch 提交（首投 hold 留守）→ kernel.flush 重提
+		expect(h.sent).toHaveLength(1);
+		expect(port.metrics().settleRejected).toBe(0); // hold 不重复计入失败
+		const firstFailWarns = h.warn.mock.calls.filter((c) => String(c[0]).includes("first-failure"));
+		expect(firstFailWarns).toHaveLength(0);
+		h.injectAndEmit(h.sent[0].message);
+		expect(h.ackEntries()[0]!["data"]).toEqual({ v: 2, id: "hd-r" }); // ack（无 outcome = 非 discard）
+	});
+
+	it("缺省（不传 onFailure）：首投经提交窗 hold 留守（设计内等待）；窗口外重投遇真注入 throw → retain 留账，恢复后边沿重投", () => {
 		const h = makeHost({ bg: false, idle: true });
 		h.sendThrows.value = true;
 		const port = createDeliveryPort(h.host);
 		expect(port.deliver(defaultEnvelope({ id: "rt-1" })).kind).toBe("accepted");
-		expect(h.ackEntries()).toHaveLength(0); // retain 留守：无终局落盘
+		expect(h.ackEntries()).toHaveLength(0); // hold 非失败 + retain 留守：均无终局落盘
+		expect(port.metrics().settleRejected).toBe(1); // 真注入 throw（重投轮）已计数
 		h.sendThrows.value = false;
 		h.fireSettled();
 		expect(h.sent).toHaveLength(1); // settled 边沿重投

@@ -41,9 +41,8 @@ export interface DeliveryEnvelope { // oe-exempt:20261017:framework:统一投递
   /** 幂等键（提交方提供即参与判重：notifyId / taskId 等）。缺省内部生成。 */
   id?: string;
   /**
-   * additive meta（原样随内核条目流转，内核零读取零加工；phase 2 collectKey 等
-   * 消费方字段的透传位）。注入形态不携带 meta——meta 只随 onSettled 回调与判重
-   * 元数据走，不出现在注入消息 details（details 是调用方业务字段空间）。
+   * port 端点暂不透传 meta（通知域无消费方）；承载随 phase 2 collect 立项实装——
+   * 内核 msg.meta 透传链已就绪（persistRecord / callOnSettled）。
    */
   meta?: Record<string, unknown>;
 }

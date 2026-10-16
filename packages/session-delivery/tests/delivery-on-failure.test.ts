@@ -17,9 +17,11 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createDelivery } from '../src/delivery.js'
 import type { DeliveryMessage } from '../src/types.js'
-import { customMsg, makeBusyParkPort, makeMockPort, textMsg } from './helpers.js'
+import { MemoryDeliveryStore, customMsg, makeBusyParkPort, makeMockPort, textMsg } from './helpers.js'
 
 const transientReject = { accepted: false as const, reason: 'transient' }
+/** 设计内等待拒（F1-13）：port 合批提交窗 hold（entry 未注入，非失败）。 */
+const holdReject = { accepted: false as const, reason: 'merge-commit-hold' }
 
 describe('onFailure 缺省按载荷类型', () => {
   it('custom 条目缺省 retain：首败留守 queued（非移除）', () => {
@@ -233,6 +235,59 @@ describe('retain 留守条目的判重与重复提交', () => {
       handle.flush() // 重投成功 → in-flight（缺省 marker 锚）
       handle.confirmDelivered('sid-1')
       expect(onSettled.mock.calls[0]![0]).toBe(msg) // 原始消息引用（非 clone）
+    } finally {
+      warnSpy.mockRestore()
+      handle.dispose()
+    }
+  })
+})
+
+describe('设计内等待拒不计首败（F1-13，onSendDeferred）', () => {
+  it('forget 条目被 hold 拒：不弃不除不上报，条目留守在册', () => {
+    const port = makeMockPort({ send: () => holdReject })
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const onSettled = vi.fn()
+    const handle = createDelivery(port, { onSettled })
+    try {
+      handle.send(textMsg('m-1'), { id: 'sid-1', onFailure: 'forget' })
+      // 设计内等待（注入未发生）：不计首败——不 discard / 不移除 / 不 onSettled('rejected')
+      expect(handle.entriesFull().active).toHaveLength(1)
+      expect(handle.entriesFull().active[0]).toMatchObject({ id: 'sid-1', state: 'queued' })
+      expect(handle.entriesFull().tombstones).toHaveLength(0)
+      expect(onSettled).not.toHaveBeenCalled()
+      expect(port.sendCalls.length).toBe(1) // 等待轮不主动重投（防同步 hold 循环）
+    } finally {
+      warnSpy.mockRestore()
+      handle.dispose()
+    }
+  })
+
+  it('store 装配下 hold 拒不触发 discard（记录仍是未投递事实）', () => {
+    const port = makeMockPort({ send: () => holdReject })
+    const store = new MemoryDeliveryStore()
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const handle = createDelivery(port, { store })
+    try {
+      handle.send(textMsg('m-1'), { id: 'sid-1' })
+      expect(store.calls.discard).toBe(0)
+      expect(store.undelivered.has('sid-1')).toBe(true) // persist 记录保留（对照：真首败 forget 会 discard）
+    } finally {
+      warnSpy.mockRestore()
+      handle.dispose()
+    }
+  })
+
+  it('投递端下一边沿重提：受理成功转 in-flight，等待轮的失败策略不再影响后续投递', () => {
+    const port = makeMockPort({ send: () => holdReject })
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const handle = createDelivery(port)
+    try {
+      handle.send(textMsg('m-1'), { id: 'sid-1', onFailure: 'forget' }) // hold 拒 → 留守
+      ;(port.send as ReturnType<typeof vi.fn>).mockImplementation(() => undefined)
+      handle.flush() // 投递端窗口结束重提（port commitAsBatch 的 kernel.flush 同型）
+      const [entry] = handle.entriesFull().active
+      expect(entry).toMatchObject({ id: 'sid-1', state: 'in-flight' }) // 受理成功（marker 锚等回执）
+      expect((port.send as ReturnType<typeof vi.fn>).mock.calls.length).toBe(2)
     } finally {
       warnSpy.mockRestore()
       handle.dispose()

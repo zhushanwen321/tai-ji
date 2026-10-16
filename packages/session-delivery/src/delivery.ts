@@ -28,7 +28,9 @@
  *
  * 失败语义（ADR-0122 首败即停，2026-10-05 用户裁决，backoff 自动重试链退役）：
  * port.send 失败（含 accepted:false）一次即收口——checked 条目 reject + 从内核移除；
- * 非 checked 条目 onSettled('rejected') 逐条显式上报 + 从内核移除。重试决策归消费方
+ * 非 checked 条目 onSettled('rejected') 逐条显式上报 + 从内核移除。唯一例外：accepted:false
+ * 且 reason 为设计内等待（SEND_DEFERRED_REASONS，如 port 合批提交窗 hold）不计首败，
+ * 条目留守等投递端下一边沿重提（onSendDeferred）。重试决策归消费方
  * （人看页面通知、agent 收失败回执），内核只做忠实投递与事实上报。
  *
  * onSettled 记账口径（D9⑤ 升级）：
@@ -291,6 +293,14 @@ const DEFAULT_CONFIG: Required<
   intent: 'interrupt-at-turn-boundary',
   mergeWindowMs: 0,
 }
+
+/**
+ * port.send 显式拒绝（accepted:false）中的设计内等待 reason 白名单（F1-13）：这些
+ * reason 是投递端提交窗的「设计内等待」——条目从未被注入（host.sendMessage 未调用），
+ * 不是失败。命中时不计首败（onSendDeferred），条目留守等投递端下一边沿重新提交；
+ * 白名单外的 reason 与 throw 路径维持首败即停（onSendFail）。
+ */
+const SEND_DEFERRED_REASONS: ReadonlySet<string> = new Set(['merge-commit-hold'])
 
 /** 投影视图默认窗口（D5③）；同时是 delivered 完整条目留存上限（环形）。 */
 const DEFAULT_DELIVERED_WINDOW = 50
@@ -785,11 +795,17 @@ export function createDelivery(
   }
 
   /**
-   * 受理判定（U2 回执口径）：显式 `{accepted:false}` → 发送失败路径（错误重试 /
-   * reject 链路）；void / `{accepted:true}` / 其他形态 = 受理成功（旧 port 兼容）。
+   * 受理判定（U2 回执口径）：显式 `{accepted:false}` 按 reason 分流——设计内等待
+   * reason（SEND_DEFERRED_REASONS，F1-13）走设计内等待收口 onSendDeferred（暂不收，
+   * 非失败）；其他 reason 走发送失败收口（首败语义）；void / `{accepted:true}` /
+   * 其他形态 = 受理成功（旧 port 兼容）。
    */
   function onSendReceipt(receipt: SendReceipt | void): void {
     if (receipt !== undefined && receipt.accepted === false) {
+      if (receipt.reason !== undefined && SEND_DEFERRED_REASONS.has(receipt.reason)) {
+        onSendDeferred(receipt.reason)
+        return
+      }
       onSendFail(new Error(receipt.reason ?? 'port.send rejected (accepted:false)'))
       return
     }
@@ -829,7 +845,8 @@ export function createDelivery(
 
   /**
    * 发送失败收口（ADR-0122 首败即停，2026-10-05 用户裁决）：port.send 失败（含
-   * accepted:false）一次即终——重试是补偿决策，前提是知道「重试是否安全」，该语义
+   * accepted:false，设计内等待 reason 除外——onSendDeferred）一次即终——重试是
+   * 补偿决策，前提是知道「重试是否安全」，该语义
    * 知识在消费方手里不在内核手里，内核只做事实上报。失败处置按条目 onFailure
    * 策略分流（v3）：
    * - forget（缺省 text / checked 恒定）：checked 条目 waiter reject（失败同步交
@@ -878,6 +895,26 @@ export function createDelivery(
     // 失败」同步循环（首败即停红线的对偶面）。「下一边沿」语义 = 等 settled 边沿 /
     // 外部 flush / 新 send 触发（事件驱动）。
     if (!retained) pump()
+  }
+
+  /**
+   * 设计内等待收口（F1-13）：port.send 返回 accepted:false 且 reason 为设计内等待
+   * （SEND_DEFERRED_REASONS，如 port 合批提交窗的 'merge-commit-hold'——注入闸门
+   * hold，窗口结束后投递端会 kernel.flush() 重提）时，条目从未被注入（host.sendMessage
+   * 未调用），拒绝不是失败：不计首败——不 store.discard、不 removeActive、不
+   * onSettled('rejected')、checked waiter 不 reject（受理未发生亦无首败），条目保持
+   * active 在册（queued）等投递端下一边沿重新提交（port 合批窗提交 / 缓冲重放会
+   * 重提）。本轮不主动 pump：提交窗未结束时重投必再次被 hold（同步循环，与 retain
+   * 分支「失败轮不主动重投」同理）——重投触发由投递端的窗口结束 flush 承诺。
+   */
+  function onSendDeferred(reason: string): void {
+    if (disposed) return
+    const batch = inflightBatch
+    inFlight = false
+    inflightBatch = []
+    warn(
+      `port.send deferred (designed-in wait, reason=${reason}); ${batch.length} entry(ies) stay queued for next dispatch edge`,
+    )
   }
 
   // ─── pump：在途结束后决定下一步（checked 优先，然后普通队列走 gate）──
