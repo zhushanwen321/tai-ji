@@ -94,8 +94,9 @@ export function applyReviewAppend(
     // 时按 params.round 建聚合不变（首轮直写路径）。重放与 live 同一校验（直写 ≡ 重放）。
     fail('invalid_params', `报告轮次（R${params.round}）与当前审查轮次（R${draft.review.round}）不一致：review-append 必须写回当前轮——先 canvas_read 核对审查聚合轮次`)
   }
-  // 校验两段先行（引用完整性 → 支撑度规则），全过才落聚合（任一失败 fail-fast 无部分写入）。
+  // 校验三段先行（引用完整性 → 条目身份 → 支撑度规则），全过才落聚合（任一失败 fail-fast 无部分写入）。
   validateEntryRefs(draft, params.entries)
+  validateEntryIds(draft, params)
   validateSupportRatings(draft, params.entries)
   upsertReviewEntries(draft, params)
   draft.updatedAt = at
@@ -108,6 +109,27 @@ function validateEntryRefs(draft: CanvasState, entries: CanvasActionParams['revi
   const knownIds = new Set<string>([...draft.nodes.map((n) => n.id), ...draft.edges.map((e) => e.id), ...draft.comments.map((c) => c.id)])
   for (const entry of entries) {
     if (!knownIds.has(entry.targetId)) fail('entry_ref_missing', `报告条目「${entry.id}」引用的图元素「${entry.targetId}」不存在`)
+  }
+}
+
+/** 条目身份校验（聚合 2 唯一防线——重放 / WS 直连不经 marker 守卫）：
+ * ① 单条 round 必须与报告轮次一致（marker 注入路径恒同轮，直连调用方声明不一致 = 非法
+ * 输入——放行会借「同轮同 id 幂等覆盖」语义伪造异轮改写）；② 条目身份 = (round, id)
+ * 二元组，同 id 异轮 = 跨轮撞号拒绝——全局按 id upsert 时 R2 复审同序号条目（reviewer
+ * 按 rv-<序号> 生成 id 的惯性）会静默覆盖 R1 条目并继承其处置记录，R2 新 must-fix 未
+ * 处置即显示已处置，收敛门禁③（must-fix 清零）被旁路。同轮同 id 不拦（崩溃重试幂等
+ * upsert，见 upsertReviewEntries）。 */
+function validateEntryIds(draft: CanvasState, params: CanvasActionParams['review-append']): void {
+  const review = draft.review
+  if (!review) return
+  for (const entry of params.entries) {
+    if (entry.round !== params.round) {
+      fail('invalid_params', `报告条目「${entry.id}」的轮次（R${entry.round}）与报告轮次（R${params.round}）不一致：条目 round 必须等于报告轮次，修正后重试`)
+    }
+    const existing = review.entries.find((e) => e.id === entry.id && e.round !== entry.round)
+    if (existing) {
+      fail('invalid_params', `报告条目 id「${entry.id}」已被 R${existing.round} 条目占用（条目身份 = 轮次 + id，跨轮不得复用）：R${entry.round} 条目换 id（如 rv-r${entry.round}-<序号>）后重试`)
+    }
   }
 }
 
@@ -132,13 +154,15 @@ function validateSupportRatings(draft: CanvasState, entries: CanvasActionParams[
 }
 
 /** 条目落聚合 + 评价写回 edge.support。幂等 upsert（同 grow：重试覆盖字段、保留已
- * 登记的处置记录）。review 聚合由调用方（applyReviewAppend 首分支）保证已初始化——
- * 本地 guard 仅为类型收窄（收窄不跨函数边界），运行时不可达。 */
+ * 登记的处置记录）。条目身份 = (round, id) 二元组——仅同轮同 id 覆盖（崩溃重试幂
+ * 等）；跨轮同 id 已被 validateEntryIds 前置拒绝，此处查找不会命中异轮条目。review
+ * 聚合由调用方（applyReviewAppend 首分支）保证已初始化——本地 guard 仅为类型收窄
+ * （收窄不跨函数边界），运行时不可达。 */
 function upsertReviewEntries(draft: CanvasState, params: CanvasActionParams['review-append']): void {
   const review = draft.review
   if (!review) return
   for (const entry of params.entries) {
-    const existing = review.entries.find((e) => e.id === entry.id)
+    const existing = review.entries.find((e) => e.id === entry.id && e.round === entry.round)
     const merged = { ...entry, resolution: existing?.resolution }
     if (existing) {
       review.entries[review.entries.indexOf(existing)] = merged

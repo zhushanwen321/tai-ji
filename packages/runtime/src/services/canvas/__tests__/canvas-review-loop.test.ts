@@ -227,6 +227,90 @@ describe('审查终态 max-rounds（设计 §3.1 失败路径②：置终态 + �
   })
 })
 
+describe('条目身份 = (round, id) 二元组（跨轮同 id 碰撞不覆盖历史条目——收敛门禁③不被旁路）', () => {
+  /** R1 前置：must-fix 条目 rv-1 写回并处置（登记 resolution）→ 再发起推进 R2。 */
+  function advanceToR2WithResolvedR1(
+    h: ReturnType<typeof makeService>,
+    canvasId: string,
+    targetId: string,
+  ): void {
+    expectOk(h.svc.mutate({ action: 'review-request', params: { canvasId } }, 'agent'))
+    expectOk(h.svc.mutate({
+      action: 'review-append',
+      params: { canvasId, round: 1, entries: [{ id: 'rv-1', round: 1, dimension: 'completeness', severity: 'must-fix', targetId, note: 'R1 缺口' }] },
+    }, 'review'))
+    expectOk(h.svc.mutate({ action: 'review-resolve', params: { canvasId, entryId: 'rv-1', disposition: 'accepted', note: '已修' } }, 'agent'))
+    expectOk(h.svc.mutate({ action: 'review-request', params: { canvasId } }, 'agent'))
+  }
+
+  it('R2 写回与 R1 条目同 id（reviewer rv-<序号> 惯性）→ invalid_params（错误文案指引换 id）；R1 条目内容与处置记录原样保留，无部分写入', () => {
+    const h = makeService()
+    try {
+      const c = growCanvas(h.svc, createCanvas(h.svc))
+      advanceToR2WithResolvedR1(h, c.canvasId, c.q1)
+      expect(c.state().review?.round).toBe(2)
+      const reply = h.svc.mutate({
+        action: 'review-append',
+        params: { canvasId: c.canvasId, round: 2, entries: [{ id: 'rv-1', round: 2, dimension: 'support', severity: 'must-fix', targetId: c.q1, note: 'R2 新缺口' }] },
+      }, 'review')
+      expectRejected(reply, 'invalid_params')
+      if (!reply.ok) expect(reply.error.message).toContain('rv-1')
+      // R1 条目不被覆盖：轮次 / 原文 / 分级 / 处置记录全部原样——R2 新 must-fix 不得
+      // 未处置即继承已处置态（继承会让 must-fix 清零门禁被错误满足）
+      const entries = c.state().review?.entries ?? []
+      expect(entries).toHaveLength(1)
+      expect(entries[0]?.round).toBe(1)
+      expect(entries[0]?.note).toBe('R1 缺口')
+      expect(entries[0]?.severity).toBe('must-fix')
+      expect(entries[0]?.resolution).toEqual({ disposition: 'accepted', by: 'agent', note: '已修' })
+    } finally {
+      h.dispose()
+    }
+  })
+
+  it('条目 round 与报告轮次不一致 → invalid_params（直连调用方伪造异轮 round 借同轮幂等语义改写历史条目的路径同拦——runtime 唯一防线）', () => {
+    const h = makeService()
+    try {
+      const c = growCanvas(h.svc, createCanvas(h.svc))
+      advanceToR2WithResolvedR1(h, c.canvasId, c.q1)
+      // R2 批次夹带自称 R1 的条目（round 伪造成 1 = 与历史条目同 (round, id)）→ 拒绝
+      const reply = h.svc.mutate({
+        action: 'review-append',
+        params: { canvasId: c.canvasId, round: 2, entries: [{ id: 'rv-1', round: 1, dimension: 'support', severity: 'must-fix', targetId: c.q1, note: '冒充 R1 改写' }] },
+      }, 'review')
+      expectRejected(reply, 'invalid_params')
+      const entries = c.state().review?.entries ?? []
+      expect(entries).toHaveLength(1)
+      expect(entries[0]?.note).toBe('R1 缺口')
+      expect(entries[0]?.resolution).toEqual({ disposition: 'accepted', by: 'agent', note: '已修' })
+    } finally {
+      h.dispose()
+    }
+  })
+
+  it('直写 ≡ 重放：R1 与 R2 条目异 id 共存经 events.jsonl 重建后一致（跨轮条目累积是设计内形态）', () => {
+    const h = makeService()
+    try {
+      const c = growCanvas(h.svc, createCanvas(h.svc))
+      advanceToR2WithResolvedR1(h, c.canvasId, c.q1)
+      expectOk(h.svc.mutate({
+        action: 'review-append',
+        params: { canvasId: c.canvasId, round: 2, entries: [{ id: 'rv-r2-1', round: 2, dimension: 'support', severity: 'must-fix', targetId: c.q1, note: 'R2 新缺口' }] },
+      }, 'review'))
+      const directWrite: CanvasState = h.svc.readState(c.canvasId)
+      expect(directWrite.review?.entries.map((e) => `${e.round}:${e.id}`)).toEqual(['1:rv-1', '2:rv-r2-1'])
+      const reborn = new CanvasService({ canvasesDir: h.dir, generateId: (): string => 'replay-unused-id' })
+      try {
+        expect(reborn.readState(c.canvasId)).toEqual(directWrite)
+      } finally {
+        reborn.dispose()
+      }
+    } finally {
+      h.dispose()
+    }
+  })
+})
+
 describe('支撑度写回（概念 §2.4：边的缺陷经支撑度表达——review-append 附带评价）', () => {
   /** 标准形态：growCanvas 的边 id 确定性派生（e-<子节点 id>）；e-o1 = q1 →(resolve) o1 主干边。 */
   const TRUNK_EDGE = 'e-o1'

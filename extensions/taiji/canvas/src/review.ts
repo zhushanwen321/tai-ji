@@ -82,7 +82,7 @@ export const REVIEWER_REPORT_SCHEMA: Record<string, unknown> = {
       items: {
         type: "object",
         properties: {
-          id: { type: "string", description: "Unique entry id (e.g. rv-1)." },
+          id: { type: "string", description: "Unique entry id, scoped to the current round (e.g. rv-r2-1 in round 2). Reusing an id from a previous round is rejected." },
           dimension: {
             type: "string",
             enum: REVIEW_DIMENSIONS_GUIDE.map((d) => d.dim),

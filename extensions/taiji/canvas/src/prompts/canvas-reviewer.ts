@@ -91,7 +91,7 @@ export function buildReviewerPrompt(input: ReviewerPromptInput): string {
     "",
     "== 输出契约 ==",
     "输出一个 JSON 对象：{ entries: [{ id, dimension, severity, targetId, note, supportRating?, supportGaps? }], summary?: string }。",
-    "- id：本条目唯一 id（rv-<序号> 即可）；",
+    "- id：本条目唯一 id，按轮次区分（rv-r<本轮轮次>-<序号>，如 R2 首条 = rv-r2-1；与历史轮次条目 id 撞号会被写回拒绝）；",
     "- dimension：六词表之一（completeness/necessity/support/authenticity/conflict/depth）；",
     "- severity：'must-fix'（不修不得收敛）或 'suggestion'（改进建议）；",
     "- targetId：条目指向的图元素 id（节点 / 边 / 评论，必须存在于画布数据中）；",
