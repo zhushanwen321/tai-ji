@@ -241,6 +241,52 @@ afterEach(() => {
 });
 
 describe("wrapper 合并语义（v2 注入优先）", () => {
+  it("standalone 账号元数据键幂等供给：缺键时从 host 态 key 名派生 identity + oauth 认证来源；二次运行不动文件（2026-10-16 真机修复回归）", () => {
+    const home = fs.mkdtempSync(path.join(tmpRoot, "home-meta-"));
+    const engineDataDir = fs.mkdtempSync(path.join(tmpRoot, "eng-meta-"));
+    const v2 = path.join(home, ".zcode", "v2");
+    fs.mkdirSync(v2, { recursive: true });
+    const credPath = path.join(v2, "credentials.json");
+    const PID = "account:bigmodel-individual-coding-plan";
+    fs.writeFileSync(credPath, JSON.stringify({
+      "oauth:bigmodel:access_token": "enc:v1:fake-oauth-token",
+      [`account-provider:coding-plan:${PID}:account:77301767000095243:api-key`]: "enc:v1:fake-plan-key",
+    }, null, 2));
+    // 内建目录 fixture（zhipu-account 规则 → plan provider 清单来源）
+    const catalogDir = path.join(tmpRoot, "catalog-meta");
+    fs.mkdirSync(catalogDir, { recursive: true });
+    const catalogPath = path.join(catalogDir, "zcode-builtin.json");
+    fs.writeFileSync(catalogPath, JSON.stringify({
+      config: { providerConfigRules: { providerRules: [{ providerId: PID, config: { access: { type: "zhipu-account" } } }] } },
+    }));
+    const launcher = ensureAppServerLauncher(engineDataDir);
+    const cliPath = path.join(tmpRoot, "probe-meta.cjs");
+    fs.writeFileSync(cliPath, PROBE_SOURCE);
+    const statePath = path.join(tmpRoot, "state-meta.json");
+    const env = {
+      ...process.env,
+      ZCODE_ENG_CLI_PATH: cliPath,
+      ZCODE_PROBE_STATE: statePath,
+      ZCODE_BUILTIN_PROVIDER_CONFIG_FILE: catalogPath,
+      HOME: home,
+      TAIJI_AGENT_DATA_DIR: engineDataDir,
+    };
+    const first = childProcess.spawnSync(process.execPath, [launcher], { encoding: "utf8", env });
+    expect(first.status).toBe(0);
+    expect(first.stderr).toContain("account metadata provisioned");
+    const after = JSON.parse(fs.readFileSync(credPath, "utf8")) as Record<string, string>;
+    expect(after[`account-provider:${PID}:identity`]).toBe("77301767000095243");
+    expect(after[`account-provider:${PID}:auth-source`]).toBe("oauth");
+    // 既有键未被动
+    expect(after["oauth:bigmodel:access_token"]).toBe("enc:v1:fake-oauth-token");
+    // 幂等：二次运行不重写（无 provisioned 行、文件内容等同）
+    const before = fs.readFileSync(credPath, "utf8");
+    const second = childProcess.spawnSync(process.execPath, [launcher], { encoding: "utf8", env });
+    expect(second.status).toBe(0);
+    expect(second.stderr).not.toContain("account metadata provisioned");
+    expect(fs.readFileSync(credPath, "utf8")).toBe(before);
+  });
+
   it("CLI 源码补丁：standalone 选项注入 + 认证头端口注入（2026-10-16 真机修复的回归守卫）", () => {
     const home = fs.mkdtempSync(path.join(tmpRoot, "home-patch-"));
     const engineDataDir = fs.mkdtempSync(path.join(tmpRoot, "eng-patch-"));

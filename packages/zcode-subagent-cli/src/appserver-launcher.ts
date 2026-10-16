@@ -452,6 +452,71 @@ if (!process.env.ZCODE_BUILTIN_PROVIDER_CONFIG_FILE) {
   }
 }
 
+// [2026-10-16 standalone account metadata] standalone 账号源要求
+// account-provider:<planProviderId>:identity / :auth-source 两条**元数据**键才承认
+// account provider（缺 identity 直接丢弃该 provider → 派发报「Provider Registry 中
+// 不存在 Model」）。两键非秘密（身份 ID / 认证来源），真凭据仍是 ZCode 自有项
+// （oauth token 或 plan api-key，均在 credentials.json，由 ZCode 登录/配置写入）。
+// 本步幂等供给：仅缺时追加、不触碰既有键；任何失败只 warn 不阻断 spawn（缺键的
+// 报错路径与恢复指引由引擎侧既有文案承载）。catches：文件缺失/坏 JSON/目录不可写。
+function ensureAccountMetadata() {
+  try {
+    const credPath = path.join(os.homedir(), '.zcode', 'v2', 'credentials.json');
+    const readOrig = fs.__origReadFileSync || fs.readFileSync;
+    if (!fs.existsSync(credPath)) return;
+    const creds = JSON.parse(readOrig.call(fs, credPath, 'utf8'));
+    if (!creds || typeof creds !== 'object' || Array.isArray(creds)) return;
+    if (!CATALOG_PATH) return;
+    let planIds = [];
+    try {
+      const cat = JSON.parse(readOrig.call(fs, CATALOG_PATH, 'utf8'));
+      const pcr = (cat && cat.config && cat.config.providerConfigRules) || {};
+      const rules = Array.isArray(pcr.providerRules) ? pcr.providerRules : [];
+      planIds = rules
+        .filter(function (r) { return r && r.config && r.config.access && r.config.access.type === 'zhipu-account'; })
+        .map(function (r) { return String(r.providerId || ''); })
+        .filter(Boolean);
+    } catch (e) { return; }
+    const added = [];
+    for (const pid of planIds) {
+      const idKey = 'account-provider:' + pid + ':identity';
+      const srcKey = 'account-provider:' + pid + ':auth-source';
+      let identity = typeof creds[idKey] === 'string' ? creds[idKey] : '';
+      if (!identity) {
+        // 从 host 态 plan api-key 键名派生身份：
+        // account-provider:coding-plan:<pid>:account:<identity>:api-key
+        const prefix = 'account-provider:coding-plan:' + pid + ':account:';
+        const suffix = ':api-key';
+        for (const k of Object.keys(creds)) {
+          if (k.indexOf(prefix) === 0 && k.slice(-suffix.length) === suffix) {
+            const mid = k.slice(prefix.length, k.length - suffix.length);
+            if (mid) { try { identity = decodeURIComponent(mid); } catch (e2) { identity = mid; } break; }
+          }
+        }
+      }
+      if (!identity) continue;
+      let family = '';
+      if (pid.indexOf('account:zai') === 0) family = 'zai';
+      else if (pid.indexOf('account:bigmodel') === 0) family = 'bigmodel';
+      let authSource = '';
+      const oauthKey = family ? ('oauth:' + family + ':access_token') : '';
+      if (oauthKey && typeof creds[oauthKey] === 'string' && creds[oauthKey] !== '') authSource = 'oauth';
+      else if (creds['account-provider:coding-plan:' + pid + ':account:' + encodeURIComponent(identity) + ':api-key']) authSource = 'manual';
+      if (!authSource) continue;
+      if (creds[idKey] !== identity) { creds[idKey] = identity; added.push(idKey); }
+      if (creds[srcKey] !== authSource) { creds[srcKey] = authSource; added.push(srcKey); }
+    }
+    if (added.length === 0) return;
+    const tmp = credPath + '.taiji-tmp-' + process.pid;
+    fs.writeFileSync(tmp, JSON.stringify(creds, null, 2));
+    fs.renameSync(tmp, credPath);
+    process.stderr.write('[zcode-launcher] account metadata provisioned: ' + added.join(', ') + '\\n');
+  } catch (err) {
+    process.stderr.write('[zcode-launcher] account metadata provisioning failed (non-blocking): ' + ((err && err.message) || String(err)) + '\\n');
+  }
+}
+ensureAccountMetadata();
+
 // 安装门：任一 patch 源可用即安装拦截层；决策两态都出声（装了哪些 patch / 为何
 // 跳过）——补丁层的失效形态是静默的（account 直通失效 = plan 家族报「不存在
 // Model」而无任何日志），跳过同样必须留痕。
