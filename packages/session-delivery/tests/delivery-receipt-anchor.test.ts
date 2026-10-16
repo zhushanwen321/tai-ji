@@ -165,10 +165,19 @@ describe('D1 申报制：首败即停语义（P0-20 锁，ADR-0122）', () => {
       },
     })
 
-    // busy 起步使两条同入 queued（构造合批），翻转 idle 后整批出站
+    // busy 起步使两条同入 queued（构造合批），翻转 idle 后整批出站。
+    // v3 缺省按载荷：custom = retain（失败留守，不发失败终局通知）——本用例锁定
+    // 的是 forget 语义的首败即停（P0-20 / ADR-0122 锁：首败即停 + 显式上报 + 无
+    // 内核重试窗口），显式申报 onFailure:'forget'。
     port.idle = false
-    handle.send(customMsg('subagents:notify', 'notify: A done'), { receiptAnchor: 'acceptance' })
-    handle.send(customMsg('subagents:notify', 'notify: B done'), { receiptAnchor: 'acceptance' })
+    handle.send(customMsg('subagents:notify', 'notify: A done'), {
+      receiptAnchor: 'acceptance',
+      onFailure: 'forget',
+    })
+    handle.send(customMsg('subagents:notify', 'notify: B done'), {
+      receiptAnchor: 'acceptance',
+      onFailure: 'forget',
+    })
     port.idle = true
     handle.flush()
 

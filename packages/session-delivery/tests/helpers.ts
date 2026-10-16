@@ -6,6 +6,8 @@ import type {
   DeliveryIntent,
   DeliveryMessage,
   DeliveryPort,
+  DeliveryStore,
+  DeliveryStoreRecord,
 } from '../src/types.js'
 
 export function makeMockPort(
@@ -115,4 +117,52 @@ export function setupFakeTimersSilencedWarn(): void {
     vi.restoreAllMocks()
     vi.useRealTimers()
   })
+}
+
+// ─── v3 DeliveryStore 内存假实现（store 契约 / 判重三级 / onFailure 留账测试用）───
+
+/**
+ * DeliveryStore 内存假实现：undelivered（Map，待投差集）+ terminals（Set，终局
+ * 记录）两视图 + 方法调用计数（判重三级顺序断言：一级命中时三级查询计数不增）。
+ * persist 幂等覆盖：同 id 重 persist 覆盖原记录（重启重报形态）。
+ */
+export class MemoryDeliveryStore implements DeliveryStore {
+  readonly undelivered = new Map<string, DeliveryStoreRecord>()
+  readonly terminals = new Set<string>()
+  /** 方法调用计数（时序 / 三级顺序断言用）。 */
+  readonly calls = { persist: 0, ack: 0, discard: 0, loadUndelivered: 0, loadTerminalIds: 0, hasTerminal: 0 }
+  /** persist 到达序（persist 先于投递尝试的时序断言用）。 */
+  readonly persistOrder: string[] = []
+
+  persist(record: DeliveryStoreRecord): void {
+    this.calls.persist++
+    this.persistOrder.push(record.id)
+    this.undelivered.set(record.id, record)
+  }
+
+  ack(id: string): void {
+    this.calls.ack++
+    this.undelivered.delete(id)
+    this.terminals.add(id)
+  }
+
+  discard(id: string): void {
+    this.calls.discard++
+    this.undelivered.delete(id)
+  }
+
+  loadUndelivered(): readonly DeliveryStoreRecord[] {
+    this.calls.loadUndelivered++
+    return [...this.undelivered.values()]
+  }
+
+  loadTerminalIds(): readonly string[] {
+    this.calls.loadTerminalIds++
+    return [...this.terminals]
+  }
+
+  hasTerminal(id: string): boolean {
+    this.calls.hasTerminal++
+    return this.terminals.has(id)
+  }
 }

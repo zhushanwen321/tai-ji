@@ -12,7 +12,14 @@ export {
   type DeliveryLane,
   type DeliveryEntryState,
   type DeliveryEntry,
-  type DeliveryTombstone,
+  // v3（统一消息投递内核，设计 §3.3/§3.5）：送达凭据三档 / 失败保留策略 /
+  // DeliveryStore 持久化存储端口 / 终局记录（DeliveryTombstone 已退役）
+  type DeliveryReceiptAnchor,
+  type DeliveryFailurePolicy,
+  type DeliveryProofCheck,
+  type DeliveryStore,
+  type DeliveryStoreRecord,
+  type DeliveryTerminalRecord,
   type DeliveryEntriesFull,
   type DeliveryEntriesProjection,
 } from './types.js'
