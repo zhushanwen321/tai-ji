@@ -51,6 +51,7 @@ export interface BlockUnitProps { // oe-exempt:20261013:framework:类型契约�
     header: { count: number; durationMs: number; failedCount: number }
     hasRunning: boolean
     miles?: RunGroupMile[]
+    headFlatIndex?: number
   }
 }
 
@@ -238,6 +239,7 @@ export function useTurnTrace(turn: () => MessageTurn, isWorkingTurn: () => boole
           header: unit.header,
           hasRunning: unit.hasRunning,
           miles: unit.miles,
+          headFlatIndex: unit.headFlatIndex,
         },
       }
     }

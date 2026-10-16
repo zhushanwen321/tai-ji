@@ -167,6 +167,7 @@
     <div v-else-if="type === 'run-group' && group" class="trace-run-group" data-testid="run-group">
       <div
         data-testid="run-group-header"
+        :data-group-head="group.headFlatIndex"
         class="group/bgroup flex min-w-0 cursor-pointer select-none items-baseline gap-[8px] text-[length:var(--text-base)] [font-weight:var(--fw-mid)] text-neutral-mid"
         role="button"
         tabindex="0"
@@ -179,7 +180,12 @@
         <!-- running 态 loader（呼吸弧 + accent），其余走组类型对应的静态图标（切换走 tico 交叉过渡，
              同 tool/thinking 行）。组头文字（「N 步 · 耗时」计数/耗时口径）是稳定标识，不跑文字扫光。
              行文字不染 accent（demo 运行态 = 仅呼吸弧图标 accent，文字保持行层级 mid，
-             workbench.css .tool .t-name），与普通 tool 行运行态同款。 -->
+             workbench.css .tool .t-name），与普通 tool 行运行态同款。
+             data-group-head 钩子（序号下线后补，零视觉成本）：组头 div 绑 headFlatIndex（段首锚，
+             与组块 :key 同源——同组跨窗口滑动/段尾延长该值不变，members[0].flatIndex 会随窗口
+             滑动漂移，故不取它）——同 turn 两个同类型组的可见文本与可访问名不再有可见序号区分
+             （21243ca3a 序号下线），e2e / 测试 / 读屏靠 DOM 次序难分辨，该属性给机器消费方一个
+             稳定锚点（不进 v-memo deps：它就是 :key，节点身份不变时该值不变）。 -->
         <RunningBlockIcon v-if="group.hasRunning" :kind="RUN_GROUP_RUNNING_ICON[group.base]" />
         <component :is="BLOCK_ICON_LUCIDE[RUN_GROUP_ICON[group.base]]" v-else :class="[BLOCK_ICON_CLASS, 'self-center']" />
         <span class="shrink-0 whitespace-nowrap text-left transition-opacity duration-[var(--duration-fast)] group-hover/bgroup:opacity-80">{{ t(RUN_GROUP_LABEL_KEY[group.base]) }}</span>
@@ -469,13 +475,15 @@ const props = defineProps<{
   tool?: ToolCall
   /** run 组块数据（type==='run-group' 时由 Turn.vue 透传；组块数据契约 base/members/header/hasRunning/miles）。
    *  base 与 header 三条口径（count/durationMs/failedCount）由 core groupToolRuns 一次算好；
-   *  miles = 里程碑徽标（§3.6，core 结构派生），空/缺省 = 无则不显示。 */
+   *  miles = 里程碑徽标（§3.6，core 结构派生），空/缺省 = 无则不显示；
+   *  headFlatIndex = 段首锚（序号下线后补透传，data-group-head 钩子数据源；与组块 :key 同源）。 */
   group?: {
     base: RunGroupBase
     members: FlatBlock[]
     header: { count: number; durationMs: number; failedCount: number }
     hasRunning: boolean
     miles?: RunGroupMile[]
+    headFlatIndex?: number
   }
   /** thinking 块初始折叠态（来自 ThinkingBlock.collapsed，默认收起） */
   collapsed?: boolean

@@ -986,11 +986,20 @@ describe('run 类型分组: Block 组块', () => {
     expect(headerOf('explore')).toContain('panel.message.runGroupExplore')
     expect(headerOf('edit')).toContain('panel.message.runGroupEdit')
     expect(headerOf('exec')).toContain('panel.message.runGroupExec')
-    // 序号下线（21243ca3a）回归护栏：组名后不得再出现 demo .rg-seq 形态的「· N」序号段
-    // （实测组头文本 = runGroupExplore + runGroupSteps 1 · 4s，· 4s 为合法耗时分隔符，故锚定组名之后的 · N）
+  })
+
+  it('序号下线（21243ca3a）回归护栏：组头组名后无「· N」序号段（单成员 + 多成员）', () => {
+    // 单成员 explore 组（实测组头文本 = runGroupExplore + runGroupSteps 1 · 4s，· 4s 为合法
+    // 耗时分隔符，故锚定组名之后的 · N）+ 多成员 exec 组（实测 = runGroupExec + runGroupSteps
+    // 2 · 8s）：捕获「无条件复辟」与「members.length>1 条件复辟」两形态。
+    // 忠实原形 v-if seq>1（第 2 个同名组才渲染，取决于同名组次序而非成员数）在 Block 单组
+    // fixture 下 seq 恒 1 不渲染 span，该形态由 Turn.test.ts 路径 C 真实 Block mount 的
+    // 双 explore 组护栏覆盖——两处互为补充，缺一即漏。
+    const headerOf = (base: RunGroupBase) =>
+      mountRunGroup(makeRunGroupProp([makeToolCall({ id: 'r0', toolName: 'read', input: { path: '/x' } })], { base }))
+        .find('[data-testid="run-group-header"]')
+        .text()
     expect(headerOf('explore')).not.toMatch(/runGroupExplore\s*·\s*\d+/)
-    // 多成员组同护栏（2 成员 exec 组，实测文本 = runGroupExec + runGroupSteps 2 · 8s）：条件复辟形态
-    // （v-if seq>1 / members.length>1）只在多成员组渲染序号，单成员护栏覆不到，故补 2 成员锚定
     expect(mountBashPairGroup().find('[data-testid="run-group-header"]').text()).not.toMatch(/runGroupExec\s*·\s*\d+/)
   })
 

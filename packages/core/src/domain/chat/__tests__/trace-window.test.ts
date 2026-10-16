@@ -568,10 +568,10 @@ describe('run 类型分组 groupToolRuns: 分组规则', () => {
       makeTool({ id: 'r2', toolName: 'read', input: { path: '/y' } }),
     ]
     const units = groupOf(flatOfTools(tools))
-    expect(units.map((u) => (isGroup(u) ? `${u.base}:${u.header.count}` : u.block.kind))).toEqual([
-      'explore:1',
-      'exec:1',
-      'explore:1',
+    expect(units.map((u) => (isGroup(u) ? `${u.base}@${u.headFlatIndex}` : u.block.kind))).toEqual([
+      'explore@0',
+      'exec@1',
+      'explore@2',
     ])
   })
 
@@ -583,10 +583,10 @@ describe('run 类型分组 groupToolRuns: 分组规则', () => {
       makeTool({ id: 'b2', toolName: 'bash', input: { command: 'b' } }),
     ]
     const units = groupOf(flatOfTools(tools))
-    expect(units.map((u) => (isGroup(u) ? `${u.base}:${u.header.count}` : (u.block.ref as ToolCall).toolName))).toEqual([
-      'exec:1',
+    expect(units.map((u) => (isGroup(u) ? `${u.base}@${u.headFlatIndex}` : (u.block.ref as ToolCall).toolName))).toEqual([
+      'exec@0',
       'subagent',
-      'exec:1',
+      'exec@2',
     ])
   })
 
@@ -619,10 +619,10 @@ describe('run 类型分组 groupToolRuns: 分组规则', () => {
       }),
     ])
     const units = groupOf(flat)
-    expect(units.map((u) => (isGroup(u) ? `${u.base}:${u.header.count}` : u.block.kind))).toEqual([
-      'exec:1',
+    expect(units.map((u) => (isGroup(u) ? `${u.base}@${u.headFlatIndex}` : u.block.kind))).toEqual([
+      'exec@0',
       'thinking',
-      'exec:1',
+      'exec@2',
     ])
   })
 
