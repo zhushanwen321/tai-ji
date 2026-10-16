@@ -1,8 +1,8 @@
-# TODO：zcode 远程形态偏好层成员校验面（async listModels 经引擎进程 RPC）
+# TODO：zcode 远程形态偏好层成员校验面（async listModels 经引擎进程 RPC）+ GLM plan 通道 headersApplied upstream 定位
 
 ## 状态
 
-未解决（2026-10-16 登记）。前提修复已落地：ADR-0138 补齐 RemoteEngine `translateModelRef`（manifest 声明表快照），但**枚举面缺口仍在**——本登记是它的后续项。
+拆分登记（2026-10-16 真机测试后改写）：①枚举面缺口未解决（本登记主体）；②GLM plan 通道 headersApplied 已锤死为 ZCode.app app-server 自身 bug（与 taiji 无关，见文末附录——真机 A/B 对照证据）。前提修复已落地：ADR-0138 补齐 RemoteEngine `translateModelRef`（manifest 声明表快照）+ 引擎侧 account 直通大小写归一。
 
 ## 问题
 
@@ -20,3 +20,15 @@ async listModels（经引擎进程 RPC 取实时清单）需要：EnginePort 签
 2. `resolveEngineModelWithTranslation` 成员校验改 await。
 3. engine-development-guide 协议面文档同 commit 更新（协议方法语义 + capability 声明）。
 4. 届时 ADR-0137 偏好层降级语义在全部部署形态达成，ADR-0138 边界段随之改写。
+
+## 附录：GLM plan 通道 headersApplied（2026-10-16 真机 A/B 对照，已锤死为 zcode 侧）
+
+真机（staged 引擎 + 独立 pi，ADR-0138 修复后代码）：
+
+| 用例 | 模型 | 解析/翻译 | 运行终态 |
+|---|---|---|---|
+| 显式 pi 词汇 | `zai-coding-cn/glm-5.3-flash` | ✓ 翻译到 `account:zai-individual-coding-plan/glm-5.3-flash`（record 盖章） | ❌ app-server `model_request_failed / invalid_union headersApplied` |
+| 对照：个人 provider | `e512d53e-…/mimo-v2.6-flash` | ✓ | ✅ completed，输出 "ok" |
+| 偏好路径（缺省） | engineDefaults（省略 model） | ✓ 同上翻译+盖章 | ❌ 同 headersApplied |
+
+结论：taiji 修复链全通；`headersApplied` 与通道映射无关（正确通道依旧），是 ZCode.app app-server 在 GLM plan 请求路径上自身的 zod 校验 bug（`Expected 'true' | 'false'`）。处置：向 ZCode 侧反馈/等其更新；taiji 侧错误文案已含「错误来自模型/服务端」指引，无需代码改动。

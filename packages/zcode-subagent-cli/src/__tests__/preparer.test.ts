@@ -583,6 +583,17 @@ describe("resolveZcodeModelRef account 家族直通", () => {
     );
   });
 
+  it("模型段小写再入（幂等产物）→ 大小写不敏感命中并归一到目录原生拼写（2026-10-16 真机回归守卫）", () => {
+    // RemoteEngine 代理侧查表产物 = 目录 provider 段 + 请求方模型段原样（小写）——
+    // 引擎侧 account 直通若精确匹配则再入即炸（真机事故：未知模型 "glm-5.3-flash"）。
+    const catalogPath = writeAccountCatalog("account-idempotent-casing-catalog.json", [
+      { providerId: ACCOUNT_PROVIDER, config: { builtinModelIds: ["GLM-5.3-Flash", "GLM-5.3"] } },
+    ]);
+    expect(resolveZcodeModelRef(`${ACCOUNT_PROVIDER}/glm-5.3-flash`, accountSources(catalogPath))).toBe(
+      `${ACCOUNT_PROVIDER}/GLM-5.3-Flash`,
+    );
+  });
+
   it("builtinModelIds 缺席 → personalModelIds 兜底判清单", () => {
     const catalogPath = writeAccountCatalog("account-personal-ids-catalog.json", [
       { providerId: ACCOUNT_PROVIDER, config: { personalModelIds: ["M2-Plan"] } },

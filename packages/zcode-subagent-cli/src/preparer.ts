@@ -494,8 +494,11 @@ function defaultProviderForShortName(conf: SourceConfig, withKey: Array<[string,
  * wrapper 对内建目录读取注入 entitled 绕过外部 spawn 装载门——app-server 注册表
  * 装载判据 = access.entitled === true，目录构建的账号条目默认非 entitled）。account
  * 凭据由 zcode CLI 账号体系自解析（credentials.json 登录态），不经个人 provider 表
- * ——校验降为目录存在性：规则存在 + 模型在清单内 → 原样放行（大小写保留，注册表
- * 匹配不敏感）。目录定位失败/不可读/规则缺失/模型不在清单 → model_not_available。
+ * ——校验降为目录存在性：规则存在 + 模型在清单内 → 放行并归一到目录原生拼写
+ * （大小写不敏感匹配——与 translatePiModelRefToZcode 查表路径同语义：幂等再入的
+ * 产物模型段可能是请求方小写拼写〔如 RemoteEngine 代理侧查表产物，2026-10-16
+ * 真机实测暴露〕，引擎是目录权威，归一职责在引擎侧）。目录定位失败/不可读/
+ * 规则缺失/模型不在清单 → model_not_available。
  */
 function resolveAccountModelRef(wanted: string, wantedProvider: string, sources?: ZcodeSourcePaths): string {
   const catalogPath = locateZcodeBuiltinCatalog(sources);
@@ -521,8 +524,7 @@ function resolveAccountModelRef(wanted: string, wantedProvider: string, sources?
       `未知 account provider "${wantedProvider}"（内建目录无此规则）。恢复指引：改用目录内 account:* 规则（如 account:zai-individual-coding-plan / account:bigmodel-individual-coding-plan）。`,
     );
   }
-  assertAccountModelKnown(accountRule, wanted, wantedProvider);
-  return wanted;
+  return `${wantedProvider}/${normalizeAccountModel(accountRule, wanted, wantedProvider)}`;
 }
 
 /** 内建目录 providerRules 内查找 account 规则（无规则段/无匹配/条目非对象 → undefined）。 */
@@ -537,20 +539,25 @@ function findAccountProviderRule(catalog: unknown, wantedProvider: string): Reco
 }
 
 /**
- * account 模型清单校验（builtinModelIds 优先、personalModelIds 兜底；清单缺席或
- * 空 = 不设限放行——目录未枚举模型时交由 app-server 注册表实况裁决）。不在清单
- * → model_not_available（列该 account provider 可用模型）。
+ * account 模型清单校验 + 拼写归一（builtinModelIds 优先、personalModelIds 兜底；清单
+ * 缺席或空 = 不设限放行——目录未枚举模型时交由 app-server 注册表实况裁决）。清单非空
+ * 时大小写不敏感匹配（与 translatePiModelRefToZcode 查表路径同款——幂等再入的产物
+ * 模型段可能是请求方小写拼写，引擎侧归一到目录原生拼写）；不在清单 → model_not_available
+ * （列该 account provider 可用模型）。返回目录原生拼写的模型短名。
  */
-function assertAccountModelKnown(accountRule: Record<string, unknown>, wanted: string, wantedProvider: string): void {
+function normalizeAccountModel(accountRule: Record<string, unknown>, wanted: string, wantedProvider: string): string {
   const accountConfig = isRecord(accountRule["config"]) ? accountRule["config"] : {};
   const modelIds = accountConfig["builtinModelIds"] ?? accountConfig["personalModelIds"];
   const short = modelShort(wanted);
-  if (Array.isArray(modelIds) && modelIds.length > 0 && !modelIds.includes(short)) {
+  if (!Array.isArray(modelIds) || modelIds.length === 0) return short;
+  const matched = modelIds.find((m) => typeof m === "string" && m.toLowerCase() === short.toLowerCase());
+  if (matched === undefined) {
     throw new ZcodePrepareError(
       "model_not_available",
-      `未知模型 "${short}"（account provider ${wantedProvider} 下可用: ${modelIds.join(", ")}）。`,
+      `未知模型 "${short}"（account provider ${wantedProvider} 下可用: ${modelIds.filter((m) => typeof m === "string").join(", ")}）。`,
     );
   }
+  return matched;
 }
 
 /**
