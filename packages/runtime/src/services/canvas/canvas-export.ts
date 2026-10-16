@@ -88,16 +88,22 @@ export function renderPlanningDoc(state: CanvasState, generatedAt: string): stri
 /** §3 方案选择与否决记录：每个 resolve 父问题一段（选定 / 已否决 / 未选定三态行）；
  * 无解边时输出占位行（段落占位由调用方标题承担，这里只产出行内容）。 */
 function renderSelectionSection(state: CanvasState, lines: string[]): void {
-  let hasSelectionSection = false
+  // 先按 from 去重出唯一父问题集再逐问题成段：同一父问题挂 ≥2 条 resolve 边（多候选
+  // 比较）时只产出一个段落，候选行各一条——不与注释「每个 resolve 父问题一段」相悖。
+  const parentIds = new Set<string>()
   for (const e of state.edges) {
-    if (e.type !== 'resolve') continue
-    hasSelectionSection = true
-    lines.push(`### 问题 ${nodeLabel(state, e.from)}`)
-    for (const candidate of state.edges.filter((x) => x.type === 'resolve' && x.from === e.from)) {
+    if (e.type === 'resolve') parentIds.add(e.from)
+  }
+  if (parentIds.size === 0) {
+    lines.push('（无解边——画布未进入方案比较阶段）')
+    return
+  }
+  for (const parentId of parentIds) {
+    lines.push(`### 问题 ${nodeLabel(state, parentId)}`)
+    for (const candidate of state.edges.filter((x) => x.type === 'resolve' && x.from === parentId)) {
       renderSelectionCandidate(state, candidate.to, lines)
     }
   }
-  if (!hasSelectionSection) lines.push('（无解边——画布未进入方案比较阶段）')
 }
 
 /** 单个候选方案行：selected（附对比理由）/ rejected（附否决与复活条件）/ 其余（生命周期）。 */
