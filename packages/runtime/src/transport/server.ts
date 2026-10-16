@@ -84,6 +84,10 @@ import { warnOnce } from '../utils/warn-once.js'
  */
 export interface RuntimeServerOptionalServices {
   extension?: IExtensionService
+  /** provider 变更后的 zcode 镜像同步（write-through，ADR-0138 镜像架构）：settings 域
+   *  provider 变更成功后由 provider-message-handler 调用；组合根接 runZcodeProviderStartupSync
+   *  （与启动同步同源同实现——同一判定链，镜像天然对账）。缺省 undefined = 不镜像。 */
+  zcodeProviderMirrorSync?: () => Promise<void>
   plugin?: IPluginService
   git?: GitService
   file?: FileService
@@ -182,6 +186,7 @@ export class RuntimeServer implements IMessageBroker {
   private handoffService?: HandoffService
   /** W4：skillRegistry（可选，landing 全局/项目 skill 缓存源） */
   private skillRegistry?: SkillRegistry
+  private zcodeProviderMirrorSync?: () => Promise<void>
   /** 导入 pi 会话服务（import-session U2）：可选，setServices 注入后经 sessionHandler ctx 触达。 */
   private importService?: ImportService
   /** 生成指标服务（composer-gen-stats u3）：可选，setServices 注入后经 sessionHandler ctx 触达。 */
@@ -290,7 +295,8 @@ export class RuntimeServer implements IMessageBroker {
   private assignServices(session: ISessionService, config: IConfigService, model: IModelService, optional: RuntimeServerOptionalServices): void {
     // genStats（composer-gen-stats D4）：恢复腿 RPC 路由依赖（sessionHandler ctx 读
     // this.genStatsService）；其余可选服务由 assembleOptionalHandlers 按域自行解构。
-    const { extension, plugin, git, file, skillRegistry, handoff, importService, genStats } = optional
+    const { extension, plugin, git, file, skillRegistry, handoff, importService, genStats, zcodeProviderMirrorSync } = optional
+    this.zcodeProviderMirrorSync = zcodeProviderMirrorSync
     this.gitService = git
     this.fileService = file
     this.handoffService = handoff
@@ -403,6 +409,9 @@ export class RuntimeServer implements IMessageBroker {
       nextPushId: () => this.broker.nextPushId(),
       broadcast: (msg) => this.broker.broadcast(msg),
       broadcastProviderList: () => this.broker.broadcastProviderList(),
+      providersMutatedSync: this.zcodeProviderMirrorSync
+        ? () => this.zcodeProviderMirrorSync!()
+        : undefined,
       broadcastSkillList: () => this.broker.broadcastSkillList(),
       broadcastSkillCacheInvalidated: (scope: SkillCacheScope, cwd?: string, partial?: boolean) => this.broker.broadcastSkillCacheInvalidated(scope, cwd, partial),
       broadcastAgentList: () => this.broker.broadcastAgentList(),

@@ -81,6 +81,18 @@ export class ProviderMessageHandler {
   // scoped-model design §3.3 D7：reply 与广播（message-broker.buildProviderListMsgs）均含 scopedModels。
   // supportedLevels 同样两路同标（U5 接线）：本 ctx 无 appInfo，piVersion 缺省（registry 以
   // 逐模型签名兜底，缓存正确性不依赖该组分——见 model-capability.ts 头注）。
+  /**
+   * provider 变更成功后的 write-through 镜像（ADR-0138 镜像架构：taiji 写自己 provider
+   * 配置时同步写 zcode engine 的 provider 配置副本）。fire-and-forget：镜像同步内部
+   * 自捕获错误只 warn，失败不阻断配置写入应答；副本读链每次现读，最终一致窗口为
+   * 单次小文件写（~10ms 量级）。
+   */
+  private mirrorAfterMutation(): void {
+    this.ctx.providersMutatedSync?.().catch(err => {
+      console.warn('[provider-message-handler] zcode provider mirror sync failed:', err instanceof Error ? err.message : String(err))
+    })
+  }
+
   private handleGetProviders(ws: WsType, msg: Extract<ClientMessage, { type: 'config.getProviders' }>): boolean {
     this.ctx.reply(ws, msg.id, 'config.providers', {
       providers: attachSupportedLevelsSafe(this.ctx.modelService, this.ctx.configService.listProviders()),
@@ -100,6 +112,7 @@ export class ProviderMessageHandler {
     const result = await this.ctx.configService.refreshProviderCatalogs()
     this.ctx.reply(ws, msg.id, 'config.providerCatalogsRefreshed', result)
     this.ctx.broadcastProviderList()
+    this.mirrorAfterMutation()
     return true
   }
 
@@ -112,6 +125,7 @@ export class ProviderMessageHandler {
       ...(setResult.quotaAutoEnabled ? { quotaAutoEnabled: true } : {}),
     })
     this.ctx.broadcastProviderList()
+    this.mirrorAfterMutation()
     reconcileDefaultModelAfterProviderChange(this.ctx, 'provider-updated', setResult.newDefault)
     return true
   }
@@ -120,6 +134,7 @@ export class ProviderMessageHandler {
     const delResult = await this.ctx.configService.deleteProvider(msg.payload.providerId)
     this.ctx.reply(ws, msg.id, 'config.providerUpdated', { providerId: msg.payload.providerId, deleted: true })
     this.ctx.broadcastProviderList()
+    this.mirrorAfterMutation()
     reconcileDefaultModelAfterProviderChange(this.ctx, 'provider-deleted', delResult.newDefault)
     return true
   }
@@ -135,6 +150,7 @@ export class ProviderMessageHandler {
     const toggleResult = this.ctx.configService.toggleProviderEnabled(providerId, enabled)
     this.ctx.reply(ws, msg.id, 'config.providerUpdated', { providerId })
     this.ctx.broadcastProviderList()
+    this.mirrorAfterMutation()
     reconcileDefaultModelAfterProviderChange(this.ctx, 'provider-updated', toggleResult.newDefault)
     return true
   }
@@ -150,6 +166,7 @@ export class ProviderMessageHandler {
     const removeResult = await this.ctx.configService.removeProviderByKind(providerId, kind)
     this.ctx.reply(ws, msg.id, 'config.providerUpdated', { providerId, deleted: true })
     this.ctx.broadcastProviderList()
+    this.mirrorAfterMutation()
     reconcileDefaultModelAfterProviderChange(this.ctx, 'provider-deleted', removeResult.newDefault)
     return true
   }
@@ -221,6 +238,7 @@ export class ProviderMessageHandler {
     // 仅成功时广播（result 有 result 字段 = 成功；有 error 字段 = 失败，不广播）
     if ('result' in result) {
       this.ctx.broadcastProviderList()
+    this.mirrorAfterMutation()
       // 导入后重选 defaultModel：不传 newDefault → reconcile 自动走 getDefaultModel 兜底
       //（内部 findValidDefaultModel + wasFixed:true 时写回 settings.json）。
       reconcileDefaultModelAfterProviderChange(this.ctx, 'provider-updated')
@@ -230,7 +248,8 @@ export class ProviderMessageHandler {
       //（与 config.refreshProviderCatalogs case 的 refresh→broadcast 模式同构）；不阻塞导入
       // reply，失败仅日志（refresh 自身 4s 超时 fail-safe，导入主语义已成功，失败可重进页面重试）。
       void this.ctx.configService.refreshProviderCatalogs()
-        .then(() => { this.ctx.broadcastProviderList() })
+        .then(() => { this.ctx.broadcastProviderList()
+    this.mirrorAfterMutation() })
         .catch((e: unknown) => {
           console.warn('[settings-handler] applyImportProviders: provider catalog refresh failed:', e)
         })

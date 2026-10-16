@@ -1485,6 +1485,14 @@ async function main(): Promise<void> {
     worktree: worktreeService,
     terminal: terminalService,
     quota: quotaService,
+    // zcode 镜像同步 write-through（ADR-0138 镜像架构）：settings 域 provider 变更成功后
+    // 与启动同步同源同实现地重跑镜像（同一判定链，副本天然对账；失败只 warn 不阻断配置写入）。
+    zcodeProviderMirrorSync: () =>
+      runZcodeProviderStartupSync({
+        configStore,
+        credentialResolver: providerCredentialResolver,
+        isModelsCorrupted: isModelsStoreCorrupted,
+      }).then(() => undefined),
     // ai-voice-tts：tts 四 RPC 路由（TtsMessageHandler 装配 + buildRoutes 展开 handles）。
     tts: ttsService,
     handoff: handoffService,
