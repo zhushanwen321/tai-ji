@@ -57,6 +57,20 @@ import type { QuotaConfigurePayload } from './quota-types'
 // 消除 shared 侧双声明漂移（engine-provider-unification D5）。
 import type { PlanLifecycleState, SubagentEngineModelInfo } from '@zhushanwen/extension-protocol'
 
+// canvas 域载荷形状 SSOT 直引（problem-solve-canvas U1 契约；canonical =
+// packages/extension-protocol/src/extensions/canvas，barrel 已 re-export）——
+// CanvasState / CanvasListEntry / CanvasMutateReply / CanvasMutateRequest 等形状
+// 单源于彼处，shared 仅登记 type→payload 映射（type-only 零运行时面，
+// PlanLifecycleState 直引先例同款；镜像会造双源，禁）。
+import type {
+  CanvasActor,
+  CanvasEventType,
+  CanvasListReply,
+  CanvasMutateReply,
+  CanvasMutateRequest,
+  CanvasState,
+} from '@zhushanwen/extension-protocol'
+
 // tts.* 域载荷形状 SSOT 引用（ai-voice-tts 设计 §7.1：域形状归属 tts-types，本文件仅登记 type→payload 映射）
 import type {
   SanitizedTtsConfig,
@@ -301,6 +315,14 @@ export type ClientMessageType =
   //（D1）。payload/reply 形状见 mcp 域登记段；ADR-0065 mutation 归类（add/update/setEnabled/remove）
   // 由 mutation-reply-contract 登记。
   | 'mcp.list' | 'mcp.add' | 'mcp.update' | 'mcp.setEnabled' | 'mcp.remove' | 'mcp.test' | 'mcp.testCancel'
+  // canvas.*（problem-solve-canvas 设计 §3.1，U1 契约面）：画布三 RPC——list（托盘/入口
+  // 清单拉取）/ get（单画布全量）/ mutate（GUI 直改唯一写入口，actor=user；agent 走
+  // marker 通道不经 WS）。reply 与 request 同名（session.subscribe / rollingRestart.status
+  // 同款 payload 消费型同名模式）；canvas.updated 广播登记在 ServerMessageType 段。
+  // mutation 门禁归类：canvas 域无「renderer 持显示副本 + reply 回显生效值」形态——
+  // 全量状态经 canvas.get 拉取 + canvas.updated 广播失效收敛（拉为主，ADR-0097），
+  // mutate reply 只回事件回执（eventId/evType/summary）或结构化错误，不进 MUTATION_DOMAINS。
+  | 'canvas.list' | 'canvas.get' | 'canvas.mutate'
 
 // ── Payload 类型定义 ────────────────────────────────────────────
 
@@ -1053,6 +1075,11 @@ export interface ClientMessageMap {
   'mcp.remove': McpRemoveRequest
   'mcp.test': McpTestRequest
   'mcp.testCancel': McpTestCancelRequest
+  // ── canvas.*（problem-solve-canvas U1 契约面）请求 payload：形状 SSOT 在
+  // @zhushanwen/extension-protocol canvas 模块（params 两通道同构——WS RPC 与 marker）。list 无参数。
+  'canvas.list': Record<string, never>
+  'canvas.get': { canvasId: string }
+  'canvas.mutate': { actor: CanvasActor } & CanvasMutateRequest
 }
 
 // ClientMessage 由 ClientMessageMap 直接派生：每个 type 字面量映射到
@@ -1376,6 +1403,15 @@ export type ServerMessageType =
   // 广播帧（`mcp.test` 异步任务句柄的完成侧，D8① pi 实测类徽标数据源；冒号形态对齐
   // rollingRestart:* 全局帧先例，payload 无 sessionId 走 broker 纯全局通道）。
   | 'mcp:testResult'
+  // canvas.updated（problem-solve-canvas 设计 §3.1(1) D4，U1 契约面）：画布变更全局广播
+  // ——无 sessionId（画布是跨 session 共享资源，不属任何 session；`canvas.` 前缀不受
+  // session./message. 缺 sid warn 约束），经 broker 全局通道（broker.broadcast，非 bus
+  // topic）。广播只是失效提示：renderer 收到后重新 canvas.get 拉取收敛（拉为主 ADR-0097）。
+  // evType = 结构化领域事件类型（词表 SSOT = extension-protocol CANVAS_EVENT_TYPES；
+  // CanvasCreated 驱动 renderer 创建后自动唤起，其余类型仅失效提示）。
+  | 'canvas.updated'
+  // canvas.* 三 RPC 的 reply（与 request 同名——session.subscribe 同名模式）。
+  | 'canvas.list' | 'canvas.get' | 'canvas.mutate'
 
 /** skill 缓存失效广播的作用域：global=全局 skill 变动，project=某项目 cwd 的 skill 变动。 */
 export type SkillCacheScope = 'global' | 'project'
@@ -3005,6 +3041,19 @@ export interface ServerMessageMapBase {
   'mcp.testCancel:result': McpTestCancelResult
   /** mcp:testResult 广播：probe 终态回填（D8① 徽标 + testId/name 回显，形状 SSOT 在 ./mcp）。 */
   'mcp:testResult': McpTestResultEvent
+
+  // ── canvas 域（problem-solve-canvas U1 契约面；payload 形状 SSOT 直引
+  // @zhushanwen/extension-protocol canvas 模块）──
+  // canvas.list reply：画布清单（托盘列表数据源；元素含阶段徽标派生输入）。
+  'canvas.list': CanvasListReply
+  // canvas.get reply：单画布全量只读视图（renderer 不直读磁盘，ADR-0097 拉为主）。
+  'canvas.get': CanvasState
+  // canvas.mutate reply：两态信封——成功回事件回执（eventId/evType/summary，与
+  // canvas.updated 广播同源同值）/ 失败回结构化错误（code + recover 恢复指引）。
+  // 不回全量状态：全量经广播失效后 canvas.get 拉取收敛（无乐观回显——事实驱动⑨）。
+  'canvas.mutate': CanvasMutateReply
+  // canvas.updated 广播：无 sid 全局通道；广播只是失效提示，消费方收到后重新拉取。
+  'canvas.updated': { canvasId: string; evType: CanvasEventType; eventId: string; summary: string }
 }
 
 /**
@@ -3398,6 +3447,12 @@ export interface ReplyPayloadMap {
   'tts.configure': ServerMessageMap['tts.configure:result']
   'tts.speak': ServerMessageMap['tts.speak:result']
   'tts.getCapabilities': ServerMessageMap['tts.getCapabilities:result']
+
+  // ── canvas.*（problem-solve-canvas U1 契约面）：三 RPC reply 与 request 同名
+  //（payload 消费型——session.subscribe / rollingRestart.status 同款模式）。
+  'canvas.list': ServerMessageMap['canvas.list']
+  'canvas.get': ServerMessageMap['canvas.get']
+  'canvas.mutate': ServerMessageMap['canvas.mutate']
 }
 
 /**

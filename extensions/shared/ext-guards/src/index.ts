@@ -160,6 +160,52 @@ export function isSubagentProcess(
 	return env[SUBAGENT_MARKER_ENV] === "1";
 }
 
+// ── taiji GUI 宿主判据（isTaijiGuiHost，dmg-r1-7 跨包收敛）──────────────
+//
+// 背景：taiji runtime 对托管 pi 恒注入 TAIJI_AGENT_EXT_LOG=1（恒注入点
+// packages/pi-rpc/src/env.ts 的 outboundExtras；名义语义是扩展日志开关，
+// extension-logger 见之落盘 INFO），独立 pi 无此信号。env 只证明 taiji runtime
+// 在上游，宿主没有 marker 路由的形态（TUI / json / print）select 会落终端 UI——
+// 完整谓词必须再收紧 ctx.mode === "rpc"；单查 env 会在 env 泄漏到独立 pi 时误入
+// select 挂起（禁超时探测，对齐时间平抑红线：不做「挂起后超时回退」类时间窗兜底）。
+//
+// [双语义耦合登记，SSOT 随谓词收敛单点化于此] 本 env 名义语义是扩展日志开关，
+// 本谓词是第二消费方（宿主分流）——若日志开关走向可配置（值不再是恒 '1'），全部
+// 宿主分流同帧静默失效，届时必须拆专用宿主信号 env 并纳入恒注入，不得沿用本名；
+// 拆分时消费方（plan state.ts / canvas host.ts 的 re-export 调用点）一并随迁移。
+//
+// 收敛历史：plan 包内三处 `isTaijiHost() && ctx.mode === "rpc"` 复写先收敛为
+// plan state.ts 单点（D-B1-7），canvas host.ts 此前持独立实现、一致性靠两侧注释
+// 互指维持（dmg-r1-7 判其为无机器检查的双实现）——现整体收敛于本包，两包改
+// re-export，一致性由构造保证。
+
+/** taiji GUI 宿主判定 env 键（taiji runtime 恒注入 "1"；名义语义 = 扩展日志开关，见分节双语义耦合登记）。 */
+export const TAIJI_GUI_HOST_ENV = "TAIJI_AGENT_EXT_LOG";
+
+/**
+ * taiji runtime 宿主 env 信号（isTaijiGuiHost 的 env 腿）：`TAIJI_GUI_HOST_ENV`
+ * 严格等值 "1" 判定。每次调用时读（不可模块加载时缓存——测试与运行中 env 都可能
+ * 变化）。
+ */
+export function isTaijiHost(): boolean {
+	return process.env[TAIJI_GUI_HOST_ENV] === "1";
+}
+
+/** 宿主形态判别的最小结构面（pi ExtensionContext 的 mode 字段结构化投影——零 pi SDK 依赖）。 */
+// oe-exempt:20261016:framework:宿主形态判别的数据形状契约（pi ctx 的结构化投影，非抽象接口单实现）
+export interface GuiHostContextLike {
+	mode: string;
+}
+
+/**
+ * taiji GUI 宿主完整谓词：env 信号 + rpc 模式（marker select 只在 rpc 宿主有路由）。
+ * 消费方 = plan 的 submit-review marker select / complete 执行方式 form / E3 恢复
+ * 分流（state.ts re-export）与 canvas 六工具的 select 前置门（host.ts re-export）。
+ */
+export function isTaijiGuiHost(ctx: GuiHostContextLike): boolean {
+	return isTaijiHost() && ctx.mode === "rpc";
+}
+
 // ── stale ctx 守卫（guardStaleCtx，崩溃韧性 D1）────────────────────────
 //
 // 背景：pi 的 extension API

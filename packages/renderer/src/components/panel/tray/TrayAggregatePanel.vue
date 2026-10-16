@@ -28,7 +28,8 @@
     <ScrollArea class="min-h-0 flex-1">
       <!-- 段间 hairline 分隔（demo .tray-seg + .tray-seg { border-top: 1px solid var(--hairline) }） -->
       <div class="flex flex-col divide-y divide-hairline">
-        <!-- built-in 各类别段（顺序 = 外壳 built-in 固定序 bash → subagent → workflow → session） -->
+        <!-- built-in 各类别段（顺序 = 外壳 built-in 固定序 bash → subagent → workflow → session →
+             canvas；canvas 段恒在——外壳对 canvas 件豁免「全无不渲染」，创建入口恒可达） -->
         <section
           v-for="section in sections"
           :key="section.kind"
@@ -51,12 +52,13 @@
           </div>
           <div :class="[SEGMENT_HEIGHT_CLASS, 'flex min-h-0 flex-col']">
             <TrayNativePanel
-              v-if="section.kind !== 'session'"
+              v-if="section.kind !== 'session' && section.kind !== 'canvas'"
               :kind="section.kind"
               :session-id="sessionId"
               :pinned="pinned"
             />
-            <TraySessionPanel v-else :session-id="sessionId" :pinned="pinned" />
+            <TraySessionPanel v-else-if="section.kind === 'session'" :session-id="sessionId" :pinned="pinned" />
+            <TrayCanvasPanel v-else :pinned="pinned" />
           </div>
         </section>
 
@@ -90,6 +92,7 @@ import { useI18n } from 'vue-i18n'
 import type { Component } from 'vue'
 import type { GuiComponent, WidgetMeta } from '@zhushanwen/extension-protocol'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import TrayCanvasPanel from '@/components/panel/tray/TrayCanvasPanel.vue'
 import TrayNativePanel from '@/components/panel/tray/TrayNativePanel.vue'
 import TraySessionPanel from '@/components/panel/tray/TraySessionPanel.vue'
 import TrayWidgetPanel from '@/components/panel/tray/TrayWidgetPanel.vue'

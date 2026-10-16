@@ -14,13 +14,16 @@
 import { overlayControl, getOverlayControlState } from './state'
 import type { OverlayContent } from './types'
 
-/** 载荷有效性判据（browser:url+sessionId 非空 / workflow:sessionId+runId 均非空 / scheduler:sessionId 非空） */
+/** 载荷有效性判据（browser:url+sessionId 非空 / workflow:sessionId+runId 均非空 / scheduler:sessionId 非空 / canvas:canvasId 非空） */
 function isValidContent(content: OverlayContent): boolean {
   if (content.kind === 'browser') {
     return content.payload.url.trim() !== '' && content.payload.sessionId.trim() !== ''
   }
   if (content.kind === 'scheduler') {
     return content.payload.sessionId.trim() !== ''
+  }
+  if (content.kind === 'canvas') {
+    return content.payload.canvasId.trim() !== ''
   }
   return content.payload.sessionId.trim() !== '' && content.payload.runId.trim() !== ''
 }
@@ -63,6 +66,19 @@ export function openBrowser(url: string, sessionId: string): void {
  */
 export function openSchedulerOverlay(sessionId: string): void {
   openOverlay({ kind: 'scheduler', payload: { sessionId } })
+}
+
+/**
+ * 打开浮层问题解决画布 tab（problem-solve-canvas §3.1(3)：对齐 scheduler 双入口先例
+ * ——同壳 tab 切换 + 独立 content kind 直达打开）。画布跨 session 共享（设计 D4/D7），
+ * 载荷只有 canvasId、无会话归属：会话删除级联对 canvas 内容不适用（不关浮层）。
+ *
+ * @param canvasId 画布 id（托盘列表 / 程序化直达打开的唯一寻址键）
+ *
+ * 已开态调用 = 单例换内容（换画布直接换载荷）；无效载荷 no-op（openOverlay 校验）。
+ */
+export function openCanvasOverlay(canvasId: string): void {
+  openOverlay({ kind: 'canvas', payload: { canvasId } })
 }
 
 /**

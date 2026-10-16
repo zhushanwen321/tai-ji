@@ -874,6 +874,11 @@ async function main(): Promise<void> {
       onSessionManagerRequest: (requestId, sessionId, action, params) => {
         server.handleSessionManagerRequest(requestId, sessionId, action, params)
       },
+      // canvas 请求路由（problem-solve-canvas U3）：fire-and-forget 调 server.handleCanvasRequest
+      //（由 CanvasMessageHandler 异步处理并回写 select value 应答；session-manager 同款形态）。
+      onCanvasRequest: (requestId, sessionId, action, params) => {
+        server.handleCanvasRequest(requestId, sessionId, action, params)
+      },
       onStatusSetUpdate: (payload) => {
         server.handleStatusSetUpdate(payload)
       },

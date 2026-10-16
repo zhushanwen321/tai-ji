@@ -39,6 +39,7 @@ import { sendHandlerError } from './handler-utils.js'
 import type { IMessageBus } from '../services/message-bus/message-bus.js'
 import { BtwError } from '../services/session/btw-service.js'
 import type { BtwCreateResult, BtwService } from '../services/session/btw-service.js'
+import { unbindCanvasOnSessionDeleted } from '../services/canvas/canvas-service.js'
 
 /**
  * forkState 具名类型经 ServerMessageMap 索引访问取形（shared 包出口是选择性 re-export、
@@ -183,6 +184,11 @@ export class BtwMessageHandler {
             // details 形态对齐（关键规则 #7：错误帧关联会话，renderer 可路由归属）。
             return this.ctx.sendError(ws, 'line_not_found', `[btw] thread already closed: ${vid}`, msg.id, { sessionId: rec.mainSid })
           }
+          // 画布绑定解绑（problem-solve-canvas，解绑规则唯一化「解绑 = 仅 session 真删除」）：
+          // btw.remove = 用户显式删除线 session（closeLine deleteSessionFile）——与
+          // SessionLifecycle.delete 的 btw 直删分支是同一条真实删除路径的两个入口，解绑
+          // 不因入口不同而漏（F1-11 同族补齐：漏解的绑定滞留内存 Map 至 runtime 重启）。
+          unbindCanvasOnSessionDeleted(vid)
           this.publishThreadList(rec.mainSid)
           return this.ctx.reply(ws, msg.id, 'btw.remove', { vid })
         } catch (e) {

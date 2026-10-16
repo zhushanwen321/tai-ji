@@ -16,6 +16,14 @@ import type { BtwHandlerContext } from '../btw-message-handler.js'
 import { BtwError } from '../../services/session/btw-service.js'
 import type { BtwLineRecord } from '../../services/session/btw-service.js'
 
+// ── canvas 绑定解绑 spy（btw.remove = 线 session 真删除 → 解绑，F1-11 同族）──
+
+vi.mock('../../services/canvas/canvas-service.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../services/canvas/canvas-service.js')>()
+  return { ...actual, unbindCanvasOnSessionDeleted: vi.fn() }
+})
+import { unbindCanvasOnSessionDeleted } from '../../services/canvas/canvas-service.js'
+
 // ── mock helpers ─────────────────────────────────────────────
 
 function mockWs(): WsType {
@@ -306,6 +314,28 @@ describe('BtwMessageHandler · btw.remove', () => {
     expect(errorCalls(ctx)).toEqual([[ws, 'line_not_found', '[btw] thread already closed: btw:t1', 'req-1', { sessionId: 'main-1' }]])
     expect(replyCalls(ctx)).toHaveLength(0)
     expect(publish).not.toHaveBeenCalled()
+  })
+
+  it('btw.remove 成功即解绑该线画布绑定（解绑规则唯一化：线 session 真删除，F1-11 同族补齐）', async () => {
+    const { ctx, getLine, closeLine } = mockCtx()
+    getLine.mockReturnValue(lineRec('btw:t1', 'main-1'))
+    closeLine.mockResolvedValue(true)
+    const handler = new BtwMessageHandler(ctx)
+
+    await handler.handleBtwMessage(msg('btw.remove', { vid: 'btw:t1' }), mockWs())
+
+    expect(vi.mocked(unbindCanvasOnSessionDeleted)).toHaveBeenCalledWith('btw:t1')
+  })
+
+  it('btw.remove 竞态落空（closeLine false）不解绑——该线已由并发删除路径解绑', async () => {
+    const { ctx, getLine, closeLine } = mockCtx()
+    getLine.mockReturnValue(lineRec('btw:t1', 'main-1'))
+    closeLine.mockResolvedValue(false)
+    const handler = new BtwMessageHandler(ctx)
+
+    await handler.handleBtwMessage(msg('btw.remove', { vid: 'btw:t1' }), mockWs())
+
+    expect(vi.mocked(unbindCanvasOnSessionDeleted)).not.toHaveBeenCalled()
   })
 
   it('closeLine 抛 BtwError → error ack 透传领域 code，不 reply 不广播', async () => {

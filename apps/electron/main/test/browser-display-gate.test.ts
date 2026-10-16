@@ -112,9 +112,11 @@ describe('display-gate 纯策略', () => {
   })
 
   describe('IPC payload 解析（error envelope + 边界用例）', () => {
-    it('overlay-state：合法形态归一（含关闭态归一）', () => {
+    it('overlay-state：合法形态归一（含关闭态归一 + canvas 无会话归属形态）', () => {
       expect(parseOverlayDisplayState({ open: true, content: 'browser', sessionId: 'A' })).toEqual({ open: true, content: 'browser', sessionId: 'A' })
       expect(parseOverlayDisplayState({ open: false, content: 'browser', sessionId: 'A' })).toEqual(CLOSED_OVERLAY)
+      // canvas 跨 session 无会话归属（problem-solve-canvas D4/D7）：sessionId 恒 null
+      expect(parseOverlayDisplayState({ open: true, content: 'canvas', sessionId: null })).toEqual({ open: true, content: 'canvas', sessionId: null })
     })
 
     it('overlay-state：非法 payload 抛错（error envelope 带原因）', () => {
@@ -123,6 +125,8 @@ describe('display-gate 纯策略', () => {
       expect(() => parseOverlayDisplayState({ open: true, content: 'drawer', sessionId: 'A' })).toThrow(/content must be/)
       expect(() => parseOverlayDisplayState({ open: true, content: 'browser', sessionId: '' })).toThrow(/sessionId must be a non-empty string/)
       expect(() => parseOverlayDisplayState({ open: true, content: 'browser' })).toThrow(/sessionId must be a non-empty string/)
+      // canvas 的会话归属校验独立分支：sessionId 非 null 拒绝（画布不属任何会话）
+      expect(() => parseOverlayDisplayState({ open: true, content: 'canvas', sessionId: 'A' })).toThrow(/sessionId must be null for canvas/)
     })
 
     it('shields：合法形态（fullscreen 无 rect / 非全屏带 rect）', () => {

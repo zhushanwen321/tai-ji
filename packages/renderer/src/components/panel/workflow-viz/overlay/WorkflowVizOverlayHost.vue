@@ -8,8 +8,8 @@
   - 数据源：开合/当前内容读 core/domain/overlay（SSOT，u-w1-core 迁移——workflow-viz-overlay
     的 overlayOpen/overlayCurrent 已退役）；DAG 解析态（overlayDag/overlayDagError）与
     一级 tab 展示态（overlayTab，scheduler 整合 2026-10-06）留
-    renderer 控制器 workflow-viz-overlay.ts；本容器壳承载 workflow 与 scheduler 两类内容
-    （browser 由 BrowserOverlay 承载，三壳互斥）；scheduler 内容下 run 相关 props 按无 run
+    renderer 控制器 workflow-viz-overlay.ts；本容器壳承载 workflow / scheduler / canvas
+    三类内容（browser 由 BrowserOverlay 承载，三壳互斥）；scheduler 内容下 run 相关 props 按无 run
     形态透传（run/dag/dagError = null，「运行」tab 由壳按 run 缺省禁用）；run
     投影从 workflowStore 分区按 runId 选中（recordsOf 响应式读，workflowUpdate 信号触发
     的重新拉取经 store 自动到达）；节点六态/当前 phase/已用时长在本容器单处派生后经
@@ -94,19 +94,25 @@ const panelRef = ref<InstanceType<typeof WorkflowLivePanel> | null>(null)
 const { isOpen: overlayOpen, current: overlayContent } = useOverlayControl()
 
 /** workflow 内容开合（单例换内容门控，u-w2-browser-mount）：browser 内容由 BrowserOverlay 的
- *  壳承载，workflow/scheduler 两类内容由本组件壳承载（scheduler 整合 2026-10-06），三壳互斥不叠显。 */
+ *  壳承载，workflow/scheduler/canvas 三类内容由本组件壳承载（scheduler 整合 2026-10-06；
+ *  canvas 画布 tab，problem-solve-canvas §3.1(3)），三壳互斥不叠显。 */
 const isWorkflowOpen = computed(() => overlayOpen.value && overlayContent.value?.kind === 'workflow')
 
 /** scheduler 内容开合（定时任务 tab 直达）：本组件壳同时承载 workflow 与 scheduler 两类内容。 */
 const isSchedulerOpen = computed(() => overlayOpen.value && overlayContent.value?.kind === 'scheduler')
 
-/** 壳开合（本组件承载的两类内容任一在场即开——Guard/scheduler tab 数据链共用该门控）。 */
-const isOverlayShellOpen = computed(() => isWorkflowOpen.value || isSchedulerOpen.value)
+/** canvas 内容开合（画布 tab 直达，problem-solve-canvas §3.1(3)）：本组件壳承载的第三类内容。 */
+const isCanvasOpen = computed(() => overlayOpen.value && overlayContent.value?.kind === 'canvas')
 
-/** 当前内容所属会话（两类载荷都持 sessionId；scheduler tab 的 ViewHost per-session 分区键）。 */
+/** 壳开合（本组件承载的三类内容任一在场即开——Guard/scheduler tab 数据链共用该门控）。 */
+const isOverlayShellOpen = computed(() => isWorkflowOpen.value || isSchedulerOpen.value || isCanvasOpen.value)
+
+/** 当前内容所属会话（workflow/scheduler 两类载荷持 sessionId；canvas 跨 session 无会话归属
+ *  ——空串。scheduler tab 的 ViewHost per-session 分区键；canvas tab body 无会话数据需求）。 */
 const overlaySessionId = computed(() => {
   const cur = overlayContent.value
-  return cur !== null ? cur.payload.sessionId : ''
+  if (cur === null || cur.kind === 'canvas') return ''
+  return cur.payload.sessionId
 })
 
 /** 当前 workflow run 投影（core OverlayContent → Host 的 run 选择形状；非 workflow 内容 = null）。 */
@@ -118,8 +124,8 @@ const overlayRun = computed<{ sessionId: string; runId: string } | null>(() => {
 /** Guard 重挂代际（fallback 后递增；下次 open 重挂全新 Guard 实例复位 failed——D10 每次点击均重试）。 */
 const guardEpoch = ref(0)
 
-// 本组件承载的内容（workflow / scheduler）开时递增（immediate 首挂同样建立递增基线，
-// 保证 :key 稳定存在）。[U4 修复] 门控用 isOverlayShellOpen（本组件两类内容的 kind 判定）
+// 本组件承载的内容（workflow / scheduler / canvas）开时递增（immediate 首挂同样建立递增基线，
+// 保证 :key 稳定存在）。[U4 修复] 门控用 isOverlayShellOpen（本组件三类内容的 kind 判定）
 // 而非裸 overlayOpen：开合态 SSOT 迁 core 后 isOpen kind 无关（browser 浮层开着时也是
 // true），裸值会让 Guard 随 browser 开合无谓重挂、且错过「workflow → browser 换出再换回
 // （isOpen 全程 true）」的重入重挂——fresh Guard 复位 failed 的语义对本组件两类内容都有

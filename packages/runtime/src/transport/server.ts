@@ -13,7 +13,7 @@
 import type { WebSocket as WsType } from 'ws'
 import type { ClientMessage, ClientMessageType, RollingRestartStatusPayload, ServerMessage, ServerMessageType, SkillCacheScope } from '@taiji/shared'
 import { EXTENSION_EVENTS, OUTBOUND_FRAME_WARN_BYTES, OUTBOUND_FRAME_TRUNCATE_BYTES } from '@taiji/shared'
-import type { SessionManagerAction } from '@zhushanwen/extension-protocol'
+import type { SessionManagerAction, CanvasMarkerAction } from '@zhushanwen/extension-protocol'
 import type { ISessionService, IConfigService, IModelService, IMessageBroker, IExtensionService, IPluginService, IAuthService, SubagentModelSwitchGateway } from '../interfaces.js'
 
 /** authService 未注入时的兜底（组合根必传；防御性空实现防 handler 空指针） */
@@ -54,6 +54,9 @@ import { TtsMessageHandler } from './tts-message-handler.js'
 import { UsageMessageHandler } from './usage-message-handler.js'
 import { PresetMessageHandler } from './preset-message-handler.js'
 import { SessionManagerHandler } from './session-manager-handler.js'
+// problem-solve-canvas U3：canvas 装配（CanvasService 构造封装在 canvas-assembly.ts）
+import { assembleCanvas } from './canvas-assembly.js'
+import type { CanvasMessageHandler } from './canvas-message-handler.js'
 import { BtwMessageHandler } from './btw-message-handler.js'
 import { SubagentMessageHandler } from './subagent-message-handler.js'
 // BtwRoutingDeps（btw-question M2-b / B1 授权）：组合根构造 BtwService 后经 optional.btw 注入。
@@ -214,6 +217,8 @@ export class RuntimeServer implements IMessageBroker {
   private usageMessageHandler!: UsageMessageHandler
   private presetMessageHandler!: PresetMessageHandler
   private sessionManagerHandler!: SessionManagerHandler
+  /** problem-solve-canvas U3：canvas transport handler（CanvasService 由 canvas-assembly 构造并被 handler 持有）。 */
+  private canvasHandler!: CanvasMessageHandler
   /** btw 三帧 handler（btw-question M2-b）：optional.btw 注入时装配（可选批次）。 */
   private btwMessageHandler?: BtwMessageHandler
 
@@ -362,6 +367,7 @@ export class RuntimeServer implements IMessageBroker {
     this.assembleCoreHandlers(messaging, optional)
     this.assembleOptionalHandlers(messaging, optional)
     this.assembleSessionManagerHandler(optional)
+    this.assembleCanvasHandler(messaging)
   }
 
   /**
@@ -584,6 +590,15 @@ export class RuntimeServer implements IMessageBroker {
     })
   }
 
+  private assembleCanvasHandler(messaging: MessageHandlerContext): void {
+    this.canvasHandler = assembleCanvas({
+      messaging,
+      sessionService: this.sessionService,
+      broadcast: (msg) => this.broker.broadcast(msg),
+      nextPushId: () => this.broker.nextPushId(),
+    }).canvasHandler
+  }
+
   // ── Build the central dispatch table (D1) ───────────────────────
   // ping 内联（无对应 handler）；file.read 已迁入 fileMessageHandler（W2）；settings 走兜底（见 handleMessage）。
   // git/file handler 可选（取决于 setServices 是否注入对应 service）：捕获到局部变量后判空，
@@ -609,6 +624,7 @@ export class RuntimeServer implements IMessageBroker {
       ['session.compact', (msg, ws) => this.sessionHandler.handleSessionCompact(msg as Extract<ClientMessage, { type: 'session.compact' }>, ws)],
       ...this.sessionHandler.handles.map(t => [t, (msg: ClientMessage, ws: WsType) => this.sessionHandler.handleSessionMessage(msg, ws)] as const),
       ...this.extensionHandler.handles.map(t => [t, (msg: ClientMessage, ws: WsType) => this.extensionHandler.handleExtensionMessage(msg, ws)] as const),
+      ...this.canvasHandler.handles.map(t => [t, (msg: ClientMessage, ws: WsType) => this.canvasHandler.handleCanvasMessage(msg, ws)] as const),
       ...this.pluginMessageHandler.handles.map(t => [t, (msg: ClientMessage, ws: WsType) => this.pluginMessageHandler.handlePluginMessage(msg, ws)] as const),
       ...this.subagentMessageHandler.handles.map(t => [t, (msg: ClientMessage, ws: WsType) => this.subagentMessageHandler.handleSubagentMessage(msg, ws)] as const),
       ...(gitHandler ? gitHandler.handles.map(t => [t, (msg: ClientMessage, ws: WsType) => gitHandler.handleGitMessage(msg, ws)] as const) : []),
@@ -797,6 +813,10 @@ export class RuntimeServer implements IMessageBroker {
       .catch((e) => {
         console.error('[server] session-manager request failed:', toErrorMessage(e))
       })
+  }
+
+  handleCanvasRequest(requestId: string, sessionId: string, action: CanvasMarkerAction | '__malformed__', params: Record<string, unknown>): void {
+    this.canvasHandler.handle(requestId, sessionId, action, params)
   }
 
   // ── Lifecycle ──────────────────────────────────────────────────

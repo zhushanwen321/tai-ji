@@ -53,7 +53,7 @@ import { AgentSettledDelayer } from './event-interpreter-settled-delay.js'
 //（event-interpreter-ping-dispose.test.ts 等直接 import 本文件；SR6 SSOT）。
 export { PING_INTERVAL_MS, PING_FAIL_THRESHOLD, PING_WARN_FAIL_COUNT } from './event-interpreter-ping.js'
 import { toErrorMessage } from '../../utils/errors.js'
-import type { SessionManagerAction } from '@zhushanwen/extension-protocol'
+import type { SessionManagerAction, CanvasMarkerAction } from '@zhushanwen/extension-protocol'
 // notify 通道 customType 词表单源（extension-protocol，与壳写点同源）
 import { SUBAGENT_BG_NOTIFY_CUSTOM_TYPE, WORKFLOW_RESULT_CUSTOM_TYPE } from '@zhushanwen/extension-protocol'
 import type { IFileChangeDiff } from '../ports/file-change-diff.js'
@@ -395,6 +395,12 @@ export interface EventInterpreterOptions {
    * 组合根注入 server.handleSessionManagerRequest。
    */
   onSessionManagerRequest?: (requestId: string, sessionId: string, action: SessionManagerAction | '__malformed__', params: Record<string, unknown>) => void
+  /**
+   * canvas 请求（problem-solve-canvas U3）。select 通道 + CANVAS_MARKER。
+   * fire-and-forget（不 await），由 CanvasMessageHandler 异步处理并回写 select value 应答。
+   * 组合根注入 server.handleCanvasRequest。
+   */
+  onCanvasRequest?: (requestId: string, sessionId: string, action: CanvasMarkerAction | '__malformed__', params: Record<string, unknown>) => void
   /** extension setStatus（路由到 statusline builtin 插件，status-bar-registry 广播）。组合根注入 server.handleStatusSetUpdate。 */
   onStatusSetUpdate?: (payload: { sessionId: string; key: string; text: string; textRaw?: string }) => void
   /**
@@ -504,7 +510,7 @@ const FILE_MUTATING_TOOLS = new Set(['write', 'edit', 'bash'])
 /**
  * [RT-4#9] PiTranslatedEvent.kind 编译期穷尽守卫：五段处理（handle 结构 case +
  * handleConversationEvent / handleTurnLifecycleEvent / handleRoutingEvent / handleMetaEvent）
- * 的 case 并集必须 == kind 全集（当前 23 个）。types.ts 新增 kind 而五段未接线时，
+ * 的 case 并集必须 == kind 全集（当前 24 个）。types.ts 新增 kind 而五段未接线时，
  * 本登记表缺键 → `Record<PiTranslatedEvent['kind'], true>` 注解编译红（多键同理），
  * 接线遗漏在编译期显形（此前仅靠人工核对，新增 kind = 该类型事件永久静默丢弃）。
  * 运行时兜底 = handleMetaEvent default warn。
@@ -528,6 +534,7 @@ const HANDLED_EVENT_KINDS: Record<PiTranslatedEvent['kind'], true> = {
   'status-broadcast': true,
   'extension-ui': true,
   'session-manager-ui': true,
+  'canvas-ui': true,
   'thinking-level': true,
   'session-renamed': true,
   'hook': true,
@@ -944,6 +951,11 @@ export class EventInterpreter {
         // fire-and-forget（不 await），由 SessionManagerHandler 异步处理并回写 response，
         // 不走前端 UI 超时流程。
         this.opts.onSessionManagerRequest?.(ev.requestId, ev.sessionId, ev.action, ev.params)
+        return true
+      case 'canvas-ui':
+        // fire-and-forget（不 await），由 CanvasMessageHandler 异步处理并回写 select value
+        // 应答（内部服务类 marker：不经前端、无降级，session-manager 同款纪律）。
+        this.opts.onCanvasRequest?.(ev.requestId, ev.sessionId, ev.action, ev.params)
         return true
       case 'extension-ui':
         this.opts.onExtensionUIRequest?.(ev.requestId, ev.sessionId, ev.method, ev.payload)

@@ -470,8 +470,11 @@ describe('createChatStore factory', () => {
 
     it('live ≡ reload（user 类型）：appendUser 派生的 ref 投影 ≡ 真实 message_end 帧喂入的 reducer 投影 ≡ 同形态 entry 重放', () => {
       const sid = 's-w2-equiv'
-      // live 乐观（ref 投影）
+      // live 乐观（ref 投影）+ 提交挂账（composer submit 真实时序：乐观气泡 + inflight 挂账
+      // 同轮发生——帧落 ② 计数抵消，ref 不重复入流；无挂账的外来直发形态走 ③ 入流，
+      // 见 applyEntryFrame describe 的 W21-user-foreign 用例）
       sut.store.appendUser(sid, textToSegments('same question'))
+      sut.store.incrementInflight(sid, 1)
       // live 权威：真实 message_end(user) 帧（adapter 重构形态：无 id）→ registry → reducer
       sut.store.applyMessageEvent(sid, {
         type: 'message.message_end',
@@ -1061,9 +1064,11 @@ describe('createChatStore factory', () => {
   // 实时路径（message_end / tool_call_end 重构 entry）与文件重放（replayEntries）喂同一个
   // applyEntry reducer；messages ref 走 overlay 路径不受影响（ref 收敛归 W22 对账）。
   describe('applyEntryFrame（w21 实时 feed 喂 reducer）', () => {
-    it('message_end（user entry）→ reducer state 累积 user 投影；messages ref 不受影响（overlay 路径不动）', () => {
+    it('message_end（user entry，确认形态：有挂账）→ reducer state 累积 user 投影；messages ref 不受影响（乐观气泡负责实时渲染）', () => {
       const s = makeStore()
       const sid = 's-w21-user'
+      // composer 场景：乐观气泡已挂账（submit 时 incrementInflight）→ 帧是回执，不入流
+      s.store.incrementInflight(sid, 1)
       s.store.applyMessageEvent(sid, msg(sid, 'message.message_end', {
         entry: {
           type: 'message',
@@ -1077,6 +1082,26 @@ describe('createChatStore factory', () => {
       expect(state?.messages[0]).toMatchObject({ role: 'user', content: [{ type: 'text', text: 'hello' }], status: 'complete' })
       // ref 不动（send 时 appendUser 的乐观消息负责实时渲染；ref 收敛归 W22 对账）
       expect(s.store.getMessages(sid)).toHaveLength(0)
+      s.dispose()
+    })
+
+    it('message_end（user entry，外来直发形态：无挂账无标记）→ reducer 累积 + ref overlay 入流（A3 缺口修复：canvas 回推等 runtime 注入通知实时显示）', () => {
+      const s = makeStore()
+      const sid = 's-w21-user-foreign'
+      s.store.applyMessageEvent(sid, msg(sid, 'message.message_end', {
+        entry: {
+          type: 'message',
+          parentId: null,
+          timestamp: new Date(1000).toISOString(),
+          message: { role: 'user', content: 'hello', timestamp: 1000 },
+        },
+      }))
+      const state = s.store.testInternals._entryStatesForTest.get(sid)?.state
+      expect(state?.messages).toHaveLength(1)
+      // ref 入流：overlay 投影（applyEntryFrameWithOverlay → commitMessages）
+      const refMsgs = s.store.getMessages(sid)
+      expect(refMsgs).toHaveLength(1)
+      expect(refMsgs[0]).toMatchObject({ role: 'user', content: [{ type: 'text', text: 'hello' }], status: 'complete' })
       s.dispose()
     })
 

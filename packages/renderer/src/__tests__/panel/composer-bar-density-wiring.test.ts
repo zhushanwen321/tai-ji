@@ -66,12 +66,15 @@ vi.mock('@/components/panel/tray/useTrayCounts', async (importOriginal) => {
         workflow: { running: 0, ended: 0, total: 0 },
         // u7 第 4 件：本文件不验 session 件（无子会话 → 该件不渲染），恒 0
         session: { running: 0, ended: 0, total: 0 },
+        // u-tray-entry 第 5 件：本文件不验 canvas 件，恒 0（canvas 按钮仍恒渲染，dim 态）
+        canvas: { running: 0, ended: 0, total: 0 },
       })),
       lists: {
         bash: { running: emptyList(), ended: emptyList() },
         subagent: { running: emptyList(), ended: emptyList() },
         workflow: { running: emptyList(), ended: emptyList() },
         session: { children: emptyList() },
+        canvas: { entries: emptyList() },
       },
       bashPartition: computed(() => ({ tasks: [], loaded: true, corrupted: false, fetchFailed: false })),
       errors: { subagent: computed(() => null), workflow: computed(() => null) },
@@ -424,43 +427,53 @@ describe('B3 聚合面：headerAction（定时任务钮）随左簇聚合走（d
     expect(bar().find('[data-testid="tray-aggregate-button"]').exists()).toBe(true)
   })
 
-  it('声明运行时 hidden=true → 视为无入口：托盘空 + toolbar 零贡献 → absent', async () => {
+  it('声明运行时 hidden=true → 不构成左簇内容：hidden 钮不渲染，左簇仅剩恒在的 canvas 件', async () => {
     setTrayCounts(0, 0)
     // hidden 声明不构成左簇内容（hasVisibleHeaderActions 判定），mountAndFit 的空 provide 路径
     // 不带 headerSource——为覆盖「hidden 源在场」形态走显式挂载
     mountComposer(makeMountPointSource(reactive(new Map())), makeHeaderActionSource(true))
     await dispatchFitGeometry(800, 80, { 0: 300, 1: 200, 2: 150, 3: 120 })
-    expect(bar().attributes('data-slot-left-cluster')).toBe('absent')
+    // [u-tray-entry 后] canvas 件恒渲染（创建入口豁免）→ 左簇不再有 absent 形态；
+    // hidden headerAction 钮照旧不渲染（该判定语义不变）
+    expect(bar().attributes('data-slot-left-cluster')).toBe('expanded')
+    expect(bar().find('[data-testid="header-action-scheduler-manager-open"]').exists()).toBe(false)
+    expect(bar().find('[data-testid="tray-builtin-button"][data-kind="canvas"]').exists()).toBe(true)
   })
 })
 
 describe('不留死入口（能力标志 → 左簇形态）', () => {
-  it('托盘全无条目 + 插件零贡献 → leftCluster absent，任何状态无聚合入口', async () => {
+  it('托盘全无任务条目 + 插件零贡献 → leftCluster expanded（canvas 恒渲染件在场，无聚合入口）', async () => {
     setTrayCounts(0, 0)
     await mountAndFit(800, { 0: 300, 1: 200, 2: 150, 3: 120 })
-    expect(bar().attributes('data-slot-left-cluster')).toBe('absent')
+    // [u-tray-entry 后] canvas 件恒渲染（创建入口豁免）→「托盘全无 → absent」形态不可达，
+    // 宽裕档下左簇 = expanded（恒在的 canvas 按钮，dim 态）
+    expect(bar().attributes('data-slot-left-cluster')).toBe('expanded')
     expect(bar().find('[data-testid="tray-aggregate-button"]').exists()).toBe(false)
+    expect(bar().find('[data-testid="tray-builtin-button"][data-kind="canvas"]').exists()).toBe(true)
     // `+` 仍在（序 0 与托盘无关）
     expect(firstButtonTitle()).toBe('添加内容（附件 / 命令）')
   })
 
-  it('非保护态托盘恒挂载：条目归零→恢复，聚合按钮经 absent 再回来（emitter 存活链）', async () => {
-    // L2 聚合态起步（左簇聚合生效）：聚合入口在场
+  it('非保护态托盘恒挂载：条目归零→恢复，聚合运行数跟随归零再回升（外壳与 emitter 链不卸载）', async () => {
+    // L2 聚合态起步（左簇聚合生效）：聚合入口在场，运行数 = bash 2 + subagent 1
     await mountAndFit(300, { 0: 500, 1: 300, 2: 180, 3: 100 })
     expectClusterShape({ leftCluster: 'aggregated' })
-    expect(bar().find('[data-testid="tray-aggregate-button"]').exists()).toBe(true)
+    const aggregate = bar().find('[data-testid="tray-aggregate-button"]')
+    expect(aggregate.exists()).toBe(true)
+    expect(aggregate.find('[data-testid="tray-aggregate-count"]').text()).toBe('3')
 
-    // 条目归零 → has-items false 上抛（托盘外壳未被卸载，emitter 存活）→ leftCluster absent
+    // 条目归零 → has-items 恒 true（canvas 件豁免，见 ComposerTray builtinItems 注释）→
+    // 左簇保持聚合形态；运行数角标归零消失（归零不虚亮），外壳未被卸载
     setTrayCounts(0, 0)
     await nextTick()
-    expect(bar().attributes('data-slot-left-cluster')).toBe('absent')
-    expect(bar().find('[data-testid="tray-aggregate-button"]').exists()).toBe(false)
+    expectClusterShape({ leftCluster: 'aggregated' })
+    expect(bar().find('[data-testid="tray-aggregate-count"]').exists()).toBe(false)
 
-    // 条目恢复 → 同一 emitter 仍上抛 → 聚合按钮重新渲染（形态恢复，无需重挂）
+    // 条目恢复 → 同一数据面仍驱动重算 → 运行数角标回升（响应链存活，无需重挂）
     setTrayCounts(2, 1)
     await nextTick()
-    expect(bar().attributes('data-slot-left-cluster')).toBe('aggregated')
-    expect(bar().find('[data-testid="tray-aggregate-button"]').exists()).toBe(true)
+    expectClusterShape({ leftCluster: 'aggregated' })
+    expect(bar().find('[data-testid="tray-aggregate-count"]').text()).toBe('3')
   })
 })
 

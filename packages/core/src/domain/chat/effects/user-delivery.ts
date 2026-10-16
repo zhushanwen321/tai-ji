@@ -192,6 +192,18 @@ function extractUserContentText(entry: PiMessageEntry): string {
 }
 
 /**
+ * 帧文本是否携带内核投递标记（双形态 u-<uuid> / 裸 <uuid>，SSOT = MSG_ID_TAG_RE）。
+ *
+ * 消费方 = registry 的 ③ 外来直发判定：带标记帧属送达回执通道管辖（① 已消费，或
+ * 「迟到重复回执」形态——投影已 delivered + 挂账已归零，须静默而非按外来入流，否则
+ * E5c 的重复确认帧场景双插）；只有无标记帧才是外来直发候选。
+ */
+export function hasKernelDeliveryMarker(entry: PiMessageEntry): boolean {
+  MSG_ID_TAG_RE_GLOBAL.lastIndex = 0
+  return MSG_ID_TAG_RE_GLOBAL.test(extractUserContentText(entry))
+}
+
+/**
  * [u3b / D2① 泛化] message_end(user) 送达回执——内核裸标记 id 命中投影条目即送达事实
  * （C-data-08 修订方向：标记 id 精确匹配取代计数 FIFO/文本匹配，id 是身份不是内容）。
  *

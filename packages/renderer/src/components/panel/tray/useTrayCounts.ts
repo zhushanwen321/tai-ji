@@ -38,6 +38,12 @@
  *   侧栏 `derivedStatus` 同源，但 agent 派发的子会话**通常未被 hydrate**（无消息分区）——
  *   `derivedStatus` 对 `status='active'` 且无消息会兜底 done，无法表达「运行中」；故托盘计数
  *   与状态点统一取进程级 `SessionSummary.status`（色语言仍复用 DOT_CLASS，见 TraySessionPanel）。
+ * - canvas（第 5 件，problem-solve-canvas §3.1(3) u-tray-entry）：**native 直连 canvas store**
+ *   （经 useCanvasSync 的窗口级单例订阅——首拉 + `canvas.updated` 失效重拉在订阅链内收敛，
+ *   本数据面只读 store 清单投影）。画布是跨 session 共享资源（设计 D4/D7）：无 sid 分区、
+ *   无 btw 抑制（非派生任务，bash/session 件同款边界）。计数口径 = 未收敛即进行中
+ *   （生长中 / 审查中都在活动），converged 终态落已结束；阶段徽标（生长中/审查中/已收敛）
+ *   是面板行的派生展示值，不在数据面建第二词表。
  *
  * [迁移语义 D14「复制不抽走」] 计数口径与首拉范式自侧栏任务视图域复制迁入；该域组件 /
  * composable 已随退役单元删除（原件不在，本文件为唯一实现）。谓词本体一律 import SSOT
@@ -55,10 +61,12 @@ import { useWorkflowStore } from '@/stores/workflow'
 import { useBackgroundTasks } from '@/composables/features/sidebar/useBackgroundTasks'
 import type { UseBackgroundTasksReturn } from '@/composables/features/sidebar/useBackgroundTasks'
 import { useSessionStore } from '@/stores/session'
+import { useCanvasSync } from '@/composables/use-canvas-sync'
 import { isRunningProjection } from '@/lib/subagent-bucket'
 import { filterBackgroundTasks } from '@/lib/background-task-bucket'
 import type { BackgroundTaskEntry } from '@/lib/background-task-bucket'
 import type { SessionSummary, SubagentRecord, WorkflowRunRecord } from '@taiji/shared'
+import type { CanvasListEntry } from '@zhushanwen/extension-protocol'
 import { isBtwVirtualId } from '@taiji/shared'
 
 /** built-in 三件（任务域面板类型 / TrayNativePanel 分桶键 / retry 分派键） */
@@ -69,8 +77,9 @@ export type TrayTaskKind = 'bash' | 'subagent' | 'workflow'
  *
  * `session` **不在** `TrayTaskKind`/`TRAY_BUCKETS` 内——它走独立扁平列表面板
  * （TraySessionPanel，不参与两视图分桶），复用同一份计数/聚合/三态契约。
+ * `canvas`（第 5 件，u-tray-entry）同理独立列表面板（TrayCanvasPanel）。
  */
-export type TrayBuiltinKind = TrayTaskKind | 'session'
+export type TrayBuiltinKind = TrayTaskKind | 'session' | 'canvas'
 
 /** 分桶视图值：三件共有的两视图（[两视图裁决 2026-09-16] subagent 不再有第三桶） */
 export type TrayBucketValue = 'running' | 'ended'
@@ -98,6 +107,11 @@ export interface TrayCounts {
   workflow: TrayKindCounts
   /** 第 4 件子会话（u7）：running = `status === 'active'`，total = 全部子会话数 */
   session: TrayKindCounts
+  /**
+   * 第 5 件画布（u-tray-entry）：running = 未收敛数（生长中/审查中都在活动），
+   * ended = 已收敛数，total = 全部画布数。
+   */
+  canvas: TrayKindCounts
 }
 
 /** 分桶行集（面板列表渲染源；计数由行集长度派生，二者恒等） */
@@ -117,6 +131,10 @@ export interface TrayLists {
   /** 第 4 件子会话（u7）：扁平列表（不分桶；顺序 = lastActiveAt 倒序） */
   session: {
     children: ComputedRef<SessionSummary[]>
+  }
+  /** 第 5 件画布（u-tray-entry）：扁平列表（不分桶；清单 = canvas.list 投影，含阶段徽标派生输入） */
+  canvas: {
+    entries: ComputedRef<CanvasListEntry[]>
   }
 }
 
@@ -249,6 +267,15 @@ export function useTrayCounts(sessionIdRef: Ref<string | null | undefined>): Use
   const bashRunning = computed(() => filterBackgroundTasks(bashTasks.value, 'active'))
   const bashEnded = computed(() => filterBackgroundTasks(bashTasks.value, 'ended'))
 
+  // ── canvas（第 5 件，u-tray-entry）：native 直连 canvas store（跨 session 全局资源）──
+  // 订阅生命周期归 useCanvasSync（窗口级单例 + refCount，见其文件头）：首拉与 canvas.updated
+  // 失效重拉在订阅链内收敛，本数据面只读清单投影、零新协议。无 sid 分区、无 btw 抑制
+  // （画布不属任何 session，也非 session 派生任务）。进行中 = 未收敛（生长中 / 审查中都在活动），
+  // 已结束 = converged 终态（回看资产）。
+  const canvasStore = useCanvasSync()
+  const canvasEntries = computed<CanvasListEntry[]>(() => canvasStore.list)
+  const canvasActive = computed(() => canvasEntries.value.filter((c) => !c.converged))
+
   const counts = computed<TrayCounts>(() => ({
     bash: {
       running: bashRunning.value.length,
@@ -269,6 +296,11 @@ export function useTrayCounts(sessionIdRef: Ref<string | null | undefined>): Use
       running: sessionRunning.value.length,
       ended: sessionChildren.value.length - sessionRunning.value.length,
       total: sessionChildren.value.length,
+    },
+    canvas: {
+      running: canvasActive.value.length,
+      ended: canvasEntries.value.length - canvasActive.value.length,
+      total: canvasEntries.value.length,
     },
   }))
 
@@ -312,6 +344,7 @@ export function useTrayCounts(sessionIdRef: Ref<string | null | undefined>): Use
       subagent: { running: subagentRunning, ended: subagentEnded },
       workflow: { running: workflowRunning, ended: workflowEnded },
       session: { children: sessionChildren },
+      canvas: { entries: canvasEntries },
     },
     bashPartition: backgroundTasks.current,
     errors: {

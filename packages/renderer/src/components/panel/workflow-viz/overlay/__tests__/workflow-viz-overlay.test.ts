@@ -404,6 +404,36 @@ describe('WorkflowVizOverlay 一级 tab（scheduler 整合 2026-10-06，黑盒 D
   })
 })
 
+describe('WorkflowVizOverlay canvas tab（problem-solve-canvas §3.1(3)，黑盒 DOM）', () => {
+  it('tab 条三段齐备：canvas 段在场且缺省未选中（runs 选中）', () => {
+    const wrapper = mountOverlay({ dag: SAMPLE_DAG })
+    const canvasTab = wrapper.find('[data-testid="wfvz-overlay-tab-canvas"]')
+    expect(canvasTab.exists()).toBe(true)
+    expect(canvasTab.attributes('aria-selected')).toBe('false')
+    expect(wrapper.find('[data-testid="wfvz-overlay-tab-runs"]').attributes('aria-selected')).toBe('true')
+  })
+
+  it('tab=canvas：canvas pane 空 wrapper 在场（shell 路径未置 core 开合态、canvasId 缺席 CanvasPane 不挂载），runs body（DAG 区 + live dock）与 scheduler pane 均卸载；header 换画布标题（run 六元素让位）', () => {
+    const wrapper = mountOverlay({ dag: SAMPLE_DAG, tab: 'canvas' })
+    expect(wrapper.find('[data-testid="wfvz-overlay-canvas-pane"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="wfvz-overlay-dag-pane"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="wfvz-overlay-live-pane"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="wfvz-overlay-scheduler-pane"]').exists()).toBe(false)
+    // header 三态：画布标题在场，run 元素整体让位（同 scheduler 形态）
+    expect(wrapper.find('[data-testid="wfvz-overlay-canvas-title"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="wfvz-overlay-slug"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="wfvz-overlay-run-pill"]').exists()).toBe(false)
+  })
+
+  it('run=null：canvas tab 不禁用、可点上抛 update:tab（画布打开不依赖 run 数据）', async () => {
+    const wrapper = mountOverlay({ run: null, dag: null })
+    const canvasTab = wrapper.find('[data-testid="wfvz-overlay-tab-canvas"]')
+    expect(canvasTab.attributes('disabled')).toBeUndefined()
+    await canvasTab.trigger('click')
+    expect(wrapper.emitted('update:tab')?.[0]).toEqual(['canvas'])
+  })
+})
+
 describe('WorkflowVizOverlayGuard（D10 捕获路径，构建者白盒）', () => {
   const ThrowingChild = defineComponent({
     name: 'ThrowingChild',

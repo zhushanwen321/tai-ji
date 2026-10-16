@@ -20,13 +20,15 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { computed, defineComponent, h, nextTick, reactive } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
+import { dispatchGlobal } from '@taiji/core/transport/api'
 import { useSubagentStore } from '@/stores/subagent'
 import { useWorkflowStore } from '@/stores/workflow'
 import { useSessionStore } from '@/stores/session'
 import { useTrayCounts } from '@/components/panel/tray/useTrayCounts'
 import type { UseTrayCountsReturn } from '@/components/panel/tray/useTrayCounts'
 import type { BackgroundTaskEntry } from '@/lib/background-task-bucket'
-import type { SessionSummary, SubagentRecord, WorkflowRunRecord } from '@taiji/shared'
+import type { CanvasListEntry } from '@zhushanwen/extension-protocol'
+import type { SessionSummary, ServerMessage, SubagentRecord, WorkflowRunRecord } from '@taiji/shared'
 
 // ── mock：bash 分区状态根（直接 mutate 模拟 list reply / 广播）──
 let partitionState: { tasks: BackgroundTaskEntry[]; loaded: boolean; corrupted: boolean; fetchFailed: boolean }
@@ -37,6 +39,14 @@ vi.mock('@/composables/features/sidebar/useBackgroundTasks', () => ({
     refresh: refreshMock,
   }),
 }))
+
+// ── mock：canvas.list RPC（第 5 件 canvas 的数据链真实经过 useCanvasSync 订阅 → canvas store；
+//    替身 reply 可控，广播腿用 core dispatchGlobal 真实现喂——链路行为级验证）──
+const commandMock = vi.hoisted(() => vi.fn())
+vi.mock('@taiji/core/transport/api', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@taiji/core/transport/api')>()
+  return { ...actual, command: commandMock }
+})
 
 // ── mock：首拉 RPC（subagent/workflow 列表）──
 const apiMocks = vi.hoisted(() => ({
@@ -98,6 +108,9 @@ function makeTask(overrides: Partial<BackgroundTaskEntry> & { taskId: string }):
 
 // ── 测试宿主：useTrayCounts 需组件 setup 上下文（内部 watch 依赖实例 scope）──
 let tray: UseTrayCountsReturn | undefined
+/** 宿主实例登记（afterEach 统一卸载）：canvas 订阅（use-canvas-sync）是模块级单例，
+ * 不卸载会跨用例残留并钉死旧 pinia 的 store（新用例的 reply 注入对旧 store 无效）。 */
+let harnessWrapper: ReturnType<typeof mount> | null = null
 const Harness = defineComponent({
   props: { sessionId: { type: String, required: true } },
   setup(props) {
@@ -107,7 +120,8 @@ const Harness = defineComponent({
 })
 
 function mountHarness(sessionId = SID) {
-  return mount(Harness, { props: { sessionId } })
+  harnessWrapper = mount(Harness, { props: { sessionId } })
+  return harnessWrapper
 }
 
 /** 当前数据面（防守：宿主 setup 必已赋值） */
@@ -121,6 +135,9 @@ beforeEach(() => {
   vi.clearAllMocks()
   apiMocks.getSubagents.mockResolvedValue({ subagents: [], oversize: false })
   apiMocks.getWorkflows.mockResolvedValue({ workflows: [], oversize: false })
+  // canvas.list 替身：缺省空清单（canvas 用例按需覆写返回值）
+  commandMock.mockReset()
+  commandMock.mockResolvedValue({ canvases: [] })
   // reactive 容器：bash 分区面的字段变更需驱动下游 computed 重算（mock 契约同真实分区）
   partitionState = reactive({ tasks: [], loaded: true, corrupted: false, fetchFailed: false })
   tray = undefined
@@ -128,6 +145,8 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  harnessWrapper?.unmount()
+  harnessWrapper = null
   vi.useRealTimers()
 })
 
@@ -429,5 +448,84 @@ describe('P-invisible·任务托盘面：D9③ 派生投影抑制（btw 线不�
     // 首拉被抑制（对线 vid 的 getSubagents/getWorkflows 零消费方 → 不发无效 RPC）
     expect(apiMocks.getSubagents).not.toHaveBeenCalledWith(vid)
     expect(apiMocks.getWorkflows).not.toHaveBeenCalledWith(vid)
+  })
+})
+
+// ── 第 5 件 canvas（u-tray-entry，problem-solve-canvas §3.1(3)）──
+
+/** canvas.list 条目 fixture（形状 = canvas.list 投影，含阶段徽标派生输入） */
+function makeCanvasEntry(overrides: Partial<CanvasListEntry> & { canvasId: string }): CanvasListEntry {
+  return {
+    name: `画布 ${overrides.canvasId}`,
+    statement: '示例陈述',
+    converged: false,
+    openMustFix: 0,
+    reviewStatus: null,
+    ...overrides,
+  }
+}
+
+/** 构造 canvas.updated 全局广播帧并分发（core 全局通道真实现，use-canvas-sync.test 同款） */
+function broadcastCanvasUpdated(canvasId: string): void {
+  dispatchGlobal({
+    type: 'canvas.updated',
+    payload: { canvasId, evType: 'NodeCreated', eventId: 'ev-1', summary: '' },
+  } as ServerMessage<'canvas.updated'>)
+}
+
+describe('useTrayCounts canvas kind（第 5 件画布，u-tray-entry）', () => {
+  it('计数口径：running = 未收敛数、ended = 已收敛数、total = 全部；行集 = canvas.list 投影', async () => {
+    commandMock.mockResolvedValue({
+      canvases: [
+        makeCanvasEntry({ canvasId: 'cvs-open' }),
+        makeCanvasEntry({ canvasId: 'cvs-done', converged: true }),
+        makeCanvasEntry({ canvasId: 'cvs-fix', openMustFix: 2, reviewStatus: 'in-progress' }),
+      ],
+    })
+    mountHarness()
+    await vi.waitFor(() => expect(data().counts.value.canvas.total).toBe(3))
+
+    expect(data().counts.value.canvas).toEqual({ running: 2, ended: 1, total: 3 })
+    expect(data().lists.canvas.entries.value.map((c) => c.canvasId)).toEqual([
+      'cvs-open',
+      'cvs-done',
+      'cvs-fix',
+    ])
+  })
+
+  it('canvas.updated 广播失效 → 重新 canvas.list 拉取，清单与计数跟随（推为提示、拉为真理）', async () => {
+    // 按 type 分流（广播处理器会同时发 canvas.get + canvas.list，Once 队列会被 get 消费）
+    commandMock.mockImplementation(async (type: string) => {
+      if (type === 'canvas.list') return { canvases: [makeCanvasEntry({ canvasId: 'cvs-1' })] }
+      return null
+    })
+    mountHarness()
+    await vi.waitFor(() => expect(data().counts.value.canvas.total).toBe(1))
+
+    // 广播后重拉：清单换新（旧画布收敛 + 新画布加入）
+    commandMock.mockImplementation(async (type: string) => {
+      if (type === 'canvas.list') {
+        return {
+          canvases: [
+            makeCanvasEntry({ canvasId: 'cvs-1', converged: true }),
+            makeCanvasEntry({ canvasId: 'cvs-2' }),
+          ],
+        }
+      }
+      return null
+    })
+    broadcastCanvasUpdated('cvs-1')
+    await vi.waitFor(() => expect(data().counts.value.canvas.total).toBe(2))
+    expect(data().counts.value.canvas).toEqual({ running: 1, ended: 1, total: 2 })
+  })
+
+  it('画布是跨 session 全局资源：空 sid 下 canvas 照常拉取计数（session 件归零、canvas 不归零）', async () => {
+    commandMock.mockResolvedValue({
+      canvases: [makeCanvasEntry({ canvasId: 'cvs-global' })],
+    })
+    const wrapper = mountHarness('')
+    await vi.waitFor(() => expect(data().counts.value.canvas.total).toBe(1))
+    expect(data().counts.value.session).toEqual({ running: 0, ended: 0, total: 0 })
+    wrapper.unmount()
   })
 })
