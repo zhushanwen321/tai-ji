@@ -18,12 +18,12 @@ vi.mock("@zhushanwen/pi-extension-logger", () => createLoggerModuleMock());
 
 const loggerMock = getLoggerMock();
 
-// pi-delivery-port 进程级槽（C-ext-06；recordManagedNotify 的消费入口）。
-const PORT_SLOT_KEY = Symbol.for(DELIVERY_PORT_SLOT_KEY);
-
 import { recordManagedNotify } from "../notify-delivery.ts";
 import type { ManagedNotifyDetails } from "../notify-content.ts";
 import { DELIVERY_PORT_SLOT_KEY } from "@zhushanwen/pi-delivery-port";
+
+// pi-delivery-port 进程级槽（C-ext-06；recordManagedNotify 的消费入口）。
+const PORT_SLOT_KEY = DELIVERY_PORT_SLOT_KEY;
 
 /** recordManagedNotify 的最小合法 details（ManagedNotifyDetails 收紧后的测试桩形状）。 */
 function makeDetails(notifyId: string): ManagedNotifyDetails {

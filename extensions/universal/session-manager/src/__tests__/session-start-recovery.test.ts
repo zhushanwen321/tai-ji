@@ -7,8 +7,8 @@
 // watch-only select（非 watch action 即抛）为本文件域行为，留在本地。
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
 import { DELIVERY_PORT_SLOT_KEY } from "@zhushanwen/pi-delivery-port";
+import {
 	flushMicrotasks,
 	makeRespondWatch,
 	mountExtension,
@@ -17,7 +17,7 @@ import { DELIVERY_PORT_SLOT_KEY } from "@zhushanwen/pi-delivery-port";
 } from "./helpers/extension-harness.ts";
 
 // pi-delivery-port 进程级槽（recordManagedNotify 的投递观察面——unified-delivery 波 2）。
-const PORT_SLOT_KEY = Symbol.for(DELIVERY_PORT_SLOT_KEY);
+const PORT_SLOT_KEY = DELIVERY_PORT_SLOT_KEY;
 
 interface Harness extends ExtensionHarness {
 	watches: WatchInvocation[];

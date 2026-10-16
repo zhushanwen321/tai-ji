@@ -56,9 +56,9 @@ vi.mock("@zhushanwen/pi-extension-logger", () => ({
 }));
 
 import type { DeliveryPortHandle } from "@zhushanwen/pi-delivery-port";
+import { DELIVERY_PORT_SLOT_KEY } from "@zhushanwen/pi-delivery-port";
 
 import {
-import { DELIVERY_PORT_SLOT_KEY } from "@zhushanwen/pi-delivery-port";
   MAX_NOTIFIED_RUN_IDS,
   notifyDone,
   trackNotifiedRunId,
@@ -176,7 +176,7 @@ function makeFakePort(): FakePortMock {
 }
 
 // pi-delivery-port 进程级槽（notifyDone 生产码直接 import 该包 getDeliveryPort 读槽）。
-const PORT_SLOT_KEY = Symbol.for(DELIVERY_PORT_SLOT_KEY);
+const PORT_SLOT_KEY = DELIVERY_PORT_SLOT_KEY;
 
 /** port 注入（直接写进程级槽——生产接线 = base-tool-enhance session_start 的
  *  bindDeliveryPort；本包 notifyDone 与 session-manager recordManagedNotify 同款

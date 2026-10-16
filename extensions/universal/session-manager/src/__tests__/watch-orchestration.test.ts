@@ -12,8 +12,8 @@ import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vite
 import { SESSION_MANAGER_MARKER } from "@zhushanwen/extension-protocol";
 // logger mock helper 必须先于 extension-harness（其 import 链触发被 mock 模块加载）
 import { createLoggerModuleMock, getLoggerMock } from "./helpers/logger-mock.ts";
-import {
 import { DELIVERY_PORT_SLOT_KEY } from "@zhushanwen/pi-delivery-port";
+import {
 	flushMicrotasks,
 	makeRespondWatch,
 	mountExtension,
@@ -29,7 +29,7 @@ const loggerMock = getLoggerMock();
 
 // pi-delivery-port 进程级槽（C-ext-06；recordManagedNotify 的消费入口——unified-
 // delivery 波 2 切换后 watch 应答的投递观察面 = port.deliver）。
-const PORT_SLOT_KEY = Symbol.for(DELIVERY_PORT_SLOT_KEY);
+const PORT_SLOT_KEY = DELIVERY_PORT_SLOT_KEY;
 
 /** watch 开表调用（deferred）——opts 为开表时传入的 select 第三参原样值 */
 interface DeferredWatch extends WatchInvocation {
