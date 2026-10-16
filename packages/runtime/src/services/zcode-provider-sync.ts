@@ -6,9 +6,9 @@
  * pi 映射条目、providerOrder 仅含 pi 追加序；真实条目的合并在读取时由 wrapper fs
  * 拦截 merge 完成，本模块只负责生成侧）。
  *
- * [engine-ref-translation]（2026-10-14 用户裁决）：pi 的 zai-coding-cn（智谱 GLM
- * coding plan 通道）不再映射条目进 zcode——它与 zcode 的
- * account:bigmodel-individual-coding-plan 是同一通道的两个名字，等价由派发期翻译
+ * [engine-ref-translation]（2026-10-14 用户裁决；2026-10-16 ADR-0138 修订映射目标）：
+ * pi 的 zai-coding-cn（智谱 GLM coding plan 通道）不再映射条目进 zcode——它与 zcode
+ * 的 account:zai-individual-coding-plan 是同一通道的两个名字，等价由派发期翻译
  * 承载（zcode-subagent-cli preparer translatePiModelRefToZcode，经
  * EnginePort.translateModelRef 接线）；GLM plan 凭据完全归 zcode 账号体系，零 key
  * 注入。其余 provider 1:1 完全原样映射（id/模型清单直传）。ADR-0132 的 zai 关联
@@ -115,10 +115,13 @@ const ZCODE_API_TYPE_MAP: Readonly<Record<string, string>> = {
 
 /**
  * pi GLM plan 通道（翻译通道，不进通用映射）：zai-coding-cn 与 zcode 的
- * account:bigmodel-individual-coding-plan 是同一通道的两个名字，等价由派发期翻译
+ * account:zai-individual-coding-plan 是同一通道的两个名字（ADR-0138 修订映射目标，
+ * 原 bigmodel 系误判），等价由派发期翻译
  * 承载（zcode-subagent-cli preparer translatePiModelRefToZcode）；在 zcode 造同义
  * 条目、注入 pi 侧 key 均属退役形态（ADR-0132 zai 关联条目 + 2026-10-13 key 来源
  * 修订，均已删除）。pi 侧 `zai`（国际 API-key provider）按 1:1 通用映射直传。
+ * 零写死原则：本集合是全链唯一的 provider id 写死点之外仅有的例外登记（与
+ * preparer PI_TO_ZCODE_PROVIDER_MAP 对应），其余任何 provider 禁止出现在代码中。
  */
 const TRANSLATION_CHANNEL_PROVIDER_IDS = ['zai-coding-cn'] as const
 
@@ -135,10 +138,13 @@ export interface ZcodeProviderSyncPaths { // oe-exempt:20261012:framework:映射
 
 export interface ZcodeProviderSyncDeps { // oe-exempt:20261012:framework:映射链形态/ports 契约,单实现常态(类型契约先行)
   readonly configStore: Pick<IConfigStore, 'readModels' | 'getEnabledModels'>
-  /** pi 凭据唯一通道（C-proc-14）：明文解析（async）+ provider 级 baseUrl 两级解析。 */
+  /** pi 凭据唯一通道（C-proc-14）：明文解析（async）+ provider 级 baseUrl 两级解析 +
+   *  凭据两源（auth.json/models.json）id 并集枚举（同步候选集的第二源供数——catalog 型
+   *  provider 的 key 在 auth.json、models 在 catalog 快照，models.json 无条目；缺此源
+   *  则这类 provider 永不进同步候选，透传翻译对它们失效〔2026-10-16 真机事故根因〕）。 */
   readonly credentialResolver: Pick<
     IProviderCredentialResolver,
-    'resolveProviderCredential' | 'resolveProviderBaseUrl'
+    'resolveProviderCredential' | 'resolveProviderBaseUrl' | 'listCredentialBackedProviderIds'
   >
   readonly paths: ZcodeProviderSyncPaths
   /** models.json 损坏降级态判定（D7①：真抛错或损坏态 → 中止保留产物）。 */
@@ -295,7 +301,7 @@ function mapSingleProviderToZcodeRule(
       skip: {
         providerId: id,
         rule: 'translation-channel',
-        detail: 'pi GLM plan 通道不映射条目——与 zcode account:bigmodel-individual-coding-plan 的等价由派发期翻译承载（2026-10-14 用户裁决）',
+        detail: 'pi GLM plan 通道不映射条目——与 zcode account:zai-individual-coding-plan 的等价由派发期翻译承载（ADR-0138）',
       },
     }
   }
@@ -722,11 +728,21 @@ export async function syncZcodeProviders(deps: ZcodeProviderSyncDeps): Promise<Z
 
   checkV2ConfigForSync(deps, warn)
 
-  const credentials = await resolveCredentialsForSync(deps, models.providers)
+  // 候选集 = models.json 条目 ∪ 凭据两源 id 并集（auth.json 型 catalog provider：
+  // key 在 auth.json、models/baseUrl 在 catalog 快照，models.json 无条目）。合成最小
+  // 视图（空 cfg：enabled 缺省 true、models 空 → catalog 供数、baseUrl 走 resolver
+  // 两级回退）。零写死原则：并集是数据驱动，无任何 provider id 分支。
+  const credentialBackedIds = deps.credentialResolver.listCredentialBackedProviderIds()
+  const providers: Record<string, ProviderConfigView> = { ...models.providers }
+  for (const id of credentialBackedIds) {
+    if (!(id in providers)) providers[id] = {}
+  }
+
+  const credentials = await resolveCredentialsForSync(deps, providers)
 
   const enabledModels = deps.configStore.getEnabledModels()
   const mapping = mapPiProvidersToZcodeRules({
-    providers: models.providers,
+    providers,
     credentials,
     providerBaseUrlOf: id => deps.credentialResolver.resolveProviderBaseUrl(id),
     catalogModelsOf: id => catalogViewToModelSources(deps.getMergedCatalogModels(id)),

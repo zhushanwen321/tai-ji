@@ -16,7 +16,7 @@
  *
  * 运行：cd packages/runtime && npx vitest run src/__tests__/services/zcode-provider-sync.test.ts
  */
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -34,6 +34,7 @@ import {
   type ZcodeProviderSyncDeps,
   type ZcodeProviderSyncPaths,
 } from '../../services/zcode-provider-sync.js'
+import type { MergedCatalogView } from '../../services/provider-catalog.js'
 
 // ── fixture 基建 ─────────────────────────────────────────────────────────────
 
@@ -90,6 +91,8 @@ interface FakeDepsInput { // oe-exempt:20261012:test:测试构造辅助形态
   catalog?: Record<string, readonly MappingModelSource[] | undefined>
   readModelsThrows?: boolean
   modelsCorrupted?: boolean
+  /** auth.json 型 provider id（models.json 无条目，仅凭据源有）——resolver 两源并集枚举的第二源。 */
+  credentialOnlyIds?: string[]
 }
 
 /** 组装编排 deps（fake configStore / fake resolver / fixture 路径族）。 */
@@ -106,10 +109,17 @@ function makeDeps(input: FakeDepsInput = {}): ZcodeProviderSyncDeps {
     credentialResolver: {
       resolveProviderCredential: async id => input.credentials?.[id] ?? undefined,
       resolveProviderBaseUrl: id => input.baseUrls?.[id],
+      // 真实两源并集语义：models.json 条目 id ∪ auth.json 凭据 id（credentialOnlyIds 模拟后者）
+      listCredentialBackedProviderIds: () =>
+        new Set([...Object.keys(models.providers), ...(input.credentialOnlyIds ?? [])]),
     },
     paths,
     isModelsCorrupted: () => input.modelsCorrupted ?? false,
-    getMergedCatalogModels: () => undefined,
+    // 输入的 catalog 值已是 MappingModelSource[]（预转换形态）——包成 MergedCatalogView 形态供桥接
+    getMergedCatalogModels: id => {
+      const models = input.catalog?.[id]
+      return models ? { models: models as unknown as MergedCatalogView['models'], overlayState: { state: 'never-seen' } } : undefined
+    },
     warn: msg => warnings.push(msg),
   }
 }
@@ -501,6 +511,55 @@ describe('syncZcodeProviders：编排与瘦副本形态', () => {
     expect(ruleIds.includes('cli-provider')).toBe(false)
     expect(copy.config.providerOrder).toEqual(['stepfun'])
     expect(copy.schemaVersion).toBe(1)
+  })
+
+  it('auth.json 型 provider（models.json 无条目）→ 凭据并集进候选集，catalog 供数 1:1 同步（2026-10-16 真机事故回归守卫）', async () => {
+    // xiaomi 形态：key 在 auth.json（resolver 命中）、models/baseUrl 在 catalog 快照、
+    // models.json 零条目——旧枚举只读 models.json 导致它永不进候选集（透传翻译失效）。
+    writeRealProviderConfig([], [])
+    writeV2Config({})
+    writeCliConfig([])
+
+    const outcome = await syncZcodeProviders(makeDeps({
+      providers: {},
+      credentialOnlyIds: ['xiaomi-token-plan-cn'],
+      credentials: { 'xiaomi-token-plan-cn': { key: 'tp-test-key', source: 'auth.json' } },
+      baseUrls: { 'xiaomi-token-plan-cn': 'https://token-plan-cn.xiaomimimo.com/v1' },
+      catalog: {
+        'xiaomi-token-plan-cn': [
+          { id: 'mimo-v2.5', api: 'openai-completions', baseUrl: 'https://token-plan-cn.xiaomimimo.com/v1' },
+          { id: 'mimo-v2.5-pro', api: 'openai-completions', baseUrl: 'https://token-plan-cn.xiaomimimo.com/v1' },
+          { id: 'mimo-v2.6-flash', api: 'openai-completions', baseUrl: 'https://token-plan-cn.xiaomimimo.com/v1' },
+          { id: 'mimo-v2.6-pro', api: 'openai-completions', baseUrl: 'https://token-plan-cn.xiaomimimo.com/v1' },
+        ],
+      },
+    }))
+
+    expect(outcome.status).toBe('written')
+    const copy = JSON.parse(readFileSync(paths.syncedCopyPath, 'utf-8')) as {
+      config: { providerOrder: string[]; providerConfigRules: { providerRules: Array<{ providerId: string; config: { personalModelIds: string[] } }> } }
+    }
+    const rules = copy.config.providerConfigRules.providerRules
+    expect(rules.map(r => r.providerId)).toEqual(['xiaomi-token-plan-cn'])
+    expect(rules[0]?.config.personalModelIds).toEqual(['mimo-v2.5', 'mimo-v2.5-pro', 'mimo-v2.6-flash', 'mimo-v2.6-pro'])
+    expect(copy.config.providerOrder).toEqual(['xiaomi-token-plan-cn'])
+  })
+
+  it('auth.json 型翻译通道（zai-coding-cn 仅凭据源命中）→ 同样 skip 不产条目（例外对枚举路径同样生效）', async () => {
+    writeRealProviderConfig([], [])
+    writeV2Config({})
+    writeCliConfig([])
+
+    const outcome = await syncZcodeProviders(makeDeps({
+      providers: {},
+      credentialOnlyIds: ['zai-coding-cn'],
+      credentials: { 'zai-coding-cn': { key: 'zai-test-key', source: 'auth.json' } },
+    }))
+
+    // 全员 skip（唯一候选是翻译通道）→ skipped-empty 分支：不落盘且删除旧副本
+    expect(outcome.status).toBe('skipped-empty')
+    expect(outcome.skips.map(s => s.rule)).toContain('translation-channel')
+    expect(existsSync(paths.syncedCopyPath)).toBe(false)
   })
 
   it('幂等：同输入二次同步跳写（mtime 不变）', async () => {

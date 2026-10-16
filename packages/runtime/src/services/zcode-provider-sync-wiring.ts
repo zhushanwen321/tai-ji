@@ -47,7 +47,7 @@ export interface ZcodeProviderStartupSyncDeps { // oe-exempt:20261012:framework:
   readonly configStore: Pick<IConfigStore, 'readModels' | 'getEnabledModels'>
   readonly credentialResolver: Pick<
     IProviderCredentialResolver,
-    'resolveProviderCredential' | 'resolveProviderBaseUrl'
+    'resolveProviderCredential' | 'resolveProviderBaseUrl' | 'listCredentialBackedProviderIds'
   >
   /** models.json 损坏降级态判定（D7①）——生产 = isModelsStoreCorrupted（infra/pi，组合根注入；services 层不 value import infra）。 */
   readonly isModelsCorrupted: () => boolean

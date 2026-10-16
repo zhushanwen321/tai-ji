@@ -66,6 +66,7 @@ function makeDeps(input: WiringDepsInput = {}): ZcodeProviderStartupSyncDeps {
         return input.credentials?.[id] ?? undefined
       },
       resolveProviderBaseUrl: id => input.providers?.[id]?.baseUrl,
+      listCredentialBackedProviderIds: () => new Set(Object.keys(input.providers ?? {})),
     },
     paths,
     isModelsCorrupted: () => false,
