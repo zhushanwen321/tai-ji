@@ -93,5 +93,10 @@
     "name": "@zhushanwen/pi-plan",
     "description": "Lightweight plan mode for Pi coding agent",
     "tier": "feature"
+  },
+  {
+    "name": "@zhushanwen/pi-canvas",
+    "description": "Problem-solving canvas toolface: six deferred canvas_* tools bridging the agent to the runtime CanvasService via the CANVAS_MARKER channel",
+    "tier": "feature"
   }
 ]

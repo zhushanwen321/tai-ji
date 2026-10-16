@@ -19,6 +19,7 @@ export default {
     overlayClose: '关闭',
     overlayTabRuns: '运行',
     overlayTabScheduler: '定时任务',
+    overlayTabCanvas: '画布',
     runStatusRunning: '运行中',
     runStatusDone: '已完成',
     // DAG 画布

@@ -117,12 +117,12 @@ vi.mock('@/composables/features/command/useCommandStore', async () => {
       if (!instance) instance = createCommandStore(storage)
       return instance
     },
-    __resetCommandStoreForTesting: () => { instance = null },
+    __testing: { __resetCommandStoreForTesting: () => { instance = null } },
   }
 })
 
 import { useSidebar, resetAppBootstrap } from '@/composables/features/sidebar/useSidebar'
-import { useNewTaskFlow, resetNewTaskFlow, __resetNewTaskFlowForTesting } from '@/composables/features/new-task/useNewTaskFlow'
+import { useNewTaskFlow, resetNewTaskFlow, __testing } from '@/composables/features/new-task/useNewTaskFlow'
 import { useNavigationStore } from '@/stores/navigation'
 import { usePanelStore, ROOT_PANEL_ID } from '@/stores/panel'
 import { useSessionStore } from '@/stores/session'
@@ -164,7 +164,7 @@ beforeEach(() => {
   __clearSessionCleanupRegistryForTest()
   setActivePinia(createPinia())
   resetNewTaskFlow()
-  __resetNewTaskFlowForTesting()
+  __testing.__resetNewTaskFlowForTesting()
   resetAppBootstrap()
   vi.clearAllMocks()
   removeMock.mockResolvedValue(undefined)

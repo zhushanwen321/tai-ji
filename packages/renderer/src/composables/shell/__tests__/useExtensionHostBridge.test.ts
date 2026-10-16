@@ -25,12 +25,13 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { computed, nextTick } from 'vue'
-import { InternalEventBus, MessageBusBridge, providePlatform, registerMountPoints, scanContributions, type ContributionRegistry, ActivationManager, CommandRegistry } from '@taiji/core'
+import { InternalEventBus, MessageBusBridge, providePlatform, registerMountPoints, scanContributions, type ContributionRegistry, ActivationManager, CommandRegistry, type ContributionRecord, type HeaderActionEntry } from '@taiji/core'
 import { dispatchCrossSession, dispatchGlobal } from '@taiji/core/transport/api'
 import {
   getExtensionBus,
   initExtensionHostBridge,
   hasVisibleHeaderActions,
+  isVisibleHeaderAction,
   resolveHeaderActionAvailability,
   HEADER_ACTIONS_SOURCE_KEY,
   __testing,
@@ -404,7 +405,47 @@ describe('u4b E13 四态判定 resolveHeaderActionAvailability（纯函数直测
   })
 })
 
-describe('hasVisibleHeaderActions（headerAction 可见性判定，与 HeaderActionsHost 渲染过滤同构对账）', () => {
+describe('isVisibleHeaderAction（可见性谓词单点：渲染过滤与聚合判定的唯一判定源）', () => {
+  const declOf = (ha: Record<string, unknown> | null): ContributionRecord => ({
+    pluginId: 'demo-plugin',
+    contributionId: 'c1',
+    type: 'headerAction',
+    headerAction: ha as ContributionRecord['headerAction'],
+  })
+  const hiddenEntry: HeaderActionEntry = {
+    headerActionId: 'c1',
+    pluginId: 'demo-plugin',
+    hidden: true,
+    updatedAt: 1,
+  }
+
+  it('① overlay 直开声明（无 commandId）可见——predicate 收窄后 headerAction 段非空（渲染侧直接取段）', () => {
+    const decl = declOf({ activation: 'scheduler-overlay', icon: 'clock', title: '定时任务' })
+    expect(isVisibleHeaderAction(decl, undefined)).toBe(true)
+    if (isVisibleHeaderAction(decl, undefined)) {
+      // type predicate 收窄断言：toHeaderActionButton 依赖它免二次 !ha 判定
+      expect(decl.headerAction.activation).toBe('scheduler-overlay')
+    }
+  })
+
+  it('② 命令链声明（有 commandId）可见；无 commandId 且无 activation 的声明不可见', () => {
+    expect(isVisibleHeaderAction(declOf({ commandId: 'demo.open', title: 'T' }), undefined)).toBe(true)
+    expect(isVisibleHeaderAction(declOf({ icon: 'puzzle', title: 'T' }), undefined)).toBe(false)
+  })
+
+  it('③ 运行时 hidden=true → 不可见（插件「无任务不显示」契约）；hidden=false 与缺省帧可见', () => {
+    const decl = declOf({ activation: 'scheduler-overlay', icon: 'clock', title: '定时任务' })
+    expect(isVisibleHeaderAction(decl, hiddenEntry)).toBe(false)
+    expect(isVisibleHeaderAction(decl, { ...hiddenEntry, hidden: false })).toBe(true)
+    expect(isVisibleHeaderAction(decl, undefined)).toBe(true)
+  })
+
+  it('④ 声明缺省（headerAction 段为空）→ false——predicate 同时收窄掉缺省形状', () => {
+    expect(isVisibleHeaderAction(declOf(null), undefined)).toBe(false)
+  })
+})
+
+describe('hasVisibleHeaderActions（聚合面板「有可见按钮才出段」+ 密度 absent 判据；可见性条件单点 isVisibleHeaderAction）', () => {
   /** 最小 source stub（只带可见性判定消费的三个读面；E13/E3 面不参与可见性） */
   function sourceOf(
     declarations: Array<{ id: string; ha: Record<string, unknown> | null }>,

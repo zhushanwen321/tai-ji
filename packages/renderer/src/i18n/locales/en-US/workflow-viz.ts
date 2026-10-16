@@ -10,6 +10,7 @@ export default {
     overlayClose: 'Close',
     overlayTabRuns: 'Runs',
     overlayTabScheduler: 'Scheduled tasks',
+    overlayTabCanvas: 'Canvas',
     runStatusRunning: 'Running',
     runStatusDone: 'Completed',
     // DAG canvas

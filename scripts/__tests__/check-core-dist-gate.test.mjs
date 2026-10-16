@@ -5,11 +5,15 @@
  * 会误拦/漏放发布门禁——零覆盖的 433 行解析逻辑必须机器锁定。
  * 补充：reportExportDrift / gateTwo 单测（gateTwo 经 coreDir 注入落 tmpdir fixture），
  * 作为复杂度重构（cognitive > 15 三函数）的行为安全网。
+ * 补充（MF-1-6）：门③ workflows/ 手写声明对双向对账（extractCjsModuleExportsKeys /
+ * extractDctsRuntimeExportNames / gateWorkflowsDeclarationPairs）——tmpdir fixture
+ * 红绿自检 + 真实仓声明对 live 只读断言（CI「Test - scripts guards」即实防线）。
  */
 import { describe, it, expect, vi } from 'vitest'
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import {
   stripComments,
   parseExportBlocks,
@@ -17,6 +21,9 @@ import {
   extractSrcExportNames,
   reportExportDrift,
   gateTwo,
+  extractCjsModuleExportsKeys,
+  extractDctsRuntimeExportNames,
+  gateWorkflowsDeclarationPairs,
 } from '../check-core-dist-gate.mjs'
 
 /** tmpdir fixture 目录工厂：files 为 rel 路径 → 内容 映射，调用方 finally rmSync 清理 */
@@ -383,5 +390,185 @@ describe('gateTwo', () => {
     } finally {
       rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
     }
+  })
+})
+
+// ---------- 门③：workflows/ 手写声明对双向对账（MF-1-6） ----------
+
+describe('extractCjsModuleExportsKeys', () => {
+  it('短手法 + 标识符字符串键 + 块内注释剥离 + 多行块', () => {
+    const src = [
+      'const A = 1',
+      '// 头注释',
+      'module.exports = {',
+      '  A,',
+      '  // 块内行注释',
+      "  'keyName': A,",
+      '  B,',
+      '};',
+    ].join('\n')
+    const { names, problems } = extractCjsModuleExportsKeys(src, 't.cjs')
+    expect([...names].sort()).toEqual(['A', 'B', 'keyName'])
+    expect(problems).toEqual([])
+  })
+  it('嵌套字面量值保持单一导出项（深度感知切分，键正确提取不碎成假键）', () => {
+    const { names, problems } = extractCjsModuleExportsKeys('module.exports = { a, b: { c: 1, d: 2 } }', 't.cjs')
+    expect([...names].sort()).toEqual(['a', 'b'])
+    expect(problems).toEqual([])
+  })
+  it('无法解析的导出项（计算键 / 展开）记 problems（fail-closed 不静默漏）', () => {
+    for (const bad of ['[k]: v', '...rest', "'key-name': v"]) {
+      const { problems } = extractCjsModuleExportsKeys(`module.exports = { a, ${bad} }`, 't.cjs')
+      expect(problems.length).toBe(1)
+      expect(problems[0]).toContain('无法解析的导出项')
+    }
+  })
+  it('缺 module.exports 块 → problem', () => {
+    const { names, problems } = extractCjsModuleExportsKeys('const a = 1', 't.cjs')
+    expect([...names]).toEqual([])
+    expect(problems.length).toBe(1)
+    expect(problems[0]).toContain('未找到 module.exports')
+  })
+  it('块外补充导出（module.exports.x = / exports.x =）→ problem（单一导出块义务）', () => {
+    for (const extra of ['module.exports.x = 1', 'exports.y = 2']) {
+      const { problems } = extractCjsModuleExportsKeys(`module.exports = { a }\n${extra}`, 't.cjs')
+      expect(problems.length).toBe(1)
+      expect(problems[0]).toContain('块外补充导出')
+    }
+  })
+})
+
+describe('extractDctsRuntimeExportNames', () => {
+  it('declare function/const 收集；type/interface 不入集（无运行时对应物）', () => {
+    const src = [
+      'export type FailFn = (msg: string) => void;',
+      'export interface ScoreEntry { x: number }',
+      'export declare function parseBatches(a: unknown): string[];',
+      'export declare function planReviewerOrder<T extends { name: string }>(items: T[]): T[];',
+      'export declare const TARGET_TYPES: string[];',
+      'export declare const REVIEWER_BATCH: number;',
+    ].join('\n')
+    const { names, problems } = extractDctsRuntimeExportNames(src, 't.d.cts')
+    expect([...names].sort()).toEqual(['REVIEWER_BATCH', 'TARGET_TYPES', 'parseBatches', 'planReviewerOrder'])
+    expect(problems).toEqual([])
+  })
+  it('export { } 块形态与 export default 记 problems（declare 形态外 fail-closed）', () => {
+    const { names, problems } = extractDctsRuntimeExportNames(
+      'export declare function a(): void;\nexport { b };\nexport default c;',
+      't.d.cts',
+    )
+    expect([...names]).toEqual(['a'])
+    expect(problems.length).toBe(2)
+    expect(problems.some((p) => p.includes('export { } 块形态'))).toBe(true)
+    expect(problems.some((p) => p.includes('export default'))).toBe(true)
+  })
+})
+
+describe('gateWorkflowsDeclarationPairs', () => {
+  /** 空转提示期望（无声明对可查时门③不红） */
+  const expectIdle = ({ logs, errors }) => {
+    expect(logs.join('\n')).toContain('门③空转')
+    expect(errors).toEqual([])
+  }
+  /** 豁免登记 fixture：SLOW_POOL 允许不在 d.cts 声明 */
+  const ALLOWED = new Map([['review-fix-loop-utils.cjs', new Set(['SLOW_POOL'])]])
+  const CJS_GREEN = [
+    'module.exports = {',
+    '  A,',
+    '  inheritCarryoverFields,',
+    '  dormantRevivalTitle,',
+    '  SLOW_POOL,',
+    '};',
+  ].join('\n')
+  const DCTS_GREEN = [
+    'export type FailFn = (msg: string) => void;',
+    'export declare function A(): void;',
+    'export declare function inheritCarryoverFields(t: unknown, e: unknown): boolean;',
+    'export declare function dormantRevivalTitle(d: unknown, e: unknown): string | undefined;',
+  ].join('\n')
+
+  it('对称声明对（含豁免登记的未声明导出 + 本次修复符号正向在场）→ ok 双向零漂移', () => {
+    const dir = makeFixture({ 'workflows/review-fix-loop-utils.cjs': CJS_GREEN, 'workflows/review-fix-loop-utils.d.cts': DCTS_GREEN })
+    try {
+      const { logs, errors } = withCapturedConsole(() => gateWorkflowsDeclarationPairs(join(dir, 'workflows'), ALLOWED))
+      expect(errors).toEqual([])
+      expect(logs.join('\n')).toContain('cjs 4 导出 / d.cts 3 声明（豁免登记 1），双向零漂移')
+    } finally {
+      rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    }
+  })
+  it('陈旧声明方向（d.cts 声明、cjs 已无）→ fail，豁免不可豁免此方向', () => {
+    const dir = makeFixture({
+      'workflows/pair.cjs': 'module.exports = { A }',
+      'workflows/pair.d.cts': 'export declare function A(): void;\nexport declare function Stale(): void;',
+    })
+    try {
+      const { errors } = withCapturedConsole(() => gateWorkflowsDeclarationPairs(join(dir, 'workflows'), ALLOWED))
+      expect(errors.join('\n')).toContain('仅 d.cts 声明、cjs module.exports 已无（陈旧声明')
+      expect(errors.join('\n')).toContain('Stale')
+    } finally {
+      rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    }
+  })
+  it('未声明方向在豁免登记外 → fail 且提示补声明或登记', () => {
+    const dir = makeFixture({
+      'workflows/pair.cjs': 'module.exports = { A, NewThing }',
+      'workflows/pair.d.cts': 'export declare function A(): void;',
+    })
+    try {
+      const { errors } = withCapturedConsole(() => gateWorkflowsDeclarationPairs(join(dir, 'workflows'), ALLOWED))
+      expect(errors.join('\n')).toContain('仅 cjs 导出、d.cts 未声明且未登记豁免: NewThing')
+      expect(errors.join('\n')).toContain('WORKFLOWS_UNDECLARED_ALLOWED')
+    } finally {
+      rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    }
+  })
+  it('未声明方向命中豁免登记 → 放行（登记键 = 相对 workflows/ 路径）', () => {
+    const dir = makeFixture({
+      'workflows/_shared/deep.cjs': 'module.exports = { A, SLOW_POOL }',
+      'workflows/_shared/deep.d.cts': 'export declare function A(): void;',
+    })
+    try {
+      const allowed = new Map([['_shared/deep.cjs', new Set(['SLOW_POOL'])]])
+      const { logs, errors } = withCapturedConsole(() => gateWorkflowsDeclarationPairs(join(dir, 'workflows'), allowed))
+      expect(errors).toEqual([])
+      expect(logs.join('\n')).toContain('双向零漂移')
+    } finally {
+      rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    }
+  })
+  it('无同名 .d.cts 的 .cjs 不设义务；全部无对 → 空转', () => {
+    const dir = makeFixture({ 'workflows/lonely.cjs': 'module.exports = { A }' })
+    try {
+      expectIdle(withCapturedConsole(() => gateWorkflowsDeclarationPairs(join(dir, 'workflows'), ALLOWED)))
+    } finally {
+      rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    }
+  })
+  it('workflows 目录不存在 → 空转（不抛）', () => {
+    expectIdle(withCapturedConsole(() => gateWorkflowsDeclarationPairs('/nonexistent-workflows-g3', ALLOWED)))
+  })
+  it('解析 problems（块外补充导出）优先 fail 且不比对差集', () => {
+    const dir = makeFixture({
+      'workflows/pair.cjs': 'module.exports = { A }\nmodule.exports.B = 1',
+      'workflows/pair.d.cts': 'export declare function A(): void;',
+    })
+    try {
+      const { errors } = withCapturedConsole(() => gateWorkflowsDeclarationPairs(join(dir, 'workflows'), ALLOWED))
+      expect(errors.join('\n')).toContain('块外补充导出')
+      expect(errors.join('\n')).not.toContain('双向零漂移')
+    } finally {
+      rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    }
+  })
+})
+
+describe('真实仓 workflows 声明对 live 只读断言（MF-1-6 门③ 实防线）', () => {
+  it('packages/subagent-core/workflows 手写声明对经默认豁免登记双向零漂移', () => {
+    const workflowsDir = fileURLToPath(new URL('../../packages/subagent-core/workflows', import.meta.url))
+    const { logs, errors } = withCapturedConsole(() => gateWorkflowsDeclarationPairs(workflowsDir))
+    expect(errors).toEqual([])
+    expect(logs.join('\n')).toContain('review-fix-loop-utils.cjs')
+    expect(logs.join('\n')).toContain('双向零漂移')
   })
 })

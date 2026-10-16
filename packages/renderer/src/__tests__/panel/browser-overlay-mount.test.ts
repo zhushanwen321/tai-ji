@@ -22,7 +22,8 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
-import { openBrowser, openOverlay, closeOverlay, _resetOverlayForTest } from '@taiji/core/domain/overlay'
+import { openBrowser, openCanvasOverlay, openOverlay, closeOverlay, _resetOverlayForTest } from '@taiji/core/domain/overlay'
+import type { OverlayContentKind } from '@taiji/shared'
 import { closeTopContainer } from '@/composables/features/app/key-orchestrator/stack-order'
 
 // ── mock lib/ipc：browser 系列捕获（web 环境 electronAPI 缺席的等价形态）──
@@ -50,7 +51,7 @@ vi.mock('@/lib/ipc', () => ({
   browserGetZoom: vi.fn().mockResolvedValue(1.0),
   browserSetOverlayState: (state: {
     open: boolean
-    content: 'browser' | 'workflow' | null
+    content: OverlayContentKind | null
     sessionId: string | null
   }) => mockBrowserSetOverlayState(state),
   browserSetShields: (payload: {
@@ -115,6 +116,19 @@ describe('BrowserOverlay（BrowserPane 挂浮层壳，S5 渲染可点）', () =>
     const reportOrder = mockBrowserSetOverlayState.mock.invocationCallOrder[openReportIndex]
     const showOrder = mockBrowserShow.mock.invocationCallOrder[0]
     expect(reportOrder).toBeLessThan(showOrder)
+    wrapper.unmount()
+  })
+
+  it("canvas 内容上报：openCanvasOverlay → browser:overlay-state 收 content='canvas' 且 sessionId=null（画布跨 session 无会话归属，设计 D4/D7）", async () => {
+    const wrapper = mount(BrowserOverlay)
+    openCanvasOverlay('cvs-1')
+    await nextTick()
+    await nextTick()
+    expect(mockBrowserSetOverlayState).toHaveBeenCalledWith({
+      open: true,
+      content: 'canvas',
+      sessionId: null,
+    })
     wrapper.unmount()
   })
 

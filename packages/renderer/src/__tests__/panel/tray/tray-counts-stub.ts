@@ -12,6 +12,7 @@
 import { computed } from 'vue'
 import type { UseTrayCountsReturn } from '@/components/panel/tray/useTrayCounts'
 import type { BackgroundTaskEntry } from '@/lib/background-task-bucket'
+import type { CanvasListEntry } from '@zhushanwen/extension-protocol'
 import type { SessionSummary, SubagentRecord, WorkflowRunRecord } from '@taiji/shared'
 
 export interface TrayCountsStubState {
@@ -26,6 +27,8 @@ export interface TrayCountsStubState {
   workflowLoading: boolean
   /** 第 4 件子会话行集（u7）：缺省空（既有三件断言无需关心；session 用例显式注入） */
   sessionChildren?: SessionSummary[]
+  /** 第 5 件画布清单（u-tray-entry）：缺省空（canvas 恒渲染——外壳豁免「全无不渲染」，画布用例显式注入） */
+  canvasEntries?: CanvasListEntry[]
   /** [RT-4#8] oversize 降级标志（缺省 false = 无降级；降级渲染用例显式注入） */
   oversize?: { subagent?: boolean; workflow?: boolean }
 }
@@ -34,6 +37,8 @@ export function makeTrayCountsStub(
   state: TrayCountsStubState,
 ): Pick<UseTrayCountsReturn, 'counts' | 'lists' | 'loading' | 'oversize'> {
   const sessionChildren = () => state.sessionChildren ?? []
+  const canvasEntries = () => state.canvasEntries ?? []
+  const canvasActive = () => canvasEntries().filter((c) => !c.converged)
   return {
     counts: computed(() => ({
       bash: {
@@ -56,6 +61,11 @@ export function makeTrayCountsStub(
         ended: sessionChildren().filter((s) => s.status !== 'active').length,
         total: sessionChildren().length,
       },
+      canvas: {
+        running: canvasActive().length,
+        ended: canvasEntries().length - canvasActive().length,
+        total: canvasEntries().length,
+      },
     })),
     lists: {
       bash: {
@@ -72,6 +82,9 @@ export function makeTrayCountsStub(
       },
       session: {
         children: computed(() => sessionChildren()),
+      },
+      canvas: {
+        entries: computed(() => canvasEntries()),
       },
     },
     loading: {

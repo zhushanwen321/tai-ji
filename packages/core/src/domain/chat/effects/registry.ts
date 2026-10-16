@@ -80,41 +80,54 @@ import { isDevMode } from '../../../platform/dev-mode'
 // [投递所有权内核 u3b] message_end(user) 送达回执（内核标记 id 匹配，C-data-08 修订方向）
 // 归位 effects/user-delivery.ts；① 前身（defer 分区 FIFO 文本匹配）与 queue_update 计数腿
 // （countDrained/drainN）已随内核整体退役（设计 §3.1 删除面），git 可追溯。
-import { confirmKernelDeliveryOnMessageEnd } from './user-delivery'
+import { confirmKernelDeliveryOnMessageEnd, hasKernelDeliveryMarker } from './user-delivery'
 // [TODO @i18n-migration] core/i18n 落地后恢复 i18n.global.t 调用（§0.3 列为后续迁移）。
 // compactionSummary（W6）/ branchSummary（D13 renderer-deepening）均已 entry 化：两者的
 // summary 兜底收敛到 reducer（compaction 中文 fallback「上下文已压缩」/ branchSummary
 // 空串），live/reload 一致，本文件不再持有占位文案。
 
 /**
- * [投递所有权内核 u3b] message_end(user) 投递确认/兜底显示（原三分支收敛为两分支）：
+ * [投递所有权内核 u3b] message_end(user) 投递确认/兜底显示（三分支：内核回执 / 计数
+ * 兜底 / 外来直发判定）：
  *
  * - ① 内核送达回执（effects/user-delivery.ts confirmKernelDeliveryOnMessageEnd，最高
  *   优先级）：帧文本尾内核裸标记 id 命中 session.delivery 投影条目 → 投影转 delivered +
  *   morph 段按序入流 + inflight 占位回收 + 帧消费终止。C-data-08 修订方向：标记 id 精确
  *   匹配（身份非内容）取代计数 FIFO / 文本匹配。
- * - ② inflight > 0 → 纯计数 decrement → return（兜底：外来直发/帧缺失等无投影命中形态
- *   ——乐观气泡已显示，纯计数抵消防重复入流）。
+ * - ② inflight > 0 → 纯计数 decrement → 帧消费终止（兜底：composer 消息标记丢失等无
+ *   投影命中形态——乐观气泡已显示，纯计数抵消防重复入流）。
+ * - ③ 外来直发（返回 false，调用方入流）：无内核标记 + 无挂账 = runtime 主动注入的
+ *   user prompt（canvas 回推等 client.prompt 通知）。此前两分支均放过、无任何实时入流
+ *   路径，通知只在切回会话的持久化重放出现（live ≠ reload，画布 D3-A3 验收 8s 计时
+ *   超时实证后恢复该分类）。
  *
- * [HISTORICAL] ③ 腿 2 includes 兜底与 queue_update 计数腿（腿 1 countDrained/drainN）
+ * [HISTORICAL] 旧 ③ 腿 2 includes 兜底与 queue_update 计数腿（腿 1 countDrained/drainN）
  * 已随内核退役：queue_update 帧降级为内核内部回执（不再直驱 UI），队列区数据源 =
  * session.delivery 状态帧单一源（D7）。
+ *
+ * @returns true = 帧已消费（回执/计数簿记，调用方不再入流）；false = 外来直发，调用方
+ *          需经 applyEntryFrameWithOverlay 入流。
  */
 function confirmUserDeliveryOnMessageEnd(
   ctx: MessageEffectContext,
   sid: string,
   entry: PiMessageEntry,
-): void {
+): boolean {
   // ① 内核送达回执（标记 id 匹配）：命中即消费终止，不走 ②。
-  if (confirmKernelDeliveryOnMessageEnd(ctx, sid, entry)) return
+  if (confirmKernelDeliveryOnMessageEnd(ctx, sid, entry)) return true
   // ② 计数兜底：乐观气泡已显示，纯计数抵消（本帧不重复入流）。
   if (ctx.getInflight(sid) > 0) {
-    // [R2-b04-3] 兜底触发频率观测（dev 门）：① 未命中落 ② = 外来直发/帧缺失形态的接管
+    // [R2-b04-3] 兜底触发频率观测（dev 门）：① 未命中落 ② = 标记丢失形态的接管
     // 频率，原先零痕迹（红线「兜底掩盖正常路径」的观测要求）。钳制幂等机制不变。
     logDeliveryCountingFallback(sid)
     ctx.decrementInflight(sid, 1)
-    return
+    return true
   }
+  // ③ 外来直发（无内核标记 + 无挂账）：交调用方入流。带标记帧属送达回执通道管辖——
+  // ① 已消费，或「迟到重复回执」形态（投影已 delivered + 挂账已归零）须静默防双插
+  //（E5c 场景），不按外来处理。
+  if (hasKernelDeliveryMarker(entry)) return true
+  return false
 }
 
 /** [R2-b04-3] ② 计数兜底的 dev 计数/日志（生产零开销；计数跨 session 累计，供频率观察）。 */
@@ -618,17 +631,21 @@ const messageEffects: Partial<Record<ServerMessageType, MessageEffectHandler>> =
     // deliveredToolResultIds 幂等承担（apply-entry applyToolResultMessage：同 toolCallId
     // 首次投递后二次 no-op），对齐 event-adapter handleMessageEnd「toolResult 与
     // tool_execution_end 的回填，去重/合并归 core store 的 reducer 接入层编排」的职责划分。
-    ctx.applyEntryFrame(sid, entry as PiEntry)
     // [chat-flow-text-color D1] assistant 消息文本定稿事实标记：mid-turn 气泡的 status
     // 要到回合级 message.complete 才收口，UI 颜色若直接跟 status，长工具回合中已写完
     // 的正文一直灰。此处按位置给 live 气泡打 textFinalized（status 不动，理由见 helper 注释）。
     if ((entry as PiMessageEntry).message?.role === 'assistant') {
       markStreamingAssistantTextFinalized(ctx, sid)
     }
-    // [steer-bubble u1 / D1+D2] 腿 2：user role 时做投递确认/兜底消费（reducer 喂入
-    // 无条件保留在前——腿 2 只是 overlay 显示侧的补充裁决，异常路径不阻断权威喂入）。
+    // [steer-bubble u1 / D1+D2] 腿 2：user role 的投递确认/兜底消费。确认命中（① 回执 /
+    // ② 计数抵消）只做簿记不入流（乐观气泡已显示）；未消费 = 外来直发（runtime 注入的
+    // user prompt，画布回推通知等）→ overlay 入流（权威喂 buffer + UI 投影，A3 缺口修复）。
     if ((entry as PiMessageEntry).message?.role === 'user') {
-      confirmUserDeliveryOnMessageEnd(ctx, sid, entry as PiMessageEntry)
+      const consumed = confirmUserDeliveryOnMessageEnd(ctx, sid, entry as PiMessageEntry)
+      if (consumed) ctx.applyEntryFrame(sid, entry as PiEntry)
+      else applyEntryFrameWithOverlay(ctx, sid, entry as PiEntry)
+    } else {
+      ctx.applyEntryFrame(sid, entry as PiEntry)
     }
   },
 

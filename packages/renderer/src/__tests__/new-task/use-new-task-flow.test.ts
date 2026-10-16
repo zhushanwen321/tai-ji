@@ -84,7 +84,7 @@ vi.mock('@/composables/useToast', () => ({
   useToast: () => ({ error: toastMock.error }),
 }))
 
-import { useNewTaskFlow, resetNewTaskFlow, __resetNewTaskFlowForTesting } from '@/composables/features/new-task/useNewTaskFlow'
+import { useNewTaskFlow, resetNewTaskFlow, __testing } from '@/composables/features/new-task/useNewTaskFlow'
 import { useSessionStore } from '@/stores/session'
 import { useProjectStore } from '@/stores/project'
 
@@ -93,7 +93,7 @@ beforeEach(() => {
   resetNewTaskFlow()
   // renderer 壳 cachedFlow 单例（捕获首次调用时的 pinia store）必须重建，
   // 否则 projectId 读取旧 pinia 的 projectStore（dedup 测试红过）
-  __resetNewTaskFlowForTesting()
+  __testing.__resetNewTaskFlowForTesting()
   vi.clearAllMocks()
   // 重置 workspaceStore mock
   workspaceStoreMock.records = []

@@ -72,3 +72,25 @@ export {
   type CompanionDialogAdaptersOptions,
   type CompanionDialogAdaptersTesting,
 } from './shell-adapters'
+export {
+  createFormRequestChannel,
+  bindSessionFormActions,
+  type FormChannelPartitions,
+  type FormRequestChannel,
+  type FormRequestChannelOptions,
+  type SessionFormActions,
+} from './form-request-channel'
+export {
+  formQuestionsOf,
+  scheduleDraftOf,
+  isPlanReviewFrame,
+  isRichInteractionFrame,
+  initialQuestionState,
+  isQuestionAnswered,
+  encodeFormAnswers,
+  draftToScheduleFormResult,
+  questionKey,
+  OTHER_VALUE,
+  type PlanReviewFrame,
+  type QuestionState,
+} from './form-protocol'

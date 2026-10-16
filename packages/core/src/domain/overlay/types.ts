@@ -10,8 +10,9 @@
  */
 import type { OverlayContentKind } from '@taiji/shared'
 
-/** 浮层内容类型（§7.2 浮层条目 + scheduler 整合（2026-10-06 用户裁决）：
- * browser（网页）/ workflow（工作流图）/ scheduler（定时任务面板））。
+/** 浮层内容类型（§7.2 浮层条目 + scheduler 整合（2026-10-06 用户裁决）+ canvas 画布
+ * tab（problem-solve-canvas §3.1(3)，对齐 scheduler 双入口先例））：
+ * browser（网页）/ workflow（工作流图）/ scheduler（定时任务面板）/ canvas（问题解决画布）。
  * 词表单源 = @taiji/shared OverlayContentKind（browser:overlay-state IPC payload
  * 契约四方共用），本域派生别名保持既有导出名与消费面不变。 */
 export type OverlayKind = OverlayContentKind
@@ -40,11 +41,19 @@ export interface SchedulerOverlayPayload { // oe-exempt:20261006:framework:类�
   sessionId: string
 }
 
+/** canvas 浮层载荷（问题解决画布整合进 workflow 浮层成一级 tab，problem-solve-canvas
+ * §3.1(3)）：canvasId = 画布 id（画布跨 session 共享——设计 D4/D7，无会话归属，
+ * 故载荷不持 sessionId；会话删除级联对 canvas 内容不适用）。 */
+export interface CanvasOverlayPayload { // oe-exempt:20261014:framework:类型契约先行——容器契约层声明，overlay 一级 tab UI 即为消费面
+  canvasId: string
+}
+
 /** 浮层当前内容（判别联合，kind/payload 换内容） */
 export type OverlayContent =
   | { kind: 'browser'; payload: BrowserOverlayPayload }
   | { kind: 'workflow'; payload: WorkflowOverlayPayload }
   | { kind: 'scheduler'; payload: SchedulerOverlayPayload }
+  | { kind: 'canvas'; payload: CanvasOverlayPayload }
 
 /** 浮层开合态（单例）：isOpen=false 时 current 置 null（关浮层复位，§7.4 发起会话删除级联同语义） */
 export interface OverlayControlState { // oe-exempt:20261003:framework:类型契约先行——容器契约层声明，D1 下游单元即为消费面

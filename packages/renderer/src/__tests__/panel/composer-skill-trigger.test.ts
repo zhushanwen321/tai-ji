@@ -63,7 +63,7 @@ vi.mock('@/api', () => ({ project: apiProjectMock(),
 
 import CommandPopover from '@/components/panel/CommandPopover.vue'
 import Composer from '@/components/panel/Composer.vue'
-import { useCommandStore, __resetCommandStoreForTesting } from '@/composables/features/command/useCommandStore'
+import { useCommandStore, __testing } from '@/composables/features/command/useCommandStore'
 import { useSessionStore } from '@/stores/session'
 
 beforeEach(() => {
@@ -330,7 +330,7 @@ describe('行首命令浮层 skill 项分流（D3：isSkill → insertSkillChip 
 
 describe('SearchModal ⌘K 注入分流（pendingSlash isSkill → skill 通路）', () => {
   beforeEach(() => {
-    __resetCommandStoreForTesting() // pendingSlash 通道跨用例隔离
+    __testing.__resetCommandStoreForTesting() // pendingSlash 通道跨用例隔离
   })
 
   afterEach(() => {

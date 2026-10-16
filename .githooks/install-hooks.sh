@@ -1603,6 +1603,32 @@ else
 fi
 
 # ============================================================================
+# i18n 使用面 vs 定义面比对守卫（源码引用的 key 必须在 zh-CN 聚合树存在——
+#   problem-solve-canvas D3 真机 9 个错位 key 渲染原文的根因防线；locale-sync
+#   只查双语一致，此段查使用面。检查本体 = renderer 的
+#   usage-definition-check.test.ts（import 真实聚合树，白名单与动态前缀提取
+#   在测试文件内维护）。无独立 SKIP 开关（R1 后惯例，SKIP_ALL_CHECKS 兜底）。
+# ============================================================================
+
+if [ "$SKIP_ALL_CHECKS" != "1" ]; then
+    # staged 触及 renderer / ui 源码即检查（使用面与定义面两侧入口都在这两根下）
+    I18N_USAGE_TRIGGER=$(echo "$STAGED_FILES" | grep -E "^packages/(renderer/src|ui/src)/" || true)
+    if [ -n "$I18N_USAGE_TRIGGER" ]; then
+        echo -e "${BLUE}[INFO] 运行 i18n 使用面-定义面比对守卫...${NC}"
+
+        (cd packages/renderer && npx vitest run src/__tests__/i18n/usage-definition-check.test.ts)
+        EXIT_CODE=$?
+
+        if [ $EXIT_CODE -ne 0 ]; then
+            echo ""
+            echo -e "${RED}[ERROR] i18n 使用面-定义面守卫失败：源码引用的 key 在定义树不存在（或动态前缀无落点）${NC}"
+            echo -e "${RED}[FIX] 修 key 拼写 / 补词条（zh+en 双侧同步），确认合法的非 i18n 同形字面量登记白名单（usage-definition-check.test.ts 的 USAGE_WHITELIST，附理由）${NC}"
+            exit 1
+        fi
+    fi
+fi
+
+# ============================================================================
 # 文档 emoji 检测（README.md / README_EN.md 禁装饰 emoji）
 #   检测逻辑单一实现 .githooks/check_doc_emoji.py，merge 流程 release.sh 复用
 #   同一脚本校验 release notes。docs/ 下 ✓/⚠/✗ 等技术功能符号不在范围。

@@ -162,6 +162,18 @@ OUTPOST_CALLSITES = [
         "recordId|runId），无用户自由文本（provider/modelId 源 = 前端模型目录选择器，"
         "非 composer 出口）——与 workflows abort 豁免同族的内部命令",
     ),
+    (
+        "transport/canvas-message-handler.ts",
+        "void client.prompt(text, undefined, 'followUp').catch",
+        "exempt",
+        "[problem-solve-canvas D5 回推] 画布事件通知（actor=user 的 mutate 后对活跃绑"
+        "定 session 逐个注入）：text = runtime 构造的固定模板事件摘要（「画布事件通"
+        "知」前缀 + 字段化节点标题/动作/理由占位 + 响应协议指引「先 canvas_read 取当"
+        "前态」），代理构造模板文本非用户自由文本发布；节点标题片段属画布状态回显而"
+        "非 composer 出口内容，agent 响应协议不依赖通知全文（先 read 后动，与 renderer"
+        "「广播=失效提示」同构）——exempt 豁免；fire-and-forget 失败 warn 不重试"
+        "（ADR-0122）；第三参 followUp = pi 占线时排队（D3-A3 v6：缺省 throw 静默丢失）",
+    ),
 ]
 
 # injection 字段合法枚举（白名单加载校验用）：typo 条目既无法放行匹配也不进统计口径，

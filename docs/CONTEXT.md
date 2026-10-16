@@ -125,6 +125,26 @@ taiji 与 pi 之间对 pi 私有语义的统一适配层（[ADR-0064](../adr/dec
 
 taiji subagent 体系的子任务执行单元：由引擎进程派生子进程（pi 引擎 spawn pi 子进程；zcode 引擎走 app-server RPC）执行子任务，宿主与引擎经 engine-protocol v1（NDJSON stdio）通信。体系由 5 类包协作：shell（`extensions/universal/subagent-workflow`）→ host core（`packages/subagent-core`）→ engine（`packages/pi-subagent-cli` / `packages/zcode-subagent-cli`）→ contract（`packages/subagent-engine-sdk`）。结构导航 SSOT：[docs/extensions/subagents/architecture.md](../extensions/subagents/architecture.md)。
 
+### review-fix-loop 状态机 severity 词表
+
+review-fix-loop workflow（`packages/subagent-core/workflows/review-fix-loop.js`，审查-修复循环）问题清单状态机中 issue 条目 `severity` 字段的四值词表：`critical | major | minor | unknown`。前三值 = 聚合 must-fix 条目的裁决等级（normalizeSeverity 单点归一，畸形值回退 major）；`unknown` = 对账通道无 severity 数据的诚实缺省——reviewer 的 reconciliation 只报 prev_id 不带等级，对账新建条目写 major 会伪造裁决，消费侧按「无等级数据」承接（注入段 `[unknown]` 显示、终态汇总 `|| "unknown"`），不参与 critical/major/minor 的等级比较。词表登记处：`packages/subagent-core/workflows/review-fix-loop-utils.cjs`（reconcileIssues 注释块）。
+
+### 问题清单（issue ledger）
+
+review-fix-loop workflow 跨轮追踪审查问题的条目表（`state.issues`，键 = 清单键）：条目状态机 open → fix-attempted → fixed/regressed →（deferred/disputed），附 fixAttempts / openStreak / history 字段。_Avoid_：「issues 表」「追踪表」混用。
+
+### 延续条目（carry-over entry）
+
+R2+ 聚合重报命中问题清单已追踪条目的形态：title 缺失侧从本轮重报回填、severity 采信本轮标注（f5c7f1506 定名并实装，[ADR-0138](adr/decisions.md)）。_Avoid_：「重报条目」；英文 carry-forward（commit message）与 carryover（函数名 inheritCarryoverFields）并存，新文统一 carryover。
+
+### dormant 条目
+
+聚合裁决降级（downgraded/unverified）暂存的问题条目（`state.dormant`）：恒为 pending 单形态（已复活条目在复活点迁出，[ADR-0139](adr/decisions.md)），不占修复队列，经活跃重报复活。
+
+### 身份对齐三级（L1/L2/L3）
+
+跨轮表格号不稳定下的条目同一性判定：L1 编号+标题双核、L2 归一标题唯一命中、L3 占号避让（`review-fix-loop-utils.cjs` resolveIssueIdentity）。_Avoid_：「编号对齐」「标题匹配」单称。
+
 ### Fan-out / 批量派发
 
 
@@ -239,6 +259,10 @@ ask-user / scheduler / plan 三个 extension 提问交互的统一协议：问�
 - **版本偏斜窗口**：旧 ask-user 帧（`askUser` + `askUserQuestions`）/ 旧 scheduler 帧（`scheduleCreate` + `scheduleDraft`）由 runtime event-adapter 的 ASK_USER / SCHEDULE_CREATE marker 分支直接归一为 `form: true` 统一表单帧（askUser 源含 type 推断映射，renderer 只消费 view-ready 帧）。退役窗口终局（新 marker 版三包 npm 发布 + 一个大版本后独立 PR）：event-adapter 的 ASK_USER / SCHEDULE_CREATE legacy 分支、两旧 marker 常量、payload 旧字段（shared/core wire 类型同批）、ask-user channel 旧名注册（`ask_user`）一并清理。
 
 **代码映射**: `packages/extension-protocol/src/extensions/ui-form/`（types/marker/helpers/guards）；消费方 `extensions/universal/{ask-user, scheduler, plan}/src/`；渲染面 `packages/renderer/src/components/extension/form/`。
+
+### form 通道
+
+form / planReview 类 ui-request 请求的双壳消费通道：C4 富交互放行面 + per-session 挂起分区 + 快照对账 + 作答回传的合称；与 dialog 通道（CompanionBand 简单对话）、permission 通道（审批弹窗）并列 extension-host 三通道。通道算法（分区容器 / 快照对账 / 作答编码）单点在 `packages/ui/src/extension-host/`（form-request-channel.ts / form-protocol.ts，[ADR-0140](adr/decisions.md)），壳只留策略回调。_Avoid_：「extensionUI 链」「表单链」等泛称。
 
 ### Schedule Create（schedule 创建表单 / 触发反转，2026-09-20）
 
@@ -630,3 +654,75 @@ taiji 的 assistant 回复朗读能力（ai-voice-tts 设计，P2 辅助功能�
 
 ### settings-tts-test（伪 id）
 设置页「保存并测试」的播放通道：走与朗读按钮完全相同的 `useTtsPlayer.speak`，但用固定伪 messageId（`SETTINGS_TTS_TEST_MESSAGE_ID`）驱动，与对话朗读天然双向互斥（同一全局单例任务态）。
+
+## 画布域（Problem-Solve Canvas）
+
+tech-design-wf 之前的方向规划层：一张人机共编的分层论证图画布——agent 经结构化工具生长（growth），用户在 overlay 画布上裁决（选定 / 否决 / 评论 / 改判据）并回推 agent 响应，反向对抗式审查迭代到 must-fix（必修项）清零即规划收敛，收敛后的执行叶子经需求卡（requirement card）派发给 tech-design-wf。领域结构（两聚合 + 不变量 + 状态机）的登记 SSOT = [domain-model.md](domain-model.md)；本节承载统一语言词条。状态权威 = runtime CanvasService 唯一入口 `mutate`，跨 session 持久落盘 `<dataDir>/canvases/<canvasId>/`。
+
+**代码映射**: 领域核心 `packages/runtime/src/services/canvas/`（聚合根 + 不变量 + 落盘 + 重建）；契约（action 词表 / actor 权限矩阵 / marker）`packages/extension-protocol/src/extensions/canvas/`；agent 工具面 `extensions/taiji/canvas/`（6 工具全 deferred）；GUI `packages/renderer/src/stores/canvas.ts` + `packages/renderer/src/components/canvas/`；wire 登记 `packages/shared/src/protocol.ts`（`canvas.updated` 等）。
+
+### 画布（canvas）
+承载一个问题域完整规划的聚合根：一张图 + 配置 + 历史。**Avoid**: 不叫「白板」「文档」。
+
+### 主干（trunk）
+由分解边与解边构成的层级结构，画布的骨架，无环、唯一根。**Avoid**: 不叫「树干」「大纲」。
+
+### 问题节点（question）
+主干上待解决的子问题实体。**Avoid**: 不叫「任务」「节点」（裸称）。
+
+### 方案节点（option）
+某问题的候选解法实体；候选可并存，至多一个被选定。**Avoid**: 不叫「答案」「行动」。
+
+### 论据（argument）
+对任意图元素的论证实体，带极性（支持 / 反对）与素材性（事实 / 主张）。**Avoid**: 不叫「证据」「反对」（两类型已合并为论据的两个字段）。
+
+### 约束（constraint）
+声明作用范围内须满足的限制条件实体（成本 / 时间 / 风险）。**Avoid**: 不叫「规则」「前提」。
+
+### 评论（comment）
+锚定在节点或边上的批注附件，非图成员；用户添加评论 = 注入议题，agent 必须响应（采纳落实或反驳留理由）后才可转已响应。**Avoid**: 不叫「留言」「消息」。
+
+### 分解边（decompose）
+主干边：父元素（问题或方案）的完成由子问题集的解决构成。**Avoid**: 不叫「拆分」「父子关系」。
+
+### 解边（resolve）
+主干边：问题指向其候选方案；至多一条被选定。**Avoid**: 不叫「实现边」。
+
+### 论证边（argue）
+附属边：论据指向被论证的图元素，带极性。**Avoid**: 不叫「支撑边」（与支撑度撞义）。
+
+### 反驳边（rebut）
+附属边：论据指向论据，论证互驳；对抗式审查的核心动作。**Avoid**: 不叫「攻击边」。
+
+### 约束作用边（constrain）
+附属边：约束指向子树锚点，作用于锚点可达的主干子树。**Avoid**: 不叫「影响边」。
+
+### 引用边（reference）
+附属边：任意元素间的复用指针，无论证语义。**Avoid**: 不叫「链接」。
+
+### 支撑度（support rating）
+主干边上的评价值对象：充分 / 有缺口（附清单）/ 不成立；只评价主干边（分解边 / 解边），论证边不评级。**Avoid**: 不叫「评分」「置信度」。
+
+### 叶子（leaf）
+无分解出边的选定方案（结构派生，非标记）。**Avoid**: 不叫「末端」。
+
+### 执行叶子（dispatchable leaf）
+被显式标记可派发的叶子；画布的原子交付单元。**Avoid**: 不叫「任务节点」。
+
+### 派发（dispatch）
+执行叶子 → 下游（tech-design-wf）的移交动作，登记产物指针；用户拍板动作（agent 工具面不持有）。**Avoid**: 不叫「发布」「移交」。
+
+### 需求卡（requirement card）
+执行叶子的导出翻译格式（目标 / 上溯链 / 已排除方案 / 论据核实态 / 生效约束五要素），对接 tech-design-wf T1 的防腐层。**Avoid**: 不叫「工单」。
+
+### 否决记录（rejection record）
+rejected 节点携带的否决理由与复活条件，不可删除——防 agent 重复提出已否决项。**Avoid**: 不叫「备注」。
+
+### 生长（growth）
+图的构建推进（分解或聚合两个方向；MVP 为自顶向下分解）。**Avoid**: 不叫「编辑」「更新」。
+
+### 规划收敛（planning converged）
+画布终态：至少一个执行叶子（防空集收敛）+ 执行叶子全部 passed/dispatched + must-fix 清零 + 待重审集合为空。**Avoid**: 不叫「完成」（执行完成归下游）。
+
+### 就绪（ready）
+节点规划态的收敛判定（自底向上递归）：问题有选定方案且其子树就绪、或其分解子问题全部就绪——两路并存须同时成立（或判定范围外，即 rejected/shelved）；方案无未决分解子问题。**Avoid**: 不叫「完成」（执行完成归下游）。

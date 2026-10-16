@@ -60,7 +60,7 @@ vi.mock('@/composables/shell/useExtensionHostBridge', async (importOriginal) => 
 
 import {
   useExtensionUI,
-  __resetExtensionBusSubscriptionForTesting,
+  __testing,
 } from '@/composables/useExtensionUI'
 import { sendExtensionUIResponse } from '@taiji/core/transport/api/domains/extension'
 import { useExtensionUIStore } from '@/stores/extension-ui'
@@ -99,7 +99,7 @@ function emitBusRequestsInvalidated(sid: string, requestIds: string[], reason: s
 }
 
 beforeEach(() => {
-  __resetExtensionBusSubscriptionForTesting()
+  __testing.__resetExtensionBusSubscriptionForTesting()
   setActivePinia(createPinia())
   mockBus = new InternalEventBus()
   vi.mocked(sendExtensionUIResponse).mockClear()

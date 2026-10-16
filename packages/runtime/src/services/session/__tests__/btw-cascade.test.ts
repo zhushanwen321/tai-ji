@@ -29,6 +29,7 @@ import { setBtwCascadeOps } from '../session-lifecycle.js'
 import { initRuntimeCheckpointStore } from '../runtime-checkpoint.js'
 import { clearRemovedSessionData } from '../../plugin-service/session-data-store.js'
 import { BtwService } from '../btw-service.js'
+import { CanvasService } from '../../canvas/canvas-service.js'
 import { getBtwThreadDir } from '../../../infra/pi/pi-paths.js'
 import { PiConfigStore } from '../../../infra/pi/pi-config-store.js'
 import { PiSessionStore } from '../../../infra/pi/session-store.js'
@@ -188,6 +189,59 @@ describe('P-cascade：删主 session → 杀名下线进程 + 删线目录 + 注
     expect(h.destroyed).toEqual(expect.arrayContaining([a.vid, b.vid]))
     expect(existsSync(a.threadDir)).toBe(false)
     expect(existsSync(b.threadDir)).toBe(false) // 两线共享同一线目录（cwd+mainSid 推导）
+  })
+})
+
+describe('画布绑定解绑（F1-11：session 真删除即解绑，btw 线不豁免）', () => {
+  /** 独立 CanvasService（tmp canvasesDir；模块级分发登记——delete 的 unbind 落本实例）。 */
+  function makeCanvasService(): { svc: CanvasService; canvasId: string; dispose: () => void } {
+    const dir = mkdtempSync(join(tmpdir(), 'btw-cascade-canvas-'))
+    const svc = new CanvasService({ canvasesDir: dir })
+    const created = svc.mutate({ action: 'create', params: { statement: '画布绑定解绑探针', criterias: ['c1'], scopeExclusions: [] } }, 'agent')
+    if (!created.ok) throw new Error(`create 失败：${JSON.stringify(created.error)}`)
+    return {
+      svc,
+      canvasId: created.canvasId as string,
+      dispose: (): void => {
+        svc.dispose()
+        rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+      },
+    }
+  }
+
+  it('btw 线直删（delete(vid) 直删分支）：该线画布绑定摘除', async () => {
+    await service.initializeManagedSession(MAIN_SID, {} as IPiEngine, CWD, 'main')
+    const { vid } = await createLine('linepi-unbind-direct')
+    await service.initializeManagedSession(vid, {} as IPiEngine, CWD, 'line', undefined, true)
+    const canvas = makeCanvasService()
+    try {
+      canvas.svc.bindSession(vid, canvas.canvasId)
+      expect(canvas.svc.getBoundSessions(canvas.canvasId)).toEqual([vid])
+
+      await service.delete(vid)
+
+      expect(canvas.svc.getBoundSessions(canvas.canvasId)).toEqual([])
+    } finally {
+      canvas.dispose()
+    }
+  })
+
+  it('主删级联（delete(MAIN_SID) → closeAllForMain）：名下 btw 线绑定随级联摘除，主会话自身绑定同摘', async () => {
+    await service.initializeManagedSession(MAIN_SID, {} as IPiEngine, CWD, 'main')
+    const { vid } = await createLine('linepi-unbind-cascade')
+    const canvas = makeCanvasService()
+    try {
+      canvas.svc.bindSession(MAIN_SID, canvas.canvasId)
+      canvas.svc.bindSession(vid, canvas.canvasId)
+      expect(canvas.svc.getBoundSessions(canvas.canvasId).sort()).toEqual([MAIN_SID, vid].sort())
+
+      await service.delete(MAIN_SID)
+
+      // 级联真删除的线绑定 + 主会话自身绑定，同一「真删除即解绑」规则全部摘除
+      expect(canvas.svc.getBoundSessions(canvas.canvasId)).toEqual([])
+    } finally {
+      canvas.dispose()
+    }
   })
 })
 

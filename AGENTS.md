@@ -10,13 +10,14 @@ Electron + Vue 3 + Node.js Runtime 的 AI Agent 桌面工作台。架构分层�
 
 ## 文档索引
 
-**重要文档资产（2026-09-13 收尾）**：根目录只留 `AGENTS.md` + 2 个 README；一级资产全大写命名收在 `docs/` 下。下表前 8 行是资产登记（读取阶段 + 更新触发）——closeout 文档同步纪律见 dev-flow `flow/acceptance.md` 收尾节；本表即资产清单 SSOT。
+**重要文档资产（2026-09-13 收尾）**：根目录只留 `AGENTS.md` + 2 个 README；一级资产全大写命名收在 `docs/` 下。下表前 9 行是资产登记（读取阶段 + 更新触发）——closeout 文档同步纪律见 dev-flow `flow/acceptance.md` 收尾节；本表即资产清单 SSOT。
 
 | 文档 | 主题 | 谁在什么阶段读 | 什么触发时同 commit 更新 |
 |------|------|---------------|------------------------|
 | [docs/PRODUCT.md](docs/PRODUCT.md) | 产品愿景/用户画像 | tech-design 设计期（产品边界核对） | 产品定位/用户画像/核心场景变化 |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | 架构总览 | tech-design reviewer（项目约定提取） | 进程拓扑/分层/数据流/核心约束变化 |
 | [docs/CONTEXT.md](docs/CONTEXT.md) | 领域术语表 | tech-design / design-code-sync（术语对齐） | 新术语/语义漂移/词条消亡 |
+| [docs/domain-model.md](docs/domain-model.md) | 领域模型登记（聚合/不变量/状态机；当前登记域：画布） | tech-design 设计期 + CR（领域规则归属核对） | 聚合/不变量/状态机变化 |
 | [docs/DESIGN.md](docs/DESIGN.md) | 视觉设计权威 | impeccable / AI 视觉上下文；改 UI 前必读 | 视觉范式/token 结构/窗口布局变化 |
 | [docs/STANDARDS.md](docs/STANDARDS.md) | 编码规范 | dev-flow 编码期 + CR | 编码规范变化 |
 | [docs/TEST-STRATEGY.md](docs/TEST-STRATEGY.md) | 测试策略 | dev-flow 验收计划 + 写测试前 | 回归基线/测试分层/已知坑变化 |
@@ -45,9 +46,9 @@ Electron + Vue 3 + Node.js Runtime 的 AI Agent 桌面工作台。架构分层�
 
 **外部依赖 pi**：上游 [earendil-works/pi](https://github.com/earendil-works/pi)（npm `@earendil-works/pi-coding-agent@1.0.0`；pi 二进制由 `scripts/prepare-pi-resources.sh` 从该上游 GitHub releases 下载，非 fork）。**[MANDATORY] 不修改 pi 源码、不提 PR、不 fork**——pi 没有的能力由 taiji 自实现。**pi 语义断言的权威源 = node_modules 实装版**（断言前 `npm ls @earendil-works/pi-coding-agent` 核对版本，以 dist 编译 JS 为准）；clone 本机 `<pi-clone>/main/packages/`（coding-agent/src 核心逻辑、ai/src/providers provider 层）仅作可读 TS 参照，引用前须核对 clone 版本与实装一致（clone 领先/落后实装均属常态——曾因按 0.80.3 clone 断言 0.84.1 行为连产 4 条漂移 bug，审计 C #6）。不靠网络搜索。pi 版本 bump 受 C-proc-08 版本门禁机器拦截（`node scripts/check-pi-semantics.mjs`：四包版本一致 + verifiedWith 比对 + 探针族重验；升级 PR 必查 pi-ai exports 的 `./compat` 与 changelog ModelManager 迁移——登记细节以 constraints.json 为准）。构建期派生锚点（build.yml env / prepare 脚本默认值 / 快照 / extensions peerDeps / KNOWN_PI_API_TYPES / pi-tui）由 `node scripts/check-pi-sync.mjs` 检查跟随（约束登记 C-build-07，pre-commit 按路径触发 + CI invariants）——升级 pi 后必须执行 `pnpm gen:builtin-providers` 重生成快照并随升级 PR 提交，锚点漏同步会被检查拦截。
 
-**Pi Extension 源码（本项目维护）**：`extensions/` 下 20 个 `@zhushanwen/pi-*` 包，按职责分两组（约定见 [extension-conventions.md](docs/extensions/extension-conventions.md)「目录分组」）+ `extensions/shared/` 共享库（llm-shared / extension-logger / file-lock / ext-guards / notify-ledger-host——NotifyLedgerHost 的 pi 扩展侧装配工厂，subagent-workflow 与 session-manager 共用 / exec-skills——技能获取共享包：目录扫描发现 + pi 注册表执行门禁，ADR-0096 / session-path——session 活跃路径裁剪单一实现，todo/plan/goal/scheduler 四包共用），统一在本仓开发发布（旧仓 taiji-pi-extensions-workspace 已废弃，以本仓为准）。分组（package.json `taiji.role` 字段必须与所在分组一致，`scripts/check-extension-dependencies.mjs` 校验）：
+**Pi Extension 源码（本项目维护）**：`extensions/` 下 21 个 `@zhushanwen/pi-*` 包，按职责分两组（约定见 [extension-conventions.md](docs/extensions/extension-conventions.md)「目录分组」）+ `extensions/shared/` 共享库（llm-shared / extension-logger / file-lock / ext-guards / notify-ledger-host——NotifyLedgerHost 的 pi 扩展侧装配工厂，subagent-workflow 与 session-manager 共用 / exec-skills——技能获取共享包：目录扫描发现 + pi 注册表执行门禁，ADR-0096 / session-path——session 活跃路径裁剪单一实现，todo/plan/goal/scheduler 四包共用），统一在本仓开发发布（旧仓 taiji-pi-extensions-workspace 已废弃，以本仓为准）。分组（package.json `taiji.role` 字段必须与所在分组一致，`scripts/check-extension-dependencies.mjs` 校验）：
 
-- **`extensions/taiji/`**（role=taiji，taiji 集成包——契约两端在 taiji 体系内，离开 taiji 无功能，必在 mandatory 清单）：agent-ext / msg-id-mapper / system-prompt / system-prompt-trace（builtin feature-tier，taiji:system-prompt 留痕）
+- **`extensions/taiji/`**（role=taiji，taiji 集成包——契约两端在 taiji 体系内，离开 taiji 无功能，必在 mandatory 清单）：agent-ext / canvas（问题解决画布——tech-design-wf 之前的方向规划层：agent 经 6 个 deferred 工具生长人机共编论证图，用户在 overlay 画布裁决回推、must-fix 审查循环收敛、收敛后需求卡派发；嵌套 {action,params} 契约 SSOT 在 @zhushanwen/extension-protocol 的 extensions/canvas，领域模型登记 docs/domain-model.md）/ msg-id-mapper / system-prompt / system-prompt-trace（builtin feature-tier，taiji:system-prompt 留痕）
 - **`extensions/universal/`**（role=universal，独立通用包——功能自足，独立 pi 用户可单独安装）：ask-user / base-tool-enhance（同名 override 内置 bash 工具：前台委托 pi 官方工厂保持等价 + 增量 background 后台模式 + 工具报错审计，承接已废弃 unified-hooks 的能力；设计决策记录在包内源码注释与 README，原设计文档见 git 历史） / cache-probe（前缀指纹采集 + analyze.py 归因） / goal / pending-notifications / permission / plan / provider-live-sync（运行中 pi 的模型快照实时同步：2s 轮询内容比较 + `modelRegistry.refresh({allowNetwork:false})`；设计依据见 模型切换实时可见性 设计文档）/ rename-session / scheduler / session-manager（agent-managed session：6 个 session 管理工具经 select+SESSION_MANAGER_MARKER 通道对接 taiji runtime 的 SessionManagerHandler；嵌套 {action,params} 契约 SSOT 在 @zhushanwen/extension-protocol） / session-reader / smart-context（agent 自决上下文压缩：compact_context 工具 + 双模式摘要接管 + 分档提醒） / structured-output / subagent-workflow / todo
 
 新增/删包时更新此列举与所在分组。校验：`pnpm extensions:typecheck` / `extensions:lint` / `extensions:test`。

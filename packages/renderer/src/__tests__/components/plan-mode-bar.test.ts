@@ -44,8 +44,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mount, DOMWrapper, type VueWrapper } from '@vue/test-utils'
 import { computed, defineComponent, nextTick } from 'vue'
-import { createPinia, setActivePinia } from 'pinia'
-import { InternalEventBus } from '@taiji/core'
 import type { PlanStateView } from '@taiji/shared'
 
 // ── mock ①：command（plan-store 首拉 RPC + 退出 session.abortPlan）——spread actual ──
@@ -55,23 +53,22 @@ vi.mock('@taiji/core/transport/api', async (importActual) => {
   return { ...actual, command: commandMock, RPC_BACKSTOP_TIMEOUT_MS: 30_000 }
 })
 
-// ── mock ②：extension domain（useExtensionUI 的 WS/RPC 面，照 plan-review-bar.test.ts）──
-// getPendingRequests 快照引用外提：retainOnly 快照差集剔除以该快照为权威 pending 集，
-// 用例需模拟「runtime 挂起表含 planReview 请求」时按需改写返回值（默认空快照）。
-const getPendingRequestsMock = vi.hoisted(() => vi.fn())
-vi.mock('@taiji/core/transport/api/domains/extension', () => ({
-  onUITimeout: () => () => {},
-  sendExtensionUIResponse: vi.fn((): boolean => true),
-  onNotify: () => () => {},
-  onExtensions: vi.fn(),
-  getPendingRequests: getPendingRequestsMock,
-}))
+// ── mock ②：extension domain（useExtensionUI 的 WS/RPC 面，公共四键单源
+// helpers/use-extension-ui-test-env；onUITimeout no-op——本文件无检测窗用例）。
+// getPendingRequests 快照引用（retainOnly 快照差集剔除以该快照为权威 pending 集）经
+// getPendingRequestsMock 别名按需改写返回值（默认空快照）──
+vi.mock('@taiji/core/transport/api/domains/extension', async () => {
+  const { extensionDomainMocks } = await import('../helpers/use-extension-ui-test-env')
+  return {
+    onUITimeout: () => () => {},
+    ...extensionDomainMocks,
+  }
+})
 
-// ── mock ③：getExtensionBus → 真实 InternalEventBus 实例 ──
-let mockBus: InternalEventBus
+// ── mock ③：getExtensionBus → 真实 InternalEventBus 实例（busSlot 单源 helper）──
 vi.mock('@/composables/shell/useExtensionHostBridge', async (importOriginal) => {
-  const original = await importOriginal<typeof import('@/composables/shell/useExtensionHostBridge')>()
-  return { ...original, getExtensionBus: () => mockBus }
+  const { bridgeModuleMocks } = await import('../helpers/use-extension-ui-test-env')
+  return bridgeModuleMocks(importOriginal)
 })
 
 // ── mock ④：Panel 的重依赖（挂载位断言用；PlanModeBar 真实挂载不 stub）──
@@ -108,7 +105,18 @@ import zhPlan from '@/i18n/locales/zh-CN/plan'
 import enPlan from '@/i18n/locales/en-US/plan'
 import { usePlanStore } from '@/stores/plan-store'
 import { useExtensionUIStore } from '@/stores/extension-ui'
-import { isPlanReviewRequest, __resetExtensionBusSubscriptionForTesting } from '@/composables/useExtensionUI'
+import { isPlanReviewRequest, __testing } from '@/composables/useExtensionUI'
+import {
+  busSlot,
+  emitPlanReviewRequest as emitPlanReviewRequestOn,
+  extensionDomainMocks,
+  flushAsync,
+  resetUseExtensionUITestEnv,
+  unmountPortalWrappers,
+} from '../helpers/use-extension-ui-test-env'
+
+// 快照权威 pending 集的引用别名（用例按需改写返回值）
+const getPendingRequestsMock = extensionDomainMocks.getPendingRequests
 
 const SID = 'sess-mode-bar'
 
@@ -123,21 +131,9 @@ function viewOf(overrides: Partial<PlanStateView> = {}): PlanStateView {
   }
 }
 
-/** 挂起 planReview 审批请求（runtime event-adapter 广播形状，D5） */
+/** 挂起 planReview 审批请求（bus 取 helper 的 busSlot 当前实例） */
 function emitPlanReviewRequest(requestId = 'pr-1'): void {
-  mockBus.emit({
-    kind: 'ui-request',
-    sessionId: SID,
-    request: {
-      requestId,
-      pluginId: '',
-      kind: 'select',
-      method: 'select',
-      title: '\x00TAIJI_PLAN_REVIEW:',
-      options: [JSON.stringify({ docs: [] })],
-      planReview: true,
-    },
-  } as never)
+  emitPlanReviewRequestOn(busSlot.current!, SID, requestId)
 }
 
 /** 挂载注册表：reka Popover Portal 内容挂在 document.body，用例末尾统一 unmount 清理
@@ -158,27 +154,14 @@ function findExitConfirm(): DOMWrapper<Element> | null {
   return el ? new DOMWrapper(el) : null
 }
 
-async function flushAsync(): Promise<void> {
-  await nextTick()
-  await Promise.resolve()
-  await nextTick()
-}
-
 beforeEach(() => {
-  // 模块级 refCount bus 订阅残留重置（对齐 plan-review-bar.test.ts）
-  __resetExtensionBusSubscriptionForTesting()
-  setActivePinia(createPinia())
+  // 公共段（refCount bus 订阅残留重置 + 新 pinia/bus + RPC mock 复位）单源 helper
+  resetUseExtensionUITestEnv(__testing.__resetExtensionBusSubscriptionForTesting)
   commandMock.mockReset()
-  getPendingRequestsMock.mockReset().mockResolvedValue([])
-  mockBus = new InternalEventBus()
 })
 
 afterEach(() => {
-  vi.useRealTimers()
-  while (mountedWrappers.length > 0) {
-    const w = mountedWrappers.pop()
-    w?.unmount()
-  }
+  unmountPortalWrappers(mountedWrappers)
 })
 
 describe('承接清单① 常驻挂载订阅（M1 硬约束）', () => {

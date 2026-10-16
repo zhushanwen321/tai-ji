@@ -15,9 +15,9 @@
  * - requestsBySession: ref<Map<sessionId, ExtensionUIRequest[]>> —— per-sessionId 分区
  * - recordsOf(sessionId): ComputedRef —— 响应式视图，组件订阅用
  * - getRequestsBySession(sessionId): ExtensionUIRequest[] —— 非响应式读（无则空数组）
- * - hasPendingBlockingOverlay / hasPendingDialog: 非响应式 getter，供 derivedStatus
- *   computed 内调（hasPendingBlockingOverlay 语义 = 有 pending 阻塞型交互 overlay：
- *   form 键 + planReview 键，D12 拓宽，见函数注释）
+ * - hasPendingBlockingOverlay: 非响应式 getter，供 derivedStatus
+ *   computed 内调（语义 = 有 pending 阻塞型交互 overlay：form 键 + planReview 键，
+ *   D12 拓宽，见函数注释）
  * - applyRecords / addRequest / removeRequest / retainOnly: 不可变 Map 写（new Map(...).set(...)）
  * - clearSession: deleteSession 精确释放分区（防泄漏）
  * - clearAllPending: runtime 重连全局清理（R3/T5）
@@ -33,7 +33,8 @@ import { createPartitionedRecords } from '../lib/partitioned-session-records'
 export const useExtensionUIStore = defineStore('extension-ui', () => {
   // ── state ──
   /**
-   * 按 sessionId 分区的 pending UI 请求（含统一表单富交互 form + 非 form dialog 原语）。
+   * 按 sessionId 分区的 pending UI 请求（富交互 form/planReview 帧——热帧经 useExtensionUI
+   * C4 门、快照补入经 factory 富交互过滤，普通 dialog 帧不进分区； CompanionBand 直连）。
    * 切走不清、切回直接读 Map 分区；deleteSession 经 clearSession(sid) 精确释放。
    * 四件套实现单源在 lib/partitioned-session-records（S4 A1，行为逐字等价迁移）。
    */
@@ -73,17 +74,6 @@ export const useExtensionUIStore = defineStore('extension-ui', () => {
   function hasPendingBlockingOverlay(sessionId: string): boolean {
     return getRequestsBySession(sessionId).some(
       (r) => r.form === true || (r as { planReview?: unknown }).planReview === true,
-    )
-  }
-
-  /**
-   * 该 session 是否有非 overlay 类的简单原语 dialog pending（供外部消费者查询；当前无消费方，
-   * 公共接口保留）。对称判据：form / planReview 两类富交互 overlay 不归 dialog（漏排会误归
-   * dialog 类，与 hasPendingBlockingOverlay 双真）。
-   */
-  function hasPendingDialog(sessionId: string): boolean {
-    return getRequestsBySession(sessionId).some(
-      (r) => r.form !== true && (r as { planReview?: unknown }).planReview !== true,
     )
   }
 
@@ -158,7 +148,6 @@ export const useExtensionUIStore = defineStore('extension-ui', () => {
     // 非响应式读 / getter
     getRequestsBySession,
     hasPendingBlockingOverlay,
-    hasPendingDialog,
     // 写操作（不可变 Map 替换）
     applyRecords,
     addRequest,

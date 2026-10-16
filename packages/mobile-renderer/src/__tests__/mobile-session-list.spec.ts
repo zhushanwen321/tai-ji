@@ -47,7 +47,7 @@ vi.mock('../shell/app-runtime', async () => {
 
 import MobileSessionList from '../views/MobileSessionList.vue'
 import { i18n } from '../i18n'
-import { applySubagentRecords, resetSubagentPartitionsForTest } from '../views/SubagentStatusLine.vue'
+import { applySubagentRecords, __testing } from '../views/SubagentStatusLine.vue'
 import { loadSessions, selectSession, sessionStore } from '../shell/app-runtime'
 
 function mountList() {
@@ -85,23 +85,28 @@ function itemIdsInOrder(wrapper: ReturnType<typeof mountList>): string[] {
     .map((node) => node.attributes('data-testid') ?? '')
 }
 
+/** 每用例前置重置（两个 describe 共用单点）：i18n locale 固定中文 + store/分区/RPC mock 全量复位 */
+function resetSessionListTestState(): void {
+  // i18n 是模块级单例：同 worker 前序测试可能把 locale 切到 en-US，此处固定中文
+  i18n.global.locale.value = 'zh-CN'
+  testState.list.value = []
+  sessionStore.listLoadError.value = null
+  sessionStore.activeId.value = null
+  testState.chatStore.isActive.mockReturnValue(false)
+  testState.chatStore.isCompacting.mockReturnValue(false)
+  testState.chatStore.isGenerating.mockReturnValue(false)
+  testState.chatStore.getMessages.mockReturnValue([])
+  testState.chatStore.getRetryState.mockReturnValue(undefined)
+  __testing.resetSubagentPartitionsForTest()
+  vi.mocked(loadSessions).mockClear()
+  vi.mocked(selectSession).mockClear()
+  vi.mocked(loadSessions).mockResolvedValue(undefined)
+  vi.mocked(selectSession).mockResolvedValue(undefined)
+}
+
 describe('MobileSessionList 会话列表（remote-use-mobile D7 列表行）', () => {
   beforeEach(() => {
-    // i18n 是模块级单例：同 worker 前序测试可能把 locale 切到 en-US，此处固定中文
-    i18n.global.locale.value = 'zh-CN'
-    testState.list.value = []
-    sessionStore.listLoadError.value = null
-    sessionStore.activeId.value = null
-    testState.chatStore.isActive.mockReturnValue(false)
-    testState.chatStore.isCompacting.mockReturnValue(false)
-    testState.chatStore.isGenerating.mockReturnValue(false)
-    testState.chatStore.getMessages.mockReturnValue([])
-    testState.chatStore.getRetryState.mockReturnValue(undefined)
-    resetSubagentPartitionsForTest()
-    vi.mocked(loadSessions).mockClear()
-    vi.mocked(selectSession).mockClear()
-    vi.mocked(loadSessions).mockResolvedValue(undefined)
-    vi.mocked(selectSession).mockResolvedValue(undefined)
+    resetSessionListTestState()
   })
 
   it('排序：runtime 组序原样渲染（A13 统一裁决——客户端 lastActiveAt 重排已删除），与数据源顺序一致', () => {
@@ -244,20 +249,7 @@ describe('MobileSessionList 会话列表（remote-use-mobile D7 列表行）', (
 
 describe('MobileSessionList 动作菜单 backdrop（点击关闭）', () => {
   beforeEach(() => {
-    i18n.global.locale.value = 'zh-CN'
-    testState.list.value = []
-    sessionStore.listLoadError.value = null
-    sessionStore.activeId.value = null
-    testState.chatStore.isActive.mockReturnValue(false)
-    testState.chatStore.isCompacting.mockReturnValue(false)
-    testState.chatStore.isGenerating.mockReturnValue(false)
-    testState.chatStore.getMessages.mockReturnValue([])
-    testState.chatStore.getRetryState.mockReturnValue(undefined)
-    resetSubagentPartitionsForTest()
-    vi.mocked(loadSessions).mockClear()
-    vi.mocked(selectSession).mockClear()
-    vi.mocked(loadSessions).mockResolvedValue(undefined)
-    vi.mocked(selectSession).mockResolvedValue(undefined)
+    resetSessionListTestState()
   })
 
   it('dead 条目点击 → 引导菜单打开（backdrop 可见）；点击 backdrop 关闭菜单', async () => {

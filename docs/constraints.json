@@ -2802,7 +2802,7 @@
     },
     {
       "id": "C-data-25",
-      "summary": "投递所有权单一所有者：全部发送方（composer / session_manager send / completion-backflow / plugin / landing 首发）一律经 runtime 投递所有权内核（`packages/session-delivery` 状态机 + `session-delivery-registry.ts` 适配层）提交；lane（direct/steer/queued）判定单一源 = runtime 权威 occupancy 投影（C-data-19）+ 内核队列态，renderer 与 extension 禁做投递车道判定（`resolveSendRoute` 仅为发送位 UI 预测）；条目终态以送达回执（`message_end(user)` 标记命中）为准——受理（prompt 受理 / 文本入 pi 槽位）≠ 送达，只拿受理的条目由对账器兜底；内核条目判重按裸标记 id 精确匹配、跨 runtime 重启回落 transcript 标记扫描",
+      "summary": "投递所有权单一所有者：全部发送方（composer / session_manager send / completion-backflow / plugin / landing 首发）一律经 runtime 投递所有权内核（`packages/session-delivery` 状态机 + `session-delivery-registry.ts` 适配层）提交；lane（direct/steer/queued）判定单一源 = runtime 权威 occupancy 投影（C-data-19）+ 内核队列态，renderer 与 extension 禁做投递车道判定（`resolveSendRoute` 仅为发送位 UI 预测）；条目终态以送达回执（`message_end(user)` 标记命中）为准——受理（prompt 受理 / 文本入 pi 槽位）≠ 送达，只拿受理的条目由对账器兜底；内核条目判重按裸标记 id 精确匹配、跨 runtime 重启回落 transcript 标记扫描；唯一登记豁免 = canvas 回推——失效提示语义非交互投递（runtime transport 层 WS mutate actor=user 成功腿对活跃绑定 session 直投 `client.prompt(text, undefined, 'followUp')`，通知文本只是 agent 重新 canvas_read 的触发器，画布状态权威在 events.jsonl、回推丢失不损状态），不经内核提交、at-most-once 丢失窗为设计已接受代价，丢失恢复 = 用户重试裁决 / agent 重开 enter，重新评估条件 = 通知承载离开画布即不可恢复的结果语义（详录 pi-boundary-reliability.md 附录 E canvas 回推豁免条目）",
       "scope": [
         "packages/session-delivery/src/**",
         "packages/runtime/src/**",

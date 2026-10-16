@@ -66,7 +66,10 @@ import { Button } from '@/components/ui/button'
 import { useI18n } from 'vue-i18n'
 import { openSchedulerTab } from '@/components/panel/workflow-viz/overlay/workflow-viz-overlay'
 import { TRAY_ITEM_COUNT_CLASS } from '@/components/panel/tray/tray-item-button'
-import { HEADER_ACTIONS_SOURCE_KEY } from '@/composables/shell/useExtensionHostBridge'
+import {
+  HEADER_ACTIONS_SOURCE_KEY,
+  isVisibleHeaderAction,
+} from '@/composables/shell/useExtensionHostBridge'
 import type {
   HeaderActionCommandAvailability,
   HeaderActionsSource,
@@ -186,21 +189,21 @@ function dispatchHeaderAction(src: HeaderActionsSource, sid: string, commandId: 
   }
 }
 
-/** 单条声明 → 按钮视图（无 headerAction 段 = null；运行时 hidden=true = null，剔除即不出按钮——
- *  过滤在列表构建层、先于 disabled 合成；hidden 缺省/false 照常走渲染。两种声明同样生效）。
+/** 单条声明 → 按钮视图（可见性判定单点委托 isVisibleHeaderAction：无 headerAction 段 /
+ *  运行时 hidden=true / 非 overlay 直开且无 commandId 一律 null——过滤在列表构建层、
+ *  先于 disabled 合成；谓词 type predicate 收窄后 ha 非空，直接消费声明段）。
  *  点击按声明 activation 分派：'scheduler-overlay' 分支不触 E13 判定/E3 簿记（resolveCommandAvailability
  *  有 lastResolved 写副作用，命令链状态机对 overlay 直开无意义），无需 commandId；缺省
- *  分支（无 activation 字段）走命令链，声明必须带 commandId——无 commandId 的声明无法
- *  走命令链 = 不渲染。 */
+ *  分支（无 activation 字段）走命令链，声明必须带 commandId——无 commandId 的声明已被
+ *  可见性谓词拦截 = 不渲染。 */
 function toHeaderActionButton(
   src: HeaderActionsSource,
   decl: ContributionRecord,
   sid: string,
 ): HeaderActionButtonView | null {
-  const ha = decl.headerAction
-  if (!ha) return null
   const entry = src.getRuntimeState(sid, decl.contributionId)
-  if (entry?.hidden === true) return null
+  if (!isVisibleHeaderAction(decl, entry)) return null
+  const ha = decl.headerAction
   if (ha.activation === 'scheduler-overlay') {
     // overlay 直开入口：灰置唯一来源 = 运行时镜像 disabled（E13/E3 是 commandId 命令链
     // 状态机，对本入口不可达）；tooltip 走 runtime/声明兜底段（命令三态两支不参与）。

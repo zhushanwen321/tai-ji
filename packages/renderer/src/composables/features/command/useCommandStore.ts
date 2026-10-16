@@ -28,6 +28,9 @@ export function useCommandStore(): ReturnType<typeof createCommandStore> {
 }
 
 /** 仅测试用：重置单例（跨用例隔离，对齐 core resetSearchModal/resetSideDrawer 先例）。 */
-export function __resetCommandStoreForTesting(): void {
+function __resetCommandStoreForTesting(): void {
   instance = null
 }
+
+/** 测试后门命名空间（生产代码禁止消费，对齐 __testing 先例；MF-1-10 裸导出收编）。 */
+export const __testing = { __resetCommandStoreForTesting }

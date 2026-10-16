@@ -51,12 +51,20 @@ async function runGuard(env: Record<string, string>): Promise<GuardResult> {
 }
 
 /**
- * zcode 夹具：从真实 .dwf.ts 截取调度相关片段（评审本机可能没有 zcode 安装——夹具缺失时
- * 用仓库内 pi 侧源码形态合成一个等价片段，保证守卫自测在任何机器上都可跑）。
+ * zcode 夹具：从真实 .dwf.ts 截取调度相关片段 + 问题清单层语义锚裸名声明（守卫结构
+ * 标记覆盖两层；评审本机可能没有 zcode 安装——夹具缺失时用仓库内 pi 侧源码形态
+ * 合成等价片段，保证守卫自测在任何机器上都可跑）。
  * @param mutate 对片段文本做改写（注入漂移）
  */
 function buildZcodeFixture(dir: string, mutate?: (src: string) => string): string {
   const snippet = [
+    // 问题清单层语义锚：守卫按裸名文本匹配两侧（ISSUE_LAYER_MARKERS），合成夹具须含
+    // 三标记的声明形态（真实 .dwf.ts 中由问题清单层定义）——缺失会使绿路径用例报
+    // 「结构缺失：zcode 侧无标记」而恒红。置于 const SLOW_POOL 之前（守卫抽取区外），
+    // 不参与调度片段求值。
+    "const TITLE_MATCH_MIN = 5;",
+    "function normIssueId(s: string): string { return s.toLowerCase(); }",
+    "const titlesCompatible = (a: string, b: string): boolean => true;",
     "const REVIEWER_BATCH = 4;",
     "const FIXER_CONCURRENCY = 3;",
     "const SLOW_POOL = ['extension-api', 'data-governance', 'arch-boundary'];",

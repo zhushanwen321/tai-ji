@@ -242,6 +242,112 @@ export type {
 } from './extensions/subagent-engine/contract'
 export { SUBAGENTS_ENGINES_FILENAME } from './extensions/subagent-engine/contract'
 
+// ── ./extensions/canvas：问题解决画布协议（U1 契约 SSOT：marker + 16 action 词表 +
+// per-action × actor 权限矩阵 + 6 工具映射 + CanvasState/ReviewReport schema + 领域事件
+// 词表 + 错误码表 + params 守卫；写侧 pi-canvas extension（extensions/taiji/canvas）与
+// runtime CanvasService / renderer 视图三侧共用，对齐 session-manager 先例）──
+export type {
+  CanvasAction,
+  CanvasActor,
+  CanvasActionParams,
+  CanvasMutateRequest,
+  CanvasMarkerAction,
+  CanvasMarkerParams,
+  CanvasMarkerRequest,
+  CanvasMutateReply,
+  CanvasListReply,
+  CanvasReadReply,
+  CanvasCreateParams,
+  CanvasGrowParams,
+  CanvasGrowItem,
+  CanvasPatchParams,
+  CanvasDecideDirectionParams,
+  CanvasSelectParams,
+  CanvasTransitionParams,
+  CanvasCommentParams,
+  CanvasCommentRespondParams,
+  CanvasReviewRequestParams,
+  CanvasReviewEntryInput,
+  CanvasReviewAppendParams,
+  CanvasReviewResolveParams,
+  CanvasConvergeCheckParams,
+  CanvasExportParams,
+  CanvasExportTarget,
+  CanvasDispatchParams,
+  CanvasReadParams,
+  CanvasListParams,
+  CanvasEnterParams,
+} from './extensions/canvas/actions'
+export {
+  isCanvasMarkerRequest,
+  isCanvasCreateParams,
+  isCanvasGrowParams,
+  isCanvasPatchParams,
+  isCanvasDecideDirectionParams,
+  isCanvasSelectParams,
+  isCanvasTransitionParams,
+  isCanvasCommentParams,
+  isCanvasCommentRespondParams,
+  isCanvasReviewRequestParams,
+  isCanvasReviewAppendParams,
+  isCanvasReviewResolveParams,
+  isCanvasConvergeCheckParams,
+  isCanvasExportParams,
+  isCanvasDispatchParams,
+  isCanvasReadParams,
+  isCanvasListParams,
+  isCanvasEnterParams,
+  isArgumentMateriality,
+  isArgumentPolarity,
+} from './extensions/canvas/actions'
+export type {
+  CanvasNodeType,
+  CanvasNodeLifecycle,
+  CanvasEdgeType,
+  ArgumentPolarity,
+  ArgumentMateriality,
+  SupportRating,
+  CanvasNode,
+  CanvasEdge,
+  CanvasComment,
+  CanvasDirectionDecision,
+  ReviewDimension,
+  ReviewSeverity,
+  ReviewReportStatus,
+  ReviewResolutionDisposition,
+  ReviewEntry,
+  ReviewReport,
+  CanvasState,
+  CanvasListEntry,
+  CanvasEventType,
+} from './extensions/canvas/state'
+export {
+  CANVAS_EVENT_TYPES,
+  ACTION_EVENT_MAP,
+} from './extensions/canvas/state'
+export type { CanvasErrorCode, CanvasError } from './extensions/canvas/errors'
+export {
+  CANVAS_ERROR_CODES,
+  CANVAS_ERROR_RECOVERY,
+  canvasError,
+} from './extensions/canvas/errors'
+export type { CanvasToolName } from './extensions/canvas/matrix'
+export {
+  CANVAS_MARKER,
+  CANVAS_ACTIONS,
+  CANVAS_MARKER_ACTIONS,
+} from './extensions/canvas/marker'
+export {
+  CANVAS_ACTOR_MATRIX,
+  isActionAllowed,
+  TOOL_ACTION_MAP,
+  CANVAS_TOOL_NAMES,
+  NON_TOOL_ACTIONS,
+  toolOfAction,
+  allToolActions,
+  allCanvasActions,
+} from './extensions/canvas/matrix'
+
 // ── pending-entries 差集核心（pending 事件流落盘形态语义：register 去重 + unregister 抵消；纯算法零 node 依赖）──
 export type {
   CollectPendingIdsOptions,

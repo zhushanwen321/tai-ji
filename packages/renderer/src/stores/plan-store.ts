@@ -169,9 +169,12 @@ export function registerPlanReviewColdSink(sink: PlanReviewColdSink): void {
 }
 
 /** 测试钩子：清 sink（模块级跨用例残留防护，对齐 __resetExtensionBusSubscriptionForTesting）。 */
-export function __resetPlanReviewColdSinkForTesting(): void {
+function __resetPlanReviewColdSinkForTesting(): void {
   planReviewColdSink = null
 }
+
+/** 测试后门命名空间（生产代码禁止消费，对齐 __testing 先例；MF-1-10 裸导出收编）。 */
+export const __testing = { __resetPlanReviewColdSinkForTesting }
 
 /** 分区容器（useSessionScopedState 响应式契约要求 reactive 容器：mutate 才触发下游 computed 失效）。 */
 // @data-owner #36 —— #36 plan 审阅态的 renderer 消费分区（WS 帧 + 首拉 reply 双路喂入；

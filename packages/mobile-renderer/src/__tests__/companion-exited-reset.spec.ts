@@ -17,41 +17,28 @@
 //
 // 运行：cd packages/mobile-renderer && npx vitest run src/__tests__/companion-exited-reset.spec.ts
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
-import { mount, type VueWrapper } from '@vue/test-utils'
+import type { VueWrapper } from '@vue/test-utils'
 import { nextTick } from 'vue'
-import App from '../App.vue'
-import { i18n } from '../i18n'
 import { registerSessionCleanup } from '@taiji/core/foundation/use-session-scoped-state'
-import { sessionStore } from '../shell/app-runtime'
 import {
   __testing,
   resetCompanionChannelsForExitedSession,
 } from '../shell/companion-bridge'
-import { hasConnectedOnce, shellConnectionState } from '../shell/connection-view'
+import {
+  cleanupCompanionTestState,
+  mountChatView,
+  resetCompanionTestState,
+  singleChoiceRequest,
+} from './helpers/companion-bridge-test-env'
 
-// chat 视图挂载触发 connected 边沿的 form 快照对账（getPendingRequests RPC）——测试环境
-// WS 未连接恒 reject 产生 console 噪音，mock 为空快照（mobile-form.spec 同款先例；
-// 本 spec 不消费回传与对账产物，mock 零行为影响）
-vi.mock('@taiji/core/transport/api/domains/extension', () => ({
-  sendExtensionUIResponse: vi.fn((): boolean => true),
-  getPendingRequests: vi.fn(async () => []),
-}))
+// vi.mock 注册留在本文件（hoist 语义）；工厂体单源在 helpers/companion-bridge-test-env
+// （本 spec 不消费回传与对账产物，mock 零行为影响）
+vi.mock('@taiji/core/transport/api/domains/extension', async () => {
+  const { extensionDomainMocks } = await import('./helpers/companion-bridge-test-env')
+  return extensionDomainMocks
+})
 
 const SID = 'sid-u6-exited'
-
-function mountApp(): VueWrapper {
-  return mount(App, { global: { plugins: [i18n] } })
-}
-
-/** 进入聊天视图（connected + hasConnectedOnce + 激活 session + 切 chat tab；mobile-form.spec 同款） */
-async function mountChatView(sessionId: string): Promise<VueWrapper> {
-  hasConnectedOnce.value = true
-  shellConnectionState.value = 'connected'
-  sessionStore.setActiveId(sessionId)
-  const wrapper = mountApp()
-  await wrapper.get('[data-testid="mobile-tab-chat"]').trigger('click')
-  return wrapper
-}
 
 /** 发一条 bridge 归一后的 dialog 类 ui-request（confirm 形态；mobile-companion-band.spec 同款） */
 function emitDialogRequest(sessionId: string, requestId: string): void {
@@ -69,7 +56,7 @@ function emitDialogRequest(sessionId: string, requestId: string): void {
   })
 }
 
-/** 发一条 form 类 ui-request（C4 放行面，form 帧；mobile-form.spec 同款） */
+/** 发一条 form 类 ui-request（C4 放行面，form 帧；载荷单源 helpers singleChoiceRequest） */
 function emitFormRequest(sessionId: string, requestId: string): void {
   __testing.mobileExtensionBus.emit({
     kind: 'ui-request',
@@ -79,10 +66,7 @@ function emitFormRequest(sessionId: string, requestId: string): void {
       pluginId: '',
       kind: 'select',
       method: 'select',
-      form: true,
-      formQuestions: [
-        { type: 'choice', header: 'db', question: '用哪个数据库？', options: [{ label: 'pg' }, { label: 'mysql' }] },
-      ],
+      ...singleChoiceRequest(),
     },
   })
 }
@@ -90,24 +74,13 @@ function emitFormRequest(sessionId: string, requestId: string): void {
 describe('移动壳 exited 分通道重置编排（U6）', () => {
   let wrapper: VueWrapper | null = null
 
-  beforeEach(() => {
-    __testing.resetFormRequestsForTest()
-    __testing.resetErrorBarForTest()
-    __testing.resetDialogQueueHandleForTest()
-    shellConnectionState.value = 'connecting'
-    hasConnectedOnce.value = false
-    sessionStore.setActiveId(null)
+  beforeEach(async () => {
+    await resetCompanionTestState()
   })
 
-  afterEach(() => {
-    wrapper?.unmount()
+  afterEach(async () => {
+    await cleanupCompanionTestState(wrapper)
     wrapper = null
-    __testing.resetFormRequestsForTest()
-    __testing.resetErrorBarForTest()
-    __testing.resetDialogQueueHandleForTest()
-    shellConnectionState.value = 'connecting'
-    hasConnectedOnce.value = false
-    sessionStore.setActiveId(null)
   })
 
   it('exited 编排：dialog band 与 form 卡两通道各被清理（composer 恢复），未调 triggerSessionCleanups（canary 不触发）', async () => {

@@ -17,78 +17,41 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { nextTick, ref } from 'vue'
-import App from '../App.vue'
 import MobileFormCard from '../views/MobileFormCard.vue'
 import { i18n } from '../i18n'
 import { __testing, useMobileFormRequests } from '../shell/companion-bridge'
 import { sessionStore } from '../shell/app-runtime'
-import { hasConnectedOnce, shellConnectionState } from '../shell/connection-view'
+import { shellConnectionState } from '../shell/connection-view'
+import {
+  cleanupCompanionTestState,
+  emitFormRequest,
+  extensionDomainMocks,
+  mountChatView,
+  resetCompanionTestState,
+  singleChoiceRequest,
+} from './helpers/companion-bridge-test-env'
 import type { ExtensionUIRequest } from '@taiji/core/transport/api/domains/extension'
 
-// vi.hoisted：mock 工厂被 hoist 到 import 前，工厂内引用的变量须经 vi.hoisted 创建
-const { mockSendResponse, mockGetPending } = vi.hoisted(() => ({
-  mockSendResponse: vi.fn(),
-  mockGetPending: vi.fn(),
-}))
+// vi.mock 注册留在本文件（hoist 语义）；工厂体单源在 helpers/companion-bridge-test-env
+vi.mock('@taiji/core/transport/api/domains/extension', async () => {
+  const { extensionDomainMocks } = await import('./helpers/companion-bridge-test-env')
+  return extensionDomainMocks
+})
 
-vi.mock('@taiji/core/transport/api/domains/extension', () => ({
-  sendExtensionUIResponse: mockSendResponse,
-  getPendingRequests: mockGetPending,
-}))
-
-function mountApp() {
-  return mount(App, { global: { plugins: [i18n] } })
-}
-
-/** 进入聊天视图（connected + hasConnectedOnce + 激活 session + 切 chat tab） */
-async function mountChatView(sessionId: string) {
-  hasConnectedOnce.value = true
-  shellConnectionState.value = 'connected'
-  sessionStore.setActiveId(sessionId)
-  const wrapper = mountApp()
-  await wrapper.get('[data-testid="mobile-tab-chat"]').trigger('click')
-  mockGetPending.mockClear()
-  return wrapper
-}
-
-/** 发一条 bus 归一后的 form 类 ui-request 事件（C4 放行面） */
-function emitFormRequest(request: Record<string, unknown>, sessionId = 'sid-form'): void {
-  __testing.mobileExtensionBus.emit({
-    kind: 'ui-request',
-    sessionId,
-    request: { requestId: 'req-1', pluginId: '', kind: 'select', ...request },
-  })
-}
-
-function singleChoiceRequest(overrides: Record<string, unknown> = {}): Record<string, unknown> {
-  return {
-    form: true,
-    formQuestions: [
-      { type: 'choice', header: 'db', question: '用哪个数据库？', options: [{ label: 'pg' }, { label: 'mysql' }] },
-    ],
-    ...overrides,
-  }
-}
+// 断言回传参数与送达布尔——mock 本体单源在 helper（本地别名保持用例体可读）
+const { sendExtensionUIResponse: mockSendResponse, getPendingRequests: mockGetPending } = extensionDomainMocks
+const BUS = __testing.mobileExtensionBus
 
 describe('移动壳 form 请求链（remote-use-mobile D7 form 行恢复）', () => {
-  let wrapper: ReturnType<typeof mountApp> | null = null
+  let wrapper: Awaited<ReturnType<typeof mountChatView>> | null = null
 
-  beforeEach(() => {
-    mockSendResponse.mockReset().mockReturnValue(true)
-    mockGetPending.mockReset().mockResolvedValue([])
-    __testing.resetFormRequestsForTest()
-    shellConnectionState.value = 'connecting'
-    hasConnectedOnce.value = false
-    sessionStore.setActiveId(null)
+  beforeEach(async () => {
+    await resetCompanionTestState()
   })
 
-  afterEach(() => {
-    wrapper?.unmount()
+  afterEach(async () => {
+    await cleanupCompanionTestState(wrapper)
     wrapper = null
-    __testing.resetFormRequestsForTest()
-    shellConnectionState.value = 'connecting'
-    hasConnectedOnce.value = false
-    sessionStore.setActiveId(null)
   })
 
   it('form 帧注入 → 表单卡呈现（题干 + 选项卡）+ composer 隐藏；点选提交 → 回传 envelope + 卡收口 + composer 恢复', async () => {
@@ -96,7 +59,7 @@ describe('移动壳 form 请求链（remote-use-mobile D7 form 行恢复）', ()
     expect(wrapper.find('[data-testid="mobile-form-section"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="mobile-composer"]').exists()).toBe(true)
 
-    emitFormRequest(singleChoiceRequest())
+    emitFormRequest(BUS, singleChoiceRequest(), 'sid-form')
     await nextTick()
 
     // 使用者视角：表单卡在场，题干与选项逐项渲染
@@ -121,10 +84,10 @@ describe('移动壳 form 请求链（remote-use-mobile D7 form 行恢复）', ()
 
   it('文本题输入 → 提交 envelope 走 `${key}__other` 键位（text 题不写主 key，协议键位规则）', async () => {
     wrapper = await mountChatView('sid-form')
-    emitFormRequest({
+    emitFormRequest(BUS, {
       form: true,
       formQuestions: [{ type: 'text', header: 'note', question: '补充说明？' }],
-    })
+    }, 'sid-form')
     await nextTick()
 
     await wrapper.get('[data-testid="mobile-form-text-input-0"]').setValue('补充内容')
@@ -135,12 +98,12 @@ describe('移动壳 form 请求链（remote-use-mobile D7 form 行恢复）', ()
 
   it('多选提交：envelope 多选序列化为 JSON 数组（label 即选中值）', async () => {
     wrapper = await mountChatView('sid-form')
-    emitFormRequest({
+    emitFormRequest(BUS, {
       form: true,
       formQuestions: [
         { type: 'choice', header: 'feat', question: '要哪些功能？', multi: true, options: [{ label: 'a' }, { label: 'b' }] },
       ],
-    })
+    }, 'sid-form')
     await nextTick()
 
     await wrapper.get('[data-testid="mobile-form-option-a"]').trigger('click')
@@ -155,7 +118,7 @@ describe('移动壳 form 请求链（remote-use-mobile D7 form 行恢复）', ()
 
   it('取消 → respond null（select resolve undefined = cancelled 语义，请求方不空等）', async () => {
     wrapper = await mountChatView('sid-form')
-    emitFormRequest(singleChoiceRequest())
+    emitFormRequest(BUS, singleChoiceRequest(), 'sid-form')
     await nextTick()
 
     await wrapper.get('[data-testid="mobile-form-cancel"]').trigger('click')
@@ -166,7 +129,7 @@ describe('移动壳 form 请求链（remote-use-mobile D7 form 行恢复）', ()
 
   it('allowCancel=false：取消键隐藏（协议显式收窄）；未送达（WS 非 OPEN）时卡保留可重试', async () => {
     wrapper = await mountChatView('sid-form')
-    emitFormRequest(singleChoiceRequest({ allowCancel: false }))
+    emitFormRequest(BUS, singleChoiceRequest({ allowCancel: false }), 'sid-form')
     await nextTick()
     expect(wrapper.find('[data-testid="mobile-form-cancel"]').exists()).toBe(false)
 
@@ -186,7 +149,7 @@ describe('移动壳 form 请求链（remote-use-mobile D7 form 行恢复）', ()
 
   it('scheduleCreate draft 帧 → 草稿摘要 + 一键确认回传扁平 ScheduleFormResult JSON', async () => {
     wrapper = await mountChatView('sid-form')
-    emitFormRequest({
+    emitFormRequest(BUS, {
       form: true,
       scheduleCreate: true,
       scheduleDraft: {
@@ -196,7 +159,7 @@ describe('移动壳 form 请求链（remote-use-mobile D7 form 行恢复）', ()
         models: ['m1'],
         name: '备份任务',
       },
-    })
+    }, 'sid-form')
     await nextTick()
 
     // 摘要呈现（预填即确认语义）
@@ -214,10 +177,10 @@ describe('移动壳 form 请求链（remote-use-mobile D7 form 行恢复）', ()
 
   it('schedule 题无 initial（不可回显）→ 未答禁用提交 + 取消可用（请求方得 cancelled，不无限等待）', async () => {
     wrapper = await mountChatView('sid-form')
-    emitFormRequest({
+    emitFormRequest(BUS, {
       form: true,
       formQuestions: [{ type: 'schedule', question: '什么时候跑？' }],
-    })
+    }, 'sid-form')
     await nextTick()
 
     expect(wrapper.find('[data-testid="mobile-form-schedule-not-ready"]').exists()).toBe(true)
@@ -229,7 +192,7 @@ describe('移动壳 form 请求链（remote-use-mobile D7 form 行恢复）', ()
 
   it('planReview 帧 → 审批卡（自审结论）→ 批准/搁置回传 {decision} JSON（桌面 PlanReviewBar 同契约）', async () => {
     wrapper = await mountChatView('sid-form')
-    emitFormRequest({ planReview: true, selfReview: '改动范围：auth 模块' })
+    emitFormRequest(BUS, { planReview: true, selfReview: '改动范围：auth 模块' }, 'sid-form')
     await nextTick()
 
     expect(wrapper.find('[data-testid="mobile-plan-review"]').exists()).toBe(true)
@@ -242,7 +205,7 @@ describe('移动壳 form 请求链（remote-use-mobile D7 form 行恢复）', ()
     expect(wrapper.find('[data-testid="mobile-plan-review"]').exists()).toBe(false)
 
     // 搁置：第二发请求 → dismiss 决策同通道回传
-    __testing.mobileExtensionBus.emit({
+    BUS.emit({
       kind: 'ui-request',
       sessionId: 'sid-form',
       request: { requestId: 'req-2', pluginId: '', kind: 'select', planReview: true },
@@ -254,8 +217,8 @@ describe('移动壳 form 请求链（remote-use-mobile D7 form 行恢复）', ()
 
   it('requestId dedup：同请求重复 emit 幂等（单卡 + 单次回传）', async () => {
     wrapper = await mountChatView('sid-form')
-    emitFormRequest(singleChoiceRequest())
-    emitFormRequest(singleChoiceRequest())
+    emitFormRequest(BUS, singleChoiceRequest(), 'sid-form')
+    emitFormRequest(BUS, singleChoiceRequest(), 'sid-form')
     await nextTick()
     expect(wrapper.findAll('[data-testid="mobile-form-section"]')).toHaveLength(1)
 
@@ -266,7 +229,7 @@ describe('移动壳 form 请求链（remote-use-mobile D7 form 行恢复）', ()
 
   it('无 sid 的 ui-request 跳过（C2，渲染面依赖 session 分区）', async () => {
     wrapper = await mountChatView('sid-form')
-    __testing.mobileExtensionBus.emit({
+    BUS.emit({
       kind: 'ui-request',
       request: { requestId: 'req-1', pluginId: '', kind: 'select', ...singleChoiceRequest() },
     })
@@ -276,18 +239,18 @@ describe('移动壳 form 请求链（remote-use-mobile D7 form 行恢复）', ()
 
   it('C4 对称排除：普通 dialog 帧（无 marker）不进 form 卡（CompanionBand 领地）', async () => {
     wrapper = await mountChatView('sid-form')
-    emitFormRequest({ message: '确认执行？' })
+    emitFormRequest(BUS, { message: '确认执行？' }, 'sid-form')
     await nextTick()
     expect(wrapper.find('[data-testid="mobile-form-section"]').exists()).toBe(false)
   })
 
   it('requests-invalidated 失效摘除（turn abort / session 销毁等非 respond 终结，僵尸卡不残留）', async () => {
     wrapper = await mountChatView('sid-form')
-    emitFormRequest(singleChoiceRequest())
+    emitFormRequest(BUS, singleChoiceRequest(), 'sid-form')
     await nextTick()
     expect(wrapper.find('[data-testid="mobile-form-section"]').exists()).toBe(true)
 
-    __testing.mobileExtensionBus.emit({
+    BUS.emit({
       kind: 'requests-invalidated',
       sessionId: 'sid-form',
       requestIds: ['req-1'],
@@ -301,7 +264,7 @@ describe('移动壳 form 请求链（remote-use-mobile D7 form 行恢复）', ()
     wrapper = await mountChatView('sid-a')
 
     // 后台会话 sid-b 的请求实时到达（分区隔离，当前视图不渲染）
-    __testing.mobileExtensionBus.emit({
+    BUS.emit({
       kind: 'ui-request',
       sessionId: 'sid-b',
       request: { requestId: 'req-b', pluginId: '', kind: 'select', ...singleChoiceRequest() },
@@ -330,7 +293,7 @@ describe('移动壳 form 请求链（remote-use-mobile D7 form 行恢复）', ()
 
   it('断连重连（connected 边沿）触发快照对账：空快照剔除滞留请求；快照新请求补挂呈现', async () => {
     wrapper = await mountChatView('sid-form')
-    emitFormRequest(singleChoiceRequest())
+    emitFormRequest(BUS, singleChoiceRequest(), 'sid-form')
     await nextTick()
     expect(wrapper.find('[data-testid="mobile-form-section"]').exists()).toBe(true)
 
@@ -361,7 +324,7 @@ describe('移动壳 form 请求链（remote-use-mobile D7 form 行恢复）', ()
 
   it('回传失败（WS 未送达）→ 内联错误行可见（submit/cancel 双路）；重试成功收口，新请求不带旧错误', async () => {
     wrapper = await mountChatView('sid-form')
-    emitFormRequest(singleChoiceRequest())
+    emitFormRequest(BUS, singleChoiceRequest(), 'sid-form')
     await nextTick()
     expect(wrapper.find('[data-testid="mobile-form-respond-error"]').exists()).toBe(false)
 
@@ -384,7 +347,7 @@ describe('移动壳 form 请求链（remote-use-mobile D7 form 行恢复）', ()
     expect(wrapper.find('[data-testid="mobile-form-respond-error"]').exists()).toBe(false)
 
     // 新请求到达：不带上一轮错误态（错误按 requestId 匹配渲染）
-    emitFormRequest({ requestId: 'req-2', ...singleChoiceRequest() })
+    emitFormRequest(BUS, { requestId: 'req-2', ...singleChoiceRequest() }, 'sid-form')
     await nextTick()
     expect(wrapper.find('[data-testid="mobile-form-section"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="mobile-form-respond-error"]').exists()).toBe(false)

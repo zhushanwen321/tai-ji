@@ -45,6 +45,7 @@ import type { TrayBuiltinKind as TrayKind, UseTrayCountsReturn } from '@/compone
 import { useSubagentStore } from '@/stores/subagent'
 import { useWorkflowStore } from '@/stores/workflow'
 import type { BackgroundTaskEntry } from '@/lib/background-task-bucket'
+import type { CanvasListEntry } from '@zhushanwen/extension-protocol'
 import type { SessionSummary, SubagentRecord, WorkflowRunRecord } from '@taiji/shared'
 import zhTray from '@/i18n/locales/zh-CN/tray'
 
@@ -61,6 +62,8 @@ interface TrayState {
   workflowLoading: boolean
   /** 第 4 件子会话行集（u7） */
   sessionChildren: SessionSummary[]
+  /** 第 5 件画布清单（u-tray-entry） */
+  canvasEntries: CanvasListEntry[]
 }
 
 function createTrayState(): TrayState {
@@ -75,6 +78,7 @@ function createTrayState(): TrayState {
     workflowEnded: [],
     workflowLoading: false,
     sessionChildren: [],
+    canvasEntries: [],
   }
 }
 
@@ -130,6 +134,14 @@ vi.mock('@/composables/features/sidebar/useBackgroundTasks', () => ({
   }),
 }))
 
+// ── mock：canvas.list RPC（第 5 件 canvas 的数据链真实经过 useCanvasSync 订阅 → canvas store
+//    → canvas.list；`useReal` 模式会触发首拉——替身回空清单，避免打真实 WS 通道）──
+const commandMock = vi.hoisted(() => vi.fn())
+vi.mock('@taiji/core/transport/api', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@taiji/core/transport/api')>()
+  return { ...actual, command: commandMock }
+})
+
 // ── mock：打开链（第 4 件 session 面板行点击 → selectSession；真实 useSidebar 依赖重，替身即可）──
 const selectSessionMock = vi.hoisted(() => vi.fn<(id: string) => Promise<void>>())
 vi.mock('@/composables/features/sidebar/useSidebar', () => ({
@@ -138,7 +150,7 @@ vi.mock('@/composables/features/sidebar/useSidebar', () => ({
 
 // ── headerAction 数据源开关（B3 聚合面：聚合面板首段 = 被聚合 clock 直开入口的承接段）。
 //    经 mountTray 的 provide 注入（HEADER_ACTIONS_SOURCE_KEY 消费方 = 外壳 + HeaderActionsHost）；
-//    hasVisibleHeaderActions 纯函数用真实现（对账对象），source stub 经开关切换。 ──
+//    hasVisibleHeaderActions 纯函数用真实现（可见性条件单点，与面板按钮渲染同源），source stub 经开关切换。 ──
 const headerActionsSwitch = vi.hoisted(() => ({ source: null as object | null }))
 
 /** scheduler 形态的 headerAction source stub（activation=overlay 直开，无 E13/E3 依赖） */
@@ -214,6 +226,18 @@ function makeChild(overrides: Partial<SessionSummary> & { id: string }): Session
     tokenCount: 0,
     spawnSource: 'agent',
     parentAgentSessionId: SID,
+    ...overrides,
+  }
+}
+
+/** 画布清单条目 fixture（u-tray-entry：第 5 件 canvas kind，形状 = canvas.list 投影） */
+function makeCanvas(overrides: Partial<CanvasListEntry> & { canvasId: string }): CanvasListEntry {
+  return {
+    name: `画布 ${overrides.canvasId}`,
+    statement: '示例问题陈述',
+    converged: false,
+    openMustFix: 0,
+    reviewStatus: null,
     ...overrides,
   }
 }
@@ -341,6 +365,8 @@ beforeEach(() => {
   trayCountsSwitch.useReal = false
   trayCountsSwitch.calls = 0
   headerActionsSwitch.source = null
+  commandMock.mockReset()
+  commandMock.mockResolvedValue({ canvases: [] })
   vi.useFakeTimers({ now: FIXED_NOW })
 })
 
@@ -355,11 +381,20 @@ afterEach(() => {
 // ── ① built-in 三态（D7；验收 N2「归零不虚亮」）──
 
 describe('ComposerTray built-in 三态（D7 / N2）', () => {
-  it('全无记录 → 三按钮都不渲染（DOM 层不存在，而非 opacity:0）', () => {
+  it('全无记录 → 任务四件都不渲染（DOM 层不存在，而非 opacity:0）；canvas 恒渲染（创建入口豁免，dim 态）', () => {
     mountTray(makeWidgetSource(SID))
 
     expect(row().find('[data-testid="composer-tray"]').exists()).toBe(true)
-    expect(row().findAll('[data-testid="tray-builtin-button"]')).toHaveLength(0)
+    // bash/subagent/workflow/session 全无 → 不渲染
+    expect(row().findAll('[data-testid="tray-builtin-button"][data-kind="bash"]')).toHaveLength(0)
+    expect(row().findAll('[data-testid="tray-builtin-button"][data-kind="subagent"]')).toHaveLength(0)
+    expect(row().findAll('[data-testid="tray-builtin-button"][data-kind="workflow"]')).toHaveLength(0)
+    expect(row().findAll('[data-testid="tray-builtin-button"][data-kind="session"]')).toHaveLength(0)
+    // canvas 件恒渲染（dim 态、无计数无呼吸点）——「＋新建画布」入口可达性优先于 D7 三态
+    expect(builtinKinds()).toEqual(['canvas'])
+    expect(builtinButton('canvas').attributes('data-state')).toBe('idle')
+    expect(builtinButton('canvas').find('[data-testid="tray-builtin-count"]').exists()).toBe(false)
+    expect(builtinButton('canvas').find('[data-testid="tray-builtin-pulse"]').exists()).toBe(false)
     // 托盘行本身仍在（挂载点可见，只是无条目=零视觉噪音）
     expect(row().find('[data-testid="composer-tray"]').attributes('data-session-id')).toBe(SID)
   })
@@ -370,7 +405,7 @@ describe('ComposerTray built-in 三态（D7 / N2）', () => {
     trayState.workflowEnded = [makeWorkflow({ runId: 'wf-e1' })]
     mountTray(makeWidgetSource(SID))
 
-    expect(builtinKinds()).toEqual(['bash', 'subagent', 'workflow'])
+    expect(builtinKinds()).toEqual(['bash', 'subagent', 'workflow', 'canvas'])
     for (const kind of ['bash', 'subagent', 'workflow'] as const) {
       const button = builtinButton(kind)
       expect(button.attributes('data-state')).toBe('idle')
@@ -406,14 +441,14 @@ describe('ComposerTray built-in 三态（D7 / N2）', () => {
     trayState.subagentEnded = [makeSubagent({ subagentId: 'sa-e1' })]
     mountTray(makeWidgetSource(SID))
 
-    // workflow 无记录 → 不渲染；bash 亮；subagent dim
-    expect(builtinKinds()).toEqual(['bash', 'subagent'])
+    // workflow 无记录 → 不渲染；bash 亮；subagent dim（canvas 恒渲染在末位）
+    expect(builtinKinds()).toEqual(['bash', 'subagent', 'canvas'])
 
     // 进行中的计数消失（任务结束）→ 该按钮自动降为 dim 常驻（不虚亮）
     trayState.bashRunning = []
     trayState.bashEnded = [makeTask({ taskId: 'bt-1', state: 'exited', reason: 'natural' })]
     await nextTick()
-    expect(builtinKinds()).toEqual(['bash', 'subagent'])
+    expect(builtinKinds()).toEqual(['bash', 'subagent', 'canvas'])
     expect(builtinButton('bash').attributes('data-state')).toBe('idle')
     expect(builtinButton('bash').find('[data-testid="tray-builtin-count"]').exists()).toBe(false)
   })
@@ -424,7 +459,7 @@ describe('ComposerTray built-in 三态（D7 / N2）', () => {
     trayState.bashEnded = [makeTask({ taskId: 'bt-e1', state: 'exited', reason: 'natural' })]
     mountTray(makeWidgetSource(SID))
 
-    expect(builtinKinds()).toEqual(['bash', 'subagent', 'workflow'])
+    expect(builtinKinds()).toEqual(['bash', 'subagent', 'workflow', 'canvas'])
   })
 })
 
@@ -730,10 +765,10 @@ describe('ComposerTray widget 区与面板分流', () => {
     await nextTick()
 
     expect(widgetKeys()).toEqual(['todo', 'goal', 'custom-b'])
-    // built-in 三件仍恒在最左（固定序不参与动态排序）
+    // built-in 各件仍恒在最左（固定序不参与动态排序）
     trayState.bashRunning = [makeTask({ taskId: 'bt-1' })]
     await nextTick()
-    expect(builtinKinds()).toEqual(['bash'])
+    expect(builtinKinds()).toEqual(['bash', 'canvas'])
   })
 
   it('widget 面板内容 = TrayWidgetPanel（meta head + guiTree 正文），推送更新后正文重算', async () => {
@@ -808,18 +843,18 @@ describe('ComposerTray widget 区与面板分流', () => {
     await realClick(builtinButton('bash'))
     expect(panelKeys()).toEqual(['native:bash'])
 
-    // 该 session 的 bash 记录归零（列表清空）→ 按钮摘除、面板同批作废
+    // 该 session 的 bash 记录归零（列表清空）→ 按钮摘除、面板同批作废（canvas 恒渲染不受影响）
     trayState.bashRunning = []
     await flushPromises()
     await advance(0)
-    expect(builtinKinds()).toEqual([])
+    expect(builtinKinds()).toEqual(['canvas'])
     expect(panelKeys()).toEqual([])
 
     // 新记录进来 → 按钮回来但交互态不继承（不是「诈尸」弹开）
     trayState.bashRunning = [makeTask({ taskId: 'bt-2' })]
     await flushPromises()
     await advance(0)
-    expect(builtinKinds()).toEqual(['bash'])
+    expect(builtinKinds()).toEqual(['bash', 'canvas'])
     expect(panelKeys()).toEqual([])
   })
 
@@ -842,11 +877,11 @@ describe('ComposerTray widget 区与面板分流', () => {
     expect(panelContentNodes('tray-native-panel')).toHaveLength(0)
   })
 
-  it('无 VIEW_HOST_SOURCE 时（未 provide）只渲染 built-in 三件，不抛错', () => {
+  it('无 VIEW_HOST_SOURCE 时（未 provide）只渲染 built-in 件，不抛错', () => {
     trayState.bashRunning = [makeTask({ taskId: 'bt-1' })]
     wrapper = mount(ComposerTray, { props: { sessionId: SID }, attachTo: document.body })
 
-    expect(builtinKinds()).toEqual(['bash'])
+    expect(builtinKinds()).toEqual(['bash', 'canvas'])
     expect(widgetKeys()).toEqual([])
   })
 })
@@ -983,26 +1018,36 @@ describe('ComposerTray 序 4 聚合单入口（aggregated）', () => {
     await openAggregatedPanel()
 
     expect(panelContentNodes('tray-aggregate-panel')).toHaveLength(1)
-    // 段 = 有记录的类别（bash + workflow），全无记录的类别不出段
+    // 段 = 有记录的类别（bash + workflow）+ 恒在的 canvas 段，全无记录的任务类别不出段
     expect(panelContentNodes('tray-aggregate-section-bash')).toHaveLength(1)
     expect(panelContentNodes('tray-aggregate-section-workflow')).toHaveLength(1)
     expect(panelContentNodes('tray-aggregate-section-subagent')).toHaveLength(0)
+    expect(panelContentNodes('tray-aggregate-section-canvas')).toHaveLength(1)
     const bashCount = panelNodes()[0]?.querySelector('[data-testid="tray-aggregate-count-bash"]')
     expect(bashCount?.textContent).toBe('1/2')
-    // 段体复用真实 built-in 面板（行渲染/行内操作零复制）
+    // 段体复用真实 built-in 面板（行渲染/行内操作零复制；canvas 段体 = TrayCanvasPanel）
     expect(panelContentNodes('tray-native-panel')).toHaveLength(2)
+    expect(panelContentNodes('tray-canvas-panel')).toHaveLength(1)
   })
 
-  it('aggregated + 全无条目（三态之「全无」）→ 聚合入口不渲染（无死入口）', () => {
+  it('aggregated + 任务件全无记录 → 聚合入口仍渲染（canvas 创建入口恒可达，面板含 canvas 段）', async () => {
     mountTray(makeWidgetSource(SID), SID, true)
 
-    expect(row().find('[data-testid="tray-aggregate-button"]').exists()).toBe(false)
-    expect(row().findAll('[data-testid="tray-builtin-button"]')).toHaveLength(0)
+    // canvas 件恒渲染（创建入口豁免，见外壳 builtinItems 注释）→ hasTrayItems 恒 true，
+    // 聚合入口不再有「全无条目」消失态——零画布时入口同样在场（面板含空 canvas 段）
+    const aggregate = row().find('[data-testid="tray-aggregate-button"]')
+    expect(aggregate.exists()).toBe(true)
+    expect(aggregate.find('[data-testid="tray-aggregate-count"]').exists()).toBe(false)
+
+    await realClick(aggregate)
+    expect(panelKeys()).toEqual(['aggregate'])
+    expect(panelContentNodes('tray-aggregate-section-canvas')).toHaveLength(1)
+    expect(panelContentNodes('tray-canvas-panel')).toHaveLength(1)
   })
 
   // ── W3a：聚合入口可见条件扩展 + 聚合面板承接插件 toolbar ──
 
-  it('aggregated + 托盘全无条目但插件 toolbar 有贡献 → 聚合入口仍渲染；面板含发丝分隔 + toolbar ViewHost', async () => {
+  it('aggregated + 托盘全无任务条目但插件 toolbar 有贡献 → 聚合入口仍渲染；面板含发丝分隔 + toolbar ViewHost', async () => {
     // 挂载点视图只经 getView 可见、不进 getViewIds 枚举（聚合入口可见条件的独立判定面）
     const toolbarSource: ViewHostSource = {
       getViewIds: () => [],
@@ -1017,7 +1062,8 @@ describe('ComposerTray 序 4 聚合单入口（aggregated）', () => {
       attachTo: document.body,
     })
 
-    // 基线（只看托盘条目）下此场景不渲染聚合入口——可见条件已扩为「或插件有贡献」
+    // 基线（只看托盘任务条目）下 toolbar 贡献是聚合入口的独立可见条件；canvas 恒渲染后
+    // 入口恒在——断言保留在场性，贡献判定本身由 headerAction/toolbar 用例承载
     const aggregate = row().find('[data-testid="tray-aggregate-button"]')
     expect(aggregate.exists()).toBe(true)
 
@@ -1042,7 +1088,7 @@ describe('ComposerTray 序 4 聚合单入口（aggregated）', () => {
     expect(panel?.querySelector('[data-testid="tray-aggregate-section-bash"]')).not.toBeNull()
   })
 
-  it('widget-only（无 built-in 记录）→ 聚合入口仍渲染（通用图标兜底）且面板含 widget 段', async () => {
+  it('widget-only（无任务条目）→ 聚合入口渲染（通用图标兜底）且面板含 widget 段与 canvas 段', async () => {
     const mock = makeWidgetSource(SID)
     mock.push(makeEntry('todo', [ansiLine('widget body')], { title: 'Todo', status: 'running' }))
     mountTray(mock, SID, true)
@@ -1059,15 +1105,13 @@ describe('ComposerTray 序 4 聚合单入口（aggregated）', () => {
     expect(panelContentNodes('tray-widget-panel')).toHaveLength(1)
   })
 
-  it('三态上抛（能力标志 hasTrayItems）：有面无面各上报一次', () => {
+  it('三态上抛（能力标志 hasTrayItems）：canvas 恒渲染 → 恒上报 true（入口恒在场）', async () => {
     mountTray(makeWidgetSource(SID), SID, true)
-    expect(row().emitted('update:hasItems')).toEqual([[false]])
+    expect(row().emitted('update:hasItems')).toEqual([[true]])
 
-    wrapper?.unmount()
-    wrapper = null
-    document.body.innerHTML = ''
+    // 任务条目进出不改变上抛值（canvas 件豁免「全无不渲染」，见外壳 builtinItems 注释）
     trayState.bashRunning = [makeTask({ taskId: 'bt-1' })]
-    mountTray(makeWidgetSource(SID), SID, true)
+    await nextTick()
     expect(row().emitted('update:hasItems')).toEqual([[true]])
   })
 })
@@ -1103,31 +1147,34 @@ describe('ComposerTray 第 4 件「子会话」（u7）', () => {
     expect(button.find('[data-testid="tray-builtin-pulse"]').exists()).toBe(false)
   })
 
-  it('全无子会话 → 该件不渲染（三态之「全无」；DOM 层不存在）', () => {
+  it('全无子会话 → 该件不渲染（三态之「全无」；DOM 层不存在；canvas 恒渲染不受影响）', () => {
     trayState.bashRunning = [makeTask({ taskId: 'bt-1' })]
     mountTray(makeWidgetSource(SID))
 
     expect(builtinButton('session').exists()).toBe(false)
-    expect(builtinKinds()).toEqual(['bash'])
+    expect(builtinKinds()).toEqual(['bash', 'canvas'])
   })
 
-  it('固定序末位：bash → subagent → workflow → session（不参与 widget 动态排序）', () => {
+  it('固定序末位：bash → subagent → workflow → session → canvas（不参与 widget 动态排序）', () => {
     trayState.bashEnded = [makeTask({ taskId: 'bt-e1', state: 'exited', reason: 'natural' })]
     trayState.subagentEnded = [makeSubagent({ subagentId: 'sa-e1', status: 'completed' })]
     trayState.workflowEnded = [makeWorkflow({ runId: 'wf-e1' })]
     trayState.sessionChildren = [makeChild({ id: 'c-1', status: 'done' })]
+    trayState.canvasEntries = [makeCanvas({ canvasId: 'cvs-1' })]
     mountTray(makeWidgetSource(SID))
 
-    expect(builtinKinds()).toEqual(['bash', 'subagent', 'workflow', 'session'])
+    expect(builtinKinds()).toEqual(['bash', 'subagent', 'workflow', 'session', 'canvas'])
   })
 
-  it('聚合入口共存（序 4）：聚合面板含 session 段，且段内复用 TraySessionPanel', async () => {
+  it('聚合入口共存（序 4）：聚合面板含 session 段与 canvas 段，段内各复用专属面板', async () => {
     trayState.bashRunning = [makeTask({ taskId: 'bt-1' })]
     trayState.sessionChildren = [makeChild({ id: 'c-1', status: 'active' })]
     await openAggregatedPanel()
 
     expect(panelContentNodes('tray-aggregate-section-session')).toHaveLength(1)
     expect(panelContentNodes('tray-session-panel')).toHaveLength(1)
+    expect(panelContentNodes('tray-aggregate-section-canvas')).toHaveLength(1)
+    expect(panelContentNodes('tray-canvas-panel')).toHaveLength(1)
     // bash 段仍走 TrayNativePanel（分流未改变）
     expect(panelContentNodes('tray-native-panel')).toHaveLength(1)
   })
@@ -1139,8 +1186,71 @@ describe('ComposerTray 第 4 件「子会话」（u7）', () => {
       makeChild({ id: 'c-2', status: 'done' }),
     ]
     mountTray(makeWidgetSource(SID), SID, true)
-    // bash 1 + session 1 = 2
+    // bash 1 + session 1 = 2（canvas 零画布不计入）
     expect(row().find('[data-testid="tray-aggregate-count"]').text()).toBe('2')
+  })
+})
+
+// ── ①c 第 5 件「画布」（u-tray-entry，problem-solve-canvas §3.1(3)）──
+
+describe('ComposerTray 第 5 件「画布」（u-tray-entry）', () => {
+  it('零画布 → 按钮恒渲染（dim 无计数无呼吸点）——「＋新建画布」创建入口恒可达', () => {
+    mountTray(makeWidgetSource(SID))
+
+    const button = builtinButton('canvas')
+    expect(button.exists()).toBe(true)
+    expect(button.attributes('title')).toBe(zhTray.tray.title.canvas)
+    expect(button.attributes('data-state')).toBe('idle')
+    expect(button.find('[data-testid="tray-builtin-count"]').exists()).toBe(false)
+    expect(button.find('[data-testid="tray-builtin-pulse"]').exists()).toBe(false)
+  })
+
+  it('有画布 → 计数徽标 = 画布总数；存在未收敛画布 → 呼吸点亮（running = 未收敛数）', async () => {
+    trayState.canvasEntries = [
+      makeCanvas({ canvasId: 'cvs-open' }),
+      makeCanvas({ canvasId: 'cvs-done', converged: true }),
+      makeCanvas({ canvasId: 'cvs-fix', openMustFix: 2 }),
+    ]
+    mountTray(makeWidgetSource(SID))
+
+    const button = builtinButton('canvas')
+    expect(button.attributes('data-state')).toBe('running')
+    // 徽标 = 总数（数量型类别与 session 件同款：total 承载数量，呼吸点承载进行中）
+    expect(button.find('[data-testid="tray-builtin-count"]').text()).toBe('3')
+    expect(button.find('[data-testid="tray-builtin-pulse"]').exists()).toBe(true)
+
+    // 聚合入口运行数 = 未收敛画布数（bash 0 + canvas 2）
+    wrapper?.unmount()
+    wrapper = null
+    document.body.innerHTML = ''
+    mountTray(makeWidgetSource(SID), SID, true)
+    expect(row().find('[data-testid="tray-aggregate-count"]').text()).toBe('2')
+  })
+
+  it('全部画布已收敛 → dim 常驻（呼吸点与计数徽标都不出，不虚亮）', () => {
+    trayState.canvasEntries = [
+      makeCanvas({ canvasId: 'cvs-done', converged: true }),
+      makeCanvas({ canvasId: 'cvs-done-2', converged: true }),
+    ]
+    mountTray(makeWidgetSource(SID))
+
+    const button = builtinButton('canvas')
+    expect(button.attributes('data-state')).toBe('idle')
+    expect(button.find('[data-testid="tray-builtin-pulse"]').exists()).toBe(false)
+    expect(button.find('[data-testid="tray-builtin-count"]').exists()).toBe(false)
+  })
+
+  it('点击画布按钮 → 面板分流到 TrayCanvasPanel（面板键 native:canvas）', async () => {
+    trayState.canvasEntries = [makeCanvas({ canvasId: 'cvs-1' })]
+    mountTray(makeWidgetSource(SID))
+
+    await builtinButton('canvas').trigger('click')
+    await nextTick()
+
+    expect(panelKeys()).toEqual(['native:canvas'])
+    expect(panelContentNodes('tray-canvas-panel')).toHaveLength(1)
+    expect(panelContentNodes('tray-native-panel')).toHaveLength(0)
+    expect(panelContentNodes('tray-session-panel')).toHaveLength(0)
   })
 })
 
@@ -1165,12 +1275,14 @@ describe('ComposerTray 聚合面板 headerAction 段（B3 聚合面含定时任�
     expect(panelContentNodes('header-action-scheduler-manager-open')).toHaveLength(0)
   })
 
-  it('托盘全无条目 + widget 空 + headerAction 有入口 → 聚合入口仍渲染（左簇第三内容源，入口不丢失）', () => {
+  it('托盘全无任务条目 + widget 空 + headerAction 有入口 → 聚合入口在场（headerAction 独立可见条件）', () => {
     headerActionsSwitch.source = makeHeaderActionSource()
     // 三态全空托盘（bash/subagent/workflow/session 全无）+ 空 widget 源
     mountTray(makeWidgetSource(SID), SID, true)
 
-    // 若无 headerAction 源，此时 showAggregate=false → 聚合钮不存在；有源则必须在场
+    // [u-tray-entry 后辨析力弱化] canvas 件恒渲染 → 入口恒在场，本用例不再能区分
+    // 「headerAction 让入口在场」；断言保留在场性，判定逻辑由 hasVisibleHeaderActions
+    // 的纯函数测试与 use-composer-bar-density 的密度档测试承载
     expect(row().find('[data-testid="tray-aggregate-button"]').exists()).toBe(true)
   })
 })

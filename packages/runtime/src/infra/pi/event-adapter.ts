@@ -32,7 +32,7 @@
  */
 import type { ServerMessage, ServerMessageType, ExtensionInteractMethod, PiMessageEntry, PiToolCallEntryForm } from '@taiji/shared'
 import { EXTENSION_EVENTS, SUBAGENT_DIRECTIVE_CUSTOM_TYPE, parseSubagentDirective } from '@taiji/shared'
-import { GUI_WIDGET_MARKER, ASK_USER_MARKER, SESSION_MANAGER_MARKER, SESSION_MANAGER_ACTIONS, SUBAGENT_INFLIGHT_MARKER, INFLIGHT_REPORT_ACK, SCHEDULE_CREATE_MARKER, PLAN_REVIEW_MARKER, UI_FORM_MARKER, SUBAGENT_JOURNAL_MARKER, JOURNAL_REPORT_ACK, isGuiComponent, isGuiRenderResult, isSubagentInFlightReport, isScheduleDraft, isFormQuestion, isSubagentJournalReport } from '@zhushanwen/extension-protocol'
+import { GUI_WIDGET_MARKER, ASK_USER_MARKER, SESSION_MANAGER_MARKER, SESSION_MANAGER_ACTIONS, SUBAGENT_INFLIGHT_MARKER, INFLIGHT_REPORT_ACK, SCHEDULE_CREATE_MARKER, PLAN_REVIEW_MARKER, UI_FORM_MARKER, SUBAGENT_JOURNAL_MARKER, JOURNAL_REPORT_ACK, CANVAS_MARKER, isCanvasMarkerRequest, isGuiComponent, isGuiRenderResult, isSubagentInFlightReport, isScheduleDraft, isFormQuestion, isSubagentJournalReport } from '@zhushanwen/extension-protocol'
 import type { SessionManagerAction } from '@zhushanwen/extension-protocol'
 import type { PiEventListener } from '../../services/ports/pi-engine.js'
 import type { PiTranslatedEvent } from '../../services/session/types.js'
@@ -823,6 +823,32 @@ function translateSessionManagerSelect(
 }
 
 /**
+ * canvas 请求检测（problem-solve-canvas U3，设计 §3.1(2) 通道）：select title 为
+ * CANVAS_MARKER → options[0] 是 {action, params} 嵌套载荷（pi-canvas extension 的
+ * callCanvas 序列化形态，session-manager 同构）。契约总守卫 isCanvasMarkerRequest
+ * 一次收窄 action + params（内部按 marker 词表逐 action 分派）。
+ *
+ * 内部服务类 marker：无降级语义（命中即 runtime 内部通道消费，SESSION_MANAGER 同款
+ * 不入 MARKER_DIALOG_FALLBACKS）——解析失败 / payload 形状非法折叠 '__malformed__'
+ * 哨兵，CanvasHandler 以结构化错误应答回 marker 通道（select value），不降级为用户
+ * 可见对话框、不发前端广播帧。
+ */
+function translateCanvasSelect(
+  event: PiExtensionUiRequestEvent,
+  sid: string,
+  requestId: string,
+): PiTranslatedEvent[] {
+  const payload = parseSelectOptionsPayload(event)
+  // 契约总守卫一次收窄 action + params；params 侧的断言同 session-manager 分支
+  // （translateSessionManagerSelect 的 `as Record<string, unknown>`）——中间事件的
+  // params 槽是宽 Record，契约 interface 无 index signature，结构守卫后放宽传值。
+  if (isCanvasMarkerRequest(payload)) {
+    return [{ kind: 'canvas-ui', requestId, sessionId: sid, action: payload.action, params: payload.params as Record<string, unknown> }]
+  }
+  return [{ kind: 'canvas-ui', requestId, sessionId: sid, action: '__malformed__', params: {} }]
+}
+
+/**
  * legacy AskUserQuestion → FormQuestion type 推断映射（ui-presentation-protocol D2 逐项对齐；
  * 归一层自 renderer normalizeFormRequest 上移至此——marker 命中即产出 view-ready 帧）：
  * 有 options → choice（multiSelect → multi 重命名）；无 options → text。
@@ -1038,8 +1064,8 @@ function translatePlainDialogRequest(
  * 可降级 marker 对话框分支表（保序 = 降级优先序）：marker 命中 → try 翻译，检测失败
  * （返回 undefined，非合法 JSON / payload 缺字段）→ 落到后续 marker 或普通对话框分支。
  * 各 try 函数的检测语义与守卫差异见各自 doc 注释。
- * SESSION_MANAGER 不入表：无降级语义（命中即 runtime 内部通道消费），在
- * translateInteractiveRequest 保留显式一段。
+ * SESSION_MANAGER / CANVAS 不入表：无降级语义（命中即 runtime 内部通道消费，畸形 payload
+ * 以结构化错误应答回各自 marker 通道），在 translateInteractiveRequest 保留显式一段。
  */
 const MARKER_DIALOG_FALLBACKS: ReadonlyArray<{
   marker: string
@@ -1065,6 +1091,9 @@ function translateInteractiveRequest(event: PiExtensionUiRequestEvent, sid: stri
   // runtime 内部通道：识别即消费（不经前端、无降级）
   if (isMarkerSelect(event, SESSION_MANAGER_MARKER)) {
     return translateSessionManagerSelect(event, sid, requestId)
+  }
+  if (isMarkerSelect(event, CANVAS_MARKER)) {
+    return translateCanvasSelect(event, sid, requestId)
   }
   // 可降级 marker 家族（表驱动，保序）：检测失败逐级降级，全不命中 → 普通对话框
   for (const { marker, translate } of MARKER_DIALOG_FALLBACKS) {
