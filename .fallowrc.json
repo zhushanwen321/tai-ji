@@ -88,7 +88,8 @@
     "stale-suppressions": "off"
   },
   "audit": {
-    "gate": "new-only"
+    "gate": "new-only",
+    "cacheMaxAgeDays": 7
   },
   "ignoreUnresolvedImports": [
     "./helpers/rpc-client-mock"
