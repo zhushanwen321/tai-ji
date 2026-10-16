@@ -3,7 +3,7 @@
  *
  * 覆盖 TC1-TC7 共 7 类场景 + design-review G1（非末位 text 不收集）+ G2（streaming assistant
  * 末尾多非 text 块的去重）+ TC-edge 边界态（0 streaming assistant 窗口稳定性）+ run 类型分组
- * （groupToolRuns：判定表三类 / 序号 / 段首锚定 key）。TC/G1/G2/TC-edge 用例断言
+ * （groupToolRuns：判定表三类 / 段首锚定 key）。TC/G1/G2/TC-edge 用例断言
  * visible 的 flatIndex 序列 + compactedCount + failedCount 精确值；分组用例断言分组输出
  * units 的形态、组头三条口径与段首锚定 key。
  *
@@ -501,7 +501,7 @@ describe('TC-edge：边界态（0 streaming assistant）窗口稳定性', () => 
 })
 
 // ── run 类型分组：groupToolRuns（demo chat spec §3 的 real 落地）─────────────
-// 覆盖判定表三类与名单外原样 / 单成员组照出 / 类型切换开新组与同名序号 / running 入组与
+// 覆盖判定表三类与名单外原样 / 单成员组照出 / 类型切换开新组 / running 入组与
 // hasRunning 两态 / 计数三条口径 / 假邻接（窗口剔出 error 成员）/ 段首锚定 key /
 // 纯函数不修改入参 / 输出序。
 
@@ -559,20 +559,19 @@ describe('run 类型分组 groupToolRuns: 分组规则', () => {
     expect(isGroup(g)).toBe(true)
     expect(g.base).toBe('explore')
     expect(g.header.count).toBe(1)
-    expect(g.seq).toBe(1)
   })
 
-  it('类型切换开新组；同名组第二次出现序号递增（探索 → 执行命令 → 探索 · 2）', () => {
+  it('类型切换开新组（探索 → 执行命令 → 探索 裂为两个同名组）', () => {
     const tools = [
       makeTool({ id: 'r0', toolName: 'read', input: { path: '/x' } }),
       makeTool({ id: 'b1', toolName: 'bash', input: { command: 'a' } }),
       makeTool({ id: 'r2', toolName: 'read', input: { path: '/y' } }),
     ]
     const units = groupOf(flatOfTools(tools))
-    expect(units.map((u) => (isGroup(u) ? `${u.base}:${u.seq}` : u.block.kind))).toEqual([
-      'explore:1',
-      'exec:1',
-      'explore:2',
+    expect(units.map((u) => (isGroup(u) ? `${u.base}@${u.headFlatIndex}` : u.block.kind))).toEqual([
+      'explore@0',
+      'exec@1',
+      'explore@2',
     ])
   })
 
@@ -584,10 +583,10 @@ describe('run 类型分组 groupToolRuns: 分组规则', () => {
       makeTool({ id: 'b2', toolName: 'bash', input: { command: 'b' } }),
     ]
     const units = groupOf(flatOfTools(tools))
-    expect(units.map((u) => (isGroup(u) ? `${u.base}:${u.seq}` : (u.block.ref as ToolCall).toolName))).toEqual([
-      'exec:1',
+    expect(units.map((u) => (isGroup(u) ? `${u.base}@${u.headFlatIndex}` : (u.block.ref as ToolCall).toolName))).toEqual([
+      'exec@0',
       'subagent',
-      'exec:2',
+      'exec@2',
     ])
   })
 
@@ -620,10 +619,10 @@ describe('run 类型分组 groupToolRuns: 分组规则', () => {
       }),
     ])
     const units = groupOf(flat)
-    expect(units.map((u) => (isGroup(u) ? `${u.base}:${u.seq}` : u.block.kind))).toEqual([
-      'exec:1',
+    expect(units.map((u) => (isGroup(u) ? `${u.base}@${u.headFlatIndex}` : u.block.kind))).toEqual([
+      'exec@0',
       'thinking',
-      'exec:2',
+      'exec@2',
     ])
   })
 
@@ -741,7 +740,7 @@ describe('run 类型分组 groupToolRuns: 分组规则', () => {
   })
 
   it('key 段首锚定：类型切换处另起段首（相邻异类型段不互相吞并锚点）', () => {
-    // [bash bash read bash] → 三段三组：exec(head=0) / explore(head=2) / exec · 2（head=3，段首是自己）
+    // [bash bash read bash] → 三段三组：exec(head=0) / explore(head=2) / exec(head=3，段首是自己)
     const tools = [
       makeTool({ id: 'b0' }),
       makeTool({ id: 'b1' }),
