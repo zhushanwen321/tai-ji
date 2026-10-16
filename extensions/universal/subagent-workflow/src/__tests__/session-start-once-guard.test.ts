@@ -3,7 +3,7 @@
 // u-audit-fix 探针实测（subagent-workflow 侧）：判定「必须接入」的跨 session 副作用
 // 操作经 oncePerProcess 包装后，双派发
 // （factory 二调/handler 累积形态：同一 handler 引用直接调两次）下各执行 1 次；
-// 粒度边界豁免（明令不包装）的 ③identity appendEntry / ④bindNotifyLedger /
+// 粒度边界豁免（明令不包装）的 ③identity appendEntry /
 // ⑥service.initSession 保持每 session_start 执行（×2，防误伤反向断言）。
 //
 // [B1] recoverCrashedRuns 已移出守卫清单（原⑪）：W17 后 loadAll 只读本 session

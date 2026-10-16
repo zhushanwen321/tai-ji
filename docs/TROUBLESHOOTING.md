@@ -519,7 +519,7 @@ pi 升级（`PI_VERSION` bump）或触碰相关模块时逐条重验；锚点均
 ### 10. settled 事件先复位再广播：边沿回调内 isIdle 恒真（PS-07）
 
 - **pi 锚点**：`dist/core/agent-session.js:325-336`——`_emitAgentSettled` 首行复位 `_isAgentRunActive = false` 再发 agent_settled 事件
-- **机制**：settled 边沿驱动的通知通道不会撞上残留 busy 态——notify-ledger 的 settled 边沿 courier 依赖此序；若 pi 未来调换次序，courier 投递时序需重验
+- **机制**：settled 边沿驱动的通知通道不会撞上残留 busy 态——delivery-port 的注入链与文本车道对账器的 settled 边沿重投依赖此序；若 pi 未来调换次序，注入/重投时序需重验
 - **处置建议**：探针检查（pi-semantics-agent-session.test.ts）；消费 settled 边沿的新代码可假定回调内 idle，但 pi 升级时此条目自动进重验清单（verifiedWith 门禁）
 
 ### 11. plain appendEntry（type=custom）不进 LLM 上下文（PS-09）

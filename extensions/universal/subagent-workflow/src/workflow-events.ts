@@ -12,9 +12,8 @@
  *   2. log（pi.appendEntry 包装）+ runSettledEffects（onRunDone 三步终局副作用
  *      管线，具名导出可直测）+ makeLifecycleDeps + makeDeps（LauncherDeps 纯装配）
  *   3. 本域 3 个 pi.on handler（session_start / session_tree / session_shutdown）
- *      + 4 个跨域事件注册（notify ledger compaction 守卫 / model 缓存刷新 /
- *      subagents 父级联关闭×2——setup* 函数住各自域模块，本 seam 在原注册位
- *      置调用；pi.on 全链注册顺序逐位不变，
+ *      + 3 个跨域事件注册（model 缓存刷新 / subagents 父级级关闭×2——
+ *      setup* 函数住各自域模块，本 seam 在原注册位置调用；pi.on 全链注册顺序逐位不变，
  *      workflow-events.test.ts 锁定）
  *   4. deps 守卫（单一出口，失败 throw）+ lazyDeps（tool lazy 注入源）
  *
@@ -215,7 +214,7 @@ export interface RunSettledEffectsEnv {
  * 恒可淘汰候选，且其终局时序 = 全局最新，恒在保留端，不被自身触发的裁剪淘汰）。
  *
  * 失败语义（直测锁定，workflow-events.test.ts）：管线内部无围栏
- * ——notifyDone 抛错（账本写账失败 / 降级直发非 stale 失败）时后续 track/evict
+ * ——notifyDone 抛错（port.deliver rejected / 降级直发非 stale 失败）时后续 track/evict
  * 不执行、异常原样上抛，由调用方 finalizeRun 的 onRunDone 独立 try 围栏接住
  * （core worker-message-pump，OR-4/B-4：真实副作用失败 error 留痕不崩宿主）。
  * notifyDone 幂等早退（notifiedRunIds 已含 runId）不是错误：后两步照常执行。
@@ -271,9 +270,8 @@ export interface WorkflowDomainHandle {
  * workflow 域事件族装配单一入口（事件族 seam，与 session-lifecycle.ts 同构）。
  * index.ts 的 workflow 域退为本调用 + 装配结果消费。
  *
- * 本域 3 个 handler（session_start → session_tree → session_shutdown）与 4 个
- * 跨域 setup* 注册（notify ledger compaction 守卫 / model 缓存刷新 / subagents
- * 父级联关闭×2）交错，pi.on 全链注册顺序逐位不变（锁
+ * 本域 3 个 handler（session_start → session_tree → session_shutdown）与 3 个
+ * 跨域 setup* 注册（model 缓存刷新 / subagents 父级联关闭×2）交错，pi.on 全链注册顺序逐位不变（锁
  * workflow-events.test.ts）；engine-awareness
  * （before_agent_start 链尾）仍由组合根在本调用之后注册（before_agent_start
  * 链序不变，跨事件通道无注册时序语义）。
@@ -466,7 +464,8 @@ export function setupWorkflowDomain(
   // ════════════════════════════════════════════════════════════
   //  session_start：初始化 subagents + workflow 两域
   //
-  //  六职责编排（identity 重建 / ledger 装配 / 双 Service 装配 / GC+恢复 / kill-9
+  //  六职责编排（identity 重建 / ledger 装配（波 2 退役，投递归 pi-delivery-port，
+  //  见 session-lifecycle.ts 头注）/ 双 Service 装配 / GC+恢复 / kill-9
   //  循环 / SAR+engine 基线）已随迁 session-lifecycle.ts（bootstrap seam，设计
   //  §3.1/D1/D2 原样搬移）。此处仅接线：lastSessionId 先行赋值（时序与原 handler
   //  开头一致）+ 装配结果写入 per-session sessionState。

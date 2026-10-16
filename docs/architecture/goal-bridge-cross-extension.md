@@ -148,7 +148,7 @@ goal 档缺失从此只剩一种合法语义：用户未装 goal（slot 不存�
 
 - **采用**：见 §3.2 方案 A——goal 挂、plan 读，进程级共享，双形态同机制。
 - **不采用**：B/C/D 三方案（§3.2 展开各自被击穿的理由）。
-- **证据**：C-ext-06（constraints.json，权威 development-guide.md §7.5——只强制载体 `globalThis[Symbol.for(包名.角色)]`，不强制 version/形状）；仓内现役 `Symbol.for` slot 十余处（grep 实证：ask-user CHANNEL_HANDSHAKE_KEY / permission FOOTER_HANDSHAKE_KEY + REQUEST_RENDER_KEY / subagent-workflow DIALOG_QUEUE_KEY / subagent-core registry·dialog-queue·notify-ledger 等多处）——其中带 version 的仅 registry 模式家族两例（ask-user channelHandshake、permission footerHandshake，双向共享可变 slot + pending 时序队列），**单向/单例 slot 全部裸挂**。
+- **证据**：C-ext-06（constraints.json，权威 development-guide.md §7.5——只强制载体 `globalThis[Symbol.for(包名.角色)]`，不强制 version/形状）；仓内现役 `Symbol.for` slot 十余处（grep 实证：ask-user CHANNEL_HANDSHAKE_KEY / permission FOOTER_HANDSHAKE_KEY + REQUEST_RENDER_KEY / subagent-workflow DIALOG_QUEUE_KEY / subagent-core registry·dialog-queue·notifyPorts 等多处）——其中带 version 的仅 registry 模式家族两例（ask-user channelHandshake、permission footerHandshake，双向共享可变 slot + pending 时序队列），**单向/单例 slot 全部裸挂**。
 - **效果**：G1/G2 成立——这是仓内唯一同时在「独立 pi 双扩展」与「taiji 桌面（builtin goal + 用户安装 plan 混载）」两种形态下都成立的通道形态。
 
 **D2：slot 协议 = 裸函数直挂（选定）**

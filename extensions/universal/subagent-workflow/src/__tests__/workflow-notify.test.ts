@@ -1,9 +1,8 @@
 // src/__tests__/workflow-notify.test.ts
 //
 // notifyDone 域合一文件（组 4 收尾段：四文件合一 + stale-guard notifyDone 半边 +
-// M10 守卫条迁入）。构成与出处：
-//   - 账本四步生命周期 / 降级直发 / content 分支矩阵全文锚定
-//     ← workflow-notify-notify-ledger.test.ts（主体）
+// M10 守卫条迁入）。构成：
+//   - 投递生命周期（port.deliver 受理 / 回执 / 降级直发）/ content 分支矩阵全文锚定（主体）
 //   - 终局载荷 D7（三态 outcome + resultSummary/errorCode + 产物与 journal 指针）
 //     ← workflow-notify-notify-payload.test.ts
 //   - bounded 序列化等价锚定 + 截断边界 ← workflow-notify-bounded-serialize.test.ts

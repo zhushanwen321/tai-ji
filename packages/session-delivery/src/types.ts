@@ -6,7 +6,8 @@
  * - 意图驱动：调用方声明 intent，内核处理与 session 运行状态的冲突
  * - 判别联合 payload：适配器声明 supportedPayloads 能力
  *
- * v2 增量（投递所有权内核，设计 .tmp/tech-design/delivery-ownership-kernel.md）：
+ * v2 增量（投递所有权内核，v2 设计批次——设计文档未入 git，裁决随本仓 commit
+ * 历史可溯）：
  * 条目状态机/lane/条目双形态（活跃条目 + 终局记录）/entriesFull()+projection() 双视图；行为实现在
  * 本包 src/delivery.ts。lane 字面量中的 'steer' 是投递车道语义名（设计 §1.1 术语表
  * /D1），非 pi API 词汇——intent → 底层参数的翻译在适配器内部，本包只记录车道，

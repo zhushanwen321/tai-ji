@@ -334,6 +334,20 @@ describe("提交侧合批（60s 滑动窗口）与批组隔离", () => {
 		expect(h.sent).toHaveLength(1);
 	});
 
+	it("merge:true 对外部通道不生效（结构性逐条）：立即单条注入无 batch wrapper", () => {
+		const h = makeHost({ bg: true });
+		const port = createDeliveryPort(h.host);
+		const wf = { kind: "custom" as const, customType: "workflow-result", content: "workflow done", display: true, details: { runId: "r-9" } };
+		expect(port.deliver({ id: "wf-m1", payload: wf }, { merge: true })).toEqual({ kind: "accepted", id: "wf-m1" });
+		// 显式 merge:true 不把外部通道条目放进窗口：立即单条注入
+		expect(h.sent).toHaveLength(1);
+		expect(h.sent[0].message.customType).toBe("workflow-result");
+		expect((h.sent[0].message.details as Record<string, unknown>)["batch"]).toBeUndefined();
+		// 窗口到期后无第二批投出（条目从未进 mergeBuffer）
+		vi.advanceTimersByTime(60_000);
+		expect(h.sent).toHaveLength(1);
+	});
+
 	it("flush() 立即放行窗口缓冲", () => {
 		const h = makeHost({ bg: true });
 		const port = createDeliveryPort(h.host);

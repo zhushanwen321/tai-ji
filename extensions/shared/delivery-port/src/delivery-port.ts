@@ -90,7 +90,7 @@ export const DELIVERY_PORT_SLOT_KEY = Symbol.for("@zhushanwen/pi-delivery-port.d
 type DeliveryPortSlot = { current: DeliveryPortHandle | undefined };
 
 function getSlot(): DeliveryPortSlot {
-  // globalThis 无 symbol 索引签名，Reflect 安全读写（账本 getNotifyLedgerSlot 同型）
+  // globalThis 无 symbol 索引签名，Reflect 安全读写
   let slot = Reflect.get(globalThis, DELIVERY_PORT_SLOT_KEY) as DeliveryPortSlot | undefined;
   if (!slot) {
     slot = { current: undefined };
@@ -101,8 +101,8 @@ function getSlot(): DeliveryPortSlot {
 
 /**
  * session_start 装配入口：构造端口并绑定为进程级单例。重复 bind（/resume /fork
- * /new 的 session_start）先 dispose 旧实例再绑定新实例（对齐账本 bindNotifyLedgerHost
- * 的 dispose 旧实例 + 重建语义——内核态按 session 重建，防跨 session 重投）。
+ * /new 的 session_start）先 dispose 旧实例再绑定新实例（dispose 旧实例 + 重建
+ * ——内核态按 session 重建，防跨 session 重投）。
  * 调用方随后应调 handle.recover() 完成差集重放（装配点接线）。
  */
 export function bindDeliveryPort(host: DeliveryPortHost): DeliveryPortHandle {
@@ -378,11 +378,12 @@ export function createDeliveryPort(host: DeliveryPortHost): DeliveryPortHandle {
     // 登记在落盘成功后——persist-failed rejected 的条目不残留策略项。
     if (opts?.onFailure) failurePolicies.set(id, opts.onFailure);
     // 攒批判定（§3.4 缺省值表）：默认通道 + 有活跃后台任务 → 60s 窗口攒批；其余
-    // （外部通道 / 无后台任务 / merge:false 覆写）→ 立即放行（泵按通道分组，外部
-    // 通道恒逐条消息——批组隔离，merge:true 不得覆盖外部通道，任务书目标 6）。
+    // → 立即放行（泵按通道分组）：外部通道结构性逐条——merge:true 亦不得覆盖
+    // （批组隔离 [u9]，窗口合批形态 {batch,items} 对外部通道无消费契约，任务书
+    // 目标 6）；默认通道的无后台任务 / merge:false 覆写同样立即放行。
     const wantMerge =
-      opts?.merge ??
-      (channel === DEFAULT_NOTIFY_CUSTOM_TYPE && host.hasRunningBackground());
+      channel === DEFAULT_NOTIFY_CUSTOM_TYPE &&
+      (opts?.merge ?? host.hasRunningBackground());
     if (wantMerge) {
       mergeBuffer.set(id, record);
       seenIds.add(id);
@@ -536,8 +537,7 @@ export function createDeliveryPort(host: DeliveryPortHost): DeliveryPortHandle {
     if (replayed > 0) {
       buckets.recoveryReplays += replayed;
       emitBucketLog("recoveryReplays", buckets.recoveryReplays);
-      // 立即尝试投递（账本 recoverFromSession → checkReceipts → attemptDeliver 的
-      // 重放合并形态同源）：攒批成员合并批、直通成员分组放行。
+      // 立即尝试投递（重放合并形态：攒批成员合并批、直通成员分组放行）。
       flushMergeBuffer("replay");
       pumpDirect();
     }

@@ -213,15 +213,16 @@ export function applySessionOccupancyTransition(
  * 事件顺序契约（ADR-0122 判定层）：标记存活期 = 旁路 turn 拦截存续期；标记清除只由
  * 显式意图事件驱动——用户显式投递（consumeForExplicitDelivery）、会话删除
  * （disposeForDelete）、shutdown（disposeAll）。不做任何自动收敛：
- * 「settled 到达即清标记」会被同边沿的补投击穿——被掐 turn 的 settled 边沿正是
- * notify-ledger 的补投触发点（settledEdgeDispatch → attemptDeliver），清标记后同
- * 边沿补投开的新 turn 不再被拦；「窗满清标记」= 时间窗猜事实（原 D4，已删）。
+   * 「settled 到达即清标记」会被同边沿的重投击穿——被掐 turn 的 settled 边沿正是文本
+   * 车道对账器的重投触发点（对账器为现行旁路 turn 源之一；custom 通知旁路源 = port
+   * session_start 差集重放），清标记后同边沿重投开的新 turn 不再被拦；「窗满清标记」=
+   * 时间窗猜事实（原 D4，已删）。
  *
  * 存续期行为：restore 每次命中标记执行 restore-abort（对 idle pi 幂等 no-op——
  * pi@1.0.0 rpc-mode.js:327-329 abort 分支 → agent-session.js:1873-1884 abort() →
- * pi-agent-core agent.js:218-220 可选链单行体，语义登记 PS-74）；notify replay /
- * scheduler 旁路源起的 turn 被 noteAgentStart 拦截再 abort（被掐通知已注入上下文，
- * 下一 settled 边沿 checkReceipts 销账，不重复投递）。
+   * pi-agent-core agent.js:218-220 可选链单行体，语义登记 PS-74）；port session_start
+   * 差集重放 / scheduler 旁路源起的 turn 被 noteAgentStart 拦截再 abort（被掐通知已
+   * 注入上下文，回执销账由投递日志 details-id 凭据承接，不重复投递）。
  *
  * 「被掐 turn 的 settled 永不到达」（pi 收尾挂死）归显式上报链：PingProbe（ADR-0047，
  * 60s ping × 3 连续失败）→ onSilentAbort → forceQuitSession。

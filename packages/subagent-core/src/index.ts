@@ -53,8 +53,8 @@ export {
 // LogLevel 是 HostServices.log 契约的成员类型（宿主实现必读）。
 export { getLogger, type CoreLogger, type LogLevel } from "./core/logger.ts";
 
-// NotifyDomainPorts：通知域窄端口（投递内核工厂 + pending 活跃计数），
-// 两成员可选，缺席降级（投递直发 / pending 计零）。
+// NotifyDomainPorts：通知域窄端口（投递端口槽访问器 getDeliveryPort + pending
+// 活跃计数），两成员可选，缺席降级（投递直发 / pending 计零）。
 export {
   configureNotifyDomain,
   type NotifyDomainPorts,

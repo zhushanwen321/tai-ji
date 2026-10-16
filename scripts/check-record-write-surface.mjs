@@ -65,7 +65,8 @@
 //     terminal-actions.ts（D15）/ resume-run.ts（D7/裁决点 7）
 //     （R3 豁免；R5/R6 在宿主内照常拦截）
 //   - 事件文件双写者：record-events.ts / run-events.ts（R7 豁免）
-//   - notify-ledger 投递账 entry（NOTIFY_LEDGER_CUSTOM_TYPE）、reconcile-sweep
+//   - delivery-port 投递日志 entry（delivery-port-outbox / delivery-port-ack，
+//     journal.ts；v1 存量 subagent-bg-notify-ledger 兼容读）、reconcile-sweep
 //     注销 entry（发射点⑤）、pending:register/unregister 通道：customType 均非
 //     两族字面量，天然不命中 R2/R3——显式列举在此表达逐域保留口径。
 //   - extension 自有域：extensions/**/src 纳入扫描（当前零命中）；未来确需直写

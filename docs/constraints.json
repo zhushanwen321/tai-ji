@@ -1738,7 +1738,7 @@
     },
     {
       "id": "C-ext-19",
-      "summary": "结果语义通知必须走确认式送达（持久账本 + 幂等键，session-delivery/notify-ledger 通道），禁止新建依赖 pi 内存队列（steer/nextTurn/followUp）的 at-most-once 通道；交互式注入仅限非结果语义。scheduler 到期触发注入已改判（2026-09-14 用户裁决，权威源 scheduler-steer-direct-dispatch.md 裁决记录）：投递模型被 steer 直投 + 受理即记账重构，scheduler 触发按「提醒语义非结果语义」处置，at-least-once 降级为受理后 at-most-once 属设计已接受代价（busy 打断/abort 丢轮/无合批三代价四要素登记于该设计 §5），pi-boundary-reliability 附录 B 的 scheduler 账本化迁移待办随之逐条处理完毕（2026-09-15）。生效口径：新代码即禁、subagent-workflow 内存量经 g4-allow 行级豁免定性和迁移去向；G4（check_subagent_channels.py）扫描面 = extensions/universal/subagent-workflow/src/ 唯一——scheduler 不在扫描面、无 g4-allow 义务，仅当 scheduler 未来承载结果语义通知时才重新评估扩面",
+      "summary": "结果语义通知必须走确认式送达（extensions/shared/delivery-port 的 port.deliver——受理前投递日志落 session entry + 幂等键 + details-id 送达凭据 + session_start 差集重放，at-least-once），禁止新建依赖 pi 内存队列（steer/nextTurn/followUp）的 at-most-once 通道；交互式注入仅限非结果语义。scheduler 到期触发注入已改判（2026-09-14 用户裁决，权威源 scheduler-steer-direct-dispatch.md 裁决记录）：投递模型被 steer 直投 + 受理即记账重构，scheduler 触发按「提醒语义非结果语义」处置，at-least-once 降级为受理后 at-most-once 属设计已接受代价（busy 打断/abort 丢轮/无合批三代价四要素登记于该设计 §5），pi-boundary-reliability 附录 B 的 scheduler 账本化迁移待办随之逐条处理完毕（2026-09-15）。生效口径：新代码即禁、存量经白名单逐文件定性与 g4-allow 行级豁免；G4（check_subagent_channels.py）按方案 B 实装（port 为唯一合法 custom 注入点）：规则 1 扫描 extensions/ 全部 .ts、deliverAs 词表含 followUp、白名单 11 条逐文件定性（shared/delivery-port 等）；deliverAs 变量传参形态不在检查射程（goal/plan 等经参数传递的注入由端口迁移波次收敛）。scheduler 改判（提醒语义）保持——结果语义义务仅当其未来承载结果语义通知时重新评估",
       "scope": [
         "extensions/**",
         "packages/session-delivery/**"

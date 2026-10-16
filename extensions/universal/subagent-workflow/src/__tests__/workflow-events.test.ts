@@ -76,8 +76,6 @@ import { GLOBAL_SLOT_KEYS } from "@zhushanwen/subagent-core";
 const WORKFLOW_DOMAIN_SLOT_KEY = Symbol.for(GLOBAL_SLOT_KEYS.workflowDomainState);
 const DIALOG_QUEUE_KEY = Symbol.for(GLOBAL_SLOT_KEYS.dialogQueue);
 const SERVICE_SLOT_KEY = Symbol.for(GLOBAL_SLOT_KEYS.service);
-// notify ledger 槽（notify-ledger.ts NOTIFY_LEDGER_SLOT_KEY）：清空保证降级直发路径
-const NOTIFY_LEDGER_SLOT_KEY = Symbol.for(GLOBAL_SLOT_KEYS.notifyLedger);
 
 // ── fake 组件（合并去重：makePi/makeCtx/makeReporter/resetSlots/mount 各一处定义） ──
 
@@ -256,7 +254,7 @@ async function mountWithSession(
 // ── 槽隔离（提权后槽是进程级共享态，防跨用例 / 跨测试文件串扰） ────────────────
 
 function resetSlots(): void {
-  for (const key of [WORKFLOW_DOMAIN_SLOT_KEY, DIALOG_QUEUE_KEY, NOTIFY_LEDGER_SLOT_KEY]) {
+  for (const key of [WORKFLOW_DOMAIN_SLOT_KEY, DIALOG_QUEUE_KEY]) {
     Reflect.deleteProperty(globalThis, key);
   };
   const serviceSlot = Reflect.get(globalThis, SERVICE_SLOT_KEY) as { current: unknown } | undefined;

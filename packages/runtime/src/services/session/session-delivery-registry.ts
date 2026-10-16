@@ -346,7 +346,7 @@ function holdEdgeTick(): Promise<void> {
  * 投出（新分支上「凭空出现」破坏 G2），与 piCompactingBlocked 同型：registry 私有
  * 标志（不在 occupancy 投影通道），经 currentHold 判定生效。**保留不退役**（u5a 裁决：
  * 任务书退役清单只列 bash 持有；目标 5「撤销编排行为不变」以本标志为承重——revoke
- * 编排窗口内新提交仍走排队等待，设计 §3.6 退役清单与任务书的分歧见 runlog 登记）。
+ * 编排窗口内新提交仍走排队等待；设计 §3.6 已在 v7 将 revoking 移出退役清单，与本保留裁决一致）。
  */
 type HoldReason = 'compacting' | 'revoking'
 
@@ -852,9 +852,10 @@ export function createSessionDeliveryRegistry(
 
   /**
    * dispatching 收口（幂等门 = 仅恰在 dispatching 时执行）：
-   * - 'reject-other'：[RT-4#10] prompt 非 busy 真失败收口（不卡 dispatching）；busy 类已在
-   *   promptWithBusyRetry 内分型收口（reject-processing → generating 等），其终态不得被本腿
-   *   覆盖——只收口仍停留 dispatching 的形态。
+   * - 'reject-other'：[RT-4#10] prompt 真失败收口（不卡 dispatching）。全部真失败均经
+   *   本腿收口（含 processing 拒绝——u5a 退役分型重试后按真失败抛出、不再反转
+   *   occupancy；compacting 拒绝在 promptAwaitingCompaction 内等待重提不抛、不经本腿）
+   *   ——幂等门只收口仍停留 dispatching 的形态。
    * - 'idle'：[D3②] handled 终局主动回落（命令接管后输入已消费、无回合要跑；回落后的 idle
    *   是终态事实）。
    */

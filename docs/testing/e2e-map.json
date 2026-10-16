@@ -2338,7 +2338,7 @@
       "run": "（A12 真机脚本未落建：能力本体锚登记态——脚本落建后同 commit 回填 run 与 spec asset，先例 E2E-BATCH-01）",
       "owner": "extensions/universal/base-tool-enhance",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
-      "note": "R2 态（统一投递波 3 / A12 依赖此登记）：bash 后台任务完成通知真机轨——断言口径 = 任务完成经 port.deliver 入账（delivery-port-outbox entry 先于受理）→ steer 档边界注入（details.deliveryId = taskId）→ message_end 送达凭据命中（delivery-port-ack entry）→ kill pi 进程重启后 session_start 差集重放重投未送达通知；收殓终态（process-exit/orphaned）由对账路径经 port 补投。assets 以被验能力本体登记（真机脚本未落建——validate 强校验 asset 磁盘存在，落建后同 commit 回填，先例 E2E-BATCH-01）。执行口径：真 pi 进程 + 空载串行（AGENTS.md e2e 执行准则），真机执行归 u4 committed 后（impl-plan A12）"
+      "note": "R2 态（统一投递波 3 / A12 依赖此登记）：bash 后台任务完成通知真机轨——断言口径 = 任务完成经 port.deliver 入账（delivery-port-outbox entry 先于受理）→ steer 档边界注入（details.deliveryId = taskId）→ message_end 送达凭据命中（delivery-port-ack entry）→ kill pi 进程重启后 session_start 差集重放重投未送达通知；收殓终态（process-exit/orphaned）由对账路径经 port 补投。A12 验收已执行 PASS（runlog = .tmp/dev-flow/unified-delivery.accept/a12-bash-notify-chain/：probe-run.log / summary.jsonl / verdict.json——.tmp 易失，验收时点证据）。assets 以被验能力本体登记（真机脚本未落建——validate 强校验 asset 磁盘存在，落建后同 commit 回填 run 与 spec asset，先例 E2E-BATCH-01）。执行口径：真 pi 进程 + 空载串行（AGENTS.md e2e 执行准则），真机执行归 u4 committed 后（impl-plan A12）"
     },
     {
       "id": "E2E-DELIVERY-01",
@@ -2389,7 +2389,7 @@
       "run": "（A13 真机脚本未落建：能力本体锚登记态——脚本落建后同 commit 回填 run 与 spec asset，先例 E2E-BTASK-01）",
       "owner": "packages/runtime",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
-      "note": "R2 态（统一投递波 4 / A13 依赖此登记）：真 pi + 真 runtime 进程——kill -9 runtime（pi 存活）→ 重启 → runStartupReattach 恢复链（reattach-delivery-trigger 包装 → reconcile('pi-restored') → outbox 重放）→ 断言未送达消息重新入队、已送达消息不重投（transcript 裸标记判重）；与 E2E-DELIVERY-01 mock 轨构成双层口径（设计 §6 波 4 增补）。assets 以被验能力本体登记（真机脚本未落建——validate 强校验 asset 磁盘存在，落建后同 commit 回填，先例 E2E-BTASK-01）。执行口径：空载串行（AGENTS.md e2e 执行准则），真机执行归 u5b committed 后（impl-plan A13/A15 同轮）"
+      "note": "R2 态（统一投递波 4 / A13 依赖此登记）：真 pi + 真 runtime 进程——kill -9 runtime（pi 存活）→ 重启 → runStartupReattach 恢复链（reattach-delivery-trigger 包装 → reconcile('pi-restored') → outbox 重放）→ 断言未送达消息重新入队、已送达消息不重投（transcript 裸标记判重）；与 E2E-DELIVERY-01 mock 轨构成双层口径（设计 §6 波 4 增补）。A13 验收已执行（runlog = .tmp/dev-flow/unified-delivery.accept/a13-crash-recovery-and-regression/：截图 s0-s10 与 summary.jsonl——.tmp 易失，验收时点证据；观察项 = respawn 后旧 session 队列区派生视图失效，登记 docs/todo/unified-delivery-residuals.md #3）。assets 以被验能力本体登记（真机脚本未落建——validate 强校验 asset 磁盘存在，落建后同 commit 回填 run 与 spec asset，先例 E2E-BTASK-01）。执行口径：空载串行（AGENTS.md e2e 执行准则），真机执行归 u5b committed 后（impl-plan A13/A15 同轮）"
     }
   ]
 }

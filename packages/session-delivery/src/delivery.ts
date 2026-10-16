@@ -2,8 +2,8 @@
  * 投递所有权内核实现：createDelivery（v2）。
  *
  * 在 v1 投递循环（入队 → dedupe → 合批窗口 → busy gate → port.send → settled 边沿
- * 驱动）之上升级为条目制所有权内核（设计 .tmp/tech-design/delivery-ownership-kernel.md
- * §3 D9①②③⑤ / D5②③ / D3，单元 u1）。零 pi 依赖不变：确认/回收由适配器（runtime
+ * 驱动）之上升级为条目制所有权内核（v2 设计批次 D9①②③⑤ / D5②③ / D3，单元 u1——
+ * 设计文档未入 git，裁决随本仓 commit 历史可溯）。零 pi 依赖不变：确认/回收由适配器（runtime
  * registry）调 handle 方法驱动。
  *
  * 五态状态机（D9①，types.ts 迁移表）+ 本文件登记的两处实施扩展：
@@ -88,7 +88,7 @@
  *   传参）；缺省 'queue-hold' = v2 队列持有行为（busy gate 排队 + settled 边沿
  *   flush + 合批窗口），现为仅本包测试装配消费的非生产形态（零行为变化锚）——
  *   其代码路径物理删除（含缺省值翻转 on-accept 与既有测试显式传参）留待后续
- *   清理波。
+ *   清理波（登记：docs/todo/unified-delivery-residuals.md #1）。
  *
  * 其余 v1/v2 机制逐条保持：busy gate（isIdle + 内核在途内查双条件——hasPendingMessages
  * 自镜像四件套已按 msg-pipeline-debloat D2 拆除，busy 判定内查 active 表）、合批窗口、

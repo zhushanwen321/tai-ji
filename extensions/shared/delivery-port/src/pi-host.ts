@@ -1,8 +1,7 @@
 // src/pi-host.ts
 //
-// pi 扩展运行时端口接线工厂（notify-ledger-host 的 createPiNotifyLedgerHost 同型）：
-// 把 ExtensionAPI / ExtensionContext 的八个端口接线成 DeliveryPortHost，供
-// session_start 装配点传入 bindDeliveryPort。
+// pi 扩展运行时端口接线工厂：把 ExtensionAPI / ExtensionContext 的八个端口接线成
+// DeliveryPortHost，供 session_start 装配点传入 bindDeliveryPort。
 //
 // 接线纪律：
 // - 原样透传（appendEntry / getEntries / isIdle / sendMessage），不加工不缓存；
@@ -18,7 +17,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 
 import type { DeliveryPortHost } from "./types.ts";
 
-/** 工厂选项：装配观测差异参数化（对齐 notify-ledger-host 的 options 形态）。 */
+/** 工厂选项：装配观测差异参数化。 */
 export interface CreatePiDeliveryPortHostOptions { // oe-exempt:20261017:framework:pi 半区装配契约接口（宿主注入面，适配层持久契约）
   /** warn/debug 归因标签（建议装配扩展名，如 "base-tool-enhance"）。 */
   component: string;

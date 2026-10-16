@@ -63,7 +63,7 @@ export interface NotifyGateRecordState {
  * notify 门的回注声明身份（迟到帧自带；缺省 = 读 record 自身——同世代、当前轮）。
  * 现有消费点的回注均从 record 投影（无独立世代/轮载体），缺省路径恒命中「同世代」，
  * 拦截由第二步标记判定承担；跨世代重复帧的最终防线 = notifyId（id:epoch:round）
- * 账本去重（reopen 前最后轮必已同步入账，晚到回注必为重复帧——设计 §3.2.7 论证）。
+ * 投递日志判重（reopen 前最后轮必已同步入账，晚到回注必为重复帧——设计 §3.2.7 论证）。
  */
 export interface NotifyGateInbound {
   /** 回注声明世代（缺省 = record 当前 epoch，第一步恒同世代）。 */
@@ -90,7 +90,7 @@ export interface NotifyGateInbound {
  * 送达——close 不置放弃轮标记（标记只由 cancel/编排性关闭的 abort 置位），且收口
  * 落账编排挂在轮次通知送达之后（§3.2.5 顺序约束 [写死]），settle 时点 record 仍
  * running 非放弃轮，①②均不命中。收口后的残余迟到回注由轮身份守卫（Continuation
- * abortAndClearQueue 废弃轮身份）+ notifyId 账本去重承接。
+ * abortAndClearQueue 废弃轮身份）+ 投递日志 notifyId 判重承接。
  *
  * 正常轮通知不该被旧标记吞的论证（为何比较 record.round 而非标记槽）：正常轮 N settle
  * 后 round 已推进（markRoundIdle +1），回注轮 = record.round > 标记轮 → 放行，重复帧由
@@ -166,8 +166,8 @@ export interface BgNotifyRecord {
   sessionFile?: string;
   /** [U2] 通知身份键（投影边界物化 = dedupe key：`id` / `id:round`；[U5 / §3.2.3]
    *  epoch>0 时扩为 `id:epoch:round` / `id:epoch`（无轮形态——reopen 后第二次
-   *  close 不与首轮 close 撞键，epoch=0 恒旧格式，磁盘账本零迁移）。账本条目 /
-   *  回执匹配 / 幂等去重共用——details 携带（不进文案，G4 字节锁定不受影响），
+   *  close 不与首轮 close 撞键，epoch=0 恒旧格式，磁盘账本零迁移）。投递日志条目 /
+   *  回执匹配 / 幂等判重共用——details 携带（不进文案，G4 字节锁定不受影响），
    *  重复注入条目凭此可识别为同一条（G2 at-least-once 幂等键）。 */
   notifyId?: string;
   /**
@@ -430,9 +430,6 @@ export function createNotifier(host: NotifierHost): BgNotifier {
         },
         dedupeKey: notifyId,
       },
-      // D1 申报制：直发出站文本不附裸标记（无回执锚点），申报 'acceptance' =
-      // 受理即落地（缺省 'marker' 会让条目永挂 in-flight——新增无标记提交点须同样申报）
-      { receiptAnchor: "acceptance" },
     );
     return true;
   }

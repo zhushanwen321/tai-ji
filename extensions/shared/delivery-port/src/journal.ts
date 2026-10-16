@@ -43,7 +43,7 @@ export const DEFAULT_NOTIFY_CUSTOM_TYPE: string = SUBAGENT_BG_NOTIFY_CUSTOM_TYPE
 
 // ─── entry data schema ──────────────────────────────────────
 
-/** v1 outbox entry data（账本 NotifyLedgerEntryData 原样）。 */
+/** v1 outbox entry data（存量格式：统一投递前旧通知账本的 outbox entry 原样，兼容读用；原 schema 见 git 历史）。 */
 export interface OutboxEntryDataV1 { // oe-exempt:20261017:framework:投递日志 entry schema v1（账本存量 session 兼容读，append-only 永存）
   v: typeof SCHEMA_V1;
   notifyId: string;
@@ -83,7 +83,7 @@ export interface AckEntryDataV2 { // oe-exempt:20261017:framework:回执 entry s
   outcome?: "delivered" | "discarded";
 }
 
-/** v1 ack entry data（账本 NotifyAckEntryData 原样）。 */
+/** v1 ack entry data（存量格式：旧通知账本的 ack entry 原样，兼容读用；原 schema 见 git 历史）。 */
 export interface AckEntryDataV1 { // oe-exempt:20261017:framework:回执 entry schema v1（账本存量兼容读，append-only 永存）
   v: typeof SCHEMA_V1;
   notifyId: string;
@@ -104,15 +104,13 @@ export interface JournalRecord { // oe-exempt:20261017:framework:投递日志记
 
 /** 扫描结果（构造期全量 + 运行时增量维护的基线形态）。 */
 export interface JournalScan { // oe-exempt:20261017:framework:投递日志差集扫描契约（session_start 重放面）
-  /** outbox 记录（id → record；后写覆盖——同 id 多条 entry 取最新，对齐账本
-   *  scanSessionLedgerEntries 的 Map 后写覆盖语义）。 */
+  /** outbox 记录（id → record；后写覆盖——同 id 多条 entry 取最新）。 */
   outbox: Map<string, JournalRecord>;
   /** 终局 id（ack ∪ discard）。 */
   ackedIds: Set<string>;
   /** 对话记录已送达 id（details-id 凭据命中）。 */
   deliveredIds: Set<string>;
-  /** 回执接受域通道（默认通道 ∪ journal 中出现过的通道——账本「默认 ∪ 在账外部
-   *  通道」现算语义的持久版）。 */
+  /** 回执接受域通道（默认通道 ∪ journal 中出现过的通道——持久化的接受域形态）。 */
   channels: Set<string>;
 }
 
@@ -131,7 +129,7 @@ export function isPlainObject(v: unknown): v is Record<string, unknown> {
  *   pi sendCustomMessage 的忙时分支即 steer 队列（agent-session.js:1762-1768），
  *   语义等价 steer 档）；
  * - payload = { kind:"custom", customType: deliveryCustomType ?? 默认通道,
- *   content, display:true, details: record }（账本 mergeItems 单条形态回构）；
+ *   content, display:true, details: record }（单条消息形态回构）；
  * - recordedAt = 扫描时点（v1 无落账时点字段，重放只用于展示与排序，取扫描时点）。
  *
  * 字段形态不符（content 非 string / record 非对象）返回 undefined（该 entry 视为
@@ -232,8 +230,7 @@ export function extractDeliveryIds(details: unknown): string[] {
 
 /**
  * 扫对话记录，收集 channels 接受域内已送达（custom_message entry 出现 details
- * 携带该 id）的通知 id。接受域防无关 custom_message 的 details 撞键误判（账本
- * collectDeliveredNotifyIds 的 channelTypes 语义继承）。
+ * 携带该 id）的通知 id。接受域防无关 custom_message 的 details 撞键误判。
  * entries 形态 = ctx.sessionManager.getEntries()（custom_message entry：
  * { type:"custom_message", customType, details }）。
  */

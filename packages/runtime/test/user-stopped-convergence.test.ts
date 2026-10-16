@@ -65,10 +65,10 @@ describe('UserStoppedGate 事件顺序契约（无自动收敛）', () => {
     gate.markUserStopped('s1', 'user_force_quit')
     expect(store.hasUserStoppedMark('s1')).toBe(true)
 
-    // 补发腿 #1：notify replay turn 开跑 → 拦截再 abort
+    // 旁路腿 #1：port session_start 差集重放 turn 开跑 → 拦截再 abort
     gate.noteAgentStart('s1')
     expect(abortSession).toHaveBeenCalledTimes(1)
-    // 补发腿 #2（多通知场景第二条 parked 通知经下一 settled 边沿补投）
+    // 旁路腿 #2（文本车道对账器 settled 边沿重投等后续旁路 turn 源）
     gate.noteAgentStart('s1')
     expect(abortSession).toHaveBeenCalledTimes(2)
     // 标记未被任何事件清除（拦截持续到显式意图）
@@ -81,7 +81,7 @@ describe('UserStoppedGate 事件顺序契约（无自动收敛）', () => {
     expect(abortSession).not.toHaveBeenCalled()
   })
 
-  it('agent_settled 不清标记（契约锁：settled 边沿是投递重投/补投类旁路 turn 的触发点——通知入账后丢失的重放仍在该边沿驱动，此处清标记会被同边沿旁路 turn 击穿）', () => {
+  it('agent_settled 不清标记（契约锁：settled 边沿是投递重投类旁路 turn 的触发点——文本车道对账器仍在该边沿重投，custom 通知崩溃后重放 = port session_start 差集，此处清标记会被同边沿旁路 turn 击穿）', () => {
     const { gate, store, abortSession } = makeGate()
     gate.markUserStopped('s1', 'user_force_quit')
     gate.noteAgentStart('s1')

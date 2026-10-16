@@ -159,9 +159,9 @@ export interface DeliveryPortHandle { // oe-exempt:20261017:framework:进程级�
    */
   deliver(envelope: DeliveryEnvelope, opts?: DeliveryDeliverOptions): DeliveryDeliverResult;
   /**
-   * session_start 差集重放（= 账本 recoverFromSession 泛化）：扫投递日志 −
+   * session_start 差集重放：扫投递日志 −
    * （对话记录已送达 ∪ ack）差集 → 重入队 → 立即尝试投递。重放条目若满足攒批
-   * 条件经窗口合并投出（对齐账本 recover→attemptDeliver 的合并形态）。幂等：可
+   * 条件经窗口合并投出（合并形态与直通路径一致）。幂等：可
    * 重复调用，差集为空零动作。
    *
    * @returns 重放条数。

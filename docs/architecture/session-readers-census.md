@@ -32,7 +32,7 @@
 ## 2. 机器锚点（清单闭合的复现命令）
 
 ```bash
-# E1 · extension 侧 getEntries 全量读者（11 包族 / 20 文件，含 extensions/shared 两库：notify-ledger-host 装配工厂 / session-path 活跃路径裁剪单一实现）
+# E1 · extension 侧 getEntries 全量读者（含 extensions/shared 两库：delivery-port 投递端口（session_start 差集重放读点）/ session-path 活跃路径裁剪单一实现）
 grep -rln 'getEntries(' extensions/ --include='*.ts' | grep -v '\.test\.' | grep -v __tests__
 
 # E2 · extension 侧 fs 直读 .jsonl 审计工具面（唯一包：session-reader；两个 pattern 取并集）
@@ -69,10 +69,9 @@ grep -rn 'client\.getEntries(' packages/runtime/src --include='*.ts' | grep -v '
 | scheduler | `backend.ts` `loadTasks` 折叠（全文件折叠恢复 pending 定时任务） | 随树 | pending 定时任务 = 未来将发生的事；被撤子树任务不得复活触发（重折叠 + `session_tree` handler） | U6c |
 | scheduler | `ack-turn.ts` `hasAssistantEntry` 落盘判据（fail-closed 只读） | 照实 | 判据 = 文件是否已有 assistant flush（文件事实），非状态投影 | — |
 | subagent-workflow | `jsonl-run-store.ts` `loadAll()`（workflow-record entry 重建 run 记录） | 照实 | run 真实执行过，与 runtime 侧 workflow-extractor 同概念域同口径 | — |
-| subagent-workflow | `session-lifecycle.ts` `bindLedgerHostAndRecover`（notify ledger/ack 差集恢复） | 照实 | 通知发送/销账是已发生事实；对账照实才能幂等 | — |
 | pending-notifications | `index.ts` 每 turn 全量扫描（pending register/unregister 对账） | 照实 | 后台任务活跃性是已发生事实；run 在跑则照实（撤回遇活跃 run 由编排前置检查阻止，两口径互斥不冲突） | — |
 | session-manager | `watch-coordinator.ts` `recoverStaleRegisters`（session_start 重启收口腿：`scanPendingEntries` 差集对账后逐条重开活跃 type 'session' 的 watch，D7③） | 照实 | pending 注册活跃性是已发生事实——与 §3 pending-notifications 行同口径（同一 protocol 差集单点对账，撤回遇活跃 run 由编排前置检查阻止） | — |
-| notify-ledger-host（extensions/shared） | `src/index.ts` 装配工厂 `readSessionEntries: () => ctx.sessionManager.getEntries()`（NotifyLedgerHost 的 pi 扩展侧装配点） | 消费面委托（照实） | 锚点命中但读取语义落在装配方——session-manager（`notify-ledger.ts`）与 subagent-workflow（§3 `session-lifecycle.ts` 行）的 notify/ack 差集恢复均经此工厂，照实对账才幂等 | — |
+| delivery-port（extensions/shared） | `src/pi-host.ts` 装配接线 `readSessionEntries: () => ctx.sessionManager.getEntries()`（投递端口的 pi 扩展侧装配点） | 消费面委托（照实） | 锚点命中但读取语义落在投递端口——session_start 差集扫描（outbox − (delivered ∪ ack)）经此读点，照实对账才幂等 | — |
 | session-path（extensions/shared） | `src/index.ts` `filterActivePath`（活跃路径裁剪单一实现：todo/plan/goal/scheduler 四包状态重建输入的共用读点——四包原同构副本收编于此，回退取值口径随之统一） | 随树（随消费方） | 防御语义与 pi `buildSessionPath` 同构（leafId 缺失/失效回退文件尾，详见 §4.1 异源登记）；读取语义落在四消费包（§3 各行随树判定不变）；runtime/plugin 两侧不经本包（有意异源） | U6b / U6c（四包各自承接） |
 | base-tool-enhance | `index.ts` / `background/pending-reconcile.ts` `reconcilePendingEntries` | 照实 | bash 后台 pending 对账 = 已发生事实 | — |
 | rename-session | `index.ts` / `llm.ts` / `landing.ts`（`countUserMessages` / `extractUserPromptText` 起名输入） | 照实 | 会话起名是历史事实分析（用户确实说过）；输出为展示性标签，被撤消息进入起名视野属可接受残影（见 §7 边界 ①） | — |

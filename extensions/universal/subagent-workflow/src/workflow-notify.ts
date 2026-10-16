@@ -59,11 +59,11 @@ function runEventsJournalPath(artifactsDir: string, runId: string): string {
 }
 
 /**
- * notifyDone 账本幂等键前缀（u9 账本化，对齐 C-ext-19）。键形态
- * `wf-done:<runId>`——一个 run 的收口通知只投递一次（写账 → courier 边沿投递 →
- * 回执销账 → 断连/重启经账本重放，幂等键去重不双投递）。前缀惯例承接 collect
- * 时代 `sync-batch:` 的「通道语义前缀 + 天然唯一标识」形态；导出供测试构造
- * 回执 entry 与账本断言复用同键。
+ * notifyDone 幂等键前缀（[u9] 承袭，对齐 C-ext-19）。键形态
+ * `wf-done:<runId>`——一个 run 的收口通知只投递一次（port.deliver 受理 →
+ * details-id 回执销账 → 断连/重启经投递日志 session_start 差集重放，幂等键去重
+ * 不双投递）。前缀惯例承接 collect 时代 `sync-batch:` 的「通道语义前缀 + 天然
+ * 唯一标识」形态；导出供测试构造回执 entry 与投递日志断言复用同键。
  */
 export const WORKFLOW_DONE_NOTIFY_ID_PREFIX = "wf-done:";
 
@@ -102,7 +102,7 @@ interface WorkflowNotifyDetails { // oe-exempt:20260929:framework:workflow/recor
   reason: string | undefined;
   traceLength: number;
   /**
-   * [u9] 账本幂等键（`wf-done:<runId>`）——回执匹配键（ledger checkReceipts 扫
+   * [u9] 幂等键（`wf-done:<runId>`）——回执匹配键（port 投递日志扫
    * 送达 custom_message entry 的 details.notifyId 判定销账）。携带在 details 不进
    * 文案（G4 字节锁定不受影响）。
    */
@@ -386,15 +386,15 @@ export function notifyDone(
  * - 幂等 add：Set.add 对已存在元素不改变其迭代位置（重复 track 同一 id，
  *   其「最旧」地位不变）。
  * - FIFO 有界：Set 迭代序=插入序，超 cap 时删迭代器首元素=最旧。
- *   被挤出窗口的旧 id 再经 notifyDone：内存层放行后由账本 notifyId 幂等兜底
- *   （[u9] record 同键拒绝——生产环境账本已 bind 时不会重发；无账本降级环境
+ *   被挤出窗口的旧 id 再经 notifyDone：内存层放行后由投递日志 notifyId 幂等兜底
+ *   （[u9] port 按 id 判重——生产环境 port 已装配时不会重发；port 缺席降级环境
  *   才会重新直发，runId 全局唯一，旧 id 重现概率为零，该边界由 W3TC12 单测
  *   在降级形态下钉死）。
  *
- * 调用点：notifyDone 内部（写账成功/false 后 + 降级直发受理后）+ workflow-events
+ * 调用点：notifyDone 内部（port 受理/rejected 后 + 降级直发受理后）+ workflow-events
  * onRunDone 回调（notifyDone 之后，幂等二次添加）。notifyDone 抛出（reload 窗口
  * record 抛 / 非 stale 发送失败等）时内外都不标记——进程内的重复收口回调不被去重
- * 阻断（防御形态；账本路径抛错的已知丢失面登记见 notifyDone 注释）。
+ * 阻断（防御形态；port.deliver rejected 的已知丢失面登记见 notifyDone 注释）。
  *
  * @param notifiedRunIds 去重 Set（调用方持有，scope 到 factory 实例）
  * @param runId run 标识

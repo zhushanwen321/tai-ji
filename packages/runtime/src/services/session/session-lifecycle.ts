@@ -1415,7 +1415,8 @@ export class SessionLifecycle implements ISessionRegistry {
    *
    * 标记不在此清（ADR-0122 事件顺序契约）：标记存活期 = 旁路 turn 拦截存续期，清除只由
    * 显式意图事件驱动（显式投递 / 会话删除 / shutdown）。restore-abort 掐掉的 replay turn
-   * 的 settled 边沿正是 notify-ledger 补投触发点——此处清标记会被同边沿补投击穿（R1 审查
+   * 的 settled 边沿正是文本车道对账器的重投触发点（custom 通知旁路源 = port
+   * session_start 差集重放）——此处清标记会被同边沿重投击穿（R1 审查
    * 反例）；标记存续期间 interpreter 的 agent_start 挂点持续拦截旁路 turn（挂点与契约见
    * event-interpreter.ts UserStoppedGate）。显式投递（sendPrompt 等）在 dispatcher 投递前
    * 清标记放行。

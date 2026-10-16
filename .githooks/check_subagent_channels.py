@@ -12,8 +12,9 @@ custom 消息注入点唯一性检查（C-ext-19，pi-boundary-reliability §3.3
   出现在 delivery-port 白名单外——custom 车道唯一执行者 =
   extensions/shared/delivery-port（port.deliver → 内核受理 → pi.sendMessage 直达
   pi 唯一队列，受理前落 session entry 投递日志 + details-id 送达凭据 + session_start
-  差集重放）。依赖 pi 内存队列的 at-most-once 直发在检查层面结构性排除
-  （事故 A F2：十余次完成通知仅 1 次送达）；交互式注入（extension-conventions.md
+  差集重放）。deliverAs 字面量注入点在检查层面收敛——字面量形态结构性排除，
+  变量传参形态不在射程（goal/plan 等经参数传递的注入由端口迁移波次收敛）；
+  交互式注入（extension-conventions.md
   「Event handler 消息注入」节）不属禁令对象，豁免须定性登记（文件白名单或行级
   g4-allow 注释）。
   规则 2（--model）："--model" 字面量不得出现在模型引用白名单外（扫描面保持
@@ -77,13 +78,11 @@ WHITELIST_DELIVERAS = {
     "universal/goal/src/adapters/event-handlers/agent-end.ts",
 }
 # ── 规则 2 白名单（路径相对 extensions/universal/subagent-workflow/src/）────
-# courier 模块：结果语义通知的合法投递通道（U2 B-ledger：账本 + settled 边沿 courier
-# + notifyId 幂等；该文件内 deliverAs 通道已全部删除，白名单是职责定位而非豁免存量）。
-WHITELIST_MODEL = {
-    "shared/model-ref.ts",
-    "execution/session-runner.ts",
-    "execution/argv-mirror.ts",
-}
+# 模型引用规范正身 = packages/subagent-core/src/shared/model-ref.ts
+# （assertCanonicalModelRef，跨包单源，本域零副本）。域内 "--model" 唯一生产
+# 出现面 = host/pi-host.ts argv 解析词表（行级 g4-allow：解析词表成员，非模型
+# 引用拼装）；无文件级白名单成员。
+WHITELIST_MODEL: set[str] = set()
 
 DELIVERAS_RE = re.compile(r"""deliverAs:\s*["'](steer|followUp|nextTurn)["']""")
 MODEL_FLAG_RE = re.compile(r"""["']--model["']""")
