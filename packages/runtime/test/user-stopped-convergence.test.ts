@@ -81,14 +81,14 @@ describe('UserStoppedGate 事件顺序契约（无自动收敛）', () => {
     expect(abortSession).not.toHaveBeenCalled()
   })
 
-  it('agent_settled 不清标记（契约锁：被掐 turn 的 settled 边沿正是 notify-ledger 补投触发点，此处清标记会被同边沿补投击穿）', () => {
+  it('agent_settled 不清标记（契约锁：settled 边沿是投递重投/补投类旁路 turn 的触发点——通知入账后丢失的重放仍在该边沿驱动，此处清标记会被同边沿旁路 turn 击穿）', () => {
     const { gate, store, abortSession } = makeGate()
     gate.markUserStopped('s1', 'user_force_quit')
     gate.noteAgentStart('s1')
     expect(abortSession).toHaveBeenCalledTimes(1)
 
     // settled 边沿到达（模拟被掐 turn 收尾）：UserStoppedGate 无 settled 消费面——
-    // 标记保持存活，下一补投 turn 仍被拦截
+    // 标记保持存活，下一旁路 turn（投递重放/补投）仍被拦截
     expect(store.hasUserStoppedMark('s1')).toBe(true)
     gate.noteAgentStart('s1')
     expect(abortSession).toHaveBeenCalledTimes(2)

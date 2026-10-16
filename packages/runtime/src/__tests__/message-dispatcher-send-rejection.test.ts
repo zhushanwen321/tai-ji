@@ -178,17 +178,19 @@ describe('pi busy 类拒绝的处置迁移（D6：适配器 catch 面）', () =>
     expect(h.registry.entries('s1')?.active[0]?.state).toBe('queued') // 持有（非 failed）
   })
 
-  it('auto 压缩 / post-run 原文 → occupancy 反转 generating（防幽灵空闲），零 send.rejected', async () => {
+  it('auto 压缩 / post-run 原文（processing）→ 首败即停 message.error（v3 busy 分型重试退役）', async () => {
     const h = makeMocks({ promptError: new Error(PI_PROCESSING_MSG) })
     await h.dispatcher.sendMessage('s1', 'hello')
     await h.flush()
     expect(findRejected(h.broadcasts)).toBeUndefined()
-    expect(h.session.isGenerating).toBe(true)
-    expect(h.session.occupancy?.turn).toBe('generating')
-    // 用户可见断言：occupancy 帧是前端 sessionPhase / 占用短路的唯一输入，末帧必为 generating
-    const turns = occupancyTurns(h.broadcasts)
-    expect(turns.length).toBeGreaterThan(0)
-    expect(turns[turns.length - 1]).toBe('generating')
+    // v3：受理即出站下全部投递恒带 streamingBehavior，pi 忙时入队不拒——processing 拒绝
+    // 按真失败首败即停：occupancy 不伪造 busy（turn 收口 idle），错误进 message.error
+    // 广播链路（错因可见，用户裁决重发）
+    expect(h.session.isGenerating).toBe(false)
+    expect(h.session.occupancy?.turn).toBe('idle')
+    const err = findError(h.broadcasts)
+    expect(err).toBeDefined()
+    expect((err!.payload as { message: string }).message).toContain('Agent is already processing')
   })
 
   it('非 busy pi 错误（No model configured）→ message.error 广播（错因可见）+ 零 send.rejected', async () => {

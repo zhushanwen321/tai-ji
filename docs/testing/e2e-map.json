@@ -3,7 +3,7 @@
     "name": "taiji e2e 资产登记表（SSOT）",
     "description": "全部 e2e 资产与其触发面的机器可读登记：「改了哪个域 → 跑哪些 e2e」的对账依据。summary 仅导航；资产内容与执行口径的权威源是 authority 指向的文档与 asset 本体。收录以磁盘实际为准（脚本/目录改名或增删时同 commit 更新本表）。",
     "fields": {
-      "id": "E2E-<域>-<两位序号>，域取现有测试域：ELECTRON（electron-smoke P0 子集）/ VISUAL（像素 diff）/ MOCK（行为轨 mock 全量）/ REAL（真实 app 启动轨）/ EQUIV（等价性双轨）/ MODELS（models.json sanitize 真机轨）/ RENAME（rename-session e2e）/ SCHED（scheduler 真实环境实测）/ BATCH（subagents 批量编排真机链）/ SKILLRELOAD（skill-reload 演化轨残留：断连恢复等真实 app 轨，原 reload 非破坏轨已随编排退役删除）/ BTW（btw 旁路提问双进程并发不变量真实进程轨） / ZCODE（zcode 引擎会话库域）/ PROP（集成线传播检查）/ MODELREF（extensions 资产模型引用漂移检查）/ RECORD（record 持久化写面唯一入口检查）/ THIRDHOST（subagent-core 第三宿主 barrel 契约探针）/ PIPE（工程门与检查脚本轨：review-pipeline 质量门脚本、pre-commit 检查检测单测、思考档位差分探针、select-affected-e2e 对账脚本、npm 发布面一致性检查）/ RESUME（workflow run 断点续跑场景族：resume/record 链路确定性场景 + 真机门段拆分）/ SESSMGR（session-manager 域 cw 剧本族：mock 探针轨 + 真 pi 全链路真机冒烟轨） / REMOTE（远程访问域：手机浏览器 LAN 直连真机/仿真验收） / TERMINAL（终端多实例真实 app 轨：切换条多实例 / 实例级生命周期 / 编号不复用 / 世代重置与对账） / MCP（MCP 服务器管理域真机子集）",
+      "id": "E2E-<域>-<两位序号>，域取现有测试域：ELECTRON（electron-smoke P0 子集）/ VISUAL（像素 diff）/ MOCK（行为轨 mock 全量）/ REAL（真实 app 启动轨）/ EQUIV（等价性双轨）/ MODELS（models.json sanitize 真机轨）/ RENAME（rename-session e2e）/ SCHED（scheduler 真实环境实测）/ BATCH（subagents 批量编排真机链）/ SKILLRELOAD（skill-reload 演化轨残留：断连恢复等真实 app 轨，原 reload 非破坏轨已随编排退役删除）/ BTW（btw 旁路提问双进程并发不变量真实进程轨） / ZCODE（zcode 引擎会话库域）/ PROP（集成线传播检查）/ MODELREF（extensions 资产模型引用漂移检查）/ RECORD（record 持久化写面唯一入口检查）/ THIRDHOST（subagent-core 第三宿主 barrel 契约探针）/ PIPE（工程门与检查脚本轨：review-pipeline 质量门脚本、pre-commit 检查检测单测、思考档位差分探针、select-affected-e2e 对账脚本、npm 发布面一致性检查）/ RESUME（workflow run 断点续跑场景族：resume/record 链路确定性场景 + 真机门段拆分）/ SESSMGR（session-manager 域 cw 剧本族：mock 探针轨 + 真 pi 全链路真机冒烟轨） / REMOTE（远程访问域：手机浏览器 LAN 直连真机/仿真验收） / TERMINAL（终端多实例真实 app 轨：切换条多实例 / 实例级生命周期 / 编号不复用 / 世代重置与对账） / MCP（MCP 服务器管理域真机子集） / BTASK（bash 后台任务域：完成通知入账全链真机轨） / DELIVERY（统一消息投递域：文本车道磁盘 outbox 崩溃恢复，mock 单测轨 + kill -9 runtime 真进程轨双层口径）",
       "summary": "一句话摘要（仅导航）",
       "scope": "代码 glob 数组（触发面）。只支持两种形态：<prefix>/** 前缀通配与精确路径（与 scripts/select-constraints.mjs 同款零依赖匹配语义：prefix/** → startsWith，精确路径 → 全等）",
       "layer": "L1 = 零 token mock/smoke（CI 固定环节）| L2 = 真实进程非真实 LLM（真实 app/pi 进程、mock 构建或 mock 数据）| L2.5 = faux（真实进程 + faux LLM 演员，凭证无关零 token）| L3 = 真实 LLM",
@@ -866,7 +866,7 @@
         },
         {
           "kind": "harness",
-          "ref": "packages/subagent-core/src/execution/notify/notify-ledger.ts"
+          "ref": "extensions/shared/delivery-port/src/delivery-port.ts"
         }
       ],
       "trigger": "on-diff",
@@ -874,7 +874,7 @@
       "run": "（已执行 PASS 2026-09-17 A6）dev 环境：GUI 批量派发 → kill 成员 relay 代理（PID 精确）→ kill-on-disconnect 连坐 → 断言会话文件 ledger/ack/送达各恰 1 条（原始证据文档 = session jsonl + runtime log）",
       "owner": "extensions/universal/subagent-workflow",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
-      "note": "R2 已激活：A6 已执行 PASS 2026-09-17——dev 环境注入（kill 成员 relay 代理 → kill-on-disconnect 连坐）下 run 收敛 done(failed)、通知照达恰一条、ledger wf-done: 登记/ack 逐条处理完毕各恰一条（原始证据文档 = 会话文件 + runtime log）。账本基建 = NotifyLedger（record / attemptDeliver / checkReceipts / recoverFromSession 生命周期），断连窗口的重放恰一次性由 u9 mock 轨 12 断言锁定（helpers-notify-ledger.test.ts）"
+      "note": "R2 已激活：A6 已执行 PASS 2026-09-17——dev 环境注入（kill 成员 relay 代理 → kill-on-disconnect 连坐）下 run 收敛 done(failed)、通知照达恰一条（原始证据文档 = 会话文件 + runtime log）。统一投递重构（2026-10-17）后断连窗口的 at-least-once 重放载体 = DeliveryPort 的投递日志差集重放（session_start 扫 outbox − delivered − ack），幂等键 notifyId 判重不变；原 NotifyLedger 账本基建随账本退役删除（u9 mock 轨断言由 port 四步对位测试承接）。"
     },
     {
       "id": "E2E-MODELS-02",
@@ -2290,6 +2290,82 @@
       "owner": "scripts/",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
       "note": "R2 态：改脚本本体或 preflight 接线时干跑（当前树 resources/pi 缺失 → exit 0 放行即绿）；dev symlink 形态下红是合法失败（正是脚本职责，--fix 恢复）。判定与恢复见 docs/TROUBLESHOOTING.md 常见问题 §29"
+    },
+    {
+      "id": "E2E-BTASK-01",
+      "summary": "bash 完成通知全链真机轨（完成 → port 入账 → 边界注入 → 崩溃重启重放）：background-bash 通知经投递端口的 outbox/凭据/重放端到端",
+      "scope": [
+        "extensions/universal/base-tool-enhance/src/background/**",
+        "extensions/shared/delivery-port/src/**"
+      ],
+      "layer": "L3",
+      "assets": [
+        {
+          "kind": "harness",
+          "ref": "extensions/universal/base-tool-enhance/src/background/notify.ts"
+        },
+        {
+          "kind": "harness",
+          "ref": "extensions/universal/base-tool-enhance/src/background/pending-reconcile.ts"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": true,
+      "run": "（A12 真机脚本未落建：能力本体锚登记态——脚本落建后同 commit 回填 run 与 spec asset，先例 E2E-BATCH-01）",
+      "owner": "extensions/universal/base-tool-enhance",
+      "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
+      "note": "R2 态（统一投递波 3 / A12 依赖此登记）：bash 后台任务完成通知真机轨——断言口径 = 任务完成经 port.deliver 入账（delivery-port-outbox entry 先于受理）→ steer 档边界注入（details.deliveryId = taskId）→ message_end 送达凭据命中（delivery-port-ack entry）→ kill pi 进程重启后 session_start 差集重放重投未送达通知；收殓终态（process-exit/orphaned）由对账路径经 port 补投。assets 以被验能力本体登记（真机脚本未落建——validate 强校验 asset 磁盘存在，落建后同 commit 回填，先例 E2E-BATCH-01）。执行口径：真 pi 进程 + 空载串行（AGENTS.md e2e 执行准则），真机执行归 u4 committed 后（impl-plan A12）"
+    },
+    {
+      "id": "E2E-DELIVERY-01",
+      "summary": "文本车道磁盘 outbox 崩溃恢复 mock 轨（快速回归）：内核 DiskDeliveryStore 端口契约 + registry 全链（受理落盘 → 重启 → loadUndelivered + reattach 判重 → 未送达重入队 / 已送达不重投 / ack 终局行 / 撤销 cancelled + segments 回填 / 损坏行容错）",
+      "scope": [
+        "packages/session-delivery/src/**",
+        "packages/runtime/src/services/session/**"
+      ],
+      "layer": "L1",
+      "assets": [
+        {
+          "kind": "spec",
+          "ref": "packages/session-delivery/tests/disk-store.test.ts"
+        },
+        {
+          "kind": "spec",
+          "ref": "packages/runtime/src/services/session/__tests__/delivery-outbox-crash-recovery.test.ts"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "pnpm -C packages/session-delivery test && pnpm -C packages/runtime exec vitest run src/services/session/__tests__/delivery-outbox-crash-recovery.test.ts",
+      "owner": "packages/runtime",
+      "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
+      "note": "统一投递波 4 双层口径的 mock 轨（零 token，可进 CI）：覆盖 A9 全部断言点。真进程轨 = E2E-DELIVERY-02（设计 §6 波 4 增补：双层都跑，真进程轨为「应用崩溃重启后未送达消息自动重新入队」的验收判据）"
+    },
+    {
+      "id": "E2E-DELIVERY-02",
+      "summary": "文本车道磁盘 outbox 崩溃恢复 kill -9 runtime 真进程轨：kill -9 runtime 进程 → 重启 → 在途未送达消息自动重新入队（真实场景判据，A13）",
+      "scope": [
+        "packages/runtime/src/services/session/**",
+        "packages/runtime/src/index.ts",
+        "packages/session-delivery/src/**"
+      ],
+      "layer": "L2",
+      "assets": [
+        {
+          "kind": "harness",
+          "ref": "packages/runtime/src/services/session/session-delivery-registry.ts"
+        },
+        {
+          "kind": "harness",
+          "ref": "packages/runtime/src/services/session/reattach-delivery-trigger.ts"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": true,
+      "run": "（A13 真机脚本未落建：能力本体锚登记态——脚本落建后同 commit 回填 run 与 spec asset，先例 E2E-BTASK-01）",
+      "owner": "packages/runtime",
+      "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
+      "note": "R2 态（统一投递波 4 / A13 依赖此登记）：真 pi + 真 runtime 进程——kill -9 runtime（pi 存活）→ 重启 → runStartupReattach 恢复链（reattach-delivery-trigger 包装 → reconcile('pi-restored') → outbox 重放）→ 断言未送达消息重新入队、已送达消息不重投（transcript 裸标记判重）；与 E2E-DELIVERY-01 mock 轨构成双层口径（设计 §6 波 4 增补）。assets 以被验能力本体登记（真机脚本未落建——validate 强校验 asset 磁盘存在，落建后同 commit 回填，先例 E2E-BTASK-01）。执行口径：空载串行（AGENTS.md e2e 执行准则），真机执行归 u5b committed 后（impl-plan A13/A15 同轮）"
     }
   ]
 }

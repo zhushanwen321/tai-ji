@@ -26,7 +26,7 @@ import { getMigrationGate, setBtwCascadeOps, subscribeSessionDeathDisposition } 
 import { clearRemovedSessionData } from './services/plugin-service/session-data-store.js'
 import { findPiExecutable } from './infra/pi/find-pi-executable.js'
 import { GenStatsService } from './services/session/gen-stats-service.js'
-import { createSessionDeliveryRegistry } from './services/session/session-delivery-registry.js'
+import { createSessionDeliveryRegistry, createDiskDeliveryStoreForSession } from './services/session/session-delivery-registry.js'
 // u4（delivery-ownership-kernel D4②）：compaction 掐断 turn 的续跑判定（新模块，无状态单例）。
 import { createResumeDecision } from './services/session/resume-decision.js'
 // u4 追加项（A5/V5）：reattach restore 包装——先建投递运行时再触发对账（reconcile 无运行时即 no-op）。
@@ -1075,6 +1075,9 @@ async function main(): Promise<void> {
     ensureActive: (sid) => sessionService.ensureActive(sid),
     subscribeAgentSettled: subscribeAgentSettledIn(agentSettledListeners),
     recordWorkspace: (cwd) => workspaceService.record(cwd),
+    // 磁盘 outbox 装配（统一投递波 4，§3.8 文本行）：每 session 一个磁盘 DeliveryStore
+    //（受理前 persist / 终局 ack / reattach 重放），路径经 getDataDir() 动态推导。
+    createDeliveryStore: (sid) => createDiskDeliveryStoreForSession(sid),
     // [A2 D-A2-2] skillNotice 广播通道（deliverText 注入的 notice 发布用）；组合根
     // messageBus 恒就绪，getter 形态与 SessionRecordsDeps 装配同款。
     getMessageBus: () => messageBus,

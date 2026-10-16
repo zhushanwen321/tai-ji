@@ -23,6 +23,13 @@
  * clear_queue 三分处置（自有条目重投 / 带标记无记录重建 / 无标记外来文本收养）在
  * reattach 后的唯一正确触发面。刻意不在每次 session attach 上触发（`getOrCreateDelivery`
  * 会挂 watchdog/settled 订阅，常驻面扩张非本缺口所需；lazy 激活路径的提交类入口已自建运行时）。
+ *
+ * 恢复后动作链（统一投递波 4，磁盘 outbox）：本包装触发的 `reconcile('pi-restored')` 在
+ * registry 内部尾接**磁盘 outbox 重放**（`loadUndelivered` 读磁盘未终局记录 → transcript
+ * 判重 → 未送达保真重入队，见 session-delivery-registry 的 replayUndelivered）——重放与
+ * 对账共享 client 解析与幂等闸（clear_queue 收回的 rebuild 以原 id 重建，重放在册 skip
+ * 吸收），因此挂 reconcile 内部而非本包装；组合根装配零改动，pi 未附着时重放 defer 到
+ * 下一触发点（磁盘记录持久）。
  */
 export interface ReattachDeliveryTriggerDeps {
   /** 恢复执行（生产 = sessionService.restoreSession；失败语义由调用方承载）。 */

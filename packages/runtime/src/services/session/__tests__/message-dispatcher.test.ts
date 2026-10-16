@@ -343,7 +343,7 @@ describe('MessageDispatcher busy 维度退役（排队取代拒绝，D5）', () 
     expect(h.registry.entries('s1')?.active[0]?.state).toBe('in-flight')
   })
 
-  it('turn=settling（pi post-run 窗口）：零 send.rejected + 持有（settling 非投递窗口，检查点 4）', async () => {
+  it('turn=settling（pi post-run 窗口）：零 send.rejected + 受理即出站（v3 settling 持有退役）', async () => {
     const h = makeHarness({
       sessionByClient: { occupancy: { turn: 'settling', compacting: false, bash: false } },
     })
@@ -352,8 +352,10 @@ describe('MessageDispatcher busy 维度退役（排队取代拒绝，D5）', () 
     expect(result).toMatchObject({ blocked: false })
     expect(h.published.filter((m) => m.type === 'send.rejected')).toHaveLength(0)
 
-    expect(h.client.prompt).not.toHaveBeenCalled()
-    expect(h.registry.entries('s1')?.active).toHaveLength(1) // 内核在册（消息不丢）
+    // v3 受理即出站：settling 非 hold 维度（唯一提交侧等待 = compaction）——pi post-run
+    // 窗口提交经 prompt(streamingBehavior) 直接入 pi 队列（忙时入队不拒），消息不丢
+    expect(h.client.prompt).toHaveBeenCalledTimes(1)
+    expect(h.registry.entries('s1')?.active[0]?.state).toBe('in-flight')
   })
 
   it('compacting 命中：零拒绝广播 + 持有；compaction 结束后自动投递', async () => {
@@ -376,7 +378,7 @@ describe('MessageDispatcher busy 维度退役（排队取代拒绝，D5）', () 
     expect(h.client.prompt).toHaveBeenCalledTimes(1) // 压缩结束 → 自动投递
   })
 
-  it('bash 命中：零拒绝广播 + 持有（bash 与 prompt 互斥由内核持有承接）', async () => {
+  it('bash 命中：零拒绝广播 + 受理即出站（v3 bash 持有退役——pi 队列忙时入队不拒）', async () => {
 
     const h = makeHarness({
       sessionByClient: { isBashRunning: true, occupancy: { turn: 'idle', compacting: false, bash: true } },
@@ -385,7 +387,9 @@ describe('MessageDispatcher busy 维度退役（排队取代拒绝，D5）', () 
     await h.flush()
     expect(result).toMatchObject({ blocked: false })
     expect(h.published.filter((m) => m.type === 'send.rejected')).toHaveLength(0)
-    expect(h.client.prompt).not.toHaveBeenCalled()
+    // v3 受理即出站：bash 运行中提交不再排队——prompt(steer) 直接入 pi 队列，轮边界注入
+    expect(h.client.prompt).toHaveBeenCalledTimes(1)
+    expect(h.promptArgs()[2]).toBe('steer')
 
   })
 

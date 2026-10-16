@@ -100,15 +100,16 @@ describe('A2-MF-C：deliverText 挂 skill 注入', () => {
     expect(occupancyAtPrompt).toEqual({ turn: 'dispatching', isGenerating: true })
   })
 
-  it('[RT-4#10] prompt 失败按拒绝分型收口终态（不卡 dispatching）：processing 拒绝 → generating', async () => {
+  it('[RT-4#10] prompt 失败按拒绝分型收口终态：processing 拒绝 → idle（v3 busy 分型重试退役）', async () => {
     const h = makeHarness()
     ;(h.client.prompt as ReturnType<typeof vi.fn>).mockRejectedValue(
       new Error('prompt failed: Cannot ... Agent is already processing'),
     )
     await expect(h.registry.sendDirect('s1', 'x')).rejects.toThrow('Agent is already processing')
-    // 'reject-processing' 行：isGenerating=true + turn='generating'（pi 有 turn 在跑的权威信号）
-    expect(h.view.isGenerating).toBe(true)
-    expect((h.view as unknown as { occupancy?: { turn: string } }).occupancy?.turn).toBe('generating')
+    // v3：processing 不再分型反转（busy 分型重试随忙闲门禁退役）——与一切真失败同型收口
+    //（'reject-other'：turn 没跑起来 → idle，错误经调用方 throw 显式上报）
+    expect(h.view.isGenerating).toBe(false)
+    expect((h.view as unknown as { occupancy?: { turn: string } }).occupancy?.turn).toBe('idle')
   })
 
   it('[RT-4#10] prompt 失败按拒绝分型收口终态：非 busy 真失败 → idle（不卡 dispatching）', async () => {

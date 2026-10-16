@@ -186,15 +186,17 @@ describe('A1-busy-queue-vitest: handleSend busy 时入队而非拒绝', () => {
     expect(h.sessionService.sendMessage).not.toHaveBeenCalled()
   })
 
-  it('普通 send busy 入队后 settled 边沿 + idle 复核 → flush 以 steer 注入 turn 边界', async () => {
+  it('普通 send 出站在 port promise settle 前留守内核 → settled 边沿后出站以 steer 注入', async () => {
     const h = makeHarness({ view: { isGenerating: true } })
-    // 普通 send()（非 sendChecked）：busy 时入内核队列，由 settled 边沿驱动（D8 主路径）
+    // 普通 send()（非 sendChecked）：同步链在 port.send 的 promise settle 前返回——条目
+    // 仍 queued（出站交接在 deliverOne 的 async 链上推进，isGenerating 非 hold 维度，
+    // v2/v3 同）；断言锚 = settle 前不出站、链完成后已出站
     const handle = h.registry.getOrCreateDelivery('s1')
     handle.send({ payload: { kind: 'text', content: 'steered' } })
     expect(h.client.prompt).not.toHaveBeenCalled()
     expect(handle.depth()).toBe(1)
 
-    // run 结束：settled 事件到达 + busy 复核通过（同一写者先复位标志）
+    // run 结束：settled 事件到达（对账触发点 + 等待者多源唤醒）
     setBusy(h, false)
     h.emitSettled()
     await flushMicrotasks()
@@ -204,15 +206,24 @@ describe('A1-busy-queue-vitest: handleSend busy 时入队而非拒绝', () => {
     expect(h.registry.getOrCreateDelivery('s1').depth()).toBe(0)
   })
 
-  it('isCompacting / isBashRunning 同样视为 busy（三者互斥判定）', async () => {
-    for (const flag of ['isCompacting', 'isBashRunning'] as const) {
-      const h = makeHarness({ view: { [flag]: true } as Partial<HarnessView> })
-      // 普通 send() 验证内核 gate：三种标志任一为 true 都判 busy，不立即投
-      const handle = h.registry.getOrCreateDelivery('s1')
-      handle.send({ payload: { kind: 'text', content: 'm' } })
-      expect(handle.depth()).toBe(1)
-      expect(h.client.prompt).not.toHaveBeenCalled()
-    }
+  it('isCompacting 持有（唯一提交侧等待状态）；isBashRunning 受理即出站（v3 bash 持有退役）', async () => {
+    // isCompacting：v3 保留的提交侧持有（view.isCompacting → waitDeliverable 挂住）——
+    // microtask 链 flush 后 prompt 仍未调、条目留守 queued
+    const hC = makeHarness({ view: { isCompacting: true } })
+    const handleC = hC.registry.getOrCreateDelivery('s1')
+    handleC.send({ payload: { kind: 'text', content: 'm' } })
+    await flushMicrotasks()
+    expect(handleC.depth(), '压缩中条目应留守内核队列（compaction 持有）').toBe(1)
+    expect(hC.client.prompt, '压缩中不得向 pi 出站').not.toHaveBeenCalled()
+
+    // isBashRunning：v3 受理即出站——bash 运行中提交不再排队（bash 持有随本地队列退役），
+    // 经 prompt(steer) 直接入 pi 队列（pi 忙时入队不拒）
+    const hB = makeHarness({ view: { isBashRunning: true } })
+    const handleB = hB.registry.getOrCreateDelivery('s1')
+    handleB.send({ payload: { kind: 'text', content: 'm' } })
+    await flushMicrotasks()
+    expect(hB.client.prompt, 'bash 运行中提交应受理即出站（prompt steer 入 pi 队列）').toHaveBeenCalledWith('m', undefined, 'steer')
+    expect(hB.registry.getOrCreateDelivery('s1').depth(), '出站受理后不留内核队列').toBe(0)
   })
 })
 
@@ -256,7 +267,8 @@ describe('A3-singleton-registry-vitest: 同 sessionId 复用同一 delivery hand
   })
 
   it('dispose(sessionId) 后再取是新 handle（旧队列随 dispose 丢弃）', () => {
-    // busy 前提：idle 时 send() 会立即投递出队，depth 恒 0——busy 才能观察队列滞留
+    // 前提构造：send() 的同步链内（port promise settle 前）条目仍 queued——depth=1 可
+    // 观察（isGenerating 非 hold 维度，出站交接在 async 链推进）
     const h = makeHarness({ view: { isGenerating: true } })
     const a = h.registry.getOrCreateDelivery('s1')
     a.send({ payload: { kind: 'text', content: 'queued' } })
@@ -325,14 +337,14 @@ describe('A5-d7-sideeffects-vitest: D7 保留的置位副作用在 port.send 成
     expect(h.calls.indexOf('prompt')).toBeLessThan(h.calls.indexOf('record:/test/workspace'))
   })
 
-  it('busy 投递（settled flush 路径）成功后同样置位', async () => {
+  it('busy 投递（受理即出站路径）成功后同样置位', async () => {
     const h = makeHarness({ view: { isGenerating: true } })
-    // 普通 send() 走内核 busy 排队 → settled 边沿 flush（settled 路径的置位守卫）
+    // v3 受理即出站：send() 直投（isGenerating 非 hold 维度）——置位发生在出站链完成时
     const handle = h.registry.getOrCreateDelivery('s1')
     handle.send({ payload: { kind: 'text', content: 'q' } })
     expect(h.view.isGenerating).toBe(true) // busy 本态
 
-    // settled → idle 复核（写者复位标志）→ flush 投递 → 重新置位
+    // settled 边沿（多源唤醒腿）+ microtask 链完成 → 投递置位
     setBusy(h, false)
     h.emitSettled()
     await flushMicrotasks()
