@@ -49,6 +49,11 @@ node 解析，原因见上 [HISTORICAL] #3）。未声明的包记 SKIP 并给�
       diff 含 packages/shared/src 时传 --extra-packages packages/runtime,packages/renderer
       承接下游兜底，见 pr-cr-fix 精简设计 D12）。追加包无新增行时走 total=0 → 100% 记
       OK 的现有路径；路径无效或缺 vitest.config.ts 记 FAIL 条目，不静默跳过。
+      下游传播（自动，无需传参）：changed packages/* 包被 extensions 依赖时（反向映射
+      见仓库根 extension-dependencies.json），依赖方 extension 目录自动并入包集实跑
+      测试——无 src/ 改动 → 增量恒过，价值在测试执行（#42 subagent-core 重构破坏
+      subagent-workflow B6 e2e、PR 门禁零可见的盲区，由此在 PR 阶段兜住）。--packages
+      探针模式不自动传播。报告包条目带 downstream_of 字段标明联动来源。
 退出码：0 = pass；1 = fail（增量不足或测试失败）；2 = 工具错误（git 异常 / 记账不闭合 /
       all-SKIP 配置错误 / argv 参数错误）
 产出：.review/coverage.json（packages 增量口径 + files 全文件级真实覆盖率，
@@ -85,6 +90,10 @@ PLUGIN_SOURCE_SUFFIX = re.compile(r"\.(ts|tsx|mts|vue)$")
 # 「未被任何测试加载的盲区」（2026-09-29 单轮 71 条违规全为此形态）。判定侧与
 # 测量侧口径对齐后，no_lcov 只剩真源文件的盲区信号。
 TEST_FILE_RE = re.compile(r"__tests__/|\.(test|spec)\.[cm]?[jt]sx?$")
+
+# 下游传播数据源（仓库根）：extension → 其依赖的 packages/* 包。与
+# check-extension-dependencies.mjs 同源消费；缺失/解析失败时降级为不传播并出声。
+EXTENSION_DEPS_JSON = "extension-dependencies.json"
 
 DEBUG = False
 
@@ -198,6 +207,57 @@ def changed_packages(repo_root: Path, base: str) -> tuple[dict[str, list[str]], 
             continue
         pkgs.setdefault(pkg, []).append(f)
     return pkgs, unmeasured
+
+
+def load_downstream_map(repo_root: Path) -> tuple[dict[str, set[str]], str]:
+    """changed packages/* 包目录 → 依赖它的 extension 目录集合（数据源 = 仓库根
+    extension-dependencies.json，与 check-extension-dependencies.mjs 同源）。
+
+    为什么需要它：包选择只收自身有 src/ 改动的包——被 extension 依赖的 packages 包
+    （如 subagent-core）改动时，依赖方 extension 的测试不会跑。2026-10-16 #42 的
+    形态：subagent-core 重构（dormant 复活即迁出）破坏 subagent-workflow 的 B6
+    e2e 旧断言，PR 阶段门禁零可见，靠 merge 前全量套件兜住（595a02acb 补救）。
+    本映射把「被 extension 依赖的 packages 包」纳入下游传播，结构性堵住该盲区。
+
+    边界（刻意收窄，防 fan-out 失控）：
+    - 传播源只含 packages/* 目录（extension→extension 依赖不传播；如后续需要，
+      按同数据结构把 name_to_dir 的扫描面扩到 extensions/ 即可）；
+    - 传播目标只含 extensions/ 目录（shared→runtime,renderer 的 packages 间下游
+      不在本映射内，仍走 SKILL.md 手工 --extra-packages，D12 既定规则）；
+    - 一跳（不递归传递依赖）。
+    JSON 缺失/解析失败 → 空映射 + 警告串（调用方 stderr 出声，不阻塞门禁）。
+    """
+    path = repo_root / EXTENSION_DEPS_JSON
+    if not path.is_file():
+        return {}, f"{EXTENSION_DEPS_JSON} 缺失，跳过 extension 下游传播"
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as e:
+        return {}, f"{EXTENSION_DEPS_JSON} 解析失败（{e}），跳过 extension 下游传播"
+    # packages/* 目录 → npm 名（只认 workspace packages/ 前缀下的包为传播源）
+    name_to_dir: dict[str, str] = {}
+    packages_root = repo_root / "packages"
+    if packages_root.is_dir():
+        for child in sorted(packages_root.iterdir()):
+            pj = child / "package.json"
+            if not pj.is_file():
+                continue
+            try:
+                name = json.loads(pj.read_text(encoding="utf-8")).get("name")
+            except (OSError, json.JSONDecodeError):
+                continue
+            if name:
+                name_to_dir[name] = f"packages/{child.name}"
+    downstream: dict[str, set[str]] = {}
+    for ext in data.get("extensions", []):
+        edir = ext.get("directory")
+        if not edir:
+            continue
+        for dep in ext.get("dependsOn", []):
+            src_dir = name_to_dir.get(dep.get("package"))
+            if src_dir:
+                downstream.setdefault(src_dir, set()).add(edir)
+    return downstream, ""
 
 
 def coverage_declared(pkg_dir: Path) -> bool:
@@ -438,6 +498,29 @@ def main() -> None:
             elif not (repo_root / p / "vitest.config.ts").is_file():
                 extra_invalid[p] = (f"--extra-packages 追加包 {p} 缺 vitest.config.ts，"
                                     "无法跑 coverage；恢复：补齐 config 或从 --extra-packages 移除该包")
+    # 下游传播（自动，2026-10-16 增）：changed packages/* 命中 extension 反向依赖
+    # （extension-dependencies.json）时，把依赖方 extension 并入包集实跑测试。下游包
+    # 无 src/ 改动 → 走 total=0 → 100% 的既有路径（增量口径恒过），价值在测试执行：
+    # 依赖方测试失败即 FAIL——#42 subagent-core 重构破坏 subagent-workflow B6 e2e、
+    # PR 门禁零可见的盲区，由此在 PR 阶段兜住。探针模式（--packages）不自动传播：
+    # 探针 = 定向读数，自动传播会稀释探针语义。shared→runtime,renderer 仍走手工
+    # --extra-packages（D12 既定规则，见 SKILL.md）。
+    downstream_map, downstream_warn = load_downstream_map(repo_root)
+    downstream_of: dict[str, list[str]] = {}
+    if not only:
+        for src_pkg in sorted(pkgs):
+            for ext_dir in sorted(downstream_map.get(src_pkg, ())):
+                if not (repo_root / ext_dir / "vitest.config.ts").is_file():
+                    print(f"WARN: 下游 extension {ext_dir}（被 {src_pkg} 变更牵连）缺 "
+                          f"vitest.config.ts，跳过联动（依赖方配置漂移，不阻塞本门禁）",
+                          file=sys.stderr)
+                    continue
+                if ext_dir not in pkgs:
+                    pkgs[ext_dir] = []
+                    print(f"DOWNSTREAM {ext_dir}: 依赖方联动测试（{src_pkg} 有 src/ 改动）")
+                downstream_of.setdefault(ext_dir, []).append(src_pkg)
+    if downstream_warn:
+        print(f"WARN: {downstream_warn}", file=sys.stderr)
     if not pkgs:
         # git_diff_names 已在源头拦截瞬态空 diff；到达此处 = diff 非空但没有
         # src/ 改动的 vitest 包（纯 docs/scripts 改动），合法 pass
@@ -457,6 +540,8 @@ def main() -> None:
     for pkg, files in sorted(pkgs.items()):
         pkg_dir = repo_root / pkg
         entry: dict = {"changed_src_files": len(files)}
+        if pkg in downstream_of:
+            entry["downstream_of"] = downstream_of[pkg]
         # --extra-packages 追加包合法性失败（路径无效/缺 config）：记 FAIL 条目，
         # 参照下方 SKIP/FAIL 记账风格，不静默跳过
         if pkg in extra_invalid:
