@@ -316,25 +316,35 @@ Session 级状态，表示 pi 进程正在工作（从用户发送消息到 agen
 
 > **术语演进（2026-09）**：`streamingMessage` 实体已消亡——流式态 = 末位消息 `status:'streaming'` + turn 级 `isStreaming` 派生；UI 活跃态 SSOT 是 `isActive`（含 pendingSend 空窗期，`packages/core/src/domain/chat/derive-status.ts` W1）。
 
-### 投递所有权内核（delivery-ownership kernel）
+### 统一投递（unified delivery，v3）
 
-用户消息（composer）、agent 消息（session_manager send）、回流消息（completion-backflow）等全部发送方的唯一投递所有者：runtime 侧每 session 单例——纯逻辑状态机在 `packages/session-delivery/`，pi 适配与对账在 `packages/runtime/src/services/session/session-delivery-registry.ts`。pi 的 steer/followUp 内存队列降级为**交接槽位**（消息从「前端持有」到「进入 transcript」之间的临时存放格），所有权在消息进 transcript 之前属于本内核；renderer 只提交（`delivery.submit`）与渲染（`session.delivery` 状态帧，队列区单一数据源），不做车道判定。
+全部消息发送的统一投递服务：**一个内核 + 两个薄适配 + 唯一队列在 pi**。内核 = `packages/session-delivery/`（v3：条目状态机 / 判重 / 送达凭据 / DeliveryStore 端口，零 pi 依赖零 fs 知识）；两个薄适配 = runtime 适配（`packages/runtime/src/services/session/session-delivery-registry.ts`，文本车道：提交入口 + 在途登记 + 撤销编排 + GUI 状态源）与 pi 内投递端口 DeliveryPort（`extensions/shared/delivery-port/`，custom 车道唯一执行者：通知提交 + 投递日志 + 回执 + 重启重放）。**唯一队列 = pi 原生 steer / followUp 队列**（每 session 一份）——文本 `prompt(streamingBehavior)` 与通知 `sendMessage(deliverAs)` 同队 FIFO，忙时入队不拒；两档注入时机由 pi 队列原生出队承载，taiji 侧零时机代码。renderer 只提交（`delivery.submit`）与渲染（`session.delivery` 状态帧），不做投递判定。
 
-**lane（投递车道）**：一条消息交给 pi 的方式，三档——`direct`（pi 空闲，直接 prompt 起新 run）/ `steer`（pi 有活跃 run，入 steeringQueue 等 turn 边界注入）/ `queued`（pi 暂不可收，内核 FIFO 持有等时机）。lane 判定单一源 = runtime 权威 occupancy 投影（C-data-19 单写原语）+ 内核队列态；renderer 的 `resolveSendRoute` 降级为发送位按钮形态（send/stop/queue）的 UI 预测，真实车道以 `session.delivery` 帧的 lane 字段为准。
+**envelope（投递信封）**：投递请求统一包装——payload（判别联合 text / custom）+ timing + 幂等键 id + 提交选项（merge 合批 / onFailure 失败处置）+ meta 透传。机制统一、差异只在提交选项缺省值（text 缺省 forget 失败即弃 + 逐条；custom 缺省 retain 留账重投 + 合批）与端点能力（cancel / drain 管控面仅 runtime 端点）。
 
-**条目五态（`DeliveryEntryState`）**：内核条目状态机——`queued`（内核持有排队）/ `in-flight`（已交 pi 槽位、未确认）/ `delivered`（拿到送达回执；marker 锚 = `message_end` 回执命中，acceptance 锚 = 受理即落地，ADR-0074 申报制）/ `failed`（重试耗尽，等用户处置：重试钮经 `delivery.resync` 单条重报，或 × 移除）/ `cancelled`（用户撤销或 drain 回收）。进入 `session.delivery` 帧的是**投影视图**而非五态全量：活跃态（queued / in-flight / failed）全量 + delivered 最近 50 条完整条目，**cancelled 不投影**（撤销即从队列区消失，全文经 `delivery.cancel` reply 回草稿）——该帧是队列区行形态的唯一来源。
+**期望注入时机（timing）**：提交方声明的注入档位，两档——`steer`（下一个轮边界：当前轮工具执行完、下一轮模型请求前）/ `followUp`（run 将停处延展同一 run）；agent 空闲时两档都立即起一轮。API 字段名 `timing`；内核包内零 pi 词汇词形（`interrupt-at-turn-boundary` / `after-run`），facade 层翻译。缺省 steer（2026-10-16 用户裁决）。
 
-**两类回执（两阶段 receipt）**：①**受理** = pi 收下消息（direct 车道 = prompt 受理；steer 车道 = 文本进入 pi 槽位）；②**送达** = `message_end(user)` 文本命中裸标记 = 消息已写入 transcript（durable）。受理 ≠ 送达：只拿受理的条目停留 `in-flight`、由对账器盯（marker 锚情形；acceptance 锚条目受理即落地，见 `receiptAnchor`）。`sendChecked` 的同步 settle 时点维持**受理口径**（session_manager send 的 `{queued:true}` 契约锚定在受理时点，后移到送达会让 agent 工具调用阻塞至目标 session 当前 turn 结束）——onSettled 记账回调为送达口径，两者显式分离。
+**实际注入时机（actualTiming）**：与 timing 对偶的实际发生形态——immediate（立即注入/入队）/ at-boundary（轮边界出队）/ at-run-end（运行结束出队），唯一例外 compaction-hold（pi 硬拒绝期间的提交侧等待）。
 
-**receiptAnchor（回执锚）**：投递条目级回执锚申报（`DeliverySubmitOptions.receiptAnchor`），`'marker'` 缺省 / `'acceptance'` 无标记 agent 通路受理即落地，来源清单 SSOT 在 [decisions.md ADR-0074](adr/decisions.md)。
+**条目五态（`DeliveryEntryState`）**：queued（受理登记）/ in-flight（已入 pi 队列、未确认）/ delivered（送达回执命中）/ failed（失败，按 onFailure：forget 失败即弃等用户重发 / retain 留账下一边沿或重启重投）/ cancelled（用户撤销）。`session.delivery` 帧是派生视图：活跃态全量 + delivered 最近 50 条，cancelled 不投影（全文经 `delivery.cancel` reply 回草稿）。
 
-**对账器（Reconciler）**：registry 侧组件，在五个触发点（agent_settled / compaction_end / abort 完成 / pi restored / 30s watchdog；`delivery.cancel` 复用同一路径为撤销兜底入口）执行对账，条件 = 「空闲 + pi 槽位非空」，处置 = `clear_queue` 全收后按裸标记**三分**——**reclaim**（内核在册条目回队首重投，保持原相对序）/ **rebuild**（**尾附锚**标记但内核无记录 = runtime 重启 reattach，先按标记对 transcript 全量扫描判 delivered：已送达只重建记账不重投）/ **adopt**（无身份承接的外来文本——notifyDone / scheduler 提醒等存量注入，或标记字面量全部非尾附锚——以新身份入内核 FIFO 正常投递，不丢弃）。pi 只有队列级 `clear_queue` 原语（无条目级撤回），条目级收回以「全收 + 标记识别 + 其余重投」实现。
+**两阶段回执**：①**受理** = 提交链路收下消息（同步返回）；②**送达** = 消息身份在 transcript 可证（文本 = `message_end` 命中裸标记；通知 = `message_end` 命中 `details.deliveryId`）。受理 ≠ 送达；`sendChecked` 同步 settle 维持受理口径（agent→managed 契约锚）。
 
-**裸标记（bare marker）**：出站文本尾附的 `<!--taiji:msg:<uuid>-->`（裸 uuid 形态）作为逐消息身份，随文本进 transcript，供送达回执与判重匹配按 id 精确查找（身份非内容匹配——skill 注入 / BeforeSend 文本改写不影响）。与 msg-id-mapper 的 `u-<uuid>` 前缀标记空间互斥（mapper 只剥 u- 形态且仅覆盖富内容直发通路；裸标记在 steer/followUp 通路不被剥离而存活）——两者正交共存，rich 通路同时携带双标记各司其职。展示层剥离 SSOT = `packages/core/src/domain/chat/apply-entry-convert.ts`（live / reload 同点）。
+**送达凭据（deliveryProof）**：判定「送达了」的证据来源，三档申报——`marker`（文本裸标记）/ `details-id`（通知：port 注入前把条目 id 统一写入消息 `details.deliveryId`，批形态逐项展平）/ `acceptance`（受理即算送达的保守档）。SSOT 在 [decisions.md ADR-0074](adr/decisions.md)。
 
-**投递身份（delivery identity）**：一条出站消息的逐消息身份载体 = 裸标记携带的 id。「这是不是投递身份」的判定权威 = `DELIVERY_MARKER_ID_RE`（`packages/runtime/src/services/session/session-delivery-registry.ts`，shared `MSG_ID_TAG_RE` source 派生的严格 uuid 双形态 ∪ 本地收养条目 `m-<base36>-<seq>` 形态）——uuid 段禁止手写正则，SSOT 形态变化自动跟随。_Avoid_：把任意形似标记的文本当身份（宽松 `[^>]*` 形态仅授权剥除面，判定宽松会让用户文本中的字面假标记产生重复投递）。**出站尾附锚（outbound tail anchor）** = rebuild 重投的附加判据：仅精确文末（原文串 endsWith，不 trimEnd 尾换行）的标记构成 rebuild 身份（剥标记不吞尾换行，P5 口径，与 ADR-0077 一致；出站标记恒尾附，与写侧 `withDeliveryMarker` 读写同形），文本中部/前部的合法形态标记字面量不构成投递身份。判据形态二分裁决：[decisions.md ADR-0077](adr/decisions.md)。
+**裸标记（bare marker）/ 投递身份（delivery identity）**：文本车道机制不变——出站文本尾附 `<!--taiji:msg:<uuid>-->` 为逐消息身份；判定权威 = `DELIVERY_MARKER_ID_RE`（session-delivery-registry.ts）；出站尾附锚口径见 [decisions.md ADR-0077](adr/decisions.md)。
 
-**tombstone 判重锚**：已终态条目（delivered / cancelled）的轻量记录（id / 终态 / lane / settledAt），在 **runtime 存活期内全量保留、不设数量窗口**——`delivery.resync` 断连重报去重与 reattach 收养判重的查询表；cancelled tombstone 防「撤销确认帧在断连窗口丢失 → 已撤销消息被 resync 复活」。判重表栖身 runtime 进程内存、不跨 runtime 重启，reattach（滚动重启后）判重锚回落 **transcript 全量标记扫描**（按重报集/滞留集 uuid 查找，transcript 是唯一跨进程持久事实源）。
+**对账器（Reconciler，文本车道保留）**：registry 侧既有组件，事件触发（`delivery.cancel` 复用同一路径为撤销入口）执行对账，处置 = `clear_queue` 全收后按裸标记三分（reclaim 重投 / rebuild 重建记账 / adopt 收养）。通知域**无运行中对账**（全链路事件驱动 + 崩溃重放，ADR-0122）。
+
+**重放（replay）**：崩溃恢复的唯一机制——重启后按投递日志差集把未送达条目重新入队。文本 = runtime 磁盘 outbox（`<getDataDir()>/delivery-outbox/<sessionId>.jsonl`）启动 loadUndelivered + reattach transcript 判重；通知 = DeliveryPort 的 session_start 差集扫描（outbox − delivered − ack）。运行中被 `clear_queue` 牵连清除的通知运行中不可恢复（扩展面无队列事实源），悬置至重启重放。
+
+**已完结 id 索引**：判重的内存缓存（已完结条目 id 集合），由 DeliveryStore 终局记录在启动 / 重放时构建（loadTerminalIds）；判重顺序 = 在途条目 → 内存索引 → 持久记录。撤销防复活凭据在持久终局记录（v2 的 tombstone 独立机制退役）。
+
+**投递日志（delivery journal）**：通知车道耐久面 = 待投记录 / 已投回执两列 session entry（port 经 appendEntry 写，schema v2 + v1 账本存量兼容读）；持久化承诺先于投递尝试（受理前落盘）。
+
+**持久化存储端口（DeliveryStore）**：内核 v3 端口——`persist / ack / discard / loadUndelivered / loadTerminalIds / hasTerminal`。两实现：runtime 半区 = 磁盘 outbox（fs 注入，内核零 fs 知识）；port 半区 = session entry（persist 为 no-op，落盘由提交层 appendEntry 前置兑现防双写）。
+
+**compaction 状态标记**：port 提交放行判定——`session_before_compact` 置位 / `session_compact`、`session_compact_failed` 复位三事件维护；标记为真留账等待、边沿唤醒重投，为假 sendMessage 直达唯一队列（run 活跃入队不拒 / 空闲起轮）。文本侧 compaction 持有判定在 runtime 侧（既有机制）。
 
 ### Side Drawer（原 Side Inspector）
 
