@@ -15,7 +15,8 @@
   "files": [
     "index.ts",
     "src/**/*.ts",
-    "README.md"
+    "README.md",
+    "skills/"
   ],
   "taiji": {
     "role": "taiji"
@@ -23,6 +24,9 @@
   "pi": {
     "extensions": [
       "./index.ts"
+    ],
+    "skills": [
+      "./skills"
     ]
   },
   "scripts": {
