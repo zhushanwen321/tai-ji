@@ -47,11 +47,11 @@ export interface BlockUnitProps { // oe-exempt:20261013:framework:类型契约�
   thinkingEnd?: number
   group?: {
     base: RunGroupBase
-    seq: number
     members: FlatBlock[]
     header: { count: number; durationMs: number; failedCount: number }
     hasRunning: boolean
     miles?: RunGroupMile[]
+    headFlatIndex?: number
   }
 }
 
@@ -148,10 +148,11 @@ export function useTurnTrace(turn: () => MessageTurn, isWorkingTurn: () => boole
 
   /**
  * v-memo deps（按单元类型二选一，见模板注释）。
- * 组块八项 = [base, seq, members.length, 末成员 block.ref, header.count, header.durationMs,
- * hasRunning, miles]：base/seq 覆盖「同名组序号随可见序列变化」（窗口右滑使更早的同名组出窗时，成员的
- * 引用可以全不变而序号从 2 变 1，漏了这两项组头会显示旧序号）；末成员 ref 覆盖 running→completed
- * 内容重组、count/durationMs 覆盖组头刷新、length 覆盖成员增减、hasRunning 覆盖组头执行态翻转；
+ * 组块六项 = [base, members.length, 末成员 block.ref, header.durationMs, hasRunning, miles]：
+ * base 覆盖组类型切换；末成员 ref 覆盖 running→completed
+ * 内容重组；length 覆盖成员增减 + 组头计数刷新（header.count 恒等于 members.length——core
+ * buildRunGroup 字面赋值 count: members.length 且组块对象不可变，不另设 dep）；durationMs
+ * 覆盖组头耗时刷新、hasRunning 覆盖组头执行态翻转；
  * miles（§3.6 里程碑徽标，序列化字符串）覆盖「首个 edit 完成 → 徽标入场」——该翻转可发生在
  * durationMs 不变（0ms 耗时成员）且 hasRunning 不变（同组仍有 running 成员）时，漏了它徽标
  * 会滞到下一个无关 dep 变化才渲染。miles 取 join 串而非数组引用：每次重组都是新数组，
@@ -174,10 +175,8 @@ export function useTurnTrace(turn: () => MessageTurn, isWorkingTurn: () => boole
     if (isRunGroupBlock(unit)) {
       return [
         unit.base,
-        unit.seq,
         unit.members.length,
         unit.members[unit.members.length - 1].block.ref,
-        unit.header.count,
         unit.header.durationMs,
         unit.hasRunning,
         unit.miles.join('|'),
@@ -222,7 +221,7 @@ export function useTurnTrace(turn: () => MessageTurn, isWorkingTurn: () => boole
   /**
  * Block props（按单元类型二选一）：普通块从 FlatBlock 解出 kind/ref + 所属 assistant 的
  * status/error/timestamp（D8 形态原样迁移）；run 组块走 type='run-group' + group 数据
- * （base/seq + header 三条口径 + miles 里程碑徽标由 core 一次算好）。经 v-bind 展开收敛到单 Block 元素——
+ * （base + header 三条口径 + miles 里程碑徽标由 core 一次算好）。经 v-bind 展开收敛到单 Block 元素——
  * vue/valid-v-memo 禁止 template v-for 子元素挂 v-memo，双分支无法各自带 memo。
  *
  * working/streaming（chat-flow-text-color D1）：按「该消息文本是否仍在写」逐消息派生，
@@ -237,11 +236,11 @@ export function useTurnTrace(turn: () => MessageTurn, isWorkingTurn: () => boole
         type: 'run-group',
         group: {
           base: unit.base,
-          seq: unit.seq,
           members: unit.members,
           header: unit.header,
           hasRunning: unit.hasRunning,
           miles: unit.miles,
+          headFlatIndex: unit.headFlatIndex,
         },
       }
     }

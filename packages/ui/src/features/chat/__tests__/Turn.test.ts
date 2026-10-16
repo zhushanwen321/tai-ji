@@ -725,7 +725,7 @@ describe('U6 D5: trigger 起点行聚合渲染', () => {
 // ═════════════════════════════════════════════════════════════════
 // run 类型分组：Turn 接线（visibleBlocks 三分支汇合之后）
 // - 三路径可见性：工作回合窗口 / 历史手动展开全量 → 组行出现；折叠态 → 无组行。
-// - 判定表与序号由 core 单测覆盖；本文件只验「接线位置 + 单元类型 + 组行 key 稳定性」。
+// - 判定表由 core 单测覆盖；本文件只验「接线位置 + 单元类型 + 组行 key 稳定性」。
 // - PR-6：key/v-memo 契约在两个生长方向下组行 DOM 节点不变（isSameNode）+ 展开态不丢——
 //   ① 段尾延长（running 并入，append）；② 窗口右滑使段首成员被收编出窗（run head 锚定 key 的验证）。
 // ═════════════════════════════════════════════════════════════════
@@ -839,7 +839,7 @@ describe('run 类型分组: Turn 组块接线（三路径 + PR-6）', () => {
     expect(wrapper.find('[data-testid="trace-compactor"]').exists()).toBe(true) // b0 并入计数
   })
 
-  it('路径 C（历史回合手动展开）：全量序列上混合类型各成一相（探索 / 执行命令 / 改动 / 探索 · 2）', () => {
+  it('路径 C（历史回合手动展开）：全量序列上混合类型各成一相（探索 / 执行命令 / 改动 / 探索 裂为两组）', () => {
     const wrapper = mountTurn({
       turn: makeToolSeqTurn(
         [{ name: 'read' }, { name: 'bash' }, { name: 'edit' }, { name: 'read' }],
@@ -857,6 +857,46 @@ describe('run 类型分组: Turn 组块接线（三路径 + PR-6）', () => {
       'edit',
       'explore',
     ])
+  })
+
+  it('序号下线（21243ca3a）忠实形态护栏：真实 Block mount 下第二个同名组组头无「· N」', () => {
+    // Block 层单组 fixture 的 seq 恒 1，忠实原形 v-if="group.seq > 1"（第 2 个同名组才渲染）
+    // 在单组 fixture 下不产生 span；本用例走真实 Block mount + core groupToolRuns：
+    // [read,bash,edit,read] 全量展开 = 两个 explore 组（seq 1/2），序号 span 一旦复辟，
+    // 第二个 explore 组头即现形（Block.test.ts 单/多成员护栏覆不到该形态，两处互为补充）。
+    const wrapper = mount(Turn, {
+      props: {
+        turn: makeToolSeqTurn(
+          [{ name: 'read' }, { name: 'bash' }, { name: 'edit' }, { name: 'read' }],
+          'complete',
+        ),
+        sessionId: SID,
+        isSessionActive: true,
+        isLastTurn: false,
+      },
+      global: {
+        provide: mockChatProvide({ isExpanded: () => true, isTakeover: () => false }),
+        stubs: {
+          UserBubble: true,
+          TurnMeta: true,
+          TurnSummary: true,
+          ChangeSetCard: true,
+          MarkdownRenderer: { props: ['content'], template: '<div class="stub-md" />' },
+        },
+      },
+    })
+    const exploreHeaders = wrapper
+      .findAll('[data-testid="run-group"]')
+      .map((g) => g.find('[data-testid="run-group-header"]').text())
+      .filter((text) => text.includes('panel.message.runGroupExplore'))
+    expect(exploreHeaders).toHaveLength(2) // 两个同名探索组（seq 1/2）
+    // 组名后不得出现「· N」序号段——含第二个同名组（忠实 seq>1 复辟形态）
+    for (const text of exploreHeaders) {
+      expect(text).not.toMatch(/runGroupExplore\s*·\s*\d+/)
+    }
+    // S-4 可辨识钩子：同 turn 两个同类型组经 data-group-head 锚点可区分（零视觉成本，无可见序号）
+    const heads = wrapper.findAll('[data-testid="run-group-header"]').map((h) => h.attributes('data-group-head'))
+    expect(new Set(heads).size).toBe(heads.length)
   })
 
   it('路径 A（折叠态）：组行不出现（只渲染末位 text，默认作用域不动）', () => {

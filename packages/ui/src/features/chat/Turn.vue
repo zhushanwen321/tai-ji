@@ -189,7 +189,8 @@
              双 Block）。组块 :key = headFlatIndex（members[0] 所属同类型段的段首锚定 run head）——
              对段尾延长（running 并入）与窗口右滑（段首被收编出窗）两方向稳定，key 抖 = remount =
              展开态丢 + 滚动锚点跳（PR-6）。v-memo deps 按单元类型二选一（unitMemoDeps）：
-             组块七项 = [base, seq, members.length, 末成员 ref, header.count, header.durationMs, hasRunning]；
+             组块六项 = [base, members.length, 末成员 ref, header.durationMs, hasRunning, miles]
+             （header.count 恒等 members.length，不另设 dep）；
              普通 [W21 D-4] deps = [块身份/内容引用, assistant 状态, thinking store 折叠态, assistant error,
              assistant timestamp, textFinalized, isActionsAnchor]。working/streaming
              按 textFinalized 逐消息派生（chat-flow-text-color D1，见 unitBlockProps 注释），
