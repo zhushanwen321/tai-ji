@@ -8,8 +8,8 @@
  * 挂起由 taiji runtime 的 marker 显式分支路由到 CanvasService。
  *
  * 宿主检测：工具调用前检查 TAIJI_AGENT_EXT_LOG === "1" 且 ctx.mode === "rpc"
- * （对齐 plan isTaijiGuiHost 完整谓词，src/host.ts）——非 taiji GUI 宿主返回
- * 结构化错误、不进入 select（禁超时探测）。
+ * （谓词单点 @zhushanwen/pi-ext-guards isTaijiGuiHost，经 src/host.ts re-export）
+ * ——非 taiji GUI 宿主返回结构化错误、不进入 select（禁超时探测）。
  *
  * 该扩展不收窄宿主工具集（与 plan 的根本差异：agent 要边查代码边论证边生长），
  * 也无 per-session 状态——画布状态唯一权威在 runtime CanvasService。

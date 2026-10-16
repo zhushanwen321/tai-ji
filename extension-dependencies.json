@@ -137,7 +137,7 @@
         {
           "package": "@zhushanwen/pi-ext-guards",
           "type": "package",
-          "reason": "代码层静态 import guardStaleCtx/toErrorMessage（src/compact.ts top-level import），缺失时模块加载即抛 Cannot find module，是强依赖"
+          "reason": "代码层静态 import guardStaleCtx/toErrorMessage（src/compact.ts top-level import）与 isTaijiGuiHost 宿主谓词（src/state.ts re-export，dmg-r1-7 双实现收敛——谓词单点在 ext-guards，tool.ts / index.ts 原通道共用），缺失时模块加载即抛 Cannot find module，是强依赖"
         },
         {
           "package": "@zhushanwen/pi-extension-logger",
@@ -546,7 +546,7 @@
         {
           "package": "@zhushanwen/pi-ext-guards",
           "type": "package",
-          "reason": "代码层静态 import toErrorMessage（src/marker-channel.ts top-level import，JSON 解析失败错误包装），缺失时模块加载即抛 Cannot find module，是强依赖"
+          "reason": "代码层静态 import toErrorMessage（src/marker-channel.ts top-level import，JSON 解析失败错误包装）与 isTaijiGuiHost 宿主谓词（src/host.ts re-export，dmg-r1-7 双实现收敛——谓词单点在 ext-guards，六工具 select 前置门与组合根共用），缺失时模块加载即抛 Cannot find module，是强依赖"
         },
         {
           "package": "@zhushanwen/subagent-core",

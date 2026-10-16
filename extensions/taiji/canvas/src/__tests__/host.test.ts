@@ -1,9 +1,12 @@
 // host.test.ts —— 宿主检测真值表（设计：env 信号 + ctx.mode === "rpc" 完整谓词；
 // 非 taiji GUI 宿主不进入 select）。
 
+import { isTaijiHost } from "@zhushanwen/pi-ext-guards";
 import { describe, expect, it } from "vitest";
 
-import { hostGateError, isTaijiGuiHost, isTaijiHost } from "../host.js";
+// isTaijiGuiHost 经 host.js re-export（canvas 工具门实走同一引用）；isTaijiHost
+// env 腿无 canvas 侧业务消费方，直接从共享谓词单点 import。
+import { hostGateError, isTaijiGuiHost } from "../host.js";
 import { withExtLogEnv } from "./helpers/canvas-harness.js";
 
 describe("isTaijiHost / isTaijiGuiHost", () => {

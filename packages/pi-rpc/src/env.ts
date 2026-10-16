@@ -52,10 +52,12 @@ export function buildPiOutboundEnv(opts: PiOutboundEnvOptions): NodeJS.ProcessEn
   // 变量即落盘 INFO 级日志（TAIJI_AGENT_DEBUG=1 的 DEBUG 全量语义不变，两变量并存
   // 取更详细；均未注入的裸 pi 独立用户保持 no-op，零磁盘影响）。托管语义恒为
   // '1'，不开放 extras 覆盖。
-  // [双语义耦合登记，2026-09-20 R1] 本 env 兼任宿主分流信号第二语义：plan 扩展
-  // isTaijiHost 读 `=== "1"` 判定 taiji 宿主（submit-review / complete / 引导门三处
-  // marker select 分流）——日志开关若改可配置（值非恒 '1'），三处分流同帧静默失效，
-  // 届时必须拆专用宿主信号 env 纳入恒注入。
+  // [双语义耦合登记，2026-09-20 R1] 本 env 兼任宿主分流信号第二语义：共享谓词
+  // isTaijiHost/isTaijiGuiHost（单点 @zhushanwen/pi-ext-guards，dmg-r1-7 自 plan /
+  // canvas 双实现收敛；消费方 plan 三处宿主分流 + canvas 六工具前置门）读
+  // `=== "1"` 判定 taiji 宿主——日志开关若改可配置（值非恒 '1'），全部分流同帧
+  // 静默失效，届时必须拆专用宿主信号 env 纳入恒注入（登记 SSOT 在 ext-guards
+  // 谓词分节注释）。
   outboundExtras.TAIJI_AGENT_EXT_LOG = '1'
   const env = opts.buildChildEnv({ parentEnv: opts.parentEnv, extras: outboundExtras })
   env.PI_CODING_AGENT_DIR = opts.piAgentDir

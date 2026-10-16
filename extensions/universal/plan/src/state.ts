@@ -110,46 +110,16 @@ export const PLAN_CONTEXT_CUSTOM_TYPE = "plan-context";
 export type PlanSessionMap = Map<string, PlanState>;
 
 /**
- * D9 宿主分流信号：taiji runtime 对托管 pi 恒注入 TAIJI_AGENT_EXT_LOG=1；
- * 独立 pi 无此信号 → submit-review 走 E8 文本软门（不发 marker select——
- * pi TUI 原生渲染 \x00 控制符 title + JSON options 成乱码对话）。
- * 不用 TAIJI_RUNTIME_TOKEN：它在 SPAWN_ENV 出站 deny list 被强制剥除
- * （C-proc-09），pi 子进程 env 里恒不可见，照抄即分流静默失效且诱导实施者
- * 动 deny list 造成安全回归。每次调用时读（不可模块加载时缓存——测试与
- * 运行中 env 都可能变化）。
- *
- * [双语义耦合登记，2026-09-20 R1] 本 env 名义语义是扩展日志开关
- * （extension-logger 见之落盘 INFO，恒注入点 packages/pi-rpc/src/env.ts），本函数
- * 是第二消费方（宿主分流，submit-review / complete / 引导门三处）——若日志开关
- * 走向可配置（值不再是恒 '1'），三处分流同帧静默失效，届时必须拆专用宿主信号
- * env 并纳入恒注入，不得沿用本名。
- *
- * export（F-W3-1）：index.ts E3 reviewing 恢复分支复用同一宿主信号做 GUI 分流
- * （taiji GUI 宿主有 degraded 恢复按钮，不自动重挂审批；独立 pi 无按钮保留 steer）——
- * 第四消费方，同帧失效约束随登记面扩展。
- *
- * canvas 消费方（problem-solve-canvas U4，2026-10-14）：extensions/taiji/canvas 的
- * src/host.ts isTaijiGuiHost 同谓词（env + ctx.mode === "rpc"）门控全部六工具的
- * select 前置宿主检测——第五消费方，同帧失效约束随登记面扩展；该 env 拆专用宿主
- * 信号时 canvas 谓词一并迁移（登记互指见 canvas host.ts 文件头）。
- *
- * 放本叶模块（D-B1-7 随 isTaijiGuiHost 收敛迁入，原 tool.ts）：宿主判定信号与
- * per-session 注册表/挂起原语同域承载，不经 tool.js 大模块中转。
+ * taiji GUI 宿主谓词（isTaijiGuiHost）单点在 @zhushanwen/pi-ext-guards（dmg-r1-7
+ * 自本模块与 canvas host.ts 双实现收敛，本处 re-export 供 tool.ts / index.ts 原通道
+ * import）：env 信号（TAIJI_AGENT_EXT_LOG === "1"，taiji runtime 恒注入）+
+ * ctx.mode === "rpc"。D9 宿主分流的 plan 侧语义不变——非 GUI 宿主无 marker 路由
+ * （pi TUI 原生渲染 \x00 控制符 title + JSON options 成乱码对话），submit-review /
+ * complete / E3 恢复按本谓词三处分流（select / form / 恢复按钮 vs 文本软门）；
+ * env 双语义耦合登记 SSOT（名义语义 = 扩展日志开关，拆专用宿主信号的退役条件）
+ * 随谓词收敛迁至 ext-guards 分节注释，不再在本模块维护。
  */
-export function isTaijiHost(): boolean {
-  return process.env.TAIJI_AGENT_EXT_LOG === "1";
-}
-
-/**
- * taiji GUI 宿主判定（D-B1-7，B5 过渡步——批次 4 askInteractively 原语再收交互分流）：
- * 三处 `isTaijiHost() && ctx.mode === "rpc"` 复写（submit-review marker select /
- * complete 执行方式 form / E3 恢复分流）收敛为本谓词单点。mode 收紧 rpc 的理由
- * 同 isTaijiHost 双语义耦合登记：env 信号只证明 taiji runtime 在上游，宿主没有
- * marker 路由的形态（TUI / json / print）不发 select。
- */
-export function isTaijiGuiHost(ctx: ExtensionContext): boolean {
-  return isTaijiHost() && ctx.mode === "rpc";
-}
+export { isTaijiGuiHost } from "@zhushanwen/pi-ext-guards";
 
 /**
  * 挂起 select 的解散来源直传原语（D-B1-2，取代旧世代计数推断）：判别所需信息
