@@ -1,6 +1,6 @@
 {
   "name": "@zhushanwen/pi-smart-context",
-  "version": "0.3.8",
+  "version": "0.3.9",
   "type": "module",
   "main": "index.ts",
   "taiji": {

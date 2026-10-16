@@ -1,5 +1,11 @@
 # @zhushanwen/pi-subagent-workflow
 
+## 9.5.2
+
+### Patch Changes
+
+- 7babdefa7: chore: refresh dependency range (triggered by @zhushanwen/extension-protocol@0.20.0 → @zhushanwen/extension-protocol@0.21.0, @zhushanwen/pi-ext-guards@0.4.4 → @zhushanwen/pi-ext-guards@0.5.0, @zhushanwen/pi-notify-ledger-host@0.3.3 → @zhushanwen/pi-notify-ledger-host@0.3.4, @zhushanwen/subagent-core@1.5.1 → @zhushanwen/subagent-core@1.5.2, @zhushanwen/pi-pending-notifications@0.8.5 → @zhushanwen/pi-pending-notifications@0.8.6, @zhushanwen/pi-structured-output@6.1.2 → @zhushanwen/pi-structured-output@6.1.3)
+
 ## 9.5.1
 
 ### Patch Changes

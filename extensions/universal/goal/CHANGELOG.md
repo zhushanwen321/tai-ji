@@ -1,5 +1,11 @@
 # @zhushanwen/pi-goal
 
+## 0.14.15
+
+### Patch Changes
+
+- 7babdefa7: chore: refresh dependency range (triggered by @zhushanwen/extension-protocol@0.20.0 → @zhushanwen/extension-protocol@0.21.0)
+
 ## 0.14.14
 
 ### Patch Changes

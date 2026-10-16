@@ -1,5 +1,11 @@
 # @zhushanwen/pi-llm-shared
 
+## 0.11.3
+
+### Patch Changes
+
+- 7babdefa7: chore: refresh dependency range (triggered by @zhushanwen/pi-ext-guards@0.4.4 → @zhushanwen/pi-ext-guards@0.5.0)
+
 ## 0.11.2
 
 ### Patch Changes

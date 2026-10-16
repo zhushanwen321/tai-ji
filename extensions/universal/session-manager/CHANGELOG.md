@@ -1,5 +1,11 @@
 # @zhushanwen/pi-session-manager
 
+## 0.3.4
+
+### Patch Changes
+
+- 7babdefa7: chore: refresh dependency range (triggered by @zhushanwen/extension-protocol@0.20.0 → @zhushanwen/extension-protocol@0.21.0, @zhushanwen/pi-ext-guards@0.4.4 → @zhushanwen/pi-ext-guards@0.5.0, @zhushanwen/pi-notify-ledger-host@0.3.3 → @zhushanwen/pi-notify-ledger-host@0.3.4, @zhushanwen/subagent-core@1.5.1 → @zhushanwen/subagent-core@1.5.2)
+
 ## 0.3.3
 
 ### Patch Changes

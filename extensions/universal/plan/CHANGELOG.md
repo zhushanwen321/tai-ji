@@ -1,5 +1,11 @@
 # @zhushanwen/pi-plan
 
+## 1.1.4
+
+### Patch Changes
+
+- 7babdefa7: Consolidate the taiji host predicates (isTaijiHost / isTaijiGuiHost) to the shared single source in @zhushanwen/pi-ext-guards: the local duplicated implementations are replaced by a re-export, keeping the exported names and semantics identical (env signal + rpc-mode check driving the three submit-review / complete / resume host branches). No behavior change; published so the tarball matches the consolidated dependency graph.
+
 ## 1.1.3
 
 ### Patch Changes

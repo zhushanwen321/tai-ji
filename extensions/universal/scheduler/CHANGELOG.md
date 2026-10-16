@@ -1,5 +1,11 @@
 # @zhushanwen/pi-scheduler
 
+## 0.10.4
+
+### Patch Changes
+
+- 7babdefa7: chore: refresh dependency range (triggered by @zhushanwen/extension-protocol@0.20.0 → @zhushanwen/extension-protocol@0.21.0, @zhushanwen/pi-ext-guards@0.4.4 → @zhushanwen/pi-ext-guards@0.5.0, @zhushanwen/pi-llm-shared@0.11.2 → @zhushanwen/pi-llm-shared@0.11.3)
+
 ## 0.10.3
 
 ### Patch Changes
