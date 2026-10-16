@@ -989,6 +989,9 @@ describe('run 类型分组: Block 组块', () => {
     // 序号下线（21243ca3a）回归护栏：组名后不得再出现 demo .rg-seq 形态的「· N」序号段
     // （实测组头文本 = runGroupExplore + runGroupSteps 1 · 4s，· 4s 为合法耗时分隔符，故锚定组名之后的 · N）
     expect(headerOf('explore')).not.toMatch(/runGroupExplore\s*·\s*\d+/)
+    // 多成员组同护栏（2 成员 exec 组，实测文本 = runGroupExec + runGroupSteps 2 · 8s）：条件复辟形态
+    // （v-if seq>1 / members.length>1）只在多成员组渲染序号，单成员护栏覆不到，故补 2 成员锚定
+    expect(mountBashPairGroup().find('[data-testid="run-group-header"]').text()).not.toMatch(/runGroupExec\s*·\s*\d+/)
   })
 
   it('耗时不足 1s 不显示（统计段只剩步数）', () => {
