@@ -108,6 +108,23 @@ describe('per-action 守卫可选字段分支', () => {
     expect(isCanvasEnterParams({ canvasId: cv, other: 1 })).toBe(false)
   })
 
+  it('grow：edgePolarity / materiality 词表校验（undefined 放行、词表内通过、词表外拒绝）', () => {
+    const grow = (item: Record<string, unknown>): boolean =>
+      isCanvasMarkerRequest({ action: 'grow', params: { canvasId: cv, reason: 'r', batch: [{ id: 'n1', type: 'argument', content: 'c', attachTo: 'root', edge: 'argue', ...item }] } })
+    // 缺省放行（argument 节点极性/素材性可走 argue 必带极性的 runtime 强制）
+    expect(grow({})).toBe(true)
+    // 词表内通过
+    expect(grow({ edgePolarity: 'support', materiality: 'fact' })).toBe(true)
+    expect(grow({ edgePolarity: 'object', materiality: 'claim' })).toBe(true)
+    // 词表外拒绝：'Support' 大小写漂移会落成不匹配 argumentPolarity==='support' 的伪极性，
+    // 绕过 passed 的 unverified_fact 拦截面（不变量 5）；'Fact' 同理不判 fact——契约层拦在形状放行
+    expect(grow({ edgePolarity: 'Support' })).toBe(false)
+    expect(grow({ edgePolarity: 'OBJECT' })).toBe(false)
+    expect(grow({ materiality: 'Fact' })).toBe(false)
+    expect(grow({ edgePolarity: 'neutral' })).toBe(false)
+    expect(grow({ materiality: 'opinion' })).toBe(false)
+  })
+
   it('材料性 / 极性守卫：词表内收窄、词表外拒绝', () => {
     expect(isArgumentMateriality('fact')).toBe(true)
     expect(isArgumentMateriality('opinion')).toBe(false)

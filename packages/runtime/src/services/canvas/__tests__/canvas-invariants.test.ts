@@ -241,6 +241,28 @@ describe('不变量 3 转移侧：否决 / 搁置同步清除 selected（放弃�
   })
 })
 
+describe('导出渲染 §3：方案选择段按 resolve 父问题去重', () => {
+  it('一问题挂 ≥2 条 resolve 边（多候选比较）→ 导出仅一个「### 问题」段落，候选行各一条不重复', () => {
+    const h = makeService()
+    try {
+      // growCanvas 标准形态：q1 挂 o1 / o2 两条 resolve 边（方案比较核心场景）
+      const c = growCanvas(h.svc, createCanvas(h.svc))
+      const doc = renderPlanningDoc(c.state(), new Date().toISOString())
+      // 段落唯一：同父问题只产出一个段标题（修复前逐 resolve 边整段重复输出 2 次）
+      const sectionHeadings = doc.split('\n').filter((l) => l.startsWith('### 问题 '))
+      expect(sectionHeadings).toHaveLength(1)
+      expect(sectionHeadings[0]).toContain(c.q1)
+      // 候选行各一条：两个候选各恰好渲染一行「未选定」（修复前每候选随段落重复出现 2 次）
+      const candidateLines = doc.split('\n').filter((l) => l.startsWith('- 未选定 '))
+      expect(candidateLines).toHaveLength(2)
+      expect(doc).toContain('(o1)')
+      expect(doc).toContain('(o2)')
+    } finally {
+      h.dispose()
+    }
+  })
+})
+
 describe('不变量 4：rejected 节点不可删除、不可从 rejected 直接转 passed', () => {
   it('逆例：rejected → passed 表外转移 → lifecycle_transition_illegal', () => {
     const h = makeService()
@@ -310,6 +332,44 @@ describe('不变量 5：fact 论据必须携带核实状态；未核实论据不
       // 恢复动作可操作：补核实后重试 → 放行
       expect(h.svc.mutate({ action: 'patch', params: { canvasId: c.canvasId, nodeId: 'arg1', factVerified: true, reason: '已复核基准数据' } }, 'agent').ok).toBe(true)
       expect(h.svc.mutate({ action: 'transition', params: { canvasId: c.canvasId, nodeId: c.o1, to: 'passed', reason: '审查通过' } }, 'user').ok).toBe(true)
+    } finally {
+      h.dispose()
+    }
+  })
+
+  it('词表外极性/素材性 fail-fast（invalid_params）且整批不落盘：「Support」形态进不了图，伪 support 未核实 fact 无旁路通道', () => {
+    const h = makeService()
+    try {
+      const c = growCanvas(h.svc, createCanvas(h.svc), { o1Dispatchable: true })
+      // 'Support' 大小写漂移：修复前直接落盘 node.polarity='Support'，不匹配
+      // argumentPolarity(...) === 'support' → unverified_fact 拦截面（下方逆例）对该节点失守；
+      // 修复后 runtime 值域校验 fail-fast（契约守卫同口径，直调 service 通道兜底）。
+      // as never = 故意注入契约类型词表外的值（测试运行时防线的必要形态）。
+      const drifted = h.svc.mutate({
+        action: 'grow',
+        params: { canvasId: c.canvasId, batch: [{ id: 'arg-bad', type: 'argument', content: '基准测试显示内存占用减半', attachTo: c.o1, edge: 'argue', edgePolarity: 'Support', materiality: 'fact' }], reason: '补支撑论据' } as never,
+      }, 'agent')
+      expectRejected(drifted, 'invalid_params')
+      if (!drifted.ok) expect(drifted.error.message).toContain('support | object')
+      // 素材性词表外值同口径拒绝
+      const badMateriality = h.svc.mutate({
+        action: 'grow',
+        params: { canvasId: c.canvasId, batch: [{ id: 'arg-mat', type: 'argument', content: 'x', attachTo: c.o1, edge: 'argue', edgePolarity: 'support', materiality: 'Fact' }], reason: '补论据' } as never,
+      }, 'agent')
+      expectRejected(badMateriality, 'invalid_params')
+      if (!badMateriality.ok) expect(badMateriality.error.message).toContain('fact | claim')
+      // 拒绝 = 无写入：伪极性 / 伪素材性节点均未落盘
+      const state = c.state()
+      expect(state.nodes.some((n) => n.id === 'arg-bad')).toBe(false)
+      expect(state.nodes.some((n) => n.id === 'arg-mat')).toBe(false)
+      // 拦截面完好对照：合法 'support' + 未核实 fact 仍被 unverified_fact 拦截
+      expect(h.svc.mutate({
+        action: 'grow',
+        params: { canvasId: c.canvasId, batch: [{ id: 'arg1', type: 'argument', content: '基准测试显示内存占用减半', attachTo: c.o1, edge: 'argue', edgePolarity: 'support', materiality: 'fact' }], reason: '补支撑论据（未核实）' },
+      }, 'agent').ok).toBe(true)
+      expect(h.svc.mutate({ action: 'patch', params: { canvasId: c.canvasId, nodeId: c.o1, criterias: ['覆盖率 ≥ 90%'], reason: '补判据' } }, 'user').ok).toBe(true)
+      expect(h.svc.mutate({ action: 'transition', params: { canvasId: c.canvasId, nodeId: c.o1, to: 'under-review', reason: '提案' } }, 'agent').ok).toBe(true)
+      expectRejected(h.svc.mutate({ action: 'transition', params: { canvasId: c.canvasId, nodeId: c.o1, to: 'passed', reason: '审查通过' } }, 'user'), 'unverified_fact')
     } finally {
       h.dispose()
     }

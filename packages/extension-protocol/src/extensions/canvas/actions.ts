@@ -298,6 +298,12 @@ function isStringIn<T extends readonly string[]>(set: T, v: unknown): v is T[num
   return typeof v === 'string' && (set as readonly string[]).includes(v)
 }
 
+/** optional 词表守卫：字段可缺省（undefined 放行），携带时必须落在守卫词表内——
+ * 只做 isOptionalString 形状放行会让词表外值（如 'Support' 大小写漂移）流入 runtime。 */
+function isOptionalGuarded(guard: (v: unknown) => boolean, v: unknown): boolean {
+  return v === undefined || guard(v)
+}
+
 function isStringField(v: Record<string, unknown>, key: string): boolean {
   return typeof v[key] === 'string'
 }
@@ -320,7 +326,9 @@ const CANVAS_NODE_TYPES = ['question', 'option', 'argument', 'constraint'] as co
 const CANVAS_EDGE_TYPES = ['decompose', 'resolve', 'argue', 'rebut'] as const
 const ARGUMENT_POLARITIES = ['support', 'object'] as const
 
-/** grow 批条目守卫（类型面；attachTo 指向存在性 / 邻接合法性归 U2）。 */
+/** grow 批条目守卫（类型面；attachTo 指向存在性 / 邻接合法性归 U2）。edgePolarity /
+ * materiality 走词表校验而非形状放行：词表外极性（'Support'）落盘后不匹配
+ * argumentPolarity(...) === 'support'，passed 的 unverified_fact 拦截面（不变量 5）失守。 */
 function isCanvasGrowItem(v: unknown): v is CanvasGrowItem {
   return (
     isRecord(v) &&
@@ -329,8 +337,8 @@ function isCanvasGrowItem(v: unknown): v is CanvasGrowItem {
     isStringField(v, 'content') &&
     isStringField(v, 'attachTo') &&
     isStringIn(CANVAS_EDGE_TYPES, v.edge) &&
-    isOptionalString(v.edgePolarity) &&
-    isOptionalString(v.materiality) &&
+    isOptionalGuarded(isArgumentPolarity, v.edgePolarity) &&
+    isOptionalGuarded(isArgumentMateriality, v.materiality) &&
     isOptionalBoolean(v.factVerified) &&
     isOptionalBoolean(v.dispatchable)
   )

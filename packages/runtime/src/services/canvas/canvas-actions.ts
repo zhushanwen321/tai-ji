@@ -7,6 +7,7 @@
  * （fail / 图查询 / 状态机 / 待重审标记）来自 canvas-foundation.ts，依赖单向：
  * foundation ← review-actions ← 本文件 ← canvas-domain.ts（主入口）。
  */
+import { isArgumentMateriality, isArgumentPolarity } from '@zhushanwen/extension-protocol'
 import type { CanvasActionParams, CanvasActor, CanvasComment, CanvasCreateParams, CanvasEdge, CanvasGrowItem, CanvasNode, CanvasState } from '@zhushanwen/extension-protocol'
 import {
   argumentPolarity,
@@ -146,6 +147,7 @@ function applyGrow(
  * 派生自节点 id（`e-<节点id>`）——同 id 重试按声明一致性判定（下方 growItemDivergence）：
  * 声明一致 = 原样保留（幂等无副作用），声明分歧 = 拒绝。 */
 function applyGrowItem(draft: CanvasState, item: CanvasGrowItem, at: string): void {
+  validateGrowVocabulary(item)
   validateGrowAdjacency(draft, item)
   const existing = nodeOf(draft, item.id)
   if (existing) {
@@ -225,6 +227,20 @@ function growItemDivergence(existing: CanvasNode, item: CanvasGrowItem, draft: C
     return '连接边与首次写入不一致'
   }
   return null
+}
+
+/** grow 单条值域校验（runtime 第二道防线，契约守卫 isCanvasGrowItem 同口径——handler
+ * 层守卫外的直调通道与历史事件重放在此兜底）：词表外极性不得落盘——'Support' 大小写
+ * 漂移落盘后不匹配 argumentPolarity(...) === 'support'，伪 support 论据绕过 unverified_fact
+ * 拦截面（不变量 5）；素材性词表外值同理不判 fact。文案给合法值域（与 argue/rebut 极性
+ * 强制同形态）。 */
+function validateGrowVocabulary(item: CanvasGrowItem): void {
+  if (item.edgePolarity !== undefined && !isArgumentPolarity(item.edgePolarity)) {
+    fail('invalid_params', `论据极性（edgePolarity）必须是 support | object，收到「${item.edgePolarity}」`)
+  }
+  if (item.materiality !== undefined && !isArgumentMateriality(item.materiality)) {
+    fail('invalid_params', `素材性（materiality）必须是 fact | claim，收到「${item.materiality}」`)
+  }
 }
 
 /** 邻接合法性（概念 §2.3 边模型，MVP 四种边）：表外组合 invalid_params；端点缺失
