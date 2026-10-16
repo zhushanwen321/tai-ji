@@ -85,6 +85,7 @@ function createPortHost(overrides: Partial<DeliveryPortHost> = {}): DeliveryPort
 		sendMessage: vi.fn(),
 		onMessageEnd: vi.fn(() => () => {}),
 		onAgentSettled: vi.fn(() => () => {}),
+		onSessionBeforeCompact: vi.fn(() => () => {}),
 		onSessionCompact: vi.fn(() => () => {}),
 		onSessionCompactFailed: vi.fn(() => () => {}),
 		hasRunningBackground: () => false,

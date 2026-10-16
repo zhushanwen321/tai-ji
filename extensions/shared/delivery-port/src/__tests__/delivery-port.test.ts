@@ -43,6 +43,7 @@ function makeHost(init: { entries?: unknown[]; idle?: boolean; bg?: boolean } = 
 	const handlers = {
 		message_end: [] as Array<(message: unknown) => void>,
 		agent_settled: [] as Array<() => void>,
+		session_before_compact: [] as Array<() => void>,
 		session_compact: [] as Array<() => void>,
 		session_compact_failed: [] as Array<() => void>,
 	};
@@ -68,6 +69,12 @@ function makeHost(init: { entries?: unknown[]; idle?: boolean; bg?: boolean } = 
 			handlers.agent_settled.push(handler);
 			return () => {
 				handlers.agent_settled = handlers.agent_settled.filter((h) => h !== handler);
+			};
+		},
+		onSessionBeforeCompact: (handler) => {
+			handlers.session_before_compact.push(handler);
+			return () => {
+				handlers.session_before_compact = handlers.session_before_compact.filter((h) => h !== handler);
 			};
 		},
 		onSessionCompact: (handler) => {
@@ -117,6 +124,7 @@ function makeHost(init: { entries?: unknown[]; idle?: boolean; bg?: boolean } = 
 		warn,
 		debug,
 		fireMessageEnd,
+		fireBeforeCompact: () => fireAll(handlers.session_before_compact),
 		fireCompact: () => fireAll(handlers.session_compact),
 		fireCompactFailed: () => fireAll(handlers.session_compact_failed),
 		fireSettled: () => fireAll(handlers.agent_settled),
@@ -339,16 +347,16 @@ describe("compaction 等待降级与事件唤醒", () => {
 		vi.useRealTimers();
 	});
 
-	it("isIdle false → 缓冲挂起不注入（落盘已完成）；session_compact 唤醒重投", () => {
+	it("before_compact 置标记 → 缓冲挂起不注入（落盘已完成）；session_compact 复位唤醒重投", () => {
 		const h = makeHost({ bg: false, idle: false });
 		const port = createDeliveryPort(h.host);
+		h.fireBeforeCompact(); // compaction 开始边沿（事件标记置位，非 isIdle 判定）
 		const receipt = port.deliver(defaultEnvelope({ id: "c-1" }));
 		expect(receipt).toEqual({ kind: "accepted", id: "c-1" }); // 受理成功（落盘已完成）
 		expect(h.sent).toHaveLength(0); // 注入被 compaction 等待挂起
 		expect(h.outboxEntries()).toHaveLength(1); // 留账
 
-		h.idle.value = true;
-		h.fireCompact(); // 唤醒边沿
+		h.fireCompact(); // 终态边沿：标记复位 + 唤醒（idle 仍 false——唤醒不依赖 idle 翻转）
 		expect(h.sent).toHaveLength(1);
 		expect(h.sent[0].options.deliverAs).toBe("steer");
 
@@ -356,22 +364,34 @@ describe("compaction 等待降级与事件唤醒", () => {
 		expect(h.ackEntries()).toHaveLength(1);
 	});
 
-	it("session_compact_failed 边沿同样唤醒", () => {
+	it("session_compact_failed 边沿同样复位唤醒", () => {
 		const h = makeHost({ bg: false, idle: false });
 		const port = createDeliveryPort(h.host);
+		h.fireBeforeCompact();
 		port.deliver(defaultEnvelope({ id: "c-2" }));
 		expect(h.sent).toHaveLength(0);
-		h.idle.value = true;
 		h.fireCompactFailed();
 		expect(h.sent).toHaveLength(1);
 	});
 
-	it("compaction 未结束时唤醒只做无谓尝试，仍挂起（无双重注入）", () => {
+	it("run 活跃（isIdle=false）未 compaction → 照常注入（steer 入 pi 队列不拒）", () => {
+		const h = makeHost({ bg: false, idle: false }); // run 活跃：无 before_compact，标记 false
+		const port = createDeliveryPort(h.host);
+		const receipt = port.deliver(defaultEnvelope({ id: "run-1" }));
+		expect(receipt).toEqual({ kind: "accepted", id: "run-1" });
+		expect(h.sent).toHaveLength(1); // run 活跃不再挂起——立即放行
+		expect(h.sent[0].options).toEqual({ deliverAs: "steer", triggerTurn: true });
+	});
+
+	it("持有期内 settled 边沿只做无谓尝试，仍挂起（无双重注入）", () => {
 		const h = makeHost({ bg: false, idle: false });
 		const port = createDeliveryPort(h.host);
+		h.fireBeforeCompact();
 		port.deliver(defaultEnvelope({ id: "c-3" }));
-		h.fireCompact();
-		expect(h.sent).toHaveLength(0); // isIdle 仍 false → 再次挂起
+		h.fireSettled(); // 持有期内内核 flush 驱动：send 拒受理（compaction-wait）→ retain
+		expect(h.sent).toHaveLength(0); // 标记未复位 → 仍挂起
+		h.fireCompact(); // 终态边沿才放行
+		expect(h.sent).toHaveLength(1); // 恰好一次（无双重注入）
 	});
 
 	it("注入 throw → 内核 retain 留账 + settleRejected 计数；恢复后 settled 边沿重投", () => {
@@ -510,8 +530,19 @@ describe("进程级槽（bindDeliveryPort / getDeliveryPort）", () => {
 describe("dispose", () => {
 	it("dispose 后 deliver 拒收、订阅退订（重绑不累积死 handler）", () => {
 		const h = makeHost();
+		// before_compact 订阅退订计数（dispose 兑现三个 compaction 事件订阅之一）
+		let beforeCompactUnsubbed = 0;
+		const origBeforeCompactSub = h.host.onSessionBeforeCompact;
+		h.host.onSessionBeforeCompact = (handler) => {
+			const unsub = origBeforeCompactSub(handler);
+			return () => {
+				beforeCompactUnsubbed += 1;
+				unsub();
+			};
+		};
 		const port = createDeliveryPort(h.host);
 		port.dispose();
+		expect(beforeCompactUnsubbed).toBe(1);
 		expect(port.deliver(defaultEnvelope({ id: "d-1" }))).toEqual({ kind: "rejected", reason: "disposed" });
 
 		// 退订验证：旧实例 handler 不再触发（消息命中不写旧 ack）

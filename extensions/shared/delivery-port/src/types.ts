@@ -105,7 +105,13 @@ export interface DeliveryPortHost { // oe-exempt:20261017:framework:pi 能力注
   appendEntry(customType: string, data: unknown): void;
   /** 读当前 session 全部 entry（回执扫描 / 重放扫描；ctx.sessionManager.getEntries()）。 */
   readSessionEntries(): readonly unknown[];
-  /** 主 agent 是否空闲（实现含 compaction 状态——提交侧等待的判定源；ctx.isIdle()）。 */
+  /**
+   * 主 agent 是否空闲（ctx.isIdle()——含 run 活跃与 compaction 两态）。仅作内核
+   * port.isIdle 供给（内核接口必填成员；on-accept 模式内核 busy gate 旁路，恒不
+   * 消费）。提交侧挂起判定不用本端口——compaction 等待由 compaction 事件标记承载
+   * （见 onSessionBeforeCompact），run 活跃必须放行（sendMessage 入 pi steer 队列
+   * 不拒），isIdle 的复合语义不能承载该区分。
+   */
   isIdle(): boolean;
   /**
    * 单通道注入直达唯一队列（pi.sendMessage；两档出队由 pi 原生 steer/followUp
@@ -121,9 +127,13 @@ export interface DeliveryPortHost { // oe-exempt:20261017:framework:pi 能力注
   onMessageEnd(handler: (message: unknown) => void): () => void;
   /** settled 边沿订阅（内核 subscribeSettled 接线——retain 留守条目的重投触发）。 */
   onAgentSettled(handler: () => void): () => void;
-  /** compaction 成功边沿（等待中的条目唤醒重投）。 */
+  /** compaction 开始前边沿（session_before_compact——manual/threshold/overflow 全
+   *  trigger 覆盖）：提交侧挂起标记置位（compaction 期间 sendMessage triggerTurn
+   *  分支会与 compaction 并发起新 run，须挂起）。 */
+  onSessionBeforeCompact(handler: () => void): () => void;
+  /** compaction 成功边沿（挂起标记复位 + 等待中的条目唤醒重投）。 */
   onSessionCompact(handler: () => void): () => void;
-  /** compaction 失败/中止边沿（同样唤醒——失败也要重投尝试，失败可见性归日志）。 */
+  /** compaction 失败/中止边沿（标记同样复位 + 唤醒——失败也要重投尝试，失败可见性归日志）。 */
   onSessionCompactFailed(handler: () => void): () => void;
   /** 攒批条件谓词（有活跃后台任务；账本 mergeHoldActive = hasRunningBackground 同源）。 */
   hasRunningBackground(): boolean;

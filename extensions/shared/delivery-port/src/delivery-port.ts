@@ -30,12 +30,15 @@
 // items[].deliveryId 逐项对位），合批只发生在注入形态。
 //
 // ── compaction 防御（§3.8 提交侧等待）────────────────────────
-// 放行泵前查 host.isIdle()（实现含 compaction 状态）：false 即整缓冲挂起（落盘已
-// 完成，等待只是注入时机的悬置），session_compact / session_compact_failed 事件
-// 边沿唤醒重放。内核侧 retain 条目（注入失败留守）的重投由 settled 边沿与本边沿
-// 的 kernel.flush() 驱动（事件驱动无定时器）。stale 防御只包裹读取探测类调用
-// （isIdle 探测异常保守归 busy + warn）；注入类调用失败不吞咽（throw 上抛内核走
-// retain）。
+// 挂起判定 = compaction 事件标记（session_before_compact → 置位；session_compact /
+// session_compact_failed → 复位）：标记 true 时整缓冲挂起（落盘已完成，等待只是注入
+// 时机的悬置），边沿复位 + 唤醒重放。标记不查 host.isIdle()——isIdle 复合了「run
+// 活跃」与「compaction 进行中」两态，run 活跃必须放行（sendMessage 入 pi steer 队列
+// 不拒；挂起会让通知等到 settled 边沿甚至永不唤醒），只有 compaction 期间才须挂起
+// （triggerTurn 分支会与 compaction 并发起新 run）。内核侧 retain 条目（注入失败留
+// 守）的重投由 settled 边沿与本边沿的 kernel.flush() 驱动（事件驱动无定时器）。内核
+// send 内保留第二道防线（标记检查，覆盖提交同步链与 compaction 边沿交叠的残余窗口）；
+// 标记读取无异常面（原 isIdle 探测的保守 busy 吞咽随预检移除）。
 //
 // ── 耐久面的分工（为什么 store.persist 是 no-op）─────────────
 // outbox 权威 = 成员记录（deliver 入口 appendEntry，先于受理——「耐久承诺先于投递
@@ -148,6 +151,15 @@ export function createDeliveryPort(host: DeliveryPortHost): DeliveryPortHandle {
   /** merge-commit 期标志：默认通道组逐条提交内核期间 hold 注入，使成员聚合为内核
    *  queued 集，最后 kernel.flush() 一次合批出站（见文件头分组放行段）。 */
   let mergeCommitting = false;
+  /**
+   * compaction 挂起标记（§3.8 提交侧等待的唯一判定源）：事件标记承载——
+   * session_before_compact 置位 / session_compact / session_compact_failed 复位。
+   * 不查 host.isIdle()：isIdle 复合「run 活跃」（须放行——sendMessage 入 pi steer
+   * 队列不拒）与「compaction 进行中」（须挂起——triggerTurn 分支会与 compaction
+   * 并发起新 run）两态，复合语义会误挂 run 活跃期的通知（run 结束不产生
+   * session_compact，挂起成员可能永不唤醒）。
+   */
+  let compacting = false;
   let idSeq = 0;
 
   function warn(msg: string, err?: unknown): void {
@@ -187,10 +199,14 @@ export function createDeliveryPort(host: DeliveryPortHost): DeliveryPortHandle {
 
   /**
    * 内核出站端口（intent → pi 参数翻译在适配器内；内核零 pi 词汇纪律由此收口）。
-   * 方法体引用的闭包变量（mergeCommitting / buckets）在内核出站时点已初始化。
+   * 方法体引用的闭包变量（mergeCommitting / compacting / buckets）在内核出站时点
+   * 已初始化。
    */
   const kernelPort: KernelPort = {
     supportedPayloads: ["custom"],
+    // 内核接口必填成员；on-accept 模式内核 busy gate 短路旁路（delivery.ts flush/
+    // scheduleFlush 均先判 on-accept），恒不被消费。提交侧挂起判定 = compacting
+    // 事件标记（见 send 第二道防线与放行泵预检），不走本探测。
     isIdle: () => host.isIdle(),
     subscribeSettled: (cb) => host.onAgentSettled(cb),
     send(msg: DeliveryMessage, intent: DeliveryIntent) {
@@ -201,16 +217,8 @@ export function createDeliveryPort(host: DeliveryPortHost): DeliveryPortHandle {
       }
       // 提交侧 compaction 等待（§3.8）的第二道防线：pump 的缓冲挂起是常态路径
       // （提交前统一预检），本检查覆盖「提交同步链与 compaction 边沿交叠」的
-      // 残余窗口。false 即留账（内核 retain）等唤醒边沿重投。
-      // 探测异常保守归 busy + warn（读取探测类吞咽留痕；stale 防御只包此读取面）。
-      let idle: boolean;
-      try {
-        idle = host.isIdle();
-      } catch (err) {
-        warn("delivery-port isIdle probe failed — delivery deferred to next wake edge", err);
-        idle = false;
-      }
-      if (!idle) {
+      // 残余窗口。标记 true 即留账（内核 retain）等唤醒边沿重投。
+      if (compacting) {
         return { accepted: false, reason: "compaction-wait" };
       }
       const payload = msg.payload;
@@ -252,15 +260,28 @@ export function createDeliveryPort(host: DeliveryPortHost): DeliveryPortHandle {
   // ─── 事件订阅（构造期建立 / dispose 退订）──────────────────
 
   const unsubMessageEnd = host.onMessageEnd(onMessageEnd);
+  const unsubBeforeCompact = host.onSessionBeforeCompact(onBeforeCompact);
   const unsubCompact = host.onSessionCompact(onCompactionEdge);
   const unsubCompactFailed = host.onSessionCompactFailed(onCompactionEdge);
 
   /**
-   * compaction 边沿唤醒：缓冲挂起成员重放 + 内核 retain 条目重投尝试。失败边沿
-   * 同样唤醒（失败也要尝试恢复；失败可见性归日志）。
+   * compaction 开始边沿：挂起标记置位（此后整缓冲挂起 + 内核 send 拒受理，直至
+   * 终态边沿复位）。manual /compact / threshold / overflow recovery 全 trigger 在
+   * 此收口（pi 两路发射点：manual compact 与 auto compaction）。
+   */
+  function onBeforeCompact(): void {
+    if (disposed) return;
+    compacting = true;
+  }
+
+  /**
+   * compaction 终态边沿（成功/失败同一处理）：挂起标记复位 + 缓冲挂起成员重放 +
+   * 内核 retain 条目重投尝试。失败边沿同样唤醒（失败也要尝试恢复；失败可见性归
+   * 日志）。复位先于放行——挂起预检读本标记。
    */
   function onCompactionEdge(): void {
     if (disposed) return;
+    compacting = false;
     try {
       flushMergeBuffer("compaction-edge");
       pumpDirect();
@@ -381,23 +402,13 @@ export function createDeliveryPort(host: DeliveryPortHost): DeliveryPortHandle {
 
   // ─── 放行泵（按通道分组交给内核）───────────────────────────
 
-  /** isIdle 安全探测（pump / 放行前预检共用；异常保守归 busy + warn 留痕）。 */
-  function isIdleSafe(): boolean {
-    try {
-      return host.isIdle();
-    } catch (err) {
-      warn("delivery-port isIdle probe failed — delivery deferred to next wake edge", err);
-      return false;
-    }
-  }
-
   /**
-   * 窗口攒批成员聚合放行（mergeBuffer → 一次批消息）。compaction 预检不通过时
-   * 整缓冲挂起（compaction 边沿唤醒）。
+   * 窗口攒批成员聚合放行（mergeBuffer → 一次批消息）。compaction 挂起标记置位时
+   * 整缓冲挂起（compaction 终态边沿唤醒）。
    */
   function flushMergeBuffer(_reason: string): void {
     if (disposed || mergeBuffer.size === 0) return;
-    if (!isIdleSafe()) return;
+    if (compacting) return; // compaction 等待：整缓冲挂起（终态边沿复位 + 唤醒）
     const group = [...mergeBuffer.values()];
     mergeBuffer.clear();
     commitAsBatch(group);
@@ -418,7 +429,7 @@ export function createDeliveryPort(host: DeliveryPortHost): DeliveryPortHandle {
    */
   function pumpDirect(): void {
     if (disposed || directBuffer.size === 0) return;
-    if (!isIdleSafe()) return; // compaction 等待：整缓冲挂起（compaction 边沿唤醒）
+    if (compacting) return; // compaction 等待：整缓冲挂起（终态边沿复位 + 唤醒）
     while (directBuffer.size > 0 && !disposed) {
       const first = directBuffer.values().next().value;
       if (first === undefined) break;
@@ -530,6 +541,7 @@ export function createDeliveryPort(host: DeliveryPortHost): DeliveryPortHandle {
     mergeBuffer.clear();
     directBuffer.clear();
     unsubMessageEnd();
+    unsubBeforeCompact();
     unsubCompact();
     unsubCompactFailed();
     kernel.dispose();

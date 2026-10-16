@@ -6,9 +6,9 @@
 //
 // 接线纪律：
 // - 原样透传（appendEntry / getEntries / isIdle / sendMessage），不加工不缓存；
-// - 订阅面（message_end / agent_settled / session_compact / session_compact_failed）
-//   透传 handler 并返回 pi 的退订函数（pi 1.0.0 起 on 返回 unsubscribe，port dispose
-//   时兑现——防 session_start 重绑累积死 handler）；
+// - 订阅面（message_end / agent_settled / session_before_compact / session_compact /
+//   session_compact_failed）透传 handler 并返回 pi 的退订函数（pi 1.0.0 起 on 返回
+//   unsubscribe，port dispose 时兑现——防 session_start 重绑累积死 handler）；
 // - 事件回调的入参裁剪：port 只消费事件的事件体（message 等），ctx 参数不透传
 //   （port 的宿主状态面只经构造期注入的 ctx）；
 // - 注入 sendMessage 恒 { triggerTurn: true }（custom 消息 append 后若无 turn 则成
@@ -49,6 +49,10 @@ export function createPiDeliveryPortHost(
 			}),
 		onAgentSettled: (handler) =>
 			pi.on("agent_settled", () => {
+				handler();
+			}),
+		onSessionBeforeCompact: (handler) =>
+			pi.on("session_before_compact", () => {
 				handler();
 			}),
 		onSessionCompact: (handler) =>
