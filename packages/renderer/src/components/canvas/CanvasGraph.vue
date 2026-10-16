@@ -99,7 +99,7 @@
             :pending-comments="pendingCommentCountOf(state, id)"
             :focused="selectedId === id"
             :rebutted-ids="rebuttedIds"
-            :rejected-kids="rejectedKidsOf(state, id)"
+            :rejected-kids="rejectedKidsCountOf(state, id)"
             :collapsed="collapsedRej"
             :selected-arg-id="selectedId && isArgumentId(selectedId) ? selectedId : null"
             :muted="focusSet !== null && !focusSet.has(id)"
@@ -315,11 +315,6 @@ const rebuttedIds = computed<Set<string>>(() => {
 
 function isArgumentId(id: string): boolean {
   return nodeById(id)?.type === 'argument'
-}
-
-/** 否决折叠展开计数（节点卡 chip）。 */
-function rejectedKidsOf(state: CanvasState, id: string): number {
-  return rejectedKidsCountOf(state, id)
 }
 
 /** 焦点路径（根 → 选中节点上溯链高亮；论据选中亮宿主链，其余子树降透明）。 */

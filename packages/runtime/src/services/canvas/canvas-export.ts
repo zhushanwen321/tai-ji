@@ -10,12 +10,9 @@
  * 已在 mutate 校验段通过（export 内部同校验不变量 10，未收敛不会到达渲染）。
  */
 import type { CanvasEdge, CanvasNode, CanvasState } from '@zhushanwen/extension-protocol'
+import { nodeOf } from './canvas-foundation.js'
 
 const EXPORT_TRUNCATE_MAX = 80
-
-function nodeOf(state: CanvasState, id: string): CanvasNode | undefined {
-  return state.nodes.find((n) => n.id === id)
-}
 
 function truncate(s: string, max = EXPORT_TRUNCATE_MAX): string {
   return s.length > max ? `${s.slice(0, max)}…` : s

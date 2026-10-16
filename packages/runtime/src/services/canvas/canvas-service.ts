@@ -362,6 +362,9 @@ export class CanvasService {
     this.assertCanvasIdFormat(canvasId)
     const eventsFile = this.eventsPath(canvasId)
     if (!existsSync(eventsFile)) return undefined
+    // 事件流单次读入（同步段内无并发写，快照锚点校验与重放共用同一份行集——拆两处
+    // readFileSync + split 是纯重复计算）。
+    const lines = readFileSync(eventsFile, 'utf-8').split('\n').filter((l) => l.trim() !== '')
     let state: CanvasState | undefined
     let anchorSeq = 0
     const snapFile = this.snapshotPath(canvasId)
@@ -369,8 +372,7 @@ export class CanvasService {
       try {
         const snap = JSON.parse(readFileSync(snapFile, 'utf-8')) as CanvasSnapshotFile
         const parsedAnchor = Number(snap.anchorEventId)
-        const rawLines = readFileSync(eventsFile, 'utf-8').split('\n').filter((l) => l.trim() !== '')
-        const lastSeqInFile = rawLines.length > 0 ? (JSON.parse(rawLines[rawLines.length - 1] as string) as CanvasPersistedEvent).seq : 0
+        const lastSeqInFile = lines.length > 0 ? (JSON.parse(lines[lines.length - 1] as string) as CanvasPersistedEvent).seq : 0
         if (snap.version === 1 && snap.state && Number.isFinite(parsedAnchor) && parsedAnchor <= lastSeqInFile) {
           state = snap.state
           anchorSeq = parsedAnchor
@@ -384,7 +386,6 @@ export class CanvasService {
         console.error(`[canvas-service] 快照读取失败（canvasId=${canvasId}），丢弃快照全量重放：`, e)
       }
     }
-    const lines = readFileSync(eventsFile, 'utf-8').split('\n').filter((l) => l.trim() !== '')
     let lastSeq = anchorSeq
     for (const line of lines) {
       let ev: CanvasPersistedEvent
