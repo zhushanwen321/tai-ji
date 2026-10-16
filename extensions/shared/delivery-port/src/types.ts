@@ -7,7 +7,9 @@
 // 端口接线成 @zhushanwen/session-delivery v3 内核的 port 半区——custom 车道唯一
 // 执行者（outbox 投递日志 / details-id 送达凭据 / session_start 差集重放 / 提交侧
 // 合批与批组隔离 / compaction 等待）。消费方（notifier / session-manager / bash）
-// 经 Symbol.for 进程级槽 getDeliveryPort() 获取（C-ext-06 惯例），无包依赖。
+// 经 Symbol.for 进程级槽 getDeliveryPort() 获取实例（C-ext-06 惯例）。包依赖分层：
+// extensions 层消费方与本包同层直依（package.json dependencies）；packages 层
+// subagent-core 受 D9 闭包红线禁 import，经宿主壳注入槽访问器。
 //
 // pi 词汇边界：本文件 timing 的 "steer"/"followUp" 与 host.sendMessage 的
 // deliverAs 是 pi 注入通道词汇，合法持有点 = 本包（pi 半区适配层，ADR-0126 清单
@@ -58,7 +60,9 @@ export interface DeliveryDeliverOptions { // oe-exempt:20261017:framework:统一
   /**
    * 失败保留策略（内核首败处置）。缺省 "retain"（留账：下一边沿 / compaction 唤醒 /
    * session_start 重放重投——通知域无人值守语义）；显式 "forget" = 首败即弃（discard
-   * 持久标记，重启不复活）。
+   * 持久标记，重启不复活）。重放重建的条目不携带本选项（按缺省 retain 重投）：
+   * forget 条目首败即落终局列、不在重放差集，仅「首败前崩溃」的残留条目按 retain
+   * 重投（通知域安全侧——多留账不丢不重）。
    */
   onFailure?: DeliveryFailurePolicy;
 }

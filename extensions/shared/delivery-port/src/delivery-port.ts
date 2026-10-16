@@ -53,6 +53,7 @@ import { createDelivery } from "@zhushanwen/session-delivery";
 import type {
   CustomPayload,
   DeliveryConfigWithWarn,
+  DeliveryFailurePolicy,
   DeliveryMessage,
   DeliveryPort as KernelPort,
   DeliveryStore,
@@ -161,6 +162,15 @@ export function createDeliveryPort(host: DeliveryPortHost): DeliveryPortHandle {
    */
   let compacting = false;
   let idSeq = 0;
+  /**
+   * 显式覆写的失败保留策略（deliver opts.onFailure → submitToKernel 的单次传递）：
+   * 条目在提交缓冲期（合批窗口 / compaction 挂起）暂存 id → policy，提交内核时
+   * 消费并摘除。不进 JournalRecord / outbox schema（§3.7 耐久面行 schema 定形，
+   * 策略是提交时选项非账目字段）。重放重建的条目不在册（缺省 retain）：forget
+   * 条目首败即 discard 落终局列、不在重放差集；「首败前崩溃」的残留条目重放按
+   * retain 重投（通知域安全侧，多留账不丢不重）。
+   */
+  const failurePolicies = new Map<string, DeliveryFailurePolicy>();
 
   function warn(msg: string, err?: unknown): void {
     host.logger.warn(msg, err === undefined ? undefined : { error: toErrorMessage(err) });
@@ -364,6 +374,9 @@ export function createDeliveryPort(host: DeliveryPortHost): DeliveryPortHandle {
     }
     state.outbox.set(id, record);
     state.channels.add(channel);
+    // 显式失败策略随条目登记（submitToKernel 单次消费；缺省 retain 不占位）。
+    // 登记在落盘成功后——persist-failed rejected 的条目不残留策略项。
+    if (opts?.onFailure) failurePolicies.set(id, opts.onFailure);
     // 攒批判定（§3.4 缺省值表）：默认通道 + 有活跃后台任务 → 60s 窗口攒批；其余
     // （外部通道 / 无后台任务 / merge:false 覆写）→ 立即放行（泵按通道分组，外部
     // 通道恒逐条消息——批组隔离，merge:true 不得覆盖外部通道，任务书目标 6）。
@@ -470,12 +483,18 @@ export function createDeliveryPort(host: DeliveryPortHost): DeliveryPortHandle {
    * （retain 留守 → settled 边沿 / compaction 边沿重投）。
    */
   function submitToKernel(rec: JournalRecord): void {
+    // 显式覆写的失败策略单次消费（deliver 登记 → 此处透传 → 摘除），读取后立即
+    // 删除——send throw 也不泄漏；缺省 retain（§3.4 缺省值表通知域语义）。内核按
+    // 条目 onFailure 分流首败处置：retain 留守（settled / compaction 边沿重投）/
+    // forget 走 store.discard（持久终局列 outcome:"discarded"，重放不复活）。
+    const onFailure = failurePolicies.get(rec.id) ?? "retain";
+    failurePolicies.delete(rec.id);
     // 内核 send 返回 DeliverySendResult | void（替身兼容口径）——本包恒传真内核
     // 本体（恒返回具体结果），void 分支防御性跳过。
     const result = kernel.send(toKernelMessage(rec), {
       id: rec.id,
       receiptAnchor: "details-id",
-      onFailure: "retain",
+      onFailure,
     });
     if (result === undefined) return;
     if (result.kind === "swallowed") {
@@ -550,7 +569,11 @@ export function createDeliveryPort(host: DeliveryPortHost): DeliveryPortHandle {
 
   function genId(): string {
     idSeq += 1;
-    return `dp-${idSeq}`;
+    // 时间戳段（进程墙钟，不随实例重置）保证跨实例唯一：bindDeliveryPort 每次
+    // session_start 重建实例后 idSeq 归零，纯序号会与同 session 历史条目（fork /
+    // resume 复制 entries）已终局的 dp-N 撞 id——内核判重（loadTerminalIds 播种）
+    // swallowed 静默丢通知。序号段区分同实例同毫秒内的多条提交。
+    return `dp-${Date.now().toString(36)}-${idSeq}`;
   }
 
   const handle: DeliveryPortHandle = { deliver, recover, metrics, flush, dispose };

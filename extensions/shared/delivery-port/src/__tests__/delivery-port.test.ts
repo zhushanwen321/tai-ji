@@ -234,6 +234,24 @@ describe("幂等（同 id 重提交 swallowed）", () => {
 		expect(h.sent).toHaveLength(1); // 未重投
 		expect(h.debug).toHaveBeenCalled();
 	});
+
+	it("缺省 id 跨实例不与历史终局 dp-N 撞车（时间戳段防 idSeq 实例重置）", () => {
+		// fork / resume 复制历史 entries：dp-1 已终局（outbox + ack 终局列）——
+		// 新实例 loadTerminalIds 播种判重索引，genId 若纯序号会生成同 id 被吞。
+		const h = makeHost({
+			entries: [
+				{ type: "custom", customType: OUTBOX_CUSTOM_TYPE, data: { v: 2, id: "dp-1", timing: "steer", payload: { kind: "custom", customType: DEFAULT_NOTIFY_CUSTOM_TYPE, content: "old", display: true }, recordedAt: T0 } },
+				{ type: "custom", customType: ACK_CUSTOM_TYPE, data: { v: 2, id: "dp-1" } },
+			],
+		});
+		const port = createDeliveryPort(h.host);
+		const receipt = port.deliver(defaultEnvelope()); // 缺省 id：genId 生成
+		expect(receipt.kind).toBe("accepted");
+		const id = (receipt as { id: string }).id;
+		expect(id).not.toBe("dp-1"); // 不与历史终局 id 撞车
+		expect(h.sent).toHaveLength(1); // 未被内核判重吞（撞 id 会 swallowed 静默丢失）
+		expect(h.sent[0].message.details).toMatchObject({ deliveryId: id });
+	});
 });
 
 // ─── 合批窗口与批组隔离 ─────────────────────────────────────
@@ -408,6 +426,61 @@ describe("compaction 等待降级与事件唤醒", () => {
 		expect(h.sent).toHaveLength(1);
 		h.injectAndEmit(h.sent[0].message);
 		expect(h.ackEntries()).toHaveLength(1);
+	});
+});
+
+// ─── 失败保留策略（onFailure 覆写）──────────────────────────
+
+describe("失败保留策略（onFailure 覆写）", () => {
+	beforeEach(() => {
+		vi.useFakeTimers();
+		vi.setSystemTime(T0);
+	});
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
+	it("显式 forget 首败即弃：discard 终局列落盘、settled 边沿不重投、重放不复活", () => {
+		const h = makeHost({ bg: false });
+		h.sendThrows.value = true;
+		const port = createDeliveryPort(h.host);
+		expect(port.deliver(defaultEnvelope({ id: "fg-1" }), { onFailure: "forget" }).kind).toBe("accepted");
+		expect(h.sent).toHaveLength(0); // 首败（注入 throw）
+		// forget → 内核 store.discard → ack entry outcome:"discarded"（持久终局列）
+		const acks = h.ackEntries();
+		expect(acks).toHaveLength(1);
+		expect(acks[0]!["data"]).toMatchObject({ v: 2, id: "fg-1", outcome: "discarded" });
+
+		h.sendThrows.value = false;
+		h.fireSettled(); // forget 条目已弃（retain 才留守重投）：无重投
+		expect(h.sent).toHaveLength(0);
+
+		// 重放差集同判：discard 条目不复活
+		const second = createDeliveryPort(h.host);
+		expect(second.recover()).toBe(0);
+		expect(h.sent).toHaveLength(0);
+	});
+
+	it("显式 forget 经合批窗口路径同样透传（窗口到期提交时消费策略）", () => {
+		const h = makeHost({ bg: true });
+		h.sendThrows.value = true;
+		const port = createDeliveryPort(h.host);
+		port.deliver(defaultEnvelope({ id: "fg-2" }), { onFailure: "forget" });
+		expect(h.sent).toHaveLength(0); // 窗口缓冲期不注入
+		vi.advanceTimersByTime(60_000); // 窗口到期 → 提交内核 → 注入 throw → forget
+		expect(h.sent).toHaveLength(0);
+		expect(h.ackEntries()[0]!["data"]).toMatchObject({ id: "fg-2", outcome: "discarded" });
+	});
+
+	it("缺省（不传 onFailure）注入 throw 保持 retain 留守重投", () => {
+		const h = makeHost({ bg: false, idle: true });
+		h.sendThrows.value = true;
+		const port = createDeliveryPort(h.host);
+		expect(port.deliver(defaultEnvelope({ id: "rt-1" })).kind).toBe("accepted");
+		expect(h.ackEntries()).toHaveLength(0); // retain 留守：无终局落盘
+		h.sendThrows.value = false;
+		h.fireSettled();
+		expect(h.sent).toHaveLength(1); // settled 边沿重投
 	});
 });
 
