@@ -32,7 +32,7 @@ import { getLogger } from "@zhushanwen/pi-extension-logger";
 import { toErrorMessage } from "@zhushanwen/pi-ext-guards";
 
 import { buildManagedNotifyContent, type ManagedNotifyDetails } from "./notify-content.ts";
-import { recordManagedNotify } from "./notify-ledger.ts";
+import { recordManagedNotify } from "./notify-delivery.ts";
 
 const logger = getLogger("session-manager");
 
@@ -303,7 +303,8 @@ export function createWatchCoordinator(deps: WatchCoordinatorDeps): WatchCoordin
 			fulfills,
 			label: first.label,
 		};
-		// 默认 record（B-ledger ①）；record false（幂等拒收 / 槽空降级）不改 unregister 语义
+		// 默认投递（unified-delivery 波 2：port.deliver）；false（port 缺席 / rejected /
+		// 幂等拒收）不改 unregister 语义
 		recordManagedNotify(first.notifyId, content, details);
 		for (const item of batch) unregisterPending(item.notifyId, reason);
 	}

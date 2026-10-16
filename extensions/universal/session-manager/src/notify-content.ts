@@ -62,7 +62,7 @@ export function buildManagedNotifyContent(params: ManagedNotifyContentParams): s
 }
 
 /**
- * record 的投递 details（ledger record 第三参）——core `extractNotifyRecords`
+ * 投递的 details（port.deliver payload.details）——core `extractNotifyRecords`
  * 的 `managed-session-notify` 分支读 `notifyId`（去重键）与 `reason`（outcome 映射
  * completed→success / failed→failed / 其余 neutral，D9）。其余字段为诊断冗余。
  */

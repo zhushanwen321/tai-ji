@@ -31,11 +31,6 @@
           "reason": "代码层静态 import countActiveFromEntries（src/host/pi-host.ts top-level import），缺失时模块加载即抛 Cannot find module，是强依赖。另有 pending 状态投影运行时协作：pending:register/unregister 事件的 emit 端在 subagent-core（notify-host.ts / orchestration/lifecycle.ts / worker-message-pump.ts / registry-reconcile/reconcile-sweep.ts 崩溃恢复 sweep 补注销）与 base-tool-enhance（bash 投影），subagent-workflow 自身仅在崩溃恢复时 emit pending:unregister（src/session-lifecycle.ts recoverCrashedRuns 回调）；pending-notifications 消费该事件落盘 session entries（活跃 pending 的唯一状态源）。后台任务完成通知不经该事件——由 subagent-workflow 自有通道承担（notifier.ts 设 display+triggerTurn，bg-notify-render 渲染完成块并唤醒父 agent）"
         },
         {
-          "package": "@zhushanwen/session-delivery",
-          "type": "package",
-          "reason": "代码层静态 import createDelivery/DeliveryHandle/DeliveryPort（src/execution/notifier.ts top-level import，投递内核装配），缺失时模块加载即抛 Cannot find module，是强依赖"
-        },
-        {
           "package": "@zhushanwen/subagent-core",
           "type": "package",
           "reason": "代码层静态 import boundedPrettySerialize/getBoundNotifyLedger/WorkflowRun/LauncherDeps 等（src/interface/helpers.ts、src/interface/commands.ts top-level import），缺失时模块加载即抛 Cannot find module，是强依赖"
@@ -51,9 +46,9 @@
           "reason": "代码层零 import——引擎包安装位（同 pi-subagent-cli 条目：engineRoots 根 1 供引擎发现扫描器枚举）；缺失时 zcode 引擎在 pi 宿主不可发现，依赖其余两根"
         },
         {
-          "package": "@zhushanwen/pi-notify-ledger-host",
+          "package": "@zhushanwen/pi-delivery-port",
           "type": "package",
-          "reason": "代码层静态 import createPiNotifyLedgerHost（src/session-lifecycle.ts:27（session 生命周期 ledger 绑定） top-level import），缺失时模块加载即抛 Cannot find module，是强依赖"
+          "reason": "代码层静态 import getDeliveryPort（src/workflow-notify.ts notifyDone 投递主投；unified-delivery 波 2 切换——C-ext-19 语义由 port 投递日志+notifyId 幂等+差集重放内包），缺失时模块加载即抛 Cannot find module，是强依赖"
         }
       ]
     },
@@ -407,9 +402,9 @@
           "reason": "代码层静态 import guardStaleCtx/toErrorMessage（src/notify-ledger.ts top-level import，ledgerHost sendDelivery 的 stale ctx 防御，stale-ctx-audit 登记接入点），缺失时模块加载即抛 Cannot find module，是强依赖"
         },
         {
-          "package": "@zhushanwen/pi-notify-ledger-host",
+          "package": "@zhushanwen/pi-delivery-port",
           "type": "package",
-          "reason": "代码层静态 import createPiNotifyLedgerHost（src/notify-ledger.ts:34（ledger 装配入口） top-level import），缺失时模块加载即抛 Cannot find module，是强依赖"
+          "reason": "代码层静态 import getDeliveryPort（src/notify-delivery.ts recordManagedNotify 投递——unified-delivery 波 2 切换，managed-session-notify 外部通道逐条），缺失时模块加载即抛 Cannot find module，是强依赖"
         }
       ]
     },
@@ -446,6 +441,11 @@
           "package": "@zhushanwen/extension-protocol",
           "type": "package",
           "reason": "代码层静态 import readOutputTail/getProcessStartTimeSec/killProcessTree/pidStartMatchesRegistered/trimTerminalEntries/isPidAlive 等（src/background/ 下 output-tail.ts/spawn-background.ts/task-store.ts/poller.ts/pending-reconcile.ts top-level import，后台任务原语复用 extension-protocol background-task 出口），缺失时模块加载即抛 Cannot find module，是强依赖"
+        },
+        {
+          "package": "@zhushanwen/pi-delivery-port",
+          "type": "package",
+          "reason": "代码层静态 import bindDeliveryPort/createPiDeliveryPortHost（src/index.ts session_start 装配点——统一投递端口装配，unified-delivery 设计 §3.7 P6 infrastructure 档必载），缺失时模块加载即抛 Cannot find module，是强依赖"
         }
       ]
     },
@@ -514,18 +514,18 @@
       ]
     },
     {
-      "name": "@zhushanwen/pi-notify-ledger-host",
-      "directory": "extensions/shared/notify-ledger-host",
+      "name": "@zhushanwen/pi-delivery-port",
+      "directory": "extensions/shared/delivery-port",
       "dependsOn": [
         {
-          "package": "@zhushanwen/pi-ext-guards",
+          "package": "@zhushanwen/extension-protocol",
           "type": "package",
-          "reason": "代码层静态 import guardStaleCtx/toErrorMessage（src/index.ts:14 top-level import，ledger 送达口 stale 分诊），缺失时模块加载即抛 Cannot find module，是强依赖"
+          "reason": "代码层静态 import SUBAGENT_BG_NOTIFY_CUSTOM_TYPE（src/journal.ts top-level import，默认投递通道词表单源），缺失时模块加载即抛 Cannot find module，是强依赖"
         },
         {
-          "package": "@zhushanwen/subagent-core",
+          "package": "@zhushanwen/session-delivery",
           "type": "package",
-          "reason": "peerDependency + 代码层 type-only import NotifyLedgerHost（src/index.ts:15 import type——适配层端口类型权威源，运行时零 import），缺失时类型检查即红"
+          "reason": "peerDependency + 代码层 import createDelivery 与 type-only import 内核契约类型（src/delivery-port.ts——本包即该内核的 port 半区装配，unified-delivery 设计 §3.7），缺失时模块加载即抛 Cannot find module，是强依赖"
         }
       ]
     }

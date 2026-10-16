@@ -5,7 +5,8 @@
  * （D2 纪律：本文件不改行为；行为变更点——守卫合一 / lazyDeps getter 化（10 成员
  * 守卫触发对象，偏差 #10）——留在 index.ts，各自独立成条）：
  *   1. identity env→appendEntry 重建（类型 13 字段含 1 个 @deprecated，写入 12）
- *   2. notify ledger host 装配 + 重启恢复
+ *   2. notify ledger host 装配 + 重启恢复（unified-delivery 波 2 退役：投递归
+ *      pi-delivery-port 恒装配于 base-tool-enhance，本包零装配义务）
  *   3. 双 Service 装配 + initSession（createOrReuseServices 封装，单例语义 D8）
  *   4. GC / manifest tmp 清扫（[U4c/D6] promote 退役）/ 索引重建（[U4c/G1] boot 全量腿）/ worktree 恢复 / 保留维护轮兜底（[W1/D5] session_start 触发）
  *   5. per-session run store + kill-9 恢复循环 + evictDoneRunsBeyondCap
@@ -22,9 +23,6 @@ import type { ExtensionAPI, ExtensionContext, SessionStartEvent } from "@earendi
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { getLogger } from "@zhushanwen/pi-extension-logger";
 import { oncePerProcess, toErrorMessage } from "@zhushanwen/pi-ext-guards";
-// notify ledger host 装配工厂（五端口接线 + 送达 stale 防御的共享单点实现，
-// 与 session-manager notify-ledger.ts 同一装配机制收敛于此）
-import { createPiNotifyLedgerHost } from "@zhushanwen/pi-notify-ledger-host";
 // [W2/V4 D6] 恢复链注销直落消费的 protocol SSOT（customType + status 映射单点——
 // 与 finalizeRun 直落 / reconcile-sweep 补注销同一函数，零新增定义点）。
 import { mapReasonToStatus, PENDING_UNREGISTER_ENTRY_TYPE } from "@zhushanwen/extension-protocol";
@@ -39,7 +37,6 @@ import {
   ModelConfigService,
   setModelConfigService,
 } from "@zhushanwen/subagent-core";
-import { bindNotifyLedgerHost, type NotifyLedgerHost } from "@zhushanwen/subagent-core";
 import { IDENTITY_CUSTOM_TYPE, type SubagentIdentityData } from "@zhushanwen/subagent-core";
 import type { ExecutionMode } from "@zhushanwen/subagent-core";
 import { startEngineJournalGcTimer } from "@zhushanwen/subagent-core";
@@ -508,54 +505,6 @@ function appendSubagentIdentityEntry(pi: ExtensionAPI): void {
 }
 
 /**
- * [U2] 通知账本装配 + 重启恢复（设计 D4：存在性 / 可达性分离）。
- *
- * bind 先于 service.initSession（notifier.revive 在其内——notify() 经
- * getBoundNotifyLedger 消费账本）。recoverFromSession 扫 ledger/ack 两列 entry
- * 差集：未销账号重放投递（已销账零重发，notifyId 幂等）；fork 继承未销账
- * pending 属可接受语义（D4 归属规则——扫描域 = 单 session 文件，幂等键作用域
- * 随文件域隔离）。compaction 存活情况归 session_compact handler 的条件降级（P-B4
- * 探针阶段 5 实测，见 notify-ledger.ts compactionCheck）。装配失败不阻断
- * session_start（通知退回 notifier 的内核路径）。
- *
- * export + 返回装配的 NotifyLedgerHost = 测试直入 seam（可直调 sendDelivery 验证
- * 守卫分诊）；生产调用方（setupSessionLifecycle）忽略返回值，行为不变。装配失败
- * 返回 undefined。
- */
-export function bindLedgerHostAndRecover(pi: ExtensionAPI, ctx: ExtensionContext): NotifyLedgerHost | undefined {
-  // host 五端口接线 + 送达 stale 防御（D5 单通道 {triggerTurn:true} / stale 静默降级）
-  // 收敛在 @zhushanwen/pi-notify-ledger-host 工厂，权威注释随迁工厂内；
-  // component/logger 参数保持本包 label 前缀与 warn 通道归因不变。
-  const ledgerHost = createPiNotifyLedgerHost(pi, ctx, {
-    component: "subagent-workflow",
-    logger,
-  });
-  // bind 与 recover 拆独立 try（失败归因不同）：
-  // - bind 失败：槽上无 ledger，消费方（getBoundNotifyLedger）退回内核直发路径；
-  // - recover 失败：bind 已成功、槽上 ledger 仍在，消费方照常走账本路径（重启重放
-  //   缺席，settled 边沿仍投新通知）——不得共用 "bind failed" 文案误报。
-  let ledger: ReturnType<typeof bindNotifyLedgerHost>;
-  try {
-    ledger = bindNotifyLedgerHost(ledgerHost);
-  } catch (err) {
-    logger.warn("[subagents] notify ledger bind failed", {
-      reason: toErrorMessage(err),
-    });
-    return undefined;
-  }
-  try {
-    // U4：重放观测已内聚到 ledger 分桶日志（recoveryReplays 桶经 extensionLogger
-    // 通道落盘），此处不再重复打日志。
-    ledger.recoverFromSession();
-  } catch (err) {
-    logger.warn("[subagents] notify ledger recoverFromSession failed (ledger stays bound)", {
-      reason: toErrorMessage(err),
-    });
-  }
-  return ledgerHost;
-}
-
-/**
  * 随迁块 4 的进程级维护三连（各 try-catch「失败记日志不阻断」，设计 §3.4）：
  * 引擎 journal TTL 回收 / ADR-035 manifest tmp 恢复 / ADR-035 worktree reaper 扫描。
  * （[modeless 波5] 原 [E1] sync 批崩溃恢复接线已摘除；[collect 退役] core 侧
@@ -902,7 +851,7 @@ async function failAdoption(
  * 会话生命周期装配单一入口（bootstrap seam，D1）。index.ts 的 session_start 退为
  * `await setupSessionLifecycle(pi, ctx, makeLifecycleDeps())`。
  *
- * 错误处理语义原样保留（设计 §3.4）：identity/ledger/cleanup 各 try-catch
+ * 错误处理语义原样保留（设计 §3.4）：identity/cleanup 各 try-catch
  * 「失败记日志不阻断」；kill-9 恢复 save 失败 error 日志不阻断其余 run（下次
  * session_start 幂等重试）。
  */
@@ -927,11 +876,6 @@ export async function setupSessionLifecycle(
 
   // ── [M4] identity 子进程写入（随迁块 1）──
   appendSubagentIdentityEntry(pi);
-
-  // ── [U2] 通知账本装配 + 重启恢复（随迁块 2）──
-  // [skill-reload D4] 两分支都保留：ledger re-bind 到新 pi/ctx（getBoundNotifyLedger()
-  // 现读方自动看到新绑定）。
-  bindLedgerHostAndRecover(pi, ctx);
 
   // ── subagents 域：双 Service 装配（随迁块 3，经 deps 可注入）──
   // [skill-reload D4] 两分支都保留：initSession 复活链 + 新 ctx 注入（SubagentService

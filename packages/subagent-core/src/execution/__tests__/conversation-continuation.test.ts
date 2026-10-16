@@ -39,7 +39,7 @@ import type {
 } from "../assembly/conversation-continuation.ts";
 import type { RoundSettlementOutcome } from "../persistence/finalize-record.ts";
 import { createNotifier, type BgNotifyRecord } from "../notify/notifier.ts";
-import { bindNotifyLedgerHost } from "../notify/notify-ledger.ts";
+import { configureNotifyDomain, resetNotifyDomainForTests, type DeliveryPortHandle } from "../../core/notify-ports.ts";
 import type { AgentOutcome, EngineCapabilities, EngineHandle } from "../engine/types.ts";
 import type { EnginePort, EngineRunResult, RunContext } from "../engine/port.ts";
 import { registerFakePiEngine, FakeRun, type FakePiEnginePort } from "./helpers/fake-engine-port.ts";
@@ -697,42 +697,31 @@ describe("ConversationContinuation — 轮末分流（D7）与通知面", () => 
     const record = makeRecord({ id: "sa-drain-guard", sessionFile: undefined });
     const { host, calls } = makeHost(record);
 
-    // 通知面接真实 notifier + ledger（生产装配形态：ContinuationHost.notifyRecord →
-    // notifyHost.notify → createNotifier().notify → ledger 四步链）。纯 push mock 不过
-    // 真实去重——修复前丢弃通知与同轮失败单发同 key（`id:round`）会被 ledger 幂等吞
-    // （sentMessages 恒 1 条），本用例的 2 条断言即该 bug 的回归锚。
-    // 元素形态 = 两列合一（ledger 写账 entry 带 data；送达落盘 entry 带 content 等，
-    // 与 notify-ledger.test.ts makeLedgerHost 的 entries/sessionEntries 共享数组同构）。
-    const ledgerEntries: Array<{
-      type: string;
-      customType: string;
-      data?: unknown;
-      content?: string;
-      display?: boolean;
-      details?: unknown;
-    }> = [];
+    // 通知面接真实 notifier + 投递端口（unified-delivery 波 2 生产装配形态：
+    // ContinuationHost.notifyRecord → notifyHost.notify → createNotifier().notify →
+    // port.deliver 主投）。纯 push mock 不过真实判重——修复前丢弃通知与同轮失败单发
+    // 同 key（`id:round`）会被投递日志幂等吞（delivered 恒 1 条），本用例的 2 条断言
+    // 即该 bug 的回归锚。fake port = 同 id 幂等吞 + 受理即记录（delivered）。
+    const seenIds = new Set<string>();
     const delivered: Array<{ customType: string; content: string; display: boolean; details?: unknown }> = [];
-    bindNotifyLedgerHost({
-      appendLedgerEntry: (customType, data) => {
-        ledgerEntries.push({ type: "custom", customType, data });
-      },
-      readSessionEntries: () => ledgerEntries,
-      isIdle: () => true,
-      onAgentSettled: () => {},
-      // 送达即落盘 custom_message entry（ledger 回执扫描输入，模拟 pi 落盘）。
-      sendDelivery: (message) => {
-        delivered.push(message);
-        ledgerEntries.push({
-          type: "custom_message",
-          customType: message.customType,
-          content: message.content,
-          display: message.display,
-          details: message.details,
+    const fakePort: DeliveryPortHandle = {
+      deliver(envelope, _opts) {
+        const id = envelope.id ?? "gen-id";
+        if (seenIds.has(id)) return { kind: "swallowed", reason: "already-seen" };
+        seenIds.add(id);
+        delivered.push({
+          customType: envelope.payload.customType,
+          content: envelope.payload.content,
+          display: envelope.payload.display,
+          details: envelope.payload.details,
         });
+        return { kind: "accepted", id };
       },
-    });
+      flush: () => {},
+    };
+    configureNotifyDomain({ getDeliveryPort: () => fakePort });
     const notifier = createNotifier({
-      sendMessage: () => {}, // ledger 路径送达出口 = sendDelivery；本端口仅内核兜底路径消费
+      sendMessage: () => {}, // port 主投不经此端口；仅缺席直发兜底消费
       hasRunningBackground: () => false,
       isIdle: () => true,
     });
@@ -763,7 +752,7 @@ describe("ConversationContinuation — 轮末分流（D7）与通知面", () => 
       expect(dropped.error).toContain("not ready for a new message");
       // 独立 dedup 身份：与同轮失败单发 key（`id:round`）区分，避免被永久去重吞掉
       expect(dropped.dedupKey).toBe("sa-drain-guard:1:drain-drop");
-      // 真实去重链上两条都可达（修复前第二条同 key 被 ledger 吞——本断言红），
+      // 真实判重链上两条都可达（修复前第二条同 key 被投递日志幂等吞——本断言红），
       // 且第二条 notifyId 独立、正文为丢弃文案（key 独立性在投递产物上可见）
       await vi.waitFor(() => expect(delivered).toHaveLength(2));
       expect(delivered[0]!.details).toMatchObject({ notifyId: "sa-drain-guard:1" });
@@ -778,8 +767,11 @@ describe("ConversationContinuation — 轮末分流（D7）与通知面", () => 
         expect.stringContaining("queued message dispatch rejected"),
       );
     } finally {
-      // dispose 摘除 ledger 模块级绑定——防泄漏到同文件后续用例
+      // dispose notifier + 重置通知域端口注入——防泄漏到同文件后续用例
+      //（configureNotifyDomain 是进程级覆盖式注入，残留 fake port 会把后续用例的
+      // 通知吸收进本用例闭包）。
       notifier.dispose();
+      resetNotifyDomainForTests();
     }
   });
 

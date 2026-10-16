@@ -5,7 +5,6 @@ import type {
 	ExtensionAPI,
 	ExtensionContext,
 	ExtensionToolContext,
-	SessionCompactEvent,
 	SessionStartEvent,
 } from "@earendil-works/pi-coding-agent";
 import {
@@ -19,7 +18,6 @@ import {
 import { getLogger, setPiHandle } from "@zhushanwen/pi-extension-logger";
 import { Type, type Static, type TObject } from "typebox";
 
-import { ensureLedgerBound, runLedgerCompactionCheck } from "./notify-ledger.ts";
 import { createWatchCoordinator } from "./watch-coordinator.ts";
 
 // 模块级 logger（default export 首行 setPiHandle 注入后自动走 appendEntry 持久化，
@@ -209,16 +207,8 @@ export default function sessionManagerExtension(pi: ExtensionAPI): void {
 	// 重启收口腿（D7③）：父 pi 死亡后永无 unregister 的活跃 type 'session' register
 	// 逐条重开 watch（入参 = entry id 即 notifyId），应答经 watch 处理链静默注销，
 	// 活跃集回归基线；每 entry 独立 handler（禁串行 await）在 coordinator 内保证。
-	// ledger 装配纪律①②（D3）：session_start 无条件 bind + recoverFromSession 成对
-	//（唯一装配方形态，与 subagent-workflow bindLedgerHostAndRecover 同款——先装配，
-	// 收口腿/watch 应答到达时消费面已就绪）。
 	pi.on("session_start", (_event: SessionStartEvent, ctx: ExtensionContext) => {
-		ensureLedgerBound(pi, ctx);
 		coordinator.recoverStaleRegisters(ctx);
-	});
-	// compactionCheck 接线（D3 装配纪律④，P-B4 降级——subagent-workflow 同款先例）
-	pi.on("session_compact", (_event: SessionCompactEvent, _ctx: ExtensionContext) => {
-		runLedgerCompactionCheck();
 	});
 
 	registerSessionTool(pi, {

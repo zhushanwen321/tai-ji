@@ -8,6 +8,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+import { DELIVERY_PORT_SLOT_KEY } from "@zhushanwen/pi-delivery-port";
 	flushMicrotasks,
 	makeRespondWatch,
 	mountExtension,
@@ -15,7 +16,8 @@ import {
 	type WatchInvocation,
 } from "./helpers/extension-harness.ts";
 
-const LEDGER_SLOT_KEY = Symbol.for("@zhushanwen/subagent-core.notifyLedger");
+// pi-delivery-port 进程级槽（recordManagedNotify 的投递观察面——unified-delivery 波 2）。
+const PORT_SLOT_KEY = Symbol.for(DELIVERY_PORT_SLOT_KEY);
 
 interface Harness extends ExtensionHarness {
 	watches: WatchInvocation[];
@@ -83,7 +85,7 @@ beforeEach(() => {
 
 afterEach(() => {
 	vi.useRealTimers();
-	Reflect.deleteProperty(globalThis, LEDGER_SLOT_KEY);
+	Reflect.deleteProperty(globalThis, PORT_SLOT_KEY);
 });
 
 describe("session_start 重启收口腿（D7③）", () => {
@@ -131,15 +133,22 @@ describe("session_start 重启收口腿（D7③）", () => {
 	});
 
 	it("收口腿 label 降级源 = register 三键 name（D9 label 两路径的恢复路径）", async () => {
-		Reflect.set(globalThis, LEDGER_SLOT_KEY, {
-			current: { record: vi.fn(() => true), compactionCheck: () => 0 },
+		const delivered: Array<{ id?: string; content: string }> = [];
+		Reflect.set(globalThis, PORT_SLOT_KEY, {
+			current: {
+				deliver: (envelope: { id?: string; payload: { content: string } }) => {
+					delivered.push({ id: envelope.id, content: envelope.payload.content });
+					return { kind: "accepted", id: envelope.id ?? "gen-id" };
+				},
+				flush: () => {},
+			},
 		});
-		const record = Reflect.get(globalThis, LEDGER_SLOT_KEY).current.record;
 		const h = await startSingleEntrySession(
 			JSON.stringify({ reason: "completed", sessionId: "child-x", settleSeq: 1, fulfillsN: 1 }),
 		);
 		await vi.advanceTimersByTimeAsync(50);
-		expect(record).toHaveBeenCalledTimes(1);
-		expect(String(record.mock.calls[0][1])).toContain('Managed session "Alpha" (child-x)');
+		expect(delivered).toHaveLength(1);
+		expect(delivered[0]!.content).toContain('Managed session "Alpha" (child-x)');
+		Reflect.deleteProperty(globalThis, PORT_SLOT_KEY);
 	});
 });

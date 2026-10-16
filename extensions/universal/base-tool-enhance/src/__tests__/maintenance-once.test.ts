@@ -50,7 +50,9 @@ function createMockPi() {
 		// __taiji_bg_reconcile__ 第二触发面（runtime 切回补投）注册桩——本文件只验证
 		// session_start 入口，命令注册面断言在 index.test.ts
 		registerCommand: vi.fn(),
-		on: vi.fn(),
+		// pi 1.0.0 契约：on 返回退订函数（delivery-port 装配在 session_start 重绑时
+		// dispose 旧实例兑现退订，mock 需符合真契约）
+		on: vi.fn(() => () => {}),
 		appendEntry: vi.fn(),
 		events: { emit: vi.fn(), on: vi.fn() },
 		sendMessage: vi.fn(),

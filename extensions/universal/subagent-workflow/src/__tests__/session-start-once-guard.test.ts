@@ -61,12 +61,9 @@ const {
   mockRecoverManifestTmpFiles,
   mockRebuildIndexes,
   mockRecoverCrashedRuns,
-  mockBindNotifyLedgerHost,
-  mockRecoverFromSession,
   mockInitSession,
   mockInitModel,
 } = vi.hoisted(() => {
-  const recoverFromSession = vi.fn();
   return {
     // ① engines.json 同步（factory 体内还有一次无守卫调用，用例内 clearAllMocks 分离计数）
     mockSyncEnginesFile: vi.fn(),
@@ -81,8 +78,6 @@ const {
     // ⑪ 崩溃 run 恢复（onRunRecovered 由用例注入行为，emit 断言经真实 pi.events 链路）
     mockRecoverCrashedRuns: vi.fn(),
     // ④ 通知账本 bind（防误伤：每 session_start 执行）
-    mockBindNotifyLedgerHost: vi.fn(() => ({ recoverFromSession })),
-    mockRecoverFromSession: recoverFromSession,
     // ⑥ service.initSession（防误伤：每 session_start 执行）
     mockInitSession: vi.fn(),
     mockInitModel: vi.fn(),
@@ -113,11 +108,8 @@ vi.mock("@zhushanwen/subagent-core/execution/persistence/engine-journal-gc.ts", 
   startEngineJournalGcTimer: mockStartGcTimer,
 }));
 
-// ④ 通知账本 bind（setupNotifyLedgerCompactionGuard 另消费 getBoundNotifyLedger —— workflow-notify.ts）
-vi.mock("@zhushanwen/subagent-core/execution/notify/notify-ledger.ts", () => ({
-  bindNotifyLedgerHost: mockBindNotifyLedgerHost,
-  getBoundNotifyLedger: () => null,
-}));
+// [④ 通知账本 bind 随波 2 账本退役] session_start 的账本装配/恢复钩子已删除——
+// 投递归 pi-delivery-port 恒装配于 base-tool-enhance（unified-delivery §3.7）。
 
 // ⑪ lifecycle：仅替换 recoverCrashedRuns，其余导出（scheduleTimeBudget/
 // terminateRunningRuns 等）经 importOriginal 保留真实实现。
@@ -332,7 +324,7 @@ describe("session_start 双派发幂等守卫（oncePerProcess，u-audit-fix）"
     });
   });
 
-  it("防误伤：③identity appendEntry / ④bindNotifyLedger / ⑥initSession 每 session_start 执行（双派发 ×2）", async () => {
+  it("防误伤：③identity appendEntry / ⑥initSession 每 session_start 执行（双派发 ×2）", async () => {
     // ③ identity 只在子进程 env 注入时写（主进程跳过）——注入后双派发应 ×2
     process.env.PI_SUBAGENT_SELF_RECORD_ID = "rec-once-1";
     process.env.PI_SUBAGENT_AGENT = "reviewer";
@@ -350,9 +342,7 @@ describe("session_start 双派发幂等守卫（oncePerProcess，u-audit-fix）"
       // ③ 本 session entry：每派发一次（进程级 flag 会杀掉后续 session 的 identity 写入）
       const identityEntries = appendEntryCalls.filter((c) => c.customType === IDENTITY_CUSTOM_TYPE);
       expect(identityEntries).toHaveLength(2);
-      // ④ bind 每 session_start 一次（recoverFromSession 是「每 session 一次」语义，D3 粒度段）
-      expect(mockBindNotifyLedgerHost).toHaveBeenCalledTimes(2);
-      expect(mockRecoverFromSession).toHaveBeenCalledTimes(2);
+      // [④ 账本 bind 断言随波 2 账本退役删除——装配归 base-tool-enhance，本壳零装配]
       // ⑥ service 覆盖式注入：SR-3 语义要求每 session_start 重新注入
       expect(mockInitSession).toHaveBeenCalledTimes(2);
       expect(mockInitModel).toHaveBeenCalledTimes(2);

@@ -26,10 +26,14 @@
 //   - countActiveFromEntries 适配：pi 侧真函数返回 CountActiveResult 对象，core
 //     端口契约是 number（core 消费面只读 .count，notify-ports.ts 契约注释）——
 //     foundation 单元登记给本单元的适配责任。
-//   - createDelivery 透传：@zhushanwen/session-delivery 的 createDelivery 与 core
-//     的 Delivery* 结构化类型逐字段结构兼容（DeliveryHandle 的 sendChecked/depth
-//     是结构超集成员，多不碍兼容）——结构兼容由本注入点 typecheck 守护，上游签名
-//     漂移即红（notify-ports.ts「闭包红线」段）。
+//   - getDeliveryPort 透传：@zhushanwen/pi-delivery-port 的进程级槽访问器本体直传
+//     （core 闭包红线禁 import 该包，经 NotifyDomainPorts.getDeliveryPort 端口注入
+//     访问器——notifier 消费点每次即到即读，禁缓存实例引用）。core 侧
+//     DeliveryPortHandle 转写类型与其返回结构逐字段结构兼容——结构兼容由本注入点
+//     typecheck 守护，上游签名漂移即红（notify-ports.ts「闭包红线」段）。
+//     [unified-delivery 波 2] 投递内核工厂注入（createDelivery）随扩展侧内核部署
+//     退役（老能力映射 #7：与 port 两套装配并存违背装配单一归属——port 恒装配于
+//     base-tool-enhance，缺席降级 = notifier 直发兜底）。
 
 import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -39,7 +43,7 @@ import { fileURLToPath } from "node:url";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { getLogger } from "@zhushanwen/pi-extension-logger";
 import { countActiveFromEntries } from "@zhushanwen/pi-pending-notifications";
-import { createDelivery } from "@zhushanwen/session-delivery";
+import { getDeliveryPort } from "@zhushanwen/pi-delivery-port";
 
 import type { DiscoveryRoot, HostServices } from "@zhushanwen/subagent-core";
 import type { LogLevel } from "@zhushanwen/subagent-core";
@@ -451,7 +455,7 @@ export function createPiNotifyDomainPorts(): NotifyDomainPorts {
       return countActiveFromEntries(entries, { currentSessionId: opts?.currentSessionId }).count;
     },
 
-    // 投递内核工厂直传本体（结构兼容论证见文件头）；不经包装避免多一层间接面。
-    createDelivery,
+    // 投递端口槽访问器直传本体（结构兼容论证见文件头）；不经包装避免多一层间接面。
+    getDeliveryPort,
   };
 }

@@ -272,13 +272,6 @@ export {
   type ModelCatalogSource,
 } from "./shared/model-catalog.ts";
 
-// notify ledger：宿主通知账本端口（bind / getBound）——组合根装配 + workflow 域消费。
-export {
-  bindNotifyLedgerHost,
-  getBoundNotifyLedger,
-  type NotifyLedgerHost,
-} from "./execution/notify/notify-ledger.ts";
-
 // identity 重建常量与类型：session_start identity custom entry 的写入侧契约。
 export {
   IDENTITY_CUSTOM_TYPE,

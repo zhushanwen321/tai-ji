@@ -668,27 +668,26 @@ describe("[U5] dispatchRoundAsync worktree 绑定丢失 → 自动重建三分�
 // ============================================================
 
 describe("[U5] notifyId epoch 防撞：epoch>0 → `id:epoch:round`（epoch=0 恒旧格式）", () => {
-  it("轮次通知 key 按 epoch 分段（`id:round` / `id:epoch:round`）", async () => {
-    // ledger 写账断言（生产装配形态——notifyId 在 notify 投影边界物化进账本 entry）
-    const ledgerEntries: Array<{ customType: string; data: Record<string, unknown> }> = [];
+  it("轮次通知幂等键按 epoch 分段（`id:round` / `id:epoch:round`）", async () => {
+    // port.deliver 受理断言（unified-delivery 波 2 生产装配形态——notifyId 在 notify
+    // 投影边界物化为 port.deliver 的幂等键 id）
+    const notifyPorts = await import("../../core/notify-ports.ts");
     const { createNotifier } = await import("../notify/notifier.ts");
-    const { bindNotifyLedgerHost, _resetNotifyLedgerForTest } = await import("../notify/notify-ledger.ts");
-    _resetNotifyLedgerForTest();
-    bindNotifyLedgerHost({
-      appendLedgerEntry: (customType, data) => {
-        ledgerEntries.push({ customType, data: data as Record<string, unknown> });
+    const acceptedIds: string[] = [];
+    const fakePort: import("../../core/notify-ports.ts").DeliveryPortHandle = {
+      deliver(envelope) {
+        acceptedIds.push(envelope.id ?? "gen-id");
+        return { kind: "accepted", id: envelope.id ?? "gen-id" };
       },
-      readSessionEntries: () => [],
-      isIdle: () => true,
-      onAgentSettled: () => {},
-      sendDelivery: () => {},
-    });
+      flush: () => {},
+    };
+    notifyPorts.configureNotifyDomain({ getDeliveryPort: () => fakePort });
     const notifier2 = createNotifier({
-      sendMessage: () => {},
+      sendMessage: () => {}, // port 主投不经此端口；仅缺席直发兜底消费
       hasRunningBackground: () => false,
       isIdle: () => true,
     });
-    // epoch=0（缺省）→ 旧格式 `id:round`（磁盘账本零迁移）
+    // epoch=0（缺省）→ 旧格式 `id:round`（磁盘投递日志零迁移）
     notifier2.notify({
       id: "sa-epoch",
       status: "running",
@@ -709,9 +708,8 @@ describe("[U5] notifyId epoch 防撞：epoch>0 → `id:epoch:round`（epoch=0 �
       round: 2,
       epoch: 3,
     });
-    const ids = ledgerEntries.map((e) => e.data.notifyId);
-    expect(ids).toContain("sa-epoch:2");
-    expect(ids).toContain("sa-epoch:3:2");
-    _resetNotifyLedgerForTest();
+    expect(acceptedIds).toContain("sa-epoch:2");
+    expect(acceptedIds).toContain("sa-epoch:3:2");
+    notifyPorts.resetNotifyDomainForTests();
   });
 });

@@ -24,6 +24,7 @@ import type {
 	SessionStartEvent,
 } from "@earendil-works/pi-coding-agent";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import { bindDeliveryPort, createPiDeliveryPortHost } from "@zhushanwen/pi-delivery-port";
 import { toErrorMessage } from "@zhushanwen/pi-ext-guards";
 import { getLogger } from "@zhushanwen/pi-extension-logger";
 
@@ -33,6 +34,7 @@ import { createBashOverrideToolDefinition } from "./bash-tool.ts";
 import { handleTaskExit, refreshPiReference } from "./background/notify.ts";
 import { installProcessExitGuard } from "./background/process-exit-guard.ts";
 import { reconcilePendingEntries } from "./background/pending-reconcile.ts";
+import { countActiveTasks } from "./background/task-store.ts";
 import { setOnTaskExit } from "./background/exit-collector.ts";
 import { setupToolErrorAudit } from "./tool-error-audit.ts";
 
@@ -61,6 +63,19 @@ export default function baseToolEnhanceExtension(pi: ExtensionAPI): void {
 	// bg-task-notify-durability U3）：pi runner emit await handler（runner.js:632），
 	// promise 由其消费不产生 unhandled rejection；错误在维护链内 async 捕获
 	pi.on("session_start", (event: SessionStartEvent, ctx: ExtensionContext) => {
+		// 统一投递端口装配（unified-delivery 波 2，设计 §3.7 装配点）：custom 车道
+		// 唯一执行者、恒装配（本扩展为 infrastructure 档必载——两套装配并存违背
+		// 装配单一归属，§3.7）。每次 session_start 重绑（dispose 旧实例 + 新实例
+		// recover 差集重放）；消费方（notifier / session-manager / workflow，
+		// bash 随波 3）经 getDeliveryPort() 进程级槽获取（C-ext-06），缺席时按
+		// 各自兜底 + warn。
+		bindDeliveryPort(
+			createPiDeliveryPortHost(pi, ctx, {
+				component: "base-tool-enhance",
+				logger,
+				hasRunningBackground: () => countActiveTasks() > 0,
+			}),
+		).recover();
 		return runSessionStartMaintenance(pi, ctx, event.reason);
 	});
 	// 第二触发面（bg-task-notify-durability 补强）：桌面「切走会话再切回」是同进程重新

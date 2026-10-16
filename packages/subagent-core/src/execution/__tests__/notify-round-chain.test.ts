@@ -35,8 +35,7 @@ const { loggerMock } = vi.hoisted(() => ({
 }));
 vi.mock("../../core/logger.ts", () => ({ getLogger: () => loggerMock }));
 
-import { configureNotifyDomain, resetNotifyDomainForTests } from "../../core/notify-ports.ts";
-import type { DeliveryConfig, DeliveryHandle, DeliveryMessage, DeliveryPort } from "../../core/notify-ports.ts";
+import { configureNotifyDomain, resetNotifyDomainForTests, type DeliveryPortHandle } from "../../core/notify-ports.ts";
 import { registerFakePiEngine, type FakePiEnginePort } from "./helpers/fake-engine-port.ts";
 import { makePi, type PiMock } from "./helpers/pi-mock.ts";
 import { emptyRegistry, CTX_MODEL } from "./helpers/model-registry-mock.ts";
@@ -52,96 +51,54 @@ import type { RecordStore } from "../persistence/record-store.ts";
 import type { ExecutionRecord } from "../domain/record-model.ts";
 import { SubagentService } from "../subagent-service.ts";
 
-// ─── 投递内核等价桩（与 notifier.test.ts 同款切片：dedupe / busy gate / 合批窗口）──
-function createDelivery(port: DeliveryPort, options?: DeliveryConfig): DeliveryHandle {
-  const cfg = {
-    mergeWindowMs: options?.mergeWindowMs ?? 0,
-    mergeHoldActive: options?.mergeHoldActive,
-    warn: options?.warn ?? ((msg: string, err?: unknown) => { console.warn(`[session-delivery] ${msg}`, err ?? ""); }),
-  };
-  const queue: DeliveryMessage[] = [];
-  let inFlight = false;
-  let mergeTimer: ReturnType<typeof setTimeout> | undefined;
-  let disposed = false;
-  const dedupSet = options?.dedupe ? new Set<string>() : null;
+// ─── fake 投递端口（port.deliver 消费面：同 id 幂等吞 + merge 判定分流）────────
+//
+// 波 2 改写对位：原「投递内核等价桩」（dedupe / busy gate / 合批窗口）随内核队列
+// 持有退役——port 形态下受理即入 pi 原生队列（忙时不拒），合批窗口在端口侧。
+// 本文件断言面只需三片：幂等键判重（同 id:round 吞）、merge 判定透传（hasRunning-
+// Background 的 M3 判据回归锚）、非 merge 条目受理即注入（观察面 = pi.sendMessage）。
 
-  function isBusy(): boolean {
-    // V2 内核（msg-pipeline-debloat D2）：busy 判定 = isIdle() 单条件——hasPendingMessages
-    // 自镜像四件套已拆除，在途队列判定内查 port 实装的 active 表，port 消费方不可见。
-    try {
-      return !port.isIdle();
-    } catch {
-      return true;
-    }
-  }
+type FakePortRecord = { id: string; merge: boolean };
 
-  function doSend(): void {
-    if (disposed || queue.length === 0 || inFlight) return;
-    inFlight = true;
-    const batch = queue.splice(0);
-    try {
-      port.send(batch[0]!, "interrupt-at-turn-boundary");
-    } catch (err) {
-      cfg.warn("port.send failed", err);
-    }
-    inFlight = false;
-  }
-
-  function scheduleFlush(): void {
-    if (disposed || queue.length === 0 || inFlight) return;
-    if (isBusy()) return; // 本文件无退避轮询断言面：busy 即等待（合批 timer / settled 边沿）
-    doSend();
-  }
-
-  return {
-    send(msg) {
-      if (disposed) return;
-      if (dedupSet) {
-        if (msg.dedupeKey !== undefined) {
-          if (dedupSet.has(msg.dedupeKey)) return;
-          dedupSet.add(msg.dedupeKey);
-        }
+function makeFakePort(inject: (message: unknown) => void) {
+  const seen = new Set<string>();
+  const records: FakePortRecord[] = [];
+  const handle: DeliveryPortHandle = {
+    deliver(envelope, opts) {
+      const id = envelope.id ?? "gen-id";
+      if (seen.has(id)) return { kind: "swallowed", reason: "already-seen" };
+      seen.add(id);
+      const merge = opts?.merge ?? false;
+      records.push({ id, merge });
+      if (!merge) {
+        // 受理即注入（pi 原生队列忙时不拒——本文件无注入失败场景）；details 由
+        // 真实 port 在注入前补 deliveryId，本替身按 notifier 业务 details 原样透传。
+        inject({
+          customType: envelope.payload.customType,
+          content: envelope.payload.content,
+          display: envelope.payload.display,
+          details: envelope.payload.details,
+        });
       }
-      queue.push(msg);
-      const useMerge = cfg.mergeWindowMs > 0 && cfg.mergeHoldActive != null && cfg.mergeHoldActive();
-      if (useMerge) {
-        if (mergeTimer !== undefined) clearTimeout(mergeTimer);
-        mergeTimer = setTimeout(() => {
-          mergeTimer = undefined;
-          scheduleFlush();
-        }, cfg.mergeWindowMs);
-        return;
-      }
-      if (mergeTimer !== undefined) {
-        clearTimeout(mergeTimer);
-        mergeTimer = undefined;
-      }
-      scheduleFlush();
+      return { kind: "accepted", id };
     },
     flush() {
-      if (disposed) return;
-      if (mergeTimer !== undefined) {
-        clearTimeout(mergeTimer);
-        mergeTimer = undefined;
-      }
-      scheduleFlush();
-    },
-    dispose() {
-      disposed = true;
-      queue.length = 0;
-      if (mergeTimer !== undefined) clearTimeout(mergeTimer);
+      // merge:true 条目在真实 port 走 60s 窗口；本文件对 merge 条目的断言面是
+      // 「不立即注入」（窗口判定透传锚），无到期出站断言，flush 直通为空。
     },
   };
+  return { handle, records };
 }
 
-// 投递内核经通知域窄端口注入——本文件是真实执行链路回归，投递内核同样保真实
-// dedupe / 合批语义（settle 内 notify 与 run 续体回注同 notifyId 重放被吞，降级
-// 直发无 dedupe 会让 sendMessage 计数翻倍）；afterEach 重置防注入态泄漏。
+// 投递端口经通知域窄端口注入（getDeliveryPort 槽访问器；当前用例的 fake port 由
+// describe 内 beforeEach 装配赋值）；afterEach 重置防注入态泄漏。
+let currentFakePort: ReturnType<typeof makeFakePort> | undefined;
 beforeEach(() => {
-  configureNotifyDomain({ createDelivery });
+  configureNotifyDomain({ getDeliveryPort: () => currentFakePort?.handle });
 });
 afterEach(() => {
   resetNotifyDomainForTests();
+  currentFakePort = undefined;
 });
 
 /** 暴露私有 store / notifyHost 的接口（测试专用 cast）。
@@ -195,6 +152,11 @@ describe("[N2] chatMode 轮次通知正文：真实执行链路（协议引擎�
     service.initSession({ pi, sessionId: "root-session" });
     internals = service as unknown as ServiceInternals;
     fake = registerFakePiEngine();
+    // fake port 装配（闭包读 let pi——用例内换 pi 后注入面随新 spy）：非 merge 条目
+    // 受理即注入 pi.sendMessage。
+    currentFakePort = makeFakePort((message) => {
+      pi.sendMessage(message as never, { triggerTurn: true });
+    });
   });
 
   afterEach(() => {
@@ -283,6 +245,10 @@ describe("首轮闭环独有断言面（迁自壳 first-round-closure-service.te
     internals = service as unknown as ServiceInternals;
     fake = registerFakePiEngine();
     pi = makePi();
+    // fake port 装配（闭包读 let pi——用例内换 pi 后注入面随新 spy）。
+    currentFakePort = makeFakePort((message) => {
+      pi.sendMessage(message as never, { triggerTurn: true });
+    });
   });
 
   afterEach(() => {
@@ -325,7 +291,11 @@ describe("首轮闭环独有断言面（迁自壳 first-round-closure-service.te
     expect(pi.sendMessage).toHaveBeenCalledTimes(1);
   });
 
-  it("[M3 busy 对照] 真在跑的 background 工作（镜像活进程 + 无 timer）→ closed 通知挂 60s 合并窗口不立即发送", async () => {
+  it("[M3 busy 对照] 真在跑的 background 工作（镜像活进程 + 无 timer）→ merge:true 透传端口（窗口判定），非 merge 条目受理即注入", async () => {
+    // fake port 装配：非 merge 条目受理即注入 pi.sendMessage（真实 port 直通形态）
+    currentFakePort = makeFakePort((message) => {
+      pi.sendMessage(message as never, { triggerTurn: true });
+    });
     service.initSession({ pi, sessionId: "root-session" }); // 换上带 spy 捕获的 pi
     // 正例（立即送达半边）：chat 轮次完成（轮终翻 idle + arm idle timer → run 应答
     // settle → notifyComplete），record 留 store。旧 hasRunningBackground 按
@@ -342,14 +312,14 @@ describe("首轮闭环独有断言面（迁自壳 first-round-closure-service.te
     expect(settled.round).toBe(1);
     expect(settled.result).toBe("first-round-done"); // 真实派生（非手工预置）
 
-    // double-notify 防护：显式再 notifyComplete 一次（同 id:round）→ notifier dedup
-    // key=`${id}:${round}` 吞第二次。
+    // double-notify 防护：显式再 notifyComplete 一次（同 id:round）→ port 幂等键
+    // `id:round` 判重吞第二次（swallowed，不重复注入）。
     internals.notifyHost.notifyComplete(settled);
     expect(pi.sendMessage).toHaveBeenCalledTimes(1);
 
     // 对照（busy 半边，本文件独有断言面）：真在跑的 background 工作（镜像活进程 +
-    // 无 timer）仍计入合并窗口——closed 通知挂 60s 不立即发送（合并窗口语义对真正
-    // 的并发完成保留）。
+    // 无 timer）计入合并窗口判定——done 通知以 merge:true 受理（窗口攒批成员，端口
+    // 60s 窗口承载，不立即注入；合并窗口语义对真正的并发完成保留）。
     const busy = makeRecord("sa-busy");
     busy.status = "running";
     internals.store.register(busy);
@@ -360,7 +330,8 @@ describe("首轮闭环独有断言面（迁自壳 first-round-closure-service.te
     done.status = "idle"; // V1 终态形态：markRoundIdle 收口 idle，toNotifyRecord 放行
     internals.store.register(done);
     internals.notifyHost.notifyComplete(done);
-    expect(pi.sendMessage).toHaveBeenCalledTimes(1); // 未新增——busy 挂起合并窗口
+    expect(pi.sendMessage).toHaveBeenCalledTimes(1); // 未新增——merge:true 不立即注入
+    expect(currentFakePort!.records.at(-1)).toMatchObject({ merge: true }); // M3 判据回归锚
   });
 
   it("[N1 载荷投影] one-shot 成功完成通知：details.status=running（轮终通知形态）、正文含真实结果，恰 1 条", async () => {

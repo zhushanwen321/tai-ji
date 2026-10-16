@@ -755,9 +755,9 @@ describe("session_start 围栏：装配链异常不逃逸", () => {
 //   ——证明 2/3 排在 1 之后；
 // - 成功分支断言 step2（notifiedRunIds 纳入）与 step3（runs 淘汰）均已执行。
 //
-// notifyDone 走降级直发路径（ledger 槽未 bind → getBoundNotifyLedger() 为
-// undefined）；stale 判定依据 ext-guards STALE_CTX_MARKER 文案子串，测试注入的
-// 失败错误消息不含该串 → guardStaleCtx 判非 stale 原样上抛（真实语义）。
+// notifyDone 走降级直发路径（port 槽未装配 → getDeliveryPort() 为 undefined——
+// 装配异常窗口的缺席降级）；stale 判定依据 ext-guards STALE_CTX_MARKER 文案子串，
+// 测试注入的失败错误消息不含该串 → guardStaleCtx 判非 stale 原样上抛（真实语义）。
 
 type EnvHarness = {
   env: RunSettledEffectsEnv;
@@ -916,15 +916,16 @@ describe("runSettledEffects：三步固定顺序", () => {
 
 // ── ⑤ setupWorkflowDomain 的 pi.on 注册顺序锁（逐位不变契约） ──────────────────
 //
-// index.ts 头注与 setupWorkflowDomain JSDoc 声明「7 个 pi.on handler 的注册相对
-// 顺序原样保留」。跨域 handler 迁出（session_compact / model_select / 父级联
-// before 事件归各自域模块的 setup* 注册）后，本用例是顺序逐位不变的机器证据：
-// fake pi 捕获 on() 调用序列（Map 保持插入序），与锁定的 7 事件序列逐位比对。
+// index.ts 头注与 setupWorkflowDomain JSDoc 声明「pi.on handler 的注册相对顺序
+// 原样保留」。跨域 handler 迁出（model_select / 父级联 before 事件归各自域模块的
+// setup* 注册）后，本用例是顺序逐位不变的机器证据：fake pi 捕获 on() 调用序列
+//（Map 保持插入序），与锁定的事件序列逐位比对。[波 2] session_compact 注册
+//（notify ledger compaction 补写守卫）随账本退役删除——pi session append-only
+// 契约排除 entry 被清事件（unified-delivery §3.7②），序列 7 → 6。
 
-/** 锁定的注册顺序（index.ts 头注声明的 7 事件序列，逐位不变契约）。 */
+/** 锁定的注册顺序（波 2 后的 6 事件序列，逐位不变契约）。 */
 const EXPECTED_REGISTRATION_ORDER = [
   "session_start",
-  "session_compact",
   "model_select",
   "session_tree",
   "session_before_fork",
@@ -933,7 +934,7 @@ const EXPECTED_REGISTRATION_ORDER = [
 ] as const;
 
 describe("setupWorkflowDomain pi.on 注册顺序", () => {
-  it("7 个事件按锁定序列逐位注册（跨域 setup* 调用原位、不改变序列）", () => {
+  it("6 个事件按锁定序列逐位注册（跨域 setup* 调用原位、不改变序列）", () => {
     const { pi, handlers } = makePi();
     setupWorkflowDomain(pi, { inflightReporter: makeReporter() });
 

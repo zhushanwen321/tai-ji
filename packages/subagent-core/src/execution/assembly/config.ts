@@ -11,7 +11,7 @@ import { getLogger } from "../../core/logger.ts";
 
 import type { SubagentsGlobalConfig } from "./types.ts";
 
-// 包内 execution 模块统一具名 logger（getLogger 缓存单例，见 notify-ledger.ts 同款）。
+// 包内 execution 模块统一具名 logger（getLogger 缓存单例，见 execution/notify/ 同款）。
 const logger = getLogger("subagents");
 
 // ============================================================

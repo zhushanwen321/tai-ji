@@ -1,20 +1,24 @@
 // src/core/notify-ports.ts
 //
-// 通知域窄端口（D2 计划期细化②）。pi 侧完成通知的两机制——@zhushanwen/session-delivery
-// 投递内核工厂 / @zhushanwen/pi-pending-notifications 活跃计数——经本端口结构化注入；
-// HostServices.notify 事件推送按演进纪律②（禁止无真实触点的推测性预留）推迟到 P2
-// zsw 壳首个真实触点（task-notification）再落。
+// 通知域窄端口（D2 计划期细化②）。pi 侧通知的两机制——@zhushanwen/pi-pending-notifications
+// 活跃计数 / @zhushanwen/pi-delivery-port 投递端口槽——经本端口结构化注入；HostServices.notify
+// 事件推送按演进纪律②（禁止无真实触点的推测性预留）推迟到 P2 zsw 壳首个真实触点
+// （task-notification）再落。
 //
-// 闭包红线：本文件是 core 对上述两包的唯一替代面——下方 Delivery* 结构化类型为手工
-// 转写（与 packages/session-delivery/src/types.ts 逐字段结构兼容），禁止 import 两包
-// （D9 闭包守卫扫描对象）。上游增删字段须手工同步本转写类型，漏同步由
+// 闭包红线：本文件是 core 对上述包的唯一替代面——下方 Delivery*/DeliveryPortHandle
+// 结构化类型为手工转写（与 packages/session-delivery/src/types.ts、extensions/shared/
+// delivery-port/src/types.ts 逐字段结构兼容），禁止 import 两包（D9 闭包守卫扫描对象；
+// core 是跨宿主包，extensions/shared 属 extensions 层，依赖方向 core ← extensions）。
+// 上游增删字段须手工同步本转写类型，漏同步由
 // extensions/universal/subagent-workflow/src/__tests__/notifier-receipt-anchor.test.ts
 // 行为锁拦截——typecheck 对删字段形态不亮红（bivariance + optional 吸收漂移）。
 //
 // 缺席语义（设计 §3.4 core_port_missing 精神：可选端口缺席是合法形态，不报错）：
 //   - 计数器缺席 → 恒 0（零活跃）：pending 门全开，缺省内聚在本端口层。
-//   - 投递工厂缺席 → 消费方降级直发：直发是消费方行为，端口层无法代为执行，
-//     故 createDelivery 刻意保持缺席（undefined），由消费方判缺席降级。
+//   - 投递端口槽访问器缺席 → 消费方降级直发（notifier 既有最深层直发兜底 + warn +
+//     诊断计数；降级代价显式登记：无判重无耐久，仅覆盖装配异常窗口——unified-
+//     delivery 设计 §3.7）。port 恒装配（base-tool-enhance session_start，P6
+//     infrastructure 档必载），缺席 = 装配异常 / 版本混装窗口的异常形态。
 
 import { GLOBAL_SLOT_KEYS } from "../shared/global-slots.ts";
 
@@ -72,28 +76,24 @@ export interface DeliveryPort {
   subscribeSettled?(cb: () => void): () => void;
 }
 
-/** 投递工厂 options（notifier 实际消费的字段集；其余策略字段未入端口面）。 */
-export interface DeliveryConfig {
-  intent?: DeliveryIntent;
-  /** 合批窗口（ms）：0 = 关；>0 = 滑动窗口合批。 */
-  mergeWindowMs?: number;
-  /** 合批依赖谓词（禁止用 isIdle 代替——D4 must-fix 语义）。 */
-  mergeHoldActive?: () => boolean;
-  backoff?: { ms: number; max: number };
-  dedupe?: { maxKeys: number };
-  /** 投递失败警告出口（U4：装配方接 logger 使警告落日志盘而非 stderr）。 */
-  warn?: (msg: string, err?: unknown) => void;
-}
-
 /**
- * 提交选项转写（与 session-delivery 的 DeliverySubmitOptions 消费面字段结构兼容——
- * 手工转写契约，上游增删字段须同步本类型，漏同步由
+ * 提交选项转写（与 delivery-port 的 DeliveryDeliverOptions / 内核提交选项消费面字段
+ * 结构兼容——手工转写契约，上游增删字段须同步本类型，漏同步由
  * extensions/universal/subagent-workflow/src/__tests__/notifier-receipt-anchor.test.ts
  * 行为锁拦截——typecheck 对删字段形态不亮红）。
  */
 export interface DeliverySubmitOptions {
   /** 合批窗口判定覆盖。 */
   merge?: boolean;
+  /**
+   * 期望注入时机（unified-delivery §3.3 timing 词条的转写位；与 pi-delivery-port
+   * 的 DeliveryTiming 结构兼容）。直发兜底路径不消费（pi.sendMessage({triggerTurn})
+   * 单通道 = steer 形态）；字段为影子契约对上游提交面的同步修正位（波 2）。
+   * "steer"/"followUp" 是 pi 注入通道词汇，合法持有点 = 通知域窄端口契约面
+   * （与 execution/notify/notify-host.ts PiLike.deliverAs 注解同位——core 内
+   * pi 通道词汇的接口形状注解形态）。
+   */
+  timing?: "steer" | "followUp";
   /**
    * 送达回执锚申报（D1 申报制转写）：'marker' = 等裸标记回执（缺省）；'acceptance' =
    * 无回执锚点条目（notifier 通知出站文本无标记），受理即落 delivered 终态。
@@ -124,6 +124,47 @@ export interface CountActivePortOptions {
   currentSessionId?: string;
 }
 
+// ─── 投递端口槽消费面（pi 半区 DeliveryPort 的 core 转写）─────────────────
+
+/**
+ * deliver 受理结果转写（与 pi-delivery-port 的 DeliveryDeliverResult 结构兼容）：
+ * accepted = 已受理（缓冲或已入内核）；swallowed = 幂等吞；rejected = 拒收未受理
+ * （persist-failed = 受理前落盘失败等，幂等键未登记、重提合法）。
+ */
+export type PortDeliverResult =
+  | { kind: "accepted"; id: string }
+  | { kind: "swallowed"; reason: string }
+  | { kind: "rejected"; reason: string };
+
+/** deliver envelope 转写（与 pi-delivery-port 的 DeliveryEnvelope 消费面结构兼容）。 */
+export interface PortDeliverEnvelope {
+  /** custom 载荷（原样透传；deliveryId 由端口在注入前统一写入 details）。 */
+  payload: DeliveryCustomPayload;
+  /** 幂等键（提交方提供即参与判重：notifyId / taskId 等）。缺省内部生成。 */
+  id?: string;
+}
+
+/** deliver 提交选项转写（与 pi-delivery-port 的 DeliveryDeliverOptions 结构兼容）。 */
+export interface PortDeliverOptions {
+  /** 合批窗口判定覆盖（缺省批判定在端口侧）。 */
+  merge?: boolean;
+}
+
+/**
+ * 投递端口句柄转写（notifier 消费面：deliver / flush——recover / metrics / dispose
+ * 等面 notifier 零触达，不入转写；与 pi-delivery-port 的 DeliveryPortHandle 结构兼容）。
+ */
+export interface DeliveryPortHandle {
+  /**
+   * 唯一提交入口（unified-delivery §3.4 端点形态）：受理前落投递日志 → 缓冲或内核
+   * send → 受理结果同步返回。fire-and-forget 语义：调用方忽略返回值不受影响；
+   * rejected 条目由调用方裁决（幂等键未登记，重提合法）。
+   */
+  deliver(envelope: PortDeliverEnvelope, opts?: PortDeliverOptions): PortDeliverResult;
+  /** 强制投递尝试（窗口缓冲提前出站 + 内核 flush——shutdown flush 消费）。 */
+  flush(): void;
+}
+
 export interface NotifyDomainPorts {
   /** pending 活跃计数（pi 会话 entries 中 register − unregister 差集的数值）。
    *  契约为 number 而非 pi 侧 CountActiveResult：core 消费面只读 count，契约面最窄；
@@ -132,9 +173,13 @@ export interface NotifyDomainPorts {
    *  读侧）持有「被读 entries 所属 session」概念时必须传入，使跨 session 残留不进
    *  差集；与 pending-notifications 实装签名（entries, opts?) 对齐。 */
   countActiveFromEntries?(entries: unknown[], opts?: CountActivePortOptions): number;
-  /** 投递内核工厂。签名与 @zhushanwen/session-delivery 的 createDelivery 结构兼容，
-   *  pi 壳直传其本体即可。缺席 = 消费方降级直发。 */
-  createDelivery?(port: DeliveryPort, options?: DeliveryConfig): DeliveryHandle;
+  /**
+   * pi 半区投递端口槽访问器（C-ext-06 进程级槽；core 闭包红线禁 import 该包，
+   * 由宿主壳注入访问器——pi 壳直传 pi-delivery-port 的 getDeliveryPort 本体）。
+   * 每次消费即到即读（禁缓存实例引用——session_start 重绑语义，账本装配纪律⑤
+   * 同律）；缺席（undefined / 未注入）= 消费方降级直发兜底。
+   */
+  getDeliveryPort?(): DeliveryPortHandle | undefined;
 }
 
 // 配置态持有：globalThis[Symbol.for] slot（与 host-services 同款覆盖式语义——重复
@@ -166,7 +211,7 @@ const DEFAULT_NOTIFY_PORTS: NotifyDomainPorts = {
   // 计数缺省恒 0：零活跃是安全侧语义（pending 门全开），且把「缺席按零处理」从
   // 消费方约定收敛为端口层的机器事实。
   countActiveFromEntries: () => 0,
-  // createDelivery 刻意缺席（见文件头「缺席语义」）。
+  // getDeliveryPort 刻意缺席（见文件头「缺席语义」——消费方降级直发兜底）。
 };
 
 export function getNotifyDomainPorts(): NotifyDomainPorts {

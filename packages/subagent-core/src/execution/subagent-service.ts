@@ -39,11 +39,9 @@ import { ManifestStore } from "./persistence/manifest-store.ts";
 import type { ModelConfigService } from "./assembly/model-config-service.ts";
 import type { AgentConfig, ModelInfo, ResolvedModel } from "./assembly/model-resolver.ts";
 import { type NotifyHost, type PiLike, createNotifyHost } from "./notify/notify-host.ts";
-// [T4④ / PS-5] flush 被门拦时的未投递 pending 落盘账本（persistUndeliveredNotificationsForReplay 消费）
 // [H1 U2] notify 门迁 notifier.ts（Continuation 双闸共用），此处 re-export 保持既有
 // import 路径（测试消费面 `from "../subagent-service.ts"` 不变）。
 export { notifyGateAllowsDelivery } from "./notify/notifier.ts";
-import { getBoundNotifyLedger, NOTIFY_LEDGER_CUSTOM_TYPE } from "./notify/notify-ledger.ts";
 import { getSubagentRecordsDir, getSubagentSessionDir } from "./assembly/path-encoding.ts";
 import type { StatusFilter } from "./persistence/record-store.ts";
 import { RecordStore } from "./persistence/record-store.ts";
@@ -1015,13 +1013,7 @@ export class SubagentService {
     // abort/kill 后仍挂着的条目，防跨 session 复活时残留）
     // flush 待发通知（session_shutdown 尽力投递一次）。
     this.notifyHost.flushPendingNotifications();
-    // [T4④ / PS-5] flush 被 isIdle 门拦时的丢失面闭合：attemptDeliver 的 isIdle 二次
-    // 复查失败时 pending 挂在 ledger 内存态，随后 dispose 销毁——旧注释「flush 后 dispose
-    //（防丢失）」的承诺与行为不符。现把未投递 pending 经 ledger entry 通道复写落盘
-    // （notifyId 幂等，重复 entry 由恢复扫描后写覆盖吸收），重启 recoverFromSession 按
-    // 账面差集重放补投——「不丢」由落盘账本承接而非本次 flush。
-    this.persistUndeliveredNotificationsForReplay();
-    this.notifyHost.dispose();
+
     this.store.dispose();
     // [§1.4 (a)] dispose 收尾显式作废 pi 句柄绑定（flush/persist 链之后的最后一步——
     // 排在其前的关停投递链保留对旧句柄的最后一次尽力写；此后 late-bound 读面统一
@@ -1030,46 +1022,6 @@ export class SubagentService {
     this.baselines.invalidatePiBinding("service dispose (session ended)");
   }
 
-  /**
-   * [T4④ / PS-5] shutdown flush 被门拦时把未投递 pending 复写落盘（供重启 replay）。
-   *
-   * 触发条件：flushPendingNotifications 后 ledger 仍有 pending（isIdle 门拦 / sendDelivery
-   * 受理失败的残留）且主 agent 非 idle——即本次 shutdown 注定投不出去。落盘动作 =
-   * pi.appendEntry 重写 NOTIFY_LEDGER_CUSTOM_TYPE entry（与 ledger.record 同通道同 schema，
-   * notifyId 幂等：恢复扫描按后写覆盖 + ack/abandoned 差集去重，重复账面不产生重复投递）。
-   * 主 agent idle 时 flush 已投出，无需复写（零开销）。
-   */
-  private persistUndeliveredNotificationsForReplay(): void {
-    try {
-      const ledger = getBoundNotifyLedger();
-      const pending = ledger?.pendingEntries() ?? [];
-      if (pending.length === 0) return;
-      if (this.isIdleFn?.() !== false) return; // idle：flush 已投出（或无 gate 场景照旧）
-      for (const item of pending) {
-        // [§1.4 (b)] best-effort：stale pi 抛错分诊留痕不冒泡（外层 catch 仍兜底其余
-        // 异常——统一包装后 stale 类走 warn 一次通道，不与真实异常混报）。
-        bestEffortPiCall(this.pi, "pending notify ledger replay write", (active) => {
-          active.appendEntry(NOTIFY_LEDGER_CUSTOM_TYPE, {
-            v: 1,
-            notifyId: item.notifyId,
-            content: item.content,
-            record: item.record,
-            // 通道字段必须透传（与 ledger.record 同 schema）：恢复扫描按 notifyId 后写
-            // 覆盖，缺省 entry 会把 wf-done 改判成默认通道——workflow-result 失效信号
-            // 失联（W18 不触发，workflows 增量不刷新）。
-            ...(item.deliveryCustomType !== undefined ? { deliveryCustomType: item.deliveryCustomType } : {}),
-          });
-        });
-      }
-      logger.warn(
-        `[subagents] shutdown flush blocked by busy main agent: ${pending.length} pending notification(s) persisted to ledger for replay on next session_start`,
-        { count: pending.length },
-      );
-    } catch (err) {
-      // 落盘复写是防丢失增强，失败不阻断 dispose（账本原 entry 仍随 pi flush 落盘）。
-      bestEffort(err, "persistUndeliveredNotificationsForReplay", "error");
-    }
-  }
 }
 
 // [R6] 进程单例访问器族（SERVICE_SLOT_KEY / getServiceSlot / getSubagentService /

@@ -1,16 +1,13 @@
-// src/__tests__/notify-reconcile-judgement.test.ts —— 补投判据纯函数（设计 §5 U1）：
-// ① collectDeliveredTaskIds 五形态（正常消息/fork 副本/缺 details 旧消息/非 bash
-// 通知/killed 无痕迹任务）+ content 双落盘形态容错；② 补投标记 entry 读写形态
-// （customType background-bash:reconciled，data {taskId, reconciledAt}）
+// src/__tests__/notify-reconcile-judgement.test.ts —— 收殓终态补投的送达痕迹提取
+// （unified-delivery D3 裁决 1）：collectDeliveredTaskIds 五形态（正常消息/fork 副本/
+// 缺 details 旧消息/非 bash 通知/killed 无痕迹任务）+ content 双落盘形态容错。
+// 旧补投标记（background-bash:reconciled）随波 3 补投机制退役：防双投由 port 幂等
+// 接管，marker 判据/读写形态及其测试一并删除（反向锁见 pending-reconcile.test.ts
+// 「legacy reconciled marker present WITHOUT trace → still re-notified」用例）
 import { describe, expect, it } from "vitest";
 
 import { BACKGROUND_BASH_CUSTOM_TYPE } from "../background/notify.ts";
-import {
-	buildReconciledMarkerData,
-	collectDeliveredTaskIds,
-	collectReconciledTaskIds,
-	RECONCILED_MARKER_CUSTOM_TYPE,
-} from "../background/notify-reconcile-judgement.ts";
+import { collectDeliveredTaskIds } from "../background/notify-reconcile-judgement.ts";
 
 const TASK_ID = "bt-1700000000-abcd12";
 const OTHER_TASK_ID = "bt-1700000000-efgh34";
@@ -58,7 +55,7 @@ describe("collectDeliveredTaskIds: five entry shapes (design §5 U1)", () => {
 	it("non-bash notification (different customType, content mentions bt- token): does NOT hit", () => {
 		const ids = collectDeliveredTaskIds([
 			deliveredEntry({ customType: "subagent-bg-notify" }),
-			deliveredEntry({ customType: "background-bash:reconciled", details: undefined }),
+			deliveredEntry({ customType: "managed-session-notify", details: undefined }),
 		]);
 		expect(ids.size).toBe(0);
 	});
@@ -105,44 +102,5 @@ describe("collectDeliveredTaskIds: content落盘形态与脏数据容错", () =>
 			deliveredEntry({ taskId: OTHER_TASK_ID, details: undefined }),
 		]);
 		expect([...ids].sort()).toEqual([TASK_ID, OTHER_TASK_ID].sort());
-	});
-});
-
-describe("reconciled marker entry: write/read shape contract (design decision 1)", () => {
-	it("buildReconciledMarkerData produces {taskId, reconciledAt}", () => {
-		expect(buildReconciledMarkerData(TASK_ID, 1_700_000_000_000)).toEqual({
-			taskId: TASK_ID,
-			reconciledAt: 1_700_000_000_000,
-		});
-	});
-
-	it("marker customType is the plain-entry channel, distinct from the delivery customType", () => {
-		// 通道纪律：账务走 plain custom entry（appendEntry），送达消息走 sendMessage——
-		// 两者 customType 不得混用（NotifyLedger 同款纪律）
-		expect(RECONCILED_MARKER_CUSTOM_TYPE).toBe("background-bash:reconciled");
-		expect(RECONCILED_MARKER_CUSTOM_TYPE).not.toBe(BACKGROUND_BASH_CUSTOM_TYPE);
-	});
-
-	it("collectReconciledTaskIds picks marker entries and tolerates malformed data", () => {
-		const ids = collectReconciledTaskIds([
-			{ type: "custom", customType: RECONCILED_MARKER_CUSTOM_TYPE, data: { taskId: TASK_ID, reconciledAt: 1 } },
-			{ type: "custom", customType: RECONCILED_MARKER_CUSTOM_TYPE }, // data 缺失
-			{ type: "custom", customType: RECONCILED_MARKER_CUSTOM_TYPE, data: { reconciledAt: 2 } }, // taskId 缺
-			{ type: "custom", customType: RECONCILED_MARKER_CUSTOM_TYPE, data: { taskId: 42 } }, // 非字符串
-			{ type: "custom_message", customType: RECONCILED_MARKER_CUSTOM_TYPE, data: { taskId: OTHER_TASK_ID } }, // 误入消息通道的形态仍按 data 读
-			deliveredEntry(), // 送达消息不是标记
-			null,
-			7,
-		]);
-		expect([...ids].sort()).toEqual([TASK_ID, OTHER_TASK_ID].sort());
-	});
-
-	it("delivered and reconciled collectors partition the two anchors without cross-talk", () => {
-		const entries = [
-			deliveredEntry(), // TASK_ID 送达痕迹在
-			{ type: "custom", customType: RECONCILED_MARKER_CUSTOM_TYPE, data: { taskId: OTHER_TASK_ID, reconciledAt: 1 } },
-		];
-		expect(collectDeliveredTaskIds(entries).has(OTHER_TASK_ID)).toBe(false);
-		expect(collectReconciledTaskIds(entries).has(TASK_ID)).toBe(false);
 	});
 });

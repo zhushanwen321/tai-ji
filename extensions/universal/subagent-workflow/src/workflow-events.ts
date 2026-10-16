@@ -77,7 +77,6 @@ import { createJournalReporter, type JournalReporter } from "./host/journal-repo
 import { type RunSettlementRecord } from "./jsonl-run-store.ts";
 import { notifyDone, trackNotifiedRunId } from "./workflow-notify.ts";
 // ═══ 跨域事件注册（handler 体住各自域模块，本 seam 原位调用保注册顺序） ═══
-import { setupNotifyLedgerCompactionGuard } from "./workflow-notify.ts";
 import { setupModelEvents } from "./model-events.ts";
 import { setupSubagentsCascadeEvents } from "./subagents-events.ts";
 // ═══ session 生命周期装配 seam（bootstrap seam，设计 §3.1/D1） ═══
@@ -506,11 +505,6 @@ export function setupWorkflowDomain(
       );
     }
   });
-
-  // ════════════════════════════════════════════════════════════
-  //  [U2 P-B4 降级] notify ledger compaction 补写守卫（notify 域）
-  // ════════════════════════════════════════════════════════════
-  setupNotifyLedgerCompactionGuard(pi);
 
   // ════════════════════════════════════════════════════════════
   //  model 缓存刷新（model 域）

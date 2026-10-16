@@ -1,10 +1,15 @@
 // src/__tests__/pending-reconcile.test.ts —— M3 session_start 对账单元（§3.5 接入细则 4）
-// + 完成通知补投执行器（bg-task-notify-durability 设计 §5 U2/U3）：
+// + 收殓终态通知补投（unified-delivery D3 裁决 1 / §5 波 3）：
 //  - bt- 差集（protocol collectActivePendingIds 单点消费）/ 三类僵尸场景 appendEntry
 //    权威路径（唯一写路径，无 emit）/ 活任务与缺条目保守跳过
-//  - 补投：严格终态（isTerminalState，killed reason 级排除）× 投递成败 × 单/多任务
-//    文案矩阵、双锚判重、双派发幂等（in-flight 单飞守卫 + 同步补投标记）、失败路径
-//    不写标记下次激活重试
+//  - 收殓补投：候选 = 收殓终态（orphaned / exited+process-exit）∧ 送达痕迹未命中，
+//    逐任务经 port.deliver（id=taskId、terminated 措辞、无 details）；真实终态
+//    （natural/timeout）退役出补投——主路径入账后丢失由 port 的 outbox 差集重放覆盖
+//    （对位说明：投递 throw → 内核 retain + 边沿重放；落盘后崩溃 → outbox 差集重放；
+//    两形态由 delivery-port 包测试锁定，本文件锁定「对账不再覆盖它们」）
+//  - 旧补投标记 / in-flight 单飞守卫随波 3 退役：防双投由 port 幂等接管（deliver
+//    幂等预检 + 内核三级判重 + outbox/ack 终态列）——本文件锁定「marker 在场不再
+//    阻断重投」（痕迹缺失即重投，旧 marker「标记在而消息丢」残余失败域随之修复）
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -27,32 +32,32 @@ vi.mock("@zhushanwen/pi-extension-logger", () => ({
 
 import {
 	reconcilePendingEntries,
-	resetRedeliveryInFlightForTest,
+	type ReconcileDeliver,
 	type ReconcilePi,
 } from "../background/pending-reconcile.ts";
 import { BACKGROUND_BASH_CUSTOM_TYPE } from "../background/notify.ts";
-import { RECONCILED_MARKER_CUSTOM_TYPE } from "../background/notify-reconcile-judgement.ts";
 import { getRegistryPath, writeRegistryEntry } from "../background/registry.ts";
 import type { RegistryEntry } from "../background/types.ts";
 
 const DATA_DIR = mkdtempSync(join(tmpdir(), "bte-reconcile-"));
 const SESSION_ID = "sess-reconcile";
 
-type SendMessageMessage = { customType: string; content: string; display: boolean; details?: unknown };
+type DeliverEnvelope = Parameters<ReconcileDeliver>[0];
 
-function createMockPi(
-	overrides: Partial<Pick<ReconcilePi, "appendEntry" | "sendMessage">> = {},
-): ReconcilePi & {
-	events: { emit: ReturnType<typeof vi.fn> };
-} {
+function createMockPi(overrides: Partial<Pick<ReconcilePi, "appendEntry">> = {}): ReconcilePi {
 	return {
 		appendEntry: vi.fn(),
-		sendMessage: vi.fn<[], void | Promise<void>>(),
-		// emit 路径已随 ext-simplify-13 删除（恒 no-op 死路径）：events spy 仅用于
-		// 断言实现不再触达 bus emit
-		events: { emit: vi.fn() },
 		...overrides,
 	};
+}
+
+/** port.deliver 替身（缺省恒 accepted；receiptKind 覆盖受理结果分型）。 */
+function createMockDeliver(receiptKind: "accepted" | "swallowed" | "rejected" = "accepted"): ReconcileDeliver {
+	return vi.fn((envelope: DeliverEnvelope): ReturnType<ReconcileDeliver> => {
+		if (receiptKind === "accepted") return { kind: "accepted", id: envelope.id ?? "" };
+		if (receiptKind === "swallowed") return { kind: "swallowed", reason: "already-seen" };
+		return { kind: "rejected", reason: "persist-failed" };
+	});
 }
 
 function makeRegistryEntry(overrides: Partial<RegistryEntry> = {}): RegistryEntry {
@@ -80,7 +85,7 @@ function registerEntry(id: string) {
 	return { customType: "pending:register", data: { id, type: "bash", name: "sleep 3600" } };
 }
 
-/** 送达消息 entry（custom_message 落盘形态，供双锚判重的「痕迹在」用例）。 */
+/** 送达消息 entry（custom_message 落盘形态，供痕迹判重的「痕迹在」用例）。 */
 function deliveredEntry(taskId: string) {
 	return {
 		type: "custom_message",
@@ -91,13 +96,17 @@ function deliveredEntry(taskId: string) {
 	};
 }
 
-function reconciledMarkerEntry(taskId: string) {
-	return { type: "custom", customType: RECONCILED_MARKER_CUSTOM_TYPE, data: { taskId, reconciledAt: 1 } };
+/** 旧版补投标记 entry（波 3 机制退役后判据不再消费——反向断言用）。 */
+function legacyMarkerEntry(taskId: string) {
+	return {
+		type: "custom",
+		customType: "background-bash:reconciled",
+		data: { taskId, reconciledAt: 1 },
+	};
 }
 
 afterEach(() => {
 	rmSync(DATA_DIR, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
-	resetRedeliveryInFlightForTest();
 	vi.clearAllMocks();
 });
 
@@ -164,7 +173,7 @@ describe("reconcile scenario ①: graceful-exit leftover (registry exited, entry
 		writeRegistryEntry(getRegistryPath(DATA_DIR, SESSION_ID), entry);
 		const pi = createMockPi();
 
-		const result = await reconcilePendingEntries(pi, DATA_DIR, SESSION_ID, [registerEntry(entry.taskId)]);
+		const result = await reconcilePendingEntries(pi, DATA_DIR, SESSION_ID, [registerEntry(entry.taskId)], undefined);
 
 		expect(result.reconciled).toBe(1);
 		// 落盘形态逐字段对齐 pending-notifications index.ts unregister listener：{id, reason, status}
@@ -185,7 +194,7 @@ describe("reconcile scenario ①: graceful-exit leftover (registry exited, entry
 		for (const [entry, expectedReason] of cases) {
 			writeRegistryEntry(getRegistryPath(DATA_DIR, SESSION_ID), entry);
 			const pi = createMockPi();
-			await reconcilePendingEntries(pi, DATA_DIR, SESSION_ID, [registerEntry(entry.taskId)]);
+			await reconcilePendingEntries(pi, DATA_DIR, SESSION_ID, [registerEntry(entry.taskId)], undefined);
 			// status 断言按「权威映射(reason)」而非 reason 本身表述（D10：identity 假设消除）
 			expect(pi.appendEntry).toHaveBeenCalledWith("pending:unregister", {
 				id: entry.taskId,
@@ -229,7 +238,7 @@ describe("reconcile scenario ②: collector-only orphan (registry orphaned, sess
 		writeRegistryEntry(getRegistryPath(DATA_DIR, SESSION_ID), entry);
 		const pi = createMockPi();
 
-		const result = await reconcilePendingEntries(pi, DATA_DIR, SESSION_ID, [registerEntry(entry.taskId)]);
+		const result = await reconcilePendingEntries(pi, DATA_DIR, SESSION_ID, [registerEntry(entry.taskId)], undefined);
 
 		expect(result.reconciled).toBe(1);
 		expect(pi.appendEntry).toHaveBeenCalledWith("pending:unregister", {
@@ -246,7 +255,7 @@ describe("reconcile scenario ③: running entry whose pid is already dead (fact-
 		writeRegistryEntry(getRegistryPath(DATA_DIR, SESSION_ID), entry);
 		const pi = createMockPi();
 
-		const result = await reconcilePendingEntries(pi, DATA_DIR, SESSION_ID, [registerEntry(entry.taskId)]);
+		const result = await reconcilePendingEntries(pi, DATA_DIR, SESSION_ID, [registerEntry(entry.taskId)], undefined);
 
 		expect(result.reconciled).toBe(1);
 		expect(pi.appendEntry).toHaveBeenCalledWith("pending:unregister", {
@@ -263,7 +272,7 @@ describe("conservative no-op paths", () => {
 		writeRegistryEntry(getRegistryPath(DATA_DIR, SESSION_ID), entry);
 		const pi = createMockPi();
 
-		const result = await reconcilePendingEntries(pi, DATA_DIR, SESSION_ID, [registerEntry(entry.taskId)]);
+		const result = await reconcilePendingEntries(pi, DATA_DIR, SESSION_ID, [registerEntry(entry.taskId)], undefined);
 
 		expect(result.reconciled).toBe(0);
 		expect(result.skipped).toEqual([entry.taskId]);
@@ -272,7 +281,7 @@ describe("conservative no-op paths", () => {
 
 	it("registry has no entry for the id → skip (terminal state unverifiable) + warn (decision-6 LRU observation)", async () => {
 		const pi = createMockPi();
-		const result = await reconcilePendingEntries(pi, DATA_DIR, SESSION_ID, [registerEntry("bt-unknown")]);
+		const result = await reconcilePendingEntries(pi, DATA_DIR, SESSION_ID, [registerEntry("bt-unknown")], undefined);
 		expect(result.reconciled).toBe(0);
 		expect(result.skipped).toEqual(["bt-unknown"]);
 		expect(pi.appendEntry).not.toHaveBeenCalled();
@@ -288,7 +297,7 @@ describe("conservative no-op paths", () => {
 		const result = await reconcilePendingEntries(pi, DATA_DIR, SESSION_ID, [
 			{ customType: "pending:register", data: { id: "bg-1", type: "subagent" } },
 			{ customType: "user" },
-		]);
+		], undefined);
 		expect(result.reconciled).toBe(0);
 		expect(result.skipped).toEqual([]);
 		expect(pi.appendEntry).not.toHaveBeenCalled();
@@ -304,7 +313,7 @@ describe("conservative no-op paths", () => {
 			registerEntry(entry.taskId),
 			{ customType: "pending:unregister", data: { id: entry.taskId, reason: "cancelled" } },
 			deliveredEntry(entry.taskId),
-		]);
+		], undefined);
 		expect(result.reconciled).toBe(0);
 		expect(pi.appendEntry).not.toHaveBeenCalledWith("pending:unregister", expect.anything());
 	});
@@ -314,13 +323,14 @@ describe("best-effort emit removed (ext-simplify-13 D5: appendEntry is the sole 
 	it("reconcile never touches pi.events (the emit path is deleted, not just disabled)", async () => {
 		const entry = makeRegistryEntry({ state: "orphaned" });
 		writeRegistryEntry(getRegistryPath(DATA_DIR, SESSION_ID), entry);
-		const pi = createMockPi();
+		const pi = createMockPi() as ReconcilePi & { events: { emit: ReturnType<typeof vi.fn> } };
+		pi.events = { emit: vi.fn() };
 
 		// 送达消息在（痕迹锚阻断补投）：appendEntry 恰 1 次 = 差集收尾的 unregister
 		await reconcilePendingEntries(pi, DATA_DIR, SESSION_ID, [
 			registerEntry(entry.taskId),
 			deliveredEntry(entry.taskId),
-		]);
+		], undefined);
 
 		expect(pi.appendEntry).toHaveBeenCalledTimes(1);
 		expect(pi.events.emit).not.toHaveBeenCalled();
@@ -343,7 +353,7 @@ describe("appendEntry failure tolerance", () => {
 		const result = await reconcilePendingEntries(pi, DATA_DIR, SESSION_ID, [
 			registerEntry(first.taskId),
 			registerEntry(second.taskId),
-		]);
+		], undefined);
 
 		expect(result.reconciled).toBe(1); // 仅 unregister 第二条成功计数
 		expect(result.skipped).toEqual([]);
@@ -351,391 +361,220 @@ describe("appendEntry failure tolerance", () => {
 });
 
 // ============================================================================
-// 补投执行器（bg-task-notify-durability 设计 §5 U2，决策 1-4）
+// 收殓终态通知补投（unified-delivery D3 裁决 1 / §5 波 3：对账路径 = 收殓终态
+// 通知的唯一生产者，载体 = port.deliver）
 // ============================================================================
 
-/** 终态真终态条目（exit 0 natural——补投矩阵的「真实完成」代表）。 */
-function genuineExitEntry(overrides: Partial<RegistryEntry> = {}): RegistryEntry {
-	return makeRegistryEntry({
-		taskId: "bt-1700000000-genu01",
-		state: "exited",
-		reason: "natural",
-		exitCode: 0,
-		durationMs: 192_000,
-		tailSummary: "Tests: 42 passed",
-		...overrides,
-	});
-}
-
-function lastSendMessageCall(pi: ReturnType<typeof createMockPi>): SendMessageMessage {
-	expect(pi.sendMessage).toHaveBeenCalled();
-	return (pi.sendMessage as ReturnType<typeof vi.fn>).mock.lastCall[0] as SendMessageMessage;
-}
-
-describe("redelivery: single-task message matrix (decision 4 three branches)", () => {
-	it("single genuine exit (natural): structured message identical to main path, details carried", async () => {
-		const entry = genuineExitEntry();
-		writeRegistryEntry(getRegistryPath(DATA_DIR, SESSION_ID), entry);
-		const pi = createMockPi();
-
-		const result = await reconcilePendingEntries(pi, DATA_DIR, SESSION_ID, []);
-
-		expect(result.redelivered).toEqual([entry.taskId]);
-		expect(pi.sendMessage).toHaveBeenCalledTimes(1);
-		const message = lastSendMessageCall(pi);
-		expect(message.customType).toBe(BACKGROUND_BASH_CUSTOM_TYPE);
-		expect(message.content).toContain(`${entry.taskId} finished (exit 0, 3m12s)`);
-		expect(message.content).toContain("Last lines: Tests: 42 passed");
-		expect(message.content).toContain(`use bash_output {task_id:"${entry.taskId}"}`);
-		// 结构化载荷与主路径 buildNotifyDetails 同源（SystemNotice 渲染正常）
-		expect(message.details).toEqual({
-			taskId: entry.taskId,
-			command: entry.command,
-			durationMs: 192_000,
-			endReason: "natural",
-			exitCode: 0,
-		});
-	});
-
-	it("single genuine exit (timeout): details.endReason = timeout", async () => {
-		const entry = genuineExitEntry({ taskId: "bt-1700000000-time01", reason: "timeout", exitCode: null, tailSummary: undefined });
-		writeRegistryEntry(getRegistryPath(DATA_DIR, SESSION_ID), entry);
-		const pi = createMockPi();
-
-		await reconcilePendingEntries(pi, DATA_DIR, SESSION_ID, []);
-
-		const message = lastSendMessageCall(pi);
-		expect(message.content).toContain("timed out");
-		expect(message.details).toMatchObject({ taskId: entry.taskId, endReason: "timeout", exitCode: null });
-	});
-
-	it("single orphaned: terminated wording, no details, no duration (decision 3)", async () => {
+describe("reap-notify: candidates (reaped terminal × trace absent) via port.deliver", () => {
+	it("single orphaned: one deliver per task with id=taskId, terminated wording, NO details", async () => {
 		const entry = makeRegistryEntry({ taskId: "bt-1700000000-orph01", state: "orphaned" });
 		writeRegistryEntry(getRegistryPath(DATA_DIR, SESSION_ID), entry);
 		const pi = createMockPi();
+		const deliver = createMockDeliver();
 
-		await reconcilePendingEntries(pi, DATA_DIR, SESSION_ID, []);
+		const result = await reconcilePendingEntries(pi, DATA_DIR, SESSION_ID, [], deliver);
 
-		const message = lastSendMessageCall(pi);
-		expect(message.content).toContain(`${entry.taskId} was terminated when the session went down (exit code unknown)`);
-		expect(message.content).toContain(`Output file: ${entry.outputFile}`);
-		expect(message.content).toContain("use bash_output to check the output before rerunning");
-		expect(message.details).toBeUndefined();
-		// 省略时长：orphaned 的 durationMs 含属主死后滞留时长，展示误导
-		expect(message.content).not.toMatch(/\d+[smh]/);
+		expect(deliver).toHaveBeenCalledTimes(1);
+		const envelope = deliver.mock.calls[0][0] as DeliverEnvelope;
+		expect(envelope.id).toBe(entry.taskId);
+		expect(envelope.timing).toBe("steer");
+		expect(envelope.payload.customType).toBe(BACKGROUND_BASH_CUSTOM_TYPE);
+		expect(envelope.payload.display).toBe(true);
+		expect(envelope.payload.content).toContain(
+			`${entry.taskId} was terminated when the session went down (exit code unknown)`,
+		);
+		expect(envelope.payload.content).toContain(`Output file: ${entry.outputFile}`);
+		expect(envelope.payload.content).toContain("use bash_output to check the output before rerunning");
+		// 收殓终态无业务 details（old decision 3 保持：无时长、不谎报成败）
+		expect(envelope.payload).not.toHaveProperty("details");
+		expect(envelope.payload.content).not.toMatch(/\d+[smh]/);
+		expect(result.redelivered).toEqual([entry.taskId]);
 	});
 
-	it("single exited process-exit: same terminated wording (not failed/exit unknown)", async () => {
-		const entry = genuineExitEntry({ taskId: "bt-1700000000-pexit1", reason: "process-exit", exitCode: null, tailSummary: undefined });
-		writeRegistryEntry(getRegistryPath(DATA_DIR, SESSION_ID), entry);
-		const pi = createMockPi();
-
-		await reconcilePendingEntries(pi, DATA_DIR, SESSION_ID, []);
-
-		const message = lastSendMessageCall(pi);
-		expect(message.content).toContain("was terminated when the session went down");
-		expect(message.details).toBeUndefined();
-		// 不谎报：收殓终止不渲染成主路径的 failed/finished 形态
-		expect(message.content).not.toContain("failed (exit");
-		expect(message.content).not.toContain("finished (exit");
-	});
-});
-
-describe("redelivery: multi-task merge (decision 4 merge branch)", () => {
-	it("multiple tasks merge into ONE message, no details, genuine-exit rows keep main-path wording", async () => {
-		const natural = genuineExitEntry();
-		const timeout = genuineExitEntry({
-			taskId: "bt-1700000000-time02",
-			reason: "timeout",
+	it("single exited process-exit: same terminated wording (not failed/finished)", async () => {
+		const entry = makeRegistryEntry({
+			taskId: "bt-1700000000-pexit1",
+			state: "exited",
+			reason: "process-exit",
 			exitCode: null,
-			tailSummary: undefined,
 		});
-		const orphaned = makeRegistryEntry({ taskId: "bt-1700000000-orph02", state: "orphaned" });
-		writeRegistryEntry(getRegistryPath(DATA_DIR, SESSION_ID), natural);
-		writeRegistryEntry(getRegistryPath(DATA_DIR, SESSION_ID), timeout);
-		writeRegistryEntry(getRegistryPath(DATA_DIR, SESSION_ID), orphaned);
-		const pi = createMockPi();
+		writeRegistryEntry(getRegistryPath(DATA_DIR, SESSION_ID), entry);
+		const deliver = createMockDeliver();
 
-		const result = await reconcilePendingEntries(pi, DATA_DIR, SESSION_ID, []);
+		await reconcilePendingEntries(createMockPi(), DATA_DIR, SESSION_ID, [], deliver);
 
-		// 合并单条：不是 N 个任务 N 条消息 N 个 turn
-		expect(pi.sendMessage).toHaveBeenCalledTimes(1);
-		expect(result.redelivered).toEqual([natural.taskId, timeout.taskId, orphaned.taskId]);
-		const message = lastSendMessageCall(pi);
-		expect(message.details).toBeUndefined();
-		// 真终态行复用 buildNotificationContent 的 content 文本（禁止套 terminated 措辞谎报）
-		expect(message.content).toContain(`${natural.taskId} finished (exit 0, 3m12s)`);
-		expect(message.content).toContain(`${timeout.taskId} timed out`);
-		expect(message.content).not.toContain(`${natural.taskId} was terminated`);
-		expect(message.content).not.toContain(`${timeout.taskId} was terminated`);
-		// 收殓终态行用 terminated 措辞
-		expect(message.content).toContain(`${orphaned.taskId} was terminated when the session went down`);
+		const envelope = deliver.mock.calls[0][0] as DeliverEnvelope;
+		expect(envelope.payload.content).toContain("was terminated when the session went down");
+		// 不谎报：收殓终止不渲染成主路径的 failed/finished 形态
+		expect(envelope.payload.content).not.toContain("failed (exit");
+		expect(envelope.payload.content).not.toContain("finished (exit");
 	});
-});
 
-describe("redelivery: success settles the reconciled marker (decision 1 anchor ③)", () => {
-	it("sendMessage resolve → one marker entry appended per task, synchronously", async () => {
-		const first = genuineExitEntry();
-		const second = makeRegistryEntry({ taskId: "bt-1700000000-orph03", state: "orphaned" });
+	it("multiple reaped tasks: per-task deliver (merge branch retired — one id one envelope for port idempotency)", async () => {
+		const first = makeRegistryEntry({ taskId: "bt-1700000000-orph02", state: "orphaned" });
+		const second = makeRegistryEntry({ taskId: "bt-1700000000-pexit2", state: "exited", reason: "process-exit", exitCode: null });
 		writeRegistryEntry(getRegistryPath(DATA_DIR, SESSION_ID), first);
 		writeRegistryEntry(getRegistryPath(DATA_DIR, SESSION_ID), second);
-		const pi = createMockPi();
+		const deliver = createMockDeliver();
 
-		await reconcilePendingEntries(pi, DATA_DIR, SESSION_ID, []);
+		const result = await reconcilePendingEntries(createMockPi(), DATA_DIR, SESSION_ID, [], deliver);
 
-		expect(pi.sendMessage).toHaveBeenCalledTimes(1);
-		expect(pi.appendEntry).toHaveBeenCalledWith(RECONCILED_MARKER_CUSTOM_TYPE, {
-			taskId: first.taskId,
-			reconciledAt: expect.any(Number),
-		});
-		expect(pi.appendEntry).toHaveBeenCalledWith(RECONCILED_MARKER_CUSTOM_TYPE, {
-			taskId: second.taskId,
-			reconciledAt: expect.any(Number),
-		});
-		// 补投绝不代写 pending:unregister（决策 2：收尾归差集循环唯一写点）
-		expect(pi.appendEntry).not.toHaveBeenCalledWith("pending:unregister", expect.anything());
-	});
-
-	it("one marker appendEntry throw does not block the other tasks' markers", async () => {
-		const first = genuineExitEntry();
-		const second = makeRegistryEntry({ taskId: "bt-1700000000-orph04", state: "orphaned" });
-		writeRegistryEntry(getRegistryPath(DATA_DIR, SESSION_ID), first);
-		writeRegistryEntry(getRegistryPath(DATA_DIR, SESSION_ID), second);
-		const appendEntry = vi.fn((customType: string, data?: unknown) => {
-			if (customType === RECONCILED_MARKER_CUSTOM_TYPE && (data as { taskId: string }).taskId === first.taskId) {
-				throw new Error("marker append failed");
-			}
-		});
-		const pi = createMockPi({ appendEntry });
-
-		await reconcilePendingEntries(pi, DATA_DIR, SESSION_ID, []);
-
-		expect(appendEntry).toHaveBeenCalledWith(RECONCILED_MARKER_CUSTOM_TYPE, {
-			taskId: second.taskId,
-			reconciledAt: expect.any(Number),
-		});
-		// 失败可观察（含 taskId 与类别）
-		expect(loggerMock.warn).toHaveBeenCalledWith(
-			"background task notify reconciled marker appendEntry failed; redelivery may repeat on next session_start",
-			{ detail: { taskId: first.taskId, err: "marker append failed" } },
+		// 逐任务信封（旧合并单条形态退役）：port 幂等键/送达凭据/差集销账全链锚定
+		// 「单 id 单消息」——合并形态需造合成 id 且部分销账必然双投
+		expect(deliver).toHaveBeenCalledTimes(2);
+		const envelopes = deliver.mock.calls.map(
+			(c) => c[0] as DeliverEnvelope,
 		);
+		expect(envelopes.map((e) => e.id)).toEqual([first.taskId, second.taskId]);
+		for (const envelope of envelopes) {
+			expect(envelope.payload.content).toContain(`${envelope.id} was terminated`);
+		}
+		expect(result.redelivered).toEqual([first.taskId, second.taskId]);
 	});
 });
 
-describe("redelivery: failure paths write NO marker (retry on next session_start)", () => {
-	it("synchronous sendMessage throw → warn with category, no marker", async () => {
-		const entry = genuineExitEntry();
-		writeRegistryEntry(getRegistryPath(DATA_DIR, SESSION_ID), entry);
-		const sendMessage = vi.fn<[], void | Promise<void>>(() => {
-			throw new Error("stale bus");
+describe("reap-notify: exclusion criteria (real terminal retired, killed/active excluded, trace blocks)", () => {
+	it("exited natural (real terminal) is NOT re-notified — outbox replay owns it now (wave-3 retirement)", async () => {
+		const entry = makeRegistryEntry({
+			taskId: "bt-1700000000-genu01",
+			state: "exited",
+			reason: "natural",
+			exitCode: 0,
+			durationMs: 192_000,
 		});
-		const pi = createMockPi({ sendMessage });
-
-		const result = await reconcilePendingEntries(pi, DATA_DIR, SESSION_ID, []);
-
-		expect(result.redelivered).toEqual([]);
-		expect(pi.appendEntry).not.toHaveBeenCalled();
-		expect(loggerMock.warn).toHaveBeenCalledWith(
-			"background task notify redelivery sendMessage threw synchronously; no marker written, retry on next session_start",
-			{ detail: { taskIds: [entry.taskId], err: "stale bus" } },
-		);
-	});
-
-	it("await sendMessage rejection → warn with category, no marker", async () => {
-		const entry = genuineExitEntry({ taskId: "bt-1700000000-rej001" });
 		writeRegistryEntry(getRegistryPath(DATA_DIR, SESSION_ID), entry);
-		const sendMessage = vi.fn<[], void | Promise<void>>(() => Promise.reject(new Error("agent loop failed")));
-		const pi = createMockPi({ sendMessage });
+		const deliver = createMockDeliver();
 
-		const result = await reconcilePendingEntries(pi, DATA_DIR, SESSION_ID, []);
+		const result = await reconcilePendingEntries(createMockPi(), DATA_DIR, SESSION_ID, [], deliver);
 
-		expect(result.redelivered).toEqual([]);
-		expect(pi.appendEntry).not.toHaveBeenCalled();
-		expect(loggerMock.warn).toHaveBeenCalledWith(
-			"background task notify redelivery sendMessage rejected; no marker written, retry on next session_start",
-			{ detail: { taskIds: [entry.taskId], err: "agent loop failed" } },
-		);
-	});
-
-	it("redelivery failure does not block the pending diff pass (unconditional diff settle)", async () => {
-		const entry = genuineExitEntry();
-		writeRegistryEntry(getRegistryPath(DATA_DIR, SESSION_ID), entry);
-		const sendMessage = vi.fn<[], void | Promise<void>>(() => {
-			throw new Error("stale bus");
-		});
-		const pi = createMockPi({ sendMessage });
-
-		const result = await reconcilePendingEntries(pi, DATA_DIR, SESSION_ID, [registerEntry(entry.taskId)]);
-
-		// 差集收尾无条件执行（幂等语义不依赖补投成败）
-		expect(result.reconciled).toBe(1);
-		expect(pi.appendEntry).toHaveBeenCalledWith("pending:unregister", expect.anything());
-	});
-});
-
-describe("redelivery: exclusion criteria (decision 2 strict terminal + killed reason-level)", () => {
-	it("exited reason=killed is NOT redelivered (state-level filter cannot exclude it)", async () => {
-		const entry = genuineExitEntry({ taskId: "bt-1700000000-kill01", reason: "killed", exitCode: null, tailSummary: undefined });
-		writeRegistryEntry(getRegistryPath(DATA_DIR, SESSION_ID), entry);
-		const pi = createMockPi();
-
-		const result = await reconcilePendingEntries(pi, DATA_DIR, SESSION_ID, []);
-
-		expect(pi.sendMessage).not.toHaveBeenCalled();
+		// 主路径丢失两形态（投递 throw / 落盘后崩溃）由 port outbox 差集重放覆盖
+		// （delivery-port 包测试锁定）；对账补投不再兜它们（D3 裁决 1 波 3）
+		expect(deliver).not.toHaveBeenCalled();
 		expect(result.redelivered).toEqual([]);
 	});
 
-	it("killing leftover with dead pid is NOT redelivered (wide isTerminalByRegistry would; strict state filter refuses)", async () => {
+	it("exited timeout (real terminal) is NOT re-notified either", async () => {
+		const entry = makeRegistryEntry({ taskId: "bt-1700000000-time01", state: "exited", reason: "timeout", exitCode: null });
+		writeRegistryEntry(getRegistryPath(DATA_DIR, SESSION_ID), entry);
+		const deliver = createMockDeliver();
+
+		await reconcilePendingEntries(createMockPi(), DATA_DIR, SESSION_ID, [], deliver);
+
+		expect(deliver).not.toHaveBeenCalled();
+	});
+
+	it("exited reason=killed is NOT re-notified (excluded via the process-exit-only branch — silent rule)", async () => {
+		const entry = makeRegistryEntry({ taskId: "bt-1700000000-kill01", state: "exited", reason: "killed", exitCode: null });
+		writeRegistryEntry(getRegistryPath(DATA_DIR, SESSION_ID), entry);
+		const deliver = createMockDeliver();
+
+		const result = await reconcilePendingEntries(createMockPi(), DATA_DIR, SESSION_ID, [], deliver);
+
+		expect(deliver).not.toHaveBeenCalled();
+		expect(result.redelivered).toEqual([]);
+	});
+
+	it("killing leftover with dead pid is NOT re-notified (strict terminal filter; unregister settle covers)", async () => {
 		const entry = makeRegistryEntry({ taskId: "bt-1700000000-killg01", state: "killing", pid: deadPid() });
 		writeRegistryEntry(getRegistryPath(DATA_DIR, SESSION_ID), entry);
-		const pi = createMockPi();
+		const deliver = createMockDeliver();
 
 		// 差集侧：宽判据把 killing+判死当事实终态收尾 unregister（既有语义保持）
-		const result = await reconcilePendingEntries(pi, DATA_DIR, SESSION_ID, [registerEntry(entry.taskId)]);
+		const result = await reconcilePendingEntries(createMockPi(), DATA_DIR, SESSION_ID, [registerEntry(entry.taskId)], deliver);
 		expect(result.reconciled).toBe(1);
 		// 补投侧：killing 遗留实为被杀任务，不补投
-		expect(pi.sendMessage).not.toHaveBeenCalled();
+		expect(deliver).not.toHaveBeenCalled();
 	});
 
-	it("running leftover with dead pid is NOT redelivered (exit-edge write-failure domain, unregister covers)", async () => {
+	it("running leftover with dead pid is NOT re-notified (exit-edge write-failure domain, unregister covers)", async () => {
 		const entry = makeRegistryEntry({ taskId: "bt-1700000000-rund01", state: "running", pid: deadPid() });
 		writeRegistryEntry(getRegistryPath(DATA_DIR, SESSION_ID), entry);
-		const pi = createMockPi();
+		const deliver = createMockDeliver();
 
-		// 差集侧：宽判据把 running+判死当事实终态收尾 unregister（既有语义保持）
-		const result = await reconcilePendingEntries(pi, DATA_DIR, SESSION_ID, [registerEntry(entry.taskId)]);
+		const result = await reconcilePendingEntries(createMockPi(), DATA_DIR, SESSION_ID, [registerEntry(entry.taskId)], deliver);
 		expect(result.reconciled).toBe(1);
-		// 补投侧：严格终态过滤排除（退化现状行为，由 unregister 收尾兜底）
-		expect(pi.sendMessage).not.toHaveBeenCalled();
+		expect(deliver).not.toHaveBeenCalled();
 	});
 
-	it("delivered trace present (normal delivery message in entries) → no redelivery", async () => {
-		const entry = genuineExitEntry();
+	it("delivered trace present (notify message in entries) → no re-notify", async () => {
+		const entry = makeRegistryEntry({ taskId: "bt-1700000000-have01", state: "orphaned" });
 		writeRegistryEntry(getRegistryPath(DATA_DIR, SESSION_ID), entry);
-		const pi = createMockPi();
+		const deliver = createMockDeliver();
 
-		const result = await reconcilePendingEntries(pi, DATA_DIR, SESSION_ID, [deliveredEntry(entry.taskId)]);
+		const result = await reconcilePendingEntries(createMockPi(), DATA_DIR, SESSION_ID, [deliveredEntry(entry.taskId)], deliver);
 
-		expect(pi.sendMessage).not.toHaveBeenCalled();
+		expect(deliver).not.toHaveBeenCalled();
 		expect(result.redelivered).toEqual([]);
 	});
 
-	it("reconciled marker present → no redelivery (cross-activation convergence)", async () => {
-		const entry = genuineExitEntry({ taskId: "bt-1700000000-mark01" });
+	it("legacy reconciled marker present WITHOUT trace → still re-notified (marker retired; lost message re-delivered)", async () => {
+		// 波 3 反向锁：旧 marker 不再是判据——「marker 写了但消息实际丢失」的旧机制
+		// 残余失败域（旧决策 6 登记边界）在痕迹判据下被顺带修复
+		const entry = makeRegistryEntry({ taskId: "bt-1700000000-mark01", state: "orphaned" });
 		writeRegistryEntry(getRegistryPath(DATA_DIR, SESSION_ID), entry);
-		const pi = createMockPi();
+		const deliver = createMockDeliver();
 
-		const result = await reconcilePendingEntries(pi, DATA_DIR, SESSION_ID, [reconciledMarkerEntry(entry.taskId)]);
+		const result = await reconcilePendingEntries(createMockPi(), DATA_DIR, SESSION_ID, [legacyMarkerEntry(entry.taskId)], deliver);
 
-		expect(pi.sendMessage).not.toHaveBeenCalled();
-		expect(result.redelivered).toEqual([]);
+		expect(deliver).toHaveBeenCalledTimes(1);
+		expect(result.redelivered).toEqual([entry.taskId]);
 	});
 
-	it("non-terminal-looking registry only: running with live pid and no pending diff → nothing at all", async () => {
+	it("non-reaped registry only: running with live pid and no pending diff → nothing at all", async () => {
 		const entry = makeRegistryEntry({ taskId: "bt-1700000000-live01", state: "running", pid: process.pid });
 		writeRegistryEntry(getRegistryPath(DATA_DIR, SESSION_ID), entry);
-		const pi = createMockPi();
+		const deliver = createMockDeliver();
 
-		const result = await reconcilePendingEntries(pi, DATA_DIR, SESSION_ID, []);
+		const result = await reconcilePendingEntries(createMockPi(), DATA_DIR, SESSION_ID, [], deliver);
 
-		expect(pi.sendMessage).not.toHaveBeenCalled();
+		expect(deliver).not.toHaveBeenCalled();
 		expect(result.reconciled).toBe(0);
 	});
 });
 
-describe("redelivery: double-dispatch idempotence (design P5, decision 1 guards)", () => {
-	it("second pass after settled first pass sees the marker and skips (cross-pass convergence)", async () => {
-		const entry = genuineExitEntry({ taskId: "bt-1700000000-dbl001" });
+describe("reap-notify: receipt handling & port absence (idempotence owned by port)", () => {
+	it("swallowed receipt (port idempotency hit) → not counted, silent (normal convergence)", async () => {
+		const entry = makeRegistryEntry({ taskId: "bt-1700000000-dbl001", state: "orphaned" });
 		writeRegistryEntry(getRegistryPath(DATA_DIR, SESSION_ID), entry);
+		const deliver = createMockDeliver("swallowed");
 
-		const firstPi = createMockPi();
-		await reconcilePendingEntries(firstPi, DATA_DIR, SESSION_ID, []);
-		expect(firstPi.sendMessage).toHaveBeenCalledTimes(1);
+		const result = await reconcilePendingEntries(createMockPi(), DATA_DIR, SESSION_ID, [], deliver);
 
-		// 双派发第二路（同激活毫秒级到达）——appendEntry 同步入账（pi dist 实证），第二路
-		// 读到的 entries 已含第一路落的标记，三判据不再全命中
-		const secondPi = createMockPi();
-		await reconcilePendingEntries(secondPi, DATA_DIR, SESSION_ID, [reconciledMarkerEntry(entry.taskId)]);
-		expect(secondPi.sendMessage).not.toHaveBeenCalled();
-		expect(secondPi.appendEntry).not.toHaveBeenCalled();
-	});
-
-	it("second pass during first pass's await window sees in-flight and skips; diff pass unaffected", async () => {
-		const entry = genuineExitEntry({ taskId: "bt-1700000000-infl01" });
-		writeRegistryEntry(getRegistryPath(DATA_DIR, SESSION_ID), entry);
-
-		// 未 resolve 的 sendMessage mock 驱动 in-flight 分支：第一路停在 await 窗口内
-		let release!: () => void;
-		const gate = new Promise<void>((resolve) => {
-			release = resolve;
-		});
-		const sendMessage = vi.fn<[], void | Promise<void>>(() => gate);
-		const firstPi = createMockPi({ sendMessage });
-
-		const first = reconcilePendingEntries(firstPi, DATA_DIR, SESSION_ID, [registerEntry(entry.taskId)]);
-		expect(sendMessage).toHaveBeenCalledTimes(1); // 同步段已到投递点并挂起
-
-		// 双派发第二路：in-flight 键控命中 → 补投跳过；差集循环照常收尾（跳过粒度仅补投扫描）
-		const secondPi = createMockPi();
-		await reconcilePendingEntries(secondPi, DATA_DIR, SESSION_ID, [registerEntry(entry.taskId)]);
-		expect(sendMessage).toHaveBeenCalledTimes(1);
-		expect(secondPi.appendEntry).toHaveBeenCalledWith("pending:unregister", expect.anything());
-		// 第二路未写任何补投标记
-		expect(secondPi.appendEntry).not.toHaveBeenCalledWith(RECONCILED_MARKER_CUSTOM_TYPE, expect.anything());
-		// 跳过记 debug（决策 6 in-flight 残留边界观测落点）
-		expect(loggerMock.debug).toHaveBeenCalledWith(
-			"background task notify redelivery in-flight; skipping duplicate reconcile pass",
-			{ detail: { taskId: entry.taskId } },
-		);
-
-		// 第一路 settle：resolve 后同步写标记 + finally 摘除
-		release();
-		await first;
-		expect(firstPi.appendEntry).toHaveBeenCalledWith(RECONCILED_MARKER_CUSTOM_TYPE, {
-			taskId: entry.taskId,
-			reconciledAt: expect.any(Number),
-		});
-		expect(loggerMock.debug).toHaveBeenCalledWith(
-			"background task notify redelivery settled; in-flight guard released",
-			{ detail: { taskId: entry.taskId } },
+		expect(deliver).toHaveBeenCalledTimes(1);
+		expect(result.redelivered).toEqual([]);
+		expect(loggerMock.warn).not.toHaveBeenCalledWith(
+			"pending reconcile reap-notify rejected by delivery port; retried next session_start",
+			expect.anything(),
 		);
 	});
 
-	it("in-flight guard is released after failure too (settle via finally, retry possible next pass)", async () => {
-		const entry = genuineExitEntry({ taskId: "bt-1700000000-fl001" });
+	it("rejected receipt (not journaled) → warn with taskId, retried next session_start", async () => {
+		const entry = makeRegistryEntry({ taskId: "bt-1700000000-rej001", state: "orphaned" });
 		writeRegistryEntry(getRegistryPath(DATA_DIR, SESSION_ID), entry);
+		const deliver = createMockDeliver("rejected");
 
-		let rejectSent!: (err: Error) => void;
-		const gate = new Promise<void>((_resolve, reject) => {
-			rejectSent = reject;
-		});
-		const sendMessage = vi.fn<[], void | Promise<void>>(() => gate);
-		const firstPi = createMockPi({ sendMessage });
+		const result = await reconcilePendingEntries(createMockPi(), DATA_DIR, SESSION_ID, [], deliver);
 
-		const first = reconcilePendingEntries(firstPi, DATA_DIR, SESSION_ID, []);
-		rejectSent(new Error("agent loop failed"));
-		await first;
-		expect(firstPi.appendEntry).not.toHaveBeenCalled();
-
-		// 守卫已摘除：下一次激活（失败路径未写标记，判据仍命中）可重试
-		const retryPi = createMockPi();
-		const retry = await reconcilePendingEntries(retryPi, DATA_DIR, SESSION_ID, []);
-		expect(retryPi.sendMessage).toHaveBeenCalledTimes(1);
-		expect(retry.redelivered).toEqual([entry.taskId]);
+		expect(result.redelivered).toEqual([]);
+		expect(loggerMock.warn).toHaveBeenCalledWith(
+			"pending reconcile reap-notify rejected by delivery port; retried next session_start",
+			{ detail: { taskId: entry.taskId, reason: "persist-failed" } },
+		);
 	});
 
-	it("delivery marker dedupe is keyed by taskId: other pending tasks still redeliver in the same pass", async () => {
-		const delivered = genuineExitEntry({ taskId: "bt-1700000000-have01" });
-		const fresh = genuineExitEntry({ taskId: "bt-1700000000-fresh1" });
-		writeRegistryEntry(getRegistryPath(DATA_DIR, SESSION_ID), delivered);
-		writeRegistryEntry(getRegistryPath(DATA_DIR, SESSION_ID), fresh);
+	it("delivery port absent → warn once, zero submission; pending diff pass unaffected", async () => {
+		const entry = makeRegistryEntry({ taskId: "bt-1700000000-abs001", state: "orphaned" });
+		writeRegistryEntry(getRegistryPath(DATA_DIR, SESSION_ID), entry);
 		const pi = createMockPi();
 
-		const result = await reconcilePendingEntries(pi, DATA_DIR, SESSION_ID, [deliveredEntry(delivered.taskId)]);
+		const result = await reconcilePendingEntries(pi, DATA_DIR, SESSION_ID, [registerEntry(entry.taskId)], undefined);
 
-		expect(result.redelivered).toEqual([fresh.taskId]);
-		const message = lastSendMessageCall(pi);
-		expect(message.content).toContain(fresh.taskId);
-		expect(message.content).not.toContain(`${delivered.taskId} finished`);
+		expect(loggerMock.warn).toHaveBeenCalledWith(
+			"pending reconcile reap-notify skipped: delivery port absent (assembly anomaly?); retried next session_start",
+		);
+		expect(result.redelivered).toEqual([]);
+		// 差集收尾无条件执行（缺席只影响补投，不拖垮对账）
+		expect(result.reconciled).toBe(1);
+		expect(pi.appendEntry).toHaveBeenCalledWith("pending:unregister", expect.anything());
 	});
 });

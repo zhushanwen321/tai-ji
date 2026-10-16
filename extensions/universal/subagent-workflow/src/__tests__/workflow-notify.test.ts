@@ -14,29 +14,28 @@
 //   - M10 源码锚定（boundedPrettySerialize 调用点守卫，bounded 性能契约唯一防线）
 //     ← robustness-medium-batch2-interface.test.ts
 //
-// [u9] notifyDone 账本化（C-ext-19 迁移——实施计划 u9 验收条款 ③ 的 mock 轨证据面，
-// S7 断连重放真机验收前置）。账本路径覆盖验收面：
-//   - 账本路径接线：写账（notifyId = wf-done:<runId>）→ courier 投递，送达通道
-//     保持 "workflow-result"（runtime W18 workflow-record 失效信号的前提）、
-//     content 字节不变（G4）、pi.sendMessage 零调用
+// [unified-delivery 波 2] notifyDone 投递路径切 pi 半区投递端口（C-ext-19 语义由
+// port 内包：受理前落投递日志 + notifyId 幂等 + details-id 送达凭据 + session_start
+// 差集重放）。本文件覆盖验收面：
+//   - port 主投接线：port.deliver（id = wf-done:<runId>），送达通道保持
+//     "workflow-result"（runtime W18 workflow-record 失效信号的前提）、content
+//     字节不变（G4）、pi.sendMessage 零调用
 //   - 幂等键拒绝：同一 runId 重复 notifyDone（绕过内存 Set 层）不双投递
-//   - 回执销账：settled 边沿扫到送达 entry → ack → 同 runId 再收口零投递
-//   - 未-ack 重放恰好一次（at-least-once + 去重）：投递受理但回执不可达（模拟
-//     relay 瞬断消息丢失）→ 账本恢复重放恰好一次，二次恢复零重放
-//   - 已销账恢复零重发：正常送达 + 销账后重启恢复零重放
-//   - 降级路径：ledger 未 bind → fire-once 直发（triggerTurn 单通道，无 deliverAs）
+//   - port rejected：error 留痕（已知丢失面）+ 去重不标记（重复收口可重试）
+//   - [回执销账 / 重放随账本退役] 送达判定与重启恢复由 port 内包——行为锁在
+//     pi-delivery-port 套件（「四步对位」/「session_start 差集重放」段），本文件
+//     不重复设条
+//   - 降级路径：port 缺席（装配异常窗口）→ fire-once 直发 + warn（triggerTurn
+//     单通道，无 deliverAs）
 //
-// 形态参照：core notify-ledger.test.ts 的 mock host（entries/sessionEntries/
-// sentMessages/settledHandlers 同构）+ helpers-gui.test.ts 的 RunMock duck typing。
-// 账本常量（NOTIFY_LEDGER_CUSTOM_TYPE 等）core 包出口未导出——本地镜像（同
-// helpers-gui.test.ts「内联镜像」惯例；账本 entry customType 值由 core 契约钉死，
-// 漂移时 core 自有用例先红）。
+// 形态参照：helpers-gui.test.ts 的 RunMock duck typing + notifier.test.ts 的
+// fake port（deliver 消费面）。
 //
-// mock 面单一定义：RunMock / makePi / LedgerHostMock 各一处（makePi 可注入
-// sendMessage 实现——stale 守卫用例经此注入抛错形态）。「无绑定环境」前置由
-// 文件级 afterEach 构造性保证（每用例后摘除模块级 ledger 绑定），不依赖
-// describe 声明顺序——账本路径用例 bind 后，降级直发 / GUI / stale / bounded
-// 用例恒从无绑定状态起步。
+// mock 面单一定义：RunMock / makePi / FakePortMock 各一处（makePi 可注入
+// sendMessage 实现——stale 守卫用例经此注入抛错形态）。「port 缺席」前置由
+// 文件级 afterEach 构造性保证（每用例后重置端口注入），不依赖 describe 声明
+// 顺序——port 路径用例注入后，降级直发 / GUI / stale / bounded 用例恒从缺席
+// 状态起步。
 
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -56,19 +55,19 @@ vi.mock("@zhushanwen/pi-extension-logger", () => ({
   setPiHandle: vi.fn(),
 }));
 
-import { bindNotifyLedgerHost, getBoundNotifyLedger, type NotifyLedgerHost } from "@zhushanwen/subagent-core";
+import type { DeliveryPortHandle } from "@zhushanwen/pi-delivery-port";
 
 import {
+import { DELIVERY_PORT_SLOT_KEY } from "@zhushanwen/pi-delivery-port";
   MAX_NOTIFIED_RUN_IDS,
   notifyDone,
   trackNotifiedRunId,
   WORKFLOW_DONE_NOTIFY_ID_PREFIX,
 } from "../workflow-notify.ts";
 
-// ── core 账本常量镜像（见文件头说明） ──────────────────────────
+// ── 通道词表（extension-protocol SSOT 值的本地镜像；值锚定锁 =
+// contract.notify-custom-types.test.ts） ──────────────────────────
 
-const NOTIFY_LEDGER_CUSTOM_TYPE = "subagent-bg-notify-ledger";
-const NOTIFY_ACK_CUSTOM_TYPE = "subagent-bg-notify-ack";
 const WORKFLOW_RESULT_CUSTOM_TYPE = "workflow-result";
 
 /** pi 实装 stale 文案的完整形态（E1 崩溃堆栈原文，探针 PS-30 守卫其稳定性）。 */
@@ -134,84 +133,56 @@ function sentDetails(sendMessage: ReturnType<typeof vi.fn>, call = 0): unknown {
   return (sendMessage.mock.calls[call] as [{ details: unknown }])[0].details;
 }
 
-type LedgerHostMock = {
-  host: NotifyLedgerHost;
-  /** appendLedgerEntry 落下的 plain custom entry（ledger/ack 列）。 */
-  entries: { type: string; customType: string; data?: Record<string, unknown> }[];
-  /** session entries 视图（回执/恢复扫描输入；与 entries 共享数组）。 */
-  sessionEntries: unknown[];
-  /** 送达消息（sendDelivery 调用）。 */
+type FakePortMock = {
+  handle: DeliveryPortHandle;
+  /** port.deliver 受理的注入消息（从 envelope 还原——断言面与原 sentMessages 同形）。 */
   sentMessages: { customType: string; content: string; display: boolean; details?: unknown }[];
-  settledHandlers: Array<() => void>;
-  setIdle(idle: boolean): void;
-  /** 送达是否同步落盘为 custom_message entry（false = 模拟回执不可达）。 */
-  deliverPersists: { value: boolean };
+  /** 下一次 deliver 返回 rejected（persist-failed 形态）。 */
+  rejectNext: () => void;
 };
 
-function makeLedgerHost(): LedgerHostMock {
-  const entries: LedgerHostMock["entries"] = [];
-  const sessionEntries: unknown[] = entries;
-  const sentMessages: LedgerHostMock["sentMessages"] = [];
-  const settledHandlers: Array<() => void> = [];
-  const idle = { value: true };
-  const deliverPersists = { value: true };
-  const host: NotifyLedgerHost = {
-    appendLedgerEntry: (customType, data) => {
-      entries.push({ type: "custom", customType, data: data as Record<string, unknown> | undefined });
-    },
-    readSessionEntries: () => sessionEntries,
-    isIdle: () => idle.value,
-    onAgentSettled: (handler) => {
-      settledHandlers.push(handler);
-    },
-    sendDelivery: (message) => {
-      sentMessages.push(message);
-      if (deliverPersists.value) {
-        sessionEntries.push({
-          type: "custom_message",
-          customType: message.customType,
-          content: message.content,
-          display: message.display,
-          details: message.details,
-        });
+/** fake 投递端口（deliver 消费面：同 id 幂等吞 + 受理即记录；port 本体行为由
+ *  pi-delivery-port 套件锁定）。 */
+function makeFakePort(): FakePortMock {
+  const seen = new Set<string>();
+  const sentMessages: FakePortMock["sentMessages"] = [];
+  let rejectNextFlag = false;
+  const handle: DeliveryPortHandle = {
+    deliver(envelope) {
+      if (rejectNextFlag) {
+        rejectNextFlag = false;
+        return { kind: "rejected", reason: "persist-failed (fake)" };
       }
+      const id = envelope.id ?? "gen-id";
+      if (seen.has(id)) return { kind: "swallowed", reason: "already-seen" };
+      seen.add(id);
+      sentMessages.push({
+        customType: envelope.payload.customType,
+        content: envelope.payload.content,
+        display: envelope.payload.display,
+        details: envelope.payload.details,
+      });
+      return { kind: "accepted", id };
     },
+    flush: () => {},
   };
   return {
-    host,
-    entries,
-    sessionEntries,
+    handle,
     sentMessages,
-    settledHandlers,
-    setIdle: (v) => {
-      idle.value = v;
+    rejectNext: () => {
+      rejectNextFlag = true;
     },
-    deliverPersists,
   };
 }
 
-/**
- * 触发一次 settled 边沿：直调当前绑定 ledger 的 checkReceipts + attemptDeliver
- * 两连——与生产 settledEdgeDispatch（notify-ledger.ts 模块级单例 handler）逐行
- * 等价。不遍历 mock.settledHandlers：bind 路径的物理监听只在首次 bind 注册一次
- * （listenerRegistered 跨用例保留），后续 mock host 的 handler 数组恒空——
- * 这正是 [MF-5] 单例化的设计行为，测试按绑定引用驱动而非按注册驱动。
- */
-function fireSettled(): void {
-  const ledger = getBoundNotifyLedger();
-  ledger?.checkReceipts();
-  ledger?.attemptDeliver();
-}
+// pi-delivery-port 进程级槽（notifyDone 生产码直接 import 该包 getDeliveryPort 读槽）。
+const PORT_SLOT_KEY = Symbol.for(DELIVERY_PORT_SLOT_KEY);
 
-/** 账本 entry 列里的 notifyId 集合。 */
-function ledgerNotifyIds(mock: LedgerHostMock): Set<string> {
-  const ids = new Set<string>();
-  for (const e of mock.entries) {
-    if (e.customType !== NOTIFY_LEDGER_CUSTOM_TYPE) continue;
-    const id = e.data?.["notifyId"];
-    if (typeof id === "string") ids.add(id);
-  }
-  return ids;
+/** port 注入（直接写进程级槽——生产接线 = base-tool-enhance session_start 的
+ *  bindDeliveryPort；本包 notifyDone 与 session-manager recordManagedNotify 同款
+ *  直读槽访问器消费）。 */
+function bindFakePort(mock: FakePortMock): void {
+  Reflect.set(globalThis, PORT_SLOT_KEY, { current: mock.handle });
 }
 
 /** [W2/V1] 终局记录构造（notifyDone 载荷源换帧直取后的测试通道——reason 词表 →
@@ -235,32 +206,30 @@ function settlementFor(reason: string | undefined): import("../jsonl-run-store.t
   }
 }
 
-// 「无绑定环境」构造性保证：任何用例（含账本路径 describe 内 bind / 用例中途
-// re-bind）结束后摘除模块级 ledger 绑定——后续降级直发 / GUI / stale / bounded
-// 用例恒走 getBoundNotifyLedger() === undefined 的降级分支。
+// 「port 缺席」构造性保证：任何用例（含 port 路径 describe 内注入 / 用例中途
+// re-inject）结束后重置端口注入——后续降级直发 / GUI / stale / bounded 用例恒走
+// getDeliveryPort() === undefined 的降级分支。
 afterEach(() => {
-  getBoundNotifyLedger()?.dispose();
+  Reflect.deleteProperty(globalThis, PORT_SLOT_KEY);
 });
 
-// ── 账本路径（bindNotifyLedgerHost 生产入口装配） ──────────────
+// ── port 主投（pi-delivery-port 槽注入，unified-delivery 波 2 生产装配形态） ──
 
-describe("notifyDone — 账本四步生命周期（C-ext-19 迁移）", () => {
-  let mock: LedgerHostMock;
+describe("notifyDone — port 主投（C-ext-19 语义由 port 内包）", () => {
+  let mock: FakePortMock;
 
   beforeEach(() => {
-    mock = makeLedgerHost();
-    bindNotifyLedgerHost(mock.host);
+    mock = makeFakePort();
+    bindFakePort(mock);
   });
 
-  it("①→② 写账先于投递：notifyId = wf-done:<runId>，送达通道保持 workflow-result，content 不变，pi 直发零调用", () => {
+  it("①→② 受理先于注入：notifyId = wf-done:<runId> 作幂等键，送达通道保持 workflow-result，content 不变，pi 直发零调用", () => {
     const { pi, sendMessage } = makePi();
     const run = makeRun({ scriptName: "fan-out", scriptResult: { status: "ok" } });
 
     notifyDone(pi, "wf-17abc", runAsParam(run), new Set(), undefined, settlementFor(run.state.reason));
 
-    // ① 写账：ledger entry 落盘，幂等键形态 wf-done:<runId>
-    expect(ledgerNotifyIds(mock)).toEqual(new Set([`${WORKFLOW_DONE_NOTIFY_ID_PREFIX}wf-17abc`]));
-    // ② courier 投递：送达通道 workflow-result（W18 信号前提），details 携带 notifyId
+    // port.deliver 受理：幂等键形态 wf-done:<runId>（port 落投递日志先于受理注入）
     expect(mock.sentMessages).toHaveLength(1);
     expect(mock.sentMessages[0]?.customType).toBe(WORKFLOW_RESULT_CUSTOM_TYPE);
     // 全文逐字锚定（分支矩阵锁见文末 describe）：header + Script Result + Agent Trace
@@ -276,7 +245,7 @@ describe("notifyDone — 账本四步生命周期（C-ext-19 迁移）", () => {
       notifyId: `${WORKFLOW_DONE_NOTIFY_ID_PREFIX}wf-17abc`,
       runId: "wf-17abc",
     });
-    // 账本路径不经 pi 直发（courier 统一出口）
+    // 主投不经 pi 直发（port 是唯一注入出口）
     expect(sendMessage).not.toHaveBeenCalled();
   });
 
@@ -286,29 +255,24 @@ describe("notifyDone — 账本四步生命周期（C-ext-19 迁移）", () => {
 
     notifyDone(pi, "wf-dup", runAsParam(run), new Set(), undefined, settlementFor(run.state.reason));
     // 第二次调用持全新 Set（模拟内存窗口挤出 / 重启后的重复收口回调）——
-    // 持久层幂等键承接去重
+    // 持久层幂等键承接去重（port 判重吞）
     notifyDone(pi, "wf-dup", runAsParam(run), new Set(), undefined, settlementFor(run.state.reason));
 
     expect(mock.sentMessages).toHaveLength(1);
-    // 账本单条：后写不覆盖（同键二次写账被拒）
-    expect(mock.entries.filter((e) => e.customType === NOTIFY_LEDGER_CUSTOM_TYPE)).toHaveLength(1);
   });
 
-  it("record 抛（reload 窗口 appendEntry assertActive 形态）→ error 留痕（含 notifyId/content 摘要）后原样上抛，去重不标记", () => {
+  it("port rejected（persist-failed 形态）→ error 留痕（含 notifyId/content 摘要），去重不标记、不上抛", () => {
     const { pi } = makePi();
     const run = makeRun();
     const notified = new Set<string>();
 
-    // 已知丢失面（如实登记，见 notifyDone 注释）：appendLedgerEntry 抛 = 账面
-    // entry 未写、无重放源——该终局通知丢失，仅 error 日志留痕供手工补偿。
-    const origAppend = mock.host.appendLedgerEntry;
-    mock.host.appendLedgerEntry = () => {
-      throw new Error("session context is no longer active (assertActive)");
-    };
-    expect(() => notifyDone(pi, "wf-stale", runAsParam(run), notified, undefined, settlementFor(run.state.reason))).toThrow("assertActive");
-    // error 留痕：含 notifyId 与 content 摘要（事后按 run 手工补偿的检索入口）
+    // 已知丢失面（如实登记，见 notifyDone 注释）：rejected = 受理未发生、投递日志
+    // 未落、重放无源——该终局通知丢失，仅 error 日志留痕供手工补偿。deliver 同步
+    // 返回无抛错通道（原账本 record 抛错上抛 finalizeRun 围栏的链路随退役消失）。
+    mock.rejectNext();
+    notifyDone(pi, "wf-stale", runAsParam(run), notified, undefined, settlementFor(run.state.reason));
     expect(loggerFns.error).toHaveBeenCalledWith(
-      expect.stringContaining("ledger record failed"),
+      expect.stringContaining("delivery rejected"),
       expect.objectContaining({
         runId: "wf-stale",
         notifyId: `${WORKFLOW_DONE_NOTIFY_ID_PREFIX}wf-stale`,
@@ -317,83 +281,26 @@ describe("notifyDone — 账本四步生命周期（C-ext-19 迁移）", () => {
     );
     // 去重未标记：进程内的重复收口回调不被去重阻断（防御形态）
     expect(notified.has("wf-stale")).toBe(false);
+    expect(mock.sentMessages).toHaveLength(0);
 
-    // 重复收口回调（若到达）：appendLedgerEntry 恢复 → 写账 + 投递成功
-    mock.host.appendLedgerEntry = origAppend;
+    // 重复收口回调（若到达）：rejected 消退 → 受理成功 + 去重标记
     notifyDone(pi, "wf-stale", runAsParam(run), notified, undefined, settlementFor(run.state.reason));
-    expect(ledgerNotifyIds(mock)).toEqual(new Set([`${WORKFLOW_DONE_NOTIFY_ID_PREFIX}wf-stale`]));
     expect(mock.sentMessages).toHaveLength(1);
     expect(notified.has("wf-stale")).toBe(true);
   });
 
-  it("③ 回执销账：settled 边沿 ack 后，同 runId 再收口零投递", () => {
-    const { pi } = makePi();
-    const run = makeRun();
-
-    notifyDone(pi, "wf-ack", runAsParam(run), new Set(), undefined, settlementFor(run.state.reason));
-    expect(mock.sentMessages).toHaveLength(1);
-
-    // 送达 entry 已落盘（sendDelivery mock 同步持久化）→ settled 边沿销账
-    fireSettled();
-    expect(mock.entries.some((e) => e.customType === NOTIFY_ACK_CUSTOM_TYPE)).toBe(true);
-
-    // 已销账号再收口：record 幂等拒绝（终态不重发）
-    notifyDone(pi, "wf-ack", runAsParam(run), new Set(), undefined, settlementFor(run.state.reason));
-    expect(mock.sentMessages).toHaveLength(1);
-  });
-
-  it("④ 未-ack 重放恰好一次（at-least-once + 去重）：回执不可达 → 恢复重放 1 次，二次恢复零重放", () => {
-    const { pi } = makePi();
-    const run = makeRun();
-
-    // 投递受理但回执不可达（deliverPersists=false——模拟 relay 瞬断，消息丢失、
-    // custom_message entry 未落盘）
-    mock.deliverPersists.value = false;
-    notifyDone(pi, "wf-lost", runAsParam(run), new Set(), undefined, settlementFor(run.state.reason));
-    expect(mock.sentMessages).toHaveLength(1);
-    expect(ledgerNotifyIds(mock)).toEqual(new Set([`${WORKFLOW_DONE_NOTIFY_ID_PREFIX}wf-lost`]));
-
-    // 重启恢复：新实例扫同一 session 文件（账本 entry 在、回执不在）→ 差集重放
-    const newMock = makeLedgerHost();
-    newMock.sessionEntries.push(...mock.sessionEntries);
-    const newLedger = bindNotifyLedgerHost(newMock.host);
-    const replayed = newLedger.recoverFromSession();
-
-    // 重放恰好一次，送达通道保持 workflow-result
-    expect(replayed).toBe(1);
-    expect(newMock.sentMessages).toHaveLength(1);
-    expect(newMock.sentMessages[0]?.customType).toBe(WORKFLOW_RESULT_CUSTOM_TYPE);
-    expect(newMock.sentMessages[0]?.details).toMatchObject({
-      notifyId: `${WORKFLOW_DONE_NOTIFY_ID_PREFIX}wf-lost`,
-    });
-
-    // 同实例二次恢复：差集已入账，零重放（去重不双投递）
-    expect(newLedger.recoverFromSession()).toBe(0);
-    expect(newMock.sentMessages).toHaveLength(1);
-  });
-
-  it("④ 已销账恢复零重发：正常送达 + 销账后重启恢复零重放", () => {
-    const { pi } = makePi();
-    const run = makeRun();
-
-    notifyDone(pi, "wf-done-ok", runAsParam(run), new Set(), undefined, settlementFor(run.state.reason));
-    fireSettled(); // 销账
-
-    const newMock = makeLedgerHost();
-    newMock.sessionEntries.push(...mock.sessionEntries);
-    const newLedger = bindNotifyLedgerHost(newMock.host);
-
-    expect(newLedger.recoverFromSession()).toBe(0);
-    expect(newMock.sentMessages).toHaveLength(0);
-  });
+  // [③ 回执销账 / ④ 断连重启重放随账本退役] 两用例的行为锁由 port 内包语义承接：
+  // 送达判定（details-id 凭据命中 → 确认 → 终局判重）与 session_start 差集重放
+  // 由 pi-delivery-port 套件「四步对位」/「session_start 差集重放」段锁定，本文件
+  // 不重复设条。
 });
 
-// ── 降级路径（ledger 未 bind） ────────────────────────────────
+// ── 降级路径（port 缺席：装配异常窗口） ──────────────────────
 
-describe("notifyDone — 降级直发（ledger 未 bind，向后兼容）", () => {
-  // 无绑定环境由文件级 afterEach 构造性保证：notifyDone 走
-  // getBoundNotifyLedger() === undefined 的降级分支。
-  it("fire-once 直发 pi.sendMessage：triggerTurn 单通道（无 deliverAs），details 携带 notifyId", () => {
+describe("notifyDone — 降级直发（port 缺席，装配异常窗口降级）", () => {
+  // 无注入环境由文件级 afterEach 构造性保证：notifyDone 走
+  // getDeliveryPort() === undefined 的降级分支。
+  it("fire-once 直发 pi.sendMessage：triggerTurn 单通道（无 deliverAs），details 携带 notifyId + 降级 warn 留痕", () => {
     const { pi, sendMessage } = makePi();
     const run = makeRun();
 
@@ -409,9 +316,13 @@ describe("notifyDone — 降级直发（ledger 未 bind，向后兼容）", () =
     // 全文逐字锚定：completed + 无 scriptResult + 空 trace + 无 artifacts 的最小形态
     expect(msg.content).toBe("Workflow 'build' done: done (completed)\n\n--- Agent Trace ---");
     expect(msg.details.notifyId).toBe(`${WORKFLOW_DONE_NOTIFY_ID_PREFIX}wf-fallback`);
-    // u9 偏差裁决（D7 账本化配套）：deliverAs 已删
+    // u9 偏差裁决承袭（D7 账本化配套）：deliverAs 已删
     expect(opts).toEqual({ triggerTurn: true });
-    expect(getBoundNotifyLedger()).toBeUndefined();
+    // 降级可见性：缺席 warn（修复信号——检查 base-tool-enhance 装配）
+    expect(loggerFns.warn).toHaveBeenCalledWith(
+      expect.stringContaining("delivery port not bound"),
+      expect.objectContaining({ runId: "wf-fallback" }),
+    );
   });
 });
 
@@ -532,8 +443,8 @@ const ARTIFACTS_DIR = "/tmp/wf-state-root/workflow-state";
 
 describe("notifyDone 终局载荷（D7）", () => {
   it("成功：outcome=done + resultSummary + 产物目录与 journal 指针，恰好一条", () => {
-    const mock = makeLedgerHost();
-    bindNotifyLedgerHost(mock.host);
+    const mock = makeFakePort();
+    bindFakePort(mock);
     const run = makeRun({ reason: "completed", scriptResult: { ok: true, files: 3 } });
 
     notifyDone(makePi().pi, "wf-payload-ok", runAsParam(run), new Set(), ARTIFACTS_DIR, settlementFor(run.state.reason));
@@ -555,8 +466,8 @@ describe("notifyDone 终局载荷（D7）", () => {
   });
 
   it("失败：outcome=failed + errorCode（最后失败 call 的 failureKind）+ 证据指针，零 resultSummary", () => {
-    const mock = makeLedgerHost();
-    bindNotifyLedgerHost(mock.host);
+    const mock = makeFakePort();
+    bindFakePort(mock);
     const run = makeRun({ reason: "failed", failedCall: { error: "engine crashed", failureKind: "unknown" } });
 
     notifyDone(makePi().pi, "wf-payload-fail", runAsParam(run), new Set(), ARTIFACTS_DIR, settlementFor(run.state.reason));
@@ -570,8 +481,8 @@ describe("notifyDone 终局载荷（D7）", () => {
   });
 
   it("取消：outcome=cancelled（aborted 经 cancel-requested 同构映射），零 errorCode / 零 resultSummary", () => {
-    const mock = makeLedgerHost();
-    bindNotifyLedgerHost(mock.host);
+    const mock = makeFakePort();
+    bindFakePort(mock);
     const run = makeRun({ reason: "aborted" });
 
     notifyDone(makePi().pi, "wf-payload-cancel", runAsParam(run), new Set(), ARTIFACTS_DIR, settlementFor(run.state.reason));
@@ -584,8 +495,8 @@ describe("notifyDone 终局载荷（D7）", () => {
   });
 
   it("成功但 scriptResult 缺省 → resultSummary 缺省（载荷字段可缺席）；artifactsDir 未注入 → 指针面整体缺席", () => {
-    const mock = makeLedgerHost();
-    bindNotifyLedgerHost(mock.host);
+    const mock = makeFakePort();
+    bindFakePort(mock);
     const run = makeRun({ reason: "completed" });
 
     notifyDone(makePi().pi, "wf-payload-bare", runAsParam(run), new Set(), undefined, settlementFor(run.state.reason));
@@ -601,8 +512,8 @@ describe("notifyDone 终局载荷（D7）", () => {
   });
 
   it("resultSummary bounded 截断（500 上限，超限带截断标记不截断为裸切片）", () => {
-    const mock = makeLedgerHost();
-    bindNotifyLedgerHost(mock.host);
+    const mock = makeFakePort();
+    bindFakePort(mock);
     const big = "x".repeat(2000);
     const run = makeRun({ reason: "completed", scriptResult: big });
 

@@ -459,10 +459,11 @@ export interface BgResponse {
    */
   outcome?: ProjectedOutcome;
   /**
-   * 通知投递契约回显位（U1 预置，U2 通知账本的契约声明）。恒值
+   * 通知投递契约回显位（U1 预置的契约声明）。恒值
    * "ledger+at-least-once"：主 agent 在当前 run 结束或有限延迟内收到完成通知，
-   * 送达保证为 at-least-once + notifyId 幂等可识别。字段与填充由 U1 负责，
-   * 值语义由 U2（execution/notify-ledger.ts）兑现。
+   * 送达保证为 at-least-once + notifyId 幂等可识别（ledger 词取投递日志
+   * delivery journal 泛化义——unified-delivery §3.3；值语义由 pi 半区投递端口
+   * 兑现，unified-delivery 波 2）。
    */
   notifyContract: "ledger+at-least-once";
   // [collect 退役] 原 collect 回显段（sync 登记回显，§3.1.1）已随批机制删除——

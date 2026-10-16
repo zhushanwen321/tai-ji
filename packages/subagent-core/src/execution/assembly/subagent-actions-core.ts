@@ -45,7 +45,7 @@ export const MAX_LIST_LIMIT = 100;
 /** background 启动提示文案（完成通知经自动注入消息投递，agent 不应轮询）。 */
 export const BG_MESSAGE = "detached, will notify on completion (auto-injected message, do not poll)";
 
-/** 通知投递契约回显恒值（契约声明；值语义由 execution/notify-ledger.ts 兑现）。 */
+/** 通知投递契约回显恒值（契约声明；值语义由统一投递服务 port 半区兑现——投递日志 + notifyId 幂等 + 差集重放，unified-delivery 波 2）。 */
 export const NOTIFY_CONTRACT = "ledger+at-least-once" as const;
 
 /**

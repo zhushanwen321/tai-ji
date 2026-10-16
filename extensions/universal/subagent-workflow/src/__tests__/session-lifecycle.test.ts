@@ -138,12 +138,11 @@ import { STATE_TTL_MS_ENV } from "@zhushanwen/subagent-core/execution/persistenc
 // 同一 mock 实例，被测 barrel import 归一到同一物理模块）
 import { startEngineJournalGcTimer } from "@zhushanwen/subagent-core/execution/persistence/engine-journal-gc.ts";
 // 通知账本重置导出（beforeEach 显式清空，对齐 index-session-start 先例）
-import { _resetNotifyLedgerForTest } from "@zhushanwen/subagent-core/execution/notify/notify-ledger.ts";
 import { WorkflowRun } from "@zhushanwen/subagent-core";
 import { Budget } from "@zhushanwen/subagent-core";
 import { Trace } from "@zhushanwen/subagent-core";
 import type { SessionLifecycleDeps } from "../session-lifecycle.ts";
-import { bindLedgerHostAndRecover, setupSessionLifecycle } from "../session-lifecycle.ts";
+import { setupSessionLifecycle } from "../session-lifecycle.ts";
 import subagentsExtension from "../index.ts";
 // 组 6 域隔离条的调用断言面；vi.mock 已在文件顶部拦截同路径（同一 mock 实例）。
 import { registerSubagentTool } from "../interface/tool/subagent-tool.ts";
@@ -300,8 +299,6 @@ async function mountWithLoadAll(loadAll: () => Promise<WorkflowRunType[]>): Prom
 //      副作用（worktree-scan / retention-maintenance-round 等）都经它单次放行；不清则
 //      首个挂载/装配用例消费 key 后，后续用例的 scan 断言 / 组 4 维护轮 / kill-9 恢复
 //      链静默旁路（storeHealthy 恒 true 等断言失真）。
-//   ② 通知账本（core notify-ledger 模块级）——恢复链按 ctx entries 重水合，残留会让
-//      账本跨用例带账。
 //   ③ 双 Service 单例槽（globalThis Symbol）——resetLifecycleSlots 兜底清空。
 //   ④ mock 调用记录——vi.clearAllMocks()（mock 工厂仅创建一次，调用记录逐用例清）。
 // 生产代码的模块级可变状态核对结论：cachedMainSessionFile（session-lifecycle.ts）
@@ -312,7 +309,6 @@ beforeEach(() => {
   mockStoreLoadAll.mockResolvedValue([]);
   resetLifecycleSlots();
   _resetOncePerProcessForTest();
-  _resetNotifyLedgerForTest();
 });
 
 afterEach(() => {
@@ -867,83 +863,11 @@ describe("session_start 兜底触发统一保留维护轮（[W1 / D5 触发点�
   });
 });
 
-// ── 组 5：sendDelivery stale ctx 守卫（出自 notify-stale-guard.test.ts，归属本域）──
-//
-// 被测入口是本文件的 bindLedgerHostAndRecover 装配 seam（crash-resilience D1 /
-// ext-guards 审计 §7 blockers#1 收口）：取装配后的 ledgerHost 直调 sendDelivery，
-// 验证 stale 分诊三面——stale 错误（含 PS-30 分诊词）静默降级不外抛、非 stale
-// 错误原样上抛（同一错误实例，attemptDeliver 既有 catch 的 settleRejected 留账
-// 重试语义可接住）、正常路径单通道 {triggerTurn:true} 形态原样透传。notifyDone
-// 半边（降级直发分支的同判）在 workflow-notify.test.ts。形态对齐 ext-guards
-// guard-stale-ctx.test.ts（PI_STALE_ERROR 文案 fixture）；分诊无 isCtxStale 注入
-// （与生产接入一致，文案兜底由 PS-30 门禁守卫）。
-
-/** pi 实装 stale 文案的完整形态（E1 崩溃堆栈原文，探针 PS-30 守卫其稳定性）。 */
-const PI_STALE_ERROR = `This extension ctx is stale ${STALE_CTX_MARKER} or reload. Do not use a captured pi or command ctx after ctx.newSession().`;
-
-const DELIVERY_MESSAGE = {
-  customType: "bg-notify",
-  content: "subagent done: reviewer",
-  display: true,
-};
-
-describe("sendDelivery stale ctx 守卫（bindLedgerHostAndRecover seam，出自 notify-stale-guard）", () => {
-  /** bindLedgerHostAndRecover 最小 pi 面（sendMessage 可注入抛错形态）。 */
-  function makeLedgerPi(sendMessageImpl?: (...args: unknown[]) => void): {
-    pi: ExtensionAPI;
-    sendMessage: ReturnType<typeof vi.fn>;
-  } {
-    const sendMessage = vi.fn(sendMessageImpl);
-    const noop = (): void => {
-      /* mock */
-    };
-    const pi = {
-      appendEntry: noop,
-      on: noop,
-      sendMessage,
-    } as unknown as ExtensionAPI;
-    return { pi, sendMessage };
-  }
-
-  /** 每用例取静态导入的 bindLedgerHostAndRecover 装配（模块图单实例，静态引用即
-   *  被测实例）。ctx 走 createFakeCtx：其 sessionManager.getEntries 恒空数组（恢复
-   *  扫描零重放）、isIdle 恒 true。 */
-  async function bindHost(sendMessageImpl?: (...args: unknown[]) => void) {
-    const { pi, sendMessage } = makeLedgerPi(sendMessageImpl);
-    const host = bindLedgerHostAndRecover(pi, createFakeCtx("session-stale-guard-1"));
-    return { host, sendMessage };
-  }
-
-  it("stale 错误静默降级：不外抛，投递不放大为无人接 rejection", async () => {
-    const { host, sendMessage } = await bindHost(() => {
-      throw new Error(PI_STALE_ERROR);
-    });
-    expect(host).toBeDefined();
-
-    expect(() => host!.sendDelivery(DELIVERY_MESSAGE)).not.toThrow();
-    expect(sendMessage).toHaveBeenCalledTimes(1);
-  });
-
-  it("非 stale 错误原样上抛：attemptDeliver 既有 catch（settleRejected 留账重试）仍可接住", async () => {
-    const boom = new Error("delivery rejected by runtime");
-    const { host } = await bindHost(() => {
-      throw boom;
-    });
-
-    expect(() => host!.sendDelivery(DELIVERY_MESSAGE)).toThrow(boom);
-  });
-
-  it("正常路径零变化：单通道形态 sendCustomMessage({triggerTurn:true}) 原样透传", async () => {
-    const { host, sendMessage } = await bindHost();
-
-    host!.sendDelivery(DELIVERY_MESSAGE);
-
-    expect(sendMessage).toHaveBeenCalledTimes(1);
-    const [msg, opts] = sendMessage.mock.calls[0] as [unknown, Record<string, unknown>];
-    expect(msg).toEqual(DELIVERY_MESSAGE);
-    expect(opts).toEqual({ triggerTurn: true });
-  });
-});
+// ── [组 5 随波 2 账本退役] sendDelivery stale ctx 守卫（原 bindLedgerHostAndRecover
+// 装配 seam）——被测装配 seam 已删除。port 形态的对位锁面：注入类 throw（含 stale
+// assertActive）→ 内核 retain 留账由 pi-delivery-port 套件「注入 throw → retain 留账 +
+// settled 边沿重投」锁定；workflow 降级直发分支的 guardStaleCtx 同判在
+// workflow-notify.test.ts 保留。
 
 // ── 组 6：session_start crash recovery — store.loadAll 路径（吸收自 crash-recovery.test.ts）──
 //

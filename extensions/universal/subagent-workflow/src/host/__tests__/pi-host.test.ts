@@ -3,14 +3,15 @@
 // 三视角：①使用者——discoveryRoots 各 kind 的根清单/顺序/source 标签与
 // resource-discovery.ts buildScanTargets（user-pi/npm/npm-dev 段）、
 // skill-discovery.ts resolveSkillPath（skills 两根）现推导逐项一致；
-// ②构建者——dataRoot/log/countActiveFromEntries/createDelivery 四端口桥接形态；
+// ②构建者——dataRoot/log/countActiveFromEntries/getDeliveryPort 四端口桥接形态；
 // ③观察者——getAgentDir 每次现取（PI_CODING_AGENT_DIR 实例隔离切换后重取生效，
 // 无模块级缓存）。
 //
 // mock 策略：pi SDK / pi 宿主协作件全部 vi.mock 工厂覆盖（vitest alias 的
 // mocks/ 桩只供其他测试族用，本文件需要可控返回值）。pending-notifications
-// mock 返回 {count: n} 形状直接验证「适配读 .count」；session-delivery mock
-// 验证 createDelivery 透传（参数 + 返回句柄）。
+// mock 返回 {count: n} 形状直接验证「适配读 .count」；pi-delivery-port mock
+// 验证 getDeliveryPort 槽访问器透传（unified-delivery 波 2——createDelivery 注入
+// 随扩展侧内核部署退役，老能力映射 #7）。
 
 import { join, dirname } from "node:path";
 import { createRequire } from "node:module";
@@ -35,14 +36,14 @@ const pendingNotificationsMock = vi.hoisted(() => ({
   countActiveFromEntries: vi.fn(),
 }));
 
-const sessionDeliveryMock = vi.hoisted(() => ({
-  createDelivery: vi.fn(),
+const deliveryPortMock = vi.hoisted(() => ({
+  getDeliveryPort: vi.fn(),
 }));
 
 vi.mock("@earendil-works/pi-coding-agent", () => piCodingAgentMock);
 vi.mock("@zhushanwen/pi-extension-logger", () => extensionLoggerMock);
 vi.mock("@zhushanwen/pi-pending-notifications", () => pendingNotificationsMock);
-vi.mock("@zhushanwen/session-delivery", () => sessionDeliveryMock);
+vi.mock("@zhushanwen/pi-delivery-port", () => deliveryPortMock);
 
 // 端到端用例（P5 staged 入扫描面）隔离真实用户目录：resource-discovery 用 homedir()
 // 推导 user-agents 根（~/.agents/workflows），不 mock 会让「内置条目存在/两次一致」
@@ -66,7 +67,7 @@ import { clearFileCache } from "@zhushanwen/subagent-core/shared/resource-discov
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { getLogger } from "@zhushanwen/pi-extension-logger";
 import { countActiveFromEntries } from "@zhushanwen/pi-pending-notifications";
-import { createDelivery } from "@zhushanwen/session-delivery";
+import { getDeliveryPort } from "@zhushanwen/pi-delivery-port";
 
 import { createPiHostServices, createPiNotifyDomainPorts, resolveGrandchildExtensionPaths } from "../pi-host.ts";
 
@@ -74,7 +75,7 @@ beforeEach(() => {
   vi.mocked(getAgentDir).mockClear();
   vi.mocked(getLogger).mockReset();
   vi.mocked(countActiveFromEntries).mockReset();
-  vi.mocked(createDelivery).mockReset();
+  vi.mocked(getDeliveryPort).mockReset();
   delete process.env.PI_CODING_AGENT_DIR;
 });
 
@@ -553,22 +554,14 @@ describe("createPiNotifyDomainPorts.countActiveFromEntries（适配读 .count）
 	});
 });
 
-describe("createPiNotifyDomainPorts.createDelivery（透传 session-delivery）", () => {
-  it("参数透传 + 返回句柄透传（不经包装）", () => {
-    const fakePort = {
-      supportedPayloads: ["text"] as const,
-      isIdle: () => true,
-      send: () => undefined,
-    };
-    const fakeConfig = { intent: "after-run" as const };
-    const fakeHandle = { send: () => {}, flush: () => {}, dispose: () => {} };
-    vi.mocked(createDelivery).mockReturnValue(fakeHandle);
+describe("createPiNotifyDomainPorts.getDeliveryPort（透传 pi-delivery-port 槽访问器）", () => {
+  it("访问器本体直传（不经包装），每次消费即到即读返回当前槽值", () => {
+    const fakeHandle = { deliver: () => ({ kind: "accepted", id: "x" }), flush: () => {} };
+    vi.mocked(getDeliveryPort).mockReturnValue(fakeHandle as never);
 
-    const result = createPiNotifyDomainPorts().createDelivery?.(fakePort, fakeConfig);
+    const result = createPiNotifyDomainPorts().getDeliveryPort?.();
 
-    expect(vi.mocked(createDelivery)).toHaveBeenCalledTimes(1);
-    expect(vi.mocked(createDelivery).mock.calls[0][0]).toBe(fakePort);
-    expect(vi.mocked(createDelivery).mock.calls[0][1]).toBe(fakeConfig);
+    expect(vi.mocked(getDeliveryPort)).toHaveBeenCalledTimes(1);
     expect(result).toBe(fakeHandle);
   });
 });

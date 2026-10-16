@@ -65,7 +65,6 @@ import {
 } from "@zhushanwen/extension-protocol";
 import { GLOBAL_SLOT_KEYS, setModelConfigService, setSubagentService } from "@zhushanwen/subagent-core";
 // 通知账本重置导出（beforeEach 显式清空；session_start 装配链按 ctx entries 重水合）
-import { _resetNotifyLedgerForTest } from "@zhushanwen/subagent-core/execution/notify/notify-ledger.ts";
 import subagentsExtension from "../index.ts";
 
 process.setMaxListeners(50);
@@ -122,7 +121,6 @@ beforeEach(() => {
   mockStoreLoadAll.mockResolvedValue([]);
   resetLifecycleSlots();
   _resetOncePerProcessForTest();
-  _resetNotifyLedgerForTest();
   injectFakeServices();
 });
 
