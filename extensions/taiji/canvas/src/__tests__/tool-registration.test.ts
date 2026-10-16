@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import { CANVAS_TOOL_NAMES } from "@zhushanwen/extension-protocol";
 
-import { mountCanvas } from "./helpers/canvas-harness.js";
+import { mountCanvas, toolOf } from "./helpers/canvas-harness.js";
 
 describe("六工具注册面", () => {
   it("注册 6 个工具，名集与 U1 契约 CANVAS_TOOL_NAMES 一致", () => {
@@ -42,5 +42,18 @@ describe("六工具注册面", () => {
         expect(schemas[i]).not.toBe(schemas[j]);
       }
     }
+  });
+
+  it("canvas_edit grow 条目 schema 与契约 CanvasGrowItem 对齐：含 materiality（claim/fact 词表）、不含 factVerified（agent 不自证核实，fact 创建即未核实）", () => {
+    const harness = mountCanvas();
+    const params = toolOf(harness, "canvas_edit").parameters as Record<string, unknown>;
+    const growProps = ((params.properties as Record<string, unknown>).growParams as Record<string, unknown>)
+      .properties as Record<string, unknown>;
+    const batchItems = (growProps.batch as Record<string, unknown>).items as Record<string, unknown>;
+    const itemProps = batchItems.properties as Record<string, unknown>;
+    expect(Object.keys(itemProps)).toContain("materiality");
+    const materialityEnum = (itemProps.materiality as Record<string, unknown>).enum as string[];
+    expect([...materialityEnum].sort()).toEqual(["claim", "fact"]);
+    expect(Object.keys(itemProps)).not.toContain("factVerified");
   });
 });

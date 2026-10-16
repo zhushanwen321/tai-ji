@@ -137,6 +137,35 @@ describe("canvas_edit 五 action 分派", () => {
     });
   });
 
+  it("grow：argument 条目携带 materiality='fact' → payload 透传且过契约守卫（素材性声明通道）", async () => {
+    await withExtLogEnv("1", async () => {
+      harness.selectMock.mockResolvedValue(JSON.stringify({ ok: true, eventId: "e2b", evType: "NodeCreated", summary: "grown" }));
+      const edit = toolOf(harness, "canvas_edit");
+      const batch = [
+        {
+          id: "arg-1",
+          type: "argument",
+          content: "实测数据支撑",
+          attachTo: "opt-1",
+          edge: "argue",
+          edgePolarity: "support",
+          materiality: "fact",
+        },
+      ];
+      await edit.execute(
+        "t1",
+        { action: "grow", growParams: { canvasId: "c1", batch, reason: "补充证据" } },
+        undefined,
+        undefined,
+        harness.ctx,
+      );
+      expect(lastMarkerCall(harness.selectMock).payload).toEqual({
+        action: "grow",
+        params: { canvasId: "c1", batch, reason: "补充证据" },
+      });
+    });
+  });
+
   it("action 与参数块缺失 → 结构化错误（五 action 各自报块名）", async () => {
     await withExtLogEnv("1", async () => {
       const edit = toolOf(harness, "canvas_edit");

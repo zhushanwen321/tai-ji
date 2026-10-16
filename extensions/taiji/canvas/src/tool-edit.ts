@@ -10,6 +10,11 @@
  * schema 形态对齐 subagent-workflow 的 SubagentManageParams（action 枚举 +
  * per-action 参数块），字段形状与 @zhushanwen/extension-protocol 契约 params
  * 一一同构（marker 载荷按契约组装，runtime 守卫按 isCanvasMarkerRequest 校验）。
+ *
+ * 唯一刻意的非同构点：grow 条目不开放 factVerified——agent 不自证核实，fact 论据
+ * 创建即携带「未核实」（契约缺省 false，不变量 5 前半句构造性满足），核实流转只走
+ * patch 通道（显式编辑 + reason 留痕）；materiality 照契约开放（素材性是创建时声明，
+ * 幂等重试一致性判定也比对它）。
  */
 import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionToolContext } from "@earendil-works/pi-coding-agent";
@@ -56,6 +61,14 @@ export const CanvasEditParams = Type.Object({
               description: "decompose (question→sub) / resolve (option→question) / argue / rebut (argument→target).",
             }),
             edgePolarity: Type.Optional(StringEnum(POLARITIES, { description: "REQUIRED when edge is argue/rebut." })),
+            materiality: Type.Optional(
+              StringEnum(["claim", "fact"], {
+                description:
+                  "For argument: evidence materiality — fact (verifiable evidence) or claim (default). " +
+                  "fact arguments are born UNVERIFIED (not declarable at grow: the agent does not self-certify) " +
+                  "and block 'passed' until verified via canvas_edit patch factVerified.",
+              }),
+            ),
             dispatchable: Type.Optional(
               Type.Boolean({ description: "For option: mark as an execution leaf (dispatchable after passed)." }),
             ),
