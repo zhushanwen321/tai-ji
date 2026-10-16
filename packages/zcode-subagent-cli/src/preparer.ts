@@ -564,11 +564,13 @@ function normalizeAccountModel(accountRule: Record<string, unknown>, wanted: str
  * pi 词汇 → zcode 词汇的派发期翻译表（2026-10-14 用户裁决：engine-ref-translation；
  * 2026-10-16 用户裁决修订映射目标）。
  *
- * 2026-10-16 裁决：zai-coding-cn/* 的 zcode 对应通道修正为
- * account:zai-individual-coding-plan（10-14 版映射到 account:bigmodel-individual-*
- * 是通道误判——bigmodel 与 zai 是两个独立账号家族，pi 侧 zai-coding-cn 凭据语义
- * 对应 zai 家族；误映射导致请求落在未登录/未 entitled 的通道上，实测表现为
- * app-server 侧 model_request_failed）。其余 provider 1:1 完全原样映射（id 直传，
+ * 2026-10-16 二次裁决（证据驱动修正）：目标家族 = account:bigmodel-individual-coding-plan。
+ * 本机实证：pi 侧 zai-coding-cn 的 baseUrl 即 open.bigmodel.cn/api/coding/paas/v4
+ * （bigmodel 通道）；zcode 侧 coding-plan-cache.json 显示 bigmodel 家族 available、
+ * zai 家族 unavailable；credentials.json 只有 oauth:bigmodel:* 与 bigmodel plan
+ * api-key；GUI 成功日志用 providerId=account:bigmodel-individual-coding-plan。
+ * （同日首版曾改向 account:zai-individual-coding-plan——该家族本机不可用，回退。）
+ * 其余 provider 1:1 完全原样映射（id 直传，
  * runtime 同步副本承载）。本表是唯一的跨世界等价对——zcode 命名空间不出现 pi
  * 词汇 id（ADR-0132 的 zai-coding-plan 关联条目已退役），GLM plan 凭据完全归
  * zcode 账号体系，零 key 注入。
@@ -578,7 +580,7 @@ function normalizeAccountModel(accountRule: Record<string, unknown>, wanted: str
  * __tests__/preparer.test.ts「modelTranslation 对账锁步」。
  */
 const PI_TO_ZCODE_PROVIDER_MAP: Readonly<Record<string, string>> = {
-  "zai-coding-cn": "account:zai-individual-coding-plan",
+  "zai-coding-cn": "account:bigmodel-individual-coding-plan",
 };
 
 /**

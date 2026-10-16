@@ -31,4 +31,4 @@ async listModels（经引擎进程 RPC 取实时清单）需要：EnginePort 签
 | 对照：个人 provider | `e512d53e-…/mimo-v2.6-flash` | ✓ | ✅ completed，输出 "ok" |
 | 偏好路径（缺省） | engineDefaults（省略 model） | ✓ 同上翻译+盖章 | ❌ 同 headersApplied |
 
-结论：taiji 修复链全通；`headersApplied` 与通道映射无关（正确通道依旧），是 ZCode.app app-server 在 GLM plan 请求路径上自身的 zod 校验 bug（`Expected 'true' | 'false'`）。处置：向 ZCode 侧反馈/等其更新；taiji 侧错误文案已含「错误来自模型/服务端」指引，无需代码改动。
+结论（2026-10-16 晚修正，源码实证取代当日推测）：taiji 修复链全通；`headersApplied` 与通道映射、凭据都无关——根因是 **taiji 的 headless spawn 恒落在 host-account 模式（源码协议路径不传 standalone），该模式需要宿主任应答 providerRuntimeHeaders 协议而 taiji 链上无宿主实现**。修复路径 = 让 app-server 跑 standalone 账号模式（补丁已实装，见 ADR-0139）；剩余前置 = credentials.json 的 standalone 设置键（identity/auth-source，见 ADR-0139 裁决项）。原文「ZCode 自身 bug」结论作废。

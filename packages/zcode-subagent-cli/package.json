@@ -50,7 +50,7 @@
         "models": []
       },
       "modelTranslation": {
-        "zai-coding-cn": "account:zai-individual-coding-plan"
+        "zai-coding-cn": "account:bigmodel-individual-coding-plan"
       },
       "displayName": "zcode",
       "description": "ZCode app-server resident engine (shared host HOME, isolated session db, credential injection via fs-interception launcher)"

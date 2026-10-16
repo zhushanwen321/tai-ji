@@ -679,18 +679,18 @@ describe("resolveZcodeModelRef account 家族直通", () => {
 
   it("翻译通道：zai-coding-cn/* 显式派发经翻译落 account 直通（pi 词汇不进个人表校验）", () => {
     const catalogPath = writeAccountCatalog("account-translate-catalog.json", [
-      { providerId: "account:zai-individual-coding-plan", config: { builtinModelIds: ["GLM-5.3", "GLM-5.3-Flash"] } },
+      { providerId: "account:bigmodel-individual-coding-plan", config: { builtinModelIds: ["GLM-5.3", "GLM-5.3-Flash"] } },
     ]);
     expect(resolveZcodeModelRef("zai-coding-cn/glm-5.3-flash", accountSources(catalogPath))).toBe(
-      "account:zai-individual-coding-plan/GLM-5.3-Flash",
+      "account:bigmodel-individual-coding-plan/GLM-5.3-Flash",
     );
   });
 });
 
 // ── 派发期模型 ref 翻译（engine-ref-translation D1，2026-10-14 用户裁决；2026-10-16
-// 修订映射目标）：zai-coding-cn ↔ account:zai-individual-coding-plan 等价对，其余 1:1 原样。
+// 二次修订目标家族）：zai-coding-cn ↔ account:bigmodel-individual-coding-plan 等价对，其余 1:1 原样。
 describe("translatePiModelRefToZcode", () => {
-  const TARGET = "account:zai-individual-coding-plan";
+  const TARGET = "account:bigmodel-individual-coding-plan";
 
   function catalogWith(models: string[], providerId = TARGET): string {
     const p = path.join(tmpRoot, `translate-catalog-${providerId.replace(/[^a-z]/g, "")}-${models.length}.json`);
@@ -704,7 +704,7 @@ describe("translatePiModelRefToZcode", () => {
     return p;
   }
 
-  it("zai-coding-cn/* → account:zai-individual-coding-plan/*（模型段大小写归一，返回目录原生拼写）", () => {
+  it("zai-coding-cn/* → account:bigmodel-individual-coding-plan/*（模型段大小写归一，返回目录原生拼写）", () => {
     const catalog = catalogWith(["GLM-5.3", "GLM-5.3-Flash"]);
     expect(translatePiModelRefToZcode("zai-coding-cn/glm-5.3-flash", { builtinCatalogPath: catalog })).toBe(
       `${TARGET}/GLM-5.3-Flash`,

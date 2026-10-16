@@ -298,24 +298,58 @@ function patchedCliSource(path) {
   let result = null;
   try {
     const readOrig = fs.__origReadFileSync || fs.readFileSync;
-    const src = readOrig(path, 'utf8');
-    // 版本鲁棒锚（2026-10-13 修订）：minified 标识符（Uk/I3 等）随 zcode 重新打包
+    let src = readOrig(path, 'utf8');
+    // ① 版本鲁棒锚（2026-10-13 修订）：minified 标识符（Uk/I3 等）随 zcode 重新打包
     // 漂移，属性名（zcodeBuiltinProviders / zhipu-account / entitled）是数据/契约
     // 真名不被混淆——以属性名定位 + 600 字符窗口内把账号条目构建的 entitled:!1
     // 翻转为 !0。窗口零命中 = 上游形态漂移 → 原文透出 + stderr warn（漂移可见，
-    // 进 app-server stderr 日志），个人 provider 不受影响。
+    // 进 app-server stderr 日志）。
     const anchorIdx = src.indexOf('zcodeBuiltinProviders.entries()');
+    let entitledApplied = false;
     if (anchorIdx >= 0) {
       const window = src.slice(anchorIdx, Math.min(src.length, anchorIdx + 600));
       if (window.indexOf('zhipu-account') >= 0 && window.indexOf('entitled:!1') >= 0) {
-        result = src.slice(0, anchorIdx)
+        src = src.slice(0, anchorIdx)
           + window.split('entitled:!1').join('entitled:!0')
           + src.slice(anchorIdx + 600);
+        entitledApplied = true;
       }
     }
-    if (result === null) {
-      process.stderr.write('[zcode-launcher] account bypass: CLI bundle anchor not found (zcode upstream shape drifted?) - account family stays gated, personal providers unaffected\\n');
+    if (!entitledApplied) {
+      process.stderr.write('[zcode-launcher] account bypass: CLI bundle anchor not found (zcode upstream shape drifted?) - account family stays gated\\n');
     }
+    // ② [2026-10-16 standalone account] 协议路径的 provider registry 恒以 host-account
+    // 模式创建（源码：create:r(()=>xCt(z),"create") 不传 standalone）——该模式下
+    // account 族请求必须由宿主应答 providerRuntimeHeaders；taiji 的 headless spawn 无
+    // 宿主参与该协议，应答帧畸形 → zod invalid_union(headersApplied)（2026-10-16 真机
+    // 事故根因；宿主日志零踪迹 = 请求从未到达任何 host 实现）。本补丁给该调用注入
+    // {standalone:{}}：standalone 模式自建本地账号源（entitled 由凭据存在性计算，
+    // 读 credentials.json）并注入本地 providerRuntimeHeaders 端口——账号族全链本地
+    // 完成、零宿主依赖。锚点两处稳定串（非 minified）：模块导出映射
+    // startProcessProviderRegistryRuntime:()=> 取函数名 + 调用点 create:r(()=><fn>(。
+    const exportAnchor = 'startProcessProviderRegistryRuntime:()=>';
+    let standaloneApplied = false;
+    const exportIdx = src.indexOf(exportAnchor);
+    if (exportIdx >= 0) {
+      const nameMatch = /^([A-Za-z_$][A-Za-z0-9_$]{0,10})/.exec(src.slice(exportIdx + exportAnchor.length));
+      const fnName = nameMatch ? nameMatch[1] : null;
+      if (fnName) {
+        const callAnchor = 'create:r(()=>' + fnName + '(';
+        const callIdx = src.indexOf(callAnchor);
+        if (callIdx >= 0) {
+          const argStart = callIdx + callAnchor.length;
+          const closeIdx = src.indexOf(')', argStart);
+          if (closeIdx > argStart) {
+            src = src.slice(0, closeIdx) + ',{standalone:{}}' + src.slice(closeIdx);
+            standaloneApplied = true;
+          }
+        }
+      }
+    }
+    if (!standaloneApplied) {
+      process.stderr.write('[zcode-launcher] standalone account: CLI bundle anchor not found (zcode upstream shape drifted?) - account family stays host-dependent\\n');
+    }
+    result = (entitledApplied || standaloneApplied) ? src : null;
   } catch { result = null; }
   __cliPatchCache.set(path, result);
   return result;
@@ -398,10 +432,14 @@ if (!process.env.ZCODE_BUILTIN_PROVIDER_CONFIG_FILE) {
 // Model」而无任何日志），跳过同样必须留痕。
 const text = injectedConfigText();
 const catalogPatch = CATALOG_PATH !== null ? catalogPatchText(CATALOG_PATH) : null;
-if (text !== null || catalogPatch !== null) {
+const cliPatchProbe = CLI_PATH ? patchedCliSource(CLI_PATH) : null;
+const cliPatchStandalone = cliPatchProbe !== null && cliPatchProbe.indexOf(',{standalone:{}}') >= 0;
+if (text !== null || catalogPatch !== null || cliPatchProbe !== null) {
   process.stderr.write('[zcode-launcher] 补丁层已安装: cli-config-inject=' + (text !== null ? 'on' : 'off')
     + ', catalog-entitled=' + (catalogPatch !== null ? 'on' : 'off')
-    + ', provider-merge=' + (PI_SYNCED_PATH ? 'armed' : 'off') + ', cli-source-bypass=armed\\n');
+    + ', provider-merge=' + (PI_SYNCED_PATH ? 'armed' : 'off')
+    + ', cli-source-bypass=' + (cliPatchProbe !== null ? 'armed' : 'off')
+    + ', standalone-account=' + (cliPatchStandalone ? 'armed' : 'off') + '\\n');
   // encoding 归一（Node 别名面）：'utf8'/'utf-8'/大小写变体统一按 string 返回——
   // 真实 bundle 的 config 读取恰用 'utf-8' 形态，仅匹配 'utf8' 会错回 Buffer
   // （当下游不只 JSON.parse 而做字符串运算时即 TypeError）

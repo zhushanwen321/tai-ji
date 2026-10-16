@@ -8,7 +8,7 @@
  *
  * [engine-ref-translation]（2026-10-14 用户裁决；2026-10-16 ADR-0138 修订映射目标）：
  * pi 的 zai-coding-cn（智谱 GLM coding plan 通道）不再映射条目进 zcode——它与 zcode
- * 的 account:zai-individual-coding-plan 是同一通道的两个名字，等价由派发期翻译
+ * 的 account:bigmodel-individual-coding-plan 是同一通道的两个名字，等价由派发期翻译
  * 承载（zcode-subagent-cli preparer translatePiModelRefToZcode，经
  * EnginePort.translateModelRef 接线）；GLM plan 凭据完全归 zcode 账号体系，零 key
  * 注入。其余 provider 1:1 完全原样映射（id/模型清单直传）。ADR-0132 的 zai 关联
@@ -115,7 +115,7 @@ const ZCODE_API_TYPE_MAP: Readonly<Record<string, string>> = {
 
 /**
  * pi GLM plan 通道（翻译通道，不进通用映射）：zai-coding-cn 与 zcode 的
- * account:zai-individual-coding-plan 是同一通道的两个名字（ADR-0138 修订映射目标，
+ * account:bigmodel-individual-coding-plan 是同一通道的两个名字（ADR-0138 修订映射目标，
  * 原 bigmodel 系误判），等价由派发期翻译
  * 承载（zcode-subagent-cli preparer translatePiModelRefToZcode）；在 zcode 造同义
  * 条目、注入 pi 侧 key 均属退役形态（ADR-0132 zai 关联条目 + 2026-10-13 key 来源
@@ -301,7 +301,7 @@ function mapSingleProviderToZcodeRule(
       skip: {
         providerId: id,
         rule: 'translation-channel',
-        detail: 'pi GLM plan 通道不映射条目——与 zcode account:zai-individual-coding-plan 的等价由派发期翻译承载（ADR-0138）',
+        detail: 'pi GLM plan 通道不映射条目——与 zcode account:bigmodel-individual-coding-plan 的等价由派发期翻译承载（ADR-0138）',
       },
     }
   }
