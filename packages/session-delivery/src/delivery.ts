@@ -81,8 +81,12 @@
  *   retain 按 forget 处置 + 一次性 warn）。
  * - 受理即出站模式（config.dispatchMode: 'on-accept'）：忙闲门禁旁路（受理后立即
  *   port.send，承重前提 = 底层唯一队列忙时不拒）+ 合批窗口不用（队列唯一化后无
- *   组批时机，合批归 port 提交侧）；in-flight 防重保留；v2 投递循环代码不删
- *   （u5a 切换后删），缺省 'queue-hold' = v2 队列持有行为不变。
+ *   组批时机，合批归 port 提交侧）；in-flight 防重保留。生产装配恒为 'on-accept'
+ *   （runtime session-delivery-registry 与 extensions/shared/delivery-port 均显式
+ *   传参）；缺省 'queue-hold' = v2 队列持有行为（busy gate 排队 + settled 边沿
+ *   flush + 合批窗口），现为仅本包测试装配消费的非生产形态（零行为变化锚）——
+ *   其代码路径物理删除（含缺省值翻转 on-accept 与既有测试显式传参）留待后续
+ *   清理波。
  *
  * 其余 v1/v2 机制逐条保持：busy gate（isIdle + 内核在途内查双条件——hasPendingMessages
  * 自镜像四件套已按 msg-pipeline-debloat D2 拆除，busy 判定内查 active 表）、合批窗口、
