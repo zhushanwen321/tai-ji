@@ -45,7 +45,7 @@ import {
   createCompanionDialogAdapters,
   createUiResponseTransport,
 } from '@taiji/ui/extension-host'
-import { __resetExtensionBusSubscriptionForTesting, useExtensionUI } from '@/composables/useExtensionUI'
+import { __testing, useExtensionUI } from '@/composables/useExtensionUI'
 import { setBtwReclaimReminder } from '@/composables/panel/btw-pending-bookkeeping'
 import { __resetBtwPendingBookkeepingForTest } from '@/composables/panel/useBtwTabData'
 import { __clearSessionCleanupRegistryForTest } from '@/composables/useSessionScopedState'
@@ -159,7 +159,7 @@ beforeEach(() => {
   bindDrawerSessionId(boundSid)
   _resetDrawerForTest()
   __clearSessionCleanupRegistryForTest()
-  __resetExtensionBusSubscriptionForTesting()
+  __testing.__resetExtensionBusSubscriptionForTesting()
   __resetBtwPendingBookkeepingForTest()
   extMock.sendExtensionUIResponse.mockReturnValue(true)
   // 快照镜像 store 现态（真实 runtime 缓存 pending 并在快照回填——切走切回不被僵尸修剪误伤）

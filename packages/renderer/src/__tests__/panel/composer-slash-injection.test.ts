@@ -64,13 +64,13 @@ vi.mock('@taiji/ui/features/composer', async (importOriginal) => {
 })
 
 import Composer from '@/components/panel/Composer.vue'
-import { useCommandStore, __resetCommandStoreForTesting } from '@/composables/features/command/useCommandStore'
+import { useCommandStore, __testing } from '@/composables/features/command/useCommandStore'
 
 beforeEach(() => {
   setActivePinia(createPinia())
   composerInputSpies = []
   // [w5] 壳单例跨测试共享：reset 让每个用例拿到全新实例（旧 Composer watch 订阅旧实例，不再干扰）
-  __resetCommandStoreForTesting()
+  __testing.__resetCommandStoreForTesting()
 })
 
 /** mount Composer，返回 wrapper + 最近一次 ComposerInput 的 insertSlashChip / insertSkillChip spy */

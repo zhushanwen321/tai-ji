@@ -39,7 +39,16 @@ import type { FormQuestion, ScheduleDraft, ScheduleQuestion } from '@zhushanwen/
 import ChoiceQuestion from './ChoiceQuestion.vue'
 import TextQuestion from './TextQuestion.vue'
 import ScheduleForm from './ScheduleForm.vue'
-import { OTHER_VALUE, initialQuestionState, type QuestionState } from './question-state'
+// 编码契约单点在 @taiji/ui/extension-host form-protocol（MF-1-8 双壳收敛：桌面 onSubmit
+// 内联编码段 / qKey fallback / 已答判定与移动 shell/form-protocol 同契约）；schedule 句柄
+// 取值差异（ref 句柄 canSubmit/submit vs 移动参数注入）经参数注入保留在本组件
+import {
+  encodeFormAnswers,
+  initialQuestionState,
+  isQuestionAnswered as isQuestionAnsweredOf,
+  questionKey,
+  type QuestionState,
+} from '@taiji/ui/extension-host'
 import { registerModalSurface } from '@/composables/features/app/modal-surface-registry'
 
 const props = withDefaults(defineProps<{
@@ -81,10 +90,8 @@ const questionsList = computed<FormQuestion[]>(() =>
   props.questions ?? (draftMount.value ? [draftQuestion.value] : []),
 )
 
-// ── 问题 key（header 缺省时用 question 文本——与协议 askUserKey fallback 同规则）──
-function qKey(q: FormQuestion): string {
-  return q.header ?? q.question
-}
+// ── 问题 key（header 缺省时用 question 文本——协议 fallback 规则，共享单点 questionKey）──
+const qKey = questionKey
 
 // ── tab 状态 ──
 const activeIdx = ref(0)
@@ -122,21 +129,11 @@ function setScheduleRef(key: string, el: Element | ComponentPublicInstance | nul
 }
 
 // ── 已答判定 + Submit 门（AskUserOverlay:161-186 逐字继承；schedule 委托 canSubmit）──
-/** 问题是否已作答（choice：普通选项选中 ≥1 或 Other 选中且有文本；text：非空；
- *  schedule：渲染器 canSubmit——预填草稿视为有效） */
+/** 问题是否已作答：choice/text 判定委托共享单点 isQuestionAnsweredOf（参数注入 schedule
+ *  ready=false——schedule 题走下方句柄分支）；schedule = 渲染器 canSubmit（预填草稿视为有效） */
 function isQuestionAnswered(q: FormQuestion): boolean {
   if (q.type === 'schedule') return scheduleRefs.get(qKey(q))?.canSubmit ?? false
-  const st = states.value[qKey(q)]
-  if (!st) return false
-  // text 题 / 空 options 的退化 choice：otherText 有值即答完
-  if (q.type === 'text' || q.options.length === 0) return st.otherText.trim().length > 0
-  // 有选项：Other 选中必须有文本才算答完
-  const otherSelected = st.selectedValues.includes(OTHER_VALUE)
-  if (otherSelected && !st.otherText.trim()) {
-    // Other 选中但没文本：检查是否还选了其他选项（多选场景）
-    return st.selectedValues.some((v) => v !== OTHER_VALUE)
-  }
-  return st.selectedValues.length > 0
+  return isQuestionAnsweredOf(q, states.value[qKey(q)], false)
 }
 
 /** 全部问题已作答（Submit 启用守卫） */
@@ -201,29 +198,14 @@ function onSubmit(): void {
     if (result !== null) emit('submit', result)
     return
   }
-  const answers: Record<string, string> = {}
-  for (const q of questionsList.value) {
-    const key = qKey(q)
-    if (q.type === 'schedule') {
-      const result = scheduleRefs.get(key)?.submit() ?? null
-      if (result === null) return // 提交瞬间复核未过（once 时刻已过等）——整表中止
-      answers[key] = result // value = JSON.stringify(ScheduleFormResult)（D2）
-      continue
-    }
-    const st = states.value[key]
-    if (!st) continue
-    if (q.type === 'choice' && q.options.length > 0) {
-      // selected 只含真实选项 label（过滤 OTHER_VALUE 占位符）
-      const vals = st.selectedValues.filter((v) => v !== OTHER_VALUE)
-      if (vals.length > 0) {
-        answers[key] = q.multi ? JSON.stringify(vals) : vals[0]
-      }
-    }
-    // Other 自由文本写独立 key `${key}__other`；text 题答案只写 __other 不写主 key（D2）
-    if (st.otherText) {
-      answers[`${key}__other`] = st.otherText
-    }
-  }
+  // FormAnswers envelope 编码走共享单点 encodeFormAnswers（MF-1-8；schedule 题经 scheduleValue
+  // 回调取渲染器句柄 submit()——已序列化 JSON 或 null，null 即提交瞬间复核未过整表中止）。
+  // 字节等价约束（同输入同 answers JSON，含 `${key}__other` 键位与 OTHER_VALUE 过滤）由
+  // ui 包 form-protocol 契约测试 + 本组件既有测试族双锁定。
+  const answers = encodeFormAnswers(questionsList.value, states.value, (q) => {
+    return scheduleRefs.get(qKey(q))?.submit() ?? null
+  })
+  if (answers === null) return
   emit('submit', JSON.stringify(answers))
 }
 </script>

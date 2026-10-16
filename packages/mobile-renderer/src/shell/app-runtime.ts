@@ -135,7 +135,7 @@ const useChatInstance = createUseChat(buildUseChatDeps())
  *  登记表主表 #54（声明处 @data-owner #54）——纯本地 UI 交互态（无 runtime 权威），
  *  写口 toggle / collapse 封闭于 createTurnExpansion，清理挂 registerSessionCleanup。
  */
-// @data-owner #53 —— 主表 #53 mobile 壳 turn 展开分区
+// @data-owner #54 —— 主表 #54 mobile 壳 turn 展开分区
 const turnExpansionMap = new Map<string, Set<string>>()
 
 // [remote-use A15/U12] turn 展开分区挂 session 销毁注册表（registerSessionCleanup——

@@ -22,7 +22,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import type { ServerMessage, SkillInfo } from '@taiji/shared'
 import * as events from '@taiji/core/transport/api'
 import { ActivationManager, CommandRegistry, InternalEventBus, type SlashCommandLike } from '@taiji/core'
-import { __resetCommandStoreForTesting } from '@/composables/features/command/useCommandStore'
+import { __testing } from '@/composables/features/command/useCommandStore'
 import CommandPopover from '@/components/panel/CommandPopover.vue'
 import { SLASH_COMMAND_SOURCE_KEY } from '@/components/panel/command-popover-source'
 
@@ -63,7 +63,7 @@ const GLOBAL_SKILLS: SkillInfo[] = [
 
 beforeEach(() => {
   setActivePinia(createPinia())
-  __resetCommandStoreForTesting()
+  __testing.__resetCommandStoreForTesting()
 })
 
 describe('CommandPopover registry 合并源（TC2）', () => {

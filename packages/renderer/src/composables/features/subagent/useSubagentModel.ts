@@ -82,9 +82,12 @@ function subagentMemberDisplayKey(runId: string, memberRunId: string): DisplayKe
 const displayStates = reactive(new Map<DisplayKey, SubagentModelDisplayState>())
 
 /** 测试隔离：清空回执态注册表（生产禁用——会话期态，生产生命周期 = 页面刷新）。 */
-export function resetSubagentModelDisplayForTests(): void {
+function resetSubagentModelDisplayForTests(): void {
   displayStates.clear()
 }
+
+/** 测试后门命名空间（生产代码禁止消费，对齐 __testing 先例；MF-1-10 裸导出收编）。 */
+export const __testing = { resetSubagentModelDisplayForTests }
 
 /** canonical ref 串（'provider/id'）。 */
 function toModelRef(provider: string, modelId: string): string {

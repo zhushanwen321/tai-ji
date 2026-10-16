@@ -20,7 +20,7 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { defineComponent, inject, nextTick } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 import CommandDocPanel from '@/components/panel/CommandDocPanel.vue'
-import { useCommandStore, __resetCommandStoreForTesting } from '@/composables/features/command/useCommandStore'
+import { useCommandStore, __testing } from '@/composables/features/command/useCommandStore'
 import { getSettingsStore } from '@taiji/core'
 import { useSideDrawer, resetSideDrawer } from '@/composables/features/drawer/useSideDrawer'
 import type { SkillInfo } from '@taiji/shared'
@@ -64,7 +64,7 @@ beforeEach(() => {
   setActivePinia(createPinia())
   resetSideDrawer()
   // [w5] 壳单例跨测试共享：reset 让每个用例拿到全新实例（getPlatform 由 vitest-i18n-setup 全局 provide mock）
-  __resetCommandStoreForTesting()
+  __testing.__resetCommandStoreForTesting()
   readMock.mockReset()
   revealMock.mockReset()
 })

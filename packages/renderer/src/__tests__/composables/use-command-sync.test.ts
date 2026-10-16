@@ -20,7 +20,7 @@ import { defineComponent, h, ref, nextTick } from 'vue'
 import { mount, type VueWrapper } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import * as events from '@taiji/core/transport/api'
-import { __resetCommandStoreForTesting, useCommandStore } from '@/composables/features/command/useCommandStore'
+import { __testing, useCommandStore } from '@/composables/features/command/useCommandStore'
 import {
   useCommandSync,
   __clearInFlightCommandsFetchForTest,
@@ -103,7 +103,7 @@ function rejectForSid(sid: string, err: unknown): void {
 beforeEach(() => {
   pendingRpcs = []
   setActivePinia(createPinia())
-  __resetCommandStoreForTesting()
+  __testing.__resetCommandStoreForTesting()
   __clearInFlightCommandsFetchForTest()
 
   getCommandsMock.mockReset()

@@ -182,7 +182,8 @@ export function useComposerBarDensity(sessionId: Ref<string | null>): UseCompose
   /**
    * 插件 headerAction 可见入口面（左簇内容三源之一；demo composer-bar spec §2.1 B3——L2 聚合面
    * 含定时任务钮，其存在性必须参与「左簇有无内容」判定，否则托盘空 + toolbar 零贡献时聚合
-   * 入口不渲染、被聚合 clock 直开动作丢失）。判定纯函数与渲染过滤同构（bridge 单份）。
+   * 入口不渲染、被聚合 clock 直开动作丢失）。判定纯函数在 bridge（可见性条件单点
+   * isVisibleHeaderAction，按钮渲染过滤同调）。
    */
   const headerActionsSource = inject(HEADER_ACTIONS_SOURCE_KEY, null)
   const hasHeaderActionEntries = computed(

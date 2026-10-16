@@ -131,7 +131,8 @@
         <!-- 插件 headerAction 段（demo composer-bar spec §2.1 B3：L2 聚合面 = 定时任务 + 托盘 →
              layers 单钮，被聚合 clock 的直开动作由面板首段承接——demo TrayPanel ⓪「定时任务
              入口行」的对位；与左簇挂载点互斥渲染（左簇只在 expanded 挂），同一份数据源）。
-             有可见按钮才出段（hasVisibleHeaderActions 与 HeaderActionsHost 渲染过滤同构），
+             有可见按钮才出段（hasVisibleHeaderActions，可见性条件单点 isVisibleHeaderAction、
+             与按钮渲染过滤同调），
              段后发丝分隔与段体一起出现，零声明/全 hidden 不留死分隔。 -->
         <template v-if="hasHeaderActions">
           <div class="shrink-0 pb-1 pt-1">

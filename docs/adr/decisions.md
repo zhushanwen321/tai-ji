@@ -735,3 +735,27 @@ WorkflowTab 步骤列表的数据源绑定从「workflow-record 全量快照（6
 **依据**：用户裁决原文「派发期翻译是对的。account:bigmodel-individual-coding-plan/* 这个等同于 pi 中 zai-coding-cn，其他的都是 1:1 完全原样映射」——pi 词汇 id（zai-coding-cn）与 zcode 词汇（account:/builtin: 家族）各归其位。ADR-0132 关联条目在 zcode 造 pi 词汇 id 且 name 借用用户 plan 名（身份与名字脱节）、key 来源修订使 zcode GLM 流量凭据随 taiji 改动联动，均与用户心智模型冲突（本机实证：engineDefaults 存 `zai-coding-plan/GLM-5.3-Flash` 压掉 zcode 自身 model.main）。
 
 **登记**：实装 = `packages/zcode-subagent-cli/src/preparer.ts`（`translatePiModelRefToZcode` 翻译单源 + `resolveZcodeModelRef` account 分支前置）+ `zcode-engine.ts`（Port 成员实装）/ `packages/subagent-core/src/execution/engine/model-ref-translation.ts`（派发层共享编排，chat/workflow 两解析点同语义）+ `port.ts`/`registry.ts`（EnginePort.translateModelRef 可选成员）/ `packages/runtime/src/services/zcode-provider-sync.ts`（翻译通道 skip + derive account 段）；ADR-0132 文本保留作历史记录，冲突处以本条为准。
+
+### ADR-0138 延续条目语义裁决：title 清单权威 / severity 本轮权威（2026-10-16 架构审查循环裁决，rfl-f5c7f1506）
+
+**决定**：review-fix-loop 聚合器 R2+ 重报命中问题清单已追踪条目（延续条目）时，字段继承语义分两半——`title` 以清单侧已有值为权威（缺失才从重报回填），`severity` 以本轮显式标注为权威（在位即刷新）。实装 = `inheritCarryoverFields`（review-fix-loop-utils.cjs）单点。
+
+**为什么**：title 是跨轮身份锚点（L1/L2 身份对齐依赖它），锚点稳定优先于措辞新鲜——重报换措辞覆盖会让下一轮标题对账失配；severity 是裁决等级，本轮审查者对当前事实的判定优先于历史标注。两者权威方向相反是有意为之，不是不一致。
+
+**两侧差异裁决**：zcode 侧 workflow（`~/.zcode/workflows/review-fix-loop.dwf.ts`）现行 `prev.title = i.title` 无条件覆盖，与本裁决相反——属 pi 侧宽契约（title 可选）下的局部补偿语义与 zcode 侧必填 schema 的形态差异，登记为刻意差异（zcode schema title 必填 + 结构化门禁下空壳不可达），非漂移待对齐；两侧语义若要收敛，以本条为锚。
+
+### ADR-0139 dormant 列表 = pending 单形态，复活即迁出（2026-10-16 架构审查循环裁决，rfl-f5c7f1506）
+
+**决定**：`state.dormant` 列表中的条目恒为 pending 单形态——复活不在原条目上置 `revived` 标志位，而是在复活点把条目从 dormant 迁出（`state.dormant.filter` 移除），信息回到 issues 问题清单单一权威；`revived` 字段整体退役。
+
+**为什么**：修饰字段形态下，dormant 的每个消费者（prompt 注入 / 对账分区 / 标题匹配器）必须各自记得过滤 revived，漏一处即身份分裂（同 id 同题同时存在于 issues 与 dormant，L2 标题对齐恒假歧义——实证探针见 rfl-f5c7f1506 round-1 MF-1-2）；迁出形态下三个过滤谓词结构性退役，匹配器无需任何新过滤。删字段形似丢信息，实际是消除信息双权威。
+
+**回加禁令**：后续消费者依赖单形态后，回加 revived 标志需重审全部 dormant 消费点——禁止把本裁决当「丢失的簿记」修回来。
+
+### ADR-0140 extension-host 请求通道以共享 factory 下沉为家族默认形态（2026-10-16 架构审查循环裁决，rfl-f5c7f1506）
+
+**决定**：taiji 双壳（桌面 renderer / 移动 mobile-renderer）消费的 extension-host 请求通道——dialog / permission / form 三通道——通道算法（分区容器 / 快照对账 / 作答编码）单点下沉 `packages/ui/src/extension-host/` 共享模块（factory / 纯函数），壳侧只留策略回调与呈现差异。新增请求通道默认走同一形态，壳内自建通道算法副本是被禁形态。
+
+**为什么**：form 通道曾是三通道家族唯一未下沉成员，核心双壳各一份靠镜像注释手工维持对齐（companion-bridge 11 处 + useExtensionUI 8 处「同构/镜像」注释），已发生第一处真实漂移（移动壳断连不清挂起 form，桌面壳清——用户可见后果为断连期僵尸 form 假成功提交）。dialog/permission 先行下沉的先例证明 factory 形态可行；第四通道再出镜像即是回归。
+
+**边界**：呈现形态差异（桌面 tab / 移动堆叠、band 样式）留壳侧，不下沉；下沉对象是通道的**行为算法**，不是 UI。

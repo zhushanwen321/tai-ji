@@ -17,7 +17,7 @@ import { mount, type VueWrapper } from '@vue/test-utils'
 import { nextTick } from 'vue'
 import SubagentStatusLine, {
   applySubagentRecords,
-  resetSubagentPartitionsForTest,
+  __testing as subagentStatusTesting,
 } from '../SubagentStatusLine.vue'
 import { __testing } from '../../bootstrap'
 import { createLifecycleEffects } from '@taiji/core'
@@ -48,7 +48,7 @@ function mountStatusLine(sessionId: string): VueWrapper {
 describe('subagent 运行状态行（A9/U15）', () => {
   beforeEach(() => {
     // 模块级分区单例跨用例残留清零（__testing 先例：仅测试消费）
-    resetSubagentPartitionsForTest()
+    subagentStatusTesting.resetSubagentPartitionsForTest()
   })
 
   it('onSubagents 消息经壳 effects 写分区并渲染运行状态行（全链路：回调 → 分区 → 渲染）', () => {

@@ -30,12 +30,11 @@ import {
   encodeFormAnswers,
   initialQuestionState,
   isQuestionAnswered,
-  isScheduleEchoReady,
   questionKey,
   scheduleDraftOf,
-  scheduleEchoResult,
   type QuestionState,
-} from '../shell/form-protocol'
+} from '@taiji/ui/extension-host'
+import { isScheduleEchoReady, scheduleEchoResult } from '../shell/form-protocol'
 
 const props = defineProps<{
   /** 队首 form 类请求（undefined = 该节不渲染） */

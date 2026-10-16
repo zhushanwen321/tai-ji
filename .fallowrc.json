@@ -6,6 +6,12 @@
   ],
   "ignoreExports": [
     {
+      "file": "packages/*/src/**",
+      "exports": [
+        "__testing"
+      ]
+    },
+    {
       "file": "extensions/shared/file-lock/src/file-lock.ts",
       "exports": [
         "DEFAULT_RETRY_BUDGET_MS",
@@ -91,6 +97,7 @@
     "gate": "new-only"
   },
   "ignoreUnresolvedImports": [
-    "./helpers/rpc-client-mock"
+    "./helpers/rpc-client-mock",
+    "./helpers/companion-bridge-test-env"
   ]
 }

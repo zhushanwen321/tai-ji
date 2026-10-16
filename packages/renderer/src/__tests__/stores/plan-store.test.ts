@@ -39,7 +39,7 @@ import {
   resolvePlanLifecycleState,
   resolveResumeHint,
   registerPlanReviewColdSink,
-  __resetPlanReviewColdSinkForTesting,
+  __testing,
   type PlanReviewComment,
 } from '@/stores/plan-store'
 import type { PlanDocMeta, PlanStateView } from '@taiji/shared'
@@ -126,7 +126,7 @@ beforeEach(() => {
   getPendingRequestsMock.mockReset().mockResolvedValue([])
   setActivePinia(createPinia())
   __clearSessionCleanupRegistryForTest()
-  __resetPlanReviewColdSinkForTesting()
+  __testing.__resetPlanReviewColdSinkForTesting()
 })
 
 afterEach(() => {

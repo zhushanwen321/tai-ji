@@ -23,7 +23,7 @@
  *   overrideIntent（请求目标 ref）——badge 事实依据 = 意图已受理，D3 缺陷四轮内空窗修复。
  *
  * 全 mock：@/api 门面 + vue-i18n + useToast（不发真实请求；单例回执态经
- * resetSubagentModelDisplayForTests 用例间隔离）。
+ * __testing.resetSubagentModelDisplayForTests 用例间隔离）。
  * 运行：cd packages/renderer && npx vitest run src/composables/features/subagent/__tests__/useSubagentModel.test.ts
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
@@ -46,13 +46,13 @@ import {
   resolveSubagentModelDisplay,
   resolveSubagentThinkingLevel,
   useSubagentModel,
-  resetSubagentModelDisplayForTests,
+  __testing,
 } from '../useSubagentModel'
 
 beforeEach(() => {
   apiMocks.setModel.mockReset()
   toastMocks.error.mockReset()
-  resetSubagentModelDisplayForTests()
+  __testing.resetSubagentModelDisplayForTests()
 })
 
 // ── 标签读取规则四分支（纯函数）────────────────────────────────────────────

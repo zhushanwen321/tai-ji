@@ -20,7 +20,7 @@
  *     的 insertSlashChip/insertSkillChip）——ComposerInput.vue 同款组合，insert 的落位/替换
  *     语义、序列化归首（segmentsToText）、draft 同步（onChanged → emitInput(getText())）全真实
  *   - pendingSlash 经真实 commandStore（requestSlashInjection 写 / clearPendingSlash 清）
- *   - core 单例隔离：beforeEach resetSearchModal()（SM 单例）+ __resetCommandStoreForTesting()
+ *   - core 单例隔离：beforeEach resetSearchModal()（SM 单例）+ __testing.__resetCommandStoreForTesting()
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/composables/useCommandPopoverTrigger.mutual-exclusion.test.ts
  */
@@ -39,7 +39,7 @@ import { segmentsToText } from '@taiji/shared'
 import { useCommandPopoverTrigger } from '@/composables/panel/useCommandPopoverTrigger'
 import {
   useCommandStore,
-  __resetCommandStoreForTesting,
+  __testing,
 } from '@/composables/features/command/useCommandStore'
 
 /**
@@ -131,18 +131,28 @@ async function confirmInject(command: string, sessionId: string | null): Promise
   await nextTick()
 }
 
+/** 每用例前置重置（两 describe 共用单点）：新 pinia + SM 重置 + command store 重置 */
+function resetTriggerTestState(): void {
+  setActivePinia(createPinia())
+  resetSearchModal()
+  __testing.__resetCommandStoreForTesting()
+}
+
+/** 每用例收尾（ctx 生命周期 + 选区清理） */
+function cleanupComposerCtx(ctx: ReturnType<typeof setupRealComposer>): void {
+  ctx.dispose()
+  ctx.el.remove()
+  window.getSelection()?.removeAllRanges()
+}
+
 describe('useCommandPopoverTrigger SM 互斥（D1 单向状态互斥）', () => {
   let ctx: ReturnType<typeof setupRealComposer>
 
   beforeEach(() => {
-    setActivePinia(createPinia())
-    resetSearchModal()
-    __resetCommandStoreForTesting()
+    resetTriggerTestState()
   })
   afterEach(() => {
-    ctx.dispose()
-    ctx.el.remove()
-    window.getSelection()?.removeAllRanges()
+    cleanupComposerCtx(ctx)
   })
 
   it('isOpen 转 true → cmdOpen 置 false（sync 同拍，无需 tick）', () => {
@@ -183,14 +193,10 @@ describe('useCommandPopoverTrigger D2b 注入前清理（pendingSlash 消费链�
   let ctx: ReturnType<typeof setupRealComposer>
 
   beforeEach(() => {
-    setActivePinia(createPinia())
-    resetSearchModal()
-    __resetCommandStoreForTesting()
+    resetTriggerTestState()
   })
   afterEach(() => {
-    ctx.dispose()
-    ctx.el.remove()
-    window.getSelection()?.removeAllRanges()
+    cleanupComposerCtx(ctx)
   })
 
   it('① 正向效果：活跃 slash 域 confirm 注入后无残留明文 + 序列化恰为所选命令 + draft 同步', async () => {

@@ -27,7 +27,7 @@ import type { ServerMessage, SkillInfo } from '@taiji/shared'
 import * as events from '@taiji/core/transport/api'
 import { getSettingsStore, provideSettingsTransport, provideSettingsStore, createSettingsStore } from '@taiji/core'
 import { makeSkillsReloadTransportStub } from '../helpers/settings-transport-stub'
-import { __resetCommandStoreForTesting } from '@/composables/features/command/useCommandStore'
+import { __testing } from '@/composables/features/command/useCommandStore'
 import CommandPopover from '@/components/panel/CommandPopover.vue'
 
 // Wave3 TC5：useGlobalSkills 走真实 events 订阅链路（dispatchGlobal → handler → loadGlobal(true) → DOM 刷新）。
@@ -89,7 +89,7 @@ beforeEach(() => {
   setActivePinia(createPinia())
   provideSettingsStore(createSettingsStore())
   // [w5] CommandPopover 改经壳单例（core 实例）：reset 防跨用例残留 commandsBySession/appCommands
-  __resetCommandStoreForTesting()
+  __testing.__resetCommandStoreForTesting()
 })
 
 describe('CommandPopover landing 态用 globalSkills prop（L1-L14，W4）', () => {

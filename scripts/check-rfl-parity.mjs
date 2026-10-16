@@ -10,12 +10,33 @@
  *
  * 校验什么：
  *  1. 结构守卫：两侧必须都导出/定义镜像函数的骨架标记（函数名、池常量、阈值常量）。
+ *     覆盖两层：调度层（池/阈值/planReviewerOrder）+ 问题清单层两侧共有语义锚
+ *     （normIssueId / titlesCompatible / TITLE_MATCH_MIN，见下方 ISSUE_LAYER_MARKERS）。
  *  2. 行为对账：用同一组输入跑两侧 `planReviewerOrder`，比较 **归一化后的调度结果**
  *     （顺序 + 两批划分 + 成员不重复）。比较按维度名归一（pi 侧 `review-<dim>`、
  *     zcode 侧 `<dim>` → 统一 `<dim>`），因此不夹带命名差异；note 文案差异不参与比较
  *     （降级文案两侧刻意不同，不属语义）。
  *  3. 不变量断言：order 恒为输入的排列（无重复、无遗漏）——去重修复的核心不变量，
  *     两侧独立断言，任一侧退化都会红。
+ *
+ * 问题清单层两侧已登记语义差异（结构标记只锁「定义在场」，以下行为语义差异不在
+ * 机器锁步面内；改任一侧问题清单层前先核对本清单，新增差异须同步登记于此）：
+ *  - D1 延续条目 title 权威【漂移待对齐】：pi 侧 title 清单权威——inheritCarryoverFields
+ *    仅在清单侧缺 title 时回填、已有 title 不覆盖（f5c7f1506 裁决）；zcode 侧延续合并
+ *    `prev.title = i.title` 无条件覆盖（$HOME/.zcode/workflows/review-fix-loop.dwf.ts）。
+ *    severity 两侧一致（均采信本轮），分歧仅 title——待「延续条目 title 清单权威」
+ *    ADR 裁决后两侧对齐或登记豁免。
+ *  - D2 聚合条目 title 可选性【与 D1 同根】：pi 侧 schema 宽——normalizeMustFixEntry
+ *    容忍缺 title 并配套回填补偿；zcode 侧 AggIssueInput.title 必填（schema 窄，
+ *    无补偿需求）。对齐裁决时与 D1 同批处理。
+ *  - D3 复活模型【刻意】：pi 侧 dormant 分区 + 复活即迁出（复活点 state.dormant.filter
+ *    迁出 + dormantRevivalTitle 回填，recordDormant 恒 pending 单形态；resolveIssueIdentity
+ *    dormant 自识别）；zcode 侧无 dormant——条目 deferred 退出追踪，唯一复活入口 =
+ *    reviewer escalate 申报。两侧宿主演化路径不同，接受为刻意差异（dormant/deferred
+ *    域模型统一未立项）。
+ *  - D4 inheritCarryoverFields / dormantRevivalTitle 的 zcode 侧处置：前者对应物为
+ *    zcode 延续合并内联赋值（title 语义差随 D1，severity 语义一致）；后者属 dormant
+ *    机制（随 D3 无对应物），登记豁免、无镜像义务。
  *
  * 退出码：0 = 一致（或 zcode 侧文件不存在 → SKIP）；1 = 结构缺失或行为分歧。
  * 输出 [FIX] 指引：两侧文件路径 + 需要同步的内容。
@@ -98,6 +119,7 @@ if (!fs.existsSync(ZCODE_RFL)) {
 if (failures.length > 0) report();
 
 /* ── 结构守卫：两侧必须存在的镜像标记 ── */
+// 调度层：池/阈值常量与调度函数签名。
 const MARKERS = [
   "const REVIEWER_BATCH",
   "const SLOW_POOL",
@@ -107,9 +129,19 @@ const MARKERS = [
   "const SLOW_CHURN_THRESHOLD",
   "function planReviewerOrder",
 ];
+// 问题清单层两侧共有语义锚：两侧定义形态不同（pi `function fn(` / zcode `const fn = (`），
+// 故按裸名匹配——锁步语义 = 结构在场（单侧删除定义即红），不含改名/数值对账
+// （TITLE_MATCH_MIN 两侧现均为 5，数值漂移不红；调度层阈值有专门数值对账通道，
+// 本层无，属已知边界）。normIssueId = ID 归一（L1 前置）、titlesCompatible = L1 标题
+// 兼容检查（防编号撞车）、TITLE_MATCH_MIN = L2 标题匹配最小长度门槛。
+const ISSUE_LAYER_MARKERS = [
+  "normIssueId",
+  "titlesCompatible",
+  "TITLE_MATCH_MIN",
+];
 const piSrc = fs.readFileSync(PI_RFL, "utf8");
 const zcodeSrc = fs.readFileSync(ZCODE_RFL, "utf8");
-for (const m of MARKERS) {
+for (const m of [...MARKERS, ...ISSUE_LAYER_MARKERS]) {
   // pi 侧常量/函数可能以 `const REVIEWER_BATCH = 4;` 或 `function planReviewerOrder(` 形态出现
   const piHas = piSrc.includes(m.replace("const ", "const ")) || piSrc.includes(m);
   const zHas = zcodeSrc.includes(m);
@@ -370,11 +402,15 @@ for (const [name, a, b] of constantPairs) {
   }
 }
 
-report();
+// OK 摘要在标记数组初始化后构造（report() 存在标记数组就绪前的提前调用路径——
+// zcode 缺失且 pi 侧已失败时，经参数传入避免引用未初始化常量）。
+const markerSummary = "结构标记 " + (MARKERS.length + ISSUE_LAYER_MARKERS.length) + " 项（问题清单层："
+  + ISSUE_LAYER_MARKERS.join(" / ") + "）";
+report(markerSummary);
 
-function report() {
+function report(markerSummary) {
   if (failures.length === 0) {
-    console.log("[rfl-parity] OK — 双实现调度与常量一致（pi: " + path.relative(REPO_ROOT, PI_RFL) + "）");
+    console.log("[rfl-parity] OK — 双实现调度与常量一致（pi: " + path.relative(REPO_ROOT, PI_RFL) + "）；" + markerSummary);
     process.exit(0);
   }
   console.error("[rfl-parity] FAIL — review-fix-loop 双实现已漂移（" + failures.length + " 项）\n");
