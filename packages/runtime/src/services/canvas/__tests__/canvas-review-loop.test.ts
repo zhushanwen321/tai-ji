@@ -288,6 +288,40 @@ describe('条目身份 = (round, id) 二元组（跨轮同 id 碰撞不覆盖历
     }
   })
 
+  it('同批两条同 (round, id) 条目（异 note）→ invalid_params 整批不落盘；跨调用重试同 (round, id) 仍幂等覆盖（崩溃重试合法路径不受影响）', () => {
+    const h = makeService()
+    try {
+      const c = growCanvas(h.svc, createCanvas(h.svc))
+      expectOk(h.svc.mutate({ action: 'review-request', params: { canvasId: c.canvasId } }, 'agent'))
+      // 同批两条同 id 条目（异 note）：last-wins upsert 会静默合并丢一条发现（可能为
+      // must-fix），收敛门禁③按残缺条目集判定——必须 upfront 整批拒绝
+      const reply = h.svc.mutate({
+        action: 'review-append',
+        params: {
+          canvasId: c.canvasId,
+          round: 1,
+          entries: [
+            { id: 'rv-1', round: 1, dimension: 'completeness', severity: 'must-fix', targetId: c.q1, note: '缺口 A' },
+            { id: 'rv-1', round: 1, dimension: 'support', severity: 'suggestion', targetId: c.o1, note: '缺口 B' },
+          ],
+        },
+      }, 'review')
+      expectRejected(reply, 'invalid_params')
+      if (!reply.ok) expect(reply.error.message).toContain('rv-1')
+      // 整批不落盘：两条均未落
+      expect(c.state().review?.entries ?? []).toHaveLength(0)
+      // 跨调用重试批与已落库条目同 (round, id) = 幂等 upsert（崩溃重试合法路径），不拦
+      expectOk(h.svc.mutate({
+        action: 'review-append',
+        params: { canvasId: c.canvasId, round: 1, entries: [{ id: 'rv-1', round: 1, dimension: 'completeness', severity: 'must-fix', targetId: c.q1, note: '缺口 A 修订' }] },
+      }, 'review'))
+      expect(c.state().review?.entries).toHaveLength(1)
+      expect(c.state().review?.entries[0]?.note).toBe('缺口 A 修订')
+    } finally {
+      h.dispose()
+    }
+  })
+
   it('直写 ≡ 重放：R1 与 R2 条目异 id 共存经 events.jsonl 重建后一致（跨轮条目累积是设计内形态）', () => {
     const h = makeService()
     try {

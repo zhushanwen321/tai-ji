@@ -117,11 +117,15 @@ function validateEntryRefs(draft: CanvasState, entries: CanvasActionParams['revi
  * 输入——放行会借「同轮同 id 幂等覆盖」语义伪造异轮改写）；② 条目身份 = (round, id)
  * 二元组，同 id 异轮 = 跨轮撞号拒绝——全局按 id upsert 时 R2 复审同序号条目（reviewer
  * 按 rv-<序号> 生成 id 的惯性）会静默覆盖 R1 条目并继承其处置记录，R2 新 must-fix 未
- * 处置即显示已处置，收敛门禁③（must-fix 清零）被旁路。同轮同 id 不拦（崩溃重试幂等
- * upsert，见 upsertReviewEntries）。 */
+ * 处置即显示已处置，收敛门禁③（must-fix 清零）被旁路；③ 同批内部 (round, id) 查重
+ * ——同批两条同 id 条目经 last-wins upsert 会静默合并丢一条（可能为 must-fix），收敛
+ * 门禁③按残缺条目集判定，必须 upfront 整批拒绝。同轮同 id 只拦同批内部重复：跨调用
+ * 的重试批与已落库条目同 (round, id) 是崩溃重试幂等 upsert（见 upsertReviewEntries），
+ * 不拦。 */
 function validateEntryIds(draft: CanvasState, params: CanvasActionParams['review-append']): void {
   const review = draft.review
   if (!review) return
+  const seenInBatch = new Set<string>()
   for (const entry of params.entries) {
     if (entry.round !== params.round) {
       fail('invalid_params', `报告条目「${entry.id}」的轮次（R${entry.round}）与报告轮次（R${params.round}）不一致：条目 round 必须等于报告轮次，修正后重试`)
@@ -130,6 +134,11 @@ function validateEntryIds(draft: CanvasState, params: CanvasActionParams['review
     if (existing) {
       fail('invalid_params', `报告条目 id「${entry.id}」已被 R${existing.round} 条目占用（条目身份 = 轮次 + id，跨轮不得复用）：R${entry.round} 条目换 id（如 rv-r${entry.round}-<序号>）后重试`)
     }
+    const batchKey = `${entry.round}:${entry.id}`
+    if (seenInBatch.has(batchKey)) {
+      fail('invalid_params', `报告条目 id「${entry.id}」在本批内重复（条目身份 = 轮次 + id，同批同 id 会静默合并丢条目）：只保留一条或换 id（如 rv-r${entry.round}-<序号>）后重试`)
+    }
+    seenInBatch.add(batchKey)
   }
 }
 
