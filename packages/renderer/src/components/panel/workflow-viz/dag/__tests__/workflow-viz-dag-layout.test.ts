@@ -326,7 +326,7 @@ describe('layoutEdges 正交路由（白盒）', () => {
     expect(layoutEdges(d, layout.nodes)).toHaveLength(0)
   })
 
-  it('同列前向边：列右缘细道绕行（右中点出 → 左中点入），不再走列中线穿卡片', () => {
+  it('同列前向边：列右缘细道绕行（右中点出 → 右中点入），任何段不穿卡片', () => {
     const d = dag({
       phases: [{ name: 'p0', order: 0 }],
       nodes: [node({ id: 'a' }), node({ id: 'b', templateName: 'zb' })],
@@ -337,9 +337,12 @@ describe('layoutEdges 正交路由（白盒）', () => {
     const [edge] = layoutEdges(d, layout.nodes)
     expect(edge.points).toHaveLength(4)
     expectAxisAligned(edge.points)
-    // 出锚 = 源右中点，入锚 = 目标左中点（四中点锚点纪律）
+    // 出锚 = 源右中点，入锚 = 目标右中点（朝向细道一侧——入左中点会让末段横线
+    // 从右侧细道横穿整张目标卡片，箭头被绘制顺序遮住，回归锚定 dmg-r1-2）
     expect(edge.points[0]).toEqual({ x: la.x + DAG_NODE_W, y: la.y + la.h / 2 })
-    expect(edge.points[3]).toEqual({ x: lb.x, y: lb.y + lb.h / 2 })
+    expect(edge.points[3]).toEqual({ x: lb.x + DAG_NODE_W, y: lb.y + lb.h / 2 })
+    // 末段从细道到入锚的短横线在节点右缘之外（不进入卡片 x 区间）
+    expect(edge.points[2].x).toBeGreaterThan(lb.x + DAG_NODE_W)
     // 细道 x 在节点右缘之外、分区内边距带内（CLUSTER_PAD_X=12）——竖线段不穿卡片
     const gutterX = edge.points[1].x
     expect(gutterX).toBe(edge.points[2].x)

@@ -433,9 +433,10 @@ export function layoutEdges(dag: WorkflowDag, nodes: DagLayoutNode[]): DagLayout
     const y1 = from.y + from.h / HALF
     const x2 = to.x
     const y2 = to.y + to.h / HALF
-    // 同列前向边（同 phase 内上下游调用点）：右中点出 → 列右缘细道下/上升 → 左中点
-    // 入。缺省通道路由的中位竖线 = 两端 x 的中点，落在节点列内部（横竖段全部穿卡片，
-    // 被「边先节点后」的绘制顺序遮住不可见）；细道在分区右内边距带内（LOOP_SIDE_OFFSET，
+    // 同列前向边（同 phase 内上下游调用点）：右中点出 → 列右缘细道下/上升 → 右中点
+    // 入（入锚取朝向细道一侧——若入左边中点，末段横线要从右侧细道横穿整张卡片，
+    // 箭头被「边先节点后」的绘制顺序遮住不可见）。缺省通道路由的中位竖线 = 两端 x
+    // 的中点，同样落在节点列内部穿卡片；细道在分区右内边距带内（LOOP_SIDE_OFFSET，
     // CLUSTER_PAD_X=12 容得下），与回边细道共带——同列多条边共享细道时纵向跨度
     // 相邻链（a→b→c）天然衔接不重叠，跨行跳连（a→c 与 a→b 并存）的重叠为已知罕见形态
     if (Math.abs(from.x - to.x) < COINCIDE_EPS) {
@@ -447,7 +448,7 @@ export function layoutEdges(dag: WorkflowDag, nodes: DagLayoutNode[]): DagLayout
           { x: x1, y: y1 },
           { x: gutterX, y: y1 },
           { x: gutterX, y: y2 },
-          { x: x2, y: y2 },
+          { x: to.x + DAG_NODE_W, y: y2 },
         ],
         labelX: gutterX + LABEL_GAP_X,
         labelY: (y1 + y2) / HALF,
