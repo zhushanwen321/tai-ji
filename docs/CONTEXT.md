@@ -320,13 +320,13 @@ Session 级状态，表示 pi 进程正在工作（从用户发送消息到 agen
 
 全部消息发送的统一投递服务：**一个内核 + 两个薄适配 + 唯一队列在 pi**。内核 = `packages/session-delivery/`（v3：条目状态机 / 判重 / 送达凭据 / DeliveryStore 端口，零 pi 依赖零 fs 知识）；两个薄适配 = runtime 适配（`packages/runtime/src/services/session/session-delivery-registry.ts`，文本车道：提交入口 + 在途登记 + 撤销编排 + GUI 状态源）与 pi 内投递端口 DeliveryPort（`extensions/shared/delivery-port/`，custom 车道唯一执行者：通知提交 + 投递日志 + 回执 + 重启重放）。**唯一队列 = pi 原生 steer / followUp 队列**（每 session 一份）——文本 `prompt(streamingBehavior)` 与通知 `sendMessage(deliverAs)` 同队 FIFO，忙时入队不拒；两档注入时机由 pi 队列原生出队承载，taiji 侧零时机代码。renderer 只提交（`delivery.submit`）与渲染（`session.delivery` 状态帧），不做投递判定。
 
-**envelope（投递信封）**：投递请求统一包装——payload（判别联合 text / custom）+ timing + 幂等键 id + 提交选项（merge 合批 / onFailure 失败处置）+ meta 透传。机制统一、差异只在提交选项缺省值（text 缺省 forget 失败即弃 + 逐条；custom 缺省 retain 留账重投 + 合批）与端点能力（cancel / drain 管控面仅 runtime 端点）。
+**envelope（投递信封）**：投递请求统一包装——payload（判别联合 text / custom）+ timing + 幂等键 id + 提交选项（merge 合批 / onFailure 失败处置 / 通知域另有 collectKey 收取关联键）。机制统一、差异只在提交选项缺省值（text 缺省 forget 失败即弃 + 逐条；custom 缺省 retain 留账重投 + 合批）与端点能力（cancel / drain 管控面仅 runtime 端点）。
 
 **期望注入时机（timing）**：提交方声明的注入档位，两档——`steer`（下一个轮边界：当前轮工具执行完、下一轮模型请求前）/ `followUp`（run 将停处延展同一 run）；agent 空闲时两档都立即起一轮。API 字段名 `timing`；内核包内零 pi 词汇词形（`interrupt-at-turn-boundary` / `after-run`），facade 层翻译。缺省 steer（2026-10-16 用户裁决）。
 
 **实际注入时机（actualTiming）**：与 timing 对偶的实际发生形态——immediate（立即注入/入队）/ at-boundary（轮边界出队）/ at-run-end（运行结束出队），唯一例外 compaction-hold（pi 硬拒绝期间的提交侧等待）。
 
-**条目五态（`DeliveryEntryState`）**：queued（受理登记）/ in-flight（已入 pi 队列、未确认）/ delivered（送达回执命中）/ failed（失败，按 onFailure：forget 失败即弃等用户重发 / retain 留账下一边沿或重启重投）/ cancelled（用户撤销）。`session.delivery` 帧是派生视图：活跃态全量 + delivered 最近 50 条，cancelled 不投影（全文经 `delivery.cancel` reply 回草稿）。
+**条目五态（`DeliveryEntryState`）**：queued（受理登记）/ in-flight（已入 pi 队列、未确认）/ delivered（送达回执命中）/ failed（失败，按 onFailure：forget 失败即弃等用户重发 / retain 留账下一边沿或重启重投）/ cancelled（用户撤销）。`session.delivery` 帧是派生视图：活跃态全量 + delivered 最近 50 条，cancelled 不进该派生视图（全文经 `delivery.cancel` reply 回草稿）。
 
 **两阶段回执**：①**受理** = 提交链路收下消息（同步返回）；②**送达** = 消息身份在 transcript 可证（文本 = `message_end` 命中裸标记；通知 = `message_end` 命中 `details.deliveryId`）。受理 ≠ 送达；`sendChecked` 同步 settle 维持受理口径（agent→managed 契约锚）。
 
@@ -345,6 +345,20 @@ Session 级状态，表示 pi 进程正在工作（从用户发送消息到 agen
 **持久化存储端口（DeliveryStore）**：内核 v3 端口——`persist / ack / discard / loadUndelivered / loadTerminalIds / hasTerminal`。两实现：runtime 半区 = 磁盘 outbox（fs 注入，内核零 fs 知识）；port 半区 = session entry（persist 为 no-op，落盘由提交层 appendEntry 前置兑现防双写）。
 
 **compaction 状态标记**：port 提交放行判定——`session_before_compact` 置位 / `session_compact`、`session_compact_failed` 复位三事件维护；标记为真留账等待、边沿唤醒重投，为假 sendMessage 直达唯一队列（run 活跃入队不拒 / 空闲起轮）。文本侧 compaction 持有判定在 runtime 侧（既有机制）。
+
+**collect 批量收取（phase 2，result-collect）**：agent 主动选择的一种消费模式——调 `collect_results` 工具（pending-notifications 扩展）阻塞等待一批后台任务终态并一次性收取结果，与 push（单条通知唤醒）相对；避免写「拉取」（与 ADR-0097 拉管义混淆）。`executionMode: sequential` 保证单在途 collect，timeout_ms 缺省 3_600_000，AbortSignal 中断捕获为正常返回（非抛错，返回值保留入历史）。
+
+**收取关联键（collectKey）**：生产方在 `deliver` 提交时申报的稳定操作 id 集合（`DeliveryDeliverOptions.collectKey: string[]`）——单债权条目 = 其 pending:register 的 id（单元素）；managed 合批条目 = 批内全部债权键。挂起判定（键集与等待集相交）与收取（逐键展开）的匹配键集。
+
+**债权键**：managed session 域概念——带 prompt 的 send_to_session / create_session 排队时登记的「完成通知义务」身份键（`sm-` 前缀 UUID）。两类：send 债权（消息完成即兑现）与 lifetime 死亡债权（create 恒返回、仅 session exited/deleted 时兑现、存活期恒活跃）；注册侧申报 kind 标记区分，collect 缺省等待集排除 lifetime 类。
+
+**合批条目（managed 域）**：managed session 完成通知的生产侧合批形态——同一 (sessionId, reason) 且同批身份（settleSeq/deathSeq）的多笔债权折叠为一次 deliver：载荷幂等键 = 批内首个债权键、fulfills = 批内笔数，其余成员仅注销 pending。多键单终局：收取写一次 collected 终局、逐键展开共享。
+
+**collect 挂起**：条目已落投递日志但暂缓进投递内核，留在端口挂起缓冲（deliver 入口按「键集 ∩ 等待集 ≠ ∅」分流）等收取或释放；纯内存态、无独立持久化——日志记录受理前已落盘，任何时点崩溃重启按未投递重放（挂起不丢）。
+
+**收取（consume）**：collect 等待器取走挂起条目的载荷并写 collected 终局；命中条目按条目键集全量逐键展开、终局按日志条目写一次；收取过的条目构造性不可再投递（收取唯一性——recover 差集排除）。
+
+**collected 终局**：投递日志 ack outcome 新枚举值（结果已随 collect 返回到达 agent），差集重放视同已完结；collectRelease 解散等待集时未收挂起条目直通内核 flush（跳过合批窗口）恢复 push。
 
 ### Side Drawer（原 Side Inspector）
 
