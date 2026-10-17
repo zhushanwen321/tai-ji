@@ -12,7 +12,7 @@
  * 最小字段集。
  */
 import { vi } from 'vitest'
-import { trash } from '../../src/infra/system/trash.js'
+import { trash, trashDirectory } from '../../src/infra/system/trash.js'
 import { PiSessionStore } from '../../src/infra/pi/session-store.js'
 import { SessionLifecycle } from '../../src/services/session/session-lifecycle.js'
 import type { ILifecycleSessionOps } from '../../src/services/session/session-internal.js'
@@ -23,10 +23,16 @@ import type { IConfigStore } from '../../src/services/ports/config.js'
 import type { WorkspaceService } from '../../src/services/workspace/workspace-service.js'
 import type { SessionSummary } from '@taiji/shared'
 
-vi.mock('../../src/infra/system/trash.js', () => ({ trash: vi.fn() }))
+// D5（session-store-layout-inversion）：delete 链新增整树软删通道 trashDirectory
+// （`<root>/<sid>/` 目录级）——与 trash 同模块，mock 须同页提供，否则 session-lifecycle
+// 的 import 拿到 undefined（树存在即 TypeError）。
+vi.mock('../../src/infra/system/trash.js', () => ({ trash: vi.fn(), trashDirectory: vi.fn() }))
 
 /** 已 mock 的 infra trash（vi.mocked 视图，测试经它注入故障/断言调用）。 */
 export const trashMock = vi.mocked(trash)
+
+/** 已 mock 的 infra 目录级软删（D5 整树 trash 通道；测试注入故障/断言调用）。 */
+export const trashDirectoryMock = vi.mocked(trashDirectory)
 
 /**
  * 构造真实 SessionLifecycle 与四类协作对象，返回 { lifecycle, svc, store, pm }

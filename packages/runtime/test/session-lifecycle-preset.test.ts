@@ -43,9 +43,17 @@ vi.mock('../src/services/session/session-fork.js', () => ({
 
 vi.mock('../src/infra/pi/pi-paths.js', () => ({
   getSessionsDir: () => '/tmp/sessions',
-  // delete 下挂内容级联（session-content-cascade）需要 agentDir（session-view /
-  // base-tool-enhance 推导根）——本文件断言不涉及其内容，固定假路径即可。
+  // delete 下挂内容级联（session-content-cascade）需要 agentDir（A23 收殓器入参推导根）
+  // ——本文件断言不涉及其内容，固定假路径即可。
   getPiAgentDir: () => '/tmp/agent',
+}))
+
+// D5（session-store-layout-inversion）整树软删通道：delete 链新增 trashDirectory
+// （`<root>/<sid>/` 目录级）。本文件只断言 preset sidecar 清理，两条 trash 通道一并
+// mock——真实通道会调系统 trash CLI（Finder），测试环境不可达。
+vi.mock('../src/infra/system/trash.js', () => ({
+  trash: vi.fn(async () => {}),
+  trashDirectory: vi.fn(async () => {}),
 }))
 
 import { SessionLifecycle } from '../src/services/session/session-lifecycle.js'
@@ -134,6 +142,9 @@ function makeMocks(opts: {
     invalidateScanCache: vi.fn(),
     persistPresetBinding: persistPresetBindingFn,
     trash: vi.fn(),
+    // D5 整树软删（ISessionStore.trashDirectory）：本文件 fs 全 mock（tc8 只断言
+    // .preset.json unlink 调用），stub no-op 即可——树删落盘效果由 cascade 测试族真跑覆盖。
+    trashDirectory: vi.fn(async () => {}),
     invalidateMetaCache: vi.fn(),
   } as unknown as ISessionStore
 
