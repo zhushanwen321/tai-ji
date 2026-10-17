@@ -35,8 +35,7 @@
              图标染色经显式类替换 BLOCK_ICON_CLASS（两者 text 色工具类同特异性，追加不构成
              可靠覆盖）：静止态染 --neutral-ico（2026-10-15 裁决 ②A 去紫——原 --reasoning 紫
              退役，token 本体不动，ANSI magenta / 摘要标题 / skill 徽标等其余消费点不受影响）；
-             行字号继承头部 --text-base（14px =
-             demo fs-lg 行级档）。
+             行字号随 trace 容器定档（Turn.vue .trace 的 text-md = 15px，行主体统一档）。
              [MF-1-28]（demo TurnList.vue:72-73）：running 态 = 呼吸弧 accent（同工具行
              :237 形态，信号源 = thinkingSweeping）；静止态 = lightbulb 15px stroke1.6 染
              --neutral-ico。行 hover 反馈（MF-1-4，demo workbench.css:355 .line:hover 只压
@@ -138,7 +137,8 @@
         <span v-if="messageTimestamp" class="ml-auto shrink-0 self-center font-mono text-[length:var(--text-2xs)] text-neutral-dim tabular-nums opacity-0 transition-opacity duration-[var(--duration-fast)] group-hover/text:opacity-100 group-focus-within/text:opacity-100" data-testid="text-time-slot">{{ formatClock(messageTimestamp) }}</span>
       </div>
       <!-- [actions-anchor] turn 级 hover actions 挂载位（Turn.vue 经 #turn-actions 插槽注入，
-           仅末位 text 块携带）。2026-10-15 用户裁决：流内固定槽位 = text 块下部一行，
+           仅 trace 末单元为 text 块时本块携带——正文后跟了任何块则该 text 无锚，防占位行
+           夹在正文与后续块之间撑出空洞）。2026-10-15 用户裁决：流内固定槽位 = text 块下部一行，
            与 UserBubble hover actions 同族形态（原「text 上方右侧」悬浮 chip 退役——
            透明底不再覆盖任何文字）。常驻 h-6 行占位（opacity 门控显隐，与 UserBubble
            mt-1+h-6 同参）；悬停区 = 外层 group/text（正文行 + 本行），按钮是本块 DOM
@@ -167,7 +167,7 @@
     <div v-else-if="type === 'run-group' && group" class="trace-run-group" data-testid="run-group">
       <div
         data-testid="run-group-header"
-        class="group/bgroup flex min-w-0 cursor-pointer select-none items-baseline gap-[8px] text-[length:var(--text-base)] [font-weight:var(--fw-mid)] text-neutral-mid"
+        class="group/bgroup flex min-w-0 cursor-pointer select-none items-baseline gap-[8px] [font-weight:var(--fw-mid)] text-neutral-mid"
         role="button"
         tabindex="0"
         :aria-expanded="groupExpanded"
@@ -184,7 +184,7 @@
         <component :is="BLOCK_ICON_LUCIDE[RUN_GROUP_ICON[group.base]]" v-else :class="[BLOCK_ICON_CLASS, 'self-center']" />
         <span class="shrink-0 whitespace-nowrap text-left transition-opacity duration-[var(--duration-fast)] group-hover/bgroup:opacity-80">{{ t(RUN_GROUP_LABEL_KEY[group.base]) }}</span>
         <!-- 同名组序号（demo `.rg-seq`）：第二个「探索」起显示「 · 2」，同类型的多段在回看时可区分 -->
-        <span v-if="group.seq > 1" class="shrink-0 whitespace-nowrap font-mono text-[length:var(--text-sm)] text-neutral-dim">· {{ group.seq }}</span>
+        <span v-if="group.seq > 1" class="shrink-0 whitespace-nowrap font-mono text-neutral-dim">· {{ group.seq }}</span>
         <!-- 里程碑徽标（demo spec §3.6 `.rg-badge`，位于序号与统计段之间）：core 结构派生的信号
              聚合上组头（当前 = 首个改动），无则不渲染。视觉 = accent 低饱和 pill（字 accent /
              边 accent-ring 30% / 底 accent-soft 10%，SessionItemDisplay agent badge 同族），
@@ -195,7 +195,7 @@
           data-testid="run-group-mile"
           class="rg-badge shrink-0 whitespace-nowrap rounded-full border border-accent-ring bg-accent-soft px-[7px] font-mono text-[length:var(--text-xs)] text-accent"
         >{{ t(RUN_GROUP_MILE_LABEL_KEY[mile]) }}</span>
-        <span class="min-w-0 truncate text-left font-mono text-[length:var(--text-sm)] text-neutral-dim transition-opacity duration-[var(--duration-fast)] group-hover/bgroup:opacity-80">{{ groupStatText }}</span>
+        <span class="min-w-0 truncate text-left font-mono text-neutral-dim transition-opacity duration-[var(--duration-fast)] group-hover/bgroup:opacity-80">{{ groupStatText }}</span>
         <!-- 失败段 chip 化（demo failtag 形态：workbench.css .failtag = 11px fw-mid danger +
              danger-soft 底 + r-xs 4px + 1px 6px 内边距） -->
         <span v-if="group.header.failedCount > 0" data-testid="run-group-failed" class="shrink-0 rounded-[var(--radius-xs)] bg-danger-soft px-1.5 py-px text-[length:var(--text-2xs)] [font-weight:var(--fw-mid)] text-danger">{{ t('panel.message.traceFailed', { count: group.header.failedCount }) }}</span>
@@ -226,7 +226,7 @@
       <div v-else-if="isWorkflow" class="trace-workflow" data-testid="workflow-block">
         <div
           data-testid="tool-block-header"
-          class="group/wf flex min-w-0 cursor-pointer select-none items-baseline gap-[8px] text-[length:var(--text-base)] [font-weight:var(--fw-mid)] text-neutral-dim"
+          class="group/wf flex min-w-0 cursor-pointer select-none items-baseline gap-[8px] [font-weight:var(--fw-mid)] text-neutral-dim"
           @click="openWorkflowDrawer"
         >
           <!-- running 态 loader（呼吸弧 + accent），其余走 list-checks ICON（瞬时切换，tico
@@ -235,10 +235,10 @@
           <component :is="BLOCK_ICON_LUCIDE.workflow" v-else :class="[headerIconClass, 'self-center']" />
           <span :class="[BLOCK_LABEL_CLASS, 'transition-opacity duration-[var(--duration-fast)] group-hover/wf:opacity-80']">{{ t('panel.message.workflow') }}</span>
           <!-- name 染对话流专属名称色 --name（2026-10-06 裁决）；slug 降行层级灰（与「子代理」等标签同色 --neutral-mid） -->
-          <span v-if="workflowFields.nameShort" class="shrink-0 whitespace-nowrap font-mono text-[length:var(--text-sm)] text-[color:var(--name)] transition-opacity duration-[var(--duration-fast)] group-hover/wf:opacity-80" :title="workflowFields.name">{{ workflowFields.nameShort }}</span>
+          <span v-if="workflowFields.nameShort" class="shrink-0 whitespace-nowrap font-mono text-[color:var(--name)] transition-opacity duration-[var(--duration-fast)] group-hover/wf:opacity-80" :title="workflowFields.name">{{ workflowFields.nameShort }}</span>
           <template v-if="workflowFields.slug">
             <span class="text-neutral-faint">·</span>
-            <span class="min-w-0 shrink-0 truncate font-mono text-[length:var(--text-sm)] text-neutral-mid transition-opacity duration-[var(--duration-fast)] group-hover/wf:opacity-80">{{ workflowFields.slug }}</span>
+            <span class="min-w-0 shrink-0 truncate font-mono text-neutral-mid transition-opacity duration-[var(--duration-fast)] group-hover/wf:opacity-80">{{ workflowFields.slug }}</span>
           </template>
         </div>
         <!-- mini phase 管道 chips：数据源 = WorkflowRunRecord.phases 折叠（getWorkflows 同批透出，
@@ -271,7 +271,7 @@
       <div v-else class="group/tool">
         <div
           data-testid="tool-block-header"
-          class="tool-header flex min-w-0 cursor-pointer select-none items-baseline gap-[8px] text-[length:var(--text-base)] [font-weight:var(--fw-mid)] text-neutral-mid"
+          class="tool-header flex min-w-0 cursor-pointer select-none items-baseline gap-[8px] [font-weight:var(--fw-mid)] text-neutral-mid"
           :title="toolExpanded ? t('panel.message.collapse') : t('panel.message.expand')"
           @click="toggleTool"
         >
@@ -286,11 +286,11 @@
           <span class="shrink-0 normal-case tracking-normal transition-opacity duration-[var(--duration-fast)] group-hover/tool:opacity-80">{{ toolName }}</span>
           <!-- running + 有流式输出：单行尾行视口（同 thinking header 结构：leading-normal
                字体无关行高 + mr-auto 短行左贴/溢出钉右 + 纵向状态机滑入）；否则静态 shortenForHeader。
-               [M3b demo 复刻] 摘要/尾行走 mono 13px（--text-sm，demo .tool .cmd =
-               font-mono fs-base dim），与行级 14px sans 拉开命令语境。 -->
+               [M3b demo 复刻] 摘要/尾行走 mono（demo .tool .cmd = font-mono 命令语境），字号随
+               trace 容器行主体统一档（15px），mono 字族承担命令语境区分。 -->
           <span
             v-if="isRunning && toolTailLines.length > 0"
-            class="flex h-[1lh] min-w-0 flex-1 self-center justify-end overflow-hidden font-mono text-[length:var(--text-sm)] normal-case leading-normal tracking-normal text-neutral-dim transition-opacity duration-[var(--duration-fast)] group-hover/tool:opacity-80"
+            class="flex h-[1lh] min-w-0 flex-1 self-center justify-end overflow-hidden font-mono normal-case leading-normal tracking-normal text-neutral-dim transition-opacity duration-[var(--duration-fast)] group-hover/tool:opacity-80"
             :class="{ invisible: toolExpanded && isBashTool }"
           >
             <span class="text-sweep mr-auto flex flex-col items-end self-start" :style="toolScrollStyle">
@@ -301,8 +301,9 @@
                与 UserBubble 文件 badge 同语义（openFileDetail 双通道 + @click.stop 防行展开 +
                title 完整路径 + ellipsis）。
                [M3b demo 复刻] chip 形态对齐 demo .tool .fchip（workbench.css:372）：card-inset
-               凹陷底 + hairline 边 + fg-2 字 + 12px mono + 1px 8px 内边距；demo chip 无图标
-               （FileText 移除）。hover 提亮为 real 保留 affordance（demo 无 hover 形态）。
+               凹陷底 + hairline 边 + fg-2 字 + mono + 1px 8px 内边距，字号随 trace 容器行主体
+               统一档（15px）；demo chip 无图标（FileText 移除）。hover 提亮为 real 保留 affordance
+               （demo 无 hover 形态）。
                [MF-1-24]（demo workbench.css:372-386 同款）：max-w-[320px] 上限（长文件名不再
                吃满整行）+ 内层 fchip-roll 双 span 轻方案——静态 truncate 截断，hover 时容器
                text-overflow:clip + 内层 roll 滚到文末停（forwards）、短名 min(0px,…) 取 0
@@ -310,7 +311,7 @@
           <span
             v-else-if="argPath && isFileWriteTool"
             data-testid="tool-file-chip"
-            class="tool-file-chip inline-flex min-w-0 max-w-[320px] cursor-pointer items-center gap-1 truncate rounded-sm border border-hairline bg-bg-input px-2 py-px font-mono text-[length:var(--text-xs)] normal-case tracking-normal [font-weight:var(--fw-text)] text-[color:var(--neutral-fg-2)] transition-[color,border-color,opacity] duration-[var(--duration-fast)] hover:border-border-strong hover:text-neutral-fg hover:[text-overflow:clip] group-hover/tool:opacity-80"
+            class="tool-file-chip inline-flex min-w-0 max-w-[320px] cursor-pointer items-center gap-1 truncate rounded-sm border border-hairline bg-bg-input px-2 py-px font-mono normal-case tracking-normal [font-weight:var(--fw-text)] text-[color:var(--neutral-fg-2)] transition-[color,border-color,opacity] duration-[var(--duration-fast)] hover:border-border-strong hover:text-neutral-fg hover:[text-overflow:clip] group-hover/tool:opacity-80"
             role="button"
             tabindex="0"
             :title="argPath"
@@ -327,7 +328,7 @@
               class="shrink-0 tabular-nums text-neutral-dim"
             >+{{ fileChipDiffStat.additions }} −{{ fileChipDiffStat.deletions }}</span>
           </span>
-          <span v-else-if="argPath" class="min-w-0 font-mono text-[length:var(--text-sm)] normal-case tracking-normal text-neutral-dim truncate transition-opacity duration-[var(--duration-fast)] group-hover/tool:opacity-80" :class="[{ invisible: toolExpanded && isBashTool }, isRunning ? 'text-sweep' : '']">{{ shortenForHeader(argPath) }}</span>
+          <span v-else-if="argPath" class="min-w-0 font-mono normal-case tracking-normal text-neutral-dim truncate transition-opacity duration-[var(--duration-fast)] group-hover/tool:opacity-80" :class="[{ invisible: toolExpanded && isBashTool }, isRunning ? 'text-sweep' : '']">{{ shortenForHeader(argPath) }}</span>
           <!-- tool 块行尾槽（[M3b demo 复刻] demo .dur/.ts）：耗时常驻显形（demo .dur 无显隐
                门控，fs-md 12px mono dim——running 也保持 dim，accent 只在呼吸弧图标），
                时刻保留 D2 悬停化（demo .ts opacity 0→1 hover 显形）；耗时与时刻间无分隔点

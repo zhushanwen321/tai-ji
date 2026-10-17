@@ -949,11 +949,13 @@ describe('run 类型分组: Turn 组块接线（三路径 + PR-6）', () => {
 })
 
 // ═════════════════════════════════════════════════════════════════
-// describe：[actions-anchor] 操作栏插槽只挂末位 text 块
+// describe：[actions-anchor] 操作栏插槽只挂 trace 末单元为 text 的块
 // （真实 Block 渲染——BlockStub 不渲染插槽，锚块断言需真实 text 分支；显隐是 CSS
-// group-hover 行为，jsdom 不可断言，本层只验挂载点存在性、唯一性与归属）
+// group-hover 行为，jsdom 不可断言，本层只验挂载点存在性、唯一性与归属。
+// 锚判定 = renderUnits 末单元存在且非 run 组块且 kind==='text'：正文后跟了任何块
+// （工具/思考/组块）就不得有占位行，末单元非 text 时操作栏无挂载点、不渲染）
 // ═════════════════════════════════════════════════════════════════
-describe('[actions-anchor] 操作栏只挂末位 text 块', () => {
+describe('[actions-anchor] 操作栏只挂 trace 末单元为 text 的块', () => {
   function mountWithRealBlock(turn: MessageTurn, opts: { isExpanded?: boolean } = {}) {
     return mount(Turn, {
       props: { turn, sessionId: SID, isLastTurn: false },
@@ -992,6 +994,51 @@ describe('[actions-anchor] 操作栏只挂末位 text 块', () => {
     const wrapper = mountWithRealBlock(twoTexts, { isExpanded: true })
     const textBlocks = wrapper.findAll('.trace-blk--text')
     expect(textBlocks.length).toBe(2)
+    const anchors = wrapper.findAll('[data-testid="turn-actions-anchor"]')
+    expect(anchors.length).toBe(1)
+    // 非 text 末单元的中间 text 块不携带锚（占位行不夹在任何块之间）
+    expect(textBlocks[0].element.contains(anchors[0].element)).toBe(false)
+    expect(textBlocks[textBlocks.length - 1].element.contains(anchors[0].element)).toBe(true)
+  })
+
+  it('正文后跟工具块（末单元是工具）：无锚块，操作栏不渲染', () => {
+    // 流式「正文→工具行」场景：text 之后跟了 tool，占位行若挂在 text 下部会夹在正文与
+    // 工具行之间撑出空洞——锚判定要求末单元是 text，此处必须 0 锚
+    const textThenTool = makeTurn()
+    textThenTool.assistants = [
+      {
+        id: 'a1',
+        role: 'assistant',
+        content: '我先查一下',
+        status: 'complete',
+        timestamp: NOW,
+        toolCalls: [{ id: 'tc-0', toolName: 'read', input: { path: '/tmp/x' }, status: 'completed', startTime: NOW }],
+        contentBlocks: [{ type: 'text', refId: 'text' }, { type: 'toolCall', refId: 'tc-0' }],
+      },
+    ]
+    const wrapper = mountWithRealBlock(textThenTool, { isExpanded: true })
+    expect(wrapper.findAll('.trace-blk--text').length).toBe(1)
+    expect(wrapper.findAll('[data-testid="turn-actions-anchor"]').length).toBe(0)
+  })
+
+  it('多 text 中间 text（后面跟工具块）：中间 text 无锚元素，锚只在时序最后的 text 块', () => {
+    const mixed = makeTurn()
+    mixed.assistants = [
+      { id: 'a1', role: 'assistant', content: '第一段', status: 'complete', timestamp: NOW },
+      {
+        id: 'a2',
+        role: 'assistant',
+        content: '中间段',
+        status: 'complete',
+        timestamp: NOW,
+        toolCalls: [{ id: 'tc-m', toolName: 'read', input: { path: '/tmp/m' }, status: 'completed', startTime: NOW }],
+        contentBlocks: [{ type: 'text', refId: 'text' }, { type: 'toolCall', refId: 'tc-m' }],
+      },
+      { id: 'a3', role: 'assistant', content: '最终回复', status: 'complete', timestamp: NOW },
+    ]
+    const wrapper = mountWithRealBlock(mixed, { isExpanded: true })
+    const textBlocks = wrapper.findAll('.trace-blk--text')
+    expect(textBlocks.length).toBe(3)
     const anchors = wrapper.findAll('[data-testid="turn-actions-anchor"]')
     expect(anchors.length).toBe(1)
     expect(textBlocks[textBlocks.length - 1].element.contains(anchors[0].element)).toBe(true)

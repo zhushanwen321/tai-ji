@@ -2,9 +2,9 @@
   <!-- split-justified: main 侧合并带入（turn 编排器，单语义域）；script 超 300 为存量（base 175 → 317），拆分属独立重构任务（长期方向：trace 窗口化编排抽 useTurnTrace composable） -->
   <!--
     编排器 · Turn（message-stream 单个回合，W4 拆分后）。
-    组合 UserBubble + TurnMeta + Block 三个子组件；hover actions 操作栏（TurnSummary）经末位
-    text 块的 #turn-actions 插槽挂载（[actions-anchor]，流内固定行 = text 块下部一行，
-    与 UserBubble hover actions 同族，见下方锚块注释）。
+    组合 UserBubble + TurnMeta + Block 三个子组件；hover actions 操作栏（TurnSummary）经 trace
+    末单元 text 块的 #turn-actions 插槽挂载（[actions-anchor]，流内固定行 = text 块下部一行，
+    与 UserBubble hover actions 同族，见下方锚块注释；末单元非 text 时无挂载点、不渲染）。
     保留：trace 区 Block 编排（窗口化）+ ChangeSetCard。
     [streaming-trace-window window wave] trace 区从双层 v-for 改单层渲染 computeTraceWindow 的 visible；
     收编区（compacted/failed）由 TraceCompactorRow 承载（零 chrome，双态，D5）。
@@ -121,6 +121,8 @@
 
       <!-- trace 容器：恒渲染（v-if 下沉 Block 级）。mt-[12px] = TurnMeta→首块 12px（原由首块
            py-2 顶距参与合成的节奏，块 padding 退役后归容器单值，ui-optimize-unified 决策 4）。
+           行主体字号容器单点定档 text-md（15px）：行头/组头/工具行名等随容器继承，mono 摘要、
+           行尾 meta 小字（耗时/时刻/计数徽标）与展开内容区在子元素显式声明各自档位。
            无 mb（demo 轮次边界唯一贡献 = 根元素 pb-5 的 20px；原 mb-1 为 TurnSummary 流内
            占位预留，TurnSummary 悬浮化后移除）。
            折叠态（!showTrace）仅末位 text 正文（scope wave D1）；
@@ -135,7 +137,7 @@
            使流式重渲染不重播；keepMounted 使工作 turn 不被虚拟化卸载，无重挂重播）；
            trace--just-done = 轮次落完成瞬间的换块落位标记（200ms 淡入 + 4px 落位），仅刚落
            完成的轮次携带（justDone ref，见 script），历史轮不误标。 -->
-      <div class="trace mt-[12px] flex flex-col" :class="{ 'trace--live': isWorkingTurn, 'trace--just-done': justDone }">
+      <div class="trace mt-[12px] flex flex-col text-[length:var(--text-md)]" :class="{ 'trace--live': isWorkingTurn, 'trace--just-done': justDone }">
         <!-- 收纳完成通知展开明细行（specs/chat/system-notices.md §3.4）：展开区首行起逐条一行
              （低频查看区，行距紧凑、无横线装饰；成功弱档 dim / 失败 warn 不依赖 hover），
              其后才是本轮 trace。仅落成态展开时渲染（工作态通知还是外部行，无明细可看）。 -->
@@ -221,8 +223,9 @@
         <span v-if="showStreamingCursor" class="streaming-tail mt-2 ml-0.5 inline-block h-3.5 w-[7px] rounded-[1px] bg-accent align-middle animate-blink" />
       </div>
 
-      <!-- [actions-anchor] 操作栏（TurnSummary）不渲染于 trace 尾部：挂载点 = 末位 text 块的
-           #turn-actions 插槽（上方 Block v-for 内）——悬停区 = text 块行 + 固定行自身
+      <!-- [actions-anchor] 操作栏（TurnSummary）不渲染于 trace 尾部：挂载点 = trace 末单元且是
+           text 块的 #turn-actions 插槽（上方 Block v-for 内；正文后跟了任何块则无锚、不渲染，
+           防占位行夹在正文与后续块之间撑出空洞）——悬停区 = text 块行 + 固定行自身
            （TurnMeta/过程行悬停不触发），流内固定行 = text 块下部一行（不遮正文）。 -->
 
       <!-- 变更集卡（W10，ADR-0024）：mt-3 = 12px 过程行节奏档（demo --blk-gap-tight） -->
