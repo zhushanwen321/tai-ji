@@ -630,9 +630,6 @@ importers:
       '@zhushanwen/pi-extension-logger':
         specifier: workspace:*
         version: link:../../shared/extension-logger
-      '@zhushanwen/subagent-core':
-        specifier: workspace:*
-        version: link:../../../packages/subagent-core
       typebox:
         specifier: 1.3.27
         version: 1.3.27
