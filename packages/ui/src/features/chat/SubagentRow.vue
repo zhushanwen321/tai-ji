@@ -1,3 +1,8 @@
+<!--
+  展示组件 · 子代理行（trace 块 subagent 类型行组件；壳分派链：Block 壳 → ToolRow 三分 → 本组件）。
+  壳根类名契约（.trace-blk）与 data-testid（block-tool-<id>）留在 Block 壳，本组件根 =
+  原 subagent 分支根 div（.trace-subagent + data-testid="subagent-block"），无新 DOM 层。
+-->
 <template>
   <!--
     subagent 块（@zhushanwen/pi-subagent-workflow，重写 fork）—— collapsed only（spec §10 / design D2）。

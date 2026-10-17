@@ -87,7 +87,10 @@ SPLIT_JUSTIFIED_SCAN_LINES = 30
 # [2026-10 trace 块壳化 W1] ThinkingRow.vue：承接 Block.vue thinking 分支的 .text-sweep 扫光与
 # block-expand 展开过渡（scoped 样式只作用于本组件模板元素，Row 拆分后与壳内副本各持一份同款
 # 规则）；block-expand 选择器组走 Vue Transition 类 escape hatch，此处放行的是 .text-sweep。
-STYLE_SCOPED_WHITELIST: list[str] = ['shell/MainPanel.vue', 'sidebar/UpdateButton.vue', 'settings/SettingsModal.vue', 'collapsible/CollapsibleContent.vue', 'sidebar/Sidebar.vue', 'features/chat/Block.vue', 'features/chat/RunningBlockIcon.vue', 'features/chat/ThinkingRow.vue']
+# [2026-10 trace 块壳化 W2] ToolRow.vue：承接 Block.vue tool 分支的 .text-sweep 扫光（运行中
+# 尾行视口/摘要）与 .tool-file-chip hover 滚动（.fchip-roll keyframes + 后代选择器，MF-1-24），
+# 与 ThinkingRow 同族论证；block-expand 展开过渡走 Vue Transition 类 escape hatch 不占名额。
+STYLE_SCOPED_WHITELIST: list[str] = ['shell/MainPanel.vue', 'sidebar/UpdateButton.vue', 'settings/SettingsModal.vue', 'collapsible/CollapsibleContent.vue', 'sidebar/Sidebar.vue', 'features/chat/Block.vue', 'features/chat/RunningBlockIcon.vue', 'features/chat/ThinkingRow.vue', 'features/chat/ToolRow.vue']
 
 # CSS 选择器检测正则
 RE_STYLE_SELECTOR = re.compile(r'^[.\w\-]+[\s,]*\{')
