@@ -149,8 +149,11 @@ export function scanRegisteredIds(entries: unknown[]): Set<string> {
  * protocol scanPendingEntries 不返回注销 entry 的 data（仅收 id），本函数独立轻扫其
  * status 字段（写侧全部落盘点——emit listener / bte 对账 / core sweep / workflow 直落
  * ——均带 protocol mapReasonToStatus 映射产物 status）；词表外/畸形不收（与 delivery-port
- * scanPendingBaseline 的 MAPPED_STATUS_VALUES 同口径，不虚构终态）。protocol 只导出
- * MappedPendingStatus 类型未导出值集，本集合与其封闭联合同步维护。
+ * scanPendingBaseline 的 MAPPED_STATUS_VALUES 同口径，不虚构终态）。「同口径」指六值
+ * 词表相等——端口 scanPendingBaseline 另查 entry.type === "custom" 前置过滤，本函数不
+ * 查：合法数据下行为一致（customType 仅存在于 custom entry），勿把「同口径」照抄为
+ * 过滤逻辑全等。protocol 只导出 MappedPendingStatus 类型未导出值集，本集合与其封闭
+ * 联合同步维护。
  */
 const MAPPED_STATUS_VALUES: ReadonlySet<string> = new Set([
 	"completed",
