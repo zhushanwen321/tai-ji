@@ -16,7 +16,6 @@ import { BtwService } from './services/session/btw-service.js'
 // 线 spawn options 工厂（buildLineSpawnOptions 决策面的可测提取，见该文件 docstring）。
 import { createBtwLineSpawnOptionsFactory } from './services/session/btw-line-spawn-options.js'
 import { buildBtwThreadListPayload } from './transport/btw-message-handler.js'
-import { scanDegradedFlag } from './infra/pi/session-file-utils.js'
 // D8-3 迁移门与 create/restore spawn 同约束（组合根后台序列 setMigrationGate 注入，读侧在
 // btw-line-spawn-options 工厂——getMigrationGate 经下方 createBtwLineSpawnOptionsFactory 接线）。
 // [M4-a] setBtwCascadeOps：deleteSession/deleteByCwd 的 btw 级联支线注入面（session-lifecycle）；
@@ -72,7 +71,7 @@ import { appendProcessEscapeLog, isContainedStreamError } from './infra/system/u
 // B5（memory-leak-remediation §3.2-B5）：sessionData 软删除实现——经 ITrash port
 // （services/ports/trash.ts）由组合根注入 SessionDataStore（三层约束 C-comm-03：
 // services 层不得 value import infra，装配归组合根）。结构匹配 ITrash.trashFile。
-import { trash } from './infra/system/trash.js'
+import { trash, trashDirectory } from './infra/system/trash.js'
 
 import { ProcessManager } from './infra/pi/process-manager.js'
 import { getProviderConfig, clearProviderApiKey, initProviderCredentialResolver, cleanLeakedPackages, sanitizeInvalidProviders, isModelsStoreCorrupted } from './infra/pi/pi-provider-store.js'
@@ -440,7 +439,7 @@ async function main(): Promise<void> {
   // graceWindowMs 宽限窗已删）。挪动此调用序前必读设计 §3.3 决策 1。扫描是旁路
   // 维护：startupSweep 结构性不 reject（内部失败只 warn/error 留痕），await 返回
   // 后启动主路径照常继续。
-  await startupSweep(getPiAgentDir, logger)
+  await startupSweep(getDataDir, logger)
 
   // u1b（crash-forensics-and-watchdog D1）：runtime 台账单例初始化。位置与时序对齐上方
   // initLogger（同处于组合根最早期、数据目录 getDataDir() 可用性已由 initLogger 验证）；
@@ -1422,6 +1421,8 @@ async function main(): Promise<void> {
     resolveMainSessionFile: (mainSid) =>
       sessionService.getSession(mainSid)?.sessionFilePath ?? sessionService.findScannedSession(mainSid)?.filePath,
     resolvePiCommand: () => findPiExecutable(effectiveRoot),
+    // D5 对称挂树软删（C-comm-03：services 层经 deps 注入消费，装配归组合根）。
+    trashDirectory,
     // [M4-a / D9④ 单入口终结扇出] 线终结（级联 / 批内直删 / btw.remove 三路同经 closeLine）的
     // lifecycle 收尾：planned kill 抑制 exit 回调，Map 条目/总线分区/插件数据不自清——
     // 在此镜像主会话 delete 的收尾序（detach → removeSessionEntry → 插件 sessionData 真删）。
@@ -1435,8 +1436,6 @@ async function main(): Promise<void> {
     onThreadStateChanged: publishBtwThreadList,
     // [BU2] 交互中转 pending 快照（respond/expired/失效三终态共同落点，server 薄委托）。
     hasPendingUiRequests: (vid) => server.getPendingUiRequests(vid).length > 0,
-    // [BU5] 孤儿补账扫描降级闸：本轮 sessions 扫描不可信 → 补账跳过改下次启动重试。
-    isSessionScanDegraded: () => scanDegradedFlag.last,
     // [BU6 / V6·⑤a] D9⑤ 行为契约注入生产 trace（运行期可达；oracle 对账单测层见
     // btw-contract-inject.test.ts，system-prompt-trace 对账/豁免结论见本轮 deviations）。
     traceContractInjection: (t) => {
@@ -1445,17 +1444,16 @@ async function main(): Promise<void> {
   })
   // B3 ensure 链分支（D1⑥/V5 回收后续问）：ensureActive 对 btw vid 转 ensureProcess。
   sessionService.setBtwService(btwService)
-  // [M4-a / btw-question D4 消费面① + D9④ + D5] 级联接线 + 启动孤儿补账（M1-b 备忘清偿）：
+  // [M4-a / btw-question D4 消费面① + D9④] 级联接线 + 启动重建：
   // ① delete/deleteByCwd 的级联支线经模块槽注入（BtwService 两原语结构性满足窄接口）；
-  // ② 孤儿补账先于重建——先清「主会话已不存在」的线目录（崩溃恢复对齐主删即删；
-  //    退出/闲置回收不删），rebuildFromDisk 只登记在场主线（裁决⑧ 重启可复原）。
-  //    同步执行：纯 btw 根目录扫描 + 主解析（sessions/ 扫描 TTL 缓存，首次扫描本就即将发生），
-  //    须在 WS listen 前完成——首个 session.delete 到达时注册表/目录已对账。
+  // ② [session-store-layout-inversion] 启动孤儿补账已退役（模块本体随布局反转删除：
+  //    线 jsonl 挂主树内域随主树回收，补账失去服务对象），启动序
+  //    只剩 rebuildFromDisk。同步执行：纯存储树目录扫描，须在 WS listen 前完成——
+  //    首个 session.delete 到达时注册表已对账。
   setBtwCascadeOps(btwService)
-  const btwOrphansReconciled = btwService.reconcileOrphanThreadDirs()
   const btwLinesRebuilt = btwService.rebuildFromDisk().length
-  if (btwOrphansReconciled > 0 || btwLinesRebuilt > 0) {
-    console.log(`[btw] startup reconcile: orphans removed=${btwOrphansReconciled}, lines rebuilt=${btwLinesRebuilt}`)
+  if (btwLinesRebuilt > 0) {
+    console.log(`[btw] startup rebuild: lines rebuilt=${btwLinesRebuilt}`)
   }
   /**
    * btw.create 主会话解析（handler ctx，BtwRoutingDeps.resolveMain）：活跃腿携带主 turn
