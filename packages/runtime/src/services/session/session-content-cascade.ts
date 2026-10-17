@@ -52,7 +52,7 @@
  * 本体都还在，重试删除即达终态）。
  */
 
-import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, type Dirent } from 'node:fs'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import {
   RECORD_EVENTS_SUFFIX,
@@ -143,7 +143,7 @@ export interface SessionContentCascadeDeps { // oe-exempt:20261012:framework:级
 export type SessionContentCascadeResult = {
   /** 主文件在级联开始时是否存在。 */
   mainFileExisted: boolean
-  /** 引用并集扫描状态：skipped（主文件缺失未枚举）/ ok / failed（保守保留全部子代理族）。 */
+  /** 引用判定状态：skipped（主文件缺失未枚举）/ ok / failed（主文件不可读致候选枚举失败或并集扫描失败——保守保留全部子代理族）。 */
   referenceScan: 'skipped' | 'ok' | 'failed'
   /** 整树软删是否执行（树存在且 trash 成功 → true）。 */
   sessionTreeTrashed: boolean
@@ -199,18 +199,33 @@ export async function cascadeDeleteSessionContent(
   let staging: StagedFamilies | null = null
   const subagentsDir = join(sessionStoreRoot, sessionId, 'subagents')
   if (mainFileExisted) {
-    const candidates = collectSubagentFamilyCandidates(sessionFilePath, failures, deps.warn)
+    const enumeration = collectSubagentFamilyCandidates(sessionFilePath, failures, deps.warn)
     const union = collectAliveReferenceUnion(sessionsRoot, sessionFilePath, deps.warn)
-    result.referenceScan = union === null ? 'failed' : 'ok'
-    const planned = union === null
-      ? planKeepAllFamilies(candidates, subagentsDir, result, deps)
-      : planReferencedFamilies(candidates, union, subagentsDir, result, deps)
-    if (union === null) {
+    // 两个判定输入任一失败（主文件不可读致候选锚枚举失败 / 并集扫描失败）= 引用
+    // 状态不可知（头注保守语义），都走 keep-all 保守分支。
+    result.referenceScan = enumeration.failed || union === null ? 'failed' : 'ok'
+    let planned: PlannedFamily[]
+    if (enumeration.failed) {
+      // 候选锚枚举不出来时无法按族定位文件——保守保留按目录整棵生效（planKeepWholeSubagentsDir）。
+      const wholeDir = planKeepWholeSubagentsDir(subagentsDir)
+      planned = wholeDir === null ? [] : [wholeDir]
+      const keptNote = wholeDir === null
+        ? 'no subagent family files exist in the session tree (nothing to keep; tree deleted as usual)'
+        : `keeping ALL subagent family files (${wholeDir.files.length}) in the residual session tree ` +
+          `(reference state unknown — never delete on unknown), residuals are accepted (no retention sweep by ruling 2026-10-12)`
+      const msg = `[session-content-cascade] session file unreadable for ${sessionId}; subagent family enumeration failed. ${keptNote}. ` +
+        `Fix: check the session file's readability, then retry the delete if needed: ${sessionFilePath}`
+      deps.warn(msg)
+      failures.push('session file unreadable (subagent family enumeration failed; reference state unknown)')
+    } else if (union === null) {
+      planned = planKeepAllFamilies(enumeration.candidates, subagentsDir, result, deps)
       const msg = `[session-content-cascade] reference union scan failed for ${sessionId}; ` +
         `keeping ALL subagent families in the residual session tree (reference state unknown — never delete on unknown), ` +
         `residuals are accepted (no retention sweep by ruling 2026-10-12). Fix: inspect the sessions pool for unreadable/corrupt .jsonl files.`
       deps.warn(msg)
       failures.push('reference union scan failed (all subagent families kept in residual tree)')
+    } else {
+      planned = planReferencedFamilies(enumeration.candidates, union, subagentsDir, result, deps)
     }
     staging = stageFamilies(planned, subagentsDir, sessionStoreRoot, sessionId, result, deps)
     result.subagentFamiliesResidual = staging?.families ?? 0
@@ -302,27 +317,35 @@ async function reapBackgroundTasksBeforeDelete(
 
 // ── 2a. 被删主会话的子代理锚枚举 ──────────────────────────────────────────────
 
+/** 候选锚枚举结果：candidates = 解析出的族锚清单；failed = 主文件读失败（引用状态不可知）。 */
+type SubagentFamilyEnumeration = {
+  candidates: SubagentFamilyCandidate[]
+  failed: boolean
+}
+
 /**
  * 读被删主会话文件，解析 subagent-record v2 条目为候选族清单。
  *
  * 读通道 = scanRecordFamilyEntries 同款行预过滤流式扫描的收窄形态（本模块自持：
  * 并集扫描需要「坏行即保守失败」的更严语义，共用读骨架会继承「坏行跳过」的宁删
- * 方向）。枚举失败（读错误 / oversize）返回空清单 + failed 记录——后续子代理族
- * 保留判定自然 no-op（宁保留方向：枚举不出来 = 一个都不保留判定）。
+ * 方向）。主文件读失败返回空清单 + failed = true——调用方置引用状态不可知，走
+ * keep-all 保守分支（整棵 subagents/ 暂存回迁，头注保守语义：锚枚举不出来时无法
+ * 按族定位文件，保留判定必须按目录整棵生效）。行内坏行不失败（该行锚丢失 = 残留，
+ * 宁保留方向）。
  */
 function collectSubagentFamilyCandidates(
   sessionFilePath: string,
   failures: string[],
   warn: (message: string) => void,
-): SubagentFamilyCandidate[] {
+): SubagentFamilyEnumeration {
   let lines: string[]
   try {
     lines = readFileSync(sessionFilePath, 'utf8').split('\n')
   } catch (e: unknown) {
-    const msg = `[session-content-cascade] session file unreadable, skipping subagent family enumeration (keep-all): ${sessionFilePath}`
+    const msg = `[session-content-cascade] session file unreadable, subagent family enumeration failed (reference state unknown): ${sessionFilePath}`
     warn(`${msg}: ${toMessage(e)}`)
     failures.push(`session file unreadable: ${toMessage(e)}`)
-    return []
+    return { candidates: [], failed: true }
   }
   const byId = new Map<string, SubagentFamilyCandidate>()
   for (const line of lines) {
@@ -330,7 +353,7 @@ function collectSubagentFamilyCandidates(
     if (entry === null) continue
     byId.set(entry.id, entry)
   }
-  return [...byId.values()]
+  return { candidates: [...byId.values()], failed: false }
 }
 
 /**
@@ -486,6 +509,26 @@ function planKeepAllFamilies(
   return planned
 }
 
+/** 整棵目录保留的哨兵族 id（观测面用，非 record id——不经 RECORD_ID_PATTERN 校验通道）。 */
+const WHOLE_SUBAGENTS_DIR_FAMILY_ID = '(whole subagents dir)'
+
+/**
+ * 规划「整棵 subagents/ 保留」（候选锚枚举失败 = 引用状态不可知的保守方向，头注
+ * 声明的「整棵 subagents/ 暂存回迁」）：锚枚举不出来时无法按族定位文件，保留判定
+ * 按目录整棵生效（与 planKeepAllFamilies 同向、枚举手段不同——递归全量列举，覆盖
+ * sessions/ records/ model-switch/ 全部子目录）。
+ *
+ * 目录不存在 / 为空返回 null = 树内无 subagent 数据可保留，保守分支退化为零动作
+ * （无数据可误删，树照删）。目录列举的非 ENOENT 读错误原样上抛（与
+ * collectInTreeFamilyFiles 的 listDirFiles 同形态：上抛即删除整体失败，树与本体
+ * 都还在，重试即达终态——G4 语义）。
+ */
+function planKeepWholeSubagentsDir(subagentsDir: string): PlannedFamily | null {
+  const files = listAllFilesRecursively(subagentsDir)
+  if (files.length === 0) return null
+  return { id: WHOLE_SUBAGENTS_DIR_FAMILY_ID, files }
+}
+
 /**
  * 规划「被引用族保留」（fork 共享防护）：任一锚被其他主会话引用（id 或
  * sessionFile）→ 该族保留 A 树；未被引用 → 随整树软删回收。
@@ -570,6 +613,28 @@ function listDirFiles(dir: string): string[] {
     if (isEnoent(e)) return []
     throw e
   }
+}
+
+/** 目录树全量文件列举（递归；ENOENT = 从未落盘的合法空态跳过；其余读取失败上抛由调用方判）。 */
+function listAllFilesRecursively(dir: string): string[] {
+  const files: string[] = []
+  const stack: string[] = [dir]
+  while (stack.length > 0) {
+    const current = stack.pop() as string
+    let entries: Dirent[]
+    try {
+      entries = readdirSync(current, { withFileTypes: true })
+    } catch (e: unknown) {
+      if (isEnoent(e)) continue
+      throw e
+    }
+    for (const entry of entries) {
+      const entryPath = join(current, entry.name)
+      if (entry.isDirectory()) stack.push(entryPath)
+      else if (entry.isFile()) files.push(entryPath)
+    }
+  }
+  return files
 }
 
 /**

@@ -8,7 +8,8 @@
  *   删除单元；树不存在 = 零动作不抛；
  * - ② fork 引用转移回退（D5 分支规则）：引用并集发现存活会话 B 仍引用 A 树内
  *   subagent 文件 → 被引用族保留 A 树残留（拷回原绝对路径，B 的 sessionFile 引用
- *   可解析）；无引用 → 随整树回收；并集扫描失败 → 全族保守保留；
+ *   可解析）；无引用 → 随整树回收；并集扫描失败 → 全族保守保留；主文件不可读致
+ *   候选锚枚举失败 → 整棵 subagents/ 保守保留（引用状态不可知 ≠ 无引用）；
  * - ③ 旧逐域段无残留调用（源码断言：级联模块不再有逐文件 unlink / agentDir 下的
  *   subagents 根、base-tool-enhance 目录、session-view tmp 导出物删除；lifecycle
  *   不再有图片缓存/产物/附件三段 rmSync）；
@@ -413,6 +414,61 @@ describe('cascadeDeleteSessionContent 引用并集扫描失败（保守保留）
     // 树删与主文件删除不受影响
     expect(result.sessionTreeTrashed).toBe(true)
     expect(h.trashed).toEqual([mainFile])
+  })
+})
+
+// ── 候选锚枚举失败保守方向（主文件不可读 = 引用状态不可知，与 union 失败同向）──
+
+describe('cascadeDeleteSessionContent 候选锚枚举失败（保守保留）', () => {
+  it('主文件不可读（B 引用同族在池内）→ 引用状态不可知 → 整棵 subagents/ 保留在残留树 + 失败出声', async () => {
+    const p = makePool()
+    const h = makeDeps()
+    const family = p.seedSubagentFamily('main-kkkk', 'sa-unreadable')
+    const mainFile = p.addMainSession('slug-a', '2026T_a', [
+      registeredLine('sa-unreadable'),
+      settledLine('sa-unreadable', family.sessionFile),
+    ])
+    // fork 场景：B 引用同族（union 扫描可成功读 B）——主文件不可读时锚枚举失败，
+    // 无法判定 B 是否引用 → 宁保留（整棵 subagents/），不能因 union 成功而照删。
+    p.addMainSession('slug-a', '2026T_b', [settledLine('sa-unreadable', family.sessionFile)])
+    // model-switch/ 子目录文件：按族枚举不覆盖（非 id 命名规则），整棵保留必须包含
+    const modelSwitchFile = p.seedTreeFile('main-kkkk', 'subagents/model-switch/switch-1.json')
+    // 树内其他域数据（应随整树回收）
+    const attachment = p.seedTreeFile('main-kkkk', 'attachments/paste-1.png', 'png')
+    // 模拟「文件存在但不可读」：主文件路径置换为同名目录（existsSync=true、readFileSync 抛 EISDIR）
+    rmSync(mainFile)
+    mkdirSync(mainFile)
+
+    const result = await runCascade('main-kkkk', mainFile, p, h)
+
+    expect(result.referenceScan).toBe('failed')
+    expect(result.sessionTreeTrashed).toBe(true)
+    expect(result.subagentFamiliesResidual).toBe(1)
+    // 整棵 subagents/ 回到 A 树残留（按族枚举的 records/ sessions/ + model-switch/ 全在内）
+    expectPresent([family.sessionFile, ...family.sidecars, family.manifest, family.events, modelSwitchFile])
+    expectGone(attachment)
+    expect(result.failures.some((f) => f.includes('session file unreadable'))).toBe(true)
+    expect(h.warnings.some((w) => w.includes('session file unreadable') && w.includes('keeping ALL subagent family files'))).toBe(true)
+    expect(h.warnings.some((w) => w.includes('fork fallback'))).toBe(true)
+    // 暂存区已清除（无 .deletion-staging-* 残留）
+    expect(readdirSync(p.storeRoot).filter((n) => n.startsWith('.deletion-staging-'))).toEqual([])
+  })
+
+  it('主文件不可读 + 树内无 subagents/ → 无可保留对象，保守分支退化零动作（树照删）', async () => {
+    const p = makePool()
+    const h = makeDeps()
+    const mainFile = p.addMainSession('slug-a', '2026T_a', ['{"type":"session","id":"a"}'])
+    const attachment = p.seedTreeFile('main-llll', 'attachments/paste-1.png', 'png')
+    rmSync(mainFile)
+    mkdirSync(mainFile)
+
+    const result = await runCascade('main-llll', mainFile, p, h)
+
+    expect(result.referenceScan).toBe('failed')
+    expect(result.subagentFamiliesResidual).toBe(0)
+    expect(result.sessionTreeTrashed).toBe(true)
+    expectGone(attachment)
+    expect(h.warnings.some((w) => w.includes('nothing to keep'))).toBe(true)
   })
 })
 
