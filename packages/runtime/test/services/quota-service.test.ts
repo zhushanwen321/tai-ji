@@ -60,8 +60,8 @@ import { getProviderConfig, upsertProvider } from '../../src/infra/pi/pi-provide
  * 「models.json 通道有值」基线；miss 场景传 `() => undefined`。
  */
 function makeResolver(
-  resolve: (providerId: string) => { key: string; source: 'auth.json' | 'models.json' } | undefined
-    = (id: string) => ({ key: `key-for-${id}`, source: 'models.json' as const }),
+  resolve: (providerId: string) => { key: string; source: 'auth.json' | 'models.json'; kind: 'api_key' | 'oauth' } | undefined
+    = (id: string) => ({ key: `key-for-${id}`, source: 'models.json' as const, kind: 'api_key' as const }),
 ): IProviderCredentialResolver {
   return {
     hasProviderCredential: vi.fn(() => false),
@@ -389,7 +389,7 @@ describe('QuotaService — getCredential fallback: api-key 类无专属 key 时�
   it('secrets 目录无专属 API Key 文件时，fallback 到 resolver 解析的 provider 凭据', async () => {
     // secrets 目录未写入任何 <id>-apikey.txt → getCredential 走 resolver（auth.json → models.json）
     const svc = new QuotaService({
-      providerCredentialResolver: makeResolver((id) => ({ key: `provider-key-${id}`, source: 'models.json' })),
+      providerCredentialResolver: makeResolver((id) => ({ key: `provider-key-${id}`, source: 'models.json', kind: 'api_key' })),
       dataDir: tmpDir,
       getProviderInfo: () => ({ baseUrl: 'https://bigmodel.cn' }),
     })
@@ -626,7 +626,7 @@ describe('QuotaService — A2-2: oauth 形态与 kimi 双形态降级', () => {
  */
 describe('QuotaService — M2b 链 1: 凭据两段经 resolver（secrets 首段保留）', () => {
   /** 固定返回值形态的 resolver 替身（与顶层 makeResolver 的按 id 回调形态区分）。 */
-  function makeResultResolver(result: { key: string; source: 'auth.json' | 'models.json' } | undefined) {
+  function makeResultResolver(result: { key: string; source: 'auth.json' | 'models.json'; kind: 'api_key' | 'oauth' } | undefined) {
     return {
       hasProviderCredential: vi.fn(() => false),
       listCredentialBackedProviderIds: vi.fn(() => new Set<string>()),
@@ -635,7 +635,7 @@ describe('QuotaService — M2b 链 1: 凭据两段经 resolver（secrets 首段�
   }
 
   it('secrets 专属 key 仍优先，不被 resolver 覆盖（resolver 不被调用）', async () => {
-    const resolver = makeResultResolver({ key: 'resolver-key', source: 'auth.json' })
+    const resolver = makeResultResolver({ key: 'resolver-key', source: 'auth.json', kind: 'api_key' })
     const svc = new QuotaService({
       dataDir: tmpDir,
       providerExtrasStore: extrasStore,
@@ -655,7 +655,7 @@ describe('QuotaService — M2b 链 1: 凭据两段经 resolver（secrets 首段�
   })
 
   it('无 secrets key 时 auth.json 段经 resolver 命中（场景 A 断链修复）', async () => {
-    const resolver = makeResultResolver({ key: 'auth-json-key', source: 'auth.json' })
+    const resolver = makeResultResolver({ key: 'auth-json-key', source: 'auth.json', kind: 'api_key' })
     const svc = new QuotaService({
       dataDir: tmpDir,
       getProviderInfo: () => ({ baseUrl: 'https://bigmodel.cn' }),
@@ -670,7 +670,7 @@ describe('QuotaService — M2b 链 1: 凭据两段经 resolver（secrets 首段�
   })
 
   it('resolver 落到 models.json 源时同样命中', async () => {
-    const resolver = makeResultResolver({ key: 'models-json-key', source: 'models.json' })
+    const resolver = makeResultResolver({ key: 'models-json-key', source: 'models.json', kind: 'api_key' })
     const svc = new QuotaService({
       dataDir: tmpDir,
       getProviderInfo: () => ({ baseUrl: 'https://bigmodel.cn' }),
@@ -870,7 +870,7 @@ describe('QuotaService — U2①: no-credential 显式失败（§7.5 清单 / �
     // 防的回归：这是改动 1 的「行为变更点」最尖锐的形态——先成功缓存一行，凭证随后
     // 消失（被外部删除/切换来源），旧实现会把旧行当成功结果返回（UI 显示过期数据却
     // 无任何失败信号）；新实现必须显式失败，同时保留旧数据供「查看上次成功数据」。
-    let cred: { key: string; source: 'models.json' } | undefined = { key: 'provider-key', source: 'models.json' }
+    let cred: { key: string; source: 'models.json'; kind: 'api_key' } | undefined = { key: 'provider-key', source: 'models.json', kind: 'api_key' }
     const svc = new QuotaService({
       providerCredentialResolver: makeResolver(() => cred),
       dataDir: tmpDir,
@@ -965,7 +965,7 @@ describe('QuotaService — U2②: cookie 空串 = 清除（§7.5 清单 / 改动
     // 失败注入点沿用上方半提交用例的手法：用同名目录占据 cookie 文件路径——第三段写入时
     // 对目录 writeFileSync 抛 EISDIR（非 ENOENT，writeCookieSecret 不会误判为成功）。
     const cookiePath = join(tmpDir, 'secrets', 'p-cookie.txt')
-    let cred: { key: string; source: 'models.json' } | undefined = { key: 'provider-key', source: 'models.json' }
+    let cred: { key: string; source: 'models.json'; kind: 'api_key' } | undefined = { key: 'provider-key', source: 'models.json', kind: 'api_key' }
     const svc = new QuotaService({
       providerCredentialResolver: makeResolver(() => cred),
       dataDir: tmpDir,
@@ -1152,7 +1152,7 @@ describe('QuotaService — U2③: 按 credentialSource 解析凭证（§7.5 清�
     // 防的回归：provider 来源下若仍读专属 Key 文件，用户「切到 Provider 凭据」后实际仍在
     // 用旧专属 Key（失败模式 D 的另一半）。切换只改标记、不删文件（D3 可逆性）——所以
     // 文件存在是刻意的，可证伪信号是 fetchQuota 收到的凭据不是 'exclusive-key'。
-    const resolver = makeResolver((id) => ({ key: `provider-key-${id}`, source: 'models.json' }))
+    const resolver = makeResolver((id) => ({ key: `provider-key-${id}`, source: 'models.json', kind: 'api_key' }))
     const svc = new QuotaService({
       providerCredentialResolver: resolver,
       dataDir: tmpDir,
@@ -1443,7 +1443,7 @@ describe('QuotaService — U2⑦: 失败路径的节流不断（§7.5 清单 / �
 describe('QuotaService — D12: clearProviderState 直调（provider 删除链 quota 副产物清理）', () => {
   it('成功路径：删两个 secrets 文件 + 清 lastFailure / lastFetchTime / 缓存条目', async () => {
     // 防的回归：组合根回填漏挂 / clearProviderState 静默失效（只有 S14 能发现）
-    let cred: { key: string; source: 'models.json' } | undefined = { key: 'provider-key', source: 'models.json' }
+    let cred: { key: string; source: 'models.json'; kind: 'api_key' } | undefined = { key: 'provider-key', source: 'models.json', kind: 'api_key' }
     const svc = new QuotaService({
       providerCredentialResolver: makeResolver(() => cred),
       dataDir: tmpDir,
@@ -1492,7 +1492,7 @@ describe('QuotaService — D12: clearProviderState 直调（provider 删除链 q
 
     // lastFetchTime 清空（私有字段不可直读，用 throttle 行为观测）：未清时 10s 窗口内的
     // fetch 被节流直接返回缓存、fetcher 零调用；清掉后立即发真实请求 → 恰好 1 次。
-    cred = { key: 'provider-key', source: 'models.json' }
+    cred = { key: 'provider-key', source: 'models.json', kind: 'api_key' }
     mockFetchQuota.mockClear()
     await svc.fetch('glm-del')
     expect(mockFetchQuota).toHaveBeenCalledTimes(1)
@@ -1522,7 +1522,7 @@ describe('QuotaService — D12: clearProviderState 直调（provider 删除链 q
     const cookiePath = join(tmpDir, 'secrets', 'glm-del-cookie.txt')
     mkdirSync(cookiePath, { recursive: true })
 
-    let cred: { key: string; source: 'models.json' } | undefined = { key: 'provider-key', source: 'models.json' }
+    let cred: { key: string; source: 'models.json'; kind: 'api_key' } | undefined = { key: 'provider-key', source: 'models.json', kind: 'api_key' }
     const svc = new QuotaService({
       providerCredentialResolver: makeResolver(() => cred),
       dataDir: tmpDir,

@@ -47,7 +47,7 @@ export interface ZcodeProviderStartupSyncDeps { // oe-exempt:20261012:framework:
   readonly configStore: Pick<IConfigStore, 'readModels' | 'getEnabledModels'>
   readonly credentialResolver: Pick<
     IProviderCredentialResolver,
-    'resolveProviderCredential' | 'resolveProviderBaseUrl'
+    'resolveProviderCredential' | 'resolveProviderBaseUrl' | 'listCredentialBackedProviderIds'
   >
   /** models.json 损坏降级态判定（D7①）——生产 = isModelsStoreCorrupted（infra/pi，组合根注入；services 层不 value import infra）。 */
   readonly isModelsCorrupted: () => boolean
@@ -57,6 +57,12 @@ export interface ZcodeProviderStartupSyncDeps { // oe-exempt:20261012:framework:
   readonly getMergedCatalogModels?: (providerId: string) => MergedCatalogView | undefined
   /** 日志通道（缺省 = logger，warn/info 同落 runtime 日志文件）。 */
   readonly log?: { warn(message: string): void; info(message: string): void }
+  /**
+   * 触发来源（缺省 'startup'）：'startup' = runtime 启动期一次性同步；'mutation' =
+   * provider 变更 write-through。两者同一实现，仅日志措辞分流（变更路径不得出现
+   * 「启动同步 / 不阻断 runtime 启动」的误导性表述，排障时按来源区分）。
+   */
+  readonly trigger?: 'startup' | 'mutation'
 }
 
 /** 接线结果：正常返回透传 u1 outcome；意外异常吞掉并标记 failed（不阻断启动）。 */
@@ -75,6 +81,8 @@ export async function runZcodeProviderStartupSync(
 ): Promise<ZcodeProviderStartupSyncResult> {
   const log = deps.log ?? logger
   const paths = deps.paths ?? defaultZcodeProviderSyncPaths()
+  const mutation = deps.trigger === 'mutation'
+  const syncLabel = mutation ? '变更镜像同步完成' : '启动同步完成'
   try {
     const outcome = await syncZcodeProviders({
       configStore: deps.configStore,
@@ -86,17 +94,59 @@ export async function runZcodeProviderStartupSync(
     })
     if (outcome.status === 'written') {
       log.info(
-        `[zcode-provider-sync] 启动同步完成：副本落盘 ${outcome.copyPath}（provider 条目 ${outcome.ruleCount}，跳过 ${outcome.skips.length}）`,
+        `[zcode-provider-sync] ${syncLabel}：副本落盘 ${outcome.copyPath}（provider 条目 ${outcome.ruleCount}，跳过 ${outcome.skips.length}）`,
       )
     } else if (outcome.status === 'skipped-empty') {
-      log.info('[zcode-provider-sync] 启动同步完成：无 pi 映射条目，旧副本已删除（如存在），引擎回落真实 zcode 配置')
+      log.info(`[zcode-provider-sync] ${syncLabel}：无 pi 映射条目，旧副本已删除（如存在），引擎回落真实 zcode 配置`)
     }
     // aborted：u1 abort() 已 warn 详细原因，此处不重复
     return { kind: 'completed', outcome }
   } catch (err) {
     log.warn(
-      `[zcode-provider-sync] 启动同步意外异常（不阻断 runtime 启动，保留现状副本回落；下次启动自动重试）：${err instanceof Error ? err.message : String(err)}`,
+      mutation
+        ? `[zcode-provider-sync] 变更镜像同步意外异常（不阻断配置写入应答，保留现状副本回落；下次 mutation/启动自动重试）：${err instanceof Error ? err.message : String(err)}`
+        : `[zcode-provider-sync] 启动同步意外异常（不阻断 runtime 启动，保留现状副本回落；下次启动自动重试）：${err instanceof Error ? err.message : String(err)}`,
     )
     return { kind: 'failed', error: err }
+  }
+}
+
+/**
+ * write-through 触发面工厂（ADR-0142 镜像架构）：组合根把「启动同步」与「变更镜像」
+ * 收敛为同一装配点——configStore / credentialResolver / isModelsCorrupted 三依赖单处
+ * 组装，避免两次手抄漂移；返回值吞掉同步结果（镜像失败只 warn，不阻断调用方）。
+ *
+ * 顺序契约（ADR-0122「竞态用顺序契约消解」，MF-4）：返回的触发闭包是唯一串行化点——
+ * 所有触发面（settings 域 provider mutation + 凭据域 OAuth 登录/退出事件）共用同一
+ * 队列：同一时刻最多一次镜像运行；运行中到达的触发不合弃（pending），本轮结束后按
+ * 最新配置重跑一次（latest-wins + re-run）。副本收敛时点 = 队列清空（最后一次变更
+ * 的副本已落盘），不以固定时延窗口作保证。重跑读取的是当时的 provider 配置快照，
+ * 因此异步凭据解析期间到达的 mutation 不会被更早启动的旧快照覆盖。
+ */
+export function createZcodeProviderMirrorSync(
+  deps: Omit<ZcodeProviderStartupSyncDeps, 'trigger'>,
+): () => Promise<void> {
+  let running = false
+  let pending = false
+  let chain: Promise<void> = Promise.resolve()
+
+  const drain = async (): Promise<void> => {
+    running = true
+    try {
+      while (pending) {
+        pending = false
+        await runZcodeProviderStartupSync({ ...deps, trigger: 'mutation' })
+      }
+    } finally {
+      running = false
+    }
+  }
+
+  return () => {
+    pending = true
+    // 运行中：返回当前链（其循环会观察到 pending 并重跑，故解析时点 = 末轮完成）。
+    if (running) return chain
+    chain = drain()
+    return chain
   }
 }

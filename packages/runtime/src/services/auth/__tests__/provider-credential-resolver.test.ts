@@ -2,8 +2,8 @@
  * Provider 凭据解析唯一通道单测（tmp 目录真实文件，全程不碰真实数据目录）。
  *
  * 覆盖：双源优先级（auth.json 命中优先于 models.json）/ 单源命中 / 双源皆无 /
- * 同步存在性判定 / 批量并集且单次读（spy 计数，非 N+1）/ oauth 取 access /
- * P-cred 探针（`$ENV_VAR` 配置值形态的实测输出与采取分支）。
+ * 同步存在性判定 / 批量并集且单次读（spy 计数，非 N+1）/ oauth 取 access 且 kind='oauth'
+ * （短时 token 形态判别，MF-2）/ P-cred 探针（`$ENV_VAR` 配置值形态的实测输出与采取分支）。
  *
  * ── P-cred 探针结论（设计 §3.6 实施期门，实测 2026-09-10）──
  * ① taiji 侧「不展开」：AuthStorage.get 原样返回 auth.json 的 JSON 解析结果，无任何配置值
@@ -84,6 +84,7 @@ describe('ProviderCredentialResolver 双源优先级', () => {
     expect(await resolver.resolveProviderCredential('catalog-prov')).toEqual({
       key: 'sk-from-auth',
       source: 'auth.json',
+      kind: 'api_key',
     })
   })
 
@@ -94,6 +95,7 @@ describe('ProviderCredentialResolver 双源优先级', () => {
     expect(await resolver.resolveProviderCredential('custom-prov')).toEqual({
       key: 'sk-custom',
       source: 'models.json',
+      kind: 'api_key',
     })
   })
 
@@ -115,13 +117,14 @@ describe('ProviderCredentialResolver 双源优先级', () => {
     expect(resolver.hasProviderCredential('empty-prov')).toBe(false)
   })
 
-  it('oauth 凭据取 access 明文（不带配置值解析，与 pi 对 oauth 的处置一致）', async () => {
+  it('oauth 凭据取 access 明文 + kind="oauth"（不带配置值解析，与 pi 对 oauth 的处置一致）', async () => {
     writeAuthFile({ 'oauth-prov': { type: 'oauth', access: '$NOT_AN_ENV_REF', expires: 1_000 } })
     const resolver = new ProviderCredentialResolver(makeDeps())
 
     expect(await resolver.resolveProviderCredential('oauth-prov')).toEqual({
       key: '$NOT_AN_ENV_REF',
       source: 'auth.json',
+      kind: 'oauth',
     })
   })
 })
@@ -158,6 +161,7 @@ describe('P-cred 探针：$ENV_VAR / command 配置值形态的解析行为', ()
     expect(await resolver.resolveProviderCredential('env-prov')).toEqual({
       key: 'sk-probe-123',
       source: 'auth.json',
+      kind: 'api_key',
     })
   })
 
@@ -171,6 +175,7 @@ describe('P-cred 探针：$ENV_VAR / command 配置值形态的解析行为', ()
     expect(await resolver.resolveProviderCredential('env-prov')).toEqual({
       key: 'sk-from-cred-suffix',
       source: 'auth.json',
+      kind: 'api_key',
     })
   })
 
@@ -185,7 +190,7 @@ describe('P-cred 探针：$ENV_VAR / command 配置值形态的解析行为', ()
     writeAuthFile({ literal: { type: 'api_key', key: '$1abc' } })
     const resolver = new ProviderCredentialResolver(makeDeps())
 
-    expect(await resolver.resolveProviderCredential('literal')).toEqual({ key: '$1abc', source: 'auth.json' })
+    expect(await resolver.resolveProviderCredential('literal')).toEqual({ key: '$1abc', source: 'auth.json', kind: 'api_key' })
   })
 
   it('command 形态（! 前缀）不执行 shell，返回 { unsupported: "command" } 判别结构', async () => {
@@ -226,6 +231,7 @@ describe('P-cred 探针：$ENV_VAR / command 配置值形态的解析行为', ()
     expect(await resolver.resolveProviderCredential('custom-prov')).toEqual({
       key: 'sk-probe-models',
       source: 'models.json',
+      kind: 'api_key',
     })
   })
 
@@ -239,8 +245,8 @@ describe('P-cred 探针：$ENV_VAR / command 配置值形态的解析行为', ()
     })
     const resolver = new ProviderCredentialResolver(makeDeps())
 
-    expect(await resolver.resolveProviderCredential('esc')).toEqual({ key: 'sk-$-literal', source: 'auth.json' })
-    expect(await resolver.resolveProviderCredential('esc-bang')).toEqual({ key: '!cmd-rest', source: 'auth.json' })
+    expect(await resolver.resolveProviderCredential('esc')).toEqual({ key: 'sk-$-literal', source: 'auth.json', kind: 'api_key' })
+    expect(await resolver.resolveProviderCredential('esc-bang')).toEqual({ key: '!cmd-rest', source: 'auth.json', kind: 'api_key' })
   })
 
   it('未闭合 ${：$ 按字面输出 + 后续原样追加（不查 env、不判 undefined、不抛）', async () => {
@@ -250,6 +256,7 @@ describe('P-cred 探针：$ENV_VAR / command 配置值形态的解析行为', ()
     expect(await resolver.resolveProviderCredential('unclosed')).toEqual({
       key: '${UNCLOSED',
       source: 'auth.json',
+      kind: 'api_key',
     })
   })
 
@@ -260,6 +267,7 @@ describe('P-cred 探针：$ENV_VAR / command 配置值形态的解析行为', ()
     expect(await resolver.resolveProviderCredential('bad-name')).toEqual({
       key: 'pre-${1BAD}-post',
       source: 'auth.json',
+      kind: 'api_key',
     })
   })
 })

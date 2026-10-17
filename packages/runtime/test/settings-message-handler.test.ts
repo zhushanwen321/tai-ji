@@ -880,7 +880,7 @@ describe('M2c: RuntimeServer.setServices 透传 providerCredentialResolver（D3 
   function assembleWithResolver() {
     const MockSvc = createMockSessionServiceClass()
     const sessionService = new MockSvc() as unknown as ISessionService
-    const resolveProviderCredential = vi.fn(async () => ({ key: 'resolved-by-resolver', source: 'auth.json' as const }))
+    const resolveProviderCredential = vi.fn(async () => ({ key: 'resolved-by-resolver', source: 'auth.json' as const, kind: 'api_key' as const }))
     const resolver = {
       hasProviderCredential: vi.fn(() => true),
       listCredentialBackedProviderIds: vi.fn(() => new Set<string>()),

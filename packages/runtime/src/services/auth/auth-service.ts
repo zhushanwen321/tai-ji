@@ -48,8 +48,10 @@ export class AuthService implements IAuthService {
   /**
    * 启动 OAuth login（异步执行，立即返回 started 状态）。
    * 已有进行中 flow 或 provider 无 oauthConfig → 返回 started:false + error。
+   * onAuthenticated（可选）：flow 成功把凭据写入 auth.json 后回调（凭据域变更事件，
+   * 供 zcode provider 镜像等联动消费方重跑——见 IAuthService.login 注释）。
    */
-  login(providerId: string): { started: boolean; error?: string } {
+  login(providerId: string, onAuthenticated?: () => void): { started: boolean; error?: string } {
     const config = this.deps.getOAuthConfig(providerId)
     if (!config) {
       return { started: false, error: `provider "${providerId}" 不支持 OAuth` }
@@ -59,7 +61,7 @@ export class AuthService implements IAuthService {
     }
     const controller = new AbortController()
     this.activeFlows.set(providerId, controller)
-    void this.runFlow(providerId, config, controller)
+    void this.runFlow(providerId, config, controller, onAuthenticated)
     return { started: true }
   }
 
@@ -109,7 +111,12 @@ export class AuthService implements IAuthService {
     await this.deps.authStorage.set(providerId, credential)
   }
 
-  private async runFlow(providerId: string, config: BuiltinOAuthConfig, controller: AbortController): Promise<void> {
+  private async runFlow(
+    providerId: string,
+    config: BuiltinOAuthConfig,
+    controller: AbortController,
+    onAuthenticated?: () => void,
+  ): Promise<void> {
     const signal = controller.signal
     try {
       const credential = await runOAuthLogin(providerId, config, {
@@ -160,6 +167,16 @@ export class AuthService implements IAuthService {
       // 迟到的 auth.success 会让前端状态机 cancelled/authorized 并存（S-7/S-8 同根因）。
       if (signal.aborted) return
       this.broadcastAuth('auth.success', { providerId })
+      // 凭据域变更事件（login 成功 = auth.json 已写入 oauth 凭据 + models.json apiKey 已清）：
+      // 联动消费方（zcode provider 镜像）在此重跑，事件驱动不做时间轮询（ADR-0122）。
+      // 回调隔离：回调自身抛错不得污染 flow 终态（否则会走 catch 广播 auth.error，与已落盘凭据矛盾）。
+      try {
+        onAuthenticated?.()
+      } catch (error) {
+        // best-effort：消费方回调失败只 warn，不传播——凭据已落盘且已广播 auth.success，
+        // 此处重抛会让 runFlow 走 catch 广播 auth.error，与磁盘事实矛盾。
+        console.warn(`[auth-service] onAuthenticated callback failed for ${providerId}:`, error)
+      }
     } catch (error) {
       if (signal.aborted) {
         // 用户取消：前端对话框已关闭，不发错误事件（cancel RPC 已确认）

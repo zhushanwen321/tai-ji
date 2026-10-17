@@ -59,6 +59,13 @@ export interface SettingsHandlerContext extends MessageHandlerContext {
    */
   providerCredentialResolver: IProviderCredentialResolver
   /**
+   * provider 配置变更后的 zcode 镜像同步（write-through，ADR-0142 镜像架构裁决）：
+   * settings 域成功的 provider 变更（set/delete/toggle/removeByKind/applyImport）后由
+   * provider-message-handler 调用。缺省 undefined = 不镜像（存量测试装配形态）。
+   * 实现内部自捕获错误只 warn（镜像同步是可用性增强，失败不阻断配置写入应答）。
+   */
+  providersMutatedSync?: () => Promise<void>
+  /**
    * 测试连接 HTTP 适配器（D-21 端口化：接口 SSOT 在 services/ports，infra 实现
    * ModelConnectionTester 由组合根构造注入——transport 不再 value import infra）。
    * 构造必需（恒注入形态，同 providerCredentialResolver）。

@@ -494,8 +494,11 @@ function defaultProviderForShortName(conf: SourceConfig, withKey: Array<[string,
  * wrapper 对内建目录读取注入 entitled 绕过外部 spawn 装载门——app-server 注册表
  * 装载判据 = access.entitled === true，目录构建的账号条目默认非 entitled）。account
  * 凭据由 zcode CLI 账号体系自解析（credentials.json 登录态），不经个人 provider 表
- * ——校验降为目录存在性：规则存在 + 模型在清单内 → 原样放行（大小写保留，注册表
- * 匹配不敏感）。目录定位失败/不可读/规则缺失/模型不在清单 → model_not_available。
+ * ——校验降为目录存在性：规则存在 + 模型在清单内 → 放行并归一到目录原生拼写
+ * （大小写不敏感匹配——与 translatePiModelRefToZcode 查表路径同语义：幂等再入的
+ * 产物模型段可能是请求方小写拼写〔如 RemoteEngine 代理侧查表产物，2026-10-16
+ * 真机实测暴露〕，引擎是目录权威，归一职责在引擎侧）。目录定位失败/不可读/
+ * 规则缺失/模型不在清单 → model_not_available。
  */
 function resolveAccountModelRef(wanted: string, wantedProvider: string, sources?: ZcodeSourcePaths): string {
   const catalogPath = locateZcodeBuiltinCatalog(sources);
@@ -521,8 +524,7 @@ function resolveAccountModelRef(wanted: string, wantedProvider: string, sources?
       `未知 account provider "${wantedProvider}"（内建目录无此规则）。恢复指引：改用目录内 account:* 规则（如 account:zai-individual-coding-plan / account:bigmodel-individual-coding-plan）。`,
     );
   }
-  assertAccountModelKnown(accountRule, wanted, wantedProvider);
-  return wanted;
+  return `${wantedProvider}/${normalizeAccountModel(accountRule, wanted, wantedProvider)}`;
 }
 
 /** 内建目录 providerRules 内查找 account 规则（无规则段/无匹配/条目非对象 → undefined）。 */
@@ -537,32 +539,48 @@ function findAccountProviderRule(catalog: unknown, wantedProvider: string): Reco
 }
 
 /**
- * account 模型清单校验（builtinModelIds 优先、personalModelIds 兜底；清单缺席或
- * 空 = 不设限放行——目录未枚举模型时交由 app-server 注册表实况裁决）。不在清单
- * → model_not_available（列该 account provider 可用模型）。
+ * account 模型清单校验 + 拼写归一（builtinModelIds 优先、personalModelIds 兜底；清单
+ * 缺席或空 = 不设限放行——目录未枚举模型时交由 app-server 注册表实况裁决）。清单非空
+ * 时大小写不敏感匹配（与 translatePiModelRefToZcode 查表路径同款——幂等再入的产物
+ * 模型段可能是请求方小写拼写，引擎侧归一到目录原生拼写）；不在清单 → model_not_available
+ * （列该 account provider 可用模型）。返回目录原生拼写的模型短名。
  */
-function assertAccountModelKnown(accountRule: Record<string, unknown>, wanted: string, wantedProvider: string): void {
+function normalizeAccountModel(accountRule: Record<string, unknown>, wanted: string, wantedProvider: string): string {
   const accountConfig = isRecord(accountRule["config"]) ? accountRule["config"] : {};
   const modelIds = accountConfig["builtinModelIds"] ?? accountConfig["personalModelIds"];
   const short = modelShort(wanted);
-  if (Array.isArray(modelIds) && modelIds.length > 0 && !modelIds.includes(short)) {
+  if (!Array.isArray(modelIds) || modelIds.length === 0) return short;
+  const matched = modelIds.find((m) => typeof m === "string" && m.toLowerCase() === short.toLowerCase());
+  if (matched === undefined) {
     throw new ZcodePrepareError(
       "model_not_available",
-      `未知模型 "${short}"（account provider ${wantedProvider} 下可用: ${modelIds.join(", ")}）。`,
+      `未知模型 "${short}"（account provider ${wantedProvider} 下可用: ${modelIds.filter((m) => typeof m === "string").join(", ")}）。`,
     );
   }
+  return matched;
 }
 
 /**
- * pi 词汇 → zcode 词汇的派发期翻译表（2026-10-14 用户裁决：engine-ref-translation）。
+ * pi 词汇 → zcode 词汇的派发期翻译表（2026-10-14 用户裁决：engine-ref-translation；
+ * 2026-10-16 用户裁决修订映射目标）。
  *
- * 裁决原文：account:bigmodel-individual-coding-plan/* 等同于 pi 中 zai-coding-cn
- * （同一「智谱 GLM coding plan」通道在两个引擎世界的名字），其余 provider 1:1 完全
- * 原样映射（id 直传，runtime 同步副本承载）。本表是唯一的跨世界等价对——
- * zcode 命名空间不出现 pi 词汇 id（ADR-0132 的 zai-coding-plan 关联条目已退役），
- * GLM plan 凭据完全归 zcode 账号体系，零 key 注入。
+ * 2026-10-16 二次裁决（证据驱动修正）：目标家族 = account:bigmodel-individual-coding-plan。
+ * 本机实证：pi 侧 zai-coding-cn 的 baseUrl 即 open.bigmodel.cn/api/coding/paas/v4
+ * （bigmodel 通道）；zcode 侧 coding-plan-cache.json 显示 bigmodel 家族 available、
+ * zai 家族 unavailable；credentials.json 只有 oauth:bigmodel:* 与 bigmodel plan
+ * api-key；GUI 成功日志用 providerId=account:bigmodel-individual-coding-plan。
+ * （同日首版曾改向 account:zai-individual-coding-plan——该家族本机不可用，回退。）
+ * 其余 provider 1:1 完全原样映射（id 直传，
+ * runtime 同步副本承载）。本表是唯一的跨世界等价对——zcode 命名空间不出现 pi
+ * 词汇 id（ADR-0132 的 zai-coding-plan 关联条目已退役），GLM plan 凭据完全归
+ * zcode 账号体系，零 key 注入。
+ *
+ * ⚠️ 对账锁步：本表与 package.json taiji.subagentEngine.modelTranslation 声明
+ * （RemoteEngine 代理形态的翻译面供数）必须逐键一致（键集合双向相等 + 逐键语义）
+ * ——锁步守卫见 __tests__/preparer.test.ts「modelTranslation 对账锁步」；导出本表
+ * 供该守卫做反向键集合断言（声明缺失/实现多余同红）。
  */
-const PI_TO_ZCODE_PROVIDER_MAP: Readonly<Record<string, string>> = {
+export const PI_TO_ZCODE_PROVIDER_MAP: Readonly<Record<string, string>> = {
   "zai-coding-cn": "account:bigmodel-individual-coding-plan",
 };
 
@@ -573,12 +591,18 @@ const PI_TO_ZCODE_PROVIDER_MAP: Readonly<Record<string, string>> = {
  * 模型段大小写归一匹配目标清单（pi 侧小写 id `glm-5.3-flash` vs zcode 目录大写 id
  * `GLM-5.3-Flash`——同一模型两世界的拼写差）；命中返回目标原生拼写（大小写保留，
  * 与 account 直通校验同口径）。目标清单缺席/空 = 不设限，按请求拼写直传（与
- * assertAccountModelKnown「不设限放行」同语义，交由 app-server 注册表实况裁决）。
+ * normalizeAccountModel「不设限放行」同语义，交由 app-server 注册表实况裁决）。
  *
  * 显式失败语义（首败即停）：目录定位失败 / 目标规则缺失 / 模型无等价 → 抛
  * model_not_available（自带恢复指引），不静默回落、不伪造兜底。调用方：
  * resolveZcodeModelRef（引擎内，翻译后即走 account 直通校验）与 EnginePort
  * translateModelRef（编排层 stamp 前调用，record 上报 zcode 原生 ref）。
+ *
+ * 分段语义：本函数 provider 段取**最后一个** `/` 之前（providerOf/modelShort 同源
+ * ——模型段因此可含 `/`，但 provider 段会吞入中间段）；而 manifest 翻译面
+ * （subagent-core client/manifest-lookup translateByTable）取**第一个** `/` 之前。
+ * 两形态当前只保证**单段 provider 前缀 + 无 `/` 模型段**（如 `zai-coding-cn/x`）
+ * 等价——多段 ref 的翻译判定可能不一致，收敛前不得扩充多段键。
  */
 export function translatePiModelRefToZcode(requested: string, sources?: ZcodeSourcePaths): string {
   if (!requested.includes("/")) return requested;
