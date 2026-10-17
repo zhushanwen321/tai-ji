@@ -699,8 +699,9 @@ export class RpcClient implements IPiEngine {
    * !this._killing 分支内；process error 路径传 code=null）。
    * code=null（信号死亡 / spawn 失败的 process error，如管道断裂后的 SIGKILL）同属异常退出，落盘。
    * 正常退出（code=0）与主动 kill 流程不写。
-   * 文件：<logsDir>/pi-crash-<date>-<sid>.log（logger.ts writePiCrashLog，复用 pi-*
-   * 命名惯例，保留期清理自动覆盖）。
+   * 文件：合法 sid → `<root>/<sid>/logs/pi-crash-<date>.log`（session 存储树 logs/ 域，
+   * 文件名去 sid）；无 sid/非法形态回落全局 `<logsDir>/pi-crash-<date>-nosid.log`
+   * （logger.ts writePiCrashLog，复用 pi-* 命名惯例，保留期清理自动覆盖）。
    *
    * best-effort 观测路径：任何失败（logger 未初始化 / 宿主环境未接线该能力，如
    * 单元测试部分 mock logger 模块）都不得影响 exit 主流程（rejectAll / exitCallbacks

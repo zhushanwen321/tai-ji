@@ -25,8 +25,10 @@
  *    对头部候选补采 `ps -p <pid> -o lstart=`（进程启动时刻）：启动时刻贴近死亡
  *    时刻 = 强信号（先起进程再下手）。
  * ③ 落盘双写：crash 台账 `signal-forensics` 事件（schema 扩展值，含 ≤2KB digest +
- *    detailPath）+ 全量记录 JSONL 追加到 `<dataDir>/logs/signal-forensics-<date>-
- *    <sid>.jsonl`（logger.ts cleanExpiredLogs 同前缀白名单覆盖，保留期清理自动接管）。
+ *    detailPath）+ 全量记录 JSONL 追加到 session 存储树
+ *    `<root>/<sid>/logs/signal-forensics-<date>.jsonl`（logger.ts cleanExpiredLogs
+ *    同前缀白名单覆盖，树内保留期清理自动接管；非法 sid 回落全局 logs——见
+ *    writeForensicsDetailFile）。
  *
  * 原理性极限（显式声明，不伪装确定性）：环间隔内生灭 <1.5s 的短命发送方可能两次
  * 采样都不在场而漏采；候选集是给人/评估器复核的线索而非定罪证据。fail-safe 方向
@@ -39,9 +41,10 @@
 import { appendFileSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import type { CrashJournalEvent, CrashJournalWriter } from '@taiji/shared'
-import { getDataDir } from '@taiji/shared/paths'
+import { SESSION_STORE_DIR_SEGMENT, getDataDir, getSessionLogsDir } from '@taiji/shared/paths'
 import { getCrashJournal } from '../crash-journal.js'
 import { isPiCrashLogEnabled } from '../logger.js'
+import { isPiSessionId } from './pi-paths.js'
 // 采样原语（ps 解析 + 滚动环）独立文件：signal-forensics 只消费环，不含 OS 枚举细节
 import { listAllProcesses, parseProcessTable, ProcessTableRing, readProcessStartTime, type ProcessRow, type RingSample } from './process-table-ring.js'
 
@@ -509,18 +512,32 @@ export function buildDigest(record: SignalForensicsRecord): string {
 /**
  * 全量记录落盘（append JSONL，每行一次死亡事件）。
  *
- * 文件：`<dataDir>/logs/signal-forensics-<date>-<sid>.jsonl`——signal-forensics- 前缀
- * 已登记进 logger.ts cleanExpiredLogs 白名单（D6-⑦：有写入就有清理），保留期清理自动
- * 接管，无需自建轮转。best-effort：任何失败（磁盘满/权限）返回 null，不向调用链抛错。
+ * 布局反转（session-store-layout-inversion 域 11）：合法 sessionId 落 session 存储树
+ * `<root>/<sid>/logs/signal-forensics-<date>.jsonl`（sid 已在路径，文件名去 sid）——
+ * 前缀已登记进 logger.ts cleanExpiredLogs 白名单（D6-⑦：有写入就有清理），树内保留期
+ * 清理自动接管，无需自建轮转。非法 sessionId（极端形态防御）回落全局
+ * `<dataDir>/logs/signal-forensics-<date>-<清洗sid>.jsonl`（D7 豁免②无归属日志留全局）。
+ * best-effort：任何失败（磁盘满/权限）返回 null，不向调用链抛错。
  *
- * @returns detailPath（相对 dataDir，供台账 detailPath 字段）；失败返回 null。
+ * @returns detailPath（相对 dataDir，供台账 detailPath 字段；树内形态
+ *          `ext-sessions/<sid>/logs/<file>`）；失败返回 null。
  */
 export function writeForensicsDetailFile(record: SignalForensicsRecord): string | null {
   try {
-    const logsDir = join(getDataDir(), 'logs')
-    mkdirSync(logsDir, { recursive: true })
+    const dataDir = getDataDir()
     const date = record.ts.slice(0, ISO_DATE_LENGTH)
-    // 文件名安全化与 logger.ts createPiSessionLog 同规则；空清洗结果回落 'nosid'
+    if (isPiSessionId(record.sessionId)) {
+      // 合法 sid 入树：目录按需创建；detailPath 相对 dataDir（诊断包收集按 join(dataDir, detail) 解析）
+      const dir = getSessionLogsDir(record.sessionId, dataDir)
+      mkdirSync(dir, { recursive: true })
+      const fileName = `signal-forensics-${date}.jsonl`
+      appendFileSync(join(dir, fileName), `${JSON.stringify(record)}\n`)
+      return [SESSION_STORE_DIR_SEGMENT, record.sessionId, 'logs', fileName].join('/')
+    }
+    // 非法 sid（极端防御）：全局 logs 平铺，文件名安全化（与 logger.ts createPiSessionLog
+    // 回落分支同规则）；空清洗结果回落 'nosid'
+    const logsDir = join(dataDir, 'logs')
+    mkdirSync(logsDir, { recursive: true })
     const safeSid = record.sessionId.replace(/[^a-zA-Z0-9-]/g, '').slice(0, SESSION_ID_MAX_LENGTH) || 'nosid'
     const fileName = `signal-forensics-${date}-${safeSid}.jsonl`
     appendFileSync(join(logsDir, fileName), `${JSON.stringify(record)}\n`)

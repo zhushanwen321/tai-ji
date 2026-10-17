@@ -501,12 +501,13 @@ describe('reportPiExitSignalForensics', () => {
         ring,
       })
       await vi.waitFor(() => {
-        expect(readdirSync(join(dataDir, 'logs')).some(f => f.startsWith('signal-forensics-'))).toBe(true)
+        // 布局反转：合法 sid 落树内 <root>/<sid>/logs/signal-forensics-<date>.jsonl（文件名去 sid）
+        expect(readdirSync(join(dataDir, 'ext-sessions', 'sess-enabled', 'logs')).some(f => f.startsWith('signal-forensics-'))).toBe(true)
       })
-      const fileName = readdirSync(join(dataDir, 'logs')).find(f => f.startsWith('signal-forensics-'))
+      const fileName = readdirSync(join(dataDir, 'ext-sessions', 'sess-enabled', 'logs')).find(f => f.startsWith('signal-forensics-'))
       expect(fileName).toBeDefined()
-      expect(fileName).toContain('sess-enabled')
-      const written = JSON.parse(readFileSync(join(dataDir, 'logs', fileName!), 'utf8').trim()) as SignalForensicsRecord
+      expect(fileName).toMatch(/^signal-forensics-\d{4}-\d{2}-\d{2}\.jsonl$/)
+      const written = JSON.parse(readFileSync(join(dataDir, 'ext-sessions', 'sess-enabled', 'logs', fileName!), 'utf8').trim()) as SignalForensicsRecord
       expect(written.sessionId).toBe('sess-enabled')
       expect(written.signalGuess).toBe('SIGTERM')
       // 环 diff 真实执行：死亡前窗口在场的发送方在替身快照中缺席 → vanished
@@ -520,7 +521,7 @@ describe('reportPiExitSignalForensics', () => {
 })
 
 describe('writeForensicsDetailFile', () => {
-  it('真实写 tmp 数据目录并返回相对 detailPath（append JSONL）', () => {
+  it('合法 sid 落树内并返回相对 detailPath（append JSONL，文件名去 sid）', () => {
     const dataDir = mkdtempSync(join(tmpdir(), 'sigf-detail-'))
     const prev = process.env.TAIJI_AGENT_DATA_DIR
     process.env.TAIJI_AGENT_DATA_DIR = dataDir
@@ -542,7 +543,8 @@ describe('writeForensicsDetailFile', () => {
         note: 'no vanished processes in the pre-death window',
       }
       const detailPath = writeForensicsDetailFile(record)
-      expect(detailPath).toBe('logs/signal-forensics-2026-10-13-sess-detail.jsonl')
+      // 布局反转：树内形态 = ext-sessions/<sid>/logs/signal-forensics-<date>.jsonl（相对 dataDir）
+      expect(detailPath).toBe('ext-sessions/sess-detail/logs/signal-forensics-2026-10-13.jsonl')
       const written = JSON.parse(readFileSync(join(dataDir, detailPath!), 'utf8').trim()) as SignalForensicsRecord
       expect(written.sessionId).toBe('sess-detail')
       expect(written.signalGuess).toBe('SIGTERM')
@@ -558,7 +560,7 @@ describe('writeForensicsDetailFile', () => {
     }
   })
 
-  it('sessionId 含非法字符时文件名安全化', () => {
+  it('sessionId 含非法字符时回落全局 logs 平铺并安全化文件名（无归属日志不入树）', () => {
     const dataDir = mkdtempSync(join(tmpdir(), 'sigf-safe-'))
     const prev = process.env.TAIJI_AGENT_DATA_DIR
     process.env.TAIJI_AGENT_DATA_DIR = dataDir
@@ -572,6 +574,8 @@ describe('writeForensicsDetailFile', () => {
         siblingPis: [], note: 'x',
       })
       expect(detailPath).toBe('logs/signal-forensics-2026-10-13-etcpasswd.jsonl')
+      // 非法 sid 不在 session 存储树内产生任何目录（路径穿越防线）
+      expect(existsSync(join(dataDir, 'ext-sessions'))).toBe(false)
     } finally {
       if (prev === undefined) delete process.env.TAIJI_AGENT_DATA_DIR
       else process.env.TAIJI_AGENT_DATA_DIR = prev

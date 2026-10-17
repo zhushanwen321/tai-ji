@@ -25,8 +25,11 @@
  *   + warn 一次，写入本体不中断
  * - 保留期：启动时清理 KEEP_DAYS 天前的日志
  * - 级别：dev 默认 debug，prod 默认 info，TAIJI_LOG_LEVEL 可覆盖（TAIJI_ 前缀自动过白名单）
- * - pi stdout JSONL 独立落盘：pi-<date>-<sessionId>.jsonl（卡死诊断的决定性证据），同款 size
- *   轮转（达阈值 gzip 归档为 <原路径>.1.gz）
+ * - pi stdout JSONL 独立落盘：`<root>/<sessionId>/logs/pi-<date>.jsonl`（session 存储树
+ *   logs/ 域，session-store-layout-inversion 布局反转——sid 已在路径，文件名不再内嵌；
+ *   卡死诊断的决定性证据），同款 size 轮转（达阈值 gzip 归档为 <原路径>.1.gz）
+ * - 带 sessionId 的日志（tee / pi-crash / 树内 signal-forensics）入树；无归属日志
+ *   （runtime-/main-/relay/plugin-crash/无 sid crash）留全局 <dataDir>/logs/（D7 豁免②）
  * - 退出 flush（D10-1 分档承诺的配套）：shutdown 链必须 `await closeLogger()`（主日志 +
  *   全部 pi session 写流 end 并等 flush 完成）后再 process.exit(0)；硬崩溃（SIGKILL/断电）
  *   丢缓冲窗口内尾部几行已声明为取证能力削弱
@@ -46,6 +49,9 @@ import { join } from 'node:path'
 import { pipeline } from 'node:stream/promises'
 // [crash-resilience §3.3 D6-⑦] 保留天数两进程共读同一函数（env 覆盖 || 默认）——merge 裁决保留 shared SSOT 形态
 import { readLogKeepDays } from '@taiji/shared'
+// session 存储树推导（域 11 布局反转）：树根/树内 logs/ 目录 SSOT，sessionId 过 isPiSessionId 同域校验
+import { getSessionLogsDir, getSessionStoreDir } from '@taiji/shared/paths'
+import { isPiSessionId } from './pi/pi-paths.js'
 import { createGzip } from 'node:zlib'
 import { isPackaged } from '../utils/runtime-env.js'
 // endAndAwait 单一实现（偏差 #32①：原模块私有复刻与 crash-journal 同构，收敛共享原语；
@@ -84,6 +90,8 @@ const SESSION_ID_MAX_LENGTH = 36
 /** 当前级别（initLogger 时定，模块级单例）。未 init 前为 undefined，所有写入降级为 no-op。 */
 let currentLevel: LogLevel | undefined
 let logsDir: string | undefined
+/** 数据根目录（initLogger 入参存档）：session 存储树 `<root>/<sid>/logs/` 推导的基址。 */
+let dataDirRoot: string | undefined
 
 /** 当前 runtime 主日志的日期（YYYY-MM-DD），跨天检测用。 */
 let currentDate = ''
@@ -168,6 +176,7 @@ export function _openPiStreamCountForTest(): number {
  */
 export function initLogger(dataDir: string): void {
   if (currentLevel) return // 已初始化（幂等）
+  dataDirRoot = dataDir
   logsDir = join(dataDir, 'logs')
   mkdirSync(logsDir, { recursive: true })
   // dev 默认 debug（含 pi 事件流），prod 默认 info（屏蔽 pi 原始事件，避 PII/性能/磁盘）
@@ -378,30 +387,59 @@ function createStreamSafe(file: string, flags: 'a' | 'w' = 'a'): WriteStream | u
  * [crash-resilience §3.3 D6-⑦] 保留天数从进程内常量改为 shared readLogKeepDays()：
  * 每次调用时读 env（TAIJI_LOG_KEEP_DAYS 覆盖 || 默认 7），与 main 侧每日复扫共用同一
  * 值域。本函数仍是 runtime 侧唯一触发点（仅启动时跑）；长寿运行的持续清理由 main
- * 每日定时器承担（u5a），两进程超龄判定同源。
+ * 每日定时器承担（u5a，只扫全局——main 进程不 import runtime，树内清理归本函数），
+ * 两进程超龄判定同源。
+ *
+ * 布局反转（session-store-layout-inversion 域 11）后双根扫描：
+ * - 全局 `<dataDir>/logs/`：无归属日志（runtime-* / pi-relay-* / 无 sid 的 pi-crash-* /
+ *   plugin-crash-* / 旧布局遗留的 signal-forensics-*）照旧按保留期清；
+ * - 树内 `<root>/<sid>/logs/`：扫 `<root>/` 一级目录，**非合法 sessionId 形态的目录
+ *   一律跳过**（isPiSessionId，D7 树内遍历规约——防手放的非会话目录被误清），只清
+ *   各树 logs/ 子目录内的白名单文件（pi-*.jsonl(.N.gz) / pi-crash-*.log /
+ *   signal-forensics-*.jsonl，文件名均已去 sid）。
  */
 function cleanExpiredLogs(): void {
-  if (!logsDir) return
+  if (!logsDir || dataDirRoot === undefined) return
   const cutoff = Date.now() - readLogKeepDays() * MS_PER_DAY
+  cleanExpiredInDir(logsDir, cutoff)
+  const storeDir = getSessionStoreDir(dataDirRoot)
+  let sessionDirs: string[]
+  try {
+    sessionDirs = readdirSync(storeDir)
+  } catch {
+    return // 树根不存在（尚无任何 session 数据）：无树内日志可清
+  }
+  for (const sid of sessionDirs) {
+    if (!isPiSessionId(sid)) continue // 非 sessionId 形态目录跳过（D7 树内遍历规约）
+    cleanExpiredInDir(join(storeDir, sid, 'logs'), cutoff) // logs/ 缺失时 readdir 失败即跳过
+  }
+}
+
+/**
+ * 单目录保留期清理（cleanExpiredLogs 的全局/树内共用实现）。
+ *
+ * 只清理本模块产出的日志文件（前缀白名单：runtime-* / pi-* / plugin-crash-* /
+ * signal-forensics-*）。pi-crash-* 靠 pi- 前缀覆盖；pi-*.jsonl.N.gz 轮转压缩代同被
+ * pi- 前缀覆盖；plugin-crash-*（u5b D6-⑤，plugin worker 崩溃取证）与
+ * signal-forensics-*（2026-10-13 信号归因取证，infra/pi/signal-forensics.ts 自写不入
+ * logger 流）写入与清理通道同步落地（D6-⑦：有写入无清理 = 新债）。
+ * runtime-uncaught-<date>.log（uncaught-policy 的 appendProcessEscapeLog 逃逸取证，非
+ * 本模块产出）也由 runtime- 前缀覆盖——appendFileSync 逐事件直写、无常驻 fd，unlink
+ * 语义安全。
+ * 固定名 stderr 文件（electron-runtime-stderr.log / zcode-appserver-stderr.log）
+ * 不匹配任何前缀，天然不进超龄清单（writer 持有型 append fd 的 unlink 会造成
+ * 「写成功、盘上无文件」的静默丢失；其治理归 writer 侧 size 轮转）。
+ */
+function cleanExpiredInDir(dir: string, cutoff: number): void {
   let entries: string[]
   try {
-    entries = readdirSync(logsDir)
+    entries = readdirSync(dir)
   } catch {
     return
   }
   for (const name of entries) {
-    // 只清理本模块产出的日志文件（runtime-* / pi-*.jsonl / pi-crash-*.log / plugin-crash-*.log /
-    // signal-forensics-*.jsonl）。pi-crash-* 靠 pi- 前缀覆盖；plugin-crash-*（u5b D6-⑤，
-    // plugin worker 崩溃取证）是新写入面，写入与清理通道同步落地（D6-⑦：有写入无清理 =
-    // 新债）；signal-forensics-*（2026-10-13 信号归因取证，infra/pi/signal-forensics.ts
-    // 自写不入 logger 流）同理同步登记。runtime-uncaught-<date>.log（uncaught-policy 的
-    // appendProcessEscapeLog 逃逸取证，非本模块产出）也由 runtime- 前缀覆盖——
-    // appendFileSync 逐事件直写、无常驻 fd，unlink 语义安全。
-    // 固定名 stderr 文件（electron-runtime-stderr.log / zcode-appserver-stderr.log）
-    // 不匹配任何前缀，天然不进超龄清单（writer 持有型 append fd 的 unlink 会造成
-    // 「写成功、盘上无文件」的静默丢失；其治理归 writer 侧 size 轮转）。
     if (!name.startsWith('runtime-') && !name.startsWith('pi-') && !name.startsWith('plugin-crash-') && !name.startsWith('signal-forensics-')) continue
-    const full = join(logsDir, name)
+    const full = join(dir, name)
     try {
       if (statSync(full).mtimeMs < cutoff) {
         unlinkSync(full)
@@ -501,11 +539,35 @@ export interface PiSessionLog {
 }
 
 /**
+ * 树内会话日志文件路径（域 11 布局反转的写入侧分流）。
+ *
+ * 合法 sessionId（isPiSessionId 同域校验）→ `<root>/<sid>/logs/<fileName>`，目录
+ * best-effort 创建（mkdirSync 失败不抛——createWriteStream 的流 error 路径自然降级，
+ * 与 gzipRotatedFile 同款容错哲学）。返回 null = sessionId 缺失/非法形态（极端防御，
+ * 真实来源是 pi 会话 UUID）——调用方回落全局 logs 平铺（D7 豁免②「无归属日志留全局」
+ * 的同款分流），tee/crash 证据不丢。
+ */
+function sessionLogFileOrNull(sessionId: string | undefined, fileName: string): string | null {
+  if (dataDirRoot === undefined || sessionId === undefined || !isPiSessionId(sessionId)) return null
+  const dir = getSessionLogsDir(sessionId, dataDirRoot)
+  try {
+    mkdirSync(dir, { recursive: true })
+  // eslint-disable-next-line taste/no-silent-catch -- 目录创建失败由写流的 error 路径降级；观测路径不杀进程
+  } catch {
+    // no-op
+  }
+  return join(dir, fileName)
+}
+
+/**
  * 为一个 pi session 创建独立日志写入器。
  *
  * pi stdout 的 JSONL 事件流是诊断 pi 卡死的**决定性证据**（pi 发了什么 / 什么都没发）。
- * 每个独立文件，文件名含 sessionId 便于关联坏 session（与数据目录 agent/sessions/
- * 下的 session JSONL 对应）。
+ * 每个独立文件（与数据目录 agent/sessions/ 下的 session JSONL 对应）。
+ *
+ * 布局反转（session-store-layout-inversion 域 11）：合法 sessionId 落 session 存储
+ * 树 `<root>/<sid>/logs/pi-<date>.jsonl`——sid 已在路径，文件名不再内嵌；非法形态
+ * （极端防御）回落全局 logs 平铺 `pi-<date>-<清洗sid>.jsonl`，证据不丢。
  *
  * size 轮转（2026-09 磁盘膨胀修复）：单 session 事件量并非总是可控——pi 的 message_update
  * delta 逐条落盘（每行一个小 delta + ~870B 信封），高频长 session 实测 30 分钟写到 19.4MB
@@ -524,8 +586,10 @@ export function createPiSessionLog(sessionId: string): PiSessionLog {
     return { write: () => {}, end: () => {} }
   }
   const date = new Date().toISOString().slice(0, ISO_DATE_LENGTH)
-  // 文件名：pi-<date>-<sessionId>.jsonl（date 防跨天 session 冲突）
-  const safeSid = sessionId.replace(/[^a-zA-Z0-9-]/g, '').slice(0, SESSION_ID_MAX_LENGTH)
+  const treeFile = sessionLogFileOrNull(sessionId, `pi-${date}.jsonl`)
+  if (treeFile) return createPiStreamWriter(treeFile)
+  // 非法 sessionId（极端防御）：全局 logs 平铺，文件名安全化（同 writePiCrashLog nosid 规则）
+  const safeSid = sessionId.replace(/[^a-zA-Z0-9-]/g, '').slice(0, SESSION_ID_MAX_LENGTH) || 'nosid'
   return createPiStreamWriter(join(logsDir, `pi-${date}-${safeSid}.jsonl`))
 }
 
@@ -750,9 +814,11 @@ export function isPiCrashLogEnabled(): boolean {
  * （formatPiCrashContextHeader 渲染）插在 stderr 原文之前，A8 交叉归因的 runtime 半边；
  * 未传时行为与历史版本逐字一致（纯 stderr 内容）。
  *
- * 文件名 `pi-crash-<date>-<sessionId>.log`：复用 pi-*.jsonl 命名惯例（pi- 前缀使
- * cleanExpiredLogs 的保留期清理自动覆盖，无需改过滤规则）；date + sessionId 防同日
- * 多 session / 跨天冲突。sessionId 缺失（无 session 的早期 spawn 崩溃）用 'nosid' 占位。
+ * 文件名（域 11 布局反转）：合法 sessionId → `<root>/<sid>/logs/pi-crash-<date>.log`
+ * （树内 logs/ 域，sid 已在路径故文件名去 sid）；sessionId 缺失（无 session 的早期
+ * spawn 崩溃）或非法形态回落全局 logs 平铺 `pi-crash-<date>-nosid.log`（'nosid' 占位，
+ * D7 豁免②无归属日志留全局；pi- 前缀使 cleanExpiredLogs 的保留期清理自动覆盖，无需改
+ * 过滤规则）。
  *
  * 写入复用 createPiStreamWriter（WriteStream 缓冲 + 惰性打开 + closeLogger 退出 flush
  * 覆盖 + 流错误自愈）而非 appendFileSync——logger.ts 写入路径禁同步 append 是
@@ -766,9 +832,10 @@ export function isPiCrashLogEnabled(): boolean {
 export function writePiCrashLog(sessionId: string | undefined, content: string, context?: PiCrashContext): void {
   if (!logsDir || !currentLevel) return
   const date = new Date().toISOString().slice(0, ISO_DATE_LENGTH)
-  // 文件名安全化与 createPiSessionLog 同规则；空清洗结果（如全非法字符）回落 'nosid'
-  const safeSid = (sessionId ?? 'nosid').replace(/[^a-zA-Z0-9-]/g, '').slice(0, SESSION_ID_MAX_LENGTH) || 'nosid'
-  const writer = createPiStreamWriter(join(logsDir, `pi-crash-${date}-${safeSid}.log`))
+  // 合法 sid 入树（文件名去 sid）；缺失/非法形态回落全局 nosid 占位（sessionLogFileOrNull 分流）
+  const file = sessionLogFileOrNull(sessionId, `pi-crash-${date}.log`)
+    ?? join(logsDir, `pi-crash-${date}-${(sessionId ?? 'nosid').replace(/[^a-zA-Z0-9-]/g, '').slice(0, SESSION_ID_MAX_LENGTH) || 'nosid'}.log`)
+  const writer = createPiStreamWriter(file)
   const body = content.endsWith('\n') ? content : content + '\n'
   // context 头块与 stderr 原文之间空一行分隔（块尾无换行，此处补两个 \n）
   writer.write(context ? `${formatPiCrashContextHeader(context)}\n\n${body}` : body)
@@ -1076,6 +1143,7 @@ export async function closeLogger(): Promise<void> {
   openPiStreams.clear()
   currentLevel = undefined
   logsDir = undefined
+  dataDirRoot = undefined
   currentDate = ''
   // 各写流独立且 endAndAwait 永不 reject——allSettled 与 all 等价，但符合
   // taste/prefer-allsettled（独立数据源允许部分降级，不互相阻塞）。

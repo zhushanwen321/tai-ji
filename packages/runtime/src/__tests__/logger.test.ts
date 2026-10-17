@@ -191,9 +191,13 @@ describe('logger.ts WriteStream 化（D10-1/D10-2）', () => {
     sessionLog.end()
     sessionLog.write('{"type":"should-not-appear"}') // end 后 no-op
     await logger.closeLogger()
-    const files = readdirSync(logsDir()).filter((n) => n.startsWith('pi-'))
+    // 布局反转：tee 落 session 存储树 <root>/<sid>/logs/pi-<date>.jsonl（sid 在路径，文件名去 sid）
+    const treeLogsDir = join(dataDir, 'ext-sessions', 'test-session-123', 'logs')
+    const files = readdirSync(treeLogsDir).filter((n) => n.startsWith('pi-'))
     expect(files).toHaveLength(1)
-    const content = readFileSync(join(logsDir(), files[0]), 'utf8')
+    expect(files[0]).toMatch(/^pi-\d{4}-\d{2}-\d{2}\.jsonl$/)
+    expect(existsSync(join(logsDir(), files[0]))).toBe(false) // 全局 logs 无同名文件（不在全局平铺）
+    const content = readFileSync(join(treeLogsDir, files[0]), 'utf8')
     expect(content).toContain('message_start')
     expect(content).toContain('message_complete')
     expect(content).not.toContain('should-not-appear')
@@ -227,31 +231,49 @@ describe('logger.ts WriteStream 化（D10-1/D10-2）', () => {
     expect(content.trim().split('\n').at(-1)).toMatch(/\{"code":1\}$/)
   })
 
-  it('保留期清理：KEEP_DAYS 天前的 runtime-*/pi-* 删除，近期 + 非本模块文件保留', async () => {
+  it('保留期清理（布局反转双根）：全局 runtime-*/relay 清、树内 logs/ 过期清活跃保、非 sid 目录跳过', async () => {
     const dir = logsDir()
     mkdirSync(dir, { recursive: true })
+    // 全局根：runtime 主日志（过期清）+ pi-relay（relay 留全局，过期清）+ 近期文件与非白名单文件（保留）
     const oldRuntime = join(dir, 'runtime-2026-07-01.log')
-    const oldPi = join(dir, 'pi-2026-07-01-abc.jsonl')
-    // pi-crash-* 前缀同属 pi- 清理覆盖面（writePiCrashLog 产物，U3-4）
-    const oldPiCrash = join(dir, 'pi-crash-2026-07-01-abc.log')
+    const oldRelay = join(dir, 'pi-relay-2026-07-01-rec-1.jsonl')
     const recent = join(dir, 'runtime-2026-08-15.log')
     const unrelated = join(dir, 'other-file.txt')
     writeFileSync(oldRuntime, 'old')
-    writeFileSync(oldPi, 'old')
-    writeFileSync(oldPiCrash, 'old')
+    writeFileSync(oldRelay, 'old')
     writeFileSync(recent, 'recent')
     writeFileSync(unrelated, 'keep-me')
+    // 树内根：<sid>/logs/ 过期清、活跃保；非 sessionId 形态目录整棵跳过（D7 树内遍历规约）
+    const sidLogs = join(dataDir, 'ext-sessions', 'clean-sid-1', 'logs')
+    mkdirSync(sidLogs, { recursive: true })
+    const oldTreePi = join(sidLogs, 'pi-2026-07-01.jsonl')
+    const oldTreeGz = join(sidLogs, 'pi-2026-07-01.jsonl.1.gz')
+    const oldTreeCrash = join(sidLogs, 'pi-crash-2026-07-01.log')
+    const recentTreePi = join(sidLogs, 'pi-2026-08-15.jsonl')
+    const recentTreeForensics = join(sidLogs, 'signal-forensics-2026-08-15.jsonl')
+    for (const f of [oldTreePi, oldTreeGz, oldTreeCrash, recentTreePi, recentTreeForensics]) writeFileSync(f, 'x')
+    // 非 sessionId 形态目录（btw 虚拟 id 形态含冒号，isPiSessionId 必拒）：整棵跳过（D7 树内遍历规约）
+    const notSidDir = join(dataDir, 'ext-sessions', 'btw:not-a-sid', 'logs')
+    mkdirSync(notSidDir, { recursive: true })
+    const insideNotSid = join(notSidDir, 'pi-2026-07-01.jsonl')
+    writeFileSync(insideNotSid, 'must-keep')
     const oldTime = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000) // 10 天前 > 7 天保留期
-    utimesSync(oldRuntime, oldTime, oldTime)
-    utimesSync(oldPi, oldTime, oldTime)
-    utimesSync(oldPiCrash, oldTime, oldTime)
+    for (const f of [oldRuntime, oldRelay, oldTreePi, oldTreeGz, oldTreeCrash, insideNotSid]) utimesSync(f, oldTime, oldTime)
     logger = await loadLogger({ TAIJI_LOG_KEEP_DAYS: '7' })
     logger.initLogger(dataDir)
+    // 全局：过期清、活跃与非白名单保
     expect(existsSync(oldRuntime)).toBe(false)
-    expect(existsSync(oldPi)).toBe(false)
-    expect(existsSync(oldPiCrash)).toBe(false)
+    expect(existsSync(oldRelay)).toBe(false)
     expect(existsSync(recent)).toBe(true)
-    expect(existsSync(unrelated)).toBe(true) // 非本模块产出的文件不清理
+    expect(existsSync(unrelated)).toBe(true)
+    // 树内：过期清（含 .1.gz 压缩代与 crash）、活跃保
+    expect(existsSync(oldTreePi)).toBe(false)
+    expect(existsSync(oldTreeGz)).toBe(false)
+    expect(existsSync(oldTreeCrash)).toBe(false)
+    expect(existsSync(recentTreePi)).toBe(true)
+    expect(existsSync(recentTreeForensics)).toBe(true)
+    // 非 sessionId 形态目录：即使内部文件过期也整棵跳过
+    expect(existsSync(insideNotSid)).toBe(true)
     await logger.closeLogger()
   })
 })
@@ -266,20 +288,25 @@ describe('pi 流 size 轮转（2026-09 日志膨胀修复）', () => {
   /** 窗口行数：写满 WINDOW_LINES 行 ≤ MAX，第 WINDOW_LINES+1 行触发轮转。 */
   const WINDOW_LINES = Math.floor(MAX / LINE_BYTES)
 
-  function piFiles(): string[] {
-    return readdirSync(logsDir()).filter((n) => n.startsWith('pi-')).sort()
+  /** pi tee 树内 logs/ 目录（<root>/<sid>/logs/，布局反转后 tee 落点）。 */
+  function sidLogsDir(sid: string): string {
+    return join(dataDir, 'ext-sessions', sid, 'logs')
   }
-  function gzFiles(): string[] {
-    return piFiles().filter((n) => n.endsWith('.1.gz'))
+
+  function piFiles(sid: string): string[] {
+    return readdirSync(sidLogsDir(sid)).filter((n) => n.startsWith('pi-')).sort()
   }
-  function piMainName(): string {
-    return piFiles().find((n) => !n.endsWith('.1.gz'))!
+  function gzFiles(sid: string): string[] {
+    return piFiles(sid).filter((n) => n.endsWith('.1.gz'))
   }
-  function readPiLines(name: string): string[] {
-    return readFileSync(join(logsDir(), name), 'utf8').trim().split('\n').filter((l) => l.trim())
+  function piMainName(sid: string): string {
+    return piFiles(sid).find((n) => !n.endsWith('.1.gz'))!
   }
-  function gunzipLines(name: string): string[] {
-    return gunzipSync(readFileSync(join(logsDir(), name))).toString('utf8').trim().split('\n').filter((l) => l.trim())
+  function readPiLines(sid: string, name: string): string[] {
+    return readFileSync(join(sidLogsDir(sid), name), 'utf8').trim().split('\n').filter((l) => l.trim())
+  }
+  function gunzipLines(sid: string, name: string): string[] {
+    return gunzipSync(readFileSync(join(sidLogsDir(sid), name))).toString('utf8').trim().split('\n').filter((l) => l.trim())
   }
   /** 逐行 JSON.parse 取 seq——解压产物必须仍是可解析的 JSONL（诊断者可读性断言）。 */
   function seqs(lines: string[]): number[] {
@@ -300,41 +327,46 @@ describe('pi 流 size 轮转（2026-09 日志膨胀修复）', () => {
   it('达阈值 → 轮转：旧段进 .1.gz（逐行可 JSON.parse）、新文件续写、无行丢失', async () => {
     logger = await loadLogger({ TAIJI_LOG_MAX_BYTES: String(MAX) })
     logger.initLogger(dataDir)
-    const pi = logger.createPiSessionLog('rot-basic')
+    const sid = 'rot-basic'
+    const pi = logger.createPiSessionLog(sid)
     const total = WINDOW_LINES * 2 // 恰好 1 次轮转（第 2 窗口写满但不越阈值）
     for (let i = 0; i < total; i++) pi.write(piLine(i))
     pi.end()
     await logger.closeLogger()
 
-    const gzs = gzFiles()
+    // gzip 命名组合（检查点 8 前半）：文件名去 sid 后轮转产物 = pi-<date>.jsonl.1.gz（树内）
+    const gzs = gzFiles(sid)
     expect(gzs).toHaveLength(1) // ① 发生轮转
-    const archived = gunzipLines(gzs[0])
+    expect(gzs[0]).toMatch(/^pi-\d{4}-\d{2}-\d{2}\.jsonl\.1\.gz$/)
+    const archived = gunzipLines(sid, gzs[0])
     expect(archived).toHaveLength(WINDOW_LINES) // ④ 旧段行数完整（未合并 / 未采样 / 未丢弃）
     expect(seqs(archived)).toEqual(range(0, WINDOW_LINES)) // ⑤ 解压后逐行 JSON.parse 且顺序原样
-    const live = readPiLines(piMainName())
+    const live = readPiLines(sid, piMainName(sid))
     expect(seqs(live)).toEqual(range(WINDOW_LINES, WINDOW_LINES)) // ③ 新文件继续接收写入
     expect(archived[0]).toBe(piLine(0)) // 内容形态不变：仍是原行（未重写 / 未加信封）
     expect(live[live.length - 1]).toBe(piLine(total - 1))
-    expect(statSync(join(logsDir(), piMainName())).size).toBeLessThanOrEqual(MAX) // size 上限生效
+    expect(statSync(join(sidLogsDir(sid), piMainName(sid))).size).toBeLessThanOrEqual(MAX) // size 上限生效
   })
 
   it('轮转窗口内到达的行被按序回放（不丢）', async () => {
     logger = await loadLogger({ TAIJI_LOG_MAX_BYTES: String(MAX) })
     logger.initLogger(dataDir)
-    const pi = logger.createPiSessionLog('rot-replay')
+    const sid = 'rot-replay'
+    const pi = logger.createPiSessionLog(sid)
     const total = WINDOW_LINES * 2
     for (let i = 0; i < total; i++) pi.write(piLine(i))
     // 同步断言（无 await，事件循环未转动）：此刻 .1.gz 尚未出现 = 轮转（end 等 flush → gzip）
     // 仍在进行中——即第 WINDOW_LINES..total-1 行都是「轮转窗口内到达的行」，只能靠回放落盘
-    expect(gzFiles()).toHaveLength(0)
+    expect(gzFiles(sid)).toHaveLength(0)
     await logger.closeLogger() // closeLogger 必须等完在途轮转（不等则窗口内的行随 process.exit 丢）
-    expect(seqs(readPiLines(piMainName()))).toEqual(range(WINDOW_LINES, WINDOW_LINES))
+    expect(seqs(readPiLines(sid, piMainName(sid)))).toEqual(range(WINDOW_LINES, WINDOW_LINES))
   })
 
   it('第二次轮转后磁盘上只有 1 个 .1.gz（单代保留，不是无限累积）', async () => {
     logger = await loadLogger({ TAIJI_LOG_MAX_BYTES: String(MAX) })
     logger.initLogger(dataDir)
-    const pi = logger.createPiSessionLog('rot-single-gen')
+    const sid = 'rot-single-gen'
+    const pi = logger.createPiSessionLog(sid)
     let next = 0
     const writeAndTick = async (): Promise<void> => {
       pi.write(piLine(next))
@@ -347,22 +379,22 @@ describe('pi 流 size 轮转（2026-09 日志膨胀修复）', () => {
     for (let i = 0; i < WINDOW_LINES * 2; i++) await writeAndTick()
     const deadline = Date.now() + 5000
     while (Date.now() < deadline) {
-      const g = gzFiles()[0]
+      const g = gzFiles(sid)[0]
       if (g !== undefined) {
         try {
-          if (seqs(gunzipLines(g))[0] > 0) break
+          if (seqs(gunzipLines(sid, g))[0] > 0) break
         } catch { /* 压缩进行中（半截 gzip 不可读），继续写 */ }
       }
       await writeAndTick()
     }
     await logger.closeLogger()
 
-    const gzs = gzFiles()
+    const gzs = gzFiles(sid)
     expect(gzs).toHaveLength(1) // 单代保留：更早的压缩代被 rename 覆盖
-    expect(piFiles().filter((n) => n.endsWith('.tmp'))).toHaveLength(0) // 无临时残骸
-    const archived = seqs(gunzipLines(gzs[0]))
+    expect(piFiles(sid).filter((n) => n.endsWith('.tmp'))).toHaveLength(0) // 无临时残骸
+    const archived = seqs(gunzipLines(sid, gzs[0]))
     expect(archived[0]).toBeGreaterThan(0) // 第 2 次轮转真实发生（旧代已删，不是累积）
-    const live = seqs(readPiLines(piMainName()))
+    const live = seqs(readPiLines(sid, piMainName(sid)))
     expect(live.at(-1)).toBe(next - 1) // 最后一行已落盘（退出 flush 生效）
     const visible = [...archived, ...live]
     for (let i = 1; i < visible.length; i++) expect(visible[i]).toBe(visible[i - 1] + 1) // 跨边界连续无缺行
@@ -372,7 +404,8 @@ describe('pi 流 size 轮转（2026-09 日志膨胀修复）', () => {
     gzipFailure.enabled = true
     logger = await loadLogger({ TAIJI_LOG_MAX_BYTES: String(MAX) })
     logger.initLogger(dataDir)
-    const pi = logger.createPiSessionLog('rot-gzip-fail')
+    const sid = 'rot-gzip-fail'
+    const pi = logger.createPiSessionLog(sid)
     const total = WINDOW_LINES * 3
     expect(() => {
       for (let i = 0; i < total; i++) pi.write(piLine(i))
@@ -381,14 +414,14 @@ describe('pi 流 size 轮转（2026-09 日志膨胀修复）', () => {
     pi.end()
     await expect(logger.closeLogger()).resolves.toBeUndefined() // 退出 flush 不被压缩失败阻塞
 
-    expect(gzFiles()).toHaveLength(0) // 无压缩产物
+    expect(gzFiles(sid)).toHaveLength(0) // 无压缩产物
     // 原文件保留（未删除）+ 后续写入继续落盘：全部行按序仍在同一文件（不丢数据）
-    expect(seqs(readPiLines(piMainName()))).toEqual(range(0, total + 1))
+    expect(seqs(readPiLines(sid, piMainName(sid)))).toEqual(range(0, total + 1))
     // 降级不静默：主日志有 warn 出口
     expect(runtimeLogText()).toContain('gzip failed')
   })
 
-  it('relay 原始字节镜像（Uint8Array）：轮转后字节级保真（无改写 / 无合并 / 无丢失）', async () => {
+  it('relay 原始字节镜像（Uint8Array）：轮转后字节级保真（无改写 / 无合并 / 无丢失）；relay 留全局 logs（无 sessionId 豁免）', async () => {
     logger = await loadLogger({ TAIJI_LOG_MAX_BYTES: String(MAX) })
     logger.initLogger(dataDir)
     const relay = logger.createPiRelayLog('relay-rot-1')
@@ -398,24 +431,29 @@ describe('pi 流 size 轮转（2026-09 日志膨胀修复）', () => {
     relay.end()
     await logger.closeLogger()
 
-    expect(gzFiles()).toHaveLength(1)
+    // relay 文件名携带 recordId 非 sessionId（无直接归属形态）→ 留全局 <dataDir>/logs/ 不入树（D7 豁免）
+    const globalPiFiles = readdirSync(logsDir()).filter((n) => n.startsWith('pi-relay-')).sort()
+    expect(globalPiFiles.filter((n) => n.endsWith('.1.gz'))).toHaveLength(1)
+    const gzName = globalPiFiles.find((n) => n.endsWith('.1.gz'))!
+    const mainName = globalPiFiles.find((n) => !n.endsWith('.1.gz'))!
+    expect(mainName).toMatch(/^pi-relay-\d{4}-\d{2}-\d{2}-relay-rot-1\.jsonl$/)
     // 轮转边界把字节流切成两段：.1.gz（旧段）+ 主文件（新段）——拼回来必须与原字节流逐字节相等
     const onDisk = Buffer.concat([
-      gunzipSync(readFileSync(join(logsDir(), gzFiles()[0]))),
-      readFileSync(join(logsDir(), piMainName())),
+      gunzipSync(readFileSync(join(logsDir(), gzName))),
+      readFileSync(join(logsDir(), mainName)),
     ])
     expect(onDisk.equals(Buffer.concat(Array.from({ length: total }, (_, i) => chunk(i))))).toBe(true)
   })
 })
 
 describe('writePiCrashLog（pi 崩溃 stderr 全量落盘，U3-4）', () => {
-  it('initLogger 后调用：pi-crash-<date>-<sid>.log 落盘，closeLogger flush 后内容完整', async () => {
+  it('initLogger 后调用：合法 sid 落树内 <root>/<sid>/logs/pi-crash-<date>.log（文件名去 sid），closeLogger flush 后内容完整', async () => {
     logger = await loadLogger()
     logger.initLogger(dataDir)
     logger.writePiCrashLog('crash-sid-1', 'pi crashed with code 1\nTypeError: boom\nat factory')
     await logger.closeLogger()
     const date = new Date().toISOString().slice(0, 10)
-    const file = join(logsDir(), `pi-crash-${date}-crash-sid-1.log`)
+    const file = join(dataDir, 'ext-sessions', 'crash-sid-1', 'logs', `pi-crash-${date}.log`)
     expect(existsSync(file)).toBe(true)
     const content = readFileSync(file, 'utf8')
     expect(content).toContain('pi crashed with code 1')
@@ -431,7 +469,7 @@ describe('writePiCrashLog（pi 崩溃 stderr 全量落盘，U3-4）', () => {
     expect(existsSync(logsDir())).toBe(false)
   })
 
-  it('sessionId 缺失或全非法字符时用 nosid 占位（文件名始终可构造）', async () => {
+  it('sessionId 缺失或全非法字符时回落全局 logs nosid 占位（无归属日志不入树，文件名始终可构造）', async () => {
     logger = await loadLogger()
     logger.initLogger(dataDir)
     logger.writePiCrashLog(undefined, 'no-sid crash')
@@ -443,6 +481,8 @@ describe('writePiCrashLog（pi 崩溃 stderr 全量落盘，U3-4）', () => {
     const content = readFileSync(join(logsDir(), files[0]), 'utf8')
     expect(content).toContain('no-sid crash')
     expect(content).toContain('illegal-chars crash')
+    // 无归属 crash 不进任何 session 树
+    expect(existsSync(join(dataDir, 'ext-sessions'))).toBe(false)
   })
 
   it('多次调用 append 语义：同 session 两次写入不覆盖历史（防御性支持）', async () => {
@@ -452,7 +492,7 @@ describe('writePiCrashLog（pi 崩溃 stderr 全量落盘，U3-4）', () => {
     logger.writePiCrashLog('append-sid', 'second crash')
     await logger.closeLogger()
     const date = new Date().toISOString().slice(0, 10)
-    const content = readFileSync(join(logsDir(), `pi-crash-${date}-append-sid.log`), 'utf8')
+    const content = readFileSync(join(dataDir, 'ext-sessions', 'append-sid', 'logs', `pi-crash-${date}.log`), 'utf8')
     expect(content).toContain('first crash')
     expect(content).toContain('second crash')
   })
@@ -487,12 +527,27 @@ describe('logger 基础行为（自 test/logger.test.ts 归并）', () => {
     sessionLog.end()
     await logger.closeLogger()
 
-    const piFile = readdirSync(logsDir()).find((n) => n.includes('test-sid-nl'))
+    const piFile = readdirSync(join(dataDir, 'ext-sessions', 'test-sid-nl', 'logs')).find((n) => n.endsWith('.jsonl'))
     expect(piFile).toBeDefined()
-    const lines = readFileSync(join(logsDir(), piFile!), 'utf8').split('\n').filter((l) => l.trim())
+    const lines = readFileSync(join(dataDir, 'ext-sessions', 'test-sid-nl', 'logs', piFile!), 'utf8').split('\n').filter((l) => l.trim())
     expect(lines).toHaveLength(2)
     expect(lines[0]).toBe('{"a":1}')
     expect(lines[1]).toBe('{"b":2}')
+  })
+
+  it('createPiSessionLog 非法 sessionId 回落全局 logs 平铺（tee 证据不丢，不入树）', async () => {
+    logger = await loadLogger()
+    logger.initLogger(dataDir)
+    const sessionLog = logger.createPiSessionLog('###/**')
+    sessionLog.write('{"fallback":true}')
+    sessionLog.end()
+    await logger.closeLogger()
+    const date = new Date().toISOString().slice(0, 10)
+    // 清洗后为空 → nosid 占位，全局平铺（与 writePiCrashLog 回落分支同规则）
+    const files = readdirSync(logsDir()).filter((n) => n.startsWith('pi-'))
+    expect(files).toEqual([`pi-${date}-nosid.jsonl`])
+    expect(readFileSync(join(logsDir(), files[0]), 'utf8')).toContain('{"fallback":true}')
+    expect(existsSync(join(dataDir, 'ext-sessions'))).toBe(false)
   })
 
   it('未 initLogger 时 createPiSessionLog 返回 no-op 写入器（不抛错）', async () => {
