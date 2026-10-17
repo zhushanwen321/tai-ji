@@ -69,6 +69,7 @@ export default {
     eventsOversize: 'Event stream too large, unavailable',
     eventsOversizeHint: 'This run’s record file exceeds the read limit (32 MB); the event stream cannot be shown. The run itself is unaffected',
     retry: 'Retry',
+    agentTabWaiting: 'Waiting for execution data (member record not yet created)…',
     truncatedHint: 'Fields truncated (2KB per-field cap): {fields}. Truncated content is display-only; view the full text via the run state file',
     ganttUnavailable: 'Timeline view unavailable; segment summary shown below',
     ganttAttemptSegments: 'Attempt segments',
