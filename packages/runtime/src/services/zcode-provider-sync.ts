@@ -30,7 +30,7 @@
  * preparer.ts locateZcodeBuiltinCatalog 同源复制（本文件 locateZcodeBuiltinCatalogSync，
  * 语义对齐 preparer.ts:246-294；漂移防线 = u2b 侧对账）。
  */
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import type { ProviderConfigView, ModelsConfigView } from '../infra/pi/pi-provider-store.js'
@@ -514,6 +514,15 @@ const SEMVER_SEGMENTS = 3
 const COPY_JSON_INDENT = 2
 
 /**
+ * 副本文件权限 = 0600（MF-1-3）：副本含明文 provider apiKey（`access.apiKey`），
+ * 禁 group/other 读——对齐同族凭据文件（auth.json / tts-*-apikey.txt / remote-access.json）。
+ */
+const SYNCED_COPY_MODE = 0o600
+
+/** 权限位掩码：stat.mode 高位含文件类型，只比较低 9 位权限位。 */
+const PERMISSION_BITS = 0o777
+
+/**
  * 内建 provider 目录定位：ZCODE_BUILTIN_PROVIDER_CONFIG_FILE env > `~/.zcode/v2/runtime/provider`
  * 平台目录 × semver 最大 × endpoint-* 扫描（语义同源复制自 zcode-subagent-cli preparer.ts
  * locateZcodeBuiltinCatalog:246-294——runtime 不 import 该包；漂移由 u2b 对账锁步）。
@@ -690,7 +699,8 @@ function removeStaleCopyOrOutcome(
   return { status: 'skipped-empty', copyPath: deps.paths.syncedCopyPath, ruleCount: 0, skips: payload.skips }
 }
 
-/** 落盘步：幂等 = 同字节跳写 + tmp+rename 原子替换（任何失败经 abort 保留上次产物）。 */
+/** 落盘步：幂等 = 同字节跳写 + tmp+rename 原子替换（任何失败经 abort 保留上次产物）；
+ * 权限 = 0600（副本含明文 apiKey，同字节跳写路径对存量低权限副本做 chmod 自愈）。 */
 function writeSyncedCopy(
   deps: ZcodeProviderSyncDeps,
   payload: SyncedCopyPayload,
@@ -710,9 +720,14 @@ function writeSyncedCopy(
     // 首次落盘时可能不存在（engines/zcode/），此处补建
     mkdirSync(dirname(deps.paths.syncedCopyPath), { recursive: true })
     if (existsSync(deps.paths.syncedCopyPath) && readFileSync(deps.paths.syncedCopyPath, 'utf-8') === text) {
+      // 权限自愈：本策略落地前写出的副本是 umask 默认（实测 0644，明文 apiKey 世界可读），
+      // 同字节跳写不会重写文件、atomicWrite 的 mode 也只在新建 tmp 时生效——故在此显式对齐。
+      if ((statSync(deps.paths.syncedCopyPath).mode & PERMISSION_BITS) !== SYNCED_COPY_MODE) {
+        chmodSync(deps.paths.syncedCopyPath, SYNCED_COPY_MODE)
+      }
       return { status: 'written', copyPath: deps.paths.syncedCopyPath, ruleCount: payload.rules.length, skips: payload.skips }
     }
-    atomicWrite(deps.paths.syncedCopyPath, text)
+    atomicWrite(deps.paths.syncedCopyPath, text, undefined, SYNCED_COPY_MODE)
   } catch (err) {
     return abort(`副本落盘失败：${err instanceof Error ? err.message : String(err)}`)
   }
@@ -753,7 +768,11 @@ export async function syncZcodeProviders(deps: ZcodeProviderSyncDeps): Promise<Z
   for (const id of credentialBackedIds) {
     // own-property 判定（不用 `in`）：auth.json 里名为 toString/constructor 的 provider id
     // 会命中 Object.prototype 继承键而被误判「已在 models.json」→ 该 provider 永不进候选（SUG-3）。
-    if (!Object.hasOwn(providers, id)) providers[id] = {}
+    // 赋值经 defineProperty 而非 `providers[id] = {}`：id='__proto__' 时后者会触发
+    // Object.prototype 的 setter（只改原型、不建自有属性）→ 该 provider 从枚举中消失（SUG-17）。
+    if (!Object.hasOwn(providers, id)) {
+      Object.defineProperty(providers, id, { value: {}, enumerable: true, configurable: true, writable: true })
+    }
   }
 
   const credentials = await resolveCredentialsForSync(deps, providers)

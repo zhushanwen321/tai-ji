@@ -11,6 +11,7 @@ import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  PI_TO_ZCODE_PROVIDER_MAP,
   ZcodePrepareError,
   defaultPersonalProviderConfigPath,
   listZcodeModels,
@@ -776,6 +777,9 @@ describe("translatePiModelRefToZcode", () => {
     expect(declared).toBeDefined();
     const entries = Object.entries(declared ?? {});
     expect(entries.length).toBeGreaterThan(0);
+    // 反向锁步：实现表键集合必须与声明键集合双向相等（实现多键 = 代理形态漏供数，
+    // 声明多键 = in-process 形态漏翻译——ADR-0138 部署形态分叉两类都要红）。
+    expect(Object.keys(PI_TO_ZCODE_PROVIDER_MAP).sort()).toEqual(Object.keys(declared ?? {}).sort());
     // 实现侧行为对账：声明表目录空清单形态下（不设限放行），翻译产物 = 声明目标/原模型段
     const catalog = catalogWith([]);
     for (const [piProvider, zcodeProvider] of entries) {

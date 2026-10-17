@@ -16,7 +16,7 @@
  *
  * 运行：cd packages/runtime && npx vitest run src/__tests__/services/zcode-provider-sync.test.ts
  */
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -524,6 +524,8 @@ describe('syncZcodeProviders：编排与瘦副本形态', () => {
     expect(ruleIds.includes('cli-provider')).toBe(false)
     expect(copy.config.providerOrder).toEqual(['stepfun'])
     expect(copy.schemaVersion).toBe(1)
+    // MF-1-3：副本含明文 apiKey，落盘权限必须 0600（对齐 auth.json 等凭据文件）
+    expect(statSync(paths.syncedCopyPath).mode & 0o777).toBe(0o600)
   })
 
   it('auth.json 型 provider（models.json 无条目）→ 凭据并集进候选集，catalog 供数 1:1 同步（2026-10-16 真机事故回归守卫）', async () => {
@@ -612,6 +614,37 @@ describe('syncZcodeProviders：编排与瘦副本形态', () => {
     expect(rules[0]?.config.personalModelIds).toEqual(['proto-model'])
   })
 
+  it('SUG-17：provider id 为 "__proto__" → defineProperty 建自有属性，仍进候选集', async () => {
+    writeRealProviderConfig([], [])
+    writeV2Config({})
+    writeCliConfig([])
+
+    // null-prototype 字典（赋值不触发 Object.prototype 的 __proto__ setter）
+    const protoCredentials: Record<string, ResolvedProviderCredential | undefined> = Object.create(null)
+    protoCredentials['__proto__'] = { key: 'proto-key', source: 'auth.json', kind: 'api_key' }
+    const protoBaseUrls: Record<string, string | undefined> = Object.create(null)
+    protoBaseUrls['__proto__'] = 'https://proto.example/v1'
+    const protoCatalog: Record<string, readonly MappingModelSource[] | undefined> = Object.create(null)
+    protoCatalog['__proto__'] = [{ id: 'proto-model', api: 'openai-completions', baseUrl: 'https://proto.example/v1' }]
+
+    const outcome = await syncZcodeProviders(makeDeps({
+      providers: {},
+      credentialOnlyIds: ['__proto__'],
+      credentials: protoCredentials,
+      baseUrls: protoBaseUrls,
+      catalog: protoCatalog,
+    }))
+
+    // 裸赋值 `providers['__proto__'] = {}` 只改原型 → 该 provider 从 Object.keys 消失 → 修复前为 skipped-empty
+    expect(outcome.status).toBe('written')
+    const copy = JSON.parse(readFileSync(paths.syncedCopyPath, 'utf-8')) as {
+      config: { providerOrder: string[]; providerConfigRules: { providerRules: Array<{ providerId: string; config: { personalModelIds: string[] } }> } }
+    }
+    const rules = copy.config.providerConfigRules.providerRules
+    expect(rules.map(r => r.providerId)).toEqual(['__proto__'])
+    expect(rules[0]?.config.personalModelIds).toEqual(['proto-model'])
+  })
+
   it('auth.json 型翻译通道（zai-coding-cn 仅凭据源命中）→ 同样 skip 不产条目（例外对枚举路径同样生效）', async () => {
     writeRealProviderConfig([], [])
     writeV2Config({})
@@ -636,6 +669,20 @@ describe('syncZcodeProviders：编排与瘦副本形态', () => {
     await new Promise(resolve => setTimeout(resolve, 10))
     await syncZcodeProviders(deps)
     expect(statSync(paths.syncedCopyPath).mtimeMs).toBe(firstMtime)
+  })
+
+  it('遗留副本（本策略前落盘的 0644 同字节）→ 跳写不重写，但权限自愈到 0600', async () => {
+    const deps = stepfunDeps()
+    await syncZcodeProviders(deps)
+    // 模拟存量 0644 副本（明文 apiKey 世界可读）——同字节不得跳写放过
+    chmodSync(paths.syncedCopyPath, 0o644)
+    const bytes = readFileSync(paths.syncedCopyPath, 'utf-8')
+
+    const outcome = await syncZcodeProviders(deps)
+
+    expect(outcome.status).toBe('written')
+    expect(statSync(paths.syncedCopyPath).mode & 0o777).toBe(0o600)
+    expect(readFileSync(paths.syncedCopyPath, 'utf-8')).toBe(bytes)
   })
 
   it('落盘条件：pi 映射条目空 → 不落盘且删除旧副本', async () => {

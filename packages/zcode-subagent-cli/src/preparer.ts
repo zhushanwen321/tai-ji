@@ -576,10 +576,11 @@ function normalizeAccountModel(accountRule: Record<string, unknown>, wanted: str
  * zcode 账号体系，零 key 注入。
  *
  * ⚠️ 对账锁步：本表与 package.json taiji.subagentEngine.modelTranslation 声明
- * （RemoteEngine 代理形态的翻译面供数）必须逐键一致——锁步守卫见
- * __tests__/preparer.test.ts「modelTranslation 对账锁步」。
+ * （RemoteEngine 代理形态的翻译面供数）必须逐键一致（键集合双向相等 + 逐键语义）
+ * ——锁步守卫见 __tests__/preparer.test.ts「modelTranslation 对账锁步」；导出本表
+ * 供该守卫做反向键集合断言（声明缺失/实现多余同红）。
  */
-const PI_TO_ZCODE_PROVIDER_MAP: Readonly<Record<string, string>> = {
+export const PI_TO_ZCODE_PROVIDER_MAP: Readonly<Record<string, string>> = {
   "zai-coding-cn": "account:bigmodel-individual-coding-plan",
 };
 
@@ -596,6 +597,12 @@ const PI_TO_ZCODE_PROVIDER_MAP: Readonly<Record<string, string>> = {
  * model_not_available（自带恢复指引），不静默回落、不伪造兜底。调用方：
  * resolveZcodeModelRef（引擎内，翻译后即走 account 直通校验）与 EnginePort
  * translateModelRef（编排层 stamp 前调用，record 上报 zcode 原生 ref）。
+ *
+ * 分段语义：本函数 provider 段取**最后一个** `/` 之前（providerOf/modelShort 同源
+ * ——模型段因此可含 `/`，但 provider 段会吞入中间段）；而 manifest 翻译面
+ * （subagent-core client/manifest-lookup translateByTable）取**第一个** `/` 之前。
+ * 两形态当前只保证**单段 provider 前缀 + 无 `/` 模型段**（如 `zai-coding-cn/x`）
+ * 等价——多段 ref 的翻译判定可能不一致，收敛前不得扩充多段键。
  */
 export function translatePiModelRefToZcode(requested: string, sources?: ZcodeSourcePaths): string {
   if (!requested.includes("/")) return requested;

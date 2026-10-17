@@ -375,13 +375,20 @@ const catalogPatch = CATALOG_PATH !== null ? catalogPatchText(CATALOG_PATH) : nu
 const cliPatchProbe = CLI_PATH ? patchedCliSource(CLI_PATH) : null;
 // 三处改写的应用态由 patchedCliSource 发布（__cliPatchStatus）——曾以产物子串判定：
 // header-port 在未打补丁的 3.15.3 bundle 上恒真（8 处既有同名属性）→ 门对锚点
-// 漂移零检测力；standalone 同理由标志驱动（三处判定各自具名）。
+// 漂移零检测力；standalone 同理由标志驱动（三处判定各自具名）。cli-source-bypass
+// 的括号后缀把三锚逐一列出（2026-10 review·S-2）：entitled 标志曾发布但无消费方，
+// 该锚单独漂移时六项矩阵会全部 armed——逐锚可见才能定位漂移（六项口径不变）。
 const cliPatchStatus = CLI_PATH ? __cliPatchStatus.get(CLI_PATH) : null;
+const anchorFlags = cliPatchStatus
+  ? '(entitled=' + (cliPatchStatus.entitled ? 'on' : 'off')
+    + ',standalone=' + (cliPatchStatus.standalone ? 'on' : 'off')
+    + ',port=' + (cliPatchStatus.headerPort ? 'on' : 'off') + ')'
+  : '';
 if (text !== null || catalogPatch !== null || cliPatchProbe !== null) {
   process.stderr.write('[zcode-launcher] 补丁层已安装: cli-config-inject=' + (text !== null ? 'on' : 'off')
     + ', catalog-entitled=' + (catalogPatch !== null ? 'on' : 'off')
     + ', provider-merge=' + (PI_SYNCED_PATH ? 'armed' : 'off')
-    + ', cli-source-bypass=' + (cliPatchProbe !== null ? 'armed' : 'off')
+    + ', cli-source-bypass=' + (cliPatchProbe !== null ? 'armed' : 'off') + anchorFlags
     + ', standalone-account=' + (cliPatchStatus && cliPatchStatus.standalone ? 'armed' : 'off')
     + ', header-port=' + (cliPatchStatus && cliPatchStatus.headerPort ? 'armed' : 'off') + '\\n');
   // encoding 归一（Node 别名面）：'utf8'/'utf-8'/大小写变体统一按 string 返回——
@@ -397,10 +404,11 @@ if (text !== null || catalogPatch !== null || cliPatchProbe !== null) {
     return Buffer.from(value);
   };
   fs.__origReadFileSync = fs.readFileSync;
-  // standalone 账号元数据键供给（ADR-0139）：仅当 standalone 补丁已武装时执行——
-  // 未武装（上游漂移/版本不支持）时这些键无消费方，写用户共享 credentials.json
-  // 只增风险；此处读源仍是原生 fs（readFileSync 拦截尚未安装）。
-  if (cliPatchStatus && cliPatchStatus.standalone) ensureAccountMetadata();
+  // standalone 账号元数据键供给（ADR-0139）：仅当 standalone 与 header-port 两锚
+  // 均已武装时执行（2026-10 review·S-3）——只武装 standalone 时认证头仍回落宿主
+  // 请求端口（无宿主任应答 = 账号链仍不可用），此时写用户共享 credentials.json
+  // 无运行时收益、只增风险；此处读源仍是原生 fs（readFileSync 拦截尚未安装）。
+  if (cliPatchStatus && cliPatchStatus.standalone && cliPatchStatus.headerPort) ensureAccountMetadata();
   fs.readFileSync = function (p, ...rest) {
     if (typeof p === 'string' && p === CONFIG_PATH) {
       const cur = injectedConfigText();

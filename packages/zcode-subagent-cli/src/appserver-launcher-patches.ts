@@ -9,7 +9,7 @@
 //   - CLI_PATCH_SECTION：patchedCliSource——CLI bundle 源码内存补丁三锚（① entitled
 //     翻转 ② standalone 选项注入 ③ 认证头端口注入），锚 miss 各自 stderr warn。
 //   - ACCOUNT_METADATA_SECTION：ensureAccountMetadata——standalone 账号元数据键
-//     （identity / auth-source）幂等供给（仅缺时追加，ADR-0139）。
+//     （identity / auth-source）幂等供给（缺时追加 + 无凭据支撑的孤儿值矫正，ADR-0139）。
 // 改段内容 = 改 wrapper 产物内容（appserver-launcher.test.ts 的落盘产物 ===
 // APPSERVER_LAUNCHER_SOURCE 断言自动跟随）；真机回归守卫与锚点变体测试同文件。
 
@@ -21,6 +21,83 @@ export const CLI_PATCH_SECTION = `
 // 磁盘文件零触碰；锚串含 ]]:[] 尾缀唯一命中 YXe 构造，另一处同名条件逻辑不受影响）。
 // 锚不命中（上游混淆形态变化）→ 原文透出：仅 account 家族继续被拒，个人 provider
 // 不受影响。
+// 补丁段内联扫描器（2026-10 review·MF-1-5）：跳过字符串/模板字面量/注释，让括号
+// 配平与参数切分只在代码面上进行——bundle 内联串里的 ')' 曾把调用点参数配平带偏。
+// 返回 -1 = 该位置不是字面量/注释起点（正常代码字符）。
+function __skipLiteralOrComment(src, i) {
+  const ch = src[i];
+  if (ch === '"' || ch === "'") {
+    i++;
+    while (i < src.length) {
+      if (src.charCodeAt(i) === 92) { i += 2; continue; }
+      if (src[i] === ch) return i + 1;
+      i++;
+    }
+    return i;
+  }
+  if (ch === '\`') {
+    i++;
+    while (i < src.length) {
+      if (src.charCodeAt(i) === 92) { i += 2; continue; }
+      const c = src[i];
+      if (c === '\`') return i + 1;
+      if (c === '$' && src[i + 1] === '{') {
+        let depth = 1;
+        i += 2;
+        while (i < src.length && depth > 0) {
+          const cc = src[i];
+          if (cc === '"' || cc === "'" || cc === '\`') { i = __skipLiteralOrComment(src, i); continue; }
+          if (cc === '/' && src[i + 1] === '/') { const nl = src.indexOf('\\n', i + 2); i = nl < 0 ? src.length : nl + 1; continue; }
+          if (cc === '/' && src[i + 1] === '*') { const end = src.indexOf('*/', i + 2); i = end < 0 ? src.length : end + 2; continue; }
+          if (cc === '{') depth++;
+          else if (cc === '}') depth--;
+          i++;
+        }
+        continue;
+      }
+      i++;
+    }
+    return i;
+  }
+  if (ch === '/' && src[i + 1] === '/') {
+    const nl = src.indexOf('\\n', i + 2);
+    return nl < 0 ? src.length : nl + 1;
+  }
+  if (ch === '/' && src[i + 1] === '*') {
+    const end = src.indexOf('*/', i + 2);
+    return end < 0 ? src.length : end + 2;
+  }
+  return -1;
+}
+// 与 openIdx 处 '(' 配对的闭括号（跳过字面量/注释）；-1 = 不配平。
+function __matchingParen(src, openIdx) {
+  let depth = 0;
+  for (let i = openIdx; i < src.length; i++) {
+    const skip = __skipLiteralOrComment(src, i);
+    if (skip >= 0) { i = skip - 1; continue; }
+    const c = src[i];
+    if (c === '(') depth++;
+    else if (c === ')') { depth--; if (depth === 0) return i; }
+  }
+  return -1;
+}
+// [start,end) 内按顶层逗号切分（括号/方括号/对象字面量与字面量内的逗号不计）；
+// 返回绝对偏移段列表。
+function __splitTopLevel(src, start, end) {
+  const parts = [];
+  let depth = 0;
+  let segStart = start;
+  for (let i = start; i < end; i++) {
+    const skip = __skipLiteralOrComment(src, i);
+    if (skip >= 0) { i = Math.min(skip, end) - 1; continue; }
+    const c = src[i];
+    if (c === '(' || c === '[' || c === '{') depth++;
+    else if (c === ')' || c === ']' || c === '}') depth--;
+    else if (c === ',' && depth === 0) { parts.push({ start: segStart, end: i }); segStart = i + 1; }
+  }
+  parts.push({ start: segStart, end: end });
+  return parts;
+}
 const __cliPatchCache = new Map();
 // 应用态标志发布（2026-10 review）：安装门曾以补丁产物子串判定 header-port——真实
 // 3.15.3 bundle 本就含 8 处 'providerRuntimeHeadersPort:'（2 处 ',providerRuntimeHeadersPort:'）
@@ -76,20 +153,38 @@ function patchedCliSource(path) {
         // 语义：调用方省略第二参（协议路径 xCt(z)）→ t = {standalone:{}}；显式传
         // {}（skipUserConfig 路径）或 {standalone:{...}}（TUI 路径）不受影响。
         const defAnchor = 'function ' + fnName + '(';
-        const defIdx = src.indexOf(defAnchor);
+        // 结构校验（2026-10 review·MF-1-5）：曾取首个文本命中——真实 bundle 有数百个
+        // 重名 function 定义（同名不代表唯一），错改一处仍是语法合法 bundle，自检无法
+        // 发现且门会报 armed。定义必须**唯一**且位于导出映射之前；第二处出现或定义
+        // 落在导出映射之后 = 无法确定导出对象指向的实现 → 放弃本锚（回退调用点锚 /
+        // not armed），宁可漏补也不默默改错位置。
+        let defCount = 0;
+        let defIdx = -1;
+        for (let scan = src.indexOf(defAnchor); scan >= 0; scan = src.indexOf(defAnchor, scan + 1)) {
+          defCount++;
+          if (scan < exportIdx) defIdx = scan;
+        }
+        if (defCount !== 1) defIdx = -1;
         if (defIdx >= 0) {
-          const paramsEnd = src.indexOf(')', defIdx + defAnchor.length);
+          const paramsEnd = __matchingParen(src, defIdx + defAnchor.length - 1);
           if (paramsEnd > defIdx) {
-            const params = src.slice(defIdx + defAnchor.length, paramsEnd);
-            // 仅在**唯一** '={}' 缺省参数时改写：曾用 split/join 全量替换，多参数
-            // 函数会把 standalone 注入到错误参数（语法仍合法，自检无法发现）；
-            // 多于一处 = 无法确定注入点 → 回退调用点锚（第二参语义等价）。
-            const firstDefault = params.indexOf('={}');
-            if (firstDefault >= 0 && firstDefault === params.lastIndexOf('={}')) {
-              src = src.slice(0, defIdx + defAnchor.length)
-                + params.slice(0, firstDefault) + '={standalone:{}}' + params.slice(firstDefault + 3)
-                + src.slice(paramsEnd);
-              standaloneApplied = true;
+            // 必须恰好两个顶层参数且第二个以 '={}' 收尾：曾只要求 '={}' 唯一——
+            // function f(e={},t) 会把 standalone 注入第一个参数（语法合法、语义错误），
+            // function f(e,t={},o={}) 也不确定注入点（既有回退用例）。
+            const params = __splitTopLevel(src, defIdx + defAnchor.length, paramsEnd);
+            if (params.length === 2) {
+              const second = params[1];
+              let secondEnd = second.end;
+              while (secondEnd > second.start && src.charCodeAt(secondEnd - 1) <= 32) secondEnd--;
+              // 函数体窗口令牌（可选保险）：真实注册源实装引用 .standalone /
+              // credentialStore——同名但无关的定义（或字符串内伪命中）不得被改写。
+              const bodyWindow = src.slice(paramsEnd + 1, paramsEnd + 500);
+              if (secondEnd - second.start > 3 && src.slice(secondEnd - 3, secondEnd) === '={}'
+                  && (bodyWindow.indexOf('standalone') >= 0 || bodyWindow.indexOf('credentialStore') >= 0)) {
+                const at = secondEnd - 3;
+                src = src.slice(0, at) + '={standalone:{}}' + src.slice(secondEnd);
+                standaloneApplied = true;
+              }
             }
           }
         }
@@ -99,14 +194,9 @@ function patchedCliSource(path) {
           const callIdx = src.indexOf(callAnchor);
           if (callIdx >= 0) {
             const argStart = callIdx + callAnchor.length;
-            // 括号深度配平找与 fnName( 配对的闭括号：实参含内层调用（如 fnName(w(z))）
-            // 时首个 ')' 落在内层，注入错位进内层调用 = 外层保持 host 模式的假成功
-            let depth = 1;
-            let closeIdx = -1;
-            for (let i = argStart; i < src.length; i++) {
-              if (src[i] === '(') depth++;
-              else if (src[i] === ')') { depth--; if (depth === 0) { closeIdx = i; break; } }
-            }
+            // 括号配平找与 fnName( 配对的闭括号（扫描器跳过字面量/模板/注释——实参
+            // 含内联串或内层调用时首个 ')' 落在错误层级 = 注入错位的假成功）
+            const closeIdx = __matchingParen(src, argStart - 1);
             if (closeIdx > argStart) {
               src = src.slice(0, closeIdx) + ',{standalone:{}}' + src.slice(closeIdx);
               standaloneApplied = true;
@@ -136,8 +226,14 @@ function patchedCliSource(path) {
         ? /([A-Za-z_$][A-Za-z0-9_$]*)\.runtime\.registryService/.exec(src.slice(appIdx, closeIdx))
         : null;
       if (closeIdx > appIdx && regMatch) {
+        // 条件 spread（2026-10 review·S-4）：上游 kEt 以 \`n.providerRuntimeHeadersPort ??
+        // mai(e,t)\` 把宿主请求端口显式交给 createZCodeApp（...q0c($0c(ut,n),...) 已含该值）；
+        // 无条件尾插 <reg>.providerRuntimeHeadersPort 在 standalone 未武装形态（值为
+        // undefined）会 shadow 掉宿主端口、抹除 host 回落。改为仅在本地端口存在时覆盖：
+        // standalone 形态字节等价，host 形态保留调用方值。
+        const reg = regMatch[1];
         src = src.slice(0, closeIdx)
-          + ',providerRuntimeHeadersPort:' + regMatch[1] + '.providerRuntimeHeadersPort'
+          + ',...(' + reg + '.providerRuntimeHeadersPort?{providerRuntimeHeadersPort:' + reg + '.providerRuntimeHeadersPort}:{})'
           + src.slice(closeIdx);
         portInjected = true;
       }
@@ -178,21 +274,25 @@ function patchedCliSource(path) {
 }`;
 
 /** wrapper 源码段：standalone 账号元数据键幂等供给（ensureAccountMetadata；调用点 =
- * 安装门 standalone 已武装分支——未武装时不写共享凭据库）。 */
+ * 安装门确认 standalone + header-port 双锚已武装分支——未武装时不写共享凭据库）。 */
 export const ACCOUNT_METADATA_SECTION = `
 // [2026-10-16 standalone account metadata] standalone 账号源要求
 // account-provider:<planProviderId>:identity / :auth-source 两条**元数据**键才承认
 // account provider（缺 identity 直接丢弃该 provider → 派发报「Provider Registry 中
 // 不存在 Model」）。两键非秘密（身份 ID / 认证来源），真凭据仍是 ZCode 自有项
 // （oauth token 或 plan api-key，均在 credentials.json，由 ZCode 登录/配置写入）。
-// 本步幂等供给：仅缺时追加、不触碰既有键；任何失败只 warn 不阻断 spawn（缺键的
-// 报错路径与恢复指引由引擎侧既有文案承载）。catches：文件缺失/坏 JSON/目录不可写。
+// 本步幂等供给：缺时追加 + **孤儿值矫正**（2026-10 review·MF-1-1）——派生值每次
+// spawn 重算，既有非空值仍是权威（不无差别覆写），仅当其背后凭据已不存在时才
+// 改写（oauth 撤销 / plan key 轮换 / 账号切换）；否则旧身份/旧来源会永久门控该
+// provider 且永不收敛。任何失败只 warn 不阻断 spawn（缺键的报错路径与恢复指引由
+// 引擎侧既有文案承载）。catches：文件缺失/坏 JSON/目录不可写。
 // 并发边界（ADR-0139 登记）：对与 GUI 共享的凭据库做无锁 read-modify-write 全量
 // 写回，与 GUI token 刷新并发存在毫秒级丢更新窗口——后果自愈（GUI 侧重试刷新 /
 // 本侧缺键下次 spawn 幂等补齐），事实驱动原则下不加锁、不做时间补偿。
-// 调用契约（2026-10 review）：仅在安装门确认 standalone 补丁已武装时调用——这些
-// 元数据键只被 standalone 账号源消费，补丁链失败（版本漂移）时写入用户共享
-// credentials.json 无任何运行时收益，只增风险。
+// 调用契约（2026-10 review·S-3）：仅在安装门确认 standalone 与 header-port 两锚
+// 均已武装时调用——这些元数据键只被 standalone 账号源消费，且账号链要成立还要求
+// 认证头走本地端口；任一锚漂移（版本不支持）时写入用户共享 credentials.json 无
+// 任何运行时收益，只增风险。
 function ensureAccountMetadata() {
   try {
     const credPath = path.join(os.homedir(), '.zcode', 'v2', 'credentials.json');
@@ -207,6 +307,12 @@ function ensureAccountMetadata() {
       const pcr = (cat && cat.config && cat.config.providerConfigRules) || {};
       const rules = Array.isArray(pcr.providerRules) ? pcr.providerRules : [];
       planIds = rules
+        // 过滤面刻意宽于 3.15.3 standalone 快照的消费判据（源码 NNn：type=zhipu-account
+        // && mode=individual-coding-plan && accountType 非空 && builtinModelIds 非空；
+        // 真实目录 10 条命中、仅 2 条被 individual 快照消费）：多写的键是非秘密元数据、
+        // 缺时追加成本≈零；而 mode 值域（individual/team/start/off-peak/
+        // highspeed）跨 CLI 版本仍在演化，按当前版本收窄会让别的版本/未来消费面
+        // 静默缺键。宽度是有意的，不按 3.15.3 收窄（2026-10 review·S-5 核实后保留）。
         .filter(function (r) { return r && r.config && r.config.access && r.config.access.type === 'zhipu-account'; })
         .map(function (r) { return String(r.providerId || ''); })
         .filter(Boolean);
@@ -217,27 +323,30 @@ function ensureAccountMetadata() {
       return;
     }
     const added = [];
+    const reconciled = [];
     for (const pid of planIds) {
       const idKey = 'account-provider:' + pid + ':identity';
       const srcKey = 'account-provider:' + pid + ':auth-source';
+      // host 态 plan api-key 键名模板：account-provider:coding-plan:<pid>:account:<identity>:api-key
+      const apiKeyPrefix = 'account-provider:coding-plan:' + pid + ':account:';
+      const apiKeySuffix = ':api-key';
+      const hasPlanApiKey = (id) => {
+        if (!id) return false;
+        return Boolean(creds[apiKeyPrefix + encodeURIComponent(id) + apiKeySuffix]);
+      };
       let identity = typeof creds[idKey] === 'string' ? creds[idKey] : '';
-      if (!identity) {
-        // 从 host 态 plan api-key 键名派生身份：
-        // account-provider:coding-plan:<pid>:account:<identity>:api-key
-        const prefix = 'account-provider:coding-plan:' + pid + ':account:';
-        const suffix = ':api-key';
-        for (const k of Object.keys(creds)) {
-          if (k.indexOf(prefix) === 0 && k.slice(-suffix.length) === suffix) {
-            const mid = k.slice(prefix.length, k.length - suffix.length);
-            if (mid) { try { identity = decodeURIComponent(mid); } catch (e2) { identity = mid; } break; }
-          }
+      const authSource = typeof creds[srcKey] === 'string' ? creds[srcKey] : '';
+      // 派生身份每次 spawn 重算（不读既有键）：当前 host 态键名首命中（保持既有优先级）。
+      let derivedIdentity = '';
+      for (const k of Object.keys(creds)) {
+        if (k.indexOf(apiKeyPrefix) === 0 && k.slice(-apiKeySuffix.length) === apiKeySuffix) {
+          const mid = k.slice(apiKeyPrefix.length, k.length - apiKeySuffix.length);
+          if (mid) { try { derivedIdentity = decodeURIComponent(mid); } catch (e2) { derivedIdentity = mid; } break; }
         }
       }
-      if (!identity) continue;
-      // auth-source：全部从凭据库数据推导（零家族名写死）——扫 oauth:<family>:access_token
-      // 键，若 provider id 以 account:<family> 开头即绑定该家族的 oauth 凭据；否则回落
-      // manual（该身份名下的 plan api-key 存在时）。
-      let authSource = '';
+      // oauth 家族凭据存在性：扫 oauth:<family>:access_token，provider id 以
+      // account:<family> 开头即绑定该家族（零家族名写死）。
+      let oauthBacked = false;
       const oauthPrefix = 'oauth:';
       const oauthSuffix = ':access_token';
       for (const k of Object.keys(creds)) {
@@ -246,18 +355,46 @@ function ensureAccountMetadata() {
         if (!fam) continue;
         const token = creds[k];
         if (typeof token !== 'string' || token === '') continue;
-        if (pid.indexOf('account:' + fam) === 0) { authSource = 'oauth'; break; }
+        if (pid.indexOf('account:' + fam) === 0) { oauthBacked = true; break; }
       }
-      if (!authSource && creds['account-provider:coding-plan:' + pid + ':account:' + encodeURIComponent(identity) + ':api-key']) authSource = 'manual';
-      if (!authSource) continue;
-      // 仅缺时追加（ADR-0139 契约；identity 分支已先读既有非空值故非空天然不覆写）：
-      // 空串/缺失/非串 = 缺失态 → 派生值兜底填充；既有非空值是 ZCode 登录/GUI 流程
-      // 的权威写入，不回写覆盖（写目标是与 GUI 共享的凭据库——auth-source 曾无差别
-      // 覆写差异值，违反「不触碰既有键」契约，2026-10-16 review 修正）
-      if (typeof creds[idKey] !== 'string' || creds[idKey] === '') { creds[idKey] = identity; added.push(idKey); }
-      if (typeof creds[srcKey] !== 'string' || creds[srcKey] === '') { creds[srcKey] = authSource; added.push(srcKey); }
+      // ① 身份孤儿矫正：既有非空身份是权威写入，但只在「认证形态要求身份对应 plan
+      // api-key」时判定孤儿——oauth 形态下身份不参与凭据查找（CLI 登录写入的身份
+      // 可能永无 api-key），不得用残留键名覆写。孤儿 = 无对应 api-key 且当前可派生
+      // → 改成当前身份（否则 manual 查旧身份凭据恒失败、永不收敛）。日志在落库
+      // 点发（无可用 auth-source 时 continue，不得留下“已矫正”而未写盘的假日志）。
+      let identityCorrectedFrom = '';
+      if (identity && !hasPlanApiKey(identity) && (authSource === 'manual' || !oauthBacked)
+          && derivedIdentity && derivedIdentity !== identity) {
+        identityCorrectedFrom = identity;
+        identity = derivedIdentity;
+      }
+      if (!identity) identity = derivedIdentity;
+      if (!identity) continue;
+      // ② auth-source 派生 + 孤儿矫正：oauth 需匹配家族的 access_token；manual 需该
+      // 身份名下的 plan api-key。既有值与当前事实一致时原样保留（GUI/登录写入的
+      // manual 在 oauth 同时存在时仍是权威——曾无差别覆写差异值）。
+      const derivedAuthSource = oauthBacked ? 'oauth' : (hasPlanApiKey(identity) ? 'manual' : '');
+      let nextAuthSource = authSource || derivedAuthSource;
+      if (authSource === 'oauth' && !oauthBacked) nextAuthSource = derivedAuthSource;
+      else if (authSource === 'manual' && !hasPlanApiKey(identity)) nextAuthSource = derivedAuthSource;
+      if (!nextAuthSource) continue;
+      // 落库判定：缺失态（空串/非串）记 provisioned，非空旧值被矫正记 reconciled。
+      if (creds[idKey] !== identity) {
+        if (identityCorrectedFrom) {
+          reconciled.push(idKey + ' (' + identityCorrectedFrom + ' -> ' + identity + ')');
+        } else if (typeof creds[idKey] !== 'string' || creds[idKey] === '') {
+          added.push(idKey);
+        }
+        creds[idKey] = identity;
+      }
+      if (creds[srcKey] !== nextAuthSource) {
+        if (typeof creds[srcKey] === 'string' && creds[srcKey] !== '') {
+          reconciled.push(srcKey + ' (' + creds[srcKey] + ' -> ' + nextAuthSource + ')');
+        } else added.push(srcKey);
+        creds[srcKey] = nextAuthSource;
+      }
     }
-    if (added.length === 0) return;
+    if (added.length === 0 && reconciled.length === 0) return;
     const tmp = credPath + '.taiji-tmp-' + process.pid;
     // rename 换 inode——tmp 不带 mode 落盘会把 GUI 侧收紧过的文件权限静默放宽为
     // 缺省 umask 值，写前读既有 mode 随写传递（stat 失败回退 0600）；写/rename
@@ -271,7 +408,8 @@ function ensureAccountMetadata() {
       try { fs.unlinkSync(tmp); } catch { /* tmp 未生成或已 rename */ }
       throw err;
     }
-    process.stderr.write('[zcode-launcher] account metadata provisioned: ' + added.join(', ') + '\\n');
+    if (added.length > 0) process.stderr.write('[zcode-launcher] account metadata provisioned: ' + added.join(', ') + '\\n');
+    if (reconciled.length > 0) process.stderr.write('[zcode-launcher] account metadata reconciled: ' + reconciled.join(', ') + '\\n');
   } catch (err) {
     process.stderr.write('[zcode-launcher] account metadata provisioning failed (non-blocking): ' + ((err && err.message) || String(err)) + '\\n');
   }
