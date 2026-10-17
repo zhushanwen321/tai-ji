@@ -111,7 +111,7 @@ describe("TC-1: 嵌套 A→B→C 的 rootSessionId 全部指向 ROOT", () => {
 
   it("三层嵌套 record 的 rootSessionId 全部指向同一 ROOT（磁盘重建 + collectRecords 过滤）", () => {
     const ROOT_SESSION = "root-session-001";
-    const store = new RecordStore(tmpDir);
+    const store = new RecordStore(() => tmpDir);
 
     // A: depth=0, parent=undefined（顶层）
     writeSessionJsonl(path.join(tmpDir, "a.jsonl"), {
@@ -147,7 +147,7 @@ describe("TC-1: 嵌套 A→B→C 的 rootSessionId 全部指向 ROOT", () => {
   it("rootSessionId 不匹配时深层 record 被过滤（隔离防护）", () => {
     const ROOT_SESSION = "root-session-001";
     const OTHER_SESSION = "other-session-999";
-    const store = new RecordStore(tmpDir);
+    const store = new RecordStore(() => tmpDir);
 
     // A 归 ROOT
     writeSessionJsonl(path.join(tmpDir, "a.jsonl"), {
@@ -190,7 +190,7 @@ describe("TC-2: collectRecords 返回全树（含深层）", () => {
 
   it("磁盘重建 + 内存 running 合并：全树 A→B→C 全部可见（深度 ≥2）", () => {
     const ROOT_SESSION = "root-merge-001";
-    const store = new RecordStore(tmpDir);
+    const store = new RecordStore(() => tmpDir);
 
     // A: 磁盘终态（idle，无 sidecar → SP-2 兜底 idle）
     writeSessionJsonl(path.join(tmpDir, "a.jsonl"), {
@@ -228,7 +228,7 @@ describe("TC-2: collectRecords 返回全树（含深层）", () => {
 
   it("depth 标签正确：A=0, B=1, C=2", () => {
     const ROOT_SESSION = "root-depth-001";
-    const store = new RecordStore(tmpDir);
+    const store = new RecordStore(() => tmpDir);
 
     writeSessionJsonl(path.join(tmpDir, "a.jsonl"), {
       id: "sa-a", agent: "worker", mode: "background", task: "task A", startedAt: 1000,
@@ -253,7 +253,7 @@ describe("TC-2: collectRecords 返回全树（含深层）", () => {
 
   it("parentRecordId 链完整：A→(root), B→A, C→B", () => {
     const ROOT_SESSION = "root-parent-001";
-    const store = new RecordStore(tmpDir);
+    const store = new RecordStore(() => tmpDir);
 
     writeSessionJsonl(path.join(tmpDir, "a.jsonl"), {
       id: "sa-a", agent: "worker", mode: "background", task: "task A", startedAt: 1000,
@@ -278,7 +278,7 @@ describe("TC-2: collectRecords 返回全树（含深层）", () => {
 
   it("statusFilter='running' 返回全树（v4 B-1：深层磁盘 idle 重建为 running）", () => {
     const ROOT_SESSION = "root-filter-001";
-    const store = new RecordStore(tmpDir);
+    const store = new RecordStore(() => tmpDir);
 
     // 3 条磁盘 idle record（SP-2: 无 sidecar → 旧 idle，v4 B-1 重建为 running）
     writeSessionJsonl(path.join(tmpDir, "a.jsonl"), {
@@ -317,7 +317,7 @@ describe("TC-2: collectRecords 返回全树（含深层）", () => {
   });
 
   it("无 rootSessionFilter 时不过滤（向后兼容）", () => {
-    const store = new RecordStore(tmpDir);
+    const store = new RecordStore(() => tmpDir);
 
     writeSessionJsonl(path.join(tmpDir, "a.jsonl"), {
       id: "sa-a", agent: "worker", mode: "background", task: "task A", startedAt: 1000,

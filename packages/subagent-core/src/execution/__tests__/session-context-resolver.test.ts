@@ -5,17 +5,19 @@ import * as path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { encodeCwd } from "../assembly/path-encoding.ts";
+import { getSubagentSessionDir } from "../assembly/path-encoding.ts";
 import { resolveSessionContext } from "../assembly/session-context-resolver.ts";
 import { ForkDepthExceededError } from "../assembly/types.ts";
 
 const AGENT_DIR = "/home/user/.pi/agent";
+const DATA_DIR = "/tmp/fake-data-dir";
+const ROOT_SID = "root-sid-resolver";
 const MAIN_CWD = "/home/user/project";
 const SESSION_FILE = "session-abc.jsonl";
 
-function expectedSessionDir(mainCwd: string): string {
-  // [MF#1] 既有布局：subagents/<enc>/sessions/
-  return path.join(AGENT_DIR, "subagents", encodeCwd(mainCwd), "sessions");
+function expectedSessionDir(rootSessionId: string): string {
+  // [session-store-layout-inversion D2/D3] 新布局：<root>/<rootSessionId>/subagents/sessions/
+  return getSubagentSessionDir(rootSessionId, DATA_DIR);
 }
 
 describe("resolveSessionContext", () => {
@@ -24,7 +26,7 @@ describe("resolveSessionContext", () => {
     const result = resolveSessionContext({
       fork: false,
       mainCwd: MAIN_CWD,
-      agentDir: AGENT_DIR,
+      rootSessionId: ROOT_SID,
     });
     expect(result.shouldFork).toBe(false);
     expect(result.forkSource).toBeUndefined();
@@ -38,7 +40,7 @@ describe("resolveSessionContext", () => {
       fork: true,
       mainCwd: MAIN_CWD,
       mainSessionFile: SESSION_FILE,
-      agentDir: AGENT_DIR,
+      rootSessionId: ROOT_SID,
     });
     expect(result.shouldFork).toBe(true);
     expect(result.forkSource).toBe(SESSION_FILE);
@@ -52,7 +54,7 @@ describe("resolveSessionContext", () => {
     const result = resolveSessionContext({
       fork: false,
       mainCwd: MAIN_CWD,
-      agentDir: AGENT_DIR,
+      rootSessionId: ROOT_SID,
       worktreePath,
     });
     expect(result.shouldFork).toBe(false);
@@ -68,7 +70,7 @@ describe("resolveSessionContext", () => {
       fork: true,
       mainCwd: MAIN_CWD,
       mainSessionFile: SESSION_FILE,
-      agentDir: AGENT_DIR,
+      rootSessionId: ROOT_SID,
       worktreePath,
     });
     expect(result.shouldFork).toBe(true);
@@ -85,7 +87,7 @@ describe("resolveSessionContext", () => {
         mainCwd: MAIN_CWD,
         mainSessionFile: SESSION_FILE,
         parentForkDepth: 10,
-        agentDir: AGENT_DIR,
+        rootSessionId: ROOT_SID,
       }),
     ).toThrow(ForkDepthExceededError);
   });
@@ -96,7 +98,7 @@ describe("resolveSessionContext", () => {
         fork: true,
         mainCwd: MAIN_CWD,
         parentForkDepth: 15,
-        agentDir: AGENT_DIR,
+        rootSessionId: ROOT_SID,
       }),
     ).toThrow(ForkDepthExceededError);
   });
@@ -108,7 +110,7 @@ describe("resolveSessionContext", () => {
       mainCwd: MAIN_CWD,
       mainSessionFile: SESSION_FILE,
       parentForkDepth: 9,
-      agentDir: AGENT_DIR,
+      rootSessionId: ROOT_SID,
     });
     expect(result.shouldFork).toBe(true);
   });
@@ -119,7 +121,7 @@ describe("resolveSessionContext", () => {
     const result = resolveSessionContext({
       fork: false,
       mainCwd,
-      agentDir: AGENT_DIR,
+      rootSessionId: ROOT_SID,
       worktreePath: "/tmp/pi-sub-run-1",
     });
     // effectiveCwd 是 worktree checkout，但 sessionDir 仍基于 mainCwd
@@ -134,7 +136,7 @@ describe("resolveSessionContext", () => {
         fork: true,
         mainCwd: MAIN_CWD,
         // mainSessionFile 故意不传
-        agentDir: AGENT_DIR,
+        rootSessionId: ROOT_SID,
       }),
     ).toThrow(/main session file is unavailable/);
   });
@@ -143,7 +145,7 @@ describe("resolveSessionContext", () => {
   it("fork/worktree omitted → shouldFork=false", () => {
     const result = resolveSessionContext({
       mainCwd: MAIN_CWD,
-      agentDir: AGENT_DIR,
+      rootSessionId: ROOT_SID,
     });
     expect(result.shouldFork).toBe(false);
     expect(result.forkSource).toBeUndefined();
@@ -156,7 +158,7 @@ describe("resolveSessionContext", () => {
     const result = resolveSessionContext({
       mainCwd: MAIN_CWD,
       cwd: customCwd,
-      agentDir: AGENT_DIR,
+      rootSessionId: ROOT_SID,
     });
     expect(result.effectiveCwd).toBe(customCwd);
     // sessionDir 仍用 mainCwd

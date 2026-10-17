@@ -27,7 +27,7 @@ const { loggerMock } = vi.hoisted(() => ({
 }));
 vi.mock("../../core/logger.ts", () => ({ getLogger: () => loggerMock }));
 
-import { encodeCwd } from "../assembly/path-encoding.ts";
+import { encodeCwd } from "@taiji/shared/paths";
 import { WorktreeRegistry } from "../worktree/worktree-registry.ts";
 import { RECONCILE_SKIP_ESCALATION_CYCLES, WorktreeManager } from "../worktree/worktree-manager.ts";
 

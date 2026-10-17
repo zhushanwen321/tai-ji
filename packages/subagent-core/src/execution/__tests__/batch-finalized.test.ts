@@ -116,7 +116,7 @@ describe("[collect 退役] v2 条目 / 存量 manifest 读侧容忍——旧 ses
     }
 
     // 读侧：真实 readFileSync 扫描 + 投影（store 测试后门访问，零 mock 断言面）
-    const fresh = new RecordStore(sessionsDir, undefined, { appendEntry: appendEntryMock }, manifestDir);
+    const fresh = new RecordStore(() => sessionsDir, undefined, { appendEntry: appendEntryMock }, () => manifestDir);
     const scanned = fresh.scanLastRecordEntries(mainFile);
     const a = scanned.find((r) => r.id === "sa-bf-a");
 
@@ -156,7 +156,7 @@ describe("[collect 退役] v2 条目 / 存量 manifest 读侧容忍——旧 ses
       "utf-8",
     );
 
-    const store = new RecordStore(sessionsDir, new ManifestStore(manifestDir));
+    const store = new RecordStore(() => sessionsDir, new ManifestStore(() => manifestDir));
     const rec = store.collectRecords(10, "all").find((r) => r.id === "sa-bf-manifest");
     expect(rec).toBeDefined();
     // manifest 源投影按 executionStatus 两态权威词读回：legacy running = §3.2.8
@@ -205,7 +205,7 @@ describe("[collect 退役] v2 条目 / 存量 manifest 读侧容忍——旧 ses
     expect(rec!.task).toBe("batch task");
     // v2 条目对经末条扫描链读取（session-reader 反查投影同源）——终局域保真；
     // batchFinalized 已无 v2 来源（原断言删除）。
-    const fresh = new RecordStore(sessionsDir, new ManifestStore(manifestDir), { appendEntry: appendEntryMock }, manifestDir);
+    const fresh = new RecordStore(() => sessionsDir, new ManifestStore(() => manifestDir), { appendEntry: appendEntryMock }, () => manifestDir);
     const scanned = fresh.scanLastRecordEntries(mainFile);
     const seeded = scanned.find((r) => r.id === "sa-bf-both");
     expect(seeded).toBeDefined();

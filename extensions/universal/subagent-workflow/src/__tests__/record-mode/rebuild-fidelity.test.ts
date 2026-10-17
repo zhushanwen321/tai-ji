@@ -97,7 +97,7 @@ describe("场景 6：record 重建保真（[D1]——盘上 record 流 fold 后�
   it("崩溃形态 fold 重建：scriptSource / 已完成 calls（result 全文逐字段）/ 在途 calls（running）逐字段等价", async () => {
     await seedCrashedRun(env);
     const entries = [registeredEntry(RUN_ID, env.recordPath(RUN_ID))];
-    const store = new JsonlRunStore({ sessionDir: env.sessionDir, ctx: mkCtxWith(entries) as never });
+    const store = new JsonlRunStore({ runsDir: env.runsDir, ctx: mkCtxWith(entries) as never });
 
     const [run] = await store.loadAll();
 
@@ -138,7 +138,7 @@ describe("场景 6：record 重建保真（[D1]——盘上 record 流 fold 后�
     await journal.append(RUN_ID, { type: "run-interrupted", seq: 99, ts: T0 + 100_000, errorCode: "crashed", reason: "Process killed (kill-9 or crash recovery)" });
 
     const entries = [registeredEntry(RUN_ID, env.recordPath(RUN_ID))];
-    const store = new JsonlRunStore({ sessionDir: env.sessionDir, ctx: mkCtxWith(entries) as never });
+    const store = new JsonlRunStore({ runsDir: env.runsDir, ctx: mkCtxWith(entries) as never });
     const [run] = await store.loadAll();
 
     // [D2] 中断非终局：重建产物维持 running（终局判据归 fold；无 done/reason 收敛）
@@ -166,7 +166,7 @@ describe("场景 6：record 重建保真（[D1]——盘上 record 流 fold 后�
       runSettled({ ts: T0 + 2000, outcome: "done" }),
     ]);
     const entries = [registeredEntry(RUN_ID, env.recordPath(RUN_ID))];
-    const store = new JsonlRunStore({ sessionDir: env.sessionDir, ctx: mkCtxWith(entries) as never });
+    const store = new JsonlRunStore({ runsDir: env.runsDir, ctx: mkCtxWith(entries) as never });
     const [run] = await store.loadAll();
     expect(isRunSettled(run!)).toBe(true);
     expect(run!.state.reason).toBe("completed");
@@ -180,7 +180,7 @@ describe("场景 6：record 重建保真（[D1]——盘上 record 流 fold 后�
       runSettled({ ts: T0 + 1000, outcome: "done" }),
     ]);
     const entries = [registeredEntry(RUN_ID, env.recordPath(RUN_ID))];
-    const store = new JsonlRunStore({ sessionDir: env.sessionDir, ctx: mkCtxWith(entries) as never });
+    const store = new JsonlRunStore({ runsDir: env.runsDir, ctx: mkCtxWith(entries) as never });
     const [run] = await store.loadAll();
     expect(run!.spec.scriptPath).toBe("");
   });

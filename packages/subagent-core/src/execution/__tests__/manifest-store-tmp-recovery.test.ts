@@ -48,7 +48,7 @@ describe("[U4c/G3] sweepTmpFiles 静默删除（promote 语义失效；H4/U5 更
 
   beforeEach(async () => {
     dir = fs.mkdtempSync(path.join(os.tmpdir(), "manifest-tmp-recovery-"));
-    store = new ManifestStore(dir);
+    store = new ManifestStore(() => dir);
     // 真实 unlinkSync（mock 模块对象上的 unlinkSync 已被替换，不能自引用转发）
     const actualFs = await vi.importActual<typeof import("node:fs")>("node:fs");
     unlinkSyncMock.mockReset();
@@ -128,7 +128,7 @@ describe("[A11] listAllSync 目录读失败分通道", () => {
 
   beforeEach(() => {
     dir = fs.mkdtempSync(path.join(os.tmpdir(), "manifest-listall-"));
-    store = new ManifestStore(dir);
+    store = new ManifestStore(() => dir);
     loggerMock.warn.mockClear();
     loggerMock.error.mockClear();
     loggerMock.debug.mockClear();

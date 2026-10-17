@@ -45,12 +45,12 @@ function resumedFrame(events: readonly { type: string; reason?: unknown }[]): { 
 describe("场景 22：恢复只复用已提交结果（[ADR-0092]）", () => {
   it("已提交调用零 token 回放、未完成调用真实重派，恢复不合成任何结果", async () => {
     const env = mkScenarioEnv("22t1");
-    const sessionDir = join(tmpdir(), `wf-s22-member-${Date.now()}`);
+    const runsDir = join(tmpdir(), `wf-s22-member-${Date.now()}`);
     try {
       // 对抗性构造：记录里带会话文件路径，且该文件末尾是「完整回复」——
       // 旧实装据此判档 1 并零 token 补收；[ADR-0092] 后此文件与恢复无关。
-      mkdirSync(sessionDir, { recursive: true });
-      const sessionFile = join(sessionDir, "member-t1.jsonl");
+      mkdirSync(runsDir, { recursive: true });
+      const sessionFile = join(runsDir, "member-t1.jsonl");
       writeFileSync(
         sessionFile,
         [
@@ -91,7 +91,7 @@ describe("场景 22：恢复只复用已提交结果（[ADR-0092]）", () => {
       expect(String(resumedFrame(events)?.reason ?? "")).toBe("resume plan: replay=2 redispatch=1");
     } finally {
       env.cleanup();
-      rmSync(sessionDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+      rmSync(runsDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
     }
   });
 

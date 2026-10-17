@@ -99,7 +99,7 @@ describe("孤儿恢复与子文件末行内容解耦（超长末行 / 截断行�
     pi.appendEntry.mockImplementation((type: string, entry: unknown) => {
       entries.push({ type, data: entry as Record<string, unknown> });
     });
-    const store = new RecordStore(sessionsDir, new ManifestStore(path.join(rootDir, "records")), pi, path.join(rootDir, "records"));
+    const store = new RecordStore(() => sessionsDir, new ManifestStore(() => path.join(rootDir, "records")), pi, () => path.join(rootDir, "records"));
     store.recoverOrphanRecords("session-main", mainFile);
     const hits = entries.filter((e) => e.data && (e.data as { id?: string }).id === id);
     if (hits.length === 0) throw new Error("orphan record not reported for " + id);

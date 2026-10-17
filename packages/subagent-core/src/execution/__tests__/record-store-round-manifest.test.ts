@@ -45,7 +45,7 @@ function makeRecord(id: string, over: Partial<ExecutionRecord> = {}): ExecutionR
 function makeStore(sessionsDir: string, manifestDir: string): RecordStore {
   fs.mkdirSync(sessionsDir, { recursive: true });
   fs.mkdirSync(manifestDir, { recursive: true });
-  return new RecordStore(sessionsDir, undefined, { appendEntry: vi.fn() }, manifestDir);
+  return new RecordStore(() => sessionsDir, undefined, { appendEntry: vi.fn() }, () => manifestDir);
 }
 
 describe("markRoundIdle 轮终派生 manifest 投影（B2 簿记⑫）", () => {
@@ -251,7 +251,7 @@ describe("manifest 来源身份投影与 markModelOverride 派生刷新（D3 缺
     );
     const { ManifestStore } = await import("../persistence/manifest-store.ts");
     const { manifestToSubagent } = await import("../persistence/record-store-rebuild.ts");
-    const ms = new ManifestStore(manifestDir);
+    const ms = new ManifestStore(() => manifestDir);
     const manifest = await ms.readManifest("corrupt-ovr");
     expect(manifest).not.toBeNull();
     const projected = manifestToSubagent(manifest!);

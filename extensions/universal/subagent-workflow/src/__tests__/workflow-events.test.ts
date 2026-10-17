@@ -184,7 +184,7 @@ function makeLifecycleResult(
       settledRecordOf: () => ({ outcome: "completed", settledAt: 0 }),
     } as never,
     runs,
-    sessionDir: "/tmp/subagent-workflow-test",
+    runsDir: "/tmp/subagent-workflow-test",
     runner: {} as never,
     ctx,
     storeHealthy: true,
@@ -780,7 +780,7 @@ function makeEnv(): EnvHarness {
   const env: RunSettledEffectsEnv = {
     resolvePi: () => pi,
     notifiedRunIds,
-    state: { sessionDir: "/tmp/run-settled-test-session", runs },
+    state: { runsDir: "/tmp/run-settled-test-session", runs },
     // [W2/V1 D1 第 7 行] 终局记录查询注入（生产 = JsonlRunStore.settledRecordOf；
     // 直测按 makeRun 的 completed 形态给帧同源记录）
     settledRecordOf: () => ({ outcome: "completed", settledAt: 0 }),

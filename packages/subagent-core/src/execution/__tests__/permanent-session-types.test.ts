@@ -271,7 +271,7 @@ describe("ExecutionRecord 新字段可选性（构造零破坏）", () => {
 
 describe("store 新收口原语（U2 实装冒烟）", () => {
   it("markSettled：running record 收口为 idle + stopReason（骨架 throw 已移除）", () => {
-    const store = new RecordStore(path.join(dir, "sessions"));
+    const store = new RecordStore(() => path.join(dir, "sessions"));
     const rec = baseRecord();
     store.register(rec);
 

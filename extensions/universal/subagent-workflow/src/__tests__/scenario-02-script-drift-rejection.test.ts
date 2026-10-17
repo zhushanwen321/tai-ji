@@ -40,7 +40,7 @@ describe("场景 2：脚本漂移（现实现行为记录——D1 单源形态�
 
       // 「编辑脚本文件改一处字节」：磁盘上出现被改的脚本文件（resume 不消费它——
       // 现行为断言锚点）
-      const editedPath = join(env.sessionDir, "edited-three-call.js");
+      const editedPath = join(env.runsDir, "edited-three-call.js");
       writeFileSync(editedPath, THREE_CALL_SERIAL_SCRIPT.replace("agent('C')", "agent('C-EDITED')"), "utf8");
 
       const sd = makeScenarioDeps(env, makeFauxRunner());

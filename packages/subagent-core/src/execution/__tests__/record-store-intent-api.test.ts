@@ -151,7 +151,7 @@ describe("RecordStore 意图 API 立面（U1 A1/A2/A5/A6）", () => {
     fs.mkdirSync(manifestDir, { recursive: true });
     sessionFile = path.join(sessionsDir, "2026-01-01_uuid.jsonl");
     appendEntryMock = vi.fn<(customType: string, data: unknown) => void>();
-    store = new RecordStore(sessionsDir, undefined, { appendEntry: appendEntryMock }, manifestDir);
+    store = new RecordStore(() => sessionsDir, undefined, { appendEntry: appendEntryMock }, () => manifestDir);
     order.length = 0;
     probe.manifestPath = undefined;
     probe.manifestExistedAtRelease = undefined;

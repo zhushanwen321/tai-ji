@@ -238,7 +238,7 @@ describe("[UF-1] record-store 据事件流折叠重建（跨重启空内存场�
   it("collectRecords：无 identity 子文件 + 事件流（bound 反查键）→ 重建 idle light（id/rootSessionId/sessionFile）", () => {
     const file = writePlainChildSession(sessionsDir);
     seedInFlightEvents(file);
-    const store = new RecordStore(sessionsDir, undefined, undefined, recordsDir);
+    const store = new RecordStore(() => sessionsDir, undefined, undefined, () => recordsDir);
 
     const records = store.collectRecords(10, "all", undefined);
     expect(records).toHaveLength(1);
@@ -256,7 +256,7 @@ describe("[UF-1] record-store 据事件流折叠重建（跨重启空内存场�
   it("findLightById：冷启动空索引先 miss → collectRecords 全扫填充 → 索引命中（coldLookup 步骤 1 链）", () => {
     const file = writePlainChildSession(sessionsDir);
     seedInFlightEvents(file);
-    const store = new RecordStore(sessionsDir, undefined, undefined, recordsDir);
+    const store = new RecordStore(() => sessionsDir, undefined, undefined, () => recordsDir);
 
     // 重启后 idToFile 未热：直查 miss
     expect(store.findLightById("sa-bind-1")).toBeUndefined();
@@ -272,7 +272,7 @@ describe("[UF-1] record-store 据事件流折叠重建（跨重启空内存场�
   it("rootSessionId 过滤仍生效：异树过滤排除折叠 record（session 隔离不因反查旁路）", () => {
     const file = writePlainChildSession(sessionsDir);
     seedInFlightEvents(file);
-    const store = new RecordStore(sessionsDir, undefined, undefined, recordsDir);
+    const store = new RecordStore(() => sessionsDir, undefined, undefined, () => recordsDir);
 
     expect(store.collectRecords(10, "all", "other-root")).toHaveLength(0);
     expect(store.collectRecords(10, "all", "root-session")).toHaveLength(1);
@@ -280,7 +280,7 @@ describe("[UF-1] record-store 据事件流折叠重建（跨重启空内存场�
 
   it("无 identity 无事件流 → 不重建（负缓存语义保持，不误建幽灵 record）", () => {
     writePlainChildSession(sessionsDir);
-    const store = new RecordStore(sessionsDir, undefined, undefined, recordsDir);
+    const store = new RecordStore(() => sessionsDir, undefined, undefined, () => recordsDir);
     expect(store.collectRecords(10, "all", undefined)).toHaveLength(0);
     expect(store.findLightById("sa-bind-1")).toBeUndefined();
   });
@@ -290,7 +290,7 @@ describe("[UF-1] record-store 据事件流折叠重建（跨重启空内存场�
     // 不能按 `<id>.events` 取戳，jsonl/binding 戳全不变——若无事件侧反查，回填后的
     // record 在磁盘扫描层永久不可见（列表面有内存源遮蔽，archive 除名后即暴露）。
     const file = writePlainChildSession(sessionsDir);
-    const store = new RecordStore(sessionsDir, undefined, undefined, recordsDir);
+    const store = new RecordStore(() => sessionsDir, undefined, undefined, () => recordsDir);
     // ① register（无 sessionFile——spawn 未回填）：事件文件只有 created 帧。
     const rec = createRecord("sa-bind-1", {
       agent: "general-purpose",
@@ -441,7 +441,7 @@ describe("[H2 S3] record-store 据事件流重建 origin（D1 投影过滤端到
       boundSessionFile: file,
       inFlight: true,
     });
-    const store = new RecordStore(sessionsDir, undefined, undefined, recordsDir);
+    const store = new RecordStore(() => sessionsDir, undefined, undefined, () => recordsDir);
 
     // 默认 list（includeWorkflow 缺省 false）：workflow record 被排除（S3 FAIL 的验收面）
     expect(store.collectRecords(10, "all", undefined)).toHaveLength(0);
@@ -462,7 +462,7 @@ describe("[H2 S3] record-store 据事件流重建 origin（D1 投影过滤端到
       boundSessionFile: file,
       inFlight: true,
     });
-    const store = new RecordStore(sessionsDir, undefined, undefined, recordsDir);
+    const store = new RecordStore(() => sessionsDir, undefined, undefined, () => recordsDir);
 
     const records = store.collectRecords(10, "all", undefined);
     expect(records).toHaveLength(1);
@@ -480,7 +480,7 @@ describe("[H2 S3] record-store 据事件流重建 origin（D1 投影过滤端到
       boundSessionFile: file,
       stopReason: "disconnected",
     });
-    const store = new RecordStore(sessionsDir, undefined, undefined, recordsDir);
+    const store = new RecordStore(() => sessionsDir, undefined, undefined, () => recordsDir);
 
     expect(store.collectRecords(10, "all", undefined)).toHaveLength(0);
     const visible = store.collectRecords(10, "all", undefined, true);
@@ -503,7 +503,7 @@ describe("[H2 S3] record-store 据事件流重建 origin（D1 投影过滤端到
       totalTokens: 60725,
       endedAt: STARTED_AT + 55_000,
     });
-    const store = new RecordStore(sessionsDir, undefined, undefined, recordsDir);
+    const store = new RecordStore(() => sessionsDir, undefined, undefined, () => recordsDir);
 
     const visible = store.collectRecords(10, "all", undefined, true);
     expect(visible).toHaveLength(1);
@@ -520,7 +520,7 @@ describe("[H2 S3] record-store 据事件流重建 origin（D1 投影过滤端到
       boundSessionFile: file,
       inFlight: true,
     });
-    const store = new RecordStore(sessionsDir, undefined, undefined, recordsDir);
+    const store = new RecordStore(() => sessionsDir, undefined, undefined, () => recordsDir);
 
     const records = store.collectRecords(10, "all", undefined);
     expect(records).toHaveLength(1);
@@ -637,7 +637,7 @@ describe("[W0 / D1] binding 载荷 stepIndex（生产构造点）与折叠重建
       inFlight: true,
     });
 
-    const store = new RecordStore(sessionsDir, undefined, undefined, recordsDir);
+    const store = new RecordStore(() => sessionsDir, undefined, undefined, () => recordsDir);
     const visible = store.collectRecords(10, "all", undefined, true);
     expect(visible).toHaveLength(1);
     expect(visible[0]!.origin).toBe("workflow");
@@ -655,7 +655,7 @@ describe("[W0 / D1] binding 载荷 stepIndex（生产构造点）与折叠重建
       boundSessionFile: file,
       inFlight: true,
     });
-    const store = new RecordStore(sessionsDir, undefined, undefined, recordsDir);
+    const store = new RecordStore(() => sessionsDir, undefined, undefined, () => recordsDir);
 
     const visible = store.collectRecords(10, "all", undefined, true);
     expect(visible).toHaveLength(1);

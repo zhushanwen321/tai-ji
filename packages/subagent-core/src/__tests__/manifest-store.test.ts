@@ -69,7 +69,7 @@ describe("ManifestStore", () => {
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "manifest-test-"));
-    store = new ManifestStore(tmpDir);
+    store = new ManifestStore(() => tmpDir);
   });
 
   afterEach(() => {
@@ -122,7 +122,9 @@ describe("ManifestStore", () => {
         createdAt: Date.now(),
       };
 
-      // Delete the directory to cause write failure
+      // 首写建立目录（ensureDirOnce 记忆化——构造期不再 mkdir，目录随 session 树
+      // 晚定位），随后外部删除目录 = 异常态：写不静默重建，fail-fast 上抛。
+      await store.writeManifest({ ...record, id: "test-seed" });
       fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
 
       await expect(store.writeManifest(record)).rejects.toThrow();
@@ -239,7 +241,7 @@ describe("ManifestStore", () => {
     it("空目录：返回空数组", () => {
       const fresh = path.join(tmpDir, "empty-sub");
       fs.mkdirSync(fresh);
-      const s = new ManifestStore(fresh);
+      const s = new ManifestStore(() => fresh);
       expect(s.listAllSync()).toEqual([]);
     });
 
@@ -427,7 +429,7 @@ describe("bound 物化守卫三断言（W1 D2 决策 9）", () => {
   });
 
   function makeStore(): RecordStore {
-    return new RecordStore(sessionsDir, undefined, undefined, recordsDir);
+    return new RecordStore(() => sessionsDir, undefined, undefined, () => recordsDir);
   }
 
   it("断言一（family 不误标）：运行中 record（bound manifest 已写）不被标已清理——manifest 在盘即 running 投影", () => {
@@ -537,7 +539,7 @@ describe("record 域 manifest 写面自由函数（W1/U2a/D2）", () => {
 
   describe("读面 IO 故障分通道（ENOENT 静默降级 / 其余留痕后降级）", () => {
     it("readManifest：非 ENOENT 读错误（ENOTDIR——父段被文件占据）→ null 不抛", async () => {
-      const store = new ManifestStore(dir);
+      const store = new ManifestStore(() => dir);
       fs.writeFileSync(path.join(dir, "sub"), "occupied");
       await expect(store.readManifest("sub/blocked")).resolves.toBeNull();
     });
@@ -551,14 +553,14 @@ describe("record 域 manifest 写面自由函数（W1/U2a/D2）", () => {
 
   describe("读面损坏 JSON 的可诊断性（损坏 warn / ENOENT 静默）", () => {
     it("readManifest：ENOENT → null 且零 warn（合法缺省静默）", async () => {
-      const store = new ManifestStore(dir);
+      const store = new ManifestStore(() => dir);
       loggerMock.warn.mockClear();
       await expect(store.readManifest("missing")).resolves.toBeNull();
       expect(loggerMock.warn).not.toHaveBeenCalled();
     });
 
     it("readManifest：JSON 损坏 → null + warn（含文件路径与「视为不存在、等待重建」）", async () => {
-      const store = new ManifestStore(dir);
+      const store = new ManifestStore(() => dir);
       const filePath = path.join(dir, "torn.json");
       fs.writeFileSync(filePath, "{ torn", "utf8");
       loggerMock.warn.mockClear();

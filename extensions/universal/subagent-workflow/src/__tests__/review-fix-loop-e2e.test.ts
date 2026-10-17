@@ -59,7 +59,7 @@ const agentMd = (name: string): string => {
   return p;
 };
 
-let sessionDir: string;
+let runsDir: string;
 let createdStores: JsonlRunStore[] = [];
 
 /**
@@ -270,7 +270,7 @@ function makeScenarioRunner(scenario: Scenario) {
 let rflHomeDir: string;
 
 beforeEach(() => {
-  sessionDir = mkdtempSync(join(tmpdir(), "rfl-e2e-"));
+  runsDir = mkdtempSync(join(tmpdir(), "rfl-e2e-"));
   fixtureDir = mkdtempSync(join(tmpdir(), "rfl-e2e-agents-"));
   // rfl 仪表（tier-1 T3）：state.json 现落 ~/.review-fix-loop/——HOME 重定向到
   // 临时目录，防测试写真实 home（worker_threads 在 new Worker 时拷贝主线程 env
@@ -286,19 +286,19 @@ beforeEach(() => {
   // AGENT_RETRY_BACKOFF_BASE_ENV）。轮询等待已随 helper runWorkflowToSettled
   // 内建小间隔，不再经 env 通道。
   vi.stubEnv("TAIJI_SUBAGENT_TEST_AGENT_RETRY_BACKOFF_BASE_MS", "10");
-  bindRunStore(sessionDir, createdStores);
+  bindRunStore(runsDir, createdStores);
   createdStores = [];
 });
 
 afterEach(() => {
   try {
-    rmSync(sessionDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+    rmSync(runsDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
     rmSync(fixtureDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
     rmSync(rflHomeDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   } catch {
     // 临时目录清理失败不影响测试结论
   }
-  sessionDir = "";
+  runsDir = "";
   fixtureDir = "";
   rflHomeDir = "";
   createdStores = [];

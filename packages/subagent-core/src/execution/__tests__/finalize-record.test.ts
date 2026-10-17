@@ -97,7 +97,7 @@ describe("doFinalizeRecord — manifest status 透传 (M3 4 态)", () => {
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "finalize-test-"));
-    manifestStore = new ManifestStore(tmpDir);
+    manifestStore = new ManifestStore(() => tmpDir);
   });
 
   afterEach(() => {
@@ -111,12 +111,9 @@ describe("doFinalizeRecord — manifest status 透传 (M3 4 态)", () => {
    *  降级——manifest 写失败用例 mock manifestStore.writeManifest 注入 throw 用）。 */
   function makeDeps(opts: { syncManifest?: boolean } = {}): Parameters<typeof doFinalizeRecord>[0] {
     const pi = { appendEntry: vi.fn() };
-    const store = new RecordStore(
-      tmpDir,
-      manifestStore,
-      pi,
-      opts.syncManifest === false ? undefined : tmpDir,
-    );
+    const syncManifestDir: (() => string) | undefined =
+      opts.syncManifest === false ? undefined : () => tmpDir;
+    const store = new RecordStore(() => tmpDir, manifestStore, pi, syncManifestDir);
     return {
       worktreeManager: {},
       store,
@@ -483,7 +480,7 @@ describe("doFinalizeRoundToIdle — chatMode 轮次完成进 idle (M2-A)", () =>
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "finalize-idle-test-"));
-    manifestStore = new ManifestStore(tmpDir);
+    manifestStore = new ManifestStore(() => tmpDir);
   });
 
   afterEach(() => {
@@ -495,7 +492,7 @@ describe("doFinalizeRoundToIdle — chatMode 轮次完成进 idle (M2-A)", () =>
    *  为 spy 以断言「不调」。 */
   function makeDeps(): { deps: Parameters<typeof doFinalizeRoundToIdle>[0]; store: RecordStore } {
     const pi = { appendEntry: vi.fn() };
-    const store = new RecordStore(tmpDir, manifestStore, pi, tmpDir);
+    const store = new RecordStore(() => tmpDir, manifestStore, pi, () => tmpDir);
     const deps = {
       worktreeManager: { cleanup: vi.fn(), collectPatch: vi.fn() },
       store,

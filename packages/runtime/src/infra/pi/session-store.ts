@@ -32,7 +32,7 @@ import { normalizeSessionFileStreamingInPlace } from './session-file-streaming.j
 import { refreshAll } from './pi-provider-store.js'
 import { convertPiHistory } from './message-converter.js'
 import { rebuildHistoryFromEntries } from './entry-tree-builder.js'
-import { trash } from '../system/trash.js'
+import { trash, trashDirectory } from '../system/trash.js'
 
 export class PiSessionStore implements ISessionStore {
   scanSessions(opts?: ScanSessionsOptions): ScannedSessionMeta[] {
@@ -132,5 +132,12 @@ export class PiSessionStore implements ISessionStore {
   // unhandledRejection，renderer 误收删除成功 reply——timeout-audit-hygiene-batch u-h4 修复轮）
   async trash(path: string): Promise<void> {
     await trash(path)
+  }
+
+  // [session-store-layout-inversion D5] 目录级软删（ISessionStore.trashDirectory）：
+  // services 层（session-lifecycle 删除链③段 / btw-service closeLine 线树）经本方法
+  // 消费，C-comm-03「services 层 IO 一律经 port」——infra 同层直调合法，rejection 原样传播。
+  async trashDirectory(dirPath: string): Promise<void> {
+    await trashDirectory(dirPath)
   }
 }

@@ -145,8 +145,8 @@ function writeTombstone(sessionFile: string, id: string): void {
 /** [W1 / D3] 读 record 事件文件的帧序列（type；round-started 帧附 `:round`）。
  *  [W1 / D1] 停写 v1 快照后运行态事实源 = 事件文件——轮次/收口的落账断言改锚
  *  帧序列；路径推导与 SubagentService 装配同源（getSubagentRecordsDir）。 */
-function readRecordEventFrames(agentDir: string, id: string): string[] {
-  const eventsPath = path.join(getSubagentRecordsDir(agentDir, agentDir), `${id}.events`);
+function readRecordEventFrames(id: string): string[] {
+  const eventsPath = path.join(getSubagentRecordsDir(ROOT_SID), `${id}.events`);
   const raw = fs.readFileSync(eventsPath, "utf8");
   return raw
     .split("\n")
@@ -156,6 +156,9 @@ function readRecordEventFrames(agentDir: string, id: string): string[] {
       return frame.round !== undefined ? `${frame.type}:${frame.round}` : frame.type;
     });
 }
+
+/** service 的根会话 id（store 目录分区键——sessions/records 同树同键）。 */
+const ROOT_SID = "root-session-cur";
 
 describe("透明重生 + fork-from 恢复通道（壳侧真链路）", () => {
   let agentDir: string;
@@ -167,7 +170,10 @@ describe("透明重生 + fork-from 恢复通道（壳侧真链路）", () => {
   beforeEach(() => {
     for (const k of IDENTITY_ENV_KEYS) delete process.env[k];
     agentDir = fs.mkdtempSync(path.join(os.tmpdir(), "swf-transparent-resume-"));
-    sessionsDir = getSubagentSessionDir(agentDir, agentDir);
+    // [session-store-layout-inversion D2/D3] 数据根经 env 注入（生产链同形态）；
+    // sessions/records 两目录由分区键 ROOT_SID 派生（不再有 agentDir/enc 段）。
+    vi.stubEnv("TAIJI_AGENT_DATA_DIR", agentDir);
+    sessionsDir = getSubagentSessionDir(ROOT_SID);
     fs.mkdirSync(sessionsDir, { recursive: true });
 
     const modelService = new ModelConfigService({ agentDir, cwd: agentDir });
@@ -180,13 +186,14 @@ describe("透明重生 + fork-from 恢复通道（壳侧真链路）", () => {
     });
     service = new SubagentService({ cwd: agentDir, modelService });
     pi = makePi();
-    service.initSession({ pi, sessionId: "root-session-cur" });
+    service.initSession({ pi, sessionId: ROOT_SID });
 
     // 协议替身引擎（续聊/fork 恒派发新 run + resume 锚点）。
     fake = registerFakePiEngine();
   });
 
   afterEach(async () => {
+    vi.unstubAllEnvs();
     service.dispose();
     // registry 是 globalThis 进程单例——清空防替身引擎泄漏进其他测试文件。
     clearEngines();
@@ -238,7 +245,7 @@ describe("透明重生 + fork-from 恢复通道（壳侧真链路）", () => {
       expect(entries.length).toBeGreaterThan(0);
       const lastEntry = entries[entries.length - 1][1] as { v?: number; kind?: string; id?: string };
       expect(lastEntry).toMatchObject({ v: 2, kind: "registered", id: "sa-d-happy" });
-      const frames = readRecordEventFrames(agentDir, "sa-d-happy");
+      const frames = readRecordEventFrames("sa-d-happy");
       expect(frames).toContain("record-created");
       expect(frames).toContain("record-round-started:0");
 
@@ -264,7 +271,7 @@ describe("透明重生 + fork-from 恢复通道（壳侧真链路）", () => {
         expect(all.length).toBeGreaterThan(0);
         // 轮次推进的事实落账：round-started(round 0) 在前、轮终收条 round-idle 在后
         // ——第二轮 dedup key 的 round 基数（=1）由该记录态派生。
-        const frames = readRecordEventFrames(agentDir, "sa-d-notify");
+        const frames = readRecordEventFrames("sa-d-notify");
         expect(frames).toContain("record-round-started:0");
         // 轮终收条帧自带累计轮数（[② 读侧换源] round 进帧）：轮终帧 = record-round-idle:1
         // ——第二轮 dedup key 的 round 基数（=1）直接在帧载荷可见。
@@ -311,9 +318,9 @@ describe("透明重生 + fork-from 恢复通道（壳侧真链路）", () => {
 
   describe("fork-from 贯通", () => {
     it("正常接续：done 记录 → 新 id + prompt 注入引导语（含源文件指引面）", async () => {
-      const sourceFile = writeSessionJsonl(sessionsDir, { id: "sa-src", rootSessionId: "old-root" });
+      const sourceFile = writeSessionJsonl(sessionsDir, { id: "sa-src", rootSessionId: ROOT_SID });
       // done 形态播种（现行载体）：事件流 record-settled 帧（stopReason=completed）
-      seedTerminalRecordForSessionFile(sourceFile, getSubagentRecordsDir(agentDir, agentDir), {
+      seedTerminalRecordForSessionFile(sourceFile, getSubagentRecordsDir(ROOT_SID), {
         stopReason: "completed",
       });
 
@@ -341,9 +348,9 @@ describe("透明重生 + fork-from 恢复通道（壳侧真链路）", () => {
     });
 
     it("无 prompt → 注入默认接管框架（reconstruct state 引导语）", async () => {
-      const sourceFile = writeSessionJsonl(sessionsDir, { id: "sa-src2", rootSessionId: "old-root" });
+      const sourceFile = writeSessionJsonl(sessionsDir, { id: "sa-src2", rootSessionId: ROOT_SID });
       // done 形态播种（载体同上）
-      seedTerminalRecordForSessionFile(sourceFile, getSubagentRecordsDir(agentDir, agentDir), {
+      seedTerminalRecordForSessionFile(sourceFile, getSubagentRecordsDir(ROOT_SID), {
         stopReason: "completed",
       });
 
@@ -359,7 +366,7 @@ describe("透明重生 + fork-from 恢复通道（壳侧真链路）", () => {
     // fork cancelled 放行壳内留一（同契约另一份在 core subagent-actions-core 守卫 4
     // 删除条参数化覆盖；此处保留真链路断言更全的一份）。
     it("[U4 守卫 4 删除] cancelled 残留源 → 放行分叉（主动告别不再是 fork 例外）", async () => {
-      const file = writeSessionJsonl(sessionsDir, { id: "sa-canxx", rootSessionId: "old-root" });
+      const file = writeSessionJsonl(sessionsDir, { id: "sa-canxx", rootSessionId: ROOT_SID });
       writeTombstone(file, "sa-canxx");
 
       const r = await forkFromHandler(service, { sourceSubagentId: "sa-canxx" });

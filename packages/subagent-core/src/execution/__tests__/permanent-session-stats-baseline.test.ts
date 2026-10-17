@@ -69,7 +69,7 @@ afterEach(() => {
 });
 
 function newStore(pi?: { appendEntry?: (customType: string, data: unknown) => void }): RecordStore {
-  return new RecordStore(sessionsDir, undefined, pi ?? null, manifestDir);
+  return new RecordStore(() => sessionsDir, undefined, pi ?? null, () => manifestDir);
 }
 
 /** pi 锚 record（running 形态，sessionFile 指向磁盘已存在的子文件）。 */

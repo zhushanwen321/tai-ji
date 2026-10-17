@@ -57,8 +57,8 @@ describe("[F1/T5] records cwd physical isolation", () => {
     // 只在 cwd1 的 records 目录写一个 manifest
     writeManifest(recordsDir1, "rec-cwd1");
 
-    const store1 = new ManifestStore(recordsDir1);
-    const store2 = new ManifestStore(recordsDir2);
+    const store1 = new ManifestStore(() => recordsDir1);
+    const store2 = new ManifestStore(() => recordsDir2);
 
     const cwd1Ids = store1.listAllSync().map((m) => m.id);
     const cwd2Ids = store2.listAllSync().map((m) => m.id);
@@ -79,8 +79,8 @@ describe("[F1/T5] records cwd physical isolation", () => {
     writeManifest(recordsDirA, "rec-a");
     writeManifest(recordsDirB, "rec-b");
 
-    const storeA = new ManifestStore(recordsDirA);
-    const storeB = new ManifestStore(recordsDirB);
+    const storeA = new ManifestStore(() => recordsDirA);
+    const storeB = new ManifestStore(() => recordsDirB);
 
     const aIds = storeA.listAllSync().map((m) => m.id);
     const bIds = storeB.listAllSync().map((m) => m.id);

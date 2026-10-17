@@ -60,12 +60,12 @@ describe("findByIdManifestFallback（D3 缺陷五 manifest 兜底单 id 读取�
   });
 
   it("manifestDir 未接线（纯内存形态）恒 undefined", () => {
-    const store = new RecordStore(sessionsDir);
+    const store = new RecordStore(() => sessionsDir);
     expect(store.findByIdManifestFallback("any-id")).toBeUndefined();
   });
 
   it("manifest 文件缺失 → undefined（保守侧，不抛）", () => {
-    const store = new RecordStore(sessionsDir, undefined, { appendEntry: vi.fn() }, manifestDir);
+    const store = new RecordStore(() => sessionsDir, undefined, { appendEntry: vi.fn() }, () => manifestDir);
     expect(store.findByIdManifestFallback("ghost-id")).toBeUndefined();
   });
 
@@ -74,7 +74,7 @@ describe("findByIdManifestFallback（D3 缺陷五 manifest 兜底单 id 读取�
     // 的新 store 实例（内存空）走兜底读取——对齐 model-switch-wiring 的重启恢复消费。
     const dbPath = path.join(tmpDir, "session-db", "db.sqlite");
     fs.mkdirSync(path.dirname(dbPath), { recursive: true });
-    const writer = new RecordStore(sessionsDir, undefined, { appendEntry: vi.fn() }, manifestDir);
+    const writer = new RecordStore(() => sessionsDir, undefined, { appendEntry: vi.fn() }, () => manifestDir);
     const record = makeRecord("fb-zcode", {
       engine: "zcode",
       engineHandle: { sessionRef: { sessionId: "z-sess-9", dbPath }, poolKey: "shared" },
@@ -86,7 +86,7 @@ describe("findByIdManifestFallback（D3 缺陷五 manifest 兜底单 id 读取�
     expect(writer.markRoundIdle("fb-zcode", { kind: "success", content: "done" })).toBe(true);
 
     // 重启形态：同 manifestDir 新实例，内存零持有。
-    const reader = new RecordStore(sessionsDir, undefined, { appendEntry: vi.fn() }, manifestDir);
+    const reader = new RecordStore(() => sessionsDir, undefined, { appendEntry: vi.fn() }, () => manifestDir);
     const projected = reader.findByIdManifestFallback("fb-zcode");
     expect(projected).toBeDefined();
     expect(projected?.id).toBe("fb-zcode");
@@ -101,7 +101,7 @@ describe("findByIdManifestFallback（D3 缺陷五 manifest 兜底单 id 读取�
 
   it("损坏 JSON（非合法 manifest 文本）→ undefined（保守侧）", () => {
     fs.writeFileSync(path.join(manifestDir, "broken.json"), "{ not json", "utf-8");
-    const store = new RecordStore(sessionsDir, undefined, { appendEntry: vi.fn() }, manifestDir);
+    const store = new RecordStore(() => sessionsDir, undefined, { appendEntry: vi.fn() }, () => manifestDir);
     expect(store.findByIdManifestFallback("broken")).toBeUndefined();
   });
 
@@ -117,7 +117,7 @@ describe("findByIdManifestFallback（D3 缺陷五 manifest 兜底单 id 读取�
       }),
       "utf-8",
     );
-    const store = new RecordStore(sessionsDir, undefined, { appendEntry: vi.fn() }, manifestDir);
+    const store = new RecordStore(() => sessionsDir, undefined, { appendEntry: vi.fn() }, () => manifestDir);
     expect(store.findByIdManifestFallback("bad-status")).toBeUndefined();
   });
 });
@@ -146,7 +146,7 @@ describe("markModelOverride 身份守卫臂（非 in-memory 实例拒绝）", ()
   } as const;
 
   it("id 不在内存表（未注册）→ false，零写面", () => {
-    const store = new RecordStore(sessionsDir, undefined, { appendEntry: vi.fn() }, manifestDir);
+    const store = new RecordStore(() => sessionsDir, undefined, { appendEntry: vi.fn() }, () => manifestDir);
     const ghost = makeRecord("ghost-ovr");
 
     expect(store.markModelOverride(ghost, override)).toBe(false);
@@ -156,7 +156,7 @@ describe("markModelOverride 身份守卫臂（非 in-memory 实例拒绝）", ()
   });
 
   it("同 id 异实例（record 非从本 store 取出）→ false，原注册实例不被触碰", () => {
-    const store = new RecordStore(sessionsDir, undefined, { appendEntry: vi.fn() }, manifestDir);
+    const store = new RecordStore(() => sessionsDir, undefined, { appendEntry: vi.fn() }, () => manifestDir);
     const registered = makeRecord("real-ovr", {
       engine: "zcode",
       engineHandle: { sessionRef: { sessionId: "z-1", dbPath: path.join(tmpDir, "db.sqlite") }, poolKey: "shared" },

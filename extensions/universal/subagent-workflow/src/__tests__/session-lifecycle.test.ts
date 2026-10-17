@@ -130,7 +130,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { mapReasonToStatus, PENDING_UNREGISTER_ENTRY_TYPE } from "@zhushanwen/extension-protocol";
 import { STALE_CTX_MARKER, _resetOncePerProcessForTest } from "@zhushanwen/pi-ext-guards";
 import { IDENTITY_CUSTOM_TYPE, isRunSettled, noteRebuiltSettlement } from "@zhushanwen/subagent-core";
-import { ENV_ROOT_CWD, getSubagentRecordsDir, resolvePiSessionScopedDir, STATE_DIR_NAME } from "@zhushanwen/subagent-core";
+import { getSubagentRecordsDir, resolvePiWorkflowRunsDir } from "@zhushanwen/subagent-core";
 import type { WorkflowRun as WorkflowRunType } from "@zhushanwen/subagent-core/orchestration/models/workflow-run.ts";
 // 保留窗口 env 通道仅测试消费，深路径直取（对齐 retention 测试先例）
 import { STATE_TTL_MS_ENV } from "@zhushanwen/subagent-core/execution/persistence/run-state-evidence.ts";
@@ -744,9 +744,10 @@ describe("streamSink ctx.mode 守卫 — 运行时行为（FR-1/FR-2/AC-1/AC-2�
 // ── 组 4：session_start 兜底触发统一保留维护轮（[W1 / D5 触发点③]，组 2 移交项）──
 //
 // 原 retention grep 形态接线断言升级为行为断言：session_start 装配链内的兜底触发点
-// 以双域目录锚调 core runRetentionMaintenanceRound——run 域 = resolveSessionDir 同源
-// （resolvePiSessionScopedDir + STATE_DIR_NAME）+ record 域 = getSubagentRecordsDir
-// (agentDir, ENV_ROOT_CWD ?? ctx.cwd)；oncePerProcess 守卫保证单进程只跑一轮。
+// 以双域目录锚调 core runRetentionMaintenanceRound——[session-store-layout-inversion
+// D2/D3] 两域分区键同为 rootSessionId：run 域 = resolvePiWorkflowRunsDir(sid)
+// （`<root>/<sid>/workflow/runs/`）+ record 域 = getSubagentRecordsDir(sid)
+// （`<root>/<sid>/subagents/records/`）；oncePerProcess 守卫保证单进程只跑一轮。
 
 /** 「N 天前」的 epoch ms（维护轮资格判据锚 = journal 帧 ts）。 */
 function daysAgoMs(days: number): number {
@@ -794,31 +795,33 @@ describe("session_start 兜底触发统一保留维护轮（[W1 / D5 触发点�
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "wf-lifecycle-maint-"));
+    // [session-store-layout-inversion D2/D3] 数据根经 env 注入（生产链同形态）——两域
+    // 目录锚都由它派生。
+    vi.stubEnv("TAIJI_AGENT_DATA_DIR", tmpDir);
     agentDir = path.join(tmpDir, "agent");
     mockAgentDir.current = agentDir;
   });
 
   afterEach(() => {
+    vi.unstubAllEnvs();
     mockAgentDir.current = "/home/user/.pi/agent";
     delete process.env[STATE_TTL_MS_ENV];
-    delete process.env[ENV_ROOT_CWD];
     fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
 
-  /** 双域目录锚（与生产触发点同源同式推导）。 */
-  function resolveDomainAnchors(): { stateDir: string; recordsDir: string } {
+  /** 双域目录锚（与生产触发点同源同式推导：分区键 = 当前会话 sid）。 */
+  function resolveDomainAnchors(sessionId: string): { stateDir: string; recordsDir: string } {
     return {
-      // run 域：<agentDir>/sessions/<slug> 不存在 → 回退 agentDir 根（探测布局单源
-      // resolvePiSessionScopedDir，与生产 resolveSessionDir 同参形态）
-      stateDir: path.join(resolvePiSessionScopedDir({ agentDir }), STATE_DIR_NAME),
-      // record 域：rootCwd = ENV_ROOT_CWD ?? ctx.cwd（ctx.cwd = createFakeCtx 固定值）
-      recordsDir: getSubagentRecordsDir(agentDir, "/home/user/project"),
+      // run 域：`<root>/<sid>/workflow/runs/`
+      stateDir: resolvePiWorkflowRunsDir(sessionId),
+      // record 域：`<root>/<sid>/subagents/records/`
+      recordsDir: getSubagentRecordsDir(sessionId),
     };
   }
 
   it("session_start 装配触发维护轮：record 域窗外终态裁剪；run 域旧双源不获裁剪资格（[D1] 中间态），窗内与 manifest 保护", async () => {
     process.env[STATE_TTL_MS_ENV] = String(30 * 86_400_000);
-    const { stateDir, recordsDir } = resolveDomainAnchors();
+    const { stateDir, recordsDir } = resolveDomainAnchors("session-maint-1");
 
     seedTerminalRunFootprint(stateDir, "wf-maint-expired", 40, 35);
     seedTerminalRunFootprint(stateDir, "wf-maint-inwindow", 10, 5);
@@ -845,7 +848,7 @@ describe("session_start 兜底触发统一保留维护轮（[W1 / D5 触发点�
 
   it("维护轮经 oncePerProcess 守卫防双跑：首轮后新落的窗外终态不被二次裁（单进程只跑一轮）", async () => {
     process.env[STATE_TTL_MS_ENV] = String(30 * 86_400_000);
-    const { stateDir, recordsDir } = resolveDomainAnchors();
+    const { stateDir, recordsDir } = resolveDomainAnchors("session-maint-2");
 
     seedTerminalRunFootprint(stateDir, "wf-maint-first", 40, 35);
     seedTerminalRecordFootprint(recordsDir, "sa-maint-first", 40, 35);
@@ -1114,7 +1117,7 @@ describe("[W1 / D4] kill-9 收编 fixture：journal 终态 + 条目恰两条 + m
           reused: false,
         })) as never,
         worktreeManager: { scan: vi.fn(async () => {}) },
-        createRunStore: () => new RealJsonlRunStore({ sessionDir: fixtureDir, pi, ctx }),
+        createRunStore: () => new RealJsonlRunStore({ runsDir: fixtureDir, pi, ctx }),
       });
 
       // 第一次启动（kill-9 后重启）：running 收编（[D2]/[D15] 中断转移——非终局帧）

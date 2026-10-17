@@ -5,7 +5,7 @@
  * 覆盖：MOCK_USAGE / JsonSchema 类型 / WORKFLOWS_DIR + wf() / extractMeta /
  * loadWorkflowsFromDir / makeRegistry / makeDeps / runWorkflowToSettled。
  *
- * sessionDir 与 store 登记册由测试文件自持生命周期（beforeEach mkdtemp / afterEach
+ * runsDir 与 store 登记册由测试文件自持生命周期（beforeEach mkdtemp / afterEach
  * rmSync），仅经 bindRunStore 把本轮值借给 makeDeps——helpers 不拥有临时目录。
  * registry 绕过说明（原两文件同款注释）：WorkflowScriptRegistryImpl 的扫描源是固定
  * 约定目录，无法指向任意路径；这里直接读 .js 文件 + 手动构造 WorkflowScript 包装为
@@ -69,8 +69,8 @@ let storeSessionDir = "";
 let stores: JsonlRunStore[] = [];
 
 /** 绑定本轮 session 目录与 store 登记册（测试文件 beforeEach 调用，afterEach 自清）。 */
-export function bindRunStore(sessionDir: string, createdStores: JsonlRunStore[]): void {
-  storeSessionDir = sessionDir;
+export function bindRunStore(runsDir: string, createdStores: JsonlRunStore[]): void {
+  storeSessionDir = runsDir;
   stores = createdStores;
 }
 
@@ -158,7 +158,7 @@ export function makeRegistry(scripts: Map<string, WorkflowScript>): WorkflowScri
 export function makeDeps(runner: AgentRunner): LauncherDeps {
   const scripts = loadWorkflowsFromDir(WORKFLOWS_DIR);
   const registry = makeRegistry(scripts);
-  const store = new JsonlRunStore({ sessionDir: storeSessionDir });
+  const store = new JsonlRunStore({ runsDir: storeSessionDir });
   stores.push(store);
   const base: LifecycleDeps = {
     store,

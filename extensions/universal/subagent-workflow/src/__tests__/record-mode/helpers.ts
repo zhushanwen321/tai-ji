@@ -22,22 +22,22 @@ import {
 } from "@zhushanwen/subagent-core";
 import type { WorkflowRunEvent } from "@zhushanwen/subagent-core";
 
-/** 自建自删的临时 workflow-state 环境（store 的 sessionDir 锚 + record 流路径构造）。 */
+/** 自建自删的临时 runs 目录环境（store 的 runsDir 锚 + record 流路径构造）。 */
 export interface RecordFixtureEnv { // oe-exempt:20260929:test:record-mode fixture env contract (test infra)
-  sessionDir: string;
+  runsDir: string;
   stateDir: string;
   recordPath(runId: string): string;
   cleanup(): void;
 }
 
 export function mkRecordEnv(label: string): RecordFixtureEnv {
-  const sessionDir = fs.mkdtempSync(path.join(os.tmpdir(), `wf-record-${label}-`));
-  const stateDir = path.join(sessionDir, "workflow-state");
+  const runsDir = fs.mkdtempSync(path.join(os.tmpdir(), `wf-record-${label}-`));
+  const stateDir = path.join(runsDir);
   return {
-    sessionDir,
+    runsDir,
     stateDir,
     recordPath: (runId: string) => path.join(stateDir, `${runId}${RUN_EVENTS_SUFFIX}`),
-    cleanup: () => fs.rmSync(sessionDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 }),
+    cleanup: () => fs.rmSync(runsDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 }),
   };
 }
 

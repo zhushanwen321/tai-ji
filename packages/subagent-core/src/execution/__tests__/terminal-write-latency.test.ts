@@ -41,12 +41,7 @@ describe("D2 时延实测：markFinalized 终态同步双写", () => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "terminal-latency-"));
     recordsDir = path.join(tmpDir, "records");
     // 生产形态全接线：manifestStore 与 manifestDir（同步写通道，D8 v7）同源同目录。
-    store = new RecordStore(
-      tmpDir,
-      new ManifestStore(recordsDir),
-      { appendEntry: () => {} },
-      recordsDir,
-    );
+    store = new RecordStore(() => tmpDir, new ManifestStore(() => recordsDir), { appendEntry: () => {} }, () => recordsDir, );
   });
 
   afterEach(() => {

@@ -53,7 +53,7 @@ import { mkCtx, mkPi } from "@zhushanwen/subagent-core/testing/orchestration/__t
 
 /** 向 stateDir 的 record 流追加一帧（raw JSONL——模拟 core 写者落账）。 */
 function appendRecordLine(tmpDir: string, runId: string, line: Record<string, unknown>): string {
-  const recordPath = path.join(tmpDir, "workflow-state", `${runId}${RUN_EVENTS_SUFFIX}`);
+  const recordPath = path.join(tmpDir, `${runId}${RUN_EVENTS_SUFFIX}`);
   fs.mkdirSync(path.dirname(recordPath), { recursive: true });
   fs.appendFileSync(recordPath, `${JSON.stringify(line)}\n`, "utf8");
   return recordPath;
@@ -144,7 +144,7 @@ describe("W1[D1]: record 重建 round-trip（call 级详情经 agent-settled res
     appendRecordLine(tmpDir, runId, { type: "run-settled", seq: 2, ts: 2000, outcome: "done", artifactsDir: tmpDir });
 
     const entries: CustomEntry[] = [v2RegisteredEntry(runId, recordPath)];
-    const store = new JsonlRunStore({ sessionDir: tmpDir, pi: mkPi(entries), ctx: mkCtx(entries) });
+    const store = new JsonlRunStore({ runsDir: tmpDir, pi: mkPi(entries), ctx: mkCtx(entries) });
     const restored = await store.loadAll();
     expect(restored[0]!.spec.budgetTimeMs).toBe(600_000);
   });
@@ -159,7 +159,7 @@ describe("W1[D1]: record 重建 round-trip（call 级详情经 agent-settled res
     appendRecordLine(tmpDir, runId, { type: "run-settled", seq: 4, ts: 2000, outcome: "done", artifactsDir: tmpDir });
 
     const entries: CustomEntry[] = [v2RegisteredEntry(runId, recordPath)];
-    const store = new JsonlRunStore({ sessionDir: tmpDir, pi: mkPi(entries), ctx: mkCtx(entries) });
+    const store = new JsonlRunStore({ runsDir: tmpDir, pi: mkPi(entries), ctx: mkCtx(entries) });
     const restored = await store.loadAll();
     expect(restored[0]!.state.errorLogs).toEqual([
       { level: "warn", message: "w1" },
@@ -175,7 +175,7 @@ describe("W1[D1]: record 重建 round-trip（call 级详情经 agent-settled res
     appendRecordLine(tmpDir, runId, { type: "run-settled", seq: 2, ts: 2000, outcome: "done", artifactsDir: tmpDir });
 
     const entries: CustomEntry[] = [v2RegisteredEntry(runId, recordPath)];
-    const store = new JsonlRunStore({ sessionDir: tmpDir, pi: mkPi(entries), ctx: mkCtx(entries) });
+    const store = new JsonlRunStore({ runsDir: tmpDir, pi: mkPi(entries), ctx: mkCtx(entries) });
     const restored = await store.loadAll();
     expect(restored[0]!.state.errorLogs).toEqual([]);
   });
@@ -189,7 +189,7 @@ describe("W1[D1]: record 重建 round-trip（call 级详情经 agent-settled res
     appendRecordLine(tmpDir, zeroId, { type: "run-settled", seq: 2, ts: 2000, outcome: "done", artifactsDir: tmpDir });
 
     const entries: CustomEntry[] = [v2RegisteredEntry(legacyId, legacyPath), v2RegisteredEntry(zeroId, zeroPath)];
-    const store = new JsonlRunStore({ sessionDir: tmpDir, pi: mkPi(entries), ctx: mkCtx(entries) });
+    const store = new JsonlRunStore({ runsDir: tmpDir, pi: mkPi(entries), ctx: mkCtx(entries) });
     const restored = await store.loadAll();
     const byId = new Map(restored.map((r) => [r.runId, r]));
     expect(byId.get(legacyId)!.spec.budgetTimeMs).toBeUndefined();
@@ -212,7 +212,7 @@ describe("W1[D1]: record 重建 round-trip（call 级详情经 agent-settled res
     appendRecordLine(tmpDir, legacyResumedId, { type: "run-settled", seq: 4, ts: 4000, outcome: "done", artifactsDir: tmpDir });
 
     const entries: CustomEntry[] = [v2RegisteredEntry(overrideId, overridePath), v2RegisteredEntry(legacyResumedId, legacyResumedPath)];
-    const store = new JsonlRunStore({ sessionDir: tmpDir, pi: mkPi(entries), ctx: mkCtx(entries) });
+    const store = new JsonlRunStore({ runsDir: tmpDir, pi: mkPi(entries), ctx: mkCtx(entries) });
     const restored = await store.loadAll();
     const byId = new Map(restored.map((r) => [r.runId, r]));
     expect(byId.get(overrideId)!.spec.budgetTimeMs).toBe(7_200_000);
@@ -237,7 +237,7 @@ describe("W1[D1]: record 重建 round-trip（call 级详情经 agent-settled res
       v2RegisteredEntry(legacyId, legacyPath),
       v2RegisteredEntry(zeroId, zeroPath),
     ];
-    const store = new JsonlRunStore({ sessionDir: tmpDir, pi: mkPi(entries), ctx: mkCtx(entries) });
+    const store = new JsonlRunStore({ runsDir: tmpDir, pi: mkPi(entries), ctx: mkCtx(entries) });
     const restored = await store.loadAll();
     const byId = new Map(restored.map((r) => [r.runId, r]));
     expect(byId.get(createdId)!.spec.budgetTokens).toBe(10_000);
@@ -261,7 +261,7 @@ describe("W1[D1]: record 重建 round-trip（call 级详情经 agent-settled res
     appendRecordLine(tmpDir, legacyResumedId, { type: "run-settled", seq: 4, ts: 4000, outcome: "done", artifactsDir: tmpDir });
 
     const entries: CustomEntry[] = [v2RegisteredEntry(overrideId, overridePath), v2RegisteredEntry(legacyResumedId, legacyResumedPath)];
-    const store = new JsonlRunStore({ sessionDir: tmpDir, pi: mkPi(entries), ctx: mkCtx(entries) });
+    const store = new JsonlRunStore({ runsDir: tmpDir, pi: mkPi(entries), ctx: mkCtx(entries) });
     const restored = await store.loadAll();
     const byId = new Map(restored.map((r) => [r.runId, r]));
     expect(byId.get(overrideId)!.spec.budgetTokens).toBe(50_000);
@@ -278,7 +278,7 @@ describe("W1[D1]: record 重建 round-trip（call 级详情经 agent-settled res
     });
 
     const entries: CustomEntry[] = [v2RegisteredEntry(runId, recordPath)];
-    const store = new JsonlRunStore({ sessionDir: tmpDir, ctx: mkCtx(entries) });
+    const store = new JsonlRunStore({ runsDir: tmpDir, ctx: mkCtx(entries) });
     const restored = await store.loadAll();
     expect(restored).toHaveLength(1);
     expect(restored[0]!.runId).toBe(runId);
@@ -296,7 +296,7 @@ describe("W1[D1]: record 重建 round-trip（call 级详情经 agent-settled res
     const recordPath = seedSettledRunWithCall(tmpDir, runId, { content: longContent });
 
     const entries: CustomEntry[] = [v2RegisteredEntry(runId, recordPath)];
-    const store = new JsonlRunStore({ sessionDir: tmpDir, ctx: mkCtx(entries) });
+    const store = new JsonlRunStore({ runsDir: tmpDir, ctx: mkCtx(entries) });
     const restored = await store.loadAll();
     expect(restored[0]!.state.calls.get(0)!.result?.content).toHaveLength(10000);
     // trace 节点回链同一 result（D-10 引用共享重建）
@@ -308,7 +308,7 @@ describe("W1[D1]: record 重建 round-trip（call 级详情经 agent-settled res
     const recordPath = seedSettledRunWithCall(tmpDir, runId, { content: "done" });
 
     const entries: CustomEntry[] = [v2RegisteredEntry(runId, recordPath)];
-    const store = new JsonlRunStore({ sessionDir: tmpDir, ctx: mkCtx(entries) });
+    const store = new JsonlRunStore({ runsDir: tmpDir, ctx: mkCtx(entries) });
     const restored = await store.loadAll();
     expect(restored[0]!.spec.scriptSource).toBe("agent('x')");
     expect(restored[0]!.spec.scriptName).toBe("test-script");
@@ -324,7 +324,7 @@ describe("W1[D1]: record 重建 round-trip（call 级详情经 agent-settled res
     appendRecordLine(tmpDir, runId, { type: "agent-started", seq: 3, ts: 1150, taskIndex: 1, agentName: "reviewer", attempt: 1, phase: "review" });
 
     const entries: CustomEntry[] = [v2RegisteredEntry(runId, recordPath)];
-    const store = new JsonlRunStore({ sessionDir: tmpDir, ctx: mkCtx(entries) });
+    const store = new JsonlRunStore({ runsDir: tmpDir, ctx: mkCtx(entries) });
     const restored = await store.loadAll();
     // [D6(a) 第 3 步] 活体判定源 = 终局记录注册表（聚合不持 status）
     expect(isRunSettled(restored[0]!)).toBe(false);
@@ -347,7 +347,7 @@ describe("W1[D1]: record 重建 round-trip（call 级详情经 agent-settled res
     appendRecordLine(tmpDir, runId, { type: "run-interrupted", seq: 3, ts: 1200, errorCode: "crashed", reason: "Process killed" });
 
     const entries: CustomEntry[] = [v2RegisteredEntry(runId, recordPath)];
-    const store = new JsonlRunStore({ sessionDir: tmpDir, ctx: mkCtx(entries) });
+    const store = new JsonlRunStore({ runsDir: tmpDir, ctx: mkCtx(entries) });
     const restored = await store.loadAll();
     // [D6(a) 第 3 步] 活体判定源 = 终局记录注册表（聚合不持 status）
     expect(isRunSettled(restored[0]!)).toBe(false); // 聚合两态保持
@@ -359,7 +359,7 @@ describe("W1[D1]: record 重建 round-trip（call 级详情经 agent-settled res
     const recordPath2 = appendRecordLine(tmpDir, runId2, { type: "run-created", seq: 1, ts: 1000, runId: runId2, workflowName: "test-script", argsSummary: "{}", scriptSource: "agent('x')" });
     appendRecordLine(tmpDir, runId2, { type: "run-interrupted", seq: 2, ts: 1100, errorCode: "crashed", reason: "Process killed" });
     appendRecordLine(tmpDir, runId2, { type: "run-resumed", seq: 3, ts: 1200, reason: "resume plan: replay=1 redispatch=1", host: "h" });
-    const store2 = new JsonlRunStore({ sessionDir: tmpDir, ctx: mkCtx([v2RegisteredEntry(runId2, recordPath2)]) });
+    const store2 = new JsonlRunStore({ runsDir: tmpDir, ctx: mkCtx([v2RegisteredEntry(runId2, recordPath2)]) });
     const restored2 = await store2.loadAll();
     expect(restored2[0]!.meta.interruptedAt).toBeUndefined();
     expect(runSummary(restored2[0]!).status).toBe("running");
@@ -374,16 +374,16 @@ describe("W2[D1]: RunStore.stateFilePath 暴露 record 流路径", () => {
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "wf-store-test-"));
-    store = new JsonlRunStore({ sessionDir: tmpDir });
+    store = new JsonlRunStore({ runsDir: tmpDir });
   });
 
   afterEach(() => {
     fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
 
-  it("stateFilePath(runId) 返回 <sessionDir>/workflow-state/<runId>.record.jsonl（[D1] 唯一持久件）", () => {
+  it("stateFilePath(runId) 返回 <runsDir>/<runId>.record.jsonl（[D1] 唯一持久件）", () => {
     const result = store.stateFilePath("run-foo");
-    expect(result).toBe(path.join(tmpDir, "workflow-state", `run-foo${RUN_EVENTS_SUFFIX}`));
+    expect(result).toBe(path.join(tmpDir, `run-foo${RUN_EVENTS_SUFFIX}`));
     expect(result.endsWith(".record.jsonl")).toBe(true);
   });
 });
@@ -410,7 +410,7 @@ describe("W17/W1[D1]: workflow-record 条目面（零条目写锚定 + v2 收编
 
   it("[停写锚定] save 全程零 workflow-record entry、零 state 文件（[D1] 无物化面）", async () => {
     const entries: CustomEntry[] = [];
-    const store = new JsonlRunStore({ sessionDir: tmpDir, pi: mkPi(entries) });
+    const store = new JsonlRunStore({ runsDir: tmpDir, pi: mkPi(entries) });
     const runId = "run-w17-shape";
     const run = WorkflowRun.reconstruct(
       runId,
@@ -422,7 +422,7 @@ describe("W17/W1[D1]: workflow-record 条目面（零条目写锚定 + v2 收编
 
     expect(entries.filter((e) => e.customType === WORKFLOW_RECORD_CUSTOM_TYPE)).toHaveLength(0);
     // 无 state 快照文件（[D1] 投影退役锚）
-    expect(fs.existsSync(path.join(tmpDir, "workflow-state", `${runId}.jsonl`))).toBe(false);
+    expect(fs.existsSync(path.join(tmpDir, `${runId}.jsonl`))).toBe(false);
   });
 
   it("[D4 接管] store rebind 后 v2 终态条目补写走新 pi（旧 pi 不再收 entry）", async () => {
@@ -435,7 +435,7 @@ describe("W17/W1[D1]: workflow-record 条目面（零条目写锚定 + v2 收编
     const seedEntries: CustomEntry[] = [v2RegisteredEntry(runId, recordPath)];
 
     const store = new JsonlRunStore({
-      sessionDir: tmpDir,
+      runsDir: tmpDir,
       pi: mkPi(entriesOld),
       ctx: mkCtx(seedEntries),
     });
@@ -463,7 +463,7 @@ describe("W17/W1[D1]: workflow-record 条目面（零条目写锚定 + v2 收编
     // 无任何 state 文件被创建过（[D1] 后磁盘唯一持久件 = record 流）
 
     const entries: CustomEntry[] = [v2RegisteredEntry(runId, recordPath)];
-    const store = new JsonlRunStore({ sessionDir: tmpDir, pi: mkPi(entries), ctx: mkCtx(entries) });
+    const store = new JsonlRunStore({ runsDir: tmpDir, pi: mkPi(entries), ctx: mkCtx(entries) });
     const loaded = await store.loadAll();
     expect(loaded).toHaveLength(1);
     expect(loaded[0]!.runId).toBe(runId);
@@ -492,7 +492,7 @@ describe("W17/W1[D1]: workflow-record 条目面（零条目写锚定 + v2 收编
     appendRecordLine(tmpDir, runId, { type: "run-settled", outcome: "interrupted", errorCode: "interrupted_abandoned", reason: "abandon window elapsed", artifactsDir: tmpDir, ts: 3000, seq: 2 });
 
     const entries: CustomEntry[] = [v2RegisteredEntry(runId, recordPath)];
-    const store = new JsonlRunStore({ sessionDir: tmpDir, pi: mkPi(entries), ctx: mkCtx(entries) });
+    const store = new JsonlRunStore({ runsDir: tmpDir, pi: mkPi(entries), ctx: mkCtx(entries) });
     // interrupted 已出 outcome 词表（[D2] 入 lifecycle）——历史帧在 strict 读面按
     // 词表外值拒绝（RecordStreamCorruptionError 上抛，storeHealthy=false——与半截
     // 行同语义，不静默跳过把损坏伪装成「无终局」）
@@ -505,7 +505,7 @@ describe("W17/W1[D1]: workflow-record 条目面（零条目写锚定 + v2 收编
     appendRecordLine(tmpDir, runId, { type: "run-settled", outcome: "failed", errorCode: "engine_crashed", reason: "boom", artifactsDir: tmpDir, ts: 3000, seq: 2 });
 
     const entries: CustomEntry[] = [v2RegisteredEntry(runId, recordPath), v2SettledEntry(runId)];
-    const storeA = new JsonlRunStore({ sessionDir: tmpDir, ctx: mkCtx(entries) });
+    const storeA = new JsonlRunStore({ runsDir: tmpDir, ctx: mkCtx(entries) });
     const loaded = await storeA.loadAll();
     // [D6(a) 第 3 步] 终局判定源 = 终局记录注册表（聚合不持 status）
     expect(isRunSettled(loaded[0]!)).toBe(true);
@@ -515,7 +515,7 @@ describe("W17/W1[D1]: workflow-record 条目面（零条目写锚定 + v2 收编
     expect(entries.filter((e) => e.customType === WORKFLOW_RECORD_CUSTOM_TYPE)).toHaveLength(2);
 
     // 第二次启动（新 store 实例读同一 session 面）：仍恰 2 条，零重复追加
-    const storeB = new JsonlRunStore({ sessionDir: tmpDir, ctx: mkCtx(entries) });
+    const storeB = new JsonlRunStore({ runsDir: tmpDir, ctx: mkCtx(entries) });
     await storeB.loadAll();
     expect(entries.filter((e) => e.customType === WORKFLOW_RECORD_CUSTOM_TYPE)).toHaveLength(2);
   });
@@ -526,7 +526,7 @@ describe("W17/W1[D1]: workflow-record 条目面（零条目写锚定 + v2 收编
     appendRecordLine(tmpDir, runId, { type: "agent-settled", taskIndex: 0, attempt: 1, outcome: "done", durationMs: 5, result: { content: "ok" }, ts: 2000, seq: 2 });
 
     const entries: CustomEntry[] = [v2RegisteredEntry(runId, recordPath)];
-    const store = new JsonlRunStore({ sessionDir: tmpDir, ctx: mkCtx(entries) });
+    const store = new JsonlRunStore({ runsDir: tmpDir, ctx: mkCtx(entries) });
     const loaded = await store.loadAll();
     expect(loaded).toHaveLength(1);
     // [D6(a) 第 3 步] 活体判定源 = 终局记录注册表（聚合不持 status）
@@ -541,7 +541,7 @@ describe("W17/W1[D1]: workflow-record 条目面（零条目写锚定 + v2 收编
     appendRecordLine(tmpDir, runId, { type: "run-settled", outcome: "done", artifactsDir: tmpDir, ts: 3000, seq: 2 });
 
     const entries: CustomEntry[] = [v2RegisteredEntry(runId, recordPath)];
-    const store = new JsonlRunStore({ sessionDir: tmpDir, ctx: mkCtx(entries) });
+    const store = new JsonlRunStore({ runsDir: tmpDir, ctx: mkCtx(entries) });
     // [D1] 反转（原坏行宽容收编）：拒绝语义——错误含文件/行定位与恢复指引
     await expect(store.loadAll()).rejects.toThrow(/record 流损坏/);
     await expect(store.loadAll()).rejects.toThrow(/恢复/);
@@ -550,9 +550,9 @@ describe("W17/W1[D1]: workflow-record 条目面（零条目写锚定 + v2 收编
   it("[中断收编] 注册条目指向缺失 record 流且无终态条目 → degraded running 重建交恢复链", async () => {
     const runId = "run-w1-missing";
     const entries: CustomEntry[] = [
-      v2RegisteredEntry(runId, path.join(tmpDir, "workflow-state", `${runId}${RUN_EVENTS_SUFFIX}`)),
+      v2RegisteredEntry(runId, path.join(tmpDir, `${runId}${RUN_EVENTS_SUFFIX}`)),
     ];
-    const store = new JsonlRunStore({ sessionDir: tmpDir, ctx: mkCtx(entries) });
+    const store = new JsonlRunStore({ runsDir: tmpDir, ctx: mkCtx(entries) });
     const loaded = await store.loadAll();
     // 设计 §3.1 失败路径样例「全文件不可解析 → 该 run 按中断收编」：静默跳过会让
     // 该实体对恢复链与收编扫描全部不可见——degraded running 基线交恢复链收编。
@@ -566,10 +566,10 @@ describe("W17/W1[D1]: workflow-record 条目面（零条目写锚定 + v2 收编
   it("[存续分流] record 流缺失 + 终态条目在 → 跳过不重建（呈现面归条目读者，不伪造收编）", async () => {
     const runId = "run-w1-missing-settled";
     const entries: CustomEntry[] = [
-      v2RegisteredEntry(runId, path.join(tmpDir, "workflow-state", `${runId}${RUN_EVENTS_SUFFIX}`)),
+      v2RegisteredEntry(runId, path.join(tmpDir, `${runId}${RUN_EVENTS_SUFFIX}`)),
       v2SettledEntry(runId),
     ];
-    const store = new JsonlRunStore({ sessionDir: tmpDir, ctx: mkCtx(entries) });
+    const store = new JsonlRunStore({ runsDir: tmpDir, ctx: mkCtx(entries) });
     // 条目在 = 实体呈现面归条目读者（runtime 投影）；壳侧不产生 running 聚合
     //（对不在场的流交恢复链 = 伪造收编事实）
     await expect(store.loadAll()).resolves.toEqual([]);
@@ -579,13 +579,13 @@ describe("W17/W1[D1]: workflow-record 条目面（零条目写锚定 + v2 收编
   it("[历史实体分流] 旧后缀锚点（.events.jsonl 注册条目）→ 跳过不重建（D1 历史数据处置：不读旧两件套）", async () => {
     const runId = "run-legacy-anchor";
     // 旧格式两件套在盘（历史遗留——不读不写不主动删）
-    const legacyJournalPath = path.join(tmpDir, "workflow-state", `${runId}.events.jsonl`);
+    const legacyJournalPath = path.join(tmpDir, `${runId}.events.jsonl`);
     fs.mkdirSync(path.dirname(legacyJournalPath), { recursive: true });
     fs.writeFileSync(legacyJournalPath, `${JSON.stringify({ type: "run-created", ts: 1000, runId, workflowName: "t", argsSummary: "{}" })}\n`, "utf8");
-    fs.writeFileSync(path.join(tmpDir, "workflow-state", `${runId}.jsonl`), `{"runId":"${runId}"}\n`, "utf8");
+    fs.writeFileSync(path.join(tmpDir, `${runId}.jsonl`), `{"runId":"${runId}"}\n`, "utf8");
 
     const entries: CustomEntry[] = [v2RegisteredEntry(runId, legacyJournalPath)];
-    const store = new JsonlRunStore({ sessionDir: tmpDir, ctx: mkCtx(entries) });
+    const store = new JsonlRunStore({ runsDir: tmpDir, ctx: mkCtx(entries) });
     // 旧后缀锚点 = 历史 run：不重建（从壳侧读取面消失 = D1 预期行为），零读取
     await expect(store.loadAll()).resolves.toEqual([]);
   });
@@ -597,7 +597,7 @@ describe("W17/W1[D1]: workflow-record 条目面（零条目写锚定 + v2 收编
     fs.appendFileSync(recordPath, '{"type":"run-settled","outcome":"compl\n', "utf8");
 
     const entries: CustomEntry[] = [v2RegisteredEntry(runId, recordPath), v2SettledEntry(runId)];
-    const store = new JsonlRunStore({ sessionDir: tmpDir, pi: mkPi(entries), ctx: mkCtx(entries) });
+    const store = new JsonlRunStore({ runsDir: tmpDir, pi: mkPi(entries), ctx: mkCtx(entries) });
     await expect(store.loadAll()).rejects.toThrow(/record 流损坏/);
     // 条目数量不变——不产生任何补写
     expect(entries.filter((e) => e.customType === WORKFLOW_RECORD_CUSTOM_TYPE)).toHaveLength(2);
@@ -614,7 +614,7 @@ describe("W17/W1[D1]: workflow-record 条目面（零条目写锚定 + v2 收编
         timestamp: new Date().toISOString(),
       },
     ];
-    const store = new JsonlRunStore({ sessionDir: tmpDir, ctx: mkCtx(entries) });
+    const store = new JsonlRunStore({ runsDir: tmpDir, ctx: mkCtx(entries) });
     await expect(store.loadAll()).resolves.toEqual([]);
   });
 });
@@ -639,7 +639,7 @@ describe("D5 store stale guard：rebind 后窗口内 stale appendEntry 统一 de
       const seedEntries: CustomEntry[] = [v2RegisteredEntry(runId, recordPath)];
 
       const store = new JsonlRunStore({
-        sessionDir: tmpDir,
+        runsDir: tmpDir,
         ctx: mkCtx(seedEntries),
       });
       // rebind 后新 pi 随下一次 reload 窗口变 stale（appendEntry 抛 PS-30 文案）

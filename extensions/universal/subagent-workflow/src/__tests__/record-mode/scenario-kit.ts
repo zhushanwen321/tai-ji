@@ -143,7 +143,7 @@ export function mkScenarioEnv(label: string): ScenarioEnv {
     rebindJournalAnchor: () => setRunEventJournalDirForTest(env.stateDir),
     cleanup: () => {
       setRunEventJournalDirForTest(undefined);
-      fs.rmSync(env.sessionDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+      fs.rmSync(env.runsDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
     },
   };
 }
@@ -252,7 +252,7 @@ export function makeScenarioDeps(env: RecordFixtureEnv, faux: FauxRunnerHandle):
   const appendedEntries: Array<{ type: string; data: unknown }> = [];
   const emitted: Array<{ event: string; payload: unknown }> = [];
   const deps: LifecycleDeps = {
-    store: new JsonlRunStore({ sessionDir: env.sessionDir }),
+    store: new JsonlRunStore({ runsDir: env.runsDir }),
     workerHost: new WorkerHostImpl(),
     runner: faux.runner,
     runs,
@@ -294,7 +294,7 @@ export async function adoptCrashedRun(
 ): Promise<{ recovered: number; runs: Map<string, WorkflowRun> }> {
   const runs = new Map<string, WorkflowRun>();
   const store = new JsonlRunStore({
-    sessionDir: env.sessionDir,
+    runsDir: env.runsDir,
     ctx: mkCtxWith([registeredEntry(runId, env.recordPath(runId))]) as never,
   });
   const result = await recoverCrashedRuns(store, runs, "Process killed (scenario fixture)");

@@ -85,7 +85,7 @@ import { execFile } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 
-import { encodeCwd } from "../assembly/path-encoding.ts";
+import { encodeCwd } from "@taiji/shared/paths";
 import type { ContinuationHost } from "../assembly/conversation-continuation.ts";
 import { WorktreeManager, type WorktreeRebuildOutcome } from "../worktree/worktree-manager.ts";
 
@@ -443,7 +443,7 @@ describe("[U5] close 顺序约束：Continuation settle 分支 route（通知送
 describe("[U5 / §3.2.2 事件表] 已收口会话 + message → revive 翻 running（复活路径不回归）", () => {
   it("markSettledOut 收口后 message 到达 → status 翻 running + 新轮派发（reviveOrThrow 承接）", async () => {
     const { RecordStore } = await import("../persistence/record-store.ts");
-    const store = new RecordStore("/tmp/u5-reactivate", undefined, {});
+    const store = new RecordStore(() => "/tmp/u5-reactivate", undefined, {});
     const record = makeIntentRecord("sa-reactivate", { status: "idle" });
     store.register(record);
 
@@ -479,7 +479,7 @@ describe("[U5 / §3.2.2 事件表] 已收口会话 + message → revive 翻 runn
 
   it("[S5] markSettledOut 清 worktreeHandle + 置 hadWorktree（重建守卫第三条判据承接）+ 幂等", async () => {
     const { RecordStore } = await import("../persistence/record-store.ts");
-    const store = new RecordStore("/tmp/u5-markarch-hw", undefined, {});
+    const store = new RecordStore(() => "/tmp/u5-markarch-hw", undefined, {});
     const handle = Object.freeze({ path: "/tmp/wt-ma", branch: "pi-sub-sa-ma-hw", baseCommit: "abc", mainCwd: "/repo" });
     const record = makeIntentRecord("sa-markarch-hw", { worktreeHandle: handle });
     store.register(record);

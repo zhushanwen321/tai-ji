@@ -53,7 +53,7 @@ const AGENTS_DIR = join(__dirname, "..", "..", "..", "agents");
 const agentMd = (name: string): string => join(AGENTS_DIR, name + ".md");
 
 // ── 临时 session 目录（RunStore 持久化根），每用例重建 ──────────────────
-let sessionDir: string;
+let runsDir: string;
 let createdStores: JsonlRunStore[] = [];
 
 /**
@@ -124,9 +124,9 @@ function makeMockRunner(): AgentRunner & { run: ReturnType<typeof vi.fn> } {
 // ── setup/teardown ──────────────────────────────────────────────────────
 
 beforeEach(() => {
-  sessionDir = mkdtempSync(join(tmpdir(), "wf-e2e-"));
+  runsDir = mkdtempSync(join(tmpdir(), "wf-e2e-"));
   createdStores = [];
-  bindRunStore(sessionDir, createdStores);
+  bindRunStore(runsDir, createdStores);
   // 压缩 agent 重试退避（1s → 10ms）：起 worker 的用例不再付真实退避等待
   // （调用时读 env，生产默认不变——见 core 侧 AGENT_RETRY_BACKOFF_BASE_ENV）。
   // （轮询等待已随 helper runWorkflowToSettled 内建小间隔，不再经 env 通道。）
@@ -134,7 +134,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  for (const dir of [sessionDir]) {
+  for (const dir of [runsDir]) {
     try {
       rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
     } catch (e) {
@@ -142,7 +142,7 @@ afterEach(() => {
       void e;
     }
   }
-  sessionDir = "";
+  runsDir = "";
   createdStores = [];
   vi.unstubAllEnvs();
   vi.restoreAllMocks();

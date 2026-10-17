@@ -55,6 +55,7 @@ describe('P-no-abort 结构面：建线路径与主会话零耦合', () => {
     expect(Object.keys(h.deps).sort()).toEqual([
       'buildLineSpawnOptions', 'forkSession', 'onWillReclaim', 'processes',
       'registerSession', 'resolveMainSessionFile', 'resolvePiCommand', 'traceContractInjection',
+      'trashDirectory', // D5 线树软删通道（C-comm-03 deps 注入形态；仍非主进程命令通道）
     ])
 
     const res = await svc.createLine({ mainSid: MAIN_SID, cwd: CWD })

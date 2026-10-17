@@ -146,7 +146,7 @@ function readDisposedState(
 }
 
 async function seedCreatedJournalFrame(recordsDir: string, id: string): Promise<void> {
-  await createRecordEventStream(recordsDir).append(id, {
+  await createRecordEventStream(() => recordsDir).append(id, {
     type: "record-created",
     ts: 1000,
     id,
@@ -357,7 +357,7 @@ describe("[M1/M2 Gate B] 编排性终态化 manifest 反查索引 + 重启冷查
       "utf-8",
     );
     const appended: Array<{ customType: string; data: Record<string, unknown> }> = [];
-    const store = new RecordStore(sessionsDir, undefined, {
+    const store = new RecordStore(() => sessionsDir, undefined, {
       appendEntry: (customType: string, data: unknown) => {
         appended.push({ customType, data: data as Record<string, unknown> });
       },

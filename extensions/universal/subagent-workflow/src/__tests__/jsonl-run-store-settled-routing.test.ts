@@ -59,7 +59,7 @@ function makeRun(runId: string): WorkflowRun {
 }
 
 function recordPath(runId: string): string {
-  return path.join(tmpDir, "workflow-state", `${runId}${RUN_EVENTS_SUFFIX}`);
+  return path.join(tmpDir, `${runId}${RUN_EVENTS_SUFFIX}`);
 }
 
 function appendRecordLine(runId: string, event: Record<string, unknown>): void {
@@ -69,7 +69,7 @@ function appendRecordLine(runId: string, event: Record<string, unknown>): void {
 
 describe("壳 store 判终局唯一判法（[D1] record fold）", () => {
   it("record 流 run-settled 帧 → settledRecordOf 载荷直取（outcome/errorCode/reason/settledAt）", async () => {
-    const store = new JsonlRunStore({ sessionDir: tmpDir });
+    const store = new JsonlRunStore({ runsDir: tmpDir });
     const ts = Date.now() - 1000;
     appendRecordLine("wf-route-settled", {
       type: "run-settled",
@@ -91,7 +91,7 @@ describe("壳 store 判终局唯一判法（[D1] record fold）", () => {
   });
 
   it("流不在场 / 流无 settled 帧 → undefined（未终局，零 warn——正常形态）", async () => {
-    const store = new JsonlRunStore({ sessionDir: tmpDir });
+    const store = new JsonlRunStore({ runsDir: tmpDir });
     expect(store.settledRecordOf("wf-route-missing")).toBeUndefined();
     // 在场但无终局帧：running run 的 record 流
     appendRecordLine("wf-route-running", { type: "run-created", seq: 1, ts: Date.now(), runId: "wf-route-running", workflowName: "t", argsSummary: "{}" });
@@ -101,7 +101,7 @@ describe("壳 store 判终局唯一判法（[D1] record fold）", () => {
   });
 
   it("流损坏 → 保守 miss + warn 留证（通知链降级；恢复面拒绝语义在 loadAll）", async () => {
-    const store = new JsonlRunStore({ sessionDir: tmpDir });
+    const store = new JsonlRunStore({ runsDir: tmpDir });
     fs.mkdirSync(path.dirname(recordPath("wf-route-broken")), { recursive: true });
     fs.writeFileSync(recordPath("wf-route-broken"), "{not-json\n", "utf8");
 
@@ -112,14 +112,14 @@ describe("壳 store 判终局唯一判法（[D1] record fold）", () => {
   });
 
   it("零快照写面：终局前后 save 均不产生 state 投影文件（磁盘唯一持久件 = record 流）", async () => {
-    const store = new JsonlRunStore({ sessionDir: tmpDir });
+    const store = new JsonlRunStore({ runsDir: tmpDir });
     const run = makeRun("wf-route-nosnap");
 
     await store.save(run); // running
     appendRecordLine(run.runId, { type: "run-settled", seq: 1, ts: Date.now(), outcome: "completed", artifactsDir: tmpDir });
     await store.save(run); // 终局后再 save
 
-    const stateDirFiles = fs.readdirSync(path.join(tmpDir, "workflow-state"));
+    const stateDirFiles = fs.readdirSync(path.join(tmpDir));
     expect(stateDirFiles).toEqual([`${run.runId}${RUN_EVENTS_SUFFIX}`]); // 无 <runId>.jsonl
     // stateFilePath 指向 record 流（唯一持久件指针）
     expect(store.stateFilePath(run.runId)).toBe(recordPath(run.runId));

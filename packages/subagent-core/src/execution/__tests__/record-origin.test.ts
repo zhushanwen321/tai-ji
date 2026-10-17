@@ -104,7 +104,7 @@ describe("record origin/parentRunId 持久化链（H2 W1）", () => {
   });
 
   it("[W1/D1] v2 注册条目携带 origin/parentRunId；注册 + 终态成对落盘经真实重建路径读回不丢", () => {
-    const store = new RecordStore(tmpDir);
+    const store = new RecordStore(() => tmpDir);
     const captured: SubagentRecordEntryV2[] = [];
     store.setPi(makeCapturePi(captured));
 
@@ -139,7 +139,7 @@ describe("record origin/parentRunId 持久化链（H2 W1）", () => {
   });
 
   it("[W1/D1] 缺省归一：无 origin 的 record 落 v2 注册条目 origin=\"tool\"（必填域归一，parentRunId 缺省不含键）", () => {
-    const store = new RecordStore(tmpDir);
+    const store = new RecordStore(() => tmpDir);
     const captured: SubagentRecordEntryV2[] = [];
     store.setPi(makeCapturePi(captured));
 
@@ -154,7 +154,7 @@ describe("record origin/parentRunId 持久化链（H2 W1）", () => {
   });
 
   it("重建投影不过滤（D1⑤）：workflow 来源 record 经内存源投影全量返回（includeWorkflow 通道）", () => {
-    const store = new RecordStore(tmpDir);
+    const store = new RecordStore(() => tmpDir);
     store.register(makeRecord({ id: "wf-step-2", origin: "workflow", parentRunId: "wf-run-2" }));
     const all = store.collectRecords(50, "all", "sess-origin", true);
     expect(all.map((r) => r.id)).toContain("wf-step-2");
@@ -162,7 +162,7 @@ describe("record origin/parentRunId 持久化链（H2 W1）", () => {
   });
 
   it("[W0 / D1] stepIndex 往返保真：register 落盘 entry 含字段，真实重建路径读回不丢", () => {
-    const store = new RecordStore(tmpDir);
+    const store = new RecordStore(() => tmpDir);
     const captured: SubagentRecordEntryV2[] = [];
     store.setPi(makeCapturePi(captured));
 
@@ -186,7 +186,7 @@ describe("record origin/parentRunId 持久化链（H2 W1）", () => {
   });
 
   it("[W0 / D1·W1 v2] stepIndex 缺省负向：无字段 record 落 v2 条目不含键（序列化自然缺省）", () => {
-    const store = new RecordStore(tmpDir);
+    const store = new RecordStore(() => tmpDir);
     const captured: SubagentRecordEntryV2[] = [];
     store.setPi(makeCapturePi(captured));
 
@@ -211,7 +211,7 @@ describe("collectRecords includeWorkflow 查询面（H2 W1）", () => {
   });
 
   function makeStore(): RecordStore {
-    return new RecordStore(tmpDir);
+    return new RecordStore(() => tmpDir);
   }
 
   it("缺省过滤 origin=workflow（tool record 可见），includeWorkflow:true 放行", () => {
@@ -308,7 +308,7 @@ describe("治理面负向规格（D1⑥：恢复链对 workflow origin 全量可
 
     // 新 store（模拟重启后内存恒空）执行恢复链
     const recovered: SubagentRecordEntryV2[] = [];
-    const store2 = new RecordStore(tmpDir);
+    const store2 = new RecordStore(() => tmpDir);
     store2.setPi(makeCapturePi(recovered));
     store2.recoverEntryOnlyOrphans(mainFile, "sess-origin");
 
@@ -338,7 +338,7 @@ describe("治理面负向规格（D1⑥：恢复链对 workflow origin 全量可
   it("[v2/D1] 条目 schema 面：注册条目透传 origin/parentRunId/stepIndex，终态条目收敛终局域（写入侧单点）", () => {
     // 直连写入侧单点的补充断言（往返用例已锁全链，此处锁两族条目的字段白名单本身）。
     // 入参 = 真实 register/archive 落盘产物（不手搓 entry data 绕过写侧 schema）。
-    const store = new RecordStore(tmpDir);
+    const store = new RecordStore(() => tmpDir);
     const captured: SubagentRecordEntryV2[] = [];
     store.setPi(makeCapturePi(captured));
 

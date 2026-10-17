@@ -179,7 +179,7 @@ describe("RecordStore", () => {
   // ============================================================
   describe("archive 立即移除", () => {
     it("archive 后 record 立即从内存移除（不再 linger）", () => {
-      const store = new RecordStore(tmpDir);
+      const store = new RecordStore(() => tmpDir);
       const r = makeRecord({ id: "sync-1", mode: "background", status: "idle" });
       store.register(r);
       expect(store.getMutable("sync-1")).toBeDefined();
@@ -188,7 +188,7 @@ describe("RecordStore", () => {
     });
 
     it("background record 同样立即移除（不再 FIFO）", () => {
-      const store = new RecordStore(tmpDir);
+      const store = new RecordStore(() => tmpDir);
       const r = makeRecord({ id: "bg-1", mode: "background", status: "idle" });
       store.register(r);
       store.archive(r);
@@ -201,7 +201,7 @@ describe("RecordStore", () => {
   // ============================================================
   describe("collectRecords 合并", () => {
     it("内存 running record 出现在结果中", () => {
-      const store = new RecordStore(tmpDir);
+      const store = new RecordStore(() => tmpDir);
       store.register(makeRecord({ id: "run-1", mode: "background", startedAt: 1000 }));
       const ids = store.collectRecords(100).map((r) => r.id);
       expect(ids).toContain("run-1");
@@ -213,7 +213,7 @@ describe("RecordStore", () => {
         id: "bg-1", agent: "worker", mode: "background", task: "do it", startedAt: 5000,
       });
       // 无 sidecar → 重建单规则兜底 idle + interrupted-by-restart（§3.2.4「文件不存在」行）
-      const store = new RecordStore(tmpDir);
+      const store = new RecordStore(() => tmpDir);
       const found = store.collectRecords(100).find((r) => r.id === "bg-1");
       expect(found).toBeDefined();
       expect(found?.status).toBe("idle");
@@ -234,7 +234,7 @@ describe("RecordStore", () => {
       writeSessionJsonl(sessionFile, {
         id: "bg-1", agent: "worker", mode: "background", task: "do it", startedAt: 5000,
       });
-      const store = new RecordStore(tmpDir);
+      const store = new RecordStore(() => tmpDir);
       store.register(makeRecord({ id: "run-1", mode: "background", startedAt: 1000 }));
       const filter: StatusFilter = "running";
       const ids = store.collectRecords(100, filter).map((r) => r.id);
@@ -247,7 +247,7 @@ describe("RecordStore", () => {
       writeSessionJsonl(sessionFile, {
         id: "bg-1", agent: "worker", mode: "background", task: "do it", startedAt: 5000,
       });
-      const store = new RecordStore(tmpDir);
+      const store = new RecordStore(() => tmpDir);
       store.register(makeRecord({ id: "run-1", mode: "background", startedAt: 1000 }));
       const ids = store.collectRecords(100).map((r) => r.id);
       expect(ids).toContain("run-1");
@@ -259,7 +259,7 @@ describe("RecordStore", () => {
       writeSessionJsonl(sessionFile, {
         id: "dup-1", agent: "worker", mode: "background", task: "from disk", startedAt: 5000,
       });
-      const store = new RecordStore(tmpDir);
+      const store = new RecordStore(() => tmpDir);
       store.register(makeRecord({ id: "dup-1", mode: "background", status: "running", startedAt: 5000 }));
       const found = store.collectRecords(100).find((r) => r.id === "dup-1");
       expect(found?.status).toBe("running"); // 内存 running 覆盖磁盘 idle（SP-2）
@@ -287,7 +287,7 @@ describe("RecordStore", () => {
       });
 
       // ROOT 进程的 store：sessionsDir/recordsDir 与子进程写盘目录同段（getSubagentSessionDir 同源）
-      const store = new RecordStore(sessionsDir, new ManifestStore(recordsDir), undefined);
+      const store = new RecordStore(() => sessionsDir, new ManifestStore(() => recordsDir), undefined);
       const recs = store.collectRecords(10, "all", "root-main");
       const ids = recs.map((r) => r.id);
 
@@ -311,7 +311,7 @@ describe("RecordStore", () => {
   // ============================================================
   describe("compareRecords 排序", () => {
     it("status priority（running < closed）", () => {
-      const store = new RecordStore(tmpDir);
+      const store = new RecordStore(() => tmpDir);
       // 被测对象 = compareRecords 的状态优先级：两条内存记录即可表达（磁盘终态投影
       // 已由事件流承载，与本用例的比较逻辑无关——不再借 sidecar fixture 造形态）。
       const running = makeRecord({ id: "run-1", mode: "background", startedAt: 3000, status: "running" });
@@ -330,7 +330,7 @@ describe("RecordStore", () => {
     });
 
     it("同 status 时 startedAt desc（新→旧）", () => {
-      const store = new RecordStore(tmpDir);
+      const store = new RecordStore(() => tmpDir);
       writeSessionJsonl(path.join(tmpDir, "old.jsonl"), {
         id: "old", agent: "w", mode: "background", task: "t", startedAt: 1000,
       });
@@ -348,7 +348,7 @@ describe("RecordStore", () => {
   // ============================================================
   describe("running 态 record（旧 idle 折入，等待续聊）", () => {
     it("getMutable 能查到 running record（不筛 status，running record 留内存不 archive）", () => {
-      const store = new RecordStore(tmpDir);
+      const store = new RecordStore(() => tmpDir);
       const r = makeRecord({ id: "idle-1", status: "running" });
       store.register(r);
       // running record 不 archive → getMutable 仍可查（续聊定位依赖此）
@@ -356,14 +356,14 @@ describe("RecordStore", () => {
     });
 
     it("running record 经 collectRecords(statusFilter=all) 可见", () => {
-      const store = new RecordStore(tmpDir);
+      const store = new RecordStore(() => tmpDir);
       store.register(makeRecord({ id: "idle-2", status: "running" }));
       const ids = store.collectRecords(100, "all").map((r) => r.id);
       expect(ids).toContain("idle-2");
     });
 
     it("running record 经 collectRecords(statusFilter=running) 可见（v4 B-1：旧 idle 折入 running）", () => {
-      const store = new RecordStore(tmpDir);
+      const store = new RecordStore(() => tmpDir);
       store.register(makeRecord({ id: "idle-3", status: "running" }));
       const ids = store.collectRecords(100, "running").map((r) => r.id);
       expect(ids).toContain("idle-3");
@@ -376,7 +376,7 @@ describe("RecordStore", () => {
   // ============================================================
   describe("重建缓存", () => {
     it("新 session.jsonl 无需内存事件即立即可见（[perf] stat 校验取代 notifyChange 整体失效）", () => {
-      const store = new RecordStore(tmpDir);
+      const store = new RecordStore(() => tmpDir);
       // 首次 collect：空目录
       expect(store.collectRecords(100)).toHaveLength(0);
       // 写新 session.jsonl（模拟外部进程/子进程写入——不经本进程任何内存事件）
@@ -396,7 +396,7 @@ describe("RecordStore", () => {
   // ============================================================
   describe("dispose / revive", () => {
     it("dispose 后 notifyChange 不再触发 listener", () => {
-      const store = new RecordStore(tmpDir);
+      const store = new RecordStore(() => tmpDir);
       let count = 0;
       store.onChange(() => { count++; });
       store.register(makeRecord({ id: "r1", startedAt: 1000 }));
@@ -427,7 +427,7 @@ describe("RecordStore", () => {
     it(".state 新格式 stopReason 非法值（外部损坏）→ idle + interrupted-by-restart 兜底", () => {
       const sessionFile = writeBaseSession();
       fs.writeFileSync(`${sessionFile}.state`, JSON.stringify({ status: "idle", reason: "garbage-reason" }), "utf-8");
-      const store = new RecordStore(tmpDir);
+      const store = new RecordStore(() => tmpDir);
       const found = store.collectRecords(100).find((r) => r.id === SESSION_ID);
       expect(found?.status).toBe("idle");
       expect(found?.stopReason).toBe("interrupted-by-restart");
@@ -442,7 +442,7 @@ describe("RecordStore", () => {
       const sessionFile = writeBaseSession();
       // .alive 在持（异宿主探活形态）不参与 status 判定——探活读面走 findForeignLiveInstance 现查
       writeAliveMarker(sessionFile, { pid: process.pid, id: SESSION_ID, startedAt: STARTED_AT });
-      const store = new RecordStore(tmpDir);
+      const store = new RecordStore(() => tmpDir);
       const found = store.collectRecords(100).find((r) => r.id === SESSION_ID);
       expect(found?.status).toBe("idle");
       expect(found?.stopReason).toBe("interrupted-by-restart");
@@ -454,7 +454,7 @@ describe("RecordStore", () => {
     it(".alive + 死 pid（崩溃残留）→ 同款 idle + interrupted-by-restart", () => {
       const sessionFile = writeBaseSession();
       writeAliveMarker(sessionFile, { pid: 9999999, id: SESSION_ID, startedAt: STARTED_AT });
-      const store = new RecordStore(tmpDir);
+      const store = new RecordStore(() => tmpDir);
       const found = store.collectRecords(100).find((r) => r.id === SESSION_ID);
       expect(found?.status).toBe("idle");
       expect(found?.stopReason).toBe("interrupted-by-restart");
@@ -475,7 +475,7 @@ describe("RecordStore", () => {
       writeSessionJsonl(path.join(tmpDir, "other.jsonl"), {
         id: "other", agent: "w", mode: "background", task: "t", startedAt: 2000, rootSessionId: "sess-B",
       });
-      const store = new RecordStore(tmpDir);
+      const store = new RecordStore(() => tmpDir);
       const ids = store.collectRecords(100, "all", "sess-A").map((r) => r.id);
       expect(ids).toEqual(["mine"]); // other 属于 sess-B，被隔离
     });
@@ -484,7 +484,7 @@ describe("RecordStore", () => {
       writeSessionJsonl(path.join(tmpDir, "legacy.jsonl"), {
         id: "legacy", agent: "w", mode: "background", task: "t", startedAt: 1000, // 无 rootSessionId
       });
-      const store = new RecordStore(tmpDir);
+      const store = new RecordStore(() => tmpDir);
       const ids = store.collectRecords(100, "all", "sess-A").map((r) => r.id);
       expect(ids).toEqual([]); // 旧文件被排除
     });
@@ -496,13 +496,13 @@ describe("RecordStore", () => {
       writeSessionJsonl(path.join(tmpDir, "tagged.jsonl"), {
         id: "tagged", agent: "w", mode: "background", task: "t", startedAt: 2000, rootSessionId: "sess-A",
       });
-      const store = new RecordStore(tmpDir);
+      const store = new RecordStore(() => tmpDir);
       const ids = store.collectRecords(100).map((r) => r.id);
       expect(ids.sort()).toEqual(["legacy", "tagged"]); // 全返回，不过滤
     });
 
     it("内存源：只返回 rootSessionId 匹配的 running record", () => {
-      const store = new RecordStore(tmpDir);
+      const store = new RecordStore(() => tmpDir);
       store.register(makeRecord({ id: "mine", startedAt: 1000, rootSessionId: "sess-A" }));
       store.register(makeRecord({ id: "other", startedAt: 2000, rootSessionId: "sess-B" }));
       const ids = store.collectRecords(100, "all", "sess-A").map((r) => r.id);
@@ -516,7 +516,7 @@ describe("RecordStore", () => {
       writeSessionJsonl(path.join(tmpDir, "disk-B.jsonl"), {
         id: "disk-B", agent: "w", mode: "background", task: "t", startedAt: 2000, rootSessionId: "sess-B",
       });
-      const store = new RecordStore(tmpDir);
+      const store = new RecordStore(() => tmpDir);
       store.register(makeRecord({ id: "mem-A", startedAt: 3000, rootSessionId: "sess-A" }));
       store.register(makeRecord({ id: "mem-B", startedAt: 4000, rootSessionId: "sess-B" }));
       const ids = store.collectRecords(100, "all", "sess-A").map((r) => r.id).sort();
@@ -530,7 +530,7 @@ describe("RecordStore", () => {
       writeSessionJsonl(path.join(tmpDir, "b.jsonl"), {
         id: "b", agent: "w", mode: "background", task: "t", startedAt: 2000, rootSessionId: "sess-B",
       });
-      const store = new RecordStore(tmpDir);
+      const store = new RecordStore(() => tmpDir);
       // 先查 sess-A（建缓存）
       expect(store.collectRecords(100, "all", "sess-A").map((r) => r.id)).toEqual(["a"]);
       // 再查 sess-B（复用缓存基底，过滤不交叉）
@@ -552,7 +552,7 @@ describe("RecordStore", () => {
         id: "bg-1", agent: "w", mode: "background", task: "t",
         startedAt: 5000, lastTs: 9000, rootSessionId: "sess-A",
       });
-      const store = new RecordStore(tmpDir);
+      const store = new RecordStore(() => tmpDir);
       const found = store.collectRecords(100, "all", "sess-A").find((r) => r.id === "bg-1");
       expect(found?.status).toBe("idle");
       // 非终态语义：endedAt 保持 undefined（待续聊；与内存 markSettled 形态一致）
@@ -566,7 +566,7 @@ describe("RecordStore", () => {
         startedAt: Date.now() - 1000, lastTs: Date.now(), rootSessionId: "sess-A",
       });
       writeAliveMarker(sessionFile, { pid: process.pid, id: "bg-1", startedAt: Date.now() - 1000 });
-      const store = new RecordStore(tmpDir);
+      const store = new RecordStore(() => tmpDir);
       const found = store.collectRecords(100, "all", "sess-A").find((r) => r.id === "bg-1");
       expect(found?.status).toBe("idle");
       expect(found?.endedAt).toBeUndefined();
@@ -585,7 +585,7 @@ describe("RecordStore", () => {
         turns: 4,
         totalTokens: 60725,
       });
-      const store = new RecordStore(tmpDir, undefined, undefined, recordsDir);
+      const store = new RecordStore(() => tmpDir, undefined, undefined, () => recordsDir);
       const found = store.collectRecords(100, "all", "sess-A").find((r) => r.id === "bg-1");
       expect(found?.status).toBe("idle");
       expect(found?.stopReason).toBe("completed");
@@ -605,7 +605,7 @@ describe("RecordStore", () => {
         stopReason: "completed",
         idleRound: { round: 2, ts: 8800, turns: 2, totalTokens: 300 },
       });
-      const store = new RecordStore(tmpDir, undefined, undefined, recordsDir);
+      const store = new RecordStore(() => tmpDir, undefined, undefined, () => recordsDir);
       const found = store.collectRecords(100, "all", "sess-A").find((r) => r.id === "bg-1");
       expect(found?.status).toBe("idle");
       expect(found?.endedAt).toBe(8800);
@@ -634,7 +634,7 @@ describe("RecordStore", () => {
         `${JSON.stringify({ type: "record-events", id })}\n${frames.join("\n")}\n`,
         "utf-8",
       );
-      const store = new RecordStore(tmpDir, undefined, undefined, path.join(tmpDir, "records"));
+      const store = new RecordStore(() => tmpDir, undefined, undefined, () => path.join(tmpDir, "records"));
       const found = store.collectRecords(100, "all", "sess-A").find((r) => r.id === "bg-1");
       expect(found?.status).toBe("idle"); // 重建单规则兜底（无收条 → interrupted-by-restart 展示）
       expect(found?.stopReason).toBe("interrupted-by-restart");
@@ -684,7 +684,7 @@ describe("RecordStore", () => {
       const pi = { appendEntry: vi.fn() };
       // Mock ManifestStore：listAllSync 返回损坏 manifest，绕开真实 fs 路径与 isValidManifest 守卫。
       const manifestStore = makeManifestStoreMock([brokenManifest()]);
-      const store = new RecordStore(tmpDir, manifestStore, pi);
+      const store = new RecordStore(() => tmpDir, manifestStore, pi);
 
       const result = store.collectRecords(100);
 
@@ -703,7 +703,7 @@ describe("RecordStore", () => {
     it("pi 为 null/undefined 时不抛错（向后兼容：不注入 pi 的旧调用路径）", () => {
       const manifestStore = makeManifestStoreMock([brokenManifest()]);
       // 不传 pi（undefined）—— 模拟 SubagentService 构造期 session_start 未触发的场景。
-      const store = new RecordStore(tmpDir, manifestStore);
+      const store = new RecordStore(() => tmpDir, manifestStore);
       expect(() => store.collectRecords(100)).not.toThrow();
       // 损坏 manifest 仍被跳过（不降级）
       const result = store.collectRecords(100);
@@ -714,7 +714,7 @@ describe("RecordStore", () => {
       const pi1 = { appendEntry: vi.fn() };
       const pi2 = { appendEntry: vi.fn() };
       const manifestStore = makeManifestStoreMock([brokenManifest()]);
-      const store = new RecordStore(tmpDir, manifestStore, pi1);
+      const store = new RecordStore(() => tmpDir, manifestStore, pi1);
       store.setPi(pi2);
 
       store.collectRecords(100);
@@ -741,7 +741,7 @@ describe("RecordStore", () => {
         startedAt: 1000, rootSessionId: "sess-sp2",
       });
       // 无任何 sidecar marker → 单规则兜底
-      const store = new RecordStore(tmpDir);
+      const store = new RecordStore(() => tmpDir);
       const found = store.collectRecords(100, "all", "sess-sp2").find((r) => r.id === "sa-sp2-1");
       expect(found).toBeDefined();
       expect(found?.status).toBe("idle");
@@ -770,11 +770,11 @@ describe("RecordStore", () => {
       const appended: Array<{ customType: string; data: Record<string, unknown> }> = [];
       const recordsDir = path.join(rootDir, "records");
       fs.mkdirSync(recordsDir, { recursive: true });
-      const store = new RecordStore(tmpDir, undefined, {
+      const store = new RecordStore(() => tmpDir, undefined, {
         appendEntry: (customType: string, data: unknown) => {
           appended.push({ customType, data: data as Record<string, unknown> });
         },
-      } as never, recordsDir);
+      } as never, () => recordsDir);
       return { store, appended };
     }
 
@@ -1059,7 +1059,7 @@ describe("RecordStore", () => {
   describe("reconstructAll 目录读失败分通道（collectRecords 冷查链消费）", () => {
     it("sessions 目录不存在（ENOENT）→ 空表且零 warn（合法缺省静默）", () => {
       fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
-      const store = new RecordStore(tmpDir);
+      const store = new RecordStore(() => tmpDir);
       expect(store.collectRecords(100)).toEqual([]);
       expect(loggerMock.warn).not.toHaveBeenCalled();
     });
@@ -1067,7 +1067,7 @@ describe("RecordStore", () => {
     it("sessions 目录位被文件占据（ENOTDIR）→ 空表 + warn 留痕（IO 故障可诊断）", () => {
       fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
       fs.writeFileSync(tmpDir, "not a directory");
-      const store = new RecordStore(tmpDir);
+      const store = new RecordStore(() => tmpDir);
       expect(store.collectRecords(100)).toEqual([]);
       expect(loggerMock.warn).toHaveBeenCalledWith(
         expect.stringContaining("reconstructAll"),
@@ -1088,7 +1088,7 @@ describe("RecordStore", () => {
     /** 构造带 appendEntry 捕获的 store（pi 注入通道，对齐生产 setPi 后形态）。 */
     function makeStoreWithPi(): { store: RecordStore; appended: AppendedCall[] } {
       const appended: AppendedCall[] = [];
-      const store = new RecordStore(tmpDir, undefined, {
+      const store = new RecordStore(() => tmpDir, undefined, {
         appendEntry: (customType: string, data: unknown) => {
           appended.push({ customType, data });
         },
@@ -1165,7 +1165,7 @@ describe("RecordStore", () => {
     });
 
     it("pi 未注入（session_start 前）：三写点均安全降级不抛错", () => {
-      const store = new RecordStore(tmpDir);
+      const store = new RecordStore(() => tmpDir);
       const r = makeRecord();
       expect(() => store.register(r)).not.toThrow();
       expect(() => store.archive(r)).not.toThrow();
@@ -1190,7 +1190,7 @@ describe("RecordStore", () => {
         startedAt: 1000,
       });
 
-      const store = new RecordStore(tmpDir);
+      const store = new RecordStore(() => tmpDir);
       const records = store.collectRecords(100);
       expect(records).toHaveLength(1); // 扫描本身不受索引写失败影响
 
@@ -1221,7 +1221,7 @@ describe("RecordStore", () => {
         startedAt: 1000,
       });
 
-      const store = new RecordStore(tmpDir);
+      const store = new RecordStore(() => tmpDir);
       store.collectRecords(100);
       await vi.waitFor(() => expect(saveIndexMock).toHaveBeenCalled());
 
@@ -1308,7 +1308,7 @@ function v2CapturePi(captured: unknown[]): { appendEntry: (customType: string, d
 }
 
 function v2ScanEvents(recordsDir: string, id: string): Promise<readonly RecordEvent[]> {
-  return createRecordEventStream(recordsDir).scan(id);
+  return createRecordEventStream(() => recordsDir).scan(id);
 }
 
 function v2ReadEventLines(recordsDir: string, id: string): RecordEvent[] {
@@ -1339,7 +1339,7 @@ describe("record 写侧 v2：事件写点映射逐点（W1 D3 表对照）", () 
   });
 
   function makeStore(captured: unknown[] = []): RecordStore {
-    const store = new RecordStore(sessionsDir, undefined, v2CapturePi(captured), recordsDir);
+    const store = new RecordStore(() => sessionsDir, undefined, v2CapturePi(captured), () => recordsDir);
     return store;
   }
 
@@ -1661,7 +1661,7 @@ describe("record-created 帧承载绑定侧独有字段（model / thinkingLevel 
   });
 
   function makeStoreForFields(): RecordStore {
-    return new RecordStore(fieldSessions, undefined, v2CapturePi([]), fieldRecords);
+    return new RecordStore(() => fieldSessions, undefined, v2CapturePi([]), () => fieldRecords);
   }
 
   it("指定模型/档位且启用 worktree → 三个字段进 created 帧", async () => {
@@ -1877,7 +1877,7 @@ describe("[④ 纯索引水位] manifest 水位（写侧嵌入 + 读侧校验）
 
   /** 生产形态 store（manifestStore + manifestDir 双接线——水位校验的前提）。 */
   function newWmStore(): RecordStore {
-    return new RecordStore(wmSessions, new ManifestStore(wmRecords), undefined, wmRecords);
+    return new RecordStore(() => wmSessions, new ManifestStore(() => wmRecords), undefined, () => wmRecords);
   }
 
   /** 播种 settled record（created + settled 帧，无子 session 文件——manifest 源独占可见）。 */

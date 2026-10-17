@@ -140,7 +140,7 @@ describe("[U8/S8] 旧格式磁盘组只读兼容——恒 idle + stopReason 桥�
     writeOld("sa-om-completed", "completed");
     writeOld("sa-om-cancelled", "cancelled");
 
-    const store = new RecordStore(sessionsDir, new ManifestStore(manifestDir));
+    const store = new RecordStore(() => sessionsDir, new ManifestStore(() => manifestDir));
     const all = store.collectRecords(20, "all");
     for (const id of ["sa-om-closed", "sa-om-completed", "sa-om-cancelled"]) {
       const rec = all.find((r) => r.id === id);
@@ -175,7 +175,7 @@ describe("[U8] manifest 双写映射 + 双写回读 + engine 域下行", () => {
     JSON.parse(fs.readFileSync(path.join(manifestDir, `${id}.json`), "utf-8")) as Record<string, unknown>;
 
   it("markSettled 轮间 idle（无 closedReason）→ legacy status=running + executionStatus=idle", () => {
-    const store = new RecordStore(sessionsDir, undefined, undefined, manifestDir);
+    const store = new RecordStore(() => sessionsDir, undefined, undefined, () => manifestDir);
     const record = makeExecutionRecord("sa-settle");
     store.register(record);
     store.markSettled(record, "gc");
@@ -189,7 +189,7 @@ describe("[U8] manifest 双写映射 + 双写回读 + engine 域下行", () => {
   });
 
   it("markSettledOut 收口落账 → legacy status=running + executionStatus=idle（[u-arch / §3.4 方案 A] 收起概念删除）", () => {
-    const store = new RecordStore(sessionsDir, undefined, undefined, manifestDir);
+    const store = new RecordStore(() => sessionsDir, undefined, undefined, () => manifestDir);
     const record = makeExecutionRecord("sa-arch");
     store.register(record);
     store.markSettled(record, "gc");
@@ -225,7 +225,7 @@ describe("[U8] manifest 双写映射 + 双写回读 + engine 域下行", () => {
       "utf-8",
     );
 
-    const store = new RecordStore(sessionsDir, new ManifestStore(manifestDir));
+    const store = new RecordStore(() => sessionsDir, new ManifestStore(() => manifestDir));
     const rec = store.collectRecords(10, "all").find((r) => r.id === "sa-bridge");
     expect(rec).toBeDefined();
     // 旧 cancelled 词汇读侧投影：idle（两态收敛）+ manifest closedReason 透传保留
@@ -236,7 +236,7 @@ describe("[U8] manifest 双写映射 + 双写回读 + engine 域下行", () => {
 
   it("双写回读：settle 产物（legacy running + executionStatus idle）manifest 源读回 idle 非 running", () => {
     // 写侧：settle（legacy running 下行 + 权威词 idle）
-    const writer = new RecordStore(sessionsDir, undefined, undefined, manifestDir);
+    const writer = new RecordStore(() => sessionsDir, undefined, undefined, () => manifestDir);
     const record = makeExecutionRecord("sa-roundtrip");
     writer.register(record);
     writer.markSettled(record, "gc");
@@ -244,7 +244,7 @@ describe("[U8] manifest 双写映射 + 双写回读 + engine 域下行", () => {
     expect(readManifest("sa-roundtrip").status).toBe("running");
 
     // 读侧：新进程（manifest 源兜底——磁盘组无子 session 文件）
-    const reader = new RecordStore(sessionsDir, new ManifestStore(manifestDir));
+    const reader = new RecordStore(() => sessionsDir, new ManifestStore(() => manifestDir));
     const rec = reader.collectRecords(10, "all").find((r) => r.id === "sa-roundtrip");
     expect(rec?.status).toBe("idle"); // executionStatus 优先（双写回读权威词）
     expect(rec?.closedReason).toBeUndefined();
@@ -252,14 +252,14 @@ describe("[U8] manifest 双写映射 + 双写回读 + engine 域下行", () => {
   });
 
   it("双写回读：markSettledOut 收口落账产物 manifest 源读回 idle（intent 停写停读）", () => {
-    const writer = new RecordStore(sessionsDir, undefined, undefined, manifestDir);
+    const writer = new RecordStore(() => sessionsDir, undefined, undefined, () => manifestDir);
     const record = makeExecutionRecord("sa-arch-rt");
     writer.register(record);
     writer.markSettled(record, "gc");
     writer.markSettledOut(record);
     writer.dispose();
 
-    const reader = new RecordStore(sessionsDir, new ManifestStore(manifestDir));
+    const reader = new RecordStore(() => sessionsDir, new ManifestStore(() => manifestDir));
     const rec = reader.collectRecords(10, "all").find((r) => r.id === "sa-arch-rt");
     expect(rec?.status).toBe("idle");
     reader.dispose();
@@ -272,7 +272,7 @@ describe("[U8] manifest 双写映射 + 双写回读 + engine 域下行", () => {
       sessionRef: { sessionId: "z-sess-1", dbPath: path.join(tmpDir, "session-db", "db.sqlite") },
       poolKey: "shared",
     };
-    const writer = new RecordStore(sessionsDir, undefined, undefined, manifestDir);
+    const writer = new RecordStore(() => sessionsDir, undefined, undefined, () => manifestDir);
     const record = makeExecutionRecord("sa-zc", {
       engine: "zcode",
       engineHandle,
@@ -287,7 +287,7 @@ describe("[U8] manifest 双写映射 + 双写回读 + engine 域下行", () => {
     expect(manifest.engineHandle).toEqual(engineHandle);
 
     // 读侧回读：manifest 源投影恢复引擎身份与锚（重启可见性兜底）
-    const reader = new RecordStore(sessionsDir, new ManifestStore(manifestDir));
+    const reader = new RecordStore(() => sessionsDir, new ManifestStore(() => manifestDir));
     const rec = reader.collectRecords(10, "all").find((r) => r.id === "sa-zc");
     expect(rec?.engine).toBe("zcode");
     expect(rec?.engineHandle).toEqual(engineHandle);
@@ -342,7 +342,7 @@ describe("[U8] manifest 双写映射 + 双写回读 + engine 域下行", () => {
     // 锚定 entry 源（recoverEntryOnlyOrphans 的 mainSessionFile 记忆点；非 interrupted
     // 终态条目在场 → 不触发纠偏 append），随后 collectRecords 经 mergedRecords 1.7
     //（zcode entry 源）→ 惰性 manifest 补建。
-    const store = new RecordStore(sessionsDir, undefined, undefined, manifestDir);
+    const store = new RecordStore(() => sessionsDir, undefined, undefined, () => manifestDir);
     store.recoverEntryOnlyOrphans(mainSessionFile, "root-session");
     const visible = store.collectRecords(10, "all").find((r) => r.id === "sa-entry-arch");
     expect(visible?.engine).toBe("zcode");
