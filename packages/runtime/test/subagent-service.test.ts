@@ -59,6 +59,8 @@ function createMockSessionStore(mainSessionFile: string, mainSessionId: string, 
     persistHandoffSidecar: () => {},
     // G4/u-h4：port trash 签名改 Promise<void>（失败保留文件并 reject），本测试不触删除路径
     trash: () => Promise.resolve(),
+    // [session-store-layout-inversion D5] 目录级整树软删 port（本测试不触删除路径）
+    trashDirectory: () => Promise.resolve(),
   }
 }
 

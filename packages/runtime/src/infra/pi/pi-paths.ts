@@ -19,7 +19,9 @@
  *       config/providers.json        ← taiji 扩展域（quota/authMethod/modelStates，pi 不扫描）
  *       sessions/                    ← Session jsonl 文件
  *         <encodeCwd>/               ← pi 按 cwd 自动分子目录（默认布局）
- *       subagents/<encodeCwd>/sessions/  ← subagent session 目录（相对 agentDir 派生不变）
+ *       subagents/<encodeCwd>/sessions/  ← subagent session 目录（旧布局残余读取面——
+ *           仅 subagent-extractor legacy 降级链读 W16 前旧 session 存量；新会话数据在
+ *           <dataDir>/ext-sessions/<rootSessionId>/subagents/，见 getSubagentSessionDir）
  */
 
 import {
@@ -136,8 +138,20 @@ export function getAgentsDir(): string {
 export { encodeCwd }
 
 /**
- * 获取 subagent session 目录路径。
- * <piAgentDir>/subagents/<encodeCwd(mainCwd)>/sessions/
+ * subagent session 目录（旧布局残余读取面）：`<piAgentDir>/subagents/<encodeCwd(mainCwd)>/sessions/`。
+ *
+ * [session-store-layout-inversion] 布局反转后新会话的 subagent 会话 jsonl 落
+ * `<dataDir>/ext-sessions/<rootSessionId>/subagents/sessions/`（subagent-core
+ * path-encoding.ts 的同名 getSubagentSessionDir，分区键 = rootSessionId）。与该同名函数
+ * 的语义分叉：本函数参数是 mainCwd、读旧布局；core 版参数是 rootSessionId、产新树落点。
+ *
+ * 本函数现役唯一消费方 = services/session/subagent-extractor.ts 的 legacy 降级链
+ * （W16 前创建的旧 session 的 sessionFile 回退查找；其存量 subagent jsonl 未迁移仍在
+ * 旧布局，按存量保留裁决静置，读旧布局即存量数据的正确来源，新会话数据不在此）。
+ *
+ * 本函数公式是对拍机检 check-artifact-dir-formula-sync.mjs 第四组 RUNTIME_TREE_FNS
+ * 的对位锚点（pi 宿主树段 'subagents' ↔ shared PI_SESSION_TREE_SEGMENTS[1]），
+ * 改公式须同步该机检与 shared 常量。
  */
 export function getSubagentSessionDir(mainCwd: string): string {
   return join(getPiAgentDir(), 'subagents', encodeCwd(mainCwd), 'sessions')

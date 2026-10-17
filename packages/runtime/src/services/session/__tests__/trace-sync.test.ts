@@ -84,6 +84,8 @@ function makeSessionStore(metas: ScannedSessionMeta[]): ISessionStore {
     normalizeSessionFileStreaming: () => {},
     persistHandoffSidecar: () => {},
     trash: () => Promise.resolve(),
+    // [session-store-layout-inversion D5] 目录级整树软删 port（本测试不触删除路径）
+    trashDirectory: () => Promise.resolve(),
   }
 }
 

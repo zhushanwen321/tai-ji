@@ -657,6 +657,11 @@ function resolveLegacySessionFile(
  * 当 background subagent 的 sessionFile 丢失（bg-notify 不带、无 listResponse）时，
  * 用 startedAt 时间戳匹配文件名中 ISO 时间戳最近的 .jsonl 文件。
  *
+ * 目录语义：本链仅对 W16 前创建的旧 session 可达（新 session 恒有 v2 自描述
+ * subagent-record entry，scanSubagentEntries 命中即返回、不经此链）；旧 session 的
+ * subagent jsonl 存量未迁移仍在旧布局目录（getSubagentSessionDir，存量保留静置），
+ * 读旧布局即存量数据的正确来源，不是布局反转遗漏。
+ *
  * @param mainCwd 主 session 的 cwd（用于推导 subagent session 目录）
  * @param startedAt bg-notify 的 startedAt 时间戳（ms）。缺失时返回最近的文件。
  */
