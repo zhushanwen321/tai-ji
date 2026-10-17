@@ -38,6 +38,23 @@
       @pointerup="onPointerUp"
       @wheel.prevent="onWheel"
     >
+      <!-- 边方向箭头（单一 marker + context-stroke 继承各边 kind 描边色——Chromium
+           119+ 支持；markerUnits=userSpaceOnUse 随视口缩放同步，与线宽同比） -->
+      <defs>
+        <marker
+          id="wfvz-dag-arrow"
+          viewBox="0 0 10 10"
+          refX="10"
+          refY="5"
+          markerWidth="7"
+          markerHeight="7"
+          orient="auto"
+          markerUnits="userSpaceOnUse"
+          data-testid="wfvz-dag-arrow-def"
+        >
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke" />
+        </marker>
+      </defs>
       <g :transform="`translate(${vp.tx},${vp.ty}) scale(${vp.k})`" data-testid="wfvz-dag-viewport">
         <!-- phase 分区背景列（当前 phase 高亮：accent 描边）。分区虚线描边 border-strong
              级弱化「面板感」、强化「分组感」（workflow-overlay-refine D3）；分区标签
@@ -64,13 +81,15 @@
           >{{ c.phase }}</text>
         </g>
 
-        <!-- 边：kind 着色（sequence 灰 / dataflow 实线深 / conditional 虚线 warn / loop-back 虚线 accent 下绕弧） -->
+        <!-- 边：kind 着色（sequence 灰 / dataflow 实线深 / conditional 虚线 warn / loop-back 虚线 accent 下绕弧）；
+             marker-end 箭头标流向（tip 落在目标锚点 = 节点边中点） -->
         <path
           v-for="le in edges"
           :key="le.edge.id"
           class="fill-none"
           :class="EDGE_KIND_CLASS[le.edge.kind]"
           :d="le.d"
+          marker-end="url(#wfvz-dag-arrow)"
           :data-testid="`wfvz-dag-edge-${le.edge.id}`"
         />
         <!-- 条件边谓词标注（原文截断，title 悬停全文） -->
