@@ -60,6 +60,7 @@ vi.mock('vue-i18n', async (importOriginal) => {
 // ── mock：agent tab 对话流渲染树（MessageStream stub + 编排接线 spy）────────────
 
 const loadSubagentDataMock = vi.fn().mockResolvedValue(undefined)
+const stopSubagentStreamMock = vi.fn()
 // loadError 用模块级可控 ref（agent tab 错误态用例注入失败值；useSubagentTabData 实装
 // 的 loadSubagentData 开头置空语义由用例内手动复位模拟）
 const loadErrorRef = ref<string | null>(null)
@@ -67,7 +68,7 @@ vi.mock('@/composables/panel/useSubagentTabData', () => ({
   useSubagentTabData: () => ({
     loadError: loadErrorRef,
     loadSubagentData: loadSubagentDataMock,
-    stopSubagentStream: vi.fn(),
+    stopSubagentStream: stopSubagentStreamMock,
     recordEngine: vi.fn(() => 'pi'),
   }),
 }))
@@ -101,6 +102,7 @@ function makeCall(overrides: Partial<WorkflowAgentCall> & { id: number }): Workf
     inputTokens: 100,
     outputTokens: 200,
     sessionId: `acs-${overrides.id}`,
+    memberRecordId: `rec-${overrides.id}`,
     ...overrides,
   }
 }
@@ -395,38 +397,64 @@ describe('WorkflowLivePanel · 多级 tab（使用者黑盒）', () => {
     expect(events.text()).not.toContain('run-created')
   })
 
-  it('trace 行点击开 agent tab：对话流编排被调 + MessageStream 挂载 agentcall 虚拟 id', async () => {
+  it('trace 行点击开 agent tab：对话流编排被调 + MessageStream 挂载三段式虚拟 id（流式管线复用）', async () => {
     const wrapper = await mountPanel()
     await wrapper.find('[data-testid="wf-viz-trace-row-0"]').trigger('click')
     await flushPromises()
-    // agent tab 出现（agentcall:acs-0 分区）
+    // agent tab 出现（subagent:<mainSid>:<memberRecordId> 三段式分区——与 drawer 同键，
+    // tee 流式帧 / entry 投影帧路由键同源命中）
     const stream = wrapper.find('[data-testid="message-stream-stub"]')
     expect(stream.exists()).toBe(true)
-    expect(stream.text()).toBe('agentcall:acs-0')
-    // mainSessionId 接线（fileSearch vid 修复）：agentcall 两段式 vid 的归属解析依赖它，
-    // 值 = 主 session id（D11⑤ 归属绑定发起 session）
+    expect(stream.text()).toBe(`subagent:${SID}:rec-0`)
+    // mainSessionId 接线（fileSearch vid 修复）：file 白名单/markdown cwd 解析归属主 session
     expect(stream.attributes('data-main-sid')).toBe(SID)
-    // 快照编排接线（useSubagentTabData.loadSubagentData 复用，零新拉取链）
-    expect(loadSubagentDataMock).toHaveBeenCalledWith('agentcall:acs-0')
+    // 对话流编排接线（useSubagentTabData.loadSubagentData 复用，三段式流式管线）
+    expect(loadSubagentDataMock).toHaveBeenCalledWith(`subagent:${SID}:rec-0`)
     // trace 详情元信息条渲染
     expect(wrapper.find('[data-testid="wf-viz-agent-meta"]').text()).toContain('worker-0')
   })
 
-  it('workflowUpdate 信号（命中活跃 run）→ agent tab 快照重拉（§3.1-2/D8 信号刷新链）', async () => {
+  it('workflowUpdate 信号不触发快照重拉（实时性由流式订阅接管——信号重拉会整分区覆盖打碎在途流）', async () => {
     const wrapper = await mountPanel()
     await wrapper.find('[data-testid="wf-viz-trace-row-0"]').trigger('click')
     await flushPromises()
     loadSubagentDataMock.mockClear()
-    // 面板挂载已登记活跃锚（setActiveWorkflowRun）——信号经 store 聚合触发纪元自增
+    // 面板挂载已登记活跃锚（setActiveWorkflowRun）——信号命中活跃 run 纪元自增，
+    // 但 agent tab 已切流式语义：不重拉快照（避免覆盖在途流式实体）
     const store = useWorkflowStore()
     store.triggerWorkflowReload(SID)
     await flushPromises()
-    expect(loadSubagentDataMock).toHaveBeenCalledWith('agentcall:acs-0')
-    // 非活跃 session 的信号不触发重拉（纪元不自增）
-    loadSubagentDataMock.mockClear()
-    store.triggerWorkflowReload('other-session')
-    await flushPromises()
     expect(loadSubagentDataMock).not.toHaveBeenCalled()
+  })
+
+  it('memberRecordId 未达：等待态（无 MessageStream）；到达后 watch 自愈加载', async () => {
+    const run = makeRun({
+      agentCalls: [makeCall({ id: 0, status: 'running', memberRecordId: undefined })],
+    })
+    const wrapper = await mountPanel(run)
+    await wrapper.find('[data-testid="wf-viz-trace-row-0"]').trigger('click')
+    await flushPromises()
+    // 等待态：等待提示在、MessageStream 不挂、零拉取
+    expect(wrapper.find('[data-testid="wf-viz-agent-waiting"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="message-stream-stub"]').exists()).toBe(false)
+    expect(loadSubagentDataMock).not.toHaveBeenCalled()
+    // 成员 record 就绪（run 推送换引用）→ vid 就绪 → watch 触发加载
+    await wrapper.setProps({
+      run: makeRun({ agentCalls: [makeCall({ id: 0, status: 'running' })] }),
+    })
+    await flushPromises()
+    expect(wrapper.find('[data-testid="wf-viz-agent-waiting"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="message-stream-stub"]').exists()).toBe(true)
+    expect(loadSubagentDataMock).toHaveBeenCalledWith(`subagent:${SID}:rec-0`)
+  })
+
+  it('组件卸载停流（独立 scope 订阅不泄漏）', async () => {
+    const wrapper = await mountPanel()
+    await wrapper.find('[data-testid="wf-viz-trace-row-0"]').trigger('click')
+    await flushPromises()
+    expect(stopSubagentStreamMock).not.toHaveBeenCalled()
+    wrapper.unmount()
+    expect(stopSubagentStreamMock).toHaveBeenCalledTimes(1)
   })
 
   it('agent tab 快照拉取失败：错误态 + 重试按钮；点重试重调快照编排（§3.1-2 同一错误态语言）', async () => {
@@ -445,7 +473,7 @@ describe('WorkflowLivePanel · 多级 tab（使用者黑盒）', () => {
     // 分支切走按钮消失，构造性防重复点击；mock 无副作用由用例手动复位模拟该语义）
     loadSubagentDataMock.mockClear()
     await retryBtn.trigger('click')
-    expect(loadSubagentDataMock).toHaveBeenCalledWith('agentcall:acs-0')
+    expect(loadSubagentDataMock).toHaveBeenCalledWith(`subagent:${SID}:rec-0`)
     loadErrorRef.value = null
     await flushPromises()
     expect(wrapper.find('[data-testid="wf-viz-agent-error"]').exists()).toBe(false)
