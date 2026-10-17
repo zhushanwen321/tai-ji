@@ -10,9 +10,9 @@
  *   nodeHeights 表传入布局；
  * - 边几何（正交路由）：锚点只取节点四条边的中点（4 个连线点）；顺序/数据流/条件
  *   = 源右中心→通道竖线→目标左中心的三段折线（同行退化直线），同通道并行边按车道
- *   错开不重合；loop-back = 侧向细道升降 + 底部总线（全图最深节点下方），贴边横行
- *   段下移进底边下方空隙带不压边框，任何段不穿节点；全部折点严格轴对齐（横竖两向
- *   不变量）；
+ *   错开不重合；loop-back 底边中点垂直进出（跨列两端下方无堆叠时四折点直连，被
+ *   同列堆叠挡住才走侧向细道 + 底边下空隙带，同列 U 形折返，自环边不产出几何），
+ *   任何段不穿节点；全部折点严格轴对齐（横竖两向不变量）；
  * - fit-to-view：computeFitTransform 内容四周留 FIT_PAD_PX 居中（k 封顶 1 不放大）；
  * - 端点缺失的边跳过不抛。
  *
@@ -261,6 +261,46 @@ describe('layoutEdges 正交路由（白盒）', () => {
     expect(toLaneY).toBeLessThan(lr1.y + lr1.h + 12)
     // 终锚 = 目标底中心（细道上升 → 空隙带短横 → 底中点收锚）
     expect(edge.points[7]).toEqual({ x: lr1.x + DAG_NODE_W / 2, y: lr1.y + lr1.h })
+  })
+
+  it('跨列 loop-back（两端下方无堆叠）：四折点直连，进出垂直于底边中点、节点附近无横行段', () => {
+    const d = dag({
+      phases: [
+        { name: 'p0', order: 0 },
+        { name: 'p1', order: 1 },
+        { name: 'p2', order: 2 },
+      ],
+      nodes: [
+        node({ id: 'a', phase: 'p0' }),
+        node({ id: 'r1', templateName: 'ra', phase: 'p1' }),
+        node({ id: 'r2', templateName: 'rb', phase: 'p1' }),
+        node({ id: 'f', templateName: 'zz', phase: 'p2' }),
+      ],
+      edges: [{ id: 'loop', from: 'f', to: 'a', kind: 'loop-back' }],
+    })
+    const layout = layoutDag(d)
+    const [la] = layout.nodes.filter((ln) => ln.node.id === 'a')
+    const [lf] = layout.nodes.filter((ln) => ln.node.id === 'f')
+    const deepest = Math.max(...layout.nodes.map((ln) => ln.y + ln.h))
+    const [edge] = layoutEdges(d, layout.nodes)
+    // p1 列的 r1/r2 既非端点也不在端点列——两端中轴无遮挡 → 四折点直连
+    expect(edge.points).toEqual([
+      { x: lf.x + DAG_NODE_W / 2, y: lf.y + lf.h },
+      { x: lf.x + DAG_NODE_W / 2, y: deepest + 28 },
+      { x: la.x + DAG_NODE_W / 2, y: deepest + 28 },
+      { x: la.x + DAG_NODE_W / 2, y: la.y + la.h },
+    ])
+    expectAxisAligned(edge.points)
+  })
+
+  it('自环回边（from===to）：不产出几何（无合法四中点正交环，循环语义由重试状态呈现）', () => {
+    const d = dag({
+      phases: [{ name: 'p0', order: 0 }],
+      nodes: [node({ id: 'a' })],
+      edges: [{ id: 'self', from: 'a', to: 'a', kind: 'loop-back' }],
+    })
+    const layout = layoutDag(d)
+    expect(layoutEdges(d, layout.nodes)).toHaveLength(0)
   })
 
   it('同通道并行边（fan-in）：竖线段按车道居中错开，不再重合成一根线', () => {

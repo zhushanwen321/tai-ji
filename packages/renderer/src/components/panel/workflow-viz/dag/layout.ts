@@ -22,10 +22,11 @@
  * - 顺序/数据流/条件边：源右中心 → 通道竖线 → 目标左中心的三段折线（同行退化直线）；
  *   同一通道（源同列且目标同列）的并行边竖线段默认重合，按纵向跨度重叠游程居中
  *   错开车道（LANE_STEP_PX），fan-in/fan-out 不再叠成一根线；
- * - loop-back：源底中心 → 底边下空隙带短降 → 源列侧向细道下探 → 底部总线（全图
- *   最深节点下方）横行 → 目标列侧向细道上升 → 目标底边下空隙带短横 → 目标底中心；
- *   同列回边 = U 形细道折返。细道在分区内边距带内（节点列之外），升降段不穿同列
- *   堆叠的节点；贴边水平段相对底边下移 LOOP_APPROACH_DROP，不压节点边框。
+ * - loop-back（底边中点进出）：跨列回边在两端同列下方均无堆叠节点时四折点直连——
+ *   源底边中点垂直下探 → 底部总线（全图最深节点下方）横行 → 目标底边中点垂直
+ *   上升，进出垂直于底边、节点附近无横行段；任一端下方被同列堆叠节点挡住时回退
+ *   侧向细道 + 底边下空隙带横行（LOOP_APPROACH_DROP，不压边框）；同列回边 = U 形
+ *   细道折返；自环边（from===to）画不出合法的四中点正交环，不产出几何。
  * 折点处用小半径圆弧过渡（视觉圆角，路由仍严格轴对齐）。
  */
 import type { WorkflowDag, WorkflowDagEdge, WorkflowDagNode } from '@taiji/shared'
@@ -310,14 +311,23 @@ type PendingEdge =
   | { edge: WorkflowDagEdge; kind: 'channeled'; chan: ChannelMember }
 
 /**
- * loop-back 路由：锚点 = 源底边中点出、目标底边中点进（连线点只取节点四边中点）。
- * 下降/上升段一律走源/目标列的侧向细道（分区内边距带内、节点列之外），任何段不穿
- * 节点卡片；贴边水平段走节点底边下方的空隙带（LOOP_APPROACH_DROP，分区底内边距
- * CLUSTER_PAD_BOTTOM / 行距 NODE_GAP 之内），不压节点边框——同列回边 = U 形细道
- * 折返；跨列回边 = 源细道下探 → 底部总线（全图最深节点下方 LOOP_DROP 处）横行 →
- * 目标细道上升 → 空隙带短横 → 底中点收锚。细道取朝向对端一侧（总线不回头折）。
+ * loop-back 路由（锚点只取节点四边中点：底边中点进出）。形态分三档：
+ * - 自环边（解析器把单调用点循环折叠成 from===to）：闭环要同时起止于底边中点必沿
+ *   底边折返或与自身重叠，无合法正交形态，不产出几何——循环语义由实例行重试状态
+ *   呈现，不画自指线；
+ * - 同列回边：U 形侧向细道折返（细道在分区左内边距带内，贴边横行走底边下空隙带）；
+ * - 跨列回边：两端同列下方均无堆叠节点时四折点直连——源底边中点垂直下探 → 底部
+ *   总线（全图最深节点下方 LOOP_DROP 处）横行 → 目标底边中点垂直上升，进出垂直
+ *   于底边；任一端下方被同列堆叠节点挡住（中轴升降段会穿卡片）时回退侧向细道 +
+ *   空隙带横行，细道取朝向对端一侧（总线不回头折）。
  */
-function loopBackPoints(from: DagLayoutNode, to: DagLayoutNode, deepestBottom: number): DagPoint[] {
+function loopBackPoints(
+  from: DagLayoutNode,
+  to: DagLayoutNode,
+  deepestBottom: number,
+  nodes: DagLayoutNode[],
+): DagPoint[] {
+  if (from === to) return []
   const fromBottom = from.y + from.h
   const toBottom = to.y + to.h
   const fromLaneY = fromBottom + LOOP_APPROACH_DROP
@@ -336,6 +346,17 @@ function loopBackPoints(from: DagLayoutNode, to: DagLayoutNode, deepestBottom: n
     ]
   }
   const busY = Math.max(deepestBottom, fromBottom, toBottom) + LOOP_DROP
+  // 同列下方堆叠节点会挡住中轴升降段（垂直段穿卡片）——任一端被挡即整体回退细道
+  const columnBlocked = (n: DagLayoutNode): boolean =>
+    nodes.some((o) => o !== n && Math.abs(o.x - n.x) < COINCIDE_EPS && o.y > n.y)
+  if (!columnBlocked(from) && !columnBlocked(to)) {
+    return [
+      { x: bx1, y: fromBottom },
+      { x: bx1, y: busY },
+      { x: bx2, y: busY },
+      { x: bx2, y: toBottom },
+    ]
+  }
   const towardTo = from.x > to.x
   const fromSideX = towardTo ? from.x - LOOP_SIDE_OFFSET : from.x + DAG_NODE_W + LOOP_SIDE_OFFSET
   const toSideX = towardTo ? to.x + DAG_NODE_W + LOOP_SIDE_OFFSET : to.x - LOOP_SIDE_OFFSET
@@ -375,7 +396,8 @@ export function layoutEdges(dag: WorkflowDag, nodes: DagLayoutNode[]): DagLayout
     const to = byId.get(edge.to)
     if (!from || !to) continue
     if (edge.kind === 'loop-back') {
-      pending.push({ edge, kind: 'fixed', points: loopBackPoints(from, to, deepestBottom) })
+      const points = loopBackPoints(from, to, deepestBottom, nodes)
+      if (points.length > 0) pending.push({ edge, kind: 'fixed', points })
       continue
     }
     const x1 = from.x + DAG_NODE_W
