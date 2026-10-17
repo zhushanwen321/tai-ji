@@ -613,19 +613,29 @@ export { reapOrphanRuns } from "./execution/persistence/run-state-evidence.ts";
 // rootCwd 贯穿 env 名单源（根进程无 env → ctx.cwd 兜底，与 SessionBaselines 推导
 // 同式——壳侧复制推导式时经此常量锚定 env 名防漂移）。壳生产消费必须走 barrel。
 export { ENV_ROOT_CWD } from "./execution/service/session-baselines.ts";
+// [session-store-layout-inversion D2/D3] rootSessionId 贯穿 env 名单源（分区键：workflow
+// runs 目录 / subagent 记录目录同键）。壳侧解析分区键时经此常量锚定 env 名防漂移。
+export { ENV_ROOT_SESSION_ID } from "./execution/service/session-baselines.ts";
 export { getSubagentRecordsDir, getSubagentModelSwitchResultsDir } from "./execution/assembly/path-encoding.ts";
 
-// resolvePiSessionScopedDir：pi 宿主 sessionDir 布局（cwd slug + existsSync 探测）
-// 的单一权威源——pi 壳 session-lifecycle 的 resolveSessionDir 经 opts.agentDir
-// 注入 pi SDK 活源 getAgentDir() 薄消费（原壳侧同形手写已删，收敛单源防漂移）；
-// resolvePiWorkflowStateDir 为其 workflow-state 后缀派生，core 读侧装配经相对
-// 路径消费，不需要 barrel 面。
-export { resolvePiSessionScopedDir } from "./execution/assembly/workflow-state-root.ts";
+// resolvePiWorkflowRunsDir：workflow 域 run 状态目录（`<root>/<rootSid>/workflow/runs/`，
+// <root> = shared getSessionStoreDir）的单一权威源——[session-store-layout-inversion
+// D2/D3] 分区键 = rootSessionId（run 创建记录字段），record 随 session 整树回收。
+// 无参形态锚进程级当前 rootSessionId（setPiWorkflowRootSessionId 绑定，绑定点 =
+// SessionBaselines.initSession）；pi 壳 session-lifecycle 以显式 sid 薄消费同一
+// 单源（壳侧按 core 同式规则解析 env 贯穿值 → 本 session id）。
+export {
+  resolvePiWorkflowRunsDir,
+  listWorkflowRunsDirs,
+  setPiWorkflowRootSessionId,
+  clearPiWorkflowRootSessionId,
+  hasPiWorkflowRootSessionId,
+} from "./execution/assembly/workflow-state-root.ts";
 
-// createPiHostRunEnumeration：pi 宿主 workflow run 的读侧枚举 store（agentDir
-// 活源 + 全 session 目录）。消费方 = startupSweep 的枚举注入（runtime 启动扫描；
-// 原 pi 壳定时器装配点已随机制退役）——跨包消费，需 barrel 面；
-// 见 pi-host-run-store.ts 头注的分层边界。
+// createPiHostRunEnumeration：pi 宿主 workflow run 的读侧枚举 store（数据根活源
+// + session 存储树一级 sid 目录的 workflow/runs/）。消费方 = startupSweep 的枚举
+// 注入（runtime 启动扫描；原 pi 壳定时器装配点已随机制退役）——跨包消费，需
+// barrel 面；见 pi-host-run-store.ts 头注的分层边界。
 export { createPiHostRunEnumeration } from "./execution/assembly/pi-host-run-store.ts";
 
 // startupSweep：runtime 启动收编扫描的 core 装配单点（30 天定时器回收机制退役

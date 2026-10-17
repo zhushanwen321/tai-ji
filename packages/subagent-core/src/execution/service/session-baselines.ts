@@ -36,6 +36,9 @@ import { UiRequestObservability } from "../ui/ui-request-observability.ts";
 // [R6/D-R3-2] ENV_SELF_RECORD_ID 因跨聚合消费（record-access）归位常量叶子文件，
 // 本聚合 initSession 消费改经 import（聚合→支撑文件方向合法）。
 import { ENV_SELF_RECORD_ID } from "./service-constants.ts";
+// [session-store-layout-inversion D2/D3] workflow 域 run 状态目录的进程级锚：分区键
+// = rootSessionId（initSession 建立后绑定，/new /resume 换 session 时覆写）。
+import { setPiWorkflowRootSessionId } from "../assembly/workflow-state-root.ts";
 import { SUBAGENT_IDENTITY_ENV } from "@zhushanwen/subagent-engine-sdk";
 
 const logger = getLogger("subagents");
@@ -328,6 +331,9 @@ export class SessionBaselines {
     // sessionRootId = init.sessionId（自己是 root），execCtxAls 不 enterWith（顶层）。
     const envRoot = process.env[ENV_ROOT_SESSION_ID];
     this._sessionRootId = envRoot ?? init.sessionId;
+    // workflow 域 run 状态目录锚（`<root>/<rootSid>/workflow/runs/`，分区键同
+    // record 域 store 目录的 resolveStoreRootSessionId——两域同树同键）。
+    setPiWorkflowRootSessionId(this._sessionRootId);
     this.initExecContextBaseline(envRoot, init.sessionId);
     // revive（dispose 的逆操作：/resume /fork /new 后复活）——壳 _disposed 旗标经 deps
     // 回调复位（旗标所有权留壳：assertReady 断言面 readAssertState 的写侧）。

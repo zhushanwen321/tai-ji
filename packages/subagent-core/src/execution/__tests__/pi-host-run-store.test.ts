@@ -1,8 +1,11 @@
-// pi-host-run-store 回归锁：枚举读侧目录由调用方注入的 agentDir 活源驱动，
-// 不从进程 env/cwd/sessionFile 推测（两条推导路径均曾在 W2 D3 真机链实证
-// 错位致恒空转，见被测模块头注）。
+// pi-host-run-store 回归锁：枚举读侧目录由调用方注入的数据根活源驱动，不从进程
+// env/cwd/sessionFile 推测（三条推导路径均曾在 W2 D3 真机链实证错位致恒空转，见被
+// 测模块头注）。
+// [session-store-layout-inversion D2/D3] 枚举对象换根：session 存储树一级 sid 目录的
+// `<root>/<rootSid>/workflow/runs/`（分区键 = rootSessionId）；旧形态的 agentDir 活源
+// + sessions/<slug> 全目录 + agentDir 根回退随 cwd 分区布局退役。
 // 覆盖面（ADR-0081 / §4.1 场景 3、5；workflow-run-store-convergence U2 枚举改接）：
-// 1. 枚举目录形态（agentDir 活源 + 全 session 目录 + 回退根）；
+// 1. 枚举目录形态（数据根活源 + 存储树全部 sid 目录 + 非 sid 形态目录跳过）；
 // 2. 终态返回形态 { runId, stateDir, status }（stateDir = 收编链 journalDir 注入源；
 //    status = 判定核三态映射——running/终态词/missing 跳过）；
 // 3. 候选来源 = record 事件流文件族（journal 在即候选在——快照在或不在均无关，
@@ -42,44 +45,53 @@ async function seedRunningJournal(stateDir: string, runId: string): Promise<void
   for (const event of events) await journal.append(runId, event);
 }
 
+/** 新布局 runs 目录（`<root>/<sid>/workflow/runs/`，root = 测试注入的数据根）。 */
+function runsDirOf(dataDir: string, sid: string): string {
+  return join(dataDir, "ext-sessions", sid, "workflow", "runs");
+}
+
 describe("createPiHostRunEnumeration", () => {
-  let agentRoot: string;
+  let dataRoot: string;
   let wsA: string;
   let wsB: string;
-  let wsRoot: string;
 
   beforeEach(() => {
-    agentRoot = mkdtempSync(join(tmpdir(), "pi-host-run-store-"));
-    // pi 壳布局：<agentRoot>/sessions/<slug>/workflow-state/ + <agentRoot>/workflow-state（回退根）
-    const slugADir = join(agentRoot, "sessions", "--fixture-slug-a--");
-    const slugBDir = join(agentRoot, "sessions", "--fixture-slug-b--");
-    wsA = join(slugADir, "workflow-state");
-    wsB = join(slugBDir, "workflow-state");
-    wsRoot = join(agentRoot, "workflow-state");
-    for (const dir of [wsA, wsB, wsRoot]) mkdirSync(dir, { recursive: true });
+    dataRoot = mkdtempSync(join(tmpdir(), "pi-host-run-store-"));
+    // 新布局：<root>/<sid>/workflow/runs/（sid = 合法 sessionId 形态 fixture）
+    wsA = runsDirOf(dataRoot, "sid-fixture-a");
+    wsB = runsDirOf(dataRoot, "sid-fixture-b");
+    for (const dir of [wsA, wsB]) mkdirSync(dir, { recursive: true });
   });
 
   afterEach(() => {
-    rmSync(agentRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+    rmSync(dataRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
 
-  it("枚举全部 session 目录 + agentDir 回退根（same/cross-session 两形态一次覆盖）", async () => {
-    // same-session 目录 / cross-session 目录 / agentDir 回退根各一个 run
-    //（seed 直接落 record 流——U2 改接后枚举候选与 status 判定都只认 journal）。
+  it("枚举存储树全部 sid 目录的 runs 目录（same/cross-session 两形态一次覆盖）", async () => {
+    // same-session 目录 / cross-session 目录各一个 run（seed 直接落 record 流——
+    // U2 改接后枚举候选与 status 判定都只认 journal）。
     await seedRunningJournal(wsA, "wf-a");
     await seedRunningJournal(wsB, "wf-b");
-    await seedRunningJournal(wsRoot, "wf-c");
-    const store = createPiHostRunEnumeration(() => agentRoot);
+    const store = createPiHostRunEnumeration(() => dataRoot);
     const runs = await store.loadAll();
-    expect(runs.map((r) => r.runId).sort()).toEqual(["wf-a", "wf-b", "wf-c"]);
+    expect(runs.map((r) => r.runId).sort()).toEqual(["wf-a", "wf-b"]);
     const byId = new Map(runs.map((r) => [r.runId, r]));
     for (const run of runs) {
       expect(run.status).toBe("running");
     }
-    // 终态返回形态：stateDir = 该 run 的 workflow-state 目录（收编链 journalDir 注入源）
-    expect(byId.get("wf-a")?.stateDir).toBe(join(agentRoot, "sessions", "--fixture-slug-a--", "workflow-state"));
-    expect(byId.get("wf-b")?.stateDir).toBe(join(agentRoot, "sessions", "--fixture-slug-b--", "workflow-state"));
-    expect(byId.get("wf-c")?.stateDir).toBe(join(agentRoot, "workflow-state"));
+    // 终态返回形态：stateDir = 该 run 的 runs 目录（收编链 journalDir 注入源）
+    expect(byId.get("wf-a")?.stateDir).toBe(wsA);
+    expect(byId.get("wf-b")?.stateDir).toBe(wsB);
+  });
+
+  it("非合法 sessionId 形态的一级目录一律跳过（D7 树内遍历规约）", async () => {
+    await seedRunningJournal(wsA, "wf-a");
+    // 手放进存储树根的非会话目录（未来可能出现的非 sid 形态）不得进枚举
+    const stray = join(dataRoot, "ext-sessions", "not-a-session-id!");
+    mkdirSync(stray, { recursive: true });
+    await seedRunningJournal(stray, "wf-stray");
+    const runs = await createPiHostRunEnumeration(() => dataRoot).loadAll();
+    expect(runs.map((r) => r.runId)).toEqual(["wf-a"]);
   });
 
   it("快照行文件（.jsonl）与 terminal manifest（.json）不进 journal 枚举结果", async () => {
@@ -88,45 +100,40 @@ describe("createPiHostRunEnumeration", () => {
     // 不再是候选：反方向完备性，设计 §3.1 步骤 2）都不是枚举来源
     writeFileSync(join(wsA, "wf-a.jsonl"), '{"v":"wf-run-v2","fixture":true}\n');
     writeFileSync(join(wsA, "wf-a.json"), '{"outcome":"completed"}\n');
-    writeFileSync(join(wsRoot, "wf-snap-only.jsonl"), '{"v":"wf-run-v2","fixture":true}\n');
-    const runs = await createPiHostRunEnumeration(() => agentRoot).loadAll();
+    writeFileSync(join(wsB, "wf-snap-only.jsonl"), '{"v":"wf-run-v2","fixture":true}\n');
+    const runs = await createPiHostRunEnumeration(() => dataRoot).loadAll();
     expect(runs.map((r) => r.runId)).toEqual(["wf-a"]);
   });
 
   it("journal 在而快照不在 → 候选在（候选不依赖快照存在性——走查必修缺口回归锚）", async () => {
     await seedRunningJournal(wsA, "wf-no-snap");
     // 该 run 无 <runId>.jsonl 快照、无 <runId>.json manifest——纯 journal 形态
-    const runs = await createPiHostRunEnumeration(() => agentRoot).loadAll();
+    const runs = await createPiHostRunEnumeration(() => dataRoot).loadAll();
     expect(runs.map((r) => r.runId)).toEqual(["wf-no-snap"]);
     expect(runs[0]?.status).toBe("running");
     expect(runs[0]?.stateDir).toBe(wsA);
   });
 
-  it("进程 env 漂移不影响枚举目录（注入活源优先于 PI_CODING_AGENT_DIR）", async () => {
+  it("进程 env 漂移不影响枚举目录（注入活源优先于 TAIJI_AGENT_DATA_DIR）", async () => {
     await seedRunningJournal(wsA, "wf-a");
     await seedRunningJournal(wsB, "wf-b");
-    await seedRunningJournal(wsRoot, "wf-c");
-    const prev = process.env.PI_CODING_AGENT_DIR;
-    process.env.PI_CODING_AGENT_DIR = join(agentRoot, "not-the-real-agent-dir");
+    const prev = process.env.TAIJI_AGENT_DATA_DIR;
+    process.env.TAIJI_AGENT_DATA_DIR = join(dataRoot, "not-the-real-data-dir");
     try {
-      const store = createPiHostRunEnumeration(() => agentRoot);
+      const store = createPiHostRunEnumeration(() => dataRoot);
       const runs = await store.loadAll();
-      expect(runs.map((r) => r.runId).sort()).toEqual(["wf-a", "wf-b", "wf-c"]);
+      expect(runs.map((r) => r.runId).sort()).toEqual(["wf-a", "wf-b"]);
     } finally {
-      if (prev === undefined) delete process.env.PI_CODING_AGENT_DIR;
-      else process.env.PI_CODING_AGENT_DIR = prev;
+      if (prev === undefined) delete process.env.TAIJI_AGENT_DATA_DIR;
+      else process.env.TAIJI_AGENT_DATA_DIR = prev;
     }
   });
 
-  it("sessions 根不存在时仅扫 agentDir 回退根（从未落盘的空态降级不抛）", async () => {
+  it("存储树根不存在时仍空集（从未落盘的空态降级不抛）", async () => {
     const bareRoot = mkdtempSync(join(tmpdir(), "pi-host-run-store-bare-"));
     try {
-      const bareWsRoot = join(bareRoot, "workflow-state");
-      mkdirSync(bareWsRoot, { recursive: true });
-      await seedRunningJournal(bareWsRoot, "wf-bare");
-      const store = createPiHostRunEnumeration(() => bareRoot);
-      const runs = await store.loadAll();
-      expect(runs.map((r) => r.runId)).toEqual(["wf-bare"]);
+      const runs = await createPiHostRunEnumeration(() => bareRoot).loadAll();
+      expect(runs).toEqual([]);
     } finally {
       rmSync(bareRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
     }
@@ -136,22 +143,22 @@ describe("createPiHostRunEnumeration", () => {
 // ── 判定核三态 → status 映射（U2 改接：status 从事实源推导）──────
 
 describe("createPiHostRunEnumeration status 映射（判定核三态）", () => {
-  let agentRoot: string;
+  let dataRoot: string;
   let wsA: string;
 
   beforeEach(() => {
-    agentRoot = mkdtempSync(join(tmpdir(), "pi-host-run-store-map-"));
-    wsA = join(agentRoot, "sessions", "--fixture-slug--", "workflow-state");
+    dataRoot = mkdtempSync(join(tmpdir(), "pi-host-run-store-map-"));
+    wsA = runsDirOf(dataRoot, "sid-fixture-map");
     mkdirSync(wsA, { recursive: true });
   });
 
   afterEach(() => {
-    rmSync(agentRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+    rmSync(dataRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
 
   it("running（journal 无 run-settled 帧）→ \"running\"", async () => {
     await seedRunningJournal(wsA, "wf-live");
-    const runs = await createPiHostRunEnumeration(() => agentRoot).loadAll();
+    const runs = await createPiHostRunEnumeration(() => dataRoot).loadAll();
     expect(runs).toEqual([{ runId: "wf-live", stateDir: wsA, status: "running" }]);
   });
 
@@ -164,7 +171,7 @@ describe("createPiHostRunEnumeration status 映射（判定核三态）", () => 
       artifactsDir: wsA,
       ts: Date.now(),
     });
-    const runs = await createPiHostRunEnumeration(() => agentRoot).loadAll();
+    const runs = await createPiHostRunEnumeration(() => dataRoot).loadAll();
     expect(runs).toEqual([{ runId: "wf-done", stateDir: wsA, status: "completed" }]);
   });
 
@@ -178,14 +185,14 @@ describe("createPiHostRunEnumeration status 映射（判定核三态）", () => 
       JSON.stringify({ outcome: "interrupted", errorCode: "idle-evicted" }),
       "utf8",
     );
-    const runs = await createPiHostRunEnumeration(() => agentRoot).loadAll();
+    const runs = await createPiHostRunEnumeration(() => dataRoot).loadAll();
     expect(runs).toEqual([{ runId: "wf-legacy-manifest", stateDir: wsA, status: "failed" }]);
   });
 
   it("missing（竞态窗口：候选列举后 journal 被删）→ 候选跳过不入结果", async () => {
-    await seedRunningJournal(wsA, "wf-race");
-    const wsB = join(agentRoot, "sessions", "--other-slug--", "workflow-state");
+    const wsB = runsDirOf(dataRoot, "sid-fixture-race");
     mkdirSync(wsB, { recursive: true });
+    await seedRunningJournal(wsA, "wf-race");
     await seedRunningJournal(wsB, "wf-keep");
     const target = join(wsA, `wf-race${RUN_EVENTS_SUFFIX}`);
     // 竞态窗口模拟：候选目录 readdir 返回之后、判定核读文件之前 journal 被删
@@ -203,7 +210,7 @@ describe("createPiHostRunEnumeration status 映射（判定核三态）", () => 
       return entries as Dirent[];
     }) as typeof fsPromises.readdir);
     try {
-      const runs = await createPiHostRunEnumeration(() => agentRoot).loadAll();
+      const runs = await createPiHostRunEnumeration(() => dataRoot).loadAll();
       expect(runs.map((r) => r.runId)).toEqual(["wf-keep"]);
     } finally {
       spy.mockRestore();
@@ -281,16 +288,16 @@ describe("枚举读错分通道：EACCES 上抛 / ENOENT 仍空集", () => {
    *  跳过惯用法与 record-store-index.test.ts 的 chmodProbeIt 同款。 */
   const chmodProbeIt = process.platform === "win32" || process.getuid?.() === 0 ? it.skip : it;
 
-  chmodProbeIt("sessions 根 EACCES：枚举 loadAll 上抛而非空数组", async () => {
+  chmodProbeIt("存储树根 EACCES：枚举 loadAll 上抛而非空数组", async () => {
     const root = mkdtempSync(join(tmpdir(), "pi-host-run-store-eacces-"));
     try {
-      const sessionsRoot = join(root, "sessions");
-      mkdirSync(join(sessionsRoot, "slug"), { recursive: true });
-      chmodSync(sessionsRoot, 0o000);
+      const storeRoot = join(root, "ext-sessions");
+      mkdirSync(join(storeRoot, "sid-x", "workflow", "runs"), { recursive: true });
+      chmodSync(storeRoot, 0o000);
       const store = createPiHostRunEnumeration(() => root);
       await expect(store.loadAll()).rejects.toMatchObject({ code: "EACCES" });
     } finally {
-      chmodSync(join(root, "sessions"), 0o755);
+      chmodSync(join(root, "ext-sessions"), 0o755);
       rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
     }
   });
@@ -298,21 +305,21 @@ describe("枚举读错分通道：EACCES 上抛 / ENOENT 仍空集", () => {
   chmodProbeIt("state 目录 EACCES：枚举 loadAll 上抛而非空数组（候选目录扫描层分通道）", async () => {
     const root = mkdtempSync(join(tmpdir(), "pi-host-run-store-eacces-"));
     try {
-      const stateDir = join(root, "workflow-state");
+      const stateDir = runsDirOf(root, "sid-eacces");
       mkdirSync(stateDir, { recursive: true });
       chmodSync(stateDir, 0o000);
       const store = createPiHostRunEnumeration(() => root);
       await expect(store.loadAll()).rejects.toMatchObject({ code: "EACCES" });
     } finally {
-      chmodSync(join(root, "workflow-state"), 0o755);
+      chmodSync(runsDirOf(root, "sid-eacces"), 0o755);
       rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
     }
   });
 
-  it("目录缺失（ENOENT）仍空集：sessions 根与 state 目录均不抛", async () => {
+  it("目录缺失（ENOENT）仍空集：存储树根与 state 目录均不抛", async () => {
     const root = mkdtempSync(join(tmpdir(), "pi-host-run-store-empty-"));
     try {
-      // 空树：无 sessions / 无 workflow-state
+      // 空树：无 ext-sessions / 无 runs 目录
       const store = createPiHostRunEnumeration(() => root);
       expect(await store.loadAll()).toEqual([]);
     } finally {
@@ -349,7 +356,7 @@ describe("v1 旧形态目录：构造性跳过 + warn 留痕（[D16⑥]）", () 
   it("只有旧双源文件（.events.jsonl + .jsonl）→ 枚举空集 + 每目录一条聚合 warn", async () => {
     const root = mkdtempSync(join(tmpdir(), "pi-host-run-store-v1-"));
     try {
-      const wsA = join(root, "sessions", "--v1-slug--", "workflow-state");
+      const wsA = runsDirOf(root, "sid-v1");
       mkdirSync(wsA, { recursive: true });
       writeFileSync(join(wsA, "wf-v1-a.events.jsonl"), '{"type":"run-created"}\n');
       writeFileSync(join(wsA, "wf-v1-a.jsonl"), '{"v":"wf-run-v1"}\n');
@@ -371,7 +378,7 @@ describe("v1 旧形态目录：构造性跳过 + warn 留痕（[D16⑥]）", () 
   it("新 record 流与旧文件共存 → 候选只含 record 流 run，旧文件 warn 不影响枚举结果", async () => {
     const root = mkdtempSync(join(tmpdir(), "pi-host-run-store-mixed-"));
     try {
-      const wsA = join(root, "sessions", "--mixed-slug--", "workflow-state");
+      const wsA = runsDirOf(root, "sid-mixed");
       mkdirSync(wsA, { recursive: true });
       writeFileSync(join(wsA, "wf-legacy.events.jsonl"), '{"type":"run-created"}\n');
       await seedRunningJournal(wsA, "wf-modern");

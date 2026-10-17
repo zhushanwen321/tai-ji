@@ -35,8 +35,6 @@
  * 架构导航见 docs/extensions/subagents/architecture.md §2.1。
  */
 
-import { join } from "node:path";
-
 import type {
   ExtensionAPI,
   ExtensionContext,
@@ -60,7 +58,6 @@ import {
   MAX_RETAINED_DONE_RUNS,
   runSummary,
   scheduleTimeBudget,
-  STATE_DIR_NAME,
 } from "@zhushanwen/subagent-core";
 import type { WorkflowRun } from "@zhushanwen/subagent-core";
 import { WorkerHostImpl } from "@zhushanwen/subagent-core";
@@ -191,9 +188,9 @@ export interface RunSettledEffectsEnv {
   resolvePi(): ExtensionAPI;
   /** notifyDone 完成通知去重窗口（domainState.notifiedRunIds，调用方持有）。 */
   notifiedRunIds: Set<string>;
-  /** per-session 装配结果（sessionDir/runs 两字段调用时现读——sessionState
+  /** per-session 装配结果（runsDir/runs 两字段调用时现读——sessionState
    *  条目引用，adoption rebind 换新后自动跟进的 D3 语义保持）。 */
-  state: Pick<SessionLifecycleResult, "sessionDir" | "runs">;
+  state: Pick<SessionLifecycleResult, "runsDir" | "runs">;
   /**
    * [W2/V1 D1 第 7 行] 终局记录查询面（通知载荷源——journal run-settled 帧直取）。
    * 生产装配 = JsonlRunStore.settledRecordOf；返回 undefined = 无终局帧（journal
@@ -221,9 +218,10 @@ export interface RunSettledEffectsEnv {
  * （core worker-message-pump，OR-4/B-4：真实副作用失败 error 留痕不崩宿主）。
  * notifyDone 幂等早退（notifiedRunIds 已含 runId）不是错误：后两步照常执行。
  *
- * [D7] notifyDone 注入产物目录指针（<sessionDir>/workflow-state——
- * journal/manifest/.state 同目录；state.sessionDir 是 sessionState 条目字段，
- * adoption rebind 换新后自动跟进；目录分量经 core barrel STATE_DIR_NAME 单源）。
+ * [D7] notifyDone 注入产物目录指针（`<root>/<rootSid>/workflow/runs/`——
+ * journal/manifest 同目录；state.runsDir 是 sessionState 条目字段，
+ * adoption rebind 换新后自动跟进；[session-store-layout-inversion D2/D3] 布局
+ * 单源在 core resolvePiWorkflowRunsDir，壳侧不持目录分量）。
  * [W2/V1 D1 第 7 行] notifyDone 尾参注入终局记录（载荷源 = 帧直取）；记录缺席
  *（journal dispatch 失败窗口）时通知跳过 + error 留痕——evict 照常
  *（内存有界性独立于通知），track 不标（未发通知不占去重窗口，允许后续语义修正）。
@@ -236,7 +234,7 @@ export function runSettledEffects(env: RunSettledEffectsEnv, run: WorkflowRun): 
       run.runId,
       run,
       env.notifiedRunIds,
-      join(env.state.sessionDir, STATE_DIR_NAME),
+      env.state.runsDir,
       settlement,
     );
     trackNotifiedRunId(env.notifiedRunIds, run.runId);
@@ -339,7 +337,7 @@ export function setupWorkflowDomain(
   }
 
   function makeDeps(
-    state: Pick<SessionLifecycleResult, "store" | "runs" | "sessionDir" | "runner">,
+    state: Pick<SessionLifecycleResult, "store" | "runs" | "runsDir" | "runner">,
   ) {
     const deps: LauncherDeps = {
       store: state.store,
@@ -648,11 +646,11 @@ export function setupWorkflowDomain(
         bestEffort(err, "terminateRunningRuns (session_shutdown handler)", "error");
       }
       // dispose 自身恒 resolve，catch 兜底防御——handler 内抛错会中断后续 session
-      // 条目清理。不留静默吞错（错误必须可操作）：warn 留痕带 sessionId/sessionDir，
+      // 条目清理。不留静默吞错（错误必须可操作）：warn 留痕带 sessionId/runsDir，
       // 排查「shutdown 后 run 状态不落盘」类问题时有迹可循。
       await state.store.dispose().catch((err: unknown) => {
         logger.warn(
-          `[subagent-workflow] session_shutdown store.dispose failed (sessionId=${sessionId}, sessionDir=${state.sessionDir})`,
+          `[subagent-workflow] session_shutdown store.dispose failed (sessionId=${sessionId}, runsDir=${state.runsDir})`,
           { reason: toErrorMessage(err) },
         );
       });

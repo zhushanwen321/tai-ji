@@ -7,8 +7,9 @@
  *   活跃会话经既有 get_entries 游标通道喂入（applyEntryBatch），冷会话经
  *   scanRecordFamilyEntriesFromSessionFile 流式扫描喂入（同一入口）；
  * - 事件源：record 事件文件（`<recordsDir>/<sa-id>.events`）与 run journal
- *   （`<sessionDir>/workflow-state/<runId>.record.jsonl`，后缀常量
- *   RUN_EVENTS_SUFFIX 单源）——两条喂入路径：
+ *   （`<root>/<sid>/workflow/runs/<runId>.record.jsonl`，[session-store-layout-
+ *   inversion D2/D3] 分区键 = 当前 sid，后缀常量 RUN_EVENTS_SUFFIX 单源）
+ *   ——两条喂入路径：
  *   ① 推送（实时路径）：journal 写入方（subagent-core，pi 扩展进程内）在落盘
  *      提交点经 select marker 通道推报告（SubagentJournalReport），经 event-adapter
  *      旁路 → journal-report-router → applyJournalReport 喂入。per 文件持两个水位

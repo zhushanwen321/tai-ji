@@ -1,86 +1,114 @@
 // src/execution/assembly/workflow-state-root.ts
 //
-// [F-1 修复] pi 宿主 WorkflowRun state 目录解析（与 pi 壳 JsonlRunStore 同源布局）。
+// [session-store-layout-inversion D2/D3] workflow 域 run 状态目录解析（与 pi 壳
+// JsonlRunStore 同源布局）。
 //
-// 为什么存在：pi 宿主 workflow 域的 run state 真实落盘 = JsonlRunStore 的
-// `<sessionDir>/workflow-state/<runId>.jsonl`，sessionDir 布局推导（slug + 探测）
-// 的单一权威源在本文件（resolvePiSessionScopedDir）。
+// 布局（终态）：`<root>/<rootSessionId>/workflow/runs/<runId>.record.jsonl`
+//   —— <root> = shared getSessionStoreDir() = `<dataDir>/ext-sessions/`。
+// 分区键 = rootSessionId（run 创建记录字段，词表 run-events.ts RunCreatedEvent；
+// 嵌套派发全层同值）。record 与 session 的关联从「cwd 目录分区 + rootSessionId
+// 字段」升级为「目录级即字段级」——run 记录随 session 整树回收，删除链零清单。
+//
+// 旧布局 `<agentDir>/sessions/<cwd-slug>/workflow-state/`（encodeCwd 分区 +
+// agentDir/cwd 探测）随布局反转退役：存量不迁移（设计裁决 11），读侧只认新树。
 //
 // 分层约束：core 不能 import extension——pi 壳 extensions/universal/
-// subagent-workflow/src/session-lifecycle.ts 的 resolveSessionDir() 薄消费本
-// 文件：经 opts.agentDir 注入 pi SDK 活源 getAgentDir()（pi 升级自动跟随）；
-// core 缺省 agentDir 锚定自推，供引擎侧 / zsw 等无 pi SDK 环境消费。agentDir
-// 双源是有意差异，slug + 探测布局恒单源。
+// subagent-workflow/src/session-lifecycle.ts 经 barrel 薄消费本文件的
+// resolvePiWorkflowRunsDir（分区键 sid 由壳侧按 core 同式规则解析后传入）。
 //
-// 消费面边界 [MANDATORY]：本推导锚「调用方进程自身 env/cwd」——只在 pi 进程
-// 内调用才与写侧落盘一致（pi 壳 resolveSessionDir、pi 进程内的注册对账
-// sweep）。runtime 进程侧的读面禁用本推导：pi 出站 env（PI_CODING_AGENT_DIR）
-// 与 pi cwd 均 pi 子进程私有，runtime 侧推导恒错位（可见信号 = 读侧恒空转，
-// 2026-09-27 W2 D3 场景 3 定位）；runtime 侧读面走 pi-host-run-store（主
-// session 文件同源枚举，不读 env/cwd）。
+// 消费面边界 [MANDATORY]：显式 sid 推导锚「入参 sid」——任何进程、任何调用点
+// 传入同一个 sid 即得同一个目录（布局单源的全部价值）。runtime 进程侧的读面
+// 不猜 sid：枚举走 pi-host-run-store（扫 session 存储树一级），收编链
+// journalDir 由枚举产物注入（ADR-0081）。**无参形态锚进程级当前 rootSessionId**
+// （见 setPiWorkflowRootSessionId）——只在 pi 进程内、session_start 之后调用才
+// 与写侧落盘一致。
 //
-// core 缺省 agentDir 推导锚定 pi 实装（1.0.0 复核）dist config.js getAgentDir：
-// `process.env.PI_CODING_AGENT_DIR || join(homedir(), ".pi", "agent")`
-// （ENV_AGENT_DIR = PI_CODING_AGENT_DIR、CONFIG_DIR_NAME = piConfig.configDir = ".pi"，
-// 无 piConfig.name 覆盖）。pi 升级若改 getAgentDir 语义 → 本推导漂移，可见信号
-// 同 F-1（sweep 补注销活跃 run / GC 空转）。
+// 公式消费 shared 新函数族（subagent-core 直接 import @taiji/shared，非镜像场景；
+// shared getDataDir 读 TAIJI_AGENT_DATA_DIR，taiji 生产链经 ENV_WHITELIST_PREFIXES
+// 注入 pi/引擎进程，裸跑落缺省 dev 树）。
 
-import { existsSync } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
+import { getSessionStoreDir, getSessionWorkflowRunsDir, isPiSessionId } from "@taiji/shared/paths";
+import type { Dirent } from "node:fs";
+import { readdir } from "node:fs/promises";
 
-// STATE_DIR_NAME 归 run-vocabulary 词表最低层（挂 run-state-evidence 会经
-// run-event-journal 反指本文件构成循环——dmg-r3-3）。
-import { STATE_DIR_NAME } from "../../shared/run-vocabulary.ts";
+/**
+ * 进程级当前 rootSessionId 锚（晚绑定）。
+ *
+ * 为什么是模块锚而不是逐调用点传参：run journal 的写者链（orchestration/
+ * terminal-actions 的转移写点、resume-run、workflow-dispatch、model-switch 记账）
+ * 与读链（run-event-journal 的模块锚解析）全部经无参形态取目录，把 sid 穿过
+ * 这条链 = 一次跨编排层的大重构，超出布局反转的范围。锚的写点唯一 =
+ * SessionBaselines.initSession（与 record 域 store 目录的 resolveStoreRootSessionId
+ * 同一时点、同一取值），/new /resume 换 session 时随 initSession 覆写——目录绑定
+ * session 生命周期（u-subagent 同款晚绑定纪律）。
+ *
+ * 未设定（initSession 前）时无参推导 fail-fast：静默回落到某个固定目录会让写侧
+ * 落到非归属会话的树上（数据错位且不可回收），比抛错危险得多。
+ */
+let anchorRootSessionId: string | undefined;
 
-/** pi SDK getAgentDir 的 env 覆盖通道（实装版 dist config.js ENV_AGENT_DIR）。 */
-const PI_AGENT_DIR_ENV = "PI_CODING_AGENT_DIR";
+/** 绑定进程级当前 rootSessionId（initSession 单点调用）。 */
+export function setPiWorkflowRootSessionId(sessionId: string): void {
+  anchorRootSessionId = sessionId;
+}
 
-/** pi SDK 缺省 agent 目录分量（实装版 dist config.js：CONFIG_DIR_NAME + "agent"）。 */
-const DEFAULT_PI_AGENT_DIR_PARTS = [".pi", "agent"] as const;
+/** 解绑进程级锚（session dispose / 测试复位）。 */
+export function clearPiWorkflowRootSessionId(): void {
+  anchorRootSessionId = undefined;
+}
 
-/** resolvePiSessionScopedDir 的注入面（测试用；生产缺省全走真实推导）。 */
-export interface PiSessionScopedDirOptions {
-  /** agent 配置目录覆盖（缺省 = PI_CODING_AGENT_DIR env 或 ~/.pi/agent）。 */
-  agentDir?: string;
-  /** cwd 覆盖（缺省 process.cwd()——锚进程 cwd 而非 ctx.cwd，pi 壳建目录方语义）。 */
-  cwd?: string;
+/** 进程级锚是否已绑定（测试与 fail-fast 文案分流用）。 */
+export function hasPiWorkflowRootSessionId(): boolean {
+  return anchorRootSessionId !== undefined && anchorRootSessionId !== "";
 }
 
 /**
- * 解析 pi 宿主 session 锚定目录（sessionDir）——pi 壳 JsonlRunStore 的落盘根，
- * 也是壳侧 resolveSessionDir 的单源实装。
+ * workflow run 状态目录（`<root>/<rootSessionId>/workflow/runs/`）——record 事件流
+ * 与终局 manifest 的同目录落点。
  *
- * 布局规则：
- *   - cwd-slug = `--<cwd 去开头分隔符、`/`→`-`>--`（pi 壳建目录方字面规则——core 的
- *     encodeCwd 额外折叠 `:` 与 `\`，服务 subagents/ 布局族（C-ext-21），与建
- *     目录方不一致，此处不共用）；
- *   - `<agentDir>/sessions/<slug>` 目录存在则用之（该目录由 workflow 域首次落盘
- *     创建——cwd 有过 workflow run 才存在），否则回退 agentDir 根
- *     （JsonlRunStore 的 mkdir recursive 使首写直接落 agentDir 根，两侧探测一致）。
+ * 公式单源在 shared getSessionWorkflowRunsDir（sessionId 过 isPiSessionId 同域
+ * 校验，非法 sid throw = 路径穿越防线）。
  *
- * 只读解析（existsSync 探测），无目录创建副作用——目录创建归 pi 壳 store 首写
- * 侧（上方 JsonlRunStore mkdir recursive 语义），职责分离。
+ * @param rootSessionId 分区键（根会话 id）；省略 = 进程级锚（见
+ *   setPiWorkflowRootSessionId），未绑定时抛错
+ * @param dataDir 可选数据根目录（测试注入）；缺省读 shared getDataDir()
+ * @throws Error 当 rootSessionId 省略且进程级锚未绑定，或 sid 非法
  */
-export function resolvePiSessionScopedDir(opts?: PiSessionScopedDirOptions): string {
-  const agentDir = opts?.agentDir ?? resolvePiAgentDir();
-  const cwd = opts?.cwd ?? process.cwd();
-  const sessionSlug = `--${cwd.replace(/^\//, "").replace(/\//g, "-")}--`;
-  const sessionScopedDir = join(agentDir, "sessions", sessionSlug);
-  return existsSync(sessionScopedDir) ? sessionScopedDir : agentDir;
+export function resolvePiWorkflowRunsDir(rootSessionId?: string, dataDir?: string): string {
+  const sid = rootSessionId ?? anchorRootSessionId;
+  if (sid === undefined || sid === "") {
+    throw new Error(
+      "workflow runs dir not resolvable: no rootSessionId bound (before initSession). " +
+        "Recovery: pass the session id explicitly, or call setPiWorkflowRootSessionId(sid) " +
+        "at session_start (SessionBaselines.initSession is the production binding point).",
+    );
+  }
+  return getSessionWorkflowRunsDir(sid, dataDir);
 }
 
 /**
- * 解析 pi 宿主 WorkflowRun state 目录（`<sessionDir>/workflow-state`）——
- * resolvePiSessionScopedDir 的纯后缀派生（同 opts 注入面）。
+ * session 存储树内全部 workflow runs 目录（孤儿对账 / 保留维护轮的触发面枚举）。
+ *
+ * 枚举对象 = `<root>/` 一级 sid 目录的 `<root>/<sid>/workflow/runs/`。非合法
+ * sessionId 形态的一级目录一律跳过（isPiSessionId，D7 树内遍历规约——防未来手放
+ * 进存储树根的非会话目录被误枚举/误清）。
+ *
+ * 读错分通道（与 pi-host-run-store 的候选目录扫描层同纪律）：树根 ENOENT =
+ * 从未落盘的正常空态（返回空数组）；EACCES / EIO 等真 IO 故障上抛——静默折叠成
+ * 空集会让持续 IO 故障伪装成「0 个 run 待对账」。
+ *
+ * @param dataDir 可选数据根目录（测试注入）；缺省读 shared getDataDir()
  */
-export function resolvePiWorkflowStateDir(opts?: PiSessionScopedDirOptions): string {
-  return join(resolvePiSessionScopedDir(opts), STATE_DIR_NAME);
-}
-
-/** pi agent 目录（getAgentDir 同语义；core 缺省推导锚定见文件头注）。 */
-function resolvePiAgentDir(): string {
-  const envDir = process.env[PI_AGENT_DIR_ENV];
-  if (envDir !== undefined && envDir !== "") return envDir;
-  return join(homedir(), ...DEFAULT_PI_AGENT_DIR_PARTS);
+export async function listWorkflowRunsDirs(dataDir?: string): Promise<string[]> {
+  const storeRoot = getSessionStoreDir(dataDir);
+  let entries: Dirent[];
+  try {
+    entries = await readdir(storeRoot, { withFileTypes: true });
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+    return [];
+  }
+  return entries
+    .filter((ent) => ent.isDirectory() && isPiSessionId(String(ent.name)))
+    .map((ent) => getSessionWorkflowRunsDir(String(ent.name), dataDir));
 }
