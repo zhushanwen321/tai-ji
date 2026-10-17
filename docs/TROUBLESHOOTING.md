@@ -400,6 +400,55 @@ node scripts/check-pi-resources-links.mjs --fix   # 外部 symlink → 真实复
 - **症状三：collect 一直等不到某任务（stillOpen 直到超时）**——按「等待中与返回后同、无死因信息」的诚实行为排查三类真残余：① subagent 子进程静默死亡（无终态通知生产者）；② managed watch 应答未达（cancelled/timeout 不动 pending，等待下次 session_start 清理收尾）；③ fork 子 session 继承的父 session register（bash 域永久活跃 / subagent 域等待窗口内无注销）。处置：孤儿等待占比高（>10%）或用户可感知长挂反馈时，重审死亡类 reason 边沿接入（设计登记的重审触发条件）；个别任务确认死亡后显式传剩余 ids 续收。
 - **通用取证**：投递日志（journal）条目的 `collectKey` 键集字段 + ack outcome 值；pending entries 的 register/unregister 对（`kind`/`status` 字段）；机制 SSOT = ADR-0138 + 设计档案 `.tmp/tech-design/result-collect.md` §3.1 失败路径（六形态 + [端口缺席]）。
 
+### 32. 自装引擎包（TAIJI_AGENT_ENGINE_ROOTS / config.json engines）的发现优先级，与自装旧版包 chat 报 engine_capability_unsupported（协议 v1.x）
+
+- **症状**：自装引擎包后 chat 请求同步报 `engine_capability_unsupported`；或多处安装同 id 引擎时「装了新版却不生效」。
+- **处置建议**：同 id 引擎「后装载覆盖先装载」（生效优先级与扫描序相反：L3 config.json > L2 node_modules > L1 宿主根 > L1 env），发现顺序、包级三态与能力兜底的细节以 `packages/subagent-core/src/execution/engine/engine-discovery-scan.ts`（scanEngines）代码为准；`[engine-discovery]` 前缀宿主日志有 same-id override 留痕。旧版引擎包 capabilities 声明缺失/unsupported 时 chat 必被能力预检拒绝（错误文案含恢复指引），升级引擎包是最短恢复路径；注意与「protocol 版本不兼容」（unusable 不装载）区分。
+
+### 33. dev 实例数据目录共享污染（R-13，已修复：受控采信）
+
+- **症状（修复前）**：多 worktree 各自 `pnpm dev` 时，实例数据目录未按 C-dev-01 预期落在 `~/.taiji-dev/instances/<worktree>/`，而是共用同一目录（sandbox 探针插件/权限/会话互相可见，单实例锁互踢）。
+- **现状**：`main.ts` dev 块经 `utils/dev-data-dir.ts` 的 `resolveDevDataDir` 受控采信——装配器注入的 `instances/<worktree>` 实例目录生效（多 worktree 并行 dev 自动隔离），树外值（泄漏形态 `~/.taiji` 等）仍固定回 `~/.taiji-dev`。
+- **处置建议**：排查多实例互相污染类问题先核对实际数据目录（日志首行/`getDataDir()` 输出），不要按文档预期推定；需要干净环境时使用 `--fresh`。
+
+### 34. e2e real 轨执行环境三坑（2026-09-19 session 导入验收实测）
+
+- **坑① 沙箱杀子进程**：沙箱化终端（如 AI agent 的 sandbox bash）里跑 `npx playwright test <real 轨 spec>`，e2e 派生的 runtime/pi 子进程会被持续 SIGKILL（supervisor 日志呈 `exitCode 137` 循环重启、runtime 死前零错误输出、无 jetsam 系统记录）——症状是 WS reply 超时/「连接中…」卡死，极具迷惑性。**处置**：real 轨一律非沙箱执行；取证先看 `<dataDir>/logs/main-*.log` 的 supervisor restart decision 与 `log show` 查 jetsam（有 = 系统内存压力，无 = 沙箱/外部 kill）。
+- **坑② bundle 陈旧分裂**：`build:e2e` 链 = main + preload + vite 三产物，**不含 build:runtime**——runtime 源码改动后直接跑 real 轨会用旧 runtime bundle，行为与源码对不上且无告警。**处置**：改过 runtime 后重跑 real 轨前先 `VITE_E2E=true pnpm run build:e2e`（会重建 runtime），或核对 `apps/electron/dist*/runtime` 产物 mtime 晚于源码最后改动。
+- **坑③ mock/real 构建产物互斥覆盖**：mock 轨（`VITE_MOCK=true`）与 real 轨（`VITE_E2E=true` 不传 VITE_MOCK）写同一 renderer 产物目录，后构建者覆盖前者——mock 轨 spec 在 real bundle 下会以「UI 停空态/元素找不到」失败，real 轨 spec 在 mock bundle 下被 `assertRealRendererBundle` 检查拦截（报 mock fixture 标记）。**处置**：切换轨之前按轨重建 bundle；mock 轨的 13 个失败里若混着 real spec 的 8-38ms 秒败，属预期拦截非回归。
+
+### 35. 终端多实例（一会话多终端）四类症状定位（2026-10-04 交付）
+
+终端实例标识为 `term:<会话id>:<序号>`，注册表与序号分配的**唯一事实源在 runtime**（重键 `ptyMap` + 会话级计数器），界面经 `terminal.list` 对账恢复。按症状分路：
+
+- **「开第二个终端返回的还是第一个」**：先看是**反向混跑**还是缺陷——dev 工作流里 renderer 走 Vite HMR、runtime 是 tsx **非 watch**，所以「新界面 × 旧 runtime」可真实共存；旧 runtime 会按会话幂等复用单 PTY（静默复用、无报错）。处置：重启 `pnpm dev`（runtime 侧改动不重启不生效）；打包形态无混跑窗口（界面与后台成对原子更新）。
+- **「活着的死实例」**（切换条有条目、输入必得 `unknown_terminal_id`）：`spawn` 完成到界面建档之间的窗口内实例就已死亡（`terminal.exit` 帧无归属可投递）→ 残留条目。**自动回收双通道**：首次对该条目的 `write` / `kill` / `attach` 收到否定回执（`unknown_terminal_id`）即执行三腿清理；或下一次 `terminal.list` 对账（清单外条目）回收。若**反复出现且不自动消失**，取证 `<数据目录>/logs/runtime-*.log` 的 `[terminal]` 行与 `terminal.list` 返回，按缺陷报（回收通道应幂等）。
+- **runtime 重启后旧终端输出消失 / 编号从「终端 1」重算**：**既定语义**（世代变更：注册表纯内存，重启即清空、序号重算；界面经世代重置清输出分区与写队列）。判据 = auth token 变化（**端口值不可靠**——重启常落回原端口）。反向异常：**同世代 WS 闪断却丢了历史** = 世代判据误判，查 `getCurrentToken()` 读取面与连接态保存的旧值。
+- **应用退出后仍有终端子进程**：正常退出路径由 shutdown 序的 `dispose-terminal-pties`（`destroyAllPties`）全量清理；**异常死亡**（SIGKILL / 崩溃）下 `nohup`/disown 类子进程可能残留（已登记的前提 P5，属 OS 层行为）——按系统进程表定位后手动清理。
+
+### 36. e2e smoke 全灭 `electron.launch: Process failed to launch`（宿主会话 ELECTRON_RUN_AS_NODE 泄漏，2026-10-01）
+
+- **症状**：`npx playwright test --project=electron-smoke` 全部用例秒级失败（40-60ms），报 `electron.launch: Process failed to launch!` + `bad option: --remote-debugging-port=0`（或 `--inspect=0`）+ 清理期 `kill EPERM`；同窗口内 `--project=visual-chromium`（纯 chromium，不经 electron.launch）正常。
+- **根因**：执行环境泄漏 `ELECTRON_RUN_AS_NODE=1`（taiji 桌面宿主 spawn 的 agent 会话可见）。该变量使 Electron 主二进制按纯 Node 运行——chromium/Electron 专属旗标全部不识别（`bad option`）即退出。**误诊陷阱**：此形态下 `Electron --version` 打印的是内嵌 Node 版本（42.x 内嵌 Node 24.15.0）而非 Electron 版本；且 Electron 42 mac 主二进制本就是 ~50KB 薄启动器（重量在 Frameworks）——「二进制只有 33KB/版本号不对 = dist 坏了」是泄漏导致的误诊，勿据此重装缓存（本次误删 @electron/get 缓存 zip 一份，无害但浪费一轮下载）。
+- **处置**：e2e/验收执行环境 `unset ELECTRON_RUN_AS_NODE` 再跑（Gate A 脚本与 A6 剧本已内建防御）；排查入口 `env | grep ELECTRON`。
+
+### 37. dev-merge 自动创建的 worktree 解析成 bare repo（config.worktree 缺失，2026-10-01）
+
+- **症状**：dev-merge.sh 自动创建目标 dev worktree 后，merge 预检报 `致命错误：该操作必须在一个工作区中运行`，且被误报成「有未提交改动（tracked）」；`git -C <dev> rev-parse --is-bare-repository` 返回 `true`。
+- **根因**：共享 config `core.bare=true`（bare repo + worktree 布局）下，worktree 依赖 per-worktree `config.worktree`（`core.bare=false` + `core.hooksPath`）覆盖。该补写是 git-cwt 包装层（`~/.shell/07-git-ws.sh`，[2026-09-11] 同族注释）的职责，`create-worktree.sh` 与 `setup-worktree.sh` 都不做——dev-merge.sh 绕过包装层直调创建脚本即漏。已修（auto-create 后补写 worktree 级 config；check_clean 区分 git 失败 exit≥2 与真脏）。
+- **连带发现**：`.bare/custom-hooks/setup-worktree.sh` 曾丢失可执行位（`[ -x ]` 为假 → 项目 hook 被静默跳过，依赖安装与 Electron/pi 缓存链接全缺）。已 `chmod +x` 根治；症状 = 创建输出无「执行项目 setup hook」行且新 worktree 无 node_modules。
+- **处置**：现症修复 = `git --git-dir=<.bare/worktrees/<name>> config --worktree core.bare false` + `core.hooksPath <同目录>/hooks`，再补跑 `bash .bare/custom-hooks/setup-worktree.sh <worktree路径>`。
+
+### 38. workflow 脚本 / agent frontmatter 显式指定的模型没生效（被用户覆盖压过——合法行为，非解析回归）
+
+- **症状**：workflow 脚本的 run 级 `model` 参数、`agent()` 调用参数或 agent frontmatter 显式写了模型，实际执行却用了另一个模型（面板/命令切换过的模型）。
+- **机制**：subagent/workflow 执行域的模型解析链有第 0 层「用户覆盖」——用户经面板模型选择器或 `/subagent-model` 命令对某 subagent 会话 / workflow run 下达过实时切换后，覆盖值优先级最高（压过 frontmatter 与脚本/调用参数显式指定，用户覆盖赢）；覆盖作用域 = 该会话/run 的剩余执行（含中断后 resume 与主 agent 重启后重开）。机制 SSOT：ADR-0129；术语见 docs/CONTEXT.md「模型覆盖」词条。
+- **三步排查**：
+  1. **查覆盖记账在场**：workflow run → run 事件 journal（`<数据目录>` 下 workflow-state 的 `<runId>.record.jsonl` 文件）grep `model-override` 帧；chat 域 subagent → record 事件文件 grep `record-model-override` 帧。覆盖帧在场 = 用户覆盖赢生效，属预期行为而非 bug。
+  2. **resume 场景查生效值**：journal 的 `run-resumed` 事件携带生效模型——三档回落：resume 显式参数（协议预留）> 持久化覆盖记录 > run 创建时模型。
+  3. **查成员实际执行模型**：成员 pi session 文件的 `model_change` 条目序列（尾条目 = 当前实际使用模型，审计权威）。
+- **处置**：需要脚本显式模型赢时，对该目标再次切换即可（覆盖替换幂等——新覆盖值压旧值，不存在叠加）；确认从未切换过而模型仍不符预期，才按模型解析回归排查（三层解析：调用参数 > frontmatter > ctxModel）。
+
 ## 环境变量速查
 
 | 变量 | 用途 | 生产默认值 | 开发默认值 |
@@ -463,7 +512,7 @@ bare repo + worktree 结构下，`.bare/hooks/pre-commit` 是全部 worktree 共
 
 pi 升级（`PI_VERSION` bump）或触碰相关模块时逐条重验；锚点均为实装版（当前 0.84.4，核对方式见 AGENTS.md pi 段查阅规则）。来源：审计报告 A/B（`.taiji-harness/2026-08-19-pi-assumption-audit/`）。
 
-**机器登记互链（2026-08-28 pi-boundary-reliability）**：本节是人读处置层，每条对应 [docs/pi-semantics.json](pi-semantics.json) 的 PS-xx 条目（唯一机器源：probe 型配探针测试，observe 型即本节处置建议）；pi 升级时 `node scripts/check-pi-semantics.mjs`（pre-commit + CI）自动门禁版本漂移。机制描述不双写——语义断言与 pi 锚点的权威源是 json，本节只留处置建议。
+**机器登记互链（2026-08-28 pi-boundary-reliability）**：本节是人读处置层，带 PS 编号的条目对应 [docs/pi-semantics.json](pi-semantics.json) 的 PS-xx 条目（唯一机器源：probe 型配探针测试，observe 型即本节处置建议；无 PS 编号的条目 = 机器登记层尚未收录的观察，登记留待后续）；pi 升级时 `node scripts/check-pi-semantics.mjs`（pre-commit + CI）自动门禁版本漂移。机制描述不双写——语义断言与 pi 锚点的权威源是 json，本节只留处置建议。
 
 ### 1. F8：subagent-workflow SIGINT re-raise 在 pi 挂起窗口可能失效（PS-13）
 
@@ -542,63 +591,14 @@ pi 升级（`PI_VERSION` bump）或触碰相关模块时逐条重验；锚点均
 - **机制**：pi rpc-mode 对 SIGTERM 的 trap 是优雅收尾后自行 `process.exit(143)`（`dist/modes/rpc/rpc-mode.js` trap 段）——子进程以主动 exit 结束，OS 层无信号终止事件，宿主只能拿到 (143, null)。该语义仍适用 run 链任务子进程（观察对象 `packages/pi-subagent-cli/src/spawn-runner.ts`）
 - **处置**：无需修复；判读时注意「引擎进程被信号杀死」（呈 `signal SIGTERM`）与「pi 收到 SIGTERM 自行退出」（呈 exit 143）的形态差异，比对事故取证时不要误判
 
-### 13. 自装引擎包（TAIJI_AGENT_ENGINE_ROOTS / config.json engines）的发现优先级，与自装旧版包 chat 报 engine_capability_unsupported（协议 v1.x）
-
-- **症状**：自装引擎包后 chat 请求同步报 `engine_capability_unsupported`；或多处安装同 id 引擎时「装了新版却不生效」。
-- **处置建议**：同 id 引擎「后装载覆盖先装载」（生效优先级与扫描序相反：L3 config.json > L2 node_modules > L1 宿主根 > L1 env），发现顺序、包级三态与能力兜底的细节以 `packages/subagent-core/src/execution/engine/engine-discovery-scan.ts`（scanEngines）代码为准；`[engine-discovery]` 前缀宿主日志有 same-id override 留痕。旧版引擎包 capabilities 声明缺失/unsupported 时 chat 必被能力预检拒绝（错误文案含恢复指引），升级引擎包是最短恢复路径；注意与「protocol 版本不兼容」（unusable 不装载）区分。
-
 ### 14. closedReason:"gc" 是统一终态占位，不是故障（2026-08-27 事故 A）
 
 - **机制**：pi 的 session close 事件把 done/failed/crashed 等全部终态统一改写为 `closed + closedReason:"gc"`——"gc" 是「非用户主动关闭」的占位终态，不代表垃圾回收、不代表异常
 - **处置建议**：看到它先别当故障查——**看 outcome 字段**（completed / failed / cancelled 一等字段）判成败，禁止对 closedReason 做 switch 推导（历史上下游三处同构各自重新推导成败，是「写入时合并终态、丢失区分度」问题类的温床）；若消费方还在读 closedReason 判成败，改为消费 outcome。（暂无 PS 互链：机器登记层未收录该语义锚点，补登记留待后续）
-
-### 15. dev 实例数据目录共享污染（R-13，已修复：受控采信）
-
-- **症状（修复前）**：多 worktree 各自 `pnpm dev` 时，实例数据目录未按 C-dev-01 预期落在 `~/.taiji-dev/instances/<worktree>/`，而是共用同一目录（sandbox 探针插件/权限/会话互相可见，单实例锁互踢）。
-- **现状**：`main.ts` dev 块经 `utils/dev-data-dir.ts` 的 `resolveDevDataDir` 受控采信——装配器注入的 `instances/<worktree>` 实例目录生效（多 worktree 并行 dev 自动隔离），树外值（泄漏形态 `~/.taiji` 等）仍固定回 `~/.taiji-dev`。
-- **处置建议**：排查多实例互相污染类问题先核对实际数据目录（日志首行/`getDataDir()` 输出），不要按文档预期推定；需要干净环境时使用 `--fresh`。
-
-### 16. e2e real 轨执行环境三坑（2026-09-19 session 导入验收实测）
-
-- **坑① 沙箱杀子进程**：沙箱化终端（如 AI agent 的 sandbox bash）里跑 `npx playwright test <real 轨 spec>`，e2e 派生的 runtime/pi 子进程会被持续 SIGKILL（supervisor 日志呈 `exitCode 137` 循环重启、runtime 死前零错误输出、无 jetsam 系统记录）——症状是 WS reply 超时/「连接中…」卡死，极具迷惑性。**处置**：real 轨一律非沙箱执行；取证先看 `<dataDir>/logs/main-*.log` 的 supervisor restart decision 与 `log show` 查 jetsam（有 = 系统内存压力，无 = 沙箱/外部 kill）。
-- **坑② bundle 陈旧分裂**：`build:e2e` 链 = main + preload + vite 三产物，**不含 build:runtime**——runtime 源码改动后直接跑 real 轨会用旧 runtime bundle，行为与源码对不上且无告警。**处置**：改过 runtime 后重跑 real 轨前先 `VITE_E2E=true pnpm run build:e2e`（会重建 runtime），或核对 `apps/electron/dist*/runtime` 产物 mtime 晚于源码最后改动。
-- **坑③ mock/real 构建产物互斥覆盖**：mock 轨（`VITE_MOCK=true`）与 real 轨（`VITE_E2E=true` 不传 VITE_MOCK）写同一 renderer 产物目录，后构建者覆盖前者——mock 轨 spec 在 real bundle 下会以「UI 停空态/元素找不到」失败，real 轨 spec 在 mock bundle 下被 `assertRealRendererBundle` 检查拦截（报 mock fixture 标记）。**处置**：切换轨之前按轨重建 bundle；mock 轨的 13 个失败里若混着 real spec 的 8-38ms 秒败，属预期拦截非回归。
 
 ### 17. pi openai-completions 适配层对「缺 usage 的错误响应」崩坏（2026-09-19 导入验收发现，上游健壮性问题，既有未修）
 
 - **症状**：续聊大上下文会话（实测 230K tokens）时 assistant 恒定 `stopReason=error`：`undefined is not an object (evaluating 'usage.totalTokens')`，秒级失败（上游 100ms 即拒）。
 - **机制**：provider 上游渠道对超窗口请求返回**不含 usage 字段**的错误响应，pi openai-completions 适配层解析时未对 usage 缺失做防御。凭据/通路无问题（同 provider 小上下文请求成功）。
 - **处置建议**：先排除渠道窗口限制（换小会话/先 compact 压缩再续聊）；根治需 pi 适配层对缺 usage 错误响应健壮降级——pi 上游问题按项目规则不改 pi 源码，待上游修复或由 taiji 侧降级链吸收。
-
-### 18. 终端多实例（一会话多终端）四类症状定位（2026-10-04 交付）
-
-终端实例标识为 `term:<会话id>:<序号>`，注册表与序号分配的**唯一事实源在 runtime**（重键 `ptyMap` + 会话级计数器），界面经 `terminal.list` 对账恢复。按症状分路：
-
-- **「开第二个终端返回的还是第一个」**：先看是**反向混跑**还是缺陷——dev 工作流里 renderer 走 Vite HMR、runtime 是 tsx **非 watch**，所以「新界面 × 旧 runtime」可真实共存；旧 runtime 会按会话幂等复用单 PTY（静默复用、无报错）。处置：重启 `pnpm dev`（runtime 侧改动不重启不生效）；打包形态无混跑窗口（界面与后台成对原子更新）。
-- **「活着的死实例」**（切换条有条目、输入必得 `unknown_terminal_id`）：`spawn` 完成到界面建档之间的窗口内实例就已死亡（`terminal.exit` 帧无归属可投递）→ 残留条目。**自动回收双通道**：首次对该条目的 `write` / `kill` / `attach` 收到否定回执（`unknown_terminal_id`）即执行三腿清理；或下一次 `terminal.list` 对账（清单外条目）回收。若**反复出现且不自动消失**，取证 `<数据目录>/logs/runtime-*.log` 的 `[terminal]` 行与 `terminal.list` 返回，按缺陷报（回收通道应幂等）。
-- **runtime 重启后旧终端输出消失 / 编号从「终端 1」重算**：**既定语义**（世代变更：注册表纯内存，重启即清空、序号重算；界面经世代重置清输出分区与写队列）。判据 = auth token 变化（**端口值不可靠**——重启常落回原端口）。反向异常：**同世代 WS 闪断却丢了历史** = 世代判据误判，查 `getCurrentToken()` 读取面与连接态保存的旧值。
-- **应用退出后仍有终端子进程**：正常退出路径由 shutdown 序的 `dispose-terminal-pties`（`destroyAllPties`）全量清理；**异常死亡**（SIGKILL / 崩溃）下 `nohup`/disown 类子进程可能残留（已登记的前提 P5，属 OS 层行为）——按系统进程表定位后手动清理。
-
-### 19. e2e smoke 全灭 `electron.launch: Process failed to launch`（宿主会话 ELECTRON_RUN_AS_NODE 泄漏，2026-10-01）
-
-- **症状**：`npx playwright test --project=electron-smoke` 全部用例秒级失败（40-60ms），报 `electron.launch: Process failed to launch!` + `bad option: --remote-debugging-port=0`（或 `--inspect=0`）+ 清理期 `kill EPERM`；同窗口内 `--project=visual-chromium`（纯 chromium，不经 electron.launch）正常。
-- **根因**：执行环境泄漏 `ELECTRON_RUN_AS_NODE=1`（taiji 桌面宿主 spawn 的 agent 会话可见）。该变量使 Electron 主二进制按纯 Node 运行——chromium/Electron 专属旗标全部不识别（`bad option`）即退出。**误诊陷阱**：此形态下 `Electron --version` 打印的是内嵌 Node 版本（42.x 内嵌 Node 24.15.0）而非 Electron 版本；且 Electron 42 mac 主二进制本就是 ~50KB 薄启动器（重量在 Frameworks）——「二进制只有 33KB/版本号不对 = dist 坏了」是泄漏导致的误诊，勿据此重装缓存（本次误删 @electron/get 缓存 zip 一份，无害但浪费一轮下载）。
-- **处置**：e2e/验收执行环境 `unset ELECTRON_RUN_AS_NODE` 再跑（Gate A 脚本与 A6 剧本已内建防御）；排查入口 `env | grep ELECTRON`。
-
-### 20. dev-merge 自动创建的 worktree 解析成 bare repo（config.worktree 缺失，2026-10-01）
-
-- **症状**：dev-merge.sh 自动创建目标 dev worktree 后，merge 预检报 `致命错误：该操作必须在一个工作区中运行`，且被误报成「有未提交改动（tracked）」；`git -C <dev> rev-parse --is-bare-repository` 返回 `true`。
-- **根因**：共享 config `core.bare=true`（bare repo + worktree 布局）下，worktree 依赖 per-worktree `config.worktree`（`core.bare=false` + `core.hooksPath`）覆盖。该补写是 git-cwt 包装层（`~/.shell/07-git-ws.sh`，[2026-09-11] 同族注释）的职责，`create-worktree.sh` 与 `setup-worktree.sh` 都不做——dev-merge.sh 绕过包装层直调创建脚本即漏。已修（auto-create 后补写 worktree 级 config；check_clean 区分 git 失败 exit≥2 与真脏）。
-- **连带发现**：`.bare/custom-hooks/setup-worktree.sh` 曾丢失可执行位（`[ -x ]` 为假 → 项目 hook 被静默跳过，依赖安装与 Electron/pi 缓存链接全缺）。已 `chmod +x` 根治；症状 = 创建输出无「执行项目 setup hook」行且新 worktree 无 node_modules。
-- **处置**：现症修复 = `git --git-dir=<.bare/worktrees/<name>> config --worktree core.bare false` + `core.hooksPath <同目录>/hooks`，再补跑 `bash .bare/custom-hooks/setup-worktree.sh <worktree路径>`。
-
-### 29. workflow 脚本 / agent frontmatter 显式指定的模型没生效（被用户覆盖压过——合法行为，非解析回归）
-
-- **症状**：workflow 脚本的 run 级 `model` 参数、`agent()` 调用参数或 agent frontmatter 显式写了模型，实际执行却用了另一个模型（面板/命令切换过的模型）。
-- **机制**：subagent/workflow 执行域的模型解析链有第 0 层「用户覆盖」——用户经面板模型选择器或 `/subagent-model` 命令对某 subagent 会话 / workflow run 下达过实时切换后，覆盖值优先级最高（压过 frontmatter 与脚本/调用参数显式指定，用户覆盖赢）；覆盖作用域 = 该会话/run 的剩余执行（含中断后 resume 与主 agent 重启后重开）。机制 SSOT：ADR-0129；术语见 docs/CONTEXT.md「模型覆盖」词条。
-- **三步排查**：
-  1. **查覆盖记账在场**：workflow run → run 事件 journal（`<数据目录>` 下 workflow-state 的 `<runId>.record.jsonl` 文件）grep `model-override` 帧；chat 域 subagent → record 事件文件 grep `record-model-override` 帧。覆盖帧在场 = 用户覆盖赢生效，属预期行为而非 bug。
-  2. **resume 场景查生效值**：journal 的 `run-resumed` 事件携带生效模型——三档回落：resume 显式参数（协议预留）> 持久化覆盖记录 > run 创建时模型。
-  3. **查成员实际执行模型**：成员 pi session 文件的 `model_change` 条目序列（尾条目 = 当前实际使用模型，审计权威）。
-- **处置**：需要脚本显式模型赢时，对该目标再次切换即可（覆盖替换幂等——新覆盖值压旧值，不存在叠加）；确认从未切换过而模型仍不符预期，才按模型解析回归排查（三层解析：调用参数 > frontmatter > ctxModel）。
 
