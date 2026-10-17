@@ -277,6 +277,31 @@ describe('设计内等待拒不计首败（F1-13，onSendDeferred）', () => {
     }
   })
 
+  it('compaction-wait 拒同判据：forget 条目留守在册不弃不上报，边沿重提受理成功', () => {
+    // port 第二道防线（提交同步链与 compaction 边沿交叠的残余窗口）返回的
+    // compaction-wait 与 hold 同为设计内等待：当首败处置即静默丢弃（从未注入），
+    // 违背 P0 fail-fast 契约——白名单成员资格由本用例锁定
+    const port = makeMockPort({ send: () => ({ accepted: false as const, reason: 'compaction-wait' }) })
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const onSettled = vi.fn()
+    const handle = createDelivery(port, { onSettled })
+    try {
+      handle.send(textMsg('m-1'), { id: 'sid-1', onFailure: 'forget' })
+      expect(handle.entriesFull().active).toHaveLength(1)
+      expect(handle.entriesFull().active[0]).toMatchObject({ id: 'sid-1', state: 'queued' })
+      expect(handle.entriesFull().tombstones).toHaveLength(0)
+      expect(onSettled).not.toHaveBeenCalled()
+      expect(port.sendCalls.length).toBe(1) // 等待轮不主动重投（等 compaction 边沿唤醒）
+      ;(port.send as ReturnType<typeof vi.fn>).mockImplementation(() => undefined)
+      handle.flush() // compaction 边沿唤醒重提（port onCompactionEdge → kernel.flush 同型）
+      expect(handle.entriesFull().active[0]).toMatchObject({ id: 'sid-1', state: 'in-flight' })
+      expect(onSettled).not.toHaveBeenCalled() // 送达终局由 confirmDelivered 驱动，非失败上报
+    } finally {
+      warnSpy.mockRestore()
+      handle.dispose()
+    }
+  })
+
   it('投递端下一边沿重提：受理成功转 in-flight，等待轮的失败策略不再影响后续投递', () => {
     const port = makeMockPort({ send: () => holdReject })
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})

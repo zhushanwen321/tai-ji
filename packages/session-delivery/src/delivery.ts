@@ -296,11 +296,15 @@ const DEFAULT_CONFIG: Required<
 
 /**
  * port.send 显式拒绝（accepted:false）中的设计内等待 reason 白名单（F1-13）：这些
- * reason 是投递端提交窗的「设计内等待」——条目从未被注入（host.sendMessage 未调用），
+ * reason 是投递端的「设计内等待」——条目从未被注入（host.sendMessage 未调用），
  * 不是失败。命中时不计首败（onSendDeferred），条目留守等投递端下一边沿重新提交；
  * 白名单外的 reason 与 throw 路径维持首败即停（onSendFail）。
+ * - 'merge-commit-hold'：port 合批提交窗的注入闸门（窗口结束 kernel.flush 重提）。
+ * - 'compaction-wait'：port compaction 提交侧等待的第二道防线（覆盖提交同步链与
+ *   compaction 边沿交叠的残余窗口；onCompactionEdge 复位唤醒重提）——forget 条目
+ *   在此窗口被当首败即静默丢弃，与 F1-13 同类（P0 fail-fast 契约）。
  */
-const SEND_DEFERRED_REASONS: ReadonlySet<string> = new Set(['merge-commit-hold'])
+const SEND_DEFERRED_REASONS: ReadonlySet<string> = new Set(['merge-commit-hold', 'compaction-wait'])
 
 /** 投影视图默认窗口（D5③）；同时是 delivered 完整条目留存上限（环形）。 */
 const DEFAULT_DELIVERED_WINDOW = 50
