@@ -374,11 +374,39 @@ function loopBackPoints(
 }
 
 /**
+ * 车道分配（通道表原地回填 laneX）：通道内按 y1 升序贪心分「纵向跨度互相重叠」的
+ * 游程（首碰归属，端点相触视作重叠）——游程序 = 车道序：同游程的边互不重叠可共线，
+ * 跨游程必重叠必须分道；整通道按游程数以默认中位为中心居中错开（单游程回到中位不动）
+ * ——fan-in/fan-out 不再叠成一根线。
+ */
+function assignChannelLanes(channels: Map<string, ChannelMember[]>): void {
+  for (const members of channels.values()) {
+    members.sort((a, b) => a.y1 - b.y1 || a.y2 - b.y2)
+    const runs: ChannelMember[][] = []
+    const runMaxHi: number[] = []
+    for (const m of members) {
+      const fit = runs.findIndex((_, i) => m.lo > runMaxHi[i])
+      if (fit === -1) {
+        runs.push([m])
+        runMaxHi.push(m.hi)
+      } else {
+        runs[fit].push(m)
+        runMaxHi[fit] = Math.max(runMaxHi[fit], m.hi)
+      }
+    }
+    const midX = (members[0].x1 + members[0].x2) / HALF
+    const laneBase = -((runs.length - 1) * LANE_STEP_PX) / HALF
+    runs.forEach((run, ri) => {
+      const laneX = midX + laneBase + ri * LANE_STEP_PX
+      for (const m of run) m.laneX = laneX
+    })
+  }
+}
+
+/**
  * 计算边几何（正交路由）。顺序/数据流/条件边 = 源右中心 → 通道竖线 → 目标左中心
  * （同行退化为直线）：同一通道（源同列且目标同列）的并行边竖线段默认重合，装配前
- * 按纵向跨度重叠分游程、以游程序为车道序居中错开 LANE_STEP_PX——fan-in/fan-out
- * 不再叠成一根线；同游程 = 跨度互不重叠，共享车道不无谓铺开（贪心首碰归属，
- * 端点相触视作重叠）。
+ * 经 assignChannelLanes 按车道错开；同游程 = 跨度互不重叠，共享车道不无谓铺开。
  * loop-back 见 loopBackPoints。端点缺失（边引用不存在节点——防御解析器缺口）的边
  * 不产出（跳过，不抛）。
  */
@@ -449,30 +477,8 @@ export function layoutEdges(dag: WorkflowDag, nodes: DagLayoutNode[]): DagLayout
     else channels.set(key, [chan])
   }
 
-  // 车道分配：通道内按 y1 升序贪心分「纵向跨度互相重叠」的游程（首碰归属，端点
-  // 相触视作重叠）——游程序 = 车道序：同游程的边互不重叠可共线，跨游程必重叠
-  // 必须分道；整通道按游程数以默认中位为中心居中错开（单游程回到中位不动）
-  for (const members of channels.values()) {
-    members.sort((a, b) => a.y1 - b.y1 || a.y2 - b.y2)
-    const runs: ChannelMember[][] = []
-    const runMaxHi: number[] = []
-    for (const m of members) {
-      const fit = runs.findIndex((_, i) => m.lo > runMaxHi[i])
-      if (fit === -1) {
-        runs.push([m])
-        runMaxHi.push(m.hi)
-      } else {
-        runs[fit].push(m)
-        runMaxHi[fit] = Math.max(runMaxHi[fit], m.hi)
-      }
-    }
-    const midX = (members[0].x1 + members[0].x2) / HALF
-    const laneBase = -((runs.length - 1) * LANE_STEP_PX) / HALF
-    runs.forEach((run, ri) => {
-      const laneX = midX + laneBase + ri * LANE_STEP_PX
-      for (const m of run) m.laneX = laneX
-    })
-  }
+  // 车道分配：同通道并行边按纵向跨度重叠游程序错开（机制见 assignChannelLanes）
+  assignChannelLanes(channels)
 
   const result: DagLayoutEdge[] = []
   for (const item of pending) {

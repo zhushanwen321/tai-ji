@@ -20,6 +20,7 @@
  */
 import { describe, it, expect } from 'vitest'
 import type { WorkflowDag, WorkflowDagNode } from '@taiji/shared'
+import type { DagLayout, DagLayoutEdge, DagLayoutNode } from '../layout'
 import {
   layoutDag,
   layoutEdges,
@@ -135,6 +136,53 @@ function expectAxisAligned(points: Array<{ x: number; y: number }>): void {
   }
 }
 
+/**
+ * 路由画布一体的取样样板：构造 dag → 布局 → 装配边 → 按 id 索引节点几何。
+ * geo 取代的 filter 取样缺 id 时返回 undefined，用例内以非空断言取值——边有产出
+ * 即端点必然在布局内，缺端点时后续属性访问抛错让用例失败（语义自暴露）。
+ */
+function buildRoutedCanvas(partial: Partial<WorkflowDag> = {}): {
+  d: WorkflowDag
+  layout: DagLayout
+  geo: Map<string, DagLayoutNode>
+  edges: DagLayoutEdge[]
+} {
+  const d = dag(partial)
+  const layout = layoutDag(d)
+  return {
+    d,
+    layout,
+    geo: new Map(layout.nodes.map((ln) => [ln.node.id, ln])),
+    edges: layoutEdges(d, layout.nodes),
+  }
+}
+
+/** 全图最深节点底（loop-back 横行总线 y 的断言锚）。 */
+function deepestBottomOf(layout: DagLayout): number {
+  return Math.max(...layout.nodes.map((ln) => ln.y + ln.h))
+}
+
+/**
+ * 跨列路由用例共用底座：3 phase（p0/p1/p2）× 4 节点（a→p0，r1/r2→p1，f→p2）。
+ * p1 列预置 r2 作堆叠遮挡、f 压底（词法序最后），edges 由用例注入。
+ */
+function crossColumnCanvas(edges: WorkflowDag['edges']): Partial<WorkflowDag> {
+  return {
+    phases: [
+      { name: 'p0', order: 0 },
+      { name: 'p1', order: 1 },
+      { name: 'p2', order: 2 },
+    ],
+    nodes: [
+      node({ id: 'a', phase: 'p0' }),
+      node({ id: 'r1', templateName: 'ra', phase: 'p1' }),
+      node({ id: 'r2', templateName: 'rb', phase: 'p1' }),
+      node({ id: 'f', templateName: 'zz', phase: 'p2' }),
+    ],
+    edges,
+  }
+}
+
 describe('layoutEdges 正交路由（白盒）', () => {
   it('顺序边：锚点 = 源右边缘中心 → 目标左边缘中心，d 无三次贝塞尔（C 指令）', () => {
     const nodes = [node({ id: 'a' }), node({ id: 'b' })]
@@ -197,7 +245,7 @@ describe('layoutEdges 正交路由（白盒）', () => {
   })
 
   it('loop-back 边：横行走全图最深节点下方总线（不穿任何节点），起终锚在两节点底边', () => {
-    const d = dag({
+    const { layout, geo, edges } = buildRoutedCanvas({
       phases: [{ name: 'p0', order: 0 }, { name: 'p1', order: 1 }],
       nodes: [
         node({ id: 'a', phase: 'p0' }),
@@ -206,10 +254,9 @@ describe('layoutEdges 正交路由（白盒）', () => {
       ],
       edges: [{ id: 'loop', from: 'b', to: 'a', kind: 'loop-back' }],
     })
-    const layout = layoutDag(d)
-    const [lb] = layout.nodes.filter((ln) => ln.node.id === 'b')
-    const deepest = Math.max(...layout.nodes.map((ln) => ln.y + ln.h))
-    const [edge] = layoutEdges(d, layout.nodes)
+    const lb = geo.get('b')!
+    const deepest = deepestBottomOf(layout)
+    const [edge] = edges
     expect(edge.points[0].y).toBe(lb.y + lb.h)
     // 横行总线 y 压在全图最深节点底之下（busY = deepest + LOOP_DROP）
     const busY = edge.points[3].y
@@ -220,25 +267,13 @@ describe('layoutEdges 正交路由（白盒）', () => {
   })
 
   it('跨列 loop-back：下降/上升段走源/目标列侧向细道（节点列之外），不穿同列堆叠节点', () => {
-    const d = dag({
-      phases: [
-        { name: 'p0', order: 0 },
-        { name: 'p1', order: 1 },
-        { name: 'p2', order: 2 },
-      ],
-      nodes: [
-        node({ id: 'a', phase: 'p0' }),
-        node({ id: 'r1', templateName: 'ra', phase: 'p1' }),
-        node({ id: 'r2', templateName: 'rb', phase: 'p1' }),
-        node({ id: 'f', templateName: 'zz', phase: 'p2' }),
-      ],
-      edges: [{ id: 'loop', from: 'f', to: 'r1', kind: 'loop-back' }],
-    })
-    const layout = layoutDag(d)
-    const [lr1] = layout.nodes.filter((ln) => ln.node.id === 'r1')
-    const [lf] = layout.nodes.filter((ln) => ln.node.id === 'f')
-    const deepest = Math.max(...layout.nodes.map((ln) => ln.y + ln.h))
-    const [edge] = layoutEdges(d, layout.nodes)
+    const { layout, geo, edges } = buildRoutedCanvas(
+      crossColumnCanvas([{ id: 'loop', from: 'f', to: 'r1', kind: 'loop-back' }]),
+    )
+    const lr1 = geo.get('r1')!
+    const lf = geo.get('f')!
+    const deepest = deepestBottomOf(layout)
+    const [edge] = edges
     expect(edge.points).toHaveLength(8)
     expectAxisAligned(edge.points)
     // 上升段 x 在目标列右缘细道（节点右缘之外、分区内边距带 CLUSTER_PAD_X=12 内）
@@ -264,25 +299,13 @@ describe('layoutEdges 正交路由（白盒）', () => {
   })
 
   it('跨列 loop-back（两端下方无堆叠）：四折点直连，进出垂直于底边中点、节点附近无横行段', () => {
-    const d = dag({
-      phases: [
-        { name: 'p0', order: 0 },
-        { name: 'p1', order: 1 },
-        { name: 'p2', order: 2 },
-      ],
-      nodes: [
-        node({ id: 'a', phase: 'p0' }),
-        node({ id: 'r1', templateName: 'ra', phase: 'p1' }),
-        node({ id: 'r2', templateName: 'rb', phase: 'p1' }),
-        node({ id: 'f', templateName: 'zz', phase: 'p2' }),
-      ],
-      edges: [{ id: 'loop', from: 'f', to: 'a', kind: 'loop-back' }],
-    })
-    const layout = layoutDag(d)
-    const [la] = layout.nodes.filter((ln) => ln.node.id === 'a')
-    const [lf] = layout.nodes.filter((ln) => ln.node.id === 'f')
-    const deepest = Math.max(...layout.nodes.map((ln) => ln.y + ln.h))
-    const [edge] = layoutEdges(d, layout.nodes)
+    const { layout, geo, edges } = buildRoutedCanvas(
+      crossColumnCanvas([{ id: 'loop', from: 'f', to: 'a', kind: 'loop-back' }]),
+    )
+    const la = geo.get('a')!
+    const lf = geo.get('f')!
+    const deepest = deepestBottomOf(layout)
+    const [edge] = edges
     // p1 列的 r1/r2 既非端点也不在端点列——两端中轴无遮挡 → 四折点直连
     expect(edge.points).toEqual([
       { x: lf.x + DAG_NODE_W / 2, y: lf.y + lf.h },
@@ -328,7 +351,7 @@ describe('layoutEdges 正交路由（白盒）', () => {
   })
 
   it('同通道并行边（fan-in）：竖线段按车道居中错开，不再重合成一根线', () => {
-    const d = dag({
+    const { layout, geo, edges } = buildRoutedCanvas({
       phases: [{ name: 'p0', order: 0 }, { name: 'p1', order: 1 }],
       nodes: [
         node({ id: 'a', templateName: 'aa', phase: 'p0' }),
@@ -347,12 +370,11 @@ describe('layoutEdges 正交路由（白盒）', () => {
         { id: 'e3', from: 'c', to: 'f', kind: 'dataflow' },
       ],
     })
-    const layout = layoutDag(d)
-    const [la] = layout.nodes.filter((ln) => ln.node.id === 'a')
-    const [lf] = layout.nodes.filter((ln) => ln.node.id === 'f')
-    const edges = layoutEdges(d, layout.nodes).filter((le) => le.edge.id.startsWith('e'))
-    expect(edges).toHaveLength(3)
-    const laneXs = edges.map((le) => le.points[1].x)
+    const la = geo.get('a')!
+    const lf = geo.get('f')!
+    const routed = edges.filter((le) => le.edge.id.startsWith('e'))
+    expect(routed).toHaveLength(3)
+    const laneXs = routed.map((le) => le.points[1].x)
     // 三根竖线 x 互不相同（默认中位竖线重合缺陷已修）
     expect(new Set(laneXs).size).toBe(3)
     // 车道以默认中位为中心、按 LANE_STEP_PX 居中分布，且跟随源 y 序（横支互不交叉）
@@ -361,7 +383,7 @@ describe('layoutEdges 正交路由（白盒）', () => {
     expect(sorted[0]).toBeCloseTo(midX - LANE_STEP_PX, 6)
     expect(sorted[1]).toBeCloseTo(midX, 6)
     expect(sorted[2]).toBeCloseTo(midX + LANE_STEP_PX, 6)
-    for (const le of edges) expectAxisAligned(le.points)
+    for (const le of routed) expectAxisAligned(le.points)
   })
 
   it('同列 loop-back：走分区左内边距侧向细道（不在节点列内折返），贴边段不压底边框', () => {
@@ -391,34 +413,19 @@ describe('layoutEdges 正交路由（白盒）', () => {
   })
 
   it('连线锚点纪律：全部边首末折点只落在节点四条边的中点（4 个连线点）', () => {
-    const d = dag({
-      phases: [
-        { name: 'p0', order: 0 },
-        { name: 'p1', order: 1 },
-        { name: 'p2', order: 2 },
-      ],
-      nodes: [
-        node({ id: 'a', phase: 'p0' }),
-        node({ id: 'r1', templateName: 'ra', phase: 'p1' }),
-        node({ id: 'r2', templateName: 'rb', phase: 'p1' }),
-        node({ id: 'f', templateName: 'zz', phase: 'p2' }),
-      ],
-      edges: [
-        { id: 'e-seq', from: 'a', to: 'r1', kind: 'sequence' },
-        { id: 'e-df', from: 'r2', to: 'f', kind: 'dataflow' },
-        { id: 'loop-x', from: 'f', to: 'r1', kind: 'loop-back' },
-        { id: 'loop-same', from: 'r2', to: 'r1', kind: 'loop-back' },
-      ],
-    })
-    const layout = layoutDag(d)
-    const geo = new Map(layout.nodes.map((ln) => [ln.node.id, ln]))
+    const { layout, geo, edges } = buildRoutedCanvas(crossColumnCanvas([
+      { id: 'e-seq', from: 'a', to: 'r1', kind: 'sequence' },
+      { id: 'e-df', from: 'r2', to: 'f', kind: 'dataflow' },
+      { id: 'loop-x', from: 'f', to: 'r1', kind: 'loop-back' },
+      { id: 'loop-same', from: 'r2', to: 'r1', kind: 'loop-back' },
+    ]))
     const midpoints = (ln: { x: number; y: number; h: number }) => [
       { x: ln.x + DAG_NODE_W / 2, y: ln.y },
       { x: ln.x + DAG_NODE_W / 2, y: ln.y + ln.h },
       { x: ln.x, y: ln.y + ln.h / 2 },
       { x: ln.x + DAG_NODE_W, y: ln.y + ln.h / 2 },
     ]
-    for (const le of layoutEdges(d, layout.nodes)) {
+    for (const le of edges) {
       const from = geo.get(le.edge.from)
       const to = geo.get(le.edge.to)
       expect(from).toBeDefined()
