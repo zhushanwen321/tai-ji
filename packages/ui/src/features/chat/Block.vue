@@ -1,18 +1,25 @@
 <template>
-  <!-- split-justified: trace 块分支体系（五分支共享 ICON/折叠态/composable 基建，按分支机械拆分产出转发壳）；script 超 300 为存量（HEAD 已 317），run 组分支叠加后 329，拆分属独立重构任务 -->
+  <!-- split-justified: trace 块转发壳（thinking/text 已迁 ThinkingRow/TextRow，tool/agentgraph/run-group 待 W2/W3 迁出）；script 超 300 为壳内残余分支存量，五类型全部迁出后回归预算 -->
   <!--
-    展示组件 · trace 块（message-stream 折叠区内的单个块）。Demo H 视觉：灰阶 + SVG ICON +
-    唯一 accent 蓝（running）+ failed hover muted 暖橙。
-    - thinking：lightbulb ICON + header 可点击 toggle，长块独立再折叠（本地折叠态）。
-    - tool：默认 1 行收起（streaming/running 也收起），点击展开详情。failed 终态默认展开（streaming 中失败不 remount，只图标染 danger）。
-    - workflow：list-checks ICON + WORKFLOW. prefix + 状态动词 + workflow 名，详情区走 list-tree GUI / 文本。
-    - subagent：渲染委托给 BlockSubagent（users ICON + SUBAGENT. prefix + 去卡片化）。
-    - run-group：run 类型分组组块——组头「类型名[ · 序号] + N 步 · 耗时 + 含 M 次失败」，
-      展开后成员行（嵌套递归渲染普通 tool 收起态，SFC 文件名自引用）。
-    - 展开块限高：thinking / bash 输出 / 非 bash 工具输出统一走 BlockScrollBox（240px 块内滚动 +
-      渐隐提示 + 行区间信息条；bash 命令头保持在滚动区外 = 恒吸顶）；GUI 协议输出自管理高度不包。
-    - failed：无鲜红全展开（红框已删），行文字保持中性灰、图标常驻染 danger（demo
-      .line.subagent.failed .sicon 形态），错误摘要进 body 文本。
+    展示组件 · trace 块转发壳（message-stream 折叠区内的单个块，Turn 层唯一渲染单元入口）。
+    壳职责：根元素持 .trace-blk / .trace-blk--text 类名契约（下方块间节奏注释——容器选择器
+    前锚，类名丢失只会静默丢间距，无类型错误可查）+ data-testid（block-tool-<id> /
+    block-thinking-<id>）+ 按 type 分派行组件。转发壳不引入新 DOM 层（壳根 = 原 Block 根
+    div，Row 根 = 原分支根 div），视觉像素不变。
+    - thinking → ThinkingRow（折叠状态机 / 尾行视口 / 时长 / 扫光 / 展开区）。
+    - text → TextRow（markdown / error 追加行 / 行尾时刻 / turn-actions 锚行；#turn-actions
+      插槽经壳透传，锚行开关经 hasTurnActions 由壳 $slots 判空传入）。
+    - tool / agentgraph（subagent / workflow 子分支）/ run-group 暂住壳内（W2/W3 迁出，
+      迁后五类型全部转发）：
+      - tool：默认 1 行收起（streaming/running 也收起），点击展开详情。failed 终态默认展开（streaming 中失败不 remount，只图标染 danger）。
+      - workflow：list-checks ICON + WORKFLOW. prefix + 状态动词 + workflow 名，详情区走 list-tree GUI / 文本。
+      - subagent：渲染委托给 BlockSubagent（users ICON + SUBAGENT. prefix + 去卡片化）。
+      - run-group：run 类型分组组块——组头「类型名[ · 序号] + N 步 · 耗时 + 含 M 次失败」，
+        展开后成员行（嵌套递归渲染普通 tool 收起态，SFC 文件名自引用）。
+      - 展开块限高：bash 输出 / 非 bash 工具输出统一走 BlockScrollBox（240px 块内滚动 +
+        渐隐提示 + 行区间信息条；bash 命令头保持在滚动区外 = 恒吸顶）；GUI 协议输出自管理高度不包。
+      - failed：无鲜红全展开（红框已删），行文字保持中性灰、图标常驻染 danger（demo
+        .line.subagent.failed .sicon 形态），错误摘要进 body 文本。
     审批按钮 DEFERRED（G-018），v1 不渲染。failed 救生按钮不做（agent 自处理，design.md 决策 3）。
   -->
   <!-- 块间节奏（MF-1-3，demo workbench.css 机制同构）：间距唯一权威 = Turn.vue trace 容器
@@ -23,134 +30,35 @@
        demo 运行态只落在行级（呼吸弧 accent 图标 + 文字扫光，workbench.css .run-ic/.shine），
        .blk 容器无任何 running 形态——行级信号已足，块级染色是 demo 不存在的自行发明。 -->
   <div class="trace-blk" :class="type === 'text' ? 'trace-blk--text' : ''" :data-testid="testId">
-    <!-- thinking 块：同行展开（float 布局——第一行环绕 label，第二行起从最左侧开始） -->
-    <div v-if="type === 'thinking'" class="trace-think">
-      <div
-        class="group/think relative cursor-pointer select-none"
-        :title="thinkingExpanded ? t('panel.message.collapseReasoning') : t('panel.message.expandReasoning')"
-        @click="toggleThinking"
-      >
-        <!-- 摘要行：flex 布局，min-h 锁定高度避免展开时跳动。
-             [M3b demo 复刻]（workbench.css .line/.think）：行内间距 gap-[8px]（demo 8px）；
-             图标染色经显式类替换 BLOCK_ICON_CLASS（两者 text 色工具类同特异性，追加不构成
-             可靠覆盖）：静止态染 --neutral-ico（2026-10-15 裁决 ②A 去紫——原 --reasoning 紫
-             退役，token 本体不动，ANSI magenta / 摘要标题 / skill 徽标等其余消费点不受影响）；
-             行字号随 trace 容器定档（Turn.vue .trace 的 text-md = 15px，行主体统一档）。
-             [MF-1-28]（demo TurnList.vue:72-73）：running 态 = 呼吸弧 accent（同工具行
-             :237 形态，信号源 = thinkingSweeping）；静止态 = lightbulb 15px stroke1.6 染
-             --neutral-ico。行 hover 反馈（MF-1-4，demo workbench.css:355 .line:hover 只压
-             文字段 opacity .8——图标与显形时间戳不参与，hover 类挂行内文字 span 而非行
-             容器，同 tool/bash-group/workflow 行）；行内垂直对齐
-             baseline（MF-1-34，workbench.css:348 align-items:baseline），图标保持
-             self-center（demo .sicon align-self:center）。 -->
-        <div class="flex items-baseline gap-[8px] min-h-[1.5rem]">
-          <!-- 运行→完成图标切换：[HISTORICAL] 曾用 Vue Transition 的 out-in 模式（过渡名 tico）
-               做交叉切换（动效裁决 2A 出半），2026-10 移除：Vue 3.5.39 下 out-in leave 完成后
-               enter 不触发（调度 bug，内容永久空白），vue_rules_checker 已禁该写法，同构踩坑
-               见 DrawerPanel/Sidebar/SettingsModal 三处先例（稳定性优先，瞬时切换）。scoped
-               尾部 tico 过渡类随本移除删除。reduced-motion 语义随之自然成立（无动画可停）。 -->
-          <RunningBlockIcon v-if="thinkingSweeping" kind="thinking" />
-          <component :is="BLOCK_ICON_LUCIDE.thinking" v-else class="size-[15px] shrink-0 self-center text-neutral-ico [stroke-width:1.6]" />
-          <!-- 状态词 label：思考进行中跑文字扫光（决策 10）。生命周期 = 块级（thinkingEnd 未填），
-               非消息级 working——思考完结后消息仍在流式（工具执行中），扫光随思考完结熄灭。
-               base 覆盖为 mid 档对齐 BLOCK_LABEL_CLASS 常态字色（reduced-motion 停帧态 = 常态色，
-               构造性回退）。:key 绑定预览形态：预览分支切换（单行预览 ↔ 尾行视口）时预览元素
-               重建重启动画，状态词同帧重建使两处扫光同一动画相位（整体一起闪）。 -->
-          <span :key="thinkingSweepPhase" :class="[BLOCK_LABEL_CLASS, 'transition-opacity duration-[var(--duration-fast)] group-hover/think:opacity-80', thinkingSweeping ? 'text-sweep [--sweep-base:var(--neutral-mid)]' : '']">{{ t('panel.message.thinkingBlock') }}</span>
-          <!-- 分隔点常驻（demo 思考行运行/完成两态都有「·」）；展开态仅当其后无时长段时随
-               预览一起隐（防悬挂点；展开且有时长 =「思考 · 22s」句式保留分隔） -->
-          <span class="text-neutral-dim" :class="thinkingExpanded && !thinkingDuration ? 'invisible' : ''">·</span>
-          <!-- N6 思考行时长（ui-optimize-unified 决策 8）：startTime/endTime 双有值才渲染（实时链路
-               thinking_start/end 效果器填充；持久化重载链路 thinking part 无时间戳数据源 → 缺值
-               维持现状展示 = 设计「推导不出则降级」分支按块级生效）。
-               [M3b demo 复刻] 时长常驻显形 + 位置贴状态词（demo「· 持续了 22 秒 ·」在预览前，
-               .think 同行 14px sans dim）——原 D2 悬停化 + mono 11px 形态被 demo 权威覆盖；
-               行尾时刻槽（thinking-time-slot）保留 D2 悬停化（demo .ts 即 hover 显形）。 -->
-          <span v-if="thinkingDuration" class="shrink-0 text-neutral-dim" data-testid="thinking-duration">{{ t('panel.message.thinkingDuration', { duration: thinkingDuration }) }}</span>
-          <span v-if="thinkingDuration && messageTimestamp" class="shrink-0 text-neutral-faint opacity-0 transition-opacity duration-[var(--duration-fast)] group-hover/think:opacity-100 group-focus-within/think:opacity-100">·</span>
-          <!-- working 态：单行尾行视口（2026-08 抖动修复重写）。横向钉右 = viewport flex
-               justify-end + 行右对齐 + mr-auto（溢出裁左纯 CSS 无 scrollLeft 时序；mr-auto
-               短行左贴 label、长行溢出时钉右）；纵向换行 = useTailScroll settled/sliding
-               状态机 translateY(-50%) 滑入（-50% 基于自身 2 行高度，与行高数值解耦）；
-               h-[1lh] 视口高度 = 1 行行高。leading-normal（无单位）必需：normal 行高下
-               行盒高度随内容 fallback 字体变（实测 system-ui 16px / PingFang 18px /
-               emoji 21px，CJK 行被裁 2-5px）；无单位系数使行盒恒 = 系数×字号，字体无关。 -->
-          <span
-            v-if="working && thinkingTailLines.length > 0"
-            class="flex h-[1lh] min-w-0 flex-1 self-center justify-end overflow-hidden leading-normal text-neutral-dim transition-opacity duration-[var(--duration-fast)] group-hover/think:opacity-80"
-            :class="thinkingExpanded ? 'invisible' : ''"
-          >
-            <span :class="[thinkingSweeping ? 'text-sweep' : '', 'mr-auto flex flex-col items-end self-start']" :style="thinkScrollStyle">
-              <span v-for="(line, i) in thinkDisplayLines" :key="i" class="whitespace-nowrap">{{ line }}</span>
-            </span>
-          </span>
-          <span v-else class="flex-1 min-w-0 truncate text-neutral-dim transition-opacity duration-[var(--duration-fast)] group-hover/think:opacity-80" :class="[thinkingSweeping ? 'text-sweep' : '', thinkingExpanded ? 'invisible' : '']">{{ previewText }}</span>
-          <!-- thinking 块行尾时刻（D2 悬停化：常驻改按需——悬停该行 / 键盘焦点进入该行才显现） -->
-          <span v-if="messageTimestamp" class="ml-auto shrink-0 self-center font-mono text-[length:var(--text-2xs)] text-neutral-dim tabular-nums opacity-0 transition-opacity duration-[var(--duration-fast)] group-hover/think:opacity-100 group-focus-within/think:opacity-100" data-testid="thinking-time-slot">{{ formatClock(messageTimestamp) }}</span>
-        </div>
-        <!-- 展开内容区：copy 按钮浮在左上角（BlockScrollBox 外层，层级不动）。按钮常驻 DOM 且
-             层级固定，可见度由悬停控制（opacity-0 + group-hover/result:opacity-100）——
-             「始终可见」指常驻 DOM 与层级，非视觉常显。 -->
-        <Transition name="block-expand">
-        <div v-if="thinkingExpanded" class="group/result relative mt-1 pl-4 text-[length:var(--text-sm)] leading-[1.8] text-neutral-mid">
-          <Button
-            variant="ghost"
-            size="icon"
-            class="absolute top-0 left-0 size-5 rounded-sm text-neutral-dim opacity-0 transition-opacity hover:text-neutral-fg group-hover/result:opacity-100"
-            :title="t('panel.message.copy')"
-            @click.stop="content && copy(content, `thinking-${thinkingId ?? 'block'}`)"
-          >
-            <Check v-if="copied === `thinking-${thinkingId ?? 'block'}`" class="size-3 text-success" />
-            <CopyIcon v-else class="size-3" />
-          </Button>
-          <!-- G5/D6：thinking 展开区统一块内滚动（240px 限高 + 渐隐 + 行区间信息条 + streaming 吸底） -->
-          <BlockScrollBox>
-            <MarkdownRenderer v-if="!working" :content="content ?? ''" :session-id="sessionId ?? undefined" variant="thinking" />
-            <span v-else class="whitespace-pre-wrap">{{ content ?? '' }}</span>
-          </BlockScrollBox>
-        </div>
-        </Transition>
-      </div>
-    </div>
+    <!-- thinking 行 → ThinkingRow（折叠状态机 / 尾行视口 / 时长 / 扫光 / 展开区，W1 迁出） -->
+    <ThinkingRow
+      v-if="type === 'thinking'"
+      :content="content"
+      :thinking-id="thinkingId"
+      :collapsed="collapsed"
+      :working="working"
+      :thinking-start="thinkingStart"
+      :thinking-end="thinkingEnd"
+      :message-timestamp="messageTimestamp"
+      :session-id="sessionId"
+    />
 
-    <!-- 正文 text 块：全 inline 统一正文样式（text-md/leading-[1.8]，D5 行类型定档 15px），颜色跟所属
-         assistant 消息的文本活跃态（chat-flow-text-color D1：streaming→neutral-mid，定稿/缺省→
-         neutral-fg）。streaming 由 Turn.unitBlockProps 按 textFinalized 逐消息派生（pi 回合级
-         message.complete 才收口 mid-turn 气泡 status，直接跟 status 会让长工具回合中已写完
-         的正文一直灰；单调不随兄弟 message 翻转）。group/text 命名分组承载行尾时刻的悬停/键盘聚焦两翼显现。
-         streaming-tail 光标在 Turn.vue trace 容器末尾（跟在所有 block 后，不受 contentBlocks 时序影响）。
-         [M2 形态统一] 唯一 error 形态 = 追加形态：content 崩溃前正文保持原色（可为空），
-         msg.error 独立 danger 行（错误文本只住 error 字段，永不染红正文）。 -->
-    <div v-else-if="type === 'text'" data-testid="block-text" class="group/text relative flex flex-col text-[length:var(--text-md)] leading-[1.8]" :class="textColorClass">
-      <!-- 正文行（原行容器原样下沉一层；textColorClass 上提到外层列容器，继承不变） -->
-      <div class="flex items-start gap-[8px]">
-        <div class="min-w-0 flex-1">
-          <MarkdownRenderer v-if="content" :content="content ?? ''" :session-id="sessionId ?? undefined" :streaming="streaming" />
-          <!-- error 独立 danger 行（AlertCircle + msg.error 文本） -->
-          <div v-if="isAppendError" data-testid="block-text-error" class="mt-1 flex items-start gap-1.5 text-danger">
-            <AlertCircle class="mt-1.5 size-3.5 shrink-0 text-danger" />
-            <span class="min-w-0 flex-1 whitespace-pre-wrap">{{ error }}</span>
-          </div>
-        </div>
-        <!-- text 块行尾时刻（D2 悬停化：原 w-28 固定占位列随悬停化一并移除，正文行恢复满宽；
-             ml-auto 钉行尾，悬停/键盘焦点进入该行才显现） -->
-        <span v-if="messageTimestamp" class="ml-auto shrink-0 self-center font-mono text-[length:var(--text-2xs)] text-neutral-dim tabular-nums opacity-0 transition-opacity duration-[var(--duration-fast)] group-hover/text:opacity-100 group-focus-within/text:opacity-100" data-testid="text-time-slot">{{ formatClock(messageTimestamp) }}</span>
-      </div>
-      <!-- [actions-anchor] turn 级 hover actions 挂载位（Turn.vue 经 #turn-actions 插槽注入，
-           仅 trace 末单元为 text 块时本块携带——正文后跟了任何块则该 text 无锚，防占位行
-           夹在正文与后续块之间撑出空洞）。2026-10-15 用户裁决：流内固定槽位 = text 块下部一行，
-           与 UserBubble hover actions 同族形态（原「text 上方右侧」悬浮 chip 退役——
-           透明底不再覆盖任何文字）。常驻 h-6 行占位（opacity 门控显隐，与 UserBubble
-           mt-1+h-6 同参）；悬停区 = 外层 group/text（正文行 + 本行），按钮是本块 DOM
-           子孙，移入按钮期间悬停态经 DOM 祖先传递不丢失。 -->
-      <span
-        v-if="$slots['turn-actions']"
-        class="mt-1 flex h-6 items-center gap-0.5 opacity-0 pointer-events-none transition-opacity duration-[var(--duration-fast)] group-hover/text:pointer-events-auto group-hover/text:opacity-100 group-focus-within/text:pointer-events-auto group-focus-within/text:opacity-100"
-        data-testid="turn-actions-anchor"
-      >
+    <!-- 正文行 → TextRow（markdown / error 追加行 / 行尾时刻 / turn-actions 锚行，W1 迁出；
+         #turn-actions 插槽经壳透传，锚行开关 = 壳 $slots 判空） -->
+    <TextRow
+      v-else-if="type === 'text'"
+      :content="content"
+      :streaming="streaming"
+      :status="status"
+      :error="error"
+      :message-timestamp="messageTimestamp"
+      :session-id="sessionId"
+      :has-turn-actions="!!$slots['turn-actions']"
+    >
+      <template #turn-actions>
         <slot name="turn-actions" />
-      </span>
-    </div>
+      </template>
+    </TextRow>
 
     <!-- ── run 组块（run 类型分组，demo specs/chat/history-load-and-run-grouping.md §3）：
          连续同类型（探索 / 改动 / 执行命令）的工具行折成一行组头。组资格只看工具类型不看状态，
@@ -426,7 +334,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { AlertCircle, Check, Copy as CopyIcon } from '@lucide/vue'
+import { Check, Copy as CopyIcon } from '@lucide/vue'
 import type { GuiComponent } from '@zhushanwen/extension-protocol'
 import { extractGui } from '@zhushanwen/extension-protocol'
 import type { MessageStatus, ToolCall } from '@taiji/shared'
@@ -434,7 +342,8 @@ import { SUBAGENT_TOOL_NAMES, WORKFLOW_TOOL_NAMES, displayWorkflowName } from '@
 import type { FlatBlock, RunGroupBase, RunGroupMile } from '@taiji/core/domain/chat'
 import { lookupWorkflowRun, openWorkflow } from '@taiji/core/domain/drawer'
 import { AnsiText, GuiComponentRenderer } from '../../rendering-protocol'
-import MarkdownRenderer from './MarkdownRenderer.vue'
+import ThinkingRow from './ThinkingRow.vue'
+import TextRow from './TextRow.vue'
 import BlockSubagent from './BlockSubagent.vue'
 import BlockScrollBox from './BlockScrollBox.vue'
 import ToolResultImages from './ToolResultImages.vue'
@@ -448,7 +357,6 @@ import { Button } from '../../primitives/button'
 import { useToolMeta } from './composables/useToolMeta'
 import { useCopy } from './composables/useCopy'
 import { TAIL_WINDOW_LINES, useTailScroll } from './composables/useTailScroll'
-import { useThinkingCollapse } from './composables/useThinkingCollapse'
 import { useLiveToolDuration } from './composables/useLiveToolDuration'
 import { useChatViewDeps } from './chat-view-deps'
 
@@ -505,57 +413,6 @@ const props = defineProps<{
   /** 所属 session（透传给 MarkdownRenderer 供文件路径打开 DetailPane 用） */
   sessionId?: string | null
 }>()
-
-/* ── thinking 折叠（streaming-trace-window 验收修正）：working 态也默认折叠（60 字符预览），
- *    与过程块收编理念一致（收编减体积 + thinking 折叠 = 视觉体积最小）；用户可手动展开，展开后保持。
- *    原 SSOT §3.3.3「working→false 展开」导致 streaming 中所有 thinking 全展开，与收编减体积冲突。──
- *    状态机拆至 useThinkingCollapse（折叠/手动置位/working 回落/预览/尾行视口一体）。 */
-const { thinkingExpanded, toggleThinking, previewText, thinkingTailLines, thinkDisplayLines, thinkScrollStyle } =
-  useThinkingCollapse({
-    content: computed(() => props.content),
-    working: computed(() => props.working),
-    collapsed: props.collapsed,
-  })
-
-/** error 终态：msg.error 有值（收口侧兜底保证非空；!! 防御漏网产出点）→ 独立 danger 行。 */
-const isAppendError = computed(() => props.status === 'error' && !!props.error)
-
-/** N6 思考行时长：startTime/endTime 双有值才推导（end<=start 视为数据缺口，守卫与
- *  useLiveToolDuration 终态分支同构）；口径 formatDuration 与工具行行尾耗时一致。 */
-const thinkingDuration = computed(() => {
-  const start = props.thinkingStart
-  if (typeof start !== 'number') return ''
-  const end = props.thinkingEnd
-  if (typeof end !== 'number' || end <= start) return ''
-  return formatDuration(end - start)
-})
-
-/** 思考是否已完结：endTime 晚于 startTime（实时链路 thinking_end 效果器填充；重载链路
- *  双 undefined → false，但历史块 working 恒 false，扫光判定不受影响）。守卫与
- *  thinkingDuration 同构。 */
-const thinkingEnded = computed(() => {
-  const start = props.thinkingStart
-  const end = props.thinkingEnd
-  return typeof start === 'number' && typeof end === 'number' && end > start
-})
-
-/** 思考扫光进行中（决策 10 生命周期修正）：消息级 working（assistant 仍在流式）不足以判
- *  块级扫光——思考完结后消息继续流式（工具执行中），扫光必须随思考完结熄灭，否则思考行
- *  与工具行同时闪。实时链路主路径：有 start 无 end = 进行中扫、end 有值 = 完结熄。
- *  重载链路双时间戳缺失（进程恢复中的进行中会话）无数据可判 → 跟随消息级 working
- *  （错闪成本低于进行中活性信号丢失）。 */
-const thinkingSweeping = computed(() => props.working === true && !thinkingEnded.value)
-
-/** 扫光相位键：预览形态（单行预览 ↔ 尾行视口）切换时预览元素重建重启动画，状态词以同
- *  key 同帧重建，使两处扫光同一动画相位——整体一起闪，不做两处各闪。 */
-const thinkingSweepPhase = computed(() =>
-  thinkingSweeping.value ? (thinkingTailLines.value.length > 0 ? 'tail' : 'preview') : 'idle',
-)
-
-/** text 分支颜色：正常正文 文本活跃（streaming 且未定稿）→neutral-mid、定稿/终态→neutral-fg（正文永不因 error 整条染红） */
-const textColorClass = computed(() => {
-  return props.streaming ? 'text-neutral-mid' : 'text-neutral-fg'
-})
 
 const isFailed = computed(() => props.tool?.status === 'error')
 const isRunning = computed(() => props.tool?.status === 'running')
@@ -894,10 +751,11 @@ const testId = computed(() => {
   transform: translateY(-4px);
 }
 
-/* 执行中文字扫光（ui-optimize-unified 决策 10 / N13）：扫光对象 = 执行中行正在发生的
-   内容文字（思考行状态词 + 预览流、工具行执行命令/摘要），稳定标识（工具名/时间戳/计数）
+/* 执行中文字扫光（ui-optimize-unified 决策 10 / N13）：扫光对象 = 执行中工具行正在发生的
+   内容文字（执行命令/摘要；思考行同款规则在 ThinkingRow.vue 各持一份——scoped 样式只
+   作用于本组件模板元素，Row 拆分后壳内副本不再命中思考行），稳定标识（工具名/时间戳/计数）
    不扫。机制 = background-clip:text + 透明字色，base（--sweep-base，缺省 dim 档 =
-   预览流/摘要常态字色；label 处经任意属性类覆盖为 mid 档）与 peak（--neutral-fg）
+   尾行视口/摘要常态字色）与 peak（--neutral-fg）
    全令牌化，六主题免逐个定值。周期 2.6s：前 55% 扫程（peak 自元素左外 -25% 移至
    右外 125%），后 45% 停帧。keyframes（text-sweep）在 renderer style.css 动画区
    全局定义——scoped 内定义会被编译器哈希改名而失效（同全局动画区先例理由）。

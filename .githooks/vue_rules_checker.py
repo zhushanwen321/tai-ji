@@ -84,7 +84,10 @@ SPLIT_JUSTIFIED_SCAN_LINES = 30
 # [2026-10 trace 块动效] RunningBlockIcon.vue（每类活动专属运行动效）：纯动效组件——
 # scoped CSS 全部为动画本体（keyframes + offset-path path() + conic/mask 几何），
 # Tailwind 无法表达 scoped-keyframe 引用与 offset-path 路径的组合；Block.vue .text-sweep 同族先例。
-STYLE_SCOPED_WHITELIST: list[str] = ['shell/MainPanel.vue', 'sidebar/UpdateButton.vue', 'settings/SettingsModal.vue', 'collapsible/CollapsibleContent.vue', 'sidebar/Sidebar.vue', 'features/chat/Block.vue', 'features/chat/RunningBlockIcon.vue']
+# [2026-10 trace 块壳化 W1] ThinkingRow.vue：承接 Block.vue thinking 分支的 .text-sweep 扫光与
+# block-expand 展开过渡（scoped 样式只作用于本组件模板元素，Row 拆分后与壳内副本各持一份同款
+# 规则）；block-expand 选择器组走 Vue Transition 类 escape hatch，此处放行的是 .text-sweep。
+STYLE_SCOPED_WHITELIST: list[str] = ['shell/MainPanel.vue', 'sidebar/UpdateButton.vue', 'settings/SettingsModal.vue', 'collapsible/CollapsibleContent.vue', 'sidebar/Sidebar.vue', 'features/chat/Block.vue', 'features/chat/RunningBlockIcon.vue', 'features/chat/ThinkingRow.vue']
 
 # CSS 选择器检测正则
 RE_STYLE_SELECTOR = re.compile(r'^[.\w\-]+[\s,]*\{')
