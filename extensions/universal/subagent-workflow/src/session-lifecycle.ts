@@ -672,17 +672,12 @@ async function runProcessLevelMaintenance(
       // 对本 session 维护轮结构性可达），判定与删除判据归 core reapOrphanRuns，本处
       // 只做目录枚举。引用集预采集一次复用全部目录（同轮同快照，逐目录重复全池
       // 扫描无增益）；登记文件（orphan-run-reap.json）落各自 stateDir，多目录天然
-      // 隔离。枚举失败（树根 EACCES/EIO）debug 留痕不放大——触发面缺侧 = 少扫
-      // 目录（宁保留方向，宽限窗兜底），对齐读错分通道纪律。
-      let stateDirs: string[];
-      try {
-        stateDirs = await listWorkflowRunsDirs();
-      } catch (err) {
-        logger.debug(
-          `[subagent-workflow] session store root enumeration failed, state dir trigger surface missing: ${toErrorMessage(err)}`,
-        );
-        stateDirs = [];
-      }
+      // 隔离。枚举读错分通道 = core listWorkflowRunsDirs 契约原样消费（树根 ENOENT
+      // 空集在函数内消化；EACCES/EIO 真故障上抛——静默折叠成空集会让持续 IO 故障
+      // 伪装成「0 个 run 待对账」，与同文件 collectAliveWorkflowRunReferences 同一口径）。
+      // 此处不接故障：真故障沿外层 catch warn 留痕并跳过本轮对账段（宁保留方向
+      // 不变；oncePerProcess 失败不落缓存，下轮触发可重试）。
+      const stateDirs = await listWorkflowRunsDirs();
       // 引用集惰性单次采集（同轮同快照，逐目录重复全池扫描无增益）：promise 在
       // core reapOrphanRuns 的 await 表达式内才创建——采集器上抛（真 IO 故障，
       // 读错分通道）时拒绝被该 await 的 try/catch 即时接住，不产生提前创建导致的
