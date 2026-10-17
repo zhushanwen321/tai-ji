@@ -26,6 +26,8 @@ import {
   BTE_STORE_SEGMENT_CONST,
   BTE_DOMAIN_SEGMENT_CONST,
   SHARED_BG_TASKS_FN,
+  SHARED_VIEW_FN,
+  SR_VIEW_FN_ANCHOR,
   compareTreeSegmentsShape,
   extractFunctionBlock,
   extractJoinSegment,
@@ -34,6 +36,9 @@ import {
   extractConstRegex,
   extractConstStringArray,
   extractTreeRootSegment,
+  extractViewTreeRootSegment,
+  extractViewFileSegment,
+  extractViewSessionIdRegex,
   mirrorUsesSegmentConst,
 } from '../check-artifact-dir-formula-sync.mjs'
 import { expectGuardDirectRunPasses, makeGuardMirror } from './helpers/guard-mirror.mjs'
@@ -137,6 +142,18 @@ ${decl}`, RUNTIME_PATTERN_CONST).value).toBe(DEFAULT_REGEX)
     expect(compareTreeSegmentsShape(['sessions', 'subagents', 'btw'], 3, 'ext-sessions').error).toBeDefined()
     expect(compareTreeSegmentsShape(['sessions', 'subagents', 'btw', 'other-root'], 3, 'ext-sessions').error).toBeDefined()
   })
+
+  it('域 6 提取器：doExport 裸字面量三段提取（树根段 / 文件段 / 内联正则；形态不符报 error）', () => {
+    const block = extractFunctionBlock(sessionReaderViewSrc(), SR_VIEW_FN_ANCHOR)
+    expect(block.error).toBeUndefined()
+    expect(extractViewTreeRootSegment(block.text).value).toBe('ext-sessions')
+    expect(extractViewFileSegment(block.text).value).toBe('session-view.md')
+    expect(extractViewSessionIdRegex(block.text).value).toBe(DEFAULT_REGEX)
+    // 调用形态锁定：基址 / 变量名 / .test 目标任一变化 → error（宁可误报不可漏报）
+    expect(extractViewTreeRootSegment(`const outDir = join(dataRoot(), 'ext-sessions', resolved.sessionId)`).error).toBeDefined()
+    expect(extractViewFileSegment(`const outPath = join(target, 'session-view.md')`).error).toBeDefined()
+    expect(extractViewSessionIdRegex(`if (!${DEFAULT_REGEX}.test(sessionId)) {`).error).toBeDefined()
+  })
 })
 
 // ── fixture 生成（源文件真实形态：函数块 + 常量）────────────────────────
@@ -149,6 +166,7 @@ const sharedPathsSrc = ({
   storeSegment = 'ext-sessions',
   treeSegments = DEFAULT_TREE_SEGMENTS,
   bgTasksSegment = 'background-tasks',
+  viewFileSegment = 'session-view.md',
 } = {}) =>
   [
     `export const ${STORE_SEGMENT_CONST} = '${storeSegment}'`,
@@ -166,6 +184,16 @@ const sharedPathsSrc = ({
           `export function ${SHARED_BG_TASKS_FN}(sessionId: string, dataDir?: string): string {`,
           `  assertPiSessionId(sessionId)`,
           `  return join(getSessionStoreDir(dataDir), sessionId, '${bgTasksSegment}')`,
+          `}`,
+          ``,
+        ]
+      : []),
+    // 第六组（域 6）对拍权威函数：viewFileSegment = null 注入「函数缺席」形态
+    ...(viewFileSegment
+      ? [
+          `export function ${SHARED_VIEW_FN}(sessionId: string, dataDir?: string): string {`,
+          `  assertPiSessionId(sessionId)`,
+          `  return join(getSessionStoreDir(dataDir), sessionId, '${viewFileSegment}')`,
           `}`,
           ``,
         ]
@@ -238,13 +266,30 @@ const bteRegistrySrc = ({ storeSegment = 'ext-sessions', domainSegment = 'backgr
     ``,
   ].join('\n')
 
+// 第六组（域 6）fixture：session-reader tool-handler 裸字面量形态（doExport 落盘段缩样）
+const sessionReaderViewSrc = ({ treeSegment = 'ext-sessions', fileSegment = 'session-view.md', regex = DEFAULT_REGEX } = {}) =>
+  [
+    `async function doExport(`,
+    `  params: SessionReadParams,`,
+    `  agentDir: string,`,
+    `): Promise<ToolResult> {`,
+    `  if (!${regex}.test(resolved.sessionId)) {`,
+    `    throw err('导出拒绝')`,
+    `  }`,
+    `  const outDir = join(dirname(agentDir), '${treeSegment}', resolved.sessionId)`,
+    `  const outPath = join(outDir, '${fileSegment}')`,
+    `  await mkdir(outDir, { recursive: true })`,
+    `}`,
+    ``,
+  ].join('\n')
+
 /**
  * tmp mirror 工厂：目录布局对齐守卫 ROOT 相对路径（packages/shared/src、extensions/taiji/
  * system-prompt/src、packages/runtime/src/infra/pi、extensions/universal/base-tool-enhance/
- * src/background）。overrides 覆盖任一侧公式（漂移注入点），missing 指定不落盘的文件。
- * root/落盘/清理/守卫副本装置见 guard-mirror.mjs。
+ * src/background、extensions/universal/session-reader/src）。overrides 覆盖任一侧公式
+ * （漂移注入点），missing 指定不落盘的文件。root/落盘/清理/守卫副本装置见 guard-mirror.mjs。
  */
-function makeMirror({ shared = {}, mirror = {}, runtime = {}, bte = {}, missing = [] } = {}) {
+function makeMirror({ shared = {}, mirror = {}, runtime = {}, bte = {}, sr = {}, missing = [] } = {}) {
   return makeGuardMirror({
     prefix: 'artifact-formula-fx-',
     files: {
@@ -252,6 +297,7 @@ function makeMirror({ shared = {}, mirror = {}, runtime = {}, bte = {}, missing 
       'extensions/taiji/system-prompt/src/index.ts': mirrorSystemPromptSrc(mirror),
       'packages/runtime/src/infra/pi/pi-paths.ts': runtimePiPathsSrc(runtime),
       'extensions/universal/base-tool-enhance/src/background/registry.ts': bteRegistrySrc(bte),
+      'extensions/universal/session-reader/src/tool-handler.ts': sessionReaderViewSrc(sr),
     },
     missing,
     script: SCRIPT,
@@ -275,6 +321,22 @@ describe('CLI 集成（守卫脚本 × tmp mirror）', () => {
       expect(r.stdout).toContain(`域 5 存储树根段一致（'ext-sessions'，shared ↔ base-tool-enhance 镜像）`)
       expect(r.stdout).toContain(`域 5 后台任务域段一致（'background-tasks'，shared ${SHARED_BG_TASKS_FN} ↔ 镜像常量）`)
       expect(r.stdout).toContain(`域 5 sessionId 校验正则一致（${DEFAULT_REGEX}）`)
+      // 第六组（域 6）：session-reader 镜像三字面量对拍
+      expect(r.stdout).toContain(`域 6 存储树根段一致（'ext-sessions'，shared ↔ session-reader 镜像）`)
+      expect(r.stdout).toContain(`域 6 导出文件段一致（'session-view.md'，shared ${SHARED_VIEW_FN} ↔ 镜像字面量）`)
+      expect(r.stdout).toContain(`域 6 sessionId 校验正则一致（${DEFAULT_REGEX}）`)
+    } finally {
+      fx.cleanup()
+    }
+  })
+
+  it('漂移红（域 6 session-reader 镜像导出文件段与 shared getSessionViewPath 不一致）→ exit 1，报双侧值', () => {
+    const fx = makeMirror({ sr: { fileSegment: 'session-view.txt' } })
+    try {
+      const r = fx.run()
+      expect(r.status).toBe(1)
+      expect(r.stderr).toContain(`域 6 导出文件段漂移: shared='session-view.md' vs 镜像='session-view.txt'`)
+      expect(r.stderr).toContain('恢复动作')
     } finally {
       fx.cleanup()
     }
@@ -404,6 +466,17 @@ describe('CLI 集成（守卫脚本 × tmp mirror）', () => {
       const r = fx.run()
       expect(r.status).toBe(1)
       expect(r.stderr).toContain('runtime pi-paths 源文件 缺失')
+    } finally {
+      fx.cleanup()
+    }
+  })
+
+  it('域 6 镜像源文件缺失 → exit 1，报 session-reader tool-handler 缺失路径', () => {
+    const fx = makeMirror({ missing: ['extensions/universal/session-reader/src/tool-handler.ts'] })
+    try {
+      const r = fx.run()
+      expect(r.status).toBe(1)
+      expect(r.stderr).toContain('session-reader tool-handler 源文件 缺失')
     } finally {
       fx.cleanup()
     }

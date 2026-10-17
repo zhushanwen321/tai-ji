@@ -1777,9 +1777,10 @@ ${STAGED_DELETED}"
     # 校验正则字面量**对拍（读源文件文本，零散文解析；与 u1 的 capability 清单对拍同型）。
     # 任一漂移 = agent 收到的路径与实际目录不符（写偏或预览 404），仅此检查红灯。
     # 触发面：检查脚本自身 / shared paths 源 / system-prompt 源 / runtime pi-paths 第三源
-    # （sessionId 正则三方对拍的第三源；文件被删除也必须触发，脚本对文件缺失自带 fail
-    # 分支）。不设独立 SKIP_* 开关（R1 后惯例，总开关 SKIP_ALL_CHECKS 兜底）。
-    if echo "$PI_SYNC_TRIGGER_FILES" | grep -qE "^scripts/check-artifact-dir-formula-sync\.mjs$|^packages/shared/src/paths\.ts$|^extensions/taiji/system-prompt/src/index\.ts$|^packages/runtime/src/infra/pi/pi-paths\.ts$"; then
+    # （sessionId 正则三方对拍的第三源）/ base-tool-enhance registry 源（域 5 镜像）/
+    # session-reader tool-handler 源（域 6 镜像）——对拍源文件被删除也必须触发，脚本对
+    # 文件缺失自带 fail 分支。不设独立 SKIP_* 开关（R1 后惯例，总开关 SKIP_ALL_CHECKS 兜底）。
+    if echo "$PI_SYNC_TRIGGER_FILES" | grep -qE "^scripts/check-artifact-dir-formula-sync\.mjs$|^packages/shared/src/paths\.ts$|^extensions/taiji/system-prompt/src/index\.ts$|^packages/runtime/src/infra/pi/pi-paths\.ts$|^extensions/universal/base-tool-enhance/src/background/registry\.ts$|^extensions/universal/session-reader/src/tool-handler\.ts$"; then
         echo -e "${BLUE}[INFO] 产物目录公式文件有变更，运行公式对拍检查...${NC}"
         if [ ! -f "scripts/check-artifact-dir-formula-sync.mjs" ]; then
             echo -e "${RED}[ERROR] 找不到 scripts/check-artifact-dir-formula-sync.mjs（D7 对拍机器检查交付物缺失）${NC}"

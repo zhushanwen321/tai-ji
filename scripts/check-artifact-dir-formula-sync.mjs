@@ -45,6 +45,14 @@
  * BackgroundTaskService 经 shared 函数推导）与 extension 写侧落点错位（收殓读不到、
  * 任务清单空转）。
  *
+ * 【第六组断言（域 6）】session-reader 导出文件公式：`extensions/universal/session-reader/
+ * src/tool-handler.ts` 的 doExport 落盘段自述「零 shared 依赖……公式与 shared
+ * getSessionViewPath 同字面镜像」，裸字面量形态（树根段 'ext-sessions' + 导出文件段
+ * 'session-view.md' + 内联 sessionId 校验正则，与第一/五组的常量声明形态不同）。对拍三字面量
+ * ↔ shared：树根段 ↔ SESSION_STORE_DIR_SEGMENT；文件段 ↔ `getSessionViewPath` 的 join 末段；
+ * 内联正则 ↔ shared PI_SESSION_ID_PATTERN。任一漂移 = 导出 md 落到树外错误位置（随会话删除
+ * 不回收、布局规约破坏）。
+ *
  * 形态照搬 scripts/check-capability-allowlist-sync.mjs（读源文件文本、零散文解析、
  * 提取失败一律 fail、`--self-test` 纯函数自检）。
  *
@@ -73,6 +81,9 @@ const SYSTEM_PROMPT_SRC = join(ROOT, 'extensions', 'taiji', 'system-prompt', 'sr
 const RUNTIME_PI_PATHS_SRC = join(ROOT, 'packages', 'runtime', 'src', 'infra', 'pi', 'pi-paths.ts')
 const BASE_TOOL_ENHANCE_REGISTRY_SRC = join(
   ROOT, 'extensions', 'universal', 'base-tool-enhance', 'src', 'background', 'registry.ts',
+)
+const SESSION_READER_TOOL_HANDLER_SRC = join(
+  ROOT, 'extensions', 'universal', 'session-reader', 'src', 'tool-handler.ts',
 )
 
 /** 权威侧函数名（shared）。 */
@@ -105,6 +116,14 @@ export const BTE_DOMAIN_SEGMENT_CONST = 'BACKGROUND_TASKS_DIR_SEGMENT'
 export const BTE_REGISTRY_FN_ANCHOR = 'export function getRegistryPath'
 /** 镜像侧 sessionId 校验函数块锚点（正则所在函数）。 */
 export const BTE_ASSERT_FN_ANCHOR = 'function assertPiSessionId'
+
+// ── 第六组对拍（域 6）符号 ──────────────────────────────────────────
+/** shared 侧会话导出文件函数（域段对拍权威）。 */
+export const SHARED_VIEW_FN = 'getSessionViewPath'
+/** 镜像侧源文件（session-reader tool-handler）。 */
+export const SR_TOOL_HANDLER_SRC = SESSION_READER_TOOL_HANDLER_SRC
+/** 镜像侧导出函数块锚点（落盘段所在函数）。 */
+export const SR_VIEW_FN_ANCHOR = 'async function doExport('
 
 /** 函数体截取锚点（含 `export function` 前缀，避免匹配到调用点）。 */
 const SHARED_ANCHOR = `export function ${SHARED_FN}`
@@ -171,6 +190,30 @@ export function extractTreeRootSegment(blockText) {
 /** 镜像侧函数块是否经两个段常量（根段 + 域段，而非重写字面量）拼路径。 */
 export function mirrorUsesSegmentConst(blockText) {
   return /join\([^,]+,\s*SESSION_STORE_DIR_SEGMENT\s*,\s*sessionId\s*,\s*SESSION_ARTIFACTS_DIR_SEGMENT\)/.test(blockText)
+}
+
+// ── 第六组（域 6）提取器：session-reader 裸字面量形态（非常量声明，逐字锁定调用形态——
+// 镜像公式结构变化时提取失败一律 fail，防对拍面静默失效）。
+
+/** 从 doExport 函数块提取 `join(dirname(agentDir), '<树根段>', resolved.sessionId)` 的树根段字面量。 */
+export function extractViewTreeRootSegment(blockText) {
+  const m = blockText.match(/join\(dirname\(agentDir\),\s*(['"])([^'"]+)\1,\s*resolved\.sessionId\)/)
+  if (!m) return { error: `函数块内未找到 join(dirname(agentDir), '<树根段>', resolved.sessionId) 形态（字面量段名缺失 / 公式形态变化？）` }
+  return { value: m[2] }
+}
+
+/** 从 doExport 函数块提取 `join(outDir, '<导出文件段>')` 的文件段字面量。 */
+export function extractViewFileSegment(blockText) {
+  const m = blockText.match(/join\(outDir,\s*(['"])([^'"]+)\1\)/)
+  if (!m) return { error: `函数块内未找到 join(outDir, '<导出文件段>') 形态（字面量段名缺失 / 公式形态变化？）` }
+  return { value: m[2] }
+}
+
+/** 从 doExport 函数块提取内联 sessionId 校验正则（`/..../.test(resolved.sessionId)` 形态）。 */
+export function extractViewSessionIdRegex(blockText) {
+  const m = blockText.match(/(\/\^[^/\n]*\/)\.test\(resolved\.sessionId\)/)
+  if (!m) return { error: `函数块内未找到 /^.../.test(resolved.sessionId) 校验正则字面量` }
+  return { value: m[1] }
 }
 
 // ── --self-test：纯函数轻量自检（不触真实仓库文件）────────────────────
@@ -321,11 +364,51 @@ function other() {}`
   assert(extractConstLiteral(registryText, 'MISSING_CONST').error !== undefined, '镜像常量缺失报 error')
 }
 
+/** 第六组（域 6）纯函数自检：session-reader 裸字面量三字面量对拍提取。 */
+function selfTestSessionReaderView(assert) {
+  const sharedText = `export const SESSION_STORE_DIR_SEGMENT = 'ext-sessions'
+
+const PI_SESSION_ID_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/
+
+export function getSessionViewPath(sessionId: string, dataDir?: string): string {
+  assertPiSessionId(sessionId)
+  return join(getSessionStoreDir(dataDir), sessionId, 'session-view.md')
+}`
+
+  // 镜像侧裸字面量形态（tool-handler.ts doExport 落盘段）
+  const handlerText = `async function doExport(
+  params: SessionReadParams,
+  agentDir: string,
+): Promise<ToolResult> {
+  if (!/^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/.test(resolved.sessionId)) {
+    throw err('导出拒绝')
+  }
+  const outDir = join(dirname(agentDir), 'ext-sessions', resolved.sessionId)
+  const outPath = join(outDir, 'session-view.md')
+  await mkdir(outDir, { recursive: true })
+}
+function other() {}`
+
+  const sharedViewBlock = extractFunctionBlock(sharedText, `export function ${SHARED_VIEW_FN}`)
+  assert(extractJoinSegment(sharedViewBlock.text).value === 'session-view.md', 'shared 会话导出文件段提取')
+  const viewBlock = extractFunctionBlock(handlerText, SR_VIEW_FN_ANCHOR)
+  assert(extractViewTreeRootSegment(viewBlock.text).value === 'ext-sessions', '镜像树根段提取（dirname(agentDir) 基址形态）')
+  assert(extractViewFileSegment(viewBlock.text).value === 'session-view.md', '镜像导出文件段提取')
+  assert(
+    extractViewSessionIdRegex(viewBlock.text).value === extractConstRegex(sharedText, SHARED_PATTERN_CONST).value,
+    '域 6 两侧 sessionId 正则一致（样例）',
+  )
+  assert(extractViewTreeRootSegment('const outDir = join(dataRoot(), "ext-sessions", id)').error !== undefined, '镜像树根段形态不符报 error（调用形态锁定防漏检）')
+  assert(extractViewFileSegment('const outPath = join(target, "x.md")').error !== undefined, '镜像文件段变量名不符报 error')
+  assert(extractViewSessionIdRegex('if (!/^x$/.test(sessionId))').error !== undefined, '镜像正则 .test 目标不符报 error')
+}
+
 function selfTestCases(assert) {
   selfTestFormulaPairing(assert)
   selfTestTreePairing(assert)
   selfTestExtractionErrors(assert)
   selfTestBaseToolEnhanceRegistry(assert)
+  selfTestSessionReaderView(assert)
 }
 
 if (process.argv.includes('--self-test')) runSelfTest('artifact-dir-formula-sync', selfTestCases)
@@ -546,12 +629,68 @@ function compareBaseToolEnhanceRegistry(sharedText, registryText, sharedStoreSeg
   }
 }
 
+/**
+ * ⑥ session-reader 导出公式对拍（域 6）：doExport 落盘段树根段 / 导出文件段 / 内联
+ * sessionId 校验正则三字面量与 shared 逐字一致——导出落点两侧各有一份推导（shared 侧
+ * 供 runtime/测试消费，镜像侧供 extension 写入），漂移即导出 md 落到树外错误位置
+ * （随会话删除不回收、布局规约破坏）。
+ */
+function compareSessionReaderView(sharedText, handlerText, sharedStoreSegment, sharedRegex) {
+  const viewBlock = extractFunctionBlock(handlerText, SR_VIEW_FN_ANCHOR)
+  const sharedViewBlock = extractFunctionBlock(sharedText, `export function ${SHARED_VIEW_FN}`)
+  if (viewBlock.error) fail(`镜像 ${SR_VIEW_FN_ANCHOR} 提取失败: ${viewBlock.error}`)
+  if (sharedViewBlock.error) fail(`shared ${SHARED_VIEW_FN} 提取失败: ${sharedViewBlock.error}`)
+  exitIfFailed('域 6 session-view 公式对拍：函数块提取失败，按上方 ✗ 修复后重跑')
+
+  const extracted = {
+    srTreeSegment: extractViewTreeRootSegment(viewBlock.text),
+    srFileSegment: extractViewFileSegment(viewBlock.text),
+    sharedFileSegment: extractJoinSegment(sharedViewBlock.text),
+    srRegex: extractViewSessionIdRegex(viewBlock.text),
+  }
+  for (const [label, r] of [
+    ['镜像树根段字面量', extracted.srTreeSegment],
+    ['镜像导出文件段字面量', extracted.srFileSegment],
+    [`shared ${SHARED_VIEW_FN} join 文件段`, extracted.sharedFileSegment],
+    ['镜像 sessionId 校验正则', extracted.srRegex],
+  ]) {
+    if (r.error) fail(`${label} 提取失败: ${r.error}`)
+  }
+  exitIfFailed('域 6 session-view 公式对拍：字面量提取失败，按上方 ✗ 修复后重跑')
+
+  if (extracted.srTreeSegment.value === sharedStoreSegment) {
+    ok(`域 6 存储树根段一致（'${extracted.srTreeSegment.value}'，shared ↔ session-reader 镜像）`)
+  } else {
+    fail(
+      `域 6 存储树根段漂移: shared='${sharedStoreSegment}' vs 镜像='${extracted.srTreeSegment.value}'` +
+        `——恢复动作：人工核对 ${SHARED_PATHS_SRC} 的 ${STORE_SEGMENT_CONST} 与 ${SR_TOOL_HANDLER_SRC} 的 doExport 落盘段`,
+    )
+  }
+  if (extracted.srFileSegment.value === extracted.sharedFileSegment.value) {
+    ok(`域 6 导出文件段一致（'${extracted.srFileSegment.value}'，shared ${SHARED_VIEW_FN} ↔ 镜像字面量）`)
+  } else {
+    fail(
+      `域 6 导出文件段漂移: shared='${extracted.sharedFileSegment.value}' vs 镜像='${extracted.srFileSegment.value}'` +
+        `——恢复动作：人工核对 ${SHARED_PATHS_SRC} 的 ${SHARED_VIEW_FN} 与 ${SR_TOOL_HANDLER_SRC} 的 doExport 落盘段`,
+    )
+  }
+  if (extracted.srRegex.value === sharedRegex) {
+    ok(`域 6 sessionId 校验正则一致（${extracted.srRegex.value}）`)
+  } else {
+    fail(
+      `域 6 sessionId 校验正则漂移: shared=${sharedRegex} vs 镜像=${extracted.srRegex.value}` +
+        `——恢复动作：人工核对 ${SHARED_PATHS_SRC} 的 ${SHARED_PATTERN_CONST} 与 ${SR_TOOL_HANDLER_SRC} 的 doExport 校验行`,
+    )
+  }
+}
+
 function main() {
-  const [sharedText, mirrorText, runtimeText, registryText] = readSourcesOrFail([
+  const [sharedText, mirrorText, runtimeText, registryText, handlerText] = readSourcesOrFail([
     [SHARED_PATHS_SRC, 'shared paths 源文件'],
     [SYSTEM_PROMPT_SRC, 'system-prompt 源文件'],
     [RUNTIME_PI_PATHS_SRC, 'runtime pi-paths 源文件'],
     [BTE_REGISTRY_SRC, 'base-tool-enhance registry 源文件'],
+    [SR_TOOL_HANDLER_SRC, 'session-reader tool-handler 源文件'],
   ])
 
   const { sharedBlock, mirrorBlock } = extractFormulaBlocksOrFail(sharedText, mirrorText)
@@ -563,9 +702,10 @@ function main() {
   checkMirrorConstUsage(mirrorBlock)
   compareTreeSegments(sharedText, runtimeText, lits.sharedStoreSegment.value)
   compareBaseToolEnhanceRegistry(sharedText, registryText, lits.sharedStoreSegment.value, lits.sharedRegex.value)
+  compareSessionReaderView(sharedText, handlerText, lits.sharedStoreSegment.value, lits.sharedRegex.value)
 
   guardExit(
-    '✓ 产物目录公式对拍通过（域段 + 存储树根段 + sessionId 校验正则三方 + pi 会话树段 + 域 5 registry 镜像逐字一致）',
+    '✓ 产物目录公式对拍通过（域段 + 存储树根段 + sessionId 校验正则三方 + pi 会话树段 + 域 5 registry 镜像 + 域 6 session-view 镜像逐字一致）',
     '产物目录公式对拍未通过，按上方 ✗ 明细修复后重跑（每条报错自带恢复动作）',
   )
 }
