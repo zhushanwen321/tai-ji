@@ -388,6 +388,10 @@ describe("reap-notify: candidates (reaped terminal × trace absent) via port.del
 		// 收殓终态无业务 details（old decision 3 保持：无时长、不谎报成败）
 		expect(envelope.payload).not.toHaveProperty("details");
 		expect(envelope.payload.content).not.toMatch(/\d+[smh]/);
+		// collectKey 债权申报 = [taskId]（result-collect 设计 §3.4：对账补投条目带键，
+		// 与主链 notify.ts 同款，collect 可收取收殓终态）
+		const opts = deliver.mock.calls[0][1] as { collectKey?: string[] } | undefined;
+		expect(opts?.collectKey).toEqual([entry.taskId]);
 		expect(result.redelivered).toEqual([entry.taskId]);
 	});
 

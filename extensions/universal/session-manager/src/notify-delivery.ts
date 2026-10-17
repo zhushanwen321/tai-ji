@@ -28,6 +28,12 @@ const logger = getLogger("session-manager");
  * 投递一条死亡通知（unified-delivery 波 2：port.deliver 主投——managed-session-notify
  * 外部通道逐条不合批）。
  *
+ * collectKeys（result-collect 设计 §3.4 managed 行）：批内全部债权键集申报——合批
+ * 条目载荷幂等键 = 批首债权键，其余成员仅注销 pending 无独立日志条目，单值申报下
+ * collect 无法按非首键定位载荷；键集申报经端口逐键展开（命中 = 等待集 ∩ 条目键集
+ * ≠ ∅）。必传：批恒至少一条应答，无键集的 deliver 在本域 = collect 永远等不到，
+ * 属调用方缺陷，构造性防漏（编译期拦截）。
+ *
  * port 缺席 → warn + false（降级登记，见文件头）。deliver swallowed = 幂等命中
  * （同 notifyId 已受理或已终局——重放/重复应答的重复提交），按已投递返回 true；
  * deliver rejected（persist-failed 等）→ warn + false（幂等键未登记，watch 重试
@@ -37,6 +43,7 @@ export function recordManagedNotify(
 	notifyId: string,
 	content: string,
 	details: ManagedNotifyDetails,
+	collectKeys: string[],
 ): boolean {
 	const port = getDeliveryPort();
 	if (!port) {
@@ -47,16 +54,19 @@ export function recordManagedNotify(
 		return false;
 	}
 	try {
-		const result = port.deliver({
-			payload: {
-				kind: "custom",
-				customType: MANAGED_SESSION_NOTIFY_CUSTOM_TYPE,
-				content,
-				display: true,
-				details,
+		const result = port.deliver(
+			{
+				payload: {
+					kind: "custom",
+					customType: MANAGED_SESSION_NOTIFY_CUSTOM_TYPE,
+					content,
+					display: true,
+					details,
+				},
+				id: notifyId,
 			},
-			id: notifyId,
-		});
+			{ collectKey: collectKeys },
+		);
 		if (result.kind === "rejected") {
 			logger.warn("[session-manager] delivery port rejected notification (idempotency key not registered)", {
 				notifyId,

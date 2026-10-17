@@ -35,22 +35,27 @@ type DeliverCall = {
 	customType: string;
 	content: string;
 	details: unknown;
+	collectKey: string[] | undefined;
 };
 
 function plantPort(behavior: "accept" | "reject" = "accept"): Array<DeliverCall> {
 	const calls: Array<DeliverCall> = [];
 	Reflect.set(globalThis, PORT_SLOT_KEY, {
 		current: {
-			deliver: (envelope: {
-				id?: string;
-				payload: { customType: string; content: string; details?: unknown };
-			}) => {
+			deliver: (
+				envelope: {
+					id?: string;
+					payload: { customType: string; content: string; details?: unknown };
+				},
+				opts?: { collectKey?: string[] },
+			) => {
 				if (behavior === "reject") return { kind: "rejected", reason: "persist-failed (fake)" };
 				calls.push({
 					id: envelope.id,
 					customType: envelope.payload.customType,
 					content: envelope.payload.content,
 					details: envelope.payload.details,
+					collectKey: opts?.collectKey,
 				});
 				return { kind: "accepted", id: envelope.id ?? "gen-id" };
 			},
@@ -72,27 +77,29 @@ afterEach(() => {
 describe("recordManagedNotify 投递接入纪律（unified-delivery 波 2：port 消费面）", () => {
 	it("槽空（port 未装配）→ 降级 false + warn 留痕（通知类接入点降级，非静默吞）", () => {
 		Reflect.deleteProperty(globalThis, PORT_SLOT_KEY);
-		expect(recordManagedNotify("sm-x", "content", makeDetails("sm-x"))).toBe(false);
+		expect(recordManagedNotify("sm-x", "content", makeDetails("sm-x"), ["sm-x"])).toBe(false);
 		expect(loggerMock.warn).toHaveBeenCalledWith(
 			expect.stringContaining("delivery port not bound"),
 			expect.objectContaining({ notifyId: "sm-x" }),
 		);
 	});
 
-	it("port 在 → 动态查槽投递：id = notifyId、payload.customType = managed-session-notify（外部通道）、details 原样", () => {
+	it("port 在 → 动态查槽投递：id = notifyId、payload.customType = managed-session-notify（外部通道）、details 原样、collectKey 键集透传", () => {
 		const delivered = plantPort();
 		const details = makeDetails("sm-a");
-		expect(recordManagedNotify("sm-a", "hello", details)).toBe(true);
+		expect(recordManagedNotify("sm-a", "hello", details, ["sm-a", "sm-b"])).toBe(true);
 		expect(delivered).toHaveLength(1);
 		expect(delivered[0]!.id).toBe("sm-a");
 		expect(delivered[0]!.customType).toBe("managed-session-notify");
 		expect(delivered[0]!.content).toBe("hello");
 		expect(delivered[0]!.details).toBe(details);
+		// collectKey 债权键集申报（result-collect 设计 §3.4）：批内全部债权键原样透传
+		expect(delivered[0]!.collectKey).toEqual(["sm-a", "sm-b"]);
 	});
 
 	it("port rejected（persist-failed）→ warn + false（幂等键未登记，watch 重试合法；不静默吞）", () => {
 		plantPort("reject");
-		expect(recordManagedNotify("sm-rej", "content", makeDetails("sm-rej"))).toBe(false);
+		expect(recordManagedNotify("sm-rej", "content", makeDetails("sm-rej"), ["sm-rej"])).toBe(false);
 		expect(loggerMock.warn).toHaveBeenCalledWith(
 			expect.stringContaining("delivery port rejected notification"),
 			expect.objectContaining({ notifyId: "sm-rej" }),
@@ -108,8 +115,8 @@ describe("recordManagedNotify 投递接入纪律（unified-delivery 波 2：port
 				flush: () => {},
 			},
 		});
-		expect(() => recordManagedNotify("sm-throw", "content", makeDetails("sm-throw"))).not.toThrow();
-		expect(recordManagedNotify("sm-throw-2", "content", makeDetails("sm-throw-2"))).toBe(false);
+		expect(() => recordManagedNotify("sm-throw", "content", makeDetails("sm-throw"), ["sm-throw"])).not.toThrow();
+		expect(recordManagedNotify("sm-throw-2", "content", makeDetails("sm-throw-2"), ["sm-throw-2"])).toBe(false);
 		expect(loggerMock.warn).toHaveBeenCalledWith(
 			expect.stringContaining("notify delivery failed"),
 			expect.objectContaining({ notifyId: "sm-throw-2" }),

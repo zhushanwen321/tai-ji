@@ -79,19 +79,23 @@ export interface ReconcilePi {
  * 赋值合法；本模块不 import port 包运行时对象，缺省值单点在 reconcilePendingEntries
  * 参数缺省表达式）。
  */
-export type ReconcileDeliver = (envelope: {
-	/** 幂等键（收殓补投恒 = taskId）。 */
-	id?: string;
-	/** 期望注入时机（收殓补投恒 steer 档——session_start 时 agent 空闲即起轮）。 */
-	timing?: "steer" | "followUp";
-	payload: {
-		kind: "custom";
-		customType: string;
-		content: string;
-		display: boolean;
-		details?: unknown;
-	};
-}) =>
+export type ReconcileDeliver = (
+	envelope: {
+		/** 幂等键（收殓补投恒 = taskId）。 */
+		id?: string;
+		/** 期望注入时机（收殓补投恒 steer 档——session_start 时 agent 空闲即起轮）。 */
+		timing?: "steer" | "followUp";
+		payload: {
+			kind: "custom";
+			customType: string;
+			content: string;
+			display: boolean;
+			details?: unknown;
+		};
+	},
+	/** 提交选项（结构兼容 DeliveryDeliverOptions 子集）。 */
+	opts?: { collectKey?: string[] },
+) =>
 	| { kind: "accepted"; id: string }
 	| { kind: "swallowed"; reason: string }
 	| { kind: "rejected"; reason: string };
@@ -222,16 +226,21 @@ function deliverReapNotifications(
 	const delivered = collectDeliveredTaskIds(entries);
 	for (const entry of registry.values()) {
 		if (!isReapNotifyCandidate(entry, delivered)) continue;
-		const receipt = deliver({
-			id: entry.taskId,
-			timing: "steer",
-			payload: {
-				kind: "custom",
-				customType: BACKGROUND_BASH_CUSTOM_TYPE,
-				content: buildTerminatedNotificationLine(entry),
-				display: true,
+		const receipt = deliver(
+			{
+				id: entry.taskId,
+				timing: "steer",
+				payload: {
+					kind: "custom",
+					customType: BACKGROUND_BASH_CUSTOM_TYPE,
+					content: buildTerminatedNotificationLine(entry),
+					display: true,
+				},
 			},
-		});
+			// collectKey 债权申报（result-collect 设计 §3.4）：与主链 notify.ts 同款——
+			// 重启后补投的通知条目带键，collect 可收取收殓终态。
+			{ collectKey: [entry.taskId] },
+		);
 		if (receipt.kind === "accepted") {
 			result.redelivered.push(entry.taskId);
 		} else if (receipt.kind === "rejected") {

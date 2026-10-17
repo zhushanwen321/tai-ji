@@ -77,8 +77,10 @@ export interface WatchCoordinatorDeps {
 }
 
 export interface WatchCoordinator {
-	/** 工具结果成功后的 arm：register + 开表（顺序固定——C-5 微窗方向 = 查询面先少计不产幽灵） */
-	armSessionNotify(ctx: ExtensionContext, notifyId: string, name: string): void;
+	/** 工具结果成功后的 arm：register + 开表（顺序固定——C-5 微窗方向 = 查询面先少计不产幽灵）。
+	 *  kind:"lifetime" = lifetime 死亡债权注册（result-collect 设计 §3.4，emit 申报
+	 *  kind 标记）；缺省 = send 债权。 */
+	armSessionNotify(ctx: ExtensionContext, notifyId: string, name: string, kind?: "lifetime"): void;
 	/** sessionId → label 缓存回填（create 入参 / list 结果；send 的 name 与文案 label 源） */
 	noteLabel(sessionId: string, label: string): void;
 	/** 读 label 缓存（缺席回退 sessionId——label 降级路径，见交付偏差登记） */
@@ -110,9 +112,13 @@ export function createWatchCoordinator(deps: WatchCoordinatorDeps): WatchCoordin
 		return labels.get(sessionId) ?? sessionId;
 	}
 
-	function registerPending(id: string, name: string): void {
+	function registerPending(id: string, name: string, kind?: "lifetime"): void {
 		try {
-			pi.events.emit("pending:register", { id, type: "session", name });
+			// kind 债权类别标记（result-collect 设计 §3.4）：lifetime 死亡债权申报
+			// kind:"lifetime"（collect 缺省等待集据此排除），send 债权不带（无 kind
+			// 缺省 = send）——两类注册 emit 此前同形态 {id, type:'session', name}
+			// （type 不可辨），标记经 pending:register 落盘 entry 透传给工具侧。
+			pi.events.emit("pending:register", { id, type: "session", name, ...(kind ? { kind } : {}) });
 		} catch (err) {
 			// emit 失败（stale bus）不阻断 arm——watch 照开，应答侧 unregister 幂等兜底；
 			// warn 留痕（STANDARDS §11.2 静默丢弃必须登记）
@@ -136,8 +142,13 @@ export function createWatchCoordinator(deps: WatchCoordinatorDeps): WatchCoordin
 		}
 	}
 
-	function armSessionNotify(ctx: ExtensionContext, notifyId: string, name: string): void {
-		registerPending(notifyId, name);
+	function armSessionNotify(
+		ctx: ExtensionContext,
+		notifyId: string,
+		name: string,
+		kind?: "lifetime",
+	): void {
+		registerPending(notifyId, name, kind);
 		openWatch(ctx, notifyId, name);
 	}
 
@@ -304,8 +315,17 @@ export function createWatchCoordinator(deps: WatchCoordinatorDeps): WatchCoordin
 			label: first.label,
 		};
 		// 默认投递（unified-delivery 波 2：port.deliver）；false（port 缺席 / rejected /
-		// 幂等拒收）不改 unregister 语义
-		recordManagedNotify(first.notifyId, content, details);
+		// 幂等拒收）不改 unregister 语义。collectKeys = 批内全部债权键（result-collect
+		// 设计 §3.4 managed 行）：合批条目载荷幂等键 = 批首债权键，collect 按键集逐键
+		// 展开定位——键集申报经 recordManagedNotify 必传参数构造性防漏。三类「注销
+		// pending 而无投递日志条目」分支（死亡槽去重跨批 / 例外1 / sessionId 缺失防御）
+		// 在本函数早退，不经此申报点——成员键不入任何条目键集，collect 侧按第四态收取。
+		recordManagedNotify(
+			first.notifyId,
+			content,
+			details,
+			batch.map((item) => item.notifyId),
+		);
 		for (const item of batch) unregisterPending(item.notifyId, reason);
 	}
 

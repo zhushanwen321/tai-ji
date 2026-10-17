@@ -237,7 +237,10 @@ export default function sessionManagerExtension(pi: ExtensionAPI): void {
 				coordinator.armSessionNotify(ctx, notifyId, name);
 			}
 			if (typeof r.lifetimeNotifyId === "string") {
-				coordinator.armSessionNotify(ctx, r.lifetimeNotifyId, name);
+				// kind:"lifetime"（result-collect 设计 §3.4）：lifetime 死亡债权注册在
+				// emit 侧申报类别标记（collect 缺省等待集据此排除）；send 债权注册
+				// 不带 kind（缺省 = send）。
+				coordinator.armSessionNotify(ctx, r.lifetimeNotifyId, name, "lifetime");
 			}
 		},
 	});

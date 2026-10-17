@@ -289,16 +289,21 @@ function deliverDoneNotify(
 ): void {
   const port = getDeliveryPort();
   if (port) {
-    const result = port.deliver({
-      payload: {
-        kind: "custom",
-        customType: WORKFLOW_RESULT_CUSTOM_TYPE,
-        content,
-        display: true,
-        details,
+    const result = port.deliver(
+      {
+        payload: {
+          kind: "custom",
+          customType: WORKFLOW_RESULT_CUSTOM_TYPE,
+          content,
+          display: true,
+          details,
+        },
+        id: details.notifyId,
       },
-      id: details.notifyId,
-    });
+      // collectKey 债权申报（result-collect 设计 §3.4）：workflow 域键 = runId
+      // （collect 以 runId 命中收取，§3.3 申报形态）。
+      { collectKey: [runId] },
+    );
     if (result.kind === "rejected") {
       // 已知丢失面（如实登记，承原账本 record 抛错同形态）：rejected = 未受理
       // （persist-failed 等，幂等键未登记）、notifyDone 每终态恰好一次（无重复收口

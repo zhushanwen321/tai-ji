@@ -135,7 +135,13 @@ function sentDetails(sendMessage: ReturnType<typeof vi.fn>, call = 0): unknown {
 type FakePortMock = {
   handle: DeliveryPortHandle;
   /** port.deliver 受理的注入消息（从 envelope 还原——断言面与原 sentMessages 同形）。 */
-  sentMessages: { customType: string; content: string; display: boolean; details?: unknown }[];
+  sentMessages: {
+    customType: string;
+    content: string;
+    display: boolean;
+    details?: unknown;
+    collectKey?: string[];
+  }[];
   /** 下一次 deliver 返回 rejected（persist-failed 形态）。 */
   rejectNext: () => void;
 };
@@ -147,7 +153,7 @@ function makeFakePort(): FakePortMock {
   const sentMessages: FakePortMock["sentMessages"] = [];
   let rejectNextFlag = false;
   const handle: DeliveryPortHandle = {
-    deliver(envelope) {
+    deliver(envelope, opts) {
       if (rejectNextFlag) {
         rejectNextFlag = false;
         return { kind: "rejected", reason: "persist-failed (fake)" };
@@ -160,6 +166,7 @@ function makeFakePort(): FakePortMock {
         content: envelope.payload.content,
         display: envelope.payload.display,
         details: envelope.payload.details,
+        collectKey: opts?.collectKey,
       });
       return { kind: "accepted", id };
     },
@@ -451,6 +458,8 @@ describe("notifyDone 终局载荷（D7）", () => {
     expect(mock.sentMessages).toHaveLength(1);
     const delivery = mock.sentMessages[0]!;
     expect(delivery.customType).toBe(WORKFLOW_RESULT_CUSTOM_TYPE);
+    // collectKey 债权申报 = runId（result-collect 设计 §3.4：collect 以 runId 命中收取）
+    expect(delivery.collectKey).toEqual(["wf-payload-ok"]);
     const details = delivery.details as Record<string, unknown>;
     expect(details["notifyId"]).toBe(`${WORKFLOW_DONE_NOTIFY_ID_PREFIX}wf-payload-ok`);
     expect(details["outcome"]).toBe("done");

@@ -166,17 +166,23 @@ export function handleTaskExit(task: BackgroundTask): void {
 function deliverTaskFinishedNotification(task: BackgroundTask): void {
 	const port = getDeliveryPort();
 	if (port !== undefined) {
-		const receipt = port.deliver({
-			id: task.taskId,
-			timing: "steer",
-			payload: {
-				kind: "custom",
-				customType: BACKGROUND_BASH_CUSTOM_TYPE,
-				content: buildNotificationContent(task),
-				display: true,
-				details: buildNotifyDetails(task),
+		const receipt = port.deliver(
+			{
+				id: task.taskId,
+				timing: "steer",
+				payload: {
+					kind: "custom",
+					customType: BACKGROUND_BASH_CUSTOM_TYPE,
+					content: buildNotificationContent(task),
+					display: true,
+					details: buildNotifyDetails(task),
+				},
 			},
-		});
+			// collectKey 债权申报（result-collect 设计 §3.4）：单债权条目 = 其
+			// pending:register 的 id（bash 域幂等键与债权键同 id，设计 §3.3），对账
+			// 补投路径（pending-reconcile deliverReapNotifications）同款申报。
+			{ collectKey: [task.taskId] },
+		);
 		if (receipt.kind === "rejected") {
 			logger.warn("background task notify rejected by delivery port; notification lost (no outbox record)", {
 				detail: { taskId: task.taskId, reason: receipt.reason },

@@ -390,7 +390,12 @@ export function createNotifier(host: NotifierHost): BgNotifier {
    * rejected（persist-failed = 受理前落盘失败）不降级直发：绕过耐久承诺制造
    * at-most-once 双语义，首败即停 + warn 显式上报（ADR-0122 ⑧）。
    */
-  function deliverViaPort(notifyId: string, content: string, details: object): boolean {
+  function deliverViaPort(
+    notifyId: string,
+    content: string,
+    details: object,
+    collectKey: string[] | undefined,
+  ): boolean {
     const port = getNotifyDomainPorts().getDeliveryPort?.();
     if (port) {
       const result = port.deliver(
@@ -405,8 +410,9 @@ export function createNotifier(host: NotifierHost): BgNotifier {
           id: notifyId,
         },
         // 攒批判定跟随提交方语义（账本 mergeHoldActive 现状保持）：有活跃后台任务
-        // → 端口 60s 滑动窗口攒批；否则直通。
-        { merge: host.hasRunningBackground() },
+        // → 端口 60s 滑动窗口攒批；否则直通。collectKey 债权申报（result-collect
+        // 设计 §3.4）：世代首个通知携带（见 notify() 内申报判据），后续轮次 undefined。
+        { merge: host.hasRunningBackground(), ...(collectKey !== undefined ? { collectKey } : {}) },
       );
       if (result.kind === "rejected") {
         notifyLogger.warn(
@@ -457,6 +463,23 @@ export function createNotifier(host: NotifierHost): BgNotifier {
           ? (withEpoch ? `${record.id}:${record.epoch}:${record.round}` : `${record.id}:${record.round}`)
           : (withEpoch ? `${record.id}:${record.epoch}` : record.id);
       const notifyId = record.dedupKey ?? roundKey;
+      // collectKey 债权申报判据（result-collect 设计 §3.3 多轮通知条目）= 该操作
+      // 世代的第一个通知：
+      //  - round === 1：markRoundIdle 同位的首个轮终通知——轮终簿记先于通知发出
+      //    （finalizeRoundOutcome 内 rec.round = (rec.round ?? 0) + 1，record-store-
+      //    rounds.ts），世代内 round 从 0/undefined 单调递增、reopen 归零重计，故
+      //    round === 1 在一个世代内恰出现一次 = 首个轮终（后续轮次 2,3,… 不申报，
+      //    collect 等到首轮即返回，后续轮次正常 push）。
+      //  - round == null：one-shot 完成通知 / close 收口提示等无轮次身份的完成通知
+      //    （notifyClosed 显式清 round），设计明示同样申报。
+      //  - dedupKey 非 null：派生通知（drain 丢弃通知等，notifyId 已非世代主身份），
+      //    非终态信号不申报。
+      //  - reopen 新世代（epoch+1、round 归零）：首个轮终通知 round 重新 = 1 →
+      //    重新申报、重新可收（collected 终局属旧世代条目，新世代条目无终局）。
+      const collectKey =
+        record.dedupKey === undefined && (record.round == null || record.round === 1)
+          ? [record.id]
+          : undefined;
       const payload: BgNotifyRecord =
         record.status === "closed"
           ? { ...record, outcome: record.outcome ?? deriveOutcome(record.closedReason, record.error), notifyId }
@@ -467,7 +490,7 @@ export function createNotifier(host: NotifierHost): BgNotifier {
       // 投递主路径（unified-delivery 波 2）：port.deliver 主投（受理前落投递日志 +
       // 直达唯一队列 + details-id 凭据 + 重启差集重放，端口侧内包）。port 缺席降级
       // 直发兜底 + warn。单条通知为 fire-and-forget，返回值忽略。
-      deliverViaPort(notifyId, content, payload);
+      deliverViaPort(notifyId, content, payload, collectKey);
     },
 
     flushPendingNotifications(): void {

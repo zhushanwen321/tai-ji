@@ -82,10 +82,10 @@ function emittedIds(h: Harness, event: string): string[] {
 	return h.emitted.filter((e) => e.event === event).map((e) => e.data.id as string);
 }
 
-function registersOf(h: Harness): Array<{ id: string; type: unknown; name: unknown }> {
+function registersOf(h: Harness): Array<{ id: string; type: unknown; name: unknown; kind: unknown }> {
 	return h.emitted
 		.filter((e) => e.event === "pending:register")
-		.map((e) => ({ id: String(e.data.id), type: e.data.type, name: e.data.name }));
+		.map((e) => ({ id: String(e.data.id), type: e.data.type, name: e.data.name, kind: e.data.kind }));
 }
 
 const SEND_OK = '{"queued":true,"willNotify":true}';
@@ -96,6 +96,7 @@ type DeliverCall = {
 	customType: string;
 	content: string;
 	details: unknown;
+	collectKey: string[] | undefined;
 };
 
 /** 植入投递端口槽（pi-delivery-port 槽镜像的读取目标）——deliver spy 由用例自持；
@@ -104,16 +105,20 @@ function plantPort(acceptAll = true): Array<DeliverCall> {
 	const calls: Array<DeliverCall> = [];
 	Reflect.set(globalThis, PORT_SLOT_KEY, {
 		current: {
-			deliver: (envelope: {
-				id?: string;
-				payload: { customType: string; content: string; details?: unknown };
-			}) => {
+			deliver: (
+				envelope: {
+					id?: string;
+					payload: { customType: string; content: string; details?: unknown };
+				},
+				opts?: { collectKey?: string[] },
+			) => {
 				if (!acceptAll) return { kind: "rejected", reason: "persist-failed (fake)" };
 				calls.push({
 					id: envelope.id,
 					customType: envelope.payload.customType,
 					content: envelope.payload.content,
 					details: envelope.payload.details,
+					collectKey: opts?.collectKey,
 				});
 				return { kind: "accepted", id: envelope.id ?? "gen-id" };
 			},
@@ -170,11 +175,13 @@ describe("arm（send/create → pending:register + watch 开表）", () => {
 		expect(sendPayload.action).toBe("send");
 		expect(String(sendPayload.params.notifyId)).toMatch(/^sm-/);
 
-		// register：P4 三键契约（label 缓存空 → name 退化 sessionId）
+		// register：P4 三键契约（label 缓存空 → name 退化 sessionId）+ send 债权无 kind
+		// （缺省 = send；result-collect 设计 §3.4）
 		const regs = registersOf(h);
 		expect(regs).toHaveLength(1);
 		expect(regs[0].id).toMatch(/^sm-/);
 		expect(regs[0]).toEqual({ id: regs[0].id, type: "session", name: "child-1" });
+		expect(regs[0].kind).toBeUndefined();
 
 		// 开表：同 notifyId、无 timeout（D2/P1 fire-and-forget）
 		expect(h.watches).toHaveLength(1);
@@ -215,7 +222,9 @@ describe("arm（send/create → pending:register + watch 开表）", () => {
 		expect(regs).toHaveLength(2);
 		expect(regs[0].id).toMatch(/^sm-/);
 		expect(regs[0]).toEqual({ id: regs[0].id, type: "session", name: "auth-refactor" });
-		expect(regs[1]).toEqual({ id: lifetime, type: "session", name: "auth-refactor" });
+		// lifetime 死亡债权注册申报 kind:"lifetime"（result-collect 设计 §3.4：emit
+		// payload 增字段，collect 缺省等待集据此排除；send 债权无 kind = 缺省）
+		expect(regs[1]).toEqual({ id: lifetime, type: "session", name: "auth-refactor", kind: "lifetime" });
 		expect(h.watches.map((w) => w.notifyId)).toEqual([regs[0].id, lifetime]);
 
 		// label 缓存回填：随后 send 的 register name = 工具入参 label（D9 正常路径）
@@ -247,7 +256,8 @@ describe("arm（send/create → pending:register + watch 开表）", () => {
 		const regs = registersOf(h);
 		expect(regs).toHaveLength(1);
 		// lifetime register：type 'session' + name=label（label 缺省 → sessionId 回退前的入参）
-		expect(regs[0]).toEqual({ id: lifetime, type: "session", name: "L" });
+		// + kind:"lifetime" 债权类别标记（result-collect 设计 §3.4）
+		expect(regs[0]).toEqual({ id: lifetime, type: "session", name: "L", kind: "lifetime" });
 		// lifetime watch 无条件开（死亡通知载体）
 		expect(h.watches.map((w) => w.notifyId)).toEqual([lifetime]);
 		expect(h.watches[0].opts?.timeout).toBeUndefined();
@@ -324,6 +334,9 @@ describe("watch 应答 → 两层攒批 record（settle 腿）", () => {
 			label: "child-1",
 		});
 		expect(call.customType).toBe("managed-session-notify"); // 外部通道（port 批组隔离恒逐条）
+		// collectKey = 批内全部债权键（result-collect 设计 §3.4 managed 行：合批条目
+		// 载荷幂等键 = 批首债权键，collect 按键集逐键展开定位非首键）
+		expect(call.collectKey).toEqual([id1, id2]);
 		expect(emittedIds(h, "pending:unregister").sort()).toEqual([id1, id2].sort());
 		expect(
 			h.emitted.filter((e) => e.event === "pending:unregister").map((e) => e.data.reason),

@@ -159,11 +159,12 @@ describe("BgNotifier 主路径 — port.deliver（envelope 构造 + flush 转发
   it("hasRunningBackground=false → merge 缺省直通；=true → merge:true 进端口 60s 窗口", () => {
     host.hasRunningBackground.mockReturnValue(false);
     notifier.notify(notifyRecord("bg-merge-false"));
-    expect(fake.envelopes[0]!.opts).toEqual({ merge: false });
+    // collectKey：无 round = 完成通知，世代首个申报判据命中（result-collect 设计 §3.3）
+    expect(fake.envelopes[0]!.opts).toEqual({ merge: false, collectKey: ["bg-merge-false"] });
 
     host.hasRunningBackground.mockReturnValue(true);
     notifier.notify(notifyRecord("bg-merge-true"));
-    expect(fake.envelopes[1]!.opts).toEqual({ merge: true });
+    expect(fake.envelopes[1]!.opts).toEqual({ merge: true, collectKey: ["bg-merge-true"] });
   });
 
   it("flushPendingNotifications → port.flush 转发（窗口缓冲提前出站的强制投递口）", () => {
@@ -190,6 +191,57 @@ describe("BgNotifier 主路径 — port.deliver（envelope 构造 + flush 转发
     expect(fake.envelopes).toHaveLength(1);
     expect(host.sendMessageCalls).toHaveLength(0);
     expect(loggerMock.warn).not.toHaveBeenCalled();
+  });
+});
+
+// ─── collectKey 债权申报（result-collect 设计 §3.3 多轮通知条目） ─────────────
+
+describe("BgNotifier collectKey 申报 — 该操作世代的第一个通知", () => {
+  let fake: ReturnType<typeof makeFakePort>;
+  let host: ReturnType<typeof makeMockHost>;
+  let notifier: BgNotifier;
+
+  beforeEach(() => {
+    fake = makeFakePort();
+    host = makeMockHost();
+    configureNotifyDomain({ getDeliveryPort: () => fake.handle });
+    notifier = createNotifier(host);
+  });
+
+  afterEach(() => {
+    notifier.dispose();
+  });
+
+  it("首轮通知（round 推进后 =1）申报 collectKey: [id]；后续轮次（round≥2）不申报", () => {
+    // 首个轮终通知：markRoundIdle 轮终簿记先于通知发出（finalizeRoundOutcome 内
+    // round 0/undefined → 1），notifier 收到的 record.round = 1。
+    notifier.notify(notifyRecord("bg-collect-1", { round: 1 }));
+    notifier.notify(notifyRecord("bg-collect-1", { round: 2 }));
+
+    expect(fake.envelopes).toHaveLength(2);
+    expect(fake.envelopes[0]!.opts).toMatchObject({ collectKey: ["bg-collect-1"] });
+    expect(fake.envelopes[1]!.opts).not.toHaveProperty("collectKey");
+  });
+
+  it("one-shot / close 收口等完成通知（round=undefined）同样申报", () => {
+    notifier.notify(notifyRecord("bg-collect-oneshot"));
+
+    expect(fake.envelopes[0]!.opts).toMatchObject({ collectKey: ["bg-collect-oneshot"] });
+  });
+
+  it("reopen 新世代（epoch+1、round 归零后首轮 round=1）重新申报", () => {
+    notifier.notify(notifyRecord("bg-collect-re", { epoch: 0, round: 1 }));
+    notifier.notify(notifyRecord("bg-collect-re", { epoch: 1, round: 1 }));
+
+    expect(fake.envelopes).toHaveLength(2);
+    expect(fake.envelopes[0]!.opts).toMatchObject({ collectKey: ["bg-collect-re"] });
+    expect(fake.envelopes[1]!.opts).toMatchObject({ collectKey: ["bg-collect-re"] });
+  });
+
+  it("dedupKey 派生通知（drain 丢弃等）不申报——非世代主身份、非终态信号", () => {
+    notifier.notify(notifyRecord("bg-collect-drain", { round: 1, dedupKey: "bg-collect-drain:1:drain-drop" }));
+
+    expect(fake.envelopes[0]!.opts).not.toHaveProperty("collectKey");
   });
 });
 
@@ -612,8 +664,8 @@ describe("U3_UNIT: createNotifier unit verification", () => {
 
     // 两条都带 merge:true 进端口（攒批成员——窗口内不注入的合成时机由端口承载）
     expect(fake.envelopes).toHaveLength(2);
-    expect(fake.envelopes[0]!.opts).toEqual({ merge: true });
-    expect(fake.envelopes[1]!.opts).toEqual({ merge: true });
+    expect(fake.envelopes[0]!.opts).toEqual({ merge: true, collectKey: ["u3-merge-1"] });
+    expect(fake.envelopes[1]!.opts).toEqual({ merge: true, collectKey: ["u3-merge-2"] });
 
     // flushPendingNotifications → 端口 flush（窗口缓冲提前出站）
     notifier.flushPendingNotifications();
