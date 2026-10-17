@@ -1,16 +1,18 @@
 #!/usr/bin/env node
 /**
  * check-artifact-dir-formula-sync.mjs —— 会话产物目录公式对拍守卫（公式双实现 +
- * sessionId 校验正则三方）。
- * （设计：.tmp/tech-design/chat-html-support.md §6.7 D7 / §11 检查点 8 / §10 u-artifacts）
+ * sessionId 校验正则三方 + session 存储树段）。
+ * （设计：.tmp/tech-design/chat-html-support.md §6.7 D7 / §11 检查点 8 / §10 u-artifacts；
+ *   session 存储树扩展：.tmp/tech-design/session-store-layout-inversion.md §3.3 D1/D8）
  *
- * 背景：产物目录公式 `<dataDir>/artifacts/<sessionId>` 有两份实现，跨包不可 import
- * （extensions 包不依赖 @taiji/shared，且 shared getDataDir 对打包态 pi 进程直接 throw）：
+ * 背景：产物目录公式 `<dataDir>/ext-sessions/<sessionId>/artifacts` 有两份实现，跨包
+ * 不可 import（extensions 包不依赖 @taiji/shared，且 shared getDataDir 对打包态 pi 进程
+ * 直接 throw）：
  *   ① 权威侧 shared：`packages/shared/src/paths.ts` 的 `getSessionArtifactsDir`
  *      （runtime / main 消费）；
  *   ② 镜像侧 system-prompt 扩展：`extensions/taiji/system-prompt/src/index.ts` 的
- *      `SESSION_ARTIFACTS_DIR_SEGMENT` + `resolveSessionArtifactsDir`（每 turn 注入产物
- *      目录绝对路径）。
+ *      `SESSION_STORE_DIR_SEGMENT` + `SESSION_ARTIFACTS_DIR_SEGMENT` +
+ *      `resolveSessionArtifactsDir`（每 turn 注入产物目录绝对路径）。
  * 两侧任一漂移（段名改了 / 校验正则松紧不一）= agent 收到的路径与实际目录不符（写偏或
  * 预览 404）。跨包不可 import 不是豁免机检的理由——本守卫与 u1 的
  * check-capability-allowlist-sync.mjs 同为**源文件字面量对拍**形态（强度对称）：
@@ -20,13 +22,28 @@
  * `packages/runtime/src/infra/pi/pi-paths.ts` 的 `PI_SESSION_ID_PATTERN`（`const <名> =
  * /正则/` 声明形态，isPiSessionId 消费）——该正则决定产物目录名合法性判据（isPiSessionId
  * 挡虚拟 id / 路径注入），漂移时公式两侧一致也会判错目录名。三方断言 = shared ↔ 镜像 +
- * shared ↔ runtime（镜像 ↔ runtime 由等价传递覆盖）。
+ * shared ↔ runtime（镜像 ↔ runtime 由等价传递覆盖）。shared 侧校验收敛在模块私有
+ * helper assertPiSessionId（同名 `PI_SESSION_ID_PATTERN` 常量声明，不再内联在各推导
+ * 函数内）。
  *
  * 第四组对拍（2026-10-14 branch-review minor 残余收编）：pi 会话树段——shared
  * `PI_SESSION_TREE_SEGMENTS`（跨进程消费 SSOT：main 不能 import runtime，树内包含
  * 判定如会话导出路径安全校验经它推导）↔ runtime pi-paths.ts 布局权威三函数
  * （getSessionsDir / getSubagentSessionDir / getBtwSessionsRoot）join 首段字面量。
  * 此前两处仅注释互指，runtime 改树名时 shared 常量漂移无红灯。
+ * session-store-layout-inversion 扩展：常量末位段 'ext-sessions' ↔ shared
+ * `SESSION_STORE_DIR_SEGMENT` 常量 ↔ 镜像侧同名常量，三方对拍（存储树根段一致性）。
+ *
+ * 【第五组断言位（已登记未启用）】base-tool-enhance 登记目录公式（域 5）：
+ * `extensions/universal/base-tool-enhance/src/background/registry.ts` 的
+ * `getRegistryPath` 现为旧布局 `join(dataDir, 'base-tool-enhance', sessionId,
+ * 'registry.json')`，与 shared `getSessionBackgroundTasksDir`（`<root>/<sid>/
+ * background-tasks/`）暂不一致——换根归 u-ext-tasks-views 单元。该单元把 registry
+ * 公式改为 `join(dataDir, 'ext-sessions', sessionId, 'background-tasks', 'registry.json')`
+ * 时，须在本守卫同批启用对拍：提取 getRegistryPath 函数块内 join 各段字面量，断言
+ * 与 shared `SESSION_STORE_DIR_SEGMENT` + 'background-tasks' 逐字一致（复用
+ * extractConstLiteral / extractFunctionBlock 原语，形态照抄第一组）。提前启用会在其
+ * 换根前恒红（现状公式即旧布局），故只登记不接线。
  *
  * 形态照搬 scripts/check-capability-allowlist-sync.mjs（读源文件文本、零散文解析、
  * 提取失败一律 fail、`--self-test` 纯函数自检）。
@@ -65,8 +82,12 @@ export const MIRROR_SEGMENT_CONST = 'SESSION_ARTIFACTS_DIR_SEGMENT'
 export const RUNTIME_PATTERN_CONST = 'PI_SESSION_ID_PATTERN'
 /** 第四组对拍：shared pi 会话树段 SSOT 常量名。 */
 export const SHARED_TREE_CONST = 'PI_SESSION_TREE_SEGMENTS'
-/** runtime 侧三棵树布局权威函数（数组位 ↔ shared 常量元素位）。 */
+/** runtime 侧三棵树布局权威函数（数组位 ↔ shared 常量元素位，pi 宿主段）。 */
 export const RUNTIME_TREE_FNS = ['getSessionsDir', 'getSubagentSessionDir', 'getBtwSessionsRoot']
+/** session 存储树根段常量名（shared 与镜像侧同名，三方对拍：shared ↔ 镜像 ↔ 树段常量末位）。 */
+export const STORE_SEGMENT_CONST = 'SESSION_STORE_DIR_SEGMENT'
+/** shared 侧 sessionId 校验正则常量名（assertPiSessionId 消费，与 runtime 同名）。 */
+export const SHARED_PATTERN_CONST = 'PI_SESSION_ID_PATTERN'
 
 /** 函数体截取锚点（含 `export function` 前缀，避免匹配到调用点）。 */
 const SHARED_ANCHOR = `export function ${SHARED_FN}`
@@ -76,10 +97,10 @@ const MIRROR_ANCHOR = `export function ${MIRROR_FN}`
 // re-export 保持单测（scripts/__tests__/check-artifact-dir-formula-sync.test.mjs）的既有 import 面。
 export { extractFunctionBlock }
 
-/** 从函数块提取 `join(<dataDir 表达式>, '<段名>', sessionId)` 的段名字面量。 */
+/** 从 shared 函数块提取 `join(getSessionStoreDir(…), sessionId, '<域段>')` 的域段字面量。 */
 export function extractJoinSegment(blockText) {
-  const m = blockText.match(/join\([^,]+,\s*'([^']+)',\s*sessionId\)/)
-  if (!m) return { error: `函数块内未找到 join(<dataDir>, '<段名>', sessionId) 形态（字面量段名缺失？）` }
+  const m = blockText.match(/join\(getSessionStoreDir\([^)]*\),\s*sessionId,\s*'([^']+)'\)/)
+  if (!m) return { error: `函数块内未找到 join(getSessionStoreDir(…), sessionId, '<域段>') 形态（字面量段名缺失 / 公式形态变化？）` }
   return { value: m[1] }
 }
 
@@ -127,9 +148,9 @@ export function extractTreeRootSegment(blockText) {
   return { value: m[1] }
 }
 
-/** 镜像侧函数块是否经常量（而非重写段名字面量）拼路径。 */
+/** 镜像侧函数块是否经两个段常量（根段 + 域段，而非重写字面量）拼路径。 */
 export function mirrorUsesSegmentConst(blockText) {
-  return /join\([^,]+,\s*SESSION_ARTIFACTS_DIR_SEGMENT\s*,\s*sessionId\)/.test(blockText)
+  return /join\([^,]+,\s*SESSION_STORE_DIR_SEGMENT\s*,\s*sessionId\s*,\s*SESSION_ARTIFACTS_DIR_SEGMENT\)/.test(blockText)
 }
 
 // ── --self-test：纯函数轻量自检（不触真实仓库文件）────────────────────
@@ -138,18 +159,25 @@ export function mirrorUsesSegmentConst(blockText) {
 
 function selfTestFormulaPairing(assert) {
   const sharedText = `/**
- * 会话产物目录（\`<dataDir>/artifacts/<sessionId>\`，含窄集注释 \`^[A-Za-z0-9_-]+$\`）。
+ * session 存储树根段。
  */
+export const SESSION_STORE_DIR_SEGMENT = 'ext-sessions'
+
+/**
+ * pi 会话 id 同域校验正则（注释里的窄集 \`^[A-Za-z0-9_-]+$\` 形态不干扰提取）。
+ */
+const PI_SESSION_ID_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/
+
 export function getSessionArtifactsDir(sessionId: string, dataDir?: string): string {
-  // 校验与 isPiSessionId 同域：允许 [A-Za-z0-9._-]
-  if (!/^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/.test(sessionId)) {
-    throw new Error(\`invalid sessionId: \${sessionId}\`)
-  }
-  return join(dataDir ?? getDataDir(), 'artifacts', sessionId)
+  // 校验注释：允许 [A-Za-z0-9._-]
+  assertPiSessionId(sessionId)
+  return join(getSessionStoreDir(dataDir), sessionId, 'artifacts')
 }
 export function nextOne() {}`
 
-  const mirrorText = `export const SESSION_ARTIFACTS_DIR_SEGMENT = 'artifacts'
+  const mirrorText = `export const SESSION_STORE_DIR_SEGMENT = 'ext-sessions'
+
+export const SESSION_ARTIFACTS_DIR_SEGMENT = 'artifacts'
 
 /**
  * 镜像推导。
@@ -158,7 +186,7 @@ export function resolveSessionArtifactsDir(sessionId: string): string {
   if (!/^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/.test(sessionId)) {
     throw new Error(\`invalid sessionId: \${sessionId}\`)
   }
-  return path.join(resolveDataDir(), SESSION_ARTIFACTS_DIR_SEGMENT, sessionId)
+  return path.join(resolveDataDir(), SESSION_STORE_DIR_SEGMENT, sessionId, SESSION_ARTIFACTS_DIR_SEGMENT)
 }
 function other() {}`
 
@@ -173,23 +201,26 @@ const PI_SESSION_ID_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/`
 
   const sb = extractFunctionBlock(sharedText, SHARED_ANCHOR)
   assert(sb.text && sb.text.includes('getSessionArtifactsDir') && !sb.text.includes('nextOne'), '函数块截取到行首 } 为止')
-  assert(extractJoinSegment(sb.text).value === 'artifacts', 'shared join 段名提取（注释里的窄集正则不干扰）')
+  assert(extractJoinSegment(sb.text).value === 'artifacts', 'shared join 域段提取（注释里的窄集正则不干扰）')
   assert(
-    extractSessionIdRegex(sb.text).value === '/^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/',
-    'shared sessionId 正则字面量提取（注释内反引号形态不误提取）',
+    extractConstRegex(sharedText, SHARED_PATTERN_CONST).value === '/^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/',
+    'shared sessionId 正则常量提取（assertPiSessionId 收敛形态；注释内反引号形态不误提取）',
   )
+  assert(extractConstLiteral(sharedText, STORE_SEGMENT_CONST).value === 'ext-sessions', 'shared 树根段常量提取')
 
   const mb = extractFunctionBlock(mirrorText, MIRROR_ANCHOR)
-  assert(extractSessionIdRegex(mb.text).value === extractSessionIdRegex(sb.text).value, '两侧正则一致（样例）')
-  assert(extractConstLiteral(mirrorText, MIRROR_SEGMENT_CONST).value === 'artifacts', '常量段名字面量提取')
-  assert(mirrorUsesSegmentConst(mb.text), '镜像侧 join 经常量拼段名')
+  assert(extractSessionIdRegex(mb.text).value === extractConstRegex(sharedText, SHARED_PATTERN_CONST).value, '两侧正则一致（样例）')
+  assert(extractConstLiteral(mirrorText, MIRROR_SEGMENT_CONST).value === 'artifacts', '常量域段字面量提取')
+  assert(extractConstLiteral(mirrorText, STORE_SEGMENT_CONST).value === 'ext-sessions', '镜像树根段常量提取')
+  assert(mirrorUsesSegmentConst(mb.text), '镜像侧 join 经根段+域段两常量拼路径')
 
-  assert(extractConstRegex(runtimeText, RUNTIME_PATTERN_CONST).value === extractSessionIdRegex(sb.text).value, '第三源 const 正则声明提取（.test 调用行不误匹配）')
+  assert(extractConstRegex(runtimeText, RUNTIME_PATTERN_CONST).value === extractSessionIdRegex(mb.text).value, '第三源 const 正则声明提取（.test 调用行不误匹配）')
   assert(extractConstRegex('const OTHER = /x/;', RUNTIME_PATTERN_CONST).error !== undefined, '常量名不符报 error')
 }
 
 function selfTestTreePairing(assert) {
-  const treeSharedText = `export const PI_SESSION_TREE_SEGMENTS = ['sessions', 'subagents', 'btw'] as const`
+  const treeSharedText = `export const PI_SESSION_TREE_SEGMENTS = ['sessions', 'subagents', 'btw', 'ext-sessions'] as const
+export const SESSION_STORE_DIR_SEGMENT = 'ext-sessions'`
   const treeRuntimeText = `export function getSessionsDir(): string {
   return join(getPiAgentDir(), 'sessions')
 }
@@ -202,10 +233,18 @@ export function getBtwSessionsRoot(): string {
   return join(getPiAgentDir(), 'btw')
 }`
   const treeSegs = extractConstStringArray(treeSharedText, SHARED_TREE_CONST)
-  assert(treeSegs.value && treeSegs.value.join(',') === 'sessions,subagents,btw', '树段常量数组元素提取')
+  assert(treeSegs.value && treeSegs.value.join(',') === 'sessions,subagents,btw,ext-sessions', '树段常量数组元素提取（含存储树末位段）')
+  assert(
+    compareTreeSegmentsShape(treeSegs.value, RUNTIME_TREE_FNS.length, 'ext-sessions').error === undefined,
+    '树段形态断言（宿主段数 + 存储树末位段）通过（样例）',
+  )
+  assert(
+    compareTreeSegmentsShape(['sessions', 'subagents', 'btw'], RUNTIME_TREE_FNS.length, 'ext-sessions').error !== undefined,
+    '缺存储树末位段报 error',
+  )
   for (const [i, fn] of RUNTIME_TREE_FNS.entries()) {
     const b = extractFunctionBlock(treeRuntimeText, `export function ${fn}`)
-    assert(!b.error && extractTreeRootSegment(b.text).value === treeSegs.value[i], `树根段对位提取（${fn}）`)
+    assert(!b.error && extractTreeRootSegment(b.text).value === treeSegs.value[i], `pi 宿主树根段对位提取（${fn}）`)
   }
   assert(extractConstStringArray('const OTHER = 1', SHARED_TREE_CONST).error !== undefined, '树段常量缺失报 error')
   assert(extractTreeRootSegment('return join(other(), x)').error !== undefined, '树根段字面量缺失报 error')
@@ -243,18 +282,22 @@ function extractFormulaBlocksOrFail(sharedText, mirrorText) {
   return { sharedBlock, mirrorBlock }
 }
 
-/** 提取阶段②：公式对拍全部字面量（段名 ×2 / sessionId 正则 ×3 源）。失败 → ✗ + fail-fast。 */
-function extractFormulaLiteralsOrFail(sharedBlock, mirrorBlock, mirrorText, runtimeText) {
+/** 提取阶段②：公式对拍全部字面量（域段 ×2 / 树根段 ×2 / sessionId 正则 ×3 源）。失败 → ✗ + fail-fast。 */
+function extractFormulaLiteralsOrFail(sharedText, sharedBlock, mirrorBlock, mirrorText, runtimeText) {
   const extracted = {
     sharedSegment: extractJoinSegment(sharedBlock.text),
-    sharedRegex: extractSessionIdRegex(sharedBlock.text),
+    sharedStoreSegment: extractConstLiteral(sharedText, STORE_SEGMENT_CONST),
+    sharedRegex: extractConstRegex(sharedText, SHARED_PATTERN_CONST),
+    mirrorStoreSegment: extractConstLiteral(mirrorText, STORE_SEGMENT_CONST),
     mirrorSegment: extractConstLiteral(mirrorText, MIRROR_SEGMENT_CONST),
     mirrorRegex: extractSessionIdRegex(mirrorBlock.text),
     runtimeRegex: extractConstRegex(runtimeText, RUNTIME_PATTERN_CONST),
   }
   for (const [label, r] of [
-    ['shared join 段名', extracted.sharedSegment],
-    ['shared sessionId 正则', extracted.sharedRegex],
+    ['shared join 域段', extracted.sharedSegment],
+    [`shared 树根段常量 ${STORE_SEGMENT_CONST}`, extracted.sharedStoreSegment],
+    [`shared sessionId 正则常量 ${SHARED_PATTERN_CONST}`, extracted.sharedRegex],
+    [`镜像树根段常量 ${STORE_SEGMENT_CONST}`, extracted.mirrorStoreSegment],
     [`镜像常量 ${MIRROR_SEGMENT_CONST}`, extracted.mirrorSegment],
     ['镜像 sessionId 正则', extracted.mirrorRegex],
     [`runtime ${RUNTIME_PATTERN_CONST} 正则`, extracted.runtimeRegex],
@@ -265,49 +308,61 @@ function extractFormulaLiteralsOrFail(sharedBlock, mirrorBlock, mirrorText, runt
   return extracted
 }
 
-/** ① 段名字面量一致（shared join ↔ 镜像常量）。 */
+/** ① 域段字面量一致（shared join ↔ 镜像常量）。 */
 function compareSegmentLiteral(sharedSegment, mirrorSegment) {
-  if (sharedSegment.value === mirrorSegment.value) {
-    ok(`段名字面量一致（'${sharedSegment.value}'，shared join ↔ 镜像常量）`)
+  if (sharedSegment === mirrorSegment) {
+    ok(`域段字面量一致（'${sharedSegment}'，shared join ↔ 镜像常量）`)
   } else {
     fail(
-      `段名字面量漂移: shared='${sharedSegment.value}' vs 镜像='${mirrorSegment.value}'` +
+      `域段字面量漂移: shared='${sharedSegment}' vs 镜像='${mirrorSegment}'` +
         `——恢复动作：人工核对 ${SHARED_PATHS_SRC} 的 ${SHARED_FN} 与 ${SYSTEM_PROMPT_SRC} 的 ${MIRROR_SEGMENT_CONST}`,
+    )
+  }
+}
+
+/** ①b 存储树根段字面量一致（shared 常量 ↔ 镜像常量）。 */
+function compareStoreSegmentLiteral(sharedStoreSegment, mirrorStoreSegment) {
+  if (sharedStoreSegment === mirrorStoreSegment) {
+    ok(`存储树根段字面量一致（'${sharedStoreSegment}'，shared ${STORE_SEGMENT_CONST} ↔ 镜像）`)
+  } else {
+    fail(
+      `存储树根段字面量漂移: shared='${sharedStoreSegment}' vs 镜像='${mirrorStoreSegment}'` +
+        `——恢复动作：人工核对 ${SHARED_PATHS_SRC} 与 ${SYSTEM_PROMPT_SRC} 的 ${STORE_SEGMENT_CONST}`,
     )
   }
 }
 
 /** ② + ②b：sessionId 校验正则字面量三方一致（shared ↔ 镜像；shared ↔ runtime）。 */
 function compareSessionIdRegexes(sharedRegex, mirrorRegex, runtimeRegex) {
-  if (sharedRegex.value === mirrorRegex.value) {
-    ok(`sessionId 校验正则字面量一致（${sharedRegex.value}）`)
+  if (sharedRegex === mirrorRegex) {
+    ok(`sessionId 校验正则字面量一致（${sharedRegex}）`)
   } else {
     fail(
-      `sessionId 校验正则漂移: shared=${sharedRegex.value} vs 镜像=${mirrorRegex.value}` +
+      `sessionId 校验正则漂移: shared=${sharedRegex} vs 镜像=${mirrorRegex}` +
         `——恢复动作：人工核对两侧正则（规则须与 isPiSessionId 同域：允许 . 与 _，禁 :）`,
     )
   }
   // 镜像 ↔ runtime 由等价传递覆盖；该正则同时是产物目录名合法性判据 isPiSessionId 的源头，
   // 漂移即判错目录名
-  if (sharedRegex.value === runtimeRegex.value) {
-    ok(`runtime ${RUNTIME_PATTERN_CONST} 与 shared sessionId 正则一致（${runtimeRegex.value}）`)
+  if (sharedRegex === runtimeRegex) {
+    ok(`runtime ${RUNTIME_PATTERN_CONST} 与 shared sessionId 正则一致（${runtimeRegex}）`)
   } else {
     fail(
-      `sessionId 校验正则漂移: shared=${sharedRegex.value} vs runtime ${RUNTIME_PATTERN_CONST}=${runtimeRegex.value}` +
-        `——恢复动作：人工核对 ${SHARED_PATHS_SRC} 的 ${SHARED_FN} 内联正则与 ${RUNTIME_PI_PATHS_SRC} 的 ${RUNTIME_PATTERN_CONST}` +
+      `sessionId 校验正则漂移: shared=${sharedRegex} vs runtime ${RUNTIME_PATTERN_CONST}=${runtimeRegex}` +
+        `——恢复动作：人工核对 ${SHARED_PATHS_SRC} 的 ${SHARED_PATTERN_CONST} 与 ${RUNTIME_PI_PATHS_SRC} 的 ${RUNTIME_PATTERN_CONST}` +
         `（同域规则：首尾字母数字，中间允许 [A-Za-z0-9._-]，禁 :）`,
     )
   }
 }
 
-/** ③ 镜像侧须经常量拼段名（防常量保留而函数内重写死字面量）。 */
+/** ③ 镜像侧须经根段+域段两常量拼路径（防常量保留而函数内重写死字面量）。 */
 function checkMirrorConstUsage(mirrorBlock) {
   if (mirrorUsesSegmentConst(mirrorBlock.text)) {
-    ok(`镜像 ${MIRROR_FN} 经 ${MIRROR_SEGMENT_CONST} 拼段名（无旁路字面量）`)
+    ok(`镜像 ${MIRROR_FN} 经 ${STORE_SEGMENT_CONST} + ${MIRROR_SEGMENT_CONST} 拼路径（无旁路字面量）`)
   } else {
     fail(
-      `镜像 ${MIRROR_FN} 未经 ${MIRROR_SEGMENT_CONST} 拼段名` +
-        `——恢复动作：改为 join(resolveDataDir(), ${MIRROR_SEGMENT_CONST}, sessionId)` +
+      `镜像 ${MIRROR_FN} 未经段常量拼路径` +
+        `——恢复动作：改为 path.join(resolveDataDir(), ${STORE_SEGMENT_CONST}, sessionId, ${MIRROR_SEGMENT_CONST})` +
         '（重写死字面量会被本守卫漏掉漂移）',
     )
   }
@@ -316,22 +371,23 @@ function checkMirrorConstUsage(mirrorBlock) {
 /**
  * ④ pi 会话树段对拍：shared PI_SESSION_TREE_SEGMENTS（跨进程消费 SSOT）↔ runtime
  * 布局权威三函数的树根段字面量——runtime 改树名而 shared 常量未跟 = 树内包含判定
- * （如会话导出路径安全校验）跨进程判据漂移
+ * （如会话导出路径安全校验）跨进程判据漂移。末位段为 taiji 存储树根段（基址
+ * `<dataDir>`，非 piAgentDir），与 shared `SESSION_STORE_DIR_SEGMENT` 一致。
  */
-function compareTreeSegments(sharedText, runtimeText) {
-  const treeSegments = extractConstStringArray(sharedText, SHARED_TREE_CONST)
-  if (treeSegments.error) {
-    fail(`shared ${SHARED_TREE_CONST} 提取失败: ${treeSegments.error}`)
-  } else if (treeSegments.value.length !== RUNTIME_TREE_FNS.length) {
-    fail(
-      `${SHARED_TREE_CONST} 元素数 ${treeSegments.value.length} ≠ runtime 布局权威函数数 ${RUNTIME_TREE_FNS.length}` +
-        `——恢复动作：树布局增删时同批更新 shared 常量与本守卫 RUNTIME_TREE_FNS 清单`,
-    )
-  } else {
-    for (const [i, fn] of RUNTIME_TREE_FNS.entries()) {
-      compareTreeRootSegment(runtimeText, treeSegments, i, fn)
+
+/**
+ * 树段数组形态断言（纯函数，self-test 直测）：前 `hostSegmentCount` 位为 pi 宿主段，
+ * 末位须为存储树根段 `storeSegment`。
+ */
+export function compareTreeSegmentsShape(treeSegments, hostSegmentCount, storeSegment) {
+  if (treeSegments.length < hostSegmentCount + 1 || treeSegments[treeSegments.length - 1] !== storeSegment) {
+    return {
+      error:
+        `${SHARED_TREE_CONST} 须含 pi 宿主 ${hostSegmentCount} 段 + 末位存储树根段 '${storeSegment}'，` +
+        `实际 [${treeSegments.join(', ')}]——恢复动作：树布局增删时同批更新 shared 常量与本守卫`,
     }
   }
+  return { value: true }
 }
 
 /** ④ 逐步（循环体）：提取 runtime 布局函数树根段，与 shared 常量对位比对。 */
@@ -344,14 +400,31 @@ function compareTreeRootSegment(runtimeText, treeSegments, i, fn) {
   const seg = extractTreeRootSegment(block.text)
   if (seg.error) {
     fail(`runtime ${fn} 树根段提取失败: ${seg.error}`)
-  } else if (seg.value !== treeSegments.value[i]) {
+  } else if (seg.value !== treeSegments[i]) {
     fail(
-      `pi 会话树段漂移: ${SHARED_TREE_CONST}[${i}]='${treeSegments.value[i]}' vs runtime ${fn}()='${seg.value}'` +
+      `pi 会话树段漂移: ${SHARED_TREE_CONST}[${i}]='${treeSegments[i]}' vs runtime ${fn}()='${seg.value}'` +
         `——恢复动作：树名变更时同批改 ${SHARED_PATHS_SRC} 常量与 ${RUNTIME_PI_PATHS_SRC} 布局函数`,
     )
   } else {
     ok(`pi 会话树段一致（runtime ${fn}() → '${seg.value}'，对应 ${SHARED_TREE_CONST}[${i}]）`)
   }
+}
+
+function compareTreeSegments(sharedText, runtimeText, sharedStoreSegment) {
+  const treeSegments = extractConstStringArray(sharedText, SHARED_TREE_CONST)
+  if (treeSegments.error) {
+    fail(`shared ${SHARED_TREE_CONST} 提取失败: ${treeSegments.error}`)
+    return
+  }
+  const shape = compareTreeSegmentsShape(treeSegments.value, RUNTIME_TREE_FNS.length, sharedStoreSegment)
+  if (shape.error) {
+    fail(shape.error)
+    return
+  }
+  for (const [i, fn] of RUNTIME_TREE_FNS.entries()) {
+    compareTreeRootSegment(runtimeText, treeSegments.value, i, fn)
+  }
+  ok(`存储树末位段一致（${SHARED_TREE_CONST} 末位 ↔ shared ${STORE_SEGMENT_CONST}='${sharedStoreSegment}'）`)
 }
 
 function main() {
@@ -362,15 +435,16 @@ function main() {
   ])
 
   const { sharedBlock, mirrorBlock } = extractFormulaBlocksOrFail(sharedText, mirrorText)
-  const lits = extractFormulaLiteralsOrFail(sharedBlock, mirrorBlock, mirrorText, runtimeText)
+  const lits = extractFormulaLiteralsOrFail(sharedText, sharedBlock, mirrorBlock, mirrorText, runtimeText)
 
-  compareSegmentLiteral(lits.sharedSegment, lits.mirrorSegment)
-  compareSessionIdRegexes(lits.sharedRegex, lits.mirrorRegex, lits.runtimeRegex)
+  compareSegmentLiteral(lits.sharedSegment.value, lits.mirrorSegment.value)
+  compareStoreSegmentLiteral(lits.sharedStoreSegment.value, lits.mirrorStoreSegment.value)
+  compareSessionIdRegexes(lits.sharedRegex.value, lits.mirrorRegex.value, lits.runtimeRegex.value)
   checkMirrorConstUsage(mirrorBlock)
-  compareTreeSegments(sharedText, runtimeText)
+  compareTreeSegments(sharedText, runtimeText, lits.sharedStoreSegment.value)
 
   guardExit(
-    '✓ 产物目录公式对拍通过（段名 + sessionId 校验正则三方 + pi 会话树段逐字一致）',
+    '✓ 产物目录公式对拍通过（域段 + 存储树根段 + sessionId 校验正则三方 + pi 会话树段逐字一致）',
     '产物目录公式对拍未通过，按上方 ✗ 明细修复后重跑（每条报错自带恢复动作）',
   )
 }
