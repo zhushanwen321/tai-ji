@@ -2212,7 +2212,7 @@
     },
     {
       "id": "C-ext-21",
-      "summary": "rename-session 的 isSubagentSession 靠嗅探 sessionDir 含 <sep>subagents<sep> 段识别 subagent 会话并跳过重命名，与 subagent-core path-encoding.ts getSubagentSessionDir 的 <agentDir>/subagents/<enc(cwd)>/sessions 布局互为跨包隐式契约——改任一端路径形态另一端必同步（改 path-encoding 布局须同步 llm.ts 嗅探；改嗅探须核对实际布局）；三模式入口（turn_end / message_end / rename_session 工具）均复用该检查",
+      "summary": "rename-session 的 isSubagentSession 靠嗅探 sessionDir 含 <sep>subagents<sep> 段识别 subagent 会话并跳过重命名，与 subagent-core path-encoding.ts getSubagentSessionDir 的布局互为跨包隐式契约——session-store-layout-inversion（ADR-0141）后布局 = <dataDir>/ext-sessions/<rootSessionId>/subagents/sessions/（分区键 rootSessionId，旧 encodeCwd 层消除），嗅探规则「含 <sep>subagents<sep> 段」对新布局同构命中无需形态分支；改任一端路径形态另一端必同步（改 path-encoding 布局须核对 llm.ts 嗅探仍同构命中；改嗅探须核对实际布局）；三模式入口（turn_end / message_end / rename_session 工具）均复用该检查",
       "scope": [
         "packages/subagent-core/src/execution/assembly/path-encoding.ts",
         "extensions/universal/rename-session/**"
@@ -2829,7 +2829,7 @@
         }
       ]
     },
-{
+    {
       "id": "C-proc-21",
       "summary": "错误处理策略裁决契约：错误路径按业务角色选策略——核心功能 fail-fast（禁吞错/禁静默降级出错误数据，错误日志含恢复动作）；辅助功能在主流程接入点降级（辅助故障不拖垮核心，降级 ≠ 吞错必须 warn 留痕）；用户可见的辅助能力失败必须有可见失败反馈（合理结果 + 失败原因，禁静默空值）。分通道纪律：读失败（非 ENOENT IO 故障）不得与合法缺省同判；静默丢弃必须注释登记为设计裁决 + 测试锁定（登记即可，不强制加日志）。两种伪防御按反缺陷对待：合法产出当错误拦、吞掉损坏状态的错误续跑",
       "scope": [
@@ -3110,8 +3110,7 @@
           "agent": "review-data-governance"
         }
       ]
-    }
-,
+    },
     {
       "id": "C-proc-30",
       "summary": "集成线传播检查（2026-09-24 dev-0.10.6 打包事故检查化）：打包（prerelease）/ 集成合并（dev-merge）前必须运行 scripts/check-line-propagation.mjs 且 --target 解析为打包/集成线——常态 = 目标线 worktree 内 --target HEAD；目标 worktree 不存在的挂接分支可在源 worktree 内以分支名变量跑（见 dev-merge skill 1.8 步）；禁把 --target 写死为 'main' 等恒绿字面量——'main' 在任何 worktree 跑都恒绿，接线即空转；硬检查 = 目标线 ⊇ main（git merge-base --is-ancestor main <target>），红灯 block（exit 1 + 缺失提交清单 + 恢复指引 merge main），仅可经 --allow-diverged 一次性越过（不做持久豁免登记）；软提示 = 兄弟 dev-* 线触及目标线共享文件的未传播 commit 清单（commit 总量 + 最老停留天数头条 + 明细），无状态恒常呈报（无本地基线文件）、不阻塞 exit code，裁决粒度 = 线粒度（吸收/暂缓），执行 agent 须将头条摘要呈报用户后才继续；机器只保证 target ⊇ main，「修复滞留兄弟线未进 main」与正常 WIP 在 git 形态上无差别——该残余类主防线 = ADR-0092 纪律① fix 优先回流 main。（2026-09-25 scope 失效处置：.agents 已脱离 git 跟踪（ADR-0086），scope 内两条 .agents/skills 路径自该日期起在 git diff 中恒不出现，select-constraints 按 diff 匹配不再命中本约束——约束本体仍有效（机器 enforcement 走 prerelease/dev-merge skill 步骤驱动），改 skill 实体文件时按 ADR-0086 自查，不依赖 diff 匹配）",
