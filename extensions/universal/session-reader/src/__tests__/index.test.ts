@@ -157,6 +157,17 @@ describe('sessionReaderExtension - execute 信号包采集（U3：ctx 全形态�
     expect(r.content[0]?.type).toBe('text')
   })
 
+  it('execute 组装 details.summary（index.ts:239 withResultSummary 包装线）——find 零匹配 → 一行摘要', async () => {
+    // 纯函数（buildSessionReadSummary）已被 summary.test.ts 直测；本条护 execute 内的
+    // withResultSummary 组装线——组装行丢失时 details.summary 缺失，GUI 收起态与 TUI
+    // 折叠态双双退化，此处红。期望文案锚点 = summary.test.ts 的 summarizeFind 零匹配口径。
+    const ctx = { mode: 'rpc', sessionManager: { getSessionDir: () => '/tmp/pi-session-reader-test-live-dir' } }
+    const r = await execute('tc-summary-1', FIND_NO_MATCH, undefined, undefined, ctx)
+    const d = r.details as { summary?: unknown }
+    expect(typeof d.summary).toBe('string')
+    expect(d.summary).toBe('No sessions matching "zzznoindexmatch"')
+  })
+
   it('u8：doctor 经 execute 走通——env/bundleUrl 补采 + ctx===undefined 降级仍出环境判定与根表', async () => {
     // mock agentDir（/tmp/pi-session-reader-test-agent）及其派生根均不存在 → 根表全空仍渲染；
     // 残留 glob 基点 = /tmp，只读 readdir（无写操作），不触碰任何真实数据目录。
