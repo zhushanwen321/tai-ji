@@ -45,9 +45,9 @@ export type RunningIconKind =
 /** toolName → tool 细分类映射（未命中的 toolName 走 'tool-other'）。grep/find 探索类
  *  单列 tool-grep（Search 字形 + 透镜扫掠动效），不再落 SquareFunction 兜底。
  *  bash 静态字形 = tool-cmd（裸 › 提示符，2026-10-15 裁决 ③B：成员/单行 bash 抽象化，
- *  波及组内外所有 bash 行——本映射是全局 SSOT）；running 动效不经此表（走 Block.vue
- *  TOOL_RUNNING_KIND，bash 仍 'tool-bash' 方框终端 + 光标闪烁）；exec 组头静态仍
- *  tool-bash（RUN_GROUP_ICON 独立映射，不动）。 */
+ *  波及组内外所有 bash 行——本映射是全局 SSOT）；bash running 态不再走动效图标
+ *  （2026-10-17 方案 A 裁决：与完成态同款 tool-cmd 静态箭头，TOOL_RUNNING_KIND 已无
+ *  bash 条目）；exec 组头静态仍 tool-bash（RUN_GROUP_ICON 独立映射，不动）。 */
 const TOOL_ICON_MAP: Record<string, BlockIconKind> = {
   read: 'tool-read',
   bash: 'tool-cmd',
@@ -141,13 +141,12 @@ export const RUNNING_LOADER_SVG: string =
  *
  * 前缀单语言化后必须非 mono、非 uppercase、非 letter-spacing：中文 label 走 mono 会掉回 CJK
  * 字体（英文 mono 的等宽观感消失），tracking 撑开汉字间距正是 DESIGN.md:124/:862 禁的
- * 「uppercase + tracking-wider 装饰文字」。字号走 --text-base（14px，demo 过程行 fs-lg 档，
- * 见 BLOCK_LABEL_CLASS 注释），层级由色彩承担而非缩到 11px。
+ * 「uppercase + tracking-wider 装饰文字」。层级由色彩承担而非缩到小字。
  */
 export const BLOCK_ICON_CLASS =
   'size-[15px] shrink-0 text-neutral-dim [stroke-width:1.6]'
 /** 动作词 label（思考 / 执行工具 / WORKFLOW. / SUBAGENT. 前缀）：字重走 --fw-mid；
- *  颜色落行层级灰 --neutral-mid。M3b demo 复刻对齐（demo .blk 过程行 14px + label
- *  fw-mid），随 BLOCK_ICON_CLASS 同批从 13px/bold 迁移。 */
+ *  颜色落行层级灰 --neutral-mid。字号不在此定档——label 是行主体文字，随 trace 容器
+ *  （Turn.vue .trace 的 text-md = 15px）继承，与所在行头其余文字同档。 */
 export const BLOCK_LABEL_CLASS =
-  'mr-0.5 inline-block shrink-0 whitespace-nowrap text-[length:var(--text-base)] [font-weight:var(--fw-mid)] text-neutral-mid'
+  'mr-0.5 inline-block shrink-0 whitespace-nowrap [font-weight:var(--fw-mid)] text-neutral-mid'

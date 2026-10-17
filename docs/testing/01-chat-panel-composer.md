@@ -840,7 +840,6 @@ message.tool_call_update {toolCallId, detail:'读取 42 行'}
 message.tool_call_end {toolCallId, output:'…文件内容…', status:'completed'}
   ↓ 90ms
 extension:widget {widgetKey:'terminal', lines:['$ pnpm run build', ...]}
-extension:status {statusKey:'build', text:'构建完成（mock）'}
   ↓
 for chunk in '已处理："..."。\n好的，我来处理这个请求。（mock 模拟回复）'（每 chunk 70ms）:
   message.text_delta {messageId, delta}

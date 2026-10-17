@@ -264,8 +264,8 @@ describe('ui-optimize-unified N1: edit/write 工具行 basename chip（决策 8�
     expect(header.text()).not.toContain(FILE_PATH)
   })
 
-  it('write 行同样渲染 chip（file_path 字段同覆盖）', () => {
-    const { wrapper } = makeChipWrapper({ toolName: 'write', input: { file_path: FILE_PATH } })
+  it('write 行同样渲染 chip（主参数 path；file_path 死分支已删——pi 1.0.0 edit/write 主参数是 path）', () => {
+    const { wrapper } = makeChipWrapper({ toolName: 'write', input: { path: FILE_PATH } })
     expectFileChip(wrapper)
   })
 
@@ -280,7 +280,7 @@ describe('ui-optimize-unified N1: edit/write 工具行 basename chip（决策 8�
   })
 
   it('diffStat 缺省（write 工具 details 恒 undefined / 历史会话）不渲染统计段，形态回退现状', () => {
-    const { wrapper } = makeChipWrapper({ toolName: 'write', input: { file_path: FILE_PATH } })
+    const { wrapper } = makeChipWrapper({ toolName: 'write', input: { path: FILE_PATH } })
     expect(wrapper.find(DIFFSTAT_SEL).exists()).toBe(false)
     expect(wrapper.find(CHIP_SEL).text()).toBe('app.ts')
   })
@@ -331,6 +331,82 @@ describe('ui-optimize-unified N1: edit/write 工具行 basename chip（决策 8�
   it('bash 行不渲染 chip（bash/其他工具行不变）', () => {
     const wrapper = mountToolBlock(makeToolCall({ toolName: 'bash', input: { command: 'pnpm build' } }))
     expect(wrapper.find(CHIP_SEL).exists()).toBe(false)
+  })
+})
+
+/* ── 工具行收起态摘要（tool-flow-summary 用户裁决）：details.summary 优先 + argPath 回落 ──
+ * 优先级：details.summary（extension 自报一行摘要，约定见 docs/extensions/extension-conventions.md）
+ * > argPath 参数派生 > 仅工具名。
+ * argPath 识别集 = command/path/pattern/query/code（file_path/tasks 死分支已删）。 */
+describe('ToolRow 收起态摘要: details.summary 优先 + argPath 回落', () => {
+  const SUMMARY_SEL = '[data-testid="tool-details-summary"]'
+
+  it('details.summary 存在 → header 显示摘要文本（用户可见 DOM 断言），样式同款 mono dim', () => {
+    const wrapper = mountToolBlock(makeToolCall({
+      toolName: 'todo',
+      input: { action: 'add', texts: ['a', 'b'] },
+      details: { summary: 'Added 2 todos (#1-#2)' },
+    }))
+    const summary = wrapper.find(SUMMARY_SEL)
+    expect(summary.exists()).toBe(true)
+    expect(summary.text()).toBe('Added 2 todos (#1-#2)')
+    // 与 argPath 摘要同款：mono 字族 + dim 灰阶（M3b demo .tool .cmd 档）
+    expect(summary.classes()).toContain('font-mono')
+    expect(summary.classes()).toContain('text-neutral-dim')
+  })
+
+  it('details.summary 存在且 argPath 可派生 → summary 优先（优先级：自报摘要 > 参数派生）', () => {
+    const wrapper = mountToolBlock(makeToolCall({
+      toolName: 'read',
+      input: { path: '/tmp/foo.txt' },
+      details: { summary: 'Read 120 lines' },
+    }))
+    expect(wrapper.find(SUMMARY_SEL).text()).toBe('Read 120 lines')
+    expect(wrapper.find(SUMMARY_SEL).exists()).toBe(true)
+    expect(wrapper.find('[data-testid="tool-block-header"]').text()).not.toContain('/tmp/foo.txt')
+  })
+
+  it('details.summary 缺失 → 无 summary testid，回落 argPath 摘要（既有行为不回归）', () => {
+    const wrapper = mountToolBlock(makeToolCall({ toolName: 'grep', input: { pattern: 'foo' } }))
+    expect(wrapper.find(SUMMARY_SEL).exists()).toBe(false)
+    expect(wrapper.find('[data-testid="tool-block-header"]').text()).toContain('foo')
+  })
+
+  it('details.summary 非字符串（脏 details）→ typeof 守卫不显示，回落 argPath', () => {
+    const wrapper = mountToolBlock(makeToolCall({
+      toolName: 'grep',
+      input: { pattern: 'foo' },
+      details: { summary: 42 },
+    }))
+    expect(wrapper.find(SUMMARY_SEL).exists()).toBe(false)
+    expect(wrapper.find('[data-testid="tool-block-header"]').text()).toContain('foo')
+  })
+
+  it('details 缺失（bash/read 等内置工具常态）→ 既有 argPath 摘要行为不变', () => {
+    const wrapper = mountToolBlock(makeToolCall({ toolName: 'bash', input: { command: 'pnpm build' } }))
+    expect(wrapper.find(SUMMARY_SEL).exists()).toBe(false)
+    expect(wrapper.find('[data-testid="tool-block-header"]').text()).toContain('pnpm build')
+  })
+
+  it('两者皆无 → header 只显示工具名', () => {
+    const wrapper = mountToolBlock(makeToolCall({ toolName: 'somecustom', input: {} }))
+    const header = wrapper.find('[data-testid="tool-block-header"]')
+    expect(header.text()).toContain('somecustom')
+    expect(wrapper.find(SUMMARY_SEL).exists()).toBe(false)
+    // 无 argPath 摘要 span（识别集外工具 header 仅工具名 + 行尾时刻槽）
+    expect(header.text()).not.toContain('undefined')
+  })
+
+  it('input.query（tool_search）→ header 显示 query 值', () => {
+    const wrapper = mountToolBlock(makeToolCall({ toolName: 'tool_search', input: { query: 'workflow resume' } }))
+    expect(wrapper.find(SUMMARY_SEL).exists()).toBe(false)
+    expect(wrapper.find('[data-testid="tool-block-header"]').text()).toContain('workflow resume')
+  })
+
+  it('input.code（codemode）→ header 显示 code 值', () => {
+    const wrapper = mountToolBlock(makeToolCall({ toolName: 'codemode', input: { code: 'await agent("w")' } }))
+    expect(wrapper.find(SUMMARY_SEL).exists()).toBe(false)
+    expect(wrapper.find('[data-testid="tool-block-header"]').text()).toContain('await agent("w")')
   })
 })
 
@@ -529,8 +605,10 @@ describe('W4 tail-scroll: thinking 双态（U8）', () => {
   })
 })
 
-// U9: tool 双态——running 态显示去 ANSI 末行文本，completed 态显示 shortenForHeader
+// U9: tool 双态——running 态显示尾行文本（2026-10-17 方案 A 后仅非 bash 工具），completed 态显示 shortenForHeader
 // rAF mock setup for U9-U10
+const ANSI_OUTPUT_RAW = '\x1b[32m✓ success\x1b[0m\n\x1b[1;34m── build output ──\x1b[0m\nfinal line of output'
+const ANSI_OUTPUT_CLEAN = '✓ success\n── build output ──\nfinal line of output'
 const rafQueue: FrameRequestCallback[] = []
 const originalRAF = globalThis.requestAnimationFrame
 const originalCAF = globalThis.cancelAnimationFrame
@@ -555,24 +633,21 @@ async function flushRaf(): Promise<void> {
 }
 
 describe('W4 tail-scroll: tool 双态（U9）', () => {
-  const ANSI_OUTPUT_RAW = '\x1b[32m✓ success\x1b[0m\n\x1b[1;34m── build output ──\x1b[0m\nfinal line of output'
-  const ANSI_OUTPUT_CLEAN = '✓ success\n── build output ──\nfinal line of output'
-
-  it('running + 有 outputRaw → 折叠头含去 ANSI 末行文本', async () => {
+  it('非 bash running + 有 output → 尾行视口保留（方案 A 只豁免 bash），折叠头含尾行 + 扫光', async () => {
     const wrapper = mountToolBlock(makeToolCall({
-      toolName: 'bash',
-      input: { command: 'pnpm build' },
+      toolName: 'read',
+      input: { path: '/tmp/foo.txt' },
       status: 'running',
-      outputRaw: ANSI_OUTPUT_RAW,
       output: ANSI_OUTPUT_CLEAN,
     }))
     await nextTick()
     await flushRaf()
     const header = wrapper.find('[data-testid="tool-block-header"]')
-    // 去 ANSI 后的末行应可见
+    // 尾行视口渲染且含最后一行（非 bash 保持既有尾行形态）
+    expect(header.find('.h-\\[1lh\\]').exists()).toBe(true)
     expect(header.text()).toContain('final line of output')
-    // ANSI 色码不应出现在 header 文本中
-    expect(header.text()).not.toContain('\x1b')
+    // 非 bash running 扫光现状保持：视口内层挂 text-sweep
+    expect(header.find('.text-sweep').exists()).toBe(true)
   })
 
   it('status=completed → 折叠头回落 shortenForHeader 形态', async () => {
@@ -608,7 +683,7 @@ describe('W4 tail-scroll: tool 双态（U9）', () => {
 
 // U10: 无输出 tool——running 但无 outputRaw/displayContent → 折叠头保持 argPath
 describe('W4 tail-scroll: 无输出 tool（U10）', () => {
-  it('running + 无 outputRaw/displayContent → 折叠头含 argPath 原文', async () => {
+  it('running + 无 outputRaw/displayContent → 折叠头含 argPath 原文（非 bash 摘要扫光现状保持）', async () => {
     const wrapper = mountToolBlock(makeToolCall({
       toolName: 'read',
       input: { path: '/tmp/foo.txt' },
@@ -619,12 +694,14 @@ describe('W4 tail-scroll: 无输出 tool（U10）', () => {
     const header = wrapper.find('[data-testid="tool-block-header"]')
     // 无流式输出 → 回落 shortenForHeader(argPath)
     expect(header.text()).toContain('/tmp/foo.txt')
+    // 非 bash running 摘要扫光保持现状（text-sweep 挂摘要 span）
+    expect(header.find('.text-sweep').exists()).toBe(true)
   })
 })
 
-/* ── bash-running-stream-output（U3）：bash 展开恒渲染容器 + 输出区内容守卫 + 尾行取数回退 ──
- * - D2: bash 展开容器恒渲染（含命令块），空输出不再「header 摘要消失 + 内容空白」假展开
- * - D3: toolTailLines bash raw 源 outputRaw ?? displayContent（无 ANSI 输出走 displayContent 尾行） */
+/* ── bash-running-stream-output（U3）：bash 展开恒渲染容器 + 输出区内容守卫 ──
+ * D2: bash 展开容器恒渲染（含命令块），空输出不再「header 摘要消失 + 内容空白」假展开
+ *（原 D3 尾行取数回退随 2026-10-17 方案 A 移除：bash running 不再进尾行视口） */
 describe('bash-running-stream-output: bash 展开容器与输出守卫（U3）', () => {
   async function expand(wrapper: ReturnType<typeof mountToolBlock>) {
     await wrapper.find('[data-testid="tool-block-header"]').trigger('click')
@@ -683,22 +760,6 @@ describe('bash-running-stream-output: bash 展开容器与输出守卫（U3）',
     expect(wrapper.find('.tool-result').exists()).toBe(false)
   })
 
-  it('尾行取数回退：running + 无 outputRaw（纯 output）→ header 尾行视口含最后一行', async () => {
-    const wrapper = mountToolBlock(makeToolCall({
-      toolName: 'bash',
-      input: { command: 'pnpm test' },
-      status: 'running',
-      output: 'step-1\nstep-2\nstep-3',
-      // 无 outputRaw（D3：raw 源回退 displayContent）
-    }))
-    await nextTick()
-    await flushRaf()
-    const header = wrapper.find('[data-testid="tool-block-header"]')
-    // 尾行视口渲染（toolTailLines 非空才出现 h-[1lh] 视口）且含最后一行
-    expect(header.find('.h-\\[1lh\\]').exists()).toBe(true)
-    expect(header.text()).toContain('step-3')
-  })
-
   it('非 bash 工具 running 且无 output：展开行为不变（v-if 不满足不渲染）', async () => {
     const wrapper = mountToolBlock(makeToolCall({
       toolName: 'read',
@@ -710,6 +771,59 @@ describe('bash-running-stream-output: bash 展开容器与输出守卫（U3）',
     // 展开区不渲染（isBashTool 分支不命中非 bash 工具）
     expect(wrapper.find('.tool-result').exists()).toBe(false)
     expect(wrapper.find('.group\\/content').exists()).toBe(false)
+  })
+})
+
+/* ── bash running 行形态（2026-10-17 方案 A 裁决）：执行中命令字符串常显 ──
+ * bash 行 running 不再被「输出尾行视口」顶替 header，也不走呼吸弧动效图标：
+ * header = 完成态同款静态展开箭头（tool-cmd）+「bash」工具名扫光（base=mid 档）
+ * + 命令字符串（不扫光）；进度看展开区输出。非 bash 工具行一切保持现状。 */
+describe('bash running 行形态（方案 A：命令常显 + 工具名扫光，2026-10-17 裁决）', () => {
+  const CMD = 'pnpm build'
+  function mountRunningBash(over: Partial<ToolCall> = {}) {
+    return mountToolBlock(makeToolCall({ toolName: 'bash', input: { command: CMD }, status: 'running', ...over }))
+  }
+
+  it('header 命令字符串用户可见（不被尾行视口顶替）；尾行视口不渲染、尾行文本不出现', () => {
+    const wrapper = mountRunningBash({ output: ANSI_OUTPUT_CLEAN, outputRaw: ANSI_OUTPUT_RAW })
+    const header = wrapper.find('[data-testid="tool-block-header"]')
+    // 用户可见 DOM 断言：命令字符串在 header 文本中
+    expect(header.text()).toContain(CMD)
+    // 尾行视口（bash 豁免）与尾行文本均不出现
+    expect(header.find('.h-\\[1lh\\]').exists()).toBe(false)
+    expect(header.text()).not.toContain('final line of output')
+  })
+
+  it('header 图标 = 完成态同款静态展开箭头（tool-cmd），非 RunningBlockIcon 动效款', () => {
+    const runningHeader = mountRunningBash().find('[data-testid="tool-block-header"]')
+    // running 不再渲染动效图标（bash 豁免 RunningBlockIcon）
+    expect(runningHeader.find('[data-running-icon]').exists()).toBe(false)
+    // 与 completed bash 行 svg 逐字节一致（不绑 lucide path 字面，防上游图标库漂移误报）
+    const doneHeader = mountToolBlock(makeToolCall({ toolName: 'bash', input: { command: CMD }, status: 'completed' }))
+      .find('[data-testid="tool-block-header"]')
+    expect(runningHeader.find('svg').exists()).toBe(true)
+    expect(runningHeader.find('svg').html()).toBe(doneHeader.find('svg').html())
+    // 颜色与完成态同档（headerIconClass 非失败分支 = BLOCK_ICON_CLASS 常态档 dim）
+    expect(runningHeader.find('svg').classes()).toContain('text-neutral-dim')
+    expect(runningHeader.find('svg').classes()).not.toContain('text-danger')
+  })
+
+  it('工具名「bash」span 挂 text-sweep（base=mid 档，与 ThinkingRow label 同款）；命令 span 不扫光', () => {
+    const header = mountRunningBash().find('[data-testid="tool-block-header"]')
+    const nameSpan = header.findAll('span').find((s) => s.text() === 'bash')
+    expect(nameSpan).toBeTruthy()
+    expect(nameSpan!.classes()).toContain('text-sweep')
+    expect(nameSpan!.classes()).toContain('[--sweep-base:var(--neutral-mid)]')
+    // 命令 span（收起态可见，无 invisible）不带扫光——扫光只扫工具名不扫命令
+    const cmdSpan = header.findAll('span').find((s) => s.text() === CMD)
+    expect(cmdSpan).toBeTruthy()
+    expect(cmdSpan!.classes()).not.toContain('invisible')
+    expect(cmdSpan!.classes()).not.toContain('text-sweep')
+  })
+
+  it('非 running（completed）bash 行不挂任何 text-sweep（扫光只随 running）', () => {
+    const wrapper = mountToolBlock(makeToolCall({ toolName: 'bash', input: { command: CMD }, status: 'completed' }))
+    expect(wrapper.findAll('.text-sweep').length).toBe(0)
   })
 })
 
@@ -1080,26 +1194,26 @@ describe('run 类型分组: Block 组块', () => {
       makeToolCall({ id: 'b0', toolName: 'bash', input: { command: 'a' } }),
       makeToolCall({ id: 'b1', toolName: 'bash', input: { command: 'b' }, status: 'running' }),
     ]))
-    expect(running.find('[data-testid="run-group"]').findAll('.trace-blk').length).toBe(0)
+    expect(running.find('[data-testid="run-group"]').findAll('[data-testid^="block-tool-"]').length).toBe(0)
     expect(running.find('[data-testid="run-group-header"]').attributes('aria-expanded')).toBe('false')
 
     const done = mountBashPairGroup()
-    expect(done.find('[data-testid="run-group"]').findAll('.trace-blk').length).toBe(0)
+    expect(done.find('[data-testid="run-group"]').findAll('[data-testid^="block-tool-"]').length).toBe(0)
     expect(done.find('[data-testid="run-group-header"]').attributes('aria-expanded')).toBe('false')
   })
 
   it('展开收起（用户手动开合）：点组头展开 → 成员行各自 1 行收起态；再点收起 → 成员消失', async () => {
     const wrapper = mountBashPairGroup()
-    expect(wrapper.find('[data-testid="run-group"]').findAll('.trace-blk').length).toBe(0) // 默认收起（成员行 = 组容器内嵌套 Block 根 .trace-blk；外层查找收窄到组子树，排除 Block 根容器自身）
+    expect(wrapper.find('[data-testid="run-group"]').findAll('[data-testid^="block-tool-"]').length).toBe(0) // 默认收起（成员行锚点 = block-tool-<id> testid，W3 直递 ToolRow 后由 RunGroupBlock 补挂；外层查找收窄到组子树，排除组头自身）
     await wrapper.find('[data-testid="run-group-header"]').trigger('click')
-    const members = wrapper.find('[data-testid="run-group"]').findAll('.trace-blk')
+    const members = wrapper.find('[data-testid="run-group"]').findAll('[data-testid^="block-tool-"]')
     expect(members.length).toBe(2) // 成员行出现
     // 成员保持各自 1 行收起态（PR-1 行高不变量）：无展开输出区
     expect(wrapper.find('.tool-result').exists()).toBe(false)
     // aria-expanded 翻转
     expect(wrapper.find('[data-testid="run-group-header"]').attributes('aria-expanded')).toBe('true')
     await wrapper.find('[data-testid="run-group-header"]').trigger('click')
-    expect(wrapper.find('[data-testid="run-group"]').findAll('.trace-blk').length).toBe(0) // 收起
+    expect(wrapper.find('[data-testid="run-group"]').findAll('[data-testid^="block-tool-"]').length).toBe(0) // 收起
     expect(wrapper.find('[data-testid="run-group-header"]').attributes('aria-expanded')).toBe('false')
   })
 
@@ -1112,9 +1226,9 @@ describe('run 类型分组: Block 组块', () => {
     // 第一步：组展开（成员行在场、均收起）
     expect(wrapper.find('.tool-result').exists()).toBe(false)
     // 第二步：点成员行 → 完整输出可见（bash 凹槽命令头 + 输出）
-    const firstHeader = wrapper.find('[data-testid="run-group"]').findAll('.trace-blk')[0].find('[data-testid="tool-block-header"]')
+    const firstHeader = wrapper.find('[data-testid="run-group"]').findAll('[data-testid^="block-tool-"]')[0].find('[data-testid="tool-block-header"]')
     await firstHeader.trigger('click')
-    const expanded = wrapper.find('[data-testid="run-group"]').findAll('.trace-blk')[0]
+    const expanded = wrapper.find('[data-testid="run-group"]').findAll('[data-testid^="block-tool-"]')[0]
     expect(expanded.text()).toContain('echo step-one')
     expect(expanded.text()).toContain('step-one-output')
   })
@@ -1126,7 +1240,7 @@ describe('run 类型分组: Block 组块', () => {
       makeToolCall({ id: 'b2', toolName: 'bash', input: { command: 'after' } }),
     ]))
     await wrapper.find('[data-testid="run-group-header"]').trigger('click')
-    const members = wrapper.find('[data-testid="run-group"]').findAll('.trace-blk')
+    const members = wrapper.find('[data-testid="run-group"]').findAll('[data-testid^="block-tool-"]')
     expect(members.length).toBe(3)
     // 失败成员（第 2 个）挂载即展开：输出区在场（displayContent 兜底 tool.error）
     expect(members[1].find('.tool-result').exists()).toBe(true)

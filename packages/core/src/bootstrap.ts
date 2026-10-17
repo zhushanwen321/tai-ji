@@ -59,24 +59,23 @@ export function setExtensionRegistries(registries: {
   contributionRegistryImpl = registries.contributions
 }
 
-// 壳向 ExtensionHost 注册挂载点（sidebar.tab / panel.header / composer.toolbar / statusbar）
+// 壳向 ExtensionHost 注册挂载点（sidebar.tab / panel.header / composer.toolbar）
 export async function registerMountPoints(): Promise<void> {
   console.log('[bootstrap] step 4/5 registerMountPoints')
   if (!mountRegistryImpl) {
     console.warn('[bootstrap] registerMountPoints: registry not injected, skip (setExtensionRegistries)')
     return
   }
-  // Tier 1 挂载点（§12.1，对齐 audit §12.1 步骤 1）：sidebar tab / panel header / composer toolbar / statusbar。
-  // 命名 SSOT = SDK/descriptor-types（'sidebar.tab' | 'panel.header' | 'composer.toolbar' | 'statusbar'），
+  // Tier 1 挂载点（§12.1，对齐 audit §12.1 步骤 1）：sidebar tab / panel header / composer toolbar。
+  // 命名 SSOT = SDK/descriptor-types（'sidebar.tab' | 'panel.header' | 'composer.toolbar'），
   // renderer ViewHost view-id 按同名路由（MF-8：曾用 'panel.header.action' 导致 listMountPoints 与
   // 渲染端名字失配）。
   mountRegistryImpl.register('sidebar.tab')
   mountRegistryImpl.register('panel.header')
   mountRegistryImpl.register('composer.toolbar')
-  mountRegistryImpl.register('statusbar')
 }
 
-// 扫描 plugin manifest 注册声明式贡献（views/menus/commands/statusBarItems/slashCommands/configuration）
+// 扫描 plugin manifest 注册声明式贡献（views/menus/commands/slashCommands/configuration）
 export async function scanContributions(): Promise<void> {
   console.log('[bootstrap] step 5/5 scanContributions')
   if (!contributionRegistryImpl) {

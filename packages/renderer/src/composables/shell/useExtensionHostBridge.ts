@@ -6,10 +6,10 @@
  *   （@taiji/ui/extension-host shell-adapters 共享件，双壳逐字节同源；
  *   core/extension-host/plugin-message-source.ts 注释明确「壳把 transport 层适配成 source 注入」）
  * - 创建 InternalEventBus + MessageBusBridge（归一 plugin:* → bus 事件）
- * - 创建 ViewHostStore + StatusBarController（消费 bus，ui 组件数据源）
+ * - 创建 ViewHostStore（消费 bus，ui 组件数据源）
  * - 注入 MountPointRegistry/ContributionRegistry 到 core bootstrap（setExtensionRegistries；
  *   注册触发收敛为 bootstrap 第 4/5 步——App.vue onMounted 编排，本模块不再自行触发）
- * - app.provide ViewHost/StatusBar 的 inject key
+ * - app.provide ViewHost 的 inject key
  *
  * 消息流：WS 下行 → route-inbound（events 正规通道）→ 本适配器 →
  * MessageBusBridge → bus 'extension-widget' → ViewHostStore → <ViewHost> getView。
@@ -40,7 +40,6 @@ import {
   MessageBusBridge,
   MountPointRegistry,
   setExtensionRegistries,
-  StatusBarController,
   NotificationHostController,
   ViewHostStore,
   OverlayLifecycle,
@@ -53,7 +52,6 @@ import {
   type OverlayState,
   type SessionScopedMap,
   type ViewCacheEntry,
-  type StatusBarSessionState,
 } from '@taiji/core'
 import { getState as getWsState, send } from '@taiji/core/transport/ws-client'
 import {
@@ -61,7 +59,6 @@ import {
   createWsPluginMessageSource,
   DIALOG_REQUEST_SOURCE_KEY,
   PluginSettingsDataSourceKey,
-  STATUS_BAR_SOURCE_KEY,
   UI_RESPONSE_TRANSPORT_KEY,
   VIEW_HOST_SOURCE_KEY,
   VIEWS_SOURCE_KEY,
@@ -294,7 +291,7 @@ export function initExtensionHostBridge(app: App): void {
   // bridge 构造即订阅 source（source.subscribe → handleMessage → bus.emit）
   const bridge = new MessageBusBridge({ source, bus })
   // MF-4 响应式桥（R2 补齐）：core store 是 headless 纯 Map 容器（刻意零 Vue 依赖），事件到达
-  // mutate 纯 Map 不被 Vue computed 追踪 → ViewHost/StatusBar 永不重渲染。壳层两层 reactive 化：
+  // mutate 纯 Map 不被 Vue computed 追踪 → ViewHost 永不重渲染。壳层两层 reactive 化：
   // ①外层 partitions 容器 reactive（createReactiveSessionScopedMap——分区后建也触发重算，
   //   修复「computed 首次求值短路 → 永久 stale」）；②分区值由 init 工厂返回 reactive 容器
   // （get/set 走 reactive proxy）。ViewHost.vue computed 的 getView/getItems 调用面即被追踪
@@ -304,19 +301,13 @@ export function initExtensionHostBridge(app: App): void {
     sessionScoped: createReactiveSessionScopedMap(() => reactive(new Map<string, ViewCacheEntry>())),
   })
   viewHostStore.subscribe()
-  const statusBarController = new StatusBarController({
-    bus,
-    // 分区值须满足 StatusBarSessionState 全字段（setEntries 必填，items/setEntries 后续 update push）
-    sessionScoped: createReactiveSessionScopedMap(() => reactive<StatusBarSessionState>({ items: [], setEntries: [] })),
-  })
-  statusBarController.subscribe()
   const mountPoints = new MountPointRegistry()
   const contributions = new ContributionRegistry(bus)
   setExtensionRegistries({ mountPoints, contributions })
   // 仅注入注册表：注册触发收敛为 bootstrap 第 4/5 步（App.vue onMounted 编排，u6 去重）——
   // 本装配点不再自行 registerMountPoints/scanContributions。
 
-  // W3 slash 收编（D1 归一）：CommandRegistry 实例化（与 ViewHostStore/StatusBarController 并列，03 文档 D3-3）。
+  // W3 slash 收编（D1 归一）：CommandRegistry 实例化（与 ViewHostStore 并列，03 文档 D3-3）。
   // ActivationManager 的 trigger 适配为 no-op——runtime 暂无激活 RPC 通道（plugin-message-handler 无
   // triggerActivation case），builtin/声明型无 activationEvents 时 ensureActivated 短路，行为等价。
   const activationManager = new ActivationManager({
@@ -353,7 +344,7 @@ export function initExtensionHostBridge(app: App): void {
   // MF-1（R2）：发送时点见 ensureMountPointsSync——init 时 WS 未建连，send 必被静默丢弃。
   const stopMountPointsSync = ensureMountPointsSync(mountPoints)
 
-  // ui 组件数据源（ViewHost/StatusBar 经 inject 取，壳 provide 真实实现；形状对齐 IF10/IF5）
+  // ui 组件数据源（ViewHost 经 inject 取，壳 provide 真实实现；形状对齐 IF10）
   app.provide(VIEW_HOST_SOURCE_KEY, {
     getView: (sessionId, viewId) => viewHostStore.getView(sessionId, viewId),
     // widget 视图消费面（Composer 托盘 widget 区）：枚举该 session 全部缓存 viewId（纯透传 core store）
@@ -384,19 +375,6 @@ export function initExtensionHostBridge(app: App): void {
   // （composer-task-tray D10：托盘承接后台命令观察面；PluginViewContainer 的
   // 同名分支同批删除）。plugin sidebar view 机制本身保留——
   // 上方 VIEWS_SOURCE_KEY + ViewHost 原路径即其消费面。
-  app.provide(STATUS_BAR_SOURCE_KEY, {
-    // 两 scope 重载（ui 契约）：直接委托 StatusBarController（签名对齐 IF8）。
-    // MF-2（R2）：global scope 经 controller 的 sessionScoped 保留分区（GLOBAL_SCOPE_KEY）存储，
-    // 壳注入 reactive 分区容器 → getItems 返回的 items 数组本身 reactive，computed 追踪有效
-    // （旧实现 reactive() 包装 controller 私有 raw 数组，replaceAllWith 原地 mutate 不经 proxy
-    // set trap → global 状态栏永不更新）。
-    getItems: (scope: 'global' | 'per-session', sessionId?: string) => {
-      if (scope === 'global') return statusBarController.getItems('global')
-      // sessionId 可能 undefined：controller 实现签名内部 `sessionId ?? GLOBAL_STATUS_KEY` 兜底
-      // （重载签名要求 string，受控断言仅类型擦除，运行时 undefined 走兜底分区）
-      return statusBarController.getItems('per-session', sessionId as string)
-    },
-  })
   // PluginSettingsPage 数据源（M16）：onPlugins 委托 api 域
   // （config.plugins 广播订阅），getContributions 委托 ContributionRegistry + MountPointRegistry
   // （toContributionInfos：未注册挂载点 → 置灰 + 原因，场景 E AC3）。

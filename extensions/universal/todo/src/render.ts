@@ -174,6 +174,16 @@ function renderDetailedTodoResult(
 ): Text {
 	const todoList = details.todos;
 
+	// 折叠态 + 有 summary → 一行摘要（details.summary 约定，见 extension-conventions.md）；
+	// 突变动作保留 ✓ 前缀（与展开态确认段同视觉语言），list 走 muted 信息档。
+	// 旧 entry（历史 session）details 无 summary → 落回原全量渲染（读写向后兼容）。
+	if (!options.expanded && typeof details.summary === "string" && details.summary) {
+		const line = details.action === "list"
+			? theme.fg("muted", details.summary)
+			: theme.fg("success", "\u2713 ") + theme.fg("muted", details.summary);
+		return new Text(line, 0, 0);
+	}
+
 	switch (details.action) {
 		case "list": {
 			return new Text(buildTodoListText(todoList, options, theme), 0, 0);

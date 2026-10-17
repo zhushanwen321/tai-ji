@@ -3,7 +3,7 @@
  *
  * 挂载点 SSOT（core 侧，AC10）：壳 bootstrap 注册可用挂载点，plugin contribution 经
  * ContributionRegistry.routeAll 路由到挂载点。挂载点是开放字符串（非枚举）：
- * 'sidebar.tab'/'panel.header'/'composer.toolbar'/'statusbar'/'drawer.tab'/...——
+ * 'sidebar.tab'/'panel.header'/'composer.toolbar'/'drawer.tab'/...——
  * mobile 壳只注册 message-stream/slash/companion 子集，桌面壳注册全量（§6.3 壳注册制）。
  *
  * 契约（IF5）：

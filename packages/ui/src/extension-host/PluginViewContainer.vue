@@ -11,7 +11,7 @@
  * - closedViewIds：close 事件对 non-builtin 生效（本地 ref 移除，不持久化）
  *
  * builtin 判定：view.pluginId ∈ BUILTIN_PLUGIN_IDS（core builtin-contributions.ts 的
- * statusline / tasks 声明）→ 不可关闭（L2TabBar 不渲染 close 按钮，容器侧再守卫）。
+ * tasks 声明）→ 不可关闭（L2TabBar 不渲染 close 按钮，容器侧再守卫）。
  *
  * icon：view.icon 当前无图标源（壳透传 undefined），统一以 default icon 兜底（见 DEFAULT_ICON）。
  *
@@ -38,7 +38,7 @@ const props = defineProps<{
 const source = inject(VIEWS_SOURCE_KEY, null)
 
 /** builtin plugin（core builtin-contributions 声明单源派生，消双处字面量）——不可关闭。
- *  派生全集含 statusline（其无 sidebar.tab view 贡献，views 查询永不命中该 id）。 */
+ *  派生全集含无 view 贡献的 builtin id（views 查询永不命中）。 */
 const BUILTIN_PLUGIN_IDS = new Set(builtinContributions.map((c) => c.pluginId))
 
 /** 通用 default icon（静态声明 view 未配 icon 时使用，统一 LayoutGrid） */

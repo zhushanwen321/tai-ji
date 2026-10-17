@@ -27,7 +27,6 @@ import type {
 
 const PLACEMENT_BY_TYPE: Record<Exclude<ContributionType, 'view' | 'menu'>, string> = {
   command: 'commands',
-  statusBarItem: 'statusbar',
   slashCommand: 'slash',
   configuration: 'settings',
   // headerAction 复用已注册挂载点名 panel.header（不新增名字，AP-1）
@@ -38,7 +37,7 @@ const PLACEMENT_BY_TYPE: Record<Exclude<ContributionType, 'view' | 'menu'>, stri
 //
 // parseContributes 的分段提取：每段只解析一种 contribution type，段内循环体与
 // 原内联实现逐字节一致；parseContributes 按原 push 顺序 concat 各段，
-// 跨段顺序（view→menu→command→statusBarItem→slashCommand→configuration→headerAction）
+// 跨段顺序（view→menu→command→slashCommand→configuration→headerAction）
 // 即注册顺序。
 
 function parseViewContributions(pluginId: string, c: PluginContributes): ContributionRecord[] {
@@ -88,27 +87,6 @@ function parseCommandContributions(pluginId: string, c: PluginContributes): Cont
       placement: PLACEMENT_BY_TYPE.command,
       available: false,
       command: { title: cmd.title, category: cmd.category, keybinding: cmd.keybinding, when: cmd.when },
-    })
-  }
-  return out
-}
-
-function parseStatusBarItemContributions(pluginId: string, c: PluginContributes): ContributionRecord[] {
-  const out: ContributionRecord[] = []
-  for (const item of c.statusBarItems ?? []) {
-    out.push({
-      pluginId,
-      contributionId: item.id,
-      type: 'statusBarItem',
-      placement: PLACEMENT_BY_TYPE.statusBarItem,
-      available: false,
-      statusBarItem: {
-        text: item.text,
-        alignment: item.alignment ?? 'right',
-        priority: item.priority,
-        scope: item.scope ?? 'global',
-        commandId: item.commandId,
-      },
     })
   }
   return out
@@ -273,7 +251,7 @@ export class ContributionRegistry {
 
   /**
    * 清除该插件全部贡献记录（E2 触发链：插件崩溃/禁用/卸载时由消费方在
-   * plugin-status-change / plugin-crashed 订阅回调内调用，对齐 statusBar 清理族语义；
+   * plugin-status-change / plugin-crashed 订阅回调内调用；
    * 重启用经 registerBuiltin/loadExternal 重放）。幂等：无记录时为 no-op。
    */
   clearForPlugin(pluginId: string): void {
@@ -293,7 +271,6 @@ export class ContributionRegistry {
       ...parseViewContributions(pluginId, c),
       ...parseMenuContributions(pluginId, c),
       ...parseCommandContributions(pluginId, c),
-      ...parseStatusBarItemContributions(pluginId, c),
       ...parseSlashCommandContributions(pluginId, c),
       ...parseConfigurationContribution(pluginId, c),
       ...parseHeaderActionContributions(pluginId, c),

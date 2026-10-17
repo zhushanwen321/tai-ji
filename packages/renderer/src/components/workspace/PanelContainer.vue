@@ -9,10 +9,10 @@
     hairline 边 + 12px 圆角、无阴影（demo .chat-card）；右/底抽屉卡 = bg-surface + border 边 +
     12px 圆角 + shadow-1（demo .drawer-card/.term-card）。PanelHeader 是对话流卡的卡头
     （2026-10-04 二轮裁决：header 只与对话流构成整体，不横跨抽屉卡——右抽屉卡有自己的 L1 栏、
-    底抽屉卡有自己的实例切换条）；StatusBar 仍是横跨状态条。main 与 drawer 的宽度 handle 即卡缝
+    底抽屉卡有自己的实例切换条）。main 与 drawer 的宽度 handle 即卡缝
     本体（w-1 = 4px 缝，缝内 1px 视觉线，hover/键盘焦点显、drag 染 accent）——drawer 关闭时
     handle 随 v-if 消失，无缝无残线。卡间缝（横缝与纵缝）统一 = 窗口边距 4px（demo 三卡化裁决
-    「卡间缝 4px = 窗口边距同值」）；底抽屉卡与 StatusBar 间 4px。
+    「卡间缝 4px = 窗口边距同值」）。
 
     Drawer 协调（W4 drawer-shell-integration）：drawer 固定挂本容器（单实例），恒作 flex 子项与
     Panel 各占一半并排（mode='split'），贴右展开（direction='right'）。单 panel 下不再有 overlay
@@ -194,7 +194,7 @@
         <FindBar v-if="drawerOpen" surface-kind="right-drawer" />
       </div>
     </div>
-    <!-- 底抽屉（display-containers §6.2/§7.3）：插在 split 行之下、StatusBar 之上，横跨全宽
+    <!-- 底抽屉（display-containers §6.2/§7.3）：插在 split 行之下，横跨全宽
          （右抽屉开着时同样全宽、右抽屉变矮）；唯一内容 = terminal（TerminalView 挂载点，保留
          defineAsyncComponent + 内部自动重试接线（D6：原 LAZY_RETRY_KEY 占位重试链已删——
          chunk 装载失败由 createLazyChunkRetry 自动重试，见下方懒加载块）。
@@ -254,11 +254,6 @@
       <FindBar v-if="bottomOpen" surface-kind="bottom-drawer" />
     </div>
     </div>
-    <!-- ExtensionHost 状态栏（audit §12.1）：数据经 app.provide STATUS_BAR_SOURCE_KEY 注入（useExtensionHostBridge），
-         无数据时自隐藏；sessionId 绑定当前 leaf（per-session 项）。
-         trailing 插槽不再注入（三卡化 2026-10-04：终端开关迁 PanelHeader，StatusBar 回落
-         「有状态项才显示」的纯显隐形态）。 -->
-    <StatusBar class="mt-1" :session-id="leaf.sessionId ?? null" />
   </div>
 </template>
 
@@ -281,7 +276,6 @@ import {
   BOTTOM_DRAWER_HEIGHT_MAX_PCT,
 } from '@taiji/core/domain/bottom-drawer'
 import { DrawerPanel } from '@taiji/ui/features/drawer'
-import { StatusBar } from '@taiji/ui/extension-host'
 import { usePanelStore } from '@/stores/panel'
 import { useSessionStore } from '@/stores/session'
 import { useSessionDerivations } from '@/composables/features/chat/useSessionDerivations'

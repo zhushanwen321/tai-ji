@@ -430,10 +430,10 @@ if [ -d "$OUTPUT_DIR/mac-arm64" ]; then
             echo -e "  ${RED}✗${NC} mobile-dist/index.html 缺失: ${MOBILE_DIST_DIR}（检查 build 编排 build:mobile + electron-builder.yml extraResources）"
             FAILED=1
         fi
-        # builtin taiji plugins 完整性校验（resources/plugins/<name>，如 statusline）
+        # builtin taiji plugins 完整性校验（resources/plugins/<name>）
         # prepare-builtin-plugins.sh 预编译 index.js + electron-builder extraResources 拷贝。
         # registry 打包后扫描 <cwd>/resources/plugins；缺入口文件则插件静默不被发现或
-        # 激活必炸（ERR_UNSUPPORTED_DIR_IMPORT，2026-08-16 statusline 从未激活成功事故）。
+        # 激活必炸（ERR_UNSUPPORTED_DIR_IMPORT——插件目录只有 ts 源、无编译产物时）。
         # 入口 SSOT = 各插件 package.json 的 taijiPlugin.main（缺省 index.js）。
         BUILTIN_PLUGINS_DIR="$APP_PATH/Contents/Resources/resources/plugins"
         if [ -d "$BUILTIN_PLUGINS_DIR" ]; then

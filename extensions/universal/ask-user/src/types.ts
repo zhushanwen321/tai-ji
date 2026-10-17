@@ -105,6 +105,9 @@ export const ResultSchema = Type.Object({
 	questions: Type.Array(QuestionSchema),
 	answers: Type.Record(Type.String(), AnswerValueSchema),
 	cancelled: Type.Boolean(),
+	/** 收起态一行摘要（execute 恒写入，约定见 docs/extensions/extension-conventions.md
+	 *  「Tool result details.summary 约定」）；历史 session 的旧 details 缺失，读侧需 typeof 守卫 */
+	summary: Type.Optional(Type.String()),
 });
 
 export type Result = Static<typeof ResultSchema>;
@@ -120,6 +123,26 @@ export type AskUserDetails = Result;
 // 放这里（而非 component.ts）是为了让 question-view.ts / submit-view.ts
 // 这两个纯渲染函数只依赖 types.ts，不反向依赖 component.ts（消除循环依赖）。
 
+// ── 收起态一行摘要（details.summary，TUI 折叠渲染与 taiji GUI ToolRow 读链共用同源文本）──
+
+/** 无 header 时摘要回退 question 的保留长度（码点安全截断 + 省略号；与 renderCall 的
+ *  HEADER_MAX_CHARS 不同档——摘要是完整一句话语境，不是 tab 标签） */
+const SUMMARY_LABEL_MAX_CHARS = 60;
+
+/** 单问题的摘要标签：header 优先（多问场景必填），缺省回退截断后的 question */
+function summaryLabel(q: Question): string {
+	if (q.header) return q.header;
+	const chars = Array.from(q.question);
+	return chars.length > SUMMARY_LABEL_MAX_CHARS
+		? chars.slice(0, SUMMARY_LABEL_MAX_CHARS).join("") + "…"
+		: q.question;
+}
+
+/** 收起态一行摘要：`Asked 1 question: Which database?` / `Asked 2 questions: DB, Region` */
+export function buildAskUserSummary(questions: readonly Question[]): string {
+	const n = questions.length;
+	return `Asked ${n} question${n === 1 ? "" : "s"}: ${questions.map(summaryLabel).join(", ")}`;
+}
 /** TUI 颜色主题的最小接口（满足真实 Theme 和测试 stub） */
 export interface ThemeLike {
 	fg(token: string, text: string): string;

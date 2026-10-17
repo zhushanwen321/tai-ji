@@ -2,7 +2,7 @@
  * Extension 域 —— 订阅（onExtensions）+ 动作（toggle）+ 安装多步流 + UI 交互。
  *
  * widget/status 订阅不在本域——SideDrawer 直接经 useSessionEvents.onMessage 消费
- * extension:widget / extension:widgetGui / extension:status（features 层 session 通道）。
+ * extension:widget / extension:widgetGui（features 层 session 通道）。
  *
  * 安装多步流（D-4 内联候选选择）：
  * - npm：install(source) → runtime 直接装，config.extensions 推回 → onExtensions 刷新（单步）

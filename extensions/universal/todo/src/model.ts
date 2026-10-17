@@ -24,6 +24,9 @@ export interface TodoDetails {
 	action: "list" | "add" | "update" | "delete";
 	todos: Todo[];
 	nextId: number;
+	/** 收起态一行摘要（execute 恒写入，约定见 docs/extensions/extension-conventions.md
+	 *  「Tool result details.summary 约定」）；历史 session 的旧 details 缺失，读侧需 typeof 守卫 */
+	summary?: string;
 }
 
 export const VALID_STATUSES = ["pending", "in_progress", "completed"] as const;
@@ -338,4 +341,94 @@ export function formatTodoLine(t: Todo): string {
 /** 把整张列表格式化为多行文本，每行复用 formatTodoLine（T3）。 */
 export function formatTodoList(todos: Todo[]): string {
 	return todos.map((t) => formatTodoLine(t)).join("\n");
+}
+
+// ── 收起态一行摘要（details.summary，TUI 折叠渲染与 taiji GUI ToolRow 读链共用同源文本）──
+
+/**
+ * summary 计算的 params 子集（结构化声明，避免 model → tool 的 schema 类型依赖成环；
+ * TodoParamsT 结构兼容可直接传入）。
+ */
+export interface TodoSummaryParams {
+	action: string;
+	texts?: string[];
+	id?: number;
+	ids?: number[];
+	status?: string;
+	text?: string;
+	updates?: Array<{ id: number; status?: string; text?: string }>;
+}
+
+/** update text 进摘要的保留长度（码点安全截断 + 省略号） */
+const SUMMARY_TEXT_MAX_CHARS = 40;
+
+/** 逐 status 计数（list 摘要行用；completed 口径与 todoProgress 同源） */
+function countByStatus(todos: readonly Todo[]): Record<Todo["status"], number> {
+	const counts: Record<Todo["status"], number> = { pending: 0, in_progress: 0, completed: 0 };
+	for (const t of todos) counts[t.status]++;
+	return counts;
+}
+
+/** 单条 update 的摘要片段：status 优先（`#1 → completed`）；纯 text 更新显示截断后的新文本 */
+function todoUpdatePart(u: { id: number; status?: string; text?: string }): string {
+	if (u.status !== undefined) return `#${u.id} → ${u.status}`;
+	const chars = Array.from((u.text ?? "").trim());
+	const shown = chars.length > SUMMARY_TEXT_MAX_CHARS
+		? chars.slice(0, SUMMARY_TEXT_MAX_CHARS).join("") + "…"
+		: chars.join("");
+	return `#${u.id} → "${shown}"`;
+}
+
+/**
+ * 收起态一行摘要（纯函数，英文一行、描述动作 + 数量/目标；与各 handler 的 resultText
+ * 风格同源）。todos 传突变后的最终列表；拿不到的数据省略后缀（如 add 起止 id 相同只显单 id）。
+ * 各 action 独立小函数（圈复杂度门禁：单函数 ≤15；曾全内联 4-action 分支 + 分支内判断达 18）。
+ */
+export function buildTodoSummary(params: TodoSummaryParams, todos: readonly Todo[]): string {
+	switch (params.action) {
+		case "list":
+			return todoListSummary(todos);
+		case "add":
+			return todoAddSummary(params, todos);
+		case "update":
+			return todoUpdateSummary(params);
+		case "delete":
+			return todoDeleteSummary(params);
+		default:
+			return "";
+	}
+}
+
+/** list 摘要：逐 status 计数（completed 口径与 todoProgress 同源） */
+function todoListSummary(todos: readonly Todo[]): string {
+	if (todos.length === 0) return "No todos";
+	const c = countByStatus(todos);
+	return `${todos.length} todos: ${c.completed} completed, ${c.in_progress} in_progress, ${c.pending} pending`;
+}
+
+/** add 摘要：新增项 = 突变后列表末尾 n 条（addTodos 尾插；auto-GC 清理后同样尾插） */
+function todoAddSummary(params: TodoSummaryParams, todos: readonly Todo[]): string {
+	const n = params.texts?.length ?? 0;
+	if (n <= 0) return "";
+	const added = todos.slice(-n);
+	const first = added[0]?.id;
+	const last = added[added.length - 1]?.id;
+	return n === 1 ? `Added 1 todo (#${first})` : `Added ${n} todos (#${first}-#${last})`;
+}
+
+/** update 摘要：批量 updates 优先，回退单条 id/status/text */
+function todoUpdateSummary(params: TodoSummaryParams): string {
+	if (params.updates && params.updates.length > 0) {
+		return `Updated ${params.updates.map(todoUpdatePart).join("; ")}`;
+	}
+	return `Updated ${todoUpdatePart({ id: params.id ?? 0, status: params.status, text: params.text })}`;
+}
+
+/** delete 摘要：单 id 与多 id 两种形态 */
+function todoDeleteSummary(params: TodoSummaryParams): string {
+	const ids = params.ids ?? [];
+	if (ids.length === 0) return "";
+	return ids.length === 1
+		? `Deleted #${ids[0]}`
+		: `Deleted ${ids.map((id) => `#${id}`).join(", ")}`;
 }

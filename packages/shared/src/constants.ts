@@ -233,38 +233,25 @@ export const DEFAULT_DISCOVERY_CONFIG = {
 } as const
 
 /**
- * 插件通知/状态栏防毒化限流参数（D7「限流与防毒化」，plugin-trust-hardening S3-W4）。
+ * 插件通知防毒化限流参数（D7「限流与防毒化」，plugin-trust-hardening S3-W4）。
  *
- * 全部为可调常量：runtime 侧 NotifyRateLimiter / StatusBarRegistry 构造时接受覆盖
+ * 全部为可调常量：runtime 侧 NotifyRateLimiter 构造时接受覆盖
  * （默认取此处 SSOT 值），不写死在逻辑里。
  *
  * 默认值校准依据（实施期门实测，2026-08-17）：
- * - 唯一 builtin 插件 statusline（resources/plugins/statusline/index.ts）代码路径
- *   **零 notify 调用**——它只被动响应 plugin:statusSetUpdate hook 转发 updateStatusBarItem，
+ * - 唯一 builtin 插件 scheduler-manager 代码路径**零 notify 调用**，
  *   因此 notify 通道的参照实测值 = 0 条/s。
- * - statusbar 更新上游（pi extension setStatus → status-set → statusline 转发）实测：
- *   a) 真实会话日志（~/.taiji/logs/pi-*.jsonl，2026-08-17 最繁忙 session）：
- *      4.6h 内 74 条 setStatus（goal 57 / todo 17），均值 ≈ 0.005 条/s；
- *   b) 活动探针（pi --mode rpc + pi-statusline + goal/todo extensions，真实 LLM turn
- *      含 todo 工具写）：完整 turn 13.1s 内 4 条，1s 窗口最大突发 = 2 条
- *      （session 初始化时 todo+plan-mode 两条相邻 2ms）。
  * - 结论：正常插件通知是用户动作/turn 边界触发型，实测突发峰值 2 条/s；
  *   20 条/s 是失控水平（连续打满令牌桶）的 ~10 倍量级，作为默认值留足余量
  *   且不会误伤任何合法 builtin 行为。
  */
 export const PLUGIN_NOTIFY_LIMITS = {
   /** notify 令牌桶速率（条/秒/插件，容量 = 速率，即可瞬时突发该数） */
-   
+
   NOTIFY_RATE_PER_SEC: 20,
   /** 单条 notify message 上限（UTF-8 字节）。超出拒绝（INVALID_MESSAGE） */
   // eslint-disable-next-line no-magic-numbers
   NOTIFY_MESSAGE_MAX_BYTES: 8 * 1024,
-  /** statusbar 单条 text 上限（UTF-8 字节）。D3 验收「1MB text 被拒」依此规则 */
-  // eslint-disable-next-line no-magic-numbers
-  STATUSBAR_TEXT_MAX_BYTES: 4 * 1024,
-  /** statusbar 更新广播合并窗口（ms）：窗口内多次更新合并为一次广播 */
-   
-  STATUSBAR_COALESCE_MS: 100,
 } as const
 
 /**

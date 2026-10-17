@@ -74,7 +74,7 @@ export type { IPiEngine, IProcessManager } from './services/ports/pi-engine.js'
  * the Service layer to the `ws` module.
  *
  * wave:perf-w09（02 文档 D1-2 / ADR-0055 7d）：`broadcast` 退化为**纯全局通道**——
- * 只服务 payload 无 sessionId 的全局消息（config.*、app.info、plugin:statusBar*、
+ * 只服务 payload 无 sessionId 的全局消息（config.*、app.info、plugin:crashed、
  * session.forkNotice、session.handoffComplete/handoffAborted 等，见 02 文档 D5-1 排除清单）。
  * session 级 push 型消息（payload 带 sessionId）一律走 `IMessageBus.publish`
  * （services/message-bus，seq/ring/snapshot + 只推订阅该 sid 的连接），双写已收口。
@@ -821,7 +821,7 @@ export interface IPluginService {
   getToolSchemas?(): import('./services/plugin-service/plugin-types.js').ToolRegistration[]
   /**
    * pi 侧事件向插件钩子的投递（pi1-disposition-chat-flow D7②）：泛型 'onPiEvent' 键派发，
-   * 载荷平铺形状（{ event, ...payload }）。statusSetUpdate 挂点迁移后的唯一投递入口。
+   * 载荷平铺形状（{ event, ...payload }）。
    */
   notifyPiEvent?(eventName: string, payload: Record<string, unknown>, sessionId: string): void
 }

@@ -786,7 +786,10 @@ interface RegisteredRenameTool {
 		signal: undefined,
 		onUpdate: undefined,
 		ctx: ExtensionContext,
-	) => Promise<unknown>;
+	) => Promise<{
+		content: Array<{ type: string; text: string }>;
+		details: { summary: string };
+	}>;
 }
 
 describe("rename_session 工具注册与 execute 守卫（D3）", () => {
@@ -846,9 +849,19 @@ describe("rename_session 工具注册与 execute 守卫（D3）", () => {
 		setupWithMode(AGENT_TOOL_CONFIG);
 		const tool = setup.registeredTool as RegisteredRenameTool;
 
-		await tool.execute("call-1", { title: "  **重构配置加载**  " }, undefined, undefined, createMockCtx());
+		const result = await tool.execute(
+			"call-1",
+			{ title: "  **重构配置加载**  " },
+			undefined,
+			undefined,
+			createMockCtx(),
+		);
 
 		expect(setup.setSessionNameMock).toHaveBeenCalledWith("重构配置加载");
+		// execute 组装线：details.summary 恒写入（index.ts:123 buildRenameSessionSummary；
+		// title 用清洗后落库值，与 content 文案同源——组装行丢失时此处红）
+		expect(result.details.summary).toBe('Renamed session to "重构配置加载"');
+		expect(result.content[0].text).toBe("已命名：重构配置加载");
 	});
 
 	it("TC-T6: execute 时 title 清洗后为空（纯标点）→ isError（throw），不落库", async () => {

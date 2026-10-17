@@ -22,7 +22,12 @@
  */
 
 import { StringEnum } from "@earendil-works/pi-ai";
-import type { ExtensionAPI, ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
+import type {
+  ExtensionAPI,
+  ExtensionContext,
+  Theme,
+  ToolRenderResultOptions,
+} from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { type Static, Type } from "typebox";
 
@@ -74,13 +79,20 @@ export type ScriptParams = Static<typeof WorkflowScriptParams>;
  * Discriminant: `action`. `save`/`delete` may surface structured `ok:false`
  * details on failure (instead of bare `undefined`) so programmatic consumers
  * can distinguish error shape from success.
+ *
+ * 收起态一行摘要 `summary`（约定见 docs/extensions/extension-conventions.md
+ * 「Tool result details.summary 约定」）：5 个 action variant 由 buildScriptSummary
+ * 统一推导（withScriptSummary 构造单点）；无 action 的 variant 承载原
+ * `details: undefined` 的纯文本结果（lint 0 findings / list 空清单）——只带
+ * 显式传入的 summary，历史 entry 的 details 缺 summary 字段由读侧兜底。
  */
 export type WorkflowScriptToolDetails =
-  | { action: "generate"; path: string; name: string; status: "ready"; __gui__?: GuiRenderResult }
-  | { action: "lint"; name: string; valid: boolean; findingCount: number; __gui__?: GuiRenderResult }
-  | { action: "list"; count: number; __gui__?: GuiRenderResult }
-  | { action: "save"; name: string; ok: boolean; __gui__?: GuiRenderResult }
-  | { action: "delete"; name: string; ok: boolean; __gui__?: GuiRenderResult };
+  | { action: "generate"; path: string; name: string; status: "ready"; summary: string; __gui__?: GuiRenderResult }
+  | { action: "lint"; name: string; valid: boolean; findingCount: number; summary: string; __gui__?: GuiRenderResult }
+  | { action: "list"; count: number; summary: string; __gui__?: GuiRenderResult }
+  | { action: "save"; name: string; ok: boolean; summary: string; __gui__?: GuiRenderResult }
+  | { action: "delete"; name: string; ok: boolean; summary: string; __gui__?: GuiRenderResult }
+  | { summary: string; __gui__?: GuiRenderResult };
 
 /** Result returned by the `workflow-script` tool's execute（公共骨架见 tool-result.ts）。 */
 export type WorkflowScriptExecuteResult = WorkflowToolResult<WorkflowScriptToolDetails | undefined>;
@@ -97,6 +109,13 @@ export type WorkflowScriptExecuteResult = WorkflowToolResult<WorkflowScriptToolD
  *   - save/delete: ok/warn
  */
 export function buildScriptGui(details: WorkflowScriptToolDetails) {
+  // summary-only details（原 details:undefined 的纯文本结果）：无结构化 stats 可提取，
+  // 用摘要文本构造中性 stats-line，避免落进下方 switch 的 action 未知的防御兜底
+  if (!("action" in details)) {
+    return guiComponent("stats-line", {
+      items: [{ label: "done", value: details.summary, severity: "ok" }],
+    });
+  }
   switch (details.action) {
     case "generate":
       return guiComponent("stats-line", {
@@ -134,6 +153,47 @@ export function buildScriptGui(details: WorkflowScriptToolDetails) {
         items: [{ label: "action", value: String((details as { action: string }).action), severity: "warn" }],
       });
   }
+}
+
+// ── 收起态一行摘要（details.summary，TUI 折叠渲染与 taiji GUI ToolRow 读链共用同源文本）──
+
+/** 分布式 Omit（union 逐成员去 key——普通 Omit 不分发，会坍缩成单成员） */
+type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
+
+/** details 构造点传入的形态（summary 写入前 = WorkflowScriptToolDetails 去 summary） */
+type WorkflowScriptDetailsInput = DistributiveOmit<WorkflowScriptToolDetails, "summary">;
+
+/**
+ * 按 action 从 details 推导收起态一行摘要（纯函数，英文一行、描述动作 + 目标；
+ * 拿不到的数据省略后缀）。措辞与 buildScriptGui 的 stats-line 值域对齐
+ * （lint：valid → "passed"，否则 "N findings"）。
+ */
+export function buildScriptSummary(_params: ScriptParams, details: WorkflowScriptDetailsInput): string {
+  if (!("action" in details)) return "";
+  switch (details.action) {
+    case "generate":
+      return `Script ${details.name} generated`;
+    case "lint":
+      return details.valid
+        ? `Script ${details.name} linted: passed`
+        : `Script ${details.name} linted: ${details.findingCount} findings`;
+    case "list":
+      return details.count === 1 ? "Listed 1 workflow script" : `Listed ${details.count} workflow scripts`;
+    case "save":
+      return `Script ${details.name} saved`;
+    case "delete":
+      return `Script ${details.name} deleted`;
+    default:
+      return "";
+  }
+}
+
+/** details 构造单点包装：附加 buildScriptSummary 推导的 summary（各 action 出口统一走此） */
+function withScriptSummary(
+  params: ScriptParams,
+  details: WorkflowScriptDetailsInput,
+): WorkflowScriptToolDetails {
+  return { ...details, summary: buildScriptSummary(params, details) };
 }
 
 // ── Tool registration ────────────────────────────────────────
@@ -204,7 +264,7 @@ export function registerWorkflowScriptTool(
           result = actionDelete(params, registry, isRunning);
           break;
         case "list":
-          result = await actionList(registry);
+          result = await actionList(params, registry);
           break;
         default:
           // 防御性（schema StringEnum 先拦）：throw（W4b）——错误路径统一 throw
@@ -227,7 +287,24 @@ export function registerWorkflowScriptTool(
       return new Text(text, 0, 0);
     },
 
-    renderResult: renderTextResult,
+    renderResult(
+      // 宽入参（SDK AgentToolResult 的 content 可含 image 块，窄 view 会逆变失配）：
+      // 本 handler 只消费 details.summary 与 content 文本兜底
+      result: {
+        content?: Array<{ type: string; text?: string }>;
+        details?: WorkflowScriptToolDetails | undefined;
+      },
+      options: ToolRenderResultOptions,
+      theme: Theme,
+    ) {
+      // 折叠态 + 有 summary → 一行摘要（details.summary 约定，见 extension-conventions.md）；
+      // details 为 undefined / 历史 entry 无 summary → 落回 renderTextResult 全文渲染（向后兼容）
+      const summary = result.details?.summary;
+      if (!options.expanded && summary) {
+        return new Text(theme.fg("dim", summary), 0, 0);
+      }
+      return renderTextResult(result);
+    },
   });
 }
 
@@ -259,7 +336,7 @@ export function actionGenerate(params: ScriptParams): WorkflowScriptExecuteResul
         text: `Generated workflow script: ${filePath}\nName: ${name}\nReady to run via the \`workflow_run\` tool.`,
       },
     ],
-    details: { action: "generate", path: filePath, name, status: "ready" },
+    details: withScriptSummary(params, { action: "generate", path: filePath, name, status: "ready" }),
   };
 }
 
@@ -289,7 +366,7 @@ async function actionLint(
 
   const result = lintScript(source);
   if (result.findings.length === 0) {
-    return textResult(`✅ No issues found in '${name}'.`);
+    return textResult(`✅ No issues found in '${name}'.`, `Script ${name} linted: 0 issues`);
   }
 
   const lines = result.findings.map((f) => {
@@ -303,7 +380,12 @@ async function actionLint(
         text: `${result.valid ? "Warnings" : "Errors"} found in '${name}':\n\n${lines.join("\n\n")}`,
       },
     ],
-    details: { action: "lint", name, valid: result.valid, findingCount: result.findings.length },
+    details: withScriptSummary(params, {
+      action: "lint",
+      name,
+      valid: result.valid,
+      findingCount: result.findings.length,
+    }),
     isError: !result.valid,
   };
 }
@@ -334,7 +416,7 @@ async function actionSave(params: ScriptParams): Promise<WorkflowScriptExecuteRe
     const result = await saveWorkflow(name, params.newName);
     return {
       content: [{ type: "text", text: result }],
-      details: { action: "save", name, ok: true },
+      details: withScriptSummary(params, { action: "save", name, ok: true }),
     };
   } catch (err: unknown) {
     throwPrefixed("Save failed", err);
@@ -361,7 +443,7 @@ function actionDelete(
     registry.invalidate();
     return {
       content: [{ type: "text", text: result }],
-      details: { action: "delete", name, ok: true },
+      details: withScriptSummary(params, { action: "delete", name, ok: true }),
     };
   } catch (err: unknown) {
     throwPrefixed("Delete failed", err);
@@ -370,7 +452,10 @@ function actionDelete(
 
 // ── list action ──────────────────────────────────────────────
 
-async function actionList(registry: WorkflowScriptRegistry): Promise<WorkflowScriptExecuteResult> {
+async function actionList(
+  params: ScriptParams,
+  registry: WorkflowScriptRegistry,
+): Promise<WorkflowScriptExecuteResult> {
   try {
     const all = await registry.loadAll();
     // item 行走 core formatAvailableWorkflowRefs（includeSource 保留 [saved]/[tmp]
@@ -378,11 +463,14 @@ async function actionList(registry: WorkflowScriptRegistry): Promise<WorkflowScr
     // 是本调用点的语境文案。
     const lines = formatAvailableWorkflowRefs(all, { includeSource: true, includeLocation: false });
     if (lines === "") {
-      return textResult("No workflow scripts available.");
+      return textResult("No workflow scripts available.", "Listed 0 workflow scripts");
     }
     return {
       content: [{ type: "text", text: `Available workflows:\n${lines}` }],
-      details: { action: "list", count: all.filter((wf) => wf.available).length },
+      details: withScriptSummary(params, {
+        action: "list",
+        count: all.filter((wf) => wf.available).length,
+      }),
     };
   } catch (err: unknown) {
     throwPrefixed("List failed", err);
@@ -394,11 +482,12 @@ async function actionList(registry: WorkflowScriptRegistry): Promise<WorkflowScr
 /**
  * 构造纯文本非错误结果（W4b：isError 参数已删除——异常错误路径一律 throw（单一
  * 错误路径纪律；pi 1.0.0 pi-agent-core agent-loop.js :579-588 对抛出统一转
- * isError:true error result），编译器兜底防回潮）。
+ * isError:true error result），编译器兜底防回潮）。details 原为 undefined，改带
+ * summary-only details（收起态一行摘要；summary 由调用方按 action 显式给出）。
  */
-function textResult(text: string): WorkflowScriptExecuteResult {
+function textResult(text: string, summary: string): WorkflowScriptExecuteResult {
   return {
     content: [{ type: "text", text }],
-    details: undefined,
+    details: { summary },
   };
 }

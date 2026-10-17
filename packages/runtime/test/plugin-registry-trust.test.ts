@@ -19,7 +19,7 @@ import { PluginRegistry } from '../src/services/plugin-service/plugin-registry.j
  */
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
-/** worktree 根（test/ → packages/runtime → packages → root），statusline 真实 built-in 目录在 <root>/resources/plugins */
+/** worktree 根（test/ → packages/runtime → packages → root），scheduler-manager 真实 built-in 目录在 <root>/resources/plugins */
 const REPO_ROOT = resolve(__dirname, '..', '..', '..')
 /** electron 主进程 spawn 源文件（代码审查级断言用） */
 const PROCESS_CONTROL_SRC = resolve(REPO_ROOT, 'apps', 'electron', 'main', 'supervisor', 'process-control.ts')
@@ -157,20 +157,20 @@ describe('PluginRegistry trust boundary (S1-W4 / D3)', () => {
     expectWarnedContaining('--builtin-plugins-dir', 'falling back')
   })
 
-  it('SEC-U1 statusline regression: the only built-in plugin stays trusted and discoverable under new rules', async () => {
-    // 用真实 worktree 的 resources/plugins（statusline 所在）+ 显式注入目录形态验证：
-    // 主进程总是显式传参的生产路径下，statusline source=built-in、trustLevel=trusted、入口可解析
+  it('SEC-U1 builtin regression: the built-in plugin stays trusted and discoverable under new rules', async () => {
+    // 用真实 worktree 的 resources/plugins（scheduler-manager 所在）+ 显式注入目录形态验证：
+    // 主进程总是显式传参的生产路径下，scheduler-manager source=built-in、trustLevel=trusted、入口可解析
     const builtinDir = join(REPO_ROOT, 'resources', 'plugins')
-    expect(existsSync(join(builtinDir, 'statusline'))).toBe(true)
+    expect(existsSync(join(builtinDir, 'scheduler-manager'))).toBe(true)
 
     const registry = new PluginRegistry(tmpDir, tmpDir, builtinDir)
     const descriptors = await registry.scan()
 
-    const desc = descriptors.find(d => d.pluginId === 'statusline')
+    const desc = descriptors.find(d => d.pluginId === 'scheduler-manager')
     expect(desc).toBeTruthy()
     expect(desc!.source).toBe('built-in')
     expect(desc!.trustLevel).toBe('trusted')
-    expect(desc!.pluginPath).toBe(join(builtinDir, 'statusline', 'index.js'))
+    expect(desc!.pluginPath).toBe(join(builtinDir, 'scheduler-manager', 'index.js'))
   })
 
   it('SEC-U1 electron: process-control.ts injects --builtin-plugins-dir in both packaged and dev spawn forms', async () => {

@@ -65,6 +65,11 @@
           "package": "@zhushanwen/pi-ext-guards",
           "type": "package",
           "reason": "代码层静态 import guardStaleCtx/isRecord/toErrorMessage（src/loop-gate.ts、tool-definition.ts、execute.ts、workflow-hook.ts、schema-guards.ts top-level import——末者另 re-export isPlainObject 兼容别名，ext-simplify-18 D2），缺失时模块加载即抛 Cannot find module，是强依赖"
+        },
+        {
+          "package": "@zhushanwen/extension-protocol",
+          "type": "package",
+          "reason": "代码层静态 import firstContentText（renderResult 展开态 content 文本提取，details.summary 收起态摘要契约的 TUI 侧消费），缺失时模块加载即抛 Cannot find module，是强依赖"
         }
       ]
     },
@@ -273,6 +278,11 @@
           "package": "@zhushanwen/pi-extension-logger",
           "type": "package",
           "reason": "代码层静态 import getLogger/setPiHandle（src/index.ts、src/llm.ts、src/landing.ts top-level import），缺失时模块加载即抛 Cannot find module，是强依赖"
+        },
+        {
+          "package": "@zhushanwen/extension-protocol",
+          "type": "package",
+          "reason": "代码层静态 import firstContentText（renderResult 展开态 content 文本提取，details.summary 收起态摘要契约的 TUI 侧消费），缺失时模块加载即抛 Cannot find module，是强依赖"
         }
       ]
     },
@@ -299,6 +309,11 @@
           "package": "@zhushanwen/pi-extension-logger",
           "type": "package",
           "reason": "代码层静态 import getLogger（src/tool-handler.ts top-level import——zcode 读链的 degradations 留痕与 L2/L3 恢复成功结构化日志走「事后排查」通道，不进 LLM 可见面），缺失时模块加载即抛 Cannot find module，是强依赖"
+        },
+        {
+          "package": "@zhushanwen/extension-protocol",
+          "type": "package",
+          "reason": "代码层静态 import firstContentText（renderResult 展开态 content 文本提取，details.summary 收起态摘要契约的 TUI 侧消费），缺失时模块加载即抛 Cannot find module，是强依赖"
         }
       ]
     },
@@ -379,6 +394,11 @@
           "package": "@zhushanwen/pi-ext-guards",
           "type": "package",
           "reason": "代码层静态 import guardStaleCtx/isSubagentProcess/isRecord/toErrorMessage（src/index.ts、tool.ts、pure.ts、llm.ts、compact-handler.ts top-level import），缺失时模块加载即抛 Cannot find module，是强依赖"
+        },
+        {
+          "package": "@zhushanwen/extension-protocol",
+          "type": "package",
+          "reason": "代码层静态 import firstContentText（renderResult 展开态 content 文本提取，details.summary 收起态摘要契约的 TUI 侧消费），缺失时模块加载即抛 Cannot find module，是强依赖"
         }
       ]
     },

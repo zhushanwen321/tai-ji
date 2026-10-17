@@ -252,14 +252,16 @@ describe('Turn.vue 接线 useTurnExpansion（w1）', () => {
     // 末位 text 在 trace 内（不被分组吞掉）
     expect(topBlocks[1].findComponent({ name: 'MarkdownRenderer' }).exists()).toBe(true)
     // 组默认收起（全已完成无 running 成员）；点组头展开 → 3 个成员行各自独立渲染
+    // [trace W3 去壳] 成员行直递 ToolRow（根 .trace-tool，无 .trace-blk 壳层），
+    // block-tool-<id> testid 经 attribute fallthrough 落 ToolRow 根
     const group = topBlocks[0].find('[data-testid="run-group"]')
     expect(group.find('[data-testid="run-group-header"]').attributes('aria-expanded')).toBe('false')
     await group.find('[data-testid="run-group-header"]').trigger('click')
-    const members = group.findAll('.trace-blk')
+    const members = group.findAll('.trace-tool')
     expect(members).toHaveLength(3)
-    expect(members[0].find('.trace-tool').exists()).toBe(true)
-    expect(members[1].find('.trace-tool').exists()).toBe(true)
-    expect(members[2].find('.trace-tool').exists()).toBe(true)
+    expect(members[0].attributes('data-testid')).toBe('block-tool-tc1')
+    expect(members[1].attributes('data-testid')).toBe('block-tool-tc2')
+    expect(members[2].attributes('data-testid')).toBe('block-tool-tc3')
   })
 })
 

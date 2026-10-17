@@ -6,7 +6,7 @@
  * - D1 中央分发表：handler 的 handles 清单 + Map spread → O(N→M) 路由映射（亮点，勿动）。
  * - setServices：四阶段编排（assignServices → createBroker → assembleHandlers → buildRoutes），
  *   装配全部 message handler 并注入各 handler 的 context（messaging + 领域依赖）。
- * - extension timeout / statusSetUpdate 投递的对外委托入口（event-adapter 经 index.ts 调用）。
+ * - extension timeout 的对外委托入口（event-adapter 经 index.ts 调用）。
  *
  * 业务逻辑在 services，经 handler 调用；本类不含领域计算，只做路由与编排。
  */
@@ -790,18 +790,6 @@ export class RuntimeServer implements IMessageBroker {
    */
   getPendingUiRequests(sessionId: string): PendingUIRequest[] {
     return this.extensionTimeoutMgr.getPendingRequests(sessionId)
-  }
-
-  /**
-   * statusSetUpdate 投递挂点（pi1-disposition-chat-flow D7② 挂点迁移 + 断链修复）：
-   * pi setStatus stdout 事件（event-adapter status-set → interpreter 路由）直达 pluginService
-   * 的插件事件投递方法——原 BridgeHandler.handleStatusSetUpdate 中转随 bridge 退役删除。
-   * 断链修复落点 = 分发侧：新投递点按泛型 'onPiEvent' 键派发（与 hook-api 注册面泛型键
-   * 形状对齐，事件名在载荷 event 字段），修复「注册键 'onPiEvent' vs 分发键原始事件名」
-   * 的既有错位（audit §4.2）。
-   */
-  handleStatusSetUpdate(payload: { sessionId: string; key: string; text: string; textRaw?: string }): void {
-    this.pluginService?.notifyPiEvent?.('plugin:statusSetUpdate', payload, payload.sessionId)
   }
 
   /**

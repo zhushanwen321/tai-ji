@@ -414,10 +414,6 @@ export type PiTranslatedEvent =
    * 信号先于锚点到达（不可能序，防御）无锚直接 return 不产值。
    */
   | { kind: 'llm-first-output'; sessionId: string }
-  /** extension setStatus —— interpreter 路由到 server.handleStatusSetUpdate + 转发 WS。 */
-  | { kind: 'status-set'; sessionId: string; key: string; text: string; textRaw?: string }
-  /** extension setStatus 对应的 WS 帧（interpreter 转发）。 */
-  | { kind: 'status-broadcast'; message: ServerMessage }
   /** 交互式 extension_ui_request（confirm/select/input/notify/editor）—— interpreter 注册超时。 */
   | { kind: 'extension-ui'; requestId: string; sessionId: string; method: string; payload: Record<string, unknown> }
   /** session-manager 请求（select + SESSION_MANAGER_MARKER）—— interpreter fire-and-forget 路由到 SessionManagerHandler。 */

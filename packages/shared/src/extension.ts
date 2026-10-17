@@ -3,7 +3,7 @@ import mandatoryExtensions from './mandatory-extensions.json'
 // ── Extension 领域 DTO（runtime ↔ renderer 之间流转的扩展相关 payload）──
 // 迁移自 protocol.ts 第 3 块：ExtensionInfo / UI 交互 / 安装流 / 状态推送。
 // protocol.ts 仅保留 type→payload 映射（SSOT），领域形状归此处便于读者一查到底。
-// 注：widget/status/notify 的 payload 形状定义在 protocol.ts 的 ServerMessageMapBase（SSOT），
+// 注：widget/notify 的 payload 形状定义在 protocol.ts 的 ServerMessageMapBase（SSOT），
 // 此处不再重复定义（此前有三个死 Payload interface 零消费，已删除）。
 
 export const EXTENSION_EVENTS = {
@@ -11,7 +11,6 @@ export const EXTENSION_EVENTS = {
   DIALOG: 'extension.dialog',
   WIDGET: 'extension:widget',
   WIDGET_GUI: 'extension:widgetGui',
-  STATUS: 'extension:status',
   NOTIFY: 'extension:notify',
   /** 挂起 UI 请求失效广播（abort/退出/回收等非 respond 路径清理时推给 renderer 对账） */
   REQUESTS_INVALIDATED: 'extension:requestsInvalidated',

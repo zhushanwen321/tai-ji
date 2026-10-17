@@ -2,6 +2,7 @@ import type {
 	AgentToolResult,
 	ExtensionAPI,
 	ExtensionContext,
+	Theme,
 } from "@earendil-works/pi-coding-agent";
 import { getLogger, setPiHandle } from "@zhushanwen/pi-extension-logger";
 import { Type } from "typebox";
@@ -9,6 +10,11 @@ import { Type } from "typebox";
 import { registerAutoRenameCommand } from "./commands.js";
 import { landTitle } from "./landing.js";
 import { debugLog as llmDebugLog, extractMessageText, isSubagentSession } from "./llm.js";
+import {
+	buildRenameSessionSummary,
+	renderRenameSessionResult,
+	type RenameSessionDetails,
+} from "./render.js";
 import {
 	cleanTitle,
 	countSuccessfulAssistantReplies,
@@ -94,7 +100,7 @@ function registerRenameSessionTool(pi: ExtensionAPI): void {
 			_signal: AbortSignal | undefined,
 			_onUpdate: undefined,
 			ctx: ExtensionContext,
-		): Promise<AgentToolResult<Record<string, never>>> {
+		): Promise<AgentToolResult<RenameSessionDetails>> {
 			// subagent session 守卫先于 mode 守卫：subagent 拒绝与 mode 无关（即便 mode 仍为
 			// agent-tool 也不该命名临时子会话），且文案归因到 subagent 而非误导性的「模式已切换」
 			if (isSubagentSession(ctx.sessionManager.getSessionDir())) {
@@ -112,7 +118,14 @@ function registerRenameSessionTool(pi: ExtensionAPI): void {
 			}
 			pi.setSessionName(title);
 			llmDebugLog(`tool renamed to "${title}"`);
-			return { content: [{ type: "text", text: `已命名：${title}` }], details: {} };
+			return {
+				content: [{ type: "text", text: `已命名：${title}` }],
+				details: { summary: buildRenameSessionSummary({ title }) },
+			};
+		},
+
+		renderResult(result: unknown, options: { expanded: boolean }, theme: Theme) {
+			return renderRenameSessionResult(result, options, theme);
 		},
 	});
 }

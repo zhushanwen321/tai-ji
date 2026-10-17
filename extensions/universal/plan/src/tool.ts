@@ -72,18 +72,24 @@ export function validateAction(action: string): action is PlanAction {
 interface SelectTemplateDetails {
   action: "select-template";
   templateName: string;
+  /** 收起态一行摘要（六个主路径 action 携带，约定见 extension-conventions.md「details.summary 约定」） */
+  summary?: string;
 }
 
 interface EnterDetails {
   action: "enter";
   requirement: string;
   skills: string[];
+  /** 收起态一行摘要（同上） */
+  summary?: string;
 }
 
 interface CompleteDetails {
   action: "complete";
   planFilePath: string;
   execMode: string;
+  /** 收起态一行摘要（同上） */
+  summary?: string;
   /**
    * 执行方式的选定来源（D7②）：'headless' = 无 UI 默认 execute；'no-exec-skills' =
    * 无 plan-exec 技能直通（不挂执行方式表单）；'dialog' = 表单/选择器选定。
@@ -99,6 +105,8 @@ interface CompleteCancelledDetails {
   reason: string;
   /** 解散源（D-B1-3 via 侧迁移：与审批 select 的 dissolvedBy 统一为同一来源直传原语值域）——'self' = 入口解散（exitPlanMode 已介入，归口 no-op）；'external' = 外部解散（review_aborted 已落盘） */
   source: "self" | "external";
+  /** 联合读侧统一字段（见 PlanDetails 尾注） */
+  summary?: string;
 }
 
 /** later 档结果（D3 连带段）：dispatching --later--> approved 已落盘——用户显式「暂不执行」，不是解散 */
@@ -106,16 +114,22 @@ interface CompleteLaterDetails {
   action: "complete-later";
   /** 用户点选的 label（i18n 文案，诊断用） */
   choice: string;
+  /** 联合读侧统一字段（见 PlanDetails 尾注） */
+  summary?: string;
 }
 
 interface AbortDetails {
   action: "abort";
+  /** 收起态一行摘要（六个主路径 action 携带，约定见 extension-conventions.md「details.summary 约定」） */
+  summary?: string;
 }
 
 interface RegisterDocDetails {
   action: "register-doc";
   fileName: string;
   version: number;
+  /** 收起态一行摘要（同上） */
+  summary?: string;
 }
 
 interface SubmitReviewDetails {
@@ -123,11 +137,15 @@ interface SubmitReviewDetails {
   /** gui = taiji 形态挂 PLAN_REVIEW_MARKER select；text = 独立 pi 软门（E8） */
   channel: "gui" | "text";
   docsCount: number;
+  /** 收起态一行摘要（同上） */
+  summary?: string;
 }
 
 /** 审阅闭环的失败出口（E5/E6/取消/门拒收）——details 与 content 文本都带恢复动作 */
 interface ReviewErrorDetails {
   action: "review-error";
+  /** 联合读侧统一字段（见 PlanDetails 尾注） */
+  summary?: string;
   reason:
     | "no-docs"
     | "inactive"
@@ -149,8 +167,16 @@ interface ReviewErrorDetails {
 interface ReviewDismissedDetails {
   action: "review-dismissed";
   docsCount: number;
+  /** 联合读侧统一字段（见 PlanDetails 尾注） */
+  summary?: string;
 }
 
+/**
+ * summary 字段（收起态一行摘要，约定见 docs/extensions/extension-conventions.md）：
+ * 六个主路径 action 的成员由 withSummary 写入；complete-cancelled / complete-later /
+ * review-dismissed / review-error 四个边缘/失败成员**不携带**（声明仅为全联合读侧
+ * 统一类型，运行时恒缺省）。
+ */
 type PlanDetails =
   | EnterDetails
   | SelectTemplateDetails
@@ -198,16 +224,99 @@ function submitReviewDetails(channel: "gui" | "text", docsCount: number): Submit
   return { action: "submit-review", channel, docsCount };
 }
 
+// ── 收起态一行摘要（details.summary，TUI 折叠渲染与 taiji GUI ToolRow 读链共用同源文本）──
+
+/** 摘要里 requirement 的保留长度（首 N 字 + 截断省略号；换行/连续空白折成单空格） */
+const SUMMARY_REQUIREMENT_MAX_CHARS = 40;
+
+/** 多行文本 → 单行摘要文本（换行与连续空白折叠为单空格） */
+function toSingleLine(text: string): string {
+  return text.replace(/\s+/g, " ").trim();
+}
+
+/** 截断到上限（码点安全），截断时补省略号 */
+function elide(text: string, max: number): string {
+  const chars = Array.from(text);
+  return chars.length > max ? chars.slice(0, max).join("") + "…" : text;
+}
+
+/**
+ * 六个主路径 action 的收起态一行摘要推导（params + details 纯函数，英文一行、描述动作 + 目标；
+ * 拿不到的数据省略后缀）。其余 details（review-error / complete-cancelled / complete-later /
+ * review-dismissed 等边缘与失败出口）返回空串 = 不携带 summary（header 只显工具名，展开区看
+ * 恢复动作全文）。
+ */
+export function buildPlanSummary(params: Record<string, unknown>, details: PlanDetails): string {
+  switch (details.action) {
+    case "enter": {
+      // 幂等重入时 details.requirement 取 state 现值，缺失回落本次入参
+      const req = elide(
+        toSingleLine(details.requirement || String(params.requirement ?? "")),
+        SUMMARY_REQUIREMENT_MAX_CHARS,
+      );
+      return req ? `Plan entered: ${req}` : "Plan entered";
+    }
+    case "select-template":
+      return `Plan template selected: ${details.templateName}`;
+    case "register-doc":
+      return `Plan doc registered: ${details.fileName}`;
+    case "submit-review":
+      // gui 通道的 submit-review details 只在「用户要求修订」消费点产出（approve/dismiss 走
+      // 各自 action 的 details）——按通道分源措辞，不误导成「等待审阅」
+      return details.channel === "gui" ? "Plan review: user requested changes" : "Plan submitted for review";
+    case "complete":
+      return "Plan completed";
+    case "abort":
+      return "Plan aborted";
+    default:
+      return "";
+  }
+}
+
+/** buildPlanSummary 非空 → details 附加 summary（attach 单点；边缘/失败出口原样返回） */
+function attachPlanSummary(params: Record<string, unknown>, details: PlanDetails): PlanDetails {
+  const summary = buildPlanSummary(params, details);
+  switch (details.action) {
+    case "enter":
+    case "select-template":
+    case "register-doc":
+    case "submit-review":
+    case "complete":
+    case "abort":
+      return { ...details, summary: summary || undefined };
+    default:
+      return details;
+  }
+}
+
+/** execute 各 action 出口的 summary 附加单点（dispatcher 统一调用） */
+function withSummary(params: Record<string, unknown>, result: ActionResult): ActionResult {
+  return { ...result, details: attachPlanSummary(params, result.details) };
+}
+
 // ── renderResult ───────────────────────────────────────────────────
+
+/** options.expanded 读取（unknown 形态守卫；pi ToolRenderResultOptions 恒带 expanded，缺省按展开处理） */
+function renderOptionsCollapsed(options: unknown): boolean {
+  if (options === null || typeof options !== "object") return false;
+  return (options as Record<string, unknown>).expanded === false;
+}
 
 function renderPlanResult(
   result: { content: Array<{ type: string; text?: string }>; details?: PlanDetails },
-  _options: unknown,
+  options: unknown,
   theme: Theme,
 ): Text {
 	const details = result.details;
 	if (!details) {
 		return new Text(firstContentText(result), 0, 0);
+	}
+
+	// 折叠态 + 有 summary → 一行摘要（details.summary 约定，见 extension-conventions.md）；
+	// 旧 entry（历史 session）details 无 summary → 落回原全量渲染（读写向后兼容）
+	const summary = typeof details.summary === "string" ? details.summary : "";
+	if (summary && renderOptionsCollapsed(options)) {
+		return new Text(theme.fg("dim", summary), 0, 0);
 	}
 
   const fg = (token: ThemeColor, text: string) => theme.fg(token, text);
@@ -1345,22 +1454,22 @@ export function registerPlanTool(
 
       switch (action) {
         case "enter":
-          return executeEnter(pi, params, state, planCtx, sessionId, ctx);
+          return withSummary(params, executeEnter(pi, params, state, planCtx, sessionId, ctx));
 
         case "select-template":
-          return executeSelectTemplate(pi, params, state, projectDir);
+          return withSummary(params, executeSelectTemplate(pi, params, state, projectDir));
 
         case "register-doc":
-          return executeRegisterDoc(pi, params, state);
+          return withSummary(params, executeRegisterDoc(pi, params, state));
 
         case "submit-review":
-          return await executeSubmitReview(pi, ctx, state, planCtx, sessionId, projectDir, signal, params);
+          return withSummary(params, await executeSubmitReview(pi, ctx, state, planCtx, sessionId, projectDir, signal, params));
 
         case "complete":
-          return await executeComplete(pi, ctx, params, state, planCtx, sessionId, projectDir, signal);
+          return withSummary(params, await executeComplete(pi, ctx, params, state, planCtx, sessionId, projectDir, signal));
 
         case "abort":
-          return executeAbort(pi, planCtx, sessionId, ctx, state);
+          return withSummary(params, executeAbort(pi, planCtx, sessionId, ctx, state));
       }
     },
   });

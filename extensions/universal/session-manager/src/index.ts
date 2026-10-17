@@ -7,6 +7,7 @@ import type {
 	ExtensionToolContext,
 	SessionCompactEvent,
 	SessionStartEvent,
+	Theme,
 } from "@earendil-works/pi-coding-agent";
 import {
 	SESSION_MANAGER_MARKER,
@@ -19,6 +20,7 @@ import {
 import { getLogger, setPiHandle } from "@zhushanwen/pi-extension-logger";
 import { Type, type Static, type TObject } from "typebox";
 
+import { renderSessionManagerResult } from "./render.ts";
 import { ensureLedgerBound, runLedgerCompactionCheck } from "./notify-ledger.ts";
 import { createWatchCoordinator } from "./watch-coordinator.ts";
 
@@ -106,6 +108,18 @@ function asResultRecord(v: unknown): Record<string, unknown> | undefined {
 			: undefined;
 }
 
+/** toSummary 的字段守卫：非空 string 才采信（缺字段 = 摘要省略对应段，不抛错——
+ * 摘要只是展示辅助，不得反过来影响工具成功路径）。 */
+function stringField(rec: Record<string, unknown> | undefined, key: string): string | undefined {
+	const v = rec?.[key];
+	return typeof v === "string" && v !== "" ? v : undefined;
+}
+
+function arrayField(rec: Record<string, unknown> | undefined, key: string): unknown[] | undefined {
+	const v = rec?.[key];
+	return Array.isArray(v) ? v : undefined;
+}
+
 /**
  * 统一的 execute 包装：调用 select 通道并解析结果。
  * 返回标准 AgentToolResult 形状；select 取消/超时/异常/非 JSON 回包是错误路径，
@@ -122,7 +136,8 @@ async function executeTool(
 	action: SessionManagerAction,
 	params: Record<string, unknown>,
 	onResult?: (ctx: ExtensionContext, params: Record<string, unknown>, result: unknown) => void,
-): Promise<{ content: Array<{ type: "text"; text: string }>; details: undefined }> {
+	toSummary?: (params: Record<string, unknown>, result: unknown) => string,
+): Promise<{ content: Array<{ type: "text"; text: string }>; details: { summary: string } | undefined }> {
 	const result = await callSessionManager(ctx, action, params);
 	if (!result.ok) {
 		// 行为微变①（D8，有意）：非 JSON 回包从「catch 后
@@ -147,9 +162,11 @@ async function executeTool(
 	// 成功路径副作用编排（notify-once U4）：send/create 的 willNotify arm（register + 开表）、
 	// label 缓存回填（list）——错误路径已 throw，天然不触发。
 	onResult?.(ctx, params, parsed);
+	// details.summary 一行摘要（工具收起态展示）：六工具共用本骨架统一组装，
+	// 文案由各工具 cfg.toSummary 从协议 params + 回包产出（未配置 = details 缺省）。
 	return {
 		content: [{ type: "text" as const, text: raw }],
-		details: undefined,
+		details: toSummary ? { summary: toSummary(params, parsed) } : undefined,
 	};
 }
 
@@ -166,6 +183,13 @@ interface SessionToolConfig<S extends TObject> {
 	toParams: (params: Static<S>) => Record<string, unknown>
 	/** 成功结果钩子（仅非错误通道结果触发）——notify-once 的 arm/label 缓存编排 */
 	onResult?: (ctx: ExtensionContext, params: Record<string, unknown>, result: unknown) => void
+	/**
+	 * 一行收起态摘要（details.summary 的产出函数，六工具共用 executeTool 骨架统一
+	 * 组装）：输入 = 协议 params（toParams 产物）+ 成功回包；纯函数、缺数据省略
+	 * 对应段不抛错。消费方 = taiji GUI 对话流（details.summary）与本包 renderResult
+	 * 折叠态（pi TUI）。
+	 */
+	toSummary?: (params: Record<string, unknown>, result: unknown) => string
 }
 
 /**
@@ -182,6 +206,9 @@ function registerSessionTool<S extends TObject>(pi: ExtensionAPI, cfg: SessionTo
 		exposure: "deferred",
 		description: cfg.description,
 		parameters: cfg.parameters,
+		renderResult(result: unknown, options: { expanded: boolean }, theme: Theme) {
+			return renderSessionManagerResult(result, options, theme);
+		},
 		async execute(
 			_toolCallId: string,
 			params: Static<S>,
@@ -190,7 +217,7 @@ function registerSessionTool<S extends TObject>(pi: ExtensionAPI, cfg: SessionTo
 			// pi 1.0.0：ToolDefinition.execute 第 5 参 ctx 收窄为 ExtensionToolContext
 			ctx: ExtensionToolContext,
 		) {
-			return executeTool(ctx, cfg.action, cfg.toParams(params), cfg.onResult);
+			return executeTool(ctx, cfg.action, cfg.toParams(params), cfg.onResult, cfg.toSummary);
 		},
 	});
 }
@@ -250,6 +277,12 @@ export default function sessionManagerExtension(pi: ExtensionAPI): void {
 				coordinator.armSessionNotify(ctx, r.lifetimeNotifyId, name);
 			}
 		},
+		toSummary: (params, result) => {
+			const label = stringField(params, "label");
+			if (label) return `Created session "${label}"`;
+			const sessionId = stringField(asResultRecord(result), "sessionId");
+			return sessionId ? `Created session ${sessionId}` : "Created session";
+		},
 	});
 
 	registerSessionTool(pi, {
@@ -268,6 +301,10 @@ export default function sessionManagerExtension(pi: ExtensionAPI): void {
 			if (typeof notifyId !== "string" || typeof sessionId !== "string") return;
 			coordinator.armSessionNotify(ctx, notifyId, coordinator.labelFor(sessionId));
 		},
+		toSummary: (params) => {
+			const sessionId = stringField(params, "sessionId");
+			return sessionId ? `Sent message to ${sessionId}` : "Sent message";
+		},
 	});
 
 	registerSessionTool(pi, {
@@ -277,6 +314,13 @@ export default function sessionManagerExtension(pi: ExtensionAPI): void {
 		parameters: ReadSessionHistoryParams,
 		action: "history",
 		toParams: (p) => ({ sessionId: p.sessionId, tailTurns: p.tailTurns }),
+		toSummary: (params, result) => {
+			const sessionId = stringField(params, "sessionId");
+			const messages = arrayField(asResultRecord(result), "messages");
+			if (sessionId && messages) return `Read history of ${sessionId} · ${messages.length} entries`;
+			if (sessionId) return `Read history of ${sessionId}`;
+			return "Read history";
+		},
 	});
 
 	registerSessionTool(pi, {
@@ -300,6 +344,10 @@ export default function sessionManagerExtension(pi: ExtensionAPI): void {
 				);
 			}
 		},
+		toSummary: (_params, result) => {
+			const sessions = arrayField(asResultRecord(result), "sessions");
+			return sessions ? `Listed ${sessions.length} managed sessions` : "Listed managed sessions";
+		},
 	});
 
 	registerSessionTool(pi, {
@@ -309,6 +357,13 @@ export default function sessionManagerExtension(pi: ExtensionAPI): void {
 		parameters: GetSessionStatusParams,
 		action: "status",
 		toParams: (p) => ({ sessionId: p.sessionId }),
+		toSummary: (params, result) => {
+			const sessionId = stringField(params, "sessionId");
+			const status = stringField(asResultRecord(result), "status");
+			if (sessionId && status) return `${sessionId} · ${status}`;
+			if (sessionId) return `Status of ${sessionId}`;
+			return "Session status";
+		},
 	});
 
 	registerSessionTool(pi, {
@@ -318,5 +373,9 @@ export default function sessionManagerExtension(pi: ExtensionAPI): void {
 		parameters: AbortSessionParams,
 		action: "abort",
 		toParams: (p) => ({ sessionId: p.sessionId }),
+		toSummary: (params) => {
+			const sessionId = stringField(params, "sessionId");
+			return sessionId ? `Aborted ${sessionId}` : "Aborted";
+		},
 	});
 }

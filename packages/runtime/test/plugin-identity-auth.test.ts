@@ -94,12 +94,12 @@ describe('dispatch 鉴权（通道身份，非消息体自报）', () => {
       return { ok: true }
     })
 
-    // 伪冒 built-in 插件 id 'statusline'（旧版：trusted/built-in 一律放行的漏洞）
+    // 伪冒 built-in 插件 id 'scheduler-manager'（旧版：trusted/built-in 一律放行的漏洞）
     await rpc.dispatch('sandbox-evil', {
       jsonrpc: '2.0',
       id: 1,
       method: 'plugin.agent.setModel',
-      params: { pluginId: 'statusline', model: 'evil-model' },
+      params: { pluginId: 'scheduler-manager', model: 'evil-model' },
     })
 
     const resp = firstResponse(port)
@@ -108,7 +108,7 @@ describe('dispatch 鉴权（通道身份，非消息体自报）', () => {
     expect(error.code).toBe(PluginRpcErrorCodes.PERMISSION_DENIED)
     // identity mismatch 语义：直接指出消息自报 id 与通道身份不符
     expect(error.message).toContain('identity mismatch')
-    expect(error.message).toContain('statusline')
+    expect(error.message).toContain('scheduler-manager')
     expect(error.message).toContain('evil')
     // handler 未执行
     expect(captured.current).toBeNull()
@@ -129,12 +129,12 @@ describe('dispatch 鉴权（通道身份，非消息体自报）', () => {
     })
 
     // 方法在授权集内（鉴权按通道身份 evil 查 granted → 放行），
-    // 但 params.pluginId 伪冒 'statusline' → 分区键必须被覆写为 evil
+    // 但 params.pluginId 伪冒 'scheduler-manager' → 分区键必须被覆写为 evil
     await rpc.dispatch('sandbox-evil', {
       jsonrpc: '2.0',
       id: 2,
       method: 'plugin.storage.global.set',
-      params: { pluginId: 'statusline', key: 'k', value: 'v' },
+      params: { pluginId: 'scheduler-manager', key: 'k', value: 'v' },
     })
 
     const resp = firstResponse(port)

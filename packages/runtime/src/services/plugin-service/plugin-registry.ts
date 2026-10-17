@@ -89,8 +89,7 @@ export class PluginRegistry {
    *       extension-resolver.scanBundledExtensions 的 ../.. 推导同构）
    *
    * [HISTORICAL] dev 缺口（F4 修复）：dev 下 cwd=apps/electron，旧实现只扫
-   * <projectRoot>/resources/plugins（不存在）→ built-in statusline 在 dev 从不被
-   * 发现。候选探测同时覆盖「cwd=仓库根」与「cwd=apps/electron」两种 dev 形态，
+   * <projectRoot>/resources/plugins（不存在）→ built-in 插件在 dev 从不被发现。候选探测同时覆盖「cwd=仓库根」与「cwd=apps/electron」两种 dev 形态，
    * 不依赖 isPackaged env（两打包形态均由候选 1 命中）。
    *
    * 全部候选缺失（如全新 checkout 未跑 prepare-builtin-plugins.sh）时返回候选 1，
@@ -212,7 +211,7 @@ export class PluginRegistry {
    * 入口文件路径解析：manifest.main 缺省 index.js（向后兼容）。
    * pluginPath 必须指向具体入口文件而非插件目录——plugin-bootstrap 的 load 分支
    * 直接 `import(pluginPath)`，ESM 禁止目录导入（ERR_UNSUPPORTED_DIR_IMPORT），
-   * 存目录会导致所有插件激活必炸（built-in statusline 曾因目录路径从未激活成功）。
+   * 存目录会导致所有插件激活必炸（built-in 插件目录曾有此形态事故）。
    *
    * 入口守卫：main 必须解析到插件目录内（拒绝 ../ 逃逸与绝对路径），
    * 防止插件声明越权入口 import 插件目录外的任意文件。越权 → warning + null。
@@ -311,8 +310,8 @@ export class PluginRegistry {
         if (!events.includes(hook)) events.push(hook)
       }
     }
-    // Phase 1 不为 panels/statusBarItems 推断 activation events（无对应事件类型）
-    // panels/statusBarItems 的激活由 Phase 3+ 的 UI 扩展机制处理
+    // Phase 1 不为 panels 推断 activation events（无对应事件类型）
+    // panels 的激活由 Phase 3+ 的 UI 扩展机制处理
     return events
   }
 }

@@ -11,35 +11,6 @@ import type { HeaderActionUpdatePayload } from '@taiji/shared'
 
 // ── InternalEvent union（IF2）────────────────────────────────────────
 
-/** 状态栏条目（IF2/DM3）。 */
-export interface StatusBarEntry {
-  id: string
-  pluginId: string
-  text: string
-  tooltip?: string
-  alignment: 'left' | 'right'
-  priority: number
-  commandId?: string
-  /** 作用域（W2 扩展，对齐 runtime StatusBarItem.scope + IF8 分流契约）。可选——旧消费方不带。 */
-  scope?: 'per-session' | 'global'
-  /** 所属 session（W2 扩展，对齐 runtime StatusBarItem.sessionId）。可选——global scope 项不带。 */
-  sessionId?: string
-}
-
-/** statusSet 条目（IF2/DM3）。 */
-export interface StatusSetEntry {
-  id: string
-  pluginId: string
-  text: string
-}
-
-/** extension 状态条目（IF2/DM3）。 */
-export interface ExtensionStatusEntry {
-  pluginId: string
-  status: string
-  detail?: string
-}
-
 /** 权限请求（IF2/DM3）。runtime 一次可申请多个权限（插件 manifest.permissions 通常多个），
  *  数组完整透传，不收敛为单数。 */
 export interface PermissionRequest {
@@ -101,9 +72,6 @@ export type { HeaderActionUpdatePayload }
 
 /** core 内部事件 union（IF2）。消费端 on(kind, handler) 编译期类型安全。 */
 export type InternalEvent =
-  | { kind: 'plugin-status-bar-update'; sessionId?: string; items: StatusBarEntry[] }
-  | { kind: 'plugin-status-set-update'; sessionId?: string; status: StatusSetEntry[] }
-  | { kind: 'extension-status'; sessionId?: string; status: ExtensionStatusEntry }
   | { kind: 'plugin-permission-request'; sessionId?: string; request: PermissionRequest }
   | { kind: 'plugin-permission-request-resolved'; sessionId?: string; resolved: PermissionRequestResolved }
   | { kind: 'plugin-crashed'; pluginId: string; error: string }
@@ -129,14 +97,13 @@ export type ContributionType =
   | 'view'
   | 'menu'
   | 'command'
-  | 'statusBarItem'
   | 'slashCommand'
   | 'configuration'
   | 'headerAction'
 
 /**
  * 解析后 contribution 统一结构（DM1）。
- * placement 是路由键（'sidebar.tab'/'composer.toolbar'/'panel.header'/'statusbar'/'drawer.tab'/...，
+ * placement 是路由键（'sidebar.tab'/'composer.toolbar'/'panel.header'/'drawer.tab'/...，
  * 开放字符串，壳注册制 IF5）。available 是 routeAll 后的缓存（AC9 置灰依据）。
  */
 export interface ContributionRecord {
@@ -151,7 +118,6 @@ export interface ContributionRecord {
   view?: { viewType: string; title: string; initialVisibility: 'visible' | 'hidden' }
   menu?: { group?: string; when?: string }
   command?: { title: string; category?: string; keybinding?: string; when?: string }
-  statusBarItem?: { text: string; alignment: 'left' | 'right'; priority: number; scope: 'global' | 'per-session'; commandId?: string }
   slashCommand?: { name: string; description: string }
   configuration?: { properties: unknown }
   /** 声明原文存档：badge/tooltip/disabled 等可变字段经 plugin:headerActionUpdate 广播，声明侧只有静态形状；
@@ -180,7 +146,7 @@ export interface PluginContributesView {
   id: string
   title: string
   view?: string
-  /** 挂载点名：'sidebar.tab' | 'panel.header' | 'composer.toolbar' | 'drawer.tab' | 'statusbar' 等，开放字符串（壳注册制） */
+  /** 挂载点名：'sidebar.tab' | 'panel.header' | 'composer.toolbar' | 'drawer.tab' 等，开放字符串（壳注册制） */
   placement: string
   viewType?: 'gui' | 'webview' | 'tree'
   activationEvent?: string
@@ -223,17 +189,6 @@ export interface PluginConfigurationProperty {
   enumDescriptions?: string[]
 }
 
-/** statusBarItem contribution（s1 DM5）。 */
-export interface PluginContributesStatusBarItem {
-  id: string
-  text: string
-  priority: number
-  alignment?: 'left' | 'right'
-  scope?: 'per-session' | 'global'
-  commandId?: string
-  tooltip?: string
-}
-
 /** headerAction contribution（AP-1，composer 左簇按钮区）。icon 为 lucide 名字符串（宿主解析，插件不给 SVG）；
  *  badge/tooltip/disabled/hidden 等可变字段不在声明侧，经 api.ui.updateHeaderAction + plugin:headerActionUpdate 广播。 */
 export interface PluginContributesHeaderAction {
@@ -272,7 +227,6 @@ export interface PluginContributes {
   menus?: PluginContributesMenu
   commands?: PluginContributesCommand[]
   configuration?: PluginContributesConfiguration
-  statusBarItems?: PluginContributesStatusBarItem[]
   headerActions?: PluginContributesHeaderAction[]
 }
 

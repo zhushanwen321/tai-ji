@@ -122,17 +122,18 @@ export function useTurnTrace(turn: () => MessageTurn, isWorkingTurn: () => boole
   )
 
   /**
- * [actions-anchor] hover actions 锚块 = visibleBlocks 内 flatIndex 最大的 text 块（折叠态即唯一
- * 可见的末位正文；工作展开/历史展开态取时序最后的 text）。操作栏（TurnSummary）经
- * #turn-actions 插槽只挂在该块上：悬停区收窄到 text 块本身，悬浮位随块定位。无 text 块
- * （纯工具 turn 流式前期）无锚 → 操作栏不渲染。
- */
+   * [actions-anchor] hover actions 锚块 = trace 末单元（renderUnits 末位，分组后末单元可能是
+   * run 组块）且该单元是 text 块时才存在：正文后面跟了任何块（工具/思考/组块）就不得有占位行
+   * （流式「正文→工具行」场景占位行夹在正文与工具行之间会把块间距撑出空洞，2026-10-17 用户裁决）。
+   * 操作栏（TurnSummary）经 #turn-actions 插槽只挂在该块上：悬停区收窄到 text 块本身，
+   * 悬浮位随块定位。turn 以工具/组块结尾（无末尾正文）或无 text 块时操作栏无挂载点、不渲染
+   * ——复制/fork/handoff 服务于正文回复，无正文可悬停属预期形态。
+   */
   const actionsAnchorFlatIndex = computed<number | null>(() => {
-    let last: number | null = null
-    for (const fb of visibleBlocks.value) {
-      if (fb.block.kind === 'text') last = fb.flatIndex
-    }
-    return last
+    const units = renderUnits.value
+    const last = units.length > 0 ? units[units.length - 1] : undefined
+    if (!last || isRunGroupBlock(last) || last.block.kind !== 'text') return null
+    return last.flatIndex
   })
 
   /** 锚块判定（模板插槽 v-if 与 v-memo deps 共用单点）；run 组块永不命中。 */

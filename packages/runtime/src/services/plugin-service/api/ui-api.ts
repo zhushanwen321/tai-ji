@@ -1,10 +1,10 @@
 /**
  * UI API 模块
  *
- * 提供前端交互（对话框、通知、状态栏）的 RPC handler（主线程侧）和 Worker 侧代理对象。
+ * 提供前端交互（对话框、通知）的 RPC handler（主线程侧）和 Worker 侧代理对象。
  *
  * 主线程侧：registerUiRpcHandlers() 在 PluginRpcServer 上注册
- *   plugin.ui.showSelect / showConfirm / showInput / notify / updateStatusBarItem 五个 RPC 方法，
+ *   plugin.ui.showSelect / showConfirm / showInput / notify 四个 RPC 方法，
  *   以及 plugin-header-action-modal-points 点位的命令式方法：
  *   plugin.ui.updateHeaderAction（AP-1，sessionId 必填）。
  *
@@ -19,36 +19,31 @@
  *     谁先到期」（对齐 pi 先例 showConfirm(title, message, opts?: { timeout?: number })）。
  *   - 到期（PendingTracker reject RPC_TIMEOUT）转译为 UI_TIMEOUT reject（取消 ≠ 替答），
  *     并经 rpcClient.notify('plugin.ui.uiRequestExpired') 通知主线程 queue 取消（撤窗 +
- *     放行串行队列）。notify/updateStatusBarItem 纯展示类无等待语义，维持 client 默认 30s。
+ *     放行串行队列）。notify 纯展示类无等待语义，维持 client 默认 30s。
  *
  * S3-W3（D7 窄校验层）：全部方法入口 fail-fast 校验——缺字段/错类型/越界键抛
  * INVALID_* 结构化错误（message 含字段名与期望格式），畸形输入不产生 UI 副作用。
  * S3-W4（D7 限流与防毒化）：
  *   - notify 与 plugin.notify 共用同一每插件令牌桶（deps.limiter，默认 20 条/s）
  *     + message ≤8KB（INVALID_MESSAGE）；
- *   - updateStatusBarItem 单条 text ≤4KB（INVALID_TEXT，D3 验收「1MB text 被拒」
- *     依此规则），坏条目在该入口被拒——其余插件条目与后续广播不受影响
- *     （D4 毒化隔离：拒绝该条而非整包）；
  *   - updateHeaderAction badge/tooltip 同口径 ≤4KB
  *     （INVALID_BADGE / INVALID_TOOLTIP，code 按字段名推导），
  *     超长展示文本不入广播帧。
  */
 
-import { PLUGIN_NOTIFY_LIMITS } from '@taiji/shared'
 import type { HeaderActionUpdatePayload } from '@taiji/shared'
 import type { PluginRpcServer } from '../plugin-rpc-server.js'
 import type { PluginRpcClient } from '../plugin-rpc-client.js'
-import type { StatusBarItemOptions, UiDialogOptions } from '../plugin-types.js'
+import type { UiDialogOptions } from '../plugin-types.js'
 import { PluginRpcErrorCodes } from '../plugin-types.js'
 import {
   asBoundedString,
   asOptionalString,
-  asRecord,
   asSafeKey,
   asString,
   asStringArray,
 } from '../validation.js'
-import { errorWithCode, toErrorMessage } from '../../../utils/errors.js'
+import { errorWithCode } from '../../../utils/errors.js'
 import { randomSuffix } from '../../../utils/ids.js'
 import { guardNotifyParams, NotifyRateLimiter } from './notify-api.js'
 
@@ -59,8 +54,7 @@ const UI_TEXT_MAX_KB = 8
 const UI_TEXT_MAX_BYTES = UI_TEXT_MAX_KB * BYTES_PER_KB
 
 /**
- * headerAction badge·tooltip 上限：4KB（UTF-8 字节）。对齐
- * updateStatusBarItem 的 S3-W4 口径（STATUSBAR_TEXT_MAX_BYTES 同量级），超长展示
+ * headerAction badge·tooltip 上限：4KB（UTF-8 字节）。S3-W4 口径，超长展示
  * 文本在入口拒绝（INVALID_BADGE / INVALID_TOOLTIP），不入广播帧。
  */
 const HEADER_TEXT_MAX_KB = 4
@@ -106,9 +100,9 @@ export function resolveUiRequestTimeoutMs(timeout: number | undefined): number {
   return Math.min(resolved, MAX_TIMER_DELAY_MS)
 }
 
-// re-export（NON-BREAKING）：UiDialogOptions 权威契约定义在 plugin-types.ts（与
-// StatusBarItemOptions 同源，单一定义消除本文件历史副本）；既有消费者
-//（plugin-ui-timeout-authority.test.ts）仍从本文件导入，导出面不变。
+// re-export（NON-BREAKING）：UiDialogOptions 权威契约定义在 plugin-types.ts
+//（单一定义消除本文件历史副本）；既有消费者（plugin-ui-timeout-authority.test.ts）
+// 仍从本文件导入，导出面不变。
 export type { UiDialogOptions }
 
 /** Worker→host dialog 请求携带的计时/取消控制字段（queue 尊重来方值）。 */
@@ -167,7 +161,6 @@ export interface UiHandlers {
   showConfirm(title: string, message: string, pluginId: string, meta?: UiRequestMeta): Promise<boolean>
   showInput(title: string, defaultValue: string | undefined, pluginId: string, meta?: UiRequestMeta): Promise<string | undefined>
   notify(pluginId: string, level: string, message: string): Promise<void>
-  updateStatusBarItem(pluginId: string, id: string, text: string, options?: StatusBarItemOptions): Promise<void>
   /**
    * notify 令牌桶（S3-W4）。缺省自建（默认 20 条/s）；与 plugin.notify 入口
    * 共享时应由装配方（plugin-rpc-setup）传入同一实例。
@@ -179,37 +172,6 @@ export interface UiHandlers {
    * 缺省（装配方未接线）时通知被记 warn 后丢弃——queue 兜底 timer 收尾（观测可见，不静默）。
    */
   onUiRequestExpired?: (requestId: string, pluginId: string) => void
-}
-
-/**
- * statusbar options 逐字段校验：present 但类型错即抛 INVALID_<FIELD>
- * （窄校验层风格：错误码带字段名，插件作者可据此修正）。缺省字段全放行。
- */
-function parseStatusBarOptions(value: unknown): StatusBarItemOptions {
-  if (value === undefined) return {}
-  const options = asRecord(value, 'options')
-  const tooltip = asOptionalString(options.tooltip, 'tooltip')
-  const commandId = asOptionalString(options.commandId, 'commandId')
-  if (options.priority !== undefined && typeof options.priority !== 'number') {
-    throw errorWithCode(
-      `Invalid priority: expected a number but received ${typeof options.priority}.`,
-      'INVALID_PRIORITY',
-    )
-  }
-  if (options.scope !== undefined && options.scope !== 'global' && options.scope !== 'per-session') {
-    throw errorWithCode(
-      `Invalid scope: expected 'global' or 'per-session' but received ${JSON.stringify(options.scope)}.`,
-      'INVALID_SCOPE',
-    )
-  }
-  const sessionId = asOptionalString(options.sessionId, 'sessionId')
-  return {
-    ...(tooltip !== undefined ? { tooltip } : {}),
-    ...(commandId !== undefined ? { commandId } : {}),
-    ...(options.priority !== undefined ? { priority: options.priority } : {}),
-    ...(options.scope !== undefined ? { scope: options.scope } : {}),
-    ...(sessionId !== undefined ? { sessionId } : {}),
-  }
 }
 
 export function registerUiRpcHandlers(
@@ -269,32 +231,6 @@ export function registerUiRpcHandlers(
       return
     }
     await deps.notify(guarded.pluginId, guarded.level, guarded.message)
-  })
-
-  rpcServer.registerMethod('plugin.ui.updateStatusBarItem', async (params) => {
-    // CT-D4 毒化隔离可观测：坏条目拒绝除回包给插件外必须留宿主侧日志——
-    // RPC 错误响应只到达插件侧，运维排查毒化插件（如批量投递 text:{}）需要
-    // 宿主侧痕迹。日志只记错误码级摘要，不回显原始 payload（防日志被毒化刷屏）。
-    try {
-      const pluginId = asString(params.pluginId, 'pluginId')
-      // id 进复合键 `${pluginId}:${id}`（statusBarItems Map 键）——白名单排除
-      // 路径分隔符与复合键注入字符 ':'，越界键 INVALID_ID
-      const id = asSafeKey(params.id, 'id')
-      // 单条 text ≤4KB（D3）：空串 = 移除该 item 的既有语义，0 字节天然放行
-      const text = asBoundedString(params.text, 'text', PLUGIN_NOTIFY_LIMITS.STATUSBAR_TEXT_MAX_BYTES)
-      const options = parseStatusBarOptions(params.options)
-      await deps.updateStatusBarItem(pluginId, id, text, options)
-    } catch (e: unknown) {
-      // 结构化校验错误的 code 是 'INVALID_*' 字符串（message 是人类可读文案）；
-      // 只记校验失败，其他异常（deps 自身错误）原样上抛不打日志
-      const code = (e as { code?: unknown }).code
-      if (typeof code === 'string' && code.startsWith('INVALID_')) {
-        console.warn(
-          `[ui-api] statusbar item rejected: ${toErrorMessage(e)} (plugin=${String(params.pluginId)} id=${String(params.id)})`,
-        )
-      }
-      throw e
-    }
   })
 
   // ── plugin headerAction 点位（AP-1，u5b）─────────────────────────────────
@@ -387,7 +323,6 @@ export function createUiApi(
   showConfirm(title: string, message: string, opts?: UiDialogOptions): Promise<boolean>
   showInput(title: string, defaultValue?: string, opts?: UiDialogOptions): Promise<string | undefined>
   notify(level: 'info' | 'warn' | 'error', message: string): Promise<void>
-  updateStatusBarItem(id: string, text: string, options?: StatusBarItemOptions): Promise<void>
   /**
    * AP-1：badge/tooltip/disabled/hidden 可变字段更新（sessionId 必填，徽标是 per-session 语义）。
    * 回执 {updated}：true = 广播帧已发出；false = 渲染端未收到（装配缺陷被丢弃），插件
@@ -407,9 +342,6 @@ export function createUiApi(
 
     notify: (level: 'info' | 'warn' | 'error', message: string) =>
       rpcClient.request('plugin.ui.notify', { pluginId, level, message }).then(() => {}),
-
-    updateStatusBarItem: (id: string, text: string, options?: StatusBarItemOptions) =>
-      rpcClient.request('plugin.ui.updateStatusBarItem', { pluginId, id, text, options }).then(() => {}),
 
     updateHeaderAction: (id: string, opts: { sessionId: string; badge?: string; tooltip?: string; disabled?: boolean; hidden?: boolean }) =>
       rpcClient

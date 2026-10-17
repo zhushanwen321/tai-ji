@@ -317,7 +317,7 @@ SideDrawer 是 workspace-body 级的右侧抽屉，终态 8 个 tab（本表为 
 
 | tab | 内容 | 数据来源 |
 |-----|------|---------|
-| `terminal` | **[已迁底抽屉 display-containers §7.3 W1]** 终端 widget 由底抽屉承载（StatusBar 开关 / ⌃` 触达），右抽屉无 terminal tab | —— |
+| `terminal` | **[已迁底抽屉 display-containers §7.3 W1]** 终端 widget 由底抽屉承载（顶栏终端按钮 / ⌃` 触达），右抽屉无 terminal tab | —— |
 | `browser` | 浏览器内容已迁浮层（display-containers §7.4：点 localhost 链接 → openBrowser → 浮层 BrowserPane）——右抽屉无 browser tab | openBrowser(url, sessionId) URL 注入链 |
 | `git` | 全量 git 状态 + 暂存/提交（GitPanel） | provide/inject GIT_STATUS_KEY |
 | `doc` | 命令/skill 详细文档（CommandDocPanel） | commandStore + skills |
@@ -394,7 +394,7 @@ pnpm --filter @taiji/electron run dev:mock
 | 3 | 点 src/new-feature.ts（git added） | drawer 切到该文件，显示 git.getDiff patch（含 'diff --git'），detail-view-toggle 可见 |
 | 4 | 点 detail-view-toggle | diff ↔ preview 切换 |
 | 5 | 切到 git tab | GitPanel 显示（mock git 状态） |
-| 6 | ~~切到 terminal tab~~ **[已退役 display-containers W1：terminal 迁底抽屉]** | 底抽屉 terminal 由 StatusBar 开关 / ⌃` 触达 |
+| 6 | ~~切到 terminal tab~~ **[已退役 display-containers W1：terminal 迁底抽屉]** | 底抽屉 terminal 由顶栏终端按钮 / ⌃` 触达 |
 
 ### 6.2 集成测试
 

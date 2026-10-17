@@ -24,7 +24,7 @@
 |---|------|------|
 | P2 | runtime `prompt()` 发 `/schedule off <id>` 三态（执行命令/不产生模型 turn/不留用户消息） | 成立。pi 0.84.4 RPC 直发实测：toggle entry 落盘、assistant/user entry 增量均 0；`expandPromptTemplates ?? true`（agent-session.js:822）+ rpc-mode 不传该键 → 默认 true。注意：该结论限于 runtime prompt RPC 直发链；**输入框手敲路径存在独立缺陷候选**（见 §4） |
 | P3 | 点击到列表更新往返 | UI 暂停 ≤1300ms（写回执+失效转发+插件重新拉取+渲染，轮询粒度 500ms 首测即完成态）；命令链 ~1200ms；LLM 链 ~54s（LLM 响应 50s + UI 刷新秒级） |
-| P4 | builtin 插件 dev/打包两态装载 | dev：三 builtin 插件（statusline/scheduler-manager/demo-echo）同批激活成功（statusline 历史坑同批关闭）；打包态留发布链验证 |
+| P4 | builtin 插件 dev/打包两态装载 | dev：各 builtin 插件（scheduler-manager/demo-echo 等 resources/plugins 目录成员）同批激活成功；打包态留发布链验证 |
 | P5 | action-bar 新宿主透传/旧宿主降级 | 单测两条绿（resolve.test.ts：透传 + ansi-text 降级 label 可读） |
 | P7 | 折叠器下沉逐字节等价 + 依赖收敛 | extensions 280 断言零改动全绿；extension-protocol 内 pi-ext-guards/pi-extension-logger/croner 零 import |
 | P9 | 恢复窗口 requireCommand 时延 | 裸 spawn + switch_session 附着 5/5 成功；附着→命令可用 gap 1.3-3.0ms；重试参数定案 500ms×6（3s 预算，对 30s 首 tick 约束 10 倍余量） |

@@ -112,17 +112,16 @@ routeInbound 只做三件事：pending 分流、seq 中间件、查表执行。*
 
 ```
 extension-host/
-  contribution-registry.ts   # 扫描 plugin manifest，注册声明式贡献（views/menus/commands/statusBarItems/slashCommands/configuration）
+  contribution-registry.ts   # 扫描 plugin manifest，注册声明式贡献（views/menus/commands/slashCommands/configuration）
   activation-manager.ts      # 懒激活：activationEvents → 触发 runtime 激活
   command-registry.ts        # 统一命令表：命令面板 + 快捷键 + slash + 菜单按钮的唯一来源
-  status-bar-controller.ts   # 状态项聚合（pi setStatus + plugin statusBarItems 统一），per-session/global 两 scope
   message-bus-bridge.ts      # plugin:* 下行消息族 → renderer 内部事件
   overlay-lifecycle.ts       # companion overlay 状态机：expanded → minimized(badge) → restored，per-session + per-requestId
   mount-point-registry.ts    # ★ 壳向 ExtensionHost 注册可用挂载点（见 4.3）
   view-host-store.ts         # plugin view 的 GuiComponent 树缓存（per viewId，per-session 分区）
 ```
 
-渲染件（ui/src/extension-host/）：`ViewHost.vue`、`StatusBar.vue`（main-panel 局部底栏）、`PluginSettingsPage.vue`、`PermissionRequestDialog.vue`。
+渲染件（ui/src/extension-host/）：`ViewHost.vue`、`PluginSettingsPage.vue`、`PermissionRequestDialog.vue`。
 
 提问表单渲染面（renderer/src/components/extension/form/，桌面壳）：`FormOverlay.vue`（壳：表头 / 多问 tab 条 / Submit 门 / 取消）+ `ChoiceQuestion.vue` / `TextQuestion.vue` / `ScheduleForm.vue` 三类型渲染器——统一提问表单协议（ui-form，ask-user / scheduler / plan 三方提问收尾）的 GUI 唯一渲染面，Panel 内联覆盖 composer 挂载。
 
@@ -131,14 +130,14 @@ extension-host/
 | 统一项 | 方案 |
 |---|---|
 | 对话框原语 | pi `ctx.ui.select/confirm/input` + plugin `api.ui.showSelect/Confirm/Input` → 统一 `DialogRequest` 内部协议，渲染统一走 companion-band |
-| 状态展示 | pi `setStatus` + plugin `updateStatusBarItem` → 统一 StatusBarController。**信息流向**：只消费「runtime 广播的消息」，不主动读 domain store（与 §2.1「ExtensionHost 不 import domain」一致） |
+| 状态展示 |（StatusBar 底栏及其数据链已整体退役）|
 | 结构化渲染 | 统一 GuiComponent（§5） |
 | 提问表单 | 统一表单协议（ui-form，select + `UI_FORM_MARKER` 双向通道）：ask-user / scheduler / plan 三方提问收敛一个入口（`uiFormInteract`）+ 一个渲染器（renderer FormOverlay），覆盖 composer 挂载；不并入单向 GuiComponent（需等用户回传） |
 | overlay lifecycle | plugin 只 await 结果，不感知 expanded/minimized/restored；状态机集中在 overlay-lifecycle.ts |
 
 ### 4.3 挂载点注册表（desktop 全集 vs mobile 子集）
 
-**挂载点不是硬编码在 ExtensionHost，而是由壳注册**：桌面壳 bootstrap 注册 sidebar.tab / panel.header / composer.toolbar / statusbar（挂载点全集以 `packages/core/src/bootstrap.ts` registerMountPoints 为 SSOT）；移动壳只注册 message-stream / slash / companion。ContributionRegistry 把 plugin 声明按类型路由到对应挂载点——mobile 天然获得子集，无需 if-else 特判；未来新形态只写自己的挂载点注册。
+**挂载点不是硬编码在 ExtensionHost，而是由壳注册**：桌面壳 bootstrap 注册 sidebar.tab / panel.header / composer.toolbar（挂载点全集以 `packages/core/src/bootstrap.ts` registerMountPoints 为 SSOT）；移动壳只注册 message-stream / slash / companion。ContributionRegistry 把 plugin 声明按类型路由到对应挂载点——mobile 天然获得子集，无需 if-else 特判；未来新形态只写自己的挂载点注册。
 
 **Plugin 交互点位（headerAction）**：`panel.header` 挂载点上并存两条点位——既有 ViewHost GuiComponent 信息条（非交互）与 `headerActions` 声明式按钮区（宿主原生渲染，运行时 `api.ui.updateHeaderAction(sessionId, …)` 改徽标/tooltip/disabled；运行时徽标帧 `plugin:headerActionUpdate` 经 broker 全局广播 transient 不入 ring）。可交互原语 `action-bar` 是 GuiComponent 协议首个交互件（items 携 commandId，点击经壳层 provide 的执行器走既有命令链）。首消费者 = `resources/plugins/scheduler-manager`（定时任务管理面；面板内容走 WorkflowVizOverlay 定时任务 tab，`views.update` 显式 sessionId 必填）。
 

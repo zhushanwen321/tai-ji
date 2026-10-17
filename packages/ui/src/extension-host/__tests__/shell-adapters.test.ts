@@ -4,7 +4,7 @@
  * 覆盖（自 renderer composables/shell 平移，行为语义全量保持）：
  * - createWsPluginMessageSource 过滤条件（FR1/AC1）：TC1 plugin:uiRequest 前缀放行 /
  *   TC1b plugin:viewUpdate / TC2 extension.dialog 白名单放行 / TC3 extension.error 拒绝 /
- *   TC4 plugin:statusBarUpdate 回归 / TC5 白名单 5 项字面量 + 行为级验证
+ *   TC5 白名单 5 项字面量 + 行为级验证
  * - convertToDialogRequest 转换（FR2/AC2）：TC1-TC4（source 判定 / form 类键不透传 /
  *   options 归一 / method 超界恢复 + receivedAt）
  * - createCompanionDialogAdapters 投递层：TC5 无 sessionId 跳过；TC6 C4 四键排除
@@ -138,31 +138,13 @@ describe('createWsPluginMessageSource 过滤条件（FR1/AC1）', () => {
     expect(emitted).toHaveLength(0)
   })
 
-  it('TC4: plugin:statusBarUpdate 前缀放行不回归', () => {
-    const { bus, bridge: b } = makeBridge()
-    bridge = b
-    const { emitted } = spyEmit(bus)
-
-    dispatchCrossSession({
-      type: 'plugin:statusBarUpdate',
-      payload: {
-        items: [{ id: 'sb1', pluginId: 'tasks', text: 'ready', priority: 100, scope: 'per-session', sessionId: 's1' }],
-      },
-    })
-
-    expect(emitted).toHaveLength(1)
-    // 事件级 sessionId 来自 payload 顶层（statusBarUpdate 无，故 undefined）；item 级 sessionId 保留在 items 内
-    expect(emitted[0]).toMatchObject({ kind: 'plugin-status-bar-update', items: [{ id: 'sb1', sessionId: 's1' }] })
-  })
-
-  it('TC5: EXTENSION_BRIDGE_TYPES 字面量 6 项 + 每项行为级验证（进 bridge 产出非 error 事件）', () => {
+  it('TC5: EXTENSION_BRIDGE_TYPES 字面量 5 项 + 每项行为级验证（进 bridge 产出非 error 事件）', () => {
     // 字面量锁：EXTENSION_BRIDGE_TYPES 已是 core SSOT（派生自 EXTENSION_HANDLERS keys），
     // 锁项数防 handlers 增删时白名单悄悄漂移（消费方 source filter 行为随之变化无信号）。
-    // 第 6 项 extension:requestsInvalidated 为 P2-2 失效链（runtime 非 respond 终结挂起的广播）
+    // 第 5 项 extension:requestsInvalidated 为 P2-2 失效链（runtime 非 respond 终结挂起的广播）
     expect(EXTENSION_BRIDGE_TYPES).toEqual([
       'extension:widget',
       'extension:widgetGui',
-      'extension:status',
       'extension:notify',
       'extension:requestsInvalidated',
       'extension.dialog',
@@ -174,7 +156,6 @@ describe('createWsPluginMessageSource 过滤条件（FR1/AC1）', () => {
     const samples: Array<{ type: string; payload: Record<string, unknown> }> = [
       { type: 'extension:widget', payload: { sessionId: 's1', widgetKey: 'w1', lines: ['line'] } },
       { type: 'extension:widgetGui', payload: { sessionId: 's1', widgetKey: 'w1', gui: ['g'] } },
-      { type: 'extension:status', payload: { sessionId: 's1', statusKey: 'k', text: 'ready' } },
       { type: 'extension:notify', payload: { sessionId: 's1', message: 'hi', level: 'info' } },
       { type: 'extension:requestsInvalidated', payload: { sessionId: 's1', requestIds: ['r9'], reason: 'turn-aborted' } },
       { type: 'extension.dialog', payload: { sessionId: 's1', requestId: 'r1', dialogKind: 'select' } },

@@ -14,12 +14,13 @@
  * 「manual + 非 runtime 发起 + compaction_start 前 turn 被掐断」后经投递内核追加续跑投递。
  */
 
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
 import { guardStaleCtx, isRecord, toErrorMessage } from "@zhushanwen/pi-ext-guards";
 import { Type } from "typebox";
 
 import { debugLog } from "./compact-handler.js";
 import { sendSmartContextNotice } from "./notices.js";
+import { renderCompactContextResult } from "./render-result.js";
 import { buildDegradationHintLine } from "./reminder.js";
 import {
 	DEGRADATION_HINT_MIN_COMPACTIONS,
@@ -63,6 +64,16 @@ export interface CompactContextDetails {
 	/** 压缩已触发（结果经注入消息送达，不在工具结果里）。 */
 	launched: boolean;
 	fellBack: boolean;
+	/** 收起态一行摘要（buildCompactContextSummary 产出；GUI 收起态与 TUI 折叠态共用）。 */
+	summary?: string;
+}
+
+/**
+ * 收起态一行摘要。R2 降级态下工具返回时压缩尚未完成（结果异步注入），无保留比例
+ * 数据可取——恒为 "Context compacted"；完成后的比例数据走注入消息，不进本摘要。
+ */
+export function buildCompactContextSummary(): string {
+	return "Context compacted";
 }
 
 /** 工具描述（§3.5：三条件自查引导；条件即纪律，无第三层复述——D1 单源化核对通过）。 */
@@ -236,8 +247,13 @@ export function registerCompactContextTool(
 					fellBack: false,
 					compactionCount: compactionCount + 1,
 					launched: true,
+					summary: buildCompactContextSummary(),
 				} satisfies CompactContextDetails,
 			};
+		},
+
+		renderResult(result: unknown, options: { expanded: boolean }, theme: Theme) {
+			return renderCompactContextResult(result, options, theme);
 		},
 	});
 }

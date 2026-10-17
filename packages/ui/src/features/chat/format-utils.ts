@@ -1,7 +1,7 @@
 /**
  * format-utils.ts —— trace 块耗时格式化 + header 摘要截短。
  *
- * W2: formatDuration（从 Block.vue / BlockSubagent.vue 抽出，DRY）。
+ * W2: formatDuration（从 Block.vue / SubagentRow.vue 抽出，DRY）。
  * W3: shortenForHeader（bash 折叠头路径截短）+ tailLines（末行截取）。
  *
  * 接受 unknown（meta 字段 / progress 快照字段类型宽松），非数字返回空串。

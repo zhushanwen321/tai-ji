@@ -10,9 +10,11 @@
  * canvas_read / canvas_review / canvas_export」指引——deferred 工具须检索激活后
  * 下一轮起可调，直接点名工具名让模型检索词精准命中。
  */
-import type { ExtensionAPI, ExtensionToolContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionToolContext, Theme } from "@earendil-works/pi-coding-agent";
 import { Type, type Static } from "typebox";
 
+import { renderCanvasToolResult } from "./render.js";
+import { canvasEnterSummary } from "./summary.js";
 import { callCanvas } from "./marker-channel.js";
 import { hostGateError, isTaijiGuiHost } from "./host.js";
 
@@ -129,6 +131,9 @@ export function registerCanvasEnterTool(pi: ExtensionAPI, cfg: EnterToolConfig):
     description: cfg.description,
     promptSnippet: cfg.promptSnippet,
     parameters: cfg.parameters,
+    renderResult(result: unknown, options: { expanded: boolean }, theme: Theme) {
+      return renderCanvasToolResult(result, options, theme);
+    },
     async execute(
       _toolCallId: string,
       params: Static<typeof CanvasEnterParams>,
@@ -141,7 +146,7 @@ export function registerCanvasEnterTool(pi: ExtensionAPI, cfg: EnterToolConfig):
       if ("error" in request) throw request.error;
       const reply = await callCanvas(ctx, request.action, request.params);
       const text = `${JSON.stringify(reply)}\n\n${CANVAS_ENTER_GUIDANCE}`;
-      return { content: [{ type: "text" as const, text }], details: undefined };
+      return { content: [{ type: "text" as const, text }], details: { summary: canvasEnterSummary(params, reply) } };
     },
   });
 }

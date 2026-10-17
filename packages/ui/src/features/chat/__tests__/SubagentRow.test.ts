@@ -1,5 +1,5 @@
 /**
- * BlockSubagent.vue 组件测试（v6 §10 collapsed-only 设计）。
+ * SubagentRow.vue 组件测试（v6 §10 collapsed-only 设计）。
  *
  * 设计对齐（spec v6 §10 / aca29110c「subagent/workflow details via drawer tabs」）：
  * - collapsed only：整个块单行精简摘要，无展开体、无 task 预览、无 bg 状态行（均已移除）
@@ -11,11 +11,11 @@
  * - input 顶层拍平：action / agent / slug / model / thinkingLevel / task 都在顶层（非 startParam 嵌套）
  * - output 是 JSON 字符串，subagentId 在顶层（toolResult.subagentId，start action 立即返回）
  *
- * 运行：cd packages/ui && npx vitest run src/features/chat/__tests__/BlockSubagent.test.ts
+ * 运行：cd packages/ui && npx vitest run src/features/chat/__tests__/SubagentRow.test.ts
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount } from '@vue/test-utils'
-import { BlockSubagent } from '@taiji/ui'
+import { SubagentRow } from '@taiji/ui'
 import type { ToolCall } from '@taiji/shared'
 import { subagentVirtualId } from '@taiji/shared'
 
@@ -53,9 +53,9 @@ beforeEach(() => {
   openSubagentMock.mockReset()
 })
 
-describe('BlockSubagent: 标题行渲染（顶层 input 拍平字段）', () => {
+describe('SubagentRow: 标题行渲染（顶层 input 拍平字段）', () => {
   it('渲染 subagent prefix + agent（--name 暖驼）+ · + slug（层级灰）', () => {
-    const wrapper = mount(BlockSubagent, {
+    const wrapper = mount(SubagentRow, {
       props: { tool: makeSubagent(), sessionId: 's1' },
     })
     const text = wrapper.text()
@@ -72,7 +72,7 @@ describe('BlockSubagent: 标题行渲染（顶层 input 拍平字段）', () => 
   })
 
   it('无 input.agent 时回退默认 general-purpose', () => {
-    const wrapper = mount(BlockSubagent, {
+    const wrapper = mount(SubagentRow, {
       props: {
         tool: makeSubagent({ input: { action: 'start', task: 'do something' } }),
       },
@@ -81,7 +81,7 @@ describe('BlockSubagent: 标题行渲染（顶层 input 拍平字段）', () => 
   })
 
   it('有 model + thinkingLevel 时渲染括号（model 层级灰，括号/· thinking dim）', () => {
-    const wrapper = mount(BlockSubagent, {
+    const wrapper = mount(SubagentRow, {
       props: {
         tool: makeSubagent({
           input: {
@@ -101,7 +101,7 @@ describe('BlockSubagent: 标题行渲染（顶层 input 拍平字段）', () => 
   })
 
   it('有 model 无 thinkingLevel 时只渲染括号 + model', () => {
-    const wrapper = mount(BlockSubagent, {
+    const wrapper = mount(SubagentRow, {
       props: {
         tool: makeSubagent({
           input: {
@@ -119,9 +119,9 @@ describe('BlockSubagent: 标题行渲染（顶层 input 拍平字段）', () => 
   })
 })
 
-describe('BlockSubagent: collapsed only（§10：task 预览 / 展开体 / bg 状态行已移除）', () => {
+describe('SubagentRow: collapsed only（§10：task 预览 / 展开体 / bg 状态行已移除）', () => {
   it('task 不在对话流内展示（task 预览已移除，全文看 drawer subagent tab）', () => {
-    const wrapper = mount(BlockSubagent, {
+    const wrapper = mount(SubagentRow, {
       props: {
         tool: makeSubagent({ input: { action: 'start', task: '单行短任务' } }),
       },
@@ -130,7 +130,7 @@ describe('BlockSubagent: collapsed only（§10：task 预览 / 展开体 / bg �
   })
 
   it('无展开体：点击整行不出现 task 完整内容区', async () => {
-    const wrapper = mount(BlockSubagent, {
+    const wrapper = mount(SubagentRow, {
       props: {
         tool: makeSubagent({ input: { action: 'start', task: '完整 task 内容' } }),
       },
@@ -144,7 +144,7 @@ describe('BlockSubagent: collapsed only（§10：task 预览 / 展开体 / bg �
   })
 
   it('output 有 bgResponse 也不渲染 bg 状态行（完成通知走 §10.5 BgNotifyCard）', () => {
-    const wrapper = mount(BlockSubagent, {
+    const wrapper = mount(SubagentRow, {
       props: {
         tool: makeSubagent({
           input: { action: 'start', task: 'task' },
@@ -170,9 +170,9 @@ describe('BlockSubagent: collapsed only（§10：task 预览 / 展开体 / bg �
   })
 })
 
-describe('BlockSubagent: 点击行为（开 drawer subagent tab）', () => {
+describe('SubagentRow: 点击行为（开 drawer subagent tab）', () => {
   it('output 含 subagentId + sessionId → openSubagent(virtualId, enteredFrom:chat)', async () => {
-    const wrapper = mount(BlockSubagent, {
+    const wrapper = mount(SubagentRow, {
       props: {
         tool: makeSubagent({
           output: JSON.stringify({
@@ -194,7 +194,7 @@ describe('BlockSubagent: 点击行为（开 drawer subagent tab）', () => {
   })
 
   it('缺 sessionId 时 no-op（不抛错、不调 openSubagent）', async () => {
-    const wrapper = mount(BlockSubagent, {
+    const wrapper = mount(SubagentRow, {
       props: {
         tool: makeSubagent({
           output: JSON.stringify({ action: 'start', subagentId: '1338dda5' }),
@@ -206,7 +206,7 @@ describe('BlockSubagent: 点击行为（开 drawer subagent tab）', () => {
   })
 
   it('output 非合法 JSON 时 no-op（running 早期 output 未就绪）', async () => {
-    const wrapper = mount(BlockSubagent, {
+    const wrapper = mount(SubagentRow, {
       props: {
         tool: makeSubagent({ output: 'plain text not json' }),
         sessionId: 's1',
@@ -217,7 +217,7 @@ describe('BlockSubagent: 点击行为（开 drawer subagent tab）', () => {
   })
 
   it('output JSON 无 subagentId 字段时 no-op', async () => {
-    const wrapper = mount(BlockSubagent, {
+    const wrapper = mount(SubagentRow, {
       props: {
         tool: makeSubagent({ output: JSON.stringify({ action: 'start', slug: 'rs' }) }),
         sessionId: 's1',
@@ -228,9 +228,9 @@ describe('BlockSubagent: 点击行为（开 drawer subagent tab）', () => {
   })
 })
 
-describe('BlockSubagent: running / failed / unfinished 态', () => {
+describe('SubagentRow: running / failed / unfinished 态', () => {
   it('running 态渲染专属动效图标（subagent 在线脉冲，RunningBlockIcon）', () => {
-    const wrapper = mount(BlockSubagent, {
+    const wrapper = mount(SubagentRow, {
       props: { tool: makeSubagent({ status: 'running' }) },
     })
     expect(wrapper.find('[data-running-icon="subagent"]').exists()).toBe(true)
@@ -241,7 +241,7 @@ describe('BlockSubagent: running / failed / unfinished 态', () => {
   })
 
   it('running 态无 progress 快照字段（detail 永远 undefined，异步 background）', () => {
-    const wrapper = mount(BlockSubagent, {
+    const wrapper = mount(SubagentRow, {
       props: { tool: makeSubagent({ status: 'running', detail: undefined }) },
     })
     const text = wrapper.text()
@@ -253,7 +253,7 @@ describe('BlockSubagent: running / failed / unfinished 态', () => {
   })
 
   it('failed 态整行降 neutral-dim（不切 icon，颜色表达）', () => {
-    const wrapper = mount(BlockSubagent, {
+    const wrapper = mount(SubagentRow, {
       props: {
         tool: makeSubagent({
           status: 'error',
@@ -268,7 +268,7 @@ describe('BlockSubagent: running / failed / unfinished 态', () => {
   })
 
   it('unfinished 态不渲染终态指示（终态 icon 已移除）', () => {
-    const wrapper = mount(BlockSubagent, {
+    const wrapper = mount(SubagentRow, {
       props: { tool: makeSubagent({ status: 'end_not_received' }) },
     })
     // 终态指示（Check/CircleDashed/未收到结果文字）已移除，unfinished 态不再显示额外文案
@@ -277,7 +277,7 @@ describe('BlockSubagent: running / failed / unfinished 态', () => {
   })
 
   it('根 div 是 trace-subagent（纯缩进无边框）', () => {
-    const wrapper = mount(BlockSubagent, {
+    const wrapper = mount(SubagentRow, {
       props: { tool: makeSubagent() },
     })
     const root = wrapper.find('.trace-subagent')

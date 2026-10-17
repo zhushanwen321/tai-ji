@@ -2,6 +2,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+	buildAskUserSummary,
 	createQuestionState,
 	InputSchema,
 	OTHER_LABEL,
@@ -66,5 +67,36 @@ describe("types", () => {
 			.properties.questions;
 		expect(qs.minItems).toBe(1);
 		expect(qs.maxItems).toBe(4);
+	});
+});
+
+// ── buildAskUserSummary（收起态一行摘要，details.summary 同源）──
+describe("buildAskUserSummary", () => {
+	it("单问无 header → question 全文（Asked 1 question: <question>）", () => {
+		expect(buildAskUserSummary([{ question: "Which database?", options: [] }])).toBe(
+			"Asked 1 question: Which database?",
+		);
+	});
+
+	it("单问有 header → header 优先", () => {
+		expect(
+			buildAskUserSummary([{ question: "Which database?", header: "DB", options: [] }]),
+		).toBe("Asked 1 question: DB");
+	});
+
+	it("多问 → 复数名词 + header 逗号连接", () => {
+		expect(
+			buildAskUserSummary([
+				{ question: "Which database?", header: "DB", options: [] },
+				{ question: "Which region?", header: "Region", options: [] },
+			]),
+		).toBe("Asked 2 questions: DB, Region");
+	});
+
+	it("无 header 的多问成员回退截断 question（60 字上限 + 省略号）", () => {
+		const long = "q".repeat(70);
+		expect(buildAskUserSummary([{ question: long, options: [] }])).toBe(
+			`Asked 1 question: ${"q".repeat(60)}…`,
+		);
 	});
 });

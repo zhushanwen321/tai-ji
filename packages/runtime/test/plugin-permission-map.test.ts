@@ -100,13 +100,13 @@ describe('plugin-permission-map SSOT（AC-I6）', () => {
     const ssot = new Set<string>(PLUGIN_RPC_METHODS)
     const orphans = [...registeredMethods].filter(m => !ssot.has(m))
     expect(orphans, `methods registered but missing from PLUGIN_RPC_METHODS: ${orphans.join(', ')}`).toEqual([])
-    // 数量级回归锚点：47（agent5 commands3 config3 hooks2 notify1 sessionData4
-    // sessions8 storage8 tools2 ui6 views2 workspace3）+ AP-4 读面 6（readEntries/
+    // 数量级回归锚点：46（agent5 commands3 config3 hooks2 notify1 sessionData4
+    // sessions8 storage8 tools2 ui5 views2 workspace3）+ AP-4 读面 6（readEntries/
     // getCommands/register+unregisterEntryInvalidation 4 + activate 族 2）+ ui 命令式
-    // 点位 1（updateHeaderAction，[u5b] handler 已落地转正）= 54。
-    // registeredMethods.size 同步锚点：54/54。
-    expect(PLUGIN_RPC_METHODS.length).toBe(54)
-    expect(registeredMethods.size).toBe(54)
+    // 点位 1（updateHeaderAction，[u5b] handler 已落地转正）= 53。
+    // registeredMethods.size 同步锚点：53/53。
+    expect(PLUGIN_RPC_METHODS.length).toBe(53)
+    expect(registeredMethods.size).toBe(53)
   })
 
   it('AC-I6: 全部口径归一化产物无孤儿（每个产出方法名都在真实注册表）', () => {

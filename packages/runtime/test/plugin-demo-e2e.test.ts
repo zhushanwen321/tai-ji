@@ -132,7 +132,6 @@ function createMockContext(): {
         notify: vi.fn(async (level: string, message: string) => {
           notifications.push({ level, message })
         }),
-        updateStatusBarItem: vi.fn(async () => {}),
         updateHeaderAction: vi.fn(async () => ({ updated: true })),
       },
       // ── agent ─────────────────────────────────────────────
