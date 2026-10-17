@@ -198,7 +198,10 @@ const EDGE_KIND_CLASS: Record<WorkflowDagEdgeKind, string> = {
 
 const CLUSTER_TITLE_INSET = 12
 const CLUSTER_TITLE_H_BASE = 20
-const PREDICATE_MAX_CHARS = 16
+/** 条件谓词标注显示截断上限（px 布局友好宽度内的可读性上界；完整原文走 title 悬停）。
+ *  40 字符容下常规布尔条件全文（如 `commitPlan.stagePaths.length === 0`），更长的
+ *  仍截断省略。 */
+const PREDICATE_MAX_CHARS = 40
 
 /** wheel 缩放灵敏度（指数系数，原型同款）。 */
 const ZOOM_WHEEL_FACTOR = 0.0012

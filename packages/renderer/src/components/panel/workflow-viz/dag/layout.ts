@@ -20,8 +20,9 @@
  * 边路由（正交）：全部边只走横竖两向，任何段不穿节点卡片；连线锚点只取节点四条
  * 边的中点（上/下/左/右共 4 个连线点，上边中点预留）——
  * - 顺序/数据流/条件边：源右中心 → 通道竖线 → 目标左中心的三段折线（同行退化直线）；
- *   同一通道（源同列且目标同列）的并行边竖线段默认重合，按纵向跨度重叠游程居中
- *   错开车道（LANE_STEP_PX），fan-in/fan-out 不再叠成一根线；
+ *   跨列并行边（同源列且同目标列）竖线段默认重合，按纵向跨度重叠游程居中错开车道
+ *   （LANE_STEP_PX），fan-in/fan-out 不再叠成一根线；同列前向边（源与目标同列）
+ *   走列右缘细道绕行——缺省通道中位竖线会落在节点列内穿卡片（绘制顺序遮住不可见）；
  * - loop-back（底边中点进出）：跨列回边在两端同列下方均无堆叠节点时四折点直连——
  *   源底边中点垂直下探 → 底部总线（全图最深节点下方）横行 → 目标底边中点垂直
  *   上升，进出垂直于底边、节点附近无横行段；任一端下方被同列堆叠节点挡住时回退
@@ -404,6 +405,27 @@ export function layoutEdges(dag: WorkflowDag, nodes: DagLayoutNode[]): DagLayout
     const y1 = from.y + from.h / HALF
     const x2 = to.x
     const y2 = to.y + to.h / HALF
+    // 同列前向边（同 phase 内上下游调用点）：右中点出 → 列右缘细道下/上升 → 左中点
+    // 入。缺省通道路由的中位竖线 = 两端 x 的中点，落在节点列内部（横竖段全部穿卡片，
+    // 被「边先节点后」的绘制顺序遮住不可见）；细道在分区右内边距带内（LOOP_SIDE_OFFSET，
+    // CLUSTER_PAD_X=12 容得下），与回边细道共带——同列多条边共享细道时纵向跨度
+    // 相邻链（a→b→c）天然衔接不重叠，跨行跳连（a→c 与 a→b 并存）的重叠为已知罕见形态
+    if (Math.abs(from.x - to.x) < COINCIDE_EPS) {
+      const gutterX = from.x + DAG_NODE_W + LOOP_SIDE_OFFSET
+      pending.push({
+        edge,
+        kind: 'fixed',
+        points: [
+          { x: x1, y: y1 },
+          { x: gutterX, y: y1 },
+          { x: gutterX, y: y2 },
+          { x: x2, y: y2 },
+        ],
+        labelX: gutterX + LABEL_GAP_X,
+        labelY: (y1 + y2) / HALF,
+      })
+      continue
+    }
     if (Math.abs(y1 - y2) < COINCIDE_EPS) {
       pending.push({
         edge,

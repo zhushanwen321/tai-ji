@@ -303,6 +303,30 @@ describe('layoutEdges 正交路由（白盒）', () => {
     expect(layoutEdges(d, layout.nodes)).toHaveLength(0)
   })
 
+  it('同列前向边：列右缘细道绕行（右中点出 → 左中点入），不再走列中线穿卡片', () => {
+    const d = dag({
+      phases: [{ name: 'p0', order: 0 }],
+      nodes: [node({ id: 'a' }), node({ id: 'b', templateName: 'zb' })],
+      edges: [{ id: 'e-same', from: 'a', to: 'b', kind: 'conditional', predicate: 'commitPlan.stagePaths.length === 0' }],
+    })
+    const layout = layoutDag(d)
+    const [la, lb] = layout.nodes
+    const [edge] = layoutEdges(d, layout.nodes)
+    expect(edge.points).toHaveLength(4)
+    expectAxisAligned(edge.points)
+    // 出锚 = 源右中点，入锚 = 目标左中点（四中点锚点纪律）
+    expect(edge.points[0]).toEqual({ x: la.x + DAG_NODE_W, y: la.y + la.h / 2 })
+    expect(edge.points[3]).toEqual({ x: lb.x, y: lb.y + lb.h / 2 })
+    // 细道 x 在节点右缘之外、分区内边距带内（CLUSTER_PAD_X=12）——竖线段不穿卡片
+    const gutterX = edge.points[1].x
+    expect(gutterX).toBe(edge.points[2].x)
+    expect(gutterX).toBeGreaterThan(la.x + DAG_NODE_W)
+    expect(gutterX).toBeLessThan(la.x + DAG_NODE_W + 12)
+    // 谓词标注锚在细道旁（节点列之外，不再落进卡片内部）
+    expect(edge.labelX).toBe(gutterX + 5)
+    expect(edge.labelY).toBe((la.y + la.h / 2 + lb.y + lb.h / 2) / 2)
+  })
+
   it('同通道并行边（fan-in）：竖线段按车道居中错开，不再重合成一根线', () => {
     const d = dag({
       phases: [{ name: 'p0', order: 0 }, { name: 'p1', order: 1 }],
