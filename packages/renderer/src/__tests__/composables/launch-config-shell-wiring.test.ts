@@ -274,7 +274,6 @@ const composerStubs = {
   AddMenuPopover: SIMPLE,
   ContextChipsBar: SIMPLE,
   ContextCapacityPopover: SIMPLE,
-  ComposerCapacityBar: SIMPLE,
   RetryIndicator: SIMPLE,
   QueueBubble: SIMPLE,
 }

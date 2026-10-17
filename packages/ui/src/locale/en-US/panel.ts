@@ -287,8 +287,6 @@ export default {
   context: {
     // Metrics aggregate entry (W3a single-icon button; resident at all fit levels since ui-optimize decision 6; hover opens the capacity/TTFT/speed/cache four-card aggregate page) title
     metricsAggregateTitle: 'Metrics',
-    // Top-edge capacity hairline bar (ui-optimize decision 6 / N7) accessibility hint (aria-label; the bar shows tier color only, no numbers)
-    capacityBarHint: 'Context usage {percent}%',
     capacity: 'Context capacity',
     used: 'Used',
     total: 'Total',
