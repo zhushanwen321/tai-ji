@@ -18,7 +18,7 @@
 
 | 车道 | 供稿方 | 消费方 | 状态 |
 |------|--------|--------|------|
-| pi 车道（delivery-port custom 车道） | `DeliveryEnvelope.meta`（已删除） | 无 | **零供稿已成立**（全仓 grep 六处 deliver 调用点均不带 meta） |
+| pi 车道（delivery-port custom 车道） | `DeliveryEnvelope.meta`（已删除） | 无 | **零供稿已成立**（全仓 grep 五处 deliver 调用点均不带 meta） |
 | runtime 车道（text 车道） | `session-manager-handler.ts` send 路径 `sendChecked({ meta: { notifyId, parentSid } })`（notify-once D2） | `runtime/src/index.ts` onSettledMessage 读 `msg.meta.notifyId/parentSid` → notify-claims markInjected / disarmDeliveryFailed（armed→injected 受理回执锚） | **活跃**（notify-once D2 状态机组成部分） |
 
 ## 删除判据（裁决时点逐条核对）
