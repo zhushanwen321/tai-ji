@@ -696,7 +696,7 @@ demo 用 `@keyframes shimmer`（1.4s ease-in-out infinite，linear-gradient 扫�
 - **形态 B**：icon 一级 + 各 tab 自治二级（L1 列表由容器注册表驱动，8 条）
   - git/doc：无二级 tab
   - detail：文件详情/diff，面板内顶部多文件实例 tab 条（命中未开 = 新增并激活、已开 = 仅激活、不设打开上限；keep-alive 多实例语义——切换不丢滚动位置与 diff/preview 模式）
-  - subagent：嵌套只读对话流（无 composer）
+  - subagent：嵌套只读对话流（无 composer）；详情页顶部实例 tab 条（打开序排列，× 关闭，激活者关闭时激活右邻/左邻；**恒渲染**——单 tab/空态不隐藏，布局稳定不跳变，2026-10-17 裁决；多 subagent 详情并行保留）
   - bashTask：后台命令详情（无二级 tab）
   - plan：计划文档阅读器（面板内文档切换条 = 组件内部导航）
   - btw：旁路线列表 + 当前线对话（组件内部导航，可开多条线）
