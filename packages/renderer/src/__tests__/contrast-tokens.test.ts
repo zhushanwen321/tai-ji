@@ -174,6 +174,14 @@ describe('对比度令牌阈值（ui-optimize §4 场景 1③，宿主 = 对话�
     }
   })
 
+  it('元信息档 --neutral-dim 于侧栏 --bg 上对比 ≥ 2.8:1（暗色族三主题；2026-10-17 六主题 v2 把此前未被断言覆盖的侧边栏暗坑纳入守护）', () => {
+    for (const theme of THEMES.filter((t) => t.family === 'dark')) {
+      const t = tokensByTheme.get(theme.id)!
+      const ratio = contrastRatio(t['--neutral-dim'], t['--bg'])
+      expect(ratio, `${theme.label} ${t['--neutral-dim']} on ${t['--bg']} = ${ratio.toFixed(2)}:1`).toBeGreaterThanOrEqual(2.8)
+    }
+  })
+
   it('亮色族 --neutral-dim 维持现行值（决策 2 锚定；实测 ≈2.57 不适用暗色 2.8 阈值）', () => {
     for (const theme of THEMES.filter((t) => t.family === 'light')) {
       const t = tokensByTheme.get(theme.id)!
