@@ -706,7 +706,6 @@ export interface PiHistoryToolResult extends PiHistoryMessage {
 export const EXTENSION_EVENTS = {
   WIDGET: 'extension:widget',
   WIDGET_GUI: 'extension:widgetGui',  // 新增：结构化 widget
-  STATUS: 'extension:status',
 } as const
 ```
 
@@ -871,7 +870,6 @@ const statusMaps = new Map<string, Ref<Map<string, string>>>()  // 按 sessionId
 
 export function useExtensionStatus(sessionId: Ref<string | null>) {
   // 从 SideDrawer 移出订阅逻辑 + statusMap
-  // 注册 extension:status 订阅（useSessionEvents）
   // 返回 computed statusEntries
 }
 ```

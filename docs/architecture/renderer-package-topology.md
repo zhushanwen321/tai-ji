@@ -137,7 +137,7 @@ extension-host/
 
 ### 4.3 挂载点注册表（desktop 全集 vs mobile 子集）
 
-**挂载点不是硬编码在 ExtensionHost，而是由壳注册**：桌面壳 bootstrap 注册 sidebar.tab / panel.header / composer.toolbar / statusbar（挂载点全集以 `packages/core/src/bootstrap.ts` registerMountPoints 为 SSOT）；移动壳只注册 message-stream / slash / companion。ContributionRegistry 把 plugin 声明按类型路由到对应挂载点——mobile 天然获得子集，无需 if-else 特判；未来新形态只写自己的挂载点注册。
+**挂载点不是硬编码在 ExtensionHost，而是由壳注册**：桌面壳 bootstrap 注册 sidebar.tab / panel.header / composer.toolbar（挂载点全集以 `packages/core/src/bootstrap.ts` registerMountPoints 为 SSOT）；移动壳只注册 message-stream / slash / companion。ContributionRegistry 把 plugin 声明按类型路由到对应挂载点——mobile 天然获得子集，无需 if-else 特判；未来新形态只写自己的挂载点注册。
 
 **Plugin 交互点位（headerAction）**：`panel.header` 挂载点上并存两条点位——既有 ViewHost GuiComponent 信息条（非交互）与 `headerActions` 声明式按钮区（宿主原生渲染，运行时 `api.ui.updateHeaderAction(sessionId, …)` 改徽标/tooltip/disabled；运行时徽标帧 `plugin:headerActionUpdate` 经 broker 全局广播 transient 不入 ring）。可交互原语 `action-bar` 是 GuiComponent 协议首个交互件（items 携 commandId，点击经壳层 provide 的执行器走既有命令链）。首消费者 = `resources/plugins/scheduler-manager`（定时任务管理面；面板内容走 WorkflowVizOverlay 定时任务 tab，`views.update` 显式 sessionId 必填）。
 

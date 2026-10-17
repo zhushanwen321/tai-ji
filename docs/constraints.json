@@ -1943,8 +1943,7 @@
         ".github/workflows/release-npm.yml",
         ".github/workflows/release-npm-dev.yml",
         ".github/workflows/ci.yml",
-        "scripts/check-publish-surface.mjs",
-        "resources/plugins/statusline/package.json"
+        "scripts/check-publish-surface.mjs"
       ],
       "authority": [
         "architecture/npm-publish-surface-guard.md#33-关键决策与权衡",

@@ -764,7 +764,7 @@ demo 用 `@keyframes shimmer`（1.4s ease-in-out infinite，linear-gradient 扫�
 
 | 维度 | 挂载点 | 级别 | 当前状态 |
 |---|---|---|---|
-| **A 结构容器** | A1 侧栏 Plugins tab（第 3 枚） / A2 drawer tab(proposed) / A3 工具条按钮 / A4 底栏状态 | L1 | A1/A2/A3 panels 声明未消费；A4 pi 已实现（extension:status），plugin 未接入 |
+| **A 结构容器** | A1 侧栏 Plugins tab（第 3 枚） / A2 drawer tab(proposed) / A3 工具条按钮 | L1 | A1/A2/A3 panels 声明未消费；A4 底栏状态已随 StatusBar 整体退役（ADR-0141） |
 | **B 对话流+companion** | B1 tool result / B2 消息卡 / B3 companion(统一出口：dialog) | L2/L1 | **已实现**（5 闭环；提问表单走 FormOverlay 覆盖 composer，不进 band） |
 | **D 命令配置** | D1 slash / D2 settings 区段 | L1 | D1 已实现（双轨待统一） |
 | **E 独立 view** | E1 独立 view 路由 | L3 | 未实现（仅 built-in） |
