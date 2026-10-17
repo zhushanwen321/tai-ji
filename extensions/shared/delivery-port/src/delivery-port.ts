@@ -604,7 +604,7 @@ export function createDeliveryPort(host: DeliveryPortHost): DeliveryPortHandle {
    * 契约外输入防御：键未注册且无条目（「未知 id」——判定源 = 活跃集 ∪ 投递日志 ∪
    * 曾注册集的补集，工具侧组装 errors）不登记等待集（防空等到 timeout 挂死）、不
    * 虚构终态；快照按 waiting 形态表达（state 词表无第五态），语义由工具侧未知判定
-   * 覆盖（见 deviations 登记）。
+   * 覆盖。
    */
   function collectArm(keys: string[]): CollectSnapshot {
     if (disposed) throw new Error("collectArm on disposed delivery port");

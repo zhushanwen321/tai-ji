@@ -63,6 +63,7 @@ import {
 	isPendingActive,
 	normalizePendingType,
 	scanRegisteredIds,
+	scanUnregisterStatuses,
 	type PendingEntry,
 	type PendingKind,
 	type PendingStatus,
@@ -458,6 +459,20 @@ export default function pendingNotificationsExtension(pi: ExtensionAPI): void {
 		// 合批窗口，恢复 push）。空等待路径不会走到这里（提前返回）。
 		collected.push(...port.consume());
 		port.collectRelease();
+
+		// outcome 缺失回填（设计 §3.1③ 字段来源表：outcome 与 pending:unregister 的
+		// status 对齐）：「等待中同步到达」的挂起条目在端口 consume 时点，生产方的注销
+		// entry 尚未落盘（managed flushBatch 的 deliver 与 unregisterPending 同步段相邻、
+		// deliver 先行；端口 consume 由到达回调在 deliver 栈内同步触发），outcome 恒取
+		// 空。await 恢复后生产方同步栈已完成（注销 entry 已落盘），按本 session entries
+		// 现算回填；注销不在册的条目保持 undefined（诚实缺省，不虚构终态）。
+		if (collected.some((c) => c.outcome === undefined)) {
+			const statuses = scanUnregisterStatuses(ctx.sessionManager.getEntries());
+			for (const c of collected) {
+				const status = statuses.get(c.id);
+				if (c.outcome === undefined && status !== undefined) c.outcome = status;
+			}
+		}
 
 		// 未收取的等待键进 stillOpen（无 note = 单纯未完成，完成时恢复 push）。
 		const collectedIds = new Set(collected.map((c) => c.id));

@@ -13,7 +13,8 @@
 //   mock 同步入账）
 // - 覆盖（任务书目标 6）：lifetime 排除生效 / 跨 session 残留反向断言 / 未知 id
 //   errors / 第四态返回形态；另覆盖 sequential 声明、abort 正常返回、timeout、
-//   in-push-pipeline note、快照重收、port 缺席降级、kind 落盘透传
+//   in-push-pipeline note、快照重收、port 缺席降级、kind 落盘透传、等待中同步到达
+//   的 outcome 回填（一致性修复 U1：managed 合批「deliver 先于注销」同步段时序）
 
 /* eslint-disable taste/no-unsafe-cast -- 测试 mock 构造（pending-notifications.test.ts:15 同款）：最小 mock ExtensionAPI/ExtensionContext 无法逐字段满足真实接口，cast 真值由测试断言兜底（mock 被被测代码真实调用，行为不符即红） */
 
@@ -21,7 +22,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import pendingNotificationsExtension from "../index";
-import { computeCollectWaitKeys, countActiveFromEntries, scanRegisteredIds } from "../state";
+import { computeCollectWaitKeys, countActiveFromEntries, scanRegisteredIds, scanUnregisterStatuses } from "../state";
 
 // ── delivery-port 全模块 mock（vi.mock 工厂提升，经 vi.hoisted 共享引用） ──
 
@@ -244,6 +245,24 @@ describe("scanRegisteredIds（曾注册集：未知 id 判定源之一）", () =
 	});
 });
 
+describe("scanUnregisterStatuses（注销 status 回填源：collect_results outcome 缺失回填）", () => {
+	it("映射产物 status 在册的注销 entry 收进映射；词表外/畸形不收（不虚构终态）", () => {
+		const entries: unknown[] = [
+			{ customType: "pending:unregister", data: { id: "ok-1", reason: "completed", status: "completed" } },
+			{ customType: "pending:unregister", data: { id: "bad-1", reason: "x", status: "not-a-status" } },
+			{ customType: "pending:unregister", data: { id: "bad-2", reason: "x" } },
+			{ customType: "pending:unregister", data: { reason: "completed", status: "completed" } },
+			{ customType: "other", data: { id: "ok-1", status: "failed" } },
+			null,
+		];
+		const statuses = scanUnregisterStatuses(entries);
+		expect(statuses.get("ok-1")).toBe("completed");
+		expect(statuses.has("bad-1")).toBe(false);
+		expect(statuses.has("bad-2")).toBe(false);
+		expect(statuses.size).toBe(1);
+	});
+});
+
 // ────────────────────────────────────────────────────
 // collect_results 工具（mock port 注入）
 // ────────────────────────────────────────────────────
@@ -370,6 +389,52 @@ describe("collect_results tool", () => {
 		expect(res.details.stillOpen).toEqual([]);
 		expect(setup.port.collectRelease).toHaveBeenCalledTimes(1);
 		expect(unsubscribe).toHaveBeenCalledTimes(1);
+	});
+
+	it("[同步到达 outcome 回填] 等待中到达的条目：consume 时点注销未落盘 outcome 取空，返回组装前从注销 entry 回填（U1）", async () => {
+		// 时序镜像（managed flushBatch，watch-coordinator.ts:323-329）：deliver（到达
+		// 回调在 deliver 栈内同步触发 pullArrived→consume，此刻注销 entry 未落盘）→
+		// 同步段后半 unregisterPending 落盘 → await 恢复后回填生效。
+		setup.entries.push(makeRegisterEntry("sm-1", { type: "session" }));
+		setup.port.collectArm.mockReturnValue([{ id: "sm-1", state: "waiting" }]);
+
+		const promise = runCollect(setup, {});
+		const arrivalCb = setup.port.onCollectArrival.mock.calls[0][0] as () => void;
+		// 端口 consume 的真实返回形态：载荷在、outcome 取不到（注销尚未落盘）
+		setup.port.consume.mockReturnValueOnce([
+			{ id: "sm-1", type: "session", content: "2 queued messages done", details: { fulfills: 2 } },
+		]);
+
+		arrivalCb(); // deliver 同步栈前半：consume 取走载荷，outcome 缺失
+		setup.handlers.pendingUnregister!({ id: "sm-1", reason: "completed" }); // 同步栈后半：注销落盘（listener 走 mapReasonToStatus）
+
+		const res = await promise;
+
+		expect(res.details.collected).toEqual([
+			{ id: "sm-1", type: "session", outcome: "completed", content: "2 queued messages done", details: { fulfills: 2 } },
+		]);
+		// 注销 entry 已由真实 listener 落盘（回填源在本 session entries 现算）
+		expect(
+			setup.entries.some((e) => e.customType === "pending:unregister" && e.data.id === "sm-1"),
+		).toBe(true);
+	});
+
+	it("[outcome 回填反向断言] 注销 entry 不在册的收取条目 outcome 保持 undefined（不虚构终态）", async () => {
+		setup.entries.push(makeRegisterEntry("w-1"));
+		setup.port.collectArm.mockReturnValue([{ id: "w-1", state: "waiting" }]);
+
+		const promise = runCollect(setup, {});
+		const arrivalCb = setup.port.onCollectArrival.mock.calls[0][0] as () => void;
+		setup.port.consume.mockReturnValueOnce([
+			{ id: "w-1", type: "workflow", content: "payload without unregister" },
+		]);
+
+		arrivalCb();
+		const res = await promise;
+
+		expect(res.details.collected).toEqual([
+			{ id: "w-1", type: "workflow", outcome: undefined, content: "payload without unregister" },
+		]);
 	});
 
 	it("超时路径：已收部分进 collected、未完成进 stillOpen（诚实返回，不抛错）", async () => {

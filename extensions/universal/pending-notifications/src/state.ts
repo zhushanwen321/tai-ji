@@ -20,7 +20,12 @@
  *   对齐 goal continuation 守卫语义）；历史 session 文件中遗留的带 expiresAt 的
  *   register entry 无需迁移——差集语义不读该键
  */
-import { applyPendingDiff, scanPendingEntries } from "@zhushanwen/extension-protocol";
+import {
+	PENDING_UNREGISTER_ENTRY_TYPE,
+	applyPendingDiff,
+	scanPendingEntries,
+	type MappedPendingStatus,
+} from "@zhushanwen/extension-protocol";
 
 /** 异步操作类型（来源：workflow / subagent / bash 后台任务 / session 完成通知债权） */
 export type PendingType = "workflow" | "subagent" | "bash" | "session";
@@ -131,6 +136,46 @@ export function scanRegisteredIds(entries: unknown[]): Set<string> {
 		if (typeof data.id === "string") ids.add(data.id);
 	}
 	return ids;
+}
+
+/**
+ * 已注销 id → 注销 status 映射（entries 现算）：collect_results 返回组装前对 outcome
+ * 缺失条目回填用（result-collect 设计 §3.1③ 字段来源表——outcome 与 pending:unregister
+ * 的 status 对齐）。回填原因：「等待中同步到达」的挂起条目在端口 consume 时点，生产方
+ * 的注销 entry 尚未落盘（managed flushBatch 的 deliver 与 unregisterPending 同步段相邻、
+ * deliver 先行——端口 consume 由到达回调在 deliver 栈内同步触发），outcome 恒取空；工具
+ * 侧 await 恢复后生产方同步栈已完成（注销已落盘），此处现算补齐。
+ *
+ * protocol scanPendingEntries 不返回注销 entry 的 data（仅收 id），本函数独立轻扫其
+ * status 字段（写侧全部落盘点——emit listener / bte 对账 / core sweep / workflow 直落
+ * ——均带 protocol mapReasonToStatus 映射产物 status）；词表外/畸形不收（与 delivery-port
+ * scanPendingBaseline 的 MAPPED_STATUS_VALUES 同口径，不虚构终态）。protocol 只导出
+ * MappedPendingStatus 类型未导出值集，本集合与其封闭联合同步维护。
+ */
+const MAPPED_STATUS_VALUES: ReadonlySet<string> = new Set([
+	"completed",
+	"failed",
+	"cancelled",
+	"expired",
+	"time_limited",
+	"aborted",
+]);
+
+export function scanUnregisterStatuses(entries: unknown[]): Map<string, MappedPendingStatus> {
+	const statuses = new Map<string, MappedPendingStatus>();
+	for (const raw of entries) {
+		if (!raw || typeof raw !== "object") continue;
+		const entry = raw as { customType?: unknown; data?: unknown };
+		if (entry.customType !== PENDING_UNREGISTER_ENTRY_TYPE) continue;
+		if (!entry.data || typeof entry.data !== "object") continue;
+		const data = entry.data as Record<string, unknown>;
+		if (typeof data.id !== "string" || data.id === "") continue;
+		const status = data.status;
+		if (typeof status === "string" && MAPPED_STATUS_VALUES.has(status)) {
+			statuses.set(data.id, status as MappedPendingStatus);
+		}
+	}
+	return statuses;
 }
 
 /**
