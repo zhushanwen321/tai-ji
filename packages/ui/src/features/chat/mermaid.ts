@@ -71,7 +71,7 @@ export function resolveMermaidThemeVariables(theme: 'dark' | 'light'): Record<st
       secondaryColor: '#efede9', // --surface-2（亮）
       secondaryBorderColor: '#43765d', // --accent（亮青玉）
       secondaryTextColor: '#706e6a', // --neutral-mid（亮）
-      tertiaryColor: '#edebe8', // --bg（亮）
+      tertiaryColor: '#eef1ea', // --bg（亮）
       tertiaryBorderColor: '#00000012', // --border（亮 rgba(0,0,0,0.07)）
       tertiaryTextColor: '#706e6a', // --neutral-mid（亮）
       lineColor: '#43765d', // --accent（亮青玉）
@@ -85,7 +85,7 @@ export function resolveMermaidThemeVariables(theme: 'dark' | 'light'): Record<st
     fontFamily: "'JetBrains Mono', 'IBM Plex Mono', ui-monospace, Menlo, monospace",
     fontSize: '14px', // --text-base 基准档
     // 暗色（玄）：深底节点 + 亮文字 + 青玉 accent（style.css :root）
-    primaryColor: '#101010', // --surface
+    primaryColor: '#171717', // --surface
     primaryBorderColor: '#ffffff21', // --border-strong rgba(255,255,255,0.13)
     primaryTextColor: '#ececec', // --neutral-fg
     secondaryColor: '#27272a', // --surface-2

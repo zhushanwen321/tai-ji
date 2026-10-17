@@ -22,11 +22,11 @@
   --bg-stage: #0a0a0c;          /* 窗口壳：标题栏底、卡片之间的缝（全场最深） */
   --bg: #1e1e1e;                /* 框架层：侧栏/composer/settings 内容区（同层同色） */
   --bg-sunken: var(--bg);       /* 框架层沉底同值跟随（语义 = 与宿主 --bg 同值） */
-  --surface: #101010;           /* 内容层：对话流/右侧 drawer/底部 drawer 的阅读区（沉底） */
+  --surface: #171717;           /* 内容层：对话流/右侧 drawer/底部 drawer 的阅读区（沉底；避开近纯黑降光晕，2026-10-17 对话流颜色提案） */
   --surface-hover: #262629;     /* 面板悬停 */
   --surface-2: #27272a;         /* 二级表面（header 浮起分层 / SegmentedTab active） */
   --bg-elevated: #2b2b2e;       /* 浮层：hover 详情卡/popover */
-  --bg-input: #161618;          /* 内容层内次级：代码块/文件 chip 底 */
+  --bg-input: #1d1d1f;          /* 内容层内次级：代码块/文件 chip 底（亮于 surface 一小档，阶梯单调性随 surface 提档联动） */
   --bg-card: #262626;           /* 设置分组卡片等操作域浮起容器（亮于 --bg 一档） */
   /* 用户气泡随 --bg-elevated 派生：demo 暗族三主题 --bubble 逐块等于同块 --elevated
      （玄 #2b2b2e / 黛蓝 #2a2b34 / 暖墨 #2e2b27），无独立档，preset 块不重声明即自动逐主题相等；
@@ -39,10 +39,10 @@
   /* ── 文字（neutral 谱系 · 纯中性四档，ui-optimize 决策2 去蓝偏）──
      暗色族三主题（玄/黛蓝/暖墨）文字档统一为同一组纯中性值；
      亮色族三主题文字档维持宣纸墨色不变（亮色族无蓝偏问题） */
-  --neutral-fg: #ececec;        /* 主前景 + 正文（对话流/侧栏主文字/composer 可操作文字同档，≈16:1） */
+  --neutral-fg: #ececec;        /* 主前景 + 正文（对话流/侧栏主文字/composer 可操作文字同档，≈15:1） */
   --neutral-fg-2: #d9d9d9;      /* 次级正文（demo --fg-2：正文与工具行之间的强调文字档） */
   --neutral-mid: #8a8a8a;       /* 工具行/次要（~5.4:1，过 AA 大字线） */
-  --neutral-dim: #5c5c5c;       /* 时间与元信息（~2.8:1，低显著度装饰性文字的显式取舍） */
+  --neutral-dim: #606060;       /* 时间与元信息（~2.85:1，低显著度装饰性文字的显式取舍；随 surface 提档联动提亮守 ≥2.8 线） */
   --neutral-faint: #45454a;     /* 极弱/装饰 */
   --neutral-ico: #8a8a8a;       /* 图标默认色（随 mid 档校准） */
   --neutral-ico-hover: #ececec; /* 图标 hover 色 */
@@ -253,10 +253,11 @@
    ============================================================ */
 [data-theme="light"] {
   /* 亮色最深衬底（窗口底，透过 app-shell 圆角/padding 透出）。
-     TAIJI_PAPER 未定义独立 stage，取宣纸族最深暖灰 #dbd9d4，
-     延续暗色 base(深)→canvas(中)→surface(浅) 三层明度；避免泄漏 :root 暗色 #0a0a0c 形成黑框。 */
-  --bg-stage: #dbd9d4;
-  --bg: #edebe8;
+     TAIJI_PAPER 未定义独立 stage，取带青玉相的浅色 #dee3da（与 accent #43765d 同族色相，
+     分离感靠色相差而非压暗舞台，2026-10-17 对话流颜色提案；借 OpenDesign 舞台层策略），
+     延续暗色 stage(深)→bg(中)→surface(浅) 三层明度；避免泄漏 :root 暗色 #0a0a0c 形成黑框。 */
+  --bg-stage: #dee3da;
+  --bg: #eef1ea;
   /* --bg-sunken 不重声明：继承 :root var(--bg) 公式随本块 --bg 自动跟随（demo settings-vars 同构） */
   --surface: #f7f6f3;
   --surface-hover: #e6e4e0;
@@ -341,21 +342,22 @@
    ============================================================ */
 
 /* 黛蓝（暗 · 依稀蓝相）
-   bg 阶梯与文字档全值 = demo tokens.css dailan 块（wave2 终态）：底色与文字均带依稀蓝相。
+   bg 阶梯与文字档带依稀蓝相；--surface/--bg-input/--neutral-dim 与玄同明度档
+   （玄 #171717/#1d1d1f/#606060 的蓝相版，2026-10-17 对话流颜色提案三主题一致提档）。
    --bg-sunken 不重声明：继承 :root var(--bg) 随本块自动跟随；
    --md-code-bg/fg 不重声明：继承 :root code-c 派生公式，随下方 --code-c 自动解析。 */
 :root[data-theme-preset="dailan"] {
   --bg: #1f2029;
-  --surface: #0f1016;
+  --surface: #16171d;
   --surface-hover: #262732;
   --surface-2: #292a35;
   --bg-elevated: #2a2b34;
-  --bg-input: #14151c;
+  --bg-input: #1b1c23;
   --bg-card: #272833;
   --neutral-fg: #ececf0;
   --neutral-fg-2: #d9dae0;
   --neutral-mid: #8a8b96;
-  --neutral-dim: #5c5d67;
+  --neutral-dim: #61626c;
   --neutral-faint: #474853;
   --neutral-ico: #8a8a8a;
   --neutral-ico-hover: #ececec;
@@ -386,20 +388,21 @@
 }
 
 /* 暖墨（暗 · 宣纸暖相）
-   bg 阶梯与文字档全值 = demo tokens.css nuanmo 块（wave2 终态）：底色与文字均宣纸暖相。
+   bg 阶梯与文字档带宣纸暖相；--surface/--bg-input/--neutral-dim 与玄同明度档
+   （玄 #171717/#1d1d1f/#606060 的暖相版，2026-10-17 对话流颜色提案三主题一致提档）。
    --bg-sunken / --md-code-bg/fg 不重声明，理由同黛蓝块。 */
 :root[data-theme-preset="nuanmo"] {
   --bg: #201e1c;
-  --surface: #100f0e;
+  --surface: #171615;
   --surface-hover: #282522;
   --surface-2: #2b2824;
   --bg-elevated: #2e2b27;
-  --bg-input: #151312;
+  --bg-input: #1c1a19;
   --bg-card: #292623;
   --neutral-fg: #eceae6;
   --neutral-fg-2: #dbd8d3;
   --neutral-mid: #8f8b85;
-  --neutral-dim: #5f5b55;
+  --neutral-dim: #66625c;
   --neutral-faint: #4a4743;
   --neutral-ico: #8a8a8a;
   --neutral-ico-hover: #ececec;
@@ -583,7 +586,7 @@ body,
   font-size: var(--text-base);
   color: var(--neutral-fg);
   /* 五层职能分层：窗口底为 stage 最深层（#0a0a0c），app-shell(bg #1e1e1e 框架层 + rounded-[10px])
-     落在 stage 上，圆角/padding 区透出 stage 衬底；内容卡（--surface #101010 沉底）浮于框架层内。 */
+     落在 stage 上，圆角/padding 区透出 stage 衬底；内容卡（--surface #171717 沉底）浮于框架层内。 */
   background: var(--bg-stage);
 
 }

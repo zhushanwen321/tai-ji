@@ -183,8 +183,8 @@
 
 
 [data-theme="light"] {
-  --bg: #edebe8;
-  --bg-sunken: #edebe8;
+  --bg: #eef1ea;                /* 与桌面皓 bg 同步（青玉相舞台，2026-10-17 对话流颜色提案） */
+  --bg-sunken: #eef1ea;
   --surface: #f7f6f3;
   --surface-hover: #dbd9d4;
   --surface-2: #e3e1dc;
