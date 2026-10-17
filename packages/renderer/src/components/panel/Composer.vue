@@ -300,10 +300,6 @@
         </Button>
         </div>
       </div>
-
-        <!-- 顶缘容量细条（ui-optimize 决策 6 / N7）：2px 色阶预警条，只显分档不显数字
-             （精确读数在指标聚合按钮 hover 页）；数字 aria 提示见组件自身。 -->
-        <ComposerCapacityBar v-if="sessionId" :session-id="sessionId" />
     </div>
     </CommandPopover>
 
@@ -325,7 +321,6 @@ import CommandPopover from './CommandPopover.vue'
 import ModelSelectPopover from './ModelSelectPopover.vue'
 import ThinkingLevelPopover from './ThinkingLevelPopover.vue'
 import ComposerMetricsAggregate from './ComposerMetricsAggregate.vue'
-import ComposerCapacityBar from './ComposerCapacityBar.vue'
 import GenStatsTriggers from './GenStatsTriggers.vue'
 import ContextCapacityPopover from './ContextCapacityPopover.vue'
 import ModelThinkingAggregate from './ModelThinkingAggregate.vue'

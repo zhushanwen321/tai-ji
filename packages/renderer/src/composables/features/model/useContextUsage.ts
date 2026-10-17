@@ -20,8 +20,8 @@
  * 分区缓存的角色 = RPC 往返期的显示初值 + RPC 失败时的兜底显示（防闪横线），
  * 不是「切回不拉」的依据（理由见设计 D3 后台 turn 论证）。
  *
- * 消费方：ComposerCapacityBar / ContextCapacityCard 改 `const { current } = useContextUsage(...)`
- * 纯读（原消费方 ContextCapacityPopover 已随 ui-optimize 决策 6 退役）。必须在组件 setup
+ * 消费方：ContextCapacityCard / ContextCapacityPopover 改 `const { current } = useContextUsage(...)`
+ * 纯读。必须在组件 setup
  * 同步调用（内部 useSessionEvents 依赖 getCurrentInstance 守卫）。
  */
 import { computed, reactive, watch, type ComputedRef, type Ref } from 'vue'
