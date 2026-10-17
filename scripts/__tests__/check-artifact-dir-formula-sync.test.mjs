@@ -23,6 +23,9 @@ import {
   RUNTIME_TREE_FNS,
   STORE_SEGMENT_CONST,
   SHARED_PATTERN_CONST,
+  BTE_STORE_SEGMENT_CONST,
+  BTE_DOMAIN_SEGMENT_CONST,
+  SHARED_BG_TASKS_FN,
   compareTreeSegmentsShape,
   extractFunctionBlock,
   extractJoinSegment,
@@ -145,6 +148,7 @@ const sharedPathsSrc = ({
   regex = DEFAULT_REGEX,
   storeSegment = 'ext-sessions',
   treeSegments = DEFAULT_TREE_SEGMENTS,
+  bgTasksSegment = 'background-tasks',
 } = {}) =>
   [
     `export const ${STORE_SEGMENT_CONST} = '${storeSegment}'`,
@@ -156,6 +160,16 @@ const sharedPathsSrc = ({
     `  return join(getSessionStoreDir(dataDir), sessionId, '${segment}')`,
     `}`,
     ``,
+    // 第五组（域 5）对拍权威函数：bgTasksSegment = null 注入「函数缺席」形态
+    ...(bgTasksSegment
+      ? [
+          `export function ${SHARED_BG_TASKS_FN}(sessionId: string, dataDir?: string): string {`,
+          `  assertPiSessionId(sessionId)`,
+          `  return join(getSessionStoreDir(dataDir), sessionId, '${bgTasksSegment}')`,
+          `}`,
+          ``,
+        ]
+      : []),
     // treeSegments = null 注入「常量缺席」形态（守卫第四组提取失败一律 fail）
     ...(treeSegments
       ? [`export const ${SHARED_TREE_CONST} = [${treeSegments.map((s) => `'${s}'`).join(', ')}] as const`, '']
@@ -205,18 +219,39 @@ const runtimePiPathsSrc = ({ regex = DEFAULT_REGEX, treeSegments = DEFAULT_TREE_
     '',
   ].join('\n')
 
+// 第五组（域 5）fixture：base-tool-enhance registry 双引号形态（包内 prettier 风格）
+const bteRegistrySrc = ({ storeSegment = 'ext-sessions', domainSegment = 'background-tasks', regex = DEFAULT_REGEX } = {}) =>
+  [
+    `export const ${BTE_STORE_SEGMENT_CONST} = "${storeSegment}"`,
+    `export const ${BTE_DOMAIN_SEGMENT_CONST} = "${domainSegment}"`,
+    ``,
+    `function assertPiSessionId(sessionId: string): void {`,
+    `  if (!${regex}.test(sessionId)) {`,
+    `    throw new Error('invalid sessionId (path traversal blocked): ' + sessionId)`,
+    `  }`,
+    `}`,
+    ``,
+    `export function getRegistryPath(dataDir: string, sessionId: string): string {`,
+    `  assertPiSessionId(sessionId);`,
+    `  return join(dataDir, ${BTE_STORE_SEGMENT_CONST}, sessionId, ${BTE_DOMAIN_SEGMENT_CONST}, "registry.json");`,
+    `}`,
+    ``,
+  ].join('\n')
+
 /**
  * tmp mirror 工厂：目录布局对齐守卫 ROOT 相对路径（packages/shared/src、extensions/taiji/
- * system-prompt/src、packages/runtime/src/infra/pi）。overrides 覆盖任一侧公式（漂移
- * 注入点），missing 指定不落盘的文件。root/落盘/清理/守卫副本装置见 guard-mirror.mjs。
+ * system-prompt/src、packages/runtime/src/infra/pi、extensions/universal/base-tool-enhance/
+ * src/background）。overrides 覆盖任一侧公式（漂移注入点），missing 指定不落盘的文件。
+ * root/落盘/清理/守卫副本装置见 guard-mirror.mjs。
  */
-function makeMirror({ shared = {}, mirror = {}, runtime = {}, missing = [] } = {}) {
+function makeMirror({ shared = {}, mirror = {}, runtime = {}, bte = {}, missing = [] } = {}) {
   return makeGuardMirror({
     prefix: 'artifact-formula-fx-',
     files: {
       'packages/shared/src/paths.ts': sharedPathsSrc(shared),
       'extensions/taiji/system-prompt/src/index.ts': mirrorSystemPromptSrc(mirror),
       'packages/runtime/src/infra/pi/pi-paths.ts': runtimePiPathsSrc(runtime),
+      'extensions/universal/base-tool-enhance/src/background/registry.ts': bteRegistrySrc(bte),
     },
     missing,
     script: SCRIPT,
@@ -236,6 +271,22 @@ describe('CLI 集成（守卫脚本 × tmp mirror）', () => {
       expect(r.stdout).toContain(`runtime ${RUNTIME_PATTERN_CONST} 与 shared sessionId 正则一致（${DEFAULT_REGEX}）`)
       expect(r.stdout).toContain(`镜像 ${MIRROR_FN} 经 ${STORE_SEGMENT_CONST} + ${MIRROR_SEGMENT_CONST} 拼路径`)
       expect(r.stdout).toContain(`存储树末位段一致（${SHARED_TREE_CONST} 末位 ↔ shared ${STORE_SEGMENT_CONST}='ext-sessions'）`)
+      // 第五组（域 5）：registry 镜像三字面量对拍
+      expect(r.stdout).toContain(`域 5 存储树根段一致（'ext-sessions'，shared ↔ base-tool-enhance 镜像）`)
+      expect(r.stdout).toContain(`域 5 后台任务域段一致（'background-tasks'，shared ${SHARED_BG_TASKS_FN} ↔ 镜像常量）`)
+      expect(r.stdout).toContain(`域 5 sessionId 校验正则一致（${DEFAULT_REGEX}）`)
+    } finally {
+      fx.cleanup()
+    }
+  })
+
+  it('漂移红（域 5 registry 镜像域段与 shared 后台任务域段不一致）→ exit 1，报双侧值', () => {
+    const fx = makeMirror({ bte: { domainSegment: 'background-task' } })
+    try {
+      const r = fx.run()
+      expect(r.status).toBe(1)
+      expect(r.stderr).toContain("域 5 域段漂移: shared='background-tasks' vs 镜像='background-task'")
+      expect(r.stderr).toContain('恢复动作')
     } finally {
       fx.cleanup()
     }

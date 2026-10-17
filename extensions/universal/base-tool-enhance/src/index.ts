@@ -23,7 +23,6 @@ import type {
 	ExtensionContext,
 	SessionStartEvent,
 } from "@earendil-works/pi-coding-agent";
-import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { toErrorMessage } from "@zhushanwen/pi-ext-guards";
 import { getLogger } from "@zhushanwen/pi-extension-logger";
 
@@ -33,6 +32,7 @@ import { createBashOverrideToolDefinition } from "./bash-tool.ts";
 import { handleTaskExit, refreshPiReference } from "./background/notify.ts";
 import { installProcessExitGuard } from "./background/process-exit-guard.ts";
 import { reconcilePendingEntries } from "./background/pending-reconcile.ts";
+import { resolveTaijiDataDir } from "./background/registry.ts";
 import { setOnTaskExit } from "./background/exit-collector.ts";
 import { setupToolErrorAudit } from "./tool-error-audit.ts";
 
@@ -114,7 +114,7 @@ async function runSessionStartMaintenance(
 	});
 	try {
 		const sessionId = ctx.sessionManager.getSessionId();
-		await reconcilePendingEntries(pi, getAgentDir(), sessionId, ctx.sessionManager.getEntries());
+		await reconcilePendingEntries(pi, resolveTaijiDataDir(), sessionId, ctx.sessionManager.getEntries());
 	} catch (err) {
 		// 对账失败无害：僵尸 register 停留差集，下一 session_start 幂等重查
 		logger.warn("session_start pending reconcile failed; zombies retried next session start", {

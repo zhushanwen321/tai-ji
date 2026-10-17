@@ -34,16 +34,16 @@
  * session-store-layout-inversion 扩展：常量末位段 'ext-sessions' ↔ shared
  * `SESSION_STORE_DIR_SEGMENT` 常量 ↔ 镜像侧同名常量，三方对拍（存储树根段一致性）。
  *
- * 【第五组断言位（已登记未启用）】base-tool-enhance 登记目录公式（域 5）：
- * `extensions/universal/base-tool-enhance/src/background/registry.ts` 的
- * `getRegistryPath` 现为旧布局 `join(dataDir, 'base-tool-enhance', sessionId,
- * 'registry.json')`，与 shared `getSessionBackgroundTasksDir`（`<root>/<sid>/
- * background-tasks/`）暂不一致——换根归 u-ext-tasks-views 单元。该单元把 registry
- * 公式改为 `join(dataDir, 'ext-sessions', sessionId, 'background-tasks', 'registry.json')`
- * 时，须在本守卫同批启用对拍：提取 getRegistryPath 函数块内 join 各段字面量，断言
- * 与 shared `SESSION_STORE_DIR_SEGMENT` + 'background-tasks' 逐字一致（复用
- * extractConstLiteral / extractFunctionBlock 原语，形态照抄第一组）。提前启用会在其
- * 换根前恒红（现状公式即旧布局），故只登记不接线。
+ * 【第五组断言（域 5，已启用）】base-tool-enhance 登记目录公式（换根随 u-ext-tasks-views
+ * 同批接线）：`extensions/universal/base-tool-enhance/src/background/registry.ts` 的
+ * `getRegistryPath` 现为新布局 `join(dataDir, SESSION_STORE_DIR_SEGMENT, sessionId,
+ * BACKGROUND_TASKS_DIR_SEGMENT, 'registry.json')`（`<dataDir>/ext-sessions/<sid>/
+ * background-tasks/`，dataDir = taiji 数据根）。对拍三字面量：树根段常量
+ * SESSION_STORE_DIR_SEGMENT ↔ shared 同名常量；域段常量 BACKGROUND_TASKS_DIR_SEGMENT
+ * ↔ shared `getSessionBackgroundTasksDir` 的 join 段；assertPiSessionId 的 sessionId
+ * 校验正则 ↔ shared PI_SESSION_ID_PATTERN。任一漂移 = runtime 读侧（reaper /
+ * BackgroundTaskService 经 shared 函数推导）与 extension 写侧落点错位（收殓读不到、
+ * 任务清单空转）。
  *
  * 形态照搬 scripts/check-capability-allowlist-sync.mjs（读源文件文本、零散文解析、
  * 提取失败一律 fail、`--self-test` 纯函数自检）。
@@ -71,6 +71,9 @@ const ROOT = repoRootFrom(import.meta.url)
 const SHARED_PATHS_SRC = join(ROOT, 'packages', 'shared', 'src', 'paths.ts')
 const SYSTEM_PROMPT_SRC = join(ROOT, 'extensions', 'taiji', 'system-prompt', 'src', 'index.ts')
 const RUNTIME_PI_PATHS_SRC = join(ROOT, 'packages', 'runtime', 'src', 'infra', 'pi', 'pi-paths.ts')
+const BASE_TOOL_ENHANCE_REGISTRY_SRC = join(
+  ROOT, 'extensions', 'universal', 'base-tool-enhance', 'src', 'background', 'registry.ts',
+)
 
 /** 权威侧函数名（shared）。 */
 export const SHARED_FN = 'getSessionArtifactsDir'
@@ -88,6 +91,20 @@ export const RUNTIME_TREE_FNS = ['getSessionsDir', 'getSubagentSessionDir', 'get
 export const STORE_SEGMENT_CONST = 'SESSION_STORE_DIR_SEGMENT'
 /** shared 侧 sessionId 校验正则常量名（assertPiSessionId 消费，与 runtime 同名）。 */
 export const SHARED_PATTERN_CONST = 'PI_SESSION_ID_PATTERN'
+
+// ── 第五组对拍（域 5）符号 ──────────────────────────────────────────
+/** 镜像侧源文件（base-tool-enhance registry）。 */
+export const BTE_REGISTRY_SRC = BASE_TOOL_ENHANCE_REGISTRY_SRC
+/** shared 侧后台任务域函数（域段对拍权威）。 */
+export const SHARED_BG_TASKS_FN = 'getSessionBackgroundTasksDir'
+/** 镜像侧树根段常量名（与 shared 同名）。 */
+export const BTE_STORE_SEGMENT_CONST = 'SESSION_STORE_DIR_SEGMENT'
+/** 镜像侧域段常量名。 */
+export const BTE_DOMAIN_SEGMENT_CONST = 'BACKGROUND_TASKS_DIR_SEGMENT'
+/** 镜像侧函数块锚点。 */
+export const BTE_REGISTRY_FN_ANCHOR = 'export function getRegistryPath'
+/** 镜像侧 sessionId 校验函数块锚点（正则所在函数）。 */
+export const BTE_ASSERT_FN_ANCHOR = 'function assertPiSessionId'
 
 /** 函数体截取锚点（含 `export function` 前缀，避免匹配到调用点）。 */
 const SHARED_ANCHOR = `export function ${SHARED_FN}`
@@ -111,11 +128,14 @@ export function extractSessionIdRegex(blockText) {
   return { value: m[1] }
 }
 
-/** 从源文本提取 `const <name> = '<字面量>'` 的段名字面量。 */
+/**
+ * 从源文本提取 `const <name> = '<字面量>'` 的段名字面量（单/双引号均收——shared 与
+ * system-prompt 镜像为单引号形态，base-tool-enhance 镜像按包内 prettier 为双引号）。
+ */
 export function extractConstLiteral(text, constName) {
-  const m = text.match(new RegExp(`const\\s+${constName}\\s*=\\s*'([^']+)'`))
+  const m = text.match(new RegExp(`const\\s+${constName}\\s*=\\s*(['"])([^'"]+)\\1`))
   if (!m) return { error: `未找到 const ${constName} = '<字面量>'（改名 / 形态变化？）` }
-  return { value: m[1] }
+  return { value: m[2] }
 }
 
 /**
@@ -259,10 +279,53 @@ function selfTestExtractionErrors(assert) {
   assert(extractSessionIdRegex('const x = 1').error !== undefined, '无校验正则报 error')
 }
 
+/** 第五组（域 5）纯函数自检：双引号常量提取 + registry 函数块三字面量对拍。 */
+function selfTestBaseToolEnhanceRegistry(assert) {
+  const sharedText = `export const SESSION_STORE_DIR_SEGMENT = 'ext-sessions'
+
+const PI_SESSION_ID_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/
+
+export function getSessionBackgroundTasksDir(sessionId: string, dataDir?: string): string {
+  assertPiSessionId(sessionId)
+  return join(getSessionStoreDir(dataDir), sessionId, 'background-tasks')
+}`
+
+  // 镜像侧双引号形态（base-tool-enhance 包 prettier 风格）
+  const registryText = `export const SESSION_STORE_DIR_SEGMENT = "ext-sessions"
+
+export const BACKGROUND_TASKS_DIR_SEGMENT = "background-tasks"
+
+function assertPiSessionId(sessionId: string): void {
+	if (!/^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/.test(sessionId)) {
+		throw new Error(\`invalid sessionId: \${sessionId}\`)
+	}
+}
+
+export function getRegistryPath(dataDir: string, sessionId: string): string {
+	assertPiSessionId(sessionId);
+	return join(dataDir, SESSION_STORE_DIR_SEGMENT, sessionId, BACKGROUND_TASKS_DIR_SEGMENT, "registry.json");
+}
+function other() {}`
+
+  assert(extractConstLiteral(registryText, BTE_STORE_SEGMENT_CONST).value === 'ext-sessions', '镜像双引号树根段常量提取')
+  assert(extractConstLiteral(registryText, BTE_DOMAIN_SEGMENT_CONST).value === 'background-tasks', '镜像双引号域段常量提取')
+  const sharedBgBlock = extractFunctionBlock(sharedText, `export function ${SHARED_BG_TASKS_FN}`)
+  assert(extractJoinSegment(sharedBgBlock.text).value === 'background-tasks', 'shared 后台任务域段提取')
+  const assertBlock = extractFunctionBlock(registryText, BTE_ASSERT_FN_ANCHOR)
+  assert(
+    extractSessionIdRegex(assertBlock.text).value ===
+      extractConstRegex(sharedText, SHARED_PATTERN_CONST).value,
+    '域 5 两侧 sessionId 正则一致（样例）',
+  )
+  assert(extractFunctionBlock(registryText, BTE_REGISTRY_FN_ANCHOR).error === undefined, '镜像 getRegistryPath 函数块截取')
+  assert(extractConstLiteral(registryText, 'MISSING_CONST').error !== undefined, '镜像常量缺失报 error')
+}
+
 function selfTestCases(assert) {
   selfTestFormulaPairing(assert)
   selfTestTreePairing(assert)
   selfTestExtractionErrors(assert)
+  selfTestBaseToolEnhanceRegistry(assert)
 }
 
 if (process.argv.includes('--self-test')) runSelfTest('artifact-dir-formula-sync', selfTestCases)
@@ -427,11 +490,68 @@ function compareTreeSegments(sharedText, runtimeText, sharedStoreSegment) {
   ok(`存储树末位段一致（${SHARED_TREE_CONST} 末位 ↔ shared ${STORE_SEGMENT_CONST}='${sharedStoreSegment}'）`)
 }
 
+/**
+ * ⑤ base-tool-enhance registry 公式对拍（域 5，u-ext-tasks-views 换根同批启用）：树根段 /
+ * 域段 / sessionId 校验正则三字面量逐字一致——runtime 读侧经 shared 函数推导，镜像漂移
+ * 即收殓读不到、任务清单空转。
+ */
+function compareBaseToolEnhanceRegistry(sharedText, registryText, sharedStoreSegment, sharedRegex) {
+  const registryBlock = extractFunctionBlock(registryText, BTE_REGISTRY_FN_ANCHOR)
+  const assertBlock = extractFunctionBlock(registryText, BTE_ASSERT_FN_ANCHOR)
+  const sharedBgTasksBlock = extractFunctionBlock(sharedText, `export function ${SHARED_BG_TASKS_FN}`)
+  if (registryBlock.error) fail(`镜像 ${BTE_REGISTRY_FN_ANCHOR} 提取失败: ${registryBlock.error}`)
+  if (assertBlock.error) fail(`镜像 ${BTE_ASSERT_FN_ANCHOR} 提取失败: ${assertBlock.error}`)
+  if (sharedBgTasksBlock.error) fail(`shared ${SHARED_BG_TASKS_FN} 提取失败: ${sharedBgTasksBlock.error}`)
+  exitIfFailed('域 5 registry 公式对拍：函数块提取失败，按上方 ✗ 修复后重跑')
+
+  const extracted = {
+    bteStoreSegment: extractConstLiteral(registryText, BTE_STORE_SEGMENT_CONST),
+    bteDomainSegment: extractConstLiteral(registryText, BTE_DOMAIN_SEGMENT_CONST),
+    sharedDomainSegment: extractJoinSegment(sharedBgTasksBlock.text),
+    bteRegex: extractSessionIdRegex(assertBlock.text),
+  }
+  for (const [label, r] of [
+    [`镜像树根段常量 ${BTE_STORE_SEGMENT_CONST}`, extracted.bteStoreSegment],
+    [`镜像域段常量 ${BTE_DOMAIN_SEGMENT_CONST}`, extracted.bteDomainSegment],
+    [`shared ${SHARED_BG_TASKS_FN} join 域段`, extracted.sharedDomainSegment],
+    ['镜像 sessionId 校验正则', extracted.bteRegex],
+  ]) {
+    if (r.error) fail(`${label} 提取失败: ${r.error}`)
+  }
+  exitIfFailed('域 5 registry 公式对拍：字面量提取失败，按上方 ✗ 修复后重跑')
+
+  if (extracted.bteStoreSegment.value === sharedStoreSegment) {
+    ok(`域 5 存储树根段一致（'${extracted.bteStoreSegment.value}'，shared ↔ base-tool-enhance 镜像）`)
+  } else {
+    fail(
+      `域 5 存储树根段漂移: shared='${sharedStoreSegment}' vs 镜像='${extracted.bteStoreSegment.value}'` +
+        `——恢复动作：人工核对 ${SHARED_PATHS_SRC} 的 ${STORE_SEGMENT_CONST} 与 ${BTE_REGISTRY_SRC} 的 ${BTE_STORE_SEGMENT_CONST}`,
+    )
+  }
+  if (extracted.bteDomainSegment.value === extracted.sharedDomainSegment.value) {
+    ok(`域 5 后台任务域段一致（'${extracted.bteDomainSegment.value}'，shared ${SHARED_BG_TASKS_FN} ↔ 镜像常量）`)
+  } else {
+    fail(
+      `域 5 域段漂移: shared='${extracted.sharedDomainSegment.value}' vs 镜像='${extracted.bteDomainSegment.value}'` +
+        `——恢复动作：人工核对 ${SHARED_PATHS_SRC} 的 ${SHARED_BG_TASKS_FN} 与 ${BTE_REGISTRY_SRC} 的 ${BTE_DOMAIN_SEGMENT_CONST}`,
+    )
+  }
+  if (extracted.bteRegex.value === sharedRegex) {
+    ok(`域 5 sessionId 校验正则一致（${extracted.bteRegex.value}）`)
+  } else {
+    fail(
+      `域 5 sessionId 校验正则漂移: shared=${sharedRegex} vs 镜像=${extracted.bteRegex.value}` +
+        `——恢复动作：人工核对 ${SHARED_PATHS_SRC} 的 ${SHARED_PATTERN_CONST} 与 ${BTE_REGISTRY_SRC} 的 ${BTE_ASSERT_FN_ANCHOR}`,
+    )
+  }
+}
+
 function main() {
-  const [sharedText, mirrorText, runtimeText] = readSourcesOrFail([
+  const [sharedText, mirrorText, runtimeText, registryText] = readSourcesOrFail([
     [SHARED_PATHS_SRC, 'shared paths 源文件'],
     [SYSTEM_PROMPT_SRC, 'system-prompt 源文件'],
     [RUNTIME_PI_PATHS_SRC, 'runtime pi-paths 源文件'],
+    [BTE_REGISTRY_SRC, 'base-tool-enhance registry 源文件'],
   ])
 
   const { sharedBlock, mirrorBlock } = extractFormulaBlocksOrFail(sharedText, mirrorText)
@@ -442,9 +562,10 @@ function main() {
   compareSessionIdRegexes(lits.sharedRegex.value, lits.mirrorRegex.value, lits.runtimeRegex.value)
   checkMirrorConstUsage(mirrorBlock)
   compareTreeSegments(sharedText, runtimeText, lits.sharedStoreSegment.value)
+  compareBaseToolEnhanceRegistry(sharedText, registryText, lits.sharedStoreSegment.value, lits.sharedRegex.value)
 
   guardExit(
-    '✓ 产物目录公式对拍通过（域段 + 存储树根段 + sessionId 校验正则三方 + pi 会话树段逐字一致）',
+    '✓ 产物目录公式对拍通过（域段 + 存储树根段 + sessionId 校验正则三方 + pi 会话树段 + 域 5 registry 镜像逐字一致）',
     '产物目录公式对拍未通过，按上方 ✗ 明细修复后重跑（每条报错自带恢复动作）',
   )
 }

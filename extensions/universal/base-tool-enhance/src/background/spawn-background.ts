@@ -2,7 +2,7 @@
  * 后台任务 spawn（D7/D10/D12/D15，设计文档 §3.5 后台任务生命周期数据流 ③④）。
  *
  * spawn 细节：detached（自成进程组，进程树 kill 的语义基础）+ stdio 直接落
- * <dataDir>/base-tool-enhance/<sessionId>/<task_id>.log（append fd，不占内存、
+ * <dataDir>/ext-sessions/<sessionId>/background-tasks/<task_id>.log（append fd，不占内存、
  * 无 pipe backpressure）+ child.unref()（pi 不等它）。abort/interrupt 不传播到
  * 后台任务（D15）——execute 立即返回，本模块不接触 signal。
  *
@@ -89,7 +89,7 @@ export interface SpawnBackgroundOptions {
 	command: string;
 	/** execute ctx.cwd（权威 cwd） */
 	cwd: string;
-	/** pi getAgentDir() 同源 dataDir */
+	/** taiji dataDir（registry.ts resolveTaijiDataDir 推导，存储树 <dataDir>/ext-sessions 基址） */
 	dataDir: string;
 	sessionId: string;
 	/** LLM 显式 timeout（秒）；undefined 时若配置默认存在由调用侧注入（M4）。 */

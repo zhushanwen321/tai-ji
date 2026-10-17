@@ -13,7 +13,7 @@ import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 
 const { reconcileMock, loggerMock, officialBashFactoryMock, dataDirRef } =
 	vi.hoisted(() => ({
@@ -25,7 +25,6 @@ const { reconcileMock, loggerMock, officialBashFactoryMock, dataDirRef } =
 
 vi.mock("@earendil-works/pi-coding-agent", () => ({
 	createBashToolDefinition: officialBashFactoryMock,
-	getAgentDir: () => dataDirRef.dir,
 }));
 vi.mock("@zhushanwen/pi-extension-logger", () => ({
 	getLogger: () => loggerMock,
@@ -80,6 +79,9 @@ async function loadExtension() {
 
 beforeEach(() => {
 	reconcileMock.mockReset();
+	// 维护链 dataDir 来源 = resolveTaijiDataDir()（env，session-store-layout-inversion 域 5）：
+	// getAgentDir mock 已随换根退役，改 stub env（dataDirRef.dir 仍是断言与 stub 的同一值源）
+	vi.stubEnv("TAIJI_AGENT_DATA_DIR", dataDirRef.dir);
 	// 官方 bash 工厂返回最小工具定义（override 定义 spread initial.name）
 	officialBashFactoryMock.mockReset();
 	officialBashFactoryMock.mockReturnValue({
@@ -92,6 +94,11 @@ beforeEach(() => {
 	loggerMock.debug.mockClear();
 	loggerMock.warn.mockClear();
 	loggerMock.error.mockClear();
+});
+
+afterEach(() => {
+	// env stub 逐用例还原（防同 worker 跨文件残留）
+	vi.unstubAllEnvs();
 });
 
 describe("session_start maintenance chain after reap sink (u-bte-remove)", () => {

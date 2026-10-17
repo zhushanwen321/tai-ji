@@ -16,10 +16,11 @@
  */
 
 import type { AgentToolUpdateCallback, BashToolDetails, ExtensionToolContext } from "@earendil-works/pi-coding-agent";
-import { createBashToolDefinition, getAgentDir } from "@earendil-works/pi-coding-agent";
+import { createBashToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
 import { truncateCommand } from "./background/command-display.ts";
+import { resolveTaijiDataDir } from "./background/registry.ts";
 import { resolveBackgroundTimeoutSec, spawnBackgroundTask } from "./background/spawn-background.ts";
 import { isSubagentProcess } from "./background/subagent-guard.ts";
 import { loadBaseToolEnhanceConfig, type BaseToolEnhanceConfig } from "./config.ts";
@@ -84,7 +85,7 @@ function startBackgroundAndReply(
 	const spawned = spawnBackgroundTask({
 		command,
 		cwd: ctx.cwd,
-		dataDir: getAgentDir(),
+		dataDir: resolveTaijiDataDir(),
 		sessionId: ctx.sessionManager.getSessionId(),
 		timeoutSec,
 		maxConcurrent: config.maxConcurrentBackground,

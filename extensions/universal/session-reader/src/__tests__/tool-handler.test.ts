@@ -158,21 +158,22 @@ describe('handleSessionRead', () => {
     expect(typeof d.hits[0].matchSnippet).toBe('string')
   })
 
-  it('6. export outline materializes a .md file', async () => {
-    // export 写目标 = <agentDir>/tmp/（mkdtemp 自建自删）；读侧经 liveSessionDir=[live]
-    // 根扫本 describe 的 fixture sessions 目录。
-    const exportDir = await mkdtemp(join(tmpdir(), 'tool-handler-export-'))
+  it('6. export outline materializes a .md file under the session store tree', async () => {
+    // export 写目标 = <dataDir>/ext-sessions/<sid>/session-view.md（session-store-layout-
+    // inversion 域 6）：agentDir 参数 = <dataDir>/agent（mkdtemp tmp 子目录，导出树随 tmp
+    // 整体清理）；读侧经 liveSessionDir=[live] 根扫本 describe 的 fixture sessions 目录。
+    const dataDir = await mkdtemp(join(tmpdir(), 'tool-handler-export-'))
     try {
       const r = await handleSessionRead(
         { action: 'export', session: FIX_E6, format: 'outline' },
-        { agentDir: exportDir, liveSessionDir: join(dir, 'sessions') },
+        { agentDir: join(dataDir, 'agent'), liveSessionDir: join(dir, 'sessions') },
       )
       const d = r.details as { path: string; sizeBytes: number }
-      expect(d.path).toMatch(/\.md$/)
+      expect(d.path).toBe(join(dataDir, 'ext-sessions', FIX_E6, 'session-view.md'))
       expect(existsSync(d.path)).toBe(true)
       expect(d.sizeBytes).toBeGreaterThan(0)
     } finally {
-      await rm(exportDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+      await rm(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
     }
   })
 

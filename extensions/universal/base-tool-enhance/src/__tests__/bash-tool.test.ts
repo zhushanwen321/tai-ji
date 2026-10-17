@@ -68,6 +68,8 @@ afterEach(() => {
 	}
 	agentDirRef.dir = "/tmp/bte-fake-agent-dir";
 	clearConfigCache();
+	// background 分支的 dataDir 来源是 env（resolveTaijiDataDir），逐用例 stub 后在此还原
+	vi.unstubAllEnvs();
 });
 
 function createOfficialFactoryResult(cwd: string) {
@@ -245,6 +247,9 @@ describe("createBashOverrideToolDefinition", () => {
 describe("background branch routing (M2)", () => {
 	it("background:true routes to spawnBackgroundTask with ctx-derived paths and returns task_id message", async () => {
 		setupFactory();
+		// dataDir 来源 = resolveTaijiDataDir()（env 注入，session-store-layout-inversion 域 5）；
+		// 断言值与 stub 值同字面（getAgentDir mock 已随换根退役）
+		vi.stubEnv("TAIJI_AGENT_DATA_DIR", "/tmp/bte-fake-agent-dir");
 		spawnBackgroundTaskMock.mockReturnValue({
 			ok: true,
 			task: {

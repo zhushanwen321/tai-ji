@@ -17,14 +17,13 @@
  */
 
 import type { AgentToolResult, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { getProcessStartTimeSec, isPidAlive, killProcessTree } from "@zhushanwen/extension-protocol/background-task";
 import { Type } from "typebox";
 
 import { toErrorMessage } from "@zhushanwen/pi-ext-guards";
 import { getLogger } from "@zhushanwen/pi-extension-logger";
 
-import { getRegistryPath, readRegistry, taskToRegistryEntry, writeRegistryEntry } from "./background/registry.ts";
+import { getRegistryPath, readRegistry, resolveTaijiDataDir, taskToRegistryEntry, writeRegistryEntry } from "./background/registry.ts";
 import { getAllTasks, markKillingIntent } from "./background/task-store.ts";
 import { isActiveState, isTerminalState, type RegistryEntry } from "./background/types.ts";
 
@@ -70,7 +69,7 @@ export function createBashKillToolDefinition() {
 			// 回落（限定终态——他进程 running/killing 条目不可 kill）
 			const fromStore = getAllTasks().find((t) => t.taskId === args.task_id);
 			if (fromStore === undefined) {
-				const entry: RegistryEntry | undefined = readRegistry(getRegistryPath(getAgentDir(), sessionId)).get(
+				const entry: RegistryEntry | undefined = readRegistry(getRegistryPath(resolveTaijiDataDir(), sessionId)).get(
 					args.task_id,
 				);
 				if (entry === undefined) {

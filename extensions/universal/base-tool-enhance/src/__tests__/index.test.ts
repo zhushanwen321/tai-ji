@@ -12,7 +12,6 @@ const { createBashToolDefinitionMock, dataDirRef } = vi.hoisted(() => ({
 }));
 vi.mock("@earendil-works/pi-coding-agent", () => ({
 	createBashToolDefinition: createBashToolDefinitionMock,
-	getAgentDir: () => dataDirRef.dir,
 }));
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -94,9 +93,11 @@ describe("baseToolEnhanceExtension entry", () => {
 describe("__taiji_bg_reconcile__ command: runtime-resume trigger face (bg-task-notify-durability)", () => {
 	it("handler runs the same maintenance chain as session_start (zombie settle via appendEntry on the SAME pi reference)", async () => {
 		setupOfficialFactory();
-		// 独立临时 dataDir（同 session_start 用例：维护链只读不扫），registry 预置终态僵尸条目
+		// 独立临时 dataDir（同 session_start 用例：维护链只读不扫），registry 预置终态僵尸条目。
+		// 维护链 dataDir 来源 = resolveTaijiDataDir()（env，session-store-layout-inversion 域 5）
 		const dataDir = mkdtempSync(join(tmpdir(), "bte-bgcmd-"));
 		dataDirRef.dir = dataDir;
+		vi.stubEnv("TAIJI_AGENT_DATA_DIR", dataDir);
 		try {
 			const sessionId = "sess-bgcmd";
 			writeRegistryEntry(getRegistryPath(dataDir, sessionId), {
@@ -138,6 +139,7 @@ describe("__taiji_bg_reconcile__ command: runtime-resume trigger face (bg-task-n
 		} finally {
 			rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
 			dataDirRef.dir = "/tmp/bte-fake-agent-dir";
+			vi.unstubAllEnvs();
 			resetNotifyForTest();
 		}
 	});
@@ -146,9 +148,11 @@ describe("__taiji_bg_reconcile__ command: runtime-resume trigger face (bg-task-n
 describe("session_start chain: reconcile (M3, reap sunk into runtime by u-bte-remove)", () => {
 	it("settles a zombie register via appendEntry on the SAME pi reference", async () => {
 		setupOfficialFactory();
-		// 独立临时 dataDir（维护链只读不扫：收殓已下沉 runtime），registry 预置终态僵尸条目
+		// 独立临时 dataDir（维护链只读不扫：收殓已下沉 runtime），registry 预置终态僵尸条目。
+		// 维护链 dataDir 来源 = resolveTaijiDataDir()（env，session-store-layout-inversion 域 5）
 		const dataDir = mkdtempSync(join(tmpdir(), "bte-index-"));
 		dataDirRef.dir = dataDir;
+		vi.stubEnv("TAIJI_AGENT_DATA_DIR", dataDir);
 		try {
 			const sessionId = "sess-index";
 			writeRegistryEntry(getRegistryPath(dataDir, sessionId), {
@@ -197,6 +201,7 @@ describe("session_start chain: reconcile (M3, reap sunk into runtime by u-bte-re
 		} finally {
 			rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
 			dataDirRef.dir = "/tmp/bte-fake-agent-dir";
+			vi.unstubAllEnvs();
 			resetNotifyForTest();
 		}
 	});
