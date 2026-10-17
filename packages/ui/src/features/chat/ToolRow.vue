@@ -85,8 +85,10 @@
           >+{{ fileChipDiffStat.additions }} −{{ fileChipDiffStat.deletions }}</span>
         </span>
         <!-- details.summary（extension 自报一行摘要，约定见 docs/extensions/extension-conventions.md
-             「Tool result details.summary 约定」）：header 摘要优先级 = 自报摘要 > argPath 参数
-             派生 > 仅工具名。样式与 argPath 摘要同款 mono dim（M3b demo .tool .cmd 命令语境档）。 -->
+             「Tool result details.summary 约定」）：header 摘要优先级 = edit/write chip > 自报摘要 >
+             argPath 参数派生 > 仅工具名（edit/write chip 是既定升级形态——basename + diff 统计 +
+             打开文件详情，信息量高于通用摘要，故排在自报摘要之前；声明与上方 v-else-if 链顺序一致）。
+             样式与 argPath 摘要同款 mono dim（M3b demo .tool .cmd 命令语境档）。 -->
         <span
           v-else-if="detailsSummary"
           data-testid="tool-details-summary"

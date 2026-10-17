@@ -101,7 +101,7 @@
 `execute` 返回的 `details` 可携带可选的 `summary: string` 字段——一行英文收起态摘要，描述动作 + 数量/目标（如 `Added 4 todos (#1-#4)`、`Plan completed`）。消费方两处，文本必须同源：
 
 1. **TUI**：`renderResult` 折叠分支（`options.expanded === false`）输出该 summary 一行（`new Text`，`theme.fg("dim")` / `theme.fg("muted")` 染色）；展开分支维持详细渲染不动。
-2. **GUI（taiji）**：ToolRow 收起态 header 优先显示 `details.summary`（`packages/ui/src/features/chat/ToolRow.vue` 的 `detailsSummary` computed）；无 summary 时回落 input 参数派生摘要（command/path/pattern/query/code），两者皆无只显工具名。
+2. **GUI（taiji）**：ToolRow 收起态 header 优先显示 `details.summary`（`packages/ui/src/features/chat/ToolRow.vue` 的 `detailsSummary` computed）；无 summary 时回落 input 参数派生摘要（command/path/pattern/query/code），两者皆无只显工具名。例外：edit/write 文件 chip（`argPath` 派生的 basename chip）优先于 `details.summary`——chip 是 edit/write 的既定升级形态（basename + diff 增删统计 + 点击打开文件详情），信息量高于通用摘要，不被自报摘要顶掉；当前 edit/write 为 pi builtin 不产 summary，base-tool-enhance 同名 override 只覆盖 bash，故该例外暂无生产者触达。
 
 规则：
 
