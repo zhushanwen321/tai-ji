@@ -9,8 +9,9 @@
  *   主 band 原样保留（提交态 per-vid/实例隔离）。
  * - 终态机四行：应答清 / 撤回·失效清 + 行内提示 / 回收提醒置位清 / 未读归 useBtwTabData
  *   既有族（本文件不重复）；重试仅限投递失败态（未送达保持挂起）；已终结应答丢弃 + 提示失效。
- * - 状态区退役（2026-10-15 用户裁决）：setStatus/setWidget per-session 源存在也不渲染——
- *   btw 状态区恒空（原「第四面状态区」移除，扩展状态行不进旁路线面板）。
+ * - 状态区退役（2026-10-15 用户裁决；StatusBar 数据链随后 ADR-0141 整体退役，本文件仅余
+ *   setWidget 注入可构造）：per-session 源存在也不渲染——btw 状态区恒空（原「第四面状态区」
+ *   移除，扩展状态行不进旁路线面板）。
  * - 运行期错误边界：确认条子树渲染异常被 BtwPanel onErrorCaptured 收口（行内错误 + 可重试，
  *   不外溢）。
  * - 并发排序：跨通道按 receivedAt 取最早，应答后晋升下一条。
@@ -37,7 +38,6 @@ import {
   CompanionBand,
   DIALOG_REQUEST_SOURCE_KEY,
   UI_RESPONSE_TRANSPORT_KEY,
-  STATUS_BAR_SOURCE_KEY,
   VIEW_HOST_SOURCE_KEY,
 } from '@taiji/ui/extension-host'
 import BtwPanel from '@/components/panel/BtwPanel.vue'
@@ -59,7 +59,10 @@ const apiMock = composerBtwApiMock
 
 // ── extension RPC domain mock（respond 送达可控；快照恒空 → retainOnly 不误清实时帧）──
 const extMock = vi.hoisted(() => ({
-  sendExtensionUIResponse: vi.fn((): boolean => true),
+  // 四参签名与 respond 真实调用形态一致（payload 取 calls[0][3] 断言需要元组位）
+  sendExtensionUIResponse: vi.fn(
+    (_sessionId: string, _requestId: string, _kind: string, _payload?: unknown): boolean => true,
+  ),
   getPendingRequests: vi.fn(async (): Promise<unknown[]> => []),
   onNotify: () => () => {},
   onExtensions: vi.fn(),
@@ -108,7 +111,7 @@ function mountMainBand(sessionId: string) {
   })
 }
 
-async function settle(wrapper: Awaited<ReturnType<typeof mountPanel>>) {
+async function settle(_wrapper: Awaited<ReturnType<typeof mountPanel>>) {
   await flushPromises()
   await nextTick()
   await nextTick()
@@ -457,13 +460,7 @@ describe('并发排序（多请求并发呈现有序，D8）', () => {
 })
 
 describe('⑤ 状态区退役（2026-10-15 用户裁决）：extension GUI 状态不进 btw 面板', () => {
-  it('per-vid setStatus 条目 + setWidget 文本行存在也不渲染——状态区恒空（主面板托盘形态不受影响）', async () => {
-    const statusSource = {
-      getItems: (scope: 'global' | 'per-session', sessionId?: string) =>
-        scope === 'per-session' && sessionId === VID
-          ? [{ id: 's1', pluginId: '', text: '构建中 3/5', alignment: 'left' as const, priority: 1, status: 'ok' as const }]
-          : [],
-    }
+  it('setWidget 文本行存在也不渲染——状态区恒空（主面板托盘形态不受影响）', async () => {
     const viewSource = {
       getView: (_sid: string, viewId: string) =>
         viewId === 'w1'
@@ -482,7 +479,6 @@ describe('⑤ 状态区退役（2026-10-15 用户裁决）：extension GUI 状�
       props: { sessionId: MAIN },
       global: {
         provide: {
-          [STATUS_BAR_SOURCE_KEY as symbol]: statusSource,
           [VIEW_HOST_SOURCE_KEY as symbol]: viewSource,
         },
       },

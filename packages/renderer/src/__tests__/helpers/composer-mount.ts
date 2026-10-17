@@ -48,7 +48,7 @@
 import { ref } from 'vue'
 import { beforeEach, expect, vi } from 'vitest'
 import { defineComponent } from 'vue'
-import type { Component, Ref } from 'vue'
+import type { Component, ComponentObjectPropsOptions, Ref } from 'vue'
 import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { textToSegments } from '@taiji/shared'
@@ -351,7 +351,7 @@ export function makeTypeAndEnter(ComposerInputMock: Component) {
  */
 function buildComposerInputMock(
   extraEmits: Record<string, null> = {},
-  opts: { props?: Record<string, unknown>; extendExpose?: (lastInputText: Ref<string>) => Record<string, unknown> } = {},
+  opts: { props?: ComponentObjectPropsOptions; extendExpose?: (lastInputText: Ref<string>) => Record<string, unknown> } = {},
 ) {
   const lastInputText = ref('')
   const lastSetText = ref<string | null>(null)
