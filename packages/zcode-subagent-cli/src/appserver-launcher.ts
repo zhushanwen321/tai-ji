@@ -48,7 +48,8 @@
 // 源码以内嵌字符串形态进 dist bundle（vendored 面只拷 dist/，独立 .cjs 资产会被
 // vendor 脚本漏掉——字符串常量无此问题），运行时幂等落盘 engineDataDir。
 // （2026-10 review：CLI 源码补丁段与账号元数据段两个字符串区块拆至
-// appserver-launcher-patches.ts 载体模块原样内插——行数守卫拆分，非行为变化。）
+// appserver-launcher-patches.ts 载体模块原样内插——行数守卫拆分 + 同批 review 行为
+// 修正随段迁移（存在性守卫/括号配平/窗口收紧/语法自检），变更点见段内就地注释。）
 
 import * as fs from "node:fs";
 import * as path from "node:path";

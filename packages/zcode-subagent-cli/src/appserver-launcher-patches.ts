@@ -1,5 +1,7 @@
 // appserver-launcher-patches.ts —— APPSERVER_LAUNCHER_SOURCE 的两个补丁段载体
-// （2026-10 review 自 appserver-launcher.ts 按 max-lines 行数守卫拆出，纯搬运无行为变化）。
+// （2026-10 review 自 appserver-launcher.ts 按 max-lines 行数守卫拆出：拆分搬运 + 同批
+// review 行为修正随段迁移——存在性守卫/括号配平/窗口收紧/语法自检/重复行清除，
+// 变更点见段内就地注释）。
 //
 // 本文件是「wrapper 源码的字符串段」而非可执行 TS：两个常量按原文逐字节内插进
 // appserver-launcher.ts 的 APPSERVER_LAUNCHER_SOURCE 模板，随 wrapper 幂等落盘为
