@@ -341,7 +341,6 @@ export class RecordLifecycle {
     await collectWorktreePatch({
       record,
       getWorktreeManager: () => manager,
-      getAgentDir: () => this.deps.getModelService().getAgentDir(),
       label: `collectPatch (archive ${source})`,
     });
     try {

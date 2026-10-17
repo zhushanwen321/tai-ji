@@ -53,7 +53,7 @@ export function assertNestingDepthWithinLimit(
  * @throws {ForkDepthExceededError} fork=true 且 parentForkDepth >= 10
  */
 export function resolveSessionContext(input: SessionResolveInput): ResolvedSessionContext {
-  const { fork, cwd, mainCwd, mainSessionFile, parentForkDepth, agentDir, worktreePath } =
+  const { fork, cwd, mainCwd, mainSessionFile, parentForkDepth, rootSessionId, worktreePath } =
     input;
 
   // fork 深度检查（D-007）
@@ -80,8 +80,9 @@ export function resolveSessionContext(input: SessionResolveInput): ResolvedSessi
   // 不再靠 tmpdir 拼凑，保证 effectiveCwd 与实际 checkout 严格一致。
   const effectiveCwd = worktreePath ?? (cwd ?? mainCwd);
 
-  // sessionDir 用 mainCwd 编码（D-004: 同一主 cwd 下所有 subagent 存同一目录）
-  const sessionDir = getSubagentSessionDir(agentDir, mainCwd);
+  // sessionDir 按 rootSessionId 树内分区（session-store-layout-inversion D2/D3：
+  // 同一根会话的所有 subagent 存同一棵会话树，随会话删除整树回收）
+  const sessionDir = getSubagentSessionDir(rootSessionId);
 
   return { shouldFork, forkSource, effectiveCwd, sessionDir };
 }

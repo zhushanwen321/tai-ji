@@ -89,11 +89,16 @@ export function resolveTitlePrompt(config: RenameSessionConfig): { systemPrompt:
  * sessionDir 路径含 subagents 段 → 是 subagent 子进程 session，跳过 rename。
  *
  * 跨包路径耦合（constraints.json C-ext-21）：`subagents` 目录布局由 taiji 的
- * `packages/subagent-core/src/execution/assembly/path-encoding.ts`（getSubagentSessionDir /
- * encodeCwd）定义并写入。本包 role=universal，不 import subagent-core
- * （import 会把 universal 包绑死在 taiji 体系上），只按路径形态守卫——
- * path-encoding.ts 侧有对向注释互指。改 subagent 目录布局必须双侧同步改。
- * 三模式的新入口（message_end / rename_session 工具）同样复用本守卫。
+ * `packages/subagent-core/src/execution/assembly/path-encoding.ts`（getSubagentSessionDir）
+ * 定义并写入；[session-store-layout-inversion D2/D3] 布局 = `<dataDir>/ext-sessions/
+ * <rootSessionId>/subagents/sessions/`（rootSessionId 树内分区，旧 encodeCwd 层消除）。
+ * 嗅探规则「路径含 `<sep>subagents<sep>` 段」对新旧布局同构命中，无需形态分支；
+ * 防误判：普通主会话（`<agentDir>/sessions/<encodeCwd>/`）与存储树内其他域目录
+ * （btw / workflow / canvases 等）均不含 `subagents` 段，不会误判为 subagent 会话。
+ * 本包 role=universal，不 import subagent-core（import 会把 universal 包绑死在
+ * taiji 体系上），只按路径形态守卫——path-encoding.ts 侧有对向注释互指。
+ * 改 subagent 目录布局必须双侧同步改。三模式的新入口（message_end /
+ * rename_session 工具）同样复用本守卫。
  */
 export function isSubagentSession(sessionDir: string): boolean {
 	return sessionDir.includes(path.sep + "subagents" + path.sep);

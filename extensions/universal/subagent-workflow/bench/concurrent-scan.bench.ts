@@ -308,7 +308,7 @@ function buildGroundTruth(args: {
 	resolvedSessionsDir: string;
 }): { ok: true; gt: string[]; recordCount: number } | { ok: false } {
 	rmIndexArtifacts(args.encDir);
-	const gtStore = new RecordStore(args.sessionsDir);
+	const gtStore = new RecordStore(() => args.sessionsDir);
 	let gtRecords: readonly SubagentRecord[];
 	try {
 		gtRecords = gtStore.collectRecords(args.limit, "all");
@@ -373,7 +373,7 @@ async function runConcurrentPhase(args: {
 
 	// ── 并发阶段：N 实例 × M 轮，轮间随机变异，yield 让在途写与下一轮扫描交错 ──
 	const stores: RecordStore[] = [];
-	for (let w = 0; w < workers; w++) stores.push(new RecordStore(sessionsDir));
+	for (let w = 0; w < workers; w++) stores.push(new RecordStore(() => sessionsDir));
 	const mismatches: string[] = [];
 	const t0 = performance.now();
 	let indexRewrites = 0;

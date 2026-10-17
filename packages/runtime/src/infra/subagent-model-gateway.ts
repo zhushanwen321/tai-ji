@@ -15,7 +15,7 @@
  */
 import { randomUUID } from 'node:crypto'
 import { closeSync, existsSync, openSync, readFileSync, readSync, unlinkSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { join } from 'node:path'
 
 import type {
   SubagentSetModelAggregateReply,
@@ -25,13 +25,12 @@ import {
   getSubagentModelSwitchResultsDir,
   getSubagentRecordsDir,
   recordEventsPath,
+  resolvePiWorkflowRunsDir,
   RUN_EVENTS_SUFFIX,
-  STATE_DIR_NAME,
 } from '@zhushanwen/subagent-core'
 
 import type { SubagentModelSwitchGateway } from '../interfaces.js'
 import type { ScannedSessionMeta } from '../services/ports/session.js'
-import { getPiAgentDir } from './pi/pi-paths.js'
 import { toErrorMessage } from '../utils/errors.js'
 
 /**
@@ -64,10 +63,14 @@ export interface SubagentModelPromptClient { // oe-exempt:20261006:framework:出
 export interface SubagentModelGatewayDeps { // oe-exempt:20261006:framework:网关适配器依赖注入面（组合根构造，单实现常态）
   /** session pi 客户端提供者（workflowAction 同款 deps.pm.getClient 形态的窄口）。 */
   getClient(sessionId: string): SubagentModelPromptClient | undefined
-  /** session 扫描（resolveSessionId 定位 + 结果目录数据根 cwd 解析的唯一来源）。 */
+  /** session 扫描（resolveSessionId 定位 + 信箱读侧会话定位的唯一来源）。 */
   scanSessions(opts?: { force?: boolean }): ScannedSessionMeta[]
-  /** pi agent 目录锚（记录域 subagents/ 布局根；缺省 getPiAgentDir()，测试注入 tmp）。 */
-  agentDir?: string
+  /**
+   * session 存储树数据根（[session-store-layout-inversion D2/D3] 记录域换根
+   * `<dataDir>/ext-sessions/<sid>/subagents/`；缺省 shared getDataDir()，测试注入
+   * tmp 数据根）。旧 agentDir 锚随布局反转退役。
+   */
+  dataDir?: string
 }
 
 /** 通道/校验分型错误（code 经 message handler 透传进 error envelope）。 */
@@ -447,16 +450,17 @@ export function createSubagentModelSwitchGateway(deps: SubagentModelGatewayDeps)
    * 目标 → session 元数据（id + cwd 数据根）解析；解析不到 undefined（信封缺省语义）。
    * 定位锚与覆盖查询（model-override-query）同源：recordId = records 目录事件文件存在
    * 性（manifest 对偶，D3 落点；recordEventsPath 自带 id 白名单防穿越）+ created 帧
-   * rootSessionId 精确归属；runId = 该 session workflow-state journal 存在性 + 首帧
-   * rootSessionId 精确归属（dmg-r2-5——同 cwd 多会话共享同一 workflow-state 目录，
-   * 仅凭存在性会把请求路由到非归属会话的 pi 进程）。
+   * rootSessionId 精确归属；runId = 该 session workflow runs 目录内 journal 存在性 +
+   * 首帧 rootSessionId 精确归属（[session-store-layout-inversion D2/D3] 分区键即
+   * sid——「同 cwd 多会话共享同一目录」的错位面随 cwd 分区布局退役，存在性之外仍
+   * 保留 rootSessionId 精确归属判定防串会话）。
    */
   function resolveSessionMeta(target: { recordId?: string; runId?: string }): ScannedSessionMeta | undefined {
     const sessions = deps.scanSessions({ force: true })
     if (target.runId !== undefined) {
       if (!TARGET_ID_PATTERN.test(target.runId)) return undefined
       return sessions.find((s) => {
-        const journalFile = join(dirname(s.filePath), STATE_DIR_NAME, `${target.runId}${RUN_EVENTS_SUFFIX}`)
+        const journalFile = join(resolvePiWorkflowRunsDir(s.id, deps.dataDir), `${target.runId}${RUN_EVENTS_SUFFIX}`)
         if (!existsSync(journalFile)) return false
         // 归属判定 = run-created 首帧 rootSessionId 精确匹配（对齐 recordId 侧
         // D3-A4 形态：目录由 cwd 派生、同 cwd 多会话共享——存在性只作快速过滤，
@@ -470,11 +474,10 @@ export function createSubagentModelSwitchGateway(deps: SubagentModelGatewayDeps)
       })
     }
     if (target.recordId !== undefined) {
-      const agentDir = deps.agentDir ?? getPiAgentDir()
       const recordId = target.recordId
       return sessions.find((s) => {
         try {
-          const eventsFile = recordEventsPath(getSubagentRecordsDir(agentDir, s.cwd), recordId)
+          const eventsFile = recordEventsPath(getSubagentRecordsDir(s.id, deps.dataDir), recordId)
           if (!existsSync(eventsFile)) return false
           // 归属判定 = record-created 帧 rootSessionId 精确匹配（D3-A4 缺陷修复：
           // recordsDir 由 cwd 派生、多会话共享同一目录——目录存在性只作快速过滤，
@@ -521,7 +524,7 @@ export function createSubagentModelSwitchGateway(deps: SubagentModelGatewayDeps)
       const client = requireActiveClient(meta)
       const requestId = randomUUID()
       const resultsFile = join(
-        getSubagentModelSwitchResultsDir(deps.agentDir ?? getPiAgentDir(), meta.cwd),
+        getSubagentModelSwitchResultsDir(meta.id, deps.dataDir),
         `${requestId}.json`,
       )
       // 出站点竞速（prompt 正常回 / prompt 失败 / 超时三态，racePromptOutcome）；

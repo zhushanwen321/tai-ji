@@ -133,6 +133,7 @@
     "test:engine-protocol": "vitest run src/execution/engine/__tests__/conformance/protocol-blackbox.test.ts src/execution/engine/__tests__/conformance/static-spawn-guard.test.ts"
   },
   "dependencies": {
+    "@taiji/shared": "workspace:*",
     "@zhushanwen/extension-protocol": "workspace:*",
     "@zhushanwen/subagent-engine-sdk": "workspace:*",
     "acorn": "^8.17.0",

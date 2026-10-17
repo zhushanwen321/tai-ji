@@ -508,7 +508,7 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
       // model-override-query.ts）：session 域内部装配（deps 依赖本域 sessionStore——
       // 与 traceSync/records 等域内构造同范式）；测试经 deps.modelOverrideQuery 显式
       // mock 覆盖（U1「端口缺席 = 载荷不造键」语义不受影响）。
-      modelOverrideQuery: createModelOverrideQuery({ sessionStore: this.sessionStore }),
+      modelOverrideQuery: createModelOverrideQuery({}),
     }, new SkillInjector(this.skillSource))
     // pi 崩溃自动恢复编排组装（u8，D7）：restore 复用既有惰性恢复内核（facade.restoreSession
     // → lifecycle.restoreSession，附着自动走 u4c 预算化 restore 路径——⑤档超阈值走逆序分块

@@ -18,6 +18,7 @@
 // core/logger（保持 shared 层无内部依赖）。
 
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
+import { dirname } from "node:path";
 
 /** 泛型 journal 的域策略（各域唯一实装点提供）。 */
 export interface JsonlEventStreamStrategy<TInput, TEvent extends { seq?: number }> { // oe-exempt:20260930:framework:shared 泛型基座的策略注入契约——record / run 两域各提供一份策略对象（两个真实变体），基座只此一个泛型实现属参数化 seam 常态，非单实现投机抽象
@@ -57,21 +58,24 @@ function isNodeErrorCode(error: unknown, code: string): boolean {
  * 失效模式是保守可诊断，不炸整个投影。
  */
 export class JsonlEventStream<TInput extends object, TEvent extends { seq?: number }> {
-  private dirEnsured = false;
+  /** 最近一次 mkdir 已确保的目录（append 惰性建目录的记忆化锚；目录切换后重建）。 */
+  private ensuredDir: string | null = null;
   /** id → 已知末 seq（append 分配基数）。 */
   private readonly lastSeqById = new Map<string, number>();
 
   constructor(
-    private readonly dir: string,
     private readonly strategy: JsonlEventStreamStrategy<TInput, TEvent>,
   ) {}
 
   async append(id: string, event: TInput): Promise<TEvent> {
     const filePath = this.strategy.pathFor(id);
-    if (!this.dirEnsured) {
-      // 惰性一次：目录缺失自建（recursive 幂等），scan 侧不建目录（只读）。
-      mkdirSync(this.dir, { recursive: true });
-      this.dirEnsured = true;
+    // 惰性一次：目录缺失自建（recursive 幂等），scan 侧不建目录（只读）。目录锚
+    // pathFor 产物（而非构造期固定值）——目录随 session 切换晚绑定推导的域
+    //（record 事件文件随 rootSessionId 树）切换后新目录照常确保，无需重建 journal。
+    const parentDir = dirname(filePath);
+    if (this.ensuredDir !== parentDir) {
+      mkdirSync(parentDir, { recursive: true });
+      this.ensuredDir = parentDir;
     }
     // seq 分配：末水位 + 1。水位未缓存时探测文件（存在则取有效事件最大 seq）——
     // 同步 readFileSync 与调用侧同一取舍（取证证据：append 返回即达页缓存）。

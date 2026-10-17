@@ -46,7 +46,8 @@ export interface TerminalCtx {
   /** `.alive` 写权释放（removeAliveMarker 注入位）。 */
   releaseLease: (sessionFile: string) => void;
   /** [D8 v7] manifest 同步写目录（构造时快照；undefined = 纯内存测试形态）。 */
-  manifestDir: string | undefined;
+  /** manifest 目录晚绑定取值（rootSessionId 树内分区，写点现取——调用时解引用）。 */
+  manifestDir: (() => string) | undefined;
   archive: (record: ExecutionRecord) => void;
   register: (record: ExecutionRecord) => void;
   reportRecordTransition: (record: ExecutionRecord) => void;

@@ -51,6 +51,9 @@ import { RecordStore } from "./persistence/record-store.ts";
 // 注册表对账 sweep（initSession 挂点；绑定面在 registry-reconcile/sweep-binding.ts
 // ——变化轴独立）。
 import { runPendingReconcileSweepForService } from "./registry-reconcile/sweep-binding.ts";
+// [session-store-layout-inversion D2/D3] workflow 域 run 状态目录的进程级锚绑定点
+//（分区键 = rootSessionId，与 record 域 store 目录同一时点、同一取值）。
+import { setPiWorkflowRootSessionId } from "./assembly/workflow-state-root.ts";
 // [§1.4 修复批顺手修] SubagentStream 未使用导入删除（HEAD 既有 lint error，本文件
 // 入暂存清单时 pre-commit 会拦）；StreamSink 仍被 streamSink getter 消费保留。
 import type { StreamSink } from "./assembly/stream-sink.ts";
@@ -218,17 +221,35 @@ export class SubagentService {
   private readonly overrideRebuildNegativeCache = new Set<string>();
 
   /**
-   * [D6 #7a] records 目录（与 manifestStore 同源同一推导）——屏障失败 warn 带 manifest
-   * 文件路径用（ManifestStore.dir 私有，此处不破封装另存同源值；漂移由构造点同语句保证不发生）。
+   * [D6 #7a] records 目录晚绑定取值（rootSessionId 树内分区，与 manifestStore 同源
+   * 同一推导）——屏障失败 warn 带 manifest 文件路径用（ManifestStore.dir 私有，此处
+   * 不破封装另存同源值；漂移由构造点同语句闭包保证不发生）。
    */
-  private readonly recordsDir: string;
+  private readonly recordsDir: () => string;
 
   /**
-   * [T1/PS-9] subagent sessionDir（getSubagentSessionDir 推导，与 store 同源同一 rootCwd）。
-   * 传给 doFinalizeRecord 的 FinalizeDeps.sessionDir——record.sessionFile 缺失时 finalize
-   * 用它做磁盘 identity 反查（marker/alive 清理的依据）。
+   * [T1/PS-9] subagent sessionDir（getSubagentSessionDir 晚绑定推导，与 store 同源
+   * 同一 rootSessionId）。传给 doFinalizeRecord 的 FinalizeDeps.sessionDir——record
+   * .sessionFile 缺失时 finalize 用它做磁盘 identity 反查（marker/alive 清理的依据）。
    */
-  private readonly sessionsDir: string;
+  private readonly sessionsDir: () => string;
+
+  /**
+   * store/manifestStore 目录闭包的分区键（rootSessionId）：initSession 绑定（根进程
+   * = 本 session id；子进程 = env 贯穿的真 ROOT）。initSession 前目录未定位——该窗口
+   * 内无任何读写点可达（写面 assertReady 先拦；读面编排全部排在 initSession 内
+   * sessionRootId 建立之后），命中即装配窗口外的异常调用，fail-fast 给恢复指引。
+   */
+  private resolveStoreRootSessionId(): string {
+    const sid = this.sessionRootId ?? this.sessionId;
+    if (sid === null) {
+      throw new Error(
+        "subagent store dir not resolvable: no session bound yet (before initSession). " +
+          "Recovery: record writes/reads run only after session_start; check the caller is not invoking the subagent store during extension boot.",
+      );
+    }
+    return sid;
+  }
 
   constructor(init: SubagentServiceInit) {
     this.cwd = init.cwd;
@@ -258,6 +279,7 @@ export class SubagentService {
               getStore: () => this.store,
               getPi: () => this.pi,
               getMainSessionFile: () => this.mainSessionFile,
+              getRootSessionId: () => this.resolveStoreRootSessionId(),
             },
             (process.env[ENV_SELF_RECORD_ID] ?? "") !== "",
           ),
@@ -268,13 +290,16 @@ export class SubagentService {
     setHostUiRequestEndpoint(init.uiRequestHandler);
     this.pool = new DefaultConcurrencyPool(this.modelService.getGlobalConfig().maxConcurrent);
     this.worktreeManager = new WorktreeManager(this.modelService.getAgentDir());
-    // [MF-3] worktree 隔离下全树落盘目录统一到 ROOT cwd：子进程（spawn cwd = worktree checkout 路径）
-    // 若按自身 cwd 编码目录，深层 record 写到 enc(worktree) 段，ROOT 磁盘重建扫不到。
-    // rootCwd 的 env 推导随域 #2 聚合（session-baselines.ts 构造器）；sessions 与 records 两套
-    // 目录必须同源（同一 rootCwd），否则 enc 段不变量断裂（只改其一会让同 record 的
-    // session 文件与 manifest 分落两段，GC/重建互相找不到）。
-    const sessionsDir = getSubagentSessionDir(this.modelService.getAgentDir(), this.rootCwd);
-    const recordsDir = getSubagentRecordsDir(this.modelService.getAgentDir(), this.rootCwd);
+    // [session-store-layout-inversion D2/D3] 目录分区键 = rootSessionId（session 存储
+    // 树 `<root>/<rootSid>/subagents/`，随会话整树回收）。宿主进程构造期尚无
+    // sessionId（initSession 才注入），/new /resume 换 session 后目录必须跟随——
+    // 两套目录全部晚绑定闭包（store/manifestStore 消费点现取，构造期零求值）；
+    // 子进程经 env 贯穿构造期即有 ROOT sid（sessionRootId getter 已同源推导）。
+    // sessions 与 records 两套目录同源（同一 rootSessionId），否则同 record 的
+    // session 文件与 manifest 分落两棵树，GC/重建互相找不到（不变量由同语句闭包
+    // 保证）。
+    const sessionsDir = () => getSubagentSessionDir(this.resolveStoreRootSessionId());
+    const recordsDir = () => getSubagentRecordsDir(this.resolveStoreRootSessionId());
     this.sessionsDir = sessionsDir;
     this.recordsDir = recordsDir;
     this.manifestStore = new ManifestStore(recordsDir);
@@ -324,7 +349,7 @@ export class SubagentService {
       getWorktreeManager: () => this.worktreeManager,
       getModelService: () => this.modelService,
       getNotifyHost: () => this.notifyHost,
-      getSessionsDir: () => this.sessionsDir,
+      getSessionsDir: () => this.sessionsDir(),
       getPi: () => this.pi,
       // [R4 / C-5 兑现 / 2026-09-13 design-code-sync 接线] Continuation 协作面本体
       //（continuations 队列 + onRecordFinalizedCleanup + abortAndClearQueue）已迁

@@ -29,7 +29,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
-import { encodeCwd } from "../assembly/path-encoding.ts";
+import { encodeCwd, getSessionStoreDir } from "@taiji/shared/paths";
 import type { PatchResult,WorktreeHandle } from "../assembly/types.ts";
 import { DirtyWorktreeError } from "../assembly/types.ts";
 import { bestEffort } from "../assembly/best-effort.ts";
@@ -196,7 +196,7 @@ export async function addWorktreeWithStaleRecovery(
 export class WorktreeManager {
   // 全局注册表：跨 repo 记录所有活 worktree，reaper 遍历此表判孤儿。
   private readonly registry: WorktreeRegistry;
-  // agentDir（<agentDir>/subagents/<enc>/sessions 下扫 .alive 活信号，D5b 对账用）
+  // agentDir（引擎级 worktrees.json 注册表锚点，豁免清单⑤——不入 session 树）
   private readonly agentDir: string;
   // per-repo 写命令串行队列：value = 队尾（已吞 rejection 的）Promise。
   // 入队形态 prev.catch(()=>{}).then(run)——后继只关心「自己已排队」，
@@ -210,10 +210,13 @@ export class WorktreeManager {
   constructor(agentDir: string) {
     this.agentDir = agentDir;
     this.registry = new WorktreeRegistry(agentDir);
+    // [session-store-layout-inversion D2/D3] 对账活信号换根：.alive 随 subagent
+    // 文件族落 session 存储树（引擎级 worktrees.json 注册表仍锚 agentDir，豁免
+    // 清单⑤——两者基址分离）。
     this.reconciler = new WorktreeReconciler({
       gitRunAsync: (args, opts) => this.gitRunAsync(args, opts),
       registry: this.registry,
-      agentDir,
+      storeRoot: getSessionStoreDir(),
     });
   }
 

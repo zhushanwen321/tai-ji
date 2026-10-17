@@ -304,7 +304,6 @@ export class RecordStore {
    * fire-and-forget 竞态构造性消灭（disposeAllRecords 同步链全链同步段内完成）；
    * 已接线（subagent-service.ts 构造点 recordsDir）；缺省分支仅纯内存测试形态。
    */
-  private readonly manifestDir: string | undefined;
 
   /**
    * [W1 / D3] record 事件文件接线层（`<manifestDir>/<sa-id>.events`——与 manifest
@@ -342,24 +341,44 @@ export class RecordStore {
    */
   private readonly roundsCtx: RoundsCtx;
 
+  /**
+   * sessions 目录晚绑定取值（rootSessionId 树内分区——目录绑定 session 生命周期，
+   * 宿主进程 initSession 后才定位；/new /resume 换 session 后现取新目录，旧 session
+   * 的记录随旧树保留、切回时重新可见）。全部消费点调用时点求值，不缓存目录串。
+   */
+  private readonly getSessionsDir: () => string;
+  /**
+   * [D8 v7] manifest 同步写目录晚绑定取值（与 getSessionsDir 同一棵 session 树）。
+   * 提供时终态原语（markFinalized / markCancelled）走 writeAtomicFileSync 同步落盘
+   * ——停机窗 fire-and-forget 竞态构造性消灭；已接线（subagent-service.ts 构造点）；
+   * 缺省分支仅纯内存测试形态。
+   */
+  private readonly getManifestDir: (() => string) | undefined;
+
+  /** sessions 目录现取（消费点统一经本方法，字段直接引用只留本方法一处）。 */
+  private sessionsDir(): string {
+    return this.getSessionsDir();
+  }
+
   constructor(
-    private readonly sessionsDir: string,
+    getSessionsDir: () => string,
     private readonly manifestStore?: ManifestStore,
     /** Pi 入口（注入 appendEntry 用于上报损坏 manifest）。
      *  SubagentService 构造时 this.pi 尚未注入（session_start 之前），传 undefined 兜底；
      *  后续通过 setPi() 注入（见下）。允许 null = 兼容 PiLike 字段类型。 */
     pi?: RecordStorePi,
-    /** [D8 v7] manifest 同步写目录（见 manifestDir 字段注释）。 */
-    manifestDir?: string,
+    /** [D8 v7] manifest 同步写目录晚绑定取值（见 getManifestDir 字段注释）。 */
+    getManifestDir?: () => string,
   ) {
     this.pi = pi ?? null;
-    this.manifestDir = manifestDir;
-    // [W1 / D3] 事件 journal 与 manifest 同目录接线（manifestDir = recordsDir，
+    this.getSessionsDir = getSessionsDir;
+    this.getManifestDir = getManifestDir;
+    // [W1 / D3] 事件 journal 与 manifest 同目录接线（recordsDir = manifestDir，
     // subagent-service 构造点同语句保证不漂移）。缺省分支（纯内存测试形态）= 事件
     // 面空转，条目面独立工作（register/archive 的 face 缺省分支）。
     this.eventStreamFace =
-      manifestDir !== undefined
-        ? new RecordEventsWriteFace(manifestDir, (customType, data) => {
+      getManifestDir !== undefined
+        ? new RecordEventsWriteFace(getManifestDir, (customType, data) => {
           // [§1.4 (b)] best-effort：stale pi 抛错留痕不冒泡（可选链只防 null 不防
           // stale——PS-30 assertActive，登记 §1.4）。
           bestEffortPiCall(this.pi, `record event entry (${customType})`, (active) => {
@@ -369,7 +388,7 @@ export class RecordStore {
           // [D2 决策 9] bound 物化写面（锚定就绪守卫与写失败降级在被调函数内）——
           // 与轮终派生投影同款「manifest 是物化投影不是条目」语义。调用字面只留本
           // 文件（R1 豁免面），轴文件经构造参数注入消费。
-          materializeBoundRecordManifest(manifestDir, derivedManifestRecord(recordToSubagent(rec)));
+          materializeBoundRecordManifest(getManifestDir(), derivedManifestRecord(recordToSubagent(rec)));
         })
         : undefined;
     // 终态轴通道绑定：写函数经箭头闭包**调用时解引用**（与原方法体内联调用同款
@@ -379,7 +398,7 @@ export class RecordStore {
     this.terminalCtx = {
       acquireLease: (file, marker) => writeAliveMarker(file, marker),
       releaseLease: (file) => removeAliveMarker(file),
-      manifestDir,
+      manifestDir: getManifestDir,
       archive: (r) => this.archive(r),
       register: (r) => this.register(r),
       reportRecordTransition: (r) => this.reportRecordTransition(r),
@@ -461,8 +480,9 @@ export class RecordStore {
    * 的可选域说明）。
    */
   private triggerRecordRetentionRound(): void {
-    if (this.manifestDir === undefined) return; // 纯内存测试形态无 record 域
-    runRetentionMaintenanceRound({ recordsDir: this.manifestDir }).catch((err: unknown) => {
+    const manifestDir = this.getManifestDir?.();
+    if (manifestDir === undefined) return; // 纯内存测试形态无 record 域
+    runRetentionMaintenanceRound({ recordsDir: manifestDir }).catch((err: unknown) => {
       logger.warn(
         `[subagents] record retention maintenance round failed: ${err instanceof Error ? err.message : String(err)}`,
       );
@@ -828,12 +848,13 @@ export class RecordStore {
    * 内存测试形态）。写失败响亮（error 日志 + 用户可见 entry，对齐 writeManifestBestEffort）。
    */
   private writeManifestPersisted(id: string, manifest: ManifestRecord): void {
-    if (this.manifestDir !== undefined) {
+    const manifestDir = this.getManifestDir?.();
+    if (manifestDir !== undefined) {
       try {
         // [④ 纯索引水位] 各原语写序（先追加事件后写 manifest）保证水位构造性新鲜。
-        const stamped = withEventsWatermark(this.manifestDir, manifest);
+        const stamped = withEventsWatermark(manifestDir, manifest);
         writeAtomicFileSync(
-          path.join(this.manifestDir, `${id}.json`),
+          path.join(manifestDir, `${id}.json`),
           JSON.stringify(stamped, null, MANIFEST_INDENT_SPACES),
         );
       } catch (err) {
@@ -859,10 +880,11 @@ export class RecordStore {
    * 不把收编 record 误注销为 expired 的唯一判据源。
    */
   findAdoptedStopReasonSync(id: string): string | undefined {
-    if (this.manifestDir === undefined) return undefined;
+    const manifestDir = this.getManifestDir?.();
+    if (manifestDir === undefined) return undefined;
     let raw: string;
     try {
-      raw = fs.readFileSync(path.join(this.manifestDir, `${id}.json`), "utf8");
+      raw = fs.readFileSync(path.join(manifestDir, `${id}.json`), "utf8");
     } catch {
       return undefined; // 文件缺失/不可读 = 非收编终局形态（保守）
     }
@@ -923,17 +945,18 @@ export class RecordStore {
    * @returns true = 本次实际补写。
    */
   private rebuildManifestIfMissing(rec: SubagentRecord): boolean {
-    if (this.manifestDir === undefined && this.manifestStore === undefined) return false;
+    const manifestDir = this.getManifestDir?.();
+    if (manifestDir === undefined && this.manifestStore === undefined) return false;
     if (this.manifestRebuildTried.has(rec.id)) return false;
     this.manifestRebuildTried.add(rec.id);
-    if (this.manifestDir !== undefined) {
-      const manifestPath = path.join(this.manifestDir, `${rec.id}.json`);
+    if (manifestDir !== undefined) {
+      const manifestPath = path.join(manifestDir, `${rec.id}.json`);
       try {
         if (fs.existsSync(manifestPath)) return false;
         // [④ 纯索引水位] 重建补写同样嵌水位（写点统一收口 withEventsWatermark）。
         writeAtomicFileSync(
           manifestPath,
-          JSON.stringify(withEventsWatermark(this.manifestDir, derivedManifestRecord(rec)), null, MANIFEST_INDENT_SPACES),
+          JSON.stringify(withEventsWatermark(manifestDir, derivedManifestRecord(rec)), null, MANIFEST_INDENT_SPACES),
         );
         return true;
       } catch (err) {
@@ -1142,7 +1165,7 @@ export class RecordStore {
         // 不在则如实缺席——陈旧快照不得顶替事实源）。无水位（存量 manifest / 纯内存
         // 形态）或本 store 无 manifestDir（manifestStore 降级形态，无事件路径可 stat）
         // → 无法证伪，按现状接受——宽容存量，行为零变化。
-        if (manifest.eventsStamp !== undefined && this.manifestDir !== undefined) {
+        if (manifest.eventsStamp !== undefined && this.getManifestDir !== undefined) {
           const events = this.eventsStampOfId(manifest.id);
           const fresh =
             events !== null &&
@@ -1548,7 +1571,7 @@ export class RecordStore {
     // sessionsDir 不存在的 early-return 不装载映像（防解析产物滞留内存）；首扫时
     // 下方快路径条件必不成立，插在快路径 if 前后等价。
     if (this.dirStamp === null) {
-      const loaded = loadIndex(path.dirname(this.sessionsDir));
+      const loaded = loadIndex(path.dirname(this.sessionsDir()));
       this.indexEntries = loaded.entries;
       this.indexHigherVersion = loaded.higherVersion;
     }
@@ -1606,10 +1629,10 @@ export class RecordStore {
    */
   private statSessionsDirMtime(): number | null {
     try {
-      return fs.statSync(this.sessionsDir).mtimeMs;
+      return fs.statSync(this.sessionsDir()).mtimeMs;
     } catch (err) {
       if (!isMissingFsError(err)) {
-        logger.warn(`[subagents] reconstructAll: sessions dir stat failed (falling back to empty) at ${this.sessionsDir}: ${toErrorMessage(err)}`);
+        logger.warn(`[subagents] reconstructAll: sessions dir stat failed (falling back to empty) at ${this.sessionsDir()}: ${toErrorMessage(err)}`);
       }
       return null;
     }
@@ -1622,13 +1645,14 @@ export class RecordStore {
    */
   private readSessionsDirFiles(): string[] | null {
     try {
-      return fs.readdirSync(this.sessionsDir)
+      const sessionsDir = this.sessionsDir();
+      return fs.readdirSync(sessionsDir)
         .filter((f) => f.endsWith(".jsonl"))
-        .map((f) => path.join(this.sessionsDir, f));
+        .map((f) => path.join(sessionsDir, f));
     } catch (err) {
       this.indexEntries = null; // [perf L-1] 该 early-return 路径同样释放映像（内存卫生）
       if (!isMissingFsError(err)) {
-        logger.warn(`[subagents] reconstructAll: sessions dir read failed (falling back to empty) at ${this.sessionsDir}: ${toErrorMessage(err)}`);
+        logger.warn(`[subagents] reconstructAll: sessions dir read failed (falling back to empty) at ${this.sessionsDir()}: ${toErrorMessage(err)}`);
       }
       return null;
     }
@@ -1825,7 +1849,7 @@ export class RecordStore {
     if (Date.now() - this.lastIndexWriteAt < INDEX_WRITE_MIN_INTERVAL_MS) return; // 60s 节流窗内
     const entries = this.projectIndexEntries();
     this.indexDirty = false; // 发起时消费（写失败在 .catch 恢复）
-    const encDir = path.dirname(this.sessionsDir);
+    const encDir = path.dirname(this.sessionsDir());
     saveIndex(encDir, { entries })
       .then(() => {
         this.lastIndexWriteAt = Date.now(); // 仅成功分支推进节流窗
@@ -1849,7 +1873,8 @@ export class RecordStore {
    */
   /** 事件文件戳（缓存键第四维）——按 record id 取 `<recordsDir>/<id>.events`。 */
   private eventsStampOfId(id: string): Stamp | null {
-    return this.manifestDir === undefined ? null : statStamp(recordEventsPath(this.manifestDir, id));
+    const manifestDir = this.getManifestDir?.();
+    return manifestDir === undefined ? null : statStamp(recordEventsPath(manifestDir, id));
   }
 
   /**
@@ -1862,7 +1887,7 @@ export class RecordStore {
    * 一个坏名把整轮扫描炸掉（与重建链其余容错同向）。
    */
   private ensureFileToRecordId(): void {
-    const dir = this.manifestDir;
+    const dir = this.getManifestDir?.();
     if (dir === undefined || this.eventStreamFace === undefined) return; // 事件面未接线：折叠腿不可用
     const dirMtimeMs = statStamp(dir)?.mtimeMs ?? null;
     if (dirMtimeMs === null) return;
@@ -1986,10 +2011,11 @@ export class RecordStore {
    * 状态读取走 mergedRecords 四源合并）。读不到/损坏/状态越界 → undefined。
    */
   findByIdManifestFallback(id: string): SubagentRecord | undefined {
-    if (this.manifestDir === undefined) return undefined;
+    const manifestDir = this.getManifestDir?.();
+    if (manifestDir === undefined) return undefined;
     let raw: string;
     try {
-      raw = fs.readFileSync(path.join(this.manifestDir, `${id}.json`), "utf8");
+      raw = fs.readFileSync(path.join(manifestDir, `${id}.json`), "utf8");
     } catch {
       return undefined; // 文件缺失/不可读 = 无兜底形态
     }

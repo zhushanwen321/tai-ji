@@ -26,11 +26,13 @@
 //
 // 触发确定性：进程内首次接线即扫一次 + 每 24h 定时复扫（startEngineJournalGcTimer，
 // 对齐 main 侧 log-retention 形态），best-effort（失败不影响启动）；
-// 调用方以 oncePerProcess 守卫防重复接线。接线方传 agentDir 时 .patch 清扫同批生效
-// （pi extension 接线点持有 agentDir；不传 = 仅引擎 journal，缺省行为不变）。
+// 调用方以 oncePerProcess 守卫防重复接线。.patch 清扫根经 getSessionStoreDir 缺省
+// 推导（session 存储树，与写侧同源）；引擎 journal 段独立于此参数恒生效。
 
 import * as fs from "node:fs";
 import * as path from "node:path";
+
+import { getSessionStoreDir } from "@taiji/shared/paths";
 
 import { getEngineDataDir } from "../engine/common/data-dir.ts";
 import { cleanupExpiredJournals } from "../engine/common/pool-manager.ts";
@@ -52,12 +54,13 @@ const GC_RESWEEP_INTERVAL_MS = HOURS_PER_DAY * MINUTES_PER_HOUR * SECONDS_PER_MI
 /**
  * 回收引擎 journal + worktree .patch 孤儿（确定性触发，由调用方决定时机）。
  * best-effort——任何异常不外抛。dataDir 解析失败 = 未配置宿主服务，同样吞掉。
- * agentDir 传入时同批清扫 subagents 各 enc 段 sessions 目录内的 .patch（文件头范围 2）。
+ * dataDir 传入时同批清扫 session 存储树各会话树 `<root>/<sid>/subagents/sessions/`
+ * 内的 .patch（文件头范围 2；缺省 = 仅引擎 journal）。
  */
-export function cleanupExpiredEngineJournals(agentDir?: string): void {
+export function cleanupExpiredEngineJournals(dataDir?: string): void {
   try {
     cleanupExpiredJournals(getEngineDataDir(), TTL_MS);
-    if (agentDir !== undefined) cleanupOrphanWorktreePatches(agentDir, TTL_MS);
+    if (dataDir !== undefined) cleanupOrphanWorktreePatches(getSessionStoreDir(dataDir), TTL_MS);
   } catch (_e) {
     // best-effort：异常不外抛
     void _e;
@@ -65,29 +68,32 @@ export function cleanupExpiredEngineJournals(agentDir?: string): void {
 }
 
 /**
- * worktree .patch 孤儿清扫：`<agentDir>/subagents/<enc>/sessions/` 两层枚举，仅
- * `*.patch` 按 mtime TTL unlink（布局 = worktree-patch-collection 落盘点
- * getSubagentSessionDir 的 `subagents/<encodeCwd>/sessions/`）。逐文件逐目录
- * best-effort（单文件失败静默——文件可能已被删除；subagents 根不存在 = 从未有过
- * 子代理，合法空态）。不递归 walk、不触碰非 .patch 文件——级联领地（.jsonl /
+ * worktree .patch 孤儿清扫：`<storeRoot>/<sessionId>/subagents/sessions/` 三段枚举，
+ * 仅 `*.patch` 按 mtime TTL unlink（布局 = worktree-patch-collection 落盘点
+ * getSubagentSessionDir 的 `<root>/<rootSessionId>/subagents/sessions/`，
+ * session-store-layout-inversion D2/D3 换根——.patch 属 subagent 文件族随会话树走；
+ * 引擎 journal 段不迁移，见文件头豁免登记）。一级目录名须是合法 sessionId 形态
+ * （isPiSessionIdShape 同域正则——非会话目录跳过，防手放目录被误扫）。逐文件逐目录
+ * best-effort（单文件失败静默——文件可能已被删除；存储树根不存在 = 从未有过
+ * 会话，合法空态）。不递归 walk、不触碰非 .patch 文件——级联领地（.jsonl /
  * sidecar / manifest / .events）的回收权威在 runtime session-content-cascade。
  */
-function cleanupOrphanWorktreePatches(agentDir: string, ttlMs: number): void {
-  let encDirs: fs.Dirent[];
+function cleanupOrphanWorktreePatches(storeRoot: string, ttlMs: number): void {
+  let sessionDirs: fs.Dirent[];
   try {
-    encDirs = fs.readdirSync(path.join(agentDir, "subagents"), { withFileTypes: true });
+    sessionDirs = fs.readdirSync(storeRoot, { withFileTypes: true });
   } catch (_e) {
-    void _e; // 根不存在（从未有过子代理）或不可读：无可清理，静默
+    void _e; // 根不存在（从未有过会话）或不可读：无可清理，静默
     return;
   }
-  for (const ent of encDirs) {
-    if (!ent.isDirectory()) continue;
-    const sessionsDir = path.join(agentDir, "subagents", ent.name, "sessions");
+  for (const ent of sessionDirs) {
+    if (!ent.isDirectory() || !isPiSessionIdShape(ent.name)) continue;
+    const sessionsDir = path.join(storeRoot, ent.name, "subagents", "sessions");
     let names: string[];
     try {
       names = fs.readdirSync(sessionsDir);
     } catch (_e) {
-      void _e; // enc 段无 sessions 子目录：合法空态
+      void _e; // 该会话树无 subagents/sessions 子目录：合法空态
       continue;
     }
     for (const name of names) {
@@ -103,14 +109,25 @@ function cleanupOrphanWorktreePatches(agentDir: string, ttlMs: number): void {
 }
 
 /**
+ * 一级目录名的 sessionId 形态判定（与 shared paths assertPiSessionId 同域正则：
+ * 首尾字母数字，中间允许 [A-Za-z0-9._-]）。shared 侧正则为模块私有不可 import——
+ * 字面量一致性由既有三方对拍机检（check-artifact-dir-formula-sync.mjs 的
+ * shared ↔ runtime 正则断言）与本文件同式字面量共同守护。
+ */
+function isPiSessionIdShape(name: string): boolean {
+  return /^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/.test(name);
+}
+
+/**
  * 确定性触发接线：立即扫一次 + 每 24h 定时复扫（unref 不 hold 进程退出），
  * 返回 stop 函数（测试清理用）。形态对齐 main 侧 log-retention 的 startLogRetentionTimer；
- * 调用方以 oncePerProcess 守卫防重复接线。agentDir 语义同 cleanupExpiredEngineJournals。
+ * 调用方以 oncePerProcess 守卫防重复接线。无参——.patch 清扫根经 getSessionStoreDir
+ * 缺省推导（与写侧同源同值；单测注入走 cleanupExpiredEngineJournals(dataDir)）。
  */
-export function startEngineJournalGcTimer(agentDir?: string): () => void {
-  cleanupExpiredEngineJournals(agentDir);
+export function startEngineJournalGcTimer(): () => void {
+  cleanupExpiredEngineJournals();
   const timer = setInterval(() => {
-    cleanupExpiredEngineJournals(agentDir);
+    cleanupExpiredEngineJournals();
   }, GC_RESWEEP_INTERVAL_MS);
   timer.unref?.();
   return () => clearInterval(timer);

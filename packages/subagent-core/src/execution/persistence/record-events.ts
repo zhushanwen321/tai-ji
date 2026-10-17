@@ -49,8 +49,8 @@ export const RECORD_EVENTS_SUFFIX = ".events";
 /**
  * record 事件文件路径：`<recordsDir>/<sa-id>.events`。
  *
- * recordsDir = getSubagentRecordsDir(agentDir, mainCwd)（与 manifest 同目录）；
- * 与 manifest 同主名的对偶关系（<sa-id>.json / <sa-id>.events）是 D3 的显式裁决。
+ * recordsDir = getSubagentRecordsDir(rootSessionId)（与 manifest 同目录，rootSessionId
+ * 树内分区）；与 manifest 同主名的对偶关系（<sa-id>.json / <sa-id>.events）是 D3 的显式裁决。
  */
 export function recordEventsPath(recordsDir: string, id: string): string {
   assertValidRecordId(id);
@@ -522,12 +522,13 @@ export interface RecordEventStream { // oe-exempt:20260929:framework:workflow/re
  * 实装体 = shared 泛型基座（JsonlEventStream，与 run journal 单源）；本函数只提供
  * record 域策略：路径（含 id 白名单校验）、首行头行、行校验器（seq 必填）、warn 标签。
  *
- * @param recordsDir manifest 同款目录（getSubagentRecordsDir 产物；测试传
- *        mkdtemp 临时目录）。
+ * @param getRecordsDir records 目录晚绑定取值（目录随 rootSessionId 树分区、宿主
+ *        进程 initSession 后才定位——getter 惰性求值，append/scan 时点现取；测试传
+ *        `() => <mkdtemp 临时目录>`）。
  */
-export function createRecordEventStream(recordsDir: string): RecordEventStream {
-  return new JsonlEventStream<RecordEventInput, RecordEvent>(recordsDir, {
-    pathFor: (id) => recordEventsPath(recordsDir, id),
+export function createRecordEventStream(getRecordsDir: () => string): RecordEventStream {
+  return new JsonlEventStream<RecordEventInput, RecordEvent>({
+    pathFor: (id) => recordEventsPath(getRecordsDir(), id),
     headerFor: (id) => toRecordEventHeader(id),
     isHeader: isRecordEventHeader,
     parseLine: (value) => parseRecordEventLine(value) ?? undefined,

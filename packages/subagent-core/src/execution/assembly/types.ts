@@ -166,8 +166,12 @@ export interface SessionResolveInput {
   mainCwd: string;
   mainSessionFile?: string;
   parentForkDepth?: number;
-  /** agent 配置目录（getSubagentSessionDir 需要）。 */
-  agentDir: string;
+  /**
+   * 根会话 id（[session-store-layout-inversion D2/D3] getSubagentSessionDir 的分区键
+   * ——session 目录落 `<root>/<rootSessionId>/subagents/sessions/`；旧 encodeCwd 分区
+   * 与 agentDir 参数随布局反转退役）。
+   */
+  rootSessionId: string;
   /** worktree checkout 路径（来自 WorktreeHandle.path，作为 effectiveCwd）。 */
   worktreePath?: string;
 }
