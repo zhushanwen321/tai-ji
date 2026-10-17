@@ -17,13 +17,15 @@
  * - 并行组（parallelGroups）v1 不画组框：同组节点天然同列相邻（同 phase 内词法
  *   序排列），并行语义由调用点行内的实例列表表达（设计 §3.1-3 最小形态）。
  *
- * 边路由（正交）：全部边只走横竖两向，任何段不穿节点卡片——
+ * 边路由（正交）：全部边只走横竖两向，任何段不穿节点卡片；连线锚点只取节点四条
+ * 边的中点（上/下/左/右共 4 个连线点，上边中点预留）——
  * - 顺序/数据流/条件边：源右中心 → 通道竖线 → 目标左中心的三段折线（同行退化直线）；
  *   同一通道（源同列且目标同列）的并行边竖线段默认重合，按纵向跨度重叠游程居中
  *   错开车道（LANE_STEP_PX），fan-in/fan-out 不再叠成一根线；
- * - loop-back：源底中心 → 源列侧向细道下探 → 底部总线（全图最深节点下方）横行 →
- *   目标列侧向细道上升 → 目标底边短横支；同列回边 = U 形细道折返。细道在分区
- *   内边距带内（节点列之外），升降段不穿同列堆叠的节点。
+ * - loop-back：源底中心 → 底边下空隙带短降 → 源列侧向细道下探 → 底部总线（全图
+ *   最深节点下方）横行 → 目标列侧向细道上升 → 目标底边下空隙带短横 → 目标底中心；
+ *   同列回边 = U 形细道折返。细道在分区内边距带内（节点列之外），升降段不穿同列
+ *   堆叠的节点；贴边水平段相对底边下移 LOOP_APPROACH_DROP，不压节点边框。
  * 折点处用小半径圆弧过渡（视觉圆角，路由仍严格轴对齐）。
  */
 import type { WorkflowDag, WorkflowDagEdge, WorkflowDagNode } from '@taiji/shared'
@@ -249,6 +251,10 @@ export interface DagLayoutEdge { // oe-exempt:20261002:framework:workflow-viz �
 const LOOP_DROP = 28
 /** 回边侧向细道偏移（节点缘到细道；细道落在分区内边距带内——节点列之外，不穿节点）。 */
 const LOOP_SIDE_OFFSET = 8
+/** 回边贴边水平段相对节点底边的下移间隙（px）：横行段落在底边与分区底界
+ *  （CLUSTER_PAD_BOTTOM=12）或下邻节点（NODE_GAP=18）之间的空隙带内——不压节点
+ *  边框，进出锚点仍唯一落在底边中点。 */
+const LOOP_APPROACH_DROP = 5
 /** 同通道并行边的车道步长（竖线段错开间距；列间走廊 ~56px，容得下常规并行度）。 */
 export const LANE_STEP_PX = 6
 /** 折点圆角半径（px；实际半径再按相邻段长收敛，短段不打弯）。 */
@@ -304,22 +310,28 @@ type PendingEdge =
   | { edge: WorkflowDagEdge; kind: 'channeled'; chan: ChannelMember }
 
 /**
- * loop-back 路由：下降/上升段一律走源/目标列的侧向细道（分区内边距带内、节点列
- * 之外），任何段不穿节点卡片——同列回边 = U 形细道折返；跨列回边 = 源细道下探 →
- * 底部总线（全图最深节点下方 LOOP_DROP 处）横行 → 目标细道上升 → 目标底边短横支
- * 进底中心。细道取朝向对端一侧（总线不回头折）。
+ * loop-back 路由：锚点 = 源底边中点出、目标底边中点进（连线点只取节点四边中点）。
+ * 下降/上升段一律走源/目标列的侧向细道（分区内边距带内、节点列之外），任何段不穿
+ * 节点卡片；贴边水平段走节点底边下方的空隙带（LOOP_APPROACH_DROP，分区底内边距
+ * CLUSTER_PAD_BOTTOM / 行距 NODE_GAP 之内），不压节点边框——同列回边 = U 形细道
+ * 折返；跨列回边 = 源细道下探 → 底部总线（全图最深节点下方 LOOP_DROP 处）横行 →
+ * 目标细道上升 → 空隙带短横 → 底中点收锚。细道取朝向对端一侧（总线不回头折）。
  */
 function loopBackPoints(from: DagLayoutNode, to: DagLayoutNode, deepestBottom: number): DagPoint[] {
   const fromBottom = from.y + from.h
   const toBottom = to.y + to.h
+  const fromLaneY = fromBottom + LOOP_APPROACH_DROP
+  const toLaneY = toBottom + LOOP_APPROACH_DROP
   const bx1 = from.x + DAG_NODE_W / HALF
   const bx2 = to.x + DAG_NODE_W / HALF
   if (Math.abs(bx1 - bx2) < COINCIDE_EPS) {
     const sx = Math.min(from.x, to.x) - LOOP_SIDE_OFFSET
     return [
       { x: bx1, y: fromBottom },
-      { x: sx, y: fromBottom },
-      { x: sx, y: toBottom },
+      { x: bx1, y: fromLaneY },
+      { x: sx, y: fromLaneY },
+      { x: sx, y: toLaneY },
+      { x: bx2, y: toLaneY },
       { x: bx2, y: toBottom },
     ]
   }
@@ -329,10 +341,12 @@ function loopBackPoints(from: DagLayoutNode, to: DagLayoutNode, deepestBottom: n
   const toSideX = towardTo ? to.x + DAG_NODE_W + LOOP_SIDE_OFFSET : to.x - LOOP_SIDE_OFFSET
   return [
     { x: bx1, y: fromBottom },
-    { x: fromSideX, y: fromBottom },
+    { x: bx1, y: fromLaneY },
+    { x: fromSideX, y: fromLaneY },
     { x: fromSideX, y: busY },
     { x: toSideX, y: busY },
-    { x: toSideX, y: toBottom },
+    { x: toSideX, y: toLaneY },
+    { x: bx2, y: toLaneY },
     { x: bx2, y: toBottom },
   ]
 }

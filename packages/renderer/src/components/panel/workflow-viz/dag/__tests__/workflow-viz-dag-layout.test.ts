@@ -8,10 +8,11 @@
  * - 零节点 run → 空布局 + 最小占位（渲染层出居中摘要提示，无独立卡片容器）；
  * - 节点高度：≥2 实例的调用点按 dagNodeHeight 增高（实例行画进节点），经
  *   nodeHeights 表传入布局；
- * - 边几何（正交路由）：顺序/数据流/条件 = 源右中心→通道竖线→目标左中心的三段
- *   折线（同行退化直线），同通道并行边按车道错开不重合；loop-back = 侧向细道
- *   升降 + 底部总线（全图最深节点下方），任何段不穿节点；全部折点严格轴对齐
- *   （横竖两向不变量）；
+ * - 边几何（正交路由）：锚点只取节点四条边的中点（4 个连线点）；顺序/数据流/条件
+ *   = 源右中心→通道竖线→目标左中心的三段折线（同行退化直线），同通道并行边按车道
+ *   错开不重合；loop-back = 侧向细道升降 + 底部总线（全图最深节点下方），贴边横行
+ *   段下移进底边下方空隙带不压边框，任何段不穿节点；全部折点严格轴对齐（横竖两向
+ *   不变量）；
  * - fit-to-view：computeFitTransform 内容四周留 FIT_PAD_PX 居中（k 封顶 1 不放大）；
  * - 端点缺失的边跳过不抛。
  *
@@ -211,9 +212,9 @@ describe('layoutEdges 正交路由（白盒）', () => {
     const [edge] = layoutEdges(d, layout.nodes)
     expect(edge.points[0].y).toBe(lb.y + lb.h)
     // 横行总线 y 压在全图最深节点底之下（busY = deepest + LOOP_DROP）
-    const busY = edge.points[2].y
+    const busY = edge.points[3].y
     expect(busY).toBeGreaterThan(deepest)
-    expect(edge.points[2].y).toBe(edge.points[3].y)
+    expect(edge.points[3].y).toBe(edge.points[4].y)
     expectAxisAligned(edge.points)
     expect(edge.labelX).toBeUndefined()
   })
@@ -238,7 +239,7 @@ describe('layoutEdges 正交路由（白盒）', () => {
     const [lf] = layout.nodes.filter((ln) => ln.node.id === 'f')
     const deepest = Math.max(...layout.nodes.map((ln) => ln.y + ln.h))
     const [edge] = layoutEdges(d, layout.nodes)
-    expect(edge.points).toHaveLength(6)
+    expect(edge.points).toHaveLength(8)
     expectAxisAligned(edge.points)
     // 上升段 x 在目标列右缘细道（节点右缘之外、分区内边距带 CLUSTER_PAD_X=12 内）
     // ——不再沿目标底中心上升、穿过同列上方堆叠的节点卡片
@@ -246,13 +247,20 @@ describe('layoutEdges 正交路由（白盒）', () => {
     expect(riseX).toBeGreaterThan(lr1.x + DAG_NODE_W)
     expect(riseX).toBeLessThan(lr1.x + DAG_NODE_W + 12)
     // 下降段 x 在源列左缘细道
-    const dropX = edge.points[1].x
+    const dropX = edge.points[2].x
     expect(dropX).toBeGreaterThan(lf.x - 12)
     expect(dropX).toBeLessThan(lf.x)
     // 总线仍压在全图最深节点底之下
-    expect(edge.points[2].y).toBeGreaterThan(deepest)
-    // 终锚 = 目标底中心（细道上升后短横支进底边）
-    expect(edge.points[5]).toEqual({ x: lr1.x + DAG_NODE_W / 2, y: lr1.y + lr1.h })
+    expect(edge.points[3].y).toBeGreaterThan(deepest)
+    // 贴边横行段下移进底边下方空隙带（回归锚定：旧实现横行段 y=节点底边，压边框）
+    const fromLaneY = edge.points[1].y
+    expect(fromLaneY).toBeGreaterThan(lf.y + lf.h)
+    expect(fromLaneY).toBeLessThan(lf.y + lf.h + 12)
+    const toLaneY = edge.points[6].y
+    expect(toLaneY).toBeGreaterThan(lr1.y + lr1.h)
+    expect(toLaneY).toBeLessThan(lr1.y + lr1.h + 12)
+    // 终锚 = 目标底中心（细道上升 → 空隙带短横 → 底中点收锚）
+    expect(edge.points[7]).toEqual({ x: lr1.x + DAG_NODE_W / 2, y: lr1.y + lr1.h })
   })
 
   it('同通道并行边（fan-in）：竖线段按车道居中错开，不再重合成一根线', () => {
@@ -292,7 +300,7 @@ describe('layoutEdges 正交路由（白盒）', () => {
     for (const le of edges) expectAxisAligned(le.points)
   })
 
-  it('同列 loop-back：走分区左内边距侧向细道（不在节点列内折返）', () => {
+  it('同列 loop-back：走分区左内边距侧向细道（不在节点列内折返），贴边段不压底边框', () => {
     const d = dag({
       phases: [{ name: 'p0', order: 0 }],
       nodes: [node({ id: 'a' }), node({ id: 'b', templateName: 'zb' })],
@@ -300,12 +308,62 @@ describe('layoutEdges 正交路由（白盒）', () => {
     })
     const layout = layoutDag(d)
     const [la] = layout.nodes.filter((ln) => ln.node.id === 'a')
+    const [lb] = layout.nodes.filter((ln) => ln.node.id === 'b')
     const [edge] = layoutEdges(d, layout.nodes)
+    expect(edge.points).toHaveLength(6)
     expectAxisAligned(edge.points)
     // 侧向细道 x 在节点左缘与分区左缘之间（内边距带内）
-    const sideX = edge.points[1].x
+    const sideX = edge.points[2].x
     expect(sideX).toBeLessThan(la.x)
     expect(sideX).toBeGreaterThan(la.x - 12)
+    // 贴边横行段各自下移进所属节点底边下方空隙带（源 b 在下、目标 a 在上，不压边框）
+    const fromLaneY = edge.points[2].y
+    expect(fromLaneY).toBeGreaterThan(lb.y + lb.h)
+    expect(fromLaneY).toBeLessThan(lb.y + lb.h + 12)
+    const toLaneY = edge.points[3].y
+    expect(toLaneY).toBeGreaterThan(la.y + la.h)
+    expect(toLaneY).toBeLessThan(la.y + la.h + 12)
+    expect(edge.points[5]).toEqual({ x: la.x + DAG_NODE_W / 2, y: la.y + la.h })
+  })
+
+  it('连线锚点纪律：全部边首末折点只落在节点四条边的中点（4 个连线点）', () => {
+    const d = dag({
+      phases: [
+        { name: 'p0', order: 0 },
+        { name: 'p1', order: 1 },
+        { name: 'p2', order: 2 },
+      ],
+      nodes: [
+        node({ id: 'a', phase: 'p0' }),
+        node({ id: 'r1', templateName: 'ra', phase: 'p1' }),
+        node({ id: 'r2', templateName: 'rb', phase: 'p1' }),
+        node({ id: 'f', templateName: 'zz', phase: 'p2' }),
+      ],
+      edges: [
+        { id: 'e-seq', from: 'a', to: 'r1', kind: 'sequence' },
+        { id: 'e-df', from: 'r2', to: 'f', kind: 'dataflow' },
+        { id: 'loop-x', from: 'f', to: 'r1', kind: 'loop-back' },
+        { id: 'loop-same', from: 'r2', to: 'r1', kind: 'loop-back' },
+      ],
+    })
+    const layout = layoutDag(d)
+    const geo = new Map(layout.nodes.map((ln) => [ln.node.id, ln]))
+    const midpoints = (ln: { x: number; y: number; h: number }) => [
+      { x: ln.x + DAG_NODE_W / 2, y: ln.y },
+      { x: ln.x + DAG_NODE_W / 2, y: ln.y + ln.h },
+      { x: ln.x, y: ln.y + ln.h / 2 },
+      { x: ln.x + DAG_NODE_W, y: ln.y + ln.h / 2 },
+    ]
+    for (const le of layoutEdges(d, layout.nodes)) {
+      const from = geo.get(le.edge.from)
+      const to = geo.get(le.edge.to)
+      expect(from).toBeDefined()
+      expect(to).toBeDefined()
+      const first = le.points[0]
+      const last = le.points[le.points.length - 1]
+      expect(midpoints(from!).some((m) => m.x === first.x && m.y === first.y)).toBe(true)
+      expect(midpoints(to!).some((m) => m.x === last.x && m.y === last.y)).toBe(true)
+    }
   })
 
   it('条件边谓词标注锚在中位竖线旁（labelX = 竖线 x + 间隙）', () => {
