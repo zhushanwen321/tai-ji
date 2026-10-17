@@ -362,6 +362,25 @@ describe("manifest schema 字段级解析", () => {
     const omitted = portOf("mt-omitted") as { translateModelRef?: unknown };
     expect(typeof omitted.translateModelRef).toBe("undefined");
   });
+
+  it("modelTranslation null 声明：不抛，扫描不崩，快照不携带翻译面（声明缺席等价）", () => {
+    // JSON null 是作者可合法照写的声明形态：曾因守卫链 typeof null === 'object' 穿透
+    // 至 Object.entries(null) 抛 TypeError，异常穿透 visitManifestPackage（无 per-package
+    // try/catch）使整个引擎发现扫描崩溃（全部引擎不可发现）。
+    makeEnginePkg(tmpRoot, "mt-null", {
+      capabilities: FULL_CAPABILITIES,
+      modelTranslation: null,
+    });
+    const result = scanEngines(scanOpts({ roots: [tmpRoot] }));
+    // 包仍可用（宽容契约不因 null 声明降级为不可用）
+    expect(result.discovered).toHaveLength(1);
+    expect(result.discovered[0].id).toBe("mt-null");
+    // 快照不携带翻译面（null 归 undefined = 声明缺席语义，与 parseModelCatalog 三态对齐）
+    expect("modelTranslation" in result.discovered[0].descriptor.manifest!).toBe(false);
+    // RemoteEngine 翻译面成员摘除（消费方 typeof 探测缺席语义）
+    const port = result.discovered[0].descriptor.portFactory() as { translateModelRef?: unknown };
+    expect(typeof port.translateModelRef).toBe("undefined");
+  });
 });
 
 // ── 三级搜索路径 ─────────────────────────────────────────────────

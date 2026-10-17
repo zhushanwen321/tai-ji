@@ -115,15 +115,19 @@ const ZCODE_API_TYPE_MAP: Readonly<Record<string, string>> = {
 
 /**
  * pi GLM plan 通道（翻译通道，不进通用映射）：zai-coding-cn 与 zcode 的
- * account:bigmodel-individual-coding-plan 是同一通道的两个名字（ADR-0138 修订映射目标，
- * 原 bigmodel 系误判），等价由派发期翻译
+ * account:bigmodel-individual-coding-plan 是同一通道的两个名字（ADR-0138 修订映射目标），
+ * 等价由派发期翻译
  * 承载（zcode-subagent-cli preparer translatePiModelRefToZcode）；在 zcode 造同义
  * 条目、注入 pi 侧 key 均属退役形态（ADR-0132 zai 关联条目 + 2026-10-13 key 来源
  * 修订，均已删除）。pi 侧 `zai`（国际 API-key provider）按 1:1 通用映射直传。
  * 零写死原则：本集合是全链唯一的 provider id 写死点之外仅有的例外登记（与
  * preparer PI_TO_ZCODE_PROVIDER_MAP 对应），其余任何 provider 禁止出现在代码中。
+ * 机器防线（ADR-0138「代码表 + manifest 声明 + 同步 skip 集合三处同源」第三腿）：
+ * 本集合与 zcode 包 manifest modelTranslation 声明键集合的锁步由对账单测绑定
+ * （__tests__ 按数据文件路径读包 manifest——runtime 禁 import 引擎包；代码表↔manifest
+ * 腿已由 preparer.test.ts 锁步用例承载）。
  */
-const TRANSLATION_CHANNEL_PROVIDER_IDS = ['zai-coding-cn'] as const
+export const TRANSLATION_CHANNEL_PROVIDER_IDS = ['zai-coding-cn'] as const
 
 // ── 依赖注入面 ─────────────────────────────────────────────────
 

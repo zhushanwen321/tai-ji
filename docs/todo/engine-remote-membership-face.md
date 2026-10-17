@@ -1,8 +1,8 @@
-# TODO：zcode 远程形态偏好层成员校验面（async listModels 经引擎进程 RPC）+ GLM plan 通道 headersApplied upstream 定位
+# TODO：zcode 远程形态偏好层成员校验面（async listModels 经引擎进程 RPC）
 
 ## 状态
 
-拆分登记（2026-10-16 真机测试后改写）：①枚举面缺口未解决（本登记主体）；②GLM plan 通道 headersApplied 已锤死为 ZCode.app app-server 自身 bug（与 taiji 无关，见文末附录——真机 A/B 对照证据）。前提修复已落地：ADR-0138 补齐 RemoteEngine `translateModelRef`（manifest 声明表快照）+ 引擎侧 account 直通大小写归一。
+拆分登记（2026-10-16 真机测试后改写；同日 headersApplied 项已由 ADR-0139 关闭）：①枚举面缺口未解决（本登记唯一未决主体）；②GLM plan 通道 headersApplied 已关闭——根因 = taiji headless spawn 恒落 host-account 模式（非 ZCode.app 自身 bug，当日初判「ZCode 自身 bug」已作废，见文末附录），ADR-0139 standalone 补丁 + 元数据键供给真机验证通过。前提修复已落地：ADR-0138 补齐 RemoteEngine `translateModelRef`（manifest 声明表快照）+ 引擎侧 account 直通大小写归一。
 
 ## 问题
 
@@ -21,7 +21,7 @@ async listModels（经引擎进程 RPC 取实时清单）需要：EnginePort 签
 3. engine-development-guide 协议面文档同 commit 更新（协议方法语义 + capability 声明）。
 4. 届时 ADR-0137 偏好层降级语义在全部部署形态达成，ADR-0138 边界段随之改写。
 
-## 附录：GLM plan 通道 headersApplied（2026-10-16 真机 A/B 对照，已锤死为 zcode 侧）
+## 附录：GLM plan 通道 headersApplied（2026-10-16 真机 A/B 对照；已由 ADR-0139 关闭，根因见文末结论）
 
 真机（staged 引擎 + 独立 pi，ADR-0138 修复后代码）：
 

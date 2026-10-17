@@ -323,6 +323,66 @@ describe("wrapper 合并语义（v2 注入优先）", () => {
     expect(fs.readFileSync(credPath, "utf8")).toBe(before);
   });
 
+  it("元数据键存在性守卫：既有非空 identity/auth-source 不被派生值覆写；空串按缺失态兜底填充 + 原子写保留文件 mode（ADR-0139「不触碰既有键」契约回归）", () => {
+    const PID = "account:bigmodel-individual-coding-plan";
+    const catalogDir = path.join(tmpRoot, "catalog-meta-guard");
+    fs.mkdirSync(catalogDir, { recursive: true });
+    const catalogPath = path.join(catalogDir, "zcode-builtin.json");
+    fs.writeFileSync(catalogPath, JSON.stringify({
+      config: { providerConfigRules: { providerRules: [{ providerId: PID, config: { access: { type: "zhipu-account" } } }] } },
+    }));
+    const launcher = ensureAppServerLauncher(fs.mkdtempSync(path.join(tmpRoot, "eng-meta-guard-")));
+    const cliPath = path.join(tmpRoot, "probe-meta-guard.cjs");
+    fs.writeFileSync(cliPath, PROBE_SOURCE);
+    const runLauncher = (home: string, statePath: string) =>
+      childProcess.spawnSync(process.execPath, [launcher], {
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          ZCODE_ENG_CLI_PATH: cliPath,
+          ZCODE_PROBE_STATE: statePath,
+          ZCODE_BUILTIN_PROVIDER_CONFIG_FILE: catalogPath,
+          HOME: home,
+        },
+      });
+
+    // 场景①：既有非空 identity/auth-source（GUI/登录流程权威写入）→ 原样保留，零写入。
+    // auth-source 旧实现会把 manual 无差别覆写为派生值 oauth（违反「不触碰既有键」）。
+    const homeKeep = fs.mkdtempSync(path.join(tmpRoot, "home-meta-guard-keep-"));
+    fs.mkdirSync(path.join(homeKeep, ".zcode", "v2"), { recursive: true });
+    const credKeep = path.join(homeKeep, ".zcode", "v2", "credentials.json");
+    fs.writeFileSync(credKeep, JSON.stringify({
+      "oauth:bigmodel:access_token": "enc:v1:fake-oauth-token",
+      [`account-provider:coding-plan:${PID}:account:host-identity-9:api-key`]: "enc:v1:fake-plan-key",
+      [`account-provider:${PID}:identity`]: "gui-identity-1",
+      [`account-provider:${PID}:auth-source`]: "manual",
+    }, null, 2));
+    const resKeep = runLauncher(homeKeep, path.join(tmpRoot, "state-meta-guard-keep.json"));
+    expect(resKeep.status).toBe(0);
+    expect(resKeep.stderr).not.toContain("account metadata provisioned");
+    const afterKeep = JSON.parse(fs.readFileSync(credKeep, "utf8")) as Record<string, string>;
+    expect(afterKeep[`account-provider:${PID}:identity`]).toBe("gui-identity-1");
+    expect(afterKeep[`account-provider:${PID}:auth-source`]).toBe("manual");
+
+    // 场景②：空串 identity（缺失态）→ 从 host 态 key 名派生填充；auth-source 缺失 →
+    // 派生 oauth；写回保留既有文件 mode（rename 换 inode 不放宽权限）。
+    const homeFill = fs.mkdtempSync(path.join(tmpRoot, "home-meta-guard-fill-"));
+    fs.mkdirSync(path.join(homeFill, ".zcode", "v2"), { recursive: true });
+    const credFill = path.join(homeFill, ".zcode", "v2", "credentials.json");
+    fs.writeFileSync(credFill, JSON.stringify({
+      "oauth:bigmodel:access_token": "enc:v1:fake-oauth-token",
+      [`account-provider:coding-plan:${PID}:account:host-identity-9:api-key`]: "enc:v1:fake-plan-key",
+      [`account-provider:${PID}:identity`]: "",
+    }, null, 2), { mode: 0o600 });
+    const resFill = runLauncher(homeFill, path.join(tmpRoot, "state-meta-guard-fill.json"));
+    expect(resFill.status).toBe(0);
+    expect(resFill.stderr).toContain("account metadata provisioned");
+    const afterFill = JSON.parse(fs.readFileSync(credFill, "utf8")) as Record<string, string>;
+    expect(afterFill[`account-provider:${PID}:identity`]).toBe("host-identity-9");
+    expect(afterFill[`account-provider:${PID}:auth-source`]).toBe("oauth");
+    expect(fs.statSync(credFill).mode & 0o777).toBe(0o600);
+  });
+
   it("CLI 源码补丁：standalone 选项注入 + 认证头端口注入（2026-10-16 真机修复的回归守卫）", () => {
     const home = fs.mkdtempSync(path.join(tmpRoot, "home-patch-"));
     const engineDataDir = fs.mkdtempSync(path.join(tmpRoot, "eng-patch-"));

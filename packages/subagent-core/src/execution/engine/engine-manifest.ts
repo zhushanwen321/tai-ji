@@ -228,9 +228,11 @@ export function parseModelCatalog(
  * modelTranslation 字段级解析（[engine-ref-translation D5] 2026-10-16）：静态跨引擎
  * 翻译表声明（pi 词汇 provider 段 → 本引擎原生 provider 段）。可选；缺省 = undefined
  * （无翻译面——RemoteEngine 构造器据此摘除 translateModelRef 成员，消费方按缺席
- * 语义降级 + 生效回执 warn）。声明形态：对象且键值均非空字符串；非法条目逐条丢弃
- * + warn（包仍可用——与 envPrefixes 同款宽容度：翻译表缺声明只降级回透传，不致
- * 引擎不可用）。
+ * 语义降级 + 生效回执 warn）。null = 声明缺席等价（JSON 作者可合法照写），同样归
+ * undefined 无翻译面——与 parseModelCatalog 三态对齐（本函数返回面无独立 null 态，
+ * 值域只有「有翻译面表 / 无翻译面」二值）。声明形态：对象且键值均非空字符串；非法
+ * 条目逐条丢弃 + warn（包仍可用——与 envPrefixes 同款宽容度：翻译表缺声明只降级
+ * 回透传，不致引擎不可用）。
  *
  * 单源纪律：本表是引擎作者对自身翻译语义的唯一声明位（staged/远程形态的
  * RemoteEngine 与 runtime 写校验面均消费声明值，不 import 引擎实装）；in-process
@@ -239,6 +241,7 @@ export function parseModelCatalog(
  */
 export function parseModelTranslation(id: string, raw: unknown): Record<string, string> | undefined {
   if (raw === undefined) return undefined;
+  if (raw === null) return undefined; // null = 声明缺席等价（typeof null === 'object' 会穿透形态守卫，须先截）
   if (typeof raw !== "object" || Array.isArray(raw)) {
     logger.warn(`[engine-discovery] engine '${id}': modelTranslation must be an object — ignoring (no translation face)`);
     return undefined;

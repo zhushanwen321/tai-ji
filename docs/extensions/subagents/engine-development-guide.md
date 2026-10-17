@@ -70,7 +70,7 @@
     "envPrefixes": ["ZCODE_"],
     "capabilities": { "schemaEnforcement": "emulated", "steer": "unsupported", "conversation": "cold", "personaInjection": "prompt", "eventGranularity": "stream", "sandbox": "emulated", "sessionRead": "full", "resume": "cold", "interrupt": "kill-only", "permissionMode": "native", "maxTurns": false, "setModel": "unsupported" },
     "modelCatalog": { "dynamic": true, "models": [] },
-    "modelTranslation": { "zai-coding-cn": "account:zai-individual-coding-plan" },
+    "modelTranslation": { "zai-coding-cn": "account:bigmodel-individual-coding-plan" },
     "displayName": "zcode",
     "description": "ZCode app-server resident engine (...)"
   }

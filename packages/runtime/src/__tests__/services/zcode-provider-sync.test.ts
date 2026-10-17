@@ -18,7 +18,8 @@
  */
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { ModelsConfigView, ProviderConfigView } from '../../infra/pi/pi-provider-store.js'
 import type { ResolvedProviderCredential } from '../../services/ports/provider-credential-resolver.js'
@@ -29,6 +30,7 @@ import {
   locateZcodeBuiltinCatalogSync,
   mapPiProvidersToZcodeRules,
   syncZcodeProviders,
+  TRANSLATION_CHANNEL_PROVIDER_IDS,
   type MappingModelSource,
   type ProviderMappingInput,
   type ZcodeProviderSyncDeps,
@@ -782,5 +784,19 @@ describe('附属函数', () => {
 
   it('locateZcodeBuiltinCatalogSync：显式路径优先注入', () => {
     expect(locateZcodeBuiltinCatalogSync(join(root, 'explicit.json'))).toBe(join(root, 'explicit.json'))
+  })
+})
+
+// ── 三处同源锁步（ADR-0138 机器防线：代码表 + manifest 声明 + 同步 skip 集合）──
+
+describe('translation-channel 三处同源锁步（ADR-0138）', () => {
+  it('TRANSLATION_CHANNEL_PROVIDER_IDS ↔ zcode 包 manifest modelTranslation 声明键集合一致（runtime 禁 import 引擎包——按数据文件路径对账；代码表↔manifest 腿由 preparer.test.ts 锁步用例承载）', () => {
+    const pkgPath = join(dirname(fileURLToPath(import.meta.url)), '../../../../zcode-subagent-cli/package.json')
+    const pkg = JSON.parse(readFileSync(pkgPath, 'utf8')) as {
+      taiji?: { subagentEngine?: { modelTranslation?: Record<string, string> } }
+    }
+    const declared = pkg.taiji?.subagentEngine?.modelTranslation
+    if (!declared) throw new Error('zcode 包 manifest 缺 modelTranslation 声明（ADR-0138 部署形态翻译面）')
+    expect(Object.keys(declared).sort()).toEqual([...TRANSLATION_CHANNEL_PROVIDER_IDS].sort())
   })
 })

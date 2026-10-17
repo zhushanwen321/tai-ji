@@ -2,4 +2,4 @@
 "@zhushanwen/zcode-subagent-cli": patch
 ---
 
-修复跨引擎翻译目标通道：zai-coding-cn/* 的 zcode 对应通道由 account:bigmodel-individual-coding-plan 修正为 account:zai-individual-coding-plan（bigmodel 与 zai 是两个独立账号家族，原映射把请求落在未登录通道上，实测表现为 app-server 侧 model_request_failed）；package.json manifest 同步声明 modelTranslation 翻译表（远程代理形态翻译面供数源，与代码表对账锁步）。
+跨引擎翻译目标通道定版：zai-coding-cn/* 的 zcode 对应通道经凭据链实证维持 account:bigmodel-individual-coding-plan（bigmodel 与 zai 是两个独立账号家族，凭据与可用性证据均指向 bigmodel 家族——同日中间态 zai-individual 已回退，目标通道以 ADR-0138 决策 1 为准）；package.json manifest 新增 modelTranslation 翻译表声明（远程代理形态翻译面供数源，与 preparer 代码表对账锁步）；app-server launcher 补齐 standalone 账号链路：源码内存补丁三锚（entitled 翻转 / standalone 选项 / 认证头端口注入，锚点抗漂移）、account-provider 元数据键幂等供给（仅缺时追加、不触碰既有键）、account 直通模型大小写归一。
