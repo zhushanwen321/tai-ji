@@ -75,7 +75,7 @@ OUTPOST_CALLSITES = [
         "[u2 内核化] deliverOne 单点出站（port.send 逐条实现 + sendDirect 共用；landing 首发 / "
         "session_manager send / completion-backflow 三消费方均经此）：唯一调用方在 "
         "injector.inject 之后按注入后文本调用（deliverOne 内 injection.text → "
-        "promptWithBusyRetry 透传），busy-retry 只改 opts.behavior、文本不换，复用同一"
+        "promptAwaitingCompaction 透传），compacting 拒绝持有重提时文本不换，复用同一"
         "已注入文本；前一版 deliverText 调用点随重构消失，旧条目 "
         "client.prompt(injection.text, undefined, streamingBehavior) 已替换；命令档"
         "条件传参形态（原第 5 参 0=不限时档，U1 D14③）随 ADR-0112 超时档位删除"

@@ -46,8 +46,9 @@ export default function baseToolEnhanceExtension(pi: ExtensionAPI): void {
 	// ResourceLoader/eventBus + extension 重新 load → 本调用把通知通路（notify.ts
 	// 模块级引用）切到新 pi——任务发起于旧 session 而完成通知投递新 session。
 	refreshPiReference(pi);
-	// ⑧⑨ exit 事件边沿 → pending:unregister emit + sendMessage steer（kill 路径
-	// 不 sendMessage，见 notify.ts 单点归属规则）。重复 load 幂等（覆盖同一回调）
+	// ⑧⑨ exit 事件边沿 → pending:unregister emit + 完成通知经 port.deliver 入账
+	//（缺席兜底 sendMessage steer；kill 路径不投递完成通知，见 notify.ts 单点归属
+	// 规则）。重复 load 幂等（覆盖同一回调）
 	setOnTaskExit(handleTaskExit);
 	// 同名 "bash" 覆盖内置工具（pi agent-session _refreshToolRegistry：custom 定义后注册者胜）
 	pi.registerTool(createBashOverrideToolDefinition());

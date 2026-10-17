@@ -3,7 +3,7 @@
 // @zhushanwen/pi-delivery-port 契约面（设计 .tmp/tech-design/unified-delivery.md
 // §3.7 pi 半区组件表 / §3.4 提交选项缺省值表）。
 //
-// 本包是「知 pi 又知内核」的适配层（与 notify-ledger-host 同型）：把 pi 扩展运行时
+// 本包是「知 pi 又知内核」的适配层：把 pi 扩展运行时
 // 端口接线成 @zhushanwen/session-delivery v3 内核的 port 半区——custom 车道唯一
 // 执行者（outbox 投递日志 / details-id 送达凭据 / session_start 差集重放 / 提交侧
 // 合批与批组隔离 / compaction 等待）。消费方（notifier / session-manager / bash）
@@ -98,7 +98,7 @@ export interface DeliveryPortLogger { // oe-exempt:20261017:framework:日志注�
 
 /**
  * port 宿主最小端口面（session_start 装配点经 createPiDeliveryPortHost 接线；
- * 接口化与账本 NotifyLedgerHost 同律——解耦便于测试，内核/端口本体零 pi import）。
+ * 接口化解耦便于测试，内核/端口本体零 pi import）。
  *
  * 订阅面全部返回退订函数（pi 1.0.0 起 on 返回 unsubscribe；port dispose 时兑现，
  * 防 session_start 重绑累积死 handler）。

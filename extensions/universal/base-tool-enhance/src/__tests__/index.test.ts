@@ -91,7 +91,7 @@ describe("baseToolEnhanceExtension entry", () => {
 	});
 });
 
-describe("__taiji_bg_reconcile__ command: runtime-resume trigger face (bg-task-notify-durability)", () => {
+describe("__taiji_bg_reconcile__ command: runtime-resume trigger face", () => {
 	it("handler runs the same maintenance chain as session_start (zombie settle via appendEntry on the SAME pi reference)", async () => {
 		setupOfficialFactory();
 		// 独立临时 dataDir（同 session_start 用例：维护链只读不扫），registry 预置终态僵尸条目

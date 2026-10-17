@@ -3,12 +3,15 @@
  *
  * 迁移口径：
  * - `classifyPromptRejection` 双字符串映射：**逐字保留**（消费方 = 内核适配器
- *   session-delivery-registry.promptWithBusyRetry；dispatcher 侧 re-export 已随过度设计
+ *   session-delivery-registry 的 promptAwaitingCompaction catch 面——classifyBusyRejection
+ *   分型消费〔时为 promptWithBusyRetry，随 u5a 退役〕；dispatcher 侧 re-export 已随过度设计
  *   审计候选 1 删除；pi1-disposition-chat-flow U3① 再下沉 infra/pi/pi-rejection.js——文案
  *   infra/pi 单点驻留，本文件改从定义方 import）。registry 侧行为
  *   断言见 src/__tests__/session-delivery-registry.test.ts「u2 错误分类迁移（D6）」。
- * - pi busy 类拒绝的处置迁移（compacting → 持有等 compaction_end；processing → occupancy
- *   反转 generating；非 busy → message.error）在本文件锁定。
+ * - pi busy 类拒绝的处置（compacting → 持有等 compaction_end；processing → 按真失败
+ *   首败即停 message.error〔v3 busy 分型重试随 u5a 退役，registry 不再反转 occupancy〕；
+ *   非 busy → message.error）在本文件锁定（断言对象 = 分类原语 + dispatcher 链处置，
+ *   registry 侧 catch 面由 occupancy-runtime.test.ts #8a/#8b 帧序锁定）。
  * - busy 维度「零 send.rejected + 排队/即时投递」退役断言的唯一归宿 =
  *   src/services/session/__tests__/message-dispatcher.test.ts（同构用例已收拢，本文件不再重复）。
 

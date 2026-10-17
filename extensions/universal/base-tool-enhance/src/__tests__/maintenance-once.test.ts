@@ -62,7 +62,7 @@ function createMockPi() {
 function getSessionStartHandler(pi: ReturnType<typeof createMockPi>) {
 	const handler = pi.on.mock.calls.find((call) => call[0] === "session_start")?.[1];
 	expect(handler).toBeTypeOf("function");
-	// handler 返回 promise（补投 await sendMessage 使维护链 async 化，bg-task-notify-durability）
+	// handler 返回 promise（pi runner emit await handler 消费，维护链 async 形态——unified-delivery 波 3 口径）
 	return handler as (event: SessionStartEvent, ctx: unknown) => Promise<void>;
 }
 
@@ -149,7 +149,7 @@ describe("session_start maintenance chain after reap sink (u-bte-remove)", () =>
 	});
 
 	it("keeps reconcile failures non-fatal: handler promise resolves, warn logged", async () => {
-		// async 化后的非致命语义（bg-task-notify-durability U3 防假绿改写）：维护链已
+		// async 化后的非致命语义（unified-delivery 防假绿改写）：维护链已
 		// async——同步 not.toThrow() 断言恒真，改为显式断言「handler 的 promise resolve
 		//（错误在链内被 async 捕获，不向上传播成 unhandled rejection）+ warn 日志确实
 		// 记录」。两个断言缺一即红：吞掉后不打日志 = 观测丢失；打日志但 reject = fire

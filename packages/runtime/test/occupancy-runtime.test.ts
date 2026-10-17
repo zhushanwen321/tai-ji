@@ -343,8 +343,9 @@ describe('MessageDispatcher occupancy 挂点', () => {
     // 迁移面（§3.4 错误规格表「压缩中 direct 投递撞 Cannot submit...」行）：条目回 queued，
     // compaction_end 后再投——持有而非失败/丢弃（D6 适配器 catch 面处置）
     expect(registry.entries('s1')?.active[0]).toMatchObject({ state: 'queued' })
-    // 帧序（[RT-4#10] 合并收口）：投递起腿写 dispatching → busy 类拒绝在 promptWithBusyRetry
-    // 内分型复位 idle（持有等 compaction_end）——显式收口帧序列，而非旧的「零帧」
+    // 帧序（[RT-4#10] 合并收口）：投递起腿写 dispatching → busy 类拒绝在 registry
+    // promptAwaitingCompaction（classifyBusyRejection 分型）内复位 idle + 置
+    // piCompactingBlocked（持有等 compaction_end）——显式收口帧序列，而非旧的「零帧」
     expect(occupancyFrames(publish)).toEqual([
       { sessionId: 's1', turn: 'dispatching', compacting: false, bash: false },
       { sessionId: 's1', turn: 'idle', compacting: false, bash: false },
