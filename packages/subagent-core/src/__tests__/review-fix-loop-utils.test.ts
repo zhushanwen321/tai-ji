@@ -38,6 +38,9 @@ import {
   applyCarryoverRegression,
   translateId,
   validateFixResult,
+  normalizeMustFixEntry,
+  normalizeSuggestionEntry,
+  combineIssueEntries,
   reconcileIssues,
   normalizeReviewResult,
   normalizeGroupEntry,
@@ -46,6 +49,7 @@ import {
   findNeedsRedesign,
   parseResult,
   normalizeAggregatorResult,
+  detectSuggestionLedgerDefect,
   buildIssueEntry,
   resolveRunRoot,
   computeOrigin,
@@ -258,7 +262,7 @@ describe("buildFixPrompt", () => {
     expect(p).toContain("/tmp/run/batch-1/round-1/aggregate-4-fixer-1.md");
     expect(p).toContain("guidance (the merged one-line fix direction");
     expect(p).not.toContain('<untrusted source="group_issues">');
-    expect(p).toContain("Full aggregated report (context; suggestion-level issues live here): /tmp/run/batch-1/round-1/aggregated.md");
+    expect(p).toContain("Full aggregated report (context only; your task document is authoritative): /tmp/run/batch-1/round-1/aggregated.md");
   });
   it("must-fix 不得 defer 红线 + 证据标准 + 禁令 + 反模式（TC2）", () => {
     const p = buildFixPrompt(base);
@@ -275,11 +279,19 @@ describe("buildFixPrompt", () => {
     expect(p).toContain("concrete blocker");
     expect(p).not.toContain("fix trivial ones");
   });
-  it("并行修复纪律：只改本组文件 + suggestion 按文件归属本组", () => {
+  it("suggestion 覆盖记账：任务文档全量列出，每一项必须落到 fixes/deferred/disputed", () => {
+    const p = buildFixPrompt(base);
+    expect(p).toContain("ACCOUNT FOR EVERY LISTED ISSUE");
+    expect(p).toContain("fixes[] / deferred[] / disputed[]");
+    expect(p).toContain("silently dropping a suggestion is not allowed");
+  });
+  it("并行修复纪律：只改本组文件 + suggestion 由任务文档直接分派（不再按报告文件归属认领）", () => {
     const p = buildFixPrompt(base);
     expect(p).toContain("Other fixer groups run in parallel on disjoint files");
     expect(p).toContain("touch ONLY the files of your group's");
-    expect(p).toContain("suggestions whose files intersect your group's files");
+    expect(p).toContain("Suggestion-level (minor) issues assigned to your group are listed in your task document");
+    expect(p).toContain("Do not rely on");
+    expect(p).not.toContain("suggestions whose files intersect your group's files");
   });
   it("用户 fixPrompt 与 commitInstr 保留在防护段之后", () => {
     const p = buildFixPrompt(base);
@@ -444,6 +456,153 @@ describe("validateFixResult", () => {
   });
 });
 
+// ── suggestion 台账（2026-10-17 线上事故：21 条 suggestion 仅计数，11 条静默遗留） ──
+
+describe("normalizeSuggestionEntry / suggestion_ids 归一", () => {
+  it("缺省/显式 minor → severity minor（normalizeMustFixEntry 的缺省 major 不适用）", () => {
+    expect(normalizeSuggestionEntry({ id: "S-1" })).toEqual({ id: "S-1", severity: "minor" });
+    expect(normalizeSuggestionEntry({ id: "S-1", severity: "minor" })).toEqual({ id: "S-1", severity: "minor" });
+    expect(normalizeSuggestionEntry("S-2")).toEqual({ id: "S-2", severity: "minor" });
+  });
+  it("显式 critical/major 按 must-fix 处理（保留 severity，不静默洗白为 minor）", () => {
+    expect(normalizeSuggestionEntry({ id: "S-1", severity: "major" })).toEqual({ id: "S-1", severity: "major" });
+    expect(normalizeSuggestionEntry({ id: "S-2", severity: "critical" })).toEqual({ id: "S-2", severity: "critical" });
+  });
+  it("扩展字段透传 + 畸形条目剔除", () => {
+    const e = normalizeSuggestionEntry({
+      id: "S-3", title: "t", files: [" src/a.ts ", ""], evidence: "ev", guidance: "gd",
+      adjudication: "evidence", note: "n",
+    });
+    expect(e).toEqual({
+      id: "S-3", severity: "minor", title: "t", files: ["src/a.ts"], evidence: "ev", guidance: "gd", adjudication: "evidence", note: "n",
+    });
+    expect(normalizeSuggestionEntry({ id: "" })).toBeNull();
+    expect(normalizeSuggestionEntry(null)).toBeNull();
+  });
+  it("normalizeAggregatorResult 保留 suggestion_ids（键缺失不补 []，显式 [] 保留）", () => {
+    const withIds = normalizeAggregatorResult({
+      report_file: "/tmp/agg.md", must_fix: 1, suggestion: 2,
+      must_fix_ids: [{ id: "MF-1", severity: "major" }],
+      suggestion_ids: [{ id: "S-1", title: "a" }, { id: "S-2", severity: "minor" }],
+    });
+    expect(withIds!.suggestion_ids).toEqual([
+      { id: "S-1", severity: "minor", title: "a" },
+      { id: "S-2", severity: "minor" },
+    ]);
+    const withoutKey = normalizeAggregatorResult({ report_file: "/r.md", must_fix: 0, suggestion: 1 });
+    expect(withoutKey!.suggestion_ids).toBeUndefined();
+    const explicitEmpty = normalizeAggregatorResult({ report_file: "/r.md", must_fix: 0, suggestion: 0, must_fix_ids: [], suggestion_ids: [] });
+    expect(explicitEmpty!.suggestion_ids).toEqual([]);
+  });
+});
+
+describe("combineIssueEntries（must-fix ∪ suggestion 单一入口）", () => {
+  it("保序 + 同 id must-fix 优先（suggestion 侧的重复 id 被丢弃）", () => {
+    const mustFix = [{ id: "MF-1", severity: "major" }, { id: "MF-2", severity: "critical" }];
+    const sugg = [{ id: "S-1", severity: "minor" }, { id: "MF-1", severity: "minor" }];
+    expect(combineIssueEntries(mustFix, sugg)).toEqual([
+      { id: "MF-1", severity: "major" },
+      { id: "MF-2", severity: "critical" },
+      { id: "S-1", severity: "minor" },
+    ]);
+  });
+  it("缺省/畸形数组安全降级", () => {
+    expect(combineIssueEntries(undefined, undefined)).toEqual([]);
+    expect(combineIssueEntries([{ id: "A" }], undefined)).toEqual([{ id: "A" }]);
+    expect(combineIssueEntries(undefined, [{ id: "S-1", severity: "minor" }, null, { id: "" }])).toEqual([
+      { id: "S-1", severity: "minor" },
+    ]);
+  });
+});
+
+describe("detectSuggestionLedgerDefect（suggestion 台账完整性 fail-fast）", () => {
+  it("suggestion 0 / 缺失 / 负数 → 合法（显式 [] 与键缺失都不构成缺陷）", () => {
+    expect(detectSuggestionLedgerDefect({ suggestion: 0 })).toBeNull();
+    expect(detectSuggestionLedgerDefect({ suggestion: 0, suggestion_ids: [] })).toBeNull();
+    expect(detectSuggestionLedgerDefect({ must_fix: 0 })).toBeNull();
+    expect(detectSuggestionLedgerDefect({ suggestion: -1 })).toBeNull();
+    expect(detectSuggestionLedgerDefect(null)).toBeNull();
+  });
+  it("suggestion > 0 → suggestion_ids 缺失 / 空数组 / 条数不足均为缺陷（带实际计数）", () => {
+    expect(detectSuggestionLedgerDefect({ suggestion: 3 })).toEqual({ suggestion: 3, suggestion_ids: 0 });
+    expect(detectSuggestionLedgerDefect({ suggestion: 3, suggestion_ids: [] })).toEqual({ suggestion: 3, suggestion_ids: 0 });
+    expect(detectSuggestionLedgerDefect({ suggestion: 3, suggestion_ids: [{ id: "S-1" }] }))
+      .toEqual({ suggestion: 3, suggestion_ids: 1 });
+  });
+  it("条数等于或多于数字 → 合法（数字是观测，台账是事实源）", () => {
+    expect(detectSuggestionLedgerDefect({
+      suggestion: 3,
+      suggestion_ids: [{ id: "S-1" }, { id: "S-2" }, { id: "S-3" }],
+    })).toBeNull();
+    expect(detectSuggestionLedgerDefect({
+      suggestion: 2,
+      suggestion_ids: [{ id: "S-1" }, { id: "S-2" }, { id: "S-3" }],
+    })).toBeNull();
+  });
+  it("non-array suggestion_ids（字符串/对象）→ 视作缺失", () => {
+    expect(detectSuggestionLedgerDefect({ suggestion: 1, suggestion_ids: "S-1" }))
+      .toEqual({ suggestion: 1, suggestion_ids: 0 });
+    expect(detectSuggestionLedgerDefect({ suggestion: 1, suggestion_ids: { id: "S-1" } }))
+      .toEqual({ suggestion: 1, suggestion_ids: 0 });
+  });
+});
+
+describe("validateFixResult：全活跃问题覆盖（suggestion 静默遗留防护）", () => {
+  it("active suggestion 缺失（不在 fixes/deferred/disputed）→ suggestion-not-accounted", () => {
+    expect(validateFixResult(
+      { fixed_count: 1, fixes: [{ issue_id: "MF-1" }] },
+      ["MF-1"], undefined, undefined, ["S-1", "S-2"],
+    )).toEqual([
+      { issue_id: "s-1", severity: "suggestion-not-accounted" },
+      { issue_id: "s-2", severity: "suggestion-not-accounted" },
+    ]);
+  });
+  it("suggestion 进 fixes[] / deferred[]（minor）/ disputed[]（带实质反证）均通过", () => {
+    expect(validateFixResult(
+      { fixed_count: 1, fixes: [{ issue_id: "S-1" }] },
+      [], undefined, undefined, ["S-1"],
+    )).toEqual([]);
+    expect(validateFixResult(
+      { fixed_count: 0, fixes: [], deferred: [{ issue_id: "S-2", severity: "minor", reason: "needs new fixture, high cost" }] },
+      [], undefined, undefined, ["S-2"],
+    )).toEqual([]);
+    expect(validateFixResult(
+      { fixed_count: 0, fixes: [], disputed: [{ issue_id: "S-3", evidence: "src/a.ts:42 — aggregator missed the guard" }] },
+      [], undefined, undefined, ["S-3"],
+    )).toEqual([]);
+  });
+  it("suggestion 空申述仍判 disputed-no-evidence（disputed 校验对所有等级生效）", () => {
+    expect(validateFixResult(
+      { fixed_count: 0, fixes: [], disputed: [{ issue_id: "S-3", evidence: "不是问题" }] },
+      [], undefined, undefined, ["S-3"],
+    )).toEqual([{ issue_id: "S-3", severity: "disputed-no-evidence" }]);
+  });
+  it("deferred 只允许 minor：must-fix 与 promoted suggestion（追踪 severity major）仍违规", () => {
+    const tracked = {
+      "MF-1": { firstSeen: 1, severity: "major", status: "open", history: [], fixAttempts: 0 },
+      "S-1": { firstSeen: 1, severity: "major", status: "open", history: [], fixAttempts: 0 },
+    };
+    const violations = validateFixResult(
+      { fixed_count: 0, fixes: [], deferred: [{ issue_id: "MF-1", severity: "minor" }, { issue_id: "S-1", severity: "minor" }] },
+      ["MF-1"], tracked, undefined, ["S-1"],
+    );
+    expect(violations).toEqual([
+      { issue_id: "MF-1", severity: "major" },
+      { issue_id: "S-1", severity: "major" },
+      { issue_id: "mf-1", severity: "must-fix-not-fixed" },
+    ]);
+  });
+  it("同 id 同时出现在 must-fix 与 suggestion 集合 → 只报 must-fix-not-fixed（不双报）", () => {
+    expect(validateFixResult(
+      { fixed_count: 0, fixes: [], deferred: [] },
+      ["MF-1"], undefined, undefined, ["MF-1", "S-1"],
+    )).toEqual([
+      { issue_id: "mf-1", severity: "must-fix-not-fixed" },
+      { issue_id: "s-1", severity: "suggestion-not-accounted" },
+    ]);
+  });
+});
+
 // ── R2+ 三段式 prompt（5.2 + 防护规格） ──
 
 describe("buildR2ReviewPrompt", () => {
@@ -477,6 +636,12 @@ describe("buildR2ReviewPrompt", () => {
     expect(p).toContain("do NOT re-word them under a different angle");
     expect(p).toContain("reporting 0 new issues when nothing is wrong is a");
     expect(p).toContain("business-impact evidence chain");
+  });
+  it("对账对象含 suggestion（must-fix AND suggestion/minor）", () => {
+    const p = buildR2ReviewPrompt(args);
+    expect(p).toContain("For EACH previous issue (must-fix AND suggestion/minor) from the previous round");
+    expect(p).toContain("Suggestion-level issues are ledger-tracked too");
+    expect(p).toContain("Minor does NOT mean optional reconciliation");
   });
   it("escalate 升级教学（m1）：PART 1 对账教学 + PART 2 结构化 status=\"escalate\" 声明", () => {
     const p = buildR2ReviewPrompt(args);
@@ -2612,6 +2777,17 @@ describe("reconcileGroups（分组确定性校验：覆盖补漏 + 相交合并�
     expect(ids).toEqual(["MF-1", "MF-2", "MF-3", "MF-4"]);
     expect(out.some((g) => g.issueIds.includes("MF-2") && g.note.includes("漏分"))).toBe(true);
   });
+  it("覆盖性兜底含 suggestion：groups 只覆盖 must-fix 时建议条目也被独立组认领", () => {
+    const mixed = [
+      { id: "MF-1", files: ["src/a.ts"] },
+      { id: "S-1", files: ["src/b.ts"] },
+      { id: "S-2", files: ["src/c.ts"] },
+    ];
+    const out = reconcileGroups([{ issueIds: ["MF-1"] }], mixed);
+    expect(out.flatMap((g) => g.issueIds).sort()).toEqual(["MF-1", "S-1", "S-2"]);
+    expect(out.some((g) => g.issueIds.includes("S-1") && g.note.includes("漏分"))).toBe(true);
+    expect(out.some((g) => g.issueIds.includes("S-2") && g.note.includes("漏分"))).toBe(true);
+  });
   it("组间文件相交 → 传递闭包合并（并行 fixer 不编辑同一文件）", () => {
     // MF-1(a)↔MF-2(a,b)↔MF-5(b,c)↔MF-3(c) 传递链全连通；MF-4 无文件 → 相交合并后
     // 再被空 files 防御归并吸收（并行安全性未知 → 最保守单组）
@@ -2704,13 +2880,23 @@ describe("buildAggregatorPrompt findings/groups（分组并行链路 prompt 段�
     expect(p).toContain("file sets MUST NOT overlap");
     expect(p).toContain('"groups": [{"id": "G1", "issueIds"');
     expect(p).toContain("groups MUST be an array of {id, issueIds, files, note} objects");
-    expect(p).toContain("Do groups cover every evidence issue id exactly once");
+    expect(p).toContain("Do groups cover every evidence issue id (must-fix AND suggestion) exactly once");
   });
   it("per-fixer 文档链路：aggregator prompt 声明 aggregate-4-fixer-<k>.md 由工作流从 groups 派生", () => {
     const p = buildAggregatorPrompt(args);
     expect(p).toContain("aggregate-4-fixer-<k>.md");
-    expect(p).toContain("workflow derives one per-fixer task");
+    expect(p).toContain("derives one per-fixer task document");
     expect(p).not.toContain("PER-FIXER DOCS (fixer input files)");
+  });
+  it("suggestion_ids：PART 2 字段 + 规则 + 自检（建议条目不得只留在 markdown 表）", () => {
+    const p = buildAggregatorPrompt(args);
+    expect(p).toContain('"suggestion_ids": [{"id": "S-1"');
+    expect(p).toContain("EVERY deduplicated suggestion-level (minor) row from the Suggestions table");
+    expect(p).toContain("NEVER leave a suggestion only in the markdown table");
+    expect(p).toContain("NEW suggestions get S-1-<seq>");
+    expect(p).toContain("Are suggestion_ids consistent with the Suggestions table rows");
+    // groups 覆盖两个数组（suggestion 无组 = 无 owner）
+    expect(p).toContain("issue id from BOTH must_fix_ids and suggestion_ids exactly once");
   });
   it("guidance 合并指令：去重合并时 guidance 并入最具体表述（随文档直达 fixer）", () => {
     const p = buildAggregatorPrompt(args);

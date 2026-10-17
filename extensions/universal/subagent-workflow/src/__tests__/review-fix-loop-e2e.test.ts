@@ -353,7 +353,9 @@ describe("review-fix-loop E2E（真实 worker + 场景化 mock runner）", () =>
         ],
         aggregate: () => ({
           report_file: "/tmp/agg.md", must_fix: 1, suggestion: 1,
-          must_fix_ids: [{ id: "MF-1", severity: "major" }], fixes_caution: [],
+          must_fix_ids: [{ id: "MF-1", severity: "major" }],
+          suggestion_ids: [{ id: "S-1", severity: "minor", title: "suggestion", files: ["src/a.ts"] }],
+          fixes_caution: [],
         }),
         fix: () => ({
           fixed_count: 1,
@@ -413,7 +415,12 @@ describe("review-fix-loop E2E（真实 worker + 场景化 mock runner）", () =>
         ],
         aggregate: () => ({
           report_file: "/tmp/agg-sugg.md", must_fix: 0, suggestion: 2,
-          must_fix_ids: [], fixes_caution: [],
+          must_fix_ids: [],
+          suggestion_ids: [
+            { id: "S-1", severity: "minor", title: "suggestion 1", files: ["src/a.ts"] },
+            { id: "S-2", severity: "minor", title: "suggestion 2", files: ["src/b.ts"] },
+          ],
+          fixes_caution: [],
         }),
         fix: () => ({
           fixed_count: 2,
@@ -1169,6 +1176,265 @@ describe("review-fix-loop E2E（真实 worker + 场景化 mock runner）", () =>
       expect(st.fixResults[0]!.fixes.map((f) => f.issue_id).sort()).toEqual(["MF-1", "MF-2"]);
       const fixerNames = st.calls.filter((c) => c.role === "fixer").map((c) => c.name).sort();
       expect(fixerNames).toEqual(["fix-G1", "fix-G2"]);
+    },
+    RUN_TIMEOUT_MS,
+  );
+  it(
+    "E2E-SUGG-1：21 条 suggestion 台账 + fixer 遗漏 11 条 → ES3 suggestion-not-accounted 终止（不得静默 clean）",
+    async () => {
+      const mfIds = Array.from({ length: 6 }, (_, i) => "MF-" + (i + 1));
+      const sugIds = Array.from({ length: 21 }, (_, i) => "S-" + (i + 1));
+      const fixedSuggestions = sugIds.slice(0, 8);
+      const deferredSuggestions = sugIds.slice(8, 10);
+      const omittedSuggestions = sugIds.slice(10);
+
+      const runner = makeScenarioRunner({
+        // R1：6 must-fix + 21 suggestion（线上事故形态）。若 workflow 错误地继续跑
+        // 第二轮，同一剧本重复返回（断言会先因 fix-failure 终止失败）。
+        review: [
+          () => ({ report_file: "/tmp/r1-sugg.md", must_fix: 6, suggestion: 21, reconciliation: [] }),
+        ],
+        aggregate: () => ({
+          report_file: "/tmp/agg-sugg.md", must_fix: 6, suggestion: 21,
+          must_fix_ids: mfIds.map((id) => ({ id, severity: "major", title: id + " must-fix", files: ["src/mf.ts"], guidance: "fix it" })),
+          suggestion_ids: sugIds.map((id) => ({ id, severity: "minor", title: id + " suggestion", files: ["src/" + id.toLowerCase() + ".ts"], guidance: "tidy it" })),
+          // groups 只覆盖 must-fix：21 条 suggestion 靠 reconcileGroups 漏分兜底认领
+          groups: [{ id: "G1", issueIds: mfIds }],
+          fixes_caution: [],
+        }),
+        // 组序：G1 = 6 must-fix；G2..G22 = S-1..S-21（backfill 按 activeIds 插入序）。
+        // 8 条修 + 2 条 defer（minor）+ 11 条完全不报（遗漏）→ ES3 必须拦截。
+        fix: (prompt: string) => {
+          const gm = prompt.match(/group G(\d+)\//);
+          const groupNo = gm ? Number(gm[1]) : 0;
+          if (groupNo === 1) {
+            return {
+              fixed_count: mfIds.length,
+              fixes: mfIds.map((id) => ({
+                issue_id: id, description: "fix", self_check: "grep: 1 hit", affected_files: ["src/mf.ts"],
+              })),
+              deferred: [],
+            };
+          }
+          const sugIdx = groupNo - 1; // G2 -> S-1
+          const sugId = "S-" + sugIdx;
+          if (sugIdx <= fixedSuggestions.length) {
+            return {
+              fixed_count: 1,
+              fixes: [{ issue_id: sugId, description: "fix suggestion", self_check: "grep: 1 hit", affected_files: ["src/" + sugId.toLowerCase() + ".ts"] }],
+              deferred: [],
+            };
+          }
+          if (sugIdx <= fixedSuggestions.length + deferredSuggestions.length) {
+            return {
+              fixed_count: 0, fixes: [],
+              deferred: [{ issue_id: sugId, severity: "minor", reason: "needs a new standalone fixture across modules, high cost" }],
+            };
+          }
+          // 遗漏：fixer 既不修也不 defer/dispute——旧实现会让这些 suggestion 静默消失
+          return { fixed_count: 0, fixes: [], deferred: [], disputed: [] };
+        },
+      });
+      const deps = makeDeps(runner);
+
+      const result = await runWorkflowToSettled(
+        wf("review-fix-loop"),
+        { targetType: "file", target: "README.md", agents: agentMd("reviewer"), _runId: RUN_ID() },
+        deps,
+        RUN_TIMEOUT_MS,
+      );
+
+      expect(result.reason).toBe("completed");
+      expect(result.error).toBeUndefined();
+      const outcome = assertScriptOutcome(result.scriptResult);
+      // 核心断言：ES3 拦截，终止态不是 clean
+      expect(outcome.terminated).toBe("fix-failure");
+      expect(outcome.message).toContain("[UNRESOLVED]");
+      expect(outcome.message).toContain("suggestion 未在 fixes[]/deferred[]/disputed[] 中处理（漏修）");
+      for (const id of omittedSuggestions) {
+        expect(outcome.message).toContain("s-" + id.slice(2));
+      }
+
+      // suggestion 全部进台账（open）；11 条遗漏条目不得消失
+      const st = JSON.parse(readFileSync(join(outcome.runDir!, "state.json"), "utf8")) as {
+        issues: Record<string, { severity: string; status: string }>;
+      };
+      for (const id of sugIds) {
+        expect(st.issues[id]).toBeDefined();
+        expect(st.issues[id]!.severity).toBe("minor");
+        expect(st.issues[id]!.status).toBe("open"); // fix 状态写入发生在 ES3 之后
+      }
+      for (const id of omittedSuggestions) expect(st.issues[id]!.status).toBe("open");
+
+      // suggestion 有 owner：aggregator groups 只覆盖 must-fix，21 条 suggestion 被兜底
+      // 独立组认领并各自派发 fixer（22 组 = 1 must-fix 组 + 21 suggestion 组）
+      const { kinds } = runner.stats();
+      expect(kinds.filter((k) => k === "fix").length).toBe(22);
+      // fixer 任务文档渲染 suggestion（含 severity），不再只存在于 aggregated.md
+      const doc2 = readFileSync(join(outcome.runDir!, "batch-1", "round-1", "aggregate-4-fixer-2.md"), "utf-8");
+      expect(doc2).toContain("- S-1 [minor] S-1 suggestion");
+    },
+    RUN_TIMEOUT_MS,
+  );
+
+  it(
+    "E2E-SUGG-2：R2 reviewer 报 suggestion 0 但台账 suggestion 仍 open → 继续对账到 stuck，不得 clean/converged",
+    async () => {
+      const runner = makeScenarioRunner({
+        review: [
+          () => ({ report_file: "/tmp/r1-ledger.md", must_fix: 1, suggestion: 1, reconciliation: [] }),
+          // R2+：reviewer 数字报 0（历史事故的假 clean 信号），对账里明确 S-1 not-fixed。
+          // 台账守门必须让 workflow 继续，而不是因数字 0 收工。
+          () => ({
+            report_file: "/tmp/r2-ledger.md", must_fix: 0, suggestion: 0,
+            reconciliation: [
+              { prev_id: "MF-1", status: "fixed", evidence: "read src/mf.ts, fix present" },
+              { prev_id: "S-1", status: "not-fixed", evidence: "read src/s-1.ts, still untidy" },
+            ],
+          }),
+        ],
+        aggregate: () => ({
+          report_file: "/tmp/agg-ledger.md", must_fix: 1, suggestion: 1,
+          must_fix_ids: [{ id: "MF-1", severity: "major", title: "must fix", files: ["src/mf.ts"] }],
+          suggestion_ids: [{ id: "S-1", severity: "minor", title: "tidy", files: ["src/s-1.ts"] }],
+          groups: [{ id: "G1", issueIds: ["MF-1", "S-1"] }],
+          fixes_caution: [],
+        }),
+        fix: () => ({
+          fixed_count: 2,
+          fixes: [
+            { issue_id: "MF-1", description: "fix", self_check: "grep: 1 hit", affected_files: ["src/mf.ts"] },
+            { issue_id: "S-1", description: "fix suggestion", self_check: "grep: 1 hit", affected_files: ["src/s-1.ts"] },
+          ],
+          deferred: [],
+        }),
+      });
+      const deps = makeDeps(runner);
+
+      const result = await runWorkflowToSettled(
+        wf("review-fix-loop"),
+        {
+          targetType: "file", target: "README.md", agents: agentMd("reviewer"), _runId: RUN_ID(),
+          maxRounds: 4, stuckThreshold: 3,
+        },
+        deps,
+        RUN_TIMEOUT_MS,
+      );
+
+      expect(result.reason).toBe("completed");
+      expect(result.error).toBeUndefined();
+      const outcome = assertScriptOutcome(result.scriptResult);
+      // 不是 clean/converged：台账 residue 让循环继续，最终由 stuck 诚实终止
+      expect(outcome.terminated).toBe("stuck");
+      expect(outcome.message).toContain("S-1");
+      expect(outcome.message).not.toContain("All batches clean");
+
+      // R3 prompt 的台账注入段含 suggestion（R2 时 S-1 是 fix-attempted 不在 open 清单，
+      // R2 对账 not-fixed 后转 regressed → R3 注入 OPEN ISSUES；reviewer 有对账对象）
+      const { kinds, prompts } = runner.stats();
+      const reviewPrompts = prompts.filter((_, i) => kinds[i] === "review");
+      expect(reviewPrompts.length).toBeGreaterThanOrEqual(3);
+      const ledgerPrompt = reviewPrompts.find((p) => p.includes("OPEN ISSUES FROM WORKFLOW LEDGER"));
+      expect(ledgerPrompt).toBeDefined();
+      expect(ledgerPrompt).toContain("S-1 [minor]");
+
+      // 台账事实：S-1 仍是 minor 且未 fixed（regressed：修过但 reviewer 确认未修好）
+      const st = JSON.parse(readFileSync(join(outcome.runDir!, "state.json"), "utf8")) as {
+        issues: Record<string, { severity: string; status: string }>;
+      };
+      expect(st.issues["S-1"]).toBeDefined();
+      expect(st.issues["S-1"]!.severity).toBe("minor");
+      expect(st.issues["S-1"]!.status).toBe("regressed");
+    },
+    RUN_TIMEOUT_MS,
+  );
+
+  it(
+    "E2E-SUGG-3：aggregator 报 suggestion:3 但缺 suggestion_ids → 重试一次后 aggregator-failure（不得 clean/converged）",
+    async () => {
+      const runner = makeScenarioRunner({
+        review: [
+          () => ({ report_file: "/tmp/r1-no-ledger.md", must_fix: 1, suggestion: 3, reconciliation: [] }),
+        ],
+        // 声称 3 条 suggestion 但完全没有条目级台账（正是线上事故形态）。重试仍返回同一
+        // 缺陷 → 必须 aggregator-failure，不得带着「只有数字」的聚合结果进入 fix/clean。
+        aggregate: () => ({
+          report_file: "/tmp/agg-no-ledger.md", must_fix: 1, suggestion: 3,
+          must_fix_ids: [{ id: "MF-1", severity: "major", title: "must fix", files: ["src/mf.ts"] }],
+          fixes_caution: [],
+        }),
+        fix: () => ({
+          fixed_count: 1,
+          fixes: [{ issue_id: "MF-1", description: "fix", self_check: "grep: 1 hit", affected_files: ["src/mf.ts"] }],
+          deferred: [],
+        }),
+      });
+      const deps = makeDeps(runner);
+
+      const result = await runWorkflowToSettled(
+        wf("review-fix-loop"),
+        { targetType: "file", target: "README.md", agents: agentMd("reviewer"), _runId: RUN_ID() },
+        deps,
+        RUN_TIMEOUT_MS,
+      );
+
+      expect(result.reason).toBe("completed");
+      expect(result.error).toBeUndefined();
+      const outcome = assertScriptOutcome(result.scriptResult);
+      expect(outcome.terminated).toBe("aggregator-failure");
+      expect(outcome.message).toContain("suggestion=3, suggestion_ids=0");
+      expect(outcome.message).toContain("恢复动作");
+      expect(outcome.message).toContain("suggestion_ids");
+
+      // 重试一次（聚合调用 2 次），且从未派发 fixer
+      const { kinds, prompts } = runner.stats();
+      expect(kinds.filter((k) => k === "aggregate").length).toBe(2);
+      expect(kinds).not.toContain("fix");
+      const aggPrompts = prompts.filter((_, i) => kinds[i] === "aggregate");
+      expect(aggPrompts[1]).toContain("[RETRY]");
+      expect(aggPrompts[1]).toContain("suggestion_ids");
+    },
+    RUN_TIMEOUT_MS,
+  );
+
+  it(
+    "E2E-SUGG-4：aggregator 报 suggestion:3 但 suggestion_ids 只有 1 条 → aggregator-failure",
+    async () => {
+      const runner = makeScenarioRunner({
+        review: [
+          () => ({ report_file: "/tmp/r1-short-ledger.md", must_fix: 1, suggestion: 3, reconciliation: [] }),
+        ],
+        aggregate: () => ({
+          report_file: "/tmp/agg-short-ledger.md", must_fix: 1, suggestion: 3,
+          must_fix_ids: [{ id: "MF-1", severity: "major", title: "must fix", files: ["src/mf.ts"] }],
+          suggestion_ids: [{ id: "S-1", severity: "minor", title: "only one", files: ["src/s-1.ts"] }],
+          fixes_caution: [],
+        }),
+        fix: () => ({
+          fixed_count: 1,
+          fixes: [{ issue_id: "MF-1", description: "fix", self_check: "grep: 1 hit", affected_files: ["src/mf.ts"] }],
+          deferred: [],
+        }),
+      });
+      const deps = makeDeps(runner);
+
+      const result = await runWorkflowToSettled(
+        wf("review-fix-loop"),
+        { targetType: "file", target: "README.md", agents: agentMd("reviewer"), _runId: RUN_ID() },
+        deps,
+        RUN_TIMEOUT_MS,
+      );
+
+      expect(result.reason).toBe("completed");
+      expect(result.error).toBeUndefined();
+      const outcome = assertScriptOutcome(result.scriptResult);
+      expect(outcome.terminated).toBe("aggregator-failure");
+      expect(outcome.message).toContain("suggestion=3, suggestion_ids=1");
+      expect(outcome.message).toContain("恢复动作");
+
+      const { kinds } = runner.stats();
+      expect(kinds.filter((k) => k === "aggregate").length).toBe(2);
+      expect(kinds).not.toContain("fix");
     },
     RUN_TIMEOUT_MS,
   );

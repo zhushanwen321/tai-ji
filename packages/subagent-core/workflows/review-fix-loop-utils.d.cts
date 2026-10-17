@@ -138,6 +138,7 @@ export declare function validateFixResult(
   mustFixIds?: string[],
   trackedIssues?: Record<string, unknown>,
   idMap?: Record<string, string>,
+  suggestionIds?: string[],
 ): Array<Record<string, unknown>>;
 export declare function reconcileIssues(
   prevIssues: Record<string, unknown>,
@@ -182,9 +183,14 @@ export declare function normalizeAggregatorResult(raw: unknown): {
   must_fix: number;
   suggestion: number;
   must_fix_ids: Array<AggMustFixEntry>;
+  suggestion_ids?: Array<AggMustFixEntry>;
   scores?: ScoreEntry[];
   [key: string]: unknown;
 };
+/** suggestion 台账完整性：suggestion > 0 但 suggestion_ids 缺失/空/条数不足 → 缺陷描述。 */
+export declare function detectSuggestionLedgerDefect(
+  agg: { suggestion?: number; suggestion_ids?: unknown; [key: string]: unknown } | null | undefined,
+): { suggestion: number; suggestion_ids: number } | null;
 export declare function resolveRunRoot(opts: {
   runId?: string;
   cwd?: string;
@@ -212,6 +218,15 @@ export interface AggMustFixEntry {
   evidence?: string;
   [key: string]: unknown;
 }
+
+export declare function normalizeMustFixEntry(x: unknown): AggMustFixEntry | null;
+/** suggestion_ids 单条归一：severity 归一为 minor；显式 critical/major 保留（按 must-fix 处理）。 */
+export declare function normalizeSuggestionEntry(x: unknown): AggMustFixEntry | null;
+/** must-fix ∪ suggestion 合并（保序，同 id must-fix 优先）。 */
+export declare function combineIssueEntries(
+  mustFixIds?: Array<{ id?: string; severity?: string; [key: string]: unknown } | null> | null,
+  suggestionIds?: Array<{ id?: string; severity?: string; [key: string]: unknown } | null> | null,
+): Array<{ id: string; severity?: string; [key: string]: unknown }>;
 
 export declare function inheritCarryoverFields(
   tracked: { title?: string; severity?: string; [key: string]: unknown },
