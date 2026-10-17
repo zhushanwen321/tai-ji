@@ -2,10 +2,10 @@
 name: taiji
 description: AI Agent 桌面工作台 · 太极纯灰（v6）设计系统
 colors:
-  bg: "#1e1e1e"
-  surface: "#101010"
-  fg: "#ececec"
-  muted: "#8a8a8a"
+  bg: "#242428"
+  surface: "#18181b"
+  fg: "#e6e6e6"
+  muted: "#949494"
   border: "rgba(255, 255, 255, 0.07)"
   accent: "#7fb89c"
   success: "#78a87e"
@@ -113,7 +113,7 @@ v6 重构的三个缘由：
 |---|------|---------|
 | 1 | **层级代替边框** | 静态容器只用一个表面色，不叠加 border；靠 bg 层级浮起分隔。border 仅保留给浮起可交互容器（popover/dialog/composer）和 focus 态 |
 | 2 | **圆角档位提升** | `--radius-sm` 6px（全局默认档）；卡片/浮层/composer 12px（demo 卡片形态统一 lg 档，无 10px 档）；徽章/pill 999px 胶囊 |
-| 3 | **正文提亮** | 正文位置统一用 `--neutral-fg`（暗色下 ≈16:1）；工具行/次要落 `--neutral-mid`（~5.4:1，过 AA 大字线）；时间与元信息落 `--neutral-dim`（~2.8:1，低显著度装饰性文字的显式取舍）；仅极弱/装饰位置保留 faint |
+| 3 | **正文提亮** | 正文位置统一用 `--neutral-fg`（暗色下 ≈14.2–14.9:1，2026-10-17 六主题 v2 微降入舒适带）；工具行/次要落 `--neutral-mid`（~5.8:1，过 AA 大字线）；时间与元信息落 `--neutral-dim`（卡面 ~3.5:1 / 侧栏 ~3.0:1，低显著度装饰性文字的显式取舍）；仅极弱/装饰位置保留 faint |
 | 4 | **内容收窄** | assistant 居中 720px（整 turn 居中，UserBubble 列内右浮）；设置内容列同 720px 左对齐；Composer 非 landing 对齐同列。例外：对话卡内内容列宽由 PanelContainer 派生（卡宽 2/3，720px 下限后撑满——feat-chat-flow-width，2026-10-14 修订；720 为窄卡下限与全局 token 口径） |
 | 5 | **彩色降噪** | 保留 git 语义色（M/A/D 降为极小圆点或单字）+ accent + 真 failure 的 danger，其余降灰阶。从色块/pill 降级为极小圆点或单字 badge |
 
@@ -228,37 +228,37 @@ demo 阶段功能做到「可见 + 可交互 + 数据 mock」即够。不接 run
 ### 4.1 背景层级（五层职能分层：读的地方沉下去，操作的地方浮上来）
 
 ```css
---bg-stage:     #0a0a0c;   /* 窗口壳：标题栏底、卡片之间的缝（全场最深）*/
---bg:           #1e1e1e;   /* 框架层：侧栏/composer/settings 内容区（同层同色）*/
+--bg-stage:     #111114;   /* 窗口壳：标题栏底、卡片之间的缝（全场最深；黛蓝 #0e0f15 / 暖墨 #100e0c 各自落定）*/
+--bg:           #242428;   /* 框架层：侧栏/composer/settings 内容区（同层同色）*/
 --bg-sunken:    var(--bg); /* 框架层沉底同值跟随（语义 = 与宿主 --bg 同值）*/
---bg-input:     #161618;   /* 内容层内次级：代码块/文件 chip 底/实例 tab 非激活底*/
---surface:      #101010;   /* 内容层：对话流/右抽屉/底抽屉阅读区（沉底，各卡自持 border + shadow）*/
---bg-card:      #262626;   /* 操作域浮起容器：设置分组卡片等（亮于 --bg 一档）*/
---bg-elevated:  #2b2b2e;   /* 浮层档（2026-10-13 用户裁决 demo 方案 A 后：popover/hover 卡族已迁 composer 同源档 bg-bg + border，本档现存消费方 = segmented active 凹陷槽浮起 / dialog / 内联浮面；用户气泡 --bubble-bg 随本层派生，暗族同值；亮族独立 #fefefe）*/
---surface-2:    #27272a;   /* 次级表面（header 浮起分层 / SegmentedTab 内项 active）*/
---surface-hover:#262629;   /* hover 态 */
+--bg-input:     #1d1d20;   /* 内容层内次级：代码块/文件 chip 底/实例 tab 非激活底*/
+--surface:      #18181b;   /* 内容层：对话流/右抽屉/底抽屉阅读区（沉底，各卡自持 border + shadow；2026-10-17 六主题 v2：阶梯整体脱离近纯黑区）*/
+--bg-card:      #2d2d30;   /* 操作域浮起容器：设置分组卡片等（亮于 --bg 一档）*/
+--bg-elevated:  #323236;   /* 浮层档（2026-10-13 用户裁决 demo 方案 A 后：popover/hover 卡族已迁 composer 同源档 bg-bg + border，本档现存消费方 = segmented active 凹陷槽浮起 / dialog / 内联浮面；用户气泡 --bubble-bg 随本层派生，暗族同值；亮族独立 #fefefe）*/
+--surface-2:    #2e2e32;   /* 次级表面（header 浮起分层 / SegmentedTab 内项 active）*/
+--surface-hover:#2d2d31;   /* hover 态 */
 ```
 
-**五层阶梯**（玄值由深到浅：`#0a0a0c → #101010 → #161618 → #1e1e1e → #2b2b2e`，越浮越亮）：
-- **窗口壳**：`--bg-stage` `#0a0a0c`（ShellView .stage 引用）。**亮色（皓族）**：`--bg-stage` `#dbd9d4`（TAIJI_PAPER 未定义独立 stage，复用宣纸族最深暖灰；style.css `[data-theme=light]` 覆盖，避免泄漏暗色 #0a0a0c 形成黑框）
-- **内容层（沉底）**：`--surface` `#101010`（对话流 / 右抽屉 / 底抽屉三张阅读卡同色共享）；`--bg-input` `#161618` 为其内次级（代码块/文件 chip）
-- **框架层（浮起）**：`--bg` `#1e1e1e`（aside / composer / settings 内容区同层同色）；操作域浮起容器 `--bg-card` `#262626` 亮于本层一档
-- **浮层**：`--bg-elevated` `#2b2b2e`（hover 详情卡 / popover；用户气泡 `--bubble-bg` 随本层派生——demo 暗族三主题 bubble 逐块等于 elevated、无独立档，亮族独立 `#fefefe`）；**2026-10-13 用户裁决 demo 方案 A 后该族已全迁 composer 同源档**（`--bg` + `--border` + shadow-2，elevated 比行高亮 surface-hover 亮会致 hover 行反向变暗，见 §5.12；本档现存消费方 = segmented active 凹陷槽浮起 / dialog / 内联浮面）；overlay 遮罩半透明黑（`bg-black/80`）全场最暗，遮罩上面板靠 border + shadow 分离
-- 黛蓝/暖墨暗色 entry 按玄五层骨架 + 各自色相偏移推导（黛蓝 B>R、暖墨 R>B，通道差与各自旧 entry 一致）；亮色族三主题（皓/青墨/朱印）bg 阶梯沿用宣纸镜像（surface 最亮、框架层深一档），青墨/朱印不覆写
-- **亮色（皓族）设置卡双层底**：`--bg-card` `#fcfbf9`（分组卡底，近白纸、亮于页底 `#edebe8`）、`--surface-2` `#efede9`（分组卡头，= demo 亮族 `--card-head`；style.css `[data-theme=light]`）——「卡浮于底」层级在亮色族与暗色族同构（卡底亮于页底，卡头 = 页底色调档）
+**五层阶梯**（玄值由深到浅：`#111114 → #18181b → #1d1d20 → #242428 → #323236`，越浮越亮；2026-10-17 六主题 v2 暗族整梯上移脱离近纯黑区，黛蓝/暖墨按各自色相同步推导——stage 各自分落 #0e0f15/#100e0c 不再共享）：
+- **窗口壳**：`--bg-stage` `#111114`（ShellView .stage 引用；黛蓝 preset `#0e0f15` / 暖墨 preset `#100e0c` 各自落定，缝隙不再与他主题色相打架）。**亮色（皓族）**：`--bg-stage` `#dee3da`（TAIJI_PAPER 未定义独立 stage，取带青玉相浅色、与 accent `#43765d` 同族色相——分离感靠色相差而非压暗舞台，2026-10-17 用户裁决借 OpenDesign 舞台层策略；style.css `[data-theme=light]` 覆盖，避免泄漏暗色 #111114 形成黑框）
+- **内容层（沉底）**：`--surface` `#18181b`（对话流 / 右抽屉 / 底抽屉三张阅读卡同色共享）；`--bg-input` `#1d1d20` 为其内次级（代码块/文件 chip，亮于 surface 一小档保阶梯单调）
+- **框架层（浮起）**：`--bg` `#242428`（aside / composer / settings 内容区同层同色）；操作域浮起容器 `--bg-card` `#2d2d30` 亮于本层一档
+- **浮层**：`--bg-elevated` `#323236`（hover 详情卡 / popover；用户气泡 `--bubble-bg` 随本层派生——demo 暗族三主题 bubble 逐块等于 elevated、无独立档，亮族独立 `#fefefe`）；**2026-10-13 用户裁决 demo 方案 A 后该族已全迁 composer 同源档**（`--bg` + `--border` + shadow-2，elevated 比行高亮 surface-hover 亮会致 hover 行反向变暗，见 §5.12；本档现存消费方 = segmented active 凹陷槽浮起 / dialog / 内联浮面）；overlay 遮罩半透明黑（`bg-black/80`）全场最暗，遮罩上面板靠 border + shadow 分离
+- 黛蓝/暖墨暗色 entry 按玄五层骨架 + 各自色相偏移推导（黛蓝 B>R、暖墨 R>B）；亮色族三主题（皓/青墨/朱印）bg 阶梯沿用宣纸镜像（surface 最亮、框架层深一档），青墨/朱印不覆写
+- **亮色（皓族）设置卡双层底**：`--bg-card` `#fcfbf9`（分组卡底，近白纸、亮于页底 `#eef1ea`）、`--surface-2` `#efede9`（分组卡头，= demo 亮族 `--card-head`；style.css `[data-theme=light]`）——「卡浮于底」层级在亮色族与暗色族同构（卡底亮于页底，卡头 = 页底色调档）
 
-### 4.2 文字 neutral 谱系（纯中性四档，暗色族三主题统一）
+### 4.2 文字 neutral 谱系（六档，暗色族带主题色相）
 
-四档全部纯中性去蓝偏（ui-optimize 决策2）：正文/侧栏主文字/composer 可操作文字同落 fg 档（≈16:1），工具行/次要 mid 档，时间与元信息 dim 档，极弱/装饰 faint 档；图标档随 mid 档校准。暗色族三主题（玄/黛蓝/暖墨）文字档统一为同一组值；亮色族三主题文字档维持宣纸墨色不变（无蓝偏问题）。
+六档（2026-10-17 六主题 v2：fg 微降入舒适带、mid/dim/faint/ico 联动提亮）：正文/侧栏主文字/composer 可操作文字同落 fg 档（暗色 ≈14.2–14.9:1），工具行/次要 mid 档，时间与元信息 dim 档（卡面 ~3.5:1 / 侧栏 ~3.0:1），极弱/装饰 faint 档；图标档随 mid 档校准。暗色族三主题文字档各自带主题色相（玄纯中性 / 黛蓝蓝相 / 暖墨暖相）；亮色族三主题文字档维持宣纸墨色不变（无蓝偏问题）。
 
 ```css
---neutral-fg:    #ececec;  /* 主前景 + 正文 */
---neutral-fg-2:  #d9d9d9;  /* 次级正文（demo --fg-2：正文与工具行之间的强调文字档） */
---neutral-mid:   #8a8a8a;  /* 工具行/次要（~5.4:1，过 AA 大字线）*/
---neutral-dim:   #5c5c5c;  /* 时间与元信息（~2.8:1，低显著度装饰性文字的显式取舍）*/
---neutral-faint: #45454a;  /* 极弱/装饰 */
---neutral-ico:   #8a8a8a;  /* 图标默认色（随 mid 档校准） */
---neutral-ico-hover: #ececec;
+--neutral-fg:    #e6e6e6;  /* 主前景 + 正文 */
+--neutral-fg-2:  #d2d2d2;  /* 次级正文（demo --fg-2：正文与工具行之间的强调文字档） */
+--neutral-mid:   #949494;  /* 工具行/次要（~5.8:1，过 AA 大字线）*/
+--neutral-dim:   #6e6e6e;  /* 时间与元信息（~3.5:1 卡面 / ~3.0:1 侧栏，低显著度装饰性文字的显式取舍）*/
+--neutral-faint: #525257;  /* 极弱/装饰 */
+--neutral-ico:   #949494;  /* 图标默认色（随 mid 档校准） */
+--neutral-ico-hover: #e6e6e6;
 
 /* 对话流专属名称色（2026-10-06 对话流视觉裁决）：workflow / subagent 的具体名称——
    暖驼微暖低饱和，不随主色态变化；亮色主题覆盖 #8c6231（对比 5.2:1），preset 不覆盖 */
@@ -317,9 +317,9 @@ demo 阶段功能做到「可见 + 可交互 + 数据 mock」即够。不接 run
 
 | 主题 | 族 | `--code-c` | 对比 |
 |---|---|---|---|
-| 玄 | 暗 | `#cf9d78` | 13.13:1 |
-| 黛蓝 | 暗 | `#c99e80` | 13.12:1 |
-| 暖墨 | 暗 | `#d4a684` | 13.06:1 |
+| 玄 | 暗 | `#cf9d78` | 11.39:1 |
+| 黛蓝 | 暗 | `#c99e80` | 11.92:1 |
+| 暖墨 | 暗 | `#d4a684` | 11.80:1 |
 | 皓 | 亮 | `#96622f` | 10.65:1 |
 | 青墨 | 亮 | `#92663a` | 10.62:1 |
 | 朱印 | 亮 | `#9a6b40` | 10.50:1 |
@@ -404,7 +404,7 @@ demo 阶段功能做到「可见 + 可交互 + 数据 mock」即够。不接 run
 |---|---|---|
 | 玄（暗·默认） | `:root` | 全部默认值，无独立块 |
 | 皓（亮·默认） | `[data-theme="light"]` | 54 = bg 阶梯 8 + bubble 1 + neutral 8（含 name、fg-2）+ border 3 + accent 3 + link-c/code-c 2 + md-code 1（7% 重声明）+ 状态 6（含 danger-fg 白字覆盖）+ 阴影 3 + chart 族 19（--bg-sunken 与 accent-soft/accent-ring/*-soft 派生公式继承 ：root 不重声明） |
-| 黛蓝 / 暖墨 | `:root[data-theme-preset="dailan"/"nuanmo"]` | 38 = bg 阶梯 7 + neutral 7（含 fg-2）+ accent 3 + link-c/code-c 2 + chart 族 19（不覆盖 border/状态色；--bg-sunken/--md-code 继承派生公式不重声明） |
+| 黛蓝 / 暖墨 | `:root[data-theme-preset="dailan"/"nuanmo"]` | 39 = bg 阶梯 8（含 --bg-stage 各自落定）+ neutral 7（含 fg-2）+ accent 3 + link-c/code-c 2 + chart 族 19（不覆盖 border/状态色；--bg-sunken/--md-code 继承派生公式不重声明） |
 | 青墨 | `[data-theme="light"][data-theme-preset="qingmo"]` | 24 = accent 3 + link-c/code-c 2 + chart 族 19（宣纸底不换、只换颜料） |
 | 朱印 | `[data-theme="light"][data-theme-preset="zhuyin"]` | 25 = accent 3 + link-c/code-c 2 + danger 1（玫红错开）+ chart 族 19（其余状态色与 light 族默认同值不重声明；--danger-fg 继承 light 块白字覆盖不重声明） |
 

@@ -71,7 +71,7 @@ export function resolveMermaidThemeVariables(theme: 'dark' | 'light'): Record<st
       secondaryColor: '#efede9', // --surface-2（亮）
       secondaryBorderColor: '#43765d', // --accent（亮青玉）
       secondaryTextColor: '#706e6a', // --neutral-mid（亮）
-      tertiaryColor: '#edebe8', // --bg（亮）
+      tertiaryColor: '#eef1ea', // --bg（亮）
       tertiaryBorderColor: '#00000012', // --border（亮 rgba(0,0,0,0.07)）
       tertiaryTextColor: '#706e6a', // --neutral-mid（亮）
       lineColor: '#43765d', // --accent（亮青玉）
@@ -84,19 +84,19 @@ export function resolveMermaidThemeVariables(theme: 'dark' | 'light'): Record<st
   return {
     fontFamily: "'JetBrains Mono', 'IBM Plex Mono', ui-monospace, Menlo, monospace",
     fontSize: '14px', // --text-base 基准档
-    // 暗色（玄）：深底节点 + 亮文字 + 青玉 accent（style.css :root）
-    primaryColor: '#101010', // --surface
+    // 暗色（玄青）：深底节点 + 亮文字 + 青玉 accent（style.css :root）
+    primaryColor: '#18181b', // --surface
     primaryBorderColor: '#ffffff21', // --border-strong rgba(255,255,255,0.13)
-    primaryTextColor: '#ececec', // --neutral-fg
-    secondaryColor: '#27272a', // --surface-2
+    primaryTextColor: '#e6e6e6', // --neutral-fg
+    secondaryColor: '#2e2e32', // --surface-2
     secondaryBorderColor: '#7fb89c', // --accent（青玉）
-    secondaryTextColor: '#8a8a8a', // --neutral-mid
-    tertiaryColor: '#1e1e1e', // --bg
+    secondaryTextColor: '#949494', // --neutral-mid
+    tertiaryColor: '#242428', // --bg
     tertiaryBorderColor: '#ffffff12', // --border rgba(255,255,255,0.07)
-    tertiaryTextColor: '#8a8a8a', // --neutral-mid
+    tertiaryTextColor: '#949494', // --neutral-mid
     lineColor: '#7fb89c', // --accent（青玉）
-    noteBkgColor: '#27272a', // --surface-2
-    noteTextColor: '#ececec', // --neutral-fg
+    noteBkgColor: '#2e2e32', // --surface-2
+    noteTextColor: '#e6e6e6', // --neutral-fg
     noteBorderColor: '#7fb89c', // --accent（青玉）
   }
 }

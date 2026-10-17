@@ -2,17 +2,17 @@
 
 状态：待裁决（D5 终态同步 contested 裁决：不把 ui-optimize-unified 令牌终态扩张到 mobile 壳——该设计从未裁决 mobile 壳视觉，盲改无验收覆盖；但镜像同步契约已被桌面侧改值打破，须显式登记）。登记来源：ui-optimize-unified D5 终态同步（2026-10-08）。2026-10-11 用户裁决：保留登记；当前桌面 UI 正在进行大幅重构，待重构稳定后再做向 mobile 壳的同步
 
-## 现状（2026-10-08 核实）
+## 现状（2026-10-17 核实）
 
 `packages/mobile-renderer/src/styles/tokens.css:20-22` 文件头自述「真值源仍是 renderer style.css……改动须同步两处」，但桌面侧 ui-optimize-unified 已完成五层分层改值 + 灰阶四档去蓝偏 + `--composer-bg` 退役删除 + `--bubble-bg` 归层派生 `--bg-elevated`（demo 暗族三主题同值；2026-10-10 demo 复刻保真修复），mobile 侧全部未跟随：
 
 | 位置 | mobile 现值 | 桌面终态 |
 |---|---|---|
-| tokens.css:27 `--bg` | `#131316` | `#1e1e1e`（框架层提亮） |
-| tokens.css:29 `--surface` | `#1f1f22`（亮于 bg 的旧方向） | `#101010`（内容层沉底） |
+| tokens.css:27 `--bg` | `#131316` | `#242428`（框架层提亮，六主题 v2） |
+| tokens.css:29 `--surface` | `#1f1f22`（亮于 bg 的旧方向） | `#18181b`（内容层沉底，六主题 v2） |
 | tokens.css:38 `--bubble-bg` | `var(--surface-hover)`（已退役改指） | `var(--bg-elevated)` 派生（暗族同值）/亮族 `#fefefe` 独立档 |
 | tokens.css:39/:189 `--composer-bg` | 残留（桌面已退役，全仓零消费方——死定义） | 已删除 |
-| tokens.css:43/:45 neutral fg/mid | `#dedee2`/`#96969c`（蓝偏旧值） | `#ececec`/`#8a8a8a`（纯中性四档） |
+| tokens.css:43/:45 neutral fg/mid | `#dedee2`/`#96969c`（蓝偏旧值） | `#e6e6e6`/`#949494`（六主题 v2，fg 微降入舒适带 + mid 联动提亮） |
 | tokens.css 全文件 | 无 `--md-code-*` 组 | `--md-code-bg/fg` 六主题各一对（决策 5） |
 | main.ts:41-44 neutral 兜底值 | 同旧 | —（style.css 加载成功时不生效，但兜底失真） |
 
