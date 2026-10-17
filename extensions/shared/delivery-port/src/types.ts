@@ -231,26 +231,3 @@ export interface DeliveryPortHandle { // oe-exempt:20261017:framework:进程级�
   /** 挂起条目到达回调订阅（事件驱动唤醒等待器，无轮询）；返回退订函数。 */
   onCollectArrival(cb: () => void): () => void;
 }
-
-/**
- * collect 面最小 stub（u-foundation 契约先行占位；实装由 u-p-port 在
- * delivery-port.ts 的 handle 构造处以挂起面实装替换——stub 仅保契约先行期编译与
- * 存量测试绿，调用即抛错（不吞不假装成功））。
- */
-export const deliveryCollectStubs: Pick<
-  DeliveryPortHandle,
-  "collectArm" | "consume" | "collectRelease" | "onCollectArrival"
-> = {
-  collectArm: () => {
-    throw new Error("not implemented: u-p-port");
-  },
-  consume: () => {
-    throw new Error("not implemented: u-p-port");
-  },
-  collectRelease: () => {
-    throw new Error("not implemented: u-p-port");
-  },
-  onCollectArrival: () => {
-    throw new Error("not implemented: u-p-port");
-  },
-};
