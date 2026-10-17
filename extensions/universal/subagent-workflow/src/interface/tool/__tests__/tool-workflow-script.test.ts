@@ -29,7 +29,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { actionGenerate, type ScriptParams, type WorkflowScriptExecuteResult, registerWorkflowScriptTool } from "../tool-workflow-script.ts";
+import { actionGenerate, buildScriptSummary, type ScriptParams, type WorkflowScriptExecuteResult, registerWorkflowScriptTool } from "../tool-workflow-script.ts";
 import { captureTool, type CapturedTool, type ScriptResultToolView } from "./capture-tool.ts";
 import { deleteWorkflow, saveWorkflow } from "@zhushanwen/subagent-core";
 
@@ -355,13 +355,13 @@ describe("execute 入口 abort 前置（P1-2：与 workflow / subagents 两 tool
 });
 
 describe("actionLint 输出形态（LLM 可见文本锁）", () => {
-  it("0 findings → ✅ 单行文案，无 details、无 isError", async () => {
+  it("0 findings → ✅ 单行文案，summary-only details、无 isError", async () => {
     const registry = makeRegistry([makeScript("clean-wf", CLEAN_SCRIPT)]);
     const tool = captureScriptTool(registry);
     const r = await lintCall(tool, "clean-wf");
     expect(registry.get).toHaveBeenCalledWith("clean-wf");
     expect(r.content).toEqual([{ type: "text", text: "✅ No issues found in 'clean-wf'." }]);
-    expect(r.details).toBeUndefined();
+    expect(r.details).toEqual({ summary: "Script clean-wf linted: 0 issues" });
     expect(r.isError).toBeUndefined();
   });
 
@@ -383,6 +383,7 @@ describe("actionLint 输出形态（LLM 可见文本锁）", () => {
       name: "no-entry-wf",
       valid: false,
       findingCount: 1,
+      summary: "Script no-entry-wf linted: 1 findings",
     });
     expect(r.isError).toBe(true);
   });
@@ -400,7 +401,13 @@ describe("actionLint 输出形态（LLM 可见文本锁）", () => {
           "   Suggestion: Add `description: 'kebab-case-name'` to agent() opts for readable /workflows display.",
       },
     ]);
-    expect(r.details).toEqual({ action: "lint", name: "unnamed-wf", valid: true, findingCount: 1 });
+    expect(r.details).toEqual({
+      action: "lint",
+      name: "unnamed-wf",
+      valid: true,
+      findingCount: 1,
+      summary: "Script unnamed-wf linted: passed",
+    });
     expect(r.isError).toBe(false);
   });
 
@@ -450,14 +457,26 @@ describe("actionLint GUI attach（execute 级 RPC/非 RPC 分发）", () => {
     expect(gui?.component?.props?.items).toEqual([{ label: "lint", value: "1 findings", severity: "warn" }]);
   });
 
-  it("RPC ctx + 纯文本结果（details undefined）→ details 保持 undefined", async () => {
+  it("RPC ctx + summary-only details（lint 0 findings）→ stats-line 展示摘要（原 undefined 无 GUI 块的形态随 details.summary 化升级）", async () => {
     const registry = makeRegistry([makeScript("clean-wf", CLEAN_SCRIPT)]);
     const tool = captureScriptTool(registry);
     const r = await tool.execute("id", { action: "lint", name: "clean-wf" }, undefined, undefined, {
       mode: "rpc",
       hasUI: true,
     });
-    expect(r.details).toBeUndefined();
+    const details = r.details as { summary?: string; __gui__?: { component?: { type?: string; props?: { items?: Array<{ label?: string; value?: string; severity?: string }> } } } };
+    expect(details.summary).toBe("Script clean-wf linted: 0 issues");
+    expect(details.__gui__?.component?.type).toBe("stats-line");
+    expect(details.__gui__?.component?.props?.items).toEqual([
+      { label: "done", value: "Script clean-wf linted: 0 issues", severity: "ok" },
+    ]);
+  });
+
+  it("非 RPC ctx + 纯文本结果（summary-only details）→ details 只带 summary、无 __gui__", async () => {
+    const registry = makeRegistry([makeScript("clean-wf", CLEAN_SCRIPT)]);
+    const tool = captureScriptTool(registry);
+    const r = await lintCall(tool, "clean-wf");
+    expect(r.details).toEqual({ summary: "Script clean-wf linted: 0 issues" });
   });
 
   it("非 RPC ctx（lintCall 既有形态）→ details 无 __gui__", async () => {
@@ -486,7 +505,11 @@ describe("actionList 输出形态（LLM 可见文本锁）", () => {
           "  - [tmp] scratch-wf: one-off scratch task",
       },
     ]);
-    expect(r.details).toEqual({ action: "list", count: 2 });
+    expect(r.details).toEqual({
+      action: "list",
+      count: 2,
+      summary: "Listed 2 workflow scripts",
+    });
     expect(r.isError).toBeUndefined();
   });
 
@@ -500,7 +523,11 @@ describe("actionList 输出形态（LLM 可见文本锁）", () => {
     expect(r.content).toEqual([
       { type: "text", text: "Available workflows:\n  - [saved] deploy-wf: deploy the app" },
     ]);
-    expect(r.details).toEqual({ action: "list", count: 1 });
+    expect(r.details).toEqual({
+      action: "list",
+      count: 1,
+      summary: "Listed 1 workflow script",
+    });
   });
 
   it("description 缺省 → (no description) 占位（core formatter 行为透传）", async () => {
@@ -512,12 +539,12 @@ describe("actionList 输出形态（LLM 可见文本锁）", () => {
     ]);
   });
 
-  it("空清单（无任何脚本）→ 空态单行文案，无 details、无 isError", async () => {
+  it("空清单（无任何脚本）→ 空态单行文案，summary-only details、无 isError", async () => {
     const registry = makeRegistry([]);
     const tool = captureScriptTool(registry);
     const r = await listCall(tool);
     expect(r.content).toEqual([{ type: "text", text: "No workflow scripts available." }]);
-    expect(r.details).toBeUndefined();
+    expect(r.details).toEqual({ summary: "Listed 0 workflow scripts" });
     expect(r.isError).toBeUndefined();
   });
 
@@ -552,6 +579,89 @@ describe("actionList GUI attach（execute 级 RPC/非 RPC 分发）", () => {
     const tool = captureScriptTool(registry);
     const r = await listCall(tool);
     expect((r.details as GuiProjection).__gui__).toBeUndefined();
-    expect(r.details).toEqual({ action: "list", count: 1 });
+    expect(r.details).toEqual({
+      action: "list",
+      count: 1,
+      summary: "Listed 1 workflow script",
+    });
+  });
+});
+
+// ── 收起态一行摘要（details.summary 约定，见 extension-conventions.md）──
+
+describe("buildScriptSummary + renderResult 折叠分支", () => {
+  /** renderResult 直通 stub theme（fg 原样返回，便于断言纯文本）。 */
+  const renderTheme = { fg: (_token: string, text: string) => text } as never;
+
+  const renderText = (node: { render(width: number): string[] }): string =>
+    node.render(400).join("\n");
+
+  it("buildScriptSummary 五 action 措辞（list 单数/复数分源；lint valid → passed）", () => {
+    const p = { action: "lint" } as ScriptParams;
+    expect(buildScriptSummary(p, { action: "generate", path: "/a.js", name: "deploy-wf", status: "ready" })).toBe(
+      "Script deploy-wf generated",
+    );
+    expect(buildScriptSummary(p, { action: "lint", name: "deploy-wf", valid: true, findingCount: 2 })).toBe(
+      "Script deploy-wf linted: passed",
+    );
+    expect(buildScriptSummary(p, { action: "lint", name: "deploy-wf", valid: false, findingCount: 3 })).toBe(
+      "Script deploy-wf linted: 3 findings",
+    );
+    expect(buildScriptSummary(p, { action: "list", count: 1 })).toBe("Listed 1 workflow script");
+    expect(buildScriptSummary(p, { action: "list", count: 2 })).toBe("Listed 2 workflow scripts");
+    expect(buildScriptSummary(p, { action: "save", name: "deploy-wf", ok: true })).toBe(
+      "Script deploy-wf saved",
+    );
+    expect(buildScriptSummary(p, { action: "delete", name: "deploy-wf", ok: true })).toBe(
+      "Script deploy-wf deleted",
+    );
+  });
+
+  it("renderResult 折叠 + details.summary → 单行摘要（不渲染 content 全文）", () => {
+    const tool = captureScriptExecuteTool();
+    const renderResult = (tool as unknown as {
+      renderResult: (r: unknown, o: { expanded: boolean }, t: never) => { render(width: number): string[] };
+    }).renderResult;
+    const node = renderResult(
+      {
+        content: [{ type: "text", text: "Available workflows:\n  - [saved] deploy-wf: deploy the app" }],
+        details: { action: "list", count: 1, summary: "Listed 1 workflow script" },
+      },
+      { expanded: false },
+      renderTheme,
+    );
+    const text = renderText(node);
+    // pi-tui Text.render 逐行 pad，整串断言用 toContain；折叠态不输出 content 全文
+    expect(text).toContain("Listed 1 workflow script");
+    expect(text).not.toContain("deploy the app");
+  });
+
+  it("renderResult 展开 → 维持 renderTextResult 全文渲染（summary 不参与展开态）", () => {
+    const tool = captureScriptExecuteTool();
+    const renderResult = (tool as unknown as {
+      renderResult: (r: unknown, o: { expanded: boolean }, t: never) => { render(width: number): string[] };
+    }).renderResult;
+    const node = renderResult(
+      {
+        content: [{ type: "text", text: "Saved workflow script: deploy-wf" }],
+        details: { action: "save", name: "deploy-wf", ok: true, summary: "Script deploy-wf saved" },
+      },
+      { expanded: true },
+      renderTheme,
+    );
+    expect(renderText(node)).toContain("Saved workflow script: deploy-wf");
+  });
+
+  it("renderResult 折叠 + details 无 summary（历史 entry）→ 落回全文渲染（读写向后兼容）", () => {
+    const tool = captureScriptExecuteTool();
+    const renderResult = (tool as unknown as {
+      renderResult: (r: unknown, o: { expanded: boolean }, t: never) => { render(width: number): string[] };
+    }).renderResult;
+    const node = renderResult(
+      { content: [{ type: "text", text: "legacy full text" }], details: undefined },
+      { expanded: false },
+      renderTheme,
+    );
+    expect(renderText(node)).toContain("legacy full text");
   });
 });

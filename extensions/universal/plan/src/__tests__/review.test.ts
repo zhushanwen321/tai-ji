@@ -130,7 +130,12 @@ describe("register-doc（D10）", () => {
   it("registers a document with derived absPath and persists it", async () => {
     const { exec, pi } = setup(activeStateWithDocs());
     const res = await exec({ action: "register-doc", fileName: "impl-plan.md", sourceSkill: "dev-flow" });
-    expect(res.details).toEqual({ action: "register-doc", fileName: "impl-plan.md", version: 1 });
+    expect(res.details).toEqual({
+      action: "register-doc",
+      fileName: "impl-plan.md",
+      version: 1,
+      summary: "Plan doc registered: impl-plan.md",
+    });
     expect(pi.appendEntry).toHaveBeenCalledWith(
       "plan-state",
       expect.objectContaining({
@@ -148,7 +153,12 @@ describe("register-doc（D10）", () => {
     const { exec } = setup(activeStateWithDocs());
     await exec({ action: "register-doc", fileName: "design.md" });
     const res = await exec({ action: "register-doc", fileName: "design.md" });
-    expect(res.details).toEqual({ action: "register-doc", fileName: "design.md", version: 3 });
+    expect(res.details).toEqual({
+      action: "register-doc",
+      fileName: "design.md",
+      version: 3,
+      summary: "Plan doc registered: design.md",
+    });
   });
 
   it("throws when fileName is missing (programming error)", async () => {
@@ -224,7 +234,12 @@ describe("submit-review 宿主分流（TAIJI_AGENT_EXT_LOG）", () => {
     const res = await exec({ action: "submit-review", selfReview: SELF_REVIEW });
 
     expect(ctx.ui.select).not.toHaveBeenCalled();
-    expect(res.details).toEqual({ action: "submit-review", channel: "text", docsCount: 1 });
+    expect(res.details).toEqual({
+      action: "submit-review",
+      channel: "text",
+      docsCount: 1,
+      summary: "Plan submitted for review",
+    });
     expect(res.content[0].text).toContain("directly in the conversation");
     // E8 软门修订闭环：text result 就近携带与 formatReviewComments revise 对齐的指令
     expect(res.content[0].text).toContain("rewrite the file");
@@ -278,7 +293,12 @@ describe("submit-review 宿主分流（TAIJI_AGENT_EXT_LOG）", () => {
     const res = await exec({ action: "submit-review", selfReview: SELF_REVIEW });
 
     expect(ctx.ui.select).not.toHaveBeenCalled();
-    expect(res.details).toEqual({ action: "submit-review", channel: "text", docsCount: 1 });
+    expect(res.details).toEqual({
+      action: "submit-review",
+      channel: "text",
+      docsCount: 1,
+      summary: "Plan submitted for review",
+    });
     expect(res.content[0].text).toContain("directly in the conversation");
   });
 });
@@ -366,7 +386,12 @@ describe("重提交无变化检测（docs 快照指纹，E8 机制级兜底）",
     const res = await exec({ action: "submit-review", selfReview: SELF_REVIEW });
 
     expect(res.content[0].text).not.toContain("no documents changed");
-    expect(res.details).toEqual({ action: "submit-review", channel: "text", docsCount: 1 });
+    expect(res.details).toEqual({
+      action: "submit-review",
+      channel: "text",
+      docsCount: 1,
+      summary: "Plan submitted for review",
+    });
   });
 
   it("register-doc 后重提交：无警告且快照指纹随 version 更新落盘", async () => {
@@ -377,7 +402,12 @@ describe("重提交无变化检测（docs 快照指纹，E8 机制级兜底）",
     const res = await exec({ action: "submit-review", selfReview: "v2 self-review: all covered." });
 
     expect(res.content[0].text).not.toContain("no documents changed");
-    expect(res.details).toEqual({ action: "submit-review", channel: "text", docsCount: 1 });
+    expect(res.details).toEqual({
+      action: "submit-review",
+      channel: "text",
+      docsCount: 1,
+      summary: "Plan submitted for review",
+    });
     const lastEntry = persistedEntries(pi).at(-1)!;
     expect(lastEntry.lastSubmitReviewDocsFingerprint).toBe("design.md:2");
   });
@@ -394,7 +424,12 @@ describe("重提交无变化检测（docs 快照指纹，E8 机制级兜底）",
     );
     // 追加为末行（追加一行契约）
     expect(res.content[0].text.split("\n").at(-1)).toMatch(/^Note: no documents changed/);
-    expect(res.details).toEqual({ action: "submit-review", channel: "text", docsCount: 1 });
+    expect(res.details).toEqual({
+      action: "submit-review",
+      channel: "text",
+      docsCount: 1,
+      summary: "Plan submitted for review",
+    });
     // 重提交不改写快照基线：指纹仍是上次值（docs 确实没变）
     const lastEntry = persistedEntries(pi).at(-1)!;
     expect(lastEntry.lastSubmitReviewDocsFingerprint).toBe("design.md:1");
@@ -410,14 +445,24 @@ describe("重提交无变化检测（docs 快照指纹，E8 机制级兜底）",
 
     const first = await exec({ action: "submit-review", selfReview: SELF_REVIEW });
     expect(first.content[0].text).not.toContain("no documents changed");
-    expect(first.details).toEqual({ action: "submit-review", channel: "gui", docsCount: 1 });
+    expect(first.details).toEqual({
+      action: "submit-review",
+      channel: "gui",
+      docsCount: 1,
+      summary: "Plan review: user requested changes",
+    });
 
     // 未 register-doc 直接重调 submit-review → 警告
     const second = await exec({ action: "submit-review", selfReview: SELF_REVIEW });
     expect(second.content[0].text).toContain(
       "Note: no documents changed since the last submit-review",
     );
-    expect(second.details).toEqual({ action: "submit-review", channel: "gui", docsCount: 1 });
+    expect(second.details).toEqual({
+      action: "submit-review",
+      channel: "gui",
+      docsCount: 1,
+      summary: "Plan review: user requested changes",
+    });
   });
 });
 

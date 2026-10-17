@@ -13,13 +13,15 @@
  * 分离构造保证：reviewer 无改图能力（零工具）；主 agent 修复走 canvas_edit。
  */
 import { StringEnum } from "@earendil-works/pi-ai";
-import type { ExtensionAPI, ExtensionToolContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionToolContext, Theme } from "@earendil-works/pi-coding-agent";
 import { Type, type Static } from "typebox";
 import {
   isCanvasReviewAppendParams,
   isCanvasReviewResolveParams,
 } from "@zhushanwen/extension-protocol";
 
+import { renderCanvasToolResult } from "./render.js";
+import { canvasReviewSummary } from "./summary.js";
 import { callCanvas } from "./marker-channel.js";
 import { hostGateError, isTaijiGuiHost } from "./host.js";
 import {
@@ -97,6 +99,9 @@ export function registerCanvasReviewTool(
     description: cfg.description,
     promptSnippet: cfg.promptSnippet,
     parameters: cfg.parameters,
+    renderResult(result: unknown, options: { expanded: boolean }, theme: Theme) {
+      return renderCanvasToolResult(result, options, theme);
+    },
     async execute(
       _toolCallId: string,
       params: Static<typeof CanvasReviewParams>,
@@ -121,7 +126,10 @@ export function registerCanvasReviewTool(
           );
         }
         const reply = await callCanvas(ctx, "review-resolve", params.resolveParams);
-        return { content: [{ type: "text" as const, text: JSON.stringify(reply) }], details: undefined };
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify(reply) }],
+          details: { summary: canvasReviewSummary(params, reply) },
+        };
       }
       if (params.action === "append") {
         const appendParams = params.appendParams;
@@ -145,7 +153,10 @@ export function registerCanvasReviewTool(
           );
         }
         const reply = await callCanvas(ctx, "review-append", request);
-        return { content: [{ type: "text" as const, text: JSON.stringify(reply) }], details: undefined };
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify(reply) }],
+          details: { summary: canvasReviewSummary(params, reply) },
+        };
       }
       // action === "run"：编排链（review-request 留痕 → read 全量 → 派 reviewer → append 写回）
       if (!params.runParams) {
@@ -169,15 +180,18 @@ export function registerCanvasReviewTool(
       // 终态 + 停回说明（mutate 本身成功——合法终态转移而非校验失败），本轮没有开始，
       // 不得再派 reviewer。停回说明结构化可读（stopNote/recoverHint），不解析 summary 文本。
       if (readReply.review?.status === "max-rounds") {
-        const text = JSON.stringify({
+        const payload = {
           ok: true,
           canvasId: readReply.canvasId,
           stopped: true,
           status: readReply.review.status,
           stopNote: readReply.review.stopNote,
           recoverHint: readReply.review.recoverHint,
-        });
-        return { content: [{ type: "text" as const, text }], details: undefined };
+        };
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify(payload) }],
+          details: { summary: canvasReviewSummary(params, payload) },
+        };
       }
       const dispatcher = resolveReviewerDispatcher();
       const outcome = await runReviewRound({
@@ -195,7 +209,10 @@ export function registerCanvasReviewTool(
         dropped: outcome.dropped,
         summary: outcome.summary,
       });
-      return { content: [{ type: "text" as const, text }], details: undefined };
+      return {
+        content: [{ type: "text" as const, text }],
+        details: { summary: canvasReviewSummary(params, outcome) },
+      };
     },
   });
 }

@@ -1,12 +1,14 @@
-import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent'
+import type { ExtensionAPI, ExtensionContext, Theme } from '@earendil-works/pi-coding-agent'
 import { getAgentDir, SessionManager } from '@earendil-works/pi-coding-agent'
 import { StringEnum } from '@earendil-works/pi-ai'
 import { Type } from 'typebox'
 import { setPiHandle } from '@zhushanwen/pi-extension-logger'
 import type { SessionMetadataProvider } from './discovery/find.js'
+import { withResultSummary } from './summary.js'
 import { handleSessionRead, type SessionReadParams, type SessionReadSignals } from './tool-handler.js'
 import { createHashAutocompleteProvider } from './tui/hash-provider.js'
 import { createSessionCommand } from './tui/session-command.js'
+import { renderSessionReadResult } from './tui/tool-render.js'
 
 /**
  * pi-session-reader extension 入口（M3 工具适配层）。
@@ -232,7 +234,13 @@ export default function sessionReaderExtension(pi: ExtensionAPI): void {
       }
       // u11：标题元数据 provider 随信号包注入（provider 抛错由发现层单目录降级，
       // 不会变成工具错误——宿主 listAll 异常不得打断 find 的「能找到 session」底线）。
-      return handleSessionRead(params, signals, signal, metadataProvider)
+      const result = await handleSessionRead(params, signals, signal, metadataProvider)
+      // 收起态一行摘要：details 追加 summary（现有字段保留），GUI 收起态与 TUI 折叠态共用
+      return withResultSummary(params, result)
+    },
+
+    renderResult(result: unknown, options: { expanded: boolean }, theme: Theme) {
+      return renderSessionReadResult(result, options, theme)
     },
   })
 

@@ -251,6 +251,9 @@ importers:
       '@earendil-works/pi-coding-agent':
         specifier: 1.0.0
         version: 1.0.0(@aws-sdk/credential-provider-node@3.972.84)(@smithy/signature-v4@5.7.4)(ws@8.21.0)(zod@3.25.76)
+      '@earendil-works/pi-tui':
+        specifier: 1.0.0
+        version: 1.0.0
       '@zhushanwen/extension-protocol':
         specifier: workspace:*
         version: link:../../../packages/extension-protocol
@@ -373,6 +376,9 @@ importers:
       '@earendil-works/pi-coding-agent':
         specifier: 1.0.0
         version: 1.0.0(@aws-sdk/credential-provider-node@3.972.84)(@smithy/signature-v4@5.7.4)(ws@8.21.0)(zod@3.25.76)
+      '@earendil-works/pi-tui':
+        specifier: 1.0.0
+        version: 1.0.0
       '@zhushanwen/extension-protocol':
         specifier: workspace:*
         version: link:../../../packages/extension-protocol
@@ -463,6 +469,9 @@ importers:
       '@earendil-works/pi-coding-agent':
         specifier: 1.0.0
         version: 1.0.0(@aws-sdk/credential-provider-node@3.972.84)(@smithy/signature-v4@5.7.4)(ws@8.21.0)(zod@3.25.76)
+      '@earendil-works/pi-tui':
+        specifier: 1.0.0
+        version: 1.0.0
       '@zhushanwen/extension-protocol':
         specifier: workspace:*
         version: link:../../../packages/extension-protocol
@@ -581,6 +590,12 @@ importers:
       '@earendil-works/pi-coding-agent':
         specifier: 1.0.0
         version: 1.0.0(@aws-sdk/credential-provider-node@3.972.84)(@smithy/signature-v4@5.7.4)(ws@8.21.0)(zod@3.25.76)
+      '@earendil-works/pi-tui':
+        specifier: 1.0.0
+        version: 1.0.0
+      '@zhushanwen/extension-protocol':
+        specifier: workspace:*
+        version: link:../../../packages/extension-protocol
       '@zhushanwen/pi-ext-guards':
         specifier: workspace:*
         version: link:../../shared/ext-guards
@@ -649,6 +664,9 @@ importers:
       '@earendil-works/pi-coding-agent':
         specifier: 1.0.0
         version: 1.0.0(@aws-sdk/credential-provider-node@3.972.84)(@smithy/signature-v4@5.7.4)(ws@8.21.0)(zod@3.25.76)
+      '@earendil-works/pi-tui':
+        specifier: 1.0.0
+        version: 1.0.0
       '@zhushanwen/extension-protocol':
         specifier: workspace:*
         version: link:../../../packages/extension-protocol
@@ -689,6 +707,9 @@ importers:
       '@earendil-works/pi-tui':
         specifier: 1.0.0
         version: 1.0.0
+      '@zhushanwen/extension-protocol':
+        specifier: workspace:*
+        version: link:../../../packages/extension-protocol
       '@zhushanwen/pi-ext-guards':
         specifier: workspace:*
         version: link:../../shared/ext-guards
@@ -723,6 +744,12 @@ importers:
       '@earendil-works/pi-coding-agent':
         specifier: 1.0.0
         version: 1.0.0(@aws-sdk/credential-provider-node@3.972.84)(@smithy/signature-v4@5.7.4)(ws@8.21.0)(zod@3.25.76)
+      '@earendil-works/pi-tui':
+        specifier: 1.0.0
+        version: 1.0.0
+      '@zhushanwen/extension-protocol':
+        specifier: workspace:*
+        version: link:../../../packages/extension-protocol
       '@zhushanwen/pi-ext-guards':
         specifier: workspace:*
         version: link:../../shared/ext-guards
@@ -748,6 +775,12 @@ importers:
       '@earendil-works/pi-coding-agent':
         specifier: 1.0.0
         version: 1.0.0(@aws-sdk/credential-provider-node@3.972.84)(@smithy/signature-v4@5.7.4)(ws@8.21.0)(zod@3.25.76)
+      '@earendil-works/pi-tui':
+        specifier: 1.0.0
+        version: 1.0.0
+      '@zhushanwen/extension-protocol':
+        specifier: workspace:*
+        version: link:../../../packages/extension-protocol
       '@zhushanwen/pi-ext-guards':
         specifier: workspace:*
         version: link:../../shared/ext-guards

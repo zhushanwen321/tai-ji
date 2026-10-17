@@ -96,6 +96,20 @@
 - `details` 是 renderResult 的数据来源，不要依赖 content 文本解析
 - 错误处理采用 **throw 范式**（统一 throw 约定保持；与 pi@1.0.0 实装一致：`AgentToolResult` 已声明 `isError?: boolean`〔pi-agent-core `dist/types.d.ts:386`〕，`dist/agent-loop.js` `executePreparedToolCall` 正常返回按 `isError: result.isError === true` 尊重返回值标记〔`:579`〕、`execute` 抛出时由 pi 外层 catch 统一转 `isError: true` 的 error tool result〔`:581-588`〕，两版语义等价，不构成错误标成功通道）——**内部实现函数与 `execute` 直接 `throw`，不要 catch 后在返回值里带 `isError: true`**（统一 throw 纪律：单一错误路径，错误消息格式统一受控；catch 后返回与 throw 语义等价，禁止双轨混用）；先例：session-reader `handler-utils.ts` err() + `index.ts` execute 不 catch 原样传播。唯一纪律：错误消息用 `err.message`（不含堆栈），禁止把 `err.stack` 拼进 content（堆栈外泄到 LLM 上下文/持久化记录）；同时禁止 `{ content: [{ text: "错误: ..." }] }` 不带失败标记的**错误成功模式**（调用方无法区分成功与失败——throw 范式下由 pi 置 isError 保证）
 
+## Tool result details.summary 约定
+
+`execute` 返回的 `details` 可携带可选的 `summary: string` 字段——一行英文收起态摘要，描述动作 + 数量/目标（如 `Added 4 todos (#1-#4)`、`Plan completed`）。消费方两处，文本必须同源：
+
+1. **TUI**：`renderResult` 折叠分支（`options.expanded === false`）输出该 summary 一行（`new Text`，`theme.fg("dim")` / `theme.fg("muted")` 染色）；展开分支维持详细渲染不动。
+2. **GUI（taiji）**：ToolRow 收起态 header 优先显示 `details.summary`（`packages/ui/src/features/chat/ToolRow.vue` 的 `detailsSummary` computed）；无 summary 时回落 input 参数派生摘要（command/path/pattern/query/code），两者皆无只显工具名。
+
+规则：
+
+- summary 是纯文本单行（不含换行、不含 ANSI）；全量列表、路径详情等超长信息留展开态，不进 summary；
+- 推导单点：用纯函数 `buildXxxSummary(params, details)` 统一推导，`execute` 构造 details 时写入，`renderResult` 折叠分支只读同一字段——禁止渲染侧另写一份文案；
+- 历史 session 的旧 details 无 summary：读侧必须做 `typeof` 检查收窄，缺失时落回原全量渲染，不做数据迁移；
+- 边缘/失败出口（错误恢复、取消）可不携带 summary，header 只显工具名，恢复动作全文留展开区。
+
 ## TUI 渲染
 
 - `renderCall` 和 `renderResult` 返回 `new Text(string, 0, 0)`

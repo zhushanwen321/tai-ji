@@ -18,6 +18,7 @@ import { answerValueText } from "./submit-view";
 import {
 	type AnswerValue,
 	type AskUserDetails,
+	buildAskUserSummary,
 	HEADER_MAX_CHARS,
 	InputSchema,
 	type Option,
@@ -50,11 +51,17 @@ function disableAskUser(pi: ExtensionAPI): void {
 	pi.setActiveTools(pi.getActiveTools().filter((n: string) => n !== "ask_user"));
 }
 
-/** 构造 cancelled 结果（用户取消 / abort 共用；错误路径已改为 throw，不走此函数）。 */
+/** 构造 cancelled 结果（用户取消 / abort 共用；错误路径已改为 throw，不走此函数）。
+ *  cancelled 同样携带 summary——「问过了」是事实，GUI ToolRow 收起态照样可显示。 */
 function cancelledResult(questions: Question[], text: string): ExecuteResult {
 	return {
 		content: [{ type: "text" as const, text }],
-		details: { questions, answers: {}, cancelled: true } satisfies Result,
+		details: {
+			questions,
+			answers: {},
+			cancelled: true,
+			summary: buildAskUserSummary(questions),
+		} satisfies Result,
 	};
 }
 
@@ -329,7 +336,7 @@ Don't:
 			});
 			return {
 				content: [{ type: "text" as const, text: summary.join("\n") }],
-				details: result satisfies Result,
+				details: { ...result, summary: buildAskUserSummary(result.questions) } satisfies Result,
 			};
 		},
 
@@ -355,6 +362,11 @@ Don't:
 			const d = details as Result | undefined;
 			if (!d || d.cancelled) {
 				return new Text(theme.fg("warning", "Cancelled"), 0, 0);
+			}
+			// 折叠态 + 有 summary → 一行摘要（details.summary 约定，见 extension-conventions.md）；
+			// 旧 session details 无 summary → 落回原 Box 渲染（读写向后兼容）
+			if (options?.expanded === false && typeof d.summary === "string" && d.summary) {
+				return new Text(theme.fg("dim", d.summary), 0, 0);
 			}
 			const box = new Box(0, 0);
 			for (const q of d.questions) {

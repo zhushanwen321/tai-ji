@@ -5,9 +5,11 @@
  * reviewer prompt；ExecuteOptions 无 tools 通道，结构上无法授工具）；
  * 响应纪律「先 read 再动」的数据入口。
  */
-import type { ExtensionAPI, ExtensionToolContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionToolContext, Theme } from "@earendil-works/pi-coding-agent";
 import { Type, type Static } from "typebox";
 
+import { renderCanvasToolResult } from "./render.js";
+import { canvasReadSummary } from "./summary.js";
 import { callCanvas } from "./marker-channel.js";
 import { hostGateError, isTaijiGuiHost } from "./host.js";
 
@@ -29,6 +31,9 @@ export function registerCanvasReadTool(
     description: cfg.description,
     promptSnippet: cfg.promptSnippet,
     parameters: cfg.parameters,
+    renderResult(result: unknown, options: { expanded: boolean }, theme: Theme) {
+      return renderCanvasToolResult(result, options, theme);
+    },
     async execute(
       _toolCallId: string,
       params: Static<typeof CanvasReadParams>,
@@ -38,7 +43,10 @@ export function registerCanvasReadTool(
     ) {
       if (!isTaijiGuiHost(ctx)) throw hostGateError();
       const reply = await callCanvas(ctx, "read", { canvasId: params.canvasId, subtree: params.subtree });
-      return { content: [{ type: "text" as const, text: JSON.stringify(reply) }], details: undefined };
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify(reply) }],
+        details: { summary: canvasReadSummary(reply) },
+      };
     },
   });
 }
