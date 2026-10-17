@@ -8,6 +8,10 @@
  *    字面量均在此红）；
  * 2. D7 降级：底层依赖抛错 → 不向调用方上抛（启动不中断）+ warn 留痕含恢复语义；
  * 3. 摘要日志三态：written（条目数 + 落盘路径）/ skipped-empty（删旧副本回落真实文件）。
+ * 4. transport 装配契约（ADR-0138 write-through）：RuntimeServer.setServices 可选服务
+ *    zcodeProviderMirrorSync 的注入分支（assignServices 解构 + providerHandler ctx 三元）
+ *    ——注入后 mutation 类 config.* 消息处理成功恰触发一次；缺省 undefined 不调用不炸。
+ *    handler 侧 mirrorAfterMutation 触发链细则见 src/transport/provider-message-handler-mirror.test.ts。
  *
  * fixture 经 mkdtempSync 自建（os.tmpdir()），零接触真实 ~/.zcode / ~/.taiji / ~/.pi。
  *
@@ -16,11 +20,18 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { WebSocket } from 'ws'
 import { getDataDir } from '@taiji/shared/paths'
+import type { ClientMessage } from '@taiji/shared'
 import { ZCODE_PI_SYNCED_PROVIDER_CONFIG_SEGMENTS } from '@zhushanwen/subagent-engine-sdk'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ModelsConfigView, ProviderConfigView } from '../../infra/pi/pi-provider-store.js'
 import type { ResolvedProviderCredential } from '../../services/ports/provider-credential-resolver.js'
+import type { IConfigService, IModelService, ISessionService } from '../../interfaces.js'
+import type { IModelConnectionTester } from '../../services/ports/model-connection-tester.js'
+import type { IProviderCredentialResolver } from '../../services/ports/provider-credential-resolver.js'
+import type { SkillRegistry } from '../../services/skill-registry.js'
+import { RuntimeServer } from '../../transport/server.js'
 import {
   defaultZcodeProviderSyncPaths,
   runZcodeProviderStartupSync,
@@ -166,5 +177,88 @@ describe('runZcodeProviderStartupSync 摘要日志', () => {
     expect(result.kind === 'completed' && result.outcome.status).toBe('skipped-empty')
     expect(infos.some(w => w.includes('无 pi 映射条目') && w.includes('回落真实 zcode 配置'))).toBe(true)
     expect(() => readFileSync(paths.syncedCopyPath, 'utf-8')).toThrow()
+  })
+})
+
+// ── transport 装配契约：RuntimeServer zcodeProviderMirrorSync 注入分支 ─────────
+
+describe('RuntimeServer zcodeProviderMirrorSync 注入（transport 装配契约）', () => {
+  /** 最小 mock services（server-error-envelope.test.ts makeMockServices 同款形态 + provider mutation 所需 stub）。 */
+  function makeServerServices() {
+    const sessionService = {
+      listPersistedSessions: vi.fn().mockReturnValue([]),
+      getRpcClient: vi.fn().mockReturnValue(undefined),
+      setOnSessionDestroyed: vi.fn(),
+      setOnPlanAborted: vi.fn(),
+      restoreSession: vi.fn(),
+      create: vi.fn(),
+    } as unknown as ISessionService
+    const configService = {
+      listProviders: vi.fn().mockReturnValue([]),
+      getScopedModels: vi.fn().mockReturnValue([]),
+      isModelsStoreCorrupted: vi.fn().mockReturnValue(false),
+      getDefaultModel: vi.fn().mockReturnValue(null),
+      setProvider: vi.fn(async () => ({ newDefault: undefined, quotaAutoEnabled: false })),
+    } as unknown as IConfigService
+    const modelService = {
+      attachSupportedLevels: vi.fn((providers: unknown[]) => providers),
+      aggregateModelsWithScoped: vi.fn().mockReturnValue([]),
+    } as unknown as IModelService
+    return { sessionService, configService, modelService }
+  }
+
+  function makeWs() {
+    return {
+      readyState: WebSocket.OPEN,
+      send: vi.fn(),
+      close: vi.fn(),
+    } as unknown as WebSocket
+  }
+
+  function handleMessageOf(server: RuntimeServer) {
+    return (server as unknown as {
+      handleMessage(msg: ClientMessage, ws: WebSocket): Promise<void>
+    }).handleMessage.bind(server)
+  }
+
+  function setProviderMsg(): ClientMessage {
+    return { type: 'config.setProvider', id: 'req-1', payload: { providerId: 'stepfun', name: 'StepFun' } } as unknown as ClientMessage
+  }
+
+  it('注入后 config.setProvider 处理成功 → 镜像同步恰被调用一次 + reply 照常（真分支接线）', async () => {
+    const { sessionService, configService, modelService } = makeServerServices()
+    const mirrorSync = vi.fn(async () => {})
+    const server = new RuntimeServer(0, '/mock-project-root', 'token')
+    server.setServices(sessionService, configService, modelService, {
+      skillRegistry: {} as SkillRegistry,
+      providerCredentialResolver: {} as IProviderCredentialResolver,
+      connectionTester: {} as IModelConnectionTester,
+      zcodeProviderMirrorSync: mirrorSync,
+    })
+    const ws = makeWs()
+
+    await handleMessageOf(server)(setProviderMsg(), ws)
+
+    expect(mirrorSync).toHaveBeenCalledTimes(1)
+    const sent = JSON.parse(vi.mocked(ws.send).mock.calls[0][0] as string) as { type: string; payload: { providerId: string } }
+    expect(sent.type).toBe('config.providerUpdated')
+    expect(sent.payload.providerId).toBe('stepfun')
+  })
+
+  it('缺省未注入（undefined，存量测试装配形态）→ mutation 照常应答、无镜像调用（假分支不炸）', async () => {
+    const { sessionService, configService, modelService } = makeServerServices()
+    const server = new RuntimeServer(0, '/mock-project-root', 'token')
+    server.setServices(sessionService, configService, modelService, {
+      skillRegistry: {} as SkillRegistry,
+      providerCredentialResolver: {} as IProviderCredentialResolver,
+      connectionTester: {} as IModelConnectionTester,
+    })
+    const ws = makeWs()
+
+    await handleMessageOf(server)(setProviderMsg(), ws)
+
+    const sent = JSON.parse(vi.mocked(ws.send).mock.calls[0][0] as string) as { type: string; payload: { providerId: string } }
+    expect(sent.type).toBe('config.providerUpdated')
+    expect(sent.payload.providerId).toBe('stepfun')
   })
 })
