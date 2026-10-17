@@ -1616,9 +1616,10 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
     // = 旧单 fixer 行为退化）。活跃条目为 0（聚合数据不一致的罕见路径）时归一组空清单。
     const fixGroups = reconcileGroups(agg.groups, activeEntriesForFix);
     if (fixGroups.length === 0) {
-      // 全 clean 轮不会走到 fix（all-clean/A4 break 拦截）；活跃为 0 但 suggestion>0
-      // 且 aggregator 未给 suggestion_ids 的旧格式数据走此路径——派单个 fixer 读报告，
-      // 但该轮 suggestion 无台账（无 id / 无覆盖校验），已在上方 WARN 标记数据缺陷。
+      // 全 clean 轮不会走到 fix（all-clean/A4 break 拦截）；活跃为 0 但 mustFix>0
+      // 且 aggregator 未给 must_fix_ids（schema 可选字段）的旧格式数据走此路径——派单个
+      // fixer 读报告；该轮 must-fix 无条目级 id，ES3 无法逐条覆盖校验。suggestion>0
+      // 无 suggestion_ids 已在聚合入口 fail-fast（aggregator-failure），不会到这里。
       fixGroups.push({ id: "G1", issueIds: [], files: [], note: "no active ledger entries (aggregator returned no issue ids)" });
     }
     log("Fix: " + fixGroups.length + " group(s) — " + fixGroups.map((g) => g.id + "(" + g.issueIds.length + ")").join(", "));
