@@ -3,7 +3,7 @@
     "name": "taiji e2e 资产登记表（SSOT）",
     "description": "全部 e2e 资产与其触发面的机器可读登记：「改了哪个域 → 跑哪些 e2e」的对账依据。summary 仅导航；资产内容与执行口径的权威源是 authority 指向的文档与 asset 本体。收录以磁盘实际为准（脚本/目录改名或增删时同 commit 更新本表）。",
     "fields": {
-      "id": "E2E-<域>-<两位序号>，域取现有测试域：ELECTRON（electron-smoke P0 子集）/ VISUAL（像素 diff）/ MOCK（行为轨 mock 全量）/ REAL（真实 app 启动轨）/ EQUIV（等价性双轨）/ MODELS（models.json sanitize 真机轨）/ RENAME（rename-session e2e）/ SCHED（scheduler 真实环境实测）/ BATCH（subagents 批量编排真机链）/ SKILLRELOAD（skill-reload 演化轨残留：断连恢复等真实 app 轨，原 reload 非破坏轨已随编排退役删除）/ BTW（btw 旁路提问双进程并发不变量真实进程轨） / ZCODE（zcode 引擎会话库域）/ PROP（集成线传播检查）/ MODELREF（extensions 资产模型引用漂移检查）/ RECORD（record 持久化写面唯一入口检查）/ THIRDHOST（subagent-core 第三宿主 barrel 契约探针）/ PIPE（工程门与检查脚本轨：review-pipeline 质量门脚本、pre-commit 检查检测单测、思考档位差分探针、select-affected-e2e 对账脚本、npm 发布面一致性检查）/ RESUME（workflow run 断点续跑场景族：resume/record 链路确定性场景 + 真机门段拆分）/ SESSMGR（session-manager 域：cw 剧本族 mock 探针轨 + 真 pi 全链路真机冒烟轨 + managed session 死亡通知真机轨） / REMOTE（远程访问域：手机浏览器 LAN 直连真机/仿真验收） / TERMINAL（终端多实例真实 app 轨：切换条多实例 / 实例级生命周期 / 编号不复用 / 世代重置与对账） / MCP（MCP 服务器管理域真机子集） / BTASK（bash 后台任务域：完成通知入账全链真机轨） / DELIVERY（统一消息投递域：文本车道磁盘 outbox 崩溃恢复，mock 单测轨 + kill -9 runtime 真进程轨双层口径）",
+      "id": "E2E-<域>-<两位序号>，域取现有测试域：ELECTRON（electron-smoke P0 子集）/ VISUAL（像素 diff）/ MOCK（行为轨 mock 全量）/ REAL（真实 app 启动轨）/ EQUIV（等价性双轨）/ MODELS（models.json sanitize 真机轨）/ RENAME（rename-session e2e）/ SCHED（scheduler 真实环境实测）/ BATCH（subagents 批量编排真机链）/ SKILLRELOAD（skill-reload 演化轨残留：断连恢复等真实 app 轨，原 reload 非破坏轨已随编排退役删除）/ BTW（btw 旁路提问双进程并发不变量真实进程轨） / ZCODE（zcode 引擎会话库域）/ PROP（集成线传播检查）/ MODELREF（extensions 资产模型引用漂移检查）/ RECORD（record 持久化写面唯一入口检查）/ THIRDHOST（subagent-core 第三宿主 barrel 契约探针）/ PIPE（工程门与检查脚本轨：review-pipeline 质量门脚本、pre-commit 检查检测单测、思考档位差分探针、select-affected-e2e 对账脚本、npm 发布面一致性检查）/ RESUME（workflow run 断点续跑场景族：resume/record 链路确定性场景 + 真机门段拆分）/ SESSMGR（session-manager 域：cw 剧本族 mock 探针轨 + 真 pi 全链路真机冒烟轨 + managed session 死亡通知真机轨） / REMOTE（远程访问域：手机浏览器 LAN 直连真机/仿真验收） / TERMINAL（终端多实例真实 app 轨：切换条多实例 / 实例级生命周期 / 编号不复用 / 世代重置与对账） / MCP（MCP 服务器管理域真机子集） / BTASK（bash 后台任务域：完成通知入账全链真机轨） / DELIVERY（统一消息投递域：文本车道磁盘 outbox 崩溃恢复，mock 单测轨 + kill -9 runtime 真进程轨双层口径；真机 collect 挂起收取链）",
       "summary": "一句话摘要（仅导航）",
       "scope": "代码 glob 数组（触发面）。只支持两种形态：<prefix>/** 前缀通配与精确路径（与 scripts/select-constraints.mjs 同款零依赖匹配语义：prefix/** → startsWith，精确路径 → 全等）",
       "layer": "L1 = 零 token mock/smoke（CI 固定环节）| L2 = 真实进程非真实 LLM（真实 app/pi 进程、mock 构建或 mock 数据）| L2.5 = faux（真实进程 + faux LLM 演员，凭证无关零 token）| L3 = 真实 LLM",
@@ -2390,6 +2390,57 @@
       "owner": "packages/runtime",
       "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
       "note": "R2 态（统一投递波 4 / A13 依赖此登记）：真 pi + 真 runtime 进程——kill -9 runtime（pi 存活）→ 重启 → runStartupReattach 恢复链（reattach-delivery-trigger 包装 → reconcile('pi-restored') → outbox 重放）→ 断言未送达消息重新入队、已送达消息不重投（transcript 裸标记判重）；与 E2E-DELIVERY-01 mock 轨构成双层口径（设计 §6 波 4 增补）。A13 验收已执行（runlog = .tmp/dev-flow/unified-delivery.accept/a13-crash-recovery-and-regression/：截图 s0-s10 与 summary.jsonl——.tmp 易失，验收时点证据；观察项 = respawn 后旧 session 队列区派生视图失效，登记 docs/todo/unified-delivery-residuals.md #3）。assets 以被验能力本体登记（真机脚本未落建——validate 强校验 asset 磁盘存在，落建后同 commit 回填 run 与 spec asset，先例 E2E-BTASK-01）。执行口径：空载串行（AGENTS.md e2e 执行准则），真机执行归 u5b committed 后（impl-plan A13/A15 同轮）"
+    },
+    {
+      "id": "E2E-DELIVERY-03",
+      "summary": "真机 collect 链路验收 S1-S9（核心收取/超时恢复 push/已完成快照/kill -9 崩溃恢复/并发串行/abort/push 管线态/managed 合批/非 bash 域收取）——执行归 D3 collect 验收节点",
+      "scope": [
+        "extensions/shared/delivery-port/src/**",
+        "extensions/universal/pending-notifications/src/**",
+        "extensions/universal/base-tool-enhance/src/background/notify.ts",
+        "extensions/universal/base-tool-enhance/src/background/pending-reconcile.ts",
+        "packages/subagent-core/src/execution/notify/**",
+        "extensions/universal/subagent-workflow/src/workflow-notify.ts",
+        "extensions/universal/session-manager/src/notify-delivery.ts",
+        "extensions/universal/session-manager/src/watch-coordinator.ts"
+      ],
+      "layer": "L3",
+      "assets": [
+        {
+          "kind": "harness",
+          "ref": "extensions/shared/delivery-port/src/delivery-port.ts"
+        },
+        {
+          "kind": "harness",
+          "ref": "extensions/universal/pending-notifications/src/index.ts"
+        },
+        {
+          "kind": "harness",
+          "ref": "extensions/universal/base-tool-enhance/src/background/notify.ts"
+        },
+        {
+          "kind": "harness",
+          "ref": "extensions/universal/base-tool-enhance/src/background/pending-reconcile.ts"
+        },
+        {
+          "kind": "harness",
+          "ref": "packages/subagent-core/src/execution/notify/notifier.ts"
+        },
+        {
+          "kind": "harness",
+          "ref": "extensions/universal/subagent-workflow/src/workflow-notify.ts"
+        },
+        {
+          "kind": "harness",
+          "ref": "extensions/universal/session-manager/src/notify-delivery.ts"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": true,
+      "run": "（D3 collect 验收节点执行 S1-S9：真机 pi + 真实后台任务（S8 需 taiji runtime managed 环境），开发期按改动范围空载串行；真机脚本未落建——能力本体锚登记态，脚本落建后同 commit 回填 run 与 spec asset，先例 E2E-BTASK-01）",
+      "owner": "extensions/shared/delivery-port",
+      "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
+      "note": "R2 态（来源设计 result-collect §4 e2e 影响面评估表「新增真机 collect 链路 rule」行；设计档案在 .tmp 不入库，authority 回退 TEST-STRATEGY 三态锚点，E2E-RESUME-01 同款先例）。触发条件（必填）：改挂起/收取端口（delivery-port src）、collect_results 工具（pending-notifications src）或四生产方 collectKey 申报链（bash notify + pending-reconcile 对账补投 / subagent notifier 世代首个通知 / workflow workflow-notify runId / managed notify-delivery 批键集 + watch-coordinator lifetime 债权注册）任一时，S1-S9 由 D3 collect 验收节点执行（inspect 形态，场景-验收项对账 = impl-plan acceptancePlan A1-A9；空载串行跨套件不并发——AGENTS.md e2e 执行准则）。场景面：S1 核心收取（含 reload 反向防线）/ S2 超时恢复 push / S3 已完成快照 / S4 kill -9 崩溃恢复（差集重放零丢失）/ S5 并发 collect 串行 / S6 abort 正常返回 / S7 push 管线态 / S8 managed 合批收取 / S9 非 bash 域收取（subagent 首轮 + workflow runId）。中断形态族（session 替换/重放作用域/dispose 在途等待器 warn/终局写失败降级）无真机场景，由端口 handle 级单测承载（A10，归 u-p-port）；工具面单测（lifetime 排除/跨 session 残留反向/errors 组装/第四态返回形态）归 u-p-tool（A11）——两者 L1 单测不占本轨。assets 以被验能力本体登记（真机脚本未落建——validate 强校验 asset 磁盘存在，落建后同 commit 回填，先例 E2E-BTASK-01）。与既有 rule 重叠口径：BTASK-01 / SESSMGR-03 / BATCH-06 等既有触发面各自的既有断言面不变，本 rule 只补 collect 挂起收取面（多 rule 命中同一 diff 时按各自 run 执行）。"
     }
   ]
 }
