@@ -32,6 +32,9 @@ export {
 } from "./journal.ts";
 
 export type {
+  CollectSnapshot,
+  CollectSnapshotEntry,
+  CollectedEntry,
   DeliveryDeliverOptions,
   DeliveryDeliverResult,
   DeliveryEnvelope,

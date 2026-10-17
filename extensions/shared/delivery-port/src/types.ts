@@ -16,6 +16,7 @@
 // 的 extensions 侧同位形态）；内核包零 pi 词汇的纪律由 session-delivery 自守。
 
 import type { CustomPayload, DeliveryFailurePolicy } from "@zhushanwen/session-delivery";
+import type { MappedPendingStatus } from "@zhushanwen/extension-protocol";
 
 // ─── envelope ───────────────────────────────────────────────
 
@@ -40,11 +41,6 @@ export interface DeliveryEnvelope { // oe-exempt:20261017:framework:统一投递
   timing?: DeliveryTiming;
   /** 幂等键（提交方提供即参与判重：notifyId / taskId 等）。缺省内部生成。 */
   id?: string;
-  /**
-   * port 端点暂不透传 meta（通知域无消费方）；承载随 phase 2 collect 立项实装——
-   * 内核 msg.meta 透传链已就绪（persistRecord / callOnSettled）。
-   */
-  meta?: Record<string, unknown>;
 }
 
 /** deliver 提交选项（缺省值表 §3.4：通知域 = steer + retain + 合批 + details-id）。 */
@@ -64,6 +60,13 @@ export interface DeliveryDeliverOptions { // oe-exempt:20261017:framework:统一
    * 重投（通知域安全侧——多留账不丢不重）。
    */
   onFailure?: DeliveryFailurePolicy;
+  /**
+   * 收取关联键（result-collect 设计 §3.1①）：生产方申报的债权键集合——单债权条目 =
+   * 其 pending:register 的 id（单元素）；managed 合批条目 = 批内全部债权键。端口层
+   * 在提交编排时读取用于挂起判定（键集 ∩ 在途等待集 ≠ ∅ → 挂起缓冲），不进投递
+   * 内核——内核对 collect 零感知。
+   */
+  collectKey?: string[];
 }
 
 /**
@@ -75,6 +78,48 @@ export type DeliveryDeliverResult =
   | { kind: "accepted"; id: string }
   | { kind: "swallowed"; reason: "already-seen" | "duplicate-content" }
   | { kind: "rejected"; reason: string };
+
+// ─── collect 面（批量收取；result-collect 设计 §3.1②③）──────
+
+/**
+ * 收取条目（collect 面返回给等待器的单条结果；字段来源设计 §3.1③ 字段来源表）：
+ * id = 收取展开键（单债权条目 = 生产方申报的操作 id；managed 合批条目逐键展开，
+ * 每键一条、载荷共享）；type = pending:register 的 PendingType 词表
+ * （workflow/subagent/bash/session）；outcome 与 pending:unregister 的 status 词表
+ * 对齐（protocol mapReasonToStatus 单一权威点，不建第三套终态词表）；
+ * content/details = 通知载荷原样；note 标记特殊态说明（如 managed 域「注销无条目
+ * 分支完结，无独立载荷快照」）。
+ */
+export interface CollectedEntry { // oe-exempt:20261017:framework:collect 批量收取对外契约（收取条目形态）
+  id: string;
+  type?: string;
+  outcome?: MappedPendingStatus;
+  content?: string;
+  details?: unknown;
+  note?: string;
+}
+
+/**
+ * collectArm 快照的单键定态（四态判据，设计 §3.1②）：
+ * - ready：键 ∈ 某日志条目键集且该条目已有终局记录（delivered ∪ collected ∪
+ *   discarded）→ 可快照收取；
+ * - in-push-pipeline：键 ∈ 某日志条目键集、条目无终局（已过分流点，在 push 管线
+ *   排队待注入）→ 不收取不等待；
+ * - unregistered-no-entry：键曾注册且已注销、不属任何日志条目键集 → 按 unregister
+ *   的 status 定 outcome 进 collected（无载荷快照形态）；
+ * - waiting：活跃且无日志条目 → 登记等待，后续 deliver 命中等待集被挂起。
+ *
+ * entry 仅 ready / unregistered-no-entry 在册（载荷与终态信息；字段命名对齐
+ * §3.1③ 字段来源表，与 CollectedEntry 同构、缺 id——id 即本条目的键）。
+ */
+export interface CollectSnapshotEntry { // oe-exempt:20261017:framework:collect 批量收取对外契约（快照单键定态）
+  id: string;
+  state: "ready" | "in-push-pipeline" | "unregistered-no-entry" | "waiting";
+  entry?: Omit<CollectedEntry, "id">;
+}
+
+/** collectArm 同步段定态快照：每 key 一条（与入参 keys 对应）。 */
+export type CollectSnapshot = CollectSnapshotEntry[];
 
 // ─── 诊断 ───────────────────────────────────────────────────
 
@@ -173,4 +218,39 @@ export interface DeliveryPortHandle { // oe-exempt:20261017:framework:进程级�
   flush(): void;
   /** 销毁：清窗口 timer + 内核 dispose + 退订全部事件订阅 + 摘进程级槽绑定。 */
   dispose(): void;
+  /**
+   * collect 面（result-collect 设计 §3.1② 端口挂起面，方法语义以该节为准）。
+   * collectArm：同步段登记在途等待集 + 对每个 key 按四态判据定态（快照形态
+   * CollectSnapshotEntry）。
+   */
+  collectArm(keys: string[]): CollectSnapshot;
+  /** 取走已到达的挂起条目（载荷 + 终态），写 collected 终局（收取过的条目不可再投递）。 */
+  consume(): CollectedEntry[];
+  /** 解散等待集；未收挂起条目直通内核 flush（跳过 60s 合批窗口，恢复 push）。 */
+  collectRelease(): void;
+  /** 挂起条目到达回调订阅（事件驱动唤醒等待器，无轮询）；返回退订函数。 */
+  onCollectArrival(cb: () => void): () => void;
 }
+
+/**
+ * collect 面最小 stub（u-foundation 契约先行占位；实装由 u-p-port 在
+ * delivery-port.ts 的 handle 构造处以挂起面实装替换——stub 仅保契约先行期编译与
+ * 存量测试绿，调用即抛错（不吞不假装成功））。
+ */
+export const deliveryCollectStubs: Pick<
+  DeliveryPortHandle,
+  "collectArm" | "consume" | "collectRelease" | "onCollectArrival"
+> = {
+  collectArm: () => {
+    throw new Error("not implemented: u-p-port");
+  },
+  consume: () => {
+    throw new Error("not implemented: u-p-port");
+  },
+  collectRelease: () => {
+    throw new Error("not implemented: u-p-port");
+  },
+  onCollectArrival: () => {
+    throw new Error("not implemented: u-p-port");
+  },
+};

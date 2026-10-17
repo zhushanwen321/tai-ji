@@ -80,6 +80,7 @@ import type {
   DeliveryPortMetrics,
   DeliveryTiming,
 } from "./types.ts";
+import { deliveryCollectStubs } from "./types.ts";
 
 /** 提交侧合批窗口（账本 MERGE_WINDOW_MS=60s 现状保持，设计 §3.7 合批行）。 */
 const MERGE_WINDOW_MS = 60_000;
@@ -576,7 +577,16 @@ export function createDeliveryPort(host: DeliveryPortHost): DeliveryPortHandle {
     return `dp-${Date.now().toString(36)}-${idSeq}`;
   }
 
-  const handle: DeliveryPortHandle = { deliver, recover, metrics, flush, dispose };
+  // collect 面 = deliveryCollectStubs（u-foundation 契约先行占位，调用即抛错；
+  // u-p-port 以挂起面实装替换——collectArm/consume/collectRelease/onCollectArrival）。
+  const handle: DeliveryPortHandle = {
+    deliver,
+    recover,
+    metrics,
+    flush,
+    dispose,
+    ...deliveryCollectStubs,
+  };
   return handle;
 }
 
