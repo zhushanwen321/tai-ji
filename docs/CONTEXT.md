@@ -668,9 +668,12 @@ taiji 的 assistant 回复朗读能力（ai-voice-tts 设计，P2 辅助功能�
 
 ## 画布域（Problem-Solve Canvas）
 
-tech-design-wf 之前的方向规划层：一张人机共编的分层论证图画布——agent 经结构化工具生长（growth），用户在 overlay 画布上裁决（选定 / 否决 / 评论 / 改判据）并回推 agent 响应，反向对抗式审查迭代到 must-fix（必修项）清零即规划收敛，收敛后的执行叶子经需求卡（requirement card）派发给 tech-design-wf。领域结构（两聚合 + 不变量 + 状态机）的登记 SSOT = [domain-model.md](domain-model.md)；本节承载统一语言词条。状态权威 = runtime CanvasService 唯一入口 `mutate`，跨 session 持久落盘 `<dataDir>/canvases/<canvasId>/`。
+tech-design-wf 之前的方向规划层：一张人机共编的分层论证图画布——agent 经结构化工具生长（growth），用户在 overlay 画布上裁决（选定 / 否决 / 评论 / 改判据）并回推 agent 响应，反向对抗式审查迭代到 must-fix（必修项）清零即规划收敛，收敛后的执行叶子经需求卡（requirement card）派发给 tech-design-wf。领域结构（两聚合 + 不变量 + 状态机）的登记 SSOT = [domain-model.md](domain-model.md)；本节承载统一语言词条。状态权威 = runtime CanvasService 唯一入口 `mutate`，画布按归属落盘 session 存储树域 8：`<dataDir>/ext-sessions/<ownerSessionId>/canvases/<canvasId>/`（归属定义见下「归属 session」词条）。
 
 **代码映射**: 领域核心 `packages/runtime/src/services/canvas/`（聚合根 + 不变量 + 落盘 + 重建）；契约（action 词表 / actor 权限矩阵 / marker）`packages/extension-protocol/src/extensions/canvas/`；agent 工具面 `extensions/taiji/canvas/`（6 工具全 deferred）；GUI `packages/renderer/src/stores/canvas.ts` + `packages/renderer/src/components/canvas/`；wire 登记 `packages/shared/src/protocol.ts`（`canvas.updated` 等）。
+
+### 归属 session（owner session）
+画布与 session 的归属关系：一张画布恒归属创建它的 session（`ownerSessionId` 字段），归属即路径——画布落盘在归属 session 的存储树内（`<dataDir>/ext-sessions/<ownerSessionId>/canvases/<canvasId>/`），一个 session 可有多个画布（1:N）。画布的创建与访问都校验归属：GUI 清单与 agent 工具面 canvas_list 按归属过滤，跨会话访问返回 `forbidden` 结构化拒绝；session 删除级联删除其全部画布（随整树回收）。领域规则 SSOT = [domain-model.md](domain-model.md) 画布域不变量 12，决策登记 [ADR-0141](adr/decisions.md) 条目 3。**Avoid**: 不叫「所属会话」「拥有者」。
 
 ### 画布（canvas）
 承载一个问题域完整规划的聚合根：一张图 + 配置 + 历史。**Avoid**: 不叫「白板」「文档」。
