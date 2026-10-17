@@ -735,3 +735,16 @@ WorkflowTab 步骤列表的数据源绑定从「workflow-record 全量快照（6
 **依据**：用户裁决原文「派发期翻译是对的。account:bigmodel-individual-coding-plan/* 这个等同于 pi 中 zai-coding-cn，其他的都是 1:1 完全原样映射」——pi 词汇 id（zai-coding-cn）与 zcode 词汇（account:/builtin: 家族）各归其位。ADR-0132 关联条目在 zcode 造 pi 词汇 id 且 name 借用用户 plan 名（身份与名字脱节）、key 来源修订使 zcode GLM 流量凭据随 taiji 改动联动，均与用户心智模型冲突（本机实证：engineDefaults 存 `zai-coding-plan/GLM-5.3-Flash` 压掉 zcode 自身 model.main）。
 
 **登记**：实装 = `packages/zcode-subagent-cli/src/preparer.ts`（`translatePiModelRefToZcode` 翻译单源 + `resolveZcodeModelRef` account 分支前置）+ `zcode-engine.ts`（Port 成员实装）/ `packages/subagent-core/src/execution/engine/model-ref-translation.ts`（派发层共享编排，chat/workflow 两解析点同语义）+ `port.ts`/`registry.ts`（EnginePort.translateModelRef 可选成员）/ `packages/runtime/src/services/zcode-provider-sync.ts`（翻译通道 skip + derive account 段）；ADR-0132 文本保留作历史记录，冲突处以本条为准。
+
+### ADR-0138 result-collect 批量收取：collectKey 类型化提交选项（取代附录 C② meta 预留）+ 端口层挂起分流 + collected 终局枚举 + timeout 缺省 3_600_000（2026-10-17 交付，result-collect phase 2 设计定版）
+
+**决策**：agent 经 `collect_results` 工具一次阻塞等待、批量收取并行后台任务（bash/subagent/workflow/managed）终态；被收取的通知不再注入对话流。四项架构裁决：
+
+1. **collectKey 走类型化提交选项，`DeliveryEnvelope.meta` 删除**——取代 phase 1 统一投递附录 C② 预留的「关联 = meta.collectKey（envelope additive meta 透传，内核零读取）；meta 的 port 端点承载随 collect 立项实装」口径（显式推翻）：meta 是「内核零读取」的无名透传位，而 collectKey 恰恰要被端口层读取消费，无名透传会把消费关系藏进签名之外；类型化选项 `DeliveryDeliverOptions.collectKey: string[]` 把「谁读它」构造性写进签名。改道后 meta 预期消费方清零（全仓 grep 六处申报落点均不带 meta），零调用方预留通道删除——真出现第二个附带数据消费方时再按其真实形态建通道。内核 msg.meta 透传链退役评估另登记 docs/todo（runtime 车道 notify-once D2 仍活跃，不随删）。
+2. **挂起分流在端口层、不进投递内核**——deliver 入口按「collectKey 键集 ∩ 在途等待集」分流命中即挂起（纯内存缓冲）；内核是跨车道共享组件（runtime 文本车道 + pi 车道），collect 是 pi 车道消费语义，进内核 = 通用组件承载特定消费方语义。挂起不独立持久化（投递日志即耐久层，受理前落盘），崩溃恢复走既有差集重放按 push 重投，零丢失由日志层构造性保证。
+3. **ack outcome 词表扩 `collected` 新枚举值**——不复用 `delivered`：语义不同（delivered = 注入对话流；collected = 随工具结果到达），复用会让「对话流里该有一条通知」的推断失效（排查误判源）；outcome 词表既有 discarded 先例。
+4. **collect_results timeout 缺省 3_600_000（小时级）**——对「超时默认原则」（AGENTS.md 规则 19：任务级缺省不限时）的显式偏离：① collect 超时不是墙钟判死——超时返回是等待器诚实返回（任务不受影响、stillOpen 列出、恢复 push、可续 collect），不在规则 19 反对的「执行体自作主张杀任务」语义域；② 缺省必须有限：等待原语的孤儿形态（无到达边沿）+ 不限时缺省 = agent 永久挂死无信号，违反事实驱动「失败显式上报」；③ 量级按被保护对象校准——collect 等待一批任务级对象（长任务常超 10 分钟），按规则 19 对任务级兜底的小时级量级取 3_600_000，显式 timeout_ms 可调紧。
+
+**依据**：phase 1 附录 C 自述「collect 设计时复评以上四点」预期内的复评结论——meta 无名透传与「端口层读取消费」的冲突是结构性证据；三候选方案（A 端口挂起区 + 提交选项 / B 工具轮询 + 抑制渲染 / C 复活旧中枢）中 B 被 append-only 契约与时间平抑红线双击穿、C 与 phase 1 收敛方向对冲（方案对比否决记录见设计档案）。
+
+**登记**：实装 = `extensions/shared/delivery-port/src/types.ts`（collectKey 选项 + handle collect 面 API 类型 + meta 删除，commit e2e4d7f04）+ `delivery-port.ts`/`journal.ts`（挂起分流/四态快照/collected 终局/键集落盘，commit abc9168ea）+ `extensions/universal/pending-notifications/src/index.ts`（collect_results 工具，commit 9b5277e78）+ 四生产方申报链（commit d29c93a81）；设计档案 `.tmp/tech-design/result-collect.md`（不入库），本条即该四项决策的现行登记处；docs/FEATURE-PRIORITIES.md 通知系统条目同步。

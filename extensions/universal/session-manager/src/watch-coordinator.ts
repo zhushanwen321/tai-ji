@@ -318,8 +318,10 @@ export function createWatchCoordinator(deps: WatchCoordinatorDeps): WatchCoordin
 		// 幂等拒收）不改 unregister 语义。collectKeys = 批内全部债权键（result-collect
 		// 设计 §3.4 managed 行）：合批条目载荷幂等键 = 批首债权键，collect 按键集逐键
 		// 展开定位——键集申报经 recordManagedNotify 必传参数构造性防漏。三类「注销
-		// pending 而无投递日志条目」分支（死亡槽去重跨批 / 例外1 / sessionId 缺失防御）
-		// 在本函数早退，不经此申报点——成员键不入任何条目键集，collect 侧按第四态收取。
+		// pending 而无投递日志条目」分支不经此申报点——成员键不入任何条目键集，collect
+		// 侧按第四态收取：死亡槽去重跨批与 sessionId 缺失防御在本函数早退（上方两个
+		// return 分支）；例外1 cancelled/orphaned 在上游 handleRespond 应答分流、不入
+		// 攒批窗不进本函数。
 		recordManagedNotify(
 			first.notifyId,
 			content,
