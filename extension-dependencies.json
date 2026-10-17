@@ -195,6 +195,11 @@
           "package": "@zhushanwen/pi-extension-logger",
           "type": "package",
           "reason": "代码层静态 import getLogger（src/index.ts top-level import），缺失时模块加载即抛 Cannot find module，是强依赖"
+        },
+        {
+          "package": "@zhushanwen/pi-delivery-port",
+          "type": "package",
+          "reason": "代码层静态 import getDeliveryPort（src/index.ts collect_results 工具经进程级槽消费投递端口 collect 面——result-collect 设计 §3.1③），缺失时模块加载即抛 Cannot find module，是强依赖"
         }
       ]
     },

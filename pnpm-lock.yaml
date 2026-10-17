@@ -435,6 +435,9 @@ importers:
       '@zhushanwen/extension-protocol':
         specifier: workspace:*
         version: link:../../../packages/extension-protocol
+      '@zhushanwen/pi-delivery-port':
+        specifier: workspace:*
+        version: link:../../shared/delivery-port
       '@zhushanwen/pi-extension-logger':
         specifier: workspace:*
         version: link:../../shared/extension-logger

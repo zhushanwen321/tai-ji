@@ -25,6 +25,16 @@ import { applyPendingDiff, scanPendingEntries } from "@zhushanwen/extension-prot
 /** 异步操作类型（来源：workflow / subagent / bash 后台任务 / session 完成通知债权） */
 export type PendingType = "workflow" | "subagent" | "bash" | "session";
 
+/**
+ * managed 债权分类标记（pending:register emit 可选字段 kind，session-manager 写侧
+ * 申报，result-collect 设计 §3.4）：lifetime = 生命周期死亡债权（create_session 返回的
+ * lifetimeNotifyId，仅 session exited/deleted 时兑现、存活期恒活跃）——collect_results
+ * 缺省等待集据此排除（排除只在工具侧 computeCollectWaitKeys 做减法，countActiveFromEntries
+ * 缺省语义不动：goal/subagent-workflow 消费方仍计 lifetime 为活跃）。
+ * 无 kind 缺省 = send 债权（消息完成即兑现，缺省主场景键，不排除）。
+ */
+export type PendingKind = "lifetime";
+
 /** 异步操作终态/过渡状态。active = 仍在运行；其他都视为已结束 */
 export type PendingStatus = "active" | "completed" | "failed" | "cancelled" | "expired" | "time_limited" | "aborted";
 
@@ -42,6 +52,8 @@ export interface PendingEntry {
 	registeredAt: number;
 	/** 注册时的 sessionId（用于跨 session 残留过滤） */
 	sessionId: string;
+	/** managed 债权分类标记（可选；无标记 = send 债权缺省语义，见 PendingKind） */
+	kind?: PendingKind;
 }
 
 /** countActiveFromEntries 的过滤选项。 */
@@ -92,6 +104,33 @@ export function countActiveFromEntries(
 		ids: active.map((e) => e.id),
 		entries: active,
 	};
+}
+
+/**
+ * collect_results 的缺省等待键集（result-collect 设计 §3.1③）：
+ * 当前 session 全部活跃 pending 项（countActiveFromEntries 同口径，currentSessionId
+ * 过滤含空串回退）− managed lifetime 死亡债权（kind 标记，本函数工具侧减法——
+ * countActiveFromEntries 缺省语义不动，goal/subagent-workflow 消费方零变化）。
+ */
+export function computeCollectWaitKeys(entries: unknown[], currentSessionId: string): string[] {
+	const active = countActiveFromEntries(
+		entries,
+		currentSessionId ? { currentSessionId } : undefined,
+	).entries;
+	return active.filter((entry) => entry.kind !== "lifetime").map((entry) => entry.id);
+}
+
+/**
+ * 曾注册集：entries 中全部 pending:register entry 的 id（含已注销）。
+ * collect_results 未知 id 判定源之一（活跃集 ∪ 投递日志键集 ∪ 曾注册集 的补集 =
+ * 未知）——已完结任务（register+unregister 对在册）不算未知，走第四态收取。
+ */
+export function scanRegisteredIds(entries: unknown[]): Set<string> {
+	const ids = new Set<string>();
+	for (const { data } of scanPendingEntries(entries).registerEntries) {
+		if (typeof data.id === "string") ids.add(data.id);
+	}
+	return ids;
 }
 
 /**
@@ -163,10 +202,13 @@ export function normalizePendingType(raw: unknown): PendingType {
 }
 
 /** 从 entry data 归一化为 PendingEntry（补默认值，容错缺失字段）。
- *  id 的 string 合法性已由差集层（applyPendingDiff）判定，此处直接窄化。 */
+ *  id 的 string 合法性已由差集层（applyPendingDiff）判定，此处直接窄化。
+ *  kind 白名单构造透传（result-collect 设计 §3.4：现状白名单只取 id/type/name/
+ *  registeredAt/sessionId，额外字段被丢弃——不改则工具侧拿不到 kind、lifetime
+ *  排除静默失效；仅认得 "lifetime" 一个值，未知值不透传）。 */
 function normalizeRegisterEntry(data: Record<string, unknown>, currentSessionId: string): PendingEntry {
 	const registeredAt = typeof data.registeredAt === "number" ? data.registeredAt : Date.now();
-	return {
+	const entry: PendingEntry = {
 		id: data.id as string,
 		type: normalizePendingType(data.type),
 		name: typeof data.name === "string" ? data.name : (data.id as string),
@@ -174,4 +216,6 @@ function normalizeRegisterEntry(data: Record<string, unknown>, currentSessionId:
 		registeredAt,
 		sessionId: typeof data.sessionId === "string" ? data.sessionId : currentSessionId,
 	};
+	if (data.kind === "lifetime") entry.kind = "lifetime";
+	return entry;
 }
