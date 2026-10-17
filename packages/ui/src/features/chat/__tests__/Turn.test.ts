@@ -185,7 +185,9 @@ function expectTraceBlock(wrapper: { find: (s: string) => { exists: () => boolea
   expect(wrapper.find(`.trace .trace-blk[data-type="${type}"]`).exists()).toBe(true)
 }
 
-/** 组行 DOM 稳定断言单源（props 更新后 header 节点 isSameNode + 成员行数保持——remount 即红）。 */
+/** 组行 DOM 稳定断言单源（props 更新后 header 节点 isSameNode + 成员行数保持——remount 即红）。
+ *  成员行锚点 = block-tool-<id> testid（W3 成员行直递 ToolRow 后由 RunGroupBlock 经 fallthrough
+ *  补挂到 ToolRow 根；ToolRow 内部 testid 无 block-tool- 前缀，前缀匹配不误计数）。 */
 function expectGroupNodeStable(
   wrapper: { find: (s: string) => { exists: () => boolean; element: Element; findAll: (s: string) => unknown[] } },
   node1: Element,
@@ -194,7 +196,7 @@ function expectGroupNodeStable(
   const header2 = wrapper.find('[data-testid="run-group-header"]')
   expect(header2.exists()).toBe(true)
   expect(header2.element.isSameNode(node1)).toBe(true)
-  expect(wrapper.find('[data-testid="run-group"]').findAll('.trace-blk').length).toBe(memberCount)
+  expect(wrapper.find('[data-testid="run-group"]').findAll('[data-testid^="block-tool-"]').length).toBe(memberCount)
 }
 
 describe('streaming-trace-window D1: Turn 折叠作用域降到 turn 级', () => {
@@ -906,7 +908,7 @@ describe('run 类型分组: Turn 组块接线（三路径 + PR-6）', () => {
     expect(header1.exists()).toBe(true)
     // ①A 裁决后挂载一律收起：先手动点开，让成员行进 DOM（用例本意 = key 锚定 + 本地展开态不丢）
     await header1.trigger('click')
-    expect(wrapper.find('[data-testid="run-group"]').findAll('.trace-blk').length).toBe(4)
+    expect(wrapper.find('[data-testid="run-group"]').findAll('[data-testid^="block-tool-"]').length).toBe(4)
     const node1 = header1.element
     // 段尾延长：b3 完成、r3→r4 新 running（members 4→5，run head 不变 → key 稳定）
     await wrapper.setProps({ turn: makeBashChainTurn({ completed: 4, running: true }) })
@@ -937,7 +939,7 @@ describe('run 类型分组: Turn 组块接线（三路径 + PR-6）', () => {
     expect(header1.exists()).toBe(true)
     // ①A 裁决后挂载一律收起：先手动点开，让成员行进 DOM（isSameNode 断言前提）
     await header1.trigger('click')
-    expect(wrapper.find('[data-testid="run-group"]').findAll('.trace-blk').length).toBe(5)
+    expect(wrapper.find('[data-testid="run-group"]').findAll('[data-testid^="block-tool-"]').length).toBe(5)
     const node1 = header1.element
     // 窗口右滑：b5 完成入池、新 running r 启动 → 窗口=末4：组(b2..b5+running)，members[0] 从 b1 变 b2；
     // 若 key=members[0].flatIndex（旧规则被击穿的形态）→ remount → isSameNode=false

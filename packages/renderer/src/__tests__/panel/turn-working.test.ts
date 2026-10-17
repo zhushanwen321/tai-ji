@@ -86,9 +86,9 @@ function mountTurnWithRealBlock(props: { turn: MessageTurn; sessionId?: string; 
   })
 }
 
-/** trace 顶层单元（.trace-blk）取样单源：「块数」口径一律指顶层单元数——组展开时后代
- *  选择器会把成员行（嵌套 .trace-blk）数进来，故用子选择器取顶层。 */
-function traceTopBlocks(wrapper: { findAll: (sel: string) => ReturnType<typeof wrapper.findAll> }) {
+/** trace 顶层单元（.trace-blk）取样单源：「块数」口径一律指顶层单元数——W3 起 run 组成员行
+ *  直递 ToolRow 无壳根（成员行锚点 = block-tool-<id> testid），子选择器保证口径恒指顶层。 */
+const traceTopBlocks = (wrapper: { findAll: (s: string) => unknown[] }) => {
   return wrapper.findAll('.trace > .trace-blk')
 }
 
