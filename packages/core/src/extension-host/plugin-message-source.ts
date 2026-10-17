@@ -6,7 +6,7 @@
  * 适配成 PluginMessageSource 注入；单测注入 MockMessageSource 驱动 AC8。
  *
  * type 取值（IF1 注释）：
- * - 8 个 plugin:*：config / crashed / messageDecoration / notification / permissionRequest /
+ * - 7 个 plugin:*：config / crashed / messageDecoration / notification / permissionRequest /
  *   statusChange / uiRequest
  * - 4 个 extension:*：extension:widget / extension:widgetGui /
  *   extension:notify / extension.dialog
