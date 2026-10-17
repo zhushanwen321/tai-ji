@@ -637,6 +637,335 @@ describe("进程级槽（bindDeliveryPort / getDeliveryPort）", () => {
 	});
 });
 
+// ─── collect 挂起面（result-collect 设计 §3.1②；§4 中断形态单测分工）───
+
+/** pending register entry fixture（写侧落盘形态：index.ts safeAppendEntry 同构）。 */
+const pendingRegister = (id: string, type = "bash") => ({
+	type: "custom",
+	customType: "pending:register",
+	data: { id, type, name: `task ${id}`, registeredAt: T0, sessionId: "s-1" },
+});
+
+/** pending unregister entry fixture（status = 写侧 mapReasonToStatus 已映射落盘值）。 */
+const pendingUnregister = (id: string, status: string) => ({
+	type: "custom",
+	customType: "pending:unregister",
+	data: { id, reason: "fixture", status },
+});
+
+const managedEnvelope = (id: string, overrides: Partial<Envelope> = {}): Envelope => ({
+	payload: {
+		kind: "custom",
+		customType: "managed-session-notify",
+		content: "managed batch done",
+		display: true,
+		details: { outcome: "completed" },
+	},
+	id,
+	...overrides,
+});
+const deliverManaged = (port: ReturnType<typeof createDeliveryPort>, id: string, collectKey: string[]) =>
+	port.deliver(managedEnvelope(id), { collectKey });
+
+describe("collect 挂起分流与收取（合批多键）", () => {
+	beforeEach(() => {
+		vi.useFakeTimers();
+		vi.setSystemTime(T0);
+	});
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
+	it("等待集命中 → 条目挂起（不注入、落盘带 collectKey）+ 到达回调；consume 全键展开写 collected 终局", () => {
+		const h = makeHost({ entries: [pendingRegister("k-a"), pendingRegister("k-b")] });
+		const port = createDeliveryPort(h.host);
+		const arrivals = vi.fn();
+		port.onCollectArrival(arrivals);
+
+		const snap = port.collectArm(["k-a", "k-b"]);
+		expect(snap.map((s) => s.state)).toEqual(["waiting", "waiting"]);
+
+		// managed 合批条目（collectKey = 批内全部债权键）→ 挂起：不进内核、零注入
+		const receipt = deliverManaged(port, "mg-1", ["k-a", "k-b"]);
+		expect(receipt).toEqual({ kind: "accepted", id: "mg-1" });
+		expect(h.sent).toHaveLength(0);
+		expect(arrivals).toHaveBeenCalledTimes(1);
+		// 落盘照常（I2）：条目 data 携带 collectKey 键集
+		expect(h.outboxEntries()[0]!["data"]).toMatchObject({ id: "mg-1", collectKey: ["k-a", "k-b"] });
+		// 同实例 recover 不重放挂起条目（已受理在册）
+		expect(port.recover()).toBe(0);
+
+		// consume：按条目键集全量逐键展开（每键一条、载荷共享），终局按日志条目写一次
+		const collected = port.consume();
+		expect(collected).toHaveLength(2);
+		expect(collected[0]).toMatchObject({ id: "k-a", type: "bash", content: "managed batch done" });
+		expect(collected[1]).toMatchObject({ id: "k-b", type: "bash", content: "managed batch done" });
+		expect(collected[0]!.details).toEqual(collected[1]!.details);
+		const acks = h.ackEntries();
+		expect(acks).toHaveLength(1); // 一条条目一个终局（I1）
+		expect(acks[0]!["data"]).toMatchObject({ v: 2, id: "mg-1", outcome: "collected" });
+		// 差集重放排除 collected：重启后新实例零重放、零注入（验收判据③）
+		const second = createDeliveryPort(h.host);
+		expect(second.recover()).toBe(0);
+		expect(h.sent).toHaveLength(0);
+	});
+
+	it("显式子集命中同批全键返回：只等 k-a，合批条目 k-a+k-b 一次收齐", () => {
+		const h = makeHost({ entries: [pendingRegister("k-a"), pendingRegister("k-b")] });
+		const port = createDeliveryPort(h.host);
+		port.collectArm(["k-a"]); // 等待集只登记 k-a
+
+		const receipt = deliverManaged(port, "mg-2", ["k-a", "k-b"]);
+		expect(receipt.kind).toBe("accepted");
+		expect(h.sent).toHaveLength(0); // 命中等待集 → 挂起
+
+		const collected = port.consume();
+		// 展开判据 = 条目键集全量：同批其余键一并返回（无部分命中中间概念）
+		expect(collected.map((c) => c.id).sort()).toEqual(["k-a", "k-b"]);
+	});
+
+	it("collectRelease 解散等待集 + 未收挂起条目直通内核（跳过 60s 窗口，恢复 push）", () => {
+		const h = makeHost({ entries: [pendingRegister("k-a")] });
+		const port = createDeliveryPort(h.host);
+		port.collectArm(["k-a"]);
+		deliverManaged(port, "mg-3", ["k-a"]);
+		expect(h.sent).toHaveLength(0);
+
+		port.collectRelease();
+		expect(h.sent).toHaveLength(1); // 直通注入，不等窗口
+		vi.advanceTimersByTime(60_000);
+		expect(h.sent).toHaveLength(1); // 无窗口兜底第二投
+
+		// 等待集已解散：后续同键条目正常 push（不再挂起）
+		const later = deliverManaged(port, "mg-4", ["k-a"]);
+		expect(later.kind).toBe("accepted");
+		expect(h.sent).toHaveLength(2);
+	});
+
+	it("onCollectArrival 退订后不再触发；到达回调 throw 不向 deliver 传播", () => {
+		const h = makeHost({ entries: [pendingRegister("k-a")] });
+		const port = createDeliveryPort(h.host);
+		const arrivals = vi.fn(() => {
+			throw new Error("waiter gone");
+		});
+		const unsub = port.onCollectArrival(arrivals);
+		port.collectArm(["k-a"]);
+		unsub();
+		expect(deliverManaged(port, "mg-5", ["k-a"]).kind).toBe("accepted");
+		expect(arrivals).not.toHaveBeenCalled();
+		expect(h.outboxEntries()).toHaveLength(1); // 条目在挂起缓冲（可被 consume）
+		const collected = port.consume();
+		expect(collected).toHaveLength(1);
+	});
+});
+
+describe("collectArm 四态快照", () => {
+	beforeEach(() => {
+		vi.useFakeTimers();
+		vi.setSystemTime(T0);
+	});
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
+	it("ready：日志条目已有终局 → 快照收取（读侧，不写新终局）", () => {
+		const h = makeHost({
+			entries: [
+				pendingRegister("k-done"),
+				{ type: "custom", customType: OUTBOX_CUSTOM_TYPE, data: { v: 2, id: "done-e1", timing: "steer", payload: { kind: "custom", customType: DEFAULT_NOTIFY_CUSTOM_TYPE, content: "finished body", display: true, details: { outcome: "completed" } }, recordedAt: T0, collectKey: ["k-done"] } },
+				{ type: "custom", customType: ACK_CUSTOM_TYPE, data: { v: 2, id: "done-e1" } },
+			],
+		});
+		const port = createDeliveryPort(h.host);
+		const snap = port.collectArm(["k-done"]);
+		expect(snap).toHaveLength(1);
+		expect(snap[0]).toMatchObject({ id: "k-done", state: "ready" });
+		expect(snap[0]!.entry).toMatchObject({ type: "bash", content: "finished body", details: { outcome: "completed" } });
+		// ready 是读侧快照：不写新终局（已 delivered 条目再写 collected = 日志宣称未注入过）
+		expect(h.ackEntries()).toHaveLength(1);
+	});
+
+	it("in-push-pipeline：日志条目无终局（已过分流点）→ 不收取不等待，不登记等待集", () => {
+		const h = makeHost({
+			entries: [
+				pendingRegister("k-pipe"),
+				{ type: "custom", customType: OUTBOX_CUSTOM_TYPE, data: { v: 2, id: "pipe-e1", timing: "steer", payload: { kind: "custom", customType: DEFAULT_NOTIFY_CUSTOM_TYPE, content: "queued", display: true }, recordedAt: T0, collectKey: ["k-pipe"] } },
+			],
+		});
+		const port = createDeliveryPort(h.host);
+		const snap = port.collectArm(["k-pipe"]);
+		expect(snap[0]).toMatchObject({ id: "k-pipe", state: "in-push-pipeline" });
+		// 不登记等待集：该键后续新条目到达不挂起（push 零变化）
+		expect(deliverManaged(port, "mg-pipe", ["k-pipe"]).kind).toBe("accepted");
+		expect(h.sent).toHaveLength(1);
+	});
+
+	it("unregistered-no-entry：曾注册已注销且无日志条目 → 按 unregister status 定 outcome（三形态：死亡跨批 / 例外1 / 防御分支的 status 值变体）", () => {
+		// 写侧 mapReasonToStatus 落盘值：exited/orphaned → cancelled（死亡跨批・例外1）、
+		// stopped → aborted（例外1 掐断）、reopened → completed（防御分支收口）
+		const cases: Array<{ id: string; status: string }> = [
+			{ id: "k-death", status: "cancelled" },
+			{ id: "k-orph", status: "cancelled" },
+			{ id: "k-stop", status: "aborted" },
+			{ id: "k-defn", status: "completed" },
+		];
+		const h = makeHost({
+			entries: [...cases.map((c) => pendingRegister(c.id)), ...cases.map((c) => pendingUnregister(c.id, c.status))],
+		});
+		const port = createDeliveryPort(h.host);
+		const snap = port.collectArm(cases.map((c) => c.id));
+		expect(snap.map((s) => s.state)).toEqual(["unregistered-no-entry", "unregistered-no-entry", "unregistered-no-entry", "unregistered-no-entry"]);
+		expect(snap[0]!.entry).toMatchObject({ outcome: "cancelled", note: expect.any(String) });
+		expect(snap[2]!.entry).toMatchObject({ outcome: "aborted" });
+		expect(snap[3]!.entry).toMatchObject({ outcome: "completed" });
+		// 无处可写终局（该键不属任何日志条目）：零 ack entry
+		expect(h.ackEntries()).toHaveLength(0);
+	});
+
+	it("waiting：活跃无条目 → 登记等待集（deliver 命中被挂起）", () => {
+		const h = makeHost({ entries: [pendingRegister("k-wait")] });
+		const port = createDeliveryPort(h.host);
+		const snap = port.collectArm(["k-wait"]);
+		expect(snap[0]).toEqual({ id: "k-wait", state: "waiting" });
+		expect(h.sent).toHaveLength(0);
+		expect(deliverManaged(port, "mg-wait", ["k-wait"]).kind).toBe("accepted");
+		expect(h.sent).toHaveLength(0); // 挂起
+	});
+
+	it("未知键（未注册且无条目）：不登记等待集（deliver 不挂起）、不虚构终态", () => {
+		const h = makeHost();
+		const port = createDeliveryPort(h.host);
+		const snap = port.collectArm(["k-ghost"]);
+		// state 词表无第五态：按 waiting 表达，但等待集未登记——工具侧未知判定组装 errors
+		expect(snap[0]).toEqual({ id: "k-ghost", state: "waiting" });
+		expect(deliverManaged(port, "mg-ghost", ["k-ghost"]).kind).toBe("accepted");
+		expect(h.sent).toHaveLength(1); // 未挂起（防空等到 timeout）
+	});
+
+	it("挂起条目 consume 后 collectRelease 幂等（缓冲已清，无第二投）", () => {
+		const h = makeHost({ entries: [pendingRegister("k-c")] });
+		const port = createDeliveryPort(h.host);
+		port.collectArm(["k-c"]);
+		deliverManaged(port, "mg-c1", ["k-c"]);
+		expect(port.consume()).toHaveLength(1);
+		port.collectRelease();
+		expect(h.sent).toHaveLength(0); // 已收条目不恢复 push（收取构造性不可再投）
+	});
+});
+
+describe("collect 中断形态（§4 单测分工）", () => {
+	beforeEach(() => {
+		vi.useFakeTimers();
+		vi.setSystemTime(T0);
+	});
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
+	it("abort 唤醒归并（AbortSignal 先于 dispose）：工具侧 abort 归并（consume + collectRelease）后 dispose 无在途 warn", () => {
+		const h = makeHost({ entries: [pendingRegister("k-ab")] });
+		const port = createDeliveryPort(h.host);
+		port.collectArm(["k-ab"]);
+		deliverManaged(port, "mg-ab", ["k-ab"]);
+		// session 替换路径 abort 先到：等待器被唤醒走归并（已收部分返回 + 解散等待集）
+		port.consume();
+		port.collectRelease();
+		port.dispose();
+		const inFlightWarns = h.warn.mock.calls.filter((c) => String(c[0]).includes("in-flight collect"));
+		expect(inFlightWarns).toHaveLength(0);
+	});
+
+	it("dispose 在途等待器 → warn 留痕不变量检查（不定义唤醒与返回语义）", () => {
+		const h = makeHost({ entries: [pendingRegister("k-dw")] });
+		const port = createDeliveryPort(h.host);
+		port.collectArm(["k-dw"]); // 等待集在途
+		deliverManaged(port, "mg-dw", ["k-dw"]); // 挂起缓冲非空
+		port.dispose();
+		const inFlightWarns = h.warn.mock.calls.filter((c) => String(c[0]).includes("in-flight collect"));
+		expect(inFlightWarns).toHaveLength(1);
+		expect(String(inFlightWarns[0]![0])).toMatch(/waiting=1, suspended=1/);
+	});
+
+	it("重放作用域：fork 历史祖先 fixture——接管 session journal 不含旧挂起条目 → recover()=0 负向断言", () => {
+		// 旧 session journal：register + 等待期挂起条目（outbox 无终局）
+		const oldJournal = [
+			pendingRegister("k-fork"),
+			{ type: "custom", customType: OUTBOX_CUSTOM_TYPE, data: { v: 2, id: "mg-old", timing: "steer", payload: { kind: "custom", customType: "managed-session-notify", content: "suspended", display: true }, recordedAt: T0, collectKey: ["k-fork"] } },
+		];
+		const first = createDeliveryPort(makeHost({ entries: [...oldJournal] }).host);
+		first.dispose();
+		// fork 历史祖先形态：新 session entries 只复制 root→fork 点祖先路径（常规 fork
+		// 分支点早于等待期条目）——挂起条目不在 branch 路径内
+		const forkedEntries = [pendingRegister("k-fork")];
+		const second = createDeliveryPort(makeHost({ entries: forkedEntries }).host);
+		expect(second.recover()).toBe(0);
+	});
+
+	it("重放作用域：旧 entries 再 bind → recover() 返回未收条目数（延迟投递正向断言）", () => {
+		const h = makeHost({
+			entries: [
+				pendingRegister("k-rebind"),
+				{ type: "custom", customType: OUTBOX_CUSTOM_TYPE, data: { v: 2, id: "mg-rb", timing: "steer", payload: { kind: "custom", customType: "managed-session-notify", content: "left behind", display: true }, recordedAt: T0, collectKey: ["k-rebind"] } },
+			],
+		});
+		const first = createDeliveryPort(h.host);
+		first.dispose(); // 旧实例消亡（未 consume——挂起条目留旧 session 日志）
+		const second = createDeliveryPort(h.host); // 同 session 重开/resume 再 bind
+		expect(second.recover()).toBe(1); // 差集重放按未投递重投（I2 零丢失）
+		expect(h.sent).toHaveLength(1);
+		expect(h.sent[0]!.message.details).toMatchObject({ deliveryId: "mg-rb" });
+	});
+
+	it("重放作用域边沿（fork 点取当前叶，RPC clone 形态）：新 journal 含等待期条目 → recover() 返回该条目数并重放为 push（已登记边沿）", () => {
+		// createBranchedSession 取当前叶（position:"at"）时祖先路径包含等待期挂起条目，
+		// 副本先于 abort 写盘、恒不含 collected 终局 → 新实例 recover 重放为 push
+		const h = makeHost({
+			entries: [
+				pendingRegister("k-leaf"),
+				{ type: "custom", customType: OUTBOX_CUSTOM_TYPE, data: { v: 2, id: "mg-leaf", timing: "steer", payload: { kind: "custom", customType: "managed-session-notify", content: "cloned", display: true }, recordedAt: T0, collectKey: ["k-leaf"] } },
+			],
+		});
+		const port = createDeliveryPort(h.host);
+		expect(port.recover()).toBe(1);
+		expect(h.sent).toHaveLength(1); // 重放为 push
+	});
+
+	it("无 collectKey 旧条目照常重放（可选字段 guard：升级前条目不参与键匹配、差集不受影响）", () => {
+		const h = makeHost({
+			entries: [
+				pendingRegister("k-legacy"),
+				{ type: "custom", customType: OUTBOX_CUSTOM_TYPE, data: { v: 2, id: "legacy-1", timing: "steer", payload: { kind: "custom", customType: DEFAULT_NOTIFY_CUSTOM_TYPE, content: "pre-upgrade", display: true }, recordedAt: T0 } },
+			],
+		});
+		const port = createDeliveryPort(h.host);
+		// 无键条目不参与 collect 匹配：arm 该键为 waiting（活跃无条目）
+		expect(port.collectArm(["k-legacy"])[0]!.state).toBe("waiting");
+		// 差集重放照常收录
+		expect(port.recover()).toBe(1);
+		expect(h.sent).toHaveLength(1);
+	});
+
+	it("consume 终局写失败降级：appendEntry 抛错 → warn 留痕、载荷照常返回（先写终局后返回的偶发语义）", () => {
+		const h = makeHost({ entries: [pendingRegister("k-wf")] });
+		const host = h.host;
+		const orig = host.appendEntry;
+		host.appendEntry = (customType, data) => {
+			if (customType === ACK_CUSTOM_TYPE) throw new Error("disk full (fake)");
+			orig(customType, data);
+		};
+		const port = createDeliveryPort(host);
+		port.collectArm(["k-wf"]);
+		deliverManaged(port, "mg-wf", ["k-wf"]);
+		const collected = port.consume();
+		// 载荷不丢：等待器照常拿到收取结果
+		expect(collected).toHaveLength(1);
+		expect(collected[0]).toMatchObject({ id: "k-wf", content: "managed batch done" });
+		const terminalWarns = h.warn.mock.calls.filter((c) => String(c[0]).includes("terminal write failed"));
+		expect(terminalWarns).toHaveLength(1);
+		expect(h.ackEntries()).toHaveLength(0); // 终局未落盘（重放可能重投为 push——偶发语义留痕）
+	});
+});
+
 // ─── dispose 语义 ───────────────────────────────────────────
 
 describe("dispose", () => {

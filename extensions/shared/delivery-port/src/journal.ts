@@ -70,17 +70,25 @@ export interface OutboxEntryDataV2 { // oe-exempt:20261017:framework:投递日�
   payload: CustomPayload;
   /** 落账时间（epoch ms）。 */
   recordedAt: number;
+  /**
+   * 收取关联键集（result-collect 设计 §3.4）：生产方申报的债权键集合，快照按键集
+   * 包含匹配的事实源。可选字段（升级前落盘的历史条目无该键，照常参与差集重放）；
+   * 读取侧 guard 见 readOutboxDataV2——缺失/畸形按无键，不入类型不符分支。
+   */
+  collectKey?: string[];
 }
 
 /**
- * v2 终局 entry data：ack（delivered / cancelled 终局）与 discard（forget 失败条目
- * 的持久标记——append-only 介质下与 ack 同列承载，重放差集同判「不再重投」）。
- * outcome 缺省 = "delivered"（ack 主形态，字段缺省省体积）。
+ * v2 终局 entry data：ack（delivered / collected / cancelled 终局）与 discard
+ * （forget 失败条目的持久标记——append-only 介质下与 ack 同列承载，重放差集同判
+ * 「不再重投」）。outcome 缺省 = "delivered"（ack 主形态，字段缺省省体积）；
+ * "collected" = 收取终局（result-collect 设计 §3.1②：结果已随 collect 返回到达
+ * agent，差集重放视同已完结——与 delivered 同列，读侧不区分 outcome 值）。
  */
 export interface AckEntryDataV2 { // oe-exempt:20261017:framework:回执 entry schema v2（现行形态，版本化兼容读族）
   v: typeof SCHEMA_V2;
   id: string;
-  outcome?: "delivered" | "discarded";
+  outcome?: "delivered" | "discarded" | "collected";
 }
 
 /** v1 ack entry data（存量格式：旧通知账本的 ack entry 原样，兼容读用；原 schema 见 git 历史）。 */
@@ -94,12 +102,14 @@ export interface AckEntryDataV1 { // oe-exempt:20261017:framework:回执 entry s
 /**
  * 投递日志一条记录的内存投影（outbox entry 的运行时形态，重放重投的重建源）。
  * 与 OutboxEntryDataV2 字段一一对应（v1 经 mapV1OutboxData 映射进同一形态）。
+ * collectKey 仅 v2 新条目在册（收取关联键集；缺失 = 无键，不参与 collect 匹配）。
  */
 export interface JournalRecord { // oe-exempt:20261017:framework:投递日志记录契约（DeliveryStore persist 载荷）
   id: string;
   timing: DeliveryTiming;
   payload: CustomPayload;
   recordedAt: number;
+  collectKey?: string[];
 }
 
 /** 扫描结果（构造期全量 + 运行时增量维护的基线形态）。 */
@@ -160,7 +170,24 @@ export function mapV1OutboxData(data: unknown, scannedAt: number): JournalRecord
   };
 }
 
-/** v2 outbox entry → journal 记录（字段形态不符返回 undefined，同 v1 宽容口径）。 */
+/**
+ * collectKey 可选字段 guard（result-collect 设计 §3.4）：仅「非空数组且全部元素
+ * 为非空 string」视为合法键集；缺失/畸形（含部分畸形）按无键——整体守卫不半收
+ * （半收会虚构键集完整性）。返回 undefined = 条目无键。
+ */
+function readCollectKeys(raw: unknown): string[] | undefined {
+  if (!Array.isArray(raw) || raw.length === 0) return undefined;
+  const keys: string[] = [];
+  for (const key of raw) {
+    if (typeof key !== "string" || key === "") return undefined;
+    keys.push(key);
+  }
+  return keys;
+}
+
+/** v2 outbox entry → journal 记录（字段形态不符返回 undefined，同 v1 宽容口径）。
+ *  collectKey 为可选字段：缺失/畸形按无键处理（不进类型不符分支，无键旧条目照常
+ *  参与差集重放——result-collect 设计 §3.4）。 */
 export function readOutboxDataV2(data: unknown): JournalRecord | undefined {
   if (!isPlainObject(data) || data["v"] !== SCHEMA_V2) return undefined;
   const id = data["id"];
@@ -177,10 +204,12 @@ export function readOutboxDataV2(data: unknown): JournalRecord | undefined {
     return undefined;
   }
   if (typeof recordedAt !== "number") return undefined;
+  const collectKey = readCollectKeys(data["collectKey"]);
   return {
     id,
     timing,
     recordedAt,
+    ...(collectKey !== undefined ? { collectKey } : {}),
     payload: {
       kind: "custom",
       customType,

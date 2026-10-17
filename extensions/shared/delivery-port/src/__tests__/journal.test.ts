@@ -52,6 +52,30 @@ describe("v2 outbox data 定形（readOutboxDataV2）", () => {
 		);
 	});
 
+	// collectKey 可选字段 guard（result-collect 设计 §3.4）：合法键集读取，缺失/畸形
+	// 按无键（不进类型不符分支，无键旧条目照常参与差集重放）。
+	it("collectKey 合法键集原样读取", () => {
+		const rec = readOutboxDataV2({ v: 2, id: "a", timing: "steer", payload: v2Payload(), recordedAt: T0, collectKey: ["k-1", "k-2"] });
+		expect(rec?.collectKey).toEqual(["k-1", "k-2"]);
+	});
+
+	it.each([
+		["collectKey 缺失", { v: 2, id: "a", timing: "steer", payload: v2Payload(), recordedAt: T0 }],
+		["collectKey 非数组", { v: 2, id: "a", timing: "steer", payload: v2Payload(), recordedAt: T0, collectKey: "k-1" }],
+		["collectKey 空数组", { v: 2, id: "a", timing: "steer", payload: v2Payload(), recordedAt: T0, collectKey: [] }],
+		["collectKey 含非 string", { v: 2, id: "a", timing: "steer", payload: v2Payload(), recordedAt: T0, collectKey: ["k-1", 3] }],
+		["collectKey 含空串", { v: 2, id: "a", timing: "steer", payload: v2Payload(), recordedAt: T0, collectKey: ["k-1", ""] }],
+	])("collectKey 缺失/畸形按无键、条目照常读取：%s", (_name, data) => {
+		const rec = readOutboxDataV2(data);
+		expect(rec).toBeDefined();
+		expect(rec?.collectKey).toBeUndefined();
+		expect(rec?.id).toBe("a");
+	});
+
+	it("ack outcome collected 识别（收取终局与 delivered 同列已完结）", () => {
+		expect(readAckId({ v: 2, id: "a", outcome: "collected" })).toBe("a");
+	});
+
 	it.each([
 		["缺 v 字段", { id: "a", timing: "steer", payload: v2Payload(), recordedAt: T0 }],
 		["v=1 旧形态", { v: 1, notifyId: "a", content: "c", record: {} }],
