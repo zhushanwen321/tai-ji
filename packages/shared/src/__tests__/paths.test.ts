@@ -21,7 +21,7 @@ import {
   SESSION_STORE_DIR_SEGMENT,
   getSessionStoreDir,
   getAttachmentsDir,
-  getImageCacheRoot,
+  isPiSessionId,
   getImageCacheDir,
   getSessionArtifactsDir,
   getSessionPluginDataPath,
@@ -108,8 +108,15 @@ describe('旧推导函数返回存储树新布局', () => {
     expect(getSessionArtifactsDir('sess.AB_01', DATA)).toBe(join(DATA, 'ext-sessions', 'sess.AB_01', 'artifacts'))
   })
 
-  it('getImageCacheRoot 保持旧布局根（无 sessionId 的旧布局残留根，换根归消费单元）', () => {
-    expect(getImageCacheRoot(DATA)).toBe(join(DATA, 'cache', 'images'))
+  it('isPiSessionId：与 assertPiSessionId 同正则（合法 uuid / 含 . _ 宽集过；空串、含 : 、含分隔符、首尾非字母数字拒）', () => {
+    expect(isPiSessionId(SID)).toBe(true)
+    expect(isPiSessionId('sess.AB_01')).toBe(true)
+    expect(isPiSessionId('')).toBe(false)
+    expect(isPiSessionId('btw:abc')).toBe(false)
+    expect(isPiSessionId('../evil')).toBe(false)
+    expect(isPiSessionId('a/b')).toBe(false)
+    expect(isPiSessionId('.lead-dot')).toBe(false)
+    expect(isPiSessionId('trail-dot.')).toBe(false)
   })
 })
 

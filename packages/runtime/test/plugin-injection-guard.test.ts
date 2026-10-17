@@ -25,6 +25,7 @@ import { PluginRpcServer } from '../src/services/plugin-service/plugin-rpc-serve
 import type { RpcResponse } from '../src/services/plugin-service/plugin-types.js'
 import { PluginStorage } from '../src/services/plugin-service/plugin-storage.js'
 import { SessionDataStore } from '../src/services/plugin-service/session-data-store.js'
+import { getSessionPluginDataPath, getSessionStoreDir } from '@taiji/shared/paths'
 
 /** 白名单 regex（与 validation.ts / store 层错误 message 中的字面量一致） */
 const SAFE_KEY_REGEX_LITERAL = '/^[A-Za-z0-9._-]{1,128}$/'
@@ -82,7 +83,7 @@ describe('SEC-A5 sessionData RPC entry validation', () => {
       keys: (sid) => store.keys(sid),
     })
 
-    // '../../evil' → <configDir>/session-data/../../evil.json → resolve → <root>/evil.json
+    // '../../evil' 被同域校验拒（INVALID_SESSION_ID）——深度防御层不得放行遍历载荷
     const resp = await dispatch('plugin.sessionData.set', {
       sessionId: '../../evil', key: 'k', value: 'v',
     })
@@ -91,9 +92,9 @@ describe('SEC-A5 sessionData RPC entry validation', () => {
     expect(err.message).toContain('sessionId')
     expect(err.message).toContain(SAFE_KEY_REGEX_LITERAL)
 
-    // 文件系统副作用：数据目录外无新文件，session-data 目录根本未创建
+    // 文件系统副作用：数据目录外无新文件，session 存储树根本未创建
     expect(existsSync(join(root, 'evil.json'))).toBe(false)
-    expect(existsSync(join(root, 'config', 'session-data'))).toBe(false)
+    expect(existsSync(getSessionStoreDir(configDir))).toBe(false)
 
     store.dispose()
     cleanup()
@@ -243,9 +244,9 @@ describe('SEC-A5 legal identifiers pass end-to-end', () => {
     const keysResp = await dispatch('plugin.sessionData.keys', { sessionId })
     expect((keysResp as { result?: string[] }).result).toEqual([key])
 
-    // 合法 sessionId 正常落盘（在 session-data 目录内）
+    // 合法 sessionId 正常落盘（session 存储树域 4 分区文件）
     store.flushSession(sessionId)
-    expect(existsSync(join(configDir, 'session-data', `${sessionId}.json`))).toBe(true)
+    expect(existsSync(getSessionPluginDataPath(sessionId, configDir))).toBe(true)
 
     store.dispose()
     cleanup()
@@ -300,7 +301,8 @@ describe('SEC-A5 store-layer resolve defense (bypassing entry layer)', () => {
         expect.unreachable('should have thrown')
       } catch (err) {
         expect((err as { code?: unknown }).code).toBe('INVALID_SESSION_ID')
-        expect((err as Error).message).toContain(SAFE_KEY_REGEX_LITERAL)
+        // store 层校验域 = isPiSessionId（与 shared 推导函数族同域，比入口层窄集更严）
+        expect((err as Error).message).toContain('pi session id domain')
       }
     }
     // clearSession 已 async（B5 trash 软删除）——防御拒绝转为 rejection（仍先于任何状态变更）

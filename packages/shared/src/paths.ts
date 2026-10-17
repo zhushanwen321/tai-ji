@@ -36,7 +36,7 @@
  *
  * 注意：extensions/npm/tmp 原在旧布局 agent/ 子树下，已迁出到 dataDir 根层（与 skills/agents 对齐）。
  *
- * 图片缓存路径（getImageCacheRoot/getImageCacheDir）为 C-state-05 债务新增面：
+ * 图片缓存路径（getImageCacheDir）为 C-state-05 债务新增面：
  * 纯校验+join 组合逻辑后续拆为无 node 依赖纯函数留 shared，env/homedir 腿（getDataDir 推导）
  * 迁 runtime/main 各自实现——收编时机随 C-state-05 白名单整体治理，不在本批。
  */
@@ -223,8 +223,20 @@ const PI_SESSION_ID_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/
  *
  * @throws Error 当 sessionId 为空串、含路径分隔符/冒号或首尾非字母数字
  */
+/**
+ * pi 会话 id 同域校验（布尔判定，不 throw）。
+ *
+ * 与 assertPiSessionId 共用同一正则（本文件是跨进程唯一权威实现）：main 进程树内
+ * 遍历点（image-cache 孤儿扫描 / local-file 读通道产物前缀枚举）不能 import runtime
+ * 的 isPiSessionId（包边界），经本 SSOT 消费；runtime pi-paths.ts 同名函数为 pi 宿主
+ * 侧权威源，字面量一致性由 scripts/check-artifact-dir-formula-sync.mjs 三方对拍守护。
+ */
+export function isPiSessionId(sessionId: string): boolean {
+  return PI_SESSION_ID_PATTERN.test(sessionId)
+}
+
 function assertPiSessionId(sessionId: string): void {
-  if (!PI_SESSION_ID_PATTERN.test(sessionId)) {
+  if (!isPiSessionId(sessionId)) {
     throw new Error(`invalid sessionId (path traversal blocked): ${sessionId}`)
   }
 }
@@ -448,19 +460,6 @@ export function getAttachmentsDir(sessionId: string, dataDir?: string): string {
  */
 export function getTtsCacheDir(dataDir?: string): string {
   return join(dataDir ?? getDataDir(), 'tts-cache')
-}
-
-/**
- * toolResult 图片缓存根目录（旧布局 `<dataDir>/cache/images`）[D6-⑨]。
- *
- * **旧布局残留根**：域 3 的 session 分区已迁 session 存储树（getImageCacheDir 返回
- * `<root>/<sid>/image-cache`），本根不再是 getImageCacheDir 的父目录；仅作为旧布局
- * 位置被 main 侧既有孤儿扫描/软上限逻辑引用，写读点换根后本函数随之退役。
- *
- * @param dataDir 可选数据根目录（测试注入）；缺省读 getDataDir()
- */
-export function getImageCacheRoot(dataDir?: string): string {
-  return join(dataDir ?? getDataDir(), 'cache', 'images')
 }
 
 /**

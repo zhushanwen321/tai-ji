@@ -48,6 +48,7 @@ import { SessionService } from '../session-service.js'
 import { MessageDispatcher } from '../message-dispatcher.js'
 import { SessionLifecycle } from '../session-lifecycle.js'
 import { SessionDataStore, isSessionDataCleared } from '../../plugin-service/session-data-store.js'
+import { getSessionPluginDataPath } from '@taiji/shared/paths'
 import { initRuntimeCheckpointStore } from '../runtime-checkpoint.js'
 import { PiConfigStore } from '../../../infra/pi/pi-config-store.js'
 import { PiSessionStore } from '../../../infra/pi/session-store.js'
@@ -65,8 +66,8 @@ const CLIENT_ACTIVITY_AT = 1_700_000_500_000
 let runDir: string
 let store: SessionDataStore
 
-/** plugin sessionData 持久化文件路径（SessionDataStore 内部推导同款）。 */
-const dataFile = (sid: string): string => join(runDir, 'session-data', `${sid}.json`)
+/** plugin sessionData 持久化文件路径（session 存储树域 4，SessionDataStore 内部推导同源）。 */
+const dataFile = (sid: string): string => getSessionPluginDataPath(sid, runDir)
 
 beforeAll(() => {
   runDir = mkdtempSync(join(tmpdir(), 'session-service-plugin-data-clear-'))

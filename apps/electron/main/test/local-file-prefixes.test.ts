@@ -290,23 +290,61 @@ describe('readLocalFileContent: 源码态白名单读取通道（chat-html-suppo
   })
 })
 
-describe('computeLocalFileReadPrefixes: 读/预检 IPC 通道准入收窄', () => {
-  // 通道消费域 = 产物子树（HtmlPreviewInline 源码态/size 预检、useDetailPane 抽屉产物
-  // 读取）；全量白名单含 <dataDir> 整前缀，读通道若复用 = 渲染进程可直读数据目录内
-  // 任意文件文本（含 pi agent 目录凭据）。本组用例锁定收窄面本身。
-  it('前缀 = <dataDir>/artifacts/ 且带 trailing path.sep（与全量白名单同构的误判防护）', () => {
-    expect(computeLocalFileReadPrefixes(DATA_DIR)).toEqual([path.join(DATA_DIR, 'artifacts') + path.sep])
+describe('computeLocalFileReadPrefixes: 读/预检 IPC 通道准入收窄（存储树产物子树，按现存会话枚举）', () => {
+  // 通道消费域 = session 存储树内产物子树 <dataDir>/ext-sessions/<sid>/artifacts/
+  // （HtmlPreviewInline 源码态/size 预检、useDetailPane 抽屉产物读取）；全量白名单含
+  // <dataDir> 整前缀，读通道若复用 = 渲染进程可直读数据目录内任意文件文本（含 pi agent
+  // 目录凭据）。本组用例锁定收窄面本身 + 布局反转候选①的枚举行为（先例 = ADR-0118 3d）。
+  const STORE_DIR = path.join(DATA_DIR, 'ext-sessions')
+
+  /** fs 桩：存储树一级目录名集 */
+  function fsWith(entries: string[]) {
+    return { readdirSync: () => entries }
+  }
+
+  it('前缀 = <dataDir>/ext-sessions/<sid>/artifacts/ 且带 trailing path.sep（每现存会话一项）', () => {
+    const prefixes = computeLocalFileReadPrefixes(DATA_DIR, fsWith(['sess-1', 'sess-2']))
+    expect(prefixes).toEqual([
+      path.join(STORE_DIR, 'sess-1', 'artifacts') + path.sep,
+      path.join(STORE_DIR, 'sess-2', 'artifacts') + path.sep,
+    ])
   })
 
-  it('产物路径命中、dataDir 内非产物子树不命中（attachments / cache/images / agent）', () => {
-    const readPrefixes = computeLocalFileReadPrefixes(DATA_DIR)
-    expect(isPathInAllowedPrefixes(`${DATA_DIR}/artifacts/s1/report.html`, readPrefixes)).toBe(true)
-    expect(isPathInAllowedPrefixes(`${DATA_DIR}/artifacts`, readPrefixes)).toBe(true)
+  it('非 sessionId 形态的一级目录跳过（D7 树内遍历规约）：含冒号 / 空格 / encodeCwd 形态 / 点文件不产前缀', () => {
+    const prefixes = computeLocalFileReadPrefixes(DATA_DIR, fsWith(['sess-1', 'btw:abc', 'not a sid', '--Users-x--', '.DS_Store']))
+    expect(prefixes).toEqual([path.join(STORE_DIR, 'sess-1', 'artifacts') + path.sep])
+  })
+
+  it('枚举失败准入从紧：ENOENT 静默空集（存储树未建 = 无产物，常态）；EACCES 空集 + onError 旁路', () => {
+    const enoent = Object.assign(new Error('x'), { code: 'ENOENT' })
+    const onErr = vi.fn()
+    expect(computeLocalFileReadPrefixes(DATA_DIR, { readdirSync: () => { throw enoent } }, onErr)).toEqual([])
+    expect(onErr).not.toHaveBeenCalled()
+
+    const eaccs = Object.assign(new Error('x'), { code: 'EACCES' })
+    expect(computeLocalFileReadPrefixes(DATA_DIR, { readdirSync: () => { throw eaccs } }, onErr)).toEqual([])
+    expect(onErr).toHaveBeenCalledWith(eaccs, STORE_DIR)
+  })
+
+  it('产物路径命中；同一会话分区内非产物子树不命中（attachments / image-cache / plugin-data.json）', () => {
+    const readPrefixes = computeLocalFileReadPrefixes(DATA_DIR, fsWith(['s1']))
+    expect(isPathInAllowedPrefixes(path.join(STORE_DIR, 's1', 'artifacts', 'report.html'), readPrefixes)).toBe(true)
+    expect(isPathInAllowedPrefixes(path.join(STORE_DIR, 's1', 'artifacts'), readPrefixes)).toBe(true)
+    expect(isPathInAllowedPrefixes(path.join(STORE_DIR, 's1', 'attachments', 'img.png'), readPrefixes)).toBe(false)
+    expect(isPathInAllowedPrefixes(path.join(STORE_DIR, 's1', 'image-cache', 'x.png'), readPrefixes)).toBe(false)
+    expect(isPathInAllowedPrefixes(path.join(STORE_DIR, 's1', 'plugin-data.json'), readPrefixes)).toBe(false)
+    // 未枚举到的会话分区不命中（按现存会话收窄语义）
+    expect(isPathInAllowedPrefixes(path.join(STORE_DIR, 's2', 'artifacts', 'report.html'), readPrefixes)).toBe(false)
+  })
+
+  it('旧布局产物根与数据目录其余位置全部不命中（换根后旧前缀不放行）', () => {
+    const readPrefixes = computeLocalFileReadPrefixes(DATA_DIR, fsWith(['s1']))
+    expect(isPathInAllowedPrefixes(`${DATA_DIR}/artifacts/s1/report.html`, readPrefixes)).toBe(false)
     expect(isPathInAllowedPrefixes(`${DATA_DIR}/attachments/sess-1/img.png`, readPrefixes)).toBe(false)
     expect(isPathInAllowedPrefixes(`${DATA_DIR}/cache/images/x.png`, readPrefixes)).toBe(false)
     expect(isPathInAllowedPrefixes(`${DATA_DIR}/agent/auth.json`, readPrefixes)).toBe(false)
     // 兄弟目录不误伤（trailing sep 守护）
-    expect(isPathInAllowedPrefixes(`${DATA_DIR}/artifacts-extra/x.html`, readPrefixes)).toBe(false)
+    expect(isPathInAllowedPrefixes(path.join(STORE_DIR, 's1', 'artifacts-extra', 'x.html'), readPrefixes)).toBe(false)
   })
 
   it('攻击面锁定：全量白名单内的 <dataDir>/agent/auth.json 经读通道前缀 out_of_whitelist 不触 fs', () => {
@@ -314,7 +352,7 @@ describe('computeLocalFileReadPrefixes: 读/预检 IPC 通道准入收窄', () =
     expect(isPathInAllowedPrefixes(`${DATA_DIR}/agent/auth.json`, packagedPrefixes())).toBe(true)
     const stat = vi.fn()
     const read = vi.fn()
-    const result = readLocalFileContent(`${DATA_DIR}/agent/auth.json`, computeLocalFileReadPrefixes(DATA_DIR), {
+    const result = readLocalFileContent(`${DATA_DIR}/agent/auth.json`, computeLocalFileReadPrefixes(DATA_DIR, fsWith(['s1'])), {
       statSync: stat,
       readFileSync: read,
     })
@@ -324,7 +362,7 @@ describe('computeLocalFileReadPrefixes: 读/预检 IPC 通道准入收窄', () =
   })
 
   it('产物文件经读通道前缀正常读取（消费面不回归）', () => {
-    const result = readLocalFileContent(`${DATA_DIR}/artifacts/s1/report.html`, computeLocalFileReadPrefixes(DATA_DIR), {
+    const result = readLocalFileContent(path.join(STORE_DIR, 's1', 'artifacts', 'report.html'), computeLocalFileReadPrefixes(DATA_DIR, fsWith(['s1'])), {
       statSync: () => ({ isDirectory: () => false, size: 11 }),
       readFileSync: () => new TextEncoder().encode('<h1>hi</h1>'),
     })
@@ -394,7 +432,7 @@ describe('会话项目 .tmp/ 子树准入（ADR-0118 决策②代价修订 3d）
       const read = vi.fn(() => new TextEncoder().encode('<p>demo</p>'))
       const result = readLocalFileContent(
         `${PROJECT_CWD}/.tmp/demo.html`,
-        computeLocalFileReadPrefixes(DATA_DIR),
+        computeLocalFileReadPrefixes(DATA_DIR, { readdirSync: () => ['s1'] }),
         { statSync: stat, readFileSync: read },
         SESSION_DIRS,
       )
@@ -417,7 +455,7 @@ describe('会话项目 .tmp/ 子树准入（ADR-0118 决策②代价修订 3d）
       // 覆盖 .tmp 段——双重断言锁定「凭据面不回归」
       const result = readLocalFileContent(
         `${DATA_DIR}/agent/auth.json`,
-        computeLocalFileReadPrefixes(DATA_DIR),
+        computeLocalFileReadPrefixes(DATA_DIR, { readdirSync: () => ['s1'] }),
         { statSync: stat, readFileSync: read },
         new Set([...SESSION_DIRS, '--Users-tester-.taiji--']),
       )

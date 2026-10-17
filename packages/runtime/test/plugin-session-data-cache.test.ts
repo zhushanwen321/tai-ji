@@ -12,7 +12,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mkdtemp, rm, mkdirSync, existsSync, readFileSync, readdirSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { promisify } from 'node:util'
 
 import { registerSessionDataRpcHandlers } from '../src/services/plugin-service/api/session-data-api.js'
@@ -20,6 +20,7 @@ import { PluginRpcServer } from '../src/services/plugin-service/plugin-rpc-serve
 import { PluginRpcErrorCodes } from '../src/services/plugin-service/plugin-types.js'
 import type { RpcResponse } from '../src/services/plugin-service/plugin-types.js'
 import { SessionDataStore } from '../src/services/plugin-service/session-data-store.js'
+import { getSessionPluginDataPath } from '@taiji/shared/paths'
 
 const mkdtempP = promisify(mkdtemp)
 const rmP = promisify(rm)
@@ -136,6 +137,11 @@ describe('SessionDataStore Flush + Lifecycle', () => {
   let tmpDir: string
   let store: SessionDataStore
 
+  /** 插件 KV 分区文件路径（session 存储树域 4，与被测模块内部推导同源）。 */
+  function dataPathOf(sid: string): string {
+    return getSessionPluginDataPath(sid, tmpDir)
+  }
+
   beforeEach(async () => {
     tmpDir = await mkdtempP(join(tmpdir(), 'session-data-store-test-'))
     store = new SessionDataStore(tmpDir)
@@ -150,7 +156,7 @@ describe('SessionDataStore Flush + Lifecycle', () => {
   it('flush persists dirty data to disk', () => {
     store.set('s1', 'k1', 'v1')
     store.flushSession('s1')
-    const filePath = join(tmpDir, 'session-data', 's1.json')
+    const filePath = dataPathOf('s1')
     expect(existsSync(filePath)).toBe(true)
     const raw = JSON.parse(readFileSync(filePath, 'utf-8'))
     expect(raw).toEqual({ k1: 'v1' })
@@ -176,24 +182,24 @@ describe('SessionDataStore Flush + Lifecycle', () => {
     store.set('s1', 'k1', 'v1')
     store.set('s2', 'k2', 'v2')
     store.flushAll()
-    expect(existsSync(join(tmpDir, 'session-data', 's1.json'))).toBe(true)
-    expect(existsSync(join(tmpDir, 'session-data', 's2.json'))).toBe(true)
+    expect(existsSync(dataPathOf('s1'))).toBe(true)
+    expect(existsSync(dataPathOf('s2'))).toBe(true)
   })
 
   // ── corrupt file quarantined (D1c parity), not silently overwritten ──
   it('corrupt partition file on load → quarantined to .corrupt-<ts> copy, set/flush rebuilds clean', () => {
-    const filePath = join(tmpDir, 'session-data', 's-broken.json')
-    mkdirSync(join(tmpDir, 'session-data'), { recursive: true })
+    const filePath = dataPathOf('s-broken')
+    mkdirSync(dirname(filePath), { recursive: true })
     writeFileSync(filePath, '{"broken": tr', 'utf-8') // 半截 JSON
 
     // lazy loadPartition：损坏 → quarantine rename + 空 Map 降级
     expect(store.get('s-broken', 'anyKey')).toBeUndefined()
 
-    const dirEntries = readdirSync(join(tmpDir, 'session-data'))
-    expect(dirEntries).not.toContain('s-broken.json')
-    const quarantineCopy = dirEntries.find((n) => /^s-broken\.json\.corrupt-\d{4}-\d{2}-\d{2}T\d{9}Z$/.test(n))
+    const dirEntries = readdirSync(dirname(filePath))
+    expect(dirEntries).not.toContain('plugin-data.json')
+    const quarantineCopy = dirEntries.find((n) => /^plugin-data\.json\.corrupt-\d{4}-\d{2}-\d{2}T\d{9}Z$/.test(n))
     expect(quarantineCopy).toBeDefined()
-    expect(readFileSync(join(tmpDir, 'session-data', quarantineCopy!), 'utf-8')).toBe('{"broken": tr')
+    expect(readFileSync(join(dirname(filePath), quarantineCopy!), 'utf-8')).toBe('{"broken": tr')
 
     // set + flush：原路径重建干净文件（quarantine 后 flush 走 ENOENT 放行）
     store.set('s-broken', 'fresh', 'v')
@@ -219,12 +225,12 @@ describe('SessionDataStore Flush + Lifecycle', () => {
     })
     store.set('s1', 'k1', 'v1')
     store.flushSession('s1')
-    expect(existsSync(join(tmpDir, 'session-data', 's1.json'))).toBe(true)
+    expect(existsSync(dataPathOf('s1'))).toBe(true)
     // B5：clearSession 已 async（磁盘删除走 ITrash port 软删除，mock 同步移除文件）
     await store.clearSession('s1')
     expect(store.get('s1', 'k1')).toBeUndefined()
-    expect(existsSync(join(tmpDir, 'session-data', 's1.json'))).toBe(false)
-    expect(trashCalls).toEqual([join(tmpDir, 'session-data', 's1.json')])
+    expect(existsSync(dataPathOf('s1'))).toBe(false)
+    expect(trashCalls).toEqual([dataPathOf('s1')])
   })
 
   // ── debounce flush 落盘 ────────────────────────────────────
@@ -235,7 +241,7 @@ describe('SessionDataStore Flush + Lifecycle', () => {
     store.set('s1-debounce', 'k1', 'v1')
     // debounce flush at 500ms
     await vi.advanceTimersByTimeAsync(600)
-    expect(existsSync(join(tmpDir, 'session-data', 's1-debounce.json'))).toBe(true)
+    expect(existsSync(dataPathOf('s1-debounce'))).toBe(true)
     vi.useRealTimers()
   })
 
@@ -244,7 +250,7 @@ describe('SessionDataStore Flush + Lifecycle', () => {
     vi.useFakeTimers()
     store.set('s1', 'k1', 'v1')
     await vi.advanceTimersByTimeAsync(100) // well within 500ms debounce
-    expect(existsSync(join(tmpDir, 'session-data', 's1.json'))).toBe(false)
+    expect(existsSync(dataPathOf('s1'))).toBe(false)
     vi.useRealTimers()
   })
 
@@ -254,7 +260,7 @@ describe('SessionDataStore Flush + Lifecycle', () => {
     store.set('s1', 'k1', 'v1')
     store.dispose()
     await vi.advanceTimersByTimeAsync(10_000)
-    expect(existsSync(join(tmpDir, 'session-data', 's1.json'))).toBe(false)
+    expect(existsSync(dataPathOf('s1'))).toBe(false)
     vi.useRealTimers()
   })
 })

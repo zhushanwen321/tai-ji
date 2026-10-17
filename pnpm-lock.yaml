@@ -1306,6 +1306,9 @@ importers:
 
   packages/subagent-core:
     dependencies:
+      '@taiji/shared':
+        specifier: workspace:*
+        version: link:../shared
       '@zhushanwen/extension-protocol':
         specifier: workspace:*
         version: link:../extension-protocol
