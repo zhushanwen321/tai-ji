@@ -382,37 +382,53 @@ function todoUpdatePart(u: { id: number; status?: string; text?: string }): stri
 /**
  * 收起态一行摘要（纯函数，英文一行、描述动作 + 数量/目标；与各 handler 的 resultText
  * 风格同源）。todos 传突变后的最终列表；拿不到的数据省略后缀（如 add 起止 id 相同只显单 id）。
+ * 各 action 独立小函数（圈复杂度门禁：单函数 ≤15；曾全内联 4-action 分支 + 分支内判断达 18）。
  */
 export function buildTodoSummary(params: TodoSummaryParams, todos: readonly Todo[]): string {
 	switch (params.action) {
-		case "list": {
-			if (todos.length === 0) return "No todos";
-			const c = countByStatus(todos);
-			return `${todos.length} todos: ${c.completed} completed, ${c.in_progress} in_progress, ${c.pending} pending`;
-		}
-		case "add": {
-			const n = params.texts?.length ?? 0;
-			if (n <= 0) return "";
-			// 新增项 = 突变后列表末尾 n 条（addTodos 尾插；auto-GC 清理后同样尾插）
-			const added = todos.slice(-n);
-			const first = added[0]?.id;
-			const last = added[added.length - 1]?.id;
-			return n === 1 ? `Added 1 todo (#${first})` : `Added ${n} todos (#${first}-#${last})`;
-		}
-		case "update": {
-			if (params.updates && params.updates.length > 0) {
-				return `Updated ${params.updates.map(todoUpdatePart).join("; ")}`;
-			}
-			return `Updated ${todoUpdatePart({ id: params.id ?? 0, status: params.status, text: params.text })}`;
-		}
-		case "delete": {
-			const ids = params.ids ?? [];
-			if (ids.length === 0) return "";
-			return ids.length === 1
-				? `Deleted #${ids[0]}`
-				: `Deleted ${ids.map((id) => `#${id}`).join(", ")}`;
-		}
+		case "list":
+			return todoListSummary(todos);
+		case "add":
+			return todoAddSummary(params, todos);
+		case "update":
+			return todoUpdateSummary(params);
+		case "delete":
+			return todoDeleteSummary(params);
 		default:
 			return "";
 	}
+}
+
+/** list 摘要：逐 status 计数（completed 口径与 todoProgress 同源） */
+function todoListSummary(todos: readonly Todo[]): string {
+	if (todos.length === 0) return "No todos";
+	const c = countByStatus(todos);
+	return `${todos.length} todos: ${c.completed} completed, ${c.in_progress} in_progress, ${c.pending} pending`;
+}
+
+/** add 摘要：新增项 = 突变后列表末尾 n 条（addTodos 尾插；auto-GC 清理后同样尾插） */
+function todoAddSummary(params: TodoSummaryParams, todos: readonly Todo[]): string {
+	const n = params.texts?.length ?? 0;
+	if (n <= 0) return "";
+	const added = todos.slice(-n);
+	const first = added[0]?.id;
+	const last = added[added.length - 1]?.id;
+	return n === 1 ? `Added 1 todo (#${first})` : `Added ${n} todos (#${first}-#${last})`;
+}
+
+/** update 摘要：批量 updates 优先，回退单条 id/status/text */
+function todoUpdateSummary(params: TodoSummaryParams): string {
+	if (params.updates && params.updates.length > 0) {
+		return `Updated ${params.updates.map(todoUpdatePart).join("; ")}`;
+	}
+	return `Updated ${todoUpdatePart({ id: params.id ?? 0, status: params.status, text: params.text })}`;
+}
+
+/** delete 摘要：单 id 与多 id 两种形态 */
+function todoDeleteSummary(params: TodoSummaryParams): string {
+	const ids = params.ids ?? [];
+	if (ids.length === 0) return "";
+	return ids.length === 1
+		? `Deleted #${ids[0]}`
+		: `Deleted ${ids.map((id) => `#${id}`).join(", ")}`;
 }

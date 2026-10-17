@@ -30,7 +30,7 @@ function makeTool(over: Partial<ToolCall> = {}): ToolCall {
 /** Tool 默认收起，需点击 header 展开。返回展开后的 wrapper。 */
 async function mountExpanded(tool: ToolCall) {
   const wrapper = mount(Block, {
-    props: { type: 'toolCall', tool },
+    props: { type: 'tool', tool },
     // Block setup 顶部经 useChatViewDeps inject 壳依赖（ui-optimize-unified N1 起），直接 mount 必须注入 mock deps
     global: { provide: mockChatProvide() },
   })
