@@ -51,7 +51,7 @@ import { sendExtensionUIResponse } from '@taiji/core/transport/api/domains/exten
  * 静默丢弃，不进 bridge（source 职责边界）。
  *
  * ADR-0060：数据源从 raw-message-tap 旁路改为 events 正规双订阅（route-inbound 单一真相源）：
- * - onGlobal：收无 sid 的 plugin:*（statusBarUpdate/notification/uiRequest 等走 global 通道）
+ * - onGlobal：收无 sid 的 plugin:*（notification/uiRequest 等走 global 通道）
  * - onCrossSession：收带 sid 的 extension:*（widget/widgetGui/status/notify/ui_request
  *   + plugin:uiRequest/plugin:viewUpdate，route-inbound 声明式条目 crossSession 字段分发，
  *   全局单例消费者 ExtensionHost 接收）

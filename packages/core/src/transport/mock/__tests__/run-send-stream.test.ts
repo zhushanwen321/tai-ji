@@ -82,11 +82,10 @@ describe('run-send-stream 默认（read）分支', () => {
     expect(ready.fileChanges.map((f) => f.status)).toEqual(['modified', 'added', 'unmerged'])
     const complete = h.emitted.find((m) => m.type === 'message.complete')
     expect((complete?.payload as { usage?: { totalTokens: number } }).usage).toMatchObject({ totalTokens: 1922 })
-    // 默认分支推 session 通道 widget/widgetGui ×2 + status
+    // 默认分支推 session 通道 widget/widgetGui ×2
     const pushedTypes = types(h.pushed)
     expect(pushedTypes).toContain('extension:widget')
     expect(pushedTypes.filter((t) => t === 'extension:widgetGui')).toHaveLength(2)
-    expect(pushedTypes).toContain('extension:status')
   })
 
   it('取消（isCancelled 恒 true）：仅 message_start 后提前返回', async () => {

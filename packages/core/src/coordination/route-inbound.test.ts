@@ -522,7 +522,6 @@ describe('configureRouteInbound — crossSession 通道（ADR-0060）', () => {
     const literals = [
       'extension:widget',
       'extension:widgetGui',
-      'extension:status',
       'extension:notify',
       'extension.dialog',
       'extension:requestsInvalidated',
@@ -550,7 +549,7 @@ describe('configureRouteInbound — 声明式条目 schema（D2 阶段 A）', ()
     const ports = makePorts()
     const effects = makeEffects()
     const dispatcher = configureRouteInbound(ports, effects)
-    dispatcher(sessionMsg('extension:status', { lines: ['l1'] }))
+    dispatcher(sessionMsg('extension:widget', { widgetKey: 'w', lines: ['l1'] }))
     expect(ports.events.dispatchSession).toHaveBeenCalledTimes(1)
     expect(ports.events.dispatchCrossSession).toHaveBeenCalledTimes(1)
     // 骨架条目只声明 crossSession（无 sessionEffect/payloadGuard）：任何 effect 不触发
@@ -559,7 +558,7 @@ describe('configureRouteInbound — 声明式条目 schema（D2 阶段 A）', ()
     expect(effects.onSessionError).not.toHaveBeenCalled()
     expect(effects.onGlobalError).not.toHaveBeenCalled()
     // 声明形状锁定：条目是纯声明式数据（crossSession 布尔 + 跳过型守卫函数），无 handle 函数体
-    expect(ROUTE_TABLE['extension:status']).toEqual({ crossSession: true })
+    expect(ROUTE_TABLE['extension:widget']).toEqual({ crossSession: true })
     expect(ROUTE_TABLE['session.subagents']).toEqual({
       payloadGuard: expect.any(Function),
       sessionEffect: expect.any(Function),

@@ -879,9 +879,6 @@ async function main(): Promise<void> {
       onCanvasRequest: (requestId, sessionId, action, params) => {
         server.handleCanvasRequest(requestId, sessionId, action, params)
       },
-      onStatusSetUpdate: (payload) => {
-        server.handleStatusSetUpdate(payload)
-      },
       onContextUpdate: (sid, ctxData) => {
         // session 级状态单一 owner：context 事件（turn-usage / turn-end / compaction）经
         // SessionService.applyContextUpdate 只做 usage 实例失效（W10 五写点收编；W12 起

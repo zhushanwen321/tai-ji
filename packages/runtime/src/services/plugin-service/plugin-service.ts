@@ -1,6 +1,6 @@
 import { PluginPermissionChecker as PermissionChecker } from './plugin-permission.js'
 import type { PluginDescriptor, ToolEntry, HookEntry, HookContext, HookResult, IPluginServiceDeps } from './plugin-types.js'
-import type { StatusBarItem, PluginInfo } from '@taiji/shared'
+import type { PluginInfo } from '@taiji/shared'
 import type { IPluginService, ISessionService } from '../../interfaces.js'
 import type { IMessageBroker } from '../../interfaces.js'
 import type { ServerMessageMap, ServerMessageType } from '@taiji/shared'
@@ -20,7 +20,6 @@ import type { InstallResult } from '../ports/plugin-installer.js'
 import { toConfigKey, fromConfigKey, isConfigKey } from './api/config-api.js'
 import { HookPipeline, OBSERVE_HOOK_TYPES } from './hook-pipeline.js'
 import { UiRequestQueue } from './ui-request-queue.js'
-import { StatusBarRegistry } from './status-bar-registry.js'
 import { PermissionStorage } from './plugin-permission-storage.js'
 import { EXTERNAL_PLUGIN_ENABLED, EXTERNAL_PLUGIN_DISABLED_MESSAGE } from './plugin-security.js'
 import { resolveEsmLoaderExecArgv } from './plugin-esm-execargv.js'
@@ -48,7 +47,7 @@ export { findTsxImportArg, resolveEsmLoaderExecArgv } from './plugin-esm-execarg
  * 5 个原交职责已下沉到内聚模块，本类仅保留：
  *  (a) initialize 编排（9 步生命周期装配）；
  *  (b) 协作者装配（registry/storage/rpcServer/host/activator/...）；
- *  (c) 薄门面方法：委托 HookPipeline / UiRequestQueue / StatusBarRegistry
+ *  (c) 薄门面方法：委托 HookPipeline / UiRequestQueue
  *      （命令执行发送段在 api/commands-executor.ts，协议映射在
  *      plugin-info-mapper.ts，贡献清理在 plugin-contributions.ts）。
  */
@@ -68,9 +67,6 @@ export class PluginService implements IPluginService {
 
   /** Hook 执行管道（持有 hookRegistry、共享 host/rpcServer 引用） */
   readonly hookPipeline: HookPipeline
-
-  /** Status bar 注册表（持有 items，广播交由注入回调） */
-  readonly statusBarRegistry: StatusBarRegistry
 
   /** UI 请求串行队列（独立状态机，广播交由注入回调） */
   readonly uiRequestQueue: UiRequestQueue
@@ -171,13 +167,6 @@ export class PluginService implements IPluginService {
       resolveActiveSessionId: () => this.activeSessionResolver.resolve()?.id,
       getMessageBus: () => this.messageBus,
       broadcastOrBroker: (type, id, payload) => this.broadcastOrBroker(type, id, payload),
-    }))
-
-    // Status bar 注册表：广播保持 `plugin:statusBarUpdate` 契约（ADR-0015）。
-    // MF-3-1：该 type 无 ServerMessageMapBase 具名条目，经 Exclude 占位腿收
-    // Record<string, unknown>，字面量窄→宽可直赋 ServerMessage，免 as 断言。
-    this.statusBarRegistry = new StatusBarRegistry((payload) => this.broker.broadcast({
-      type: 'plugin:statusBarUpdate', id: `sb_${Date.now()}`, payload,
     }))
 
     this.activator = new PluginActivator({
@@ -299,12 +288,11 @@ export class PluginService implements IPluginService {
       for (const pluginId of pluginIds) {
         this.activator.markCrashed(pluginId)
       }
-      // D6/W4 贡献清理：崩溃插件的 statusBar/hook/tool/command 贡献不残留——对齐
-      // togglePlugin(false) 的清理集（僵尸 statusbar 条目/仍可被路由的 tool/command
+      // D6/W4 贡献清理：崩溃插件的 hook/tool/command 贡献不残留——对齐
+      // togglePlugin(false) 的清理集（仍可被路由的 tool/command
       // 都指向已死 Worker，调用必超时）。重新启用由用户在管理界面显式触发（ADR-0122：
       // 原自动 rebuild 重激活链已退役）。
       for (const pluginId of pluginIds) {
-        this.statusBarRegistry.clearForPlugin(pluginId)
         this.removeHookEntriesFor(pluginId)
         this.removeToolEntriesFor(pluginId)
         this.removeCommandEntriesFor(pluginId)
@@ -424,7 +412,6 @@ export class PluginService implements IPluginService {
         // 禁用
         await this.activator.deactivatePlugin(pluginId, this.host)
         this.activator.stopWatching(pluginId) // 停止热重载监听
-        this.statusBarRegistry.clearForPlugin(pluginId) // 清理 status bar items
         this.removeHookEntriesFor(pluginId) // P-1：清 hook 注册，禁用插件的 hook 不再执行
         // Fix-7：禁用插件的工具/命令同步清注册——与 P-1 的 hook 清理对称，否则禁用插件的
         // 工具仍可被执行路由、命令 invoke 仍发向该插件（worker 已 deactivate，必超时）
@@ -532,9 +519,6 @@ export class PluginService implements IPluginService {
     // S3-W2：session 事件注册表同步清理（卸载插件的订阅不再投递）
     this.sessionEventDispatch.clearForPlugin(pluginId)
     this.entryInvalidationDispatch.clearForPlugin(pluginId)
-
-    // 清理 status bar items
-    this.statusBarRegistry.clearForPlugin(pluginId)
 
     this.broadcastPluginList()
     // RT-6#6：内存清理与回滚广播已全部完成，此刻才把磁盘删除失败抛给调用方——
@@ -678,7 +662,6 @@ export class PluginService implements IPluginService {
       sessionDataStore: this.sessionDataStore,
       storage: this.storage,
       rpcServer: this.rpcServer,
-      statusBarRegistry: this.statusBarRegistry,
       commandInvokes: this.commandInvokes,
       sessionEventDispatch: this.sessionEventDispatch,
     })
@@ -690,9 +673,7 @@ export class PluginService implements IPluginService {
       storage: this.storage,
       toolRegistry: this.toolRegistry,
       hookRegistry: this.hookPipeline.registry,
-      statusBarItems: this.statusBarRegistry.items,
       deps: this.deps,
-      broadcastStatusBarItems: () => this.statusBarRegistry.broadcastAll(),
       handleUiRequest: (method, params, pluginId) => this.uiRequestQueue.handleRequest(method, params, pluginId),
       cancelUiRequest: (requestId) => this.uiRequestQueue.cancelRequest(requestId),
       getDescriptor: (pluginId) => this.registry.getDescriptor(pluginId),
@@ -733,14 +714,14 @@ export class PluginService implements IPluginService {
 
   /**
    * pi 侧事件向插件钩子的投递入口（pi1-disposition-chat-flow D7② 挂点迁移 + 断链修复）：
-   * statusSetUpdate 等内部事件经本方法以泛型 'onPiEvent' 键派发——与 hook-api 注册面的
+   * 内部事件经本方法以泛型 'onPiEvent' 键派发——与 hook-api 注册面的
    * 泛型键形状对齐（hook-api 以 'onPiEvent' 为键写入 hookRegistry），修复原
    * handleBridgeEvent「分发键 = 原始事件名」的注册/分发键错位断链。
    *
    * context 形态与 event-interpreter 的既有调用完全同构：平铺 { event: <事件名>,
    * ...payload }（ExecuteHookFn 的 context 参数是宽松 Record）——hook-api onPiEvent
    * 适配层走「event-interpreter 平铺」分支：payload = 剥离 event 元字段后的剩余字段，
-   * 插件侧 handler 收到的第二参即业务载荷本身（statusline 适配后的解包形状）。
+   * 插件侧 handler 收到的第二参即业务载荷本身（平铺形状，hook-api 解包）。
    *
    * fire-and-forget：observe 快捷路径（executeHooks → notifyObservers），不等待不回包。
    */
@@ -802,8 +783,4 @@ export class PluginService implements IPluginService {
     })
   }
 
-  /** Get all current status bar items */
-  getStatusBarItems(): StatusBarItem[] {
-    return this.statusBarRegistry.getItems()
-  }
 }

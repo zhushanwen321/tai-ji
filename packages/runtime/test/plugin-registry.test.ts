@@ -133,7 +133,7 @@ describe('PluginRegistry', () => {
   // ── TC-1-06: pluginPath 指向 main 入口文件而非插件目录 ──────────
   // 回归防护：ESM 禁止目录导入（ERR_UNSUPPORTED_DIR_IMPORT），plugin-bootstrap 的
   // load 分支直接 import(pluginPath)，pluginPath 存目录会导致激活必炸
-  // （built-in statusline 曾因此从未激活成功）
+  // （built-in 插件目录缺编译产物时曾因此从未激活成功）
   it('TC-1-06: pluginPath resolves to main entry file, not plugin directory', async () => {
     const pluginDir = join(tmpDir, '.taiji', 'plugins', 'entry-plugin')
     await mkdir(pluginDir, { recursive: true })

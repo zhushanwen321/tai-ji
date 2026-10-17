@@ -8,7 +8,7 @@
 
 ### 1.1 SCQA
 
-- **S（情境）**：本仓 29 个 npm 发布面包（28 workspace 包 + statusline 特例——u4/D6 将 deprecated 的 pi-unified-hooks 加入 changeset ignore 后的终态口径，见 §1.2；2026-09 ext-simplify-01 删包后 ignore 条目已移除；该包删前被 ignore 排除、删后不在磁盘，31 包计数不变）经三条路径发布——正式线（merge skill 阶段 4N 编排版本，推 `npm-*` tag 触发 release-npm.yml）、dev 预发布线（本地 npm-prerelease.sh + changeset pre，推 `dev-npm-*` 分支触发 release-npm-dev.yml）。每个包进 tarball 的内容由 package.json `files` 白名单声明。
+- **S（情境）**：本仓 31 个 npm 发布面包（全部 pnpm workspace 包；曾有的非 workspace 特例 statusline 已随 StatusBar 底栏退役删除，见 ADR-0141）经三条路径发布——正式线（merge skill 阶段 4N 编排版本，推 `npm-*` tag 触发 release-npm.yml）、dev 预发布线（本地 npm-prerelease.sh + changeset pre，推 `dev-npm-*` 分支触发 release-npm-dev.yml）。每个包进 tarball 的内容由 package.json `files` 白名单声明。
 - **C（冲突）**：npm 对 `files` 白名单里磁盘上不存在的条目**静默跳过**，白名单承诺与构建产出之间没有任何一致性约束。`@zhushanwen/subagent-core` 的 `dist.bundle/`（自包含 vendoring 产物；vendoring = 消费方把产物文件整体复制进自己目录、没有 node_modules 依赖安装链的消费形态，因此产物必须内联全部运行时依赖——外部 zsw 插件 vendor `--npm` 通道依赖此产物）自 0.4.0 起从未进过 tarball——`files` 声明了它，但发布流程中 subagent-core 唯一的构建入口（smoke-core-dist.mjs）只跑 `build`（常规档）不跑 `build:bundle`（自包含档），CI 全新 checkout 后磁盘上根本没有该目录，tarball 自然缺货且零报警。
 - **Q（问题）**：如何让「files 白名单 ↔ 实际产物」的一致性从「靠人记」变成「机器门」，并保证未来新增包/新增产物档不再重演？
 - **A（答案）**：新独立检查 `check-publish-surface.mjs`（幽灵条目拦截 + 自包含探针 + 产物目录反向覆盖，双向封住「files ↔ 产物」两个漂移方向）挂发布门与 CI PR invariants；发布 workflow 为每个 dist 包显式声明全部构建档；补齐 dev 线同型缺口；约束登记 C-proc-11。
@@ -17,7 +17,7 @@
 
 **npm files 语义最小例子**：包 A 的 `package.json` 声明 `files: ["src/", "dist/"]`。执行 `npm pack` / `npm publish` 时只有匹配白名单的文件进 tarball。关键静默面：若磁盘上 `dist/` 目录不存在（没跑构建），npm **不报错、不警告**，直接打包一个没有 dist 的 tarball——发布者以为承诺了什么和 tarball 里实际有什么，中间隔着一层零反馈的静默。
 
-**发布面全景**（终态发布面 32 包 = pnpm workspace 内非 private 且未被 changeset ignore 的 31 包——u4/D6 将 deprecated 的 pi-unified-hooks 加入 changeset ignore 落地后的口径（此前 29 + statusline = 30；2026-09 ext-simplify-01 删包后 ignore 条目已移除；该包删前被 ignore 排除、删后不在磁盘，31 包计数不变）+ statusline 特例 + W5/W7 引擎三包（subagent-engine-sdk / pi-subagent-cli / zcode-subagent-cli，MF-4 批次接入检查面），按产物形态分三类）：
+**发布面全景**（终态发布面 31 包 = pnpm workspace 内非 private 且未被 changeset ignore 的全部包，含 W5/W7 引擎三包（subagent-engine-sdk / pi-subagent-cli / zcode-subagent-cli，MF-4 批次接入检查面）；曾计入的非 workspace 特例 statusline 已随 StatusBar 底栏退役删除，见 ADR-0141。按产物形态分三类）：
 
 | 类别 | 包 | files 声明的产物 | 构建方式 |
 |---|---|---|---|
@@ -29,7 +29,6 @@
 | dist 发布包 | `@zhushanwen/pi-subagent-cli` | `bin/` + `dist/`（CLI 包：bin 是唯一 npm 消费方，不带 src/） | tsup，正式/dev 两线均有显式 build 步骤（MF-4 批次接入） |
 | dist 发布包 | `@zhushanwen/zcode-subagent-cli` | `bin/` + `dist/`（CLI 包：bin 是唯一 npm 消费方，不带 src/） | tsup，正式/dev 两线均有显式 build 步骤（MF-4 批次接入） |
 | dist 发布包 | `@zhushanwen/pi-rpc` | `src/`（排除 `__tests__`）+ `dist/`（库包双形态：workspace 走 exports import 条件 → src，npm 走 publishConfig → dist） | tsup，正式/dev 两线均有显式 build 步骤（2026-09 pi-subagent-cli 依赖可解析性缺口批次接入） |
-| 非 workspace 特例 | `statusline`（resources/plugins/，v0.3.14） | 无 files 字段 | 非 pnpm workspace 成员——机制上不经 changeset 发布线（见 D6） |
 
 TS 源直发类不存在本缺口（声明的都是 git 里就有的文件）；风险集中在 dist 发布包。
 
@@ -37,7 +36,7 @@ TS 源直发类不存在本缺口（声明的都是 git 里就有的文件）；
 
 - **G1 发布面一致性机器门（双向）**：发布现场，每个 dist 发布包 `files` 白名单的每个条目必须真实存在于磁盘且非空（幽灵条目拦截，幽灵声明方向）；包内顶层 `dist*` 产物目录必须被 `files` 白名单覆盖（产物目录反向覆盖，漏声明方向）；自包含档（`dist.bundle/`）必须真正自包含（外部依赖探针）。
 - **G2 构建入口显式化**：发布 workflow 显式声明每个 dist 包的全部构建档；消除「smoke 脚本副作用 = 唯一构建入口」的隐式依赖——构建产出由显式步骤保证，验证门只负责验证。
-- **G3 同型缺口清偿**：dev 预发布线补 session-delivery build 步骤；`resources/plugins/statusline` 加 `"private": true`（非 workspace 目录不经 changeset 发布线，真实尾部风险是手滑 `npm publish` 全目录打包——private 是该形态的唯一机制层拦截，见 D6）；deprecated 的 `pi-unified-hooks` 显式加入 changeset ignore（workspace 内包，ignore 有效，deprecated 包不应再发版）。
+- **G3 同型缺口清偿**：dev 预发布线补 session-delivery build 步骤；`resources/plugins/statusline` 加 `"private": true`（非 workspace 目录不经 changeset 发布线，真实尾部风险是手滑 `npm publish` 全目录打包——private 是该形态的唯一机制层拦截，见 D6；**statusline 已随 StatusBar 底栏退役删除，该措施随之失效**，ADR-0141）；deprecated 的 `pi-unified-hooks` 显式加入 changeset ignore（workspace 内包，ignore 有效，deprecated 包不应再发版）。
 - **G4 防复发登记**：constraints.json 新增 C-proc-11（发布面一致性约束，含「新增产物档须同批挂检查」条款）。
 
 ### 1.4 in / out scope
@@ -246,7 +245,7 @@ dev 线（release-npm-dev.yml）为条件化结构（与正式线不对称，刻
 | S4 | 全链路 tarball 实证 | 按 §3.4 完整步骤序构建 → `cd packages/subagent-core && npm pack --dry-run` | dry-run 清单含 `dist.bundle/index.cjs`；同法验证 extension-protocol / session-delivery 的 `dist` 非空 | G1、G2 |
 | S5 | CI 接线生效（真实 Actions run） | 推分支：①正常分支 → invariants 段新 step 绿；②含幽灵条目 `dist.worker/` 或反向覆盖形态（构建了不加 files）的分支 → CI 红 | 两次真实 run 的 job 结论分别绿/红，红 run 的日志含恢复指引；记录 invariants job 实际时长增量回填 D2 | G1、G2 |
 | S6 | dev 线缺口补全（本地等价 + 条件语义） | release-npm-dev.yml diff 审查：session-delivery build + core 两档 + 检查 step 均挂 `should_publish == 'true'` 条件、既有 `Build extension-protocol` 保持无条件；本地跑各 build 命令验证产出非空 + 检查绿；未准备 pre.json 的 dev-npm-* 分支 push → job conclusion 仍为 success | 三 step 条件挂载正确、命令产出实证、skip 分支不被新 step 误红 | G3 |
-| S6b | 发布面尾部风险清偿（u4 简化验收） | `node -p "require('./resources/plugins/statusline/package.json').private"` 输出 true；`.changeset/config.json` ignore 数组含 `@zhushanwen/pi-unified-hooks` | 两个断言成立（单行改动，简化验收） | G3 |
+| S6b | 发布面尾部风险清偿（u4 简化验收） | `.changeset/config.json` ignore 数组含 `@zhushanwen/pi-unified-hooks`（statusline private 断言已随该插件删除失效，ADR-0141） | 断言成立（单行改动，简化验收） | G3 |
 | S7 | 发布后终验（0.5.2） | 走 merge / prerelease skill 既有编排发布 → registry 下载 tarball → zsw 仓跑 vendor `--npm` 通道；干净目录 `npm install @zhushanwen/subagent-core@0.5.2` → require 主入口 + 4 条子入口（smoke 同口径） | tarball 实测含 `dist.bundle/index.cjs` 且 vendor 副本 `selfContainedIndex=true`；常规消费者升级路径不回归（require 全通） | G1–G3 闭环 |
 
 S7 是外部消费方（zsw）真实回归，作为发布后场景登记——发布编排本身不在本设计拆分内。S1–S4 本地可完整执行，S5 需真实 CI run，S6 的 workflow 生效面在下次 dev 预发布（如近期无 dev 发布计划，以本地等价命令 + diff 审查为验收形态，如实登记）。

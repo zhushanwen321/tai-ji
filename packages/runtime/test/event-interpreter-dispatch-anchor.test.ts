@@ -29,28 +29,9 @@ describe('EventInterpreter · handle 三段分发锚定（W3 复杂度债务偿�
 
   // ── handleRoutingEvent / handleMetaEvent：server 路由与元数据回调类（每 case 恰好一次、参数逐字段一致） ──
 
-  it('R1: status-set → onStatusSetUpdate({sessionId,key,text,textRaw}) 恰好一次', () => {
-    const onStatusSetUpdate = vi.fn()
-    const interpreter = new EventInterpreter('sid-r1', { send, onStatusSetUpdate })
-
-    interpreter.interpret([{ kind: 'status-set', sessionId: 'ignored-evt-sid', key: 'model', text: 'gpt', textRaw: 'gpt-x' }])
-
-    expect(onStatusSetUpdate).toHaveBeenCalledTimes(1)
-    // sessionId 取 interpreter 持有的 sid（非事件 payload 自报）
-    expect(onStatusSetUpdate).toHaveBeenCalledWith({ sessionId: 'sid-r1', key: 'model', text: 'gpt', textRaw: 'gpt-x' })
-  })
-
-  it('R2: status-broadcast → WS 帧原样透传', () => {
-    const interpreter = new EventInterpreter('sid-r2', { send })
-    // 帧类型值取协议外占位（interpreter 对 status-broadcast 是零改写透传，类型值不参与语义）
-    const frame: ServerMessage = { type: 'session.status' as ServerMessage['type'], payload: { sessionId: 'sid-r2', key: 'k' } }
-
-    interpreter.interpret([{ kind: 'status-broadcast', message: frame }])
-
-    expect(sent).toEqual([frame])
-  })
-
   // [pi1-disposition-chat-flow D7①] R3（bridge-ui → onBridgeUIRequest）随 bridge 退役删除
+  // （kind 与 option 均已删，编号空位保留登记对账）。
+  // R1/R2（setStatus 路由与 WS 透传两用例）随状态栏退役删除
   // （kind 与 option 均已删，编号空位保留登记对账）。
 
   it('R4: session-manager-ui → onSessionManagerRequest(requestId, sessionId, action, params)', () => {
@@ -151,21 +132,21 @@ describe('EventInterpreter · handle 三段分发锚定（W3 复杂度债务偿�
 
   // ── 跨分组分发顺序（批内顺序保持 = 单一 switch 等价性） ───────────
 
-  it('O1: 混合批次 [status-set, turn-usage, message] → 分发顺序与批次顺序一致', () => {
+  it('O1: 混合批次 [session-renamed, turn-usage, message] → 分发顺序与批次顺序一致', () => {
     const callOrder: string[] = []
-    const onStatusSetUpdate = vi.fn(() => { callOrder.push('status-set') })
+    const onSessionRenamed = vi.fn(() => { callOrder.push('session-renamed') })
     const onContextUpdate = vi.fn(() => { callOrder.push('turn-usage') })
-    const interpreter = new EventInterpreter('sid-o1', { send, onStatusSetUpdate, onContextUpdate })
+    const interpreter = new EventInterpreter('sid-o1', { send, onSessionRenamed, onContextUpdate })
     const msgFrame: ServerMessage = { type: 'message.delta' as ServerMessage['type'], payload: { sessionId: 'sid-o1' } }
 
     interpreter.interpret([
-      { kind: 'status-set', sessionId: 'x', key: 'k', text: 't' },
+      { kind: 'session-renamed', name: 'new-label' },
       // gen-stats D1/D2：turn-usage 携带样本六字段（composer-gen-stats 事件契约扩展）
       { kind: 'turn-usage', sessionId: 'x', inputTokens: 1, totalTokens: 1, outputTokens: null, cacheRead: null, cacheWrite: null, input: null, model: null, provider: null },
       { kind: 'message', message: msgFrame },
     ])
 
-    expect(callOrder).toEqual(['status-set', 'turn-usage'])
+    expect(callOrder).toEqual(['session-renamed', 'turn-usage'])
     // message 帧最后透传（帧序保持）
     expect(sent).toEqual([msgFrame])
   })

@@ -137,7 +137,6 @@ describe('步骤真实现（非 spyOn 路径）', () => {
       'sidebar.tab',
       'panel.header',
       'composer.toolbar',
-      'statusbar',
     ])
   })
 

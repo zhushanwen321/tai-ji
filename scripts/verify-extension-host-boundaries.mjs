@@ -5,8 +5,8 @@
  * 断言 extension-host 消费端模块的 import 不含任何 domain/stores/composables 路径。
  * core 是独立 headless 包，不反向依赖 renderer domain/store/composables（AC7 + 包级依赖铁律）。
  *
- * 检查对象（W4 交付的三个消费端模块）：
- *   - packages/core/src/extension-host/status-bar-controller.ts
+ * 检查对象（extension-host 消费端模块；status-bar-controller 已随 StatusBar 底栏
+ * 整体退役删除，见 ADR-0141）：
  *   - packages/core/src/extension-host/overlay-lifecycle.ts
  *   - packages/core/src/extension-host/view-host-store.ts
  *
@@ -34,9 +34,8 @@ const FORBIDDEN_PATTERNS = [
   { pattern: /@\/composables/, reason: 'renderer composables 别名路径' },
 ]
 
-/** 检查对象：W4 交付的 extension-host 消费端模块（相对仓库根）。 */
+/** 检查对象：extension-host 消费端模块（相对仓库根）。 */
 const TARGETS = [
-  'packages/core/src/extension-host/status-bar-controller.ts',
   'packages/core/src/extension-host/overlay-lifecycle.ts',
   'packages/core/src/extension-host/view-host-store.ts',
 ]

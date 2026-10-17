@@ -23,10 +23,7 @@
  *   INVALID_* 结构化错误（error.code）且零写副作用；asString/asSafeKey/
  *   asBoundedString 工具正反例
  * - CT-D3（S3-W4）：notify 每插件令牌桶（默认 20 条/s，超限丢弃记日志）；
- *   message >8KB 拒；statusbar text >4KB 拒；statusbar 更新 100ms 合并窗口；
- *   常量可配置（构造参数覆盖 shared SSOT 默认值）
- * - CT-D4（S3-W4）：statusbar 单条坏 item（text:{}）拒绝该条并记宿主日志，
- *   其余条目与后续更新不受影响（不整包丢弃）
+ *   message >8KB 拒；常量可配置（构造参数覆盖 shared SSOT 默认值）
  *
  * 运行：cd packages/runtime && npx vitest run test/contract-hardening.test.ts
  */
@@ -65,7 +62,6 @@ import { registerWorkspaceRpcHandlers } from '../src/services/plugin-service/api
 import { registerToolRpcHandlers } from '../src/services/plugin-service/tool-api.js'
 import { registerHookRpcHandlers } from '../src/services/plugin-service/hook-api.js'
 import { NotifyRateLimiter, registerNotifyRpcHandler } from '../src/services/plugin-service/api/notify-api.js'
-import { StatusBarRegistry } from '../src/services/plugin-service/status-bar-registry.js'
 import { asBoundedString, asSafeKey, asString } from '../src/services/plugin-service/validation.js'
 import { PLUGIN_NOTIFY_LIMITS } from '@taiji/shared'
 import type { SendPromptReason } from '@taiji/shared'
@@ -805,7 +801,6 @@ describe('CT-U1 api 入口窄校验层（畸形输入 → INVALID_* 结构化错
     sessionDataSet: ReturnType<typeof vi.fn<(sessionId: string, key: string, value: unknown) => void>>
     messageSent: ReturnType<typeof vi.fn<(sessionId: string, role: string, content: string, requireCommand?: string) => Promise<{ blocked: boolean; reason?: SendPromptReason }>>>
     notifySent: ReturnType<typeof vi.fn<(pluginId: string, level: string, message: string) => void>>
-    statusBarSet: ReturnType<typeof vi.fn<(pluginId: string, id: string, text: string, options?: Record<string, unknown>) => Promise<void>>>
     viewUpdated: ReturnType<typeof vi.fn<(pluginId: string, viewId: string, guiTree: unknown[]) => void>>
     setModel: ReturnType<typeof vi.fn<(model: string) => Promise<string>>>
     syncTools: ReturnType<typeof vi.fn<() => Promise<void>>>
@@ -824,7 +819,6 @@ describe('CT-U1 api 入口窄校验层（畸形输入 → INVALID_* 结构化错
       sessionDataSet: vi.fn<(sessionId: string, key: string, value: unknown) => void>(),
       messageSent: vi.fn<(sessionId: string, role: string, content: string, requireCommand?: string) => Promise<{ blocked: boolean; reason?: SendPromptReason }>>(),
       notifySent: vi.fn<(pluginId: string, level: string, message: string) => void>(),
-      statusBarSet: vi.fn<(pluginId: string, id: string, text: string, options?: Record<string, unknown>) => Promise<void>>(),
       viewUpdated: vi.fn<(pluginId: string, viewId: string, guiTree: unknown[]) => void>(),
       setModel: vi.fn<(model: string) => Promise<string>>(),
       syncTools: vi.fn<() => Promise<void>>(),
@@ -875,7 +869,6 @@ describe('CT-U1 api 入口窄校验层（畸形输入 → INVALID_* 结构化错
       showConfirm: vi.fn<(title: string, message: string, pluginId: string) => Promise<boolean>>(),
       showInput: vi.fn<(title: string, defaultValue: string | undefined, pluginId: string) => Promise<string | undefined>>(),
       notify: vi.fn<(pluginId: string, level: string, message: string) => Promise<void>>(),
-      updateStatusBarItem: effects.statusBarSet as never,
     })
     registerViewRpcHandlers(rpc, { handleViewUpdate: effects.viewUpdated as never, mountPoints: [] })
     registerWorkspaceRpcHandlers(rpc, {
@@ -969,7 +962,6 @@ describe('CT-U1 api 入口窄校验层（畸形输入 → INVALID_* 结构化错
     await expectInvalid('plugin.ui.showSelect', { pluginId: 'p', title: 't', options: ['a', 42] }, 'INVALID_OPTIONS', 'options')
     await expectInvalid('plugin.ui.showConfirm', { pluginId: 'p', title: 't', message: [] }, 'INVALID_MESSAGE', 'message')
     await expectInvalid('plugin.ui.showInput', { pluginId: 'p' }, 'INVALID_TITLE', 'title')
-    await expectInvalid('plugin.ui.updateStatusBarItem', { pluginId: 'p', id: 'a/b', text: 't' }, 'INVALID_ID', 'id')
     await expectInvalid('plugin.ui.notify', { pluginId: 'p', level: 'info', message: {} }, 'INVALID_MESSAGE', 'message')
     await expectInvalid('plugin.notify', { level: 'info', message: 'x' }, 'INVALID_PLUGIN_ID', 'pluginId')
     await expectInvalid('plugin.notify', { pluginId: 'p', level: 'info', message: {} }, 'INVALID_MESSAGE', 'message')
@@ -990,7 +982,6 @@ describe('CT-U1 api 入口窄校验层（畸形输入 → INVALID_* 结构化错
       ['plugin.sessions.sendMessage', { sessionId: '../s', role: 'user', content: 'x' }],
       ['plugin.sessions.sendMessage', {}],
       ['plugin.notify', { pluginId: 'p', level: 'info', message: 42 }],
-      ['plugin.ui.updateStatusBarItem', { pluginId: 'p', id: 'i', text: {} }],
       ['plugin.views.update', { pluginId: 'p', viewId: 'v', sessionId: 's1', guiTree: {} }],
       ['plugin.agent.setModel', { model: 42 }],
       ['plugin.commands.register', { pluginId: 'p', command: { id: 'x' }, handlerId: 42 }],
@@ -1006,7 +997,6 @@ describe('CT-U1 api 入口窄校验层（畸形输入 → INVALID_* 结构化错
     expect(effects.sessionDataSet).not.toHaveBeenCalled()
     expect(effects.messageSent).not.toHaveBeenCalled()
     expect(effects.notifySent).not.toHaveBeenCalled()
-    expect(effects.statusBarSet).not.toHaveBeenCalled()
     expect(effects.viewUpdated).not.toHaveBeenCalled()
     expect(effects.setModel).not.toHaveBeenCalled()
     expect(effects.syncTools).not.toHaveBeenCalled()
@@ -1020,7 +1010,7 @@ describe('CT-U1 api 入口窄校验层（畸形输入 → INVALID_* 结构化错
 // S3-W4 — CT-D3 限流与大小上限
 // ══════════════════════════════════════════════════════════════════
 
-describe('CT-D3 限流与防毒化（notify 令牌桶 / 大小上限 / statusbar 合并窗口）', () => {
+describe('CT-D3 限流与防毒化（notify 令牌桶 / 大小上限）', () => {
   it('CT-D3 NotifyRateLimiter 默认 20 条/s（shared SSOT）：瞬时突发 20 条放行、第 21 条拒、每插件独立分桶、1s 后配额恢复（nowMs 注入）', () => {
     const limiter = new NotifyRateLimiter()
     // 默认值来自 shared SSOT（可配置性：config 暴露且等于 PLUGIN_NOTIFY_LIMITS）
@@ -1108,111 +1098,5 @@ describe('CT-D3 限流与防毒化（notify 令牌桶 / 大小上限 / statusbar
     expect(last.response.error?.code).toBe('INVALID_MESSAGE')
   })
 
-  it('CT-D3 statusbar text >4KB 拒（INVALID_TEXT，D3 验收「1MB text 被拒」依此规则）', async () => {
-    const rpc = new PluginRpcServer()
-    const port = createMockPort()
-    rpc.registerWorker('w1', port)
-    const updateStatusBarItem = vi.fn()
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    registerUiRpcHandlers(rpc, {
-      showSelect: vi.fn(), showConfirm: vi.fn(), showInput: vi.fn(), notify: vi.fn(), updateStatusBarItem,
-    })
-
-    const dispatchStatus = (id: number, text: string) =>
-      rpc.dispatch('w1', {
-        jsonrpc: '2.0', id, method: 'plugin.ui.updateStatusBarItem',
-        params: { pluginId: 'p', id: 'item', text },
-      })
-
-    // 1MB text（验收场景）：拒绝
-    await dispatchStatus(720001, 'x'.repeat(1024 * 1024))
-    expect(updateStatusBarItem).not.toHaveBeenCalled()
-    const responses = port.messages.filter(m => m.type === 'rpc' && (m as { response?: unknown }).response)
-    const last = responses[responses.length - 1] as { response: { error?: { code?: unknown } } }
-    expect(last.response.error?.code).toBe('INVALID_TEXT')
-
-    // 4KB 整放行（边界值本体合法）
-    await dispatchStatus(720002, 'x'.repeat(PLUGIN_NOTIFY_LIMITS.STATUSBAR_TEXT_MAX_BYTES))
-    expect(updateStatusBarItem).toHaveBeenCalledTimes(1)
-    warnSpy.mockRestore()
-  })
-
-  it('CT-D3 statusbar 更新 100ms 合并窗口（fake timers）：窗口内多次更新合并为一次广播，coalesceMs=0 退化立即广播，dispose 清 pending timer', () => {
-    vi.useFakeTimers()
-    try {
-      const broadcasts: Array<{ items: unknown[] }> = []
-      const registry = new StatusBarRegistry(p => broadcasts.push(p))
-      // 默认值来自 shared SSOT（可配置性）
-      expect(registry).toBeDefined()
-
-      registry.items.set('p:a', { id: 'a', pluginId: 'p', text: 't1', priority: 1 } as never)
-      registry.broadcastAll()
-      registry.items.set('p:b', { id: 'b', pluginId: 'p', text: 't2', priority: 2 } as never)
-      registry.broadcastAll()
-      expect(broadcasts, '合并窗口内不广播（trailing-edge）').toHaveLength(0)
-
-      vi.advanceTimersByTime(PLUGIN_NOTIFY_LIMITS.STATUSBAR_COALESCE_MS)
-      expect(broadcasts, '窗口到期合并为一次广播').toHaveLength(1)
-      expect(broadcasts[0]!.items, '广播内容是最新全量快照（合并不丢终态）').toHaveLength(2)
-
-      // coalesceMs=0（构造参数覆盖默认）：退化为立即广播
-      const immediate: Array<{ items: unknown[] }> = []
-      const noCoalesce = new StatusBarRegistry(p => immediate.push(p), { coalesceMs: 0 })
-      noCoalesce.broadcastAll()
-      expect(immediate).toHaveLength(1)
-
-      // dispose：pending timer 清理（关停后不再广播）
-      registry.items.set('p:c', { id: 'c', pluginId: 'p', text: 't3', priority: 3 } as never)
-      registry.broadcastAll()
-      registry.dispose()
-      vi.advanceTimersByTime(PLUGIN_NOTIFY_LIMITS.STATUSBAR_COALESCE_MS * 2)
-      expect(broadcasts, 'dispose 后 pending 广播不发出').toHaveLength(1)
-    } finally {
-      vi.useRealTimers()
-    }
-  })
 })
 
-// ══════════════════════════════════════════════════════════════════
-// S3-W4 — CT-D4 毒化隔离（runtime 侧 statusbar 逐条校验）
-// ══════════════════════════════════════════════════════════════════
-
-describe('CT-D4 毒化隔离（runtime 侧）：statusbar 单条坏 item 拒绝该条，不整包丢弃', () => {
-  it('CT-D4 text:{} 单条坏 item：该条 INVALID_TEXT 拒绝并记宿主日志，好条目与后续更新不受影响', async () => {
-    const rpc = new PluginRpcServer()
-    const port = createMockPort()
-    rpc.registerWorker('w1', port)
-    const updateStatusBarItem = vi.fn()
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    registerUiRpcHandlers(rpc, {
-      showSelect: vi.fn(), showConfirm: vi.fn(), showInput: vi.fn(), notify: vi.fn(), updateStatusBarItem,
-    })
-
-    const dispatchStatus = (id: number, itemId: string, text: unknown) =>
-      rpc.dispatch('w1', {
-        jsonrpc: '2.0', id, method: 'plugin.ui.updateStatusBarItem',
-        params: { pluginId: 'p', id: itemId, text },
-      })
-
-    // 1) 好条目正常注册
-    await dispatchStatus(800001, 'good', '正常文案')
-    expect(updateStatusBarItem).toHaveBeenCalledTimes(1)
-
-    // 2) 坏条目（text:{}，spec 点名形态）：该条拒绝（INVALID_TEXT 回包 + 宿主日志）
-    await dispatchStatus(800002, 'bad', {})
-    expect(updateStatusBarItem, '坏条目不触达 registry 写通道').toHaveBeenCalledTimes(1)
-    const responses = port.messages.filter(m => m.type === 'rpc' && (m as { response?: unknown }).response)
-    const last = responses[responses.length - 1] as { response: { error?: { code?: unknown } } }
-    expect(last.response.error?.code).toBe('INVALID_TEXT')
-    expect(warnSpy, '坏条目拒绝留宿主侧日志（可观测）').toHaveBeenCalledWith(
-      expect.stringContaining('statusbar item rejected'),
-    )
-
-    // 3) 坏条目之后的好条目正常放行（毒化不扩散——不整包丢弃后续更新）
-    await dispatchStatus(800003, 'good2', '后续好条目')
-    expect(updateStatusBarItem).toHaveBeenCalledTimes(2)
-    expect(warnSpy.mock.calls.filter(c => String(c[0]).includes('good2')), '好条目不产生拒绝日志').toHaveLength(0)
-
-    warnSpy.mockRestore()
-  })
-})

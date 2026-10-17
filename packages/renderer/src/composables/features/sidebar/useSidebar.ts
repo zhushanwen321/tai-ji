@@ -26,7 +26,7 @@
  * main 侧 2026-08-31 已独立完成同一 strangler 收尾（af96fa94c），两侧合并时采纳其终态命名。
  *
  * 未来替换挂载实现：P4 挂载实际以 core bootstrap.ts 的 registerMountPoints 五挂载点注册表
- * 落地（sidebar.tab / panel.header / composer.toolbar / statusbar / modal，无 'sessions' 挂载点）；
+ * 落地（sidebar.tab / panel.header / composer.toolbar / modal，无 'sessions' 挂载点）；
 
  * 如需替换挂载实现，走该注册表（packages/core/src/bootstrap.ts），勿另起壳侧入口。
  */
@@ -168,7 +168,7 @@ export function useSidebar() {
     clearSubagent: (sid) => useSubagentStore().clearSession(sid),
     clearWorkflow: (sid) => useWorkflowStore().clearSession(sid),
     clearExtensionUI: (sid) => useExtensionUIStore().clearSession(sid),
-    // M1-03：extension-host 三处 scoped map 分区（ViewHostStore/StatusBarController/OverlayLifecycle）
+    // M1-03：extension-host scoped map 分区（ViewHostStore/OverlayLifecycle）
     // 只订阅 session-destroyed bus 事件（该事件无生产者），经 bus 显式 emit 触发分区 cleanup
     clearExtensionHost: (sid) => getExtensionBus().emit({ kind: 'session-destroyed', sessionId: sid }),
     evictChat: (sid) => chat.evictSessionWithVirtual(sid),

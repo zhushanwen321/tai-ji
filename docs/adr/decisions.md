@@ -296,9 +296,6 @@ subagent 是 single-shot 子进程，控制只支持 cancel（现扩展 message/
 ### ADR-0067 subagent「已收起」第三状态全链路清除（2026-09-16 用户裁决）
 subagent 对用户的可见状态只有两桶：进行中 / 已结束（判据 = `isRunningProjection` 及其取反）——「已收起」（archived）不以第三状态呈现，全链路清除不残留：renderer 三桶视图与「已收起」过滤器删除；shared/runtime 投影链的 Intent 类型与 ExecutionRecord.intent / SubagentRecord.intent 字段删除；subagent-core markArchived 原语删除，close 的资源收尾职责由 `markSettledOut` 承接（close 终态写点：幂等、worktreeHandle 清句、`.alive` release、manifest 投影，不写任何意愿字段）；markReactivated 删除（message 续聊无翻位发生，万物可续判据不变）；通知 gate ①（archived 静默检查）删除，close 注销 reason 词 `archived` → `completed`。机制权威 [docs/architecture/subagent-permanent-session-model.md](../architecture/subagent-permanent-session-model.md)（§3.2.5/§3.2.7 已按删除后现状改写）。登记 C-data-20、C-proc-13。
 
-### ADR-0015 statusline plugin 封装
-plugin 中转渲染 statusline（`plugin:statusBarUpdate` 通道），plugin 不直写 UI。
-
 ### ADR-0013 / ADR-0014（digest）sessionData 本地文件持久化（0013 部分有效）
 plugin 的 per-session KV API 保留；底层为本地文件持久化（`plugin-service/session-data-store.ts`，atomic write + 启动恢复 + debounce flush），不依赖 pi.appendEntry。
 
@@ -453,6 +450,7 @@ GitHub issue #24（Windows 10 窗口外壳四问题）复核结论：用户抱�
 
 
 - **ADR-0008** navigate-tree 桥接命令——命令已删，桥接形态被 marker 通道取代。
+- **ADR-0015** statusline plugin 封装（`plugin:statusBarUpdate` 通道）——随 StatusBar 底栏整体退役（ADR-0141），通道、registry 与 builtin statusline 插件已删。
 - **ADR-0019 / ADR-0022** 冷蓝暗色视觉方向——被 ADR-0066 太极纯灰推翻。
 - **ADR-0023** Overview 入口 = sidebar 按钮 + ⌘⇧O——v6 D14 nav 重构移除入口按钮，⌘⇧O 未绑；go-overview 仅经 SearchModal 可达。
 - **ADR-0045** 自研虚拟滚动不引入库——决策反转：MessageStream 已切 virtua/vue `<Virtualizer>`（cw wave w3）。
@@ -759,3 +757,11 @@ WorkflowTab 步骤列表的数据源绑定从「workflow-record 全量快照（6
 **为什么**：form 通道曾是三通道家族唯一未下沉成员，核心双壳各一份靠镜像注释手工维持对齐（companion-bridge 11 处 + useExtensionUI 8 处「同构/镜像」注释），已发生第一处真实漂移（移动壳断连不清挂起 form，桌面壳清——用户可见后果为断连期僵尸 form 假成功提交）。dialog/permission 先行下沉的先例证明 factory 形态可行；第四通道再出镜像即是回归。
 
 **边界**：呈现形态差异（桌面 tab / 移动堆叠、band 样式）留壳侧，不下沉；下沉对象是通道的**行为算法**，不是 UI。
+
+### ADR-0141 StatusBar 底栏整体退役（2026-10-17 用户裁决）
+
+**决定**：main-panel 局部底栏 StatusBar（`packages/ui/src/extension-host/StatusBar.vue`，26px 状态条）及其全部数据链删除——渲染层（组件 / status-bar-source 契约 / StatusBarController / PanelContainer 挂载）、core 数据链（bridge 的 `plugin:statusBarUpdate` / `plugin:statusSetUpdate` / `extension:status` 三解析器 + InternalEvent 三 kind + statusBarItem 贡献类型与 statusbar 挂载点）、runtime 转发链（event-adapter setStatus 翻译、interpreter status-set/status-broadcast、`server.handleStatusSetUpdate`、`plugin.ui.updateStatusBarItem` RPC、StatusBarRegistry、builtin statusline 插件）、shared 协议类型与 plugin-sdk 声明同批删除。pi 扩展的 `ctx.ui.setStatus` 调用保留（pi CLI 独立运行状态栏仍有意义；taiji 内 event-adapter 静默 noop，与 setTitle 同类已知落点）。
+
+**为什么**：状态项的两个真实消费场景已被其他表面承接——pi 扩展状态（goal/todo 进度）由 Composer 任务托盘 widget 区与对话流内联呈现，插件交互入口由 headerAction 顶栏按钮区承接；底栏只剩低价值展示位。ADR-0015 的「plugin 不直写 UI、经 registry 中转」间接层随之失去服务对象。
+
+**边界**：`plugin.*` WS 方法命名空间与 `message.status` 事件链（pi passthrough）不动；ContributionRegistry 其余贡献类型与挂载点不受影响。

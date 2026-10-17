@@ -8,7 +8,7 @@
  *   只进 bus 无处落地。console 消费满足可观测；不弹 toast——毒化插件的高频坏
  *   消息会刷屏，toast 只留给用户可行动的通知）
  *
- * 零 UI 依赖（AC7 边界，与 StatusBarController 同范式）：toast 函数经构造 deps 注入，
+ * 零 UI 依赖（AC7 边界，与 ViewHostStore 同范式）：toast 函数经构造 deps 注入，
  * 壳（装配层）提供命令式 toast 实现。core 不 import 任何 Vue 单文件组件 / 不直连 toast UI 组件 /
  * 不耦合渲染层 toast composable。信息流向单向：runtime 广播 → bridge → bus → controller（feature D5，不反向读 domain）。
  *

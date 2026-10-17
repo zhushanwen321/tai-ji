@@ -13,12 +13,12 @@ describe('InternalEventBus', () => {
   it('TC-3a: emit 后 handler 同步收到（emit 返回即已执行）', () => {
     const bus = new InternalEventBus()
     const handler = vi.fn()
-    bus.on('plugin-status-bar-update', handler)
-    bus.emit({ kind: 'plugin-status-bar-update', items: [{ id: 's1', pluginId: 'p1', text: 'x', alignment: 'right', priority: 0 }] })
+    bus.on('plugin-crashed', handler)
+    bus.emit({ kind: 'plugin-crashed', pluginId: 'p1', error: 'boom' })
     expect(handler).toHaveBeenCalledTimes(1)
-    const e = handler.mock.calls[0]?.[0] as Extract<InternalEvent, { kind: 'plugin-status-bar-update' }>
-    expect(e.kind).toBe('plugin-status-bar-update')
-    expect(e.items[0].id).toBe('s1')
+    const e = handler.mock.calls[0]?.[0] as Extract<InternalEvent, { kind: 'plugin-crashed' }>
+    expect(e.kind).toBe('plugin-crashed')
+    expect(e.pluginId).toBe('p1')
   })
 
   it('TC-3b: unsubscribe 后不再收到', () => {
@@ -64,9 +64,9 @@ describe('MockMessageSource', () => {
     const src = new MockMessageSource()
     const handler = vi.fn()
     const unsub = src.subscribe(handler)
-    src.emit({ type: 'plugin:statusBarUpdate', sessionId: 's1', payload: {} })
+    src.emit({ type: 'plugin:notification', sessionId: 's1', payload: {} })
     expect(handler).toHaveBeenCalledTimes(1)
-    expect(handler.mock.calls[0]?.[0]).toMatchObject({ type: 'plugin:statusBarUpdate', sessionId: 's1' })
+    expect(handler.mock.calls[0]?.[0]).toMatchObject({ type: 'plugin:notification', sessionId: 's1' })
     unsub()
     src.emit({ type: 'plugin:crashed', payload: {} })
     expect(handler).toHaveBeenCalledTimes(1)

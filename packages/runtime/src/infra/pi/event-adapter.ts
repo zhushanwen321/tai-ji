@@ -96,7 +96,8 @@ const STOP_REASON_MAP: Record<string, string> = {
  *
  * notify 不在此列——它是 fire-and-forget（pi rpc-mode.ts notify 发后不等回复），
  * 走独立 extension:notify WS 帧 + 前端 toast 渲染（非阻塞）。
- * setStatus/setWidget/set_editor_text 也不在此列——它们走独立分支，不产 dialog 帧。
+ * setWidget/set_editor_text 也不在此列——它们走独立分支，不产 dialog 帧
+ * （setStatus 曾同列，状态栏退役后改为静默 noop，见 translateStatusRequest）。
  *
  * 用 `as const satisfies readonly ExtensionInteractMethod[]` 实现编译期穷举检查：
  * ExtensionInteractMethod 扩展新方法时，若此数组遗漏，tsc 报错（而非静默 noop 丢弃）。
@@ -107,7 +108,7 @@ const INTERACTIVE_UI_METHODS = new Set(
 
 /**
  * 扩展交互表面 kind 词表（pi1-disposition-chat-flow D6①，三值）：dialog / notify / widget——
- * 每值物化于一族 WS 消息并驱动前端路由（值值有消费点，无死值；setStatus/set_editor_text 是
+ * 每值物化于一族 WS 消息并驱动前端路由（值值有消费点，无死值；set_editor_text 是
  * runtime/前端内部状态上报，不进本词表、出口与载荷维持现状——见映射表各行归类）。
  * 词表止点：本类型是 kind 词表在仓内的唯一驻留点（合法持有点），taiji 协议侧（WS 载荷、
  * 前端路由）不出现 kind 字段——kind 经下方帧类型映射物化为消息类型本身。
@@ -656,24 +657,14 @@ function isJournalReportFrame(event: PiEvent): boolean {
 }
 
 /**
- * extension_ui_request{method:'setStatus'} → status-set（interpreter 路由 server）+
- * status-broadcast（WS 帧）。审计项 B（协议 spec §8.1）：保留 text（stripAnsi 后纯文本，
- * 向后兼容）+ textRaw（原始 ANSI 文本），前端可选 textRaw 做 ANSI 着色渲染，text 作纯文本兜底。
+ * extension_ui_request{method:'setStatus'} 静默忽略（状态栏底栏已退役）：状态栏 UI 与
+ * runtime→前端的内部路由事件与广播帧转发链已整体删除；pi 扩展（goal/todo 等）
+ * 的 setStatus 调用在 taiji 内成为无害空操作（pi CLI 独立运行时状态栏仍有意义）。
+ * 显式分支放行（不落 RT-2#7 的未知 method warn——setStatus 是宿主有意不实现的已知落点，
+ * 与 setTitle 同类，逐条 warn 会刷日志）。
  */
-function translateStatusRequest(event: PiExtensionUiRequestEvent, sid: string): PiTranslatedEvent[] {
-  const key = String(event.statusKey ?? '')
-  const raw = String(event.statusText ?? '')
-  const text = stripAnsi(raw)
-  return [
-    { kind: 'status-set', sessionId: sid, key, text, textRaw: raw },
-    {
-      kind: 'status-broadcast',
-      message: {
-        type: EXTENSION_EVENTS.STATUS as ServerMessageType,
-        payload: { sessionId: sid, statusKey: key, text, textRaw: raw },
-      },
-    },
-  ]
+function translateStatusRequest(): PiTranslatedEvent[] {
+  return [{ kind: 'noop' }]
 }
 
 /**
@@ -1118,7 +1109,7 @@ function isMarkerSelect(event: PiExtensionUiRequestEvent, marker: string): boole
 function handleExtensionUIRequest(event: PiExtensionUiRequestEvent, sid: string): PiTranslatedEvent[] {
   const method = event.method
 
-  if (method === 'setStatus') return translateStatusRequest(event, sid)
+  if (method === 'setStatus') return translateStatusRequest()
 
   if (method === 'setWidget') return translateSetWidgetRequest(event, sid)
 

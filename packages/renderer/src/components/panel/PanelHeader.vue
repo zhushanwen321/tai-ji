@@ -124,9 +124,9 @@
         :session-id="sessionId"
         empty="hidden"
       />
-      <!-- 终端开关（三卡化 2026-10-04 迁入：原 StatusBar 底栏落点退役，鼠标路径入口与其它
-           容器开关同区，位于右侧抽屉开关左边）。恒显（不随折叠态 chrome 迁移、不随 sessionId
-           消失——landing 态也开终端区，与原 StatusBar 按钮行为对齐）。 -->
+      <!-- 终端开关（三卡化 2026-10-04 迁入顶栏：鼠标路径入口与其它容器开关同区，
+           位于右侧抽屉开关左边）。恒显（不随折叠态 chrome 迁移、不随 sessionId 消失
+           ——landing 态也开终端区）。 -->
       <TerminalToggleButton />
       <!-- SideDrawer toggle（always-visible）。demo 形态：30×30 钮 + 17px 图标（--hb-btn/--hb-icon），
            开态无选中视觉（demo 选中态范式不含卡头开关钮），开关反馈由抽屉面板本身承担。

@@ -80,7 +80,6 @@ vi.mock('@/components/panel/SubagentTab.vue', () => ({
   default: { name: 'SubagentTab', template: '<div />' },
 }))
 vi.mock('@taiji/ui/extension-host', () => ({
-  StatusBar: { name: 'StatusBar', template: '<div />' },
 }))
 
 // ── 壳层依赖 mock（对齐 panel-container-drawer-mode.test.ts）──

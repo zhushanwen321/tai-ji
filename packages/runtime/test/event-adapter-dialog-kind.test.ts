@@ -7,7 +7,7 @@
  * | select/confirm/input/editor（无 marker） | extension.dialog 帧（载荷 dialogKind，taiji 词表） |
  * | notify           | extension:notify 帧（出口与载荷零变化）      |
  * | setWidget        | extension:widget 帧（出口与载荷零变化，无 kind） |
- * | setStatus        | status-set 内部事件 + extension:status 帧（双出口载荷零变化，无 kind） |
+ * | setStatus        | noop（状态栏退役，静默忽略，无帧） |
  * | set_editor_text  | extension:setEditorText 帧（出口与载荷零变化，无 kind） |
  * | setTitle         | warn + noop（宿主不实现，pi fire-and-forget 无损失） |
  * | select + SESSION_MANAGER_MARKER | session-manager-ui 内部 kind（不广播前端） |
@@ -102,17 +102,9 @@ describe('D6 mapping table: notify / setWidget / setStatus / set_editor_text / s
     expect(msg.payload).toEqual({ sessionId: SID, widgetKey: 'k', lines: ['l1'] })
   })
 
-  it('setStatus → status-set 内部事件 + extension:status 帧双出口（载荷零变化，均无 kind）', () => {
+  it('setStatus → noop（状态栏退役，静默忽略不产帧）', () => {
     const events = translate({ type: 'extension_ui_request', method: 'setStatus', id: 'req-s', statusKey: 'model', statusText: 'gpt-x' } as PiTestEvent as never, SID)
-    // 内部路由事件（interpreter → server.handleStatusSetUpdate）
-    const statusSet = events.find((e) => e.kind === 'status-set') as { key: string; text: string; sessionId: string } | undefined
-    expect(statusSet).toEqual({ kind: 'status-set', sessionId: SID, key: 'model', text: 'gpt-x', textRaw: 'gpt-x' })
-    // WS 广播帧
-    const frames = events.filter((e) => e.kind === 'status-broadcast')
-    expect(frames).toHaveLength(1)
-    const msg = (frames[0] as { message: ServerMessage }).message
-    expect(msg.type).toBe('extension:status')
-    expect(msg.payload).toEqual({ sessionId: SID, statusKey: 'model', text: 'gpt-x', textRaw: 'gpt-x' })
+    expect(events).toEqual([{ kind: 'noop' }])
   })
 
   it('set_editor_text → extension:setEditorText（载荷零变化，无 kind）', () => {

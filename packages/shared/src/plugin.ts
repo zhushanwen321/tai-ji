@@ -11,14 +11,3 @@ export interface PluginInfo {
   trustLevel: 'trusted' | 'sandbox'
   enabled: boolean
 }
-
-export interface StatusBarItem {
-  id: string
-  pluginId: string
-  text: string
-  tooltip?: string
-  commandId?: string
-  priority: number
-  scope: 'per-session' | 'global'
-  sessionId?: string
-}

@@ -8,7 +8,6 @@ import type { PluginActivator } from './plugin-activator.js'
 import type { SessionDataStore } from './session-data-store.js'
 import type { PluginStorage } from './plugin-storage.js'
 import type { PluginRpcServer } from './plugin-rpc-server.js'
-import type { StatusBarRegistry } from './status-bar-registry.js'
 import type { SessionEventDispatch } from './api/session-api.js'
 import { toErrorMessage } from '../../utils/errors.js'
 import { PendingTracker } from '../../utils/async/pending-tracker.js'
@@ -20,7 +19,6 @@ export interface PluginShutdownDeps {
   sessionDataStore: SessionDataStore
   storage: PluginStorage
   rpcServer: PluginRpcServer
-  statusBarRegistry: StatusBarRegistry
   commandInvokes: PendingTracker<string, unknown>
   sessionEventDispatch: SessionEventDispatch
 }
@@ -30,9 +28,6 @@ export async function shutdownPluginCollaborators(deps: PluginShutdownDeps): Pro
   //（Worker 即将终止，等待中的 executeCommand 与后续事件投递都无意义）。
   deps.commandInvokes.rejectAll(new Error('Plugin service shutting down'))
   deps.sessionEventDispatch.clearAll()
-
-  // S3-W4：statusbar 广播合并窗口的待发 timer 清理（关停后不再广播）
-  deps.statusBarRegistry.dispose()
 
   // D6/W4 关停顺序（反转）：deactivateAll（allSettled，单插件 deactivate 超时不
   // 阻塞整体——每插件自带 DEACTIVATE_TIMEOUT_MS 兜底）→ sessionData flush+dispose

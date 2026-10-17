@@ -708,10 +708,10 @@ demo 用 `@keyframes shimmer`（1.4s ease-in-out infinite，linear-gradient 扫�
 
 ### 6.4 Bottom Drawer（底抽屉）
 
-- **位置**（三卡化）：独立内容卡（`--surface` + border + `--radius-card` 12px 圆角 + shadow-1），split 行（对话流卡 + 右抽屉卡）之下、StatusBar 之上，横跨主区全宽；与上方卡列间距 = a = 4px（三轮裁决：与横缝及窗口边距统一）、与 StatusBar 间 4px；composer 在其上沿保持可见、随开合上移。与右抽屉可同时开（一挤宽度、一挤高度互不冲突；右抽屉开着时底抽屉全宽、右抽屉变矮）
+- **位置**（三卡化）：独立内容卡（`--surface` + border + `--radius-card` 12px 圆角 + shadow-1），split 行（对话流卡 + 右抽屉卡）之下，横跨主区全宽；与上方卡列间距 = a = 4px（三轮裁决：与横缝及窗口边距统一）；composer 在其上沿保持可见、随开合上移。与右抽屉可同时开（一挤宽度、一挤高度互不冲突；右抽屉开着时底抽屉全宽、右抽屉变矮）
 - **高度**：默认 35%；上沿拖拽手柄命中区跨进卡上方缝（4px，视觉线贴卡顶边 1px，hover `border-strong` / drag `accent`）；拖拽 clamp 15%–70%，高度为全局布局值单键持久化（`taiji:bottom-drawer-height`）；窗口过矮时显示期钳制保证对话流 + composer 最小可视区域，不写回持久值
 - **内容**：terminal 唯一内容（不预设 tab 枚举）；终端面板头部一行 = **实例切换条**（tab 条 + 右簇）——多实例：条目切换（tab 范式见 §5.3.1）/ 「+」新建（新建即自动激活并聚焦新实例输入区，2026-10-04 产品裁决）/ tab 内**常驻**关闭叉（最后实例灰置禁用）/ 空态占位（文案如「终端 1」按序号命名）/ 右簇**收起按钮**（收起整个终端区，收起语义非销毁，实例保留、重开走对账恢复，焦点回 composer）；原第二行工具栏（清屏/终止）随 head 一行化移除，清屏功能退役；空态时 xterm 黑块容器不渲染；spawn 失败走 inline 错误条 + 重试，chunk 装载失败走 AsyncErrorFallback
-- **开关**：`` ⌃` ``（before-input-event 窗口级拦截，不经 globalShortcut——失焦无动作）+ **PanelHeader 顶栏终端按钮**（三卡化 2026-10-04 迁入：原 StatusBar 底栏 trailing 落点退役，鼠标路径入口与右抽屉开关同区、居其左；StatusBar 回落「有状态项才显示」纯显隐）；开合态按会话分区、不持久化；终端聚焦时 Esc 归终端输入，关抽屉走 `` ⌃` `` / 顶栏按钮 / 终端头部收起按钮
+- **开关**：`` ⌃` ``（before-input-event 窗口级拦截，不经 globalShortcut——失焦无动作）+ **PanelHeader 顶栏终端按钮**（鼠标路径入口与右抽屉开关同区、居其左）；开合态按会话分区、不持久化；终端聚焦时 Esc 归终端输入，关抽屉走 `` ⌃` `` / 顶栏按钮 / 终端头部收起按钮
 
 ### 6.5 Overlay（内容浮层）
 

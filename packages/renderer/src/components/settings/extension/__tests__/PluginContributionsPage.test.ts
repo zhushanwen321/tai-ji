@@ -7,7 +7,7 @@
  * 覆盖 design TC1/TC2：
  *   - TC1（SettingsModal 导航）：进入扩展 → 插件贡献子页 → PluginSettingsPage 渲染
  *     （plugin-settings-page testid 存在；contribution-unavailable 置灰项存在；
- *     builtin statusline/tasks 可见——DOM 断言，AGENTS.md 测试规范 §8 渲染 gate）。
+ *     builtin scheduler-manager/tasks 可见——DOM 断言，AGENTS.md 测试规范 §8 渲染 gate）。
  *   - TC2（provide 接线）：toContributionInfos 纯函数映射（available + 未注册挂载点置灰 + 原因），
  *     真实 ContributionRegistry + MountPointRegistry；组件测试 global.provide mock 数据源
  *     （贡献列表含 unavailable 项 → is-unavailable class + 原因文案渲染）。
@@ -84,12 +84,12 @@ function stubTransport(): SettingsTransport {
   return makeSettingsTransportStub()
 }
 
-/** mock 数据源：builtin statusline/tasks 插件 + 贡献可用性（statusbar/sidebar.tab 注册=可用，slash 未注册=置灰+原因）。 */
+/** mock 数据源：builtin scheduler-manager/tasks 插件 + 贡献可用性（panel.header/sidebar.tab 注册=可用，slash/commands 未注册=置灰+原因）。 */
 const PLUGINS: PluginInfo[] = [
   {
-    pluginId: 'statusline',
+    pluginId: 'scheduler-manager',
     version: '1.0.0',
-    displayName: 'statusline',
+    displayName: 'scheduler-manager',
     description: '',
     status: 'active',
     trustLevel: 'trusted',
@@ -113,8 +113,8 @@ function makeDataSource(): PluginSettingsDataSource {
       return () => {}
     }),
     getContributions: vi.fn((pluginId: string) => {
-      if (pluginId === 'statusline') {
-        return [{ id: 'statusline', type: 'statusBarItem', available: true }]
+      if (pluginId === 'scheduler-manager') {
+        return [{ id: 'scheduler-manager.open', type: 'headerAction', available: true }]
       }
       if (pluginId === 'tasks') {
         return [
@@ -202,11 +202,11 @@ describe('TC1: Settings 导航到插件贡献子页 → PluginSettingsPage 渲�
     expect(document.body.querySelector('[data-testid="plugin-settings-page"]')).not.toBeNull()
     // 数据源被消费：onPlugins 订阅 + getContributions 按插件查询
     expect(dataSource.onPlugins).toHaveBeenCalledTimes(1)
-    expect(dataSource.getContributions).toHaveBeenCalledWith('statusline')
+    expect(dataSource.getContributions).toHaveBeenCalledWith('scheduler-manager')
     expect(dataSource.getContributions).toHaveBeenCalledWith('tasks')
-    // builtin statusline/tasks 可见
+    // builtin scheduler-manager/tasks 可见
     const bodyText = document.body.textContent ?? ''
-    expect(bodyText).toContain('statusline')
+    expect(bodyText).toContain('scheduler-manager')
     expect(bodyText).toContain('tasks')
     // 未注册挂载点（slash）置灰项存在 + 原因文案
     const grayed = document.body.querySelector('[data-testid="contribution-unavailable"]')
@@ -222,15 +222,20 @@ describe('TC2: provide 接线（toContributionInfos 映射 + 组件 global.provi
     contributions.registerBuiltin()
     const mounts = new MountPointRegistry()
     mounts.register('sidebar.tab')
-    mounts.register('statusbar')
+    mounts.register('panel.header')
 
-    const statuslineInfos = toContributionInfos(
-      contributions.getContributions({ pluginId: 'statusline' }),
+    const managerInfos = toContributionInfos(
+      contributions.getContributions({ pluginId: 'scheduler-manager' }),
       mounts,
     )
-    expect(statuslineInfos).toEqual([
-      { id: 'statusline', type: 'statusBarItem', available: true, reason: undefined },
+    // scheduler-manager: headerAction（panel.header 注册 → 可用）+ 3 commands（commands 未注册 → 置灰 + 原因）
+    const haInfos = managerInfos.filter((i) => i.type === 'headerAction')
+    expect(haInfos).toEqual([
+      { id: 'scheduler-manager.open', type: 'headerAction', available: true, reason: undefined },
     ])
+    const cmdInfos = managerInfos.filter((i) => i.type === 'command')
+    expect(cmdInfos.length).toBe(3)
+    expect(cmdInfos.every((i) => !i.available)).toBe(true)
 
     const tasksInfos = toContributionInfos(
       contributions.getContributions({ pluginId: 'tasks' }),
@@ -259,8 +264,8 @@ describe('TC2: provide 接线（toContributionInfos 映射 + 组件 global.provi
 
     // 子页头 + PluginSettingsPage 渲染
     expect(wrapper.find('[data-testid="plugin-settings-page"]').exists()).toBe(true)
-    // builtin statusline/tasks 可见（插件卡片）
-    expect(wrapper.text()).toContain('statusline')
+    // builtin scheduler-manager/tasks 可见（插件卡片）
+    expect(wrapper.text()).toContain('scheduler-manager')
     expect(wrapper.text()).toContain('tasks')
     // 置灰项：contribution-unavailable testid + is-unavailable class + 原因
     const grayed = wrapper.find('[data-testid="contribution-unavailable"]')

@@ -3,7 +3,7 @@
  *
  * 已交付模块：types/InternalEventBus/createSessionScopedMap/MountPointRegistry/
  * ContributionRegistry/builtinContributions/PluginMessageSource+MockMessageSource（W1）+
- * MessageBusBridge（W2）+ CommandRegistry/ActivationManager（W3）+ StatusBarController/
+ * MessageBusBridge（W2）+ CommandRegistry/ActivationManager（W3）+
  * OverlayLifecycle/ViewHostStore（W4 消费端）。AC7 边界（消费端不 import domain/stores）
  * 由 scripts/verify-extension-host-boundaries.mjs 静态检查强制。
  */
@@ -22,8 +22,6 @@ export { ActivationManager } from './activation-manager'
 export type { ActivationEvent, ActivationTrigger, ActivationManagerDeps } from './activation-manager'
 export { CommandRegistry } from './command-registry'
 export type { CommandRecord, CommandExecutor, CommandRegistryDeps, SlashCommandLike, ResolvedSlashCommand } from './command-registry'
-export { StatusBarController } from './status-bar-controller'
-export type { StatusBarSessionState, StatusBarControllerDeps } from './status-bar-controller'
 export { NotificationHostController } from './notification-host-controller'
 export type { NotificationHostControllerDeps } from './notification-host-controller'
 export { OverlayLifecycle, GLOBAL_OVERLAY_KEY } from './overlay-lifecycle'
