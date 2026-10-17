@@ -235,7 +235,7 @@ export function parseModelCatalog(
  * 回透传，不致引擎不可用）。
  *
  * 单源纪律：本表是引擎作者对自身翻译语义的唯一声明位（staged/远程形态的
- * RemoteEngine 与 runtime 写校验面均消费声明值，不 import 引擎实装）；in-process
+ * RemoteEngine 快照消费声明值；宿主侧写校验接入时同源读取，不 import 引擎实装）；in-process
  * 引擎类内的代码表（如 zcode preparer PI_TO_ZCODE_PROVIDER_MAP）是同一语义的执行
  * 体，与声明表由对账锁步单测绑定（漂移即红）。
  */

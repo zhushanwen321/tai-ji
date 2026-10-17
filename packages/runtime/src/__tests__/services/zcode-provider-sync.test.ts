@@ -164,7 +164,7 @@ function stdProvider(): ProviderConfigView {
 }
 
 function stdCredential(): ResolvedProviderCredential {
-  return { key: 'resolved-key', source: 'auth.json' }
+  return { key: 'resolved-key', source: 'auth.json', kind: 'api_key' }
 }
 
 /** 纯函数标准输入（StepFun 全绿通过形态）。 */
@@ -216,6 +216,17 @@ describe('mapPiProvidersToZcodeRules：D2 六条判定', () => {
       expect(result.rules).toHaveLength(0)
       expect(result.skips[0]?.rule).toBe('unsupported-credential')
     }
+  })
+
+  it('判定①：oauth 凭据（auth.json type:"oauth" 的短时 access token）不映射为 api-key 条目（MF-2）', () => {
+    const result = mapPiProvidersToZcodeRules(stdMappingInput({
+      credentials: new Map([['stepfun', { key: 'oauth-access-token', source: 'auth.json', kind: 'oauth' }]]),
+    }))
+    expect(result.rules).toHaveLength(0)
+    expect(result.providerOrder).toHaveLength(0)
+    expect(result.skips).toEqual([
+      expect.objectContaining({ providerId: 'stepfun', rule: 'oauth-credential' }),
+    ])
   })
 
   it('判定②：models.json enabled:false 与 enabledModels 白名单禁用均整条跳过', () => {
@@ -525,7 +536,7 @@ describe('syncZcodeProviders：编排与瘦副本形态', () => {
     const outcome = await syncZcodeProviders(makeDeps({
       providers: {},
       credentialOnlyIds: ['xiaomi-token-plan-cn'],
-      credentials: { 'xiaomi-token-plan-cn': { key: 'tp-test-key', source: 'auth.json' } },
+      credentials: { 'xiaomi-token-plan-cn': { key: 'tp-test-key', source: 'auth.json', kind: 'api_key' } },
       baseUrls: { 'xiaomi-token-plan-cn': 'https://token-plan-cn.xiaomimimo.com/v1' },
       catalog: {
         'xiaomi-token-plan-cn': [
@@ -547,6 +558,60 @@ describe('syncZcodeProviders：编排与瘦副本形态', () => {
     expect(copy.config.providerOrder).toEqual(['xiaomi-token-plan-cn'])
   })
 
+  it('oauth 凭据（auth.json type:"oauth"）不进映射：skip=oauth-credential、副本不落盘、清单派生不产模型（MF-2）', async () => {
+    writeRealProviderConfig([], [])
+    writeV2Config({})
+    writeCliConfig([])
+
+    const outcome = await syncZcodeProviders(makeDeps({
+      providers: {},
+      credentialOnlyIds: ['anthropic'],
+      // resolver 凭据形态判别：auth.json oauth 条目 → kind='oauth'（access 是短时 token）
+      credentials: { anthropic: { key: 'oauth-access-token', source: 'auth.json', kind: 'oauth' } },
+      baseUrls: { anthropic: 'https://api.anthropic.com' },
+      catalog: {
+        anthropic: [{ id: 'claude-sonnet-4-5', api: 'anthropic-messages', baseUrl: 'https://api.anthropic.com' }],
+      },
+    }))
+
+    // 唯一候选被 skip → 空集分支：副本不写（旧副本若在也删除），短时 access token 永不落盘
+    expect(outcome.status).toBe('skipped-empty')
+    expect(outcome.skips.map(s => s.rule)).toContain('oauth-credential')
+    expect(existsSync(paths.syncedCopyPath)).toBe(false)
+    expect(warnings.some(w => w.includes('oauth-credential'))).toBe(true)
+    // settings 清单派生（读副本）同样不产该 provider 的模型
+    const models = deriveZcodeEngineModels({ ...paths, builtinCatalogPath: join(root, 'absent-catalog.json') })
+    expect(models.map(m => m.id)).toEqual([])
+  })
+
+  it('SUG-3：provider id 与 Object.prototype 继承名同名（toString）→ own-property 判定，仍进候选集', async () => {
+    writeRealProviderConfig([], [])
+    writeV2Config({})
+    writeCliConfig([])
+
+    // null-prototype 字典：字面量 `{ toString: ... }` 会被 TS 当成 Object.prototype.toString 覆写，
+    // 上下文类型丢失（source/kind 被宽化成 string）。
+    const protoCredentials: Record<string, ResolvedProviderCredential | undefined> = Object.create(null)
+    protoCredentials['toString'] = { key: 'proto-key', source: 'auth.json', kind: 'api_key' }
+
+    const outcome = await syncZcodeProviders(makeDeps({
+      providers: {},
+      credentialOnlyIds: ['toString'],
+      credentials: protoCredentials,
+      baseUrls: { toString: 'https://proto.example/v1' },
+      catalog: { toString: [{ id: 'proto-model', api: 'openai-completions', baseUrl: 'https://proto.example/v1' }] },
+    }))
+
+    // `in` 判定会被 Object.prototype.toString 继承键误命中 → 本题在修复前为 skipped-empty
+    expect(outcome.status).toBe('written')
+    const copy = JSON.parse(readFileSync(paths.syncedCopyPath, 'utf-8')) as {
+      config: { providerOrder: string[]; providerConfigRules: { providerRules: Array<{ providerId: string; config: { personalModelIds: string[] } }> } }
+    }
+    const rules = copy.config.providerConfigRules.providerRules
+    expect(rules.map(r => r.providerId)).toEqual(['toString'])
+    expect(rules[0]?.config.personalModelIds).toEqual(['proto-model'])
+  })
+
   it('auth.json 型翻译通道（zai-coding-cn 仅凭据源命中）→ 同样 skip 不产条目（例外对枚举路径同样生效）', async () => {
     writeRealProviderConfig([], [])
     writeV2Config({})
@@ -555,7 +620,7 @@ describe('syncZcodeProviders：编排与瘦副本形态', () => {
     const outcome = await syncZcodeProviders(makeDeps({
       providers: {},
       credentialOnlyIds: ['zai-coding-cn'],
-      credentials: { 'zai-coding-cn': { key: 'zai-test-key', source: 'auth.json' } },
+      credentials: { 'zai-coding-cn': { key: 'zai-test-key', source: 'auth.json', kind: 'api_key' } },
     }))
 
     // 全员 skip（唯一候选是翻译通道）→ skipped-empty 分支：不落盘且删除旧副本
@@ -789,10 +854,18 @@ describe('附属函数', () => {
 
 // ── 三处同源锁步（ADR-0138 机器防线：代码表 + manifest 声明 + 同步 skip 集合）──
 
+/**
+ * zcode 引擎包 manifest 路径（SUG-10：包目录名集中为命名常量——runtime 禁 import 引擎包，
+ * 只能按数据文件路径对账；zcode-subagent-cli 若改名/移动，必须同步本常量）。
+ */
+const ZCODE_ENGINE_PACKAGE_JSON_PATH = join(
+  dirname(fileURLToPath(import.meta.url)),
+  '../../../../zcode-subagent-cli/package.json',
+)
+
 describe('translation-channel 三处同源锁步（ADR-0138）', () => {
   it('TRANSLATION_CHANNEL_PROVIDER_IDS ↔ zcode 包 manifest modelTranslation 声明键集合一致（runtime 禁 import 引擎包——按数据文件路径对账；代码表↔manifest 腿由 preparer.test.ts 锁步用例承载）', () => {
-    const pkgPath = join(dirname(fileURLToPath(import.meta.url)), '../../../../zcode-subagent-cli/package.json')
-    const pkg = JSON.parse(readFileSync(pkgPath, 'utf8')) as {
+    const pkg = JSON.parse(readFileSync(ZCODE_ENGINE_PACKAGE_JSON_PATH, 'utf8')) as {
       taiji?: { subagentEngine?: { modelTranslation?: Record<string, string> } }
     }
     const declared = pkg.taiji?.subagentEngine?.modelTranslation

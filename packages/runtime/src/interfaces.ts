@@ -705,8 +705,13 @@ export interface IExtensionService {
  * 实现：services/auth/auth-service.ts（路径 B 自实现：device/callback flow 拿 token 写 auth.json）。
  */
 export interface IAuthService {
-  /** 启动 OAuth login（异步执行）。无 oauthConfig / 已有进行中 flow → started:false + error。 */
-  login(providerId: string): { started: boolean; error?: string }
+  /**
+   * 启动 OAuth login（异步执行）。无 oauthConfig / 已有进行中 flow → started:false + error。
+   * onAuthenticated（可选）：flow 成功把凭据写入 auth.json（并广播 auth.success）后回调——
+   * 凭据域变更的联动消费方（如 zcode provider 镜像同步）经此事件驱动重跑，禁止时间轮询
+   * （事实驱动，ADR-0122）。
+   */
+  login(providerId: string, onAuthenticated?: () => void): { started: boolean; error?: string }
   /** 中止进行中 flow。幂等：无 flow 返回 cancelled:false。 */
   cancel(providerId: string): { cancelled: boolean }
   /** 读 auth.json：该 provider 是否有 oauth 凭据。 */

@@ -85,8 +85,11 @@ import { warnOnce } from '../utils/warn-once.js'
 export interface RuntimeServerOptionalServices {
   extension?: IExtensionService
   /** provider 变更后的 zcode 镜像同步（write-through，ADR-0138 镜像架构）：settings 域
-   *  provider 变更成功后由 provider-message-handler 调用；组合根接 runZcodeProviderStartupSync
-   *  （与启动同步同源同实现——同一判定链，镜像天然对账）。缺省 undefined = 不镜像。 */
+   *  provider 变更成功后由 provider-message-handler 调用；组合根经
+   *  createZcodeProviderMirrorSync 接 runZcodeProviderStartupSync（与启动同步同源同实现
+   *  ——同一判定链，镜像天然对账）。缺省 undefined = 不镜像。
+   *  命名说明（有意不统一）：本键是装配面服务名，按引擎镜像职责命名（zcode 专属）；
+   *  handler ctx 侧同义字段为 providersMutatedSync，按触发语义命名（不绑引擎实现）。 */
   zcodeProviderMirrorSync?: () => Promise<void>
   plugin?: IPluginService
   git?: GitService

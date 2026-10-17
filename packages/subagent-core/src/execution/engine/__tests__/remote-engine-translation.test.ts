@@ -36,7 +36,7 @@ const FAKE_CAPS: EngineCapabilities = {
   setModel: "unsupported",
 };
 
-const TABLE = { "zai-coding-cn": "account:zai-individual-coding-plan" };
+const TABLE = { "zai-coding-cn": "account:bigmodel-individual-coding-plan" };
 
 function makeEngine(manifest: { modelTranslation?: Record<string, string> }): RemoteEngine {
   const client = new EngineClient({
@@ -61,14 +61,14 @@ describe("RemoteEngine translateModelRef 形态映射（manifest modelTranslatio
     const engine = makeEngine({ modelTranslation: TABLE });
     expect(typeof engine.translateModelRef).toBe("function");
     expect(engine.translateModelRef("zai-coding-cn/glm-5.3-flash")).toBe(
-      "account:zai-individual-coding-plan/glm-5.3-flash",
+      "account:bigmodel-individual-coding-plan/glm-5.3-flash",
     );
   });
 
   it("幂等：翻译产物（account:/个人 id）与裸 id 再入恒等", () => {
     const engine = makeEngine({ modelTranslation: TABLE });
-    expect(engine.translateModelRef("account:zai-individual-coding-plan/GLM-5.3-Flash")).toBe(
-      "account:zai-individual-coding-plan/GLM-5.3-Flash",
+    expect(engine.translateModelRef("account:bigmodel-individual-coding-plan/GLM-5.3-Flash")).toBe(
+      "account:bigmodel-individual-coding-plan/GLM-5.3-Flash",
     );
     expect(engine.translateModelRef("e512d53e-0bfc/mimo-v2.6-flash")).toBe("e512d53e-0bfc/mimo-v2.6-flash");
     expect(engine.translateModelRef("GLM-5.3")).toBe("GLM-5.3");
@@ -77,6 +77,12 @@ describe("RemoteEngine translateModelRef 形态映射（manifest modelTranslatio
   it("表外 provider（含已退役 pi 词汇）原样透传——不纠正不抛错，引擎侧裁决", () => {
     const engine = makeEngine({ modelTranslation: TABLE });
     expect(engine.translateModelRef("zai-coding-plan/GLM-5.3-Flash")).toBe("zai-coding-plan/GLM-5.3-Flash");
+  });
+
+  it("原型链键（toString/constructor）不作 provider 段命中——原样透传（自有属性判定）", () => {
+    const engine = makeEngine({ modelTranslation: TABLE });
+    expect(engine.translateModelRef("toString/GLM-5.3")).toBe("toString/GLM-5.3");
+    expect(engine.translateModelRef("constructor/GLM-5.3")).toBe("constructor/GLM-5.3");
   });
 
   it("声明表缺席 → 成员摘除（消费方 typeof 探测缺席语义：恒等透传 + 生效回执 warn）", () => {

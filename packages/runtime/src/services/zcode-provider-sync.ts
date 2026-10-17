@@ -23,6 +23,9 @@
  *
  * 凭据读取红线（C-proc-14）：pi 侧凭据只经 ProviderCredentialResolver 单通道，
  * 禁止自建解析链（守卫 scripts/check-provider-credential-reads.mjs）。
+ * 凭据形态红线（MF-2）：只有静态 api-key（resolver `kind === 'api_key'`）可映射为副本条目；
+ * auth.json 的 oauth 条目（短时 access token，pi 侧自动 refresh）一律 skip=oauth-credential
+ * ——复制到 zcode 只会 401，且在副本里残留明文 token（退出登录后仍在）。
  * 跨包红线：runtime 不 import zcode-subagent-cli——zcode-builtin.json 定位逻辑与
  * preparer.ts locateZcodeBuiltinCatalog 同源复制（本文件 locateZcodeBuiltinCatalogSync，
  * 语义对齐 preparer.ts:246-294；漂移防线 = u2b 侧对账）。
@@ -84,6 +87,7 @@ export interface ProviderSyncSkip { // oe-exempt:20261012:framework:映射链形
   readonly rule:
     | 'no-credential' // ① 凭据不可得
     | 'unsupported-credential' // ① 凭据形态不支持（command / unresolved-env）
+    | 'oauth-credential' // ① 凭据形态为 oauth（短时 access token，不可当静态 api-key 复制）
     | 'provider-disabled' // ② provider 级禁用（enabled:false 或白名单禁用）
     | 'no-base-url' // ③ baseUrl 三链全空
     | 'no-supported-api' // ④ 生效协议无 zcode 对应
@@ -317,6 +321,12 @@ function mapSingleProviderToZcodeRule(
   }
   if ('unsupported' in cred) {
     return { skip: { providerId: id, rule: 'unsupported-credential', detail: `凭据形态不支持（${cred.unsupported}），不做 api-key 映射，请修正 pi 侧凭据配置` } }
+  }
+  // ① 凭据形态为 oauth → 不映射。oauth access 是短时 token（pi 侧自动 refresh），zcode
+  // 无法用它做静态 api-key 鉴权：复制过去只会得到 401，且副本里残留明文 token（退出登录
+  // 后仍留在副本）。凭据域事实来自 resolver 的 kind 判别，不做 provider id 分支（零写死）。
+  if (cred.kind === 'oauth') {
+    return { skip: { providerId: id, rule: 'oauth-credential', detail: '凭据类型为 oauth（短时 access token，非静态 api-key），不做 api-key 映射——zcode 侧请使用其自有账号/订阅登录' } }
   }
 
   // ② provider 级禁用（models.json enabled:false 遗留形态 + enabledModels 白名单派生）→ 整条跳过
@@ -736,10 +746,14 @@ export async function syncZcodeProviders(deps: ZcodeProviderSyncDeps): Promise<Z
   // key 在 auth.json、models/baseUrl 在 catalog 快照，models.json 无条目）。合成最小
   // 视图（空 cfg：enabled 缺省 true、models 空 → catalog 供数、baseUrl 走 resolver
   // 两级回退）。零写死原则：并集是数据驱动，无任何 provider id 分支。
+  // 注：并集含 oauth 型 auth.json 条目 → 映射链按 resolver 的 kind 判别 skip=oauth-credential
+  // （候选入集只为登记「为何不同步」，短时 token 永不落盘——MF-2）。
   const credentialBackedIds = deps.credentialResolver.listCredentialBackedProviderIds()
   const providers: Record<string, ProviderConfigView> = { ...models.providers }
   for (const id of credentialBackedIds) {
-    if (!(id in providers)) providers[id] = {}
+    // own-property 判定（不用 `in`）：auth.json 里名为 toString/constructor 的 provider id
+    // 会命中 Object.prototype 继承键而被误判「已在 models.json」→ 该 provider 永不进候选（SUG-3）。
+    if (!Object.hasOwn(providers, id)) providers[id] = {}
   }
 
   const credentials = await resolveCredentialsForSync(deps, providers)

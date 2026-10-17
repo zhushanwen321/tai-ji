@@ -39,6 +39,7 @@ import {
   parseCapabilities,
   parseEnvPrefixes,
   parseModelCatalog,
+  parseModelTranslation,
   resolveManifestBin,
 } from "./engine-manifest.ts";
 import { inspectEnginePackage } from "./engine-discovery-scan.ts";
@@ -95,11 +96,12 @@ interface LocatedEnginePkg {
   binPath: string;
 }
 
-/** 引擎包 manifest 的薄壳消费面（capabilities/envPrefixes/modelCatalog 快照）。 */
+/** 引擎包 manifest 的薄壳消费面（capabilities/envPrefixes/modelCatalog/modelTranslation 快照）。 */
 interface ManifestInfo {
   capabilities: EngineCapabilities;
   envPrefixes: string[];
   modelCatalog?: { dynamic: boolean; models: ModelCatalogEntry[] } | null;
+  modelTranslation?: Record<string, string>;
 }
 
 // ============================================================
@@ -195,10 +197,14 @@ function readEngineManifest(pkgDir: string): ManifestInfo | undefined {
   const manifest = parsed.manifest;
   const id = typeof manifest["id"] === "string" ? manifest["id"] : D8_ZCODE_ENGINE_ID;
   const modelCatalog = parseModelCatalog(id, manifest["modelCatalog"]);
+  // [engine-ref-translation D5] 翻译表与 modelCatalog 同模式：静态声明读 manifest，
+  // 进快照供 RemoteEngine 构造器装配 translateModelRef 成员（缺省 = 无翻译面）。
+  const modelTranslation = parseModelTranslation(id, manifest["modelTranslation"]);
   return {
     capabilities: parseCapabilities(id, manifest["capabilities"]),
     envPrefixes: parseEnvPrefixes(id, manifest["envPrefixes"]),
     ...(modelCatalog !== undefined ? { modelCatalog } : {}),
+    ...(modelTranslation !== undefined ? { modelTranslation } : {}),
   };
 }
 
@@ -278,16 +284,22 @@ function resolveManifestInfo(located: LocatedEnginePkg | undefined): ManifestInf
     capabilities: info?.capabilities ?? { ...CONSERVATIVE_CAPABILITIES },
     envPrefixes: info?.envPrefixes ?? [],
     ...(info?.modelCatalog !== undefined && info.modelCatalog !== null ? { modelCatalog: info.modelCatalog } : {}),
+    ...(info?.modelTranslation !== undefined ? { modelTranslation: info.modelTranslation } : {}),
   };
 }
 
-/** RemoteEngine manifest 快照：capabilities 恒有；modelCatalog 三态语义（无枚举面不注入）。 */
+/**
+ * RemoteEngine manifest 快照：capabilities 恒有；modelCatalog 三态语义（无枚举面不注入）；
+ * modelTranslation 缺省不注入（构造器据此摘除 translateModelRef 成员——部署形态的翻译面
+ * 必须经本快照到达，否则该成员在 D8/zsw 路径整体静默缺席）。
+ */
 function buildManifestSnapshot(manifestInfo: ManifestInfo): RemoteEngineManifestSnapshot {
   return {
     capabilities: manifestInfo.capabilities,
     ...(manifestInfo.modelCatalog !== undefined && manifestInfo.modelCatalog !== null
       ? { modelCatalog: manifestInfo.modelCatalog }
       : {}),
+    ...(manifestInfo.modelTranslation !== undefined ? { modelTranslation: manifestInfo.modelTranslation } : {}),
   };
 }
 

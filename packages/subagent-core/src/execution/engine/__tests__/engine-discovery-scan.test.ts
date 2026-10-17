@@ -344,7 +344,7 @@ describe("manifest schema 字段级解析", () => {
   it("modelTranslation：声明 → 注册期快照携带 + RemoteEngine 翻译面实装；非法条目丢弃 + warn", () => {
     makeEnginePkg(tmpRoot, "mt-ok", {
       capabilities: FULL_CAPABILITIES,
-      modelTranslation: { "zai-coding-cn": "account:zai-individual-coding-plan", "bad-key": 42 },
+      modelTranslation: { "zai-coding-cn": "account:bigmodel-individual-coding-plan", "bad-key": 42 },
     });
     makeEnginePkg(tmpRoot, "mt-omitted", { capabilities: FULL_CAPABILITIES });
     const result = scanEngines(scanOpts({ roots: [tmpRoot] }));
@@ -354,8 +354,12 @@ describe("manifest schema 字段级解析", () => {
     const port = portOf("mt-ok") as { translateModelRef?: (ref: string) => string };
     expect(typeof port.translateModelRef).toBe("function");
     expect(port.translateModelRef!("zai-coding-cn/glm-5.3-flash")).toBe(
-      "account:zai-individual-coding-plan/glm-5.3-flash",
+      "account:bigmodel-individual-coding-plan/glm-5.3-flash",
     );
+    // descriptor.manifest 同投递（稳定标识比较读此面——翻译表单改必须使 descriptor 不等价）
+    expect(result.discovered.find((d) => d.id === "mt-ok")!.descriptor.manifest?.modelTranslation).toEqual({
+      "zai-coding-cn": "account:bigmodel-individual-coding-plan",
+    });
     expect(collectedLogs.some((l) => l.level === "warn" && l.message.includes("modelTranslation"))).toBe(true);
 
     // 声明缺席：成员摘除（消费方 typeof 探测缺席语义）
@@ -376,7 +380,8 @@ describe("manifest schema 字段级解析", () => {
     expect(result.discovered).toHaveLength(1);
     expect(result.discovered[0].id).toBe("mt-null");
     // 快照不携带翻译面（null 归 undefined = 声明缺席语义，与 parseModelCatalog 三态对齐）
-    expect("modelTranslation" in result.discovered[0].descriptor.manifest!).toBe(false);
+    // 成员形态断言（非 in 检查——字段进入类型后以成员值/键集判定，空断言不再可空成立）
+    expect(result.discovered[0].descriptor.manifest).not.toHaveProperty("modelTranslation");
     // RemoteEngine 翻译面成员摘除（消费方 typeof 探测缺席语义）
     const port = result.discovered[0].descriptor.portFactory() as { translateModelRef?: unknown };
     expect(typeof port.translateModelRef).toBe("undefined");

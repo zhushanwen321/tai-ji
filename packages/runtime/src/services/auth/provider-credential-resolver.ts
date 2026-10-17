@@ -22,7 +22,7 @@
  *   Bearer 是以畸形凭据打外部 API）。命中即不降级低优先源（显式配置错误不掩盖）。
  */
 import type { IConfigStore } from '../ports/config.js'
-import type { IProviderCredentialResolver, ResolvedProviderCredential, UnsupportedCredentialForm } from '../ports/provider-credential-resolver.js'
+import type { IProviderCredentialResolver, ProviderCredentialKind, ResolvedProviderCredential, UnsupportedCredentialForm } from '../ports/provider-credential-resolver.js'
 import type { AuthService } from './auth-service.js'
 import type { AuthStorage, Credential } from './auth-storage.js'
 import builtinData from '../../generated/builtin-providers.json'
@@ -41,11 +41,11 @@ interface CredentialSource {
   /** 同步批量列出该源的 providerId（实现须单次读盘）。 */
   listIdsSync(): Set<string>
   /**
-   * 异步取生效凭据：{ key } = 明文；{ unsupported } = 条目存在但形态不支持
+   * 异步取生效凭据：{ key, kind } = 明文 + 形态判别；{ unsupported } = 条目存在但形态不支持
    * （对象判别——UnsupportedCredentialForm 若用裸字符串字面量会是 string 子类型，
    * typeof 判别失效，'command' 会被当明文 key 透传）；undefined = 未命中。
    */
-  readKey(providerId: string): Promise<{ key: string } | { unsupported: UnsupportedCredentialForm } | undefined>
+  readKey(providerId: string): Promise<{ key: string; kind: ProviderCredentialKind } | { unsupported: UnsupportedCredentialForm } | undefined>
 }
 
 /**
@@ -139,14 +139,20 @@ function resolveCredentialValue(config: string, env?: Record<string, string>): s
   return resolved === undefined ? { unsupported: 'unresolved-env' } : resolved
 }
 
-/** auth.json 条目 → 生效明文（api_key 走配置值解析；oauth 取 access，pi 对 oauth 不做配置值解析）。 */
-function readAuthCredentialKey(credential: Credential): { key: string } | { unsupported: UnsupportedCredentialForm } | undefined {
+/**
+ * auth.json 条目 → 生效明文 + 凭据形态（api_key 走配置值解析；oauth 取 access，pi 对 oauth
+ * 不做配置值解析）。kind 是凭据域事实：oauth 的 access 是短时 token，消费方（如 zcode provider
+ * 同步）必须据此拒绝把 token 当静态 api-key 复制到外部通道。
+ */
+function readAuthCredentialKey(credential: Credential): { key: string; kind: ProviderCredentialKind } | { unsupported: UnsupportedCredentialForm } | undefined {
   if (credential.type === 'api_key') {
     if (typeof credential.key !== 'string' || credential.key === '') return undefined
     return toReadKeyOutcome(resolveCredentialValue(credential.key, credential.env))
   }
   const access = credential.access
-  return typeof access === 'string' && access !== '' ? { key: access } : undefined
+  // 非 api_key 条目（oauth；auth.json 被外部改写时也可能是未知 type）一律按 'oauth' 处置：
+  // 保守方向 = 宁可 skip 也不把未知形态的 access 当静态 key 下发外部通道（fail-closed）。
+  return typeof access === 'string' && access !== '' ? { key: access, kind: 'oauth' } : undefined
 }
 
 /** models.json apiKey 是否是可用的非空串（'' 是 schema 违规值，等同无凭据）。 */
@@ -192,11 +198,12 @@ function createAuthJsonSource(deps: ProviderCredentialResolverDeps): CredentialS
   }
 }
 
-/** 明文串 → readKey 出参形态（{ key } 包装；unsupported 透传）。 */
+/** 明文串 → readKey 出参形态（{ key, kind } 包装；unsupported 透传）。models.json 的 apiKey
+ * 恒为静态密钥（kind='api_key'——oauth token 只可能来自 auth.json）。 */
 function toReadKeyOutcome(
   value: string | { unsupported: UnsupportedCredentialForm },
-): { key: string } | { unsupported: UnsupportedCredentialForm } {
-  return typeof value === 'string' ? { key: value } : value
+): { key: string; kind: ProviderCredentialKind } | { unsupported: UnsupportedCredentialForm } {
+  return typeof value === 'string' ? { key: value, kind: 'api_key' } : value
 }
 
 function createModelsJsonSource(deps: ProviderCredentialResolverDeps): CredentialSource {
@@ -257,7 +264,7 @@ export class ProviderCredentialResolver implements IProviderCredentialResolver {
       // 用户以为生效的凭据与实际使用的凭据背离（D 类「显示 A、实际用 B」）。报错让
       // 用户修配置比静默换源诚实。
       if ('unsupported' in outcome) return outcome
-      return { key: outcome.key, source: source.id }
+      return { key: outcome.key, source: source.id, kind: outcome.kind }
     }
     return undefined
   }

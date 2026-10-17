@@ -590,7 +590,7 @@ const PI_TO_ZCODE_PROVIDER_MAP: Readonly<Record<string, string>> = {
  * 模型段大小写归一匹配目标清单（pi 侧小写 id `glm-5.3-flash` vs zcode 目录大写 id
  * `GLM-5.3-Flash`——同一模型两世界的拼写差）；命中返回目标原生拼写（大小写保留，
  * 与 account 直通校验同口径）。目标清单缺席/空 = 不设限，按请求拼写直传（与
- * assertAccountModelKnown「不设限放行」同语义，交由 app-server 注册表实况裁决）。
+ * normalizeAccountModel「不设限放行」同语义，交由 app-server 注册表实况裁决）。
  *
  * 显式失败语义（首败即停）：目录定位失败 / 目标规则缺失 / 模型无等价 → 抛
  * model_not_available（自带恢复指引），不静默回落、不伪造兜底。调用方：

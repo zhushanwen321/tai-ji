@@ -373,14 +373,17 @@ ${ACCOUNT_METADATA_SECTION}
 const text = injectedConfigText();
 const catalogPatch = CATALOG_PATH !== null ? catalogPatchText(CATALOG_PATH) : null;
 const cliPatchProbe = CLI_PATH ? patchedCliSource(CLI_PATH) : null;
-const cliPatchStandalone = cliPatchProbe !== null && (cliPatchProbe.indexOf('={standalone:{}}') >= 0 || cliPatchProbe.indexOf(',{standalone:{}}') >= 0);
+// 三处改写的应用态由 patchedCliSource 发布（__cliPatchStatus）——曾以产物子串判定：
+// header-port 在未打补丁的 3.15.3 bundle 上恒真（8 处既有同名属性）→ 门对锚点
+// 漂移零检测力；standalone 同理由标志驱动（三处判定各自具名）。
+const cliPatchStatus = CLI_PATH ? __cliPatchStatus.get(CLI_PATH) : null;
 if (text !== null || catalogPatch !== null || cliPatchProbe !== null) {
   process.stderr.write('[zcode-launcher] 补丁层已安装: cli-config-inject=' + (text !== null ? 'on' : 'off')
     + ', catalog-entitled=' + (catalogPatch !== null ? 'on' : 'off')
     + ', provider-merge=' + (PI_SYNCED_PATH ? 'armed' : 'off')
     + ', cli-source-bypass=' + (cliPatchProbe !== null ? 'armed' : 'off')
-    + ', standalone-account=' + (cliPatchStandalone ? 'armed' : 'off')
-    + ', header-port=' + (cliPatchProbe !== null && cliPatchProbe.indexOf('providerRuntimeHeadersPort:') >= 0 ? 'armed' : 'off') + '\\n');
+    + ', standalone-account=' + (cliPatchStatus && cliPatchStatus.standalone ? 'armed' : 'off')
+    + ', header-port=' + (cliPatchStatus && cliPatchStatus.headerPort ? 'armed' : 'off') + '\\n');
   // encoding 归一（Node 别名面）：'utf8'/'utf-8'/大小写变体统一按 string 返回——
   // 真实 bundle 的 config 读取恰用 'utf-8' 形态，仅匹配 'utf8' 会错回 Buffer
   // （当下游不只 JSON.parse 而做字符串运算时即 TypeError）
@@ -394,6 +397,10 @@ if (text !== null || catalogPatch !== null || cliPatchProbe !== null) {
     return Buffer.from(value);
   };
   fs.__origReadFileSync = fs.readFileSync;
+  // standalone 账号元数据键供给（ADR-0139）：仅当 standalone 补丁已武装时执行——
+  // 未武装（上游漂移/版本不支持）时这些键无消费方，写用户共享 credentials.json
+  // 只增风险；此处读源仍是原生 fs（readFileSync 拦截尚未安装）。
+  if (cliPatchStatus && cliPatchStatus.standalone) ensureAccountMetadata();
   fs.readFileSync = function (p, ...rest) {
     if (typeof p === 'string' && p === CONFIG_PATH) {
       const cur = injectedConfigText();

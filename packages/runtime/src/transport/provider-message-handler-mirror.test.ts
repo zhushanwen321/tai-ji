@@ -5,6 +5,9 @@
  *  - mutation 类 config.* 消息（setProvider/deleteProvider/toggleProviderEnabled/removeProviderByKind/
  *    refreshProviderCatalogs）处理成功后 `ctx.providersMutatedSync` 恰被调用一次；
  *  - config.applyImportProviders 成功分支：同步触发 + 导入后目录刷新 .then 回调再触发（共两次）；
+ *  - 注：镜像运行串行化（ADR-0122 顺序契约，latest-wins + re-run）收敛在组合根触发面
+ *    （zcode-provider-sync-wiring.createZcodeProviderMirrorSync），不在本 handler；
+ *    串行化契约测试见 src/__tests__/services/zcode-provider-sync-wiring.test.ts。
  *  - 镜像同步 reject → catch 只 console.warn（fire-and-forget，不阻断 handler、不上抛）；
  *  - ctx 未注入（undefined，存量测试装配形态）→ 不调用、不炸，配置写入语义照常。
  *

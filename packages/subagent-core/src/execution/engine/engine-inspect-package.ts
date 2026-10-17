@@ -219,6 +219,12 @@ function buildManifestCliDescriptor(params: {
     },
     manifest: {
       ...(modelCatalog !== undefined ? { modelCatalog } : {}),
+      // [engine-ref-translation D5] 翻译表也进 descriptor.manifest：稳定标识比较
+      // （isStableEquivalentDescriptor）读 manifest 余项——翻译表单改必须使
+      // descriptor 不等价（换新单例），否则旧实例继续跑旧翻译表。
+      ...(manifestSnapshot.modelTranslation !== undefined
+        ? { modelTranslation: manifestSnapshot.modelTranslation }
+        : {}),
       ...(displayName !== undefined ? { displayName } : {}),
       // 进程形态声明同源进 descriptor（读位 = engineProcessModelOfDescriptor → 宿主
       // 实例管理分流：per-window → getEngine 只读代理/窗口实例；shared-service →
@@ -265,7 +271,8 @@ export function inspectEnginePackage(
   const modelCatalog = parseModelCatalog(id, m["modelCatalog"]);
 
   // ── modelTranslation（可选；缺省 = undefined = 无翻译面——RemoteEngine 构造器
-  //    据此摘除 translateModelRef 成员；声明表同时是 runtime 写校验面的翻译供数源）──
+  //    据此摘除 translateModelRef 成员；声明表是部署形态翻译面的供数源（RemoteEngine
+  //    快照消费，宿主侧写校验接入时同源读取））──
   const modelTranslation = parseModelTranslation(id, m["modelTranslation"]);
 
   const displayName = parseOptionalDisplayFields(m, id);

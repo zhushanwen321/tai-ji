@@ -421,11 +421,12 @@ describe("D2b：同稳定标识重注册幂等（cli 单例跨 reload 存活）"
       args: [],
       capabilities: manifest.capabilities,
       portFactory,
-      ...(manifest.modelCatalog !== undefined || manifest.displayName !== undefined
-          || manifest.processModel !== undefined
+      ...(manifest.modelCatalog !== undefined || manifest.modelTranslation !== undefined
+          || manifest.displayName !== undefined || manifest.processModel !== undefined
         ? {
           manifest: {
             modelCatalog: manifest.modelCatalog,
+            modelTranslation: manifest.modelTranslation,
             displayName: manifest.displayName,
             processModel: manifest.processModel,
           },
@@ -550,6 +551,27 @@ describe("D2b：同稳定标识重注册幂等（cli 单例跨 reload 存活）"
     reregisterEquivalent("displayname-change", renamed, () => makeRemoteEngine("displayname-change", renamed) as EnginePort);
     expect(dispose).toHaveBeenCalledTimes(1);
     expect(getEngine("displayname-change")).not.toBe(oldPort);
+  });
+
+  it("同标识重注册但 manifest 版本面变化（modelTranslation）：触发 dispose", () => {
+    const manifest = makeManifestSnapshot("Translated");
+    const dispose = vi.fn(() => Promise.resolve());
+    const oldPort = makeRemoteEngine("translation-change", manifest);
+    (oldPort as unknown as { dispose: typeof dispose }).dispose = dispose;
+    reregisterEquivalent("translation-change", manifest, () => oldPort as EnginePort);
+    getEngine("translation-change");
+
+    // 仅翻译表单字段变化（bin/capabilities/packageVersion 全同）：翻译面属于部署形态
+    // 语义，旧单例必须被换掉，否则继续跑旧翻译表。
+    const translated: EngineManifestSnapshot = {
+      ...manifest,
+      modelTranslation: { "zai-coding-cn": "account:bigmodel-individual-coding-plan" },
+    };
+    reregisterEquivalent("translation-change", translated, () =>
+      makeRemoteEngine("translation-change", translated) as EnginePort,
+    );
+    expect(dispose).toHaveBeenCalledTimes(1);
+    expect(getEngine("translation-change")).not.toBe(oldPort);
   });
 
   it("同标识重注册但 kind 变化（inproc → cli）：触发 dispose", () => {

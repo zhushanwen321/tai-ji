@@ -33,7 +33,7 @@ import { mergePersonalProviderConfig } from "../preparer.ts";
 const CLI_VARIANT_PROBE_SOURCE = `'use strict';
 const fs = require('node:fs');
 const STATE = process.env.ZCODE_PROBE_STATE;
-// startProcessProviderRegistryRuntime:()=>aBc
+// startProcessProviderRegistryRuntime:()=>aBc,
 // function aBc(e,t={}){return {runtime:{registryService:null}}}
 // zcodeBuiltinProviders.entries()  ...zhipu-account... new Uk({access:new I3({entitled:!1})})
 // createZCodeApp:r(function(ut){return {args:[Rt.runtime.registryService],extra:1}}),"createZCodeApp"),cwd
@@ -45,11 +45,58 @@ const CLI_PATCH_PROBE_SOURCE = `'use strict';
 const fs = require('node:fs');
 const STATE = process.env.ZCODE_PROBE_STATE;
 // 补丁锚点 fixture（文本匹配用，非执行路径）：
-// startProcessProviderRegistryRuntime:()=>xCt
+// startProcessProviderRegistryRuntime:()=>xCt,
 // create:r(()=>xCt(z),"create")
 // createZCodeApp:r((
 // Fe.runtime.registryService
 // }),"createZCodeApp")
+const self = fs.readFileSync(process.env.ZCODE_ENG_CLI_PATH, 'utf8');
+fs.writeFileSync(STATE, JSON.stringify({ self }));
+`;
+
+/** 仅端口锚命中的 CLI 源码（无 ①/② 锚）：验证 portInjected 单独命中时补丁产物
+ * 仍被交付（曾只按 entitled/standalone 交付 → 端口补丁静默丢弃）与门标志分离。 */
+const CLI_PORT_ONLY_PROBE_SOURCE = `'use strict';
+const fs = require('node:fs');
+const STATE = process.env.ZCODE_PROBE_STATE;
+// createZCodeApp:r((
+// Fe.runtime.registryService
+// }),"createZCodeApp")
+const self = fs.readFileSync(process.env.ZCODE_ENG_CLI_PATH, 'utf8');
+fs.writeFileSync(STATE, JSON.stringify({ self }));
+`;
+
+/** ③ 锚缺失形态（①/② 锚仍在）：门须报 header-port=off（标志驱动，产物子串判定
+ * 在真实 bundle 上恒真——既有 8 处 'providerRuntimeHeadersPort:'）。 */
+const CLI_NO_HEADER_ANCHOR_PROBE_SOURCE = `'use strict';
+const fs = require('node:fs');
+const STATE = process.env.ZCODE_PROBE_STATE;
+// startProcessProviderRegistryRuntime:()=>xCt,
+// create:r(()=>xCt(z),"create")
+// 既有同名属性（模拟真实 bundle 的 8 处预存 occurrence——子串判定恒真）
+// return {providerRuntimeHeadersPort:e.providerRuntimeHeadersPort}
+const self = fs.readFileSync(process.env.ZCODE_ENG_CLI_PATH, 'utf8');
+fs.writeFileSync(STATE, JSON.stringify({ self }));
+`;
+
+/** 长 minified 名形态（> 11 字符）：旧 `{0,10}` 上限会静默截断 → 取错函数名。 */
+const CLI_LONG_NAME_PROBE_SOURCE = `'use strict';
+const fs = require('node:fs');
+const STATE = process.env.ZCODE_PROBE_STATE;
+// startProcessProviderRegistryRuntime:()=>aVeryLongMinifiedName,
+// function aVeryLongMinifiedName(e,t={}){return {runtime:{registryService:null}}}
+const self = fs.readFileSync(process.env.ZCODE_ENG_CLI_PATH, 'utf8');
+fs.writeFileSync(STATE, JSON.stringify({ self }));
+`;
+
+/** 多缺省参数形态（`e,t={},o={}`）：定义默认参数法不唯一 → 回退调用点锚，
+ * 不得把 standalone 注入到错误参数。 */
+const CLI_MULTI_DEFAULT_PROBE_SOURCE = `'use strict';
+const fs = require('node:fs');
+const STATE = process.env.ZCODE_PROBE_STATE;
+// startProcessProviderRegistryRuntime:()=>aBc,
+// function aBc(e,t={},o={}){return {runtime:{registryService:null}}}
+// create:r(()=>aBc(z),"create")
 const self = fs.readFileSync(process.env.ZCODE_ENG_CLI_PATH, 'utf8');
 fs.writeFileSync(STATE, JSON.stringify({ self }));
 `;
@@ -297,7 +344,9 @@ describe("wrapper 合并语义（v2 注入优先）", () => {
     }));
     const launcher = ensureAppServerLauncher(engineDataDir);
     const cliPath = path.join(tmpRoot, "probe-meta.cjs");
-    fs.writeFileSync(cliPath, PROBE_SOURCE);
+    // 带 standalone 锚的 CLI 源码：元数据供给现仅在安装门确认 standalone 已武装时
+    // 执行（无消费方的版本不写共享凭据库）
+    fs.writeFileSync(cliPath, CLI_PATCH_PROBE_SOURCE);
     const statePath = path.join(tmpRoot, "state-meta.json");
     const env = {
       ...process.env,
@@ -333,7 +382,7 @@ describe("wrapper 合并语义（v2 注入优先）", () => {
     }));
     const launcher = ensureAppServerLauncher(fs.mkdtempSync(path.join(tmpRoot, "eng-meta-guard-")));
     const cliPath = path.join(tmpRoot, "probe-meta-guard.cjs");
-    fs.writeFileSync(cliPath, PROBE_SOURCE);
+    fs.writeFileSync(cliPath, CLI_PATCH_PROBE_SOURCE);
     const runLauncher = (home: string, statePath: string) =>
       childProcess.spawnSync(process.execPath, [launcher], {
         encoding: "utf8",
@@ -411,6 +460,121 @@ describe("wrapper 合并语义（v2 注入优先）", () => {
     // 安装门出声（补丁可观测）
     expect(res.stderr).toContain("standalone-account=armed");
     expect(res.stderr).toContain("header-port=armed");
+  });
+
+  it("端口锚单独命中即交付（portInjected 纳入交付条件）+ 门标志分离：standalone-account=off", () => {
+    // 回归：曾按 entitledApplied||standaloneApplied 交付，端口补丁单独命中时产物被
+    // 静默丢弃（③ 形同虚设、无任何信号）
+    const home = fs.mkdtempSync(path.join(tmpRoot, "home-portonly-"));
+    const engineDataDir = fs.mkdtempSync(path.join(tmpRoot, "eng-portonly-"));
+    const cliPath = path.join(tmpRoot, "portonly-cli.cjs");
+    fs.writeFileSync(cliPath, CLI_PORT_ONLY_PROBE_SOURCE);
+    const launcher = ensureAppServerLauncher(engineDataDir);
+    const statePath = path.join(tmpRoot, "state-portonly.json");
+    const res = childProcess.spawnSync(process.execPath, [launcher], {
+      encoding: "utf8",
+      env: { ...process.env, ZCODE_ENG_CLI_PATH: cliPath, ZCODE_PROBE_STATE: statePath, HOME: home, TAIJI_AGENT_DATA_DIR: engineDataDir },
+    });
+    expect(res.status).toBe(0);
+    const recorded = JSON.parse(fs.readFileSync(statePath, "utf8")) as { self: string };
+    // 交付证据：探针自读 bundle 源码（经 wrapper 拦截）看到注入后的端口
+    expect(recorded.self).toContain(",providerRuntimeHeadersPort:Fe.providerRuntimeHeadersPort");
+    expect(res.stderr).toContain("cli-source-bypass=armed");
+    expect(res.stderr).toContain("header-port=armed");
+    expect(res.stderr).toContain("standalone-account=off");
+  });
+
+  it("③ 锚缺失 → header-port=off（标志驱动；既有同名属性子串不得再冒充已武装）", () => {
+    const home = fs.mkdtempSync(path.join(tmpRoot, "home-noheader-"));
+    const engineDataDir = fs.mkdtempSync(path.join(tmpRoot, "eng-noheader-"));
+    const cliPath = path.join(tmpRoot, "noheader-cli.cjs");
+    // fixture 内含 1 处预存 'providerRuntimeHeadersPort:'（真实 3.15.3 bundle 8 处）：
+    // 旧子串判定在此形态下必报 armed，标志驱动才能如实报 off
+    fs.writeFileSync(cliPath, CLI_NO_HEADER_ANCHOR_PROBE_SOURCE);
+    const launcher = ensureAppServerLauncher(engineDataDir);
+    const statePath = path.join(tmpRoot, "state-noheader.json");
+    const res = childProcess.spawnSync(process.execPath, [launcher], {
+      encoding: "utf8",
+      env: { ...process.env, ZCODE_ENG_CLI_PATH: cliPath, ZCODE_PROBE_STATE: statePath, HOME: home, TAIJI_AGENT_DATA_DIR: engineDataDir },
+    });
+    expect(res.status).toBe(0);
+    const recorded = JSON.parse(fs.readFileSync(statePath, "utf8")) as { self: string };
+    expect(recorded.self).not.toContain(",providerRuntimeHeadersPort:Fe.providerRuntimeHeadersPort");
+    expect(res.stderr).toContain("standalone-account=armed");
+    expect(res.stderr).toContain("header-port=off");
+    expect(res.stderr).toContain("header-port injection anchor not found");
+  });
+
+  it("长 minified 名（>11 字符）不被截断：函数定义默认参数法仍命中（{0,10} 上限回归）", () => {
+    const home = fs.mkdtempSync(path.join(tmpRoot, "home-longname-"));
+    const engineDataDir = fs.mkdtempSync(path.join(tmpRoot, "eng-longname-"));
+    const cliPath = path.join(tmpRoot, "longname-cli.cjs");
+    fs.writeFileSync(cliPath, CLI_LONG_NAME_PROBE_SOURCE);
+    const launcher = ensureAppServerLauncher(engineDataDir);
+    const statePath = path.join(tmpRoot, "state-longname.json");
+    const res = childProcess.spawnSync(process.execPath, [launcher], {
+      encoding: "utf8",
+      env: { ...process.env, ZCODE_ENG_CLI_PATH: cliPath, ZCODE_PROBE_STATE: statePath, HOME: home, TAIJI_AGENT_DATA_DIR: engineDataDir },
+    });
+    expect(res.status).toBe(0);
+    const recorded = JSON.parse(fs.readFileSync(statePath, "utf8")) as { self: string };
+    expect(recorded.self).toContain("function aVeryLongMinifiedName(e,t={standalone:{}}){");
+  });
+
+  it("多缺省参数 → 回退调用点锚（不把 standalone 注入错误参数）", () => {
+    const home = fs.mkdtempSync(path.join(tmpRoot, "home-multidefault-"));
+    const engineDataDir = fs.mkdtempSync(path.join(tmpRoot, "eng-multidefault-"));
+    const cliPath = path.join(tmpRoot, "multidefault-cli.cjs");
+    fs.writeFileSync(cliPath, CLI_MULTI_DEFAULT_PROBE_SOURCE);
+    const launcher = ensureAppServerLauncher(engineDataDir);
+    const statePath = path.join(tmpRoot, "state-multidefault.json");
+    const res = childProcess.spawnSync(process.execPath, [launcher], {
+      encoding: "utf8",
+      env: { ...process.env, ZCODE_ENG_CLI_PATH: cliPath, ZCODE_PROBE_STATE: statePath, HOME: home, TAIJI_AGENT_DATA_DIR: engineDataDir },
+    });
+    expect(res.status).toBe(0);
+    const recorded = JSON.parse(fs.readFileSync(statePath, "utf8")) as { self: string };
+    // 定义处保持原样（曾 split/join 全量替换，t/o 两个缺省参数都会被改写）
+    expect(recorded.self).toContain("function aBc(e,t={},o={}){");
+    // 调用点回退锚：第二参注入 standalone
+    expect(recorded.self).toContain("create:r(()=>aBc(z,{standalone:{}})");
+    expect(res.stderr).toContain("standalone-account=armed");
+  });
+
+  it("standalone 补丁未武装 → 不写共享凭据库（上游漂移版本上元数据键无消费方）", () => {
+    const PID = "account:bigmodel-individual-coding-plan";
+    const catalogDir = path.join(tmpRoot, "catalog-meta-miss");
+    fs.mkdirSync(catalogDir, { recursive: true });
+    const catalogPath = path.join(catalogDir, "zcode-builtin.json");
+    fs.writeFileSync(catalogPath, JSON.stringify({
+      config: { providerConfigRules: { providerRules: [{ providerId: PID, config: { access: { type: "zhipu-account" } } }] } },
+    }));
+    const home = fs.mkdtempSync(path.join(tmpRoot, "home-meta-miss-"));
+    fs.mkdirSync(path.join(home, ".zcode", "v2"), { recursive: true });
+    const credPath = path.join(home, ".zcode", "v2", "credentials.json");
+    const initial = JSON.stringify({
+      "oauth:bigmodel:access_token": "enc:v1:fake-oauth-token",
+      [`account-provider:coding-plan:${PID}:account:test-identity-0001:api-key`]: "enc:v1:fake-plan-key",
+    }, null, 2);
+    fs.writeFileSync(credPath, initial);
+    const launcher = ensureAppServerLauncher(fs.mkdtempSync(path.join(tmpRoot, "eng-meta-miss-")));
+    const cliPath = path.join(tmpRoot, "probe-meta-miss.cjs");
+    // 无补丁锚的 CLI 源码 = 上游形态漂移（补丁链失败）形态
+    fs.writeFileSync(cliPath, PROBE_SOURCE);
+    const res = childProcess.spawnSync(process.execPath, [launcher], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        ZCODE_ENG_CLI_PATH: cliPath,
+        ZCODE_PROBE_STATE: path.join(tmpRoot, "state-meta-miss.json"),
+        ZCODE_BUILTIN_PROVIDER_CONFIG_FILE: catalogPath,
+        HOME: home,
+      },
+    });
+    expect(res.status).toBe(0);
+    expect(res.stderr).toContain("header-port=off");
+    expect(res.stderr).not.toContain("account metadata provisioned");
+    expect(fs.readFileSync(credPath, "utf8")).toBe(initial);
   });
 
   it("同 id 时 v2 条目整条优先于真实文件（等价复刻 GUI 直传：v2 权威），real 独有条目保留", () => {

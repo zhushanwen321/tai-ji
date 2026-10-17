@@ -120,6 +120,25 @@ describe('W8 D8 兼容公共面薄壳', () => {
     })
     expect(engine.id).toBe('zcode')
   })
+
+  it('createZcodeEngine 携带部署形态翻译面：vendored manifest modelTranslation → translateModelRef 查表改写', () => {
+    // 不传 cliPath：走 vendored 相对定位读 packages/zcode-subagent-cli/package.json
+    // （manifest 声明 modelTranslation）；构造同步不 spawn，翻译面为纯查表。
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'w8-d8-translation-'))
+    try {
+      const engine = createZcodeEngine({ engineDataDir: () => dir })
+      expect(typeof engine.translateModelRef).toBe('function')
+      // vendored 包声明的目标段（ADR-0138 D1 已发布形态）
+      expect(engine.translateModelRef!('zai-coding-cn/glm-5.3-flash')).toBe(
+        'account:bigmodel-individual-coding-plan/glm-5.3-flash',
+      )
+      // 表外 provider / 无 provider 段 → 恒等透传（幂等）
+      expect(engine.translateModelRef!('deepseek/deepseek-chat')).toBe('deepseek/deepseek-chat')
+      expect(engine.translateModelRef!('glm-5.3-flash')).toBe('glm-5.3-flash')
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    }
+  })
 })
 
 describe('W8 H12 relay 透传（正反例）', () => {

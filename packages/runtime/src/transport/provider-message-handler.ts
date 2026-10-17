@@ -82,10 +82,15 @@ export class ProviderMessageHandler {
   // supportedLevels 同样两路同标（U5 接线）：本 ctx 无 appInfo，piVersion 缺省（registry 以
   // 逐模型签名兜底，缓存正确性不依赖该组分——见 model-capability.ts 头注）。
   /**
-   * provider 变更成功后的 write-through 镜像（ADR-0138 镜像架构：taiji 写自己 provider
-   * 配置时同步写 zcode engine 的 provider 配置副本）。fire-and-forget：镜像同步内部
-   * 自捕获错误只 warn，失败不阻断配置写入应答；副本读链每次现读，最终一致窗口为
-   * 单次小文件写（~10ms 量级）。
+   * provider 变更成功后的 write-through 镜像触发（ADR-0138 镜像架构：taiji 写自己 provider
+   * 配置时同步写 zcode engine 的 provider 配置副本）。fire-and-forget：镜像失败只 warn，
+   * 不阻断配置写入应答。
+   *
+   * 顺序契约不在本 handler：settings 域 mutation 与凭据域 OAuth 事件经组合根同一触发面
+   * （zcode-provider-sync-wiring.createZcodeProviderMirrorSync）收敛——同一时刻最多一次
+   * runZcodeProviderStartupSync，运行中到达的触发合并为结束后的一次重跑（latest-wins +
+   * re-run，触发不丢）。副本收敛于镜像队列清空（最后一次 mutation 的落盘），以顺序契约
+   * 保证而非固定时延窗口（ADR-0122）。
    */
   private mirrorAfterMutation(): void {
     this.ctx.providersMutatedSync?.().catch(err => {
@@ -238,7 +243,7 @@ export class ProviderMessageHandler {
     // 仅成功时广播（result 有 result 字段 = 成功；有 error 字段 = 失败，不广播）
     if ('result' in result) {
       this.ctx.broadcastProviderList()
-    this.mirrorAfterMutation()
+      this.mirrorAfterMutation()
       // 导入后重选 defaultModel：不传 newDefault → reconcile 自动走 getDefaultModel 兜底
       //（内部 findValidDefaultModel + wasFixed:true 时写回 settings.json）。
       reconcileDefaultModelAfterProviderChange(this.ctx, 'provider-updated')
@@ -249,7 +254,7 @@ export class ProviderMessageHandler {
       // reply，失败仅日志（refresh 自身 4s 超时 fail-safe，导入主语义已成功，失败可重进页面重试）。
       void this.ctx.configService.refreshProviderCatalogs()
         .then(() => { this.ctx.broadcastProviderList()
-    this.mirrorAfterMutation() })
+          this.mirrorAfterMutation() })
         .catch((e: unknown) => {
           console.warn('[settings-handler] applyImportProviders: provider catalog refresh failed:', e)
         })

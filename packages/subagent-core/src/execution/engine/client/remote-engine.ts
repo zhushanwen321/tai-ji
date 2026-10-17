@@ -42,6 +42,7 @@ import type {
 } from "../types.ts";
 import type { EngineModelSelectorInput, EnginePort, EngineRunResult, RunContext } from "../port.ts";
 import type { EngineClient, RunRoute } from "./engine-client.ts";
+import { matchCatalogEntry, translateByTable } from "./manifest-lookup.ts";
 
 /** manifest 注册期快照（发现器/注册表读取，构造时注入——同步成员唯一源）。 */
 export interface RemoteEngineManifestSnapshot {
@@ -87,17 +88,6 @@ export interface RemoteEngineOptions {
    * 小窗用（量级断言由常量锚定用例持有）；生产链路不传。
    */
   cancelSettleGraceMs?: number;
-}
-
-/** manifest 目录条目命中：id / canonicalRef / 任一 alias 与 ref 全等。 */
-function matchCatalogEntry(
-  entries: ModelCatalogEntry[],
-  ref: string,
-): ModelCatalogEntry | undefined {
-  return entries.find(
-    (entry) =>
-      entry.id === ref || entry.canonicalRef === ref || entry.aliases?.includes(ref) === true,
-  );
 }
 
 const logger = getLogger("remote-engine");
@@ -293,24 +283,12 @@ export class RemoteEngine implements EnginePort {
   }
 
   /**
-   * [engine-ref-translation D5] 翻译面（manifest 声明表查表改写，同步无协议）：
-   * ref 含 "/" 时按 provider 段查快照表命中改写、未命中原样透传（幂等——翻译产物
-   * 的 account:/个人 id 不在表内）；模型段原样保留（大小写归一由引擎侧再翻译承担
-   * ——引擎内 resolveZcodeModelRef 的同名翻译分支对翻译产物幂等，且持内建目录
-   * 可做清单校验/大小写归一，代理侧无目录不复制该职责）。
-   *
-   * 与 in-process 引擎类实装（如 zcode translatePiModelRefToZcode）的语义差：
-   * 代理侧纯查表不触目录（无 model_not_available 抛错面）——目录校验失败在引擎
-   * 侧 prepare 期显式报错承接（首败即停语义不变，仅失败时点后移到 record 创建后
-   * ——cli 形态的既有取舍）。声明表缺席时本成员已在构造器摘除（见构造器注释）。
+   * [engine-ref-translation D5] 翻译面（manifest 声明表查表改写，同步无协议）。
+   * 查表语义（含自有属性判定）在 client/manifest-lookup.ts 单点实装；声明表
+   * 缺席时本成员已在构造器摘除（见构造器注释）。
    */
   translateModelRef(modelRef: string): string {
-    const table = this.opts.manifest.modelTranslation as Record<string, string>;
-    if (!modelRef.includes("/")) return modelRef;
-    const provider = modelRef.slice(0, modelRef.indexOf("/"));
-    const target = table[provider];
-    if (target === undefined) return modelRef;
-    return `${target}/${modelRef.slice(modelRef.indexOf("/") + 1)}`;
+    return translateByTable(this.opts.manifest.modelTranslation as Record<string, string>, modelRef);
   }
 
   /** 直读 manifest 注册期快照（无缓存——每次调用同值，快照不可变）。 */

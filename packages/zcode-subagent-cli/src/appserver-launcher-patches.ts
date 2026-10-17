@@ -22,9 +22,17 @@ export const CLI_PATCH_SECTION = `
 // 锚不命中（上游混淆形态变化）→ 原文透出：仅 account 家族继续被拒，个人 provider
 // 不受影响。
 const __cliPatchCache = new Map();
+// 应用态标志发布（2026-10 review）：安装门曾以补丁产物子串判定 header-port——真实
+// 3.15.3 bundle 本就含 8 处 'providerRuntimeHeadersPort:'（2 处 ',providerRuntimeHeadersPort:'）
+// → 子串判定恒真、对锚点漂移零检测力。改由补丁函数本身发布 {entitled,standalone,
+// headerPort}（缓存命中仍可读），门只读标志（三处判定各自具名，漂移不静默）。
+const __cliPatchStatus = new Map();
 function patchedCliSource(path) {
   if (__cliPatchCache.has(path)) return __cliPatchCache.get(path);
   let result = null;
+  let entitledApplied = false;
+  let standaloneApplied = false;
+  let portInjected = false;
   try {
     const readOrig = fs.__origReadFileSync || fs.readFileSync;
     let src = readOrig(path, 'utf8');
@@ -34,7 +42,6 @@ function patchedCliSource(path) {
     // 翻转为 !0。窗口零命中 = 上游形态漂移 → 原文透出 + stderr warn（漂移可见，
     // 进 app-server stderr 日志）。
     const anchorIdx = src.indexOf('zcodeBuiltinProviders.entries()');
-    let entitledApplied = false;
     if (anchorIdx >= 0) {
       const window = src.slice(anchorIdx, Math.min(src.length, anchorIdx + 600));
       if (window.indexOf('zhipu-account') >= 0 && window.indexOf('entitled:!1') >= 0) {
@@ -57,10 +64,11 @@ function patchedCliSource(path) {
     // 完成、零宿主依赖。锚点两处稳定串（非 minified）：模块导出映射
     // startProcessProviderRegistryRuntime:()=> 取函数名 + 调用点 create:r(()=><fn>(。
     const exportAnchor = 'startProcessProviderRegistryRuntime:()=>';
-    let standaloneApplied = false;
     const exportIdx = src.indexOf(exportAnchor);
     if (exportIdx >= 0) {
-      const nameMatch = /^([A-Za-z_$][A-Za-z0-9_$]{0,10})/.exec(src.slice(exportIdx + exportAnchor.length));
+      // 名称尾部须是分隔符（真实形态 = 导出映射对象 ',' / '}'）：'{0,10}' 上限会静默
+      // 截断更长的 minified 名 → 取到错误函数名；要求分隔符后截断不成立（漂移可见）。
+      const nameMatch = /^([A-Za-z_$][A-Za-z0-9_$]*)(?=[,}:])/.exec(src.slice(exportIdx + exportAnchor.length));
       const fnName = nameMatch ? nameMatch[1] : null;
       if (fnName) {
         // 锚点 A（首选，抗漂移最强）：函数定义默认参数法——
@@ -73,9 +81,13 @@ function patchedCliSource(path) {
           const paramsEnd = src.indexOf(')', defIdx + defAnchor.length);
           if (paramsEnd > defIdx) {
             const params = src.slice(defIdx + defAnchor.length, paramsEnd);
-            if (params.indexOf('={}') >= 0) {
+            // 仅在**唯一** '={}' 缺省参数时改写：曾用 split/join 全量替换，多参数
+            // 函数会把 standalone 注入到错误参数（语法仍合法，自检无法发现）；
+            // 多于一处 = 无法确定注入点 → 回退调用点锚（第二参语义等价）。
+            const firstDefault = params.indexOf('={}');
+            if (firstDefault >= 0 && firstDefault === params.lastIndexOf('={}')) {
               src = src.slice(0, defIdx + defAnchor.length)
-                + params.split('={}').join('={standalone:{}}')
+                + params.slice(0, firstDefault) + '={standalone:{}}' + params.slice(firstDefault + 3)
                 + src.slice(paramsEnd);
               standaloneApplied = true;
             }
@@ -114,7 +126,6 @@ function patchedCliSource(path) {
     // providerRuntimeHeadersPort（standalone 模式 = 本地端口）注入该 app 创建选项：
     // 账号族认证头由本进程本地解析（凭据 = credentials.json 中 ZCode 自有项）。
     const appAnchor = 'createZCodeApp:r(';
-    let portInjected = false;
     const appIdx = src.indexOf(appAnchor);
     if (appIdx >= 0) {
       const closeAnchor = '}),"createZCodeApp")';
@@ -134,7 +145,9 @@ function patchedCliSource(path) {
     if (!portInjected) {
       process.stderr.write('[zcode-launcher] standalone account: header-port injection anchor not found (zcode upstream shape drifted?) - account auth stays host-dependent\\n');
     }
-    if (entitledApplied || standaloneApplied) {
+    // 交付条件含 portInjected（2026-10 review 修正）：曾只认 entitled/standalone——
+    // 端口锚单独命中时补丁产物被静默丢弃（③ 形同虚设，无任何信号）。
+    if (entitledApplied || standaloneApplied || portInjected) {
       // 缓存前语法自检（廉价保险）：锚漂移形态下插错位置会产出语法非法 bundle，
       // app-server 启动即裸 SyntaxError 且难归因补丁层——缓存前 try 编译一次，
       // 失败回退原文 + stderr warn（走既有「原文透出」降级语义）。BOM/shebang 剥离
@@ -154,10 +167,18 @@ function patchedCliSource(path) {
     }
   } catch { result = null; }
   __cliPatchCache.set(path, result);
+  // 标志只描述「已交付产物」：语法自检失败/异常回退（result=null）时全部 false——
+  // 门不得把未生效的补丁报成 armed。
+  __cliPatchStatus.set(path, {
+    entitled: result !== null && entitledApplied,
+    standalone: result !== null && standaloneApplied,
+    headerPort: result !== null && portInjected,
+  });
   return result;
 }`;
 
-/** wrapper 源码段：standalone 账号元数据键幂等供给（ensureAccountMetadata + 调用）。 */
+/** wrapper 源码段：standalone 账号元数据键幂等供给（ensureAccountMetadata；调用点 =
+ * 安装门 standalone 已武装分支——未武装时不写共享凭据库）。 */
 export const ACCOUNT_METADATA_SECTION = `
 // [2026-10-16 standalone account metadata] standalone 账号源要求
 // account-provider:<planProviderId>:identity / :auth-source 两条**元数据**键才承认
@@ -169,6 +190,9 @@ export const ACCOUNT_METADATA_SECTION = `
 // 并发边界（ADR-0139 登记）：对与 GUI 共享的凭据库做无锁 read-modify-write 全量
 // 写回，与 GUI token 刷新并发存在毫秒级丢更新窗口——后果自愈（GUI 侧重试刷新 /
 // 本侧缺键下次 spawn 幂等补齐），事实驱动原则下不加锁、不做时间补偿。
+// 调用契约（2026-10 review）：仅在安装门确认 standalone 补丁已武装时调用——这些
+// 元数据键只被 standalone 账号源消费，补丁链失败（版本漂移）时写入用户共享
+// credentials.json 无任何运行时收益，只增风险。
 function ensureAccountMetadata() {
   try {
     const credPath = path.join(os.homedir(), '.zcode', 'v2', 'credentials.json');
@@ -186,7 +210,12 @@ function ensureAccountMetadata() {
         .filter(function (r) { return r && r.config && r.config.access && r.config.access.type === 'zhipu-account'; })
         .map(function (r) { return String(r.providerId || ''); })
         .filter(Boolean);
-    } catch (e) { return; }
+    } catch (e) {
+      // 目录损坏/不可读 = identity/auth-source 无法供给的真因，不能静默返回（否则
+      // standalone 派发报「Provider Registry 中不存在 Model」时排障无入口）
+      process.stderr.write('[zcode-launcher] account metadata: builtin catalog unreadable (' + ((e && e.message) || String(e)) + ') - skipping account provider metadata\\n');
+      return;
+    }
     const added = [];
     for (const pid of planIds) {
       const idKey = 'account-provider:' + pid + ':identity';
@@ -231,14 +260,20 @@ function ensureAccountMetadata() {
     if (added.length === 0) return;
     const tmp = credPath + '.taiji-tmp-' + process.pid;
     // rename 换 inode——tmp 不带 mode 落盘会把 GUI 侧收紧过的文件权限静默放宽为
-    // 缺省 umask 值，写前读既有 mode 随写传递（stat 失败回退缺省，供给不阻断）
-    let writeMode;
-    try { writeMode = fs.statSync(credPath).mode & 0o777; } catch { /* 缺省 mode */ }
-    fs.writeFileSync(tmp, JSON.stringify(creds, null, 2), writeMode !== undefined ? { mode: writeMode } : undefined);
-    fs.renameSync(tmp, credPath);
+    // 缺省 umask 值，写前读既有 mode 随写传递（stat 失败回退 0600）；写/rename
+    // 失败清理 tmp，不在用户凭据目录留残片。
+    let writeMode = 0o600;
+    try { writeMode = fs.statSync(credPath).mode & 0o777; } catch { /* 缺省 0600 */ }
+    try {
+      fs.writeFileSync(tmp, JSON.stringify(creds, null, 2), { mode: writeMode });
+      fs.renameSync(tmp, credPath);
+    } catch (err) {
+      try { fs.unlinkSync(tmp); } catch { /* tmp 未生成或已 rename */ }
+      throw err;
+    }
     process.stderr.write('[zcode-launcher] account metadata provisioned: ' + added.join(', ') + '\\n');
   } catch (err) {
     process.stderr.write('[zcode-launcher] account metadata provisioning failed (non-blocking): ' + ((err && err.message) || String(err)) + '\\n');
   }
 }
-ensureAccountMetadata();`;
+`;
