@@ -81,3 +81,109 @@ describe("resolveEngineModelWithTranslation 生效回执（翻译面缺席 warn 
     expect(warns).toHaveLength(0);
   });
 });
+
+describe("resolveEngineModelWithTranslation 偏好层翻译 + 降级（resolvePreferenceLayer 语义锚）", () => {
+  /** model_not_available 形态错误（zcode 实装 preparer 的同款：Error + code 字段，非 any）。 */
+  function modelNotAvailableError(message: string): Error & { code: string } {
+    const err = new Error(message) as Error & { code: string };
+    err.code = "model_not_available";
+    return err;
+  }
+
+  it("翻译命中且在清单 → preference 来源（translateModelRef + listModels 双面引擎）", () => {
+    const warns: string[] = [];
+    const route = fakeRoute(`pref-hit-${Math.random().toString(36).slice(2)}`, {
+      translateModelRef: () => "native/m1",
+      listModels: () => [{ id: "native/m1" }],
+    });
+
+    const resolved = resolveEngineModelWithTranslation(route, undefined, undefined, () => "pi-prov/m1", (m) => warns.push(m), "test");
+    expect(resolved).toEqual({ engineModel: "native/m1", source: "preference" });
+    expect(warns).toHaveLength(0);
+  });
+
+  it("无枚举面引擎（listModels 缺席）→ 翻译产物放行，不被当空清单误跳过", () => {
+    const warns: string[] = [];
+    const route = fakeRoute(`pref-no-list-${Math.random().toString(36).slice(2)}`, {
+      translateModelRef: (ref) => ref,
+    });
+
+    const resolved = resolveEngineModelWithTranslation(route, undefined, undefined, () => "prov/m1", (m) => warns.push(m), "test");
+    expect(resolved).toEqual({ engineModel: "prov/m1", source: "preference" });
+    expect(warns).toHaveLength(0);
+  });
+
+  it("翻译抛 model_not_available → 降级走引擎缺省 + warn（不炸派发）", () => {
+    const warns: string[] = [];
+    const route = fakeRoute(`pref-na-${Math.random().toString(36).slice(2)}`, {
+      translateModelRef: () => {
+        throw modelNotAvailableError("no rule for legacy ref");
+      },
+    });
+
+    const resolved = resolveEngineModelWithTranslation(route, undefined, undefined, () => "zai-coding-plan/legacy", (m) => warns.push(m), "wf");
+    expect(resolved).toEqual({ engineModel: undefined, source: "default" });
+    expect(warns).toHaveLength(1);
+    expect(warns[0]).toContain("翻译失败");
+    expect(warns[0]).toContain("no rule for legacy ref");
+    expect(warns[0]).toContain("跳过偏好层走引擎缺省");
+  });
+
+  it("翻译抛非 model_not_available 错误 → 原样上抛（首败即停边界不吞）", () => {
+    const warns: string[] = [];
+    const route = fakeRoute(`pref-boom-${Math.random().toString(36).slice(2)}`, {
+      translateModelRef: () => {
+        throw new Error("exploded");
+      },
+    });
+
+    expect(() =>
+      resolveEngineModelWithTranslation(route, undefined, undefined, () => "prov/m1", (m) => warns.push(m), "test"),
+    ).toThrow("exploded");
+    expect(warns).toHaveLength(0);
+  });
+
+  it("翻译后不在引擎清单 → 降级走引擎缺省 + warn（清单漂移不炸派发）", () => {
+    const warns: string[] = [];
+    const route = fakeRoute(`pref-drift-${Math.random().toString(36).slice(2)}`, {
+      translateModelRef: () => "retired/native-ref",
+      listModels: () => [{ id: "native/m1" }],
+    });
+
+    const resolved = resolveEngineModelWithTranslation(route, undefined, undefined, () => "prov/m1", (m) => warns.push(m), "wf");
+    expect(resolved).toEqual({ engineModel: undefined, source: "default" });
+    expect(warns).toHaveLength(1);
+    expect(warns[0]).toContain("retired/native-ref");
+    expect(warns[0]).toContain("不在引擎模型清单");
+  });
+
+  it("偏好缺席（readPreference 返回 undefined）→ default 来源且不触翻译面", () => {
+    const warns: string[] = [];
+    let translateCalls = 0;
+    const route = fakeRoute(`pref-absent-${Math.random().toString(36).slice(2)}`, {
+      translateModelRef: () => {
+        translateCalls += 1;
+        return "never";
+      },
+    });
+
+    const resolved = resolveEngineModelWithTranslation(route, undefined, undefined, () => undefined, (m) => warns.push(m), "test");
+    expect(resolved).toEqual({ engineModel: undefined, source: "default" });
+    expect(translateCalls).toBe(0);
+    expect(warns).toHaveLength(0);
+  });
+
+  it("显式层在场 → 偏好 thunk 不求值（惰性纪律：前两层命中不触盘）", () => {
+    const route = fakeRoute(`pref-lazy-${Math.random().toString(36).slice(2)}`, {
+      translateModelRef: (ref) => ref,
+    });
+    let preferenceReads = 0;
+
+    const resolved = resolveEngineModelWithTranslation(route, "prov/explicit", undefined, () => {
+      preferenceReads += 1;
+      return "prov/pref";
+    }, () => undefined, "test");
+    expect(resolved).toEqual({ engineModel: "prov/explicit", source: "explicit" });
+    expect(preferenceReads).toBe(0);
+  });
+});

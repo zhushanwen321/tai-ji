@@ -68,11 +68,26 @@ export function resolveEngineModelWithTranslation(
   if (frontmatterModel !== undefined) return { engineModel: translate(frontmatterModel), source: "frontmatter" };
   const preference = readPreference();
   if (preference === undefined) return { engineModel: undefined, source: "default" };
-  // 偏好层失败语义补口（MF-2）：引擎翻译面对历史遗留/清单漂移的偏好值可能抛
-  // model_not_available（zcode 实装 translatePiModelRefToZcode 三处同步 throw）。
-  // 显式层首败即停不变；偏好层按本文件头声明的语义降级——跳过偏好层走引擎缺省
-  // + warn，不炸派发（settings 页可重选）。code 用结构化探测，不 import 具体
-  // 引擎包（core 不依赖引擎实装）。
+  return resolvePreferenceLayer(route, preference, translate, warn, logPrefix);
+}
+
+/**
+ * 偏好层的翻译 + 降级语义（自主函数拆出的模块内私有辅助——metrics-gate 复杂度治理：
+ * 主函数只留四层路由判定，翻译失败降级与清单校验降级的分支链留本函数）。
+ *
+ * 偏好层失败语义补口（MF-2）：引擎翻译面对历史遗留/清单漂移的偏好值可能抛
+ * model_not_available（zcode 实装 translatePiModelRefToZcode 三处同步 throw）。
+ * 显式层首败即停不变；偏好层按本文件头声明的语义降级——跳过偏好层走引擎缺省
+ * + warn，不炸派发（settings 页可重选）。code 用结构化探测，不 import 具体
+ * 引擎包（core 不依赖引擎实装）。
+ */
+function resolvePreferenceLayer(
+  route: EngineRouteResult,
+  preference: string,
+  translate: (ref: string) => string,
+  warn: (message: string) => void,
+  logPrefix: string,
+): ResolvedEngineModelResult {
   let translated: string;
   try {
     translated = translate(preference);
