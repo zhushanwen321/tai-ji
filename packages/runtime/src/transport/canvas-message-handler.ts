@@ -12,19 +12,19 @@
  * - WS RPC 通道：canvas.list / canvas.get / canvas.mutate（GUI 操作链，payload.actor 恒 'user'）
  *   → 同一 CanvasService 唯一入口。
  *
- * 回推派发（设计 §3.1(1) 回推节）：WS mutate 成功且 actor='user' 时，对该画布活跃绑定集合
- * （CanvasService.getBoundSessions ∩ 存活 session）逐个 client.prompt(通知文本)。存活判定 =
- * 现成 client 存在且未退出（进程生死二态，ADR-0122）——**不经 ensureActive**（该入口带崩溃后
- * 懒重生语义，误用会把已关闭 session 的 pi 进程拉活并触发 turn，对用户会话表面的实质副作用）。
- * 每次 actor=user 的 mutate 事务一条通知（取该次 mutate 的主事件摘要 reply.summary），不做
- * 时间窗聚合（pi send 队列天然串行化，设计 D5 同口径）。事务边界即通知边界——一次 mutate
- * 产多条事件时（如 select 带 replace = OptionMigrated + OptionSelected）仍只发一条，多
- * 事件不放大通知数。
+ * 回推派发（设计 §3.1(1) 回推节 + session-store-layout-inversion D4 回推通道收窄）：
+ * WS mutate 成功且 actor='user' 时，对画布归属会话（owner 持久在落盘路径，getBoundSessions
+ * 返回 [owner]）判存活——存活 = 现成 client 存在且未退出（进程生死二态，ADR-0122）——
+ * **不经 ensureActive**（该入口带崩溃后懒重生语义，误用会把已关闭 session 的 pi 进程拉活
+ * 并触发 turn，对用户会话表面的实质副作用）。owner session 重开（pi 重启 / runtime 重启
+ * 后索引重建）即恢复回推——崩溃恢复回推语义保留。每次 actor=user 的 mutate 事务一条通知
+ * （取该次 mutate 的主事件摘要 reply.summary），不做时间窗聚合（pi send 队列天然串行化，
+ * 设计 D5 同口径）。事务边界即通知边界——一次 mutate 产多条事件时（如 select 带 replace =
+ * OptionMigrated + OptionSelected）仍只发一条，多事件不放大通知数。
  *
  * 广播接线（broadcastUpdated，server.ts 装配注入 CanvasService.onUpdated）：mutate 成功后经
- * broker 全局广播 {type:'canvas.updated', payload:{canvasId, evType, eventId, summary}}——
- * 无 sessionId（画布是跨 session 共享资源；无 sid 全局消息走 broker.broadcast 非 bus topic
- * 表，rollingRestart 先例；`canvas.` 前缀不触发 broker 的 session-scoped 哨兵）。
+ * broker 全局广播 {type:'canvas.updated', payload:{canvasId, sessionId, evType, eventId,
+ * summary}}——sessionId = 画布归属会话（帧在 broker 全局豁免清单登记，消费方按归属过滤）。
  *
  * 失败语义（分级错误处理契约）：领域拒绝（不变量 / 状态机 / 矩阵 / 寻址）→ 结构化错误
  * （CanvasError：code + message + recover）沿原通道返回——marker 通道回 {ok:false, error}
@@ -103,16 +103,21 @@ export class CanvasMessageHandler {
   }
 
   private handleCanvasList(msg: Extract<ClientMessage, { type: 'canvas.list' }>, ws: WsType): void {
-    return this.ctx.reply(ws, msg.id, 'canvas.list', this.ctx.canvasService.listCanvases())
+    // 清单按归属会话过滤（D4 裁决 3）：payload.sessionId 必填（renderer 传焦点会话）。
+    const sessionId = msg.payload.sessionId
+    if (typeof sessionId !== 'string' || sessionId === '') {
+      return this.ctx.sendError(ws, 'invalid_params', 'canvas.list 缺 sessionId（画布清单按归属会话过滤）：携带当前会话 id 重试', msg.id)
+    }
+    return this.ctx.reply(ws, msg.id, 'canvas.list', this.ctx.canvasService.listCanvases(sessionId))
   }
 
   private handleCanvasGet(msg: Extract<ClientMessage, { type: 'canvas.get' }>, ws: WsType): void {
-    // 领域拒绝（canvas_not_found / node_not_found）→ error envelope（code + hint 恢复动作）；
-    // 基础设施失败（磁盘 IO）上抛走 server 兜底。
+    // 领域拒绝（canvas_not_found / forbidden 归属拒绝 / node_not_found）→ error envelope
+    // （code + hint 恢复动作）；基础设施失败（磁盘 IO）上抛走 server 兜底。
     try {
-      const state = this.ctx.canvasService.readState(msg.payload.canvasId)
-      // 绑定徽标数据源（设计 §3.1(3)）：活跃绑定数随全量视图附加（查询侧派生，不落盘——
-      // CanvasState.activeBindings 契约注释；空集合 0 = 徽标明示「当前无 agent 在响应」）。
+      const state = this.ctx.canvasService.readState(msg.payload.canvasId, msg.payload.sessionId)
+      // 绑定徽标数据源（设计 §3.1(3)）：活跃回推对象数随全量视图附加（查询侧派生，不落盘——
+      // CanvasState.activeBindings 契约注释；owner 即回推对象，存活判定经 sessionService）。
       // 收敛阻断清单同款查询侧派生（导出面板门禁区②格逐项呈现——门禁②判定是 runtime
       // 领域规则不跨 wire，结论随本字段携带；CanvasState.convergenceBlockers 契约注释）。
       return this.ctx.reply(ws, msg.id, 'canvas.get', {
@@ -122,7 +127,7 @@ export class CanvasMessageHandler {
       })
     } catch (e: unknown) {
       if (isCanvasDomainError(e)) {
-        // taste:allow-outbound-without-session-id — canvas.get 跨 session 画布查询，画布不属任何 session（与 canvas.updated 同一全局语义），错误帧无会话归属可关联
+        // taste:allow-outbound-without-session-id — canvas.get 错误帧无会话归属字段可传：payload.sessionId 由调用方传入但错误 envelope 的 details 槽只携带 hint（归属拒绝的恢复指引在文案内呈现），且错误帧经 reply 通道按 msg.id 路由
         return this.ctx.sendError(ws, e.detail.code, e.detail.message, msg.id, { hint: e.detail.recover })
       }
       throw e
@@ -130,11 +135,19 @@ export class CanvasMessageHandler {
   }
 
   private handleCanvasMutate(msg: Extract<ClientMessage, { type: 'canvas.mutate' }>, ws: WsType): void {
-    const { actor, ...request } = msg.payload
+    const { actor, sessionId, ...request } = msg.payload
+    // payload 归属字段守卫（D4 裁决 14 破坏性协议：sessionId 必填，schema 层拒绝缺失——
+    // 归属写面：create 落 owner、transform 校验归属，缺字段即 invalid_params 结构化拒绝）。
+    if (typeof sessionId !== 'string' || sessionId === '') {
+      return this.ctx.reply(ws, msg.id, 'canvas.mutate', {
+        ok: false,
+        error: canvasError('invalid_params', 'canvas.mutate 缺 sessionId（画布归属创建它的会话）：携带当前会话 id 重试'),
+      } satisfies CanvasMutateReply)
+    }
     // mutate 唯一入口：领域拒绝走 reply 失败腿（ok:false 结构化错误），不 throw；
     // 成功腿按 actor 判定回推——防回环（actor 维度）的构造点：marker 通道恒 agent/review
     // 不进本路径，WS 通道仅 actor='user' 回推（GUI 用户裁决驱动 agent 响应，设计 D5）。
-    const result = this.ctx.canvasService.mutate(request, actor)
+    const result = this.ctx.canvasService.mutate(request, actor, sessionId)
     if (result.ok && actor === 'user') {
       const canvasId = result.canvasId ?? (request.action !== 'create' ? request.params.canvasId : undefined)
       if (canvasId !== undefined) this.pushToBoundSessions(canvasId, result)
@@ -189,7 +202,10 @@ export class CanvasMessageHandler {
 
   /**
    * marker action 路由表：mutate 词表 14 action 统一走 mutateFromMarker（actor 按矩阵唯一
-   * 合法格推导）；read / list 直查；enter = 读全量 + 绑定登记（打开形态，非 mutation 不产事件）。
+   * 合法格推导）；read / list 直查（归属会话 = 发起方 sessionId，服务层按归属校验/过滤）；
+   * enter = 读全量（归属校验在 readState——非 owner 即 forbidden）。enter 不再登记绑定：
+   * 回推对象 = 归属会话本身（owner 持久在落盘路径，session 重开即恢复回推——旧「enter
+   * 建立回推路由」的绑定 Map 已随归属唯一化退役）。
    * 新增 action 只加一行（session-manager routes 表同款收敛）。
    */
   private readonly markerRoutes: {
@@ -209,15 +225,13 @@ export class CanvasMessageHandler {
       'converge-check': { run: (sid, params) => this.mutateFromMarker(sid, { action: 'converge-check', params }) },
       export: { run: (sid, params) => this.mutateFromMarker(sid, { action: 'export', params }) },
       dispatch: { run: (sid, params) => this.mutateFromMarker(sid, { action: 'dispatch', params }) },
-      read: { run: (_sid, params) => this.ctx.canvasService.readState(params.canvasId, params.subtree) },
-      list: { run: () => this.ctx.canvasService.listCanvases() },
+      read: { run: (sid, params) => this.ctx.canvasService.readState(params.canvasId, sid, params.subtree) },
+      list: { run: (sid) => this.ctx.canvasService.listCanvases(sid) },
       enter: {
         run: (sid, params) => {
-        // 打开已有画布：读全量（点开即完整图，设计目标 1）+ 绑定登记（sessionId ↔ canvasId，
-        // 回推路由建立——重开 session 不自动恢复回推，须重新 enter，设计回推节载体裁决）。
-          const state = this.ctx.canvasService.readState(params.canvasId)
-          this.ctx.canvasService.bindSession(sid, params.canvasId)
-          return state
+        // 打开已有画布：读全量（点开即完整图，设计目标 1）；归属校验在 readState
+        // （跨会话 enter → forbidden 结构化拒绝 + 恢复指引）。
+          return this.ctx.canvasService.readState(params.canvasId, sid)
         },
       },
     }
@@ -227,17 +241,12 @@ export class CanvasMessageHandler {
    * 唯一例外 review-append（reviewer subagent 经 canvas_review 的报告写回，矩阵仅 review
    * 格为 true → actor='review'）。表外组合（如 marker 通道试图 decide-direction）由
    * CanvasService 矩阵校验拒为 actor_not_allowed——runtime 按通道放行、按矩阵校验，
-   * 不按意图判定（矩阵注释同口径）。
+   * 不按意图判定（矩阵注释同口径）。归属 = 发起方 sessionId（dispatch 已携带）：create
+   * 落 owner、transform 归属校验，均由服务层承担。
    */
   private mutateFromMarker(sessionId: string, request: CanvasMutateRequest): CanvasMutateReply {
     const actor: CanvasActor = request.action === 'review-append' ? 'review' : 'agent'
-    const result = this.ctx.canvasService.mutate(request, actor)
-    // 创建形态的绑定登记（契约 marker.ts 两层词表注释：marker 通道 create 成功时一并登记；
-    // GUI 托盘新建走 WS 通道、不登记绑定——画布创建者不是回推对象，回推对象 = enter 的 agent）。
-    if (result.ok && request.action === 'create' && result.canvasId !== undefined) {
-      this.ctx.canvasService.bindSession(sessionId, result.canvasId)
-    }
-    return result
+    return this.ctx.canvasService.mutate(request, actor, sessionId)
   }
 
   /** 泛型索引分发（correlated union 标准写法，session-manager dispatch 同款）。 */
@@ -261,18 +270,18 @@ export class CanvasMessageHandler {
   // ── 回推派发（WS mutate actor=user 成功腿）──────────────────────
 
   /**
-   * 活跃绑定集合（设计 §3.1(1)：绑定记录 ∩ 存活 session）——回推派发与绑定徽标
-   * （canvas.get 的 activeBindings 派生）共用的单一交集判定，返回 sid + 现成 client
-   * 对。存活 = client 存在且未退出（进程生死二态，ADR-0122，不区分退出原因、不设宽限窗）；
-   * 绑定在册但不存活的 session 排除并留痕（这正是徽标显示「无 agent 在响应」的原因
-   * 留痕——绑定不随 pi 崩溃解绑，session 重开即恢复回推）。
+   * 活跃回推对象（D4 回推通道收窄：owner 即回推对象，getBoundSessions = [owner]）——
+   * 回推派发与绑定徽标（canvas.get 的 activeBindings 派生）共用的单一存活判定，返回
+   * sid + 现成 client 对。存活 = client 存在且未退出（进程生死二态，ADR-0122，不区分
+   * 退出原因、不设宽限窗）；owner 在册但不存活排除并留痕（这正是徽标显示「无 agent 在
+   * 响应」的原因留痕——owner 持久在落盘路径，session 重开即恢复回推）。
    */
   private activeBoundClients(canvasId: string): Array<{ sid: string; client: NonNullable<ReturnType<ISessionService['getRpcClient']>> }> {
     const out: Array<{ sid: string; client: NonNullable<ReturnType<ISessionService['getRpcClient']>> }> = []
     for (const sid of this.ctx.canvasService.getBoundSessions(canvasId)) {
       const client = this.ctx.sessionService.getRpcClient(sid)
       if (!client || client.exited) {
-        console.info(`[canvas] 绑定 session 不存活，活跃交集排除（canvasId=${canvasId} session=${sid}）——绑定不随 pi 崩溃解绑，session 重开即恢复回推`)
+        console.info(`[canvas] 归属会话不存活，回推排除（canvasId=${canvasId} owner=${sid}）——owner 持久在落盘路径，session 重开即恢复回推`)
         continue
       }
       out.push({ sid, client })
@@ -281,12 +290,12 @@ export class CanvasMessageHandler {
   }
 
   /**
-   * 对画布活跃绑定集合逐个回推（现成 client 直取，不经 ensureActive——防拉活已关 session
-   * 的 pi，见类头注释）。prompt fire-and-forget：失败 warn（首败显式上报，不重试——
-   * ADR-0122 手动恢复口径）。streamingBehavior='followUp' 显式排队：pi 1.0.0 契约 = 占线
-   * 且缺省该参数直接 throw「Agent is already processing」（D3-A3 v6 实证：用户连续裁决
-   * 的高频路径下回推静默丢失），followUp 让连续裁决逐条排队、agent 完成当前响应后依次
-   * 消化——不打断进行中的 turn（steer 会中断，通知场景语义不符）。
+   * 对画布回推对象（归属会话，活跃时）回推（现成 client 直取，不经 ensureActive——防拉活
+   * 已关 session 的 pi，见类头注释）。prompt fire-and-forget：失败 warn（首败显式上报，
+   * 不重试——ADR-0122 手动恢复口径）。streamingBehavior='followUp' 显式排队：pi 1.0.0
+   * 契约 = 占线且缺省该参数直接 throw「Agent is already processing」（D3-A3 v6 实证：
+   * 用户连续裁决的高频路径下回推静默丢失），followUp 让连续裁决逐条排队、agent 完成
+   * 当前响应后依次消化——不打断进行中的 turn（steer 会中断，通知场景语义不符）。
    * 本调用点是 C-data-25 投递所有权内核发送方封闭清单外的登记豁免：失效提示语义非交互投递
    * （通知文本只是 agent 重新 canvas_read 的触发器，画布状态权威在 events.jsonl，回推丢失
    * 不损状态），不经内核提交的理由与丢失恢复路径见约束 C-data-25 及
@@ -304,9 +313,11 @@ export class CanvasMessageHandler {
   // ── 广播接线（CanvasService.onUpdated → broker 全局通道）────────
 
   /**
-   * canvas.updated 全局广播帧封装（server.ts 装配注入 CanvasService.onUpdated）。
-   * payload 无 sessionId（broker.broadcast 契约：`canvas.` 前缀合法全局帧，rollingRestart
-   * 先例）；广播只是失效提示（renderer 收到后重新 canvas.get 拉取收敛，ADR-0097 拉为主）。
+   * canvas.updated 失效提示广播帧封装（server.ts 装配注入 CanvasService.onUpdated）。
+   * payload 带 sessionId = 画布归属会话（D4 隔离：消费方按归属过滤；帧在 broker 全局
+   * 通道豁免清单 GLOBAL_BROADCAST_SESSION_ID_EXEMPT 登记——sessionId 仅作归属信息，
+   * 对齐 plugin:headerActionUpdate 先例）。广播只是失效提示（归属会话的 renderer 收到后
+   * 重新 canvas.get 拉取收敛，ADR-0097 拉为主）。
    * evType 成员资格由类型系统保证：CanvasUpdatedBroadcast.evType 已收紧为封闭词表
    * CanvasEventType（canvas-service.ts），值源自 ACTION_EVENT_MAP 表内映射——越界值
    * 在编译期即不可构造，无需运行时成员资格守卫（M1-1：类型是既有等价保证面）。
@@ -317,6 +328,7 @@ export class CanvasMessageHandler {
       id: this.ctx.nextPushId(),
       payload: {
         canvasId: update.canvasId,
+        sessionId: update.ownerSessionId,
         evType: update.evType,
         eventId: update.eventId,
         summary: update.summary,

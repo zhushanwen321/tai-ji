@@ -453,9 +453,10 @@ describe('P-invisible·任务托盘面：D9③ 派生投影抑制（btw 线不�
 
 // ── 第 5 件 canvas（u-tray-entry，problem-solve-canvas §3.1(3)）──
 
-/** canvas.list 条目 fixture（形状 = canvas.list 投影，含阶段徽标派生输入） */
+/** canvas.list 条目 fixture（形状 = canvas.list 投影，含阶段徽标派生输入；ownerSessionId = D4 归属字段） */
 function makeCanvasEntry(overrides: Partial<CanvasListEntry> & { canvasId: string }): CanvasListEntry {
   return {
+    ownerSessionId: SID,
     name: `画布 ${overrides.canvasId}`,
     statement: '示例陈述',
     converged: false,
@@ -465,11 +466,12 @@ function makeCanvasEntry(overrides: Partial<CanvasListEntry> & { canvasId: strin
   }
 }
 
-/** 构造 canvas.updated 全局广播帧并分发（core 全局通道真实现，use-canvas-sync.test 同款） */
-function broadcastCanvasUpdated(canvasId: string): void {
+/** 构造 canvas.updated 全局广播帧并分发（core 全局通道真实现，use-canvas-sync.test 同款；
+ * payload.sessionId = 画布归属会话——D4 隔离后消费方按归属分流） */
+function broadcastCanvasUpdated(canvasId: string, sessionId: string = SID): void {
   dispatchGlobal({
     type: 'canvas.updated',
-    payload: { canvasId, evType: 'NodeCreated', eventId: 'ev-1', summary: '' },
+    payload: { canvasId, sessionId, evType: 'NodeCreated', eventId: 'ev-1', summary: '' },
   } as ServerMessage<'canvas.updated'>)
 }
 
@@ -519,13 +521,43 @@ describe('useTrayCounts canvas kind（第 5 件画布，u-tray-entry）', () => 
     expect(data().counts.value.canvas).toEqual({ running: 1, ended: 1, total: 2 })
   })
 
-  it('画布是跨 session 全局资源：空 sid 下 canvas 照常拉取计数（session 件归零、canvas 不归零）', async () => {
+  it('画布按归属会话隔离：空 sid 下 canvas 计数归零（per-session 分区——无会话即无画布）', async () => {
     commandMock.mockResolvedValue({
       canvases: [makeCanvasEntry({ canvasId: 'cvs-global' })],
     })
     const wrapper = mountHarness('')
-    await vi.waitFor(() => expect(data().counts.value.canvas.total).toBe(1))
-    expect(data().counts.value.session).toEqual({ running: 0, ended: 0, total: 0 })
+    await vi.waitFor(() => expect(data().counts.value.session.total).toBe(0))
+    // 空 sid → 归一 null → 不发 canvas.list RPC、计数恒零（与 session 件同款归零语义）
+    expect(commandMock).not.toHaveBeenCalledWith('canvas.list', expect.anything(), expect.anything())
+    expect(data().counts.value.canvas).toEqual({ running: 0, ended: 0, total: 0 })
     wrapper.unmount()
+  })
+
+  it('跨会话广播不刷新本会话计数：B 会话画布的 canvas.updated 只重拉 B 分区（A 计数不变）', async () => {
+    commandMock.mockImplementation(async (type: string) => {
+      if (type === 'canvas.list') return { canvases: [makeCanvasEntry({ canvasId: 'cvs-a' })] }
+      return null
+    })
+    mountHarness()
+    await vi.waitFor(() => expect(data().counts.value.canvas.total).toBe(1))
+
+    // B 会话的画布变更广播（payload.sessionId = SID2）→ 只重拉 B 分区清单，
+    // A 的计数与清单不变（D4 隔离：托盘计数 = 本会话画布）
+    commandMock.mockImplementation(async (type: string) => {
+      if (type === 'canvas.list') {
+        return {
+          canvases: [
+            makeCanvasEntry({ canvasId: 'cvs-a' }),
+            makeCanvasEntry({ canvasId: 'cvs-b', ownerSessionId: SID2 }),
+          ],
+        }
+      }
+      return null
+    })
+    broadcastCanvasUpdated('cvs-b', SID2)
+    await vi.waitFor(() => expect(commandMock).toHaveBeenCalledWith('canvas.list', { sessionId: SID2 }, expect.anything()))
+    // A 的清单未被动过（B 的广播只写 B 分区）
+    expect(data().lists.canvas.entries.value.map((c) => c.canvasId)).toEqual(['cvs-a'])
+    expect(data().counts.value.canvas.total).toBe(1)
   })
 })

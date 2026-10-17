@@ -38,10 +38,12 @@
  *   侧栏 `derivedStatus` 同源，但 agent 派发的子会话**通常未被 hydrate**（无消息分区）——
  *   `derivedStatus` 对 `status='active'` 且无消息会兜底 done，无法表达「运行中」；故托盘计数
  *   与状态点统一取进程级 `SessionSummary.status`（色语言仍复用 DOT_CLASS，见 TraySessionPanel）。
- * - canvas（第 5 件，problem-solve-canvas §3.1(3) u-tray-entry）：**native 直连 canvas store**
- *   （经 useCanvasSync 的窗口级单例订阅——首拉 + `canvas.updated` 失效重拉在订阅链内收敛，
- *   本数据面只读 store 清单投影）。画布是跨 session 共享资源（设计 D4/D7）：无 sid 分区、
- *   无 btw 抑制（非派生任务，bash/session 件同款边界）。计数口径 = 未收敛即进行中
+ * - canvas（第 5 件，problem-solve-canvas §3.1(3) u-tray-entry + session-store-layout-
+ *   inversion D4 隔离化）：**native 直连 canvas store**（经 useCanvasSync 的单条订阅——
+ *   首拉 + `canvas.updated` 失效重拉在订阅链内收敛，本数据面只读 store 清单投影）。
+ *   画布按归属会话隔离（runtime 清单只返回本会话画布）：本件计数 = 本会话画布；
+ *   btw 线（vid）托盘构造性归零（[D9③ 抑制执行点③]——画布已是会话维度资源，vid 非
+ *   合法归属分区键，线内画布经线 owner 会话托盘承载）。计数口径 = 未收敛即进行中
  *   （生长中 / 审查中都在活动），converged 终态落已结束；阶段徽标（生长中/审查中/已收敛）
  *   是面板行的派生展示值，不在数据面建第二词表。
  *
@@ -267,13 +269,17 @@ export function useTrayCounts(sessionIdRef: Ref<string | null | undefined>): Use
   const bashRunning = computed(() => filterBackgroundTasks(bashTasks.value, 'active'))
   const bashEnded = computed(() => filterBackgroundTasks(bashTasks.value, 'ended'))
 
-  // ── canvas（第 5 件，u-tray-entry）：native 直连 canvas store（跨 session 全局资源）──
-  // 订阅生命周期归 useCanvasSync（窗口级单例 + refCount，见其文件头）：首拉与 canvas.updated
-  // 失效重拉在订阅链内收敛，本数据面只读清单投影、零新协议。无 sid 分区、无 btw 抑制
-  // （画布不属任何 session，也非 session 派生任务）。进行中 = 未收敛（生长中 / 审查中都在活动），
-  // 已结束 = converged 终态（回看资产）。
-  const canvasStore = useCanvasSync()
-  const canvasEntries = computed<CanvasListEntry[]>(() => canvasStore.list)
+  // ── canvas（第 5 件，u-tray-entry）：native 直连 canvas store（per-session 分区读）──
+  // 订阅生命周期归 useCanvasSync（模块级单条订阅 + per-session 分流，见其文件头）：首拉与
+  // canvas.updated 失效重拉在订阅链内收敛，本数据面只读清单投影、零新协议。[D9③ 抑制
+  // 执行点③] btw 线（vid）托盘构造性归零——画布按归属会话隔离（D4）后已是会话维度资源，
+  // vid 非合法归属分区键（线内画布经线 owner 会话托盘承载）。进行中 = 未收敛（生长中 /
+  // 审查中都在活动），已结束 = converged 终态（回看资产）。
+  const canvasStore = useCanvasSync(normalizedSid)
+  const canvasEntries = computed<CanvasListEntry[]>(() => {
+    if (derivedSuppressed.value) return []
+    return canvasStore.list.value
+  })
   const canvasActive = computed(() => canvasEntries.value.filter((c) => !c.converged))
 
   const counts = computed<TrayCounts>(() => ({

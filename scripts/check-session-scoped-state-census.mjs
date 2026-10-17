@@ -66,6 +66,7 @@ export const CENSUS_SNAPSHOT = {
   'packages/renderer/src/composables/panel/useBtwTabData.ts': 1,
   'packages/renderer/src/composables/panel/useLoadMoreHistory.ts': 1,
   'packages/renderer/src/composables/panel/useSkillNoticeStream.ts': 1,
+  'packages/renderer/src/stores/canvas.ts': 1, // session-store-layout-inversion u-canvas：canvas store 迁 ADR-0049 Map 分区范式
   'packages/renderer/src/stores/plan-store.ts': 1,
   'packages/ui/src/extension-host/dialog-request-queue.ts': 1,
 }

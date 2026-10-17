@@ -42,7 +42,7 @@ canvas_unavailable_host: 画布需要 taiji 宿主。…
 
 ## 存储概览（只读理解用，agent 不直改文件）
 
-画布数据在 taiji runtime 数据目录 `<dataDir>/canvases/<canvasId>/` 下：
+画布按归属会话隔离（session-store-layout-inversion D4）：画布归属创建它的 session，一个 session 可有多张画布（1:N）。数据在 taiji runtime 数据目录 `<dataDir>/ext-sessions/<sessionId>/canvases/<canvasId>/` 下：
 
 | 文件 | 角色 |
 |---|---|
@@ -51,6 +51,8 @@ canvas_unavailable_host: 画布需要 taiji 宿主。…
 | `exports/` | 导出产物（planning-doc / requirement-card） |
 
 `<dataDir>` 按环境：taiji dev = `~/.taiji-dev`，taiji prod = `~/.taiji`（`TAIJI_AGENT_DATA_DIR` 可隔离）。修改画布只经 `canvas_edit` / `canvas_review` 工具走领域校验，**禁止手改这两个文件**。
+
+归属即隔离：`canvas_list` 只返回当前会话的画布；打开 / 读取 / 修改其他会话的画布一律被拒（错误码 `forbidden`，恢复动作 = 让用户切换到画布归属会话）。session 删除时该会话目录树（含其全部画布）随整树回收。
 
 ## 排障入口：扩展日志
 
@@ -69,7 +71,7 @@ canvas_unavailable_host: 画布需要 taiji 宿主。…
 | 环境 | 日志路径 | 画布数据 |
 |---|---|---|
 | 独立 pi CLI | `~/.pi/agent/logs/` | 不可用（canvas_unavailable_host） |
-| taiji dev | `~/.taiji-dev/agent/logs/` | `~/.taiji-dev/canvases/` |
-| taiji prod | `~/.taiji/agent/logs/` | `~/.taiji/canvases/` |
+| taiji dev | `~/.taiji-dev/agent/logs/` | `~/.taiji-dev/ext-sessions/<sessionId>/canvases/` |
+| taiji prod | `~/.taiji/agent/logs/` | `~/.taiji/ext-sessions/<sessionId>/canvases/` |
 
 排障顺序：先看工具 isError 消息里的错误码与恢复动作（多数问题到此为止）→ 需要通道级细节再读当日 `pi-canvas-*.log`（marker 调用失败会带 action 名落日志）→ 数据疑义以 `events.jsonl` 为准核对。

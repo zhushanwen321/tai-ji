@@ -7,9 +7,10 @@
   用户操作链 = mutate(actor:'user') → runtime 校验落盘广播 → 广播回返触发 store 刷新
   （无乐观回显：成功才呈现，失败 toast + 原因）。
 
-  数据链：useCanvasSync()（窗口级单例订阅 + 拉取收敛）→ canvasStore；本组件挂载/换画布
-  即 loadCanvas。绑定徽标数据源 = canvas.get reply 的 activeBindings（活跃绑定集合
-  = 绑定记录 ∩ 存活 session 的查询侧派生）；缺字段按未知处理（不渲染）。
+  数据链：useCanvasSync(sidRef)（模块级单条订阅 + per-session 分流）→ canvas store
+  本会话分区；本组件挂载/换画布即 loadCanvas（canvas.get 带归属 sessionId）。
+  绑定徽标数据源 = canvas.get reply 的 activeBindings（owner 即回推对象，存活 =
+  现成 client 存活的查询侧派生）；缺字段按未知处理（不渲染，事实驱动⑨）。
   组件异步导入：WorkflowVizOverlay canvas body 分支（defineAsyncComponent）。
 -->
 <template>
@@ -103,12 +104,15 @@ import CanvasOpDialog from './CanvasOpDialog.vue'
 
 const props = defineProps<{
   canvasId: string
+  /** 画布归属会话 id（overlay 载荷透传，D4 会话隔离：RPC 带归属 + per-session 分区读）。 */
+  sessionId: string
 }>()
 
 const { t } = useI18n()
 const toast = useToast()
 
-const store = useCanvasSync()
+const sidRef = computed(() => props.sessionId)
+const store = useCanvasSync(sidRef)
 
 const state = computed(() => store.canvasOf(props.canvasId))
 const loadError = computed(() => store.loadErrorOf(props.canvasId))
@@ -175,7 +179,8 @@ const activeBindingCount = computed<number | null>(() => state.value?.activeBind
 async function runMutate(request: CanvasMutateRequest): Promise<boolean> {
   mutating.value = true
   try {
-    const reply = await command('canvas.mutate', { actor: 'user', ...request }, RPC_BACKSTOP_TIMEOUT_MS)
+    // sessionId 必填（D4 破坏性协议）：归属写面——runtime 按 payload.sessionId 校验归属。
+    const reply = await command('canvas.mutate', { actor: 'user', sessionId: props.sessionId, ...request }, RPC_BACKSTOP_TIMEOUT_MS)
     if (reply.ok) {
       toast.info(reply.summary)
       return true

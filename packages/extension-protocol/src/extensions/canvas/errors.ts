@@ -17,10 +17,11 @@ export interface CanvasError { // oe-exempt:20261015:framework:画布域类型�
 }
 
 /**
- * 错误码词表（封闭 15 值）。分组：
+ * 错误码词表（封闭 16 值）。分组：
  * - 寻址 / 形状：canvas_not_found / node_not_found / edge_not_found /
  *   invalid_params / unknown_action
- * - 权限：actor_not_allowed（矩阵表外组合 fail-fast）
+ * - 权限：actor_not_allowed（矩阵表外组合 fail-fast）/ forbidden（画布不属当前会话——
+ *   归属校验拒绝，画布归属 = 创建它的 session，跨会话访问一律结构化拒绝）
  * - 不变量拦截：selection_conflict（不变量 3 双选定）/ cycle_detected（不变量 2 成环）/
  *   unverified_fact（不变量 5）/ dispatch_blocked（不变量 7）/ not_converged（不变量 10）/
  *   lifecycle_transition_illegal（状态机表外转移）
@@ -33,6 +34,7 @@ export const CANVAS_ERROR_CODES = [
   'invalid_params',
   'unknown_action',
   'actor_not_allowed',
+  'forbidden',
   'selection_conflict',
   'cycle_detected',
   'unverified_fact',
@@ -59,6 +61,7 @@ export const CANVAS_ERROR_RECOVERY: Record<CanvasErrorCode, string> = {
   invalid_params: '请求参数形状非法：对照该 action 的 params 契约修正字段后重试',
   unknown_action: 'action 不在词表：对照 CANVAS_ACTIONS 词表修正 action 名',
   actor_not_allowed: '当前操作方无此动作权限：查权限矩阵（该动作仅限特定操作方），改由有权方执行',
+  forbidden: '画布不属于当前会话（画布归属创建它的会话，跨会话访问被拒绝）：请让用户切换到画布归属会话后重试，或经 canvas_list 查看当前会话可用的画布',
   selection_conflict: '该问题已有选定方案：换选走 select 的 replace 参数（同一调用内迁移旧选定）并附对比理由',
   cycle_detected: '该边会使主干成环：分解/解边只能指向上层节点的下层，去掉回边后重试',
   unverified_fact: '未核实的 fact 论据不得作为通过依据：先补核实状态（factVerified）再重试',

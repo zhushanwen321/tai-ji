@@ -171,6 +171,14 @@ export interface ReviewReport { // oe-exempt:20261015:framework:画布域类型�
 /** 画布状态（聚合 1 全量投影；canvas.get reply 与 canvas.json 快照共用形状）。 */
 export interface CanvasState { // oe-exempt:20261015:framework:画布域类型契约（数据形状/端口/测试 harness，非抽象接口单实现）
   canvasId: string
+  /**
+   * 归属会话 id（画布归属 = 创建它的 session，1:N——一个 session 可有多张画布）。
+   * 归属即落盘路径（`<dataDir>/ext-sessions/<ownerSessionId>/canvases/<canvasId>/`），
+   * 路径即归属的构造性承载：该字段由 runtime 从落盘路径推导填充（服务层唯一写入点），
+   * 领域事件流不承载归属（CanvasCreated 事件 data 不含 sessionId——事件流内容与格式
+   * 不随布局反转变化，只挪位置）；跨会话访问按本字段归属校验拒绝（forbidden）。
+   */
+  ownerSessionId: string
   /** 画布名（canvasId = 短随机 id；重命名属第二版多画布管理，MVP 只读）。 */
   name: string
   /** 根问题三要素（不变量 1：有且仅有一个根节点，类型 question，带完成判据与范围排除）。 */
@@ -221,9 +229,12 @@ export interface CanvasState { // oe-exempt:20261015:framework:画布域类型�
 
 /** canvas.list 条目：托盘画布列表的数据源（名称 + 阶段徽标 + must-fix 计数）。
  * 阶段徽标本身是 renderer 派生值（开放 must-fix 或审查进行中 = 审查中；
- * converged = 已收敛；其余 = 生长中），契约只给派生输入。 */
+ * converged = 已收敛；其余 = 生长中），契约只给派生输入。清单按请求 sessionId
+ * 过滤（只返回归属该会话的画布），ownerSessionId 即过滤判据的回显。 */
 export interface CanvasListEntry { // oe-exempt:20261015:framework:画布域类型契约（数据形状/端口/测试 harness，非抽象接口单实现）
   canvasId: string
+  /** 归属会话 id（= 请求的过滤 sessionId；语义同 CanvasState.ownerSessionId）。 */
+  ownerSessionId: string
   name: string
   statement: string
   converged: boolean

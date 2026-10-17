@@ -15,7 +15,8 @@ import { join } from 'node:path'
 import { ACTION_EVENT_MAP, CANVAS_ACTOR_MATRIX, canvasError } from '@zhushanwen/extension-protocol'
 import type { CanvasAction, CanvasActor, CanvasMutateReply, CanvasState } from '@zhushanwen/extension-protocol'
 import { CanvasService } from '../canvas-service.js'
-import { createCanvas, expectOk, expectRejected, growCanvas, makeService, runActionHappyPath, type ServiceHandle } from './canvas-helpers.js'
+import { createCanvas, expectOk, expectRejected, growCanvas, makeService, runActionHappyPath, type ServiceHandle, SID, SID_B } from './canvas-helpers.js'
+import { getSessionCanvasesDir } from '@taiji/shared/paths'
 
 const ALL_ACTIONS = Object.keys(CANVAS_ACTOR_MATRIX) as CanvasAction[]
 const ALL_ACTORS: readonly CanvasActor[] = ['user', 'agent', 'review']
@@ -23,7 +24,7 @@ const ALL_ACTORS: readonly CanvasActor[] = ['user', 'agent', 'review']
 const HAPPY_PATH_ACTIONS = Object.keys(ACTION_EVENT_MAP) as (keyof typeof ACTION_EVENT_MAP)[]
 
 function eventsFilePath(dir: string, canvasId: string): string {
-  return join(dir, canvasId, 'events.jsonl')
+  return join(getSessionCanvasesDir(SID, dir), canvasId, 'events.jsonl')
 }
 
 function readEvents(dir: string, canvasId: string): Array<{ seq: number; eventId: string; type: string; action: string; actor: string }> {
@@ -42,7 +43,7 @@ describe('actor 权限矩阵执行（48 格全扫描）', () => {
           const request = action === 'create'
             ? { action: 'create' as const, params: { statement: 'x', criterias: ['c'], scopeExclusions: [] } }
             : { action: action as Exclude<CanvasAction, 'create'>, params: { canvasId: 'nonexistent' } as never }
-          const reply = h.svc.mutate(request, actor)
+          const reply = h.svc.mutate(request, actor, SID)
           expect(reply.ok, `${action}×${actor} 应为 false 格`).toBe(false)
           if (!reply.ok) {
             expect(reply.error.code, `${action}×${actor} 应报 actor_not_allowed`).toBe('actor_not_allowed')
@@ -65,11 +66,11 @@ describe('actor 权限矩阵执行（48 格全扫描）', () => {
           const h = makeService()
           try {
             const base = createCanvas(h.svc)
-            const mutated = h.svc.mutate({ action, params: { canvasId: base.canvasId } as never }, actor)
+            const mutated = h.svc.mutate({ action, params: { canvasId: base.canvasId } as never }, actor, SID)
             expect(mutated.ok, `${action} 经 mutate 应被引导到查询通道`).toBe(false)
             if (!mutated.ok) expect(mutated.error.code).toBe('invalid_params')
-            expect(h.svc.readState(base.canvasId).canvasId).toBe(base.canvasId)
-            expect(h.svc.listCanvases().canvases.length).toBeGreaterThan(0)
+            expect(h.svc.readState(base.canvasId, SID).canvasId).toBe(base.canvasId)
+            expect(h.svc.listCanvases(SID).canvases.length).toBeGreaterThan(0)
           } finally {
             h.dispose()
           }
@@ -104,10 +105,10 @@ describe('原子事务（批量 grow）', () => {
           ],
           reason: '原子事务断言',
         },
-      }, 'agent')
+      }, 'agent', SID)
       expect(reply.ok).toBe(false)
       if (!reply.ok) expect(reply.error.code).toBe('node_not_found')
-      const state = h.svc.readState(c.canvasId)
+      const state = h.svc.readState(c.canvasId, SID)
       expect(state.nodes.find((n) => n.id === 'ok-node')).toBeUndefined()
       expect(state.nodes).toHaveLength(nodesBefore)
       expect(readEvents(h.dir, c.canvasId)).toHaveLength(eventsBefore)
@@ -124,10 +125,10 @@ describe('幂等 upsert（崩溃窗口重试安全）', () => {
       const c = createCanvas(h.svc)
       const item = { id: 'dup-1', type: 'option' as const, content: '候选 A', attachTo: c.rootId, edge: 'resolve' as const }
       const params = { canvasId: c.canvasId, batch: [item], reason: '首次写入' }
-      expect(h.svc.mutate({ action: 'grow', params }, 'agent').ok).toBe(true)
+      expect(h.svc.mutate({ action: 'grow', params }, 'agent', SID).ok).toBe(true)
       const afterFirst = c.state()
       // 崩溃窗口重试：同 id 同内容再写一次
-      expect(h.svc.mutate({ action: 'grow', params }, 'agent').ok).toBe(true)
+      expect(h.svc.mutate({ action: 'grow', params }, 'agent', SID).ok).toBe(true)
       const afterRetry = c.state()
       expect(afterRetry.nodes.filter((n) => n.id === 'dup-1')).toHaveLength(1)
       expect(afterRetry.edges.filter((e) => e.id === 'e-dup-1')).toHaveLength(1)
@@ -146,9 +147,9 @@ describe('幂等 upsert（崩溃窗口重试安全）', () => {
     try {
       const g = growCanvas(h.svc, createCanvas(h.svc), { o1Dispatchable: true })
       // 后续 mutate 在 o1 上积累状态：选定 + 判据 + 生命周期推进
-      expect(h.svc.mutate({ action: 'select', params: { canvasId: g.canvasId, questionId: g.q1, optionId: g.o1, reason: '长期演进性优先' } }, 'user').ok).toBe(true)
-      expect(h.svc.mutate({ action: 'patch', params: { canvasId: g.canvasId, nodeId: g.o1, criterias: ['抽象层单测覆盖率 ≥ 90%'], reason: '补判据' } }, 'user').ok).toBe(true)
-      expect(h.svc.mutate({ action: 'transition', params: { canvasId: g.canvasId, nodeId: g.o1, to: 'under-review', reason: '提案' } }, 'agent').ok).toBe(true)
+      expect(h.svc.mutate({ action: 'select', params: { canvasId: g.canvasId, questionId: g.q1, optionId: g.o1, reason: '长期演进性优先' } }, 'user', SID).ok).toBe(true)
+      expect(h.svc.mutate({ action: 'patch', params: { canvasId: g.canvasId, nodeId: g.o1, criterias: ['抽象层单测覆盖率 ≥ 90%'], reason: '补判据' } }, 'user', SID).ok).toBe(true)
+      expect(h.svc.mutate({ action: 'transition', params: { canvasId: g.canvasId, nodeId: g.o1, to: 'under-review', reason: '提案' } }, 'agent', SID).ok).toBe(true)
       const before = g.state()
       // 崩溃窗口重试：同 id 同内容整批重放
       const retry = h.svc.mutate({
@@ -162,7 +163,7 @@ describe('幂等 upsert（崩溃窗口重试安全）', () => {
           ],
           reason: '按 MECE 分解引擎层',
         },
-      }, 'agent')
+      }, 'agent', SID)
       expect(retry.ok).toBe(true)
       const after = g.state()
       // 无重复节点 / 边
@@ -186,7 +187,7 @@ describe('幂等 upsert（崩溃窗口重试安全）', () => {
       const reply = h.svc.mutate({
         action: 'grow',
         params: { canvasId: g.canvasId, batch: [{ id: 'q1', type: 'question', content: '改述后的子问题', attachTo: g.rootId, edge: 'decompose' }], reason: '重试' },
-      }, 'agent')
+      }, 'agent', SID)
       expectRejected(reply, 'invalid_params')
       if (!reply.ok) {
         expect(reply.error.message).toContain('q1')
@@ -204,15 +205,15 @@ describe('幂等 upsert（崩溃窗口重试安全）', () => {
     try {
       const c = createCanvas(h.svc)
       const append = { canvasId: c.canvasId, round: 1, entries: [{ id: 'ent-1', round: 1, dimension: 'depth' as const, severity: 'must-fix' as const, targetId: c.rootId, note: '过浅' }] }
-      expect(h.svc.mutate({ action: 'review-append', params: append }, 'review').ok).toBe(true)
-      expect(h.svc.mutate({ action: 'review-resolve', params: { canvasId: c.canvasId, entryId: 'ent-1', disposition: 'accepted', note: '已补分支' } }, 'agent').ok).toBe(true)
+      expect(h.svc.mutate({ action: 'review-append', params: append }, 'review', SID).ok).toBe(true)
+      expect(h.svc.mutate({ action: 'review-resolve', params: { canvasId: c.canvasId, entryId: 'ent-1', disposition: 'accepted', note: '已补分支' } }, 'agent', SID).ok).toBe(true)
       // 崩溃窗口重试 append：覆盖条目字段但保留 resolution（first-writer-wins 不被重试冲掉）
-      expect(h.svc.mutate({ action: 'review-append', params: append }, 'review').ok).toBe(true)
+      expect(h.svc.mutate({ action: 'review-append', params: append }, 'review', SID).ok).toBe(true)
       const entries = c.state().review?.entries ?? []
       expect(entries.filter((e) => e.id === 'ent-1')).toHaveLength(1)
       expect(entries[0]?.resolution?.by).toBe('agent')
       // 重试后 resolve 仍被 already_resolved 拦截
-      const again = h.svc.mutate({ action: 'review-resolve', params: { canvasId: c.canvasId, entryId: 'ent-1', disposition: 'deferred', note: 'x' } }, 'user')
+      const again = h.svc.mutate({ action: 'review-resolve', params: { canvasId: c.canvasId, entryId: 'ent-1', disposition: 'deferred', note: 'x' } }, 'user', SID)
       expect(again.ok).toBe(false)
       if (!again.ok) expect(again.error.code).toBe('already_resolved')
     } finally {
@@ -239,7 +240,7 @@ describe('reason 留痕纪律（契约「canvas_edit 族共享 reason 强制字�
         return {
           canvasId: c.canvasId,
           eventsBefore,
-          reply: h.svc.mutate({ action: 'grow', params: { canvasId: c.canvasId, batch: [{ id: 'g1', type: 'question', content: '子问题', attachTo: c.rootId, edge: 'decompose' }], reason: '' } }, 'agent'),
+          reply: h.svc.mutate({ action: 'grow', params: { canvasId: c.canvasId, batch: [{ id: 'g1', type: 'question', content: '子问题', attachTo: c.rootId, edge: 'decompose' }], reason: '' } }, 'agent', SID),
         }
       },
     },
@@ -251,7 +252,7 @@ describe('reason 留痕纪律（契约「canvas_edit 族共享 reason 强制字�
         return {
           canvasId: c.canvasId,
           eventsBefore,
-          reply: h.svc.mutate({ action: 'patch', params: { canvasId: c.canvasId, nodeId: c.rootId, content: '改述后的问题', reason: '   ' } }, 'user'),
+          reply: h.svc.mutate({ action: 'patch', params: { canvasId: c.canvasId, nodeId: c.rootId, content: '改述后的问题', reason: '   ' } }, 'user', SID),
         }
       },
     },
@@ -263,7 +264,7 @@ describe('reason 留痕纪律（契约「canvas_edit 族共享 reason 强制字�
         return {
           canvasId: c.canvasId,
           eventsBefore,
-          reply: h.svc.mutate({ action: 'decide-direction', params: { canvasId: c.canvasId, direction: 'top-down', reason: '' } }, 'user'),
+          reply: h.svc.mutate({ action: 'decide-direction', params: { canvasId: c.canvasId, direction: 'top-down', reason: '' } }, 'user', SID),
         }
       },
     },
@@ -275,7 +276,7 @@ describe('reason 留痕纪律（契约「canvas_edit 族共享 reason 强制字�
         return {
           canvasId: c.canvasId,
           eventsBefore,
-          reply: h.svc.mutate({ action: 'select', params: { canvasId: c.canvasId, questionId: c.q1, optionId: c.o1, reason: '  ' } }, 'user'),
+          reply: h.svc.mutate({ action: 'select', params: { canvasId: c.canvasId, questionId: c.q1, optionId: c.o1, reason: '  ' } }, 'user', SID),
         }
       },
     },
@@ -287,7 +288,7 @@ describe('reason 留痕纪律（契约「canvas_edit 族共享 reason 强制字�
         return {
           canvasId: c.canvasId,
           eventsBefore,
-          reply: h.svc.mutate({ action: 'transition', params: { canvasId: c.canvasId, nodeId: c.rootId, to: 'under-review', reason: '' } }, 'user'),
+          reply: h.svc.mutate({ action: 'transition', params: { canvasId: c.canvasId, nodeId: c.rootId, to: 'under-review', reason: '' } }, 'user', SID),
         }
       },
     },
@@ -338,9 +339,9 @@ describe('领域事件对账（ACTION_EVENT_MAP SSOT）', () => {
       const c = createCanvas(h.svc)
       const file = eventsFilePath(h.dir, c.canvasId)
       const before = readFileSync(file, 'utf-8').length
-      h.svc.readState(c.canvasId)
-      h.svc.readState(c.canvasId)
-      h.svc.listCanvases()
+      h.svc.readState(c.canvasId, SID)
+      h.svc.readState(c.canvasId, SID)
+      h.svc.listCanvases(SID)
       expect(readFileSync(file, 'utf-8').length).toBe(before)
     } finally {
       h.dispose()
@@ -351,16 +352,16 @@ describe('领域事件对账（ACTION_EVENT_MAP SSOT）', () => {
     const h = makeService()
     try {
       const c = createCanvas(h.svc)
-      expectOk(h.svc.mutate({ action: 'patch', params: { canvasId: c.canvasId, nodeId: c.rootId, content: '改述', reason: 'r' } }, 'user'))
+      expectOk(h.svc.mutate({ action: 'patch', params: { canvasId: c.canvasId, nodeId: c.rootId, content: '改述', reason: 'r' } }, 'user', SID))
       let events = readEvents(h.dir, c.canvasId)
       expect(events.filter((e) => e.type === 'DirtiedPathMarked')).toHaveLength(1)
       const g = growCanvas(h.svc, c, { o1Dispatchable: true })
-      expectOk(h.svc.mutate({ action: 'select', params: { canvasId: g.canvasId, questionId: g.q1, optionId: g.o1, reason: 'r' } }, 'user'))
-      expectOk(h.svc.mutate({ action: 'patch', params: { canvasId: g.canvasId, nodeId: g.o1, criterias: ['c'], reason: 'r' } }, 'user'))
-      expectOk(h.svc.mutate({ action: 'transition', params: { canvasId: g.canvasId, nodeId: g.o1, to: 'under-review', reason: '提案' } }, 'agent'))
-      expectOk(h.svc.mutate({ action: 'transition', params: { canvasId: g.canvasId, nodeId: g.o1, to: 'passed', reason: '过审' } }, 'user'))
-      expectOk(h.svc.mutate({ action: 'review-request', params: { canvasId: g.canvasId } }, 'agent'))
-      expectOk(h.svc.mutate({ action: 'converge-check', params: { canvasId: g.canvasId } }, 'user'))
+      expectOk(h.svc.mutate({ action: 'select', params: { canvasId: g.canvasId, questionId: g.q1, optionId: g.o1, reason: 'r' } }, 'user', SID))
+      expectOk(h.svc.mutate({ action: 'patch', params: { canvasId: g.canvasId, nodeId: g.o1, criterias: ['c'], reason: 'r' } }, 'user', SID))
+      expectOk(h.svc.mutate({ action: 'transition', params: { canvasId: g.canvasId, nodeId: g.o1, to: 'under-review', reason: '提案' } }, 'agent', SID))
+      expectOk(h.svc.mutate({ action: 'transition', params: { canvasId: g.canvasId, nodeId: g.o1, to: 'passed', reason: '过审' } }, 'user', SID))
+      expectOk(h.svc.mutate({ action: 'review-request', params: { canvasId: g.canvasId } }, 'agent', SID))
+      expectOk(h.svc.mutate({ action: 'converge-check', params: { canvasId: g.canvasId } }, 'user', SID))
       events = readEvents(h.dir, g.canvasId)
       expect(events.filter((e) => e.type === 'ReviewConverged')).toHaveLength(1)
       expect(events.filter((e) => e.type === 'ConvergenceChecked')).toHaveLength(1)
@@ -374,7 +375,7 @@ describe('领域事件对账（ACTION_EVENT_MAP SSOT）', () => {
     const h = makeService({ onUpdated: (u) => updates.push(u) })
     try {
       const c = createCanvas(h.svc)
-      const reply = h.svc.mutate({ action: 'decide-direction', params: { canvasId: c.canvasId, direction: 'top-down', reason: 'r' } }, 'user')
+      const reply = h.svc.mutate({ action: 'decide-direction', params: { canvasId: c.canvasId, direction: 'top-down', reason: 'r' } }, 'user', SID)
       expectOk(reply)
       expect(updates).toHaveLength(2) // create + decide-direction
       const last = updates[updates.length - 1]
@@ -392,7 +393,7 @@ describe('领域事件对账（ACTION_EVENT_MAP SSOT）', () => {
       const c = createCanvas(h.svc)
       const before = readEvents(h.dir, c.canvasId).length
       for (const action of ['read', 'list'] as const) {
-        const reply = h.svc.mutate({ action, params: { canvasId: c.canvasId } as never }, 'user')
+        const reply = h.svc.mutate({ action, params: { canvasId: c.canvasId } as never }, 'user', SID)
         expect(reply.ok).toBe(false)
         if (!reply.ok) {
           expect(reply.error.code).toBe('invalid_params')

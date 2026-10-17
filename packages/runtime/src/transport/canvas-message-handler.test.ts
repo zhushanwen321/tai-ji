@@ -44,7 +44,7 @@ function makeFakeClient(overrides: { exited?: boolean } = {}): { prompt: ReturnT
 }
 
 interface Harness { // oe-exempt:20261015:framework:画布域类型契约（数据形状/端口/测试 harness，非抽象接口单实现）
-  canvasesDir: string
+  dataDir: string
   canvasService: CanvasService
   handler: CanvasMessageHandler
   sentResponses: SentResponse[]
@@ -63,11 +63,11 @@ interface Harness { // oe-exempt:20261015:framework:画布域类型契约（数�
  * pi 子进程 IO 与 ISessionService 换成收集数组与 fake。
  */
 function makeHarness(agentSessionId = 'sid-agent'): Harness {
-  const canvasesDir = mkdtempSync(join(tmpdir(), 'canvas-transport-'))
+  const dataDir = mkdtempSync(join(tmpdir(), 'canvas-transport-'))
   // 广播接线与 server.ts 装配一致（service.onUpdated → handler.broadcastUpdated）；闭包晚绑定
   //（service 先构造，handler 构造后即接线完成，mutate 只发生在测试体内）。
   let broadcastUpdated: CanvasServiceDeps['onUpdated'] = undefined
-  const canvasService = new CanvasService({ canvasesDir, onUpdated: (u) => broadcastUpdated?.(u) })
+  const canvasService = new CanvasService({ dataDir, onUpdated: (u) => broadcastUpdated?.(u) })
   const sentResponses: SentResponse[] = []
   const broadcast = vi.fn()
   const reply = vi.fn()
@@ -98,7 +98,7 @@ function makeHarness(agentSessionId = 'sid-agent'): Harness {
     },
   })
   return {
-    canvasesDir,
+    dataDir,
     canvasService,
     handler,
     sentResponses,
@@ -137,6 +137,9 @@ function canvasWsMsg<T extends ClientMessage['type']>(type: T, payload: unknown)
   return { type, id: 'rpc-1', payload } as unknown as Extract<ClientMessage, { type: T }>
 }
 
+/** marker 通道固定发起会话（makeHarness 的 agentSessionId；服务调用归属参数同值）。 */
+const SID = 'sid-agent'
+
 const ws = {} as WsType
 
 /** 收尾：画布目录自建自删 + service 摘除模块级登记。 */
@@ -165,7 +168,7 @@ async function createBoundCanvas(h: Harness, requestId = 'req-create-setup'): Pr
 describe('marker 往返翻译（CANVAS_MARKER select 通道）', () => {
   it('create 全链：marker request → 真实 handler 创建画布 + 登记绑定 + 应答回 select 通道', async () => {
     const h = makeHarness()
-    trackDir(h.canvasesDir)
+    trackDir(h.dataDir)
 
     await h.dispatch(canvasRequestLine('req-1', 'create', {
       statement: '多引擎支持怎么落地',
@@ -179,20 +182,20 @@ describe('marker 往返翻译（CANVAS_MARKER select 通道）', () => {
     expect(body.ok).toBe(true)
     expect(body.evType).toBe('CanvasCreated')
     expect(body.canvasId).toMatch(/^cvs-/)
-    // create 成功即登记绑定（marker 通道 create 一并登记；回推路由建立）
+    // create 即建立回推通道（owner = 发起会话——归属即路径，无 enter 登记语义）
     expect(h.canvasService.getBoundSessions(body.canvasId)).toEqual(['sid-agent'])
   })
 
   it('enter 打开形态：读全量 CanvasState + 幂等登记绑定', async () => {
     const h = makeHarness()
-    trackDir(h.canvasesDir)
+    trackDir(h.dataDir)
     const canvasId = await createBoundCanvas(h)
 
     await h.dispatch(canvasRequestLine('req-enter', 'enter', { canvasId }))
     const state = readSingleResponse<CanvasState>(h.sentResponses, 'req-enter')
     expect(state.canvasId).toBe(canvasId)
     expect(state.root.statement).toBe('多引擎支持怎么落地')
-    // 绑定幂等：重复 enter 同画布无副作用
+    // owner 即回推对象（enter 只读不登记——归属持久在落盘路径）
     expect(h.canvasService.getBoundSessions(canvasId)).toEqual(['sid-agent'])
   })
 
@@ -212,7 +215,7 @@ describe('marker 往返翻译（CANVAS_MARKER select 通道）', () => {
 
   it('畸形 payload：非法 JSON → __malformed__ → 结构化错误应答（不降级普通对话框、不走 error envelope）', async () => {
     const h = makeHarness()
-    trackDir(h.canvasesDir)
+    trackDir(h.dataDir)
     const malformedLine = JSON.stringify({
       type: 'extension_ui_request', id: 'req-bad', method: 'select', title: CANVAS_MARKER, options: ['not json'],
     })
@@ -230,7 +233,7 @@ describe('marker 往返翻译（CANVAS_MARKER select 通道）', () => {
 
   it('畸形 payload：action 词表外 → 结构化错误应答（unknown 领域动作不进 service）', async () => {
     const h = makeHarness()
-    trackDir(h.canvasesDir)
+    trackDir(h.dataDir)
 
     await h.dispatch(canvasRequestLine('req-bad-action', 'self-destruct', { canvasId: 'cvs-x' }))
 
@@ -238,12 +241,12 @@ describe('marker 往返翻译（CANVAS_MARKER select 通道）', () => {
     expect(body.ok).toBe(false)
     expect(body.error.code).toBe('invalid_params')
     // service 未被触达（无画布被创建/查询副作用）：翻译层折叠，未到 dispatch
-    expect(h.canvasService.listCanvases().canvases).toHaveLength(0)
+    expect(h.canvasService.listCanvases(SID).canvases).toHaveLength(0)
   })
 
   it('marker 通道表外动作（agent 权限外）：decide-direction → actor_not_allowed 结构化拒绝', async () => {
     const h = makeHarness()
-    trackDir(h.canvasesDir)
+    trackDir(h.dataDir)
     const canvasId = await createBoundCanvas(h)
 
     // decide-direction 仅 user（矩阵）——marker 通道恒 agent，表外组合 fail-fast
@@ -262,14 +265,14 @@ describe('marker 往返翻译（CANVAS_MARKER select 通道）', () => {
 describe('回推派发（actor=user 成功腿；防回环 actor 维度）', () => {
   it('WS mutate actor=user → 绑定 session 的现成 client 收到「画布事件通知」回推', async () => {
     const h = makeHarness()
-    trackDir(h.canvasesDir)
+    trackDir(h.dataDir)
     const canvasId = await createBoundCanvas(h)
     const client = makeFakeClient()
     h.clients.set('sid-agent', client)
-    const state = h.canvasService.readState(canvasId)
+    const state = h.canvasService.readState(canvasId, SID)
 
     const msg = canvasWsMsg('canvas.mutate', {
-      actor: 'user', action: 'patch',
+      actor: 'user', sessionId: 'sid-agent', action: 'patch',
       params: { canvasId, nodeId: state.root.nodeId, content: '多引擎支持怎么落地（用户改写）', reason: '用户澄清陈述' },
     })
     await h.handler.handleCanvasMessage(msg, ws)
@@ -294,11 +297,11 @@ describe('回推派发（actor=user 成功腿；防回环 actor 维度）', () =
 
   it('防回环：marker 通道（agent actor）mutate 成功 → prompt 零调用', async () => {
     const h = makeHarness()
-    trackDir(h.canvasesDir)
+    trackDir(h.dataDir)
     const canvasId = await createBoundCanvas(h)
     const client = makeFakeClient()
     h.clients.set('sid-agent', client)
-    const state = h.canvasService.readState(canvasId)
+    const state = h.canvasService.readState(canvasId, SID)
 
     // agent 自己 grow（绑定在册、mutate 成功）——不回推（构造性：marker 通道恒 agent）
     await h.dispatch(canvasRequestLine('req-grow', 'grow', {
@@ -312,11 +315,11 @@ describe('回推派发（actor=user 成功腿；防回环 actor 维度）', () =
 
   it('防回环：review-append（review actor）成功写回 → prompt 零调用', async () => {
     const h = makeHarness()
-    trackDir(h.canvasesDir)
+    trackDir(h.dataDir)
     const canvasId = await createBoundCanvas(h)
     const client = makeFakeClient()
     h.clients.set('sid-agent', client)
-    const state = h.canvasService.readState(canvasId)
+    const state = h.canvasService.readState(canvasId, SID)
 
     // reviewer 报告写回（actor=review，唯一合法格）——成功腿也不回推；契约每条 entry 自带 round
     await h.dispatch(canvasRequestLine('req-append', 'review-append', {
@@ -331,14 +334,14 @@ describe('回推派发（actor=user 成功腿；防回环 actor 维度）', () =
 
   it('回推存活过滤：绑定 session 的 pi 已退出 → prompt 零调用（不经 ensureActive 拉活）', async () => {
     const h = makeHarness()
-    trackDir(h.canvasesDir)
+    trackDir(h.dataDir)
     const canvasId = await createBoundCanvas(h)
     const deadClient = makeFakeClient({ exited: true })
     h.clients.set('sid-agent', deadClient)
-    const state = h.canvasService.readState(canvasId)
+    const state = h.canvasService.readState(canvasId, SID)
 
     const msg = canvasWsMsg('canvas.mutate', {
-      actor: 'user', action: 'patch',
+      actor: 'user', sessionId: 'sid-agent', action: 'patch',
       params: { canvasId, nodeId: state.root.nodeId, content: '改', reason: '用户改写' },
     })
     await h.handler.handleCanvasMessage(msg, ws)
@@ -347,38 +350,87 @@ describe('回推派发（actor=user 成功腿；防回环 actor 维度）', () =
     expect(deadClient.prompt).not.toHaveBeenCalled()
   })
 
-  it('回推边界：无绑定记录 → getRpcClient 不被触达（无回推对象）', async () => {
+  it('回推通道（owner 语义）：GUI create 带 sessionId → owner 即回推对象，patch 成功腿回推 owner', async () => {
     const h = makeHarness()
-    trackDir(h.canvasesDir)
-    // 不走 marker 通道 create（无绑定）——直接经 WS 通道建画布
+    trackDir(h.dataDir)
+    // GUI 托盘新建走 WS 通道：create 落 owner（payload.sessionId），回推通道随创建建立
     const msgCreate = canvasWsMsg('canvas.mutate', {
-      actor: 'user', action: 'create',
+      actor: 'user', sessionId: 'sid-agent', action: 'create',
       params: { statement: 'S', criterias: ['C1'], scopeExclusions: [] },
     })
     await h.handler.handleCanvasMessage(msgCreate, ws)
     const canvasId = (h.reply.mock.calls[0][3] as Extract<CanvasMutateReply, { ok: true }> & { canvasId: string }).canvasId
-    const state = h.canvasService.readState(canvasId)
-    h.getRpcClient.mockClear()
+    const state = h.canvasService.readState(canvasId, SID)
+    const client = makeFakeClient()
+    h.clients.set('sid-agent', client)
 
     const msgPatch = canvasWsMsg('canvas.mutate', {
-      actor: 'user', action: 'patch',
+      actor: 'user', sessionId: 'sid-agent', action: 'patch',
       params: { canvasId, nodeId: state.root.nodeId, content: '改', reason: '用户改写' },
     })
     await h.handler.handleCanvasMessage(msgPatch, ws)
 
-    // 绑定集合为空（GUI 托盘新建不登记绑定）→ 回推路径根本不取 client
-    expect(h.canvasService.getBoundSessions(canvasId)).toEqual([])
-    expect(h.getRpcClient).not.toHaveBeenCalled()
+    // owner 持久在落盘路径（D4）：回推对象 = 归属会话本身
+    expect(h.canvasService.getBoundSessions(canvasId)).toEqual(['sid-agent'])
+    expect(client.prompt).toHaveBeenCalledTimes(1)
     expect(h.reply).toHaveBeenCalledWith(ws, 'rpc-1', 'canvas.mutate', expect.objectContaining({ ok: true }))
+  })
+
+  it('归属校验拒绝：B 会话 WS mutate A 的画布 → forbidden 失败腿（D4 隔离）', async () => {
+    const h = makeHarness()
+    trackDir(h.dataDir)
+    const canvasId = await createBoundCanvas(h)
+    const state = h.canvasService.readState(canvasId, SID)
+
+    const msg = canvasWsMsg('canvas.mutate', {
+      actor: 'user', sessionId: 'sid-other', action: 'patch',
+      params: { canvasId, nodeId: state.root.nodeId, content: '越会话改写', reason: 'r' },
+    })
+    await h.handler.handleCanvasMessage(msg, ws)
+    const failReply = h.reply.mock.calls[0][3] as Extract<CanvasMutateReply, { ok: false }>
+    expect(failReply.ok).toBe(false)
+    expect(failReply.error.code).toBe('forbidden')
+    expect(failReply.error.recover).toContain('归属会话')
+  })
+
+  it('payload 缺 sessionId → invalid_params 结构化拒绝（破坏性协议：schema 层拒绝缺失）', async () => {
+    const h = makeHarness()
+    trackDir(h.dataDir)
+    const msg = canvasWsMsg('canvas.mutate', {
+      actor: 'user', action: 'create',
+      params: { statement: 'S', criterias: ['C1'], scopeExclusions: [] },
+    })
+    await h.handler.handleCanvasMessage(msg, ws)
+    const failReply = h.reply.mock.calls[0][3] as Extract<CanvasMutateReply, { ok: false }>
+    expect(failReply.ok).toBe(false)
+    expect(failReply.error.code).toBe('invalid_params')
+    expect(failReply.error.message).toContain('sessionId')
+    // 未触服务（零画布落盘）
+    expect(h.canvasService.listCanvases('sid-agent').canvases).toHaveLength(0)
+  })
+
+  it('canvas.list 按 sessionId 过滤：A 的画布不出现在 B 的清单（D4 裁决 3）', async () => {
+    const h = makeHarness()
+    trackDir(h.dataDir)
+    const canvasId = await createBoundCanvas(h)
+
+    await h.handler.handleCanvasMessage(canvasWsMsg('canvas.list', { sessionId: 'sid-agent' }), ws)
+    expect(h.reply).toHaveBeenCalledWith(ws, 'rpc-1', 'canvas.list', {
+      canvases: [expect.objectContaining({ canvasId, ownerSessionId: 'sid-agent' })],
+    })
+
+    h.reply.mockClear()
+    await h.handler.handleCanvasMessage(canvasWsMsg('canvas.list', { sessionId: 'sid-other' }), ws)
+    expect(h.reply).toHaveBeenCalledWith(ws, 'rpc-1', 'canvas.list', { canvases: [] })
   })
 })
 
-// ── ③ 广播 payload 形状（canvas.updated 含 evType，无 sessionId）──
+// ── ③ 广播 payload 形状（canvas.updated 含 evType + 归属 sessionId）──
 
-describe('广播 payload 形状（canvas.updated 全局通道）', () => {
-  it('marker create 成功 → broker 全局广播帧：payload 四键（canvasId/evType/eventId/summary）无 sessionId，evType 为词表值', async () => {
+describe('广播 payload 形状（canvas.updated 全局通道，payload 带归属 sessionId）', () => {
+  it('marker create 成功 → broker 全局广播帧：payload 五键（canvasId/sessionId/evType/eventId/summary），sessionId = 归属会话', async () => {
     const h = makeHarness()
-    trackDir(h.canvasesDir)
+    trackDir(h.dataDir)
 
     await h.dispatch(canvasRequestLine('req-1', 'create', {
       statement: 'S', criterias: ['C1'], scopeExclusions: [],
@@ -390,19 +442,18 @@ describe('广播 payload 形状（canvas.updated 全局通道）', () => {
     expect(frame.id).toBe('push_test_1')
     expect(frame.payload).toEqual({
       canvasId: expect.any(String),
+      sessionId: 'sid-agent',
       evType: 'CanvasCreated',
       eventId: expect.any(String),
       summary: expect.any(String),
     })
-    // 无 sid 全局消息走 broker.broadcast（画布不属任何 session；broker session-scoped 哨兵靠 payload 无 sessionId 不触发）
-    expect('sessionId' in frame.payload).toBe(false)
   })
 
   it('每次 mutate 成功一条广播：后续 grow 的 evType = NodeCreated（evType 随事件类型分流）', async () => {
     const h = makeHarness()
-    trackDir(h.canvasesDir)
+    trackDir(h.dataDir)
     const canvasId = await createBoundCanvas(h)
-    const state = h.canvasService.readState(canvasId)
+    const state = h.canvasService.readState(canvasId, SID)
     h.broadcast.mockClear()
 
     await h.dispatch(canvasRequestLine('req-grow', 'grow', {
@@ -423,16 +474,16 @@ describe('广播 payload 形状（canvas.updated 全局通道）', () => {
 describe('canvas.* RPC 面', () => {
   it('canvas.list → CanvasListReply；canvas.get → CanvasState（含 activeBindings 绑定徽标派生）；get 未知画布 → canvas_not_found error envelope（hint 恢复动作）', async () => {
     const h = makeHarness()
-    trackDir(h.canvasesDir)
+    trackDir(h.dataDir)
     const canvasId = await createBoundCanvas(h)
 
-    await h.handler.handleCanvasMessage(canvasWsMsg('canvas.list', {}), ws)
+    await h.handler.handleCanvasMessage(canvasWsMsg('canvas.list', { sessionId: 'sid-agent' }), ws)
     expect(h.reply).toHaveBeenCalledWith(ws, 'rpc-1', 'canvas.list', {
       canvases: [expect.objectContaining({ canvasId, converged: false })],
     })
 
     h.reply.mockClear()
-    await h.handler.handleCanvasMessage(canvasWsMsg('canvas.get', { canvasId }), ws)
+    await h.handler.handleCanvasMessage(canvasWsMsg('canvas.get', { canvasId, sessionId: 'sid-agent' }), ws)
     const state = h.reply.mock.calls[0][3] as CanvasState
     expect(state.canvasId).toBe(canvasId)
     expect(state.root.statement).toBe('多引擎支持怎么落地')
@@ -446,44 +497,45 @@ describe('canvas.* RPC 面', () => {
     )
     // 查询侧派生只落在 WS get 附加层：domain 产物（service readState）不含该字段
     // ——落盘与 marker 工具结果均不携带（契约注释「optional = marker 通道不携带」）
-    expect('convergenceBlockers' in h.canvasService.readState(canvasId)).toBe(false)
+    expect('convergenceBlockers' in h.canvasService.readState(canvasId, SID)).toBe(false)
 
     h.reply.mockClear()
     h.sendError.mockClear()
-    await h.handler.handleCanvasMessage(canvasWsMsg('canvas.get', { canvasId: 'cvs-missing' }), ws)
+    await h.handler.handleCanvasMessage(canvasWsMsg('canvas.get', { canvasId: 'cvs-missing', sessionId: 'sid-agent' }), ws)
     expect(h.reply).not.toHaveBeenCalled()
     expect(h.sendError).toHaveBeenCalledWith(ws, 'canvas_not_found', expect.any(String), 'rpc-1', expect.objectContaining({ hint: expect.stringContaining('canvas_list') }))
   })
 
-  it('canvas.get activeBindings 派生：绑定 ∩ 存活 client（存活计 1 / exited 不计 / 解绑归零）', async () => {
+  it('canvas.get activeBindings 派生：owner 存活计 1 / exited 不计 / session 真删除后画布不可达', async () => {
     const h = makeHarness()
-    trackDir(h.canvasesDir)
+    trackDir(h.dataDir)
     const canvasId = await createBoundCanvas(h)
 
-    // 存活 client 在册 → 活跃交集 1
+    // 存活 client 在册 → 活跃交集 1（owner 即回推对象）
     h.clients.set('sid-agent', makeFakeClient())
     h.reply.mockClear()
-    await h.handler.handleCanvasMessage(canvasWsMsg('canvas.get', { canvasId }), ws)
+    await h.handler.handleCanvasMessage(canvasWsMsg('canvas.get', { canvasId, sessionId: 'sid-agent' }), ws)
     expect((h.reply.mock.calls[0][3] as CanvasState).activeBindings).toBe(1)
 
-    // pi 已退出（exited）→ 绑定在册不等于活跃：排除（生死二态，无宽限窗）
+    // pi 已退出（exited）→ owner 在册不等于活跃：排除（生死二态，无宽限窗）
     h.clients.set('sid-agent', makeFakeClient({ exited: true }))
     h.reply.mockClear()
-    await h.handler.handleCanvasMessage(canvasWsMsg('canvas.get', { canvasId }), ws)
+    await h.handler.handleCanvasMessage(canvasWsMsg('canvas.get', { canvasId, sessionId: 'sid-agent' }), ws)
     expect((h.reply.mock.calls[0][3] as CanvasState).activeBindings).toBe(0)
 
-    // session 真删除解绑 → 交集空
+    // session 真删除 → 内存镜像摘除（磁盘树随 ext-sessions 整树回收归 u-deletion）：
+    // 画布对该会话不可达（canvas_not_found error envelope）
     h.canvasService.unbindSession('sid-agent')
-    h.reply.mockClear()
-    await h.handler.handleCanvasMessage(canvasWsMsg('canvas.get', { canvasId }), ws)
-    expect((h.reply.mock.calls[0][3] as CanvasState).activeBindings).toBe(0)
+    h.sendError.mockClear()
+    await h.handler.handleCanvasMessage(canvasWsMsg('canvas.get', { canvasId, sessionId: 'sid-agent' }), ws)
+    expect(h.sendError).toHaveBeenCalledWith(ws, 'canvas_not_found', expect.any(String), 'rpc-1', expect.objectContaining({ hint: expect.any(String) }))
   })
 
   it('canvas.mutate 领域拒绝 → reply 失败腿结构化错误（selection_conflict：一问双选定）', async () => {
     const h = makeHarness()
-    trackDir(h.canvasesDir)
+    trackDir(h.dataDir)
     const canvasId = await createBoundCanvas(h)
-    const state = h.canvasService.readState(canvasId)
+    const state = h.canvasService.readState(canvasId, SID)
     // 两张候选方案（同属根问题）
     await h.dispatch(canvasRequestLine('req-grow', 'grow', {
       canvasId,
@@ -495,7 +547,7 @@ describe('canvas.* RPC 面', () => {
     }))
 
     const msg = canvasWsMsg('canvas.mutate', {
-      actor: 'user', action: 'select',
+      actor: 'user', sessionId: 'sid-agent', action: 'select',
       params: { canvasId, questionId: state.root.nodeId, optionId: 'opt-a', reason: '先选 A' },
     })
     await h.handler.handleCanvasMessage(msg, ws)
@@ -503,7 +555,7 @@ describe('canvas.* RPC 面', () => {
 
     h.reply.mockClear()
     const msgAgain = canvasWsMsg('canvas.mutate', {
-      actor: 'user', action: 'select',
+      actor: 'user', sessionId: 'sid-agent', action: 'select',
       params: { canvasId, questionId: state.root.nodeId, optionId: 'opt-b', reason: '未走 replace 迁移直接换选' },
     })
     await h.handler.handleCanvasMessage(msgAgain, ws)

@@ -1076,10 +1076,16 @@ export interface ClientMessageMap {
   'mcp.test': McpTestRequest
   'mcp.testCancel': McpTestCancelRequest
   // ── canvas.*（problem-solve-canvas U1 契约面）请求 payload：形状 SSOT 在
-  // @zhushanwen/extension-protocol canvas 模块（params 两通道同构——WS RPC 与 marker）。list 无参数。
-  'canvas.list': Record<string, never>
-  'canvas.get': { canvasId: string }
-  'canvas.mutate': { actor: CanvasActor } & CanvasMutateRequest
+  // @zhushanwen/extension-protocol canvas 模块（action params 两通道同构——WS RPC 与
+  // marker；sessionId 是通道级字段，与 canvas.mutate 的 actor/sessionId 同模式）。
+  // 画布按归属会话隔离（session-store-layout-inversion D4）：WS list 按归属过滤
+  // （payload.sessionId 必填）、get/mutate 归属校验（非 owner → forbidden 结构化拒绝）；
+  // mutate payload sessionId 必填（归属写面——create 落 owner，transform 校验归属；
+  // 缺失 handler 拒绝）。marker 通道（agent 面）的 sessionId 由 dispatch 上下文注入
+  // （发起 pi 进程的会话），不进行 payload——list 的共享 params 为无参 Record。
+  'canvas.list': { sessionId: string }
+  'canvas.get': { canvasId: string; sessionId: string }
+  'canvas.mutate': { actor: CanvasActor; sessionId: string } & CanvasMutateRequest
 }
 
 // ClientMessage 由 ClientMessageMap 直接派生：每个 type 字面量映射到
@@ -1403,12 +1409,13 @@ export type ServerMessageType =
   // 广播帧（`mcp.test` 异步任务句柄的完成侧，D8① pi 实测类徽标数据源；冒号形态对齐
   // rollingRestart:* 全局帧先例，payload 无 sessionId 走 broker 纯全局通道）。
   | 'mcp:testResult'
-  // canvas.updated（problem-solve-canvas 设计 §3.1(1) D4，U1 契约面）：画布变更全局广播
-  // ——无 sessionId（画布是跨 session 共享资源，不属任何 session；`canvas.` 前缀不受
-  // session./message. 缺 sid warn 约束），经 broker 全局通道（broker.broadcast，非 bus
-  // topic）。广播只是失效提示：renderer 收到后重新 canvas.get 拉取收敛（拉为主 ADR-0097）。
+  // canvas.updated（problem-solve-canvas 设计 §3.1(1) D4，U1 契约面）：画布变更失效提示
+  // 广播。payload 带 sessionId = 画布归属会话（session-store-layout-inversion D4 隔离：
+  // 广播仍走 broker 全局通道——broker 豁免清单 GLOBAL_BROADCAST_SESSION_ID_EXEMPT 登记帧，
+  // sessionId 仅作归属信息，消费方按会话过滤；非归属会话的订阅忽略本帧）。广播只是
+  // 失效提示：归属会话的 renderer 收到后重新 canvas.get 拉取收敛（拉为主 ADR-0097）。
   // evType = 结构化领域事件类型（词表 SSOT = extension-protocol CANVAS_EVENT_TYPES；
-  // CanvasCreated 驱动 renderer 创建后自动唤起，其余类型仅失效提示）。
+  // CanvasCreated 驱动归属会话前台创建后自动唤起，其余类型仅失效提示）。
   | 'canvas.updated'
   // canvas.* 三 RPC 的 reply（与 request 同名——session.subscribe 同名模式）。
   | 'canvas.list' | 'canvas.get' | 'canvas.mutate'
@@ -3052,8 +3059,10 @@ export interface ServerMessageMapBase {
   // canvas.updated 广播同源同值）/ 失败回结构化错误（code + recover 恢复指引）。
   // 不回全量状态：全量经广播失效后 canvas.get 拉取收敛（无乐观回显——事实驱动⑨）。
   'canvas.mutate': CanvasMutateReply
-  // canvas.updated 广播：无 sid 全局通道；广播只是失效提示，消费方收到后重新拉取。
-  'canvas.updated': { canvasId: string; evType: CanvasEventType; eventId: string; summary: string }
+  // canvas.updated 广播：payload 带 sessionId = 画布归属会话（失效提示仍走全局通道，
+  // 帧在 broker 豁免清单 GLOBAL_BROADCAST_SESSION_ID_EXEMPT 登记——sessionId 仅作归属
+  // 信息，消费方按归属过滤，对齐 plugin:headerActionUpdate 先例）；收到后重新拉取。
+  'canvas.updated': { canvasId: string; sessionId: string; evType: CanvasEventType; eventId: string; summary: string }
 }
 
 /**
