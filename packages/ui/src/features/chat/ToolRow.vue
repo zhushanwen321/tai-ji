@@ -32,16 +32,20 @@
              [HISTORICAL]）。
              [M3b demo 复刻]（workbench.css .tool/.run-ic）：行文字恒行层级 mid 不随状态染色
              （demo .tool .t-name 恒 mid，无 accent/danger 文字态），状态色只落在图标——
-             running = accent 呼吸弧、failed = danger（.line.subagent.failed .sicon）。 -->
-        <RunningBlockIcon v-if="isRunning" :kind="toolRunningKind" />
+             running = accent 呼吸弧、failed = danger（.line.subagent.failed .sicon）。
+             bash 豁免动效图标（2026-10-17 方案 A 裁决）：running 中与完成态同款静态展开
+             箭头（tool-cmd），命令字符串常显；扫光只扫「bash」工具名，不扫命令。 -->
+        <RunningBlockIcon v-if="isRunning && !isBashTool" :kind="toolRunningKind" />
         <component :is="headerBlockIcon" v-else :class="[headerIconClass, 'self-center']" />
-        <span class="shrink-0 normal-case tracking-normal transition-opacity duration-[var(--duration-fast)] group-hover/tool:opacity-80">{{ toolName }}</span>
+        <span class="shrink-0 normal-case tracking-normal transition-opacity duration-[var(--duration-fast)] group-hover/tool:opacity-80" :class="isBashTool && isRunning ? 'text-sweep [--sweep-base:var(--neutral-mid)]' : ''">{{ toolName }}</span>
         <!-- running + 有流式输出：单行尾行视口（同 thinking header 结构：leading-normal
              字体无关行高 + mr-auto 短行左贴/溢出钉右 + 纵向状态机滑入）；否则静态 shortenForHeader。
+             bash 不进尾行视口（2026-10-17 方案 A 裁决：running 中 header 保持命令字符串，
+             进度看展开区输出），故 v-if 带 !isBashTool（toolTailLines 数据层同源排除）。
              [M3b demo 复刻] 摘要/尾行走 mono（demo .tool .cmd = font-mono 命令语境），字号随
              trace 容器行主体统一档（15px），mono 字族承担命令语境区分。 -->
         <span
-          v-if="isRunning && toolTailLines.length > 0"
+          v-if="isRunning && !isBashTool && toolTailLines.length > 0"
           class="flex h-[1lh] min-w-0 flex-1 self-center justify-end overflow-hidden font-mono normal-case leading-normal tracking-normal text-neutral-dim transition-opacity duration-[var(--duration-fast)] group-hover/tool:opacity-80"
           :class="{ invisible: toolExpanded && isBashTool }"
         >
@@ -80,7 +84,7 @@
             class="shrink-0 tabular-nums text-neutral-dim"
           >+{{ fileChipDiffStat.additions }} −{{ fileChipDiffStat.deletions }}</span>
         </span>
-        <span v-else-if="argPath" class="min-w-0 font-mono normal-case tracking-normal text-neutral-dim truncate transition-opacity duration-[var(--duration-fast)] group-hover/tool:opacity-80" :class="[{ invisible: toolExpanded && isBashTool }, isRunning ? 'text-sweep' : '']">{{ shortenForHeader(argPath) }}</span>
+        <span v-else-if="argPath" class="min-w-0 font-mono normal-case tracking-normal text-neutral-dim truncate transition-opacity duration-[var(--duration-fast)] group-hover/tool:opacity-80" :class="[{ invisible: toolExpanded && isBashTool }, isRunning && !isBashTool ? 'text-sweep' : '']">{{ shortenForHeader(argPath) }}</span>
         <!-- tool 块行尾槽（[M3b demo 复刻] demo .dur/.ts）：耗时常驻显形（demo .dur 无显隐
              门控，fs-md 12px mono dim——running 也保持 dim，accent 只在呼吸弧图标），
              时刻保留 D2 悬停化（demo .ts opacity 0→1 hover 显形）；耗时与时刻间无分隔点
@@ -190,7 +194,7 @@ import ToolResultImages from './ToolResultImages.vue'
 import RunningBlockIcon from './RunningBlockIcon.vue'
 import type { RunningIconKind } from './block-icon'
 import { BLOCK_ICON_CLASS, BLOCK_ICON_LUCIDE, getBlockIcon } from './block-icon'
-import { formatClock, formatJsonIfValid, shortenForHeader, tailLines, stripAnsi } from './format-utils'
+import { formatClock, formatJsonIfValid, shortenForHeader, tailLines } from './format-utils'
 // primitives 直接路径（不经 @taiji/ui 顶层 barrel）：chat 组件被 barrel 再导出，
 // barrel 自引用会闭合一族循环依赖环（详见 BashOutputBlock.vue 同款注释）
 import { Button } from '../../primitives/button'
@@ -250,20 +254,14 @@ const copyContent = computed(() => {
 const outputRaw = computed(() => props.tool?.outputRaw)
 
 /* ── tool 尾行视口（同 thinking，2026-08 抖动修复重写）──
- * isRunning + 有流式输出时，bash 用 outputRaw 去 ANSI 取尾行；其余 tool 用 displayContent 取尾行。
- * 无流式输出或非 running 保持静态 shortenForHeader(argPath)。 */
+ * 非 bash 工具 running + 有流式输出时取 displayContent 尾行。bash 行 running 态已改
+ * 命令字符串常显（2026-10-17 方案 A 裁决：进度看展开区输出），不进尾行视口——
+ * bash 专属的 outputRaw 回退取数与 stripAnsi 随之移除。无流式输出或非 running
+ * 保持静态 shortenForHeader(argPath)。 */
 const toolTailLines = computed(() => {
-  if (!isRunning.value) return []
-  // bash：outputRaw 缺失（无 ANSI 输出）时回退 displayContent（D3 尾行取数）
-  const raw = isBashTool.value ? (outputRaw.value ?? displayContent.value) : displayContent.value
-  if (!raw) return []
-  // 尾部窗口先行：tailLines 是尾部扫描 O(窗口)，先取尾再对窗口内 2 行 stripAnsi。
-  // 反序（先全文 strip 再取尾）是 O(全文) 正则替换产出全文新串，每条 tool output 推送
-  // 命中一次，架空 tailLines 的尾部扫描优化（format-utils.ts 2026-08 注释）。
-  // 等价性：ANSI_RE 只匹配 \x1b[0-9;]*m——字符类不含 \n，strip 不增删换行、单次匹配
-  // 不跨行，行边界 strip 前后不变，两序逐字节一致（对拍 format-utils.test.ts）。
-  const tail = tailLines(raw, TAIL_WINDOW_LINES)
-  return isBashTool.value ? tail.map(stripAnsi) : tail
+  if (!isRunning.value || isBashTool.value) return []
+  if (!displayContent.value) return []
+  return tailLines(displayContent.value, TAIL_WINDOW_LINES)
 })
 const { displayLines: toolDisplayLines, contentStyle: toolScrollStyle } = useTailScroll(toolTailLines)
 
@@ -304,19 +302,22 @@ const filteredMetaItems = computed(() => {
 const isSubagent = computed(() => SUBAGENT_TOOL_NAMES.has(toolName.value))
 const isWorkflow = computed(() => WORKFLOW_TOOL_NAMES.has(toolName.value))
 
-/** 普通 tool header 的块类型 ICON（running 用 RunningBlockIcon，其余走 BLOCK_ICON_LUCIDE） */
+/** 普通 tool header 的块类型 ICON（running 用 RunningBlockIcon，其余走 BLOCK_ICON_LUCIDE）。
+ *  bash running 豁免动效图标（2026-10-17 方案 A 裁决）：status 归一 completed，
+ *  经 TOOL_ICON_MAP 落完成档 tool-cmd 静态箭头（与完成态同形同色）；其余工具 running
+ *  kind 为 'running'，回退 tool-other 字形（实际渲染走模板 RunningBlockIcon 分支）。 */
 const headerBlockIcon = computed(() => {
-  const kind = getBlockIcon(toolName.value, props.tool?.status ?? 'completed', false, false)
-  // running 态走模板的 RunningBlockIcon 分支（v-if isRunning），不走此 computed
+  const status = isBashTool.value && isRunning.value ? 'completed' : (props.tool?.status ?? 'completed')
+  const kind = getBlockIcon(toolName.value, status, false, false)
   return kind === 'running' ? BLOCK_ICON_LUCIDE['tool-other'] : BLOCK_ICON_LUCIDE[kind]
 })
 
 /** 工具名 → 运行中动效 kind（RunningBlockIcon 消费；grep/find 探索单列透镜扫掠，
  *  未命中工具走 tool-other 字形呼吸兜底。与 block-icon TOOL_ICON_MAP 同构但独立声明——
- *  本表键值语义是「动效档」而非「图标档」，两表各自服务动效/静态 SSOT） */
+ *  本表键值语义是「动效档」而非「图标档」，两表各自服务动效/静态 SSOT。
+ *  bash 不在表内：running 态豁免动效图标（2026-10-17 方案 A 裁决），不渲染 RunningBlockIcon。 */
 const TOOL_RUNNING_KIND: Record<string, RunningIconKind> = {
   read: 'tool-read',
-  bash: 'tool-bash',
   edit: 'tool-edit',
   write: 'tool-edit',
   grep: 'tool-grep',

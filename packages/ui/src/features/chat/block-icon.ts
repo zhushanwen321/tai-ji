@@ -45,9 +45,9 @@ export type RunningIconKind =
 /** toolName → tool 细分类映射（未命中的 toolName 走 'tool-other'）。grep/find 探索类
  *  单列 tool-grep（Search 字形 + 透镜扫掠动效），不再落 SquareFunction 兜底。
  *  bash 静态字形 = tool-cmd（裸 › 提示符，2026-10-15 裁决 ③B：成员/单行 bash 抽象化，
- *  波及组内外所有 bash 行——本映射是全局 SSOT）；running 动效不经此表（走 Block.vue
- *  TOOL_RUNNING_KIND，bash 仍 'tool-bash' 方框终端 + 光标闪烁）；exec 组头静态仍
- *  tool-bash（RUN_GROUP_ICON 独立映射，不动）。 */
+ *  波及组内外所有 bash 行——本映射是全局 SSOT）；bash running 态不再走动效图标
+ *  （2026-10-17 方案 A 裁决：与完成态同款 tool-cmd 静态箭头，TOOL_RUNNING_KIND 已无
+ *  bash 条目）；exec 组头静态仍 tool-bash（RUN_GROUP_ICON 独立映射，不动）。 */
 const TOOL_ICON_MAP: Record<string, BlockIconKind> = {
   read: 'tool-read',
   bash: 'tool-cmd',
