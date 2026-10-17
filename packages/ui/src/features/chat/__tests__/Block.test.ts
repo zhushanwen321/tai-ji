@@ -264,8 +264,8 @@ describe('ui-optimize-unified N1: edit/write 工具行 basename chip（决策 8�
     expect(header.text()).not.toContain(FILE_PATH)
   })
 
-  it('write 行同样渲染 chip（file_path 字段同覆盖）', () => {
-    const { wrapper } = makeChipWrapper({ toolName: 'write', input: { file_path: FILE_PATH } })
+  it('write 行同样渲染 chip（主参数 path；file_path 死分支已删——pi 1.0.0 edit/write 主参数是 path）', () => {
+    const { wrapper } = makeChipWrapper({ toolName: 'write', input: { path: FILE_PATH } })
     expectFileChip(wrapper)
   })
 
@@ -280,7 +280,7 @@ describe('ui-optimize-unified N1: edit/write 工具行 basename chip（决策 8�
   })
 
   it('diffStat 缺省（write 工具 details 恒 undefined / 历史会话）不渲染统计段，形态回退现状', () => {
-    const { wrapper } = makeChipWrapper({ toolName: 'write', input: { file_path: FILE_PATH } })
+    const { wrapper } = makeChipWrapper({ toolName: 'write', input: { path: FILE_PATH } })
     expect(wrapper.find(DIFFSTAT_SEL).exists()).toBe(false)
     expect(wrapper.find(CHIP_SEL).text()).toBe('app.ts')
   })
@@ -331,6 +331,82 @@ describe('ui-optimize-unified N1: edit/write 工具行 basename chip（决策 8�
   it('bash 行不渲染 chip（bash/其他工具行不变）', () => {
     const wrapper = mountToolBlock(makeToolCall({ toolName: 'bash', input: { command: 'pnpm build' } }))
     expect(wrapper.find(CHIP_SEL).exists()).toBe(false)
+  })
+})
+
+/* ── 工具行收起态摘要（tool-flow-summary 用户裁决）：details.summary 优先 + argPath 回落 ──
+ * 优先级：details.summary（extension 自报一行摘要，约定见 docs/extensions/extension-conventions.md）
+ * > argPath 参数派生 > 仅工具名。
+ * argPath 识别集 = command/path/pattern/query/code（file_path/tasks 死分支已删）。 */
+describe('ToolRow 收起态摘要: details.summary 优先 + argPath 回落', () => {
+  const SUMMARY_SEL = '[data-testid="tool-details-summary"]'
+
+  it('details.summary 存在 → header 显示摘要文本（用户可见 DOM 断言），样式同款 mono dim', () => {
+    const wrapper = mountToolBlock(makeToolCall({
+      toolName: 'todo',
+      input: { action: 'add', texts: ['a', 'b'] },
+      details: { summary: 'Added 2 todos (#1-#2)' },
+    }))
+    const summary = wrapper.find(SUMMARY_SEL)
+    expect(summary.exists()).toBe(true)
+    expect(summary.text()).toBe('Added 2 todos (#1-#2)')
+    // 与 argPath 摘要同款：mono 字族 + dim 灰阶（M3b demo .tool .cmd 档）
+    expect(summary.classes()).toContain('font-mono')
+    expect(summary.classes()).toContain('text-neutral-dim')
+  })
+
+  it('details.summary 存在且 argPath 可派生 → summary 优先（优先级：自报摘要 > 参数派生）', () => {
+    const wrapper = mountToolBlock(makeToolCall({
+      toolName: 'read',
+      input: { path: '/tmp/foo.txt' },
+      details: { summary: 'Read 120 lines' },
+    }))
+    expect(wrapper.find(SUMMARY_SEL).text()).toBe('Read 120 lines')
+    expect(wrapper.find(SUMMARY_SEL).exists()).toBe(true)
+    expect(wrapper.find('[data-testid="tool-block-header"]').text()).not.toContain('/tmp/foo.txt')
+  })
+
+  it('details.summary 缺失 → 无 summary testid，回落 argPath 摘要（既有行为不回归）', () => {
+    const wrapper = mountToolBlock(makeToolCall({ toolName: 'grep', input: { pattern: 'foo' } }))
+    expect(wrapper.find(SUMMARY_SEL).exists()).toBe(false)
+    expect(wrapper.find('[data-testid="tool-block-header"]').text()).toContain('foo')
+  })
+
+  it('details.summary 非字符串（脏 details）→ typeof 守卫不显示，回落 argPath', () => {
+    const wrapper = mountToolBlock(makeToolCall({
+      toolName: 'grep',
+      input: { pattern: 'foo' },
+      details: { summary: 42 },
+    }))
+    expect(wrapper.find(SUMMARY_SEL).exists()).toBe(false)
+    expect(wrapper.find('[data-testid="tool-block-header"]').text()).toContain('foo')
+  })
+
+  it('details 缺失（bash/read 等内置工具常态）→ 既有 argPath 摘要行为不变', () => {
+    const wrapper = mountToolBlock(makeToolCall({ toolName: 'bash', input: { command: 'pnpm build' } }))
+    expect(wrapper.find(SUMMARY_SEL).exists()).toBe(false)
+    expect(wrapper.find('[data-testid="tool-block-header"]').text()).toContain('pnpm build')
+  })
+
+  it('两者皆无 → header 只显示工具名', () => {
+    const wrapper = mountToolBlock(makeToolCall({ toolName: 'somecustom', input: {} }))
+    const header = wrapper.find('[data-testid="tool-block-header"]')
+    expect(header.text()).toContain('somecustom')
+    expect(wrapper.find(SUMMARY_SEL).exists()).toBe(false)
+    // 无 argPath 摘要 span（识别集外工具 header 仅工具名 + 行尾时刻槽）
+    expect(header.text()).not.toContain('undefined')
+  })
+
+  it('input.query（tool_search）→ header 显示 query 值', () => {
+    const wrapper = mountToolBlock(makeToolCall({ toolName: 'tool_search', input: { query: 'workflow resume' } }))
+    expect(wrapper.find(SUMMARY_SEL).exists()).toBe(false)
+    expect(wrapper.find('[data-testid="tool-block-header"]').text()).toContain('workflow resume')
+  })
+
+  it('input.code（codemode）→ header 显示 code 值', () => {
+    const wrapper = mountToolBlock(makeToolCall({ toolName: 'codemode', input: { code: 'await agent("w")' } }))
+    expect(wrapper.find(SUMMARY_SEL).exists()).toBe(false)
+    expect(wrapper.find('[data-testid="tool-block-header"]').text()).toContain('await agent("w")')
   })
 })
 

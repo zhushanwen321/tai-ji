@@ -84,6 +84,14 @@
             class="shrink-0 tabular-nums text-neutral-dim"
           >+{{ fileChipDiffStat.additions }} −{{ fileChipDiffStat.deletions }}</span>
         </span>
+        <!-- details.summary（extension 自报一行摘要，约定见 docs/extensions/extension-conventions.md
+             「Tool result details.summary 约定」）：header 摘要优先级 = 自报摘要 > argPath 参数
+             派生 > 仅工具名。样式与 argPath 摘要同款 mono dim（M3b demo .tool .cmd 命令语境档）。 -->
+        <span
+          v-else-if="detailsSummary"
+          data-testid="tool-details-summary"
+          class="min-w-0 font-mono normal-case tracking-normal text-neutral-dim truncate transition-opacity duration-[var(--duration-fast)] group-hover/tool:opacity-80"
+        >{{ shortenForHeader(detailsSummary) }}</span>
         <span v-else-if="argPath" class="min-w-0 font-mono normal-case tracking-normal text-neutral-dim truncate transition-opacity duration-[var(--duration-fast)] group-hover/tool:opacity-80" :class="[{ invisible: toolExpanded && isBashTool }, isRunning && !isBashTool ? 'text-sweep' : '']">{{ shortenForHeader(argPath) }}</span>
         <!-- tool 块行尾槽（[M3b demo 复刻] demo .dur/.ts）：耗时常驻显形（demo .dur 无显隐
              门控，fs-md 12px mono dim——running 也保持 dim，accent 只在呼吸弧图标），
@@ -374,18 +382,29 @@ function toggleTool(): void {
 
 /**
  * 从 input 提取可读参数摘要（header 单行展示）。覆盖高频工具：
- * bash→command、read/write/edit→path、grep→pattern、todo_write→tasks 数量等。
- * 未覆盖的工具返回空串（header 只显 toolName）。
+ * bash→command、read/write/edit→path、grep→pattern、tool_search→query、codemode→code。
+ * （file_path/tasks 为死分支已删：pi 1.0.0 内置 edit/write 主参数是 path；tasks 参数
+ * 工具 subagents 走 WorkflowRow 不经本链。）未覆盖的工具返回空串（header 只显 toolName，
+ * 或由 details.summary 自报摘要接管）。
  */
 const argPath = computed(() => {
   const input = props.tool?.input as Record<string, unknown> | undefined
   if (!input) return ''
   if (typeof input.command === 'string') return input.command
   if (typeof input.path === 'string') return input.path
-  if (typeof input.file_path === 'string') return input.file_path
   if (typeof input.pattern === 'string') return input.pattern
-  if (Array.isArray(input.tasks)) return `${input.tasks.length} todos`
+  if (typeof input.query === 'string') return input.query
+  if (typeof input.code === 'string') return input.code
   return ''
+})
+
+/** 收起态一行摘要（extension 自报）：tool.details.summary（details 是各扩展自定的自由
+ *  结构，summary 字段经 unknown typeof 守卫读取）。非空时优先于 argPath 参数派生摘要。 */
+const detailsSummary = computed(() => {
+  const details = props.tool?.details
+  if (!details) return ''
+  const summary = details.summary
+  return typeof summary === 'string' ? summary : ''
 })
 
 /* ── N1（ui-optimize-unified 决策 8）：edit/write 工具行文件 basename chip ──
