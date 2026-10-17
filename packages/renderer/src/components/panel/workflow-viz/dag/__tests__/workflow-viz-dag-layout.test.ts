@@ -8,9 +8,10 @@
  * - 零节点 run → 空布局 + 最小占位（渲染层出居中摘要提示，无独立卡片容器）；
  * - 节点高度：≥2 实例的调用点按 dagNodeHeight 增高（实例行画进节点），经
  *   nodeHeights 表传入布局；
- * - 边几何（正交路由）：顺序/数据流/条件 = 源右中心→中位竖线→目标左中心的三段
- *   折线（同行退化直线）；loop-back = 底部总线（全图最深节点下方）横行，同列回边
- *   走侧向细道；全部折点严格轴对齐（横竖两向不变量）；
+ * - 边几何（正交路由）：顺序/数据流/条件 = 源右中心→通道竖线→目标左中心的三段
+ *   折线（同行退化直线），同通道并行边按车道错开不重合；loop-back = 侧向细道
+ *   升降 + 底部总线（全图最深节点下方），任何段不穿节点；全部折点严格轴对齐
+ *   （横竖两向不变量）；
  * - fit-to-view：computeFitTransform 内容四周留 FIT_PAD_PX 居中（k 封顶 1 不放大）；
  * - 端点缺失的边跳过不抛。
  *
@@ -28,6 +29,7 @@ import {
   INSTANCE_ROW_H,
   FIT_PAD_PX,
   ZOOM_MIN,
+  LANE_STEP_PX,
 } from '../layout'
 
 function node(partial: Partial<WorkflowDagNode> & { id: string }): WorkflowDagNode {
@@ -165,10 +167,13 @@ describe('layoutEdges 正交路由（白盒）', () => {
       edges: [{ id: 'e1', from: 'a', to: 'c', kind: 'dataflow' }],
     })
     const layout = layoutDag(d)
+    const [la] = layout.nodes.filter((ln) => ln.node.id === 'a')
+    const [lc] = layout.nodes.filter((ln) => ln.node.id === 'c')
     const [edge] = layoutEdges(d, layout.nodes)
     expect(edge.points).toHaveLength(4)
     expectAxisAligned(edge.points)
-    // 中点 x = 两锚点中位（竖线落在列间距带内）
+    // 独占通道的边车道 = 默认中位（两锚点中位，竖线落在列间距带内）
+    expect(edge.points[1].x).toBe((la.x + DAG_NODE_W + lc.x) / 2)
     expect(edge.points[1].x).toBe(edge.points[2].x)
   })
 
@@ -206,11 +211,85 @@ describe('layoutEdges 正交路由（白盒）', () => {
     const [edge] = layoutEdges(d, layout.nodes)
     expect(edge.points[0].y).toBe(lb.y + lb.h)
     // 横行总线 y 压在全图最深节点底之下（busY = deepest + LOOP_DROP）
-    const busY = edge.points[1].y
+    const busY = edge.points[2].y
     expect(busY).toBeGreaterThan(deepest)
-    expect(edge.points[1].y).toBe(edge.points[2].y)
+    expect(edge.points[2].y).toBe(edge.points[3].y)
     expectAxisAligned(edge.points)
     expect(edge.labelX).toBeUndefined()
+  })
+
+  it('跨列 loop-back：下降/上升段走源/目标列侧向细道（节点列之外），不穿同列堆叠节点', () => {
+    const d = dag({
+      phases: [
+        { name: 'p0', order: 0 },
+        { name: 'p1', order: 1 },
+        { name: 'p2', order: 2 },
+      ],
+      nodes: [
+        node({ id: 'a', phase: 'p0' }),
+        node({ id: 'r1', templateName: 'ra', phase: 'p1' }),
+        node({ id: 'r2', templateName: 'rb', phase: 'p1' }),
+        node({ id: 'f', templateName: 'zz', phase: 'p2' }),
+      ],
+      edges: [{ id: 'loop', from: 'f', to: 'r1', kind: 'loop-back' }],
+    })
+    const layout = layoutDag(d)
+    const [lr1] = layout.nodes.filter((ln) => ln.node.id === 'r1')
+    const [lf] = layout.nodes.filter((ln) => ln.node.id === 'f')
+    const deepest = Math.max(...layout.nodes.map((ln) => ln.y + ln.h))
+    const [edge] = layoutEdges(d, layout.nodes)
+    expect(edge.points).toHaveLength(6)
+    expectAxisAligned(edge.points)
+    // 上升段 x 在目标列右缘细道（节点右缘之外、分区内边距带 CLUSTER_PAD_X=12 内）
+    // ——不再沿目标底中心上升、穿过同列上方堆叠的节点卡片
+    const riseX = edge.points[4].x
+    expect(riseX).toBeGreaterThan(lr1.x + DAG_NODE_W)
+    expect(riseX).toBeLessThan(lr1.x + DAG_NODE_W + 12)
+    // 下降段 x 在源列左缘细道
+    const dropX = edge.points[1].x
+    expect(dropX).toBeGreaterThan(lf.x - 12)
+    expect(dropX).toBeLessThan(lf.x)
+    // 总线仍压在全图最深节点底之下
+    expect(edge.points[2].y).toBeGreaterThan(deepest)
+    // 终锚 = 目标底中心（细道上升后短横支进底边）
+    expect(edge.points[5]).toEqual({ x: lr1.x + DAG_NODE_W / 2, y: lr1.y + lr1.h })
+  })
+
+  it('同通道并行边（fan-in）：竖线段按车道居中错开，不再重合成一根线', () => {
+    const d = dag({
+      phases: [{ name: 'p0', order: 0 }, { name: 'p1', order: 1 }],
+      nodes: [
+        node({ id: 'a', templateName: 'aa', phase: 'p0' }),
+        node({ id: 'b', templateName: 'bb', phase: 'p0' }),
+        node({ id: 'c', templateName: 'cc', phase: 'p0' }),
+        // 目标列占位节点：把 f 排到第 4 行——三条边源行各不同且都不与 f 同行
+        //（同行退化为直线不进通道，测不到车道分配）
+        node({ id: 't0', templateName: 'pa', phase: 'p1' }),
+        node({ id: 't1', templateName: 'pb', phase: 'p1' }),
+        node({ id: 't2', templateName: 'pc', phase: 'p1' }),
+        node({ id: 'f', templateName: 'zz', phase: 'p1' }),
+      ],
+      edges: [
+        { id: 'e1', from: 'a', to: 'f', kind: 'dataflow' },
+        { id: 'e2', from: 'b', to: 'f', kind: 'dataflow' },
+        { id: 'e3', from: 'c', to: 'f', kind: 'dataflow' },
+      ],
+    })
+    const layout = layoutDag(d)
+    const [la] = layout.nodes.filter((ln) => ln.node.id === 'a')
+    const [lf] = layout.nodes.filter((ln) => ln.node.id === 'f')
+    const edges = layoutEdges(d, layout.nodes).filter((le) => le.edge.id.startsWith('e'))
+    expect(edges).toHaveLength(3)
+    const laneXs = edges.map((le) => le.points[1].x)
+    // 三根竖线 x 互不相同（默认中位竖线重合缺陷已修）
+    expect(new Set(laneXs).size).toBe(3)
+    // 车道以默认中位为中心、按 LANE_STEP_PX 居中分布，且跟随源 y 序（横支互不交叉）
+    const midX = (la.x + DAG_NODE_W + lf.x) / 2
+    const sorted = [...laneXs].sort((x, y) => x - y)
+    expect(sorted[0]).toBeCloseTo(midX - LANE_STEP_PX, 6)
+    expect(sorted[1]).toBeCloseTo(midX, 6)
+    expect(sorted[2]).toBeCloseTo(midX + LANE_STEP_PX, 6)
+    for (const le of edges) expectAxisAligned(le.points)
   })
 
   it('同列 loop-back：走分区左内边距侧向细道（不在节点列内折返）', () => {

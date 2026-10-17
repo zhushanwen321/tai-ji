@@ -88,6 +88,12 @@ describe('WorkflowVizDag 画布（黑盒 DOM）', () => {
     expect(wrapper.find('[data-testid="wfvz-dag-node-n-biz"]').attributes('data-state')).toBe('pending')
   })
 
+  it('pending 节点卡片有中性描边（卡片 fill 与分区背景同为 surface，缺描边即隐形）', () => {
+    const wrapper = mountDag(sampleDag(), { nodeStates: { 'n-gate': 'done' } })
+    const rect = wrapper.find('[data-testid="wfvz-dag-node-n-biz"] rect')
+    expect(rect.classes()).toContain('stroke-[var(--neutral-dim)]')
+  })
+
   it('当前 phase 分区高亮：activePhase 命中分区 data-active（观察者形态）', () => {
     const wrapper = mountDag(sampleDag(), { activePhase: 'review' })
     expect(wrapper.find('[data-testid="wfvz-dag-cluster-review"]').attributes('data-active')).toBe('true')

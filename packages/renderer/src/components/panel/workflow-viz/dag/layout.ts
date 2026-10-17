@@ -17,10 +17,13 @@
  * - 并行组（parallelGroups）v1 不画组框：同组节点天然同列相邻（同 phase 内词法
  *   序排列），并行语义由调用点行内的实例列表表达（设计 §3.1-3 最小形态）。
  *
- * 边路由（正交化，2026-10 用户裁决替代原贝塞尔）：全部边只走横竖两向——
- * - 顺序/数据流/条件边：源右中心 → 中位竖线 → 目标左中心的三段折线（同行退化直线）；
- * - loop-back：源底中心下探 → 底部总线（全图最深节点下方）横行 → 目标底中心；
- *   同列回边走分区左内边距的侧向细道，不在节点列内穿过。
+ * 边路由（正交）：全部边只走横竖两向，任何段不穿节点卡片——
+ * - 顺序/数据流/条件边：源右中心 → 通道竖线 → 目标左中心的三段折线（同行退化直线）；
+ *   同一通道（源同列且目标同列）的并行边竖线段默认重合，按纵向跨度重叠游程居中
+ *   错开车道（LANE_STEP_PX），fan-in/fan-out 不再叠成一根线；
+ * - loop-back：源底中心 → 源列侧向细道下探 → 底部总线（全图最深节点下方）横行 →
+ *   目标列侧向细道上升 → 目标底边短横支；同列回边 = U 形细道折返。细道在分区
+ *   内边距带内（节点列之外），升降段不穿同列堆叠的节点。
  * 折点处用小半径圆弧过渡（视觉圆角，路由仍严格轴对齐）。
  */
 import type { WorkflowDag, WorkflowDagEdge, WorkflowDagNode } from '@taiji/shared'
@@ -237,15 +240,17 @@ export interface DagLayoutEdge { // oe-exempt:20261002:framework:workflow-viz �
   points: DagPoint[]
   /** SVG path d 串（fill:none；折点处小半径圆弧过渡）。 */
   d: string
-  /** 谓词标注锚点（kind='conditional' 时携带；置于中位竖线旁）。 */
+  /** 谓词标注锚点（kind='conditional' 时携带；置于本边通道竖线旁）。 */
   labelX?: number
   labelY?: number
 }
 
-/** 回边下探深度（画布坐标系常量——loop-back 横行走全图最深节点下方）。 */
+/** 回边下探深度（画布坐标系常量——loop-back 横行总线的 y——压在所有分区内容之下）。 */
 const LOOP_DROP = 28
-/** 同列回边侧向细道的偏移（CLUSTER_PAD_X=12 的内边距带内，不穿节点列）。 */
+/** 回边侧向细道偏移（节点缘到细道；细道落在分区内边距带内——节点列之外，不穿节点）。 */
 const LOOP_SIDE_OFFSET = 8
+/** 同通道并行边的车道步长（竖线段错开间距；列间走廊 ~56px，容得下常规并行度）。 */
+export const LANE_STEP_PX = 6
 /** 折点圆角半径（px；实际半径再按相邻段长收敛，短段不打弯）。 */
 const CORNER_RADIUS = 6
 /** 条件谓词标注与中位竖线的间隙（px）。 */
@@ -280,11 +285,66 @@ function roundedPath(points: DagPoint[]): string {
   return d
 }
 
+/** 通道成员（三段折线前向边）：源同列且目标同列 → 默认路径完全重合，装配前按纵向跨度重叠关系错开车道。 */
+interface ChannelMember {
+  x1: number
+  y1: number
+  x2: number
+  y2: number
+  /** 竖线段纵向跨度（lo ≤ hi）。 */
+  lo: number
+  hi: number
+  /** 车道分配后的竖线 x（缺省 = 默认中位；装配前回填）。 */
+  laneX: number
+}
+
+/** 待装配边（保持 dag.edges 序——输出序不因车道分遍打乱）：已定型路径或通道成员。 */
+type PendingEdge =
+  | { edge: WorkflowDagEdge; kind: 'fixed'; points: DagPoint[]; labelX?: number; labelY?: number }
+  | { edge: WorkflowDagEdge; kind: 'channeled'; chan: ChannelMember }
+
 /**
- * 计算边几何（正交路由）。顺序/数据流/条件边 = 源右中心 → 中位竖线 → 目标左中心
- * （同行退化为直线）；loop-back = 源底中心下探至全图最深节点下方 LOOP_DROP 处横行
- * → 目标底中心（同列回边改走分区左内边距侧向细道，不在节点列内折返）。
- * 端点缺失（边引用不存在节点——防御解析器缺口）的边不产出（跳过，不抛）。
+ * loop-back 路由：下降/上升段一律走源/目标列的侧向细道（分区内边距带内、节点列
+ * 之外），任何段不穿节点卡片——同列回边 = U 形细道折返；跨列回边 = 源细道下探 →
+ * 底部总线（全图最深节点下方 LOOP_DROP 处）横行 → 目标细道上升 → 目标底边短横支
+ * 进底中心。细道取朝向对端一侧（总线不回头折）。
+ */
+function loopBackPoints(from: DagLayoutNode, to: DagLayoutNode, deepestBottom: number): DagPoint[] {
+  const fromBottom = from.y + from.h
+  const toBottom = to.y + to.h
+  const bx1 = from.x + DAG_NODE_W / HALF
+  const bx2 = to.x + DAG_NODE_W / HALF
+  if (Math.abs(bx1 - bx2) < COINCIDE_EPS) {
+    const sx = Math.min(from.x, to.x) - LOOP_SIDE_OFFSET
+    return [
+      { x: bx1, y: fromBottom },
+      { x: sx, y: fromBottom },
+      { x: sx, y: toBottom },
+      { x: bx2, y: toBottom },
+    ]
+  }
+  const busY = Math.max(deepestBottom, fromBottom, toBottom) + LOOP_DROP
+  const towardTo = from.x > to.x
+  const fromSideX = towardTo ? from.x - LOOP_SIDE_OFFSET : from.x + DAG_NODE_W + LOOP_SIDE_OFFSET
+  const toSideX = towardTo ? to.x + DAG_NODE_W + LOOP_SIDE_OFFSET : to.x - LOOP_SIDE_OFFSET
+  return [
+    { x: bx1, y: fromBottom },
+    { x: fromSideX, y: fromBottom },
+    { x: fromSideX, y: busY },
+    { x: toSideX, y: busY },
+    { x: toSideX, y: toBottom },
+    { x: bx2, y: toBottom },
+  ]
+}
+
+/**
+ * 计算边几何（正交路由）。顺序/数据流/条件边 = 源右中心 → 通道竖线 → 目标左中心
+ * （同行退化为直线）：同一通道（源同列且目标同列）的并行边竖线段默认重合，装配前
+ * 按纵向跨度重叠分游程、以游程序为车道序居中错开 LANE_STEP_PX——fan-in/fan-out
+ * 不再叠成一根线；同游程 = 跨度互不重叠，共享车道不无谓铺开（贪心首碰归属，
+ * 端点相触视作重叠）。
+ * loop-back 见 loopBackPoints。端点缺失（边引用不存在节点——防御解析器缺口）的边
+ * 不产出（跳过，不抛）。
  */
 export function layoutEdges(dag: WorkflowDag, nodes: DagLayoutNode[]): DagLayoutEdge[] {
   const byId = new Map<string, DagLayoutNode>()
@@ -294,59 +354,88 @@ export function layoutEdges(dag: WorkflowDag, nodes: DagLayoutNode[]): DagLayout
   let deepestBottom = 0
   for (const ln of nodes) deepestBottom = Math.max(deepestBottom, ln.y + ln.h)
 
-  const result: DagLayoutEdge[] = []
+  const pending: PendingEdge[] = []
+  const channels = new Map<string, ChannelMember[]>()
   for (const edge of dag.edges) {
     const from = byId.get(edge.from)
     const to = byId.get(edge.to)
     if (!from || !to) continue
-    let points: DagPoint[]
-    let labelX: number | undefined
-    let labelY: number | undefined
     if (edge.kind === 'loop-back') {
-      const fromBottom = from.y + from.h
-      const toBottom = to.y + to.h
-      const bx1 = from.x + DAG_NODE_W / HALF
-      const bx2 = to.x + DAG_NODE_W / HALF
-      if (Math.abs(bx1 - bx2) < COINCIDE_EPS) {
-        // 同列回边：侧向细道在节点左缘之外的内边距带（不穿节点列，也不穿源节点自身）
-        const sx = Math.min(from.x, to.x) - LOOP_SIDE_OFFSET
-        points = [
-          { x: bx1, y: fromBottom },
-          { x: sx, y: fromBottom },
-          { x: sx, y: toBottom },
-          { x: bx2, y: toBottom },
-        ]
+      pending.push({ edge, kind: 'fixed', points: loopBackPoints(from, to, deepestBottom) })
+      continue
+    }
+    const x1 = from.x + DAG_NODE_W
+    const y1 = from.y + from.h / HALF
+    const x2 = to.x
+    const y2 = to.y + to.h / HALF
+    if (Math.abs(y1 - y2) < COINCIDE_EPS) {
+      pending.push({
+        edge,
+        kind: 'fixed',
+        points: [{ x: x1, y: y1 }, { x: x2, y: y2 }],
+        labelX: (x1 + x2) / HALF,
+        labelY: y1,
+      })
+      continue
+    }
+    const chan: ChannelMember = {
+      x1, y1, x2, y2,
+      lo: Math.min(y1, y2),
+      hi: Math.max(y1, y2),
+      laneX: (x1 + x2) / HALF,
+    }
+    pending.push({ edge, kind: 'channeled', chan })
+    const key = `${x1}|${x2}`
+    const list = channels.get(key)
+    if (list) list.push(chan)
+    else channels.set(key, [chan])
+  }
+
+  // 车道分配：通道内按 y1 升序贪心分「纵向跨度互相重叠」的游程（首碰归属，端点
+  // 相触视作重叠）——游程序 = 车道序：同游程的边互不重叠可共线，跨游程必重叠
+  // 必须分道；整通道按游程数以默认中位为中心居中错开（单游程回到中位不动）
+  for (const members of channels.values()) {
+    members.sort((a, b) => a.y1 - b.y1 || a.y2 - b.y2)
+    const runs: ChannelMember[][] = []
+    const runMaxHi: number[] = []
+    for (const m of members) {
+      const fit = runs.findIndex((_, i) => m.lo > runMaxHi[i])
+      if (fit === -1) {
+        runs.push([m])
+        runMaxHi.push(m.hi)
       } else {
-        const busY = Math.max(deepestBottom, fromBottom, toBottom) + LOOP_DROP
-        points = [
-          { x: bx1, y: fromBottom },
-          { x: bx1, y: busY },
-          { x: bx2, y: busY },
-          { x: bx2, y: toBottom },
-        ]
-      }
-    } else {
-      const x1 = from.x + DAG_NODE_W
-      const y1 = from.y + from.h / HALF
-      const x2 = to.x
-      const y2 = to.y + to.h / HALF
-      if (Math.abs(y1 - y2) < COINCIDE_EPS) {
-        points = [{ x: x1, y: y1 }, { x: x2, y: y2 }]
-        labelX = (x1 + x2) / HALF
-        labelY = y1
-      } else {
-        const midX = (x1 + x2) / HALF
-        points = [
-          { x: x1, y: y1 },
-          { x: midX, y: y1 },
-          { x: midX, y: y2 },
-          { x: x2, y: y2 },
-        ]
-        labelX = midX + LABEL_GAP_X
-        labelY = (y1 + y2) / HALF
+        runs[fit].push(m)
+        runMaxHi[fit] = Math.max(runMaxHi[fit], m.hi)
       }
     }
-    result.push({ edge, points, d: roundedPath(points), labelX, labelY })
+    const midX = (members[0].x1 + members[0].x2) / HALF
+    const laneBase = -((runs.length - 1) * LANE_STEP_PX) / HALF
+    runs.forEach((run, ri) => {
+      const laneX = midX + laneBase + ri * LANE_STEP_PX
+      for (const m of run) m.laneX = laneX
+    })
+  }
+
+  const result: DagLayoutEdge[] = []
+  for (const item of pending) {
+    if (item.kind === 'fixed') {
+      result.push({ edge: item.edge, points: item.points, d: roundedPath(item.points), labelX: item.labelX, labelY: item.labelY })
+      continue
+    }
+    const c = item.chan
+    const points: DagPoint[] = [
+      { x: c.x1, y: c.y1 },
+      { x: c.laneX, y: c.y1 },
+      { x: c.laneX, y: c.y2 },
+      { x: c.x2, y: c.y2 },
+    ]
+    result.push({
+      edge: item.edge,
+      points,
+      d: roundedPath(points),
+      labelX: c.laneX + LABEL_GAP_X,
+      labelY: (c.y1 + c.y2) / HALF,
+    })
   }
   return result
 }
