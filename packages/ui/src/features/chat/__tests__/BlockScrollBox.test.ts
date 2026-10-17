@@ -6,6 +6,7 @@
  * - 内容不超限高：信息条整条不渲染（展开按钮是唯一入口，也随之不渲染）
  * - 渐隐 class 切换：mock 滚动几何 + scroll 事件 → 上/下渐隐条按滚动方向切 opacity class
  * - 渐隐底色上下文：surface prop → 根 --block-scroll-fade-bg（thinking/画布底 vs bash 凹槽底）
+ * - 渐隐条开关：fade=false 两渐隐条不渲染（thinking 展开区）；默认 true 行为不变
  * - 行区间信息条：行高实测路径（computed line-height）与无布局引擎降级路径（字号 × leading-snug）
  * - 展开切换：按钮文案（展开全部/收起 + 方向箭头）+ aria-expanded + 展开态信息条保留
  * - streaming 吸底：内容增长且未上滚 → 贴底；用户上滚后停吸、回底恢复；展开态不吸底
@@ -83,18 +84,21 @@ function mockScrollMetrics(el: HTMLElement): ScrollMetrics {
  * 挂载：slot 内容带内联行高（实测路径）或字号（降级路径）。
  * attachTo body：getComputedStyle 需要有文档上下文（同 WidgetArea.test.ts 范式）。
  */
-function mountBox(options: { surface?: 'canvas' | 'recessed'; lineHeight?: number; fontSize?: number } = {}) {
+function mountBox(options: { surface?: 'canvas' | 'recessed'; fade?: boolean; lineHeight?: number; fontSize?: number } = {}) {
   const style = options.lineHeight !== undefined
     ? `line-height: ${options.lineHeight}px`
     : `font-size: ${options.fontSize ?? FALLBACK_FONT_SIZE}px`
+  const props: Record<string, unknown> = {}
+  if (options.surface) props.surface = options.surface
+  if (options.fade !== undefined) props.fade = options.fade
   return mount(BlockScrollBox, {
     attachTo: document.body,
-    props: options.surface ? { surface: options.surface } : {},
+    props,
     slots: { default: `<div data-testid="block-scroll-content" style="${style}">content</div>` },
   })
 }
 
-function setupBox(options: { surface?: 'canvas' | 'recessed'; lineHeight?: number; fontSize?: number } = {}): BoxHarness {
+function setupBox(options: { surface?: 'canvas' | 'recessed'; fade?: boolean; lineHeight?: number; fontSize?: number } = {}): BoxHarness {
   const wrapper = mountBox(options)
   const viewport = wrapper.get(VIEWPORT_SEL).element as HTMLElement
   const metrics = mockScrollMetrics(viewport)
@@ -187,6 +191,36 @@ describe('BlockScrollBox 限高与信息条渲染', () => {
     const recessedBox = setupBox({ surface: 'recessed', lineHeight: CONTENT_LINE_HEIGHT })
     expect(recessedBox.wrapper.element.style.getPropertyValue('--block-scroll-fade-bg')).toBe('var(--bg-input)')
     recessedBox.wrapper.unmount()
+  })
+
+  it('fade=false：两渐隐条整条不渲染（DOM 无该元素）；限高滚动与信息条行为不变', async () => {
+    const box = setupBox({ fade: false, lineHeight: CONTENT_LINE_HEIGHT })
+    expect(box.wrapper.find(FADE_TOP_SEL).exists()).toBe(false)
+    expect(box.wrapper.find(FADE_BOTTOM_SEL).exists()).toBe(false)
+
+    // 溢出 + 滚动到中部（既有形态下该位置两渐隐条都显形）→ 仍无元素，非仅 opacity 关闭
+    box.metrics.scrollHeight = 400
+    box.metrics.clientHeight = 240
+    await box.scrollTo(80)
+    expect(box.wrapper.find(FADE_TOP_SEL).exists()).toBe(false)
+    expect(box.wrapper.find(FADE_BOTTOM_SEL).exists()).toBe(false)
+    // 限高与信息条不受 fade 影响
+    expect(box.viewport.style.maxHeight).toBe('var(--block-scroll-max-height)')
+    expect(box.wrapper.find(INFO_SEL).exists()).toBe(true)
+    box.wrapper.unmount()
+  })
+
+  it('默认（不传 fade）：两渐隐条渲染在 DOM，溢出时显形行为与现状一致', async () => {
+    const box = setupBox({ lineHeight: CONTENT_LINE_HEIGHT })
+    box.metrics.scrollHeight = 400
+    box.metrics.clientHeight = 240
+    await box.scrollTo(0)
+    expect(box.wrapper.find(FADE_TOP_SEL).exists()).toBe(true)
+    expect(box.wrapper.find(FADE_BOTTOM_SEL).exists()).toBe(true)
+    // 底部可下滚 → 下渐隐显形（同既有「溢出」用例方向判据）
+    expect(fadeVisible(box, FADE_BOTTOM_SEL)).toBe(true)
+    expect(fadeVisible(box, FADE_TOP_SEL)).toBe(false)
+    box.wrapper.unmount()
   })
 })
 

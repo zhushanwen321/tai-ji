@@ -8,7 +8,8 @@
      mobile tokens.css 同批镜像）+ overflow-y auto + overscroll-behavior contain；
      细滚动条沿用 style.css base reset 的全局规则（滚动条外观 SSOT，组件不另行覆盖）。
   2. 渐隐提示：上/下渐隐条仅在该方向可滚时显形（scroll 事件切 opacity class）；
-     渐隐底色按容器上下文区分（surface prop → 局部 CSS 变量 --block-scroll-fade-bg）。
+     渐隐底色按容器上下文区分（surface prop → 局部 CSS 变量 --block-scroll-fade-bg）；
+     fade prop 可整关（thinking 展开区 = false，不渲染两渐隐条）。
   3. 底部信息条：mono 行区间 + 右侧展开全部/收起（@taiji/ui Button ghost，禁原生 button）；
      内容不超过限高时整条不渲染。
 
@@ -36,14 +37,17 @@
         <slot />
       </div>
       <!-- 渐隐提示条：仅在该方向可滚时显形（scroll 事件切 opacity class）；不拦截指针事件。
-           渐变底色 = 容器上下文色（prop 注入的 --block-scroll-fade-bg），内容淡出到本层底色 -->
+           渐变底色 = 容器上下文色（prop 注入的 --block-scroll-fade-bg），内容淡出到本层底色。
+           fade=false（thinking 展开区）：两整条不渲染（用户裁决：思考块上下不要渐隐遮罩） -->
       <div
+        v-if="fade"
         class="pointer-events-none absolute inset-x-0 top-0 h-6 bg-[image:linear-gradient(to_bottom,var(--block-scroll-fade-bg),transparent)] opacity-0 transition-opacity duration-[var(--duration-fast)]"
         :class="canScrollUp ? 'opacity-100' : 'opacity-0'"
         data-testid="block-scroll-fade-top"
         aria-hidden="true"
       />
       <div
+        v-if="fade"
         class="pointer-events-none absolute inset-x-0 bottom-0 h-6 bg-[image:linear-gradient(to_top,var(--block-scroll-fade-bg),transparent)] opacity-0 transition-opacity duration-[var(--duration-fast)]"
         :class="atBottom ? 'opacity-0' : 'opacity-100'"
         data-testid="block-scroll-fade-bottom"
@@ -87,8 +91,10 @@ const props = withDefaults(
   defineProps<{
     /** 渐隐底色上下文：canvas = thinking / 普通工具区（--bg）；recessed = bash 凹槽（--bg-input） */
     surface?: 'canvas' | 'recessed'
+    /** 顶部/底部渐隐条开关（默认开）；thinking 展开区传 false——上下不叠渐隐遮罩 */
+    fade?: boolean
   }>(),
-  { surface: 'canvas' },
+  { surface: 'canvas', fade: true },
 )
 
 const { t } = useI18n()

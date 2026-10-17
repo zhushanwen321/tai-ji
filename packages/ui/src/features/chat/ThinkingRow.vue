@@ -4,7 +4,7 @@
   原 thinking 分支根 div（.trace-think），无新 DOM 层。
   职责：折叠状态机（useThinkingCollapse：折叠/手动置位/working 回落/收起预览/尾行视口一体）
   + 思考时长（N6）+ 文字扫光（决策 10，块级生命周期随思考完结熄灭）+ 展开区（copy 按钮 +
-  BlockScrollBox 240px 限高滚动 + 渐隐提示 + 行区间信息条）。
+  BlockScrollBox 240px 限高滚动 + 行区间信息条，fade=false 不渲染渐隐条）。
   Demo H 视觉：lightbulb ICON + header 可点击 toggle，长块独立再折叠（本地折叠态，不进
   store 不持久化）。
 -->
@@ -89,8 +89,9 @@
           <Check v-if="copied === `thinking-${thinkingId ?? 'block'}`" class="size-3 text-success" />
           <CopyIcon v-else class="size-3" />
         </Button>
-        <!-- G5/D6：thinking 展开区统一块内滚动（240px 限高 + 渐隐 + 行区间信息条 + streaming 吸底） -->
-        <BlockScrollBox>
+        <!-- G5/D6：thinking 展开区统一块内滚动（240px 限高 + 行区间信息条 + streaming 吸底；
+             渐隐关闭：思考块上下不叠渐隐遮罩，fade=false 两渐隐条不渲染） -->
+        <BlockScrollBox :fade="false">
           <MarkdownRenderer v-if="!working" :content="content ?? ''" :session-id="sessionId ?? undefined" variant="thinking" />
           <span v-else class="whitespace-pre-wrap">{{ content ?? '' }}</span>
         </BlockScrollBox>
