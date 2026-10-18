@@ -3,7 +3,7 @@
  *
  * 与入站白名单的关系（双向边界契约，详见 docs/architecture/env-propagation-boundary.md §3.2/§3.5-D2）：
  * - 入站白名单 SSOT ENV_WHITELIST_PREFIXES（constants.ts:72，pre-commit
- *   check_env_whitelist_sync.py 守卫其唯一性）回答「外部环境哪些东西准许进来」——管准入；
+ *   check_env_whitelist_sync.py 检查其唯一性）回答「外部环境哪些东西准许进来」——管准入；
  * - 本文件的出站契约回答「我（runtime/main）身上的东西哪些允许跟随 spawn 出去」——管出站。
  *   两问不同维度、正交共存；出站侧不改变入站白名单任何内容。
  *
@@ -210,7 +210,7 @@ export const SPAWN_ENV_FORWARD_REFERENCE: readonly SpawnEnvForwardEntry[] = [
   {
     // git ssh remote（git@github.com:…）的 ssh-agent 认证通道：OpenSSH 经
     // SSH_AUTH_SOCK 连接 agent。不在白名单前缀内，故由 npm-git-installer /
-    // shell-runner / git-executor 的 extras 显式 forward（值守卫：父 env 未设置
+    // shell-runner / git-executor 的 extras 显式 forward（值检查：父 env 未设置
     // 时不注入）；消费锚点 = git 的 ssh 子进程（libssh2/OpenSSH 标准行为）。
     name: 'SSH_AUTH_SOCK',
     injectionPath:

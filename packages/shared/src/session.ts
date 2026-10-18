@@ -18,11 +18,11 @@
 export type SessionStatus = 'active' | 'idle' | 'dead' | 'done' | 'error' | 'stopped'
 
 /**
- * 条目/快照数据来源标记（W15 磁盘占位值守卫的判定依据，D1b 按来源分流）。
+ * 条目/快照数据来源标记（W15 磁盘占位值检查的判定依据，D1b 按来源分流）。
  *
  * - `'scan'`：磁盘扫描来源（SessionScanner.scannedToSummary 产出）。扫描读不出
  *   modelId / tokenCount 真值，其 `''` / `0` 是**占位值**而非权威空值——core 合并侧
- *   （createSessionStore.mergeViewSnapshot 守卫）据此跳过对已知真值的覆盖
+ *   （createSessionStore.mergeViewSnapshot 检查）据此跳过对已知真值的覆盖
  *   （#2 空串覆盖事故的最后防线）。
  * - 缺省（undefined）：owner 来源——runtime 活跃实例 / 广播 / 乐观更新，D1b 整字段
  *   覆盖的权威语义，显式空值（''/0）按「owner 声明空即空」正常覆盖。

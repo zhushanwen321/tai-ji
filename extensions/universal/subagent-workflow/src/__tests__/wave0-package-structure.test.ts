@@ -4,7 +4,7 @@
  * 验证新包 @zhushanwen/pi-subagent-workflow 的结构完整性：
  * - index.ts 导出工厂函数
  * - 7 tool（subagent 三件 + subagents + workflow 两件 + workflow-script）+ 2 command 注册正确
- *   （D3 工具拆分后的终态注册面；本文件 wave0 时点的原始目标为 3 tool，断言段 AC-1.1 为权威）
+ *   （D3 工具拆分后的终态注册点；本文件 wave0 时点的原始目标为 3 tool，断言段 AC-1.1 为权威）
  * - 目录结构符合三层架构
  *
  * （历史上含「挂载后暴露跨扩展编程 API」断言——该编程入口已随嵌套 workflow()
@@ -13,7 +13,7 @@
  * [装载模型] 模块图（index.js 全图）beforeAll 静态加载一次，factory 对同一 mock api
  * 执行一次，用例共享同一份注册记录断言。各用例断言均为存在性形态（toContain /
  * toBeDefined / length 下界），无「从零只有自己注册项」的隔离性断言，共享一份记录
- * 不改变任何断言语义。factory 幂等（D2b 稳定标识等价保留单例），单次执行即注册面
+ * 不改变任何断言语义。factory 幂等（D2b 稳定标识等价保留单例），单次执行即注册点
  * 全集。
  */
 import { beforeAll, describe, expect, it, vi } from "vitest";

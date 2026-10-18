@@ -241,7 +241,7 @@ stage2 = {
 
 # ── 综合 ready_to_submit
 # stage1.clean 不作为硬条件：「单轮不循环」下 aggregated.md 的 must_fix 是修复前快照，
-# 修复闭合由 pr-cr-fix 主 agent 校验 worker 回执保证（软 gate），不由本脚本读快照数字保证。
+# 修复完成由 pr-cr-fix 主 agent 校验 worker 回执保证（软 gate），不由本脚本读快照数字保证。
 # 硬 gate = PR 存在 + 本地已同步 + pre-merge PASS + marker head 锚匹配当前 HEAD。
 ready = (
     stage0["pr_exists"] is True

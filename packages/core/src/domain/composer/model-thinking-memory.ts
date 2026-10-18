@@ -6,11 +6,11 @@
  * 表值是 UI key（ThinkingLevel 枚举，D1——跨模型恢复的语义是档位名而非实现值）；
  * 表键是 provider/modelId 复合串、全局一份（D6，多 composer 实例共享）。
  *
- * 持久化生命周期（三态预载 / 加载完成回调 / 加载窗口守卫 / deferred 补写 / 写穿串行链）
+ * 持久化生命周期（三态预载 / 加载完成回调 / 加载窗口检查 / deferred 补写 / 写穿串行链）
  * 由 foundation createKVSlot 收编（state-truth-sync §3.3 D9 KV 单键族）；本模块保留：
  * - 内存容器（reactive Map，reactive 使下游 watch 记忆变化成为可能）
  * - 值域差异钩子：record 侧 E6 枚举校验（validate）/ 加载侧 isPlainObject 形状门
- *   （parseSnapshot）+ 逐条 E6 过滤与「内存已有值优先」窗口守卫（mergeSnapshot）
+ *   （parseSnapshot）+ 逐条 E6 过滤与「内存已有值优先」窗口检查（mergeSnapshot）
  *
  * 错误规格（设计 §3.4 错误规格表）：
  * - E1  KV 读失败 / JSON 损坏 → 空表启动（factory catch 回退，不抛不吞，对齐 system-storage ES2 范式）

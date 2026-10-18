@@ -5,7 +5,7 @@
  * 77 单测 + 集成全绿但用户打开发现「同名文件打不开」。根因是只有 store/composable
  * 白盒测试，缺组件渲染断言。本测试补「观察者 + 使用者」视角。
  *
- * [W28/D-7.2] 组件语义变更：FileTreeRow 从递归行改为纯行组件（收 VisibleRow 投影行，
+ * [W28/D-7.2] 组件语义变更：FileTreeRow 从递归行改为纯行组件（收 VisibleRow 派生视图行，
  * 零 store 依赖）——交互经 emit('toggle'/'select') 交给 FileView。本测试改为：
  * - 构造 VisibleRow fixture 直接传 props（不再预置 store 展开态）
  * - emit 断言替代 useFileTree/useSideDrawer mock 断言
@@ -16,7 +16,7 @@
  * - hint 行（loading/error/empty）：各自渲染，error 行点击 emit toggle（旧递归语义）
  * - 字号一致性（D-007）：dir/file 行 name span 均含 text-[length:var(--text-xs)]（12px 档）
  * - chevron 槽（D-022）：dir 行含 ChevronRight，file 行含空占位
- * - W2 徽章/行数：childCount/lineStats 全部来自 row（投影预计算，组件不再读 store）
+ * - W2 徽章/行数：childCount/lineStats 全部来自 row（派生视图预计算，组件不再读 store）
  * - 长文件名（demo .fname 契约，2026-10-10 裁决）：省略号截断 + title 悬停展示全名
  * - 交互：点 dir → emit toggle；点 file → emit select；selected 控制选中态样式
  *
@@ -122,12 +122,12 @@ describe('FileTreeRow 视觉一致性（D-007 字号 / D-022 chevron 槽）', ()
     expect(fileRow.classes()).not.toContain('text-[11px]')
   })
 
-  it('行 padding-left 用单一公式 depth*18+8（spec files §4 缩进档 8/26/44/62，dir/file/hint 行共用投影 depth）', () => {
+  it('行 padding-left 用单一公式 depth*18+8（spec files §4 缩进档 8/26/44/62，dir/file/hint 行共用派生视图 depth）', () => {
     const dirWrapper = mountRow(makeRow({ path: 'src', type: 'dir', depth: 2 }))
     const dirRow = dirWrapper.find('[data-testid="file-tree-dir-src"]')
     expect((dirRow.element as HTMLElement).style.paddingLeft).toBe('44px') // 2*18+8（demo .frow.ind2）
 
-    // hint 行 depth 已由投影 +1（子区占位缩进），组件直接用 row.depth——与旧 childHintPaddingStyle 等价
+    // hint 行 depth 已由派生视图 +1（子区占位缩进），组件直接用 row.depth——与旧 childHintPaddingStyle 等价
     const hintWrapper = mountRow(makeRow({ path: 'src', type: 'dir', depth: 2, hint: 'loading' }))
     const hintRow = hintWrapper.find('[data-testid="file-tree-loading-src"]')
     expect((hintRow.element as HTMLElement).style.paddingLeft).toBe('44px') // 2*18+8
@@ -173,7 +173,7 @@ function expectDirBadge(wrapper: { find: (s: string) => { exists: () => boolean;
   expect(badge.text()).toBe(count)
 }
 
-describe('FileTreeRow 目录徽标（childCount 来自投影 row，demo .fbadge：是目录即恒渲染）', () => {
+describe('FileTreeRow 目录徽标（childCount 来自派生视图 row，demo .fbadge：是目录即恒渲染）', () => {
   it('目录行恒渲染徽标，内容 = 可见子项数', () => {
     const row = makeRow({ path: 'src', type: 'dir', childCount: 2 })
     const wrapper = mountRow(row)
@@ -203,7 +203,7 @@ describe('FileTreeRow 目录徽标（childCount 来自投影 row，demo .fbadge�
   })
 })
 
-describe('FileTreeRow W2 文件行数 +N −M（lineStats 来自投影 row）', () => {
+describe('FileTreeRow W2 文件行数 +N −M（lineStats 来自派生视图 row）', () => {
   it('tracked 改动文件（有 additions/deletions）→ 显 +N −M', () => {
     const row = makeRow({
       path: 'src/existing.ts',
@@ -262,7 +262,7 @@ describe('FileTreeRow 交互（emit 路由，不再直调 useFileTree）', () =>
     expect(wrapper.emitted('select')).toBeUndefined()
   })
 
-  it('点展开目录 → emit toggle（expanded 状态由投影行携带，组件不读 store）', async () => {
+  it('点展开目录 → emit toggle（expanded 状态由派生视图行携带，组件不读 store）', async () => {
     const row = makeRow({ path: 'src', type: 'dir', expanded: true })
     const wrapper = mountRow(row)
     await wrapper.find('[data-testid="file-tree-dir-src"]').trigger('click')
@@ -308,7 +308,7 @@ describe('FileTreeRow 交互（emit 路由，不再直调 useFileTree）', () =>
     await dirRow.trigger('keydown.space')
     expect(wrapper.emitted('toggle')).toHaveLength(2)
 
-    // aria-expanded 随投影行 expanded 值同步（展开态行）
+    // aria-expanded 随派生视图行 expanded 值同步（展开态行）
     const openWrapper = mountRow(makeRow({ path: 'src', type: 'dir', expanded: true }))
     expect(openWrapper.find('[data-testid="file-tree-dir-src"]').attributes('aria-expanded')).toBe('true')
   })

@@ -2,13 +2,13 @@
  * WorkspaceService 测试
  *
  * 覆盖 execution-plan test-matrix T2.6-T2.7：
- * - T2.6: AC-2.4 service 零 setTimeout/setInterval（grep 守卫）
- * - T2.7: AC-2.5 service 不 import session（grep 守卫）
+ * - T2.6: AC-2.4 service 零 setTimeout/setInterval（grep 检查）
+ * - T2.7: AC-2.5 service 不 import session（grep 检查）
  *
  * 以及 WorkspaceService 的行为验证：
  * - record 透传到 store
  * - list 透传到 store
- * - INV-1 主守卫：空串/undefined 静默跳过
+ * - INV-1 主检查：空串/undefined 静默跳过
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
@@ -18,7 +18,7 @@ import { WorkspaceService } from '../src/services/workspace/workspace-service.js
 import type { RecentWorkspacesStore } from '../src/services/workspace/recent-workspaces-store.js'
 
 // ── T2.6: service 源码不含 setTimeout/setInterval ─────────────────
-// 这是 grep 守卫测试，运行时读源码验证
+// 这是 grep 检查测试，运行时读源码验证
 
 const SERVICE_SOURCE = readFileSync(
   new URL('../src/services/workspace/workspace-service.ts', import.meta.url),
@@ -68,9 +68,9 @@ describe('WorkspaceService — behavior', () => {
     expect(mockStore.record).not.toHaveBeenCalled()
   })
 
-  // 方案 A homedir 守卫（自 workspace-service-homedir.test.ts 并入）：
+  // 方案 A homedir 检查（自 workspace-service-homedir.test.ts 并入）：
   // homedir 是失效 cwd 的兜底目标，作为「最近工作区」无记录价值——service 层堵死。
-  it('record(homedir) → store.record 不被调用（方案A homedir 守卫）', () => {
+  it('record(homedir) → store.record 不被调用（方案A homedir 检查）', () => {
     service.record(homedir())
     expect(mockStore.record).not.toHaveBeenCalled()
   })

@@ -1,5 +1,5 @@
 /**
- * check-ci-vitest-targets.mjs 守卫逻辑单测（G2：CI vitest 目标非空）。
+ * check-ci-vitest-targets.mjs 检查逻辑单测（G2：CI vitest 目标非空）。
  *
  * 误放行会让「CI 步骤空跑」回归（taste-lint 事故形态：目标被根 config exclude，
  * vitest run 恒 No test files found）——五条行为机器锁定：
@@ -87,7 +87,7 @@ describe('R2 classifyCommand', () => {
     expect(classifyCommand('bash -c "vitest run x"').kind).toBe('unrecognized')
   })
 
-  it('非 pnpm 命令 → null（不进守卫面）', () => {
+  it('非 pnpm 命令 → null（不进检查范围）', () => {
     expect(classifyCommand('node scripts/check-publish-surface.mjs')).toBeNull()
   })
 })

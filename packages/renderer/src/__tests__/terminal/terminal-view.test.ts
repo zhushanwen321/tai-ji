@@ -80,7 +80,7 @@ const currentRef = ref(mockState)
 const instancesRef = ref<Array<{ terminalId: string; seq: number; alive: boolean }>>([])
 const activeRef = ref<string | null>(null)
 // 类型契约：spawnTerminal 返回 Promise<string>（spawn-feedback 链 .catch）；
-// spawnTerminalAuto 同一替身：自动新建腿经互斥入口仍委托同一 spawn 面（dmg-r1-3）
+// spawnTerminalAuto 同一替身：自动新建路径经互斥入口仍委托同一 spawn 面（dmg-r1-3）
 const spawnTerminalMock = vi.fn(async () => 'term:test-session:1')
 const useTerminalMock = {
   current: currentRef,

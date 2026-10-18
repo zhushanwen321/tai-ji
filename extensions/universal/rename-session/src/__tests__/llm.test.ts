@@ -735,7 +735,7 @@ describe("callRenameLLM", () => {
 });
 
 // ────────────────────────────────────────────────────
-// usage 落账回调（appendUsageEntry 注入；时点与 catch 归属契约见 llm.ts CallRenameLLMOptions）
+// usage 记录回调（appendUsageEntry 注入；时点与 catch 归属契约见 llm.ts CallRenameLLMOptions）
 // ────────────────────────────────────────────────────
 
 /** 合法 Usage 夹具（pi-ai Usage 全必填字段，消除 unsafe-cast 强断言）。 */
@@ -748,7 +748,7 @@ const STUB_USAGE: Usage = {
 	cost: { input: 0.01, output: 0.02, cacheRead: 0, cacheWrite: 0, total: 0.03 },
 };
 
-describe("callRenameLLM usage 落账回调（appendUsageEntry 注入）", () => {
+describe("callRenameLLM usage 记录回调（appendUsageEntry 注入）", () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
 	});
@@ -789,7 +789,7 @@ describe("callRenameLLM usage 落账回调（appendUsageEntry 注入）", () => 
 		expect(appendUsageEntry).toHaveBeenCalledWith("stub/stub-model", STUB_USAGE);
 	});
 
-	it("usage 缺失（provider 不回）→ 跳过回调不落账（存在性守卫），标题照常返回", async () => {
+	it("usage 缺失（provider 不回）→ 跳过回调不记录（存在性检查），标题照常返回", async () => {
 		vi.mocked(resolveModel).mockReturnValue(STUB_MODEL);
 		vi.mocked(callLLM).mockResolvedValue({ ok: true, content: "修复登录bug" });
 		const appendUsageEntry = vi.fn();
@@ -821,7 +821,7 @@ describe("callRenameLLM usage 落账回调（appendUsageEntry 注入）", () => 
 		expect(appendUsageEntry).toHaveBeenCalledTimes(1);
 	});
 
-	it("违约回调（实现未自吞错直接抛出）→ callRenameLLM reject（llm.ts 不吞错——catch 归属钉死回调实现内部，防双重 catch 漂移；真实接线的兜底由 landing.ts 回调体内 catch + 外层 .catch 覆盖）", async () => {
+	it("违约回调（实现未自吞错直接抛出）→ callRenameLLM reject（llm.ts 不吞错——catch 归属固定为回调实现内部，防双重 catch 漂移；真实接线的兜底由 landing.ts 回调体内 catch + 外层 .catch 覆盖）", async () => {
 		vi.mocked(resolveModel).mockReturnValue(STUB_MODEL);
 		vi.mocked(callLLM).mockResolvedValue({ ok: true, content: "修复登录bug", usage: STUB_USAGE });
 		const appendUsageEntry = vi.fn(() => {

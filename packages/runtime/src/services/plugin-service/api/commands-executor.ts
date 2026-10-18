@@ -91,7 +91,7 @@ export async function executeCommand(
   const timeoutMs = resolveToolTimeoutMs(declared)
   const declaredActive = isDeclaredTimeoutActive(declared)
 
-  // 并发守卫：同 handlerId 二次执行会覆盖 pending 登记表条目（旧 promise 永挂），
+  // 并发检查：同 handlerId 二次执行会覆盖 pending 登记表条目（旧 promise 永挂），
   // 显式拒绝并发（用户双击同一命令的第二次触发立即失败优于静默挂死）。错误规格表
   // 「命令执行中重复触发」行：30min 默认窗口放大了重复触发的等待面，busy 提示
   // 含已等待时长与出路（现状无取消通道——诚实告知等当前执行结束/超时后再试）。

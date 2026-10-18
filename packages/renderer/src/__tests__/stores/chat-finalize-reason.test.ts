@@ -1,7 +1,7 @@
 // @vitest-environment node
 
 /**
- * fix-state-tearing 收口契约套件（finalizeSession reason→终态映射 + sealed guard 防污染；
+ * fix-state-tearing 收尾契约套件（finalizeSession reason→终态映射 + sealed guard 防污染；
  * 原 chat-sealed-guard.test.ts 已并入本文件——同一契约域、零 mock 差异）。
  *
  * finalizeSession reason→终态映射（D-011 诚实态 + D-013 errorText 合并）：
@@ -122,7 +122,7 @@ describe('finalizeSession reason→终态映射', () => {
     expect(msgs[0].status).toBe('error')
   })
 
-  it('restart: streaming assistant → error（runtime 重启收口）', () => {
+  it('restart: streaming assistant → error（runtime 重启收尾）', () => {
     const store = useChatStore()
     const sid = 's-restart'
     store.applyMessageEvent(sid, {
@@ -217,7 +217,7 @@ describe('sealed guard（D-010：finalizeSession 后晚到事件幂等丢弃）'
       type: 'message.text_delta',
       payload: { sessionId: sid, delta: '正常内容' },
     })
-    // 收口
+    // 收尾
     store.applyMessageEvent(sid, {
       type: 'message.complete',
       payload: { sessionId: sid, stopReason: 'end_turn' },
@@ -304,7 +304,7 @@ describe('sealed guard（D-010：finalizeSession 后晚到事件幂等丢弃）'
       type: 'message.tool_call_update',
       payload: { sessionId: sid, toolCallId: 'tc1', detail: '进度' },
     })
-    // end_not_received 收口态不被 update 覆盖（update handler sealed）
+    // end_not_received 收尾态不被 update 覆盖（update handler sealed）
     expect(store.getMessages(sid)[0].toolCalls![0].status).toBe('end_not_received')
   })
 
@@ -366,7 +366,7 @@ describe('sealed guard（D-010：finalizeSession 后晚到事件幂等丢弃）'
       type: 'message.tool_call_start',
       payload: { sessionId: sid, entry: { type: 'toolCall', toolCallId: 'tc1', toolName: 'bash', arguments: {}, timestamp: new Date(0).toISOString() } },
     })
-    // complete 收口：running toolCall → end_not_received
+    // complete 收尾：running toolCall → end_not_received
     store.applyMessageEvent(sid, {
       type: 'message.complete',
       payload: { sessionId: sid, stopReason: 'end_turn' },

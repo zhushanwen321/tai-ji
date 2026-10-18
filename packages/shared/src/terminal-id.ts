@@ -5,7 +5,7 @@
  * core terminal-write-queue.removeSession 三包共用同一份结构解析），故归属 shared（平台无关
  * SSOT，同 virtual-session-id.ts 形态），禁止重复定义——历史上三包各持同名实现，跨包无编译期
  * 约束，实现漂移只能靠人肉对齐；本单点以编译期引用约束取代「顺序一致是调用点防错序的唯一
- * 抓手」式注释约定。
+ * 手段」式注释约定。
  *
  * 键序与解析口径（terminal-multi-instance 设计 §0.5 P7 精确前缀）：会话 id 域不含冒号，
  * 判归属 / 枚举一律取**精确前缀** `term:<sid>:`（后必须紧邻纯数字序号段），**禁按冒号切分

@@ -10,7 +10,7 @@
 //
 // 含 node 内建依赖的后台任务行为原语（进程处置 / registry 文件 IO / output tail）
 // 经独立子出口 `./background-task`（src/background-task-entry.ts）暴露，**不进
-// index 桶出口**——renderer/core 等浏览器消费面结构性不触达 node 内建。
+// index 桶出口**——renderer/core 等浏览器消费方结构性不触达 node 内建。
 //
 // core 只保留结构性、中性的通用原语（card/stats-line/progress-bar/list-tree/
 // columns/tab-bar/ansi-text）。特定 extension 的领域数据结构不进协议层——
@@ -97,7 +97,7 @@ export {
   formatRelativeTime,
 } from './extensions/scheduler/format'
 
-// ── ./extensions/scheduler-create：scheduler 创建确认的共享资产（定制交互 helper 已随统一表单协议退役；ScheduleDraft/FormResult 类型 + 形状/时间折叠守卫；实现在 extensions/universal/scheduler——交互入口 uiFormInteract，runtime event-adapter 保留 legacy 分支至退役窗口）──
+// ── ./extensions/scheduler-create：scheduler 创建确认的共享资产（定制交互 helper 已随统一表单协议退役；ScheduleDraft/FormResult 类型 + 形状/时间折叠检查；实现在 extensions/universal/scheduler——交互入口 uiFormInteract，runtime event-adapter 保留 legacy 分支至退役窗口）──
 export type {
   ScheduleKind,
   ScheduleDraft,
@@ -112,10 +112,10 @@ export {
 } from './extensions/scheduler-create/helpers'
 
 // ── ./extensions/plan：plan 模式生命周期状态机（D1：states/events/transition/derivePhase）+
-// 审阅回传值域契约（D3①⑤/D9③：值域守卫 + error envelope + selfReview 有界截断）+
+// 审阅回传值域契约（D3①⑤/D9③：值域检查 + error envelope + selfReview 有界截断）+
 // 旧 entry legacy 读取（D-B4-1：lifecycle/resumeHint 映射 + entry customType 常量单源）——
 // 纯数据 + 纯函数零 pi 依赖，pi-plan 扩展（转移接管）/ runtime（派生归一）/ renderer（呈现映射）三层共用；
-// 消费面勾销锚 = src/extensions/plan/consumers.md ──
+// 消费方勾销锚 = src/extensions/plan/consumers.md ──
 export type {
   PlanLifecycleState,
   PlanLifecycleEvent,
@@ -353,14 +353,17 @@ export type {
   CollectPendingIdsOptions,
   MappedPendingStatus,
   PendingEntriesScan,
+  PendingFieldsScan,
 } from './pending-entries'
 export {
   PENDING_REGISTER_ENTRY_TYPE,
   PENDING_UNREGISTER_ENTRY_TYPE,
   scanPendingEntries,
+  scanPendingFields,
   applyPendingDiff,
   collectActivePendingIds,
   mapReasonToStatus,
+  MAPPED_PENDING_STATUSES,
 } from './pending-entries'
 
 // ── background-task 协议（base-tool-enhance 后台任务 registry.json 契约；写侧实现在 extensions/universal/base-tool-enhance，收殓读侧在 runtime）──

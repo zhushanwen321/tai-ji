@@ -53,7 +53,7 @@ export interface FileHandleLike {
   close(): Promise<void>;
 }
 
-/** writer 的文件系统依赖面（结构接口：测试注入 fake，免 vi.mock 整个 fs 模块）。 */
+/** writer 的文件系统依赖范围（结构接口：测试注入 fake，免 vi.mock 整个 fs 模块）。 */
 export interface JournalFsDeps {
   mkdir(path: string, opts: { recursive: boolean }): Promise<unknown>;
   appendFile(path: string, data: string): Promise<void>;
@@ -137,9 +137,9 @@ export class JournalWriter {
     await this.flush();
     if (this.failed || !this.wrote) return;
     // fsync 一次（§3.3.6）：进程崩溃后已 flush 的行不丢——record 读第②级的一致性依据。
-    // fsync 段与 writeChunk 同款 failed 收口（warn 留证 + 不上抛，不置 failed——数据已
+    // fsync 段与 writeChunk 同款 failed 收尾（warn 留证 + 不上抛，不置 failed——数据已
     // 落盘，只是 sync 保证级别受损，文件仍可作②级数据源）：close 不抛是 event-journal-wiring
-    // 的接线契约（调用点在 run 成功/失败收口与 finally 语义中，close 抛错会把成功 run
+    // 的接线契约（调用点在 run 成功/失败收尾与 finally 语义中，close 抛错会把成功 run
     // 改写为 failed / 取代原始错误 / 劈叉 finally 返回值）。
     this.chain = this.chain
       .then(async () => {

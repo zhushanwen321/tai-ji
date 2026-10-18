@@ -1,5 +1,5 @@
 /**
- * model-override-query — 覆盖记账的 runtime 侧磁盘投影查询（subagent-model-switch
+ * model-override-query — 覆盖记账的 runtime 侧磁盘派生视图查询（subagent-model-switch
  * §9 transport 行「详情载荷组装时经覆盖查询端口读取」的生产后端）。
  *
  * 权威源（shared SubagentModelOverrideStatus 注释锚定）：
@@ -59,9 +59,9 @@ const OVERRIDE_TAIL_WINDOW_BYTES = OVERRIDE_TAIL_WINDOW_KB * BYTES_PER_KB
 /**
  * run id 白名单：`[\w-]{1,128}`（与 core record id 白名单 RECORD_ID_PATTERN /
  * gateway TARGET_ID_PATTERN 同式，同式漂移由各处注释锚定）。run journal 文件名
- * = runId + RUN_EVENTS_SUFFIX 直拼（core runEventJournalPathIn 读面刻意不夹带
+ * = runId + RUN_EVENTS_SUFFIX 直拼（core runEventJournalPathIn 读侧刻意不夹带
  * 校验），防穿越校验归本查询读入口，与 getRecordOverride 经 recordEventsPath
- * 白名单防御对称；runId 生产源 = 投影内 core 生成 runId，字符集 ⊆ 白名单。
+ * 白名单防御对称；runId 生产源 = 派生视图内 core 生成 runId，字符集 ⊆ 白名单。
  */
 const RUN_ID_PATTERN = /^[\w-]{1,128}$/
 
@@ -85,7 +85,7 @@ export interface ModelOverrideQuery {
   getRunOverride(sessionId: string, runId: string, resolved?: SessionMetaRef): SubagentModelOverrideStatus | undefined
 }
 
-export interface ModelOverrideQueryDeps { // oe-exempt:20261006:framework:查询工厂依赖注入面（SessionService 装配注入，单实现常态）
+export interface ModelOverrideQueryDeps { // oe-exempt:20261006:framework:查询工厂依赖注入范围（SessionService 装配注入，单实现常态）
   /** session 存储端口（sessionId → cwd / session 文件路径解析，scanSessions force 语义）。 */
   sessionStore: ISessionStore
   /** pi agent 目录锚（记录域 subagents/ 布局根；缺省 getPiAgentDir()，测试注入 tmp）。 */
@@ -163,7 +163,7 @@ export function createModelOverrideQuery(deps: ModelOverrideQueryDeps): ModelOve
       let filePath: string
       try {
         // core recordEventsPath 单源（含 record id 白名单防穿越校验——非法 id 上抛，
-        // 调用方 id 源 = 投影注册条目，throw 即编程错误，不静默吞）。
+        // 调用方 id 源 = 派生视图注册条目，throw 即编程错误，不静默吞）。
         filePath = recordEventsPath(getSubagentRecordsDir(deps.agentDir ?? getPiAgentDir(), cwd), recordId)
       } catch (e) {
         console.warn(`[model-override-query] record id rejected (${toErrorMessage(e)}): ${recordId}`)

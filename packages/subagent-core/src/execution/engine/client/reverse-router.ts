@@ -5,10 +5,10 @@
 // 落在本文件）。
 //
 // 超时域划分（impl-plan §2.2 / 设计 §3.3 帧④注释）：
-//   - 快答数据面（host/log / host/streamDelta / host/handleReady /
-//     host/childSpawned / host/childStateChanged）：分发 + 回 {ok:true}，10s 应答守卫
+//   - 快答数据范围（host/log / host/streamDelta / host/handleReady /
+//     host/childSpawned / host/childStateChanged）：分发 + 回 {ok:true}，10s 应答检查
 //     ——10s 未答 = 引擎故障 → 杀进程 + 在途 run 失败（REVERSE_REQUEST_TIMEOUT_MS）；
-//   - 人机交互面（host/askUser）：ack 两阶段——收即回 {ack:true}，
+//   - 人机交互通道（host/askUser）：ack 两阶段——收即回 {ack:true}，
 //     handler 结果异步补帧②，**不计时**（R9-2：已 ack 的等待不参与任何 in-flight
 //     超时，ADR-0047 静默 ≠ 卡死）；未注入 handler → {unsupported:true}；
 //   - 未知 host/* 通道 → {unsupported:true}（引擎自行降级，不重试）。
@@ -34,7 +34,7 @@ import { getHostUiRequestEndpoint } from "../host/host-ui-endpoint.ts";
 
 const logger = getLogger("subagents");
 
-/** 路由器依赖面（EngineClient 注入；全部单向引用，无回环持有）。 */
+/** 路由器依赖范围（EngineClient 注入；全部单向引用，无回环持有）。 */
 export interface ReverseRouterDeps {
   engineId: string;
   /** run 作用域通知路由表（EngineClient 持有，EngineClient 生命周期内同一引用）。 */
@@ -56,7 +56,7 @@ export function routeReverseRequest(deps: ReverseRouterDeps, frame: { id: string
   if (frame.method === "host/askUser") {
     // [D3 槽现读] host/askUser 应答端在**消费时**经 host-ui-endpoint 槽现读，不在
     // EngineClient 构造期固化：cli 引擎单例跨 reload 存活（D2b 幂等重注册），adoption
-    // 只更新槽、不重建 EngineClient——构造期固化会把在飞 run 的反向请求路由到旧 ctx
+    // 只更新槽、不重建 EngineClient——构造期固化会把在途 run 的反向请求路由到旧 ctx
     // 的 handler（assertActive 抛错 → {cancelled:true} 静默取消）。
     handleInteractionRequest(deps, frame, getHostUiRequestEndpoint(), (params) => (params as HostAskUserParams).request as UiRequest);
     return;
@@ -70,7 +70,7 @@ export function routeReverseRequest(deps: ReverseRouterDeps, frame: { id: string
 }
 
 /**
- * 人机交互面 ack 两阶段（R9-2）：先回 {ack:true}，handler 结果异步补帧②。
+ * 人机交互通道 ack 两阶段（R9-2）：先回 {ack:true}，handler 结果异步补帧②。
  * **不计时**——已 ack 的等待属人机交互异步等待，不参与任何 in-flight 超时；
  * handler 永不 resolve（用户不答）也不判引擎故障。handler 抛错兜底
  * {cancelled:true}（dialog-queue 应答链同款语义）。
@@ -109,8 +109,8 @@ function handleInteractionRequest<P>(
 }
 
 /**
- * 快答数据面（R9-2 二分）：分发 + 回 {ok:true}，全程受 10s 应答守卫——10s 未答 =
- * 引擎故障 → 杀进程 + 在途 run 失败。当前各通道分发都是快操作；守卫覆盖的是
+ * 快答数据范围（R9-2 二分）：分发 + 回 {ok:true}，全程受 10s 应答检查——10s 未答 =
+ * 引擎故障 → 杀进程 + 在途 run 失败。当前各通道分发都是快操作；检查覆盖的是
  * 「handler 返回的 promise 挂住」的演化面（挂起 = 宿主消费方死锁，须 fail-fast
  * 拉起杀链，防止 core 被单通道拖死）。分发抛错不判引擎故障（宿主回调 bug 不该
  * 杀引擎），仍回 {ok:true} + warn 留痕。
@@ -148,7 +148,7 @@ function handleDataPlaneRequest(deps: ReverseRouterDeps, frame: { id: string; me
     );
 }
 
-/** 数据面单通道分发器（params 形态自证——发帧前引擎侧自检，分发层只做强转）。 */
+/** 数据范围单通道分发器（params 形态自证——发帧前引擎侧自检，分发层只做强转）。 */
 type DataPlaneHandler = (deps: ReverseRouterDeps, params: unknown) => Promise<void> | void;
 
 /** method → 分发器表（表外 method = 无操作；路由面准入已由 REVERSE_CHANNEL_TIMEOUT_CLASS 收敛为 data-plane）。
@@ -171,8 +171,8 @@ function dispatchLog(deps: ReverseRouterDeps, p: HostLogParams): void {
 
 async function dispatchStreamDelta(deps: ReverseRouterDeps, p: HostStreamDeltaParams): Promise<void> {
   // [H1 U6] 关联键收敛为 runId 单键（recordId 分路随 chat 续聊轮 interact 面退役——
-  // 续聊轮经 resume run 复用 runId）。无注册路由 = 该轮宿主消费面未挂
-  //（诊断形态）——静默丢弃（数据面已 ack，引擎侧不重发；路由缺席非引擎故障）。
+  // 续聊轮经 resume run 复用 runId）。无注册路由 = 该轮宿主消费方未挂
+  //（诊断形态）——静默丢弃（数据范围已 ack，引擎侧不重发；路由缺席非引擎故障）。
   await deps.runRoutes.get(p.runId)?.onStreamDelta?.(p.delta);
 }
 
@@ -189,7 +189,7 @@ function dispatchChildSpawned(deps: ReverseRouterDeps, p: HostChildSpawnedParams
   // 引擎进程组级 kill(-enginePid)）。kill(-pid, 0) 成功 ⟺ 该 pid 自成进程组
   // （setsid/detached 后代）⟺ 不在引擎收割组内 → 告警留痕（不判 fail——
   // detached 后代是设计 §3.9 已接受代价）。Windows 无外部判据（无 kill(-pid,0)
-  // 等价物），仅 SDK 层 spawnEngineChild 形态保证，真机面挂 A3 手动门。
+  // 等价物），仅 SDK 层 spawnEngineChild 形态保证，真机验证挂 A3 手动门。
   if (process.platform !== "win32" && typeof p.pid === "number") {
     try {
       process.kill(-p.pid, 0);

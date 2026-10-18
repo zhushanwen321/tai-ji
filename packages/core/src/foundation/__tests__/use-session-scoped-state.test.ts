@@ -8,7 +8,7 @@
  * 队列级行为断言在 packages/ui（dialog-request-queue.test.ts TC-12~TC-14）。
  *
  * 与既有 foundation/use-session-scoped-state.test.ts（W1 工厂契约全量）分文件：本文件
- * 只覆盖 U6 新增导出，不重复既有断言面。
+ * 只覆盖 U6 新增导出，不重复既有断言范围。
  *
  * 运行：cd packages/core && npx vitest run src/foundation/__tests__/use-session-scoped-state.test.ts
  * 禁止 node:test / tsx --test。

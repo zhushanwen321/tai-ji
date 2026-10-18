@@ -110,7 +110,7 @@ export function useForkActions(focusedSessionId: Ref<string | null>) {
     })
     session.appendSession(created)
     const newId = created.id
-    // 空 content 守卫：不输入直接提交时退化为纯 fork（不发送首条 user），等价原 fork-background
+    // 空 content 检查：不输入直接提交时退化为纯 fork（不发送首条 user），等价原 fork-background
     // （onFork）。新 session 留空放后台，由 runtime session.forkNotice 广播反馈行。
     if (!content.trim()) return
     const segments = textToSegments(content)
@@ -121,7 +121,7 @@ export function useForkActions(focusedSessionId: Ref<string | null>) {
     // [投递所有权内核 u3c / D-10] 统一提交 + clientUuid 单源：appendUser 返回的 `u-<uuid>` 既是
     // 本地乐观气泡 id，也作为 delivery.submit 的条目 id（内核出站裸标记身份源 D2 + 回执匹配锚）。
     // 前身（chatApi.send 不带 clientUuid）的异源窗口：内核自造条目 id ≠ 本地气泡 id——direct
-    // 车道下仅表现为占位记账错位（回执 decrementInflight 落在未挂账的 session 上被钳制），
+    // 车道下仅表现为占位记账错位（回执 decrementInflight 落在未登记的 session 上被钳制），
     // 非 direct 车道下气泡按 clientUuid 找不到 → morph 不生效 → 气泡与队列条目双显示悬挂。
     // 迁移后 lane 判定全部形态收敛（新 session 恒 direct 的当前事实不再是前提）。
     const clientUuid = chat.appendUser(newId, segments)

@@ -145,7 +145,7 @@ describe('W5 RuntimeSupervisor.forceRestartForLiveness（半活进程强制重�
 describe('W5 start() 半活清理：spawn 后 waitForHealth 失败应 kill 子进程', () => {
   it('start() 包 try-catch，waitForHealth 失败时清理半活子进程后抛出', async () => {
     // 场景：spawn 成功但 waitForHealth 超时（进程半活）。
-    // 当前 start() 无 try-catch → child 保留为半活进程引用 → 下次 start 幂等守卫误判存活
+    // 当前 start() 无 try-catch → child 保留为半活进程引用 → 下次 start 幂等检查误判存活
     // W5 后：catch 块调 stopRuntimeProcess 清理半活进程，再抛出原错误
     //
     // 此用例需注入 waitForHealth 抛错 + 断言 stopRuntimeProcess 被调，

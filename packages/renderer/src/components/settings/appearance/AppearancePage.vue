@@ -25,9 +25,9 @@
     <GroupCard>
       <div class="px-[10px] pt-[4px] pb-[8px]">
         <SettingRow :label="t('settings.system.appearance')" :desc="t('settings.system.appearanceDesc')">
-          <!-- 外观模式 segmented 平铺：三值域闭合，比 Select 少一层浮层；
+          <!-- 外观模式 segmented 平铺：三值域封闭，比 Select 少一层浮层；
                视觉同 sidebar SegmentedTab 范式（凹陷槽 bg-bg-input + active 浮起）。
-               点击仍走 onThemeSelect 运行时守卫（isThemeMode 收窄后才 emit），非模板 as 断言。 -->
+               点击仍走 onThemeSelect 运行时检查（isThemeMode 收窄后才 emit），非模板 as 断言。 -->
           <div class="flex w-[200px] gap-0.5 rounded-lg bg-bg-input p-[3px]" data-testid="appearance-mode-seg">
             <Button
               v-for="m in THEME_MODES"
@@ -47,7 +47,7 @@
           </div>
         </SettingRow>
         <SettingRow :label="t('settings.system.fontSize')" :desc="t('settings.system.fontSizeDesc')">
-          <!-- 全局字号 segmented：三档值域闭合，同上范式；点击走 onFontSizeSelect 运行时守卫。 -->
+          <!-- 全局字号 segmented：三档值域封闭，同上范式；点击走 onFontSizeSelect 运行时检查。 -->
           <div class="flex w-[200px] gap-0.5 rounded-lg bg-bg-input p-[3px]" data-testid="appearance-fs-global-seg">
             <Button
               v-for="fs in FONT_SIZE_OPTIONS"
@@ -185,7 +185,7 @@ import { useToast } from '@/composables/useToast'
 
 const props = defineProps<{
   system: SystemSettings
-  /** 壳激活信号（SettingsModal v-show 常挂载形态独有）：false→true = 切回本页（重拉终端
+  /** 壳激活信号（SettingsModal v-show 常挂载形态独有）：false→true = 切回本页（重新拉取终端
    *  配置 + 刷新 token 读值快照），true→false = 切出（失焦兜底保存终端字号输入）。缺省
    *  （undefined，测试/独立宿主直挂）不参与信号，行为同旧版。 */
   isActive?: boolean
@@ -198,8 +198,8 @@ const emit = defineEmits<{
 const { t } = useI18n()
 const { info: toastInfo, error: toastError } = useToast()
 
-// ── Select payload 运行时守卫 ──
-// reka Select 的 update:modelValue payload 是宽联合（AcceptableValue），先运行时守卫收窄
+// ── Select payload 运行时检查 ──
+// reka Select 的 update:modelValue payload 是宽联合（AcceptableValue），先运行时检查收窄
 // 再 emit（对齐 ModelListSection onCtxSelect/onStrategySelect 的 unknown+guard 范式），
 // 不用模板 as 断言把非法 payload 直接放行。成员校验用 some 严格相等比较，不做强转。
 const THEME_MODES: readonly ThemeMode[] = ['light', 'dark', 'system']
@@ -327,7 +327,7 @@ onMounted(() => {
   window.addEventListener('resize', refreshTokens)
 })
 
-// 壳激活信号（v-show 常挂载形态）：切回重拉终端配置（终端分区与本页共用 TerminalConfig
+// 壳激活信号（v-show 常挂载形态）：切回重新拉取终端配置（终端分区与本页共用 TerminalConfig
 // SSOT，双向同步）+ 刷新 token 读值快照；切出即失焦兜底保存未落盘的终端字号输入
 // （saveTerminalFontSize 同值短路，不产生多余写入）。
 watch(() => props.isActive, (now, prev) => {

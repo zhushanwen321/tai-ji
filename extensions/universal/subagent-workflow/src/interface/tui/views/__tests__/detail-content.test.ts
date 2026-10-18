@@ -2,9 +2,9 @@
  * detail-content 纯函数直测——与 WorkflowsView.driver.test.ts（经 view 驱动覆盖）
  * 互补：本文件直接单测 view 驱动不易逐一命中的分支面。
  *
- * 覆盖面：
+ * 覆盖范围：
  *   - statusLabel 四分支（入参收窄联合的编译期补齐运行时对照）
- *   - projectRecordProgress 投影口径（S1 等价表：toolCallCount = tool_start 计数、
+ *   - projectRecordProgress 派生视图口径（S1 等价表：toolCallCount = tool_start 计数、
  *     lastError = eventLog 末条 error 的 label、elapsed/turns/token 直读）
  *   - processDetailKey 全键位（PgUp/PgDn/Home/End）+ followTail 语义 + 视口 0 兜底
  *   - buildDetailContent 大正文截断（>OUTPUT_TRUNCATE_BYTES → 末 5 行 + (truncated)）
@@ -82,7 +82,7 @@ describe("statusLabel 色档四分支", () => {
   });
 });
 
-describe("projectRecordProgress 投影口径（S1 等价表消费面）", () => {
+describe("projectRecordProgress 派生视图口径（S1 等价表消费方）", () => {
   it("toolCallCount = tool_start 计数；lastError = 末条 error 的 label；字段直读", () => {
     const rec = makeSub({
       totalTokens: 1234,

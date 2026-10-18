@@ -7,7 +7,7 @@
  *     文件 key 集合完全一致（嵌套 key 也算）。
  * U8: 扫 components 下所有 .vue 文件的 template 块，断言无新增 CJK 字符（豁免清单外）。
  *
- * 这两个测试是"机械闸门"——任何漏网的中文 UI 文案或 locale desync 都会被捕获。
+ * 这两个测试是"机械门禁"——任何漏网的中文 UI 文案或 locale desync 都会被捕获。
  */
 import { describe, it, expect, vi } from 'vitest'
 import { readFileSync, readdirSync, statSync } from 'node:fs'
@@ -88,8 +88,8 @@ function listVueFiles(dir: string): string[] {
  *
  * 栈深度计数而非非贪婪正则（/<template>([\s\S]*?)<\/template>/）：它会在第一个
  * </template> 截断——组件内嵌套 <template>（slot / v-if 形态）之后的模板后半段
- * 逃过 U8 CJK 扫描（审查 F4 盲区）。自闭合（<template #slot />）不进栈
- * （alternation 自闭合分支在前，防 [^>]*> 先吞）。
+ * 逃过 U8 CJK 扫描（审查 F4 盲区）。自关闭（<template #slot />）不进栈
+ * （alternation 自关闭分支在前，防 [^>]*> 先吞）。
  */
 function extractTemplate(source: string): string {
   const tokens = source.matchAll(/<template\b[^>]*\/>|<template\b[^>]*>|<\/template>/g)
@@ -100,7 +100,7 @@ function extractTemplate(source: string): string {
       depth--
       if (depth === 0) return source.slice(contentStart, t.index)
     } else if (t[0].endsWith('/>')) {
-      continue // 自闭合：无块体，不影响深度
+      continue // 自关闭：无块体，不影响深度
     } else {
       if (depth === 0) contentStart = (t.index ?? 0) + t[0].length
       depth++
@@ -173,7 +173,7 @@ describe('U8: 组件 <template> 无新增 CJK 字符（豁免清单外）', () =
  * 不依赖 components 目录的偶然形态）。
  */
 describe('U8a: extractTemplate 嵌套 <template> 盲区（回归锁定）', () => {
-  /** 嵌套闭合之后的模板后段含 CJK——旧正则的 0 检出盲区形态。 */
+  /** 嵌套结束标签之后的模板后段含 CJK——旧正则的 0 检出盲区形态。 */
   const nestedFixture = [
     '<template>',
     '  <div>outer before</div>',
@@ -182,7 +182,7 @@ describe('U8a: extractTemplate 嵌套 <template> 盲区（回归锁定）', () =
     '      <span>inner</span>',
     '    </template>',
     '  </Comp>',
-    '  <p>嵌套闭合之后的中文残留</p>',
+    '  <p>嵌套结束标签之后的中文残留</p>',
     '  <template v-if="ok"><em>二层嵌套中文</em></template>',
     '</template>',
     '<script setup lang="ts">',
@@ -190,29 +190,29 @@ describe('U8a: extractTemplate 嵌套 <template> 盲区（回归锁定）', () =
     '</script>',
   ].join('\n')
 
-  it('顶层块完整覆盖到配对闭标签（嵌套闭合之后的后段仍参与扫描）', () => {
+  it('顶层块完整覆盖到配对闭标签（嵌套结束标签之后的后段仍参与扫描）', () => {
     const tpl = extractTemplate(nestedFixture)
     expect(tpl).toContain('outer before')
     expect(tpl).toContain('inner')
-    expect(tpl).toContain('嵌套闭合之后的中文残留') // 旧正则截断点之后
+    expect(tpl).toContain('嵌套结束标签之后的中文残留') // 旧正则截断点之后
     expect(tpl).toContain('二层嵌套中文')
     expect(tpl).not.toContain('script 段中文注释') // 顶层闭标签后不外溢
     // CJK 检出面（U8 同款剥离注释后计数）非空——盲区形态下后段 2 处全漏
     expect(tpl.replace(/<!--[\s\S]*?-->/g, '').match(/[\u4e00-\u9fff]/g)).not.toBeNull()
   })
 
-  it('自闭合内部 <template #slot /> 不破坏深度计数', () => {
+  it('自关闭内部 <template #slot /> 不破坏深度计数', () => {
     const source = [
       '<template>',
       '  <Comp>',
       '    <template #header />',
       '    <template #footer><i>x</i></template>',
       '  </Comp>',
-      '  <p>自闭合之后的中文</p>',
+      '  <p>自关闭之后的中文</p>',
       '</template>',
     ].join('\n')
     const tpl = extractTemplate(source)
-    expect(tpl).toContain('自闭合之后的中文')
+    expect(tpl).toContain('自关闭之后的中文')
     // 块体不含顶层开标签本身（与旧捕获组语义一致；内部带属性的 <template #...> 不受影响）
     expect(tpl).not.toContain('<template>')
   })
@@ -223,19 +223,19 @@ describe('U8a: extractTemplate 嵌套 <template> 盲区（回归锁定）', () =
 })
 
 /**
- * U9: locale 消息字符串无裸 `@`（vue-i18n linked-message 语法冲突守卫）。
+ * U9: locale 消息字符串无裸 `@`（vue-i18n linked-message 语法冲突检查）。
  *
  * 背景：vue-i18n message format 里 `@` 是 linked message 起始符，消息值里的字面 `@`
  * （如「调用 @subagent 工具」）会被编译器按 linked 语法解析 → 运行时 console 编译
  * 告警（2026-09-12 Gate B 真机验收在 `sidebar.subagentList.emptyHint` 实测）。修法 =
- * vue-i18n 字面量插值 `{'@'}` 转义（t() 输出仍为字面 @）。本守卫扫双侧全部消息
+ * vue-i18n 字面量插值 `{'@'}` 转义（t() 输出仍为字面 @）。本检查扫双侧全部消息
  * 字符串，剥掉合法 `{'@'}` 后仍含 `@` 即红——覆盖未来新增的任何 key。
  * [2026-09-16] 原事故锚二（侧栏子代理列表的空态提示键）随侧栏任务 tab 退役删除
  * （该键的消费组件同批退役，文案承载面迁 composer 任务托盘的 `panel.tray.*`，措辞去掉了
  * @subagent 提法）——运行时锚点收敛为下方唯一一条 `settings.preset.builtinExtensionHint`；
  * 上位「逐文件全量扫描」用例不受影响。
  */
-describe('U9: locale 消息无裸 @（linked-message 语法冲突守卫）', () => {
+describe('U9: locale 消息无裸 @（linked-message 语法冲突检查）', () => {
   it.each(['zh-CN', 'en-US'] as const)('%s 全部消息字符串无未转义 @', (locale) => {
     const violations: string[] = []
     for (const file of listTsFiles(join(LOCALES_DIR, locale))) {

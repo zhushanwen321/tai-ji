@@ -2,7 +2,7 @@
  * handoff-formatter 单测（TC1/TC2，wrapWithXmlTag 纯函数）。
  *
  * 覆盖：
- * - 基本包装：输出含 <handoff_document source="..." created="<ISO8601>"> 开头 + doc + 闭合 + action 后缀
+ * - 基本包装：输出含 <handoff_document source="..." created="<ISO8601>"> 开头 + doc + 结束标签 + action 后缀
  * - filePath undefined 时不出现 file 属性；非空时含 file="..."
  * - created 是有效 ISO8601（new Date(created).getTime() 不为 NaN）
  * - source 含特殊字符（" & < >）时被转义（escapeXmlAttr）
@@ -19,7 +19,7 @@ const ACTION_SUFFIX =
   'Immediately execute the next incomplete item in the document. If you encounter a blocker or blocked item, stop and ask me. After completing each step, proceed to the next one.'
 
 describe('wrapWithXmlTag (TC1/TC2 纯函数)', () => {
-  it('TC1 基本包装：含 handoff_document 开标签 + doc + 闭合标签 + action 后缀', () => {
+  it('TC1 基本包装：含 handoff_document 开标签 + doc + 结束标签 + action 后缀', () => {
     const doc = '# 交接文档\n\n- 任务A\n- 任务B'
     const out = wrapWithXmlTag(doc, 'src')
 
@@ -27,7 +27,7 @@ describe('wrapWithXmlTag (TC1/TC2 纯函数)', () => {
     expect(out.startsWith('<handoff_document source="src" created="')).toBe(true)
     // doc 原样嵌入（标签行后紧跟 doc）
     expect(out).toContain(`>\n${doc}\n</handoff_document>`)
-    // action 后缀在闭合标签之后（空行分隔）
+    // action 后缀在结束标签之后（空行分隔）
     expect(out.endsWith(`</handoff_document>\n\n${ACTION_SUFFIX}`)).toBe(true)
   })
 

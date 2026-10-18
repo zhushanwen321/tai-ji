@@ -6,7 +6,7 @@
  * 回传经 App 编排走 extension.ui_response 既有通路）：
  * - form 帧（新 form / legacy askUser / scheduleCreate 归一后）：堆叠单列渲染 choice / text /
  *   schedule 回显三类问题（触控形态；桌面 FormOverlay 是 tab 逐题形态——真差异，编码契约
- *   同构，纯逻辑单点在 shell/form-protocol）。legacy scheduleCreate draft 源包装为单 schedule
+ *   同构，纯逻辑单点在 @taiji/ui/form-protocol 双壳共享）。legacy scheduleCreate draft 源包装为单 schedule
  *   题直挂（桌面 FormOverlay.draftQuestion 同式），submit 回传扁平 ScheduleFormResult JSON；
  *   questions 源 submit 回传 FormAnswers JSON envelope。
  * - planReview 审批帧：自审结论展示 + 批准 / 搁置双键（payload 与桌面 PlanReviewBar 同契约
@@ -24,17 +24,18 @@ import type { ExtensionUIRequest } from '@taiji/core/transport/api/domains/exten
 import { isFormQuestion, type FormQuestion, type ScheduleDraft, type ScheduleQuestion } from '@zhushanwen/extension-protocol'
 import { onceCronToDate } from '@zhushanwen/extension-protocol'
 import type { PlanReviewFrameForView } from '../shell/companion-bridge'
+import { scheduleDraftOf } from '../shell/form-protocol'
 import {
   OTHER_VALUE,
   draftToScheduleFormResult,
   encodeFormAnswers,
   initialQuestionState,
   isQuestionAnswered,
+  isScheduleEchoReady,
   questionKey,
-  scheduleDraftOf,
+  scheduleEchoResult,
   type QuestionState,
-} from '@taiji/ui/extension-host'
-import { isScheduleEchoReady, scheduleEchoResult } from '../shell/form-protocol'
+} from '@taiji/ui/form-protocol'
 
 const props = defineProps<{
   /** 队首 form 类请求（undefined = 该节不渲染） */
@@ -62,7 +63,7 @@ const legacyDraft = computed<ScheduleDraft | null>(() => {
   return scheduleDraftOf(req)
 })
 
-/** draft 守卫失败留痕（正常路径不可达——runtime isScheduleDraft 预检后才产帧；移动壳不静默：
+/** draft 检查失败留痕（正常路径不可达——runtime isScheduleDraft 预检后才产帧；移动壳不静默：
  *  cancel-only 卡片承接，请求方可得取消应答） */
 watch(() => props.request, (req) => {
   if (req?.scheduleCreate === true && scheduleDraftOf(req) === null) {
@@ -70,7 +71,7 @@ watch(() => props.request, (req) => {
   }
 })
 
-/** isFormQuestion 复核过滤后的问题集（滤除留痕对齐桌面 Panel 复核守卫；draft 源不含问题） */
+/** isFormQuestion 复核过滤后的问题集（滤除留痕对齐桌面 Panel 复核检查；draft 源不含问题） */
 const questions = computed<FormQuestion[]>(() => {
   const req = props.request
   if (!req || req.form !== true || req.scheduleCreate === true) return []
@@ -90,7 +91,7 @@ const draftQuestion = computed<ScheduleQuestion | null>(() =>
 )
 
 // 回传未送达错误行（role=alert 形态对齐 TokenInputView 错误行）：requestId 匹配当前展示
-// 请求才渲染——请求被摘除（卡片收口）或新请求到达时旧错误不残留
+// 请求才渲染——请求被摘除（卡片收尾）或新请求到达时旧错误不残留
 const showRespondError = computed(() => {
   const failedId = props.respondFailedId
   if (failedId === null || failedId === undefined) return false
@@ -102,7 +103,7 @@ const questionsList = computed<FormQuestion[]>(() =>
   isDraftMount.value && draftQuestion.value ? [draftQuestion.value] : questions.value,
 )
 
-/** 请求在场但无可渲染内容（空问题集 / draft 守卫失败）：cancel-only 卡片，不静默吞帧 */
+/** 请求在场但无可渲染内容（空问题集 / draft 检查失败）：cancel-only 卡片，不静默吞帧 */
 const showCancelOnly = computed(() => props.request !== undefined && !isDraftMount.value && questions.value.length === 0)
 const allowCancel = computed(() => props.request?.allowCancel !== false)
 
@@ -246,7 +247,7 @@ function showOtherInput(q: FormQuestion): boolean {
         </span>
       </div>
 
-      <!-- cancel-only：空问题集 / draft 守卫失败（不静默吞帧，请求方可得取消应答） -->
+      <!-- cancel-only：空问题集 / draft 检查失败（不静默吞帧，请求方可得取消应答） -->
       <p v-if="showCancelOnly" class="text-[12px] leading-1.5 text-neutral-mid" data-testid="mobile-form-empty">
         {{ t('mobile.formCard.emptyForm') }}
       </p>

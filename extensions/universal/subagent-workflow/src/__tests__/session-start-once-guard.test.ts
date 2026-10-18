@@ -3,12 +3,12 @@
 // u-audit-fix 探针实测（subagent-workflow 侧）：判定「必须接入」的跨 session 副作用
 // 操作经 oncePerProcess 包装后，双派发
 // （factory 二调/handler 累积形态：同一 handler 引用直接调两次）下各执行 1 次；
-// 粒度边界豁免（明令不包装）的 ③identity appendEntry / ④bindNotifyLedger /
+// 粒度边界豁免（明令不包装）的 ③identity appendEntry /
 // ⑥service.initSession 保持每 session_start 执行（×2，防误伤反向断言）。
 //
-// [B1] recoverCrashedRuns 已移出守卫清单（原⑪）：W17 后 loadAll 只读本 session
+// [B1] recoverCrashedRuns 已移出检查清单（原⑪）：W17 后 loadAll 只读本 session
 // entries、save 只写自身 runId 的 state 文件——恢复是 session 级幂等操作，挂进程级
-// 守卫会让同进程后续 session（/new 后 /resume 崩溃 session）的残留不被收编
+// 检查会让同进程后续 session（/new 后 /resume 崩溃 session）的残留不被收编
 // （session-lifecycle.test.ts 的 B1 用例锁定该场景）。双派发下恢复 ×2 是幂等空转
 // （第二次 loadAll 全终态、emit 0 条）——本文件 mock 不模拟幂等（每次调用恒 emit），
 // 故断言 ×2 / emit 2 条，真实幂等语义由 B1 用例锁定。
@@ -16,12 +16,12 @@
 // 断言与验证点的对应（入口计数 ⟹ 内层副作用 ≤1 的构造性蕴含）：
 //   ① syncEnginesFile 写 = 1（engines.json 写发生在函数内部，入口 =1 ⟹ 写 ≤1）
 //   ⑧ startEngineJournalGcTimer = 1（确定性触发接线在函数内部：首调即扫 + 24h
-//     复扫定时器不属双派发观察面；范围 = 引擎 journal，会话下挂内容回收归级联）
+//     复扫定时器不属双派发观测点；范围 = 引擎 journal，会话下挂内容回收归级联）
 //   ⑨ recoverManifestTmpFiles = 1（promote/unlink 在函数内部）
 //   ⑩ WorktreeManager.scan = 1（git/rm 进程操作在方法内部）
 //   ⑫ rebuildIndexes = 1（[U4c/G1] manifest 补缺/索引重建写发生在函数内部）
 //
-// 守卫 Map 是模块级状态：本文件静态 import 被测工厂（免付每用例全图重建），守卫
+// 检查 Map 是模块级状态：本文件静态 import 被测工厂（免付每用例全图重建），检查
 // Map 经 ext-guards 测试重置导出在 beforeEach 清空（与 resetModules 重建等价）。
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -61,14 +61,11 @@ const {
   mockRecoverManifestTmpFiles,
   mockRebuildIndexes,
   mockRecoverCrashedRuns,
-  mockBindNotifyLedgerHost,
-  mockRecoverFromSession,
   mockInitSession,
   mockInitModel,
 } = vi.hoisted(() => {
-  const recoverFromSession = vi.fn();
   return {
-    // ① engines.json 同步（factory 体内还有一次无守卫调用，用例内 clearAllMocks 分离计数）
+    // ① engines.json 同步（factory 体内还有一次无检查调用，用例内 clearAllMocks 分离计数）
     mockSyncEnginesFile: vi.fn(),
     // ⑩ worktree reaper 扫描
     mockScan: vi.fn(),
@@ -81,8 +78,6 @@ const {
     // ⑪ 崩溃 run 恢复（onRunRecovered 由用例注入行为，emit 断言经真实 pi.events 链路）
     mockRecoverCrashedRuns: vi.fn(),
     // ④ 通知账本 bind（防误伤：每 session_start 执行）
-    mockBindNotifyLedgerHost: vi.fn(() => ({ recoverFromSession })),
-    mockRecoverFromSession: recoverFromSession,
     // ⑥ service.initSession（防误伤：每 session_start 执行）
     mockInitSession: vi.fn(),
     mockInitModel: vi.fn(),
@@ -113,11 +108,8 @@ vi.mock("@zhushanwen/subagent-core/execution/persistence/engine-journal-gc.ts", 
   startEngineJournalGcTimer: mockStartGcTimer,
 }));
 
-// ④ 通知账本 bind（setupNotifyLedgerCompactionGuard 另消费 getBoundNotifyLedger —— workflow-notify.ts）
-vi.mock("@zhushanwen/subagent-core/execution/notify/notify-ledger.ts", () => ({
-  bindNotifyLedgerHost: mockBindNotifyLedgerHost,
-  getBoundNotifyLedger: () => null,
-}));
+// [④ 通知账本 bind 随波 2 账本退役] session_start 的账本装配/恢复钩子已删除——
+// 投递归 pi-delivery-port 恒装配于 base-tool-enhance（unified-delivery §3.7）。
 
 // ⑪ lifecycle：仅替换 recoverCrashedRuns，其余导出（scheduleTimeBudget/
 // terminateRunningRuns 等）经 importOriginal 保留真实实现。
@@ -189,7 +181,7 @@ vi.mock("../interface/command/commands.ts", () => ({
   registerWorkflowsCommand: vi.fn(),
 }));
 
-// ── import 被测工厂（静态 import——守卫 Map 经 _resetOncePerProcessForTest 重置，
+// ── import 被测工厂（静态 import——检查 Map 经 _resetOncePerProcessForTest 重置，
 //    免付每用例 resetModules 全图重建） ──
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -285,8 +277,8 @@ function createMockCtx(): Record<string, unknown> {
 
 // ── tests ──
 
-describe("session_start 双派发幂等守卫（oncePerProcess，u-audit-fix）", () => {
-  it("双派发下五项跨 session 副作用操作各执行 1 次（recoverCrashedRuns 已移出守卫，B1）", async () => {
+describe("session_start 双派发幂等检查（oncePerProcess，u-audit-fix）", () => {
+  it("双派发下五项跨 session 副作用操作各执行 1 次（recoverCrashedRuns 已移出检查，B1）", async () => {
     // ⑪ 模拟恢复一个 run：onRunRecovered 回调 → [W2/V4 D6] pi.appendEntry 直落
     //（真实链路观察点——注销不经 emit）
     mockRecoverCrashedRuns.mockImplementation(async (
@@ -300,7 +292,7 @@ describe("session_start 双派发幂等守卫（oncePerProcess，u-audit-fix）"
 
     const { pi, appendEntryCalls, getSessionStartHandler } = createMockPi();
     subagentsExtension(pi);
-    // factory 体内有一次无守卫的 syncEnginesFile（U7b，模块加载期兜底，u-audit 范围外）
+    // factory 体内有一次无检查的 syncEnginesFile（U7b，模块加载期兜底，u-audit 范围外）
     // ——清计数后只观察 handler 双派发窗口。
     vi.clearAllMocks();
 
@@ -317,7 +309,7 @@ describe("session_start 双派发幂等守卫（oncePerProcess，u-audit-fix）"
     expect(mockRecoverManifestTmpFiles).toHaveBeenCalledTimes(1);
     expect(mockRebuildIndexes).toHaveBeenCalledTimes(1);
     expect(mockScan).toHaveBeenCalledTimes(1);
-    // [B1] recoverCrashedRuns 不再挂进程级守卫：每 session_start 各跑一次（×2）——
+    // [B1] recoverCrashedRuns 不再挂进程级检查：每 session_start 各跑一次（×2）——
     // 双派发是幂等空转（第二次 loadAll 全终态）。mock 恒回调故 unregister = 2；
     // 真实幂等语义（第二次直落 0 条）由 session-lifecycle.test.ts 的 B1 用例锁定。
     expect(mockRecoverCrashedRuns).toHaveBeenCalledTimes(2);
@@ -332,7 +324,7 @@ describe("session_start 双派发幂等守卫（oncePerProcess，u-audit-fix）"
     });
   });
 
-  it("防误伤：③identity appendEntry / ④bindNotifyLedger / ⑥initSession 每 session_start 执行（双派发 ×2）", async () => {
+  it("防误伤：③identity appendEntry / ⑥initSession 每 session_start 执行（双派发 ×2）", async () => {
     // ③ identity 只在子进程 env 注入时写（主进程跳过）——注入后双派发应 ×2
     process.env.PI_SUBAGENT_SELF_RECORD_ID = "rec-once-1";
     process.env.PI_SUBAGENT_AGENT = "reviewer";
@@ -350,9 +342,7 @@ describe("session_start 双派发幂等守卫（oncePerProcess，u-audit-fix）"
       // ③ 本 session entry：每派发一次（进程级 flag 会杀掉后续 session 的 identity 写入）
       const identityEntries = appendEntryCalls.filter((c) => c.customType === IDENTITY_CUSTOM_TYPE);
       expect(identityEntries).toHaveLength(2);
-      // ④ bind 每 session_start 一次（recoverFromSession 是「每 session 一次」语义，D3 粒度段）
-      expect(mockBindNotifyLedgerHost).toHaveBeenCalledTimes(2);
-      expect(mockRecoverFromSession).toHaveBeenCalledTimes(2);
+      // [④ 账本 bind 断言随波 2 账本退役删除——装配归 base-tool-enhance，本壳零装配]
       // ⑥ service 覆盖式注入：SR-3 语义要求每 session_start 重新注入
       expect(mockInitSession).toHaveBeenCalledTimes(2);
       expect(mockInitModel).toHaveBeenCalledTimes(2);

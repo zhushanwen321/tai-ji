@@ -1,7 +1,7 @@
 // src/execution/__tests__/terminal-write-latency.test.ts
 //
 // [H4 / D2 / 待验证检查点①] 终态原语同步写时延实测（vitest 内采样，非 bench 文件）：
-// markFinalized 的持久化面 = `.state` writeSync + manifest writeSync（D8 v7 双写），
+// markFinalized 的持久化路径 = `.state` writeSync + manifest writeSync（D8 v7 双写），
 // D2 重审阈值 = 终态路径 P99 增量 > 10ms（超限方向 = 降级「shutdown 前 flush 批量
 // 同步写」，设计 §3.3 D2）。本测试在真实 mkdtemp 目录采样 N=100 次，断言 P99 <
 // 10ms；实测数字经 console.info 落测试输出，供 H4 文档回写登记。

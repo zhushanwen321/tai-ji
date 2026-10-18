@@ -124,7 +124,7 @@ function makeLifecycleEnv() {
     fetchAndBroadcastContext: vi.fn(async () => undefined),
     // S3-W2 被测收敛点
     notifySessionCreated: vi.fn(),
-    // S2 ISP 化：结构性满足 lifecycle 窄接口（10 方法 = 实际消费面），无强转
+    // S2 ISP 化：结构性满足 lifecycle 窄接口（10 方法 = 消费方实际用到的全部），无强转
     removeSessionEntry: vi.fn(),
     getActiveSummaries: vi.fn(() => []),
   }
@@ -1039,10 +1039,10 @@ describe('CT-D3 限流与防毒化（notify 令牌桶 / 大小上限）', () => 
   })
 
   it('CT-D3 plugin.notify 超限丢弃并记日志（真实 dispatch 链路，20/s 打满后第 21 条丢弃 + warn）', async () => {
-    // fake Date 钉死时钟（toFake 精确限定 Date，不动 setTimeout）：guardNotifyParams
+    // fake Date 固定时钟（toFake 精确限定 Date，不动 setTimeout）：guardNotifyParams
     // 默认 nowMs=Date.now()，令牌桶按真实 elapsed 墙钟补充令牌——满并行 + coverage
     // 插桩下 21 条 await dispatch 的墙上耗时可能 >1s，桶被补满后第 21 条意外放行
-    // （gate-suite round 2 实测时序脆弱）。钉死后放行/丢弃仅由条数决定，与调度快慢无关。
+    // （gate-suite round 2 实测时序脆弱）。固定后放行/丢弃仅由条数决定，与调度快慢无关。
     vi.useFakeTimers({ toFake: ['Date'] })
     try {
       const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})

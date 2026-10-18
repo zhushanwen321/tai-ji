@@ -7,7 +7,7 @@
  * - 检测失败（非合法 JSON / draft 缺字段）→ 降级普通 select（S2 同款兜底）
  *
  * 既有 marker 分支（SESSION_MANAGER / BRIDGE / ASK_USER）的覆盖：
- * - SESSION_MANAGER → src/__tests__/session-manager-e2e-probe.test.ts（marker 翻译 + 枚举守卫）
+ * - SESSION_MANAGER → src/__tests__/session-manager-e2e-probe.test.ts（marker 翻译 + 枚举检查）
  * - BRIDGE → test/bridge-marker-channel.test.ts（四 method it.each + malformed 三态）
  * - ASK_USER → test/event-adapter-gui.test.ts（U6 合法表单 + U8 降级）
  */

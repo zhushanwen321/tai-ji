@@ -3,7 +3,7 @@
 //
 // busy 期消息经 core morph 移出对话流（投递所有权内核 u3b），此前移动壳无队列可视化——
 // 排队消息「消失」且悬停撤回钮触屏不可达。本组件承接 D7 三件事：
-// - 条目 = core 投影单读口 getDeliveryProjectionRef() 经 `deliveryQueueEntries` 谓词过滤
+// - 条目 = core 派生视图单读口 getDeliveryProjectionRef() 经 `deliveryQueueEntries` 谓词过滤
 //   （U20 下沉唯一定义点，桌面 useQueueRows/ActivityStrip 同源——**禁壳内重写 lane 判定**）；
 //   preview 直用帧值（runtime 装配已剥标记，显示层不二次加工），帧序 = 内核 FIFO 发送序。
 // - 取消钮 = delivery.cancel（app-runtime 透传出口；queued 立即移除 / in-flight 收回-重投 /
@@ -15,7 +15,7 @@
 //
 // 反馈通道：取消失败就近落条目级内联错误行（MobileComposer sendFailed 同款
 // respondFailedId 范式：role=alert + 专用 testid；新取消尝试时清空，不跨条目残留旧错；
-// core toast 契约的错误条承载 core 失败面文案，壳级条目反馈不挪用该单槽）。
+// core toast 契约的错误条承载 core 失败情形文案，壳级条目反馈不挪用该单槽）。
 // 移动壳不做 failed 行重试钮（D7 原文「条目状态 + 取消钮」，重试
 // 面属桌面 QueueBubble 展示序；取消对 failed 条目同样有效，滞留条目有出路）。
 import { computed, ref } from 'vue'
@@ -51,7 +51,7 @@ function stateText(state: DeliveryFrameEntry['state']): string {
 }
 
 // ── 取消编排（对齐桌面 useQueueRows.onCancelEntry：失败域拆分 + 全文回草稿）──────
-// RPC 失败 / 不可撤 / 回填是三个独立失败面，各自明确反馈不静默（§3.4）；
+// RPC 失败 / 不可撤 / 回填是三个独立失败情形，各自明确反馈不静默（§3.4）；
 // cancellingId 全局单飞：并发取消的 reply 乱序会把反馈错挂到别的条目上。
 
 const cancellingId = ref<string | null>(null)
@@ -108,7 +108,7 @@ function requestDraftRestore(text: string): void {
 </script>
 
 <template>
-  <!-- 空队列结构性不渲染（无占位空态）：显隐完全由投影帧驱动（core 单源，无本地布尔表） -->
+  <!-- 空队列结构性不渲染（无占位空态）：显隐完全由派生视图帧驱动（core 单源，无本地布尔表） -->
   <div
     v-if="rows.length > 0"
     class="flex flex-col gap-1 rounded-lg border border-[var(--border)] bg-bg-input p-1.5"

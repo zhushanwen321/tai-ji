@@ -2,27 +2,27 @@
  * useContextUsage —— Composer 上下文用量的 per-session 分区状态源
  * （context-consistency Phase 2，设计 context-consistency-design §3.3）。
  *
- * 职责（D2 分区 / D3 恢复腿 / D4 0 帧哨兵 / D5-G4 dev 漂移检测器）：
+ * 职责（D2 分区 / D3 恢复路径 / D4 0 帧哨兵 / D5-G4 dev 漂移检测器）：
  * - 分区：useSessionScopedState 建 per-session 分区（Map 分区范式，ADR-0049）——B 的帧
  *   物理上写不进 A 分区，结构性消除串台；
  * - 订阅：只订 context.update（D1 协议收敛后 usage 单帧贯穿，不订 state_changed），
  *   handler 用第二参数 sid 写「消息所属 sid」分区（不读当前 sid 实时值）；
- * - 恢复腿：每次进入某 sid 视图无条件拉 session.getContext——no-value 也重拉（切走期间
+ * - 恢复路径：每次进入某 sid 视图无条件拉 session.getContext——no-value 也重新拉取（切走期间
  *   后台 turn 可能产生新值，组件级订阅已退订收不到帧，不能依赖分区缓存）；RPC 失败保留
  *   分区缓存不降级；
  * - in-flight 去重：模块级 createInflightDedup 表（D9 共享原语收编，meta 携带发起时刻
- *   帧序号），多实例 await 同一 Promise 后各写各分区；resolve 即清条目（下次切入重拉）；
+ *   帧序号），多实例 await 同一 Promise 后各写各分区；resolve 即清条目（下次切入重新拉取）；
  *   组件 remount 的重复拉取接受（幂等查询）；
  * - cleanup：分区删除由 useSessionScopedState 工厂自动注册进 useSidebar.deleteSession
  *   清理编排（含 deletedSids 僵尸写回拦截，D-B2-1）；
- * - G4 dev 漂移检测器：TAIJI_AGENT_DEBUG=1 时恢复腿 resolve 后对账（口径见 applyReply）。
+ * - G4 dev 漂移检测器：TAIJI_AGENT_DEBUG=1 时恢复路径 resolve 后对账（口径见 applyReply）。
  *
  * 分区缓存的角色 = RPC 往返期的显示初值 + RPC 失败时的兜底显示（防闪横线），
  * 不是「切回不拉」的依据（理由见设计 D3 后台 turn 论证）。
  *
- * 消费方：ContextCapacityCard / ContextCapacityPopover 改 `const { current } = useContextUsage(...)`
- * 纯读。必须在组件 setup
- * 同步调用（内部 useSessionEvents 依赖 getCurrentInstance 守卫）。
+ * 消费方：ComposerMetricsAggregate / ContextCapacityCard / ContextCapacityPopover 改
+ * `const { current } = useContextUsage(...)` 纯读。必须在组件 setup
+ * 同步调用（内部 useSessionEvents 依赖 getCurrentInstance 检查）。
  */
 import { computed, reactive, watch, type ComputedRef, type Ref } from 'vue'
 import { useSessionScopedState } from '@/composables/useSessionScopedState'
@@ -41,7 +41,7 @@ interface ContextUsageReply {
 
 /**
  * 分区形态。
- * - unknown：从未收到合法帧也未拉到过 resolve（含恢复腿 in-flight 的过渡态）；
+ * - unknown：从未收到合法帧也未拉到过 resolve（含恢复路径 in-flight 的过渡态）；
  * - no-value：权威源明确无值（pi tokens=null，如 compact 后无新 turn）；
  * - ok：有真值（used=inputTokens / total=contextLimit / percent=usagePercent）。
  */
@@ -69,7 +69,7 @@ export interface UseContextUsageReturn {
  * （recency 基准，存「发起时」而非「attach 时」——复用条目的实例 attach 更晚，若按
  * attach 时序号捕获，发起后落地过 live 帧的分区会被陈旧 reply 回滚，详见 applyReply
  * 的 coveredByNewerFrame 判定）。resolve/reject 即清条目：下次切入同一 sid 重新拉取
- * （无条件恢复腿，不依赖分区缓存的时效）。
+ * （无条件恢复路径，不依赖分区缓存的时效）。
  */
 const inflightContextFetch = createInflightDedup<ContextUsageReply, { seqAtIssue: number }>()
 
@@ -81,7 +81,7 @@ export function __clearInFlightContextFetchForTest(): void {
 /**
  * G4 dev 漂移检测器开关：TAIJI_AGENT_DEBUG=1。
  *
- * renderer 是浏览器上下文读不到主进程 env，用守卫探测 globalThis.process（vitest /
+ * renderer 是浏览器上下文读不到主进程 env，用检查探测 globalThis.process（vitest /
  * Electron 环境注入时存在；纯浏览器安全降级 false，生产零开销）。
  */
 function isDriftDetectorEnabled(): boolean {
@@ -149,15 +149,15 @@ export function useContextUsage(sessionIdRef: Ref<string | null | undefined>): U
   }
 
   /**
-   * 恢复腿 resolve 落地：G4 对账（debug 时）+ 写分区。
+    * 恢复路径 resolve 落地：G4 对账（debug 时）+ 写分区。
    *
    * G4 对账口径（对设计 D5-G4 的精确化，避免误报），按序判定：
    * 1. RPC 发起后该 sid 已有更新的合法 live 帧落地 → 跳过对账**并跳过写入**——帧即真相，
    *    分区新于 reply 属正常；写入反而会用陈旧采样回滚 newer 帧值；
-   * 2. 分区仍是 unknown → 跳过对账（从未有值，无漂移可言——首拉必经态）；
+    * 2. 分区仍是 unknown → 跳过对账（从未有值，无漂移可言——首次拉取必经态）；
    * 3. 其余情形分区应已收敛到 owner 快照：值不等 → console.warn 带两值与 sid。
    *    此时分区显示确与 owner 快照不一致（如某写入路径被丢），warn 即 G4 目标信号；
-   *    warn 后照常写 reply，恢复腿自愈。
+   *    warn 后照常写 reply，恢复路径自愈。
    * 对账只对「当前视图 sid」进行（经 scoped.current 读分区）：G4 关心的是用户眼前显示的
    * 漂移，非当前视图分区无 UI 意义且无读取 API。
    */
@@ -194,7 +194,7 @@ export function useContextUsage(sessionIdRef: Ref<string | null | undefined>): U
   }
 
   /**
-   * 恢复腿（D3）：进入 sid 视图时无条件拉取。in-flight 去重：同 sid 已有在途 RPC 则复用
+    * 恢复路径（D3）：进入 sid 视图时无条件拉取。in-flight 去重：同 sid 已有在途 RPC 则复用
    * （多实例/同实例快速来回切），不重复发。
    */
   function recover(sid: string): void {
@@ -209,14 +209,14 @@ export function useContextUsage(sessionIdRef: Ref<string | null | undefined>): U
     void entry.promise.then(
       (reply) => applyReply(sid, reply, entry.meta.seqAtIssue),
       (err: unknown) => {
-        // RPC 失败：保留分区缓存不降级（分区缓存角色 = 失败兜底显示），下次切入重拉自愈。
+        // RPC 失败：保留分区缓存不降级（分区缓存角色 = 失败兜底显示），下次切入重新拉取自愈。
         // debug 级而非 warn/error：可重试瞬态 + transport/pending 层已记错误，避免断连期刷屏
         console.debug('[context-usage] getContext failed, keep cached partition', sid, err)
       },
     )
   }
 
-  // 恢复腿触发源：每次进入某 sid 视图（immediate 覆盖首挂载）。null/undefined 不拉
+  // 恢复路径触发源：每次进入某 sid 视图（immediate 覆盖首次挂载）。null/undefined 不拉
   watch(
     sessionIdRef,
     (sid) => {

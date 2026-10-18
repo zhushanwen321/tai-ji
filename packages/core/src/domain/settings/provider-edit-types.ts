@@ -1,6 +1,6 @@
 /**
  * provider-edit 共享类型 —— 三个编辑 module（form / discover / models）+ 纯 reconcile 核
- * 共用的最小契约面（[C4] 拆分自 use-provider-edit.ts）。
+ * 共用的最小契约范围（[C4] 拆分自 use-provider-edit.ts）。
  *
  * 只放跨 module 的类型/别名，不含实现（实现分布见各 module 文件头注释）：
  * - provider-edit-form.ts     表单草稿 + dirty/快照 + save 持久化

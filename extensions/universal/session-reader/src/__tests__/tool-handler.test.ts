@@ -975,7 +975,7 @@ describe('renderExtractItems F9 截断（S3 首项超大 + S4 文案）', () => 
 
 // ============================================================
 // w2 新增：resolveSessionId 三形态（① 绝对路径 / ② sa-id / ③ findSessions 透传 source）
-// + ES1/ES2 错误契约 + source 透传 + 真实数据守卫（design TC2-TC18）
+// + ES1/ES2 错误契约 + source 透传 + 真实数据检查（design TC2-TC18）
 // ============================================================
 
 /**
@@ -1183,7 +1183,7 @@ describe('resolveSessionId ② sa-id 形态（w2 TC7-TC10 + CQ3）', () => {
     }
   })
 
-  it('TC9: sa-id 0 命中（可能 running）→ zcode_record_not_found（U9：sa-id 语境统一错误面，含 family 指引 + 👉）', async () => {
+  it('TC9: sa-id 0 命中（可能 running）→ zcode_record_not_found（U9：sa-id 语境统一错误范围，含 family 指引 + 👉）', async () => {
     await expect(
       handleSessionRead({ action: 'outline', session: 'sa-nonexist-9999' }, { agentDir: dir }),
     ).rejects.toThrow('zcode_record_not_found')
@@ -1197,7 +1197,7 @@ describe('resolveSessionId ② sa-id 形态（w2 TC7-TC10 + CQ3）', () => {
     }
   })
 
-  it('TC10: sa-id 片段输入（精确相等不命中）→ zcode_record_not_found + 完整 sa- id 重试指引（U9 统一错误面）', async () => {
+  it('TC10: sa-id 片段输入（精确相等不命中）→ zcode_record_not_found + 完整 sa- id 重试指引（U9 统一错误范围）', async () => {
     await makeFixtureSubagent(dir, 'sa-c8c8dfa8', {
       realSessionId: '019e6c96-dddd-eeee-ffff-0000000010a3',
     })
@@ -1264,7 +1264,7 @@ describe('resolveSessionId ② sa-id 形态（w2 TC7-TC10 + CQ3）', () => {
   })
 })
 
-describe('sa-id entry 兜底 v2 终态条锚定（W1 D1 版本门补齐，第三层兜底消费面）', () => {
+describe('sa-id entry 兜底 v2 终态条锚定（W1 D1 版本门补齐，第三层兜底消费方）', () => {
   // fixture 骨架对齐 zcode-routing.test.ts：root/agent = agentDir、root/live-sessions =
   // liveSessionDir（entry 兜底候选根）、root/engines/zcode/session-db/db.sqlite = 隔离库
   // 白名单形态路径（不落文件——正向用例锚命中后进 zcode 读链，在白名单存在性检查处
@@ -1361,7 +1361,7 @@ describe('sa-id entry 兜底 v2 终态条锚定（W1 D1 版本门补齐，第三
     await expect(
       handleSessionRead({ action: 'outline', session: 'sa-v2-1' }, { agentDir, liveSessionDir: liveDir }),
     ).rejects.toThrow('zcode_anchor_missing')
-    // 归因进结构化日志不进 LLM 可见面（§3.4）：firstIncompleteAnchorReason 的 v2 分支
+    // 归因进结构化日志不进 LLM 可见部分（§3.4）：firstIncompleteAnchorReason 的 v2 分支
     //（tool-handler 唯一消费点）产出 missing-dbPath
     expect(logCallsWithReason('missing-dbPath')).toBeGreaterThanOrEqual(1)
   })
@@ -1603,7 +1603,7 @@ describe('doWorkflow（w6，fixture）', () => {
   }
 
   /** 构造 v2 record 流文件（run-created + agent-settled[+终局] 帧提 calls）并写注册条目——
-   *  [ADR-0095] v1 读面删除后的单档 fixture 形态（替代 wf-state 快照 + link 指针）。 */
+   *  [ADR-0095] v1 读侧删除后的单档 fixture 形态（替代 wf-state 快照 + link 指针）。 */
   async function wfV2Run(
     dir: string,
     slug: string,
@@ -1798,7 +1798,7 @@ describe('doWorkflow（w6，fixture）', () => {
     expect(text).toContain('family')
   })
 
-  // [ADR-0095] TC-w6-snapshot-skip（快照不可读 → skippedRuns）随 v1 读面删除：
+  // [ADR-0095] TC-w6-snapshot-skip（快照不可读 → skippedRuns）随 v1 读侧删除：
   // 发现链收敛 v2 后 run 一律 record 流直读（读失败 → running 兜底不 skipped），
   // skippedRuns 快照链对 v2 档不可达。
 
@@ -1939,7 +1939,7 @@ describe('doFamily recursive（m3b U8 接入）', () => {
 
 // ===========================================================================
 // ext-simplify-04 U4/E2（D2②）：formatFamilyText subagents 行富字段展示
-// status 终态短标签 + agent 名 + task 截 60 摘要；孤儿只标 [已清理]；P4 输出量级守卫。
+// status 终态短标签 + agent 名 + task 截 60 摘要；孤儿只标 [已清理]；P4 输出量级检查。
 // ===========================================================================
 
 describe('formatFamilyText subagents 行富字段（ext-simplify-04 U4 / E2）', () => {
@@ -2219,7 +2219,7 @@ describe('doctor action（u8：环境判定 + 根表 + 告警 + 残留 glob）',
   it('无缓存形态（ext-simplify-04 U3）：重复调用输出一致（每次实扫），新落盘文件立即可见', async () => {
     // 原三个用例（缓存命中不重扫 / TTL 到期失效 / find 不读 doctor 缓存 PS-14）随
     // doctor 缓存机删除而合并为本用例——无缓存层后「find/doctor 读到旧计数」的形态
-    // 在结构上不存在，守卫点收敛为：输出无「缓存命中」行 + 每次调用实扫（新增文件
+    // 在结构上不存在，检查点收敛为：输出无「缓存命中」行 + 每次调用实扫（新增文件
     // 下一次调用即见，反而更实时）
     const agentDir = join(tmp, 'agent')
     await writeJsonl(join(agentDir, 'sessions', SLUG, 'a.jsonl'))

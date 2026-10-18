@@ -12,11 +12,11 @@
 // core 缺省 agentDir 锚定自推，供引擎侧 / zsw 等无 pi SDK 环境消费。agentDir
 // 双源是有意差异，slug + 探测布局恒单源。
 //
-// 消费面边界 [MANDATORY]：本推导锚「调用方进程自身 env/cwd」——只在 pi 进程
+// 消费方边界 [MANDATORY]：本推导锚「调用方进程自身 env/cwd」——只在 pi 进程
 // 内调用才与写侧落盘一致（pi 壳 resolveSessionDir、pi 进程内的注册对账
-// sweep）。runtime 进程侧的读面禁用本推导：pi 出站 env（PI_CODING_AGENT_DIR）
+// sweep）。runtime 进程侧的读侧禁用本推导：pi 出站 env（PI_CODING_AGENT_DIR）
 // 与 pi cwd 均 pi 子进程私有，runtime 侧推导恒错位（可见信号 = 读侧恒空转，
-// 2026-09-27 W2 D3 场景 3 定位）；runtime 侧读面走 pi-host-run-store（主
+// 2026-09-27 W2 D3 场景 3 定位）；runtime 侧读侧走 pi-host-run-store（主
 // session 文件同源枚举，不读 env/cwd）。
 //
 // core 缺省 agentDir 推导锚定 pi 实装（1.0.0 复核）dist config.js getAgentDir：
@@ -39,7 +39,7 @@ const PI_AGENT_DIR_ENV = "PI_CODING_AGENT_DIR";
 /** pi SDK 缺省 agent 目录分量（实装版 dist config.js：CONFIG_DIR_NAME + "agent"）。 */
 const DEFAULT_PI_AGENT_DIR_PARTS = [".pi", "agent"] as const;
 
-/** resolvePiSessionScopedDir 的注入面（测试用；生产缺省全走真实推导）。 */
+/** resolvePiSessionScopedDir 的注入点（测试用；生产缺省全走真实推导）。 */
 export interface PiSessionScopedDirOptions {
   /** agent 配置目录覆盖（缺省 = PI_CODING_AGENT_DIR env 或 ~/.pi/agent）。 */
   agentDir?: string;
@@ -72,7 +72,7 @@ export function resolvePiSessionScopedDir(opts?: PiSessionScopedDirOptions): str
 
 /**
  * 解析 pi 宿主 WorkflowRun state 目录（`<sessionDir>/workflow-state`）——
- * resolvePiSessionScopedDir 的纯后缀派生（同 opts 注入面）。
+ * resolvePiSessionScopedDir 的纯后缀派生（同 opts 注入点）。
  */
 export function resolvePiWorkflowStateDir(opts?: PiSessionScopedDirOptions): string {
   return join(resolvePiSessionScopedDir(opts), STATE_DIR_NAME);

@@ -3,7 +3,7 @@
  * `parseSpec` 不校验包名，`join(nodeModulesDir, name)` 后 rmSync(recursive,force)/
  * renameSync 可被 `../../` 逃逸写删 node_modules 之外任意目录；name 可来自外部
  * clone 仓库 package.json 的依赖名。修复 = validateNpmName 白名单（第一向）+
- * resolve 后 isUnderOrEqual 双向守卫（第二向），install/uninstall 调用点全接。
+ * resolve 后 isUnderOrEqual 双向检查（第二向），install/uninstall 调用点全接。
  *
  * 运行：cd packages/runtime && npx vitest run test/npm-installer-name-validation.test.ts
  */
@@ -63,7 +63,7 @@ describe('RT-8#3: validateNpmName 白名单（非法名必抛，消息含恢复�
   })
 })
 
-describe('RT-8#3: isUnderOrEqual 守卫语义（node_modules 边界判定）', () => {
+describe('RT-8#3: isUnderOrEqual 检查语义（node_modules 边界判定）', () => {
   const nodeModulesDir = '/proj/node_modules'
 
   it.each([
@@ -96,7 +96,7 @@ describe('RT-8#3: 调用点接线（uninstall/install 在 rmSync 前拒绝越界
     root = mkdtempSync(join(tmpdir(), 'npm-name-guard-'))
     nodeModulesDir = join(root, 'node_modules')
     mkdirSync(nodeModulesDir)
-    // node_modules 之外的诱饵：非法名若穿透守卫会被 rmSync 递归删除
+    // node_modules 之外的诱饵：非法名若穿透检查会被 rmSync 递归删除
     outsideDir = join(root, 'outside')
     mkdirSync(outsideDir)
     outsideFile = join(outsideDir, 'precious.txt')

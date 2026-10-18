@@ -2,7 +2,7 @@
  * GitRepoResolver 单测（缓存治理批 4 U10）：walk-up 一次遍历同时产出 {isBare, gitDir, headPath}。
  *
  * fs 走真实临时目录 fixture（mkdtempSync 自建自删，不触真实数据目录）；branch 的 execSync 经
- * vi.mock 钉死（不真 spawn git）——验证的是 walk-up 判定逻辑与 branch 解析契约。
+ * vi.mock 固定为（不真 spawn git）——验证的是 walk-up 判定逻辑与 branch 解析契约。
  *
  * 测试框架 vitest，运行命令：cd packages/runtime && npx vitest run src/infra/system/git-repo-resolver.test.ts
  */

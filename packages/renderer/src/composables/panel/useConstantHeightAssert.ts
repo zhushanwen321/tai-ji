@@ -6,7 +6,7 @@
  * padding / 字号 / icon size 却忘了同步常量，占位会静默漂移致重叠或留空，且生产无任何报错。
  *
  * 本 composable 在 dev 下挂 ResizeObserver 实测 DOM 高度对比常量，差值 > 1px（避开亚像素
- * 抖动）时 console.warn 提醒。生产构建被 import.meta.env.DEV 守卫裁剪，零运行时开销。
+ * 抖动）时 console.warn 提醒。生产构建被 import.meta.env.DEV 检查裁剪，零运行时开销。
  *
  * 用法：传入 { el, expected, name } 列表，composable 返回各 el 的 ref 供模板绑定，
  * 并自动管理 observer 生命周期与条件渲染元素的重挂。

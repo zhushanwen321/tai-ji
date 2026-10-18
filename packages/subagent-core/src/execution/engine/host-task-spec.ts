@@ -34,7 +34,7 @@ export function executeOptionsToEngineTaskSpec(opts: ExecuteOptions): AgentCallO
   };
 }
 
-/** 声明面基础字段（slug/agent/model/thinkingLevel/skillPath/appendSystemPrompt 同名透传）。 */
+/** 声明侧基础字段（slug/agent/model/thinkingLevel/skillPath/appendSystemPrompt 同名透传）。 */
 function identityFields(opts: ExecuteOptions): Partial<AgentCallOpts> {
   return {
     ...(opts.slug !== undefined ? { description: opts.slug } : {}),
@@ -46,7 +46,7 @@ function identityFields(opts: ExecuteOptions): Partial<AgentCallOpts> {
   };
 }
 
-/** 约束面字段（schema/maxTurns/graceTurns 同名透传）。 */
+/** 约束侧字段（schema/maxTurns/graceTurns 同名透传）。 */
 function budgetFields(opts: ExecuteOptions): Partial<AgentCallOpts> {
   return {
     ...(opts.schema !== undefined ? { schema: opts.schema } : {}),

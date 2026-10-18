@@ -1,5 +1,5 @@
 /**
- * sidecar-binding-sync 守卫测试——「入口回填断言」（设计文档 §3.3 决策 3 第 ① 类）。
+ * sidecar-binding-sync 检查测试——「入口回填断言」（设计文档 §3.3 决策 3 第 ① 类）。
  *
  * 两部分分工：
  * - Part 1：hydrateBindingMeta 纯函数契约。期望值全部硬编码自设计文档 §3.3 决策 1
@@ -119,7 +119,7 @@ describe('hydrateBindingMeta · 设计文档 §3.3 决策 1 矩阵（期望硬�
     expect(Object.hasOwn(s, 'handedOffTo')).toBe(false)
   })
 
-  it('handoff 承接通道说明性用例：实现上承接复用 entry=\'create\' 调用 hydrate（通道独立性由 CREATE_DERIVED_CALLERS 清单静态守卫承诺，见 Part 2 handoff-service 断言），故此处按 create 入口断言承接值注入生效', () => {
+  it('handoff 承接通道说明性用例：实现上承接复用 entry=\'create\' 调用 hydrate（通道独立性由 CREATE_DERIVED_CALLERS 清单静态检查承诺，见 Part 2 handoff-service 断言），故此处按 create 入口断言承接值注入生效', () => {
     const s = freshSession()
     hydrateBindingMeta(s, { projectId: 'src-p' }, 'create')
     expect(s.projectId).toBe('src-p')
@@ -150,7 +150,7 @@ describe('hydrateBindingMeta · 设计文档 §3.3 决策 1 矩阵（期望硬�
 
   it('遍历矩阵：注册表每键 × 四入口的 patch/skip 行为与硬编码矩阵一致（骨架从表读、期望不读表）', () => {
     /**
-     * hydrate 行为投影矩阵——设计文档 §3.3 决策 1 的手工誊写：
+     * hydrate 行为派生视图矩阵——设计文档 §3.3 决策 1 的手工誊写：
      * patch = 该格语义为 options / inherit-source / meta / resolved-in-entry（hydrate 一律回填）
      * skip  = 该格语义为 'none'（刻意不回填）。
      * 本表是外部事实锚点；BINDING_FIELDS 改行而本表未跟 → 此处红，逼 review 表语义决策。

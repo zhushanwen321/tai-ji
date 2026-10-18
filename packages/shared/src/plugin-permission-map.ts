@@ -50,7 +50,7 @@ export const PLUGIN_RPC_METHODS = [
   'plugin.sessionData.set',
   'plugin.sessionData.delete',
   'plugin.sessionData.keys',
-  // sessions 域（api/session-api.ts，14 个——S3-W2 生命周期事件注册 4 个 + AP-4 读面 6 个）
+  // sessions 域（api/session-api.ts，14 个——S3-W2 生命周期事件注册 4 个 + AP-4 读侧 6 个）
   'plugin.sessions.list',
   'plugin.sessions.get',
   'plugin.sessions.getActive',
@@ -59,7 +59,7 @@ export const PLUGIN_RPC_METHODS = [
   'plugin.sessions.registerDestroy',
   'plugin.sessions.unregisterCreate',
   'plugin.sessions.unregisterDestroy',
-  // AP-4 读面（readEntries/getCommands 数据面 + entry 失效订阅注册族；entriesInvalidated
+  // AP-4 读侧（readEntries/getCommands 数据范围 + entry 失效订阅注册族；entriesInvalidated
   // 是 server→Worker notify、不进本表，与 didCreate/didDestroy 同族）
   'plugin.sessions.readEntries',
   'plugin.sessions.getCommands',
@@ -129,7 +129,7 @@ const CAPABILITY_ALIASES: Readonly<Record<string, readonly string[]>> = {
   'tools.register': ['plugin.tools.register', 'plugin.tools.unregister'],
   'hooks.register': ['plugin.hooks.register', 'plugin.hooks.unregister'],
   'sessions.sendMessage': ['plugin.sessions.sendMessage'],
-  // sessions.readState 含生命周期事件订阅（S3-W2）与 AP-4 读面（U2）：onDidCreateSession/
+  // sessions.readState 含生命周期事件订阅（S3-W2）与 AP-4 读侧（U2）：onDidCreateSession/
   // onDidDestroySession 的注册/注销、readEntries/getCommands 状态读、entry 失效与
   // 会话激活订阅（registerActivate 族）的注册/注销方法并入读侧能力（通知型/只读型，
   // 无写语义；注册类连带 unregister 的既有成对授予模式）。不新增 SDK 常量（能力词汇表

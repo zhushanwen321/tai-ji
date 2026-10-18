@@ -181,12 +181,14 @@ describe('u2 检重与 lane 判定', () => {
     expect(h.promptCalls).toHaveLength(1)
   })
 
-  it('settling 窗口保守按不可收（检查点 4 降级档）：turn=settling → lane=queued 且不投递', async () => {
+  it('settling 窗口受理即出站（v3 settling 持有退役）：lane=direct 且不排队', async () => {
+    // v3 受理即出站：settling 非 hold 维度（唯一提交侧等待 = compaction）——pi post-run
+    // 窗口提交经 prompt(streamingBehavior) 直接入 pi 队列（忙时入队不拒），无本地排队
     const h = makeHarness({ view: { occupancy: { turn: 'settling', compacting: false, bash: false } } })
     const result = h.registry.submit('s1', { content: 'settling 窗口消息', clientUuid: 'u-33333333-3333-4333-8333-333333333333' })
-    expect(result.lane).toBe('queued')
+    expect(result.lane).toBe('direct')
     await h.flush()
-    expect(h.promptCalls).toHaveLength(0)
+    expect(h.promptCalls).toHaveLength(1)
   })
 
   it('检重（D5② tombstone）：同 clientUuid 已送达后重报被吞（不重投）', async () => {
@@ -318,7 +320,7 @@ describe('u2 对账器三分处置（D3）', () => {
 })
 
 // ── 假标记字面量身份判据（MF-1-1 B2 判据收敛 + MF-2-1 尾附锚收窄） ──────────────
-// 两轮判据收敛的回归面：① MF-1-1 把宽松手写 BARE_MARKER_RE（`[^>]*` 任意内容）收敛为
+// 两轮判据收敛的回归测试：① MF-1-1 把宽松手写 BARE_MARKER_RE（`[^>]*` 任意内容）收敛为
 // SSOT 双形态（uuid / m-），非合法形态不再构成投递身份；② MF-2-1 把 rebuild 判定锚从
 // 「全文提取 id」收窄为「出站尾附锚」（原文文末精确 endsWith——msg-pipeline-debloat
 // D5-3/P5 口径统一后不再 trimEnd）——文本中部/前部的合法形态标记字面量（用户从
@@ -454,17 +456,20 @@ describe('u2 错误分类迁移（D6）', () => {
     expect(h.registry.entries('s1')?.active[0]?.state).toBe('in-flight')
   })
 
-  it('pi 报 already processing（runtime 不知情的 turn）→ occupancy 反转 generating + 按 steer 重投', async () => {
+  it('pi 报 already processing（runtime 不知情的 turn）→ 首败即停显式上报（v3 busy 分型重试退役）', async () => {
+    // v3：受理即出站下全部文本投递恒带 streamingBehavior，pi 忙时入队不拒
+    //（agent-session.js:1515-1524）——processing 拒绝仅剩异常形态，按真失败首败即停
+    //（不反转 occupancy、不重试；错误范围 = message.error 显式上报，用户裁决重发）
     const h = makeHarness({ promptError: new Error(PI_PROCESSING_MSG) })
     h.registry.submit('s1', { content: '幽灵空闲撞墙', clientUuid: 'u-aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' })
     await h.flush()
-    // 权威信号反转：pi 有 turn 在跑 → occupancy turn=generating（防幽灵空闲死循环）
-    const occ = h.view.occupancy
-    expect(occ?.turn).toBe('generating')
-    expect(h.view.isGenerating).toBe(true)
-    // 重投（第二次 prompt）成功 → 条目继续在途（不再撞墙）
-    expect(h.promptCalls.length).toBeGreaterThanOrEqual(2)
-    expect(h.promptCalls[1]![2]).toBe('steer')
+    // occupancy 不伪造 busy：turn 保持 idle（markDispatchingIfIdle 置位后经 reject-other 收尾）
+    expect(h.view.occupancy?.turn).toBe('idle')
+    expect(h.view.isGenerating).toBe(false)
+    // 首败即停：条目移出内核（不留幽灵）+ message.error 广播可见 + 零重试
+    expect(h.registry.entries('s1')?.active).toHaveLength(0)
+    expect(h.published.some((m) => m.type === 'message.error')).toBe(true)
+    expect(h.promptCalls.length).toBe(1)
   })
 
   it('非 busy 错误（auth 失败等）不上反转、按失败抛出（内核受理失败路径）', async () => {
@@ -772,14 +777,12 @@ describe('segments 快照（MF-1-2）：提交快照持有与回草稿返回', (
 })
 
 // ── S1 死锁复现（msg-pipeline-debloat D1 申报制）：≥2 条无标记条目同批永挂 in-flight ──
-// 七环链条（设计 §2.3）：agent 通路两条无标记消息父 session 忙时排队 → settled 边沿
-// 合批 flush → splitComposed 无标记整条退化投递受理 → confirmMarkerlessAccepted 对
-// joined 文本精确等值反查 miss（joined ≠ 任何单条）→ confirmDelivered 永不调用 →
-// in-flight 恒挂 → hasPendingMessages 恒 true → busy gate 恒关 → queued 投递永不执行。
-// 修复（D1 申报制）：acceptance 条目受理即落地，链条第 5 环构造性消失。
+// [u5a 语义收窄登记] v2 死锁七环链条的第 2 环（settled 边沿合批 flush）随受理即出站
+// 构造性消失（on-accept 无组批时机，逐条出站）——用例降为 **acceptance 申报受理即落地**
+// 的行为锁（漏申报 = 缺省 marker 永挂 in-flight 的死锁前提，申报制语义 v3 保留）。
 
-describe('S1 死锁复现（D1 申报制）：无标记合批受理即落地 + gate 复开', () => {
-  it('连续两条无标记消息同批投递 → 条目达 delivered 终态且后续 queued 消息正常投出', async () => {
+describe('S1 死锁复现（D1 申报制）：无标记条目受理即落地 + 投递通路不占死', () => {
+  it('连续两条无标记消息受理即出站逐条投递 → 条目达 delivered 终态且后续消息正常投出', async () => {
     // 父 session 生成中（agent 通路回流排队的前置）
     const h = makeHarness({ view: { isGenerating: true, occupancy: { turn: 'generating', compacting: false, bash: false } } })
     // agent 通路两条无标记消息（completion-backflow 回流 / session_manager send 同形：
@@ -789,34 +792,24 @@ describe('S1 死锁复现（D1 申报制）：无标记合批受理即落地 + g
     handle.send({ payload: { kind: 'text', content: 'subagent A 完成' } }, { receiptAnchor: 'acceptance' })
     handle.send({ payload: { kind: 'text', content: 'subagent B 完成' } }, { receiptAnchor: 'acceptance' })
     await h.flush()
-    expect(h.promptCalls).toHaveLength(0) // 父 session 忙：内核排队不入槽
+    // v3 受理即出站：忙时不再内核排队——两条逐条出站（on-accept 无组批，in-flight 防重
+    // 下串行），各单条 prompt 且批内无标记（申报 acceptance 的无标记形态）
+    expect(h.promptCalls).toHaveLength(2)
+    expect(h.promptCalls[0]![0]).toContain('subagent A 完成')
+    expect(h.promptCalls[1]![0]).toContain('subagent B 完成')
+    expect(extractMarkerIds(h.promptCalls[0]![0] as string)).toEqual([])
+    expect(extractMarkerIds(h.promptCalls[1]![0] as string)).toEqual([])
 
-    // 父 session 生成结束 → settled 边沿 → busy 复核通过 → doSend 把全部 queued 锁一批
-    applySessionOccupancyTransition(h.view, null, 'idle')
-    h.emitSettled()
-    await h.flush()
-    expect(h.promptCalls).toHaveLength(1)
-    const composed = h.promptCalls[0]![0] as string
-    expect(composed).toContain('subagent A 完成')
-    expect(composed).toContain('subagent B 完成')
-    expect(extractMarkerIds(composed)).toEqual([]) // 批内无标记（死锁前提成立）
-
-    // 断言①（旧代码红灯形态：joined 文本反查 miss → 两条永挂 in-flight）
+    // 断言①（旧代码红灯形态：反查 miss → 两条永挂 in-flight）：acceptance 受理即落地
     const full = h.registry.entries('s1')!
     expect(full.active).toHaveLength(0)
     expect(full.tombstones.filter((t) => t.state === 'delivered')).toHaveLength(2)
 
-    // 断言② gate 复开（旧代码红灯形态：hasPendingMessages 恒 true → busy gate 恒关 →
-    // queued 消息永不执行）。用 send 路径锁 gate——
-    // checked 直投不经 busy gate，锁不住死锁第 7 环。
-    // 先收口第一批投递开启的 turn（deliverOne 置 dispatching = turn 开始的生产语义）
-    applySessionOccupancyTransition(h.view, null, 'idle')
-    h.emitSettled()
-    await h.flush()
+    // 断言②投递通路不占死（旧代码红灯形态：in-flight 恒挂 → 后续消息永不执行）
     handle.send({ payload: { kind: 'text', content: '后续 queued 消息' } }, { receiptAnchor: 'acceptance' })
     await h.flush()
-    expect(h.promptCalls).toHaveLength(2)
-    expect(h.promptCalls[1]![0]).toContain('后续 queued 消息')
+    expect(h.promptCalls).toHaveLength(3)
+    expect(h.promptCalls[2]![0]).toContain('后续 queued 消息')
   })
 })
 
@@ -921,16 +914,16 @@ describe('in-flight 撤销二段式归宿（dmg-r1-2）：意图集持有至兑�
   })
 })
 
-// ── 缺陷修复回归④（dmg-r1-4）：合批分段中途失败只对未受理段走失败面 ───────────
+// ── 缺陷修复回归④（dmg-r1-4）：合批分段中途失败只对未受理段走失败路径 ───────────
 // 缺陷：批 [A,B] 中 A 段已受理进 pi 后 B 段失败 → port.send 整体 reject → 内核对 A、B
 // 全部 reject + removeActive + 广播「消息投递失败」——A 实际已进 transcript，重开 session
 // 后与失败提示矛盾（信号失真）。修复 = 逐段受理登记（confirmAccepted）：已受理段转
-// in-flight 出批留守（等回执/对账），仅未受理段走失败面。
+// in-flight 出批留守（等回执/对账），仅未受理段走失败路径。
 
-describe('合批分段中途失败（dmg-r1-4）：已受理段留守，失败面只落未受理段', () => {
+describe('合批分段中途失败（dmg-r1-4）：已受理段留守，失败路径只落未受理段', () => {
   it('三段批 [A 挂起受理 | B 成功 | C 失败]：A、B in-flight 留守，C 入口即拦 + 单条失败广播', async () => {
     const h = makeHarness()
-    // prompt 序列：首次挂起（拉住 A 段在途，让 B、C 挂账成同批）、二次成功（B）、三次失败（C）
+    // prompt 序列：首次挂起（拉住 A 段在途，让 B、C 挂起成同批）、二次成功（B）、三次失败（C）
     let resolveFirstPrompt: (() => void) | undefined
     h.client.prompt.mockImplementation(async (text: string) => {
       h.promptCalls.push([text, undefined, undefined])
@@ -946,18 +939,18 @@ describe('合批分段中途失败（dmg-r1-4）：已受理段留守，失败�
     const idB = 'u-d4000002-0000-4000-8000-000000000002'
     const idC = 'u-d4000003-0000-4000-8000-000000000003'
     h.registry.submit('s1', { content: '段A', clientUuid: idA }) // 批[A] 在途（prompt 挂起）
-    h.registry.submit('s1', { content: '段B', clientUuid: idB }) // checked 挂账
-    h.registry.submit('s1', { content: '段C', clientUuid: idC }) // checked 挂账
+    h.registry.submit('s1', { content: '段B', clientUuid: idB }) // checked 挂起
+    h.registry.submit('s1', { content: '段C', clientUuid: idC }) // checked 挂起
     await h.flush()
     expect(h.promptCalls).toHaveLength(1)
 
-    // A 段受理成功 → confirmAccepted 出批留守 → pump 把挂账的 B、C 锁成同批
+    // A 段受理成功 → confirmAccepted 出批留守 → pump 把挂起的 B、C 锁成同批
     resolveFirstPrompt!()
     await h.flush()
     expect(h.promptCalls).toHaveLength(3) // B 成功 + C 失败
     await h.flush()
 
-    // 失败面只落 C：单条广播（修复前：A 的 waiter 同被 reject → 2 条误报）
+    // 失败路径只落 C：单条广播（修复前：A 的 waiter 同被 reject → 2 条误报）
     const errors = h.published.filter((m) => m.type === 'message.error')
     expect(errors).toHaveLength(1)
     expect(errors[0]).toMatchObject({

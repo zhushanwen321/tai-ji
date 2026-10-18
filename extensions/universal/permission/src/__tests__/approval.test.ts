@@ -286,7 +286,7 @@ describe("ApprovalComponent（G4 invalidate）", () => {
 		expect(result.approved).toBe(false);
 	});
 
-	it("handleInput 在 resolved 后 no-op（守卫）", () => {
+	it("handleInput 在 resolved 后 no-op（检查）", () => {
 		const done = vi.fn();
 		const comp = new ApprovalComponent(req, { requestRender: vi.fn() }, done);
 		comp.handleInput("\r"); // 首次 approve（Enter）

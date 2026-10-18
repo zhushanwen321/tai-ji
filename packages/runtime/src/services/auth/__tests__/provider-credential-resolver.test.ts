@@ -45,7 +45,7 @@ function readModelsFile(): ConfigModelsConfig {
   return JSON.parse(readFileSync(modelsPath, 'utf-8')) as ConfigModelsConfig
 }
 
-/** deps 工厂：auth.json 走真实 AuthStorage（async 经 AuthService 收口通道 + sync 同步原语），
+/** deps 工厂：auth.json 走真实 AuthStorage（async 经 AuthService 收敛通道 + sync 同步原语），
  * models.json 走计数 fake（断言批量形态单次读）。 */
 function makeDeps(): ProviderCredentialResolverDeps & { readModels: ReturnType<typeof vi.fn> } {
   const readModels = vi.fn((): ConfigModelsConfig => readModelsFile())
@@ -308,7 +308,7 @@ describe('P-cred 探针：$ENV_VAR / command 配置值形态的解析行为', ()
 
   // resolveTemplate 的 ${} 深边界分支（Gate-1.6 补口）：apiKey 含 $ 字面量的 provider
   // 若被错误展开 → 鉴权失败；三例断言均与实装逐行核对（provider-credential-resolver.ts
-  // resolveTemplate 转义对 / 未闭合 ${ / ENV_VAR_NAME_RE 拒绝分支）。
+  // resolveTemplate 转义对 / `${` 缺结束花括号 / ENV_VAR_NAME_RE 拒绝分支）。
   it('转义对：$$ → 字面 $，$! → 字面 !（各只消费 $ 后 1 字符，! 前缀形态标记不受影响）', async () => {
     writeAuthFile({
       esc: { type: 'api_key', key: 'sk-$$-literal' },
@@ -320,7 +320,7 @@ describe('P-cred 探针：$ENV_VAR / command 配置值形态的解析行为', ()
     expect(await resolver.resolveProviderCredential('esc-bang')).toEqual({ key: '!cmd-rest', source: 'auth.json', kind: 'api_key' })
   })
 
-  it('未闭合 ${：$ 按字面输出 + 后续原样追加（不查 env、不判 undefined、不抛）', async () => {
+  it('`${` 缺结束花括号：$ 按字面输出 + 后续原样追加（不查 env、不判 undefined、不抛）', async () => {
     writeAuthFile({ unclosed: { type: 'api_key', key: '${UNCLOSED' } })
     const resolver = new ProviderCredentialResolver(makeDeps())
 

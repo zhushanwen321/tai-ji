@@ -11,7 +11,7 @@
          排除，各归 FormOverlay / PlanReviewBar 消费；inject 缺失时静默空态，provide 由
          useExtensionHostBridge dialog 适配接线） -->
     <CompanionBand :session-id="focusedSessionId" />
-    <!-- hasSession 守卫放行整个 new-task flow 活跃态（landing + 各 overlay）：
+    <!-- hasSession 检查放行整个 new-task flow 活跃态（landing + 各 overlay）：
          统一延迟 create 下 flow 活跃期间 activeId 恒 null，但 UI 须保持 Landing 挂载，
          否则用户点 chip 进 overlay 态会瞬间卸载 Landing 跳兜底页、系统目录选择器视觉丢失。
          Sparkles 空态仅作异常兜底（initApp 失败且 flow 未离开 idle 时）。 -->
@@ -56,7 +56,7 @@ const { formatKbd } = usePlatformShortcut()
 const flow = useNewTaskFlow()
 // Browser drawer view swap：切 session 时通知主进程切换可见 WebContentsView（Wave 4 per-session 隔离）
 useBrowserFocusSync()
-// ⌘W：编排器层级序逐层关容器（浮层→底抽屉→右抽屉），全关后关窗；让位守卫见
+// ⌘W：编排器层级序逐层关容器（浮层→底抽屉→右抽屉），全关后关窗；让位检查见
 // key-orchestrator（before-input-event 拦截转发，display-containers §7.5）
 useCloseShortcut()
 

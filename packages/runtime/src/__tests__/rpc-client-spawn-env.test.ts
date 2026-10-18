@@ -1,7 +1,7 @@
 /**
  * RpcClient 出站 env 契约回归锁定（U3，docs/architecture/env-propagation-boundary.md §5-U3）。
  *
- * B3（runtime→pi）是本案泄道收口点：私有 buildSafeEnv 被 buildOutboundChildEnv 取代后，
+ * B3（runtime→pi）是本案泄道封堵点：私有 buildSafeEnv 被 buildOutboundChildEnv 取代后，
  * 子进程 env 必须满足——deny 清单两键（TAIJI_AGENT_PACKAGED / TAIJI_RUNTIME_TOKEN）无论从
  * 哪条通路进来都不出现在 spawn 的 env 里；PATH/HOME 基座与必备注入键不受牵连；
  * options.env override 与 undefined 键的既有语义逐项保留。
@@ -130,7 +130,7 @@ describe('RpcClient 出站 env 契约（U3：deny 剥除 + 基座保全）', () 
     expect(env.TAIJI_AGENT_DATA_DIR).toBe('/mock/home/.taiji')
   })
 
-  it('T2: 非 deny 的白名单内产品变量仍放行（收口只剥 deny 清单，不做全量掐断）', async () => {
+  it('T2: 非 deny 的白名单内产品变量仍放行（收尾只剥 deny 清单，不做全量掐断）', async () => {
     vi.stubEnv('TAIJI_AGENT_DEBUG', '1')
 
     await startWith()

@@ -74,7 +74,7 @@ export function corruptPathFor(registryPath: string): string {
 
 /**
  * 读取 registry 全量条目 + 损坏标记（runtime 现形态为超集；extension 侧 Map 形态
- * 由各侧薄壳投影）。UI 读侧需要区分「真的空表」与「损坏被隔离的空表」。
+ * 由各侧薄壳派生）。UI 读侧需要区分「真的空表」与「损坏被隔离的空表」。
  *
  * 文件不存在 / 读失败 → 空表 + corrupted:false（常态/降级，非损坏）；解析失败 →
  * 重命名 .corrupt 保留现场 + onLog warn + 空表 + corrupted:true（「空表重建」由

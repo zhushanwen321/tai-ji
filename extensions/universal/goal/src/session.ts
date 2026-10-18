@@ -6,7 +6,7 @@
  * U6c：重建输入接活跃路径裁剪——被撤子树的 goal-state 不进重建态）。
  *
  * FR-6.4: 删除 hasPendingInjection（僵尸字段）
- * FR-6.7: 删除 pendingPause（ESC 改用 aborted 守卫）
+ * FR-6.7: 删除 pendingPause（ESC 改用 aborted 检查）
  * FR-8.1 G-006: session append-only——entry GC 不生效（生产），history 显示侧截断
  * FR-3: 崩溃后保持原状态（active 重启计时；paused/blocked 保持；终态保持）
  */
@@ -26,7 +26,7 @@ export interface GoalSession {
 	/**
 	 * W5 退避延迟发送的 continuation 定时器（无进展退避时 continuation 不立即发出，
 	 * 按间隔 ×2 递增延迟）。非 null 表示有一个待发的退避 continuation——调度前必须
-	 * 先清（防双发）。清理面（cancelContinuationTimer 统一入口）：clearGoalSession、
+	 * 先清（防双发）。清理侧（cancelContinuationTimer 统一入口）：clearGoalSession、
 	 * session_start（新 session 生命周期旧 timer 作废）、before_agent_start（新用户
 	 * 活动使旧退避作废）、下一轮 agent_end 调度前。
 	 */
@@ -71,7 +71,7 @@ export interface ActivePathSessionView {
 // ── reconstructGoalState（session_start / session_tree 时调）──────────
 
 /**
- * 从 session entries 恢复 goal state（U6c：重建输入 = 活跃路径投影，非全文件）。
+ * 从 session entries 恢复 goal state（U6c：重建输入 = 活跃路径派生视图，非全文件）。
  *
  * Pi SDK 的 session 是 append-only，getEntries() 返回 filter-copy——splice
  * 无法修改真实 entries。Entry GC（goal-state 留 1、goal-history 留 20）在生产
@@ -127,7 +127,7 @@ function isGoalStateEntry(entry: SessionEntryLike): boolean {
 // ── clearGoalSession ──────────────────────────────────
 
 /**
- * 取消待发的退避 continuation timer（全部清理点走本函数，防止清理面遗漏）：
+ * 取消待发的退避 continuation timer（全部清理点走本函数，防止清理侧遗漏）：
  * - clearGoalSession：goal 已终态/清除，发出即僵尸 turn
  * - session_start：session 句柄跨 session 复用，新 session 生命周期旧 timer 作废
  * - before_agent_start：新用户活动使旧退避作废，该轮 agent_end 按最新状态重新决策
@@ -145,7 +145,7 @@ export function clearGoalSession(session: GoalSession, uiPort: UiPort): void {
 	cancelContinuationTimer(session);
 	session.state = null;
 	session.isProcessing = false;
-	// FR-6.6: hasUI 守卫
+	// FR-6.6: hasUI 检查
 	if (uiPort.hasUI) {
 		uiPort.setWidget("goal", undefined);
 		uiPort.setStatus("goal", undefined);

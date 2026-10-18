@@ -29,9 +29,9 @@ Session 的视口。每个 Panel 最多绑定一个 Session，每个 Session 同
 用户从「无活跃会话」进入「准备开聊」的业务动作。终点是 session 发出第一条消息。用户流程 5 步：落地空态 → 选目录 popover → 选分支 popover → 系统原生目录选择器 → 创建分支 modal；对应状态机 8 态（`idle/landing/dir-popover/branch-popover/dir-dialog/branch-modal/completed/cancelled`，`useNewTaskFlow.ts`）。**directory / branch** 是 session 的元信息，非任务本体，显示为 composer 顶部 chip，可随时改。
 
 ### 模式（Mode）
-**启动预设（launch preset）的用户可见名**：一组 pi 启动参数（工具面 + 扩展面 + 提示词面）的命名集合，用户可创建/编辑/删除，内置四项（全工具 / Orchestrator / 只读 / 调度）。**代码与协议保留 `preset` 标识**（RPC `preset.*`、类型 `PiLaunchPreset`、**会话绑定字段 `SessionSummary.launchPresetId`**、sidecar `<sessionFile>.preset.json`）——改名只落在用户可见文案层（设置页菜单、landing chip、命令面板、chip tooltip）。
+**启动预设（launch preset）的用户可见名**：一组 pi 启动参数（工具范围 + 扩展范围 + 提示词面）的命名集合，用户可创建/编辑/删除，内置四项（全工具 / Orchestrator / 只读 / 调度）。**代码与协议保留 `preset` 标识**（RPC `preset.*`、类型 `PiLaunchPreset`、**会话绑定字段 `SessionSummary.launchPresetId`**、sidecar `<sessionFile>.preset.json`）——改名只落在用户可见文案层（设置页菜单、landing chip、命令面板、chip tooltip）。
 
-**锁定语义 = 锁模式 id，不锁模式定义**：模式 id 在会话创建时确定、生命周期内不可更换（无任何 UI 路径可切）；模式定义（提示词文本 / 工具面 / 扩展面）以设置页为唯一可信源（活定义），用户编辑后该模式的全部会话（含已建）在**下次进程启动**（restore / fork / respawn）采用新定义。会话 = 对模式 id 的引用，不是创建时快照。
+**锁定语义 = 锁模式 id，不锁模式定义**：模式 id 在会话创建时确定、生命周期内不可更换（无任何 UI 路径可切）；模式定义（提示词文本 / 工具范围 / 扩展范围）以设置页为唯一可信源（活定义），用户编辑后该模式的全部会话（含已建）在**下次进程启动**（restore / fork / respawn）采用新定义。会话 = 对模式 id 的引用，不是创建时快照。
 
 **可见性**：landing 首行第三 chip（可选，三档退化：模式名 → 短名 → 纯图标）+ 对话态 `#meta-row` 只读 chip（**仅非默认模式渲染**，判据 `launchPresetId !== (defaultPresetId || 'builtin:full')`——**用 `||` 不用 `??`**：store 未加载时 `defaultPresetId === ''`，`??` 会让空串穿透，把任意会话误判为非默认）+ 非默认模式在消息流顶部一条派生**模式声明行**（零新 entry 类型，不进 transcript、不进 LLM 上下文）。
 
@@ -39,21 +39,21 @@ Session 的视口。每个 Panel 最多绑定一个 Session，每个 Session 同
 模式的可选提示词面（`PiLaunchPreset.prompt`）：`replace` 段顶掉 pi 核心系统提示词、`append` 段追加在 pi 基础之后，两段各自启用；**单段与两段合计均 ≤ 16000 字符**。校验双语义：写路（保存 / 导入）整条拒绝、读路（磁盘加载）段级折叠（超限优先丢 `append`）。注入通道 = pi 原生两条 argv（`--system-prompt` / `--append-system-prompt`），**不新增 env、扩展零改动**；替换优先级 = **模式 > 全局 > pi 默认**。链序与 `\n` 前缀构造性区分（防 pi 把文案当文件路径）见 [pi-launch-presets.md §2.6](architecture/pi-launch-presets.md)。
 
 ### 调度模式（Session Dispatch Mode）
-内置模式 `builtin:session-dispatch`（显示序第 4）：主 agent 只做拆解与派发、执行由独立会话完成。工具面 = `allowlist`（`read/grep/find/ls` + 六个 session 管理工具 + `ask_user/todo`），扩展面 = `denylist` 屏蔽 `@zhushanwen/pi-subagent-workflow`（派发不经 subagent，直接开会话），提示词面 = 预置可编辑 `append` 纪律文案。子会话经 `create_managed_session` 创建，**服务端继承父会话 projectId**（不新增工具参数），在侧栏命名 project 视图与父会话同屏。
+内置模式 `builtin:session-dispatch`（显示序第 4）：主 agent 只做拆解与派发、执行由独立会话完成。工具范围 = `allowlist`（`read/grep/find/ls` + 六个 session 管理工具 + `ask_user/todo`），扩展范围 = `denylist` 屏蔽 `@zhushanwen/pi-subagent-workflow`（派发不经 subagent，直接开会话），提示词面 = 预置可编辑 `append` 纪律文案。子会话经 `create_managed_session` 创建，**服务端继承父会话 projectId**（不新增工具参数），在侧栏命名 project 视图与父会话同屏。
 
 ### 通知债权（claim / lifetime / notifyId）
 
-managed session 完成通知的判据模型（[ADR-0087](adr/decisions.md)）：一笔债权 = 主 session 一次「等待子会话结果」的请求，携带唯一 `notifyId`（幂等键，`sm-` 前缀形态）；请求被消费的轮次结束时销账并经 B-ledger 通知一次，无债权的完成一律静默。两种记录：**claim**（随单笔请求生灭——create+prompt / send 成功产生，settle 兑现 / exit·deleted 终结 / 主 abort 抹除）与 **lifetime**（随 session 生灭——create 时 runtime 自动 arm，非 respawn 链终局死亡时发声，携带 runtime 生成的 `lifetimeNotifyId`，与 claim 键独立杜绝撞幂等键）。claim 状态机 = `armed → injected → fulfilled → 删除`，吸收/终态 `orphaned` / `aborted`；唯一键 `(parentSessionId, notifyId)`，重复 arm 拒绝。**不变量**：债权只在 session-manager 通道产生与消灭，UI 续聊/插话、scheduler、孙会话回流一律不触碰（「插话仍通知」「只通知第一次」均由不变量推导，无需特判 flag）。
+managed session 完成通知的判据模型（[ADR-0087](adr/decisions.md)）：一笔债权 = 主 session 一次「等待子会话结果」的请求，携带唯一 `notifyId`（幂等键，`sm-` 前缀形态）；请求被消费的轮次结束时关闭债权并经 B-ledger 通知一次，无债权的完成一律静默。两种记录：**claim**（随单笔请求生灭——create+prompt / send 成功产生，settle 兑现 / exit·deleted 终结 / 主 abort 抹除）与 **lifetime**（随 session 生灭——create 时 runtime 自动 arm，非 respawn 链终局死亡时发声，携带 runtime 生成的 `lifetimeNotifyId`，与 claim 键独立杜绝撞幂等键）。claim 状态机 = `armed → injected → fulfilled → 删除`，吸收/终态 `orphaned` / `aborted`；唯一键 `(parentSessionId, notifyId)`，重复 arm 拒绝。**不变量**：债权只在 session-manager 通道产生与消灭，UI 续聊/插话、scheduler、孙会话回流一律不触碰（「插话仍通知」「只通知第一次」均由不变量推导，无需特判 flag）。
 
 **代码映射**: `packages/runtime/src/services/session/notify-claims.ts`（ClaimLedger 纯状态机）。
 
 ### watch 桥
 
-session-manager extension 与 taiji runtime 之间的长挂应答事件通道（[ADR-0087](adr/decisions.md)）：extension 以 `{action:'watch', params:{notifyId}}` **单键寻址** fire-and-forget 挂起 select（不传 timeout，前提 = marker select 长挂语义探针实测），runtime 按（调用方 parentSid, notifyId）反查 claim 后 deferred respond——查无 fail-closed 立即 'cancelled'、已兑现 catch-up 快照、未兑现挂等、已终结回终结 reason；每 claim 单 watch 槽新覆盖旧（被覆盖的旧 watch 悬置为已知无害）。respond payload 回带 `sessionId` + `deathSeq`/`settleSeq`/`fulfills N`/`exitCode`/`stderrTail`/`sessionFilePath`，extension 据此 unregister + `notifyLedger.record`（两例外：cancelled·orphaned 静默、死亡新闻槽 (sessionId, deathSeq) 去重）。它把「生命周期观测者在 runtime、注册者在父 pi 进程内」的跨进程缝桥起来，是 managed session 并入 pending-notifications 注册面与 notify-ledger 送达面的唯一事件通路。与 [Marker RPC](#marker-rpcselectmarker-通道原语2026-09-14) 的区别 = 挂起等待状态迁移，而非即问即答。
+session-manager extension 与 taiji runtime 之间的长挂应答事件通道（[ADR-0087](adr/decisions.md)）：extension 以 `{action:'watch', params:{notifyId}}` **单键寻址** fire-and-forget 挂起 select（不传 timeout，前提 = marker select 长挂语义探针实测），runtime 按（调用方 parentSid, notifyId）反查 claim 后 deferred respond——查无 fail-closed 立即 'cancelled'、已兑现 catch-up 快照、未兑现挂等、已终结回终结 reason；每 claim 单 watch 槽新覆盖旧（被覆盖的旧 watch 悬置为已知无害）。respond payload 回带 `sessionId` + `deathSeq`/`settleSeq`/`fulfills N`/`exitCode`/`stderrTail`/`sessionFilePath`，extension 据此 unregister + `recordManagedNotify` → `port.deliver`（id=notifyId，managed-session-notify 外部通道逐条；两例外：cancelled·orphaned 静默、死亡新闻槽 (sessionId, deathSeq) 去重）。它把「生命周期观测者在 runtime、注册者在父 pi 进程内」的跨进程缝桥起来，是 managed session 并入 pending-notifications 注册范围与 delivery-port 送达面的唯一事件通路（投递通道形态见 [统一投递](#统一投递unified-delivery-v3)）。与 [Marker RPC](#marker-rpcselectmarker-通道原语2026-09-14) 的区别 = 挂起等待状态迁移，而非即问即答。
 
 ### pending type 'session'
 
-`pending_notifications` 查询面的注册类型之一：managed session 债权在挂期间以三键 `{id: notifyId, type: 'session', name}` 注册（P4 既有 emit 契约零改动；lifetime 同类——每子会话 1 条 register，随终局死亡 unregister，写入面每 session 共 2 行 entry）。词表真身 = `extensions/universal/pending-notifications/src/state.ts`（`PendingType` 扩值 + `normalizePendingType` 放行，否则写侧归一成 'workflow' 展示错标）；`reconcile-sweep` 按 raw type 分流时对 `session` 跳过（不入 workflow run-state 判据，防误销活跃 claim）；注销 reason 经 `mapReasonToStatus` 族映射（stopped→aborted、exited/deleted/orphaned→cancelled），**不扩共享词表**——精确状态由通知正文与 `get_session_status` 承载。消费方 `countActiveFromEntries()` 不传 type 过滤，managed session 计入活跃集 = 有意为之（goal continuation 守卫在子会话未收口时不误判「已干完」）。
+`pending_notifications` 查询范围的注册类型之一：managed session 债权在挂期间以三键 `{id: notifyId, type: 'session', name}` 注册（P4 既有 emit 契约零改动；lifetime 同类——每子会话 1 条 register，随终局死亡 unregister，写侧每 session 共 2 行 entry）。词表真身 = `extensions/universal/pending-notifications/src/state.ts`（`PendingType` 扩值 + `normalizePendingType` 放行，否则写侧归一成 'workflow' 展示错标）；`reconcile-sweep` 按 raw type 分流时对 `session` 跳过（不入 workflow run-state 判据，防误销活跃 claim）；注销 reason 经 `mapReasonToStatus` 族映射（stopped→aborted、exited/deleted/orphaned→cancelled），**不扩共享词表**——精确状态由通知正文与 `get_session_status` 承载。消费方 `countActiveFromEntries()` 不传 type 过滤，managed session 计入活跃集 = 有意为之（goal continuation 检查在子会话未收尾时不误判「已干完」）。
 
 **代码映射**: `extensions/universal/pending-notifications/src/state.ts`（词表）；`packages/extension-protocol/src/pending-entries.ts`（族映射）；`packages/subagent-core/src/execution/round-supervisor/reconcile-sweep.ts`（skip 分支）。
 
@@ -65,11 +65,11 @@ session-manager extension 与 taiji runtime 之间的长挂应答事件通道（
 ### 导入源（Import Source）
 session 导入统一入口的多 coding-agent 抽象：一个导入源负责「定位外部会话 → 校验 → 转换为合法 pi session JSONL」，实现 runtime 的 SessionImportSource SPI（`listCandidates` + `prepareImport`）；公共编排（互斥/去重/原子落盘/sidecar）由 ImportService 统一承担，导入完成广播由 handler 层在 reply 后发出。现役源：pi（外部 pi JSONL 原样复制）、zcode（宿主 SQLite 库转换）。导入产物落太极 sessions 目录后完全复用现有会话消费链（渲染/续聊/搜索），导入后续聊由 pi 引擎接管。**幂等键 = 产物 header.id**；**文件名不变量**：文件名剥 `.jsonl` 后最后 `_` 尾段 === header.id（源 id 含 `_` 须归一化）。扩展指南（新增源的步骤清单与不变量全集）：[docs/architecture/session-import-sources.md](architecture/session-import-sources.md)。
 
-### 消息投影（Message Projection）
-源 coding-agent 对单条消息「给谁看」的裁决，与 `role` 是**两个正交维度**：`role` 只表达角色（user/assistant），不表达这条消息是真人输入还是运行时注入。zcode 用四字段（`semantics` / `visibility` / `source` / `synthetic`）联合判定出六种投影策略（`realUserInput` / `visibleAssistant` / `compactSummary` / `providerContextOnly` / `hiddenSynthetic` / `timelineOnly`），导入转换器按策略映射到 pi entry 类型。**教训**：只按 `role` 分派会让源系统的合成消息（提醒/通知/引用回放）冒充用户消息——zcode 全库 user 消息 67% 是合成。完整判据与闭集枚举：[session-import-sources.md §6.1](architecture/session-import-sources.md)。
+### 消息派生视图（Message Projection）
+源 coding-agent 对单条消息「给谁看」的裁决，与 `role` 是**两个正交维度**：`role` 只表达角色（user/assistant），不表达这条消息是真人输入还是运行时注入。zcode 用四字段（`semantics` / `visibility` / `source` / `synthetic`）联合判定出六种派生视图策略（`realUserInput` / `visibleAssistant` / `compactSummary` / `providerContextOnly` / `hiddenSynthetic` / `timelineOnly`），导入转换器按策略映射到 pi entry 类型。**教训**：只按 `role` 分派会让源系统的合成消息（提醒/通知/引用回放）冒充用户消息——zcode 全库 user 消息 67% 是合成。完整判据与闭集枚举：[session-import-sources.md §6.1](architecture/session-import-sources.md)。
 
 ### 消息撤回（Message Revoke）
-撤回 = 把一条已发出的 user 消息（连同其引发的回复与派生）从模型上下文移出，原文回草稿。机制 = pi `navigateTree` **树内回退**（被撤内容移出活跃路径，非删除——session 文件保留完整历史），LabelEntry（label `taiji:revoked`）落文件尾 = 持久化锚（重启/空闲回收后回退不复活）。**派生面口径二分准则**：未来状态随树回退（plan/todo/goal/scheduler/模型绑定——经 session_tree 重建或失效信号重建），已发生事实照实保留（subagent/workflow run 记录、usage 消耗）。撤回 ≠ 抹除：tee 日志、provider 侧已收请求、工具副作用均如实保留，UI 按此表述。机制裁决与重审触发：[decisions.md ADR-0076](adr/decisions.md)。
+撤回 = 把一条已发出的 user 消息（连同其引发的回复与派生）从模型上下文移出，原文回草稿。机制 = pi `navigateTree` **树内回退**（被撤内容移出活跃路径，非删除——session 文件保留完整历史），LabelEntry（label `taiji:revoked`）落文件尾 = 持久化锚（重启/空闲回收后回退不复活）。**派生侧口径二分准则**：未来状态随树回退（plan/todo/goal/scheduler/模型绑定——经 session_tree 重建或失效信号重建），已发生事实照实保留（subagent/workflow run 记录、usage 消耗）。撤回 ≠ 抹除：tee 日志、provider 侧已收请求、工具副作用均如实保留，UI 按此表述。机制裁决与重审触发：[decisions.md ADR-0076](adr/decisions.md)。
 
 ### 会话读取基座（session-core / zcode-session-source）
 session「发现 → 读取 → 归一化 → 序列化」的零依赖共享实现，两层：`packages/session-core/`（canonical 原语——`NormalizedSession` 归一化模型 `{header, entries, degradations}`、JSONL parse/serialize、首行读取、session/zcode sa-id 工具）与 `packages/zcode-session-source/`（zcode 宿主 SQLite 库只读访问层——sqlite 驱动双形态适配、**四级恢复阶梯**（L1 直开 → L2 immutable 逃逸 → L3 快照 → L4 SqliteUnreadableError）、transcript 转换）。两个消费方：session-reader 扩展（通知链 `session_read` 的 zcode 读链）与 runtime zcode 导入源——同一套实现，禁止各自复制副本。`degradations` 承载无法保真的内容（显式登记，禁止伪造）；sa-id → zcode 会话的路由经 manifest/entry 锚双键（`engine: 'zcode'` + sessionRef）判别，db 路径白名单闸放行。
@@ -83,7 +83,7 @@ taiji 的后端服务进程（Node.js）。职责：托管 pi 子进程的生命
 
 ```
 Agent Runtime（一个 Node.js 进程）
-├── transport/   WS 消息面：server.ts 入口 + 按域拆分的 message handler
+├── transport/   WS 消息侧：server.ts 入口 + 按域拆分的 message handler
 │                （session/config/extension/plugin/git/file/terminal/... 各一）
 │                + message-broker（统一广播）。只做连接管理与消息路由，不含业务逻辑。
 ├── services/    业务服务：session/（生命周期、历史、compaction、restore、fork）、
@@ -114,6 +114,13 @@ Agent Runtime（一个 Node.js 进程）
 
 **依赖方向**: Transport → Service → ports → infra。Service 经 `services/ports/` 定义的 port 接口消费 pi 能力（`IPiEngine` / `IProcessManager` 由 `infra/pi/rpc-client.ts` + `process-manager.ts` 实现，收敛于 D24），不直接碰 pi 协议；Transport 不包含业务逻辑。
 
+### IPC 通道名 SSOT（ipc-channels.ts）
+
+preload 与 main 两侧全部 Electron IPC 通道名的唯一常量登记处（`packages/shared/src/ipc-channels.ts`，payload 类型伴生 `ipc-payloads.ts`）；renderer 经 preload `electronAPI` 方法面间接消费，不持通道名。_Avoid_：通道名内联字面量 / preload 本地副本。
+
+### 原子写助手（atomicWriteJsonFile）
+
+main 侧 JSON 落盘的单一实现（`apps/electron/main/utils/atomic-write-json.ts`：同目录 tmp（pid+seq 命名）+ rename + 失败清理 + 可选 fsync/mode 档），各 JSON 写方 import 使用，禁止保留本地副本。_Avoid_：手搓 tmp+rename / 裸 writeFileSync 直写主文件。
 
 ### 语义吸收层（pi-boundary-reliability，2026-08-28）
 
@@ -163,7 +170,7 @@ subagent 跨 run 续聊时定位既有会话的凭据（引擎中立形态 `Resu
 ### Execution Record
 
 
-subagent 运行状态的内存单源（`packages/subagent-core/src/execution/persistence/execution-record.ts` + `record-store.ts`）：事实源 = record 事件文件（W1 介质归位，[ADR-0094](adr/decisions.md)），恢复 = v2 注册条目定界 + 事件文件 fold（v1 全量快照兼容层已整体删除，2026-09-30）；状态词表三维正交（见下文 [run/record 状态词表](#runrecord-状态词表w2-收敛adr-0080)），对外投影两态（`active` / `idle`，ended 随终态概念删除），轮终收条由 `record-settled` / `record-round-idle` 事件帧承载（事件流是唯一事实源），manifest 为物化投影。
+subagent 运行状态的内存单源（`packages/subagent-core/src/execution/persistence/execution-record.ts` + `record-store.ts`）：事实源 = record 事件文件（W1 介质归位，[ADR-0094](adr/decisions.md)），恢复 = v2 注册条目定界 + 事件文件 fold（v1 全量快照兼容层已整体删除，2026-09-30）；状态词表三维正交（见下文 [run/record 状态词表](#runrecord-状态词表w2-收敛adr-0080)），对外呈现两态（`active` / `idle`，ended 随终态概念删除），轮终收条由 `record-settled` / `record-round-idle` 事件帧承载（事件流是唯一事实源），manifest 为物化派生视图。
 
 
 ### Subagent 流式通道（subagent.stream_chunk / session.getSubagentStreamState）
@@ -172,7 +179,7 @@ subagent 运行状态的内存单源（`packages/subagent-core/src/execution/per
 
 - **subagent.stream_chunk 消息型**：唯一的内容推送通道。runtime 对子代理的每个文本增量发一条 `{ sessionId, recordId, msgSeq, deltaSeq, delta }`，`delta` 是真增量片段（非累积全文）。transient 主题（不分配 seq、不入 ring、不写快照，断连即丢、无回放），推送允许丢失，正确性由拉取收敛兜底。
 - **msgSeq / deltaSeq 双序号**：`msgSeq` = per-record assistant 消息序号，表达消息边界（产生端从 1 开始——首条 assistant 消息 = 1，message_start 递进；消费端状态机初始 0）；`deltaSeq` = per-message 从 0 递增。消费端按双序号拼合：边界推进（msgSeq 前向变化）开新消息并重置 deltaSeq 期望值；msgSeq 回退（陈旧 chunk）丢弃不推进；序号连续即追加；跳号即失步。
-- **session.getSubagentStreamState RPC**：拉取某 record 当前流状态的只读快照（`SubagentTee` 既有内存状态的投影，不新增保留状态）。入参 `{ sessionId, recordId }`；出参 `{ found, msgSeq, lastDeltaSeq, lines, degraded? }`。`found: false` = 该 record 无进行中流（未开始或已定稿，合法回执非错误）；`found: true` 时 `lines` = 当前消息累积全文（消费端复用现有全量替换入口），`lastDeltaSeq` = 这份全文包含到第几条 delta；`degraded: true`（additive，缺省不出现）= raw mirror 出现 seq 空洞/丢弃，live 视图已停止更新、reload 不受影响。失败走统一 error envelope，无独立错误码词表。
+- **session.getSubagentStreamState RPC**：拉取某 record 当前流状态的只读快照（`SubagentTee` 既有内存状态的派生视图，不新增保留状态）。入参 `{ sessionId, recordId }`；出参 `{ found, msgSeq, lastDeltaSeq, lines, degraded? }`。`found: false` = 该 record 无进行中流（未开始或已定稿，合法回执非错误）；`found: true` 时 `lines` = 当前消息累积全文（消费端复用现有全量替换入口），`lastDeltaSeq` = 这份全文包含到第几条 delta；`degraded: true`（additive，缺省不出现）= raw mirror 出现 seq 空洞/丢弃，live 视图已停止更新、reload 不受影响。失败走统一 error envelope，无独立错误码词表。
 - **水位（watermark，记录已处理到哪的位置标记）**：`lastDeltaSeq` 在消费端的用法——拉取响应携带的 `lastDeltaSeq` 标记这份全文覆盖到哪条 delta，`<= 水位` 的在途/缓冲 chunk 丢弃，`> 水位` 的按序回放；跨通道（RPC 应答 × 广播）拼接正确性靠水位 + 缓冲回放保证。
 - **sealedMsgSeq**：消费端状态机的定稿水位——已定稿到的最高消息序号，单调推进、从不重置（清除消息按其携带的 msgSeq 置位）。用于丢弃「定稿后同消息序号的晚到拉取响应」，防止已定稿消息被复活。
 
@@ -218,7 +225,7 @@ raw mirror 的显式降级标注（additive）：写侧 seq 按 `recordId` 进�
 
 ### 模型覆盖（modelOverride）
 
-用户对执行中/已中断的 subagent 或 workflow run 实时下达的模型意图，作用域 = 该会话/run 的剩余执行（含中断后 resume 与进程重启后重开），优先级最高（用户覆盖赢，压过 agent frontmatter 与脚本显式参数）。载体 = record 事件文件 `record-model-override` 帧（chat 域）/ run journal `model-override` 帧（workflow 域），fold 取最新、替换不叠加（至多一个生效覆盖值）。配套术语：**生效模型** = pi 子进程当前实际使用的模型（审计权威 = pi session `model_change` 条目，热切后可与本轮盖章值不同）；**覆盖记账** = 覆盖意图的持久化半场（管未派发步骤/resume/重开），与**热切**半场（管在跑成员立即生效）构成同一意图的两半——只热切不记账会被下一轮 spawn 的旧 `--model` argv 压回。resume 生效模型三档回落：resume 显式参数 > 持久化覆盖记录 > run 创建时模型。**模型意图 / 历史事实（持久化二分）**：切换只写「意图」类载体（override 帧），永不修改「历史事实」类持久化（record.model 盖章、run-created.model、pi session model_change 条目）。机制 SSOT：[ADR-0129](adr/decisions.md)；用户通道 = 面板模型选择器 / `/subagent-model` 命令（runtime 经 prompt 斜杠命令出站点触达 pi extension，守卫 `.githooks/check_prompt_outposts.py` 白名单）。
+用户对执行中/已中断的 subagent 或 workflow run 实时下达的模型意图，作用域 = 该会话/run 的剩余执行（含中断后 resume 与进程重启后重开），优先级最高（用户覆盖赢，压过 agent frontmatter 与脚本显式参数）。载体 = record 事件文件 `record-model-override` 帧（chat 域）/ run journal `model-override` 帧（workflow 域），fold 取最新、替换不叠加（至多一个生效覆盖值）。配套术语：**生效模型** = pi 子进程当前实际使用的模型（审计权威 = pi session `model_change` 条目，热切后可与本轮盖章值不同）；**覆盖记账** = 覆盖意图的持久化半场（管未派发步骤/resume/重开），与**热切**半场（管在跑成员立即生效）构成同一意图的两半——只热切不记账会被下一轮 spawn 的旧 `--model` argv 压回。resume 生效模型三档回落：resume 显式参数 > 持久化覆盖记录 > run 创建时模型。**模型意图 / 历史事实（持久化二分）**：切换只写「意图」类载体（override 帧），永不修改「历史事实」类持久化（record.model 盖章、run-created.model、pi session model_change 条目）。机制 SSOT：[ADR-0129](adr/decisions.md)；用户通道 = 面板模型选择器 / `/subagent-model` 命令（runtime 经 prompt 斜杠命令出站点触达 pi extension，检查 `.githooks/check_prompt_outposts.py` 白名单）。
 
 ### ToolCall
 
@@ -294,7 +301,7 @@ ask-user / scheduler / plan 三个 extension 提问交互的统一协议：问�
 - **turn 预期声明 `expectTurn`**（2026-09-22，ADR-0073）：opts 可选布尔，扩展作者声明「表单提交后是否有 turn 跟随」——缺省 true（桥接 message_start 照旧，存量全兼容）；显式 `false`（command handler 内 select 的源，如 scheduler /schedule）经 event-adapter 条件落键（仅显式 false 落帧）→ respond 严格双条件 `result≠null && expectTurn===false` 即时清 pendingSend（真机 91ms/48ms 两轮实测），不再命中 30s 兜底。
 - **版本偏斜窗口**：旧 ask-user 帧（`askUser` + `askUserQuestions`）/ 旧 scheduler 帧（`scheduleCreate` + `scheduleDraft`）由 runtime event-adapter 的 ASK_USER / SCHEDULE_CREATE marker 分支直接归一为 `form: true` 统一表单帧（askUser 源含 type 推断映射，renderer 只消费 view-ready 帧）。退役窗口终局（新 marker 版三包 npm 发布 + 一个大版本后独立 PR）：event-adapter 的 ASK_USER / SCHEDULE_CREATE legacy 分支、两旧 marker 常量、payload 旧字段（shared/core wire 类型同批）、ask-user channel 旧名注册（`ask_user`）一并清理。
 
-**代码映射**: `packages/extension-protocol/src/extensions/ui-form/`（types/marker/helpers/guards）；消费方 `extensions/universal/{ask-user, scheduler, plan}/src/`；渲染面 `packages/renderer/src/components/extension/form/`。
+**代码映射**: `packages/extension-protocol/src/extensions/ui-form/`（types/marker/helpers/guards）；消费方 `extensions/universal/{ask-user, scheduler, plan}/src/`；渲染范围 `packages/renderer/src/components/extension/form/`。
 
 ### form 通道
 
@@ -315,34 +322,34 @@ pi-plan extension 提供的只读规划态：用户输入 `/plan <需求> [--ski
 ### plan-state entry
 
 
-计划模式在 session JSONL 中的持久化状态条目（customType 字面量 `"plan-state"`，session 内取最后一条为当前态）。字段 = 现状四字段 `isActive` / `planFilePath` / `requirement` / `templateName` + 旧 entry 可缺省字段 `templateProvidedPath`（`--template` 直传标记：直传进入时为展开后模板绝对路径，select-template 防御判据；模板流程缺失）/ `skills`（挂载技能名）/ `docs`（产物清单 `PlanDocMeta[]`：fileName + absPath + sourceSkill + version）/ `state`（生命周期八值，D1/D2 取代式——每次转移落盘，见词条「计划生命周期状态机」）/ `selfReview`（上次 submit-review 的自审结论，≤4KB 写侧截断：E3 重挂回传源 + 防照抄比较基线，见词条「selfReview（自审结论）」）/ `resumeHint`（降级等待原因 `resubmit`：会话重启待重提交，仅描述当前降级等待、submit-review 重挂起点清空，不跨轮残留）/ `lastSubmitReviewDocsFingerprint`（submit-review 重提交指纹快照）。旧键 `reviewState` / `reviewStateSource` **已停写**（取代式演进），仅作重建映射输入（reviewState：awaiting→reviewing / revising→revising / 无→planning|idle 按 isActive；reviewStateSource:'resubmit'→resumeHint:'resubmit'）。旧 entry（无新字段）逐字段降级读 + 映射读。runtime 投影链按同字面量派生扫描，前端消费与冷启动首拉共用同一份派生代码。
+计划模式在 session JSONL 中的持久化状态条目（customType 字面量 `"plan-state"`，session 内取最后一条为当前态）。字段 = 现状四字段 `isActive` / `planFilePath` / `requirement` / `templateName` + 旧 entry 可缺省字段 `templateProvidedPath`（`--template` 直传标记：直传进入时为展开后模板绝对路径，select-template 防御判据；模板流程缺失）/ `skills`（挂载技能名）/ `docs`（产物清单 `PlanDocMeta[]`：fileName + absPath + sourceSkill + version）/ `state`（生命周期八值，D1/D2 取代式——每次转移落盘，见词条「计划生命周期状态机」）/ `selfReview`（上次 submit-review 的自审结论，≤4KB 写侧截断：E3 重挂回传源 + 防照抄比较基线，见词条「selfReview（自审结论）」）/ `resumeHint`（降级等待原因 `resubmit`：会话重启待重提交，仅描述当前降级等待、submit-review 重挂起点清空，不跨轮残留）/ `lastSubmitReviewDocsFingerprint`（submit-review 重提交指纹快照）。旧键 `reviewState` / `reviewStateSource` **已停写**（取代式演进），仅作重建映射输入（reviewState：awaiting→reviewing / revising→revising / 无→planning|idle 按 isActive；reviewStateSource:'resubmit'→resumeHint:'resubmit'）。旧 entry（无新字段）逐字段降级读 + 映射读。runtime 派生视图链按同字面量派生扫描，前端消费与冷启动首次拉取共用同一份派生代码。
 
 
 **代码映射**: `extensions/universal/plan/src/state.ts`（schema + 重建/落盘唯一入口）；`packages/extension-protocol/src/core/types.ts` 的 `PlanDocMeta`（产物元数据契约）。
 
 ### 计划生命周期状态机（Plan Lifecycle State Machine）
 
-plan 模式流程的单一显式状态契约（状态散落三处 → 任意两者漂移即产「僵尸/谎言」UI 的根因修复）。8 存储态 `idle / planning / reviewing / revising / approved / dispatching / completed / exited`（`idle` = 无 plan 缺省；终态两值 `completed`（批准并派发执行）/ `exited`（主动退出）共享全部终态规则，仅留诊断/审计区分）+ `transition(state, event)` 纯函数转移表（守卫集中一处；非法转移返回 `{ ok: false }` 由调用方降级，不 throw 炸 turn；副作用不进返回值）+ `derivePhase` 呈现映射（8 存储态 → 5 呈现相位：规划中 = planning|revising / 待审批 = reviewing / 已批准 = approved|dispatching / 终态 = completed|exited 同映 / 无 plan = idle——用户口述四主态是呈现层，不是存储）。状态写全走转移函数；挂起事实唯一权威 = runtime pending 注册表，entry 不镜像挂起。
+plan 模式流程的单一显式状态契约（状态散落三处 → 任意两者漂移即产「僵尸/谎言」UI 的根因修复）。8 存储态 `idle / planning / reviewing / revising / approved / dispatching / completed / exited`（`idle` = 无 plan 缺省；终态两值 `completed`（批准并派发执行）/ `exited`（主动退出）共享全部终态规则，仅留诊断/审计区分）+ `transition(state, event)` 纯函数转移表（校验集中一处；非法转移返回 `{ ok: false }` 由调用方降级，不 throw 炸 turn；副作用不进返回值）+ `derivePhase` 呈现映射（8 存储态 → 5 呈现相位：规划中 = planning|revising / 待审批 = reviewing / 已批准 = approved|dispatching / 终态 = completed|exited 同映 / 无 plan = idle——用户口述四主态是呈现层，不是存储）。状态写全走转移函数；挂起事实唯一权威 = runtime pending 注册表，entry 不镜像挂起。
 
-**代码映射**: `packages/extension-protocol/src/extensions/plan/state-machine.ts`（契约 SSOT，全边表 19 合法边 / 53 非法格）；消费面清单与勾销锚 = 同目录 `consumers.md`。
+**代码映射**: `packages/extension-protocol/src/extensions/plan/state-machine.ts`（契约 SSOT，全边表 19 合法边 / 53 非法格）；消费方清单与勾销锚 = 同目录 `consumers.md`。
 
 ### plan 状态机事件（Plan Lifecycle Event）
 
-状态机边的名字（9 值闭集）：`enter`（进入/新一轮，idle|终态 → planning）/ `submit`（submit-review 重挂，planning|revising → reviewing）/ `revise`（用户评论修订，reviewing → revising）/ `dismiss`（用户搁置——非破坏协议级决策，reviewing → planning，被搁置的审批不复活）/ `review_aborted`（挂起期外部解散，如 turn abort：reviewing → planning；dispatching → approved，批准事实保留不倒退）/ `approve`（确认执行意向——reviewing|approved → dispatching 进入执行方式选择；含「批准后重调 complete 重新选执行方式」，事件命名裁决见 state-machine.ts 模块头）/ `exec_chosen`（选定执行方式并派发，dispatching → completed）/ `later`（用户显式「暂不执行」，dispatching → approved，不是解散不进解散文案桶）/ `exit`（退出 plan 模式，任何非终态 → exited）。归口点按 `via: 'later' | 'dissolved'` 判别选择 `later` / `review_aborted` 边，不从 result/details 反推。
+状态机边的名字（9 值闭集）：`enter`（进入/新一轮，idle|终态 → planning）/ `submit`（submit-review 重挂，planning|revising → reviewing）/ `revise`（用户评论修订，reviewing → revising）/ `dismiss`（用户搁置——非破坏协议级决策，reviewing → planning，被搁置的审批不复活）/ `review_aborted`（挂起期外部解散，如 turn abort：reviewing → planning；dispatching → approved，批准事实保留不倒退）/ `approve`（确认执行意向——reviewing|approved → dispatching 进入执行方式选择；含「批准后重调 complete 重新选执行方式」，事件命名裁决见 state-machine.ts 模块头）/ `exec_chosen`（选定执行方式并派发，dispatching → completed）/ `later`（用户显式「暂不执行」，dispatching → approved，不是解散不进解散文案桶）/ `exit`（退出 plan 模式，任何非终态 → exited）。统一判定入口按 `via: 'later' | 'dissolved'` 判别选择 `later` / `review_aborted` 边，不从 result/details 反推。
 
 **代码映射**: `packages/extension-protocol/src/extensions/plan/state-machine.ts`（`PlanLifecycleEvent` + 边表）。
 
 ### selfReview（自审结论）
 
-agent 提交计划审批（submit-review）前的自审摘要，审批交互的硬门参数（D9）：每次 submit-review 必带非空 selfReview（**无豁免**，含修订后重挂——自审对象是新版本文档），缺失/空被拒收并附纠偏指令。门语义三层边界：存在性（非空必填）= 结构保证；防照抄（文档已变而 selfReview 与上次逐字节相同 → 拒收）= 启发式；语义级新鲜度（自审是否真的对着新文档做了）= 提示词纪律（Phase C.5 自审清单），机器不可判。单字段双角色：E3 会话重启重挂的回传源（仅独立 pi/TUI 形态——该形态自动重挂是唯一恢复路径，steer 携带上轮全文，指示原样回传不重新思考，豁免只在「自审内容」、过门义务不豁免；taiji GUI 宿主 E3 不自动重挂，恢复走 renderer degraded 按钮由用户触发重提，重提时正常过门）+ 防照抄比较基线。有界 4KB（写侧单点截断，UTF-8 码点界安全）。投影面止于审批请求帧（`PlanReviewRequest.selfReview` → `extension.ui_request`）：不进 `PlanStateView` / `session.planState` 帧；entry 持久字段 = `plan-state.selfReview`。
+agent 提交计划审批（submit-review）前的自审摘要，审批交互的硬门参数（D9）：每次 submit-review 必带非空 selfReview（**无豁免**，含修订后重挂——自审对象是新版本文档），缺失/空被拒收并附纠偏指令。门语义三层边界：存在性（非空必填）= 结构保证；防照抄（文档已变而 selfReview 与上次逐字节相同 → 拒收）= 启发式；语义级新鲜度（自审是否真的对着新文档做了）= 提示词纪律（Phase C.5 自审清单），机器不可判。单字段双角色：E3 会话重启重挂的回传源（仅独立 pi/TUI 形态——该形态自动重挂是唯一恢复路径，steer 携带上轮全文，指示原样回传不重新思考，豁免只在「自审内容」、过门义务不豁免；taiji GUI 宿主 E3 不自动重挂，恢复走 renderer degraded 按钮由用户触发重提，重提时正常过门）+ 防照抄比较基线。有界 4KB（写侧单点截断，UTF-8 码点界安全）。呈现范围止于审批请求帧（`PlanReviewRequest.selfReview` → `extension.ui_request`）：不进 `PlanStateView` / `session.planState` 帧；entry 持久字段 = `plan-state.selfReview`。
 
-**代码映射**: `packages/extension-protocol/src/extensions/plan/review-contract.ts`（截断/上限权威）+ `core/types.ts`（`PlanReviewRequest.selfReview`）；消费面勾销锚 = 同目录 `consumers.md`。
+**代码映射**: `packages/extension-protocol/src/extensions/plan/review-contract.ts`（截断/上限权威）+ `core/types.ts`（`PlanReviewRequest.selfReview`）；消费方勾销锚 = 同目录 `consumers.md`。
 
 ### dismiss（搁置）
 
-plan 审批的第三键裁决（D3）：`PlanReviewResponse` 判别联合 `{ decision: 'dismiss' }`，用户「暂不审阅本次提交」的**非破坏**协议级决策（不杀 turn、不丢状态，无需确认 Popover）——取代旧「忽略 = message.abort 杀整个 turn」的副作用实现（F1/F2/F3 根因构造性消除）。语义：转移 `reviewing --dismiss--> planning` 落盘，plan 模式保持、文档与进度不变，**被搁置的审批不复活**（重开 session 不卷土重来）；tool result 指示 agent 简短告知用户已搁置并询问下一步（继续完善/等待指示），**不实施改动**。与「退出」（exit，退出整个模式）语义距离三层；值域守卫 canonical = `review-contract.ts`（未知 decision 值域降级为「宿主/扩展版本不匹配」指引，**不再引导重挂**——防再入循环）。
+plan 审批的第三键裁决（D3）：`PlanReviewResponse` 判别联合 `{ decision: 'dismiss' }`，用户「暂不审阅本次提交」的**非破坏**协议级决策（不杀 turn、不丢状态，无需确认 Popover）——取代旧「忽略 = message.abort 杀整个 turn」的副作用实现（F1/F2/F3 根因构造性消除）。语义：转移 `reviewing --dismiss--> planning` 落盘，plan 模式保持、文档与进度不变，**被搁置的审批不复活**（重开 session 不卷土重来）；tool result 指示 agent 简短告知用户已搁置并询问下一步（继续完善/等待指示），**不实施改动**。与「退出」（exit，退出整个模式）语义距离三层；值域检查 canonical = `review-contract.ts`（未知 decision 值域降级为「宿主/扩展版本不匹配」指引，**不再引导重挂**——防再入循环）。
 
-**代码映射**: `packages/extension-protocol/src/core/types.ts`（`PlanReviewDecision` 三键值域）+ `extensions/plan/review-contract.ts`（值域守卫）；消费面勾销锚 = 同目录 `consumers.md`。
+**代码映射**: `packages/extension-protocol/src/core/types.ts`（`PlanReviewDecision` 三键值域）+ `extensions/plan/review-contract.ts`（值域检查）；消费方勾销锚 = 同目录 `consumers.md`。
 
 ### PLAN_REVIEW_MARKER
 
@@ -350,7 +357,7 @@ plan 审阅请求的 select title marker（`\x00TAIJI_PLAN_REVIEW:`，与 `UI_FO
 
 **代码映射**: `packages/extension-protocol/src/core/markers.ts`（常量）+ `core/types.ts`（payload/decision/comment 契约 SSOT）。
 
-### record 投影链
+### record 派生视图链
 
 会话持久派生态到前端 stateSnapshot 的统一通道（subagent/workflow 现役，plan-state 为第三员——plan-mode-redesign 方案 A）。链路：custom entry append → event-adapter `handleEntryAppended` 白名单 → interpreter record 联合类型 + 失效透传 → `SessionRecords.invalidateRecordEntries` 派生扫描（冷启动读盘与 live 更新共用同一份派生代码，live ≡ reload 构造性成立）→ publish 走 diff 基线 → message-bus `TOPIC_TABLE` / `STATE_TYPE_KEY_MAP` 分发 → 前端 store 订阅 + 切换/冷启动 RPC 首次拉取。三道运行时 customType 门 + 冷启动首次拉取全部要过，缺一则静默失效（三道门均为字符串判定，编译器不保护——加员时逐点核对）。
 
@@ -361,9 +368,9 @@ plan 审阅请求的 select title marker（`\x00TAIJI_PLAN_REVIEW:`，与 `UI_FO
 
 ### Ask User（ask_user）
 
-> **术语演进（2026-09 核对）**：原词条「Human Confirm」的代码符号已消亡，任务级用户确认统一到 ask_user 概念（主对话的 ask-user 工具与子代理的反向 UI 通道是同一交互面）。
+> **术语演进（2026-09 核对）**：原词条「Human Confirm」的代码符号已消亡，任务级用户确认统一到 ask_user 概念（主对话的 ask-user 工具与子代理的反向 UI 通道是同一交互侧）。
 
-agent（主对话或子代理 run）在执行中请求用户输入/确认的交互。子代理场景的链路：引擎进程的 dialog/UI 请求经 engine-protocol v1 的 `host/askUser` 反向通道到达宿主（`packages/subagent-core/src/execution/ui/ui-request-handler-factory.ts`，dialog 类经 `dialog-queue.ts` 跨子进程串行），GUI 模式透传进宿主 UI 通道，以 extension UI 请求呈现给用户（富交互形态 = [统一表单协议](#统一表单协议ui-form2026-09-19)的 FormOverlay：选项/多选/Other/自由文本）。ask-user 包的 channel-handler 以 `ui_form` / `ask_user` 双通道名注册并双读 `formQuestions ?? questions` 入参（孙进程版本不可控的兼容面）。用户回复不是简单的 allow/deny，可以是自由文本、修正指令或附加信息。
+agent（主对话或子代理 run）在执行中请求用户输入/确认的交互。子代理场景的链路：引擎进程的 dialog/UI 请求经 engine-protocol v1 的 `host/askUser` 反向通道到达宿主（`packages/subagent-core/src/execution/ui/ui-request-handler-factory.ts`，dialog 类经 `dialog-queue.ts` 跨子进程串行），GUI 模式透传进宿主 UI 通道，以 extension UI 请求呈现给用户（富交互形态 = [统一表单协议](#统一表单协议ui-form2026-09-19)的 FormOverlay：选项/多选/Other/自由文本）。ask-user 包的 channel-handler 以 `ui_form` / `ask_user` 双通道名注册并双读 `formQuestions ?? questions` 入参（孙进程版本不可控的兼容范围）。用户回复不是简单的 allow/deny，可以是自由文本、修正指令或附加信息。
 
 **Tool Approval vs Ask User**: Tool Approval 是权限控制（binary + always allow），Ask User 是任务级沟通（开放式输入）。
 
@@ -376,25 +383,53 @@ Session 级状态，表示 pi 进程正在工作（从用户发送消息到 agen
 
 > **术语演进（2026-09）**：`streamingMessage` 实体已消亡——流式态 = 末位消息 `status:'streaming'` + turn 级 `isStreaming` 派生；UI 活跃态 SSOT 是 `isActive`（含 pendingSend 空窗期，`packages/core/src/domain/chat/derive-status.ts` W1）。
 
-### 投递所有权内核（delivery-ownership kernel）
+### 统一投递（unified delivery，v3）
 
-用户消息（composer）、agent 消息（session_manager send）、回流消息（completion-backflow）等全部发送方的唯一投递所有者：runtime 侧每 session 单例——纯逻辑状态机在 `packages/session-delivery/`，pi 适配与对账在 `packages/runtime/src/services/session/session-delivery-registry.ts`。pi 的 steer/followUp 内存队列降级为**交接槽位**（消息从「前端持有」到「进入 transcript」之间的临时存放格），所有权在消息进 transcript 之前属于本内核；renderer 只提交（`delivery.submit`）与渲染（`session.delivery` 状态帧，队列区单一数据源），不做车道判定。
+全部消息发送的统一投递服务：**一个内核 + 两个薄适配 + 唯一队列在 pi**。内核 = `packages/session-delivery/`（v3：条目状态机 / 判重 / 送达凭据 / DeliveryStore 端口，零 pi 依赖零 fs 知识）；两个薄适配 = runtime 适配（`packages/runtime/src/services/session/session-delivery-registry.ts`，文本车道：提交入口 + 在途登记 + 撤销编排 + GUI 状态源）与 pi 内投递端口 DeliveryPort（`extensions/shared/delivery-port/`，custom 车道唯一执行者：通知提交 + 投递日志 + 回执 + 重启重放）。**唯一队列 = pi 原生 steer / followUp 队列**（每 session 一份）——文本 `prompt(streamingBehavior)` 与通知 `sendMessage(deliverAs)` 同队 FIFO，忙时入队不拒；两档注入时机由 pi 队列原生出队承载，taiji 侧零时机代码。renderer 只提交（`delivery.submit`）与渲染（`session.delivery` 状态帧），不做投递判定。
 
-**lane（投递车道）**：一条消息交给 pi 的方式，三档——`direct`（pi 空闲，直接 prompt 起新 run）/ `steer`（pi 有活跃 run，入 steeringQueue 等 turn 边界注入）/ `queued`（pi 暂不可收，内核 FIFO 持有等时机）。lane 判定单一源 = runtime 权威 occupancy 投影（C-data-19 单写原语）+ 内核队列态；renderer 的 `resolveSendRoute` 降级为发送位按钮形态（send/stop/queue）的 UI 预测，真实车道以 `session.delivery` 帧的 lane 字段为准。
+**envelope（投递信封）**：投递请求统一包装——payload（判别联合 text / custom）+ timing + 幂等键 id + 提交选项（merge 合批 / onFailure 失败处置 / 通知域另有 collectKey 收取关联键）。机制统一、差异只在提交选项缺省值（text 缺省 forget 失败即弃 + 逐条；custom 缺省 retain 留账重投 + 合批）与端点能力（cancel / drain 管控面仅 runtime 端点）。
 
-**条目五态（`DeliveryEntryState`）**：内核条目状态机——`queued`（内核持有排队）/ `in-flight`（已交 pi 槽位、未确认）/ `delivered`（拿到送达回执；marker 锚 = `message_end` 回执命中，acceptance 锚 = 受理即落地，ADR-0074 申报制）/ `failed`（重试耗尽，等用户处置：重试钮经 `delivery.resync` 单条重报，或 × 移除）/ `cancelled`（用户撤销或 drain 回收）。进入 `session.delivery` 帧的是**投影视图**而非五态全量：活跃态（queued / in-flight / failed）全量 + delivered 最近 50 条完整条目，**cancelled 不投影**（撤销即从队列区消失，全文经 `delivery.cancel` reply 回草稿）——该帧是队列区行形态的唯一来源。
+**期望注入时机（timing）**：提交方声明的注入档位，两档——`steer`（下一个轮边界：当前轮工具执行完、下一轮模型请求前）/ `followUp`（run 将停处延展同一 run）；agent 空闲时两档都立即起一轮。API 字段名 `timing`；内核包内零 pi 词汇词形（`interrupt-at-turn-boundary` / `after-run`），facade 层翻译。缺省 steer（2026-10-16 用户裁决）。
 
-**两类回执（两阶段 receipt）**：①**受理** = pi 收下消息（direct 车道 = prompt 受理；steer 车道 = 文本进入 pi 槽位）；②**送达** = `message_end(user)` 文本命中裸标记 = 消息已写入 transcript（durable）。受理 ≠ 送达：只拿受理的条目停留 `in-flight`、由对账器盯（marker 锚情形；acceptance 锚条目受理即落地，见 `receiptAnchor`）。`sendChecked` 的同步 settle 时点维持**受理口径**（session_manager send 的 `{queued:true}` 契约锚定在受理时点，后移到送达会让 agent 工具调用阻塞至目标 session 当前 turn 结束）——onSettled 记账回调为送达口径，两者显式分离。
+**实际注入时机（actualTiming）**：与 timing 对偶的实际发生形态——immediate（立即注入/入队）/ at-boundary（轮边界出队）/ at-run-end（运行结束出队），唯一例外 compaction-hold（pi 硬拒绝期间的提交侧等待）。
 
-**receiptAnchor（回执锚）**：投递条目级回执锚申报（`DeliverySubmitOptions.receiptAnchor`），`'marker'` 缺省 / `'acceptance'` 无标记 agent 通路受理即落地，来源清单 SSOT 在 [decisions.md ADR-0074](adr/decisions.md)。
+**条目五态（`DeliveryEntryState`）**：queued（受理登记）/ in-flight（已入 pi 队列、未确认）/ delivered（送达回执命中）/ failed（失败，按 onFailure：forget 失败即弃等用户重发 / retain 留账下一边沿或重启重投）/ cancelled（用户撤销）。`session.delivery` 帧是派生视图：活跃态全量 + delivered 最近 50 条，cancelled 不进该派生视图（全文经 `delivery.cancel` reply 回草稿）。
 
-**对账器（Reconciler）**：registry 侧组件，在五个触发点（agent_settled / compaction_end / abort 完成 / pi restored / 30s watchdog；`delivery.cancel` 复用同一路径为撤销兜底入口）执行对账，条件 = 「空闲 + pi 槽位非空」，处置 = `clear_queue` 全收后按裸标记**三分**——**reclaim**（内核在册条目回队首重投，保持原相对序）/ **rebuild**（**尾附锚**标记但内核无记录 = runtime 重启 reattach，先按标记对 transcript 全量扫描判 delivered：已送达只重建记账不重投）/ **adopt**（无身份承接的外来文本——notifyDone / scheduler 提醒等存量注入，或标记字面量全部非尾附锚——以新身份入内核 FIFO 正常投递，不丢弃）。pi 只有队列级 `clear_queue` 原语（无条目级撤回），条目级收回以「全收 + 标记识别 + 其余重投」实现。
+**两阶段回执**：①**受理** = 提交链路收下消息（同步返回）；②**送达** = 消息身份在 transcript 可证（文本 = `message_end` 命中裸标记；通知 = `message_end` 命中 `details.deliveryId`）。受理 ≠ 送达；`sendChecked` 同步 settle 维持受理口径（agent→managed 契约锚）。
 
-**裸标记（bare marker）**：出站文本尾附的 `<!--taiji:msg:<uuid>-->`（裸 uuid 形态）作为逐消息身份，随文本进 transcript，供送达回执与判重匹配按 id 精确查找（身份非内容匹配——skill 注入 / BeforeSend 文本改写不影响）。与 msg-id-mapper 的 `u-<uuid>` 前缀标记空间互斥（mapper 只剥 u- 形态且仅覆盖富内容直发通路；裸标记在 steer/followUp 通路不被剥离而存活）——两者正交共存，rich 通路同时携带双标记各司其职。展示层剥离 SSOT = `packages/core/src/domain/chat/apply-entry-convert.ts`（live / reload 同点）。
+**送达凭据（deliveryProof）**：判定「送达了」的证据来源，三档申报——`marker`（文本裸标记）/ `details-id`（通知：port 注入前把条目 id 统一写入消息 `details.deliveryId`，批形态逐项展平）/ `acceptance`（受理即算送达的保守档）。SSOT 在 [decisions.md ADR-0074](adr/decisions.md)。
 
-**投递身份（delivery identity）**：一条出站消息的逐消息身份载体 = 裸标记携带的 id。「这是不是投递身份」的判定权威 = `DELIVERY_MARKER_ID_RE`（`packages/runtime/src/services/session/session-delivery-registry.ts`，shared `MSG_ID_TAG_RE` source 派生的严格 uuid 双形态 ∪ 本地收养条目 `m-<base36>-<seq>` 形态）——uuid 段禁止手写正则，SSOT 形态变化自动跟随。_Avoid_：把任意形似标记的文本当身份（宽松 `[^>]*` 形态仅授权剥除面，判定宽松会让用户文本中的字面假标记产生重复投递）。**出站尾附锚（outbound tail anchor）** = rebuild 重投的附加判据：仅精确文末（原文串 endsWith，不 trimEnd 尾换行）的标记构成 rebuild 身份（剥标记不吞尾换行，P5 口径，与 ADR-0077 一致；出站标记恒尾附，与写侧 `withDeliveryMarker` 读写同形），文本中部/前部的合法形态标记字面量不构成投递身份。判据形态二分裁决：[decisions.md ADR-0077](adr/decisions.md)。
+**裸标记（bare marker）/ 投递身份（delivery identity）**：文本车道机制不变——出站文本尾附 `<!--taiji:msg:<uuid>-->` 为逐消息身份；判定权威 = `DELIVERY_MARKER_ID_RE`（session-delivery-registry.ts）；出站尾附锚口径见 [decisions.md ADR-0077](adr/decisions.md)。
 
-**tombstone 判重锚**：已终态条目（delivered / cancelled）的轻量记录（id / 终态 / lane / settledAt），在 **runtime 存活期内全量保留、不设数量窗口**——`delivery.resync` 断连重报去重与 reattach 收养判重的查询表；cancelled tombstone 防「撤销确认帧在断连窗口丢失 → 已撤销消息被 resync 复活」。判重表栖身 runtime 进程内存、不跨 runtime 重启，reattach（滚动重启后）判重锚回落 **transcript 全量标记扫描**（按重报集/滞留集 uuid 查找，transcript 是唯一跨进程持久事实源）。
+**对账器（Reconciler，文本车道保留）**：registry 侧既有组件，事件触发（`delivery.cancel` 复用同一路径为撤销入口）执行对账，处置 = `clear_queue` 全收后按裸标记三分（reclaim 重投 / rebuild 重建记账 / adopt 收养）。通知域**无运行中对账**（全链路事件驱动 + 崩溃重放，ADR-0122）。
+
+**重放（replay）**：崩溃恢复的唯一机制——重启后按投递日志差集把未送达条目重新入队。文本 = runtime 磁盘 outbox（`<getDataDir()>/delivery-outbox/<sessionId>.jsonl`）启动 loadUndelivered + reattach transcript 判重；通知 = DeliveryPort 的 session_start 差集扫描（outbox − delivered − ack）。运行中被 `clear_queue` 牵连清除的通知运行中不可恢复（扩展范围无队列事实源），悬置至重启重放。
+
+**已完结 id 索引**：判重的内存缓存（已完结条目 id 集合），由 DeliveryStore 终局记录在启动 / 重放时构建（loadTerminalIds）；判重顺序 = 在途条目 → 内存索引 → 持久记录。撤销防复活凭据在持久终局记录（v2 的 tombstone 独立机制退役）。
+
+**投递日志（delivery journal）**：通知车道耐久侧 = 待投记录 / 已投回执两列 session entry（port 经 appendEntry 写，schema v2 + v1 账本存量兼容读）；持久化承诺先于投递尝试（受理前落盘）。
+
+**持久化存储端口（DeliveryStore）**：内核 v3 端口——`persist / ack / discard / loadUndelivered / loadTerminalIds / hasTerminal`。两实现：runtime 半区 = 磁盘 outbox（fs 注入，内核零 fs 知识）；port 半区 = session entry（persist 为 no-op，落盘由提交层 appendEntry 前置兑现防双写）。
+
+**compaction 状态标记**：port 提交放行判定——`session_before_compact` 置位 / `session_compact`、`session_compact_failed` 复位三事件维护；标记为真留账等待、边沿唤醒重投，为假 sendMessage 直达唯一队列（run 活跃入队不拒 / 空闲起轮）。文本侧 compaction 持有判定在 runtime 侧（既有机制）。
+
+**collect 批量收取（phase 2，result-collect）**：agent 主动选择的一种消费模式——调 `collect_results` 工具（pending-notifications 扩展）阻塞等待一批后台任务终态并一次性收取结果，与 push（单条通知唤醒）相对；避免写「拉取」（与 ADR-0097 拉管义混淆）。`executionMode: sequential` 保证单在途 collect，timeout_ms 缺省 3_600_000，AbortSignal 中断捕获为正常返回（非抛错，返回值保留入历史）。
+
+**收取关联键（collectKey）**：生产方在 `deliver` 提交时申报的稳定操作 id 集合（`DeliveryDeliverOptions.collectKey: string[]`）——单债权条目 = 其 pending:register 的 id（单元素）；managed 合批条目 = 批内全部债权键。挂起判定（键集与等待集相交）与收取（逐键展开）的匹配键集。
+
+**债权键**：managed session 域概念——带 prompt 的 send_to_session / create_session 排队时登记的「完成通知义务」身份键（`sm-` 前缀 UUID）。两类：send 债权（消息完成即兑现）与 lifetime 死亡债权（create 恒返回、仅 session exited/deleted 时兑现、存活期恒活跃）；注册侧申报 kind 标记区分，collect 缺省等待集排除 lifetime 类。
+
+**合批条目（managed 域）**：managed session 完成通知的生产侧合批形态——同一 (sessionId, reason) 且同批身份（settleSeq/deathSeq）的多笔债权折叠为一次 deliver：载荷幂等键 = 批内首个债权键、fulfills = 批内笔数，其余成员仅注销 pending。多键单终局：收取写一次 collected 终局、逐键展开共享。
+
+**collect 挂起**：条目已落投递日志但暂缓进投递内核，留在端口挂起缓冲（deliver 入口按「键集 ∩ 等待集 ≠ ∅」分流）等收取或释放；纯内存态、无独立持久化——日志记录受理前已落盘，任何时点崩溃重启按未投递重放（挂起不丢）。
+
+**收取（consume）**：collect 等待器取走挂起条目的载荷并写 collected 终局；命中条目按条目键集全量逐键展开、终局按日志条目写一次；收取过的条目构造性不可再投递（收取唯一性——recover 差集排除）。时序契约：生产方 deliver 可先于注销 entry 落盘（如 managed 合批的 flushBatch 顺序），到达回调在 deliver 调用栈内同步触发——consume 时点 type/outcome 允许 undefined，消费方须以等待结束后的最终回填为准（诚实缺省，不虚构终态）。
+
+**collected 终局**：投递日志 ack outcome 新枚举值（结果已随 collect 返回到达 agent），差集重放视同已完结；collectRelease 解散等待集时未收挂起条目直通内核 flush（跳过合批窗口）恢复 push。
+
+**设计内等待（designed-in deferral）**：`port.send` 显式拒绝中表示「条目未被注入、等投递端下一边沿重提」的受理形态，载体 = SendReceipt 判别联合的 `{ accepted: false, deferred: DeliveryDeferReason }` 分支（词表内核单源导出：`merge-commit-hold` / `compaction-wait`）。_Avoid_：把这类拒绝称「失败」或「重试」——首败即停语义（ADR-0122）不适用于它；禁以裸字符串 reason 表达（判别联合是唯一合法形态）。
+
+**未知键（unknown key，collect 域）**：活跃集 ∪ 投递日志键集 ∪ 曾注册集的补集——collect 的不可等待输入：不进等待集、不伪装 waiting，按 errors 逐条返回（CollectSnapshotEntry 第五态 `"unknown"`）。_Avoid_：用 waiting 态遮蔽未知键。
 
 ### Side Drawer（原 Side Inspector）
 
@@ -412,7 +447,7 @@ split 行（对话区 + 右抽屉）之下的全宽横向容器，横宽内容�
 
 ### 终端实例（Terminal Instance）
 
-一个会话内可并行运行的多个终端（各自独立 PTY 与输出缓冲）。标识 = **实例编号** `term:<会话id>:<序号>`：序号由后台（runtime）按会话维度分配、单调递增、实例关闭后**不复用**（防旧输出串进新终端）；枚举/归属校验一律取**精确前缀 `term:<sid>:` + 序号段数字校验（`^\d+$`）**，禁按冒号切分取段；由编号反解 sid / 序号则取最后一个冒号前的余段 + 数字校验（sid 域不含冒号由格式保证）。实例注册表与序号分配的**唯一事实源 = runtime**（重键后的 `ptyMap` 派生视图 + 会话级计数器），界面经 `terminal.list` 在三个触发点（⌘R 刷新 / 会话激活 / 世代变更重连）对账恢复。生命周期：主动关闭与自然退出（exit/崩溃）同语义（切换条移除 + 输出分区/写队列/模块级订阅三腿清理）；最后实例的关闭按钮为 UI 供养规则（可自然退出归零至空态）；会话删除与 runtime shutdown 均级联全量杀链。
+一个会话内可并行运行的多个终端（各自独立 PTY 与输出缓冲）。标识 = **实例编号** `term:<会话id>:<序号>`：序号由后台（runtime）按会话维度分配、单调递增、实例关闭后**不复用**（防旧输出串进新终端）；枚举/归属校验一律取**精确前缀 `term:<sid>:` + 序号段数字校验（`^\d+$`）**，禁按冒号切分取段；由编号反解 sid / 序号则取最后一个冒号前的余段 + 数字校验（sid 域不含冒号由格式保证）。实例注册表与序号分配的**唯一事实源 = runtime**（重键后的 `ptyMap` 派生视图 + 会话级计数器），界面经 `terminal.list` 在三个触发点（⌘R 刷新 / 会话激活 / 世代变更重连）对账恢复。生命周期：主动关闭与自然退出（exit/崩溃）同语义（切换条移除 + 输出分区/写队列/模块级订阅三路径清理）；最后实例的关闭按钮为 UI 供养规则（可自然退出归零至空态）；会话删除与 runtime shutdown 均级联全量杀链。
 
 **世代变更**：runtime 重启即注册表清空、序号从 1 重算（「全新世界」作用域 = runtime 进程生命周期）。界面判据 = **auth token 是否变化**（端口值不可靠——重启常落回原端口）；世代变更时终端域显式失效重置（清输出分区与切换条、清写队列状态机、模块级订阅先退订再清空），**同世代 WS 闪断不重置**。
 
@@ -442,7 +477,7 @@ pi session 文件（JSONL）中通过 `parentId` 构建的逻辑树结构。同�
 **命名约定**: "Panel" 统一指 Session 的视口（即代码中的 `Panel` / `PanelLeaf` / `PanelTree`，`packages/renderer/src/stores/panel.ts`），不用于其他含义。
 
 ### 远程访问（Remote Access）
-手机浏览器经局域网直连 runtime 的可选能力，默认关闭（纯回环监听，与既有形态一致）。开启后 runtime 改绑 `0.0.0.0`，同一端口同源托管移动壳构建产物（HTTP 静态面 + WS）；WS 鉴权集合 = {per-spawn token} ∪ {remote token}。配置面 = 设置 → 远程访问面板（开关 / token 轮换 / LAN 地址+二维码 / Tailscale 指引），配置持久化 `<dataDir>/remote-access.json`（0600，main 原子写，关态留存）。开启信号 = argv `--remote-access`（无 env 通道，脚本直跑 / e2e 池等非 supervisor 路径不传 flag 即天然关态）；`--mobile-dist=<path>` 是移动壳 dist 的唯一来源（main 按运行环境解析：dev 仓库 dist / prod 打包资源）。**代码映射**：runtime `packages/runtime/src/transport/connection-manager.ts`（绑定地址 / token 集合 / 静态托管白名单）、组合根 `packages/runtime/src/index.ts`、main 配置面 `apps/electron/main/remote-access/`、supervisor 拼参 `apps/electron/main/supervisor/process-control.ts`、面板 `packages/renderer/src/components/settings/remote-access/`、契约 `packages/shared/src/remote-access.ts`。
+手机浏览器经局域网直连 runtime 的可选能力，默认关闭（纯回环监听，与既有形态一致）。开启后 runtime 改绑 `0.0.0.0`，同一端口同源托管移动壳构建产物（HTTP 静态范围 + WS）；WS 鉴权集合 = {per-spawn token} ∪ {remote token}。配置侧 = 设置 → 远程访问面板（开关 / token 轮换 / LAN 地址+二维码 / Tailscale 指引），配置持久化 `<dataDir>/remote-access.json`（0600，main 原子写，关态留存）。开启信号 = argv `--remote-access`（无 env 通道，脚本直跑 / e2e 池等非 supervisor 路径不传 flag 即天然关态）；`--mobile-dist=<path>` 是移动壳 dist 的唯一来源（main 按运行环境解析：dev 仓库 dist / prod 打包资源）。**代码映射**：runtime `packages/runtime/src/transport/connection-manager.ts`（绑定地址 / token 集合 / 静态托管白名单）、组合根 `packages/runtime/src/index.ts`、main 配置侧 `apps/electron/main/remote-access/`、supervisor 拼参 `apps/electron/main/supervisor/process-control.ts`、面板 `packages/renderer/src/components/settings/remote-access/`、契约 `packages/shared/src/remote-access.ts`。
 
 ### 移动壳（mobile shell）
 `@taiji/mobile-renderer` 构建出的手机 web 客户端（浏览器运行、触控交互），与桌面 renderer 并列的双壳成员（拓扑见 [renderer-package-topology.md](architecture/renderer-package-topology.md)）。连接装配：WS URL 从 `location.host` 同源派生、凭据经 PlatformPort.storage（localStorage）持久、storage/webSocket 为真实实现。UI 主体 = session 列表 / 消息流 / 新建任务表单 / token 输入视图 + 底部 tab + 根级权限审批弹窗（ui PermissionRequestDialog，PermissionTransport 经 plugin.approvePermissions/revokePermissions 回传）；业务逻辑复用 core 业务域，展示复用 ui 共享组件（markdown 渲染链模块与被 ui 组件消费的 locale 域文件已下沉 ui 包，双壳共享单源）。v1 能力边界：slash 命令 bar / plugin view 全集 / terminal / 文件树 / git 面板不在移动壳（挂载点子集 = message-stream / slash(隐藏保留) / companion）；图片粘贴降级为文本占位（`[图片粘贴：需桌面环境]`）、mermaid 图表占位呈现、hover 类消息操作不可用。壳间禁止互相 import。
@@ -451,26 +486,26 @@ pi session 文件（JSONL）中通过 `parentId` 构建的逻辑树结构。同�
 远程访问的持久凭据：64 位 hex 小写字符串（32 字节随机值的 hex 编码）。main 生成与轮换——重写 `remote-access.json` 即生效（runtime 每次 WS auth 握手热读文件，轮换不重启 runtime、不中断在途 turn）；文件缺失/损坏 → remote 集合为空退化为仅 spawn token（fail-closed）。存量已认证连接不随轮换踢除（auth 只门禁握手）——「怀疑泄漏」的完整处置 = 面板轮换（断新接入）+ 关开开关（重启 runtime 踢全部存量连接）。移动壳侧 token 经验身成功才写 localStorage（key `taiji.remote-access.token`）；URL query 携带的 token 验身失败**不动**既有 storage（坏链接不毁好凭据），storage 来源验身失败才清空（落 token 输入视图重扫恢复）。
 
 ### profile 连接策略（connection profile）
-连接发现三分支中的远程形态，形态判定收口在 `packages/core/src/transport/use-connection.ts` 的 resolveConnectionMode() 薄谓词（init 首连 / HMR 重连 / retryRuntime 三处消费；连接目标解析留在各分支原地）：**本地 = IPC** 端口发现（electronAPI 有值）、**远程 = profile**（移动壳）、**mock = VITE_MOCK**。profile 的注入实现 = `packages/mobile-renderer/src/platform/connection-profile.ts`：凭据采纳顺序 = URL query `?token=`（显式携带的新凭据 = 用户新意图，验身成功落 storage 并 `history.replaceState` 抹地址栏）→ storage（验身过的持久凭据，跨 runtime 重启免重扫）→ 皆无（不带凭据发起连接，runtime fail-closed 拒绝 → `onAuthRejected` 信号 → token 输入视图）。auth 被拒时移动壳抑制全部自动重连触发点（退避重连 + visibility 切前台主动重连）；连接失败（非凭据失败）维持重连等待态，不落 token 视图。
+连接发现三分支中的远程形态，形态判定收敛在 `packages/core/src/transport/use-connection.ts` 的 resolveConnectionMode() 薄谓词（init 首连 / HMR 重连 / retryRuntime 三处消费；连接目标解析留在各分支原地）：**本地 = IPC** 端口发现（electronAPI 有值）、**远程 = profile**（移动壳）、**mock = VITE_MOCK**。profile 的注入实现 = `packages/mobile-renderer/src/platform/connection-profile.ts`：凭据采纳顺序 = URL query `?token=`（显式携带的新凭据 = 用户新意图，验身成功落 storage 并 `history.replaceState` 抹地址栏）→ storage（验身过的持久凭据，跨 runtime 重启免重扫）→ 皆无（不带凭据发起连接，runtime fail-closed 拒绝 → `onAuthRejected` 信号 → token 输入视图）。auth 被拒时移动壳抑制全部自动重连触发点（退避重连 + visibility 切前台主动重连）；连接失败（非凭据失败）维持重连等待态，不落 token 视图。
 
 ### Run record 事件流（workflow 域）
-workflow run 的唯一持久化：`<sessionDir>/workflow-state/<runId>.record.jsonl`（workspace 有活跃 session 时落 `sessions/<slug>/workflow-state/`），append-only JSONL 逐行记录 run 生命周期事件（[ADR-0082](adr/decisions.md) 对齐 pi 后 9 事件：`run-created / phase-started / agent-started / agent-retrying / agent-settled / phase-settled / run-interrupted / run-resumed / run-settled`，事件行携带单调 seq；`run-created` 带 scriptSource 全文、`agent-settled` 带 result 全文与 sessionFile）。`agent-started` 载荷携带 `phase?`（call 归属快照——fold 推导无需回溯转移事件）与 `memberRecordId?`（[D6] 绑定字段——同名续写路由）；`phase-started`/`phase-settled` 是 phase 状态机转移事件（[D3]——worker 模板 `phase()` 经 postMessage 写入 record，异步丢失窗口由 fold 自愈规则承接）。run 生命周期四态 + interrupted 暂停态（`created → running → settling → terminal`；`running/settling → interrupted → resume → running`）——interrupted 非终局（run-interrupted 转移帧，可续跑）；终局 outcome 四值 `done/failed/cancelled/time_limited`。manifest（`<runId>.json`）降格为 run-settled 终局事件的派生缓存。判读 = record fold 唯一权威（注册表投影 / 终局诊断引用 / resume 资格全部折叠）。由显式状态机单点写入（terminal-actions.ts 的 dispatchRunTrigger 单写者链），引擎不直接写。无主 run 的磁盘清理走对账清理（裁决点 7：引用集三代解析 + 宽限窗——run 数据生命周期跟随 session 归属）。
+workflow run 的唯一持久化：`<sessionDir>/workflow-state/<runId>.record.jsonl`（workspace 有活跃 session 时落 `sessions/<slug>/workflow-state/`），append-only JSONL 逐行记录 run 生命周期事件（[ADR-0082](adr/decisions.md) 对齐 pi 后 9 事件：`run-created / phase-started / agent-started / agent-retrying / agent-settled / phase-settled / run-interrupted / run-resumed / run-settled`，事件行携带单调 seq；`run-created` 带 scriptSource 全文、`agent-settled` 带 result 全文与 sessionFile）。`agent-started` 载荷携带 `phase?`（call 归属快照——fold 推导无需回溯转移事件）与 `memberRecordId?`（[D6] 绑定字段——同名续写路由）；`phase-started`/`phase-settled` 是 phase 状态机转移事件（[D3]——worker 模板 `phase()` 经 postMessage 写入 record，异步丢失窗口由 fold 自愈规则承接）。run 生命周期四态 + interrupted 暂停态（`created → running → settling → terminal`；`running/settling → interrupted → resume → running`）——interrupted 非终局（run-interrupted 转移帧，可续跑）；终局 outcome 四值 `done/failed/cancelled/time_limited`。manifest（`<runId>.json`）降格为 run-settled 终局事件的派生缓存。判读 = record fold 唯一权威（注册表派生视图 / 终局诊断引用 / resume 资格全部折叠）。由显式状态机单点写入（terminal-actions.ts 的 dispatchRunTrigger 单写者链），引擎不直接写。无主 run 的磁盘清理走对账清理（裁决点 7：引用集三代解析 + 宽限窗——run 数据生命周期跟随 session 归属）。
 
 ### run/record 状态词表（W2 收敛 + 生命周期重构，[ADR-0080](adr/decisions.md) / [ADR-0082](adr/decisions.md)）
 run 与 record 两域状态词表的单源口径，消费方按维取值、禁止跨维混用：
 
-- **run 域两维正交**：lifecycle 维 = `RunLifecycle` 四态 + `interrupted` 暂停态（`created/running/settling/terminal` + `interrupted`——dispatched 已并入 running（两态行为相同且零消费方，[ADR-0082] D2）；`packages/subagent-core/src/orchestration/run-events.ts` 的 `RUN_TRANSITIONS` 转移表唯一裁决，表外转移 fail-fast）；outcome 维 = `RunOutcome` 四值（`done/failed/cancelled/time_limited`，`ALL_RUN_OUTCOMES` 单源），outcome 仅 terminal 出现。`interrupted` 不是终局——是「执行中断、无活体」的 lifecycle 暂停态（running/settling → interrupted：崩溃收编 / terminate 被动失联（resume 来源 run，[ADR-0082] D11）；interrupted → running：resume），自动终局化写入方已随 abandon 移除消失（[ADR-0082] D9），中断来源细分由 `run-interrupted` 帧 errorCode 承载（`crashed` / `terminated` / `startup-sweep`；历史成员 `interrupted_abandoned` / `idle-evicted` 保留只读解析）；`cancelled` 保留「用户主动取消」语义，显示面「已取消」（主动）与「已中断」（被动）禁混用。旧 `RunStatus` 两态机（running|done + `state.status`/`state.reason` 快照字段）降级 v1 兼容层（W4 sunset），禁止作活体终局判据或载荷源。
+- **run 域两维正交**：lifecycle 维 = `RunLifecycle` 四态 + `interrupted` 暂停态（`created/running/settling/terminal` + `interrupted`——dispatched 已并入 running（两态行为相同且零消费方，[ADR-0082] D2）；`packages/subagent-core/src/orchestration/run-events.ts` 的 `RUN_TRANSITIONS` 转移表唯一裁决，表外转移 fail-fast）；outcome 维 = `RunOutcome` 四值（`done/failed/cancelled/time_limited`，`ALL_RUN_OUTCOMES` 单源），outcome 仅 terminal 出现。`interrupted` 不是终局——是「执行中断、无活体」的 lifecycle 暂停态（running/settling → interrupted：崩溃收编 / terminate 被动失联（resume 来源 run，[ADR-0082] D11）；interrupted → running：resume），自动终局化写入方已随 abandon 移除消失（[ADR-0082] D9），中断来源细分由 `run-interrupted` 帧 errorCode 承载（`crashed` / `terminated` / `startup-sweep`；历史成员 `interrupted_abandoned` / `idle-evicted` 保留只读解析）；`cancelled` 保留「用户主动取消」语义，显示侧「已取消」（主动）与「已中断」（被动）禁混用。旧 `RunStatus` 两态机（running|done + `state.status`/`state.reason` 快照字段）降级 v1 兼容层（W4 sunset），禁止作活体终局判据或载荷源。
 - **record 域三维正交**：lifecycle 维 = `ExecutionStatus`（running|idle）× 停因维 = `StopReason`（上一轮收条语义，由 `record-settled` / `record-round-idle` 事件帧承载，仅展示排障）× 结果维 = outcome 四值（轮终参数 `ExecutionOutcome` 为独立实体字面量 `completed/failed/cancelled`——原 `Exclude<RunOutcome,"interrupted">` 派生别名随 interrupted 移出 RunOutcome 取消，[ADR-0082] 实施期裁决：execution/subagent-record 域写入值不变）。record 域不建显式转移表：意图原语族即状态机（C-data-20 唯一写入口 + `tryEnterRunning` CAS 表外拒绝）。
-- **投影相 ≠ 状态**：注册表投影 = record fold 四相（missing/active/terminal/interrupted，`run-registry.ts` 的 `RunRegistryPhase`）——interrupted 相是投影判读（`run-interrupted` 转移帧已写入 record，或事件流停止且活体未命中的 host-died 判读），对应 lifecycle 暂停态而非终局（[ADR-0082] 后投影相与 lifecycle 同构，interrupted 相可流转回 active）。manifest 的投影持久化格式（record 终局事件的派生缓存，单一生产者）不计入消费方状态词表口径。
+- **派生视图相 ≠ 状态**：注册表派生视图 = record fold 四相（missing/active/terminal/interrupted，`run-registry.ts` 的 `RunRegistryPhase`）——interrupted 相是派生视图判读（`run-interrupted` 转移帧已写入 record，或事件流停止且活体未命中的 host-died 判读），对应 lifecycle 暂停态而非终局（[ADR-0082] 后派生视图相与 lifecycle 同构，interrupted 相可流转回 active）。manifest 的派生视图持久化格式（record 终局事件的派生缓存，单一生产者）不计入消费方状态词表口径。
 
 ### 介质归位（run/record 运行态持久化，W1）
 run 与 record 的运行态数据持久化形态（[ADR-0094](adr/decisions.md) / [ADR-0082](adr/decisions.md) D1）：**事件流是唯一事实源**——run 侧 = record 事件流（`<runId>.record.jsonl`，[ADR-0082] D1 由 journal 更名并升格：全文入事件、state 快照删除），record 侧 = 事件文件 `<recordsDir>/<sa-id>.events`（无 .jsonl 后缀，既有 .jsonl 扫描器结构性忽略；首行 `{"type":"record-events"}` 头行自描述）。子术语：
 
 - **注册条目 / 终态条目**：主 session JSONL 里每实体只写的两条小 entry（v:2，kind 判别 registered/settled，customType 不变）——注册条记身份与锚点（诞生时写；workflow-record 族携带 recordPath 锚点），终态条记终局与摘要（结束时写，含 result 全文与 engineHandle 双键）。旧读者按版本门跳过 v2。
-- **落盘键的旧词裁决（已完成）**：事件流升格前的旧词（journal）在代码符号与落盘键里的残留已全部改成现行词，不做迁移、不留兼容读——项目未上线，不存在需要兼容的 v1 数据。三处落盘键现状：事件文件头行 = `{"type":"record-events"}`（`RECORD_EVENTS_HEADER_TYPE`，`record-events.ts`）；engineHandle 落盘键 = `engineHandle.eventsPath`（引擎侧事件文件路径——SDK `EngineHandleData`/`ResumeAnchor` wire 契约、core record/manifest/entry 形状、读写两侧与扫描守卫同批改名）；workflow-record 注册条目锚点键 = `recordPath`（record 流路径，D16③ 后锚点语义 = `<runId>.record.jsonl`）。
-- **物化投影 / 索引**：折叠结果的落盘副本（record 侧 manifest、run 侧 manifest、`.record-binding`、`sessions-index.json`）。三条硬性质（可删 / 带水位 / 无独有字段）与逐项现状见 [物化投影与索引](#物化投影与索引)。`.alive` 是操作租约，不计事实源。
-- **事件流增量读**：从上次读到的位置（offset）继续读新增事件行的增量读取方式（`packages/subagent-core/src/execution/persistence/event-tail.ts`，run 与 record 两域共用）——runtime 内存投影的增量喂入源之一（另一源 = pi entry 游标）。
-- **收编**：把「有注册记录、无终态记录」的实体判定为中断并补齐记录的动作（本域领域词）——run 侧 = 落 `run-interrupted` 转移帧转 interrupted 暂停态（[ADR-0082] D15：壳侧 recoverCrashedRuns 与 runtime startupSweep 两链经终局编排单一入口），record 侧 = 幂等追加终态事件；事件流重放后幂等追加。`recoverCrashedRuns`（崩溃孤儿收编链）与 `rebuildRunFromRecord`（resume 正常路径的聚合重建面——fold 判 resume 资格、重建供 worker 接管的完整聚合）均经调用链甄别为现役机制非补偿残留，保留。
+- **落盘键的旧词裁决（已完成）**：事件流升格前的旧词（journal）在代码符号与落盘键里的残留已全部改成现行词，不做迁移、不留兼容读——项目未上线，不存在需要兼容的 v1 数据。三处落盘键现状：事件文件头行 = `{"type":"record-events"}`（`RECORD_EVENTS_HEADER_TYPE`，`record-events.ts`）；engineHandle 落盘键 = `engineHandle.eventsPath`（引擎侧事件文件路径——SDK `EngineHandleData`/`ResumeAnchor` wire 契约、core record/manifest/entry 形状、读写两侧与扫描检查同批改名）；workflow-record 注册条目锚点键 = `recordPath`（record 流路径，D16③ 后锚点语义 = `<runId>.record.jsonl`）。
+- **物化派生视图 / 索引**：折叠结果的落盘副本（record 侧 manifest、run 侧 manifest、`.record-binding`、`sessions-index.json`）。三条硬性质（可删 / 带水位 / 无独有字段）与逐项现状见 [物化派生视图与索引](#物化派生视图与索引)。`.alive` 是操作租约，不计事实源。
+- **事件流增量读**：从上次读到的位置（offset）继续读新增事件行的增量读取方式（`packages/subagent-core/src/execution/persistence/event-tail.ts`，run 与 record 两域共用）——runtime 内存派生视图的增量喂入源之一（另一源 = pi entry 游标）。
+- **收编**：把「有注册记录、无终态记录」的实体判定为中断并补齐记录的动作（本域领域词）——run 侧 = 落 `run-interrupted` 转移帧转 interrupted 暂停态（[ADR-0082] D15：壳侧 recoverCrashedRuns 与 runtime startupSweep 两链经终局编排单一入口），record 侧 = 幂等追加终态事件；事件流重放后幂等追加。`recoverCrashedRuns`（崩溃孤儿收编链）与 `rebuildRunFromRecord`（resume 正常路径的聚合重建侧——fold 判 resume 资格、重建供 worker 接管的完整聚合）均经调用链甄别为现役机制非补偿残留，保留。
 - **惰性兼容读（run 侧存量）**：run 侧旧格式两件套（`.events.jsonl` + `<runId>.jsonl` 快照）无兼容读——不读、不写、不主动删（[ADR-0082] D1 历史数据处置，随裁决点 7 清理自然消亡）；subagent-record 的 v1 全量快照兼容层已整体删除（无 v1 数据）。
 - **保留窗口**：事件流的显式保留期限（默认 30 天）——窗口内全保留，窗口外的终态实体由统一保留维护轮清理（折叠终态资格判据；cap=50 已废除）。
 
@@ -480,20 +515,20 @@ run 与 record 的状态变化唯一落盘形态：append-only 文本流，逐�
 
 - record 侧 = `<recordsDir>/<sa-id>.events`（首行 `{"type":"record-events"}` 自描述；六类事件 `record-created` / `bound` / `round-started` / `round-idle` / `settled` / `reopened`）；
 - run 侧 = `<sessionDir>/workflow-state/<runId>.record.jsonl`（九类事件，见 [Run record 事件流](#run-record-事件流workflow-域)）；
-- **单一写者**：状态变化只能追加事件，其它模块禁止直写盘上投影（写面检查 `scripts/check-record-write-surface.mjs`）；
+- **单一写者**：状态变化只能追加事件，其它模块禁止直写盘上派生视图（写侧检查 `scripts/check-record-write-surface.mjs`）；
 - **崩溃安全**：只追加、不原地改，尾部损坏按 [事件流损坏形态](#事件流损坏形态半写--坏行--截断)处理，不需要跨文件事务。
 
-**遗留符号改名（已完成）**：原待改名清单 `JsonlEventJournal` / `RecordJournalWriteFace` / `RecordJournalFoldState` / `journal-tail.ts` / `SessionJournalProjection` 已全部改成现行词——`JsonlEventStream`（`shared/jsonl-event-stream.ts`）/ `RecordEventsWriteFace` / `RecordEventFoldState` / `event-tail.ts` / `SessionEventProjection`（runtime `events-projection.ts`）；`journal-wiring.ts` 同批改名 `event-journal-wiring.ts`。journal 词的保留边界（现行词，不改）：引擎域自己的 journal 概念（`engine/common/event-journal.ts` 的 `JournalWriter`、zcode 引擎 `journal-io.ts`、磁盘文件名 `journal-<taskId>.jsonl`）与 run 域 journal 概念（`run-event-journal.ts` 等）。同族收尾批（record 域与 runtime 投影）已完成：record 域事件词族现行词 = `RecordEvent` / `RecordEventInput` / `RecordEventHeader`，流式读口 = `RecordEventStream` / `createRecordEventStream`（接口对齐 run 侧单写者纪律，基座仍是 `JsonlEventStream`）；runtime 投影面现行词 = `EventProjectionSources` / `initialEventProjectionSources` / `mergeEventProjection` / `onEventProjectionChange` / `eventTailerRecheckMs`。事件文件首行头行的 type 判别值 = `record-events`（`RECORD_EVENTS_HEADER_TYPE`，落盘格式）。journal 词的保留边界前句即全部保留项。
+**遗留符号改名（已完成）**：原待改名清单 `JsonlEventJournal` / `RecordJournalWriteFace` / `RecordJournalFoldState` / `journal-tail.ts` / `SessionJournalProjection` 已全部改成现行词——`JsonlEventStream`（`shared/jsonl-event-stream.ts`）/ `RecordEventsWriteFace` / `RecordEventFoldState` / `event-tail.ts` / `SessionEventProjection`（runtime `events-projection.ts`）；`journal-wiring.ts` 同批改名 `event-journal-wiring.ts`。journal 词的保留边界（现行词，不改）：引擎域自己的 journal 概念（`engine/common/event-journal.ts` 的 `JournalWriter`、zcode 引擎 `journal-io.ts`、磁盘文件名 `journal-<taskId>.jsonl`）与 run 域 journal 概念（`run-event-journal.ts` 等）。同族收尾批（record 域与 runtime 派生视图）已完成：record 域事件词族现行词 = `RecordEvent` / `RecordEventInput` / `RecordEventHeader`，流式读口 = `RecordEventStream` / `createRecordEventStream`（接口对齐 run 侧单写者纪律，基座仍是 `JsonlEventStream`）；runtime 派生视图现行符号词 = `EventProjectionSources` / `initialEventProjectionSources` / `mergeEventProjection` / `onEventProjectionChange` / `eventTailerRecheckMs`。事件文件首行头行的 type 判别值 = `record-events`（`RECORD_EVENTS_HEADER_TYPE`，落盘格式）。journal 词的保留边界前句即全部保留项。
 
 ### 折叠（fold）
 
-按 `seq` 顺序重放事件流、得到实体当前状态的动作。它是「事件流 → 状态」的唯一推导方式，也是判读权威——注册表投影、终局诊断引用、resume 资格、保留窗口资格都由折叠结果裁决。
+按 `seq` 顺序重放事件流、得到实体当前状态的动作。它是「事件流 → 状态」的唯一推导方式，也是判读权威——注册表派生视图、终局诊断引用、resume 资格、保留窗口资格都由折叠结果裁决。
 
-**唯一实现原则**：折叠与状态词表只有一份实现，runtime 内存投影、core 查询面、扩展与 session-reader 一律复用它，禁止各自再写一份「从事件算状态」的代码。
+**唯一实现原则**：折叠与状态词表只有一份实现，runtime 内存派生视图、core 查询范围、扩展与 session-reader 一律复用它，禁止各自再写一份「从事件算状态」的代码。
 
-### 物化投影与索引
+### 物化派生视图与索引
 
-物化投影 = 把折叠结果写到盘上、免去每次重算的文件。判断它是**索引（缓存）**还是**第二份事实源**，用三条硬性质：
+物化派生视图 = 把折叠结果写到盘上、免去每次重算的文件。判断它是**索引（缓存）**还是**第二份事实源**，用三条硬性质：
 
 1. **可删**：整目录删掉后行为不变，只有性能下降；
 2. **带水位**：自带「派生自事件流的哪个 seq / 内容摘要」，读时对不上就回落事件流重建；
@@ -502,27 +537,27 @@ run 与 record 的状态变化唯一落盘形态：append-only 文本流，逐�
 | 载体 | ① 可删 | ② 带水位 | ③ 无独有字段 | 现状 |
 |---|---|---|---|---|
 | `sessions-index.json` | 是 | **是**（每条带该 jsonl 的 mtime+size，消费点 `record-store.ts` 逐条比对，不匹配即重探测） | 是 | **三性质齐备**——唯一的纯索引 |
-| manifest（`<sa-id>.json`） | 是（惰性通道 + boot 轮双重建） | **是**（`eventsStamp` = 派生自 `<id>.events` 的 mtime+size，写点先事件后投影构造性新鲜；读侧不匹配即跳过回落重建） | 是（`stopReason` / `turns` / `totalTokens` 已随读侧换源由 `record-settled` / `record-round-idle` 帧承载） | **三性质齐备的物化投影**；跨包读取面（session-reader 只认它）是整体退场的挂起点 |
+| manifest（`<sa-id>.json`） | 是（惰性通道 + boot 轮双重建） | **是**（`eventsStamp` = 派生自 `<id>.events` 的 mtime+size，写点先事件后派生视图构造性新鲜；读侧不匹配即跳过回落重建） | 是（`stopReason` / `turns` / `totalTokens` 已随读侧换源由 `record-settled` / `record-round-idle` 帧承载） | **三性质齐备的物化派生视图**；跨包读侧（session-reader 只认它）是整体退场的挂起点 |
 | ~~`.state` 收条~~ | — | — | — | **已删除**：收条由 `record-settled` / `record-round-idle` 帧承载（写侧、读侧、戳与常量全部退场；快路径走索引收条，重建路径走折叠） |
-| `.record-binding` | 写点退场后可达 | 戳（写面覆盖写变 mtime，缓存键职责） | 是（身份域 + 统计域已全部入事件载荷） | **读侧已全部换源事件流折叠**（身份 = `identityFromFold`、统计 = `receiptStatisticsFromFold`、revive 基线 = `baselineStatisticsFromFold`）——binding 只剩写面（spawn 回填 / settle 快照 / reopen merge）与负缓存击穿戳；写点退场 = 后续批次 |
+| `.record-binding` | 写点退场后可达 | 戳（写侧覆盖写变 mtime，缓存键职责） | 是（身份域 + 统计域已全部入事件载荷） | **读侧已全部换源事件流折叠**（身份 = `identityFromFold`、统计 = `receiptStatisticsFromFold`、revive 基线 = `baselineStatisticsFromFold`）——binding 只剩写侧（spawn 回填 / settle 快照 / reopen merge）与负缓存击穿戳；写点退场 = 后续批次 |
 
 **终态目标**：只有索引存在，且三性质齐备；其余载体删除。
 
 **`.state` 退场已完成**（记录于此以免后人重复排查）：写函数族 / 读函数 / `statStateStamp` / 三个后缀常量与 `SidecarStat` 已从 `state-marker.ts` 删除；`markResurrected` 不再清理旧终态文件（磁盘终态由事件流决定，重开由 `record-reopened` 帧表达）；12 处测试 fixture 迁到事件帧播种（helper `execution/__tests__/helpers/seed-terminal-record.ts`），纯旧兼容用例随其被测对象一并删除。
 
-**索引承载终态收条的裁决**（换源时不可回避）：终态域（`stopReason` / `turns` / `totalTokens`）换源到折叠后，索引快路径**不能**去读每条记录的事件文件——那正好废掉索引存在的理由（冷启动零内容读取）。因此索引条目必须自己承载终态收条，且它的水位要覆盖**事件文件**的 stat（今天只盖 jsonl 的 mtime+size：轮终收条写在 jsonl 末次写入之后，只比 jsonl 会漏掉收条变化）。两条腿：① 索引条目加终态字段；② 水位扩到 `jsonl + <id>.events` 两个 stat。**两腿均已落地**：索引条目自承收条（`receipt` = stopReason + endedAt；v3 起再加 `turns` / `totalTokens`——统计域随读侧换源由折叠承载，索引自承后快路径零内容读取即可回答「为什么停/何时停/停时多少量」），`INDEX_VERSION` 升到 3；round 不入索引（既有缺口，消费侧登记，下轮戳变化重探补齐）。
+**索引承载终态收条的裁决**（换源时不可回避）：终态域（`stopReason` / `turns` / `totalTokens`）换源到折叠后，索引快路径**不能**去读每条记录的事件文件——那正好废掉索引存在的理由（冷启动零内容读取）。因此索引条目必须自己承载终态收条，且它的水位要覆盖**事件文件**的 stat（今天只盖 jsonl 的 mtime+size：轮终收条写在 jsonl 末次写入之后，只比 jsonl 会漏掉收条变化）。两条路径：① 索引条目加终态字段；② 水位扩到 `jsonl + <id>.events` 两个 stat。**两条路径均已落地**：索引条目自承收条（`receipt` = stopReason + endedAt；v3 起再加 `turns` / `totalTokens`——统计域随读侧换源由折叠承载，索引自承后快路径零内容读取即可回答「为什么停/何时停/停时多少量」），`INDEX_VERSION` 升到 3；round 不入索引（既有缺口，消费侧登记，下轮戳变化重探补齐）。
 
-第 ② 腿的改动面（动手前先看这里，别低估）：事件戳属于缓存键，而缓存新鲜度判定是中心面——连带影响 `isFreshCache`、负缓存条目、以及索引投影 `projectIndexEntries` 的正/负两类条目。**已完成**：`FileStamps` 去掉 state 维（现为 `jsonl` + `binding`），事件戳落在 `FileCacheEntry.events` 并由 `isFreshCache` 作为第四维比对；索引条目承载事件戳（`eventsMtimeMs` / `eventsSize`）与终态收条（`receipt`），`INDEX_VERSION` 升到 2。
+第 ② 条路径的改动范围（动手前先看这里，别低估）：事件戳属于缓存键，而缓存新鲜度判定是中心面——连带影响 `isFreshCache`、负缓存条目、以及索引派生视图 `projectIndexEntries` 的正/负两类条目。**已完成**：`FileStamps` 去掉 state 维（现为 `jsonl` + `binding`），事件戳落在 `FileCacheEntry.events` 并由 `isFreshCache` 作为第四维比对；索引条目承载事件戳（`eventsMtimeMs` / `eventsSize`）与终态收条（`receipt`），`INDEX_VERSION` 升到 2。
 
 ### 身份绑定（`.record-binding`）与写权（`epoch`）
 
-`.record-binding` = 每子会话一个 sidecar（`<sessionFile>.record-binding`），记 record id ↔ 会话文件映射。**读侧已全部换源事件流折叠**（[② 读侧换源]：身份 = `identityFromFold`、统计 = `receiptStatisticsFromFold`、revive 基线 = `baselineStatisticsFromFold`，`.record-binding` 读函数零生产读路径）——binding 只剩写面（spawn 回填 / settle 快照 / reopen merge-or-create，best-effort）与缓存键戳职责（写面覆盖写变 mtime，负缓存击穿）。写点退场 = 后续批次，退场后该文件删除。
+`.record-binding` = 每子会话一个 sidecar（`<sessionFile>.record-binding`），记 record id ↔ 会话文件映射。**读侧已全部换源事件流折叠**（[② 读侧换源]：身份 = `identityFromFold`、统计 = `receiptStatisticsFromFold`、revive 基线 = `baselineStatisticsFromFold`，`.record-binding` 读函数零生产读路径）——binding 只剩写侧（spawn 回填 / settle 快照 / reopen merge-or-create，best-effort）与缓存键戳职责（写侧覆盖写变 mtime，负缓存击穿）。写点退场 = 后续批次，退场后该文件删除。
 
 `epoch` = 写权世代计数，随写权取得递增，用于判定过期写者（`acquireWriteLease` 一族）。
 
 ### 记录谱系字段（origin / rootSessionId / parentRecordId / depth）
 
-判读 record 归属与嵌套深度的四件套：`rootSessionId` = 根会话（跨 tree 归属判据）、`parentRecordId` = 直接父 record、`depth` = 嵌套层数（`MAX_FORK_DEPTH` 上限判据）、`origin` = 诞生来源（工具调用 / workflow 成员 / resume 等）。查询面按 `rootSessionId` 过滤，禁止跨 tree 混读。
+判读 record 归属与嵌套深度的四件套：`rootSessionId` = 根会话（跨 tree 归属判据）、`parentRecordId` = 直接父 record、`depth` = 嵌套层数（`MAX_FORK_DEPTH` 上限判据）、`origin` = 诞生来源（工具调用 / workflow 成员 / resume 等）。查询范围按 `rootSessionId` 过滤，禁止跨 tree 混读。
 
 ### 轮次（round）与轮次事件
 
@@ -538,7 +573,7 @@ record 的执行单位：一次「派发 → 回收」= 一轮。`round-started`
 
 ### 三级降级读取链（引擎历史）
 
-非 pi 引擎的 record 详情读取顺序：① 引擎原生读取（zcode 隔离会话库 / 协议 `read`）→ ② 宿主事件文件重放 → ③ outcome-only（record 字段投影摘要）。逐级降级并留痕；pi record 不走该链（走会话文件直读）。**身份已知才允许降级**——「有会话锚却没有 engine」是数据损坏，必须显式失败，不能按 pi 链读。
+非 pi 引擎的 record 详情读取顺序：① 引擎原生读取（zcode 隔离会话库 / 协议 `read`）→ ② 宿主事件文件重放 → ③ outcome-only（record 字段派生视图摘要）。逐级降级并留痕；pi record 不走该链（走会话文件直读）。**身份已知才允许降级**——「有会话锚却没有 engine」是数据损坏，必须显式失败，不能按 pi 链读。
 
 ### 模型引用与三元组（`{provider, id, thinkingLevel}`）
 
@@ -553,7 +588,7 @@ record 的执行单位：一次「派发 → 回收」= 一轮。`round-started`
 schema 强制链的引擎确认信号：native 引擎在启动期武装断言通过 + 孙进程 spawn 成功后上报一次 `armed` 事件（载荷 = env 变量名 + 必备扩展包名）。宿主是独立信号源（监控不与施控同源），等待窗内未收到即 fail-fast。仅 native 引擎、仅 schema 任务；emulated 引擎恒不上报。契约义务见 [engine-development-guide](extensions/subagents/engine-development-guide.md) §6。
 
 ### 终局必达通知
-workflow run 的结果语义通知纪律：成功/失败/取消一律出终局通知，走确认式送达（持久账本 + 幂等键，at-least-once）。是 C-ext-19 确认式送达在 workflow 域的细化（C-ext-26），终局内容由 run 状态机统一裁决，禁止旁路第二通知面。
+workflow run 的结果语义通知纪律：成功/失败/取消一律出终局通知，走确认式送达（持久账本 + 幂等键，at-least-once）。是 C-ext-19 确认式送达在 workflow 域的细化（C-ext-26），终局内容由 run 状态机统一裁决，禁止旁路第二通知侧。
 
 ### 模型目录（pi 引擎域）
 pi 引擎的可用模型集合及其能力（思考档位等）。能力判定只在 `packages/runtime/src/services/model-capability.ts` 一点进入（ADR-0064 能力注册表），离线快照由 builtin provider 快照承载（`scripts/check-model-references.mjs` 检查漂移）。workflow 派发按全路径形态引用模型：裸名不解析、解析失败为期望行为（C-ext-24）。
@@ -567,12 +602,12 @@ pi 引擎的可用模型集合及其能力（思考档位等）。能力判定�
 ### Code Mode（codemode / 脚本模式）
 pi 1.0 内置扩展（builtin extension）提供的能力：模型编写 JavaScript 脚本调用工具，脚本内可并行调用多个工具、过滤过大的结果、生成图片，QuickJS 沙箱执行。taiji 侧常驻默认启用（零配置可用），设置页「系统」提供全局开关（SystemCodemodeSection，经 `config.getCodemodeEnabled` / `config.setCodemodeEnabled` 命令对）。激活判定 = settings.json `defaultTools` 解析出的激活工具集含 `codemode`（`isCodemodeActive`）；配置随新启动的会话读取。例外：会话以显式工具白名单启动时（launch preset `--tools` 或 subagent agentTools），pi 语义是白名单整体覆盖 `defaultTools`，该类会话 codemode 不激活。与 MCP 管理的职责边界：本词条域管 codemode 全局默认启用（settings.json `defaultTools`）；per-server 暴露档位（exposure）与 mcp.json 的 `autoEnableCodemode` 字段归 [MCP 服务器条目](#mcp-服务器条目mcp-server-entry)词条。
 
-**代码映射**: `packages/runtime/src/infra/pi/pi-codemode-settings.ts`（解析/迁移/开关写入唯一写点）；渲染面 `packages/renderer/src/components/settings/system/SystemCodemodeSection.vue`。
+**代码映射**: `packages/runtime/src/infra/pi/pi-codemode-settings.ts`（解析/迁移/开关写入唯一写点）；渲染范围 `packages/renderer/src/components/settings/system/SystemCodemodeSection.vue`。
 
 ### MCP 服务器条目（MCP Server Entry）
 mcp.json 里一条具名配置：传输参数 + 启停（`enabled`）+ 暴露档位（`exposure`）+ 描述（`description`）。名称是聚合唯一键：全局唯一，仅含字母、数字、下划线、连字符（连字符与下划线归并同名，pi 比对前把连字符替换为下划线）；编辑态锁定名称——改名 = 删除后重建，不做原地改名。传输类型两种：stdio（本地子进程：`command`/`args`/`env`/`cwd`）或 http（远程流式 HTTP：`url`/`headers`），由传输字段有无表达、不落 `type` 键。管理入口 = 设置页 MCP 分区（清单、表单/代码双模式表单、启停/删除确认、连接测试）。
 
-**代码映射**: `packages/runtime/src/infra/pi/pi-mcp-store.ts`（读写与保存校验唯一入口）；渲染面 `packages/renderer/src/components/settings/mcp/`。
+**代码映射**: `packages/runtime/src/infra/pi/pi-mcp-store.ts`（读写与保存校验唯一入口）；渲染范围 `packages/renderer/src/components/settings/mcp/`。
 
 ### mcp.json
 pi 内置 MCP 扩展的用户级配置文件（`<agentDir>/mcp.json`，taiji 隔离部署下 = `<数据目录>/agent/mcp.json`，路径经 `getMcpConfigPath()` 动态推导；与 settings.json 的 [defaultTools](#defaulttools) 分属两个文件、两套字段域）。**生效语义 = 新会话读取**：会话启动时由 spawn 白名单装载的 `--extension builtin:mcp` 扩展读取并后台连接全部启用的服务器，运行中会话不感知配置变化——与扩展启停同属「写文件、新会话生效」模型，页头固定说明该语义。taiji 侧唯一读写层 = `packages/runtime/src/infra/pi/pi-mcp-store.ts`（跨进程磁盘锁内重读合并写入 + 保存校验 fail-fast + 文件损坏拒入不覆盖外部手编内容）；pi 官方写路径（`editMcpServers` / 终端 `pi mcp` 命令）与用户手编并存且无锁，锁协议与外部并发窗口登记见 [data-source-registry §6](architecture/data-source-registry.md)。项目级 `<会话cwd>/.pi/mcp.json` 在该会话中同名整条覆盖用户级——设置页清单只反映用户级文件（覆盖偏差由设置页页头说明声明）。`mcpServers` 之外的顶层键（如 `autoEnableCodemode`）taiji 写回时原样保留（丢顶层键会静默改变 codemode 激活行为）。
@@ -589,7 +624,7 @@ pi 运行时读配置与存数据的目录（系统 pi = `~/.pi/agent`；taiji �
 pi settings.json 的默认工具集字段（数组，settings-manager 解析后决定新会话启动时激活哪些工具）：pi 侧两层合并（global/project）经 `mergeDefaultTools`、激活集解析经 `resolveDefaultTools`；字段缺失时 pi 会话层回落 `DEFAULT_TOOL_NAMES`（read/bash/edit/write）。taiji 读侧解析同构实现 = `resolveDefaultToolSet`（开关显示判定），对字段缺失/非数组坏值统一解析为空激活集（codemode 不在默认集，与 pi 侧「不激活」判定等价）。字段归属 = settings.json tools 字段域（[data-source-registry §6](architecture/data-source-registry.md)），写方全集 = taiji 启动迁移 + 设置页 Code Mode 开关，用户手工编辑始终被尊重（taiji 不把用户移除的条目写回）。
 
 ### 工具增量条目（`+name` / `-name` 语法）
-`defaultTools` 数组条目的增量修饰语法：`+name` 追加工具、`-name` 移除工具，按条目顺序应用；纯名条目（无修饰符）= 整体替换默认工具集。解析规则（pi `getDefaultTools` 读面 + `resolveDefaultTools` 同构——非字符串元素的丢弃发生在 `getDefaultTools` 读面 filter，`resolveDefaultTools` 本身不剥非字符串，与 PS-70 登记归属一致）：数组内任一纯名出现 → 激活集 = 全部纯名（增量条目在其上继续应用）；仅增量条目 → 激活集从 `DEFAULT_TOOL_NAMES` 起步；空数组 → 空激活集；非字符串元素解析前被丢弃。taiji 用 `+codemode` 表达默认启用、`-codemode` 表达关闭占位（负条目占位 = 字段保留 + codemode 关闭跨重启持久 + 不写回用户默认工具集的唯一同时满足形态）。
+`defaultTools` 数组条目的增量修饰语法：`+name` 追加工具、`-name` 移除工具，按条目顺序应用；纯名条目（无修饰符）= 整体替换默认工具集。解析规则（pi `getDefaultTools` 读侧 + `resolveDefaultTools` 同构——非字符串元素的丢弃发生在 `getDefaultTools` 读侧 filter，`resolveDefaultTools` 本身不剥非字符串，与 PS-70 登记归属一致）：数组内任一纯名出现 → 激活集 = 全部纯名（增量条目在其上继续应用）；仅增量条目 → 激活集从 `DEFAULT_TOOL_NAMES` 起步；空数组 → 空激活集；非字符串元素解析前被丢弃。taiji 用 `+codemode` 表达默认启用、`-codemode` 表达关闭占位（负条目占位 = 字段保留 + codemode 关闭跨重启持久 + 不写回用户默认工具集的唯一同时满足形态）。
 
 **代码映射**: `packages/runtime/src/infra/pi/pi-codemode-settings.ts` 的 `resolveDefaultToolSet`（语义表驱动单测 `__tests__/pi-codemode-settings.test.ts`；pi 语义门禁登记 docs/pi-semantics.json PS-70）。
 
@@ -606,7 +641,7 @@ pi 内置扩展提供的工具检索工具：BM25 排序（Okapi BM25），检�
 **代码映射**: pi builtin extension（实装 `dist/extensions/tool-search/`）；taiji 侧迁移写点 `packages/runtime/src/infra/pi/pi-codemode-settings.ts`。
 
 ### 乐观更新协议
-「乐观写本地 → await 持久化 → 失败回滚后 rethrow」的唯一实现（`packages/core/src/foundation/optimistic-update.ts`，提供 `runOptimisticUpdate`/`optimisticUpdate`/`refCell` 三形态）；错误映射到既有错误面（toast / actionError / saveError 标志）由调用方或字段 module 承接。RPC 设置项字段编排（`setting-field` module）与 settings 域全部乐观写现场均收编于此协议。**Avoid**：手写 prev/rollback 快照样板、组件内 try/catch 回滚、置标志式失败语义。
+「乐观写本地 → await 持久化 → 失败回滚后 rethrow」的唯一实现（`packages/core/src/foundation/optimistic-update.ts`，提供 `runOptimisticUpdate`/`optimisticUpdate`/`refCell` 三形态）；错误映射到既有错误范围（toast / actionError / saveError 标志）由调用方或字段 module 承接。RPC 设置项字段编排（`setting-field` module）与 settings 域全部乐观写现场均收编于此协议。**Avoid**：手写 prev/rollback 快照样板、组件内 try/catch 回滚、置标志式失败语义。
 
 ### 动作错误来源标签（ActionErrorSource）
 provider-edit 域动作错误的归属判定机制：每条动作错误带 source 标签（save/headers/discover/models），清除与归属按 source 判定。**Avoid**：比对错误展示文案判定归属（i18n 运行时值不稳定，locale 切换后失效——曾致旧错误滞留的真 bug）。
@@ -678,7 +713,7 @@ composer 工具条左簇的常驻观察入口（`packages/renderer/src/component
 > **术语演进（2026-09 核对）**：原「WidgetArea」（对话流内的单行 pill 状态带，`@taiji/ui` 组件）已退役——widget 消费端收敛为上述托盘（2026-09-16，设计 D11：对话流回归纯内容，入口唯一化）。子会话第 4 件为模式体系设计 D7 新增（u7 已落地，面板 `TraySessionPanel.vue` 为扁平列表而非分桶槽）。
 
 ### 语音朗读（TTS）
-taiji 的 assistant 回复朗读能力（ai-voice-tts 设计，P2 辅助功能）。链路：朗读按钮（TurnSummary `speak-btn`，三态 idle/loading/playing + 生成中置灰）→ `useTtsPlayer` 全局单例（ADR-0049 例外清单，窗口级唯一播放任务态）→ core 域 `tts.speak` → runtime `TtsService` 八步编排（现读配置 → 清洗复核 → 缓存键 → 分句 → 逐段合成 → WAV 封装 → 原子写 + FIFO 封顶 → reply `filePath`）→ local-file 音频播放。三家 provider：MiniMax `t2a_v2` / StepFun `audio/speech` / MiMo 借壳 `chat/completions`，配置入口 = 设置页「语音」菜单（表单投影驱动，用户不接触 JSON）。
+taiji 的 assistant 回复朗读能力（ai-voice-tts 设计，P2 辅助功能）。链路：朗读按钮（TurnSummary `speak-btn`，三态 idle/loading/playing + 生成中置灰）→ `useTtsPlayer` 全局单例（ADR-0049 例外清单，窗口级唯一播放任务态）→ core 域 `tts.speak` → runtime `TtsService` 八步编排（现读配置 → 清洗复核 → 缓存键 → 分句 → 逐段合成 → WAV 封装 → 原子写 + FIFO 封顶 → reply `filePath`）→ local-file 音频播放。三家 provider：MiniMax `t2a_v2` / StepFun `audio/speech` / MiMo 借壳 `chat/completions`，配置入口 = 设置页「语音」菜单（表单派生视图驱动，用户不接触 JSON）。
 
 ### 语音朗读总开关
 设置页「启用语音朗读」开关（`use-tts-enabled.ts`，localStorage key `taiji.tts.enabled`，data-source-registry #47）：只拦 idle 新朗读（关闭时点朗读 → 「语音服务未配置」toast 不发 RPC）；非 idle 停止与设置页「保存并测试」不受拦。默认开启（键缺失/读失败同默认开）。

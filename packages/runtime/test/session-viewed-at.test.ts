@@ -14,7 +14,7 @@
  *  无需 session-service.test.ts 的 7 模块 mock 链；BackgroundTaskService 轮询 timer
  *  unref 不持进程，路径经 globalSetup 的 TAIJI_AGENT_DATA_DIR=tmp 重定向，不触真实数据目录）。
  * - 处理器链路（第 2/3 层）不用真 service 挂进 handler：getSummary 未命中会拖入
- *  RespawnOrchestrator/restore 磁盘机制（与本测试目标无关的失败面）；fake 断言调用
+ *  RespawnOrchestrator/restore 磁盘机制（与本测试目标无关的失败情形）；fake 断言调用
  *  参数恰是要锁定的「handler → 记录方法」契约（mock 模式照抄
  *  session-message-handler-switch-reply.test.ts 先例）。故障注入（第 3 层）也只能在
  *  fake 上做——真 Map.set 不抛，无法注入失败。

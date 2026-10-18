@@ -9,7 +9,7 @@
  * - 未命中白名单的 type 不触发任何 handler（回归锚）
  *
  * 订阅走真实 @taiji/core/transport/api events 模块（模块级 Map，dispatchSession 直调）；
- * 组件上下文经 mount Host 提供（useSessionEvents 有 getCurrentInstance 守卫）。
+ * 组件上下文经 mount Host 提供（useSessionEvents 有 getCurrentInstance 检查）。
  */
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { mount } from '@vue/test-utils'

@@ -113,7 +113,7 @@ export async function rpc<T = Record<string, unknown>>(
     /** 无法解析为非 JSON 的帧累计数（RT-8#13：静默丢弃须显形） */
     let dropCount = 0
 
-    /** 首次失败结算收口：置位 + 清 timer + 关连接 + reject（幂等，已结算时静默）。 */
+    /** 首次失败结算收尾：置位 + 清 timer + 关连接 + reject（幂等，已结算时静默）。 */
     const settleReject = (err: Error): void => {
       if (settled) return
       settled = true

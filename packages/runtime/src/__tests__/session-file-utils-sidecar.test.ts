@@ -2,16 +2,16 @@
  * Sidecar 绑定测试（agent binding + model 扫描可见性）。
  *
  * Agent binding（u7-sidecar-persist 验收 A3 + A4）：
- * A3：规则 #6 守卫——session JSONL 不存在时 persistAgentBinding 不创建 sidecar。
+ * A3：规则 #6 检查——session JSONL 不存在时 persistAgentBinding 不创建 sidecar。
  * A3b：缓存失效集成——persistAgentBinding 写入后 sessionMetaCache 失效，scanPiSessions 能立即读到 binding。
  * A4：readAgentBinding 降级路径——sidecar 不存在/JSON 损坏/spawnSource 非法 → undefined。
  *
- * RT-3#3 读侧显形（warn 分支回归守卫）：meta/handoff sidecar 存在但内容非法 JSON 时
+ * RT-3#3 读侧显形（warn 分支回归检查）：meta/handoff sidecar 存在但内容非法 JSON 时
  * warnSidecarReadFailureOnce 恰出声一次（ENOENT 不出声）且降级走 JSONL/尾读兜底——
  * 回归即退回「绑定损坏与从未绑定不可区分」的静默态。
  *
  * Model binding（缓存治理批 3 U8 后仅存扫描可见性面）：
- * M1：BINDING_FIELDS 矩阵守卫——modelId/thinkingLevel 四列值符合预期。
+ * M1：BINDING_FIELDS 矩阵检查——modelId/thinkingLevel 四列值符合预期。
  * M2d：「JSONL append model entry → 扫描反向读可见」集成（持久层唯一写方 = pi，
  *     无 taiji 侧写点）。persist 侧用例（M2a-M2c / modelSidecarPath）随 W6 写点退役删除，
  *     反向读语义权威覆盖见 src/infra/pi/__tests__/session-model-reverse-read.test.ts。
@@ -48,7 +48,7 @@ function makeTmpDir(prefix: string): string {
 }
 
 describe('persistAgentBinding', () => {
-  it('A3: 规则 #6 守卫——session JSONL 不存在时不创建 sidecar', () => {
+  it('A3: 规则 #6 检查——session JSONL 不存在时不创建 sidecar', () => {
     const dir = makeTmpDir('u7-a3-')
     try {
       const nonExistentFile = join(dir, 'nonexistent.jsonl')
@@ -299,7 +299,7 @@ describe('sidecar 损坏 warn 分支（RT-3#3 非 ENOENT 出声）', () => {
 
 // ── Model binding sidecar 测试 ─────────────────────────────────
 
-describe('M1: BINDING_FIELDS 矩阵守卫', () => {
+describe('M1: BINDING_FIELDS 矩阵检查', () => {
   it('modelId 四列 = create:options / handoff:options / restore:none / fork:options', () => {
     expect(BINDING_FIELDS.modelId.entries.create).toBe('options')
     expect(BINDING_FIELDS.modelId.entries.handoff).toBe('options')

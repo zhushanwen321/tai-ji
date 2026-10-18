@@ -4,7 +4,7 @@
 //   判定层：createBackgroundStream 真实函数（vi.importActual 绕过文件级 mock）——
 //   gui+control 激活不创建；tui / 非托管 / headless 原样创建；sink=null 恒降级。
 //   接线层：SubagentService.execute（background → kickOffChatRound 同步段）透传
-//   mode/streamSink 给工厂——mode 传错 = 判定失效，故接线面必须锁定。
+//   mode/streamSink 给工厂——mode 传错 = 判定失效，故接线点必须锁定。
 //
 // spawn 层 mock（FakeChild），与 nested-visibility-env-propagation.test.ts 同模式。
 
@@ -66,7 +66,7 @@ vi.mock("node:fs", async () => {
   };
 });
 
-// 接线层观测点：工厂调用记录（参数透传断言用）。返回 stub 形状满足消费面
+// 接线层观测点：工厂调用记录（参数透传断言用）。返回 stub 形状满足消费方
 // （session-runner onDelta / subagent-service dispose）。判定层走 vi.importActual。
 vi.mock("../assembly/stream-sink.ts", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../assembly/stream-sink.ts")>();

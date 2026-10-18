@@ -1,7 +1,7 @@
 /**
  * applyEntry —— chat 视图态 reducer（data-source-governance W20，D5「单一 reducer 双路喂入」重放侧）。
  *
- * 职责：把 pi session entry（get_entries 返回 / 实时事件重构，W21）逐条投影为 chat 视图态切片。
+ * 职责：把 pi session entry（get_entries 返回 / 实时事件重构，W21）逐条映射为 chat 视图态切片。
  * 消息列表 = entry 日志的纯函数——同 entry 序列必得同 state，「live ≡ reload」从构造上成立。
  *
  * 纯度契约（规格锁定 1）：
@@ -15,7 +15,7 @@
  * - console.warn 是可观测性（未知 role / 孤儿 toolResult），不影响确定性——与迁移前行为对齐。
  *
  * [transient fold，collector 拆段] handler 拆两段：「派生段」（deriveXxxMessage 纯函数，构造
- * Message / ToolCall）+「commit 段」（ChatStateCollector 落账）。两个 collector 实现共享同一
+ * Message / ToolCall）+「commit 段」（ChatStateCollector 记账）。两个 collector 实现共享同一
  * 派生段与 dispatch 骨架（ADR-0062「实时帧与文件重放喂同一 reducer」的结构性保证——分组/构造
  * 规则只有一份，防 W20/W21 曾发生的 reducer 分叉漂移）：
  * - applyEntry 单条对外 API → copy-on-write collector：每操作产新 state 引用、未变字段共享
@@ -24,26 +24,26 @@
  *   拷贝的 O(n²) 降为 O(n)（runtime convertPiHistory = lift + replayEntries，getHistory 冷切入
  *   与历史 load-more 在 10k entry 会话上的真实痛点）。mutable 中间态只存在于 fold
  *   过程内，snapshot 组装产物后不再写——「内部累积、产物同构」约定，产物与 copy-on-write 路径
- *   deep-equal（元断言测试 apply-entry-fold-equivalence.test.ts 守卫），不加运行时冻结开销。
+ *   deep-equal（元断言测试 apply-entry-fold-equivalence.test.ts 检查），不加运行时冻结开销。
  * - createChatViewStateBuffer → buffer collector：跨 feed 调用持久的 mutable 累积缓冲
  *   （store entryStates 活容器形态）——容器操作与 mutable collector 同构，差别只在容器
  *   生命周期从「单次 fold 过程内」延长到「session 分区生命周期」，实时每帧一条 entry 的
  *   场景（store.applyEntryFrame）从每帧 copy-on-write 整表拷贝（10k 消息会话每帧 O(n)
- *   分配）变为 O(1) 原地落账。**新约束：buffer.state 是活容器（引用恒定、容器内容原地
+ *   分配）变为 O(1) 原地记账。**新约束：buffer.state 是活容器（引用恒定、容器内容原地
  *   累积），读方不得跨帧持有其数组/Set 引用并假设内容不变**——需要稳定值时用 snapshot()
  *   浅拷贝。产物与 copy-on-write 路径 deep-equal 的同构约定同 mutable collector
- *   （apply-entry-buffer-equivalence.test.ts 守卫）。
+ *   （apply-entry-buffer-equivalence.test.ts 检查）。
  *
  * 规则迁移源：packages/runtime/src/infra/pi/message-converter.ts 重放路径
  * （convertSinglePiMessage 的 content parts 解析 / skill block 剖离 / usage / fileChanges 静态提取、
  * convertPiHistory 的 toolResult 窗口局部配对 / compactionSummary / custom / branchSummary /
  * bashExecution 分支）。runtime 保留 wire 层职责（RPC reply → entry 列表 → 喂本 reducer，
- * 见 message-converter.ts liftHistoryToEntries），派生规则唯一实现在此（D7 投影一次）。
+ * 见 message-converter.ts liftHistoryToEntries），派生规则唯一实现在此（D7 只生成一次派生视图）。
  *
  * [已知分叉，收敛待后续 wave] stripAnsi/normalizePiToolResult 与 runtime
  * infra/pi/normalize-tool-result.ts（event-adapter 实时路径 hook 上下文消费）仍为两份：
  * core 不依赖 runtime（包依赖方向）。W21 起 core 版已导出（effects/registry 的
- * tool_call_end overlay 收口消费，输入语义 = toolResult message body），shared 收敛
+ * tool_call_end overlay 收尾消费，输入语义 = toolResult message body），shared 收敛
  * 留待后续 wave 统一处理。W5（2026-08-20）images 提取差异已消除——两份行为对齐
  * （此前 core 副本丢 toolResult content 的 ImageContent → 图片工具结果重开消失，
  * 破 live≡replay；审计 #3，pi-assumption-remediation）。
@@ -52,11 +52,11 @@
  * （apply-entry.ts + apply-entry-convert.ts + apply-entry-utils.ts）只 import
  * '@taiji/shared' 与群内文件，不 import core 内群外模块（防 vue 依赖渗入 runtime bundle）。
  * 拆分布局（依赖单向 convert → utils、本文件 → utils + convert，禁止循环 import）：
- * - apply-entry-utils.ts：共享底层（normalizePiToolResult / toMs / Record 守卫 / 常量类型）
+ * - apply-entry-utils.ts：共享底层（normalizePiToolResult / toMs / Record 检查 / 常量类型）
  * - apply-entry-convert.ts：message body 转换群（convertMessageBody / computeToolCallFill 等）
  * - 本文件：reducer 本体（派生段 deriveXxx / commit 段 handler / dispatch 骨架 /
  *   ChatStateCollector 三实现 / applyEntry / replayEntries / createChatViewStateBuffer）
- *   + 对外导出面。
+ *   + 对外导出清单。
  */
 import type {
   Message,
@@ -114,7 +114,7 @@ export type {
  * 路径（applyEntry 单条 / replayEntries 序列），全部调用方从空 state 出发 fold。
  */
 export interface ChatViewState {
-  /** 重建出的消息列表（entry 日志的投影，按 apply 顺序追加） */
+  /** 重建出的消息列表（entry 日志的派生视图，按 apply 顺序追加） */
   messages: Message[]
   /**
    * 窗口内无法配对的孤儿 toolResult。消费方在 runtime 侧增量合并阶段（session-service
@@ -150,7 +150,7 @@ export function createInitialChatViewState(): ChatViewState {
   }
 }
 
-// ── 确定性派生工具（toMs / Record 守卫在 apply-entry-utils.ts）────────────────
+// ── 确定性派生工具（toMs / Record 检查在 apply-entry-utils.ts）────────────────
 
 /**
  * 本条 entry 派生 Message 的确定性 id 基。
@@ -161,14 +161,14 @@ function deriveBaseId(entry: PiEntryBase, messageCount: number): string {
   return entry.id ?? `e${messageCount}`
 }
 
-// ── commit 段：ChatStateCollector（state 落账抽象，两条 fold 路径的唯一分叉点）──────
+// ── commit 段：ChatStateCollector（state 记账抽象，两条 fold 路径的唯一分叉点）──────
 
 /**
- * ChatViewState 落账抽象：派生段构造 Message / ToolCall 后经此提交，读口供 handler 的
- * 窗口配对 / 幂等去重查询。三个实现差异只在落账方式（copy-on-write vs fold 内原地 vs
+   * ChatViewState 记账抽象：派生段构造 Message / ToolCall 后经此提交，读口供 handler 的
+   * 窗口配对 / 幂等去重查询。三个实现差异只在记账方式（copy-on-write vs fold 内原地 vs
  * 跨帧原地），派生与 dispatch 完全共享——「同一 reducer 双路喂入」的构造性保证。
  *
- * 不导出（模块内部 seam）：state 结构经 collector 收口，外部无法绕过 fold 构造 ChatViewState。
+ * 不导出（模块内部 seam）：state 结构经 collector 收敛，外部无法绕过 fold 构造 ChatViewState。
  */
 interface ChatStateCollector {
   /** 当前消息数（deriveBaseId 的 `e<N>` 下标基；两实现在同一 fold 时序下值恒一致） */
@@ -177,13 +177,13 @@ interface ChatStateCollector {
   hasDeliveredToolResult(toolCallId: string): boolean
   /** 窗口局部配对锚点：最近一条带 toolCalls 的消息及其下标（无 → undefined） */
   peekLastAssistantWithToolCalls(): { index: number; message: Message } | undefined
-  /** 对话流追加一条投影消息 */
+  /** 对话流追加一条派生视图消息 */
   appendMessage(msg: Message): void
   /** toolResult 回填：原位替换 host 消息（copy-on-write 下其余元素保留引用） */
   replaceMessageAt(index: number, msg: Message): void
   /** 孤儿 toolResult 收集（增量合并阶段回填消费） */
   addOrphanToolResult(orphan: PiToolResultBody): void
-  /** [R2-S1] 投递记账（无 toolCallId 的畸形 body 由 handler 侧守卫不调） */
+  /** [R2-S1] 投递记账（无 toolCallId 的畸形 body 由 handler 侧检查不调） */
   recordDeliveredToolResult(toolCallId: string): void
   /** 追加的 assistant 消息带非空 toolCalls 时更新配对锚点下标 */
   markLastAssistantWithToolCalls(index: number): void
@@ -288,12 +288,12 @@ function createMutableCollector(initial: ChatViewState): ChatStateCollector {
  *
  * 动机：实时链路每帧一条 entry 喂 applyEntry（copy-on-write），10k 消息会话每帧整表拷贝
  * messages 数组 + orphan 数组 + delivered Set——净分配随会话长度线性增长（短命垃圾 → GC
- * 停顿）。buffer 把容器提升为跨 feed 持久的实例字段，每帧落账 O(1)：消息对象仍不可变
+   * 停顿）。buffer 把容器提升为跨 feed 持久的实例字段，每帧记账 O(1)：消息对象仍不可变
  * （replace 类操作只换槽位引用，不 mutate 对象），可变点只剩容器本身。
  *
  * 派生段与 dispatch 骨架复用同前两种形态（feed 内直调 dispatchEntry）——「同一 reducer
  * 双路喂入」对 buffer 形态构造性保持，产物与 copy-on-write / mutable fold 路径 deep-equal
- * （apply-entry-buffer-equivalence.test.ts 守卫）。
+   * （apply-entry-buffer-equivalence.test.ts 检查）。
  *
  * **活容器约束（本形态新增，读方义务）**：`state` 引用恒定，容器内容随 feed 原地累积——
  * 读方不得跨帧持有其数组 / Set 引用并假设内容不变（如需稳定值用 snapshot() 浅拷贝）。
@@ -306,7 +306,7 @@ function createMutableCollector(initial: ChatViewState): ChatStateCollector {
 export interface ChatViewStateBuffer {
   /** 活容器视图：引用恒定、内容随 feed 原地累积（读方不得跨帧持有容器引用假设不变） */
   readonly state: ChatViewState
-  /** 喂入一条 entry，原地落账（不 mutate 输入 entry 对象） */
+  /** 喂入一条 entry，原地记账（不 mutate 输入 entry 对象） */
   feed(entry: PiEntry): void
   /** 浅拷贝快照（容器层 clone、消息对象共享引用），供对账 / 测试低频使用 */
   snapshot(): ChatViewState
@@ -426,7 +426,7 @@ function deriveBashExecutionMessage(body: PiMessageBody, baseId: string, fallbac
 // （compaction / branch_summary）双形态存储（见 applyMessageEntry 注释）——两对派生段
 // 仅「id / ts 来源 + 字段归一」异源（调用方算好传入），Message 构造逐字同构，收敛为
 // 共享构造核心；fromId 归一留在调用方（role 形态 typeof 收窄 vs entry 形态类型直传，
-// 两形态语义刻意不同构）。append 由 collector 落账段统一承担（transient fold 架构）。
+// 两形态语义刻意不同构）。append 由 collector 记账段统一承担（transient fold 架构）。
 
 /** compaction 构造核心（双形态共用）：summary 缺失 → 中文 fallback「上下文已压缩」。 */
 function deriveCompactionSummaryMessageCore(
@@ -541,7 +541,7 @@ function deriveCustomMessageEntryMessage(entry: PiCustomMessageEntry, baseId: st
   }
 }
 
-// ── commit 段 handler（读口判定 + 派生段 → collector 落账，顺序语义与拆段前一致）────────
+// ── commit 段 handler（读口判定 + 派生段 → collector 记账，顺序语义与拆段前一致）────────
 
 /**
  * toolResult role：窗口局部配对回填 host toolCall，配不上 → 孤儿收集；同 toolCallId 幂等。
@@ -551,9 +551,9 @@ function commitToolResultMessage(c: ChatStateCollector, body: PiMessageBody): vo
   // {role:'toolResult'} 两个事件，taiji 翻译为 message.tool_call_end / message.message_end
   // 两条帧，effects/registry 两个 handler 各喂本函数一次。去重键 = deliveredToolResultIds
   // （「已投递过该 toolCallId 的 toolResult」）而非「存在该 toolCallId」：任一帧单独到达
-  // （另一帧丢失）时是首次投递，照常投影——两入口任一单独到达仍正常投影的单入口契约；
+  // （另一帧丢失）时是首次投递，照常生成派生视图——两入口任一单独到达仍正常生成派生视图的单入口契约；
   // 第二条同 id 帧整体 no-op（回填不重放、orphan 不重复收集），保留首条版本（tool_call_end
-  // 恒先到，其 entry 含 hook 改写后内容、与 overlay 收口同值），故双喂入 [t_end, m_end] ≡
+  // 恒先到，其 entry 含 hook 改写后内容、与 overlay 收尾同值），故双喂入 [t_end, m_end] ≡
   // 单喂入 [t_end] 对任意帧序/丢失组合构造成立——异常时序下不再产生重复孤儿永久残留
   // （live/reload 漂移源消灭）。无 toolCallId 的畸形 toolResult 无键可去重，维持原语义。
   // [chat-flow-timestamp U3] endTime 例外（last-wins）：首条帧（tool_call_end 重构）的
@@ -659,14 +659,14 @@ function dispatchMessageEntry(c: ChatStateCollector, entry: PiMessageEntry): voi
 }
 
 /**
- * 单条 pi entry → chat 视图态切片的投影 dispatch（D5）。
+ * 单条 pi entry → chat 视图态切片的派生视图 dispatch（D5）。
  *
  * 按 entry type 分派（message 经 dispatchMessageEntry 按 role 细分），applyEntry /
  * replayEntries 两条 fold 路径共用——「live ≡ reload」两条链路共用同一 dispatch 与派生段。
  *
  * case 覆盖（pi SessionEntry 全集）：message（role 细分 user/assistant/toolResult/
  * bashExecution/compactionSummary/custom/branchSummary）/ custom / label / compaction /
- * branch_summary / custom_message / usage / context_edit（后两者零投影显式 no-op）；
+ * branch_summary / custom_message / usage / context_edit（后两者零派生视图显式 no-op）；
  * 未建模类型（thinking_level_change / model_change /
  * session_info / 未来的新类型）走 default no-op——「converter 不丢弃任何 pi entry 类型」
  * （父文档规则 #9）指不崩溃、不中断重放、不静默吞掉后续 entry；元数据类 entry 本身不产出
@@ -693,22 +693,22 @@ function dispatchEntry(c: ChatStateCollector, entry: PiEntry): void {
       return
     }
     case 'label': {
-      // 用户书签/标记：重放侧无对话流投影，显式 no-op（规则 #9：有 case、不丢弃、不崩溃）。
+      // 用户书签/标记：重放侧无对话流派生视图，显式 no-op（规则 #9：有 case、不丢弃、不崩溃）。
       return
     }
     case 'usage': {
       // pi 1.0.0 用量记录（cache_warm 等）：不产对话流消息（用量统计由 runtime 侧
-      // usage-stats-service 扫描计入），零投影显式 no-op（与 live 侧 event-adapter 跳过同语义）。
+      // usage-stats-service 扫描计入），零派生视图显式 no-op（与 live 侧 event-adapter 跳过同语义）。
       return
     }
     case 'context_edit': {
       // pi 1.0.0 上下文编辑（只改未来模型上下文，原始历史/UI/导出不变——pi 官方语义
-      // 就是投影不动），零投影显式 no-op；模型上下文的编辑投影属第二类组 4 设计。
+      // 就是派生视图不动），零派生视图显式 no-op；模型上下文的编辑派生视图属第二类组 4 设计。
       return
     }
     default: {
       // 未建模 entry 类型（thinking_level_change / model_change / session_info / pi 未来新增）
-      // → no-op。重放不中断，后续 entry 照常投影；类型清单见 pi session-manager.ts SessionEntry。
+      // → no-op。重放不中断，后续 entry 照常生成派生视图；类型清单见 pi session-manager.ts SessionEntry。
       return
     }
   }
@@ -717,7 +717,7 @@ function dispatchEntry(c: ChatStateCollector, entry: PiEntry): void {
 // ── 对外 API（签名与产物结构不变；两条 fold 路径只差 collector 实现）────────────────
 
 /**
- * 单条 pi entry → chat 视图态切片的纯函数投影（D5）。
+ * 单条 pi entry → chat 视图态切片的纯函数派生视图（D5）。
  *
  * 对外契约不变——applyEntry 仍是唯一单条喂入入口，「live ≡ reload」两条链路共用本入口。
  * copy-on-write：输入 state / entry 不被 mutate；no-op entry（custom / label / 未建模类型 /
@@ -737,7 +737,7 @@ export function applyEntry(state: ChatViewState, entry: PiEntry): ChatViewState 
  *
  * [transient fold] 内部经 mutable collector 原地累积（O(n)，见文件头 collector 叙事），
  * 与 `entries.reduce(applyEntry, ...)`（copy-on-write 路径）产物 deep-equal——元断言测试
- * apply-entry-fold-equivalence.test.ts 守卫。输入 entries / initial 不被 mutate。
+ * apply-entry-fold-equivalence.test.ts 检查。输入 entries / initial 不被 mutate。
  */
 export function replayEntries(entries: PiEntry[], initial?: ChatViewState): ChatViewState {
   const collector = createMutableCollector(initial ?? createInitialChatViewState())

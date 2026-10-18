@@ -9,7 +9,7 @@
  *   onDidCreateSession/onDidDestroySession 的订阅经注册表（handlerId → workerId）
  *   定向投递回对应 Worker（rpcServer.notify 通道，非全局广播）。
  *
- * AP-4 读面（plugin headerAction/modal 点位 U2）：readEntries（live only 条目镜像，
+ * AP-4 读侧（plugin headerAction/modal 点位 U2）：readEntries（live only 条目镜像，
  *   customType 服务端过滤 + sinceEntryId 游标增量）/ getCommands（纯查询直连 client，
  *   不经 sessionService 的 markDirty 语义）/ registerEntryInvalidation /
  *   unregisterEntryInvalidation（转调 EntryInvalidationDispatch 订阅注册表，u2c 产出）。
@@ -35,7 +35,7 @@ import { errorWithCode, toErrorMessage } from '../../../utils/errors.js'
 import { asOptionalString, asSafeKey, asString } from '../validation.js'
 
 /**
- * AP-4 读面 RPC 方法（U2）。读数据两方法 + entry 失效订阅注册族（对齐
+ * AP-4 读侧 RPC 方法（U2）。读数据两方法 + entry 失效订阅注册族（对齐
  * SESSION_EVENT_METHODS 注册族模式；entriesInvalidated 是 server→Worker notify、
  * 不进本表，方法名由 EntryInvalidationDispatch 的 ENTRY_INVALIDATION_NOTIFY_METHOD 承载）。
  * 方法名全集登记于 packages/shared/src/plugin-permission-map.ts 的 PLUGIN_RPC_METHODS。
@@ -63,7 +63,7 @@ export const SESSION_READ_NOT_WIRED = 'SESSION_READ_NOT_WIRED'
  */
 type EntriesSinceResult = { data?: { entries?: unknown[]; leafId?: string | null } }
 
-/** readEntries 投影条目：含 type/customType——共享折叠器 replayFoldEntries 的首道守卫依赖这两个字段，剥掉即强迫折叠器分叉。data 原样透传（域语义插件解）。 */
+/** readEntries 派生视图条目：含 type/customType——共享折叠器 replayFoldEntries 的首道检查依赖这两个字段，剥掉即强迫折叠器分叉。data 原样透传（域语义插件解）。 */
 export interface PluginSessionEntry {
   id: string
   timestamp: string
@@ -80,9 +80,9 @@ export interface PluginSessionEntries {
 }
 
 /**
- * AP-4 读面的 runtime 侧依赖（单一注入点）。由 runtime 装配（plugin-rpc-setup 的
+ * AP-4 读侧的 runtime 侧依赖（单一注入点）。由 runtime 装配（plugin-rpc-setup 的
  * registerSessionRpcHandlers 实参）提供；缺失时读方法抛 SESSION_READ_NOT_WIRED。
- * [u5b 接线] pm 收窄为 getClient 窄结构面——PluginService 不持 IProcessManager，
+ * [u5b 接线] pm 收窄为 getClient 窄结构侧——PluginService 不持 IProcessManager，
  * 装配经 sessionService.getRpcClient（= pm.getClient 同源）适配。
  */
 export interface SessionReadDeps {
@@ -125,7 +125,7 @@ const SESSION_EVENT_NOTIFY_METHODS = {
 } as const
 
 /**
- * SessionSummary（session-service 域）→ SessionInfo（插件 SDK 契约面）。
+ * SessionSummary（session-service 域）→ SessionInfo（插件 SDK 契约范围）。
  * 事件投递与 list/get 共用的字段映射单一真相。
  */
 export function sessionInfoFromSummary(s: SessionSummary): SessionInfo {
@@ -230,10 +230,10 @@ export class SessionEventDispatch {
 const ACTIVE_SESSION_CACHE_TTL_MS = 2 * 1000
 
 /**
- * 活跃 session 解析器（P6 收口：消除 plugin-rpc-setup.ts 的模块级可变全局状态）。
+ * 活跃 session 解析器（P6 收尾：消除 plugin-rpc-setup.ts 的模块级可变全局状态）。
  *
  * 此前 `_activeSessionCache` 是 plugin-rpc-setup.ts 的隐藏模块全局——跨 service
- * 实例共享、测试间泄漏、无法注入。现收口为可注入实例：每个 PluginService 持有
+ * 实例共享、测试间泄漏、无法注入。现收尾为可注入实例：每个 PluginService 持有
  * 自己的 resolver，缓存随实例生命周期生灭。
  *
  * 提供 TTL 缓存：命中时按缓存 sessionId 查 summary（避免全盘扫描），过期或失效
@@ -276,9 +276,9 @@ export class ActiveSessionResolver {
 }
 
 /**
- * 插件面 sendMessage 回执（AP-4/D6；reason = shared SendPromptReason 单点词表
- * （D4-6 收敛，与 ISessionService.sendMessage 同源）——插件运行面分支只看 accepted，
- * reason 是诊断/文案面，不得依赖精确值做行为分支）。
+ * 插件侧 sendMessage 回执（AP-4/D6；reason = shared SendPromptReason 单点词表
+ * （D4-6 收敛，与 ISessionService.sendMessage 同源）——插件运行侧分支只看 accepted，
+ * reason 是诊断/文案侧，不得依赖精确值做行为分支）。
  */
 export interface PluginSendReceipt {
   accepted: boolean
@@ -303,7 +303,7 @@ export interface SessionHandlers {
   /** session 事件注册表（S3-W2）：registerCreate/registerDestroy/registerActivate 的投递目标 */
   sessionEvents: SessionEventDispatch
   /**
-   * AP-4 读面依赖（U2）。可选：runtime 装配侧接线后读方法可用；缺失时读方法抛
+   * AP-4 读侧依赖（U2）。可选：runtime 装配侧接线后读方法可用；缺失时读方法抛
    * SESSION_READ_NOT_WIRED（装配缺陷显式报错，不伪装成 SESSION_NOT_ACTIVE——
    * 两者恢复动作不同，前者修装配、后者等会话恢复/走会话列表核验）。
    * [u5b] 生产装配已在 plugin-rpc-setup 接线（sessionService.getRpcClient 同源适配），
@@ -323,8 +323,8 @@ function throwSessionReadNotWired(method: string): never {
 }
 
 /**
- * pi entry → 插件投影条目的收窄守卫：非对象 / 非 custom / customType 不匹配 /
- * id-timestamp 非 string（畸形条目）一律丢弃。新建投影对象而非透传原 entry——
+ * pi entry → 插件派生视图条目的收窄检查：非对象 / 非 custom / customType 不匹配 /
+ * id-timestamp 非 string（畸形条目）一律丢弃。新建派生视图对象而非透传原 entry——
  * 回包只含五个契约字段（最小暴露面），多余字段（parentId 等树结构）不出 runtime。
  */
 function toPluginSessionEntry(raw: unknown, customType: string): PluginSessionEntry | undefined {
@@ -336,16 +336,16 @@ function toPluginSessionEntry(raw: unknown, customType: string): PluginSessionEn
 }
 
 /**
- * 活跃路径过滤（readEntries 投影前的 raw entries 裁剪）：从 leafId 沿 parentId 回溯得
+ * 活跃路径过滤（readEntries 派生视图前的 raw entries 裁剪）：从 leafId 沿 parentId 回溯得
  * 活跃路径 id 集合，只保留链上条目——消息撤回（navigateTree 树回退）后，被撤子树的
  * custom op entry 不得再进入插件镜像的折叠输入（scheduler-manager 面板残留缺陷的
- * runtime 数据面落点；全量与增量两模式同过本过滤）。与 extensions 侧 todo/plan/goal/
+ * runtime 数据范围落点；全量与增量两模式同过本过滤）。与 extensions 侧 todo/plan/goal/
  * scheduler 的 filterActivePath、runtime infra/pi/entry-tree-builder 是设计登记的并行
  * 同构实现（extension 不能 import runtime 包的约束所致；census 收敛决策归阶段 6）。
  *
  * 防御语义（与 scheduler 扩展同构）：leafId 缺失/null/不在条目集 → 不过滤（回退现行为
  * ——增量批的父链可越批悬空，按「不丢数据」优先）；parentId 环 → `!activeIds.has`
- * 守卫终止（不死循环）；无 string id 的条目按线性语义保留（投影层 toPluginSessionEntry
+ * 检查终止（不死循环）；无 string id 的条目按线性语义保留（派生视图层 toPluginSessionEntry
  * 会再次收窄，此处不提前丢弃）。
  */
 export function filterEntriesToActivePath(rawEntries: unknown[], leafId: string | null | undefined): unknown[] {
@@ -424,11 +424,11 @@ export function registerSessionRpcHandlers(
     }
     // 执行异常统一转回执（AP-4 修复，裁决方案①）：dispatcher 的 ensureActiveOrBroadcast
     // 在自身 try 外 rethrow（E4「会话恢复失败」等），插件侧回执契约是 {accepted, reason?}
-    // 词表、不应要求插件 catch RPC 异常——异常在此收口为 {accepted:false, reason:'error'}，
+    // 词表、不应要求插件 catch RPC 异常——异常在此收尾为 {accepted:false, reason:'error'}，
     // 错误详情进宿主日志（前端已由 dispatcher 的 message.error 广播看到错误气泡）。
     try {
       const receipt = await deps.sendMessage(sessionId, role, content, requireCommand)
-      // 回执映射（AP-4 两步之②）：dispatcher 的 {blocked, rejected?, reason?} → 插件面
+      // 回执映射（AP-4 两步之②）：dispatcher 的 {blocked, rejected?, reason?} → 插件侧
       // {accepted, reason?}；command-missing 由 requireCommand 校验在 dispatcher 内产生。
       if (receipt.blocked) {
         return { accepted: false, ...(receipt.reason !== undefined ? { reason: receipt.reason } : {}) }
@@ -440,9 +440,9 @@ export function registerSessionRpcHandlers(
     }
   })
 
-  // ── AP-4 读面（U2，SESSION_READ_METHODS）──────────────────
+  // ── AP-4 读侧（U2，SESSION_READ_METHODS）──────────────────
   // customType 由请求参数服务端过滤：回包只含请求方指定域的条目（最小暴露面与
-  // 权限模型一致）；域字符串由调用方声明、runtime 不硬编码任何域（通用数据面）。
+  // 权限模型一致）；域字符串由调用方声明、runtime 不硬编码任何域（通用数据范围）。
   rpcServer.registerMethod(SESSION_READ_METHODS.readEntries, async (params) => {
     const sessionId = asSafeKey(params.sessionId, 'sessionId')
     // customType 形如 'pi-scheduler:task'（含冒号），走 asString 不走 SAFE_KEY 白名单
@@ -462,9 +462,9 @@ export function registerSessionRpcHandlers(
     const raw = await resolved.client.getEntries(sinceEntryId) as EntriesSinceResult
     const leafId = raw.data?.leafId
     const entries: PluginSessionEntry[] = []
-    // 投影前先做活跃路径裁剪（filterEntriesToActivePath）——被撤子树的 op entry 不出
+    // 派生视图前先做活跃路径裁剪（filterEntriesToActivePath）——被撤子树的 op entry 不出
     // runtime，插件镜像折叠输入天然干净；parentId 等树结构字段仍只在本函数内消费、
-    // 不进投影（对外契约零变更）。
+    // 不进派生视图（对外契约零变更）。
     for (const rawEntry of filterEntriesToActivePath(raw.data?.entries ?? [], leafId)) {
       const projected = toPluginSessionEntry(rawEntry, customType)
       if (projected) entries.push(projected)
@@ -477,7 +477,7 @@ export function registerSessionRpcHandlers(
   })
 
   // 纯查询直连 client.getCommands：不经 sessionService.getCommands——那条路径带
-  // markDirty 语义（查询即失效 → commands 快照防抖重拉），插件面状态查询不应触发
+  // markDirty 语义（查询即失效 → commands 快照防抖重新拉取），插件侧状态查询不应触发
   // 宿主缓存失效（设计 §3.4「getCommands 降级为状态查询」的纯查询落点）。
   rpcServer.registerMethod(SESSION_READ_METHODS.getCommands, async (params) => {
     const sessionId = asSafeKey(params.sessionId, 'sessionId')
@@ -491,7 +491,7 @@ export function registerSessionRpcHandlers(
         SESSION_NOT_ACTIVE,
       )
     }
-    // 投影收窄到插件契约三字段：sourceInfo（SKILL/extension 文件路径等宿主内部元信息）不出面
+    // 派生视图收窄到插件契约三字段：sourceInfo（SKILL/extension 文件路径等宿主内部元信息）不出面
     const commands = await resolved.client.getCommands()
     return commands.map(c => ({ name: c.name, description: c.description, source: c.source }))
   })
@@ -595,14 +595,14 @@ export function createSessionApi(
   sendMessage(params: { sessionId: string; role: 'user' | 'system'; content: string; requireCommand?: string }): Promise<PluginSendReceipt>
   /** AP-4 条目镜像：live only 读 + customType 服务端过滤 + sinceEntryId 增量（无 client 抛 SESSION_NOT_ACTIVE）。 */
   readEntries(sessionId: string, opts: { customType: string; sinceEntryId?: string }): Promise<PluginSessionEntries>
-  /** AP-4 状态查询：投影收窄到 {name, description?, source}，会话未激活抛 SESSION_NOT_ACTIVE。 */
+  /** AP-4 状态查询：派生视图收窄到 {name, description?, source}，会话未激活抛 SESSION_NOT_ACTIVE。 */
   getCommands(sessionId: string): Promise<Array<{ name: string; description?: string; source: string }>>
   onDidCreateSession(handler: (session: SessionInfo) => void): Disposable
   onDidDestroySession(handler: (session: SessionInfo) => void): Disposable
-  /** AP-4 会话激活订阅（u5b）：session.switch 成功（含 auto-restore）时投递，徽标/列表补拉的刷新触发源。 */
+  /** AP-4 会话激活订阅（u5b）：session.switch 成功（含 auto-restore）时投递，徽标/列表补充拉取的刷新触发源。 */
   onDidActivateSession(handler: (session: SessionInfo) => void): Disposable
   /**
-   * AP-4 entry 失效订阅：失效信号无 payload（事件只做失效，插件收信号后 readEntries 重拉）。
+   * AP-4 entry 失效订阅：失效信号无 payload（事件只做失效，插件收信号后 readEntries 重新拉取）。
    * 回调参数化 (sessionId, customType) 便于同一 handler 绑定多订阅/自检命中的会话。
    */
   onEntriesInvalidated(

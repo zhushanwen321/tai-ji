@@ -38,7 +38,7 @@ export const MAX_HISTORY_ENTRIES = 20;			// goal-history entry GC 上限
 
 // ── 轮次活性熔断（chat-domain-v1x D4 / W5）─────────────
 //
-// 事故背景（2026-09-08，64 分钟 ~320 turn 空转烧 2.93M token）：pending 守卫被
+// 事故背景（2026-09-08，64 分钟 ~320 turn 空转烧 2.93M token）：pending 检查被
 // 「等待已注销的后台任务」击穿后，goal 每轮注入 continuation、主 agent 每轮回一句
 // 等待，无任何无进展熔断。双维度封顶：主判据总量上限（与是否调工具正交，不可被
 // 任何目标行为绕过）+ 辅判据无进展退避（间隔 ×2 递增）。全部可经 PI_GOAL_* env 覆盖。

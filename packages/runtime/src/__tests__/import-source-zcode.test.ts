@@ -77,7 +77,7 @@ interface MessageSeed {
 }
 
 /**
- * 建最小列集 fixture 库（宿主 schema 0.16.5 的消费面子集：session 六列 + message/part
+ * 建最小列集 fixture 库（宿主 schema 0.16.5 的消费方子集：session 六列 + message/part
  * 存在性 + schema_migration）。parts 直挂 session_id（本单元的字节聚合只消费
  * part.session_id/part.data）；messages 缺省不插（getSessionTranscript LEFT JOIN 从
  * message 侧起查，空表 = 空会话）；需要转换器消费行集时（compaction 降级明细）插入。
@@ -179,7 +179,7 @@ describe('normalizeZcodeSessionId（T1 三步骤 + 后置条件 fail-fast）', (
   it('步骤③ 后置条件 fail-fast（message 带原 id；错误码 import_invalid_session 映射由薄包装承接——下方 prepareImport 用例锁定）', () => {
     for (const raw of ['', 'sess_', '_', '-']) {
       // eslint 参数循环内断言 message：空串/纯 sess_（剥后空）、'_'/'-'（字符集或首尾非法）。
-      // source 包错误面归消费侧（设计 §1.5 契约④）：normalize 抛普通 Error，本组只断言
+      // source 包错误范围归消费侧（设计 §1.5 契约④）：normalize 抛普通 Error，本组只断言
       // fail-fast + message；「后置条件不满足 → import_invalid_session」的映射断言在
       // prepareImport describe（'sess_' 归一化为空 / 'sess_-badid-0001' 首字符非法两组）。
       try {
@@ -379,7 +379,7 @@ describe('ZcodeImportSource.listCandidates', () => {
     const drifted = reply.items.find((i) => i.sessionId === 'sess_-badid-0001')!
     expect(drifted.alreadyImported).toBe(false)
     expect(reply.items.find((i) => i.sessionId === 'sess_goodid-0002')!.alreadyImported).toBe(false)
-    // 导入侧同条件保持 fail-fast（降级只在列表展示面，幂等防线不放松）
+    // 导入侧同条件保持 fail-fast（降级只在列表展示侧，幂等防线不放松）
     await expect(catchCode(() => makeSource(dbPath3).prepareImport({ sourcePath: '', projectId: 'p', source: 'zcode', sessionId: 'sess_-badid-0001', dbPath: dbPath3 })))
       .resolves.toBe('import_invalid_session')
   })
@@ -496,7 +496,7 @@ describe('ZcodeImportSource.prepareImport（T1 header/fileName 全量）', () =>
 
   it('RT-5#8：timeCreated 为 finite 但超出 Date 范围（越界大数）→ import_invalid_session 单条失败（不产 1970 / 不裸抛 RangeError）', async () => {
     // asNumber 只拦非 finite；1e300 finite 但 getTime()=NaN——此前 new Date(NaN).toISOString()
-    // 裸抛 RangeError，现在收口为带字段名的 B 类错误，其余会话导入不受影响
+    // 裸抛 RangeError，现在收敛为带字段名的 B 类错误，其余会话导入不受影响
     const dbPath3 = join(fixturesRoot, 'zc-huge-ts.sqlite')
     buildFixtureDb(
       dbPath3,

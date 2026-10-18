@@ -4,8 +4,8 @@
  * [2026-09 测试舰队审查 r2-14 裁剪] 原「类型系统验证」约 12 个用例已删——
  * `const x: PluginSource = 'built-in'; expect(x).toBe('built-in')` 形态的断言在
  * vitest（esbuild 剥类型）下运行时恒真，类型契约由 tsc（pnpm typecheck）承担；
- * PermissionConstants truthiness 守卫与 plugin-permission-map.test.ts 的
- * SSOT 全量归一守卫重叠（那边更强）。仅保留 PluginRegistry scan 2 个真行为用例。
+ * PermissionConstants truthiness 检查与 plugin-permission-map.test.ts 的
+ * SSOT 全量归一检查重叠（那边更强）。仅保留 PluginRegistry scan 2 个真行为用例。
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'

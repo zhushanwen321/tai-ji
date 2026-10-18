@@ -5,14 +5,14 @@
 // P-Z3 的「close 事件吞没」在真实子进程形态不可确定性注入（Node child 进程退出后
 // stdio 关闭即触发 close 事件）——真实现场归 Gate B；本文件用 mock 连接承载机制层
 // 可判定形态：不触发 onClose（= close 吞没的机制等价物）→ dispose → 在途 turn 收敛
-// 为明确失败。与 zcode-engine-dispose.test.ts（fake-appserver 子进程集成面）互补。
+// 为明确失败。与 zcode-engine-dispose.test.ts（fake-appserver 子进程集成测试）互补。
 //
 // 覆盖：
 //   ① close 吞没形态：dispose 触发 failAllTurns——在途 turn 于 dispose 时收割
-//     （P-Z3 核心断言），收割后到达的终态不再改写（settled 守卫）；
+//     （P-Z3 核心断言），收割后到达的终态不再改写（settled 检查）；
 //   ② grace 窗口内全部终态化：并发多会话 turn 全量收割，不留永久 pending；
 //   ③ 正常 close 主路径零回归：onClose 收割先行 → dispose no-op 不改写收割错误；
-//   ④ 终态已落定（成功）后 dispose：settled 守卫不改写已成功结果；
+//   ④ 终态已落定（成功）后 dispose：settled 检查不改写已成功结果；
 //   ⑤ dispose 收割后 closeSession 短路：runTurn finally 不再发 session/close
 //     （防写死进程/惰性重建——D7 收割语义的必要闭环）+ 正常完成对照（发 close）；
 //   ⑥ 二次 dispose 幂等。
@@ -28,7 +28,7 @@ import {
 
 // ============================================================
 // mock 连接 + 驱动器（与 session-channel-turn-timers.test.ts 同形态，
-// 增补 onClose handler 的手动触发面——close 吞没注入的机制等价物）
+// 增补 onClose handler 的手动触发范围——close 吞没注入的机制等价物）
 // ============================================================
 
 interface MockChannel {
@@ -140,7 +140,7 @@ afterEach(() => {
 });
 
 // ============================================================
-// dispose 收割（P0-1 U5/D7：close 缺失/被吞没的退化路径闭合）
+// dispose 收割（P0-1 U5/D7：close 缺失/被吞没的退化路径完成）
 // ============================================================
 
 describe("dispose 收割（P-Z3 机制层：close 吞没 → dispose 触发 failAllTurns）", () => {
@@ -160,7 +160,7 @@ describe("dispose 收割（P-Z3 机制层：close 吞没 → dispose 触发 fail
     expect(err.message).toContain("已 dispose");
     expect(err.message).toContain("收割");
     expect(err.message).toContain("恢复指引");
-    // 收割后到达的权威终态：settled 守卫——落定结果不改写
+    // 收割后到达的权威终态：settled 检查——落定结果不改写
     m.emitTerminal(t.sessionId, "success");
     expect(t.outcome).toBe("rejected");
     expect((t.error as Error).message).toBe(err.message);
@@ -202,7 +202,7 @@ describe("dispose 收割（P-Z3 机制层：close 吞没 → dispose 触发 fail
     expect((t.error as Error).message).toBe(onCloseErr.message);
   });
 
-  it("终态已落定（成功）后 dispose：settled 守卫不改写已成功结果", async () => {
+  it("终态已落定（成功）后 dispose：settled 检查不改写已成功结果", async () => {
     const m = makeMockChannel();
     enginesChannels.push(m.ch);
     const t = startTurn(m.ch);
@@ -227,7 +227,7 @@ describe("dispose 收割（P-Z3 机制层：close 吞没 → dispose 触发 fail
     expect(t1.outcome).toBe("rejected");
     expect(m1.requests.map((r) => r.method)).not.toContain("session/close");
 
-    // 对照：正常完成的 turn，finally 发 session/close（D4 用后即毁——零回归面）
+    // 对照：正常完成的 turn，finally 发 session/close（D4 用后即毁——零回归测试）
     const m2 = makeMockChannel();
     enginesChannels.push(m2.ch);
     const t2 = startTurn(m2.ch);

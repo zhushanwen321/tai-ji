@@ -25,7 +25,7 @@
  * 是功能真源入口；Landing.vue 的目录/分支 chip 不在本功能链路上）。
  *
  * ── 策略 ──
- * - 真 pinia + 真 chatStore（isActive 派生驱动 onSend 分流守卫）
+ * - 真 pinia + 真 chatStore（isActive 派生驱动 onSend 分流检查）
  * - mock useChat（spy 化 send/steer/abort...，landing 首发不应触发 send）
  * - mock useNewTaskFlow（submitFirstMessage spy + currentCwd=null ref 使 useProjectSkills 不 RPC）
  * - mock @/api（getGlobalSkills 可控 mock，onSkillCacheInvalidated 接真实 events.onGlobalType 端到端可达）
@@ -37,9 +37,9 @@
  * ── 模块单例隔离（声明顺序约定）──
  * useGlobalSkills 是模块级 singleton（globalSkillsCache / globalLoaded / globalInvalidateSubscribed 跨
  * 用例共享）。TC5-Composer 必须是首个 mount Composer 的用例，拿到干净 singleton 完成首次拉取 + force
- * reload 验证（首拉 SKILL_A → 广播 force 重拉 SKILL_A_B）。首屏冒烟用例不检查 skill 列表内容（只断言
+ * reload 验证（首次拉取 SKILL_A → 广播 force 重新拉取 SKILL_A_B）。首屏冒烟用例不检查 skill 列表内容（只断言
  * composer-box / composer-input testid 存在），对 singleton 状态不敏感，故放后面无副作用。与
- * command-popover-landing.test.ts 同范式（依赖文件级首拉拿到干净 singleton）。broadcast 走文件级静态
+ * command-popover-landing.test.ts 同范式（依赖文件级首次拉取拿到干净 singleton）。broadcast 走文件级静态
  * import 的 events 模块（与 vi.mock 工厂内 realEvents.onGlobalType 同实例），订阅与广播同 module 实例。
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/panel/composer-landing-skill-reload.test.ts
@@ -60,7 +60,7 @@ import { composerApiModule, composerChatApiSpy } from '../helpers/composer-mount
 const getGlobalSkillsMock = vi.hoisted(() => vi.fn().mockResolvedValue([]))
 
 // ── onSkillCacheInvalidated 接真实 events.onGlobalType：让 dispatchGlobal 广播能端到端触达
-// useGlobalSkills 的订阅回调（loadGlobal(true) force 重拉）。这是「真实订阅链路」验证的关键。
+// useGlobalSkills 的订阅回调（loadGlobal(true) force 重新拉取）。这是「真实订阅链路」验证的关键。
 // api 骨架单源 helpers/composer-mount.ts；config 域换受控 getGlobalSkills + events 桥。
 vi.mock('@/api', async () => {
   const realEvents = await import('@taiji/core/transport/api')
@@ -187,13 +187,13 @@ describe('Composer.vue landing 态 skill reload 集成（PR#123 reviewer-D WARNI
   // ── 用例声明顺序约定（singleton 隔离）──
   // useGlobalSkills 是模块级 singleton（globalSkillsCache / globalLoaded / globalInvalidateSubscribed 跨
   // 用例共享）。TC5-Composer 必须是首个 mount Composer 的用例，拿到干净的 singleton 完成首次拉取 +
-  // force reload 验证（首拉 SKILL_A → 广播 force 重拉 SKILL_A_B）。首屏冒烟用例不检查 skill 列表内容
+  // force reload 验证（首次拉取 SKILL_A → 广播 force 重新拉取 SKILL_A_B）。首屏冒烟用例不检查 skill 列表内容
   // （只断言 composer-box / composer-input testid 存在），对 singleton 状态不敏感，故放后面无副作用。
-  // 与 command-popover-landing.test.ts 同范式（依赖文件级首拉拿到干净 singleton）。
+  // 与 command-popover-landing.test.ts 同范式（依赖文件级首次拉取拿到干净 singleton）。
 
   // ── WARNING-2：mount 文档入口 Composer.vue，验证 skill reload 生产连线（AGENTS.md #6 MANDATORY）──
   // 端到端链路：dispatchGlobal {scope:'global'} → useGlobalSkills 订阅回调（Composer.vue line 192 真实
-  // 调用）→ loadGlobal(true) force 重拉 → landingGlobalSkills ref 刷新 → :global-skills prop 透传 →
+  // 调用）→ loadGlobal(true) force 重新拉取 → landingGlobalSkills ref 刷新 → :global-skills prop 透传 →
   // CommandPopover DOM 反映新 skill 列表。若 Composer.vue 删了 useGlobalSkills 调用或改了 prop 传递，
   // 本用例红（区别于 command-popover-landing.test.ts TC5 的 GlobalSkillsHarness 复制品）。
   it('TC5-Composer: mount Composer.vue → dispatchGlobal skillCacheInvalidated → CommandPopover DOM 反映 globalSkills 刷新（文档入口集成）', async () => {
@@ -220,7 +220,7 @@ describe('Composer.vue landing 态 skill reload 集成（PR#123 reviewer-D WARNI
     // mock 改返回 [skill-a, skill-b]（模拟 runtime 重扫 globalCache 后缓存更新）
     getGlobalSkillsMock.mockResolvedValue(SKILL_A_B)
     // 派发 global scope 失效信号 → Composer.vue line 192 的 useGlobalSkills 订阅回调 → loadGlobal(true)
-    // force 重拉 → landingGlobalSkills ref 刷新 → :global-skills prop 更新 → CommandPopover DOM 刷新
+    // force 重新拉取 → landingGlobalSkills ref 刷新 → :global-skills prop 更新 → CommandPopover DOM 刷新
     events.dispatchGlobal({
       type: 'config.skillCacheInvalidated',
       payload: { scope: 'global' },

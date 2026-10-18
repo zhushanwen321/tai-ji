@@ -2,11 +2,11 @@
  * W18 tests：EventInterpreter subagent 事件 → 派生缓存失效信号。
  *
  * 背景（W18 data-source-governance P3.1，D4）：subagent 列表数据源切换为
- * 「entry_appended 失效 → get_entries(since) 增量重拉 → entry 扫描派生缓存」。
+ * 「entry_appended 失效 → get_entries(since) 增量重新拉取 → entry 扫描派生缓存」。
  * interpreter 的 subagent 事件流（tool-call-end 建 running / bg-notify 合并终态）
  * **直写退役**——全部降级为失效信号（onRecordEntriesInvalidated，组合根注入
  * sessionService.invalidateRecordEntries）。数据合并语义（status 归一 / agent 覆盖 /
- * closedReason 投影 / batch 合并）由 entry 扫描承载（subagent-extractor.test.ts 的
+ * closedReason 派生视图 / batch 合并）由 entry 扫描承载（subagent-extractor.test.ts 的
  * scanSubagentEntries 用例 + session-record-entries.test.ts 的拉取收敛用例）。
  *
  * U1：subagent tool-call-end → 失效回调（不产 session.subagents 帧）
@@ -158,7 +158,7 @@ describe('EventInterpreter · subagent 事件 → 派生缓存失效（W18 直�
     expect(sent.filter((m) => m.type === 'session.subagents')).toHaveLength(0)
   })
 
-  it('U5: 无关 customType 的 customStart 不触发失效（守卫保持）', () => {
+  it('U5: 无关 customType 的 customStart 不触发失效（检查保持）', () => {
     const interpreter = makeInterpreter('sid-u5')
 
     interpreter.interpret([customStart('sid-u5', 'unrelated-notify', { id: 'x' })])

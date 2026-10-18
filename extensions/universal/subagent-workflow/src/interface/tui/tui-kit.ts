@@ -11,7 +11,7 @@
 // 唯一外部依赖 = pi-tui 的 visibleWidth（纯函数，无内部耦合）。
 //
 // 布局家族原定义与行为（含 __fixtures__/truncline.snapshot.json 逐字节锚定）不变，
-// format.ts 经 re-export 保持既有导入面（bg-notify-render / tool-render / 测试零改动）。
+// format.ts 经 re-export 保持既有导入侧（bg-notify-render / tool-render / 测试零改动）。
 
 import { visibleWidth } from "@earendil-works/pi-tui";
 

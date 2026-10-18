@@ -6,12 +6,12 @@
 // aborted 分支先例，run-orchestration.ts）。
 //
 // 缺陷链（修复前）：close(force:false) 挂起 → cancel 抢先 settle（status=idle、
-// 挂起残留）→ 轮收敛回调 onRunSettled 被 status 守卫拦截（不清挂起）→ 用户
+// 挂起残留）→ 轮收敛回调 onRunSettled 被 status 检查拦截（不清挂起）→ 用户
 // message 开新轮 → 轮终 settleRoundSuccess gate 放行 → closeAfterRound===true →
-// archiveAfterClosingRound 意外收口。违背 §3.2.5 cancel 语义「暂停这一轮（可以
-// 继续聊）」——用户 cancel 后的正常续聊轮被自动收口。
+// archiveAfterClosingRound 意外收尾。违背 §3.2.5 cancel 语义「暂停这一轮（可以
+// 继续聊）」——用户 cancel 后的正常续聊轮被自动收尾。
 //
-// 集成面 = registerFakePiEngine 协议替身（与 conversation-continuation.test.ts
+// 集成测试侧 = registerFakePiEngine 协议替身（与 conversation-continuation.test.ts
 // 同源 setup 形态）。
 
 import * as fs from "node:fs";
@@ -90,7 +90,7 @@ function makeChatRecord(id: string, agentDir: string): ExecutionRecord {
   return record;
 }
 
-describe("集成：cancel × closeAfterRound（[区1-U2] cancel / 编排性关闭打断作废优雅收口挂起）", () => {
+describe("集成：cancel × closeAfterRound（[区1-U2] cancel / 编排性关闭打断作废优雅收尾挂起）", () => {
   let agentDir: string;
   let service: SubagentService;
   let store: RecordStore;
@@ -111,25 +111,25 @@ describe("集成：cancel × closeAfterRound（[区1-U2] cancel / 编排性关�
     fs.rmSync(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
 
-  it("close 挂起 → cancel 抢先 settle（挂起作废）→ message 新轮 → 轮终不收口，record 保持可续聊", async () => {
+  it("close 挂起 → cancel 抢先 settle（挂起作废）→ message 新轮 → 轮终不收尾，record 保持可续聊", async () => {
     const record = makeChatRecord("sa-cancel-close", agentDir);
     store.register(record);
     await service.chatActions.deliverChatMessage(record, "long round");
     await vi.waitFor(() => expect(fake.runs.length).toBe(1));
 
-    // close 优雅收口挂起（在飞轮不打断——closeAfterRound=true）。
+    // close 优雅收尾挂起（在途轮不打断——closeAfterRound=true）。
     await service["closeSubagent"](record, false);
     expect(record.closeAfterRound).toBe(true);
 
-    // cancel 抢先 settle：打断在飞轮 + settle interrupted——挂起随打断作废
-    //（cancel 语义 = 暂停这一轮可以继续聊，与「收口下一轮」意愿相反）。
+    // cancel 抢先 settle：打断在途轮 + settle interrupted——挂起随打断作废
+    //（cancel 语义 = 暂停这一轮可以继续聊，与「收尾下一轮」意愿相反）。
     const cancelled = service.cancel(record.id);
     expect(cancelled).toBe(true);
     expect(record.status).toBe("idle");
     expect(record.stopReason).toBe("interrupted");
     expect(record.closeAfterRound).toBeUndefined();
 
-    // 中断轮的收敛应答迟到：onRunSettled 被 status 守卫拦截（不簿记、不清队列）
+    // 中断轮的收敛应答迟到：onRunSettled 被 status 检查拦截（不簿记、不清队列）
     //——挂起清除只能由 cancel 侧承担（本修复的缺陷链环节）。
     fake.runs[0]!.settle({ content: "interrupted round partial" });
     await new Promise((resolve) => setTimeout(resolve, 20));
@@ -139,8 +139,8 @@ describe("集成：cancel × closeAfterRound（[区1-U2] cancel / 编排性关�
     await vi.waitFor(() => expect(fake.runs.length).toBe(2));
     fake.runs[1]!.settle({ content: "continuation reply" });
 
-    // 轮终：通知送达但**不收口**——残留挂起会在此触发 archiveAfterClosingRound
-    // 意外收口（回归失败信号）。cancel = 暂停这一轮：record 留 idle 可续聊，
+    // 轮终：通知送达但**不收尾**——残留挂起会在此触发 archiveAfterClosingRound
+    // 意外收尾（回归失败信号）。cancel = 暂停这一轮：record 留 idle 可续聊，
     // 占用位不动。
     await vi.waitFor(() => expect(record.result).toBe("continuation reply"));
     expect(record.round).toBe(2);
@@ -148,7 +148,7 @@ describe("集成：cancel × closeAfterRound（[区1-U2] cancel / 编排性关�
     expect(record.status).toBe("idle");
   });
 
-  it("close 挂起 → disposeAllRecords 编排性关闭（挂起作废 + 立即收口落账）", async () => {
+  it("close 挂起 → disposeAllRecords 编排性关闭（挂起作废 + 立即收尾写入 journal 记录）", async () => {
     const record = makeChatRecord("sa-dispose-close", agentDir);
     store.register(record);
     await service.chatActions.deliverChatMessage(record, "long round");
@@ -159,8 +159,8 @@ describe("集成：cancel × closeAfterRound（[区1-U2] cancel / 编排性关�
 
     const count = service.disposeAllRecords("parent-fork");
 
-    // 编排性关闭 = 立即打断 + settle interrupted-by-parent + 收口落账——
-    // 挂起（等轮终收口）意愿被立即收口完全取代，随打断作废。
+    // 编排性关闭 = 立即打断 + settle interrupted-by-parent + 收尾写入 journal 记录——
+    // 挂起（等轮终收尾）意愿被立即收尾完全取代，随打断作废。
     expect(count).toBe(1);
     expect(record.closeAfterRound).toBeUndefined();
     expect(record.status).toBe("idle");

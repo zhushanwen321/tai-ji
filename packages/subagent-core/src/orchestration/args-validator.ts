@@ -5,7 +5,7 @@
 // 带「read 脚本重看」指引。
 //
 // 设计决策（m3 design-review 探针实证）：
-// - ajv 选项钉死 { coerceTypes:true, strictSchema:false, allErrors:true, useDefaults:false }：
+// - ajv 选项固定为 { coerceTypes:true, strictSchema:false, allErrors:true, useDefaults:false }：
 //   coerceTypes 原地规范化弱 LLM 的字符串参数（'false'→false、'10'→10，m2 MAJOR-1 闭环）；
 //   strictSchema:false 容忍用户 workflow 的自定义关键字/format（默认 strict:true 会误判畸形）；
 //   useDefaults:false 不注入 schema default（脚本 fallback 语义不变）。

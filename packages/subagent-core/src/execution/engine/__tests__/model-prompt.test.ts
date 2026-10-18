@@ -90,7 +90,7 @@ describe("buildEngineModelsPromptAppend（defaultEngine 开关语义）", () => 
         "</available_bare_models>",
       ].join("\n"),
     );
-    // 文案语义守卫：指向上方核心段、不含 ZCode desktop 指引（那是无凭据形态专属）
+    // 文案语义检查：指向上方核心段、不含 ZCode desktop 指引（那是无凭据形态专属）
     const append = buildEngineModelsPromptAppend("bare");
     expect(append).toContain("use ids from <available_provider_models> above");
     expect(append).not.toContain("ZCode desktop");
@@ -107,7 +107,7 @@ describe("buildEngineModelsPromptAppend（defaultEngine 开关语义）", () => 
       ].join("\n"),
     );
     expect(buildEngineModelsPromptAppend("nul")).not.toContain("ZCode desktop");
-    // 空清单：引擎枚举面存在但当前无凭据模型——维持「无凭据 + ZCode desktop 指引」文案
+    // 空清单：引擎枚举侧存在但当前无凭据模型——维持「无凭据 + ZCode desktop 指引」文案
     registerEngine("empty", () => fakeEngine("empty", []));
     expect(buildEngineModelsPromptAppend("empty")).toBe(
       [
@@ -122,7 +122,7 @@ describe("buildEngineModelsPromptAppend（defaultEngine 开关语义）", () => 
   it("dynamic:true 且静态目录空的 RemoteEngine → core-aligned 声明段（B1：静态空目录 ≠ 无模型）", () => {
     // 真实 RemoteEngine（非 fake listModels）构造性证明「映射 → 注入」整链：
     // manifest {dynamic:true, models:[]} 经 listModels 四态映射返回 null（无静态
-    // 枚举面）→ 走「与主 agent 模型体系一致」声明段，不注入「no credentialed
+    // 枚举侧）→ 走「与主 agent 模型体系一致」声明段，不注入「no credentialed
     // models」误导文案（该文案会让模型错误拒绝派发，B1 缺陷根因）。
     // EngineClient 构造纯内存无副作用（spawn 在 ensureConnected），listModels 只读
     // manifest 注册期快照不触协议——无需连接，也无需清理。

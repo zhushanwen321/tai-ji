@@ -9,7 +9,7 @@
  *
  * [HISTORICAL] N1 的 historyTruncatedSessions（useChat 模块级 Set<boolean>）双轨退役：
  * 布尔显隐从本窗口状态派生（hasMoreHistory），避免「同一 truncated 事实两处存储」。
- * [u6] legacy historyTruncated wire 字段退役（偏差表 D7 双轨收口）：truncated 是唯一
+ * [u6] legacy historyTruncated wire 字段退役（偏差表 D7 双轨收敛）：truncated 是唯一
  * 截断标志，HistoryWindowReply 三字段必填（mock 门面同契约），归一无回落逻辑。
  *
  * 判据归 [ADR-0049 例外]：createChatStore() factory 经 renderer
@@ -30,7 +30,7 @@ export interface HistoryWindowReply {
   totalTurnsEstimate: number
 }
 
-/** 历史加载窗口状态（u4b session.history 双预算截断契约的 store 侧投影） */
+/** 历史加载窗口状态（u4b session.history 双预算截断契约的 store 侧派生视图） */
 export interface HistoryWindow {
   /** true = 窗口外仍有历史（顶部条显示的唯一依据；false = 顶部条结构性不渲染，A6 回归） */
   truncated: boolean

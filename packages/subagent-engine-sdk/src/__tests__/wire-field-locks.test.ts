@@ -12,14 +12,14 @@
 //   - wire 层键集交集现状**为空**——SDK AgentCallOpts（run.params.task）已按字段裁决
 //     排除 schemaEnv（contract-types.ts 字段裁决注释：「schemaEnv（→ctx.schemaEnv）」），
 //     schemaEnv 只在 RunContextParams（run.params.ctx）单侧存在 → 无需 Exclude<> 豁免。
-//   - 但 H1b **未收口**（P5 已销案为「在飞」）：宿主派发面仍双源合流
+//   - 但 H1b **未收敛**（P5 已销案为「在途」）：宿主派发面仍双源合流
 //     `ctx.schemaEnv ?? task.schemaEnv`，锚点
 //     `packages/subagent-core/src/execution/engine/client/remote-engine.ts:382`
 //     （该处 task = core 全量 AgentCallOpts，含 schemaEnv，见
-//      packages/subagent-core/src/orchestration/models/types.ts；双源在 core→wire 投影
+//      packages/subagent-core/src/orchestration/models/types.ts；双源在 core→wire 派生
 //      过程中，不体现为 wire 键集交集）。
-//   - H1b 收口（remote-engine.ts:382 双源消灭）后本断言无需摘除：断言只钉 wire 键集，
-//     收口后恒绿；届时仅需回看本注释是否过期。
+//   - H1b 收敛（remote-engine.ts:382 双源消灭）后本断言无需摘除：断言只钉 wire 键集，
+//     收敛后恒绿；届时仅需回看本注释是否过期。
 
 import { describe, expect, it } from "vitest";
 

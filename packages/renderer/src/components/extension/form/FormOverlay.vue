@@ -12,8 +12,8 @@ function nextFormOverlaySurfaceKey(): string {
 /**
  * FormOverlay —— 统一提问表单壳（AskUserOverlay 泛化，设计 D5）。
  *
- * 三 extension（ask-user / scheduler / plan）的提问经 UI_FORM_MARKER 收口为一个表单协议，
- * 本组件为 GUI 唯一渲染面：壳负责表头（脉冲点 + 单问标题 | 多问 tab 条）/ Submit 门 /
+ * 三 extension（ask-user / scheduler / plan）的提问经 UI_FORM_MARKER 收敛为一个表单协议，
+ * 本组件为 GUI 唯一渲染范围：壳负责表头（脉冲点 + 单问标题 | 多问 tab 条）/ Submit 门 /
  * 取消；按问题 type 分派渲染器——choice（单选 auto-advance / 多选 / Other 卡片化）、
  * text（纯自由文本）、schedule（ScheduleForm 整表单）。
  *
@@ -39,16 +39,7 @@ import type { FormQuestion, ScheduleDraft, ScheduleQuestion } from '@zhushanwen/
 import ChoiceQuestion from './ChoiceQuestion.vue'
 import TextQuestion from './TextQuestion.vue'
 import ScheduleForm from './ScheduleForm.vue'
-// 编码契约单点在 @taiji/ui/extension-host form-protocol（MF-1-8 双壳收敛：桌面 onSubmit
-// 内联编码段 / qKey fallback / 已答判定与移动 shell/form-protocol 同契约）；schedule 句柄
-// 取值差异（ref 句柄 canSubmit/submit vs 移动参数注入）经参数注入保留在本组件
-import {
-  encodeFormAnswers,
-  initialQuestionState,
-  isQuestionAnswered as isQuestionAnsweredOf,
-  questionKey,
-  type QuestionState,
-} from '@taiji/ui/extension-host'
+import { encodeFormAnswers, initialQuestionState, isQuestionAnswered as isAnswered, questionKey, type QuestionState } from '@taiji/ui/form-protocol'
 import { registerModalSurface } from '@/composables/features/app/modal-surface-registry'
 
 const props = withDefaults(defineProps<{
@@ -90,8 +81,7 @@ const questionsList = computed<FormQuestion[]>(() =>
   props.questions ?? (draftMount.value ? [draftQuestion.value] : []),
 )
 
-// ── 问题 key（header 缺省时用 question 文本——协议 fallback 规则，共享单点 questionKey）──
-const qKey = questionKey
+// ── 问题 key：共享件 questionKey（header 缺省回落 question 全文，协议 fallback 规则）──
 
 // ── tab 状态 ──
 const activeIdx = ref(0)
@@ -106,7 +96,7 @@ watch(questionsList, (qs) => {
   const next: Record<string, QuestionState> = {}
   for (const q of qs) {
     if (q.type === 'schedule') continue
-    const key = qKey(q)
+    const key = questionKey(q)
     next[key] = states.value[key] ?? initialQuestionState()
   }
   states.value = next
@@ -129,14 +119,13 @@ function setScheduleRef(key: string, el: Element | ComponentPublicInstance | nul
 }
 
 // ── 已答判定 + Submit 门（AskUserOverlay:161-186 逐字继承；schedule 委托 canSubmit）──
-/** 问题是否已作答：choice/text 判定委托共享单点 isQuestionAnsweredOf（参数注入 schedule
- *  ready=false——schedule 题走下方句柄分支）；schedule = 渲染器 canSubmit（预填草稿视为有效） */
+/** 问题是否已作答：共享判定（@taiji/ui/form-protocol）+ 桌面侧状态折算入参
+ *  （choice/text 取壳 states；schedule 取渲染器 canSubmit——预填草稿视为有效） */
 function isQuestionAnswered(q: FormQuestion): boolean {
-  if (q.type === 'schedule') return scheduleRefs.get(qKey(q))?.canSubmit ?? false
-  return isQuestionAnsweredOf(q, states.value[qKey(q)], false)
+  return isAnswered(q, states.value[questionKey(q)], scheduleRefs.get(questionKey(q))?.canSubmit ?? false)
 }
 
-/** 全部问题已作答（Submit 启用守卫） */
+/** 全部问题已作答（Submit 启用检查） */
 const allAnswered = computed(() => questionsList.value.every(isQuestionAnswered))
 /** 未答题数（disabled tooltip 文案） */
 const unansweredCount = computed(() => questionsList.value.filter((q) => !isQuestionAnswered(q)).length)
@@ -167,7 +156,7 @@ const isLastQuestion = computed(() => activeIdx.value >= questionsList.value.len
 
 /** Tab / Shift+Tab 在问题间循环导航（多问题时生效）。
  *  IME 组合输入中（中文/日文输入法拼音未确认）按 Tab 可能是候选词选择操作，
- *  此时拦截 Tab 做问题切换会打断用户的输入法操作，故加 isComposing 守卫。 */
+ *  此时拦截 Tab 做问题切换会打断用户的输入法操作，故加 isComposing 检查。 */
 function onTabKey(e: KeyboardEvent): void {
   if (e.isComposing) return
   if (questionsList.value.length <= 1) return
@@ -180,8 +169,8 @@ function onTabKey(e: KeyboardEvent): void {
   }
 }
 
-/** Other input Enter（渲染器已过 IME isComposing 守卫）：非最后一题前进到下一题，
- *  最后一题不拦截（全答则提交，让按钮守卫语义一致）。 */
+/** Other input Enter（渲染器已过 IME isComposing 检查）：非最后一题前进到下一题，
+ *  最后一题不拦截（全答则提交，让按钮检查语义一致）。 */
 function onOtherEnter(): void {
   if (!isLastQuestion.value) {
     advanceToNext()
@@ -194,18 +183,18 @@ function onOtherEnter(): void {
 function onSubmit(): void {
   // legacy scheduleCreate 挂载源：扁平 ScheduleFormResult JSON 直传
   if (draftMount.value) {
-    const result = scheduleRefs.get(qKey(draftQuestion.value))?.submit() ?? null
+    const result = scheduleRefs.get(questionKey(draftQuestion.value))?.submit() ?? null
     if (result !== null) emit('submit', result)
     return
   }
-  // FormAnswers envelope 编码走共享单点 encodeFormAnswers（MF-1-8；schedule 题经 scheduleValue
-  // 回调取渲染器句柄 submit()——已序列化 JSON 或 null，null 即提交瞬间复核未过整表中止）。
-  // 字节等价约束（同输入同 answers JSON，含 `${key}__other` 键位与 OTHER_VALUE 过滤）由
-  // ui 包 form-protocol 契约测试 + 本组件既有测试族双锁定。
-  const answers = encodeFormAnswers(questionsList.value, states.value, (q) => {
-    return scheduleRefs.get(qKey(q))?.submit() ?? null
-  })
-  if (answers === null) return
+  // questions 源：FormAnswers envelope 编码走共享单点（@taiji/ui/form-protocol，与移动壳同契约）；
+  // schedule 题经渲染器 submit() 取 JSON（提交瞬间复核未过 → null → 整表中止，与内联实现同语义）
+  const answers = encodeFormAnswers(
+    questionsList.value,
+    states.value,
+    (q) => scheduleRefs.get(questionKey(q))?.submit() ?? null,
+  )
+  if (answers === null) return // 提交瞬间复核未过（once 时刻已过等）——整表中止
   emit('submit', JSON.stringify(answers))
 }
 </script>
@@ -237,7 +226,7 @@ function onSubmit(): void {
       <div v-else class="flex items-center gap-0.5">
         <Button
           v-for="(q, i) in questionsList"
-          :key="qKey(q)"
+          :key="questionKey(q)"
           variant="ghost"
           :class="[
             'rounded-sm px-2.5 py-1 text-[length:var(--text-xs)] font-normal transition-colors',
@@ -282,21 +271,21 @@ function onSubmit(): void {
 
       <ChoiceQuestion
         v-if="activeQuestion.type === 'choice'"
-        v-model="states[qKey(activeQuestion)]"
+        v-model="states[questionKey(activeQuestion)]"
         :question="activeQuestion"
         @advance="advanceToNext"
         @other-enter="onOtherEnter"
       />
       <TextQuestion
         v-else
-        v-model="states[qKey(activeQuestion)]"
+        v-model="states[questionKey(activeQuestion)]"
         :question="activeQuestion"
       />
     </div>
 
     <!-- body ②：schedule 题全部常挂 v-show（表单状态在渲染器内部，切 tab 不重置）；
          context 行由壳补（渲染器整表单迁移不含 context 呈现） -->
-    <template v-for="(q, i) in questionsList" :key="qKey(q)">
+    <template v-for="(q, i) in questionsList" :key="questionKey(q)">
       <template v-if="q.type === 'schedule'">
         <p
           v-if="i === activeIdx"
@@ -314,14 +303,14 @@ function onSubmit(): void {
         </p>
         <ScheduleForm
           v-show="i === activeIdx"
-          :ref="(el) => setScheduleRef(qKey(q), el)"
+          :ref="(el) => setScheduleRef(questionKey(q), el)"
           :question="q"
           @cancel="emit('cancel')"
         />
       </template>
     </template>
 
-    <!-- actions：无边框，透明继承根。非最后一题显示"下一题"，最后一题显示"提交"(守卫 allAnswered) -->
+    <!-- actions：无边框，透明继承根。非最后一题显示"下一题"，最后一题显示"提交"(检查 allAnswered) -->
     <div class="flex items-center justify-end gap-2 px-3.5 pb-2.5 pt-1">
       <Button
         v-if="allowCancel"

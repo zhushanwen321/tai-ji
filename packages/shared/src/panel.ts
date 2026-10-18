@@ -11,7 +11,7 @@ export interface PanelLeaf {
 }
 
 /**
- * 窗口状态投影（跨窗口 session 查询用，main 进程消费）。
+ * 窗口状态派生视图（跨窗口 session 查询用，main 进程消费）。
  * v2：panelTree 字段简化为 panel（单 panel，无树结构）。
  */
 export interface WindowState {

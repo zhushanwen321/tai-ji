@@ -13,7 +13,7 @@ import type { ShutdownStepName } from '../../session/rolling-restart.js'
 import { disposeTerminalPtysStep } from '../dispose-terminal-ptys-step.js'
 
 describe('disposeTerminalPtysStep（shutdown 链 dispose-terminal-ptys 步骤本体）', () => {
-  it('先打点再 destroyAllPties（顺序契约：可观测打点在资源收口之前）', () => {
+  it('先打点再 destroyAllPties（顺序契约：可观测打点在资源收尾之前）', () => {
     const order: string[] = []
     const destroyAllPties = vi.fn(() => { order.push('destroyAllPties') })
     const shutdownStep = vi.fn((name: ShutdownStepName) => { order.push(name) })

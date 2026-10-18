@@ -4,7 +4,7 @@
  * 覆盖设计 `mode-system-composer-density` §6.5 D5（派生行）+ §7.4「声明行」行
  * + §7.5 E7（三态降级）的可执行条款：
  * ① 未加载（presets 空 + 无错误）→ 不渲染（不能当「已删除」）；
- * ② 已加载 + 非默认模式 → 渲染模式名 + 工具面/提示词段数两枚描边 chip；
+ * ② 已加载 + 非默认模式 → 渲染模式名 + 工具范围/提示词段数两枚描边 chip；
  * ③ 已加载但缺 id → 「模式已删除（<presetId>）」+「新建会话 ⌘N」出口；
  * ④ 加载失败（loadError 非空）→ 等同未加载：不渲染（不误报删除）。
  * 另锁：判据锚在 `defaultPresetId`（不是硬编码 builtin:full）、无 launchPresetId 不渲染。
@@ -114,7 +114,7 @@ describe('ModeDeclarationRow 可见性（D5 判据 + E7 三态）', () => {
     expect(wrapper.text()).not.toContain('模式已删除')
   })
 
-  it('② 已加载 + 非默认模式 → 渲染模式名 + 工具面/提示词段数两枚描边 chip', () => {
+  it('② 已加载 + 非默认模式 → 渲染模式名 + 工具范围/提示词段数两枚描边 chip', () => {
     const presetStore = usePresetStore()
     presetStore.setPresets([FULL, dispatchPreset()])
     presetStore.setDefaultPresetId('builtin:full')
@@ -307,7 +307,7 @@ describe('MessageStream 挂载点（u5 条款 6）', () => {
   })
 })
 
-describe('ModeDeclarationRow 工具面名单未定义 → 面未知（RD-2#6：不伪装「允许 0 项」）', () => {
+describe('ModeDeclarationRow 工具范围名单未定义 → 面未知（RD-2#6：不伪装「允许 0 项」）', () => {
   it('allowlist 无 allowedTools → 工具 chip 显「工具 · —」，不显「允许 0 项」假计数', () => {
     const presetStore = usePresetStore()
     presetStore.setPresets([

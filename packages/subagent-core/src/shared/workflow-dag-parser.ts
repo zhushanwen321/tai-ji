@@ -8,14 +8,14 @@
  * - 节点 = 脚本字面中的 `agent(...)` 调用点（含 parallel 实参子树内、函数体内、
  *   map 回调内的形态）；kind 恒 'agent'（'script-step' 为协议预留值，脚本门禁
  *   步骤无独立调用语法，v1 不产）。
- * - helper 投影：全程序恰含 1 个 `agent()` 调用的**具名**函数（FunctionDeclaration
+ * - helper 派生视图：全程序恰含 1 个 `agent()` 调用的**具名**函数（FunctionDeclaration
  *   或 const/let/var 绑定的函数表达式/箭头，参数 ≥1）登记为 agent-helper；其调用点
- *   投影为虚拟 agent 调用点——显示名取第一实参（对象字面量形态优先 description/label
+ *   映射为虚拟 agent 调用点——显示名取第一实参（对象字面量形态优先 description/label
  *   属性表达式，串/模板形态直取），phase 取调用点词法 currentPhase；helper 体内的
- *   agent() 实现点不再按词法位置收口。动因：平台适配层脚本（zsw-skills 单源拼接产物
+ *   agent() 实现点不再按词法位置收尾。动因：平台适配层脚本（zsw-skills 单源拼接产物
  *   的 wfAgent/askAgent——zcode 公共体 `agent(name, persona).ask<T>()` 转 pi 签名的
  *   桥接函数）把唯一实现点藏在声明处（词法上先于全部 phase()），旧规则下 DAG 退化为
- *   「唯一节点落缺省分区 + 全部实例未匹配」；投影后每个派发点恢复为带名节点、落对
+ *   「唯一节点落缺省分区 + 全部实例未匹配」；映射后每个派发点恢复为带名节点、落对
  *   分区，与运行时实例经 D2 判据正常挂接。
  * - phase 分区 = `phase(name)` 调用序列（首现序）；字面量实参才登记分区，动态
  *   实参（拼接/函数调用）不造伪名——其后的调用点归缺省分区（与 worker 侧
@@ -33,7 +33,7 @@
  * - 不可区分调用点合并（解析产物收尾）：同 (phase, templateName, kind) 的调用点
  *   在 D2 实例匹配与视图两侧天然不可区分（同 phase 等值 + 同模板正则 + 字面段总
  *   长相等恒并列），保留多个只会互致歧义——任一实例命中并列候选即判歧义进未匹配
- *   分组，该 agent 家族在图上整体失去挂接（实测：helper 投影把「派发 + 原位重试」
+ *   分组，该 agent 家族在图上整体失去挂接（实测：helper 派生视图把「派发 + 原位重试」
  *   投成两个全通配节点、同模板直呼双节点）。合并语义：组内最前行号者为代表节点，
  *   边端点重写到代表后走既有 (from,to) 优先级去重，并行组/循环成员 id 同步重映射
  *   去重；不同 phase / 不同模板不合并——可区分的调用点保持一节点一调用点。
@@ -47,26 +47,26 @@
  *   execute-full-workflow 的 `subWave.map(...)` → `parallel(subCalls)`）脚本字面
  *   无 agent() 调用点，解析为零调用点；运行时实例经事件流「未匹配实例」分组
  *   兜底（设计 D2 ⑥），不静默丢失。
- * - helper 投影的边界：多 agent() 调用的 helper、零参数 helper（名字无实参入口）、
+ * - helper 派生视图的边界：多 agent() 调用的 helper、零参数 helper（名字无实参入口）、
  *   匿名回调（map 等实参位置的函数——批量回调内的调用点语义保持现状）、子树内
  *   直接调用其他 helper 候选（复合调用链，命运迭代结算：被调者录取则 caller 让位，
  *   被调者注定落选则无碍）、嵌套声明其他候选（内层录取、外层让位）、同名多候选
- *   声明（全部不投影——hoisting 末者胜与词法序错位属静态不可裁决）均不投影——
- *   相关调用点保持词法位置收口，归属漂移由挂接侧「未匹配实例」分组兜底；helper
- *   体内对显示名的后处理（replace 等）不在投影语义内，模板取自调用点第一实参原文。
+ *   声明（全部不映射——hoisting 末者胜与词法序错位属静态不可裁决）均不映射——
+ *   相关调用点保持词法位置收尾，归属漂移由挂接侧「未匹配实例」分组兜底；helper
+ *   体内对显示名的后处理（replace 等）不在派生视图语义内，模板取自调用点第一实参原文。
  *   helper 调用匹配为名字级（裸 callee Identifier ∈ 注册表，shadow 不分析——与
  *   dataflow/conditional 名字级匹配同族）。
  * - dataflow/conditional 判定为名字级匹配，不做作用域 shadow 分析（同名词法
  *   槽极罕见；误连边的代价是图上多一条提示边，不产生错误结构）。
  * - dataflow 只认 `await agent(...)` / `await parallel(...)` 的直接绑定；helper
- *   返回的 ask 闭包经 `.ask()` 二跳才产生实例，跨跳数据流不追踪（投影节点仍按
+ *   返回的 ask 闭包经 `.ask()` 二跳才产生实例，跨跳数据流不追踪（派生视图节点仍按
  *   词法序连 sequence 边）。
  * - parallel 实参子树内的嵌套 parallel() 调用不展开（collectParallelMembers
  *   短路 return，主遍历亦不进入）：嵌套组成员的调用点不产节点，运行时实例经
  *   事件流「未匹配实例」分组兜底（设计 D2 ⑥），不静默丢失。
  *
  * 类型跟随锚（core 为定义源——本文件是解析器产物类型；shared 的 WorkflowDag 族为
- * u2 协议冻结面（跨包消费契约），core 包不依赖 @taiji/shared、双侧逐字段等值——同
+ * u2 协议冻结部分（跨包消费契约），core 包不依赖 @taiji/shared、双侧逐字段等值——同
  * RunOutcome 值域跟随先例的「core 定义源 + shared 跟随载体」方向）：
  * packages/shared/src/workflow.ts 的 WorkflowDag 族（u2 冻结）。
  * 扩字段同步链：双侧同 commit 同步。等值锁定实测形态：shared 扩必选字段而 core
@@ -79,10 +79,10 @@ import * as acorn from "acorn";
 import { collapseDuplicateCallSites } from "./workflow-dag-collapse.ts";
 
 /** DAG 节点类型（跟随 shared WorkflowDagNodeKind）。 */
-export type WorkflowDagNodeKind = "agent" | "script-step"; // oe-exempt:20261002:framework:workflow-viz 协议类型双侧等值跟随（core 为定义源——解析器产物类型；shared 为 u2 协议冻结面、跨包消费契约，core 包不依赖 shared——仓内 SUBAGENT_RECORD_CUSTOM_TYPE 同款先例；改字段须同 commit 双侧同步，等值锁定 = shared 侧扩必选字段而 core 未跟时 runtime 赋值点 typecheck 红（workflow-run-events-reader）+ core 侧构造点受本地接口约束）
+export type WorkflowDagNodeKind = "agent" | "script-step"; // oe-exempt:20261002:framework:workflow-viz 协议类型双侧等值跟随（core 为定义源——解析器产物类型；shared 为 u2 协议冻结部分、跨包消费契约，core 包不依赖 shared——仓内 SUBAGENT_RECORD_CUSTOM_TYPE 同款先例；改字段须同 commit 双侧同步，等值锁定 = shared 侧扩必选字段而 core 未跟时 runtime 赋值点 typecheck 红（workflow-run-events-reader）+ core 侧构造点受本地接口约束）
 
 /** DAG 节点（跟随 shared WorkflowDagNode——权威源在本包，shared u2 冻结跟随）。 */
-export interface WorkflowDagNode { // oe-exempt:20261002:framework:workflow-viz 协议类型双侧等值跟随（core 为定义源——解析器产物类型；shared 为 u2 协议冻结面、跨包消费契约，core 包不依赖 shared——仓内 SUBAGENT_RECORD_CUSTOM_TYPE 同款先例；改字段须同 commit 双侧同步，等值锁定 = shared 侧扩必选字段而 core 未跟时 runtime 赋值点 typecheck 红（workflow-run-events-reader）+ core 侧构造点受本地接口约束）
+export interface WorkflowDagNode { // oe-exempt:20261002:framework:workflow-viz 协议类型双侧等值跟随（core 为定义源——解析器产物类型；shared 为 u2 协议冻结部分、跨包消费契约，core 包不依赖 shared——仓内 SUBAGENT_RECORD_CUSTOM_TYPE 同款先例；改字段须同 commit 双侧同步，等值锁定 = shared 侧扩必选字段而 core 未跟时 runtime 赋值点 typecheck 红（workflow-run-events-reader）+ core 侧构造点受本地接口约束）
   /** 节点 id（`agent-L<行号>-N<序>`，图内唯一）。 */
   id: string;
   kind: WorkflowDagNodeKind;
@@ -97,10 +97,10 @@ export interface WorkflowDagNode { // oe-exempt:20261002:framework:workflow-viz 
 }
 
 /** DAG 边类型（跟随 shared WorkflowDagEdgeKind）。 */
-export type WorkflowDagEdgeKind = "sequence" | "dataflow" | "conditional" | "loop-back"; // oe-exempt:20261002:framework:workflow-viz 协议类型双侧等值跟随（core 为定义源——解析器产物类型；shared 为 u2 协议冻结面、跨包消费契约，core 包不依赖 shared——仓内 SUBAGENT_RECORD_CUSTOM_TYPE 同款先例；改字段须同 commit 双侧同步，等值锁定 = shared 侧扩必选字段而 core 未跟时 runtime 赋值点 typecheck 红（workflow-run-events-reader）+ core 侧构造点受本地接口约束）
+export type WorkflowDagEdgeKind = "sequence" | "dataflow" | "conditional" | "loop-back"; // oe-exempt:20261002:framework:workflow-viz 协议类型双侧等值跟随（core 为定义源——解析器产物类型；shared 为 u2 协议冻结部分、跨包消费契约，core 包不依赖 shared——仓内 SUBAGENT_RECORD_CUSTOM_TYPE 同款先例；改字段须同 commit 双侧同步，等值锁定 = shared 侧扩必选字段而 core 未跟时 runtime 赋值点 typecheck 红（workflow-run-events-reader）+ core 侧构造点受本地接口约束）
 
 /** DAG 边（跟随 shared WorkflowDagEdge）。 */
-export interface WorkflowDagEdge { // oe-exempt:20261002:framework:workflow-viz 协议类型双侧等值跟随（core 为定义源——解析器产物类型；shared 为 u2 协议冻结面、跨包消费契约，core 包不依赖 shared——仓内 SUBAGENT_RECORD_CUSTOM_TYPE 同款先例；改字段须同 commit 双侧同步，等值锁定 = shared 侧扩必选字段而 core 未跟时 runtime 赋值点 typecheck 红（workflow-run-events-reader）+ core 侧构造点受本地接口约束）
+export interface WorkflowDagEdge { // oe-exempt:20261002:framework:workflow-viz 协议类型双侧等值跟随（core 为定义源——解析器产物类型；shared 为 u2 协议冻结部分、跨包消费契约，core 包不依赖 shared——仓内 SUBAGENT_RECORD_CUSTOM_TYPE 同款先例；改字段须同 commit 双侧同步，等值锁定 = shared 侧扩必选字段而 core 未跟时 runtime 赋值点 typecheck 红（workflow-run-events-reader）+ core 侧构造点受本地接口约束）
   /** 边 id（`edge-<序>`，图内唯一）。 */
   id: string;
   from: string;
@@ -111,18 +111,18 @@ export interface WorkflowDagEdge { // oe-exempt:20261002:framework:workflow-viz 
 }
 
 /** phase 分区（跟随 shared WorkflowDagPhase）。 */
-export interface WorkflowDagPhase { // oe-exempt:20261002:framework:workflow-viz 协议类型双侧等值跟随（core 为定义源——解析器产物类型；shared 为 u2 协议冻结面、跨包消费契约，core 包不依赖 shared——仓内 SUBAGENT_RECORD_CUSTOM_TYPE 同款先例；改字段须同 commit 双侧同步，等值锁定 = shared 侧扩必选字段而 core 未跟时 runtime 赋值点 typecheck 红（workflow-run-events-reader）+ core 侧构造点受本地接口约束）
+export interface WorkflowDagPhase { // oe-exempt:20261002:framework:workflow-viz 协议类型双侧等值跟随（core 为定义源——解析器产物类型；shared 为 u2 协议冻结部分、跨包消费契约，core 包不依赖 shared——仓内 SUBAGENT_RECORD_CUSTOM_TYPE 同款先例；改字段须同 commit 双侧同步，等值锁定 = shared 侧扩必选字段而 core 未跟时 runtime 赋值点 typecheck 红（workflow-run-events-reader）+ core 侧构造点受本地接口约束）
   name: string;
   order: number;
 }
 
 /** 并行组（跟随 shared WorkflowDagParallelGroup）。 */
-export interface WorkflowDagParallelGroup { // oe-exempt:20261002:framework:workflow-viz 协议类型双侧等值跟随（core 为定义源——解析器产物类型；shared 为 u2 协议冻结面、跨包消费契约，core 包不依赖 shared——仓内 SUBAGENT_RECORD_CUSTOM_TYPE 同款先例；改字段须同 commit 双侧同步，等值锁定 = shared 侧扩必选字段而 core 未跟时 runtime 赋值点 typecheck 红（workflow-run-events-reader）+ core 侧构造点受本地接口约束）
+export interface WorkflowDagParallelGroup { // oe-exempt:20261002:framework:workflow-viz 协议类型双侧等值跟随（core 为定义源——解析器产物类型；shared 为 u2 协议冻结部分、跨包消费契约，core 包不依赖 shared——仓内 SUBAGENT_RECORD_CUSTOM_TYPE 同款先例；改字段须同 commit 双侧同步，等值锁定 = shared 侧扩必选字段而 core 未跟时 runtime 赋值点 typecheck 红（workflow-run-events-reader）+ core 侧构造点受本地接口约束）
   nodeIds: string[];
 }
 
 /** 循环标注（跟随 shared WorkflowDagLoop）。 */
-export interface WorkflowDagLoop { // oe-exempt:20261002:framework:workflow-viz 协议类型双侧等值跟随（core 为定义源——解析器产物类型；shared 为 u2 协议冻结面、跨包消费契约，core 包不依赖 shared——仓内 SUBAGENT_RECORD_CUSTOM_TYPE 同款先例；改字段须同 commit 双侧同步，等值锁定 = shared 侧扩必选字段而 core 未跟时 runtime 赋值点 typecheck 红（workflow-run-events-reader）+ core 侧构造点受本地接口约束）
+export interface WorkflowDagLoop { // oe-exempt:20261002:framework:workflow-viz 协议类型双侧等值跟随（core 为定义源——解析器产物类型；shared 为 u2 协议冻结部分、跨包消费契约，core 包不依赖 shared——仓内 SUBAGENT_RECORD_CUSTOM_TYPE 同款先例；改字段须同 commit 双侧同步，等值锁定 = shared 侧扩必选字段而 core 未跟时 runtime 赋值点 typecheck 红（workflow-run-events-reader）+ core 侧构造点受本地接口约束）
   /** 循环标注 id（`loop-<序>`，图内唯一）。 */
   id: string;
   /** 循环体节点 id 集合（按执行序）。 */
@@ -134,7 +134,7 @@ export interface WorkflowDagLoop { // oe-exempt:20261002:framework:workflow-viz 
 }
 
 /** Workflow DAG（跟随 shared WorkflowDag——结构与 shared u2 冻结形态逐字段一致）。 */
-export interface WorkflowDag { // oe-exempt:20261002:framework:workflow-viz 协议类型双侧等值跟随（core 为定义源——解析器产物类型；shared 为 u2 协议冻结面、跨包消费契约，core 包不依赖 shared——仓内 SUBAGENT_RECORD_CUSTOM_TYPE 同款先例；改字段须同 commit 双侧同步，等值锁定 = shared 侧扩必选字段而 core 未跟时 runtime 赋值点 typecheck 红（workflow-run-events-reader）+ core 侧构造点受本地接口约束）
+export interface WorkflowDag { // oe-exempt:20261002:framework:workflow-viz 协议类型双侧等值跟随（core 为定义源——解析器产物类型；shared 为 u2 协议冻结部分、跨包消费契约，core 包不依赖 shared——仓内 SUBAGENT_RECORD_CUSTOM_TYPE 同款先例；改字段须同 commit 双侧同步，等值锁定 = shared 侧扩必选字段而 core 未跟时 runtime 赋值点 typecheck 红（workflow-run-events-reader）+ core 侧构造点受本地接口约束）
   nodes: WorkflowDagNode[];
   edges: WorkflowDagEdge[];
   phases: WorkflowDagPhase[];
@@ -273,7 +273,7 @@ function extractNameTemplate(source: string, expr: AstNode | undefined): { templ
   return { template, pattern: `^${pattern}$` };
 }
 
-// ── 遍历上下文与收口 ─────────────────────────────────────────
+// ── 遍历上下文与收尾 ─────────────────────────────────────────
 
 interface IfFrame { // oe-exempt:20261002:framework:workflow-viz 解析器 AST 帧类型——判别联合成员数据形状，非抽象接口
   kind: "if";
@@ -314,7 +314,7 @@ interface ParseCtx { // oe-exempt:20261002:framework:workflow-viz 解析器 AST 
   loops: WorkflowDagLoop[];
   ctrlStack: CtrlFrame[];
   prevBatch: string[];
-  /** 最近收口单元的节点 ids（VariableDeclarator binding 登记源）。 */
+  /** 最近收尾单元的节点 ids（VariableDeclarator binding 登记源）。 */
   lastUnitIds: string[];
   bindings: Map<string, string[]>;
   sequenceEdges: EdgeCandidate[];
@@ -325,7 +325,7 @@ interface ParseCtx { // oe-exempt:20261002:framework:workflow-viz 解析器 AST 
   loopSeq: number;
   /** 具名单 agent 调用 helper 注册表（name → 函数体与内部实现调用点）。 */
   agentHelpers: Map<string, AgentHelperEntry>;
-  /** 已登记 helper 体内的 agent() 实现点（主遍历跳过——投影由 helper 调用点承载）。 */
+  /** 已登记 helper 体内的 agent() 实现点（主遍历跳过——派生视图由 helper 调用点承载）。 */
   helperInternalCalls: Set<AstNode>;
 }
 
@@ -337,7 +337,7 @@ function newId(prefix: string, seq: number): string {
   return `${prefix}-${seq}`;
 }
 
-/** agent-helper 登记（恰含 1 个 agent() 调用的具名函数——调用点投影为虚拟 agent 调用点）。 */
+/** agent-helper 登记（恰含 1 个 agent() 调用的具名函数——调用点映射为虚拟 agent 调用点）。 */
 interface AgentHelperEntry { // oe-exempt:20261002:framework:workflow-viz 解析器 AST 帧类型——判别联合成员数据形状，非抽象接口
   fn: AstNode;
   /** 体内唯一 agent() 调用节点（主遍历跳过的实现点）。 */
@@ -392,7 +392,7 @@ function extractAgentDescription(callNode: AstNode): { descExpr: AstNode | undef
   return { descExpr: undefined, explicitPhaseExpr: undefined };
 }
 
-/** 建节点 + 数据流扫描（模板/phase/实参集由调用方解析——直接调用点与 helper 投影共用）。返回节点 id。 */
+/** 建节点 + 数据流扫描（模板/phase/实参集由调用方解析——直接调用点与 helper 派生视图共用）。返回节点 id。 */
 function pushAgentNode(
   ctx: ParseCtx,
   callNode: AstNode,
@@ -425,7 +425,7 @@ function pushAgentNode(
   return id;
 }
 
-/** 收口单个 agent 调用点：建节点 + 数据流扫描。返回节点 id。 */
+/** 收尾单个 agent 调用点：建节点 + 数据流扫描。返回节点 id。 */
 function emitAgentCallSite(ctx: ParseCtx, callNode: AstNode): string {
   const { descExpr, explicitPhaseExpr } = extractAgentDescription(callNode);
   const { template, pattern } = extractNameTemplate(ctx.source, descExpr);
@@ -436,7 +436,7 @@ function emitAgentCallSite(ctx: ParseCtx, callNode: AstNode): string {
 }
 
 /**
- * helper 调用点投影：虚拟 agent 调用点。显示名取第一实参（对象字面量形态优先
+ * helper 调用点派生视图：虚拟 agent 调用点。显示名取第一实参（对象字面量形态优先
  * description/label 属性表达式——对齐 agent 自身 opts 契约，askAgent(callSpec) 形态
  * 据此保留模板名；串/模板形态直取——wfAgent(name) 形态）；phase 取调用点词法
  * currentPhase（helper 调用不携带 phase opts）。
@@ -453,7 +453,7 @@ function emitHelperCallSite(ctx: ParseCtx, callNode: AstNode): string {
   return pushAgentNode(ctx, callNode, template, pattern, phaseName, args);
 }
 
-/** 收口一个执行单元（单节点或并行组）：条件/顺序边推进 + 循环体记录。 */
+/** 收尾一个执行单元（单节点或并行组）：条件/顺序边推进 + 循环体记录。 */
 function closeUnit(ctx: ParseCtx, ids: string[]): void {
   if (ids.length === 0) return;
   const top = ctx.ctrlStack[ctx.ctrlStack.length - 1];
@@ -503,7 +503,7 @@ function declaratorNames(idNode: AstNode | undefined): { kind: "single"; name: s
   return undefined;
 }
 
-/** parallel 实参子树的成员收集（短路：嵌套 parallel 不深入；helper 调用点投影为成员）。 */
+/** parallel 实参子树的成员收集（短路：嵌套 parallel 不深入；helper 调用点映射为成员）。 */
 function collectParallelMembers(ctx: ParseCtx, node: AstNode, memberIds: string[]): void {
   if (isGlobalCall(node, "agent")) {
     if (!ctx.helperInternalCalls.has(node)) memberIds.push(emitAgentCallSite(ctx, node));
@@ -526,12 +526,12 @@ function handlePhaseCall(ctx: ParseCtx, callNode: AstNode): void {
   if (ctx.currentPhase !== undefined) registerPhase(ctx, ctx.currentPhase);
 }
 
-/** 主遍历：按词法序收口调用点与控制流上下文（各 case 主体在对应 handler 内）。 */
+/** 主遍历：按词法序收尾调用点与控制流上下文（各 case 主体在对应 handler 内）。 */
 function visit(ctx: ParseCtx, node: AstNode): void {
   switch (node.type) {
     case "CallExpression":
-      // 编排全局（phase/agent/parallel）短路收口（实参子树不再通用遍历）——防止
-      // parallel 成员被主遍历二次收口；实参内嵌套编排调用的极端形态登记于头注释静态边界。
+      // 编排全局（phase/agent/parallel）短路收尾（实参子树不再通用遍历）——防止
+      // parallel 成员被主遍历二次收尾；实参内嵌套编排调用的极端形态登记于头注释静态边界。
       if (handleOrchestrationCall(ctx, node)) return;
       break;
     case "VariableDeclarator":
@@ -575,14 +575,14 @@ function helperCallName(ctx: ParseCtx, node: AstNode): string | undefined {
   return name !== undefined && ctx.agentHelpers.has(name) ? name : undefined;
 }
 
-/** 编排全局调用短路收口：返回 true = 已收口（调用方不再通用遍历实参子树）。 */
+/** 编排全局调用短路收尾：返回 true = 已收尾（调用方不再通用遍历实参子树）。 */
 function handleOrchestrationCall(ctx: ParseCtx, node: AstNode): boolean {
   if (isGlobalCall(node, "phase")) {
     handlePhaseCall(ctx, node);
     return true;
   }
   if (isGlobalCall(node, "agent")) {
-    // helper 体内的实现点：投影由 helper 调用点承载，不再按词法位置收口——
+    // helper 体内的实现点：派生视图由 helper 调用点承载，不再按词法位置收尾——
     // 消除「adapter 声明在全部 phase 之前 → 唯一节点落缺省分区」的假象
     if (ctx.helperInternalCalls.has(node)) return true;
     closeUnit(ctx, [emitAgentCallSite(ctx, node)]);
@@ -616,7 +616,7 @@ function collectSubtreeAgentCalls(node: AstNode, out: AstNode[]): void {
   }
 }
 
-/** 函数子树内对指定名集的 bare 调用收集（复合 helper 检测——内部调其他 helper 者不投影）。 */
+/** 函数子树内对指定名集的 bare 调用收集（复合 helper 检测——内部调其他 helper 者不映射）。 */
 function collectCallsToNames(node: AstNode, names: ReadonlySet<string>, out: AstNode[]): void {
   for (const child of childNodes(node)) {
     if (child.type === "CallExpression") {
@@ -657,12 +657,12 @@ function collectHelperCandidates(node: AstNode, out: HelperCandidate[]): void {
 /**
  * helper 注册表构建（预计算 + 迭代结算）：先收集全部具名候选，平凡不合格者（多/
  * 零 agent 调用、零参、同名多候选）先结算为拒；其余按依赖命运逐轮结算——依赖 =
- * 子树内直接调用的候选 + 嵌套声明的候选，依赖已录取 → 复合形态拒（双层投影失真：
+ * 子树内直接调用的候选 + 嵌套声明的候选，依赖已录取 → 复合形态拒（双层派生视图失真：
  * 外层第一实参 ≠ 内层实现实际收到的名字），依赖全部落选 → 录取，存在未结算 →
  * 延到下轮（跨度升序仅为评估序；「单行 caller 先于多行 callee 评估」的次序漏洞
  * 由依赖命运结算消除，不依赖评估顺序），循环停滞（互调环）→ 剩余全拒。
  * 让位归属：被拒 caller 的调用点不产节点；其体内对已录取 helper 的调用点仍按
- * helper 投影（phase 取该处词法位置）。
+ * helper 派生视图（phase 取该处词法位置）。
  */
 function collectAgentHelpers(program: AstNode): Map<string, AgentHelperEntry> {
   const candidates: HelperCandidate[] = [];
@@ -670,7 +670,7 @@ function collectAgentHelpers(program: AstNode): Map<string, AgentHelperEntry> {
   const info = buildCandidateDependencyInfo(candidates);
   const status = rejectTrivialCandidates(candidates);
   settleByDependencyFate(info, status);
-  // 停滞残留（无结算状态）= 候选间互调/嵌套环 → 全部不投影；录取者登记注册表
+  // 停滞残留（无结算状态）= 候选间互调/嵌套环 → 全部不映射；录取者登记注册表
   const byName = new Map<string, AgentHelperEntry>();
   for (const cand of candidates) {
     if (status.get(cand) === "accepted") {
@@ -680,7 +680,7 @@ function collectAgentHelpers(program: AstNode): Map<string, AgentHelperEntry> {
   return byName;
 }
 
-/** 候选间依赖信息（预计算共享面：直接调用名集 + 词法嵌套集 + 同名索引 + 评估序）。 */
+/** 候选间依赖信息（预计算共享清单：直接调用名集 + 词法嵌套集 + 同名索引 + 评估序）。 */
 interface CandidateDependencyInfo {
   /** 候选子树内直接调用的候选名（原始名集，含自调——结算时按 byName 归一并剔除）。 */
   directCalls: Map<HelperCandidate, Set<string>>;
@@ -775,7 +775,7 @@ function settleByDependencyFate(info: CandidateDependencyInfo, status: Map<Helpe
   }
 }
 
-/** parallel 实参成员收集 + 并行组登记（成员非空时）；返回成员 id 供 closeUnit 收口。空组（变量形态）对顺序链不可见——prevBatch 不变。 */
+/** parallel 实参成员收集 + 并行组登记（成员非空时）；返回成员 id 供 closeUnit 收尾。空组（变量形态）对顺序链不可见——prevBatch 不变。 */
 function collectParallelGroup(ctx: ParseCtx, node: AstNode): string[] {
   const memberIds: string[] = [];
   const arg = (node.arguments as AstNode[])[0];
@@ -826,7 +826,7 @@ function visitBranch(ctx: ParseCtx, test: AstNode, consequent: AstNode, alternat
   ctx.ctrlStack.pop();
 }
 
-/** 循环体遍历 + 回边闭合：体非空时登记 loop 与 loop-back 边，循环整体参与后续顺序链。 */
+/** 循环体遍历 + 回边封住：体非空时登记 loop 与 loop-back 边，循环整体参与后续顺序链。 */
 function visitLoop(ctx: ParseCtx, node: AstNode): void {
   const test = node.test as AstNode | undefined;
   const left = node.left as AstNode | undefined;
@@ -844,7 +844,7 @@ function visitLoop(ctx: ParseCtx, node: AstNode): void {
   visit(ctx, node.body as AstNode);
   const frame = ctx.ctrlStack.pop() as LoopFrame;
   if (frame.bodyNodes.length === 0) return;
-  // 回边闭合循环体（末节点 → 首节点）。
+  // 回边封住循环体（末节点 → 首节点）。
   // 回边独立表收集（携带 loopId 按 loop 归属配对——嵌套循环共享 (首,末) 节点对时
   // 各持独立回边，不因同键覆盖让先压入的回边成孤儿），不与顺序/条件/数据流候选
   // 混表去重（方向天然不同向）。
@@ -933,7 +933,7 @@ function buildDag(source: string, program: AstNode): WorkflowDag {
   });
 
   const phases: WorkflowDagPhase[] = [...ctx.phaseOrder.entries()].map(([name, order]) => ({ name, order }));
-  // 收尾：不可区分调用点合并（同 phase + 同模板收口单代表节点——规则与动因见
+  // 收尾：不可区分调用点合并（同 phase + 同模板收敛单代表节点——规则与动因见
   // workflow-dag-collapse 模块注释与 ADR-0105 补记）
   return collapseDuplicateCallSites({
     nodes: ctx.nodes,

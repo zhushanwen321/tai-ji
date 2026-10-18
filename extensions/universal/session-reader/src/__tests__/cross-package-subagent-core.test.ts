@@ -21,16 +21,16 @@ import {
 } from '@zhushanwen/subagent-core/execution/assembly/path-encoding.ts'
 
 /**
- * W4 跨包集成测试（[collect 退役] 改造保留：原「E1 落标出口产出 manifest」驱动面
- * 随 sync 批机制删除，现行真实投影出口 = store 重建通道 rebuildIndexes——manifest
- * 是可丢缓存，boot 全量腿按磁盘子文件锚幂等补缺）。「subagent-core 真实 tmpdir
+ * W4 跨包集成测试（[collect 退役] 改造保留：原「E1 落标出口产出 manifest」驱动侧
+ * 随 sync 批机制删除，现行真实派生视图出口 = store 重建通道 rebuildIndexes——manifest
+ * 是可丢缓存，boot 全量路径按磁盘子文件锚幂等补缺）。「subagent-core 真实 tmpdir
  * 产出磁盘状态 → session-reader result action sa- id 反查，不 mock manifest 写入」
  * 的跨包契约保持不变。
  *
  * 与 result.test.ts 的分工：result.test.ts 的 fixture **手工预写** manifest；本文件
- * manifest 内容必须来自投影代码路径——subagent-core 侧真实驱动（真实 RecordStore
+ * manifest 内容必须来自派生视图代码路径——subagent-core 侧真实驱动（真实 RecordStore
  * 落盘 register/轮终 entry → initSession 内 orphan 覆写真实跑 → rebuildIndexes
- * derivedManifestRecord 投影真写 records/<sa-id>.json），session-reader 侧零 mock
+ * derivedManifestRecord 派生视图真写 records/<sa-id>.json），session-reader 侧零 mock
  * 读同一 tmpdir 断言反查闭环。
  *
  * 构造形态取自 subagent-core sync-collect-recovery.test.ts 的 kill -9 同构主用例
@@ -199,7 +199,7 @@ describe('跨包集成：subagent-core 重建 manifest → session-reader result
         data: { id: m.id, agent: '/agents/worker.md', mode: 'background', task: 'cross-package task', startedAt: 1000, rootSessionId: ROOT_SESSION, depth: 0 },
       }),
       JSON.stringify({
-        // 登记 §3.3：主/子文件条目面 = v2 注册条（身份域；运行态事实源在 record 事件文件）。
+        // 登记 §3.3：主/子文件条目范围 = v2 注册条（身份域；运行态事实源在 record 事件文件）。
         type: 'custom', id: `cid-${m.id}-2`, parentId: `cid-${m.id}-1`, timestamp: ts,
         customType: 'subagent-record',
         data: {
@@ -244,7 +244,7 @@ describe('跨包集成：subagent-core 重建 manifest → session-reader result
   }
 
   /** 全链路驱动：种子 → 恢复 service（orphan 覆写）→ rebuildIndexes（现行 boot
-   *  全量重建通道——derivedManifestRecord 投影真写 manifest）。返回子 session 文件
+   *  全量重建通道——derivedManifestRecord 派生视图真写 manifest）。返回子 session 文件
    *  路径表。[collect 退役] 原 E1 落标出口（recoverSyncCollectBatch →
    *  appendBatchFinalizedEntry）随 sync 批机制删除。 */
   async function driveManifestRebuild(members: MemberSeed[]): Promise<Map<string, string>> {
@@ -256,7 +256,7 @@ describe('跨包集成：subagent-core 重建 manifest → session-reader result
     }
     const service = makeRecoveryService()
     service.rebuildIndexes()
-    // derivedManifestRecord 投影为同步落盘——全成员 manifest 即刻可见（W3 投影
+    // derivedManifestRecord 派生视图为同步落盘——全成员 manifest 即刻可见（W3 派生视图
     // 代码路径的产物，非手工预写）。
     for (const m of members) {
       expect(
@@ -277,9 +277,9 @@ describe('跨包集成：subagent-core 重建 manifest → session-reader result
     }
     const childFiles = await driveManifestRebuild([m])
 
-    // manifest 内容断言（rebuildIndexes → derivedManifestRecord 投影路径的产物，
-    // 非手工预写）：sessionFile 来自 W1 投影扩展。[U2/U3 两态桥接] 恢复链覆写后成员
-    // 处于 idle（重建单规则）、无旧终态遗留位 → legacy status 如实投影 "running"
+    // manifest 内容断言（rebuildIndexes → derivedManifestRecord 派生视图路径的产物，
+    // 非手工预写）：sessionFile 来自 W1 派生视图扩展。[U2/U3 两态桥接] 恢复链覆写后成员
+    // 处于 idle（重建单规则）、无旧终态遗留位 → legacy status 如实派生 "running"
     //（legacyManifestStatusFields 单点派生，session-reader 视角的活跃成员）。
     const manifest = JSON.parse(
       fs.readFileSync(path.join(getSubagentRecordsDir(agentDir, agentDir), 'sa-cross-1.json'), 'utf-8'),

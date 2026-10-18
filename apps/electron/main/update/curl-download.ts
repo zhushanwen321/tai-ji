@@ -11,7 +11,7 @@
  *   downloadAsset 统一执行（D6：两引擎同点清理，不散落），本模块不碰。
  * - spawn 系统 curl（macOS 绝对路径 /usr/bin/curl——系统自带且 Apple 签名，是
  *   ad-hoc 授权失效场景的绕行依据；win/linux 走 PATH 解析，缺失由 D10 第三步
- *   回退 undici 直连兜底），参数数组传参不走 shell，无注入面（D6）。
+ *   回退 undici 直连兜底），参数数组传参不走 shell，无注入范围（D6）。
  *
  * [HISTORICAL] 不变量：
  * - 停滞检测是本模块唯一超时形态（timeout-slow-flow-wallclock D1）：外层总墙钟已删除，
@@ -96,7 +96,7 @@ export class CurlConnectionError extends UpdateError {
  * 单次 curl 运行的原始失败信号（内部控制流用，不导出）。
  *
  * 携带原始 exit code 供外层区分「exit 33 重下」与「直接映射抛出」两条路径；
- * 对用户的错误分类统一在 mapCurlExitToError 收口（对齐 download-asset 的
+ * 对用户的错误分类统一在 mapCurlExitToError 收敛（对齐 download-asset 的
  * RangeNotRespectedError 内部信号模式）。
  */
 class CurlExitError extends Error {
@@ -149,7 +149,7 @@ function getCurlPath(): string {
 }
 
 /**
- * 构造 curl 参数数组（数组传参不走 shell，URL/代理来自受控配置，无注入面）。
+ * 构造 curl 参数数组（数组传参不走 shell，URL/代理来自受控配置，无注入范围）。
  *
  * [NOTE] `-C -` 恒带：以 temp 文件实际落盘字节数为续传起点（D6「与 undici 侧
  * statSync 口径一致」——文件实际大小是唯一权威），temp 不存在时 curl 自动从 0

@@ -1,13 +1,13 @@
 /**
  * createProjectionBusView 单测（composer-gen-stats 设计 D4 写 2 挂接点的实装件——
  * 全 runtime 唯一 state_changed 拦截点；此前仅经 session-service 大装配间接擦到，
- * modelId 守卫分支回归时无定向失败信息，review round1 test-coverage S15）。
+ * modelId 检查分支回归时无定向失败信息，review round1 test-coverage S15）。
  *
  * 覆盖：
  * - state_changed + 合法 modelId → tap 触发且帧序先 publish 后 tap（MF9 固定帧序：
  *   state_changed 同步送达订阅 ws 之后才执行写 2 tap）
  * - 非 state_changed 类型 → 仅透传 publish，不触发 tap
- * - modelId 守卫：payload 缺失 / 非 string / 空串 → 不触发 tap（publish 仍透传）
+ * - modelId 检查：payload 缺失 / 非 string / 空串 → 不触发 tap（publish 仍透传）
  * - 其余 IMessageBus 方法逐项透传底层 bus
  *
  * Mock 边界：fake bus（vi.fn 五方法，零真实 ws）；纯内存无 fs、无 timer。
@@ -49,7 +49,7 @@ function stateChangedMessage(modelId: string, thinkingLevel?: string): ServerMes
   return { type: 'session.state_changed', id: 'push_test', payload }
 }
 
-/** 运行时脏数据形态构造（守卫分支的被测对象；协议类型上不合法，故意 as）。 */
+/** 运行时脏数据形态构造（检查分支的被测对象；协议类型上不合法，故意 as）。 */
 function dirtyMessage(type: string, payload?: unknown): ServerMessage {
   return { type, id: 'push_test', payload } as unknown as ServerMessage
 }
@@ -84,7 +84,7 @@ describe('createProjectionBusView：state_changed 拦截 tap（D4 写 2 挂接�
     expect(onStateChanged).not.toHaveBeenCalled()
   })
 
-  it('modelId 守卫：payload 缺失 / 非 string / 空串 → 不触发 tap（publish 仍透传）', () => {
+  it('modelId 检查：payload 缺失 / 非 string / 空串 → 不触发 tap（publish 仍透传）', () => {
     const bus = makeFakeBus()
     const onStateChanged = vi.fn()
     const view = createProjectionBusView(bus as unknown as IMessageBus, onStateChanged)

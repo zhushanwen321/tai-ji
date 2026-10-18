@@ -11,7 +11,7 @@
  *    { contextIsolation: true, nodeIntegration: false, sandbox: true }，
  *    无 preload、无持久注入——被嵌入页不能访问 Node / Electron API。仅限主进程一次性
  *    executeJavaScript 白名单用途（viewport meta 注入 / autoFit 读数 / getSelection，
- *    均一次性只读或幂等 meta 补齐，无常驻脚本面；与 §6.7④ 否决的常驻 preload 探测面
+ *    均一次性只读或幂等 meta 补齐，无常驻脚本面；与 §6.7④ 否决的常驻 preload 探测路径
  *    是两类风险，不构成「已有注入先例」的边界松动）。
  *
  * 2. WebContentsView 是 Electron 42 原生 API（`import { WebContentsView } from 'electron'`），
@@ -38,11 +38,11 @@
  *    「无 LRU 上限（W4 再加淘汰策略）」，2026-09-14 内存审计（B4 browserDestroy 接线）
  *    复核时按实装修正。
  *
- * 8. 显示收口谓词（display-containers §7.4 show 统一谓词，R3 收口）：view 显示的唯一触发 =
+ * 8. 显示收敛谓词（display-containers §7.4 show 统一谓词，R3 收敛）：view 显示的唯一触发 =
  *    「浮层开 ∧ 内容 browser ∧ 无错误态 ∧ 无相交 shieldsView 面」，收敛在 applyDisplay 单点
- *    （show / focus / 错误态 / shieldsView / 浮层开合与内容切换 / rect 推送全触发面经它求值），
+ *    （show / focus / 错误态 / shieldsView / 浮层开合与内容切换 / rect 推送全触发路径经它求值），
  *    禁止各触发点独立 show——否则 shieldsView 相交隐藏期间重开浮层会「show 竞态盖住模态」。
- *    focus() 收口：非该态只隐藏不显示（防「关浮层 → 切走 → 切回」残影经 focus sync 旁路复活）；
+ *    focus() 收敛：非该态只隐藏不显示（防「关浮层 → 切走 → 切回」残影经 focus sync 旁路复活）；
  *    浮层随行豁免（§5.1 规则 5）：浮层开 ∧ 内容 browser 时 focus 换显整体豁免。策略纯函数在
  *    gateway/display-gate.ts（含双阈值空间滞回——禁时间滞回）。
  *
@@ -60,11 +60,12 @@
  *
  * 依赖方向：browser-view-manager → electron(WebContentsView/shell) + interfaces(type-only)
  * + input-validators（D2b setWindowOpenHandler 的 http/https 白名单）
- * + gateway/display-gate（显示收口谓词 + 滞回纯函数）+ gateway/forward-keys（转发桥）
+ * + gateway/display-gate（显示收敛谓词 + 滞回纯函数）+ gateway/forward-keys（转发桥）
  * （will-download 拦截用 view.webContents.session 实例属性，不需 electron 的 session 模块导入）
  */
 import { WebContentsView, shell } from 'electron'
 import type { Rectangle } from 'electron'
+import type { BrowserFrameState } from '@taiji/shared'
 import type { IWindowManager } from '../interfaces.js'
 import { URL_PREVIEW_MAX_LENGTH, isAllowedNavigateUrl, isDangerousScheme } from '../gateway/url-scheme-validators.js'
 import { isValidExternalUrl } from '../gateway/input-validators.js'
@@ -96,28 +97,15 @@ const AUTO_FIT_MIN = 0.5
 /** autoFit 缩放上限：只缩小不放大（不溢出的页面保持 100%，避免把响应式页面强制放大失真） */
 const AUTO_FIT_MAX = 1.0
 
-/** 暂存的 view 状态（W2 经 IPC 回传 renderer） */
-export interface BrowserViewState { // oe-exempt:20261003:framework:类型契约先行——容器/编排/注册表契约层，D1 下游单元即为消费面
-  /** 当前 URL（did-navigate / did-navigate-in-page 更新） */
-  currentUrl: string
-  /** 是否加载中 */
-  isLoading: boolean
-  /** 最近一次加载错误（did-fail-load 记录；成功导航后清空） */
-  error: { errorCode: number; errorDescription: string; validatedURL: string } | null
-  /** render-process-gone 后非 null（进程崩溃原因；成功导航后清空）。
-   *  renderer 落「创建失败」占位族（§5.3 两类占位区分：创建失败 vs 页面加载失败），
-   *  重试 = create + show + navigate。 */
-  processGone: { reason: string } | null
-  /** 是否可后退（did-navigate 等事件后同步 webContents.navigationHistory，供 renderer 更新 back 按钮 disabled 态） */
-  canGoBack: boolean
-  /** 是否可前进 */
-  canGoForward: boolean
-  /** 当前缩放因子（setZoomFactor 后同步经 onBrowserState 推 renderer，让 useBrowserZoom 基准一致） */
-  zoomFactor: number
-}
+/**
+ * 暂存的 view 状态（W2 经 IPC 回传 renderer）。字段集 = `browser:state` 推送载荷去掉
+ * sessionId（组装时由回调注入），单一类型源 = shared BrowserFrameState
+ * （packages/shared/src/ipc-payloads.ts）——本类型只做 Omit 派生，不重复字段声明。
+ */
+export type BrowserViewState = Omit<BrowserFrameState, 'sessionId'>
 
 /** 单个 sessionId 对应的托管条目 */
-interface ManagedView { // oe-exempt:20261003:framework:类型契约先行——容器/编排/注册表契约层，D1 下游单元即为消费面
+interface ManagedView { // oe-exempt:20261003:framework:类型契约先行——容器/编排/注册表契约层，D1 下游单元即为消费方
   view: WebContentsView
   windowId: string
   /** 最近 rect（show 时恢复；W3 由 renderer 经 setRect 推送真实 rect） */
@@ -129,7 +117,7 @@ interface ManagedView { // oe-exempt:20261003:framework:类型契约先行——
    *  setRect 不再 attach（[HISTORICAL] PR #100 W2 修复：view 在 create 已 attach，重复 addChildView
    *  会破坏视图树；destroy 仅在 isAttached=true 时 removeChildView）。hide/show 不改 isAttached（keep-alive 复用）。 */
   isAttached: boolean
-  /** webContents 状态投影 */
+  /** webContents 状态派生视图 */
   state: BrowserViewState
   /** 最近访问时间戳（Date.now()）。LRU 排序依据：create/focus 时更新，evictLRU 淘汰最小值。 */
   lastUsed: number
@@ -164,9 +152,9 @@ interface ManagedView { // oe-exempt:20261003:framework:类型契约先行——
 export class BrowserViewManager {
   private views = new Map<string, ManagedView>()
 
-  /** 浮层开合态（renderer 经 browser:overlay-state 上报；显示收口谓词事实源之一） */
+  /** 浮层开合态（renderer 经 browser:overlay-state 上报；显示收敛谓词事实源之一） */
   private overlayState: OverlayDisplayState = { ...CLOSED_OVERLAY }
-  /** shieldsView 遮蔽面集合（renderer 经 browser:shields 上报；全量替换语义） */
+  /** shieldsView 遮蔽视图集合（renderer 经 browser:shields 上报；全量替换语义） */
   private shieldFaces: ShieldFace[] = []
   /** 双阈值空间滞回状态（per session；gateway/display-gate.ts nextShieldHidden 的状态位） */
   private shieldHidden = new Map<string, boolean>()
@@ -324,7 +312,7 @@ export class BrowserViewManager {
     if (entry.isVisible) {
       entry.view.setBounds(rect)
     }
-    // 谓词重算触发面（§7.4 R4）：view rect 变化（resize）→ 滞回与相交判定重算
+    // 谓词重算触发路径（§7.4 R4）：view rect 变化（resize）→ 滞回与相交判定重算
     this.applyDisplay()
   }
 
@@ -333,8 +321,8 @@ export class BrowserViewManager {
    * keep-alive 语义：view 对象还在 Map 中，webContents 不销毁，show 时重新挂载。
    * 幂等：sessionId 不存在时无操作。
    *
-   * 显式强制隐藏（不经谓词）；可见性由显示收口谓词统一支配（applyDisplay），
-   * 后续触发面重算时若谓词为真会恢复显示（不变量 8）。
+   * 显式强制隐藏（不经谓词）；可见性由显示收敛谓词统一支配（applyDisplay），
+   * 后续触发路径重算时若谓词为真会恢复显示（不变量 8）。
    *
    * [HISTORICAL] 修复浏览器页面残留问题：原实现只调 setBounds({0,0,0,0})，view 仍然
    * attach 在 contentView 树上。多次 session 切换后，如果状态管理出错，view 会意外显示。
@@ -351,7 +339,7 @@ export class BrowserViewManager {
   }
 
   /**
-   * 显示请求：收敛到显示收口谓词（§7.4 show 统一谓词，不变量 8）——
+   * 显示请求：收敛到显示收敛谓词（§7.4 show 统一谓词，不变量 8）——
    * show 当且仅当「浮层开 ∧ 内容 browser ∧ 无错误态 ∧ 无相交 shieldsView 面」，
    * 谓词为假时只保持/进入隐藏（不报错：这是语义门控不是失败）。幂等：sessionId 不存在时无操作。
    */
@@ -367,7 +355,7 @@ export class BrowserViewManager {
 
   /**
    * 浮层开合/内容切换上报（browser:overlay-state IPC）。
-   * 谓词重算触发面（§7.4 R4）：重开浮层 → 恢复显示；关闭/换出 browser 内容 → 隐藏（keep-alive）。
+   * 谓词重算触发路径（§7.4 R4）：重开浮层 → 恢复显示；关闭/换出 browser 内容 → 隐藏（keep-alive）。
    */
   setOverlayState(state: OverlayDisplayState): void {
     this.overlayState = state
@@ -376,9 +364,9 @@ export class BrowserViewManager {
   }
 
   /**
-   * shieldsView 遮蔽面全量上报（browser:shields IPC；模态表面聚合 §6.7 的 view 遮蔽族）。
-   * 全量替换语义（上报是事件提示 + 全量收敛，不做增量簿记/时间窗兑底）。
-   * 谓词重算触发面：成员开合 + 成员开态内 rect 变化（横幅文案随 level 改宽）都经此触发。
+   * shieldsView 遮蔽视图全量上报（browser:shields IPC；模态表面聚合 §6.7 的 view 遮蔽族）。
+   * 全量替换语义（上报是事件提示 + 全量收敛，不做增量簿记/时间窗兜底）。
+   * 谓词重算触发路径：成员开合 + 成员开态内 rect 变化（横幅文案随 level 改宽）都经此触发。
    */
   setShieldsViewFaces(faces: ShieldFace[]): void {
     this.shieldFaces = faces
@@ -441,7 +429,7 @@ export class BrowserViewManager {
 
   /**
    * 从 contentView 摘除 view（内部方法）。
-   * 前置守卫：仅 isAttached=true 且窗口未销毁时操作。
+   * 前置检查：仅 isAttached=true 且窗口未销毁时操作。
    */
   private _detachView(entry: ManagedView): void {
     if (!entry.isAttached) return
@@ -454,7 +442,7 @@ export class BrowserViewManager {
 
   /**
    * 挂载 view 到 contentView（内部方法）。
-   * 前置守卫：仅 isAttached=false 且窗口未销毁时操作。
+   * 前置检查：仅 isAttached=false 且窗口未销毁时操作。
    */
   private _attachView(entry: ManagedView): void {
     if (entry.isAttached) return
@@ -491,7 +479,7 @@ export class BrowserViewManager {
   }
 
   /**
-   * 单 session 的显示收口谓词求值（含双阈值滞回状态位推进）。
+   * 单 session 的显示收敛谓词求值（含双阈值滞回状态位推进）。
    * 滞回状态即使不显示也推进（状态机与显隐解耦，事件序重放收敛一致）。
    */
   private evaluateShouldShow(sessionId: string, entry: ManagedView): boolean {
@@ -506,7 +494,7 @@ export class BrowserViewManager {
   }
 
   /**
-   * 显示收口单点（不变量 8）：全部可见性触发面（show 请求 / focus / 错误态 / shieldsView /
+   * 显示收敛单点（不变量 8）：全部可见性触发路径（show 请求 / focus / 错误态 / shieldsView /
    * 浮层开合与内容切换 / rect 推送）收敛到此，按谓词补齐显隐差额（只在状态翻转时 actuator，
    * 避免重复 setBounds）。
    */
@@ -527,13 +515,13 @@ export class BrowserViewManager {
    * 浮层随行豁免（§5.1 规则 5 / §7.4）：浮层开 ∧ 内容 browser 时换显动作整体豁免——
    * 浮层内容与 view 保持发起会话的（切走不关浮层、视口不空白）；浮层关闭后豁免解除。
    *
-   * 显示收口（§7.4 R3，不变量 8）：非「浮层开 ∧ 内容 browser ∧ 无错误态 ∧ 无相交 shieldsView」态
-   * 只隐藏不显示（含浮层开但内容为 workflow 的换显场景，R4 对齐收口谓词）——
+   * 显示收敛（§7.4 R3，不变量 8）：非「浮层开 ∧ 内容 browser ∧ 无错误态 ∧ 无相交 shieldsView」态
+   * 只隐藏不显示（含浮层开但内容为 workflow 的换显场景，R4 对齐收敛谓词）——
    * [HISTORICAL] 原实装无条件 _showEntry(target, lastRect)（注释自述「切 session 时
    * 屏幕只显示新 sid 的 view」），「恢复现状语义」不安全：关浮层 → 切走 → 切回 → 池内 view 以浮层旧
    * rect 复显盖住对话流（残影经 focus sync 旁路复活，正是 §5.1 规则 6③ 要防的形态）。
-   * 实现取设计锚两选项中的收口强形态：不提供「调用方自报谓词」的显式参数（那会开旁路、
-   * 形成两处收口点双权威）——focus 恒只隐藏不显示，显示唯一触发 = applyDisplay 的统一谓词。
+   * 实现取设计锚两选项中的收敛强形态：不提供「调用方自报谓词」的显式参数（那会开旁路、
+   * 形成两处收敛点双权威）——focus 恒只隐藏不显示，显示唯一触发 = applyDisplay 的统一谓词。
    *
    * 场景：renderer watch(focusedSessionId) → browser:focus(newSid)。
    */
@@ -552,7 +540,7 @@ export class BrowserViewManager {
       target.lastUsed = Date.now() // LRU 提升优先级（防最近用的 session 被淘汰）
     }
 
-    // 收口：只隐藏不显示（显示唯一触发 = applyDisplay 的统一谓词，不变量 8）
+    // 收敛：只隐藏不显示（显示唯一触发 = applyDisplay 的统一谓词，不变量 8）
     for (const entry of this.views.values()) {
       if (entry.isVisible) {
         this._hideEntry(entry)
@@ -561,7 +549,7 @@ export class BrowserViewManager {
   }
 
   /**
-   * 读取某 session 的状态投影（W2 IPC 回传 renderer 用）。
+   * 读取某 session 的状态派生视图（W2 IPC 回传 renderer 用）。
    * 不存在返回 null。
    */
   getState(sessionId: string): BrowserViewState | null {
@@ -595,7 +583,7 @@ export class BrowserViewManager {
    * 后退。sessionId 不存在或无法后退时无操作。
    *
    * [HISTORICAL] Electron 42 的 webContents.goBack() 已废弃，
-   * 用 webContents.navigationHistory.goBack()。isDestroyed 守卫防 webContents 已销毁时报错。
+   * 用 webContents.navigationHistory.goBack()。isDestroyed 检查防 webContents 已销毁时报错。
    */
   goBack(sessionId: string): void {
     const entry = this.views.get(sessionId)
@@ -610,7 +598,7 @@ export class BrowserViewManager {
    * 前进。sessionId 不存在或无法前进时无操作。
    *
    * [HISTORICAL] Electron 42 的 webContents.goForward() 已废弃，
-   * 用 webContents.navigationHistory.goForward()。isDestroyed 守卫防 webContents 已销毁时报错。
+   * 用 webContents.navigationHistory.goForward()。isDestroyed 检查防 webContents 已销毁时报错。
    */
   goForward(sessionId: string): void {
     const entry = this.views.get(sessionId)
@@ -706,7 +694,7 @@ export class BrowserViewManager {
       state.error = null
       state.processGone = null
       notify()
-      // 谓词重算触发面（§7.4 联动①）：重试成功/导航成功 → 错误态清空，谓词为真则恢复显示
+      // 谓词重算触发路径（§7.4 联动①）：重试成功/导航成功 → 错误态清空，谓词为真则恢复显示
       this.applyDisplay()
     })
     wc.on('did-navigate-in-page', (_e, url: string) => {
@@ -722,11 +710,11 @@ export class BrowserViewManager {
       if (errorCode === ERR_ABORTED) return
       state.error = { errorCode, errorDescription, validatedURL }
       notify()
-      // 层级共存守卫①（§5.1 规则 6）：错误态进入即主动隐藏 view（keep-alive），DOM 错误占位才可见
+      // 层级共存检查①（§5.1 规则 6）：错误态进入即主动隐藏 view（keep-alive），DOM 错误占位才可见
       this.applyDisplay()
     })
     // render-process-gone（§7.4 错误通道）：渲染进程崩溃 → 落「创建失败」占位族（state.processGone
-    // 推送，重试 = create + show + navigate）+ 错误态隐藏 view（守卫①，DOM 占位不被原生 view 盖住）。
+    // 推送，重试 = create + show + navigate）+ 错误态隐藏 view（检查①，DOM 占位不被原生 view 盖住）。
     // [HISTORICAL] 本 handler 为 W2 新增：原实装无 render-process-gone 处理，进程崩溃后
     // view 以死 webContents 残留覆盖 DOM（C-proc-12 只覆盖主窗口 renderer 崩溃恢复链）。
     wc.on('render-process-gone', (_e, details: { reason?: string }) => {

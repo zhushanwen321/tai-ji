@@ -20,7 +20,7 @@ import {
 import { InMemoryStorage } from './helpers/in-memory-storage'
 import type { ProviderInfo, ExtensionInfo } from '@taiji/shared'
 
-// fake transport 工厂迁 ./helpers/fake-transport（[C3] seam 方法面全覆盖共享工厂）
+// fake transport 工厂迁 ./helpers/fake-transport（[C3] seam 方法侧全覆盖共享工厂）
 
 beforeEach(() => {
   __resetPlatformForTesting()

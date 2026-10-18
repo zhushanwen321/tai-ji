@@ -249,7 +249,7 @@ export class CurlFetchError extends Error {
  *
  * true = 服务器已响应（curl -f exit 22 上抛形态）——与「网络错误」（exit 7/28 等无
  * httpStatusCode 的 CurlFetchError / undici 原始网络错误）可区分：调用方须据此重建
- * 既有 HTTP 语义（限流退避 / 非 2xx null 收口 / testProxy「任何响应算成功」），
+ * 既有 HTTP 语义（限流退避 / 非 2xx null 收尾 / testProxy「任何响应算成功」），
  * 不得归入网络错误桶触发通道维度「代理→直连」重试。
  */
 export function isCurlHttpStatusError(

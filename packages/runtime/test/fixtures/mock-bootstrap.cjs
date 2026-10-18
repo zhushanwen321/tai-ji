@@ -7,7 +7,7 @@
  * 不再经「写 src/plugin-bootstrap.js 文本中转」，消除并行测试互相覆盖的竞态。
  *
  * 注：被 require()/new Worker() 顶层加载时 parentPort 为 undefined（非 Worker 上下文），
- * if(parentPort) 守卫使其安全返回，不抛错。
+ * if(parentPort) 检查使其安全返回，不抛错。
  */
 const { parentPort } = require('node:worker_threads')
 

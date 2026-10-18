@@ -17,8 +17,8 @@
  *      三层路由 call 层生效 + DEFAULT_DATA_ROOT / CORE_PACKAGE_VERSION 导出形态）
  *      与 engine/paths 子入口（纯函数确定性输出）；5 个入口的 .d.cts 类型产物
  *      做存在性断言（[W11] 起为 3+1 个入口）。语义边界如实登记：V7 golden 回放跑在 src TS 源（步骤 3 的
- *      vitest），dist 侧行为面 = 上述主入口 + paths 子入口断言，d.cts 仅验证
- *      存在性（不做内容 / TS 编译面校验）
+ *      vitest），dist 侧行为范围 = 上述主入口 + paths 子入口断言，d.cts 仅验证
+ *      存在性（不做内容 / TS 编译期校验）
  *   3. golden 回放：vitest run 跑 conformance 免 LLM 免二进制测试集
  *      （golden-replay.pi/zcode + contract.probe/abort/agent-events/read-degradation，
  *      全部 fake 注入），质量资产随 dist 形态可用
@@ -32,7 +32,7 @@
  * node 版本说明：engines 声明 node>=20。本脚本实际执行环境跟随调用方
  * （本机 dev / release-npm.yml CI 均为 node 24）。TODO(node20 runner)：真正的
  * node 20 require 复验需 node 20 runner——[W11/H3] 起 core dist 全入口
- * require 链不含 node:sqlite（bare import("sqlite") 守卫已随 reader 迁引擎包
+ * require 链不含 node:sqlite（bare import("sqlite") 检查已随 reader 迁引擎包
  * 构建），node 20 可加载面与 node 24 一致。语义等价声明：本脚本在 node 24 上
  * 验证的是「构建产物可加载 + exports 映射正确 + golden 回放绿」的回归语义。
  *
@@ -108,7 +108,7 @@ for (const spec of CJS_ENTRY_SPECS) {
 }
 
 console.log('  [2/3] dist 类型产物存在性断言（exports require.types → dist .d.cts，5 入口）...')
-// npm 消费者的 TS 编译面走 exports require 条件的 types 字段——声明存在但 dist
+// npm 消费者的 TS 编译期走 exports require 条件的 types 字段——声明存在但 dist
 // .d.cts 未产出（tsup dts 配置漂移）会让消费者类型解析断裂。路径按 exports
 // require 条件映射推导（不手工拼），映射本身漂移也在此报错。
 const pkgRaw = JSON.parse(readFileSync(join(CORE_DIR, 'package.json'), 'utf8'))
@@ -147,16 +147,16 @@ const pathsChecks = [
 for (const c of pathsChecks) {
   if (!c.ok) {
     console.error(`  ✗ dist paths 断言失败: ${c.msg}`)
-    console.error('    排查：dist 行为面与 src 不一致——核对 packages/subagent-core/tsup.config.ts 与 src/execution/engine/paths.ts')
+    console.error('    排查：dist 行为范围与 src 不一致——核对 packages/subagent-core/tsup.config.ts 与 src/execution/engine/paths.ts')
     process.exit(1)
   }
   console.log(`  ✓ ${c.msg}`)
 }
 
 // dist 主入口行为 golden 断言（同一 CJS 上下文）：上方 require 探针只证明「可加载 +
-// exports 映射正确」，此处补最小行为面——纯路由与常量导出在 dist 形态下返回值
+// exports 映射正确」，此处补最小行为范围——纯路由与常量导出在 dist 形态下返回值
 // 确定性正确。全部 mock 注入（零 LLM / 零子进程 / 零宿主状态）。语义边界见头注释：
-// golden 回放本体跑在 src TS 源（步骤 3），dist 侧行为面 = 主入口 + paths 子入口
+// golden 回放本体跑在 src TS 源（步骤 3），dist 侧行为范围 = 主入口 + paths 子入口
 // 上述断言，不宣称「golden 在 dist 上字面成立」。
 console.log('  [2/3] dist 主入口行为 golden 断言（routeEngine mock 注入 + 导出常量形态）...')
 const coreMod = coreRequire(CORE_PKG_NAME)
@@ -178,7 +178,7 @@ try {
   })
 } catch (e) {
   console.error(`  ✗ dist golden 断言失败: routeEngine 抛错: ${e.message}`)
-  console.error('    排查：dist 产物行为面与 src 不一致（tsup 配置漂移 / 导出面收窄）——')
+  console.error('    排查：dist 产物行为范围与 src 不一致（tsup 配置漂移 / 导出清单收窄）——')
   console.error('    核对 packages/subagent-core/tsup.config.ts 与 src/execution/engine/routing.ts barrel 导出')
   process.exit(1)
 }
@@ -201,7 +201,7 @@ const distGoldenChecks = [
 for (const g of distGoldenChecks) {
   if (!g.ok) {
     console.error(`  ✗ dist golden 断言失败: ${g.msg}`)
-    console.error('    排查：dist 产物行为面与 src 不一致（tsup 配置漂移 / 导出面收窄）——')
+    console.error('    排查：dist 产物行为范围与 src 不一致（tsup 配置漂移 / 导出清单收窄）——')
     console.error('    核对 packages/subagent-core/tsup.config.ts 与 src/index.ts barrel（D5 公共 API 面）')
     process.exit(1)
   }

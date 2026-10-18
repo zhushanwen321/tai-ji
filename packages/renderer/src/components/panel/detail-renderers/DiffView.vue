@@ -118,7 +118,7 @@ const props = withDefaults(
   /** 文件路径（用于推断 shiki 语言；从 patch 内 +++ b/xxx 也可，但 path 更可靠） */
   path?: string
   /** newNo 是否可点击注入 #file:L 引用（FR-5）：DetailPane 上下文可注入；trace 块内
-   *  复用时（tool-detail-rich）无注入收口，传 false 关闭可点击 affordance */
+   *  复用时（tool-detail-rich）无注入收尾，传 false 关闭可点击 affordance */
   injectable?: boolean
 }>(),
   { injectable: true },
@@ -136,7 +136,7 @@ const emit = defineEmits<{
  * 行号点击：emit 行引用信息（FR-5）。仅用 newNo（改动后行号）。
  * 纯删除行（newNo undefined）不可点击注入——该行在新文件已不存在，注入 :L<oldNo>
  * 语义错误（指向被删行）。模板 v-if="line.newNo !== undefined && injectable" 已挡住删除行
- * 与 injectable=false（trace 块复用）的渲染，此处 return 是防御性兑底。
+ * 与 injectable=false（trace 块复用）的渲染，此处 return 是防御性兜底。
  */
 function onLineClick(line: { oldNo?: number; newNo?: number }): void {
   if (!props.path) return
@@ -230,7 +230,7 @@ async function highlightHunk(hunk: DiffHunk, lang: string): Promise<RenderedLine
   return out
 }
 
-// 序号守卫（RD-2#2，范式照抄同目录 CodeBlock.vue：`const seq = ++renderSeq` + 每个 await 后
+// 序号检查（RD-2#2，范式照抄同目录 CodeBlock.vue：`const seq = ++renderSeq` + 每个 await 后
 // 比对）：patch 切换后旧异步循环不得向新 diff 的 renderedHunks 写入——行数相等即被
 // codeLines 采纳，旧文件正文会显示在新 patch 行号下（数据误读）。watch 源含 props.path：
 // path 变化（同名切换语言推断）也要重新高亮，且重启循环使旧循环的待写结果作废。
@@ -254,7 +254,7 @@ watch(
       for (let i = 0; i < hunks.length; i++) {
         const hunk = hunks[i]
         const rendered = await highlightHunk(hunk, lang)
-        // 序号守卫：await 期间 patch/path 已变 → 本循环整体作废，一个结果都不写入
+        // 序号检查：await 期间 patch/path 已变 → 本循环整体作废，一个结果都不写入
         if (seq !== renderSeq) return
         renderedHunks.value[i] = rendered
       }

@@ -1,6 +1,6 @@
 // 时间格式化器（r4 M1 locale 版）：formatSchedule / formatRelativeTime 是 locale 必填的
 // 本地实现（UiLocale 双语输出，i18n.ts / widget / service / commands 消费）；fix 轨 locale
-// 化与 U2 protocol 下沉（无 locale 面，服务 taiji plugin 管理面）暂双轨并存，收敛待后续
+// 化与 U2 protocol 下沉（无 locale 面，服务 taiji plugin 管理侧）暂双轨并存，收敛待后续
 // 把 locale 版提升进 @zhushanwen/extension-protocol。formatDuration / MS_PER_* 单源
 // @zhushanwen/extension-protocol（re-export 保持既有 import 路径）。
 import { formatDuration, MS_PER_DAY, MS_PER_HOUR, MS_PER_MINUTE, MS_PER_SECOND } from './parsing.js'

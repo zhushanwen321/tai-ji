@@ -2,7 +2,7 @@
  * PS-04 / PS-06 / PS-07 / PS-08 探针：pi-coding-agent agent-session.js 行为契约（D6 探针层）。
  *
  * 登记条目（docs/pi-semantics.json）：
- * - PS-04「setThinkingLevel 同值不落账不发声（isChanging 判定）；effective ≠ previous 必发事件」
+ * - PS-04「setThinkingLevel 同值不落盘不发声（isChanging 判定）；effective ≠ previous 必发事件」
  *   ——D9 删 30s 轮询的依据（pi 不会静默改值）。
  * - PS-06「_pendingNextTurnMessages 唯一消费点 = _runAgentPrompt 注入段（注入即清空）」
  *   ——nextTurn 投递依赖用户发起下一轮。
@@ -31,20 +31,20 @@ const SESSION_SRC = PI_DIST ? readFileSync(join(PI_DIST, 'core', 'agent-session.
 const count = (text: string, needle: string): number => text.split(needle).length - 1
 
 describe.skipIf(!PI_DIST)(
-  `PS-04 探针：setThinkingLevel 条件落账/发声（isChanging 门控${SKIP_REASON ? `｜skip：${SKIP_REASON}` : ''}）`,
+  `PS-04 探针：setThinkingLevel 条件落盘/发声（isChanging 门控${SKIP_REASON ? `｜skip：${SKIP_REASON}` : ''}）`,
   () => {
     it('isChanging = effective !== previousLevel；appendThinkingLevelChange 与 thinking_level_changed 均在 if (isChanging) 块内', () => {
       // pi 1.0.0：签名第二参 options（ModelMutationOptions.persist）保留——会话内切档默认
       // 不再写全局默认。taiji 单参调用（rpc-mode.js:389
       // session.setThinkingLevel(command.level)）不触发 settings 写入，与 model-service
       // 「per-session runtime state — no persistence needed」设计一致；全局默认由
-      // pi-provider-store 独立通路读写。条件落账/发声（claim 本体）逐行未变。
+      // pi-provider-store 独立通路读写。条件落盘/发声（claim 本体）逐行未变。
       const win = methodWindow(SESSION_SRC, 'setThinkingLevel(level, options = {}) {')
       expect(win, 'PS-04 漂移：setThinkingLevel 方法消失/改签名——复核 PS-04 锚点 dist/core/agent-session.js').not.toBe('')
       const isChangingIdx = win.indexOf('const isChanging = effectiveLevel !== previousLevel')
       expect(
         isChangingIdx,
-        'PS-04 漂移：isChanging 判定形态消失（同值是否仍跳过落账？）——复核 PS-04（D9 删轮询的依据）',
+        'PS-04 漂移：isChanging 判定形态消失（同值是否仍跳过落盘？）——复核 PS-04（D9 删轮询的依据）',
       ).toBeGreaterThanOrEqual(0)
       expect(
         win.includes('if (options.persist) {'),
@@ -55,7 +55,7 @@ describe.skipIf(!PI_DIST)(
       const block = win.slice(ifIdx, ifIdx + 900)
       expect(
         block.includes('appendThinkingLevelChange') && block.includes('thinking_level_changed'),
-        'PS-04 漂移：落账/发声移出 isChanging 块（同值也会发声？）或事件类型改名——复核 PS-04',
+        'PS-04 漂移：落盘/发声移出 isChanging 块（同值也会发声？）或事件类型改名——复核 PS-04',
       ).toBe(true)
     })
   },
@@ -108,10 +108,10 @@ describe.skipIf(!PI_DIST)(
 describe.skipIf(!PI_DIST)(
   `PS-08 探针：sendCustomMessage 四分支 + triggerTurn 直达（${SKIP_REASON ? `skip：${SKIP_REASON}` : ''}）`,
   () => {
-    it('分支齐全：nextTurn 入队 / isStreaming 分流 / triggerTurn 直达 / isStreaming+triggerTurn:false 延迟落账 / 其余仅 append', () => {
+    it('分支齐全：nextTurn 入队 / isStreaming 分流 / triggerTurn 直达 / isStreaming+triggerTurn:false 延迟落盘 / 其余仅 append', () => {
       // pi 0.84.4：原 else 内联 append 抽成 _appendCustomMessage（push + appendCustomMessageEntry
-      // 落账 + message_start/end 双发，逐行等价），并新增第五分支 defer：isStreaming &&
-      // triggerTurn===false 时延迟到 turn 末尾落账（修 replay 顺序 bug：立即 append 会插进
+      // 落盘 + message_start/end 双发，逐行等价），并新增第五分支 defer：isStreaming &&
+      // triggerTurn===false 时延迟到 turn 末尾落盘（修 replay 顺序 bug：立即 append 会插进
       // tool call 与 result 之间）。taiji 全侧调用形态 = {triggerTurn:true}（D5 单通道）/
       // {deliverAs:"nextTurn"} / 非流式不传 options——defer 场景 taiji 不可达，claim 四条
       // taiji 消费路径行为不变。
@@ -134,13 +134,13 @@ describe.skipIf(!PI_DIST)(
       ).toBe(true)
       expect(
         win.includes('else if (this.isStreaming)'),
-        'PS-08 漂移：defer 分支（isStreaming+triggerTurn:false 延迟落账，0.84.4 新增）消失——复核 PS-08',
+        'PS-08 漂移：defer 分支（isStreaming+triggerTurn:false 延迟落盘，0.84.4 新增）消失——复核 PS-08',
       ).toBe(true)
       expect(
         win.includes('this._appendCustomMessage(appMessage)'),
         'PS-08 漂移：无 trigger 分支不再走 _appendCustomMessage append——复核 PS-08 与 PS-09',
       ).toBe(true)
-      // 落账/双发下沉在 _appendCustomMessage（0.84.4 从 else 内联抽出）：持久化与双发形态不得再漂
+      // 落盘/双发下沉在 _appendCustomMessage（0.84.4 从 else 内联抽出）：持久化与双发形态不得再漂
       const appendWin = methodWindow(SESSION_SRC, '_appendCustomMessage(appMessage) {')
       expect(appendWin, 'PS-08 漂移：_appendCustomMessage 方法消失——复核 PS-08').not.toBe('')
       expect(

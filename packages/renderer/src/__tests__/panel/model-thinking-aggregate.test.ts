@@ -265,7 +265,7 @@ describe('click 选中（关弹层）', () => {
   })
 })
 
-describe('数据面与 ModelSelectPopover 同源（model-picker-data）', () => {
+describe('数据范围与 ModelSelectPopover 同源（model-picker-data）', () => {
   it('enabled===false 的模型不进聚合列表（双保险过滤同源）', async () => {
     const mixed: ModelInfo[] = [
       ...MODELS,

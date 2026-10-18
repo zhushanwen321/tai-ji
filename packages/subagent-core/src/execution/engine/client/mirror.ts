@@ -5,14 +5,14 @@
 // 协议化后引擎进程是子进程的持有方（spawn/杀链都发生在引擎侧），core 只持
 // **状态镜像**：数据源 = 反向通道 `host/childSpawned` / `host/childStateChanged`。
 // 消费方 = 引擎客户端（killAll 整体置死、孤儿收割快照、onChange → core 镜像的
-// 桥接投影）；生命周期谓词读 core 侧镜像（host/spawned-children.ts 的
+// 桥接映射）；生命周期谓词读 core 侧镜像（host/spawned-children.ts 的
 // hasLiveProcessHandleCore），不读本类。
 //
 // 失效语义（impl-plan §2.2 必写死）：
 //   1. 未收 `childSpawned` 前 = 无句柄（getEntry undefined 等价）；
 //   2. 引擎进程 exit / 重建 / dispose / killAll 时把该引擎**全部镜像项整体置死**
 //      （killed=true + 状态广播）——否则 notify-host 60s 合并窗口挂住 /
-//      桥接投影把死句柄登记为活（countInFlight 虚高）；
+//      桥接映射把死句柄登记为活（countInFlight 虚高）；
 //   3. 置死广播后镜像清空，core 镜像读点回落「无句柄」。
 //
 // 载荷契约（SDK reverse-channels.ts）：`killed` 必含，判据
@@ -24,7 +24,7 @@ import { notifyChildProcessExited } from "../../ui/dialog-queue.ts";
 
 const logger = getLogger("subagents");
 
-/** 镜像项（childSpawned/childStateChanged 载荷的落库形态）。 */
+/** 镜像项（childSpawned/childStateChanged 载荷的存储形态）。 */
 export interface MirrorEntry {
   /** 引擎内一次性子进程 pid（镜像 key）。 */
   readonly pid: number;
@@ -36,7 +36,7 @@ export interface MirrorEntry {
   killed: boolean;
   exitCode?: number;
   signal?: string;
-  /** 最近一次状态变更的墙钟时间戳（Date.now()，诊断面）。 */
+  /** 最近一次状态变更的墙钟时间戳（Date.now()，诊断范围）。 */
   updatedAt: number;
 }
 
@@ -53,8 +53,8 @@ type MirrorListener = (event: MirrorChangeEvent) => void;
 /**
  * spawnedChildren 状态镜像（per EngineClient 一份）。
  *
- * 镜像只是状态投影：本类不发信号、不杀进程（收割 = 引擎进程组级，见 EngineClient）；
- * 「整体置死」是对状态面的批量标记 + 广播，使宿主侧桥接投影/通知/GC 立即回落安全态。
+ * 镜像只是状态派生视图：本类不发信号、不杀进程（收割 = 引擎进程组级，见 EngineClient）；
+ * 「整体置死」是对状态侧的批量标记 + 广播，使宿主侧桥接映射/通知/GC 立即回落安全态。
  */
 export class SpawnedChildrenMirror {
   private readonly entries = new Map<number, MirrorEntry>();

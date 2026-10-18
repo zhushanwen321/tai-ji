@@ -46,7 +46,7 @@ export interface SettingsHandlerContext extends MessageHandlerContext {
   configService: IConfigService
   sessionService: ISessionService
   /**
-   * modelService（IModelService）。测试连接的 per-model 编排面（M3a：
+   * modelService（IModelService）。测试连接的 per-model 编排侧（M3a：
    * ProviderConnectionTestService.testProviderConnections）是可选交集——组合根注入的
    * ModelService 实现类具备该方法，测试替身可缺省（handler 走 test_unavailable 防御分支）。
    */
@@ -54,8 +54,8 @@ export interface SettingsHandlerContext extends MessageHandlerContext {
   /** OAuth Login（路径 B）：config.oauthLogin/oauthCancel RPC 路由 + auth.* 事件由 AuthService 推 broadcast */
   authService: IAuthService
   /**
-   * Provider 凭据解析唯一通道（D3 收口，链 2 消费点）。
-   * 构造必需（M2fg 收口）：组合根装配注入（M2c），models.json 直查回退已删除。
+   * Provider 凭据解析唯一通道（D3 收尾，链 2 消费点）。
+   * 构造必需（M2fg 收尾）：组合根装配注入（M2c），models.json 直查回退已删除。
    */
   providerCredentialResolver: IProviderCredentialResolver
   /**
@@ -238,7 +238,7 @@ export class SettingsMessageHandler {
     if (!handler) return false
     // 路由表 key 与 msg.type 字面量同源（上方 routes 逐 key 登记），查表命中即类型匹配；
     // TS 无法静态关联索引访问与 key（correlated types，microsoft/TypeScript#30581），
-    // `as never` 是该不变式下的类型层收口，运行时分发行为与原 switch 完全一致
+    // `as never` 是该不变式下的类型层收尾，运行时分发行为与原 switch 完全一致
     //（未知 type 落空 → return false，同原 default 分支）。
     return handler(msg as never, ws)
   }

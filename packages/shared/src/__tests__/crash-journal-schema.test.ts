@@ -4,7 +4,7 @@
  * 守护三条验收线：
  * 1. 枚举与设计 §3.3 D1 schema JSON 块对齐——event = 设计行 20 值逐字转录 + 实装扩展
  *    frame-unserializable 恰 1 值（message-bus 序列化失败丢帧，与 registry-miss 同为核心
- *    链整帧丢弃的台账对称收尾）/ layer 5 值 /
+ *    链整帧丢弃的条目清单对称收尾）/ layer 5 值 /
  *    reason 已知值分层登记（下方 DESIGN_REASON_LINE = 设计 reason 行 6 值逐字转录，
  *    IMPLEMENTED_KNOWN_REASONS = 设计行 ∪ 实装 append 调用点静态可枚举值全集；
  *    设计改 schema 时同步改 DESIGN_*；event 枚举不得混入 reason 值 unclean-exit，
@@ -12,7 +12,7 @@
  * 2. 字段全可空——仅 {ts,layer,event} 的最小事件与全 null 事件均合法
  *    （设计「不知道 ≠ 没打点」；类型收窄导致构造不过 = 本文件编译红）；
  * 3. JSON.stringify→parse 往返不丢字段——JSONL 落盘/回读的最低保真契约
- *    （D2 评估器以台账 JSONL 为唯一输入，字段静默丢失 = 条件计数失真）。
+ *    （D2 评估器以条目清单 JSONL 为唯一输入，字段静默丢失 = 条件计数失真）。
  */
 import { describe, it, expect } from 'vitest'
 import {
@@ -52,7 +52,7 @@ const DESIGN_EVENT_LINE = [
 ]
 // 设计行之外的实装扩展 event 值全集（来源见逐值注释；差集锁空范式同 KNOWN_REASONS）
 const IMPLEMENTED_EXTRA_EVENTS = [
-  // message-bus publish 序列化失败丢帧（与 registry-miss 同为核心链整帧丢弃的台账对称收尾）
+  // message-bus publish 序列化失败丢帧（与 registry-miss 同为核心链整帧丢弃的条目清单对称收尾）
   'frame-unserializable',
   // 受管 pi 意外退出（exit_converge）时的信号发送方归因转储（signal-forensics.ts）
   'signal-forensics',
@@ -67,7 +67,7 @@ const DESIGN_REASON_LINE = [
 ]
 /**
  * 实装 append 调用点静态可枚举已知值全集（impl-plan 偏差 #18 残留风险回写，逐值
- * 来源 = 全仓 crash 台账 append 点枚举；开放形态——Electron reason 透传、
+ * 来源 = 全仓 crash 条目清单 append 点枚举；开放形态——Electron reason 透传、
  * `condition-<id>` 模板、无 reason 事件——不在此列，落 open 集语义）。
  */
 const IMPLEMENTED_KNOWN_REASONS = [
@@ -93,7 +93,7 @@ const IMPLEMENTED_KNOWN_REASONS = [
   'stale-checkpoint-after-clean-exit',
   // checkpoint-corrupt（runtime-checkpoint.ts）
   'parse-failed',
-  // registry-miss（message-bus 出站守卫 dropReason 闭合二值）
+  // registry-miss（message-bus 出站检查 dropReason 封闭二值）
   'registry_miss',
   'still_oversize_after_truncate',
   // frame-unserializable（message-bus publish 序列化失败丢帧）
@@ -169,12 +169,12 @@ describe('CRASH_JOURNAL_LAYERS（D1 schema layer 行）', () => {
   })
 })
 
-describe('CRASH_JOURNAL_KNOWN_REASONS（开放枚举已知值登记面：设计行 + 实装调用点）', () => {
+describe('CRASH_JOURNAL_KNOWN_REASONS（开放枚举已知值登记清单：设计行 + 实装调用点）', () => {
   it(`恰 ${IMPLEMENTED_KNOWN_REASONS.length} 值（设计行 + 实装已知值全集）`, () => {
     expect(CRASH_JOURNAL_KNOWN_REASONS).toHaveLength(IMPLEMENTED_KNOWN_REASONS.length)
   })
 
-  it('设计 reason 行 6 值全部登记（行末「…」= 开放枚举，登记面是超集不是逐字转录）', () => {
+  it('设计 reason 行 6 值全部登记（行末「…」= 开放枚举，登记清单是超集不是逐字转录）', () => {
     for (const reason of DESIGN_REASON_LINE) {
       expect(CRASH_JOURNAL_KNOWN_REASONS).toContain(reason)
     }
@@ -190,7 +190,7 @@ describe('CRASH_JOURNAL_KNOWN_REASONS（开放枚举已知值登记面：设计�
     }
   })
 
-  it('无重复值（登记面供消费方测试作全集矩阵，重复会污染矩阵）', () => {
+  it('无重复值（登记清单供消费方测试作全集矩阵，重复会污染矩阵）', () => {
     expect(new Set(CRASH_JOURNAL_KNOWN_REASONS).size).toBe(CRASH_JOURNAL_KNOWN_REASONS.length)
   })
 
@@ -208,7 +208,7 @@ describe('CRASH_JOURNAL_KNOWN_REASONS（开放枚举已知值登记面：设计�
 })
 
 describe('CrashJournalEvent 字段全可空（设计「不知道 ≠ 没打点」）', () => {
-  it('仅 {ts,layer,event} 的最小事件合法（字段缺省形态，编译即守卫）', () => {
+  it('仅 {ts,layer,event} 的最小事件合法（字段缺省形态，编译即检查）', () => {
     const minimal: CrashJournalEvent = {
       ts: '2026-09-12T02:57:03Z',
       layer: 'runtime',
@@ -284,7 +284,7 @@ describe('JSON 往返保真（JSONL 落盘/回读不丢字段）', () => {
     expect(parsed.memPressure).toEqual({ swapUsedMB: 11004, freeMB: 170 })
   })
 
-  it('扩展字段（偏差 #32③ 登记面）可携带且往返不丢（写入侧禁绕过接口私自扩字段的守卫基线）', () => {
+  it('扩展字段（偏差 #32③ 登记清单）可携带且往返不丢（写入侧禁绕过接口私自扩字段的检查基线）', () => {
     const withExtensions: CrashJournalEvent = {
       layer: 'pi',
       event: 'reaped',

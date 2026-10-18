@@ -248,7 +248,7 @@ rpc-client.ts:128 当前**硬编码** `--no-extensions --approve`，所有 exten
 | `noContextFiles` | **新增维度** | 直接映射到 `--no-context-files`，不影响其他 |
 | `modelOverride` | 见 §5.2 优先级规则 | Landing Chip 覆盖 > preset > 全局默认 |
 | `thinkingLevel` | 见 §5.2 优先级规则 | Landing Chip 覆盖 > preset > 全局默认 |
-| `prompt` | **模式提示词面**（新增，见 §2.6） | `replace` = 模式 > 全局替换 > pi 默认；`append` = 模式段（全局追加由 pi-system-prompt 扩展独立处理） |
+| `prompt` | **模式提示词侧**（新增，见 §2.6） | `replace` = 模式 > 全局替换 > pi 默认；`append` = 模式段（全局追加由 pi-system-prompt 扩展独立处理） |
 
 ### 2.3 BUILTIN EXTENSION 强制注入（infrastructure 级不可 exclude）
 
@@ -302,7 +302,7 @@ return afterPreset.filter(r => r.loadable).map(r => r.path)
 
 **注意 `all` 模式不传 `--tools`**——因为 pi 默认就启用 read/bash/edit/write（不是全部 7 个）。若要启用 grep/find/ls，必须用 allowlist 显式列出。
 
-### 2.6 与现有 systemPrompt 的关系（模式提示词面）
+### 2.6 与现有 systemPrompt 的关系（模式提示词侧）
 
 > **[2026-09 修订，推翻本节原结论]** 原文「preset 不引入新 systemPrompt 字段」已被模式体系设计推翻——预设（用户可见名「模式」）现引入可选的提示词字段，与全局系统提示词并列而非互斥。
 

@@ -4,10 +4,10 @@
  * 根因链（四段缺一不可）：
  * 1. runtime：ws onDisconnect → bus.unsubscribeAll(ws) 清空该连接全部订阅
  * 2. core ws-client onopen 只置状态 + 心跳；use-connection 重连路径只重连不重订阅
- * 3. useChat.ensureStreamSubscription 的 streamSubscriptions.has 幂等守卫 + 本模块
+ * 3. useChat.ensureStreamSubscription 的 streamSubscriptions.has 幂等检查 + 本模块
  *    subscriptionStates.subscribed 标记，重连后全部短路 → subscribe 永不重发
  * 4. 唯一自愈通道（seq-gap 分支 5 reconcile）需要先收到一条带 seq 的跳号消息才触发——
- *    W09 删除 broadcast 兜底腿后无消息到达，自愈通道失效
+ *    W09 删除 broadcast 兜底路径后无消息到达，自愈通道失效
  *
  * 修复：connected false→true 迁移时 use-connection 调 resubscribeAll()——
  * subscribed 条目重置后带 fromSeq=lastSeenSeq 增量重订（回放断线期间 ring 消息），

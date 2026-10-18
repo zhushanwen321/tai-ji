@@ -4,7 +4,7 @@
  * 域函数 = 「command 原语 + reply 解包」或「events 订阅路由」的薄封装，本测试验证封装契约：
  * - RPC：type / payload 形状（含条件键省略，如 send 无 images 时不带 images 键）、超时取值
  *   （compact/bash 引用 shared 常量 + RENDERER_RPC_MARGIN_MS）、reply 字段解包返回
- * - 订阅：onGlobalType/on 的事件类型 + payload 解包 + sessionId 过滤守卫 + 取消函数透传
+ * - 订阅：onGlobalType/on 的事件类型 + payload 解包 + sessionId 过滤检查 + 取消函数透传
  *
  * mock 链路：request.command / events.on|onGlobalType / ws-client.send（extension.ui_response
  * fire-and-forget）。mock 路径相对测试文件解析（../../request = transport/api/request.ts），
@@ -286,7 +286,7 @@ describe('extension 域 RPC 动作', () => {
     expect(mockCommand.mock.calls[1][0]).toBe('extension.list')
   })
 
-  it('getPendingRequests 按类型守卫过滤非法条目', async () => {
+  it('getPendingRequests 按类型检查过滤非法条目', async () => {
     mockCommand.mockResolvedValueOnce({
       requests: [
         { requestId: 'ok1', dialogKind: 'confirm', sessionId: 's1' },

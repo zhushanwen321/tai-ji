@@ -99,12 +99,12 @@ describe("executeAndAwait worktree 失败收尾", () => {
     });
 
     // spy store.archive：[U5] 失败轮 settle（markRoundIdle）不终态化——archive
-    // 必须零调用（旧终态化退役）；失败收口 = record 落 idle 等续聊（
+    // 必须零调用（旧终态化退役）；失败收尾 = record 落 idle 等续聊（
     // [two-state-convergence U4/D3] 翻边后 idle 即 resumable）。
     const store = getStore(service);
     const archiveSpy = vi.spyOn(store, "archive");
     // 捕获 record id（executeAndAwait reject 时不返回 handle；listRunningMutable 是 running
-    // 过滤视图，[two-state-convergence U4] 轮终翻边 idle 后不承载「留内存」断言面）。
+    // 过滤视图，[two-state-convergence U4] 轮终翻边 idle 后不承载「留内存」断言范围）。
     // spy 只观察不替换实现（register 的入册副作用必须保持）。
     const registerSpy = vi.spyOn(store, "register");
 
@@ -131,12 +131,12 @@ describe("executeAndAwait worktree 失败收尾", () => {
   });
 
   // ============================================================
-  // create-await 竞态守卫（Phase 2）：create await 窗口内 dispose 抢先把
-  // record CAS 成 closed → 守卫 cleanup + throw cancelled（失败 throw 语义，
-  // SAR.run 的 catch 会转 AgentResult.error）。守卫 throw 不落在 try 内
+  // create-await 竞态检查（Phase 2）：create await 窗口内 dispose 抢先把
+  // record CAS 成 closed → 检查 cleanup + throw cancelled（失败 throw 语义，
+  // SAR.run 的 catch 会转 AgentResult.error）。检查 throw 不落在 try 内
   // （否则被上方 catch 当 create 失败再走 finalizeFailed，对已 closed record 语义未定义）。
   // ============================================================
-  it("守卫：create await 窗口内 dispose 抢先 → cleanup 被调 + throw cancelled（不进 runAndFinalize）", async () => {
+  it("检查：create await 窗口内 dispose 抢先 → cleanup 被调 + throw cancelled（不进 runAndFinalize）", async () => {
     const { service, worktreeManager } = setup();
 
     const handle = Object.freeze({
@@ -161,7 +161,7 @@ describe("executeAndAwait worktree 失败收尾", () => {
     // 微任务推进：record 已建 + executeAndAwait 挂在 pending create 上
     await new Promise((r) => { setTimeout(r, 0); });
     // dispose 抢先：CAS running → closed（此刻 worktreeHandle 仍 undefined，
-    // dispose 的 fire-and-forget cleanup 跳过）——守卫是唯一清理点
+    // dispose 的 fire-and-forget cleanup 跳过）——检查是唯一清理点
     service.disposeAllRecords("parent-shutdown");
     resolveCreate(handle);
 
@@ -172,7 +172,7 @@ describe("executeAndAwait worktree 失败收尾", () => {
 
 // ============================================================
 // [S5] execute(worktree:true) 创建路径置 record.hadWorktree
-// （三层缺口之一：仅 cold-lookup 跨重启水合置位时，进程内归档寻回的重建守卫
+// （三层缺口之一：仅 cold-lookup 跨重启水合置位时，进程内归档寻回的重建检查
 //  `hadWorktree === true && !worktreeHandle` 第一条永不满足——归档清句后无从重建）
 // ============================================================
 describe("execute(worktree:true) 创建即置 hadWorktree", () => {
@@ -201,7 +201,7 @@ describe("execute(worktree:true) 创建即置 hadWorktree", () => {
 
     const store = getStore(service);
     const rec = store.getMutable(execHandle.subagentId);
-    // [S5] 创建即置（close 收口 markSettledOut 清句后，重建守卫判据由本标志承载）
+    // [S5] 创建即置（close 收尾 markSettledOut 清句后，重建检查判据由本标志承载）
     expect(rec?.hadWorktree).toBe(true);
     expect(rec?.worktreeHandle).toBe(handle);
   });

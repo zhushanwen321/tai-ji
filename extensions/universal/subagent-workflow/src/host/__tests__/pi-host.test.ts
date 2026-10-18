@@ -3,14 +3,15 @@
 // 三视角：①使用者——discoveryRoots 各 kind 的根清单/顺序/source 标签与
 // resource-discovery.ts buildScanTargets（user-pi/npm/npm-dev 段）、
 // skill-discovery.ts resolveSkillPath（skills 两根）现推导逐项一致；
-// ②构建者——dataRoot/log/countActiveFromEntries/createDelivery 四端口桥接形态；
+// ②构建者——dataRoot/log/countActiveFromEntries/getDeliveryPort 四端口桥接形态；
 // ③观察者——getAgentDir 每次现取（PI_CODING_AGENT_DIR 实例隔离切换后重取生效，
 // 无模块级缓存）。
 //
 // mock 策略：pi SDK / pi 宿主协作件全部 vi.mock 工厂覆盖（vitest alias 的
 // mocks/ 桩只供其他测试族用，本文件需要可控返回值）。pending-notifications
-// mock 返回 {count: n} 形状直接验证「适配读 .count」；session-delivery mock
-// 验证 createDelivery 透传（参数 + 返回句柄）。
+// mock 返回 {count: n} 形状直接验证「适配读 .count」；pi-delivery-port mock
+// 验证 getDeliveryPort 槽访问器透传（unified-delivery 波 2——createDelivery 注入
+// 随扩展侧内核部署退役，老能力映射 #7）。
 
 import { join, dirname } from "node:path";
 import { createRequire } from "node:module";
@@ -35,16 +36,16 @@ const pendingNotificationsMock = vi.hoisted(() => ({
   countActiveFromEntries: vi.fn(),
 }));
 
-const sessionDeliveryMock = vi.hoisted(() => ({
-  createDelivery: vi.fn(),
+const deliveryPortMock = vi.hoisted(() => ({
+  getDeliveryPort: vi.fn(),
 }));
 
 vi.mock("@earendil-works/pi-coding-agent", () => piCodingAgentMock);
 vi.mock("@zhushanwen/pi-extension-logger", () => extensionLoggerMock);
 vi.mock("@zhushanwen/pi-pending-notifications", () => pendingNotificationsMock);
-vi.mock("@zhushanwen/session-delivery", () => sessionDeliveryMock);
+vi.mock("@zhushanwen/pi-delivery-port", () => deliveryPortMock);
 
-// 端到端用例（P5 staged 入扫描面）隔离真实用户目录：resource-discovery 用 homedir()
+// 端到端用例（P5 staged 入扫描范围）隔离真实用户目录：resource-discovery 用 homedir()
 // 推导 user-agents 根（~/.agents/workflows），不 mock 会让「内置条目存在/两次一致」
 // 断言依赖本机用户资产状态（resource-discovery.test.ts 同款手法）。
 const mockHomeDir = vi.hoisted(() => {
@@ -59,14 +60,14 @@ vi.mock("node:os", async (importOriginal) => {
 });
 
 import { discoverResources } from "@zhushanwen/subagent-core";
-// clearFileCache 仅测试消费（barrel 收窄面外）——测试深路径经 vitest alias 正则
+// clearFileCache 仅测试消费（barrel 收窄后的范围外）——测试深路径经 vitest alias 正则
 // 重写到 core src 物理路径（B-2/D3 既有先例形态；specifier 不含 src/ 段）
 import { clearFileCache } from "@zhushanwen/subagent-core/shared/resource-discovery.ts";
 
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { getLogger } from "@zhushanwen/pi-extension-logger";
 import { countActiveFromEntries } from "@zhushanwen/pi-pending-notifications";
-import { createDelivery } from "@zhushanwen/session-delivery";
+import { getDeliveryPort } from "@zhushanwen/pi-delivery-port";
 
 import { createPiHostServices, createPiNotifyDomainPorts, resolveGrandchildExtensionPaths } from "../pi-host.ts";
 
@@ -74,7 +75,7 @@ beforeEach(() => {
   vi.mocked(getAgentDir).mockClear();
   vi.mocked(getLogger).mockReset();
   vi.mocked(countActiveFromEntries).mockReset();
-  vi.mocked(createDelivery).mockReset();
+  vi.mocked(getDeliveryPort).mockReset();
   delete process.env.PI_CODING_AGENT_DIR;
 });
 
@@ -96,9 +97,9 @@ describe("createPiHostServices.discoveryRoots（与现推导逐项一致）", ()
   }
 
   beforeEach(() => {
-    // 独立 pi 形态基线（argv 无 --extension）：P5 扫描根修正后 npm/npm-dev 根的
+    // 独立 pi 形态基线（argv 无 --extension）：P5 扫描从根源修复后 npm/npm-dev 根的
     // 指向随形态分流——本 describe 全部锚定独立态推导，runner argv 形态不构成
-    // 契约，显式钉死防漂移（taiji 态断言见下方专属 describe）。
+    // 契约，显式固定防漂移（taiji 态断言见下方专属 describe）。
     process.argv = ["node", "/pi", "--mode", "rpc"];
   });
 
@@ -136,7 +137,7 @@ describe("createPiHostServices.discoveryRoots（与现推导逐项一致）", ()
     expect(existsSync(join(coreRoot!.dir, "subagent-core", "agents"))).toBe(true);
   });
 
-  it("workflows 四根：与 agents 同构，末级目录名切换为 workflows，第 4 根 core 包父目录（P5 staged 副本入扫描面）", () => {
+  it("workflows 四根：与 agents 同构，末级目录名切换为 workflows，第 4 根 core 包父目录（P5 staged 副本入扫描范围）", () => {
     stubAgentDir();
     const roots = createPiHostServices().discoveryRoots?.().workflows;
 
@@ -149,7 +150,7 @@ describe("createPiHostServices.discoveryRoots（与现推导逐项一致）", ()
       { dir: join(AGENT_DIR, "npm", "node_modules"), source: "npm" },
       { dir: join(AGENT_DIR, "extensions"), source: "npm-dev" },
       // P5：workflows kind 的「刻意不注入」禁区拆除——内置 workflow 随 core 包入
-      // 扫描面（P-C6 裁决见 pi-host.ts 注释）
+      // 扫描范围（P-C6 裁决见 pi-host.ts 注释）
       { dir: coreParent, source: "npm" },
     ]);
   });
@@ -185,7 +186,7 @@ describe("createPiHostServices.discoveryRoots（与现推导逐项一致）", ()
   });
 });
 
-describe("createPiHostServices.discoveryRoots（P5 D4-2 扫描根修正：taiji 态形态感知）", () => {
+describe("createPiHostServices.discoveryRoots（P5 D4-2 扫描从根源修复：taiji 态形态感知）", () => {
   const AGENT_DIR = "/fake/data-dir/agent";
   const argvSaved = process.argv;
 
@@ -553,33 +554,25 @@ describe("createPiNotifyDomainPorts.countActiveFromEntries（适配读 .count）
 	});
 });
 
-describe("createPiNotifyDomainPorts.createDelivery（透传 session-delivery）", () => {
-  it("参数透传 + 返回句柄透传（不经包装）", () => {
-    const fakePort = {
-      supportedPayloads: ["text"] as const,
-      isIdle: () => true,
-      send: () => undefined,
-    };
-    const fakeConfig = { intent: "after-run" as const };
-    const fakeHandle = { send: () => {}, flush: () => {}, dispose: () => {} };
-    vi.mocked(createDelivery).mockReturnValue(fakeHandle);
+describe("createPiNotifyDomainPorts.getDeliveryPort（透传 pi-delivery-port 槽访问器）", () => {
+  it("访问器本体直传（不经包装），每次消费即到即读返回当前槽值", () => {
+    const fakeHandle = { deliver: () => ({ kind: "accepted", id: "x" }), flush: () => {} };
+    vi.mocked(getDeliveryPort).mockReturnValue(fakeHandle as never);
 
-    const result = createPiNotifyDomainPorts().createDelivery?.(fakePort, fakeConfig);
+    const result = createPiNotifyDomainPorts().getDeliveryPort?.();
 
-    expect(vi.mocked(createDelivery)).toHaveBeenCalledTimes(1);
-    expect(vi.mocked(createDelivery).mock.calls[0][0]).toBe(fakePort);
-    expect(vi.mocked(createDelivery).mock.calls[0][1]).toBe(fakeConfig);
+    expect(vi.mocked(getDeliveryPort)).toHaveBeenCalledTimes(1);
     expect(result).toBe(fakeHandle);
   });
 });
 
 // ──────────────────────────────────────────────────────────────
-// P5 staged workflows 入扫描面（端到端）：taiji 态 roots → discoverResources
+// P5 staged workflows 入扫描范围（端到端）：taiji 态 roots → discoverResources
 // 验收条款 b：location 可派发（<location> = 真实存在的脚本路径）+ 同环境两次
 // 扫描 location 形态确定（P-C6 裁决「实际路径直渲染」的稳定性构造性证据）。
 // ──────────────────────────────────────────────────────────────
 
-describe("P5 staged workflows 入扫描面（端到端）", () => {
+describe("P5 staged workflows 入扫描范围（端到端）", () => {
   const AGENT_DIR = "/fake/data-dir/agent";
   const argvSaved = process.argv;
   let ws: string;
@@ -620,7 +613,7 @@ describe("P5 staged workflows 入扫描面（端到端）", () => {
       expect(existsSync(r.path)).toBe(true);
       expect(r.path.endsWith(".js")).toBe(true);
     }
-    // 内置代表脚本（review-fix-loop = workflow 域核心脚本）在扫描面内
+    // 内置代表脚本（review-fix-loop = workflow 域核心脚本）在扫描范围内
     expect(builtin.some((r) => r.path.endsWith("review-fix-loop.js"))).toBe(true);
   });
 
@@ -638,7 +631,7 @@ describe("P5 staged workflows 入扫描面（端到端）", () => {
     const second = await scan();
 
     // readdir 枚举序无契约（discoverResources 返回按扫描插入序）——确定性断言
-    // 以 path 排序投影比较（条目集合与形态稳定，序不在契约内）
+    // 以 path 排序派生视图比较（条目集合与形态稳定，序不在契约内）
     const sorted = (rs: Awaited<ReturnType<typeof discoverResources>>) =>
       rs.map((r) => ({ path: r.path, source: r.source, available: r.available })).sort((a, b) => (a.path < b.path ? -1 : 1));
     expect(sorted(second)).toEqual(sorted(first));

@@ -15,7 +15,7 @@
  * - renderer store/composable：useChatStore / useSessionStore / useSettingsStore / useNewTaskFlow /
  *   useModel / useHandoffActions / useSidebar / useToast / useForkModeChannel /
  *   useHandoffModeChannel / useImageAttachment / useI18n
- *   [u3c 退役] useCompactQueue 已随投递所有权内核退役（队列区数据源 = session.delivery 帧投影，
+ *   [u3c 退役] useCompactQueue 已随投递所有权内核退役（队列区数据源 = session.delivery 帧派生视图，
  *   见 composables/panel/useQueueRows.ts）；本文件的残留职责仅剩「撤销/回收文本回输入区」。
  *
  * 视觉派生（D1「视觉派生留壳」）：useComposerBoxClass + useComposerModeVisual 的逻辑并入本文件
@@ -142,9 +142,9 @@ export interface ComposerShellParams {
   isSending: Ref<boolean>
   /** per-session 草稿存储窄接口（ADR-0049：经 useSessionScopedState 分区，不暴露 Map 引用） */
   drafts: DraftStore
-  /** session 是否活跃（流式/派发）—— canSend/visual 守卫 */
+  /** session 是否活跃（流式/派发）—— canSend/visual 检查 */
   isActive: ComputedRef<boolean>
-  /** 命令浮层 open 态（useCommandPopoverTrigger 产物；命令动作表守卫——浮层 open 时动作表跳过） */
+  /** 命令浮层 open 态（useCommandPopoverTrigger 产物；命令动作表检查——浮层 open 时动作表跳过） */
   cmdOpen: Readonly<Ref<boolean>>
 }
 
@@ -324,7 +324,7 @@ export function useComposerShell(params: ComposerShellParams) {
     switchModel,
     setThinkingLevel,
     getThinkingLevelMap: (modelId: string) => {
-      // 旧版守卫：无 '/' 的 modelId（如空串/非完整模型 id）直接返回 undefined（all-levels），
+      // 旧版检查：无 '/' 的 modelId（如空串/非完整模型 id）直接返回 undefined（all-levels），
       // 不碰 providers。
       if (!modelId.includes('/')) return undefined
       const [providerId, modelName] = modelId.split('/')
@@ -483,7 +483,7 @@ export function useComposerShell(params: ComposerShellParams) {
    * [HISTORICAL] 前身 isBusy = isActive ∨ isSending——isActive 半边是 renderer 侧车道判定的残留
    * （占用即拦截），随 D1「renderer 只提交不判定」退役（u3b 收 core send.ts 的 canSend 语义，
    * 壳层派生同批收窄归 u3c）。
-   * 仅约束普通 send；staging 发送不受本守卫拦（fork-ask 对源只读，streaming 中合法）。 */
+   * 仅约束普通 send；staging 发送不受本检查拦（fork-ask 对源只读，streaming 中合法）。 */
   const canSend = computed(() => hasInput.value && !isSending.value)
   /** 可提交：staging 活跃时只看本地双发锁（isSending）——streaming 中 fork 提交合法，
    *  handoff 的 streaming 拦截在入口（enterHandoffMode）+ 兜底（handleHandoffSend）。
@@ -538,7 +538,7 @@ export function useComposerShell(params: ComposerShellParams) {
       : t('panel.composer.handoffBannerDesc'),
   )
 
-  // ── 发送分流（core dispatch/send；[u3c/D1] 统一分发器：staging > canSend 守卫 >
+  // ── 发送分流（core dispatch/send；[u3c/D1] 统一分发器：staging > canSend 检查 >
   //    staging.send > landing（含 bash）> bash > /compact > send（统一 submit））──
   const { onSend } = useComposerSend({
     staging: { hasActiveStaging: staging.hasActiveStaging, send: staging.send, activeStaging: staging.activeStaging },

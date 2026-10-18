@@ -14,9 +14,9 @@
  *
  * 2. Dev 模式隔离：
  *    - TAIJI_AGENT_DATA_DIR = resolveDevDataDir(...)（受控采信：外部值仅当解析后
- *      位于 ~/.taiji-dev 树内才采信——装配器 per-worktree 实例目录；其余钉死
+ *      位于 ~/.taiji-dev 树内才采信——装配器 per-worktree 实例目录；其余固定
  *      ~/.taiji-dev，2026-09-08 泄漏事故防线语义保留）
- *    - TAIJI_AGENT_PORT_OFFSET ?? DEV_PORT_OFFSET（无泄漏风险面，保持兜底语义）
+ *    - TAIJI_AGENT_PORT_OFFSET ?? DEV_PORT_OFFSET（无泄漏风险，保持兜底语义）
  *    - app.setPath('userData', 隔离目录)  ← 防 Chromium LevelDB LOCK 竞争
  *
  * 3. local-file:// 协议路径白名单 = computeLocalFilePrefixes 纯函数
@@ -63,9 +63,9 @@ import path from 'node:path'
 import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { app, protocol, net, BrowserWindow } from 'electron'
-import { DEV_PORT_OFFSET } from '@taiji/shared'
+import { DEV_PORT_OFFSET, BROWSER_STATE } from '@taiji/shared'
 import type { CrashJournalWriter, LaunchResult } from '@taiji/shared'
-import { RUN_CHECKPOINT_FAILED_PREFIX, RUN_CHECKPOINT_FAILED_RETENTION, getRunStatePaths, getDataDir } from '@taiji/shared/paths'
+import { RUN_CHECKPOINT_FAILED_PREFIX, RUN_CHECKPOINT_FAILED_RETENTION, getRunStatePaths, getDataDir, DATA_DIR_ROOT_NAMES } from '@taiji/shared/paths'
 import { createMainContext } from './context.js'
 import type { MainContext } from './interfaces.js'
 import { RuntimeSupervisor } from './supervisor/runtime-supervisor.js'
@@ -166,10 +166,10 @@ const isDev = !app.isPackaged
 // TAIJI_AGENT_DATA_DIR 受控采信（R-13 修复）：外部值仅当解析后位于 ~/.taiji-dev
 // 目录树内才采信（装配器 dev-instance.mjs 注入的 instances/<worktree> per-worktree
 // 实例目录——多 worktree 并行 dev 的数据隔离权威来源）；其余（未设 / 泄漏值如
-// ~/.taiji / 任意树外路径）一律钉死回 ~/.taiji-dev，防宿主环境泄漏使 dev 读到
-// prod 数据。解析序（e2e 豁免 → 树内采信 → 钉死）与 [HISTORICAL] 事故背景见
+// ~/.taiji / 任意树外路径）一律固定回 ~/.taiji-dev，防宿主环境泄漏使 dev 读到
+// prod 数据。解析序（e2e 豁免 → 树内采信 → 固定）与 [HISTORICAL] 事故背景见
 // utils/dev-data-dir.ts。
-// PORT_OFFSET 无数据泄漏风险面，刻意保留 `??` 外部覆盖语义（不动）。
+// PORT_OFFSET 无数据泄漏风险，刻意保留 `??` 外部覆盖语义（不动）。
 if (isDev) {
   process.env.TAIJI_AGENT_DATA_DIR = resolveDevDataDir(process.env, homedir())
   process.env.TAIJI_AGENT_PORT_OFFSET = process.env.TAIJI_AGENT_PORT_OFFSET ?? String(DEV_PORT_OFFSET)
@@ -177,16 +177,16 @@ if (isDev) {
   // 从 TAIJI_AGENT_DATA_DIR 派生（而非硬编码 .taiji-dev）：多 worktree 并行 dev 时
   // 各实例用独立数据目录，userData 隔离随之成立——否则单实例锁互斥导致第二个 dev
   // 实例静默退出（subagent-drawer-blank 设计 §8.2 验收场景实测发现）。
-  app.setPath('userData', path.join(process.env.TAIJI_AGENT_DATA_DIR ?? path.join(homedir(), '.taiji-dev'), 'electron'))
+  app.setPath('userData', path.join(process.env.TAIJI_AGENT_DATA_DIR ?? path.join(homedir(), DATA_DIR_ROOT_NAMES.dev), 'electron'))
 } else {
-  // 打包态：数据目录钉死 ~/.taiji（外部注入值仅当 resolve 后位于 ~/.taiji 树内才
+  // 打包态：数据目录固定 ~/.taiji（外部注入值仅当 resolve 后位于 ~/.taiji 树内才
   // 采信——与 dev 侧 resolveDevDataDir 树检查镜像对称，防宿主 shell 残留的 dev 值
   // 使打包版写 dev 目录）。缺省反转（getDataDir 缺省已改 ~/.taiji-dev）后，这里是
-  // prod 数据目录的唯一权威钉死点；本赋值早于下方 initMainLogger / initCrashJournal
+  // prod 数据目录的唯一权威固定点；本赋值早于下方 initMainLogger / initCrashJournal
   // 等一切 getDataDir() 消费者，并经 process-control spawn 显式透传给 runtime
   // （TAIJI_AGENT_PACKAGED 与 TAIJI_AGENT_DATA_DIR 成对注入，runtime 入口有交叉断言）。
   process.env.TAIJI_AGENT_DATA_DIR = resolvePackagedDataDir(process.env, homedir())
-  // 自置位 PACKAGED=1：getDataDir 的 prod 值准入守卫（C-proc-26）要求持有 ~/.taiji
+  // 自置位 PACKAGED=1：getDataDir 的 prod 值准入检查（C-proc-26）要求持有 ~/.taiji
   // 树值的进程声明 prod 形态——打包 main 自身后续的 getDataDir() 消费也走这条链。
   // 出站侧不受影响：spawn 子进程经 buildSafeEnv/buildOutboundChildEnv 按需注入或剥除。
   process.env.TAIJI_AGENT_PACKAGED = '1'
@@ -200,7 +200,7 @@ if (isDev) {
 // writer 未 init 时 no-op，这里失败（磁盘满/权限）不阻断 app 启动。
 initMainLogger({ isPackaged: app.isPackaged })
 
-// ── 崩溃台账 writer init（crash-forensics §3.3 D1）────────────────
+// ── 崩溃登记清单 writer init（crash-forensics §3.3 D1）────────────────
 // main 写 <dataDir>/logs/crashes/main.jsonl（main 自身 + renderer 事件；runtime 侧
 // 事件也经本文件写入——main 侧事件接线单元 u1f 的挂点在 supervisor/window-factory）。
 // initMainLogger 之后（同读 getDataDir() 动态推导）+ 早于一切业务挂接；纯惰性 IO
@@ -223,7 +223,7 @@ if (!gotSingleInstanceLock) {
 // 常量必须在下方启动块求值之前初始化（模块级 const 无提升）；落点 `<dataDir>/run/`，
 // run 目录文件名族 SSOT = @taiji/shared/paths RUN_* 常量族（【oe-audit C8】：原
 // 此处与 runtime-checkpoint.ts / export-diagnostic-bundle.ts 三处手抄字面量收敛为单点，
-// 「双胞胎显式对齐」的漂移面构造性消失）。
+// 「双胞胎显式对齐」的漂移风险构造性消失）。
 /** 本进程是否已为陈旧 checkpoint 记过 reattach-skipped（D3：重复失败不重复记事件）。 */
 let staleCheckpointReported = false
 
@@ -272,7 +272,7 @@ let launchResultCache: LaunchResult | null = null
 const browserViewManager = new BrowserViewManager(windows, (sid, state) => {
   const win = ctx.mainWindow
   if (win && !win.isDestroyed()) {
-    win.webContents.send('browser:state', { sessionId: sid, ...state })
+    win.webContents.send(BROWSER_STATE, { sessionId: sid, ...state })
   }
 })
 
@@ -376,7 +376,7 @@ app.whenReady().then(async () => {
   // probeLocalFileUrlPathname / probeLocalFileServable，chat-html-support §6.4 D4「同一谓词」/
   // §6.9 D9）——边缘路径（.. 穿越 / // 冗余斜杠 / %2e2e / 含 % # 空格的文件名）上两份平行
   // 实现必然分叉。白名单前缀构造单一来源 = gateway/local-file-handlers 的
-  // getAllowedLocalFilePrefixes（D2a 打包态剔除 cwd 的守卫在该处，单测
+  // getAllowedLocalFilePrefixes（D2a 打包态剔除 cwd 的检查在该处，单测
   // main/test/local-file-prefixes.test.ts 守护）。
   // 响应头（全部响应 no-store + .html/.htm 内容级 CSP）见 gateway/local-file-response（§6.5 D5）。
   protocol.handle('local-file', async (request) => {
@@ -390,7 +390,7 @@ app.whenReady().then(async () => {
     }, getSessionTmpEncodeCwdDirs())
     if (!probe.servable) {
       // 可读错误文档（§11 检查点 3）：父页面 opaque origin 读不到状态码，错误文档是
-      // 用户在 iframe 内唯一的可见信号；消息不回显路径（无反射注入面）
+      // 用户在 iframe 内唯一的可见信号；消息不回显路径（无反射注入风险）
       return buildLocalFileErrorResponse(probe.reason ?? 'not_found')
     }
     try {
@@ -400,7 +400,7 @@ app.whenReady().then(async () => {
       return decorateLocalFileResponse(response, probe.resolvedPath)
     } catch (err) {
       // 预检后文件被删 / 读取失败的残余窗口：降级为可读 404 文档。错误文档本身不回显路径
-      // （无反射注入面），诊断细分（errno + 路径）由 main 日志承载（§6.4 D4 子决策③）
+      // （无反射注入风险），诊断细分（errno + 路径）由 main 日志承载（§6.4 D4 子决策③）
       mainLogger.warn(`[main] local-file fetch failed (${probe.resolvedPath}): ${errorText(err)}`)
       return buildLocalFileErrorResponse('not_found')
     }
@@ -420,14 +420,14 @@ app.whenReady().then(async () => {
   await bootstrapMainWindow()
 
   // u2（crash-forensics D2 出口①）：触发条件每日巡检（启动评估一次 + 24h 间隔，
-  // log-retention 同款形态）——任一条件越线 → main 日志 WARN + 台账 trigger-review 事件
+  // log-retention 同款形态）——任一条件越线 → main 日志 WARN + 登记清单 trigger-review 事件
   startTriggerPatrol()
 })
 
 /**
- * 本实例是否已在 before-quit **之外**发起过 runtime 终止（非 darwin window-all-closed 腿）。
+ * 本实例是否已在 before-quit **之外**发起过 runtime 终止（非 darwin window-all-closed 路径）。
  *
- * 用途 = checkpoint 删除属主的「成功段」判据之一（D3 删除实现语义钉死）：window-all-closed
+ * 用途 = checkpoint 删除属主的「成功段」判据之一（D3 删除实现语义固定）：window-all-closed
  * 先调 stop() 使 child.killed 置位，随后 before-quit 的第二次 stop() 在 `child.killed`
  * 检查处**立即 resolve 而不等真退出**（killed 短路）——此时删 checkpoint 是在 runtime 可能
  * 仍在写盘的窗口里动手，必须跳过（残留交下次启动「clean exit 但残留」分支隔离兜底）。
@@ -458,7 +458,7 @@ let isQuitting = false
 app.on('before-quit', (event) => {
   if (isQuitting) return // 第二次进入（app.quit() 触发），放行
   isQuitting = true
-  // 崩溃台账 before-quit 上下文（crash-forensics D1 shutdown 行）：app 级正常退出
+  // 崩溃登记清单 before-quit 上下文（crash-forensics D1 shutdown 行）：app 级正常退出
   // 的 shutdown 行在此写，runtime 随后的 exit 落 supervisor stopping 早退分支零写入
   // （stopping 被 stop() 全部调用方置位，按 stopping 写行会把正常退出记假事件——
   // 判别式详见 classifyRuntimeExit）。markAppQuitting 无条件（退出上下文是事实）；
@@ -555,7 +555,7 @@ export function clearRunningMarker(paths: RunStatePaths): void {
  * D1 v8 枚举裁决）并清除残留。
  *
  * 顺序 = 先记后删：记完崩掉最多产生重复 crash 行（可数偏多，可人工归因），删完崩掉则
- * 该次崩溃永久无台账（归因不可恢复）——宁可多记不可丢失（D1「不知道 ≠ 没打点」同向）。
+ * 该次崩溃永久无登记清单（归因不可恢复）——宁可多记不可丢失（D1「不知道 ≠ 没打点」同向）。
  *
  * @returns true = 上次 unclean（checkpoint 因此可信，D3 冷启动判定输入）
  */

@@ -160,7 +160,7 @@ describe('T5: runtime 重连清理 ask-user pending（clearAllPending）', () =>
     await init()
     expect(restartingCb).not.toBeNull()
 
-    // 从未进入 connected，IPC 崩溃仍收口（restarting 分支不要求 oldState=connected）
+    // 从未进入 connected，IPC 崩溃仍收尾（restarting 分支不要求 oldState=connected）
     restartingCb!()
     await nextTick()
     expect(mockRuntimeCleanup).toHaveBeenCalledTimes(1)

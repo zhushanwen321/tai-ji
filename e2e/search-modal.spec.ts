@@ -68,7 +68,7 @@ async function openSearch(page: import('@playwright/test').Page): Promise<void> 
  *   'search-modal-root'（全浮层唯一选中项，SM-E2E-7 口径）或 'search-section-命令'
  *   （限定命令分组内，SM-E2E-8/9 口径）。
  *
- * 「等选中项收敛」是不可省略的竞态守卫：逐字输入的防抖窗口内，前缀/子串中间查询
+ * 「等选中项收敛」是不可省略的竞态检查：逐字输入的防抖窗口内，前缀/子串中间查询
  * （'c'/'r' 等子串命中概览 sub 'Mission Control'，概览 app 命令排名靠前 + 默认选中
  * 首项）可能让 section 已含目标词但选中项仍落在概览/应用命令上，此时 Enter 会确认
  * 概览（goOverview 跳概览页，chip 不注入，2026-09-18 CI 实发）或应用命令（如
@@ -166,7 +166,7 @@ test.describe('搜索浮层 E2E', () => {
     // 输入 auth 查到文件，Enter confirm（useSearchJump.confirmFile → mock file.read）
     await page.getByTestId('search-input').pressSequentially('auth')
     await expect(page.getByTestId('search-section-文件')).toBeVisible({ timeout: 5_000 })
-    // Enter 消费当前选中项：等选中收敛为 auth 文件项再按 Enter——与 SM-E2E-7/8/9 同款守卫
+    // Enter 消费当前选中项：等选中收敛为 auth 文件项再按 Enter——与 SM-E2E-7/8/9 同款检查
     // （防抖窗口内旧结果排前时 Enter 可能消费应用命令（如 toggle-sidebar：收侧栏 + ok:true 关弹层、
     // 不开 drawer、recents 无记录），2026-09-24 批内实发：二次 openSearch 侧栏不可点 → 30s 超时）
     await expect(page.getByTestId('search-modal-root').locator('[aria-selected="true"]'))

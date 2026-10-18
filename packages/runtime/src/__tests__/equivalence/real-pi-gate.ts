@@ -11,7 +11,7 @@
  * 引用约定：真实 LLM turn 用例（TEST-STRATEGY §4 完整基线，开发机手动跑）一律
  * `import { REAL_PI_READY } from './real-pi-gate.js'` + `describe.skipIf(!REAL_PI_READY)`
  * 包裹；`TAIJI_SKIP_REAL_PI=1` 强制跳过（探测短路，连凭证文件都不读）。
- * 新增真实 LLM 文件须同步登记 vitest.config.ts 的 REAL_PI_TESTS 分池（守卫脚本
+ * 新增真实 LLM 文件须同步登记 vitest.config.ts 的 REAL_PI_TESTS 分池（检查脚本
  * session-manager-e2e-fixture-unit 识别本模块的 import 信号做双向对账）。
  */
 

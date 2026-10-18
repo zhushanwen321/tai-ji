@@ -11,7 +11,7 @@
  * 语义清单（设计 §3.3 D5 采用段）：
  * - markSessionDead：markSessionError（流式终结或追加 error 消息，chat store 单一入口）
  *   + markDead（列表置灰）+ invalidateStreamSubscription（本地订阅簿记失效——服务端订阅
- *   已随 bus.clearSession 清除，不失效则 respawn 后 ensureStreamSubscription 被幂等守卫短路）。
+   *   已随 bus.clearSession 清除，不失效则 respawn 后 ensureStreamSubscription 被幂等检查短路）。
  *   保序依据：错误消息 / dead 态等 UI 反馈先落地（useMessageEffects 既有契约）。
  * - openRestoreWindow：恢复窗口订阅——invalidate 之后立即重发 subscribeSession（幂等，
  *   fire-and-forget，失败 console.warn 由 WS 重连 resubscribeAll 兜底自愈）。这是 restored /
@@ -27,7 +27,7 @@
  * 恢复提示条写入走 chat store appendRespawnNotice（liveOnly system 提示条，customType
  * 分支渲染），两形态文案经 notices 参数注入——core 不持有 i18n。
  *
- * 依赖方向：纯 core（chat store 动作面 + session store 动作面 + 订阅编排），零壳面
+ * 依赖方向：纯 core（chat store 动作侧 + session store 动作侧 + 订阅编排），零壳面
  * （无 toast / subagent / extensionUI）。deps 为结构类型，renderer 的 Pinia 包装 store
  * 与移动壳 store 实例均满足（方法闭包持原始 ref，pinia unwrap 不影响方法调用）。
  */
@@ -36,25 +36,25 @@ import type { PiRespawnNoticeVariant } from '@taiji/shared'
 import { invalidateStreamSubscription } from './useChat'
 import { subscribeSession } from '../../coordination/subscription-state'
 
-/** session store 生命周期动作面（markDead 置灰 / revive 复位；createSessionStore 产物子集）。 */
-export interface LifecycleSessionActions { // oe-exempt:20261003:framework:D5 设计裁决的 core factory 契约面——factory 即唯一实现点是设计形态，非待扩展口
+/** session store 生命周期动作侧（markDead 置灰 / revive 复位；createSessionStore 产物子集）。 */
+export interface LifecycleSessionActions { // oe-exempt:20261003:framework:D5 设计裁决的 core factory 契约范围——factory 即唯一实现点是设计形态，非待扩展口
   markDead(sessionId: string): void
   revive(sessionId: string): void
 }
 
-export interface LifecycleEffectsDeps { // oe-exempt:20261003:framework:D5 设计裁决的 core factory 契约面——factory 即唯一实现点是设计形态，非待扩展口
-  /** chat store 动作面：markSessionError（session 级错误统一入口，含流式终结）+ appendRespawnNotice（恢复提示条写入点）。 */
+export interface LifecycleEffectsDeps { // oe-exempt:20261003:framework:D5 设计裁决的 core factory 契约范围——factory 即唯一实现点是设计形态，非待扩展口
+  /** chat store 动作侧：markSessionError（session 级错误统一入口，含流式终结）+ appendRespawnNotice（恢复提示条写入点）。 */
   chat: Pick<ChatStoreInstance, 'markSessionError' | 'appendRespawnNotice'>
   session: LifecycleSessionActions
 }
 
 /** 恢复提示条两形态文案（壳注入——core 不持有 i18n）。 */
-export interface LifecycleNoticeTexts { // oe-exempt:20261003:framework:D5 设计裁决的 core factory 契约面——factory 即唯一实现点是设计形态，非待扩展口
+export interface LifecycleNoticeTexts { // oe-exempt:20261003:framework:D5 设计裁决的 core factory 契约范围——factory 即唯一实现点是设计形态，非待扩展口
   restored: string
   restoreFailed: string
 }
 
-export interface LifecycleEffects { // oe-exempt:20261003:framework:D5 设计裁决的 core factory 契约面——factory 即唯一实现点是设计形态，非待扩展口
+export interface LifecycleEffects { // oe-exempt:20261003:framework:D5 设计裁决的 core factory 契约范围——factory 即唯一实现点是设计形态，非待扩展口
   /**
    * session.exited 的 core 序列：markSessionError（含流式终结 / error 消息追加）+ markDead
    * （列表置灰）+ 订阅簿记失效。壳扩展（弹窗分区清理 / toast / 强杀分流 / 过渡态）由调用方

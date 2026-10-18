@@ -1,13 +1,13 @@
 // @vitest-environment node
 
 /**
- * W4 —— chat store subagent streaming 收口测试（U8/U9）。
+ * W4 —— chat store subagent streaming 收尾测试（U8/U9）。
  *
  * 背景：subagent store 原 applyStreamDelta 绕过 chat store 直调 setMessages，
  * chat store 应成为所有 assistant content mutation 的唯一入口。本测试覆盖
  * 从 subagent store 迁入的两个新 action：
  * - applySubagentStreamDelta(virtualId, lines)：全量替换 content + 幂等补 contentBlock
- * - finalizeSubagentStream(virtualId)：streaming → complete 收口
+ * - finalizeSubagentStream(virtualId)：streaming → complete 收尾
  *
  * virtualId = 'subagent:<subagentId>'，是 chat store messages Map 的 key，
  * 与主 session 共用同一 Map（仅 key 不同）。注意：本组 VIRTUAL_ID（下方 fixture）为
@@ -37,7 +37,7 @@ const flushPull = (): Promise<void> => new Promise((resolve) => setTimeout(resol
 // 同链消费方（worker OOM 实测），spy 单方法是替换面最小的可控形态。
 const pullMock = () => vi.mocked(coreMockSession.getSubagentStreamState)
 
-describe('W4 chat store — subagent streaming 收口（U8/U9）', () => {
+describe('W4 chat store — subagent streaming 收尾（U8/U9）', () => {
   beforeEach(() => {
     vi.restoreAllMocks()
     setActivePinia(createPinia())
@@ -145,7 +145,7 @@ describe('W4 chat store — subagent streaming 收口（U8/U9）', () => {
       {
         id: 'sa-old',
         role: 'assistant',
-        content: '已收口',
+        content: '已收尾',
         status: 'complete',
         contentBlocks: [{ type: 'text', refId: 'text' }],
         timestamp: 1,
@@ -165,7 +165,7 @@ describe('W4 chat store — subagent streaming 收口（U8/U9）', () => {
 
   // ── U9：finalizeSubagentStream ──
 
-  it('U9.1: streaming assistant → finalize 后翻 complete（sealed 收口）', () => {
+  it('U9.1: streaming assistant → finalize 后翻 complete（sealed 收尾）', () => {
     const store = useChatStore()
     store.setMessages(VIRTUAL_ID, [
       {
@@ -209,7 +209,7 @@ describe('W4 chat store — subagent streaming 收口（U8/U9）', () => {
 
     const list = store.getMessages(VIRTUAL_ID)
     expect(list[0].status).toBe('complete') // 第一条不变
-    expect(list[1].status).toBe('complete') // 第二条收口
+    expect(list[1].status).toBe('complete') // 第二条收尾
   })
 
   it('U9.3: 无 streaming assistant → 幂等 no-op（不抛错，不改已有 complete 消息）', () => {
@@ -218,7 +218,7 @@ describe('W4 chat store — subagent streaming 收口（U8/U9）', () => {
       {
         id: 'sa-1',
         role: 'assistant',
-        content: '已收口',
+        content: '已收尾',
         status: 'complete',
         timestamp: 1,
       },
@@ -233,7 +233,7 @@ describe('W4 chat store — subagent streaming 收口（U8/U9）', () => {
     expect(() => store.finalizeSubagentStream('subagent:never-exists')).not.toThrow()
   })
 
-  // ── sealed 守卫对齐（D-010 parity）──
+  // ── sealed 检查对齐（D-010 parity）──
 
   it('sealed parity: finalize 后再 applySubagentStreamDelta → push 新 streaming（不污染已 complete 实体）', () => {
     const store = useChatStore()
@@ -249,7 +249,7 @@ describe('W4 chat store — subagent streaming 收口（U8/U9）', () => {
     ])
 
     store.finalizeSubagentStream(VIRTUAL_ID)
-    // 收口后再来 delta（如迟到的 WS 帧）
+    // 收尾后再来 delta（如迟到的 WS 帧）
     store.applySubagentStreamDelta(VIRTUAL_ID, ['新回合'])
 
     const list = store.getMessages(VIRTUAL_ID)
@@ -280,8 +280,8 @@ describe('W4 chat store — subagent streaming 收口（U8/U9）', () => {
 
   // ── [B2 subagent-stream-chunk §4.3] 增量 chunk 消费状态机（store 委托层）──
   // 状态机分支判定 / 水位回放 / 在途去重的全量断言在 core streaming-state-machine.test.ts
-  // （分区状态与拉取执行器注入属 core 工厂测试面）；本组锁定 pinia store 委托入口行为
-  // （renderer 分派改造（u-renderer）的消费面契约）。
+  // （分区状态与拉取执行器注入属 core 工厂测试）；本组锁定 pinia store 委托入口行为
+  // （renderer 分派改造（u-renderer）的消费方契约）。
 
   const RECORD_ID = 'bg-1'
 
@@ -298,7 +298,7 @@ describe('W4 chat store — subagent streaming 收口（U8/U9）', () => {
     expect(list[0].id).toMatch(/^sa-/)
   })
 
-  it('chunk 委托·跨消息边界：msgSeq 推进开新 streaming 消息（旧实体收口，增量不并入旧消息）', () => {
+  it('chunk 委托·跨消息边界：msgSeq 推进开新 streaming 消息（旧实体收尾，增量不并入旧消息）', () => {
     const store = useChatStore()
     store.applySubagentStreamChunk(VIRTUAL_ID, RECORD_ID, 1, 0, '第一回合')
     store.applySubagentStreamChunk(VIRTUAL_ID, RECORD_ID, 2, 0, '第二回合')

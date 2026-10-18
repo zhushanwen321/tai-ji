@@ -190,7 +190,7 @@ describe('zcode-session-db-cleanup', () => {
     expect(r.deleted.sort()).toEqual(['sess_child_1', 'sess_ours_1', 'sess_zsw_1'])
   })
 
-  it('执行：宿主 FK 级联 + input_history 显式删 + 派生行纳入；索引面 N→0；凭证与删除集总数匹配', () => {
+  it('执行：宿主 FK 级联 + input_history 显式删 + 派生行纳入；索引侧 N→0；凭证与删除集总数匹配', () => {
     seedStandard()
     const a = analyze({ whitelistRows: parseRecordWhitelist(recordsDir), hostDbPath, indexDbPath })
     const r = executeDeletion({ analysis: a, hostDbPath, indexDbPath, residueDir: outDir, operator: 'tester', authorizationSource: '--confirm-count', now: T0 })

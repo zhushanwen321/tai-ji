@@ -24,11 +24,11 @@
   - `pending:register { id, type, name }` —— 操作启动（`type` ∈ `workflow` / `subagent` / `bash`）
   - `pending:unregister { id, reason }` —— 操作结束（`reason` 映射为终态 status）
   - 发送方：subagent-core（subagent 与 workflow run 生命周期：启动注册 / 结束注销 / 崩溃恢复 sweep 补注销）、base-tool-enhance（bash 后台任务）、subagent-workflow（仅崩溃恢复补注销）
-- **session entries 唯一状态源**：register/unregister 经 `appendEntry` 落盘，无内存第二份状态；活跃集合 = register − unregister 差集，工具投影与写侧去重对同一份 entries 现算，结构上不可分歧
+- **session entries 唯一状态源**：register/unregister 经 `appendEntry` 落盘，无内存第二份状态；活跃集合 = register − unregister 差集，工具派生视图与写侧去重对同一份 entries 现算，结构上不可分歧
 - **写侧幂等**：重复 register、未知/已注销 id 的 unregister 均忽略，天然不重复落盘
 - **无 TTL**：三类操作均按进程存活口径处理，长任务（>1h）仍视为活跃
 - **跨 session 残留过滤**：查询按当前 session id 过滤 fork 继承的父级注册残留
-- **跨扩展导出**：`countActiveFromEntries()` 供 goal（continuation 守卫）、subagent-workflow（后代存活判定）直接复用差集计算；差集本体单点在 `@zhushanwen/extension-protocol`
+- **跨扩展导出**：`countActiveFromEntries()` 供 goal（continuation 检查）、subagent-workflow（后代存活判定）直接复用差集计算；差集本体单点在 `@zhushanwen/extension-protocol`
 
 ## 安装
 
@@ -55,7 +55,7 @@ LLM 在决定「继续推进还是等待异步操作」前主动查询：
 { "action": "list" }
 ```
 
-典型场景：agent 想确认是否真有后台任务在跑（workflow run / subagent / bash 后台命令），避免在异步操作未收口时提前下结论或重复派发。
+典型场景：agent 想确认是否真有后台任务在跑（workflow run / subagent / bash 后台命令），避免在异步操作未收尾时提前下结论或重复派发。
 
 ## 文件结构
 

@@ -127,7 +127,7 @@ export function useProjectGroups(options: {
     curOpen.value = true
   }
 
-  /** 组头行内重命名提交（ProjectGroup 已做空名守卫，store 层再守卫默认项目/未知 id） */
+  /** 组头行内重命名提交（ProjectGroup 已做空名检查，store 层再检查默认项目/未知 id） */
   function onRenameCommit(pg: ProjectGroupVM, name: string): void {
     projectStore.renameProject(pg.id, name)
   }
@@ -166,7 +166,7 @@ export function useProjectGroups(options: {
   }
 
   /** 失焦提交（草稿行无浮层后「点外」无统一关闭路径，失焦即落编辑结果；Esc 先清 creating，
-   *  随后的 blur 命中 creating=false 守卫无副作用） */
+   *  随后的 blur 命中 creating=false 检查无副作用） */
   function onDraftBlur(): void {
     if (creating.value) commitCreate()
   }

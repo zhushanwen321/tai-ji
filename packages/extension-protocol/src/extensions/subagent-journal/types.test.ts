@@ -12,7 +12,7 @@ import { SESSION_MANAGER_MARKER } from '../session-manager/marker'
 import { ASK_USER_MARKER } from '../ask-user/marker'
 
 /**
- * marker 精确值 + NUL 前缀 + 形状守卫：journal 推送通道（event-push-channel）的
+ * marker 精确值 + NUL 前缀 + 形状检查：journal 推送通道（event-push-channel）的
  * SSOT 契约——pi 侧壳层 reporter 与 runtime event-adapter 两侧都按此序列化/识别
  * 通道帧（值漂移 = 通道静默失联，此层测试在漂移时早炸）。
  */
@@ -32,7 +32,7 @@ describe('subagent-journal marker 精确值', () => {
   })
 })
 
-describe('isSubagentJournalReport 形状守卫', () => {
+describe('isSubagentJournalReport 形状检查', () => {
   const event: SubagentJournalEvent = { type: 'run_started', ts: 1_000 }
   const valid: SubagentJournalReport = {
     domain: 'run',
@@ -77,7 +77,7 @@ describe('isSubagentJournalReport 形状守卫', () => {
     expect(isSubagentJournalReport({ ...valid, events: {} })).toBe(false)
   })
 
-  it('events 内事件信封非法拒绝（逐条过守卫）', () => {
+  it('events 内事件信封非法拒绝（逐条过检查）', () => {
     expect(isSubagentJournalReport({ ...valid, events: [{ type: '', ts: 1 }] })).toBe(false)
     expect(isSubagentJournalReport({ ...valid, events: [{ type: 'x' }] })).toBe(false)
     expect(isSubagentJournalReport({ ...valid, events: [{ type: 'x', ts: '1' }] })).toBe(false)

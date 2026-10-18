@@ -175,7 +175,7 @@ describe("index.ts wiring SDK 契约", () => {
 			charCount: P1.length,
 			hash: computePromptHash(P1),
 		});
-		// 自持久化基线小文件已随 persisted 子系统删除（设计目标 2）：无 agentDir 落盘面，仅 session JSONL
+		// 自持久化基线小文件已随 persisted 子系统删除（设计目标 2）：无 agentDir 写盘位置，仅 session JSONL
 
 		prompt = P2;
 		await emit(h, "turn_start", { type: "turn_start", turnIndex: 1, timestamp: 0 }, ctx);

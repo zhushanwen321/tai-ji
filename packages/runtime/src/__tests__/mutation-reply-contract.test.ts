@@ -1,5 +1,5 @@
 /**
- * mutation reply 生效值契约守卫测试（静态扫描 + 双向清单比对 + 编译期类型断言）。
+ * mutation reply 生效值契约检查测试（静态扫描 + 双向清单比对 + 编译期类型断言）。
  *
  * 锁定行为（ADR-0065 / C-pi-14，设计 state-truth-sync-architecture.md §3.3 D8）：
  * 全部 mutation 类 RPC（改状态值且 renderer 有 store 副本，覆盖域 = session 配置状态 /
@@ -8,7 +8,7 @@
  * 禁乐观写；分支二（后端原样存储）reply 携带回显字段或登记豁免理由，消费侧允许
  * 乐观写 + reply 权威覆盖 + 失败回滚。
  *
- * 守卫结构（参照 create-derived-callers.test.ts 的清单守卫模式）：
+ * 检查结构（参照 create-derived-callers.test.ts 的清单检查模式）：
  * - 「新增 mutation 不入清单即红」：谓词扫描 protocol.ts 的 ClientMessageType 联合，
  *   域内改值动词形态的 type 全部提取为候选集合，与登记清单双向比对（漏登记红 /
  *   登记失效红）。谓词刻意宽松（宁可误红逼人显式归类），读类/生命周期类命中后
@@ -196,7 +196,7 @@ const MUTATION_RPC_REGISTRY: readonly MutationRegistryEntry[] = [
   {
     // mcp.setEnabled（§3.1 启停最小语义）：store 锁内仅翻转 enabled 键——请求布尔值映射
     // 为落盘形态（false 落 enabled:false 键 / true 删键，缺省启用），请求值 ≠ 落盘终态
-    //（分支一）；reply entry = 写后落盘终态条目（生效值）。专用操作不带清单投影回写，
+    //（分支一）；reply entry = 写后落盘终态条目（生效值）。专用操作不带清单派生视图回写，
     // D2 丢失窗口保持锁内亚秒级（pi-mcp-store setMcpServerEnabled）。
     type: 'mcp.setEnabled',
     branch: 'transformable',
@@ -505,7 +505,7 @@ const MUTATION_RPC_REGISTRY: readonly MutationRegistryEntry[] = [
     type: 'session.abortPlan',
     branch: 'non-mutation',
     contract: 'excluded',
-    rationale: '动作类（终止运行中的 plan 审批流，非配置状态改值）：reply void ack，plan 状态经 session.planState 广播推回（投影链唯一承载，abort 前后无 mutation 生效值概念）',
+    rationale: '动作类（终止运行中的 plan 审批流，非配置状态改值）：reply void ack，plan 状态经 session.planState 广播推回（派生视图链唯一承载，abort 前后无 mutation 生效值概念）',
   },
   {
     type: 'session.forceQuit',
@@ -552,11 +552,11 @@ const SERVER_MESSAGE_MAP_BASE_BLOCK = extractBlock('export interface ServerMessa
 const MUTATION_DOMAINS = ['session', 'model', 'preset', 'config', 'mcp', 'subagent'] as const
 
 /**
- * 改值动词形态（宽松 startsWith——宁可误红逼人显式归类，见文件头守卫取向声明）。
+ * 改值动词形态（宽松 startsWith——宁可误红逼人显式归类，见文件头检查取向声明）。
  *
  * 表覆盖两批动词：① 现存清单内出现过的改值动词（set 特殊处理见 isMutationCandidate）；
  * ② 常见改值动词前瞻补齐（clear/reset/toggle/enable/disable/add）——保证「新动词 mutation
- * 出现即被逼入清单」的守卫声明对常见动词命名成立，而非只对历史动词成立。新增动词前
+ * 出现即被逼入清单」的检查声明对常见动词命名成立，而非只对历史动词成立。新增动词前
  * 先 grep 本表避免漏配；误命中读类/动作类时以 excluded 显式登记排除理由（特性非缺陷）。
  */
 const MUTATION_VERB_PREFIXES = [
@@ -671,7 +671,7 @@ function extractReplyShape(replyKey: string, requestType: string): string {
   throw new Error(`ServerMessageMapBase 中未找到 reply key '${replyKey}'——协议类型登记缺失`)
 }
 
-describe('MUTATION_RPC_REGISTRY 清单守卫（ADR-0065 / C-pi-14，D8 机器强制）', () => {
+describe('MUTATION_RPC_REGISTRY 清单检查（ADR-0065 / C-pi-14，D8 机器强制）', () => {
   it('谓词扫描 ClientMessageType 的候选 mutation 与登记清单完全相等（双向：漏登记红 / 登记失效红）', () => {
     const candidates = listClientMessageTypes().filter(isMutationCandidate)
     const registered = MUTATION_RPC_REGISTRY.map((e) => e.type)

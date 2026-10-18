@@ -422,7 +422,7 @@ describe('W23 review Fix-3/4: latest-wins 串行 + 卸载清理', () => {
     await flushRaf()
     wrapper.unmount()
     // 首帧结果带 streaming-fence 占位段：若 in-flight 落定后照常 arm 定时器 → 推进时间会触发
-    // 第二次渲染（旧实现无 disposed 守卫）。新实现短路，定时器不重挂。
+    // 第二次渲染（旧实现无 disposed 检查）。新实现短路，定时器不重挂。
     mock.resolveFirst?.(incResult([], [seg('streaming-fence', 'code', 0, { lang: 'ts' })], emptyCache(1)))
     await vi.advanceTimersByTimeAsync(500)
     expect(mock.renderMarkdownIncremental).toHaveBeenCalledTimes(1)
@@ -554,7 +554,7 @@ describe('D4 ④路: 相对链接分流（preventDefault + resolve + openDrawer 
     expect(openDrawer).not.toHaveBeenCalled()
   })
 
-  it('props 缺省 → deps.sessionCwdOf fallback 按 session cwd resolve（D4 双通道：对话流/命令文档零模板传 props 的消费面）', async () => {
+  it('props 缺省 → deps.sessionCwdOf fallback 按 session cwd resolve（D4 双通道：对话流/命令文档零模板传 props 的消费方）', async () => {
     const openDrawer = vi.fn()
     const sessionCwdOf = vi.fn((sid: string) => (sid === 's1' ? '/home/proj' : undefined))
     const { clicks } = await mountWithAnchor('docs/x.md', { sessionId: 's1' }, { openDrawer, sessionCwdOf })

@@ -1,7 +1,7 @@
 /**
  * PresetSelectChip 组件测试（U2c：回显改读 resolveLaunchConfig 输出，废 B6 echo）。
  *
- * 覆盖面：
+ * 覆盖范围：
  * 1. 首屏冒烟（C-NT-5 沿袭）：landing 态 chip DOM 存在 + loadPresets 拉数据 + popover 展开选项 DOM。
  * 2. 回显语义（U2c 核心）：chip 显示 = createLaunchConfigView 对 preset 字段的解析输出——
  *    默认档回显（defaultPresetId 有值）、未设默认兜底 builtin:full（D3 默认链）、数据延迟
@@ -212,7 +212,7 @@ describe('PresetSelectChip 重入同步（G1 破口修复：explicitPresetId 跟
     await flushPromises()
     expect(wrapper.emitted('select')).toEqual([[{ presetId: 'custom:read-only' }]])
     expect(wrapper.find('[data-testid="chip-preset"]').text()).toContain('只读模式')
-    // ② startFlow 重入（多次 ⌘N / initApp 重试）：Landing 不重挂载（isActive 守卫），
+    // ② startFlow 重入（多次 ⌘N / initApp 重试）：Landing 不重挂载（isActive 检查），
     //    flow.pendingPreset 无条件重置为 null——修复前 explicitPresetId 残留旧选择，
     //    chip 显示「只读模式」而 submit 按默认预设创建（显示 ≠ 生效）
     pendingPreset.value = null

@@ -2,7 +2,7 @@
 // 比对「能力注册表计算路径」与 pi-ai 同源函数直调在思考档位上的逐模型一致性。
 //
 // 演化：U6 删除 resolveAvailableLevels（前端影子实现）后，原「旧品牌实现 vs pi-ai」
-// 比对对象已不存在；本探针改为守卫 registry 自身不漂移——
+// 比对对象已不存在；本探针改为检查 registry 自身不漂移——
 // packages/runtime/src/services/model-capability.ts 的 computeSupportedLevels
 // 是 pi 档位语义在 taiji 侧的唯一入口（D2），若长出影子逻辑（改写 / 钳制 / 默认值
 // 偏移），与 pi-ai getSupportedThinkingLevels 直调的差分即红。
@@ -94,7 +94,7 @@ registerHooks({
   },
 })
 
-// 须在重 exec 守卫之后动态 import TS 模块（静态 import 会在守卫前求值）
+// 须在重 exec 检查之后动态 import TS 模块（静态 import 会在检查前求值）
 const { computeSupportedLevels } = await import(
   pathToFileURL(join(REPO_ROOT, 'packages', 'runtime', 'src', 'services', 'model-capability.ts')).href
 )

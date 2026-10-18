@@ -158,13 +158,13 @@ function renderCapabilityLists(): {
 const CAPABILITY_LISTS = renderCapabilityLists()
 
 /**
- * taiji capability 固定注入段（chat-html-support 设计 D1）：告知 AI 本渲染器的能力面，让新会话
+ * taiji capability 固定注入段（chat-html-support 设计 D1）：告知 AI 本渲染器的能力侧，让新会话
  * 无需用户手动教。常量放扩展源码内（版本化随 feature 走，非用户配置——用户只持有 on/off 开关，
  * 不持有文案本身）。文案英文，与 pi system prompt 语言一致。
  *
  * M0 = ①②（inline HTML 正面清单 + 负面清单，文案由 CAPABILITY_* 常量渲染）；
  * M1 = ③④（HTML 产物交付约定 + 预览约束告知，本函数追加）。其余三点 = 相对图片 cwd 解析 /
- * 相对链接 cwd 解析（与反引号白名单路径自动链接化同基准、校验面差异如实）/ 远程图片不渲染
+ * 相对链接 cwd 解析（与反引号白名单路径自动链接化同基准、校验侧差异如实）/ 远程图片不渲染
  * + 反引号规约。
  *
  * @param artifactsDir 会话产物目录绝对路径（handler 每 turn 经 ctx 推导后拼入 ③ 段）；
@@ -392,7 +392,7 @@ function readSection(raw: unknown): { enabled: boolean; prompt: string } {
 /**
  * pi 是否以 --no-context-files / -nc 启动。用户显式退出 AGENTS.md
  * 自动发现时，全局文件不得从这条通路溜回来。pi CLI 把 -nc 视为 --no-context-files
- * 的等价短形式（cli/args.ts），两种形式都必须命中守卫——与镜像侧
+ * 的等价短形式（cli/args.ts），两种形式都必须命中检查——与镜像侧
  * （argv-mirror.ts 同样解析两种形式）保持一致。
  */
 function contextFilesDisabled(): boolean {

@@ -23,7 +23,7 @@
 #   导出纯函数 + 同文件主流程自调」的本仓惯例形态（check-chat-ops-sync.mjs /
 #   check-cross-process-literals.mjs 同款：导出供 import 消费，主流程自己也要用）误判
 #   no-reference（同文件调用点被整文件排除一并清零）。[HISTORICAL] 2026-10-01 实拦
-#   cross-process-literals 新脚本 extractStringLiterals。真死导出（定义文件内亦无调用）
+#   cross-process-literals 新脚本 extractStringLiterals。导出后无任何调用点（定义文件内亦无调用）
 #   仍零引用照拦，漏拦面不因此放大。
 #
 # 权威模板与断言口径：code-overdesign-audit skill 的 references/ci-assertions.md（模板 v1）。
@@ -82,7 +82,7 @@ for f in $SRC_FILES; do
   SYMS=$(printf '%s\n' "$ADDED" \
     | grep -oE 'export (async function|function|const|let|var|class) [A-Za-z_$][A-Za-z0-9_$]*' \
     | awk '{print $NF}' | sort -u)
-  # 具名花括号导出，跳过别名（export { x as y } 拦截面外）
+  # 具名花括号导出，跳过别名（export { x as y } 拦截范围外）
   SYMS="$SYMS
 $(printf '%s\n' "$ADDED" | grep -oE 'export [{][^}]*[}]' \
     | sed -E 's/export[[:space:]]*[{]//; s/[}]//' | tr ',' '\n' \

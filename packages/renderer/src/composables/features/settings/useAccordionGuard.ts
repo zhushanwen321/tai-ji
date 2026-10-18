@@ -1,9 +1,9 @@
 /**
- * 手风琴就地编辑的展开切换 + dirty 守卫（R4）。
+ * 手风琴就地编辑的展开切换 + dirty 检查（R4）。
  *
  * 从 ProviderPage 提取（wave4：script setup 行数压力）。职责：
  * - 单展开状态（expandedId：null=无 / NEW_ID=新建态 / 其它=编辑该 provider）
- * - dirty 守卫（切换/收起/新建前若有未保存改动 → ConfirmDialog 二次确认 → 丢弃后执行）
+ * - dirty 检查（切换/收起/新建前若有未保存改动 → ConfirmDialog 二次确认 → 丢弃后执行）
  * - ProviderEditBody 的 dirty/saved/cancel 事件接入（联动 currentBodyDirty + expandedId）
  *
  * composable 返回的 refs/functions 在 ProviderPage template 直接解构使用，引用不变。
@@ -14,14 +14,14 @@ import type { Ref } from 'vue'
 export function useAccordionGuard(newId: string) {
   /** 当前展开的 provider id（null=无，newId=新建态，其它=编辑该 provider） */
   const expandedId: Ref<string | null> = ref(null)
-  /** 当前展开 body 的 dirty 态（经 @dirty-change 上抛，用于切换守卫） */
+  /** 当前展开 body 的 dirty 态（经 @dirty-change 上抛，用于切换检查） */
   const currentBodyDirty = ref(false)
   /**
-   * dirty 守卫的待执行目标（confirmDiscard 后直接赋给 expandedId）：undefined=无守卫在途，
-   * null=确认后收起，string=确认后切到该 provider。存在性（!== undefined）驱动守卫弹窗开合。
+   * dirty 检查的待执行目标（confirmDiscard 后直接赋给 expandedId）：undefined=无检查在途，
+   * null=确认后收起，string=确认后切到该 provider。存在性（!== undefined）驱动检查弹窗开合。
    */
   const pendingTarget = ref<string | null | undefined>(undefined)
-  /** dirty 守卫确认弹窗 open 态（v-model:open 双向绑定） */
+  /** dirty 检查确认弹窗 open 态（v-model:open 双向绑定） */
   const guardDialogOpen = computed({
     get: () => pendingTarget.value !== undefined,
     set: (open: boolean) => {
@@ -53,7 +53,7 @@ export function useAccordionGuard(newId: string) {
   }
 
   /**
-   * 新建并展开（spec §9 旅程 A1）：已有未保存改动时先走守卫。
+   * 新建并展开（spec §9 旅程 A1）：已有未保存改动时先走检查。
    * 列表底部追加合成行（id=newId），ProviderEditBody 收到 null provider → 新增态空表单。
    */
   function createAndExpand(): void {
@@ -65,7 +65,7 @@ export function useAccordionGuard(newId: string) {
     currentBodyDirty.value = false
   }
 
-  /** dirty 守卫确认 → 执行待定动作（展开体卸载即丢弃表单态，无需显式 reset） */
+  /** dirty 检查确认 → 执行待定动作（展开体卸载即丢弃表单态，无需显式 reset） */
   function confirmDiscard(): void {
     const target = pendingTarget.value
     pendingTarget.value = undefined

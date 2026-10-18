@@ -168,7 +168,7 @@ describe('SubagentEngineSection（U7 引擎选择器）', () => {
 
     expect(wrapper.find('[data-testid=subagent-engine-load-error]').exists()).toBe(false)
     expect(wrapper.findComponent({ name: 'Select' }).props('disabled')).toBe(false)
-    // 重拉成功后权威值回填：触发器从占位 pi 前进到已存默认 zcode（field reset 回填基准）
+    // 重新拉取成功后权威值回填：触发器从占位 pi 前进到已存默认 zcode（field reset 回填基准）
     expect(wrapper.find('[data-testid=subagent-engine-select]').text()).toContain('zcode')
   })
 

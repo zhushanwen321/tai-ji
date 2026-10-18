@@ -1,10 +1,10 @@
 /**
- * pi-semantics 探针族共享装置（PS 条目静态守卫测试，源文件 = node_modules 实装 dist）。
+ * pi-semantics 探针族共享装置（PS 条目静态检查测试，源文件 = node_modules 实装 dist）。
  *
  * 从各 pi-semantics-*.test.ts 的逐字副本收敛为单源（locatePiCodingAgentDist ×6、
  * locatePiDist ×4、methodWindow 正则边界版 ×3、methodWindowUntil 显式下界版 ×2）。
  * 只抽装置：每 PS 条目的登记与独立复核边界仍留在各探针文件，不合并文件。
- * dist 不可达时各探针经 describe.skipIf 自行 skip（空集守卫先例：
+ * dist 不可达时各探针经 describe.skipIf 自行 skip（空集检查先例：
  * pi-paths-config-dir-contract.test.ts——负断言前先验证提取器命中已知锚点）。
  */
 import { existsSync } from 'node:fs'

@@ -1,10 +1,10 @@
 /**
- * 连接发现收口测试（renderer-package-topology §2.4「连接发现策略可插拔」/ 连接派生 profile 策略 D4）。
+ * 连接发现收敛测试（renderer-package-topology §2.4「连接发现策略可插拔」/ 连接派生 profile 策略 D4）。
  *
  * 锁定 init() 的三形态分支选择与各形态连接目标派生：
  * - 分支选择：mock = env.isMock（优先于 ipc 存在性——electron 装配恒注入 ipc（含
  *   VITE_MOCK 构建），mock 优先是桌面等价性要求）；本地 = ipc 有值；远程 = ipc 无值。
- * - electron 本地形态 URL 派生与收口前逐字节等价：knownPort / onRuntimePort 推送 /
+ * - electron 本地形态 URL 派生与收敛前逐字节等价：knownPort / onRuntimePort 推送 /
  *   fallback（含 dev offset）/ HMR 重连四条路径的 URL 字符串断言。
  * - 远程 profile 分支：连接目标经注入的 connectionProfile 解析（U1.3 移动壳消费点）；
  *   未注入时 init 显式失败（fail-fast + 恢复指引），不静默降级、不发起连接。
@@ -40,7 +40,7 @@ vi.mock('../ws-client', () => ({
     }
   },
   onQueueDrop: vi.fn(() => () => {}),
-  // U1.3 D8：auth 拒绝信号消费面（use-connection 远程形态注册/查询）——本文件断言连接目标
+  // U1.3 D8：auth 拒绝信号消费方（use-connection 远程形态注册/查询）——本文件断言连接目标
   // 与分支选择，信号路径由 use-connection-auth-rejection.test.ts 专项锁定
   onAuthRejected: vi.fn(() => () => {}),
   isAuthRejectedSuppressed: vi.fn(() => false),
@@ -124,7 +124,7 @@ afterEach(() => {
   useConnection().teardown()
 })
 
-describe('连接发现收口：三形态分支选择（topology §2.4 / D4）', () => {
+describe('连接发现收敛：三形态分支选择（topology §2.4 / D4）', () => {
   it('TC-M1: mock 分支优先于 ipc 存在性（electron mock 构建形态：ipc 有值 + isMock）→ mock:// 且零 IPC 端口发现', async () => {
     const { ports, ipc } = makePorts({ isMock: true, knownPort: 4000 })
     await initFresh(ports)
@@ -146,7 +146,7 @@ describe('连接发现收口：三形态分支选择（topology §2.4 / D4）', 
     expect(connect).toHaveBeenCalledTimes(1)
   })
 
-  it('TC-M3: 本地分支（ipc 有值 + 非 mock）→ knownPort 路径 connect ws://localhost:4000 + token（收口前等价）', async () => {
+  it('TC-M3: 本地分支（ipc 有值 + 非 mock）→ knownPort 路径 connect ws://localhost:4000 + token（收敛前等价）', async () => {
     const { ports, ipc } = makePorts({ knownPort: 4000, token: 'tok-1' })
     await initFresh(ports)
     // 本地分支完整装配：端口发现 + runtime 事件监听注册
@@ -155,21 +155,21 @@ describe('连接发现收口：三形态分支选择（topology §2.4 / D4）', 
     expect(connect).toHaveBeenCalledWith('ws://localhost:4000', { auth: 'token', token: 'tok-1' })
   })
 
-  it('TC-M4: 本地分支 fallback（getRuntimePort→undefined）→ ws://localhost:3210（BASE_PORT，收口前等价）', async () => {
+  it('TC-M4: 本地分支 fallback（getRuntimePort→undefined）→ ws://localhost:3210（BASE_PORT，收敛前等价）', async () => {
     const { ports } = makePorts({ knownPort: undefined, offset: undefined, token: 'tok-2' })
     await initFresh(ports)
     expect(connect).toHaveBeenCalledWith('ws://localhost:3210', { auth: 'token', token: 'tok-2' })
   })
 
-  it('TC-M5: 本地分支 dev fallback（isDev + offset undefined）→ ws://localhost:3310（BASE_PORT+DEV_PORT_OFFSET，收口前等价）', async () => {
+  it('TC-M5: 本地分支 dev fallback（isDev + offset undefined）→ ws://localhost:3310（BASE_PORT+DEV_PORT_OFFSET，收敛前等价）', async () => {
     const { ports } = makePorts({ isDev: true, offset: undefined, token: null })
     await initFresh(ports)
     // IPC 拿不到 token（null）→ 降级空串 token 握手探测（S4 裁决：本地 runtime 恒配 token，
-    // skip 会在握手缺失下假 connected；探测必被拒走重连链，凭据恢复经 onRuntimePort 重拉）
+    // skip 会在握手缺失下假 connected；探测必被拒走重连链，凭据恢复经 onRuntimePort 重新拉取）
     expect(connect).toHaveBeenCalledWith('ws://localhost:3310', { auth: 'token', token: '' })
   })
 
-  it('TC-M7: 本地分支 HMR 重连（重复 init）→ fallback URL ws://localhost:3210（收口前等价）', async () => {
+  it('TC-M7: 本地分支 HMR 重连（重复 init）→ fallback URL ws://localhost:3210（收敛前等价）', async () => {
     const { ports } = makePorts({ knownPort: 4000, token: 'tok-4' })
     setConnectionPorts(ports)
     const conn = useConnection()
@@ -197,7 +197,7 @@ describe('远程 profile 分支（U0.2 骨架，U1.3 移动壳消费点）', () 
 
   it('TC-M9: profile resolve 无 token → connect(url, {auth:"token", token:""})（空串强制走 auth 握手，D8 恢复链可达）', async () => {
     // 无凭据 ≠ skip：skip 会在握手缺失下假 connected，runtime fail-closed 拒绝永远不可达
-    // （U1.3 事故形态）；空串 token 走强制握手探测，runtime 回 bad_token → onAuthRejected 闭合。
+    // （U1.3 事故形态）；空串 token 走强制握手探测，runtime 回 bad_token → onAuthRejected 恢复回路。
     const { ports, profile } = makePorts({ withIpc: false, withProfile: true, profileToken: null })
     await initFresh(ports)
     expect(profile?.resolve).toHaveBeenCalledTimes(1)
@@ -213,7 +213,7 @@ describe('远程 profile 分支（U0.2 骨架，U1.3 移动壳消费点）', () 
     expect(connect).not.toHaveBeenCalled()
   })
 
-  it('TC-M11: 远程 HMR 重连（重复 init）→ 再次经 profile 解析（骨架语义：重连同走收口点）', async () => {
+  it('TC-M11: 远程 HMR 重连（重复 init）→ 再次经 profile 解析（骨架语义：重连同走收敛点）', async () => {
     const { ports, profile } = makePorts({ withIpc: false, withProfile: true })
     setConnectionPorts(ports)
     const conn = useConnection()

@@ -30,7 +30,7 @@
  *   {v:2,kind}}`（W1 record/journal 媒体重定位起现行格式，schema SSOT =
  *   subagent-core orchestration/workflow-record-entry.ts）：kind=registered（起跑，无
  *   status 字段）与 kind=settled（终局，status ∈ 'done'|'interrupted'）两条小条目——
- *   读取形态同 lastWorkflowRecordFor（registered 投影 running，settled 取 status）。
+ *   读取形态同 lastWorkflowRecordFor（registered 映射为 running，settled 取 status）。
  * - composer skill 浮层候选行：CommandPopover.vue `.pop-item`（portal 到 body，00-overview §6.4），
  *   skill 项 displayName = 裸名（command-popover-skill-candidates.ts:68，`/skill:` 前缀已去）。
  *   触发 = 行中空白后 `/`（非换行空白 + `/`，空 query 合法——dom-core skill-trigger.test.ts 锁定语义）。
@@ -116,7 +116,7 @@ export function writeGlobalSkill(dataDir: string, name: string, description: str
 }
 
 /**
- * workflow 探针脚本源码（单 agent() 调用，faux 槽位演员长响应保持 run 在飞）。
+ * workflow 探针脚本源码（单 agent() 调用，faux 槽位演员长响应保持 run 在途）。
  * lintScript 约束：含 agent() 入口 / 无 bare IIFE / 不用 result 作变量名。
  */
 export function makeSurvivalProbeSource(scriptName: string, model: string, description: string): string {
@@ -161,7 +161,7 @@ export function mainDispatchSteps(runPaths: string[], closingText: string): Faux
   return steps
 }
 
-/** subagent faux 队列（model-keyed）：长流式响应保持 run 在飞跨越编辑→reload→adoption 全窗口 */
+/** subagent faux 队列（model-keyed）：长流式响应保持 run 在途跨越编辑→reload→adoption 全窗口 */
 export function survivorSteps(model: string, streamText: string, extraSteps: FauxStep[] = []): Record<string, FauxStep[]> {
   return { [model]: [{ text: streamText }, ...extraSteps] }
 }
@@ -232,7 +232,7 @@ export function readJsonlEntries(file: string): unknown[] | null {
   }
 }
 
-/** workflow-record entry 最小投影（只取断言消费的 runId/status 面） */
+/** workflow-record entry 最小派生视图（只取断言消费的 runId/status 面） */
 export interface WorkflowRecordView {
   runId: string
   status: string | undefined
@@ -248,7 +248,7 @@ const WORKFLOW_RECORD_ENTRY_V = 2
 /**
  * 提取主 session JSONL 内指定 runId 的最后一条 workflow-record（W17：last-wins 终态）。
  * v2 条目形态（W1 record/journal 媒体重定位起，classifyWorkflowRecordEntryData 同款判别键）：
- * registered = run 起跑（无 status 字段，投影 running）；settled = 终局（status ∈
+ * registered = run 起跑（无 status 字段，映射为 running）；settled = 终局（status ∈
  * 'done'|'interrupted'）。测试 session 全新创建只写 v2；v1 快照格式已随该重定位退役。
  */
 export function lastWorkflowRecordFor(file: string, runId: string): WorkflowRecordView | null {
@@ -273,7 +273,7 @@ export function lastWorkflowRecordFor(file: string, runId: string): WorkflowReco
 // ── run 完成 → done 增量信号帧到达的双锚计时（S1b/S2 共用，G1 必达窗口断言） ──
 
 /**
- * 双锚计时结果（reload-closeout-reliability 设计 §4 A1 新断言的观测面）。
+ * 双锚计时结果（reload-closeout-reliability 设计 §4 A1 新断言的观测范围）。
  * - tDoneRecord：主 session JSONL 末条 workflow-record 落 done 的首见时刻——完成锚
  *   （权威 record 落盘 = 系统语义上的「run 完成」，W17 last-wins 终态）。
  * - tFrameSeen：spec WS events 首见 status=done 增量信号帧的时刻——到达锚
@@ -329,7 +329,7 @@ function doneRecordSeenAt(sessionFile: string | null, runId: string): number {
  * 两锚都见到才返回（时序不定：帧可先于文件 flush 到达，反之亦然）；deadline 内未见全返回 null。
  *
  * runId 取 events 内首条 workflowUpdate 帧（running 帧——run 启动即广播；harness 防重播种
- * 守卫后每 session 单 run，首个 runId 即目标）。events 全量遍历（禁 find：running 帧先入数组
+ * 检查后每 session 单 run，首个 runId 即目标）。events 全量遍历（禁 find：running 帧先入数组
  * 且 find 恒返回首帧，done 帧永不被检视——S1b/S2 既有注释同款教训）。
  */
 export async function awaitWorkflowDoneTimed(
@@ -356,7 +356,7 @@ export async function awaitWorkflowDoneTimed(
   return null
 }
 
-/** G1 必达窗口红线（ms）：agent_settled 对账腿秒级 / 15s 定时腿最坏 ≈15s+单轮，30s = 2x 余量 */
+/** G1 必达窗口红线（ms）：agent_settled 对账路径秒级 / 15s 定时路径最坏 ≈15s+单轮，30s = 2x 余量 */
 export const WORKFLOW_DONE_MAX_LATENCY_MS = 30_000
 
 /** 观测容差倍数：完成锚与到达锚各含一次观测延迟 */
@@ -367,7 +367,7 @@ export const DONE_TIMING_OBSERVE_SLACK_MS = OBSERVE_SLACK_MULTIPLIER * DONE_TIMI
 
 // ── 进程面（孤儿检查 / 引擎 pid 稳定性） ──────────────────────────────
 
-/** ps 单行最小面 */
+/** ps 单行最小字段集 */
 interface PsEntry {
   pid: number
   command: string
@@ -403,7 +403,7 @@ function pidsMatching(markers: readonly string[]): number[] {
     .sort((a, b) => a - b)
 }
 
-/** 引擎 CLI 进程 pid 集（D2b 稳定性断言面：reload 前后同一集合 = 单例未被 dispose 重建） */
+/** 引擎 CLI 进程 pid 集（D2b 稳定性断言范围：reload 前后同一集合 = 单例未被 dispose 重建） */
 export function engineCliPids(): number[] {
   return pidsMatching(['pi-subagent-cli.mjs'])
 }

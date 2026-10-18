@@ -1,10 +1,10 @@
 /**
- * bg-notify 边界聚合投影（D5，对话流系统通知渲染升级）——隐藏完成通知本体 → 展示数字。
+ * bg-notify 边界聚合派生视图（D5，对话流系统通知渲染升级）——隐藏完成通知本体 → 展示数字。
  *
- * 独立成模块的理由（变化轴）：本文件是「通知载荷 → 计数/成败/耗时」的解析聚合面，与
- * message-turns.ts 的「消息序列 → turn 分组」是两个变化轴（前者随载荷形态/判据演进，
+ * 独立成模块的理由（变化原因）：本文件是「通知载荷 → 计数/成败/耗时」的解析聚合范围，与
+ * message-turns.ts 的「消息序列 → turn 分组」是两个变化原因（前者随载荷形态/判据演进，
  * 后者随分组规则演进）；且 message-turns.ts 已触及 eslint max-lines 门禁（500 计数行），
- * 聚合逻辑内联会把该文件推过线。消费面唯一（message-turns 规则 2 分支），派生结果存
+ * 聚合逻辑内联会把该文件推过线。消费方唯一（message-turns 规则 2 分支），派生结果存
  * TurnGroup.notifySummary / MessageTurn.notifySummary，渲染层零解析零回扫。
  *
  * 数据链：Message.details → 防御解析（@taiji/shared 单点 SSOT）→ 去重 + 判据 + 耗时聚合
@@ -25,7 +25,7 @@ import { WORKFLOW_RESULT_CUSTOM_TYPE } from '@zhushanwen/extension-protocol'
 export type NotifyOutcome = 'success' | 'failed' | 'neutral'
 
 /**
- * bg-notify 边界行聚合投影（D5）：分组层从隐藏完成通知本体派生的全部展示数字。
+ * bg-notify 边界行聚合派生视图（D5）：分组层从隐藏完成通知本体派生的全部展示数字。
  * 「N 个后台任务完成 · M 失败 ●●● · 26m03s」的四类信息一一对应本结构字段。
  */
 export interface NotifySummary {
@@ -37,7 +37,7 @@ export interface NotifySummary {
   neutralCount: number
   /** 去重后逐 record 判定（序 = record 首见序）——状态点列按此序逐点渲染 */
   outcomes: NotifyOutcome[]
-  /** 去重后实际含 endedAt 值记录（含 endedAt >= startedAt 守卫）的 max(endedAt) − min(startedAt)；
+  /** 去重后实际含 endedAt 值记录（含 endedAt >= startedAt 检查）的 max(endedAt) − min(startedAt)；
    *  无含值记录时不写入（= 不显耗时）。workflow 无时间字段不计入。 */
   durationMs?: number
 }
@@ -63,7 +63,7 @@ interface NotifyExtraction {
 }
 
 /** bg-notify 单条判据两段式（D5）：① status 分派（legacy 五值联集）② running/closed 走
- *  shared deriveClosedDisplay 复用（与侧边栏投影同一函数——cancelled 中性 / gc+error 失败 /
+ *  shared deriveClosedDisplay 复用（与侧边栏派生视图同一函数——cancelled 中性 / gc+error 失败 /
  *  其余含 parent-* 级联关闭成功，勿回退成「error 有值即 failed」）。 */
 function judgeBgNotifyRecord(record: BgNotifyRecord): NotifyOutcome {
   switch (record.status) {
@@ -90,7 +90,7 @@ function judgeBgNotifyRecord(record: BgNotifyRecord): NotifyOutcome {
 
 /**
  * managed-session-notify details 防御解析（notify-once D9 提取口径）：key = details.notifyId
- * （批已在 extension 攒批窗重建身份，单条即一批，无 items 展开面）；outcome = reason/status
+ * （批已在 extension 攒批窗重建身份，单条即一批，无 items 展开逻辑）；outcome = reason/status
  * 映射 completed→success / failed→failed / 其余（stopped/cancelled 等）→neutral。
  * notifyId 缺失/空串、reason 与 status 双缺席 → null（消费侧降级 unparsed，不崩溃）。
  */
@@ -165,7 +165,7 @@ function dedupeNotifyRecords(entries: NotifyRecordEntry[]): NotifyRecordEntry[] 
   return [...byKey.values()]
 }
 
-/** 耗时聚合（D5）：去重后实际含 endedAt 值记录（endedAt >= startedAt 守卫，排除时钟回拨
+/** 耗时聚合（D5）：去重后实际含 endedAt 值记录（endedAt >= startedAt 检查，排除时钟回拨
  *  的负贡献）的 max(endedAt) − min(startedAt)——聚合集合 = 含值记录本身，混合组耗时只由
  *  这些记录贡献；无含值记录 → undefined（不显耗时）。 */
 function aggregateNotifyDuration(records: NotifyRecordEntry[]): number | undefined {

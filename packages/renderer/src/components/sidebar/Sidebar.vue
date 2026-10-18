@@ -8,7 +8,7 @@
     折叠态 C：整体隐藏（width:0 + opacity:0），spec §收起态。
     File View 内容 G2-003 defer。
     [HISTORICAL] 2026-09-16 五 tab 收敛为三 tab：Agents（子代理列表）/ Flows（工作流列表 +
-    详情视图）两 tab 及其挂载分支退役，任务观察入口唯一化收口到 composer 任务托盘——原
+    详情视图）两 tab 及其挂载分支退役，任务观察入口唯一化收敛到 composer 任务托盘——原
     「侧栏任务 tab 数 vs 托盘计数」双口径穿帮面随之消灭。
   -->
   <div
@@ -450,7 +450,7 @@ useGlobalShortcuts({ onNewSession, onOpenImportSession: () => { importOpen.value
 // v-if="connectionState !== 'connected'" 卸载 AppShell，runtime 崩溃自动重启下断连重连是
 // 设计内常态——丢弃退订函数会每次重挂泄漏一份 handler + 组件响应式子图
 // （piVersion ref → versionLabel computed → 渲染 effect）；A4 断言（重连后 handler 数恒 1）
-// 由 Sidebar.test.ts B3 组退订对称单测守卫（原挂载/卸载探针日志行验收后已删）。
+// 由 Sidebar.test.ts B3 组退订对称单测检查（原挂载/卸载探针日志行验收后已删）。
 let unsubscribeAppInfo: (() => void) | null = null
 onMounted(() => {
   void loadSessions()

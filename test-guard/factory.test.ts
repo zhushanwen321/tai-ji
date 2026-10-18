@@ -10,7 +10,7 @@
  * - 观察者形态：合并语义——用户既有 setupFiles 追加在双防线之后，不被覆盖。
  *
  * scripts/check-vitest-guard.mjs 规则 5 与本文件同语义（helper 形态 / 显式双挂载
- * 形态放行、单 fs 形态违规），静态侧由该脚本守卫，动态形状由本文件锁定。
+ * 形态放行、单 fs 形态违规），静态侧由该脚本检查，动态形状由本文件锁定。
  */
 import { describe, expect, it } from 'vitest'
 import { ENV_PURITY_PATH, FS_GUARD_PATH, GLOBAL_SETUP_PATH, guardProjectSetup, taijiTestConfig } from './factory.ts'
@@ -24,7 +24,7 @@ describe('taijiTestConfig 双防线挂载（root 级）', () => {
     expect(test.setupFiles.indexOf(FS_GUARD_PATH)).toBeLessThan(test.setupFiles.indexOf(ENV_PURITY_PATH))
   })
 
-  it('globalSetup 排最前（env 钉死必须早于测试进程派生）', () => {
+  it('globalSetup 排最前（env 固定必须早于测试进程派生）', () => {
     const config = taijiTestConfig({})
     const test = config.test as { globalSetup: string[] }
     expect(test.globalSetup[0]).toBe(GLOBAL_SETUP_PATH)

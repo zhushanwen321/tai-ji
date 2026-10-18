@@ -6,12 +6,12 @@
  * 三段同属 createLine 的 fork 分支一体（读源 → 判状态 → 执行 fork；readSessionHeader
  * 兼作 createLine 的 fork 文件验收与 rebuild 的线文件 header 读取）。全部为
  * fixture 可驱动的纯函数/一次性执行体，不触服务状态；btw-service 保持原样 re-export
- *（导出面零变更），`from '.../btw-service.js'` 消费路径零改动
+ *（导出清单零变更），`from '.../btw-service.js'` 消费路径零改动
  *（inspectSourceState / forkViaCliPi 的既有测试同）。
  *
  * 关键红线呼应（AGENTS.md 关键规则）：
  *   #6 pi session 延迟写入：宿主只读源/线文件，fork 文件由 pi fork 链路写；
- *   #19 超时默认原则：fork bootstrap 属「控制面单请求」量级 → 秒级有界（10s）；
+ *   #19 超时默认原则：fork bootstrap 属「控制范围单请求」量级 → 秒级有界（10s）；
  *   #12 打包约束：本模块只 spawn（经注入 piCommand），不拼 ESM 模块元数据 URL 类路径
  *      （该属性在 CJS bundle 下恒为 undefined——原文随段从 btw-service 迁入此处）；
  *      bootstrap 出站 env 经 buildOutboundChildEnv（C-proc-09）。
@@ -25,12 +25,12 @@ import { toErrorMessage } from '../../utils/errors.js'
 import { BtwError } from './btw-error.js'
 
 /**
- * fork bootstrap 就绪上限（控制面单请求量级，规则 #19）：实测双旗标 fork 落盘 206ms
+ * fork bootstrap 就绪上限（控制范围单请求量级，规则 #19）：实测双旗标 fork 落盘 206ms
  *（V2 探针 A），10s 覆盖慢机/冷缓存；超时 → 回落无 fork 分支（不静默：pill 标 no-source）。
  */
 export const BTW_FORK_TIMEOUT_MS = 10_000
 
-/** fork bootstrap 目录轮询节拍（扫到新增 .jsonl 即收进程；控制面内部采样间隔，规则 #19 秒级量级）。 */
+/** fork bootstrap 目录轮询节拍（扫到新增 .jsonl 即收进程；控制范围内部采样间隔，规则 #19 秒级量级）。 */
 const FORK_POLL_INTERVAL_MS = 50
 
 /**
@@ -93,7 +93,7 @@ export type BtwSourceState =
  * 结构（content item `toolResult.toolCallId` / message role toolResult 的
  * `toolCallId` 字段），判定只影响 pill 标注不影响 fork 内容（fork 逐字节复制）。
  *
- * 分解件（metrics-gate 复杂度偿还）：单 entry 形状守卫归 asPiMessageEntry、单
+ * 分解件（metrics-gate 复杂度偿还）：单 entry 形状检查归 asPiMessageEntry、单
  * content item 判定归 collectContentItemIds，本函数只做两集合收集与差集判定。
  */
 export function hasDanglingToolCall(entries: readonly unknown[]): boolean {
@@ -107,7 +107,7 @@ interface DanglingCheckMessage {
   content?: unknown
 }
 
-/** entry 形状守卫：非 message entry / message 非对象 → undefined（判定面外，跳过）。 */
+/** entry 形状检查：非 message entry / message 非对象 → undefined（判定侧外，跳过）。 */
 function asPiMessageEntry(raw: unknown): DanglingCheckMessage | undefined {
   if (typeof raw !== 'object' || raw === null) return undefined
   const entry = raw as { type?: string; message?: DanglingCheckMessage | null }
@@ -143,11 +143,11 @@ function collectToolCallIds(entries: readonly unknown[]): { callIds: Set<string>
 }
 
 /**
- * 检查 fork 源状态（D3 分支② 判定；语义对齐 pi `forkFrom` 守卫——缺失/空/无 header
+ * 检查 fork 源状态（D3 分支② 判定；语义对齐 pi `forkFrom` 检查——缺失/空/无 header
  * 即不可 fork——并**更严**一档：header-only（零非 header entry）也判不可用，构造性
  * 杜绝「空上下文线」击穿 G2；pi 对 header-only 会产出空快照文件，宿主前置拦截）。
- * pi 守卫与 header-only 行为断言登记 PS-51（verifiedWith 以 pi-semantics.json 为准，
- * 逐 claim 行号见该条目 piAnchor：forkFrom 守卫 throw / append 循环
+ * pi 检查与 header-only 行为断言登记 PS-51（verifiedWith 以 pi-semantics.json 为准，
+ * 逐 claim 行号见该条目 piAnchor：forkFrom 检查 throw / append 循环
  * 对 header-only 源零 append 仍产出文件），durable 探针 = btw-pi-fork-semantics.test.ts。
  * 读侧容忍尾部半行（append 中读到未写完的行直接丢弃，不整文件判废）。
  */
@@ -221,7 +221,7 @@ export async function forkViaCliPi(req: ForkViaCliRequest): Promise<string> {
   try {
     child = spawn(req.piCommand, args, { cwd: req.cwd, env, stdio: ['ignore', 'pipe', 'pipe'] })
   } catch (e) {
-    // spawn 同步抛（参数面异常）：包成 fork_failed，调用方回落分支②。
+    // spawn 同步抛（参数侧异常）：包成 fork_failed，调用方回落分支②。
     throw new BtwError('fork_failed', `[btw] pi fork bootstrap spawn failed: ${toErrorMessage(e)}`)
   }
   child.stdout.on('data', () => {}) // bootstrap 进程 stdout 不消费（fork 后即收）

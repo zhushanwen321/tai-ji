@@ -168,7 +168,7 @@ describe('MessageStream → ActivityStrip subagentThinking 接线（u3-thinking 
 })
 
 /**
- * 占位反例（D6）：③级投影的
+ * 占位反例（D6）：③级派生视图的
  * 占位 assistant（content === SUBAGENT_OUTCOME_PLACEHOLDER，仅 result/error 双缺时出现）
  * 不算实质产出——思考行仍触发；真实 content（result/error 文本）= 有产出 → 熄灭。
  * drawer-blank T3 既有断言（上方「末位 turn 无 assistant → thinking 行出现」）不动。
@@ -176,7 +176,7 @@ describe('MessageStream → ActivityStrip subagentThinking 接线（u3-thinking 
 describe('MessageStream subagentThinking 占位反例（D6）', () => {
   beforeEach(resetMessageStreamEnv)
 
-  it('末位 assistant 为占位（③级 result/error 双缺投影）→ thinking 行仍出现', async () => {
+  it('末位 assistant 为占位（③级 result/error 双缺派生视图）→ thinking 行仍出现', async () => {
     const sidP = subagentVirtualId(MAIN_SID, 'sub-fw-ph')
     useChatStore().hydrate(sidP, [
       makeMsg({ id: 'u1', role: 'user', content: '任务' }),
@@ -192,7 +192,7 @@ describe('MessageStream subagentThinking 占位反例（D6）', () => {
     wrapper.unmount()
   })
 
-  it('末位 assistant 为真实 content（error 文本投影）→ thinking 行熄灭', async () => {
+  it('末位 assistant 为真实 content（error 文本派生视图）→ thinking 行熄灭', async () => {
     const sidR = subagentVirtualId(MAIN_SID, 'sub-fw-real')
     useChatStore().hydrate(sidR, [
       makeMsg({ id: 'u1', role: 'user', content: '任务' }),

@@ -7,7 +7,7 @@
  *
  * 形态对齐 `src/__tests__/session-file-utils-sidecar.test.ts` 的 delete 驱动 harness
  * （trash mock，真实驱动生命周期删链）。产物目录经 shared 公式推导落在 globalSetup
- * 钉扎的 tmp 数据目录内（仓规测试红线：禁触碰真实数据目录）。
+ * 固定的 tmp 数据目录内（仓规测试红线：禁触碰真实数据目录）。
  *
  * 运行：cd packages/runtime && npx vitest run src/services/session/__tests__/session-artifact-cascade.test.ts
  */
@@ -66,7 +66,7 @@ function makeLifecycle(sid: string, filePath: string, cwd: string): SessionLifec
 /**
  * 级联删除用例骨架：建 tmp 会话文件 + （seedArtifactDir 时）产物目录树 → 断言种子在位 →
  * 驱动 `SessionLifecycle.delete` → 用例断言 → finally 双清理（workDir + 产物目录）。
- * 产物目录经 shared 公式推导（globalSetup 钉扎的 tmp 数据目录内，不触真实数据目录）。
+ * 产物目录经 shared 公式推导（globalSetup 固定的 tmp 数据目录内，不触真实数据目录）。
  */
 async function withCascadeFixture(
   seedArtifactDir: boolean,

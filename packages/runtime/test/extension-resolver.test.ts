@@ -708,7 +708,7 @@ describe('ExtensionResolver', () => {
       mockedReadFileSync.mockImplementation(((p: unknown) => {
         if (typeof p !== 'string') throw new Error('not found')
         if (p === `${dir}/package.json`) {
-          return '{ "pi": { "extensions": [' // 未闭合 JSON，JSON.parse 必抛
+          return '{ "pi": { "extensions": [' // 未封口 JSON，JSON.parse 必抛
         }
         throw new Error('not found')
       }) as unknown as typeof readFileSync)

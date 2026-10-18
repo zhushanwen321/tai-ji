@@ -1,7 +1,7 @@
 /**
  * WorkflowScript.validate lint memo（IF9/#15，TC9/DM2）— 引用相等键缓存测试。
  *
- * vi.mock script-lint 模块统计 lintScript 调用次数（design IF9 测试面）：
+ * vi.mock script-lint 模块统计 lintScript 调用次数（design IF9 测试层）：
  * - 同 path + sourceCode 相等（含等值异字面量）→ 二次 validate 只 1 次 lint 调用
  * - 【设计修正】design 原文「异引用等值 miss」在 JS 不可构造：字符串 === 是值相等
  *   （实测等值异字面量命中）。lintScript 是纯函数，值相等 ⟹ 结果相同，值键 memo

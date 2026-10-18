@@ -394,7 +394,7 @@ describe('ScheduleCreateComponent — Submit 确认门与回传', () => {
 		})
 	})
 
-	it('S-5: 终态后继续按键 no-op（resolved 守卫）', () => {
+	it('S-5: 终态后继续按键 no-op（resolved 检查）', () => {
 		const { c, result } = make()
 		fillRecurringToSubmit(c)
 		c.handleInput(ENTER)

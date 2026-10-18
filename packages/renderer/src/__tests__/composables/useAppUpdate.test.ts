@@ -7,7 +7,7 @@
  * - performInstall 乐观置 replacing / triggerRestart 置 restarting / 失败置 error
  * - onUpdateError → error/unsupported（SSOT）
  * - restorePreloadedUpdate 有效产物 → downloaded / 无效 no-op
- * - 状态守卫 ES4（downloaded 同版本不覆盖）/ ES5（downloaded 追新版退回 available）
+ * - 状态检查 ES4（downloaded 同版本不覆盖）/ ES5（downloaded 追新版退回 available）
  * - performDownload catch 兜底 / 传给 ipc 的是 version 字符串（批次 3 契约）
  *
  * w2 改造：旧一键 performUpdate 拆为 performDownload（downloaded 态）+ performInstall（restarting 态）。
@@ -15,7 +15,7 @@
  * Mock 策略：族级共享 harness（../helpers/app-update-mount.ts）——ipc 七键默认值 +
  * __APP_VERSION__ stub + markdown 桩 '<h2>新特性</h2>'（renderMarkdown 断言经
  * renderMarkdownMock）；场景前置收敛为文件内装置函数：enterAvailable（进入 available 态）、
- * makeDownloadStale（STALE 交错）、primePreloaded（预下载守卫）、launchWithResult（W4 toast）。
+ * makeDownloadStale（STALE 交错）、primePreloaded（预下载检查）、launchWithResult（W4 toast）。
  * markdown 桩挂 '@taiji/ui/features/chat/markdown'（渲染链下沉后 SUT 实际 import 的模块）。
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/composables/useAppUpdate.test.ts
@@ -64,7 +64,7 @@ function makeDownloadStale(): void {
   })
 }
 
-/** 预下载恢复装置：置 getPreloaded 产物（可选先 stub 当前版本触发守卫分支）→ 订阅 → 执行恢复 */
+/** 预下载恢复装置：置 getPreloaded 产物（可选先 stub 当前版本触发检查分支）→ 订阅 → 执行恢复 */
 async function restorePreloaded(
   release: LatestReleaseInfo | null,
   appVersion?: string,
@@ -183,7 +183,7 @@ describe('useAppUpdate', () => {
 
     // 修复前：performDownload 已置 downloading 且 catch 被 errorHandled 去重跳过，
     // STALE 分支不置态 → 自动重查 prevState='downloading' 被 rateLimited 恢复固化，
-    // UpdateCheckCard downloading 态无按钮 + 周期检查守卫跳过 → UI 永久卡死。
+    // UpdateCheckCard downloading 态无按钮 + 周期检查跳过 → UI 永久卡死。
     // 修复后：STALE 分支在重查前显式置 available，rateLimited 恢复 available（稳定态有出路）。
     await vi.waitFor(() => {
       expect(result.state.state).toBe('available')
@@ -344,18 +344,18 @@ describe('useAppUpdate', () => {
     stop()
   })
 
-  it('openFallbackUrl 调 ipc.openUpdateFallbackUrl(latestRelease.htmlUrl)', async () => {
-    ipc.openUpdateFallbackUrl.mockResolvedValue(undefined)
+  it('openFallbackUrl 调 ipc.openExternal(latestRelease.htmlUrl)', async () => {
+    ipc.openExternal.mockResolvedValue(undefined)
     const { result, stop } = await enterAvailable()
     await result.openFallbackUrl()
 
-    expect(ipc.openUpdateFallbackUrl).toHaveBeenCalledWith(makeUpdateRelease('0.9.0').htmlUrl)
+    expect(ipc.openExternal).toHaveBeenCalledWith(makeUpdateRelease('0.9.0').htmlUrl)
     stop()
   })
 
   // ── RD-4#9：逃生通道自身裸崩修复 ──
   it('RD-4#9: openFallbackUrl IPC 失败 → toastError 带可复制 URL（不变 unhandledRejection）', async () => {
-    ipc.openUpdateFallbackUrl.mockRejectedValue(new Error('shell.openPath failed'))
+    ipc.openExternal.mockRejectedValue(new Error('shell.openPath failed'))
     toastFns.error.mockClear()
     const { result, stop } = await enterAvailable()
     await result.openFallbackUrl()
@@ -433,8 +433,8 @@ describe('useAppUpdate', () => {
     stop()
   })
 
-  // ── restorePreloadedUpdate 版本守卫（w2-frontend-guard：前端兜底拦截过期产物）──
-  it('W2TC1：currentVersion < preloaded.version（0.8.48 < 0.8.49）→ 守卫放行，恢复 downloaded', async () => {
+  // ── restorePreloadedUpdate 版本检查（w2-frontend-guard：前端兜底拦截过期产物）──
+  it('W2TC1：currentVersion < preloaded.version（0.8.48 < 0.8.49）→ 检查放行，恢复 downloaded', async () => {
     const { result, stop, restored } = await restorePreloaded(makeUpdateRelease('0.8.49'), '0.8.48')
 
     expect(restored).toBe(true)
@@ -443,7 +443,7 @@ describe('useAppUpdate', () => {
     stop()
   })
 
-  it('W2TC2：currentVersion >= preloaded.version（0.8.49 >= 0.8.49）→ 守卫拦截，不恢复，回退 pending', async () => {
+  it('W2TC2：currentVersion >= preloaded.version（0.8.49 >= 0.8.49）→ 检查拦截，不恢复，回退 pending', async () => {
     const { result, stop, restored } = await restorePreloaded(makeUpdateRelease('0.8.49'), '0.8.49')
 
     expect(restored).toBe(false)
@@ -468,10 +468,10 @@ describe('useAppUpdate', () => {
     stop()
   })
 
-  // ── 状态守卫 ES4/ES5（downloaded 态不被联网检测误覆盖）──
-  it('状态守卫 ES4：downloaded 态检测到同版本 → 不被覆盖为 available（保持 downloaded）', async () => {
+  // ── 状态检查 ES4/ES5（downloaded 态不被联网检测误覆盖）──
+  it('状态检查 ES4：downloaded 态检测到同版本 → 不被覆盖为 available（保持 downloaded）', async () => {
     // 通过 restorePreloadedUpdate 恢复 downloaded 态：同时设 pendingRestored=true，
-    // 否则 checkForUpdate 进入时会置 checking 态破坏守卫前提（pendingRestored 守的是 checking 回退）
+    // 否则 checkForUpdate 进入时会置 checking 态破坏检查前提（pendingRestored 守的是 checking 回退）
     const { result, stop } = await restorePreloaded(makeUpdateRelease('0.8.44'))
     expect(result.state.state).toBe('downloaded')
 
@@ -484,7 +484,7 @@ describe('useAppUpdate', () => {
     stop()
   })
 
-  it('状态守卫 ES5：downloaded 态检测到更新版本 → 退回 available（追新版）', async () => {
+  it('状态检查 ES5：downloaded 态检测到更新版本 → 退回 available（追新版）', async () => {
     const { result, stop } = await restorePreloaded(makeUpdateRelease('0.8.44'))
     expect(result.state.state).toBe('downloaded')
 
@@ -549,7 +549,7 @@ describe('useAppUpdate 订阅引用计数（RD-4#4）', () => {
   })
 })
 
-describe('useAppUpdate initAutoCheck 定时器（递归 setTimeout + 守卫）', () => {
+describe('useAppUpdate initAutoCheck 定时器（递归 setTimeout + 检查）', () => {
   beforeEach(() => {
     vi.useFakeTimers()
   })
@@ -603,13 +603,13 @@ describe('useAppUpdate initAutoCheck 定时器（递归 setTimeout + 守卫）',
     stop()
   })
 
-  it('守卫：state.state="downloaded" 时定时器触发跳过 checkForUpdate，但仍排下一次', async () => {
+  it('检查：state.state="downloaded" 时定时器触发跳过 checkForUpdate，但仍排下一次', async () => {
     const { result, stop } = setupAppUpdate({ initAutoCheck: true })
     // 置为升级流程态（downloaded），定时器触发时不应打断
     result.state.state = 'downloaded'
 
     await vi.advanceTimersByTimeAsync(30000)
-    // 守卫跳过本次检查
+    // 检查跳过本次检查
     expect(ipc.checkForUpdate).not.toHaveBeenCalled()
 
     // 恢复可检测态后，下一个周期应恢复检测（证明仍排了下一次定时器）
@@ -619,7 +619,7 @@ describe('useAppUpdate initAutoCheck 定时器（递归 setTimeout + 守卫）',
     stop()
   })
 
-  it('守卫：state.state="replacing" 时定时器触发跳过 checkForUpdate', async () => {
+  it('检查：state.state="replacing" 时定时器触发跳过 checkForUpdate', async () => {
     const { result, stop } = setupAppUpdate({ initAutoCheck: true })
     result.state.state = 'replacing'
 
@@ -649,7 +649,7 @@ describe('useAppUpdate initAutoCheck 定时器（递归 setTimeout + 守卫）',
     await vi.advanceTimersByTimeAsync(30000)
     expect(ipc.checkForUpdate).toHaveBeenCalledTimes(1)
 
-    // hidden（含 document.hidden，runAutoCheck 守卫读的是它）→ 周期触发置 skipped
+    // hidden（含 document.hidden，runAutoCheck 检查读的是它）→ 周期触发置 skipped
     const hiddenSpy = vi.spyOn(document, 'hidden', 'get').mockReturnValue(true)
     await vi.advanceTimersByTimeAsync(60 * 60 * 1000)
     expect(ipc.checkForUpdate).toHaveBeenCalledTimes(1) // hidden 期间周期跳过联网

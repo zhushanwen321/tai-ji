@@ -39,7 +39,7 @@ import { createResourceListInjector } from "./resource-list-injector.ts";
  * 每 turn 由 @pi-meta 动态注入），只给通用路由指引 + read location 参数指针。
  *
  * 末句 = 批量入口的 pi 壳附加句（D5③）：条目侧 when/notFor 走 fan-out.js 的 @pi-meta
- * （宿主中立、双宿主共享，注入面只渲染 name/description/location，元数据经 read
+ * （宿主中立、双宿主共享，注入点只渲染 name/description/location，元数据经 read
  * <location> 取）；「subagents tool 是 fan-out 的执行体」是 pi 壳专属表述，故放这里
  * 而不进模板 meta——zsw 宿主清单注入不会照搬本句。
  */
@@ -48,7 +48,7 @@ export const WORKFLOW_LIST_GUIDE =
 
 /**
  * 解析 workflow .js 文件的 meta（name + description），经 IF1 parseResourceMeta。
- * 投影到 WorkflowEntry {name, description(summarized)} 注入用。
+ * 映射到 WorkflowEntry {name, description(summarized)} 注入用。
  */
 export function parseWorkflowMeta(content: string): WorkflowEntry | null {
 	const meta = parseResourceMeta(content, "workflow");

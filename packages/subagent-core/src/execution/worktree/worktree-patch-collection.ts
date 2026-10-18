@@ -2,7 +2,7 @@
 //
 // [§3.1.6 双份接线收敛] worktree 未提交改动的 patch 快照落盘原语（单源）。
 //
-// 变化轴 = 「什么时候把 worktree 的未提交改动落成 patch 备份、路径怎么落」。两个调用
+// 变化原因 = 「什么时候把 worktree 的未提交改动落成 patch 备份、路径怎么落」。两个调用
 // 时点同属该轴，此前各写一份（persistence/finalize-record.ts 的终态收尾 Step 0 与
 // service/record-lifecycle.ts 的归档资源回收）：正文逐行等价，但 try 边界（lifecycle
 // 在 try 外取 manager，getter 抛错会上抛）与日志标签不一致——修一处漏一处即漂移，

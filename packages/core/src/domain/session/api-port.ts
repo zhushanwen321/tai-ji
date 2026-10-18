@@ -42,7 +42,7 @@ export interface SessionApiPort {
   /**
    * 显式重开 dead session（重新 spawn pi；session.restore RPC）。
    * remote-use A3/U12：恢复三步编排（restore RPC → selectSession → revive）落壳层、
-   * 编排不上收 core，本成员只承载壳侧透传面——可选成员，core 链内不消费（use-session
+   * 编排不上收 core，本成员只承载壳侧透传逻辑——可选成员，core 链内不消费（use-session
    * 无恢复编排），桌面壳经自身 api 层调用不受影响。
    */
   restoreSession?(id: string): Promise<SessionSummary>

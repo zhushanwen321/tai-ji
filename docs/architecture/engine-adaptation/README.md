@@ -1,6 +1,6 @@
 # 外部 coding-agent 引擎适配映射
 
-本目录收录六个外部 coding-agent 对 taiji subagent 引擎协议 v1（`packages/subagent-engine-sdk/src/protocol/`）的 **type 级适配映射文档**。协议面权威 = SDK protocol 源码；协议设计决策 = [`../subagent-engine-protocolization.md`](../subagent-engine-protocolization.md)；本文档族回答「每个引擎的细分类型如何映射到协议靶面」。
+本目录收录六个外部 coding-agent 对 taiji subagent 引擎协议 v1（`packages/subagent-engine-sdk/src/protocol/`）的 **type 级适配映射文档**。协议范围权威 = SDK protocol 源码；协议设计决策 = [`../subagent-engine-protocolization.md`](../subagent-engine-protocolization.md)；本文档族回答「每个引擎的细分类型如何映射到协议目标类型」。
 
 ## 文档索引
 
@@ -39,11 +39,11 @@
 
 **稀缺位**：steer 仅 claude-code / codex 为 native，其余为 emulated（排队/打断重发/文本命令）或 unsupported（kimi 的 node-sdk 有 `Session.steer` 但 ACP 方法集无对应）；schemaEnforcement native 仅 claude-code（`--json-schema`）与 codex（`output_schema_strict`）。
 
-## 协议面不可达矩阵（六引擎 × engine-protocol v1）
+## 协议范围不可达矩阵（六引擎 × engine-protocol v1）
 
-本矩阵汇总六份映射文档的「靶有源无」缺口与各节降级标注，列协议面各能力项在六引擎的可达性。汇总口径：**空格 = 支持**（原生或直接映射，该引擎文档未列为缺口）；⚠️ = 降级可用（emulated / 合成 / 词表折算 / 语义偏差，见括注）；❌ = 不可达（引擎无对应机制，宿主补齐或丢弃）。
+本矩阵汇总六份映射文档的「靶有源无」缺口与各节降级标注，列协议范围各能力项在六引擎的可达性。汇总口径：**空格 = 支持**（原生或直接映射，该引擎文档未列为缺口）；⚠️ = 降级可用（emulated / 合成 / 词表折算 / 语义偏差，见括注）；❌ = 不可达（引擎无对应机制，宿主补齐或丢弃）。
 
-引擎多出的能力（源有靶无，协议面无承载）不在此表，见各文档 §9。
+引擎多出的能力（源有靶无，协议范围无承载）不在此表，见各文档 §9。
 
 ### run 入参（run.params.task）
 
@@ -72,7 +72,7 @@
 
 **全部 ❌ 的通用行**：`ctxModel`（无一家有 ctx 模型分离概念）、`sessionRootId`（pi relay 专属键）。
 
-### 事件面（event 通知 9 种）
+### 事件范围（event 通知 9 种）
 
 | 协议事件 | Claude Code | Codex | opencode | kimi | openclaw | hermes |
 |----------|------------|-------|----------|------|----------|--------|
@@ -111,7 +111,7 @@
 | AgentOutcome.exitCode | ✅ 进程退出码 | | | | ❌ 常驻恒无 | ❌ 常驻形态无意义 |
 | AgentOutcome.failureKind | | | ✅ StructuredOutputError 可分诊 schema_deterministic | | ⚠️ 从 stopReason/errorMessage 合成 | |
 
-### 模型面
+### 模型侧
 
 | 协议方法 | Claude Code | Codex | opencode | kimi | openclaw | hermes |
 |----------|------------|-------|----------|------|----------|--------|
@@ -126,11 +126,11 @@
 - **opencode**：permission ask 挂起会阻塞 run（必须 prompt_async + SSE，宿主不 reply = 永挂，须映射超时/杀链到 reply reject）；session 与创建时 directory 绑定，跨目录续聊必须带路由参数。
 - **claude-code**：每会话一进程，协议常驻端点语义（initialize/dispose/ping 多 run 复用）须适配层 wrapper 重构——接入形态最大结构差异。
 
-## 引擎多出能力面（engine-protocol v1 无承载位）
+## 引擎多出能力侧（engine-protocol v1 无承载位）
 
 六家引擎普遍携带协议 v1 没有的能力（各文档 §9「源有靶无」汇总）。这些能力**不阻塞接入**——适配器丢弃或仅诊断消费；下表是协议未来扩展的候选面，是否值得进协议按 [`../subagent-engine-protocolization.md`](../subagent-engine-protocolization.md) 的字段归属判据裁决，不在本表展开。
 
-✅ = 该引擎具备此能力面（括注为引擎侧具体形态）；空 = 无此面或未在映射文档中标记。
+✅ = 该引擎具备此能力侧（括注为引擎侧具体形态）；空 = 无此面或未在映射文档中标记。
 
 | 能力域 | Claude Code | Codex | opencode | kimi | openclaw | hermes |
 |--------|------------|-------|----------|------|----------|--------|
@@ -145,7 +145,7 @@
 | 审批流增强 | ✅ permission_denials / fast_mode_state | ✅ guardian 自动审批（autoApprovalReview） | | ✅ mode 推送 | ✅ 结构化审批元数据 + 远程节点审批配置 | ✅ allow_once/session/always 五值细分 |
 | 结构化 diff / patch 面 | | ✅ turn/diff/updated | ✅ patch/snapshot parts + session.diff | ✅ ToolKind / diff content | ✅ bus item/patch | |
 | 多任务入口（shell/命令/手动压缩） | | | ✅ /shell /command /init /summarize | ✅ available_commands_update | | ✅ available_commands（9 个 slash） |
-| 平台生态面（渠道/cron/记忆/市场） | ✅ plugins / marketplace（--plugin-dir） | ✅ hooks / plugins / marketplace / skills 管理面 | ✅ share / provider OAuth | ✅ goal / cron / task 域 | ✅ 多渠道路由 + cron/heartbeat/web | ✅ send_message/kanban/cron + memory/session_search |
+| 平台生态面（渠道/cron/记忆/市场） | ✅ plugins / marketplace（--plugin-dir） | ✅ hooks / plugins / marketplace / skills 管理侧 | ✅ share / provider OAuth | ✅ goal / cron / task 域 | ✅ 多渠道路由 + cron/heartbeat/web | ✅ send_message/kanban/cron + memory/session_search |
 
 三个跨引擎观察：
 
@@ -168,7 +168,7 @@
 
 ## 横向事实
 
-- **ACP 公共面**：kimi（`kimi acp`）、hermes（`hermes acp`）原生提供 ACP stdio server；openclaw 的 `openclaw acp` 是 gateway 的客户端桥。ACP 语义与协议 v1 同构度高，一个「ACP ↔ engine-protocol 转换层」可覆盖多引擎；但 kimi 实测 ACP 面存在 steer/maxTurns/schema/细分 usage 四项不可达，需扩展 acp-server 或直连引擎层。
+- **ACP 公共部分**：kimi（`kimi acp`）、hermes（`hermes acp`）原生提供 ACP stdio server；openclaw 的 `openclaw acp` 是 gateway 的客户端桥。ACP 语义与协议 v1 同构度高，一个「ACP ↔ engine-protocol 转换层」可覆盖多引擎；但 kimi 实测 ACP 面存在 steer/maxTurns/schema/细分 usage 四项不可达，需扩展 acp-server 或直连引擎层。
 - **拓扑两极**：全部六家均可用常驻服务形态承载（zcode 式）；仅 claude-code 推荐每任务 spawn（其常驻形态 daemon/mcp serve 均非会话服务）。
 - **usage 字段方言**：各家 token 字段名与归并口径不同（如 codex cached/uncached、opencode reasoning 单列、hermes usage 在 turn 终态一次性给出需差分）；cacheWrite/cost 普遍缺 wire 槽。适配层需逐家按映射文档 §5 落。
 - **快照漂移风险**：各文档头部标注证据基准 commit；openclaw/hermes 快照较旧（2026-06），按机制存在性采信，实施前须按当时实装版重验（纪律同 pi 语义断言，见 [pi-boundary-reliability.md](../pi-boundary-reliability.md)）。

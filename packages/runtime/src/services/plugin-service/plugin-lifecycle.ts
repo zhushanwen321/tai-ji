@@ -1,5 +1,5 @@
 /**
- * 插件服务启动生命周期编排（P4 收口）
+ * 插件服务启动生命周期编排（P4 收尾）
  *
  * 从 PluginService.initialize() 抽取的 9 步顺序装配流程。此前 initialize() 是
  * 一个 god-orchestrator，混合了 descriptor 扫描、存储初始化、RPC 注册、权限加载、

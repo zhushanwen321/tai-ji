@@ -245,7 +245,7 @@ function parseScheduleFormAnswerValue(rawResult: unknown): ScheduleFormResult {
 // ── 命令路径入口（异步打开）──
 
 /**
- * 命令路径表单入口：打开创建表单，提交后经 service.create 落库。
+ * 命令路径表单入口：打开创建表单，提交后经 service.create 写入。
  *
  * **契约：返回的 Promise 永不 reject**（内部错误自 catch → `ctx.ui.notify(..., 'error')`；
  * 挂起期间 `session_shutdown` abort → 取消收尾）。因此调用点的 `void openScheduleFormAsync(...)`

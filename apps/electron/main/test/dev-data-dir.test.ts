@@ -22,20 +22,20 @@ function env(dataDir?: string, e2e?: string): NodeJS.ProcessEnv {
 }
 
 describe('resolveDevDataDir 受控采信行为矩阵', () => {
-  describe('钉死分支（未设 / 泄漏 / 树外）', () => {
-    it('未设值 → 钉死 ~/.taiji-dev', () => {
+  describe('固定分支（未设 / 泄漏 / 树外）', () => {
+    it('未设值 → 固定 ~/.taiji-dev', () => {
       expect(resolveDevDataDir(env(undefined), HOME)).toBe(DEV_ROOT)
     })
 
-    it('空字符串 → 钉死（非空才算外部值）', () => {
+    it('空字符串 → 固定（非空才算外部值）', () => {
       expect(resolveDevDataDir(env(''), HOME)).toBe(DEV_ROOT)
     })
 
-    it('宿主泄漏形态 ~/.taiji（prod 目录，2026-09-08 事故原形态）→ 拒绝，钉死', () => {
+    it('宿主泄漏形态 ~/.taiji（prod 目录，2026-09-08 事故原形态）→ 拒绝，固定', () => {
       expect(resolveDevDataDir(env(path.join(HOME, '.taiji')), HOME)).toBe(DEV_ROOT)
     })
 
-    it('树外绝对路径（/tmp 下任意目录）→ 拒绝，钉死', () => {
+    it('树外绝对路径（/tmp 下任意目录）→ 拒绝，固定', () => {
       expect(resolveDevDataDir(env(path.join(path.sep, 'tmp', 'leak')), HOME)).toBe(DEV_ROOT)
     })
 
@@ -75,7 +75,7 @@ describe('resolveDevDataDir 受控采信行为矩阵', () => {
       expect(resolveDevDataDir(env(tmpDataDir, '1'), HOME)).toBe(tmpDataDir)
     })
 
-    it('TAIJI_E2E=1 但外部值非空才豁免——空值仍钉死', () => {
+    it('TAIJI_E2E=1 但外部值非空才豁免——空值仍固定', () => {
       expect(resolveDevDataDir(env(undefined, '1'), HOME)).toBe(DEV_ROOT)
       expect(resolveDevDataDir(env('', '1'), HOME)).toBe(DEV_ROOT)
     })

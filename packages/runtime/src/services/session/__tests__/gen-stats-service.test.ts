@@ -8,7 +8,7 @@
  *   聚合共享 / current 各自独立）；TTFT（composer-genstats-ttft §3.3）：逐字段独立判定
  *   （durationMs 缺失不阻 ttft 落盘 / ttftMs null 不写 ttft 文件）、单元素组落盘、
  *   ttftMs=0 真实测量、current 槽 modelKey 校验、composeFrame 真实聚合（D1 占位覆写）
- *   + 恢复腿回填（S4）；
+ *   + 恢复路径回填（S4）；
  * - 映射三写一清：写 1（recordSample）/ 写 2（onModelSwitched 重登记+推帧）/ 写 3
  *   （getSnapshotForSession get_state 成功回填）/ 清（registerSessionCleanup + 销毁回调，
  *   映射与 per-session current 槽同清）；
@@ -18,7 +18,7 @@
  *   缓存值 → 全 null；
  * - interpreter 接线（LLM 窗口口径 genstats-speed-llm-window D1/D3）：turn-start →
  *   message_end(assistant) → turn-usage → onGenStats 携带扩展字段 + durationMs=窗口差；
- *   无 turn-start / 缺闭合 → durationMs=null。
+ *   无 turn-start / 缺配对结束 → durationMs=null。
  *
  * 数据目录红线（TEST-STRATEGY / fs-guard）：全部写删目标 = mkdtempSync(
  * join(tmpdir(), 'taiji-gen-stats-')) + TAIJI_AGENT_DATA_DIR env 注入，零共享推导路径触碰。
@@ -69,7 +69,7 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-// ── 服务构造 fixture：窄依赖 mock（deps 面 = 消费面）────────────────────────────────────
+// ── 服务构造 fixture：窄依赖 mock（deps 面 = 消费方）────────────────────────────────────
 
 interface Fixture {
   service: GenStatsService
@@ -325,7 +325,7 @@ describe('GenStatsService 映射三写一清 + 扩展广播（D4）', () => {
     expect(frame.cacheRatio).toEqual({ current: null, day: null })
   })
 
-  it('写 3 onSnapshotResolved：恢复腿解析回填后 live 帧可达（sessionsOfModel 含该 sid）', () => {
+  it('写 3 onSnapshotResolved：恢复路径解析回填后 live 帧可达（sessionsOfModel 含该 sid）', () => {
     const { service } = makeOfflineService()
     service.onSnapshotResolved('s9', 'prov/mdl')
     expect(service.sessionsOfModel('prov/mdl')).toEqual(['s9'])
@@ -419,7 +419,7 @@ describe('GenStatsService 帧归属：openrouter 系复合 key 完整性（A4/S1
     expect(frame.speed).toEqual({ current: null, day: null, d7: null, d30: null })
   })
 
-  it('误杀修复（恢复腿降级链①）：get_state 的 Model.id 自含 / → 复合解析完整 key + 写 3 回填', async () => {
+  it('误杀修复（恢复路径降级链①）：get_state 的 Model.id 自含 / → 复合解析完整 key + 写 3 回填', async () => {
     const { service, getClient, getState } = makeService(async () => ({
       model: { id: 'anthropic/claude-3', provider: 'openrouter' },
     }))
@@ -618,7 +618,7 @@ describe('GenStatsService 归因降噪（cacheRatio.currentMiss）', () => {
     expect(service.frameFor('sB', 'prov/mdl').cacheRatio.currentMiss).toEqual({ reason: 'cold-start' })
   })
 
-  it('恢复腿保留归因：getSnapshotForSession（RPC 帧）与 live 帧同带 currentMiss', async () => {
+  it('恢复路径保留归因：getSnapshotForSession（RPC 帧）与 live 帧同带 currentMiss', async () => {
     const { service } = makeOfflineService()
     service.recordSample('s1', ZERO_SAMPLE)
 
@@ -640,7 +640,7 @@ describe('GenStatsService 归因降噪（cacheRatio.currentMiss）', () => {
   })
 })
 
-describe('GenStatsService.frameFor ttft（composeFrame 真实聚合 + current 槽 modelKey 校验 + S4 恢复腿）', () => {
+describe('GenStatsService.frameFor ttft（composeFrame 真实聚合 + current 槽 modelKey 校验 + S4 恢复路径）', () => {
   it('composeFrame ttft 真实聚合（D1 占位覆写核验：非全 null）：current=本会话末条原值、day/d7/d30=p50', () => {
     const { service } = makeOfflineService()
     service.recordSample('s1', { ...NORMAL_SAMPLE, ttftMs: 300 })
@@ -688,7 +688,7 @@ describe('GenStatsService.frameFor ttft（composeFrame 真实聚合 + current �
     expect(snap.ttft.day).toBe(820)
   })
 
-  it('恢复腿回填（S4）：重启形态（磁盘存量 + 内存槽清零）经 getSnapshotForSession 回填一致', async () => {
+  it('恢复路径回填（S4）：重启形态（磁盘存量 + 内存槽清零）经 getSnapshotForSession 回填一致', async () => {
     const { service } = makeService(async () => ({ model: { id: 'mdl', provider: 'prov' } }))
     const now = new Date()
     const daysAgo = (n: number): string =>
@@ -707,7 +707,7 @@ describe('GenStatsService.frameFor ttft（composeFrame 真实聚合 + current �
   })
 })
 
-describe('GenStatsService.getSnapshotForSession（恢复腿降级链，D4）', () => {
+describe('GenStatsService.getSnapshotForSession（恢复路径降级链，D4）', () => {
   it('① get_state 成功：解析 provider/id 复合 key + 写 3 回填 + 帧 current=本会话样本', async () => {
     const { service, getClient } = makeService(async () => ({ model: { id: 'mdl', provider: 'prov' } }))
     service.recordSample('sOther', { ...NORMAL_SAMPLE }) // prov/mdl 已有样本（sOther 的）
@@ -817,7 +817,7 @@ describe('EventInterpreter gen-stats 接线（D1/D2）', () => {
     expect(onGenStats).toHaveBeenCalledWith('s1', expect.objectContaining({ durationMs: null }))
   })
 
-  it('消费后置空：缺闭合的下一个 turn-usage 不得复用上一窗口（§3.5 一致性）', () => {
+  it('消费后置空：缺配对结束的下一个 turn-usage 不得复用上一窗口（§3.5 一致性）', () => {
     vi.useFakeTimers()
     const onGenStats = vi.fn()
     const interp = makeInterpreter(onGenStats)
@@ -827,7 +827,7 @@ describe('EventInterpreter gen-stats 接线（D1/D2）', () => {
     vi.setSystemTime(T0 + 5_000)
     interp.interpret([{ kind: 'message', message: makeAssistantMessageEnd() }])
     interp.interpret([TURN_USAGE_EVENT])
-    // 第二个 turn-usage 缺配对闭合（真缺闭：pi 崩溃/断连）：窗口消费后置 null + 重锚
+    // 第二个 turn-usage 缺配对结束（真未结束：pi 崩溃/断连）：窗口消费后置 null + 重锚
     // 清除不变量——若旧窗口未清会复用 5_000 产出「旧窗口 × 新 token」脏样本（系统性
     // 失真），必须为 null（§3.5：速度样本跳过而非脏样本）
     vi.setSystemTime(T0 + 10_000)
@@ -923,7 +923,7 @@ describe('event-adapter handleTurnEndPi 扩展字段提取（D1）', () => {
 
 // ── Gate A ③：session-service 写 2 tap 机制（state_changed 后置 tap / 帧序 / bus 替换 memoize）──
 
-describe('SessionService 写 2 tap（setGenStatsModelSwitchTap / 投影 bus 视图）', () => {
+describe('SessionService 写 2 tap（setGenStatsModelSwitchTap / 映射 bus 视图）', () => {
   beforeEach(() => {
     vi.useFakeTimers()
   })
@@ -1013,7 +1013,7 @@ describe('SessionService 写 2 tap（setGenStatsModelSwitchTap / 投影 bus 视�
   })
 })
 
-// ── Gate A ④：session-message-handler getGenStats case（D4 恢复腿路由）────────────────
+// ── Gate A ④：session-message-handler getGenStats case（D4 恢复路径路由）────────────────
 
 describe('SessionMessageHandler session.getGenStats case', () => {
   const MSG = { type: 'session.getGenStats', id: 'req-1', payload: { sessionId: 's9' } } as never

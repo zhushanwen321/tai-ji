@@ -125,7 +125,7 @@ export function sendGetStateCommand(child: ChildProcess): string {
  * 命令写入接线复用本模块既有原语——pi-rpc buildSetModelCommandFrame 组帧 +
  * tryWriteStdinLine 裸写 + isBrokenPipeError 判别）。
  *
- * 与 prompt 路径的 writeStdinLine 错误策略刻意不同：setModel 是控制面操作，投递
+ * 与 prompt 路径的 writeStdinLine 错误策略刻意不同：setModel 是控制范围操作，投递
  * 失败（no-stdin / destroyed / EPIPE——均为子进程已死或将死的形态）必须以判别式
  * 结果上浮，让调用方按「无活进程」形态处置（§7.5 命令写入窗口退出行），而不是
  * throw 驱动冷恢复或静默返回后悬挂等待。

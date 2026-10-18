@@ -1,6 +1,6 @@
 // workflow-list-injector 单测（injectors 域合并宿主：workflow + subagent 两份工厂配置）
 //
-// 覆盖面：
+// 覆盖范围：
 // 1. 纯函数：summarizeDescription（截断）+ parseWorkflowMeta（meta 块解析）+
 //    formatWorkflowList（B2 注入段格式 + 引导语）+ agent 侧 CA2 字节快照
 //    （SUBAGENT_LIST_GUIDE 壳自有文案唯一字节锁）。渲染/解析算法下沉 core 的
@@ -192,7 +192,7 @@ describe("formatWorkflowList", () => {
 			{ guide: WORKFLOW_LIST_GUIDE },
 		);
 		// guide 段硬编码（锁文本）：期望值不插值生产常量——改写 WORKFLOW_LIST_GUIDE
-		// 即红灯，避免「两侧同源插值」下文案漂移无守卫
+		// 即红灯，避免「两侧同源插值」下文案漂移无检查
 		expect(out).toBe(
 			`\n\n<available_workflows>\nThe following workflows are available. Do NOT call list to discover available workflows — they are listed below; use list only for running state. All listed workflows run directly via the workflow_run tool — do NOT use workflow-script generate for any listed workflow. For parameter details, read the <location> script file (script header has @pi-meta parameters + usage). For 2+ independent tasks dispatched together, prefer the \`subagents\` tool — it drives the fan-out workflow for you.\n  <workflow><name>chain</name><description>三步链</description><location>/workflows/chain.js</location></workflow>\n</available_workflows>`,
 		);
@@ -243,7 +243,7 @@ describe("formatAgentList CA2 快照（agent guide 壳自有文案唯一字节�
 		];
 		const out = formatAgentList(agents, { guide: SUBAGENT_LIST_GUIDE });
 		// guide 段硬编码（锁文本）：期望值不插值生产常量——改写 SUBAGENT_LIST_GUIDE
-		// 即红灯，避免「两侧同源插值」下文案漂移无守卫
+		// 即红灯，避免「两侧同源插值」下文案漂移无检查
 		expect(out).toBe(
 			`\n\n<available_subagents>\nThe following subagents are available. PRIORITY: when a task involves reading 3+ files, writing 100+ lines, parallel research, or specialized review, delegate to a matching subagent FIRST instead of doing it yourself — this keeps your context focused on orchestration. Do NOT call list to discover available subagents; use list only for running state. When using the subagent_start tool, pass the <location> path from this list as the agent param (usually the right choice); an absolute .md path outside this list also works if the file is a readable agent definition. If no agent matches your task, omit agent (a general-purpose agent is used) and put all role-specific instructions in the task text.\n${expectedItems.join("\n")}\n</available_subagents>`,
 		);
@@ -524,7 +524,7 @@ describe("生产模块单例接线冒烟", () => {
 
 // ──────────────────────────────────────────────────────────────
 // KV-cache 顺序契约：注入段按 name 码点序，重建（两次发现）逐字节一致。
-// 经真实 injector 实例的 handler 驱动（顺序契约直接验证注入面——比裸 entries
+// 经真实 injector 实例的 handler 驱动（顺序契约直接验证注入点——比裸 entries
 // 断言更端到端）。workflow 走内置装配循环、agent 走 assemble 委托，两路径同守。
 // ──────────────────────────────────────────────────────────────
 

@@ -5,7 +5,7 @@
 // M12: budget-done transition and onRunDone in separate try blocks
 //   （D5-② coda 收敛后语义不变、落点转移：budget-done 分支改调 finalizeRun 单写点，
 //   transition / unregister+onRunDone 的错误分离在 finalizeRun 函数体内断言）
-// [u1-move] M10（notifyDone 序列化守卫，读壳侧 interface/helpers.ts 源文本）随壳件
+// [u1-move] M10（notifyDone 序列化检查，读壳侧 interface/helpers.ts 源文本）随壳件
 // 留守 pi extension 包：src/__tests__/robustness-medium-batch2-interface.test.ts。
 
 import { readFileSync } from "node:fs";
@@ -25,8 +25,8 @@ function readSrc(relPath: string): string {
 
 describe("M6: worktree cleanup not gated by patchOk", () => {
   // [H3/R3] worktree cleanup 调用点（disposeAllRecords / cancelBackground）已随终态
-  // 写面迁 execution/service/record-lifecycle.ts（strangler 抽取，壳只留单行转发）——
-  // 源文本守卫随被守卫本体改读聚合文件，断言强度不变（patchOk 解耦锁）。
+  // 写路径迁 execution/service/record-lifecycle.ts（strangler 抽取，壳只留单行转发）——
+  // 源文本检查随被检查本体改读聚合文件，断言强度不变（patchOk 解耦锁）。
   const src = readSrc(join("src", "execution", "service", "record-lifecycle.ts"));
 
   it("worktree cleanup condition does not reference patchOk", () => {
@@ -34,7 +34,7 @@ describe("M6: worktree cleanup not gated by patchOk", () => {
     // [U5] cleanup 通道随归档编排改造为 archiveWorktreeResources（patch 前移 +
     // cleanup 串行链——handle 提取后判空 return，manager.cleanup 无条件跟随）。
     // [S5] cleanup 调用带 { keepBranch: true }（归档保留分支 = 续聊重建依据）——
-    // 正则兼容带参形态，守卫语义不变（cleanup 不被 patchOk 门控）。
+    // 正则兼容带参形态，检查语义不变（cleanup 不被 patchOk 门控）。
     const cleanupMatch = src.match(/const handle = record\.worktreeHandle;[\s\S]*?manager\.cleanup\(handle[^)]*\)/);
     expect(cleanupMatch).toBeTruthy();
     const condition = cleanupMatch![0];

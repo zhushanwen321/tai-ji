@@ -63,7 +63,7 @@ describe("场景 6：record 重建保真（真收编链 + D16 ③ 概览消费�
       expect(settled.find((l) => l["taskIndex"] === 2)).toBeUndefined(); // 在途 C 无 settled
       expect(lines.some((l) => l["type"] === "run-interrupted")).toBe(true); // 收编帧在场
 
-      // 收编不覆盖：收编后 loadAll 重建仍保全文（设计目标 1 断言面，场景层复述）
+      // 收编不覆盖：收编后 loadAll 重建仍保全文（设计目标 1 断言范围，场景层复述）
       const store = new JsonlRunStore({
         sessionDir: env.sessionDir,
         ctx: mkCtxWith([registeredEntry(RUN_ID, env.recordPath(RUN_ID))]) as never,

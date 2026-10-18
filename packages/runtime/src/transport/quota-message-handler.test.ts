@@ -1,5 +1,5 @@
 /**
- * QuotaMessageHandler 测试 — A1-5 configure await 竞态守卫（round 1 review SUGGESTION）。
+ * QuotaMessageHandler 测试 — A1-5 configure await 竞态检查（round 1 review SUGGESTION）。
  *
  * 测试框架：vitest（从 vitest 导入 describe/it/expect/vi，禁 node:test）。
  * 运行命令：cd packages/runtime && npx vitest run src/transport/quota-message-handler.test.ts
@@ -58,7 +58,7 @@ describe('QuotaMessageHandler · quota.configure await 竞态（A1-5）', () => 
     expect(ctx.reply).toHaveBeenCalledWith(WS, 'm1', 'quota.configure:result', { ok: true })
   })
 
-  it('configure 返回 ok:false → reply 原样携带错误面', async () => {
+  it('configure 返回 ok:false → reply 原样携带错误范围', async () => {
     const ctx = mockContext({ configure: vi.fn().mockResolvedValue({ ok: false, error: 'boom' }) })
     const handler = new QuotaMessageHandler(ctx)
 

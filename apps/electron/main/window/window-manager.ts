@@ -4,7 +4,7 @@
  * 对应 spec §4.2 M2/M3「Window Manager」：窗口注册表 + 跨窗口 session 查询。
  *
  * [HISTORICAL] 不变量：
- * - Main 只保留单 panel 投影（v2 移除 split 后简化），window-manager 内部构造初始 state
+ * - Main 只保留单 panel 派生视图（v2 移除 split 后简化），window-manager 内部构造初始 state
  * - 不直接创建 BrowserWindow（创建委托 window-factory）
  * - fullscreen 状态变化通过 webContents.send 通知 renderer
  * - onWindowListChanged 回调：窗口 close 时触发，用于广播 window-list-updated
@@ -12,6 +12,7 @@
  * 依赖方向：window-manager → interfaces + electron
  */
 import { BrowserWindow } from 'electron'
+import { FULLSCREEN_CHANGED } from '@taiji/shared'
 import type { WindowState } from '@taiji/shared'
 import type { IWindowManager } from '../interfaces.js'
 
@@ -52,10 +53,10 @@ export class WindowManager implements IWindowManager {
 
     // Notify renderer when macOS fullscreen state changes
     win.on('enter-full-screen', () => {
-      win.webContents.send('fullscreen-changed', { isFullscreen: true })
+      win.webContents.send(FULLSCREEN_CHANGED, { isFullscreen: true })
     })
     win.on('leave-full-screen', () => {
-      win.webContents.send('fullscreen-changed', { isFullscreen: false })
+      win.webContents.send(FULLSCREEN_CHANGED, { isFullscreen: false })
     })
 
     win.on('closed', () => {
@@ -74,7 +75,7 @@ export class WindowManager implements IWindowManager {
     return this.windows.get(windowId)?.win
   }
 
-  /** 取所有窗口的 WindowState 投影（供桥接 handler） */
+  /** 取所有窗口的 WindowState 派生视图（供桥接 handler） */
   getAll(): WindowState[] {
     return Array.from(this.windows.values()).map(w => w.state)
   }

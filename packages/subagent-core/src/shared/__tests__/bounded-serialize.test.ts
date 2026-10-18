@@ -228,7 +228,7 @@ describe("硬编码字节快照（期望串固化为字面量，不回读实现�
     expect(boundedPrettySerialize({ key: "\u0001" }, 20)).toBe(
       '{\n  "key": "\\u0001"\n' + "\n... (truncated)",
     );
-    // budget 13：切在转义序列中间——末尾裸反斜杠，不补闭合
+    // budget 13：切在转义序列中间——末尾裸反斜杠，不做结构补全
     expect(boundedPrettySerialize({ key: "\u0001" }, 13)).toBe(
       '{\n  "key": "\\' + "\n... (truncated)",
     );

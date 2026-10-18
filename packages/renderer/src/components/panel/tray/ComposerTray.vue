@@ -7,7 +7,7 @@
   挂 `Composer.vue` 的 `.composer-bar` 左簇、AddMenuPopover 之后（`v-if="sessionId"`，landing 态
   隐藏与指标聚合按钮同判据——无 session 无任务面）；随 Composer 实例化（per-Composer 归属），数据按该 Composer 绑定
   的 sessionId 过滤——各件计数走 `useTrayCounts(sessionId)`（**唯一实例在本外壳创建**，见文末
-  「数据面归属」），widget 走 ViewHostStore 的 per-session 分区，切 session 即跟随。
+  「数据范围归属」），widget 走 ViewHostStore 的 per-session 分区，切 session 即跟随。
   条目 = built-in 五件（bash → subagent → workflow → session → canvas，固定序恒在最左）+
   协议 widget 区（排序后逐个 TrayWidgetButton）。两类条目共用同一套外壳状态机（hover/pin/互斥），
   面板内容按类型分流：
@@ -59,9 +59,9 @@
   ['todo','goal'] 优先 + 当前插入序）决定；拆开即断链。可运行复刻样例见
   __tests__/panel/tray/tray-widget.test.ts 的「外壳契约复刻」宿主。
 
-  ── 数据面归属（D2/D13）──
-  计数/首拉/错误态全部在 useTrayCounts，**唯一实例在本外壳创建**（面板随 Popover 开合反复
-  挂载/卸载，数据面必须活在外壳上：面板打开时数据已在，且打开/关闭不重发首拉 RPC）——创建即
+  ── 数据范围归属（D2/D13）──
+  计数/首次拉取/错误态全部在 useTrayCounts，**唯一实例在本外壳创建**（面板随 Popover 开合反复
+  挂载/卸载，数据范围必须活在外壳上：面板打开时数据已在，且打开/关闭不重发首次拉取 RPC）——创建即
   provide(TRAY_COUNTS_KEY)，面板经 useTrayCountsContext inject 消费同一实例；行集与行内操作在
   TrayNativePanel 自持（面板 emits 为空，外壳无需回调）。
 -->
@@ -131,7 +131,7 @@
         @interact-outside="onInteractOutside"
         @open-auto-focus="onOpenAutoFocus"
       >
-        <!-- 插件 headerAction 段（demo composer-bar spec §2.1 B3：L2 聚合面 = 定时任务 + 托盘 →
+        <!-- 插件 headerAction 段（demo composer-bar spec §2.1 B3：L2 聚合范围 = 定时任务 + 托盘 →
              layers 单钮，被聚合 clock 的直开动作由面板首段承接——demo TrayPanel ⓪「定时任务
              入口行」的对位；与左簇挂载点互斥渲染（左簇只在 expanded 挂），同一份数据源）。
              有可见按钮才出段（hasVisibleHeaderActions，可见性条件单点 isVisibleHeaderAction、
@@ -278,7 +278,7 @@
 
 <script setup lang="ts">
 /**
- * 脚本分区：常量与类型 / 数据面（计数 + widget entries） / 外壳状态机（hover·pin·互斥） /
+ * 脚本分区：常量与类型 / 数据范围（计数 + widget entries） / 外壳状态机（hover·pin·互斥） /
  * 关闭路径接线（reka 层） / 会话切换与卸载清理。
  */
 import { computed, inject, onBeforeUnmount, provide, ref, watch } from 'vue'
@@ -324,7 +324,7 @@ const props = withDefaults(
 /**
  * 托盘三态上抛（能力标志 `hasTrayItems`）：托盘数据的唯一实例在本外壳（D2），Composer 底栏的
  * 密度状态机需要「托盘是否全无条目」才能决定序 4 是否生效——故由本外壳 watch 后经事件上抛，
- * 而不是让 Composer 自建第二份托盘数据面。
+ * 而不是让 Composer 自建第二份托盘数据范围。
  */
 const emit = defineEmits<{ 'update:hasItems': [hasItems: boolean] }>()
 
@@ -381,15 +381,15 @@ interface WidgetItem {
   entry: ViewCacheEntry
 }
 
-// ── 数据面 ──
+// ── 数据范围 ──
 
 /** 托盘根节点：层外 pointerdown 判定用（点击自身按钮行不算「面板外」，见文件头） */
 const trayRootEl = ref<HTMLElement | null>(null)
 
 /**
- * built-in 各件计数（口径/首拉/错误态全在 useTrayCounts；本组件只做三态判定）。
- * **数据面单例**：本组件是唯一实例创建者，创建即 provide 给面板（TRAY_COUNTS_KEY）——
- * 面板随 Popover 每次打开重新挂载，自建实例会在每次 hover 打开时重发首拉 RPC。
+ * built-in 各件计数（口径/首次拉取/错误态全在 useTrayCounts；本组件只做三态判定）。
+ * **数据范围单例**：本组件是唯一实例创建者，创建即 provide 给面板（TRAY_COUNTS_KEY）——
+ * 面板随 Popover 每次打开重新挂载，自建实例会在每次 hover 打开时重发首次拉取 RPC。
  */
 const tray = useTrayCounts(computed(() => props.sessionId))
 provide(TRAY_COUNTS_KEY, tray)
@@ -445,7 +445,7 @@ const hasTrayItems = computed(() => builtinItems.value.length > 0 || widgetItems
 watch(hasTrayItems, (value) => emit('update:hasItems', value), { immediate: true })
 
 /**
- * 插件 headerAction 可见面（聚合面板首段的渲染条件；与左簇挂载点互斥——左簇只在
+ * 插件 headerAction 可见性（聚合面板首段的渲染条件；与左簇挂载点互斥——左簇只在
  * leftCluster==='expanded' 挂 HeaderActionsHost，聚合态同一数据源改由本面板承载，
  * demo composer-bar spec §2.1 B3「定时任务 + 托盘 → layers 单钮」的入口承接）。
  */
@@ -454,7 +454,7 @@ const hasHeaderActions = computed(() =>
   !!headerActionsSource && hasVisibleHeaderActions(headerActionsSource, props.sessionId),
 )
 
-/** 插件 toolbar 贡献面 + 聚合入口可见条件（W3a：托盘有条目 / 插件 toolbar 有贡献 /
+/** 插件 toolbar 贡献点 + 聚合入口可见条件（W3a：托盘有条目 / 插件 toolbar 有贡献 /
  *  headerAction 有入口三者任一，皆无不留死入口；贡献判定实现见 use-plugin-toolbar，
  *  headerAction 判定 = hasVisibleHeaderActions——与密度状态机的 absent 判据同构，
  *  缺一会造成「状态机判 aggregated 而聚合钮不渲染」的入口丢失）。 */

@@ -298,7 +298,7 @@ describe('TurnRail (IF4)', () => {
   // ---- 占位门 TC-w3-17/18/19（D1：isPlaceholderVisible = sessionActive ∧ 真末位）----
   // 占位 DOM 文本 = t('panel.message.railInProgress')，vitest.setup.ts mock 下返回 key 本身。
   // 19 是防旧判据（isActiveTurn = sessionActive ∧ idx===activeTurnIndex）假绿的核心锁，
-  // 三元组构造钉死：被测 idx == activeTurnIndex 同值且 idx ≠ 末位（详见各用例注释）。
+  // 三元组构造固定：被测 idx == activeTurnIndex 同值且 idx ≠ 末位（详见各用例注释）。
 
   it('TC-w3-17: sessionActive=false + 末位 user-only turn（assistants=[]）→ 无占位文本，显示 fallback', () => {
     // 三元组：被测 idx=2 == 末位(turns.length-1)；activeTurnIndex=0(defaultProps)；sessionActive=false
@@ -322,7 +322,7 @@ describe('TurnRail (IF4)', () => {
   })
 
   it('TC-w3-19: sessionActive=true + 3 turn 阵 + 非末位 user-only turn（idx==activeTurnIndex）→ 无占位（防旧判据假绿）', () => {
-    // 三元组钉死：被测 idx=0 == activeTurnIndex=0(defaultProps 同值) 且 idx ≠ 末位(2)；sessionActive=true
+    // 三元组固定：被测 idx=0 == activeTurnIndex=0(defaultProps 同值) 且 idx ≠ 末位(2)；sessionActive=true
     // ——旧判据 isActiveTurn(sessionActive ∧ idx===activeTurnIndex) 在此构造判 true 会显占位 =
     // 假绿复现（设计 U2 明示：若 idx 恰为末位或传 activeTurnIndex=末位，旧判据同绿）。
     const turns = [makeRailTurn(0, { userOnly: true }), makeRailTurn(1), makeRailTurn(2)]

@@ -1,5 +1,5 @@
 /**
- * provider-importer 白名单守卫测试（wave3 TC5，provider-dual-system-r2::enabledmodels-dual-consume）。
+ * provider-importer 白名单检查测试（wave3 TC5，provider-dual-system-r2::enabledmodels-dual-consume）。
  *
  * 测试框架：vitest（从 vitest 导入 describe/it/expect/vi/beforeEach/afterEach，禁 node:test）。
  * 运行命令：cd packages/runtime && npx vitest run src/services/__tests__/provider-importer-whitelist.test.ts
@@ -9,7 +9,7 @@
  * 对每个 imported provider 调用、对 skipped/failed 不调用。ensureProviderInWhitelist 自身真实行为
  * （非空加 pattern / 空时 no-op / 幂等）见 config-service-toggle.test.ts 的真实 pi-settings-store 用例。
  *
- * 覆盖 design TC5（边界1 importer 新建 provider 白名单守卫）。
+ * 覆盖 design TC5（边界1 importer 新建 provider 白名单检查）。
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
@@ -59,7 +59,7 @@ afterEach(() => {
   _resetCacheForTest()
 })
 
-describe('TC5: importer applyImport 新建 provider 白名单守卫（边界1 / C2）', () => {
+describe('TC5: importer applyImport 新建 provider 白名单检查（边界1 / C2）', () => {
   it('导入新 provider 后 → ensureProviderInWhitelist 对每个 imported 调用', async () => {
     const importId = createPreview('pi', [makeParsed('my-custom'), makeParsed('another')])
     const out = await applyImport(importId, ['my-custom', 'another'])
@@ -85,7 +85,7 @@ describe('TC5: importer applyImport 新建 provider 白名单守卫（边界1 / 
     expect(mockedEnsure).not.toHaveBeenCalledWith('existing-one')
   })
 
-  it('未勾选（selectedIds 不含）的 provider 不导入也不守卫', async () => {
+  it('未勾选（selectedIds 不含）的 provider 不导入也不检查', async () => {
     const importId = createPreview('pi', [makeParsed('a'), makeParsed('b'), makeParsed('c')])
     const out = await applyImport(importId, ['a', 'c'])
     if (!('result' in out)) throw new Error('apply should succeed')
@@ -95,13 +95,13 @@ describe('TC5: importer applyImport 新建 provider 白名单守卫（边界1 / 
     expect(mockedEnsure).toHaveBeenCalledTimes(2)
   })
 
-  it('ensureProviderInWhitelist 在 upsertProvider 之后调用（先建 provider 再守卫）', async () => {
+  it('ensureProviderInWhitelist 在 upsertProvider 之后调用（先建 provider 再检查）', async () => {
     const order: string[] = []
     mockedUpsertProvider.mockImplementation(() => { order.push('upsert'); return {} })
     mockedEnsure.mockImplementation(() => { order.push('ensure') })
     const importId = createPreview('pi', [makeParsed('x')])
     await applyImport(importId, ['x'])
-    // upsert 先（建 provider），ensure 后（加白名单）——守卫依赖 provider 已建立
+    // upsert 先（建 provider），ensure 后（加白名单）——检查依赖 provider 已建立
     expect(order).toEqual(['upsert', 'ensure'])
   })
 })

@@ -14,7 +14,7 @@
  *
  * 策略：
  * - `useTrayCounts` 替身（托盘三态计数注入）——真 ComposerTray 渲染，聚合入口是真实组件；
- * - `VIEW_HOST_SOURCE_KEY` provide（插件 toolbar 贡献面：有 entry → 贡献数 1）；`getViewIds` 返回空
+ * - `VIEW_HOST_SOURCE_KEY` provide（插件 toolbar 贡献点：有 entry → 贡献数 1）；`getViewIds` 返回空
  *   （该 mock 只服务挂载点查询，不冒充 widget 区条目）；
  * - `ManualResizeObserverStub`（`../effects/_virtua-mock-helper` 定稿件）确定性派发；
  * - 真 pinia + 真 chat store（与 composer-send-button-states 同范式），mock useChat / useNewTaskFlow /
@@ -98,7 +98,7 @@ vi.mock('@/api', () => ({
 }))
 vi.mock('@/stores/session', () => composerSessionStoreModule())
 
-// ── 子组件 stub（ComposerInput mock 收敛 composer-mount 共用面工厂）──
+// ── 子组件 stub（ComposerInput mock 收敛 composer-mount 共用部分工厂）──
 const { lastInputText, ComposerInputMock } = makeComposerInputMock()
 // GenStatsTriggers 专属空 stub（共享骨架未覆盖的本文件特例）
 const SIMPLE = defineComponent({ name: 'SimpleStub', template: '<div />' })
@@ -156,7 +156,7 @@ function makeMountPointSource(partition: Map<string, ViewCacheEntry>): ViewHostS
 }
 
 /**
- * headerAction 数据源替身（B3 聚合面用例：scheduler overlay 直开声明形态——
+ * headerAction 数据源替身（B3 聚合范围用例：scheduler overlay 直开声明形态——
  * hasVisibleHeaderActions 判定消费 getDeclarations/getRuntimeState 两面）。
  */
 function makeHeaderActionSource(hidden = false): object {
@@ -398,7 +398,7 @@ describe('S4 模型名零截断 + `»` 退役（构造性回归防线）', () =>
   })
 })
 
-describe('B3 聚合面：headerAction（定时任务钮）随左簇聚合走（demo composer-bar spec §2.1/§4.2）', () => {
+describe('B3 聚合范围：headerAction（定时任务钮）随左簇聚合走（demo composer-bar spec §2.1/§4.2）', () => {
   it('L0 expanded：headerAction 钮在左簇渲染（clock 直开入口在场）', async () => {
     mountComposer(makeMountPointSource(reactive(new Map())), makeHeaderActionSource())
     await dispatchTick()

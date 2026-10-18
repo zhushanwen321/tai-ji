@@ -7,8 +7,8 @@
 // a. 增量等价对拍：dispatch 链逐帧 transition 推进的缓存终态 === 同一事件序列
 //    一次性全量 foldRunEventCheckpoint 终态（同一 runId 对拍，行为级等价证明）。
 // b. 写入后缓存推进：appendTransition 落盘后共享读口（foldRunEventsToLifecycleState）
-//    立见新态；命中路径不重读盘面（盘面注入表外坏帧不影响缓存命中的合法投递）。
-// c. 单调守卫：盘面旧快照（水位低于内存）不回退内存权威态。
+//    立见新态；命中路径不重读磁盘内容（磁盘内容注入表外坏帧不影响缓存命中的合法投递）。
+// c. 单调检查：磁盘内容旧快照（水位低于内存）不回退内存权威态。
 // d. 失效三联动：terminal 删除（终局后迟到事件重新冷读让位）、
 //    setRunEventJournalDirForTest 换目录清空（旧 run 缓存不串目录）。
 //
@@ -87,7 +87,7 @@ function runSettledInput(): WorkflowRunEventInput {
 const dispatch = (runId: string, input: WorkflowRunEventInput) =>
   dispatchRunTrigger({ runId }, input);
 
-/** 盘面全量 fold（对拍基准——与缓存路径无关的独立重放）。 */
+/** 磁盘内容全量 fold（对拍基准——与缓存路径无关的独立重放）。 */
 async function foldFromDisk(runId: string): Promise<RunEventFoldCheckpoint> {
   return foldRunEventCheckpoint(await scanRunEvents(runId), () => {});
 }
@@ -115,14 +115,14 @@ describe("run fold checkpoint cache: incremental equivalence", () => {
     expect(lastState.lifecycle).toBe("running");
   });
 
-  it("共享读口全量重折与缓存推进态一致（水位对齐后守卫放行重折）", async () => {
+  it("共享读口全量重折与缓存推进态一致（水位对齐后检查放行重折）", async () => {
     const runId = "wf-equiv-2";
     const inputs = [runCreatedInput(runId), agentStartedInput(0), agentSettledInput(0)];
     let lastState = (await dispatch(runId, inputs[0]!)).state;
     for (const input of inputs.slice(1)) {
       lastState = (await dispatch(runId, input)).state;
     }
-    // 缓存水位已推进到盘面末帧：读口重折结果必须与缓存推进态值级一致
+    // 缓存水位已推进到磁盘内容末帧：读口重折结果必须与缓存推进态值级一致
     const events = await scanRunEvents(runId);
     expect(foldRunEventsToLifecycleState(runId, events)).toEqual(lastState);
   });
@@ -131,13 +131,13 @@ describe("run fold checkpoint cache: incremental equivalence", () => {
 // ── b. 写入后缓存推进 ────────────────────────────────────────
 
 describe("run fold checkpoint cache: advance on append", () => {
-  it("命中路径不重读盘面：盘面注入表外坏帧不影响缓存命中的合法投递", async () => {
+  it("命中路径不重读磁盘内容：磁盘内容注入表外坏帧不影响缓存命中的合法投递", async () => {
     const runId = "wf-advance-1";
     await dispatch(runId, runCreatedInput(runId));
     await dispatch(runId, agentStartedInput(0));
 
-    // 向盘面注入一帧「行合法、转移表外」的坏帧（running × run-created）：若
-    // 投递命中缓存（不重读盘面），后续合法帧照常推进；若实现退化为每次冷读，
+    // 向磁盘内容注入一帧「行合法、转移表外」的坏帧（running × run-created）：若
+    // 投递命中缓存（不重读磁盘内容），后续合法帧照常推进；若实现退化为每次冷读，
     // 坏帧让 fold 停在 created，agent-settled 表外 fail-fast——本测试失败。
     const recordPath = path.join(dir, `${runId}${RUN_EVENTS_SUFFIX}`);
     const probe = `${JSON.stringify({ type: "run-created", runId, workflowName: "probe", ts: nextTs(), seq: 99 })}\n`;
@@ -150,18 +150,18 @@ describe("run fold checkpoint cache: advance on append", () => {
   it("落盘后共享读口立见新态（首次冷读建立缓存并写回）", async () => {
     const runId = "wf-advance-2";
     await dispatch(runId, runCreatedInput(runId));
-    // 无缓存条目时读口冷读盘面折出并写缓存；随后喂同盘面事件集，读口与盘面一致
+    // 无缓存条目时读口冷读磁盘内容折出并写缓存；随后喂同磁盘内容事件集，读口与磁盘内容一致
     const events = await scanRunEvents(runId);
     const state = foldRunEventsToLifecycleState(runId, events);
     expect(state.lifecycle).toBe("running");
-    // 缓存建立后，喂旧前缀（守卫面）走单调守卫——间接证明条目已入缓存（见守卫组）
+    // 缓存建立后，喂旧前缀（检查范围）走单调检查——间接证明条目已入缓存（见检查组）
   });
 });
 
-// ── c. 单调守卫 ─────────────────────────────────────────────
+// ── c. 单调检查 ─────────────────────────────────────────────
 
-describe("run fold checkpoint cache: monotonic guard", () => {
-  it("盘面旧快照（水位低于内存）不回退内存权威态", async () => {
+describe("run fold checkpoint cache: monotonic check", () => {
+  it("磁盘内容旧快照（水位低于内存）不回退内存权威态", async () => {
     const runId = "wf-guard-1";
     await dispatch(runId, runCreatedInput(runId));
     await dispatch(runId, agentStartedInput(0));
@@ -187,7 +187,7 @@ describe("run fold checkpoint cache: invalidation", () => {
     await dispatch(runId, agentSettledInput(0));
     await dispatch(runId, runSettledInput());
 
-    // 终局后迟到事件：缓存已删 → 冷读盘面折出 terminal → 表外 fail-fast 让位
+    // 终局后迟到事件：缓存已删 → 冷读磁盘内容折出 terminal → 表外 fail-fast 让位
     await expect(dispatch(runId, agentStartedInput(9))).rejects.toBeInstanceOf(
       IllegalTransitionError,
     );

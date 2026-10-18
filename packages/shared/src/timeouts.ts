@@ -1,7 +1,7 @@
 /**
  * RPC 超时校准链常量 SSOT（timeout-slow-flow-wallclock 设计 D2/D3）。
  *
- * 为什么独立文件而非 protocol.ts：protocol.ts 是 wire 形状契约（纯类型 + 守卫），
+ * 为什么独立文件而非 protocol.ts：protocol.ts 是 wire 形状契约（纯类型 + 检查），
  * 本文件是运行时超时校准链值域——「协议长什么样」与「各层等多久」是真差异，混装
  * 会稀释两边的单一职责。renderer 与 runtime 双端 import 本文件（barrel 导出），
  * 编译期保证校准链对齐（下游 = 上游 + 余量），消灭注释手动对齐的漂移模式

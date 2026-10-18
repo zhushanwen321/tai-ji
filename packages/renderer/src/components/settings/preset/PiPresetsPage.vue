@@ -49,7 +49,7 @@
           @mode-update="onModeUpdate"
         />
 
-        <!-- 模式提示词两节（替换 / 追加）。数据面 preset.prompt，保存走 preset.update；
+        <!-- 模式提示词两节（替换 / 追加）。数据范围 preset.prompt，保存走 preset.update；
              上限是两段合计，故两节共用下方一行合计计数（禁止分节各自计数）。
              形态 = demo PresetSection：预设盒内 border-t hairline 分节，flab 标题 + 右侧开关同行。 -->
         <div
@@ -96,7 +96,7 @@
             </div>
           </section>
 
-          <!-- 追加节（保存入口与替换节共用闸门——写盘 payload 恒含两段） -->
+          <!-- 追加节（保存入口与替换节共用门禁——写盘 payload 恒含两段） -->
           <section class="flex flex-col">
             <div class="flex items-center gap-2">
               <h3 class="text-[length:var(--text-xs)] font-semibold text-neutral-fg-2">{{ t('settings.preset.promptAppendTitle') }}</h3>
@@ -311,12 +311,12 @@ function needsReplaceConfirm(id: string): boolean {
   return !saved || !saved.replaceEnabled || saved.replaceText !== draft.replaceText
 }
 
-/** 两卡共用保存入口——闸门只在唯一写点 persistPrompt（payload 恒含两段）。 */
+/** 两卡共用保存入口——门禁只在唯一写点 persistPrompt（payload 恒含两段）。 */
 function onSavePrompt(id: string): void {
   void persistPrompt(id)
 }
 
-/** 二次确认通过：放行写盘（confirmed 跳过闸门，避免重入弹窗）。 */
+/** 二次确认通过：放行写盘（confirmed 跳过门禁，避免重入弹窗）。 */
 async function onConfirmReplaceSave(): Promise<void> {
   const id = replaceConfirmId.value
   replaceConfirmId.value = ''

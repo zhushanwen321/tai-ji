@@ -10,7 +10,7 @@
 // 本文件：同一事件序列分喂两侧，逐字段比对。
 //
 // 覆盖口径：文本/思考增量、toolCall 配对（含 tool_end 无 start 的幽灵兜底）、isError
-// 状态位、turn_end 闭合与计数、message_end 的 usage 归一与 totalTokens、error 记录与
+// 状态位、turn_end 结束与计数、message_end 的 usage 归一与 totalTokens、error 记录与
 // 轮终清除、no-op 事件（compaction/activity/armed）。
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -24,7 +24,7 @@ import { createRecord, updateFromEvent } from "../persistence/execution-record.t
 // 两侧 reducer 各自以 Date.now() 给 toolCall 打 startedTs（execution-record.ts
 // applyToolStart / SDK journal-replay 副本同形）——真实墙钟下同一事件喂两侧跨毫秒
 // 边界时 startedTs 差 1ms，toEqual 对拍即挂（负载下偶发红）。fake timers 固定时钟
-// 让两侧打戳恒同值，对拍回归纯 reducer 语义等价（本文件的被测面）。
+// 让两侧打戳恒同值，对拍回归纯 reducer 语义等价（本文件的被测对象）。
 beforeEach(() => {
   vi.useFakeTimers({ now: 1_700_000_000_000 });
 });
@@ -60,7 +60,7 @@ function runBoth(events: readonly AgentEvent[]): { core: ExecutionRecord; sdk: R
 
 // 两侧 reducer 都对 toolCall 盖墙钟戳（事件载荷不带 ts，各自 Date.now() 采点）；
 // 真实时钟下两次采点跨毫秒边界 → startedTs 差 1ms → 等价断言假红（负载下偶发，
-// 2026-10-02 质量门禁实锤）。fake timers 钉死时钟：两侧采点恒等，等价性判定
+// 2026-10-02 质量门禁实锤）。fake timers 固定时钟：两侧采点恒等，等价性判定
 // 回到 reducer 逻辑本身（时钟不是被测语义）。
 beforeEach(() => {
   vi.useFakeTimers({ now: 1_000 });
@@ -69,7 +69,7 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-/** 断言两侧 reducer 的状态面等价（turns 全文 + 计数 + usage + 末次错误）。 */
+/** 断言两侧 reducer 的状态侧等价（turns 全文 + 计数 + usage + 末次错误）。 */
 function expectParity(core: ExecutionRecord, sdk: ReplayRecordView): void {
   expect(sdk.turns).toEqual(core.turns);
   expect(sdk.turnCount).toBe(core.turnCount);

@@ -1,8 +1,8 @@
 /**
- * Electron 安全守卫源码断言（integrity-hardening §3.2 D2b 导航拦截 / D2d 单实例锁）。
+ * Electron 安全检查源码断言（integrity-hardening §3.2 D2b 导航拦截 / D2d 单实例锁）。
  *
  * 挂载行为需要 electron 运行时（vitest 无法实例化 BrowserWindow），改用源码断言
- * （window-factory.test.ts 同款 readFileSync 模式）：断言守卫代码存在且关键语义
+ * （window-factory.test.ts 同款 readFileSync 模式）：断言检查代码存在且关键语义
  * （preventDefault / deny / quit）不被后续改动静默移除。判定逻辑本身可测的部分
  * 在纯函数单测：input-validators.test.ts（isAllowedAppNavigation）、
  * local-file-prefixes.test.ts（computeLocalFilePrefixes）。

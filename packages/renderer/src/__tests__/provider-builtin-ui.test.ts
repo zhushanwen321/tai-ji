@@ -3,7 +3,7 @@
  *
  * 覆盖用例：
  *  - ProviderQuickSetup 组件级：默认凭据模式（t4b/t4c）/ 自定义环境变量（t6b）/ ambient（t9）/
- *    env 自定义变量留空守卫（t12）/ 已存 OAuth 恢复（t13）/ 恢复分支真差异（s1b/s1d）
+ *    env 自定义变量留空检查（t12）/ 已存 OAuth 恢复（t13）/ 恢复分支真差异（s1b/s1d）
  *    ——组件渲染与 emit 的权威断言在 @taiji/ui 包测试（ProviderTemplatePicker / ProviderQuickSetup），
  *    本文件只保留 renderer 侧环境（zh-CN i18n 真实翻译）下的默认链路分支用例
  *  - ProviderPage 保存集成链路（t10 系列）：选模板 → 保存 → setProvider payload / toast / Dialog 收尾 /

@@ -63,10 +63,10 @@ export interface PruneStateDeps { // oe-exempt:20260929:framework:workflow/recor
 // ── 统一保留通道（W1 D5：fold 终态 + 保留窗口，废除 cap）──────────
 //
 // W1 D5 清理规则落地（替代 [Q2] 的 manifest 资格 + cap + mtime TTL 三限）：
-// ① 资格判据 = fold 投影为终态（journal 内 run-settled 帧驱动 fold 到 terminal，
+// ① 资格判据 = fold 推算为终态（journal 内 run-settled 帧驱动 fold 到 terminal，
 //    含收编产生的 interrupted——收编入口幂等追加终态事件后即获资格）∧ 终态时间
 //    超窗（终态时间 = journal 内终态事件时间戳；防御兜底 = 末条事件时间戳）。
-//    manifest 不再参与资格判定（读序 3 降级为「journal 被裁后的终局投影」与
+//    manifest 不再参与资格判定（读序 3 降级为「journal 被裁后的终局派生视图」与
 //    abandon 终局化载体），结构性不在候选——永不随裁（孤儿判定依赖）；
 // ② 判据②（无终态事件 ∧ 注册超窗 ∧ mtime 超阈值）默认不启用：阈值未实测校准前
 //    只走判据①。其镜像代价（崩溃后永不重开的会话 journal 滞留）经维护轮候选数
@@ -108,11 +108,11 @@ export interface PruneTerminalRunFilesOptions { // oe-exempt:20260929:framework:
   ttlMs?: number;
 }
 
-/** pruneTerminalRunFiles 的执行结果（宿主日志/健康面用）。 */
+/** pruneTerminalRunFiles 的执行结果（宿主日志/健康检查侧用）。 */
 export interface PruneTerminalRunFilesResult { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   /** 扫描到的 state 文件数（glob 命中、排除 journal）。 */
   scanned: number;
-  /** fold 投影为终态的 run 数（无论是否超窗——资格计数）。 */
+  /** fold 推算为终态的 run 数（无论是否超窗——资格计数）。 */
   eligible: number;
   /** 本次裁剪的 run 数（state 文件计数；journal 同删不计入）。 */
   pruned: number;
@@ -123,10 +123,10 @@ export interface PruneTerminalRunFilesResult { // oe-exempt:20260929:framework:w
   nonTerminalBeyondWindow: number;
 }
 
-/** 单 run 保留判定（fold 投影 + 时间锚提取；判据①资格与判据②候选的公共输入）。 */
+/** 单 run 保留判定（fold 推算 + 时间锚提取；判据①资格与判据②候选的公共输入）。 */
 interface RunRetentionAssessment { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   runId: string;
-  /** fold 投影是否终态（含收编产生的 interrupted——终态事件在 journal 内）。 */
+  /** fold 推算是否终态（含收编产生的 interrupted——终态事件在 journal 内）。 */
   terminal: boolean;
   /** 终态时间（run-settled 帧 ts；防御兜底 = 末条事件 ts）。非终态 = undefined。 */
   terminalAt: number | undefined;
@@ -269,7 +269,7 @@ async function pruneTerminalRunFootprint(
   result.scanned = stateNames.length;
 
   const now = Date.now();
-  // 候选计数锚：判据②监控不随清理 opt-out 失明（默认窗兜底，仅用于日志面）
+  // 候选计数锚：判据②监控不随清理 opt-out 失明（默认窗兜底，仅用于日志侧）
   const windowForCandidates = retentionMs ?? DEFAULT_STATE_TTL_MS;
   for (const name of stateNames) {
     const runId = name.slice(0, -".jsonl".length);
@@ -296,7 +296,7 @@ async function pruneTerminalRunFootprint(
 export interface PruneTerminalRecordEventFilesResult { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   /** 扫描到的 *.events 事件文件数。 */
   scanned: number;
-  /** fold 投影为终态（record-settled 在流内且未被回边清除）的 record 数。 */
+  /** fold 推算为终态（record-settled 在流内且未被回边清除）的 record 数。 */
   eligible: number;
   /** 本次裁剪的事件文件数。 */
   pruned: number;
@@ -307,7 +307,7 @@ export interface PruneTerminalRecordEventFilesResult { // oe-exempt:20260929:fra
 /**
  * record 域保留清理（W1 D5：record 事件文件与 run journal 同判据——fold 终态 +
  * 窗口）。运行中/非终态永不清（settled 被 reopened/round-started 清除 = 回边续跑，
- * 保护语义与 fold 投影单源）；manifest（<sa-id>.json）不触碰——其清理归删主会话
+ * 保护语义与 fold 派生视图单源）；manifest（<sa-id>.json）不触碰——其清理归删主会话
  * 级联（随子代理文件族删，runtime session-content-cascade，2026-10-12 裁决）。
  */
 async function pruneTerminalRecordEventFiles(
@@ -383,7 +383,7 @@ function mtimeMsOf(full: string): number {
  * 为什么可选：三触发点各只天然持有一个域的精确目录锚（壳 run 首写持
  * `<sessionDir>/workflow-state`、core record 首写持 recordsDir、session_start 兜底
  * 双域）——强制两域必传会逼出「core 侧反推 pi sessionDir」或「壳侧反推 record
- * enc 段」两类推导漂移面。每域至少有一个持锚触发点，覆盖面由三触发点并集保证
+ * enc 段」两类推导漂移风险。每域至少有一个持锚触发点，覆盖范围由三触发点并集保证
  * （幂等整轮，任一触发点缺一域只影响冗余度不影响覆盖）。 */
 export interface RetentionMaintenanceInput { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   /** run 域状态目录（workflow-state——state 快照 + journal 成对清理）；undefined = 跳过 run 域。 */
@@ -487,7 +487,7 @@ export type RunSettlementEvidence =
   | { kind: "missing" };
 
 /**
- * 按 runId 同步查 run 的终局证据——journal run-settled 帧 ∨ manifest 终局面的
+ * 按 runId 同步查 run 的终局证据——journal run-settled 帧 ∨ manifest 终局条目的
  * 三态判定核。枚举改接（启动扫描，pi-host-run-store.ts）与对账 sweep 判据
  * （sweep-binding）共用同一份判定逻辑（设计 §3.3 决策 2：抽取共用而非各写一份
  * 尾向扫描——两份尾扫 = 新的一对并存实现，正是该设计要消灭的形态）。同步形态：
@@ -497,26 +497,26 @@ export type RunSettlementEvidence =
  *
  * 判定矩阵（[W2 D6] 逐形态锚定保守侧——误注销活跃 run 是事故方向，不可逆）：
  * - journal 与 manifest 均不存在（ENOENT）→ missing（「已归档/不存在视同终态」
- *   ——run 从未落账或已被保留期清理，注册是死亡窗口残留）；
+ *   ——run 从未写入或已被保留期清理，注册是死亡窗口残留）；
  * - journal 尾向存在 run-settled 帧（append-only 单写者：帧在盘 = 终局已记录，
  *   行级独立 JSON 不受早先坏行影响）→ terminal + reason（帧 (outcome, errorCode)
  *   经 runSettledOutcomeToDoneReason 联合派生——[W2 D5] sweep 补注销 reason 统一
  *   派生源第三处；budget_limited/time_limited 细分保留）；
- * - journal 无帧但 manifest 在盘（record 流缺场 + manifest 残局——现行写入面下
+ * - journal 无帧但 manifest 在盘（record 流缺场 + manifest 残局——现行写侧下
  *   record 流不被保留期裁剪（prune 候选排除，裁决点 7）、对账清理五件全删不留
  *   manifest，该组合只剩外部删除 / 清理部分失败残局两类来源）→ terminal +
  *   reason（manifest outcome 派生；无码细分退化为 outcome 兜底）；
  * - journal 存在但无 run-settled 帧（run 真未终局，含坏链首帧形态）→ running
  *   （保守按活跃，不补注销——对齐 adoptInterruptedRun skippedBrokenChain 纪律）；
  * - journal / manifest 读错误（非 ENOENT IO 故障）→ running + warn 留证
- *   （「IO 故障 ≠ 不存在」的保守侧纪律，宁挂账不误注销）。
+ *   （「IO 故障 ≠ 不存在」的保守侧纪律，宁挂着不处理也不误注销）。
  */
 /** journal 尾扫四态（[findRunSettlementEvidence 拆分] 的返回契约）。 */
 type JournalScan =
   | { kind: "frame"; settled: Extract<WorkflowRunEvent, { type: "run-settled" }> }
   | { kind: "noFrame" } // 读成功、无 run-settled 帧（真未终局）
-  | { kind: "fileMissing" } // ENOENT（从未落账/已清理）
-  | { kind: "ioError" }; // 非 ENOENT 读错误（保守挂账）
+  | { kind: "fileMissing" } // ENOENT（从未写入/已清理）
+  | { kind: "ioError" }; // 非 ENOENT 读错误（保守挂起）
 
 /** [findRunSettlementEvidence 拆分] journal 尾扫：自尾向头找最近一条 run-settled 帧
  * （坏行继续向前——append-only 下帧行独立有效；尾部空行静默跳过）。 */
@@ -549,8 +549,8 @@ function scanJournalLastSettledFrame(recordPath: string): JournalScan {
   return settled !== undefined ? { kind: "frame", settled } : { kind: "noFrame" };
 }
 
-/** [findRunSettlementEvidence 拆分] manifest 终局面（残局防御）。undefined = 无
- * manifest / 无 outcome / ENOENT——交回调用方兜底；非 ENOENT 读错误原样上抛（保守挂账）。 */
+/** [findRunSettlementEvidence 拆分] manifest 终局条目（残局防御）。undefined = 无
+ * manifest / 无 outcome / ENOENT——交回调用方兜底；非 ENOENT 读错误原样上抛（保守挂起）。 */
 function readManifestSettlement(
   manifestPath: string,
 ): { reason: string } | undefined {
@@ -580,8 +580,8 @@ export function findRunSettlementEvidence(stateDir: string, runId: string): RunS
   const recordPath = join(stateDir, `${runId}${RUN_EVENTS_SUFFIX}`);
   const journal = scanJournalLastSettledFrame(recordPath);
   if (journal.kind === "ioError") {
-    // 非 ENOENT 读错误（EACCES/EIO 等）≠ 文件不存在——保守侧按活跃挂账
-    //（宁挂账不误注销），warn 留证防 IO 故障伪装成 missing。
+    // 非 ENOENT 读错误（EACCES/EIO 等）≠ 文件不存在——保守侧按活跃保留
+    //（宁挂着不处理也不误注销），warn 留证防 IO 故障伪装成 missing。
     logger.warn(
       `[run-state-evidence] findRunSettlementEvidence journal read failed, treating as running (stay registered): ${recordPath}`,
     );
@@ -593,7 +593,7 @@ export function findRunSettlementEvidence(stateDir: string, runId: string): RunS
       reason: runSettledOutcomeToDoneReason(journal.settled.outcome, journal.settled.errorCode),
     };
   }
-  // journal 无帧：manifest 终局面（残局防御——现行写入面下 record 流不被保留期
+  // journal 无帧：manifest 终局条目（残局防御——现行写侧下 record 流不被保留期
   // 裁剪、对账清理五件全删，正常无此组合；见上方判定矩阵该行注释）
   const manifestPath = join(stateDir, `${runId}.json`);
   try {
@@ -607,7 +607,7 @@ export function findRunSettlementEvidence(stateDir: string, runId: string): RunS
     return { kind: "running" };
   }
   // 两证据面均缺：journal 存在但无帧 = 真未终局（保守活跃）；journal 也缺 =
-  // missing（从未落账/已清理——视同终态补注销）。
+  // missing（从未写入/已清理——视同终态补注销）。
   if (journal.kind === "fileMissing") return { kind: "missing" };
   return { kind: "running" };
 }
@@ -624,7 +624,7 @@ export function findRunSettlementEvidence(stateDir: string, runId: string): RunS
 // 实现落点：维护轮族扩展（本文件——prune/maintenance 同族，[D9] abandon 移除后
 // 无主 run 的唯一磁盘清理通道），复用三触发点（新 run 首写 / record 首写 /
 // session_start 兜底——经壳侧 session-lifecycle 装配）；存活 session 引用集采集
-// = 壳侧注入面（collectAliveRunReferences，core 不 import pi SDK）；不复用
+// = 壳侧注入点（collectAliveRunReferences，core 不 import pi SDK）；不复用
 // createPiHostRunEnumeration（run 维度枚举 ≠ session 维度引用集采集，且维护轮
 // 不应依赖 pi 布局的 agentDir 活源）。
 //
@@ -634,7 +634,7 @@ export function findRunSettlementEvidence(stateDir: string, runId: string): RunS
 /** 对账清理的宿主注入依赖（引用集采集面 + 日志）。 */
 export interface OrphanRunReapDeps { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   /**
-   * 存活 session 引用集采集（壳侧注入面——全池 session 文件流式扫描，秒级～
+   * 存活 session 引用集采集（壳侧注入点——全池 session 文件流式扫描，秒级～
    * 十秒级）：返回「全部存活 session 的注册引用并集」runId 集合。调用一次，
    * 结果复用于本轮全部判定（宽限窗判定不做增量）。
    */
@@ -685,7 +685,7 @@ type OrphanReapRegistry = Record<string, number>;
  *
  * ENOENT 静默返回空表（首轮无登记的正常空态——不存在 ≠ 损坏）；其余读失败 /
  * 损坏 JSON / 非登记表结构 warn 留证后按空表返回——持续损坏 = 宽限窗反复重起
- * 的循环，无 warn 则该循环不可见（观测面）。
+ * 的循环，无 warn 则该循环不可见（观测范围）。
  */
 function readOrphanReapRegistry(
   stateDir: string,
@@ -702,7 +702,7 @@ function readOrphanReapRegistry(
   }
   if (typeof parsed !== "object" || parsed === null) {
     // 合法 JSON 但非登记表结构（原始值/数组）——后果与损坏 JSON 同路（空表重
-    // 登记 + 宽限窗重起），同走 warn 观测面
+    // 登记 + 宽限窗重起），同走 warn 观测范围
     warnCorruptOrphanReapRegistry(
       fullPath,
       deps.warn,
@@ -717,7 +717,7 @@ function readOrphanReapRegistry(
   return out;
 }
 
-/** 损坏登记的观测面 warn（单点文案：文件路径 + 空重登记语义 + 恢复指引）。 */
+/** 损坏登记的观测范围 warn（单点文案：文件路径 + 空重登记语义 + 恢复指引）。 */
 function warnCorruptOrphanReapRegistry(
   fullPath: string,
   warn: (msg: string) => void,
@@ -776,7 +776,7 @@ function deleteOrphanRunFootprint(stateDir: string, runId: string): number {
   return deleted;
 }
 
-/** 对账清理执行结果（宿主日志/健康面用）。 */
+/** 对账清理执行结果（宿主日志/健康检查侧用）。 */
 export interface OrphanRunReapResult { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
   /** 扫描的 run 候选数（record 流 + 旧 journal 文件族并集的 runId 数）。 */
   scanned: number;
@@ -794,9 +794,9 @@ export interface OrphanRunReapResult { // oe-exempt:20260929:framework:workflow/
  * 判定链（每轮全量）：
  * 1. 枚举 stateDir 的 runId 候选（record 流后缀 + 旧 journal 后缀的文件族并集——
  *    含历史遗留形态；manifest 单独在场不成候选：无 record 流与旧 journal 的孤儿
- *    manifest 是终局投影残留，prune 资格链已覆盖）；
+ *    manifest 是终局派生视图残留，prune 资格链已覆盖）；
  * 2. 引用集三代解析（collectAliveRunReferences 注入——壳侧全池 session 文件扫描，
- *    v2 注册条目 ∪ v1 快照条目 ∪ pre-W17 link 指针的并集，解析归壳侧注入面）；
+ *    v2 注册条目 ∪ v1 快照条目 ∪ pre-W17 link 指针的并集，解析归壳侧注入点）；
  * 3. 引用命中 → 跳过（保护——任一存活 session 引用即保留）；引用未命中 → 登记
  *    首判无主时刻（幂等：已登记保持首判时刻，宽限锚不随重扫漂移——「不采用锚
  *    mtime」的裁决：仅被 v1/link 引用的存量 run 创建于数周前，首轮判无主即删
@@ -898,7 +898,7 @@ export async function reapOrphanRuns(
   const runIds = collectOrphanCandidateRunIds(names);
   result.scanned = runIds.size;
 
-  // 引用集采集（壳侧注入面——三代解析归注入实现）
+  // 引用集采集（壳侧注入点——三代解析归注入实现）
   let referenced: ReadonlySet<string>;
   try {
     referenced = await deps.collectAliveRunReferences();

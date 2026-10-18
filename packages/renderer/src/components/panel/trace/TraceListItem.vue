@@ -1,6 +1,6 @@
 <template>
   <!--
-    展示组件 · trace-list-item（列表项分发：台账行 / assistant 子 block 行 / context 分界行）。
+    展示组件 · trace-list-item（列表项分发：登记清单行 / assistant 子 block 行 / context 分界行）。
     独立组件的原因：virtua <Virtualizer> slot 要求恰好 1 个 vnode（MessageStream M5 教训），
     分支收在本组件内，Virtualizer 与 v-for 两路径共用。
   -->

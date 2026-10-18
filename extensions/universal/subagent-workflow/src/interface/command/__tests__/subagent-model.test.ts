@@ -9,7 +9,7 @@
  * - service 未就绪 → subagent_runtime_not_ready envelope；
  * - 注册形态：命令名 / TUI 模式指引（内部 RPC 通道，无 TUI 分支）。
  *
- * mock 策略：runSubagentModelRpc 依赖注入面直驱（不 mock barrel）；落盘全在 mkdtemp tmp。
+ * mock 策略：runSubagentModelRpc 依赖注入点直驱（不 mock barrel）；落盘全在 mkdtemp tmp。
  * 运行：cd extensions/universal/subagent-workflow && npx vitest run src/interface/command/__tests__/subagent-model.test.ts
  */
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";

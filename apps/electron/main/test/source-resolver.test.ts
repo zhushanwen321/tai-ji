@@ -296,7 +296,7 @@ describe('source-resolver: auto 模式源顺序决策表（D4）', () => {
     })
   })
 
-  describe('getLastProbeOutcome: S2 观测面三态（R1-U1a）', () => {
+  describe('getLastProbeOutcome: S2 观测范围三态（R1-U1a）', () => {
     it('初始态与显式偏好路径 → null（显式偏好不是探测决策）', async () => {
       expect(getLastProbeOutcome()).toBeNull()
 

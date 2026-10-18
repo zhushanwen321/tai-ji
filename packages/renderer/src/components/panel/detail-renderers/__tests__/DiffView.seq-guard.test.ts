@@ -1,8 +1,8 @@
 /**
- * DiffView 异步高亮守卫测试（RD-2#2 / code-harden RD-2）。
+ * DiffView 异步高亮检查测试（RD-2#2 / code-harden RD-2）。
  *
  * 覆盖：
- * - 乱序守卫：patch 切换后，旧 patch 的迟到高亮结果不得写入新 diff 的渲染缓存
+ * - 乱序检查：patch 切换后，旧 patch 的迟到高亮结果不得写入新 diff 的渲染缓存
  *   （旧行为：行数相等即被 codeLines 采纳 → 新 patch 行号下显示旧文件正文）
  * - 高亮抛错显形降级：renderFailed 横幅出现 + 内容仍按原始行纯文本渲染
  *   （旧行为：watch async 回调无人 catch，静默丢高亮/炸渲染帧）
@@ -32,8 +32,8 @@ afterEach(() => {
   mockHighlight.mockImplementation(async (code: string) => `<b>${code}</b>`)
 })
 
-describe('DiffView — 异步高亮序号守卫（RD-2#2）', () => {
-  it('patch 切换后旧循环迟到结果不写入（seq 守卫），新 patch 内容保持权威', async () => {
+describe('DiffView — 异步高亮序号检查（RD-2#2）', () => {
+  it('patch 切换后旧循环迟到结果不写入（seq 检查），新 patch 内容保持权威', async () => {
     let resolveOld!: (html: string) => void
     mockHighlight.mockImplementation((code: string) => {
       // 旧 patch 首行的高亮挂起（模拟慢 shiki 首调），其余立即返回
@@ -50,7 +50,7 @@ describe('DiffView — 异步高亮序号守卫（RD-2#2）', () => {
     await wrapper.setProps({ patch: patchOf('const beta = 1', 'const beta2 = 2') })
     await flushPromises()
     expect(wrapper.text()).toContain('const beta = 1')
-    // 旧 patch 首行此时才迟到完成 → 必须被序号守卫丢弃
+    // 旧 patch 首行此时才迟到完成 → 必须被序号检查丢弃
     resolveOld('<b>STALE-ALPHA-CONTENT</b>')
     await flushPromises()
     await nextTick()

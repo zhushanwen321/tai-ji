@@ -2,7 +2,7 @@
  * rebuildSegmentsWithEditedText 单测。
  *
  * - MF-2：编辑重发 slash 段不翻倍。
- * - [轮 3 收口] 其余非 text 段（skill/file/mention/session/handoff）序列化文本同样不翻倍。
+ * - [轮 3 收尾] 其余非 text 段（skill/file/mention/session/handoff）序列化文本同样不翻倍。
  * - [轮 3-4] RC-A-2 剥离按段序推进游标（正文里的同形字符串不被误删）；RC-A-6 剥离后
  *   只剩空白不物化 text 段（prompt 不以空格开头）。
  * - image 段：改为与其余非 text 段同款的剥离语义，但用裸路径 token 双侧边界匹配
@@ -132,7 +132,7 @@ describe('rebuildSegmentsWithEditedText：slash 段不参与 text 替换（MF-2�
   })
 })
 
-// ── [轮 3 收口] 非 text 段序列化不翻倍（skill 为主用例）──
+// ── [轮 3 收尾] 非 text 段序列化不翻倍（skill 为主用例）──
 // 链路：live content → normalizeContent（编辑草稿）→ 用户只改正文 → rebuild → segmentsToPrompt。
 // 修复前：草稿整串回灌首个 text 段 + 段原位保留 ⇒ 序列化后同一形态出现两次（skill 标记两遍
 // ⇒ runtime 注入器展开两遍，同一 SKILL.md 注入两次）。修复后：标记只出现一次。
@@ -267,7 +267,7 @@ describe('[image] 裸路径 token 剥离：编辑重发不翻倍 / 删路径不�
     expect(count(prompt, IMG.path)).toBe(0)
   })
 
-  it('④a 后边界守卫：正文 `/data/a/1.png2` 不误剥（路径后紧贴数字，属正文）', () => {
+  it('④a 后边界检查：正文 `/data/a/1.png2` 不误剥（路径后紧贴数字，属正文）', () => {
     const live: Segment[] = [IMG, { type: 'text', text: '正文' }]
     const edited = '/data/a/1.png2\n正文'
     const segments = rebuildSegmentsWithEditedText(live, edited)
@@ -276,7 +276,7 @@ describe('[image] 裸路径 token 剥离：编辑重发不翻倍 / 删路径不�
     expect(segmentsToPrompt(segments)).toBe(edited)
   })
 
-  it('④b 前边界守卫：正文 `x/data/a/1.png` 不误剥（路径前有字符，属相对路径片段）', () => {
+  it('④b 前边界检查：正文 `x/data/a/1.png` 不误剥（路径前有字符，属相对路径片段）', () => {
     const live: Segment[] = [IMG, { type: 'text', text: '正文' }]
     const edited = 'x/data/a/1.png\n正文'
     const segments = rebuildSegmentsWithEditedText(live, edited)

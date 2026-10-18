@@ -4,11 +4,11 @@
  * 覆盖：openOverlay 开/换内容（单例换内容）/ closeOverlay 复位不变量（isOpen=false ⇔ current=null）/
  * 无效载荷 no-op 边界 / useOverlayControl 响应式视图 / 单一权威形态（全部读写经同一 reactive 单例）。
  *
- * 三视角：构建者白盒（单例 reactive + 写原语收口）、使用者黑盒（「点 workflow 块开浮层看图、
+ * 三视角：构建者白盒（单例 reactive + 写原语收敛）、使用者黑盒（「点 workflow 块开浮层看图、
  * 再点另一个 run 换内容、关闭后无残留」的用户可见语义）、观察者形态（状态读出形状）。
  *
  * SSOT 迁移对账锚：本域是开合态唯一权威——renderer workflow-viz-overlay.ts 的
- * overlayOpen / overlayCurrent 模块级 ref 已退役（DAG 缓存留 renderer），消费面
+ * overlayOpen / overlayCurrent 模块级 ref 已退役（DAG 缓存留 renderer），消费方
  * （Esc 编排器 / AppShell 宿主 / Host 容器）统一读 getOverlayControlState / useOverlayControl。
  *
  * 运行：cd packages/core && npx vitest run src/domain/overlay/__tests__/state.test.ts
@@ -96,7 +96,7 @@ describe('载荷校验边界（无效载荷 no-op，不改开合态）', () => {
   })
 })
 
-describe('单一权威形态（消费面读同一 reactive 单例）', () => {
+describe('单一权威形态（消费方读同一 reactive 单例）', () => {
   it('getOverlayControlState 与 useOverlayControl 读同一对象同一值（无第二权威）', () => {
     openOverlay(WORKFLOW_A)
     const { isOpen, current } = useOverlayControl()

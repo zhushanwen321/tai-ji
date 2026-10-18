@@ -156,7 +156,7 @@ const guidelines = [
   // 工具内指向本工具的交叉引用，非本清单的锚）。
   'Progressive reading: outline (~1500 tokens) → expand (one turn) → detail; defaults omit toolResult/thinking noise.',
   'find first (uuid fragment / name); TUI #references are full uuids. Never read raw .jsonl—use this tool.',
-  // zcode 路由（U9）对 LLM 的唯一可见面：sa-id 输入自动路由，无需任何参数；首遇
+  // zcode 路由（U9）对 LLM 的唯一可见部分：sa-id 输入自动路由，无需任何参数；首遇
   // zcode_* 错误码前先有背景预告。
   'sa- ids route transparently to pi or zcode engine sessions; sess_ prefixed ids are not accepted—use the completion-notice sa- id.',
   'Errors carry a 👉 recovery hint—follow it to retry.',
@@ -250,7 +250,7 @@ export default function sessionReaderExtension(pi: ExtensionAPI): void {
   //
   // addAutocompleteProvider 挂在 ctx.ui（非 ExtensionAPI），setup 入口无 ctx，
   // 只能在 event handler 里拿——session_start 是最早且每 session 触发的 event。
-  // once-guard + ctx.mode 守卫 + typeof 运行时守卫三重防护。
+	// once-guard + ctx.mode 检查 + typeof 运行时检查三重防护。
   //
   // 2026-08-10 重构：数据源从全盘 findSessions(agentDir) 换为 SessionManager.listAll(ctx.sessionManager.getSessionDir())。
   // getSessionDir() 返回当前 session 的目录（encoded cwd），listAll 只扫该目录 →

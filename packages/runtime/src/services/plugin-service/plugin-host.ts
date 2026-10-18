@@ -208,10 +208,10 @@ export function safeDispatchHostMessage(
 }
 
 /**
- * PluginHost 的最小接口契约（P8 收口）。
+ * PluginHost 的最小接口契约（P8 收尾）。
  *
  * 此前该接口定义在 plugin-activator.ts（消费方），由本类（供应商）实现，构成
- * 「消费方拥有供应商契约」的坏味道 + 仅类型层的循环依赖。现收口到供应商本文件，
+ * 「消费方拥有供应商契约」的坏味道 + 仅类型层的循环依赖。现收尾到供应商本文件，
  * 由实现者拥有自己的契约。plugin-activator.ts 通过 re-export 以 `PluginHost` 之名
  * 继续对外暴露，保持所有现有导入（NON-BREAKING）。
  */
@@ -278,7 +278,7 @@ export class PluginHost implements PluginHostContract {
 
   /**
    * 惰性创建子进程宿主（sandbox 插件首次分配时）。
-   * crash/reply 回调转发到 PluginHost 自己的回调；幂等守卫在 PluginHostProcess 内部。
+   * crash/reply 回调转发到 PluginHost 自己的回调；幂等检查在 PluginHostProcess 内部。
    */
   private ensureProcessHost(): PluginHostProcess {
     if (this.processHost) return this.processHost
@@ -334,7 +334,7 @@ export class PluginHost implements PluginHostContract {
    * 向指定 Worker 发送 load 指令，等待 loaded/error 响应。
    * pluginId 显式传入（loadedModules 分区键，见 PluginHostContract.loadPlugin 注释）。
    * loadPlugin 墙钟超时（loadTimeoutMs 10s + terminate 回收链）已随 ADR-0122 防御机制
-   * 清查退役（C-proc-19 控制面单请求粒度条款一并收窄）——插件顶层死循环 = loaded/error
+   * 清查退役（C-proc-19 控制范围单请求粒度条款一并收窄）——插件顶层死循环 = loaded/error
    * 永不到达 = 本 Promise 悬挂，处置归用户（插件管理界面停用/卸载）。
    */
   async loadPlugin(workerId: string, pluginId: string, pluginPath: string, trustLevel?: 'trusted' | 'sandbox'): Promise<void> {
@@ -416,7 +416,7 @@ export class PluginHost implements PluginHostContract {
     return undefined
   }
 
-  /** 反向索引删除（带归属守卫：只删当前映射仍指向 workerId 的条目，防误删重建后的新映射） */
+  /** 反向索引删除（带归属检查：只删当前映射仍指向 workerId 的条目，防误删重建后的新映射） */
   private removeIndexEntries(workerId: string, pluginIds: string[]): void {
     for (const pid of pluginIds) {
       if (this.pluginToWorker.get(pid) === workerId) {
@@ -494,7 +494,7 @@ export class PluginHost implements PluginHostContract {
     let worker: Worker
     try {
       // D6-⑤：stderr: true 改 pipe（默认继承拿不到流引用），「trusted-1 exited with code 1」
-      // 场景的崩溃打印从此可落盘；stdout 保持继承（行为面最小化）。
+      // 场景的崩溃打印从此可落盘；stdout 保持继承（行为范围最小化）。
       worker = new Worker(bootstrapPath, {
         name: workerId,
         stderr: true,
@@ -560,7 +560,7 @@ export class PluginHost implements PluginHostContract {
       try {
         process.stderr.write(chunk)
       } catch (e) {
-        // EPIPE 极端路径：转发失败不连坐采集与主链路（取证面 best-effort），debug 留痕
+        // EPIPE 极端路径：转发失败不连坐采集与主链路（取证侧 best-effort），debug 留痕
         console.debug('[plugin-host] worker stderr forward failed:', e)
       }
     })
@@ -582,7 +582,7 @@ export class PluginHost implements PluginHostContract {
 
   /**
    * exit code 0 的 Worker 清理（D6/W4）：正常退出与崩溃分流——不报 crash。
-   * 幂等守卫与 crash 路径同款（crashed/terminated 已处理过则跳过；terminateWorker /
+   * 幂等检查与 crash 路径同款（crashed/terminated 已处理过则跳过；terminateWorker /
    * shutdown 的 pre-mark 路径自带清理，不会重复到达这里）。
    */
   private handleWorkerCleanExit(workerId: string): void {
@@ -610,7 +610,7 @@ export class PluginHost implements PluginHostContract {
 
     // D6-⑤：崩溃 stderr 全量落盘 plugin-crash-*.log（形态对齐 pi-crash：首行摘要 +
     // truncated 标注 + [runtime-context] 头块 + stderr 原文）。三入口（error 事件 /
-    // fatal_error 消息 / exit code≠0）都汇聚到本函数，幂等守卫（上方 status 检查）保证
+    // fatal_error 消息 / exit code≠0）都汇聚到本函数，幂等检查（上方 status 检查）保证
     // 单次崩溃只写一份。时序注记：terminate→exit 间的残余 stderr 不进本份 log（collector
     // 已 take，仍转发 process.stderr），取证主体是崩溃前打印，该窗口丢失可接受。best-effort。
     try {
@@ -632,7 +632,7 @@ export class PluginHost implements PluginHostContract {
 
     // 崩溃线程兜底终止（D6/W4 对称化）：fatal_error 消息路径线程发完消息仍存活
     //（对齐 plugin-host-process 的 kill 兜底），不 terminate = 线程泄漏。terminate 触发
-    // 的 exit(code=1) 被 status='crashed' 幂等守卫拦截，不会二次进入本函数。
+    // 的 exit(code=1) 被 status='crashed' 幂等检查拦截，不会二次进入本函数。
     const worker = this.workerInstances.get(workerId)
     if (worker) {
       void worker.terminate().catch((e: unknown) => {

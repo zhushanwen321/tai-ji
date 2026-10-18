@@ -112,7 +112,7 @@ function createReactiveSessionScopedMap<T>(init: () => T): SessionScopedMap<T> {
  *
  * watcher 生命周期随 init dispose-and-rebuild（对齐 usePermissionRequest 习语）：返回 stop
  * 句柄由 __testing.lastInitHandles.dispose 统一回收，重复 init 先 stop 旧 watcher 再挂新。
- * [HISTORICAL] 旧实现的模块级布尔守卫使 watcher 永久闭包绑定第一次 init 的 registry 实例
+ * [HISTORICAL] 旧实现的模块级布尔检查使 watcher 永久闭包绑定第一次 init 的 registry 实例
  * ——重复 init 后 setExtensionRegistries 已把 core 单例换新实例，注册进新实例、上报旧实例快照。
  */
 function ensureMountPointsSync(mountPoints: MountPointRegistry): () => void {
@@ -175,7 +175,7 @@ export function toContributionInfos(
 /** E13 命令可用性三态（HeaderActionsHost 灰置状态机的判定输入）。 */
 export type HeaderActionCommandAvailability = 'registered' | 'unregistered' | 'unknown'
 
-/** HeaderActionsHost 数据源（声明镜像 + per-session 运行时镜像 + E13/E3 执行面）。 */
+/** HeaderActionsHost 数据源（声明镜像 + per-session 运行时镜像 + E13/E3 执行侧）。 */
 export interface HeaderActionsSource {
   /** headerAction 型声明（panel.header 挂载点）。响应式镜像：注册同步 / E2 清理与重放后刷新。 */
   getDeclarations(): ContributionRecord[]
@@ -227,7 +227,7 @@ export function hasVisibleHeaderActions(source: HeaderActionsSource, sessionId: 
 }
 
 /**
- * E13 判定的最小读取面（会话命令分区；结构契约而非 pinia store 全型——纯函数直测
+ * E13 判定的最小读侧（会话命令分区；结构契约而非 pinia store 全型——纯函数直测
  * 只需 getCommands，test-coverage SG-2 补防线时提出）。
  */
 export interface CommandPartitionReader {
@@ -263,7 +263,7 @@ export function resolveHeaderActionAvailability(
  *   void 后（生产调用方 main.ts 恒丢弃返回值），测试 afterEach dispose 与注册注入用例
  *   （contributions）取内部实例的唯一通道。dispose 回收本次装配（重复 init 前置调用 /
  *   测试 afterEach，幂等）：stop 两个 connected 重放器 watcher + dispose bridge（防 bus
- *   事件翻倍，项目规则#2；bus 上其余 controller 订阅随 app 生命周期存活，不在回收面）。
+ *   事件翻倍，项目规则#2；bus 上其余 controller 订阅随 app 生命周期存活，不在回收逻辑）。
  */
 export const __testing = {
   lastInitHandles: null as null | {
@@ -294,7 +294,7 @@ export function initExtensionHostBridge(app: App): void {
   // mutate 纯 Map 不被 Vue computed 追踪 → ViewHost 永不重渲染。壳层两层 reactive 化：
   // ①外层 partitions 容器 reactive（createReactiveSessionScopedMap——分区后建也触发重算，
   //   修复「computed 首次求值短路 → 永久 stale」）；②分区值由 init 工厂返回 reactive 容器
-  // （get/set 走 reactive proxy）。ViewHost.vue computed 的 getView/getItems 调用面即被追踪
+  // （get/set 走 reactive proxy）。ViewHost.vue computed 的 getView/getItems 调用点即被追踪
   // （core 代码零改动）。
   const viewHostStore = new ViewHostStore({
     bus,
@@ -347,7 +347,7 @@ export function initExtensionHostBridge(app: App): void {
   // ui 组件数据源（ViewHost 经 inject 取，壳 provide 真实实现；形状对齐 IF10）
   app.provide(VIEW_HOST_SOURCE_KEY, {
     getView: (sessionId, viewId) => viewHostStore.getView(sessionId, viewId),
-    // widget 视图消费面（Composer 托盘 widget 区）：枚举该 session 全部缓存 viewId（纯透传 core store）
+    // widget 视图消费方（Composer 托盘 widget 区）：枚举该 session 全部缓存 viewId（纯透传 core store）
     getViewIds: (sessionId: string) => viewHostStore.getViewIds(sessionId),
   })
   // L2 二级 tab 数据源（PluginViewContainer 经 inject 取；纯静态声明——sidebar.tab 视图贡献清单，
@@ -372,9 +372,9 @@ export function initExtensionHostBridge(app: App): void {
     },
   })
   // L2 原生视图路由表与 L2 tab badge 源已随「后台命令」native 视图退役
-  // （composer-task-tray D10：托盘承接后台命令观察面；PluginViewContainer 的
+  // （composer-task-tray D10：托盘承接后台命令观察范围；PluginViewContainer 的
   // 同名分支同批删除）。plugin sidebar view 机制本身保留——
-  // 上方 VIEWS_SOURCE_KEY + ViewHost 原路径即其消费面。
+  // 上方 VIEWS_SOURCE_KEY + ViewHost 原路径即其消费方。
   // PluginSettingsPage 数据源（M16）：onPlugins 委托 api 域
   // （config.plugins 广播订阅），getContributions 委托 ContributionRegistry + MountPointRegistry
   // （toContributionInfos：未注册挂载点 → 置灰 + 原因，场景 E AC3）。

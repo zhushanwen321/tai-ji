@@ -5,7 +5,7 @@
  * - truncateToolCall 超限截断（含标记总字节 ≤ 4KB、codepoint 边界对齐、确定性——
  *   判定与截断共用一次编码的重构回归锁定：截断结果与长度不变）
  * - 未超限 / 非 truncate 工具原样返回（引用不变）
- * - truncateToolOutputBatchCached 产物复用（applySubagentEntries 基线投影路径：
+ * - truncateToolOutputBatchCached 产物复用（applySubagentEntries 基线派生视图路径：
  *   已见引用复用上次产物输出不变，新消息照常截断，输入源不被污染）
  *
  * 运行：cd packages/core && npx vitest run src/domain/chat/__tests__/truncate-tool-output.test.ts
@@ -141,8 +141,8 @@ describe('truncateToolOutput / truncateToolOutputBatch（R7 不可变）', () =>
   })
 })
 
-describe('truncateToolOutputBatchCached（产物复用，applySubagentEntries 投影路径）', () => {
-  it('首次投影：与 truncateToolOutputBatch(浅拷贝 map) 输出逐值一致；二次投影复用产物输出不变', () => {
+describe('truncateToolOutputBatchCached（产物复用，applySubagentEntries 派生视图路径）', () => {
+  it('首次派生视图：与 truncateToolOutputBatch(浅拷贝 map) 输出逐值一致；二次派生视图复用产物输出不变', () => {
     const bigMsg = makeMessage([makeToolCall('read', { output: 'x'.repeat(5000) })])
     const smallMsg = makeMessage([makeToolCall('bash', { output: 'tiny' })])
     const cache = new WeakMap<Message, Message>()
@@ -154,7 +154,7 @@ describe('truncateToolOutputBatchCached（产物复用，applySubagentEntries �
     expect(first[1]).not.toBe(smallMsg) // 未命中消息仍是浅拷贝新对象（形态对齐既有链路）
     expect(first[0]!.toolCalls![0]!.output!.endsWith(TRUNCATION_MARKER)).toBe(true)
 
-    // 二次投影（同引用输入 = reducer 未变更的历史消息）：复用产物，逐值且逐引用一致
+    // 二次派生视图（同引用输入 = reducer 未变更的历史消息）：复用产物，逐值且逐引用一致
     const second = truncateToolOutputBatchCached([bigMsg, smallMsg], cache)
     expect(second).not.toBe(first) // 恒返回新数组（对齐既有链路的每帧新数组）
     expect(second[0]).toBe(first[0]) // 命中消息产物原引用复用
@@ -168,7 +168,7 @@ describe('truncateToolOutputBatchCached（产物复用，applySubagentEntries �
     const truncatedOutput = first[0]!.toolCalls![0]!.output!
     expect(truncatedOutput.endsWith(TRUNCATION_MARKER)).toBe(true)
 
-    // 新增消息后再投影：旧消息值逐字节稳定（marker 不叠加），新消息正确截断
+    // 新增消息后再派生视图：旧消息值逐字节稳定（marker 不叠加），新消息正确截断
     const nextMsg = makeMessage([makeToolCall('grep', { output: 'y'.repeat(6000) })])
     const second = truncateToolOutputBatchCached([bigMsg, nextMsg], cache)
     expect(second[0]!.toolCalls![0]!.output).toBe(truncatedOutput)
@@ -186,7 +186,7 @@ describe('truncateToolOutputBatchCached（产物复用，applySubagentEntries �
     const bigMsg = makeMessage([makeToolCall('read', { output: 'x'.repeat(5000) })])
     const originalOutput = bigMsg.toolCalls![0]!.output
     truncateToolOutputBatchCached([bigMsg], cache)
-    // reducer state.messages 是全量原文权威镜像（截断只发生在投影输出侧）
+    // reducer state.messages 是全量原文权威镜像（截断只发生在派生视图输出侧）
     expect(bigMsg.toolCalls![0]!.output).toBe(originalOutput)
     expect(cache.get(bigMsg)!.toolCalls![0]!.output).not.toBe(originalOutput)
   })

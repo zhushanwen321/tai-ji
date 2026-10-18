@@ -8,7 +8,7 @@
  *
  * 背景：一个 run 可经历多个 WorkerHandle（终止/重试各换一个）。
  * 需防止「terminate(old) → start(new) → old exit fires」竞态——
- * WorkerHandle 把守卫内化：terminate 后 isCurrent=false，
+ * WorkerHandle 把检查内化：terminate 后 isCurrent=false，
  * 已终止 handle 的 onMessage/onError/onExit 回调自动 no-op（无需调用方比对引用）。
  *
  * 层归属：Infra（D-12）。仅依赖 node:worker_threads（Node 原生）。
@@ -30,7 +30,7 @@ export type WorkerExitHandler = (code: number) => void;
 export class WorkerHandle {
   private readonly worker: Worker;
   /**
- * 竞态守卫。true = 此 handle 仍是当前活动 handle；false = 已 terminate，
+ * 竞态检查。true = 此 handle 仍是当前活动 handle；false = 已 terminate，
  * 后续事件（已终止 worker 延迟触发的 message/error/exit）必须忽略。
  *
  * 终止后置 false 并永不回升（幂等语义）。新 handle 由调用方（WorkerHost）
@@ -63,7 +63,7 @@ export class WorkerHandle {
   /**
  * 终止 worker 线程。幂等——重复调用安全，第二次起 no-op。
  * 置 isCurrent=false 后再 await worker.terminate，确保并发 exit 事件
- * 在 terminate resolve 之前到达时也被守卫拦下。
+ * 在 terminate resolve 之前到达时也被检查拦下。
  */
   async terminate(): Promise<void> {
     if (!this.current) return;
@@ -101,7 +101,7 @@ export class WorkerHandle {
   }
 
   /**
- * 绑定 exit 回调。仅当 isCurrent 时触发——这是 G-025 的关键守卫：
+ * 绑定 exit 回调。仅当 isCurrent 时触发——这是 G-025 的关键检查：
  * terminate(old) → startWorker(new) → old exit 触发时，old handle.current
  * 已为 false，回调 no-op，不会误删 new worker。
  */

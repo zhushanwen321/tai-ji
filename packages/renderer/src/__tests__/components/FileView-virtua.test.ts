@@ -154,7 +154,7 @@ async function mountExpandedBigTree() {
 describe('FileView 真实 virtua 虚拟滚动（P-D7-1：万级可见行 DOM 行数远小于总行数）', () => {
   it('展开 10000 文件目录 → DOM 只挂载视口 ± 缓冲的行（< 200），远小于 10001 总行', async () => {
     const wrapper = await mountView(buildBigTree())
-    // 展开 big/（useFileTree.expandNode：loaded 早退 → addExpanded → 投影产出 10001 行）
+    // 展开 big/（useFileTree.expandNode：loaded 早退 → addExpanded → 派生视图产出 10001 行）
     const store = useFileTreeStore()
     store.setNodeState('s1', 'big', { status: 'loaded' })
     store.addExpanded('s1', 'big')
@@ -194,10 +194,10 @@ describe('FileView 真实 virtua 虚拟滚动（P-D7-1：万级可见行 DOM 行
     wrapper.unmount()
   })
 
-  it('大数据量投影 + 虚拟滚动下过滤仍工作（命中后投影重算，DOM 行随投影收缩）', async () => {
+  it('大数据量派生视图 + 虚拟滚动下过滤仍工作（命中后派生视图重算，DOM 行随派生视图收缩）', async () => {
     const { wrapper, store } = await mountExpandedBigTree()
 
-    // 无匹配过滤 → 空态（投影 [] → file-empty）
+    // 无匹配过滤 → 空态（派生视图 [] → file-empty）
     store.setFilter('zzz_no_match')
     await flushVirtua()
     expect(wrapper.find('[data-testid="file-empty"]').exists()).toBe(true)
@@ -206,7 +206,7 @@ describe('FileView 真实 virtua 虚拟滚动（P-D7-1：万级可见行 DOM 行
     wrapper.unmount()
   })
 
-  it('折叠后投影收缩（可见行 10001 → 1），DOM 行数跟随', async () => {
+  it('折叠后派生视图收缩（可见行 10001 → 1），DOM 行数跟随', async () => {
     const { wrapper, store } = await mountExpandedBigTree()
     expect(wrapper.findAll('[data-testid^="file-tree-file-"]').length).toBeGreaterThan(0)
 

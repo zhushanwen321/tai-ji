@@ -14,7 +14,7 @@
 /**
  * RunSpec——一次 workflow run 的不可变输入规格。
  *
- * 作为 RunStore 持久化的一部分（WorkflowRun.spec），崩溃恢复重水合后
+ * 作为 RunStore 持久化的一部分（WorkflowRun.spec），崩溃恢复重新加载运行状态快照后
  * 需要 scriptSource/args 重建 worker（G3-001）。
  */
 export interface RunSpec {
@@ -45,7 +45,7 @@ export interface RunSpec {
  * undefined = 继承主 agent thinkingLevel。取值范围由 THINKING_ORDER SSOT 派生（含 max）。
  */
   readonly thinkingLevel?: string;
- /** Token 预算上限（未设或 0 = 不限制，见 Budget 守卫）。 */
+  /** Token 预算上限（未设或 0 = 不限制，见 Budget 检查）。 */
   readonly budgetTokens?: number;
  /** 时间预算上限（ms，wall-clock，由 lifecycle.scheduleTimeBudget 调度）。 */
   readonly budgetTimeMs?: number;

@@ -6,9 +6,10 @@
  * - 非 ENOENT 读失败（EACCES 形态）→ 响亮日志含恢复指引 + 关态空 token 降级（缺失
  *   形态，不落盘；重新开启时 setEnabled 自愈补发新 token）
  * - generateToken：64 位小写 hex
- * - write：原子写语义（同目录 .tmp 临时文件 + rename，写后无 .tmp 残留、无半截 JSON）+
- *   0600 权限（含覆写已存在文件后仍 0600——writeFileSync mode 仅创建时生效的兜底）；
- *   rename 前 fsync 段的专项断言见 remote-access-store-fsync.test.ts
+ * - write：原子写语义（同目录唯一 tmp 名 + rename，写后无新增 .tmp 残留、无半截
+ *   JSON）+ 0600 权限（含覆写已存在文件后仍 0600、崩溃残留 tmp 不被复用——
+ *   atomic-write-json 的 chmodSync 兜底与唯一 tmp 名纪律）；rename 前 fsync 段的
+ *   专项断言见 remote-access-store-fsync.test.ts
  * - rotate：重写后读取一致（新 token + enabled/createdAt 保留）
  * - setEnabled：仅 enabled 变化，token/createdAt 保留；关态文件留存
  * - 损坏 JSON / 字段不合法 → E10 重建默认关态 + 响亮日志（console.error 含恢复指引）；
@@ -101,7 +102,7 @@ describe('readRemoteAccessConfig', () => {
     try {
       const config = readRemoteAccessConfig(TMP_DATA_DIR)
       // 降级为关态 fail-closed；token 空串 = 缺失形态（磁盘态不可信，不产磁盘上
-      // 不存在的假 token 误导面板——上游 fullUrl 有 token 真值守卫，空值不渲染假链接）
+      // 不存在的假 token 误导面板——上游 fullUrl 有 token 真值检查，空值不渲染假链接）
       expect(config.enabled).toBe(false)
       expect(config.token).toBe('')
       expect(config.createdAt).toBeTruthy()
@@ -186,28 +187,34 @@ describe('writeRemoteAccessConfig（原子写 + 0600）', () => {
     rmSync(join(TMP_DATA_DIR, 'deep'), { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
   })
 
-  it('.tmp 崩溃残留（0644）+ 目标被外部放宽 → 写入后目标仍 0600（chmodSync 收紧残留 tmp 的旧 inode 权限）', () => {
+  it('崩溃残留 tmp 不被复用（唯一 tmp 名）+ 目标被外部放宽 → 写入后目标仍 0600，不新增 tmp 残留', () => {
     if (process.platform === 'win32') return // POSIX 文件权限语义，win32 不跑本用例
-    // 兜底行的独立场景：writeFileSync 的 mode 只在创建文件时生效——上次写入进程在
-    // writeFileSync 之后、renameSync 之前崩溃，留下宽松权限（0644）的 `.tmp` 残留时，
-    // 本次写入打开的是既有 tmp inode（O_CREAT 不应用 mode），rename 后目标继承 0644，
-    // 只有 rename 后的 chmodSync 能把它拉回 0600。
+    // 固定 tmp 名的旧纪律下，上次写入在 writeFileSync 之后、rename 之前崩溃留下的
+    // `.tmp` 残留会被本次写入重新打开（O_CREAT 不应用 mode），rename 后目标继承
+    // 残留 inode 的宽松权限，只能靠 rename 后的 chmodSync 拉回 0600。现纪律
+    // （atomic-write-json：pid+序号唯一 tmp 名）每次写入恒新建 tmp（mode 在创建时
+    // 生效），残留 tmp 永不被复用。本用例固定三点：① 残留 tmp 原样留存（无复用
+    // 通道——宽松权限的残留内容不可能进入目标）；② 目标 inode 被外部放宽后，
+    // chmodSync 兜底保证最终权限精确 0600；③ 写入自身不新增 tmp 残留。
     const config = { enabled: true, token: 'g'.repeat(64), createdAt: '2026-01-01T00:00:00.000Z' }
-    const tmpPath = `${FILE_PATH}.tmp`
-    // ① 先正常写一次（合法基线态，rename 已移走 tmp——随后手动构造的 tmp 即崩溃残留形态）
+    const staleTmpName = `${REMOTE_ACCESS_FILENAME}.crashed-writer.tmp`
+    const staleTmpPath = join(TMP_DATA_DIR, staleTmpName)
+    // ① 先正常写一次（合法基线态），随后手动构造崩溃残留 + 目标被外部放宽为 0644
     writeRemoteAccessConfig({ enabled: false, token: 'h'.repeat(64), createdAt: '2026-01-01T00:00:00.000Z' }, TMP_DATA_DIR)
-    // ② 手动以 0644 构造 .tmp 崩溃残留 + 目标文件被外部放宽为 0644
-    writeFileSync(tmpPath, 'stale-content-from-crashed-writer', { mode: 0o644 })
-    chmodSync(tmpPath, 0o644)
+    writeFileSync(staleTmpPath, 'stale-content-from-crashed-writer', { mode: 0o644 })
+    chmodSync(staleTmpPath, 0o644)
     chmodSync(FILE_PATH, 0o644)
-    // 前置自检：残留 tmp 权限确为 0644（防 umask 收窄致用例假绿——0600 的 tmp 无 chmodSync 也绿）
-    expect(statSync(tmpPath).mode & 0o777).toBe(0o644)
-    // ③ 再写入：落盘权限必须回到 0600
+    // 前置自检：目标确为 0644（放宽形态成立，防用例假绿）
+    expect(statSync(FILE_PATH).mode & 0o777).toBe(0o644)
+    // ② 再写入：目标权限回到 0600；残留 tmp 不被消费（内容未进入目标）；无新增 tmp
     writeRemoteAccessConfig(config, TMP_DATA_DIR)
     expect(statSync(FILE_PATH).mode & 0o777).toBe(0o600)
     expect(JSON.parse(readFileRaw())).toEqual(config)
+    expect(readFileSync(staleTmpPath, 'utf-8')).toBe('stale-content-from-crashed-writer')
     const leftovers = readdirSync(TMP_DATA_DIR).filter((name) => name.includes('.tmp'))
-    expect(leftovers).toEqual([])
+    expect(leftovers).toEqual([staleTmpName])
+    // 清掉手动构造的残留，不污染同目录后续用例的 leftovers 断言
+    rmSync(staleTmpPath, { force: true })
   })
 })
 
@@ -337,7 +344,7 @@ describe('ensureRemoteAccessIntegrity（E10 损坏重建，经 read 触发）', 
   })
 })
 
-describe('isValidRemoteAccessConfig（结构守卫）', () => {
+describe('isValidRemoteAccessConfig（结构检查）', () => {
   it('合法形态放行', () => {
     expect(
       isValidRemoteAccessConfig({ enabled: true, token: '6'.repeat(64), createdAt: '2026-01-01T00:00:00.000Z' }),

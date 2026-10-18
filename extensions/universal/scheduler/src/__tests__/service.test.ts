@@ -315,7 +315,7 @@ describe('SchedulerService', () => {
       if (result.params === undefined || !('tasks' in result.params)) throw new Error('expected list params')
       const line = renderResult('task.list', result.params, 'zh-CN').split('\n')[1]!
       expect(line).toContain('上次: 失败×2')
-      // 命令变体保留相对时间（设计 D1-a：命令层按需呈现面不变）
+      // 命令变体保留相对时间（设计 D1-a：命令层按需呈现侧不变）
       expect(line).toMatch(/分钟后|分钟前|\d+m ago|in \d+m/)
       // params 携带 locale-neutral 原始值（摘要不预渲染）
       expect(result.params.tasks[0]!.lastExec).toEqual({ lastStatus: 'failed', recentFailures: 2 })

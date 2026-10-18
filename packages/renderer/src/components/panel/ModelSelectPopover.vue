@@ -5,7 +5,7 @@
     点选即切换当前 session 模型。
 
     表现层已抽为 ModelPickerPanel（架构审查 D4）——本组件保留 Popover 壳 + trigger + select 语义；
-    数据面（settingsStore.models → groups + providerFilter/enabled 兜底过滤、裸 id 反查 provider）
+    数据范围（settingsStore.models → groups + providerFilter/enabled 兜底过滤、裸 id 反查 provider）
     在 model-picker-data（与 ModelThinkingAggregate 共用，禁止两处复制）。
     [HISTORICAL] `variant='icon'`（fit L2 图标态，Boxes 触发器）已随 W3b 删除——
     聚合形态由 ModelThinkingAggregate（单图标聚合页）承担，本组件恒为文本触发器。
@@ -70,7 +70,7 @@ const props = withDefaults(defineProps<{
   providerFilter?: ProviderId[]
   /**
    * U4「切换中」：true 时 trigger 显示转圈并**忽略开合与点选**（禁用重复点击；并发两条
-   * model.switch 在飞会让回执乱序与 session.modelId 双写竞争）。读条件由调用方判
+   * model.switch 在途会让回执乱序与 session.modelId 双写竞争）。读条件由调用方判
    * sessionId 等值后传入（本组件不感知 session）。
    */
   switching?: boolean
@@ -86,7 +86,7 @@ const settingsStore = getSettingsStore()
 // U4：切换中禁止开合（门禁在 useSwitchingGatedPopoverOpen，与 ThinkingLevelPopover 共用）
 const { open, canOpen } = useSwitchingGatedPopoverOpen(() => props.switching)
 
-// 数据面（分组 / enabled 过滤 / pickerGroups / 反查）在 model-picker-data——
+// 数据范围（分组 / enabled 过滤 / pickerGroups / 反查）在 model-picker-data——
 // 顶层绑定名保持 groups（既有测试经 vm.groups 断言分组形状，语义不漂移）。
 // defaultModel（config.defaults.defaultModel）透传 panel 驱动行尾「默认」标签（demo .pt）。
 const { groups, hasAnyModel, pickerGroups, defaultModel } = useModelPickerData(() => props.providerFilter)

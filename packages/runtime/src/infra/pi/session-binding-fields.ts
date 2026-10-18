@@ -3,11 +3,11 @@
  *
  * 职责三件：① BINDING_FIELDS 声明每个绑定字段的入口适用性矩阵（SSOT）
  * ② hydrateBindingMeta 统一内存回填（create/handoff/restore/fork 四入口共用）
- * ③ CREATE_DERIVED_CALLERS 登记 sessionService.create 派生调用方（守卫测试静态扫描数据源）。
+ * ③ CREATE_DERIVED_CALLERS 登记 sessionService.create 派生调用方（防线测试静态扫描数据源）。
  *
  * 从 session-file-utils.ts 抽出的原因：后者聚焦 sidecar 文件 IO 与缓存治理（max-lines
  * 预算），本模块是纯声明数据 + 纯函数，独立成档职责更清晰；「新增第 6 个绑定字段」的
- * 完整改动路径 = 本表加一行 + 各写点 persist helper 照旧，回填与守卫自动获得。
+ * 完整改动路径 = 本表加一行 + 各写点 persist helper 照旧，回填与检查自动获得。
  */
 import type { ScannedSessionMeta } from './session-file-utils.js'
 
@@ -27,7 +27,7 @@ type OptionalKeys<T> = { [K in keyof T]-?: undefined extends T[K] ? K : never }[
  * 可选字段恰好 9 个 = 2 排除 + 7 绑定（handedOffTo / launchPresetId / projectId /
  * spawnSource / parentAgentSessionId + modelId / thinkingLevel——后两者经 ModelBindingFields
  * extends 收编，声明在 session-file-utils.ts）；outcome 与 name 是 `| null` 非 `| undefined`，
- * 天然不进 OptionalKeys。决策 4 残余边界：必填字段不受此守卫保护——绑定字段天然可选
+ * 天然不进 OptionalKeys。决策 4 残余边界：必填字段不受此检查保护——绑定字段天然可选
  *（sidecar 缺失 = undefined），误声明必填会在 scanSessionMeta 构造处撞理想类型冲突。
  */
 export type BindingFieldKey = Exclude<OptionalKeys<ScannedSessionMeta>, 'parentSession' | 'forkEntryId'>
@@ -57,7 +57,7 @@ export interface BindingFieldSpec {
    * 四入口完整性由类型强制：Record<BindingEntryKind, ...> 少一列编译红——「省略」不是
    * 选项，拿不准的入口必须显式写 'none'，把入口语义决策逼到显式化（设计文档 §3.1
    * 失败路径与恢复）。本表是回填入口适用性的 SSOT：hydrateBindingMeta 据此过滤，
-   * Wave 3 守卫测试据此生成用例。
+   * Wave 3 防线测试据此生成用例。
    */
   entries: Record<BindingEntryKind, BindingEntrySemantics>
 }
@@ -79,7 +79,7 @@ export interface BindingFieldSpec {
  *
  * handoff 列的运行时形态：承接 session 复用 create 入口（entry='create'），由
  * handoff-service 组装源继承值进 options——表列声明该通道的允许语义，「防顺手继承
- * 漂移」由 Wave 3 守卫测试对 CREATE_DERIVED_CALLERS 逐项断言实际传参。
+ * 漂移」由 Wave 3 防线测试对 CREATE_DERIVED_CALLERS 逐项断言实际传参。
  *
  * 能力边界（设计文档 §3.1）：拦「漏登记 / 漏回填 / 漏失效 / 派生调用方漏传多传」，
  * 不拦「语义定错」（该继承却写 none 属业务判断，靠 review）。
@@ -159,7 +159,7 @@ export const BINDING_FIELDS: Record<BindingFieldKey, BindingFieldSpec> = {
  * 过滤规则：entries[entry] === 'none' 或 meta[field] === undefined 的字段跳过
  *（undefined 不 patch——与原逐字段 `if (x)` 条件 patch 等价，restore 的 options 条件
  * 语义与 meta 值存在语义在 undefined 处等价）。handoff 承接通道复用 create 入口调用
- *（entry='create'），handoff 列的语义承诺由 CREATE_DERIVED_CALLERS 守卫测试断言。
+ *（entry='create'），handoff 列的语义承诺由 CREATE_DERIVED_CALLERS 防线测试断言。
  *
  * @param session initializeManagedSession 产出的 IManagedSessionView（实为可扩展的
  *                ManagedSession 实例——绑定字段不在 IManagedSessionView 声明，经
@@ -194,12 +194,12 @@ export interface CreateDerivedCaller {
 }
 
 /**
- * sessionService.create 的派生调用方登记处（决策 1b，Wave 3 守卫测试静态扫描的数据源）。
+ * sessionService.create 的派生调用方登记处（决策 1b，Wave 3 防线测试静态扫描的数据源）。
  *
  * 语义：create 的绑定字段除 lifecycle 主流程（user-facing 直连）外还有派生调用方——
- * 新增调用点必须在此登记，否则守卫测试红（静态扫描源码 create 调用点集合 vs 本清单）。
+ * 新增调用点必须在此登记，否则防线测试红（静态扫描源码 create 调用点集合 vs 本清单）。
  * passedBindingFields 是「允许透传的绑定字段」承诺：防顺手继承漂移（如 handoff 顺手
- * 透传 spawnSource——矩阵 handoff 列为 none），守卫测试逐项断言实际传参与承诺一致。
+ * 透传 spawnSource——矩阵 handoff 列为 none），防线测试逐项断言实际传参与承诺一致。
  *
  * 边界：静态扫描不拦「调用方语义定错」（该不该传 projectId 传错属 review 职责）。
  */
@@ -213,7 +213,7 @@ export const CREATE_DERIVED_CALLERS: readonly CreateDerivedCaller[] = [
     // 归属决策不交给 LLM（反伪造断言在 session-manager-handler 单测：「params 伪造
     // projectId 被忽略」）。该字段原属本通道禁传清单（防「调用方（含 LLM 请求参数）顺手
     // 注入绑定字段」），值完全服务端派生时该字面禁令被取化，反伪造精神完整保全。
-    // 本通道禁传清单随之清空（见守卫测试的 FORBIDDEN_FIELDS_BY_SEMANTIC）：
+    // 本通道禁传清单随之清空（见防线测试的 FORBIDDEN_FIELDS_BY_SEMANTIC）：
     // spawnSource / parentAgentSessionId 同样是服务端从路由上下文注入、不读请求参数，
     // 但它们是本通道的正常写入字段（属 passedBindingFields 承诺），不入禁传清单。
     passedBindingFields: ['spawnSource', 'parentAgentSessionId', 'projectId'],

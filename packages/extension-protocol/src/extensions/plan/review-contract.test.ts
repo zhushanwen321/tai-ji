@@ -41,7 +41,7 @@ describe('dismiss 样本（D3 主干，必测）', () => {
     expect(envelope).toEqual({ ok: true, response: { decision: 'dismiss' } })
   })
 
-  it('isPlanReviewResponse 对 dismiss 为 true（值域守卫含 dismiss 员）', () => {
+  it('isPlanReviewResponse 对 dismiss 为 true（值域检查含 dismiss 员）', () => {
     expect(isPlanReviewResponse({ decision: 'dismiss' })).toBe(true)
   })
 
@@ -59,7 +59,7 @@ describe('error envelope 三态判别（降级双分源，D3①）', () => {
     for (const decision of ['shelve', 'DISMISS', 'hold', 'reject']) {
       const envelope = parsePlanReviewResponse({ decision })
       expect(envelope).toEqual({ ok: false, code: 'unknown-decision', decision })
-      // 与 malformed 可判别分离（消费面出口同款引导重挂，见 review-contract.ts 文件头）
+      // 与 malformed 可判别分离（消费方出口同款引导重挂，见 review-contract.ts 文件头）
       expect(envelope.ok === false && envelope.code).toBe('unknown-decision')
     }
   })
@@ -148,7 +148,7 @@ describe('超限：selfReview 4KB 写侧单点截断（D9③ / R3）', () => {
     expect(emojiTruncated.includes('\ufffd')).toBe(false)
   })
 
-  it('request 守卫不二次截断（有界性由写侧单点保证）：超长 selfReview 帧通过守卫', () => {
+  it('request 检查不二次截断（有界性由写侧单点保证）：超长 selfReview 帧通过检查', () => {
     const request = { docs: [], selfReview: 'y'.repeat(PLAN_SELF_REVIEW_MAX_BYTES + 1) }
     expect(isPlanReviewRequest(request)).toBe(true)
     // 写侧接线后帧内值恒为截断产物——契约等价式：truncate 幂等且有界
@@ -158,7 +158,7 @@ describe('超限：selfReview 4KB 写侧单点截断（D9③ / R3）', () => {
   })
 })
 
-describe('boundary 帧：PlanReviewRequest 入站守卫（空载荷 / 非法形态）', () => {
+describe('boundary 帧：PlanReviewRequest 入站检查（空载荷 / 非法形态）', () => {
   it('合法形态：docs 逐项形状 + selfReview 可选', () => {
     const request = {
       docs: [{ fileName: 'plan.md', absPath: '/tmp/plans/auth/plan.md', sourceSkill: 'tech-design', version: 2 }],

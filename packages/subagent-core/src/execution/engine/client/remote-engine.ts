@@ -1,7 +1,7 @@
 // src/execution/engine/client/remote-engine.ts
 //
 // RemoteEngine：cli 形态 EnginePort 适配（W2，impl-plan §2.2「RemoteEngine 同步成员
-// 形态映射」必写死；[H1 U6] 交互控制面与 recordId 键路由面已随 chat 域退役删除）。
+// 形态映射」必写死；[H1 U6] 交互控制范围与 recordId 键路由面已随 chat 域退役删除）。
 // 把 core EnginePort 的成员映射到 EngineClient 协议请求；
 // 同步成员（capabilities / listModels / validateModel）**只读 manifest 注册期快照**
 // ——单源化原则（设计 §3.3「同步成员清单」v6 减法）：无握手缓存、无失效时机，
@@ -53,7 +53,7 @@ export interface RemoteEngineManifestSnapshot {
    * 省略；`models: []` 仅作者显式声明）。解析器**不得**把省略填成 `[]`——省略与
    * 显式 `[]` 的下游语义不同：validateModel 成员实现与否（构造器摘除判定）；
    * listModels 上 dynamic:false 的显式 `[]` 走 buildEmptyModelsHint（显式空清单），
-   * 省略走 buildCoreAlignedHint（无枚举面）——填充会让该区分不可达。
+   * 省略走 buildCoreAlignedHint（无枚举情形）——填充会让该区分不可达。
    */
   modelCatalog?: { dynamic: boolean; models: ModelCatalogEntry[] } | null;
   /**
@@ -67,7 +67,7 @@ export interface RemoteEngineManifestSnapshot {
    * manifest `taiji.subagentEngine.processModel`（U0 / 设计 §3.3 决策 3）：宿主实例
    * 管理分流判据（per-window → 窗口作用域实例；shared-service → registry 单例）。
    * 缺省 undefined = 解析层缺省 'per-window'（轻壳是常态）。RemoteEngine 自身不消费
-   * 本字段（引擎实例行为与形态无关——形态是宿主管理面），承载仅为与 registry 的
+   * 本字段（引擎实例行为与形态无关——形态是宿主管理侧），承载仅为与 registry 的
    * EngineManifestSnapshot 结构闭包一致（漂移由 typecheck 期同形约束承载）。
    */
   processModel?: "per-window" | "shared-service";
@@ -100,11 +100,11 @@ const logger = getLogger("remote-engine");
  * 此处不杀不判死）。
  *
  * 量级校准依据（全局超时原则：兜底窗按被保护对象粒度校准——本窗保护的是
- * 「pi 引擎 cancel 停轮收敛」这一任务级过程，非控制面单请求）：pi 引擎 cancel
+ * 「pi 引擎 cancel 停轮收敛」这一任务级过程，非控制范围单请求）：pi 引擎 cancel
  * 停轮链 = SIGTERM → trap-flush（在途工具/turn 收尾写盘）→ 进程退出 → run 应答
  * 返回，实测可达 15s（S1 验收 timeline 取证）；兜底窗取实测值的 2× 量级 = 30s。
- * 历史 3s（SDK CANCEL_SETTLE_GRACE_MS）按「控制面单请求秒级」量级误校准到本
- * 任务级窗口上——常驻引擎在 pi 正常收敛途中被组杀，续聊轮 run 陪葬（S1 主路径
+ * 历史 3s（SDK CANCEL_SETTLE_GRACE_MS）按「控制范围单请求秒级」量级误校准到本
+ * 任务级窗口上——常驻引擎在 pi 正常收敛途中被按进程组终止，续聊轮 run 陪葬（S1 主路径
  * 8/8 失败，P1）。SDK 常量仍由 engine-client.cancelRun 作为单请求超时使用（秒级
  * 量级对 cancel 请求往返正确），两窗语义自此分离。
  */
@@ -214,7 +214,7 @@ function isArmedEventFrame(event: unknown): boolean {
  * outcome fail-fast；② cancel 收敛窗——窗满本地合成 abort 终态）：run 应答先到 →
  * 正常返回；触发源先到 → 合流 resolve 为调用方合成的结果（EnginePort 契约「运行中
  * 失败不 reject——合成 outcome + 正常 handle」）。败者后续 settle 一律吞掉（settled
- * 守卫 + run 请求的 then 链恒有 handler，无 unhandled rejection）。
+ * 检查 + run 请求的 then 链恒有 handler，无 unhandled rejection）。
  *
  * registerTrigger 两侧实现均为纯登记赋值（ArmedReceiptGate.onTimeout /
  * AbortWiring.onForceSettle），登记与 run 请求 then 链的先后顺序无可观察差异；
@@ -299,7 +299,7 @@ export class RemoteEngine implements EnginePort {
   /**
    * listModels 四态映射（必写死）：
    *   省略 modelCatalog / models null → 返回 null（buildCoreAlignedHint 语义）；
-   *   dynamic:true 且 `models: []` → 返回 null（「无静态枚举面」：dynamic:true 声明
+   *   dynamic:true 且 `models: []` → 返回 null（「无静态枚举情形」：dynamic:true 声明
    *     清单运行期由引擎凭据链动态发现，静态空目录 ≠ 无模型——与 validateModel 的
    *     dynamic:true 放行对称化。若映射为 []，model-prompt 会走 buildEmptyModelsHint
    *     注入「no credentialed models — configure the provider in ZCode desktop first」
@@ -365,7 +365,7 @@ export class RemoteEngine implements EnginePort {
 
   /**
    * [subagent-model-switch §7.3] setModel 协议映射（EngineClient.setModel 类型化面，
-   * cancelRun 同族控制面单请求）。错误分型经协议 error 帧原样上浮（EngineSdkError
+   * cancelRun 同族控制范围单请求）。错误分型经协议 error 帧原样上浮（EngineSdkError
    * code 保留：三型失败 + engine_run_not_active 无活进程形态——消费方按 §7.2 处置表
    * 分派）。非 native 引擎的本成员已在构造器摘除（见构造器注释）；位 native 的调用
    * 若引擎侧漂移未实装，由引擎 server 的 setModel 分发行结构化拒。
@@ -376,7 +376,7 @@ export class RemoteEngine implements EnginePort {
   }
 
   /**
-   * 协议 run 映射。task 收窄为引擎面子集（model/cwd 改挂 run.params.ctx，协议层
+   * 协议 run 映射。task 收窄为引擎侧子集（model/cwd 改挂 run.params.ctx，协议层
    * 单列——SDK AgentCallOpts 注释的字段裁决；schema 本体经
    * wire task.schema 单字段承载，PI_WORKFLOW_SCHEMA env 由引擎侧派生——H1 schema
    * 传输归位）；事件经 run 作用域
@@ -394,14 +394,14 @@ export class RemoteEngine implements EnginePort {
     // 已 spawn 的 pi env，会致 live 流/流状态拉取双失效，且遮蔽嵌套身份根）。
     await this.opts.client.ensureConnected(ctx.sessionRootId);
 
-    // [W3 契约⑤ run 期接线] gate 位方向判定②：同步面 assertTaskShapeSupported 读
-    // manifest 拦「少声明」；「多声明」（manifest 声明可用、引擎实态不符）gate 同步面
+    // [W3 契约⑤ run 期接线] gate 位方向判定②：同步部分 assertTaskShapeSupported 读
+    // manifest 拦「少声明」；「多声明」（manifest 声明可用、引擎实态不符）gate 同步部分
     // 读不到，由握手应答发现——manifest 快照 vs initialize 应答 capabilities 逐 gate
     // 位对照（common/capability-gate），命中抛 engine_capability_mismatch：本处位于
     // run 帧发出前 → prepare 期失败 reject、不产生 handle，上层 executeViaEngine 经
     // finalizeFailed → Step 3b cleanupWorktreeIfBound 清理 run 前已建的前置副作用。
     // 每次 run 都对照（纯内存比较，幂等）：崩溃重建重新握手后应答变化也能在下一 run
-    // 发现。非 gate 位不一致不进此判定（诊断面 warnOnManifestDiagnostics 已留痕）。
+    // 发现。非 gate 位不一致不进此判定（诊断范围 warnOnManifestDiagnostics 已留痕）。
     const answeredCaps = this.opts.client.getInitializeDiagnostics()?.capabilities;
     if (answeredCaps !== undefined) {
       assertGateCapabilitiesMatched(this.id, this.opts.manifest.capabilities, answeredCaps);
@@ -481,7 +481,7 @@ export class RemoteEngine implements EnginePort {
         )
         : runRequest;
       // [收敛窗合流] 引擎应答先到正常返回；窗满先到 = 本地合成 abort 终态
-      //（wireAbortSignal 窗满回调），晚到的引擎应答由 settled 守卫吞掉。
+      //（wireAbortSignal 窗满回调），晚到的引擎应答由 settled 检查吞掉。
       const wireResult = await awaitRunOrTrigger(
         armedSettled,
         (onForceSettle) => abort.onForceSettle(onForceSettle),
@@ -502,7 +502,7 @@ export class RemoteEngine implements EnginePort {
         // 可达 15s（收敛 30s 兜底窗内为**常态路径**，非窄窗）。原「CAS 恒先行、窗极窄」
         // 断言在 cancel → 用户 message revive 场景不成立：cancelBackground 的 settle
         // 不再终态化 record（idle + interrupted，可随时 revive），15s 窗口内 message
-        // 即把 status 翻回 running——本 outcome 到达时 status 守卫失守，须由
+        // 即把 status 翻回 running——本 outcome 到达时 status 检查失守，须由
         // Continuation 侧轮身份校验（activeRunId）丢弃迟到应答（S1 P1 修复②，
         // conversation-continuation.ts dispatchRoundAsync handlers）。
         return {
@@ -511,7 +511,7 @@ export class RemoteEngine implements EnginePort {
         };
       }
       if (isTransientRunFailure(err)) {
-        // 运行中失败（引擎崩溃 / 数据面故障）：合成 error outcome + 正常 handle。
+        // 运行中失败（引擎崩溃 / 数据范围故障）：合成 error outcome + 正常 handle。
         return {
           handle: { data: this.synthesizeHandle() },
           outcome: transientRunOutcome(this.id, err),
@@ -534,7 +534,7 @@ export class RemoteEngine implements EnginePort {
     return view;
   }
 
-  /** 协议 dispose（幂等）→ EngineClient 停机清理（镜像置死 + pidfile + 组杀兜底）。 */
+  /** 协议 dispose（幂等）→ EngineClient 停机清理（镜像置死 + pidfile + 按进程组终止兜底）。 */
   async dispose(): Promise<void> {
     await this.opts.client.dispose();
   }
@@ -557,8 +557,8 @@ export class RemoteEngine implements EnginePort {
  * 运行中失败（合成 outcome）vs prepare 期失败（reject）的分界：EngineSdkError 的
  * run 期瞬态码由「run 帧已发出后的进程死亡/链路故障/通道终局」产生；其余
  *（engine_protocol_mismatch、engine_model_*、未知错误）按 prepare 期失败上抛
- *（调用方分诊）。进程组杀引发的 stdin 写失败同属 engine_crashed（engine-client.request
- * 统一包装）。
+ *（调用方分诊）。进程被按进程组终止引发的 stdin 写失败同属 engine_crashed
+ *（engine-client.request 统一包装）。
  *
  * [m-core-2] 集合补齐 runtime transport 在 run 期可能出现的四条码：
  *   - engine_transport_lost（control 连接中途丢失）；
@@ -642,7 +642,7 @@ function hostExtensionPaths(): { extensionPaths: string[] } | undefined {
 /**
  * run 帧 wire 载荷构建。协议 ctx 承载（RunContext 字段映射表）：cwd 取任务声明值
  * （有值才上 wire——缺省不上，引擎侧回退自身进程 cwd；worktree 隔离路径由
- * taskSpecWithModel 合流后必有值）；ctxModel 投影 canonical 词形（provider/id，
+ * taskSpecWithModel 合流后必有值）；ctxModel 映射 canonical 词形（provider/id，
  * ModelInfo 字段裁决）。
  * [H1 U6] 会话形态参数直传（RunContext.resume → run.params.resume；结构由
  * RunContext.resume 注释与 SDK RunResumeParams 的 implements 互证承载）。一次性轮
@@ -696,16 +696,16 @@ function buildRunRouteHandlers(ctx: RunContext): RunRoute {
  * （既有）+ 按载体回收」，定点杀链（镜像 recordId 过滤逐 pid 杀）随共享薄壳形态
  * 一并退役：
  *
- * | # | 触发面 | 行为 |
+ * | # | 触发范围 | 行为 |
  * |---|--------|------|
  * | ① | cancel 收敛窗满（wireAbortSignal） | 本地合成 abort 终态（record 必须收尾）；进程回收归资源归属链——per-window 引擎随窗口收尾 dispose（finalizeRun / 轮 idle 收尾 / cancel 打断面补释；薄壳死 = 孙进程同进程组连带收割，P2/P3），shared-service 引擎 stall 出声不回收 |
  * | ② | armed 超时兜底窗满（armWindowDisposeFallbackForArmedTimeout） | 同①的第二道回收：cancel 受理成功但引擎不收敛 / 受理失败两种形态都由本 timer 到点兜底——per-window 引擎对**本实例**执行 dispose（dispose 请求 → 按进程组终止兜底 = 薄壳整体回收），shared-service 引擎 stall 出声不回收（dispose 对其是宿主停机/引擎退役语义，误触发破坏单例常驻 G4） |
- * | — | dispose 通道（宿主停机 / 引擎退役语义） | engine-client.ts dispose（3s 上界 → 组杀兜底）——窗口收尾与引擎退役的共用回收通道，组杀语义保留（停机时引擎本就该全灭） |
- * | — | 引擎自报故障杀链（data-plane 反向请求 10s 未答判引擎故障） | engine-client.ts failEngine → killAll 组杀保留（同 dispose 族）：故障定位在引擎级（引擎反向通道楔死），按进程组终止后同窗口后续派发经 ensureConnected respawn（D7 保留语义） |
+ * | — | dispose 通道（宿主停机 / 引擎退役语义） | engine-client.ts dispose（3s 上界 → 按进程组终止兜底）——窗口收尾与引擎退役的共用回收通道，按进程组终止语义保留（停机时引擎本就该全灭） |
+ * | — | 引擎自报故障杀链（data-plane 反向请求 10s 未答判引擎故障） | engine-client.ts failEngine → killAll 按进程组终止保留（同 dispose 族）：故障定位在引擎级（引擎反向通道楔死），按进程组终止后同窗口后续派发经 ensureConnected respawn（D7 保留语义） |
  *
  * shared-service 降级出口（①②的 zcode 分支）：不杀任何进程、不触发任何 dispose
  * ——stall warn 出声（ADR-0047 静默 ≠ 卡死：活跃产出不得判死，无进展的判定由
- * 任务级无进展检测承载，core 不在回收路径上另开通知面）。
+ * 任务级无进展检测承载，core 不在回收路径上另开通知侧）。
  */
 
 /**
@@ -753,7 +753,7 @@ function armWindowDisposeFallbackForArmedTimeout(
 /**
  * abort 接线的运行态句柄（isCancelSent 供 run catch 分支分诊；dispose 归 finally；
  * onForceSettle 供 run 请求在收敛窗超时时本地合成终态——EnginePort「record 必须收尾」
- * 契约的兑现点，晚到的引擎应答由调用方 settled 守卫吞掉）。
+ * 契约的兑现点，晚到的引擎应答由调用方 settled 检查吞掉）。
  */
 interface AbortWiring {
   isCancelSent(): boolean;
@@ -830,7 +830,7 @@ function abortedRunOutcome(engineId: string, runId: string, err: unknown): SdkAg
   };
 }
 
-/** 运行中失败合成 outcome（引擎崩溃 / 数据面故障）。 */
+/** 运行中失败合成 outcome（引擎崩溃 / 数据范围故障）。 */
 function transientRunOutcome(engineId: string, err: unknown): SdkAgentOutcome {
   return {
     content: "",
@@ -866,7 +866,7 @@ function armedReceiptTimeoutOutcome(engineId: string, runId: string): SdkAgentOu
   };
 }
 
-/** core AgentCallOpts → SDK 引擎面子集（宿主自持字段不透传，SDK 契约类型注释裁决）。 */
+/** core AgentCallOpts → SDK 引擎侧子集（宿主自持字段不透传，SDK 契约类型注释裁决）。 */
 function toSdkTaskSubset(task: AgentCallOpts): SdkAgentCallOpts {
   return {
     prompt: task.prompt,

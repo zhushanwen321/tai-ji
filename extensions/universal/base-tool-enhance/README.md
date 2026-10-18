@@ -1,8 +1,8 @@
 # @zhushanwen/pi-base-tool-enhance
 
-同名 override pi 内置 bash 工具的增强层：前台行为 100% 委托 pi 官方工厂（`createBashToolDefinition`），增量提供 background 模式、强制后台白名单与双模式可配置超时。能力面：测试类命令 force-test 白名单命中自动转后台（模式登记于 force-patterns.ts）、前台挂死保护（可配置前台默认超时，对一切未显式填 timeout 的前台命令生效——典型挂死场景是网络类命令）、工具报错审计（tool_error 审计 hook，entry customType 为 `unified-hooks:tool-error`）。
+同名 override pi 内置 bash 工具的增强层：前台行为 100% 委托 pi 官方工厂（`createBashToolDefinition`），增量提供 background 模式、强制后台白名单与双模式可配置超时。能力侧：测试类命令 force-test 白名单命中自动转后台（模式登记于 force-patterns.ts）、前台挂死保护（可配置前台默认超时，对一切未显式填 timeout 的前台命令生效——典型挂死场景是网络类命令）、工具报错审计（tool_error 审计 hook，entry customType 为 `unified-hooks:tool-error`）。
 
-设计决策沉淀在包内源码注释与本文档。
+设计决策记录在案于包内源码注释与本文档。
 
 ## 安装
 

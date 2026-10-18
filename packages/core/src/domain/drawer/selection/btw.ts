@@ -3,8 +3,8 @@
  *
  * 迁出来源 = DrawerControlState.selectedBtwVid（btw tab 当前查看的旁路线 vid）。
  * per-session 分区（useSessionScopedState，ADR-0049），键 = drawerSessionKey。
- * 写入面 = setBtwView（BtwPanel 选中线时写入）；读取面 = useBtwSelection（BtwPanel）+
- * 复合谓词 selection/predicates.ts（getViewedVids 的 D5 豁免 / btw-replay 触发面 /
+ * 写侧 = setBtwView（BtwPanel 选中线时写入）；读侧 = useBtwSelection（BtwPanel）+
+ * 复合谓词 selection/predicates.ts（getViewedVids 的 D5 豁免 / btw-replay 触发范围 /
  * useBtwTabData 视口命中三消费方共用——禁止各处自行拼装三分量）。
  */
 import { computed, reactive } from 'vue'
@@ -13,7 +13,7 @@ import { useSessionScopedState } from '../../../foundation/use-session-scoped-st
 import { drawerSessionKey } from '../control'
 
 /** btw 选中态（per-session 分区） */
-export interface BtwSelectionState { // oe-exempt:20261003:framework:类型契约先行——selection 分区契约，renderer 消费面即本批 D1 单元
+export interface BtwSelectionState { // oe-exempt:20261003:framework:类型契约先行——selection 分区契约，renderer 消费方即本批 D1 单元
   /** btw tab 当前查看的旁路线 vid（`btw:<piSessionId>`，由 BtwPanel 选中线时写入）；undefined=未查看。
    *  D5 chat-lru 查看态保护数据源之一（getViewedVids：isOpen + activeTab==='btw' + 本字段
    *  三分量 → chat store 注入 evictIfNeeded，入口刷新该线 recency——查看中恒不落阈值驱逐）；

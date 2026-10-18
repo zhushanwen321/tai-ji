@@ -146,7 +146,7 @@ describe('relay ①：session.switch 成功 → notifySessionActivated 投递（
     expect(cap.replies[0]!.payload).toMatchObject({ sessionId: 's-live' })
   })
 
-  it('自动 restore 分支：restore 成功 → 回调收到 restored summary（冷启动/崩溃恢复补拉承接）', async () => {
+  it('自动 restore 分支：restore 成功 → 回调收到 restored summary（冷启动/崩溃恢复补充拉取承接）', async () => {
     const { handler, cap, switchMsg } = makeSwitchHarness()
     cap.summaries = [undefined] // 入口首查未命中 → 走 ensureActive
     cap.restoredSummary = summaryOf('s-restored')

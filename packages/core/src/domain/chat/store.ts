@@ -1,7 +1,7 @@
 /**
  * chat store factory（IF1）—— chat 域状态管理 SSOT（state + actions）。
  * 设计决策叙事（归位历史 / factory 模式 / 状态撕裂修复 / 响应式策略 / 流式块类型 /
- * FileChanges 通道 / 收口出口设计 / 子域控制器委托）见 ./README.md。
+ * FileChanges 通道 / 收尾出口设计 / 子域控制器委托）见 ./README.md。
  * 本文件仅保留与代码行为直接绑定的短契约注释。
  */
 import { computed, ref, shallowRef, type ComputedRef, type ShallowRef } from 'vue'
@@ -49,10 +49,10 @@ import { randomUuid } from '../../utils/random-uuid'
 import { getViewedVids } from '@taiji/core/domain/drawer'
 
 /**
- * [session-occupancy u5b / D1+D3] occupancy 的 renderer 投影三维（wire 契约提取，shared
+ * [session-occupancy u5b / D1+D3] occupancy 的 renderer 派生视图三维（wire 契约提取，shared
  * protocol 是唯一权威）。runtime occupancy 状态机（D3 十一挂点幂等写）经 session.occupancy
  * state topic 广播，useChat ensureStreamSubscription handler 消费（live 帧 + subscribeSession
- * 的 stateSnapshot 回放同路径——重连/切回自动恢复，G4）写入本投影。
+ * 的 stateSnapshot 回放同路径——重连/切回自动恢复，G4）写入本派生视图。
  * sessionPhase（P4 ActivityStrip / 发送位四态的单一数据源）从这里派生。
  */
 export type SessionOccupancyState = Omit<ServerMessageMap['session.occupancy'], 'sessionId'>
@@ -61,7 +61,7 @@ export type SessionOccupancyState = Omit<ServerMessageMap['session.occupancy'], 
  * [E-4] toolCall overlay 形态挂载到分区最后一条 assistant（subagent entry 帧消费，§6.1）。
  *
  * 模块级纯函数（输入输出均不可变构造）：与主对话流 message.tool_call_start effect 同语义，
- * 但目标分区无 message_start/delta overlay 链——挂载目标是 reducer 基线投影后的末位 assistant
+ * 但目标分区无 message_start/delta overlay 链——挂载目标是 reducer 基线映射后的末位 assistant
  * （pi 事件序保证 tool_execution_* 晚于所属 assistant 的 message_end 定稿，基线已含该消息的
  * toolCalls 提取版 status:'completed'——overlay 改 running 是对「重放视角终态假设」的 live 修正）。
  * 幂等：同 toolCallId 已存在且已有终态（toolResult 已回填 output / error）→ no-op，防同帧
@@ -101,7 +101,7 @@ function attachRunningToolCall(prev: Message[], form: PiToolCallEntryForm): Mess
  * 显示的用户气泡（G4 违背）。
  *
  * 步骤① 尾部保护段收集：从分区尾向前收集「streaming assistant（pi 无对应 entry 的
- * 进行中实体，直接替换会让后续 text_delta 被守卫丢弃、流永久停滞）或 user
+ * 进行中实体，直接替换会让后续 text_delta 被检查丢弃、流永久停滞）或 user
  * （piEntryId 缺失或不在基线 id 集——live overlay 的结构性特征：appendUser 剥除
  * piEntryId 且 id 为客户端 u-<uuid>，与基线 entry 派生 uuidv7 永不相等）」的连续段，
  * 遇其他已确认消息即停——已确认部分由基线接管（基线是准确相）。
@@ -112,7 +112,7 @@ function attachRunningToolCall(prev: Message[], form: PiToolCallEntryForm): Mess
  * （pi session 文件 appendFileSync 按投递序追加），基线滞后时缺的是尾部新消息
  * （后缀），对齐必然从保护段头部（先投递）对起。**不能倒序**：k < n 时倒序会把
  * 保护段最新条（基线没有）错配到基线最新条（较旧）——剔掉基线没有的、留下基线
- * 已有的，恰好双计反转（设计 D3 被否项）。
+ * 已有的，恰好双计反转（设计 D3 不采用项）。
  *
  * 已知边界（设计 D3，可接受）：跨 turn 重发相同文本时数量对齐可能误剔新 overlay——
  * 表现为该消息暂以基线旧版本显示（位置在历史区），不丢消息不重复，新 entry 落盘后
@@ -127,7 +127,7 @@ function attachRunningToolCall(prev: Message[], form: PiToolCallEntryForm): Mess
  * 一次性语义不受影响）。
  */
 /**
- * user 消息文本投影（mergeBaselineWithLive 文本多重集判据用）。比较是**投影级**而非
+ * user 消息文本派生视图（mergeBaselineWithLive 文本多重集判据用）。比较是**派生视图级**而非
  * 「pi 文本 ≡ 提交文本」字节恒等（composer-multi-skill-injection §3.5-① R4 修正，
  * 过时前提实施期同批更正）：两侧经本函数同规则转换——sidecar 命中消息的基线 content
  * 已被 runtime backfillSegments 换回原始 Segment[]，与 live overlay（原始 segments）
@@ -144,7 +144,7 @@ function userMessageText(m: Message): string {
 function mergeBaselineWithLive(baseline: Message[], partition: Message[]): Message[] {
   // 基线身份集：piEntryId 与 id 双收（user/assistant 消息带 piEntryId；system 族无
   // piEntryId 字段但 id 即 entry 派生 uuidv7——与 hydrate 锚取值 `piEntryId ?? id` 对称）。
-  // 分区 user 的已确认判据 = 身份任一命中：piEntryId 命中覆盖真实基线投影（前轮
+  // 分区 user 的已确认判据 = 身份任一命中：piEntryId 命中覆盖真实基线派生视图（前轮
   // reconcile/hydrate 注入的消息），id 命中兜底同 id 形态；live overlay 的 u-<uuid> id
   // 与基线 uuidv7 是两个永不相等的 id 空间（mutations.ts prependHistory 同款论证），
   // 不会被误判已确认。
@@ -155,12 +155,12 @@ function mergeBaselineWithLive(baseline: Message[], partition: Message[]): Messa
   }
   // [steer-bubble Gate B 修复 2026-08-30] user 文本多重集判据（第三判据）：
   // AC-2 实跑暴露的结构性竞态——pi 文件（基线源）对「message_end(user) 帧已落盘但帧
-  // 仍在途」的消息领先于 live 帧流，此时 overlay（乐观/腿 1 投递插入，身份判据结构性
+  // 仍在途」的消息领先于 live 帧流，此时 overlay（乐观/路径 1 投递插入，身份判据结构性
   // 永假：piEntryId 剥除 + id 空间不相交）会被当 live-only 保护保留，与基线权威副本
   // 双计（实测 R3-PROMPT 前端 2 条 / pi 1 条；触发形态 = 基线尾部为 assistant（k=0）
-  // 时数量尾窗对齐 a=0 失去去重能力）。文本判据是**投影级比较**（composer-multi-skill-
+  // 时数量尾窗对齐 a=0 失去去重能力）。文本判据是**派生视图级比较**（composer-multi-skill-
   // injection §3.5-① R4 修正，早期注释「pi 文本 ≡ 提交文本」为过时前提）：比较域 =
-  // userMessageText 两侧投影（基线 Array content 经 segmentsToText 序列化），非 pi
+  // userMessageText 两侧派生视图（基线 Array content 经 segmentsToText 序列化），非 pi
   // 落盘字节。sidecar 命中消息的基线 content 经 runtime backfillSegments 换回原始
   // Segment[]，与 live 侧（原始 segments）同源 → 文本命中不双计；真实失配域 = sidecar
   // 丢失的兜底反解析路径——反解析产物与提交文本存在剥块残留分隔空白等字节差（含
@@ -190,7 +190,7 @@ function mergeBaselineWithLive(baseline: Message[], partition: Message[]): Messa
     (m.piEntryId !== undefined && baselineIds.has(m.piEntryId)) || baselineIds.has(m.id)
   // 预计算整分区三态确认标记（正序消费多重集——尾部 walk 的逆序调用序会把同文本
   // 新 overlay 错配到基线旧副本上，AC-2b 同文本双投递场景实测暴露）：
-  // 'identity' = 前轮合并注入的基线投影；'text' = 与基线副本文本同源的 dup overlay；
+  // 'identity' = 前轮合并注入的基线派生视图；'text' = 与基线副本文本同源的 dup overlay；
   // false = 未确认（live-only 候选）。
   type ConfirmKind = 'identity' | 'text' | false
   const confirmKinds: ConfirmKind[] = partition.map((m) => {
@@ -201,7 +201,7 @@ function mergeBaselineWithLive(baseline: Message[], partition: Message[]): Messa
 
   // 步骤①：尾部保护段。'text' 确认的 dup overlay **透明跳过**（丢弃但不停止 walk——
   // 它前面的 streaming assistant 仍可能 live-only，F2 组合形态 [streaming, dup-overlay]
-  // 若在 dup 处停止会把 streaming 实体踢出保护、流被基线替换后 delta 守卫丢弃）；
+  // 若在 dup 处停止会把 streaming 实体踢出保护、流被基线替换后 delta 检查丢弃）；
   // 'identity' 确认或 complete assistant（非 streaming 的已定稿消息）才停止。
   const protectedSeg: Message[] = []
   for (let i = partition.length - 1; i >= 0; i--) {
@@ -321,19 +321,19 @@ export function createChatStore(options: ChatStoreOptions = {}) {
    */
   const pendingSend = ref<Set<string>>(new Set())
   /**
-   * [session-occupancy u5b / D1] occupancy 投影分区（session.occupancy state topic 驱动，
+   * [session-occupancy u5b / D1] occupancy 派生视图分区（session.occupancy state topic 驱动，
    * per-session 三维 {turn, compacting, bash}）。occupancy 权威在 runtime（D3 状态机），本
-   * Map 是表现投影：isCompacting 由 compacting 维度派生（单一来源，[HISTORICAL] compactingSessions
-   * Set 双轨退役——u3 前 renderer 从 session.compacting/compacted 事件拼装，P3 双轨收口）。
+   * Map 是表现派生视图：isCompacting 由 compacting 维度派生（单一来源，[HISTORICAL] compactingSessions
+   * Set 双轨退役——u3 前 renderer 从 session.compacting/compacted 事件拼装，P3 双轨收敛）。
    * 无记录 = 全 idle（getOccupancy 返回缺省值，路由 direct）。
-   * 断连收口（clearIndependentTransient）删分区——重连后 resubscribeAll 的 stateSnapshot
+   * 断连收尾（clearIndependentTransient）删分区——重连后 resubscribeAll 的 stateSnapshot
    * 回放恢复真实值（G4）。
    */
   const occupancies = ref<Map<string, SessionOccupancyState>>(new Map())
   /** compacting reason 平行表（M4：session.compacting{reason} 驱动，浮层文案源保留）。
    *  区分手动（'manual'）/自动（'threshold'|'overflow'），驱动 MessageStream compacting 浮层文案。
    *  [u5b] membership 已切 occupancy 派生，本 Map 只承载文案源：session.compacting 写入 /
-   *  session.compacted 清除 / 断连收口随 occupancy 分区一并清（reason 只在 isCompacting 时被读，
+   *  session.compacted 清除 / 断连收尾随 occupancy 分区一并清（reason 只在 isCompacting 时被读，
    *  孤立残留无害）。 */
   const compactingReasons = ref<Map<string, string>>(new Map())
   /**
@@ -360,30 +360,30 @@ export function createChatStore(options: ChatStoreOptions = {}) {
   const retryStates = ref<Map<string, RetryState>>(new Map())
   // [u5a 退役] `queueStates` 分区 + `getQueueState` / `clearQueueState` 已删除：唯一写方
   // （message.queue_update handler）随投递所有权内核 u3b 退役（内核排队取代 pi 快照），队列区
-  // 展示数据源改为 session.delivery 状态帧单一来源（u3c：useQueueRows 读内核投影）——本分区
-  // 恒空、读面恒 undefined、clearQueueState 恒 no-op（u3b/u3c 已把「分区与 API 收尾」挂账 u5）。
+  // 展示数据源改为 session.delivery 状态帧单一来源（u3c：useQueueRows 读内核派生视图）——本分区
+  // 恒空、读侧恒 undefined、clearQueueState 恒 no-op（u3b/u3c 已把「分区与 API 收尾」记为待处理 u5）。
   // [B1 退役] `pendingBuffer` 分区 + `pushPending` / `drainN` / `reconcilePending` /
-  // `abortPending` 已删除：计数腿被设计 §3.1 删除面明列退役（投递所有权内核 u3b 后零生产
+  // `abortPending` 已删除：计数路径被设计 §3.1 删除范围明列退役（投递所有权内核 u3b 后零生产
   // 消费方，队列区数据源 = session.delivery 状态帧；提交侧统一 submit 直发，无暂存形态）。
   // 历史见 git（steer-followup-user-bubble-display D2 / W14 D6）。
   /**
    * [steer-bubble u0 / D2]
    * per-session inflight 投递确认计数（Map 分区，对齐 retryStates 惯例，不可变写保证响应式）。
    *
-   * 语义 = **已挂账待确认的投递数**（投递所有权内核 u3b 后）：统一提交（统一 submit）的
+   * 语义 = **已记为待确认的投递数**（投递所有权内核 u3b 后）：统一提交（统一 submit）的
    * 每条乐观气泡在提交点 +1，其确认帧 message_end(user) 到达时 −1。不变式 inflight ≥ 0
    * （decrementInflight 钳制，配额漂移不产生负值）；正常路径逐投递归零。
    *
    * 维护点两处：
-   * 1. 统一提交挂账：appendUser 乐观插入 +1 / RPC 失败 catch 回滚 −1（挂 useChat
+   * 1. 统一提交记账：appendUser 乐观插入 +1 / RPC 失败 catch 回滚 −1（挂 useChat
    *    submitNewMessage 调用点，不在 appendUser 内防双计）。
    * 2. 标记回执回收：message_end(user) 帧命中内核裸标记（送达回执主分支）即 −1；
-   *    ② 纯计数兜底（帧无标记/标记不命中投影时 inflight > 0）服务 direct 车道等
+   *    ② 纯计数兜底（帧无标记/标记不命中派生视图时 inflight > 0）服务 direct 车道等
    *    无回执命中形态，同一 −1 语义。
    *
-   * 清零挂点（D4 生命周期闭合）：abort（message.complete{stopReason:'aborted'}）与
+   * 清零挂点（D4 生命周期完成）：abort（message.complete{stopReason:'aborted'}）与
    * disposeSession——pi 队列确定性作废后确认基线一并作废，防残留吞掉后续投递的确认
-   * 配额。LRU 驱逐与断连收口**刻意不清**（D4 豁免，见 lruEvictDeps 处声明注释）。
+   * 配额。LRU 驱逐与断连收尾**刻意不清**（D4 豁免，见 lruEvictDeps 处声明注释）。
    */
   const inflightCounts = ref<Map<string, number>>(new Map())
   /**
@@ -394,14 +394,14 @@ export function createChatStore(options: ChatStoreOptions = {}) {
    * 「live ≡ reload」从构造上成立（同 reducer 同输入序列必得同 state，等价性断言见
    * runtime src/__tests__/equivalence/live-reload.test.ts）。
    *
-   * 值 = ChatViewStateBuffer（跨帧 mutable 累积缓冲）：实时每帧一条 entry 的落账从
+   * 值 = ChatViewStateBuffer（跨帧 mutable 累积缓冲）：实时每帧一条 entry 的记账从
    * copy-on-write 整表拷贝（10k 消息会话每帧 O(n) 分配）变为 O(1) 原地累积——buffer
    * 与 applyEntry / replayEntries 共享同一派生段与 dispatch 骨架，产物 deep-equal
-   * （apply-entry-buffer-equivalence.test.ts 守卫）。**buffer.state 是活容器**：消费点
-   * 只允许同步读（如 applySubagentEntries 基线投影紧随 feed 之后），不得跨帧持有其
+   * （apply-entry-buffer-equivalence.test.ts 检查）。**buffer.state 是活容器**：消费点
+   * 只允许同步读（如 applySubagentEntries 基线派生视图紧随 feed 之后），不得跨帧持有其
    * 数组 / Set 引用并假设内容不变。
    *
-   * 非 Vue ref（[ADR-0049 例外]：factory 单例 Map，存的是纯投影数据非响应式业务状态）：
+   * 非 Vue ref（[ADR-0049 例外]：factory 单例 Map，存的是纯派生视图数据非响应式业务状态）：
    * 渲染不走它——实时渲染走 messages ref 的 overlay 路径
    * （message_start/delta/complete，streaming 语义）；本 state 是权威累积，供 W22
    * broadcast≡get_state 对账与后续 ref 收敛消费。disposeSession / LRU 驱逐同点清理。
@@ -516,7 +516,7 @@ export function createChatStore(options: ChatStoreOptions = {}) {
    *  同点全清」的既有清理惯例不一致是有意为之（steer-bubble D4「刻意保留」）：
    *  inflight 确认基线是不可重建状态（仅存在于前端，清了即永久丢失/漂移），
    *  且驱逐重进后标记回执回收仍依赖它；entryStates/anchors/hydrated 是重建型（hydrate 重放可
-   *  恢复）才随驱逐清理。断连收口（clearIndependentTransient）同理豁免 inflight，见该处注释。
+   *  恢复）才随驱逐清理。断连收尾（clearIndependentTransient）同理豁免 inflight，见该处注释。
    *  后续维护勿按惯例顺手补清。 */
   const lruEvictDeps = makeLruEvictDeps(
     messages,
@@ -557,7 +557,7 @@ export function createChatStore(options: ChatStoreOptions = {}) {
     return retryStates.value.get(sessionId)
   }
 
-  // [u5a 退役] 前身 getQueueState / clearQueueState（queueStates 分区的读写面）已删除——
+  // [u5a 退役] 前身 getQueueState / clearQueueState（queueStates 分区的读侧与写侧）已删除——
   // 分区已无生产写方（见上方 queueStates 退役注记），两方法分别为恒 undefined 读与恒 no-op 写。
   // forceQuit 编排（renderer useSidebarSessionActions）不再调用 clearQueueState：steer 队列快照
   // 展示态本身已不存在，pi 槽位的真实回收由 delivery.drain 承担（u3c）。
@@ -610,10 +610,10 @@ export function createChatStore(options: ChatStoreOptions = {}) {
    * 切入 reconcile：entry 历史（服务端 getHistory 快照）与 live 分区合并。
    *
    * [背景 session-reconcile 2026-08-22] 后台 session（agent-managed 子 session）在
-   * 前端不在场时推进/完成 turn——hydrate 的一次性守卫会让切入后的新 entry 永不出现
-   * （最后输出看不到）；且 pi entries 不含进行中消息（entry 完成才 append），直接
-   * 替换会抹掉 live streaming 实体 → 后续 text_delta 被 isLastAssistantStreaming
-   * 守卫丢弃 → 流永久停滞。合并方向（登记表 #7 切入 reconcile 规则）：
+ * 前端不在场时推进/完成 turn——hydrate 的一次性检查会让切入后的新 entry 永不出现
+ * （最后输出看不到）；且 pi entries 不含进行中消息（entry 完成才 append），直接
+ * 替换会抹掉 live streaming 实体 → 后续 text_delta 被 isLastAssistantStreaming
+ * 检查丢弃 → 流永久停滞。合并方向（登记表 #7 切入 reconcile 规则）：
    * **entry 历史为基线，分区尾部 streaming 实体追加其后**（live 真相优先于 entry 快照）。
    *
    * - 未 hydrate → 等价 hydrate（原语义：合并注入 + 标记 + [u4d] 窗口状态）
@@ -663,7 +663,7 @@ export function createChatStore(options: ChatStoreOptions = {}) {
     lruTouch(sessionId) // W3: LRU recency（切入刷新视同活跃访问）
   }
 
-  /** 直接覆盖某 session 的消息（subagent 虚拟 session 用，不受 hydrated 守卫；回流路径截断 AC-10/D9）。 */
+  /** 直接覆盖某 session 的消息（subagent 虚拟 session 用，不受 hydrated 检查；回流路径截断 AC-10/D9）。 */
   function setMessages(sessionId: string, history: Message[]): void {
     const cloned = truncateToolOutputBatch(history.map((m) => ({ ...m })))
     commitMessages(messages, sessionId, cloned)
@@ -691,10 +691,10 @@ export function createChatStore(options: ChatStoreOptions = {}) {
    * 引用原样透传（morph 暂存段经送达回执取出的原引用直接进消息流）。
    * piEntryId 同点剥除（见实现内注释：客户端 entry id 非真实 pi entry id，防 fork 误定位）。
    *
-   * [消息撤回 U8] 可选 id：送达回执入流重建时传提交 clientUuid 保号（气泡 id 与内核
+   * [消息撤回 U8] 可选 id：送达回执入流重建时传提交 clientUuid 保留原 id（气泡 id 与内核
    * 条目 id / morph 前乐观气泡 id 对齐——live 窗口撤回定位的锚，见 effect-types
    * appendUser 注释）；缺省自生成（乐观插入现行为）。id 任意形态照用（外来条目可能为
-   * 内核裸 uuid），无 u- 前缀校验——保号语义优先于形态约束。
+   * 内核裸 uuid），无 u- 前缀校验——保留原 id 语义优先于形态约束。
    */
   function appendUser(sessionId: string, segments: Segment[], id?: string): string {
     const entry: PiMessageEntry = {
@@ -720,7 +720,7 @@ export function createChatStore(options: ChatStoreOptions = {}) {
     return derivedMsg.id
   }
 
-  // ── inflight 挂账/回收（[steer-bubble u0/D2] 契约层：state 见上，调用方接线归 u1/u2）──
+  // ── inflight 记账/回收（[steer-bubble u0/D2] 契约层：state 见上，调用方接线归 u1/u2）──
 
   /** 读 per-session inflight 计数。无记录 = 0（归零即删条目，正常路径 Map 多数时间无该 sid）。 */
   function getInflight(sessionId: string): number {
@@ -728,7 +728,7 @@ export function createChatStore(options: ChatStoreOptions = {}) {
   }
 
   /**
-   * inflight += n（默认 1）。统一提交乐观挂账 +1（useChat submitNewMessage 调用点）。
+   * inflight += n（默认 1）。统一提交乐观记账 +1（useChat submitNewMessage 调用点）。
    * n ≤ 0 no-op。
    */
   function incrementInflight(sessionId: string, n = 1): void {
@@ -763,11 +763,11 @@ export function createChatStore(options: ChatStoreOptions = {}) {
    * [W21] 重构 entry 喂 per-session reducer state（buffer.feed）——实时 feed 与文件重放
    * （hydrate 链的 replayEntries）喂同一个 reducer。
    *
-   * 本语义：纯累积（权威镜像），不直接投影 messages ref——实时渲染走 overlay 路径
+   * 本语义：纯累积（权威镜像），不直接映射出 messages ref——实时渲染走 overlay 路径
    * （message_start/delta/complete + tool_call_start/end 的 effect，streaming 态语义
    * reducer 无法表达：running toolCall / delta 累积；例外——user 消息 [W2] 已 entry 化，
-   * appendUser 构造 user entry 经本方法喂入 + overlay 投影，乐观 user 插入自此落入
-   * reducer 可表达域）。ref 与 reducer state 的收敛（对账投影）归 W22 broadcast≡get_state
+   * appendUser 构造 user entry 经本方法喂入 + overlay 映射，乐观 user 插入自此落入
+   * reducer 可表达域）。ref 与 reducer state 的收敛（对账派生视图）归 W22 broadcast≡get_state
    * 全量化。同 entry 序列必得同 state——「live ≡ reload」在构造上成立（buffer 与
    * applyEntry 共享派生段 + dispatch 骨架，产物 deep-equal 见 apply-entry.ts 文件头）。
    */
@@ -782,17 +782,17 @@ export function createChatStore(options: ChatStoreOptions = {}) {
 
   /**
    * [E-4] subagent entry 帧消费（subagent-realtime-channel §6.1/§6.2）：虚拟分区喂
-   * applyEntry + 基线投影 + toolCall overlay。
+   * applyEntry + 基线派生视图 + toolCall overlay。
    *
    * 输入 = session.subagentEntriesAppended 帧的 entries（PiEntry 与 PiToolCallEntryForm
    * 混合，形态与主对话流 message.message_end / tool_call_* 帧的 entry 同构）。三步：
    * 1. PiEntry 逐条喂 reducer（applyEntryFrame，toolResult 的 deliveredToolResultIds
-   *    幂等去重继承；与 reload 腿（getSubagentHistory）喂同一 reducer——live ≡ reload
+   *    幂等去重继承；与 reload 路径（getSubagentHistory）喂同一 reducer——live ≡ reload
    *    构造性成立的 SubagentTee 侧锚点，等价性断言见 runtime __tests__/equivalence/subagent-live-reload.test.ts）。
-   * 2. 基线投影：reducer state.messages 整体替换分区 ref（copy + truncate，对齐 setMessages
+   * 2. 基线派生视图：reducer state.messages 整体替换分区 ref（copy + truncate，对齐 setMessages
    *    形态）。定稿是权威：stream_delta 打字机中间态（applySubagentStreamDelta 建的 sa-*
    *    streaming 实体）被定稿取代（§6.2 覆盖语义）。已知限制：基线只含本连接存续期间的
-   *    live entry——丢帧后经 fetchAndInject 快照补齐的头部会被下一次投影替换掉，靠重开
+   *    live entry——丢帧后经 fetchAndInject 快照补齐的头部会被下一次派生视图替换掉，靠重开
    *    drawer 重新快照自愈（与 W22 对账收敛前的主对话流 ref/reducer 分离同等程度的临时态）。
    * 3. toolCall overlay：running toolCall 挂末位 assistant（attachRunningToolCall，帧内
    *    toolResult 先处理时幂等跳过）。
@@ -801,10 +801,10 @@ export function createChatStore(options: ChatStoreOptions = {}) {
    * （renderer useMessageEffects 注入），subagent 虚拟分区 id 由调用方经 shared 工厂构造。
    */
   /**
-   * [E-4] subagent 基线投影的产物缓存（truncateToolOutputBatchCached 的短路表：
-   * 输入消息引用 → 上次投影产物）。
+   * [E-4] subagent 基线派生视图的产物缓存（truncateToolOutputBatchCached 的短路表：
+   * 输入消息引用 → 上次派生视图产物）。
    *
-   * per-factory 簿记（对齐 entryStates 判据，[ADR-0049 例外]）：投影是纯变换，同引用必得
+   * per-factory 簿记（对齐 entryStates 判据，[ADR-0049 例外]）：派生视图是纯变换，同引用必得
    * 同结果（ADR-0039 引用恒等 ⇒ 内容恒等），随 factory 实例隔离只为测试隔离。弱引用：
    * 消息对象随分区销毁 / LRU 驱逐 GC 后条目自动回收，disposeSession / 驱逐**无需清理挂点**
    * （重进分区 reducer 重建新对象，不命中即照常截断判定，无陈旧复用风险）。
@@ -816,16 +816,16 @@ export function createChatStore(options: ChatStoreOptions = {}) {
     for (const entry of entries) {
       if (entry.type !== 'toolCall') applyEntryFrame(virtualId, entry)
     }
-    // 基线投影（无 PiEntry 的纯 toolCall 帧不触发投影——分区保持，overlay 直接操作 ref）。
-    // 已投影过的消息引用直接复用上次产物（reducer 不截断、历史 toolCall 原文 MB 级时
-    // 每帧全量重编码是投影热开销），输出形态与 truncateToolOutputBatch(map 浅拷贝) 逐值一致。
+    // 基线派生视图（无 PiEntry 的纯 toolCall 帧不触发派生视图——分区保持，overlay 直接操作 ref）。
+    // 已生成过派生视图的消息引用直接复用上次产物（reducer 不截断、历史 toolCall 原文 MB 级时
+    // 每帧全量重编码是派生视图热开销），输出形态与 truncateToolOutputBatch(map 浅拷贝) 逐值一致。
     // buffer.state 活容器在此同步消费（紧随上方 feed，不跨帧持有数组引用）；
     // truncateToolOutputBatchCached 恒返回新数组，活数组不出本表达式
     const buf = entryStates.get(virtualId)
     if (buf) {
       commitMessages(messages, virtualId, truncateToolOutputBatchCached(buf.state.messages, subagentProjectedCache))
     }
-    // toolCall overlay 后置：基于投影后分区操作，保证挂载目标是基线末位 assistant
+    // toolCall overlay 后置：基于派生视图后分区操作，保证挂载目标是基线末位 assistant
     for (const form of entries) {
       if (form.type !== 'toolCall') continue
       const prev = messages.value.get(virtualId)?.value ?? []
@@ -856,27 +856,27 @@ export function createChatStore(options: ChatStoreOptions = {}) {
     )
   }
 
-  // ── 收口出口（唯一，D-007 真收口非翻 flag）──
+  // ── 收尾出口（唯一，D-007 真收尾非翻 flag）──
 
   /**
-   * session 级统一收口：streaming 实体推终态 + 清 pendingSend。幂等（D-010 sealed）。
+   * session 级统一收尾：streaming 实体推终态 + 清 pendingSend。幂等（D-010 sealed）。
    * @param reason 决定 message.status + toolCall.status 终态映射（见 FinalizeReason）
    */
   function finalizeSession(sessionId: string, reason: FinalizeReason, errorText?: string): void {
     streamingStateMachine.finalizeMessages(sessionId, reason, errorText)
-    // 清 pendingSend（bash 消息不经此收口：finalizeMessages 跳过 bash，
-    // 其生命周期由 bashResultEffect/markBashError 独立管理，不应被 assistant 收口误清）。
+    // 清 pendingSend（bash 消息不经此收尾：finalizeMessages 跳过 bash，
+    // 其生命周期由 bashResultEffect/markBashError 独立管理，不应被 assistant 收尾误清）。
     clearPendingSend(sessionId)
-    // 收口日志（D5）：异常 reason 维持 dev 门（dev 留痕）；normal/aborted 正常路径不打
+    // 收尾日志（D5）：异常 reason 维持 dev 门（dev 留痕）；normal/aborted 正常路径不打
     //（去长对话噪音）。（原 reason === 'timeout' 常驻 warn 分支随 pendingSend 30s 空窗
-    // timer 退役——ADR-0122 时间平抑红线，收口全事件驱动。）
+    // timer 退役——ADR-0122 时间平抑红线，收尾全事件驱动。）
     if (isDevMode() && reason !== 'normal' && reason !== 'aborted') {
       console.warn(`[chat] finalizeSession sid=${sessionId} reason=${reason}`)
     }
   }
 
   /**
-   * 多 session 统一收口（断连 / runtime 重启兜底）：遍历瞬态 session，逐个调 resetTransientStates。
+   * 多 session 统一收尾（断连 / runtime 重启兜底）：遍历瞬态 session，逐个调 resetTransientStates。
    * 遍历范围是 messages.keys() ∪ occupancy 分区中 compacting 的 sid ∪ handingOffSessions ∪ retryStates ∪ pendingSend 并集
    *（不能只遍历 messages——compacting/retry/pendingSend 可独立于消息存在）。详见 ./README.md。
    */
@@ -890,16 +890,16 @@ export function createChatStore(options: ChatStoreOptions = {}) {
   }
 
   /**
-   * 统一瞬态状态收口 helper（W3）：finalizeSession（消息流收口）+ 额外清 compacting / retry / queue
+   * 统一瞬态状态收尾 helper（W3）：finalizeSession（消息流收尾）+ 额外清 compacting / retry / queue
    * 瞬态（断连后无事件驱动清理）。与 finalizeSession 的边界详见 ./README.md。
    * @param reason 透传给 finalizeSession 决定 message.status 终态映射（见 FinalizeReason）
    */
   function resetTransientStates(sessionId: string, reason: FinalizeReason = 'disconnect'): void {
-    // 先走 finalizeSession 收口 streaming 实体 + 清 pendingSend + 清 timer（保留其幂等语义）
+    // 先走 finalizeSession 收尾 streaming 实体 + 清 pendingSend + 清 timer（保留其幂等语义）
     finalizeSession(sessionId, reason)
     // 再清 session 级独立瞬态（断连兜底：这些态在断连后无事件驱动清理）
     streamingStateMachine.clearIndependentTransient(sessionId)
-    // [u5b] compacting reason 文案源随断连收口清理（原 setCompacting(false) 单点写的语义拆分：
+    // [u5b] compacting reason 文案源随断连收尾清理（原 setCompacting(false) 单点写的语义拆分：
     // occupancy 分区由 clearOccupancy 删，reason 由本点清——重连快照恢复 occupancy 后浮层
     // 文案从 session.compacting 事件重新取得，不残留旧 reason）
     setCompactingReason(sessionId, undefined)
@@ -907,7 +907,7 @@ export function createChatStore(options: ChatStoreOptions = {}) {
 
   // ── pendingSend 生命周期（useChat/effects 经 ctx/port 调）──
   // [ADR-0122 时间平抑红线] 原 pendingSend 30s 空窗 timer（PENDING_SEND_TIMEOUT_MS +
-  // pendingSendTimers + disarmPendingSendTimer 命令豁免）已整体退役：pendingSend 的收口
+  // pendingSendTimers + disarmPendingSendTimer 命令豁免）已整体退役：pendingSend 的收尾
   // 全事件驱动——message_start（正常）/ finalizeSession（complete/error/disconnect 等）/
   // session.deliveryHandled（命令终局 U2①）/ session.delivery morph / occupancy 三维全
   // idle 帧 / abort 乐观清 / 断连 resetTransientStates。
@@ -926,7 +926,7 @@ export function createChatStore(options: ChatStoreOptions = {}) {
     }
   }
 
-  /** [D3] pendingSend 投影查询（「正在提交直发」瞬时态——send/editAndResend 置、message_start
+  /** [D3] pendingSend 派生视图查询（「正在提交直发」瞬时态——send/editAndResend 置、message_start
    *  清）。语义窄于 isActive（= isGenerating ∨ pendingSend）：UserBubble submitEdit 双发锁
    *  消费（与 Composer isSending 对齐的「正在提交」信号），不含「生成中」（编辑入口本身
    *  仅非活跃态可见，锁的目的是防提交在途并发覆盖 pendingDirectSends）。 */
@@ -954,7 +954,7 @@ export function createChatStore(options: ChatStoreOptions = {}) {
    * 指定 session 是否正在压缩上下文（#6）。
    * [u5b / D1] occupancy 派生（compacting 维度）——单一来源（session.occupancy 帧驱动，
    * [HISTORICAL] setCompacting 双轨通路退役：u3 前 session.compacting/compacted 事件直写
-   * membership Set，P3 双轨收口后由 occupancy state topic 承担 membership + session.compacting
+   * membership Set，P3 双轨收敛后由 occupancy state topic 承担 membership + session.compacting
    * 事件只承载浮层 reason 文案源）。
    */
   function isCompacting(sessionId: string): boolean {
@@ -962,7 +962,7 @@ export function createChatStore(options: ChatStoreOptions = {}) {
   }
 
   /**
-   * [u5b / D1] 写入 occupancy 投影（session.occupancy 帧驱动；useChat ensureStreamSubscription
+   * [u5b / D1] 写入 occupancy 派生视图（session.occupancy 帧驱动；useChat ensureStreamSubscription
    * handler 消费 live 广播与 stateSnapshot 回放同一入口——重连/切回自动恢复，G4）。
    * 整体替换该 sid 分区（帧是全量三维快照，非 patch）。
    */
@@ -970,7 +970,7 @@ export function createChatStore(options: ChatStoreOptions = {}) {
     occupancies.value = new Map(occupancies.value).set(sessionId, occupancy)
   }
 
-  /** [u5b / D1] 删除 occupancy 分区（断连收口 clearIndependentTransient / disposeSession）。
+  /** [u5b / D1] 删除 occupancy 分区（断连收尾 clearIndependentTransient / disposeSession）。
    *  删除后派生回落全 idle；重连后 stateSnapshot 回放恢复真实值。 */
   function clearOccupancy(sessionId: string): void {
     if (!occupancies.value.has(sessionId)) return
@@ -980,9 +980,9 @@ export function createChatStore(options: ChatStoreOptions = {}) {
   }
 
   /**
-   * [u5b / D1] sessionPhase —— occupancy 投影读口（P4 ActivityStrip / 发送位四态 /
+   * [u5b / D1] sessionPhase —— occupancy 派生视图读口（P4 ActivityStrip / 发送位四态 /
    * 发送分发器 getSendRoute 的单一数据源；语义命名面向消费方）。无记录（未收到任何帧 /
-   * 已断连收口）= 全 idle 缺省。原 getOccupancy 读口已删（生产外部消费 0，同值双读口收敛本口）。
+   * 已断连收尾）= 全 idle 缺省。原 getOccupancy 读口已删（生产外部消费 0，同值双读口收敛本口）。
    */
   function sessionPhase(sessionId: string): SessionOccupancyState {
     return occupancies.value.get(sessionId) ?? { turn: 'idle', compacting: false, bash: false }
@@ -1071,7 +1071,7 @@ export function createChatStore(options: ChatStoreOptions = {}) {
    *
    * 消息形态与 reload 链路逐字段对齐（live ≡ reload，关键规则 9）：reload 侧由
    * mapSessionEntries 对 subagent-directive custom_message 覆写 display:true →
-   * applyCustomMessageEntry 投影出同字段 Message（role:'system' + customType + content +
+   * applyCustomMessageEntry 映射出同字段 Message（role:'system' + customType + content +
    * details + display:true）。live 侧消费 subagent.directive 广播时经本方法构造——
    * id 用 `cm-<uuid>`（对齐 message.customStart effect 的客户端 id 先例；reload 侧为 pi
    * 持久化 entry id，id 值异源属 W21 已裁决的 live/reload 差异类），timestamp 客户端时钟。
@@ -1244,7 +1244,7 @@ export function createChatStore(options: ChatStoreOptions = {}) {
 export type ChatStoreInstance = ReturnType<typeof createChatStore>
 
 /**
- * [D6②/u6.1] chat store facet：readers 面——消费组件可碰的渲染读取面。
+ * [D6②/u6.1] chat store facet：readers 面——消费组件可碰的渲染读侧。
  *
  * 边界裁量（「组件渲染需要」vs「编排动作」，renderer-deepening §3.3 D6）：
  * - 状态 refs 全部入 readers：数据载体本身，组件读 ref 不破坏任何不变量
@@ -1275,7 +1275,7 @@ export type ChatStoreReaders = Pick<
 
 
 /**
- * [D6②/u6.1] chat store facet：ops 面——编排/composable 专用动作面（写操作 + LRU + 订阅类 + 测试逃生舱）。
+ * [D6②/u6.1] chat store facet：ops 面——编排/composable 专用动作侧（写操作 + LRU + 订阅类 + 测试逃生舱）。
  *
  * 消费方边界：composables/stores/effects/tests 不受限；组件（src/components/** 的 .vue）
  * 禁访问——编排动作在组件内联是 facet 约束要拦的形态（下沉 composable 后经 props/事件对接）。

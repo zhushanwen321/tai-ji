@@ -30,7 +30,7 @@
  *   按 checkpoint 时间戳正常回收它（自收敛，无用户可见损害）。排查口径：持续多恢复且
  *   不自收敛 = 公式错误；偶发单次后自收敛 = 快照滞后。
  *
- * **过滤排除不记台账**（设计无此要求）：被补集排除 = 设计内「不恢复」语义，非异常；
+ * **过滤排除不记 journal**（设计无此要求）：被补集排除 = 设计内「不恢复」语义，非异常；
  * reattach-skipped 只覆盖三类异常跳过（reason 常量见下方导出），逐 session 一条。
  *
  * **checkpoint 删除（D3 契约 1 删除属主第二轨）**：全部尝试完后无条件删（含全跳过/全
@@ -82,7 +82,7 @@ export const REATTACH_SKIP_RESTORE_FAILED = 'restore-failed'
 /** reattach-skipped reason：孤儿收割未在上界内完成（全部候选跳过，防双持）。 */
 export const REATTACH_SKIP_REAP_TIMEOUT = 'reap-wait-timeout'
 
-/** reattach-skipped 三类已知 reason（开放枚举的登记面，非校验闸）。 */
+/** reattach-skipped 三类已知 reason（开放枚举的登记清单，非校验门禁）。 */
 export const REATTACH_SKIP_REASONS = [
   REATTACH_SKIP_STALENESS,
   REATTACH_SKIP_RESTORE_FAILED,
@@ -133,12 +133,12 @@ export interface StartupReattachDeps {
    */
   waitForOrphanReap: () => Promise<void>
   /**
-   * reattach:deferred 广播出口（偏差 #27 横幅腿的 runtime 半边；缺省无动作 = 纯逻辑单测
+   * reattach:deferred 广播出口（偏差 #27 横幅路径的 runtime 半边；缺省无动作 = 纯逻辑单测
    * 与无 WS 形态零依赖）。组合根注入 server.broadcast 包装（u7c 滚动重启 broadcast 同形态）。
    *
    * **广播形态选择（进入单发 + 缓解退出单发，非延迟中每拍重发）**：两种形态对「renderer
    * 重连错过退出帧」的陈旧态残留窗口等价（退出帧都是单发），每拍重发只增冗余帧；且 D3
-   * 高水位延迟只存在于启动后短窗口，协议面无只读拉取 RPC（「持续态必须可拉取」教训按状态
+   * 高水位延迟只存在于启动后短窗口，协议范围无只读拉取 RPC（「持续态必须可拉取」教训按状态
    * 生命周期区分适用——延迟是瞬态不是持续态）。残余窗口（进入后断连、退出也错过后重连）
    * 低概率，接受并已登记在 shared ReattachDeferredPayload 注释。
    */
@@ -151,9 +151,9 @@ export type ReattachDeferredBroadcast = (payload: ReattachDeferredPayload) => vo
 export interface StartupReattachOptions {
   /** 时钟注入（测试）；缺省 Date.now。 */
   now?: () => number
-  /** 台账 writer（reattach-skipped 事件）；缺省 getCrashJournal() 单例。 */
+  /** journal writer（reattach-skipped 事件）；缺省 getCrashJournal() 单例。 */
   journal?: CrashJournalWriter
-  /** checkpoint 读面与删除路径；缺省 getRuntimeCheckpointStore() 单例。 */
+  /** checkpoint 读侧与删除路径；缺省 getRuntimeCheckpointStore() 单例。 */
   checkpoint?: RuntimeCheckpointStore
   /** mem-pressure 即时查询注入（测试替身）；缺省 infra 真实现。 */
   queryMemPressure?: () => Promise<MemPressureSample>
@@ -175,17 +175,17 @@ export interface StartupReattachOptions {
   delay?: (ms: number) => Promise<void>
 }
 
-/** 编排结果（组合根/测试断言面）。 */
+/** 编排结果（组合根/测试断言范围）。 */
 export interface ReattachReport {
   /** 是否读到 checkpoint（false = clean/corrupt，编排零动作）。 */
   checkpointFound: boolean
   /** 过滤通过、进入恢复候选的 session id（按 checkpoint 顺序）。 */
   candidates: string[]
-  /** 被补集排除的 session id（不恢复、无台账事件，设计内语义）。 */
+  /** 被补集排除的 session id（不恢复、无 journal 事件，设计内语义）。 */
   excluded: string[]
   /** restore 成功的 session id。 */
   restored: string[]
-  /** 跳过明细（逐 session 一条 reattach-skipped 台账行对应一项）。 */
+  /** 跳过明细（逐 session 一条 reattach-skipped journal 行对应一项）。 */
   skipped: Array<{ sessionId: string; reason: string }>
   /** 高水位轮询等待次数（0 = 判定时刻无高压）。 */
   highWaterWaits: number
@@ -305,7 +305,7 @@ export async function runStartupReattach(
   if (!snapshot) return report
   report.checkpointFound = true
 
-  // ② 真补集过滤（纯 CPU，无 IO；过滤排除不记台账，见文件头）。
+  // ② 真补集过滤（纯 CPU，无 IO；过滤排除不记 journal，见文件头）。
   const entryById = partitionSnapshotEntries(ctx, snapshot, report)
 
   // ③ 零候选 = 零尝试：直接删 checkpoint（A6「全跳过也删」的零尝试形态）。
@@ -468,7 +468,7 @@ async function restoreOne(input: {
   }
 }
 
-/** 记一条 reattach-skipped 台账行（runtime 层，字段集 = schema D1；best-effort）。 */
+/** 记一条 reattach-skipped journal 行（runtime 层，字段集 = schema D1；best-effort）。 */
 function appendSkip(journal: CrashJournalWriter, sessionId: string, reason: string, detailDigest: string): void {
   journal.append({
     layer: 'runtime',

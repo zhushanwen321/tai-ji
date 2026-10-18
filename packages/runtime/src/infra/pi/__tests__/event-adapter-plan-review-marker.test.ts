@@ -4,7 +4,7 @@
  * 覆盖（照 ask-user 检测测试形态，全部 mock 零真实 pi）：
  * - title=PLAN_REVIEW_MARKER 的 select 事件 → 成对产出 extension-ui kind + extension.ui_request
  *   广播帧，payload 含 planReview: true 标记（与 askUser: true 同构分流）；docs 不透传进帧
- *   （审批条文档清单由 usePlanState 投影链 session.planState 承载，死字段 planReviewDocs 已删）
+ *   （审批条文档清单由 usePlanState 派生视图链 session.planState 承载，死字段 planReviewDocs 已删）
  * - 普通 select（无 marker）不带 planReview 标记（plain dialog 分支形态不变）
  * - marker 命中但 payload 非法（非 JSON）→ 降级普通 select（payload 无 planReview，
  *   与 ask-user 检测失败降级同构边界）
@@ -12,7 +12,7 @@
  *   不透传纪律保留）；边界形态：缺席/非 string 不落键、空串原样过、超限不截不拒（截断在
  *   扩展写侧——canonical = packages/extension-protocol/src/extensions/plan/review-contract.ts 的 truncateSelfReview）
  * - 既有 marker 路由无回归：ASK_USER_MARKER 富交互分流照常（form:true 统一表单帧）；
- *   SUBAGENT_INFLIGHT_MARKER 唯一不广播例外照常（translate 守卫分支零产出）
+ *   SUBAGENT_INFLIGHT_MARKER 唯一不广播例外照常（translate 检查分支零产出）
  *
  * 运行：cd packages/runtime && npx vitest run src/infra/pi/__tests__/event-adapter-plan-review-marker.test.ts
  */
@@ -37,7 +37,7 @@ function broadcastPayload(events: PiTranslatedEvent[]): Record<string, unknown> 
 }
 
 describe('EventAdapter PLAN_REVIEW_MARKER 检测路由（D5）', () => {
-  it('title=PLAN_REVIEW_MARKER + docs payload → 广播 extension.ui_request 含 planReview:true；docs 不透传（planState 投影链承载）', () => {
+  it('title=PLAN_REVIEW_MARKER + docs payload → 广播 extension.ui_request 含 planReview:true；docs 不透传（planState 派生视图链承载）', () => {
     const docs = [{ fileName: 'design.md', absPath: '/repo/.taiji-harness/slug/design.md', sourceSkill: 'tech-design', version: 1 }]
     const events = translate(
       selectEvent({ title: PLAN_REVIEW_MARKER, options: [JSON.stringify({ docs })] }),
@@ -115,7 +115,7 @@ describe('EventAdapter PLAN_REVIEW_MARKER 检测路由（D5）', () => {
     ))
     expect(absent).toBeDefined()
     expect(absent).not.toHaveProperty('selfReview')
-    // 协议错配防御式不落键（帧上永不出现非法类型值，同 expectTurn 严格 typeof 守卫纪律）
+    // 协议错配防御式不落键（帧上永不出现非法类型值，同 expectTurn 严格 typeof 检查纪律）
     const nonString = broadcastPayload(translate(
       selectEvent({ title: PLAN_REVIEW_MARKER, options: [JSON.stringify({ docs, selfReview: 42 })] }),
       SID,
@@ -154,7 +154,7 @@ describe('EventAdapter 既有 marker 路由无回归（plan-review 加员后）'
     expect(payload?.['planReview']).toBeUndefined()
   })
 
-  it('SUBAGENT_INFLIGHT_MARKER 唯一不广播例外照常（translate 守卫分支零产出）', () => {
+  it('SUBAGENT_INFLIGHT_MARKER 唯一不广播例外照常（translate 检查分支零产出）', () => {
     const events = translate(
       selectEvent({ title: SUBAGENT_INFLIGHT_MARKER, options: [JSON.stringify({ report: {} })] }),
       SID,

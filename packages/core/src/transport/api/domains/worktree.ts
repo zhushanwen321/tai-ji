@@ -15,7 +15,7 @@ import { RPC_BACKSTOP_TIMEOUT_MS } from '../pending'
 /**
  * worktree.create 专用 RPC 超时（10 分钟）。
  *
- * 不复用 RPC_BACKSTOP_TIMEOUT_MS（65s，控制面单请求量级）：create 是长任务，runtime 侧
+ * 不复用 RPC_BACKSTOP_TIMEOUT_MS（65s，控制范围单请求量级）：create 是长任务，runtime 侧
  * 最坏耗时 = git worktree add 60s（整树 checkout）+ setup 脚本 worktreeTimeout（默认 300s，
  * 可配到 3600s）+ setup 失败回滚 2×60s。65s 兜底会在 setup 超时/慢安装时先于 runtime 的
  * 真实结果（含回滚结局）触发——前端拿到超时错误、runtime 还在回滚，状态分裂。600s 覆盖

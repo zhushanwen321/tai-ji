@@ -2,7 +2,7 @@
  * subagent-workflow 通知通道的 custom_message customType 词表（单源）。
  *
  * 契约两端（值逐字节依赖，改名 = 跨侧破坏性变更）：
- *   - 写侧：@zhushanwen/pi-subagent-workflow extension（workflow 收口通知 / bg-notify
+ *   - 写侧：@zhushanwen/pi-subagent-workflow extension（workflow 收敛通知 / bg-notify
  *     送达 / 定向消息留痕，经 pi.sendMessage 落 custom_message entry 进 session JSONL）
  *     与 @zhushanwen/subagent-core（notifier 送达 + notify ledger 默认通道）；
  *   - 读侧：taiji 三层——@taiji/shared（COMPLETE_NOTIFY_CUSTOM_TYPES display 覆写
@@ -18,7 +18,7 @@
  * 不跨 pi session 边界，不进本词表。
  */
 
-/** workflow run 收口通知的送达 customType。runtime event-interpreter 按它识别 run 完成
+/** workflow run 收敛通知的送达 customType。runtime event-interpreter 按它识别 run 完成
  *  并驱动 W18 workflow-record 失效信号；shared 完成通知 display 覆写集合亦按它收录。
  *  与 SUBAGENT_BG_NOTIFY_CUSTOM_TYPE 通道互斥（互用会让失效信号误判通道语义）。 */
 export const WORKFLOW_RESULT_CUSTOM_TYPE = 'workflow-result' as const

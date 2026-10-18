@@ -183,7 +183,7 @@ function onCreate(): void {
 }
 
 function onClose(terminalId: string): void {
-  // 双保险：disabled 之外再守卫一次（合成点击事件在无激活语义的环境下仍可能派发到 handler）
+  // 双保险：disabled 之外再检查一次（合成点击事件在无激活语义的环境下仍可能派发到 handler）
   if (closeDisabled.value) return
   emit('close', terminalId)
 }

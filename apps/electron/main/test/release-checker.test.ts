@@ -1,7 +1,7 @@
 /**
  * W2 TDD 测试：ReleaseChecker（自动升级检测后端，多源编排版）。
  *
- * 多源改造（update-multi-source §4.2①-⑥）后的覆盖面：
+ * 多源改造（update-multi-source §4.2①-⑥）后的覆盖范围：
  *   W2TC1 happy path：主源 /releases/latest 返回 v0.9.0 → 胜出即出循环（次源零请求）
  *   W2TC2 三重 prerelease 过滤：防御 b（prerelease/draft）checker 循环内拦截 →
  *         该源「无新版」→ 次源；防御 c（tag 正则）→「该源无新版」（循环内 per-source）
@@ -1010,7 +1010,7 @@ describe('per-source 限流退避', () => {
 
   it('退避按源分派：github latest 403 记退避；gitcode manifest 403 是签名拒绝不记退避；github 退避窗口内短路零请求', async () => {
     // github latest 403（记 github 退避）；gitcode latest 无 digest → manifest 403
-    //（auth_key 签名直链的签名/权限拒绝，§4.1——普通失败收口，不记退避）
+    //（auth_key 签名直链的签名/权限拒绝，§4.1——普通失败收尾，不记退避）
     // → gitcode 该源失败 → 全源失败 null
     const spy = installRoutedFetch((url) => {
       if (url === GITHUB_LATEST_URL) return new Response('rate limited', { status: 403 })
@@ -1099,7 +1099,7 @@ describe('manifest 填充与源归类', () => {
   })
 
   it.each([403, 429])(
-    'GitCode manifest HTTP %i → 签名/权限拒绝按普通失败收口（不记限流退避）→ 该源失败降级次源',
+    'GitCode manifest HTTP %i → 签名/权限拒绝按普通失败收尾（不记限流退避）→ 该源失败降级次源',
     async (status) => {
       // GitCode manifest 直链是 auth_key 签名 URL（§4.1），403 = 签名/权限拒绝而非
       // 限流信号——若误记 2h 退避，国内主场景（GitCode 优先）后续检查会被短路降级
@@ -1290,7 +1290,7 @@ describe('manifest 填充与源归类', () => {
 })
 
 // ════════════════════════════════════════════════════════════════
-// 诊断接线（S1/S2/F5 观测面）：source-selection / source-failover
+// 诊断接线（S1/S2/F5 观测范围）：source-selection / source-failover
 // ════════════════════════════════════════════════════════════════
 describe('诊断登记接线', () => {
   let originalFetch: typeof globalThis.fetch
@@ -1327,7 +1327,7 @@ describe('诊断登记接线', () => {
       order: ['github', 'gitcode'],
       winner: 'gitcode',
       probe: { executed: false, reason: 'resolver-internal' },
-      tags: { gitcode: 'v0.9.0' }, // github 无响应 → 缺 key（F5 观测面语义）
+      tags: { gitcode: 'v0.9.0' }, // github 无响应 → 缺 key（F5 观测范围语义）
     })
     expect(errorLogMocks.logSourceFailover).toHaveBeenCalledWith({
       segment: 'check',
@@ -1386,7 +1386,7 @@ describe('诊断登记接线', () => {
     )
   })
 
-  it('auto 路径透传 resolver 探测详情（S2 观测面）：executed=true + results 对齐 getLastProbeOutcome', async () => {
+  it('auto 路径透传 resolver 探测详情（S2 观测范围）：executed=true + results 对齐 getLastProbeOutcome', async () => {
     resolverMocks.getLastProbeOutcome.mockReturnValue({
       via: 'probe',
       decidedAt: 1_700_000_000_000,

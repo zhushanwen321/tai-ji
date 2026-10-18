@@ -70,7 +70,7 @@ export function keyEvent(key: string, init: KeyboardEventInit = {}): KeyboardEve
   return new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...init })
 }
 
-/** 组合态事件（IPC 键路守卫的信号源） */
+/** 组合态事件（IPC 键路检查的信号源） */
 export function compositionEvent(type: 'compositionstart' | 'compositionend'): void {
   window.dispatchEvent(new Event(type))
 }

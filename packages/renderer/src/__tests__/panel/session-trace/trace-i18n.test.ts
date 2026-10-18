@@ -1,11 +1,11 @@
 /**
- * A51 trace i18n 文案收口单测（trace-i18n 单元，spec .cw-specs/trace-i18n.json）。
+ * A51 trace i18n 文案收尾单测（trace-i18n 单元，spec .cw-specs/trace-i18n.json）。
  *
  * 覆盖（spec：zh-CN/en-US 文案键全存在且被引用；空态/损坏行/降级/SYSTEM 无留痕
  * 四类边界文案；状态行与 chips 标签双语——对应 design §3.1 失败路径与终态图）：
  * 1. 键完整性：panel.trace 命名空间 zh-CN/en-US 键集合对称（无单侧缺失/多余）。
  * 2. 双语值：四类边界文案 + 状态行 + chips 在两 locale 下均有非回退文案。
- * 3. 键被引用：trace 组件源码实际调用 t()（无死键——spec-review 确认的收口缺口
+ * 3. 键被引用：trace 组件源码实际调用 t()（无死键——spec-review 确认的收尾缺口
  *    降级 banner / 现取当前值 / 当前值非历史 / 打开所在目录）。
  * 4. 组件渲染：mount 后 DOM 断言四类边界文案可见（zh-CN，vitest-i18n-setup mock）。
  *
@@ -106,7 +106,7 @@ describe('A51 trace i18n：zh-CN/en-US 键集合对称 + 双语值 + 组件引�
   it('panel.trace 键集合 zh-CN === en-US（无单侧缺失/多余）', () => {
     const zh = traceKeys(zhPanel)
     const en = traceKeys(enPanel)
-    expect(zh.size).toBeGreaterThan(35) // trace-ui 预置 35 键 + 本单元收口新增
+    expect(zh.size).toBeGreaterThan(35) // trace-ui 预置 35 键 + 本单元收尾新增
     expect([...zh].filter((k) => !en.has(k))).toEqual([])
     expect([...en].filter((k) => !zh.has(k))).toEqual([])
   })
@@ -158,7 +158,7 @@ describe('A51 trace i18n：zh-CN/en-US 键集合对称 + 双语值 + 组件引�
     }
   })
 
-  it('新收口键被 trace 组件源码实际引用（t() 调用存在，无死键）', () => {
+  it('新收尾键被 trace 组件源码实际引用（t() 调用存在，无死键）', () => {
     const traceDir = resolve(__dirname, '../../../components/panel/trace')
     const sources = ['TraceView.vue', 'TraceToolbar.vue', 'TraceInspector.vue', 'TraceRowItem.vue', 'TraceListItem.vue']
       .map((f) => readFileSync(resolve(traceDir, f), 'utf-8'))

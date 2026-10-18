@@ -26,7 +26,7 @@ export const SKILLS_BLOCK_TAG = 'taiji-skills'
  * `<taiji-skill-data>` 末尾集中追加包裹块标签裸名（R4 D11）：正常形态（块内 pi 对齐
  * 展开的 `<skill>` 全文）与降级形态（块内 `<taiji-skill/>` 清单 + 指引行，原 `<taiji-skills>`
  * 统一并入）共用包裹。tag 名即新旧消息自识别锚点（存量 `<taiji-skills>` 与 R4 新块靠
- * tag 即可区分，D11 被否变体④的裁决依据），对模型传达「数据附挂区」语义。
+ * tag 即可区分，D11 不采用变体④的裁决依据），对模型传达「数据附挂区」语义。
  */
 export const SKILL_DATA_BLOCK_TAG = 'taiji-skill-data'
 
@@ -99,7 +99,7 @@ export function unescapeSkillAttr(raw: string): string {
 }
 
 /**
- * 构建单个 `<taiji-skill/>` 自闭合标记（D3）。
+ * 构建单个 `<taiji-skill/>` 自封闭标记（D3）。
  * location 缺省或空串时不输出该属性——空串路径无意义，输出 `location=""` 会污染
  * 反解析结果（空串与缺省在 Segment 语义上等价，统一归一为缺省）。
  */
@@ -125,7 +125,7 @@ const SKILL_ATTR_VALUE = '((?:[^"\\\\]|\\\\.)*)'
 
 /**
  * 私有标记解析正则。属性顺序固定 name → location（本模块 buildSkillMarker 的唯一生产格式）：
- * 解析刻意不宽松——顺序错乱/非自闭合一律不识别，与 D8「标记被破坏则透传」语义一致，
+ * 解析刻意不宽松——顺序错乱/非自封闭一律不识别，与 D8「标记被破坏则透传」语义一致，
  * 手打残缺标记不会被误展开。matchAll 克隆正则迭代，无 module 级 lastIndex 残留问题。
  */
 const SKILL_MARKER_RE = new RegExp(
@@ -151,7 +151,7 @@ export function parseSkillMarkers(text: string): ParsedSkillMarker[] {
 }
 
 /**
- * 构建降级块（D7）：`<taiji-skills>` 包裹全部自闭合标记 + 紧跟块后一行的指引文案。
+ * 构建降级块（D7）：`<taiji-skills>` 包裹全部自封闭标记 + 紧跟块后一行的指引文案。
  * 归拢成块的取舍见设计（块 + 单指引行的指令遵循率高于散点）；末尾不加换行，
  * 由调用方决定与后文的拼接方式。
  * 注意：此存量形态的指引行在块外（紧随闭标签一行，SKILLS_BLOCK_RE 的可选吞尾组
@@ -176,11 +176,11 @@ export interface ParsedSkillsBlock {
 }
 
 /**
- * 降级块解析正则：非贪婪匹配首个闭合标签，并可选吞入紧随一行的指引文案——构建产物
- * 中指引行是块的组成部分，解析区间若止步于闭合标签，反解析按区间切片保留正文时会把
+ * 降级块解析正则：非贪婪匹配首个结束标签，并可选吞入紧随一行的指引文案——构建产物
+ * 中指引行是块的组成部分，解析区间若止步于结束标签，反解析按区间切片保留正文时会把
  * 指引行当孤立正文残留。指引行设为可选：hook 改写删掉指引行时块本身仍可识别（提取
  * name/location 的能力不失效）。多块场景靠 g 标志逐个命中；嵌套块不在生产形态中，
- * 首个闭合标签即视为块结束。
+ * 首个结束标签即视为块结束。
  */
 const escapeRegExpSource = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 const SKILLS_BLOCK_RE = new RegExp(
@@ -252,9 +252,9 @@ const SKILL_DATA_BLOCK_RE = new RegExp(
 
 /**
  * 定位文本中首个完整 `<taiji-skill-data>...</taiji-skill-data>` 块（供 core 反解析剥块，
- * D7 三形态①「任意位置剥块优先」）。非贪婪语义：止于首个闭合标签——嵌套块不在生产
- * 形态中，与 parseSkillsFallbackBlocks 的「首个闭合即块结束」一致；无完整块（缺开
- * 标签或缺闭合标签）返回 null。切片用法：块前 = text.slice(0, start)、块后 = text.slice(end)。
+ * D7 三形态①「任意位置剥块优先」）。非贪婪语义：止于首个结束标签——嵌套块不在生产
+ * 形态中，与 parseSkillsFallbackBlocks 的「首个结束即块结束」一致；无完整块（缺开
+ * 标签或缺结束标签）返回 null。切片用法：块前 = text.slice(0, start)、块后 = text.slice(end)。
  */
 export function findSkillDataBlockRange(text: string): SkillDataBlockRange | null {
   const m = SKILL_DATA_BLOCK_RE.exec(text)

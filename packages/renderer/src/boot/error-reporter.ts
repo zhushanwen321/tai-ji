@@ -2,11 +2,11 @@
  * Renderer 全局错误捕获三件套（D2-① / u2-renderer-errors）。
  *
  * E3 教训：renderer 崩溃前零日志——9/9 OOM 崩溃后 `~/.taiji/logs/` 里没有任何
- * renderer 侧现场。本模块在 app 创建后立即安装三个捕获面：
+ * renderer 侧现场。本模块在 app 创建后立即安装三个捕获点：
  * ① `app.config.errorHandler`——组件 render / setup / 生命周期钩子错误（Vue 体系内；
  *    handler 不 rethrow，Vue 不再走默认 console 报错链路，组件树不卸载）
  * ② `window` error 事件——Vue 体系外的全局 JS 错误（addEventListener 形态，等价
- *    window.onerror 捕获面且不覆盖第三方注册；资源加载错误事件无 message，跳过）
+ *    window.onerror 捕获点且不覆盖第三方注册；资源加载错误事件无 message，跳过）
  * ③ `unhandledrejection`——未接住的 Promise rejection
  * 捕获后组装错误记录（时间戳 / 错误栈 / 可选 performance.memory 快照 / 当前
  * sessionId / 来源）经 electronAPI.reportRendererLog 上报，main 侧落盘
@@ -36,7 +36,7 @@ export function installRendererErrorReporting(app: App): void {
   try {
     app.config.errorHandler = (err, _instance, info) => {
       report('vue-error-handler', err, info)
-      // RD-2#1 上屏显形：只落盘用户不可见——渲染面异常时补一次 toast（限流防风暴）
+      // RD-2#1 上屏显形：只落盘用户不可见——渲染范围异常时补一次 toast（限流防风暴）
       toastVueError()
       // 不 rethrow：Vue 3 存在 errorHandler 时错误不再向默认链路传播，组件树保留
       // （设计确认语义：抑制默认错误处理，不卸载整树）
@@ -83,7 +83,7 @@ const VUE_ERROR_TOAST_INTERVAL_MS = 30_000
 let lastVueErrorToastAt = 0
 
 /**
- * errorHandler 附加的上屏 toast（RD-2#1 ③）：全局 handler 原本只落盘，用户对渲染面
+ * errorHandler 附加的上屏 toast（RD-2#1 ③）：全局 handler 原本只落盘，用户对渲染范围
  * 异常零感知。补一条含 sessionId 的 error toast——与落盘互补（落盘管取证、toast 管显形）。
  * 组件级边界捕获的错误不经过这里（return false 已阻断），本 toast 只显形边界外的漏网错误。
  * 全链路 try/catch：i18n 未就绪 / pinia 未激活 / toast 通道故障均静默放弃上屏（落盘已在先）。
@@ -119,7 +119,7 @@ interface BufferedError {
 
 /** 环形缓冲（FIFO，超上限驱逐最旧）；模块级，跨 report 调用共享（resetModules 后重置）。 */
 const ringBuffer: BufferedError[] = []
-/** 回放在途守卫：避免并发 replayBuffer 重复交付同一条目。 */
+/** 回放在途检查：避免并发 replayBuffer 重复交付同一条目。 */
 let replaying = false
 
 /** 入缓冲（按 message 去重计数）：同 message 已存在则累计 count + 刷新为最新 payload。 */
@@ -138,7 +138,7 @@ function bufferError(payload: RendererLogPayload): BufferedError {
 
 /**
  * 通道恢复回放：交付所有滞留的未交付条目（FIFO）。任一条目交付失败即停（通道又不可用），
- * 剩余留待下次成功时再放。replaying 守卫防并发重入。零抛错（reportRendererLog 自身已容错）。
+ * 剩余留待下次成功时再放。replaying 检查防并发重入。零抛错（reportRendererLog 自身已容错）。
  */
 async function replayBuffer(): Promise<void> {
   if (replaying) return
@@ -188,7 +188,7 @@ function report(source: RendererErrorSource, err: unknown, vueInfo?: string): vo
 }
 
 /**
- * RD-3#2：runtime 启动失败真因落台账。连接屏显示之外的可观测留痕——经 renderer-log
+ * RD-3#2：runtime 启动失败真因写入登记清单。连接屏显示之外的可观测留痕——经 renderer-log
  * 通道落 renderer-error-<date>.log（main 侧限流权威）。调用方 = App.vue（runtime-error
  * 推送 / get-runtime-start-error 拉取兜底到达时，与显示共用同一到达路径）。
  * 容错契约与 report 一致：任何环节异常静默（上报器不得成为新崩溃源）。

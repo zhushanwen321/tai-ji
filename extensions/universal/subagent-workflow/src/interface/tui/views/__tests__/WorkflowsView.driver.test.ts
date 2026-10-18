@@ -1,5 +1,5 @@
 /**
- * WorkflowsView 交互面驱动测试（createWorkflowsView 返回的 Component 全行为面）。
+ * WorkflowsView 交互侧驱动测试（createWorkflowsView 返回的 Component 全行为范围）。
  *
  * 与 WorkflowsView.test.ts（纯函数三块：渲染签名 / live 配对 / detail session 行）
  * 互补无断言重叠。本文件经 fake ctx.ui.custom 捕获 Component 后直接驱动：
@@ -186,7 +186,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-// ── 渲染面 ───────────────────────────────────────────────────
+// ── 渲染范围 ───────────────────────────────────────────────────
 
 describe("WorkflowsView L0 渲染", () => {
   it("初绘：header（名/slug/描述/state 路径）+ phase 列表 + 右侧 agent 概览 + footer", () => {
@@ -496,7 +496,7 @@ describe("WorkflowsView tick 条件失效（200ms）", () => {
     expect(d.tui.requestRender).toHaveBeenCalledTimes(1);
     vi.advanceTimersByTime(200);
     expect(d.tui.requestRender).toHaveBeenCalledTimes(1);
-    // 原位替换 record（token 数变化 → 配对投影变 → 签名变）。追加同分候选不改投影
+    // 原位替换 record（token 数变化 → 配对派生视图变 → 签名变）。追加同分候选不改派生视图
     // （startedAt 最近邻贪心仍取首个，签名不变——非本用例目标）。
     subs[0] = makeSub({ totalTokens: 2400 });
     vi.advanceTimersByTime(200);
@@ -505,7 +505,7 @@ describe("WorkflowsView tick 条件失效（200ms）", () => {
 });
 
 describe("WorkflowsView live 进度渲染（liveRecords 注入）", () => {
-  it("L1 agent 行 live 路径：tok/tools/elapsed 来自 store record 投影", () => {
+  it("L1 agent 行 live 路径：tok/tools/elapsed 来自 store record 派生视图", () => {
     const d = openDriver({
       liveRecords: () => [makeSub({ totalTokens: 1200, turns: 2 })],
     });

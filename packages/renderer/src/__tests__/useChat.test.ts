@@ -3,7 +3,7 @@
  *
  * 覆盖：
  * - ensureStreamSubscription 幂等：首次 send 订阅一次，二次不重复订阅
- * - send 守卫：空文本早退；占用期照常统一提交（[u3c/D1] B 策略本地转 steer 已退役——
+ * - send 检查：空文本早退；占用期照常统一提交（[u3c/D1] B 策略本地转 steer 已退役——
  *   lane 判定收归 runtime 内核，renderer 只提交不判定）
  * - 事件驱动派生态 isGenerating：
  *   message.message_start → isGenerating=true（+ clearPendingSend）
@@ -142,7 +142,7 @@ describe('useChat 流式状态机', () => {
     expect(chat.isGenerating('s-stream-err')).toBe(false)
   })
 
-  it('send 守卫：空文本/纯空白时早退', async () => {
+  it('send 检查：空文本/纯空白时早退', async () => {
     const { send } = useChat()
     await send('s-empty', textToSegments('   '))
     await send('s-empty', textToSegments(''))
@@ -215,7 +215,7 @@ describe('useChat pendingSend 合并态（空窗期）', () => {
     expect(chat.isActive('s-fail')).toBe(false)
   })
 
-  // [审计候选 8] useChat.steer 已随 message.steer 协议腿退役删除——其统一提交 / 非活跃早退 /
+  // [审计候选 8] useChat.steer 已随 message.steer 协议路径退役删除——其统一提交 / 非活跃早退 /
   // 乐观气泡用例随被测符号移除；followUp 通路契约由下方用例承接。
 
   it('[u3c/D1] followUp 统一提交并生成自己的乐观气泡（空窗期）', async () => {
@@ -224,7 +224,7 @@ describe('useChat pendingSend 合并态（空窗期）', () => {
     await send('s-pending', textToSegments('first'))
     await followUp('s-pending', textToSegments('followup 内容'))
     // 两条各自经统一提交（内核判 lane）；每条都有乐观气泡入流。[B1 退役] 前身「pendingBuffer
-    // 不暂存」哨兵已删：分区本尊随计数腿删除，无暂存由缺字段结构性保证。
+    // 不暂存」哨兵已删：分区本尊随计数路径删除，无暂存由缺字段结构性保证。
     expect(apiMock.submitDelivery).toHaveBeenCalledTimes(2)
     const users = chat.getMessages('s-pending').filter((m) => m.role === 'user')
     expect(users).toHaveLength(2)
@@ -243,17 +243,17 @@ describe('useChat pendingSend 合并态（空窗期）', () => {
   })
 
   // [ADR-0122] 原「pendingSend 30s 超时兜底（W3）」用例随 30s 空窗 timer 退役删除：
-  // pendingSend 收口全事件驱动（message_start / finalizeSession 各 reason / deliveryHandled /
+  // pendingSend 收尾全事件驱动（message_start / finalizeSession 各 reason / deliveryHandled /
   // delivery morph / occupancy idle 帧 / 断连 finalizeAllStreaming），无墙钟兜底可推演。
-  // 「message_start 永不到」的现实成因（pi 死亡）由断连链收口——finalizeAllStreaming 用例覆盖。
+  // 「message_start 永不到」的现实成因（pi 死亡）由断连链收尾——finalizeAllStreaming 用例覆盖。
 
-  it('finalizeAllStreaming 强制收口所有 streaming session（runtime 崩溃时 useConnection 调）', () => {
+  it('finalizeAllStreaming 强制收尾所有 streaming session（runtime 崩溃时 useConnection 调）', () => {
     const chat = useChatStore()
     // 创建 streaming entity（isActive=true via isGenerating）
     chat.applyMessageEvent('s-crash', { type: 'message.message_start', payload: { sessionId: 's-crash', messageId: 'a1' } })
     expect(chat.isActive('s-crash')).toBe(true)
     expect(chat.isGenerating('s-crash')).toBe(true)
-    // runtime 崩溃：finalizeAllStreaming 收口（useConnection restart/disconnect 时调）
+    // runtime 崩溃：finalizeAllStreaming 收尾（useConnection restart/disconnect 时调）
     chat.finalizeAllStreaming('restart')
     expect(chat.isGenerating('s-crash')).toBe(false)
     expect(chat.isActive('s-crash')).toBe(false)
@@ -261,7 +261,7 @@ describe('useChat pendingSend 合并态（空窗期）', () => {
 
   // [ADR-0122] 原「正常流转清除 pendingSend 超时 timer」用例随 timer 退役删除：
   // message_start 到达清 pendingSend 的语义由「message_start 到达 → 清 pendingSend +
-  // 设 isGenerating」用例覆盖，无 timer 残留断言面。
+  // 设 isGenerating」用例覆盖，无 timer 残留断言范围。
 
   it('[u3c/D1] followUp 提交失败零乐观残留（受理回执前不上屏）+ toast 提示', async () => {
     const chat = useChatStore()
@@ -284,17 +284,17 @@ describe('useChat compact 状态机（#6）', () => {
     expect(apiMock.streamSubscribe).toHaveBeenCalledTimes(1)
   })
 
-  it('session.compacting + occupancy{compacting:true} → isCompacting=true；occupancy{false} 帧 → false（u5b 投影驱动）', async () => {
+  it('session.compacting + occupancy{compacting:true} → isCompacting=true；occupancy{false} 帧 → false（u5b 派生视图驱动）', async () => {
     const chat = useChatStore()
     const { compact } = useChat()
     await compact('c-flow')
-    // [u5b] membership 由 occupancy 投影派生（interpreter 同一挂点先发 session.compacting
+    // [u5b] membership 由 occupancy 派生视图推导（interpreter 同一挂点先发 session.compacting
     // 再发 occupancy——帧序镜像 runtime 实发）；session.compacting 只承载 reason 文案源。
     emit({ type: 'session.compacting', payload: { sessionId: 'c-flow', status: 'compacting', reason: 'manual' } })
     expect(chat.getCompactingReason('c-flow')).toBe('manual')
     emit({ type: 'session.occupancy', payload: { sessionId: 'c-flow', turn: 'idle', compacting: true, bash: false } })
     expect(chat.isCompacting('c-flow')).toBe(true)
-    // compaction_end 三路复位（含失败）→ occupancy compacting=false 帧 → 投影复位
+    // compaction_end 三路复位（含失败）→ occupancy compacting=false 帧 → 派生视图复位
     emit({ type: 'session.compacted', payload: { sessionId: 'c-flow', status: 'compacted' } })
     emit({ type: 'session.occupancy', payload: { sessionId: 'c-flow', turn: 'idle', compacting: false, bash: false } })
     expect(chat.isCompacting('c-flow')).toBe(false)

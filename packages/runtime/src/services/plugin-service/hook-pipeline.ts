@@ -11,7 +11,7 @@
  * - 行为与原 PluginService.executeHooks 一致：按 priority 升序串行执行，
  *   proceed === false 终止链路（block），modifiedData 透传（transform），
  *   每个 handler 超时 5s、超时/异常视为放行，Worker crashed 跳过该 handler。
- * - D2-3 映射层：Worker 响应（InterceptorResult）到 HookResult 的字段映射在此收口
+ * - D2-3 映射层：Worker 响应（InterceptorResult）到 HookResult 的字段映射在此收尾
  *   （modifiedData → transformedData），消费侧（event-interpreter 等）读 transformedData。
  * - [pi1-disposition-chat-flow D7①] 注入（injectedMessages）支线已随 bridge 退役删除——
  *   唯一消费方是 bridge intercept 注入映射；blocked / transform 语义保留。
@@ -34,7 +34,7 @@ import { toErrorMessage } from '../../utils/errors.js'
 export const HOOK_ANOMALY_WARN_EVERY = 10
 
 /**
- * RT-6#4：observe 腿单次派发的在途通知深度上限。
+ * RT-6#4：observe 路径单次派发的在途通知深度上限。
  *
  * observe 走 rpcServer.notify（fire-and-forget，无 pending 登记、无超时定时器、不等
  * 响应），onPiEvent 又是逐事件高频（message_end/turn_end…）。旧状对「在途多少」毫无
@@ -45,7 +45,7 @@ const OBSERVE_MAX_IN_FLIGHT = 64
 /**
  * observe 类 hookType 集合（D2-2）：fire-and-forget 语义，经 notifyObservers 以
  * rpcServer.notify 零往返派发（无 pending 登记、无超时定时器、不等响应）。
- * block/transform 类不在集合内，走 execute 的 request 腿（同步拿结果）。
+ * block/transform 类不在集合内，走 execute 的 request 路径（同步拿结果）。
  */
 export const OBSERVE_HOOK_TYPES: ReadonlySet<string> = new Set(['onPiEvent'])
 
@@ -67,7 +67,7 @@ export class HookPipeline {
   private skippedNoHandle = 0
   /** RT-6#3：失败/超时（视为放行）的 handler 累计数（同上） */
   private failedHandlers = 0
-  /** RT-6#4：observe 腿在途通知深度（派发 +1、宏任务释放 -1） */
+  /** RT-6#4：observe 路径在途通知深度（派发 +1、宏任务释放 -1） */
   private observeInFlight = 0
   /** RT-6#4：因在途深度超限被 drop 的 observe 通知累计数（聚合 warn 节流） */
   private observeDropped = 0
@@ -84,7 +84,7 @@ export class HookPipeline {
   }
 
   /**
-   * 执行指定 hookType 的钩子管道（request 腿：block/transform 类）。
+   * 执行指定 hookType 的钩子管道（request 路径：block/transform 类）。
    *
    * 从 hookRegistry 获取 handlers 后串行执行——entries 在注册时已按 priority 升序
    * 保序（hook-api.ts registerHookRpcHandlers 的 entries.sort，D2-5：执行侧不再重复
@@ -203,7 +203,7 @@ export class HookPipeline {
    *
    * RT-6#4 背压：notify 不回句柄、无 ack，父侧无法精确知道 worker 何时消化完队列。
    * 以「单个事件循环轮次内派发的通知数」为在途深度记账（派发 +1、宏任务释放 -1），
-   * 超 OBSERVE_MAX_IN_FLIGHT 即 drop + 聚合 warn——把此前完全无约束的 observe 腿
+   * 超 OBSERVE_MAX_IN_FLIGHT 即 drop + 聚合 warn——把此前完全无约束的 observe 路径
    * 收敛为有界，且让「在途积压」从静默变为可见。
    */
   notifyObservers(hookType: string, context: HookContext): void {

@@ -4,7 +4,7 @@
 // conformance 以「翻译产物」为契约锚点（journal/record 消费的正是它）。
 //
 // 覆盖：C3 不变量（流式口径）+ journal 往返保真（replayJournal === golden 序列）+
-// parseSpawnLine 对实录行形态的回归（pi parser 的纯函数面）。
+// parseSpawnLine 对实录行形态的回归（pi parser 的纯函数部分）。
 
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";

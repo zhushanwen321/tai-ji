@@ -30,7 +30,7 @@
  * 2026-08-25 P5：分协议历史读取链（record.engine 路由 + ①reader ②journal ③outcome
  * 三级降级）独立到 ./subagent-engine-history.ts——本文件保持纯 entry 扫描器职责。
  *
- * 2026-09-02 dual-track-convergence D1：engineHandle 守卫收敛到 core
+ * 2026-09-02 dual-track-convergence D1：engineHandle 检查收敛到 core
  * session-view-types.parseEngineHandle 单一实现（读写两侧共用），本地
  * projectEngineHandle 删除。
  */
@@ -41,7 +41,7 @@ import { getSubagentSessionDir } from '../../infra/pi/pi-paths.js'
 import { parseBgNotifyDetails } from '@taiji/shared'
 // notify 通道 customType 词表单源（extension-protocol，与壳写点同源）
 import { SUBAGENT_BG_NOTIFY_CUSTOM_TYPE } from '@zhushanwen/extension-protocol'
-// subagent-record 词表已收 core 单源（runtime 投影经 core barrel 消费；shared 副本仅剩 renderer 消费）
+// subagent-record 词表已收 core 单源（runtime 派生视图经 core barrel 消费；shared 副本仅剩 renderer 消费）
 import {
   classifySubagentRecordEntryData,
   SUBAGENT_RECORD_CUSTOM_TYPE,
@@ -101,7 +101,7 @@ interface SubagentToolResultData {
 
 /** bg-notify 单条记录复用 shared/message.ts 的 BgNotifyRecord（不再本地重复定义） */
 
-/** [legacy] subagent toolCall startParam 的投影字段（按 toolCallId 索引） */
+/** [legacy] subagent toolCall startParam 的映射字段（按 toolCallId 索引） */
 interface LegacySubagentToolCall {
   agent: string
   slug: string
@@ -111,19 +111,19 @@ interface LegacySubagentToolCall {
 /** [legacy] listResponse item（background 模式状态更新，按 subagentId 索引） */
 type LegacySubagentListItem = NonNullable<NonNullable<SubagentToolResultData['listResponse']>['items']>[number]
 
-/** 自描述 entry 可选字符串字段守卫（typeof string ? 值 : undefined） */
+/** 自描述 entry 可选字符串字段检查（typeof string ? 值 : undefined） */
 function optString(v: unknown): string | undefined {
   return typeof v === 'string' ? v : undefined
 }
 
-/** 自描述 entry 可选数值字段守卫（typeof number ? 值 : undefined） */
+/** 自描述 entry 可选数值字段检查（typeof number ? 值 : undefined） */
 function optNumber(v: unknown): number | undefined {
   return typeof v === 'number' ? v : undefined
 }
 
 /**
- * origin 字面量守卫（H2 R3-1 修复：自描述投影透传 origin，renderer 侧栏计数 / 后台工作
- * 指示 / 列表桶按 `origin === 'workflow'` 负向过滤）。守卫语义对齐 core record-store.ts
+ * origin 字面量检查（H2 R3-1 修复：自描述派生透传 origin，renderer 侧栏计数 / 后台工作
+ * 指示 / 列表桶按 `origin === 'workflow'` 负向过滤）。检查语义对齐 core record-store.ts
  * readEntryOriginFields：仅认 'tool' | 'workflow' 字面量，非法值/缺省 → undefined =
  * "tool" 语义（存量 record 零迁移）。
  */
@@ -131,18 +131,18 @@ function projectOrigin(v: unknown): 'tool' | 'workflow' | undefined {
   return v === 'workflow' || v === 'tool' ? v : undefined
 }
 
-/** plain object 判定（LLM 可控的 JSON.parse 产物 shape 守卫用） */
+/** plain object 判定（LLM 可控的 JSON.parse 产物 shape 检查用） */
 function isPlainRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v)
 }
 
 /**
- * entry data.engineHandle → shared engineHandle（U1）。守卫已收敛到 core 单一实现
- * parseEngineHandle（dual-track-convergence D1 双守卫收敛：此前本文件的
+ * entry data.engineHandle → shared engineHandle（U1）。检查已收敛到 core 单一实现
+ * parseEngineHandle（dual-track-convergence D1 双检查收敛：此前本文件的
  * projectEngineHandle 与 subagent-engine-history 的 extractRecordEngineHandle 两份
  * guard 各自演进，收敛取本侧的严格语义——sessionRef 含非 string 值整体拒绝）：
- * - poolKey 缺失/非 string/空串 → 整个字段不投影（定位符不完整，读侧降级 outcome-only）
- * - sessionRef 非 plain object 或含非 string 值 → 整个字段不投影；键不枚举整体透传
+ * - poolKey 缺失/非 string/空串 → 整个字段不映射（定位符不完整，读侧降级 outcome-only）
+ * - sessionRef 非 plain object 或含非 string 值 → 整个字段不映射；键不枚举整体透传
  * - eventsPath optString（可选）
  */
 
@@ -190,7 +190,7 @@ export function scanSubagentEntries(entries: unknown[]): SubagentRecord[] {
  *
  * data schema = core record-entry.ts 的 v2 条目契约（registered / settled）——与
  * events-projection 的 scanV2RecordEntries 消费同一 classify 单源；runtime 只取
- * shared SubagentRecord 投影需要的字段（eventLog/displayItems 等扩展内部字段不进
+ * shared SubagentRecord 派生需要的字段（eventLog/displayItems 等扩展内部字段不进
  * runtime 契约）。
  *
  * @returns null = 无有效命中（走 legacy 兜底）；SubagentRecord[] = 命中（同 id 后到覆盖）。
@@ -215,7 +215,7 @@ interface V2SubagentPair {
 }
 
 /**
- * 单条 entry → v2 条目对（type/customType/data/版本逐层守卫，坏 entry 静默丢弃）。
+ * 单条 entry → v2 条目对（type/customType/data/版本逐层检查，坏 entry 静默丢弃）。
  * 版本不认识（missing-v / future-v / unknown-kind）或旧形态 warn 留证——与
  * events-projection 的 scanV2RecordEntries 同一 classify 判定。
  */
@@ -243,8 +243,8 @@ function collectV2SubagentPair(entry: unknown, pairs: Map<string, V2SubagentPair
 }
 
 /**
- * settled 终态条目 → 投影字段块（projectV2SubagentRecord 拆出）：终局统计与结果域
- * 缺省 undefined、sessionFile 缺省 null（与 legacy 投影同形）、status 按终态条目
+ * settled 终态条目 → 映射字段块（projectV2SubagentRecord 拆出）：终局统计与结果域
+ * 缺省 undefined、sessionFile 缺省 null（与 legacy 映射同形）、status 按终态条目
  * 在场性归一（idle / running）。
  */
 function v2SettledProjection(
@@ -311,11 +311,11 @@ function deriveElapsedSeconds(startedAt: number | undefined, endedAt: number | u
  * 读取/预检/降级语义走 ./session-file-extraction.ts 共享骨架（与 workflow-extractor
  * 同一实现）；本函数只注入日志标签、降级文案与 scanSubagentEntries 扫描器。
  *
- * 读失败分级（renderer 侧栏 stale 守卫的契约前提，由骨架承担）：
+ * 读失败分级（renderer 侧栏 stale 检查的契约前提，由骨架承担）：
  * - 文件不存在（ENOENT）→ 返回空数组（合法边界：pi session 文件延迟写入，首条 assistant
  *   前 file 可能不存在——文件都没有必然无 subagent）。
  * - 其他读错误（EACCES / EISDIR 等）→ 原样上抛（RPC 报错，renderer catch 保留旧分区并
- *   显示重试态；降级 [] 会让 renderer 的空结果守卫把「读失败」与「真实删空」混淆）。
+ *   显示重试态；降级 [] 会让 renderer 的空结果检查把「读失败」与「真实删空」混淆）。
  * 文件存在但无 subagent 调用时返回空数组（真实删空语义）。
  *
  * [G3 / crash-resilience D5⑤] READ_PRECHECK 预检（> 32MB 降级空列表 + oversize 标记
@@ -420,8 +420,8 @@ function parseLegacyToolCallBlock(block: unknown): { id: string; info: LegacySub
   if (typeof block !== 'object' || block === null) return null
   const b = block as { type?: string; name?: string; id?: string; arguments?: unknown }
   if (b.type !== 'toolCall' || b.name !== 'subagent' || !b.id || typeof b.arguments !== 'object') return null
-  // arguments 是 LLM 生成的 toolCall 参数（不可信源）——逐字段 shape 守卫后投影
-  // （type-safety review：对齐自描述路径守卫风格，畸形字段缺省走下游 ?? 兜底）
+  // arguments 是 LLM 生成的 toolCall 参数（不可信源）——逐字段 shape 检查后映射
+  // （type-safety review：对齐自描述路径检查风格，畸形字段缺省走下游 ?? 兜底）
   const args = projectSubagentStartArgs(b.arguments)
   if (!args) return null
   return {
@@ -435,7 +435,7 @@ function parseLegacyToolCallBlock(block: unknown): { id: string; info: LegacySub
 }
 
 /**
- * [legacy] LLM 生成的 subagent toolCall arguments → 受控形状投影。
+ * [legacy] LLM 生成的 subagent toolCall arguments → 受控形状映射。
  * action 非 'start' 或 startParam 非 plain object 时返回 null（坏 block 跳过）；
  * startParam 内字段逐个 typeof 收窄（畸形值 undefined，下游 ?? 兜底）。
  */
@@ -458,7 +458,7 @@ function projectSubagentStartArgs(raw: unknown): SubagentStartArgs | null {
 /**
  * [legacy] toolResult message content → 解析结果（首个 text block 的 JSON）。
  * 无 text block / 非合法 JSON（如错误消息 "startParam is required"）返回 null 跳过该条。
- * parse 产物经 projectLegacyToolResultData 逐字段 shape 守卫（LLM toolResult 文本不可信）。
+ * parse 产物经 projectLegacyToolResultData 逐字段 shape 检查（LLM toolResult 文本不可信）。
  */
 function parseLegacyToolResultContent(content: unknown): SubagentToolResultData | null {
   if (!Array.isArray(content) || content.length === 0) return null
@@ -474,12 +474,12 @@ function parseLegacyToolResultContent(content: unknown): SubagentToolResultData 
 }
 
 /**
- * [legacy] toolResult 文本 JSON.parse 产物 → 受控形状投影。
+ * [legacy] toolResult 文本 JSON.parse 产物 → 受控形状映射。
  *
  * parse 成功≠形状正确（任意合法 JSON 值——string/number/array 都能 parse 成功），原实现
  * 裸断言会让畸形值透传：`sessionFile: number` 直达 SubagentRecord.sessionFile，下游
  * readFileSync 对非 string 会 throw。此处逐字段 typeof 收窄：非 plain object 整条丢弃
- * （返回 null）；出参 string 字段畸形归 null/''；listResponse items 元素级投影。
+ * （返回 null）；出参 string 字段畸形归 null/''；listResponse items 元素级映射。
  */
 function projectLegacyToolResultData(parsed: unknown): SubagentToolResultData | null {
   if (!isPlainRecord(parsed)) return null
@@ -585,7 +585,7 @@ function buildLegacySubagentRecord(
 ): SubagentRecord {
   // [U6/D5] 归一明细一体化：status 两态直出 + legacy 值的展示位合成（stopReason/
   // closedReason/chatMode）由归一层产出——原 resolveLegacyClosedReason 的「仅 closed
-  // 投影」守卫内化到归一明细（closed 分支才返回 derivedClosedReason）。
+  // 才派生」检查内化到归一明细（closed 分支才返回 derivedClosedReason）。
   const norm = resolveLegacySubagentStatus(notify, listItem)
   return {
     subagentId,

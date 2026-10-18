@@ -71,7 +71,7 @@ describe('断言①：预算内不截断（truncated:false，A6 回归）', () =
   })
 
   it('窗口扩到最老 turn 时带上前导孤儿段（startIdx=0，不误报 truncated）', () => {
-    // 病态前导：首条非 user（如增量合并边界的孤儿 toolResult 投影）
+    // 病态前导：首条非 user（如增量合并边界的孤儿 toolResult 派生视图）
     const orphan = assistantMsg('orphan-tail')
     const turns = Array.from({ length: 3 }, (_, i) => smallTurn(`t${i}`)).flat()
     const all = [orphan, ...turns]

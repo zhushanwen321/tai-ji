@@ -67,7 +67,7 @@ const LEGACY_STATUS: Record<string, ValidStatus> = {
 /** 旧格式迁移：verifying → in_progress，failed → pending，cancelled → completed（历史三态化降级），done:boolean → status */
 export function migrateTodo(raw: unknown): Todo {
 	// raw 是任意旧格式数据（兼容 done:boolean 等历史结构），以 Record 方式安全访问字段
-	// 守卫：null/原始类型（typeof null === 'object'，必须显式排除 null）→ 明确报错而非混淆的 TypeError
+	// 检查：null/原始类型（typeof null === 'object'，必须显式排除 null）→ 明确报错而非混淆的 TypeError
 	if (raw === null || typeof raw !== "object") {
 		throw new TypeError(
 			`migrateTodo: expected object, got ${raw === null ? "null" : typeof raw}`,
@@ -93,7 +93,7 @@ export function migrateTodo(raw: unknown): Todo {
 
 	// id/text 契约校验：脏 id（非 number / NaN）会在 reconstructState 的 Math.max 推导
 	// nextId 时产出 NaN 毒化后续 add/update/delete 锚点，脏 text 破坏渲染与 add 的 trim
-	// 契约——按「脏数据明确报错 → 调用方单条跳过」契约，与上方 null/primitive 守卫同型
+	// 契约——按「脏数据明确报错 → 调用方单条跳过」契约，与上方 null/primitive 检查同型
 	// throw TypeError（调用方 reconstructState 收集降级）。
 	const id = record.id;
 	if (typeof id !== "number" || Number.isNaN(id)) {

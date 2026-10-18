@@ -46,7 +46,7 @@ function readExtrasRaw(): Record<string, unknown> {
   return JSON.parse(readFileSync(extrasPath, 'utf-8')).providers
 }
 
-/** 恒注入形态的 resolver 替身（D3/M2fg：removeProviderByKind 经 resolver() 守卫强制要求；
+/** 恒注入形态的 resolver 替身（D3/M2fg：removeProviderByKind 经 resolver() 检查强制要求；
  * 本文件用例不关心凭据解析，空集语义 = 无凭据，与生产「无凭据 provider」一致）。 */
 const stubResolver: IProviderCredentialResolver = {
   hasProviderCredential: () => false,

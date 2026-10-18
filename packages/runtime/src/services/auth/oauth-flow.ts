@@ -603,11 +603,11 @@ export async function runOAuthLogin(
   if (providerId === 'github-copilot') {
     return runCopilotDeviceFlow(config, hooks, signal, tuning)
   }
-  // 流程必需端点守卫（pi 1.0.0 起 snapshot 允许端点缺失 = 需运行时发现语义，radius 首例——
+  // 流程必需端点检查（pi 1.0.0 起 snapshot 允许端点缺失 = 需运行时发现语义，radius 首例——
   // 实装 loadRadiusOAuthDiscovery 从 gateway 动态发现，静态提取为空是预期降级）。缺失时
   // fail-fast 给可操作错误（经 auth-service catch 广播 auth.error，用户可见），替代深层
   // postForm(new URL(undefined)) 的裸 TypeError。两条特判 flow（codex/copilot）自带硬编码
-  // 端点，不依赖 snapshot，已在上方提前返回不受本守卫影响。
+  // 端点，不依赖 snapshot，已在上方提前返回不受本检查影响。
   const required = config.flow === 'device'
     ? ['deviceCode', 'token'] as const
     : config.flow === 'callback'

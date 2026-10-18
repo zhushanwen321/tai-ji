@@ -19,7 +19,7 @@
       <span class="min-w-0 flex-1">{{ t('panel.tray.corruptBanner') }}</span>
     </div>
     <!-- 断连提示条（bash，S6）：断连 &&（拉取失败 || 未拉到过）——重连边沿由 useBackgroundTasks
-         重连腿自动重拉，恢复即消失（计数冻结不虚报，§3.5） -->
+         重连路径自动重新拉取，恢复即消失（计数冻结不虚报，§3.5） -->
     <div
       v-if="kind === 'bash' && showDisconnectBanner"
       data-testid="tray-bash-disconnect-banner"
@@ -29,14 +29,14 @@
       <span class="min-w-0 flex-1">{{ t('panel.tray.disconnectBanner') }}</span>
     </div>
 
-    <!-- 加载态：在途且该类无数据（bash = 从未拉到过一次；重连腿恢复后自消）——有缓存即直出列表 -->
+    <!-- 加载态：在途且该类无数据（bash = 从未拉到过一次；重连路径恢复后自消）——有缓存即直出列表 -->
     <div v-if="isKindLoading" data-testid="tray-panel-loading"
       class="flex flex-col items-center justify-center gap-2 py-8 text-center">
       <Loader2 class="size-[16px] animate-spin text-neutral-dim opacity-60" />
       <p class="text-[length:var(--text-2xs)] text-neutral-dim opacity-60">{{ t('panel.tray.loading') }}</p>
     </div>
 
-    <!-- 错误态（subagent / workflow 首拉失败）：可重试（D13 retry 腿） -->
+    <!-- 错误态（subagent / workflow 首次拉取失败）：可重试（D13 retry 路径） -->
     <div v-else-if="kindError" data-testid="tray-panel-error"
       class="flex flex-col items-center justify-center gap-2 py-8 text-center">
       <AlertCircle class="size-5 text-danger opacity-60" />
@@ -139,7 +139,7 @@
                 </span>
                 <span v-if="record.slug" data-testid="tray-subagent-slug"
                   class="shrink-0 font-mono text-[length:var(--text-3xs)] text-neutral-dim">{{ record.slug }}</span>
-                <!-- 确认窗口期保留按钮：第一击进入确认态后迟到收口广播不得把确认钮藏掉（可达性优先） -->
+                <!-- 确认窗口期保留按钮：第一击进入确认态后迟到收尾广播不得把确认钮藏掉（可达性优先） -->
                 <TrayConfirmButton
                   v-if="pinned && (isRunningSubagent(record) || cancelConfirm.isConfirming(record.subagentId))"
                   testid="tray-subagent-cancel"
@@ -236,12 +236,12 @@
  * ── 契约（供 u-tray-shell 消费）──
  * props.kind: 'bash' | 'subagent' | 'workflow' —— 面板类型（built-in 三件之一）
  * props.sessionId: string —— 焦点 session id（行点击归宿 / 行内操作 RPC 的会话键；外壳由
- *   Composer 绑定的 sessionId 透传，与外壳 provide 的数据面同一 session——外壳透传自身
+ *   Composer 绑定的 sessionId 透传，与外壳 provide 的数据范围同一 session——外壳透传自身
  *   props，两侧天然一致）
  * props.pinned?: boolean（默认 false）—— pin 态。行内操作按钮**仅 pin 态渲染**
  *   （D8：hover 态刻意不渲染行内按钮防误触；pin 由外壳管理，面板只消费该位）
- * inject TRAY_COUNTS_KEY（必需）：数据面单例，由外壳创建并 provide（见 useTrayCountsContext）。
- *   **面板不自建数据实例**——面板随 Popover 开合反复挂载，自建即每次打开重发首拉 RPC；token
+ * inject TRAY_COUNTS_KEY（必需）：数据范围单例，由外壳创建并 provide（见 useTrayCountsContext）。
+ *   **面板不自建数据实例**——面板随 Popover 开合反复挂载，自建即每次打开重发首次拉取 RPC；token
  *   缺失时 useTrayCountsContext 直接抛错（不静默降级）。
  * emits: 无 —— 面板自持动作：行内操作直连既有 store / RPC（结果经 store 广播回流，外壳计数
  *   自动跟随），行点击直连 drawer API（D2 入口唯一化），外壳无需回调。
@@ -261,12 +261,12 @@
  *   + scriptName + slug + 进度条 + N/M + 耗时 + abort（两段式；pause/resume 已随扩展 D-2 移除）；
  * - 空态（D9 可行动空态）：默认桶「进行中」为空 = 一行提示 + 「查看已结束 (N)」显式切桶按钮
  *   （不自动跳转）；其余桶为空仅提示；
- * - 提示条（bash）：损坏（sticky，自愈拍清位）+ 断连（S6 范式，重连边沿自动重拉）。
+ * - 提示条（bash）：损坏（sticky，自愈拍清位）+ 断连（S6 范式，重连边沿自动重新拉取）。
  *
  * 迁移语义 D14「复制不抽走」：cancel 防误报（原侧栏列表动作 composable）、两段式确认、行渲染
  * 形态均以复制件迁入；旧侧栏组件已随退役单元删除，本文件为唯一实现。
  *
- * 脚本分区：props 契约 / 数据面接线（inject 外壳单例，禁自建）/ 分桶视图状态（ADR-0049
+ * 脚本分区：props 契约 / 数据范围接线（inject 外壳单例，禁自建）/ 分桶视图状态（ADR-0049
  * per-session 分区）/ 行渲染格式化 / 行内操作（RPC + 两段式确认）/ 行点击归宿矩阵。
  */
 import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
@@ -311,8 +311,8 @@ const { error: toastError, info: toastInfo } = useToast()
 const subagentStore = useSubagentStore()
 
 /**
- * 数据面（单例注入）：实例由外壳 ComposerTray 创建并 provide（TRAY_COUNTS_KEY），本面板
- * **不自建实例**——面板随 Popover 开合反复挂载/卸载，自建即每次打开重发首拉 RPC（loadSubagents
+ * 数据范围（单例注入）：实例由外壳 ComposerTray 创建并 provide（TRAY_COUNTS_KEY），本面板
+ * **不自建实例**——面板随 Popover 开合反复挂载/卸载，自建即每次打开重发首次拉取 RPC（loadSubagents
  * + loadWorkflows）。计数/行集/错误态/retry 全部消费外壳实例，本面板零拉取。
  */
 const tray = useTrayCountsContext()
@@ -382,14 +382,14 @@ const workflowRows = computed<WorkflowRunRecord[]>(() =>
 const hasRows = computed(() => bucketCount(activeBucket.value) > 0)
 
 /**
- * 面板加载态：判据 = **在途且当前 sid 该类无任何数据（total === 0）**。外壳挂载即首拉，hover
+ * 面板加载态：判据 = **在途且当前 sid 该类无任何数据（total === 0）**。外壳挂载即首次拉取，hover
  * 打开时数据通常已在——只要有缓存数据就直出列表，不闪加载态（U2：§3.1 场景 A「hover 即得列表」）。
  * bash 的 loaded=false 表示「从未成功拉到过一次」（S6 语义），同样只在无数据时占位。
  */
 const isKindLoading = computed(() =>
   tray.loading[props.kind].value && tray.counts.value[props.kind].total === 0,
 )
-/** 错误态（subagent / workflow 首拉失败；bash 的失败信号由提示条承载，见设计 §3.5） */
+/** 错误态（subagent / workflow 首次拉取失败；bash 的失败信号由提示条承载，见设计 §3.5） */
 const kindError = computed(() =>
   props.kind === 'bash' ? null : tray.errors[props.kind].value,
 )
@@ -409,7 +409,7 @@ const showDisconnectBanner = computed(() => {
   const partition = tray.bashPartition.value
   return partition.fetchFailed || !partition.loaded
 })
-/** 错误态 retry：按类重拉（D13 retry 腿） */
+/** 错误态 retry：按类重新拉取（D13 retry 路径） */
 function onRetry(): void {
   void tray.retry(props.kind)
 }
@@ -510,7 +510,7 @@ function workflowPercent(record: WorkflowRunRecord): number {
   return Math.round((completedAgentCount(record) / record.agentCalls.length) * PERCENT_BASE)
 }
 
-// ── 行点击归宿矩阵（D2：subagent/bash 对齐现状；workflow 行改收口 drawer workflow tab）──
+// ── 行点击归宿矩阵（D2：subagent/bash 对齐现状；workflow 行改收尾 drawer workflow tab）──
 function openSubagentRow(record: SubagentRecord): void {
   openSubagent({ virtualId: subagentVirtualId(props.sessionId, record.subagentId), enteredFrom: 'chat' })
 }
@@ -536,7 +536,7 @@ function onKillClick(entry: BackgroundTaskEntry): void {
   killConfirm.toggle(entry.taskId)
 }
 
-// ── 行内操作 2：subagent 两段式取消 + 迟到收口防误报（复制件，自原侧栏列表动作 composable）──
+// ── 行内操作 2：subagent 两段式取消 + 迟到收尾防误报（复制件，自原侧栏列表动作 composable）──
 const cancelConfirm = useTwoStepConfirm((subagentId) => {
   void cancelSubagent(subagentId)
 })
@@ -544,7 +544,7 @@ function onCancelClick(record: SubagentRecord): void {
   cancelConfirm.toggle(record.subagentId)
 }
 /**
- * 第二击时任务可能已收口（迟到 isStreaming=false 窗口）——此时**不发** cancel RPC
+ * 第二击时任务可能已收尾（迟到 isStreaming=false 窗口）——此时**不发** cancel RPC
  * （会被 runtime 拒绝并误报「取消失败」），toast「任务已结束」给出确定反馈。
  */
 async function cancelSubagent(subagentId: string): Promise<void> {

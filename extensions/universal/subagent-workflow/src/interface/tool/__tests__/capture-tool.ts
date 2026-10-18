@@ -1,7 +1,7 @@
 /**
  * 注册层黑盒测试共享捕获 helper：fake pi 收集 registerTool 入参，支持两种形态——
  * ①恰好注册一个 tool（可锁定期望名）；②一次注册多个工具（D3 拆分：registerSubagentTool
- * 注册三工具、registerWorkflowTool 注册两工具）按名捕获。差异面（注册函数、pi 之后
+ * 注册三工具、registerWorkflowTool 注册两工具）按名捕获。差异点（注册函数、pi 之后
  * 的实参、deps 形状）留在调用方闭包。
  */
 

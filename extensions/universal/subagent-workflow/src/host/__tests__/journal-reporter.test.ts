@@ -2,7 +2,7 @@
 //
 // 三视角：
 //   ①使用者（runtime event-adapter 视角）——帧形状：title=SUBAGENT_JOURNAL_MARKER、
-//     options=[JSON 报告]（domain/fileKey/events/sessionId/emittedAt）、控制面级
+//     options=[JSON 报告]（domain/fileKey/events/sessionId/emittedAt）、控制通道级
 //     timeout 在场；
 //   ②构建者——单帧单文件（fileKey 单数）；一次推送尝试在途时新事件并入待推缓冲，
 //     成功后逐组继续；失败（无 ack）→ 待推缓冲整体丢弃不重推（设计 D5，与 inflight
@@ -96,7 +96,7 @@ async function advance(ms: number): Promise<void> {
 }
 
 describe("帧形状与单文件单帧（①使用者契约）", () => {
-  it("onJournalAppended → 单帧报告（title/marker、domain/fileKey/events/sessionId、控制面 timeout）", async () => {
+  it("onJournalAppended → 单帧报告（title/marker、domain/fileKey/events/sessionId、控制通道 timeout）", async () => {
     const channel = makeSelectChannel();
     const reporter = createJournalReporter({ selectTimeoutMs: SELECT_TIMEOUT_MS });
     reporter.attachSession(makeCtx(channel));
@@ -225,6 +225,6 @@ describe("生命周期与环境门控（③观察者）", () => {
     await advance(0);
     reporter.attachSession(makeCtx(channel));
     await advance(0);
-    expect(channel.calls).toHaveLength(0); // 丢失面归消费方冷读收敛
+    expect(channel.calls).toHaveLength(0); // 丢失风险归消费方冷读收敛
   });
 });

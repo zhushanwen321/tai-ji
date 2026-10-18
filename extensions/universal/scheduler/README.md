@@ -208,7 +208,7 @@ pi -p "/schedule 5m 'check build'"
 | 默认过期 | **7 天**（`DEFAULT_EXPIRY_MS`） | recurring 任务缺省 `expires` 时；`expires: 'never'` 关闭 |
 | once 任务 | 触发后自动删除 | 不参与后续调度 |
 | cron 失效 | 任务停用 + `lastStatus=failed` + `lastError='cron expression invalid'` | 不会用 `now()` 兜底导致每 tick 重触发死循环 |
-| 忙时 dispatch | steer 直投（scheduler-steer-direct-dispatch） | busy 时消息插入当前 turn、idle 时开新 turn（`{deliverAs:'steer', triggerTurn:true}`），受理即记账不排队；同任务 in-flight 守卫防双投 |
+| 忙时 dispatch | steer 直投（scheduler-steer-direct-dispatch） | busy 时消息插入当前 turn、idle 时开新 turn（`{deliverAs:'steer', triggerTurn:true}`），受理即记账不排队；同任务 in-flight 检查防双投 |
 | history | 保留最近 **20** 条执行记录 | 超出丢弃最旧；重放折叠时同样裁剪 |
 | 持久化 | custom entry append 到 session JSONL（dispatch 成功后立即 append advance 记录执行） | 任务随 owner session 持久化，resume 后重放恢复，无需额外写盘 |
 | 交付语义 | **at-least-once**（至少一次） | dispatch 成功后内存更新 nextRunAt 并 append advance；append 之前若进程崩溃可能重复注入一次（无精确一次保证，可接受） |

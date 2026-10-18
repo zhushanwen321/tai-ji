@@ -10,10 +10,10 @@ import { findZcodeEntryAnchor } from '../discovery/entry-anchor.js'
 // 变体 M（设计 §4 场景 1a）：zcode manifest 直读（§3.1 第①步主路径）+ 枚举（family 用）。
 //
 // fixture 对齐 F21 磁盘真实形态：zcode manifest **无 sessionFile 键**
-// （投影函数照写 sessionFile: undefined，JSON.stringify 丢键）、engine:'zcode'、
+// （派生视图函数照写 sessionFile: undefined，JSON.stringify 丢键）、engine:'zcode'、
 // engineHandle.sessionRef 双键齐。
 //
-// 单元边界：只测「认出 zcode manifest + 提取锚」；白名单闸 / 错误码映射（U9）、
+// 单元边界：只测「认出 zcode manifest + 提取锚」；白名单门禁 / 错误码映射（U9）、
 // entry 兜底定位语义（U7 已交付）不在本文件展开。
 // ============================================================
 

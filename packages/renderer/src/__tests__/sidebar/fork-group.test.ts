@@ -3,7 +3,7 @@
  *
  * [HISTORICAL] 本文件原为 W4「后台分支管理（ForkGroup）」红灯 TDD 测试（U17-U20：聚合渲染 /
  * fresh 淡出 / ForkGroup 内两段式停止）。D9 裁决「侧栏不聚合（子会话与 fork 分支都按一般
- * session 各占一行）」后 ForkGroup 组件退役，原断言随之失效，本文件重写为退役面的回归测试
+ * session 各占一行）」后 ForkGroup 组件退役，原断言随之失效，本文件重写为退役场景的回归测试
  * （保留同文件名，git 可追溯原测试）。
  *
  * 覆盖 D9「退役的爆炸半径与能力处置」：
@@ -89,7 +89,7 @@ function findStopItem(): HTMLElement | null {
   return document.body.querySelector('[data-testid="session-stop-item"]')
 }
 
-/** 生产源码 = src 下非 __tests__ 的 .ts/.vue（组件退役扫描面） */
+/** 生产源码 = src 下非 __tests__ 的 .ts/.vue（组件退役扫描范围） */
 function productionSources(): string[] {
   return walkFiles('src', { extensions: ['.ts', '.vue'], skipDirs: ['__tests__'] })
 }

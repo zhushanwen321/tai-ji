@@ -15,7 +15,7 @@
 - **绝对写规则**：taiji 的任何代码（runtime / renderer / 脚本）永不写 pi **当前持有**的 session JSONL——对 pi 持有文件的修改只发生在 pi 内部（内置 RPC 或扩展 API）。精确边界含两类**登记在案的合法形态**（非例外，裁定 D3/D3b）：① **sidecar 家族**——pi 体系外的 taiji 自有文件（`.meta.json` / `.preset.json` / `.project.json` / `.handoff.json` / `.agent.json` / `.model.json`，全集见登记表 §4 ⑤）；② **文件创建型**——创建 pi 将来才持有的新 session 文件（目标写前不存在、无并发写方、写后即移交 pi，fork/导入/restore 归一化等实例见登记表 §4）。这条规则的力量在于绝对性——一旦有例外，例外就会衰变（label 双写方是前车之鉴）。
 - **pi 内操作原则**：pi 没有而 taiji 需要的能力，默认解法是开发 pi 扩展在 pi 进程内实现（经 `appendEntry` 持久化、经 `entry_appended`/`get_entries` 上报），runtime 只经 RPC 存取。禁止 runtime 绕过 pi 直接读改 pi 的内部数据。
 - **owner（数据所有者）**：taiji 侧某类数据唯一的写入者——一个模块、一个状态容器、一个写入口。所有来源（事件/RPC/文件）都汇入 owner 的单一入口，读方只读 owner。
-- **投影宿主**：runtime 是唯一的投影发生地——所有派生在 runtime（或 core 包的唯一实现）发生一次；**renderer 零派生**，stores 只是视图模型容器，经单一 `applySnapshot` 入口接收 view-ready 数据。
+- **派生宿主**：runtime 是唯一的派生发生地——所有派生在 runtime（或 core 包的唯一实现）发生一次；**renderer 零派生**，stores 只是视图模型容器，经单一 `applySnapshot` 入口接收 view-ready 数据。
 - **纯派生缓存**：只有一个写方（扫描/转换/计算本身）、可随时丢弃并从权威源完整重建的缓存。
 - **影子状态库**：有独立写路径（被多条事件/RPC 回写直写）、承载真值的缓存。它是多源问题的载体（典型已删实例：runtime `sessionMetaCache`）。
 - **快照拉取 + 事件失效**：标量状态的复制模式——数据只由 owner 从权威源拉取快照填充；事件到达只做一件事：标 dirty 并触发（防抖后的）重新拉取。事件永远不直接写数据。载体 = `ReplicatedState<T>` 原语（`packages/runtime/src/services/session/replicated-state.ts`）。
@@ -28,7 +28,7 @@
 
 1. **绝对写规则**：taiji 代码永不写 pi **当前持有**的文件。pi 持有状态的所有修改发生在 pi 内部——内置 RPC（`set_session_name` 等）或扩展 API（`appendEntry` 等）。合法形态（sidecar 家族、文件创建型）是规则边界的一部分；例外是带期限的债务，必须登记并带移除期限。无白名单。
 2. **pi 内操作原则**：pi 能力缺口由 pi 扩展在 pi 进程内补齐（持久化经 `appendEntry`，上报经 `entry_appended` + `get_entries`），runtime 只经 RPC 存取。runtime 对 pi 数据只有两种动作：调 RPC 命令、订阅事件。
-3. **投影只发生一次**：runtime 是唯一投影宿主。所有派生逻辑（merge / normalize / 计数对账 / 状态推导）在 runtime（或 core 包唯一实现）发生一次；renderer 零派生，stores 是视图模型容器，唯一写入口是 `applySnapshot`。多 pane / 多窗口是 runtime 副本的下游扇出，绝不出现两个消费者各自从 pi 独立推导。
+3. **派生只发生一次**：runtime 是唯一派生宿主。所有派生逻辑（merge / normalize / 计数对账 / 状态推导）在 runtime（或 core 包唯一实现）发生一次；renderer 零派生，stores 是视图模型容器，唯一写入口是 `applySnapshot`。多 pane / 多窗口是 runtime 副本的下游扇出，绝不出现两个消费者各自从 pi 独立推导。
 4. **两种复制模式按数据形态分流**：标量 session 状态走通用快照复制原语 `ReplicatedState<T>`（快照拉取 + 事件只做失效）；append-only 日志（消息流）走单一 `applyEntry` reducer 双路喂入。不发明第三种模式；权威源能力缺失处（队列内容）降级该通道为对账信号 + 按字段重划权威，而非绕过权威源另起炉灶。
 5. **治理即代码**：数据登记表的终态是可执行配置——驱动 `ReplicatedState` 实例、lint/pre-commit 许可表、契约测试参数。护栏是双层：机器检查（模式级：R1 直写检查 / R2 写入口 / R3 `@data-owner` 注解）+ dev-merge review-data-governance agent（语义级，长期存在，因为跨文件语义「第二写方」机器只能拦直呼形态）。
 
@@ -55,6 +55,6 @@
 | D3 / D3b 写边界裁定 | session_end 维持 sidecar 单写方（合法形态非例外）；handoff_marker 迁 sidecar；patchSessionCwd 归一化；fork 创建型登记 | registry §3 / §4 |
 | D4 扩展数据单一来源 | 扩展 `appendEntry` 自描述 entry 为唯一持久化权威（写方是 pi），runtime 经 `entry_appended` 失效 + `get_entries(since)` 增量拉取 | registry #8/#9（W17/W18 已落地） |
 | D5 消息流单一 reducer | `applyEntry` 双路喂入；message entry 不发射 `entry_appended`（已实测），实时 feed 由 `message_end` 等事件重构 entry | `apply-entry.ts` + 等价性测试族 |
-| D6 队列按字段分权威 | 深度权威 = pi（pendingMessageCount 推送投影）；内容权威 = renderer 提交日志；taiji 自研扩展禁止 `sendUserMessage({deliverAs})` 注入 | registry #6 / #15 |
-| D7 投影一次 | renderer 零派生；`ReplicatedState` 配置三元组 =（快照 RPC, 失效触发源, 合并策略）；既有 subscribe/ring/stateSnapshot 通道复用为推送通道，state 类话题数据源切 owner 快照发布 | registry §1 各条目「唯一写入口」列 |
+| D6 队列按字段分权威 | 深度权威 = pi（pendingMessageCount 推送派生视图）；内容权威 = renderer 提交日志；taiji 自研扩展禁止 `sendUserMessage({deliverAs})` 注入 | registry #6 / #15 |
+| D7 派生一次 | renderer 零派生；`ReplicatedState` 配置三元组 =（快照 RPC, 失效触发源, 合并策略）；既有 subscribe/ring/stateSnapshot 通道复用为推送通道，state 类话题数据源切 owner 快照发布 | registry §1 各条目「唯一写入口」列 |
 | D8 预防双层护栏 | 语义层 review-data-governance agent + 机器层 R1/R2/R3 + 等价性测试族 + 登记表即代码 + ADR | `.githooks/check_pi_direct_write.py` · taste-lint · `packages/runtime/src/__tests__/equivalence/` |

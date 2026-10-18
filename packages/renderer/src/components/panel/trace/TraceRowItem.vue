@@ -87,7 +87,7 @@
 /**
  * 单行渲染。headline/suffix 纯数据展示（core summarizeRow 产物 + 本层拼接的数据符号
  * 如 blocks 计数 / exit code），句子级文案（MALFORMED / 不进 context）走 t()——
- * 键内容收口在 trace-i18n 单元。
+ * 键内容收敛在 trace-i18n 单元。
  */
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'

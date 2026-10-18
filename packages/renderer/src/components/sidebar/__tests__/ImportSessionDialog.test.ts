@@ -29,7 +29,7 @@
  *     纯文本）/ 空态两条出路引导
  * 15. 两阶段视图（session-import-unified U5）：打开停在来源选择（阶段一零 RPC）→
  *     选 pi/zcode 进入候选列表（RPC 带 source / zcode 不显示换根按钮 / zcode 导入
- *     payload 带 sessionId）→ 返回重选（同源不重拉 / 切源重拉）
+ *     payload 带 sessionId）→ 返回重选（同源不重新拉取 / 切源重新拉取）
  *
  * mock 策略：vi.mock('@/api'（session 两方法模拟 runtime D5 S7 匹配语义 + project save
  * 供 store 持久化 watch）+ vi.mock('@/composables/useToast')（捕获 info/warning 通道）
@@ -195,7 +195,7 @@ function seedProjects(): void {
 
 /**
  * mount 对话框并推进到阶段二候选列表（open=true 触发 resetForOpen 停在来源选择，
- * 再点指定来源选项进入该源列表）。默认 'pi'——存量用例即 pi 缺省路径（V5 零回归面）。
+ * 再点指定来源选项进入该源列表）。默认 'pi'——存量用例即 pi 缺省路径（V5 零回归测试）。
  */
 async function mountDialogAtSource(kind: 'pi' | 'zcode' = 'pi'): Promise<void> {
   wrapper = mount(ImportSessionDialog, {
@@ -287,7 +287,7 @@ beforeEach(() => {
   fixture = makeFixture()
   zcodeFixture = makeZcodeFixture()
   // 候选 mock 按 payload.source 分发（复刻多源路由：pi 回 pi fixture，zcode 回
-  // sess_ 前缀形态候选——两源候选域不同是 selectSource 切源重拉断言的语义前提）
+  // sess_ 前缀形态候选——两源候选域不同是 selectSource 切源重新拉取断言的语义前提）
   apiMocks.importCandidates.mockImplementation(
     async (req?: { query?: string; source?: string }) => {
       const pool = req?.source === 'zcode' ? zcodeFixture : fixture
@@ -540,7 +540,7 @@ describe('ImportSessionDialog（U5 验收）', () => {
       expect(rowBtn.attributes('disabled')).toBeDefined()
       await rowBtn.trigger('click')
       await flushPromises()
-      // 构建者：composable alreadyImported 守卫兜底（disabled 吞 click 或守卫 return，均不得发 RPC）
+      // 构建者：composable alreadyImported 检查兜底（disabled 吞 click 或检查 return，均不得发 RPC）
       expect(apiMocks.importSession).not.toHaveBeenCalled()
     })
 
@@ -708,7 +708,7 @@ describe('ImportSessionDialog（U5 验收）', () => {
           warning: 'sidecar_failed',
         },
       ])
-      // 对话框请求父层关闭（v-model:open 收口）
+      // 对话框请求父层关闭（v-model:open 收尾）
       const openEvents = wrapper!.emitted('update:open')
       expect(openEvents?.[openEvents.length - 1]).toEqual([false])
     })
@@ -853,7 +853,7 @@ describe('ImportSessionDialog（U5 验收）', () => {
       ]
     }
 
-    /** 点「选择其他目录」按钮（触发 pickDirectory → 选中后切根重拉） */
+    /** 点「选择其他目录」按钮（触发 pickDirectory → 选中后切根重新拉取） */
     async function clickChooseDir(): Promise<void> {
       const btn = byTestId('import-choose-dir-btn')
       expect(btn, '「选择其他目录」按钮应存在').not.toBeNull()
@@ -1064,7 +1064,7 @@ describe('ImportSessionDialog（U5 验收）', () => {
       expect(byTestId('import-search-input')).toBeNull()
       expect(allByTestId('import-item')).toHaveLength(0)
       expect(byTestId('import-confirm-btn')).toBeNull()
-      // 构建者：选定来源前零 RPC（resetForOpen 不首拉，阶段一是纯选择视图）
+      // 构建者：选定来源前零 RPC（resetForOpen 不首次拉取，阶段一是纯选择视图）
       expect(apiMocks.importCandidates).not.toHaveBeenCalled()
     })
 
@@ -1112,7 +1112,7 @@ describe('ImportSessionDialog（U5 验收）', () => {
       expect(wrapper!.emitted('imported')).toHaveLength(1)
     })
 
-    it('返回重选：回到阶段一列表隐藏；重进同源不重拉（RPC 次数不变），切源重拉 source 跟随', async () => {
+    it('返回重选：回到阶段一列表隐藏；重进同源不重新拉取（RPC 次数不变），切源重新拉取 source 跟随', async () => {
       await mountDialog() // pi 阶段二（RPC #1）
       expect(apiMocks.importCandidates).toHaveBeenCalledTimes(1)
 
@@ -1128,7 +1128,7 @@ describe('ImportSessionDialog（U5 验收）', () => {
       expect(apiMocks.importCandidates).toHaveBeenCalledTimes(1)
       expect(allByTestId('import-item')).toHaveLength(5)
 
-      // 切源：重拉 + source=zcode
+      // 切源：重新拉取 + source=zcode
       await byTestId('import-back-btn')!.trigger('click')
       await byTestId('import-source-option-zcode')!.trigger('click')
       await flushPromises()
@@ -1245,7 +1245,7 @@ describe('ImportSessionDialog（U5 验收）', () => {
     })
   })
 
-  it('取消按钮：emit update:open false（父层收口关闭）', async () => {
+  it('取消按钮：emit update:open false（父层收尾关闭）', async () => {
     await mountDialog()
     await byTestId('import-cancel-btn')!.trigger('click')
 

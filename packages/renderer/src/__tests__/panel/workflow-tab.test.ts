@@ -1,6 +1,6 @@
 /**
- * WorkflowTab 组件测试（[P3/D6] 快照投影增强的消费面）。
- * [W0] 合并投影消费面锚定（V4 两阶段归组 + V6 failed 错误摘要）。
+ * WorkflowTab 组件测试（[P3/D6] 快照派生视图增强的消费方）。
+ * [W0] 合并派生视图消费方锚定（V4 两阶段归组 + V6 failed 错误摘要）。
  *
  * 三视角（TEST-STRATEGY §3）：
  * - 使用者（黑盒 DOM）：agent call 三态渲染（running/pending/done 耗时）——每条用例
@@ -50,7 +50,7 @@ function record(overrides: Partial<WorkflowRunRecord> = {}): WorkflowRunRecord {
 
 async function mountTab(records: WorkflowRunRecord[], selectName?: string): Promise<VueWrapper> {
   const workflowStore = useWorkflowStore()
-  // 种数据：applyRecords 已从 store 导出面摘除，直写分区 ref（不可变替换触发响应性）
+  // 种数据：applyRecords 已从 store 导出清单摘除，直写分区 ref（不可变替换触发响应性）
   workflowStore.recordsBySession = new Map(workflowStore.recordsBySession).set(SID, records)
   // workflow-visualization U6/D1 入口改向后 openWorkflow = 开 overlay（core 测试环境无
   // opener 绑定 no-op）；本组件测试意图 = 注入 drawer 选中态，改调显式 drawer 语义函数
@@ -60,7 +60,7 @@ async function mountTab(records: WorkflowRunRecord[], selectName?: string): Prom
   return wrapper
 }
 
-describe('WorkflowTab [P3/D6] 投影消费', () => {
+describe('WorkflowTab [P3/D6] 派生视图消费', () => {
   beforeEach(() => {
     vi.useFakeTimers({ now: FIXED_NOW })
     setActivePinia(createPinia())
@@ -114,10 +114,10 @@ describe('WorkflowTab [P3/D6] 投影消费', () => {
   })
 })
 
-// ── [W0] 合并投影形状锚定（设计 D2-R3：mock 输入按契约形状——id/agent/slug/status/
-// startedAt/sessionId，phase 可 undefined；U2 合并投影落地后由主 agent 复核真实形状）──
+// ── [W0] 合并派生视图形状锚定（设计 D2-R3：mock 输入按契约形状——id/agent/slug/status/
+// startedAt/sessionId，phase 可 undefined；U2 合并派生视图落地后由主 agent 复核真实形状）──
 
-describe('WorkflowTab [W0] 合并投影消费锚定（V4 结构 / V6 失败渲染）', () => {
+describe('WorkflowTab [W0] 合并派生视图消费锚定（V4 结构 / V6 失败渲染）', () => {
   beforeEach(() => {
     vi.useFakeTimers({ now: FIXED_NOW })
     setActivePinia(createPinia())
@@ -174,7 +174,7 @@ describe('WorkflowTab [W0] 合并投影消费锚定（V4 结构 / V6 失败渲�
     expect(wrapper.findAll('[data-testid="drawer-workflow-agent-call"]')).toHaveLength(3)
   })
 
-  it('V6 失败渲染：failed 行红点态 + 错误摘要文案（record.error 投影）', async () => {
+  it('V6 失败渲染：failed 行红点态 + 错误摘要文案（record.error 派生视图）', async () => {
     const wf = record({
       agentCalls: [
         call({ id: 0, agent: 'reviewer-2', status: 'failed', sessionId: 'acs-r2', durationMs: 5_000, error: 'agent process crashed (exit 1)' }),

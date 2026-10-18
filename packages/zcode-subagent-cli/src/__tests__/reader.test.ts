@@ -13,7 +13,7 @@ import { readZcodeSessionView, ZcodeReaderError } from "../reader.ts";
 let tmpDir: string;
 let dbPath: string;
 
-// 建出与 zcode 0.16.5 同形的三表最小 schema（列裁剪到 reader 消费面）
+// 建出与 zcode 0.16.5 同形的三表最小 schema（列裁剪到 reader 消费方）
 async function createDb(file: string): Promise<void> {
   const { DatabaseSync } = (await import("node:sqlite")) as { DatabaseSync: new (p: string) => unknown };
   type Db = {
@@ -97,7 +97,7 @@ beforeAll(async () => {
 });
 
 describe("readZcodeSessionView：native 读取", () => {
-  it("turns 派生：两轮闭合、text/thinking/toolCalls/usage 齐备（验收 4）", async () => {
+  it("turns 派生：两轮完成、text/thinking/toolCalls/usage 齐备（验收 4）", async () => {
     const view = await readZcodeSessionView(dbPath, "sess_target");
     expect(view.engineId).toBe("zcode");
     expect(view.source).toBe("native");

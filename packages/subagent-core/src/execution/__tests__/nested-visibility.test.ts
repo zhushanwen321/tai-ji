@@ -311,7 +311,7 @@ describe("TC-2: collectRecords 返回全树（含深层）", () => {
     const runningRecords = store.collectRecords(100, "running", ROOT_SESSION);
     const ids = runningRecords.map((r) => r.id);
 
-    // [U3 / §3.2.4] 重建单规则：磁盘 A/B 恒 idle（running 只在轮次在飞时有意义），
+    // [U3 / §3.2.4] 重建单规则：磁盘 A/B 恒 idle（running 只在轮次在途时有意义），
     // filter=running 只剩内存 C
     expect(ids).toEqual(["sa-c"]);
   });

@@ -7,15 +7,15 @@
  * 阶段 3.5 版本校验门，pi 依赖相对最新 release tag 变更时先跑本测试再放行 bump）。
  *
  * 契约三断言（w25-acceptance.md 交付物 1）：
- * - ① RPC 命令面：set_session_name / get_state / get_session_stats / get_entries / get_commands
+ * - ① RPC 命令范围：set_session_name / get_state / get_session_stats / get_entries / get_commands
  *   全部可调 + reply 形状 guard（Record<ContractRpcCommand, Guard> 对命令 union 编译期穷举——
  *   union 增删成员而 guard 不同步 → tsc 报错，ADR-0037 exhaustive 手法）。
- * - ② 事件面：本设计依赖的五个事件真实发射（fixture 触发实测，非 mock）：
+ * - ② 事件范围：本设计依赖的五个事件真实发射（fixture 触发实测，非 mock）：
  *   session_info_changed（set_session_name 触发）/ thinking_level_changed（set_thinking_level
  *   实际变更触发）/ queue_update（steer 入队触发）/ message_end（prompt 对话触发）/
  *   entry_appended（见 D5 固化——扩展 appendEntry 是唯一发射路径，pi 源码 agent-session.ts
  *   appendEntry 上下文 API 独占发射；fixture spawn 形态锁定无 --extension 参数，正向发射
- *   无法在本 fixture 触发，契约面固化为下方 D5 负向断言）。
+ *   无法在本 fixture 触发，契约范围固化为下方 D5 负向断言）。
  * - ③ entry 面：get_entries 返回的 entry 类型 union（shared/pi-entry.ts PiEntry，W21 wire
  *   契约 SSOT）穷举覆盖 reducer（core applyEntry）的 case——assertReducerCaseCoverage 的
  *   never-default 分支 + case 可比性双向编译期保证（tsc --noEmit 通过即证）；运行时侧对
@@ -25,12 +25,12 @@
  * message entry 不发射」是当前契约。上游若补发射此断言红 → 触发 W21 预留的换源适配
  * （message_end 流不再是等价源），而非静默分叉。
  *
- * faux LLM 轨（L2.5 翻轨，2026-09-15）：验证对象是 RPC/事件/entry 三个协议面（pi 自身
+ * faux LLM 轨（L2.5 翻轨，2026-09-15）：验证对象是 RPC/事件/entry 三个协议范围（pi 自身
  * 行为），非模型智能——LLM turn 由 fauxResponses 脚本固定（it2 用 reasoning 演员
  * faux/faux-1-reasoning，档位 ⊇ {off, low} 确定性成立，摆脱宿主 models.json 依赖），
  * 断言语义与翻轨前一致。门控 FAUX_PI_READY（只判 binary，凭证无关、CI 可跑，已从
  * REAL_PI_TESTS 分池移出）。**pi bump 时需真实轨重放一次**（本文件断言的 RPC reply
- * 形状/事件面/D5 负向断言是对 pi wire 协议的契约锁定，bump 触发的重放登记由后续
+ * 形状/事件范围/D5 负向断言是对 pi wire 协议的契约锁定，bump 触发的重放登记由后续
  * e2e-map 承接）。
  *
  * 禁 mock pi（真实 fixture）；skip-if 约定见 pi-fixture.ts 文件头。
@@ -53,7 +53,7 @@ const TURN_TIMEOUT_MS = 120_000
 const TEST_TIMEOUT_MS = 240_000
 
 /**
- * 事件面实测的事件名清单。satisfies 编译期锚定到生产 PiEvent 联合（pi-protocol.ts，
+ * 事件范围实测的事件名清单。satisfies 编译期锚定到生产 PiEvent 联合（pi-protocol.ts，
  * ADR-0037 真契约）：上游事件改名的类型同步先落 pi-protocol.ts，此处立即跟着红——
  * 防「类型层已同步、契约断言仍用旧名」的静默脱钩。entry_appended 的特殊性见 D5 固化。
  */
@@ -65,9 +65,9 @@ const CONTRACT_EVENT_TYPES = [
   'entry_appended',
 ] as const satisfies readonly PiEvent['type'][]
 
-// ── ① RPC 命令面：契约命令 union + reply 形状 guard（编译期穷举）──────────────
+// ── ① RPC 命令范围：契约命令 union + reply 形状 guard（编译期穷举）──────────────
 
-/** 数据治理消费面锁定的 RPC 命令 union（rpc-client.ts 实际调用的子集） */
+/** 数据治理消费方锁定的 RPC 命令 union（rpc-client.ts 实际调用的子集） */
 type ContractRpcCommand =
   | 'set_session_name'
   | 'get_state'
@@ -75,7 +75,7 @@ type ContractRpcCommand =
   | 'get_entries'
   | 'get_commands'
 
-/** unknown → Record 守卫 */
+/** unknown → Record 检查 */
 function asRecord(v: unknown): Record<string, unknown> {
   if (typeof v !== 'object' || v === null) throw new Error(`expected object, got: ${String(v)}`)
   return v as Record<string, unknown>
@@ -93,7 +93,7 @@ const REPLY_GUARDS: Record<ContractRpcCommand, (resp: PiRpcResponse) => void> = 
     if (resp.data !== undefined) throw new Error('set_session_name reply unexpectedly carries data')
   },
   get_state: (resp) => {
-    // 镜像 pi RpcSessionState 必填字段（rpc-types.ts:94-107）——W7/W8 scalar 实例的消费面
+    // 镜像 pi RpcSessionState 必填字段（rpc-types.ts:94-107）——W7/W8 scalar 实例实际用到的字段
     const data = asRecord(resp.data)
     expect(typeof data.sessionId).toBe('string')
     expect(typeof data.thinkingLevel).toBe('string')
@@ -103,7 +103,7 @@ const REPLY_GUARDS: Record<ContractRpcCommand, (resp: PiRpcResponse) => void> = 
   },
   get_session_stats: (resp) => {
     // 镜像 pi SessionStats（agent-session.ts:225-242）；contextUsage 可选（无 turn 时缺省），
-    // 出现时形状必须符合 usage 实例投影口径（tokens/percent 可为 null = 合法「无值」态）
+    // 出现时形状必须符合 usage 实例派生视图口径（tokens/percent 可为 null = 合法「无值」态）
     const data = asRecord(resp.data)
     expect(typeof data.sessionId).toBe('string')
     expect(typeof data.userMessages).toBe('number')
@@ -219,7 +219,7 @@ describe.skipIf(!FAUX_PI_READY)(
   })
 
   it(
-    '① RPC 命令面：五个契约命令全部可调 + reply 形状 guard 全过（无 LLM 调用，空 session）',
+    '① RPC 命令范围：五个契约命令全部可调 + reply 形状 guard 全过（无 LLM 调用，空 session）',
     { timeout: TEST_TIMEOUT_MS },
     async () => {
       // faux 轨空队列：本用例全程无 LLM turn（纯 RPC 面），队列耗尽即报错是意外 turn 的 fail-fast
@@ -267,7 +267,7 @@ describe.skipIf(!FAUX_PI_READY)(
   )
 
   it(
-    '② 事件面五事件真实发射 + D5 固化（N 事件 0 条 message 载体 entry_appended）+ ③ entry 面穷举',
+    '② 事件范围五事件真实发射 + D5 固化（N 事件 0 条 message 载体 entry_appended）+ ③ entry 面穷举',
     { timeout: TEST_TIMEOUT_MS },
     async () => {
       // faux 轨 reasoning 演员（thinking-level 二档互切的确定性前提）；一轮 turn 的
@@ -281,13 +281,13 @@ describe.skipIf(!FAUX_PI_READY)(
       expect(sessionInfo.name).toBe('w25-event-face')
 
       // ── 事件 2：thinking_level_changed（set_thinking_level 实际变更才发射，pi 源码
-      //    setThinkingLevel 的 isChanging 守卫——先读当前值再切到不同档）──
+      //    setThinkingLevel 的 isChanging 检查——先读当前值再切到不同档）──
       const stateResp = await fx.sendCommand('get_state')
       const stateData = asRecord(stateResp.data)
       const currentLevel = stateData.thinkingLevel
       if (typeof currentLevel !== 'string') throw new Error(`get_state.thinkingLevel 非 string: ${String(currentLevel)}`)
       // 演员锁定 faux/faux-1-reasoning（reasoning: true，无 thinkingLevelMap → 档位
-      // ['off','minimal','low','medium','high']，faux-llm-ext 注册面），二档互切必产生实际变更
+      // ['off','minimal','low','medium','high']，faux-llm-ext 注册点），二档互切必产生实际变更
       const targetLevel = currentLevel === 'off' ? 'low' : 'off'
       await fx.sendCommand('set_thinking_level', { level: targetLevel })
       const thinking = await fx.waitForEvent((e) => e.type === 'thinking_level_changed')
@@ -306,7 +306,7 @@ describe.skipIf(!FAUX_PI_READY)(
       const queue = await fx.waitForEvent((e) => e.type === 'queue_update')
       expect(queue.steering).toContain('w25-queue-probe')
 
-      // 事件面收口：契约清单除 entry_appended（下方 D5 负向断言）外全部实测出现
+      // 事件范围核验完成：契约清单除 entry_appended（下方 D5 负向断言）外全部实测出现
       for (const t of CONTRACT_EVENT_TYPES) {
         if (t === 'entry_appended') continue
         expect(fx.collectEvents((e) => e.type === t).length).toBeGreaterThan(0)
@@ -321,7 +321,7 @@ describe.skipIf(!FAUX_PI_READY)(
       //    （如实测环境的 cache-probe），其 appendEntry 的 custom 载体广播属 extension 行为，
       //    不构成上游 message 语义漂移——A/B 对照（0.84.1 vs 0.84.4）确认 pi 两侧均未补发。
       const allEvents = fx.collectEvents()
-      expect(allEvents.length).toBeGreaterThanOrEqual(10) // 非空转守卫（实测 ~25+）
+      expect(allEvents.length).toBeGreaterThanOrEqual(10) // 非空转检查（实测 ~25+）
       const messageEntryAppended = fx
         .collectEvents((e) => e.type === 'entry_appended')
         .filter((e) => (e['entry'] as Record<string, unknown> | undefined)?.['type'] === 'message')
@@ -332,7 +332,7 @@ describe.skipIf(!FAUX_PI_READY)(
       const entriesData = asRecord(entriesResp.data)
       const entries = entriesData.entries
       if (!Array.isArray(entries)) throw new Error('get_entries reply has no entries array')
-      // 持久化非空守卫：启动元数据 2 条（model_change + thinking_level_change）+ 改名 1 条 +
+      // 持久化非空检查：启动元数据 2 条（model_change + thinking_level_change）+ 改名 1 条 +
       // 切档 1 条 + 对话 ≥2 条（user/assistant message）——「M 条 entry 持久化 + 0 条
       // entry_appended」的 M 侧证据
       expect(entries.length).toBeGreaterThanOrEqual(5)
@@ -343,10 +343,10 @@ describe.skipIf(!FAUX_PI_READY)(
       expect(observedTypes.has('message')).toBe(true)
       expect(observedTypes.has('session_info')).toBe(true)
 
-      // 真实产物侧证：get_entries 产出含 message entry 且能通过穷举守卫。
+      // 真实产物侧证：get_entries 产出含 message entry 且能通过穷举检查。
       // 「case 全集可达性」的运行时循环已删——文件编译通过后类型化字面量恒命中
       // case（default 对 PiEntry 成员不可达），该循环不可能红，全集证明由
-      // assertReducerCaseCoverage 的编译期 never 守卫独自承载。
+      // assertReducerCaseCoverage 的编译期 never 检查独自承载。
       const messageEntry = rawEntries.find((e) => e.type === 'message')
       expect(messageEntry).toBeDefined()
       assertReducerCaseCoverage(messageEntry as unknown as PiEntry)

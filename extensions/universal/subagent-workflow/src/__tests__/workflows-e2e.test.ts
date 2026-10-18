@@ -9,7 +9,7 @@
  *   3. runWorkflow(spec, deps) 起真实的 node:worker_threads Worker 执行脚本
  *   4. 脚本内调 agent()/parallel() → worker postMessage(agent-call) →
  *      主线程 deps.runner.run() → 我们 mock 它返回固定结构化数据
- *   5. 脚本聚合结果 → return outcome → helper 轮询至终局返回结果投影
+ *   5. 脚本聚合结果 → return outcome → helper 轮询至终局返回结果派生视图
  *
  * 唯一 mock 的是 deps.runner（AgentRunner 接口）——真实 runner 会 spawn pi 子进程调 LLM，
  * mock runner 根据 opts.schema 生成符合脚本 schema 的假数据。
@@ -148,7 +148,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-// ── 断言 helper：对每个 workflow 的结果投影做统一终态断言 ──────
+// ── 断言 helper：对每个 workflow 的结果派生视图做统一终态断言 ──────
 
 interface ScriptOutcome {
   status: string;

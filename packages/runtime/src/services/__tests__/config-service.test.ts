@@ -46,15 +46,15 @@ const service = new ConfigService('/tmp/project', {} as unknown as IConfigStore)
 describe('ConfigService.listBuiltinProviders', () => {
   const providers: BuiltinProviderTemplate[] = service.listBuiltinProviders()
 
-  // 投影层契约 = 「生成 JSON 完整透出 + 形状守卫」。值契约（42/openai both/radius 在册/
+  // 派生视图层契约 = 「生成 JSON 完整透出 + 形状检查」。值契约（42/openai both/radius 在册/
   // google-vertex M-1）的归属边界在 gen 提取器（scripts/__tests__/gen-builtin-providers.test.ts），
   // 此处不再复制第二份手写基线数字（gen t10 注释登记过「手写基线第三份数据失守」教训）。
-  it('t1: 投影与生成快照结构等价（完整透出，无丢失无改写）', () => {
+  it('t1: 派生视图与生成快照结构等价（完整透出，无丢失无改写）', () => {
     expect(providers.length).toBeGreaterThan(0)
     expect(providers).toEqual(snapshot.providers)
   })
 
-  it('t5: provider 级投影形状契约（本层独有信号：models.length===modelCount 对账 + 损坏守卫不误触发）', () => {
+  it('t5: provider 级派生视图形状契约（本层独有信号：models.length===modelCount 对账 + 损坏检查不误触发）', () => {
     for (const p of providers) {
       expect(typeof p.id).toBe('string')
       expect(typeof p.name).toBe('string')
@@ -63,7 +63,7 @@ describe('ConfigService.listBuiltinProviders', () => {
       expect(typeof p.oauthSupported).toBe('boolean')
       expect(typeof p.modelCount).toBe('number')
       expect(Array.isArray(p.models)).toBe(true)
-      // 条目数对账是投影层独有的完整性信号（快照等价已保证其余字段）
+      // 条目数对账是派生视图层独有的完整性信号（快照等价已保证其余字段）
       expect(p.models.length).toBe(p.modelCount)
     }
   })
@@ -166,7 +166,7 @@ describe('ConfigService.checkEnvVars（I3，wave-env-check TC2）', () => {
 // - 'status 派生与 models 合并' → config-service-listproviders.test.ts TC5/TC7
 //   （connected/not_configured 双源 + custom models 兜底）
 
-describe('ConfigService.getScopedModels（A8 恒注入守卫）', () => {
+describe('ConfigService.getScopedModels（A8 恒注入检查）', () => {
   it('未注入 providerExtrasStore → 抛带恢复指引 Error（不静默返回 []，与 write 侧 modifyScopedModels 对称）', () => {
     // 构造参数缺省 providerExtrasStore（生产组合根恒注入，此形态只出现在测试/装配遗漏）
     const svc = new ConfigService('/tmp/project', {} as unknown as IConfigStore)

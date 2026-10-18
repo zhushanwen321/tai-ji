@@ -22,7 +22,7 @@ import { notDeliveredError } from '../errors'
  * @param type ClientMessageType 字面量（须是 ReplyPayloadMap 的 key，即 RPC 型）
  * @param payload 请求 payload，类型由 ClientMessageMap[K] 约束
  * @param timeoutMs 超时毫秒数（必传，G5：漏传 = 编译错误——调用方按命令语义显式
- *                  决策，控制面单请求传 pending.RPC_BACKSTOP_TIMEOUT_MS，长任务命令
+ *                  决策，控制范围单请求传 pending.RPC_BACKSTOP_TIMEOUT_MS，长任务命令
  *                  传各自校准链常量如 BASH_RPC_TIMEOUT_MS + RENDERER_RPC_MARGIN_MS；
  *                  传 0 禁用超时）
  * @returns reply payload，类型由 ReplyPayloadMap[K] 推导（ack 型为 void，payload 消费型为具体字段）

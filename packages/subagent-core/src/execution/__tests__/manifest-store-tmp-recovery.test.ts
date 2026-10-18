@@ -2,7 +2,7 @@
 //
 // [U4c / G3] tmp 恢复退役（D6）：sweepTmpFiles 语义 = 全部 tmp **静默删除**——
 // manifest 已是可丢可重建缓存（权威 = `.state`，重建 = RecordStore.rebuildIndexes），
-// promote 半写 tmp 的恢复语义失效。断言面：
+// promote 半写 tmp 的恢复语义失效。断言范围：
 //   - 合法 JSON 的 tmp（旧 promote 分支 2 形态）也删——promote 退役的核心锚点；
 //   - manifest 已存在时的陈旧 tmp（旧分支 1 形态）删；
 //   - 非法 JSON 的 tmp（旧分支 3 形态）删；
@@ -42,7 +42,7 @@ const VALID_MANIFEST = {
   status: "running",
 };
 
-describe("[U4c/G3] sweepTmpFiles 静默删除（promote 语义失效；H4/U5 更名收口）", () => {
+describe("[U4c/G3] sweepTmpFiles 静默删除（promote 语义失效；H4/U5 更名收尾）", () => {
   let dir: string;
   let store: ManifestStore;
 
@@ -120,7 +120,7 @@ describe("[U4c/G3] sweepTmpFiles 静默删除（promote 语义失效；H4/U5 更
 });
 
 // [A11] listAllSync 目录级读失败分通道：ENOENT = 合法缺省（静默空表）；非 ENOENT
-// （ENOTDIR/EACCES 等）= 真 IO 故障（error 留痕——collectRecords orphan 投影把空表
+// （ENOTDIR/EACCES 等）= 真 IO 故障（error 留痕——collectRecords orphan 派生视图把空表
 // 当 not-found 消费，静默会伪装掉持续故障）。
 describe("[A11] listAllSync 目录读失败分通道", () => {
   let dir: string;

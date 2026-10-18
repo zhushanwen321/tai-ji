@@ -18,7 +18,7 @@
  *   首次故障经 mainLogger.warn 记一次（模块级布尔去重，window-factory
  *   unresponsiveJournaled「防刷屏记一次」惯用法），区分「管道死」与「无事件」
  *   （设计 D3①；renderer-error 通道纯静默吞，无此诊断需求）
- * - 偏离②：不设 IPC 注册面与 payload 运行时校验——消费入口是 U2 的事件回调
+ * - 偏离②：不设 IPC 注册范围与 payload 运行时校验——消费入口是 U2 的事件回调
  *   直调（main 进程内部契约，结构由 Electron 事件保证），不可信输入才需要校验
  *
  * 停用旋钮（设计 D3④）：`TAIJI_RENDERER_CONSOLE_OFF` 值感知解析——仅 '1'/'true'
@@ -76,7 +76,7 @@ export function isRendererConsoleDisabled(): boolean {
 // ── 入口（U2 事件回调直调）─────────────────────────────────────────
 
 /**
- * console-message 回调 params 的最小消费面（D1：只取四个标量字段构造 JSON 行，
+ * console-message 回调 params 的最小消费方（D1：只取四个标量字段构造 JSON 行，
  * 禁整体序列化 params——frame 是 WebFrameMain 结构对象，序列化即抛错/内存膨胀，
  * 本接口结构上将其排除）。main 进程内部契约（U2 直调），结构由 Electron 事件
  * 保证，不作运行时校验（对照：renderer-log-handler 的不可信 IPC payload 才校验）。

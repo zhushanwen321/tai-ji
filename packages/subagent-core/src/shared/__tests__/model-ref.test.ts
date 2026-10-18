@@ -1,10 +1,10 @@
 // src/shared/__tests__/model-ref.test.ts
 //
 // [U1 ModelRef 全等裁决] assertCanonicalModelRef / modelRefFromVerified 单测族。
-// 设计权威：docs/architecture/pi-boundary-reliability.md 附录 D §3.3 D1（规则①~⑤含孪生守卫）、D2（继承路径豁免口径）。
+// 设计权威：docs/architecture/pi-boundary-reliability.md 附录 D §3.3 D1（规则①~⑤含孪生检查）、D2（继承路径豁免口径）。
 //
-// P-A2（实施期门）：孪生守卫行为验证——含孪生的 registry 快照实测拒单路径 +
-// 无孪生快照实测放行路径。「有孪生仍放行」= 守卫失效，阻断合入。
+// P-A2（实施期门）：孪生检查行为验证——含孪生的 registry 快照实测拒单路径 +
+// 无孪生快照实测放行路径。「有孪生仍放行」= 检查失效，阻断合入。
 
 import { describe, expect, it } from "vitest";
 
@@ -187,7 +187,7 @@ describe("assertCanonicalModelRef — strips legal thinking suffix (rule ①)", 
 });
 
 // ============================================================
-// 孪生守卫（规则④）—— P-A2 拒单路径
+// 孪生检查（规则④）—— P-A2 拒单路径
 // ============================================================
 
 describe("assertCanonicalModelRef — twin guard (rule ④, P-A2)", () => {
@@ -198,7 +198,7 @@ describe("assertCanonicalModelRef — twin guard (rule ④, P-A2)", () => {
     { provider: "deepseek", id: "deepseek-v4-pro" },
   ];
 
-  it("P-A2 拒单路径：有孪生仍放行 = 守卫失效——全等命中（大写形态）也必须拒绝", () => {
+  it("P-A2 拒单路径：有孪生仍放行 = 检查失效——全等命中（大写形态）也必须拒绝", () => {
     let msg = "";
     try {
       // 输入与快照条目逐字符全等，但 registry 存在 case-insensitive 相等的另一条目
@@ -221,7 +221,7 @@ describe("assertCanonicalModelRef — twin guard (rule ④, P-A2)", () => {
     ).toThrow(/ambiguous case variants/);
   });
 
-  it("无孪生快照下同串放行（守卫零误伤）", () => {
+  it("无孪生快照下同串放行（检查零误伤）", () => {
     const ref = assertCanonicalModelRef("zai-coding-cn/GLM-5.3-Flash", makeSource(BASELINE));
     expect(ref.id).toBe("GLM-5.3-Flash");
   });
@@ -258,7 +258,7 @@ describe("modelRefFromVerified — ctxModel inheritance path (D2)", () => {
     expect(ref).toEqual({ provider: "runtime-only", id: "live-model" });
   });
 
-  it("P-A2 双路径生效：含孪生快照下继承路径同样拒绝（豁免的只是存在性复查，不是孪生守卫）", () => {
+  it("P-A2 双路径生效：含孪生快照下继承路径同样拒绝（豁免的只是存在性复查，不是孪生检查）", () => {
     const TWIN_SNAPSHOT = [
       { provider: "zai-coding-cn", id: "GLM-5.3-Flash" },
       { provider: "zai-coding-cn", id: "glm-5.3-flash" },

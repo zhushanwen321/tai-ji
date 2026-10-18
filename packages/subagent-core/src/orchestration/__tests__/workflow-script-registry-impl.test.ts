@@ -105,12 +105,12 @@ describe("loadWorkflowScriptByPath / WorkflowScript 导出形态（U1）", () =>
     expect(await loadWorkflowScriptByPath("/proj/wf.txt")).toBeUndefined();
   });
 
-  it("⛔2：含 .. 段的路径引用被拒（undefined——收紧对工厂消费面生效）", async () => {
+  it("⛔2：含 .. 段的路径引用被拒（undefined——收紧对工厂消费方生效）", async () => {
     await trackedWrite(SCRIPT_SOURCE);
     expect(await loadWorkflowScriptByPath("/x/../factory-wf.js")).toBeUndefined();
   });
 
-  it("~/ 前缀引用：展开 homedir 后加载（barrel 消费面的合法引用形态）", async () => {
+  it("~/ 前缀引用：展开 homedir 后加载（barrel 消费方的合法引用形态）", async () => {
     const fakeHome = await mkdtemp(join(tmpdir(), "wf-registry-impl-home-"));
     tempDirs.push(fakeHome);
     mockedHomedir.mockReturnValue(fakeHome);

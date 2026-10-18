@@ -2,7 +2,7 @@
 // jsdom：本文件断言 renderMarkdown env 透传（mock 层），无 DOM 断言；与管线测试族同环境
 // 惯例（U1 起管线族钉 jsdom），避免 happy-dom/jsdom 混跑同一装配器时环境漂移。
 /**
- * useChatViewDeps 装配器单测（U3：resourceBaseDir 传值矩阵——对话流 cwd 装配面）。
+ * useChatViewDeps 装配器单测（U3：resourceBaseDir 传值矩阵——对话流 cwd 装配侧）。
  *
  * 覆盖（设计 markdown-html-sanitize-render D4 传值矩阵「对话流」行）：
  * - renderMarkdown 的 env 携带 session cwd（sessionStore.list 按 id 查，与 filePaths/localFiles 同层）
@@ -242,8 +242,8 @@ describe('useChatViewDeps — sessionCwdOf deps 字段 + override 传值矩阵�
   })
 })
 
-describe('useChatViewDeps — 文件白名单代际守卫（RD-1#1：迟到 file.search 不覆盖新 session）', () => {
-  it('A session 的 file.search 迟到返回，不覆盖 B session 已落位的白名单（跨 session 串台守卫）', async () => {
+describe('useChatViewDeps — 文件白名单代际检查（RD-1#1：迟到 file.search 不覆盖新 session）', () => {
+  it('A session 的 file.search 迟到返回，不覆盖 B session 已落位的白名单（跨 session 串台检查）', async () => {
     // s1 的 load 挂起（手控 resolve），s2 的 load 立即返回
     let resolveS1!: (nodes: FileNode[]) => void
     mockLoad.mockImplementation((sid: string) => {
@@ -260,7 +260,7 @@ describe('useChatViewDeps — 文件白名单代际守卫（RD-1#1：迟到 file
     await deps.renderMarkdown('after-switch')
     let env = mockRenderMarkdownSegments.mock.calls.at(-1)![1] as { filePaths: Set<string> }
     expect([...env.filePaths]).toEqual(['/proj-b/s2-file.ts'])
-    // s1 的 file.search 此时才迟到返回 → 必须被代际守卫丢弃，不得回写白名单
+    // s1 的 file.search 此时才迟到返回 → 必须被代际检查丢弃，不得回写白名单
     resolveS1([fileNode('s1-file.ts', '/proj-a/s1-file.ts')])
     await flushPromises()
     await deps.renderMarkdown('after-late')
@@ -269,7 +269,7 @@ describe('useChatViewDeps — 文件白名单代际守卫（RD-1#1：迟到 file
     expect(env.filePaths.has('/proj-a/s1-file.ts')).toBe(false)
   })
 
-  it('未切 session 时迟到返回正常落位（守卫不误杀同 session 的正常异步写入）', async () => {
+  it('未切 session 时迟到返回正常落位（检查不误杀同 session 的正常异步写入）', async () => {
     let resolveS1!: (nodes: FileNode[]) => void
     mockLoad.mockImplementation(() => new Promise<FileNode[]>((resolve) => { resolveS1 = resolve }))
     const deps = assemble(ref('s1'))
@@ -281,7 +281,7 @@ describe('useChatViewDeps — 文件白名单代际守卫（RD-1#1：迟到 file
     expect([...env.filePaths]).toEqual(['/proj-a/s1-file.ts'])
   })
 
-  it('A session 的 load 失败迟到发生，不清空 B session 已落位的白名单（catch 路径同受守卫约束）', async () => {
+  it('A session 的 load 失败迟到发生，不清空 B session 已落位的白名单（catch 路径同受检查约束）', async () => {
     let rejectS1!: (e: unknown) => void
     mockLoad.mockImplementation((sid: string) => {
       if (sid === 's1') {
@@ -303,10 +303,10 @@ describe('useChatViewDeps — 文件白名单代际守卫（RD-1#1：迟到 file
 })
 
 describe('useChatViewDeps — turn settled 白名单刷新（agent 落盘文件进入链接白名单）', () => {
-  it('message.complete（本 session）→ 重拉 file.search，turn 内新建文件进入 filePaths 白名单', async () => {
+  it('message.complete（本 session）→ 重新拉取 file.search，turn 内新建文件进入 filePaths 白名单', async () => {
     const deps = assemble(ref('s1'))
     await flushPromises()
-    expect(mockLoad).toHaveBeenCalledTimes(1) // 挂载时首拉
+    expect(mockLoad).toHaveBeenCalledTimes(1) // 挂载时首次拉取
     // turn 内 agent 新建文件：下一帧 complete 时 file.search 返回包含新文件的结果
     mockLoad.mockResolvedValueOnce([fileNode('new-doc.md', '/proj-a/docs/todo/new-doc.md')])
     events.dispatchSession('s1', { type: 'message.complete', payload: { sessionId: 's1' } })
@@ -317,7 +317,7 @@ describe('useChatViewDeps — turn settled 白名单刷新（agent 落盘文件�
     expect(env.filePaths.has('/proj-a/docs/todo/new-doc.md')).toBe(true)
   })
 
-  it('message.error（本 session）同样触发刷新（turn 异常收口，写盘可能已发生）', async () => {
+  it('message.error（本 session）同样触发刷新（turn 异常收尾，写盘可能已发生）', async () => {
     assemble(ref('s1'))
     await flushPromises()
     expect(mockLoad).toHaveBeenCalledTimes(1)
@@ -336,7 +336,7 @@ describe('useChatViewDeps — turn settled 白名单刷新（agent 落盘文件�
     expect(mockLoad).toHaveBeenCalledTimes(1)
   })
 
-  it('内容等价守卫：无文件变化的 turn 重拉但 Set 引用恒等（增量渲染缓存不失效、零重渲染）', async () => {
+  it('内容等价检查：无文件变化的 turn 重新拉取但 Set 引用恒等（增量渲染缓存不失效、零重渲染）', async () => {
     mockLoad.mockResolvedValue([fileNode('a.ts', '/proj-a/a.ts')])
     const deps = assemble(ref('s1'))
     await flushPromises()
@@ -421,7 +421,7 @@ describe('useChatViewDeps — 虚拟 id 解析（fileSearch vid 修复：需要�
     expect(mockLoad).toHaveBeenCalledWith('s1')
   })
 
-  it('deps.sessionCwdOf 对 vid 解析后查 cwd（MarkdownRenderer ④路点击消费面）', () => {
+  it('deps.sessionCwdOf 对 vid 解析后查 cwd（MarkdownRenderer ④路点击消费方）', () => {
     const deps = assemble(ref('s1'), { mainSessionId: computed(() => 's1') })
     expect(deps.sessionCwdOf?.('subagent:s1:sub-9')).toBe('/home/demo/project-a')
     expect(deps.sessionCwdOf?.('agentcall:acs-1')).toBe('/home/demo/project-a')

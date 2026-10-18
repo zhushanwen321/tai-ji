@@ -4,7 +4,7 @@
  * - restorePreloadedUpdate（功能 2：预下载）：恢复 downloaded 态，优先级高于 pending
  * - restorePendingUpdate（功能 1：常驻提醒）：恢复 available 态
  *
- * 恢复成功即置 pendingRestored=true（state.flags，见 use-app-update-state）启用防覆盖守卫：
+ * 恢复成功即置 pendingRestored=true（state.flags，见 use-app-update-state）启用防覆盖检查：
  * 后续 30s 联网检测失败/无新版不回退已恢复的提醒。运行时由 initAutoCheck 触发
  * （use-app-update-autocheck.ts）；测试经控制器实例的 restorePreloadedUpdate/
  * restorePendingUpdate 方法直调。
@@ -43,13 +43,13 @@ export function createRestoreAxis(deps: RestoreAxisDeps): RestoreAxis {
    *
    * app 启动时调用（经 initAutoCheck 触发，优先级高于 restorePendingUpdate）：读取 main 侧
    * 预下载产物（getPreloaded），若有效 → 置 state='downloaded' + 填充 latestRelease +
-   * 异步渲染 releaseNotes，并设 pendingRestored=true 启用防覆盖守卫（防 30s 联网检测回退）。
+   * 异步渲染 releaseNotes，并设 pendingRestored=true 启用防覆盖检查（防 30s 联网检测回退）。
    */
   async function restorePreloadedUpdate(): Promise<boolean> {
     try {
       const preloaded = await ipc.getPreloaded()
       if (!preloaded) return false
-      // 版本守卫：current >= preloaded.version 说明已升级/更旧，产物过期 → return false 回退 pending。
+      // 版本检查：current >= preloaded.version 说明已升级/更旧，产物过期 → return false 回退 pending。
       // 非 semver 版本号 catch+继续恢复（信任 preloaded，对齐后端 readPreloadedUpdateRaw 的 keep 语义）。
       try {
         if (compare(__APP_VERSION__, preloaded.release.version, '>=')) return false
@@ -77,10 +77,10 @@ export function createRestoreAxis(deps: RestoreAxisDeps): RestoreAxis {
    *
    * app 启动时调用（经 initAutoCheck 触发）：读取 main 侧 pending-update.json，
    * 若有有效 pending release（版本仍 > 当前版本）→ 置 state='available' + 填充
-   * latestRelease + 异步渲染 releaseNotes，并设 pendingRestored=true 启用防覆盖守卫。
+   * latestRelease + 异步渲染 releaseNotes，并设 pendingRestored=true 启用防覆盖检查。
    *
    * 离线也能恢复（pending 存完整 release info，不依赖网络）。恢复后仍跑 30s 联网检测
-   * 作为刷新（修正 release 被编辑等不一致），但防覆盖守卫保证联网检测失败不丢失提醒。
+   * 作为刷新（修正 release 被编辑等不一致），但防覆盖检查保证联网检测失败不丢失提醒。
    */
   async function restorePendingUpdate(): Promise<void> {
     try {

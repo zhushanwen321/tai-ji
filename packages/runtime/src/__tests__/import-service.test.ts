@@ -7,7 +7,7 @@
  *   conversion_degraded + degradationSummary（stub source 注入，D4 结构化降级）；
  *   warning 优先序 sidecar_failed > conversion_unclassified > conversion_degraded +
  *   degradations 日志留痕
- * - listCandidates（pi source 语义，零回归）：字段面 / lastModified 降序 / total（过滤前）/
+ * - listCandidates（pi source 语义，零回归）：字段侧 / lastModified 降序 / total（过滤前）/
  *   dirs 聚合 / cwdExists 标注 / alreadyImported 打标（导入后立即翻转）/ query 匹配语义
  *   （name∪sessionId∪短ID∪sourcePath∪dirLabel，case-insensitive）/ rootDir 缺省 =
  *   getPiGlobalAgentDir()/sessions 动态推导
@@ -108,7 +108,7 @@ afterAll(() => {
 })
 
 describe('ImportService.listCandidates', () => {
-  it('字段面 / lastModified 降序 / total / dirs 聚合 / cwdExists / dirLabel', async () => {
+  it('字段侧 / lastModified 降序 / total / dirs 聚合 / cwdExists / dirLabel', async () => {
     const root = join(fixturesRoot, 'cand-root')
     const sub = join(root, 'proj-alpha')
     mkdirSync(sub, { recursive: true })
@@ -211,7 +211,7 @@ describe('ImportService.listCandidates', () => {
     // targetPath = getSessionsDir()/encodeCwd(resolve(cwd))/原文件名
     expect(imported.targetPath).toBe(join(getSessionsDir(), encodeCwd('/tmp/mark-cwd'), 'm1.jsonl'))
     expect(existsSync(imported.targetPath)).toBe(true)
-    expect(existsSync(src)).toBe(true) // 复制语义：源文件不动（P-isolation 结构面）
+    expect(existsSync(src)).toBe(true) // 复制语义：源文件不动（P-isolation 结构侧）
 
     const after = await svc.listCandidates({ rootDir: root })
     expect(after.items[0].alreadyImported).toBe(true)
@@ -431,7 +431,7 @@ describe('ImportService.importSession', () => {
     await expect(catchCode(() => svc.importSession({ sourcePath: join(root, 'no-cwd.jsonl'), projectId: 'proj-1' })))
       .resolves.toBe('import_invalid_session')
 
-    // 首行为字面量 null（r5-MF1）：parse 产物非 object 须被运行时守卫拦下转
+    // 首行为字面量 null（r5-MF1）：parse 产物非 object 须被运行时检查拦下转
     // import_invalid_session，不得逃逸原始 TypeError 被 handler 兜底成 import_failed
     writeFileSync(join(root, 'null-first.jsonl'), 'null\n')
     await expect(catchCode(() => svc.importSession({ sourcePath: join(root, 'null-first.jsonl'), projectId: 'proj-1' })))
@@ -559,7 +559,7 @@ describe('ImportService source 路由（SPI 编排层，设计 §3.3/§3.7）', 
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
 
     const reply = await svc.importSession({ sourcePath: '/stub/source-not-read-by-stub', projectId: 'proj-1', source: 'pi' })
-    // warning 聚合（§3.6）：degradations 非空 → conversion_degraded；明细不进契约面、日志留痕（D6）
+    // warning 聚合（§3.6）：degradations 非空 → conversion_degraded；明细不进契约范围、日志留痕（D6）
     expect(reply.warning).toBe('conversion_degraded')
     expect(reply.sessionId).toBe('stub-deg-00001')
     expect(reply.targetPath).toBe(join(getSessionsDir(), encodeCwd('/tmp/stub-deg-cwd'), 'stub-deg.jsonl'))
@@ -727,7 +727,7 @@ describe('ImportService source 路由（SPI 编排层，设计 §3.3/§3.7）', 
     expect(existsSync(join(targetDir, 'stub-dom.jsonl'))).toBe(false)
   })
 
-  it('注册表缺项 → import_source_missing（防御分支：闭合联合 + 组合根全注册下仅版本不匹配可达）', async () => {
+  it('注册表缺项 → import_source_missing（防御分支：封闭联合 + 组合根全注册下仅版本不匹配可达）', async () => {
     // U2 阶段 zcode 尚未注册（U3 加入）——空表构造即可触达；同时锁「未知源字面量不静默走 pi」
     const svc = makeImportService(new Map<ImportSourceKind, SessionImportSource>())
     await expect(catchCode(() => svc.importSession({ sourcePath: '/any.jsonl', projectId: 'proj-1', source: 'zcode' })))

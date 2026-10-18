@@ -430,7 +430,7 @@ describe('C4: PiToolExecutionEndEvent has NO args field (pi never sends args on 
 //   - details.calls：嵌套调用清单（D6 后置的树形展示数据源，本期无渲染消费点），
 //     每项 { id: "<toolCallId>/<序号>", name, args: JSON 字符串, status, durationMs }
 // 嵌套子调用自身的事件带 parentToolCallId 且不落 transcript（D4 过滤判据的
-// 协议依据），不会以独立 tool_execution_end 形态出现在该契约面上。
+// 协议依据），不会以独立 tool_execution_end 形态出现在该契约范围上。
 
 describe('C5: pi 1.0.0 codemode tool_execution_end shape (real-device sample)', () => {
   const CODEMODE_END_SAMPLE: PiToolExecutionEndEvent = {

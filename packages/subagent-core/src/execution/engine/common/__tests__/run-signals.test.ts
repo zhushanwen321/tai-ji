@@ -2,7 +2,7 @@
 //
 // [H2 W4] mergeRunSignals 纯函数行为测试——自 subprocess-agent-runner-timeout.test.ts
 // 迁移改写：原 mergeTimeoutSignal 薄包装（timeoutMs 无守护信号源时原样返回 external
-// signal；有则返回 .signal 视图）随 SAR.run 掏空删除（生产零消费），断言面改直测
+// signal；有则返回 .signal 视图）随 SAR.run 掏空删除（生产零消费），断言范围改直测
 // 公共 helper 权威实现（engine/common/run-signals.ts，W2 迁移步⑥自 SAR 提取）。
 // 原用例行为语义逐条保持（T3.6 / T3.17 编号沿用）。
 

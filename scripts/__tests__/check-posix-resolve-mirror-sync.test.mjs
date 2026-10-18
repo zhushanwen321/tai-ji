@@ -1,13 +1,13 @@
 /**
- * check-posix-resolve-mirror-sync.mjs 单测（branch-review minor 残余：守卫本体 +
+ * check-posix-resolve-mirror-sync.mjs 单测（branch-review minor 残余：检查本体 +
  * --self-test 已交付，但无回归测试、无 CI 挂载——比较逻辑（逐字比对退化为恒真、
  * 语义锚点断言被删）自身退化时无任何红灯。形态照同辈 check-capability-allowlist-sync.test.mjs：
- * 纯函数直测 + tmpdir fixture，CLI 集成用例把守卫脚本复制到 tmp mirror 运行（守卫 ROOT
- * 由 import.meta.url 推导，副本位置使 ROOT 落在 mirror 内——篡改 fixture 才真正改到守卫
+ * 纯函数直测 + tmpdir fixture，CLI 集成用例把检查脚本复制到 tmp mirror 运行（检查 ROOT
+ * 由 import.meta.url 推导，副本位置使 ROOT 落在 mirror 内——篡改 fixture 才真正改到检查
  * 读的文件，「篡改即红、还原即绿」的差分才成立）。）
  *
  * 三份函数体从真实仓库源文件动态提取（绿 fixture 的成员源，随真实交付面走）：
- * 各漂移/退化用例篡改 mirror fixture → exit 1，证明守卫非恒绿；另含真实仓库直跑用例。
+ * 各漂移/退化用例篡改 mirror fixture → exit 1，证明检查非恒绿；另含真实仓库直跑用例。
  *
  * 运行：cd <repo-root> && pnpm exec vitest run scripts/__tests__/check-posix-resolve-mirror-sync.test.mjs
  * （ci.yml「Test - scripts guards」逐文件列举同款口径。）
@@ -52,9 +52,9 @@ const signatureOf = (anchor) => `${anchor}(base: string, rel: string): string {`
 const srcOf = (anchor, body) => `${signatureOf(anchor)}\n${body}\n`
 
 /**
- * tmp mirror 工厂：目录布局对齐守卫 ROOT 相对路径（packages/ui/src/features/chat 下三份
+ * tmp mirror 工厂：目录布局对齐检查 ROOT 相对路径（packages/ui/src/features/chat 下三份
  * 源文件）。overrides 以「函数体注入」漂移（默认 = 真实函数体三份同款），missing 指定
- * 不落盘的文件。root/落盘/清理/守卫副本装置见 guard-mirror.mjs。
+ * 不落盘的文件。root/落盘/清理/检查副本装置见 guard-mirror.mjs。
  */
 function makeMirror({
   uiBody = REAL_UI_BODY,
@@ -72,7 +72,7 @@ function makeMirror({
   return { root, run, cleanup }
 }
 
-describe('CLI 集成（守卫脚本 × tmp mirror）', () => {
+describe('CLI 集成（检查脚本 × tmp mirror）', () => {
   it('三份一致 → exit 0，锚点在场 + 两两比对报一致', () => {
     const fx = makeMirror()
     try {
@@ -129,8 +129,8 @@ describe('CLI 集成（守卫脚本 × tmp mirror）', () => {
   })
 })
 
-describe('真实仓库源文件（守卫对实际交付面非恒绿的反面：当前三份一致）', () => {
-  it('直跑真实守卫 → exit 0', () => {
+describe('真实仓库源文件（检查对实际交付面非恒绿的反面：当前三份一致）', () => {
+  it('直跑真实检查 → exit 0', () => {
     expectGuardDirectRunPasses(SCRIPT, '✓ POSIX resolve 三份折叠实现对拍通过')
   })
 })

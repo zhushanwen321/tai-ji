@@ -16,7 +16,7 @@ export const SYSTEM_PROMPT_CUSTOM_TYPE = "taiji:system-prompt";
  * `PRESET_FALLBACK_ENV_KEYS`）。
  *
  * extension 独立发布体系不依赖 `@taiji/shared`，只能按字面量镜像——单侧改名即断链
- * （消息见 write 产出的 `presetFallback` 字段消失）。一致性由机器守卫断言：
+ * （消息见 write 产出的 `presetFallback` 字段消失）。一致性由机器检查断言：
  * `.githooks/check_env_whitelist_sync.py` 规则 3 A8（漂移即红）。写入方 =
  * `packages/runtime/src/services/session/launch-params.ts` 的 `buildPresetFallbackEnv`。
  */
@@ -27,10 +27,10 @@ export const PRESET_FALLBACK_ENV_KEYS = {
 
 /**
  * 模式回落事实（F1b，设计 `mode-system-composer-density` §7.5 E4
- * 的 trace 披露面）。
+ * 的 trace 披露部分）。
  *
  * 语义 = 本次 pi 进程启动时，sidecar 里的模式定义已不可得，runtime 已回落
- * `builtin:full` 启动（工具面从模式的受限面弹回全工具）——记录在 trace entry 里，
+ * `builtin:full` 启动（工具范围从模式的受限面弹回全工具）——记录在 trace entry 里，
  * 事后审计从 `taiji:system-prompt` 即可得知「提示词为何变了」。
  */
 export interface PresetFallbackFact {
@@ -75,7 +75,7 @@ export interface SystemPromptTraceEntryData {
 	/** 与上一版的行级 diff 摘要；首条留痕（无 parent）时缺省。 */
 	parentVersionDiffSummary?: string;
 	/**
-	 * 模式回落事实（F1b，E4 trace 披露面）：本次 pi 进程以「模式已删除 → 回落
+	 * 模式回落事实（F1b，E4 trace 披露部分）：本次 pi 进程以「模式已删除 → 回落
 	 * builtin:full」启动时出现；未回落（正常启动）时**字段不出现**——既有 entry
 	 * 形状向后兼容。见 `PresetFallbackFact`。
 	 */

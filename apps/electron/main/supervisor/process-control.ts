@@ -323,7 +323,7 @@ export function buildRemoteAccessSpawnArgs(env: MobileDistEnv, enabled: boolean)
  * 开发：node + tsx 运行 runtime/src/index.ts
  *
  * [HISTORICAL] onExit 回调：子进程自然退出（崩溃）时 supervisor 必须清 child/port，
- * 否则幂等守卫误判存活、start() 返回死端口，前端 WS 永连不上（应用假死）。
+ * 否则幂等检查误判存活、start() 返回死端口，前端 WS 永连不上（应用假死）。
  * 旧 runtime-manager 的 child.on('exit') 会 this.child=null，重构拆出自由函数后由 onExit 传递。
  *
  * @param port runtime 监听端口
@@ -436,7 +436,7 @@ export function spawnRuntimeProcess(port: number, onExit?: (code: number | null)
 
   // [HISTORICAL] W5 改动 5：spawn 'error' 事件（如命令不存在/权限不足）必须走与 exit 相同的清理路径。
   // 旧实现仅 console.error 记日志，supervisor 收不到通知 → child 引用残留 →
-  // 下次 start 幂等守卫误判存活（exitCode 此时仍是 null）→ 返回死端口（应用假死）。
+  // 下次 start 幂等检查误判存活（exitCode 此时仍是 null）→ 返回死端口（应用假死）。
   // 改为调 onExit(SPAWN_ERROR_EXIT_CODE) 哨兵退出码（真实 exit 不会产生负退出码），
   // 让 supervisor 清 child/port。
   child.on('error', (err) => {

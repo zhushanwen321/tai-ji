@@ -28,7 +28,7 @@ export function widgetToneDot(status: WidgetMeta['status'] | undefined): string 
 }
 
 // ── workflow run 行 tone（[W2 D8] 三分 + 全集锁 → [D2] 词表更新）─────────────
-// 判据数据源 = 投影透传的 outcome 四值（WorkflowRunOutcome），不读 reason 字符串
+// 判据数据源 = 派生视图透传的 outcome 四值（WorkflowRunOutcome），不读 reason 字符串
 // （翻译层）。三分裁决：done→绿 / failed→红 / cancelled（用户主动）与
 // time_limited（超时终局）同落中性暗——「同语义同色」构造性成立；用词区分由
 // workflowStatusLabel 的中文词表承载（禁混用）。[D2] 中断语义已移出 outcome——

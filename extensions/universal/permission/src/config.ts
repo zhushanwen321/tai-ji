@@ -145,7 +145,7 @@ function warnLegacyConfigIfExists(): void {
  * D3：subagent/workflow 拆分改名后，持久化的旧名精确规则原地展开为新名规则——
  * 原地替换保序 + makeNextIdCounter 新 id + 幂等；只内存展开，不回写落盘，加载路径纯读）。
  * 所有配置消费方（pipeline / rule-editor / statusline / commands）都经本入口取 config，
- * 迁移单点在此即全消费面生效。
+ * 迁移单点在此即全部消费方生效。
  */
 export function loadAndWatchConfig(onWarning?: (msg: string) => void): PermissionConfig {
 	const configPath = getConfigPath();

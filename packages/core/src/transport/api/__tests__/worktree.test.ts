@@ -24,7 +24,7 @@ describe('worktree 域 RPC 封装', () => {
     const params = { branch: 'feat-x', baseBranch: 'main', workspaceHint: 'dev' }
     const r = await worktreeApi.create(params)
     // create 是长任务（git add + setup 脚本 + 失败回滚），显式传长任务校准超时 600s
-    // 而非控制面 65s 兜底——详见 domains/worktree.ts 的 WORKTREE_CREATE_RPC_TIMEOUT_MS 注释
+    // 而非控制范围 65s 兜底——详见 domains/worktree.ts 的 WORKTREE_CREATE_RPC_TIMEOUT_MS 注释
     expect(mockCommand).toHaveBeenCalledWith('worktree.create', params, 600_000)
     expect(r).toEqual(reply)
   })

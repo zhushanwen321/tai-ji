@@ -1,15 +1,15 @@
 /**
- * check-thinking-levels.mjs 单测（review round1 MUST_FIX：守卫自身假绿——提取正则失效仍放行——
- * 正是守卫测试该拦的漂移；此前仅有人肉 --self-test，无自动化回归）。
+ * check-thinking-levels.mjs 单测（review round1 MUST_FIX：检查自身假绿——提取正则失效仍放行——
+ * 正是检查测试该拦的漂移；此前仅有人肉 --self-test，无自动化回归）。
  *
  * 组织方式照同辈 check-publish-surface.test.mjs 惯例：纯函数直测 + tmpdir fixture，
- * 不依赖/不修改真实仓库词表文件。CLI 集成用例把守卫脚本复制到 tmp mirror 运行：
+ * 不依赖/不修改真实仓库词表文件。CLI 集成用例把检查脚本复制到 tmp mirror 运行：
  * - 权威源（pi-ai dist/types.d.ts）经 node_modules symlink 指向真实实装包——import.meta.resolve
  *   默认 realpath 解析，脚本向上爬包根的逻辑与真实仓库运行完全同构；
  * - 两个比对面词表（宿主侧 subagent-core THINKING_ORDER + 前端派生源 shared
  *   PI_THINKING_LEVELS）是测试生成的 fixture（成员集从真实权威源动态提取，pi 升级不破测试）：
  *   绿 = fixture 与权威源一致；红 = 篡改 fixture 成员（多出/缺失）跑出 exit 1——
- *   「篡改即红、还原即绿」在同一 tmpdir 内构成差分，证明守卫非恒绿（不触碰真实源文件，
+ *   「篡改即红、还原即绿」在同一 tmpdir 内构成差分，证明检查非恒绿（不触碰真实源文件，
  *   无需还原动作）。
  *
  * 运行：cd <repo-root> && pnpm exec vitest run scripts/__tests__/check-thinking-levels.test.mjs
@@ -123,7 +123,7 @@ describe('resolvePiAiRoot（触发路径解析：入口爬包根 + name 校验�
   })
 })
 
-// ── CLI 集成（tmp mirror：守卫脚本 + fixture 副本 + 真实 pi-ai symlink）────────
+// ── CLI 集成（tmp mirror：检查脚本 + fixture 副本 + 真实 pi-ai symlink）────────
 
 /** 两个比对面词表 fixture 的真实文件形态（成员集动态取自权威源，pi 升级不破）。 */
 const subagentCoreModelRefSrc = (members) =>
@@ -132,11 +132,11 @@ const sharedPiPresetSrc = (members) =>
   `export const PI_THINKING_LEVELS = [${members.map((m) => `'${m}'`).join(', ')}] as const\n`
 
 /**
- * tmp mirror 工厂：目录布局对齐守卫的 ROOT 相对路径（packages/subagent-core/src/shared、
+ * tmp mirror 工厂：目录布局对齐检查的 ROOT 相对路径（packages/subagent-core/src/shared、
  * packages/shared/src），node_modules/@earendil-works/pi-ai
  * symlink 到真实实装包根（import.meta.resolve realpath 后向上爬包根与真实运行同构）。
  * overrides 可按比对面覆盖成员集（漂移注入点），missing 指定不落盘的比对面路径。
- * root/落盘/清理/守卫副本装置见 guard-mirror.mjs。
+ * root/落盘/清理/检查副本装置见 guard-mirror.mjs。
  */
 function makeMirror({ thinkingOrder, piPresetLevels, missing = [] } = {}) {
   const { root, writeAt, cleanup } = createMirrorRoot('thinking-levels-fx-')
@@ -151,13 +151,13 @@ function makeMirror({ thinkingOrder, piPresetLevels, missing = [] } = {}) {
   return { root, run, cleanup }
 }
 
-describe('CLI 集成（守卫脚本 × tmp mirror）', () => {
+describe('CLI 集成（检查脚本 × tmp mirror）', () => {
   it('词表一致 → exit 0，两个比对面逐一报一致', () => {
     const fx = makeMirror()
     try {
       const r = fx.run()
       expect(r.status).toBe(0)
-      expect(r.stdout).toContain('✓ thinking-levels 守卫通过')
+      expect(r.stdout).toContain('✓ thinking-levels 检查通过')
       for (const label of ['T3 subagent-core THINKING_ORDER', 'T4 shared PI_THINKING_LEVELS']) {
         expect(r.stdout).toContain(`${label} 与 pi-ai`)
         expect(r.stdout).toContain(`一致（${REAL_MEMBERS.length} 值）`)
@@ -188,7 +188,7 @@ describe('CLI 集成（守卫脚本 × tmp mirror）', () => {
       expect(r.stderr).toContain('T4 shared PI_THINKING_LEVELS')
       expect(r.stderr).toContain('副本多出: bogus-tier')
       expect(r.stderr).toContain('恢复动作')
-      expect(r.stderr).toContain('thinking-levels 守卫未通过')
+      expect(r.stderr).toContain('thinking-levels 检查未通过')
     } finally {
       fx.cleanup()
     }

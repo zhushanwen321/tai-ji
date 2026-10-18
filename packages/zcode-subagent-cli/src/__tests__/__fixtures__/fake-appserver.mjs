@@ -7,7 +7,7 @@
  * 以 `node <本文件> app-server --cwd <dir>` spawn（argv 解析后记录进流水，不消费）。
  * stdio NDJSON，帧形态对齐设计附录 A.1（无 jsonrpc 字段）。
  *
- * 测试断言面 = FAKE_STATE_FILE 事件流水（append JSONL）：
+ * 测试断言范围 = FAKE_STATE_FILE 事件流水（append JSONL）：
  *   boot / env / recv（收到的每个客户端帧）/ reverse-answer（反向请求收到的我方应答）
  * / unparseable-from-client。env 开关随 spawn env 固化：
  *   FAKE_STATE_FILE     流水文件路径（未设则不记流水）
@@ -64,13 +64,13 @@
  *     readError?:   {code,message,data} read 应答 error 帧（read 兜底降级链断言）
  *     readResult?:  object             覆盖 read 应答
  *     stopBehavior?: 'terminal'|'none'|'hang'
- *                                      session/stop 的行为（R4 abort 链断言面）：
+ *                                      session/stop 的行为（R4 abort 链断言范围）：
  *                                      'terminal'（缺省）= stop 时推送该会话的
  *                                      turn.terminal 终态帧（stop 优雅生效——不杀
  *                                      进程的 abort 路径）；'none' = 只应答不推终态
  *                                      （grace 窗口耗尽 → killChain 兜底路径）；
  *                                      'hang' = 连应答都不给（P0-1 U2 超时入口态③——
- *                                      控制面假死注入，stop 3s 超时 → 连接级失败判据）
+ *                                      控制范围假死注入，stop 3s 超时 → 连接级失败判据）
  *     stopError?:   {code,message,data} stop 应答 error 帧（P0-1 U2 超时入口态②——
  *                                      协议性 error（如会话已回收）注入，断言不升级杀链）
  *   }
@@ -259,7 +259,7 @@ async function handleRequest(f) {
           : SCENARIO && SCENARIO.sendPushes;
       pushFrames(pushes, String(params.sessionId || ''));
       // [P0-1 U4] 崩溃收割注入：应答后 N ms 自杀（onClose → failAllTurns 在途 turn
-      // 收割的确定性触发面；exit(1) 非零码与 test/suicide 同形态）
+      // 收割的确定性触发范围；exit(1) 非零码与 test/suicide 同形态）
       const crashAfterSendMs = SCENARIO && SCENARIO.crashAfterSendMs;
       if (typeof crashAfterSendMs === 'number' && crashAfterSendMs >= 0) {
         setTimeout(() => {
@@ -270,7 +270,7 @@ async function handleRequest(f) {
       return reply(id, (SCENARIO && SCENARIO.sendResult) || { accepted: true });
     }
     case 'session/stop': {
-      // [R4] abort 链断言面：缺省推终态（stop 优雅生效）；stopBehavior:'none' 只应答；
+      // [R4] abort 链断言范围：缺省推终态（stop 优雅生效）；stopBehavior:'none' 只应答；
       // stopError 注入协议性 error 应答帧（P0-1 U2 态②——不升级杀链判据）；
       // stopBehavior:'hang' 永不应答（态③——stop 3s 超时 = 连接级失败判据）
       const behavior = (SCENARIO && SCENARIO.stopBehavior) || 'terminal';

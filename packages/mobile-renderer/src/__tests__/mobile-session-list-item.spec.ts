@@ -1,7 +1,7 @@
 // SessionListItem 组件测试（u13/A5：自 MobileSessionList 内联行模板机械拆出 + 模型/思考档只读标签；
 // u20/A14：状态点改派生态渲染——derivedStatus prop 经 core 谓词计算后传入）。
 //
-// 行为面：label/状态点配色/状态文案/时间 + A5 模型标签 + 交互契约（click/enter emit open、
+// 行为范围：label/状态点配色/状态文案/时间 + A5 模型标签 + 交互契约（click/enter emit open、
 // active 高亮）+ A14 派生态渲染（9 态语义色/文案 + dead 进程态红点特判——进程态权威于
 // 对话派生，A3 分流视觉锚）。
 //

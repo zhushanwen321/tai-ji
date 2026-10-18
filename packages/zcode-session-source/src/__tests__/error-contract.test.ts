@@ -5,7 +5,7 @@
  * - `parseRowData` 三段 throw 的缺测两段（非 string / 解析后非对象；「非法 JSON」段已由
  *   access.test.ts「data 列非法 JSON」用例覆盖）——schema 漂移映射的上游契约：不在本层
  *   静默跳过（整行丢失会破坏切段配对），错误上下文带表与行标识；
- * - `candidatesByteSize` 行守卫（bytes 非 number → warn 留痕 + 跳过——消费端以 null 语义
+ * - `candidatesByteSize` 行检查（bytes 非 number → warn 留痕 + 跳过——消费端以 null 语义
  *   呈现「大小未知」，不回填 0 B 假数据，RT-5#10）；
  * - recovery 阶梯错误收尾契约（经 sqlite-driver 假驱动注入——真实驱动的 close 无法构造
  *   失败形态；probe / schema 行为按 sql 路由）：probe 失败先 close 再原样上抛（close
@@ -36,7 +36,7 @@ import {
   snapshotDirNameSet,
 } from './helpers.ts'
 
-// ── 假驱动注入面（仅 recovery 错误收尾契约组使用；slot 为空 = 回退真实驱动）──────────
+// ── 假驱动注入点（仅 recovery 错误收尾契约组使用；slot 为空 = 回退真实驱动）──────────
 
 const fakeDriverSlot = vi.hoisted(() => ({ driver: null as SqliteDriver | null }))
 
@@ -48,7 +48,7 @@ vi.mock('../sqlite-driver.ts', async (importOriginal) => {
   }
 })
 
-// ── per-file 私有 tmp 根（快照计数竞态的结构性根修）───────────────────────────
+// ── per-file 私有 tmp 根（快照计数竞态的结构性从根源修复）───────────────────────────
 // 快照目录住全局共享 tmpdir（taiji-zcode-snap-*），vitest 并发 worker 互相可见：
 // 差分计数断言会被其他文件的新建/清理双向污染（全量并发跑稳定红、单文件跑绿——
 // 早期的 <= 差分只堵住了「别人清理变少」方向，「别人新建变多」方向依旧破断言）。
@@ -209,9 +209,9 @@ describe('parseRowData 错误契约（schema 漂移上游——不静默跳过�
   })
 })
 
-// ── candidatesByteSize 行守卫（fixture 真库 + 真实驱动）─────────────────────────
+// ── candidatesByteSize 行检查（fixture 真库 + 真实驱动）─────────────────────────
 
-describe('candidatesByteSize 行守卫（bytes 非 number → warn 留痕 + 跳过）', () => {
+describe('candidatesByteSize 行检查（bytes 非 number → warn 留痕 + 跳过）', () => {
   it('全 NULL part.data 组 SUM 返 NULL：该会话不入 Map（大小未知非 0 B）+ warn 留痕；健康会话照常', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const fx = makeFixtureDir('zss-ec-bytes-')
@@ -219,7 +219,7 @@ describe('candidatesByteSize 行守卫（bytes 非 number → warn 留痕 + 跳�
       const writer = await openWritableSqlite(join(fx.root, 'db.sqlite'))
       writer.exec('CREATE TABLE session (id TEXT PRIMARY KEY)')
       writer.exec('CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT, sequence INTEGER, data)')
-      // part.data 可空（宿主真 schema 允许 NULL；SUM(全 NULL) 返 NULL 是该守卫的真实触发面）
+      // part.data 可空（宿主真 schema 允许 NULL；SUM(全 NULL) 返 NULL 是该检查的真实触发范围）
       writer.exec('CREATE TABLE part (id TEXT PRIMARY KEY, message_id TEXT, session_id TEXT, sequence INTEGER, data)')
       writer.exec(
         'CREATE TABLE schema_migration (id TEXT PRIMARY KEY, checksum TEXT NOT NULL, app_version TEXT, time_applied INTEGER NOT NULL)',
@@ -272,12 +272,12 @@ describe('recovery 错误收尾契约（假驱动：close 失败 / probe 失败 
       expect(caught).toBeInstanceOf(SqliteUnreadableError)
       const err = caught as SqliteUnreadableError
       expect(err.attempted).toEqual(['L1-direct', 'L2-immutable', 'L3-snapshot'])
-      // 归因以探测错误为准：close 错误吞掉不参与（失败路径错误面不污染）
+      // 归因以探测错误为准：close 错误吞掉不参与（失败路径错误范围不污染）
       expect(err.message).toContain('fake probe NOTADB')
       expect(err.message).not.toContain('fake close broken')
       // L3 失败路径收尾：快照目录读后即清（零新增残留断言，并发噪声免疫形态
       // 见 helpers.expectNoNewSnapshotDirs —— 旧 toBeLessThanOrEqual 计数差分挡得住
-      // 外部清理噪声、挡不住创建噪声，同族竞态已由新形态收口）
+      // 外部清理噪声、挡不住创建噪声，同族竞态已由新形态收尾）
       await expectNoNewSnapshotDirs(snapshotsBefore)
     } finally {
       fx.cleanup()
@@ -339,13 +339,13 @@ describe('recovery 错误收尾契约（假驱动：close 失败 / probe 失败 
       const dbPath = join(fx.root, 'db.sqlite')
       writeFileSync(dbPath, 'dummy bytes — orchestration entry requires the file to exist')
       const handle = await openZcodeSessionDb(dbPath)
-      schemaBroken = true // 开库闸门已过；读版本 best-effort 面失败
+      schemaBroken = true // 开库门禁已过；读版本 best-effort 面失败
       expect(handle.db.readSchemaVersion()).toBeUndefined()
       expect(() => handle.dispose()).not.toThrow()
       // wrapDb.close 吞错（[HISTORICAL] 只读连接 close 失败不影响读取结果）：
       // dispose 走 recovery 的 closeQuietly，close 面须单独驱动
       expect(() => handle.db.close()).not.toThrow()
-      // 前缀常量仍在断言面（快照目录识别 SSOT 未漂移）
+      // 前缀常量仍在断言范围（快照目录识别 SSOT 未漂移）
       expect(SNAPSHOT_TMP_PREFIX).toBe('taiji-zcode-snap-')
     } finally {
       fx.cleanup()

@@ -6,7 +6,7 @@
  * computeToolCallFill）是同一归一规则的两份孪生实现——迁移副本而非 import（core 不依赖
  * runtime，包依赖方向约束）。两份并存是 W20 已知分叉（收敛到 shared 留待后续 wave），
  * 分叉期间纯靠注释互指的纪律同步会漂移：实时路径与重放路径（live ≡ reload，关键规则 9）
- * 的归一输出一旦分叉，同一条 toolResult 在重开 session 后渲染漂移且等价性守卫归因困难。
+ * 的归一输出一旦分叉，同一条 toolResult 在重开 session 后渲染漂移且等价性检查归因困难。
  *
  * 本测试对同一输入组双侧调用、共同契约字段（output / outputRaw / images）断言 deep
  * equal——任一侧单方面改动（过滤规则 / join 分隔符 / ANSI 正则 / images 空块判定）

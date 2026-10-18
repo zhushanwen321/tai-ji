@@ -6,7 +6,7 @@
  * - renderStatusLine: slug 标题（fallback objective 截断）+ 状态后缀 + cancelled 短路 + token/耗时显示
  * - renderWidgetLines: cancelled 短路 + 标题行 + criteria 摘要单行 + 预算进度条（Objective 全文行已移除，GAP-8）
  * - renderTerminalStatusLine: 终态单行 + cancelled 短路
- * - updateWidget: FR-6.6 hasUI 守卫 + 终态折叠 + cancelled 清除
+ * - updateWidget: FR-6.6 hasUI 检查 + 终态折叠 + cancelled 清除
  *
  * 用 passthrough ThemeLike（fg/bold 返回原文），断言渲染逻辑而非颜色。
  */
@@ -197,7 +197,7 @@ describe("renderWidgetLines", () => {
 	});
 });
 
-// ── updateWidget（FR-6.6 hasUI 守卫 + dual payload）──
+// ── updateWidget（FR-6.6 hasUI 检查 + dual payload）──
 
 interface RecordedCall {
 	method: "setWidget" | "setStatus";
@@ -225,7 +225,7 @@ function makeUiPort(hasUI: boolean): { ui: UiPort; calls: RecordedCall[] } {
 }
 
 describe("updateWidget (FR-6.6 hasUI guard)", () => {
-	it("hasUI=false → 不调 setWidget/setStatus（headless 守卫）", () => {
+	it("hasUI=false → 不调 setWidget/setStatus（headless 检查）", () => {
 		const { ui, calls } = makeUiPort(false);
 		const session = createGoalSession();
 		session.state = makeState({ status: "active" });

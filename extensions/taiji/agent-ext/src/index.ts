@@ -28,7 +28,7 @@ export default function (pi: ExtensionAPI): void {
   // taiji:current-system-prompt custom entry（不进 LLM context，零模型侧影响——pi
   // sessionEntryToContextMessages 对 type=custom 落入末尾 return []，session-manager.ts:383-413），
   // runtime 轮询 get_entries(since) 拉到后返回前端（同条 entry 也会作为 DATA 行出现在 trace
-  // 台账里，留下取值痕迹）。
+  // 登记清单里，留下取值痕迹）。
   pi.registerCommand("__taiji_get_system_prompt__", {
     description:
       "Internal: append a custom entry with the current system prompt (host-initiated for the Trace view fetch-current button)",
@@ -56,7 +56,7 @@ export default function (pi: ExtensionAPI): void {
   // 写法契约（D1 硬要求）：handler 必须把 navigateTree 的 promise 纳入自身返回链——
   // pi `await command.handler(...)` 接住返回值是「revokeMessage reply 前树变更+落盘
   // 完成」的保证链。取 D1 许可形态「显式 await」而非「直接 return」：SDK（1.0.0 复核）
-  // RegisteredCommand.handler 钉死 `(args, ctx) => Promise<void>`，直接 return
+  // RegisteredCommand.handler 固定为 `(args, ctx) => Promise<void>`，直接 return
   // navigateTree 的 `Promise<{cancelled}>` 编译不过（TS2322，as 断言亦被拒/禁）。
   // fire-and-forget（去掉 await）会使 reply 先于树变更，产生偶发假阴性 nav-failed——
   // 禁止。

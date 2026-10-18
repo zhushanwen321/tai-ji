@@ -35,7 +35,7 @@ import { spawnPiFixture, FAUX_PI_READY, FAUX_PI_SKIP_REASON, type PiFixture } fr
 
 const SID = 'g5-thinking-level'
 
-/** get_available_models 返回项的消费面（pi-ai Model 的宽形态，只声明用到的字段）。 */
+/** get_available_models 返回项实际用到的形态（pi-ai Model 的宽形态，只声明用到的字段）。 */
 interface AvailableModel {
   id: string
   provider: string
@@ -49,7 +49,7 @@ const CLAMP_ACTOR = { provider: 'faux', id: 'faux-1' } as const
 /** 正常档位用例演员：reasoning:true 且无 thinkingLevelMap → 档位含 high，set high 生效 */
 const NORMAL_ACTOR = { provider: 'faux', id: 'faux-1-reasoning' } as const
 
-/** 把 fixture 的原始 JSONL RPC 适配成 SessionService 消费的 IPiEngine 语义面（唯一适配点）。 */
+/** 把 fixture 的原始 JSONL RPC 适配成 SessionService 消费的 IPiEngine 语义侧（唯一适配点）。 */
 function makeEngine(fx: PiFixture): IPiEngine {
   return {
     getCommands: async () => [],

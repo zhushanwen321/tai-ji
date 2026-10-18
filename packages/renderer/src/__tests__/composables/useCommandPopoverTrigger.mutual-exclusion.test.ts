@@ -81,7 +81,7 @@ function runWithScope<T>(fn: () => T): { result: T; dispose: () => void } {
 
 /**
  * 真实 DOM 组装的 ComposerInput 等价件：contenteditable el + dom-core 真实 composable。
- * inputInstance 暴露 useCommandPopoverTrigger 消费面（getInputElement/insertSlashChip/
+ * inputInstance 暴露 useCommandPopoverTrigger 消费方（getInputElement/insertSlashChip/
  * insertSkillChip/focus）；draft ref 对齐 ComposerInput 的 emit('input', getText()) 链。
  */
 function setupRealComposer(html: string, sessionId = 'sid-1') {
@@ -179,7 +179,7 @@ describe('useCommandPopoverTrigger SM 互斥（D1 单向状态互斥）', () => 
     expect(ctx.result.cmdOpen.value).toBe(false)
   })
 
-  it('互斥不动触发域标记（active/query 保留——冻结守卫与 D2b 责任面的锚）', () => {
+  it('互斥不动触发域标记（active/query 保留——冻结检查与 D2b 职责范围的锚）', () => {
     ctx = setupRealComposer('/compact')
     ctx.result.onSlashTrigger({ query: 'compact' })
     useSearchModal().open()
@@ -219,7 +219,7 @@ describe('useCommandPopoverTrigger D2b 注入前清理（pendingSlash 消费链�
 
   it('② 失活边界：`/rev $f`（$ 域活跃、/rev 失活）confirm 后 `$f` 被清、`/rev` 保留', async () => {
     ctx = setupRealComposer('/rev $f')
-    // slash 域开过又关（空格后触发终止）——失活历史 token 出 D2b 责任面
+    // slash 域开过又关（空格后触发终止）——失活历史 token 出 D2b 职责范围
     ctx.result.onSlashTrigger({ query: 'rev' })
     ctx.result.onSlashTrigger(null)
     ctx.result.onFileTrigger({ query: 'f' }) // $ 域活跃
@@ -273,7 +273,7 @@ describe('useCommandPopoverTrigger D2b 注入前清理（pendingSlash 消费链�
     // 注入发生（req.sessionId 匹配当前 session，chip 已插 + 通道被清）……
     expect(serialize(ctx.el).startsWith('/commit')).toBe(true)
     expect(useCommandStore().pendingSlash.value).toBeNull()
-    // ……但清理被冻结守卫跳过（不误删他 session 草稿的同形 token）
+    // ……但清理被冻结检查跳过（不误删他 session 草稿的同形 token）
     expect(plainTextOutsideChips(ctx.el)).toBe('/rev $f')
   })
 

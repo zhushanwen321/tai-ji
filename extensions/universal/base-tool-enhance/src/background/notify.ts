@@ -1,25 +1,40 @@
 /**
- * 完成通知与 pending-notifications 接入（M3，设计 §3.5 数据流 ⑤⑧⑨ / §3.3 D5·D17）。
+ * 完成通知入账与 pending-notifications 接入（M3 + unified-delivery 波 3 入账切换，
+ * 设计 .tmp/tech-design/unified-delivery.md D3 裁决 1 / §5 波 3 / 老能力映射 #4）。
  *
- * 通道形态（与 pending-notifications index.ts listener / subagent-workflow notifier
- * 先例对齐——先例经父进程 IPC 投递与本包同进程异步时机不同构，探针 P3 已实测）：
+ * 通道形态：
  *  - register/unregister 经 pi.events.emit（EventBus，pending 侧 pi.events.on 消费）
- *  - 完成通知经 pi.sendMessage({customType, content, display:true},
- *    {deliverAs:"steer", triggerTurn:true}) 驱动新 turn
+ *  - 完成通知经投递端口入账：port.deliver({id: taskId, timing: "steer",
+ *    payload: {kind:"custom", customType:"background-bash", ...}})——受理前落
+ *    session entry 投递日志（outbox）、受理即直达 pi 唯一队列（steer 档）、送达凭据
+ *    = details.deliveryId（port 注入，业务 details 字段保持原样）、丢失由
+ *    session_start 差集重放覆盖。幂等键 = taskId（bash 任务终态通知恰好一次语义）。
+ *    C-ext-19 的 at-most-once 直发禁令由此在通道无关层面满足（结果语义 = at-least-once
+ *    + 幂等）。
+ *  - port 缺席（装配异常 / 版本混装窗口）= 直发兜底：pi.sendMessage steer + warn
+ *    留痕（设计 §3.7 缺席语义；降级代价 = 无判重无耐久的 at-most-once，只覆盖装配
+ *    异常窗口、不作为常态路径——warn 即修复信号）。
  *
- * D17 pi 引用刷新：通知通路持模块级「当前 pi 引用」——同进程 session 替换
- * （/fork、选择器切换、RPC session.*）会重建 eventBus 并重新 load extension，本
- * 模块引用由新实例 load 时 refreshPiReference 刷新，完成通知投递新 session。
+ * D17 pi 引用刷新：直发兜底与 pending emit 通路持模块级「当前 pi 引用」——同进程
+ * session 替换（/fork、选择器切换、RPC session.*）会重建 eventBus 并重新 load
+ * extension，本模块引用由新实例 load 时 refreshPiReference 刷新，兜底投递新 session。
  * （exit-collector 的收尾回调链同样全模块级，exit 事件边沿由此跨替换可达——
  * ADR-0122 改造：原 2s 轮询器已删。）
  *
- * 已知竞态（设计 §3.5 原样登记，不修）：dispose → 新实例 load 间毫秒窗口任务恰好
- * 完成时，sendMessage/emit 落旧 bus 丢一条——对账在该 session 重开时补 unregister，
- * 完成内容可由 bash_output 查询；窗口极窄且后果可恢复，不加同步握手。旧引用 throw
- * （旧 bus 已 dispose）时捕获降级为日志，不中断后续任务的通知（边沿收尾不受影响）。
+ * 投递端口按 session_start 重绑（dispose 旧实例 + 新实例 recover）：同进程 session
+ * 替换毫秒窗口任务恰好完成时，getDeliveryPort() 指向的已是当前槽实例（旧实例已
+ * dispose 时返回 undefined → 走直发兜底 + warn）——旧「落旧 bus 丢一条」竞态被
+ * 槽语义 + 缺席兜底收窄为「兜底 at-most-once」已登记形态。
  *
- * kill 路径不 sendMessage（§3.5「bash_kill 终态收尾的单点归属」）：reason:"killed"
- * 只 emit unregister——kill 调用方就在当前 turn 等结果，双发是噪音。
+ * 丢失覆盖对位（主路径补投退役，D3 裁决 1）：旧补投机制覆盖的「投递 throw」「投递
+ * 受理后未落盘即崩溃」两形态由 port 的 outbox 差集重放覆盖（outbox 受理前落盘、
+ * details-id 凭据未命中即差集、session_start 重放重投）；「进程死亡收殓终态通知」
+ * （收殓时 pi API 不可用，无 outbox 条目，重放无从覆盖）改由对账路径承接
+ * （pending-reconcile.ts——收殓终态通知的唯一生产者）。
+ *
+ * kill 路径不入账（§3.5「bash_kill 终态收尾的单点归属」，老能力映射 #10 result 类
+ * silent 声明）：reason:"killed" 只 emit unregister——kill 调用方就在当前 turn 等结果，
+ * 双发是噪音。
  *
  * peer 版本门槛（D16 独立安装场景）——运行时检测**降级为静态声明**：pi 0.84.1 的
  * ExtensionAPI/ExtensionContext 均无「枚举已加载 extensions」接口（types.d.ts 全文
@@ -29,6 +44,7 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { getDeliveryPort } from "@zhushanwen/pi-delivery-port";
 import { toErrorMessage } from "@zhushanwen/pi-ext-guards";
 import { getLogger } from "@zhushanwen/pi-extension-logger";
 
@@ -130,17 +146,56 @@ export function emitPendingUnregister(
 
 /**
  * ⑧⑨ exit 事件边沿的完成通知入口（exit-collector setOnTaskExit 接线，index.ts load 时挂）。
- * 入参是 finalizeTask 之后的终态条目（state=exited）。kill 路径不 sendMessage
- * （文件头）；process-exit 不经过这里（收殓路径直接 finalizeTask + 只 emit）。
+ * 入参是 finalizeTask 之后的终态条目（state=exited）。kill 路径不入账（文件头）；
+ * process-exit 不经过这里（收殓路径直接 finalizeTask + 只 emit，终态通知由对账路径
+ * 补投——pending-reconcile.ts）。
  */
 export function handleTaskExit(task: BackgroundTask): void {
 	emitPendingUnregister(task.taskId, task.reason ?? "natural", task.exitCode ?? null);
 	if (task.reason === "killed") return;
-	sendTaskFinishedMessage(task);
+	deliverTaskFinishedNotification(task);
 }
 
-/** ⑨ sendMessage steer 驱动新 turn（探针 P3 已实测同进程异步时机可用）。 */
-function sendTaskFinishedMessage(task: BackgroundTask): void {
+/**
+ * ⑨ 完成通知入账（port.deliver，id = taskId 幂等键）：受理前落 outbox（丢失由差集
+ * 重放覆盖）→ 受理即直达 pi 唯一队列（steer 档，注入形态与直发一致）。deliver 同步
+ * 返回受理结果，本通路 fire-and-forget：accepted / swallowed（幂等命中）静默；
+ * rejected（persist-failed / disposed）= 幂等键未登记、outbox 未落，通知丢失且重放
+ * 无从覆盖（natural/timeout 不在对账补投判据内）——warn 留痕即修复信号。
+ */
+function deliverTaskFinishedNotification(task: BackgroundTask): void {
+	const port = getDeliveryPort();
+	if (port !== undefined) {
+		const receipt = port.deliver(
+			{
+				id: task.taskId,
+				timing: "steer",
+				payload: {
+					kind: "custom",
+					customType: BACKGROUND_BASH_CUSTOM_TYPE,
+					content: buildNotificationContent(task),
+					display: true,
+					details: buildNotifyDetails(task),
+				},
+			},
+			// collectKey 债权申报（result-collect 设计 §3.4）：单债权条目 = 其
+			// pending:register 的 id（bash 域幂等键与债权键同 id，设计 §3.3），对账
+			// 补投路径（pending-reconcile deliverReapNotifications）同款申报。
+			{ collectKey: [task.taskId] },
+		);
+		if (receipt.kind === "rejected") {
+			logger.warn("background task notify rejected by delivery port; notification lost (no outbox record)", {
+				detail: { taskId: task.taskId, reason: receipt.reason },
+			});
+		}
+		return;
+	}
+	// port 缺席（装配异常窗口）：直发兜底（at-most-once 降级代价见文件头）。
+	sendDirectFallback(task);
+}
+
+/** 缺席兜底：pi.sendMessage steer 驱动新 turn（旧 bus 已 dispose 时降级日志不断链）。 */
+function sendDirectFallback(task: BackgroundTask): void {
 	const pi = currentPi;
 	if (pi === undefined) return;
 	try {
@@ -154,8 +209,8 @@ function sendTaskFinishedMessage(task: BackgroundTask): void {
 			{ deliverAs: "steer", triggerTurn: true },
 		);
 	} catch (err) {
-		// 旧 bus 已 dispose（session 替换毫秒窗口）——降级日志，不中断后续收尾（文件头已知竞态）
-		logger.warn("background task notify sendMessage failed (stale bus?); notification skipped, later tasks unaffected", {
+		// 旧 bus 已 dispose（session 替换毫秒窗口）——降级日志，不中断后续收尾（文件头 D17）
+		logger.warn("background task notify direct fallback sendMessage failed (stale bus?); notification skipped, later tasks unaffected", {
 			detail: {
 				taskId: task.taskId,
 				err: toErrorMessage(err),
@@ -165,7 +220,7 @@ function sendTaskFinishedMessage(task: BackgroundTask): void {
 }
 
 /**
- * 通知文案函数的参数面：只依赖终态渲染所需字段。收窄为结构子集（而非完整
+ * 通知文案函数的参数侧：只依赖终态渲染所需字段。收窄为结构子集（而非完整
  * BackgroundTask）使补投路径可直接传 registry 终态条目（RegistryEntry——无
  * registryPath 等运行时字段），文案组装逻辑主路径与补投路径共用一份。完整
  * BackgroundTask 满足该子集，既有调用方不受影响。
@@ -248,8 +303,10 @@ export function buildNotifyDetails(task: NotificationTaskLike): BackgroundBashDe
 }
 
 /**
- * 收殓终态（exited process-exit / orphaned）的补投文案行（bg-task-notify-durability
- * 设计决策 3/4）——主路径不产这类消息（process-exit 收殓不 sendMessage），仅供补投：
+ * 收殓终态（exited process-exit / orphaned）的补投文案行（unified-delivery D3 裁决 1：
+ * 对账路径 = 收殓终态通知的唯一生产者）——主路径不产这类消息（process-exit 收殓不经
+ * handleTaskExit、无 outbox 条目，重放无从覆盖），仅供对账补投（pending-reconcile.ts
+ * 经 port.deliver）：
  *
  *   [background-bash] bt-x was terminated when the session went down (exit code unknown): <command>. Output file: <path>; use bash_output to check the output before rerunning.
  *

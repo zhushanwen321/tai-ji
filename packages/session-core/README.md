@@ -6,7 +6,7 @@ Coding-agent session 的 canonical 模型与纯 JSONL 原语基座。**零运行
 
 「把某个 coding-agent 的 session 读成统一结构」的唯一落点：session-reader（pi 会话读取）、runtime 导入、未来的 coding-agent source 包共用本基座，取代各自为政的字节层副本（首行读取、entry 解析、id 归一化）。
 
-## 导出面
+## 导出清单
 
 | 导出 | 说明 |
 |------|------|

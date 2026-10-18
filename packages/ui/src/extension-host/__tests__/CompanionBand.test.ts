@@ -308,7 +308,7 @@ describe('CompanionBand × OverlayLifecycle 契约（IF9）', () => {
     const { wrapper, source } = mountBand('A', overlay)
     source.triggerUiRequest({ sessionId: 'A', requestId: 'r4', method: 'confirm', title: '确认', message: 'm' })
     await nextTick()
-    // 用户可见断言：band 内联 z 钉确认层档 token（高于 --z-modal 的数值序由 renderer style.css 守卫）
+    // 用户可见断言：band 内联 z 钉确认层档 token（高于 --z-modal 的数值序由 renderer style.css 检查）
     expect(wrapper.find('[data-testid="companion-band"]').attributes('style')).toContain('z-index: var(--z-dialog)')
   })
 

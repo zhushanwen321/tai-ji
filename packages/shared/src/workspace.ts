@@ -7,7 +7,7 @@
  * @see docs/adr/decisions.md ADR-0034（recent-workspaces pull-only + 三层）
  */
 export interface RecentWorkspaceRecord {
-  /** 绝对路径（INV-1 非空串守卫） */
+  /** 绝对路径（INV-1 非空串检查） */
   cwd: string
   /** 最后使用时间戳（毫秒，Date.now()，与 session.lastActiveAt 一致） */
   lastUsedAt: number

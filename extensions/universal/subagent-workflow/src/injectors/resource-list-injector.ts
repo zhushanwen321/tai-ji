@@ -80,7 +80,7 @@ export interface ResourceListInjectorConfig<TEntry extends ResourceListEntry> {
 	 * warn/error 口径全归被委托方），工厂不再跑内置装配循环。agent 侧真差异：
 	 * U11（sink 设计）装配算法单源 core discoverAgents（第三宿主免复刻 G3/S5），
 	 * 壳侧收缩为「宿主注入根现取 + 委托」。此时 parse 不参与工厂装配，
-	 * invalids 恒空（core discoverAgents 无 invalid 产出面）。
+	 * invalids 恒空（core discoverAgents 无 invalid 产出侧）。
 	 */
 	assemble?: (workspaceRoot: string) => Promise<TEntry[]>;
 	/** 单文件内容 → entry；null = 损坏文件（invalid 具名上报，D4-3）。assemble 覆写时不需要。 */
@@ -119,8 +119,8 @@ function singularKind(kind: "agents" | "workflows"): string {
 /**
  * 空态注入（D4-2）渲染的发现根清单：宿主注入根（discoveryRoots 槽，现取——
  * 实例隔离语义同 discover）+ core 约定根推导（conventionRootDirs 单源，含
- * includeTmp 的 .tmp 根）——本函数只做纯投影，不持有任何 join 字面。
- * TAIJI_EXTENSION_PATHS 刻意不列——taiji 内部 dev-link 通道，非 agent 自救面。
+ * includeTmp 的 .tmp 根）——本函数只做纯派生视图，不持有任何 join 字面。
+ * TAIJI_EXTENSION_PATHS 刻意不列——taiji 内部 dev-link 通道，非 agent 自救侧。
  * 清单是给 agent 的提示信息：顺序无优先级契约，保序去重由渲染函数保证
  * （同 turn 重建字节稳定，KV-cache 契约）。
  */

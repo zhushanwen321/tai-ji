@@ -13,7 +13,7 @@
  *   启发式 tier（kill-tool/pi-reference/shell，'other' 不进 present 但消失仍进
  *   vanished）、排除集（ownPid/deadPid/INIT_PID）、siblings 连坐视图、
  *   freshRows=null 降级（两桶空 + freshSnapshotAvailable=false）；
- * - captureSignalForensics：编排全链（环历史 diff + lstart 补采 + 台账事件字段 +
+ * - captureSignalForensics：编排全链（环历史 diff + lstart 补采 + journal 事件字段 +
  *   detailPath）；新快照失败降级不抛；
  * - reportPiExitSignalForensics：logger 门控两态——未启用结构性 no-op（无落点不采样），
  *   启用时真实采集落盘（生效态同时是 mock 路径正确性的对照面：no-op 态真门控也关，
@@ -331,7 +331,7 @@ describe('classifySenders', () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('captureSignalForensics', () => {
-  it('全链：vanished 归因 + lstart 补采 + 台账事件字段 + detailPath', async () => {
+  it('全链：vanished 归因 + lstart 补采 + journal 事件字段 + detailPath', async () => {
     const journal = makeJournal()
     const detailPath = 'logs/signal-forensics-2026-10-13-sess-1.jsonl'
     const writeDetailFile = vi.fn(() => detailPath)
@@ -356,7 +356,7 @@ describe('captureSignalForensics', () => {
       },
     )
 
-    // 记录面
+    // 记录侧
     expect(result.record.signalGuess).toBe('SIGTERM')
     expect(result.record.exitCode).toBe(143)
     expect(result.record.uptimeMs).toBe(137_110)
@@ -367,7 +367,7 @@ describe('captureSignalForensics', () => {
     expect(result.record.siblingPis).toEqual([{ pid: SIBLING_PID, aliveAtDeath: true }])
     expect(result.record.note).toContain('vanished candidates')
 
-    // 落盘面
+    // 落盘断言
     expect(result.detailPath).toBe(detailPath)
     expect(writeDetailFile).toHaveBeenCalledTimes(1)
     expect(result.journalAppended).toBe(true)
@@ -384,7 +384,7 @@ describe('captureSignalForensics', () => {
     expect((event.detailDigest ?? '').length).toBeLessThanOrEqual(2_000)
   })
 
-  it('新快照失败降级：freshSnapshotAvailable=false，两桶空，仍落账不抛', async () => {
+  it('新快照失败降级：freshSnapshotAvailable=false，两桶空，仍落盘不抛', async () => {
     const journal = makeJournal()
     const result = await captureSignalForensics(
       { sessionId: 'sess-2', deadPid: DEAD_PID, exitCode: 143 },

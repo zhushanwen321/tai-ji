@@ -5,8 +5,8 @@
 // —— §4 验收场景脚本化（u-probe-verify）。
 //
 // 第三宿主纪律（G3 的可证伪前提）：本脚本对 subagent-core 的全部消费**仅凭 barrel
-// 导出面**——import 自 dist/index.cjs（构建产物），禁止任何 core 内部深路径 import；
-// 符号签名依据 dist/index.d.ts 导出类型面，不读 core 实现源码。
+// 导出清单**——import 自 dist/index.cjs（构建产物），禁止任何 core 内部深路径 import；
+// 符号签名依据 dist/index.d.ts 导出类型范围，不读 core 实现源码。
 //
 // 覆盖场景：
 //   S5① 列 agents        —— discoverAgents（tmp fixture agentDir）
@@ -49,7 +49,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-// ── barrel 导出面（第三宿主唯一消费通道） ────────────────────
+// ── barrel 导出清单（第三宿主唯一消费通道） ────────────────────
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const coreRequire = createRequire(import.meta.url);
@@ -67,7 +67,7 @@ const core = coreRequire(CORE_ENTRY);
 // log 端口把 warn/error 引到 stderr（出声，不参与断言）。
 const fixtureRoot = join(tmpdir(), `sink-probe-third-host-${process.pid}-${Date.now()}`);
 // journal 模块锚重定向（Part C 前置，全进程生效）：recoverCrashedRuns → interruptRun
-// 的 run-interrupted 帧落账目录走模块锚生产推导（PI_CODING_AGENT_DIR env 指向目录
+// 的 run-interrupted 帧落盘目录走模块锚生产推导（PI_CODING_AGENT_DIR env 指向目录
 // 下的 workflow-state 后缀），探针指进 fixture——收编链写盘不触真实 ~/.pi 数据目录。
 process.env.PI_CODING_AGENT_DIR = join(fixtureRoot, "pi-agent");
 core.configureCore({
@@ -181,7 +181,7 @@ async function partA() {
   );
 
   // ── S5①：discoverAgents 装配（tmp fixture agentDir 作 hostRoot） ──
-  // hostRoots[].source 是封闭 8 值 ResourceSource 枚举（dist/index.d.ts 类型面）；
+  // hostRoots[].source 是封闭 8 值 ResourceSource 枚举（dist/index.d.ts 类型范围）；
   // 第三宿主注入项目级根走 "project-agents" 标签（序位高于 project-pi 的项目级通道）。
   const workspaceRoot = repoRoot;
   const entries = await core.discoverAgents(workspaceRoot, [{ dir: agentDir, source: "project-agents" }]);
@@ -194,7 +194,7 @@ async function partA() {
   const entry = entries.find((e) => e.name === "t-sink");
   check("S5① discoverAgents: t-sink path 为绝对路径", !!entry && entry.path === join(agentDir, "t-sink.md"), String(entry?.path));
   check(
-    "S1 discoverAgents: description 投影完整（block-scalar 未丢字段）",
+    "S1 discoverAgents: description 呈现完整（block-scalar 未丢字段）",
     !!entry && T_SINK_LINES.every((l) => String(entry.description).includes(l)),
     JSON.stringify(entry?.description),
   );
@@ -211,7 +211,7 @@ async function partA() {
     String(core.normalizeRef("/x/../etc/passwd.md", ".md")),
   );
   check(
-    "S1③ normalizeRef('/x/../y.js', '.js') 拒绝（workflow 同面）",
+    "S1③ normalizeRef('/x/../y.js', '.js') 拒绝（workflow 同一侧）",
     core.normalizeRef("/x/../y.js", ".js") === null,
     String(core.normalizeRef("/x/../y.js", ".js")),
   );
@@ -248,7 +248,7 @@ async function partA() {
 // ══════════════════════════════════════════════════════════════
 
 async function partB() {
-  section("Part B · S5② workflow 契约面（normalizeWorkflowRef + loadWorkflowScriptByPath）");
+  section("Part B · S5② workflow 契约范围（normalizeWorkflowRef + loadWorkflowScriptByPath）");
 
   // 内置 workflow 名经 knownNames 宿主注入（内置名不 core 硬编码——wave1 裁决）。
   const ref = core.normalizeWorkflowRef("chain", { knownNames: ["chain", "map-reduce", "parallel"] });
@@ -295,7 +295,7 @@ async function partB() {
 }
 
 
-// ── [partC 拆分] 第三宿主最小 RunStore 的 loadAll 实装（投影语义锚定壳
+// ── [partC 拆分] 第三宿主最小 RunStore 的 loadAll 实装（派生视图语义锚定壳
 // foldRecordStreamToRun：lifecycle terminal → status done + DoneReason；其余（含
 // interrupted）→ status running，中断态经 meta.interruptedAt 表达——聚合 status
 // 词表保持两态）──────────────────────────────────────────────
@@ -379,16 +379,16 @@ async function seedPartCCrashFixture(journal, runsDir, runId) {
 
 
 
-/** [partC 拆分] D15 收编落账证据：record 流追加恰 1 条 run-interrupted 帧
+/** [partC 拆分] D15 收编落盘证据：record 流追加恰 1 条 run-interrupted 帧
  * （errorCode=crashed、reason 透传恢复原因）；2 前置帧 + 1 中断帧 = 3——append
  * 追加语义，无覆盖改写；收编零文件覆盖。 */
 async function verifyPartCJournalAppendEvidence(journal, runsDir, runId) {
-  // D15 收编落账证据：record 流追加恰 1 条 run-interrupted 帧（errorCode=crashed、
+  // D15 收编落盘证据：record 流追加恰 1 条 run-interrupted 帧（errorCode=crashed、
   // reason 透传恢复原因）；2 前置帧 + 1 中断帧 = 3——append 追加语义，无覆盖改写。
   const afterEvents = await journal.scan(runId);
   const interruptedFrames = afterEvents.filter((e) => e.type === "run-interrupted");
   check(
-    "S5③ run-interrupted 帧恰 1 条落账（errorCode=crashed）",
+    "S5③ run-interrupted 帧恰 1 条落盘（errorCode=crashed）",
     interruptedFrames.length === 1 && interruptedFrames[0].errorCode === "crashed",
     JSON.stringify(interruptedFrames),
   );
@@ -412,19 +412,19 @@ async function verifyPartCJournalAppendEvidence(journal, runsDir, runId) {
   );
 }
 
-/** [partC 拆分] 收编后断言段：interrupted 暂停态投影 / hooks 计数 / run-interrupted
- * 落账证据（追加语义、零覆盖）——D15 中断收编语义（崩溃 ≠ 失败，可 resume）。 */
+/** [partC 拆分] 收编后断言段：interrupted 暂停态派生视图 / hooks 计数 / run-interrupted
+ * 落盘证据（追加语义、零覆盖）——D15 中断收编语义（崩溃 ≠ 失败，可 resume）。 */
 async function verifyPartCRecoveryOutcome(journal, runsDir, runId, runs, recovery, recoveredPayloads) {
   const recovered = runs.get(runId);
   // D15 中断收编：running 遗留 → interrupted 暂停态（非终局——崩溃 ≠ 失败，
-  // 可 resume）。聚合面 meta.interruptedAt 置位，runSummary 投影 'interrupted'。
+  // 可 resume）。聚合上 meta.interruptedAt 置位，runSummary 呈现 'interrupted'。
   check(
     "S5③ recoverCrashedRuns: run 进 runs Map 且转 interrupted 暂停态（meta.interruptedAt 置位）",
     !!recovered && typeof recovered.meta.interruptedAt === "string",
     JSON.stringify(recovered && { interruptedAt: recovered.meta.interruptedAt }),
   );
   check(
-    "S5③ runSummary 投影 status=interrupted（不显示僵尸「运行中」）",
+    "S5③ runSummary 呈现 status=interrupted（不显示僵尸「运行中」）",
     !!recovered && core.runSummary(recovered).status === "interrupted",
     JSON.stringify(recovered ? core.runSummary(recovered) : null),
   );
@@ -434,7 +434,7 @@ async function verifyPartCRecoveryOutcome(journal, runsDir, runId, runs, recover
     String(recovered ? core.isRunSettled(recovered) : "no-run"),
   );
   check(
-    "S5③ state.error 携带恢复 reason（收编链诊断面）",
+    "S5③ state.error 携带恢复 reason（收编链诊断范围）",
     !!recovered &&
       typeof recovered.state.error === "string" &&
       recovered.state.error.includes("SIGKILL"),
@@ -474,12 +474,12 @@ async function partC() {
   );
 
   // 第三宿主最小 RunStore 内存双（RunStore port 三方法，D1 后形态）：
-  // - loadAll = 逐 record 流 foldRunEventCheckpoint 重建聚合（投影语义锚定壳
+  // - loadAll = 逐 record 流 foldRunEventCheckpoint 重建聚合（派生视图语义锚定壳
   //   foldRecordStreamToRun：lifecycle terminal → status done + DoneReason；
   //   其余（含 interrupted）→ status running，中断态经 meta.interruptedAt 表达
   //   ——聚合 status 词表保持两态）；
   // - save = 显式 no-op（D1 快照删除后 port 写侧契约即 no-op——收编不覆盖任何
-  //   文件，中断帧由收编链经 journal append 落账）；
+  //   文件，中断帧由收编链经 journal append 落盘）；
   // - stateFilePath = record 流绝对路径。
   const store = {
     async save() {},
@@ -491,7 +491,7 @@ async function partC() {
     },
   };
 
-  // 重水合：record fold loadAll 见残留 running 聚合（无 settled 尾 → running）。
+  // 重新加载：record fold loadAll 见残留 running 聚合（无 settled 尾 → running）。
   const hydrated = await store.loadAll();
   check(
     "S5③ record fold loadAll: 恰重建 1 个 running run（无 settled 尾）",
@@ -529,12 +529,12 @@ async function partC() {
     JSON.stringify(secondRecovery),
   );
   check(
-    "S5③ 幂等: run-interrupted 帧仍恰 1 条（无二次落账）",
+    "S5③ 幂等: run-interrupted 帧仍恰 1 条（无二次落盘）",
     secondFrames.length === 1,
     String(secondFrames.length),
   );
   check(
-    "S5③ 幂等: 二次重水合聚合仍携带中断标记（投影面 interrupted 保持）",
+    "S5③ 幂等: 二次重新加载聚合仍携带中断标记（派生视图 interrupted 保持）",
     typeof secondRuns.get(runId)?.meta.interruptedAt === "string",
     JSON.stringify(secondRuns.get(runId)?.meta.interruptedAt),
   );

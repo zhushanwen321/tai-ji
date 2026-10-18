@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
 /**
- * Toast 进出场过渡回归守卫（Plan 03: toast enter-exit transition）。
+ * Toast 进出场过渡回归检查（Plan 03: toast enter-exit transition）。
  *
  * 背景：Toast 进出场是所有用户高频看到的动画，scoped style 三错叠加：
  *   1. transition: all（AUDIT §5「always a finding」——未限定过渡属性）

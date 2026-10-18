@@ -1,13 +1,13 @@
 /**
  * Workflow 任务托盘同步 E2E —— Playwright + Electron + mock 轨。
  *
- * [改写 2026-09-16] 原断言面（侧栏 Flows/Agents tab 的 workflow-card / subagent-card /
+ * [改写 2026-09-16] 原断言范围（侧栏 Flows/Agents tab 的 workflow-card / subagent-card /
  * workflow-detail）随侧栏任务 tab 退役（设计 docs/design/composer-task-tray.md——已删除，git 可追溯——D10/D11：
  * 任务观察入口唯一化收敛到 composer 任务托盘），本 spec 改挂托盘。文件名与登记 id 保留
  * （docs/testing/e2e-map.json E2E-MOCK-01 条目），语义从「侧栏列表同步」变为「托盘同步」。
  *
  * 分层定位（workflow-visualization 设计 §4 e2e 影响面评估 + 计划 u6 验收条款）：
- * 行渲染细节（分桶/格式化/两段式操作/空态）已沉淀 ComposerTray / TrayNativePanel 组件测试
+ * 行渲染细节（分桶/格式化/两段式操作/空态）已转化为 ComposerTray / TrayNativePanel 组件测试
  * （packages/renderer/src/__tests__/panel/tray/），本 spec 只保留 e2e 层不可替代的**跨进程链路**：
  *   mock 数据源 → store 分区 → useTrayCounts 计数/行集 → 托盘 DOM，
  * 以及「点托盘行 → workflow overlay」的归宿不变量（workflow-visualization U6/D1 入口改向
@@ -33,7 +33,7 @@
  *   wf-mock-mismatched-calls
  * - getWorkflows(非 s3) = [] → 该类无记录 → 托盘条目整体不渲染
  * - 计数>0 分支（徽标 + 呼吸点）自 D8 演员入列起可达（running=4）；「归零不虚亮」的
- *   否定面断言保留在 T2（切无数据 session → 条目整体摘除）与托盘组件测试三态用例
+ *   否定用例断言保留在 T2（切无数据 session → 条目整体摘除）与托盘组件测试三态用例
  *
  * 运行：npx playwright test --project=electron e2e/workflow-sidebar-sync.spec.ts
  */

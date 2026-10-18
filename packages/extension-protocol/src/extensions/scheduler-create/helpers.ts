@@ -7,8 +7,8 @@
  * 交互入口在 extensions/universal/scheduler/src/tool.ts。
  *
  * 本模块保留三类跨端共享资产：
- * - isScheduleDraft / isScheduleFormResult 形状守卫：前者供 runtime event-adapter
- *   legacy 分支（SCHEDULE_CREATE_MARKER 帧 payload 判定）与 ui-form 守卫的
+ * - isScheduleDraft / isScheduleFormResult 形状检查：前者供 runtime event-adapter
+ *   legacy 分支（SCHEDULE_CREATE_MARKER 帧 payload 判定）与 ui-form 检查的
  *   schedule 分支（initial 深度校验）消费；后者供 scheduler 包回包判别
  *   （uiFormInteract answers[key] 解包后收窄为 ScheduleFormResult）。
  * - dateToOnceCron / onceCronToDate 时间折叠单点（D2）：GUI（ScheduleForm 渲染器）
@@ -21,7 +21,7 @@
 
 import type { ScheduleDraft, ScheduleFormResult } from './types'
 
-/** 形状守卫公共前置：非 null 的普通对象（排除数组；JSON.parse 产物均为 JSON 值） */
+/** 形状检查公共前置：非 null 的普通对象（排除数组；JSON.parse 产物均为 JSON 值） */
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
@@ -37,7 +37,7 @@ function isStringArray(v: unknown): boolean {
 }
 
 /**
- * 类型守卫：验证 unknown 是否为合法的 ScheduleDraft。
+ * 类型检查：验证 unknown 是否为合法的 ScheduleDraft。
  * 用于 runtime event-adapter 判定 marker select 的 payload 是否为本协议 draft
  * （检测失败降级普通 select），以及前端从 runtime 透传值中安全收窄。
  * 字段白名单校验（与 isAskUserQuestion 同构）：可选字段校验类型，未知附加字段忽略。
@@ -55,7 +55,7 @@ export function isScheduleDraft(value: unknown): value is ScheduleDraft {
     && isOptionalString(d.currentModel)
 }
 
-/** 回传形状守卫（导出消费：scheduler 包对 uiFormInteract answers[key] 解包值收窄；
+/** 回传形状检查（导出消费：scheduler 包对 uiFormInteract answers[key] 解包值收窄；
  *  FormOverlay schedule 渲染器提交的 value = JSON.stringify(ScheduleFormResult)） */
 export function isScheduleFormResult(value: unknown): value is ScheduleFormResult {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false

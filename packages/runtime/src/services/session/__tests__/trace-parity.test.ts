@@ -101,7 +101,7 @@ describe('A24 探针 P1：RPC 录制产物 vs 文件直读产物 SessionEntry �
     expect(raw.response.data.leafId).toBe(lastWithId?.id)
   })
 
-  it('覆盖面：三个 session 合计 entry 数 ≥ 100（防 fixture 退化为玩具样本）', () => {
+  it('覆盖范围：三个 session 合计 entry 数 ≥ 100（防 fixture 退化为玩具样本）', () => {
     let total = 0
     for (const { name } of RECORDED_SESSIONS) {
       const raw = JSON.parse(readFileSync(join(FIXTURES, `${name}.json`), 'utf-8')) as {

@@ -9,7 +9,7 @@
  *
  * 职责（编排，非状态机实现）：NewTaskFlow 横切编排骨架——compose 状态机 + 分支 + 选目录三子模块，
  * 自身仅保留跨子模块的编排动作：
- * - startFlow：进 landing（销毁重建终态 / in-flight 守卫 / presetCwd / 不变量强制清 activeId）。
+ * - startFlow：进 landing（销毁重建终态 / in-flight 检查 / presetCwd / 不变量强制清 activeId）。
  * - submitFirstMessage：landing 态首发提交（ensure 数据源就绪 → resolve 解析终值 → create session
  *   + 载入 panel + 发送；post-create 双重 apply 已随 D5 契约快照化删除）。
  * - presetCwd / setPendingModel / setPendingPreset：landing 态回灌选定值（submit 时经 resolve 生效）。
@@ -22,7 +22,7 @@ import { computed, ref } from 'vue'
 import type { ComputedRef } from 'vue'
 import type { Segment } from '@taiji/shared'
 // AC10 跨域铁律：session 域经 '@taiji/core/domain/session' 公开 index API 消费（禁内部模块相对路径）
-// migrateImageSegments：tmpdir image 段迁移单源原语（S4-A2 收口——原本文件私有 migrateTmpdirImages
+// migrateImageSegments：tmpdir image 段迁移单源原语（S4-A2 收尾——原本文件私有 migrateTmpdirImages
 // 与 create-session-flow 私有实现逐字同构，双份合一）
 import { migrateImageSegments } from '@taiji/core/domain/session'
 import type { CreateSessionFlowInput } from '@taiji/core/domain/session'
@@ -114,7 +114,7 @@ export type NewTaskFlowDepsWithLaunch = NewTaskFlowDeps & {
  * - 'background'：创建中用户切走（post-create 状态复核命中）→ 后台投递，不碰视图/状态机；
  *   可发现性 info toast（F12）在本侧后台分支发出。
  * - 'abandoned'：用户主动取消（abandonSubmit）→ 不投递、删已建 session，草稿由调用方归还。
- *   未投递早退（空内容守卫 / 飞行中重复提交）统一报此值（草稿归还语义）。
+ *   未投递早退（空内容检查 / 飞行中重复提交）统一报此值（草稿归还语义）。
  */
 export type SubmitFirstMessageResult = 'handed-over' | 'background' | 'abandoned'
 
@@ -167,7 +167,7 @@ export function useNewTaskFlow(deps: NewTaskFlowDepsWithLaunch) {
   /**
    * [E] 放弃标志：abandonSubmit() 置位（不改状态机 state——创建中 state 仍是 landing）。
    * submitFirstMessage 各出口消费（post-create 复核点优先于 state 检查；throw 路径静默化）。
-   * 每次 submit 真正启动（过 createInFlight 守卫）时清零，防上一轮残留标志误杀新一轮。
+   * 每次 submit 真正启动（过 createInFlight 检查）时清零，防上一轮残留标志误杀新一轮。
    */
   const submitAbandoned = ref(false)
 
@@ -239,12 +239,12 @@ export function useNewTaskFlow(deps: NewTaskFlowDepsWithLaunch) {
   )
 
   /**
-   * gitInfo（UC-7 chip 可见性 + openBranchPopover 守卫派生）。
+   * gitInfo（UC-7 chip 可见性 + openBranchPopover 检查派生）。
    * 数据源优先级：
    * 1. session 态（已建 session）：currentSession.gitBranch / isBareWorkspace
    * 2. landing 态（无 session，延迟 create）：dirSelect 的 mode + worktreeItems HEAD 项
    *    —— landing 态无 session，旧实现只从 session 派生导致恒 null，branch chip 永不显示、
-   *       openBranchPopover 守卫必抛错。改为合并 landing 态数据源。
+   *       openBranchPopover 检查必抛错。改为合并 landing 态数据源。
    */
   const gitInfo: ComputedRef<GitInfo | null> = computed(() => {
     const s = currentSession.value
@@ -266,7 +266,7 @@ export function useNewTaskFlow(deps: NewTaskFlowDepsWithLaunch) {
    * 首次/非首次一致（推翻原「触发即创建」+ G1.1「非首次沿用上次 cwd」）。
    * session 由首发提交 submitFirstMessage 创建；选目录只记 pendingCwd 不建 session。
    * - completed 终态再触发→先销毁重建 idle（AC-3.12）再进 landing
-   * - createInFlight 守卫：submitFirstMessage 飞行中再触发→忽略（防并发重复建 session）
+   * - createInFlight 检查：submitFirstMessage 飞行中再触发→忽略（防并发重复建 session）
    * - presetCwd：可选，进 landing 时预设 chip 的 cwd（initApp 用最近 session 目录预填）。
    *   未传→空 chip 态（默认）；传值→chip 所见即所得（G1.1「沿用目录做新任务」）。
    *
@@ -277,9 +277,9 @@ export function useNewTaskFlow(deps: NewTaskFlowDepsWithLaunch) {
    * 「页面不跳转、只 composer 消失」。此处清空后 sessionId=null → Landing 正确渲染。
    */
   async function startFlow(presetCwd?: string): Promise<void> {
-    // [G] createInFlight 守卫必须在终态重建之前：handover 后 deliver 窗口（state 已 completed
+    // [G] createInFlight 检查必须在终态重建之前：handover 后 deliver 窗口（state 已 completed
     // 而 createInFlight 仍 true）按 ⌘N 时，旧序会先 transitionUnchecked('idle') + bind(null)
-    // 再早退——零价值的 state/bind 翻转把交付中的流程搅成 idle 残留。守卫前置后零副作用。
+    // 再早退——零价值的 state/bind 翻转把交付中的流程搅成 idle 残留。检查前置后零副作用。
     if (createInFlight.value) return // submitFirstMessage 飞行中，忽略重复触发
     // 终态重建（AC-3.12）：completed 后 ⌘N 销毁重建。completed→idle 不在 ALLOWED 表（completed 无出口），
     // 必须用 transitionUnchecked（@internal 终态重建语义），随后 idle→landing 走正常 transition。
@@ -347,7 +347,7 @@ export function useNewTaskFlow(deps: NewTaskFlowDepsWithLaunch) {
    * presetId（preset 透传）：landing 态用户在 PresetSelectChip 选定的预设（pendingPreset，
    * 经 setPendingPreset 写入）与全局默认预设（defaultPresetId）都作为 resolveLaunchConfig
    * 的输入——透传的是 resolve 终值（D3：默认预设首次真正生效；出厂 builtin:full →
-   * undefined 不透传，行为与写入面全等现状）。pendingPreset 仍是用户显式选择的单一真源
+   * undefined 不透传，行为与写侧全等现状）。pendingPreset 仍是用户显式选择的单一真源
    * （PresetSelectChip emit select → Landing.vue onPresetSelect → flow.setPendingPreset）。
    */
   /**
@@ -393,7 +393,7 @@ export function useNewTaskFlow(deps: NewTaskFlowDepsWithLaunch) {
       // runtime INV-7 降级，不消费 resolve.cwd
       cwd: pendingCwd.value,
       // D3：透传 resolve 终值 presetId（出厂 builtin:full → undefined 不透传，
-      // 行为与写入面全等现状）
+      // 行为与写侧全等现状）
       presetId: resolved.presetId ?? null,
       // D5 契约快照化：恒传解析终值（'' 全链空防御形态不上线——回落 runtime 全局默认）
       pendingModel: resolved.model || null,
@@ -497,7 +497,7 @@ export function useNewTaskFlow(deps: NewTaskFlowDepsWithLaunch) {
    * [E] abandonSubmit —— 创建中「取消」的真语义入口（Landing 过渡视图取消按钮调）。
    * 只置 abandoned 标志，不改状态机 state（创建中 state 仍是 landing）；过渡视图据此进
    * 「正在取消…」态并保持到 create settle（createInFlight 复位）——防用户在 create 仍在途时
-   * 重发造成并发双 create（createInFlight 守卫会静默丢弃，不能让用户走到那一步）。
+   * 重发造成并发双 create（createInFlight 检查会静默丢弃，不能让用户走到那一步）。
    * 放弃收尾在 submitFirstMessage 各出口（不投递 / 删已建 session / 静默失败）。
    */
   function abandonSubmit(): void {
@@ -539,7 +539,7 @@ export function useNewTaskFlow(deps: NewTaskFlowDepsWithLaunch) {
         finalSegments = await migrateRetryImages(segments)
       }
       // [robustness P0] post-create 状态复核：create 飞行期 flow 可能已被外部取消（侧栏切
-      // session → cancelActiveFlow 置 cancelled / Landing 卸载 D4 守卫）。此时 handover 三步会
+      // session → cancelActiveFlow 置 cancelled / Landing 卸载 D4 检查）。此时 handover 三步会
       // ①setActiveSession 强切用户视图 ②transition('completed') 撞 cancelled→completed 非法
       // 转换抛错 ③外层 catch 误报「任务创建失败」（实际已创建成功）。语义 = 后台完成投递：
       // 消息照发进新建 session（不丢用户输入），但不碰视图、不碰状态机、不报错（设计 D1）；
@@ -611,7 +611,7 @@ export function useNewTaskFlow(deps: NewTaskFlowDepsWithLaunch) {
    * 此时点 directory chip 触发 idle→dir-popover 非法转换抛错。故顺序定为先 startFlow（空 chip）
    * → loadSessions → presetCwd 回灌。
    *
-   * 守卫：仅 landing 态生效（其他态 noop，避免污染 overlay/终态流程）。
+   * 检查：仅 landing 态生效（其他态 noop，避免污染 overlay/终态流程）。
    */
   function presetCwd(cwd: string): void {
     if (state.value !== 'landing') return
@@ -624,7 +624,7 @@ export function useNewTaskFlow(deps: NewTaskFlowDepsWithLaunch) {
    * landing 态 session 尚未 create，无法调 model.switch RPC。记 pendingModel 供 Composer
    * 显示所选模型（currentModel computed），首发提交时经 resolveLaunchConfig 终值随
    * create payload 快照透传（D5，无 post-create apply）。
-   * 守卫：仅 landing 态生效（其他态 noop，避免污染 overlay/终态流程）。
+   * 检查：仅 landing 态生效（其他态 noop，避免污染 overlay/终态流程）。
    * payload 为 "provider/modelId" 复合串（ModelSelectPopover emit 的格式约定）。
    */
   function setPendingModel(model: string): void {
@@ -638,10 +638,10 @@ export function useNewTaskFlow(deps: NewTaskFlowDepsWithLaunch) {
    * 对齐 pendingCwd/pendingModel 范式。PresetSelectChip emit select 时调用，
    * submitFirstMessage create session 时透传给 sessionApi.create。
    *
-   * 守卫（[HISTORICAL]「选模式后不生效」缺陷根修）：模式选择发生在 PresetSelectChip 的
+   * 检查（[HISTORICAL]「选模式后不生效」缺陷从根源修复）：模式选择发生在 PresetSelectChip 的
    * preset-popover overlay 内——用户先点 chip 展开列表（`openPresetPopover` 把 state 置为
    * `preset-popover`），再点选项，此时写入点的 state 恒为 `preset-popover` 而非 `landing`。
-   * 原守卫 `state !== 'landing'` 把这次真实选择静默丢弃：pendingPreset 恒 null → chip 文案
+   * 原检查 `state !== 'landing'` 把这次真实选择静默丢弃：pendingPreset 恒 null → chip 文案
    * 不回显（Landing 的 modeName 源自 pendingPreset）+ 建出的 session launchPresetId=undefined。
    * preset-popover 是 landing 上下文的 overlay（打开态由 Landing 的 isPresetOpen 绑定、
    * 选择在列表内原地完成），与 landing 同属「选择进行中」态，一并放行；
@@ -660,8 +660,8 @@ export function useNewTaskFlow(deps: NewTaskFlowDepsWithLaunch) {
    * closeOverlay → landing，状态机出口唯一。
    * [HISTORICAL] 旧链路 success emit 挂在 modal 的 2s 展示定时器上：用户在窗口内关 modal
    * （Esc/点外/X/切 session）→ modal 卸载清 timer → 切换静默丢失（chip 留旧目录，且首发提交
-   * create 落旧目录）。根修：切换与「创建成功」同刻发生，与 modal 生命周期解耦。
-   * 守卫：仅 worktree-modal 态生效（modal 仅在该态挂载，防御性）；同值 noop（对齐 selectWorkspace）。
+   * create 落旧目录）。从根源修复：切换与「创建成功」同刻发生，与 modal 生命周期解耦。
+   * 检查：仅 worktree-modal 态生效（modal 仅在该态挂载，防御性）；同值 noop（对齐 selectWorkspace）。
    */
   function adoptWorktreeCwd(cwd: string): void {
     if (state.value !== 'worktree-modal') return
@@ -672,7 +672,7 @@ export function useNewTaskFlow(deps: NewTaskFlowDepsWithLaunch) {
   }
 
   // ── compose 子模块（分支 + 选目录）── 传 computed 值的 getter，解耦于父内部 ──
-  // branch 子模块需要飞行标记 setter + 守卫失败回 idle 的 transitionUnchecked，
+  // branch 子模块需要飞行标记 setter + 检查失败回 idle 的 transitionUnchecked，
   // 由父编排器从独占 controller 中按需注入（setter 不再模块级 export，无法被子模块直接 import）。
   const branch = useNewTaskBranch(
     gitApi,
@@ -724,7 +724,7 @@ export function useNewTaskFlow(deps: NewTaskFlowDepsWithLaunch) {
    * openPresetPopover —— 点 PresetSelectChip 打开 preset popover（landing→preset-popover）。
    *
    * overlay 互斥由 openOverlay 统一处理（已开任意 overlay 时先归 landing 再开 preset-popover）。
-   * preset 不涉及 git 守卫（任何 landing 态均可开），故内联在主 controller 而非拆独立模块。
+   * preset 不涉及 git 检查（任何 landing 态均可开），故内联在主 controller 而非拆独立模块。
    */
   function openPresetPopover(): void {
     openOverlay('preset-popover')

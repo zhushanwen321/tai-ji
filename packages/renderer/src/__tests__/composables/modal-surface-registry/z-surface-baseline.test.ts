@@ -6,7 +6,7 @@
  * - 新增表面不登记 ⇒ 本文件红（防「view 盖模态 + Esc 双关」静默回归）；
  * - 表面删除/改 z 形态未同步登记表 ⇒ 同样红（登记表不许腐化）。
  *
- * 三视角归属：本文件是守卫类对账用例（构建者白盒——登记表 ↔ 源码字面量机器对账）；
+ * 三视角归属：本文件是检查类对账用例（构建者白盒——登记表 ↔ 源码字面量机器对账）；
  * 用户可见 DOM/行为断言由 registry-flags（挂载点开关 + 旗标查询）/ modal-surface-event-order
  * （真实事件序）/ local-esc-two-tier（两档契约）三个文件承载。
  *
@@ -51,7 +51,7 @@ describe('z 基线 ↔ 登记表全等对账（§6.7 完备性判据）', () => 
     expect(keys.some((k) => k.includes('overlays/SearchModal.vue') && k.includes('var(--z-modal)'))).toBe(true)
     expect(keys.some((k) => k.includes('CompanionBand.vue') && k.includes('var(--z-dialog)'))).toBe(true)
     expect(keys.some((k) => k.includes('ToastContainer.vue') && k.endsWith('|var(--z-toast)'))).toBe(true)
-    // 三类字面形态 + CSS 声明形都在扫描面里（CSS 形现存 0 处，形本身仍须在场）
+    // 三类字面形态 + CSS 声明形都在扫描范围里（CSS 形现存 0 处，形本身仍须在场）
     for (const o of occurrences) expect(o.value).toBeGreaterThanOrEqual(1000)
   })
 

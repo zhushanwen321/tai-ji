@@ -34,7 +34,6 @@ import {
   onUpdateProgress as onUpdateProgressIpc,
   onUpdateError as onUpdateErrorIpc,
   getLaunchResult as getLaunchResultIpc,
-  openUpdateFallbackUrl as openUpdateFallbackUrlIpc,
   getDataDir as getDataDirIpc,
   openUpdateManualDir as openUpdateManualDirIpc,
   chooseDirectory as chooseDirectoryIpc,
@@ -112,11 +111,6 @@ export function onUpdateError(cb: (e: UpdateErrorPayload) => void): () => void {
 /** 读取启动结果（升级成功/失败/回滚通知）。首次调用返回结果，后续返回 null。 */
 export function getLaunchResult(): Promise<LaunchResult | null> {
   return getLaunchResultIpc()
-}
-
-/** 不支持当前平台时，打开备用下载页（release 页面）。 */
-export function openUpdateFallbackUrl(url: string): Promise<void> {
-  return openUpdateFallbackUrlIpc(url)
 }
 
 /** 打开手动升级产物目录（main 幂等建目录 + shell.openPath），打开失败 reject。 */

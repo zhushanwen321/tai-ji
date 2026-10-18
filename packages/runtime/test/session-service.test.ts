@@ -150,9 +150,9 @@ interface MockClient {
   /** get_entries RPC mock（entry 树重建路径）。默认空 entries（触发 fallback 尾读）。 */
   getEntries: MockInstance<(since?: string) => Promise<unknown>>
   sendCommand: MockInstance<SendCommandFn>
-  /** 切换 pi session 文件（W2 收口：替代 sendCommand('switch_session')）。 */
+  /** 切换 pi session 文件（W2 收尾：替代 sendCommand('switch_session')）。 */
   switchSession: MockInstance<(sessionPath: string) => Promise<void>>
-  /** 查询 pi get_state（W2 收口：替代 readPiState/sendCommand('get_state')），返回归一后的 state 对象。 */
+  /** 查询 pi get_state（W2 收尾：替代 readPiState/sendCommand('get_state')），返回归一后的 state 对象。 */
   getState: MockInstance<() => Promise<Record<string, unknown> | undefined>>
   getCommands: MockInstance<() => Promise<unknown>>
   getSessionStats: MockInstance<() => Promise<unknown>>
@@ -265,7 +265,7 @@ function createSetup(): Setup {
     createSession: vi.fn(async (_id: string, _cwd: string) => {
       const piSid = `pi-auto-${++autoId}`
       const client = makeMockClient({
-        // W2 收口后 create 用 client.getState()（返回归一后的 state 对象）
+        // W2 收尾后 create 用 client.getState()（返回归一后的 state 对象）
         getState: vi.fn<() => Promise<Record<string, unknown> | undefined>>().mockResolvedValue({
           sessionId: piSid, sessionFile: `/fake/${piSid}.jsonl`,
         }),
@@ -297,7 +297,7 @@ function createSetup(): Setup {
     sendError: vi.fn(),
   } as unknown as IMessageBroker
 
-  // wave:perf-w09（02 文档 D1-2）：session 级消息单通道走 bus.publish（broker 双写腿已删）。
+  // wave:perf-w09（02 文档 D1-2）：session 级消息单通道走 bus.publish（broker 双写路径已删）。
   // dispatcher（构造参数注入）与 session-service 自身（setMessageBus，对齐组合根）共用此 mock。
   const messageBus: IMessageBus = {
     publish: vi.fn(),
@@ -365,7 +365,7 @@ function createSetup(): Setup {
   const seedSession: Setup['seedSession'] = async (opts = {}) => {
     const piSid = `pi-seed-${++autoId}`
     const client = makeMockClient({
-      // W2 收口后 create 用 client.getState()（返回归一后的 state 对象）
+      // W2 收尾后 create 用 client.getState()（返回归一后的 state 对象）
       getState: vi.fn<() => Promise<Record<string, unknown> | undefined>>().mockResolvedValue({
         sessionId: piSid, sessionFile: opts.sessionFile ?? `/fake/${piSid}.jsonl`,
       }),
@@ -666,7 +666,7 @@ describe('SessionService · dispatcher', () => {
       client.prompt.mockRejectedValueOnce(new Error('pi down'))
       await setup.service.sendMessage('sid-1', 'go')
       await flushDelivery()
-      // [u2] 非 busy 受理失败的错误面出口 = 内核失败出口（适配层 onDeliveryFailure），
+      // [u2] 非 busy 受理失败的错误范围出口 = 内核失败出口（适配层 onDeliveryFailure），
       // 文案带「消息投递失败」前缀但错因逐字可见（本轮迁移仅前缀演化，断言按错因收窄）
       const err = findBroadcast(setup, 'message.error')
       expect(err?.payload).toMatchObject({ sessionId: 'sid-1' })
@@ -693,7 +693,7 @@ describe('SessionService · dispatcher', () => {
     // handoff 2026-07-04 P2：pi 卡死（静默不退出）时不发 agent_end，若 abort 只调
     // client.abort() 不广播终态，前端 isStreaming 永不复位（违反规则 #3）。
     // session-message-handler 的 message.status reply 走 pending 通道，不触发
-    // chat store 收口逻辑——必须走流式 message.complete 广播。
+    // chat store 收尾逻辑——必须走流式 message.complete 广播。
     it('abort broadcasts message.complete with stopReason aborted', async () => {
       setup.mountClient('sid-a')
       await setup.service.abort('sid-a')
@@ -716,7 +716,7 @@ describe('SessionService · dispatcher', () => {
     })
 
     // [MF-1-8 退役] steerMessage / followUpMessage 用例已删除：renderer/core 消费方经
-    // delivery.submit 统一提交（u3b 内核化），dispatcher/sessionService 转发腿与协议条目
+    // delivery.submit 统一提交（u3b 内核化），dispatcher/sessionService 转发路径与协议条目
     // message.steer / message.follow_up 同批退役——同语义覆盖由 sendMessage（steer 车道）
     // 与 useChat 提交链测试承接。
   })
@@ -819,7 +819,7 @@ describe('SessionService · lifecycle', () => {
     })
 
     it('throws and destroys session when pi returns no sessionId', async () => {
-      // W2 收口后 create 用 client.getState()，返回空对象 → 无 sessionId → 抛错
+      // W2 收尾后 create 用 client.getState()，返回空对象 → 无 sessionId → 抛错
       const stateless = makeMockClient({
         getState: vi.fn<() => Promise<Record<string, unknown> | undefined>>().mockResolvedValue({}),
       })
@@ -880,7 +880,7 @@ describe('SessionService · lifecycle', () => {
       // W1 接口契约：活跃分支唯一写入口 = setSessionName RPC（seedSession 的 create 显式
       // label 也走同一 RPC，故断言最后一次调用是 rename 的新名）
       expect(client.setSessionName).toHaveBeenLastCalledWith('new name')
-      // 直写路径已随 W11 全删（persistSessionName 不存在），回归守卫由 R1 检查承担
+      // 直写路径已随 W11 全删（persistSessionName 不存在），回归检查由 R1 检查承担
       expect(mocks.refreshAllMock).toHaveBeenCalled()
       expect(setup.service.getSummary(id)?.label).toBe('new name')
     })
@@ -995,7 +995,7 @@ describe('SessionService · lifecycle', () => {
         async (dir, filePath) => {
           pushScannedSession({ id: 'persist-3', filePath, cwd: dir })
           const client = makeMockClient({
-            // W2 收口后 restoreSession 用 client.switchSession，失败时抛错触发清理
+            // W2 收尾后 restoreSession 用 client.switchSession，失败时抛错触发清理
             switchSession: vi.fn<(sessionPath: string) => Promise<void>>().mockRejectedValue(new Error('switch failed')),
           })
           stubNextCreatedClient(setup, client)
@@ -1049,7 +1049,7 @@ describe('SessionService · Facade', () => {
       vi.mocked(setup.broker.broadcast).mockClear()
       vi.mocked(setup.messageBus.publish).mockClear()
       // W12：get_state 权威翻新（thinkingLevel + 新模型）——mockResolvedValue 持续，
-      // modelId / thinkingLevel 两实例防抖重拉都消费同一权威值
+      // modelId / thinkingLevel 两实例防抖重新拉取都消费同一权威值
       vi.mocked(client.getState).mockResolvedValue({
         thinkingLevel: 'high',
         model: { id: 'claude-x', provider: 'anthropic' },
@@ -1059,7 +1059,7 @@ describe('SessionService · Facade', () => {
       // switchModel 的失效防抖挂 fake 时钟，waitForSnapshotPublish advance 推进收敛
       vi.useFakeTimers()
       await setup.service.switchModel(id, 'anthropic' as ProviderId, 'claude-x')
-      // W12：即时广播退役——三实例防抖重拉收敛后经快照挂钩发布
+      // W12：即时广播退役——三实例防抖重新拉取收敛后经快照挂钩发布
       await waitForSnapshotPublish()
 
       // D1 协议收敛：state_changed 只携带 sessionId/modelId/thinkingLevel（usage 三字段已删）
@@ -1146,7 +1146,7 @@ describe('SessionService · Facade', () => {
 
     it('U-setInput-2b：session 存在但 usage 快照未就绪（fetch 失败保留空）返回 null——无快照与上下文真空显式分形', async () => {
       const { id } = await setup.seedSession()
-      // 不播种快照（mock getSessionStats 默认 {} → 拉取失败保留空）：读面 null 而非折叠为 0
+      // 不播种快照（mock getSessionStats 默认 {} → 拉取失败保留空）：读侧 null 而非折叠为 0
       expect(setup.service.getInputTokens(id)).toBe(null)
       expect(setup.service.getUsagePercent(id)).toBe(null)
     })
@@ -1159,7 +1159,7 @@ describe('SessionService · Facade', () => {
       const { id, client } = await setup.seedSession()
       await seedUsageSnapshot(setup, id, client, { tokens: 12345, contextWindow: 200000, percent: 6 })
       setup.service.applyContextUpdate(id, 99999)
-      // 事件参数不直写：快照保持播种值（真 timers 下防抖未到点，无重拉）
+      // 事件参数不直写：快照保持播种值（真 timers 下防抖未到点，无重新拉取）
       expect(setup.service.getInputTokens(id)).toBe(12345)
     })
   })
@@ -1174,7 +1174,7 @@ describe('SessionService · Facade', () => {
       vi.mocked(setup.broker.broadcast).mockClear()
       vi.mocked(setup.messageBus.publish).mockClear()
 
-      // W12：事件只失效（markDirty），发布由防抖重拉的快照挂钩承担
+      // W12：事件只失效（markDirty），发布由防抖重新拉取的快照挂钩承担
       //（fake timers 安装在动作前：失效防抖挂 fake 时钟）
       vi.useFakeTimers()
       setup.service.applyContextUpdate(id, 25000)
@@ -1223,7 +1223,7 @@ describe('SessionService · Facade', () => {
   })
 
   describe('getUsagePercent（W10：usage 实例快照派生 pi 权威 percent）', () => {
-    it('读快照 usagePercent（pi get_session_stats 投影，不再本地按缓存重算）', async () => {
+    it('读快照 usagePercent（pi get_session_stats 派生视图，不再本地按缓存重算）', async () => {
       const { id, client } = await setup.seedSession()
       await seedUsageSnapshot(setup, id, client, { tokens: 100000, contextWindow: 200000, percent: 50 })
 
@@ -1307,7 +1307,7 @@ describe('SessionService · Facade', () => {
     it('agent_end 无 usage（inputTokens=0）时 applyContextUpdate 早退，快照保持', async () => {
       const { id, client } = await setup.seedSession()
       await seedUsageSnapshot(setup, id, client, { tokens: 15000, contextWindow: 100000, percent: 15 })
-      // inputTokens=0 守卫：不广播（markDirty 失效仍发出，真 timers 防抖未到点无重拉）
+      // inputTokens=0 检查：不广播（markDirty 失效仍发出，真 timers 防抖未到点无重新拉取）
       setup.service.applyContextUpdate(id, 0, 0)
       expect(setup.service.getInputTokens(id)).toBe(15000)
     })
@@ -1329,7 +1329,7 @@ describe('SessionService · Facade', () => {
   describe('fetchAndBroadcastContext（session 恢复后推送用量）', () => {
     it('contextUsage.tokens 有值 → 查询失效收敛后经快照挂钩广播 context.update（W12）', async () => {
       const { id, client } = await setup.seedSession()
-      // mockResolvedValue 持续：fetchContext 查询 RPC 与防抖重拉 RPC 拿同一权威值
+      // mockResolvedValue 持续：fetchContext 查询 RPC 与防抖重新拉取 RPC 拿同一权威值
       client.getSessionStats.mockResolvedValue({
         contextUsage: { tokens: 69000, contextWindow: 512000, percent: 13.5 },
       })
@@ -1818,7 +1818,7 @@ describe('SessionService · onSessionExit callback', () => {
     trackScalarStates(localService, () => localSetup.clientMap.keys())
     const piSid = 'pi-detach-1'
     const client = makeMockClient({
-      // W2 收口后 create 用 client.getState()，返回归一后的 state 对象
+      // W2 收尾后 create 用 client.getState()，返回归一后的 state 对象
       getState: vi.fn<() => Promise<Record<string, unknown> | undefined>>().mockResolvedValue({
         sessionId: piSid, sessionFile: `/fake/${piSid}.jsonl`,
       }),
@@ -1838,18 +1838,18 @@ describe('SessionService · onSessionExit callback', () => {
   })
 })
 
-// ── wave:runtime-patch ipc-converge-a3 W2：业务持久化写迁移的安全守卫回归 ──
+// ── wave:runtime-patch ipc-converge-a3 W2：业务持久化写迁移的安全检查回归 ──
 // 背景：write-session-image / migrate-session-image / write-segments-metadata 三个 IPC handler
 // 从 main 迁到 runtime session-service（WS：session.writeImage/migrateImage/writeSegments）时，
 // 原 Electron 测试（apps/electron/main/test/privileged-handlers.test.ts，-476 行）未随迁，
-// 安全守卫（20MB 上限 / mimeType image/* / name sanitize 防目录穿越 / fromPath 白名单 /
+// 安全检查（20MB 上限 / mimeType image/* / name sanitize 防目录穿越 / fromPath 白名单 /
 // segments.json 原子写 + 损坏恢复）失去唯一回归保护。以下用例按 runtime 真实 API 签名
 // （service 直接调用，非 IPC handler 形态）移植，断言强度与原用例一致（TC3 零削弱）。
 //
 // 真实文件 I/O：writeImage/migrateImage/writeSegmentsMetadata 写真实 attachments/tmpdir 文件，
 // 测试读回校验后清理。不 mock node:fs/os/path——这些模块 mock 会破坏同文件其他用例。
 // dataDir 由 vitest globalSetup 的 TAIJI_AGENT_DATA_DIR 指向 tmp 目录，不会污染用户数据。
-describe('SessionService · 业务持久化写安全守卫（W2 ipc-converge-a3 移植）', () => {
+describe('SessionService · 业务持久化写安全检查（W2 ipc-converge-a3 移植）', () => {
   let service: SessionService
 
   beforeEach(() => {

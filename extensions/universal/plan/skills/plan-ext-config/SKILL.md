@@ -36,7 +36,7 @@ description: "使用或排查 @zhushanwen/pi-plan（计划模式 plan mode）时
 
 ## 审阅闭环（submit-review → 三键裁决）
 
-- **taiji rpc 宿主**（`TAIJI_AGENT_EXT_LOG=1` 且 `mode==='rpc'`）：挂 `PLAN_REVIEW_MARKER` select 弹 GUI 审批条，payload 携带 docs + selfReview（写侧 4KB 截断），用户三键裁决——**approve**（确认执行，自动走 complete 流程，状态进 dispatching）/ **revise**（提交 `{quote, comment}[]` 评论，注入对话要求修订，状态进 revising）/ **dismiss 搁置**（D3 协议级决策，非破坏：不杀 turn、不丢状态，状态回 planning，被搁置的审批不复活；tool result 指示 agent 告知用户已搁置并询问下一步，不实施改动）。选择框被解散（turn abort / TUI 取消）非批准：按归口判别走 review_aborted 边或 no-op，result 明确禁止实施。
+- **taiji rpc 宿主**（`TAIJI_AGENT_EXT_LOG=1` 且 `mode==='rpc'`）：挂 `PLAN_REVIEW_MARKER` select 弹 GUI 审批条，payload 携带 docs + selfReview（写侧 4KB 截断），用户三键裁决——**approve**（确认执行，自动走 complete 流程，状态进 dispatching）/ **revise**（提交 `{quote, comment}[]` 评论，注入对话要求修订，状态进 revising）/ **dismiss 搁置**（D3 协议级决策，非破坏：不杀 turn、不丢状态，状态回 planning，被搁置的审批不复活；tool result 指示 agent 告知用户已搁置并询问下一步，不实施改动）。选择框被解散（turn abort / TUI 取消）非批准：按收尾判别走 review_aborted 边或 no-op，result 明确禁止实施。
 - **独立 pi / 非 rpc 形态**：文本软门——result 指示 agent 请用户直接在对话中反馈；用户满意确认后 agent 调 `complete`。
 - **修订闭环**：revise 后逐条评论 rewrite 文件 + 重新 `register-doc`（version+1），**对新版本重做自审**后带新 selfReview 再调 `submit-review` 重挂，循环直至 approve。
 - **重提交无变化检测**：上次 submit-review 后无任何 register-doc（docs 指纹相同）再次 submit-review 时，result 末行追加确定性警告，提示必须先 rewrite + re-register。
@@ -60,7 +60,7 @@ description: "使用或排查 @zhushanwen/pi-plan（计划模式 plan mode）时
 - **Execute 档**：goal 跟踪已整合——goal 扩展可用时先建 goal 跟踪（`/goal`），再按复杂度执行：独立可并行任务派发 subagent、小步/紧耦合在本会话直执；goal 不可用/启动失败降级为直接执行（notify 提示 + result 带恢复动作）。
 - **暂不执行**：留在 plan mode，状态落「已批准」（later 边），不派发实施——需要时说『执行』或再调 `complete` 重新选执行方式。
 
-headless（json/print 无 UI）默认 execute 不弹选择；交互框被解散（取消 / 超时 / channel-error / non-json）按「无选择解散」归口：无命令介入时状态落「已批准」（批准事实保留）+ result 可再调 complete；plan abort 等命令已退出时归口 no-op（不覆写终态）。
+headless（json/print 无 UI）默认 execute 不弹选择；交互框被解散（取消 / 超时 / channel-error / non-json）按「无选择解散」收尾：无命令介入时状态落「已批准」（批准事实保留）+ result 可再调 complete；plan abort 等命令已退出时收尾 no-op（不覆写终态）。
 
 **goal 桥结构建议**：计划文档建议包含 `## Implementation Steps` 编号步骤节——Execute 档的 goal 步骤提取硬依赖该节；缺失会退化 fallback（扫全部编号项）或提取失败（no-steps，有恢复文案）。
 

@@ -4,11 +4,11 @@
 //
 // 背景：pi 与 zcode 两个引擎包各持一份 `EngineProtocolServer`（协议主循环 ~60% 逐字
 // 同文：帧分类/分发/握手/反向请求等待表/错误帧构造），改一处漏一处即漂移。第一批只
-// 收敛**声明与纯函数**部分（零行为面），把打包面（tsup entry + exports 子入口）先
+// 收敛**声明与纯函数**部分（零行为范围），把打包面（tsup entry + exports 子入口）先
 // 打通；后续批次把 `handleFrame` / `dispatch` / `initialize` / 反向请求客户端与
 // `settleReverse` 逐步迁入，引擎差异经适配器钩子注入。
 //
-// 为什么放 SDK 而不是 core：引擎包不得依赖 core（边界守卫
+// 为什么放 SDK 而不是 core：引擎包不得依赖 core（边界检查
 // `.githooks/check-engine-sdk-boundary.mjs` / `scripts/check-engine-package-boundary.mjs`）；
 // SDK 是两个引擎唯一的共同依赖。
 import { toErrorMessage } from "../error-message.ts";
@@ -19,19 +19,19 @@ import { isResponseFrame, isReverseRequestFrame } from "../protocol/frames.ts";
 import type { InitializeParams, InitializeResult, RunContextParams } from "../protocol/methods.ts";
 import type { ReverseRequestClock } from "../spawn.ts";
 
-/** 出站帧写入面（各引擎 main.ts 注入 process.stdout；测试注入内存缓冲）。 */
+/** 出站帧写侧（各引擎 main.ts 注入 process.stdout；测试注入内存缓冲）。 */
 export type FrameWriter = (frame: unknown) => void;
 
 /**
- * 反向请求应答等待缺省上限（ms）——数据面分类 core 侧 10s，两阶段等待放宽一档兜底。
+ * 反向请求应答等待缺省上限（ms）——数据范围分类 core 侧 10s，两阶段等待放宽一档兜底。
  *
- * 两个引擎此值必须相同：它是「宿主应答迟到多久算超时」的协议面常数，分叉会让同一宿主
+ * 两个引擎此值必须相同：它是「宿主应答迟到多久算超时」的协议范围常数，分叉会让同一宿主
  * 在不同引擎下得到不同的超时语义。
  */
 export const REVERSE_TIMEOUT_DEFAULT_MS = 60_000;
 
 /** 单个 run 的在途登记（cancel 帧路由 + 事件 seq 计数）。 */
-export interface ActiveRun { // oe-exempt:20260930:framework:SDK 协议面契约类型——两引擎服务器共用的在途登记形态（引擎包不得依赖 core，契约落 SDK）
+export interface ActiveRun { // oe-exempt:20260930:framework:SDK 协议范围契约类型——两引擎服务器共用的在途登记形态（引擎包不得依赖 core，契约落 SDK）
   controller: AbortController;
   seq: number;
 }
@@ -39,10 +39,10 @@ export interface ActiveRun { // oe-exempt:20260930:framework:SDK 协议面契约
 /**
  * 反向请求在途登记（引擎 → 宿主请求的应答等待项）。
  *
- * `method` 是 pi 引擎的扩展位（settle 时按通道守卫应答形态，如 askUser 的 UI 应答面
- * 检查）；zcode 无该通道守卫，可缺省。
+ * `method` 是 pi 引擎的扩展位（settle 时按通道检查应答形态，如 askUser 的 UI 应答
+ * 检查）；zcode 无该通道检查，可缺省。
  */
-export interface ReversePending { // oe-exempt:20260930:framework:SDK 协议面契约类型——两引擎服务器共用的应答等待项（pi 用 method 扩展位）
+export interface ReversePending { // oe-exempt:20260930:framework:SDK 协议范围契约类型——两引擎服务器共用的应答等待项（pi 用 method 扩展位）
   resolve: (result: unknown) => void;
   reject: (err: Error) => void;
   timer: NodeJS.Timeout;
@@ -50,7 +50,7 @@ export interface ReversePending { // oe-exempt:20260930:framework:SDK 协议面�
 }
 
 /** 协议错误帧载荷（`{code,message,recovery}` 三件套——宿主据此渲染恢复指引）。 */
-export interface ProtocolErrorPayload { // oe-exempt:20260930:framework:SDK 协议面契约类型——错误帧三件套载荷（两引擎与宿主消费）
+export interface ProtocolErrorPayload { // oe-exempt:20260930:framework:SDK 协议范围契约类型——错误帧三件套载荷（两引擎与宿主消费）
   code: string;
   message: string;
   recovery: string;
@@ -124,8 +124,8 @@ export function unknownMethodError(id: number, method: string): EngineSdkError {
 }
 
 /** 帧循环所需的最小上下文（引擎侧实现注入；每引擎构造一次，不在每帧重建）。 */
-export interface FrameLoopContext { // oe-exempt:20260930:framework:SDK 协议面契约类型——两引擎帧循环共用的注入面（引擎包不得依赖 core，契约落 SDK）
-  /** 出站帧写入面。 */
+export interface FrameLoopContext { // oe-exempt:20260930:framework:SDK 协议范围契约类型——两引擎帧循环共用的注入点（引擎包不得依赖 core，契约落 SDK）
+  /** 出站帧写侧。 */
   write: FrameWriter;
   /** 反向应答帧落地（各引擎的两阶段 ack 语义在此，**刻意不统一**）。 */
   settleReverse(id: number | string, frame: { result?: unknown; error?: unknown }): void;
@@ -167,7 +167,7 @@ export function handleInboundFrame(frame: unknown, ctx: FrameLoopContext): Inbou
 
 // ── [§2.11 第三批] 反向请求客户端 / 运行事件通知 / 初始化握手（两引擎逐字同文部分） ──
 //
-// 留在各引擎的部分：应答侧 `settleReverse`（pi 的两阶段 ack + askUI 应答面检查 vs zcode
+// 留在各引擎的部分：应答侧 `settleReverse`（pi 的两阶段 ack + askUI 应答侧检查 vs zcode
 // ack 即结算，**语义不同不得合并**）、正向方法表本体、`run` 前门。这里只抽发送侧与握手。
 
 /**
@@ -179,14 +179,14 @@ export function handleInboundFrame(frame: unknown, ctx: FrameLoopContext): Inbou
  *     reject；不让异常同步逃出 Promise executor（逃出 = pending 条目与 timer 残留，
  *     且 reject 无人消费时仍是 unhandled rejection 面）。
  */
-export interface ReverseRequestSendContext { // oe-exempt:20260930:framework:SDK 协议面契约类型——两引擎反向请求发送侧共用注入面（引擎包不得依赖 core，契约落 SDK）
+export interface ReverseRequestSendContext { // oe-exempt:20260930:framework:SDK 协议范围契约类型——两引擎反向请求发送侧共用注入点（引擎包不得依赖 core，契约落 SDK）
   write: FrameWriter;
   pending: Map<string, ReversePending>;
   timeoutMs: number;
   clock?: ReverseRequestClock;
   /** 请求 id 分配（各引擎可带自己的前缀与计数器）。 */
   nextId(): string;
-  /** 实现特有的 pending 附加字段（pi 记 `method` 供应答面检查用；zcode 不记）。 */
+  /** 实现特有的 pending 附加字段（pi 记 `method` 供应答侧检查用；zcode 不记）。 */
   pendingExtras?(method: string): Partial<ReversePending>;
 }
 
@@ -229,7 +229,7 @@ export function writeRunEvent(
 }
 
 /** 初始化握手所需的最小上下文（版本协商共用；引擎实例面与适配器版本由引擎注入）。 */
-export interface InitializeHandshakeContext { // oe-exempt:20260930:framework:SDK 协议面契约类型——两引擎初始化握手共用注入面（引擎包不得依赖 core，契约落 SDK）
+export interface InitializeHandshakeContext { // oe-exempt:20260930:framework:SDK 协议范围契约类型——两引擎初始化握手共用注入点（引擎包不得依赖 core，契约落 SDK）
   /** 引擎实例 id（`EnginePort.id`）。 */
   engineId: string;
   /** 引擎包自己的适配器版本常量（各包独立版本号）。 */

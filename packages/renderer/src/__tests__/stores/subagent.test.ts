@@ -135,7 +135,7 @@ describe('subagent store — loadSubagents', () => {
 // ── found 会话存在性判定（待裁决项 4 行为锁）：runtime getSubagents 以 found=false
 // 显式标记「会话不在册」（pi 延迟落盘窗口 / 扫描竞态），歧义在协议层根治——
 // 「读不到会话」保留分区不覆盖，「真实空列表」（found=true）直接覆盖。
-// 原连续空计数 strike 守卫随歧义根治整体退役（原 sidebar-sync-plan P1 + R1
+// 原连续空计数 strike 检查随歧义根治整体退役（原 sidebar-sync-plan P1 + R1
 // business-logic S3 的补偿，其补偿对象已不存在）。
 
 describe('subagent store — loadSubagents found 会话存在性判定（待裁决项 4 行为锁）', () => {
@@ -355,7 +355,7 @@ describe('subagent store — fetchAndInject（drawer SubagentTab 数据加载入
 
     const history = await store.fetchAndInject('session-1', 'bg-1', chat.setMessages)
 
-    // 空结果不写入：E-4 已投影内容不被擦除（drawer-blank-fix §6.2）
+    // 空结果不写入：E-4 已映射内容不被擦除（drawer-blank-fix §6.2）
     expect(chat.setMessages).not.toHaveBeenCalled()
     // 返回值契约：调用方（u2 编排层）据此判定分区是否种兜底
     expect(history).toEqual([])
@@ -422,7 +422,7 @@ describe('subagent store — cancelSubagent', () => {
   })
 })
 
-// ── subscribeStream / stopStream（W4 收口机制 + U8 drawer scope token + E-4 双订阅适配）──
+// ── subscribeStream / stopStream（W4 收尾机制 + U8 drawer scope token + E-4 双订阅适配）──
 //
 // store 内 import * as events from '@taiji/core/transport/api'，此处 mock events.on 捕获 WS handler。
 // E-4：双键订阅（主 sid = 旧 widget 通道帧路由 key；虚拟分区 id = tee 帧路由 key），
@@ -478,7 +478,7 @@ describe('subagent store — subscribeStream / stopStream（streaming 订阅生�
     expect(events.on).toHaveBeenNthCalledWith(1, 'session-1', expect.any(Function))
     expect(events.on).toHaveBeenNthCalledWith(2, 'subagent:session-1:bg-1', expect.any(Function))
 
-    // 两个 key 的 handler 同语义：帧类型 / recordId 过滤 + delta 经 chat 回调收口（W4）。
+    // 两个 key 的 handler 同语义：帧类型 / recordId 过滤 + delta 经 chat 回调收尾（W4）。
     // chat mock 是跨迭代累积的同一 vi.fn，按迭代起点快照计数断言增量（绝对 not-called
     // 断言在第二迭代必被第一迭代的合法调用击穿）。
     for (const handler of [getMainKeyHandler(), getVirtualKeyHandler()]) {
@@ -493,15 +493,15 @@ describe('subagent store — subscribeStream / stopStream（streaming 订阅生�
     expect(chat.applySubagentStreamDelta).toHaveBeenCalledWith('subagent:session-1:bg-1', ['line-1'])
   })
 
-  it('lines === undefined（assistant 定稿清除帧）→ finalize 收口，不停订阅不 refetch（E-4 / R1 消解）', async () => {
+  it('lines === undefined（assistant 定稿清除帧）→ finalize 收尾，不停订阅不 refetch（E-4 / R1 消解）', async () => {
     const store = useSubagentStore()
     const { getVirtualKeyHandler, unsubSpies, chat } = subscribe(store)
 
     getVirtualKeyHandler()({ type: 'subagent.stream_delta', payload: { recordId: 'bg-1', lines: undefined } })
 
-    // 收口 streaming 实体（chat store sealed 收口）
+    // 收尾 streaming 实体（chat store sealed 收尾）
     expect(chat.finalizeSubagentStream).toHaveBeenCalledWith('subagent:session-1:bg-1')
-    // 订阅保留（续聊轮后续 delta 仍可达）+ 无 refetch（定稿由 entry 帧投影链覆盖）
+    // 订阅保留（续聊轮后续 delta 仍可达）+ 无 refetch（定稿由 entry 帧派生视图链覆盖）
     for (const unsubSpy of unsubSpies) expect(unsubSpy).not.toHaveBeenCalled()
     await Promise.resolve()
     expect(sessionApi.getSubagentHistory).not.toHaveBeenCalled()

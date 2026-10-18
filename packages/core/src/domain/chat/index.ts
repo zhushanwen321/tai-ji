@@ -20,7 +20,7 @@ export * from './bash-effects'
 export * from './effect-types'
 export * from './truncate-tool-output'
 export { dispatchMessageEvent } from './effects/registry'
-// [投递所有权内核 u3b] session.delivery 投影消费口（D7——队列区/气泡 morph 单一数据源，
+// [投递所有权内核 u3b] session.delivery 派生视图消费口（D7——队列区/气泡 morph 单一数据源，
 // u3c QueueBubble 单源化消费；响应式读口 getDeliveryProjectionRef）
 // findDeliveryEntry：撤回「在途条目」判定谓词（[MF-1-4] UserBubble / useChat 共享单点）
 export {
@@ -44,10 +44,10 @@ export * from './queue-projection'
 export { createChatStore } from './store'
 
 export type { ChatStoreOptions } from './store'
-// [session-occupancy u5b] occupancy 投影类型（sessionPhase 数据源，P4 ActivityStrip/发送位消费）
+// [session-occupancy u5b] occupancy 派生视图类型（sessionPhase 数据源，P4 ActivityStrip/发送位消费）
 export type { SessionOccupancyState } from './store'
 export * from './derive-status'
-// [session-dead C1 方案一] turn 进展观测面（设计 §3.3 D6/D7：结构事件边界派生计时 + ask_user 豁免）
+// [session-dead C1 方案一] turn 进展观测范围（设计 §3.3 D6/D7：结构事件边界派生计时 + ask_user 豁免）
 export { createStreamingStateMachine, type StreamingStateMachineDeps, type SubagentStreamStateSnapshot, type SubagentStreamChunk } from './streaming-state-machine'
 export type { ChatStoreInstance, ChatStoreReaders, ChatStoreOps } from './store'
 // w5 chat-use-chat：useChat composable 迁移（createUseChat factory + ChatApiPort）

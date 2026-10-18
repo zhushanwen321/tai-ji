@@ -110,7 +110,7 @@ describe('resolveBase：base 口径两侧差异（有意保留，参数化承载
   })
 })
 
-describe('子进程命令构建（py 参数面锚点）', () => {
+describe('子进程命令构建（py 参数侧锚点）', () => {
   it('coverage-gate 命令透传 --base', () => {
     expect(buildCoverageCommand('.agents/skills/pr-cr-fix/scripts/coverage-gate.py', 'main')).toEqual([
       'python3',
@@ -119,7 +119,7 @@ describe('子进程命令构建（py 参数面锚点）', () => {
       'main',
     ])
   })
-  it('metrics-gate 命令透传 --base（dev-merge 侧 hash 与 pr-cr-fix 侧 main 走同构参数面）', () => {
+  it('metrics-gate 命令透传 --base（dev-merge 侧 hash 与 pr-cr-fix 侧 main 走同构的参数侧）', () => {
     expect(buildMetricsCommand('.agents/skills/pr-cr-fix/scripts/metrics-gate.py', 'c0ffee0')).toEqual([
       'python3',
       '.agents/skills/pr-cr-fix/scripts/metrics-gate.py',
@@ -265,11 +265,11 @@ describe('judgeNoLcov：机器盲区判定（决策 4 判定边界）', () => {
     const { violations } = judgeNoLcov(report(Object.keys(files)), (f) => files[f])
     expect(violations.map((v) => v.file)).toEqual(['packages/foo/src/polyfill.ts'])
   })
-  it('.vue 文件保守不排除（template 渲染行为面）', () => {
+  it('.vue 文件保守不排除（template 渲染行为范围）', () => {
     const files = { 'packages/foo/src/Panel.vue': '<template>\n  <div>hi</div>\n</template>\n' }
     expect(judgeNoLcov(report(Object.keys(files)), (f) => files[f]).violations).toHaveLength(1)
   })
-  it('非 OK 包（SKIP/FAIL）不进盲区判定面', () => {
+  it('非 OK 包（SKIP/FAIL）不进盲区判定范围', () => {
     const reportSkip = { packages: { 'packages/foo': { status: 'SKIP', files_without_lcov: ['packages/foo/src/x.ts'] } } }
     expect(judgeNoLcov(reportSkip, () => 'export const a = 1;\n').violations).toHaveLength(0)
   })

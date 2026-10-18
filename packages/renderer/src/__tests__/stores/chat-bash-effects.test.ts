@@ -5,9 +5,9 @@
  * W1 fix-chat-flow-order entry 化后种子方式更新）。
  *
  * 锁定行为（[timeout-streaming-ui-idle u-s3] dormant bash timer 契约整链删除后，
- * bash 收口只剩 bashResult entry 化 + markBashError 兜底两条真实路径）：
+ * bash 收尾只剩 bashResult entry 化 + markBashError 兜底两条真实路径）：
  * - W1T2：bashResult entry 化后消息恒 complete，推进 300s 无任何 timer 再触碰
- *   （原 W1T1 的 300s bash timer 随 dormant 契约删除，本用例守卫「无 timer 误触」不变式）。
+ *   （原 W1T1 的 300s bash timer 随 dormant 契约删除，本用例检查「无 timer 误触」不变式）。
  * - W1T3：markBashError 清 executingBash（abortBash RPC 失败兜底）。
  * - W1T3b：markBashError 对手动种子的 streaming bash 消息仍推 error 态（防御路径保留）。
  *
@@ -42,7 +42,7 @@ function streamingBashMsg(command: string): Message {
   } as Message
 }
 
-describe('w1 bash 收口链（entry 化 + markBashError 兜底，bash timer 契约已删除）', () => {
+describe('w1 bash 收尾链（entry 化 + markBashError 兜底，bash timer 契约已删除）', () => {
   beforeEach(() => {
     vi.useFakeTimers()
     setActivePinia(createPinia())

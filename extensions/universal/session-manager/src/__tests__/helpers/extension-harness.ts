@@ -13,7 +13,7 @@ import { expect, vi, type Mock } from "vitest";
 import registerExtension from "../../index.ts";
 
 /** registerTool 捕获的注册工具形态（execute 以六工具用例的固定五参形态调用） */
-export interface RegisteredTool { // oe-exempt:20260930:test:测试 harness 契约——多测试文件的断言面引用其字段类型
+export interface RegisteredTool { // oe-exempt:20260930:test:测试 harness 契约——多测试文件的断言范围引用其字段类型
 	name: string;
 	execute: (...args: unknown[]) => Promise<unknown>;
 }
@@ -26,7 +26,7 @@ export interface EmittedEvent { // oe-exempt:20260930:test:事件断言形状契
 export interface ExtensionHarness {
 	registered: RegisteredTool[];
 	emitted: EmittedEvent[];
-	/** pi.on 注册的 handler（session_start / session_compact 收口腿触发面） */
+	/** pi.on 注册的 handler（session_start / session_compact 收尾路径触发点） */
 	handlers: Record<string, (event: unknown, ctx: unknown) => unknown>;
 	/** rpc 模式 ctx 桩（sessionManager.getEntries 读 mountExtension 的 entries 入参） */
 	ctx: Record<string, unknown>;
@@ -75,7 +75,7 @@ export function createToolHarness(selectImpl: (...args: unknown[]) => Promise<un
 }
 
 /** 一次 watch 开表调用（deferred——由测试按调用序应答） */
-export interface WatchInvocation { // oe-exempt:20260930:test:watch 调用记录形状——断言面契约
+export interface WatchInvocation { // oe-exempt:20260930:test:watch 调用记录形状——断言范围契约
 	notifyId: string;
 	resolve: (value: unknown) => void;
 }
@@ -94,8 +94,8 @@ export async function flushMicrotasks(): Promise<void> {
 	for (let i = 0; i < 12; i++) await Promise.resolve();
 }
 
-/** 工具文本结果形态（六工具 execute 成功路径的 content 投影） */
-export interface ToolTextResult { // oe-exempt:20260930:test:runToolForText 返回契约——断言面消费
+/** 工具文本结果形态（六工具 execute 成功路径的 content 派生视图） */
+export interface ToolTextResult { // oe-exempt:20260930:test:runToolForText 返回契约——断言范围消费
 	content: Array<{ type: string; text: string }>;
 }
 

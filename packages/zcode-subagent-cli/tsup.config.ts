@@ -3,7 +3,7 @@ import { defineConfig } from 'tsup'
 // 引擎 CLI 双形态构建（形态对齐 subagent-core D4 / subagent-engine-sdk：
 // workspace 消费 src、npm 消费 dist，npm 面经 package.json publishConfig 整体替换）。
 //
-// entry 两个，恰好覆盖两个消费面：
+// entry 两个，恰好覆盖两个消费方：
 //   - main：bin/zcode-subagent-cli.mjs 的 dist 目标（npm 发布形态唯一真实入口——
 //     本包仓内零生产 import，bin 是 manifest taiji.subagentEngine.bin 的解析目标）；
 //   - index：exports "." 的库面（npm publishConfig 指向 dist/index.*）。

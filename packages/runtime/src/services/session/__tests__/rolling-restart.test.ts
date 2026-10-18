@@ -9,12 +9,12 @@
  * - A2 Path A 保活：settled 无在途（镜像全 idle + 引擎通道 0）→ 不推迟
  *   （无 deferred 事件）直接进 countdown → 执行（!hasIdleTimer 谓词语义——保活进程
  *   在镜像计数中恒 0）。
- * - A3 deferred 台账字段语义（u7b 配方）：计数在场 = 数字；errs 形态（已注入从未上报）
+ * - A3 deferred journal 字段语义（u7b 配方）：计数在场 = 数字；errs 形态（已注入从未上报）
  *   = inflight=null + reason=absent-report。
  * - A4 planned 边不进计数状态机（main 侧测试，见 restart-policy-planned.test.ts）。
  * - A5 shutdown 步骤打点序列：SHUTDOWN_STEP_SEQUENCE SSOT 断言（首步取消推迟定时器；
  *   engine-pool-dispose 位于 server-stop 与 close-logger 之间；close-crash-journal
- *   位于 close-logger 之前——D1 台账尾部 flush 先于 logger 关闭；
+ *   位于 close-logger 之前——D1 journal 尾部 flush 先于 logger 关闭；
  *   dispose-terminal-pties [terminal-multi-instance u4] 紧随 server-stop）。
  * - B2 Gate W：armed=false 时编排零动作。
  * - 推迟循环：在途清零 → countdown（T-30s 广播）→ 执行（journal event=rolling-restart）。
@@ -154,7 +154,7 @@ describe('A1① 谓词命中推迟（D5 ①②）', () => {
     expect(status.deferDeadlineAt).toBeDefined()
   })
 
-  it('deferred 期间第二次 critical 不重复记事件（相位守卫）', async () => {
+  it('deferred 期间第二次 critical 不重复记事件（相位检查）', async () => {
     const h = startHarness()
     h.mirror.applyReport(SID, report(1))
     h.handle.onMemoryPressure(criticalPayload())
@@ -284,7 +284,7 @@ describe('A2 Path A 保活不推迟（settled 无在途）', () => {
   })
 })
 
-describe('推迟循环收口：在途清零 → countdown → 执行', () => {
+describe('推迟循环收尾：在途清零 → countdown → 执行', () => {
   it('deferred 期间任务完成（计数归 0）→ countdown 广播 → T-30s 后执行', async () => {
     const h = startHarness({ deferRetryMs: 1_000, countdownMs: 30_000 })
     h.mirror.applyReport(SID, report(2))
@@ -309,7 +309,7 @@ describe('推迟循环收口：在途清零 → countdown → 执行', () => {
 
   it('countdown 相位二次 critical 且 heap 升至 FORCE_PCT → 硬升级 forced=hard-threshold（非 planned 记账）', async () => {
     const h = startHarness({ countdownMs: 30_000 })
-    // Path A：无在途 → 首拍 critical 直接进 countdown（planned 排队，无台账事件）
+    // Path A：无在途 → 首拍 critical 直接进 countdown（planned 排队，无 journal 事件）
     h.handle.onMemoryPressure(criticalPayload())
     await flushDecisions()
     expect(h.handle.getStatus().state).toBe('countdown')
@@ -445,7 +445,7 @@ describe('A5 shutdown 步骤打点序列 SSOT（SHUTDOWN_STEP_SEQUENCE）', () =
     expect(SHUTDOWN_STEP_SEQUENCE[0]).toBe('cancel-rolling-restart')
   })
 
-  it('engine-pool-dispose 位于 server-stop 之后、close-logger 之前（D5 挂点钉死）', () => {
+  it('engine-pool-dispose 位于 server-stop 之后、close-logger 之前（D5 挂点固定）', () => {
     const seq = SHUTDOWN_STEP_SEQUENCE as readonly string[]
     const engineIdx = seq.indexOf('engine-pool-dispose')
     const serverStopIdx = seq.indexOf('server-stop')
@@ -454,7 +454,7 @@ describe('A5 shutdown 步骤打点序列 SSOT（SHUTDOWN_STEP_SEQUENCE）', () =
     expect(closeLoggerIdx).toBeGreaterThan(engineIdx)
   })
 
-  it('close-crash-journal 位于 close-logger 之前（D1 台账尾部 flush 先于 logger 关闭）', () => {
+  it('close-crash-journal 位于 close-logger 之前（D1 journal 尾部 flush 先于 logger 关闭）', () => {
     const seq = SHUTDOWN_STEP_SEQUENCE as readonly string[]
     const journalIdx = seq.indexOf('close-crash-journal')
     const closeLoggerIdx = seq.indexOf('close-logger')

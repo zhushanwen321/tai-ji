@@ -81,7 +81,7 @@ function poolDir(): string {
   return join(dataDir, 'engines', 'zcode', POOL_KEY)
 }
 
-/** 建出与 zcode 0.16.5 同形的三表最小 schema（zcode reader ①级的真实读取面）。
+/** 建出与 zcode 0.16.5 同形的三表最小 schema（zcode reader ①级的真实读侧）。
  * dbFile 缺省落池目录；宿主 db（存量兼容）用例显式传入 <home>/.zcode/cli/db/db.sqlite，
  * 隔离库（现役）用例显式传入 <dataDir>/engines/zcode/session-db/db.sqlite。 */
 async function createPoolDb(sessionId: string, dbFile = join(poolDir(), DB_RELATIVE)): Promise<void> {
@@ -164,7 +164,7 @@ describe('extractRecordEngine（record 路由段）', () => {
     expect(extractRecordEngine(zcodeRecord(undefined))).toBe('zcode')
   })
 
-  it('treats malformed engine values as pi（防御式守卫）', () => {
+  it('treats malformed engine values as pi（防御式检查）', () => {
     expect(extractRecordEngine(zcodeRecord(undefined, 42 as never))).toBe('pi')
     expect(extractRecordEngine(zcodeRecord(undefined, ''))).toBe('pi')
   })
@@ -175,7 +175,7 @@ describe('readEngineSubagentHistory（zcode 三级降级）', () => {
     // [W8 D9 反转] runtime 不再 import 引擎实现直读 sqlite：①级 = 协议 read（spawn
     // 引擎 CLI）。db fixture 存在且路径在白名单集合内也不被 runtime 消费——本用例
     // 以「发现确定性为零」（nodeModuleRoots: [] + 空 env）阻断协议 read，断言降②级
-    // journal 投影（db 白名单/shared reader 的守护已随逻辑留在 core，由
+    // journal 派生视图（db 白名单/shared reader 的守护已随逻辑留在 core，由
     // session-view-service-zcode-dbpath.test.ts 承担）。
     setRuntimeDiscoveryOptionsForTests({ nodeModuleRoots: [], env: {} })
     const isolatedDb = join(dataDir, 'engines', 'zcode', 'session-db', 'db.sqlite')
@@ -231,7 +231,7 @@ describe('readEngineSubagentHistory（zcode 三级降级）', () => {
       dataDir,
     )
 
-    // db 存在但 runtime 不直读（①级已外移引擎协议面）→ ③级
+    // db 存在但 runtime 不直读（①级已外移引擎协议范围）→ ③级
     expect(messages).toHaveLength(2)
     expect(messages[1]?.content).toBe('LGTM outcome text')
     expect(JSON.stringify(messages)).not.toContain('thinking hard')
@@ -346,7 +346,7 @@ describe('readEngineSubagentHistory（zcode 三级降级）', () => {
     expect(messages[1]?.content).toBe('LGTM outcome text')
   })
 
-  it('tier1 defined-empty view → 非空壳投影，占位 content === shared 常量（D6 契约钉子）', async () => {
+  it('tier1 defined-empty view → 非空壳派生视图，占位 content === shared 常量（D6 契约钉子）', async () => {
     // ①级 defined-empty：db 存在且 session 可读，但 send 后、首个 assistant content
     // 持久化前——collectTurns 只收 assistant 消息 → {turns: [], source: 'native'}。
     // db 建到池内相对路径（createPoolDb 同款 schema），仅插 user prompt。
@@ -375,7 +375,7 @@ describe('readEngineSubagentHistory（zcode 三级降级）', () => {
 
     // fixture 约束（设计 D6）：result 与 error 必须双缺——:450 三选一
     // (result ?? error ?? 占位)，带任一则断言走不到占位分支、守护空转。
-    // 无 eventsPath → ①空降②、②不可达 → ③级占位投影。
+    // 无 eventsPath → ①空降②、②不可达 → ③级占位派生视图。
     const base = zcodeRecord({ sessionRef: { dbPath: DB_RELATIVE, sessionId: SESSION_ID }, poolKey: POOL_KEY })
     const record: EngineAwareRecord = { ...base, result: undefined, error: undefined }
 

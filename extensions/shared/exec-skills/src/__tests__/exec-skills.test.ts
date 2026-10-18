@@ -326,9 +326,9 @@ describe("isEnabledByOverrides（overrides 三级优先级，pi 同构）", () =
   });
 
   // globToRegExp 未测分支（minimatch 子集重实现，与 pi 求值的偏差域）：? 单字符 /
-  // [...] 字符类（含取反）/ 未闭合 ] 字面量 / 正则元字符转义——经公开入口锁语义，
+  // [...] 字符类（含取反）/ 未结束 ] 字面量 / 正则元字符转义——经公开入口锁语义，
   // 任一分支回归即红（false = 禁用命中，true = 默认启用未命中）。
-  it("? / 字符类 / 取反 / 未闭合 ] / 元字符转义分支", () => {
+  it("? / 字符类 / 取反 / 未结束 ] / 元字符转义分支", () => {
     const baseDir = join(world.root, "base");
     const filePath = join(baseDir, "skills", "demo", "SKILL.md");
     // ? = 单字符且不跨 /：dem? 命中 o；demo? 差一字符不命中；skills?demo 不跨 / 不命中
@@ -341,7 +341,7 @@ describe("isEnabledByOverrides（overrides 三级优先级，pi 同构）", () =
     // 取反类：[!a-z] 排除小写字母 → d 不命中；[!0-9] 排除数字 → d 命中
     expect(isEnabledByOverrides(filePath, ["!skills/[!a-z]emo/SKILL.md"], baseDir)).toBe(true);
     expect(isEnabledByOverrides(filePath, ["!skills/[!0-9]emo/SKILL.md"], baseDir)).toBe(false);
-    // 未闭合 ]：[ 按字面量处理（不吞后续段），demo 目录无 [ → 不命中
+    // 未结束 ]：[ 按字面量处理（不吞后续段），demo 目录无 [ → 不命中
     expect(isEnabledByOverrides(filePath, ["!skills/demo[/SKILL.md"], baseDir)).toBe(true);
     // 字符类单字：dem[o] 命中（dem 后是 o）；dem[w] 不命中（dem 后非 w）
     expect(isEnabledByOverrides(filePath, ["!skills/dem[o]/SKILL.md"], baseDir)).toBe(false);
@@ -371,7 +371,7 @@ describe("pi 实装对拍（loadSkillsFromDir 语义锚）", () => {
    * - beta：无 frontmatter name → 目录名 fallback（⑥）
    * - no-desc：无 description → ③ 必填门排除
    * - nested/deep/gamma：递归遍历
-   * - loose.md：根级散 .md（loadSkillsFromDir 收集，⑦登记面内）
+   * - loose.md：根级散 .md（loadSkillsFromDir 收集，⑦登记清单内）
    * - ignored/：.gitignore 排除（①）
    * - node_modules 与 .hidden：loader 内建排除
    */
@@ -396,7 +396,7 @@ describe("pi 实装对拍（loadSkillsFromDir 语义锚）", () => {
     const { root, agentDir } = makeAnchorRoot();
     try {
       const piResult = loadSkillsFromDir({ dir: join(agentDir, "skills"), source: "anchor" });
-      // pi 实装语义快照——pi bump 改单根规则时此处红灯（守卫边界 = 单根规则漂移）
+      // pi 实装语义快照——pi bump 改单根规则时此处红灯（检查边界 = 单根规则漂移）
       expect(piResult.skills.map((s) => s.name).sort()).toEqual(["beta", "custom-alpha", "gamma", "loose"]);
       expect(piResult.skills.some((s) => s.name === "no-desc")).toBe(false); // ③ description 必填门
       expect(piResult.skills.some((s) => s.filePath.includes("ignored"))).toBe(false); // ① gitignore
@@ -430,7 +430,7 @@ describe("pi 实装对拍（loadSkillsFromDir 语义锚）", () => {
     }
   });
 
-  it("散 .md 形态：skillEntryPath = 文件路径本身（指引路径不悬空，⑦登记面内）", () => {
+  it("散 .md 形态：skillEntryPath = 文件路径本身（指引路径不悬空，⑦登记清单内）", () => {
     const { root, agentDir } = makeAnchorRoot();
     try {
       const detected = detectExecSkills({

@@ -18,7 +18,7 @@
  *      携带 lines 全文的形态余留 widget 通道 W 路径使用）。
  *
  * 状态查询入口 getStreamState()：同步读当前流三元组 (msgSeq, 已发 delta 数, textAccumulated)
- * 的只读投影（形状与 session.getSubagentStreamState reply payload 逐字段一致），供 RPC 层
+ * 的只读派生视图（形状与 session.getSubagentStreamState reply payload 逐字段一致），供 RPC 层
  * 原样透传；不保留任何 delta 历史或切分边界索引（拉取语义 = 当前全量状态，非历史区间）。
  *
  * [M3 D6 degraded]：镜像 seq 空洞（写侧丢弃/丢失）由读取侧检测并调用
@@ -28,15 +28,15 @@
  *
  * entry 原样透传（不在此层做内容截断）：image 块（toolResult content 的 base64）与
  * 输出文本的 live 可见性依赖完整透传，此前本层曾对 >256KB 的 toolResult 做整体替换
- * 截断——图片/文本/details 全部丢失且 reload 腿才恢复，与主会话 tool_call_end 帧
- * （无此层截断）形成通道水位劈叉。量级防护单点在下游出站守卫
+ * 截断——图片/文本/details 全部丢失且 reload 路径才恢复，与主会话 tool_call_end 帧
+ * （无此层截断）形成通道水位劈叉。量级防护单点在下游出站检查
  * （outbound-frame-registry 已注册 session.subagentEntriesAppended：8MB 告警档 +
  * 32MB 契约保持式截断，与主会话帧同一防线）。
  *
  * 隔离范式（对齐 interpreter W1 per-event try-catch）：单事件（单行）翻译/提取/发布失败
  * 只丢弃该事件 + warn（含 recordId 与原始字节 tail），不连坐后续事件、不影响编排通路、
  * 不杀进程。连续 ≥TEE_MAX_CONSECUTIVE_FAILURES 失败 → 放弃该 record 的 tee 分支
- * （feed 变 no-op，drawer 降级快照 + reload 腿）。
+ * （feed 变 no-op，drawer 降级快照 + reload 路径）。
  *
  * stderr 不进 tee（镜像通道只有 stdout）；record 结束/通道关闭由读取侧调 dispose
  * （行缓冲/累积文本/锚点缓存全释放）。
@@ -121,7 +121,7 @@ export class SubagentTee {
 
   constructor(private readonly opts: SubagentTeeOptions) {
     // [btw-question D9③ / M1-a 键中段位约定] 虚拟键中段 = owner 会话的 piSessionId：
-    // btw 线的 tee 以线 vid 归属（opts.mainSessionId 是 bus 路由键，发布面保持 vid 原样），
+    // btw 线的 tee 以线 vid 归属（opts.mainSessionId 是 bus 路由键，发布范围保持 vid 原样），
     // 键构造前先 extract——vid 不入键，INVAR-1.1 三段式不破（M1a 值域断言对 `btw:` 前缀
     // fail-fast，未翻译即 throw）。非 btw 输入零变化。
     this.virtualId = subagentVirtualId(
@@ -130,7 +130,7 @@ export class SubagentTee {
     )
   }
 
-  /** tee 分支是否已放弃（放弃后读取侧停止喂入，live 流降级快照 + reload 腿）。 */
+  /** tee 分支是否已放弃（放弃后读取侧停止喂入，live 流降级快照 + reload 路径）。 */
   get abandoned(): boolean {
     return this._abandoned
   }
@@ -142,7 +142,7 @@ export class SubagentTee {
 
   /**
    * [M3 D6] 标记降级：停止后续 live 发布（feed 变 no-op），getStreamState 带
-   * `degraded: true`。幂等；不 dispose（状态快照保留给查询，reload 腿不受影响）。
+   * `degraded: true`。幂等；不 dispose（状态快照保留给查询，reload 路径不受影响）。
    */
   markDegraded(): void {
     this._degraded = true
@@ -174,8 +174,8 @@ export class SubagentTee {
 
   /**
    * 流状态查询入口（B2 subagent-stream-chunk §4.2，session.getSubagentStreamState RPC 的
-   * 数据源）：同步读当前流状态的只读投影，返回形状与 reply payload 逐字段一致——RPC 层
-   * 原样透传，不再二次投影。
+   * 数据源）：同步读当前流状态的只读派生视图，返回形状与 reply payload 逐字段一致——RPC 层
+   * 原样透传，不再二次派生视图。
    *
    * - found = 有进行中的 assistant 流（message_start 已见且未 message_end）。未开始 /
    *   已定稿 / dispose 后 = false，其余字段按协议恒 0 / 0 / []；

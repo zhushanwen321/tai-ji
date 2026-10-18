@@ -1,17 +1,17 @@
 // 移动壳 form/planReview 类请求链装配（remote-use-mobile D7（移动壳 v1 功能集裁定）form 行恢复：消除「请求方无限等待」）。
 //
 // 链路锁定：bus 'ui-request'（companion-bridge 模块级 form 通道，C4 门排除出 CompanionBand
-// 的富交互面）→ App 聊天视图 MobileFormCard 渲染 → 作答 → sendExtensionUIResponse 回传
-// （extension.ui_response 既有通路，method 透传）→ 卡片出队收口。
+// 的富交互入口）→ App 聊天视图 MobileFormCard 渲染 → 作答 → sendExtensionUIResponse 回传
+// （extension.ui_response 既有通路，method 透传）→ 卡片出队收尾。
 //
 // 装配 + 通道一体断言（桌面同构语义锚定 useExtensionUI.test.ts / use-extension-ui-* 测试族）；
 // 协议编码纯逻辑契约在 form-protocol.test.ts。断连重连快照对账（connected 边沿
-// reconcileNow 补拉）与回传失败内联错误行（respondFailedId prop，组件级断言独立 describe）
+// reconcileNow 补充拉取）与回传失败内联错误行（respondFailedId prop，组件级断言独立 describe）
 // 同文件覆盖。
 //
 // mock 策略：extension 域（sendExtensionUIResponse/getPendingRequests）模块级 vi.mock
 // 隔离 WS（断言回传参数与送达布尔）；请求注入经 __testing.mobileExtensionBus.emit
-// （生产订阅面 = form 通道 bus 订阅）。
+// （生产订阅侧 = form 通道 bus 订阅）。
 //
 // 运行：cd packages/mobile-renderer && npx vitest run src/__tests__/mobile-form.spec.ts
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
@@ -54,7 +54,7 @@ describe('移动壳 form 请求链（remote-use-mobile D7 form 行恢复）', ()
     wrapper = null
   })
 
-  it('form 帧注入 → 表单卡呈现（题干 + 选项卡）+ composer 隐藏；点选提交 → 回传 envelope + 卡收口 + composer 恢复', async () => {
+  it('form 帧注入 → 表单卡呈现（题干 + 选项卡）+ composer 隐藏；点选提交 → 回传 envelope + 卡收尾 + composer 恢复', async () => {
     wrapper = await mountChatView('sid-form')
     expect(wrapper.find('[data-testid="mobile-form-section"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="mobile-composer"]').exists()).toBe(true)
@@ -77,7 +77,7 @@ describe('移动壳 form 请求链（remote-use-mobile D7 form 行恢复）', ()
 
     expect(mockSendResponse).toHaveBeenCalledTimes(1)
     expect(mockSendResponse).toHaveBeenCalledWith('sid-form', 'req-1', 'select', JSON.stringify({ db: 'pg' }))
-    // 送达即出队：卡收口 + composer 恢复
+    // 送达即出队：卡收尾 + composer 恢复
     expect(wrapper.find('[data-testid="mobile-form-section"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="mobile-composer"]').exists()).toBe(true)
   })
@@ -227,7 +227,7 @@ describe('移动壳 form 请求链（remote-use-mobile D7 form 行恢复）', ()
     expect(mockSendResponse).toHaveBeenCalledTimes(1)
   })
 
-  it('无 sid 的 ui-request 跳过（C2，渲染面依赖 session 分区）', async () => {
+  it('无 sid 的 ui-request 跳过（C2，渲染范围依赖 session 分区）', async () => {
     wrapper = await mountChatView('sid-form')
     BUS.emit({
       kind: 'ui-request',
@@ -304,7 +304,7 @@ describe('移动壳 form 请求链（remote-use-mobile D7 form 行恢复）', ()
     expect(wrapper.find('[data-testid="shell-reconnecting-banner"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="mobile-form-section"]').exists()).toBe(true)
 
-    // 重连恢复：快照空（断连期间请求已被 pi 侧终结）→ 滞留卡差集剔除（僵尸卡假成功收口）
+    // 重连恢复：快照空（断连期间请求已被 pi 侧终结）→ 滞留卡差集剔除（僵尸卡假成功收尾）
     shellConnectionState.value = 'connected'
     await flushPromises()
     expect(mockGetPending).toHaveBeenCalledWith('sid-form')
@@ -322,7 +322,7 @@ describe('移动壳 form 请求链（remote-use-mobile D7 form 行恢复）', ()
     expect(wrapper.get('[data-testid="mobile-form-title"]').text()).toBe('用哪个数据库？')
   })
 
-  it('回传失败（WS 未送达）→ 内联错误行可见（submit/cancel 双路）；重试成功收口，新请求不带旧错误', async () => {
+  it('回传失败（WS 未送达）→ 内联错误行可见（submit/cancel 双路）；重试成功收尾，新请求不带旧错误', async () => {
     wrapper = await mountChatView('sid-form')
     emitFormRequest(BUS, singleChoiceRequest(), 'sid-form')
     await nextTick()
@@ -340,7 +340,7 @@ describe('移动壳 form 请求链（remote-use-mobile D7 form 行恢复）', ()
     await wrapper.get('[data-testid="mobile-form-cancel"]').trigger('click')
     expect(wrapper.find('[data-testid="mobile-form-respond-error"]').exists()).toBe(true)
 
-    // 重试成功：卡收口（错误随请求摘除消失）
+    // 重试成功：卡收尾（错误随请求摘除消失）
     mockSendResponse.mockReturnValueOnce(true)
     await wrapper.get('[data-testid="mobile-form-submit"]').trigger('click')
     expect(wrapper.find('[data-testid="mobile-form-section"]').exists()).toBe(false)
@@ -354,7 +354,7 @@ describe('移动壳 form 请求链（remote-use-mobile D7 form 行恢复）', ()
   })
 })
 
-describe('form 通道 respond 防御面（无 App 装配的通道级断言）', () => {
+describe('form 通道 respond 防御机制（无 App 装配的通道级断言）', () => {
   beforeEach(() => {
     mockSendResponse.mockReset().mockReturnValue(true)
     mockGetPending.mockReset().mockResolvedValue([])
@@ -377,7 +377,7 @@ describe('form 通道 respond 防御面（无 App 装配的通道级断言）', 
     })
     expect(respond('req-1', 'late')).toBe(false)
     expect(mockSendResponse).not.toHaveBeenCalled()
-    // 无 sid 上下文：respond 直接 false（渲染面依赖 session 分区的同构防御）
+    // 无 sid 上下文：respond 直接 false（渲染范围依赖 session 分区的同构防御）
     sid.value = null
     expect(respond('req-1', 'late')).toBe(false)
   })

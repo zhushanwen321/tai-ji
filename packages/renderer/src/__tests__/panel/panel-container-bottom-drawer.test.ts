@@ -46,7 +46,7 @@ import {
   type PlatformPort,
 } from '@taiji/core/platform/port'
 
-// ── 懒加载面板 mock（轻量占位，带 sessionId 透传断言面）──
+// ── 懒加载面板 mock（轻量占位，带 sessionId 透传断言范围）──
 vi.mock('@/components/panel/TerminalView.vue', () => ({
   default: {
     name: 'TerminalView',

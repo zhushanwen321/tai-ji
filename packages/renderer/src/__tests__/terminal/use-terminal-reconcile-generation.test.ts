@@ -2,8 +2,8 @@
  * useTerminal `terminal.list` 对账的连接世代防护测试（greptile PR #30 发现 2）。
  *
  * 场景：list 请求在途期间 auth token 变化（runtime 重启换 token = 连接世代变更），
- * 旧世代落定的清单响应必须被丢弃——不进实例注册表、按失败腿返回（不自动新建）。
- * 当前接线下断连时 use-connection 的 pendingApi.rejectAll 已把在途请求 reject 走失败腿，
+ * 旧世代落定的清单响应必须被丢弃——不进实例注册表、按失败路径返回（不自动新建）。
+ * 当前接线下断连时 use-connection 的 pendingApi.rejectAll 已把在途请求 reject 走失败路径，
  * 本防护是纵深第二层：传输层行为变化（旧响应不再被 reject 直达注册表）时兜住
  * 「旧清单响应复活幽灵终端」，与 resetTerminalDomain 的世代重置语义配套。
  *
@@ -69,7 +69,7 @@ describe('terminal.list 对账的连接世代防护（greptile PR #30 发现 2�
     const terminal = useTerminal(ref('s1'))
     const result = await terminal.reconcileInstances()
 
-    // 失败腿语义：不自动新建、保留既有条目（响应整体丢弃，不按清单增删注册表）
+    // 失败路径语义：不自动新建、保留既有条目（响应整体丢弃，不按清单增删注册表）
     expect(result).toEqual({ ok: false, count: -1 })
     expect(hasInstance(T1)).toBe(false)
     expect(terminal.instances.value).toEqual([])

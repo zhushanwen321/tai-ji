@@ -8,8 +8,8 @@
  * 数据源（D1；ADR-0050 修订，skill-reload-nondestructive D6）：panel 与 landing 两态统一
  * taiji SkillRegistry 源——globalSkills ∪ projectSkills 合并，global 优先、project 补独有项
  * （与 slash landing 源优先级一致）。候选新鲜度由 config.skillCacheInvalidated 广播链驱动
- * （watcher → 重扫 → 广播 → useGlobalSkills/useProjectSkills 重拉），不依赖 pi reload 往返；
- * panel 态 projectSkills 的 cwd 由 Composer 按 session cwd 接线（sessionStore 投影）。
+ * （watcher → 重扫 → 广播 → useGlobalSkills/useProjectSkills 重新拉取），不依赖 pi reload 往返；
+ * panel 态 projectSkills 的 cwd 由 Composer 按 session cwd 接线（sessionStore 派生视图）。
  * location 取 SkillInfo.sourcePath（SKILL.md 绝对路径，权威扫描产出）。
  * `__` 内部项过滤（isInternalSkillName）。
  * 已选禁选（D2）：selectedNames 命中的项标 selected，浮层显示「已选」并禁选。

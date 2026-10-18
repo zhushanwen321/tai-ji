@@ -104,7 +104,7 @@ export function useNewTaskDirSelect(
    * openWorktreeModal —— 点「新建 worktree…」动作项打开 CreateWorktreeModal（W2 wave）。
    *
    * 来源态：dir-popover（DirSelectPopover 动作项）。overlay 互斥由 openOverlay 统一处理。
-   * landing→worktree-modal 在 ALLOWED 表内合法，状态变更统一走守卫表。
+   * landing→worktree-modal 在 ALLOWED 表内合法，状态变更统一走检查表。
    * CreateWorktreeModal 由 Landing 按 state==='worktree-modal' 挂载，内部自管五态机。
    */
   function openWorktreeModal(): void {
@@ -142,7 +142,7 @@ export function useNewTaskDirSelect(
   async function openDirDialog(): Promise<void> {
     transition('dir-dialog') // dir-popover→dir-dialog
     try {
-      // defaultPath 候选 = 当前 cwd（chip 回灌值）。主进程 existsSync 守卫：存在则定位到该目录，
+      // defaultPath 候选 = 当前 cwd（chip 回灌值）。主进程 existsSync 检查：存在则定位到该目录，
       // 不存在（目录被删）则回退 ~。避免 macOS 原生 dialog 在记忆位置失效时回退到 Documents。
       const result = await directoryPicker.pickDirectory({
         defaultPath: currentCwd() ?? undefined,

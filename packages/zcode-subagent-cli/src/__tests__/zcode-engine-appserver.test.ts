@@ -9,7 +9,7 @@
 // grace 耗尽 → killChain 连坐）/ 连接复用（跨任务 boot 1）/ dispose（幂等 /
 // close 帧先于 SIGTERM / dispose 后 run 重建——不变量 4）/ 多会话并发不串线
 // （RA3 地基，FAKE_STAMP_SESSION）/ -32603 Model config missing 错误归类 /
-// capabilities 断言（eventGranularity 翻转无下游破坏的生产零消费方守卫）。
+// capabilities 断言（eventGranularity 翻转无下游破坏的生产零消费方检查）。
 
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -54,7 +54,7 @@ interface EngineHandle_ {
   workspace: string;
 }
 
-/** run 返回形态别名（abort 用例的中止终态断言面）。 */
+/** run 返回形态别名（abort 用例的中止终态断言范围）。 */
 type EngineRunResult_ = EngineRunResult;
 
 const engines: ZcodeEngine[] = [];
@@ -270,7 +270,7 @@ describe("事件流与回调时点（缺省 appserver 路径）", () => {
   it("[PR3] 工具执行期活性接线：turn 中途 tool.updated progress 帧 → ctx.onEvent 收到 {type:'activity'}（零载荷严格相等）", async () => {
     // 真机探针实证（/tmp/zcode-activity-probe.log，2026-09-10）：工具执行期
     // session/event 每隔 ~1.0s 推 {type:"tool.updated", payload:{kind:"progress",…}}
-    // ——既非 final-frame 也非 delta。宿主刷新面只有 delta 事件，该帧族必须经
+    // ——既非 final-frame 也非 delta。宿主刷新逻辑只有 delta 事件，该帧族必须经
     // activity 变体透出，否则「仅工具执行、零正文」形态下宿主 30min 中段无进展
     // 守护饿死误杀。引擎接线 = channel onActivity → ctx.onEvent({type:"activity"})。
     const toolUpdatedProgress = JSON.stringify({
@@ -303,7 +303,7 @@ describe("事件流与回调时点（缺省 appserver 路径）", () => {
       makeCtx({ onEvent: (e) => events.push(e) }),
     );
     expect(outcome.error).toBeUndefined();
-    // activity 事件恰一次（一帧一事件）、零载荷字段面严格相等（无多余键）
+    // activity 事件恰一次（一帧一事件）、零载荷字段侧严格相等（无多余键）
     const activities = events.filter((e) => e.type === "activity");
     expect(activities).toHaveLength(1);
     expect(activities[0]).toStrictEqual({ type: "activity" });
@@ -359,7 +359,7 @@ describe("事件流与回调时点（缺省 appserver 路径）", () => {
   it("maxTurns（pi 专属）→ 引擎内不再拒绝（[D3-④] 能力拒绝上提宿主 capability-gate，防双轨拦截复活）", async () => {
     // [D3-④ 合并注] capability 拒绝唯一实现 = common/capability-gate（两调用点 = chat 域
     // executeViaEngine 同步段 + SAR run 前，拒绝语义 engine_capability_unsupported 由
-    // capability-gate.test.ts 承载）。引擎域 run() 不做 shape 检查——本用例反转回归面：
+    // capability-gate.test.ts 承载）。引擎域 run() 不做 shape 检查——本用例反转回归测试：
     // maxTurns 直传引擎不得再被拒（曾因引擎内残留拦截与 gate 形成双轨）。
     const { engine, stateFile, workspace } = makeEngine();
     const r = await engine.run(makeTask({ cwd: workspace, maxTurns: 10 }), makeCtx());
@@ -672,7 +672,7 @@ describe("reasoningLevel 择档（目录值域 × thinkingLevel）", () => {
 
 describe("abort 链（D3）", () => {
   /** 无终态推送的挂起场景（仅 state.updated——turn 永不自然落定；scenario 每引擎
-   * 固化，故「后续任务」同样挂起——复用形态断言用再次 abort 收口，不 await 自然终态）。 */
+   * 固化，故「后续任务」同样挂起——复用形态断言用再次 abort 收尾，不 await 自然终态）。 */
   const hangPushes = [ZCODE_APPSERVER_GOLDEN.pushStream[0]];
 
   /** 挂起场景下发起第 N 轮并推进到该轮 create+send 已达（轮次按 create 帧计数——
@@ -700,7 +700,7 @@ describe("abort 链（D3）", () => {
   it("stop 优雅生效：stop 帧先发（send 之后）→ 终态在 grace 内到达 → 不杀共享进程（第二轮零重启）", async () => {
     // stopBehavior 缺省 'terminal'：fake 收到 stop 即推该会话终态
     const { engine, stateFile, workspace } = makeEngine({ replaceSendPushes: [...hangPushes] });
-    // 第一轮：挂起 → abort → stop 推终态 → 优雅收口
+    // 第一轮：挂起 → abort → stop 推终态 → 优雅收尾
     const first = await startHangRun(engine, workspace, stateFile, "sa-a1");
     first.controller.abort();
     const r1 = await first.run;
@@ -718,7 +718,7 @@ describe("abort 链（D3）", () => {
     expect(bootCount(stateFile)).toBe(1);
   }, 30_000);
 
-  it("stop 无效（stopBehavior none + 无终态）→ grace 耗尽 → killChain 收割共享进程 → 崩溃路径收口 + 重建", async () => {
+  it("stop 无效（stopBehavior none + 无终态）→ grace 耗尽 → killChain 收割共享进程 → 崩溃路径收尾 + 重建", async () => {
     // abort grace 注入缝（两轮各经历一次 ABORT_GRACE）：真实默认 3s×2 不在单测等待
     // 范围——200ms 级覆盖，fake 真子进程 IO 与杀链路径全保真。
     vi.stubEnv("TAIJI_ZCODE_TEST_ABORT_GRACE_MS", "200");
@@ -789,7 +789,7 @@ describe("连接复用", () => {
 // ============================================================
 
 describe("dispose", () => {
-  it("在途会话：close 帧发出（fake 收到且记入流水）→ 进程收割 → 挂起任务走崩溃路径收口", async () => {
+  it("在途会话：close 帧发出（fake 收到且记入流水）→ 进程收割 → 挂起任务走崩溃路径收尾", async () => {
     const { engine, stateFile, workspace } = makeEngine({
       replaceSendPushes: [ZCODE_APPSERVER_GOLDEN.pushStream[0]], // 挂起不落定
     });
@@ -833,12 +833,12 @@ describe("dispose", () => {
     expect(bootCount(stateFile)).toBe(2);
   }, 15_000);
 
-  it("窄竞态守卫：进程已死（child=null）但 activeSessions 残留时，dispose 不经 post 惰性拉起新进程（D6 防泄漏）", async () => {
+  it("窄竞态检查：进程已死（child=null）但 activeSessions 残留时，dispose 不经 post 惰性拉起新进程（D6 防泄漏）", async () => {
     // 真实微拍窗口（进程死亡收割与 activeSessions 清理之间的 microtask）不可从公开
     // 面同步注入——白盒构造同形态快照：runtime 的 conn 无活进程、activeSessions 非空。
-    // 守卫缺失时 dispose 循环 post("session/close") 会 ensureStarted 惰性 spawn 一代新
-    // 进程再被同次 dispose 杀掉（onSpawned 同步触发）；守卫生效时永不 spawn。
-    // 观测面用 conn.onSpawned（spawnGeneration 内同步调用）而非 fake 侧 boot 计数：
+    // 检查缺失时 dispose 循环 post("session/close") 会 ensureStarted 惰性 spawn 一代新
+    // 进程再被同次 dispose 杀掉（onSpawned 同步触发）；检查生效时永不 spawn。
+    // 观测范围用 conn.onSpawned（spawnGeneration 内同步调用）而非 fake 侧 boot 计数：
     // post 后紧接 SIGTERM，新进程来不及写 boot 即死，写盘时序不可靠。
     const { engine } = makeEngine();
     let spawned = false;
@@ -863,7 +863,7 @@ describe("dispose", () => {
     (engine as unknown as { appserverRuntime: unknown }).appserverRuntime = ghostRt;
     expect(conn.alive).toBe(false); // 快照前置：无活进程
     await engine.dispose();
-    expect(spawned).toBe(false); // 守卫生效：close 帧循环跳过，零惰性 spawn
+    expect(spawned).toBe(false); // 检查生效：close 帧循环跳过，零惰性 spawn
   }, 15_000);
 });
 
@@ -907,7 +907,7 @@ describe("多会话并发（单常驻进程双会话不串线）", () => {
 });
 
 // ============================================================
-// capabilities（D5）+ eventGranularity 生产零消费方守卫
+// capabilities（D5）+ eventGranularity 生产零消费方检查
 // ============================================================
 
 describe("capabilities（D5：仅 eventGranularity 变）", () => {
@@ -933,7 +933,7 @@ describe("capabilities（D5：仅 eventGranularity 变）", () => {
     });
   });
 
-  it("eventGranularity 生产零消费方守卫：src 内（测试除外）无任何能力位读取访问（翻转无下游破坏）", () => {
+  it("eventGranularity 生产零消费方检查：src 内（测试除外）无任何能力位读取访问（翻转无下游破坏）", () => {
     // 扫描根 = 本包 src（设计意图「src 内零消费」）。勿改成 5 级上跳——本文件
     // 在 src/__tests__（比 renderer i18n 用例浅 2 层），5 级会落到 workspace 父目录
     // 扫进所有兄弟 worktree（曾致本用例 3.1s 且耗时随兄弟 worktree 文件量漂移）。

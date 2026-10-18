@@ -7,7 +7,7 @@
  * 用户可见断言宿主换为 ContextCapacityCard（数字唯一入口：hover 指标聚合页），断言锚从
  * 触发器按钮文字换为卡内 stats 文本。组件纯读语义不变：per-session 分区状态在
  * useContextUsage composable，组件只做 status → 显示映射（ok → 真值；no-value/unknown →
- * 「—」）。切回恢复腿 / in-flight / 哨兵行为由 use-context-usage.test.ts（层 1）与
+ * 「—」）。切回恢复路径 / in-flight / 哨兵行为由 use-context-usage.test.ts（层 1）与
  * context-usage-journeys.test.ts（层 3）覆盖。
  *
  * mock 策略：getContext RPC mock 为受控 pending deferred（不 resolve，分区保持 unknown
@@ -26,7 +26,7 @@ import type { ServerMessage } from '@taiji/shared'
 
 import ContextCapacityCard from '@/components/panel/ContextCapacityCard.vue'
 
-// ── mock 边界：getContext mock 为受控 pending（挂载触发的恢复腿不落地）；'@/api' 门面
+// ── mock 边界：getContext mock 为受控 pending（挂载触发的恢复路径不落地）；'@/api' 门面
 //    session 域重指单源 helpers/session-context-mock（domain mock 一行内联 + 工厂转发）──
 const getContextMock = vi.hoisted(() => vi.fn())
 vi.mock('@taiji/core/transport/api/domains/session', () => ({ getContext: getContextMock }))

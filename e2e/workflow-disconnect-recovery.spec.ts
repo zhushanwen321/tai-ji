@@ -2,28 +2,28 @@
  * workflow 断连恢复语义 E2E（A2，设计 reload-closeout-reliability §4 A2）。
  *
  * faux LLM 轨（L2.5，零 token）。场景：WS 断开期间 run 完成 → 重连 → 收敛。
- * 验证对象 = 传输兜底面回归（G2 覆盖矩阵「publish 之后的传输跳」分治）：断连下 publish
+ * 验证对象 = 传输兜底路径回归（G2 覆盖矩阵「publish 之后的传输跳」分治）：断连下 publish
  * 正常完成并推进水位、重连后 diff 空——水位结构性不触发，恢复只能来自既有传输兜底
- * （stateSnapshot 回放 / 冷拉）。水位的直接证明在 A3 单测轨 + A1 e2e 轨（S1b/S2 的
+ * （stateSnapshot 回放 / 主动拉取）。水位的直接证明在 A3 单测轨 + A1 e2e 轨（S1b/S2 的
  * ≤30s 帧到达断言），不在本用例。
  *
  * 断连的实现载体（u3a 裁决，deviations 登记）：spec 自备 WS 客户端扮演断连者——它与
- * renderer 走完全相同的协议面（auth 握手 + session.subscribe + stateSnapshot 回放，
+ * renderer 走完全相同的协议范围（auth 握手 + session.subscribe + stateSnapshot 回放，
  * packages/core/src/coordination/subscription-state.ts resubscribeAll 同一 reply 消费
  * 通路）。不强制 renderer 侧断网（CDP emulateNetworkConditions 在 Electron e2e 未经
  * 验证，本单元只编写不执行，不押注未验证工具行为）；renderer 全程在线，其 GUI 收敛
  * 经 live 帧达成，本 spec 以托盘终态断言锚定用户可见结果。
  *
  * 通过标准（设计 A2）：
- * - 断连窗口真实：spec WS 关闭时 run 仍在飞（JSONL 末条 workflow-record 非 done）；
+ * - 断连窗口真实：spec WS 关闭时 run 仍在途（JSONL 末条 workflow-record 非 done）；
  * - 断连期间 run 完成：主 session JSONL 终态 done 落盘（权威 record，无需任何 WS 观察者）；
  * - 恢复来源①（stateSnapshot 回放帧）：重连 re-subscribe 的 reply.stateSnapshot 携带
  *   该 run 的 session.workflowUpdate done last-value 帧（message-bus 既有机制：
- *   state topic 写快照、subscribe 回放，断连空投不碍快照写入）；
- * - 恢复来源②（冷拉）：session.getWorkflows RPC 返回该 run 终态 done 记录
- *   （renderer WS 重连冷拉同一 RPC，useSidebar.onConnected → loadWorkflows）；
+ *   state topic 写快照、subscribe 回放，断连期消息丢弃不碍快照写入）；
+ * - 恢复来源②（主动拉取）：session.getWorkflows RPC 返回该 run 终态 done 记录
+ *   （renderer WS 重连主动拉取同一 RPC，useSidebar.onConnected → loadWorkflows）；
  * - GUI 收敛：run 完成后托盘 workflow 条目 data-state 回 idle（≤30s，G1 用户可见窗口）；
- * - 重连稳态：不出现重复的 done workflowUpdate live 帧（断连空投下 publish 已完成、
+ * - 重连稳态：不出现重复的 done workflowUpdate live 帧（断连期消息丢弃下 publish 已完成、
  *   重连后 diff 恒空——A3 单测锁定结构属性的 e2e 面防回归）。
  *
  * 断言样本来源见 e2e/fixtures/skill-reload-real-helpers.ts 文件头（workflow-record 读取
@@ -58,7 +58,7 @@ import {
 
 const SESSION_LABEL = 'wf-disconnect-recovery'
 
-/** 稳态观察窗：覆盖一个完整 15s 对账定时腿周期 + 1s 余量（u1 落地后定时腿周期） */
+/** 稳态观察窗：覆盖一个完整 15s 对账定时路径周期 + 1s 余量（u1 落地后定时路径周期） */
 const STEADY_WINDOW_MS = 16_000
 
 /**
@@ -95,7 +95,7 @@ async function selectSessionInSidebar(page: Page, label: string): Promise<void> 
   await expect(page.getByTestId('composer-box')).toBeVisible({ timeout: 30_000 })
 }
 
-/** run 在飞确认：轮询 spec WS events 直到首条 workflowUpdate 帧的 runId 出现并返回
+/** run 在途确认：轮询 spec WS events 直到首条 workflowUpdate 帧的 runId 出现并返回
  * （running 帧即目标 run——单 run 场景；超时返回空串，断言由调用方继续）。 */
 async function pollRunningRunId(
   events: WsFrame[],
@@ -173,7 +173,7 @@ function removeTempDirs(projectDir: string, dataDir: string): void {
   fs.rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
 }
 
-test('A2: WS 断开期间 run 完成 → 重连后 stateSnapshot 回放/冷拉恢复 + GUI 收敛', async () => {
+test('A2: WS 断开期间 run 完成 → 重连后 stateSnapshot 回放/主动拉取恢复 + GUI 收敛', async () => {
   test.setTimeout(300_000)
   // 轨道自保护门（batch-* TAIJI_PI_LIVE 门同款）：mock bundle 在场 → skip 不 fail（置于
   // mkdtemp 之前，skip 不留临时目录）
@@ -228,20 +228,20 @@ test('A2: WS 断开期间 run 完成 → 重连后 stateSnapshot 回放/冷拉�
       payload: { sessionId, content: '运行断连恢复探针脚本。' },
     }, 'a2-send', 30_000)
 
-    // ── run 在飞确认：running 增量信号帧到 spec WS + 托盘 running ──
+    // ── run 在途确认：running 增量信号帧到 spec WS + 托盘 running ──
     const workflowBtn = page.locator('[data-testid="tray-builtin-button"][data-kind="workflow"]')
     await expect(workflowBtn).toHaveAttribute('data-state', 'running', { timeout: 60_000 })
     const runId = await pollRunningRunId(listen1.events, 30_000)
-    expect(runId, 'spec WS 应收到 run 的 running 增量信号帧（断连前在飞确认）').not.toBe('')
+    expect(runId, 'spec WS 应收到 run 的 running 增量信号帧（断连前在途确认）').not.toBe('')
 
-    // ── 断连：spec WS 关闭时 run 必须仍在飞（窗口真实，非空转）──
+    // ── 断连：spec WS 关闭时 run 必须仍在途（窗口真实，非空转）──
     const recAtDisconnect = lastWorkflowRecordFor(sessionFile!, runId)
     expect(
       recAtDisconnect?.status ?? 'running',
-      '断连时 run 应仍在飞（JSONL 末条 workflow-record 非 done；null=running record 未 flush 同样在飞）',
+      '断连时 run 应仍在途（JSONL 末条 workflow-record 非 done；null=running record 未 flush 同样在途）',
     ).not.toBe('done')
     listen1.ws.close()
-    console.log(`[A2] spec WS 已断连（runId=${runId}，run 在飞中）`)
+    console.log(`[A2] spec WS 已断连（runId=${runId}，run 在途中）`)
 
     // ── 断连期间 run 完成：权威 record 落盘，无需任何 WS 观察者 ──
     const tDoneRecord = await waitForDoneRecordAt(sessionFile!, runId, 150_000)
@@ -254,7 +254,7 @@ test('A2: WS 断开期间 run 完成 → 重连后 stateSnapshot 回放/冷拉�
     ).toHaveAttribute('data-state', 'idle', { timeout: 30_000 })
 
     // ── 恢复来源①：重连 re-subscribe → reply.stateSnapshot 回放 done last-value 帧 ──
-    // 断连空投不碍快照写入（message-bus publishState 无条件写 stateSnapshot，与订阅者
+    // 断连期消息丢弃不碍快照写入（message-bus publishState 无条件写 stateSnapshot，与订阅者
     // 存在与否无关）——重连客户端经回放拿到终态，这是断连场景的第一恢复层（D5）。
     const subReply = await wsRoundTrip(port, {
       type: 'session.subscribe',
@@ -271,7 +271,7 @@ test('A2: WS 断开期间 run 完成 → 重连后 stateSnapshot 回放/冷拉�
       '恢复来源①（stateSnapshot 回放帧）：重连 re-subscribe reply 应携带该 run 的 done workflowUpdate last-value 帧',
     ).toBeDefined()
 
-    // ── 恢复来源②：冷拉 RPC 返回终态记录（renderer WS 重连冷拉同一 RPC）──
+    // ── 恢复来源②：主动拉取 RPC 返回终态记录（renderer WS 重连主动拉取同一 RPC）──
     const wfReply = await wsRoundTrip(port, {
       type: 'session.getWorkflows',
       id: 'a2-coldpull',
@@ -283,13 +283,13 @@ test('A2: WS 断开期间 run 完成 → 重连后 stateSnapshot 回放/冷拉�
     }>
     expect(
       workflows.some((w) => w.runId === runId && w.status === 'done'),
-      '恢复来源②（冷拉）：session.getWorkflows RPC 应返回该 run 的终态 done 记录',
+      '恢复来源②（主动拉取）：session.getWorkflows RPC 应返回该 run 的终态 done 记录',
     ).toBe(true)
 
     // ── 重连稳态：无重复 done live 帧（水位 diff 恒空的结构属性，A3 单测的 e2e 面）──
     // 断连下 publish 已正常完成 → 水位已推进 → 重连后 diff 恒空 → 回放是唯一送达（已在
     // subscribe reply 一次性交付，live 通道静默）。若未来出现重发回归（水位误滞留补发），
-    // 此处将捕获到重复 live 帧。窗口覆盖一个完整 15s 定时腿周期。
+    // 此处将捕获到重复 live 帧。窗口覆盖一个完整 15s 定时路径周期。
     const listen2 = await openListenWs(port, sessionId)
     listenWs2 = listen2.ws
     await new Promise((r) => setTimeout(r, STEADY_WINDOW_MS))
@@ -301,7 +301,7 @@ test('A2: WS 断开期间 run 完成 → 重连后 stateSnapshot 回放/冷拉�
 
     listenWs2?.close()
     listenWs2 = null
-    console.log('[A2] 通过：断连期间完成 / stateSnapshot 回放 / 冷拉终态 / GUI 收敛 / 稳态无重复帧')
+    console.log('[A2] 通过：断连期间完成 / stateSnapshot 回放 / 主动拉取终态 / GUI 收敛 / 稳态无重复帧')
     reachedEnd = true
   } finally {
     // 失败取证放最前（appCleanup 之前）：logs 拷到固定路径，规避后续清理丢失现场

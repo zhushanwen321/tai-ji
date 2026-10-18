@@ -1,8 +1,8 @@
 // server.test.ts —— EngineProtocolServer 直测（照 zcode-subagent-cli/src/__tests__/
-// server.test.ts 形态，两包同构代码测试面对齐——review round1 MF-2）。
+// server.test.ts 形态，两包同构代码测试对齐——review round1 MF-2）。
 //
 // engine = EnginePort 内存 fake（无子进程 / 无真实数据目录——本文件零 fs 触碰），
-// stdout 写入面注入内存 sink。覆盖：
+// stdout 写侧注入内存 sink。覆盖：
 //   ① 帧分类路由：请求帧分发 / 反向应答落位 / 入站反向请求 bad_frame / 坏帧静默；
 //   ② 10 正向方法表驱动路由（逐方法 → EnginePort 成员；[H1 U5] interact 已退役；
 //      [subagent-model-switch] setModel 含能力位防御分支）+
@@ -110,7 +110,7 @@ function makeSink() {
   };
 }
 
-/** EnginePort 内存 fake（含 pi 专有 bindAskUser 绑定面）：
+/** EnginePort 内存 fake（含 pi 专有 bindAskUser 绑定侧）：
  * 逐成员 vi.fn，overrides 直替换（undefined = 未实现分支）。 */
 type FakeEngine = EnginePort & {
   bindAskUser(handler: ((req: UiRequest) => Promise<UiResponse>) | undefined): void;
@@ -133,8 +133,8 @@ function makeEngine(overrides: Partial<FakeEngine> = {}): FakeEngine {
   return { ...base, ...overrides };
 }
 
-/** 组合一个 server（缺省 clock 记录面 + 内存 sink），返回全部观测点。
- * piAgentDir 缺省注入一个不存在的 tmp 路径——查询面（listModels/validateModel，
+/** 组合一个 server（缺省 clock 记录侧 + 内存 sink），返回全部观测点。
+ * piAgentDir 缺省注入一个不存在的 tmp 路径——查询范围（listModels/validateModel，
  * 路由 engine-query）读不到任何数据文件 → null/结构化错误，测试既不触碰真实
  * 系统 pi 目录，也无需 fixture 文件（本文件保持零 fs 写删）。 */
 function makeServer(engine = makeEngine(), reverseTimeoutMs?: number, piAgentDir?: string) {
@@ -227,7 +227,7 @@ describe("handleFrame 帧分类路由", () => {
 // ── 10 正向方法分发表 ──
 
 describe("dispatchTable 表驱动路由（逐方法 → EnginePort 成员）", () => {
-  it("initialize：版本协商 + 能力应答（查询面 agentDir 无数据 → 应答不含 models 键）", async () => {
+  it("initialize：版本协商 + 能力应答（查询范围 agentDir 无数据 → 应答不含 models 键）", async () => {
     const engine = makeEngine();
     const { server, sink } = makeServer(engine);
     const resp = await request(server, sink, 1, "initialize", INIT_PARAMS);
@@ -241,9 +241,9 @@ describe("dispatchTable 表驱动路由（逐方法 → EnginePort 成员）", (
     });
   });
 
-  it("initialize：models 应答源 = 引擎查询面（engine-query 读数据目录，不经 engine mock；models 投影仅 id）", async () => {
+  it("initialize：models 应答源 = 引擎查询范围（engine-query 读数据目录，不经 engine mock；models 派生视图仅 id）", async () => {
     // engine.listModels mock 不再被分发位消费（pi-workflow-run-resource-model §3.3
-    // 决策 11：查询面路由 engine-query）——数据面断言归 engine-query.test.ts（fixture
+    // 决策 11：查询范围路由 engine-query）——数据范围断言归 engine-query.test.ts（fixture
     // 注入形态），本用例锁定「mock 声明不泄漏进 initialize 应答」的改道路由事实。
     const engine = makeEngine({ listModels: vi.fn((): Array<{ id: string; name?: string }> => [{ id: "mock-only/m", name: "Mock" }]) });
     const { server, sink } = makeServer(engine);
@@ -285,7 +285,7 @@ describe("dispatchTable 表驱动路由（逐方法 → EnginePort 成员）", (
     expect(resp.error?.code).toBe("engine_protocol_not_initialized");
   });
 
-  it("listModels：分发位路由 engine-query（agentDir 无数据 → {models:null}；数据面 fixture 断言归 engine-query.test.ts）", async () => {
+  it("listModels：分发位路由 engine-query（agentDir 无数据 → {models:null}；数据范围 fixture 断言归 engine-query.test.ts）", async () => {
     const { server, sink } = makeServer();
     const r1 = await request(server, sink, 1, "listModels", {});
     expect(r1.result).toEqual({ models: null });
@@ -302,7 +302,7 @@ describe("dispatchTable 表驱动路由（逐方法 → EnginePort 成员）", (
     expect(r2.error?.recovery).toContain("pi /model");
   });
 
-  it("read：handle 以 {data} 包装传给引擎（协议面裸 handle）", async () => {
+  it("read：handle 以 {data} 包装传给引擎（协议范围裸 handle）", async () => {
     const engine = makeEngine();
     const { server, sink } = makeServer(engine);
     const r2 = await request(server, sink, 2, "read", { handle: HANDLE, dataDir: "/d" });
@@ -558,7 +558,7 @@ describe("run：协议载荷 → 本地 AgentCallOpts/RunContext", () => {
   });
 });
 
-// ── pi 专有：askUser 绑定面 + run.resume 帧校验 ──
+// ── pi 专有：askUser 绑定侧 + run.resume 帧校验 ──
 
 describe("bindAskUser 两阶段绑定体（pi 专有）", () => {
   it("非 chat run：run 前绑定 askUser 等待体（host/askUser 载荷 {runId, request}），run 结束解绑", async () => {
@@ -711,7 +711,7 @@ describe("reverseRequest 客户端", () => {
     await expect(p2).resolves.toEqual({ ok: true });
   });
 
-  it("ack 两阶段（R9-2）：{ack:true} 只 ack 计时面不终结等待，最终帧才 settle", async () => {
+  it("ack 两阶段（R9-2）：{ack:true} 只 ack 计时侧不终结等待，最终帧才 settle", async () => {
     const { server, sink, clockCalls } = makeServer();
     const p = server.reverseRequest("host/askUser", { runId: "r", request: { method: "select", id: "1" } });
     await sink.waitFor((f) => f.id === "rev-1", "rev-1");

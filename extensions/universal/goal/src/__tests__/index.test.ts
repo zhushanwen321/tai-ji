@@ -2,7 +2,7 @@
  * index.ts 测试 — 工厂入口 + 跨扩展 API（goalInit slot）
  *
  * 覆盖 T1.8 (NFR-AC-8)：goalInit 签名 (objective, budget, ctx, slug?, successCriteria?)，
- * 结构上无法接收 tasks（task CRUD 已删除，D-16/FR-4 双轨消除）。active 守卫由 service.test.ts 覆盖。
+ * 结构上无法接收 tasks（task CRUD 已删除，D-16/FR-4 双轨消除）。active 检查由 service.test.ts 覆盖。
  *
  * 用最小 fake pi + fake ctx 实例化 goalExtension 工厂，再从 globalThis slot 读取 goalInit——
  * mock 形态与真实通道同构（goal-bridge-cross-extension.md §3.4：桥的元教训是 mock 世界

@@ -386,7 +386,7 @@ describe('A1: scoped 非空 → 只输出白名单内模型', () => {
 })
 
 describe('A2: scoped 为空 → 输出与现状完全一致', () => {
-  it('A2 scopedModels=[] 时返回全部模型（原路径）+ 守卫分支存在（scoped 配置被读取）', () => {
+  it('A2 scopedModels=[] 时返回全部模型（原路径）+ 检查分支存在（scoped 配置被读取）', () => {
     const providers: ProviderInfo[] = [
       makeProvider('openai', 'OpenAI', ['gpt-4', 'gpt-3.5-turbo']),
       makeProvider('anthropic', 'Anthropic', ['claude-opus']),
@@ -399,8 +399,8 @@ describe('A2: scoped 为空 → 输出与现状完全一致', () => {
     const result = svc.aggregateModels(providers)
 
     expect(result.map(m => m.id)).toEqual(['gpt-4', 'gpt-3.5-turbo', 'claude-opus'])
-    // A2 区分力锚点：空列表也必须读 scoped 配置——无此守卫读取的旧实现（scoped 引入前）
-    // 输出同样全量，仅靠结果断言无法区分，守卫调用是 scoped 分支存在的直接证据
+    // A2 区分力锚点：空列表也必须读 scoped 配置——无此检查读取的旧实现（scoped 引入前）
+    // 输出同样全量，仅靠结果断言无法区分，检查调用是 scoped 分支存在的直接证据
     expect(getScopedModels).toHaveBeenCalledOnce()
   })
 })

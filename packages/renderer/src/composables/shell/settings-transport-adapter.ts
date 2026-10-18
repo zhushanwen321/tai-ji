@@ -12,7 +12,7 @@
  * 形态裁决（[C3] adapter 浅层收敛）：报告建议的「方法 → 命令/门面映射表 + 循环生成」在
  * 本接口形态下会损失类型安全（8 个门面签名异构，表驱动生成需跨型断言/any），按报告豁免
  * 条款保留逐方法显式转发（每行即一条映射，编译期与 SettingsTransport 逐签名配对）；
- * 接口分组（读/写/订阅）已反映真实消费面（transport.ts）。
+ * 接口分组（读/写/订阅）已反映真实消费方（transport.ts）。
  *
  * 签名对齐 core SettingsTransport 接口；mock 兼容硬约束（@/api 的 on* 订阅 / listProviders 等
  * 已就位，settings/quota/preset/usage/session 域 mock 与 real 同构）。

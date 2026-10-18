@@ -2,7 +2,7 @@
   <!--
     RunTraceTable —— workflow 实况面板的实例 trace 表（设计 §3.1-2：agentCalls 表，列 =
     taskIndex/agentName/phase/attempt/状态/起止/耗时/token/结果；workflow tab 与 phase tab
-    共用，D9 派生状态在本表消费——「DAG 与 trace 逐行一致」S2 构造性一致的数据面）。
+    共用，D9 派生状态在本表消费——「DAG 与 trace 逐行一致」S2 构造性一致的数据范围）。
     表格形态 = div 网格行列表（仓内表格先例；taste/no-native-html-elements 禁原生 table）。
     行点击上抛 openAgent（pending / sessionId 缺失行 no-op——对齐 WorkflowTab 现状行为）。
   -->
@@ -80,9 +80,9 @@ import { formatCompactDuration, MS_PER_SECOND } from '@/lib/duration-format'
 const props = defineProps<{
   /** 实例列表（workflow tab = 全部 agentCalls；phase tab = 本 phase 归属实例）。 */
   calls: WorkflowAgentCall[]
-  /** run 投影状态（D9 stoppedInFlight 与 retrying 派生的 run 级输入）。 */
+  /** run 派生视图状态（D9 stoppedInFlight 与 retrying 派生的 run 级输入）。 */
   runStatus: WorkflowRunStatus
-  /** run 终局形态（停止着色映射输入；可缺省 = 未终局/旧投影）。 */
+  /** run 终局形态（停止着色映射输入；可缺省 = 未终局/旧派生视图）。 */
   runOutcome?: WorkflowRunOutcome
 }>()
 

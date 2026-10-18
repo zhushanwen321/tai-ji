@@ -1,8 +1,8 @@
 /**
- * ClaimLedger 单测 —— 状态机腿 / TTL 清扫 / seq 计数器 / session 清理 / 幂等不变量。
+ * ClaimLedger 单测 —— 状态机路径 / TTL 清扫 / seq 计数器 / session 清理 / 幂等不变量。
  *
  * 与 notify-claims.test.ts（D10 矩阵 32 case + P9 事件序）互补：本文件覆盖矩阵行之外的
- * 状态机边角（重复 arm、投递失败腿作用域、单 watch 槽覆盖、orphan 双触发器细节、
+ * 状态机边角（重复 arm、投递失败路径作用域、单 watch 槽覆盖、orphan 双触发器细节、
  * TTL 下界钳制与三类扫描、per-session 计数器、clearSession 边界、贯穿不变量）。
  *
  * 材料形态：零 I/O 纯状态机 + 注入手动时钟（__tests__/helpers/notify-claims-harness.ts
@@ -26,7 +26,7 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
-/** 送达投影（设计 D3：settled/death 发声，aborted/orphaned 静默——生产映射在 u-bridge）。 */
+/** 送达派生（设计 D3：settled/death 发声，aborted/orphaned 静默——生产映射在 u-bridge）。 */
 function delivered(t: RespondTarget): number {
   if (t.payload.type === 'settled') return 1
   if (t.payload.type === 'death') return 1
@@ -44,9 +44,9 @@ function armClaim(l: ClaimLedger, notifyId: string, opts?: { parent?: string; se
   ).toEqual({ ok: true })
 }
 
-// ─── 状态机腿 ───────────────────────────────────────────────────────────────
+// ─── 状态机路径 ───────────────────────────────────────────────────────────────
 
-describe('ClaimLedger 状态机腿', () => {
+describe('ClaimLedger 状态机路径', () => {
   it('同键重复 arm 拒绝（armed/injected/fulfilled 任意既有态；键 = (parentSid, notifyId)）', () => {
     const l = makeLedger()
     const p = { parentSid: P, notifyId: 'sm-dup', kind: 'claim' as const, sessionId: S }
@@ -61,7 +61,7 @@ describe('ClaimLedger 状态机腿', () => {
     expect(l.arm({ parentSid: 'other-parent', notifyId: 'sm-dup', kind: 'claim', sessionId: S })).toEqual({ ok: true })
   })
 
-  it('armed --delivery-failed--> 删除腿只作用 armed（受理后不得静默抹除；重复 disarm 幂等）', () => {
+  it('armed --delivery-failed--> 删除路径只作用 armed（受理后不得静默抹除；重复 disarm 幂等）', () => {
     const l = makeLedger()
     armClaim(l, 'sm-df-1')
     expect(l.disarmDeliveryFailed(P, 'sm-df-1')).toBe(true)
@@ -69,7 +69,7 @@ describe('ClaimLedger 状态机腿', () => {
     expect(l.disarmDeliveryFailed(P, 'sm-df-1')).toBe(false) // 已删
     armClaim(l, 'sm-df-2')
     expect(l.markInjected(P, 'sm-df-2')).toBe(true)
-    expect(l.disarmDeliveryFailed(P, 'sm-df-2')).toBe(false) // 已受理 → 腿不适用
+    expect(l.disarmDeliveryFailed(P, 'sm-df-2')).toBe(false) // 已受理 → 路径不适用
     expect(l.getClaim(P, 'sm-df-2')?.state).toBe('injected')
     expect(l.disarmDeliveryFailed(P, 'sm-missing')).toBe(false)
   })

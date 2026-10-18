@@ -138,8 +138,8 @@ export function shortId(id: string): string {
  *
  * [U2 两态迁移] 永久会话模型（subagent-permanent-session-model §3.2.2）状态机收敛为
  * running | idle 两态，终态概念删除——旧 closed 分支（v4 B-1 统一终态 ✓ success 色）
- * 迁移为 idle（已收口/等续聊，语义上「上一轮有产出」保留 ✓ success 色；stopReason
- * 派生词的渲染细化归 U8 投影面）。签名兼容 BgNotifyRecord 的通知词汇 "closed"
+ * 迁移为 idle（已收尾/等续聊，语义上「上一轮有产出」保留 ✓ success 色；stopReason
+ * 派生词的渲染细化归 U8 派生视图范围）。签名兼容 BgNotifyRecord 的通知词汇 "closed"
  * （通知文案载体的本地类型不受 ExecutionStatus 两态约束，桥接映射同 idle）。
  */
 export function statusGlyph(
@@ -150,7 +150,7 @@ export function statusGlyph(
       return { icon: undefined, color: "accent" };
     case "idle":
     case "closed":
-      // 已收口/等续聊（closed = BgNotifyRecord 通知词汇桥接）。默认 ✓ success 色
+      // 已收尾/等续聊（closed = BgNotifyRecord 通知词汇桥接）。默认 ✓ success 色
       // （承接旧 closed 分支的视觉基线）。
       return { icon: "✓", color: "success" };
   }
@@ -213,7 +213,7 @@ export function firstLineSanitized(text?: string): string {
 
 /**
  * 从 renderCall/execute 的 unknown args 安全提取 agent 名.
- * 类型守卫窄化(替代 `as { agent?: string }` 全可选断言).
+ * 类型保护窄化(替代 `as { agent?: string }` 全可选断言).
  * 无 agent 字段或非空字符串时兜底 DEFAULT_AGENT_NAME(与 service 层 resolveIdentity 一致,
  * 保证 block 标题显示的名与实际加载的 agent.md 相符).
  */
@@ -233,7 +233,7 @@ export function extractAgentName(args: unknown): string {
  *   ── turn ──  turn_end(仅 expanded)
  *   error:   tool label + ✗
  *
- * text_output / thinking 类型已移除——完整内容收口在 record.turns[]，
+ * text_output / thinking 类型已移除——完整内容汇总在 record.turns[]，
  * eventLog 只承载离散语义事件。实时 text/thinking 进度由 currentActivity 行展示。
  *
  * 预处理统一用 sanitizeLabel(换行→空格、tab→2空格).
@@ -256,7 +256,7 @@ export function formatEventLine(entry: AgentEventLogEntry, theme: ThemeLike): st
     case "turn_end": {
       // label = turn.text 摘要（getEventLog 派生，TURN_SUMMARY_MAX=80），无 text 时为 "turn"。
       // 若丢弃 label 只显 "── turn ──"，流式 text 在 turn 结束后完全消失（currentActivity
-      // 随 turn 闭合转为 undefined），用户无法回顾 subagent 说了什么。这里显示摘要保留可见性。
+      // 随 turn 结束转为 undefined），用户无法回顾 subagent 说了什么。这里显示摘要保留可见性。
       const summary = sanitizeLabel(entry.label);
       if (!summary || summary === "turn") {
         return theme.fg("dim", "── turn ──");
@@ -432,8 +432,8 @@ const MS_PER_SEC = 1000;
  * 可显示的状态文本集合。
  *
  * 生命周期三态（"running"|"done" 不直接显示，done 转 reason；"interrupted" 为
- * [D2] 重水合中断投影——displayStatusOf 三态输出的第三值，与 core runSummary
- * 投影 / shared WorkflowRunStatus 同词）+ DoneReason（completed/failed/aborted/
+ * [D2] 重新加载进内存时的中断派生视图——displayStatusOf 三态输出的第三值，与 core runSummary
+ * 派生视图 / shared WorkflowRunStatus 同词）+ DoneReason（completed/failed/aborted/
  * budget_limited/time_limited）+ ExecutionTraceNode.status（含 "pending"——trace
  * 节点的初始态）。
  *
@@ -533,7 +533,7 @@ export function formatRunStatusElapsed(
  *   error      → "✗ {label}"
  *
  * 对齐上方 subagents formatEventLine 的视觉风格，但语义域是 workflow trace
- * （前缀符号不同、label 不 sanitize）——与 formatEventLine 是两个概念域的实现，
+ * （前缀符号不同、label 不 sanitize）——与 formatEventLine 是两种业务含义的实现，
  * 同文件共存故以 Trace 前缀区分命名。
  */
 export function formatTraceEventLine(entry: AgentEventLogEntry, theme: ThemeLike): string {
@@ -594,7 +594,7 @@ export function formatActivityLine(entry: ToolCallEntry, maxWidth: number): stri
 // ── Workflow phase group（filters empty phases）──────────────
 
 /**
- * phase 折叠投影的展示消费面（[D3] phase 状态机与展示分组同源）。
+ * phase 折叠派生视图的展示消费方（[D3] phase 状态机与展示分组同源）。
  *
  * 数据源 = core fold 的 phases 半边（RunEventFoldCheckpoint["phases"]：
  * phase 名 → { startedAt, settledAt? }——settledAt 有无即 running/settled 态，
@@ -609,8 +609,8 @@ export interface PhaseGroup {
   nodes: ExecutionTraceNode[];
   doneCount: number;
   /**
-   * [D3] phase 状态机态的展示位：true = phase-settled 转移已落账（fold 投影
-   * settledAt 有值）。注入折叠投影时读投影（权威）；未注入（活体聚合 trace 的
+   * [D3] phase 状态机态的展示位：true = phase-settled 转移已写入 journal 记录（fold 派生视图
+   * settledAt 有值）。注入折叠派生视图时读派生视图（权威）；未注入（活体聚合 trace 的
    * 既有调用形态）回落「组内全部节点 completed」推导——两者的同源性由测试
    * 断言钉住（同一事件流喂两侧恒等）。
    */
@@ -642,9 +642,9 @@ const NO_PHASE = "(default)";
 /**
  * Build phase groups. Nodes without a phase are placed in an unnamed group.
  *
- * @param nodes trace 节点（活体聚合或 fold 重建的 calls 投影）
- * @param phaseFold 可选的 phase 折叠投影（[D3] 状态机权威）——在场时组完成判定
- *   读投影（phase 名 → settledAt 有无）；(default) 组（无 phase 归属节点）在投影
+ * @param nodes trace 节点（活体聚合或 fold 重建的 calls 派生视图）
+ * @param phaseFold 可选的 phase 折叠派生视图（[D3] 状态机权威）——在场时组完成判定
+ *   读派生视图（phase 名 → settledAt 有无）；(default) 组（无 phase 归属节点）在派生视图
  *   中无对应行（fold 只登记显式 phase），恒走节点计数推导兜底。
  */
 export function buildPhaseGroups(
@@ -656,8 +656,8 @@ export function buildPhaseGroups(
   for (const [name, phaseNodes] of map) {
     if (phaseNodes.length > 0) {
       const doneCount = phaseNodes.filter((n) => n.status === "completed").length;
-      // 投影在场且该 phase 有行 → 读投影（行存在即权威——running 行 settledAt
-      // undefined 判 false，不回落推导）；未注入投影 / 无该行（(default) 组）→ 推导兜底
+      // 派生视图在场且该 phase 有行 → 读派生视图（行存在即权威——running 行 settledAt
+      // undefined 判 false，不回落推导）；未注入派生视图 / 无该行（(default) 组）→ 推导兜底
       const foldRow = phaseFold?.get(name);
       const settled = foldRow !== undefined
         ? foldRow.settledAt !== undefined

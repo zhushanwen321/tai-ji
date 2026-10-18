@@ -196,7 +196,7 @@ describe('RuntimeServer message.send marker 通道废弃 — boundary & hostile 
   expect(sent).not.toContain('<!--')
   })
 
-  it('subagent 字段含 XML 危险字符 / 超长值 → 忽略后不产生任何注入面（值不进发送文本）', async () => {
+  it('subagent 字段含 XML 危险字符 / 超长值 → 忽略后不产生任何注入点（值不进发送文本）', async () => {
   const client = await connectClient()
   const longTask = 'y'.repeat(1000)
 

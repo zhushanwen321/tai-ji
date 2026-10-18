@@ -50,7 +50,7 @@ function makeRestoreEnv() {
     switchSession: vi.fn(async (_sessionPath: string) => {}),
     setSessionName: vi.fn(async () => undefined),
   }
-  // notifyCreated 提取引用（接口类型抹掉 vi.fn 方法面，断言面直接用原 mock）
+  // notifyCreated 提取引用（接口类型抹掉 vi.fn 方法侧，断言范围直接用原 mock）
   const notifyCreated = vi.fn()
   const svc: ILifecycleSessionOps = {
     getExtensionPaths: vi.fn(async () => [] as string[]),
@@ -155,7 +155,7 @@ describe('restoreSession D5② 幂等短路', () => {
     // #2：client 活跃 + Map 有条目 → 短路，零副作用
     const second = await lifecycle.restoreSession(SID)
 
-    expect(second).toEqual(first) // 返回现有 summary（同一注册记录的投影）
+    expect(second).toEqual(first) // 返回现有 summary（同一注册记录的派生视图）
     expect(pm.createSession).toHaveBeenCalledTimes(1) // 未重开进程
     expect(pm.destroySession).not.toHaveBeenCalled() // 未杀旧 pi（K3 撞车回归锚）
     expect(svc.removeSessionEntry).not.toHaveBeenCalled() // 未摘 Map 条目

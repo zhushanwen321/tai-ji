@@ -39,6 +39,7 @@
   },
   "dependencies": {
     "@zhushanwen/extension-protocol": "workspace:*",
+    "@zhushanwen/pi-delivery-port": "workspace:*",
     "@zhushanwen/pi-extension-logger": "workspace:*"
   },
   "peerDependenciesMeta": {

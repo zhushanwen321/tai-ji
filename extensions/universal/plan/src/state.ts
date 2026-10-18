@@ -55,7 +55,7 @@ export interface PlanState {
    * 生命周期状态（D1 八值，D2 取代式演进）：每次转移落盘，取代 reviewState/reviewStateSource
    * 的隐含编码（两旧键停写，仅旧 entry 映射读——见 applyPlanStateEntry）。生命周期写唯一
    * 通道 = applyPlanEvent（transition 纯函数）；登记例外 = resetPlanState 的终态直写
-   * （归口落点，非第二转移通道——因果序与幂等性质见其函数注释）。
+   * （收尾落点，非第二转移通道——因果序与幂等性质见其函数注释）。
    */
   state: PlanLifecycleState;
   /**
@@ -142,7 +142,7 @@ export interface PendingSelect {
 
 /**
  * 挂起 select 的 per-session 注册表（E10；值 = PendingSelect 含解散来源槽位，
- * 不新建注册表）。生命周期钉死：每次发挂起 select 前 fresh 一个（见 freshPendingSelect），
+ * 不新建注册表）。生命周期固定：每次发挂起 select 前 fresh 一个（见 freshPendingSelect），
  * select settled 即弃；session_start / session_shutdown / exitPlanMode 联动处清理。
  */
 export type PlanAbortControllers = Map<string, PendingSelect>;
@@ -180,7 +180,7 @@ export function freshPendingSelect(
  * 缓存）+ controllers（挂起 select 注册表，值 = PendingSelect 含解散来源槽位）两表收敛，
  * 「解散挂起 select」做成其方法（dissolveAll——exitPlanMode 入口打 'self' 标；'external'
  * 留给不经入口的外部解散显式打标）。widget.ts 无 per-session 存量（直调 ctx.ui.*），
- * 不在收敛面——GUI 侧呈现态是 renderer 派生投影。
+ * 不在收敛范围——GUI 侧呈现态是 renderer 派生视图。
  */
 export interface PlanCtx {
   /** per-session 生命周期态缓存（收敛前的 sessions 表） */
@@ -195,7 +195,7 @@ export interface PlanCtx {
   toolSnapshots: Map<string, string[]>;
   /**
    * 解散全部挂起 select：markDissolved 一次打标 + controller.abort（E10 因果链：打标
-   * 先行保证等待归口读到来源）+ 注册表清空（不留已 dissolved 的条目）。单活跃 session
+   * 先行保证等待收尾读到来源）+ 注册表清空（不留已 dissolved 的条目）。单活跃 session
    * 不变量下（pi 进程同时只有一个活跃 session；session_start/shutdown 联动清理）与
    * 「按 sessionId 解散单条」等价，全表遍历 + clear 是方法语义的自然形态。
    */
@@ -230,7 +230,7 @@ export function createPlanCtx(): PlanCtx {
  * 一次 plan 进出即把它常驻激活，击穿 D4 削减目标。快照式直接还原进入前事实，
  * 宿主内外一致、不依赖任何档位分类。
  *
- * 覆盖式写入：activatePlanMode 的 isActive 幂等守卫保证进入时上一轮必已经过退出
+ * 覆盖式写入：activatePlanMode 的 isActive 幂等检查保证进入时上一轮必已经过退出
  * 消费，正常路径无旧值可覆盖；异常残留（退出路径异常格未消费）由新值覆盖兜底。
  */
 export function snapshotActiveTools(pi: ExtensionAPI, planCtx: PlanCtx, sessionId: string): void {
@@ -254,8 +254,8 @@ export function restoreActiveTools(pi: ExtensionAPI, planCtx: PlanCtx, sessionId
 /**
  * 生命周期写唯一通道（D1）：六 action 的状态写全走本函数——转移成功才改 state.state，
  * 副作用（persist / 注入 / 工具集）由调用方内联在转移成功后执行；`ok:false` 不落盘、
- * 不执行副作用（终态上 ok:false 不落盘 = 归口点的兜底保险）。登记例外 = resetPlanState
- * 的终态直写（归口落点，见其函数注释）。
+ * 不执行副作用（终态上 ok:false 不落盘 = 收尾点的兜底保险）。登记例外 = resetPlanState
+ * 的终态直写（收尾落点，见其函数注释）。
  */
 export function applyPlanEvent(state: PlanState, event: PlanLifecycleEvent): PlanTransitionResult {
   const result = transition(state.state, event);
@@ -264,7 +264,7 @@ export function applyPlanEvent(state: PlanState, event: PlanLifecycleEvent): Pla
 }
 
 /**
- * requirement 长度封顶（64KB）：session.planState 帧在 runtime 出站守卫（outbound-frame-registry）
+ * requirement 长度封顶（64KB）：session.planState 帧在 runtime 出站检查（outbound-frame-registry）
  * 按「requirement 有界」归入不登记 LARGE_FIELD_REGISTRY 的标量/小列表类——超 32MB 的未登记帧
  * 会被整帧丢弃（前端 plan 面板缺失）。本封顶把该隐含前提变为代码保障（进入写侧 + entry 重建
  * 读侧双点）。截断只影响 state/entry/帧；进入提示词仍携带全文直达模型（message content 通路
@@ -283,7 +283,7 @@ export function capPlanRequirement(requirement: string): string {
 /**
  * docs 快照指纹：fileName:version 按登记序拼接。register-doc 任何形态（新增 /
  * 同名原位 version+1）都会改变指纹 ⇒「与上次 submit-review 快照相同 ⇔ 期间无任何
- * register-doc」。空 docs 的指纹是空串，但 submit-review 的 no-docs 守卫先行拦截，
+ * register-doc」。空 docs 的指纹是空串，但 submit-review 的 no-docs 检查先行拦截，
  * 空串指纹不会入库。
  */
 export function planDocsFingerprint(docs: PlanDocMeta[]): string {
@@ -309,7 +309,7 @@ export function getPlanState(
 
 export function persistPlanState(pi: ExtensionAPI, state: PlanState): void {
   // customType 判别键 = canonical 常量 PLAN_STATE_CUSTOM_TYPE（extension-protocol 导出，
-  // 值冻结——改即历史会话全部失联，冻结锚测试见 legacy-entries.test.ts）；runtime 投影链
+  // 值冻结——改即历史会话全部失联，冻结锚测试见 legacy-entries.test.ts）；runtime 派生视图链
   // （plan-state-extractor / session-records）消费同一常量。
   // optional 字段（templateProvided / selfReview / resumeHint / lastSubmitReviewDocsFingerprint）
   // 为 undefined 时 JSON 序列化自然消失，旧 entry 消费方对该字段惰性（D4 向后兼容）。
@@ -358,13 +358,13 @@ export function clearRoundFields(state: PlanState): void {
  * 终态矩阵（D5/E10/D3 连带段）：isActive=false + state=terminal（默认 'exited'，complete
  * 终局传 'completed'）+ selfReview/resumeHint/指纹清空 + skills 清空（挂载声明失效）+
  * docs 保留——产物 tab 由 docs.length 驱动、与 isActive 解耦，执行期（approve 后）与
- * 退出后（abort 后）都可回看产物文档；reset entry 持久，重开 session 后冷启动首拉仍恢复
+ * 退出后（abort 后）都可回看产物文档；reset entry 持久，重开 session 后冷启动首次拉取仍恢复
  * docs 显示，至下次 /plan 同 slug 覆写。
  *
  * 终态直写例外登记（applyPlanEvent 之外唯一 state.state 写点）：因果序 = 正常路径调用点
  * 先行经 applyPlanEvent 完成转移（exitPlanMode 的 'exit' / executeComplete 的
  * 'exec_chosen'），本函数随后幂等重写同值（落 isActive=false 清洗 entry，state 值不变）；
- * 坏数据清洗腿（isActive=true 的终态/idle 残留，exitPlanMode ok:false 例外）无先行转移
+ * 坏数据清洗路径（isActive=true 的终态/idle 残留，exitPlanMode ok:false 例外）无先行转移
  * 可依赖，终态落点由本直写承载。非第二转移通道——不经本函数产生任何 FSM 边，19 边表
  * 语义不受影响。
  */
@@ -430,13 +430,13 @@ type LegacyPlanEntryData = Partial<PlanState> & {
   templateProvidedPath?: unknown;
 };
 
-/** skills 白名单式读取：数组 + 逐项 string 守卫，垃圾项丢弃（垃圾数据不进内存态） */
+/** skills 白名单式读取：数组 + 逐项 string 检查，垃圾项丢弃（垃圾数据不进内存态） */
 function readSkills(data: Partial<PlanState>): string[] {
   if (!Array.isArray(data.skills)) return [];
   return data.skills.filter((s): s is string => typeof s === "string");
 }
 
-/** PlanDocMeta 最小结构守卫：fileName/absPath 必要字段（渲染与 file.read 的锚点） */
+/** PlanDocMeta 最小结构检查：fileName/absPath 必要字段（渲染与 file.read 的锚点） */
 function isPlanDocMeta(value: unknown): value is PlanDocMeta {
   if (typeof value !== "object" || value === null) return false;
   if (!("fileName" in value) || !("absPath" in value)) return false;
@@ -452,7 +452,7 @@ function readDocs(data: Partial<PlanState>): PlanDocMeta[] {
 /**
  * 生命周期状态与 resumeHint 读取（D2 读方①）：readLifecycleState / readResumeHint 直引
  * extension-protocol legacy-entries（D-B4-1 映射单源下沉——runtime 读方②同引一份，原本地
- * 拷贝删除；映射契约断言面 = protocol 包内 legacy-entries.test.ts）。
+ * 拷贝删除；映射契约断言范围 = protocol 包内 legacy-entries.test.ts）。
  */
 
 /**
@@ -519,7 +519,7 @@ export function reconstructPlanState(ctx: ExtensionContext): PlanState {
   const entries = filterActivePath(ctx.sessionManager);
 
   for (let i = entries.length - 1; i >= 0; i--) {
-    // entries[i] 是复杂表达式（TS 不收窄），守卫移到 const 变量上
+    // entries[i] 是复杂表达式（TS 不收窄），检查移到 const 变量上
     const entry = entries[i];
     if (!isPlanStateEntry(entry)) continue;
     applyPlanStateEntry(state, entry.data);

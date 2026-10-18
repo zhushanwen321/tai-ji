@@ -4,17 +4,17 @@
  * 泄漏序列（设计 §2.4 模式四核实链）：pi turn 中崩溃 → onSessionExit → adapter.detach →
  * interpreter.dispose()——事件源已退订，turn-end 永不再达，ping 循环失去唯一停止点
  * （历史场景注：B1 当时有 5s 自动 respawn 使失败计数恒清零、interval 永续；自动 respawn
- * 已随防御机制清查退役，该永续条件不再存在，但 dispose 幂等收口仍是防线）。
+ * 已随防御机制清查退役，该永续条件不再存在，但 dispose 幂等收尾仍是防线）。
  *
  * 修复：dispose() 补 this.stopPingLoop()（幂等）；已 in-flight 的 pingTick 由既有
- * `pingTimer === null` 守卫（SR1）拦截。
+ * `pingTimer === null` 检查（SR1）拦截。
  *
  * 锁定：
  * - TC1 respawn 序列：turn-start 起探 → dispose（模拟崩溃收殓）→ 大幅推进时钟，
  *   旧实例 pingPi 零调用、零 stream_warn、零 onSilentAbort；同 sid 新 interpreter
  *   （respawn 产物）起探后 ping 正常工作——证明停的是旧循环、不误伤新实例。
- * - TC2 in-flight tick 守卫：tick 已发起（pingPi pending）→ dispose → ping 以失败
- *   resolve（模拟打到已死进程）→ 守卫拦截，不计数/不广播/不 abort。
+ * - TC2 in-flight tick 检查：tick 已发起（pingPi pending）→ dispose → ping 以失败
+ *   resolve（模拟打到已死进程）→ 检查拦截，不计数/不广播/不 abort。
  * - TC3 dispose 幂等 + 未起探实例 dispose 不抛。
  *
  * 运行：cd packages/runtime && npx vitest run src/services/session/__tests__/event-interpreter-ping-dispose.test.ts
@@ -70,7 +70,7 @@ describe('B1 pingTimer 泄漏：dispose 停 ping 循环（respawn 序列）', ()
     revived.interp.dispose()
   })
 
-  it('TC2: in-flight pingTick 在 dispose 后被 pingTimer===null 守卫拦截（不计数/不广播/不 abort）', async () => {
+  it('TC2: in-flight pingTick 在 dispose 后被 pingTimer===null 检查拦截（不计数/不广播/不 abort）', async () => {
     // 手动 deferred：控制 ping 的 resolve 时点落在 dispose 之后（模拟 await 窗口内崩溃收殓）
     let resolvePing: (v: Record<string, unknown> | undefined) => void = () => {}
     const pingPi = vi.fn(() => new Promise<Record<string, unknown> | undefined>((resolve) => {
@@ -88,9 +88,9 @@ describe('B1 pingTimer 泄漏：dispose 停 ping 循环（respawn 序列）', ()
 
     // ping 以失败形态 resolve（resolve(undefined)：打到已死进程 / client 未就绪）
     resolvePing(undefined)
-    await vi.advanceTimersByTimeAsync(0) // flush 微任务，让 pingTick 走完守卫分支
+    await vi.advanceTimersByTimeAsync(0) // flush 微任务，让 pingTick 走完检查分支
 
-    // 守卫生效：不计数 → 不达 WARN/ABORT 阈值副作用
+    // 检查生效：不计数 → 不达 WARN/ABORT 阈值副作用
     expect(sent.filter(m => m.type === 'message.stream_warn')).toHaveLength(0)
     expect(onSilentAbort).not.toHaveBeenCalled()
 

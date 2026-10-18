@@ -27,14 +27,14 @@ import {
   type InFlightSnapshot,
 } from "../inflight-snapshot.ts";
 // W3 合并改写：inproc 引擎已删——句柄记账走 host/spawned-children 镜像（register +
-// reset 测试面）。
+// reset 测试）。
 import {
   killRecordChildWithEscalation,
   registerSpawnedChildForRecord,
   _resetCoreSpawnedChildrenMirrorForTest,
 } from "../host/spawned-children.ts";
 
-/** 最小 fake 子进程（EventEmitter + killed/pid 字段——hasLiveProcessHandle 消费面）。 */
+/** 最小 fake 子进程（EventEmitter + killed/pid 字段——hasLiveProcessHandle 消费方）。 */
 function makeFakeChild(): ChildProcess & EventEmitter {
   const child = new EventEmitter() as ChildProcess & EventEmitter;
   (child as { pid?: number }).pid = 4242;
@@ -77,7 +77,7 @@ describe("getInFlightSnapshot：双谓词绝对计数（D5 求值位置 = 状态
     const child = makeFakeChild();
     registerSpawnedChildForRecord(id, child);
     // W3 镜像形态：killed 判据由镜像置死位承载（注册后改 child 引用字段不进镜像——
-    // 生产置死路径 = killRecordChildWithEscalation 杀链记账面 / 引擎反向通道）。
+    // 生产置死路径 = killRecordChildWithEscalation 杀链记账侧 / 引擎反向通道）。
     killRecordChildWithEscalation(id, "test");
     expect(getInFlightSnapshot().inFlight).toBe(0);
   });

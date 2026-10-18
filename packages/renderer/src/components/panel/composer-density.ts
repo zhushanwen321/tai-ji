@@ -72,10 +72,10 @@ export interface ComposerDensityCapabilities {
    */
   readonly hasTrayItems?: boolean
   /**
-   * 插件 headerAction 声明面是否有可见入口（scheduler 定时任务钮等；判定实现 =
+   * 插件 headerAction 声明侧是否有可见入口（scheduler 定时任务钮等；判定实现 =
    * `hasVisibleHeaderActions`，可见性条件单点 isVisibleHeaderAction、与按钮渲染过滤同调）。
    * 缺省 false。
-   * 左簇内容三源之一（托盘条目 / toolbar 贡献 / headerAction 入口）：L2 聚合面含
+   * 左簇内容三源之一（托盘条目 / toolbar 贡献 / headerAction 入口）：L2 聚合范围含
    * headerAction（demo composer-bar spec §2.1 B3「定时任务 + 托盘 → layers」），故
    * 「不留死入口」的 absent 判据必须覆盖它——否则托盘空 + toolbar 零贡献时聚合入口
    * 不渲染，被聚合的 clock 直开动作丢失。

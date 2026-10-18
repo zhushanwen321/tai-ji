@@ -1,6 +1,6 @@
 // src/protocol/contract-types.ts
 //
-// 引擎面契约类型 SSOT（协议两侧不许各写一份；core 反向 re-export 保上层消费面）。
+// 引擎侧契约类型 SSOT（协议两侧不许各写一份；core 反向 re-export 保上层消费方）。
 // 设计权威源：docs/architecture/subagent-engine-protocolization.md §3.5.1 D7 类型闭包表 +
 // impl-plan §2.1「类型闭包处置」。
 //
@@ -14,7 +14,7 @@
 //   - WorktreeHandle ← core execution/assembly/types.ts:349（SDK 结构等价副本——设计 §3.5.1
 //     点名「AgentCallOpts.worktree 的 WorktreeHandle 即这类副本」）
 //
-// ==================== 字段归属判据 1-7（协议宪法·字段面；新增 wire 字段依序裁决，
+// ==================== 字段归属判据 1-7（协议宪法·字段侧；新增 wire 字段依序裁决，
 // 先到先定。条文全文 = engine-protocol.ts 头注；删改史与判据 why =
 // docs/adr/decisions.md ADR-0071） ====================
 // 1. 引擎不消费它，任务能否正确完成？能 → 宿主自持不上协议。
@@ -29,7 +29,7 @@
 // 7. （能力位消费点登记）每个能力位登记消费点与 wire 载体，执行通道缺失如实登记；
 //    未登记位 = 违宪（首个登记条目 = steer）。
 //
-// 演进政策（字段面）：新增字段/事件变体/方法/通道过新增门槛（消费方 + 降级路径 +
+// 演进政策（字段侧）：新增字段/事件变体/方法/通道过新增门槛（消费方 + 降级路径 +
 // 能力位绑定三件齐）才进协议，无消费方不进协议；A 型同形改名默认 additive 双读 +
 // major 清除，B 型机制替换同批合法（对端同仓 + ADR 登记）——三条全文见
 // engine-protocol.ts 头注，minor 协商触发条件见 ADR-0071。
@@ -45,8 +45,8 @@
 // 条文权威 = ADR-0071；本文件承载①④，②落 methods.ts 头注，③落 reverse-channels.ts
 // 头注）====================
 // ① 未知 event.type → 旧宿主 reducer default no-op 安全落空——逐变体 noop-safe:
-//    论证标记登在下方 AGENT_EVENT_TYPE_NAMES 词表成员行（U2 已实装，标记守卫 =
-//    contract-closure.test.ts「noop-safe 标记守卫」），此处只引用不复述论证内容。
+//    论证标记登在下方 AGENT_EVENT_TYPE_NAMES 词表成员行（U2 已实装，标记检查 =
+//    contract-closure.test.ts「noop-safe 标记检查」），此处只引用不复述论证内容。
 // ④ 未知可选键 → advisory 忽略（判据 6 第一档：忽略无语义影响，直接 additive）；
 //    behavior 键必有门（宿主派发前预检），不存在「无门依赖」的 behavior 键——与
 //    判据 6 呼应：宽容只覆盖 advisory/degradable，behavior 靠预检不靠容忍。
@@ -77,7 +77,7 @@ export type AssertMutuallyAssignable<A, B> = [A] extends [B]
   : never;
 
 // ============================================================
-// 事件面（AgentEvent 及其字段型）
+// 事件范围（AgentEvent 及其字段型）
 // ============================================================
 
 /** token 用量（message_end 单条消息增量）。← core execution/assembly/types.ts AgentUsage。 */
@@ -91,7 +91,7 @@ export interface AgentUsage {
 }
 
 export interface AgentUsageTotal extends AgentUsage {
-  /** 四项之和。投影时不再手工求和。 */
+  /** 四项之和。派生时不再手工求和。 */
   total: number;
   /** 累计成本（USD）。无成本数据时为 0。 */
   cost: number;
@@ -128,7 +128,7 @@ export interface Turn {
   toolCalls: InternalToolCall[];
   /** 本 turn message_end 的 token 增量（聚合得 usage 总量）。 */
   usageDelta?: AgentUsage;
-  /** turn_end 是否已到达。false=正在进行；true=已闭合。 */
+  /** turn_end 是否已到达。false=正在进行；true=已结束。 */
   closed: boolean;
   /** turn_end 到达时的墙钟时间戳（Date.now()，ms）。 */
   closedTs?: number;
@@ -136,7 +136,7 @@ export interface Turn {
 
 /**
  * 引擎事件（10 种，协议 event.params.event 逐字序列化——「事件与 handle 序列化逐字
- * 兼容」不变量 3 的类型面）。语义锚点 = pi（ACP 词汇对照见 core execution/assembly/types.ts 注释）。
+ * 兼容」不变量 3 的类型范围）。语义锚点 = pi（ACP 词汇对照见 core execution/assembly/types.ts 注释）。
  *
  * activity = 纯活性信号：双侧 reducer no-op、不开 turn、不写状态、不落 journal
  * （core event-journal-wiring 对其豁免 append），只承诺「引擎活跃时周期性出现」——供宿主
@@ -175,7 +175,7 @@ export type AgentEvent =
  * 每个成员必须带一行 `// noop-safe: <论证>`：未知成员宽容语义四行①（ADR-0071）的
  * 逐变体登记——旧宿主 reducer 遇未知 event.type 走 default 分支零写入，标记后写
  * 「本变体被丢弃时状态无损」的一行论证（no-op 安全性属运行时消费语义，不可静态
- * 判定——守卫只查标记存在不查内容，落点 contract-closure.test.ts「noop-safe 标记守卫」）。
+ * 判定——检查只查标记存在不查内容，落点 contract-closure.test.ts「noop-safe 标记检查」）。
  *
  * 编译锁（漏改任一侧 typecheck 红，且错误指向漏点）：
  *   ① union 侧——成员 type 必须经 `EventName<"x">` 取名（约束 = 本词表）：union 加
@@ -183,19 +183,19 @@ export type AgentEvent =
  *   ② 词表侧——`satisfies readonly AgentEvent["type"][]`：词表加成员不加 union
  *      → 错误直接落在词表漏改的成员行；
  *   ③ 兜底——成员绕过 EventName 约束裸加字面量 → _EventVocabSyncLock 爆红。
- * 新增事件变体的同步面分两层，漏改任一处 typecheck 均红且精确指路（验收 A1 演练
- * 实证）：协议面两笔（词表 + union）即协议面全同步——schema enum 与遍历型测试断言
- * 自动跟随；同仓消费面另有两处编译期同步点——journal-replay reducer case（穷尽
+ * 新增事件变体的同步点分两层，漏改任一处 typecheck 均红且精确指路（验收 A1 演练
+ * 实证）：协议范围两笔（词表 + union）即协议范围全同步——schema enum 与遍历型测试断言
+ * 自动跟随；同仓消费方另有两处编译期同步点——journal-replay reducer case（穷尽
  * switch never 检查）与 contract-closure 构造冒烟（Record<AgentEventTypeName,…>
  * 漏键爆红）。不 bump 版本、不改任何引擎（演进政策 additive 面，判据全文见头注）。
  */
 export const AGENT_EVENT_TYPE_NAMES = [
   "tool_start", // noop-safe: 旧宿主 default 分支零写入——丢弃仅缺 tool 起始占位（显示降级），turn 结构不受损
-  "tool_end", // noop-safe: 旧宿主 default 分支零写入——丢弃仅缺 result，turn 收口由 turn_end/message_end 承担
+  "tool_end", // noop-safe: 旧宿主 default 分支零写入——丢弃仅缺 result，turn 收尾由 turn_end/message_end 承担
   "text_delta", // noop-safe: 旧宿主 default 分支零写入——丢弃仅缺正文增量，不产生半解析状态
   "thinking_delta", // noop-safe: 旧宿主 default 分支零写入——丢弃仅缺推理增量，不产生半解析状态
   "turn_end", // noop-safe: 旧宿主 default 分支零写入——丢弃则该 turn 滞留进行态，journal 重放仍按序重建
-  "message_end", // noop-safe: 旧宿主 default 分支零写入——丢弃仅缺 usage 聚合与闭合计量，已累积内容不回滚
+  "message_end", // noop-safe: 旧宿主 default 分支零写入——丢弃仅缺 usage 聚合与结束计量，已累积内容不回滚
   "compaction", // noop-safe: 事件无载荷且现行 reducer 即直接 return——丢弃与处理零差异
   "activity", // noop-safe: 纯活性信号，双侧 reducer 恒 no-op（协议语义见 AgentEvent 头注），丢弃零差异
   "error", // noop-safe: 旧宿主 default 分支零写入——丢弃仅缺 lastError 诊断留痕，已写状态不回滚
@@ -243,7 +243,7 @@ export interface EngineHandleData {
 }
 
 /**
- * [v1.x] 冷续 resume 锚点——EngineHandleData 定位键的投影子集（诊断字段
+ * [v1.x] 冷续 resume 锚点——EngineHandleData 定位键的派生子集（诊断字段
  * v/engineVersion/adapterVersion 不属锚点语义，不随锚点走）。消费点：
  *   - run.params.resume（宿主 → 引擎：冷续重开已 idle 的 session，pi 消费
  *     sessionRef.sessionFile —— 对照 core SpawnResumeOpts.sessionFile 的锚点面）。
@@ -289,7 +289,7 @@ export interface SessionView {
  * 用户覆盖记账共用的模型指向形状（设计 subagent-model-switch §6.2/§7.3）。
  *
  * 刻意用结构化对象而非现役 wire 的字符串 canonical ref（`ctx.model` = "provider/id"）：
- * 切换操作的原生输入面就是「provider 选了哪个模型」两个独立选择（前端模型选择器 /
+ * 切换操作的原生输入范围就是「provider 选了哪个模型」两个独立选择（前端模型选择器 /
  * runtime `model.switch` 均平铺 provider/modelId），字符串拼接形态会在协议两侧各做一次
  * 拆/拼（拆分规则 = provider 含 '/' 时无法无歧义反转），结构化形状让拆装只发生在宿主
  * 编排层单点（U2 组帧时拼 canonical ref、读回执时拆 ref）。
@@ -322,7 +322,7 @@ export type EngineProcessModel = "per-window" | "shared-service";
  * 引擎能力声明（11 必填位 + 1 可选位 setModel）。三级：native / emulated / unsupported。
  * 声明的是本仓 subagent 链路实际接通的能力，不是引擎 RPC 层的理论能力。
  * 同步权威 = manifest（注册期直读）；握手应答仅诊断（§3.3「同步成员清单」）。
- * 进程形态声明是独立字段（上方 EngineProcessModel——manifest 契约面，不在本
+ * 进程形态声明是独立字段（上方 EngineProcessModel——manifest 契约范围，不在本
  * 接口内），两套字段服务不同裁决（任务能力 vs 宿主实例管理）。
  */
 export interface EngineCapabilities {
@@ -334,7 +334,7 @@ export interface EngineCapabilities {
    * [H1 D5 语义收窄 + modeless] 「怎么续」形态轴兼 message 资格轴：
    * 位非 'unsupported' = 引擎可续聊（core capability-gate 的 message 资格门消费），
    * 值区分续聊形态——native（原地续写）/ cold（冷恢复重建 + 新 run + resume 锚点）。
-   * 原名字沿用——conversation 位保留、语义从「interact 长驻控制面」收窄为
+   * 原名字沿用——conversation 位保留、语义从「interact 长驻控制范围」收窄为
    * 「resume 续聊能力」。[modeless 波2] 会话形态键只剩 run.params.resume（协议
    * task.conversation 已删），本轴不再是 per-run 模式开关——描述各引擎的真实
    * 续聊差异（gate 判据仍是 `=== "unsupported"` 拒绝，"cold" 与 "native" 等价
@@ -449,7 +449,7 @@ export interface AgentOutcome {
   /** null = 被信号杀死（杀链/abort 合成终态的判据）。 */
   exitCode?: number | null;
   /**
-   * [D5 诊断引用落账] 失败时子进程 stderr tee 文件绝对路径（引擎侧 W11 已有落盘）。
+   * [D5 诊断引用写入记录] 失败时子进程 stderr tee 文件绝对路径（引擎侧 W11 已有落盘）。
    *
    * 通道裁决（协议演进宪法 ADR-0071 判据链，2026-09-22 一致性审查 P1 修复登记）：stderr
    * tee 路径是引擎产生的诊断事实，宿主不可靠推导（文件名格式/dataDir 解析/轮转
@@ -470,12 +470,12 @@ export interface AgentOutcome {
 }
 
 // ============================================================
-// AgentCallOpts 引擎面子集（协议 run.params.task）
+// AgentCallOpts 引擎侧子集（协议 run.params.task）
 // ============================================================
 
 /**
  * 引擎模型目录条目（manifest `modelCatalog.models` 条目形态，设计 §3.4 示例）。
- * 协议面 = initialize 应答 models? 与 listModels 应答 models 的元素型；
+ * 协议范围 = initialize 应答 models? 与 listModels 应答 models 的元素型；
  * manifest 解析与生成（gen:model-catalog）归 W4/W5 实装。
  */
 export interface ModelCatalogEntry { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）
@@ -485,15 +485,15 @@ export interface ModelCatalogEntry { // oe-exempt:20260929:framework:workflow/re
 }
 
 /**
- * 单次 agent 调用的任务声明——引擎面子集（协议 run.params.task；core 全量
- * AgentCallOpts 22 字段留 core，core 侧反向 re-export 保消费面）。
+ * 单次 agent 调用的任务声明——引擎侧子集（协议 run.params.task；core 全量
+ * AgentCallOpts 22 字段留 core，core 侧反向 re-export 保消费方）。
  *
  * 字段归属判据（协议演进宪法 ADR-0071 成文，权威源
  * docs/architecture/subagent-engine-protocolization.md §3.3「协议演进宪法」与
  * docs/adr/decisions.md ADR-0071；
- * 本注释是判据与存量结论的投影，新增字段按决策树依序裁决后在此登记）：
+ * 本注释是判据与存量结论的派生整理，新增字段按决策树依序裁决后在此登记）：
  *   ① 引擎不消费它任务能否正确完成？能 → 宿主自持不上协议（「正确」含满足字段
- *      声明携带的约束面——轮次预算/超时等约束被引擎忽略即任务语义受损，视为消费）；
+ *      声明携带的约束侧——轮次预算/超时等约束被引擎忽略即任务语义受损，视为消费）；
  *   ② 描述「任务是什么」(what) 还是「在什么环境跑/怎么跑」(where/how)？
  *      what → task（预算/验收类约束 = 任务自带语义归 task，宿主偏好参数走③）；
  *   ③ 引擎能否自行推导该环境值且与宿主恒等？能 → 不上协议（推导权归引擎，设计期

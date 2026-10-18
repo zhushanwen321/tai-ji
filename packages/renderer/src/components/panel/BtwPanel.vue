@@ -9,7 +9,7 @@
   - ①线归属创建时的主会话（关联在 runtime 注册表/目录布局，面板不展示血缘）；
   - ②线列表 = 当前焦点主会话的线（:session-id=panelSessionId → btw.list{mainSid} 拉取）；
   - ③切走主会话线照常后台运行（面板随 drawer 分区切走即不展示，生命周期归 M4-a）；
-  - ④切回恢复面板（选中线存 core drawer 分区 selectedBtwVid，切回保留；列表重拉）；
+  - ④切回恢复面板（选中线存 core drawer 分区 selectedBtwVid，切回保留；列表重新拉取）；
   - ⑤挂起表单提交态 per-vid 隔离归 M3-c（本单元不触及交互闭环）；
   - ⑥删除主会话级联归 M4-a（本面板不自行清理，走 deleteSession 编排）。
 
@@ -107,7 +107,7 @@
             :data-vid="thread.vid"
             @click="selectThread(thread.vid)"
           >
-            <!-- badge 待处理态 per-line 挂点（D8 终态机驱动；聚合面 = composer btw 按钮 Σ） -->
+            <!-- badge 待处理态 per-line 挂点（D8 终态机驱动；聚合范围 = composer btw 按钮 Σ） -->
             <span
               v-if="isBtwPending(thread.vid)"
               class="size-1.5 shrink-0 rounded-full bg-warn"
@@ -152,14 +152,14 @@
              无交互时带内仅 composer（空闲几何与主面板一致）。
              M3-c 交互闭环（D8 降级路径唯一形态：drawer 内联确认条，富表单降档；五类请求
              按 vid 路由本面板，主视图三模态面零浮出）。Guard 为无 DOM 渲染哨兵，包全部
-             风险渲染——异常由 onErrorCaptured 在本组件收口（return false 不外溢主面板，
+             风险渲染——异常由 onErrorCaptured 在本组件收尾（return false 不外溢主面板，
              P2 隔离），错误条 + 重试在 Guard 外恒可达。 -->
         <!-- composer 带跟 chat 档位（chat-font-scope）：主面板 composer 恒在 main-area
              chat scope 内，btw 线的 composer + 内联确认条同语义（对话流配套输入区，
              非 drawer chrome）——上方 MessageStream 已自挂同款 scope。 -->
         <div v-if="selectedVid" :class="COMPOSER_BAND_CLASS" data-fs-scope="chat" data-testid="btw-interaction">
           <BtwInteractionGuard :key="interactionKey">
-            <!-- 终态机失效支行内提示（失效支单入口 invalidateBtwRequests——事件帧一路：badge 清 + 表单撤下 + 本提示同拍收口，D-B2-3） -->
+            <!-- 终态机失效支行内提示（失效支单入口 invalidateBtwRequests——事件帧一路：badge 清 + 表单撤下 + 本提示同拍收尾，D-B2-3） -->
             <div v-if="expiredNotice" class="flex items-center gap-1.5 rounded bg-danger-soft px-2.5 py-1.5 text-[length:var(--text-2xs)] text-danger" data-testid="btw-request-expired">
               <TriangleAlert class="size-3 shrink-0" />
               <span>{{ t('btw.interaction.expiredNotice') }}</span>
@@ -291,7 +291,7 @@ interface BtwPanelState {
   threads: BtwThreadInfo[]
   loading: boolean
   loadError: string | null
-  /** 同分区加载序号：旧响应 seq 不匹配即丢弃（乱序守卫，搜索 TC-2 loadSeq 同款） */
+  /** 同分区加载序号：旧响应 seq 不匹配即丢弃（乱序检查，搜索 TC-2 loadSeq 同款） */
   loadSeq: number
   creating: boolean
   createError: string | null
@@ -341,7 +341,7 @@ async function loadThreads(captured: string): Promise<void> {
   try {
     const threads = await btw.list(captured)
     scoped.updateFor(captured, (s) => {
-      if (s.loadSeq !== seq) return // 同分区旧响应丢弃（重试双击/watch 连触乱序守卫）
+      if (s.loadSeq !== seq) return // 同分区旧响应丢弃（重试双击/watch 连触乱序检查）
       s.loading = false
       s.threads = threads
     })
@@ -411,7 +411,7 @@ function reload(): void {
   if (props.sessionId) void loadThreads(props.sessionId)
 }
 
-// 焦点绑定②：切主会话即按新 mainSid 重拉（清空不是隔离手段——数据按 captured 分区落位，
+// 焦点绑定②：切主会话即按新 mainSid 重新拉取（清空不是隔离手段——数据按 captured 分区落位，
 // 迟到旧响应用 loadSeq 丢弃；watch 只负责触发拉取，不手动清空任何状态）
 watch(
   () => props.sessionId,
@@ -454,7 +454,7 @@ const {
 
 // ── M3-c：失效提示 / 运行期错误边界（编排下沉 useBtwPanelSurface，
 //    规则：全部风险渲染在 Guard slot 内求值，异常由 surface 注册的 onErrorCaptured 在
-//    本组件收口 return false 不外溢主面板；MessageStream/Composer 不在 Guard 内不受影响；
+//    本组件收尾 return false 不外溢主面板；MessageStream/Composer 不在 Guard 内不受影响；
 //    第四面状态区已随 2026-10-15 用户裁决移除，Guard slot 仅余失效提示 + 内联确认条）──
 const {
   expiredNotice,

@@ -69,7 +69,7 @@ export function resolveBottomDrawerDisplayPct(
  */
 const heightPct = ref(BOTTOM_DRAWER_HEIGHT_DEFAULT_PCT)
 
-/** 加载窗口内是否已有本模块写入（窗口守卫：在途 KV 快照不得覆写窗口内新写值） */
+/** 加载窗口内是否已有本模块写入（窗口检查：在途 KV 快照不得覆写窗口内新写值） */
 let wroteInLoadWindow = false
 
 /**
@@ -83,7 +83,7 @@ const slot = createKVSlot<number>(BOTTOM_DRAWER_HEIGHT_KEY, {
     typeof parsed === 'number' && Number.isFinite(parsed)
       ? clampBottomDrawerHeightPct(parsed)
       : undefined,
-  // 窗口守卫（createKVSlot 契约）：加载窗口内已 record 的新值比在途 KV 快照新，不被覆写
+  // 窗口检查（createKVSlot 契约）：加载窗口内已 record 的新值比在途 KV 快照新，不被覆写
   mergeSnapshot: (value) => {
     if (!wroteInLoadWindow) heightPct.value = value
   },

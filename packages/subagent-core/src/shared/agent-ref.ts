@@ -109,7 +109,7 @@ export type WorkflowRefInvalidReason =
   | "reserved" // 名分支命中保留字（保留字裁决优先于 knownNames）
   | "unknown_name" // 裸名未命中 knownNames
   | "not_absolute" // 路径分支：相对路径无基准
-  | "parent_segment" // 路径分支：含 `..` 段（⛔2 同面）
+  | "parent_segment" // 路径分支：含 `..` 段（⛔2 同一处）
   | "bad_ext"; // 路径分支：非 .js
 
 /**
@@ -135,7 +135,7 @@ export type NormalizedWorkflowRef =
  * 清单异常含保留字也不放行（`..` 若被当名接受会绕过路径域的 ⛔2 收紧）。
  *
  * 路径分支复用 normalizeRef(WORKFLOW_REF_EXT)：`..` 段拒绝、~/ 展开、扩展名校验
- * 与 agent 域同面（G1：同一校验语义）。
+ * 与 agent 域同一处（G1：同一校验语义）。
  */
 export function normalizeWorkflowRef(
   ref: string,
@@ -193,7 +193,7 @@ export const WORKFLOW_REF_EXT = ".js";
  * 不切 Windows `\` 分隔符，反之类推），且本模块避免引入平台分支。
  *
  * 包边界注记：GUI 侧（@taiji/shared display-name.ts）存在行为逐字节等价的同名
- * 实现——shared 不发 npm，core 运行时 import shared 需改 bundle/发布面，代价不成
+ * 实现——shared 不发 npm，core 运行时 import shared 需改 bundle/发布范围，代价不成
  * 比例，故双实现并存。两侧测试用同款向量互锚（`C:\\a\\worker.md` → `worker`），
  * 任一侧改语义须同步另一侧。
  */

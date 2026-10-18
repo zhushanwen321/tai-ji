@@ -12,11 +12,11 @@
 // 单源后两侧 import 同一常量。
 //
 // 为什么不并入 paths.ts：paths.ts 是 engineId 参数化的通用引擎布局；本模块是 zcode
-// 引擎专属路径段契约（变化轴不同——zcode 安装布局变更不影响通用布局，反之亦然）。
+// 引擎专属路径段契约（变化原因不同——zcode 安装布局变更不影响通用布局，反之亦然）。
 //
-// 已知残留投影：scripts/zcode-session-db-cleanup.mjs 为纯 ESM 脚本（无 TS 构建链）
+// 已知残留派生副本：scripts/zcode-session-db-cleanup.mjs 为纯 ESM 脚本（无 TS 构建链）
 // 无法 import 本模块，保留等价 JS 字面量——一致性由 packages/runtime/test/
-// host-db-suffix-parity.test.ts 的脚本投影文本比对守卫。
+// host-db-suffix-parity.test.ts 的脚本派生文本比对检查。
 
 /**
  * 宿主 HOME 下 zcode 会话库相对段（`~/.zcode/cli/db/db.sqlite`，绝对路径 =

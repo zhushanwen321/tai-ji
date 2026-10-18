@@ -8,12 +8,12 @@
  * - provider-edit-reconcile.ts 广播 × 用户编辑并发对齐纯核（D8 + S8 规则，接口级可测）
  * - provider-edit-types.ts    跨 module 共享类型
  *
- * 本 facade 只做两件事：① 三 module 装配（互相依赖的注入面在此接线）② provider 变化时的
+ * 本 facade 只做两件事：① 三 module 装配（互相依赖的注入点在此接线）② provider 变化时的
  * 重置序（载入 → 瞬态重置 → 快照捕获，原 watch(props.provider) 的执行序逐字保持——唯一
  * 例外是同 id 刷新：不重置，由 form module 的 watch(providers) + applyReconcile 承接，
- * 见下方 watch 内注释）。返回面收敛为 3 组子 interface（form / discover / models），调用方按组消费。
+ * 见下方 watch 内注释）。返回结构收敛为 3 组子 interface（form / discover / models），调用方按组消费。
  *
- * 历史导出面（CONTEXT_OPTIONS / THINKING_STRATEGIES / API_KEY_CLEAR_SENTINEL / LocalModel /
+ * 历史导出清单（CONTEXT_OPTIONS / THINKING_STRATEGIES / API_KEY_CLEAR_SENTINEL / LocalModel /
  * ThinkingStrategy / DiscoverAction 等）已归位各 module，经 settings 域 barrel（index.ts）
  * 统一导出，消费方 import 源不变（'@taiji/core' / '@taiji/core/domain/settings'）。
  *
@@ -31,7 +31,7 @@ import type { ProviderEditModelsModule } from './provider-edit-models'
 import { createProviderEditModels } from './provider-edit-models'
 
 /**
- * Provider 编辑会话 —— 3 组子 interface（原 31 成员扁平返回面的收敛形态）：
+ * Provider 编辑会话 —— 3 组子 interface（原 31 成员扁平返回结构的收敛形态）：
  * - form     表单草稿 / dirty / headers CRUD / save
  * - discover test / discover 探活
  * - models   模型清单 CRUD

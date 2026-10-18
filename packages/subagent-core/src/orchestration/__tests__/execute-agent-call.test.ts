@@ -53,7 +53,7 @@ function makeTraceNode(stepIndex = 0): ExecutionTraceNode {
   };
 }
 
-/** 按 stepIndex 查 trace 节点（Trace 公共查询面 = toArray 线性扫）。 */
+/** 按 stepIndex 查 trace 节点（Trace 公共查询范围 = toArray 线性扫）。 */
 function findByStep(trace: Trace, stepIndex: number): ExecutionTraceNode | undefined {
   return trace.toArray().find((n) => n.stepIndex === stepIndex);
 }
@@ -188,12 +188,12 @@ describe("ADR-0122: 失败单次终态（无自动重试）", () => {
   });
 });
 
-// ── isOrphaned 守卫（OB2：S7 残留瞬时污染根除） ──
+// ── isOrphaned 检查（OB2：S7 残留瞬时污染根除） ──
 //
 // 谓词为 true 时 finalizeCall 跳过 trace.update，但 markDone 与
 // sessionId/sessionFile 同步保留。U4 锁定不传谓词时的现状回归。
 
-describe("isOrphaned 守卫", () => {
+describe("isOrphaned 检查", () => {
   it("U1: 谓词 () => true + 终态成功路径 → trace.update 0 次，markDone 保留（status done + result 已设置）", async () => {
     const { call, trace } = makeAgentCallAndTrace();
     const updateSpy = vi.spyOn(trace, "update");
@@ -497,9 +497,9 @@ describe("D5-③: failureKind 分诊字段透传", () => {
     expect(findByStep(trace, 0)?.status).toBe("failed");
   });
 
-  it("词表漂移失效模式：未知错误文案 → classifyFailureKind=unknown → 仍单次终态（分类降级不影响执行面）", async () => {
+  it("词表漂移失效模式：未知错误文案 → classifyFailureKind=unknown → 仍单次终态（分类降级不影响执行侧）", async () => {
     // pi 升级改写 stale 文案后，旧词表对新文案零命中——分诊降级 unknown 只影响
-    // 分类展示，执行面恒为单次终态（ADR-0122）
+    // 分类展示，执行侧恒为单次终态（ADR-0122）
     const futurePiError = "extension runtime was superseded by a newer orchestration epoch";
     expect(classifyFailureKind(futurePiError)).toBe("unknown");
 

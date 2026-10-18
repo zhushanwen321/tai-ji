@@ -7,7 +7,7 @@
  * runtime-* / pi-* 文件被清、固定名 stderr 文件不误删（清理语义全部在 log-retention.ts
  * 的 cleanExpiredLogs，本文件只做 IPC 接线）。
  *
- * **验收调试入口，无鉴权面（本地 app 内），不进任何产品 UI**——renderer 产品代码不得
+ * **验收调试入口，无鉴权（本地 app 内），不进任何产品 UI**——renderer 产品代码不得
  * 调用；handler 返回 LogRetentionResult 的通道镜像 DebugRunLogRetentionResult
  * （ipc-payloads.ts，preload 签名共用）。零抛错：runLogRetentionNow 全路径容错
  * （目录缺失静默 {0,0} / 单文件失败 best-effort 跳过），invoke 无 rejection 面。
@@ -36,7 +36,7 @@ export function registerLogRetentionDebugHandler(): void {
       return result
     })
     mainLogger.debug('[log-retention-ipc] registered', { channel: DEBUG_RUN_LOG_RETENTION })
-  // eslint-disable-next-line taste/no-silent-catch -- 注册失败（极端：channel 被占）不能炸 main 启动；调试口缺席只影响 dev 触发面，每日定时器清理不受影响
+  // eslint-disable-next-line taste/no-silent-catch -- 注册失败（极端：channel 被占）不能炸 main 启动；调试口缺席只影响 dev 触发范围，每日定时器清理不受影响
   } catch {
     // no-op
   }

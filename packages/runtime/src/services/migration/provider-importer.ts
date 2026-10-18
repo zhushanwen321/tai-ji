@@ -238,8 +238,8 @@ function validateApplyRequest(importId: unknown, selectedIds: unknown): ImportEr
  * 组 1 单条处理：models.json 已定义的 provider（分体系处理）。
  *
  * 返回 null = 未勾选（不产生条目）；否则返回 imported/skipped/failed 三态条目之一。
- * 分解件（metrics-gate 复杂度偿还，编排序不变）：catalog 凭据腿归 applyCatalogCredential、
- * models.json 落盘腿归 upsertProviderViaPolicy，本函数只做勾选/冲突/catalog 分路。
+ * 分解件（metrics-gate 复杂度偿还，编排序不变）：catalog 凭据路径归 applyCatalogCredential、
+ * models.json 落盘路径归 upsertProviderViaPolicy，本函数只做勾选/冲突/catalog 分路。
  */
 async function applyProviderEntry(
   provider: ParsedProvider,
@@ -285,7 +285,7 @@ async function applyCatalogCredential(provider: ParsedProvider, credentialWriter
 }
 
 /**
- * models.json 落盘腿（自定义 provider，或 credentialWriter 未注入的 catalog）：剥离 _
+ * models.json 落盘路径（自定义 provider，或 credentialWriter 未注入的 catalog）：剥离 _
  * 前缀元数据 → 防线载体转译（source='import'）→ upsert；防线拦截（skipUpsert）与
  * 写侧异常统一转 failed 条目，丢弃的非法模型项 surface 到 warnings（U6②）。
  */
@@ -446,7 +446,7 @@ function collectMissingIdsAsFailed(selectedIds: string[], imported: ProviderImpo
 }
 
 /**
- * 边界1（wave3 TC5 / C2）：为本次导入的新 provider 加 enabledModels 白名单守卫。
+ * 边界1（wave3 TC5 / C2）：为本次导入的新 provider 加 enabledModels 白名单检查。
  *
  * 若 enabledModels 非空（用户已显式启用某些 provider），新 provider 默认不启用——补 <id>/*
  * 让其可用。ensureProviderInWhitelist 内部判空（全可用时 no-op）+ 幂等。catalog（auth.json）
@@ -496,7 +496,7 @@ async function applyBatch<TSrc>(
 /**
  * coding-plan 额度显示自动开启（导入即默认同意）落盘：只对本次真实落盘（imported）的条目；
  * skipped（duplicate）不动——不覆盖用户对既存 provider 的配置。写入必须在本函数返回前
- * 完成：handler 随后广播 provider 列表，闸门（renderer quota.enabled）直接消费本次写值。
+ * 完成：handler 随后广播 provider 列表，门禁（renderer quota.enabled）直接消费本次写值。
  * 写成功才在结果条目置 quotaAutoEnabled（写失败不置位，前端不 toast 不实报告）。
  */
 async function applyQuotaAutoEnable(targets: QuotaAutoEnableTarget[], store: QuotaExtrasWriter | undefined): Promise<void> {
@@ -536,7 +536,7 @@ function countByStatus(items: ProviderImportedItem[], status: ProviderImportedIt
 export async function applyImport(
   importId: string,
   selectedIds: string[],
-  // A1-4 收口：catalog 分路写凭据经 CredentialWriter（AuthService.saveCredential），
+  // A1-4 收敛：catalog 分路写凭据经 CredentialWriter（AuthService.saveCredential），
   // 不再直接持有 authStorage.set——auth.json 写入唯一入口在 AuthService。
   credentialWriter?: CredentialWriter,
   quotaExtrasStore?: QuotaExtrasWriter,
@@ -592,7 +592,7 @@ export async function applyImport(
     deletePreview(importId)
   }
 
-  // 边界1（wave3 TC5 / C2）：白名单守卫
+  // 边界1（wave3 TC5 / C2）：白名单检查
   ensureWhitelistForImported(imported)
 
   // coding-plan 额度显示自动开启：写入必须在本函数返回前完成（见 applyQuotaAutoEnable）。

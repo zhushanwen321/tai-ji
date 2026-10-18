@@ -17,7 +17,7 @@ import type { ExtensionContext, ToolInfo } from "@earendil-works/pi-coding-agent
 import { toErrorMessage } from "@zhushanwen/pi-ext-guards";
 
 /**
- * ToolInfo → pi-ai Tool 投影：三字段直取。parameters 是 typebox schema（主会话同源对象，
+ * ToolInfo → pi-ai Tool 派生视图：三字段直取。parameters 是 typebox schema（主会话同源对象，
  * 序列化后与主请求一致——缓存对齐的关键是不改造、原样透传）。
  */
 export function projectTools(toolInfos: readonly ToolInfo[]): LlmTool[] {
@@ -67,11 +67,11 @@ export interface SameModelCallOptions {
 	systemPrompt: string;
 	/** 完整上下文 messages + 末尾已追加的压缩指令 message。 */
 	messages: Message[];
-	/** 主会话工具投影（缓存对齐）。 */
+	/** 主会话工具派生视图（缓存对齐）。 */
 	tools: LlmTool[];
 	signal?: AbortSignal;
 	sessionId?: string;
-	/** 工具投影与 LLM 调用的依赖注入（单测 mock 点）。 */
+	/** 工具派生视图与 LLM 调用的依赖注入（单测 mock 点）。 */
 	deps?: {
 		getApiKeyAndHeaders?: (model: Model<never> | Model<string>) => Promise<{ ok: true; apiKey?: string; headers?: Record<string, string>; env?: Record<string, string> } | { ok: false; error: string }>;
 		call?: (model: Model<never> | Model<string>, context: LlmContext, options: SimpleStreamOptions) => Promise<SimpleResponseLike>;

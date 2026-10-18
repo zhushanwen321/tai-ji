@@ -1,5 +1,5 @@
 /**
- * pi 不扫描 agent/config/ 子目录——providers.json 落点安全性契约守卫
+ * pi 不扫描 agent/config/ 子目录——providers.json 落点安全性契约检查
  * （PR #187 round1 data-governance MF4，ADR-0063 I4 机器防线）。
  *
  * 背景：`getProviderExtrasPath()` 把 taiji 扩展域 providers.json 放在
@@ -80,17 +80,17 @@ function extractAgentDirJoinFirstSegments(sources: Map<string, string>): Array<[
 // ── 第一部分：taiji 侧路径结构断言（无条件跑，不依赖 pi 包）─────────────────────
 
 describe('getProviderExtrasPath 路径结构（pi 不扫描子目录落点）', () => {
-  it('providers.json 派生自 <piAgentDir>/config/providers.json——首段 config，不在 pi agentDir 顶层扫描面', () => {
+  it('providers.json 派生自 <piAgentDir>/config/providers.json——首段 config，不在 pi agentDir 顶层扫描范围', () => {
     const path = getProviderExtrasPath()
     expect(isAbsolute(path)).toBe(true)
     const segments = relative(getPiAgentDir(), path).split(sep)
-    // agentDir 顶层是 pi 的扫描面（models.json / settings.json / auth.json / themes/...）；
-    // taiji 扩展域必须落在 config/ 子目录（pi 零引用，见第二部分守卫）而非顶层
+    // agentDir 顶层是 pi 的扫描范围（models.json / settings.json / auth.json / themes/...）；
+    // taiji 扩展域必须落在 config/ 子目录（pi 零引用，见第二部分检查）而非顶层
     expect(segments).toEqual(['config', 'providers.json'])
   })
 })
 
-// ── 第二部分：pi dist 静态守卫（pi 包可达才跑；升级引入占用时红 = 提示复核锚点）──
+// ── 第二部分：pi dist 静态检查（pi 包可达才跑；升级引入占用时红 = 提示复核锚点）──
 
 describe.skipIf(!PI_DIST)(
   `pi dist 对 agent/config/ 零引用契约（ADR-0063 I4 锚点机器防线${SKIP_REASON ? `｜skip：${SKIP_REASON}` : ''}）`,
@@ -99,11 +99,11 @@ describe.skipIf(!PI_DIST)(
       const dist = PI_DIST as string
       const hits = extractAgentDirJoinFirstSegments(readDistJs(dist))
 
-      // 空集守卫（防正则失配导致 vacuous pass）：pi agentDir 核心三文件必在家族内，
-      // 提取不到 = pi 改了路径派生形态 → 本守卫失效，须复核 pi-paths.ts 锚点
+      // 空集检查（防正则失配导致 vacuous pass）：pi agentDir 核心三文件必在家族内，
+      // 提取不到 = pi 改了路径派生形态 → 本检查失效，须复核 pi-paths.ts 锚点
       const uniqueFirsts = new Set(hits.map(([first]) => first))
       for (const core of ['models.json', 'settings.json', 'auth.json']) {
-        expect(uniqueFirsts, `提取空集守卫失败：${core} 未命中（pi 路径派生改形，复核锚点）`).toContain(core)
+        expect(uniqueFirsts, `提取空集检查失败：${core} 未命中（pi 路径派生改形，复核锚点）`).toContain(core)
       }
 
       const configHits = hits.filter(([first]) => first === 'config')
@@ -127,7 +127,7 @@ describe.skipIf(!PI_DIST)(
       const dist = PI_DIST as string
       const migrations = readFileSync(join(dist, 'migrations.js'), 'utf-8')
       const idx = migrations.indexOf('readdirSync(agentDir')
-      // 条件守卫：pi 未来删除 migrateSessionsFromAgentRoot（顶层 .jsonl 一次性迁移代码）
+      // 条件检查：pi 未来删除 migrateSessionsFromAgentRoot（顶层 .jsonl 一次性迁移代码）
       // 不算漂移；保留时必须伴随顶层 .jsonl filter（0.84.1 形态：filter((f) => f.endsWith(".jsonl"))）
       if (idx === -1) return
       const window = migrations.slice(idx, idx + 300)

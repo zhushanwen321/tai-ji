@@ -9,7 +9,7 @@
  * 模块级表 → notify 模块级 currentPi）不含任何实例级 bus/pi 引用。通知可达性由
  * notify.ts 的 D17 pi 引用刷新承担（新实例 load 时 refreshPiReference 指向新 pi）。
  *
- * 幂等：exit 事件与 bash_kill / timeout 收尾并发时，finalizeTask 的终态守卫
+ * 幂等：exit 事件与 bash_kill / timeout 收尾并发时，finalizeTask 的终态检查
  * （isTerminalState）保证单一终态归属，先到者写、后到者 no-op。
  *
  * 已知竞态（设计文档 §3.5 原样登记，不修）：同进程 session 替换 dispose → 新实例

@@ -105,7 +105,7 @@ export function useBrowserZoom(sessionIdRef: Ref<string>): {
   }
 
   // sessionId 变化时从主进程读回该 session 的 zoom（view keep-alive 保留状态）。
-  // RD-5#5：seq 守卫 + catch——watch 回调是 async，快速切 session 时多个 browserGetZoom
+  // RD-5#5：seq 检查 + catch——watch 回调是 async，快速切 session 时多个 browserGetZoom
   // 在途，晚到的旧 sid 响应会把陈旧 zoom 写进当前 session 的 ref（竞态写错值）；await 无
   // catch 时 IPC 失败还会裸 reject（watch 回调的 rejection 无接收方）。形态对齐
   // useFileTree.expandNode 的在途 stale 丢弃（AC-3.7）。

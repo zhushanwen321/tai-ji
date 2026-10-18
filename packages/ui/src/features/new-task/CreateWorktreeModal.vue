@@ -18,7 +18,7 @@ import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Loader2, Check, AlertTriangle, ChevronDown, ChevronRight, GitBranch, Folder, FolderOpen } from '@lucide/vue'
 // ui 原语走包内相对导入（不经 @taiji/ui 顶层 barrel）：new-task 组件经顶层 barrel
-// 再导出，顶层 barrel 自引用会闭合循环依赖环（R2 S-1）
+// 再导出，顶层 barrel 自引用会封住循环依赖环（R2 S-1）
 import { Button } from '../../primitives/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '../../primitives/dialog'
 import { Input } from '../../primitives/input'

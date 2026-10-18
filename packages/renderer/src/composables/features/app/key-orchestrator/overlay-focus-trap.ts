@@ -1,5 +1,5 @@
 /**
- * 浮层 Tab 焦点陷阱（display-containers §7.3/§7.5「Tab 焦点陷阱与 IME 守卫随迁编排器浮层
+ * 浮层 Tab 焦点陷阱（display-containers §7.3/§7.5「Tab 焦点陷阱与 IME 检查随迁编排器浮层
  * 分支整体保位」）。
  *
  * 实现自 WorkflowVizOverlay.onWindowKeydown/trapTab 原样迁入（a11y 不回退）：焦点在浮层

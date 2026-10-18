@@ -7,7 +7,7 @@ import { normalizeSkillName, resolveSkills } from "../resolve-skills.js";
 /**
  * fake skill 命令条目（SlashCommandInfo 形态：source === 'skill' + sourceInfo.path）。
  * name 带 pi 命名空间前缀（`skill:<name>`）——真实 pi.getCommands() 枚举 skill 类
- * 命令即此形态，归一化比对的靶子。
+ * 命令即此形态，归一化比对的检查目标。
  */
 const SKILL_COMMANDS = [
   { name: "skill:tech-design", source: "skill", sourceInfo: { path: "/skills/tech-design/SKILL.md" } },
@@ -36,7 +36,7 @@ describe("normalizeSkillName（skill: 命名空间前缀剥离）", () => {
 
 describe("resolveSkills（执行门禁：pi 注册表枚举比对，双向剥 skill: 前缀归一）", () => {
   it("resolves prefixed enum entries from bare-name input (short name in resolved)", () => {
-    // 无前缀输入命中带前缀枚举（输入面：用户用自然技能名）
+    // 无前缀输入命中带前缀枚举（输入范围：用户用自然技能名）
     const resolution = resolveSkills(makePi(), ["tech-design", "code review"]);
     expect(resolution.ok).toBe(true);
     if (resolution.ok) {

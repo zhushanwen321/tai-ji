@@ -4,7 +4,7 @@
  * 来源设计：docs/design/import-session.md（已删除，git 可追溯）§3.3 D5（RPC 契约）+ §3.1 终态交互样例。
  *
  * 职责边界：纯状态编排（来源选择 + query debounce 拉候选 / 目录过滤 / 选中 /
- * 执行导入 /「选择其他目录」切扫描根重拉），不含 DOM 与 i18n 文案映射（错误码 →
+ * 执行导入 /「选择其他目录」切扫描根重新拉取），不含 DOM 与 i18n 文案映射（错误码 →
  * 恢复指引文案在组件层，按 source 分支取 zcode 特化文案）。无 per-session 状态
  * （ADR-0049 不适用：对话框是全局单例 UI，非 session 隔离域）。
  *
@@ -14,7 +14,7 @@
  *    SessionItem 消费——与 useSessionMarkers.isUnread 同款模块级状态范式，避免
  *    Sidebar → SessionList → SessionItem 逐层透传 prop）
  *
- * 竞态防护：快速连续输入时 debounce 触发的并发请求用递增 seq 守卫——仅最新
+ * 竞态防护：快速连续输入时 debounce 触发的并发请求用递增 seq 检查——仅最新
  * 一次请求允许写回 items/dirs/total，stale 响应静默丢弃（避免旧结果覆盖新结果）。
  */
 import { computed, ref, shallowRef, watch } from 'vue'
@@ -203,12 +203,12 @@ export function useImportSession(options: UseImportSessionOptions = {}) {
     return items.value.filter((item) => item.dirLabel === selectedDir.value)
   })
 
-  /** 路径模式判定：query 以 '/' 或 '~' 开头（D5 S7 renderer 侧切换；runtime 无分支）。纯 query 派生，数据面登记归 #22 */
+  /** 路径模式判定：query 以 '/' 或 '~' 开头（D5 S7 renderer 侧切换；runtime 无分支）。纯 query 派生，数据范围登记归 #22 */
   const isPathMode = computed<boolean>(() => /^[~/]/.test(query.value.trim()))
 
   /**
    * 路径模式命中条目：候选中 sourcePath includes query 的首条（items 已按
-   * lastModified 降序；isPathMode/pathHit 均纯派生投影，数据面登记归 #22）。
+   * lastModified 降序；isPathMode/pathHit 均纯派生视图，数据范围登记归 #22）。
    * runtime 的 includes 匹配天然覆盖路径输入，此处只在
    * renderer 侧收敛到「路径行」单一命中语义（demo 方案 A path-bar）。
    */
@@ -243,7 +243,7 @@ export function useImportSession(options: UseImportSessionOptions = {}) {
     open.value = false
     // [G4 / 2026-09-14 内存审计] 关闭即清扫描结果：items/dirs/total 是候选全量快照（可达数百条
     // path/name 对象），对话框为全局单例 UI（无 session 生命周期兜底），不清则驻留到下次打开。
-    // requestSeq++ 使在途迟到的候选响应失效（stale 写回守卫——否则清了又被打回填）；
+    // requestSeq++ 使在途迟到的候选响应失效（stale 写回检查——否则清了又被打回填）；
     // pending debounce 一并取消（组件侧 watch(open) 注释承诺的「取消 pending debounce」在此落实）。
     requestSeq++
     cancelPendingFetch()
@@ -299,7 +299,7 @@ export function useImportSession(options: UseImportSessionOptions = {}) {
     }, IMPORT_SEARCH_DEBOUNCE_MS)
   }
 
-  /** 取消 pending debounce（关闭对话框时；in-flight RPC 结果由 seq 守卫丢弃） */
+  /** 取消 pending debounce（关闭对话框时；in-flight RPC 结果由 seq 检查丢弃） */
   function cancelPendingFetch(): void {
     if (debounceTimer != null) {
       clearTimeout(debounceTimer)
@@ -345,10 +345,10 @@ export function useImportSession(options: UseImportSessionOptions = {}) {
   /**
    * 选定导入来源（对话框阶段一 → 阶段二的入口动作）。
    * 切源：清源相关状态（选中/目录筛选/扫描根/错误态/候选快照——两源候选域不同，
-   * 旧数据对新源无意义；rootDir 是 pi 概念，zcode 换根 out-of-scope）并重拉。
+   * 旧数据对新源无意义；rootDir 是 pi 概念，zcode 换根 out-of-scope）并重新拉取。
    * 同源重进：候选保留（避免往返闪烁），仅清选中与错误态；上次结果为空（含加载
-   * 失败——catch 路径已清空 items）时补拉，覆盖「重进失败列表 = 直接重试」与
-   * 「resetForOpen 不首拉后直接点缺省源」两个首次拉取场景。
+   * 失败——catch 路径已清空 items）时补充拉取，覆盖「重进失败列表 = 直接重试」与
+   * 「resetForOpen 不首次拉取后直接点缺省源」两个首次拉取场景。
    */
   function selectSource(kind: ImportSourceKind): void {
     const switched = kind !== source.value
@@ -369,8 +369,8 @@ export function useImportSession(options: UseImportSessionOptions = {}) {
 
   /**
    * 「选择其他目录」（V8）：OS 原生目录选择器 → 选中则切换扫描根并带新 rootDir
-   * 重拉候选（D5：打开/搜索/切目录都走 importCandidates）；取消（canceled 或无
-   * path）无任何操作。切根后目录过滤/选中/错误态回到初始（新根的 dirs 全新，
+   * 重新拉取候选（D5：打开/搜索/切目录都走 importCandidates）；取消（canceled 或无
+ * path）无任何操作。切根后目录过滤/选中/错误态回到初始（新根的 dirs 全新，
    * 旧 selectedDir 在其中无意义）；搜索词保留——跨根找同一目标的 V9 场景依赖。
    */
   async function chooseRootDir(): Promise<void> {

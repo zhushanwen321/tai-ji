@@ -25,7 +25,7 @@ export interface SkillRef { // oe-exempt:20261001:framework:exec-skills 共享�
 /**
  * 技能名归一：剥掉 pi 命令命名空间前导 `skill:` 前缀，得到自然技能名。
  * pi.getCommands() 枚举 skill 类命令时 name 带 `skill:` 前缀（如 `skill:tech-design`），
- * 这是 pi 的实现细节，不得泄漏到输入面——slash `--skills` 与消费方工具的 skills 参数
+ * 这是 pi 的实现细节，不得泄漏到输入范围——slash `--skills` 与消费方工具的 skills 参数
  * 都用自然技能名。枚举侧与输入侧双向剥前缀后比对，兼容两种形态。
  */
 export function normalizeSkillName(name: string): string {
@@ -41,7 +41,7 @@ export function normalizeSkillName(name: string): string {
  * available + 空 missing——available 正是调用方报错文案的恢复动作输入（错误 →
  * 可用清单 → 重试闭环），missing 空让报错器走「没有给技能名」分支。自 plan 包
  * enter.ts 迁入（plan-mode-audit-remediation 批次 4②b）：该分支是 slash 空
- * `--skills` 报错复用单源的活契约，非死防御；既有调用方先判非空才调的，行为不受影响。
+ * `--skills` 报错复用单源的活契约，非永不命中的防御机制；既有调用方先判非空才调的，行为不受影响。
  */
 export function resolveSkills(pi: ExtensionAPI, requested: string[]): SkillResolution {
   const skillCommands = pi.getCommands().filter((c) => c.source === "skill");

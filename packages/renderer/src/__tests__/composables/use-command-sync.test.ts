@@ -1,5 +1,5 @@
 /**
- * useCommandSync 单测 —— slash 命令补拉闭环。
+ * useCommandSync 单测 —— slash 命令补充拉取闭环。
  *
  * 覆盖（三视角）：
  * 1. 构建者（白盒）：watch(sessionIdRef, immediate) 拉取 → commandStore.applyCommands(reply.sessionId, reply.commands)
@@ -62,7 +62,7 @@ interface HostHandle {
 
 /**
  * 测试宿主组件：在 setup 内调 useCommandSync（useSessionEvents 的 getCurrentInstance
- * 守卫要求组件 setup 上下文）。
+ * 检查要求组件 setup 上下文）。
  */
 function mountHost(initialSid: string | null): HostHandle {
   const sidRef = ref<string | null>(initialSid)
@@ -154,7 +154,7 @@ describe('挂载/sid 变化触发拉取', () => {
     // 切到 B
     host.sidRef.value = 'B'
     await settle()
-    expect(getCommandsMock).toHaveBeenCalledTimes(2) // A 首拉 + B 首拉
+    expect(getCommandsMock).toHaveBeenCalledTimes(2) // A 首次拉取 + B 首次拉取
 
     resolveForSid('B', {
       sessionId: 'B',

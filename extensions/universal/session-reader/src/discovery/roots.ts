@@ -120,7 +120,7 @@ const SKIP_DIRS_NONE = new Set<string>()
 
 // ============================================================
 // 扫描 options（u8 追加：doctor「同一数据源两处渲染，不重复实现探测」§6.3——
-// doctor 经 options 驱动 subagent 根不扫。原 u8 的进程内缓存注入面已删除
+// doctor 经 options 驱动 subagent 根不扫。原 u8 的进程内缓存注入点已删除
 // （ext-simplify-04 U3）：每次调用实扫，本模块不再持有任何缓存语义）
 // ============================================================
 
@@ -143,7 +143,7 @@ export interface SessionRootScanOptions {
  * （不存在/无权限）→ 空结果继续，不抛错（沿用 listXxxSessions 契约）。
  *
  * options（u8 追加，全部缺省安全）：`subagents:'stat'` 让 subagent 根只做存在性检查。
- * 无缓存——每次调用实扫（原 u8 cache 注入面已删除，ext-simplify-04 U3；find/F1
+ * 无缓存——每次调用实扫（原 u8 cache 注入点已删除，ext-simplify-04 U3；find/F1
  * 自检行计数与 doctor 表计数同取本次实扫，§7B 要点 8）。
  */
 export async function resolveSessionRoots(
@@ -194,7 +194,7 @@ export interface SessionFileMeta {
 /**
  * main sessions 扫描时整体跳过的子目录名。
  * `workflow-state` 目录存放 workflow 运行状态文件（wf-*.jsonl，首行 `{"v":"wf-run-v1"|"wf-run-v2"...}`，
- * 版本随 subagent-workflow 快照格式演进，读取侧 v1/v2 兼容），非 session 文件——属 family 腿
+ * 版本随 subagent-workflow 快照格式演进，读取侧 v1/v2 兼容），非 session 文件——属 family 路径
  * 独立处理（design §3.3 D-7），扫描 main sessions 时排除，
  * 否则会把 wf 文件误收为 session（且 find.ts 读其首行 header 时会因 type≠session 被丢弃，
  * 在此排除可避免这批无效首行扫描）。

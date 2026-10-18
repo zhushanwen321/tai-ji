@@ -94,7 +94,7 @@ describe('WorktreePage RD-4#8 加载失败（有意行为修正：一次性 toas
     expect(toasts.value.some((toast) => toast.type === 'error')).toBe(false)
   })
 
-  it('retry → getter 重拉成功 → loadError 消失 + 控件恢复可用 + 显示加载值', async () => {
+  it('retry → getter 重新拉取成功 → loadError 消失 + 控件恢复可用 + 显示加载值', async () => {
     await mountWithLoadError()
 
     await $('[data-testid="worktree-load-retry"]').trigger('click')

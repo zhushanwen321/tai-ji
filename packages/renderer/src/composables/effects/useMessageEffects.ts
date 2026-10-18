@@ -45,9 +45,9 @@ const t = i18n.global.t
 // bus.clearSession 清掉 renderer 订阅；自动恢复成功 publish session.restored 时 bus entry
 // 内零订阅者（live 不达）。修法 = exited（非强制）时经 factory.openRestoreWindow 立即重发
 // subscribe 建立恢复窗口订阅——恢复路径（自动/手动）restored publish 前无清场，renderer
-// 是恢复后新 bus entry 的订阅者 → restored live 送达，本回调链自收口。runtime 重启后
+// 是恢复后新 bus entry 的订阅者 → restored live 送达，本回调链自收尾。runtime 重启后
 // 编排器状态全内存即清、无 restored 帧——该场景由 revive-on-RPC-reply（useSidebar
-// .restoreSession / useSessionRespawnRetry，D3 保留件）收口，30s TTL 兜底过渡态回收。
+// .restoreSession / useSessionRespawnRetry，D3 保留件）收尾，30s TTL 兜底过渡态回收。
 
 /** 恢复超时（无 restored/restoreFailed 到达即放弃等待，切回终态 dead 页）。30s：respawn
  *  实测 6s 级（5s 延迟 + spawn/attach），熔断最迟 ~10s 出结果，30s 覆盖两次重试仍有裕量。 */
@@ -129,7 +129,7 @@ function handleSessionExited(sessionId: string, payload: { code: number | null; 
       sessionId,
       setTimeout(() => {
         respawnTimeoutTimers.delete(sessionId)
-        // restored/熔断已收口则分区已清 → no-op；仍 pending = 恢复无响应（如 runtime 重启
+        // restored/熔断已收尾则分区已清 → no-op；仍 pending = 恢复无响应（如 runtime 重启
         // 丢恢复承诺），超时切回终态 dead 页（保留「重新打开」出口）
         if (!chatStore.isRespawnPending(sessionId)) return
         chatStore.clearRespawnPending(sessionId)
@@ -145,7 +145,7 @@ function handleSessionExited(sessionId: string, payload: { code: number | null; 
 /**
  * [u8] 处理 session.restored（pi 崩溃自动恢复成功，D7 / T4）。
  *
- * 壳扩展④回收：清 30s 超时 timer + 收口过渡态（respawnPending 清除 → panel 派生回
+ * 壳扩展④回收：清 30s 超时 timer + 收尾过渡态（respawnPending 清除 → panel 派生回
  * conversation，T4 提示条在对话流内呈现）。core 序列（revive + 恢复提示条 restored 形态
  * + 重订阅）归 factory.onSessionRestored：帧经恢复窗口订阅 live 到达（WS 重连场景由
  * resubscribeAll 的 ring 回放兜底，同一本回调）；重订阅幂等（subscribed=true 短路），
@@ -199,7 +199,7 @@ function handleSessionError(sessionId: string, payload: { code?: string; message
 /**
  * 处理 message.complete 事件（session 生成完成）。
  * 算 focusedSid（当前面板聚焦的 session）→ 交给 handleCompletion 链
- * （aborted 过滤 → [retry-sound] willRetry 中间失败静音 → background work 守卫 → 后台判定 →
+ * （aborted 过滤 → [retry-sound] willRetry 中间失败静音 → background work 检查 → 后台判定 →
  * 未读标记 → 提示音）。
  */
 function handleMessageComplete(

@@ -8,7 +8,7 @@
 // '../src/index.js'（fixture 位于 tests/ 根下，相对路径与消费方一致），再调 mod.default(mockPi)。
 // restoreSchemaEnv(original)：只处理 env——消费方 afterEach 必须保留自己的 vi.restoreAllMocks()。
 //
-// U2（D3 闸门）增量：emit 第二参数恒传 handlerCtx（含 shutdown spy）；appendEntry
+// U2（D3 门禁）增量：emit 第二参数恒传 handlerCtx（含 shutdown spy）；appendEntry
 // 提升到 partial 供断言；failedToolEndWith / paramLayerErrorText 构造失败事件原料。
 // 向后兼容——既有消费方（workflow-hook 两测试）不受影响。
 
@@ -23,10 +23,10 @@ export function createMockPi() {
   // {customType, content, display}，options = {deliverAs, triggerTurn}）。
   const sendMessage = vi.fn();
   const appendEntry = vi.fn();
-  // U2（D3 闸门）：事件 handler 的第二参数 ctx（ExtensionContext）。
+  // U2（D3 门禁）：事件 handler 的第二参数 ctx（ExtensionContext）。
   // pi 真实形态：shutdown/abort 存在于 ctx（ExtensionContextActions），不在 pi 顶层
-  // API——闸门 terminal 时经 ctx.abort()（停当前 turn）+ ctx.shutdown()（请求优雅
-  // 退出）终止子进程。mock 只补齐闸门消费的成员。
+  // API——门禁 terminal 时经 ctx.abort()（停当前 turn）+ ctx.shutdown()（请求优雅
+  // 退出）终止子进程。mock 只补齐门禁消费的成员。
   const shutdown = vi.fn();
   const abort = vi.fn();
   const handlerCtx = { shutdown, abort };
@@ -41,7 +41,7 @@ export function createMockPi() {
   return {
     sendMessage,
     appendEntry,
-    /** 断言入口：ctx.shutdown 的 spy（闸门 terminal 行为断言用）。 */
+    /** 断言入口：ctx.shutdown 的 spy（门禁 terminal 行为断言用）。 */
     ctx: handlerCtx,
     registerTool: vi.fn(),
     on,
@@ -137,7 +137,7 @@ export const SUCCESS_TOOL_END = {
 export const turnEndPayload = (stopReason = "stop") => ({ message: { stopReason } });
 
 /**
- * U2（D3 闸门）增量：按错误文本构造 structured-output 失败事件——
+ * U2（D3 门禁）增量：按错误文本构造 structured-output 失败事件——
  * 同/异签名、参数层回显形态（"Received arguments:" 起的实参块）的测试原料。
  */
 export function failedToolEndWith(errorText: string, toolName = "structured-output") {

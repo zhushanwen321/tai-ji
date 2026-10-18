@@ -4,7 +4,7 @@
  * A41 per-session trace store 单测（trace-ui，ADR-0049 useSessionScopedState 分区）。
  *
  * 覆盖：加载/增量/过滤/选中 per-session 分区隔离，切 session 不串；
- * 增量腿 entry.id 去重追加 + empty（未落盘）→ 增量触发全量重拉；
+ * 增量路径 entry.id 去重追加 + empty（未落盘）→ 增量触发全量重新拉取；
  * loading 窗口推送缓冲 flush（竞态：推送先于回包到达不丢行）；
  * cleanup 退订 events handler（防 per 删除 session 监听泄漏）；
  * payload → rows 派生（mergeTraceLines 归并 + core mapSessionTraceRows）。
@@ -70,7 +70,7 @@ describe('A41 per-session trace store（ADR-0049 useSessionScopedState 分区）
     focusSession(null)
   })
 
-  it('加载按 session 分区：各 session 各自数据，切走再切回不重拉不丢失', async () => {
+  it('加载按 session 分区：各 session 各自数据，切走再切回不重新拉取不丢失', async () => {
     const entriesA = [{ type: 'message', id: 'e1', parentId: null, message: { role: 'user', content: 'A 的消息' } }]
     const entriesB = [{ type: 'message', id: 'f1', parentId: null, message: { role: 'user', content: 'B 的消息' } }]
     apiMock.getTraceEntries.mockImplementation(async (sid: string) =>
@@ -87,7 +87,7 @@ describe('A41 per-session trace store（ADR-0049 useSessionScopedState 分区）
     await vi.waitFor(() => expect(partitionOf(SID_B).status).toBe('ready'))
     expect(apiMock.getTraceEntries).toHaveBeenCalledTimes(2)
 
-    // 切回 A：数据保留 + 不重拉（幂等：ready 态 ensureTraceLoaded no-op）
+    // 切回 A：数据保留 + 不重新拉取（幂等：ready 态 ensureTraceLoaded no-op）
     focusSession(SID_A)
     traceStore.ensureTraceLoaded(SID_A)
     await Promise.resolve()
@@ -96,7 +96,7 @@ describe('A41 per-session trace store（ADR-0049 useSessionScopedState 分区）
     expect((partitionOf(SID_A).entries[0] as { id?: string }).id).toBe('e1')
   })
 
-  it('增量腿：traceEntryAppended 按消息所属 session 写分区（去重追加 + leafId 滚动），不串其他 session', async () => {
+  it('增量路径：traceEntryAppended 按消息所属 session 写分区（去重追加 + leafId 滚动），不串其他 session', async () => {
     const u1 = { type: 'message', id: 'e1', parentId: null, message: { role: 'user', content: 'q1' } }
     apiMock.getTraceEntries.mockResolvedValue(snapshotOf(SID_A, [u1]))
     focusSession(SID_A)
@@ -152,11 +152,11 @@ describe('A41 per-session trace store（ADR-0049 useSessionScopedState 分区）
     expect(partitionOf(SID_A).selectedKey).toBeNull()
   })
 
-  it('empty（未落盘）→ 收到增量自动全量重拉（「落盘后自动加载」）', async () => {
+  it('empty（未落盘）→ 收到增量自动全量重新拉取（「落盘后自动加载」）', async () => {
     let call = 0
     apiMock.getTraceEntries.mockImplementation(async () => {
       call++
-      // 首次 empty（延迟写入窗口），重拉返回真实数据
+      // 首次 empty（延迟写入窗口），重新拉取返回真实数据
       return call === 1
         ? snapshotOf(SID_A, [], { source: 'empty' })
         : snapshotOf(SID_A, [{ type: 'message', id: 'e1', parentId: null, message: { role: 'user', content: 'q' } }])
@@ -199,7 +199,7 @@ describe('A41 per-session trace store（ADR-0049 useSessionScopedState 分区）
     traceStore.ensureTraceLoaded(SID_A)
     await vi.waitFor(() => expect(partitionOf(SID_A).status).toBe('loading'))
 
-    // 窗口内推送：e1 快照里已有（flush 时去重）+ e2 是快照后新 entry（不得丢，否则台账永久缺行）
+    // 窗口内推送：e1 快照里已有（flush 时去重）+ e2 是快照后新 entry（不得丢，否则登记清单永久缺行）
     const a1 = { type: 'message', id: 'e2', parentId: 'e1', message: { role: 'assistant', content: [] } }
     pushAppend(SID_A, [u1, a1], 'e2')
 
@@ -253,7 +253,7 @@ describe('A41 per-session trace store（ADR-0049 useSessionScopedState 分区）
 
   it('文件尾坏行：直读快照 → rows 尾部 MALFORMED 占位可见，后续增量追加不吞占位（GUI 回归 pin）', () => {
     // GUI 实测形态（dsh调研 session）：文件尾部注入坏行后，直读路径快照 malformed 带
-    // 尾部行号；后续增量腿（如现取 DATA taiji:current-system-prompt）往 entries 尾部追加
+    // 尾部行号；后续增量路径（如现取 DATA taiji:current-system-prompt）往 entries 尾部追加
     // 新 entry。两者交互下 MALFORMED 占位必须仍可见且位于追加行之前（坏行行号锚点归并）。
     const header = { type: 'session', version: 1, id: 'h0', cwd: '/w' }
     const fileEntries = [
@@ -276,7 +276,7 @@ describe('A41 per-session trace store（ADR-0049 useSessionScopedState 分区）
   })
 })
 
-describe('B11 台账治理（内存泄漏审计中危#9：seenIds 增量去重 + 5000 软上限 + truncated 正交字段）', () => {
+describe('B11 登记清单治理（内存泄漏审计中危#9：seenIds 增量去重 + 5000 软上限 + truncated 正交字段）', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     apiMock.getTraceEntries.mockReset()
@@ -291,7 +291,7 @@ describe('B11 台账治理（内存泄漏审计中危#9：seenIds 增量去重 +
     return { type: 'message', id, parentId, message: { role: 'user', content: `q-${id}` } }
   }
 
-  /** 强制拉取到 ready（retryTraceLoad 无条件重拉——ensureTraceLoaded 对 ready 分区 no-op）。 */
+  /** 强制拉取到 ready（retryTraceLoad 无条件重新拉取——ensureTraceLoaded 对 ready 分区 no-op）。 */
   async function loadReady(sid: string, entries: unknown[], extra: Partial<ServerMessageMap['session.traceEntries']> = {}): Promise<void> {
     apiMock.getTraceEntries.mockResolvedValue(snapshotOf(sid, entries, extra))
     focusSession(sid)
@@ -299,7 +299,7 @@ describe('B11 台账治理（内存泄漏审计中危#9：seenIds 增量去重 +
     await vi.waitFor(() => expect(partitionOf(sid).status).toBe('ready'))
   }
 
-  it('增量去重等价性：seenIds 增量维护下重复 id 不追加（快照内/历史增量/重拉后均一致）', async () => {
+  it('增量去重等价性：seenIds 增量维护下重复 id 不追加（快照内/历史增量/重新拉取后均一致）', async () => {
     await loadReady(SID_A, [chainEntry('e1', null)])
 
     // 与快照重叠的 id + 新 id 混合推送：重叠丢弃、新增追加（与旧全量重建语义等价）
@@ -315,7 +315,7 @@ describe('B11 台账治理（内存泄漏审计中危#9：seenIds 增量去重 +
     pushAppend(SID_A, [noId], 'e2')
     expect(partitionOf(SID_A).entries).toHaveLength(3)
 
-    // 重拉（error→retry 或手动刷新路径）：快照替换后 seen 集随新快照重建，重复 id 仍不追加
+    // 重新拉取（error→retry 或手动刷新路径）：快照替换后 seen 集随新快照重建，重复 id 仍不追加
     await loadReady(SID_A, [chainEntry('e1', null), chainEntry('e9', 'e1')], { leafId: 'e9' })
     expect(partitionOf(SID_A).entries).toHaveLength(2)
     pushAppend(SID_A, [chainEntry('e9', 'e1')], 'e9')
@@ -336,7 +336,7 @@ describe('B11 台账治理（内存泄漏审计中危#9：seenIds 增量去重 +
     pushAppend(SID_A, [chainEntry('e4999', 'e4998')], 'e4999')
     expect(partitionOf(SID_A).truncated).toBe(false)
 
-    // 第 5001 条：停止追加 + truncated 置位；leafId 仍滚动（单字符串非内存面，保 core 边界计算输入最新）
+    // 第 5001 条：停止追加 + truncated 置位；leafId 仍滚动（单字符串不占内存，保 core 边界计算输入最新）
     pushAppend(SID_A, [chainEntry('e5000', 'e4999')], 'e5000')
     expect(partitionOf(SID_A).entries).toHaveLength(5000)
     expect(partitionOf(SID_A).truncated).toBe(true)
@@ -355,20 +355,20 @@ describe('B11 台账治理（内存泄漏审计中危#9：seenIds 增量去重 +
     expect((partitionOf(SID_A).entries.at(-1) as { id?: string }).id).toBe('e5002')
     expect(partitionOf(SID_A).leafId).toBe('e5002')
 
-    // 截断后的增量：直接停采（新 id 不可进入，台账恒有界）
+    // 截断后的增量：直接停采（新 id 不可进入，登记清单恒有界）
     pushAppend(SID_A, [chainEntry('e5003', 'e5002')], 'e5003')
     expect(partitionOf(SID_A).entries).toHaveLength(5000)
     expect(partitionOf(SID_A).truncated).toBe(true)
   })
 
-  it('重拉小快照后 truncated 复位：全量快照是权威状态，截断标记随新快照重置', async () => {
+  it('重新拉取小快照后 truncated 复位：全量快照是权威状态，截断标记随新快照重置', async () => {
     await loadReady(SID_A, Array.from({ length: 5001 }, (_, i) => chainEntry(`e${i}`, i === 0 ? null : `e${i - 1}`)), { leafId: 'e5000' })
     expect(partitionOf(SID_A).truncated).toBe(true)
 
     await loadReady(SID_A, [chainEntry('n1', null)], { leafId: 'n1' })
     expect(partitionOf(SID_A).truncated).toBe(false)
     expect(partitionOf(SID_A).entries).toHaveLength(1)
-    // seen 集已随新快照重建：旧 id 不再被认成重复（新台账独立）
+    // seen 集已随新快照重建：旧 id 不再被认成重复（新登记清单独立）
     pushAppend(SID_A, [chainEntry('e0', null)], 'e0')
     expect(partitionOf(SID_A).entries).toHaveLength(2)
   })

@@ -29,8 +29,8 @@ const { loggerMock } = vi.hoisted(() => ({
     error: vi.fn(),
   },
 }));
-// W7 迁移：stdin-writer 的日志面改 SDK logger facade——mock SDK barrel 的
-// getLogger（其余成员 importOriginal 透传），保持 warn 断言面不变。
+// W7 迁移：stdin-writer 的日志侧改 SDK logger facade——mock SDK barrel 的
+// getLogger（其余成员 importOriginal 透传），保持 warn 断言范围不变。
 vi.mock("@zhushanwen/subagent-engine-sdk", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@zhushanwen/subagent-engine-sdk")>();
   return {
@@ -214,7 +214,7 @@ describe("respond — JSON.stringify 失败降级为 cancelled (#16)", () => {
 });
 
 // ============================================================
-// respond：signal.aborted 守卫
+// respond：signal.aborted 检查
 // ============================================================
 
 describe("respond — signal 已 aborted 跳过写入", () => {

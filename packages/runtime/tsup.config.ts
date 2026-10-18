@@ -34,11 +34,11 @@ export default defineConfig({
   // ══════════════════════════════════════════════════════════════
   // @taiji/shared：workspace 包（纯 TS 类型 + 工具函数），必须打包进 bundle，
   // 否则打包后 require('@taiji/shared') 找不到（runtime 子进程无 node_modules）
-  // @zhushanwen/subagent-core：双端复用的语义面——barrel 的运行时无状态导出
+  // @zhushanwen/subagent-core：双端复用的语义导出——barrel 的运行时无状态导出
   // （startupSweep / model gateway 常量与摘要 / model ref 解析 / record 自定义类型 /
   // session 记录读取）经条件 require 解析到该包 dist CJS（core dist 未 build 时打包
   // 失败属预期，build 前置）+ engine/engine-discovery-scan 语义子入口（纯常量+纯函数，
-  // 设计 §3.3.1 例外条款）。禁止扩大消费面到 launcher/preparer/parser/EnginePort
+  // 设计 §3.3.1 例外条款）。禁止扩大消费方到 launcher/preparer/parser/EnginePort
   // （依赖方向纪律）。
   // @earendil-works/pi-ai：能力注册表（pi-boundary-reliability U5）pi 同源档位计算——
   // 「根声明、runtime 不可 import」格局的首次反转，声明见 services/model-capability.ts 头注；
@@ -50,9 +50,9 @@ export default defineConfig({
   // taiji-plugin-sdk：插件契约 SSOT（D28 方向反转）——runtime 的 plugin-types
   // 薄壳 re-export 其类型与 PermissionConstants 常量值。纯 TS 源码包（main 直指
   // src/index.ts，零 dependencies），esbuild 直接编译，同 pi-file-lock 先例
-  // @zhushanwen/subagent-engine-sdk [W11/A5]：runtime 经 subagent-core 协议面传递消费
+  // @zhushanwen/subagent-engine-sdk [W11/A5]：runtime 经 subagent-core 协议范围传递消费
   // SDK 原语（buildEngineChildEnv / spawnEngineChild 等），workspace TS 源码包无 dist
-  // 解析面，必须内联进 bundle（否则打包态 Cannot find module）
+  // 解析范围，必须内联进 bundle（否则打包态 Cannot find module）
   // @zhushanwen/pi-rpc [U1 subagent-permanent-session-model]：pi 进程 RPC 公共层
   // （argv 构造 / LF-only 分帧 / pending 表 / 命令帧组装 / 杀链 / 出站 env 组装），
   // rpc-client 薄壳消费——同 pi-file-lock 形态（exports 直指 src 的纯 TS 源码包，
@@ -92,7 +92,7 @@ export default defineConfig({
       throw new Error(`Runtime bundle too small (${sizeKB}KB), likely missing dependencies`)
     }
 
-    // esbuild 前缀剥离守卫（P5，2026-08-25）：CJS 输出会把字面量 import("node:sqlite")
+    // esbuild 前缀剥离开关（P5，2026-08-25）：CJS 输出会把字面量 import("node:sqlite")
     // 规约成裸名 import("sqlite")——Node 动态 import 裸名不走内置 fallback，zcode
     // reader①级在打包环境恒降级。reader 已改变量间接规避；此处拦截 esbuild 升级后
     // 输出形态变化导致的静默回归

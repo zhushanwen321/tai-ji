@@ -29,16 +29,16 @@ export interface ZcodeAnchor {
  * `subagent-record` custom entry 的 customType 值。
  *
  * 磁盘 JSONL 协议字符串（跨侧契约）：写侧单源 = subagent-core record-entry.ts 的
- * SUBAGENT_RECORD_CUSTOM_TYPE。reader 生产依赖面不引 subagent-core（该包是
+ * SUBAGENT_RECORD_CUSTOM_TYPE。reader 生产依赖范围不引 subagent-core（该包是
  * devDependency + vitest alias 形态），故按协议字符串本地持有；两侧漂移由
- * entry-anchor.test.ts 的跨包断言守卫。
+ * entry-anchor.test.ts 的跨包断言检查。
  */
 const SUBAGENT_RECORD_CUSTOM_TYPE = 'subagent-record'
 
 /**
  * v2 条目 data 的认识版本词表（W1 起 = 2）。与写侧 subagent-core
- * SUBAGENT_RECORD_ENTRY_VERSION 同值、同「本地持有 + 测试守卫漂移」模式——写侧
- * 再升 v3 时本守卫先红，提醒评估新版本的锚读取面。
+ * SUBAGENT_RECORD_ENTRY_VERSION 同值、同「本地持有 + 测试检查漂移」模式——写侧
+ * 再升 v3 时本检查先红，提醒评估新版本的锚读取范围。
  */
 const SUBAGENT_RECORD_ENTRY_V2 = 2
 
@@ -46,7 +46,7 @@ const SUBAGENT_RECORD_ENTRY_V2 = 2
  * 从单条 entry 提取 zcode 锚。形状校验窄而严，任一不满足 = 该条不算命中（返回
  * undefined，调用方继续扫——缺键条目不遮蔽更早的完整条目）：
  * - `type === 'custom'` ∧ `customType === 'subagent-record'`
- * - 版本/判别键（schema 版本守卫，不认识的版本跳过而非猜测——写侧
+ * - 版本/判别键（schema 版本检查，不认识的版本跳过而非猜测——写侧
  *   record-entry.ts classifySubagentRecordEntryData v2-only 同口径）：
  *   `data.v === 2` ∧ `data.kind === 'settled'`（W1 注册/终态两条小条目——
  *   **锚只取自终态条**：registered 条目不携带 engineHandle，且设计 D1 裁决

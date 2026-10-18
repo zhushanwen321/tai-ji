@@ -165,7 +165,7 @@ describe('ExtensionService', () => {
 
       const extensions = await service.scanExtensions()
       // 无条件断言条目存在：扫描回归致 pi-ask-user 条目消失时必须红，
-      // 不能让断言包在 if 守卫内静默绿
+      // 不能让断言包在 if 检查内静默绿
       const askUser = extensions.find(e => e.name === 'pi-ask-user')
       expect(askUser).toBeDefined()
       expect(askUser!.enabled).toBe(false)
@@ -354,10 +354,10 @@ describe('ExtensionService', () => {
     })
 
     it('rejects builtin packages (builtin_already_installed guard, MF-4)', async () => {
-      // @zhushanwen/pi-goal 是 builtin（feature 级），installExtension 守卫应拒绝用户 npm 安装。
+      // @zhushanwen/pi-goal 是 builtin（feature 级），installExtension 检查应拒绝用户 npm 安装。
       // 否则与内置副本产生去重冲突，deduplicate 保留用户装的那份，
       // 产生 source(user-installed)/tier(mandatory) 矛盾条目（不可卸载却显示为用户安装）。
-      // 与 uninstall/toggle 的 builtin 守卫对称（均有测），唯独 install 入口原缺测（MF-4）。
+      // 与 uninstall/toggle 的 builtin 检查对称（均有测），唯独 install 入口原缺测（MF-4）。
       try {
         await service.installExtension('npm:@zhushanwen/pi-goal')
         expect.unreachable('Should have thrown builtin_already_installed')
@@ -416,7 +416,7 @@ describe('ExtensionService', () => {
     })
 
     it('rejects disabling infrastructure but allows feature', async () => {
-      // 阶段 2：守卫只拦截 infrastructure builtin（被依赖的基础包，不可禁）；
+      // 阶段 2：检查只拦截 infrastructure builtin（被依赖的基础包，不可禁）；
       // feature builtin（pi-goal）可禁，禁用走正常 disabled-packages.json 路径。
 
       // [1] infrastructure builtin（pi-pending-notifications）禁用应抛 infrastructure_cannot_disable
@@ -434,7 +434,7 @@ describe('ExtensionService', () => {
       const data = JSON.parse(raw)
       expect(data.disabled).toContain('npm:@zhushanwen/pi-goal')
 
-      // [3] builtin 可 enable（守卫只拦截禁用，开启无害；原「allows enabling builtin packages」并入）
+      // [3] builtin 可 enable（检查只拦截禁用，开启无害；原「allows enabling builtin packages」并入）
       await expect(service.toggleExtension('@zhushanwen/pi-goal', true))
         .resolves.toBeUndefined()
     })

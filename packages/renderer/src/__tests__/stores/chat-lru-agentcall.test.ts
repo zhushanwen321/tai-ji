@@ -7,7 +7,7 @@
  * - 联动驱逐：主 session 被 LRU 阈值驱逐时，未查看的 agentcall 分区释放（getMessages → []）
  * - 豁免：正被查看的 agentcall 分区存活、drawer 不白屏；关闭 drawer 后再驱逐，分区释放
  * - 两路径：evictSessionWithVirtual 显式驱逐同样联动
- * - 豁免源钉死 panel 枚举：曾开过 drawer、焦点已切走的 session 分区不被全枚举豁免
+ * - 豁免源固定为 panel 枚举：曾开过 drawer、焦点已切走的 session 分区不被全枚举豁免
  *
  * panel store 用模块 mock（对齐 useSideDrawer.test.ts 模式——豁免查询源经装配模块绑定的
  * panel 枚举 computed，mock 使其与用例内焦点切换同步）；workflow/chat store 走真实 pinia。
@@ -178,7 +178,7 @@ describe('B9 agentcall LRU 联动驱逐（阈值路径 evictIfNeeded）', () => 
     expect(chat.getMessages(viewed)).toEqual([]) // 无豁免 → 释放
   })
 
-  it('豁免源钉死 panel 枚举：曾开过 drawer、焦点已切走的 session 分区不被全枚举豁免', () => {
+  it('豁免源固定为 panel 枚举：曾开过 drawer、焦点已切走的 session 分区不被全枚举豁免', () => {
     const chat = useChatStore()
     const wf = useWorkflowStore()
     const staleVid = agentCallVirtualId('acs-stale')

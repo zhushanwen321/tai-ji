@@ -11,7 +11,7 @@
  *      路由，按 cwd 单键会让共享同 cwd 的两个 session 串扰——D4-3 修正定案）；
  *    - 「非仓库」判定 cwd 级负缓存（60s）：仅 stderr 明确报 not a git repository 时写入；
  *      超时/不可用等瞬态失败**不写**（git 稍后可能恢复，缓存不会因失败写入错误值）。
- * 3. invalidate(sessionId)（D4-3）：写操作后调用，清该 session 的缓存与在飞条目。在飞条目被标记
+ * 3. invalidate(sessionId)（D4-3）：写操作后调用，清该 session 的缓存与在途条目。在途条目被标记
  *    dead——完成后不回写缓存，防止「失效后旧值复活」竞态。
  *
  * 4. repo 观测器（缓存治理批 4 U10）：branch / worktree / bare 判定的单一观测源——内嵌
@@ -54,7 +54,7 @@ const KEY_SEP = '\0'
 /** git fatal 类错误统一退出码（非仓库 / bad object / index.lock 冲突等 fatal 均为 128，与 locale 无关——实测依据见 maybeMarkNotRepo 注释）。 */
 const GIT_FATAL_EXIT_CODE = 128
 
-/** getStatus 的在飞条目：dead 标记用于 invalidate 竞态防护（完成后不回写缓存）。 */
+/** getStatus 的在途条目：dead 标记用于 invalidate 竞态防护（完成后不回写缓存）。 */
 interface InflightGetStatus {
   promise: Promise<GitStatusResult>
   dead: boolean
@@ -281,7 +281,7 @@ export class GitStateService implements IGitStateService, IGitRepoObserver {
   }
 
   /**
-   * 失效公共路径：清缓存键 + 在飞条目标 dead（完成后不回写缓存，防「失效后旧值复活」竞态）
+   * 失效公共路径：清缓存键 + 在途条目标 dead（完成后不回写缓存，防「失效后旧值复活」竞态）
    * + 移出去重表（下一次调用重新执行，不拿旧值）。仅删除匹配条目，防误删 invalidate 后新发起的条目。
    */
   private dropKeysWith(match: (key: string) => boolean): void {
@@ -422,7 +422,7 @@ function firstRejectionReason(
  * - GitExecutorError（executor 已知降级路径）：git 不可用 / 超时不再与「真非仓库」塌缩为
  *   同一 fallbackResult——降级携带 gitUnavailableReason，前端显示「Git 不可用（原因）」
  *   而非「非 git 仓库」（未装 git 的用户曾被引导按错方向自救）。瞬态失败不写负缓存
- *   （既有守卫：仅 exit 128 + 官方英文文案才负缓存为非仓库）也不进 TTL 缓存
+   *   （既有检查：仅 exit 128 + 官方英文文案才负缓存为非仓库）也不进 TTL 缓存
  *   （「缓存不因失败写入错误值」纪律；git 恢复后下一次调用即拿到正确状态）。
  * - 未知异常（TypeError 等编程错误）不得无声吞成 isRepo:false——降级语义保持（不
  *   rethrow：rethrow 会改变 handler 行为链，降级 + 出声是「失败要出声」的最小正确实现），

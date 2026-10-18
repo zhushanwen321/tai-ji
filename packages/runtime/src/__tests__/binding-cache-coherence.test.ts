@@ -1,5 +1,5 @@
 /**
- * sidecar 绑定写点 × 目录级 TTL 缓存一致性守卫测试（binding-cache-coherence）。
+ * sidecar 绑定写点 × 目录级 TTL 缓存一致性检查测试（binding-cache-coherence）。
  *
  * 锁定行为（sidecar-binding-sync 设计文档 §3.3 决策 2 / 决策 3 第②类）：全部 sidecar
  * 写点（persistBindingSidecar 骨架 + persistSessionEnd / persistHandoffSidecar 自维护

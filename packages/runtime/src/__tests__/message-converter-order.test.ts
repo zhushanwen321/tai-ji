@@ -2,7 +2,7 @@
  * message-converter contentBlocks 顺序测试（§11 检查点 3：两条填充路径顺序语义统一）。
  *
  * 持久化路径按 pi content array 顺序（= contentIndex 顺序）构建 contentBlocks：
- * - thinking/toolCall/text part 按 parts 下标 i 依次 push，text 单守卫（首次遇到才 push）
+ * - thinking/toolCall/text part 按 parts 下标 i 依次 push，text 单检查（首次遇到才 push）
  * - contentIndex 字段 = parts 下标，与 streaming 路径（core effects registry 按 contentIndex
  *   有序插入）对称——同一消息内容下两条路径必须产生一致顺序的 contentBlocks。
  *
@@ -46,7 +46,7 @@ describe('convertSinglePiMessage —— contentBlocks 顺序（§11 检查点 3 
     ])
   })
 
-  it('多 text part 不绕过单 text 守卫（text 块只 push 一次，content 合并）', () => {
+  it('多 text part 不绕过单 text 检查（text 块只 push 一次，content 合并）', () => {
     const m = toMessage([
       { type: 'text', text: 'part1 ' },
       { type: 'toolCall', id: 'tc1', name: 'read', arguments: {} },

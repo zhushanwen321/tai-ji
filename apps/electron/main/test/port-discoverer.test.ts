@@ -190,7 +190,7 @@ describe('findAvailablePort（先收割自身残留，占用者一律跳过）',
     tmpDirs.push(dataDir)
     pathsMocks.getDataDir.mockReturnValue(dataDir)
     deadPids = new Set<number>()
-    // isPidAlive 走真实 process.kill 会探到宿主进程空间的无关 pid——钉死为本测试可控语义
+    // isPidAlive 走真实 process.kill 会探到宿主进程空间的无关 pid——固定为本测试可控语义
     vi.spyOn(process, 'kill').mockImplementation(((pid: number, signal?: string | number) => {
       if ((signal ?? 0) === 0) {
         if (deadPids.has(pid)) {

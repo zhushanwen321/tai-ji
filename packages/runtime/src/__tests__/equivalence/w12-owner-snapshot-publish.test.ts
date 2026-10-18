@@ -1,13 +1,13 @@
 /**
  * W12 等价性断言：5 个 state 话题 publish 数据源切换为 ReplicatedState / 包装实例快照
- * （data-source-governance P1.5 / D7 投影一次）。
+ * （data-source-governance P1.5 / D7 映射一次）。
  *
  * 验收对照（.taiji-harness/2026-08-19-data-source-governance-p1p4/acceptance/w12-acceptance.md
  * 通过命令 2）：每阶段附「切换前后同场景 stateSnapshot 内容一致」断言——本文件按 5 阶段
  * 分 describe（阶段 1 commands / 2 context.update / 3 state_changed / 4 subagents /
  * 5 workflowUpdate），两层断言：
  * - 等价层：RPC mock 稳定返回权威值时，publish 进 stateSnapshot 的 last-value 与
- *   「切换前口径」（RPC 直连投影 / 事件 payload 投影）逐字段一致；
+ *   「切换前口径」（RPC 直连派生视图 / 事件 payload 派生视图）逐字段一致；
  * - 数据源层（证伪影子路径）：播种 fetch 与发布路径 RPC 返回不同值时，last-value ==
  *   实例快照（owner），证明 payload 不再取自事件/RPC 直连的影子数据。
  *
@@ -95,11 +95,11 @@ describe('W12 阶段 2：context.update publish 数据源 = usage 实例快照�
 
   it('等价层：turn 事件失效收敛后，stateSnapshot 的 context last-value == 旧口径（事件值 + resolver 重算）同值', async () => {
     // 旧口径：applyContextUpdate(8000) + resolver(128000) → round(8000/128000*100) = 6
-    // 新口径：权威 stats percent 6.25 → 快照投影 round = 6（同值——pi percent 与事件值同源）
+    // 新口径：权威 stats percent 6.25 → 快照派生视图 round = 6（同值——pi percent 与事件值同源）
     const fx = makeFixture({ stats: { contextUsage: { tokens: 8000, contextWindow: 128000, percent: 6.25 } } })
     const sid = 'w12-ctx-eq'
     await fx.svc.initializeManagedSession(sid, {} as unknown as IPiEngine, '/tmp', 'test')
-    await vi.advanceTimersByTimeAsync(1) // 播种（contextUsage 旧值 5000/128000/3.9 投影）
+    await vi.advanceTimersByTimeAsync(1) // 播种（contextUsage 旧值 5000/128000/3.9 派生视图）
 
     fx.svc.applyContextUpdate(sid, 8000, 8000) // turn_end 事件（W12 后只失效）
     await vi.advanceTimersByTimeAsync(SCALAR_STATE_DEBOUNCE_MS + 50) // 防抖 + fetch + 挂钩发布
@@ -118,7 +118,7 @@ describe('W12 阶段 2：context.update publish 数据源 = usage 实例快照�
     })
   })
 
-  it('数据源层：事件即时值 ≠ 权威值时，last-value == 权威快照投影（事件 payload 不再进广播）', async () => {
+  it('数据源层：事件即时值 ≠ 权威值时，last-value == 权威快照派生视图（事件 payload 不再进广播）', async () => {
     const fx = makeFixture({ stats: { contextUsage: { tokens: 7000, contextWindow: 128000, percent: 5.47 } } })
     const sid = 'w12-ctx-src'
     await fx.svc.initializeManagedSession(sid, {} as unknown as IPiEngine, '/tmp', 'test')
@@ -138,7 +138,7 @@ describe('W12 阶段 2：context.update publish 数据源 = usage 实例快照�
     })
   })
 
-  it('无值态（compact 后空投影）：fetch 成功且 tokens=null → 发无值占位帧，last-value 被占位帧覆盖（D1）', async () => {
+  it('无值态（compact 后空派生视图）：fetch 成功且 tokens=null → 发无值占位帧，last-value 被占位帧覆盖（D1）', async () => {
     const fx = makeFixture()
     const sid = 'w12-ctx-null'
     await fx.svc.initializeManagedSession(sid, {} as unknown as IPiEngine, '/tmp', 'test')
@@ -147,7 +147,7 @@ describe('W12 阶段 2：context.update publish 数据源 = usage 实例快照�
     const seeded = fx.bus.subscribe(sid, createMockWs())
     expect(findStateMsg(seeded.stateSnapshot, 'context.update')?.payload).toMatchObject({ inputTokens: 5000 })
 
-    // compact 后 tokens=null：fetch 成功但投影为空快照 {}——D1 协议收敛后发「无值占位帧」
+    // compact 后 tokens=null：fetch 成功但映射为空快照 {}——D1 协议收敛后发「无值占位帧」
     //（仅含 sessionId，last-value 显式登记无值态，切回回放可区分「无值」与「从未收到帧」）。
     // 实例快照经 ownerSnapshotMerge 保持旧值（空快照不覆盖——无值态值要等新 turn）。
     fx.client.getSessionStats.mockResolvedValue({ contextUsage: { tokens: null, contextWindow: 128000, percent: null } })
@@ -200,7 +200,7 @@ describe('W12 阶段 3：session.state_changed payload 全字段来自实例快�
       modelId: 'p/model-b',
       thinkingLevel: 'medium',
     })
-    // usage 终态仍收敛（switchModel 失效 → 防抖重拉）：快照与 context.update last-value 同值
+    // usage 终态仍收敛（switchModel 失效 → 防抖重新拉取）：快照与 context.update last-value 同值
     const states = fx.svc.getScalarReplicatedStates(sid)
     expect(states?.modelId.get()).toEqual({ modelId: 'p/model-b' })
     expect(states?.thinkingLevel.get()).toEqual({ thinkingLevel: 'medium' })
@@ -234,7 +234,7 @@ describe('W12 阶段 3：session.state_changed payload 全字段来自实例快�
     })
   })
 
-  it('diff 抑制：失效驱动重拉（同值）不重复发 state_changed 帧；值变恢复发帧（U6：30s 周期兜底已删）', async () => {
+  it('diff 抑制：失效驱动重新拉取（同值）不重复发 state_changed 帧；值变恢复发帧（U6：30s 周期兜底已删）', async () => {
     const fx = makeFixture()
     const sid = 'w12-state-diff'
     const ws = createMockWs()
@@ -250,7 +250,7 @@ describe('W12 阶段 3：session.state_changed payload 全字段来自实例快�
     await vi.advanceTimersByTimeAsync(95_000)
     expect(countStateChanged()).toBe(1)
 
-    // 权威翻新后失效驱动重拉（switchModel RPC 成功响应 markDirty，替代旧周期 poll）：
+    // 权威翻新后失效驱动重新拉取（switchModel RPC 成功响应 markDirty，替代旧周期 poll）：
     // 组合值变化 → 恢复发帧
     fx.client.getState.mockResolvedValue({
       sessionName: 'w12',
@@ -346,7 +346,7 @@ describe('W12→W18 阶段 4：session.subagents 数据源 = entry 扫描派生�
     expect(frames.some((m) => m.type === 'message.customStart' && (m.payload as { customType?: string }).customType === 'subagent-bg-notify')).toBe(true)
   })
 
-  it('未命中 customType 的事件不触发失效（守卫语义保持）', () => {
+  it('未命中 customType 的事件不触发失效（检查语义保持）', () => {
     const sid = 'w18-sub-miss'
     const { interpreter, invalidations } = makeInterpreter(sid)
     interpreter.interpret([{
@@ -408,7 +408,7 @@ describe('W12 阶段 1：session.commands publish 数据源 = commands 实例快
     expect(fx.svc.getScalarReplicatedStates(sid)?.commands.get()?.commands).toEqual(commands)
   })
 
-  it('数据源层：权威翻新后查询即失效重拉，last-value 刷新为新快照（owner 恒等，非 RPC 响应直转发）', async () => {
+  it('数据源层：权威翻新后查询即失效重新拉取，last-value 刷新为新快照（owner 恒等，非 RPC 响应直转发）', async () => {
     const fx = makeFixture()
     const sid = 'w12-cmds-src'
     const seeded = [{ name: 'seed-cmd' }] as PiCommandInfo[]
@@ -424,8 +424,8 @@ describe('W12 阶段 1：session.commands publish 数据源 = commands 实例快
       commands: seeded,
     })
 
-    // 权威翻新 + 查询即失效（renderer 主动 getCommands）：防抖重拉后挂钩刷新 last-value。
-    // mock 调用序：#1 播种（seeded）→ #2 查询 RPC → #3 防抖重拉（#2/#3 起权威值 = renewed）
+    // 权威翻新 + 查询即失效（renderer 主动 getCommands）：防抖重新拉取后挂钩刷新 last-value。
+    // mock 调用序：#1 播种（seeded）→ #2 查询 RPC → #3 防抖重新拉取（#2/#3 起权威值 = renewed）
     fx.client.getCommands.mockResolvedValueOnce(seeded).mockResolvedValue(renewed)
     await fx.svc.getCommands(sid)
     await vi.advanceTimersByTimeAsync(SCALAR_STATE_DEBOUNCE_MS + 50)
@@ -491,7 +491,7 @@ describe('W12→W18 阶段 5：session.workflowUpdate 数据源 = entry 扫描�
     expect(frames.some((m) => m.type === 'message.customStart' && (m.payload as { customType?: string }).customType === 'workflow-result')).toBe(true)
   })
 
-  it('无 customType 命中的 workflow 相关通知不触发失效（守卫语义保持）', () => {
+  it('无 customType 命中的 workflow 相关通知不触发失效（检查语义保持）', () => {
     const sid = 'w18-wf-miss'
     const { interpreter, invalidations } = makeInterpreter(sid)
     interpreter.interpret([

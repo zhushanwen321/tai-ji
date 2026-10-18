@@ -2,7 +2,7 @@
  * ResourcesMessageHandler.setSkillDirs 失效编排测试（缓存治理 1-5）。
  *
  * 被测缺口：rebuildGlobal 失败分支此前只 broadcast 不清 projectCache——失效广播与缓存
- * 实际状态不一致，前端重拉仍命中旧值。修复后失败分支同样 invalidateAllProjects。
+ * 实际状态不一致，前端重新拉取仍命中旧值。修复后失败分支同样 invalidateAllProjects。
  *
  * 分层说明：「invalidate 清缓存 → 下次 getProjectSkills 重扫」的缓存语义本体归
  * skill-registry 自身测试域；本文件在 handler 编排层证明——失效动作在失败分支真实发生，

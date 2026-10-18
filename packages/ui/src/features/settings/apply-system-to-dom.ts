@@ -15,7 +15,7 @@
  *   = MessageStream 根 + btw composer 带，drawer 内嵌对话流随之跟 chat 档）
  * - locale → 经 deps.setLocale 注入（ui 不持有 i18n 全局实例，W4 壳传入真实 setLocale）
  *
- * SSR 守卫：typeof document === 'undefined' 时早返（不抛错），保证同构安全。
+ * SSR 检查：typeof document === 'undefined' 时早返（不抛错），保证同构安全。
  */
 import type { SystemSettings } from '@taiji/core'
 import { DEFAULT_FONT_SCALES } from '@taiji/core'

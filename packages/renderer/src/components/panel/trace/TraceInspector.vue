@@ -293,7 +293,7 @@ const blocks = computed<
   }))
 })
 
-/** toolCall arguments 展示 JSON（[RD-2#5] 经 safeJson 统一守卫：解析失败/超限降级占位，不让 inspector 崩）。 */
+/** toolCall arguments 展示 JSON（[RD-2#5] 经 safeJson 统一检查：解析失败/超限降级占位，不让 inspector 崩）。 */
 const blockArgumentsJson = computed(() => {
   const b = block.value
   if (!b || b.kind !== 'toolCall') return ''

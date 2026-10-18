@@ -84,7 +84,7 @@ export type ModelSwitchTarget =
   | { domain: "workflow-run"; runId: string };
 
 // ============================================================
-// 依赖注入面
+// 依赖注入范围
 // ============================================================
 
 /**
@@ -104,15 +104,15 @@ export interface ModelSwitchModelService { // oe-exempt:20261006:framework:类�
 }
 
 /**
- * setModel 编排的依赖注入面。转发通道（engineSetModel / runAggregate）与 workflow
+ * setModel 编排的依赖注入范围。转发通道（engineSetModel / runAggregate）与 workflow
  * 侧查询（assertRunNotTerminal / listAcceptedMemberRunIds / persistRunOverride）的
  * 生产实装在壳装配段（subagent-service.setModel deps 闭包）。
  */
-export interface ModelSwitchDeps { // oe-exempt:20261006:framework:setModel 编排依赖注入面（U3/U5/U4 接线点，端口先立单实现常态）
+export interface ModelSwitchDeps { // oe-exempt:20261006:framework:setModel 编排依赖注入范围（U3/U5/U4 接线点，端口先立单实现常态）
   /** 模型服务（步骤①校验 + 步骤③内存记账表写入）。 */
   readonly getModelService: () => ModelSwitchModelService;
 /**
- * chat 域覆盖落账原语（store.markModelOverride——内存 record 字段 + record 事件
+ * chat 域覆盖写入原语（store.markModelOverride——内存 record 字段 + record 事件
  * 文件帧，持久化权威）。返回 false = record 非内存实例（未注册 / 已回收 / 重建
  * 对象），两面都未写——调用方（writeChatOverride）必须同步跳过内存记账表，禁止
  * 「持久化缺失而内存生效」的双介质状态（dmg-r1-10）。
@@ -122,7 +122,7 @@ readonly markModelOverride: (record: ExecutionRecord, override: ModelOverride) =
   readonly resolveEnginePort: (record: Pick<ExecutionRecord, "engine" | "engineHandle" | "id">) => EnginePort;
   /**
    * 引擎 setModel 转发通道（签名 = SDK SetModelParams→SetModelResult）。生产实装 =
-   * EnginePort.setModel 协议转发（U3 实装的可选面——manifest capabilities.setModel
+   * EnginePort.setModel 协议转发（U3 实装的可选能力部分——manifest capabilities.setModel
    * = 'native' 条件挂方法）；capability 非 'native' 的引擎在步骤②预检即被拦截，
    * 本通道只承接 native 引擎。
    */
@@ -147,7 +147,7 @@ readonly markModelOverride: (record: ExecutionRecord, override: ModelOverride) =
    * 异步校验仍在全部写入前完成（步骤①语义不变），终局抛错走 catch 转 error 应答。
    */
   readonly assertRunNotTerminal: (runId: string) => void | Promise<void>;
-  /** run 级已受理成员 runId 全量清单（全切转发面，§7.4——不做宿主侧存活预判）。 */
+  /** run 级已受理成员 runId 全量清单（全量切走的转发，§7.4——不做宿主侧存活预判）。 */
   readonly listAcceptedMemberRunIds: (runId: string) => string[];
   /**
    * run 级覆盖意图持久化（U4a journal 覆盖事件——run 事件流是唯一合法持久化写入
@@ -164,7 +164,7 @@ readonly markModelOverride: (record: ExecutionRecord, override: ModelOverride) =
 
 /** ModelRef 结构 → canonical ref 词形（组帧单点——结构化形状的拆装收在宿主编排层，
  *  SDK contract-types ModelRef 注释的语义）。模块内私有——词形只服务本编排层的
- *  预检与记账，无外部消费面。 */
+ *  预检与记账，无外部消费方。 */
 function canonicalRefOf(modelRef: ModelRef): string {
   return `${modelRef.provider}/${modelRef.modelId}`;
 }
@@ -190,10 +190,10 @@ const RACE_EXIT_NOTICE = "子进程在切换期间已退出，已记录，下次
 
 /**
  * 处置表「写记账后回错误应答」分型词表（行 3 快照型 / 行 7 回读失败型——catch 分支
- * 除 credential_missing 特判外的写面分型登记）。词表外引擎错误码 / 无码错误走同一
- * 写面兜底（「命令已送达、意图已表达」的保守归属，catch 实装按 credential_missing
+ * 除 credential_missing 特判外的写侧分型登记）。词表外引擎错误码 / 无码错误走同一
+ * 写侧兜底（「命令已送达、意图已表达」的保守归属，catch 实装按 credential_missing
  * 特判组织——特判 = SDK 词表全集减本词表）；shared 的 SUBAGENT_SET_MODEL_ACCOUNTED_
- * ERROR_CODES 是本词表的前端显示面投影（badge 亮灯依据，词表外码不亮 badge）。
+ * ERROR_CODES 是本词表的前端显示侧映射（badge 亮灯依据，词表外码不亮 badge）。
  * **对账锚**：packages/runtime/src/infra/subagent-model-gateway.test.ts
  * 「core ↔ shared setModel 对账」——本词表扩位漏同步 shared 时该测试红。
  */
@@ -277,7 +277,7 @@ async function validateSetModelTarget(
   return undefined;
 }
 
-/** 覆盖意图载体组装（§7.2 步骤③写面的记账形状；setAt = 意图落账时点）。 */
+/** 覆盖意图载体组装（§7.2 步骤③写侧的记账形状；setAt = 意图写入时点）。 */
 function buildModelOverride(model: ModelRef, thinkingLevel?: string): ModelOverride {
   return {
     ref: { provider: model.provider, modelId: model.modelId },
@@ -304,7 +304,7 @@ async function switchWorkflowRunModel(
   });
   // 处置表行 4（run 级聚合个别成员转发失败——以及全员成功行 1 的 run 级面）：
   // run 级意图恒写（§6.1③「一个成员失败不回滚其他成员」的直接推论；不写则已
-  // 热切成功的成员被下一轮 spawn 旧 argv 压回）。写面 = 内存表 + U4a 事件载体
+  // 热切成功的成员被下一轮 spawn 旧 argv 压回）。写侧 = 内存表 + U4a 事件载体
   //（await 持久化结果——失败上抛转报错应答，内存覆盖仍生效，§7.5）。
   deps.getModelService().setModelOverride(target.runId, override);
   await deps.persistRunOverride(target.runId, override);
@@ -312,7 +312,7 @@ async function switchWorkflowRunModel(
 }
 
 /**
- * chat 域分流（步骤②：活进程判定 → capability 预检 → 引擎转发；步骤③写面按
+ * chat 域分流（步骤②：活进程判定 → capability 预检 → 引擎转发；步骤③写侧按
  * §7.2 处置表分型）。
  */
 async function switchChatModel(
@@ -371,10 +371,10 @@ async function switchChatModel(
 
 const logger = getLogger("subagents");
 
-/** chat 域覆盖落账（步骤③写面）：持久化（store 原语——record 字段 + 事件帧）+
+/** chat 域覆盖写入（步骤③写侧）：持久化（store 原语——record 字段 + 事件帧）+
  *  内存记账表。切换不改写 record.model 盖章值（不变量 5 由 store 原语保证）。
  *
- *  落账返回值门（dmg-r1-10）：false = record 非内存实例，持久化两面（事件帧 +
+ *  写入返回值门（dmg-r1-10）：false = record 非内存实例，持久化两面（事件帧 +
  *  record 字段）都未写——内存记账表同步跳过，只 warn 上浮（消除「内存覆盖生效 /
  *  重启丢失、详情载荷查询无覆盖」的双介质劈叉）；该形态 = 调用方传入重建 record
  *  的集成缺陷信号（正常链 record 来自内存表），warn 后应答形态不变（引擎已实际

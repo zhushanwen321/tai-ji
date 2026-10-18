@@ -53,9 +53,9 @@ import { toErrorMessage } from "@zhushanwen/pi-ext-guards";
 
 /**
  * execute 回调的统一形状（三工具共用，仅 params 类型随 schema 变——泛型单点消除了
- * D3 拆分时三份逐字同构副本）。params 类型由各 schema 经 Static 投影得出。
- * typebox v1 的 StringEnum 在 Static 投影下退化为 string（非字面量联合），
- * 由下方 is*Action 类型守卫收窄到字面量联合后再 switch。
+ * D3 拆分时三份逐字同构副本）。params 类型由各 schema 经 Static 映射得出。
+ * typebox v1 的 StringEnum 在 Static 映射下退化为 string（非字面量联合），
+ * 由下方 is*Action 类型保护收窄到字面量联合后再 switch。
  */
 type SubagentExecuteCb<P extends TSchema> = (
   toolCallId: string,
@@ -95,7 +95,7 @@ type SubagentManageAction = "list" | "cancel" | "close";
 /** subagent_message 的 action 字面量联合（与 SubagentMessageParams 的 StringEnum 取值一致）。 */
 type SubagentMessageAction = "message" | "fork-from";
 
-/** 类型守卫：把 schema 投影出的 string 形式 action 收窄回字面量联合。
+/** 类型保护：把 schema 映射出的 string 形式 action 收窄回字面量联合。
  *  typebox v1 的 StringEnum Static 退化为 string，需运行时校验 + 类型收窄
  *  才能恢复 switch 的 exhaustiveness 约束。 */
 function isManageAction(value: string): value is SubagentManageAction {
@@ -106,13 +106,13 @@ function isMessageAction(value: string): value is SubagentMessageAction {
   return value === "message" || value === "fork-from";
 }
 
-/** unknown 是否为含 model/thinkingLevel 的对象（类型守卫，替代全可选结构 `as`）。 */
+/** unknown 是否为含 model/thinkingLevel 的对象（类型保护，替代全可选结构 `as`）。 */
 function isModelOverrideObj(a: unknown): a is { model?: unknown; thinkingLevel?: unknown } {
   return typeof a === "object" && a !== null;
 }
 
 /**
- * start 路径类参数（skillPath / cwd）运行时守卫：绝对路径 + 禁 `..` 穿越。
+ * start 路径类参数（skillPath / cwd）运行时检查：绝对路径 + 禁 `..` 穿越。
  *
  * 校验链事实（语义登记 PS-20，verifiedWith 以 pi-semantics.json 为准，逐 claim 行号见该条目
  * piAnchor）：pi agent-loop 对注册 typebox schema
@@ -123,7 +123,7 @@ function isModelOverrideObj(a: unknown): a is { model?: unknown; thinkingLevel?:
  * pattern（skillPath/cwd `^/`）/ maxLength（slug 35）是运行时强制而非仅模型可见
  * 契约；tool-definition-wrapper.js:11 只原样透传 params，校验发生在上游 agent-loop 层。
  *
- * 工具层守卫定位 = defense-in-depth + schema 表达力缺口，非「pi 无校验」：
+ * 工具层检查定位 = defense-in-depth + schema 表达力缺口，非「pi 无校验」：
  *   - `..` 穿越段拒绝超出 pattern 能力（`^/` 放行 "/a/../b"），穿越语义只能在
  *     工具层判——与 slug maxLength 双闸同理（schema 强制之上再叠 handler 兜底）
  *
@@ -133,7 +133,7 @@ function isModelOverrideObj(a: unknown): a is { model?: unknown; thinkingLevel?:
  *   - 任意 `..` 路径段拒绝（按 /[\\/] 分段判断而非子串——"a..b" 不是穿越）：
  *     相对穿越让子进程读到意图外的目录
  *
- * 校验失败 immediate throw（与 action 枚举守卫同风格）：pi 只对 execute throw 置
+ * 校验失败 immediate throw（与 action 枚举检查同风格）：pi 只对 execute throw 置
  * isError:true，错误文案原样进 toolResult。
  */
 function assertSafeStartPath(value: string, param: "skillPath" | "cwd"): void {
@@ -339,8 +339,8 @@ const executeSubagentStart: SubagentStartExecuteCb = async (
   //（完成由 notify 驱动新 turn）。onUpdate 参数保留以兼容 SDK 回调签名，但不消费。
   const service = assertServiceAvailable();
 
-  // 路径类参数守卫（三通道对称审查 + MF-13）：skillPath/cwd 在进入 handler 前
-  // immediate throw，不产生半启动 record（与 action 枚举守卫同风格）。
+  // 路径类参数检查（三通道对称审查 + MF-13）：skillPath/cwd 在进入 handler 前
+  // immediate throw，不产生半启动 record（与 action 枚举检查同风格）。
   if (params.skillPath !== undefined) assertSafeStartPath(params.skillPath, "skillPath");
   if (params.cwd !== undefined) assertSafeStartPath(params.cwd, "cwd");
 
@@ -364,7 +364,7 @@ const executeSubagentManage: SubagentManageExecuteCb = async (
 ) => {
   const service = assertServiceAvailable();
 
-  // typebox v1 的 StringEnum 在 Static 投影下退化为 string，此处类型守卫收窄回
+  // typebox v1 的 StringEnum 在 Static 映射下退化为 string，此处类型保护收窄回
   // 字面量联合，恢复 switch 的 exhaustiveness 约束（default 分支 = never）。
   if (!isManageAction(params.action)) {
     throw new Error(`Unknown subagent_manage action: ${params.action}`);

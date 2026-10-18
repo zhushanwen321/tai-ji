@@ -1,7 +1,7 @@
 /**
  * 聊天流壳测试共享 mock 工厂与装配工具单源（Wave C r2-05 chatDepsMock 收敛）。
  *
- * 导出面：
+ * 导出清单：
  * - 壳 mock 三工厂：chatViewDepsModule / useChatMockModule / useSidebarMockModule
  *   （vi.mock 注册形态：测试文件自行 vi.mock 转发，或 import
  *   message-stream-shell-mount.ts 由其顶层注册）
@@ -41,7 +41,7 @@ export function chatViewDepsModule() {
   }
 }
 
-/** '@/composables/features/chat/useChat' mock 工厂（壳依赖：useChat 窄面，测试聚焦渲染分发）。 */
+/** '@/composables/features/chat/useChat' mock 工厂（壳依赖：useChat 窄接口，测试聚焦渲染分发）。 */
 export function useChatMockModule() {
   return {
     useChat: () => ({
@@ -53,7 +53,7 @@ export function useChatMockModule() {
   }
 }
 
-/** '@/composables/features/sidebar/useSidebar' mock 工厂（壳依赖：useSidebar 窄面）。
+/** '@/composables/features/sidebar/useSidebar' mock 工厂（壳依赖：useSidebar 窄接口）。
  *  selectSession 为 ActivityStrip 集成用例（挂真实 MessageStream）的无害多余键——
  *  i18n-toast-mock warning 键同款先例，不消费方不读取即无影响。 */
 export function useSidebarMockModule() {

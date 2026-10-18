@@ -3,13 +3,13 @@
  * TTS mock 演示数据（VITE_MOCK 测试基建）——三家最小可用 TtsFormModel 样例 + 默认配置骨架。
  *
  * mock 本职 = 模拟 runtime（内嵌假数据不违反「数据走 runtime 链路」纪律，设计 §7.5）：
- * 形状逐字段照 shared tts-types（协议 tts.getCapabilities reply 载荷），枚举值与 runtime 真投影同构（真值子集，
- * D5 终态同步 F1-10 对齐——mock 轨保存的枚举值在真机投影中必须存在）。「最小可用」= 能驱动
- * 表单控件存在性三分支渲染：枚举渲染 / null 置灰 / 空数组不渲染，非厂商全集。真实能力表与表单投影数据本体在 runtime driver（u2）。
+ * 形状逐字段照 shared tts-types（协议 tts.getCapabilities reply 载荷），枚举值与 runtime 真派生视图同构（真值子集，
+ * D5 终态同步 F1-10 对齐——mock 轨保存的枚举值在真机派生视图中必须存在）。「最小可用」= 能驱动
+ * 表单控件存在性三分支渲染：枚举渲染 / null 置灰 / 空数组不渲染，非厂商全集。真实能力表与表单派生视图数据本体在 runtime driver（u2）。
  */
 import type { SanitizedTtsConfig, TtsFormModel, TtsProviderId } from '@taiji/shared'
 
-/** StepFun 最小表单投影（指令控件可用 / 音调与声道与情感不渲染）。 */
+/** StepFun 最小表单派生视图（指令控件可用 / 音调与声道与情感不渲染）。 */
 const stepfunForm: TtsFormModel = {
   capabilities: {
     endpointPath: '/audio/speech',
@@ -37,7 +37,7 @@ const stepfunForm: TtsFormModel = {
   hasPronunciationDict: true,
 }
 
-/** MiniMax 最小表单投影（情感/声道/效果器/词典渲染，音调置灰唯一全功能家演示）。 */
+/** MiniMax 最小表单派生视图（情感/声道/效果器/词典渲染，音调置灰唯一全功能家演示）。 */
 const minimaxForm: TtsFormModel = {
   capabilities: {
     endpointPath: '/t2a_v2',
@@ -81,7 +81,7 @@ const minimaxForm: TtsFormModel = {
   hasPronunciationDict: true,
 }
 
-/** MiMo 最小表单投影（语速/音量/音调全置灰——无对应字段的 null 三分支演示）。 */
+/** MiMo 最小表单派生视图（语速/音量/音调全置灰——无对应字段的 null 三分支演示）。 */
 const mimoForm: TtsFormModel = {
   capabilities: {
     endpointPath: '/chat/completions',
@@ -119,7 +119,7 @@ const mimoForm: TtsFormModel = {
   hasPronunciationDict: false,
 }
 
-/** 三家表单投影（tts.getCapabilities reply 载荷）。 */
+/** 三家表单派生视图（tts.getCapabilities reply 载荷）。 */
 export const MOCK_TTS_FORMS: Record<TtsProviderId, TtsFormModel> = {
   stepfun: stepfunForm,
   minimax: minimaxForm,

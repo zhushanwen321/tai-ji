@@ -54,7 +54,7 @@ function lineRec(vid: string, mainSid: string): BtwLineRecord {
 }
 
 /**
- * 组装 ctx：messaging 三方法 vi.fn + BtwService 四原语 fake（BtwServiceFace 结构化窄面，
+ * 组装 ctx：messaging 三方法 vi.fn + BtwService 四原语 fake（BtwServiceFace 结构化窄接口，
  * 无 cast）+ messageBus 全接口 fake（publish 计数单独外提便于断言）。
  */
 function mockCtx(overrides?: Partial<BtwHandlerContext>) {
@@ -83,7 +83,7 @@ function mockCtx(overrides?: Partial<BtwHandlerContext>) {
   return { ctx, publish, createLine, listLines, closeLine, getLine, resolveMain }
 }
 
-/** reply/sendError 调用面读取（ack 必回断言用）。 */
+/** reply/sendError 调用读取（ack 必回断言用）。 */
 function replyCalls(ctx: BtwHandlerContext) { return vi.mocked(ctx.reply).mock.calls }
 function errorCalls(ctx: BtwHandlerContext) { return vi.mocked(ctx.sendError).mock.calls }
 

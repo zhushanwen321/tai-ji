@@ -6,17 +6,17 @@
  * 覆盖（impl-plan U4b 验收条款 + S15 renderer 断言族）：
  * - derivePlanStage 重写（derivePhase 单点接线）：① exploring / ② writing（含 revising 归
  *   规划中档）/ ③ reviewing / ③✓ approved（D5 阶段不倒退，F5）
- * - state 读侧解析（resolvePlanLifecycleState：归一 View 的 state 直读 + 值域守卫，缺失/
+ * - state 读侧解析（resolvePlanLifecycleState：归一 View 的 state 直读 + 值域检查，缺失/
  *   垃圾落 idle——批次 3 条目 1 删除混装兜底后的声明例外锚；resolveResumeHint：直读）
- * - D4 分支公式单源（derivePlanReviewBarMode）：presence 语义 / 抑制标记 / degraded 组合输入面
+ * - D4 分支公式单源（derivePlanReviewBarMode）：presence 语义 / 抑制标记 / degraded 组合输入范围
  * - 审批窗口机件：已应答标记两路事件驱动解除（预期后态帧值判定 / 新 pending）、迟到旧帧
- *   不解标记、degraded 组合即时评估（[ADR-0122] 时间窗已删）、双源冷拉对账（显式拉取：
+ *   不解标记、degraded 组合即时评估（[ADR-0122] 时间窗已删）、双源主动拉取对账（显式拉取：
  *   失败 → 标记悬挂 + loadError（R7）；成功 → 真值解除 + sink 再入店）
  * - D8 检测窗相位机（dmg-r1-2）：send resolve 只进 armed（前置在途 turn 终态不判定）、
  *   nudge 轮 message_start 才开 watching、send.rejected 不受起点标记门
  * - 辅助表迟到写拦截（D-B2-1 口径延伸，dmg-r1-3）：cleanup 后迟到 applyFrame /
  *   活动信号不复活 frameRevs / edgeFrameRevs 条目
- * - 首拉成功/置空/失败、陈旧首拉守卫、applyFrame 分区写、评论草稿、enter 翻转清、
+ * - 首次拉取成功/置空/失败、陈旧首次拉取检查、applyFrame 分区写、评论草稿、enter 翻转清、
  *   草稿回看（历史族，行为不变）
  *
  * 范式照抄 subagent.test.ts（pinia setActivePinia 每 case 重建）+ gen-stats-composable.test.ts
@@ -54,7 +54,7 @@ vi.mock('@taiji/core/transport/api', async (importActual) => {
   return { ...actual, command: commandMock, RPC_BACKSTOP_TIMEOUT_MS: 30_000 }
 })
 
-// ── mock 边界②：extension domain（D4③ 冷拉双源之一 getPendingRequests）——受控返回/拒绝 ──
+// ── mock 边界②：extension domain（D4③ 主动拉取双源之一 getPendingRequests）——受控返回/拒绝 ──
 const getPendingRequestsMock = vi.hoisted(() => vi.fn())
 vi.mock('@taiji/core/transport/api/domains/extension', () => ({
   getPendingRequests: getPendingRequestsMock,
@@ -101,7 +101,7 @@ function resolveForSid(sid: string, reply: { sessionId: string; planState: PlanS
   entry.resolve(reply)
 }
 
-/** reject 指定 sid 最晚登记的在途 RPC（多轮切入后失败分支针对最新一次首拉） */
+/** reject 指定 sid 最晚登记的在途 RPC（多轮切入后失败分支针对最新一次首次拉取） */
 function rejectLatestForSid(sid: string, err: unknown): void {
   const idx = pendingRpcs.map((e) => e.sid).lastIndexOf(sid)
   if (idx < 0) throw new Error(`测试编排错误：sid ${sid} 无在途 RPC`)
@@ -155,7 +155,7 @@ describe('derivePlanStage：derivePhase 单点接线（consumers.md §三 C）',
 
   it('③✓ 已批准档 = phase approved（approved/dispatching，D5 阶段不倒退——F5 不复活）', () => {
     expect(derivePlanStage({ ...BASE_VIEW, docs: [DOC], state: 'approved' })).toBe('approved')
-    // 执行方式表单挂起期间（dispatching）不再打回 ②文档撰写（F5 病灶形态）
+    // 执行方式表单挂起期间（dispatching）不再打回 ②文档撰写（F5 问题点形态）
     expect(derivePlanStage({ ...BASE_VIEW, docs: [DOC], state: 'dispatching' })).toBe('approved')
   })
 
@@ -233,10 +233,10 @@ describe('derivePlanReviewBarMode：D4 分支公式单源（presence 语义）',
   })
 })
 
-// ── 审批窗口机件（D4 抑制标记 / degraded 组合 / 冷拉对账）─────────────
+// ── 审批窗口机件（D4 抑制标记 / degraded 组合 / 主动拉取对账）─────────────
 
 describe('审批窗口机件（D4）', () => {
-  /** planReview 帧记录（冷拉 getPendingRequests 快照形态） */
+  /** planReview 帧记录（主动拉取 getPendingRequests 快照形态） */
   function planReviewRecord(requestId: string): ExtensionUIRequest {
     return { sessionId: 'A', requestId, method: 'select', planReview: true } as unknown as ExtensionUIRequest
   }
@@ -305,12 +305,12 @@ describe('审批窗口机件（D4）', () => {
     expect(planReviewNudgePhase.value).toBe('idle')
     expect(planReviewNudgeError.value).toBe('no-response')
 
-    // 重试成功形态：armed → 重挂到达（setPlanReviewPending(true) 内含收口：关窗 + 清错误）
+    // 重试成功形态：armed → 重挂到达（setPlanReviewPending(true) 内含收尾：关窗 + 清错误）
     store.beginPlanReviewNudge('A')
     store.setPlanReviewPending('A', true)
     expect(planReviewNudgePhase.value).toBe('idle')
     expect(planReviewNudgeError.value).toBeNull()
-    // 已收口后的 turn 信号不再误报
+    // 已收尾后的 turn 信号不再误报
     store.endPlanReviewNudge('A', 'no-response')
     expect(planReviewNudgeError.value).toBeNull()
   })
@@ -361,7 +361,7 @@ describe('审批窗口机件（D4）', () => {
     expect(planReviewDegradedGate.value).toBe(true)
   })
 
-  it('冷拉失败（R7 失败分支）→ 标记悬挂不解除 + loadError 呈现', async () => {
+  it('主动拉取失败（R7 失败分支）→ 标记悬挂不解除 + loadError 呈现', async () => {
     const { store, planReviewAckMarked, planReviewDegradedGate, planLoadError } = mountStore()
     store.applyFrame('A', { ...BASE_VIEW, state: 'reviewing' })
     store.markPlanReviewAnswered('A')
@@ -377,7 +377,7 @@ describe('审批窗口机件（D4）', () => {
     expect(planLoadError.value).toContain('ws closed')
   })
 
-  it('冷拉真值（reviewing ∧ 无挂起）→ 解除标记 + degraded 组合即时放行', async () => {
+  it('主动拉取真值（reviewing ∧ 无挂起）→ 解除标记 + degraded 组合即时放行', async () => {
     const { store, planReviewAckMarked, planReviewDegradedGate } = mountStore()
     store.applyFrame('A', { ...BASE_VIEW, state: 'reviewing' })
     store.markPlanReviewAnswered('A')
@@ -388,11 +388,11 @@ describe('审批窗口机件（D4）', () => {
     await settle()
 
     expect(planReviewAckMarked.value).toBe(false)
-    // 冷拉落地即以真值解除标记，degraded 组合即时重估放行（无时间窗）
+    // 主动拉取落地即以真值解除标记，degraded 组合即时重估放行（无时间窗）
     expect(planReviewDegradedGate.value).toBe(true)
   })
 
-  it('冷拉真值（pending 在场）→ 真值解除标记 + sink 再入店 registry（呈 ready 权威优先）', async () => {
+  it('主动拉取真值（pending 在场）→ 真值解除标记 + sink 再入店 registry（呈 ready 权威优先）', async () => {
     const sinkRecords: ExtensionUIRequest[][] = []
     registerPlanReviewColdSink((sid, records) => {
       expect(sid).toBe('A')
@@ -414,10 +414,10 @@ describe('审批窗口机件（D4）', () => {
   })
 })
 
-// ── 首拉 RPC（成功 / 空响应置空 / 失败错误通路）──────────────
+// ── 首次拉取 RPC（成功 / 空响应置空 / 失败错误通路）──────────────
 
-describe('loadPlanState：首拉与错误通路', () => {
-  it('首拉成功 → reply.planState 写入焦点 sid 分区（updateFor），RPC 参数带超时', async () => {
+describe('loadPlanState：首次拉取与错误通路', () => {
+  it('首次拉取成功 → reply.planState 写入焦点 sid 分区（updateFor），RPC 参数带超时', async () => {
     const { store, planView, planStage, planLoadError } = usePlanRefs()
     store.syncFocus('A')
     void store.loadPlanState('A')
@@ -437,7 +437,7 @@ describe('loadPlanState：首拉与错误通路', () => {
   it('响应空/无 planState = 无 plan 状态，分区 view 置空', async () => {
     const { store, planView, planStage } = usePlanRefs()
     store.syncFocus('A')
-    // 先建立非空 view（帧路径），再首拉到空响应
+    // 先建立非空 view（帧路径），再首次拉取到空响应
     store.applyFrame('A', { ...BASE_VIEW, docs: [DOC] })
     expect(planView.value).not.toBeNull()
 
@@ -455,7 +455,7 @@ describe('loadPlanState：首拉与错误通路', () => {
   it('RPC 失败（reply success=false → command reject）→ 错误落分区 loadError，view 不被覆盖', async () => {
     const { store, planView, planLoadError } = usePlanRefs()
     store.syncFocus('A')
-    // 先建立非空 view，再触发失败首拉（失败兜底显示语义）
+    // 先建立非空 view，再触发失败首次拉取（失败兜底显示语义）
     store.applyFrame('A', { ...BASE_VIEW, docs: [DOC] })
 
     void store.loadPlanState('A')
@@ -468,33 +468,33 @@ describe('loadPlanState：首拉与错误通路', () => {
   })
 })
 
-// ── 陈旧首拉守卫（F-R2-1：首拉空 reply 晚于 live 帧 → 丢弃，不倒拨热状态）──
+// ── 陈旧首次拉取检查（F-R2-1：首次拉取空 reply 晚于 live 帧 → 丢弃，不倒拨热状态）──
 
-describe('陈旧首拉守卫（F-R2-1：冷回填不倒拨 live 帧）', () => {
-  it('归因场景：首拉在途 → 帧先达（view=active）→ 迟到的空 reply 丢弃，view 保持 active', async () => {
+describe('陈旧首次拉取检查（F-R2-1：冷回填不倒拨 live 帧）', () => {
+  it('归因场景：首次拉取在途 → 帧先达（view=active）→ 迟到的空 reply 丢弃，view 保持 active', async () => {
     const { store, planView, planStage, planLoadError } = usePlanRefs()
     store.syncFocus('A')
-    // 首拉发出（base rev 记录），reply 悬挂——模拟 runtime 冷腿慢（scanSessions 全目录重扫）
+    // 首次拉取发出（base rev 记录），reply 悬挂——模拟 runtime 冷路径慢（scanSessions 全目录重扫）
     void store.loadPlanState('A')
     // live 帧在请求在途窗口内到达（/plan 毫秒级落盘 entry → 300ms 防抖 → publish）
     store.applyFrame('A', { ...BASE_VIEW, docs: [DOC] })
     expect(planView.value?.isActive).toBe(true)
 
-    // 迟到的首拉 reply：冷读早于 entry 落盘 → 空（INACTIVE）
+    // 迟到的首次拉取 reply：冷读早于 entry 落盘 → 空（INACTIVE）
     resolveForSid('A', {
       sessionId: 'A',
       planState: null,
     } as unknown as { sessionId: string; planState: PlanStateView })
     await settle()
 
-    // 守卫生效：view 不被倒拨回空（bar 90s 不显形的根因消除）
+    // 检查生效：view 不被倒拨回空（bar 90s 不显形的根因消除）
     expect(planView.value?.isActive).toBe(true)
     expect(planView.value?.docs?.length).toBe(1)
     expect(planStage.value).toBe('writing')
     expect(planLoadError.value).toBeNull()
   })
 
-  it('失败分支同守卫：首拉在途窗口内帧到达 → 迟到的 reject 丢弃，不误写 loadError', async () => {
+  it('失败分支同检查：首次拉取在途窗口内帧到达 → 迟到的 reject 丢弃，不误写 loadError', async () => {
     const { store, planView, planLoadError } = usePlanRefs()
     store.syncFocus('A')
     void store.loadPlanState('A')
@@ -518,20 +518,20 @@ describe('陈旧首拉守卫（F-R2-1：冷回填不倒拨 live 帧）', () => {
     await settle()
     expect(planView.value).toBeNull()
 
-    // 帧晚于 reply：applyFrame 不经守卫，live 权威照常落地
+    // 帧晚于 reply：applyFrame 不经检查，live 权威照常落地
     store.applyFrame('A', { ...BASE_VIEW })
     expect(planView.value?.isActive).toBe(true)
   })
 
-  it('新一轮重拉不受上轮丢弃误伤：帧失效请求 1 → 请求 2（新基准）reply 正常回填', async () => {
+  it('新一轮重新拉取不受上轮丢弃误伤：帧失效请求 1 → 请求 2（新基准）reply 正常回填', async () => {
     const { store, planView } = usePlanRefs()
     store.syncFocus('A')
-    // 请求 1：切会话首拉（空启动）
+    // 请求 1：切会话首次拉取（空启动）
     void store.loadPlanState('A')
     // 在途窗口帧到达 → 请求 1 失效
     store.applyFrame('A', { ...BASE_VIEW, isActive: false })
 
-    // 请求 2：切回重拉（新基准，晚于帧）
+    // 请求 2：切回重新拉取（新基准，晚于帧）
     void store.loadPlanState('A')
 
     // FIFO 到达序（对齐真机）：请求 1 的迟到空 reply 先到 → 丢弃
@@ -549,7 +549,7 @@ describe('陈旧首拉守卫（F-R2-1：冷回填不倒拨 live 帧）', () => {
     expect(planView.value?.docs?.length).toBe(1)
   })
 
-  it('cleanup 链同步清帧版本：session 销毁后重建分区，首拉回填不受残留版本影响', async () => {
+  it('cleanup 链同步清帧版本：session 销毁后重建分区，首次拉取回填不受残留版本影响', async () => {
     const { store, planView } = usePlanRefs()
     store.syncFocus('A')
     void store.loadPlanState('A')
@@ -569,7 +569,7 @@ describe('陈旧首拉守卫（F-R2-1：冷回填不倒拨 live 帧）', () => {
     await settle()
     expect(planView.value).toBeNull()
 
-    // 销毁后重新首拉：版本表已清（新基准），reply 正常回填
+    // 销毁后重新首次拉取：版本表已清（新基准），reply 正常回填
     void store.loadPlanState('A')
     resolveForSid('A', { sessionId: 'A', planState: { ...BASE_VIEW } })
     await settle()
@@ -580,7 +580,7 @@ describe('陈旧首拉守卫（F-R2-1：冷回填不倒拨 live 帧）', () => {
     const { store, planView } = usePlanRefs()
     store.syncFocus('A')
     store.applyFrame('A', { ...BASE_VIEW, docs: [DOC] }) // rev=1，view 就绪
-    // 旧生命周期的首拉在途（reply 跨 cleanup 到达）
+    // 旧生命周期的首次拉取在途（reply 跨 cleanup 到达）
     void store.loadPlanState('A') // baseRev=1
     triggerSessionCleanups('A')
     await settle()
@@ -594,20 +594,20 @@ describe('陈旧首拉守卫（F-R2-1：冷回填不倒拨 live 帧）', () => {
     expect(planView.value).toBeNull()
 
     // 旧生命周期在途 reply 到达：迟到帧被拦截（rev 保持 cleanup 清除态，0 ≠ baseRev 1）
-    // → 陈旧守卫丢弃，不写进新生命周期分区；未拦截形态下 rev=1 === baseRev 伪解除 →
+    // → 陈旧检查丢弃，不写进新生命周期分区；未拦截形态下 rev=1 === baseRev 伪解除 →
     // 僵尸 reply 写入新分区（docs 1），断言即红
     resolveForSid('A', { sessionId: 'A', planState: { ...BASE_VIEW, docs: [DOC] } })
     await settle()
     expect(planView.value).toBeNull()
 
-    // 新生命周期重新首拉：正常回填（拦截不误伤健康路径）
+    // 新生命周期重新首次拉取：正常回填（拦截不误伤健康路径）
     void store.loadPlanState('A')
     resolveForSid('A', { sessionId: 'A', planState: { ...BASE_VIEW, docs: [DOC] } })
     await settle()
     expect(planView.value?.docs?.length).toBe(1)
   })
 
-  it('辅助表迟到写拦截（D-B2-1 口径延伸）：cleanup 后迟到活动信号不重建 edgeFrameRevs，不触发补拉', async () => {
+  it('辅助表迟到写拦截（D-B2-1 口径延伸）：cleanup 后迟到活动信号不重建 edgeFrameRevs，不触发补充拉取', async () => {
     const { store } = usePlanRefs()
     store.syncFocus('A')
     store.applyFrame('A', { ...BASE_VIEW, docs: [DOC] })
@@ -615,7 +615,7 @@ describe('陈旧首拉守卫（F-R2-1：冷回填不倒拨 live 帧）', () => {
     await settle()
 
     // 迟到活动信号 ×2：若未拦截，第一次会重建 edgeFrameRevs('A'→0)，第二次因「边沿间
-    // frameRev 零增长」通过帧进展门 → 触发补拉 RPC（零 RPC 断言拦截生效）
+    // frameRev 零增长」通过帧进展门 → 触发补充拉取 RPC（零 RPC 断言拦截生效）
     store.reconcileOnAssistantMessage('A')
     store.reconcileOnAssistantMessage('A')
     await settle()
@@ -711,7 +711,7 @@ describe('评论草稿：焦点分区操作与 per-session 隔离', () => {
     await settle()
 
     store.syncFocus('A')
-    // A 分区重新惰性 init：草稿与 view 全空（下次访问重新首拉）
+    // A 分区重新惰性 init：草稿与 view 全空（下次访问重新首次拉取）
     expect(draftComments.value).toEqual([])
     expect(planView.value).toBeNull()
 
@@ -740,7 +740,7 @@ describe('enter 翻转清草稿（§3.5 兜底：新审阅轮 = 干净草稿区�
     expect(draftComments.value).toEqual([])
   })
 
-  it('首拉路径：loadPlanState 冷启动返回 isActive=true → 同样触发翻转清（双路同覆）', async () => {
+  it('首次拉取路径：loadPlanState 冷启动返回 isActive=true → 同样触发翻转清（双路同覆）', async () => {
     const { store, draftComments } = usePlanRefs()
     store.syncFocus('A')
     store.applyFrame('A', { ...BASE_VIEW, isActive: false })
@@ -753,7 +753,7 @@ describe('enter 翻转清草稿（§3.5 兜底：新审阅轮 = 干净草稿区�
     expect(draftComments.value).toEqual([])
   })
 
-  it('true→true（审阅中的重复帧/首拉回放）不清：审阅中草稿安全', () => {
+  it('true→true（审阅中的重复帧/首次拉取回放）不清：审阅中草稿安全', () => {
     const { store, draftComments } = usePlanRefs()
     store.syncFocus('A')
     store.applyFrame('A', { ...BASE_VIEW, isActive: true })
@@ -773,7 +773,7 @@ describe('enter 翻转清草稿（§3.5 兜底：新审阅轮 = 干净草稿区�
     expect(draftComments.value).toEqual([C])
   })
 
-  it('首拉失败（RPC reject）不清：view 不被覆盖，翻转无从发生', async () => {
+  it('首次拉取失败（RPC reject）不清：view 不被覆盖，翻转无从发生', async () => {
     const { store, draftComments } = usePlanRefs()
     store.syncFocus('A')
     store.applyFrame('A', { ...BASE_VIEW, isActive: false })
@@ -797,7 +797,7 @@ describe('enter 翻转清草稿（§3.5 兜底：新审阅轮 = 干净草稿区�
 
     // 焦点切到无 plan 状态的 B → 再切回 A：syncFocus 只动焦点指针，不写分区
     store.syncFocus('B')
-    void store.loadPlanState('B') // B 侧首拉（返回 isActive=true 触发 B 的翻转清——只清 B 分区）
+    void store.loadPlanState('B') // B 侧首次拉取（返回 isActive=true 触发 B 的翻转清——只清 B 分区）
     resolveForSid('B', { sessionId: 'B', planState: { ...BASE_VIEW, isActive: true } })
     await settle()
 

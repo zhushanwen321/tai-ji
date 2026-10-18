@@ -47,7 +47,7 @@ beforeEach(() => {
 })
 
 describe('useScopedModels', () => {
-  it('A3: impl-token 存在（红阶段区分力守卫）', () => {
+  it('A3: impl-token 存在（红阶段区分力检查）', () => {
     expect(SCOPED_MODEL_RENDERER_TOKEN).toBe('scoped-model-renderer-v1')
   })
 
@@ -181,7 +181,7 @@ describe('useScopedModels', () => {
     expect(store.scopedModels.value).toEqual(['openai/gpt-4o', 'anthropic/claude-sonnet-4.5'])
   })
 
-  it('A3: move in-flight 时连点第二次触发被忽略（模块级防重入守卫）', async () => {
+  it('A3: move in-flight 时连点第二次触发被忽略（模块级防重入检查）', async () => {
     const store = getSettingsStore()
     store.providers.value = MOCK_PROVIDERS as any
     store.scopedModels.value = ['openai/gpt-4o', 'anthropic/claude-sonnet-4.5']
@@ -194,8 +194,8 @@ describe('useScopedModels', () => {
 
     const { moveScopedModel } = useScopedModels()
     const first = moveScopedModel('openai/gpt-4o', 'down')
-    // 连点：第一次乐观交换后 anthropic 位于 idx0，其 down 本有效（无守卫会二次 RPC），
-    // 守卫生效 → 直接忽略，不排队、不改快照
+    // 连点：第一次乐观交换后 anthropic 位于 idx0，其 down 本有效（无检查会二次 RPC），
+    // 检查生效 → 直接忽略，不排队、不改快照
     await moveScopedModel('anthropic/claude-sonnet-4.5', 'down')
 
     // 乐观状态 = 仅第一次交换结果

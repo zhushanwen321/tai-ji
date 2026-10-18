@@ -9,9 +9,9 @@
 
     主区分支 = usePanelView 派生的 PanelView discriminated union（D1/D5）：组件层禁止再直接组合
     flow/chat/session 状态做渲染判据——全部判据收敛在 derivePanelView 纯函数
-    （core 64 组合全表守卫），本模板只消费 kind/input。分支顺序即派生优先级：
+    （core 64 组合全表检查），本模板只消费 kind/input。分支顺序即派生优先级：
     dead > trace > conversation（有消息 MessageStream / 无消息空对话态）> landing > empty。
-    turn 运行态（streaming/compacting）不参与任何存在性判定（D2：输入面恒定，
+    turn 运行态（streaming/compacting）不参与任何存在性判定（D2：输入范围恒定，
     compacting 的禁用模态由 Composer 内部承担）。
   -->
   <section
@@ -101,7 +101,7 @@
            数据源 = chat store respawnPending 分区（与 usePanelView 的 isSessionRespawning
            同源）；此时 panelView.kind 恒为 conversation/trace（respawning 抑制 dead），
            对话流 + composer 保持可用，恢复窗口发消息经 runtime join 等恢复完成后送达。
-           restored 到达 / 熔断 / 超时由 useMessageEffects 收口分区 → 本条随之消失。 -->
+           restored 到达 / 熔断 / 超时由 useMessageEffects 收尾分区 → 本条随之消失。 -->
       <div
         v-if="respawnPending"
         data-testid="respawn-pending-bar"
@@ -194,8 +194,8 @@ const restoreErrorCode = ref<string | null>(null)
 
 /**
  * 渲染视图单源（usePanelView：事实收集 + derivePanelView 单点派生）。
- * D2：isSessionActive/isCompacting 兜底已删——turn 状态不再驱动输入面存在性；
- * 「landing 残留 × 输入面消失」在派生规则上不可表达（G2 结构免疫）。
+ * D2：isSessionActive/isCompacting 兜底已删——turn 状态不再驱动输入范围存在性；
+ * 「landing 残留 × 输入范围消失」在派生规则上不可表达（G2 结构免疫）。
  * currentOverlayRequest 本地别名：currentFormRequest = 队列第一个统一表单 overlay 请求
  * （form 键——新 form 帧与 legacy askUser / scheduleCreate 帧归一后统一命中）。
  */
@@ -218,7 +218,7 @@ const conversationSessionId = computed<string | null>(() => {
 const traceSessionId = computed<string | null>(() =>
   panelView.value.kind === 'trace' ? panelView.value.sessionId : null,
 )
-/** band 内 Composer 渲染（D5）：conversation/trace 恒挂（trace 保留输入面 = session-trace
+/** band 内 Composer 渲染（D5）：conversation/trace 恒挂（trace 保留输入范围 = session-trace
  *  契约「composer 保留在底部，不打断对话能力」）；empty 绑定会话时挂（直输，防御支现行不可达） */
 const showPanelComposer = computed(() => {
   const v = panelView.value
@@ -227,7 +227,7 @@ const showPanelComposer = computed(() => {
   )
 })
 
-/** form 问题集（类型守卫收窄 unknown[] → FormQuestion[]，复核守卫——非法项跳过 + warn 留痕）。
+/** form 问题集（类型检查收窄 unknown[] → FormQuestion[]，复核检查——非法项跳过 + warn 留痕）。
  *  formQuestions 来源双路：新 form 帧（runtime event-adapter UI_FORM_MARKER 分支透传）/
  *  legacy askUser 帧经 useExtensionUI 归一层 type 推断映射。全不合法 → 空表单
  *  （仅取消可点语义由 FormOverlay 承接，不静默丢帧不挂死）。 */
@@ -240,28 +240,28 @@ const formQuestions = computed<FormQuestion[]>(() => {
   const dropped = raw.length - valid.length
   if (dropped > 0) {
     console.warn(
-      `[Panel] formQuestions 复核守卫滤除非法项（requestId=${req.requestId}）: dropped=${dropped}/${raw.length}`,
+      `[Panel] formQuestions 复核检查滤除非法项（requestId=${req.requestId}）: dropped=${dropped}/${raw.length}`,
     )
   }
   return valid
 })
 
-/** legacy scheduleCreate draft（isScheduleDraft 守卫收窄 unknown → ScheduleDraft；非法/无标记 → null）。
- *  守卫失败不挂载（正常路径不可达，runtime event-adapter 同守卫预检后非法降级普通 select），
+/** legacy scheduleCreate draft（isScheduleDraft 检查收窄 unknown → ScheduleDraft；非法/无标记 → null）。
+ *  检查失败不挂载（正常路径不可达，runtime event-adapter 同检查预检后非法降级普通 select），
  *  失败时 warn 留痕（设计 D2）——overlaySource 回落 null 挂 composer 的原因可追。 */
 const scheduleDraft = computed<ScheduleDraft | null>(() => {
   const req = currentOverlayRequest.value
   if (!req?.scheduleCreate) return null
   if (isScheduleDraft(req.scheduleDraft)) return req.scheduleDraft
   console.warn(
-    `[Panel] scheduleCreate 帧的 scheduleDraft 守卫失败，draft 源不挂载（requestId=${req.requestId}）:`,
+    `[Panel] scheduleCreate 帧的 scheduleDraft 检查失败，draft 源不挂载（requestId=${req.requestId}）:`,
     req.scheduleDraft === undefined ? 'scheduleDraft 缺失' : 'isScheduleDraft 形状校验不通过',
   )
   return null
 })
 
 /**
- * overlay 输入面带有效性（conversation/trace 且派生为 overlay 替换 composer）。
+ * overlay 输入范围带有效性（conversation/trace 且派生为 overlay 替换 composer）。
  * 抽出公共判据供 overlay / Composer 分支复用（v-if/v-else-if 互斥对的第一段）。
  */
 const overlayBandActive = computed(() =>
@@ -272,8 +272,8 @@ const overlayBandActive = computed(() =>
 /**
  * 当前 overlay 请求挂载源分型（互斥三值，分流判据单点）：
  * - 'questions'：新 form 帧 / legacy askUser 帧归一后（formQuestions 渲染，应答 envelope）；
- * - 'draft'：legacy scheduleCreate 帧直挂（draft 守卫通过才算可挂载，应答扁平 FormResult）；
- * - null：draft 守卫失败等不可挂载形态（回落 composer）。
+ * - 'draft'：legacy scheduleCreate 帧直挂（draft 检查通过才算可挂载，应答扁平 FormResult）；
+ * - null：draft 检查失败等不可挂载形态（回落 composer）。
  * 判据收敛在 script（手动 .value 读取）而非模板表达式——模板直接解引用请求对象
  * 会在「{ value } 形态的测试替身」下失真（unwrap 语义只对真 ref 生效）。
  */

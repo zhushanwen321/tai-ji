@@ -1,5 +1,5 @@
 // journal-io.test.ts —— read 第②级（journal 重放）文件 IO 直测（review round1 MF-3：
-// journal-io.ts 曾覆盖 7.7%，文件头注声称「W10 golden 往返覆盖」与实际测试面不符）。
+// journal-io.ts 曾覆盖 7.7%，文件头注声称「W10 golden 往返覆盖」与实际测试不符）。
 //
 // 覆盖：
 //   ① replayJournal：合法行序列往返（seq 乱序写入 → 事件按 seq 升序返回）；
@@ -9,7 +9,7 @@
 //   ③ ②级不可达语义：缺文件 / 空文件 / 零有效事件 → 空事件序列（replayJournal）
 //      或 undefined（replayJournalToSessionView，调用方落③级降级）；
 //   ④ replayJournalToSessionView：eventsPath 缺省 → undefined；有事件 → SDK
-//      eventsToSessionView 投影（source: "journal" + sessionRef.sessionId 提取）。
+//      eventsToSessionView 派生视图（source: "journal" + sessionRef.sessionId 提取）。
 //
 // 纪律：临时文件 mkdtemp 自建自删，零真实数据目录触碰。
 
@@ -125,9 +125,9 @@ describe("replayJournalToSessionView：②级编排与③级降级语义", () =>
     expect(replayJournalToSessionView(handleWithJournal(empty), "zcode")).toBeUndefined();
   });
 
-  it("有事件 → SDK reducer 投影 SessionView（source journal + sessionId 提取 + turn 内容）", () => {
+  it("有事件 → SDK reducer 推算 SessionView（source journal + sessionId 提取 + turn 内容）", () => {
     const p = eventsPath("journal-view.jsonl");
-    // 故意乱序写入，验证 seq 排序后 reducer 投影正确
+    // 故意乱序写入，验证 seq 排序后 reducer 派生视图正确
     writeFileSync(p, [line(1, { type: "turn_end" }), line(0, { type: "text_delta", delta: "Hello" })].join("\n") + "\n", "utf8");
     const view = replayJournalToSessionView(handleWithJournal(p), "zcode");
     expect(view).toBeDefined();

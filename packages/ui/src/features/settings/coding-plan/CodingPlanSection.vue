@@ -248,7 +248,7 @@
 
 <script setup lang="ts">
 /**
- * CodingPlanSection 消费面（C1 deep module seam）：
+ * CodingPlanSection 消费方（C1 deep module seam）：
  * - 状态 = module 三个透镜（draft / view / test），写入 = 3 个动作 / 草稿直写；
  *   无 props / 无 emits（原 23 props + 7 emits 的逐名管道已删）
  * - 本组件只保留展示职责：i18n 映射（失败文案表 / 徽标 / 提示）、布局分层（D8）、
@@ -278,7 +278,7 @@ const { t } = useI18n()
 /** quota configure module 实例（ProviderEditBody provide；缺失 = 接线错误，loud fail） */
 const { draft, view, test, selectType, setEnabled, saveAndTest } = useQuotaConfigureModule()
 
-/** 类型下拉变更：非字符串守卫在 module selectType 内（reka Select 的宽联合 payload） */
+/** 类型下拉变更：非字符串检查在 module selectType 内（reka Select 的宽联合 payload） */
 
 /** 拨动启用开关：reka Switch 的 update 是宽联合类型，`=== true` 布尔窄化后交给 module（D4） */
 function onToggleEnabled(value: unknown): void {

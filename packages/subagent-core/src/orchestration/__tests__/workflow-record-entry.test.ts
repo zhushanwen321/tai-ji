@@ -1,12 +1,12 @@
 // workflow-record-entry.test.ts —— entry 契约单源的 v1/v2 双版本判定分类测试。
 //
-// [W1 / D1] 版本升格 2 后的重写：v1 全量快照分支保留为兼容读面（分支语义与
+// [W1 / D1] 版本升格 2 后的重写：v1 全量快照分支保留为兼容读取侧（分支语义与
 // 收敛前逐分支对齐），v2 新增 registered/settled kind 判别。覆盖：
 // - 表驱动全 reason 分支（wrong-type / missing-v / future-v / no-snapshot /
 //   unknown-kind——每分支至少一行真实输入）；
 // - ok 分支：v1 snapshot 引用透传（不复制不校验）与 truthy-即放行语义；
 // - v2 分支：registered/settled 载荷透传（含 recordPath 锚点字段）；
-// - 词表零差集守卫：期望 reason 词表与判别联合双向穷尽（类型级赋值锚 +
+// - 词表零差集检查：期望 reason 词表与判别联合双向穷尽（类型级赋值锚 +
 //   运行时表覆盖核对——任一侧加成员即红）；
 // - 常量钉住：customType / entry schema 版本（W1 起 = 2）的字面量值锁（壳测试
 //   另有 jsonl-run-store-session-file.test.ts 同款锁，双侧互证）。
@@ -72,7 +72,7 @@ describe("classifyWorkflowRecordEntryData 表驱动（failure reason 全分支�
   });
 });
 
-describe("classifyWorkflowRecordEntryData ok 分支（v1 兼容读面）", () => {
+describe("classifyWorkflowRecordEntryData ok 分支（v1 兼容读侧）", () => {
   it("v1 且 snapshot truthy → ok，snapshot 引用透传（不复制不校验形状）", () => {
     const snapshot = { v: "wf-run-v2", runId: "wf-1" };
     const result = classifyWorkflowRecordEntryData({ v: 1, snapshot, updatedAt: "2026-09-24T00:00:00Z" });
@@ -133,7 +133,7 @@ describe("classifyWorkflowRecordEntryData v2 分支（W1 注册/终态两条小�
   });
 });
 
-describe("词表零差集守卫（期望词表 ↔ 判别联合）", () => {
+describe("词表零差集检查（期望词表 ↔ 判别联合）", () => {
   it("期望词表恰好 6 成员且互异（增删成员须同步联合类型与表用例）", () => {
     expect(EXPECTED_REASONS).toHaveLength(6);
     expect(new Set(EXPECTED_REASONS).size).toBe(EXPECTED_REASONS.length);
@@ -154,7 +154,7 @@ describe("词表零差集守卫（期望词表 ↔ 判别联合）", () => {
 });
 
 describe("常量钉住", () => {
-  it("customType 与 entry schema 版本字面量锁（W1 起版本 = 2——v1 为兼容读面）", () => {
+  it("customType 与 entry schema 版本字面量锁（W1 起版本 = 2——v1 为兼容读侧）", () => {
     expect(WORKFLOW_RECORD_CUSTOM_TYPE).toBe("workflow-record");
     expect(WORKFLOW_RECORD_ENTRY_VERSION).toBe(2);
   });

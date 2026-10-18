@@ -2,7 +2,7 @@
 //
 // 引擎子进程 env 契约（W12，impl-plan §2.12 / 设计 §3.5.1 D7）。
 //
-// F9：buildOutboundChildEnv 在 @taiji/shared，而 SDK 的消费面（zsw 宿主、引擎
+// F9：buildOutboundChildEnv 在 @taiji/shared，而 SDK 的消费方（zsw 宿主、引擎
 // CLI 包）不可依赖 shared——SDK 是跨宿主 SSOT，故本文件自持全部常量与构建器，
 // 不 import @taiji/shared。
 //
@@ -38,7 +38,7 @@ export const ENGINE_ENV_DENY_LIST: readonly string[] = [
 // L0 基础设施键（core 过滤之后显式注入，不受放行/剥除约束）
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** L0 注入的全部基础设施键（守卫断言：与 ENGINE_ENV_DENY_LIST 交集 = ∅）。 */
+/** L0 注入的全部基础设施键（检查断言：与 ENGINE_ENV_DENY_LIST 交集 = ∅）。 */
 export const ENGINE_ENV_L0_INFRA_KEYS: readonly string[] = [
   'TAIJI_AGENT_DATA_DIR',
   'TAIJI_AGENT_ENGINE_NODE',
@@ -195,7 +195,7 @@ export function buildEngineChildEnv(
   applyManifestAllowlist(env, opts);
 
   // L1 兜底复检：deny/剥除恒高于 manifest 放行——宽前缀（如声明 TAIJI_ 形态的
-  // 宽松清单）也不允许经 L2 把 deny 键带回来。L0 未注入，此轮只清 L2 写入面。
+  // 宽松清单）也不允许经 L2 把 deny 键带回来。L0 未注入，此轮只清 L2 写侧。
   deleteEnvKeysCaseInsensitive(env, ENGINE_ENV_DENY_LIST);
 
   // L0：基础设施键显式注入（最后写入 = 最高优先级）
@@ -224,7 +224,7 @@ export interface BuildOutboundChildEnvOptions {
  * 消费生命周期标志 / WS 令牌。
  *
  * 与 @taiji/shared 版 buildOutboundChildEnv 的刻意差异：**缺省不做白名单过滤**
- * （prefixes 省略 = 全量继承父 env + deny 剥除）。理由：SDK 消费面（zsw 宿主 /
+ * （prefixes 省略 = 全量继承父 env + deny 剥除）。理由：SDK 消费方（zsw 宿主 /
  * 引擎 CLI）不可 import shared 的 ENV_WHITELIST_PREFIXES；引擎 spawn 的基座由
  * 调用方先经 buildEngineChildEnv 组装（其 baseEnv 已是 core 过滤后的），而
  * ambient 场景（git 需要 GIT_* / proxy / ssh 等）必须保留继承面——deny-by-default

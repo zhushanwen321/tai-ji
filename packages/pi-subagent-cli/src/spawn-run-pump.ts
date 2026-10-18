@@ -1,7 +1,7 @@
 // src/spawn-run-pump.ts
 //
 // stdout pump + close 收尾 + session 身份回填（自 runSpawnOnce 行为等价提取的
-// 子进程生命周期接线面）。身份三路同源：header 行 / get_state 应答（响应行同步
+// 子进程生命周期接线点）。身份三路同源：header 行 / get_state 应答（响应行同步
 // 路径 + 握手 promise 兜底）/ LC-4 后缀反查——写入口收敛在 identity tracker；
 // close 收尾时三路全 miss = 应响亮报错的异常信号，warn 留痕不自动认领。
 
@@ -64,7 +64,7 @@ export interface RunEndState {
   resolveChatRun?: (code: number) => void;
   /**
    * resolve 时刻的真实轮数快照（agent_settled 传出，见 SdkTranslatorOpts.onAgentSettled）。
-   * agent_settled 消费面随后按轮清零 record.turnCount（SP-9），收集面以本快照恢复
+   * agent_settled 消费方随后按轮清零 record.turnCount（SP-9），收集侧以本快照恢复
    * 成功 run 的真实轮数；undefined = agent_settled 未到达（失败路径），record 值即真实值。
    */
   settledTurnCount?: number;
@@ -241,7 +241,7 @@ function createLineConsumer(deps: StdoutPumpDeps): (line: string) => void {
         }
         promptAck?.dispatch(parsed.id, parsed.command, parsed.success, parsed.data, parsed.error);
         // [subagent-model-switch §7.3] 进程级控制应答等待表并行分发（setModel 通路
-        // ——run 生命周期外的控制面操作等不到 per-run 监听表；两表按 id 各自一次性
+        // ——run 生命周期外的控制范围操作等不到 per-run 监听表；两表按 id 各自一次性
         // 消费，未登记 id 各自自弃）。
         dispatchControlResponse(parsed.id, parsed.success, parsed.data, parsed.error);
         return;
@@ -413,7 +413,7 @@ export function wireChildStdoutPump(deps: StdoutPumpDeps): Promise<number> {
       onClose(null, null);
     });
     // stdin 异步 error 监听器必挂：'error' 事件无监听即进程级 uncaught exception。
-    // 原 EPIPE 失败计数器（热路径投递判死的消费面）已随协议化删除，此处仅 debug
+    // 原 EPIPE 失败计数器（热路径投递判死的消费方）已随协议化删除，此处仅 debug
     // 留痕；不能 warn——agent_settled 收割（killPiProcess）每次正常 run 都会断
     // stdin 管道触发 EPIPE，属正常路径。判别经 pi-rpc isBrokenPipeError 单源
     // （同步半面①在 stdin-writer writeStdinLine 的 EPIPE throw）。

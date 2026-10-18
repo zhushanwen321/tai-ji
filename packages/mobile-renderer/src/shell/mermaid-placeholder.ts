@@ -4,9 +4,9 @@
 // 期望 {svg} 结构（ui MermaidRenderer v-html 受控点注入）——纯 no-op 会破图，占位呈现
 // 「图表在桌面查看」。文案经 i18n 注入（壳不养文案副本）。
 //
-// 产出是纯静态字符串（结构固定 + label 经 XML 转义），无用户输入注入面。
+// 产出是纯静态字符串（结构固定 + label 经 XML 转义），无用户输入注入通道。
 
-/** XML 文本转义（label 是 i18n 文案，防御性转义保持注入面纯净） */
+/** XML 文本转义（label 是 i18n 文案，防御性转义保持注入通道纯净） */
 function escapeXmlText(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }

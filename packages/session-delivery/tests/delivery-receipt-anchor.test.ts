@@ -4,7 +4,7 @@
  * 覆盖设计 §3.3 D1 的判定语义与边界批次：
  * - 单条 acceptance：受理即 delivered + onSettled 送达口径回调（confirmDelivered 驱动）
  * - 全 marker 批：受理后维持 in-flight 等回执（现状保守语义不变）
- * - 混合批（per-entry 粒度关键锁）：同批 marker + acceptance 各按各的申报落账——
+ * - 混合批（per-entry 粒度关键锁）：同批 marker + acceptance 各按各的申报写入记录——
  *   acceptance 直落 delivered，marker 维持 in-flight；envelope 挂载形态（取首条值）
  * 會丢此粒度，本用例即否决形态的回归锁
  * - 全 acceptance 批（死锁反例重演）：≥2 条无标记同批受理后全部落地，在途清零
@@ -165,10 +165,19 @@ describe('D1 申报制：首败即停语义（P0-20 锁，ADR-0122）', () => {
       },
     })
 
-    // busy 起步使两条同入 queued（构造合批），翻转 idle 后整批出站
+    // busy 起步使两条同入 queued（构造合批），翻转 idle 后整批出站。
+    // v3 缺省按载荷：custom = retain（失败留守，不发失败终局通知）——本用例锁定
+    // 的是 forget 语义的首败即停（P0-20 / ADR-0122 锁：首败即停 + 显式上报 + 无
+    // 内核重试窗口），显式申报 onFailure:'forget'。
     port.idle = false
-    handle.send(customMsg('subagents:notify', 'notify: A done'), { receiptAnchor: 'acceptance' })
-    handle.send(customMsg('subagents:notify', 'notify: B done'), { receiptAnchor: 'acceptance' })
+    handle.send(customMsg('subagents:notify', 'notify: A done'), {
+      receiptAnchor: 'acceptance',
+      onFailure: 'forget',
+    })
+    handle.send(customMsg('subagents:notify', 'notify: B done'), {
+      receiptAnchor: 'acceptance',
+      onFailure: 'forget',
+    })
     port.idle = true
     handle.flush()
 

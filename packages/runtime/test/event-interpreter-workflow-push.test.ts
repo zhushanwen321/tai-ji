@@ -2,7 +2,7 @@
  * W18 tests：EventInterpreter workflow 事件 → 派生缓存失效信号。
  *
  * 背景（W18 data-source-governance P3.1，D4）：workflow 列表数据源切换为
- * 「entry_appended 失效 → get_entries(since) 增量重拉 → entry 扫描派生缓存」。
+ * 「entry_appended 失效 → get_entries(since) 增量重新拉取 → entry 扫描派生缓存」。
  * interpreter 的 workflow 事件流（tool-call-end 发起 running / workflow-result 终态）
  * **直写退役**——降级为失效信号（onRecordEntriesInvalidated）。增量信号帧
  * session.workflowUpdate 的发布归 sessionService 拉取收敛后的状态 diff（含
@@ -111,7 +111,7 @@ describe('EventInterpreter · workflow 事件 → 派生缓存失效（W18 直�
     expect(findWorkflowUpdate()).toBeUndefined()
   })
 
-  // ── U3：守卫语义保持 ────────────────────────────────────────────
+  // ── U3：检查语义保持 ────────────────────────────────────────────
   it('U3: 非 workflow tool 的 tool-call-end 不触发失效', () => {
     const interpreter = makeInterpreter('sid-wf')
 
@@ -136,7 +136,7 @@ describe('EventInterpreter · workflow 事件 → 派生缓存失效（W18 直�
     expect(invalidations).toHaveLength(0)
   })
 
-  it('U3b: 无关 customType（subagent-bg-notify）不触发 workflow 失效（定向守卫保持）', () => {
+  it('U3b: 无关 customType（subagent-bg-notify）不触发 workflow 失效（定向检查保持）', () => {
     const interpreter = makeInterpreter('sid-wf')
 
     interpreter.interpret([

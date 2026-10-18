@@ -2,7 +2,7 @@
  * TerminalToggleButton 测试（display-containers u-w1-layout：§5.1 规则 4）。
  *
  * 被测行为：TerminalToggleButton（renderer panel/）：点击 = toggleBottomDrawer()（与 ⌃` 同一
- * 协调函数落点），aria-pressed 投影底抽屉开合态；关闭分支焦点回 composer（§6.7）。
+ * 协调函数落点），aria-pressed 派生视图底抽屉开合态；关闭分支焦点回 composer（§6.7）。
  *
  * 三视角：使用者黑盒（按钮可见可点、点击开底抽屉）、观察者形态（testid/aria-pressed/title 文案）。
  *
@@ -33,7 +33,7 @@ afterEach(() => {
 })
 
 describe('TerminalToggleButton（顶栏鼠标路径入口，三卡化 2026-10-04 迁 PanelHeader）', () => {
-  it('按钮常驻可点：title 文案 + aria-pressed 投影开合态；点击切换底抽屉（toggleBottomDrawer 同源）', async () => {
+  it('按钮常驻可点：title 文案 + aria-pressed 派生视图开合态；点击切换底抽屉（toggleBottomDrawer 同源）', async () => {
     const wrapper = mount(TerminalToggleButton)
     const button = wrapper.find('[data-testid="terminal-toggle-button"]')
     expect(button.exists()).toBe(true)

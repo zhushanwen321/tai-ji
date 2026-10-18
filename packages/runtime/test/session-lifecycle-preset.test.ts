@@ -119,7 +119,7 @@ function makeMocks(opts: {
     findScannedSession: vi.fn(() => undefined),
     fetchAndBroadcastContext: vi.fn(async () => undefined),
     removeSessionEntry: vi.fn(),
-    // S2 ISP 化：结构性满足 lifecycle 窄接口（10 方法 = 实际消费面），无强转
+    // S2 ISP 化：结构性满足 lifecycle 窄接口（10 方法 = 消费方实际用到的全部），无强转
     getActiveSummaries: vi.fn(() => []),
   }
 
@@ -175,7 +175,7 @@ describe('session-lifecycle preset integration', () => {
     expect(opts.noContextFiles).toBe(true)
     expect(opts.model).toBe('preset-model')
     expect(opts.extensionPaths).toEqual(['/ext/builtin.js'])
-    // persistPresetBinding 写 sidecar（V9-④ 根修：create 路径携 skipJsonlExistsGuard 放行守卫）
+    // persistPresetBinding 写 sidecar（V9-④ 从根源修复：create 路径携 skipJsonlExistsGuard 放行检查）
     expect(persistPresetBindingFn).toHaveBeenCalledWith('/tmp/pi.jsonl', 'builtin:readonly', { skipJsonlExistsGuard: true })
   })
 
@@ -226,7 +226,7 @@ describe('session-lifecycle preset integration', () => {
     expect(opts.extensionPaths).toEqual(['/default/ext'])
     expect(opts.skillPaths).toEqual(['/default/skill'])
     expect(opts.tools).toBeUndefined()
-    // presetId 传入值仍写 sidecar（create 路径放行守卫，同 tc1）
+    // presetId 传入值仍写 sidecar（create 路径放行检查，同 tc1）
     expect(persistPresetBindingFn).toHaveBeenCalledWith('/tmp/pi.jsonl', 'deleted-preset', { skipJsonlExistsGuard: true })
   })
 

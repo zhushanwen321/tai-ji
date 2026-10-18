@@ -13,7 +13,7 @@
 //
 // companion 区挂 ui CompanionBand（简单 dialog 渲染）——D3 根级常驻：不随页签/视图分支
 // 卸载（订阅随组件卸载退订，页签分支内挂载会静默丢请求），任意页签直接可见可作答；
-// form/planReview 类请求（C4 门排除面）由 MobileFormCard 承接（D7 form 行恢复）；
+// form/planReview 类请求（C4 门排除情形）由 MobileFormCard 承接（D7 form 行恢复）；
 // source/transport/OverlayLifecycle 经 App provide（回传走 core 既有通路，D7 ask-user 行）。
 // 权限审批弹窗（D7「手机可批」行）全局挂根：bus 'plugin-permission-request' →
 // companion-bridge 弹窗状态 → PermissionRequestDialog；回传经 provide 的
@@ -70,10 +70,10 @@ provide(DIALOG_QUEUE_HANDLE_KEY, registerDialogQueueHandle)
 // 在 inject 缺失时仍在场但点击 no-op（假行为）；provide 后 minimize/restore 经
 // transition→getState 闭环真实生效（expanded→minimized→restored，对齐桌面
 // useExtensionHostBridge 同类 provide）。bus 为独立实例：移动壳共享 bus 私居
-// companion-bridge（无导出面），本实例不 subscribe——状态迁移不依赖订阅（transition/getState
+// companion-bridge（无导出清单），本实例不 subscribe——状态迁移不依赖订阅（transition/getState
 // 直读分区 Map），订阅无事件源的 bus 属无效监听；桌面订阅才有的 ui-request 自动建 expanded
-// 分区（z-index 派生）与 session-destroyed cleanup 在移动壳消费面之外（移动壳未定义
-// --z-dialog，bandStyle 的 expanded 分支本就无有效投影）。
+// 分区（z-index 派生）与 session-destroyed cleanup 在移动壳消费方之外（移动壳未定义
+// --z-dialog，bandStyle 的 expanded 分支本就无有效派生视图）。
 provide(
   OVERLAY_LIFECYCLE_KEY,
   new OverlayLifecycle({
@@ -85,7 +85,7 @@ provide(
 // 权限审批弹窗状态（companion-bridge bus 订阅驱动，全局单例 session 无关）
 const permission = useMobilePermissionRequest()
 
-// form/planReview 类请求（C4 门排除出 CompanionBand 的富交互面，D7 form 行恢复）：
+// form/planReview 类请求（C4 门排除出 CompanionBand 的富交互入口，D7 form 行恢复）：
 // 队首请求派生 + 快照对账（companion-bridge form 通道）；作答经 respond 回传
 // extension.ui_response 既有通路。form 请求呈现时替换 composer（桌面 FormOverlay 与
 // composer 互斥同构——输入禁止）；planReview 卡与 composer 并存（桌面 PlanReviewBar 同式）。
@@ -130,7 +130,7 @@ function onTokenSubmit(token: string): void {
 }
 
 // 连接成功即拉取会话列表（首屏数据；后续 config.sessions 广播经 SessionApiPort 自动更新）；
-// connected 边沿同时补拉 form/planReview 快照对账（静默重连保持视图挂载、sessionId 不变，
+// connected 边沿同时补充拉取 form/planReview 快照对账（静默重连保持视图挂载、sessionId 不变，
 // 断连期间到达的请求重连后补挂——dialog/permission 通道不在此列：dialog 另立任务、
 // permission 有超时撤窗有界）；并对当前活跃会话触发重连对账（U9/A6——断连期间完成的
 // turn + D1 链外残留窗口经 core 统一编排入口收敛；无活跃会话跳过，未 hydrate 由 core
@@ -227,7 +227,7 @@ watch(isConnected, (connected) => {
             <MobileMessageStream :session-id="activeSessionId" />
           </main>
 
-          <!-- form/planReview 类请求卡（D7 form 行恢复）：C4 门排除的富交互面；
+          <!-- form/planReview 类请求卡（D7 form 行恢复）：C4 门排除的富交互入口；
                form 请求在场时 composer 隐藏（桌面 overlay 与 composer 互斥同构） -->
           <MobileFormCard
             :request="pendingFormRequest"

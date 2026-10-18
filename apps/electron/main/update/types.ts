@@ -72,7 +72,7 @@ export const UPDATE_ERROR_MESSAGES: Record<UpdateErrorCode, Omit<UpdateErrorInfo
     // 'curl connection timeout (...)'）② curl --speed-time 传输停滞（exit 28 另一成因，
     // 诊断串 'curl download stalled (...)'——curl 进程参数属外部引擎，不在删除范围）
     // ③ undici 传输层超时（headers/body timeout 兜出）④ 泛化探测/abort（如 testProxy
-    // 10s 探测超时，诊断串 'timeout (aborted)'）。本条是下载场景的基准文案；用户可见面
+    // 10s 探测超时，诊断串 'timeout (aborted)'）。本条是下载场景的基准文案；用户可见部分
     // 由 update-handlers.resolveTimeoutUserCopy 按诊断 message 成因分流——connect 形态给
     // 连接超时话术（下载文案会误导排查方向），泛化形态给中性超时话术（无下载语境，
     // 「断点续传」指引不适用）。

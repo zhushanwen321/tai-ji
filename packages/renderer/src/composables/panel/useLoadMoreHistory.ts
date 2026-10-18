@@ -1,10 +1,10 @@
 /**
  * useLoadMoreHistory —— 「加载更早」游标翻页的 loading 状态 + handler + 触顶自动加载（从 MessageStream.vue 拆出）。
  *
- * 职责（单一变化轴「load-more 交互态」，原 misplaced 在容器组件 MessageStream.vue 内）：
+ * 职责（单一变化原因「load-more 交互态」，原 misplaced 在容器组件 MessageStream.vue 内）：
  * - loadingMore：加载中状态（驱动按钮 disabled + spinner + 文案切换）。
  * - showLoadMore：是否还有更早历史可加载（[u6] 由 store 截断窗口状态 truncated 派生，非默认 true）。
- * - handleLoadMore：防重入的加载调用（loadingMore/showLoadMore 守卫）——[u6] 走
+ * - handleLoadMore：防重入的加载调用（loadingMore/showLoadMore 检查）——[u6] 走
  *   useChat.loadMoreHistory 游标翻页（D4 中期形态，原 getFullHistory
  *   全量通路已退役），游标 = 分区最旧消息的文件侧身份，runtime 返回锚点之前的最近窗口。
  * - onScrollOffset：**滚到顶自动续载**（2026-09-19 会话实证：历史预算按字节收窗后，重会话
@@ -83,7 +83,7 @@ export function useLoadMoreHistory(
   loadingMore: Ref<boolean>
   /** 是否还有更早历史可加载（store 截断窗口 truncated 派生） */
   showLoadMore: ComputedRef<boolean>
-  /** 防重入加载调用（loadingMore / showLoadMore 守卫） */
+  /** 防重入加载调用（loadingMore / showLoadMore 检查） */
   handleLoadMore: () => Promise<void>
   /** [cw wave w3 / IF8] 顶部插入信号（load-more 期间 true）。
    *  喂给 `<Virtualizer :shift>`：virta 在 shift=true 时按列表**末尾**保位（reverse scroll adjustment），
@@ -115,7 +115,7 @@ export function useLoadMoreHistory(
   /** 是否有更早历史可加载（store 截断窗口 truncated 派生，非默认 true） */
   const showLoadMore = computed(() => checkHasMore(sessionId()))
 
-  // 消费面 computed：读当前 sid 分区（切 sid 自动切视图，无需手动复位）
+  // 消费方 computed：读当前 sid 分区（切 sid 自动切视图，无需手动复位）
   const loadingMore = computed(() => state.current.value.loadingMore)
   const isPrepend = computed(() => state.current.value.isPrepend)
   const loadMoreError = computed(() => state.current.value.loadMoreError)
@@ -172,7 +172,7 @@ export function useLoadMoreHistory(
    *   底的强滚尚未落地且 stickToBottom 被 force 置 true，不会白拉一页历史。
    * - offset ≤ THRESHOLD：触顶判定；续载后 virtua :shift 保位把 offset 抬到阈值以上，
    *   天然节流为「每次主动上滑至顶拉一页」。
-   * 防重入直接复用 handleLoadMore 自身的 loadingMore/showLoadMore 守卫（单一状态源，
+   * 防重入直接复用 handleLoadMore 自身的 loadingMore/showLoadMore 检查（单一状态源，
    * per-session 分区各守各的）。
    */
   function onScrollOffset(offset: number, isDetached: boolean): void {

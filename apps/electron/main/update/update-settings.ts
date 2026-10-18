@@ -15,10 +15,10 @@
  *
  * 依赖方向：update-settings → constants + @taiji/shared + node:fs/path
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import path from 'node:path'
+import { existsSync, readFileSync } from 'node:fs'
 import type { UpdateSettings, UpdateSourcePref } from '@taiji/shared'
 import { getUpdateSettingsFile } from './constants.js'
+import { atomicWriteJsonFile } from '../utils/atomic-write-json.js'
 
 /**
  * updateSource 的合法值集合（多源 D3 三值枚举 SSOT）。
@@ -116,8 +116,8 @@ export function getUpdateSettings(): UpdateSettings {
 /**
  * 写入升级设置（局部更新语义）。
  *
- * 自动 mkdirSync 父目录（recursive）。best-effort：写入失败抛错由调用方决定容错
- * （gateway 层 IPC handler 已有 try/catch 包裹）。
+ * 走 main/utils/atomic-write-json 原子写（自动建父目录）。best-effort：写入失败
+ * 抛错由调用方决定容错（gateway 层 IPC handler 已有 try/catch 包裹）。
  *
  * 合并语义：以现有设置（含默认值）为基底合并传入字段后整体写盘，
  * 调用方只传要修改的字段（如仅 { preDownload } 或仅 { updateSource }），不会覆盖其他开关的持久化值。
@@ -125,9 +125,9 @@ export function getUpdateSettings(): UpdateSettings {
  * 枚举校验兜底），本函数不做校验（与 preDownload/autoUpdate 同策略）。
  */
 export function setUpdateSettings(settings: Partial<UpdateSettings>): void {
-  mkdirSync(path.dirname(getUpdateSettingsFile()), { recursive: true })
   // 合并写入：读现有设置做基底，局部更新不丢其他字段
   const merged: UpdateSettings = { ...getUpdateSettings(), ...settings }
-  // eslint-disable-next-line no-magic-numbers -- 2 = JSON 缩进空格数（人类可读）
-  writeFileSync(getUpdateSettingsFile(), JSON.stringify(merged, null, 2))
+  // 原子写（main/utils/atomic-write-json 缺省档）：update-settings.json 承载用户
+  // 偏好，裸写的崩溃窗口半写会把偏好静默重置（读取侧逐字段回退默认值）
+  atomicWriteJsonFile(getUpdateSettingsFile(), merged)
 }

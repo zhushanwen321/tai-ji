@@ -153,9 +153,9 @@ const COMPONENT_CONSUME: Array<{
   { component: 'Settings', cls: 'bg-surface', prop: 'backgroundColor', varName: '--surface' },
 ]
 
-describe('chromium 轨真实验证（双轨守卫）', () => {
+describe('chromium 轨真实验证（双轨检查）', () => {
   it('chromium 轨真实验证脚本存在（scripts/token-consume-check.mjs，双轨）', () => {
-    // 静态守卫：chromium 轨加载真实 vite dev server + Tailwind JIT 验证组件真实消费
+    // 静态检查：chromium 轨加载真实 vite dev server + Tailwind JIT 验证组件真实消费
     const scriptPath = resolve(
       process.cwd(),
       '..',

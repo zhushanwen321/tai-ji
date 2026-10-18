@@ -6,7 +6,7 @@
  * - mock pi 脚本族（../mock-pi/）扮演现版 pi-plan 扩展行为（cancelled 不落盘 / executeComplete
  *   先清 reviewState 再挂表单 / E3 steer 重挂前提）；
  * - derive-probe.mts 直接调用**现版生产派生函数**（runtime scanPlanStateEntries + renderer
- *   derivePlanStage）——复现判定零镜像面；
+ *   derivePlanStage）——复现判定零镜像；
  * - 代码锚点 = 现版源文件行提取（症状机制的代码证据）。
  *
  * 层级声明：实跑覆盖协议层 / 持久层 / 派生层；GUI 层（审批条渲染态）复现需 dev 实例 +
@@ -103,7 +103,7 @@ try {
     '# mock pi 症状复现基线（F1-F5）',
     '',
     '> U0 验收条款②产物。复现通道 = mock pi 脚本族（`scripts/acceptance/plan-mode/mock-pi/`，模拟**现版** pi-plan 扩展行为）',
-    '> + 真实派生探针 `repro/derive-probe.mts`（直接调用现版 `scanPlanStateEntries` / `derivePlanStage`，零镜像面）',
+    '> + 真实派生探针 `repro/derive-probe.mts`（直接调用现版 `scanPlanStateEntries` / `derivePlanStage`，零镜像）',
     '> + 现版源码行锚点。生成命令：`node scripts/acceptance/plan-mode/repro/repro-baseline.mjs --out .tmp/dev-flow/mock-pi-repro-baseline.md`。',
     '',
     `- 采集时间：${new Date().toISOString()}`,

@@ -354,7 +354,7 @@ publish 规则在后，last-match-wins 时 deny 胜出。
 - 查看决策来源：`PermissionDecision.source`（`mode` / `rule` / `ai` / `user`），区分是模式直接放行、规则命中、AI 分类还是人工审批（AST 分析不直接产生决策，只改变后续评估路径）
 - 查看命中规则：`PermissionDecision.matchedRule`（命中时携带 Rule 对象），从 `id` 可判断是 `builtin-safe`（白名单虚拟规则）、`bd-<n>`（内置危险）还是 `user-<n>`（用户规则）
 - 故意写一条 `deny` + 带 `description` 的用户规则触发拦截，从 tool_result 的 block reason 文案反查命中的是哪条规则
-- 规则 pattern 编译失败不会静默跳过：`resolvePattern` 无容错，非法 pattern 抛出的异常由 tool_call handler 兜底 fail-closed block（该次调用被拦）。实际触发面极窄——`source` 非 `user`/`builtin-safe`/`builtin-danger` 时归一化为 `user`，走 wildcard 编译（特殊字符自动转义，几乎不会失败）；只有手写配置把 `source` 写成 `builtin-danger` 且 pattern 恰为非法正则时才会抛异常。怀疑某条规则没生效时先检查 JSON 语法与 wildcard 写法
+- 规则 pattern 编译失败不会静默跳过：`resolvePattern` 无容错，非法 pattern 抛出的异常由 tool_call handler 兜底 fail-closed block（该次调用被拦）。实际触发范围极窄——`source` 非 `user`/`builtin-safe`/`builtin-danger` 时归一化为 `user`，走 wildcard 编译（特殊字符自动转义，几乎不会失败）；只有手写配置把 `source` 写成 `builtin-danger` 且 pattern 恰为非法正则时才会抛异常。怀疑某条规则没生效时先检查 JSON 语法与 wildcard 写法
 
 ## AI Classifier
 

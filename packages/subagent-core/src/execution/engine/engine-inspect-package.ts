@@ -149,9 +149,9 @@ function resolveVerifiedEngineBin(
 }
 
 /**
- * displayName / description（可选；displayName 缺省 = id 由消费面兜底
+ * displayName / description（可选；displayName 缺省 = id 由消费方兜底
  * （listEnginesByDisplayName 的 `?? id`），快照只存显式值防「缺省填充」被误读；
- * description 当前无消费面，仅做形态校验）。
+ * description 当前无消费方，仅做形态校验）。
  */
 function parseOptionalDisplayFields(m: Record<string, unknown>, id: string): string | undefined {
   let displayName: string | undefined;
@@ -267,7 +267,7 @@ export function inspectEnginePackage(
 
   // ── modelCatalog（可选；缺省 = 不注入保持 undefined——解析器不得把省略填成
   //    models: []，否则省略与「显式空静态目录」不可区分，validateModel 的成员
-  //    实现差异与 buildEmptyModelsHint 触发面都会失真）──
+  //    实现差异与 buildEmptyModelsHint 触发范围都会失真）──
   const modelCatalog = parseModelCatalog(id, m["modelCatalog"]);
 
   // ── modelTranslation（可选；缺省 = undefined = 无翻译面——RemoteEngine 构造器

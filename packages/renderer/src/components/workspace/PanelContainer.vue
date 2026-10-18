@@ -240,7 +240,7 @@
       <!-- 收合过渡期内容保挂载（U6 修复，§6.2 S1「开合动画平顺」）：壳 height 过渡逐帧收拢
            期间终端不同帧卸载（旧形态动画期空抽屉），卸载时机 = leave 过渡结束（Vue Transition
            事件顺序语义，无定时兜底）。Transition 直接子项用无 key 包装层：retry 的 :key 重挂
-           留在内层，chunk 重试换件不经 leave/enter 过渡（chunk 失败占位链断言面不变）。 -->
+           留在内层，chunk 重试换件不经 leave/enter 过渡（chunk 失败占位链断言范围不变）。 -->
       <Transition name="bottom-drawer-content">
         <div v-if="bottomOpen" class="h-full overflow-hidden rounded-[var(--radius-card)] border border-border bg-surface shadow-[var(--shadow-1)]" :class="DRAWER_FOCUS_SCOPE">
           <TerminalView
@@ -305,7 +305,7 @@ import { createLazyChunkRetry } from '@/components/ui/lazy-chunk-retry'
 // （xterm 移出首屏初始请求集合）；WorkflowTab（抽屉 workflow 回落内容）同为懒加载挂载点
 // ——它同时是浮层装载失败的回落目标（display-containers §5.3），回落目标自身的 chunk 也
 // 可能失败（file:// chunk 404），必须挂同一 AsyncErrorFallback 占位链才有「回落目标失败 →
-// 占位」的呈现面。其余条件挂载面板（GitPanel/CommandDocPanel/SubagentTab）不拆：
+// 占位」的呈现侧。其余条件挂载面板（GitPanel/CommandDocPanel/SubagentTab）不拆：
 // 均无重第三方依赖（重依赖判据不满足），拆分只引入 async 边界无字节收益。
 // 错误兜底（§3.5 · D6 2026-10-03 用户裁决改版）：界面无重试按钮——装载失败由内部有界自动
 // 重试承接（createLazyChunkRetry：3 次 × 300ms 递增退避，失败 URL 提取 + ?t=N cache-busting
@@ -498,7 +498,7 @@ watch(panelSessionId, () => {
 /**
  * [display-containers §6.7 W1] ESC 关抽屉已并入键盘栈序编排器（key-orchestrator 唯一属主）：
  * 旧壳层 window keydown 监听已拆除——双监听双触发（一次 Esc 连剥两层），且 Esc 需按焦点
- * 所有权分派 + 固定层级序 + 模态/局部消费方让位守卫，非本壳单点可判。用户可感知行为由
+ * 所有权分派 + 固定层级序 + 模态/局部消费方让位检查，非本壳单点可判。用户可感知行为由
  * 编排器承接（含终端聚焦态让位）。
  */
 

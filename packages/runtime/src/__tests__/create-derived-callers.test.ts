@@ -1,5 +1,5 @@
 /**
- * create 派生调用方登记完整性与传参承诺守卫测试（静态扫描）。
+ * create 派生调用方登记完整性与传参承诺检查测试（静态扫描）。
  *
  * 锁定行为（sidecar-binding-sync 设计文档 §3.3 决策 1b / G2 / A5 变异 4）：所有
  * `sessionService.create(` 的派生调用点必须在
@@ -58,7 +58,7 @@ const FORBIDDEN_FIELDS_BY_SEMANTIC: Record<CreateDerivedCaller['semantic'], read
   // 的登记注释与 session-manager-handler 单测的伪造参数断言）。
   // 本通道其余写入字段（spawnSource / parentAgentSessionId）不属本清单：它们由服务端
   // 从路由上下文注入、同样不读请求参数，属「允许透传的绑定字段」（登记 passedBindingFields
-  // 承诺 + handler 的 params 信任边界守卫），列入禁传会与本通道实际传参自相矛盾。
+  // 承诺 + handler 的 params 信任边界检查），列入禁传会与本通道实际传参自相矛盾。
   // 「不得由请求参数携带」的精神由 handler 侧单测（伪造 spawnSource/parentAgentSessionId
   // 被忽略）与登记注释共同保全。
   'agent-managed': [],
@@ -88,7 +88,7 @@ function extractSessionCreateWindows(content: string) {
   return extractCallWindows(content, /sessionService\.create\(/g)
 }
 
-describe('CREATE_DERIVED_CALLERS 入口清单守卫（sidecar-binding-sync §3.3 决策 1b）', () => {
+describe('CREATE_DERIVED_CALLERS 入口清单检查（sidecar-binding-sync §3.3 决策 1b）', () => {
   it('静态扫描 sessionService.create( 命中文件集合与登记清单完全相等（双向：漏登记红 / 失效登记红）', () => {
     const hitFiles = new Set<string>()
     for (const absPath of listSourceFiles(SRC_DIR)) {
@@ -104,7 +104,7 @@ describe('CREATE_DERIVED_CALLERS 入口清单守卫（sidecar-binding-sync §3.3
     expect(unregistered, [
       '发现未登记的 sessionService.create 派生调用点：',
       ...unregistered.map((f) => `  - ${f}`),
-      '新调用点的绑定字段传参必须受守卫约束——请到 infra/pi/session-binding-fields.ts 的',
+      '新调用点的绑定字段传参必须受检查约束——请到 infra/pi/session-binding-fields.ts 的',
       'CREATE_DERIVED_CALLERS 登记该文件（file / semantic / passedBindingFields），见设计文档 §3.3 决策 1b 与 G2。',
     ].join('\n')).toEqual([])
 

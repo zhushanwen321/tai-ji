@@ -25,7 +25,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:f
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-/** 落盘行形态（JSON 行反序列化后的最小断言面；kind/dropped 为汇总行字段）。 */
+/** 落盘行形态（JSON 行反序列化后的最小断言范围；kind/dropped 为汇总行字段）。 */
 interface ConsoleLine {
   ts: string
   windowId: number

@@ -1,7 +1,7 @@
 /**
- * ClaimLedger 测试共享 harness：手动时钟 + ledger 台账自动回收 + 每例重置。
+ * ClaimLedger 测试共享 harness：手动时钟 + ledger journal 自动回收 + 每例重置。
  *
- * 供 notify-claims 系测试文件共用（makeLedger 工厂 / 时钟推进 / 台账兜底回收）；
+ * 供 notify-claims 系测试文件共用（makeLedger 工厂 / 时钟推进 / journal 兜底回收）；
  * vi.useFakeTimers/useRealTimers 由各测试文件在自身钩子里调用（fake timers 的主语是
  * 测试文件，保证工厂内 TTL 清扫 setInterval 不落真实事件循环——AGENTS.md timer 规则）。
  */

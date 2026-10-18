@@ -144,7 +144,7 @@ describe('不变量 1 · 名称字符集（复刻 pi SERVER_NAME）', () => {
     ['my server', false], // 空格
     ['服务器', false], // 非 ASCII
     ['a.b', false], // 点
-    ['a/b', false], // 斜杠（路径注入面）
+    ['a/b', false], // 斜杠（路径注入点）
     ['a:b', false], // 冒号
     ['', false], // 空串
   ])('名称 %j 合法性 = %j', (name, valid) => {
@@ -621,7 +621,7 @@ describe('setMcpServerEnabled · 启停专用操作（仅翻转 enabled 键，�
     expect(produced.enabled).toBeUndefined()
   })
 
-  it('吃进锁内最新磁盘内容：外部并发改动（新字段/新条目）不被清单旧投影覆盖（D2）', () => {
+  it('吃进锁内最新磁盘内容：外部并发改动（新字段/新条目）不被清单旧派生视图覆盖（D2）', () => {
     useFile({ mcpServers: { s: { command: 'npx' }, other: { url: 'https://x' } } })
     // 模拟清单打开后外部手编改动
     writeFileSync(

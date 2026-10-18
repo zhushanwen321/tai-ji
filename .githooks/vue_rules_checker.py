@@ -239,7 +239,7 @@ def find_split_justified_domain(content: str) -> str | None:
     """提取文件头登记的 split-justified 豁免语义域；未登记或登记无效返回 None。
 
     认可的登记形态（均须在注释语境内、位于文件头前 SPLIT_JUSTIFIED_SCAN_LINES 行）：
-      <!-- split-justified: <语义域> -->   （SFC 文件头 HTML 注释，须同行闭合）
+      <!-- split-justified: <语义域> -->   （SFC 文件头 HTML 注释，须同行封口）
       // split-justified: <语义域>         （script 内行注释；/* 块注释与 * 续行同样接受）
     标记存在但语义域为空（`split-justified:` / 纯空白）视为未登记；首个标记定性，
     不向后继续扫描（防止堆叠多个标记直到某个通过）。
@@ -255,7 +255,7 @@ def find_split_justified_domain(content: str) -> str | None:
         if text.startswith('<!--'):
             m = re.match(r'<!--(.*)-->\s*$', text)
             if not m:
-                continue  # 跨行 HTML 注释首行（未同行闭合）不认，登记须单行自足
+                continue  # 跨行 HTML 注释首行（未同行封口）不认，登记须单行自足
             text = m.group(1)
         else:
             text = re.sub(r'^(?:/{2}|/\*|\*)\s*', '', text)

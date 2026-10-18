@@ -42,7 +42,7 @@ import * as events from '../events'
 // 此处统一解包对应字段，与 session.list 解包 `.groups` 同构。mock 门面有独立实现不受影响。
 // scoped-model D7：reply 与 config.providers 广播同形（protocol.ts 'config.getProviders' 映射
 // ServerMessageMap['config.providers']），scopedModels 透传给 refreshProviders 消费（[] 与 undefined 语义不同：
-// [] = 空白名单，undefined = reply 未携带，由消费方守卫区分）。
+// [] = 空白名单，undefined = reply 未携带，由消费方检查区分）。
 export async function listProviders(): Promise<{ providers: ProviderInfo[]; scopedModels?: string[] }> {
   const reply = await command('config.getProviders', {}, RPC_BACKSTOP_TIMEOUT_MS)
   return { providers: reply.providers, scopedModels: reply.scopedModels }
@@ -194,9 +194,9 @@ export function onSkillDirs(handler: (dirs: SkillDirConfig[]) => void): () => vo
 }
 
 /**
- * 订阅 skill 缓存失效信号（landing useGlobalSkills/useProjectSkills 失效缓存重拉）。
+ * 订阅 skill 缓存失效信号（landing useGlobalSkills/useProjectSkills 失效缓存重新拉取）。
  * 与 onSkills 区分：onSkills 推全量 skill 列表给 settingsStore（settings 弹窗用）；
- * onSkillCacheInvalidated 推失效信号给 landing composable（runtime 已重扫缓存，前端重拉即拿新值）。
+ * onSkillCacheInvalidated 推失效信号给 landing composable（runtime 已重扫缓存，前端重新拉取即拿新值）。
  *
  * payload 与 shared protocol.ts 的 config.skillCacheInvalidated 一致：
  * - scope='global'：全局 skill 变动，所有 panel 刷全局缓存（cwd 缺省）

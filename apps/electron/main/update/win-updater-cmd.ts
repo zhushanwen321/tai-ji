@@ -87,7 +87,7 @@ function assertCmdSafe(name: string, value: string): void {
  * 生成 win wrapper cmd 脚本。
  *
  * @throws TypeError 注入值含 cmd 危险字符或 parentPid 缺失（与 mac/linux 同契约：
- *         无父 PID 就没有可靠的「等 app 退出」守卫，宁可不升级）
+ *         无父 PID 就没有可靠的「等 app 退出」检查，宁可不升级）
  */
 export function buildWinUpdaterCmd(vars: WinUpdaterCmdVars): string {
   assertCmdSafe('installerPath', vars.installerPath)
@@ -112,7 +112,7 @@ export function buildWinUpdaterCmd(vars: WinUpdaterCmdVars): string {
 // ── win wrapper cmd 模板（§3.4.1 五步）──────────────────────────
 // 结构要点：
 // - goto 式流程（非圆括号块）：unquoted /D= 值可能含括号（如 Program Files (x86)），
-//   圆括号块内的 `)` 会提前闭合块；顶层行内括号是字面量，goto 流程规避该解析坑。
+//   圆括号块内的 `)` 会提前结束块；顶层行内括号是字面量，goto 流程规避该解析坑。
 // - call :main >> "%LOG%" 2>&1：单点重定向收集全程日志（cmd 无 exec 重定向等价物）。
 // - result 经 :write_result 子例程写：> tmp + move /y 同卷 rename（m12 原子写语义）。
 // - "at" 用 %DATE% %TIME% 本地格式：cmd 无内建 ISO 时间，不引入 PowerShell 依赖；

@@ -1,7 +1,7 @@
 /**
  * /workflows 命令的 resume 通道契约（workflow-run-resume-revision U3 + F1-26 后续项）。
  *
- * 覆盖面（TUI 模式）：/workflows resume <runId> [model] → 执行断点续跑后 notify，
+ * 覆盖范围（TUI 模式）：/workflows resume <runId> [model] → 执行断点续跑后 notify，
  * 不打开面板；缺 runId → Usage 提示（含可选 [model]）；resumeRun 拒绝 → warning
  * notify 透出恢复指引文案；显式 model 的 handler 透传（第三参 { model } / 无 model
  * 不落键）与目录预检拒单（与 tool 通道同款 D8 语义）。

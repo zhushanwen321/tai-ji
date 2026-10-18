@@ -1,17 +1,17 @@
 /**
- * zcode 会话库路径段常量同源守卫（MF-1-2 收编后形态）。
+ * zcode 会话库路径段常量同源检查（MF-1-2 收编后形态）。
  *
  * 路径段 SSOT = `@zhushanwen/subagent-engine-sdk` zcode-db-paths.ts（跨侧契约根）：
  * zcode-cli db-path.ts（引擎写侧）与 runtime sqlite-access.ts（import 读侧）import
- * 同一常量，不再是各自重声明的同形字面量。本守卫四层：
+ * 同一常量，不再是各自重声明的同形字面量。本检查四层：
  *   ① 权威常量值独立展开断言（期望值逐段写死——SSOT 自身被改错时红）；
- *   ② runtime 侧函数输出与权威常量 join 等价（同源引用的行为面断言）；
- *   ③ 脚本投影文本比对：scripts/zcode-session-db-cleanup.mjs 为纯 ESM（无 TS 构建
+ *   ② runtime 侧函数输出与权威常量 join 等价（同源引用的行为范围断言）；
+ *   ③ 脚本字面量文本比对：scripts/zcode-session-db-cleanup.mjs 为纯 ESM（无 TS 构建
  *      链）无法 import SSOT，保留等价 JS 字面量——逐段比对权威常量；
- *   ④ 重声明扫描：契约相关源码树内四段数组字面量只允许出现在 SSOT 与脚本投影
+ *   ④ 重声明扫描：契约相关源码树内四段数组字面量只允许出现在 SSOT 与脚本字面量
  *      两处（任何包新增重声明即红——取代旧「三处文本互相比对」形态）。
  *
- * 引擎侧（zcode-cli）的值正确性由其自身测试的独立展开断言守卫
+ * 引擎侧（zcode-cli）的值正确性由其自身测试的独立展开断言检查
  * （zcode-session-db-isolation.test.ts「路径单一来源」节），不在此重复。
  */
 
@@ -37,7 +37,7 @@ function extractSuffixSegments(file: string, constName: string): string[] {
   const text = readFileSync(resolve(REPO_ROOT, file), 'utf8')
   const m = text.match(new RegExp(`\\b${constName}\\b\\s*=\\s*\\[([^\\]]*)\\]`))
   if (!m) {
-    throw new Error(`${file} 未找到 ${constName} 数组字面量——常量改名或迁移后须同步本守卫`)
+    throw new Error(`${file} 未找到 ${constName} 数组字面量——常量改名或迁移后须同步本检查`)
   }
   return [...m[1].matchAll(/['"]([^'"]+)['"]/g)].map((s) => s[1])
 }
@@ -47,7 +47,7 @@ function extractJoinSegments(file: string, fnName: string): string[] {
   const text = readFileSync(resolve(REPO_ROOT, file), 'utf8')
   const m = text.match(new RegExp(`function ${fnName}\\([^)]*\\)[\\s\\S]*?\\bjoin\\(([^)]*)\\)`))
   if (!m) {
-    throw new Error(`${file} 未找到 ${fnName} 的 join 调用——函数改名或迁移后须同步本守卫`)
+    throw new Error(`${file} 未找到 ${fnName} 的 join 调用——函数改名或迁移后须同步本检查`)
   }
   return [...m[1].matchAll(/['"]([^'"]+)['"]/g)].map((s) => s[1])
 }
@@ -71,7 +71,7 @@ describe('① 路径段 SSOT（engine-sdk zcode-db-paths）值独立展开断言
   })
 })
 
-describe('② runtime 侧函数输出与 SSOT 常量 join 等价（同源引用行为面）', () => {
+describe('② runtime 侧函数输出与 SSOT 常量 join 等价（同源引用行为范围）', () => {
   it('zcodeIsolatedDbPath(dataDir) = join(dataDir, ...ZCODE_ISOLATED_DB_SEGMENTS)', () => {
     expect(zcodeIsolatedDbPath('/data-root')).toBe(join('/data-root', ...ZCODE_ISOLATED_DB_SEGMENTS))
   })
@@ -81,7 +81,7 @@ describe('② runtime 侧函数输出与 SSOT 常量 join 等价（同源引用�
   })
 })
 
-describe('③ 脚本投影（zcode-session-db-cleanup.mjs，纯 ESM 无法 import SSOT）文本比对', () => {
+describe('③ 脚本字面量（zcode-session-db-cleanup.mjs，纯 ESM 无法 import SSOT）文本比对', () => {
   it('HOST_DB_SUFFIX 与 SSOT 逐段一致', () => {
     expect(extractSuffixSegments('scripts/zcode-session-db-cleanup.mjs', 'HOST_DB_SUFFIX')).toEqual([
       ...ZCODE_HOST_DB_SUFFIX,
@@ -95,8 +95,8 @@ describe('③ 脚本投影（zcode-session-db-cleanup.mjs，纯 ESM 无法 impor
   })
 })
 
-describe('④ 重声明扫描：四段数组字面量只允许 SSOT 与脚本投影两处', () => {
-  /** 契约相关源码树（两侧消费面 + 宿主侧大包 + 脚本目录）内扫描四段数组字面量的命中文件。 */
+describe('④ 重声明扫描：四段数组字面量只允许 SSOT 与脚本字面量两处', () => {
+  /** 契约相关源码树（两侧消费方 + 宿主侧大包 + 脚本目录）内扫描四段数组字面量的命中文件。 */
   function scanRedeclarations(): string[] {
     const roots = [
       'packages/runtime/src',
@@ -132,7 +132,7 @@ describe('④ 重声明扫描：四段数组字面量只允许 SSOT 与脚本投
     return hits.sort()
   }
 
-  it('命中集合恰为 [SSOT, 脚本投影]（任何包重声明四段字面量即红）', () => {
+  it('命中集合恰为 [SSOT, 脚本字面量]（任何包重声明四段字面量即红）', () => {
     expect(scanRedeclarations()).toEqual([
       'packages/subagent-engine-sdk/src/zcode-db-paths.ts',
       'scripts/zcode-session-db-cleanup.mjs',

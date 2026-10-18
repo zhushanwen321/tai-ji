@@ -4,7 +4,7 @@
  * 锁定（内存审计 ADR-0069 G4「ImportSessionDialog close() 清扫描结果」；原文档已删除 git 可追溯）：
  *  - C1 关闭即清：items/dirs/total（候选全量快照，可达数百条对象）随 close 置空——
  *    对话框是全局单例 UI，无 session 生命周期兜底，不清则驻留到下次打开
- *  - C2 在途失效：close 后迟到的候选响应不回填（requestSeq++ 使 stale 写回守卫拦截）
+ *  - C2 在途失效：close 后迟到的候选响应不回填（requestSeq++ 使 stale 写回检查拦截）
  *  - C3 debounce 取消：close 清 pending debounce（组件侧 watch(open) 注释承诺的
  *    「取消 pending debounce」在 composable 落实）——关窗后不再发出新查询
  *
@@ -105,10 +105,10 @@ describe('useImportSession close() 清扫描结果（G4/u10）', () => {
     vi.useRealTimers()
   })
 
-  it('C1: 打开写入候选 → close() 清 items/dirs/total + open 收口', async () => {
+  it('C1: 打开写入候选 → close() 清 items/dirs/total + open 收尾', async () => {
     const t = mountComposable()
     t.s.resetForOpen()
-    t.s.selectSource('pi') // 选定缺省源（两阶段视图：resetForOpen 不首拉，首拉由 selectSource 承担）
+    t.s.selectSource('pi') // 选定缺省源（两阶段视图：resetForOpen 不首次拉取，首次拉取由 selectSource 承担）
     await flushPromises()
     expect(t.s.open.value).toBe(true)
     expect(t.counts()).toBe('2/2/2')
@@ -133,7 +133,7 @@ describe('useImportSession close() 清扫描结果（G4/u10）', () => {
     )
     const t = mountComposable()
     t.s.resetForOpen()
-    t.s.selectSource('pi') // 发起首拉（在途）
+    t.s.selectSource('pi') // 发起首次拉取（在途）
     t.s.close() // 关闭（清结果 + 失效在途写回）
     resolveFetch?.({
       items: [makeCandidate('late-1')],
@@ -149,7 +149,7 @@ describe('useImportSession close() 清扫描结果（G4/u10）', () => {
     vi.useFakeTimers()
     const t = mountComposable()
     t.s.resetForOpen()
-    t.s.selectSource('pi') // 选定缺省源（首拉，调用 #1）
+    t.s.selectSource('pi') // 选定缺省源（首次拉取，调用 #1）
     await vi.advanceTimersByTimeAsync(0)
     expect(apiMocks.importCandidates).toHaveBeenCalledTimes(1)
 

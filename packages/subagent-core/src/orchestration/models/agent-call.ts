@@ -1,7 +1,7 @@
 /**
  * Workflow Extension — AgentCall 实体
  *
- * 单次 agent 调用的数据 + 不变式守卫（D-12）。纯数据，无 execute 上帝方法——
+ * 单次 agent 调用的数据 + 不变式检查（D-12）。纯数据，无 execute 上帝方法——
  * 执行编排（重试+预算+stale 检测）在 execute-agent-call.ts 的 free function。
  *
  * - 状态机：pending → running → done（不可逆）

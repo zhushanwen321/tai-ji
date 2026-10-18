@@ -29,7 +29,7 @@ import { createMockVlist } from './_virtua-mock-helper'
 
 // ── 测试数据工厂 ────────────────────────────────────────────────────
 
-/** 构造一个 turn RenderItem（index 可控；content 缺省 'q'，rail 投影摘要 = 'q'）。 */
+/** 构造一个 turn RenderItem（index 可控；content 缺省 'q'，rail 派生视图摘要 = 'q'）。 */
 function turnItem(index: number, content = 'q'): RenderItem {
   return {
     kind: 'turn',
@@ -200,10 +200,10 @@ describe('useMessageStreamRail · streaming perf（railTurns 引用恒等 + O(1)
     wrapper.unmount()
   })
 
-  it('turn 引用变化且 rail 投影摘要变化 → railTurns 产出新数组且未变成员引用逐项保留', () => {
+  it('turn 引用变化且 rail 派生视图摘要变化 → railTurns 产出新数组且未变成员引用逐项保留', () => {
     // 行为不变反面：末位 turn 的 rail 可见内容变化（user 正文变 → 摘要变）必须照常产出
     // 新数组（不能过度缓存吞掉真实变更）；此处同时换 index 与 content 保证新旧引用与
-    // 投影签名都不同。
+    // 派生视图签名都不同。
     const base = makeRenderItems()
     const { rail, renderItemsRef, wrapper } = mountRail({ renderItems: base })
     const first = rail.railTurns.value
@@ -219,14 +219,14 @@ describe('useMessageStreamRail · streaming perf（railTurns 引用恒等 + O(1)
     wrapper.unmount()
   })
 
-  it('仅末位 turn 引用不同且 rail 投影摘要未变 → railTurns 复用旧数组引用（投影恒等放宽）', () => {
+  it('仅末位 turn 引用不同且 rail 派生视图摘要未变 → railTurns 复用旧数组引用（派生视图恒等放宽）', () => {
     // streaming perf：末位 turn 每 delta 帧新引用（ADR-0039 不可变替换），但 rail 显示的
     // 摘要（userSummary/agentSummary/failed/iconClass）未变 → TurnRail render 输出不变，
     // 旧数组引用复用让 TurnRail props 不变 → 常驻面板零 vnode diff。
     const base = makeRenderItems()
     const { rail, renderItemsRef, wrapper } = mountRail({ renderItems: base })
     const first = rail.railTurns.value
-    const rebuiltLast = turnItem(4) // content 同为 'q' → rail 投影摘要相同
+    const rebuiltLast = turnItem(4) // content 同为 'q' → rail 派生视图摘要相同
 
     renderItemsRef.value = [base[0]!, base[1]!, rebuiltLast]
 
@@ -234,7 +234,7 @@ describe('useMessageStreamRail · streaming perf（railTurns 引用恒等 + O(1)
     wrapper.unmount()
   })
 
-  it('投影恒等复用后 onJump 末位 rail 下标仍跳到当前最新 turn（结构定位兜底）', () => {
+  it('派生视图恒等复用后 onJump 末位 rail 下标仍跳到当前最新 turn（结构定位兜底）', () => {
     // 旧数组末位持旧引用，按引用 findIndex 必 miss → 兜底「第 idx 个 turn 项」定位，
     // 仍指向 renderItems 中当前末位 turn（重建后的新引用），跳转语义不变。
     const base = makeRenderItems()
@@ -252,7 +252,7 @@ describe('useMessageStreamRail · streaming perf（railTurns 引用恒等 + O(1)
     wrapper.unmount()
   })
 
-  it('投影恒等复用后 updateActiveTurnIndex 对末位新引用仍定位末位下标（补映射不退化）', () => {
+  it('派生视图恒等复用后 updateActiveTurnIndex 对末位新引用仍定位末位下标（补映射不退化）', () => {
     // 放宽帧返回旧数组时同步补末位下标映射：滚动反查到末位新引用时 O(1) 命中，
     // activeTurnIndex 保持末位（2），不退化 findIndex/-1。
     const base = makeRenderItems()
@@ -286,7 +286,7 @@ describe('useMessageStreamRail · streaming perf（railTurns 引用恒等 + O(1)
     wrapper.unmount()
   })
 
-  it('O(1) 索引随 railTurns 重建同步更新：同一 turn 引用移动下标后仍定位新下标（守卫索引过期回归）', () => {
+  it('O(1) 索引随 railTurns 重建同步更新：同一 turn 引用移动下标后仍定位新下标（检查索引过期回归）', () => {
     // 陈旧索引会把复用引用的 turn 定位到旧下标（indicator 高亮错位）——数组引用一变索引必须重建。
     const moved = turnItem(2)
     const findItemIndex = vi.fn(() => 1) // renderItems[1] = moved → rail 下标 1

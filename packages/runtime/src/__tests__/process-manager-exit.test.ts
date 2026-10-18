@@ -43,7 +43,7 @@ const fakeProc = {
     on: vi.fn(),
   },
   // 模拟真实进程：收到 SIGTERM/SIGKILL 后异步死亡（信号致死 → exit code null）。
-  // 让 destroySession 的 kill() 快速收口（不必等 2s SIGKILL 兜底超时）。
+  // 让 destroySession 的 kill() 快速收尾（不必等 2s SIGKILL 兜底超时）。
   kill: vi.fn((signal?: string) => {
     if (signal === 'SIGTERM' || signal === 'SIGKILL') {
       queueMicrotask(() => {
@@ -62,7 +62,7 @@ vi.mock('node:child_process', () => ({
     throw new Error('execSync mocked: not found')
   },
   // MF-3 采样心跳探针：ProcessTableRing.listAllProcesses 的 ps 执行体。每次 ps 调用
-  //（= 一次采样动作）计数 +1，测试以计数增长断言「环在转、有采样」这个行为面，
+  //（= 一次采样动作）计数 +1，测试以计数增长断言「环在转、有采样」这个行为范围，
   // 不窥 ring 内部定时器实现。
   execFile: (_file: unknown, _args: unknown, _opts: unknown, cb: (err: null, stdout: string) => void) => {
     psProbeCalls.count += 1
@@ -207,7 +207,7 @@ describe('ProcessManager onExit 死亡通知', () => {
  * 再 start，新进程生命周期零采样。修复后 start 移到 destroy 之后（入册后再幂等重申）：
  * 重启结束环必须恢复运行并有采样。
  *
- * 断言用 ps 采样心跳计数（行为面：环在转的外显后果就是周期性 ps 采样），不窥 ring
+ * 断言用 ps 采样心跳计数（行为范围：环在转的外显后果就是周期性 ps 采样），不窥 ring
  * 内部定时器。start() 的首帧采样在 createSession 解析前已同步计数，此后计数继续增长
  * 只能来自间隔定时器——「重启结束后计数仍在增长」即证明环恢复运行。
  */

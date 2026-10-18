@@ -8,10 +8,10 @@
  *   供 landing slash 命令源（FR-5：不再走 settingsStore.skills 配置态扫描）。
  *
  * Wave3 改动（订阅 skill 缓存失效信号）：
- * - useGlobalSkills 订阅 config.skillCacheInvalidated scope='global' → loadGlobal(true) force 重拉。
+ * - useGlobalSkills 订阅 config.skillCacheInvalidated scope='global' → loadGlobal(true) force 重新拉取。
  *   修复原永久失败 bug：catch 分支不再置 globalLoaded=true，保留旧缓存值，允许下次失效信号触发重试。
  * - useProjectSkills 用模块级失效信号机制：scope='project' 信号 → 携带 cwd 的 signal → 各实例 watch
- *   清自己的 skillsByCwd（有 cwd 只清该分区，无 cwd 保守清所有）+ 重拉当前 cwd。signal 是模块级 ref，
+ *   清自己的 skillsByCwd（有 cwd 只清该分区，无 cwd 保守清所有）+ 重新拉取当前 cwd。signal 是模块级 ref，
  *   所有实例共享一份订阅（避免每个 Composer 实例重复挂订阅）。
  *
  * PR #123 review fix（B1/W4/W3/W2/S1/S3）：
@@ -19,23 +19,23 @@
  *   新实例拿到新 ref、失效信号仍写首个实例旧 ref 导致活跃 Composer 不刷新的 bug。
  * - W4：loadFor catch 不写空数组到 cache，失败后 cache miss 仍在，watch/失效信号可重试（修复 project 侧永久失败）。
  * - W3：project 失效信号尊重 payload.cwd，有 cwd 只清该分区，无 cwd（setSkillDirs 全局配置变更）才保守清所有。
- * - W2：loadGlobal force 重拉用 pendingForceReload 合并并发 force，避免快速触发 N 次失效信号串联 N 次 RPC。
- * - S1：projectInvalidateSubscribed 守卫移除（模块顶层只执行一次，守卫冗余）。
- * - S3：useGlobalSkills() 首次拉取用 if (!globalLoaded) 守卫，意图明确。
+ * - W2：loadGlobal force 重新拉取用 pendingForceReload 合并并发 force，避免快速触发 N 次失效信号串联 N 次 RPC。
+ * - S1：projectInvalidateSubscribed 检查移除（模块顶层只执行一次，检查冗余）。
+ * - S3：useGlobalSkills() 首次拉取用 if (!globalLoaded) 检查，意图明确。
  *
  * 设计取舍：
  * - useGlobalSkills 用模块级 singleton（cache + loaded flag + 模块级 globalSkills ref）：全局 skill 是
  *   AppShell 级数据，所有 landing CommandPopover 共享一份。首次调用触发 RPC，后续命中缓存。runtime 侧
  *   SkillRegistry 有 chokidar watcher 自动刷新 globalCache，wave3 起前端订阅 config.skillCacheInvalidated
- *   信号实时重拉。globalSkills 为模块级 ref 保证 Composer 重挂后失效信号仍刷新活跃实例。
+ *   信号实时重新拉取。globalSkills 为模块级 ref 保证 Composer 重挂后失效信号仍刷新活跃实例。
  * - useProjectSkills 保持实例级 Map<cwd, SkillInfo[]>（按 cwd key 隔离，切 cwd 切分区）。
  *   消费者是各 Composer 实例（landing 单例 + panel per-session，split mode 多 panel 多实例）：
  *   per-instance 缓存下同 cwd 各实例各拉一次 RPC、失效信号逐实例刷新——冗余可接受，
  *   未来需要跨实例共享再提升到模块级或 store。
  * - 失效信号订阅为模块级单例（只执行一次），project 侧用模块级 signal watch 让订阅与实例数解耦。
  *   [C3] 订阅在首次 useProjectSkills/useGlobalSkills 调用时挂载（seam fail-fast 注入序要求
- *   不可在模块 import 期注册）；信号只推进版本号驱动重拉，挂载前到达的信号不影响新实例
- *   自拉取（首拉即新值），行为等价。
+ *   不可在模块 import 期注册）；信号只推进版本号驱动重新拉取，挂载前到达的信号不影响新实例
+ *   自拉取（首次拉取即新值），行为等价。
  */
 import { computed, ref, watch, type Ref } from 'vue'
 import { createInflightDedup } from '@taiji/core/foundation/create-inflight-dedup'
@@ -46,8 +46,8 @@ import type { SkillCacheInvalidatedPayload, SkillInfo } from '@taiji/shared'
 // 收到 scope='project' 失效信号时推进 version 并携带 cwd：
 // - 有 cwd（磁盘 watcher 触发的具体项目目录变更）：只清该 cwd 分区。
 // - 无 cwd（setSkillDirs 改全局配置，所有 cwd 都可能受影响）：保守清所有。
-// S1：与 useGlobalSkills 同款订阅守卫（只挂一次）。
-// taste:allow-no-data-owner W24-EX-B（模块级单例 UI 瞬态，12 类未覆盖存量，登记草稿）：skills 失效信号版本号（watch 驱动重拉，12 类未覆盖）
+// S1：与 useGlobalSkills 同款订阅检查（只挂一次）。
+// taste:allow-no-data-owner W24-EX-B（模块级单例 UI 瞬态，12 类未覆盖存量，登记草稿）：skills 失效信号版本号（watch 驱动重新拉取，12 类未覆盖）
 const projectInvalidateSignal = ref<{ version: number; cwd?: string }>({ version: 0 })
 let projectInvalidateSubscribed = false
 function ensureProjectInvalidateSubscription(): void {
@@ -92,7 +92,7 @@ export function useProjectSkills(currentCwd: Ref<string | null>) {
   /**
    * 拉取某 cwd 的 project skill 并写缓存（best-effort：RPC 失败不崩）。
    * W4：catch 不写空数组到 cache，失败后 cache miss 仍在，下次 watch/失效信号触发会重试
-   * （修复原永久失败 bug：原 catch 写空数组导致 has(cwd) 命中、watch 守卫永不重试）。
+   * （修复原永久失败 bug：原 catch 写空数组导致 has(cwd) 命中、watch 检查永不重试）。
    */
   async function loadFor(cwd: string): Promise<void> {
     inFlight.add(cwd)
@@ -132,7 +132,7 @@ export function useProjectSkills(currentCwd: Ref<string | null>) {
     { immediate: true },
   )
 
-  // 监听模块级失效信号：signal 变 → 按是否带 cwd 选择性清缓存 → 重拉当前 cwd
+  // 监听模块级失效信号：signal 变 → 按是否带 cwd 选择性清缓存 → 重新拉取当前 cwd
   watch(projectInvalidateSignal, (signal) => {
     if (signal.cwd) {
       // 有具体 cwd（磁盘 watcher 触发的项目目录变更）：只清该分区
@@ -141,7 +141,7 @@ export function useProjectSkills(currentCwd: Ref<string | null>) {
         next.delete(signal.cwd)
         skillsByCwd.value = next
       }
-      // 只在当前 cwd 正是受影响 cwd 时重拉
+      // 只在当前 cwd 正是受影响 cwd 时重新拉取
       const currentC = currentCwd.value
       if (currentC === signal.cwd && !inFlight.has(currentC)) {
         void loadFor(currentC)
@@ -162,23 +162,23 @@ export function useProjectSkills(currentCwd: Ref<string | null>) {
 // ── useGlobalSkills：模块级 singleton 缓存 ──────────────────────────
 // 全局 skill 是 AppShell 级数据，所有 landing CommandPopover 共享一份。模块级 singleton 保证
 // 首次调用触发一次 RPC，后续命中缓存。Wave3 改造：订阅 config.skillCacheInvalidated 失效信号，
-// 收到 scope='global' 时 force 重拉（runtime 侧 SkillRegistry 已重扫 globalCache）。
+// 收到 scope='global' 时 force 重新拉取（runtime 侧 SkillRegistry 已重扫 globalCache）。
 // B1：globalSkills 提升为模块级 ref，所有 useGlobalSkills() 调用共享同一份，修复 Composer 重挂后
 // 失效信号仍写旧实例 ref 导致活跃 Composer 不刷新的 bug。
 let globalSkillsCache: SkillInfo[] | null = null
 let globalLoaded = false
 // W2 收编：原单 Promise 变量 globalInFlight 改为 createInflightDedup 固定 key 退化形态
 // （state-truth-sync §3.3 D9）——同 key 复用 / settle 即清（等价原 finally 置 null，且
-// settle 清理先于调用方 await 恢复，force fall-through 重拉必发起新 RPC）/ 引用比对防
+// settle 清理先于调用方 await 恢复，force fall-through 重新拉取必发起新 RPC）/ 引用比对防
 // 误删由 factory 内建。
 const GLOBAL_SKILLS_FETCH_KEY = 'global'
 const globalSkillsFetchDedup = createInflightDedup<SkillInfo[]>()
 // 模块级单例 ref，所有 useGlobalSkills() 调用共享
 // taste:allow-no-data-owner W24-EX-B（模块级单例 UI 瞬态，12 类未覆盖存量，登记草稿）：全局 skills 列表单例 ref（多 Composer 共享，12 类未覆盖）
 const globalSkills = ref<SkillInfo[]>([])
-// W2：force 重拉合并标志。多个 force 调用并发等待同一个 in-flight 时，只有第一个执行新 RPC。
+// W2：force 重新拉取合并标志。多个 force 调用并发等待同一个 in-flight 时，只有第一个执行新 RPC。
 let pendingForceReload = false
-/** 模块级订阅守卫：保证 onSkillCacheInvalidated(global) 只挂一次（AppShell 级常驻订阅）。 */
+/** 模块级订阅检查：保证 onSkillCacheInvalidated(global) 只挂一次（AppShell 级常驻订阅）。 */
 let globalInvalidateSubscribed = false
 
 /**
@@ -186,7 +186,7 @@ let globalInvalidateSubscribed = false
  * - 首次调用触发 configApi.getGlobalSkills() RPC，结果缓存到 globalSkillsCache + 写入模块级 globalSkills ref。
  * - 后续调用命中缓存，返回同一份模块级 ref（响应式，所有实例共享）。
  * - in-flight 去重：并发调用共享同一个 Promise，避免重复 RPC。
- * - force=true 跳过 globalLoaded 守卫强制重拉（失效信号触发）。W2：并发 force 用 pendingForceReload
+ * - force=true 跳过 globalLoaded 检查强制重新拉取（失效信号触发）。W2：并发 force 用 pendingForceReload
  *   合并，N 次快速失效信号只触发一次新 RPC（首个 force 执行，后续 force 看到标志已清则直接 return）。
  * - 失败时不置 globalLoaded=true（修复原永久失败 bug），保留旧缓存值允许下次失效信号触发重试。
  *
@@ -222,7 +222,7 @@ export function useGlobalSkills() {
   }
 
   /**
-   * 拉取全局 skill。force=true 跳过 globalLoaded 守卫强制重拉（失效信号触发）。
+   * 拉取全局 skill。force=true 跳过 globalLoaded 检查强制重新拉取（失效信号触发）。
    * W2：force 并发合并语义（pendingForceReload 标志）留调用方——多个 force 调用等待
    * 同一 in-flight 时，只有第一个执行新 RPC。
    */
@@ -237,7 +237,7 @@ export function useGlobalSkills() {
         // globalSkills 已是模块级，in-flight 完成后已更新
         return
       }
-      // force=true：标记待重拉，等待当前 in-flight 完成后只重拉一次（合并多次并发 force）
+      // force=true：标记待重新拉取，等待当前 in-flight 完成后只重新拉取一次（合并多次并发 force）
       pendingForceReload = true
       await runGlobalSkillsFetch()
       // await 后重新检查：多个 force 可能都在等同一个 in-flight，已被另一个 force 接管则直接 return
@@ -253,7 +253,7 @@ export function useGlobalSkills() {
     void loadGlobal()
   }
 
-  // 订阅失效信号（模块级，只挂一次）。收到 scope='global' 时强制重拉。
+  // 订阅失效信号（模块级，只挂一次）。收到 scope='global' 时强制重新拉取。
   if (!globalInvalidateSubscribed) {
     globalInvalidateSubscribed = true
     getSettingsTransport().onSkillCacheInvalidated((payload: SkillCacheInvalidatedPayload) => {

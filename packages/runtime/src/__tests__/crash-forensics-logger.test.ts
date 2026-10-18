@@ -230,7 +230,7 @@ describe('D6-⑦ 清理前缀扩展与保留天数 shared 化', () => {
     return file
   }
 
-  it('超龄 plugin-crash-* 被清理（新写入面配清理通道，D6-⑦ 有写入无清理 = 新债）', async () => {
+  it('超龄 plugin-crash-* 被清理（新写侧配清理通道，D6-⑦ 有写入无清理 = 新债）', async () => {
     const oldPluginCrash = seedLog('plugin-crash-2026-07-01-trusted-1.log', 10)
     const recentPluginCrash = seedLog(`plugin-crash-${new Date().toISOString().slice(0, 10)}-trusted-2.log`, 0)
     logger = await loadLogger({ TAIJI_LOG_KEEP_DAYS: '7' })

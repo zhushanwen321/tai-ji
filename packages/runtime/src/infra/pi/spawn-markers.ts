@@ -25,7 +25,7 @@
  * 由 reap 四条合取的 `--no-extensions` 主判别位兜底（裸用户 pi 不带该 flag）。
  * TaiJi spawn 的 argv 实测混有用户世界路径（~/.pi/agent/extensions/…、项目
  * .pi/extensions/…、~/.agents/skills 等）——均不在三根之下，构造上被排除；登记它们
- * = 为误杀用户进程开门（v5 原案被活体证据否决，见设计 §6.12「被否」）。
+ * = 为误杀用户进程开门（v5 原案被活体证据否决，见设计 §6.12「不采用」）。
  *
  * 写语义：每次 spawn 全量重算并覆盖写（同目录 tmp + rename 原子替换），不 append——
  * 覆盖写天然清理已禁用 extension 的历史值；并发 spawn 各写各的全量集（tmp 名含
@@ -198,7 +198,7 @@ export function writeSpawnMarkersFile(
   }
 }
 
-/** recordSpawnMarkers 的入参形状（结构化最小面，避免与 rpc-client 循环 import）。 */
+/** recordSpawnMarkers 的入参形状（结构化最小子集，避免与 rpc-client 循环 import）。 */
 export interface SpawnMarkerOptions {
   skillPaths?: string[]
   extensionPaths?: string[]

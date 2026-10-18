@@ -101,7 +101,7 @@ afterEach(() => {
 })
 
 describe('W1：任意触发路径的 state_changed 帧永不含 usage 三字段', () => {
-  it('播种 / switchModel 失效 / 事件失效重拉 / 30s 周期 poll 全路径无 usage key（序列化断言）', async () => {
+  it('播种 / switchModel 失效 / 事件失效重新拉取 / 30s 周期 poll 全路径无 usage key（序列化断言）', async () => {
     const fx = makeFixture()
     const sid = 'd1-w1'
 
@@ -110,7 +110,7 @@ describe('W1：任意触发路径的 state_changed 帧永不含 usage 三字段'
     await vi.advanceTimersByTimeAsync(1)
     expect(publishedFrames(fx.publishSpy, 'session.state_changed').length).toBeGreaterThanOrEqual(1)
 
-    // 路径 2：switchModel 失效重拉（set_model RPC 成功 → modelId/usage/thinkingLevel markDirty）
+    // 路径 2：switchModel 失效重新拉取（set_model RPC 成功 → modelId/usage/thinkingLevel markDirty）
     fx.client.getState.mockResolvedValue({
       sessionName: 'd1', thinkingLevel: 'medium', model: { id: 'model-b', provider: 'p' }, pendingMessageCount: 0,
     })
@@ -121,7 +121,7 @@ describe('W1：任意触发路径的 state_changed 帧永不含 usage 三字段'
     fx.svc.applyContextUpdate(sid, 9000, 9000)
     await vi.advanceTimersByTimeAsync(SCALAR_STATE_DEBOUNCE_MS + 50)
 
-    // 路径 4：thinkingLevel 失效驱动重拉（U6：30s 周期兜底已删，事件/RPC 响应失效替代；
+    // 路径 4：thinkingLevel 失效驱动重新拉取（U6：30s 周期兜底已删，事件/RPC 响应失效替代；
     // 推进长时段验证「无失效不拉取」下不变量仍成立——帧数由路径 2/3 保证）
     await vi.advanceTimersByTimeAsync(65_000)
 
@@ -153,7 +153,7 @@ describe('W2：context.update 帧形态——全三字段（真值）或仅 sess
     await vi.advanceTimersByTimeAsync(1)
     fx.publishSpy.mockClear()
 
-    // compact 后 tokens=null：事件失效 → 防抖重拉 → 空投影 → 占位帧
+    // compact 后 tokens=null：事件失效 → 防抖重新拉取 → 空派生视图 → 占位帧
     fx.client.getSessionStats.mockResolvedValue({ contextUsage: { tokens: null, contextWindow: 128000, percent: null } })
     fx.svc.applyContextUpdate(sid, 0, 0)
     await vi.advanceTimersByTimeAsync(SCALAR_STATE_DEBOUNCE_MS + 50)
@@ -184,7 +184,7 @@ describe('W2：context.update 帧形态——全三字段（真值）或仅 sess
   })
 })
 
-describe('W3：session.getContext reply ≡ 最近一次 context.update 帧（投影一次）', () => {
+describe('W3：session.getContext reply ≡ 最近一次 context.update 帧（映射一次）', () => {
   /** 构造 SessionMessageHandler（真 SessionService 注入；session-trace makeHandler 同形态）。 */
   function makeHandler(svc: SessionService) {
     const replies: { id: string | undefined; type: string; payload: Record<string, unknown> }[] = []
@@ -230,7 +230,7 @@ describe('W3：session.getContext reply ≡ 最近一次 context.update 帧（�
     const fx = makeFixture({ contextUsage: { tokens: null, contextWindow: 128000, percent: null } })
     const sid = 'd1-w3-null'
     await fx.svc.initializeManagedSession(sid, {} as unknown as IPiEngine, '/tmp', 'w3')
-    await vi.advanceTimersByTimeAsync(1) // 播种空投影 → 占位帧为 last-value
+    await vi.advanceTimersByTimeAsync(1) // 播种空派生视图 → 占位帧为 last-value
 
     const { handler, replies, errors, WS } = makeHandler(fx.svc)
     await handler.handleSessionMessage(getContextMsg(sid), WS)
@@ -247,7 +247,7 @@ describe('W3：session.getContext reply ≡ 最近一次 context.update 帧（�
 })
 
 describe('W4：pi 重启重建（removeSessionEntry → 重播种）后 context last-value ≡ 新实例快照', () => {
-  it('销毁全部实例 + bus clearSession 后重播种，stateSnapshot 的 context last-value == 新快照投影', async () => {
+  it('销毁全部实例 + bus clearSession 后重播种，stateSnapshot 的 context last-value == 新快照派生视图', async () => {
     const fx = makeFixture()
     const sid = 'd1-w4'
     await fx.svc.initializeManagedSession(sid, {} as unknown as IPiEngine, '/tmp', 'w4')
@@ -262,13 +262,13 @@ describe('W4：pi 重启重建（removeSessionEntry → 重播种）后 context 
     // bus 条目已清：无 last-value 残留（旧帧不泄漏给重建后的 stateSnapshot）
     expect(findStateMsg(fx.bus.subscribe(sid, createMockWs()).stateSnapshot, 'context.update')).toBeUndefined()
 
-    // 新 pi 进程权威翻新（重播种前 mock 换值——模拟重启后 get_session_stats 投影变化）
+    // 新 pi 进程权威翻新（重播种前 mock 换值——模拟重启后 get_session_stats 派生视图变化）
     fx.client.getSessionStats.mockResolvedValue({ contextUsage: { tokens: 12000, contextWindow: 200000, percent: 6 } })
     fx.publishSpy.mockClear()
     await fx.svc.initializeManagedSession(sid, {} as unknown as IPiEngine, '/tmp', 'w4-rebuilt')
     await vi.advanceTimersByTimeAsync(1)
 
-    // 重播种收敛：stateSnapshot 的 context last-value == 新实例快照投影（diff 基线已清，
+    // 重播种收敛：stateSnapshot 的 context last-value == 新实例快照派生视图（diff 基线已清，
     // 不因「上辈子同值」误判）
     const late = fx.bus.subscribe(sid, createMockWs())
     const lastValue = findStateMsg(late.stateSnapshot, 'context.update')

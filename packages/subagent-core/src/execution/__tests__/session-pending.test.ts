@@ -9,7 +9,7 @@
 // 语义；core 依赖闭包禁 pi 系包（u-5c 验收「零跨包 specifier」），改为下方
 // countActiveFromEntries 等价转写（逐字对照 extensions/universal/
 // pending-notifications/src/state.ts 同名实现的两遍差集算法：先收 unregister id
-// 集，再计 register 差集按 id 去重）——pi 侧算法自身由该包自有测试守卫。
+// 集，再计 register 差集按 id 去重）——pi 侧算法自身由该包自有测试检查。
 //
 // 合并终态（feat 容器 + dev [LC-6/T6②] 增量游标有界化增量）：
 //   - 差集已由 per-file 游标内联（activeRegisters Map，见 session-pending.ts
@@ -36,7 +36,7 @@ import {
   readActivePendingFromSessionFile,
 } from "../assembly/session-pending.ts";
 
-/** pi pending entries 的最小可识别形状（与 pi state.ts EntryLike 同构，运行时守卫）。 */
+/** pi pending entries 的最小可识别形状（与 pi state.ts EntryLike 同构，运行时检查）。 */
 interface PendingEntryLike {
   customType?: unknown;
   data?: { id?: unknown } | null;
@@ -52,7 +52,7 @@ interface PendingEntryLike {
 function countActiveFromEntries(entries: unknown[]): { count: number } {
   const unregistered = new Set<string>();
   for (const raw of entries) {
-    // S-10：entries 元素可能是 null/undefined（坏数据），断言前先守卫
+    // S-10：entries 元素可能是 null/undefined（坏数据），断言前先检查
     if (!raw || typeof raw !== "object") continue;
     const entry = raw as PendingEntryLike;
     if (entry.customType !== "pending:unregister") continue;
@@ -75,7 +75,7 @@ function countActiveFromEntries(entries: unknown[]): { count: number } {
 }
 
 // 计数器经通知域窄端口注入（session-pending 不再直接 import pi-pending-notifications）
-// ——注入差集计数等价实现保住差集语义回归面（真函数返回 CountActiveResult，端口
+// ——注入差集计数等价实现保住差集语义回归测试（真函数返回 CountActiveResult，端口
 // 契约是 number（拆 .count，与 pi 壳 createPiNotifyDomainPorts 适配同构）；
 // afterEach 重置防注入态泄漏。dev [LC-6] 族用 stubCountingPort 按用例覆盖
 // （configureNotifyDomain 覆盖式写入，内层后执行生效）。
@@ -127,7 +127,7 @@ function registerData(id: string, sessionId: string): Record<string, unknown> {
   return { id, type: "session", name: `desc-${id}`, status: "active", registeredAt: 1, expiresAt: undefined, sessionId };
 }
 
-/** 注入直数端口：返回收到的 entry 数（观察 count 口径的消费面）。 */
+/** 注入直数端口：返回收到的 entry 数（观察 count 口径的消费方）。 */
 function stubCountingPort(): ReturnType<typeof vi.fn<(entries: unknown[]) => number>> {
   const counter = vi.fn((entries: unknown[]) => entries.length) as ReturnType<typeof vi.fn<(entries: unknown[]) => number>>;
   configureNotifyDomain({ countActiveFromEntries: counter });
@@ -179,7 +179,7 @@ describe("readActivePendingFromSessionFile", () => {
   it("fork 继承的主 session register 已被 expired unregister 抵消 → 不干扰", () => {
     // 模拟 P fork 主 session：继承 register 且文件里已有对应 unregister 抵消行
     // （历史 session 档 U4 产物）。翻 process 档后 U4 不再补写抵消行，fork 残留的
-    // 现行收口 = 读侧过滤②（见文末 [F1] describe）——本用例锁「文件内抵消行仍生效」
+    // 现行收尾 = 读侧过滤②（见文末 [F1] describe）——本用例锁「文件内抵消行仍生效」
     // 的差集语义本身，不锁清理机制。
     const file = makeTmpSessionFile([
       mkRegister("parent-bg"),
@@ -467,7 +467,7 @@ describe("[LC-6] 游标剪枝", () => {
 // ─── [F1 读侧过滤②] 跨 session 残留基准 = 被读文件所属 session ───
 //
 // fork 继承的父级 register 残留（翻 process 档后 U4 补注销不再中性化，永久留存）
-// 由读侧过滤收口：本文件读侧以「被读文件所属 session id」（pi session 文件首行
+// 由读侧过滤收尾：本文件读侧以「被读文件所属 session id」（pi session 文件首行
 // SessionHeader.id）为基准经端口第二参传入，端口实现按 entry sessionId ≠ 基准
 // 跳过——后代判定差集不含跨 session 残留，层主不被残留误判「尚有活跃后代」。
 

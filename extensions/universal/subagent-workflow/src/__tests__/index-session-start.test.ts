@@ -24,7 +24,7 @@
 //
 // [组 5a 瘦身 2026-09-27] beforeEach 不再 resetModules + 动态 import index.ts
 //（每用例全图重求值，9 条 seam 用例免付）——模块图静态加载一次，oncePerProcess
-// 守卫 Map 经 ext-guards 测试重置导出在 beforeEach 清空（与 resetModules 重建等价）；
+// 检查 Map 经 ext-guards 测试重置导出在 beforeEach 清空（与 resetModules 重建等价）；
 // W3TC7/W3TC8 淘汰接线两条删除（core lifecycle-recover-crashed 已锁淘汰语义；
 // W3TC8 由组 5b 在 workflow-events 合并文件补薄接线断言）。
 //
@@ -71,7 +71,7 @@ vi.mock("@zhushanwen/subagent-core/orchestration/lifecycle.ts", async (importOri
 });
 
 // interface/commands mock：组合根 factory 体内的 registerWorkflowsCommand 调用
-// 打桩（挂载用例的 fake pi 无真实命令注册面）。
+// 打桩（挂载用例的 fake pi 无真实命令注册点）。
 const { mockRegisterWorkflowsCommand } = vi.hoisted(() => ({
   mockRegisterWorkflowsCommand: vi.fn(),
 }));
@@ -82,10 +82,9 @@ vi.mock("../interface/command/commands.ts", () => ({
 // ── import 被测模块 ──
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
-// session_start 的六项跨 session 副作用操作经 oncePerProcess 守卫（u-audit-fix），
-// 守卫 Map 是模块级状态：beforeEach 经 _resetOncePerProcessForTest 清空（本文件
+// session_start 的六项跨 session 副作用操作经 oncePerProcess 检查（u-audit-fix），
+// 检查 Map 是模块级状态：beforeEach 经 _resetOncePerProcessForTest 清空（本文件
 // 静态加载模块图，无 resetModules 重建）。
-import { NOTIFY_ACK_CUSTOM_TYPE, NOTIFY_CUSTOM_TYPE, NOTIFY_LEDGER_CUSTOM_TYPE, _resetNotifyLedgerForTest } from "@zhushanwen/subagent-core/execution/notify/notify-ledger.ts";
 import { setupSessionLifecycle } from "../session-lifecycle.ts";
 import subagentsExtension from "../index.ts";
 import { WorkflowRun } from "@zhushanwen/subagent-core";
@@ -147,7 +146,7 @@ function createFakeCtx(
 
 /**
  * seam 直测：注入 fake 双 Service（访问器槽，默认装配 existing 分支复用 fake）+
- * fake wtm/store，跑一次完整 session 装配。返回接线观察面（initSession/initModel/
+ * fake wtm/store，跑一次完整 session 装配。返回接线观测点（initSession/initModel/
  * recoverManifestTmpFiles spies）。
  */
 async function runSessionAssembly(mode: "tui" | "rpc" | "json" | "print", entries?: unknown[]): Promise<{
@@ -182,7 +181,7 @@ async function runSessionAssembly(mode: "tui" | "rpc" | "json" | "print", entrie
   return { mockInitSession, mockInitModel, mockRecoverManifestTmpFiles };
 }
 
-/** 挂载 index.ts 并跑一次 session_start（store loadAll 行为可配），返回守卫观察面：
+/** 挂载 index.ts 并跑一次 session_start（store loadAll 行为可配），返回检查观测点：
  *  pi / session_shutdown handler / registerWorkflowsCommand 捕获。 */
 async function mountWithLoadAll(loadAll: () => Promise<unknown[]>): Promise<{
   pi: ExtensionAPI;
@@ -351,71 +350,9 @@ describe("session_shutdown: store.dispose 接线（W2TC16）", () => {
 });
 
 // ============================================================
-// [U2] session_start 通知账本装配 + 重启恢复钩子（设计 D4）
+// [U2 账本恢复钩子随波 2 退役] session_start 通知账本装配 + 重启恢复（设计 D4）
+// 的锁面用例已随 bindLedgerHostAndRecover 退役删除——session_start 差集重放的
+// 行为锁由 pi-delivery-port 套件「session_start 差集重放」段承接，装配点接线由
+// base-tool-enhance 的 delivery-port-assembly.test.ts 锁定（port 恒装配，
+// unified-delivery §3.7 装配单一归属）。
 // ============================================================
-//
-// fake session 文件（ctx.sessionManager.getEntries）含 ledger/ack entry →
-// session 装配绑定账本并重放差集：未销账号经 pi.sendMessage({triggerTurn:true})
-// 单通道重投；已销账零重发。bind 顺序在 service.initSession 之前（notifier.notify
-// 经模块级绑定消费账本）。
-
-describe("session_start 通知账本恢复钩子（U2 B-ledger）", () => {
-  afterEach(() => {
-    // 静态 import 命中被测绑定槽同一实例（本文件已无 resetModules，首载图即当前图）
-    _resetNotifyLedgerForTest();
-  });
-
-  it("mock session 含 ledger/ack entry → 仅未销账号重放（单通道 triggerTurn），已销账零重发零重放", async () => {
-    const appendEntryCalls: Array<{ customType: string; data: unknown }> = [];
-    const sendMessageCalls: Array<{ message: unknown; options: unknown }> = [];
-    const pi = createFakePi({
-      appendEntry: (customType, data) => {
-        appendEntryCalls.push({ customType, data });
-      },
-      sendMessage: (message, options) => {
-        sendMessageCalls.push({ message, options });
-      },
-    });
-
-    // 模拟重启前落盘：3 条 ledger entry（s-a/s-c 已销账 + s-b 未销账）+ 2 条 ack
-    //（原「全部已销账 → 零重放」独立用例并入：已销账条目不重投由 s-a/s-c 共同证明）
-    const entries: unknown[] = [
-      { type: "custom", customType: NOTIFY_LEDGER_CUSTOM_TYPE, data: { v: 1, notifyId: "s-a", content: "ca", record: { notifyId: "s-a" } } },
-      { type: "custom", customType: NOTIFY_LEDGER_CUSTOM_TYPE, data: { v: 1, notifyId: "s-b", content: "cb", record: { notifyId: "s-b" } } },
-      { type: "custom", customType: NOTIFY_LEDGER_CUSTOM_TYPE, data: { v: 1, notifyId: "s-c", content: "cc", record: { notifyId: "s-c" } } },
-      { type: "custom", customType: NOTIFY_ACK_CUSTOM_TYPE, data: { v: 1, notifyId: "s-a" } },
-      { type: "custom", customType: NOTIFY_ACK_CUSTOM_TYPE, data: { v: 1, notifyId: "s-c" } },
-    ];
-
-    await setupSessionLifecycle(pi, createFakeCtx("rpc", entries), {
-      createServices: (() => ({
-        service: {
-          initSession: vi.fn(),
-          recoverManifestTmpFiles: vi.fn(async () => ({ deleted: 0, recovered: 0 })),
-        },
-        modelService: {
-          initModel: vi.fn(),
-          reloadGlobalConfig: vi.fn(() => ({ status: "absent", config: { version: 1, maxConcurrent: 6 } })),
-        },
-        reused: false,
-      })) as never,
-      worktreeManager: { scan: vi.fn(async () => {}) },
-      createRunStore: () =>
-        ({
-          loadAll: vi.fn(async () => []),
-          save: vi.fn(async () => {}),
-          dispose: vi.fn(async () => {}),
-        }) as never,
-    });
-
-    // 未销账 s-b 单条重放：sendMessage 恰 1 次，options 恰 {triggerTurn:true}
-    expect(sendMessageCalls).toHaveLength(1);
-    expect(sendMessageCalls[0]!.options).toEqual({ triggerTurn: true });
-    const sent = sendMessageCalls[0]!.message as { customType: string; content: string; details?: { notifyId?: string } };
-    expect(sent.customType).toBe(NOTIFY_CUSTOM_TYPE);
-    expect(sent.content).toBe("cb");
-    expect(sent.details?.notifyId).toBe("s-b");
-    // 已销账 s-a/s-c 零重发（不追加新 ledger entry，不重投）
-    expect(appendEntryCalls.filter((c) => c.customType === NOTIFY_LEDGER_CUSTOM_TYPE)).toHaveLength(0);
-  });
-});

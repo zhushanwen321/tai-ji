@@ -10,11 +10,11 @@
  *   bare-arrow：裸 ↑/↓ → preventDefault + moveCaretVertical；moved 不翻历史；
  *   at-edge ↑/↓ 翻历史；修饰键 + ↑/↓ 放行原生。
  *   Enter：staging 优先（⏎/Alt+⏎ 均提交 staging）；Alt+⏎ steer 路由行 → onFollowUp；
- *   Alt+⏎ queued/direct 行 → onSend（经统一分发器）；裸 ⏎ 恒 onSend（路由判定收口在
+ *   Alt+⏎ queued/direct 行 → onSend（经统一分发器）；裸 ⏎ 恒 onSend（路由判定收敛在
  *   core dispatch/send，keydown 层不分流）；⇧⏎ 放行换行。
  *   动作表接线（composer-pi-shortcuts）：链序（动作表先于 staging Esc）、消费短路（命中
  *   返回 true → 链终止）、未命中放行（返回 false → 既有段照常触达）、浮层未消费仍咨询
- *   （cmdOpen 入口守卫归动作表自判）、IME 段先行（组合中动作表不被咨询）。
+ *   （cmdOpen 入口检查归动作表自判）、IME 段先行（组合中动作表不被咨询）。
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { computed, nextTick, ref } from 'vue'
@@ -61,7 +61,7 @@ function makeKeyEvent(key: string, mods: KeyMods = {}) {
   return { e, preventDefault }
 }
 
-/** fake deps：仅覆盖 keydown 分发路径实际消费的契约面（多余方法对测试无意义） */
+/** fake deps：仅覆盖 keydown 分发路径实际消费的契约范围（多余方法对测试无意义） */
 function makeDeps(overrides: {
   /** moveCaretVertical 返回值（默认 at-edge → 触发翻历史路径） */
   caret?: 'moved' | 'at-edge'
@@ -194,7 +194,7 @@ describe('useComposerKeydown', () => {
     })
   })
 
-  describe('Enter 分发矩阵（u5b D6：路由判定收口在 core dispatch/send）', () => {
+  describe('Enter 分发矩阵（u5b D6：路由判定收敛在 core dispatch/send）', () => {
     it('staging 活跃：裸 Enter → onSend（staging 提交优先）', () => {
       const { deps, onFollowUp, onSend } = makeDeps({ stagingActive: true, route: 'steer' })
       const onKeydown = useComposerKeydown(deps)
@@ -243,7 +243,7 @@ describe('useComposerKeydown', () => {
       expect(onFollowUp).not.toHaveBeenCalled()
     })
 
-    it('Alt+Enter + direct → onSend（followUp 非活跃退化路径的语义收口）', () => {
+    it('Alt+Enter + direct → onSend（followUp 非活跃退化路径的语义收尾）', () => {
       const { deps, onFollowUp, onSend } = makeDeps({ route: 'direct' })
       const onKeydown = useComposerKeydown(deps)
       const { e, preventDefault } = makeKeyEvent('Enter', { alt: true })
@@ -295,7 +295,7 @@ describe('useComposerKeydown', () => {
   /**
    * 分发链接线（composer-pi-shortcuts U1②）：命令动作表分支插在 IME 之后、staging Esc 之前。
    * 本矩阵只锁链序与短路语义（动作表消费 → 链终止；未消费 → 链继续），动作表内部
-   * 键位判定/守卫/编排由 composer-shortcut-actions.test.ts 全量覆盖。
+   * 键位判定/检查/编排由 composer-shortcut-actions.test.ts 全量覆盖。
    */
   describe('分发链接线：命令动作表分支（composer-pi-shortcuts）', () => {
     it('动作表消费（shift+tab 命中返回 true）：链短路——staging Esc / 裸箭头 / Enter 均不触达', () => {
@@ -357,7 +357,7 @@ describe('useComposerKeydown', () => {
       expect(onSend).not.toHaveBeenCalled()
     })
 
-    it('浮层 open 且浮层未消费该键：动作表仍被咨询（消费与否由其 cmdOpen 入口守卫自判）', () => {
+    it('浮层 open 且浮层未消费该键：动作表仍被咨询（消费与否由其 cmdOpen 入口检查自判）', () => {
       const { deps, shortcutActions, onSend, popoverHandle } = makeDeps({
         cmdOpen: true,
         popoverConsumes: false,
@@ -783,7 +783,7 @@ describe('useComposerKeydown', () => {
 
     // ── ↑↓ 截断回归锁（缺陷：浮层 open 时 ↑/↓ 穿透到 composer 方向键导航）─────────────
     // 只 preventDefault 不 stopPropagation 时：window capture 消费后事件继续到 contenteditable
-    // 的冒泡监听 → composer handleBareArrowNav 二次消费（defaultPrevented 幂等守卫只挡
+    // 的冒泡监听 → composer handleBareArrowNav 二次消费（defaultPrevented 幂等检查只挡
     // activeIndex 二次变更，不挡 composer 的方向键导航）→ dom-core 单视觉行 at-edge →
     // history setText 用上一条历史消息替换当前草稿。下方用例用真实 DOM 派发锁 capture/bubble
     // 全链路（window capture 注册 = useCommandPopoverKeyboard，target 冒泡 = useComposerKeydown）。
@@ -838,9 +838,9 @@ describe('useComposerKeydown', () => {
     it('IME composing 态（compositionstart 置 composingRef）：Enter 不选中浮层候选（只锁「浮层不选中」）', () => {
       // 本用例只锁浮层侧行为（composingRef 真值时 handleKeydown 不消费 Enter → 不选中候选）。
       // 不加 onSend 断言的原因：本用例的 target 是纯 div 直挂 composer 分发器，绕过产线上
-      // 真正的 IME 防线——dom-core contenteditable.ts:242 的元素级 composing 守卫（事件根本
+      // 真正的 IME 防线——dom-core contenteditable.ts:242 的元素级 composing 检查（事件根本
       // 不会转发到 composer-keydown）。「IME 场景不发送」的有效锁在 dom-core contenteditable.test.ts
-      // 「onKeydown IME 守卫」用例；事件属性路径（e.isComposing=true）见下方用例。
+      // 「onKeydown IME 检查」用例；事件属性路径（e.isComposing=true）见下方用例。
       setupChain(true)
       // 组合发生在 composer 输入区（target），compositionstart 冒泡到 window capture 置 composingRef
       target.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }))
@@ -850,7 +850,7 @@ describe('useComposerKeydown', () => {
       expect(onSelect).not.toHaveBeenCalled()
     })
 
-    it('IME composing 态（事件属性 isComposing）：Enter 不选中浮层候选、到达 composer 被 IME 守卫放行不发送', () => {
+    it('IME composing 态（事件属性 isComposing）：Enter 不选中浮层候选、到达 composer 被 IME 检查放行不发送', () => {
       setupChain(true)
 
       dispatchEnter(true)

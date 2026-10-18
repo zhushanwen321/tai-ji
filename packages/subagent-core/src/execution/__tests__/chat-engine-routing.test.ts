@@ -75,11 +75,11 @@ import type {
 import { ModelConfigService } from "../assembly/model-config-service.ts";
 import type { ModelInfo, ModelRegistryLike } from "../assembly/model-resolver.ts";
 // [v1 兼容层删除] 主 session 条目现行为「注册 + 终态两条小条目」（record-entry.ts v2）：
-// engine/engineHandle 的持久载体 = 终态条目，故断言改经 v2 投影辅助（与生产写侧
+// engine/engineHandle 的持久载体 = 终态条目，故断言改经 v2 派生视图辅助（与生产写侧
 // toSettledEntryData 同形）。
 import { v2SettledEntry } from "./helpers/v2-record-entry.ts";
 // W10（§2.10 ②）：子进程句柄断言改读 core 侧状态镜像（host/spawned-children——
-// 协议化后 spawnedChildren 持有方在引擎进程，core 消费镜像面；判据 pid 同构）。
+// 协议化后 spawnedChildren 持有方在引擎进程，core 消费镜像侧；判据 pid 同构）。
 import {
   _resetCoreSpawnedChildrenMirrorForTest,
 } from "../engine/host/spawned-children.ts";
@@ -130,7 +130,7 @@ class FakeEngine implements EnginePort {
   }
 
   capabilities(): EngineCapabilities {
-    // [W3] id==='pi' 的注册占位按 pi 真实能力位声明（gate 同步面放行 pi 全参数——
+    // [W3] id==='pi' 的注册占位按 pi 真实能力位声明（gate 参数同步路径放行 pi 全参数——
     // V4⑤ 反向守护；否则 maxTurns/conversation 会被误拦）。
     if (this.id === "pi") {
       return {
@@ -202,7 +202,7 @@ function writeAgentMd(dir: string, engine: string): string {
 /** registry：可解析 "zcode/glm"（taskSpec 字段用例的显式 model），其余未配置。 */
 function fakeRegistry(): ModelRegistryLike {
   // [U1] getAvailable 与 find 必须同源：assertCanonicalModelRef 以 getAvailable 为
-  // 全等/孪生扫描面（D1④ 孪生守卫需复扫 registry 全集）。旧 mock 只在 find 特判、
+  // 全等/孪生扫描范围（D1④ 孪生检查需复扫 registry 全集）。旧 mock 只在 find 特判、
   // getAvailable 返回空，与真实 registry 契约（find 可命中 ⇔ getAvailable 列出）不符。
   const AVAILABLE: ModelInfo[] = [{ id: "glm", name: "GLM", provider: "zcode", reasoning: true }];
   return {
@@ -241,7 +241,7 @@ function baseOpts(agentDir: string, extra: Partial<ExecuteOptions> = {}): Execut
   return { task: "do work", slug: "routing-test", cwd: agentDir, ctxModel: CTX_MODEL, ...extra };
 }
 
-/** 挂起 run 的引擎路径下取内存 running record 的 engine 盖章（collectRecords 内存源投影）。 */
+/** 挂起 run 的引擎路径下取内存 running record 的 engine 盖章（collectRecords 内存源派生视图）。 */
 function runningEngineTag(service: SubagentService, id: string): string | undefined {
   const rec = service.queries.collectRecords(10, "running").find((r) => r.id === id);
   return rec?.engine;
@@ -306,7 +306,7 @@ describe("chat 工具域引擎路由分叉（U0：D4/D5/D10）", () => {
   });
 
   it("[缺省] 全缺省 → pi 路由派发（[W3] pi 缺省经 registry cli 形态 port 协议派发）", async () => {
-    // [W3 改写] 原「不注册任何引擎也照跑（inproc DI 直连 spawn）」随 chat 域收口
+    // [W3 改写] 原「不注册任何引擎也照跑（inproc DI 直连 spawn）」随 chat 域收尾
     // 消亡：pi 路由 = registry 'pi' 的 cli 形态 port（pi-host-binding 解析）。未注册
     // 时为不可用 stub——engine.run 抛 engine_not_found，record 按 MF-6 回退可恢复。
     clearEngines();
@@ -356,8 +356,8 @@ describe("chat 工具域引擎路由分叉（U0：D4/D5/D10）", () => {
     const rec = service.queries.collectRecords(10, "running").find((r) => r.id === handle.subagentId);
     expect(rec).toBeDefined();
     expect(rec?.engine).toBeUndefined();
-    // [v1 兼容层删除] engine 域的持久面 = v2 终态条目（engine/engineHandle 只落此处）；
-    // pi 缺省不盖章 → 终态投影序列化产物不含 engine 键。
+    // [v1 兼容层删除] engine 域的持久化侧 = v2 终态条目（engine/engineHandle 只落此处）；
+    // pi 缺省不盖章 → 终态派生视图序列化产物不含 engine 键。
     expect(JSON.stringify(v2SettledEntry(rec!))).not.toContain("engine");
   });
 
@@ -400,7 +400,7 @@ describe("chat 工具域引擎路由分叉（U0：D4/D5/D10）", () => {
   it("[D3-④] zcode + maxTurns → 同步拒绝（record 创建前，不产生孤儿 record）——旧形态的 engine.run 内异步拒绝废弃", async () => {
     // 旧形态：Service 层预检不查 maxTurns → record 创建 + kickOffEngineRun（已删）→
     // zcode run 内硬编码 shape 检查 throw → failed record（异步化）。
-    // D3-④ 检查点钉死后：capabilities.maxTurns 位驱动，record 创建前同步 throw。
+    // D3-④ 检查点固定后：capabilities.maxTurns 位驱动，record 创建前同步 throw。
     const { service, zcode } = setup(agentDir);
     const err = await service
       .execute(baseOpts(agentDir, { engine: "zcode", maxTurns: 5 }))
@@ -472,7 +472,7 @@ describe("chat 工具域引擎路由分叉（U0：D4/D5/D10）", () => {
     expect(task.appendSystemPrompt).toEqual(["extra"]);
   });
 
-  it("[骨架] run resolve 成功 → 轮终收口 idle + result=content（[modeless 波1] 万物可续——不终态化销毁）", async () => {
+  it("[骨架] run resolve 成功 → 轮终收尾 idle + result=content（[modeless 波1] 万物可续——不终态化销毁）", async () => {
     const { service, zcode, pi } = setup(agentDir);
     zcode.runImpl = () => Promise.resolve({ handle: fakeHandle(), outcome: doneOutcome("hello result") });
     const handle = await service.execute(baseOpts(agentDir, { engine: "zcode" }));
@@ -498,7 +498,7 @@ describe("chat 工具域引擎路由分叉（U0：D4/D5/D10）", () => {
     const handle = await service.execute(baseOpts(agentDir, { engine: "zcode" }));
 
     // [modeless 波1 / MF-6] 失败轮不销毁——落 idle 可恢复（stopReason=failed +
-    // result 失败摘要；lastError 不进列表投影，经失败通知可达）
+    // result 失败摘要；lastError 不进列表派生视图，经失败通知可达）
     await vi.waitFor(() => {
       const rec = service.queries.collectRecords(10, "all").find((r) => r.id === handle.subagentId);
       expect(rec?.status).toBe("idle");
@@ -543,7 +543,7 @@ describe("chat 工具域引擎路由分叉（U0：D4/D5/D10）", () => {
 
       // workflow 域 sync 派发（runAndFinalize 的 runCtx 构造点；其引擎解析恒走
       // registry 'pi'——resolveChatEnginePort，不消费 opts.engine）。fire-and-forget：
-      // 本 harness 无 idle-notify 驱动面，收尾链（finalizeRoundToIdle）不收敛——
+      // 本 harness 无 idle-notify 驱动侧，收尾链（finalizeRoundToIdle）不收敛——
       // 只断言构造点（runs 捕获在收尾之前），与既有用例的挂起 record 同等形态。
       let awaitErr: unknown;
       void service
@@ -632,8 +632,8 @@ describe("chat 引擎分支 U2：probe 失败 / journal / engineHandle", () => {
     const eventsPath = resolveJournalPath(agentDir, "zcode", "shared", handle.subagentId);
     expect(fs.existsSync(eventsPath)).toBe(false);
 
-    // [W1/D2 停写写点→事件面] engineHandle 过程投影改走事件文件：成功轮 modeless
-    // 收口 = markRoundIdle（round-idle 帧 stopReason: completed，不终态化无 settled
+    // [W1/D2 停写写点→事件流] engineHandle 过程派生视图改走事件文件：成功轮 modeless
+    // 收尾 = markRoundIdle（round-idle 帧 stopReason: completed，不终态化无 settled
     // 条目）；引擎锚经 record-bound 帧承载（运行中另经 bound manifest 物化可见），
     // 均无 eventsPath 键。
     const events = scanRecordEventsFor(agentDir, handle.subagentId);
@@ -667,7 +667,7 @@ describe("chat 引擎分支 U2：probe 失败 / journal / engineHandle", () => {
       expect(rec?.stopReason).toBe("failed");
     });
 
-    // [W1/D2·D3] 失败轮 modeless 收口 = markRoundIdle（round-idle 帧 stopReason:
+    // [W1/D2·D3] 失败轮 modeless 收尾 = markRoundIdle（round-idle 帧 stopReason:
     // failed，不终态化）——engineHandle 部分回填形态经 record-bound 帧承载。
     const events = scanRecordEventsFor(agentDir, handle.subagentId);
     expect(events.filter((e) => e.type === "record-round-idle").at(-1)).toMatchObject({
@@ -702,7 +702,7 @@ describe("chat 引擎分支 U2：probe 失败 / journal / engineHandle", () => {
     await vi.waitFor(() => expect(zcode.runs.length).toBe(1));
 
     // run 尚未 resolve（record 仍 running）：engineHandle 已回填且 [W1/D2 停写点→
-    // 事件面] record-bound 帧已落事件文件（bound manifest 物化同步可见——运行中
+    // 事件流] record-bound 帧已落事件文件（bound manifest 物化同步可见——运行中
     // GUI 的锚定通道，不再依赖过程 entry）。
     await vi.waitFor(() => {
       const events = scanRecordEventsFor(agentDir, handle.subagentId);
@@ -719,7 +719,7 @@ describe("chat 引擎分支 U2：probe 失败 / journal / engineHandle", () => {
       poolKey: "shared",
     });
 
-    // 轮终收口（防 dangling）：release → settle idle（record 留内存 idle 可续聊）
+    // 轮终收尾（防 dangling）：release → settle idle（record 留内存 idle 可续聊）
     releaseRun({ handle: fakeHandle(), outcome: doneOutcome("ok") });
     await vi.waitFor(() => {
       const rec = service.queries.collectRecords(10, "all").find((r) => r.id === handle.subagentId);
@@ -738,7 +738,7 @@ describe("chat 引擎分支 U2：probe 失败 / journal / engineHandle", () => {
       ctx.onHandleReady?.({
         sessionRef: { dbPath: ".zcode/cli/db/db.sqlite", sessionId: "sess-live-1" },
       });
-      // ② 迟到 handleReady：只补 sessionFile——旧守卫「有 sessionId 即整条 return」
+      // ② 迟到 handleReady：只补 sessionFile——旧检查「有 sessionId 即整条 return」
       // 会把它整条吞掉，sessionFile 永不落位（消费点：冷续 resume 锚点 / interact 定位）。
       ctx.onHandleReady?.({
         sessionRef: { sessionId: "sess-live-1", sessionFile: LATE_SESSION_FILE },
@@ -765,7 +765,7 @@ describe("chat 引擎分支 U2：probe 失败 / journal / engineHandle", () => {
       },
       poolKey: "shared",
     });
-    // [W1/D2 停写点→事件面] 补缺经 record-bound 帧落账（引擎域签名变化才追加），
+    // [W1/D2 停写点→事件流] 补缺经 record-bound 帧写入 journal 记录（引擎域签名变化才追加），
     // 且 ③ 的「无新字段」重复回调不产生第二条写噪（同 sessionFile 恰好一条 bound）。
     const boundEvents = scanRecordEventsFor(agentDir, handle.subagentId).filter(
       (e) => e.type === "record-bound",
@@ -775,7 +775,7 @@ describe("chat 引擎分支 U2：probe 失败 / journal / engineHandle", () => {
     );
     expect(withLateSessionFile).toHaveLength(1);
 
-    // 轮终收口（防 dangling）：release → settle idle（record 留内存 idle 可续聊）
+    // 轮终收尾（防 dangling）：release → settle idle（record 留内存 idle 可续聊）
     releaseRun({ handle: fakeHandle(), outcome: doneOutcome("ok") });
     await vi.waitFor(() => {
       const rec = service.queries.collectRecords(10, "all").find((r) => r.id === handle.subagentId);
@@ -816,7 +816,7 @@ describe("chat 引擎分支 U2：probe 失败 / journal / engineHandle", () => {
 
     const rec = service.queries.collectRecords(10, "running").find((r) => r.id === handle.subagentId);
     // [v1 兼容层删除] engine/engineHandle 的持久载体 = v2 终态条目——此处保留缺位断言
-    // 作「v2 投影不重新引入该键」的回归守卫。
+    // 作「v2 派生视图不重新引入该键」的回归检查。
     const entryJson = JSON.stringify(v2SettledEntry(rec!));
     expect(entryJson).not.toContain("engineHandle");
     expect(entryJson).not.toMatch(/"engine"/);
@@ -835,7 +835,7 @@ describe("chat 引擎分支 U2：probe 失败 / journal / engineHandle", () => {
 
     for (let i = 0; i < 7; i++) {
       const h = await service.execute(baseOpts(agentDir, { engine: "zcode" }));
-      // 等本条轮终收口（idle 留守）再发下一条——泄漏形态下第 7 条 acquire 永久
+      // 等本条轮终收尾（idle 留守）再发下一条——泄漏形态下第 7 条 acquire 永久
       // 排队、record 永卡 running，本 waitFor 即超时失败
       await vi.waitFor(() => {
         const rec = service.queries.collectRecords(10, "all").find((r) => r.id === h.subagentId);
@@ -852,7 +852,7 @@ describe("chat 引擎分支 U2：probe 失败 / journal / engineHandle", () => {
     return calls.length > 0 ? (calls[calls.length - 1][1] as Record<string, unknown>) : undefined;
   }
 
-  /** [W1/D3] 读 record 事件文件全部事件行（观察面独立于被测 store）。 */
+  /** [W1/D3] 读 record 事件文件全部事件行（观察侧独立于被测 store）。 */
   function scanRecordEventsFor(agentDir: string, id: string): Array<Record<string, unknown>> {
     const recordsDir = getSubagentRecordsDir(agentDir, agentDir);
     try {

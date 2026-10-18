@@ -86,7 +86,7 @@ function dialogTimeoutLogMessage(req: UiRequest, waitedMs: number): string {
 
 // ── 类型再导出（W7 / R3 S-A + R4-S③：SSOT 迁 @zhushanwen/subagent-engine-sdk
 // src/ui-types.ts，结构等价；队列实现本体留 core——壳侧 host/askUser 消费端与
-// inproc 过渡链路同样消费该类型面。双向可赋值断言挂本包 typecheck 断言族
+// inproc 过渡链路同样消费该类型范围。双向可赋值断言挂本包 typecheck 断言族
 // （contract-closure），漂移编译期可抓。 ──
 export type { UiMethod, UiRequest, UiRequestHandler, UiResponse } from "@zhushanwen/subagent-engine-sdk";
 import type { UiRequest, UiRequestHandler, UiResponse } from "@zhushanwen/subagent-engine-sdk";
@@ -214,7 +214,7 @@ export class DialogGlobalQueue {
    * 的 current（handler 等用户输入卡死）时，processNext 的 `await item.handler` 永不 resume，
    * 尾部不会执行；只有 settleItem 里的 processNext 才能打破死锁，推进下一个。
    *
-   * [A2-2] 超时 timer 清理也统一收口在这里：任何路径抢先 settle（reject/rejectAll/超时
+   * [A2-2] 超时 timer 清理也统一收尾在这里：任何路径抢先 settle（reject/rejectAll/超时
    * 自身）都必须撤下 armed timer——handler 永挂时 processNext 内联的 clearTimeout 不可达，
    * 不在这里清则 timer 到期触发虚假「dialog timed out」warn 且句柄滞留至超时点。
    */

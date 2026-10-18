@@ -67,7 +67,7 @@ describe('discoverGuardedPackages（D5 动态发现）', () => {
       rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
     }
   })
-  it('private 包不纳入发现面', () => {
+  it('private 包不纳入发现范围', () => {
     const root = makeRepo({
       'packages/priv/package.json': pkgJsonOf({ name: '@fixture/priv', private: true, files: ['dist/'] }),
     })
@@ -423,7 +423,7 @@ describe('checkDependencyClosure（检查项 4：workspace 依赖发布闭包）
       rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
     }
   })
-  it('外部依赖（不在 workspace 索引）不纳入；peerDependencies 与 dependencies 同面检查', () => {
+  it('外部依赖（不在 workspace 索引）不纳入；peerDependencies 与 dependencies 同一处检查', () => {
     const root = consumerRepo({
       dependencies: { ajv: '^8.20.0' },
       peerDependencies: { '@fixture/lib': 'workspace:*' },

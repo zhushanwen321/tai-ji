@@ -56,7 +56,7 @@ describe("场景 23：phase 状态机跨续聊", () => {
       const summary = await waitForScenarioSettled(sd.runs, RUN_ID);
       expect(summary.reason).toBe("completed");
 
-      // p1 调用回放（零派发）；p2 同名 agent 续聊重派恰一次（绑定保留的编排面：
+      // p1 调用回放（零派发）；p2 同名 agent 续聊重派恰一次（绑定保留的编排侧：
       // 同名 agent() 绑定同一子代理身份——重派按同名路由）
       expect(sd.faux.dispatches).toHaveLength(1);
       expect(sd.faux.dispatches[0]!.opts["agent"]).toBe("shared");

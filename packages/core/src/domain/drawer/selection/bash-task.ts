@@ -3,8 +3,8 @@
  *
  * 迁出来源 = DrawerControlState.selectedBackgroundTaskId（bashTask tab 当前展示的后台任务 id）。
  * per-session 分区（useSessionScopedState，ADR-0049），键 = drawerSessionKey。
- * 写入面 = setBackgroundTaskView（TrayNativePanel 行点击 / 测试）；
- * 读取面 = useBashTaskSelection（BackgroundTaskDetailPanel + PanelContainer 注入判定）。
+ * 写侧 = setBackgroundTaskView（TrayNativePanel 行点击 / 测试）；
+ * 读侧 = useBashTaskSelection（BackgroundTaskDetailPanel + PanelContainer 注入判定）。
  */
 import { computed, reactive } from 'vue'
 import type { ComputedRef } from 'vue'
@@ -12,7 +12,7 @@ import { useSessionScopedState } from '../../../foundation/use-session-scoped-st
 import { drawerSessionKey } from '../control'
 
 /** bashTask 选中态（per-session 分区） */
-export interface BashTaskSelectionState { // oe-exempt:20261003:framework:类型契约先行——selection 分区契约，renderer 消费面即本批 D1 单元
+export interface BashTaskSelectionState { // oe-exempt:20261003:framework:类型契约先行——selection 分区契约，renderer 消费方即本批 D1 单元
   /** bashTask tab 当前展示的后台任务 id（registry taskId，background-task-sidebar-view D5①）；undefined=未选中（bashTask tab 显空态） */
   selectedBackgroundTaskId?: string
 }

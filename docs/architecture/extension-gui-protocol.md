@@ -234,7 +234,7 @@ export interface WidgetMeta {
 
 **icon/badge 均为 v1.1 可选字段**：旧宿主忽略、旧 extension 不发，双向兼容（`isGuiRenderResult` 只校验 `v` 与 `component`，不校验 meta 形状）。
 
-**自定义形状：形状归 extension、风格归宿主**。`{ paths }` 是 SVG path 的 `d` 字符串数组，extension 只定义形状；宿主渲染统一锁定 `viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap/linejoin="round"`——线宽/颜色/尺寸由宿主锁死，输出必然与 @lucide 细线图标同构（不会出现风格失控的自定义 icon）。渲染经 Vue `<path :d>`（DOM 属性赋值，无 innerHTML 注入面）。
+**自定义形状：形状归 extension、风格归宿主**。`{ paths }` 是 SVG path 的 `d` 字符串数组，extension 只定义形状；宿主渲染统一锁定 `viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap/linejoin="round"`——线宽/颜色/尺寸由宿主锁死，输出必然与 @lucide 细线图标同构（不会出现风格失控的自定义 icon）。渲染经 Vue `<path :d>`（DOM 属性赋值，无 innerHTML 注入范围）。
 
 **paths 白名单防御（`validateWidgetIconPaths`，协议包导出）**：字符白名单正则 `^[MLCQAZHVSTmlcqazhvst0-9 ,.\-]+$`——精确等于「SVG `d` 命令字母全集（`M` `L` `C` `Q` `A` `Z` `H` `V` `S` `T` 及其小写形态）+ 数字 + 空格/逗号/小数点/负号」，命令字母之外任何字符（含指数记法的 `e`/`E`）一律拒。`S`/`s`/`T`/`t`（平滑曲线命令）在列：@lucide/vue 全量 1746 图标 5869 条 `d` 串中约 1% 用到，不收则合法形状被误拒。条数 ≤8、单条 ≤512 字符、总长 ≤2048 字符。校验不抛异常，返回判定对象（合法携带 paths 副本 / 非法携带拒绝原因：`not-array` / `empty` / `too-many` / `non-string` / `too-long` / `total-too-long` / `illegal-char`）——宿主据 `!valid` 落兜底 icon + console warn 一次（去重）。
 
@@ -584,7 +584,7 @@ function firstContentText(result: { content: Array<{ type: string; text?: string
 
 - **交互入口**：`uiFormInteract(ctx, form, opts?): Promise<UiFormInteractResult>`（`packages/extension-protocol/src/extensions/ui-form/helpers.ts`），marker = `UI_FORM_MARKER`，复用 select 双向通道（传输核 `callMarkerRpc`）。不走 `details.__gui__`——那是单向渲染通道，无法承载双向交互；select 是 pi 原生双向通道，复用它获得队列/超时/abort 能力。
 - **问题集**：`FormQuestion` 判别联合（`choice` / `text` / `schedule`），wire 帧 `form: true` + `formQuestions`；legacy `ASK_USER_MARKER` 帧由 runtime event-adapter 分支直接归一为同款 `form: true` + `formQuestions` 帧（type 推断映射，scheduleCreate 源保留源键分流应答形状）进同一渲染器（版本偏斜窗口期现状，随 D7 窗口末清理）。
-- **渲染面**：`FormOverlay`（`packages/renderer/src/components/extension/form/`，三渲染器 ChoiceQuestion / TextQuestion / ScheduleForm），Panel.vue inline 覆盖 composer 位置（多问 = 多 tab，单问 = 单视图）。
+- **渲染范围**：`FormOverlay`（`packages/renderer/src/components/extension/form/`，三渲染器 ChoiceQuestion / TextQuestion / ScheduleForm），Panel.vue inline 覆盖 composer 位置（多问 = 多 tab，单问 = 单视图）。
 - **回包四态判别**（返回判别联合，不抛错）：`ok` / `cancelled` / `timeout` / `channel-error` / `non-json`；channel-error 含 echo 检测（旧宿主 × 新扩展组合的确定性识别，message 携带升级指引）。内置消费方折叠策略：scheduler 命令路径 → `notify(..., 'error')` + 本会话不再重复试探（`json`/`print` 模式一律 rethrow，notify 是 no-op）；plan → 折 cancelled result 留 plan mode。
 - **答案解码**：choice/text 部分与旧 `AskUserAnswers` 逐字兼容，`getAskUserAnswer` / `getAskUserOther` 解码零改动。
 
@@ -602,7 +602,7 @@ function firstContentText(result: { content: Array<{ type: string; text?: string
 > - `session_start` handler 确实传 ctx（`runner.js:531`），且在 `bindExtensions` 后触发
 > - 但 shim 的唯一潜在价值（透明覆盖第三方 extension 的原生 setWidget）不成立——第三方传 string[] 不触发 GuiComponent 分支
 >
-> 结论：砍掉 shim extension，消除 monkey-patch 风险面、session_start 时序依赖、加载顺序讨论三个复杂度来源。widget 传输改为 helper 直编码（§4.3）。
+> 结论：砍掉 shim extension，消除 monkey-patch 风险、session_start 时序依赖、加载顺序讨论三个复杂度来源。widget 传输改为 helper 直编码（§4.3）。
 
 ---
 

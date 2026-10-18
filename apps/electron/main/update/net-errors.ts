@@ -117,7 +117,7 @@ const IPV4_192_PRIVATE_SECOND_OCTET = 168
  * 已声明局限：hostname 形式（如 'nas.local'、DDNS 域名）不做 DNS 解析，
  * 返回 false → 落通用「无法连接代理」文案（仍可行动，只是少了精确权限指引）。
  *
- * 不解析 DNS（引入解析即引入新失败面与延迟）。
+ * 不解析 DNS（引入解析即引入新失败情形与延迟）。
  */
 export function isPrivateHost(hostname: string): boolean {
   // 去掉方括号（IPv6 URL 格式 [::1]）

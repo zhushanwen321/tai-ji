@@ -1,6 +1,6 @@
 // src/execution/registry-reconcile/index.ts
 //
-// 注册表对账清扫公共出口（SubagentService 与测试的消费面）。
+// 注册表对账清扫公共出口（SubagentService 与测试的消费方）。
 
 export {
   runReconcileSweep,

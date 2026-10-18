@@ -5,12 +5,12 @@
  * - 增量拉取：cursor 建立后失效 → client.getEntries(since=cursor)
  * - 游标失效全量自愈："Entry not found" → 丢 cursor → getEntries() 全量重建
  * - RPC 编排链：本文件覆盖 get_entries 拉取编排（extractor 的 workflow legacy 分支
- *   已随 [ADR-0095] v1 读面删除；subagent 派生面见 subagent-extractor 层单测）
+ *   已随 [ADR-0095] v1 读侧删除；subagent 派生侧见 subagent-extractor 层单测）
  *
  * mock 层级 = RPC（client.getEntries 可编程返回 entry 数组，entry 形态对齐 pi
  * appendCustomEntry 契约：{type:'custom', customType, data:{v:2, kind, ...}}——v2 条目对：
  * 每条记录 = registered（身份）+ 可选 settled（终局），见 core record-entry.ts）——
- * 生产代码（invalidateRecordEntries → refreshRecordEntries → 投影 applyEntryBatch →
+ * 生产代码（invalidateRecordEntries → refreshRecordEntries → 派生视图 applyEntryBatch →
  * syncCacheFromProjection → 水位 diff → bus.publish）全部真实执行，不 mock。
  *
  * fake timers（项目规范）：SCALAR_STATE_DEBOUNCE_MS 防抖由 advanceTimersByTimeAsync 推进。
@@ -34,8 +34,8 @@ function createMockWs(): BusClient & { sent: string[] } {
 type GetEntriesResult = { data?: { entries?: unknown[]; leafId?: string | null } }
 
 /**
- * v2 subagent-record 注册条目（身份半边；rootSessionId 是投影的 session 归属键，
- * 必须等于被测 sessionId——投影按此过滤跨会话注册条目）。
+ * v2 subagent-record 注册条目（身份半边；rootSessionId 是派生视图的 session 归属键，
+ * 必须等于被测 sessionId——派生视图按此过滤跨会话注册条目）。
  */
 function subagentRegisteredEntry(sid: string, id: string, entryId: string, extra: Record<string, unknown> = {}): Record<string, unknown> {
   return {
@@ -84,7 +84,7 @@ function subagentSettledEntry(id: string, entryId: string, extra: Record<string,
   }
 }
 
-/** v2 workflow-record 注册条目（run 身份 + recordPath 锚点——recordPath 是投影收编键）。 */
+/** v2 workflow-record 注册条目（run 身份 + recordPath 锚点——recordPath 是派生视图收编键）。 */
 function workflowRegisteredEntry(runId: string, entryId: string, extra: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     type: 'custom',
@@ -194,7 +194,7 @@ describe('W18：record entry 派生缓存——增量拉取编排（mock RPC 层
     fx.svc.invalidateRecordEntries(sid, 'subagent-record')
     await vi.advanceTimersByTimeAsync(SCALAR_STATE_DEBOUNCE_MS + 50)
 
-    // 首拉全量：getEntries 无 since 参数
+    // 首次拉取全量：getEntries 无 since 参数
     expect(fx.client.getEntries).toHaveBeenCalledWith()
     const subMsgs = received(ws, 'session.subagents')
     expect(subMsgs).toHaveLength(1)
@@ -265,7 +265,7 @@ describe('W18：record entry 派生缓存——增量拉取编排（mock RPC 层
     expect(fx.client.getEntries).toHaveBeenCalledTimes(1)
     expect(received(ws, 'session.subagents')).toHaveLength(1)
 
-    // 窗口后再失效但权威无变化（同快照重拉）→ 不重复发布（diff 抑制）
+    // 窗口后再失效但权威无变化（同快照重新拉取）→ 不重复发布（diff 抑制）
     fx.svc.invalidateRecordEntries(sid, 'subagent-record')
     await vi.advanceTimersByTimeAsync(SCALAR_STATE_DEBOUNCE_MS + 50)
     expect(fx.client.getEntries).toHaveBeenCalledTimes(2)
@@ -300,7 +300,7 @@ describe('W18：record entry 派生缓存——增量拉取编排（mock RPC 层
     fx.svc.invalidateRecordEntries(sid, 'subagent-record')
     await vi.advanceTimersByTimeAsync(SCALAR_STATE_DEBOUNCE_MS + 200)
 
-    // 增量尝试（since=e-1）失败 → 全量重拉（无 since）
+    // 增量尝试（since=e-1）失败 → 全量重新拉取（无 since）
     const calls = fx.client.getEntries.mock.calls
     expect(calls[calls.length - 2]![0]).toBe('e-1')
     expect(calls[calls.length - 1]).toHaveLength(0)
@@ -349,7 +349,7 @@ describe('W18：record entry 派生缓存——增量拉取编排（mock RPC 层
     })
   })
 
-  it('无效 customType 不触发拉取（守卫）+ 未激活 session（无缓存条目）no-op', async () => {
+  it('无效 customType 不触发拉取（检查）+ 未激活 session（无缓存条目）no-op', async () => {
     const fx = makeFixture()
     const sid = 'w18-guard'
     await fx.svc.initializeManagedSession(sid, {} as unknown as IPiEngine, '/tmp', 'test')
@@ -364,7 +364,7 @@ describe('W18：record entry 派生缓存——增量拉取编排（mock RPC 层
     expect(fx.client.getEntries).not.toHaveBeenCalled()
   })
 
-  it('workflow 状态变化才发增量信号（同状态重拉不重复发 workflowUpdate 帧）', async () => {
+  it('workflow 状态变化才发增量信号（同状态重新拉取不重复发 workflowUpdate 帧）', async () => {
     const fx = makeFixture()
     const sid = 'w18-wf-diff'
     const ws = createMockWs()
@@ -379,7 +379,7 @@ describe('W18：record entry 派生缓存——增量拉取编排（mock RPC 层
     await vi.advanceTimersByTimeAsync(SCALAR_STATE_DEBOUNCE_MS + 50)
     expect(received(ws, 'session.workflowUpdate')).toHaveLength(1)
 
-    // 同状态快照重拉（running 未变）：不发 workflowUpdate
+    // 同状态快照重新拉取（running 未变）：不发 workflowUpdate
     fx.client.getEntries.mockResolvedValueOnce({
       data: { entries: [workflowRegisteredEntry('wf-1', 'e-2')], leafId: 'e-2' },
     } as GetEntriesResult)

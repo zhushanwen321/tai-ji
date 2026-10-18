@@ -10,7 +10,7 @@
  *    此链路无 switch 事件、reason=startup；文件未落盘 / 无留痕 → null）
  * 4. 兜底：三档都读不到 → 任意 reason 必写一条（startup/new→initial，resume/fork/reload→resume）
  *
- * 用真实临时目录 + 真实 fs 函数（非 mock 投影）；appendEntry 同步模拟 pi appendCustomEntry
+ * 用真实临时目录 + 真实 fs 函数（非 mock 派生视图）；appendEntry 同步模拟 pi appendCustomEntry
  * 的落盘形状（session-manager.ts）。
  */
 import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";

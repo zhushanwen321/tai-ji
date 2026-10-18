@@ -1,7 +1,7 @@
 // src/protocol/error-codes.ts
 //
 // 协议错误码表（impl-plan §2.1「错误码表」逐项）+ 结构化错误载体 + kill-chain 消费的
-// 具名错误文案构造器（自 core execution/engine/common/errors.ts 迁入 SDK 的引擎面
+// 具名错误文案构造器（自 core execution/engine/common/errors.ts 迁入 SDK 的引擎侧
 // 子集；core 侧错误 SSOT 留守，双侧错误码词表由测试互证）。
 //
 // 错误码语义与 core 侧处置（设计 §3.3 错误码表）：
@@ -16,7 +16,7 @@
 //   engine_handshake_timeout    initialize 超时（HANDSHAKE_TIMEOUT_MS=10s）→ 引擎不可用
 //   engine_crashed              进程意外退出 → 在途 run 失败（附 stderr 尾
 //                               STDERR_TAIL_CHARS=400 字符）；重建最多 3 次退避 1s/2s/4s
-//   engine_probe_failed         probe 失败 → 既有 fallback 三守卫不变
+//   engine_probe_failed         probe 失败 → 既有 fallback 三项检查不变
 //   engine_model_not_in_snapshot  setModel 目标模型不在子进程快照 → 宿主写覆盖意图
 //                               （模型本身有效，下一轮 spawn 现取目录）
 //   engine_credential_missing   setModel 子进程凭据校验失败（checkAuth 权威兜底）→
@@ -30,14 +30,14 @@
 //                               成员态——非失败分型，不进 SET_MODEL_ERROR_CODES）
 //   其余 engine_*               引擎在 error 帧原样给出 → core 透传，文案契约不变
 //
-// [登记非实装·透传面新码] engine_method_unsupported——未知成员宽容语义②（条文权威
+// [登记非实装·透传类新码] engine_method_unsupported——未知成员宽容语义②（条文权威
 // = ADR-0071）：新宿主派本引擎未知的正向 method → 引擎回 error 帧，旧宿主经
 // isEngineErrorPassthroughCode 原样透传不崩。实装码现状：两引擎 server（pi/zcode
 // dispatch 表落空分支）对未知 method 回的是 engine_protocol_unknown_method（同为
-// engine_ 前缀透传面，非本码）；本码刻意不进下方 ENGINE_PROTOCOL_ERROR_CODES
+// engine_ 前缀透传逻辑，非本码）；本码刻意不进下方 ENGINE_PROTOCOL_ERROR_CODES
 // 消费词表（该集是 core 消费集；C 型「无消费方不进协议」纪律——当前全仓零消费方，
 // 故只登记不实装）；引擎应答义务成文 =
-// docs/extensions/subagents/engine-development-guide.md（未知 method 必回透传面
+// docs/extensions/subagents/engine-development-guide.md（未知 method 必回透传侧
 // 错误码 + conformance 用例）。
 
 // ============================================================
@@ -173,7 +173,7 @@ export type SetModelErrorCode = (typeof SET_MODEL_ERROR_CODES)[number];
  * 四个竞态窗口内发现子进程已退出——**同一处置**按无活进程形态应答，引擎回本码
  * error 帧）。进主词表的依据与 SET_MODEL_ERROR_CODES 三型相同：宿主消费分型
  * （chat 域转已记账型应答 / run 级聚合落 not-active 成员态，§7.2 处置表），不是
- * 「core 不解释文案」的纯透传面。刻意**不进** SET_MODEL_ERROR_CODES：聚合失败
+ * 「core 不解释文案」的纯透传逻辑。刻意**不进** SET_MODEL_ERROR_CODES：聚合失败
  * 名单的分型值域只收「转发失败」三型，无活进程是成员三态之一（not-active），
  * 不是失败——两值域语义正交。
  */
@@ -204,7 +204,7 @@ export function isEngineProtocolErrorCode(value: unknown): value is EngineProtoc
   );
 }
 
-/** 其余引擎自报错误码的前缀契约（透传面；core 不解释文案）。 */
+/** 其余引擎自报错误码的前缀契约（透传侧；core 不解释文案）。 */
 export const ENGINE_ERROR_CODE_PREFIX = "engine_";
 
 export function isEngineErrorPassthroughCode(value: string): boolean {
@@ -239,7 +239,7 @@ export class EngineSdkError extends Error {
     this.data = data;
   }
 
-  /** 协议 error 帧载荷投影。 */
+  /** 协议 error 帧载荷派生视图。 */
   toStructured(): ProtocolError {
     return { code: this.code, message: this.message, recovery: this.recovery, data: this.data };
   }
@@ -322,7 +322,7 @@ export function engineSetModelUnsupportedError(
 }
 
 // ============================================================
-// kill-chain 消费的引擎面错误文案（自 core errors.ts 迁入，逐字等价）
+// kill-chain 消费的引擎侧错误文案（自 core errors.ts 迁入，逐字等价）
 // ============================================================
 
 /** 错误回显长度上限（截断长输出，避免错误消息爆炸）。 */

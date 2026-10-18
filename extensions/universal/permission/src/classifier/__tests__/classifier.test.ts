@@ -1,7 +1,7 @@
 /**
  * CT 系列：classifier.ts 单元测试（createClassifier + classifyRisk 主流程）。
  *
- * C1a 收口后 classifier 的 LLM 调用走 llm-shared callLLM（依赖注入 deps.callLLM，
+ * C1a 收敛后 classifier 的 LLM 调用走 llm-shared callLLM（依赖注入 deps.callLLM，
  * mock 返回 CallLLMResult 判别联合）。stopReason 归一化在 callLLM 层完成，
  * classifier 消费 ok:false + stopReason 透传字段保留日志区分。
  *

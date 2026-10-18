@@ -277,7 +277,7 @@ describe('fileTreeStore W15/D-7.1 徽章预聚合', () => {
     ])
     expect(store.getDirChangeCount('s1', 'src')).toBe(2)
 
-    // overlay 被新状态覆盖（如 ready 回写 / 重拉），计数跟随重建而非累加
+    // overlay 被新状态覆盖（如 ready 回写 / 重新拉取），计数跟随重建而非累加
     store.setGitOverlay('s1', [{ path: 'lib/c.ts', xyCode: ' M', status: 'modified' }])
     expect(store.getDirChangeCount('s1', 'src')).toBe(0)
     expect(store.getDirChangeCount('s1', 'lib')).toBe(1)

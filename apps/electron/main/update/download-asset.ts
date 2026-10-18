@@ -36,12 +36,13 @@
  *   + curl-download + error-log + @taiji/shared + node:fs/stream
  *   （hash 为无网络依赖的纯函数叶子模块，见 hash.ts / review S#13）
  */
-import { createWriteStream, createReadStream, mkdirSync, renameSync, statSync, unlinkSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { createWriteStream, createReadStream, mkdirSync, renameSync, statSync, unlinkSync, existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import { ProxyAgent } from 'undici'
 import type { ReleaseAsset, IProxyConfig } from '@taiji/shared'
+import { atomicWriteJsonFile } from '../utils/atomic-write-json.js'
 import { getUpdateDir } from './constants.js'
 import { hashFileSha256 } from './hash.js'
 import { resolveProxyUrl, stripCredential } from './proxy-config.js'
@@ -169,7 +170,7 @@ const PROGRESS_THROTTLE_MS = 200
  * @returns 下载完成后最终文件路径（已通过校验）；multiPart = 本次是否实际走了
  *   多段路径（probe supported 且多段真实完成——降级单段/curl 接管均为 false）；
  *   engine = 本次成功完成下载的实际引擎（curl 接管与 undici 两态，降级后成功的
- *   以实际成功者为准）。两字段是 download-success 观测面的数据源（设计 §7.2
+ *   以实际成功者为准）。两字段是 download-success 观测范围的数据源（设计 §7.2
  *   error-log 行 / §8.2 S1：multiPart=true 断言防 probe 改造回归静默退化单段）。
  * @throws UpdateIntegrityError sha256/size 校验失败
  */
@@ -208,7 +209,7 @@ export async function downloadAsset(
     tempPath, finalPath, downloadedBytes, resumeState, onProgress, proxyConfig, proxyUrl,
   }
   // useMultiPart 提升到函数级：成功返回时作为 multiPart 观测值（download-success
-  // 观测面消费，见 @returns）。多段成功路径才置 true——降级单段 / curl 接管均保持 false。
+  // 观测范围消费，见 @returns）。多段成功路径才置 true——降级单段 / curl 接管均保持 false。
   let handledByCurl = false
   let useMultiPart = false
   if (getEnginePreference() === 'curl') {
@@ -1292,12 +1293,9 @@ async function downloadMultiPart(
  */
 function saveResumeState(state: IResumeState): void {
   try {
-    // 原子写（批次 5 m12 / §3.7.2）：先写 .tmp 再 rename，避免读到半截 JSON
+    // 原子写（已收敛至单一助手 atomicWriteJsonFile）：避免读到半截 JSON
     // （半截 state 会被 loadResumeState 的 parse 失败分支吞掉，丢掉续传进度）
-    const resumeStateFile = getResumeStateFile()
-    const tmpPath = `${resumeStateFile}.tmp`
-    writeFileSync(tmpPath, JSON.stringify(state, null, 2)) // eslint-disable-line no-magic-numbers -- JSON 缩进 2 空格
-    renameSync(tmpPath, resumeStateFile)
+    atomicWriteJsonFile(getResumeStateFile(), state)
   } catch (err) {
     // best-effort：resume state 只是续传优化，写入失败不应中断下载，下次重头下即可
     console.warn('[download] save resume state failed:', err)

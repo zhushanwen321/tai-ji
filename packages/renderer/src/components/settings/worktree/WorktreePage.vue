@@ -13,7 +13,7 @@
       </div>
     </header>
 
-    <!-- RD-4#8：读配置失败常驻提示（默认值非已存值）+ 重试；控件禁用直到重拉成功 -->
+    <!-- RD-4#8：读配置失败常驻提示（默认值非已存值）+ 重试；控件禁用直到重新拉取成功 -->
     <div
       v-if="loadError"
       data-testid="worktree-load-error"

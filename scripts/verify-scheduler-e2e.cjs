@@ -14,7 +14,7 @@
  *   - entry 线性增长 + advance nextRunAt 单调递增
  *
  * [L2.5 faux 翻轨] LLM 演员是 faux 脚本（真 pi 进程 + 真 scheduler extension + 假 LLM）。
- * 断言面全在扩展写盘的 entry 形态与工具 / 命令反馈（与模型智能无关），确定性、零 token、
+ * 断言范围全在扩展写盘的 entry 形态与工具 / 命令反馈（与模型智能无关），确定性、零 token、
  * 凭证无关（agentDir 预置 faux settings/models，无需 ~/.pi/agent/auth.json）。S17/S4/S12
  * 的 dispatch 注入 turn 同样消费 faux 队列（注入 prompt 的响应步骤预排余量）。
  *
@@ -33,8 +33,8 @@
  *      （无 turn_end）——驱动器用 sendCommand() 只等 prompt ack，随后轮询请求帧与 notify 帧。
  *
  * 断言源（命令路径）：命令路径**无 tool 调用**，用户可见反馈走 ctx.ui.notify →
- * extension_ui_request{method:'notify', message, notifyType} 帧（getNotifies() 捕获面 +
- * 文案断言），落库证据仍读 customType='pi-scheduler:task' entry —— 双轨断言。
+ * extension_ui_request{method:'notify', message, notifyType} 帧（getNotifies() 捕获范围 +
+ * 文案断言），落盘证据仍读 customType='pi-scheduler:task' entry —— 双轨断言。
  *
  * uiActor 应答器（extension_ui_request → extension_ui_response）：
  *   缺省 = **不回确认**（不再按预填草稿自动应答）——schedule 表单请求按「非预期」记录进
@@ -49,7 +49,7 @@
  * 落盘开关（session-manager `_persist`：已有 assistant 消息即把整批 fileEntries 写盘）——
  * 这就是**正常路径**，故 e2e **不再自植入 flush 探针**（原 flushForJsonlEvidence 已退役，
  * 见断言辅助节的 [u-e2e-adjust] 注释）。S18/S20/S21 断言「创建后会话 JSONL 出现 aborted
- * assistant 行 + 确认文案（i18n `ack.confirm`，locale 由 makeFauxAgentDir 钉死 en-US）+
+ * assistant 行 + 确认文案（i18n `ack.confirm`，locale 由 makeFauxAgentDir 固定为 en-US）+
  * op=upsert 已落盘」；S19 补负向断言（取消 ⇒ 无 assistant 行、JSONL 无 op=upsert）；
  * S22 = 合成行字段（provider/model=会话模型、usage 全 0）+ 宿主不变量（model_change /
  * thinking_level_change 不因创建新增 + auto-rename 不被合成轮触发）；S23 = 同会话连续两次
@@ -110,7 +110,7 @@ const EXTENSION_PATH = path.join(REPO_ROOT, 'extensions', 'universal', 'schedule
 /**
  * rename-session 扩展（S22 显式 --extension 加载 + config.enabled=true）：
  * 「宿主 auto-rename 不被合成轮触发」的判别力来源（first-stop 入口只在 stopReason==='stop'
- * 触发，合成轮为 'aborted'）。缺省场景不加载它——避免多余事件 handler 影响既有断言面。
+ * 触发，合成轮为 'aborted'）。缺省场景不加载它——避免多余事件 handler 影响既有断言范围。
  */
 const RENAME_SESSION_EXT_PATH = path.join(REPO_ROOT, 'extensions', 'universal', 'rename-session')
 /**
@@ -155,7 +155,7 @@ const FAUX_MODEL_ID = MODEL.includes('/') ? MODEL.slice(MODEL.indexOf('/') + 1).
  *
  * `TAIJI_AGENT_DATA_DIR` 指向同一临时目录并预置 `ui-preferences.json`（locale=en-US）：
  * scheduler i18n 的 locale 读取器（`readUiLocale`）从 `<TAIJI_AGENT_DATA_DIR>/ui-preferences.json`
- * 取值，env 缺失时回落 en-US。显式钉死 = 拒绝宿主 env 污染（否则确认文案会在 zh/en 间漂移，
+ * 取值，env 缺失时回落 en-US。显式固定 = 拒绝宿主 env 污染（否则确认文案会在 zh/en 间漂移，
  * 而既有 notify 断言同样假定 en-US）。
  *
  * @param {Array<Object>} fauxSteps faux 响应步骤队列（写入 TAIJI_FAUX_SCRIPT 脚本）
@@ -192,7 +192,7 @@ function makeFauxAgentDir(tag, fauxSteps, options = {}) {
       },
     },
   }, null, 2))
-  // locale 钉死（确认文案断言的确定性前提）：见上方 doc 注释。
+  // locale 固定（确认文案断言的确定性前提）：见上方 doc 注释。
   writeFileSync(path.join(agentDir, 'ui-preferences.json'), JSON.stringify({ v: 1, locale: 'en-US' }, null, 2))
   if (options.autoRename === true) {
     const renameConfigDir = path.join(agentDir, 'config')
@@ -369,7 +369,7 @@ function scheduleFormAnswer(question, result) {
   }
 }
 
-/** notify 帧入 state.notifies（命令路径反馈的捕获面；单向帧无应答）。 */
+/** notify 帧入 state.notifies（命令路径反馈的捕获范围；单向帧无应答）。 */
 function captureNotifyFrame(msg, state) {
   state.notifies.push({
     id: typeof msg.id === 'string' ? msg.id : String(msg.id),
@@ -379,7 +379,7 @@ function captureNotifyFrame(msg, state) {
 }
 
 /**
- * extension_ui_request 帧分发：捕获 notify（命令路径断言面）+ 按场景 uiActor 应答。
+ * extension_ui_request 帧分发：捕获 notify（命令路径断言范围）+ 按场景 uiActor 应答。
  * 帧契约（pi 0.84.4 dist/modes/rpc/rpc-mode.js）：stdout 输出
  * {type:'extension_ui_request', id, method, ...}，stdin 回
  * {type:'extension_ui_response', id, ...reply}（cancelled:true → resolve undefined；
@@ -468,7 +468,7 @@ function resolveTurnEndWaiter(msg, state) {
 
 /**
  * spawn 一个 pi 进程（加载 scheduler + faux provider extension，关 builtin tools——
- * 模型的工具面只剩 scheduler 的 schedule/schedule_control，工具调用由 faux 队列预设）。
+ * 模型的工具范围只剩 scheduler 的 schedule/schedule_control，工具调用由 faux 队列预设）。
  * 返回 RPC 控制 API。
  *
  * @param {{ piBin: string, cwd: string, sessionDir: string, sessionFile?: string, label: string,
@@ -523,7 +523,7 @@ function spawnSession(opts) {
   const captured = []
   // 跨 chunk 可变状态：stdout 行缓冲 / turn_end 等待者 / sessionFile 缓存 /
   // ui 应答器（extension_ui_request → extension_ui_response）/
-  // notify 捕获面 + 非预期表单请求记录（命令路径断言 / 模型路径回归守卫）
+  // notify 捕获范围 + 非预期表单请求记录（命令路径断言 / 模型路径回归检查）
   const state = {
     stdoutBuf: '',
     turnEndResolver: null,
@@ -813,7 +813,7 @@ function extractAllText(messages) {
 
 /**
  * 合并 blob：get_messages 文本 + 所有捕获的原始 stdout JSON。
- * 用于回显/list 文本断言——belt-and-suspenders，任一来源命中即满足。
+ * 用于回显/list 文本断言——双重保险防线，任一来源命中即满足。
  */
 function fullTextBlob(messages, captured) {
   const msgText = extractAllText(messages)
@@ -855,7 +855,7 @@ function countNumberedRunLines(text) {
 
 /**
  * 从 captured 提取统一表单 schedule 请求帧列表（命令路径表单的请求侧证据；模型路径下
- * 应为空——`schedule` tool 直建不再弹表单，回归守卫由场景断言 unexpectedScheduleForms）。
+ * 应为空——`schedule` tool 直建不再弹表单，回归检查由场景断言 unexpectedScheduleForms）。
  * @param {unknown[]} captured
  * @returns {Array<{ id: string, options: string[] }>}
  */
@@ -896,7 +896,7 @@ function countEntryType(entries, type) {
   return (entries || []).filter((e) => e && e.type === type).length
 }
 
-/** assistant 行字段投影摘要（provider / model / stopReason / usage / 正文片段）。 */
+/** assistant 行字段派生视图摘要（provider / model / stopReason / usage / 正文片段）。 */
 function describeAssistantEntry(entry) {
   const m = entry && entry.message ? entry.message : {}
   return `provider=${String(m.provider)} model=${String(m.model)} stopReason=${String(m.stopReason)} `
@@ -920,7 +920,7 @@ function isZeroUsage(usage) {
  * 断言源 = pi 落盘后的 JSONL（非内存 get_entries）：合成轮的意义就是打开落盘开关，
  * 断言必须落在磁盘产物上。文案权威源 = `extensions/universal/scheduler/src/i18n.ts`
  * 的 `ack.confirm`（en-US 形：`Task saved: {name} ({schedule}).`）——locale 由
- * makeFauxAgentDir 的 `TAIJI_AGENT_DATA_DIR/ui-preferences.json` 钉死 en-US。
+ * makeFauxAgentDir 的 `TAIJI_AGENT_DATA_DIR/ui-preferences.json` 固定为 en-US。
  *
  * @param {unknown[]} entries parsed JSONL entries
  * @param {{ name: string, schedule: string }} expected 文案插值（任务名 + formatSchedule 结果）
@@ -994,7 +994,7 @@ async function runS1(piBin) {
     const noRecurringHeader = !blob.includes('Next 5 runs:')
     const numberedLines = countNumberedRunLines(blob)
     const hasUpsert = upserts.length >= 1
-    // 触发反转回归守卫：模型路径直建，不得出现确认表单帧
+    // 触发反转回归检查：模型路径直建，不得出现确认表单帧
     const noConfirmForm = unexpectedForms.length === 0
 
     const pass =
@@ -1694,14 +1694,14 @@ async function runS14(piBin) {
   }
 }
 
-// ── A 类：命令路径创建表单场景（设计 §6.2 命令面 / §7.6 探针表 / §8.3 e2e 影响面）──
+// ── A 类：命令路径创建表单场景（设计 §6.2 命令范围 / §7.6 探针表 / §8.3 e2e 影响面）──
 
 /** 恰 1 条 upsert entry 时取其 task 字段，否则 null。 */
 function getSingleUpsertTask(upserts) {
   return upserts.length === 1 && upserts[0].data.task ? upserts[0].data.task : null
 }
 
-/** 落库 task 是否 = S18 用户裁定值（interval 45m + user-edited-prompt + once）。 */
+/** 落盘 task 是否 = S18 用户裁定值（interval 45m + user-edited-prompt + once）。 */
 function isEditedValueTask(task) {
   return !!task
     && task.prompt === 'user-edited-prompt'
@@ -1711,13 +1711,13 @@ function isEditedValueTask(task) {
     && task.schedule.intervalMs === 45 * 60 * 1000
 }
 
-/** S18 ③ 落库 task 的诊断摘要（缺失字段以 '?' 占位）。 */
+/** S18 ③ 落盘 task 的诊断摘要（缺失字段以 '?' 占位）。 */
 function describeUpsertTask(task) {
   return `(prompt=${task ? String(task.prompt).slice(0, 40) : '?'} kind=${task ? task.kind : '?'} `
     + `schedule=${task && task.schedule ? JSON.stringify(task.schedule) : '?'})`
 }
 
-/** 落库 task 是否 = S20 表单提交值（用户裁定 recurring + 6 字段归一化 cron）。 */
+/** 落盘 task 是否 = S20 表单提交值（用户裁定 recurring + 6 字段归一化 cron）。 */
 function isSubmittedCronTask(task) {
   return !!task
     && task.prompt === 'daily-standup-reminder'
@@ -1780,12 +1780,12 @@ function s22SyntheticLineChecks(line, sessionModel) {
  * `/schedule 1h "confirm-draft-prompt"` → 命令 handler 异步打开表单 →
  * extension_ui_request{select, title=UI_FORM_MARKER}（schedule 问题 initial 预填
  * kind=recurring / schedule=1h / prompt=confirm-draft-prompt）→ uiActor 以「用户裁定值」
- * 回 FormAnswers envelope（45m / user-edited-prompt）→ service.create 落库 + notify。
+ * 回 FormAnswers envelope（45m / user-edited-prompt）→ service.create 落盘 + notify。
  * 断言四面（命令路径无 tool 调用 → 回显改读 notify 帧）：
  *   ① 请求帧契约：恰 1 次 UI_FORM_MARKER select，formQuestions[0] 为 schedule 问题且
  *      initial 是合法 ScheduleDraft、反映命令参数
  *   ② notify 帧文案：回显用户裁定值（45m + 改后 prompt 进自动任务名），notifyType=info
- *   ③ 落库形态：upsert entry 恰 1 条，task 字段 = 用户裁定值（非预填原值）
+ *   ③ 落盘形态：upsert entry 恰 1 条，task 字段 = 用户裁定值（非预填原值）
  *   ④ 确认轮：会话 JSONL 出现 aborted assistant 行 + `ack.confirm` 文案（en-US）
  *      + op=upsert 已落盘（无需 flush 探针）
  */
@@ -1833,7 +1833,7 @@ async function runS18(piBin) {
     const notifyEdited = !!notify
       && /^Created [0-9a-f]+: user-edited-prompt · once in 45m · next run in \d+m$/.test(notify.message)
     const notifyIsInfo = !!notify && notify.notifyType === 'info'
-    // ③ 落库 = 裁定值（45m → interval 2700000ms；prompt/kind 为用户回传形态）
+    // ③ 落盘 = 裁定值（45m → interval 2700000ms；prompt/kind 为用户回传形态）
     const task = getSingleUpsertTask(upserts)
     const taskOk = isEditedValueTask(task)
     // 第三轨：确认轮打开落盘开关 ⇒ entry 已落到 session JSONL（无需探针）
@@ -1873,7 +1873,7 @@ async function runS18(piBin) {
  * 断言四面：
  *   ① 请求帧契约：恰 1 次 UI_FORM_MARKER select（交互确实发生）
  *   ② notify 帧数 = 0（取消不 toast）
- *   ③ 落库：零 scheduler entry（任务未创建）
+ *   ③ 落盘：零 scheduler entry（任务未创建）
  *   ④ 负向（确认轮不启动）：无 assistant 消息新增 + 会话 JSONL 无 op=upsert
  *      （取消 ⇒ 无创建 ⇒ 无合成轮；若出现即回归）
  */
@@ -1893,7 +1893,7 @@ async function runS19(piBin) {
 
     await s.sendCommand('/schedule 30m "cancel-path-task"')
     const reqs = await s.waitForFormRequest(15000)
-    // 取消路径无 toast —— 留出落库 / 通知的结算窗口后再断言
+    // 取消路径无 toast —— 留出落盘 / 通知的结算窗口后再断言
     await sleep(2000)
 
     const entries = await s.getEntries()
@@ -1939,11 +1939,11 @@ async function runS19(piBin) {
  * `/schedule`（无参）→ 表单预填默认草稿（kind=once / schedule='' / prompt=''；
  * 默认单次为现行契约，schedule 置空由表单端派生初值，见
  * extensions/universal/scheduler/src/commands.ts 无参分支）→ uiActor 把任务改为
- * recurring 每天 09:00 后提交 → 落库 + notify。
+ * recurring 每天 09:00 后提交 → 落盘 + notify。
  * 断言三面：
  *   ① 请求帧契约：恰 1 次 UI_FORM_MARKER select，initial 为默认草稿（kind/schedule/prompt）
  *   ② notify 帧文案：提交的 cron 表达式（0 9 * * *）与任务名回显
- *   ③ 落库形态：upsert entry 恰 1 条，task = cron 任务（cronExpression + prompt）
+ *   ③ 落盘形态：upsert entry 恰 1 条，task = cron 任务（cronExpression + prompt）
  *   ④ 确认轮：会话 JSONL 出现 aborted assistant 行 + `ack.confirm` 文案（en-US）
  *      + op=upsert 已落盘（无需 flush 探针）
  */
@@ -2021,12 +2021,12 @@ async function runS20(piBin) {
 /**
  * S21：`/schedule` 命令路径表单——预填原值确认基线。
  *
- * `/schedule 30m "alias-task"`：表单请求帧契约 + 提交后落库 + notify，
+ * `/schedule 30m "alias-task"`：表单请求帧契约 + 提交后落盘 + notify，
  * 与其它命令路径用例（S18/S20）同形；uiActor 按命令参数原值应答（不改动预填）。
  * 断言三面：
  *   ① 请求帧契约：恰 1 次 UI_FORM_MARKER select，initial 反映命令参数
  *   ② notify 帧文案：30m + alias-task 回显
- *   ③ 落库形态：upsert entry 恰 1 条，task = 命令参数值
+ *   ③ 落盘形态：upsert entry 恰 1 条，task = 命令参数值
  *   ④ 确认轮：会话 JSONL 出现 aborted assistant 行 + `ack.confirm` 文案（en-US）
  *      + op=upsert 已落盘（无需 flush 探针）
  */
@@ -2106,7 +2106,7 @@ async function runS21(piBin) {
  * S22：确认轮合成行字段 + 宿主不变量（可脚本化 S7①②）。
  *
  * 命令路径建 once 2h 任务（表单确认）→ 确认轮落盘后读会话 JSONL，断言：
- *   ① assistant 行 stopReason='aborted'（合成轮的终止形态投影到落盘消息）
+ *   ① assistant 行 stopReason='aborted'（合成轮的终止形态映射到落盘消息）
  *   ② 该行 provider/model = **创建时会话模型**（get_state 动态取值的 model.provider /
  *      model.id）。注意语义收敛：真实环境此断言区分「合成行用会话模型」vs「掉进 pi-ai
  *      faux core（provider:'faux' 硬编码）」；e2e 演员本身就是 faux，故此处只能断言

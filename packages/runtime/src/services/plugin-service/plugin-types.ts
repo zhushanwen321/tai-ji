@@ -7,16 +7,16 @@ import type { ISessionService, IConfigService } from '../../interfaces.js'
 // 随 plugin-bridge 整体退役删除
 // （D4 单源化，runtime 与 plugin-sdk 均经协议包 re-export 消费）。本文件原内联的
 // Worker/AgentAPI/Bridge/Tool 等域类型已上收，此处仅 re-export 保持既有
-// `from './plugin-types.js'` 导入面不变；仅保留一个 runtime 专属内部类型
-// （IPluginServiceDeps，依赖 runtime 内部 service port，不进插件作者契约面）。
+// `from './plugin-types.js'` 导入侧不变；仅保留一个 runtime 专属内部类型
+// （IPluginServiceDeps，依赖 runtime 内部 service port，不进插件作者契约范围）。
 // descriptor / rpc 域亦经 SDK re-export（本地子文件已删）；hook 域经薄壳
 // hook-types.ts 指向 SDK——各域定义源唯一 = SDK。
 //
 // 分层标注（IF2）沿承 SDK 侧定义：
-// - @stable — Phase1AgentAPI 核心面 storage/notify/sessions、PermissionConstants、
+// - @stable — Phase1AgentAPI 核心部分 storage/notify/sessions、PermissionConstants、
 //   PluginRpcErrorCodes、Disposable、SessionInfo、PluginStateStorage
 // - @experimental — events 插件间事件总线（未实现，调用即抛 NOT_IMPLEMENTED）
-// - @proposed — Phase2AgentAPI 扩展面 tools/hooks/config/sessionData/ui/agent/
+// - @proposed — Phase2AgentAPI 扩展范围 tools/hooks/config/sessionData/ui/agent/
 //   workspace、ToolRegistration、HookEntry 等
 // - @internal — runtime 内部塑形对象（WorkerHandle、PluginContext、Bridge* 等）
 

@@ -1,6 +1,6 @@
 // src/identity-env.ts
 //
-// [§2.7 身份 env 接通] 子代理身份 env 键的**单一声明处**（协议面常量）。
+// [§2.7 身份 env 接通] 子代理身份 env 键的**单一声明处**（协议范围常量）。
 //
 // 用途：子代理 pi 进程靠这组键判定「自己是子进程」并读取自己的身份。三处消费者：
 //   - **写入方** = 引擎在 spawn 子 pi 进程时按 per-run 值写回（pi 引擎
@@ -28,7 +28,7 @@
 //   - depth：执行嵌套深度（子进程 = 父进程 + 1）
 //   - forkDepth：fork 链深度（root 侧一次设定，链上不变）
 //   - parentRecordId：父 record id（嵌套时 = 父进程自身的 selfRecordId）
-//   - agent / task / mode / slug / startedAt / worktree：record 身份面；引擎侧只能填
+//   - agent / task / mode / slug / startedAt / worktree：record 身份信息；引擎侧只能填
 //     它确实知道的（agent/task 来自 run 参数；mode 继承父进程判定、顶层缺省 background），
 //     其余缺席由壳读者回落（slug/parentRecordId 可选；startedAt 缺席回落 Date.now()）。
 export const SUBAGENT_IDENTITY_ENV = {

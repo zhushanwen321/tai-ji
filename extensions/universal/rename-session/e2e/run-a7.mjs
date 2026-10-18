@@ -7,12 +7,12 @@
  * （first-stop 不注册工具 ⇒ 必无 toolCall 的确定性判据与 agent 行为无关，faux 下恒成立）。
  *
  * 主进程：config 写 mode:"agent-tool"（extension load 时注册 rename_session 工具），先经
- * RPC 预置既有名（防覆盖守卫的触发前提），prompt 要求 agent 调 rename_session 改成指定标题。
+ * RPC 预置既有名（防覆盖检查的触发前提），prompt 要求 agent 调 rename_session 改成指定标题。
  * 断言：
  *   ① 工具被调用：session JSONL 出现 rename_session toolCall entry
- *   ② 立即落库：`tool renamed to` 日志时刻早于最终 stop assistant message_end——
+ *   ② 立即写入：`tool renamed to` 日志时刻早于最终 stop assistant message_end——
  *      execute 同步段内 setSessionName，不等 round 完成 / 下一轮
- *   ③ 覆盖既有名成功（不走防覆盖守卫）：最终名 = 指定标题 ≠ 预置名
+ *   ③ 覆盖既有名成功（不走防覆盖检查）：最终名 = 指定标题 ≠ 预置名
  *
  * 对照进程：默认 first-stop 起动（不注册工具），同样 prompt。断言其 session JSONL 无任何
  * rename_session toolCall entry——确定性判据：pi RPC 无工具清单查询命令，但
@@ -32,12 +32,12 @@ import {
 
 /** 工具指定标题（cleanTitle 后不变，断言可预测）。 */
 const TOOL_TITLE = "重构配置加载";
-/** 预置既有名（守卫触发前提：若 execute 误走防覆盖，最终名将保持此值）。 */
+/** 预置既有名（检查触发前提：若 execute 误走防覆盖，最终名将保持此值）。 */
 const PRESET_NAME = "预置占位名";
 /** 两进程共用 prompt：明确指定工具与目标标题（Gate B 真实跑时的遵从性由模型决定，脚本按设计断言）。 */
 const TOOL_PROMPT = `请调用 rename_session 工具，把当前会话改名为「${TOOL_TITLE}」。完成后简短确认即可，不要做其他事。`;
 
-/** 主进程：agent-tool 模式 + 预置名覆盖 + toolCall/立即落库断言。 */
+/** 主进程：agent-tool 模式 + 预置名覆盖 + toolCall/立即写入断言。 */
 async function runToolSession(log) {
 	const pi = await spawnPi({
 		tag: "a7tool",
@@ -67,26 +67,26 @@ async function runToolSession(log) {
 		const calls = countToolCalls(lines, "rename_session");
 		assert(calls >= 1, `① rename_session toolCall entry 未出现（${calls} 条）`);
 
-		// ② 立即落库：tool renamed to（execute 内 setSessionName 后打出）早于最终 stop
-		//    assistant message_end——落库发生在 round 完成前，不等下一轮
+		// ② 立即写入：tool renamed to（execute 内 setSessionName 后打出）早于最终 stop
+		//    assistant message_end——写入发生在 round 完成前，不等下一轮
 		const stopEndT = lastStopAssistantEndT(pi.timeline.all());
 		assert(stopEndT !== null, "时间轴上未找到最终 stop assistant message_end");
 		assert(
 			toolLog.t < stopEndT,
-			`② 立即落库断言失败: t(tool renamed to)=${toolLog.t} 不早于 t(最终 assistant message_end)=${stopEndT}`,
+			`② 立即写入断言失败: t(tool renamed to)=${toolLog.t} 不早于 t(最终 assistant message_end)=${stopEndT}`,
 		);
 
-		// ③ 覆盖既有名：最终名 = 指定标题（若误走防覆盖守卫，名字保持 PRESET_NAME）
+		// ③ 覆盖既有名：最终名 = 指定标题（若误走防覆盖检查，名字保持 PRESET_NAME）
 		const info = await pi.waitSessionInfoEntry(10_000);
-		assert(info !== null, "③ session_info 未落盘（工具改名未落库）");
+		assert(info !== null, "③ session_info 未落盘（工具改名未写入）");
 		assert(info.name === TOOL_TITLE, `③ 最终名 "${info.name}" ≠ 指定标题 "${TOOL_TITLE}"（覆盖失败或未生效）`);
 		const logTitle = toolLog.message.match(/tool renamed to "(.*)"$/)?.[1];
 		assert(logTitle === TOOL_TITLE, `③ 工具日志标题 "${logTitle}" ≠ "${TOOL_TITLE}"`);
 		assert(
 			lastSessionInfoEntry(lines)?.name === TOOL_TITLE,
-			`③ 落库名 "${lastSessionInfoEntry(lines)?.name}" ≠ "${TOOL_TITLE}"`,
+			`③ 写入名 "${lastSessionInfoEntry(lines)?.name}" ≠ "${TOOL_TITLE}"`,
 		);
-		log(`主进程: toolCall×${calls} + round 完成前落库 + 覆盖「${PRESET_NAME}」→「${info.name}」`);
+		log(`主进程: toolCall×${calls} + round 完成前写入 + 覆盖「${PRESET_NAME}」→「${info.name}」`);
 	} finally {
 		pi.cleanup();
 	}

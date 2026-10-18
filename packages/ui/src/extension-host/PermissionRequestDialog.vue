@@ -7,7 +7,7 @@
  * 展示插件申请的权限列表，用户可部分勾选批准（全选/部分）或拒绝。
  *
  * 回传双通道（clarify Q4，职责分离）：
- *  - emit('approve', selectedPermissions) / emit('deny') —— 组件契约面，供父层 UI 编排（关浮层/置 pending=false）
+ *  - emit('approve', selectedPermissions) / emit('deny') —— 组件契约范围，供父层 UI 编排（关浮层/置 pending=false）
  *  - transport.approve(pluginId, selected) / transport.deny(pluginId) —— RPC 唯一通道（plugin.approvePermissions / plugin.denyPermissions，deny=拒绝本次申请不回收已授权限）
  *
  * transport 经 PERMISSION_TRANSPORT_KEY inject；未注入时只 emit 不 RPC（壳未接时不崩，design-review T3 cost）。

@@ -41,7 +41,7 @@ export interface LauncherDeps extends LifecycleDeps {
  * 缺省参数组合的输出与历史 run 拒单格式逐字节一致（既有测试锁定）。
  *
  * @param opts 两个布尔选项，缺省 includeLocation=true / includeSource=false。
- *   出现第三个选项的需求时先停下——这层刻意只表达「行内投影裁剪」这一个变化轴。
+ *   出现第三个选项的需求时先停下——这层刻意只表达「行内派生视图裁剪」这一个变化原因。
  */
 export function formatAvailableWorkflowRefs(
   all: readonly WorkflowScript[],

@@ -160,7 +160,7 @@ export class PluginService implements IPluginService {
     })
 
     // UI 请求队列：广播回调装配迁 plugin-broadcast.ts（u5a max-lines 回落拆分，行为保持——
-    // MF-2 活跃 sessionId 注入 / 撤窗直发 global / bus 定向与回退双腿的决策注释随迁彼处）。
+    // MF-2 活跃 sessionId 注入 / 撤窗直发 global / bus 定向与回退双路径的决策注释随迁彼处）。
     // 动态状态经闭包注入（调用时求值）：activeSessionResolver / messageBus（晚期注入）/
     // broadcastOrBroker（动态读 broadcastFn 与 broker）。
     this.uiRequestQueue = new UiRequestQueue(createUiRequestBroadcastFn({
@@ -256,7 +256,7 @@ export class PluginService implements IPluginService {
     // registry/host），搬出会引入更宽的注入缝，故作为委托缝留在本类（P4 PARTIAL）。
     this.registerWorkerCallbacks()
 
-    // 9 步顺序启动装配委托 plugin-lifecycle（god-orchestrator 收口）。
+    // 9 步顺序启动装配委托 plugin-lifecycle（god-orchestrator 收尾）。
     await bootstrapPluginService({
       registry: this.registry,
       storage: this.storage,
@@ -368,8 +368,8 @@ export class PluginService implements IPluginService {
   }
 
   /**
-   * Entry 失效信号派发（AP-4，U2）：组合根 onRecordEntriesInvalidated 两路注入的 plugin 腿
-   * （session 腿 = invalidateRecordEntries，record 三族早退门保留）。按 (sessionId,
+   * Entry 失效信号派发（AP-4，U2）：组合根 onRecordEntriesInvalidated 两路注入的 plugin 路径
+   * （session 路径 = invalidateRecordEntries，record 三族早退门保留）。按 (sessionId,
    * customType) 双匹配命中订阅注册表，命中者经 rpcServer.notify 定向投递（server→Worker
    * notify 非 WS 帧，与 didCreate/didDestroy 同族；Worker 已死时静默 no-op 既有口径）；
    * 无订阅者零开销（零 notify）。
@@ -395,11 +395,11 @@ export class PluginService implements IPluginService {
         await this.activator.activatePlugin(pluginId, { type: 'onStartupFinished' }, this.host)
         // 激活成功后，对外部插件启动热重载监听
         this.watchExternalIfActive(descriptor)
-        // E2 修复：enable 腿补 plugin:statusChange 广播（此前全仓唯一 producer 在 external
-        // 热重载回调，toggle 腿无广播 → renderer E2 触发链无触发源，重启用不恢复顶栏按钮）。
+        // E2 修复：enable 路径补 plugin:statusChange 广播（此前全仓唯一 producer 在 external
+        // 热重载回调，toggle 路径无广播 → renderer E2 触发链无触发源，重启用不恢复顶栏按钮）。
         // newStatus 按激活终态派生（对齐 hot-reload producer 的 getState 判定；激活未达
         // ACTIVE 不产虚假 active 帧致 renderer 重放声明）。payload 键集逐字对齐
-        // StatusChangeCallback 契约（pluginId/oldStatus/newStatus），信封与 crashed 腿同款
+        // StatusChangeCallback 契约（pluginId/oldStatus/newStatus），信封与 crashed 路径同款
         //（broker.broadcast 三键 type/id/payload，id 前缀按源命名：crash_/watch_/toggle_）。
         if (this.activator.getState(pluginId) === 'ACTIVE') {
           this.broker.broadcast({
@@ -420,12 +420,12 @@ export class PluginService implements IPluginService {
         // S3-W2：session 事件注册表同步清理（禁用插件的 didCreate/didDestroy 订阅不再投递）
         this.sessionEventDispatch.clearForPlugin(pluginId)
         this.entryInvalidationDispatch.clearForPlugin(pluginId)
-        // E2 修复：disable 腿补 plugin:statusChange 广播——renderer E2 触发链
+        // E2 修复：disable 路径补 plugin:statusChange 广播——renderer E2 触发链
         //（plugin-status-change{inactive} → handlePluginGone：三容器清理 + 命令注销 +
         // 顶栏按钮/modal 收起）此前无触发源，禁用后按钮残留。deactivatePlugin 抛错走
         // catch 不广播（虚假 inactive 帧会清掉仍在运行的插件的 renderer 镜像）；
         // 正常返回（含对未装载插件重入禁用）终态必为 UNLOADED，'inactive' 恒为真。
-        // payload/信封与 enable 腿及 hot-reload producer 同形状。
+        // payload/信封与 enable 路径及 hot-reload producer 同形状。
         this.broker.broadcast({
           type: 'plugin:statusChange',
           id: `toggle_${pluginId}_${Date.now()}`,
@@ -460,7 +460,7 @@ export class PluginService implements IPluginService {
     // builtin 判定
     const descriptor = this.registry.getDescriptor(pluginId)
     // RT-6#6：磁盘删除失败的事故记录——盘上残留意味着重启后 scan 会把插件扫回来
-    // （用户视角 = 卸载无效/复活）。内存清理仍必须完成（Fix-5），但失败要在收口时抛出。
+    // （用户视角 = 卸载无效/复活）。内存清理仍必须完成（Fix-5），但失败要在收尾时抛出。
     let onDiskRemovalError: string | undefined
 
     // 停用插件。Fix-5：deactivate 失败不阻断后续清理——注册表/工具/hook/命令清理是
@@ -497,7 +497,7 @@ export class PluginService implements IPluginService {
       const installer = this.deps.pluginInstaller
       if (installer) {
         // RT-6#6：best-effort 删除——失败不阻断内存清理（Fix-5），但把原因交还调用方，
-        // 由下方收口抛出（「卸载重启后复活」不得静默假成功）。
+        // 由下方收尾抛出（「卸载重启后复活」不得静默假成功）。
         onDiskRemovalError = await removePluginDiskFiles(installer, pluginId, descriptor.pluginPath)
       } else {
         console.warn(`[plugin-service] no pluginInstaller configured; on-disk removal skipped for ${pluginId}`)
@@ -567,7 +567,7 @@ export class PluginService implements IPluginService {
 
     // 唤醒正挂在权限审批等待的那次激活（若有）：只 grant 不 resolve pending 的话，
     // 挂起中的激活（boot/handleEvent 里 await 着）要干等 30s 超时才回落。无 pending
-    // 时 no-op（resolvePermissionApproval 内部守卫）。
+    // 时 no-op（resolvePermissionApproval 内部检查）。
     this.activator.resolvePermissionApproval(pluginId, true)
 
     // activatePlugin 真幂等（in-flight 重入返回同一 promise）：
@@ -596,7 +596,7 @@ export class PluginService implements IPluginService {
 
   /**
    * 拒绝插件本次权限申请（不回收已授权限）。对齐 WS 命令 plugin.denyPermissions。
-   * 与 revokePermissions（撤销全部已授权限并持久化，基线协议面保留）的语义分界：
+   * 与 revokePermissions（撤销全部已授权限并持久化，基线协议范围保留）的语义分界：
    * deny 只 resolve 挂起中的审批等待（无 pending 幂等 no-op），已授权限与持久化不动。
    */
   async denyPermissions(pluginId: string): Promise<void> {
@@ -633,7 +633,7 @@ export class PluginService implements IPluginService {
 
   async getPluginConfig(pluginId: string, key?: string): Promise<unknown> {
     if (key === undefined || key === '__all__') {
-      // Return all config（key 前缀约定委托 config-api，P7 收口）
+      // Return all config（key 前缀约定委托 config-api，P7 收尾）
       const allKeys = this.storage.keys(pluginId)
       const configKeys = allKeys.filter(isConfigKey)
       const result: Record<string, unknown> = {}
@@ -714,7 +714,7 @@ export class PluginService implements IPluginService {
 
   /**
    * pi 侧事件向插件钩子的投递入口（pi1-disposition-chat-flow D7② 挂点迁移 + 断链修复）：
-   * 内部事件经本方法以泛型 'onPiEvent' 键派发——与 hook-api 注册面的
+   * 内部事件经本方法以泛型 'onPiEvent' 键派发——与 hook-api 注册点的
    * 泛型键形状对齐（hook-api 以 'onPiEvent' 为键写入 hookRegistry），修复原
    * handleBridgeEvent「分发键 = 原始事件名」的注册/分发键错位断链。
    *
@@ -766,7 +766,7 @@ export class PluginService implements IPluginService {
     this.sessionDataStore.flushSession(sessionId)
   }
 
-  // [B5 触发面收窄 2026-09-15] 原 clearSessionData facade 已删：全仓零调用点（真删除链
+  // [B5 触发点收窄 2026-09-15] 原 clearSessionData facade 已删：全仓零调用点（真删除链
   // 经模块级 clearRemovedSessionData 分发，session-lifecycle.ts delete 直调；生存路径
   // exit/forceQuit/restore 清场不清插件数据）。IPluginService 同名条目同批删除。
 

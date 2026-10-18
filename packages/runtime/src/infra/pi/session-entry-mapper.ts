@@ -119,8 +119,8 @@ export function applyEntryEndTimes(messages: Message[], entries: PiSessionEntry[
  * 实锚 dist/core/session-manager.js:673 `_buildIndex` 文件序循环置 leafId=entry.id、
  * :616 `_setSessionFile` 加载路径）。撤回
  * （navigateTree 回退）后被撤子树仍在文件里（审计保留）但不在活跃路径上——本函数把
- * entries 投影为活跃路径子集，供历史重建链喂入既有映射（被撤分支不渲染，G2 二分的
- * 「未来状态随树」腿）。
+ * entries 映射为活跃路径子集，供历史重建链喂入既有映射（被撤分支不渲染，G2 二分的
+ * 「未来状态随树」路径）。
  *
  * 契约：
  * - leafId === undefined → 原数组原样返回（同一引用）：缺省 = 现行为（全文件），
@@ -137,7 +137,7 @@ export function applyEntryEndTimes(messages: Message[], entries: PiSessionEntry[
  *
  * 泛型结构约束宽松（id/parentId 运行时校验）：调用方可能持 port 收窄类型（如
  * get_entries 响应的域内收窄）而非完整 PiSessionEntry——按原类型透传；id 非 string 的
- * entry 不可被索引/命中，不在活跃路径上（投影语义，非垃圾容忍契约）。
+ * entry 不可被索引/命中，不在活跃路径上（派生视图语义，非垃圾容忍契约）。
  */
 export function computeActivePathEntries<T extends { id?: unknown; parentId?: unknown }>(
   entries: T[],

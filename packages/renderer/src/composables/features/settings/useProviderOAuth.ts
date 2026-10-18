@@ -67,7 +67,7 @@ export interface ProviderOAuthDialogInfo {
 type OAuthLoginSource = 'quicksetup' | 'edit'
 
 /**
- * Provider OAuth 编排 module —— 状态机 + 来源路由的全部消费面（1 个 interface）。
+ * Provider OAuth 编排 module —— 状态机 + 来源路由的全部消费方（1 个 interface）。
  */
 export interface ProviderOauthModule {
   /** OAuthDialog 四态状态机 */
@@ -118,7 +118,7 @@ export interface ProviderOauthModule {
   clearOAuthPresence(providerId: string): void
 }
 
-/** module 工厂输入（依赖注入：模板表 / providers 列表 / QuickSetup 选中态 / 手风琴守卫） */
+/** module 工厂输入（依赖注入：模板表 / providers 列表 / QuickSetup 选中态 / 手风琴检查） */
 export interface ProviderOauthInputs {
   builtinProviders: Ref<BuiltinProviderTemplate[]>
   providers: Ref<ProviderInfo[]>

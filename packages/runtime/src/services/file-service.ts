@@ -1,7 +1,7 @@
 /**
  * FileService —— 文件树编排深模块（code-architecture §3，#2/#7/#16，D-008 三层+port）。
  *
- * 职责（单一变化轴「文件树编排」）：cwd 解析 / 越界统一守门 / 懒加载分层 / ignore 标记 / readFile 截断。
+ * 职责（单一变化原因「文件树编排」）：cwd 解析 / 越界统一守门 / 懒加载分层 / ignore 标记 / readFile 截断。
  *
  * 数据流（§4 功能1）：listTree → sessionService.getSummary(sid).cwd → isUnderOrEqual 守门 →
  *   executor.listDir ×N（1+M 次，F-1：顶层 1 次 + 每个顶层 dir 再 1 次拿一级子）→
@@ -62,7 +62,7 @@ export const MAX_SEARCH_DEPTH = 8
 export const MAX_SEARCH_RESULTS = 5000
 /**
  * searchFiles 有界并发度（D7-4，05-scan-caching §3.3 定案 8~16 取 16）：
- * 限制同时在飞的 listDir 数（目录级并发）。导出供测试断言并发上限。
+ * 限制同时在途的 listDir 数（目录级并发）。导出供测试断言并发上限。
  * 信号量只包裹单次 listDir IO——父任务发起子任务后仅 await 不占 slot，
  * 深链目录树不会因「父持 slot 等子」产生饥饿/死锁。
  */
@@ -89,7 +89,7 @@ export class FileService implements IFileService {
    * 返回前按 sortNodes 排序（dir 在前、同类型内 name 降序），与 listLevel 一致。
    *
    * ignore 策略：始终返回所有节点，对 .gitignore 命中的节点标记 `ignored=true`，
-   * 由前端按 showIgnored 开关做本地 computed 过滤（瞬时切换不重拉，避免闪烁）。
+   * 由前端按 showIgnored 开关做本地 computed 过滤（瞬时切换不重新拉取，避免闪烁）。
    * @throws FileError('session_not_found' | 'permission_denied')
    */
   async listTree(sessionId: string): Promise<FileNode[]> {

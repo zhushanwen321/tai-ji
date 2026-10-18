@@ -7,11 +7,11 @@
  *
  * 依赖方向：无下游（读全局 window.electronAPI，类型经 declare global 自动可用）
  */
-import type { LatestReleaseInfo, UpdateStage, UpdateSettings, UpdateErrorPayload, ProxyTestResult, LaunchResult, UpdateCheckResult, UpdateInstallResult, RendererLogPayload, DiagnosticExportBundlePayload, DiagnosticExportBundleResult, SessionJsonlExportPayload, SessionJsonlExportResult, RemoteAccessInfo, RemoteAccessToggleResult, ShieldsFacesPayload, OverlayContentKind, LocalFileServableReason, LocalFileServableResult, LocalFileReadReason, LocalFileReadResult } from '@taiji/shared'
+import type { LatestReleaseInfo, UpdateStage, UpdateSettings, UpdateErrorPayload, ProxyTestResult, LaunchResult, UpdateCheckResult, UpdateInstallResult, RendererLogPayload, DiagnosticExportBundlePayload, DiagnosticExportBundleResult, SessionJsonlExportPayload, SessionJsonlExportResult, RemoteAccessInfo, RemoteAccessToggleResult, ShieldsFacesPayload, OverlayContentKind, BrowserFrameState, LocalFileServableReason, LocalFileServableResult, LocalFileReadReason, LocalFileReadResult } from '@taiji/shared'
 import type { ImageCacheWritePort } from '@taiji/core'
 
 /** preload 注入的 electronAPI（web/mock / node 测试环境为 undefined——后者连
- * window 全局都没有，裸标识符直接 ReferenceError，故按环境守卫取值） */
+ * window 全局都没有，裸标识符直接 ReferenceError，故按环境检查取值） */
 const api = typeof window !== 'undefined' ? window.electronAPI : undefined
 
 /** 读取已知 runtime 端口（main 已 spawn）。无 IPC 或未启动返回 undefined */
@@ -88,7 +88,7 @@ export function onFullscreenChanged(cb: (isFullscreen: boolean) => void): () => 
  * 选择目录（OS 原生目录选择器，#5 步骤 4a 接入 preload handler）。
  * web/mock 环境无 preload → 返回 canceled，让上层落回 popover（AC-5.3）。
  *
- * @param options.defaultPath 候选初始目录（通常是 currentCwd）；主进程 existsSync 守卫，
+ * @param options.defaultPath 候选初始目录（通常是 currentCwd）；主进程 existsSync 检查，
  *                            存在则用，否则自动回退到 ~（homedir）。不传则用 homedir。
  */
 export async function pickDirectory(
@@ -102,7 +102,7 @@ export async function pickDirectory(
  * 选择文件（OS 原生文件选择器，+菜单「附件 / 图片」入口用）。
  * web/mock 环境无 preload → 返回 canceled，让上层（onAddSelect）静默 return。
  *
- * @param options.defaultPath 候选初始目录（主进程 existsSync 守卫，失效回退 ~）
+ * @param options.defaultPath 候选初始目录（主进程 existsSync 检查，失效回退 ~）
  * @param options.filters    文件类型过滤（如 [{name:'Images', extensions:['png','jpg',...]}]）
  */
 export async function pickFile(
@@ -169,8 +169,8 @@ export function browserShow(sessionId: string): Promise<void> {
   return api?.browserShow(sessionId) ?? Promise.resolve()
 }
 
-/** 切换可见 view 到指定 session（Wave 4 per-session 隔离；§7.4 R3 收口后语义）。
- *  hide-only 收口 + 浮层随行豁免：恒只隐藏不显示，显示唯一触发 = browser-view-manager.applyDisplay
+/** 切换可见 view 到指定 session（Wave 4 per-session 隔离；§7.4 R3 收尾后语义）。
+ *  hide-only 收尾 + 浮层随行豁免：恒只隐藏不显示，显示唯一触发 = browser-view-manager.applyDisplay
  *  统一谓词。切 session 时由 useBrowserFocusSync 调用。
  *  无 IPC（web/mock）静默 no-op。 */
 export function browserFocus(sessionId: string): Promise<void> {
@@ -253,7 +253,7 @@ export function browserSetShields(payload: ShieldsFacesPayload): Promise<void> {
 
 // ── view 转发键清单（display-containers §7.4 [MANDATORY]，renderer 半边）─────────────
 // 主进程半边（forward-keys.ts 桥 + registry + before-input-event）已备；本组封装是
-// renderer 注册处的上报/派发腿：useGlobalShortcuts 装配处按 keymap+shortcutOverrides
+// renderer 注册处的上报/派发路径：useGlobalShortcuts 装配处按 keymap+shortcutOverrides
 // 派生 mod 前缀清单上报，并订阅 'shortcut:forward' 按 accelerator 派发动作。
 // 无 IPC（web/mock）静默 no-op / 返回空回执 / no-op 退订。
 
@@ -287,22 +287,10 @@ export function onBrowserForwardKey(callback: (payload: { accelerator: string })
  * 监听主进程推送的 browser 状态变化（url/isLoading/error）。
  * 主进程 did-navigate / did-fail-load / did-start-loading 等事件触发时推送，
  * BrowserPane 据此更新地址栏真实 URL（防钓鱼）+ loading/error 态。
+ * 载荷形态 SSOT = @taiji/shared BrowserFrameState（browser:state 通道契约，C-comm-22）。
  * 返回取消订阅函数。无 IPC 时返回 no-op。
  */
-export function onBrowserState(
-  callback: (state: {
-    sessionId: string
-    currentUrl: string
-    isLoading: boolean
-    error: { errorCode: number; errorDescription: string; validatedURL: string } | null
-    /** 渲染进程崩溃（render-process-gone，§5.3 两类占位之二：创建失败/进程崩溃） */
-    processGone: { reason: string } | null
-    canGoBack: boolean
-    canGoForward: boolean
-    /** 当前缩放因子（autoFit 后主进程回推，BrowserPane 转发给 useBrowserZoom.setZoomFromRemote） */
-    zoomFactor: number
-  }) => void,
-): () => void {
+export function onBrowserState(callback: (state: BrowserFrameState) => void): () => void {
   // onBrowserState 在 preload 暴露（Wave 2 加）；类型经 declare global ElectronAPI 对齐。
   // 用可选链兜底旧 preload 未暴露的场景（mock/测试环境）。
   return (api as { onBrowserState?: (cb: typeof callback) => () => void })?.onBrowserState?.(callback) ?? (() => {})
@@ -365,11 +353,6 @@ export function onUpdateError(cb: (e: UpdateErrorPayload) => void): () => void {
 /** 读取启动结果（升级成功/失败/回滚通知）。首次调用返回结果，后续返回 null。无 IPC 返回 null */
 export function getLaunchResult(): Promise<LaunchResult | null> {
   return api?.getLaunchResult() ?? Promise.resolve(null)
-}
-
-/** 不支持当前平台时，打开备用下载页（release 页面）。无 IPC 时 no-op */
-export function openUpdateFallbackUrl(url: string): Promise<void> {
-  return api?.openUpdateFallbackUrl(url) ?? Promise.resolve()
 }
 
 /**
@@ -536,7 +519,7 @@ export function reportRendererLog(payload: RendererLogPayload): Promise<boolean>
 // ── 诊断包导出（crash-forensics §3.3 D6 / u3b）────────────────────────
 
 /**
- * 导出诊断包（main 先弹保存对话框，用户自选保存位置，打包双台账 + 日志尾部 +
+ * 导出诊断包（main 先弹保存对话框，用户自选保存位置，打包双登记清单 + 日志尾部 +
  * 触发状态表 + summary.md 为 zip）。三态永不 reject（main 侧零 rejection 契约，
  * 见 shared DiagnosticExportBundleResult）：exported（含产物路径与摘要）/
  * canceled（用户取消保存对话框）/ error（含具体 errno，磁盘满/权限可判定可重试）。
@@ -567,7 +550,7 @@ export function exportSessionJsonl(
 // ── 图片缓存写 port（D6-⑨，MF-7 装配点）────────
 
 /**
- * toolResult 图片落盘 write port：core image-cache 编排层的 main 侧调用腿。
+ * toolResult 图片落盘 write port：core image-cache 编排层的 main 侧调用路径。
  * electronAPI 消费收敛本文件（C-build-05 单点）；main.ts bootstrap 经
  * setImageCacheWritePort(getImageCacheWritePort()) 显式注入（core 平台无关内核
  * 不懒探测 preload 全局）。web/mock（无 preload 或旧 preload 未暴露该方法）返回
@@ -583,7 +566,7 @@ export function getImageCacheWritePort(): ImageCacheWritePort | undefined {
 
 // local-file 两条通道的 payload 类型不在此另立副本：定义 SSOT = `@taiji/shared`
 // （packages/shared/src/ipc-payloads.ts，C-comm-22 唯一类型源）；re-export 保持渲染域既有
-// 消费面（useDetailPane 等自 `@/lib/ipc` 取用）。
+// 消费方（useDetailPane 等自 `@/lib/ipc` 取用）。
 export type {
   LocalFileReadReason,
   LocalFileReadResult,

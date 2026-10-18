@@ -1,7 +1,7 @@
 /**
  * JSON 文件存储抽象（P0-1）。
  *
- * 收口 runtime 6 类 JSON 存储（models / settings / disabled-packages /
+ * 收敛 runtime 6 类 JSON 存储（models / settings / disabled-packages /
  * permissions / plugin-KV / session-data）的读写样板：read→parse→ENOENT 容错→
  * 默认值、atomicWrite、revision 指纹校验（JsonStore）、write-back（dirty +
  * 定时 flush + size 跟踪，WriteBackCache）。
@@ -589,7 +589,7 @@ export class WriteBackCache<K extends string, IK extends string, IV> {
       }
       this.backing.persistPartition(k, partition.data)
       partition.dirty.clear()
-      // 以写入后指纹刷新 loadRevision：磁盘已是内存投影，非 dirty 读侧校验应命中；
+      // 以写入后指纹刷新 loadRevision：磁盘已是内存派生视图，非 dirty 读侧校验应命中；
       // 采集失败降级 undefined → 下次访问失配重载（安全方向，多一次盘读）
       partition.loadRevision = statPartitionRevision(this.backing.partitionPath(k))
     } catch (e) {

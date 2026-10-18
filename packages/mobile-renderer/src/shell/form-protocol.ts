@@ -1,26 +1,52 @@
-// form-protocol —— 移动壳 form 视图辅助薄层（schedule 回显确认门）。
+// form-protocol —— 移动壳 form 类请求的帧收窄（问题集过滤 / 草稿收窄 / 富交互帧判定）。
 //
-// ui-form 线协议的编码契约与帧标记守卫已收敛 @taiji/ui/extension-host form-protocol
-// （双壳共享纯模块单点——问题收窄 / 答案编码 / draft 回显构造 / C4 帧判定，消费面直改
-// import 该模块）；本模块只留移动壳消费面的 schedule 回显薄包装：
-// - schedule 回显：预填草稿未编辑确认 = ScheduleFormResult 构造（委托共享
-//   draftToScheduleFormResult；MobileFormCard 的确认门与提交门共用）
-//
-// 移动壳自建精简 form 视图（触控堆叠单列，区别于桌面 FormOverlay 的 tab 形态——真差异），
-// 渲染形态差异不进共享模块。
-import type { ScheduleFormResult, ScheduleQuestion } from '@zhushanwen/extension-protocol'
-import { draftToScheduleFormResult } from '@taiji/ui/extension-host'
+// ui-form 线协议的编码/判定纯逻辑（initialQuestionState/questionKey/isQuestionAnswered/
+// encodeFormAnswers/draftToScheduleFormResult 等）单点在 @taiji/ui/form-protocol（双壳共享，
+// 契约测试锁定）；本模块只承载移动壳特有的帧级消费面：
+// - 问题集收窄：isFormQuestion 复核过滤（renderer Panel.formQuestions 同式，滤除留痕由调用方）
+// - 草稿收窄：legacy scheduleCreate 帧的预填草稿形状检查
+// - 富交互帧判定：C4 门放行 form ∨ planReview（桌面 useExtensionUI handler 同式）
+import {
+  isFormQuestion,
+  isScheduleDraft,
+  type FormQuestion,
+  type ScheduleDraft,
+} from '@zhushanwen/extension-protocol'
+import type { ExtensionUIRequest } from '@taiji/core/transport/api/domains/extension'
 
-/**
- * schedule 回显构造（桌面 ScheduleForm 打开即确认路径的字节等价物）：
- * 无 initial 的 schedule 题 → null（桌面默认表单需用户填时刻与提示词，移动仅可取消）。
- */
-export function scheduleEchoResult(question: ScheduleQuestion): ScheduleFormResult | null {
-  if (question.initial === undefined) return null
-  return draftToScheduleFormResult(question.initial)
+// ── 帧标记检查（窄化 ExtensionUIRequest 索引签名承载的 marker 键）──────────────
+
+/** planReview 审批帧（runtime event-adapter PLAN_REVIEW_MARKER 分支产出，selfReview 有界可选） */
+export type PlanReviewFrame = ExtensionUIRequest & {
+  planReview: true
+  selfReview?: string
 }
 
-/** schedule 回显的确认门（= draftToScheduleFormResult 可构造性；提交门与禁用态共用） */
-export function isScheduleEchoReady(question: ScheduleQuestion): boolean {
-  return question.initial !== undefined && draftToScheduleFormResult(question.initial) !== null
+export function isPlanReviewFrame(req: ExtensionUIRequest): req is PlanReviewFrame {
+  return (req as { planReview?: unknown }).planReview === true
+}
+
+/**
+ * C4 富交互帧判定（桌面 useExtensionUI handler 同式：form ∨ planReview 放行——legacy
+ * askUser/scheduleCreate 帧的归一已在 runtime event-adapter 完成，此处只认 view-ready 键）。
+ * 参数取 unknown + 运行时收窄：bus DialogRequest（索引签名承载 marker 键）与
+ * ExtensionUIRequest 快照条目两源共用，规避弱类型检查对无公共声明属性源的拒绝。
+ */
+export function isRichInteractionFrame(req: unknown): boolean {
+  if (typeof req !== 'object' || req === null) return false
+  const probe = req as { form?: unknown; planReview?: unknown }
+  return probe.form === true || probe.planReview === true
+}
+
+/** form 帧问题集收窄（isFormQuestion 逐项过滤；非 form 帧恒空） */
+export function formQuestionsOf(req: ExtensionUIRequest): FormQuestion[] {
+  if (req.form !== true) return []
+  const raw = req.formQuestions ?? []
+  return raw.filter(isFormQuestion)
+}
+
+/** legacy scheduleCreate 帧的预填草稿收窄（形状检查失败 → null，不可确认仅可取消） */
+export function scheduleDraftOf(req: ExtensionUIRequest): ScheduleDraft | null {
+  if (req.scheduleCreate !== true) return null
+  return isScheduleDraft(req.scheduleDraft) ? req.scheduleDraft : null
 }

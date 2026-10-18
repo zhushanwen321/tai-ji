@@ -15,6 +15,11 @@
  * mjs import 用法（同进程零成本，impl-spec §2.2）：
  *   import { skillDataDir, projectSlug } from "./skill-data-dir.mjs"
  *
+ * 消费方（.agents/skills/pr-cr-fix/scripts/coverage-gate.py / metrics-gate.py）：
+ * 解析失败（本脚本缺失 / 非零退出 / 空输出）时降级只写旧 .review/ 目录，门禁判定不受影响；
+ * 解析成功时新旧目录同内容双写。本脚本入 git 随分支传播，读方脚本（不入 git）按
+ * 旧目录兼容窗口设计，删除/改输出格式前须先核对读方兼容性。
+ *
  * slug 算法（design.md §3.1 全域唯一，固定测试向量 impl-spec §3）：
  *   规范化 realpath()（解析 symlink、消尾斜杠、消 ..）
  *   slug = basename(realpath) + "-" + sha256(realpath) 前 8 位十六进制小写

@@ -12,8 +12,8 @@
 //   2. lastSchemaError 只在 steer 后清空——超上限时保留最近错误（turn 自然结束）
 //
 // [U2 重锁 2026-08-28] 设计 §7.4「RetryState 增 terminal 态」为允许的基线变更：
-//   - ②：同 turn 3 次同签名失败 → 闸门（loop-gate）在第 3 次 terminal + shutdown，
-//     turn_end 不再 steer（旧基线：single steer）——硬闸门接管软 steer
+//   - ②：同 turn 3 次同签名失败 → 门禁（loop-gate）在第 3 次 terminal + shutdown，
+//     turn_end 不再 steer（旧基线：single steer）——硬门禁接管软 steer
 //   - ③：第 3 轮失败同时是第 3 次同签名失败 → terminal 抢在 hookRetryCount 上限
 //     之前拦截（旧基线：超上限放弃）；steer 总数仍 2，新增 shutdown 副作用断言
 
@@ -86,7 +86,7 @@ describe("characterization: setupWorkflowHook timing (baseline before RetryState
     await pi.emit("tool_execution_end", FAILED_TOOL_END);
     await pi.emit("tool_execution_end", FAILED_TOOL_END);
     expect(pi.ctx.shutdown).not.toHaveBeenCalled(); // 2 次 < 阈值 3
-    // 第 3 次同签名失败：合一状态机 terminal 置位（单字段，steer 守卫链直接可读）+ shutdown
+    // 第 3 次同签名失败：合一状态机 terminal 置位（单字段，steer 检查链直接可读）+ shutdown
     await pi.emit("tool_execution_end", FAILED_TOOL_END);
     expect(pi.ctx.shutdown).toHaveBeenCalledTimes(1);
     expect(pi.appendEntry).toHaveBeenCalledWith(
@@ -94,7 +94,7 @@ describe("characterization: setupWorkflowHook timing (baseline before RetryState
       expect.objectContaining({ event: "terminated", consecutiveFailures: 3 }),
     );
 
-    // turn_end：守卫链第 0 条（terminal）拦截 → 不 steer（旧基线：1 次 steer）
+    // turn_end：检查链第 0 条（terminal）拦截 → 不 steer（旧基线：1 次 steer）
     await pi.emit("turn_end", turnEndPayload());
     expect(pi.sendMessage).not.toHaveBeenCalled();
   });
@@ -105,7 +105,7 @@ describe("characterization: setupWorkflowHook timing (baseline before RetryState
     await loadExtension(pi, SCHEMA);
 
     // 失败→steer 循环 3 轮：前 2 轮 steer（失败次数 1、2），第 3 轮失败是第 3 次
-    // 同签名失败 → 闸门 terminal + shutdown；turn_end 被守卫链第 0 条拦截不 steer。
+    // 同签名失败 → 门禁 terminal + shutdown；turn_end 被检查链第 0 条拦截不 steer。
     // steer 总数与旧基线一致（2），拦截者从 hookRetryCount 上限变为 terminal。
     for (let i = 0; i < 3; i++) {
       await pi.emit("tool_execution_end", FAILED_TOOL_END);
@@ -120,7 +120,7 @@ describe("characterization: setupWorkflowHook timing (baseline before RetryState
     await loadExtension(pi, SCHEMA);
 
     // 成功调用 → soSucceededEver=true（终态）。后续失败调用 + turn_end 均不干预。
-    // 闸门侧：成功清零后仅 1 次失败，未达阈值 → 无 shutdown（软硬闸门互不干扰）。
+    // 门禁侧：成功清零后仅 1 次失败，未达阈值 → 无 shutdown（软硬门禁互不干扰）。
     await pi.emit("tool_execution_end", SUCCESS_TOOL_END);
     await pi.emit("tool_execution_end", FAILED_TOOL_END);
     await pi.emit("turn_end", turnEndPayload());
@@ -154,7 +154,7 @@ describe("characterization: setupWorkflowHook timing (baseline before RetryState
 
   // ── U3（审查项#8/#9/#1）新增基线 ─────────────────────────────
 
-  // 每轮不同字段的失败原料——字段集合不同 = 闸门签名不同，避免闸门 terminal
+  // 每轮不同字段的失败原料——字段集合不同 = 门禁签名不同，避免门禁 terminal
   //（3 次同签名）先于 hook 上限拦截，干扰预算语义断言。
   const failWith = (field: string) =>
     failedToolEndWith(paramLayerErrorText(`  - ${field}: must be number`, "{}"));

@@ -92,7 +92,7 @@ describe('TerminalInstanceBar 实例切换条（u3-bar）', () => {
     const close = wrapper.find('[data-testid="terminal-instance-close"]')
     expect(close.attributes('disabled')).toBeDefined()
 
-    // 合成点击（disabled 元素在部分环境下仍可派发事件）→ 组件内守卫必须拦住 emit
+    // 合成点击（disabled 元素在部分环境下仍可派发事件）→ 组件内检查必须拦住 emit
     await close.trigger('click')
     expect(wrapper.emitted('close')).toBeUndefined()
   })

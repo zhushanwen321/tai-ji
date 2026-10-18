@@ -18,7 +18,7 @@
  * ④ css-decl：样式表 `z-index:` 声明形（现存 0 处，防新增漏登记）。
  * 指针驱动瞬态面（HoverCard z-[90]）< 1000 结构性不入基线（§6.7 R4 carve-out 豁免双旗标）。
  *
- * kind 语义：'member' = 入聚合让位族（编排器/⌘W 守卫与 view 遮蔽读此表）；'excluded' =
+ * kind 语义：'member' = 入聚合让位族（编排器/⌘W 检查与 view 遮蔽读此表）；'excluded' =
  * 仅入 z 基线登记、**不入聚合**——浮层壳是容器不是模态（§6.7 末段：Esc 由编排器层级序管理，
  * view 可见性受浮层内容切换/错误态支配，见 §7.4）。
  *
@@ -58,7 +58,7 @@ export type ModalSurfaceFamily =
  * （u-foundation 裁决，类型契约在 @taiji/core/domain/overlay）。
  */
 export const MODAL_SURFACE_FAMILY_FLAGS: Record<ModalSurfaceFamily, ModalSurfaceFlags> = {
-  // 全屏阻塞面（遮罩盖满视口）：双键均让位（有未提交输入/阻塞交互）、无条件遮蔽 view
+  // 全屏阻塞遮罩（遮罩盖满视口）：双键均让位（有未提交输入/阻塞交互）、无条件遮蔽 view
   'modal-token-z': { yieldsEsc: true, yieldsCmdW: true, shieldsView: 'unconditional' },
   'modal-dialog': { yieldsEsc: true, yieldsCmdW: true, shieldsView: 'unconditional' },
   'companion-band': { yieldsEsc: true, yieldsCmdW: true, shieldsView: 'unconditional' },
@@ -80,7 +80,7 @@ export const MODAL_SURFACE_FAMILY_FLAGS: Record<ModalSurfaceFamily, ModalSurface
 // ── 表面条目（§6.7 完备性判据：每个表面一行）────────────────────────────────────
 
 /** z 基线锚：登记表 ↔ 全仓扫描的对账键（多重集按 (file, form, literal) → count 全等） */
-export interface ModalSurfaceZAnchor { // oe-exempt:20261003:framework:类型契约先行——容器/编排/注册表契约层，D1 下游单元即为消费面 // oe-exempt:20261003:framework:聚合注册表契约——modal surface registry 数据契约，消费面为编排器与各表面单元
+export interface ModalSurfaceZAnchor { // oe-exempt:20261003:framework:类型契约先行——容器/编排/注册表契约层，D1 下游单元即为消费方 // oe-exempt:20261003:framework:聚合注册表契约——modal surface registry 数据契约，消费方为编排器与各表面单元
   /** 仓库根相对路径 */
   file: string
   /** z 字面形态（§6.7 三类字面形态 + CSS 声明形） */
@@ -91,7 +91,7 @@ export interface ModalSurfaceZAnchor { // oe-exempt:20261003:framework:类型契
   count: number
 }
 
-export interface ModalSurfaceManifestEntry { // oe-exempt:20261003:framework:类型契约先行——容器/编排/注册表契约层，D1 下游单元即为消费面
+export interface ModalSurfaceManifestEntry { // oe-exempt:20261003:framework:类型契约先行——容器/编排/注册表契约层，D1 下游单元即为消费方
   /** 表面 id（运行时注册键，registry.ts 校验） */
   id: string
   /** §6.7 登记表家族行（旗标组由此取，注册方不得自带旗标） */
@@ -112,7 +112,7 @@ export const MODAL_SURFACE_MANIFEST = [
     zAnchors: [
       { file: 'packages/renderer/src/components/settings/SettingsModal.vue', form: 'class-token', literal: 'var(--z-modal)', count: 1 },
     ],
-    basis: '§6.7 表：全屏阻塞面；既有 window 级 Esc 兜底（defaultPrevented 先检后 preventDefault）',
+    basis: '§6.7 表：全屏阻塞遮罩；既有 window 级 Esc 兜底（defaultPrevented 先检后 preventDefault）',
   },
   {
     id: 'async-error-fallback-overlay',
@@ -130,7 +130,7 @@ export const MODAL_SURFACE_MANIFEST = [
     zAnchors: [
       { file: 'packages/ui/src/overlays/SearchModal.vue', form: 'class-token', literal: 'var(--z-modal)', count: 1 },
     ],
-    basis: '§6.7 表：SearchModal（遮罩+面板全屏阻塞面；z 已令牌化 --z-modal）',
+    basis: '§6.7 表：SearchModal（遮罩+面板全屏阻塞遮罩；z 已令牌化 --z-modal）',
   },
   {
     id: 'dialog-confirm',

@@ -14,9 +14,9 @@
 // 新 run + resume 锚点（docs/architecture/subagent-chat-run-unification.md §3.3 D5/D7），
 // 既有 interact 方法已随 U5 删除，方法集收敛为 9 个。
 //
-// 应答面补充约定（设计 §3.3）：initialize 应答仅诊断（与 manifest 不一致 → warn 留痕，
+// 应答侧补充约定（设计 §3.3）：initialize 应答仅诊断（与 manifest 不一致 → warn 留痕，
 // 不参与同步成员判据；唯一阻断面 = 被 gate 能力位多声明 → engine_capability_mismatch）；
-// listModels / validateModel 为诊断面（宿主侧同步成员读 manifest，不经本方法）；
+// listModels / validateModel 为诊断范围（宿主侧同步成员读 manifest，不经本方法）；
 // dispose 幂等；ping 为健康检查（ADR-0047：静默 ≠ 卡死，不据此杀任务）；
 // setModel 应答 = 回读生效值（引擎 set 后经 get_state 同源读回，不信命令应答即真——
 // pi 部分模型族静默替换成同族模型，生效值 ≠ 请求值，先例 = 主对话 set→回读范式）；
@@ -25,7 +25,7 @@
 // 未知正向 method 的应答义务（未知成员宽容语义②，条文权威 = ADR-0071）：宿主演进
 // 会派出本引擎未知的正向 method（协议 additive 演进的跨代窗口）——引擎必须回 error
 // 帧，不得静默挂起/无应答/崩溃。实装码现状：两引擎 server（pi/zcode dispatch 表
-// 落空分支）对未知 method 回 `engine_protocol_unknown_method`（engine_ 前缀透传面，
+// 落空分支）对未知 method 回 `engine_protocol_unknown_method`（engine_ 前缀透传逻辑，
 // 不进 core 消费词表，isEngineErrorPassthroughCode 原样透传，旧宿主收到不崩）；
 // 条文名码 `engine_method_unsupported` 全仓零消费方（C 型「无消费方不进协议」纪律，
 // 登记 = error-codes.ts 头注）——义务成文 =
@@ -171,14 +171,14 @@ export interface InitializeParams {
   engineConfig: Record<string, string>;
 }
 
-/** initialize 应答（仅诊断面：capabilities/models 与 manifest 不一致 → warn，不参与判据）。 */
+/** initialize 应答（仅诊断范围：capabilities/models 与 manifest 不一致 → warn，不参与判据）。 */
 export interface InitializeResult {
   protocolVersion: number;
   engineId: string;
   engineVersion: string;
   adapterVersion: string;
   capabilities: EngineCapabilities;
-  /** 模型目录（诊断面；省略/null = 无枚举面语义）。 */
+  /** 模型目录（诊断范围；省略/null = 无枚举情形语义）。 */
   models?: ModelCatalogEntry[] | null;
 }
 
@@ -232,7 +232,7 @@ export interface ListModelsParams {
 }
 
 export interface ListModelsResult {
-  /** 数组 = 有枚举面；null = 无枚举面（buildCoreAlignedHint 语义，与 manifest 省略对齐）。 */
+  /** 数组 = 有枚举；null = 无枚举情形（buildCoreAlignedHint 语义，与 manifest 省略对齐）。 */
   models: ModelCatalogEntry[] | null;
 }
 

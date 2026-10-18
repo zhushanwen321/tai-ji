@@ -86,7 +86,7 @@ const activeOrdinal = computed(() =>
   find.hitCount.value === 0 ? 0 : find.activeIndex.value + 1,
 )
 
-// 输入即搜，无防抖（时间平抑红线）：query 是唯一事实源，高亮是搜索结果的纯投影
+// 输入即搜，无防抖（时间平抑红线）：query 是唯一事实源，高亮是搜索结果的纯派生视图
 watch(() => find.query.value, () => {
   if (find.isOpen.value) find.search()
 })

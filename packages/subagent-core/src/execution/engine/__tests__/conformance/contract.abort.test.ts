@@ -3,7 +3,7 @@
 //
 // W10 协议黑盒化：断言对象从内建 ZcodeEngine × fake app-server（inproc，W11 删除）
 // 改为 RemoteEngine × fake 引擎 CLI——abort 走协议 cancel 帧 + 引擎收敛应答
-// （杀链升级面 = W2 EngineClient 套件 3s 收敛窗口用例）。zcode app-server 的
+// （杀链升级路径 = W2 EngineClient 套件 3s 收敛窗口用例）。zcode app-server 的
 // stop 优雅链随 W5 归 zcode-subagent-cli 引擎内测试。
 
 import { mkdtempSync, rmSync } from "node:fs";

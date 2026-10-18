@@ -1,12 +1,12 @@
 /**
- * MessageDispatcher 竞态守卫测试（PR#116 review W1 + W3）。
+ * MessageDispatcher 竞态检查测试（PR#116 review W1 + W3）。
  *
  * 锁定：
- * - W1: sendBash 在 await client.bash() 期间被 abortBash 抢先收口时，
+ * - W1: sendBash 在 await client.bash() 期间被 abortBash 抢先收尾时，
  *   pi 响应到达后 sendBash 静默跳过终态广播（不重复广播 bashResult / message.error）。
  *   abortBash 兜底终态走独立帧 message.bashAborted（msg-pipeline-debloat D4-3，原
  *   bashResult{command:''} 哨兵退役）；真实 output bashResult（来自 sendBash）照常发布。
- * - W1b: sendBash await 抛错时若已被 abortBash 抢先收口，也不广播 message.error（避免双重报错）。
+ * - W1b: sendBash await 抛错时若已被 abortBash 抢先收尾，也不广播 message.error（避免双重报错）。
  * - W3: compact() 在 isBashRunning=true 或 isGenerating=true 时被拒（广播 session.compacted{error} + throw）。
  *
  * 运行：npx vitest run src/__tests__/message-dispatcher-bash-race.test.ts
@@ -73,11 +73,11 @@ function makeRaceMocks() {
     compact: compactFn,
   } as unknown as IPiEngine
 
-  // wave:perf-w09（D1-2）：dispatcher 只依赖 publish 抽象（broker 双写腿已删），mock bus 收集发布消息
+  // wave:perf-w09（D1-2）：dispatcher 只依赖 publish 抽象（broker 双写路径已删），mock bus 收集发布消息
   const broadcasts: ServerMessage[] = []
   const bus = { publish: vi.fn((_sid: string, m: ServerMessage) => { broadcasts.push(m) }) } as unknown as IMessageBus
 
-  // S2 ISP 化：结构性满足 dispatcher 窄接口（6 方法 = 实际消费面），无强转
+  // S2 ISP 化：结构性满足 dispatcher 窄接口（6 方法 = 消费方实际用到的全部），无强转
   const svc: IDispatcherSessionOps = {
     ensureActive: vi.fn(async () => client),
     getSessionByClient: vi.fn(() => session),
@@ -94,10 +94,10 @@ function makeRaceMocks() {
   return { dispatcher, session, bashFn, abortBashFn, compactFn, broadcasts, bashResolve, bashReject }
 }
 
-describe('MessageDispatcher —— W1 abortBash/sendBash 竞态守卫', () => {
+describe('MessageDispatcher —— W1 abortBash/sendBash 竞态检查', () => {
   beforeEach(() => vi.clearAllMocks())
 
-  it('W1a: abortBash 在 sendBash await 期间抢先收口后，pi resolve 到达时 sendBash 仍发布真实 bashResult（D1 closure——与 pi 落盘一致，例外①消灭）', async () => {
+  it('W1a: abortBash 在 sendBash await 期间抢先收尾后，pi resolve 到达时 sendBash 仍发布真实 bashResult（D1 closure——与 pi 落盘一致，例外①消灭）', async () => {
     const { dispatcher, broadcasts, bashResolve, abortBashFn } = makeRaceMocks()
 
     // sendBash 启动，await client.bash() 挂起
@@ -136,13 +136,13 @@ describe('MessageDispatcher —— W1 abortBash/sendBash 竞态守卫', () => {
     expect(result).toEqual({ status: 'settled' })
   })
 
-  it('W1b: abortBash 抢先收口后，client.bash reject 到达时 sendBash 不广播 message.error（避免双重报错）', async () => {
+  it('W1b: abortBash 抢先收尾后，client.bash reject 到达时 sendBash 不广播 message.error（避免双重报错）', async () => {
     const { dispatcher, broadcasts, bashReject } = makeRaceMocks()
 
     const sendPromise = dispatcher.sendBash('s1', 'doomed-cmd', false)
     await Promise.resolve()
 
-    // abortBash 抢先收口（广播 message.bashAborted 兜底终态）
+    // abortBash 抢先收尾（广播 message.bashAborted 兜底终态）
     await dispatcher.abortBash('s1')
     expect(findBashAborted(broadcasts)).toBeDefined()
 
@@ -150,19 +150,19 @@ describe('MessageDispatcher —— W1 abortBash/sendBash 竞态守卫', () => {
     bashReject(new Error('stream closed by abort'))
     const result = await sendPromise
 
-    // 关键断言：sendBash 检测到被 abort 抢先收口，不广播 message.error
-    //（bashAborted 已是收口帧，再补 message.error 会双重报错）。
+    // 关键断言：sendBash 检测到被 abort 抢先收尾，不广播 message.error
+    //（bashAborted 已是收尾帧，再补 message.error 会双重报错）。
     expect(broadcasts.some((m) => m.type === 'message.error')).toBe(false)
 
     // catch abort-skip：无 bashResult 兜底帧（D4-3 后兜底终态只走 bashAborted 独立帧）
     const allResults = findBashResults(broadcasts)
     expect(allResults).toHaveLength(0)
 
-    // 回执 settled+error（已执行、已由 abortBash 抢先收口——消费方不得恢复草稿）
+    // 回执 settled+error（已执行、已由 abortBash 抢先收尾——消费方不得恢复草稿）
     expect(result).toEqual({ status: 'settled', error: 'stream closed by abort' })
   })
 
-  it('W1c: 无 abort 时 sendBash 正常广播真实 bashResult（守卫不影响正常路径）', async () => {
+  it('W1c: 无 abort 时 sendBash 正常广播真实 bashResult（检查不影响正常路径）', async () => {
     const { dispatcher, broadcasts, bashResolve } = makeRaceMocks()
 
     const sendPromise = dispatcher.sendBash('s1', 'normal-cmd', false)

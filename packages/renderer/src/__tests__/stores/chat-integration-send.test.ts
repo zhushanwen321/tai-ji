@@ -5,7 +5,7 @@
  * T1.5: submitDelivery reject → 返回 false + clearPendingSend（[W2] 不 throw，toast 消化错误）
  * T5.1: editAndResend → truncate + appendUser + addPendingSend + submitDelivery，失败 → false + clearPendingSend
  *
- * 五方法返回契约（Promise<boolean>）：true = 提交成功或无事发生（busy/空白早退无丢失面）；
+ * 五方法返回契约（Promise<boolean>）：true = 提交成功或无事发生（busy/空白早退无丢失风险）；
  * false = RPC 失败（内部已 toast 且乐观副作用已回滚，调用方据此恢复草稿）。
  *
  * [MANDATORY] 集成用例补 DOM 断言：mount(Composer) 验证 send 全链/失败后 composer-box 可见 + 用户可重试态。
@@ -234,7 +234,7 @@ describe('T5.1 editAndResend pendingSend 对称', () => {
     chat.addPendingSend('s-edit-busy')
     expect(chat.isActive('s-edit-busy')).toBe(true)
     const { editAndResend } = useChat()
-    // busy 时早退：不 throw、不提交，返回 true（「无事发生」——早退无丢失面，调用方不恢复草稿）
+    // busy 时早退：不 throw、不提交，返回 true（「无事发生」——早退无丢失风险，调用方不恢复草稿）
     await expect(editAndResend('s-edit-busy', 'msg-id', textToSegments('text'))).resolves.toBe(true)
     expect(apiMock.submitDelivery).not.toHaveBeenCalled()
   })

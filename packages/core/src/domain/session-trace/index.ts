@@ -1,5 +1,5 @@
 /**
- * session-trace 域入口 —— pi session JSONL 的 trace 台账纯函数层（design §5 单元 2）。
+ * session-trace 域入口 —— pi session JSONL 的 trace 条目清单纯函数层（design §5 单元 2）。
  *
  * 三块能力：entry→TraceRow 映射（A21）、context 边界计算 + 影子化标记（A22，复刻
  * pi buildContextEntries 语义）、过滤（A23）。无 IO、无 Vue 依赖（runtime 路径 B 与

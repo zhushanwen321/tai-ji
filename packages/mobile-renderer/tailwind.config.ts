@@ -5,7 +5,7 @@ import sharedPreset from '@taiji/shared/tailwind-preset'
  * taiji Tailwind 配置 · v3 冷蓝暗色（ADR-0019）。
  * colors 主体 / fontFamily / borderRadius / boxShadow / .content-col plugin 经
  * @taiji/shared/tailwind-preset 共享（与 renderer 单一 SSOT，防两包漂移；
- * 等价性守卫见 preset 文件头注释）。本文件只落 mobile-renderer 专属差异：
+ * 等价性检查见 preset 文件头注释）。本文件只落 mobile-renderer 专属差异：
  *  - keyframes SSOT 尚未迁移 style.css 全局（renderer 已迁，见其 config 注释；迁移后此块可删）
  *  - pulse-warn / steer-breathe / working-pulse / wiggle 等专属 animation
  */

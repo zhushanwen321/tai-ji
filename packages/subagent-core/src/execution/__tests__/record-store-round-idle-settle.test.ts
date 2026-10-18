@@ -1,21 +1,21 @@
 // src/execution/__tests__/record-store-round-idle-settle.test.ts
 //
-// [A-lite / 区1-U1 + 区3-U1] markRoundIdle 正常轮终磁盘面增补（簿记⑩⑪）的
+// [A-lite / 区1-U1 + 区3-U1] markRoundIdle 正常轮终磁盘侧增补（簿记⑩⑪）的
 // 单元级断言——真实轮终路径（store.markRoundIdle 直驱，= finalizeRoundOutcome
 // 编排薄壳的最终写点，非 markSettled("gc") 构造）：
 //   1. 成功/失败轮后 `.state` 收条在场（{status:"idle", reason: completed|failed,
-//      endedAt}——轮收口 idle 形态，重建单规则一律 idle）；
+//      endedAt}——轮收尾 idle 形态，重建单规则一律 idle）；
 //   2. binding 快照 turns/totalTokens 在场（U7 统计口径）；
 //   3. rec.stopReason 内存展示位（completed/failed）且 status 翻 idle（
-//      [two-state-convergence U4/D3] 写面翻边）、endedAt 不写（A3 终态冻结判据不击穿
+//      [two-state-convergence U4/D3] 写侧翻边）、endedAt 不写（A3 终态冻结判据不击穿
 //      ——跨轮轮终不抛）；
 //   4. 新 store 实例 markResurrected revive 水合不归零（turns/tokens/round 从
 //      binding 快照恢复——正常轮终后宿主崩溃的最常见形态）；
-//   5. zcode 腿锚分派：无 sessionFile 时快照写 transcriptRef 派生锚键、`.state`
+//   5. zcode 路径锚分派：无 sessionFile 时快照写 transcriptRef 派生锚键、`.state`
 //      不写（对齐 markSettled），revive 水合同样不归零；
 //   6. 双锚皆缺（spawn 窗口期）：warn 留痕不抛，内存簿记照常。
 //
-// 测试纪律：真实 fs 落盘断言（不 mock state-marker——写面形态本身是断言对象）；
+// 测试纪律：真实 fs 落盘断言（不 mock state-marker——写侧形态本身是断言对象）；
 // fixture 一律 mkdtempSync 自建自删（tmpdir），不触碰真实数据目录。
 
 import * as fs from "node:fs";
@@ -60,7 +60,7 @@ function makeStore(sessionsDir: string, manifestDir: string): RecordStore {
   return new RecordStore(sessionsDir, undefined, { appendEntry: vi.fn() }, manifestDir);
 }
 
-describe("markRoundIdle 正常轮终磁盘面（A-lite 簿记⑩⑪）", () => {
+describe("markRoundIdle 正常轮终磁盘侧（A-lite 簿记⑩⑪）", () => {
   let tmpDir: string;
   let sessionsDir: string;
   let manifestDir: string;
@@ -101,7 +101,7 @@ describe("markRoundIdle 正常轮终磁盘面（A-lite 簿记⑩⑪）", () => {
 
     expect(store.markRoundIdle("bg-ok", { kind: "success", content: "round output" })).toBe(true);
 
-    // ⑩ 内存展示位：status 翻 idle（[two-state-convergence U4/D3] 写面翻边——idle 即
+    // ⑩ 内存展示位：status 翻 idle（[two-state-convergence U4/D3] 写侧翻边——idle 即
     // resumable，resumable 不再写）、endedAt 不写（终态冻结信号——写了会击穿方法头
     // A3 断言的跨轮轮终）。
     expect(record.status).toBe("idle");
@@ -110,7 +110,7 @@ describe("markRoundIdle 正常轮终磁盘面（A-lite 簿记⑩⑪）", () => {
     expect(record.endedAt).toBeUndefined();
     expect(record.result).toBe("round output");
     // ⑥ idleSince 已退役（30 天空闲回收判据锚，ADR-0081）——轮终不再写 idle 锚。
-    // ⑪ `.state` 收条：轮收口 idle 形态（重建单规则一律 idle）。
+    // ⑪ `.state` 收条：轮收尾 idle 形态（重建单规则一律 idle）。
     const idle = lastRoundIdle("bg-ok");
     expect(idle?.stopReason).toBe("completed");
     expect(typeof idle?.ts).toBe("number");
@@ -172,7 +172,7 @@ describe("markRoundIdle 正常轮终磁盘面（A-lite 簿记⑩⑪）", () => {
     expect(readRecordBinding(sessionFile)?.turns).toBe(1);
     expect(readRecordBinding(sessionFile)?.totalTokens).toBe(300);
     // 帧面：record-round-idle 携带失败原因原文（W1 终态同步 F2-2——v1 rec.error
-    // 显示信号的 journal 承接，投影 error 供源）
+    // 显示信号的 journal 承接，派生视图 error 供源）
     const failLines = fs
       .readFileSync(path.join(manifestDir, "bg-fail.events"), "utf-8")
       .trim()
@@ -188,7 +188,7 @@ describe("markRoundIdle 正常轮终磁盘面（A-lite 簿记⑩⑪）", () => {
     store.register(record);
     expect(store.markRoundIdle("bg-multi", { kind: "success", content: "r1" })).toBe(true);
     // 第二轮：先过轮始门（[§4] 轮终原语的同状态在途门——连续两次轮终会被拒绝），
-    // 再失败轮终——断言收条 reason 跟随最新轮（单槽收口位覆写）。
+    // 再失败轮终——断言收条 reason 跟随最新轮（单槽收尾位覆写）。
     expect(store.markRoundStarted("bg-multi")).toBe(true);
     expect(() => store.markRoundIdle("bg-multi", { kind: "failed", reason: "r2 boom" })).not.toThrow();
     expect(record.round).toBe(2);
@@ -201,7 +201,7 @@ describe("markRoundIdle 正常轮终磁盘面（A-lite 簿记⑩⑪）", () => {
     expect(lastRoundIdle("bg-multi")?.stopReason).toBe("completed");
   });
 
-  it("zcode 腿锚分派：快照写 transcriptRef 派生锚键、`.state` 不写、revive 水合不归零", () => {
+  it("zcode 路径锚分派：快照写 transcriptRef 派生锚键、`.state` 不写、revive 水合不归零", () => {
     const dbPath = path.join(tmpDir, "session-db", "db.sqlite");
     fs.mkdirSync(path.dirname(dbPath), { recursive: true });
     const transcriptRef = { engine: "zcode", sessionId: "z-sess-1", dbPath } as const;
@@ -238,7 +238,7 @@ describe("markRoundIdle 正常轮终磁盘面（A-lite 簿记⑩⑪）", () => {
     expect(() => store.markRoundIdle("bg-noanchor", { kind: "success", content: "x" })).not.toThrow();
     expect(record.stopReason).toBe("completed");
     expect(record.status).toBe("idle");
-    // tmpdir 下无任何 `.state` / `.record-binding` 产出（无锚无写面）。
+    // tmpdir 下无任何 `.state` / `.record-binding` 产出（无锚无写侧）。
     const stray = fs
       .readdirSync(tmpDir, { recursive: true })
       .filter((f) => String(f).endsWith(".state") || String(f).endsWith(".record-binding"));

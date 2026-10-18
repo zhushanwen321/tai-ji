@@ -5,7 +5,7 @@
  * 动机：B5 将 SessionDataStore 的磁盘删除从 rmSync 永久删改为 trash 软删除（与
  * session 本体持久性对齐——支持废纸篓还原/import 同 id 复活工作流），但
  * SessionDataStore（services 层）不得 value import infra/system/trash.ts
- * （C-comm-03 三层约束「services 层 IO 一律经 port」）——本接口是该约束下的收口：
+ * （C-comm-03 三层约束「services 层 IO 一律经 port」）——本接口是该约束下的收敛：
  * services 依赖此 port 类型，infra/system/trash.ts 的 trash 函数（结构匹配
  * trashFile 成员签名）由组合根 index.ts 经 PluginService deps 注入。
  *

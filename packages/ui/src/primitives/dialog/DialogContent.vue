@@ -29,7 +29,7 @@ defineOptions({ inheritAttrs: false })
 // 前缀——demo 无条件圆角，窄窗不该塌成直角）；内边距 20px（.cpop padding）；遮罩
 // bg-black/80 + blur 4px 与 demo .cmask 同值。z-index 走 --z-modal(1000)：demo .rmodal
 // 用 --z-dialog 是其单一语义；real 的 --z-dialog(1100) 档被嵌套弹层（Popover/Select）与
-// ui-request band（AP-2：浮于 modal 之上）占用，DialogContent 升档会破坏 band 语义。
+// ui-request band（AP-2：浮于 modal 之上）占用，DialogContent 升到下一档会破坏 band 语义。
 // 进出场过渡参数见 style.css .reka-dialog-transition（demo rmodal-in 0.16s 档）。
 // 轨道钉为 grid-cols-[minmax(0,1fr)]：auto 轨道会被网格项的 min-content 撑破内容盒——
 // 内容里的 nowrap 长文本（如 worktree modal 的仓库路径 truncate 行，truncate 不减少其对

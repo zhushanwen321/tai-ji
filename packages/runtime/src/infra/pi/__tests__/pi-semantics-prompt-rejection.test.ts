@@ -58,7 +58,7 @@ describe.skipIf(!PI_DIST)(
       const checkIdx = win.indexOf('if (this._compactionAbortController !== undefined) {')
       expect(
         checkIdx,
-        'PS-22 漂移：_compactionAbortController 前置检查移出 prompt()（manual 压缩改走别的拒绝面？）——复核 PS-22',
+        'PS-22 漂移：_compactionAbortController 前置检查移出 prompt()（manual 压缩改走别的拒绝路径？）——复核 PS-22',
       ).toBeGreaterThanOrEqual(0)
       const throwIdx = win.indexOf(`"${PI_REJECTION_COMPACTING}`)
       expect(
@@ -87,7 +87,7 @@ describe.skipIf(!PI_DIST)(
       const streamingIdx = win.indexOf('if (this.isStreaming) {')
       expect(
         streamingIdx,
-        'PS-23 漂移：isStreaming 分流分支移出 prompt()（busy 拒绝面改形？）——复核 PS-23',
+        'PS-23 漂移：isStreaming 分流分支移出 prompt()（busy 拒绝路径改形？）——复核 PS-23',
       ).toBeGreaterThanOrEqual(0)
       const throwIdx = win.indexOf(`"${PI_REJECTION_PROCESSING}`)
       expect(
@@ -96,7 +96,7 @@ describe.skipIf(!PI_DIST)(
       ).toBe(true)
       expect(
         win.slice(streamingIdx, throwIdx).includes('!options?.streamingBehavior'),
-        'PS-23 漂移：streamingBehavior 缺省守卫消失（裸 prompt 语义变化，taiji 调用形态恒两参）——复核 PS-23',
+        'PS-23 漂移：streamingBehavior 缺省检查消失（裸 prompt 语义变化，taiji 调用形态恒两参）——复核 PS-23',
       ).toBe(true)
     })
   },

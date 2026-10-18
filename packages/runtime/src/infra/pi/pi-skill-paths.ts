@@ -2,12 +2,12 @@
  * Skill 路径管理 helper（从 pi-provider-store.ts 抽出，控 max-lines 500）。
  *
  * 职责：ADR-0021 §1 的 skill 路径 SSOT 管理——discovery.json.skillDirs 读写（SSOT，
- * 有序数组 = 优先级）+ 同步投影到 settings.json.skills（pi 原生读此加载 skill）+
+ * 有序数组 = 优先级）+ 同步映射到 settings.json.skills（pi 原生读此加载 skill）+
  * 旧版 settings.json.skills → discovery.json 一次性迁移。
  *
  * 数据流（方案 C 决策）：
  *   UI 读写 → discovery.json.skillDirs（SSOT，有序数组 = 优先级）
- *   discovery.json 变更 → syncSkillDirsToSettings() 同步投影到 settings.json.skills
+ *   discovery.json 变更 → syncSkillDirsToSettings() 同步映射到 settings.json.skills
  *   pi 启动 → collectSettingsSkillPaths 读 settings.json.skills 加载 skill（pi 官方扩展点）
  *
  * 抽出原因：pi-provider-store.ts 超 ESLint max-lines(500)。本模块只经 discovery-store /
@@ -28,7 +28,7 @@ import {
 import { normalizeToHome } from '../../utils/path-utils.js'
 
 /**
- * 把 discovery.json.skillDirs 投影到 settings.json.skills（pi 原生读此加载 skill）。
+ * 把 discovery.json.skillDirs 映射到 settings.json.skills（pi 原生读此加载 skill）。
  * 在 setSkillPaths/addSkillPath/removeSkillPath 写入 discovery 后调用，保持派生缓存一致。
  */
 function syncSkillDirsToSettings(): void {
@@ -36,10 +36,10 @@ function syncSkillDirsToSettings(): void {
 }
 
 /**
- * 两步写（discovery.json → settings.json 投影）+ 失败回滚（RT-3#8）。
+ * 两步写（discovery.json → settings.json 派生视图）+ 失败回滚（RT-3#8）。
  *
- * 为什么必须有：settings 投影走 updateSettingsFields（跨进程锁，锁超时/写盘失败可抛）；
- * 先写 discovery 再投影，第二步失败会留下「discovery 已新、settings 仍旧」的分歧态，
+ * 为什么必须有：settings 派生视图走 updateSettingsFields（跨进程锁，锁超时/写盘失败可抛）；
+ * 先写 discovery 再派生视图，第二步失败会留下「discovery 已新、settings 仍旧」的分歧态，
  * pi 读到的 skills 与 taiji 视图不一致（直到下次成功写）。回滚 = 把 discovery 恢复为
  * 写前内容后原样上抛——旧值在内存中（readDiscovery），回滚成本一次小文件写，优于
  * pending-reconcile 标记 + 启动重放方案（后者要新增持久化状态与重放入口，收益相同
@@ -55,10 +55,10 @@ function setDiscoverySkillDirsThenSync(dirs: SkillDirConfig[], context: string):
     try {
       setSkillDirsRaw(previous)
     } catch (rollbackErr) {
-      // 降级策略（best-effort）：回滚失败仅 error 留痕不掩盖原投影错误；分歧态由下一次
+      // 降级策略（best-effort）：回滚失败仅 error 留痕不掩盖原派生视图错误；分歧态由下一次
       // 成功写自愈（syncSkillDirsToSettings 恒从 discovery 派生）。
       console.error(
-        `[pi-skill-paths] ${context}: settings 投影失败且回滚 discovery 失败——discovery 与 settings.skills 处于分歧态，` +
+        `[pi-skill-paths] ${context}: settings 写入失败且回滚 discovery 失败——discovery 与 settings.skills 处于分歧态，` +
         `下次成功写入时自愈。rollback error:`,
         rollbackErr instanceof Error ? rollbackErr.message : rollbackErr,
       )

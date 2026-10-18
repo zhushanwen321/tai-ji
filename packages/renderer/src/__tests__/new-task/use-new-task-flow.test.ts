@@ -1,11 +1,11 @@
 /**
  * useNewTaskFlow 状态机单测（#3，需求修正后「统一延迟 create」语义）。
  *
- * 覆盖（纯状态机守卫）：
+ * 覆盖（纯状态机检查）：
  * - T1.2 startFlow→不调 create、state=landing、currentSessionId=null（统一延迟 create）
  * - T7.1 gitInfo==null→openBranchPopover 抛错回 idle
  * （T8.3-T8.6 状态机转换用例已删，core flow-state/flow 测试权威覆盖。）
- * - T6.5 openBranchModal 来源守卫：非 branch-popover 来源抛错回 idle
+ * - T6.5 openBranchModal 来源检查：非 branch-popover 来源抛错回 idle
  *
  * 新设计下 landing 态 gitInfo 恒 null（统一延迟 create 后无 session）→
  * branch-popover/branch-modal 不可达。原 overlay 互斥（T8.1）、Esc 优先级（T8.2）、
@@ -49,7 +49,7 @@ const apiMock = vi.hoisted(() => ({
   })),
   streamSubscribe: vi.fn((): (() => void) => () => {}),
   // composer-bash-execute: landing 态 bash 首发 → useChat.sendBash → chatApi.bash
-  // 回执契约（dmg-r1-2）：默认 = 已执行并收口
+  // 回执契约（dmg-r1-2）：默认 = 已执行并收尾
   chatBash: vi.fn((): Promise<{ status: 'settled' }> => Promise.resolve({ status: 'settled' })),
   chatAbortBash: vi.fn((): Promise<void> => Promise.resolve()),
 }))
@@ -155,8 +155,10 @@ describe('useNewTaskFlow 状态机', () => {
       await flow.startFlow()
       await flow.submitFirstMessage(textToSegments('一二三四五六七八九十十一')) // 11 字
       expect(apiMock.create).toHaveBeenCalledTimes(1)
-      // cwd 兑底用最近 session 的 /repo；label 截断为前 10 字 + 省略号
-      expect(apiMock.create).toHaveBeenCalledWith('/repo', '一二三四五六七八九十…', undefined, undefined, undefined, 'high')
+      // cwd 兜底用最近 session 的 /repo；label 截断为前 10 字 + 省略号。
+      // 第 7 参 = clientUuid（create 幂等键，core new-task-search/flow.ts 黏滞槽生成）：
+      // 桌面适配器 rest 透传不吞参，uuid 原样到达 api 实现（具体值由黏滞槽决定，核 core flow.test）。
+      expect(apiMock.create).toHaveBeenCalledWith('/repo', '一二三四五六七八九十…', undefined, undefined, undefined, 'high', expect.any(String))
     })
 
     it('短提示词 → label = 原文（不加省略号），与提示词一致', async () => {
@@ -166,17 +168,17 @@ describe('useNewTaskFlow 状态机', () => {
       const flow = useNewTaskFlow()
       await flow.startFlow()
       await flow.submitFirstMessage(textToSegments('修 bug')) // 4 字
-      expect(apiMock.create).toHaveBeenCalledWith('/repo', '修 bug', undefined, undefined, undefined, 'high')
+      expect(apiMock.create).toHaveBeenCalledWith('/repo', '修 bug', undefined, undefined, undefined, 'high', expect.any(String))
     })
 
-    it('selectedWorkspace 选定 cwd 后发送 → create 第 1 参数用选定 cwd 而非兑底', async () => {
+    it('selectedWorkspace 选定 cwd 后发送 → create 第 1 参数用选定 cwd 而非兜底', async () => {
       setGroups([gitSession({ id: 'hist', cwd: '/repo', lastActiveAt: 1 })])
       const flow = useNewTaskFlow()
       await flow.startFlow()
       flow.openDirPopover() // landing→dir-popover（selectWorkspace 须从 dir-popover 调用）
       await flow.selectWorkspace('/custom/path') // dir-popover→landing，记 pendingCwd
       await flow.submitFirstMessage(textToSegments('hello world!'))
-      expect(apiMock.create).toHaveBeenCalledWith('/custom/path', 'hello worl…', undefined, undefined, undefined, 'high')
+      expect(apiMock.create).toHaveBeenCalledWith('/custom/path', 'hello worl…', undefined, undefined, undefined, 'high', expect.any(String))
     })
   })
 
@@ -196,8 +198,8 @@ describe('useNewTaskFlow 状态机', () => {
       const flow = useNewTaskFlow()
       await flow.startFlow()
       await flow.submitFirstMessage(textToSegments('hello'))
-      // create 用兑底 cwd 调用
-      expect(apiMock.create).toHaveBeenCalledWith('/gone', expect.any(String), undefined, undefined, undefined, 'high')
+      // create 用兜底 cwd 调用
+      expect(apiMock.create).toHaveBeenCalledWith('/gone', expect.any(String), undefined, undefined, undefined, 'high', expect.any(String))
       // toast 触发一次，文案含「已不存在」+ 原 cwd
       expect(toastMock.error).toHaveBeenCalledTimes(1)
       expect(toastMock.error).toHaveBeenCalledWith(expect.stringContaining('已不存在'))
@@ -229,7 +231,7 @@ describe('useNewTaskFlow 状态机', () => {
       await flow.submitFirstMessage(textToSegments('hello'))
       // create 以空串 cwd 调用（两空形态：pendingCwd=null + defaultCwd=''）
       expect(apiMock.create).toHaveBeenCalledTimes(1)
-      expect(apiMock.create).toHaveBeenCalledWith('', expect.any(String), undefined, undefined, undefined, 'high')
+      expect(apiMock.create).toHaveBeenCalledWith('', expect.any(String), undefined, undefined, undefined, 'high', expect.any(String))
       // toast 触发一次，文案是 E7 专属文案（不含 dirNotExist 的「已不存在」空插值形态）
       expect(toastMock.error).toHaveBeenCalledTimes(1)
       expect(toastMock.error).toHaveBeenCalledWith(expect.stringContaining('未选择目录'))
@@ -299,7 +301,7 @@ describe('useNewTaskFlow 状态机', () => {
       )
       // create 的 label 参数取自 bashCommand.command（"ls -la"），不带 `!` 前缀
       // 第三参数 presetId=undefined（main 的 preset 透传，pendingPreset 为 null 时降级 undefined）
-      expect(apiMock.create).toHaveBeenCalledWith('/repo', 'ls -la', undefined, undefined, undefined, 'high')
+      expect(apiMock.create).toHaveBeenCalledWith('/repo', 'ls -la', undefined, undefined, undefined, 'high', expect.any(String))
       // 反向断言：label 绝不以 `!` 开头
       const labelArg = apiMock.create.mock.calls[0]?.[1]
       expect(labelArg).toBeTruthy()
@@ -318,7 +320,7 @@ describe('useNewTaskFlow 状态机', () => {
     })
   })
 
-  describe('UC-7 非 git 守卫（T7.1）', () => {
+  describe('UC-7 非 git 检查（T7.1）', () => {
     it('landing 态 currentSession=null→gitInfo 派生 null→openBranchPopover 抛错回 idle', async () => {
       // 统一延迟 create：landing 态无绑定 session → gitInfo 恒 null（与目录是否 git 无关）
       setGroups([
@@ -346,7 +348,7 @@ describe('useNewTaskFlow 状态机', () => {
 
   // （状态机转换 describe T8.3-T8.6 已删：cancelFlow/reenterFlow/completed 重建/非法
   //  转换的状态机本体由 core flow-state.test.ts（TC-1/2/2b/3）与 flow.test.ts
-  //  （TC-4c/TC-8b）权威覆盖；renderer 壳侧保留消费面用例。）
+  //  （TC-4c/TC-8b）权威覆盖；renderer 壳侧保留消费方用例。）
 
   describe('closeOverlay 幂等（worktree 成功回调重复调用回归）', () => {
     // [HISTORICAL] 2026-07-24 事故：worktree 创建成功后 onWorktreeSuccess 先 selectWorkspace
@@ -436,7 +438,7 @@ describe('useNewTaskFlow 状态机', () => {
   })
 
   describe('landing 态 branch 不可达（T4.4）', () => {
-    it('landing 态 currentSession=null→gitInfo 恒 null→branch chip 隐藏 + openBranchPopover 守卫不可达', async () => {
+    it('landing 态 currentSession=null→gitInfo 恒 null→branch chip 隐藏 + openBranchPopover 检查不可达', async () => {
       // 即便历史 session 是 git 目录，landing 态 currentSession=null → gitInfo 派生 null
       setGroups([
         {
@@ -453,13 +455,13 @@ describe('useNewTaskFlow 状态机', () => {
       const flow = useNewTaskFlow()
       await flow.startFlow()
       expect(flow.gitInfo.value).toBeNull()
-      // 状态机守卫：branch 相关动作在 landing 态不可达
+      // 状态机检查：branch 相关动作在 landing 态不可达
       expect(() => flow.openBranchPopover()).toThrow()
       expect(flow.state.value).toBe('idle')
     })
   })
 
-  describe('openBranchModal 来源守卫（T6.5）', () => {
+  describe('openBranchModal 来源检查（T6.5）', () => {
     it('非 branch-popover 来源（landing）→抛错回 idle', async () => {
       const flow = useNewTaskFlow()
       await flow.startFlow() // state=landing（非 branch-popover）
@@ -467,7 +469,7 @@ describe('useNewTaskFlow 状态机', () => {
       expect(flow.state.value).toBe('idle')
     })
 
-    // 新设计下 landing→branch-popover 不可达（gitInfo null 守卫），
+    // 新设计下 landing→branch-popover 不可达（gitInfo null 检查），
     // 「branch-popover 来源→正常进 branch-modal」正向用例已删（场景不可达）。
   })
 
@@ -475,12 +477,12 @@ describe('useNewTaskFlow 状态机', () => {
   // 原 Esc 排队（T4.8）依赖 branch-popover 的测试已删（场景不可达）。
 
   /**
-   * isActive 派生语义锁定：landing + 全部 overlay 态 → true（Workspace 渲染守卫依赖，
+   * isActive 派生语义锁定：landing + 全部 overlay 态 → true（Workspace 渲染检查依赖，
    * 延迟 create 下活跃期间 activeId=null 但须保持 Landing 挂载）；idle/completed/cancelled → false。
-   * 防护：未来改状态枚举时若误把活跃态从集合移除，Workspace 守卫会静默回退到卸载 Landing，
+   * 防护：未来改状态枚举时若误把活跃态从集合移除，Workspace 检查会静默回退到卸载 Landing，
    * 本块立刻红。
    */
-  describe('isActive 派生（Workspace 渲染守卫真相源）', () => {
+  describe('isActive 派生（Workspace 渲染检查真相源）', () => {
     it('idle → false（异常兜底态，无 session 无活跃 flow）', () => {
       const flow = useNewTaskFlow()
       expect(flow.state.value).toBe('idle')
@@ -616,7 +618,7 @@ describe('useNewTaskFlow 状态机', () => {
 
 // ── 原 session-project-attribution.test.ts 并入（同 SUT 同 mock 套；保留 2 个核心用例，
 //    「切 project 变体」与「空 content guard」分别由本文件 label 派生组 / flow-integration
-//    非法态守卫覆盖，不再重复）──
+//    非法态检查覆盖，不再重复）──
 describe('create 透传归属 projectId（D14 语义修正，原 session-project-attribution 并入）', () => {
   function seedHistGroup(cwd: string): void {
     setGroups([{ id: 'hist', label: 'hist', cwd, status: 'idle', lastActiveAt: 1, modelId: 'm', tokenCount: 0 }])
@@ -633,7 +635,7 @@ describe('create 透传归属 projectId（D14 语义修正，原 session-project
     await flow.submitFirstMessage(textToSegments('修 bug'))
 
     expect(apiMock.create).toHaveBeenCalledTimes(1)
-    expect(apiMock.create).toHaveBeenCalledWith('/repo', '修 bug', undefined, projectStore.activeProjectId, undefined, 'high')
+    expect(apiMock.create).toHaveBeenCalledWith('/repo', '修 bug', undefined, projectStore.activeProjectId, undefined, 'high', expect.any(String))
   })
 
   it('默认项目下新建任务 → create 第 4 参数为 undefined（未归类，不写 sidecar）', async () => {
@@ -646,6 +648,6 @@ describe('create 透传归属 projectId（D14 语义修正，原 session-project
     await flow.submitFirstMessage(textToSegments('修 bug'))
 
     expect(apiMock.create).toHaveBeenCalledTimes(1)
-    expect(apiMock.create).toHaveBeenCalledWith('/repo', '修 bug', undefined, undefined, undefined, 'high')
+    expect(apiMock.create).toHaveBeenCalledWith('/repo', '修 bug', undefined, undefined, undefined, 'high', expect.any(String))
   })
 })

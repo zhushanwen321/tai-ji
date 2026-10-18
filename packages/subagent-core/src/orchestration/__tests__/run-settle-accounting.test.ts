@@ -7,7 +7,7 @@
  *    （runId 键投递）由原语补写 manifest（workflowName 从 run-created 帧取）。
  * 2. 幂等两道：三面证据前置（adoptInterruptedRun 侧）+ 表内转移 fail-fast 让位
  *    （terminal × run-settled IllegalTransitionError）。
- * 3. 注册表：note 于 terminal 落账 → isRunSettled / settledRecordOf 可查询 →
+ * 3. 注册表：note 于 terminal 写入 journal 记录 → isRunSettled / settledRecordOf 可查询 →
  *    forgetSettledRecord 回收（与 runs Map 同生命周期）。
  * 4. 双帧 fold 停帧（[W2 D3 竞态防护] V1 单测锚）：同 run 两帧 run-settled 经
  *    foldRunEventFrames → onBrokenFrame 出声 + 保守停在先到帧的 terminal
@@ -120,7 +120,7 @@ describe("settleRunAccounting 原语（[W2/V1 D1] journal 帧 + manifest 两件�
     expect(manifest).toMatchObject({ outcome: "failed", errorCode: "idle-evicted", workflowName: "sig-wf" });
   });
 
-  it("注册表：terminal 落账即 note → isRunSettled / settledRecordOf 可查询 → forget 回收", async () => {
+  it("注册表：terminal 写入 journal 记录即 note → isRunSettled / settledRecordOf 可查询 → forget 回收", async () => {
     await seedCreated("wf-sa-2");
     const run = makeRun("wf-sa-2");
     expect(isRunSettled(run)).toBe(false);
@@ -170,17 +170,17 @@ describe("双帧 fold 停帧（[W2 D3 竞态防护] 单测锚——先到帧为�
 });
 
 describe("phase 收束账本（[D3] 原语语义 + forgetPhaseSettlement 终局回收接线）", () => {
-  it("记账/落定原语：显式 phase 入账、追平清账、空 phase 与无条目均 no-op/false", () => {
+  it("记账/落定原语：显式 phase 入账、追平后标记登记项完成、空 phase 与无条目均 no-op/false", () => {
     notePhaseDispatched("wf-sa-p0", undefined);
     notePhaseDispatched("wf-sa-p0", "");
     expect(settlePhaseLedger("wf-sa-p0", undefined)).toBe(false);
     expect(settlePhaseLedger("wf-sa-p0", "p1")).toBe(false); // 无条目
-    // 派发 2 次 → 落定 1 次未追平（false），落定第 2 次追平（true）且清账
+    // 派发 2 次 → 落定 1 次未追平（false），落定第 2 次追平（true）且标记登记项完成
     notePhaseDispatched("wf-sa-p0", "p1");
     notePhaseDispatched("wf-sa-p0", "p1");
     expect(settlePhaseLedger("wf-sa-p0", "p1")).toBe(false);
     expect(settlePhaseLedger("wf-sa-p0", "p1")).toBe(true);
-    // 清账后同 phase 再落定 = 无条目 false（新一轮由后续派发重建）
+    // 标记登记项完成后同 phase 再落定 = 无条目 false（新一轮由后续派发重建）
     expect(settlePhaseLedger("wf-sa-p0", "p1")).toBe(false);
   });
 

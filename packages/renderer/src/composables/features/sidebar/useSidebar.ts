@@ -8,11 +8,11 @@
  *
  * 关键裁决：
  * - C-W5-1 → [HISTORICAL]（renderer-deepening D3/D4 推翻，u5.2）：selectSession 曾壳重编排
- *   （理由「core.selectSession 是闭合函数，renderer 步骤无法插入」）——u5.1 起 core 持完整
+ *   （理由「core.selectSession 是自包含函数，renderer 步骤无法插入」）——u5.1 起 core 持完整
  *   12 步切入链 + sessionEntry 端口束，renderer 专属步骤（取消 flow/清未读/流订阅/LRU/文件树）
  *   经端口注入。壳 selectSession 现为一行代理 core.selectSession，链唯一载体在
  *   core domain/session/use-session.ts（改时序只改那一处，12 步顺序有接口级断言）。
- *   deleteSession/deleteFolder 的 wasActive 回退原「缺 ensureStreamSubscription」接缝债随之闭合
+ *   deleteSession/deleteFolder 的 wasActive 回退原「缺 ensureStreamSubscription」接缝债随之清偿
  *   （回退路径经同一 core 链，端口已接线；main 侧曾以 selectSessionFallback 端口注入壳版
  *   selectSession 清偿同一债务——D3 路线下 core 链即完整链，壳不再注入该端口）。
  * - C-W5-5（ADR-0059 重构）：sessionStore 经 pinia useSessionStore() cast 成 core factory 类型。
@@ -63,7 +63,7 @@ import { useSubagentStore } from '@/stores/subagent'
 import { useWorkflowStore } from '@/stores/workflow'
 // [可视化 U6/D11⑤] overlay 关闭编排（deleteSession 级联经 SessionCleanupHooks.closeWorkflowOverlay）
 import { closeWorkflowVizOverlayForSession } from '@/components/panel/workflow-viz/overlay/workflow-viz-overlay'
-// [M4-a / btw-question D4 消费面①] deleteSession 级联的前端腿：枚举/处置/清映射三函数
+// [M4-a / btw-question D4 消费方①] deleteSession 级联的前端路径：枚举/处置/清映射三函数
 //（与 m7/agentcall 的 evictVirtualKeys 先例同构，登记结构在 useBtwTabData）。
 import { getBtwVirtualIdsByMain, clearBtwVirtualKeyMapping, disposeBtwLinePartitions } from '@/composables/panel/useBtwTabData'
 import { useExtensionUIStore } from '@/stores/extension-ui'
@@ -86,11 +86,11 @@ import { useHandoffActions } from '@/composables/features/fork-handoff/useHandof
 import { useNewTaskFlow } from '@/composables/features/new-task/useNewTaskFlow'
 import type { NavEntry } from '@/types'
 
-// ── App 启动编排幂等守卫 ──
+// ── App 启动编排幂等检查 ──
 let appBootstrapped = false
 let hasConnectedBefore = false
 
-/** 测试隔离：重置启动编排守卫 + session.list 订阅计数（beforeEach 调）。 */
+/** 测试隔离：重置启动编排检查 + session.list 订阅计数（beforeEach 调）。 */
 export function resetAppBootstrap(): void {
   appBootstrapped = false
   hasConnectedBefore = false
@@ -99,7 +99,7 @@ export function resetAppBootstrap(): void {
 
 /**
  * 测试后门命名空间（生产代码禁止消费，对齐 useExtensionHostBridge / app-runtime __testing
- * 先例）：装配检查断言入口——sessionEntry 端口束原始注入面（composable 内构造，useSidebar()
+ * 先例）：装配检查断言入口——sessionEntry 端口束原始注入点（composable 内构造，useSidebar()
  * 调用时填充）。remote-use D9/U21 装配检查 helper 双壳测试的桌面壳断言源：未来重构 useSidebar
  * 静默删 sessionEntry 注入时，core helper 断言在测试期报红（生产零消费由 assembly-check
  * grep 断言守护，出口不扩大 API 面常驻语义）。
@@ -178,18 +178,18 @@ export function useSidebar() {
       for (const acsVirtualId of workflowStore.getAgentCallVirtualIdsByMain(sid)) {
         chat.evictVirtualKey(acsVirtualId)
       }
-      // [M4-a / btw-question D4 消费面① + D9④ 清派生键] deleteSession 级联的前端腿：
+      // [M4-a / btw-question D4 消费方① + D9④ 清派生键] deleteSession 级联的前端路径：
       // **枚举先于清映射**（顺序约束）——主会话名下全部 btw 线逐线处置（vid 分区 +
       // 派生 subagent/agentcall 键 + 两 store 记录分区，单入口幂等），随后清反查表
       //（主已删，映射无意义）。runtime 半边（杀线进程 + 删线目录）在 session-lifecycle
-      // 的级联支线；失效腿（闲置回收/进程亡）不进本路径——分区保留待重载链回填（D9④）。
+      // 的级联支线；失效路径（闲置回收/进程亡）不进本路径——分区保留待重载链回填（D9④）。
       for (const btwVid of getBtwVirtualIdsByMain(sid)) disposeBtwLinePartitions(btwVid)
       clearBtwVirtualKeyMapping(sid)
     },
     clearAgentCallMapping: (sid) => useWorkflowStore().clearAgentCallMapping(sid),
     // [投递所有权内核 u3c / ADR-0049 范围修订] 队列区 per-session 分区的销毁编排**收窄**：
     // 旧 defer 队列（useCompactQueue 经 useSessionScopedState 注册的 registerSessionCleanup）
-    // 已随其退役从编排清单消失；现役队列状态 = 内核 session.delivery 投影，清理点在 core
+    // 已随其退役从编排清单消失；现役队列状态 = 内核 session.delivery 派生视图，清理点在 core
     // useChat.disposeSession 内（clearDeliveryProjection），随本 hook 一并执行——「session
     // 销毁唯一编排点」仍是 deleteSession → triggerSessionCleanups → 本 hooks，renderer 侧
     // 不再多注册一个分区清理项。
@@ -213,7 +213,7 @@ export function useSidebar() {
     clearTerminalQueue: (sid) => useTerminalWriteQueueStore().removeSession(sid),
     clearSlashCommands: (sid) => useCommandStore().clearCommands(sid),
     // [可视化 U6/D11⑤] workflow-viz overlay UI 关闭：删除的 session 是 overlay 当前发起
-    // session 时关 overlay（数据面——事件流缓存 + 活跃锚——由 clearWorkflow/store.clearSession 收口）。
+    // session 时关 overlay（数据范围——事件流缓存 + 活跃锚——由 clearWorkflow/store.clearSession 收尾）。
     closeWorkflowOverlay: (sid) => closeWorkflowVizOverlayForSession(sid),
     clearForkNotices: (sid) => useForkNoticeFeed().clearSession(sid),
   }
@@ -298,7 +298,7 @@ export function useSidebar() {
    * restoreSession —— 显式重开 dead session（重新 spawn pi）。
    * 编排对齐 selectSession，但切入 RPC 用 sessionApi.restoreSession（显式重新 spawn，区别于
    * switchSession 的「内存已有则纯切换」语义）替代。壳侧职责收缩为：restore RPC 前置取消 flow
-   * （保持取消先于 RPC 的原时序）+ 成功后经 core 12 步链切入 + revive（dead→idle 统一收口）。
+   * （保持取消先于 RPC 的原时序）+ 成功后经 core 12 步链切入 + revive（dead→idle 统一收尾）。
    *
    * 与壳版链的两处已知等价偏差（u5.2 记录）：① core 链步 1 的 cancelActiveFlow 对本路径是
    * no-op 冗余（壳已在 RPC 前取消）；② core 链步 2 会补发一次 switchSession RPC——runtime 对
@@ -311,12 +311,12 @@ export function useSidebar() {
     if (newTaskFlow.isActive.value) newTaskFlow.cancelFlow()
 
     await sessionApi.restoreSession(id)
-    // [T4→D3] respawnPending 过渡态的收口权归 runtime：restore RPC 成功即走 facade 尾部
+    // [T4→D3] respawnPending 过渡态的收尾权归 runtime：restore RPC 成功即走 facade 尾部
     // 三合一出口（msg-pipeline-debloat D3）——respawn 编排上下文命中（失败计数>0 含熔断
     // 态 / 抢占窗口 pending timer / attemptInFlight）时发布 session.restored，帧经恢复窗口
-    // 订阅到达驱动收口（useMessageEffects.handleSessionRestored）。本地 clearRespawnPending
-    // 清账已删（与根源同缺口的补偿，发布点补齐后为纯噪音）。runtime 重启后编排器状态全
-    // 内存即清、三信号构造性 miss 无帧——该场景由下方 revive-on-RPC-reply 收口（保留件），
+    // 订阅到达驱动收尾（useMessageEffects.handleSessionRestored）。本地 clearRespawnPending
+    // 逐条处理完毕（关闭）已删（与根源同缺口的补偿，发布点补齐后为纯噪音）。runtime 重启后编排器状态全
+    // 内存即清、三信号构造性 miss 无帧——该场景由下方 revive-on-RPC-reply 收尾（保留件），
     // 30s TTL 兜底过渡态回收。
     // revive 不被切入失败阻断：restore RPC 成功 = runtime 侧 spawn+attach 已完成，revive 语义
     // 是 UI 死态清除，与切入 RPC 成败解耦——不 revive 会留下「进程已恢复、列表仍置灰」的
@@ -358,7 +358,7 @@ export function useSidebar() {
   }
 
   // ── 代理 core 方法（deleteSession/deleteFolder/retryHistory/renameSession/loadSessions）──
-  // [D3 接缝债已闭合] deleteSession/deleteFolder 的 wasActive 回退走 core.selectSession——
+  // [D3 接缝债已清偿] deleteSession/deleteFolder 的 wasActive 回退走 core.selectSession——
   // sessionEntry 端口接线后回退路径执行完整 12 步链（含 ensureStreamSubscription），
   // 原「回退后新 session 无流订阅」债务消除。
   const retryHistory = core.retryHistory
@@ -429,7 +429,7 @@ export function useSidebar() {
       // 复位 appBootstrapped 保留显式重试通道：重调 initApp（如启动失败重试入口）可重新编排；
       // 生产常规路径首连失败后走 onConnected 重连刷新支，不会自动回到 initApp。
       appBootstrapped = false
-      // 失败必须用户可见：无提示时用户面对空 landing 无法区分「加载中」与「失败」。
+      // 失败必须用户可见：无提示时用户看到空 landing 无法区分「加载中」与「失败」。
       // 恢复动作 = 刷新页面重试（无运行时内自动重试，符合任务级默认无超时/无自动重试约定）。
       const msg = e instanceof Error ? e.message : String(e)
       toastError(t('app.bootstrapFailed', { msg }))
@@ -451,7 +451,7 @@ export function useSidebar() {
     void extensionApi.scan().catch((e) => console.warn('[useSidebar] extension scan on reconnect failed:', e))
     // 重连对账（residual-fixes 附录 A-3 闭环）：runtime 侧派生缓存的刷新以 entry_appended
     // 事件为触发，重连后若无新 entry 写入（如断连前 subagent 已全部终态），侧栏将停留
-    // 断连前 stale 数据直到用户切 tab。对聚焦 session 显式重拉（getSubagents/getWorkflows
+    // 断连前 stale 数据直到用户切 tab。对聚焦 session 显式重新拉取（getSubagents/getWorkflows
     // RPC 直读磁盘，不依赖缓存事件）。load 内部 catch 降级（失败保留旧分区），
     // fire-and-forget 与上面两条刷新一致。
     const sid = focusedSessionId.value

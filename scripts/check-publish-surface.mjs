@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * check-publish-surface.mjs —— packages/ 方向 npm 发布面一致性守卫
+ * check-publish-surface.mjs —— packages/ 方向 npm 发布范围一致性检查
  * （约束 C-proc-11，设计 docs/architecture/npm-publish-surface-guard.md）。
  *
  * 背景：npm 对 files 白名单里磁盘上不存在的条目静默跳过——白名单承诺与构建产出
@@ -11,15 +11,15 @@
  * （当前 7 包：@zhushanwen/extension-protocol / @zhushanwen/session-delivery /
  * @zhushanwen/subagent-core / @zhushanwen/subagent-engine-sdk /
  * @zhushanwen/pi-subagent-cli / @zhushanwen/zcode-subagent-cli /
- * @zhushanwen/pi-rpc；未来新增 dist 发布包自动纳入守卫面）。
+ * @zhushanwen/pi-rpc；未来新增 dist 发布包自动纳入检查范围）。
  *
- * 检查项（设计 D5，双向闭合「files ↔ 产物」两个漂移方向）：
+ * 检查项（设计 D5，双向封住「files ↔ 产物」两个漂移方向）：
  * 1. 幽灵条目（幽灵声明方向）：files 每个条目磁盘存在且非空——判定信号以磁盘
  *    stat 为准而非字符串尾斜杠（磁盘是目录 → 须至少含 1 文件；是文件 → 须存在
  *    且非零字节；glob 条目 → 须至少命中 1 文件）。npm 排除语义条目（`!` 前缀）
  *    是「从 tarball 扣掉」的规则、非存在性承诺，不参与幽灵检查与体积估算。
  * 2. 自包含探针（存在 dist.bundle 命名约定目录的包）：静态扫描
- *    dist.bundle/index.cjs 的全部 require 说明符，三步判定顺序钉死（设计 D3，
+ *    dist.bundle/index.cjs 的全部 require 说明符，三步判定顺序固定为（设计 D3，
  *    顺序即防呆——fs/promises 内建子路径必须先于含 / 分流被 PASS）：
  *    ① isBuiltin（覆盖裸名 / node: 前缀 / 内建子路径三形态）
  *    ② 相对路径（./ ../ 开头）
@@ -50,7 +50,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const ROOT = join(__dirname, '..')
 
-// 纯函数 + rootDir 注入导出面（scripts/__tests__/check-publish-surface.test.mjs
+// 纯函数 + rootDir 注入导出清单（scripts/__tests__/check-publish-surface.test.mjs
 // 用 tmpdir fixture 驱动，不依赖真实仓库状态）。仅 CLI 直跑时执行下方 main()。
 export {
   discoverGuardedPackages,
@@ -153,7 +153,7 @@ function listDirFiles(dir) {
  * 单个 `*` 不跨目录段）。语义与 check-extension-files.mjs 的 inWhitelist 同源，
  * 实现改为分段转换：原脚本的链式 replace 会对前一步已插入的 globstar 正则片段
  * 二次替换其中的 `*`，使无目录前缀的 globstar 形态（如顶层 `**` 加斜杠通配 .js）
- * 退化为只匹配单层前缀——本守卫的 files 条目会出现该形态，故按声称语义正确实现
+ * 退化为只匹配单层前缀——本检查的 files 条目会出现该形态，故按声称语义正确实现
  * （分段转换杜绝二次改写）。
  */
 function globToRegExp(glob) {
@@ -221,7 +221,7 @@ function checkGhostEntries(pkgDir, files, pkgName) {
   for (const entry of files) {
     // npm files 官方排除语义（"!path"）：排除规则声明的是「从 tarball 里扣掉」，
     // 不是文件存在性承诺——磁盘上无需存在对应路径，不参与幽灵检查（体积估算
-    // 同理跳过：无法从 include 求和里正确扣除排除面，跳过 = 保守高估，warning
+    // 同理跳过：无法从 include 求和里正确扣除被排除的条目，跳过 = 保守高估，warning
     // 方向安全）。
     if (entry.startsWith('!')) continue
     if (entry.includes('*')) {
@@ -256,7 +256,7 @@ function checkGhostEntries(pkgDir, files, pkgName) {
 // ---------- 检查项 2：自包含探针（设计 D3 三步判定） ----------
 
 /**
- * 静态扫描自包含档入口的全部 require 说明符。三步判定顺序钉死：
+ * 静态扫描自包含档入口的全部 require 说明符。三步判定顺序固定为：
  * ① isBuiltin——覆盖裸名（fs）/ node: 前缀（node:fs）/ 内建子路径（fs/promises、
  *    node:fs/promises）三形态，命中即 PASS（不进豁免检查）；
  * ② 相对路径（./ ../ 开头）PASS；
@@ -286,7 +286,7 @@ function checkSelfContained(entryFile, entryRel = 'dist.bundle/index.cjs', pkgRe
       problems.push(
         [
           `自包含档 ${entryRel} 含外部依赖 require("${spec}")`,
-          `  ——自包含档必须内联全部运行时依赖（vendoring 宿主无 node_modules 解析面）`,
+          `  ——自包含档必须内联全部运行时依赖（vendoring 宿主无 node_modules 解析范围）`,
           `  修复：核对 ${pkgRel}/tsup.config.ts bundleConfig.noExternal 后重新构建`,
         ].join('\n'),
       )
@@ -397,7 +397,7 @@ function indexWorkspacePackages(packagesDir) {
  * publish 后人工登记——已发布 → registry 可解析）∨ X 有 pending changeset
  * （本次发布会发布）。两信号皆无 → 红。
  *
- * 信号误报面（注释备案）：假绿仅限「清单错登未发布包」——禁预登纪律兜底；
+ * 信号误报风险（注释备案）：假绿仅限「清单错登未发布包」——禁预登纪律兜底；
  * 假红方向安全（X 已发布但清单漏登 → 红 → 按指引核对 npm 后登记即绿）。
  * devDependencies 不进 tarball 依赖树不查；外部依赖（ajv 等）registry 存在性
  * 零网络不可验，不在成员索引即跳过（与本脚本零第三方依赖取向一致）。
@@ -429,7 +429,7 @@ function checkDependencyClosure(pkgDir, workspaceByName, pendingPkgs, publishedP
       [
         `dependencies 中的 workspace 包 "${name}" 未登记进 check-publish-surface.mjs 的 PUBLISHED_REGISTRY_PACKAGES（未发布）也无 pending changeset（本次不会发布）`,
         `  ——publish 把 workspace:* 替换为 ^<version> 后 registry 无此包，npm install 解析 E404、tarball 装不上`,
-        `  修复：为 ${name} 新增 changeset（格式对照 .changeset/ 现有条目；新包首发惯例 type=minor）后重跑本守卫；`,
+        `  修复：为 ${name} 新增 changeset（格式对照 .changeset/ 现有条目；新包首发惯例 type=minor）后重跑本检查；`,
         `  若 ${name} 实际已发布（npm view 可查到版本），则把它登记进 PUBLISHED_REGISTRY_PACKAGES 清单`,
       ].join('\n'),
     )
@@ -463,7 +463,7 @@ function estimateFilesSize(pkgDir, files) {
 // ---------- 聚合 ----------
 
 /**
- * 全链路守卫（rootDir 可注入——单测 fixture 落 tmpdir 用，CLI 默认真实仓库根）。
+ * 全链路检查（rootDir 可注入——单测 fixture 落 tmpdir 用，CLI 默认真实仓库根）。
  * 返回 { guarded, failures, notices, warnings }：failures 非空 = 红（exit 1 语义）；
  * notices / warnings 不影响绿。
  */
@@ -508,11 +508,11 @@ function main() {
   if (failures.length > 0) {
     for (const f of failures) console.error(f)
     console.error(
-      `✗ 发布面一致性未通过（${guarded.length} 个 dist 发布包扫描，${failures.length} 处红）——按上方修复指引处理后重跑 node scripts/check-publish-surface.mjs`,
+      `✗ 发布范围一致性未通过（${guarded.length} 个 dist 发布包扫描，${failures.length} 处红）——按上方修复指引处理后重跑 node scripts/check-publish-surface.mjs`,
     )
     process.exit(1)
   }
-  console.log(`✓ 发布面一致（${guarded.length} 个 dist 发布包：幽灵条目 / 产物目录反向覆盖 / 自包含探针 / workspace 依赖发布闭包 全绿）`)
+  console.log(`✓ 发布范围一致（${guarded.length} 个 dist 发布包：幽灵条目 / 产物目录反向覆盖 / 自包含探针 / workspace 依赖发布闭包 全绿）`)
   process.exit(0)
 }
 

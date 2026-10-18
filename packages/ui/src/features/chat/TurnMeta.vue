@@ -20,7 +20,7 @@
        working 态贴顶时与 scrollEl 顶部有间隔，滚过来的文字从 gap 漏出。改回正常文档流）。
        [u6a] v-if 收窄回 assistants.length > 0：dispatching 空窗期的空 turn（user 已发、
        assistant 未到）不再渲染 TurnMeta 占位——「思考中」指示已迁对话流尾部 ActivityStrip
-       thinking 行（sessionPhase occupancy 投影驱动，D7 展示统一）。 -->
+       thinking 行（sessionPhase occupancy 派生视图驱动，D7 展示统一）。 -->
   <div
     v-if="turn.assistants.length > 0"
     :data-testid="`turn-meta-${turnIndex}`"
@@ -90,7 +90,7 @@
         <!-- 已生成 token 数（B1 完成态定格常驻；口径 = 本 turn 已上报的真实 usage.outputTokens
              之和，含正文 + 思考 + 工具参数——pi usage 原语义，无需按 block 分类）：
              TurnMeta 是 per-turn 事实聚合位，tokens 与 elapsed/时刻区间同族事实。
-             流式期的当前调用尚无 usage → 显示已完成段的真实累计（收口时跳到完整值）；
+             流式期的当前调用尚无 usage → 显示已完成段的真实累计（收尾时跳到完整值）；
              全程无近似值（用户裁决 A：不在真值之外显示估算）。0 不渲染（零内容 turn 不占行宽）。
              [MF-1-37]（demo TurnList.vue:63 `已生成 <b>7,705</b> tokens` + workbench.css
              .workmeta b）：数值段强调档 mid 色 + fw-mid——i18n 单串 {tokens} 占位无法局部
@@ -131,7 +131,7 @@ import { computed } from 'vue'
 import { ChevronRight } from '@lucide/vue'
 import { useI18n } from 'vue-i18n'
 // primitives 直接路径（不经 @taiji/ui 顶层 barrel）：chat 组件被 barrel 再导出，
-// barrel 自引用会闭合一族循环依赖环（详见 BashOutputBlock.vue 同款注释）
+// barrel 自引用会封住一族循环依赖环（详见 BashOutputBlock.vue 同款注释）
 import { Button } from '../../primitives/button'
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '../../primitives/hover-card'
 import type { FoldedNoticeRow, FoldedNoticeType, MessageTurn } from '@taiji/core/domain/chat'
@@ -186,7 +186,7 @@ const { t } = useI18n()
  * working 态文案（SSOT §3.3.4）：working（assistant 已到、仍在生成）显示「工作中」；
  * 完成态「已工作」。[u6a] dispatching 空窗占位分支已删除——空 turn 不再渲染 TurnMeta
  * （v-if 收窄 assistants.length > 0），「思考中」指示迁对话流尾部 ActivityStrip thinking 行
- * （sessionPhase occupancy 投影驱动，D7 展示统一）。
+ * （sessionPhase occupancy 派生视图驱动，D7 展示统一）。
  */
 const statusLabel = computed(() => {
   if (!props.isWorkingTurn) return t('panel.message.worked')

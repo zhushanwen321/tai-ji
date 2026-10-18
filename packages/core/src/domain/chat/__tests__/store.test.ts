@@ -2,8 +2,8 @@
  * createChatStore factory 行为单测（core chat/domain store，P3 w4 迁移锁定）。
  *
  * 测试 factory 产物不经 pinia defineStore 的纯行为（在 effectScope 内直接调 createChatStore），
- * 锁定 chat 域 store 层核心迁移面：
- * - messages 分区（hydrate 守卫 / setMessages 覆盖 / appendUser）
+ * 锁定 chat 域 store 层核心迁移范围：
+ * - messages 分区（hydrate 检查 / setMessages 覆盖 / appendUser）
  * - isGenerating 派生（streamingSessionIds scan + applyMessageEvent 端到端）
  * - finalizeSession reason→终态映射（normal/error + toolCall 级联）
  * - disposeSession 清理全部 per-session ref
@@ -83,7 +83,7 @@ describe('createChatStore factory', () => {
       expect(sut.store.getMessages(sid)).toHaveLength(1)
     })
 
-    it('hydrate 幂等守卫（重复调用不二次注入）', () => {
+    it('hydrate 幂等检查（重复调用不二次注入）', () => {
       const sid = 's1'
       const history = [userMsg('m1')]
       sut.store.hydrate(sid, history)
@@ -91,7 +91,7 @@ describe('createChatStore factory', () => {
       expect(sut.store.getMessages(sid)).toHaveLength(1)
     })
 
-    it('setMessages 覆盖（不受 hydrated 守卫，subagent 虚拟 session 用）', () => {
+    it('setMessages 覆盖（不受 hydrated 检查，subagent 虚拟 session 用）', () => {
       const sid = 's1'
       sut.store.setMessages(sid, [userMsg('m1', 'a')])
       sut.store.setMessages(sid, [userMsg('m2', 'b')])
@@ -128,7 +128,7 @@ describe('createChatStore factory', () => {
         const msgs = sut.store.getMessages(sid)
         expect(msgs).toHaveLength(2)
         expect(msgs[1]).toMatchObject({ id: 'a-live', status: 'streaming', content: '部分' })
-        // isGenerating 保持 true（后续 text_delta 守卫不丢流）
+        // isGenerating 保持 true（后续 text_delta 检查不丢流）
         expect(sut.store.isGenerating(sid)).toBe(true)
       })
 
@@ -212,7 +212,7 @@ describe('createChatStore factory', () => {
           expect(msgs.map((m) => m.id)).toEqual(['ent-m1', 'ent-a1', 'ent-s1', 'u-s2'])
           expect(msgs.filter((m) => m.content === '第一条')).toHaveLength(1) // 无双计
           expect(msgs.filter((m) => m.content === '第二条')).toHaveLength(1) // 不丢
-          // 方向断言：倒序对齐（D3 被否项）会把 s2_ov 错配 s1_real——上面两条恰捕获
+          // 方向断言：倒序对齐（D3 不采用项）会把 s2_ov 错配 s1_real——上面两条恰捕获
         })
 
         it('基线多含 n<k：快照尾部比保护段多 → overlay 剔除，纯基线刷新（无双计）', () => {
@@ -300,7 +300,7 @@ describe('createChatStore factory', () => {
           expect(msgs).toHaveLength(4)
           // s1 双通道收敛为基线版本一条（overlay 剔除，无双计）
           expect(msgs.filter((m) => m.content === '注意用中文')).toHaveLength(1)
-          // streaming 实体保留（后续 text_delta 守卫不丢流）
+          // streaming 实体保留（后续 text_delta 检查不丢流）
           expect(msgs[3]).toMatchObject({ id: 'a-live', status: 'streaming', content: '生成中' })
           expect(sut.store.isGenerating(sid)).toBe(true)
         })
@@ -310,7 +310,7 @@ describe('createChatStore factory', () => {
 
         it('基线领先且尾部为 assistant（k=0）：overlay 文本命中基线副本 → 剔除无双计（AC-2 R3 场景）', () => {
           const sid = 's1'
-          // 上一轮已合并的基线投影头部
+          // 上一轮已合并的基线派生视图头部
           sut.store.hydrate(sid, [baselineUser('ent-m1', 'q1'), completeAssistant('ent-a1', '先答复')])
           // 本轮：send 乐观 overlay + turn 进行中（多消息 turn 首个 assistant 已在 live 流式）
           sut.store.setMessages(sid, [
@@ -454,24 +454,24 @@ describe('createChatStore factory', () => {
       expect(id).toMatch(/^u-[0-9a-fA-F-]{36}$/)
     })
 
-    it('可选 id 参数：缺省自生成（乐观插入现行为回归）/ 提供则气泡沿用（回执保号）', () => {
+    it('可选 id 参数：缺省自生成（乐观插入现行为回归）/ 提供则气泡沿用（回执保留原 id）', () => {
       // 缺省：两次调用各自生成新 u-<uuid>（乐观插入路径——useChat.submitNewMessage 不传 id）
       const a = sut.store.appendUser('s-w2-id', textToSegments('a'))
       const b = sut.store.appendUser('s-w2-id', textToSegments('b'))
       expect(a).toMatch(/^u-/)
       expect(b).toMatch(/^u-/)
       expect(a).not.toBe(b)
-      // 提供：送达回执重建保号（消息撤回 U8）——entry.id 沿用 → 气泡 id = 传入 id
+      // 提供：送达回执重建保留原 id（消息撤回 U8）——entry.id 沿用 → 气泡 id = 传入 id
       const kept = 'u-11111111-2222-3333-4444-555555555555'
       const returned = sut.store.appendUser('s-w2-id', textToSegments('c'), kept)
       expect(returned).toBe(kept)
       expect(sut.store.getMessages('s-w2-id').at(-1)!.id).toBe(kept)
     })
 
-    it('live ≡ reload（user 类型）：appendUser 派生的 ref 投影 ≡ 真实 message_end 帧喂入的 reducer 投影 ≡ 同形态 entry 重放', () => {
+    it('live ≡ reload（user 类型）：appendUser 派生的 ref 派生视图 ≡ 真实 message_end 帧喂入的 reducer 派生视图 ≡ 同形态 entry 重放', () => {
       const sid = 's-w2-equiv'
-      // live 乐观（ref 投影）+ 提交挂账（composer submit 真实时序：乐观气泡 + inflight 挂账
-      // 同轮发生——帧落 ② 计数抵消，ref 不重复入流；无挂账的外来直发形态走 ③ 入流，
+      // live 乐观（ref 派生视图）+ 提交记账（composer submit 真实时序：乐观气泡 + inflight 记账
+      // 同轮发生——帧落 ② 计数抵消，ref 不重复入流；无记账的外来直发形态走 ③ 入流，
       // 见 applyEntryFrame describe 的 W21-user-foreign 用例）
       sut.store.appendUser(sid, textToSegments('same question'))
       sut.store.incrementInflight(sid, 1)
@@ -502,7 +502,7 @@ describe('createChatStore factory', () => {
         message: { role: 'user', content: 'same question', timestamp: 0 },
       }])
       // 剥异源字段（id：位置派生 vs pi uuidv7；piEntryId：entry.id 衍生）后逐字段等价——
-      // 权威帧与重放对 user 类型构造性同构（Segment[]/string 归一到同一投影）
+      // 权威帧与重放对 user 类型构造性同构（Segment[]/string 归一到同一派生视图）
       const strip = (m: Message) => {
         const { id: _i, piEntryId: _p, ...rest } = m
         return rest
@@ -572,18 +572,18 @@ describe('createChatStore factory', () => {
   })
 
   // [B1 退役] 前身 `pendingBuffer 数据层` describe（TC1/TC2/TC2b/TC3/TC3b 五例：pushPending
-  // 暂存 / drainN 计数 FIFO / abortPending 文本匹配）已随计数腿整体删除（设计 §3.1 删除面）——
+  // 暂存 / drainN 计数 FIFO / abortPending 文本匹配）已随计数路径整体删除（设计 §3.1 删除范围）——
   // 分区与四个方法不再是 store 面 API，无方法可测。
 
   // ── [steer-bubble u0/D2] inflight 投递确认计数契约层：state + 增/减/清零 action 面。
-  //    本组只锁 store 层语义；调用方接线（腿 1 消费 +m / send 乐观 ±1 / message_end 确认
+  //    本组只锁 store 层语义；调用方接线（路径 1 消费 +m / send 乐观 ±1 / message_end 确认
   //    −1 / abort 清零）归 u1/u2 单元 ──
   describe('inflight 计数（u0 契约层：已显示待确认的投递数）', () => {
-    it('increment/decrement 基本语义：默认步长 1，显式 n 累加（腿 1 实取数 m 形态）', () => {
+    it('increment/decrement 基本语义：默认步长 1，显式 n 累加（路径 1 实取数 m 形态）', () => {
       const sid = 's1'
-      sut.store.incrementInflight(sid) // send 乐观 +1 / 腿 1 消费 1 条
+      sut.store.incrementInflight(sid) // send 乐观 +1 / 路径 1 消费 1 条
       expect(sut.store.getInflight(sid)).toBe(1)
-      sut.store.incrementInflight(sid, 2) // 腿 1 按实取数 +m
+      sut.store.incrementInflight(sid, 2) // 路径 1 按实取数 +m
       expect(sut.store.getInflight(sid)).toBe(3)
       sut.store.decrementInflight(sid) // message_end 确认 −1
       expect(sut.store.getInflight(sid)).toBe(2)
@@ -648,7 +648,7 @@ describe('createChatStore factory', () => {
       sut.store.evictIfNeeded()
       expect(sut.store.getMessages('s0')).toHaveLength(0) // 前置：s0 被驱逐（messages 已清）
       // 豁免验证：驱逐刻意不清 inflight（与 disposeSession 全清惯例刻意不一致——segments
-      // 与确认基线不可重建，驱逐重进后两腿判定仍依赖）
+      // 与确认基线不可重建，驱逐重进后两路径判定仍依赖）
       expect(sut.store.getInflight('s0')).toBe(1)
       expect(sut.store.getInflight('s8')).toBe(1) // 保留 session 不受影响
     })
@@ -799,7 +799,7 @@ describe('createChatStore factory', () => {
       expect(tc.endTime).toBeUndefined()
     })
 
-    it('bash 消息跳过 finalizeSession（bash 收口链独立域）', () => {
+    it('bash 消息跳过 finalizeSession（bash 收尾链独立域）', () => {
       const sid = 's1'
       sut.store.setMessages(sid, [{
         id: 'b1', role: 'system', content: '', status: 'streaming', timestamp: 1,
@@ -811,11 +811,11 @@ describe('createChatStore factory', () => {
     })
   })
 
-  describe('finalizeSession 收口 warn 的 dev 门（D5）', () => {
+  describe('finalizeSession 收尾 warn 的 dev 门（D5）', () => {
     let warnSpy: ReturnType<typeof vi.spyOn>
 
     beforeEach(() => {
-      // 钉死非 dev 起点（isDevMode 默认 false；防御同 worker 前序用例泄漏 true）
+      // 固定非 dev 起点（isDevMode 默认 false；防御同 worker 前序用例泄漏 true）
       __resetDevModeForTesting()
       warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     })
@@ -824,7 +824,7 @@ describe('createChatStore factory', () => {
       __resetDevModeForTesting()
     })
 
-    /** 只取 finalizeSession 收口 warn 行（steer/send 等路径另有 warn，滤除） */
+    /** 只取 finalizeSession 收尾 warn 行（steer/send 等路径另有 warn，滤除） */
     function finalizeWarnLines(): string[] {
       const allLines: string[] = warnSpy.mock.calls.map((c: unknown[]) => String(c[0]))
       return allLines.filter((s) => s.includes('finalizeSession'))
@@ -854,8 +854,8 @@ describe('createChatStore factory', () => {
     })
   })
 
-  describe('finalizeAllStreaming（断连 / 崩溃兜底收口，review #1.2）', () => {
-    it('disconnect → 全部候选 session 的 streaming 复位（isGenerating false）+ 消息 error 收口 + 独立瞬态清空', () => {
+  describe('finalizeAllStreaming（断连 / 崩溃兜底收尾，review #1.2）', () => {
+    it('disconnect → 全部候选 session 的 streaming 复位（isGenerating false）+ 消息 error 收尾 + 独立瞬态清空', () => {
       const s1 = 's1'
       const s2 = 's2'
       // s1：streaming assistant（messages 分区来源的候选）
@@ -863,7 +863,7 @@ describe('createChatStore factory', () => {
       // s2：无消息实体、仅 retry/compacting 瞬态（瞬态 Map 来源的候选——只遍历 messages 会漏）
       sut.store.applyMessageEvent(s2, msg(s2, 'message.auto_retry_start', { attempt: 1 }))
       // [u3b/D7] 原 queue_update 写 queueStates 的候选来源已退役（handler 删除，无生产写方）——
-      // 瞬态候选维度由 retryStates + compactingSessions 承担，断言面不缩水。
+      // 瞬态候选维度由 retryStates + compactingSessions 承担，断言范围不缩水。
       sut.store.setOccupancy(s2, { turn: 'idle', compacting: true, bash: false })
       expect(sut.store.isGenerating(s1)).toBe(true)
       expect(sut.store.getRetryState(s2)).toBeDefined()
@@ -871,7 +871,7 @@ describe('createChatStore factory', () => {
 
       sut.store.finalizeAllStreaming('disconnect')
 
-      // streaming 实体收口为 error（disconnect 属 error 类 reason）→ isGenerating 复位
+      // streaming 实体收尾为 error（disconnect 属 error 类 reason）→ isGenerating 复位
       expect(sut.store.getMessages(s1)[1].status).toBe('error')
       expect(sut.store.isGenerating(s1)).toBe(false)
       // 独立瞬态（retry/compacting）清空——clearIndependentTransient 断连兜底
@@ -880,7 +880,7 @@ describe('createChatStore factory', () => {
       expect(sut.store.isCompacting(s2)).toBe(false)
     })
 
-    it('幂等：已收口 session 二次调用 no-op（重连成功后 ring 回放已收口的场景）', () => {
+    it('幂等：已收尾 session 二次调用 no-op（重连成功后 ring 回放已收尾的场景）', () => {
       const sid = 's1'
       sut.store.setMessages(sid, [streamingAssistant('a1', { content: '生成中' })])
       sut.store.finalizeAllStreaming('disconnect')
@@ -981,8 +981,8 @@ describe('createChatStore factory', () => {
     })
 
     // [ADR-0122] 原「addPendingSend 挂 30s 超时 timer / clearPendingSend 取消 timer」两用例
-    // 随 timer 退役删除：pendingSend 收口全事件驱动（message_start/finalizeSession/
-    // deliveryHandled/delivery morph/occupancy idle 帧/断连收口），无墙钟兜底可推演。
+    // 随 timer 退役删除：pendingSend 收尾全事件驱动（message_start/finalizeSession/
+    // deliveryHandled/delivery morph/occupancy idle 帧/断连收尾），无墙钟兜底可推演。
 
     it('clearPendingSend 幂等：清不存在的 session 不抛错', () => {
       expect(() => sut.store.clearPendingSend('ghost')).not.toThrow()
@@ -1064,10 +1064,10 @@ describe('createChatStore factory', () => {
   // 实时路径（message_end / tool_call_end 重构 entry）与文件重放（replayEntries）喂同一个
   // applyEntry reducer；messages ref 走 overlay 路径不受影响（ref 收敛归 W22 对账）。
   describe('applyEntryFrame（w21 实时 feed 喂 reducer）', () => {
-    it('message_end（user entry，确认形态：有挂账）→ reducer state 累积 user 投影；messages ref 不受影响（乐观气泡负责实时渲染）', () => {
+    it('message_end（user entry，确认形态：有记账）→ reducer state 累积 user 派生视图；messages ref 不受影响（乐观气泡负责实时渲染）', () => {
       const s = makeStore()
       const sid = 's-w21-user'
-      // composer 场景：乐观气泡已挂账（submit 时 incrementInflight）→ 帧是回执，不入流
+      // composer 场景：乐观气泡已记账（submit 时 incrementInflight）→ 帧是回执，不入流
       s.store.incrementInflight(sid, 1)
       s.store.applyMessageEvent(sid, msg(sid, 'message.message_end', {
         entry: {
@@ -1085,7 +1085,7 @@ describe('createChatStore factory', () => {
       s.dispose()
     })
 
-    it('message_end（user entry，外来直发形态：无挂账无标记）→ reducer 累积 + ref overlay 入流（A3 缺口修复：canvas 回推等 runtime 注入通知实时显示）', () => {
+    it('message_end（user entry，外来直发形态：无记账无标记）→ reducer 累积 + ref overlay 入流（A3 缺口修复：canvas 回推等 runtime 注入通知实时显示）', () => {
       const s = makeStore()
       const sid = 's-w21-user-foreign'
       s.store.applyMessageEvent(sid, msg(sid, 'message.message_end', {
@@ -1098,7 +1098,7 @@ describe('createChatStore factory', () => {
       }))
       const state = s.store.testInternals._entryStatesForTest.get(sid)?.state
       expect(state?.messages).toHaveLength(1)
-      // ref 入流：overlay 投影（applyEntryFrameWithOverlay → commitMessages）
+      // ref 入流：overlay 派生视图（applyEntryFrameWithOverlay → commitMessages）
       const refMsgs = s.store.getMessages(sid)
       expect(refMsgs).toHaveLength(1)
       expect(refMsgs[0]).toMatchObject({ role: 'user', content: [{ type: 'text', text: 'hello' }], status: 'complete' })
@@ -1133,7 +1133,7 @@ describe('createChatStore factory', () => {
         },
       }))
       const state = s.store.testInternals._entryStatesForTest.get(sid)?.state
-      // reducer：assistant 投影（toolCalls completed）+ toolResult 窗口局部配对回填（isError → error 态）
+      // reducer：assistant 派生视图（toolCalls completed）+ toolResult 窗口局部配对回填（isError → error 态）
       expect(state?.messages).toHaveLength(1)
       const tc = state?.messages[0].toolCalls?.[0]
       expect(tc).toMatchObject({ id: 'tc-9', toolName: 'read', output: 'file body', status: 'error' })

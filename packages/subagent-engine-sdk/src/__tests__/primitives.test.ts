@@ -143,7 +143,7 @@ describe("paths（数据目录布局 SSOT，纯函数）", () => {
   });
 });
 
-describe("journal-replay（纯投影 + reducer，重放等价性语义）", () => {
+describe("journal-replay（纯派生视图 + reducer，重放等价性语义）", () => {
   /** 事件序列驱动 reducer 累积后返回 turns（对齐 core journal-replay 消费链）。 */
   function replay(events: AgentEvent[]): Turn[] {
     const record = createReplayRecord();
@@ -151,7 +151,7 @@ describe("journal-replay（纯投影 + reducer，重放等价性语义）", () =
     return record.turns;
   }
 
-  it("reducer：text/thinking 累积、tool 配对、turn 闭合、usage 聚合", () => {
+  it("reducer：text/thinking 累积、tool 配对、turn 结束、usage 聚合", () => {
     const record = createReplayRecord();
     const events: AgentEvent[] = [
       { type: "text_delta", delta: "Hello, " },
@@ -201,7 +201,7 @@ describe("journal-replay（纯投影 + reducer，重放等价性语义）", () =
     expect(orphanTurn.toolCalls[0]?._status).toBe("done");
   });
 
-  it("eventsToSessionView：source 恒 journal + sessionId 提取 + usage 聚合（投影出口）", () => {
+  it("eventsToSessionView：source 恒 journal + sessionId 提取 + usage 聚合（派生视图出口）", () => {
     const events: AgentEvent[] = [
       { type: "text_delta", delta: "answer" },
       { type: "message_end", usage: { input: 1, output: 2, cacheRead: 3, cacheWrite: 4 } },

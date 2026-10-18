@@ -3,7 +3,7 @@
  *
  * 锁定：七 type（mcp.list/add/update/setEnabled/remove/test/testCancel）经路由表查表命中并委托 McpMessageHandler
  * （service 真实例 + fake IMcpServers port——u2a fake 形态复用），reply 对应 :result 帧；
- * mcpServersService 缺省（存量测试的退化装配面）时 mcp.* 落 unknown_type（handled=false，
+ * mcpServersService 缺省（存量测试的退化装配侧）时 mcp.* 落 unknown_type（handled=false，
  * 构造器条件装配语义，tts 批缺省同构）；未知 mcp type → false（unknown_type 兜底不变）。
  *
  * 运行：cd packages/runtime && npx vitest run src/transport/settings-message-handler-mcp.test.ts
@@ -107,7 +107,7 @@ describe('SettingsMessageHandler · mcp.* 七命令路由（pi-mcp-management）
 
   it('mcpServersService 缺省（退化测试装配）：mcp.* 落 unknown_type（handled=false）', async () => {
     const { ctx: full } = mockCtx()
-    // 摘除 mcpServersService 模拟存量测试/缺省装配面（optional 通道未注入）
+    // 摘除 mcpServersService 模拟存量测试/缺省装配侧（optional 通道未注入）
     const ctxWithoutMcp = full as unknown as Record<string, unknown>
     delete ctxWithoutMcp.mcpServersService
     const handler = new SettingsMessageHandler(full)

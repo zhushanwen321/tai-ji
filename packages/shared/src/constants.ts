@@ -169,7 +169,7 @@ export const MAX_WS_PAYLOAD_BYTES: number = 16 * 1024 * 1024
  *
  * [历史] 2026-09：移除 ~/.claude/skills / ~/.claude/agents 预设候选。原因：preset 成员
  * 恒在 UI 重挂（buildDirConfigs 未启用也会补回），导致用户「删除 claude 行」后重新出现、
- * 无法真正移除；且 claude 目录非本产品默认扫描面。用户仍可手动「添加路径」加入。
+ * 无法真正移除；且 claude 目录非本产品默认扫描范围。用户仍可手动「添加路径」加入。
  */
 export const PRESET_SKILL_DIRS = [
   '~/.pi/agent/skills',
@@ -335,7 +335,7 @@ export const PRESET_FALLBACK_ENV_KEYS = {
 export const UI_TOAST_LIMITS = { MAX_IN_FLIGHT: 5 } as const
 
 // ── 崩溃韧性共享契约（实施计划 u-foundation）──
-// 本段是 DAG 根共享契约：u4a（出站守卫）/ u4b（历史预算）/ u4c（读预检）/
+// 本段是 DAG 根共享契约：u4a（出站检查）/ u4b（历史预算）/ u4c（读预检）/
 // u5a/u5b（日志保留期）从这里取值，禁止各单元自写魔数。
 
 /**
@@ -365,8 +365,8 @@ export const RING_BUDGET_BYTES: number = 16 * 1024 * 1024
 /**
  * server→client 出站帧截断阈值（默认 32MB）[D3]。
  *
- * 按通路分两种守卫形态：reply 通路超限 → 替换为 `payload_too_large` 错误 envelope
- * （前端 pending 对 type:'error' 且 id 命中的 reply 走 reject，Promise 收口不悬挂）；
+ * 按通路分两种检查形态：reply 通路超限 → 替换为 `payload_too_large` 错误 envelope
+ * （前端 pending 对 type:'error' 且 id 命中的 reply 走 reject，Promise 收尾不悬挂）；
  * push 通路超限 → publish 入口 **seq 分配前**「契约保持式截断」（消息类型不变，按
  * 帧内字段路径注册表把大字段替换为占位文案，ring 回放 / 重订阅拉到同一份截断版，
  * seq 连续性不被破坏），注册表 miss 或截断后仍超限 → seq 分配前整条丢弃（不占 seq
@@ -387,7 +387,7 @@ export const OUTBOUND_FRAME_TRUNCATE_BYTES: number = 32 * 1024 * 1024
  * 消费方）② 离线尾读 fallback ③ findLastEntryField fallback ④ readSessionJsonlText
  * （Trace 视图）⑤ restore 附着 normalize ⑥ workflow record 事件流拉取
  * （workflow-run-events-reader，2026-10-02 增——record 含无上界 worker-log 行且信号
- * force 重拉放大读面）。超限按调用方语义分档降级（逆序分块读 / oversize 标记 /
+ * force 重新拉取放大读侧）。超限按调用方语义分档降级（逆序分块读 / oversize 标记 /
  * 跳过 normalize + warn），消除「读巨文件 → OOM」恶性循环。
  *
  * 校准依据：本机实测 session 历史文件最大 6MB（探针 P-hist-sizes，`du` 实测）、单
@@ -414,7 +414,7 @@ export const BYTES_PER_MB: number = 1024 * 1024
  * RECENT_TURNS turns 且总字节 ≤ MAX_BYTES」双条件截取，响应携带 truncated /
  * loadedTurns / totalTurnsEstimate。切分粒度：预算作用于 **turn 选择**，单 turn 内
  * entry 不切分（entry 原子性——切分会破坏 reducer 幂等与 parentId 链）；最近一个
- * turn 自身超预算时仍完整放行（保证对话可见性连续），极端 turn 由 D3 帧守卫与
+ * turn 自身超预算时仍完整放行（保证对话可见性连续），极端 turn 由 D3 帧检查与
  * U7 累积态截断兜底。
  *
  * 校准依据：两值**对齐现有离线窗口**——runtime session-history.ts 的
@@ -480,6 +480,6 @@ export const TTS_CACHE_MAX_BYTES: number = 512 * 1024 * 1024
  * import main 侧符号，SSOT 落 shared 消除双 86 字面量。
  *
  * apps/electron/main/supervisor/runtime-supervisor.ts 的 `PLANNED_EXIT_CODE` 是
- * 本值的转发常量（导出面不变，u1f 既有测试与消费方 import 点不受影响）。
+ * 本值的转发常量（导出清单不变，u1f 既有测试与消费方 import 点不受影响）。
  */
 export const RUNTIME_PLANNED_EXIT_CODE = 86

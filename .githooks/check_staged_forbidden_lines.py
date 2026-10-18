@@ -8,7 +8,8 @@ staged 新增行禁词检查（C-ext-07 / C-proc-04 的行级增量拦截）。
     install-hooks.sh §2c 拦截，本检查补齐 warn/error——存量迁移中，只拦新增）。
   - 规则 B：任意 .ts/.vue/.mjs 新增行含 eslint-disable 且 `--` 后无说明文字 →
     违规（AGENTS.md「禁 eslint-disable-next-line 静默」：规则误报须修规则本体，
-    确需豁免必须带说明注释）。.md 文件不拦（文档引用这些词合法）。
+    确需豁免必须带说明注释）。.md 文件不拦（文档引用这些词合法）；规则本体文件
+    taste-lint/rules/no-eslint-disable.mjs 整文件豁免（其行文必然含该字面）。
 
 用法：
   python3 .githooks/check_staged_forbidden_lines.py            # 检查全部 staged diff
@@ -36,10 +37,19 @@ DISABLE_RE = re.compile(r"eslint-disable")
 # 侧「文件迁走则 glob 跟走」策略对齐）。现前缀登记同一豁免语义——规则 A 目前只扫
 # extensions/ 前缀（C 侧由 eslint 的 packages/subagent-core/src no-console:error 块
 # 管住，src/core 豁免对应本条目前瞻条目），本条目
-# 保证规则 A 扫描面未来若扩到 packages/ 时豁免同步，与 eslint 侧 override
+# 保证规则 A 扫描范围未来若扩到 packages/ 时豁免同步，与 eslint 侧 override
 # （packages/subagent-core/src/core/**）一一对应。
 ALLOWED_CONSOLE_PREFIXES = (
     "packages/subagent-core/src/core/",
+)
+
+# [lexicon-sweep 2026-10-18] 规则 B 的 scoped allowlist：no-eslint-disable.mjs 是「禁
+# eslint-disable」这条 taste 规则的本体文件——其文档注释与 message 串必然含
+# eslint-disable 字面（检测脚本功能性检查串，AGENTS.md 登记的例外类别），不是新增的
+# 静默豁免指令。该文件任何行文编辑（如本次词表清扫改 message 文案）都会被规则 B
+# 误报，故整文件豁免；其余文件的 eslint-disable 新增行仍按原规则拦截。
+ALLOWED_DISABLE_PATHS = (
+    "taste-lint/rules/no-eslint-disable.mjs",
 )
 
 
@@ -55,7 +65,7 @@ def check_file(path: str) -> list[str]:
         console_rule_applies = is_ext_ts and not path.startswith(ALLOWED_CONSOLE_PREFIXES)
         if console_rule_applies and CONSOLE_RE.search(added):
             violations.append(f"{path}: 新增行含 console.warn/error（extensions 日志统一接 @zhushanwen/pi-extension-logger，见 docs/extensions/logging-conventions.md）")
-        if path.endswith((".ts", ".vue", ".mjs")) and DISABLE_RE.search(added):
+        if path.endswith((".ts", ".vue", ".mjs")) and path not in ALLOWED_DISABLE_PATHS and DISABLE_RE.search(added):
             # eslint-disable 后须带 `-- 说明`（AGENTS.md 禁静默 disable）
             after = added.split("--", 1)
             if len(after) == 1 or not after[1].strip():

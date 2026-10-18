@@ -8,7 +8,7 @@
  *
  * 覆盖范围（格式化边界 + 聚合边界）：
  *   - fmtUSD / fmtCompact / niceMax 的全分支数值边界
- *   （fmtWeekday 已随 i18n 收口 D6 迁往 UsageDailyChart 组件层，周几断言随组件测试）
+ *   （fmtWeekday 已随 i18n 收敛 D6 迁往 UsageDailyChart 组件层，周几断言随组件测试）
  *   - aggregate：空数组、range=0（全量日期轴）、单日、isolate 复合键 / offProv 过滤组合
  *   - 跨 provider 同名模型：perModel 复合键不合并、各归各 provider、总量守恒（V10）
  *   - aggregateProjects range=0 + metric=cost 贯穿排序；aggregateDetailGroups 复合键归属 + metric 排序

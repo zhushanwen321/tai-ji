@@ -14,12 +14,12 @@
  * - U9-S1 真 pi 全链路 create：工具 60s 内返回 + sidecar 已写 + spawnSource='agent'
  * - U9-S2 重启恢复：scanPiSessions({force:true}) 重扫恢复 spawnSource + parentAgentSessionId
  * - U9-S3 watch 开表挂等：extension 经真实 marker select 通道开表 → handler 路由 deferred
- *  （零 respond）→ settle 兑现腿经同一写回通道 respond（设计 §4-9；faux 轨零 token）
+ *  （零 respond）→ settle 兑现路径经同一写回通道 respond（设计 §4-9；faux 轨零 token）
  * - U9-S4 晚 respond catch-up：watch 到达时 claim 已 fulfilled → 立即快照 respond（D4）
  * - U9-S5 fail-closed 静默：watch 查无 claim → 立即 respond 'cancelled'（不携 sessionId，D-4）
- * - U9-D1 死亡收口：子会话意外退出 → watch 挂等 claim 恰收一条 reason:'exited'
+ * - U9-D1 死亡收尾：子会话意外退出 → watch 挂等 claim 恰收一条 reason:'exited'
  *  （携 exitCode/stderrTail + deathSeq/fulfillsN），destroy 迟到二次发声幂等（notify-once
- *  D5「死亡也通知恰一次」第一承诺的执行面）
+ *  D5「死亡也通知恰一次」第一承诺的执行侧）
  * - U9-D2 死亡词形分派：cause=delete → reason:'deleted'（不携退出现场字段）
  *
  * 环境约定照抄 equivalence 族（pi-fixture.ts）：真实 spawn（禁 mock 子进程）。faux LLM 轨
@@ -65,7 +65,7 @@ const FIXED_LABEL = 'u9-smoke'
 /** watch 三路径轨的固定初始 prompt：携带 → willNotify:true → extension arm claim + 经 marker 通道开表 */
 const FIXED_PROMPT = 'Run a trivial task and report done.'
 
-/** respond 回写记录（sendExtensionUiResponse 捕获面；watch 断言按 requestId 过滤） */
+/** respond 回写记录（sendExtensionUiResponse 捕获侧；watch 断言按 requestId 过滤） */
 interface RecordedRespond {
   requestId: string
   /** select value 原样（JSON 字符串）；cancelled（null）路径为 null */
@@ -78,7 +78,7 @@ interface ChainOptions {
   withPrompt?: boolean
 }
 
-/** runFullChain 返回面（既有两用例消费 result/fx/cleanup；watch 三路径另消费账本/写回捕获/喂入通道） */
+/** runFullChain 返回侧（既有两用例消费 result/fx/cleanup；watch 三路径另消费账本/写回捕获/喂入通道） */
 interface FullChain {
   result: FullChainResult
   fx: PiFixture
@@ -86,7 +86,7 @@ interface FullChain {
   claims: ClaimLedger
   handler: SessionManagerHandler
   responds: RecordedRespond[]
-  /** 经真实 marker select 通道喂一个 ui_request（translate → interpreter → handler）并等 handle 收口 */
+  /** 经真实 marker select 通道喂一个 ui_request（translate → interpreter → handler）并等 handle 收尾 */
   feedUiRequest: (event: PiStreamEvent) => Promise<void>
 }
 
@@ -109,7 +109,7 @@ function watchNotifyIdOf(e: PiStreamEvent): string | undefined {
   }
 }
 
-/** 全链路执行结果（各验收用例的消费面） */
+/** 全链路执行结果（各验收用例消费的形态） */
 interface FullChainResult {
   parentSessionId: string
   childId: string
@@ -153,7 +153,7 @@ async function runFullChain(options: ChainOptions = {}): Promise<FullChain> {
     sessionDir,
     commandTimeoutMs: STEP_TIMEOUT_MS,
     // create_managed_session 自 tool-declaration-slimming D4 起 exposure=deferred（不进
-    // 模型声明面），faux 脚本直呼工具名会被 pi 判 "Tool not found"——extension_ui_request
+    // 模型声明侧），faux 脚本直呼工具名会被 pi 判 "Tool not found"——extension_ui_request
     // 不发出、全链路断流。经全局 settings defaultTools 预激活（'+name' 增量条目，与生产
     // spawn 经 settings 激活工具同通道）；tool_search 检索发现路径不是本文件被测对象
     // （marker 通道闭环），其行为由 pi-codemode-settings.test.ts 覆盖。
@@ -194,7 +194,7 @@ async function runFullChain(options: ChainOptions = {}): Promise<FullChain> {
 
     // ── 2. 最小 fake SessionService：create 落盘子 session JSONL header + 真实 persistAgentBinding ──
     // 生产路径由 pi 子进程自己写 session 文件（延迟 flush）；fake 模拟「子 session 已存在」，
-    // 供 persistAgentBinding 的 existsSync 守卫（规则 #6）放行——sidecar 才能落在 JSONL 旁。
+    // 供 persistAgentBinding 的 existsSync 检查（规则 #6）放行——sidecar 才能落在 JSONL 旁。
     const childId = `u9-smoke-child-${Date.now()}`
     const childJsonl = join(sessionDir, `${childId}.jsonl`)
     let createCall: FullChainResult['createCall'] | undefined
@@ -208,10 +208,10 @@ async function runFullChain(options: ChainOptions = {}): Promise<FullChain> {
         id,
         // 归属材料（handleWatch respond 前二次归属校验 / isOwnedBy 的唯一读源）：子会话是
         // spawnSource='agent' 且归属本父会话的 managed child——生产路径由真实 SessionService
-        // 提供，fake 同形物化否则 catch-up 腿会误判「归属失效 → cancelled」（U9-S4）。
+        // 提供，fake 同形物化否则 catch-up 路径会误判「归属失效 → cancelled」（U9-S4）。
         ...(id === childId ? { spawnSource: 'agent', parentAgentSessionId: parentSessionId } : {}),
       }),
-      getSession: () => undefined, // resolveSessionFile 的内存态腿（sessionFile 缺席 → undefined，respond 不携该字段）
+      getSession: () => undefined, // resolveSessionFile 的内存态路径（sessionFile 缺席 → undefined，respond 不携该字段）
       create: async (cwd: unknown, label: unknown, opts: Record<string, unknown> = {}) => {
         createCall = { cwd, label, opts }
         writeFileSync(
@@ -395,20 +395,20 @@ async function openClaimWatchChain(): Promise<WatchChain> {
   }
 }
 
-/** 开表挂等共用腿（U9-S3 / U9-D1 前置）：真实通道喂入 watch → deferred（wait）路由，断言零 respond。 */
+/** 开表挂等共用路径（U9-S3 / U9-D1 前置）：真实通道喂入 watch → deferred（wait）路由，断言零 respond。 */
 async function feedWatchDeferring(w: WatchChain): Promise<void> {
   await w.feedUiRequest(w.watchEvent)
   expect(w.responds.filter((r) => r.requestId === w.watchRequestId), 'deferred 阶段不应有 respond').toHaveLength(0)
 }
 
-/** watch 回写断言共用腿：按 requestId 过滤恰一条 respond + JSON 解析 payload toMatchObject。 */
+/** watch 回写断言共用路径：按 requestId 过滤恰一条 respond + JSON 解析 payload toMatchObject。 */
 function expectSingleWatchRespond(w: WatchChain, payload: Record<string, unknown>, message: string): void {
   const watchResponds = w.responds.filter((r) => r.requestId === w.watchRequestId)
   expect(watchResponds, message).toHaveLength(1)
   expect(JSON.parse(watchResponds[0]?.value ?? 'null')).toMatchObject(payload)
 }
 
-/** claim 已销账断言（settle 兑现回收 / clearSession 清账 / 死亡收口后共用）。 */
+/** claim 已处理完毕断言（settle 兑现回收 / clearSession 清理 / 死亡收尾后共用）。 */
 function expectClaimRecycled(w: WatchChain): void {
   expect(w.claims.getClaim(w.parentSessionId, w.claimNotifyId)).toBeUndefined()
 }
@@ -470,17 +470,17 @@ describe.skipIf(!FAUX_PI_READY)(`session-manager full e2e faux pi${FAUX_PI_READY
   // 经真实 marker select 通道开表，watch 事件刻意不喂入，各用例自控喂入时机）。
   // 偏离登记（按 §4-9「handler 真实通道集成」意图的最小可达形态）：
   //   ① 入站 watch 与出站 respond 均走真实通道（translate → interpreter → handler →
-  //     extension_ui_response 回写 pi stdin），但 U9-S3 的 settle 兑现腿由测试直调
+  //     extension_ui_response 回写 pi stdin），但 U9-S3 的 settle 兑现路径由测试直调
   //     claims.settle + deliverRespondTargets（与组合根 index.ts 同函数同序）——faux 轨
   //     无真实子 pi 进程，产不出子会话 agent_settled 事件；
   //   ② U9-S5 的「查无 claim」以 claims.clearSession 构造（等价 D8-v1 runtime 重启内存
   //     账本全失形态），非真实 runtime 重启；
   //   ③ lifetime watch 开表后刻意不喂（fire-and-forget 悬 promise = P1 已知无害）。
-  //   ④ U9-D1/D2 的死亡收口腿由测试直调 claims.onSessionDeath + deliverRespondTargets +
+  //   ④ U9-D1/D2 的死亡收尾路径由测试直调 claims.onSessionDeath + deliverRespondTargets +
   //     clearSession（组合根 index.ts speakSessionDeath 同函数同序三步）——faux 轨无真实
   //     子 pi 进程可 kill（同①困境：进程死亡事件边界在组合根 pm.onSessionExit，不在本
   //     文件可触碰面），exit 现场以 pm 上报形态注入 extra（stderrTail 经真实 collectStderrTail）；
-  //     被测面 = 死亡批分流 → 词形映射（toWatchRespondPayload cause 分派 exited/deleted +
+  //     被测对象 = 死亡批分流 → 词形映射（toWatchRespondPayload cause 分派 exited/deleted +
   //     退出现场附加）→ watch 写回通道闭环 + 发声幂等。
   it('U9-S3 watch 开表挂等：marker 通道 watch → handler deferred → settle 兑现 respond', { timeout: 80_000 }, async () => {
     const w = await openClaimWatchChain()
@@ -490,7 +490,7 @@ describe.skipIf(!FAUX_PI_READY)(`session-manager full e2e faux pi${FAUX_PI_READY
       expect(w.claims.getClaim(w.parentSessionId, w.claimNotifyId)?.watchId, 'wait 路由应登记 watch 槽').toBe(w.watchRequestId)
 
       // 2. 后续 settle 兑现：injected → fulfilled + 经同一写回通道 respond
-      //（与组合根 index.ts settle 兑现腿同函数同序；faux 轨无子 pi → 测试直调，见上方偏离登记）
+      //（与组合根 index.ts settle 兑现路径同函数同序；faux 轨无子 pi → 测试直调，见上方偏离登记）
       const batch = w.claims.settle(w.result.childId, 'done')
       expect(batch.targets, '已挂 watch 的 injected claim 应进 respond 批').toHaveLength(1)
       deliverRespondTargets(w.claims, batch.targets, w.handler.watchRespond)
@@ -512,7 +512,7 @@ describe.skipIf(!FAUX_PI_READY)(`session-manager full e2e faux pi${FAUX_PI_READY
       expect(batch.targets, '兑现时 watch 未挂 → 零 respond 批').toHaveLength(0)
       expect(w.claims.getClaim(w.parentSessionId, w.claimNotifyId)?.state).toBe('fulfilled')
 
-      // 2. 晚达 watch → 立即快照 respond（catch-up 分支，本次 handle 内收口）
+      // 2. 晚达 watch → 立即快照 respond（catch-up 分支，本次 handle 内收尾）
       await w.feedUiRequest(w.watchEvent)
       // reason 'failed'：outcome 'error' → 协议词形 failed（映射单点 toWatchRespondPayload）
       expectSingleWatchRespond(w, { reason: 'failed', sessionId: w.result.childId, settleSeq: 1, fulfillsN: 1 }, 'catch-up 应在 handle 内立即回写')
@@ -523,7 +523,7 @@ describe.skipIf(!FAUX_PI_READY)(`session-manager full e2e faux pi${FAUX_PI_READY
     }
   })
 
-  it('U9-S5 watch fail-closed：查无 claim → 立即 respond cancelled（静默收口）', { timeout: 80_000 }, async () => {
+  it('U9-S5 watch fail-closed：查无 claim → 立即 respond cancelled（静默收尾）', { timeout: 80_000 }, async () => {
     const w = await openClaimWatchChain()
     try {
       // 1. 构造「查无 claim」：清空该 session 全部记录 ≙ D8-v1 runtime 重启内存账本全失形态
@@ -535,7 +535,7 @@ describe.skipIf(!FAUX_PI_READY)(`session-manager full e2e faux pi${FAUX_PI_READY
       await w.feedUiRequest(w.watchEvent)
       const watchResponds = w.responds.filter((r) => r.requestId === w.watchRequestId)
       expect(watchResponds, 'fail-closed 应立即回写').toHaveLength(1)
-      // 无 claim 可回带 → 不携 sessionId（D-4）；extension 侧折叠静默 unregister 收口
+      // 无 claim 可回带 → 不携 sessionId（D-4）；extension 侧折叠静默 unregister 收尾
       expect(JSON.parse(watchResponds[0]?.value ?? 'null')).toEqual({ reason: 'cancelled' })
     } finally {
       await w.fx.dispose().catch(() => {})
@@ -543,18 +543,18 @@ describe.skipIf(!FAUX_PI_READY)(`session-manager full e2e faux pi${FAUX_PI_READY
     }
   })
 
-  // ── 死亡收口（notify-once D5「死亡也通知恰一次」执行面；装配偏离见上方偏离登记④）────
+  // ── 死亡收尾（notify-once D5「死亡也通知恰一次」执行侧；装配偏离见上方偏离登记④）────
   // 两用例共用前置 = openClaimWatchChain + 开表挂等（claim 经真实 handler wait 路由登记
-  // watch 槽），死亡腿按组合根 speakSessionDeath 同函数同序三步直调（onSessionDeath →
+  // watch 槽），死亡路径按组合根 speakSessionDeath 同函数同序三步直调（onSessionDeath →
   // deliverRespondTargets → clearSession），被测对象是死亡批 → 词形映射 → watch 写回通道
   // 的端到端闭环（账本内环语义由 notify-claims.test.ts / notify-claims-state.test.ts 覆盖）。
-  it('U9-D1 死亡收口：子会话意外退出 → watch 挂等 claim 恰收一条 reason:exited（携 exitCode/stderrTail），destroy 迟到二次发声幂等', { timeout: 80_000 }, async () => {
+  it('U9-D1 死亡收尾：子会话意外退出 → watch 挂等 claim 恰收一条 reason:exited（携 exitCode/stderrTail），destroy 迟到二次发声幂等', { timeout: 80_000 }, async () => {
     const w = await openClaimWatchChain()
     try {
       // 1. 开表挂等：真实通道入站 → handler wait 路由登记 watch 槽（U9-S3 同款，零 respond）
       await feedWatchDeferring(w)
 
-      // 2. 子会话进程意外退出 → 死亡收口三步（偏离登记④）：「session 不在内存」腿 =
+      // 2. 子会话进程意外退出 → 死亡收尾三步（偏离登记④）：「session 不在内存」路径 =
       //    fake SessionService.getSession 恒 undefined 的生产同判形态；退出现场 exitCode/
       //    stderrTail 以 pm.onSessionExit 上报形态注入，stderrTail 经真实 collectStderrTail
       const stderr = 'pi exited: Fatal error in extension handler\n  at onExit (...)\n'
@@ -575,12 +575,12 @@ describe.skipIf(!FAUX_PI_READY)(`session-manager full e2e faux pi${FAUX_PI_READY
         fulfillsN: 1,
         exitCode: 1,
         stderrTail: collectStderrTail(stderr),
-      }, '死亡收口应恰有一条 respond')
+      }, '死亡收尾应恰有一条 respond')
 
-      // 4. destroy 迟到二次发声：死亡腿重放对已销账账本空批空转（组合根 speakSessionDeath
+      // 4. destroy 迟到二次发声：死亡路径重放对已处理完毕账本空批空转（组合根 speakSessionDeath
       //    幂等——「重复调用空批空转」），watch 通道不再收第二条
       const replay = w.claims.onSessionDeath(w.result.childId, 'exit')
-      expect(replay.terminated, '重放应空批（死亡已销账）').toHaveLength(0)
+      expect(replay.terminated, '重放应空批（死亡已处理完毕）').toHaveLength(0)
       deliverRespondTargets(w.claims, replay.targets, w.handler.watchRespond)
       w.claims.clearSession(w.result.childId)
       expect(w.responds.filter((r) => r.requestId === w.watchRequestId), 'destroy 迟到不得二次发声').toHaveLength(1)
@@ -598,7 +598,7 @@ describe.skipIf(!FAUX_PI_READY)(`session-manager full e2e faux pi${FAUX_PI_READY
       await w.feedUiRequest(w.watchEvent)
 
       // 2. 组合根 delete 汇聚点（subscribeSessionDeathDisposition 'delete' → speakSessionDeath
-      //    同函数同序，偏离登记④）：无退出现场 extra——delete 腿不携 exitCode/stderrTail
+      //    同函数同序，偏离登记④）：无退出现场 extra——delete 路径不携 exitCode/stderrTail
       const batch = w.claims.onSessionDeath(w.result.childId, 'delete')
       expect(batch.targets, 'watch 挂等的 claim 应进死亡 respond 批').toHaveLength(1)
       deliverRespondTargets(w.claims, batch.targets, w.handler.watchRespond)

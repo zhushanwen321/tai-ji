@@ -52,8 +52,8 @@ interface LogMsg {
   message?: string;
 }
 
-// ── 类型守卫：从 unknown 收窄到判别联合 ──
-// 共享 hasType 辅助：避免每个守卫重复 `(m as {type?:string})` 断言（taste/no-unsafe-catch）。
+// ── 类型检查：从 unknown 收窄到判别联合 ──
+// 共享 hasType 辅助：避免每个检查重复 `(m as {type?:string})` 断言（taste/no-unsafe-catch）。
 
 function hasType<T extends string>(m: unknown, type: T): boolean {
   return typeof m === "object" && m !== null
@@ -94,7 +94,7 @@ interface RunResult {
   agentCalls: AgentCallMsg[];
 }
 
-/** workerLogs 条目守卫收窄 + message 包含判定（元素类型 unknown，断言前先收窄）。 */
+/** workerLogs 条目检查收窄 + message 包含判定（元素类型 unknown，断言前先收窄）。 */
 function someLogMessageContains(logs: unknown[] | undefined, text: string): boolean {
   return (logs ?? []).some((l) => {
     if (typeof l !== "object" || l === null) return false;

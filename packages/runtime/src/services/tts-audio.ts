@@ -3,7 +3,7 @@
  *
  * 从 tts-service 按变化原因拆出：本模块只承载「文本切分 / PCM→WAV 封装 / 缓存键序列化 /
  * 缓存目录 FIFO 封顶」四件无 IO 依赖（除封顶的删除通道注入）的确定性计算，与编排服务
- * （配置读写、Key 联动、协议面）分开演化。全部导出为纯函数，单测直调。
+ * （配置读写、Key 联动、协议范围）分开演化。全部导出为纯函数，单测直调。
  */
 import { readdirSync, rmSync, statSync } from 'node:fs'
 import { join } from 'node:path'

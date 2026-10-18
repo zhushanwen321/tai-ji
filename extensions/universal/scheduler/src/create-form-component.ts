@@ -991,7 +991,7 @@ export class ScheduleCreateComponent implements Component {
 		this.done(result)
 	}
 
-	/** 取消。public 供 signal abort 监听复用 resolved 守卫（abort 晚于用户操作时防二次 done）。 */
+	/** 取消。public 供 signal abort 监听复用 resolved 检查（abort 晚于用户操作时防二次 done）。 */
 	cancel(): void {
 		if (this.resolved) return
 		this.resolved = true

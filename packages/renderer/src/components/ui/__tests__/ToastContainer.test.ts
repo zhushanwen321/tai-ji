@@ -9,7 +9,7 @@
  * 3. hover 暂停：mouseenter 后超时 advance toast 仍留存，mouseleave 恢复到期移除
  *
  * useSidebar 重依赖（导航栈/sessionApi/LRU 编排），mock 只出 selectSession spy。
- * 进出场过渡的源码级回归守卫见 ToastContainer.transition.test.ts（不重复覆盖）。
+ * 进出场过渡的源码级回归检查见 ToastContainer.transition.test.ts（不重复覆盖）。
  *
  * 运行：cd packages/renderer && npx vitest run src/components/ui/__tests__/ToastContainer.test.ts
  */

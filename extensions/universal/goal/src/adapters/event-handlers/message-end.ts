@@ -1,7 +1,7 @@
 /**
- * 事件 3: message_end（FR-6.7 ESC 守卫 + token 累加）。
+ * 事件 3: message_end（FR-6.7 ESC 检查 + token 累加）。
  *
- * FR-6.7 ESC 守卫：ctx.signal.aborted 时跳过 token 累加。
+ * FR-6.7 ESC 检查：ctx.signal.aborted 时跳过 token 累加。
  * FR-8.6: token 累加算法（委托 service.applyEvent("message_end")）。
  *
  * role 过滤（D13①，rename-session 先例同形态）：仅 user/assistant 的 message_end
@@ -37,7 +37,7 @@ export async function handleMessageEnd(
 	event: MessageEndEvent,
 ): Promise<void> {
 	if (!session.state) return;
-	// FR-6.7 ESC 守卫
+	// FR-6.7 ESC 检查
 	if (ctx.signal?.aborted) return;
 
 	// D13① role 过滤：仅对话轴两形态（AgentMessage role 域为开放联合，宽比较）

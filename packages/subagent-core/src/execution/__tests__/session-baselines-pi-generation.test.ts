@@ -24,7 +24,7 @@ import {
 } from "../service/session-baselines.ts";
 import { makePi, type PiMock } from "./helpers/pi-mock.ts";
 
-/** 壳装配同构的 deps fake：readAssertState 经 baselines 自身读面组装（生产 = 壳闭包
+/** 壳装配同构的 deps fake：readAssertState 经 baselines 自身读侧组装（生产 = 壳闭包
  *  `() => ({pi: this.pi, disposed, piGeneration})` 的镜像），store/回调全 spy。 */
 function makeBaselines(): {
   baselines: SessionBaselines;

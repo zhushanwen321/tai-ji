@@ -17,7 +17,7 @@
 //     剥 \x00TAIJI_ 前缀 + 小写化）——新孙进程发 ui_form、旧孙进程发 ask_user，
 //     channel-registry-register 双名注册两代通道，本 handler 同一实现服务两名；
 //   - 入口 payload 双读 `formQuestions ?? questions`：新 payload {formQuestions: FormQuestion[]}
-//     （逐项 isFormQuestion 守卫过滤），旧 payload {questions: AskUserQuestion[]} 经包内
+//     （逐项 isFormQuestion 检查过滤），旧 payload {questions: AskUserQuestion[]} 经包内
 //     归一 adapter 转 FormQuestion。旧读与旧名随 D7 窗口退役。
 //
 // handler 收到的 req.channelPayload 由 packages/subagent-core 的 parseChannel
@@ -66,10 +66,10 @@ interface ChannelRequest {
 
 /**
  * D9 双读：channelPayload 归一为 FormQuestion[]。
- *  - 新 payload formQuestions 逐项 isFormQuestion 守卫过滤（不合法项跳过——与
+ *  - 新 payload formQuestions 逐项 isFormQuestion 检查过滤（不合法项跳过——与
  *    event-adapter / renderer 的逐项过滤失败策略一致，D2）
  *  - 旧 payload questions 经包内归一 adapter 转 FormQuestion（legacy 子进程产出，
- *    其自身 schema 已保证形状，不做二次守卫——与迁移前行为一致）
+ *    其自身 schema 已保证形状，不做二次检查——与迁移前行为一致）
  * 返回 undefined = 无可用问题（payload 缺失/空/全不合法），调用方折 {cancelled: true}。
  */
 function payloadToFormQuestions(payload: ChannelRequest["channelPayload"]): FormQuestion[] | undefined {
@@ -146,7 +146,7 @@ async function runTuiProtoInteraction(
 		},
 	);
 	// json/print 模式 ctx.ui 是 noOpUIContext，custom 返回 undefined（TUI 返回 Result | null）。
-	// 显式 undefined 守卫：裸 result.cancelled 对 undefined 会抛 TypeError（W4 修复前
+	// 显式 undefined 检查：裸 result.cancelled 对 undefined 会抛 TypeError（W4 修复前
 	// 靠 dialog-queue 兜底为 {cancelled:true}，现源头短路，语义等价且不再依赖兜底）。
 	if (result === null || result === undefined || result.cancelled) return null;
 	return encodeTuiResultToProto(questions, result);

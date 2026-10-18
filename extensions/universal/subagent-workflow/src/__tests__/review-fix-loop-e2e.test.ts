@@ -1004,7 +1004,7 @@ describe("review-fix-loop E2E（真实 worker + 场景化 mock runner）", () =>
         const committed = execFileSync("git", ["show", "--name-only", "--pretty=", "HEAD"], { cwd: repo, encoding: "utf-8", timeout: 10_000, env: gitEnv() })
           .split("\n").map((s) => s.trim()).filter(Boolean).sort();
         expect(committed).toEqual(["src/a.ts", "src/b.ts"]);
-        // fixImpactFiles 不做存在性过滤（收集层语义：声称触碰即进 recheck 观察面）
+        // fixImpactFiles 不做存在性过滤（收集层语义：声称触碰即进 recheck 观测点）
         const st = JSON.parse(readFileSync(join(outcome.runDir!, "state.json"), "utf8")) as {
           fixImpactFiles: string[];
         };
@@ -1086,7 +1086,7 @@ describe("review-fix-loop E2E（真实 worker + 场景化 mock runner）", () =>
         review: [
           // R1：2 must-fix（G1/G2 各一条）
           () => ({ report_file: "/tmp/mf112-r1.md", must_fix: 2, suggestion: 0, reconciliation: [] }),
-          // R2：全 clean（两组修复经对账清账）
+          // R2：全 clean（两组修复经对账逐条处理完毕（关闭））
           () => ({
             report_file: "/tmp/mf112-r2.md", must_fix: 0, suggestion: 0,
             reconciliation: [
@@ -1770,7 +1770,7 @@ describe("startup fail-fast (ADR-0003 D6)", () => {
       expect(parsed.required).toEqual(["report_file", "must_fix", "suggestion", "reconciliation"]);
       expect(JSON.stringify(parsed)).not.toContain("optional for R1"); // stale description 已更新
       // 【源码 grep 断言已删（"...reviewerSchema, required:" 不在脚本内）——同用例上方
-      // 的真实调用 schema 逐字节比对已覆盖该行为面】
+      // 的真实调用 schema 逐字节比对已覆盖该行为范围】
     },
     RUN_TIMEOUT_MS,
   );
@@ -1781,7 +1781,7 @@ describe("startup fail-fast (ADR-0003 D6)", () => {
     "A4: 全降级轮（reviewer 报 must-fix、aggregator 全部降级）→ 不派 fixer，批推进 + 跨批 skip（W5）",
     async () => {
       // 剧本：批 1 R1 reviewer-a 报 1 must-fix，aggregator 裁决全部降级
-      //（must_fix=0、唯一条目 downgraded）→ A4 守卫生效：批 1 视同 clean 终止本轮，
+      //（must_fix=0、唯一条目 downgraded）→ A4 检查生效：批 1 视同 clean 终止本轮，
       // 不空转派发 fixer（修复前：mustFix===0 混过 all-clean 判定（用的是 reviewer
       // 原始计数口径）→ 照常进 Fix 阶段 → fixCount++ 白跑）；批 2 = reviewer-a +
       // reviewer-b：W5 修复后 reviewer-a 在 A4 break 前被补记 recordAgentClean
@@ -1815,14 +1815,14 @@ describe("startup fail-fast (ADR-0003 D6)", () => {
       expect(result.error).toBeUndefined();
       const outcome = assertScriptOutcome(result.scriptResult);
       expect(outcome.terminated).toBe("clean");
-      // 无 fixer 调用（守卫生效）；聚合 1 次（批 1），批 2 全 clean 不聚合
+      // 无 fixer 调用（检查生效）；聚合 1 次（批 1），批 2 全 clean 不聚合
       const { kinds } = runner.stats();
       expect(kinds.filter((k) => k === "fix").length).toBe(0);
       expect(kinds.filter((k) => k === "aggregate").length).toBe(1);
       // W5：review 总数 2 = 批 1 reviewer-a + 批 2 仅 reviewer-b（reviewer-a 被跨批
       // skip）；修复前 reviewer-a 未记 clean → 批 2 派 2 个 agent → 总 3，本断言拦截
       expect(kinds.filter((k) => k === "review").length).toBe(2);
-      // 批推进到批 2（守卫视同 clean，不 fail-fast）+ fixCount 不虚增
+      // 批推进到批 2（检查视同 clean，不 fail-fast）+ fixCount 不虚增
       const st = JSON.parse(readFileSync(join(outcome.runDir!, "state.json"), "utf8")) as {
         batches: unknown[];
         fixCount: number;
@@ -1906,13 +1906,13 @@ describe("startup fail-fast (ADR-0003 D6)", () => {
   );
 
   it(
-    "A4/W4: R2 全降级 + 台账残留 → 守门不假 clean，追账轮 openStreak 单计至 stuck 诚实终止",
+    "A4/W4: R2 全降级 + 登记清单残留 → 守门不假 clean，追账轮 openStreak 单计至 stuck 诚实终止",
     async () => {
       // 剧本：R1 reviewer 报 2 must-fix（MF-1/MF-2 聚合均活跃）→ fix 修两个
       //（fix-attempted）；R2 reviewer 原始报 1 must-fix + 对账 MF-1 fixed /
       // MF-2 not-fixed；R2 聚合全部降级（mustFix=0、唯一条目 MF-2 downgraded）。
-      // 台账守门后（2026-08-29 假 clean 修复）：A4 出口检出 MF-2 regressed 残留 →
-      // 不以 clean 收工（旧行为「A4 break → clean + 台账躺着 regressed 条目」即
+      // 登记清单守门后（2026-08-29 假 clean 修复）：A4 出口检出 MF-2 regressed 残留 →
+      // 不以 clean 收工（旧行为「A4 break → clean + 登记清单躺着 regressed 条目」即
       // 假 clean 缺陷），跳过 fix（修复队列空）continue 追账。mock review 耗尽后
       // 重复 R2 剧本（must_fix=1 + MF-2 not-fixed）→ 每轮 reconcile 恰好一次
       //（同轮不双计，W4 语义在守门路径下保持）→ openStreak 1/2/3 → 第 3 次达
@@ -2260,7 +2260,7 @@ describe("review-fix-loop fail-fast（结构化返回失败立即终判）", () 
       const rounds = (st.batches as Array<{ rounds: Array<{ mustFix: number | null; suggestion: number | null }> }>)[0]!.rounds;
       expect(rounds[0]!.mustFix).toBeNull();
       expect(rounds[0]!.suggestion).toBeNull();
-      // degraded 可观测面零残留（返回值 / state.meta 均无 degradedRounds）
+      // degraded 可观测范围零残留（返回值 / state.meta 均无 degradedRounds）
       expect("degradedRounds" in outcome).toBe(false);
       expect("degradedRounds" in (st.meta as Record<string, unknown>)).toBe(false);
     },

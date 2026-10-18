@@ -16,7 +16,7 @@ const logger = getLogger("rename-session");
 /**
  * rename 专属 systemPrompt（slug 词组风格约束）。
  *
- * 收口自旧版 `ctx.getSystemPrompt()`（搭便车整个 agent prompt，含 AGENTS.md/技能/工具说明，> 2000 字符）。
+ * 收敛自旧版 `ctx.getSystemPrompt()`（搭便车整个 agent prompt，含 AGENTS.md/技能/工具说明，> 2000 字符）。
  * 本常量 < 200 字符（llm.test.ts LTC16 断言），只为标题生成服务，省 input token 成本。
  * slug 风格重写：旧版只约束「3-8 词」，实测产出常是完整句子（如「我帮你修复了登录 bug」）；
  * 新版锚定 slug 词组形态（名词/动名词词组、非主谓宾、无句尾标点、英文 kebab-case 小写）。
@@ -27,7 +27,7 @@ export const RENAME_SYSTEM_PROMPT =
 /**
  * 追加到对话末尾的 user 指令（与 RENAME_SYSTEM_PROMPT 双处一致约束）。
  * 含正例（「修复登录超时」「refactor-config-loader」）与反例（「我帮你修复了登录 bug」）
- * few-shot 锚定——正反例是最有效的风格锚定手段（被否方案：只在 instruction 加一句弱提示，遵从率低）。
+ * few-shot 锚定——正反例是最有效的风格锚定手段（不采用的方案：只在 instruction 加一句弱提示，遵从率低）。
  */
 export const RENAME_INSTRUCTION =
 	"根据以上对话，为这个会话生成一个 slug 式标题。要求：\n- 名词或动名词词组，例：「修复登录超时」「重构配置加载」「refactor-config-loader」\n- 反例（错误）：「我帮你修复了登录 bug」「This session is about fixing bugs」\n- 英文小写 kebab-case，中文直接用词组，不要句号\n使用对话所用的语言。只输出标题文本。";
@@ -91,9 +91,9 @@ export function resolveTitlePrompt(config: RenameSessionConfig): { systemPrompt:
  * 跨包路径耦合（constraints.json C-ext-21）：`subagents` 目录布局由 taiji 的
  * `packages/subagent-core/src/execution/assembly/path-encoding.ts`（getSubagentSessionDir /
  * encodeCwd）定义并写入。本包 role=universal，不 import subagent-core
- * （import 会把 universal 包绑死在 taiji 体系上），只按路径形态守卫——
+ * （import 会把 universal 包绑死在 taiji 体系上），只按路径形态检查——
  * path-encoding.ts 侧有对向注释互指。改 subagent 目录布局必须双侧同步改。
- * 三模式的新入口（message_end / rename_session 工具）同样复用本守卫。
+ * 三模式的新入口（message_end / rename_session 工具）同样复用本检查。
  */
 export function isSubagentSession(sessionDir: string): boolean {
 	return sessionDir.includes(path.sep + "subagents" + path.sep);
@@ -156,7 +156,7 @@ const MAX_TITLE_INPUT_CODE_POINTS = 4000;
 
 /**
  * 按 Unicode 码点截断标题输入段（两段信号各 4000 码点，中文场景约 4k token/段，成本可控）。
- * 截断内核见 pure.ts truncateCodePoints（ext-simplify-17 D13 收口）；超长才追加 '…' 后缀，
+ * 截断内核见 pure.ts truncateCodePoints（ext-simplify-17 D13 收敛）；超长才追加 '…' 后缀，
  * ≤ 上限（含恰好等于）原样返回。
  */
 export function truncateForTitle(text: string): string {
@@ -234,7 +234,7 @@ const PREVIEW_TAIL_CODE_POINTS = 100;
 /**
  * debug 日志的文本预览（≤300 码点直接全文；超长输出 head 200 码点 + 字面 … + tail 100 码点
  * （head/tail 双段支撑 E2E 对长 prompt 首尾片段的断言）。截断内核见 pure.ts truncateCodePoints
- * （ext-simplify-17 D13 收口，双段形态经 head/keepTail 参数表达——300/200/100 是 15 号 §6.4
+ * （ext-simplify-17 D13 收敛，双段形态经 head/keepTail 参数表达——300/200/100 是 15 号 §6.4
  * D4 裁决的三个独立契约数字）；e2e/harness.mjs 的 rebuildPreview 是同构实现，两处必须同步改。
  */
 function previewText(text: string): string {
@@ -254,7 +254,7 @@ function messageText(message: Message): string {
 
 // ──────────────────────── LLM 调用 ────────────────────────
 
-// ──────────────────────── 注入项（usage 落账） ────────────────────────
+// ──────────────────────── 注入项（usage 记录） ────────────────────────
 
 /**
  * callRenameLLM 可选注入项。llm.ts 不依赖 pi 句柄（ExtensionAPI）——依赖 pi 的副作用由
@@ -262,11 +262,11 @@ function messageText(message: Message): string {
  */
 export interface CallRenameLLMOptions {
 	/**
-	 * usage 落账回调：`callLLM` 返回 `ok:true && usage` 存在后**立即**、
+	 * usage 记录回调：`callLLM` 返回 `ok:true && usage` 存在后**立即**、
 	 * `cleanTitle` 之前调用——计量「LLM 调用事实」与标题清洗成败解耦（标题清洗为空导致
-	 * rename 跳过时，调用用量照常落账）。`usage` 缺失时不调用（存在性守卫）。
+ * rename 跳过时，调用用量照常记录）。`usage` 缺失时不调用（存在性检查）。
 	 * 契约：catch 必须位于回调实现内部（index.ts 侧 try/catch + logger.error），
-	 * 不向调用方抛错；本函数不包裹 try/catch（catch 归属钉死回调体内，防双重 catch 漂移）。
+	 * 不向调用方抛错；本函数不包裹 try/catch（catch 归属固定为回调体内，防双重 catch 漂移）。
 	 */
 	appendUsageEntry?: (model: string, usage: Usage) => void;
 	/**
@@ -284,7 +284,7 @@ export interface CallRenameLLMOptions {
  * finalMessage：触发 turn 的 event.message（stopReason==='stop' 的 turn_end 自带最终
  * assistant message，final text 零遍历可得）。
  *
- * 收口要点（对比旧版搭便车逻辑）：
+ * 收敛要点（对比旧版搭便车逻辑）：
  * - model：空 ref → `ctx.model` 跟随会话主模型（消灭「默认配置静默不工作」）；
  *   非空 ref → `resolveModel(ctx, config.model)` 独立选模（解析失败静默跳过 + warn）
  * - systemPrompt：`RENAME_SYSTEM_PROMPT` 精简版（旧版 `ctx.getSystemPrompt()` 整个 agent prompt）
@@ -293,7 +293,7 @@ export interface CallRenameLLMOptions {
  * - tools：不传（callLLM 内部显式 tools:[]；旧版 `pi.getAllTools()` 塞全部工具，纯浪费 token）
  * - model 不可用（resolveModel 返回 null）→ 静默跳过返回 null，不报错不阻断
  * - signal：透传 ctx.signal（保留旧版随 session abort 取消的语义）
- * - options.appendUsageEntry：usage 落账回调注入（时点 ok:true && usage 后立即、
+ * - options.appendUsageEntry：usage 记录回调注入（时点 ok:true && usage 后立即、
  *   cleanTitle 前；catch 归属回调实现内部）
  *
  * 本函数是 async（内部 await callLLM，这是 callRenameLLM 自身流程）；
@@ -309,7 +309,7 @@ export async function callRenameLLM(
 	// 内部顺序不可调换（E2E 竞态断言依赖「内省日志在请求发起前打出」）：
 	// resolveModel（含空 ref fallback）→ extract prompt → extract finalText → truncate ×2 → build → debug 内省 → callLLM
 	// 模型解析：空 ref = 未配置语义 → 跟随会话主模型（ctx.model，探针 P2 实测首轮可用；
-	// undefined 时无 fallback 走下方静默跳过）；非空 ref 解析失败 = 显式配错 → 同一守卫静默跳过 + warn。
+	// undefined 时无 fallback 走下方静默跳过）；非空 ref 解析失败 = 显式配错 → 同一检查静默跳过 + warn。
 	const model =
 		config.model.ref === "" ? ctx.model : resolveModel(ctx, config.model);
 	if (!model) {
@@ -335,7 +335,7 @@ export async function callRenameLLM(
 	const finalText = extractFinalText(finalMessage);
 
 	// 提示词解析（rename-prompt-config）：内置风格 → 词表 + slug system；custom 非空 →
-	// 自定义指令 + 通用骨架 system（风格权威 = 用户指令）。事件面 live 读 config 后每次调用重解析。
+	// 自定义指令 + 通用骨架 system（风格权威 = 用户指令）。事件路径 live 读 config 后每次调用重解析。
 	const { systemPrompt, instruction } = resolveTitlePrompt(config);
 
 	// 两段输入信号各截断 4000 码点（成本可控，标题语义足够）
@@ -378,9 +378,9 @@ export async function callRenameLLM(
 		return null;
 	}
 
-	// usage 落账：ok:true && usage 存在后立即、cleanTitle 之前——「LLM 调用
-	// 事实」的计量与标题清洗成败解耦（cleanTitle 为空跳过 rename 不影响已落账）；usage 缺失
-	// （provider 不回）→ 跳过回调不落账（存在性守卫）。回调契约自带 catch（归属
+	// usage 记录：ok:true && usage 存在后立即、cleanTitle 之前——「LLM 调用
+	// 事实」的计量与标题清洗成败解耦（cleanTitle 为空跳过 rename 不影响已记录的用量）；usage 缺失
+	// （provider 不回）→ 跳过回调不记录（存在性检查）。回调契约自带 catch（归属
 	// 回调实现内部），此处不包裹 try/catch。
 	if (options?.appendUsageEntry && result.usage) {
 		options.appendUsageEntry(`${model.provider}/${model.id}`, result.usage);
@@ -406,7 +406,7 @@ export async function callRenameLLM(
 		debugLog("skip: title empty");
 		return null;
 	}
-	// 落库报捷日志由 index.ts handler 侧在 setSessionName 之后打出——此处只返回候选标题，
-	// 防覆盖检查未过时并未落库，不能在 LLM 层提前报捷
+	// setSessionName 写入成功后的报捷日志由 index.ts handler 侧打出——此处只返回候选标题，
+	// 防覆盖检查未过时并未写入，不能在 LLM 层提前报捷
 	return title;
 }

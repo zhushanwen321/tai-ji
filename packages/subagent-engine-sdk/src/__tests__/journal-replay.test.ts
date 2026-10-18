@@ -2,9 +2,9 @@
 //
 // journal-replay reducer 边界契约（primitives.test.ts 已覆盖主链路，本文件只补缺口：
 // usage 累加、索引外/孤儿 tool_end、同名多实例 LIFO 配对、message_end error、
-// compaction no-op、投影 strip、sessionIdFromHandle 运行时 guard）。
+// compaction no-op、派生 strip、sessionIdFromHandle 运行时 guard）。
 // 全部走导出 API；直接往 record.turns[] 构造 running toolCall 是 ReplayRecordView
-// 的公开契约面（源码注释明示「重建 record 的历史 running toolCall（索引未覆盖）」
+// 的公开契约范围（源码注释明示「重建 record 的历史 running toolCall（索引未覆盖）」
 // 为支持场景，journal 重建产物无 tool_start 索引）。
 
 import { describe, expect, it } from "vitest";
@@ -66,7 +66,7 @@ describe("journal-replay reducer 边界契约", () => {
     };
     record.turns[0]!.toolCalls.push(running);
     updateFromEvent(record, { type: "turn_end" });
-    // toolCall 已落在闭合 turn 内，tool_end 仍应跨 turn 扫描配对
+    // toolCall 已落在已结束 turn 内，tool_end 仍应跨 turn 扫描配对
     updateFromEvent(record, {
       type: "tool_end",
       toolName: "bash",
@@ -133,7 +133,7 @@ describe("journal-replay reducer 边界契约", () => {
   });
 });
 
-describe("eventsToSessionView 投影与 sessionIdFromHandle", () => {
+describe("eventsToSessionView 派生与 sessionIdFromHandle", () => {
   it("ReplayedTurn.toolCalls 导出纯净形状（无 _status/startedTs 内部态）；无 usage → undefined；未传 sessionId → 键缺省", () => {
     const view = eventsToSessionView(
       [

@@ -15,7 +15,7 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
-// 基线三层②（W10）：引擎层 golden 随引擎包——内嵌副本经 zcode 包公共导出面
+// 基线三层②（W10）：引擎层 golden 随引擎包——内嵌副本经 zcode 包公共导出范围
 // 消费，fixture SSOT = zcode 包 src/__golden__/（core 不再深路径 import 内建副本）。
 import { ZCODE_APPSERVER_GOLDEN } from "@zhushanwen/zcode-subagent-cli";
 

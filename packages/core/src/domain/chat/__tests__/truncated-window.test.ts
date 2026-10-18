@@ -83,7 +83,7 @@ describe('store 截断窗口状态（hydrate/reconcile 接线）', () => {
   it('必测⑤ hydrate 接线：窗口契约字段经 historyWindowFromReply 归一后正确写入 store 窗口状态', () => {
     const f = makeFixture()
     // use-session 点击切入的生产通路：getHistory reply → historyWindowFromReply 归一 →
-    // store.hydrate/reconcileHistory 写入（原 useChat.hydrateHistory 死导出已删，验收路径不变）
+    // store.hydrate/reconcileHistory 写入（原 useChat.hydrateHistory 导出但无任何调用点已删，验收路径不变）
     f.chatStore.hydrate('s1', [makeMsg('m1')], historyWindowFromReply({
       truncated: true,
       loadedTurns: 20,

@@ -146,7 +146,7 @@ describe('TC6: findValidDefaultModel catalog 兜底过滤 enabledModels（ES3）
 })
 
 describe('A8: findValidDefaultModel 主路径 enabledModels 过滤', () => {
-  // 主路径：defaultProvider+defaultModel 在 models.json 有效时直接返回。A8 加 enabledModels 守卫——
+  // 主路径：defaultProvider+defaultModel 在 models.json 有效时直接返回。A8 加 enabledModels 检查——
   // 被禁用的 default 不走主路径，fall through 到 fallback（pickFirstModelProvider 同样过滤 enabled）。
   it('default provider 被 enabledModels 禁用 → 主路径跳过，fallback 重选到启用的 provider', () => {
     writeModels({
@@ -176,7 +176,7 @@ describe('A8: findValidDefaultModel 主路径 enabledModels 过滤', () => {
     expect(r.wasFixed).toBe(false)
   })
 
-  it('主路径 model 重选不受 A8 守卫影响：default 启用但 defaultModel 无效 → 仍走 provider 内重选', () => {
+  it('主路径 model 重选不受 A8 检查影响：default 启用但 defaultModel 无效 → 仍走 provider 内重选', () => {
     writeModels({
       'custom-a': { models: [{ id: 'm-a' }, { id: 'm-a2' }] },
     })

@@ -38,7 +38,7 @@ export interface SubagentRef extends SessionRef {
   task?: string
   /** agent 类型名（manifest.agentName，P-fallback 时 identity.data.agent；同语义异名） */
   agentName?: string
-  /** 模型 id（仅 manifest 有；P-fallback 时 undefined）。仅 details 可见，不进文本渲染（D2②：展示面只取 status/agentName/task） */
+  /** 模型 id（仅 manifest 有；P-fallback 时 undefined）。仅 details 可见，不进文本渲染（D2②：展示侧只取 status/agentName/task） */
   model?: string
   /** 终态 completed/failed/running（仅 manifest 有；P-fallback 时 undefined） */
   status?: string
@@ -60,7 +60,7 @@ export interface Family {
   forks: SessionRef[]
   /** 含隔代（design §3.3 D-7 Q1：对 fork 链每个节点查 subagentsByRoot 合并） */
   subagents: SubagentRef[]
-  /** M1 恒返回 []，workflow 腿需读 workflow-state 文件（IO）归 M2 */
+  /** M1 恒返回 []，workflow 路径需读 workflow-state 文件（IO）归 M2 */
   workflows: WorkflowRef[]
 }
 
@@ -146,12 +146,12 @@ export function buildZcodeSubagentsByRoot(
   return byRoot
 }
 
-// ---- 类型守卫：从 unknown 的 entry.data 提取 subagent identity 字段 ----
+// ---- 类型检查：从 unknown 的 entry.data 提取 subagent identity 字段 ----
 
 /**
  * identity 尾行 data 结构（读取视图，DM-IdentityData）。
  *
- * 守卫只强制 rootSessionId+slug（m0 契约），其余富字段全 optional——由 buildFamilyFromFs
+ * 检查只强制 rootSessionId+slug（m0 契约），其余富字段全 optional——由 buildFamilyFromFs
  * 按 manifest 主/P-fallback 回退路径组装时决定是否填入（manifest 主填全，P-fallback
  * 只填 task/agent/sessionFile，model/status 缺）。
  */
@@ -178,7 +178,7 @@ interface SubagentIdentityData {
 function isSubagentIdentityData(v: unknown): v is SubagentIdentityData {
   if (typeof v !== 'object' || v === null) return false
   const obj = v as Record<string, unknown>
-  // 守卫放宽：只校验 rootSessionId+slug 必填（m0 契约），task/agent/model/status/sessionFile optional
+	// 检查放宽：只校验 rootSessionId+slug 必填（m0 契约），task/agent/model/status/sessionFile optional
   return typeof obj.rootSessionId === 'string' && typeof obj.slug === 'string'
 }
 
@@ -380,7 +380,7 @@ export function resolveFamily(sessionId: string, index: FamilyIndex): Family {
     }
   }
 
-  // 5. workflows：M1 恒 []，workflow 腿需读 workflow-state 文件（IO）归 M2
+  // 5. workflows：M1 恒 []，workflow 路径需读 workflow-state 文件（IO）归 M2
   const workflows: WorkflowRef[] = []
 
   return { root, parents, forks, subagents, workflows }

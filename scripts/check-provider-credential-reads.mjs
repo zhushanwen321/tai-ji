@@ -1,23 +1,23 @@
 #!/usr/bin/env node
 /**
- * Provider 凭据读取单通道守卫（C-proc-14）+ upsertProvider 直调清单守卫（C-proc-15）。
+ * Provider 凭据读取单通道检查（C-proc-14）+ upsertProvider 直调清单检查（C-proc-15）。
  *
  * [HISTORICAL] 起因（设计 catalog-provider-field-authority v3.3 §3.3 D3/D6）：凭据读取
  * 历史上散落成 5 条互不知情的解析链（quota 私有三源链 / handleDiscoverModels 只查
  * models.json / pi-provider-store 私有裸读 auth.json / AuthService 单源 / listProviders
- * 内联判定），M2 系列单元收口到 ProviderCredentialResolver 唯一通道后，本脚本把
+ * 内联判定），M2 系列单元收敛到 ProviderCredentialResolver 唯一通道后，本脚本把
  * 「新代码自建第 6 条解析链 / 旁路防线载体直写 models.json」变成 pre-commit 可机检
  * 的失败。约束登记见 docs/constraints.json（C-proc-14 / C-proc-15）。
  *
- * 守卫 A（凭据直查禁令，D3）：packages/runtime/src 生产代码在白名单外出现以下模式即违规——
+ * 检查 A（凭据直查禁令，D3）：packages/runtime/src 生产代码在白名单外出现以下模式即违规——
  *   1. 标识符 `getApiKeyForProvider`（pi-provider-store 直查函数，M2fg 已删除，防复活）
  *   2. 标识符 `readAuthCredentials`（绕过 AuthStorage 的私有裸读，M2c 已删除，防复活）
  *   3. 成员读取模式 `getProviderConfig(...)?.apiKey`（models.json 单源直查的现存形态）
  *   白名单 = resolver 唯一通道本体（services/auth/provider-credential-resolver.ts）仅此
  *   一个文件——白名单清零即「D3 唯一通道」成立的机器证据；新增合法读取点必须先走
- *   review 改白名单（白名单膨胀到 >1 文件 = 收口失效信号，应回到 resolver 设计重审）。
+ *   review 改白名单（白名单膨胀到 >1 文件 = 收敛失效信号，应回到 resolver 设计重审）。
  *
- * 守卫 B（upsertProvider 直调清单，D6 姊妹守卫）：白名单外出现 `upsertProvider(` 调用
+ * 检查 B（upsertProvider 直调清单，D6 姊妹检查）：白名单外出现 `upsertProvider(` 调用
  * （含成员调用；接口方法签名声明同形，见 ports/config.ts 条目）即违规——models.json 的
  * provider 写入必须经防线载体（setProvider / applyProviderWritePolicy 托管的 importer
  * 主路径）或登记在案的历史迁移链，堵防线载体被旁路的复发通道。
@@ -27,7 +27,7 @@
  * pi-provider-store 源码不含 readAuthCredentials），扫描目标是「会进产物的代码」。
  *
  * 用法：node scripts/check-provider-credential-reads.mjs（始终全量扫描——纯文本匹配
- * 毫秒级，触发面由 pre-commit 按路径控制）
+ * 毫秒级，触发范围由 pre-commit 按路径控制）
  */
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import path from 'node:path'
@@ -40,14 +40,14 @@ const SCAN_ROOT = path.join(PROJECT_ROOT, 'packages/runtime/src')
 
 // ─── 白名单（相对 packages/runtime/src 的 POSIX 路径）─────────────────────────
 
-/** 守卫 A 白名单：凭据读取唯一通道本体（设计 D3「白名单清零」目标）。 */
+/** 检查 A 白名单：凭据读取唯一通道本体（设计 D3「白名单清零」目标）。 */
 const GUARD_A_ALLOWLIST = new Set([
   // resolver 唯一通道本体：models.json 源的 hasSync/readKey 必须直读 getProviderConfig().apiKey
   'services/auth/provider-credential-resolver.ts',
 ])
 
 /**
- * 守卫 B 白名单：upsertProvider 直调清单（每条注明理由——新增条目须过 review 并同步
+ * 检查 B 白名单：upsertProvider 直调清单（每条注明理由——新增条目须过 review 并同步
  * docs/constraints.json C-proc-15 的 summary 表述）。
  */
 const GUARD_B_ALLOWLIST = new Set([
@@ -94,7 +94,7 @@ const IDENTIFIER_RES = {
 /** 成员读取模式：getProviderConfig(...) 结果上取 .apiKey（?. 与 . 两种形态）。 */
 const GET_CONFIG_APIKEY_RE = /\bgetProviderConfig\s*\([^)]*\)\s*\??\.\s*apiKey\b/g
 
-/** 守卫 B：upsertProvider 调用形态（标识符/成员后紧跟 (，定义与签名声明由白名单放行）。 */
+/** 检查 B：upsertProvider 调用形态（标识符/成员后紧跟 (，定义与签名声明由白名单放行）。 */
 const UPSERT_CALL_RE = /\bupsertProvider\s*\(/g
 
 /**
@@ -116,7 +116,7 @@ function scanDir(scanRoot, allowlists = {}) {
     const lines = readFileSync(file, 'utf-8').split('\n')
     lineCount += lines.length
     lines.forEach((line, i) => {
-      // 行内注释剔除后再匹配（注释提及旧符号做历史说明不算违规，与守卫 A 头注释自洽）
+      // 行内注释剔除后再匹配（注释提及旧符号做历史说明不算违规，与检查 A 头注释自洽）
       const code = line.replace(/\/\/.*$/, '')
       if (!guardAAllowlist.has(rel)) {
         for (const [name, re] of Object.entries(IDENTIFIER_RES)) {
@@ -141,9 +141,9 @@ function scanDir(scanRoot, allowlists = {}) {
   return { violations, fileCount: files.length, lineCount }
 }
 
-// 导出面（测试消费）：scanDir 主体 + 三组正则（词边界行为直测）+ 白名单常量（收口计数断言）。
+// 导出清单（测试消费）：scanDir 主体 + 三组正则（词边界行为直测）+ 白名单常量（收敛计数断言）。
 // 主流程仅直接执行时运行（node scripts/check-provider-credential-reads.mjs），测试 import
-// 零副作用——否则测试会隐式全量扫真实仓库（结果依赖工作区状态），且守卫红时
+// 零副作用——否则测试会隐式全量扫真实仓库（结果依赖工作区状态），且检查红时
 // process.exit(1) 会杀死 vitest worker。
 export { scanDir, IDENTIFIER_RES, GET_CONFIG_APIKEY_RE, UPSERT_CALL_RE, GUARD_A_ALLOWLIST, GUARD_B_ALLOWLIST }
 
@@ -159,14 +159,14 @@ if (isMainModule) {
       const fix = v.guard === 'A'
         ? '凭据读取走唯一通道 ProviderCredentialResolver（services/auth/provider-credential-resolver.ts，接口在 services/ports/）'
         : 'models.json 写入走防线载体（setProvider / applyProviderWritePolicy 托管的 importer 主路径）'
-      console.error(`  ✗ [守卫 ${v.guard}] packages/runtime/src/${v.file}:${v.line}  命中：${v.hit}`)
+      console.error(`  ✗ [检查 ${v.guard}] packages/runtime/src/${v.file}:${v.line}  命中：${v.hit}`)
       console.error(`    修复：${fix}；确属例外先过 review 并把文件加进本脚本白名单（附理由注释）`)
     }
     console.error('')
-    console.error('恢复动作：按上方 ✗ 明细改走 resolver / 写入载体后重试；白名单膨胀到守卫 A >1 文件')
-    console.error('或守卫 B >8 文件 = 收口失效信号，应回到 provider-edit-form.ts 防线注释重审（原设计文档 catalog-provider-field-authority.md 已删除，git 可追溯）。')
+    console.error('恢复动作：按上方 ✗ 明细改走 resolver / 写入载体后重试；白名单膨胀到检查 A >1 文件')
+    console.error('或检查 B >8 文件 = 收敛失效信号，应回到 provider-edit-form.ts 防线注释重审（原设计文档 catalog-provider-field-authority.md 已删除，git 可追溯）。')
     process.exit(1)
   }
 
-  console.log(`[provider-credential-reads] OK：${fileCount} 个生产文件 / ${lineCount} 行，凭据直查（守卫 A，白名单 ${GUARD_A_ALLOWLIST.size} 文件）与 upsertProvider 直调（守卫 B，白名单 ${GUARD_B_ALLOWLIST.size} 文件）零违规`)
+  console.log(`[provider-credential-reads] OK：${fileCount} 个生产文件 / ${lineCount} 行，凭据直查（检查 A，白名单 ${GUARD_A_ALLOWLIST.size} 文件）与 upsertProvider 直调（检查 B，白名单 ${GUARD_B_ALLOWLIST.size} 文件）零违规`)
 }

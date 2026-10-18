@@ -1,6 +1,6 @@
 /**
  * useMemoryPressure —— runtime 内存看门狗通知消费（crash-forensics-and-watchdog.md
- * §3.3 D4，实施单元 u6；relief 真实动作随 u7d / 偏差 #28② 收口）。
+ * §3.3 D4，实施单元 u6；relief 真实动作随 u7d / 偏差 #28② 收尾）。
  *
  * 通道归属（D4 原文）：runtime 看门狗 → WS 广播（watchdog:memoryPressure）→ 本 composable
  * 消费——memory-relief 降级的 renderer 半边：收到 warn 及以上 → 收紧 renderer 侧 LRU 缓存。
@@ -8,13 +8,13 @@
  * 均为可重建缓存——驱逐重进走 hydrate 全量重放，用户无感，代价是切回延迟；与 D4「可回收
  * 物全部自动重建」语义一致）。
  *
- * 收紧语义（#28② 已收口）：defaultReliefAction = 压窗到 LRU_RELIEF_MAX_SESSIONS(4) +
+ * 收紧语义（#28② 已收尾）：defaultReliefAction = 压窗到 LRU_RELIEF_MAX_SESSIONS(4) +
  * 驱逐一轮（evictLruWithUnsubscribe 复合入口，remote-use D2——被驱逐会话连带退订，与
  * 切入链驱逐同式；压力持续期 runtime 每采样拍重发通知 → 每拍都有驱逐机会，压窗值幂等
  * 重设无副作用）。
  * - **压窗值裁决**：D4 未钉数值（Gate W 校准清单可调），取默认窗一半（8→4）——「收紧」
  *   的最小有效档，避免过激驱逐把「切回重进」变常态路径。
- * - **恢复语义裁决（D4 未指明，登记）**：压窗一次**不自动恢复默认**。协议面 'normal'
+ * - **恢复语义裁决（D4 未指明，登记）**：压窗一次**不自动恢复默认**。协议范围 'normal'
  *   不广播（renderer 无「压力消退」信号可消费），自动恢复无从触发；已驱逐的 session
  *   不回补（恢复默认只影响后续判定），应用重启后 LRU 模块态归零天然复位。
  *
@@ -50,7 +50,7 @@ export type MemoryReliefAction = (level: MemoryPressureLevel, payload: WatchdogM
 
 // taste:allow-no-data-owner W24-EX-B（模块级单例 UI 瞬态，已登记 §4 ⑧ 2026-09-12）：内存压力级别（窗口级全局观测态）
 const level = ref<MemoryPressureLevel>('normal')
-// taste:allow-no-data-owner W24-EX-C（非 GUI 数据技术结构，已登记 §4 ⑧ 2026-09-12）：最近一拍通知快照（观测面，payload 原样透传）
+// taste:allow-no-data-owner W24-EX-C（非 GUI 数据技术结构，已登记 §4 ⑧ 2026-09-12）：最近一拍通知快照（观测范围，payload 原样透传）
 const lastPayload = shallowRef<WatchdogMemoryPressurePayload | null>(null)
 
 /** 订阅引用计数（useAppUpdate 同款：多消费者共享单条物理订阅）。 */
@@ -82,7 +82,7 @@ function defaultReliefAction(): void {
     })
   } catch (e) {
     // best-effort：pinia 未就绪（极端早到通知）/ store 异常时降级为静默——renderer 侧
-    // 收紧失败不影响 runtime 侧降级链（台账与滚动重启决策都在 runtime）。
+    // 收紧失败不影响 runtime 侧降级链（登记清单与滚动重启决策都在 runtime）。
     console.warn('[useMemoryPressure] memory-relief action failed; skipped this tick:', e)
   }
 }

@@ -6,7 +6,7 @@
  * - 类型 import 自 engine/types.ts 与 ports.ts（ThemeLike 上移至接口层）
  * - 工具函数 import 自 engine/budget.ts
  * - 时间计算基于 state.timeUsedSeconds（不含 Date.now() 副作用段）
- * - updateWidget(session, uiPort) 含 FR-6.6 hasUI 守卫
+ * - updateWidget(session, uiPort) 含 FR-6.6 hasUI 检查
  * - 仅 token 维度预算（time budget 已移除）；耗时仅作记账显示
  *
  * slug 精简（widget 显示优化）：
@@ -184,7 +184,7 @@ export function renderWidgetLines(state: GoalRuntimeState, th: ThemeLike): strin
 	return lines;
 }
 
-// ── updateWidget（FR-6.6 hasUI 守卫）──
+// ── updateWidget（FR-6.6 hasUI 检查）──
 
 /**
  * 刷新 widget + status bar。

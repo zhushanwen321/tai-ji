@@ -56,7 +56,7 @@ function devPrefixes(): string[] {
   })
 }
 
-describe('computeLocalFilePrefixes: 打包态（D2a 守卫）', () => {
+describe('computeLocalFilePrefixes: 打包态（D2a 检查）', () => {
   it('白名单不含文件系统根 /（Finder 启动 cwd=/ 时 startsWith("/") 恒真的塌缩已剔除）', () => {
     const prefixes = packagedPrefixes('/')
     // 带 trailing sep 后根目录本身就是 path.sep（'/'），逐项断言不存在
@@ -293,7 +293,7 @@ describe('readLocalFileContent: 源码态白名单读取通道（chat-html-suppo
 describe('computeLocalFileReadPrefixes: 读/预检 IPC 通道准入收窄', () => {
   // 通道消费域 = 产物子树（HtmlPreviewInline 源码态/size 预检、useDetailPane 抽屉产物
   // 读取）；全量白名单含 <dataDir> 整前缀，读通道若复用 = 渲染进程可直读数据目录内
-  // 任意文件文本（含 pi agent 目录凭据）。本组用例锁定收窄面本身。
+  // 任意文件文本（含 pi agent 目录凭据）。本组用例锁定收窄范围本身。
   it('前缀 = <dataDir>/artifacts/ 且带 trailing path.sep（与全量白名单同构的误判防护）', () => {
     expect(computeLocalFileReadPrefixes(DATA_DIR)).toEqual([path.join(DATA_DIR, 'artifacts') + path.sep])
   })
@@ -323,7 +323,7 @@ describe('computeLocalFileReadPrefixes: 读/预检 IPC 通道准入收窄', () =
     expect(read).not.toHaveBeenCalled()
   })
 
-  it('产物文件经读通道前缀正常读取（消费面不回归）', () => {
+  it('产物文件经读通道前缀正常读取（消费方不回归）', () => {
     const result = readLocalFileContent(`${DATA_DIR}/artifacts/s1/report.html`, computeLocalFileReadPrefixes(DATA_DIR), {
       statSync: () => ({ isDirectory: () => false, size: 11 }),
       readFileSync: () => new TextEncoder().encode('<h1>hi</h1>'),
@@ -410,7 +410,7 @@ describe('会话项目 .tmp/ 子树准入（ADR-0118 决策②代价修订 3d）
       expect(stat).not.toHaveBeenCalled()
     })
 
-    it('数据目录凭据不经会话 .tmp 通道放行（3d 不扩大 3c 收窄面的结论）', () => {
+    it('数据目录凭据不经会话 .tmp 通道放行（3d 不扩大 3c 收窄范围的结论）', () => {
       const stat = vi.fn()
       const read = vi.fn()
       // encodeCwd(DATA_DIR) 不在目录集 → auth.json 仍被拒；即使目录集含它，读通道也只该

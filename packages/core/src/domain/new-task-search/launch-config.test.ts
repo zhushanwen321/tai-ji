@@ -8,7 +8,7 @@
  * - D3 isFactoryFullPreset 出厂等价（含 P2b：modelOverride / noSkills / allowedExtensions
  *   三字段覆写翻转 + resolve 透传；数组比对语义：顺序敏感、undefined ≠ []）
  * - D3 对象扩展：prompt（模式提示词）覆写翻转 + 普通对象结构化比对（引用无关）
- * - 穷尽守卫：比对键运行时枚举 vs D3 十一字段清单（编译期由 satisfies 映射类型锁）
+ * - 穷尽检查：比对键运行时枚举 vs D3 十一字段清单（编译期由 satisfies 映射类型锁）
  * - P5①：KV 延迟到达时 createLaunchConfigView 响应式重算（chip 脱离默认占位值）
  * - D1 ensureLaunchDataReady：已加载微任务内返回 / 未加载等待完成 / 单源失败不阻塞
  */
@@ -659,7 +659,7 @@ describe('launchFieldEquals · 普通对象比对语义（D3 对象扩展）', (
   })
 })
 
-describe('穷尽守卫 · 比对键 vs D3 十一字段清单', () => {
+describe('穷尽检查 · 比对键 vs D3 十一字段清单', () => {
   it('PRESET_LAUNCH_KEYS 键集 = D3 声明的 11 个 launch 生效字段', () => {
     expect(Object.keys(PRESET_LAUNCH_KEYS).sort()).toEqual(
       [

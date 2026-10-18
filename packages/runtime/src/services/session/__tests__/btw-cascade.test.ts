@@ -8,7 +8,7 @@
  *   btw.remove 关线——单入口 closeLine、枚举先于注册表移除、abort/删除幂等（重复处置不抛、
  *   批内不记 failed）；级联失败 best-effort 不阻断主删除（P2 降级隔离）。
  * - **P-invisible·侧边栏面**：SessionScanner.listAll 的 hidden 过滤拦下隐藏线条目
- *  （active 腿防线；磁盘腿靠目录隔离——session-scanner 注释已按实装修正）。
+ *  （active 路径防线；磁盘路径靠目录隔离——session-scanner 注释已按实装修正）。
  * - **P-invisible·工作区历史面**：btw 线注册（registerSession 汇聚点）不记工作区历史。
  *
  * 装置：真 SessionService（构造期零 fs 触点，session-service-plugin-data-clear 同款）+
@@ -163,7 +163,7 @@ describe('P-cascade：删主 session → 杀名下线进程 + 删线目录 + 注
     expect(pm.destroySession).toHaveBeenCalledWith(MAIN_SID)
   })
 
-  it('scanned（冷主）分支：主不在 active Map 仍级联（cwd 取扫描面真值）', async () => {
+  it('scanned（冷主）分支：主不在 active Map 仍级联（cwd 取扫描范围真值）', async () => {
     const { vid, threadDir } = await createLine('linepi-cold-main')
     const coldFile = join(fx, 'cold-main.jsonl')
     vi.spyOn(service, 'findScannedSession').mockReturnValue({
@@ -307,7 +307,7 @@ describe('三路并发收敛（D9④）：单入口 closeLine + 幂等', () => {
 })
 
 describe('P-invisible：线不出侧边栏 / 不记工作区历史（runtime 面）', () => {
-  it('侧边栏面：SessionScanner 列举过滤 hidden（active 腿防线；磁盘腿靠目录隔离）', () => {
+  it('侧边栏面：SessionScanner 列举过滤 hidden（active 路径防线；磁盘路径靠目录隔离）', () => {
     const summary = (id: string, hidden?: boolean): SessionSummary => ({
       id, label: id, cwd: fx, status: 'idle', lastActiveAt: 1, modelId: 'm', tokenCount: 0, hidden,
     })

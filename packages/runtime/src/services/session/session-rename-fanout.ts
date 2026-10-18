@@ -2,7 +2,7 @@
  * session-renamed 事件扇出（rename-session-three-modes 设计 D4 的可测提取）。
  *
  * 组合根 index.ts 的 onSessionRenamed 注入点闭包原先只做 setLabelCache——显示侧扇出
- * 缺口：rename 落库成功但侧边栏不刷新，直到下一个无关操作触发整表广播。D4 修复 =
+ * 缺口：rename 已提交成功但侧边栏不刷新，直到下一个无关操作触发整表广播。D4 修复 =
  * label 回写后追加 broadcastSessionList（行为契约对齐手动 rename 先例
  * session-message-handler 的 handleSessionRename，session-message-handler.ts）。
  *

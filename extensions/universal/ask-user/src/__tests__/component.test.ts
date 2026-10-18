@@ -353,7 +353,7 @@ describe("AskUserComponent — Other free-text editor", () => {
 
 // ── 5e2. 多字符粘贴（M2/M7：完整保留，过滤控制字符，emoji 不丢）──
 // 回归 MUST_FIX-M2：handleEditorInput 按 code point 迭代粘贴 chunk，去掉了
-// `c.length === 1` 守卫（它误杀 BMP 之外的代理对，如 emoji）。
+// `c.length === 1` 检查（它误杀 BMP 之外的代理对，如 emoji）。
 describe("AskUserComponent — multi-char paste in editor", () => {
 	it("C-PASTE-1: multi-char chunk pasted at once is fully captured", () => {
 		// 终端把整段粘贴文本作为一个 data chunk 投递。修复前只取首字符。
@@ -370,7 +370,7 @@ describe("AskUserComponent — multi-char paste in editor", () => {
 	});
 
 	it("C-PASTE-2: paste with emoji (surrogate pair) preserves emoji (M2)", () => {
-		// 修复前：`c.length === 1` 守卫把代理对（🐛 length===2）过滤掉，emoji 被静默丢弃。
+		// 修复前：`c.length === 1` 检查把代理对（🐛 length===2）过滤掉，emoji 被静默丢弃。
 		const { c } = make([singleQ]);
 		c.handleInput(DOWN);
 		c.handleInput(DOWN);
@@ -415,7 +415,7 @@ describe("AskUserComponent — multi-char paste in editor", () => {
 	});
 
 	it("C-PASTE-5: single printable char still works (backward-compat)", () => {
-		// 回归：修复去掉守卫后单字符行为不变（与 C-27 等价的逐字符输入）。
+		// 回归：修复去掉检查后单字符行为不变（与 C-27 等价的逐字符输入）。
 		const { c } = make([singleQ]);
 		c.handleInput(DOWN);
 		c.handleInput(DOWN);
@@ -429,7 +429,7 @@ describe("AskUserComponent — multi-char paste in editor", () => {
 
 	it("C-PASTE-6: bracketed paste 序列被剥离，不残留 [200~/[201~", () => {
 		// 回归：启用 bracketed paste mode 的终端粘贴时会把内容包裹在
-		// \x1b[200~ ... \x1b[201~ 中。ESC 被守卫过滤，但 [200~/[201~ 可见字符
+		// \x1b[200~ ... \x1b[201~ 中。ESC 被检查过滤，但 [200~/[201~ 可见字符
 		// 会残留。修复：handleEditorInput 先 replace 剥离这两个序列。
 		const { c } = make([singleQ]);
 		c.handleInput(DOWN);
@@ -488,7 +488,7 @@ describe("AskUserComponent — re-entry guard", () => {
 		expect(result.val).toBeDefined();
 		expect(result.val!.cancelled).toBe(false);
 		const submitVal = result.val;
-		// 模拟 signal abort 在 submit 后触发 → cancel() 应被 _resolved 守卫拦截
+		// 模拟 signal abort 在 submit 后触发 → cancel() 应被 _resolved 检查拦截
 		c.cancel();
 		expect(result.val).toBe(submitVal); // 不变 —— done 未被二次调用
 	});
@@ -821,7 +821,7 @@ describe("AskUserComponent — new behavior (post-refactor)", () => {
 	});
 });
 
-// ── options 输入路由 no-op 落空语义（←/→ 与 Space 的守卫分支）──
+// ── options 输入路由 no-op 落空语义（←/→ 与 Space 的检查分支）──
 describe("AskUserComponent — options input no-op edges", () => {
 	it("C-NAV-1: single question ignores LEFT/RIGHT in options mode (no tab nav, no cancel overlay)", () => {
 		const { c, result } = make([singleQ]);

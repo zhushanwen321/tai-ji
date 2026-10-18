@@ -1,4 +1,4 @@
-// review-fix-loop-utils.cjs 的消费面类型声明（test-only 类型基建：src/__tests__/
+// review-fix-loop-utils.cjs 的消费方类型声明（test-only 类型基建：src/__tests__/
 // review-fix-loop-utils.test.ts 顶层 import 本模块；tsc 纳入测试后需要声明锚点）。
 // 与 .cjs 同名同目录的 .d.cts 会被 TS 自动关联（相对路径导入解析）。
 // 仅声明测试消费的导出——未来消费新导出时在编译期报缺并在此补充。

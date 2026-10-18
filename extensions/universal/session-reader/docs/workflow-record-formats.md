@@ -1,4 +1,4 @@
-# workflow run 磁盘格式速查（session-reader 兼容读面）
+# workflow run 磁盘格式速查（session-reader 兼容读侧）
 
 > 现行文档：session-reader 的 `workflow` / `family` action 在磁盘上会遇到的三种 workflow run 格式与判定。写入侧语义的权威登记 = [ADR-0095](../../../../docs/adr/decisions.md)（快照机制退役、record 单模式收敛）；本文只记读取侧要认的形状。
 
@@ -14,4 +14,4 @@
 
 - 读取原语：`src/discovery/workflows.ts` 的 `readRunSnapshot`（v1 / 旧指针档 → unknown）
 - 解析与版本标记：`src/core/workflow.ts` 的 `parseRunSnapshot`（`version: 'wf-run-v1' | 'wf-run-v2' | 'legacy'`，随 `details.runs` 透传给程序化消费方）
-- 跨包纪律：本包不 import `@zhushanwen/pi-subagent-workflow` 的 RunSnapshot 类型（跨包类型耦合会使上游演化绑架读取面——`core/workflow.ts` 头注释）
+- 跨包纪律：本包不 import `@zhushanwen/pi-subagent-workflow` 的 RunSnapshot 类型（跨包类型耦合会使上游演化绑架读侧——`core/workflow.ts` 头注释）

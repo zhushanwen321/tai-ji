@@ -1,7 +1,7 @@
 /**
  * TraceRowItem.suffix 输出锚定（round3 review S1 / mutation M3）。
  *
- * suffix computed 是 metrics 头号靶子（CRAP 63.6 / cognitive 22，全 PR 最高）：
+ * suffix computed 是 metrics 头号检查目标（CRAP 63.6 / cognitive 22，全 PR 最高）：
  * trace-view + trace-i18n 34 例只覆盖了执行（95% 行覆盖），未锚定输出——
  * mutation M3 实证删掉 ASSISTANT `thinking×N/tool×N/text×N` 后仍全绿。
  * 本文件直接 mount TraceRowItem，对每个 kind 的 suffix 输出做参数化精确断言：

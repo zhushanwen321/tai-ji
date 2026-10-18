@@ -11,7 +11,7 @@
  * - 物理内存：node:os freemem/totalmem（跨平台同步）；
  * - swap：node:os 不暴露——Linux 读 /proc/meminfo（SwapTotal/SwapFree，kB），macOS
  *   `sysctl -n vm.swapusage`（execFile 数组参数不经 shell，带超时），其余平台 null（未知）。
- *   swap 未知时 swap 判据不命中、物理空闲判据仍在（判定面收窄，不阻塞恢复）。
+ *   swap 未知时 swap 判据不命中、物理空闲判据仍在（判定侧收窄，不阻塞恢复）。
  *
  * 高压判据（初值，设计 D3「阈值随 Gate W 校准」——调用方可注入覆盖）：
  * - swap 近耗尽：swapUsed/swapTotal ≥ swapUsedRatio（swap 是「物理内存已耗尽后溢出」的
@@ -130,7 +130,7 @@ function execSysctlSwapUsage(): Promise<string> {
 
 /**
  * 平台 swap 探针（best-effort）：Linux /proc/meminfo 同步读；macOS sysctl 异步探；
- * 其余平台 / 单源失败 → null（判定面收窄不抛错）。独立导出供测试与调用方 DI。
+ * 其余平台 / 单源失败 → null（判定侧收窄不抛错）。独立导出供测试与调用方 DI。
  */
 export async function probeSwapPressure(): Promise<MemPressureSwapSample | null> {
   try {

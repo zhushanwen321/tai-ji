@@ -149,7 +149,7 @@ test.describe('文件树 E2E', () => {
 
   test('D-020 修订（2026-10-15 全量显示）: ignored 节点恒显 + 未跟踪文件名非 fg（跟踪态双色）', async ({ page }) => {
     await gotoFileTree(page)
-    // 全量显示：ignored 目录 node_modules 无需开关直接可见（开关已退役，无网络重拉差异）
+    // 全量显示：ignored 目录 node_modules 无需开关直接可见（开关已退役，无网络重新拉取差异）
     await expect(page.getByTestId('file-tree-dir-node_modules')).toBeVisible({ timeout: 5_000 })
     // 未跟踪文件 untracked.log（gitStatus '??'）→ 文件名无 fg（继承行基线 mid）
     const untrackedName = page.getByTestId('file-tree-file-untracked.log').locator('.fname')

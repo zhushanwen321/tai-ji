@@ -9,7 +9,7 @@
 
 推荐 zcode 式常驻接入：spawn `codex app-server --listen stdio://`（app-server/src/main.rs:29-36，stdio 为默认 transport），JSON-RPC over stdio，一个常驻引擎进程承载多个 thread（codex 的会话单位）。thread 生命周期：`thread/start` 创建 → `turn/start` 提交任务 → 通知流（`item/*`、`turn/completed`）→ `thread/resume`/`thread/fork` 续接；会话落盘 rollout JSONL，进程重启后仍可 `thread/resume`。审批等反向交互走 JSON-RPC ServerRequest（服务端 → 客户端请求，须应答）。
 
-exec 降级路径（一次性任务形态）：`codex exec --json --output-schema <file> "<prompt>"`（exec/src/cli.rs:47-65，`--json` 输出 JSONL 事件流，`--output-schema` 指定终响应 JSON Schema），`--output-last-message <file>` 取最终正文（cli.rs:67-74），`codex exec resume <session-id> --json` / `codex exec fork <session-id>` 续接（cli.rs:148-158）。降级路径事件面窄（无 delta 流），仅作 app-server 不可用时的回退。
+exec 降级路径（一次性任务形态）：`codex exec --json --output-schema <file> "<prompt>"`（exec/src/cli.rs:47-65，`--json` 输出 JSONL 事件流，`--output-schema` 指定终响应 JSON Schema），`--output-last-message <file>` 取最终正文（cli.rs:67-74），`codex exec resume <session-id> --json` / `codex exec fork <session-id>` 续接（cli.rs:148-158）。降级路径事件范围窄（无 delta 流），仅作 app-server 不可用时的回退。
 
 ## 2. run 参数映射表
 
@@ -39,11 +39,11 @@ run.params.task（AgentCallOpts）/ ctx / resume → app-server `thread/start`�
 | resume.recordId | 适配器自持关联键 | — | 用于 host/handleReady、host/childStateChanged 回填 |
 | resume.resume.sessionRef | `thread/resume`：`thread_id`（首选）或 `path`（rollout 路径，[UNSTABLE]） | common.rs:511-516；v2/thread.rs:318-352 | sessionRef 构成建议见 §6 |
 
-模型面（靶面 H）补充：
+模型侧（目标类型 H）补充：
 
 | taiji 面 | 源对应 | 证据（file:line） | 备注 |
 |---|---|---|---|
-| listModels → ModelCatalogEntry{id,aliases?,canonicalRef?} | `model/list` → `ModelListResponse{data:Vec\<Model\>}`；`Model{id, model, displayName, …}` | common.rs:1020-1024；v2/model.rs:53-63, :92-121, :147-152 | 投影：ModelCatalogEntry.id←Model.id；canonicalRef←Model.model（真实模型 ref）；aliases 无对应（缺省）。无枚举面时返回 null 的协议语义不受影响（方法恒可调） |
+| listModels → ModelCatalogEntry{id,aliases?,canonicalRef?} | `model/list` → `ModelListResponse{data:Vec\<Model\>}`；`Model{id, model, displayName, …}` | common.rs:1020-1024；v2/model.rs:53-63, :92-121, :147-152 | 映射：ModelCatalogEntry.id←Model.id；canonicalRef←Model.model（真实模型 ref）；aliases 无对应（缺省）。无枚举形态时返回 null 的协议语义不受影响（方法恒可调） |
 | validateModel → canonicalRef | 无独立校验方法 | — | 合成：以 model/list 全集匹配；不命中时 thread/start 实际验证（ModelRerouted 通知为替换信号，v2/model.rs:157-163） |
 
 ## 3. 事件映射表
@@ -57,14 +57,14 @@ run.params.task（AgentCallOpts）/ ctx / resume → app-server `thread/start`�
 | error | error | 直接 | v2 ErrorNotification |
 | thread/started | — | 丢弃 | 生命周期通知 |
 | thread/status/changed | activity | 合成 | ThreadStatus 变化时刷新判活（可选降级为丢弃） |
-| thread/archived / deleted / unarchived / closed / reverted | — | 丢弃 | 管理面 |
-| thread/name/updated / goal/updated / goal/cleared / queue/changed | — | 丢弃 | 管理面 |
-| thread/project/updated / settings/updated / environment/connected / disconnected | — | 丢弃 | 管理面 |
+| thread/archived / deleted / unarchived / closed / reverted | — | 丢弃 | 管理侧 |
+| thread/name/updated / goal/updated / goal/cleared / queue/changed | — | 丢弃 | 管理侧 |
+| thread/project/updated / settings/updated / environment/connected / disconnected | — | 丢弃 | 管理侧 |
 | skills/changed / project/changed | — | 丢弃 | 全局面 |
 | turn/started | — | 合成开界 | 适配器开新 turn（不开 taiji 事件） |
 | turn/completed | turn_end | 直接 | Turn{id,items,status,error,…}（v2/thread_data.rs:353-373）；turn 级 usage 不在此载荷，经 tokenUsage/updated |
 | turn/diff/updated | — | 丢弃 | turn 级聚合 diff，taiji 无槽 |
-| turn/plan/updated | — | 丢弃 | plan 工具面，taiji 无槽 |
+| turn/plan/updated | — | 丢弃 | plan 工具范围，taiji 无槽 |
 | item/started | tool_start（tool 类 item）/ — | 直接 | CommandExecution/McpToolCall/DynamicToolCall/WebSearch 等 → tool_start{toolName,args}；AgentMessage/Reasoning/UserMessage/ContextCompaction 等非 tool 类不产 tool_start |
 | item/completed | tool_end（tool 类）/ message_end（AgentMessage）/ compaction（ContextCompaction）/ — | 直接 | 同上分派；AgentMessage 完成即正文定稿（不含 usage） |
 | item/autoApprovalReview/started / completed、autoApprovalReview/strictReviewRequired | — | 丢弃 | guardian 自动审批内部面 |
@@ -74,7 +74,7 @@ run.params.task（AgentCallOpts）/ ctx / resume → app-server `thread/start`�
 | item/plan/delta | — | 丢弃 | plan item 流 |
 | command/exec/outputDelta、process/outputDelta、process/exited | — | 丢弃 | 独立 exec/process 面（非 thread turn） |
 | item/commandExecution/outputDelta | activity | 合成 | 长命令输出流，作活性信号；也可累积进 tool_end result |
-| item/commandExecution/terminalInteraction | — | 丢弃 | PTY stdin 交互面 |
+| item/commandExecution/terminalInteraction | — | 丢弃 | PTY stdin 交互侧 |
 | item/fileChange/outputDelta | — | 丢弃 | 已废弃，服务端不再发（v2/item.rs:1425-1427） |
 | item/fileChange/patchUpdated | — | 丢弃（或累积） | FileUpdateChange 增量，tool_end 时以 item/completed 全量为准 |
 | item/reasoning/summaryTextDelta | thinking_delta | 直接 | {…,delta,summaryIndex}（v2/item.rs:1372-1379） |
@@ -83,13 +83,13 @@ run.params.task（AgentCallOpts）/ ctx / resume → app-server `thread/start`�
 | thread/compacted | compaction | 直接 | [Deprecated] 改用 ContextCompaction item（common.rs:1894-1895） |
 | serverRequest/resolved | — | 丢弃 | 反向请求生命周期 |
 | item/mcpToolCall/progress | activity | 合成 | MCP 执行中活性 |
-| mcpServer/oauthLogin/completed、startupStatus/updated、event/stream/notification | — | 丢弃 | MCP 管理面 |
+| mcpServer/oauthLogin/completed、startupStatus/updated、event/stream/notification | — | 丢弃 | MCP 管理侧 |
 | account/*（updated / rateLimits / login/completed） | — | 丢弃 | 账户面 |
 | app/list/updated、remoteControl/status/changed、externalAgentConfig/import/* | — | 丢弃 | 外围面 |
 | fs/changed | — | 丢弃 | fs watch 面 |
 | model/rerouted | error（warn 级） | 合成 | 模型被替换，宿主须感知（v2/model.rs:157-163） |
-| model/verification、model/safetyBuffering/updated、turn/moderationMetadata | — | 丢弃 | 平台安全面 |
-| warning / guardianWarning / deprecationNotice / configWarning | error（或 host/log） | 合成 | 非致命告知；taiji 9 事件无 warn 槽，投影 error 或降 host/log |
+| model/verification、model/safetyBuffering/updated、turn/moderationMetadata | — | 丢弃 | 平台安全侧 |
+| warning / guardianWarning / deprecationNotice / configWarning | error（或 host/log） | 合成 | 非致命告知；taiji 9 事件无 warn 槽，映射为 error 或降 host/log |
 | fuzzyFileSearch/sessionUpdated / sessionCompleted | — | 丢弃 | 搜索面 |
 | thread/realtime/*（9 个） | — | 丢弃 | 语音实时面 |
 | windows/worldWritableWarning、windowsSandbox/setupCompleted | — | 丢弃 | Windows 沙箱面 |
@@ -113,7 +113,7 @@ thread.started（:40-43，携 thread_id）/ turn.started（:47）/ turn.complete
 | DynamicToolCall{namespace,tool,arguments,status,contentItems,success}（v2/item.rs:335-346） | ToolCall{toolName, args:arguments, result:{content:contentItems 文本化}, isError:!success} | 宿主侧动态工具反呼见 §7 |
 | FileChange{changes:[{path,kind,diff}],status}（v2/item.rs:307-311, :1065-1089） | 合成 ToolCall{toolName:"apply_patch",args:{changes},result:{content:[diffs join]},isError:status∈{Failed,Declined}} | codex 无 per-file tool 调用流，整个 patch 为一个 item |
 | WebSearch{id,query,action,results} | ToolCall{toolName:"web_search",args:{query},result:{content:[results]}} | WebSearchItem 定义于 codex-extension-items（v2/item.rs:378, :918-923） |
-| CollabAgentToolCall / SubAgentActivity | 丢弃（或合成 activity） | codex 内建多 agent 协作面，taiji 无对应槽 |
+| CollabAgentToolCall / SubAgentActivity | 丢弃（或合成 activity） | codex 内建多 agent 协作范围，taiji 无对应槽 |
 | TodoList / Plan / ImageView / Sleep / ImageGeneration / ReviewMode items | 丢弃（或 GUI 自行消费） | taiji 9 事件无槽 |
 | exec 版 CommandExecutionItem{command,aggregatedOutput,exitCode,status}（exec/src/exec_events.rs:161-166） | 同上 shell 装载 | exec_events McpToolCallItemResult{content:Vec\<JsonValue\>,meta,structuredContent}（:263-276）同 v2 对位 |
 
@@ -123,7 +123,7 @@ thread.started（:40-43，携 thread_id）/ turn.started（:47）/ turn.complete
 
 | taiji 字段 | 源字段 | 证据（file:line） | 备注 |
 |---|---|---|---|
-| AgentUsage.input | TokenUsageBreakdown.inputTokens | v2/thread.rs:1795-1809 | last（单轮增量）投影 message_end.usage；total 投影累计 |
+| AgentUsage.input | TokenUsageBreakdown.inputTokens | v2/thread.rs:1795-1809 | last（单轮增量）映射 message_end.usage；total 映射累计 |
 | AgentUsage.output | TokenUsageBreakdown.outputTokens | 同上 | 含 reasoning 输出 |
 | AgentUsage.cacheRead | TokenUsageBreakdown.cachedInputTokens | 同上 | 直接 |
 | AgentUsage.cacheWrite | TokenUsageBreakdown.cacheWriteInputTokens | 同上 | serde default（:1802-1804），旧上游可能缺省 |
@@ -148,7 +148,7 @@ thread.started（:40-43，携 thread_id）/ turn.started（:47）/ turn.complete
 - `Turn{id, items: Vec\<ThreadItem\>, itemsView, status, error, startedAt, completedAt, durationMs}`（thread_data.rs:353-373）。
 - 大历史分页：`thread/turns/list`（v2/thread.rs:1678-1707，cursor/limit/sortDirection/itemsView）与 `thread/items/list`（:1712-1748，返回 `ThreadItemEntry{turnId,item}`）。
 
-ReplayedTurn 映射（Turn.items 投影）：
+ReplayedTurn 映射（Turn.items 派生视图）：
 
 | ReplayedTurn 槽 | 源 | 备注 |
 |---|---|---|
@@ -198,11 +198,11 @@ UiRequest 9 method 对齐度：select（← requestUserInput）✅、confirm（�
 
 ### 9.1 源有靶无（codex 有、taiji 协议无槽——适配器丢弃，不阻塞接入）
 
-- thread 管理面：archive/delete/unarchive/name/goal/queue/section/project/settings/rollback/revert/inject_items/search（common.rs:523-802）。
-- collab agents（codex 内建多 agent 子线程：CollabAgentToolCall item、thread/realtime 语音面）——taiji subagent 编排归宿主，引擎内多 agent 不投影。
-- command/exec、process/* 独立进程面与 fs/* 远程文件面（common.rs:899-945, :1247-1299）。
+- thread 管理侧：archive/delete/unarchive/name/goal/queue/section/project/settings/rollback/revert/inject_items/search（common.rs:523-802）。
+- collab agents（codex 内建多 agent 子线程：CollabAgentToolCall item、thread/realtime 语音面）——taiji subagent 编排归宿主，引擎内多 agent 不映射。
+- command/exec、process/* 独立进程面与 fs/* 远程文件侧（common.rs:899-945, :1247-1299）。
 - dynamic tools 注册（thread/start.dynamicTools，v2/thread.rs:135-141）与 DynamicToolCall 宿主反呼（item/tool/call）——taiji 反向面无「宿主执行引擎工具」通道，此能力不可用（除非扩展协议）。
-- hooks / plugins / marketplace / skills 管理面（common.rs:803-878）。
+- hooks / plugins / marketplace / skills 管理侧（common.rs:803-878）。
 - guardian 自动审批（item/autoApprovalReview/*）与 attestation/remoteControl/environment 面。
 - turn/plan/updated、turn/diff/updated（plan 工具与 turn 级聚合 diff）。
 
@@ -220,7 +220,7 @@ UiRequest 9 method 对齐度：select（← requestUserInput）✅、confirm（�
 
 1. **thread ≠ taiji session**：codex thread 是会话单位（Thread.session_id 是「session tree 共享 id」，thread_data.rs:205-206），一个引擎进程多 thread；taiji session≈record+sessionFile 一对一。映射取 threadId 为 sessionId，thread.session_id 不投。
 2. **turn/item 层级 vs taiji turn/message 两层**：codex 一个 turn 内 items 交错（AgentMessage、Reasoning、CommandExecution…），taiji ReplayedTurn 只有 text/thinking/toolCalls 三槽——**item 顺序与交错信息丢失**（多段正文/思考被合并拼接）；中途 error item 无槽（并入 turn error 或丢弃）。
-3. **usage 增量语义**：taiji message_end.usage 是「单条消息增量」；codex tokenUsage/updated 给 {total,last}，last 是「单轮」而非「单消息」——一 turn 多次模型调用时增量粒度粗于 pi；message_end 投影点建议绑 turn/completed 而非 item/completed(AgentMessage)。
+3. **usage 增量语义**：taiji message_end.usage 是「单条消息增量」；codex tokenUsage/updated 给 {total,last}，last 是「单轮」而非「单消息」——一 turn 多次模型调用时增量粒度粗于 pi；message_end 映射点建议绑 turn/completed 而非 item/completed(AgentMessage)。
 4. **compaction 双形态**：thread/compacted 通知已标 deprecated（common.rs:1894-1895），现行 = ContextCompaction item（v2/item.rs:401-403）随 item/started|completed 出现；rollout 侧另有 compacted line（replacementHistory 重建历史）。适配器以 item 形态为准。
 5. **正文完成去重**：AgentMessage delta 累积与 item/completed 全文并存，须按 itemId 去重（§4）；Plan delta 注释明示「completed 权威、delta 拼接可能不等」（v2/item.rs:1357-1361），若投 text_delta 需同规则。
 6. **fork 语义**：codex thread/fork 产新 threadId（v2/thread.rs:503-514），taiji fork 概念是「继承父 session 上下文的新 run」——resume 锚点须切换为新 fork 的 threadId，宿主 record 的 handle 需更新。

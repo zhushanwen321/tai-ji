@@ -199,7 +199,7 @@ describe('fork handler 单次 scanSessions（W26 微项 12 find 合并）', () =
     expect(lines).toHaveLength(3)
   })
 
-  it('源 session 不存在时抛错且不扫描（force 路径守卫）', async () => {
+  it('源 session 不存在时抛错且不扫描（force 路径检查）', async () => {
     await expect(service.forkSession('no-such', 'm2', false, 'x')).rejects.toThrow('source session not found')
     expect(countingStore.scanCount).toBe(1)
   })

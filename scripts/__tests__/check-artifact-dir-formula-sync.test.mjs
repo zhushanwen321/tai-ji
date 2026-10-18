@@ -1,12 +1,12 @@
 /**
- * check-artifact-dir-formula-sync.mjs 单测（R1 一致性审查：守卫本体 + pre-commit 触发段已交付，
- * 但守卫自身无回归测试、--self-test 无自动化挂载点——三条比较（段名相等 / 正则相等 / 镜像经常量
+ * check-artifact-dir-formula-sync.mjs 单测（R1 一致性审查：检查本体 + pre-commit 触发段已交付，
+ * 但检查自身无回归测试、--self-test 无自动化挂载点——三条比较（段名相等 / 正则相等 / 镜像经常量
  * 拼段名）自身退化时无任何红灯。设计 §11 检查点 8 要求「与 u1 对拍同型」，u1 对拍照搬的先例
- * check-thinking-levels 含守卫回归测试，故本守卫的非恒绿证明随行补上。）
+ * check-thinking-levels 含检查回归测试，故本检查的非恒绿证明随行补上。）
  *
  * 组织方式照 check-thinking-levels.test.mjs 惯例：纯函数直测 + tmpdir fixture，CLI 集成用例把
- * 守卫脚本复制到 tmp mirror 运行（守卫 ROOT 由 import.meta.url 推导，副本位置使 ROOT 落在 mirror
- * 内——篡改 fixture 才真正改到守卫读的文件，「篡改即红、还原即绿」的差分才成立）。
+ * 检查脚本复制到 tmp mirror 运行（检查 ROOT 由 import.meta.url 推导，副本位置使 ROOT 落在 mirror
+ * 内——篡改 fixture 才真正改到检查读的文件，「篡改即红、还原即绿」的差分才成立）。
  *
  * 运行：cd <repo-root> && pnpm exec vitest run scripts/__tests__/check-artifact-dir-formula-sync.test.mjs
  * （ci.yml「Test - scripts guards」逐文件列举同款口径。）
@@ -136,7 +136,7 @@ const sharedPathsSrc = ({ segment = 'artifacts', regex = DEFAULT_REGEX, treeSegm
     `  return join(dataDir ?? getDataDir(), '${segment}', sessionId)`,
     `}`,
     ``,
-    // treeSegments = null 注入「常量缺席」形态（守卫第四组提取失败一律 fail）
+    // treeSegments = null 注入「常量缺席」形态（检查第四组提取失败一律 fail）
     ...(treeSegments
       ? [`export const ${SHARED_TREE_CONST} = [${treeSegments.map((s) => `'${s}'`).join(', ')}] as const`, '']
       : []),
@@ -180,9 +180,9 @@ const runtimePiPathsSrc = ({ regex = DEFAULT_REGEX, treeSegments = DEFAULT_TREE_
   ].join('\n')
 
 /**
- * tmp mirror 工厂：目录布局对齐守卫 ROOT 相对路径（packages/shared/src、extensions/taiji/
+ * tmp mirror 工厂：目录布局对齐检查 ROOT 相对路径（packages/shared/src、extensions/taiji/
  * system-prompt/src、packages/runtime/src/infra/pi）。overrides 覆盖任一侧公式（漂移
- * 注入点），missing 指定不落盘的文件。root/落盘/清理/守卫副本装置见 guard-mirror.mjs。
+ * 注入点），missing 指定不落盘的文件。root/落盘/清理/检查副本装置见 guard-mirror.mjs。
  */
 function makeMirror({ shared = {}, mirror = {}, runtime = {}, missing = [] } = {}) {
   return makeGuardMirror({
@@ -197,7 +197,7 @@ function makeMirror({ shared = {}, mirror = {}, runtime = {}, missing = [] } = {
 )}
 
 
-describe('CLI 集成（守卫脚本 × tmp mirror）', () => {
+describe('CLI 集成（检查脚本 × tmp mirror）', () => {
   it('三方一致 → exit 0，各条比较逐一报一致（含 runtime 第三源）', () => {
     const fx = makeMirror()
     try {
@@ -243,7 +243,7 @@ describe('CLI 集成（守卫脚本 × tmp mirror）', () => {
       const r = fx.run()
       expect(r.status).toBe(1)
       expect(r.stderr).toContain(`镜像 ${MIRROR_FN} 未经 ${MIRROR_SEGMENT_CONST} 拼段名`)
-      expect(r.stderr).toContain('重写死字面量会被本守卫漏掉漂移')
+      expect(r.stderr).toContain('重写死字面量会被本检查漏掉漂移')
     } finally {
       fx.cleanup()
     }
@@ -308,8 +308,8 @@ describe('CLI 集成（守卫脚本 × tmp mirror）', () => {
   })
 })
 
-describe('真实仓库源文件（守卫对实际交付面非恒绿的反面：当前三方一致）', () => {
-  it('直跑真实守卫 → exit 0', () => {
+describe('真实仓库源文件（检查对实际交付面非恒绿的反面：当前三方一致）', () => {
+  it('直跑真实检查 → exit 0', () => {
     expectGuardDirectRunPasses(SCRIPT, '✓ 产物目录公式对拍通过')
   })
 })

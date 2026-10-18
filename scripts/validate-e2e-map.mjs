@@ -2,7 +2,7 @@
 /**
  * validate-e2e-map.mjs — docs/testing/e2e-map.json（SSOT）结构校验
  *
- * e2e-map.json 登记全部 e2e 资产与触发面（消费方 scripts/select-affected-e2e.mjs），
+ * e2e-map.json 登记全部 e2e 资产与触发范围（消费方 scripts/select-affected-e2e.mjs），
  * 本脚本是登记自身的护栏：结构非法 / 死链 / 幽灵 asset 拦在提交前。
  * pre-commit 在 e2e-map.json / 两脚本 / 其单测变更时触发（install-hooks.sh 段）。
  *

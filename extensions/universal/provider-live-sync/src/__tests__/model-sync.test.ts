@@ -1,7 +1,7 @@
 /**
  * provider-live-sync 单元测试（设计 §4.2「单元（extension）」全部断言）。
  *
- * 被测面 = 纯函数（`readObservation` / `evaluateSnapshot`），不依赖 pi 运行时：
+ * 被测对象 = 纯函数（`readObservation` / `evaluateSnapshot`），不依赖 pi 运行时：
  * 决策与基线推进是全部语义所在，时钟/timer 不进断言（timer 只做调度）。
  *
  * 覆盖映射（设计行 → 用例）：

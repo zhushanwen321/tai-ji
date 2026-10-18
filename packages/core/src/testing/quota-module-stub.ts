@@ -13,7 +13,7 @@
  * 用例按需直接改 `view.value.*` / `draft.value.*`（桩是普通 ref，写入即生效）；
  * 写动作是 vi.fn（默认 noop），需要断言的用例经 mock.calls 检查。
  *
- * 导出面：@taiji/core/testing（与 makeSettingsTransportStub 同址同范式）。
+ * 导出清单：@taiji/core/testing（与 makeSettingsTransportStub 同址同范式）。
  */
 import { ref } from 'vue'
 import { vi } from 'vitest'

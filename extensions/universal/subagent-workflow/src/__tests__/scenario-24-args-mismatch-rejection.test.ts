@@ -30,13 +30,13 @@ import {
   waitForScenarioSettled,
 } from "./record-mode/scenario-kit.ts";
 
-/** 历史 args 的生产形态：rfl 仪表向 spec.args 注入 _runId 后 stringify 落账。 */
+/** 历史 args 的生产形态：rfl 仪表向 spec.args 注入 _runId 后 stringify 写入 journal 记录。 */
 const HISTORICAL_ARGS_SUMMARY = JSON.stringify({ a: 1, _runId: "wf-s24-run" });
 
 /**
  * 终局 manifest（<stateDir>/<runId>.json 派生缓存）是 run-settled 落盘后的异步
- * 投影（terminal-actions 终局 coda）——cleanup 前等它落盘，防 teardown 删目录与
- * 投影 rename 的竞态告警（场景族无噪音形态）。
+ * 派生视图（terminal-actions 终局 coda）——cleanup 前等它落盘，防 teardown 删目录与
+ * 派生视图 rename 的竞态告警（场景族无噪音形态）。
  */
 async function waitForTerminalManifest(env: ReturnType<typeof mkScenarioEnv>, runId: string, timeoutMs = 5_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
@@ -181,7 +181,7 @@ describe("场景 24：args 不一致拒绝（D14 fail-fast）", () => {
     const runId = "wf-s24-fullargs";
     const env = mkScenarioEnv("24fa");
     try {
-      // 生产写面 dispatchRunCreated 现行形态：args 全文 + argsSummary 摘要随帧
+      // 生产写侧 dispatchRunCreated 现行形态：args 全文 + argsSummary 摘要随帧
       // 双落（超长 args 的摘要截断不影响全文比对面）
       const longPayload = "y".repeat(400);
       const historical = { payload: longPayload, _runId: runId };
@@ -238,7 +238,7 @@ describe("场景 24：args 不一致拒绝（D14 fail-fast）", () => {
     try {
       // 旧格式流（args 全文载荷落地前落盘）：run-created 帧只带截断摘要（slice 256
       // + 「…」尾标——截断边界常量 = terminal-actions.ts RUN_ARGS_SUMMARY_MAX_CHARS，
-      // 模块私有，此处按生产形态字面构造；检测面 = readHistoricalArgs 的「…」尾标
+      // 模块私有，此处按生产形态字面构造；检测侧 = readHistoricalArgs 的「…」尾标
       // 判定，仅旧格式帧到达）
       const longPayload = "y".repeat(400);
       const serialized = JSON.stringify({ payload: longPayload, _runId: runId });

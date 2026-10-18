@@ -30,7 +30,7 @@ let warnedNoResizeObserver = false
  * - 信任标记跨档不丢（§7.1）：文本/短名档 = chip 内小后缀（warn 色）；纯图标档 = 右上角警示色
  *   角标（`data-testid="preset-chip-replace-badge"`）+ tooltip。**刻意不用 accent**（accent 底已表示
  *   「非默认模式」，两个语义不共色）。
- * - hover popover（只读）：模式描述 / 工具面 / 扩展面 / 提示词段数 / 锁定说明 + 「新建会话…」出口。
+ * - hover popover（只读）：模式描述 / 工具范围 / 扩展范围 / 提示词段数 / 锁定说明 + 「新建会话…」出口。
  * - chip **不承载子会话计数**（设计 D5/P0-22：计数归托盘第 4 件与侧栏）。
  *
  * 约束：禁 Emoji（图标全走 @lucide/vue）；禁原生表单元素（Button/HoverCard 原语）；颜色用 token；
@@ -177,7 +177,7 @@ const promptSegmentCount = computed(() => {
   if (!p) return 0
   return [p.replace, p.append].filter((s) => s?.enabled && (s.prompt ?? '').trim().length > 0).length
 })
-/** 工具面摘要（toolMode + 名单数）。[RD-2#6] allowlist/denylist 而名单未定义 = 面未知
+/** 工具范围摘要（toolMode + 名单数）。[RD-2#6] allowlist/denylist 而名单未定义 = 面未知
  * （unknownSurface 出口）——不得 ?? 0 伪装成「允许 0 项」（0=真值，D4 null=无数据）。 */
 const toolSurface = computed(() => {
   const p = preset.value
@@ -193,7 +193,7 @@ const toolSurface = computed(() => {
     ? t('panel.presetChip.denyCount', { count: p.deniedTools.length })
     : t('panel.presetChip.unknownSurface')
 })
-/** 扩展面摘要（extensionMode + 名单数；[RD-2#6] 名单未定义 → 面未知，同 toolSurface 口径） */
+/** 扩展范围摘要（extensionMode + 名单数；[RD-2#6] 名单未定义 → 面未知，同 toolSurface 口径） */
 const extensionSurface = computed(() => {
   const p = preset.value
   if (!p) return t('panel.presetChip.unknownSurface')

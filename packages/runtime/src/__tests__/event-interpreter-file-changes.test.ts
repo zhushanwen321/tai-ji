@@ -6,8 +6,8 @@
  * - F2: ready 恒为链尾——accumulating 采集慢于 turn-end 到达时，ready 仍最后发出
  *       （串行链 by-construction；fire-and-forget 实现会让 ready 抢先 → 断言失败）
  * - F3: message.complete 先于 ready（complete 同步转发，ready 排链尾异步）
- * - F4: 跨回合代际守卫（仅 accumulating）——上回合挂起的 accumulating 在新 turn-start 后
- *       resolve，帧被丢弃（不串帧）；迟到的 ready 绕过守卫恒推，挂旧 messageId
+ * - F4: 跨回合代际检查（仅 accumulating）——上回合挂起的 accumulating 在新 turn-start 后
+ *       resolve，帧被丢弃（不串帧）；迟到的 ready 绕过检查恒推，挂旧 messageId
  *       （W18 review：ready 被 gen 丢弃会让变更集卡永久停在 accumulating）
  * - F5: turnFinalizing 压制——turn-end 后迟到的写工具 tool-call-end 不产生 accumulating 帧
  * - F6: 非 git 仓库（snapshot → null）→ 零 file_changes 帧
@@ -162,7 +162,7 @@ describe('EventInterpreter file_changes 帧序（W18 D3-3）', () => {
     expect(seq.indexOf('message.complete')).toBeLessThan(seq.lastIndexOf('message.file_changes'))
   })
 
-  it('F4a: 跨回合代际守卫（仅 accumulating）——上回合挂起的 accumulating 在新 turn-start 后 resolve，帧被丢弃（不串帧）', async () => {
+  it('F4a: 跨回合代际检查（仅 accumulating）——上回合挂起的 accumulating 在新 turn-start 后 resolve，帧被丢弃（不串帧）', async () => {
     const mock = createDiffMock()
     mock.setBehaviors([HOLD])
     const { interp, sent } = makeInterpreter(mock.impl)
@@ -182,7 +182,7 @@ describe('EventInterpreter file_changes 帧序（W18 D3-3）', () => {
     expect(sent.filter((m) => m.type === 'message.tool_call_end')).toHaveLength(1)
   })
 
-  it('F4b: 迟到的 ready 绕过代际守卫恒推——ready 排链后 turnGen++ 再 flush，ready 不丢且挂旧 messageId', async () => {
+  it('F4b: 迟到的 ready 绕过代际检查恒推——ready 排链后 turnGen++ 再 flush，ready 不丢且挂旧 messageId', async () => {
     const mock = createDiffMock()
     // 回合 1 的 accumulating + ready 采集都挂起
     mock.setBehaviors([HOLD, HOLD])
@@ -200,7 +200,7 @@ describe('EventInterpreter file_changes 帧序（W18 D3-3）', () => {
     mock.resolveHeld(1, snap({ 'a.ts': 'modified', 'b.ts': 'added' }))
     await flushMicrotasks()
 
-    // ready 不丢：若无「ready 绕过守卫」，本帧被 gen 静默丢弃 → 卡片永久停在 accumulating
+    // ready 不丢：若无「ready 绕过检查」，本帧被 gen 静默丢弃 → 卡片永久停在 accumulating
     const fcFrames = sent.filter((m) => m.type === 'message.file_changes')
     expect(fcFrames).toHaveLength(1)
     const ready = fcFrames[0].payload as { changeSetStatus: string; messageId: string; fileChanges: FileChange[] }

@@ -80,8 +80,8 @@ describe('isDangerousScheme', () => {
     it('只有空白', () => {
       expect(isDangerousScheme('   ')).toBe(false)
     })
-    it('非字符串（类型守卫）', () => {
-      // 类型守卫：string 参数下编译期已防，运行时仍兜底 undefined/null 误传
+    it('非字符串（类型检查）', () => {
+      // 类型检查：string 参数下编译期已防，运行时仍兜底 undefined/null 误传
       expect(isDangerousScheme(undefined as unknown as string)).toBe(false)
       expect(isDangerousScheme(null as unknown as string)).toBe(false)
     })

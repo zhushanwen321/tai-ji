@@ -14,7 +14,7 @@
  *   3. 删 session-reader 导出物（<agentDir>/tmp/session-view-<sid>.md，A21）。
  *   4. 删后台任务 registry 目录（<agentDir>/base-tool-enhance/<sid>/，A23）——
  *      先 await 收殓（幂等双跑：removeSessionEntry 已 fire-and-forget 挂过一次，
- *      此处显式 await 收口在途收殓，防删目录与终态写入竞态）再 rmSync。触发面
+ *      此处显式 await 收尾在途收殓，防删目录与终态写入竞态）再 rmSync。触发点
  *      天然收窄到真删除路径（restore 清场等 session 存活路径不经本模块，E8）。
  *   5. trash 主文件（rejection 原样上抛——G4：trash 失败必须让删除整体报失败，
  *      此时下挂已清、本体还在，重试删除即达终态）。
@@ -38,7 +38,7 @@
  * （session-lifecycle.ts，漏删线目录由启动孤儿补账 reconcileOrphanThreadDirs 兜底），
  * 即主删时 btw 线同批消亡、不存在「线仍存活引用子代理族而扫描看不见」的窗口。未来
  * btw 删除时序与主删解耦（closeAllForMain 移出 deleteSession 同批 / 异步延迟删线）时，
- * 扫描根必须扩为 sessions ∪ btw 两树，否则构成共享族误删面。
+ * 扫描根必须扩为 sessions ∪ btw 两树，否则构成共享族误删风险。
  */
 
 import { existsSync, readdirSync, readFileSync, rmSync, unlinkSync } from 'node:fs'
@@ -56,7 +56,7 @@ import { isEnoent } from '../../utils/errors.js'
 type SubagentRecordEntry = SubagentRecordRegisteredEntryData | SubagentRecordSettledEntryData
 
 /**
- * 子代理会话文件族 sidecar 扩展名名单——本名单是这些 sidecar 的唯一删除面
+ * 子代理会话文件族 sidecar 扩展名名单——本名单是这些 sidecar 的唯一删除点
  * （删主会话级联；外部删除主文件场景接受残留，2026-10-12 裁决）。
  *
  * 现役/退场锚定（防名单与 subagent-core 写点漂移）：
@@ -107,14 +107,14 @@ export type SessionContentCascadeInput = {
   sessionsRoot: string
   /**
    * active 分支语义：true = 主文件已不存在时整体零动作（现行 purgeActiveSessionFile
-   * 守卫「外部已删则整体零动作」）；false = scanned 分支语义（主文件不存在仍清孤儿
+   * 检查「外部已删则整体零动作」）；false = scanned 分支语义（主文件不存在仍清孤儿
    * sidecar，A21/A23 照清——session-view 与后台任务目录不依赖主文件内容）。
    */
   skipIfMainFileMissing: boolean
 }
 
-/** 依赖注入面（全部可注入——测试 zero mock-module、零真实数据目录）。 */
-export interface SessionContentCascadeDeps { // oe-exempt:20261012:framework:级联依赖注入面（lifecycle 组装注入 + 测试 fake，DI 端口先立单实现常态）
+/** 依赖注入范围（全部可注入——测试 zero mock-module、零真实数据目录）。 */
+export interface SessionContentCascadeDeps { // oe-exempt:20261012:framework:级联依赖注入范围（lifecycle 组装注入 + 测试 fake，DI 端口先立单实现常态）
   /** 主文件移入废纸篓（现行 sessionStore.trash；rejection 原样上抛，G4 语义）。 */
   trash: (filePath: string) => Promise<void>
   /** 主文件 sidecars 清理（session-lifecycle.purgeSessionSidecars 回调注入）。 */
@@ -198,7 +198,7 @@ export async function cascadeDeleteSessionContent(
   // 4. A21：session-reader 导出物（主会话的；子代理的在各族内顺带删）
   removeSessionViewExport(join(agentDir, SESSION_VIEW_TMP_DIRNAME, `session-view-${sessionId}.md`), failures, deps.warn)
 
-  // 5. A23：后台任务 registry 目录（先收殓后删目录——收口在途收殓，防竞态）
+  // 5. A23：后台任务 registry 目录（先收殓后删目录——收尾在途收殓，防竞态）
   await removeBackgroundTaskRegistryDir(agentDir, sessionId, deps)
 
   // 6. trash 主文件（rejection 上抛：下挂已清、本体还在的可恢复形态）
@@ -209,7 +209,7 @@ export async function cascadeDeleteSessionContent(
   // 7. 主文件 sidecars（scanned 分支主文件缺失时也照清孤儿 sidecar——原语义保持）
   deps.purgeMainSidecars(sessionFilePath)
 
-  // 汇总出声（失败必出声；成功+有删除也留一行观测面）
+  // 汇总出声（失败必出声；成功+有删除也留一行观测范围）
   if (failures.length > 0) {
     deps.warn(`[session-content-cascade] cascade finished with ${failures.length} failure(s) for session ${sessionId} ` +
       `(familiesDeleted=${result.subagentFamiliesDeleted} familiesProtected=${result.subagentFamiliesProtected}); ` +
@@ -255,7 +255,7 @@ function collectSubagentFamilyCandidates(
 }
 
 /**
- * 单行 → subagent-record 候选（type/customType/classify 逐层守卫；非命中返回 null）。
+ * 单行 → subagent-record 候选（type/customType/classify 逐层检查；非命中返回 null）。
  * 坏 id / 坏 sessionFile（白名单外 / 树外）丢弃该项并 console.warn（不可信源字段，
  * 对齐 session-records.ts 的 sessionFile 树内校验先例）。
  */
@@ -288,7 +288,7 @@ function parseSubagentRecordLine(line: string): SubagentFamilyCandidate | null {
  *
  * 形态参照 subagent-workflow extension 的 collectAliveWorkflowRunReferences（sessions
  * 根 + 全 slug 子目录 *.jsonl，逐行 JSON.parse），两处差异：
- * - 收集面：那边 workflow-record 三代；这边 subagent-record v2（registered id /
+ * - 收集侧：那边 workflow-record 三代；这边 subagent-record v2（registered id /
  *   settled id+sessionFile）。
  * - 失败语义反转（文件头已述）：任何文件读失败 / 坏行 → 返回 null（引用状态不可知），
  *   调用方放弃全部子代理族删除。
@@ -423,7 +423,7 @@ function deleteOneFamily(
       removeFileBestEffort(sessionFile + ext, label, result, deps)
     }
     // manifest 与 .events 与子会话文件同 enc 段（path-encoding.ts 布局不变量：
-    // records 与 sessions 同 <enc> 段物理相邻）——由 sessionFile 推导，无漂移面。
+    // records 与 sessions 同 <enc> 段物理相邻）——由 sessionFile 推导，无漂移情形。
     const recordsDir = join(dirname(sessionFile), '..', 'records')
     removeFileBestEffort(join(recordsDir, `${candidate.id}.json`), label, result, deps)
     removeFileBestEffort(join(recordsDir, `${candidate.id}${RECORD_EVENTS_SUFFIX}`), label, result, deps)
@@ -534,7 +534,7 @@ function removeSessionViewExport(
 /**
  * A23：后台任务 registry 目录删除（`<agentDir>/base-tool-enhance/<sessionId>/`）。
  * 先 await 收殓（removeSessionEntry 汇聚点已 fire-and-forget 过一次，此处幂等双跑
- * 收口「杀进程 + 写 orphaned 终态」的在途执行——目录删除先于收殓完成会让终态写入
+ * 收尾「杀进程 + 写 orphaned 终态」的在途执行——目录删除先于收殓完成会让终态写入
  * 撞已删目录），再整目录 rmSync（recursive + force，与既有目录级联同幂等形态）。
  * 收殓失败不阻断目录删除（进程已被杀，残留条目无属主；失败出声）。
  */
@@ -561,7 +561,7 @@ async function removeBackgroundTaskRegistryDir(
   }
 }
 
-// ── 守卫 helpers ──────────────────────────────────────────────────────────────
+// ── 检查 helpers ──────────────────────────────────────────────────────────────
 
 /** child 是否严格落在 parent 树内（resolve 归一 + 同前缀 + 非自身；session-records.ts 同式先例）。 */
 function isStrictlyUnder(parent: string, child: string): boolean {

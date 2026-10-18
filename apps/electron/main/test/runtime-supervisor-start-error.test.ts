@@ -57,7 +57,7 @@ vi.mock('../supervisor/liveness-probe.js', () => ({
 import { RuntimeSupervisor } from '../supervisor/runtime-supervisor.js'
 import { waitForHealth } from '../supervisor/health-checker.js'
 
-/** 最小 fake 窗口：捕获 webContents.send（runtime-error / runtime-port 推送断言面） */
+/** 最小 fake 窗口：捕获 webContents.send（runtime-error / runtime-port 推送断言范围） */
 function fakeWin(): { win: BrowserWindow; send: ReturnType<typeof vi.fn> } {
   const send = vi.fn()
   return { win: { webContents: { send } } as unknown as BrowserWindow, send }

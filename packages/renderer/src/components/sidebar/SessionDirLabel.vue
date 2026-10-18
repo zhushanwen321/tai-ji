@@ -16,7 +16,7 @@
          右贴由计数 span 的 ml-auto 承接；hover 显隐。
          [review MF-2] 删除按钮显隐由父级 isFolderDeleteAvailable 裁决（deleteAvailable）：
          removeByCwd 是 cwd 全量删除（项目无关），项目分组隐藏了部分 session 时点删除会
-         误删用户不可见的其他 project session；+ 按钮无此守卫。 -->
+         误删用户不可见的其他 project session；+ 按钮无此检查。 -->
     <div
       class="flex items-center gap-1"
       data-testid="folder-actions"
@@ -66,7 +66,7 @@ defineProps<{
   cwd: string
   /** 目录内会话数（静态计数） */
   count: number
-  /** 该 cwd 处于删除两段式确认态（父级 folderConfirmingCwd 投影） */
+  /** 该 cwd 处于删除两段式确认态（父级 folderConfirmingCwd 派生视图） */
   confirming: boolean
   /** 批量删除按钮显隐（review MF-2：组内可见数 = 该 cwd 全量数才可删） */
   deleteAvailable: boolean

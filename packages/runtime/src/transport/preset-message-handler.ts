@@ -80,7 +80,7 @@ export class PresetMessageHandler {
    * 分发表（复杂度债清偿 U07）：原 13 个 case 直排 switch（cyclo 19）改为查表 + 落空语义。
    * 表项 = 各 case 体逐字搬移到命名私有方法（同步 case 保持同步，微任务时序不变）；
    * 落空返回 false 与原 default 一致；异常统一走 sendPresetError（原 catch 块）。
-   * S-TR-2 参数化用例继续守卫 handles 清单与表的同步（漏登记的 type 会返回 false 落红）。
+   * S-TR-2 参数化用例继续检查 handles 清单与表的同步（漏登记的 type 会返回 false 落红）。
    */
   private readonly caseHandlers = new Map<string, PresetCaseHandler>([
     ['preset.list', (msg, ws) => this.replyList(msg as PresetMsg<'preset.list'>, ws)],

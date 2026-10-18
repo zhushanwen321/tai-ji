@@ -1,7 +1,7 @@
 /**
  * view-host-source.ts —— ViewHost 组件的数据源注入接口（W3 · T1，C2 契约）。
  *
- * 对齐 S2 plan IF10（ViewHostStore）消费面：getView(sessionId, viewId)。
+ * 对齐 S2 plan IF10（ViewHostStore）消费方：getView(sessionId, viewId)。
  * S2 的 ViewHostStore 类尚未交付（S2 W4 headless-consumers），本接口即 ui 侧消费契约：
  * 壳（P5）在 S2 落地后把真 store 适配注入（S4 TC4），单测注入 mock 实现。
  *
@@ -23,7 +23,7 @@ export interface ViewCacheEntry {
   updatedAt: number
 }
 
-/** ViewHost 数据源（对齐 S2 IF10 ViewHostStore 消费面）。 */
+/** ViewHost 数据源（对齐 S2 IF10 ViewHostStore 消费方）。 */
 export interface ViewHostSource {
   getView(sessionId: string, viewId: string): ViewCacheEntry | undefined
 

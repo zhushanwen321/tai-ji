@@ -46,8 +46,6 @@ export const GLOBAL_SLOT_KEYS = {
   channelHandshake: "@zhushanwen/subagent-core.channelHandshake",
   /** modelService：模型服务单例（execution/assembly/model-config-service.ts）。 */
   modelService: "@zhushanwen/subagent-core.model-service",
-  /** notifyLedger：通知账本（execution/notify/notify-ledger.ts）。 */
-  notifyLedger: "@zhushanwen/subagent-core.notifyLedger",
   /** service：subagent 服务单例（execution/service/service-bootstrap.ts）。 */
   service: "@zhushanwen/subagent-core.service",
   /**

@@ -1,11 +1,11 @@
 // companion-bridge —— 移动壳 companion 区（CompanionBand）的数据源与回传装配
 // （remote-use-mobile D7（移动壳 v1 功能集裁定）「ask-user 提问答复 ✅」行的壳侧拉通）+
 // 权限审批通道（同表「权限审批 ✅ 手机可批」行的壳侧拉通）+ form/planReview 类请求通道
-// （同表 form 行恢复任务：统一表单与 plan 审批的移动壳消费面，消除「请求方无限等待」）。
+// （同表 form 行恢复任务：统一表单与 plan 审批的移动壳消费方，消除「请求方无限等待」）。
 //
 // 对话桥翻译层（WS source 适配 + dialog source/transport 工厂 + requestId 反查表）已下沉
 // @taiji/ui/extension-host shell-adapters（双壳逐字节共享，含 [G1] 反查表泄漏语义文档）；
-// 权限审批编排状态机（bus 订阅 + 畸形事件守卫 + expired 撤窗 + transport 回传 +
+// 权限审批编排状态机（bus 订阅 + 畸形事件检查 + expired 撤窗 + transport 回传 +
 // BM3/D3 语义）已下沉同包 createPermissionRequestController（双壳共享，单测在同包
 // __tests__/）。本模块只做移动壳裁决：
 // - 简单 dialog 走 CompanionBand（C4 门固定排除面之内）；form/planReview 类请求被同一 C4
@@ -78,7 +78,7 @@ export const __testing = {
 // 作答失败反馈的唯一载体）──
 //
 // 状态承载 = ./error-bar 模块级单例（ref 单槽——与 app-runtime core toast 通道共用的
-// 单点出口，core 失败面文案经 toast 注入直入本槽）；views/ErrorBar.vue 纯展示消费
+// 单点出口，core 失败情形文案经 toast 注入直入本槽）；views/ErrorBar.vue 纯展示消费
 // （依赖方向 views → shell，与 App 消费 shell 状态同向），挂载与 effects 注入
 // 在 bootstrap/App（U6 接线）。单槽覆盖式 + 手动关闭（ErrorBar 关闭钮），不加自动消失
 // timer（时间平抑类逻辑红线）；onSessionError 的持久反馈在流内（markSessionError 追加
@@ -110,7 +110,7 @@ function notifyDialogResponseNotDelivered(_sessionId?: string): void {
   showErrorBar(t('mobile.errorBar.responseNotDelivered'))
 }
 
-/** bootstrap effects 注入面（U6 接线：`effects: { ...errorBarEffects, ... }`），签名对齐 core InboundEffects */
+/** bootstrap effects 注入点（U6 接线：`effects: { ...errorBarEffects, ... }`），签名对齐 core InboundEffects */
 export const errorBarEffects = {
   onSessionError: handleSessionError,
   onGlobalError: handleGlobalError,
@@ -142,7 +142,7 @@ export function useMobilePermissionRequest(): PermissionRequestState {
   return permissionController.state
 }
 
-// ── form/planReview 类请求通道（remote-use-mobile D7（移动壳 v1 功能集裁定）form 行恢复：统一表单 + plan 审批的移动壳消费面）──
+// ── form/planReview 类请求通道（remote-use-mobile D7（移动壳 v1 功能集裁定）form 行恢复：统一表单 + plan 审批的移动壳消费方）──
 //
 // 通道算法（C4 富交互门 / 快照对账差集剔除 / 失效摘除 / respond 未送达保留-送达摘除 /
 // 队首读口）已下沉 @taiji/ui/extension-host createFormRequestChannel（双壳单点，桌面
@@ -189,7 +189,7 @@ const formPartitions: FormChannelPartitions = {
 }
 
 /**
- * form 帧的公共读取面：bus ui-request 的 request（core DialogRequest，marker 键由索引签名
+ * form 帧的公共读侧：bus ui-request 的 request（core DialogRequest，marker 键由索引签名
  * 承载）与 getPendingRequests 快照条目（runtime {...r,...r.payload} 解包的 ExtensionUIRequest）
  * 的结构交集——适配器两源共用，零断言转换。
  */
@@ -207,7 +207,7 @@ type FormFrameSource = {
   selfReview?: unknown
 }
 
-/** 帧 → ExtensionUIRequest 适配（桌面 toExtensionUIRequest 的移动消费面子集：
+/** 帧 → ExtensionUIRequest 适配（桌面 toExtensionUIRequest 的移动消费方子集：
  *  只搬运本通道渲染/回传消费的字段，白名单外的载荷键不进分区） */
 function toMobileFormRequest(sid: string, request: FormFrameSource): ExtensionUIRequest {
   return {
@@ -314,7 +314,7 @@ export function resetCompanionChannelsForExitedSession(sid: string): void {
 export type MobileFormRequests = {
   /** 队首 form 类请求（form 帧 / legacy 归一帧；factory firstFormRequest 读口派生） */
   currentFormRequest: ComputedRef<ExtensionUIRequest | undefined>
-  /** 队首 planReview 审批请求（桌面 PlanReviewBar 消费面的移动形态） */
+  /** 队首 planReview 审批请求（桌面 PlanReviewBar 消费方的移动形态） */
   currentPlanReviewRequest: ComputedRef<PlanReviewFrameForView | undefined>
   /**
    * 作答回传（factory respond 核心流）：result 经 sendExtensionUIResponse（method 透传），
@@ -333,7 +333,7 @@ export type MobileFormRequests = {
   reconcileNow(): void
 }
 
-/** 视图消费的 planReview 帧窄化面（requestId + 守卫搬运的 selfReview） */
+/** 视图消费的 planReview 帧窄化面（requestId + 检查搬运的 selfReview） */
 export type PlanReviewFrameForView = {
   requestId: string
   selfReview?: string

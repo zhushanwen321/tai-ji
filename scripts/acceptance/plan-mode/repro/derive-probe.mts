@@ -3,7 +3,7 @@
  * session JSONL → **真实 runtime 派生函数** scanPlanStateEntries（plan-state-extractor）
  * → **真实 renderer 推导函数** derivePlanStage（plan-store）→ 输出 {view, stage}。
  *
- * 不重实现任何公式（零镜像面）——复现断言直接对着现版生产函数做。
+ * 不重实现任何公式（零镜像）——复现断言直接对着现版生产函数做。
  * cwd 需在 packages/renderer（plan-store 的 `@/` alias 靠 tsconfig paths 解析），
  * 本探针内部自行 chdir。
  *

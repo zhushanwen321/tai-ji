@@ -5,7 +5,7 @@
  * 契约两端（此前各持一份同构差集实现，对齐手段是注释）：
  *  - extension 侧：@zhushanwen/pi-base-tool-enhance 对账（原 collectUnsettledTaskIds：
  *    session_start 时对「entries 显示活跃但任务已终态」的 bt- 任务补写注销）
- *  - extension 侧：@zhushanwen/pi-pending-notifications 守卫判据（原
+ *  - extension 侧：@zhushanwen/pi-pending-notifications 检查判据（原
  *    scanPendingEntries + filterActiveRegisters；其 types/currentSessionId/normalize
  *    过滤是 pending 产品语义，留在 pending 侧，不在本模块）
  *
@@ -29,30 +29,83 @@ export interface CollectPendingIdsOptions {
   idPrefix?: string
 }
 
-/** scanPendingEntries 的结果：register 原始 data 列表 + 已注销 id 集合。 */
+/** scanPendingEntries 的结果：register 原始 data 列表 + 已注销 id 集 + collect 字段映射视图。 */
 export interface PendingEntriesScan {
   registerEntries: Array<{ data: Record<string, unknown> }>
   unregisteredIds: Set<string>
+  /**
+   * register 首见字段视图（MF-2-1 单点）：id → type（string 才收，原样透传——归一化
+   * 归消费方）。首见规则 = 首条 register 胜出：同 id 重复条目不覆盖；首条无 type
+   * 则该 id 恒无映射（不被后续重复条目补位——与 applyPendingDiff 的首条 data 语义
+   * 同口径，工具侧旧「首条带 type 胜出」的补位行为是漂移，收敛时已废除）。
+   */
+  registerTypes: Map<string, string>
+  /**
+   * 注销条目 status 视图：id → status（写侧经 mapReasonToStatus 已映射落盘）。仅收
+   * MAPPED_PENDING_STATUSES 成员（词表外/畸形不收，不虚构终态）；同 id 多条注销取
+   * 末次合法值（后条非法不抹除前条合法值）。
+   */
+  unregisterStatuses: Map<string, MappedPendingStatus>
 }
 
 /**
  * 单趟扫描 entries 按 customType 分流（容错对齐 pending 侧 S-10：null/非对象
- * 元素先守卫再访问字段）。register 侧不校验 id（合法性判定归差集层）；unregister
- * 仅收 string id。data 用最小结构类型 Record<string, unknown>，消费方自行窄化。
+ * 元素先检查再访问字段）。register 侧 registerEntries 不校验 id（合法性判定归差集
+ * 层）；unregister 仅收 string id。data 用最小结构类型 Record<string, unknown>，
+ * 消费方自行窄化。字段映射视图（registerTypes / unregisterStatuses）顺路产出：
+ * collect 链路的 type/outcome 映射规则单点在本次扫描（delivery-port 快照基线与
+ * pending-notifications 终局回填此前各持一份同构扫描器且首见语义已分歧，MF-2-1
+ * 收敛——消费方禁止本地复制映射段）。
  */
-export function scanPendingEntries(entries: unknown[]): PendingEntriesScan {
-  const scan: PendingEntriesScan = { registerEntries: [], unregisteredIds: new Set() }
+export function scanPendingEntries(entries: readonly unknown[]): PendingEntriesScan {
+  const scan: PendingEntriesScan = {
+    registerEntries: [],
+    unregisteredIds: new Set(),
+    registerTypes: new Map(),
+    unregisterStatuses: new Map(),
+  }
+  const seenRegisterIds = new Set<string>()
   for (const raw of entries) {
     if (!raw || typeof raw !== 'object') continue
     const entry = raw as { customType?: unknown; data?: unknown }
+    const data = (entry.data ?? {}) as Record<string, unknown>
     if (entry.customType === PENDING_REGISTER_ENTRY_TYPE) {
-      scan.registerEntries.push({ data: (entry.data ?? {}) as Record<string, unknown> })
+      scan.registerEntries.push({ data })
+      // 首见胜出（applyPendingDiff 首条 data 同口径）：占据即锁定，后续重复不覆盖；
+      // 首条无 type 则该 id 恒无映射（不补位）。字段视图跳过空串 id。
+      if (typeof data.id === 'string' && data.id !== '' && !seenRegisterIds.has(data.id)) {
+        seenRegisterIds.add(data.id)
+        if (typeof data.type === 'string') scan.registerTypes.set(data.id, data.type)
+      }
     } else if (entry.customType === PENDING_UNREGISTER_ENTRY_TYPE) {
-      const data = (entry.data ?? {}) as Record<string, unknown>
-      if (typeof data.id === 'string') scan.unregisteredIds.add(data.id)
+      if (typeof data.id === 'string') {
+        scan.unregisteredIds.add(data.id)
+        const status = data.status
+        // 字段视图同跳过空串 id；status 仅收词表成员（不虚构终态）
+        if (data.id !== '' && typeof status === 'string' && MAPPED_PENDING_STATUSES.has(status)) {
+          scan.unregisterStatuses.set(data.id, status as MappedPendingStatus)
+        }
+      }
     }
   }
   return scan
+}
+
+/** scanPendingFields 的结果：collect 链路消费的字段映射投影（首见 type + 注销 status）。 */
+export interface PendingFieldsScan {
+  registerTypes: Map<string, string>
+  unregisterStatuses: Map<string, MappedPendingStatus>
+}
+
+/**
+ * collect 终局回填的字段视图（MF-2-1 单点入口）：scanPendingEntries 产物中
+ * register 首见 type + 全部注销 status 的 MAPPED 成员投影。消费方（delivery-port
+ * 快照基线 / pending-notifications consume 后回填）按 id 查表补 type/outcome，
+ * 查无保持 undefined（诚实缺省，不虚构终态）。
+ */
+export function scanPendingFields(entries: readonly unknown[]): PendingFieldsScan {
+  const { registerTypes, unregisterStatuses } = scanPendingEntries(entries)
+  return { registerTypes, unregisterStatuses }
 }
 
 /**
@@ -149,3 +202,13 @@ export function mapReasonToStatus(reason: string): MappedPendingStatus {
   // 未知 reason → completed（与既有 switch default 同义：日终 summary 的兜底口径）
   return REASON_STATUS_MAP[reason] ?? 'completed'
 }
+
+/**
+ * MappedPendingStatus 的值集（MF-1-5 词表单源）：由 REASON_STATUS_MAP 派生——映射表
+ * 演化（新增 reason / 改映射目标）时值集构造性跟随，无第二份手工词表可漂移。消费方
+ * （delivery-port / pending-notifications 读取侧）按成员资格判定落盘 status 合法性时
+ * import 本常量，禁止本地复制六值 Set（曾两包各持一份本地拷贝注释自认「同步维护」）。
+ * Set 成员与 MappedPendingStatus 联合的相等性由 pending-entries.test.ts 断言锁定。
+ * string 元素类型是消费面要求（对任意落盘 status 做成员判定，窄化前的原始值）。
+ */
+export const MAPPED_PENDING_STATUSES: ReadonlySet<string> = new Set(Object.values(REASON_STATUS_MAP))

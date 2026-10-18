@@ -1,6 +1,6 @@
 // contract.read-degradation.test.ts —— conformance C5（read 降级链）：不 throw、
 // 坏 handle → 结构化降级（outcome-only）非崩溃、journal 重放与 live 一致
-// （重放等价性，§3.3.6——journal 重放与 live 通路共用同一 reducer 的断言面）。
+// （重放等价性，§3.3.6——journal 重放与 live 通路共用同一 reducer 的断言范围）。
 //
 // W10 协议黑盒化：read 的引擎内三级降级（①级 db / ②级 journal / ③级 outcome-only）
 // 随 W5/W7 归各引擎包（zcode zcode-engine-degrade / pi read-fallback）；core 协议层

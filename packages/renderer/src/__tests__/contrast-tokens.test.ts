@@ -6,7 +6,7 @@
  * ≥ 12:1、工具行（--neutral-mid）4–6:1、元信息（--neutral-dim）≥ 2.8:1；
  * 另含场景 1① 的纯计算形态 bg 分层方向断言（§3.1 分层/镜像规则）。
  * 开发期脚本形态 = .tmp/tech-design/ui-optimize-unified/verify-contrast.mjs
- * （不入库），本文件为其入库单测投影，两处阈值须同批维护。
+ * （不入库），本文件为其入库单测派生视图，两处阈值须同批维护。
  *
  * 亮色族 dim 档裁决（U3 实施期）：场景 1③ 的 2.8 阈值锚定自暗色族 #5c5c5c
  * （实测 2.85）；亮色族现行 --neutral-dim #9d9b96 实测 ≈2.57，强加 2.8 会与
@@ -17,7 +17,7 @@
  * 同构）：--md-code-bg 为 color-mix(in oklch, var(--code-c) N%, transparent) 形态，
  * --md-code-fg 为 color-mix(in oklch, var(--neutral-fg) 85%, var(--code-c)) 形态
  * （demo 令牌名 --fg 在本仓映射为 --neutral-fg）。两者均不走 REQUIRED_TOKENS 的 hex
- * 断言面，由本文件解析混合：底 = premultiplied alpha 的 sRGB 逐通道合成（与浏览器
+ * 断言范围，由本文件解析混合：底 = premultiplied alpha 的 sRGB 逐通道合成（与浏览器
  * 半透明背景合成公式一致）；字 = OKLab 三分量 lerp（color-mix(in oklch) 的浏览器
  * 混合空间，Björn Ottosson 线性空间矩阵），转 linear sRGB 算亮度。
  * 对比锚定（R4 公式重验，2026-10-17 六主题 v2 后）：暗色族 ≈11.4–11.9:1 / 皓 10.65 / 青墨 10.62 / 朱印 10.50，
@@ -109,7 +109,7 @@ const tokensByTheme = new Map<string, ThemeTokens>(THEMES.map((t) => [t.id, reso
 
 type ThemeEntry = (typeof THEMES)[number]
 
-/** color-mix 形态令牌的原始串解析（--accent/--md-code-* 不进 REQUIRED_TOKENS 的 hex 断言面） */
+/** color-mix 形态令牌的原始串解析（--accent/--md-code-* 不进 REQUIRED_TOKENS 的 hex 断言范围） */
 function parseThemeRawVars(theme: ThemeEntry, names: readonly string[]): Record<string, string> {
   const merged: Record<string, string> = {}
   for (const selector of theme.chain) {
@@ -136,7 +136,7 @@ function compositeOver(accentHex: string, alpha: number, baseHex: string): strin
 }
 
 describe('对比度令牌阈值（ui-optimize §4 场景 1③，宿主 = 对话流卡 --surface）', () => {
-  it('六主题级联解析健全：断言面 8 令牌全部为 hex 字面值', () => {
+  it('六主题级联解析健全：断言范围 8 令牌全部为 hex 字面值', () => {
     // 显式遍历断言（不依赖模块顶层构造期的校验副作用——那以文件级错误出现，不落在任何用例上）
     for (const theme of THEMES) {
       const t = tokensByTheme.get(theme.id)!

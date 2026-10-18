@@ -2,7 +2,7 @@
 //
 // 包内归一 adapter（form-adapter.ts）的映射规则单测——设计 ui-presentation-protocol
 // D2/D3：askUserInteract 退役后 AskUserQuestion↔FormQuestion 归一职责下沉本包。
-// 键位规则对拍基准 = e2e/ask-user-real.spec.ts A1 协议面：无 allowComment、Other 保留
+// 键位规则对拍基准 = e2e/ask-user-real.spec.ts A1 协议范围：无 allowComment、Other 保留
 // （__other 键）、多选 JSON 序列化。
 import { describe, expect, it } from "vitest";
 

@@ -1,14 +1,32 @@
-// src/__tests__/notify.test.ts —— M3 通知通路单元：
-// register emit 形态（数据流 ⑤）/ exit 边沿通知（⑧⑨，含 killed 不 sendMessage）/
-// 通知文案 / D17 pi 引用刷新 / 收殓路径补 emit（process-exit 不 sendMessage）
+// src/__tests__/notify.test.ts —— M3 通知入账单元（unified-delivery 波 3）：
+// register emit 形态（数据流 ⑤）/ exit 边沿入账（⑧⑨，含 killed 零投递零入账）/
+// port.deliver 接线（id=taskId、details 业务字段保持 + deliveryId 追加）/
+// port 缺席降级直发（设计 §3.7 缺席语义）/ 通知文案 / D17 pi 引用刷新（兜底通路）/
+// 收殓路径（process-exit 不经主路径，零投递零入账——对账承接）
+//
+// 主路径补投退役的丢失覆盖对位（D3 裁决 1，测试注释级）：
+//  - 「投递 throw」→ port 内核 retain 留账，settled / compaction 边沿与 session_start
+//    差集重放重投（delivery-port 包测试锁定）；
+//  - 「受理后未落盘即崩溃」→ 受理即已落盘（outbox appendEntry 先于受理；persist 失败
+//    = rejected 未受理）——落盘后的崩溃由 outbox 差集重放覆盖（delivery-port 的
+//    journal.test / delivery-port.test 重启用例锁定）；
+//  - 「进程死亡收殓终态（process-exit / orphaned）」→ 无 outbox 条目，重放无从覆盖，
+//    由对账路径补投（pending-reconcile.test.ts 锁定）；
+//  - rejected（本文件「rejected by delivery port」用例）= 幂等键未登记、无 outbox，
+//    通知丢失——warn 留痕即修复信号（登记丢失风险，与旧机制 throw 降级日志同型）。
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { killProcessTree } from "@zhushanwen/extension-protocol/background-task";
+import {
+	_resetDeliveryPortForTest,
+	bindDeliveryPort,
+	type DeliveryPortHost,
+} from "@zhushanwen/pi-delivery-port";
 import {
 	BACKGROUND_BASH_CUSTOM_TYPE,
 	buildNotificationContent,
@@ -30,6 +48,14 @@ import type { BackgroundTask } from "../background/types.ts";
 
 vi.setConfig({ testTimeout: 20000 });
 
+const { moduleLoggerMock } = vi.hoisted(() => ({
+	moduleLoggerMock: { debug: vi.fn(), warn: vi.fn(), error: vi.fn() },
+}));
+
+vi.mock("@zhushanwen/pi-extension-logger", () => ({
+	getLogger: () => moduleLoggerMock,
+}));
+
 const DATA_DIR = mkdtempSync(join(tmpdir(), "bte-notify-"));
 const SESSION_ID = "sess-notify";
 
@@ -47,10 +73,31 @@ function attach(pi: MockPi): void {
 	refreshPiReference(pi as unknown as ExtensionAPI);
 }
 
-/** 取第一条 sendMessage 的首参数对象（D1 details 断言入口）。 */
-function sentMessage(pi: MockPi): { content: string; details: unknown } {
-	const [message] = pi.sendMessage.mock.calls[0] as [{ content: string; details: unknown }, unknown];
-	return message;
+/** port 宿主 mock（结构满足 DeliveryPortHost；idle 恒真 = 提交即注入，免缓冲挂起）。 */
+function createPortHost(overrides: Partial<DeliveryPortHost> = {}): DeliveryPortHost & {
+	appendEntry: ReturnType<typeof vi.fn>;
+	sendMessage: ReturnType<typeof vi.fn>;
+} {
+	return {
+		appendEntry: vi.fn(),
+		readSessionEntries: () => [],
+		isIdle: () => true,
+		sendMessage: vi.fn(),
+		onMessageEnd: vi.fn(() => () => {}),
+		onAgentSettled: vi.fn(() => () => {}),
+		onSessionBeforeCompact: vi.fn(() => () => {}),
+		onSessionCompact: vi.fn(() => () => {}),
+		onSessionCompactFailed: vi.fn(() => () => {}),
+		hasRunningBackground: () => false,
+		logger: { warn: vi.fn(), debug: vi.fn() },
+		...overrides,
+	};
+}
+
+/** 装配进程级端口（主路径用例前置；afterEach 统一复位）。 */
+function attachPort(host = createPortHost()): typeof host {
+	bindDeliveryPort(host);
+	return host;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -107,6 +154,17 @@ function finalizedTask(overrides: Partial<BackgroundTask> = {}): BackgroundTask 
 	};
 }
 
+/** port 注入消息（host.sendMessage 首参——deliveryId 追加断言入口）。 */
+function portSentMessage(
+	host: ReturnType<typeof createPortHost>,
+): { customType: string; content: string; display: boolean; details: Record<string, unknown> } {
+	const [message] = host.sendMessage.mock.calls[0] as [
+		{ customType: string; content: string; display: boolean; details: Record<string, unknown> },
+		unknown,
+	];
+	return message;
+}
+
 function killLeftoverTasks(): void {
 	for (const task of getActiveTasks()) {
 		try {
@@ -126,6 +184,7 @@ afterEach(() => {
 	clearTaskStoreForTest();
 	setOnTaskExit(undefined);
 	resetNotifyForTest();
+	_resetDeliveryPortForTest();
 	vi.restoreAllMocks();
 });
 
@@ -171,27 +230,38 @@ describe("register emit (data flow ⑤)", () => {
 	});
 });
 
-describe("exit-edge notification (⑧⑨, exit-edge wiring)", () => {
-	it("natural exit 0: unregister emit reason 'completed' + sendMessage steer with exact params", async () => {
-		const pi = createMockPi();
-		attach(pi);
+describe("exit-edge notification via delivery port (⑧⑨, unified-delivery wave 3)", () => {
+	it("natural exit 0: port.deliver id=taskId — outbox before accept + steered injection with deliveryId appended", async () => {
+		const host = attachPort();
 		setOnTaskExit(handleTaskExit);
 		const spawned = spawnBg("sleep 0.1 && echo done");
 		if (!spawned.ok) throw new Error(spawned.error);
 		const { task } = spawned;
 
-		// 等到 exit 边沿收尾（handleTaskExit 同步完成 unregister emit + sendMessage）
+		// 等到 exit 边沿收尾（handleTaskExit 同步完成 unregister emit + port.deliver 入账）
 		await pollUntilTicked(
-			() => pi.events.emit.mock.calls.some((c) => c[0] === "pending:unregister"),
-			"pending:unregister (completed)",
+			() => host.sendMessage.mock.calls.length > 0,
+			"port injection (background-bash notify)",
 		);
 
-		expect(pi.events.emit).toHaveBeenCalledWith("pending:unregister", {
-			id: task.taskId,
-			reason: "completed",
-		});
-		expect(pi.sendMessage).toHaveBeenCalledTimes(1);
-		const [message, options] = pi.sendMessage.mock.calls[0] as [
+		// 受理前落盘（outbox 投递日志；payload.details = 业务原样，无 deliveryId）
+		expect(host.appendEntry).toHaveBeenCalledWith(
+			"delivery-port-outbox",
+			expect.objectContaining({
+				v: 2,
+				id: task.taskId,
+				timing: "steer",
+				payload: expect.objectContaining({
+					kind: "custom",
+					customType: BACKGROUND_BASH_CUSTOM_TYPE,
+					display: true,
+					details: expect.objectContaining({ taskId: task.taskId }),
+				}),
+			}),
+		);
+		// 直达唯一队列：steer 档注入形态与直发一致
+		expect(host.sendMessage).toHaveBeenCalledTimes(1);
+		const [message, options] = host.sendMessage.mock.calls[0] as [
 			{ customType: string; content: string; display: boolean; details: Record<string, unknown> },
 			{ deliverAs: string; triggerTurn: boolean },
 		];
@@ -201,20 +271,20 @@ describe("exit-edge notification (⑧⑨, exit-edge wiring)", () => {
 		expect(message.content).toContain("exit 0");
 		expect(message.content).toContain("done"); // tail 摘要
 		expect(options).toEqual({ deliverAs: "steer", triggerTurn: true });
-		// U1（D1）：真实 exit 边沿投递的 details 与终态条目逐字段一致（非 fixture 常量）
+		// details 业务字段与终态条目逐字段一致（非 fixture 常量）+ deliveryId 追加
 		const finalizedEntry = getTask(task.taskId);
 		expect(message.details).toMatchObject({
 			taskId: task.taskId,
 			command: "sleep 0.1 && echo done",
 			endReason: "natural",
 			exitCode: 0,
+			durationMs: finalizedEntry?.durationMs,
 		});
-		expect((message.details as { durationMs: number }).durationMs).toBe(finalizedEntry?.durationMs);
+		expect(message.details.deliveryId).toBe(task.taskId);
 	});
 
-	it("killed: emits unregister reason 'cancelled' but does NOT sendMessage (single-point rule)", async () => {
-		const pi = createMockPi();
-		attach(pi);
+	it("killed: emits unregister 'cancelled' but ZERO port submission (no outbox, no injection — silent rule)", async () => {
+		const host = attachPort();
 		setOnTaskExit(handleTaskExit);
 		const spawned = spawnBg("sleep 60");
 		if (!spawned.ok) throw new Error(spawned.error);
@@ -222,53 +292,90 @@ describe("exit-edge notification (⑧⑨, exit-edge wiring)", () => {
 
 		markKillingIntent(task.taskId, "killed");
 		killProcessTree(task.pid);
-		// 等到 kill 边沿收尾（SIGKILL 生效 + exit 事件终态化）
 		await pollUntilTicked(() => getTask(task.taskId)?.reason === "killed", "reason=killed finalization");
 
 		expect(getTask(task.taskId)?.reason).toBe("killed");
-		expect(pi.events.emit).toHaveBeenCalledWith("pending:unregister", {
-			id: task.taskId,
-			reason: "cancelled",
-		});
-		// kill 调用方就在当前 turn 等结果：sendMessage 双发是噪音，绝不发送
-		expect(pi.sendMessage).not.toHaveBeenCalled();
+		// kill 调用方就在当前 turn 等结果（result 类 silent，老能力映射 #10）：
+		// 零入账（无 outbox）零注入，emit unregister 照常（pending 观测点收尾）
+		expect(host.appendEntry).not.toHaveBeenCalledWith("delivery-port-outbox", expect.anything());
+		expect(host.sendMessage).not.toHaveBeenCalled();
 	});
 
-	it("timeout: still sends steer message with reason 'time_limited'", () => {
+	it("timeout: still notifies via port with 'timed out' content", () => {
+		const host = attachPort();
+		handleTaskExit(finalizedTask({ reason: "timeout", exitCode: null, durationMs: 15000 }));
+
+		expect(host.sendMessage).toHaveBeenCalledTimes(1);
+		const message = portSentMessage(host);
+		expect(message.content).toContain("timed out");
+		expect(message.details).toMatchObject({ endReason: "timeout", exitCode: null });
+	});
+
+	it("natural nonzero exit: content marks failure, details endReason stays 'natural'", () => {
+		const host = attachPort();
+		handleTaskExit(finalizedTask({ exitCode: 3, durationMs: 5000 }));
+
+		expect(host.sendMessage).toHaveBeenCalledTimes(1);
+		const message = portSentMessage(host);
+		expect(message.content).toContain("failed (exit 3,");
+		expect(message.details).toMatchObject({ taskId: "bt-1700000000-test01", endReason: "natural", exitCode: 3 });
+	});
+
+	it("rejected by delivery port (persist failure): notification lost, warn logged (registered loss surface)", () => {
+		const host = attachPort(
+			createPortHost({
+				appendEntry: vi.fn(() => {
+					throw new Error("session file unwritable");
+				}),
+			}),
+		);
+
+		expect(() => handleTaskExit(finalizedTask())).not.toThrow();
+		// rejected = 幂等键未登记、无 outbox 记录——重放无从覆盖的登记丢失风险
+		//（模块 logger warn 留痕即修复信号；port 侧另有 persist-failed warn 同栈落日志）
+		expect(host.sendMessage).not.toHaveBeenCalled();
+		expect(moduleLoggerMock.warn).toHaveBeenCalledWith(
+			"background task notify rejected by delivery port; notification lost (no outbox record)",
+			{ detail: { taskId: "bt-1700000000-test01", reason: "persist-failed" } },
+		);
+	});
+});
+
+describe("port-absent fallback (assembly anomaly window, §3.7 absence semantics)", () => {
+	it("port absent: direct steer fallback with exact params (at-most-once registered degradation)", () => {
 		const pi = createMockPi();
 		attach(pi);
-		handleTaskExit(finalizedTask({ reason: "timeout", exitCode: null, durationMs: 15000 }));
+		handleTaskExit(finalizedTask());
+
+		expect(pi.sendMessage).toHaveBeenCalledTimes(1);
+		const [message, options] = pi.sendMessage.mock.calls[0] as [
+			{ customType: string; content: string; display: boolean; details: Record<string, unknown> },
+			{ deliverAs: string; triggerTurn: boolean },
+		];
+		expect(message.customType).toBe(BACKGROUND_BASH_CUSTOM_TYPE);
+		expect(message.display).toBe(true);
+		expect(message.content).toContain("finished (exit 0, 3m12s)");
+		// 缺席兜底无 port 注入点：details = 业务原样（无 deliveryId）
+		expect(message.details).toEqual({
+			taskId: "bt-1700000000-test01",
+			command: "pnpm test",
+			durationMs: 192_000,
+			endReason: "natural",
+			exitCode: 0,
+		});
+		expect(options).toEqual({ deliverAs: "steer", triggerTurn: true });
+	});
+
+	it("port absent + killed: fallback path also silent (single-point rule holds in degraded mode)", () => {
+		const pi = createMockPi();
+		attach(pi);
+		handleTaskExit(finalizedTask({ reason: "killed", exitCode: null }));
 
 		expect(pi.events.emit).toHaveBeenCalledWith("pending:unregister", {
 			id: "bt-1700000000-test01",
-			reason: "time_limited",
+			reason: "cancelled",
 		});
-		expect(pi.sendMessage).toHaveBeenCalledTimes(1);
-		const [message] = pi.sendMessage.mock.calls[0] as [{ content: string }, unknown];
-		expect(message.content).toContain("timed out");
-	});
-
-	it("natural nonzero exit: reason 'failed', content marks failure", async () => {
-		const pi = createMockPi();
-		attach(pi);
-		setOnTaskExit(handleTaskExit);
-		// 断言只看 reason=failed 与文案 exit code，不依赖命令时长
-		const spawned = spawnBg("sleep 0.1; exit 3");
-		if (!spawned.ok) throw new Error(spawned.error);
-		const { task } = spawned;
-
-		// 等到 exit 边沿收尾（reason failed）
-		await pollUntilTicked(
-			() => pi.events.emit.mock.calls.some((c) => c[0] === "pending:unregister"),
-			"pending:unregister (failed)",
-		);
-
-		expect(pi.events.emit).toHaveBeenCalledWith("pending:unregister", {
-			id: task.taskId,
-			reason: "failed",
-		});
-		const [message] = pi.sendMessage.mock.calls[0] as [{ content: string }, unknown];
-		expect(message.content).toContain("failed (exit 3,");
+		expect(pi.sendMessage).not.toHaveBeenCalled();
 	});
 });
 
@@ -300,30 +407,24 @@ describe("notification content (§3.1 sample)", () => {
 	});
 });
 
-describe("notification details (D1 schema: taskId/command/durationMs/endReason/exitCode)", () => {
-	it("natural: details mirror the terminal task fields; content stays byte-identical (LLM payload)", () => {
-		const pi = createMockPi();
-		attach(pi);
-		const task = finalizedTask();
-		handleTaskExit(task);
+describe("notification details (D1 schema + deliveryId append; business fields byte-stable)", () => {
+	it("business five fields exactly (key-level) + deliveryId as the sole port-owned key", () => {
+		const host = attachPort();
+		handleTaskExit(finalizedTask());
 
-		const message = sentMessage(pi);
-		expect(message.details).toEqual({
-			taskId: task.taskId,
-			command: task.command,
-			durationMs: task.durationMs,
+		const message = portSentMessage(host);
+		// 业务五字段与 buildNotifyDetails 逐字段一致（D1 字面量镜像契约：消费侧
+		// parseBackgroundBashDetails 按 taskId/command/durationMs/endReason/exitCode 解析）
+		expect(message.details).toMatchObject({
+			taskId: "bt-1700000000-test01",
+			command: "pnpm test",
+			durationMs: 192_000,
 			endReason: "natural",
-			exitCode: task.exitCode,
+			exitCode: 0,
 		});
-		// 键级断言：D1 恰五字段，防字段悄悄混入（register emit 同款范式）
-		expect(Object.keys(message.details as Record<string, unknown>).sort()).toEqual([
-			"command",
-			"durationMs",
-			"endReason",
-			"exitCode",
-			"taskId",
-		]);
-		// content 是 triggerTurn:true 给 LLM 接力的载荷：挂 details 不得改动一个字节
+		// deliveryId = port 注入的送达凭据（§3.3 词条：身份由注入端附加，业务字段保持原样）
+		expect(message.details.deliveryId).toBe("bt-1700000000-test01");
+		// content 是 triggerTurn:true 给 LLM 接力的载荷：入账不得改动一个字节
 		expect(message.content).toBe(
 			"[background-bash] bt-1700000000-test01 finished (exit 0, 3m12s): pnpm test\n" +
 				"Last lines: Tests: 42 passed\n" +
@@ -331,12 +432,26 @@ describe("notification details (D1 schema: taskId/command/durationMs/endReason/e
 		);
 	});
 
-	it("natural nonzero exit: exitCode passes through unchanged, endReason stays 'natural'", () => {
-		const pi = createMockPi();
-		attach(pi);
-		handleTaskExit(finalizedTask({ exitCode: 3, durationMs: 5000 }));
+	it("outbox payload details stay business-only (deliveryId injected at kernel boundary, not persisted)", () => {
+		const host = attachPort();
+		handleTaskExit(finalizedTask());
 
-		expect(sentMessage(pi).details).toEqual({
+		const outboxCall = host.appendEntry.mock.calls.find((c) => c[0] === "delivery-port-outbox") as [
+			string,
+			{ payload: { details: Record<string, unknown> } },
+		];
+		expect(outboxCall).toBeDefined();
+		expect(Object.keys(outboxCall[1].payload.details).sort()).toEqual([
+			"command",
+			"durationMs",
+			"endReason",
+			"exitCode",
+			"taskId",
+		]);
+	});
+
+	it("natural nonzero exit: exitCode passes through unchanged, endReason stays 'natural'", () => {
+		expect(buildNotifyDetails(finalizedTask({ exitCode: 3, durationMs: 5000 }))).toEqual({
 			taskId: "bt-1700000000-test01",
 			command: "pnpm test",
 			durationMs: 5000,
@@ -346,11 +461,7 @@ describe("notification details (D1 schema: taskId/command/durationMs/endReason/e
 	});
 
 	it("timeout: endReason 'timeout' + exitCode null (D1 可空字段的 timeout 形态)", () => {
-		const pi = createMockPi();
-		attach(pi);
-		handleTaskExit(finalizedTask({ reason: "timeout", exitCode: null, durationMs: 15_000 }));
-
-		expect(sentMessage(pi).details).toEqual({
+		expect(buildNotifyDetails(finalizedTask({ reason: "timeout", exitCode: null, durationMs: 15_000 }))).toEqual({
 			taskId: "bt-1700000000-test01",
 			command: "pnpm test",
 			durationMs: 15_000,
@@ -364,8 +475,8 @@ describe("notification details (D1 schema: taskId/command/durationMs/endReason/e
 	});
 });
 
-describe("D17: pi reference refresh (session replacement takeover)", () => {
-	it("second load wins: notification goes through the NEW reference, old one untouched", () => {
+describe("D17: pi reference refresh (fallback-path takeover, session replacement)", () => {
+	it("second load wins: fallback notification goes through the NEW reference, old one untouched", () => {
 		const piA = createMockPi();
 		const piB = createMockPi();
 		attach(piA);
@@ -416,7 +527,7 @@ describe("D17: pi reference refresh (session replacement takeover)", () => {
 	});
 });
 
-describe("process-exit reap: best-effort unregister emit, no sendMessage", () => {
+describe("process-exit reap: best-effort unregister emit, ZERO notification (reconcile owns the notify)", () => {
 	it("reapBackgroundTasksNow emits pending:unregister reason 'cancelled' (process-exit)", async () => {
 		const { reapBackgroundTasksNow, resetProcessExitGuardForTest } = await import(
 			"../background/process-exit-guard.ts"
@@ -432,8 +543,25 @@ describe("process-exit reap: best-effort unregister emit, no sendMessage", () =>
 			id: spawned.task.taskId,
 			reason: "cancelled",
 		});
-		// 进程都退了，无投递目标：绝不 sendMessage
+		// 进程都退了，无投递目标：绝不 sendMessage（缺席兜底形态也不投）
 		expect(pi.sendMessage).not.toHaveBeenCalled();
+		resetProcessExitGuardForTest();
+	});
+
+	it("reap with port present: no outbox record either (terminated notify is reconcile-only, D3 adjudication 1)", async () => {
+		const { reapBackgroundTasksNow, resetProcessExitGuardForTest } = await import(
+			"../background/process-exit-guard.ts"
+		);
+		const host = attachPort();
+		const spawned = spawnBg("sleep 30");
+		if (!spawned.ok) throw new Error(spawned.error);
+
+		reapBackgroundTasksNow();
+
+		// 收殓路径零入账零注入：process-exit 终态通知由对账路径经 port 补投
+		// （pending-reconcile.test.ts 锁定），主路径（exit 边沿/收殓）恒静默
+		expect(host.appendEntry).not.toHaveBeenCalledWith("delivery-port-outbox", expect.anything());
+		expect(host.sendMessage).not.toHaveBeenCalled();
 		resetProcessExitGuardForTest();
 	});
 });

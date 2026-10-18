@@ -687,7 +687,7 @@ function buildReconciliationSection({ aggPath, fixResult, aggRound, fixRound }) 
  * 仅 round>1 使用；R1 保持现状全量深挖。
  */
 function buildR2ReviewPrompt({ header, round, max, roundDir, reportFile, aggPath, fixResult, aggRound, fixRound, knownRemaining, dormant, openIssues, reviewPrompt, reviewInstruction }) {
-  // 5.10 防注入：defer 理由自由文本是注入面（5.2-P3/5.10 不可信清单），必须包裹。
+  // 5.10 防注入：defer 理由自由文本是注入点（5.2-P3/5.10 不可信清单），必须包裹。
   const knownLines = knownRemaining && knownRemaining.length
     ? wrapUntrusted(knownRemaining.map((k) => "- " + k).join("\n"), "known_remaining")
     : "- (none)";
@@ -1266,7 +1266,7 @@ function filterAndBackfillGroups(rawGroups, activeIds) {
 }
 
 /** ③ 组间文件相交 → 传递闭包合并（reconcileGroups 子步骤）：并行 fixer 不编辑同一
- * 文件；groupFiles 为组→files 投影函数。 */
+ * 文件；groupFiles 为组→files 映射函数。 */
 function mergeOverlappingGroups(groups, groupFiles) {
   let mergedFlag = true;
   while (mergedFlag) {

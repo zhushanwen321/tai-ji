@@ -3,7 +3,7 @@
 // [U5 pi-workflow-run-resource-model] registry D6 改造 + routing 网关真实化单测
 //（impl-plan u5 验收 3/4；fake port，不拉真实进程）：
 //   1. per-window 引擎不进 singletons：getEngine 返回同步只读代理（capabilities /
-//      listModels / validateModel 直读 manifest 注册期快照——同步只读 3 处调用面零改动
+//      listModels / validateModel 直读 manifest 注册期快照——同步只读 3 处调用点零改动
 //      兼容）；连接级成员（probe/run/read/dispose）fail-fast 抛 WindowScopeEngineError
 //      并指路窗口实例解析；
 //   2. validateModel 的「catalog 省略 = 成员摘除」形态经代理保形；
@@ -147,14 +147,14 @@ afterEach(() => {
 // ── D6：getEngine 二分 ──────────────────────────────────────
 
 describe("registry D6：per-window 引擎不进 singletons，getEngine 返回同步只读代理", () => {
-  it("验收④a：per-window 引擎 getEngine → 代理同步只读直答（capabilities/listModels/validateModel 转发底层快照面），不抛不连", () => {
+  it("验收④a：per-window 引擎 getEngine → 代理同步只读直答（capabilities/listModels/validateModel 转发底层快照侧），不抛不连", () => {
     registerEngineDescriptor("pw", makeCliDescriptor("pw", {
       modelCatalog: { dynamic: false, models: [{ id: "only-model" }] },
     }));
     const engine = getEngine("pw");
     expect(engine.capabilities().conversation).toBe("native");
     // 「直读 manifest 快照」的成员实现语义由 remote-engine.test.ts 同步成员形态映射
-    // describe 承载；本用例锁定代理对同步只读成员的转发透明性（调用面零改动兼容）。
+    // describe 承载；本用例锁定代理对同步只读成员的转发透明性（调用点零改动兼容）。
     expect(engine.listModels!()).toEqual([{ id: "only-model" }]);
     expect(engine.validateModel!("only-model")).toEqual({ canonicalRef: "only-model" });
   });
@@ -194,7 +194,7 @@ describe("registry D6：per-window 引擎不进 singletons，getEngine 返回同
     registerEngineDescriptor("pw", makeCliDescriptor("pw"));
     const a = getEngine("pw");
     const b = getEngine("pw");
-    expect(a).toBe(b); // 代理实现缓存（纯快照读面）
+    expect(a).toBe(b); // 代理实现缓存（纯快照读侧）
 
     const sharedPort = new FakeWindowEnginePort("shared");
     registerEngineDescriptor("zcode-like", makeCliDescriptor("zcode-like", { processModel: "shared-service" }));

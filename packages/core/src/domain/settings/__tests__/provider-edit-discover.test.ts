@@ -25,7 +25,7 @@ import { createProviderEditDiscover, type ProviderEditDiscoverModule } from '../
 /** i18n stub：返回 key 本身（校验调用参数而非翻译）；调用记录在每用例 mount 时复位。 */
 const tStub = vi.fn((key: string) => key)
 
-// fake transport 工厂迁 ./helpers/fake-transport（[C3] seam 方法面全覆盖共享工厂）
+// fake transport 工厂迁 ./helpers/fake-transport（[C3] seam 方法侧全覆盖共享工厂）
 
 /** mountDiscover 挂载的 effectScope（afterEach 统一回收）。 */
 let scope: ReturnType<typeof effectScope> | null = null
@@ -83,7 +83,7 @@ function mountDiscover(options: {
   tStub.mockImplementation((key: string) => key)
   const providerRef = ref<ProviderInfo | null>(options.provider ?? makeProvider())
   const draft = reactive<ProviderEditFormDraft>(options.draft ?? makeDraft())
-  // 动作错误投影 stub（MF-1-7 写通道协议：report/clear 落到本地 ref 供断言）
+  // 动作错误派生视图 stub（MF-1-7 写通道协议：report/clear 落到本地 ref 供断言）
   const actionError = ref('')
   scope = effectScope()
   // effectScope.run 类型签名 T | undefined——活动 scope 内同步返回值恒非空

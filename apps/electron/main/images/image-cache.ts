@@ -66,7 +66,7 @@ const MIME_EXTENSIONS: Record<string, string> = {
   'image/gif': '.gif',
 }
 
-/** 本模块全部 fs 动作的参数面（测试注入 tmpdir；生产缺省动态推导）。 */
+/** 本模块全部 fs 动作的参数侧（测试注入 tmpdir；生产缺省动态推导）。 */
 export interface ImageCacheDirs {
   /** 数据根目录（缺省 getDataDir()） */
   dataDir?: string
@@ -124,7 +124,7 @@ export function sessionImageCacheBytes(sessionId: string, dirs: ImageCacheDirs =
  * 传新→旧序——帽满时最新图已落盘、更旧图占位（「最新内容优先可见」）。live 单图传单
  * 元素数组（剩余额度内即写）。
  *
- * **cached 先于判帽（U4 根修）**：64MB 满帽 session 重开/重放时已落盘图全部 hash 命中 →
+ * **cached 先于判帽（U4 从根源修复）**：64MB 满帽 session 重开/重放时已落盘图全部 hash 命中 →
  * 零占位；帽判定只作用于真正要写的新图。曾因帽预检先于 hash 探测，满帽 session 重开把
  * 已落盘图误判 quota-full 致 renderer 重启后重图误占位。
  */
@@ -206,7 +206,7 @@ function sessionFileNameMatchesDir(fileName: string, dirName: string): boolean {
 /**
  * sessions 树枚举/条目探测失败（readdir / statSync）是否按「会话文件可能存在」保守保护：
  * ENOENT = 目录未建立（pi 延迟写入窗口下合法
- * 不存在）或枚举后条目已被并发删除（合法窗口）；其他错误码（EACCES 等）= 枚举面未知
+ * 不存在）或枚举后条目已被并发删除（合法窗口）；其他错误码（EACCES 等）= 枚举侧未知
  * → 保守保护并 console.warn 出声（静默保护会让枚举故障不可见）。
  */
 function readdirFailureMeansSessionFileMayExist(dir: string, err: unknown): boolean {

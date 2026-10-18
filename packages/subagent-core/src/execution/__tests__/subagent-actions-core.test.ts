@@ -2,7 +2,7 @@
 //
 // ⛔4 行为快照等值测试（sink 设计 docs/design/subagent-core-sink-design.md（已删，git 可追溯） §5.4 ⛔4 /
 // impl-plan u-core-actions）：六 handler（start/list/cancel/message/close/fork-from）
-// 的校验、守卫链、归属判定、终态映射，迁移前后行为逐项一致。
+// 的校验、检查链、归属判定、终态映射，迁移前后行为逐项一致。
 //
 // 期望值形态：**硬编码自 pi-sw 现实现（extensions/universal/subagent-workflow
 // src/interface/subagent-actions.ts）迁移前实测输出**——临时探针以 stub SubagentService
@@ -135,7 +135,7 @@ function makeRec(over: Partial<SubagentRecord> = {}): SubagentRecord {
 }
 
 function makeService(over: Record<string, unknown> = {}): SubagentService {
-  // 聚合面形态对齐 subagent-service.ts D4：queries（读模型）与 chatActions（对话
+  // 聚合范围形态对齐 subagent-service.ts D4：queries（读模型）与 chatActions（对话
   // action 面）分组挂载，mock 按同构 key 装配（over 仍传平铺 key，最小化快照用例改动）。
   const m = {
     execute: vi.fn(),
@@ -148,7 +148,7 @@ function makeService(over: Record<string, unknown> = {}): SubagentService {
     closeSubagent: vi.fn(),
     deliverChatMessage: vi.fn(),
     // [modeless 波1] messageHandler 的引擎轴资格判据读 service.engineSupportsConversation
-    //（stub 缺省放行 = pi 默认引擎语义；拒绝面专项见 conversation-continuation.test.ts）。
+    //（stub 缺省放行 = pi 默认引擎语义；拒绝情形专项见 conversation-continuation.test.ts）。
     engineSupportsConversation: vi.fn(() => true),
     ...over,
   };
@@ -156,7 +156,7 @@ function makeService(over: Record<string, unknown> = {}): SubagentService {
     execute: m.execute,
     cancel: m.cancel,
     // [modeless 波1] messageHandler 引擎轴资格判据经平铺访问器（真实 service 为
-    // 平铺方法，非 queries/chatActions 聚合面成员），stub 须同构挂载。
+    // 平铺方法，非 queries/chatActions 聚合范围成员），stub 须同构挂载。
     engineSupportsConversation: m.engineSupportsConversation,
     queries: {
       findRecord: m.findRecord,
@@ -189,7 +189,7 @@ async function errOf(fn: () => unknown): Promise<{ errorName: string; message: s
 const CTX_MODEL = { id: "m1", name: "Model One", provider: "prov", reasoning: true };
 
 // ============================================================
-// 终态映射 / list 投影
+// 终态映射 / list 派生视图
 // ============================================================
 describe("⛔4 mapExternalState / recordToListItem（终态映射，快照 = pi-sw 实测）", () => {
   it("ExecutionStatus → ExternalState 两态映射", () => {
@@ -381,7 +381,7 @@ describe("⛔4 startHandler（校验 + 启动，快照 = pi-sw 实测）", () =>
       ctxModel: CTX_MODEL,
       signal,
     });
-    // 常量与响应同源（宿主 adapter 复用面）
+    // 常量与响应同源（宿主 adapter 复用范围）
     expect(BG_MESSAGE).toBe("detached, will notify on completion (auto-injected message, do not poll)");
     expect(NOTIFY_CONTRACT).toBe("ledger+at-least-once");
   });
@@ -410,7 +410,7 @@ describe("⛔4 startHandler（校验 + 启动，快照 = pi-sw 实测）", () =>
 // listHandler
 // ============================================================
 describe("⛔4 listHandler（limit 夹紧 + 过滤 + enrich，快照 = pi-sw 实测）", () => {
-  it("includeFinished:true → collectRecords(20,'all') + getFullRecord 补全投影", () => {
+  it("includeFinished:true → collectRecords(20,'all') + getFullRecord 补全派生视图", () => {
     const collectRecords = vi.fn(() => [
       makeRec({ id: "bg-1", slug: "one" }),
       makeRec({ id: "bg-2", slug: "two", status: "idle", closedReason: "gc", endedAt: 5000 }),
@@ -454,7 +454,7 @@ describe("⛔4 listHandler（limit 夹紧 + 过滤 + enrich，快照 = pi-sw 实
       },
     });
     expect(collectRecords).toHaveBeenCalledWith(20, "all", false);
-    // light record（getFullRecord undefined）回退原样投影
+    // light record（getFullRecord undefined）回退原样派生视图
     expect(getFullRecord).toHaveBeenCalledWith("bg-2");
   });
 
@@ -477,7 +477,7 @@ describe("⛔4 listHandler（limit 夹紧 + 过滤 + enrich，快照 = pi-sw 实
     expect(MAX_LIST_LIMIT).toBe(100);
   });
 
-  it("空列表 → response 形态 { running: 0, items: [] }（LLM 消费面契约）", () => {
+  it("空列表 → response 形态 { running: 0, items: [] }（LLM 消费方契约）", () => {
     expect(
       listHandler(makeService({ collectRecords: vi.fn(() => [] as SubagentRecord[]) }), { includeFinished: true }),
     ).toEqual({ response: { running: 0, items: [] } });
@@ -504,7 +504,7 @@ describe("⛔4 listHandler（limit 夹紧 + 过滤 + enrich，快照 = pi-sw 实
     expect(r.response.items.map((i) => i.subagentId)).toEqual(["old", "new"]);
   });
 
-  it("includeWorkflow:true → collectRecords 第三参 true（workflow record 投影放行，排查通道）", () => {
+  it("includeWorkflow:true → collectRecords 第三参 true（workflow record 派生视图放行，排查通道）", () => {
     // 过滤责任在 store 层（collectRecords 第三参），listHandler 只透传——stub 按第三参
     // 分流返回，模拟 store 的 includeWorkflow 放行形态。
     const toolRecord = makeRec({ id: "tool-1", startedAt: 1 });
@@ -519,7 +519,7 @@ describe("⛔4 listHandler（limit 夹紧 + 过滤 + enrich，快照 = pi-sw 实
 // ============================================================
 // cancelHandler
 // ============================================================
-describe("⛔4 cancelHandler（守卫 + 归属判定 + CAS 失败映射，快照 = pi-sw 实测）", () => {
+describe("⛔4 cancelHandler（检查 + 归属判定 + CAS 失败映射，快照 = pi-sw 实测）", () => {
   it("id 空白 → 逐字错误文案", async () => {
     expect(await errOf(() => cancelHandler(makeService(), { subagentId: "   " }))).toEqual({
       errorName: "Error",
@@ -567,12 +567,12 @@ describe("⛔4 cancelHandler（守卫 + 归属判定 + CAS 失败映射，快照
     });
   });
 
-  it("mode 非 background → unsupported mode 文案（守卫分支完整性）", async () => {
+  it("mode 非 background → unsupported mode 文案（检查分支完整性）", async () => {
     expect(
       await errOf(() =>
         cancelHandler(
           // "sync" 是历史已裁撤值（ExecutionMode 现仅 "background"）——经 as never
-          // 注入非法值专测守卫分支，运行时守卫按 !== "background" 拦截
+          // 注入非法值专测检查分支，运行时检查按 !== "background" 拦截
           makeService({ findRecord: vi.fn(() => makeRec({ id: "bg-1", mode: "sync" as never })) }),
           { subagentId: "bg-1" },
         ),
@@ -583,7 +583,7 @@ describe("⛔4 cancelHandler（守卫 + 归属判定 + CAS 失败映射，快照
     });
   });
 
-  it("[modeless 波1] cancel 语义统一：record（running）→ service.cancel 打断在飞轮（无 close 别名归档）", async () => {
+  it("[modeless 波1] cancel 语义统一：record（running）→ service.cancel 打断在途轮（无 close 别名归档）", async () => {
     const closeSubagent = vi.fn(async () => {});
     const r = await cancelHandler(
       makeService({
@@ -661,7 +661,7 @@ describe("⛔4 cancelHandler（守卫 + 归属判定 + CAS 失败映射，快照
 // ============================================================
 // messageHandler + endedMessageGuard（归属判定 + 文案分流）
 // ============================================================
-describe("⛔4 messageHandler（守卫 + upgrade + 投递，快照 = pi-sw 实测）", () => {
+describe("⛔4 messageHandler（检查 + upgrade + 投递，快照 = pi-sw 实测）", () => {
   it("id/text 空白 → 逐字错误文案", async () => {
     expect(await errOf(() => messageHandler(makeService(), { subagentId: "  ", text: "hi" }))).toEqual({
       errorName: "Error",
@@ -736,7 +736,7 @@ describe("⛔4 messageHandler（守卫 + upgrade + 投递，快照 = pi-sw 实�
         makeService({
           getRecordForAction: vi.fn(() => corrupt),
           deliverChatMessage,
-          // 资格判据拒绝 → 拒绝文案的引擎 id 解析点被损坏守卫拦截
+          // 资格判据拒绝 → 拒绝文案的引擎 id 解析点被损坏检查拦截
           engineSupportsConversation: vi.fn(() => false),
         }),
         { subagentId: "bg-corrupt", text: "hi" },
@@ -767,9 +767,9 @@ describe("⛔4 messageHandler（守卫 + upgrade + 投递，快照 = pi-sw 实�
   });
 
   // [round2-notify-fix 合并注] 原「collect:'sync' 批成员硬拒续聊」回归锁随 modeless
-  // 波1/波3 删除：chatMode/collectMode 字段消亡，sync 批成员批闭合即自动归档、通知走
+  // 波1/波3 删除：chatMode/collectMode 字段消亡，sync 批成员批完成即自动归档、通知走
   // 统一轮终形态（批缓冲路由面消亡），message 对任何归属内 record 直接续聊——被锁的
-  // 守卫行为是 main 设计上有意移除的，不再保留测试。
+  // 检查行为是 main 设计上有意移除的，不再保留测试。
 
   it("getRecordForAction 拒绝 + 无终态快照 → 原错误透传（文案最准原则）", async () => {
     expect(
@@ -920,10 +920,10 @@ describe("⛔4 closeHandler（force 语义透传，快照 = pi-sw 实测）", ()
 });
 
 // ============================================================
-// forkFromHandler（守卫链 1–6）
+// forkFromHandler（检查链 1–6）
 // ============================================================
-describe("⛔4 forkFromHandler（守卫链 + slug 派生 + prompt 包装，快照 = pi-sw 实测）", () => {
-  // [U4b/E2] 双宿主探针 fixture 目录：守卫 3 现查探针读真实 .alive 侧车（不再读
+describe("⛔4 forkFromHandler（检查链 + slug 派生 + prompt 包装，快照 = pi-sw 实测）", () => {
+  // [U4b/E2] 双宿主探针 fixture 目录：检查 3 现查探针读真实 .alive 侧车（不再读
   // rec.externalInstance 缓存字段），用临时目录落盘驱动，自建自删。
   let forkDir: string;
   /** [U4] 锚可解析性 fixture（fork-from 正常路径要求源文件真实在盘）。 */
@@ -957,7 +957,7 @@ describe("⛔4 forkFromHandler（守卫链 + slug 派生 + prompt 包装，快�
     });
   });
 
-  it("守卫 1：本进程内存 running → still-active 文案", async () => {
+  it("检查 1：本进程内存 running → still-active 文案", async () => {
     expect(
       await errOf(() =>
         forkFromHandler(makeForkService(undefined, undefined, makeRec({ id: "bg-1" })), { sourceSubagentId: "bg-1" }),
@@ -970,7 +970,7 @@ describe("⛔4 forkFromHandler（守卫链 + slug 派生 + prompt 包装，快�
     });
   });
 
-  it("守卫 2：全态查无 → garbage-collected 文案", async () => {
+  it("检查 2：全态查无 → garbage-collected 文案", async () => {
     expect(await errOf(() => forkFromHandler(makeForkService(undefined), { sourceSubagentId: "bg-404" }))).toEqual({
       errorName: "Error",
       message:
@@ -979,9 +979,9 @@ describe("⛔4 forkFromHandler（守卫链 + slug 派生 + prompt 包装，快�
     });
   });
 
-  it("[R5] 守卫 3：zcode 源 → fork 通道未接入文案（准确理由 + 行动语言，无 retention 误导文字）", async () => {
+  it("[R5] 检查 3：zcode 源 → fork 通道未接入文案（准确理由 + 行动语言，无 retention 误导文字）", async () => {
     // zcode 形态：sessionFile 恒 undefined，历史在隔离 sqlite 会话库（engineHandle.sessionRef）。
-    // 旧链路下该形态落守卫 6 锚判据，文案「never started / retention expired」对 zcode 失实
+    // 旧链路下该形态落检查 6 锚判据，文案「never started / retention expired」对 zcode 失实
     // （历史不随 pi retention 回收，真实原因是 fork 通道未接入）——zcode 按引擎早分流给出准确理由。
     const r = await errOf(() =>
       forkFromHandler(
@@ -1010,8 +1010,8 @@ describe("⛔4 forkFromHandler（守卫链 + slug 派生 + prompt 包装，快�
     expect(r.message).toContain("action:'start'");
   });
 
-  it("[R5] 守卫 3 先于 worktree 守卫：zcode + worktree 源 → 仍是 zcode 通道文案（worktree 文案对 zcode 失实）", async () => {
-    // 分流位置在 worktree 守卫之前（设计 §5 W4：worktree 文案的「read its session file」
+  it("[R5] 检查 3 先于 worktree 检查：zcode + worktree 源 → 仍是 zcode 通道文案（worktree 文案对 zcode 失实）", async () => {
+    // 分流位置在 worktree 检查之前（设计 §5 W4：worktree 文案的「read its session file」
     // 行动语言对 zcode 无意义——zcode 无 sessionFile 载体）
     const r = await errOf(() =>
       forkFromHandler(
@@ -1033,9 +1033,9 @@ describe("⛔4 forkFromHandler（守卫链 + slug 派生 + prompt 包装，快�
     expect(r.message).not.toContain("worktree isolation");
   });
 
-  it("守卫 4：异进程活实例（.alive 恒活外部 pid）→ another-process 文案（双宿主形态）", async () => {
+  it("检查 4：异进程活实例（.alive 恒活外部 pid）→ another-process 文案（双宿主形态）", async () => {
     // [U4b/E2] 双宿主形态：宿主 A 持有中的 record（.alive = A 进程的活 pid 声明）被
-    // 宿主 B 冷查重建，B fork-from 该源时守卫 4 现查探针命中 → 拒绝（源仍在异进程
+    // 宿主 B 冷查重建，B fork-from 该源时检查 4 现查探针命中 → 拒绝（源仍在异进程
     // 运行，接续会读到半截历史）。[U1/A4] self-pid 排除后「异进程」不能用本测试进程
     // pid 模拟，改恒活外部 pid 1（launchd/init：kill(1,0) → EPERM → isProcessAlive 判活）。
     const sessionFile = path.join(forkDir, "sess-foreign.jsonl");
@@ -1055,7 +1055,7 @@ describe("⛔4 forkFromHandler（守卫链 + slug 派生 + prompt 包装，快�
     });
   });
 
-  it("守卫 4 不误伤：running 快照（无活 pid，跨重启重建）放行 → 正常 fork", async () => {
+  it("检查 4 不误伤：running 快照（无活 pid，跨重启重建）放行 → 正常 fork", async () => {
     // [U4] 锚可解析性要求源 sessionFile 真实在盘（isAnchorResolvable = existsSync）。
     const sessionFile = path.join(forkDir, "sess-live.jsonl");
     fs.writeFileSync(sessionFile, "{}\n", "utf-8");
@@ -1071,8 +1071,8 @@ describe("⛔4 forkFromHandler（守卫链 + slug 派生 + prompt 包装，快�
     });
   });
 
-  it("[U4 守卫 4 删除] cancelled / user-close 源 → fork-from 放行（万物可续后对任何 idle record 分叉）", async () => {
-    // [U4 / §3.2.3] 主动告别不再是 fork 例外：守卫 4 随形态枚举 gate 消亡——
+  it("[U4 检查 4 删除] cancelled / user-close 源 → fork-from 放行（万物可续后对任何 idle record 分叉）", async () => {
+    // [U4 / §3.2.3] 主动告别不再是 fork 例外：检查 4 随形态枚举 gate 消亡——
     // message 与 fork-from 的「guard 一致性拒绝」双双转为放行。
     const sessionFile = path.join(forkDir, "sess-closed.jsonl");
     fs.writeFileSync(sessionFile, "{}\n", "utf-8");
@@ -1093,7 +1093,7 @@ describe("⛔4 forkFromHandler（守卫链 + slug 派生 + prompt 包装，快�
     }
   });
 
-  it("守卫 5：worktree 记录 → isolation-lost 文案（含 sessionFile 路径插值）", async () => {
+  it("检查 5：worktree 记录 → isolation-lost 文案（含 sessionFile 路径插值）", async () => {
     expect(
       await errOf(() =>
         forkFromHandler(
@@ -1111,7 +1111,7 @@ describe("⛔4 forkFromHandler（守卫链 + slug 派生 + prompt 包装，快�
     });
   });
 
-  it("[U4 守卫 6 锚判据化] 锚不可解析（字段缺失 / 文件被回收）→ 引导 message reopen 语义而非 start fresh", async () => {
+  it("[U4 检查 6 锚判据化] 锚不可解析（字段缺失 / 文件被回收）→ 引导 message reopen 语义而非 start fresh", async () => {
     const expectedMessage =
       "subagent bg-1 has no transcript history left to fork from (it never started, or the transcript " +
       "was collected after its retention expired). " +

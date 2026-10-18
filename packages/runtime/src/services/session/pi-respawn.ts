@@ -13,7 +13,7 @@
  *
  * 挂点（D7-① 沿用）：SessionService 构造器的 pm.onSessionExit 链尾部（exit 回调只对
  * 「非 intentional destroy」通知——forceQuitSession 在 message-dispatcher 手工编排、exit
- * 事件被 _killing/processes.has 双层守卫拦截，不经本链）。
+ * 事件被 _killing/processes.has 双层检查拦截，不经本链）。
  *
  * 消息推送（仓规规则 7）：session.restored 必带 sessionId，经 messageBus session 级 publish
  * （stream topic 入 ring，断连重连回放可见）。
@@ -23,7 +23,7 @@ import type { ServerMessage } from '@taiji/shared'
 /** 恢复编排依赖（窄接口注入，SessionService 组装——与 traceSync/records 的 deps 形态一致）。 */
 export interface RespawnDeps {
   /** session 是否有活进程（true = 已恢复/用户已惰性恢复）。
-   *  可选调用语义由组装方保证（port 缺失按 false 继续，守卫不得成为崩溃链新故障源）。 */
+   *  可选调用语义由组装方保证（port 缺失按 false 继续，检查不得成为崩溃链新故障源）。 */
   isActive: (sessionId: string) => boolean
   /**
    * 恢复动作内核（复用惰性恢复内核 facade.restoreSession——附着自动走 u4c 预算化路径）。
@@ -35,7 +35,7 @@ export interface RespawnDeps {
 }
 
 /**
- * 崩溃终态命运事件（notify-once D5 death 收口挂点）：组合根 index.ts 据以判定子会话
+ * 崩溃终态命运事件（notify-once D5 death 收尾挂点）：组合根 index.ts 据以判定子会话
  * 进程死亡是否发声——
  * - 'recovered'：session 活跃/恢复中（惰性恢复在跑将复活）——静默，丢弃退出现场 stash；
  * - 'terminal'：崩溃上报——按不可恢复 crash 发声（携原 crash 的 exitCode/stderrTail
@@ -89,7 +89,7 @@ export class RespawnOrchestrator {
    * 崩溃挂点入口（onSessionExit 链尾部调用）：显式上报崩溃（ADR-0122——原 5s 延迟自动
    * 恢复调度已退役），恢复决策归用户。
    *
-   * 上报前守卫：
+   * 上报前检查：
    * - 活跃（pm.hasClient）→ 无需上报（防御位：exit 链已清 processes，正常不可达）；
    * - in-flight 恢复（restoringSessions）→ 用户先发消息触发的惰性恢复在跑，session 将
    *   复活——静默不发声（stash 丢弃）。
@@ -128,7 +128,7 @@ export class RespawnOrchestrator {
   }
 
   /**
-   * 惰性恢复内核（u8 D7-③ join，原 SessionService.ensureActive 的 restore 腿接管）：
+   * 惰性恢复内核（u8 D7-③ join，原 SessionService.ensureActive 的 restore 路径接管）：
    * 无 in-flight → 登记并执行 restore；已有 in-flight → join（返回并等待同一 Promise，
    * 不报错不双跑——恢复进行中用户发消息，等恢复完成后继续）；原恢复失败则 join 方得到
    * 同一失败（不吞错）。
@@ -150,14 +150,14 @@ export class RespawnOrchestrator {
     try {
       await restorePromise
     } finally {
-      // 身份守卫：只清自己登记的条目（防并发清理路径误删他人的 in-flight）。
+      // 身份检查：只清自己登记的条目（防并发清理路径误删他人的 in-flight）。
       if (this.restoringSessions.get(sessionId) === restorePromise) {
         this.restoringSessions.delete(sessionId)
       }
     }
   }
 
-  /** 是否有 in-flight 恢复（crashExit 守卫 + 组装方可查询）。 */
+  /** 是否有 in-flight 恢复（crashExit 检查 + 组装方可查询）。 */
   isRestoring(sessionId: string): boolean {
     return this.restoringSessions.has(sessionId)
   }

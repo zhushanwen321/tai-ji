@@ -3,16 +3,16 @@
  *
  * 根因：徽标 generatedTokens
  * = deriveTurnAggregates Σ Message.usage.outputTokens。重放径逐条 assistant entry 带 usage
- * （reducer usageField），求和天然完整；live 径的 usage 唯一写入点是 message.complete 收口
+ * （reducer usageField），求和天然完整；live 径的 usage 唯一写入点是 message.complete 收尾
  * （terminalMessagePatch 回填末位 assistant），此前 payload.usage = 末次调用量 → 多 LLM
  * 调用 turn 的 live 值结构性偏小。修复后 runtime sumTurnUsage 在 event-adapter 对
  * agent_end.messages 全部 assistant 调用求和（runtime 侧断言见 event-adapter-turn-usage-sum
  * 测试），本文件锁两端组合后的聚合一致性：
  *
- * - live 腿：多调用 turn 的 ref 形态（中间 assistant 气泡无 usage——live 唯一 usage 写入点
- *   是末位收口）+ terminalMessagePatch（payload.usage = turn 累计，即 runtime 产物）；
- * - reload 腿：同 turn 的 session JSONL entries 经 replayEntries（逐条 entry 自带 usage）；
- * - 两腿 deriveTurnAggregates().generatedTokens 全等，且等于全部调用之和（非末次调用量）。
+ * - live 路径：多调用 turn 的 ref 形态（中间 assistant 气泡无 usage——live 唯一 usage 写入点
+ *   是末位收尾）+ terminalMessagePatch（payload.usage = turn 累计，即 runtime 产物）；
+ * - reload 路径：同 turn 的 session JSONL entries 经 replayEntries（逐条 entry 自带 usage）；
+ * - 两路径 deriveTurnAggregates().generatedTokens 全等，且等于全部调用之和（非末次调用量）。
  *
  * 运行：cd packages/core && npx vitest run src/domain/chat/__tests__/turn-usage-live-reload-equivalence.test.ts
  */
@@ -38,8 +38,8 @@ function makeTurn(user: Message | null, assistants: Message[]): MessageTurn {
 }
 
 describe('[turn-badge-tokens] 多 assistant 调用 turn：live ≡ reload 聚合一致', () => {
-  it('live 腿（terminalMessagePatch 回填 turn 累计到末位）= reload 腿（replayEntries 逐条求和）= 全部调用之和', () => {
-    // ── live 腿：ref 形态（registry overlay 产物）——中间气泡无 usage，末位 streaming ──
+  it('live 路径（terminalMessagePatch 回填 turn 累计到末位）= reload 路径（replayEntries 逐条求和）= 全部调用之和', () => {
+    // ── live 路径：ref 形态（registry overlay 产物）——中间气泡无 usage，末位 streaming ──
     const live: Message[] = [
       { id: 'u-live', role: 'user', content: 'q', status: 'complete', timestamp: T0 },
       {
@@ -66,7 +66,7 @@ describe('[turn-badge-tokens] 多 assistant 调用 turn：live ≡ reload 聚合
     const liveTurn = makeTurn(livePatched[0]!, livePatched.filter((m) => m.role === 'assistant'))
     const liveAgg = deriveTurnAggregates(liveTurn)
 
-    // ── reload 腿：session JSONL entries（每条 assistant 自带 usage）──
+    // ── reload 路径：session JSONL entries（每条 assistant 自带 usage）──
     const entries: PiMessageEntry[] = [
       msgEntry('e-u', { role: 'user', content: [{ type: 'text', text: 'q' }], timestamp: T0 }, { timestamp: ISO(T0) }),
       msgEntry('e-a1', {
@@ -89,7 +89,7 @@ describe('[turn-badge-tokens] 多 assistant 调用 turn：live ≡ reload 聚合
     const reloadUser = state.messages.find((m) => m.role === 'user') ?? null
     const reloadAgg = deriveTurnAggregates(makeTurn(reloadUser, reloadAssistants))
 
-    // 两腿聚合全等 = 全部调用之和（修复前 live 径只回填末次调用量 → 30 ≠ 530）
+    // 两路径聚合全等 = 全部调用之和（修复前 live 路径只回填末次调用量 → 30 ≠ 530）
     expect(liveAgg.generatedTokens).toBe(SUM_OUTPUT)
     expect(reloadAgg.generatedTokens).toBe(SUM_OUTPUT)
     expect(liveAgg.generatedTokens).toBe(reloadAgg.generatedTokens)

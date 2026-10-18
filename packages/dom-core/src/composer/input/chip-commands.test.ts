@@ -604,7 +604,7 @@ describe('useComposerChipCommands just-inserted 落位反馈', () => {
     c.insertSlashChip('/new') // 替换：旧 chip 出 DOM
     expect(c.el.contains(oldChip)).toBe(false)
     // 旧 timer（若未被 clear）触发时对已分离节点操作；此处旧 timer 已被新插入 clear，
-    // 快进验证无异常即收口
+    // 快进验证无异常即完成
     vi.advanceTimersByTime(1600)
     expect(c.el.querySelector('.slash-chip')?.classList.contains('just-inserted')).toBe(false)
     cleanup = c.cleanup

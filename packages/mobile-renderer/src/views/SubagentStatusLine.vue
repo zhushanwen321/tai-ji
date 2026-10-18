@@ -8,7 +8,7 @@
 // 直挂本模块导出的 applySubagentRecords（factory 不含 subagent 语义，D5 去留表）。
 //
 // 状态内聚本文件（单读方 = 本组件；唯一写方 = bootstrap 直挂）——与 ErrorBar「shell 持状态」
-// 先例的差异：ErrorBar 状态被三条链共享须收口 companion-bridge，本分区单组件消费，内聚即收口。
+// 先例的差异：ErrorBar 状态被三条链共享须汇总 companion-bridge，本分区单组件消费，内聚即汇总。
 import { shallowRef } from 'vue'
 import type { SubagentRecord } from '@taiji/shared'
 
@@ -20,7 +20,7 @@ const recordsBySession = shallowRef<Map<string, SubagentRecord[]>>(new Map())
 
 /**
  * onSubagents 直挂写入口（bootstrap effects.onSubagents）。
- * 推送是权威数据：整体替换该 sid 分区（空数组照写——对齐桌面推送路径不经 strike 守卫）。
+ * 推送是权威数据：整体替换该 sid 分区（空数组照写——对齐桌面推送路径不经 strike 检查）。
  */
 export function applySubagentRecords(sessionId: string, subagents: SubagentRecord[]): void {
   recordsBySession.value = new Map(recordsBySession.value).set(sessionId, subagents)

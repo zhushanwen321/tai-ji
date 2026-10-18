@@ -1,8 +1,8 @@
 /**
- * subagent-extractor 终局 result 投影（v2 条目对）。
+ * subagent-extractor 终局 result 派生视图（v2 条目对）。
  *
  * 锁定：result 是 v2 终态条目（settled）的字段——终局结果全文一次性写（事件文件只存
- * 摘要锚，本条目是全文唯一落点），投影层逐字透传（subagent-core record-entry.ts
+ * 摘要锚，本条目是全文唯一落点），派生视图层逐字透传（subagent-core record-entry.ts
  * SubagentRecordSettledEntryData.result）。终态条目在场即 status 归一 idle（两态词表：
  * 终局收敛 idle + stopReason 表达「为什么停」）；无 result 字段 → undefined
  * （settled 条目未携带 / 未终态）。
@@ -59,8 +59,8 @@ function settledEntry(id: string, data: Record<string, unknown> = {}): Record<st
   }
 }
 
-describe('scanSubagentEntries · 终局 result 投影（v2 终态条目）', () => {
-  it('终态条目 result 有值 → SubagentRecord.result 投影（status 归一 idle）', () => {
+describe('scanSubagentEntries · 终局 result 派生视图（v2 终态条目）', () => {
+  it('终态条目 result 有值 → SubagentRecord.result 派生视图（status 归一 idle）', () => {
     const records = scanSubagentEntries([
       registeredEntry('bg-1'),
       settledEntry('bg-1', { result: '本轮产出正文' }),

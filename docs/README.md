@@ -39,7 +39,7 @@ docs/
 | 单模块/单包的实现设计？ | **不进 docs/**——「为什么/坑」蒸馏进该模块代码注释（挂 `// ADR-xxxx` 锚点），已实施的过程内容删除（git 可追溯） |
 | review/impl-plan/acceptance 等工作流产物？ | **不进 docs/ 也不进 git**——落本地 `.taiji-harness/<date>-<slug>/`（gitignored，不入库；追溯靠 commit message 与 docs） |
 | 竞品/技术调研？ | 本地归档目录（不进 git） |
-| 前端视觉/组件/页面设计？ | `DESIGN.md`（值真值 = packages/renderer/src/style.css，frontmatter 投影挂值相等检查） |
+| 前端视觉/组件/页面设计？ | `DESIGN.md`（值真值 = packages/renderer/src/style.css，frontmatter 派生视图挂值相等检查） |
 | pi 扩展跨包约定？ | `extensions/`；单 extension 行为文档进该包内 `docs/` 或 README |
 | UI 设计演变历史？ | `design-evolution.md`（单篇汇总） |
 

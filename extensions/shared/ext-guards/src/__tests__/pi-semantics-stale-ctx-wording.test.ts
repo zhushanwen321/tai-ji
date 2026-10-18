@@ -1,5 +1,5 @@
 /**
- * PS-30 探针：pi ExtensionRunner 的 stale ctx 错误文案契约（crash-resilience D1 守卫
+ * PS-30 探针：pi ExtensionRunner 的 stale ctx 错误文案契约（crash-resilience D1 检查
  * 分诊词锁，docs/pi-semantics.json PS-30）。
  *
  * 断言方式（静态直读 dist，同 packages/runtime pi-semantics-prompt-rejection.test.ts 范式）：
@@ -7,12 +7,12 @@
  *   （staleMessage 的唯一写入点）+ `assertActive()` 的 `throw new Error(this.staleMessage)`
  *   形态（E1 崩溃堆栈帧 `assertActive → sendUserMessage` 的实装机制）。
  * - loader.js：pi API（sendMessage / sendUserMessage / appendEntry）的 `assertActive()`
- *   前置——守卫分诊词覆盖「跨 session 存活回调触碰捕获 pi」的面。
- * - runner.js：ctx 的 compact / abort / shutdown 受 assertActive 保护——守卫分诊词
- *   同样覆盖「回调触碰捕获 ctx」的面。
+ *   前置——检查分诊词覆盖「跨 session 存活回调触碰捕获 pi」的范围。
+ * - runner.js：ctx 的 compact / abort / shutdown 受 assertActive 保护——检查分诊词
+ *   同样覆盖「回调触碰捕获 ctx」的范围。
  *
  * 该文案是 ext-guards `guardStaleCtx` 的兜底分诊依据（代际检测为主判，本文案为
- * reload 盲区兜底）。pi 升级红 = 文案/机制漂移：守卫退化为「全部上抛」（回到现状
+ * reload 盲区兜底）。pi 升级红 = 文案/机制漂移：检查退化为「全部上抛」（回到现状
  * 崩溃链路，不更危险），同步 ext-guards STALE_CTX_MARKER 与本文档引用后更新 verifiedWith。
  *
  * 运行：cd extensions/shared/ext-guards && npx vitest run src/__tests__/pi-semantics-stale-ctx-wording.test.ts
@@ -46,7 +46,7 @@ const LOADER_SRC = PI_DIST ? readFileSync(join(PI_DIST, "core", "extensions", "l
 describe.skipIf(!PI_DIST)(
 	`PS-30 探针：stale ctx 错误文案与 assertActive 机制${SKIP_REASON ? `｜skip：${SKIP_REASON}` : ""}`,
 	() => {
-		it("invalidate() 默认 message 含 stale after session replacement（守卫兜底分诊词的 pi 侧源头）", () => {
+		it("invalidate() 默认 message 含 stale after session replacement（检查兜底分诊词的 pi 侧源头）", () => {
 			expect(
 				RUNNER_SRC.includes("stale after session replacement"),
 				"PS-30 漂移：stale 默认文案消失/变更——guardStaleCtx 文案兜底分诊失效退化为全部上抛（回到现状崩溃链路），同步 ext-guards STALE_CTX_MARKER 后更新 verifiedWith",
@@ -63,26 +63,26 @@ describe.skipIf(!PI_DIST)(
 			).toBe(true);
 		});
 
-		it("pi API（sendMessage/sendUserMessage/appendEntry）前置 assertActive（守卫覆盖捕获 pi 的触碰面）", () => {
+		it("pi API（sendMessage/sendUserMessage/appendEntry）前置 assertActive（检查覆盖捕获 pi 的触碰范围）", () => {
 			for (const method of ["sendMessage(message, options)", "sendUserMessage(content, options)", "appendEntry(customType, data)"]) {
 				const idx = LOADER_SRC.indexOf(method);
 				expect(idx, `PS-30 漂移：loader.js pi API ${method} 消失/改签名——复核锚点`).toBeGreaterThanOrEqual(0);
 				const window = LOADER_SRC.slice(idx, idx + 160);
 				expect(
 					window.includes("assertActive()"),
-					`PS-30 漂移：pi API ${method} 不再前置 assertActive——stale 触碰面改形，复核守卫分诊词的覆盖面`,
+					`PS-30 漂移：pi API ${method} 不再前置 assertActive——stale 触碰范围改形，复核检查分诊词的覆盖范围`,
 				).toBe(true);
 			}
 		});
 
-		it("ctx 的 compact/abort/shutdown 受 assertActive 保护（守卫覆盖捕获 ctx 的触碰面）", () => {
+		it("ctx 的 compact/abort/shutdown 受 assertActive 保护（检查覆盖捕获 ctx 的触碰范围）", () => {
 			for (const entry of ["compact: (options) => {", "abort: () => {", "shutdown: () => {"]) {
 				const idx = RUNNER_SRC.indexOf(entry);
 				expect(idx, `PS-30 漂移：ctx.${entry.replace(/[: ].*/, "")} 定义消失/改形——复核 createContext 锚点`).toBeGreaterThanOrEqual(0);
 				const window = RUNNER_SRC.slice(idx, idx + 200);
 				expect(
 					window.includes("assertActive()"),
-					`PS-30 漂移：ctx.${entry.replace(/[: ].*/, "")} 不再受 assertActive 保护——stale 触碰面改形，复核守卫分诊词的覆盖面`,
+					`PS-30 漂移：ctx.${entry.replace(/[: ].*/, "")} 不再受 assertActive 保护——stale 触碰范围改形，复核检查分诊词的覆盖范围`,
 				).toBe(true);
 			}
 		});

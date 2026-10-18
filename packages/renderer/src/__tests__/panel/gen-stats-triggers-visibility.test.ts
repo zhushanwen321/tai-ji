@@ -10,7 +10,7 @@
  *   部分无值帧 → 无值维不渲染、有值维照常（维度级独立）
  * - 观察者（形态）：根容器恒在（零宽折叠由 flex 布局自然承担，不出孤立的组容器盒）
  *
- * mock 策略：@/api 局部替换（useGenStats 恢复腿走 core transport command——经
+ * mock 策略：@/api 局部替换（useGenStats 恢复路径走 core transport command——经
  * importActual 保留 events 面，仅 command 按 sid 发帧/挂起）；HoverCard 浮层不展开
  * （只断言触发器按钮），reka 在 happy-dom 下触发器正常渲染。
  *
@@ -23,7 +23,7 @@ import { ref } from 'vue'
 import { useGenStats, __clearInFlightGenStatsForTest } from '@/composables/features/model/useGenStats'
 import type { GenStatsFrame } from '@taiji/shared'
 
-// 恢复腿 RPC 面：按 sid 出帧（PENDING sid 恒挂起 = 无帧形态）；events 面走 actual
+// 恢复路径 RPC 面：按 sid 出帧（PENDING sid 恒挂起 = 无帧形态）；events 面走 actual
 const commandMock = vi.hoisted(() => vi.fn())
 vi.mock('@taiji/core/transport/api', async (importActual) => {
   const actual = await importActual<typeof import('@taiji/core/transport/api')>()
@@ -48,7 +48,7 @@ function frameOf(over: {
   } as GenStatsFrame
 }
 
-/** 组合式挂载壳：GenStatsTriggers 必须在 setup 同步消费 useGenStats（getCurrentInstance 守卫）。 */
+/** 组合式挂载壳：GenStatsTriggers 必须在 setup 同步消费 useGenStats（getCurrentInstance 检查）。 */
 function mountTriggers(sessionId?: string) {
   return mount({
     components: { GenStatsTriggers },
@@ -79,7 +79,7 @@ beforeEach(() => {
 })
 
 describe('GenStatsTriggers 空值不占位（使用者黑盒 DOM）', () => {
-  it('无帧（挂起恢复腿）→ 三触发器值节点全不渲染，根容器仍在', () => {
+  it('无帧（挂起恢复路径）→ 三触发器值节点全不渲染，根容器仍在', () => {
     const wrapper = mountTriggers(PENDING_SID)
     for (const id of valueTestids) {
       expect(wrapper.find(`[data-testid="${id}"]`).exists(), id).toBe(false)

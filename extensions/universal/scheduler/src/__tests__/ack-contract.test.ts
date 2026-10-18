@@ -1,7 +1,7 @@
-// ack 契约面测试（dev-flow u-foundation 单元）。
+// ack 契约范围测试（dev-flow u-foundation 单元）。
 //
-// 本单元只交付「依赖反转契约面」，不含 ack 业务逻辑，故测试只证明三件事：
-//   1. SchedulerBackend 扩面（registerProvider/unregisterProvider/getEntries）后可被纯对象
+// 本单元只交付「依赖反转契约范围」，不含 ack 业务逻辑，故测试只证明三件事：
+//   1. SchedulerBackend 接口扩大（registerProvider/unregisterProvider/getEntries）后可被纯对象
 //      夹具实现（isIdle/getCurrentModel 是 PiSchedulerBackend 类方法、非接口成员）；
 //   2. PiSchedulerBackend 对 pi / ctx 的转发语义（含缺字段兜底）；
 //   3. ack 契约常量/判别值锚定（防后续单元依赖字符串时不发现改动）。
@@ -24,14 +24,14 @@ import {
   type SchedulerProviderOverride,
 } from '../types.js'
 
-// ── 1. 扩面可被纯对象夹具实现（类型闭合）──
+// ── 1. 接口扩大可被纯对象夹具实现（类型完备）──
 
 /**
  * 纯对象夹具：只实现接口成员（sendMessage/appendEntry/getSessionFile/now +
  * registerProvider/unregisterProvider/getEntries）。
  * `satisfies SchedulerBackend` 的**编译期**效力以「测试被 typecheck」为前提——
  * `extensions/tsconfig.json` 的 exclude 覆盖全部测试目录，常态 `extensions:typecheck`
- * 不覆盖本文件（若将来把测试纳入 typecheck，这行才是编译期契约闭合证据）；当前至少保证
+ * 不覆盖本文件（若将来把测试纳入 typecheck，这行才是编译期契约完备证据）；当前至少保证
  * 运行期结构契约。
  */
 function createFixtureBackend(): SchedulerBackend {
@@ -65,8 +65,8 @@ function createFixtureBackend(): SchedulerBackend {
   } satisfies SchedulerBackend
 }
 
-describe('SchedulerBackend ack 扩面（纯对象夹具）', () => {
-  it('夹具实现既有 + 新增全部方法且类型闭合', () => {
+describe('SchedulerBackend ack 接口扩大（纯对象夹具）', () => {
+  it('夹具实现既有 + 新增全部方法且类型完备', () => {
     const backend = createFixtureBackend()
 
     expect(backend.getEntries()).toHaveLength(1)
@@ -83,7 +83,7 @@ describe('SchedulerBackend ack 扩面（纯对象夹具）', () => {
 
 // ── 2. PiSchedulerBackend 转发 / 归一 / 兜底 ──
 
-/** 最小假 pi 的记录面。 */
+/** 最小假 pi 的记录侧。 */
 interface FakePi {
   pi: Pick<
     ExtensionAPI,
@@ -118,7 +118,7 @@ function createFakePi(): FakePi {
   }
 }
 
-describe('PiSchedulerBackend ack 扩面转发', () => {
+describe('PiSchedulerBackend ack 接口扩大转发', () => {
   it('registerProvider 转发 pi 并零转换透传 (providerId, config)', () => {
     const { pi, providerCalls } = createFakePi()
     const ctx: SchedulerBackendCtx = {
@@ -230,7 +230,7 @@ describe('ack 契约常量与类型', () => {
     expect<AckAvailability>({ available: true }).toEqual({ available: true })
 
     // 可通知形态只有两种：其余 E 形态（e1/e2/e4/e5/e6/e8b）不发用户通知——真实轮已
-    // 应答或与落盘无关，提示即反向撒谎（设计 §3.4）；它们在日志面用字符串标签。
+    // 应答或与落盘无关，提示即反向撒谎（设计 §3.4）；它们在日志侧用字符串标签。
     const notifyReasons: AckNotifyReason[] = ['e3-no-turn', 'e8-no-base']
     expect(notifyReasons).toHaveLength(2)
 

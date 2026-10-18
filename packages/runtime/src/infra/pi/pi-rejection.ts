@@ -8,23 +8,25 @@
  * 分支位置，文案/分支漂移即红——pi 版本 bump 时探针红须同步本文件常量后更新 verifiedWith）。
  *
  * [HISTORICAL] 驻留迁移史：识别函数原在 message-dispatcher（catch 面消费点），错误分类
- * 迁移（session-occupancy-send-closure D6）后落 session-delivery-registry（promptWithBusyRetry
- * 的 catch 面）；抽象层并入（pi1-disposition-chat-flow U3①）再下沉 infra/pi——pi 词汇
+ * 迁移（session-occupancy-send-closure D6）后落 session-delivery-registry（时为
+ * promptWithBusyRetry 的 catch 面——该函数已随 u5a 退役，现 catch 面 =
+ * promptAwaitingCompaction）；抽象层并入（pi1-disposition-chat-flow U3①）再下沉 infra/pi——pi 词汇
  * 合法持有点清单（ADR D5①）中 services 层不留文案驻留。
  */
 
-/** pi prompt() busy 类确定性拒绝原文（语义登记 PS-22，verifiedWith 以 pi-semantics.json 为准；探针锁守卫——manual 压缩窗口拒绝）。 */
+/** pi prompt() busy 类确定性拒绝原文（语义登记 PS-22，verifiedWith 以 pi-semantics.json 为准；探针锁检查——manual 压缩窗口拒绝）。 */
 export const PI_REJECTION_COMPACTING = 'Cannot submit a prompt while compaction is in progress'
 
-/** pi prompt() busy 类确定性拒绝原文（语义登记 PS-23，verifiedWith 以 pi-semantics.json 为准；探针锁守卫——isStreaming 无 streamingBehavior 拒绝）。 */
+/** pi prompt() busy 类确定性拒绝原文（语义登记 PS-23，verifiedWith 以 pi-semantics.json 为准；探针锁检查——isStreaming 无 streamingBehavior 拒绝）。 */
 export const PI_REJECTION_PROCESSING = 'Agent is already processing'
 
-/** pi busy 类拒绝分型（D6；非 busy 类返回 null → 走普通错误面）。 */
+/** pi busy 类拒绝分型（D6；非 busy 类返回 null → 走普通错误范围）。 */
 export type PromptRejectionReason = 'compacting' | 'processing'
 
 /**
  * 识别 pi prompt() 的 busy 类确定性拒绝（按错误消息原文 includes）。
- * 逐字保持识别口径——消费方 = session-delivery-registry.promptWithBusyRetry 的 catch 面。
+ * 逐字保持识别口径——消费方 = session-delivery-registry 的 promptAwaitingCompaction
+ * （classifyBusyRejection 包装）catch 面。
  */
 export function classifyPromptRejection(errorMessage: string): PromptRejectionReason | null {
   if (errorMessage.includes(PI_REJECTION_COMPACTING)) return 'compacting'

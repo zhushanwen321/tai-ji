@@ -8,7 +8,7 @@
 //   B1. collectRecords 返回 light（无 eventLog/result/turns）
 //   B2. getFullRecord 懒加载全量（result/turns/tokens/eventLog）且缓存
 //   B3. identity-only 文件（无 assistant）→ 分支 4 running 呈现（v4 B-1 可续聊语义）
-//   B4. getFullRecord 内存源优先（register 后直接投影全量）
+//   B4. getFullRecord 内存源优先（register 后直接生成派生视图全量）
 //
 // 「去读权限」验证法：chmod 000 后 statSync 仍可用、readFileSync/openSync 失败——
 // 若实现退化回读文件，记录会消失（readIdentityHeader 捕获异常返回 undefined）。
@@ -212,7 +212,7 @@ describe("RecordStore per-file cache + light scan [perf]", () => {
     expect(store.collectRecords(100, "all", "root-1").map((r) => r.id)).toEqual(ids); // 负缓存稳定
   });
 
-  it("B4: getFullRecord 内存源优先——register 后直接投影全量", () => {
+  it("B4: getFullRecord 内存源优先——register 后直接生成派生视图全量", () => {
     writeSession({ name: "a.jsonl", id: "sa-1", assistantTexts: ["r1"], finalized: true });
     store.collectRecords(100, "all", "root-1");
 

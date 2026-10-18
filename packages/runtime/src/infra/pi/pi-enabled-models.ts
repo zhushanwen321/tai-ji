@@ -1,8 +1,8 @@
 /**
  * enabledModels 白名单读写 helper（从 pi-provider-store.ts 抽出，控 max-lines 500）。
  *
- * 职责：settings.json.enabledModels 白名单的读写 + 边界守卫（ensureProviderInWhitelist
- * 新建 provider 守卫、cleanEnabledModelsResidue 移除 provider 残留清理）。
+ * 职责：settings.json.enabledModels 白名单的读写 + 边界检查（ensureProviderInWhitelist
+ * 新建 provider 检查、cleanEnabledModelsResidue 移除 provider 残留清理）。
  *
  * 抽出原因：pi-provider-store.ts 超 ESLint max-lines(500)。本模块只经 settings.json
  *（readSettings/updateSettingsFields），不碰 modelsStore 模块级缓存，移到本模块后
@@ -23,7 +23,7 @@ export function setEnabledModels(patterns: string[]): void {
  *
  * pi 白名单语义：空 = 全可用。若用 setEnabledModels([]) 写入空数组，语义不变（readSettings
  * 仍得 []，deriveEnabled 返回全 true），但「显式空数组」与「未设置」在配置语义上有歧义，
- * 且 belt-and-suspenders 要求 runtime 层让 settings.json 物理上无此字段——故用 delete 而非写 []。
+ * 且 双重保险防线 要求 runtime 层让 settings.json 物理上无此字段——故用 delete 而非写 []。
  * JSON.stringify 丢弃 undefined 字段，故 updateSettingsFields(delete) 后落盘的 settings.json
  * 不含 enabledModels key（与从未设置过不可区分）。
  */
@@ -32,7 +32,7 @@ export function clearEnabledModels(): void {
 }
 
 /**
- * 边界1 守卫（wave3 TC5 / C2）：若 enabledModels 已非空（用户显式启用某些 provider），
+ * 边界1 检查（wave3 TC5 / C2）：若 enabledModels 已非空（用户显式启用某些 provider），
  * 加 `${providerId}/*` 让新 provider 默认启用；空/undefined 时 no-op（全可用语义，新 provider 默认可用）。
  *
  * 调用点：importer applyImport 新建 provider 后、setProvider 新建 provider（existing 为空）时。
@@ -56,7 +56,7 @@ export function ensureProviderInWhitelist(providerId: string): void {
  * 语义与 toggleProviderEnabled(false) 的过滤段同构（startsWith('<id>/') 统一匹配 provider 级
  * 与 model 级 pattern，带斜杠防 openai vs openai-compatible 前缀碰撞）：
  *   - filter 后非空 → setEnabledModels(remaining)
- *   - filter 后空 → clearEnabledModels（边界3(a) 空数组守卫，CL2——delete 字段而非写空数组）
+ *   - filter 后空 → clearEnabledModels（边界3(a) 空数组检查，CL2——delete 字段而非写空数组）
  *   - 无 pattern 被移除（provider 本就不在白名单）→ 幂等 no-op
  */
 export function cleanEnabledModelsResidue(providerId: string): void {

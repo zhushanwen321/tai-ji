@@ -27,7 +27,7 @@ import { useChatStore } from '@/stores/chat'
 import type { PiLaunchPreset } from '@taiji/shared'
 
 // ── useExtensionUI mock（usePanelView 的 overlay 订阅：无 pending 请求；
-//    返回面与真实实现一致——currentFormRequest/currentPlanReviewRequests/respond/cancel）──
+//    返回结构与真实实现一致——currentFormRequest/currentPlanReviewRequests/respond/cancel）──
 const uiMock = vi.hoisted(() => ({
   formReq: { value: undefined as undefined | Record<string, unknown> },
   respond: () => {},
@@ -40,7 +40,7 @@ vi.mock('@/composables/useExtensionUI', () => ({
     respond: uiMock.respond,
     cancel: uiMock.cancel,
   }),
-  // PanelModeBar（Panel composer 上方常驻挂载）setup 消费 planReviewFilter——窄 mock 需补齐该导出面
+  // PanelModeBar（Panel composer 上方常驻挂载）setup 消费 planReviewFilter——窄 mock 需补齐该导出清单
   planReviewFilter: (req: { planReview?: boolean }) => req.planReview === true,
 }))
 

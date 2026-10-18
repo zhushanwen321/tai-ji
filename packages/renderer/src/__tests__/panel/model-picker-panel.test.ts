@@ -3,7 +3,7 @@
  *
  * 锁两条：
  * - 默认（不传 hoverSelect）：pointerenter 不 emit hoverSelect（Composer / ProviderPage /
- *   ScheduleForm 三个既有消费面零影响），click 仍照常 emit update:modelValue；
+ *   ScheduleForm 三个既有消费方零影响），click 仍照常 emit update:modelValue；
  * - hoverSelect: true：pointerenter 即上抛 hoverSelect（D2 模型聚合的 hover 切换通道），
  *   值未变的去重在消费方（ModelThinkingAggregate）——本层只负责上抛。
  *

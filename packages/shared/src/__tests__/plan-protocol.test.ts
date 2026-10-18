@@ -1,7 +1,7 @@
 /**
  * plan-protocol.test.ts — plan 模式重设计协议登记契约校验
  *
- * 验证 plan 模式投影面（D1-⑥ 冷启动首拉 + D5 退出命令）三面登记完整：
+ * 验证 plan 模式派生视图范围（D1-⑥ 冷启动首次拉取 + D5 退出命令）三方面登记完整：
  *  - 新帧 session.planState 在 ServerMessageType 联合 + ServerMessageMapBase 有精确登记
  *    （防 payload 漂移——漏登记会落 Record<string, unknown> 占位，消费侧被迫 as）
  *  - 新 RPC session.getPlanState / session.abortPlan 在 ClientMessageType 联合 +
@@ -15,8 +15,8 @@
  *    旧字段 reviewState/reviewStateSource 已随批次 3 条目 1（plan-mode-audit-remediation）
  *    退出契约——映射只存在于 entry 读取侧归一点，View 不再携带旧字段（混装格 renderer
  *    兜底映射同批删除）。
- *    旧格式重放回归锚（V5：旧格式会话重放三侧逐字段一致）的映射契约断言面 =
- *    extension-protocol 包内 legacy-entries.test.ts（D-B4-1 下沉后唯一断言面；原 shared
+ *    旧格式重放回归锚（V5：旧格式会话重放三侧逐字段一致）的映射契约断言范围 =
+ *    extension-protocol 包内 legacy-entries.test.ts（D-B4-1 下沉后唯一断言范围；原 shared
  *    fixture 等价表已随下沉删除，V5 验收按其登记形态构造旧 entry）
  *  - PlanDocMeta 与 @zhushanwen/extension-protocol core/types 的 PlanDocMeta 跨包同形：
  *    devDependency 引对侧做编译期 AssertExact 双向断言（单侧改字段即红），
@@ -74,7 +74,7 @@ type _Assert_AbortPlan_union = AssertExtends<'session.abortPlan', ClientMessageT
 type _Assert_AbortPlan_map_key = AssertHasKey<ClientMessageMap, 'session.abortPlan'>
 type _Assert_AbortPlan_payload_exact = AssertExact<ClientMessageMap['session.abortPlan'], { sessionId: string }>
 type _Assert_AbortPlan_reply_key = AssertHasKey<ReplyPayloadMap, 'session.abortPlan'>
-// ack 型（状态变化经投影链广播推回，reply 仅确认命令受理——session.forceQuit 同构）
+// ack 型（状态变化经派生视图链广播推回，reply 仅确认命令受理——session.forceQuit 同构）
 type _Assert_AbortPlan_reply_void = AssertExact<ReplyPayloadMap['session.abortPlan'], void>
 
 // ── PlanStateView 字段契约：四必填 + 四 optional（optional 性 = 向后兼容契约）──

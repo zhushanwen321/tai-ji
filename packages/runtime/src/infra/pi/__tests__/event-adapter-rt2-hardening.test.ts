@@ -7,7 +7,7 @@
  *   null/undefined，normalizeWithTailCap 直读 c.type 抛 TypeError）时，失败在 adapter 内
  *   显形为 message.stream_warn（MF-1-13：非终结性 system 提示，前端不调 finalizeSession、
  *   session 保持 streaming——pi 流继续，turn 可能照常成功；stream_error 会被
- *   registry 无条件收口成 error 终态）并留 [ADAPTER-FAIL] 日志，流继续（后续好帧
+ *   registry 无条件归为 error 终态）并留 [ADAPTER-FAIL] 日志，流继续（后续好帧
  *   照常翻译）。修复前 translate 在 try 外：异常逃逸进 rpc-client 的 stdout parse
  *   catch 被误记「parse error」，本帧对第二 listener 整帧丢失且无用户可见失败。
  *   同一失败原因只显形一次（漂移按帧复发，逐帧提示刷屏）。
@@ -73,7 +73,7 @@ describe('EventAdapter RT-2 加固：translate 隔离显形（#3a）', () => {
     const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
     let adapterFailLogged = false
     try {
-      // 触发面：handleToolExecutionUpdate → normalizeWithTailCap 的 content 条目直读
+      // 触发点：handleToolExecutionUpdate → normalizeWithTailCap 的 content 条目直读
       //（pi 字段漂移致数组内混入 null 条目）
       // 修复前此 emit 同步抛出（translate 在 try 外），interpret 收不到任何事件
       client.emit(updateEvent([null]))

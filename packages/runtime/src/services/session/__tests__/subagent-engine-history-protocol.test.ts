@@ -1,8 +1,8 @@
 // subagent-engine-history 协议客户端接线测试（W8 宿主接线，impl-plan §2.8 验收）。
 //
-// 覆盖面（真实 spawn fake 引擎 CLI——协议 IO 全真，fake 只是引擎实现替身）：
+// 覆盖范围（真实 spawn fake 引擎 CLI——协议 IO 全真，fake 只是引擎实现替身）：
 // ① 三级发现消费（L1 TAIJI_AGENT_ENGINE_ROOTS → manifest 自注册 → 按需 spawn）；
-// ② read 走协议（native reader 覆盖后 core 链①级 = 协议 read，投影复用）；
+// ② read 走协议（native reader 覆盖后 core 链①级 = 协议 read，派生视图复用）；
 // ③ 协议失败降②级 journal / 引擎未发现降③级 outcome-only（GUI source 标注的
 //    数据源契约 = SessionView.source，降级事实 warn 留痕）；
 // [ADR-0122 退役登记] ④ idle 5min 复用窗口与 ⑤ dispose 聚合上界用例已随机制删除
@@ -138,7 +138,7 @@ describe('W8 runtime 协议客户端接线（subagent-engine-history）', () => 
     // outcome-only（"(no outcome recorded)"），协议链生效即此断言成立。
     const assistant = messages.find((m) => m.role === 'assistant')
     expect(assistant?.content).toBe('fake turn')
-    // user task 前置投影（core 投影链复用）。
+    // user task 前置派生视图（core 派生视图链复用）。
     expect(messages[0]?.role).toBe('user')
     expect(messages[0]?.content).toBe('demo task')
     expect(spawnLogPids()).toHaveLength(1)
@@ -152,10 +152,10 @@ describe('W8 runtime 协议客户端接线（subagent-engine-history）', () => 
     expect(spawnLogPids()).toHaveLength(1) // 同引擎实例恒复用
   }, 20_000)
 
-  it('③ 协议 read 失败降②级 journal：eventsPath 白名单内事件重放投影', async () => {
+  it('③ 协议 read 失败降②级 journal：eventsPath 白名单内事件重放派生视图', async () => {
     setEnv('FAKE_READ_MODE', 'error')
     const eventsPath = path.join(dataDir, 'engines', 'fake', 'shared', 'journal-j1.jsonl')
-    // 行 schema = JournalLine（event-journal parseLine 守卫：v:1 + ts/seq + event.type）。
+    // 行 schema = JournalLine（event-journal parseLine 检查：v:1 + ts/seq + event.type）。
     fs.writeFileSync(
       eventsPath,
       [

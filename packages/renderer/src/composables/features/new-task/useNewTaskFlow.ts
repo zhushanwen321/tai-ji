@@ -26,7 +26,7 @@
  * - workspaceApi：@/api workspace.detect + worktreeApi.list
  * - workspaceState：useWorkspaceStore().record
  *
- * 公共 API 兼容：useNewTaskFlow() 返回类型与旧版逐字段对齐（core flow 返回面一致）；
+ * 公共 API 兼容：useNewTaskFlow() 返回类型与旧版逐字段对齐（core flow 返回结构一致）；
  * resetNewTaskFlow / NewTaskFlowState / GitInfo 重导出改从 @taiji/core（旧消费方
  * 与测试 import 路径不变即获得 core 版）。
  */

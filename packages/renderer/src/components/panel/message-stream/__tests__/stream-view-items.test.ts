@@ -53,7 +53,7 @@ describe('buildStreamViewItems — 逐项恒等缓存（streaming perf）', () =
     expect(second).toBe(first)
     expect(second[0]).toBe(first[0])
     expect(second[1]).toBe(first[1])
-    // 内容仍逐字节正确（引用复用不改变投影值）
+    // 内容仍逐字节正确（引用复用不改变派生视图值）
     expect(second[1]).toMatchObject({ kind: 'turn', key: 't-u2', preview: 'second question', canEdit: true, isLastTurn: true })
   })
 

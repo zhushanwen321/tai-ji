@@ -284,7 +284,7 @@ function onForceQuitSelect(e: Event): void {
   confirmingQuit.value = false
   emit('forceQuit', props.sessionId)
 }
-/** 菜单项点击：向上 emit 父 session id。守卫除防御外还承担 TS 窄化
+/** 菜单项点击：向上 emit 父 session id。检查除防御外还承担 TS 窄化
  *  （props 字段 string|undefined → emit 要求 string），不可删。 */
 function onViewParent(): void {
   const parent = props.parentAgentSessionId

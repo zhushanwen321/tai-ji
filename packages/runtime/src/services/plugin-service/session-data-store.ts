@@ -65,7 +65,7 @@ export function isSessionDataCleared(sessionId: string): boolean {
 const activeStores = new Set<SessionDataStore>()
 
 /**
- * B5：真删除路径直调入口（lifecycle.delete 尾段，触发面收窄 2026-09-15）——对全部已注册
+ * B5：真删除路径直调入口（lifecycle.delete 尾段，触发点收窄 2026-09-15）——对全部已注册
  * store 实例执行 clearSession（tombstone 登记 + 分区摘除 + trash 软删除）。三条 session
  * 存活路径（pi 崩溃 exit / forceQuit / restore 清场）不经此入口：插件数据存活供
  * respawn / 复活后续写（详见 session-lifecycle.ts delete 内 B5 注释）。
@@ -138,7 +138,7 @@ export class SessionDataStore {
   }
 
   /**
-   * B5 写守卫①：迟到 set 丢弃 + warn——set 是唯一文件复活入口（见模块级 tombstone 注释
+   * B5 写检查①：迟到 set 丢弃 + warn——set 是唯一文件复活入口（见模块级 tombstone 注释
    * 的源码依据），已删 session 的迟到 set 不得 lazy 重建分区并把新文件写回盘。
    */
   set(sessionId: string, key: string, value: unknown): void {
@@ -151,7 +151,7 @@ export class SessionDataStore {
     this.cache.set(sessionId, key, value)
   }
 
-  /** B5 写守卫②：迟到 delete 丢弃——delete 不复活文件但会 lazy 重建空内存分区（驻留）。 */
+  /** B5 写检查②：迟到 delete 丢弃——delete 不复活文件但会 lazy 重建空内存分区（驻留）。 */
   delete(sessionId: string, key: string): void {
     if (clearedSessions.has(sessionId)) {
       console.warn(
@@ -208,7 +208,7 @@ export class SessionDataStore {
    *
    * 顺序：①tombstone 登记（先于 trash——trash 失败降级时迟到写也必须被丢弃，见设计
    * §3.2-B5 降级登记）；②dropPartition（清 flushTimer + 摘内存分区——封死 clear 前已
-   * 排定的定时器写盘路径，使迟到 set 成为唯一文件复活入口，由写守卫拦截）；③trash
+   * 排定的定时器写盘路径，使迟到 set 成为唯一文件复活入口，由写检查拦截）；③trash
    * 软删除（mac 废纸篓 / 非 mac unlink，与 session 本体持久性对齐）。
    *
    * trash 失败（文件保留原地 + 拋结构化错误，trash.ts G4 语义）：本方法向上传播 rejection，

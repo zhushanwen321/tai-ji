@@ -56,7 +56,7 @@ function spawnDriver(
   // 检测会落 no-op journal——子进程不继承测试防线）。
   // PI_CODING_AGENT_DIR 锚进本轮 tmp（生产推导 resolvePiWorkflowStateDir 的根——
   // 不注入会落真实 ~/.pi 数据目录，测试红线；锚定后 worker 后续帧/manifest 全落
-  // 本轮 stateDir，与 journalDir 注入面同目录）。
+  // 本轮 stateDir，与 journalDir 注入点同目录）。
   const childEnv = { ...process.env };
   delete childEnv.VITEST;
   childEnv.PI_CODING_AGENT_DIR = agentDirRoot;

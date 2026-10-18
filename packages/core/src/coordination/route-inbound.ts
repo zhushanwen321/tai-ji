@@ -33,7 +33,7 @@
  *
  * core 零 import renderer（D3 降级后形态）：pending/events/subscribe 三件套已下沉
  * core/transport/api，生产路径由 configureRouteInbound 缺省直连真实模块（defaultPorts）；
- * TransportPorts 仅作 core 内部测试 seam（测试注入 fake，不出现在壳装配面）。
+ * TransportPorts 仅作 core 内部测试 seam（测试注入 fake，不出现在壳装配侧）。
  * effect 兜底经 InboundEffects 注入（undefined 跳过）。
  */
 import type { PiEntry, PiToolCallEntryForm, ServerMessage, ServerMessageMap, SubagentRecord } from '@taiji/shared'
@@ -48,7 +48,7 @@ import * as eventsApi from '../transport/api/events'
 // ── 端口契约（IF1） ────────────────────────────────────────────────
 
 /**
- * 入站分发依赖的 WS 能力面（IF1）——D3 后为 **core 内部测试 seam**。
+ * 入站分发依赖的 WS 能力范围（IF1）——D3 后为 **core 内部测试 seam**。
  *
  * 生产路径不经本接口：configureRouteInbound 缺省用 defaultPorts（真实模块直连）：
  * - pending → transport/api/pending 的 resolve/reject/rejectAll/has/resolveEnvelope
@@ -149,11 +149,11 @@ export interface InboundEffects {
 
 /**
  * 声明式路由表条目（D2 阶段 A）——条目只声明「分发之后发生什么」，路由序言
- * （seqGate → dispatchSession/crossSession → 守卫 → effect）由 dispatchRouted 统一执行，
+ * （seqGate → dispatchSession/crossSession → 检查 → effect）由 dispatchRouted 统一执行，
  * 条目不再各持 handle 函数体：「type ∧ 有 sid」合取在 dispatcher 判定，条目无
  * `if (!sid) return` 防御（sessionEffect 只在有 sid 分支被消费）。
  *
- * 守卫归宿（两类语义不同，分置）：
+ * 检查归宿（两类语义不同，分置）：
  * - **跳过型**（payloadGuard）：坏形状 → 不调 effect、dispatchSession/crossSession 分发
  *   照常（per-session 订阅者可能自带消费逻辑）——布尔门，由 dispatcher 在分发之后、
  *   effect 之前统一执行，只门控 effect 调用、不门控分发。
@@ -166,12 +166,12 @@ export interface RouteTableEntry {
   sessionEffect?(sid: string, payload: ServerMessage['payload'], effects: InboundEffects): void
   /**
    * 无 sid 分支的 effect 回调（dispatcher 在 dispatchGlobal 之后、L9 warn 之前调用）。
-   * 生产使用方：'error' 条目（无 sid + 无 id 的 onGlobalError 兜底，守卫语义内迁条目）。
+   * 生产使用方：'error' 条目（无 sid + 无 id 的 onGlobalError 兜底，检查语义内迁条目）。
    */
   globalEffect?(msg: ServerMessage, effects: InboundEffects): void
   /** 带 sid 但需同时分发到全局消费者（原 CROSS_SESSION_TYPES 白名单的声明式形态，ADR-0060 决策1）。 */
   crossSession?: boolean
-  /** 跳过型守卫：返回 false → 只跳过 effect 调用，dispatchSession/crossSession 分发照常。 */
+  /** 跳过型检查：返回 false → 只跳过 effect 调用，dispatchSession/crossSession 分发照常。 */
   payloadGuard?(payload: ServerMessage['payload']): boolean
 }
 
@@ -219,7 +219,7 @@ function dispatchSessionRouted(
   if (entry?.crossSession) {
     events.dispatchCrossSession(msg)
   }
-  // 跳过型守卫（D2 守卫两类分置）：只门控 effect 调用，不门控 dispatchSession/
+  // 跳过型检查（D2 检查两类分置）：只门控 effect 调用，不门控 dispatchSession/
   // crossSession 分发（per-session 订阅者可能自带消费逻辑）。
   if (entry?.payloadGuard && !entry.payloadGuard(msg.payload)) return
   entry?.sessionEffect?.(sid, msg.payload, effectsCtx)
@@ -228,7 +228,7 @@ function dispatchSessionRouted(
 /**
  * 路由序言的 global 半边（dispatchRouted 无 sid 分支提取，行为零改变）：
  * dispatchGlobal → globalEffect? → L9 前缀 warn。默认路径为纯兜底（阶段 B 后
- * 零 type 特判）：'error' 的无 sid 兜底已并入条目 globalEffect（含 !msg.id 守卫），
+   * 零 type 特判）：'error' 的无 sid 兜底已并入条目 globalEffect（含 !msg.id 检查），
  * 未命中条目的消息只做通道分发 + L9 warn。
  */
 function dispatchGlobalRouted(
@@ -270,7 +270,7 @@ function dispatchGlobalRouted(
  * event-adapter 实发 'extension.dialog'，与 protocol.ts + MessageBusBridge
  * EXTENSION_HANDLERS 同源）。
  *
- * 导出面说明：导出供 route-inbound.test.ts 注册探针条目（payloadGuard「不门控分发」
+ * 导出清单说明：导出供 route-inbound.test.ts 注册探针条目（payloadGuard「不门控分发」
  * 契约的接口级验证——生产 payloadGuard 条目均无 crossSession 声明，需注入探针才可
  * 组合验证）与声明形状锁定；生产消费方只读，不 mutate（与 subscription-state 的
  * resetSubscriptionStates 同类测试支撑导出）。globalEffect 自阶段 B 起有生产条目
@@ -308,7 +308,7 @@ export const ROUTE_TABLE: Record<string, RouteTableEntry> = {
   'session.subagents': {
     // session.subagents 兜底：subagent 终态推送必须在所有 session 生效（含非活跃），
     // 不能只依赖 per-focus 订阅（切走即退订 → 终态丢弃 → 侧栏卡 running）。
-    // 跳过型守卫（D2）：subagents 非数组 → 跳过 effect、dispatch 照常。
+    // 跳过型检查（D2）：subagents 非数组 → 跳过 effect、dispatch 照常。
     payloadGuard: (payload) => Array.isArray((payload as { subagents?: unknown }).subagents),
     sessionEffect(sid, payload, effects) {
       effects.onSubagents?.(sid, (payload as { subagents: SubagentRecord[] }).subagents)
@@ -316,7 +316,7 @@ export const ROUTE_TABLE: Record<string, RouteTableEntry> = {
   },
   'session.subagentEntriesAppended': {
     // [E-4] subagent entry 帧兜底：写 chatStore 虚拟分区必须在所有 session 生效
-    //（帧先于 drawer 打开——分区惰性创建不依赖订阅，§6.1）。跳过型守卫对齐
+    //（帧先于 drawer 打开——分区惰性创建不依赖订阅，§6.1）。跳过型检查对齐
     // session.subagents 条目（subagentId 非空 + entries 数组，坏形状跳过 effect 但
     // dispatch 照常——per-session 订阅者可能自带消费逻辑）。
     payloadGuard: (payload) => {
@@ -339,7 +339,7 @@ export const ROUTE_TABLE: Record<string, RouteTableEntry> = {
   },
   'error': {
     // D6b：带 sid 的 error envelope 兜底（见 InboundEffects.onSessionError 注释）。
-    // 整形型守卫留 sessionEffect 参数构造处（D2 守卫两类分置）：payload.message 缺失时
+    // 整形型检查留 sessionEffect 参数构造处（D2 检查两类分置）：payload.message 缺失时
     // 兜底通用文案，防御运行时坏形状。error envelope 无 seq（broker.send 直发，非
     // bus.publish live 帧）→ seqGate 无 seq 分支正常放行，不触发 gap reconcile。
     sessionEffect(sid, payload, effects) {
@@ -350,7 +350,7 @@ export const ROUTE_TABLE: Record<string, RouteTableEntry> = {
       })
     },
     // 无 sid 兜底（阶段 B 自 dispatcher 默认路径特判 `msg.type === 'error' && !msg.id`
-    // 逐字迁入）：!msg.id 守卫保留——带 id 的 error 若未命中 pending（如 reply 超时后
+    // 逐字迁入）：!msg.id 检查保留——带 id 的 error 若未命中 pending（如 reply 超时后
     // 迟到），只 dispatchGlobal 不 toast；无 id 的 server-push 全局 error（如 config
     // 加载失败）才 toast（renderer 注册 onGlobalError 实现 toast）。
     globalEffect(msg, effects) {
@@ -400,8 +400,8 @@ export const ROUTE_TABLE: Record<string, RouteTableEntry> = {
  * core/transport/api（barrel 静态图）解析，与本模块静态拉入的 ws-client 实例
  * 分属两个模块身份，mock 拦截不到（api/composer-domain、preset-domain、
  * quota-domain、session-removebycwd、t4-api-layer、usage-forcequit-domains、
- * extension-upgrade、new-task/session-api）。renderer mock 链收口前，动态
- * import 是静态依赖图与测试面的唯一兼容形态（设计 D9 附带降级路径）。
+ * extension-upgrade、new-task/session-api）。renderer mock 链收尾前，动态
+ * import 是静态依赖图与测试入口的唯一兼容形态（设计 D9 附带降级路径）。
  */
 const defaultPorts: TransportPorts = {
   pending: pendingApi,
@@ -449,7 +449,7 @@ export function configureRouteInbound(
   //   有 sid → seqGate → dispatchSession → crossSession? → payloadGuard 过 → sessionEffect?.()
   //   无 sid → dispatchGlobal → globalEffect?.() → L9 前缀 warn（默认路径纯兜底，零特判）
   function dispatchRouted(msg: ServerMessage, sid: string | undefined): void {
-    // [Q1-4] Record 直查（O(1)）。hasOwnProperty.call 守卫原型成员名（'constructor' 等），
+    // [Q1-4] Record 直查（O(1)）。hasOwnProperty.call 检查原型成员名（'constructor' 等），
     // 语义与旧数组 .find 严格等价（只匹配自有 type 键）。不用 Object.hasOwn：renderer
     // vue-tsc 的 lib 不含 ES2022（TS2550）。「type ∧ 有 sid」合取在此判定——条目查表
     // 与 sid 分支持有，条目声明无需各自 `if (!sid) return` 防御。

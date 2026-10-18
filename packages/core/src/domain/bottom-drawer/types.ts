@@ -14,12 +14,12 @@
  */
 
 /** per-session 开合控制态（内存分区，不持久化） */
-export interface BottomDrawerControlState { // oe-exempt:20261003:framework:类型契约先行——容器契约层声明，D1 下游单元即为消费面
+export interface BottomDrawerControlState { // oe-exempt:20261003:framework:类型契约先行——容器契约层声明，D1 下游单元即为消费方
   isOpen: boolean
 }
 
 /** 全局布局尺寸值（全局单键持久化，与 per-session 开合态分粒度） */
-export interface BottomDrawerLayoutState { // oe-exempt:20261003:framework:类型契约先行——容器契约层声明，D1 下游单元即为消费面
+export interface BottomDrawerLayoutState { // oe-exempt:20261003:framework:类型契约先行——容器契约层声明，D1 下游单元即为消费方
   /** 底抽屉高度百分比（拖拽 clamp 15%–70%，默认 35%；显示期钳制不写回持久值） */
   heightPct: number
 }

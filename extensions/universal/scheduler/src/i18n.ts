@@ -19,12 +19,12 @@ export { readUiLocale }
  * - `t(key, params)`：单条词典模板
  * - `renderResult(messageKey, params, locale)`：toast / 命令反馈（12+ 条命令反馈）
  * - `renderTaskLine(taskParams, locale)`：**命令变体**任务行（状态●/○ + id + name + 摘要 +
- *   相对时间 + 执行状态摘要），调用面 = list 行 / toast 内部组合，`renderResult` 内部复用、
+ *   相对时间 + 执行状态摘要），调用点 = list 行 / toast 内部组合，`renderResult` 内部复用、
  *   不重实现
  * - `renderTaskLineStatic(taskParams, locale)`：**widget 静态变体**（状态●/○ + id + name +
  *   静态调度描述，无任何 now 派生段），仅供 widget GUI body——两变体拆分是 scheduler
- *   widget 推送修正设计 D1-a 的渲染单点裁决：命令层是按需呈现面（保留相对时间），widget
- *   显示面静态化是指纹跳推的前置
+ *   widget 推送修正设计 D1-a 的渲染单点裁决：命令层是按需呈现侧（保留相对时间），widget
+ *   显示侧静态化是指纹跳推的前置
  *
  * L4（模型可见的 tool result）**不**经本模块——`service.ts` 的 `message` 字段保留英文回退。
  */
@@ -74,9 +74,9 @@ export type TaskParams = TaskScheduleParams & {
   enabled: boolean
   /**
    * 执行状态摘要（可选；仅命令层 `task.list` 行尾消费，见 renderLastExecSummary）。
-   * widget 静态变体**不消费**本字段：摘要不在 widget 指纹字段集内，进显示面会造出
-   * 「显示已变、指纹未变」的冻结缺口（scheduler widget 推送修正设计 D1-a/被否③）；
-   * 失败可见性补偿只进命令查询面（按需呈现，零推送成本）。
+   * widget 静态变体**不消费**本字段：摘要不在 widget 指纹字段集内，进显示侧会造出
+   * 「显示已变、指纹未变」的冻结缺口（scheduler widget 推送修正设计 D1-a/不采用③）；
+   * 失败可见性补偿只进命令查询结果（按需呈现，零推送成本）。
    */
   lastExec?: { lastStatus: TaskStatus; recentFailures: number }
 }
@@ -136,7 +136,7 @@ export type ServiceMessage<K extends ServiceMessageKey = ServiceMessageKey> = {
 }[K]
 
 /**
- * messageKey 词表（机器化守卫用：`service.test.ts` 断言「词典 key 集合 ⊇ 本表 + tray.title」）。
+ * messageKey 词表（机器化检查用：`service.test.ts` 断言「词典 key 集合 ⊇ 本表 + tray.title」）。
  * RESULT_RENDERERS 的映射类型已提供编译期穷尽校验；本数组供测试与词典对账。
  */
 export const SERVICE_MESSAGE_KEYS: readonly ServiceMessageKey[] = [
@@ -192,7 +192,7 @@ const ZH_CN: Dictionary = {
   'task.notDispatched': '任务 {id} 未派发（已停用 / 触发受限 / 正在派发中）',
   'task.limit': '任务数已达上限（{max}），请先删除一个',
   'schedule.invalid': '无法解析的时间表达式：{input}',
-  // 执行状态摘要（task.list 行尾；widget 静态面不带——scheduler widget 推送修正设计 D1）
+  // 执行状态摘要（task.list 行尾；widget 静态范围不带——scheduler widget 推送修正设计 D1）
   // 失败可见性优先裁决：窗口内有失败即失败形态（n = 近期失败计数），否则成功形态
   'task.lastOk': '上次: 成功',
   'task.lastFailures': '上次: 失败×{n}',
@@ -212,14 +212,14 @@ const ZH_CN: Dictionary = {
 
   // ack 确认轮（合成确认行 + 落盘失败如实文案）
   // 措辞边界：只承诺「写入会话文件」（本机制的唯一保证），不得写「已持久化 / 已保存到磁盘」
-  // 之类存储级承诺——ack.notPersisted 是失败面，confirm 是成功面，两者都不越界。
+  // 之类存储级承诺——ack.notPersisted 是失败情形，confirm 是成功情形，两者都不越界。
   'ack.confirm': '已保存任务：{name}（{schedule}）。',
   'ack.notPersisted': '已创建任务 {name}，但未写入会话文件。在本会话说一句话即可保存。',
 
   // 托盘标题（扩展自产，宿主零改动）
   'tray.title': '定时任务',
 
-  // TUI widget 文本行（静态面：任务名 + 静态调度描述，无相对时间/逾期段——D1 静态化）
+  // TUI widget 文本行（静态范围：任务名 + 静态调度描述，无相对时间/逾期段——D1 静态化）
   'widget.title': '定时任务',
   'widget.count': '{n} 条',
   'widget.task': '{name} {schedule}',
@@ -264,7 +264,7 @@ const EN_US: Dictionary = {
   // 托盘标题（扩展自产，宿主零改动）
   'tray.title': 'Scheduled tasks',
 
-  // TUI widget 文本行（静态面：任务名 + 静态调度描述，无相对时间/逾期段——D1 静态化）
+  // TUI widget 文本行（静态范围：任务名 + 静态调度描述，无相对时间/逾期段——D1 静态化）
   'widget.title': 'scheduler',
   'widget.count': '{n} scheduled',
   'widget.task': '{name} {schedule}',
@@ -285,7 +285,7 @@ export function dictionaryKeys(locale: UiLocale): string[] {
 
 /**
  * 渲染词典模板。键缺失 → 回落 en 值 → 再回落键名本身（**禁返回空串**，设计 r4 S1）：
- * 所有经 `t()` 赋值的字段因此天然非空——防「空标题在 nullish 渲染面显示空白段头」
+ * 所有经 `t()` 赋值的字段因此天然非空——防「空标题在 nullish 渲染范围显示空白段头」
  * 从词典后门回潮（`meta.title` 依赖本保证）。占位符缺参时保留 `{name}` 原样（非空）。
  */
 export function t(key: string, params?: Record<string, string | number>, locale?: UiLocale): string {
@@ -302,10 +302,10 @@ function interpolate(template: string, params?: Record<string, string | number>)
   })
 }
 
-// ── 形状投影 ──
+// ── 形状映射 ──
 
 /**
- * 执行状态摘要投影（ScheduledTask.history/lastStatus → TaskParams.lastExec 单点）：
+ * 执行状态摘要派生视图（ScheduledTask.history/lastStatus → TaskParams.lastExec 单点）：
  * recentFailures = history 定长窗口（HISTORY_LIMIT=20）内失败计数；无任何执行记录
  * （history 空且 lastStatus 缺）→ undefined = 行尾不显示摘要段。
  * 失败记账为进程内存态（失败 dispatch 无 jsonl op），跨 resume/重启后计数归零、
@@ -317,7 +317,7 @@ function toLastExec(task: ScheduledTask): TaskParams['lastExec'] {
   return { lastStatus: task.lastStatus ?? 'success', recentFailures }
 }
 
-/** ScheduledTask → locale-neutral TaskParams（service 与 widget 共用同一投影，防双口径）。 */
+/** ScheduledTask → locale-neutral TaskParams（service 与 widget 共用同一派生视图，防双口径）。 */
 export function toTaskParams(task: ScheduledTask, now: number): TaskParams {
   const base = {
     id: task.id,
@@ -327,7 +327,7 @@ export function toTaskParams(task: ScheduledTask, now: number): TaskParams {
     now,
     expiresAt: task.expiresAt,
     enabled: task.enabled,
-    // 摘要随投影携带；仅命令变体消费（widget 静态变体忽略——不在指纹字段集内）
+    // 摘要随派生视图携带；仅命令变体消费（widget 静态变体忽略——不在指纹字段集内）
     lastExec: toLastExec(task),
   }
   return task.schedule.mode === 'interval'
@@ -345,7 +345,7 @@ function toScheduleSpec(task: TaskParams): ScheduleSpec {
 // ── 三个渲染入口 ──
 
 /**
- * 执行状态摘要段（task.list 行尾，D1 失败可见性补偿；widget 静态面不带）。
+ * 执行状态摘要段（task.list 行尾，D1 失败可见性补偿；widget 静态范围不带）。
  * 失败可见性优先：窗口内有失败即失败形态（`上次: 失败×n`，n = 近期失败计数——即使最近
  * 一次执行成功，窗口内存在失败也须让用户看见，否则静默失败不可发现与 G3 语义冲突）；
  * 无失败但有记录 → 成功形态；无任何记录 → 空串（行尾不追加段）。
@@ -362,7 +362,7 @@ function renderLastExecSummary(lastExec: TaskParams['lastExec'], locale: UiLocal
  * `{状态} {id} {name} · {摘要} · {相对时间}[ · {执行状态摘要}]`——状态由 `enabled` 在
  * **代码**派生（r5 追补：不得把 ●/○ 做成词典固定字面量，否则停用任务本地化后会显示为
  * 启用）；摘要/相对时间走带 locale 的格式化器现算（params 只携带原始值）。
- * 相对时间**保留**：命令层是按需呈现面（用户主动触发，无推送放大成本），schedule tool
+ * 相对时间**保留**：命令层是按需呈现侧（用户主动触发，无推送放大成本），schedule tool
  * 的「next run time」承诺依赖它（scheduler widget 推送修正设计 D1-a）。
  */
 export function renderTaskLine(taskParams: TaskParams, locale: UiLocale): string {
@@ -378,7 +378,7 @@ export function renderTaskLine(taskParams: TaskParams, locale: UiLocale): string
 /**
  * **widget 静态变体**任务行（仅供 widget GUI body，`buildSchedulerWidgetItems` 单点消费）：
  * `{状态} {id} {name} · {静态调度描述}`——无任何 now 派生段（相对时间/逾期标记/执行摘要
- * 都不进 widget 行），显示面 = f(稳定字段, locale)。这是 index.ts 任务集指纹跳推的完备性
+ * 都不进 widget 行），显示侧 = f(稳定字段, locale)。这是 index.ts 任务集指纹跳推的完备性
  * 前提（D1-a）：now 派生元素会造出「显示已变而指纹不变」的冻结缺口（P6 反例基线）。
  */
 export function renderTaskLineStatic(taskParams: TaskParams, locale: UiLocale): string {

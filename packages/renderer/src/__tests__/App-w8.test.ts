@@ -1,7 +1,7 @@
 /**
  * W8: App.vue 连接建立时调 useSidebar.onConnected（统一入口）。
  *
- * 背景：workspaceStore.load() 只在 initApp 调一次，appBootstrapped 守卫阻止重连后重跑 initApp。
+ * 背景：workspaceStore.load() 只在 initApp 调一次，appBootstrapped 检查阻止重连后重跑 initApp。
  * WS 断连重连后（runtime 可能重启重载磁盘新记录，或另一窗口写入），前端 records 停留 stale。
  *
  * 修复：onConnected 在 useSidebar 内用模块级 hasConnectedBefore 区分首次 vs 重连（见 useSidebar
@@ -70,7 +70,7 @@ vi.mock('@/composables/effects/useSessionStreamSync', () => ({
   },
 }))
 
-// stub 入站守卫装配（u-init P0 接线：App setup 顶层 install + onBeforeUnmount uninstall）。
+// stub 入站检查装配（u-init P0 接线：App setup 顶层 install + onBeforeUnmount uninstall）。
 // 真实 composable 依赖 active pinia（usePanelStore），本文件不装 pinia——stub 保用例隔离，
 // 接线契约由 spy 断言（真实链路见 Panel.inbound-frame-notice.test.ts）。
 vi.mock('@/composables/useInboundFrameGuard', () => ({
@@ -84,7 +84,7 @@ vi.mock('@/composables/useInboundFrameGuard', () => ({
 
 // stub 权限弹窗状态（App setup 顶层调 usePermissionRequest()）。真实模块是 init-gated 的
 // （main.ts 挂载前 initPermissionRequest 建 controller，未 init 调用 fail-fast），本文件不跑
-// main.ts 装配链——perm state 非被测面，stub 关闭态即可（状态机本体见 ui factory 单测）。
+// main.ts 装配链——perm state 非被测对象，stub 关闭态即可（状态机本体见 ui factory 单测）。
 vi.mock('@/composables/shell/usePermissionRequest', () => ({
   usePermissionRequest: () => ({ pending: false, error: false, pluginId: '', permissions: [] }),
 }))
@@ -112,7 +112,7 @@ describe('W8: App.vue 连接建立调 onConnected', () => {
     expect(effectSpies.bindForkNoticeEffect).toHaveBeenCalledTimes(1)
     expect(effectSpies.bindHandoffEffect).toHaveBeenCalledTimes(1)
     expect(effectSpies.bindSessionStreamSync).toHaveBeenCalledTimes(1)
-    // u-init P0 接线：入站帧守卫在 App setup 顶层安装（同区装配），否则 core 丢帧回调
+    // u-init P0 接线：入站帧检查在 App setup 顶层安装（同区装配），否则 core 丢帧回调
     // 无人消费、终止阀提示永不出现（接线缺失 = 生产链路零调用）
     expect(effectSpies.installInboundFrameGuard).toHaveBeenCalledTimes(1)
     connectionState.value = 'connected'
@@ -120,7 +120,7 @@ describe('W8: App.vue 连接建立调 onConnected', () => {
     expect(mocks.onConnected).toHaveBeenCalledTimes(1)
   })
 
-  it('u-init: App 卸载解绑入站帧守卫（install/uninstall 配对，HMR 重挂不残留）', () => {
+  it('u-init: App 卸载解绑入站帧检查（install/uninstall 配对，HMR 重挂不残留）', () => {
     wrapper = mount(App)
     expect(effectSpies.uninstallInboundFrameGuard).not.toHaveBeenCalled()
     wrapper.unmount()

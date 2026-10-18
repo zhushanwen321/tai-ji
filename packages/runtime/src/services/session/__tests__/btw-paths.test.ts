@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { encodeCwd, getBtwSessionsRoot, getBtwThreadDir, getPiAgentDir, isPiSessionId } from '../../../infra/pi/pi-paths.js'
 
 describe('btw 目录布局推导（D2 目录即关联）', () => {
-  it('根目录 = <piAgentDir>/btw（不落 sessions/ 扫描面）', () => {
+  it('根目录 = <piAgentDir>/btw（不落 sessions/ 扫描范围）', () => {
     expect(getBtwSessionsRoot()).toBe(join(getPiAgentDir(), 'btw'))
     expect(getBtwSessionsRoot()).not.toContain(join(getPiAgentDir(), 'sessions'))
   })

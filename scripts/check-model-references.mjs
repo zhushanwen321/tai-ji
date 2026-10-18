@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * check-model-references.mjs —— pi 引擎域资产模型引用漂移守卫（workflow-architecture-redesign D8 机器守卫）。
+ * check-model-references.mjs —— pi 引擎域资产模型引用漂移检查（workflow-architecture-redesign D8 机器检查）。
  *
  * 校验对象：extensions/ 内 pi 引擎域资产里**声明式**的模型引用 vs 模型目录的 diff。
  * 目录静态基准 = packages/runtime/src/generated/builtin-providers.json（pi 内置
@@ -14,7 +14,7 @@
  *   其他 .md 的正文文本不误报——只读 frontmatter 块内行首键）。
  * - workflow 资产（.js meta）无模型声明字段（WorkflowMeta 无 model——P-C4 实测
  *   内置 workflows 零硬编码模型引用，脚本内 agent({model}) 全为运行时变量），
- *   无静态扫描面。
+ *   无静态扫描范围。
  * - 校验域 = pi 内置 provider 快照：引用用户自定义 provider 的资产会被判红——
  *   本仓发布资产不得依赖用户侧 provider 配置，红即正确。
  *
@@ -62,7 +62,7 @@ function stripThinkingSuffix(modelStr) {
   return modelStr.replace(new RegExp(`:(${alt})$`), '')
 }
 
-// ── 0b. THINKING_ORDER 副本 vs core 权威表对账（防漂移机器守卫）─────────────
+// ── 0b. THINKING_ORDER 副本 vs core 权威表对账（防漂移机器检查）─────────────
 // 权威源 = 本仓 core 源码（相对脚本定位，不随 --root fixture 走——对账保护的是
 // 本脚本内副本与权威源的一致性，与被扫资产域无关）。
 const CORE_MODEL_REF_TS = join(__dirname, '..', 'packages', 'subagent-core', 'src', 'shared', 'model-ref.ts')
@@ -130,7 +130,7 @@ auditThinkingOrderCopy()
 
 // ── 1. 收集 extensions/ 下 agent 资产的 frontmatter model 声明 ────────
 
-/** 读 .md frontmatter 围栏块（首个 `---` 到闭合 `---`），无 frontmatter 返回 null。 */
+/** 读 .md frontmatter 围栏块（首个 `---` 到结束 `---`），无 frontmatter 返回 null。 */
 function readFrontmatterBlock(content) {
   const lines = content.split('\n')
   if ((lines[0] ?? '').trim() !== '---') return null
@@ -139,7 +139,7 @@ function readFrontmatterBlock(content) {
   return lines.slice(1, end)
 }
 
-/** frontmatter 行集合 → { kind, model }（行首键直读，非 YAML 全量解析——守卫只认
+/** frontmatter 行集合 → { kind, model }（行首键直读，非 YAML 全量解析——检查只认
  *  这两个键的顶层声明，嵌套/正文文本不误报）。 */
 function readDeclaredRef(frontLines) {
   let kind

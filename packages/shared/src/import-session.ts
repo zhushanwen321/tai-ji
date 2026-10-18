@@ -101,7 +101,7 @@ export interface ImportDegradation {
  * 降级摘要（`ImportReply.degradationSummary` 的载荷，toast 计数/sample 的最小
  * 契约通道，设计 §7.4）：仅在 warning 含 conversion_* 时携带；全量明细（含 L3
  * 截断明细）走 runtime 日志不入 wire。不设 truncatedCount——L3（截断保留）在
- * toast 上无对应分句，避免契约面搭车无消费字段。
+ * toast 上无对应分句，避免契约范围搭车无消费字段。
  */
 export interface ImportDegradationSummary {
   /** L1+L2 聚合（dropped_redundant + dropped_transient 的 count 总和）——toast 汇总分句数据源 */
@@ -222,7 +222,7 @@ export interface ImportReply {
  * 导入错误码字面量联合（错误规格表权威清单，与设计文档 D5 同章错误表一一对应）。
  *
  * 新增错误码必须在此登记，编译器强制 runtime/renderer 两端同步（防止改码后
- * renderer switch 静默失效，同 WorktreeErrorCode 守卫模式）。renderer 统一在
+ * renderer switch 静默失效，同 WorktreeErrorCode 检查模式）。renderer 统一在
  * 对话框内联展示恢复指引，不弹系统对话框。
  *
  * 例外：`import_sidecar_failed` 不是 error envelope 的 code——rename 落地后

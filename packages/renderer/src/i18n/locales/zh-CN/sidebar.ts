@@ -115,7 +115,7 @@ export default {
     // tablist 容器 aria-label（spec sidebar §3.1）
     viewLabel: '侧栏视图',
   },
-  // R6.2 锚定分组（原 projectSwitcher.* 键段随卡片网格退役更名：项目管理面 = 会话视图内项目分组）
+  // R6.2 锚定分组（原 projectSwitcher.* 键段随卡片网格退役更名：项目管理侧 = 会话视图内项目分组）
   projectGroup: {
     defaultName: '默认项目',
     currentChip: '当前',

@@ -5,12 +5,12 @@
  * - W 组 Composer wiring（挂 Composer + stub CommandPopover）：空格/全角空格/NBSP 后 `/`
  *   触发 skill-only 浮层（场景 6④）；`/usr` 输到第二个 `/` 浮层关闭（场景 6①）；
  *   行首 `/` 仍命令浮层（场景 6② 回归）；`#`/`$`/`@` 无变化（场景 6③ 回归）；
- *   select payload → insertSkillChip（光标标记 chip、多个共存）+ 已选集合回传（D2 已选禁选数据面）
+ *   select payload → insertSkillChip（光标标记 chip、多个共存）+ 已选集合回传（D2 已选禁选数据范围）
  * - P 组 CommandPopover（真实组件）：panel 态 taiji 源（globalSkills ∪ projectSkills props，
  *   ADR-0050 修订切源）合并去重序 + `__` 过滤 + pi 真源 skill 推送不影响；已选项「已选」
- *   禁选（onSelect 守卫）；location 取 SkillInfo.sourcePath；panel slash 段 skill 换源保留
+ *   禁选（onSelect 检查）；location 取 SkillInfo.sourcePath；panel slash 段 skill 换源保留
  *   （ADR-0050 二次修订：pi 快照 skill: 项剔除 + registry 源项补入）；landing 态合并回归
- * - P7/P8 组 panel cwd 接线（ADR-0050 修订，Composer 层）：sessionStore 投影的 session cwd
+ * - P7/P8 组 panel cwd 接线（ADR-0050 修订，Composer 层）：sessionStore 派生视图的 session cwd
  *   → useProjectSkills(cwd) 拉取 → CommandPopover projectSkills prop；landing 态不受影响
  * - W9/W10 组 SearchModal ⌘K 注入（第三条 skill 入口）：pendingSlash.isSkill → insertSkillChip
  *   （裸名 + location + 多共存）；isSkill 缺省 → 维持 insertSlashChip 命令通路（回归锁）
@@ -79,7 +79,7 @@ beforeEach(() => {
 let currentPick: Record<string, unknown> | null = null
 
 /** CommandPopover stub：props 反映到 data-* 供 DOM 断言；cp-pick 按钮模拟选中项 emit select。
- *  globalSkills/projectSkills 反映到 data-*（P7/P8 cwd 接线断言面）。 */
+ *  globalSkills/projectSkills 反映到 data-*（P7/P8 cwd 接线断言范围）。 */
 const CommandPopoverStub = defineComponent({
   name: 'CommandPopover',
   props: {
@@ -228,7 +228,7 @@ describe('Composer skill 触发 wiring（场景 6①②③④）', () => {
   })
 })
 
-describe('Composer skill chip 插入与已选回传（D2 已选禁选数据面）', () => {
+describe('Composer skill chip 插入与已选回传（D2 已选禁选数据范围）', () => {
   afterEach(() => {
     document.body.innerHTML = ''
   })
@@ -295,7 +295,7 @@ describe('行首命令浮层 skill 项分流（D3：isSkill → insertSkillChip 
     await wrapper.find('[data-testid="cp-pick"]').trigger('click')
     await nextTick()
     const chips = wrapper.findAll('.slash-chip')
-    // 不误删已有 skill chip（失败模式 C 根修）+ 新 chip 是 skill 形态且带 location
+    // 不误删已有 skill chip（失败模式 C 从根源修复）+ 新 chip 是 skill 形态且带 location
     expect(chips).toHaveLength(2)
     expect(chips[0].attributes('data-chip-name')).toBe('alpha')
     expect(chips[1].attributes('data-chip-type')).toBe('skill')
@@ -594,7 +594,7 @@ describe('CommandPopover skill-only 候选（D1 taiji 源 + D2 已选禁选，AD
 })
 
 // ─────────────── P7/P8 组：panel cwd 接线（ADR-0050 修订——session cwd → projectSkills）───────────────
-// Composer 层垂直切片：sessionStore 投影的 session cwd（split mode 各 panel 各自 session）
+// Composer 层垂直切片：sessionStore 派生视图的 session cwd（split mode 各 panel 各自 session）
 // → useProjectSkills(cwd) 拉取 → CommandPopover projectSkills prop；landing 态不受影响。
 
 describe('panel cwd 接线（session cwd → project skill，ADR-0050 修订）', () => {

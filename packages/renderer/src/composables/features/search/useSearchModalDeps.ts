@@ -34,7 +34,7 @@ import { useSidebarStore } from '@/stores/sidebar'
 import { usePresetStore } from '@/stores/preset'
 import i18n from '@/i18n'
 
-export interface SearchModalShellDeps { // oe-exempt:20261003:framework:类型契约先行——容器/编排/注册表契约层，D1 下游单元即为消费面
+export interface SearchModalShellDeps { // oe-exempt:20261003:framework:类型契约先行——容器/编排/注册表契约层，D1 下游单元即为消费方
   selectSession: (id: string) => Promise<void>
   newSession: () => void
 }

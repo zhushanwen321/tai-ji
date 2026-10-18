@@ -196,7 +196,7 @@ describe('WorkflowVizDag 停止叠加（D9 着色映射）', () => {
 describe('WorkflowVizDag 节点级渲染边界与零节点形态', () => {
   it('单节点 SVG 生成失败 = 节点占位错误态，其余节点不受影响', async () => {
     const bad = sampleDag()
-    // 模拟渲染违约节点：id 空串触发节点组件 fail-fast 守卫（布局产物正常不可达；
+    // 模拟渲染违约节点：id 空串触发节点组件 fail-fast 检查（布局产物正常不可达；
     // 防御路径 = WorkflowVizDagNodeGuard 捕获后渲染占位错误态）
     bad.nodes = [...bad.nodes, node({ id: '' })]
     const wrapper = mountDag(bad)
@@ -417,7 +417,7 @@ describe('WorkflowVizDag 画布视觉（workflow-overlay-refine D3）', () => {
     const rect = wrapper.find('[data-testid="wfvz-dag-cluster-gate"] rect')
     expect(rect.classes()).toContain('stroke-border-strong')
     expect(rect.classes()).toContain('[stroke-dasharray:5_4]')
-    // 描边升档不回退既有 hairline
+    // 描边升级不回退既有 hairline
     expect(rect.classes()).not.toContain('stroke-border-hairline')
   })
 })

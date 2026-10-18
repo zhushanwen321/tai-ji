@@ -90,7 +90,7 @@ export function readDeclaredStartupConfigs(extensionPaths: string[]): DeclaredSt
     })
   }
   // 跨包重复 path 声明：read 阶段去重保留首个（后到者被丢弃，不进 ensure、
-  // 不计 skipped），warn 同时点名先到者（保留生效方）与后到者，辅助排查配置面误复制。
+  // 不计 skipped），warn 同时点名先到者（保留生效方）与后到者，辅助排查配置范围误复制。
   const seen = new Map<string, string>()
   const deduped: DeclaredStartupConfigEntry[] = []
   for (const entry of out) {

@@ -10,7 +10,7 @@
  *
  * mock 模式对齐 __tests__/panel/subagent-tab.test.ts（@/api 门面 session 重定向 + transport/api
  * events mock）；chat store 用真 store（pinia）——虚拟分区即 MessageStream 渲染源，
- * getMessages(virtualId) 断言即用户可见内容面（三视角之观察者形态）。
+ * getMessages(virtualId) 断言即用户可见内容部分（三视角之观察者形态）。
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/composables/useSubagentTabData.test.ts
  */
@@ -22,7 +22,7 @@ import { subagentVirtualId } from '@/stores/subagent'
 import { useSubagentTabData, type SubagentTabDataDeps } from '@/composables/panel/useSubagentTabData'
 import type { SubagentRecord, Message } from '@taiji/shared'
 
-// mock sessionApi：fetchAndInject 内部调 getSubagentHistory（快照腿）。
+// mock sessionApi：fetchAndInject 内部调 getSubagentHistory（快照路径）。
 // [B2 u-renderer] getSubagentStreamState = 接入拉取（触发点①，running record 订阅建立后
 // 经 chat store subagentStreamPull 执行器直达本域）——缺成员时触发点①同步 TypeError 进
 // loadError；工厂给默认回执（found:false，core 分支 3 不动作）。
@@ -123,7 +123,7 @@ describe('useSubagentTabData — 空历史兜底判定顺序即优先级（drawe
 
   it('pi + 空历史 + 分区已有内容（E-4 先到）→ 不种不擦（分区内容保持）', async () => {
     const { chat, setSpy, tabData } = mountComposable(makeRecord())
-    // 模拟 E-4 entry 帧先于 drawer 打开到达（routeInbound → applySubagentEntries 已投影）
+    // 模拟 E-4 entry 帧先于 drawer 打开到达（routeInbound → applySubagentEntries 已映射）
     const e4Projected: Message[] = [
       { id: 'e4-a1', role: 'assistant', content: 'E-4 先到的产出', status: 'complete', timestamp: 100 },
     ]
@@ -133,7 +133,7 @@ describe('useSubagentTabData — 空历史兜底判定顺序即优先级（drawe
 
     await tabData.loadSubagentData(VIRTUAL_ID)
 
-    // 不擦：u1 空历史不写分区 + seed 被分区空守卫跳过 → E-4 内容原样保留
+    // 不擦：u1 空历史不写分区 + seed 被分区空检查跳过 → E-4 内容原样保留
     const partition = chat.getMessages(VIRTUAL_ID)
     expect(partition).toEqual(e4Projected)
     expect(partition[0].id).toBe('e4-a1')
@@ -144,7 +144,7 @@ describe('useSubagentTabData — 空历史兜底判定顺序即优先级（drawe
     expect(setSpy).not.toHaveBeenCalled()
   })
 
-  it('非 pi（zcode）+ 空历史 + outcome 有值 + 分区空 → 仅 outcome 投影，无 seed 消息', async () => {
+  it('非 pi（zcode）+ 空历史 + outcome 有值 + 分区空 → 仅 outcome 派生视图，无 seed 消息', async () => {
     const { chat, setSpy, tabData } = mountComposable(
       makeRecord({ engine: 'zcode', status: 'done', result: '最终结论文本', startedAt: 1000, endedAt: 2000 }),
     )
@@ -189,7 +189,7 @@ describe('useSubagentTabData — 空历史兜底判定顺序即优先级（drawe
     await tabData.loadSubagentData(VIRTUAL_ID)
     expect(chat.getMessages(VIRTUAL_ID)).toHaveLength(1)
 
-    // 重开 drawer：reload 仍空历史 → seed 被分区空守卫跳过（首种气泡保留）
+    // 重开 drawer：reload 仍空历史 → seed 被分区空检查跳过（首种气泡保留）
     await tabData.loadSubagentData(VIRTUAL_ID)
 
     const partition = chat.getMessages(VIRTUAL_ID)

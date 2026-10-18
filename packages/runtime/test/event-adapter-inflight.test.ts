@@ -6,7 +6,7 @@
  * - 合法帧 → 在途镜像绝对计数覆盖 + resolve INFLIGHT_REPORT_ACK（第三参
  *   'select'，rpc-client 对 select 走 value 序列化，pi 侧 reporter 靠它判「已送达」）；
  * - **无任何前端广播副作用**：marker 帧不进翻译（interpret 零调用），且直调 translate()
- *   也返回空（守卫分支）——[HISTORICAL] 广播会让前端渲染无人应答的弹窗导致 pending 泄漏；
+ *   也返回空（检查分支）——[HISTORICAL] 广播会让前端渲染无人应答的弹窗导致 pending 泄漏；
  * - 坏帧三态（非 JSON / 未知 schema / 缺 sessionId）→ 静默丢弃（不镜像不 ack 不抛），
  *   通道保持存活（后续合法帧照常生效）；
  * - 非 marker 帧（普通 select / marker title 但非 select method）→ 旁路不吞，既有 UI 翻译不变；
@@ -83,14 +83,14 @@ describe('event-adapter: subagent 在途帧旁路（D5）', () => {
     expect(interpret).not.toHaveBeenCalled()
   })
 
-  it('translate() 直调 marker 帧 → 空输出（守卫分支：绝不广播前端）', () => {
+  it('translate() 直调 marker 帧 → 空输出（检查分支：绝不广播前端）', () => {
     const events = translate(makeFrame(SUBAGENT_INFLIGHT_MARKER, [reportPayload(0)]), SID)
     expect(events).toEqual([])
     // 不产任何 message / extension-ui 事件（无广播、无弹窗、无 pending）
     expect(events.some(e => e.kind === 'message' || e.kind === 'extension-ui')).toBe(false)
   })
 
-  it('同一帧经 translate 不写镜像（守卫纯化：镜像只由 EventAdapter 旁路写）', () => {
+  it('同一帧经 translate 不写镜像（检查纯化：镜像只由 EventAdapter 旁路写）', () => {
     translate(makeFrame(SUBAGENT_INFLIGHT_MARKER, [reportPayload(5)]), SID)
     expect(inflightMirror.query(SID)).toBeUndefined()
   })

@@ -1,13 +1,13 @@
 <!--
-  TraySessionPanel —— composer 任务托盘第 4 件「子会话」面板（u7，调度模式的执行面入口）。
+  TraySessionPanel —— composer 任务托盘第 4 件「子会话」面板（u7，调度模式的执行入口）。
   设计 `mode-system-composer-density` §6.7 决策 D7 + §7.4「底栏」行。
 
-  ── 数据面（D7：native 直连，零新协议）──
+  ── 数据范围（D7：native 直连，零新协议）──
   inject TRAY_COUNTS_KEY（外壳单例）：本面板**不自建 useTrayCounts 实例**（面板随 Popover
-  开合反复挂载，自建即每次打开重发首拉）；子会话行集来自 `tray.lists.session.children`
+  开合反复挂载，自建即每次打开重发首次拉取）；子会话行集来自 `tray.lists.session.children`
   （native 直连 session store，过滤 parentAgentSessionId === 外壳 sessionId，无新 RPC/订阅）。
 
-  ── 形态（与三件任务面板的差异面）──
+  ── 形态（与三件任务面板的差异点）──
   扁平列表（刻意不做两视图分桶：子会话条数少，用户要一眼看全「我派发的全部」）——段头摘要
   `{total} 个 · {running} 运行中` + 每行：7px 状态点 + label + `cwd 末段 · 状态 · 最近活动`。
   行点击 = 打开该子会话（`useSidebar().selectSession`，与侧栏点击同一条 core 12 步切入链）；
@@ -96,7 +96,7 @@
 
 <script setup lang="ts">
 /**
- * 脚本分区：数据面（inject 外壳单例）/ 状态映射（进程级 status → DOT_CLASS 色 + i18n 文案）/
+ * 脚本分区：数据范围（inject 外壳单例）/ 状态映射（进程级 status → DOT_CLASS 色 + i18n 文案）/
  * 行格式化（cwd 末段 / 最近活动）/ 行动作（打开 = selectSession；停止 = chat.abort 两段确认）。
  */
 import { computed } from 'vue'
@@ -125,7 +125,7 @@ const { error: toastError } = useToast()
 /** 打开子会话：与侧栏点击同一条 core 12 步切入链（useSidebar 为每次调用新建实例，无副作用） */
 const { selectSession } = useSidebar()
 
-/** 数据面（单例注入）：实例由外壳 ComposerTray 创建并 provide，本面板零拉取（见文件头） */
+/** 数据范围（单例注入）：实例由外壳 ComposerTray 创建并 provide，本面板零拉取（见文件头） */
 const tray = useTrayCountsContext()
 const children = computed(() => tray.lists.session.children.value)
 

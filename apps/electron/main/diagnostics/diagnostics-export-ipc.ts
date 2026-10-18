@@ -21,13 +21,13 @@ import type { ExportDiagnosticBundleOptions } from './export-diagnostic-bundle.j
 import { mainLogger } from '../logs/main-logger.js'
 import { runSaveDialogGuarded } from '../utils/save-dialog-guard.js'
 
-/** 保存对话框返回形态（Electron SaveDialogReturnValue 的测试最小投影）。 */
+/** 保存对话框返回形态（Electron SaveDialogReturnValue 的测试最小派生视图）。 */
 export interface SaveDialogResult {
   canceled: boolean
   filePath?: string
 }
 
-/** 依赖注入面：测试注入对话框桩 / 打包桩，生产用 electron 与真实实现。 */
+/** 依赖注入范围：测试注入对话框桩 / 打包桩，生产用 electron 与真实实现。 */
 export interface DiagnosticsExportIpcDeps {
   /** 保存对话框；缺省 dialog.showSaveDialog（聚焦窗口，无聚焦窗口直接 canceled） */
   showSaveDialog?: (options: { title: string; defaultPath?: string }) => Promise<SaveDialogResult>
@@ -87,7 +87,7 @@ export function registerDiagnosticsExportHandler(deps: DiagnosticsExportIpcDeps 
       },
     )
     mainLogger.debug('[diagnostics-export-ipc] registered', { channel: DIAGNOSTICS_EXPORT_BUNDLE })
-  // eslint-disable-next-line taste/no-silent-catch -- 注册失败（极端：channel 被占）不能炸 main 启动；导出入口缺席只影响设置页导出，崩溃台账与巡检不受影响（对齐 log-retention-ipc）
+  // eslint-disable-next-line taste/no-silent-catch -- 注册失败（极端：channel 被占）不能炸 main 启动；导出入口缺席只影响设置页导出，崩溃登记清单与巡检不受影响（对齐 log-retention-ipc）
   } catch {
     // no-op
   }

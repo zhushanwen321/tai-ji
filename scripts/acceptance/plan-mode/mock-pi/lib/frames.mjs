@@ -63,7 +63,7 @@ export function messageEnd(role, text, extra = {}) {
  */
 export function planReviewSelect({ id = `pr-${nextSeq()}`, docs = [], selfReview, message } = {}) {
   const payload = { docs };
-  // selfReview 前向兼容键（U3b 透传面）：现版 runtime 不透传，携带有界字段不改路由。
+  // selfReview 前向兼容键（U3b 透传路径）：现版 runtime 不透传，携带有界字段不改路由。
   if (selfReview !== undefined) payload.selfReview = selfReview;
   return {
     type: 'extension_ui_request',
@@ -106,7 +106,7 @@ export function execFormQuestions({ skills = [] } = {}) {
 //
 // 每个构造器对应一种「宿主必须降级不炸」的边界输入；自测入口逐个断言边界性质
 //（options 空 / JSON 不可解析 / docs 非数组 / 载荷超限），runtime 侧的降级行为
-// 由 runtime 自身测试族覆盖（event-adapter marker 守卫），此处只保证帧面构造正确。
+// 由 runtime 自身测试族覆盖（event-adapter marker 检查），此处只保证帧面构造正确。
 
 /** 空载荷：select 无 options（parseSelectOptionsPayload → undefined → 降级普通 select）。 */
 export function emptyOptionsSelect(id = `edge-${nextSeq()}`) { // oe-exempt:20261001:test:plan 模式验收 harness 预编译场景词汇，场景脚本接线 wip
@@ -155,7 +155,7 @@ export function oversizedPlanStateEntry() { // oe-exempt:20261001:test:plan 模�
   });
 }
 
-/** 超限：message_end 巨文本（投影链有界性边界输入）。 */
+/** 超限：message_end 巨文本（派生视图链有界性边界输入）。 */
 export function oversizedMessageEnd(role = 'assistant') { // oe-exempt:20261001:test:plan 模式验收 harness 预编译场景词汇，场景脚本接线 wip
   return messageEnd(role, 'M'.repeat(200 * 1024));
 }

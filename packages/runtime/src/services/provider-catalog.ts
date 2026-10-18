@@ -99,7 +99,7 @@ export type MergedCatalogView = {
  * 取 provider X 的「快照 ⊕ overlay」合并视图（D4 单点，listProviders 与
  * pi-provider-store 的默认模型有效性判定都从它取，不再各自拼接）。
  *
- * 返回 undefined = provider 不在快照内（非 catalog provider；D6 维持快照闸门，
+ * 返回 undefined = provider 不在快照内（非 catalog provider；D6 维持快照门禁，
  * 快照外 provider 不构成合并视图）。纯同步只读，overlay 读侧自带 mtime 缓存 +
  * fail-safe（文件缺失/损坏按 never-seen 处理），session create 热路径安全。
  */

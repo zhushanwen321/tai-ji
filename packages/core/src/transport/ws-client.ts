@@ -28,12 +28,12 @@
  * - 删除 import.meta.hot HMR 块（core headless 无 HMR）
  * - ConnectionState 含 restarting/failed（IPC 驱动，7 导出签名不变）
  *
- * 入站 parse 前置大小守卫 + 终止阀（crash-forensics §3.3 D8 / u10a）：
+ * 入站 parse 前置大小检查 + 终止阀（crash-forensics §3.3 D8 / u10a）：
  * - JSON.parse 前检查帧大小：text 帧 `string.length` > 40M code units（≈80MB UTF-16）、
  *   binary 帧按字节 > 80MB → 整条丢弃（不 parse——UTF-16 放大 + 对象图再放大正是 E3 类
- *   OOM 形态，响亮失败优于静默 parse 巨型字符串）。阈值论证：出站守卫（C-comm-14）下合法
+ *   OOM 形态，响亮失败优于静默 parse 巨型字符串）。阈值论证：出站检查（C-comm-14）下合法
  *   帧恒 ≤32MiB UTF-8 字节，text 帧 string.length 恒 ≤32M code units，40M = 25% 余量，
- *   只拦「守卫已失效/协议漂移」的显著超界形态（哨兵语义）。
+ *   只拦「检查已失效/协议漂移」的显著超界形态（哨兵语义）。
  * - 丢弃 → seq gap → 重订阅全量拉取 → 拉取响应同样超界 → 再丢的死循环，由**终止阀**防护：
  *   同一 session **连续 3 次**丢帧后暂停该 session 的自动重订阅（send 层拦截
  *   `session.subscribe`，与 WS 连接态无关）；**作用域 = 单 session**（resubscribeAll 的
@@ -47,7 +47,7 @@
  *   ② 否则取首个 `"sessionId"` 字段（live push 帧形态）；③ 均无 → null（只上报，
  *   不参与阀门）。binary 帧不读内容（无 text 可扫），归因恒 null。
  * - 每次丢弃经 onInboundFrameDropped 回调通知（单槽，对齐 onMessage 体例）——renderer
- *   消费者经既有 renderer-log IPC 通道带结构化标记上报进崩溃台账（main.jsonl
+ *   消费者经既有 renderer-log IPC 通道带结构化标记上报进崩溃登记清单（main.jsonl
  *   `inbound-frame-dropped`，D1 矩阵），不新建 IPC 通道。
  *
  * 依赖方向：platform/port（getPlatform）→ 无下游（暴露 connect/disconnect/send/getState/onMessage）
@@ -111,8 +111,8 @@ const PROBE_ALIVE_TIMEOUT_MS = 5_000
  */
 const MAX_PREAUTH_QUEUE = 256
 
-// ── 入站帧守卫常量（crash-forensics §3.3 D8）────────────────────────
-/** text 帧大小上限（string.length code units，≈80MB UTF-16；出站守卫 32MiB 上界 + 25% 余量）。 */
+// ── 入站帧检查常量（crash-forensics §3.3 D8）────────────────────────
+/** text 帧大小上限（string.length code units，≈80MB UTF-16；出站检查 32MiB 上界 + 25% 余量）。 */
 export const INBOUND_FRAME_MAX_TEXT_CODE_UNITS = 40_000_000
 /** binary 帧大小上限（字节；与 text 上限的 80MB 语义对齐）。 */
 export const INBOUND_FRAME_MAX_BINARY_BYTES = 80_000_000
@@ -179,7 +179,7 @@ let authRejectedHandler: (() => void) | null = null
 /**
  * auth 拒绝重连抑制位（D8「全触发点」）：仅当存在注册消费方时才会在拒绝时置位（桌面零回归
  * by construction）。置位后两个自动重连触发点全部短路：ws-client scheduleReconnect（退避
- * /onclose 链，下方守卫）+ use-connection 的 visibility 切前台主动重连（经
+ * /onclose 链，下方检查）+ use-connection 的 visibility 切前台主动重连（经
  * isAuthRejectedSuppressed 查询）。解除 = markConnected（auth 成功 = 凭据已有效）或
  * resetAuthRejectionSuppression（token 重试路径的显式入口）。
  */
@@ -226,7 +226,7 @@ export function resetAuthRejectionSuppression(): void {
   authRejectedSuppressed = false
 }
 
-// ── 入站帧守卫：类型 / 状态 / 公开 API（crash-forensics §3.3 D8）────
+// ── 入站帧检查：类型 / 状态 / 公开 API（crash-forensics §3.3 D8）────
 
 /** 一次入站超界帧丢弃的通知载荷（onInboundFrameDropped 回调参数）。 */
 export interface InboundFrameDroppedInfo {
@@ -243,7 +243,7 @@ export interface InboundFrameDroppedInfo {
 }
 
 /** 入站帧丢弃回调（单槽，对齐 onMessage 体例）：renderer 装配层注册，经既有
- *  renderer-log IPC 通道带结构化标记上报崩溃台账；valveTripped=true 时同时驱动
+ *  renderer-log IPC 通道带结构化标记上报崩溃登记清单；valveTripped=true 时同时驱动
  *  该 session 的静态错误提示。 */
 let inboundFrameDroppedHandler: ((info: InboundFrameDroppedInfo) => void) | null = null
 
@@ -256,7 +256,7 @@ export function onInboundFrameDropped(cb: (info: InboundFrameDroppedInfo) => voi
 }
 
 /** per-session 连续丢帧计数（终止阀判定依据；正常帧到达清零——「连续」语义）。 */
-// taste:allow-no-data-owner W24-EX-C（非 GUI 数据技术结构，已登记）：入站守卫 per-session 丢帧计数簿记（防死循环阀门依据；登记见 docs/architecture/data-source-registry.md §4 ⑧）
+// taste:allow-no-data-owner W24-EX-C（非 GUI 数据技术结构，已登记）：入站检查 per-session 丢帧计数簿记（防死循环阀门依据；登记见 docs/architecture/data-source-registry.md §4 ⑧）
 const inboundDropStreakBySession = new Map<string, number>()
 /** 终止阀生效中的 session（自动重订阅被 send 层拦截；retryInboundDroppedSession 解除）。 */
 // taste:allow-no-data-owner W24-EX-C（非 GUI 数据技术结构，已登记）：终止阀生效 session 集合（自动重订阅暂停的判定依据；登记见 docs/architecture/data-source-registry.md §4 ⑧）
@@ -288,7 +288,7 @@ export function isInboundValveTripped(sessionId: string): boolean {
   return inboundValveTrippedSessions.has(sessionId)
 }
 
-/** 测试钩子：清空入站守卫全部模块级状态（对齐 resetSubscriptionStates 模式）。 */
+/** 测试钩子：清空入站检查全部模块级状态（对齐 resetSubscriptionStates 模式）。 */
 export function _resetInboundGuardForTest(): void {
   inboundDropStreakBySession.clear()
   inboundValveTrippedSessions.clear()
@@ -379,7 +379,7 @@ export function connect(url: string, credentials: ConnectCredentials): void {
   currentUrl = url
   currentCredentials = credentials
 
-  // 单飞守卫（防并存连接）：存在非 CLOSED 的 socket 期间一律不放行建新连接。
+  // 单飞检查（防并存连接）：存在非 CLOSED 的 socket 期间一律不放行建新连接。
   // - OPEN/CONNECTING：已有活跃连接，no-op（原幂等行为不变）。
   // - CLOSING：close 握手未完成（移动弱网下可悬挂数秒~分钟）——此前会被模块变量直接覆盖
   //   并开新连接，旧 socket 悬挂期间与新连接并存（半死连接堆积的根因：移动端「同页多连接
@@ -447,11 +447,11 @@ export function connect(url: string, credentials: ConnectCredentials): void {
 
   ws.onmessage = (event) => {
     if (gen !== wsGeneration) return
-    // 探活（remote 切前台死链检测）：本代任何入站帧都是链路活性证据——在大小守卫/parse
+    // 探活（remote 切前台死链检测）：本代任何入站帧都是链路活性证据——在大小检查/parse
     // 之前清探活计时器（超界帧、坏 JSON 帧同样证明链路活，不清会被误判死链）。
     clearProbeAliveTimer()
-    // 入站帧守卫（D8）：JSON.parse 前置大小检查——超界整条丢弃（不 parse，防 OOM 形态），
-    // 归因 + 计数 + 终止阀见 handleOversizedInboundFrame。守卫在 auth 检查之前（任何阶段
+    // 入站帧检查（D8）：JSON.parse 前置大小检查——超界整条丢弃（不 parse，防 OOM 形态），
+    // 归因 + 计数 + 终止阀见 handleOversizedInboundFrame。检查在 auth 检查之前（任何阶段
     // 的超界帧都拦，含握手期异常帧）。
     const measured = measureInboundFrame(event.data)
     if (measured !== null && isInboundFrameOverLimit(measured)) {
@@ -602,7 +602,7 @@ export function send(msg: ClientMessage): boolean {
  *
  * 计时器清理点与心跳/auth 计时器同款：任意入站帧（onmessage 首行）/ onclose / clearTimers
  * （disconnect、setFailed）——断开与重连各路径不残留；重复调用先清旧（单定时器不变量，
- * 对齐 scheduleReconnect :703-705 注释先例）。超时回调带 gen 守卫（对齐 authTimer），换代后
+ * 对齐 scheduleReconnect :703-705 注释先例）。超时回调带 gen 检查（对齐 authTimer），换代后
  * 旧探活不误杀新连接。
  */
 export function probeAlive(): void {
@@ -623,7 +623,7 @@ export function probeAlive(): void {
 
 // ── 内部 ────────────────────────────────────────────────────
 
-// ── 入站帧守卫私有实现（crash-forensics §3.3 D8）──────────────────
+// ── 入站帧检查私有实现（crash-forensics §3.3 D8）──────────────────
 
 /** 超界判定前的帧度量（text 帧留原文供归因；binary 帧不读内容——大帧转字符串本身是 OOM 形态）。 */
 interface InboundFrameMeasurement {
@@ -636,7 +636,7 @@ interface InboundFrameMeasurement {
  * 度量入站帧：text 帧（string）按 code units；binary 帧按字节（ArrayBuffer / view /
  * Blob 类——runtime 只发 text JSON，binary 分支是形态存在性防御。core 无 DOM lib，
  * Blob 判定走 duck-typing：带 number size 字段即按 binary 度量）。无法度量的形态
- * （undefined 等）返回 null，不守卫，维持原 parse 错误链行为。
+ * （undefined 等）返回 null，不做检查，维持原 parse 错误链行为。
  */
 function measureInboundFrame(data: unknown): InboundFrameMeasurement | null {
   if (typeof data === 'string') return { kind: 'text', size: data.length, text: data }
@@ -655,7 +655,7 @@ function isInboundFrameOverLimit(measured: InboundFrameMeasurement): boolean {
 
 /**
  * 处理超界帧：响亮丢弃（console error）→ 归因 → per-session 连续计数 → 阈值触发终止阀
- * → 丢弃回调通知（每次丢弃都通知——台账 ×4 计数由消费方逐帧上报）。
+ * → 丢弃回调通知（每次丢弃都通知——登记清单 ×4 计数由消费方逐帧上报）。
  */
 function handleOversizedInboundFrame(measured: InboundFrameMeasurement): void {
   const sessionId = attributeOversizedFrame(measured.text)
@@ -738,7 +738,7 @@ function isSubscribeForValvedSession(msg: ClientMessage): boolean {
 }
 
 /**
- * 可 parse 的正常入站帧到达时的守卫簿记维护：
+ * 可 parse 的正常入站帧到达时的检查簿记维护：
  * - id 命中 in-flight subscribe 簿记 → 清理（reply 正常到达 = 订阅完成，归因锚退役）；
  * - payload.sessionId 命中丢帧计数表 → 清零该 session 计数（「连续 3 次」的连续性中断语义：
  *   丢 2 帧 → 正常帧 → 再丢 2 帧，不触发终止阀）。空表时零开销（size 门控，常态热路径）。
@@ -757,7 +757,7 @@ function noteParsedInboundFrame(parsed: unknown): void {
 }
 
 /**
- * 入站消息运行时形状守卫（MF-5：替代 `JSON.parse(...) as ServerMessage` unsafe cast）。
+ * 入站消息运行时形状检查（MF-5：替代 `JSON.parse(...) as ServerMessage` unsafe cast）。
  * 仅做最小形状校验：type 为字符串 + payload 非 null。不验证 type 是否在已知 ServerMessageType
  * 联合内（未知 type 由下游 dispatcher 兜底分支处理），避免过度收紧静默丢弃合法 runtime 消息。
  * ServerMessage 的 payload 恒为对象（pong / session.writeSegments:result 为 Record<string,never>={}），
@@ -795,9 +795,9 @@ function scheduleReconnect(): void {
   state.value = 'reconnecting'
   console.log('[ws] reconnecting in', delay, 'ms (attempt', reconnectAttempts + ')')
   // 「保留上次凭据」的内部实现（S4）：复用 currentCredentials 重新发起（currentCredentials
-  // 与 currentUrl 同在 connect 设置，非 null 由 currentUrl 守卫蕴含）
+  // 与 currentUrl 同在 connect 设置，非 null 由 currentUrl 检查蕴含）
   // 单一定时器不变量：覆盖前清旧 handle——旧定时器若滞留到期再触发，会与本次调度的定时器
-  // 构成双链（单飞守卫能挡住双建连，但重连簿记会被无谓搅动）。
+  // 构成双链（单飞检查能挡住双建连，但重连簿记会被无谓搅动）。
   if (reconnectTimer) clearTimeout(reconnectTimer)
   reconnectTimer = setTimeout(() => connect(currentUrl!, currentCredentials!), delay)
 }

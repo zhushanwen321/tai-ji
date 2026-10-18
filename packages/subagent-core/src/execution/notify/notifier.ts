@@ -4,28 +4,41 @@
 //
 // 职责：
 //   - buildLlmContent：格式化通知文案（本文件唯一逻辑职责）
-//   - createNotifier：薄工厂——ledger 装配时（bindNotifyLedgerHost 已注入）走
-//     四步生命周期（写账 → courier 边沿投递 → 回执销账 → notifyId 幂等重放，
-//     notify-ledger.ts）；未装配时退回投递内核路径（createDelivery 经通知域窄端口
-//     NotifyDomainPorts 注入——core 依赖闭包不含 session-delivery，见 core/notify-ports.ts；
-//     合并窗口 / 去重 / 退避 / flush 委托内核，旧装配 / 无 ledger 测试兼容）
+//   - createNotifier：薄工厂——投递统一走 pi 半区投递端口（getDeliveryPort 进程级
+//     槽，unified-delivery 波 2 切换）：port.deliver 主投（受理前落投递日志 + 直达
+//     pi 原生唯一队列 + details-id 送达凭据 + 重启差集重放）；port 缺席（装配异常 /
+//     版本混装窗口）降级既有最深层直发兜底（createDirectSendHandle）+ warn 留痕 +
+//     诊断计数——降级代价显式登记：无判重无耐久（重复提交可能双投），仅覆盖装配
+//     异常窗口，不作为常态路径（fail-fast 导向：warn 即修复信号）。
 //
 // [collect 退役] 原 notifyBatch / buildBatchLlmContent / computeBatchBudget /
 // buildBatchNotifyId（sync 批通知三件套 + 批幂等键）已随 collect 批机制整体删除。
+// [波 2 退役] 通知账本（notify-ledger 四步生命周期）随波 2 shadow 比对通过退役，
+// 语义由 port 承接（老能力映射 #1-#3）。
 
-// 投递通道（D5 单通道化）：ledger 路径经 courier 在 settled 边沿直达
-// pi.sendMessage({triggerTurn:true})；内核路径的 port.send 同样只传
-// {triggerTurn:true}——steer / followUp / nextTurn 通道已全部删除（nextTurn 的
-// 唯一 drain 点在 session.prompt() 内，主 agent 长 streaming 场景下无限期滞留，
-// 设计 D5 实测证伪）；busy 场景由 ledger（settled 边沿 + isIdle 二次复查）或内核
-// settled 订阅驱动在空闲边沿投递。
+// 投递通道：port.deliver 受理即入 pi 原生 steer/followUp 队列（忙时不拒），两档出队
+// 注入时机由 pi 队列原生承载；本模块唯一 intent 形态 = turn 边界档（缺省，端口侧
+// 翻译为 pi sendMessage steer 档 + triggerTurn）。
 
 import { getLogger } from "../../core/logger.ts";
-import { getNotifyDomainPorts, type DeliveryHandle, type DeliveryPort } from "../../core/notify-ports.ts";
+import { SUBAGENT_BG_NOTIFY_CUSTOM_TYPE } from "@zhushanwen/extension-protocol";
+import {
+  getNotifyDomainPorts,
+  type DeliveryHandle,
+  type DeliveryPort,
+} from "../../core/notify-ports.ts";
 
 import { deriveOutcome } from "../persistence/execution-record.ts";
-import { getBoundNotifyLedger, NOTIFY_CUSTOM_TYPE } from "./notify-ledger.ts";
 import type { AbandonedRoundMark, ClosedReason, Epoch, ExecutionOutcome } from "../domain/record-types.ts";
+
+/**
+ * 送达消息的 customType——notify 词表单源（extension-protocol 的
+ * SUBAGENT_BG_NOTIFY_CUSTOM_TYPE）的兼容别名：notifier / bg-notify-render /
+ * 壳 index.ts（messageRenderer 注册）/ shared 集合消费同一常量，历史名保留供
+ * 本包既有消费方（值锚定锁 = 壳 __tests__/contract.notify-custom-types.test.ts）。
+ * （原定义在 notify-ledger.ts，随账本退役迁入本文件。）
+ */
+export const NOTIFY_CUSTOM_TYPE = SUBAGENT_BG_NOTIFY_CUSTOM_TYPE;
 
 // ============================================================
 // [T4① / PS-2 → U5 二元组] notify 门（H1 U2 自 subagent-service.ts 迁入——
@@ -39,7 +52,7 @@ import type { AbandonedRoundMark, ClosedReason, Epoch, ExecutionOutcome } from "
 export interface NotifyGateRecordState {
   /** record 当前世代（两步判定的比较基准——非标记槽 epoch，§3.2.7 显式两步）。 */
   readonly epoch?: Epoch;
-  /** 放弃轮标记（gate 判据，单槽）：abort（cancel / 编排性关闭打断）时置在飞轮。 */
+  /** 放弃轮标记（gate 判据，单槽）：abort（cancel / 编排性关闭打断）时置在途轮。 */
   readonly lastAbandonedRound?: AbandonedRoundMark | null;
   /** 当前轮次（gate 第二步的回注轮缺省源——settle 推进后的值，正常轮通知凭此
    *  越过旧标记；被中断轮不推进，迟到回注轮 ≤ 标记轮被丢弃）。 */
@@ -48,9 +61,9 @@ export interface NotifyGateRecordState {
 
 /**
  * notify 门的回注声明身份（迟到帧自带；缺省 = 读 record 自身——同世代、当前轮）。
- * 现有消费点的回注均从 record 投影（无独立世代/轮载体），缺省路径恒命中「同世代」，
+ * 现有消费点的回注均从 record 派生视图（无独立世代/轮载体），缺省路径恒命中「同世代」，
  * 拦截由第二步标记判定承担；跨世代重复帧的最终防线 = notifyId（id:epoch:round）
- * 账本去重（reopen 前最后轮必已同步入账，晚到回注必为重复帧——设计 §3.2.7 论证）。
+ * 投递日志判重（reopen 前最后轮必已同步入账，晚到回注必为重复帧——设计 §3.2.7 论证）。
  */
 export interface NotifyGateInbound {
   /** 回注声明世代（缺省 = record 当前 epoch，第一步恒同世代）。 */
@@ -63,7 +76,7 @@ export interface NotifyGateInbound {
  * [U5 / §3.2.7 通知 gate] 轮次完成回注的投递门。
  *
  * 两个阻断维度承接旧 closedReason 集合门的事故防御（v4 A-6 僵尸回执 / cancelled
- * 防双发），判据源 = 「放弃标记」单维（收口/静默场景由放弃轮标记 + 轮身份守卫 +
+ * 防双发），判据源 = 「放弃标记」单维（收尾/静默场景由放弃轮标记 + 轮身份检查 +
  * notifyId 账本三层承接——原 intent=archived 静默 gate 随 intent 概念删除退役）：
  *
  *   ① 回注 epoch ≠ record 当前 epoch → 丢弃（跨世代回注）；
@@ -73,18 +86,18 @@ export interface NotifyGateInbound {
  *        第一步：回注 epoch ≠ record 当前 epoch → 丢弃；
  *        第二步：同 epoch 时标记非空、标记槽世代 = 当前世代且回注轮 ≤ 标记轮 → 丢弃。
  *
- * 收口轮豁免（构造性）：close 挂起等待的最后一轮（closeAfterRound 消费）通知正常
- * 送达——close 不置放弃轮标记（标记只由 cancel/编排性关闭的 abort 置位），且收口
- * 落账编排挂在轮次通知送达之后（§3.2.5 顺序约束 [写死]），settle 时点 record 仍
- * running 非放弃轮，①②均不命中。收口后的残余迟到回注由轮身份守卫（Continuation
- * abortAndClearQueue 废弃轮身份）+ notifyId 账本去重承接。
+ * 收尾轮豁免（构造性）：close 挂起等待的最后一轮（closeAfterRound 消费）通知正常
+ * 送达——close 不置放弃轮标记（标记只由 cancel/编排性关闭的 abort 置位），且收尾
+ * 写入 journal 记录的编排挂在轮次通知送达之后（§3.2.5 顺序约束 [写死]），settle 时点 record 仍
+ * running 非放弃轮，①②均不命中。收尾后的残余迟到回注由轮身份检查（Continuation
+ * abortAndClearQueue 废弃轮身份）+ 投递日志 notifyId 判重承接。
  *
  * 正常轮通知不该被旧标记吞的论证（为何比较 record.round 而非标记槽）：正常轮 N settle
  * 后 round 已推进（markRoundIdle +1），回注轮 = record.round > 标记轮 → 放行，重复帧由
  * notifyId 去重兜底；只有「被显式放弃的轮」才进标记（stopReason 单值会被新轮覆盖，
  * 无法承载 per-round 终局）。
  *
- * 消费面：Continuation 成功/失败分支双闸 + drain 丢弃通知 + 泛化派发主干尾部
+ * 消费方：Continuation 成功/失败分支双闸 + drain 丢弃通知 + 泛化派发主干尾部
  *（one-shot 回注）+ watchdog 失败通知（run-orchestration）。
  */
 export function notifyGateAllowsDelivery(
@@ -118,13 +131,13 @@ export interface BgNotifyRecord {
   /**
    * 完成状态。v4 B-1 两态收敛：closed（终态，含 cancelled，closedReason 表达 L2 原因）
    * 或 running（对话模式轮次完成，旧 idle 折入 running，携带本轮结果送回主 agent）。
-   * toNotifyRecord 守卫放行后经此联合穷尽。
+   * toNotifyRecord 检查放行后经此联合穷尽。
    */
   status: "running" | "closed";
   /** L2 关闭原因子枚举（仅 status="closed" 时有意义）。内部诊断 + outcome 兜底派生输入。 */
   closedReason?: ClosedReason;
   /**
-   * 终态三态对外语义（U3 C-outcome）。notify() 投影边界物化：closed 入参缺省时按
+   * 终态三态对外语义（U3 C-outcome）。notify() 派生视图边界物化：closed 入参缺省时按
    * deriveOutcome(closedReason, error) 兜底填充（所有可达流程下与 completeLegacyClosed
    * 冻结的 record.outcome 等价——toNotifyRecord 构造点在 completeLegacyClosed 之后；该
    * 构造点属 U3 领地外，不透传本字段）。buildLlmContent 与 bg-notify-render 只读本字段。
@@ -151,10 +164,10 @@ export interface BgNotifyRecord {
    *  "Full transcript: <path>" 指针行，父 LLM 可按需读全文；万物可续下每个
    *  record 都要能被 message/fork 定位。缺失时 buildLlmContent 省略整行。 */
   sessionFile?: string;
-  /** [U2] 通知身份键（投影边界物化 = dedupe key：`id` / `id:round`；[U5 / §3.2.3]
+  /** [U2] 通知身份键（派生视图边界物化 = dedupe key：`id` / `id:round`；[U5 / §3.2.3]
    *  epoch>0 时扩为 `id:epoch:round` / `id:epoch`（无轮形态——reopen 后第二次
-   *  close 不与首轮 close 撞键，epoch=0 恒旧格式，磁盘账本零迁移）。账本条目 /
-   *  回执匹配 / 幂等去重共用——details 携带（不进文案，G4 字节锁定不受影响），
+   *  close 不与首轮 close 撞键，epoch=0 恒旧格式，磁盘账本零迁移）。投递日志条目 /
+   *  回执匹配 / 幂等判重共用——details 携带（不进文案，G4 字节锁定不受影响），
    *  重复注入条目凭此可识别为同一条（G2 at-least-once 幂等键）。 */
   notifyId?: string;
   /**
@@ -168,11 +181,11 @@ export interface BgNotifyRecord {
    *  `id` / `id:round` 语义零变化）。供「同轮先导通知与派生通知必须区分」的场景使用：
    *  现行唯一消费方 = drain 队列丢弃通知（`${id}:${round}:drain-drop`）——同轮
    *  settleRoundFailed 失败通知缺省 key 为 `id:round`，丢弃通知若沿用同 key 会被
-   *  ledger/内核按 key 永久去重吞掉（「队列消息被丢」的显式反馈永不可达）。
+   *  投递日志按 key 永久判重吞掉（「队列消息被丢」的显式反馈永不可达）。
    */
   dedupKey?: string;
   /** [C-2] close 终态通知的轮次统计（文案 "completed after N rounds." 用）。
-   *  仅收口落账提示语义（notifyClosed）构造时携带——此时 dedup 身份 round 已被
+   *  仅收尾写入 journal 记录的提示语义（notifyClosed）构造时携带——此时 dedup 身份 round 已被
    *  置 undefined（与轮次通知的 id:round key 区分，终态不被吞），轮数改由本字段进
    *  文案。one-shot 完成通知不设置，文案保持 "completed. Result:" 逐字节（G4）。 */
   totalRounds?: number;
@@ -233,7 +246,7 @@ function buildLlmContent(record: BgNotifyRecord): string {
     : "";
   switch (record.status) {
     case "closed": {
-      // U3 C-outcome：终态文案只读 outcome（notify() 投影边界已物化；?? 兜底为防御
+      // U3 C-outcome：终态文案只读 outcome（notify() 派生视图边界已物化；?? 兜底为防御
       // 完整性——单一权威函数，非同构重写）。判定先于 patchFile——失败轮也会写
       // patchFile（doFinalizeRecord Step 0 对 worktreeHandle 无条件 collectPatch），
       // failed 分支不展示 patch 提示，否则 worktree 失败并存时 LLM 被告知 completed
@@ -248,8 +261,8 @@ function buildLlmContent(record: BgNotifyRecord): string {
         return `Subagent "${agent}" (${id}) failed: ${record.error}\n\n${FAILURE_RECOVERY_TAIL}${transcriptPointer}`;
       }
       // 成功完成或通用结束：展示结果。
-      // [C-2] close 收口提示附轮次统计（设计 D2 路径①"completed after N rounds"）。
-      // totalRounds 仅 notifyClosed（收口提示）携带；轮次通知不设置（轮次身份由
+      // [C-2] close 收尾提示附轮次统计（设计 D2 路径①"completed after N rounds"）。
+      // totalRounds 仅 notifyClosed（收尾提示）携带；轮次通知不设置（轮次身份由
       // round 承载），文案保持 "completed. Result:" 逐字节（G4 硬约束锚定）。
       const roundsSuffix =
         record.totalRounds != null && record.totalRounds > 0
@@ -272,7 +285,7 @@ function buildLlmContent(record: BgNotifyRecord): string {
 /**
  * Background 完成通知器接口（迁移后由内核实现）。
  *
- * 保持与旧 BgNotifier 类相同的公共 API，避免消费方（subagent-service）改动面过大。
+ * 保持与旧 BgNotifier 类相同的公共 API，避免消费方（subagent-service）改动范围过大。
  */
 export interface BgNotifier {
   /** 入队一条完成通知（去重 + 合批窗口合并）。dispose 后短路。 */
@@ -286,18 +299,19 @@ export interface BgNotifier {
 }
 
 /**
- * 投递工厂缺席降级（NotifyDomainPorts.createDelivery === undefined）时的最小直发
- * handle：send 直接调 port.send，无 gate / 合批窗口 / dedupe / 退避。
+ * 投递工厂缺席降级（投递端口槽缺席）时的最小直发 handle：send 直接调 port.send，
+ * 无 gate / 合批窗口 / dedupe / 耐久。
  *
- * 缺席形态 = 宿主漏配通知域窄端口（生产接线在 extension 入口 configureNotifyDomain，
- * 见 index.ts——正常不可达）或测试未装配。降级是「消息仍能发出」的安全侧退化：
- * 丢失的只是 busy 场景的投递时机治理（isIdle gate 由 port.send 装配层兜底语义吸收）。
+ * 缺席形态 = 投递端口未装配（base-tool-enhance session_start 装配异常 / 版本混装
+ * 窗口，生产不可达常态）或测试未装配。降级是「消息仍能发出」的安全侧退化，降级
+ * 代价显式登记（unified-delivery 设计 §3.7）：无判重无耐久（重复提交可能双投），
+ * 仅覆盖装配异常窗口、不作为常态路径（fail-fast 导向：warn 即修复信号）。
  */
 function createDirectSendHandle(port: DeliveryPort): DeliveryHandle {
   return {
     send: (msg) => {
-      // D5 单通道下 port.send 装配忽略 intent 参数；传 notifier 装配的唯一 intent
-      // 与工厂配置保持语义一致。回执（receipt）为扩展位，直发路径不消费。
+      // 直发唯一形态 = triggerTurn（steer 形态注入）；回执（receipt）为扩展位，
+      // 直发路径不消费。
       void port.send(msg, "interrupt-at-turn-boundary");
     },
     flush: () => {}, // 无队列（每条 send 即投），无待 flush 内容
@@ -308,21 +322,21 @@ function createDirectSendHandle(port: DeliveryPort): DeliveryHandle {
 /**
  * 创建 Background 完成通知器（薄工厂）。
  *
- * ledger 装配时（bindNotifyLedgerHost）：四步生命周期接线（写账 → courier 边沿
- * 投递 → 回执销账 → notifyId 幂等，见 notify-ledger.ts）。未装配时：装配投递内核
- * （createDelivery 经 NotifyDomainPorts 注入，缺席降级直发见 createDirectSendHandle）
- * ——gate（isIdle 退避）/ 合批窗口（滑动 60s）/
- * dedup（按 id:round）/ flush / shutdown flush 均委托内核。
+ * 投递统一走 pi 半区投递端口（getDeliveryPort 进程级槽，经 NotifyDomainPorts 注入
+ * 访问器——core 闭包红线禁 import 该包）：受理前落投递日志、直达唯一队列、details-id
+ * 送达凭据、重启差集重放均在端口侧（本函数零时机代码）。端口缺席：降级直发兜底
+ * （createDirectSendHandle）+ warn 留痕 + 诊断计数（per-notifier 首次 + 计数递增
+ * 限流——降级是装配级状态而非逐条通知事件）。
  * 本函数职责：BgNotifyRecord → 预格式化 content + notifyId 物化。
  *
- * @param host 宿主能力注入（pi.sendMessage + hasRunningBackground + isIdle）
- * @returns BgNotifier 接口（与旧类同形）
+ * @param host 宿主能力注入（直发兜底的 sendMessage + hasRunningBackground）
+ * @returns BgNotifier 接口
  */
 export function createNotifier(host: NotifierHost): BgNotifier {
   let disposed = false;
 
-  // 构造 DeliveryPort：intent → pi 参数翻译在适配器内（D3）
-  const port: DeliveryPort = {
+  // 直发兜底的底层端口（pi.sendMessage 适配器——仅缺席降级路径消费）。
+  const directPort: DeliveryPort = {
     supportedPayloads: ["custom"],
     isIdle: () => {
       if (host.isIdle) {
@@ -331,106 +345,87 @@ export function createNotifier(host: NotifierHost): BgNotifier {
       // 未注入 isIdle → 视为 idle（不 gate，向后兼容旧 host）
       return true;
     },
-    // D8（must-fix #4）：settled 边沿驱动装配——内核 busy 入队后由 settled 事件唤醒
-    // flush（watch-dog 兜底事件丢失），替代无订阅时的退避轮询。host 只注入原生订阅
-    // 能力；disposed 标志包装（兑现退订语义——pi.on 返回 void 且无 off）在此完成。
-    subscribeSettled:
-      host.onAgentSettled === undefined
-        ? undefined
-        : (cb) => {
-          let disposed = false;
-          host.onAgentSettled?.(() => {
-            if (!disposed) cb();
-          });
-          return () => {
-            disposed = true;
-          };
-        },
-    send: (msg, _intent) => {
-      // D5 单通道：投递意图唯一化——steer/followUp/nextTurn 多通道全部删除，
-      // 唯一发送形态 = sendCustomMessage({triggerTurn:true})。busy 场景由 ledger
-      //（settled 边沿 + isIdle 二次复查）或内核 settled 订阅在空闲边沿驱动，
-      // 不在此层分流。返回 void = 受理成功（同步无异常；SendReceipt 扩展位留待
-      // 升级方接入）。
+    send: (_msg, _intent) => {
+      // 直发单通道：sendMessage({triggerTurn:true})（steer 形态注入）。返回 void =
+      // 受理成功（同步无异常；SendReceipt 扩展位留待升级方接入）。
       host.sendMessage(
         {
           customType: NOTIFY_CUSTOM_TYPE,
-          content: msg.payload.content,
+          content: _msg.payload.content,
           display: true,
-          details: msg.payload.kind === "custom" ? msg.payload.details : undefined,
+          details: _msg.payload.kind === "custom" ? _msg.payload.details : undefined,
         },
         { triggerTurn: true },
       );
     },
   };
 
-  // #5（must-fix）：内核 handle 的 disposed 不可逆——dispose 后 revive 必须重建 handle，
-  // 否则 revive 后所有 notify() 被内核静默吞（外层标志复位救不回已销毁的内核）。
-  // revive = 新生命周期：合批窗口 / 在途批次 / dedup LRU 随重建自然复位（可接受）。
-  // 工厂经通知域窄端口解析（每次 createHandle 时取——与 facade logger 同款延迟解析，
-  // 宿主 configureNotifyDomain 的时序无关紧要）；缺席降级直发并 warn 一次（per-notifier
-  // 一次：revive 重建 handle 不重复刷屏，新 session 新 notifier 再 warn 可接受）。
-  let directFallbackWarned = false;
-  const createHandle = (): DeliveryHandle => {
-    const factory = getNotifyDomainPorts().createDelivery;
-    if (factory === undefined) {
-      if (!directFallbackWarned) {
-        directFallbackWarned = true;
-        // 错误必须可操作：指出恢复动作（configureNotifyDomain 注入）与 pi 壳落点。
-        notifyLogger.warn(
-          "NotifyDomainPorts.createDelivery not configured - falling back to direct-send delivery " +
-            "(no idle gate / merge window / dedupe). Host must call configureNotifyDomain({ createDelivery }) " +
-            "during extension initialization (pi shell: createPiNotifyDomainPorts in src/host/pi-host.ts).",
-        );
-      }
-      return createDirectSendHandle(port);
+  // 直发兜底 handle：无内核无状态，dispose 不可逆问题不存在（内核时代 revive 重建
+  // handle 的 #5 语义随内核路径退役——直发 handle 恒可复用）。
+  const directHandle: DeliveryHandle = createDirectSendHandle(directPort);
+
+  /** port 缺席降级的 warn 与诊断计数（per-notifier 首次 + 1/10/100 递增限流）。
+   *  降级代价：无判重无耐久（重复提交可能双投），仅覆盖装配异常窗口。 */
+  let directFallbackCount = 0;
+  function warnDirectFallback(notifyId: string): void {
+    directFallbackCount += 1;
+    const crossedMagnitude =
+      directFallbackCount === 1 ||
+      Math.floor(Math.log10(directFallbackCount)) !== Math.floor(Math.log10(directFallbackCount - 1));
+    if (!crossedMagnitude) {
+      return; // 限流：仅在 1 / 10 / 100 … 量级跨越时刷 warn
     }
-    return factory(port, {
-      intent: "interrupt-at-turn-boundary",    // D3：turn 边界抢占（F1 教训内化）
-      mergeWindowMs: 60_000,                   // 滑动窗口合批（继承 MERGE_WINDOW_MS=60s）
-      mergeHoldActive: () => host.hasRunningBackground(), // D4 must-fix #1：禁止用 isIdle 代替
-      backoff: { ms: 100, max: 50 },           // 继承 FLUSH_BACKOFF_MS/MAX
-      // dedup LRU：语义与旧 DEDUP_TTL_MS=60s **不同**——按 key 永久去重（仅 LRU 逐出后
-      // 同 key 可再入）。当前 key 空间（id / id:round，id 每 spawn 唯一）无实际差异；
-      // 后续复用方勿按「60s 内不重复」假设接入（同 key 通知会被永久吞）。
-      dedupe: { maxKeys: 1000 },
-      // U4 warn 出口参数化：内核投递失败警告接 core logger facade（pi 壳下经
-      // extension-logger appendEntry 落 session JSONL + TAIJI_AGENT_DEBUG 落
-      // <dataDir>/logs/），不再走 console.warn（stderr tee 不到日志盘——排查无痕，
-      // 设计 §5 U4）。
-      warn: (msg, err) => notifyLogger.warn(msg, err),
-    });
-  };
-  let handle: DeliveryHandle = createHandle();
+    // 错误必须可操作：指出恢复动作（检查 base-tool-enhance 装配）与降级代价。
+    notifyLogger.warn(
+      "delivery port not bound - falling back to direct-send delivery (no dedupe / no durability; " +
+        "check base-tool-enhance session_start bindDeliveryPort wiring)",
+      { detail: { notifyId, fallbackTotal: directFallbackCount } },
+    );
+  }
 
-  /** ledger 未 bind 降级留痕的 per-notifier 一次性去重（对齐 directFallbackWarned
-   *  同款策略）：降级是装配级状态而非逐条通知事件，首条 warn 即可定位漏装配；每条
-   *  notify 刷一次会在多通知场景刷屏。revive 不复位（per-notifier 一次），新 session
-   *  新 notifier 再 warn 可接受。 */
-  let ledgerFallbackWarned = false;
-
-  /** 四步投递链收尾共用段（S2，code-simplify）：ledger 在 → ①写账（拒绝 = false，
-   *  幂等去重：同 notifyId 已在账/已销账）→ ②attemptDeliver（settled 边沿 + isIdle
-   *  二次复查，③④销账/重放在 ledger 内）；ledger 缺（旧装配 / 部分测试，含 jiti
-   *  单例分裂的失效形态）→ 内核路径降级 + 降级留痕 warn（C-ext-06 配套，per-notifier
-   *  一次，不改变向后兼容行为）。notify 为 fire-and-forget，返回值忽略。闭包读
-   *  let handle：revive 重建后自然指向新 handle。 */
-  function deliverViaLedgerOrKernel(notifyId: string, content: string, details: object): boolean {
-    const ledger = getBoundNotifyLedger();
-    if (ledger) {
-      if (!ledger.record(notifyId, content, details)) return false;
-      ledger.attemptDeliver();
+  /**
+   * 投递主路径：port.deliver（受理前落投递日志 + 直达唯一队列 + details-id 凭据 +
+   * 重启差集重放，端口侧内包）。
+   *
+   * rejected（persist-failed = 受理前落盘失败）不降级直发：绕过耐久承诺制造
+   * at-most-once 双语义，首败即停 + warn 显式上报（ADR-0122 ⑧）。
+   */
+  function deliverViaPort(
+    notifyId: string,
+    content: string,
+    details: object,
+    collectKey: string[] | undefined,
+  ): boolean {
+    const port = getNotifyDomainPorts().getDeliveryPort?.();
+    if (port) {
+      const result = port.deliver(
+        {
+          payload: {
+            kind: "custom",
+            customType: NOTIFY_CUSTOM_TYPE,
+            content,
+            display: true,
+            details,
+          },
+          id: notifyId,
+        },
+        // 攒批判定跟随提交方语义（账本 mergeHoldActive 现状保持）：有活跃后台任务
+        // → 端口 60s 滑动窗口攒批；否则直通。collectKey 债权申报（result-collect
+        // 设计 §3.4）：世代首个通知携带（见 notify() 内申报判据），后续轮次 undefined。
+        { merge: host.hasRunningBackground(), ...(collectKey !== undefined ? { collectKey } : {}) },
+      );
+      if (result.kind === "rejected") {
+        notifyLogger.warn(
+          "delivery port rejected notification (idempotency key not registered; will retry on next notify)",
+          { detail: { notifyId, reason: result.reason } },
+        );
+        return false;
+      }
       return true;
     }
-    if (!ledgerFallbackWarned) {
-      ledgerFallbackWarned = true;
-      notifyLogger.warn("notify ledger not bound, falling back to delivery kernel path (at-most-once)", {
-        notifyId,
-      });
-    }
-    // D1 申报制：通知出站文本不附裸标记（无回执锚点），申报 'acceptance' = 受理即落地
-    // （缺省 'marker' 会让条目永挂 in-flight，死锁形态复发——新增无标记提交点须同样申报）
-    handle.send(
+    // port 缺席：直发兜底（无判重无耐久——降级代价见 warnDirectFallback）。
+    warnDirectFallback(notifyId);
+    directHandle.send(
       {
         payload: {
           kind: "custom",
@@ -441,7 +436,6 @@ export function createNotifier(host: NotifierHost): BgNotifier {
         },
         dedupeKey: notifyId,
       },
-      { receiptAnchor: "acceptance" },
     );
     return true;
   }
@@ -450,7 +444,7 @@ export function createNotifier(host: NotifierHost): BgNotifier {
     notify(record: BgNotifyRecord): void {
       if (disposed) return;
 
-      // U3 C-outcome：投影边界物化 outcome——closed payload 缺省时按单一权威
+      // U3 C-outcome：派生视图边界物化 outcome——closed payload 缺省时按单一权威
       // deriveOutcome 兜底填充，content 与 details（GUI pane 消费）均携带一等 outcome；
       // 所有可达流程下与 record.outcome 等价（toNotifyRecord 在 completeLegacyClosed 之后
       // 构造）。running（轮次通知）语义上无 outcome，不物化。消源自 record 的浅拷贝
@@ -460,15 +454,32 @@ export function createNotifier(host: NotifierHost): BgNotifier {
       // 身份），缺省 = `id:round` / `id` 旧格式；[U5 / §3.2.3] epoch>0 时两种形态都
       // 带 epoch 段——轮次通知 `id:epoch:round`（reopen 后 round 归零不与历史轮撞
       // 键）、无轮通知 `id:epoch`（notifyClosed 显式清 round，reopen 后第二次 close
-      // 的终态提示若沿用裸 id 会与首轮 close 撞键，被 ledger 按「同 notifyId 已
-      // ack」永久拒绝——同 key 撞车吞通知是本代码库已修复过的事故类，epoch 是同族
-      // 防御的构造性根治）。epoch=0 恒旧格式，磁盘账本零迁移。
+      // 的终态提示若沿用裸 id 会与首轮 close 撞键，被投递日志按「同 notifyId 已
+      // 终局」永久判重吞掉——同 key 撞车吞通知是本代码库已修复过的事故类，epoch 是
+      // 同族防御的构造性根治）。epoch=0 恒旧格式，磁盘投递日志零迁移。
       const withEpoch = record.epoch !== undefined && record.epoch > 0;
       const roundKey =
         record.round != null
           ? (withEpoch ? `${record.id}:${record.epoch}:${record.round}` : `${record.id}:${record.round}`)
           : (withEpoch ? `${record.id}:${record.epoch}` : record.id);
       const notifyId = record.dedupKey ?? roundKey;
+      // collectKey 债权申报判据（result-collect 设计 §3.3 多轮通知条目）= 该操作
+      // 世代的第一个通知：
+      //  - round === 1：markRoundIdle 同位的首个轮终通知——轮终簿记先于通知发出
+      //    （finalizeRoundOutcome 内 rec.round = (rec.round ?? 0) + 1，record-store-
+      //    rounds.ts），世代内 round 从 0/undefined 单调递增、reopen 归零重计，故
+      //    round === 1 在一个世代内恰出现一次 = 首个轮终（后续轮次 2,3,… 不申报，
+      //    collect 等到首轮即返回，后续轮次正常 push）。
+      //  - round == null：one-shot 完成通知 / close 收尾提示等无轮次身份的完成通知
+      //    （notifyClosed 显式清 round），设计明示同样申报。
+      //  - dedupKey 非 null：派生通知（drain 丢弃通知等，notifyId 已非世代主身份），
+      //    非终态信号不申报。
+      //  - reopen 新世代（epoch+1、round 归零）：首个轮终通知 round 重新 = 1 →
+      //    重新申报、重新可收（collected 终局属旧世代条目，新世代条目无终局）。
+      const collectKey =
+        record.dedupKey === undefined && (record.round == null || record.round === 1)
+          ? [record.id]
+          : undefined;
       const payload: BgNotifyRecord =
         record.status === "closed"
           ? { ...record, outcome: record.outcome ?? deriveOutcome(record.closedReason, record.error), notifyId }
@@ -476,41 +487,29 @@ export function createNotifier(host: NotifierHost): BgNotifier {
 
       const content = buildLlmContent(payload);
 
-      // U2 B-ledger 四步接线（设计 D4/D5）：账本装配时①写账（appendEntry 先于一切
-      // 投递尝试）→ ②courier 边沿投递（settled 边沿 + 120s 看门狗 + isIdle 二次
-      // 复查）→ ③回执销账 / ④重放幂等均在 ledger 内。record 返回 false = 同
-      // notifyId 已在账或已销账（幂等去重，含重启恢复后的已送达账号零重发）。
-      // 无 ledger 装配时内核路径降级 + 降级留痕（C-ext-06 配套，见 helper 注释）。
-      // 单条通知为 fire-and-forget，返回值忽略。
-      deliverViaLedgerOrKernel(notifyId, content, payload);
+      // 投递主路径（unified-delivery 波 2）：port.deliver 主投（受理前落投递日志 +
+      // 直达唯一队列 + details-id 凭据 + 重启差集重放，端口侧内包）。port 缺席降级
+      // 直发兜底 + warn。单条通知为 fire-and-forget，返回值忽略。
+      deliverViaPort(notifyId, content, payload, collectKey);
     },
 
     flushPendingNotifications(): void {
-      // ledger 路径：立即投递尝试（isIdle 复查，busy 则挂 pending 等边沿——账已落盘，
-      // 重启恢复兜底）；内核路径：flush。
-      const ledger = getBoundNotifyLedger();
-      if (ledger) {
-        ledger.attemptDeliver();
-        return;
-      }
-      handle.flush();
+      // 端口路径：强制投递尝试（窗口缓冲提前出站 + 内核 flush）；缺席（直发）无队列
+      // 可 flush——no-op。
+      getNotifyDomainPorts().getDeliveryPort?.()?.flush();
     },
 
     dispose(): void {
       disposed = true;
-      handle.dispose();
-      // ledger 销毁（清看门狗 + 摘模块级绑定；settled 回调由 disposed 标志静默）。
-      // 未 bind 时 no-op。bind 归 index.ts session_start 装配，对称免受。
-      getBoundNotifyLedger()?.dispose();
+      // 直发兜底 handle 无资源（无 timer / 订阅）；端口生命周期归装配点
+      // （base-tool-enhance session_start 对称 dispose），notifier 不越权销毁。
+      directHandle.dispose();
     },
 
     revive(): void {
       disposed = false;
-      // #5：内核 disposed 不可逆——revive 必须重建 handle（/resume /fork /new 后的
-      // session_start 时序：disposeAll → initSession → revive）。旧 handle 若仍存活
-      // （首次 session_start 的 revive）dispose 为幂等清理，无副作用。
-      handle.dispose();
-      handle = createHandle();
+      // 直发 handle 无 disposed 不可逆问题（内核时代 revive 重建 handle 的 #5 语义
+      // 随内核路径退役）——复位外层标志即可。
     },
   };
 }

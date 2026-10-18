@@ -246,7 +246,7 @@ export default {
       credentialMissing: '需手填',
       credentialOauth: 'OAuth·Phase2',
       credentialCommand: '!命令',
-      credentialCommandHint: 'apiKey 以 ! 开头，pi 运行时执行 shell 命令取值（命令注入面）',
+      credentialCommandHint: 'apiKey 以 ! 开头，pi 运行时执行 shell 命令取值（命令注入风险）',
       warnings: '警告',
       // B2/W7：源配置解析期致命错误横幅（preview?.parseError 触发，不阻断已解析 providers 导入）
       parseError: '源配置解析出错（部分 provider 可能仍可导入）：{message}',
@@ -769,7 +769,7 @@ export default {
     //    DIAGNOSTIC_EXPORT_PRIVACY_NOTICE，有意不走 i18n——两端共用防文案分叉）──
     diagnosticsTitle: '诊断',
     diagnosticsExportLabel: '导出诊断包',
-    diagnosticsExportDesc: '打包崩溃台账与日志尾部为 zip（含本机路径与会话标识），保存位置由你选择，仅用于问题排查',
+    diagnosticsExportDesc: '打包崩溃条目清单与日志尾部为 zip（含本机路径与会话标识），保存位置由你选择，仅用于问题排查',
     diagnosticsExportBtn: '导出诊断包',
     diagnosticsConfirmTitle: '导出诊断包',
     diagnosticsConfirmExport: '导出',
@@ -1094,7 +1094,7 @@ export default {
     loading: '加载用量数据…',
     retry: '重试',
     scannedAt: '数据截至',
-    // ── 摘要台账行 ──
+    // ── 摘要条目清单行 ──
     totalTokens: '总 Token',
     recentDays: '近 {n} 天',
     cost: '费用（估算）',
@@ -1157,14 +1157,14 @@ export default {
     // ── 缓存构成 ──
     sectionCache: '缓存构成',
     sectionCacheMeta: '命中 = cacheRead ÷ (cacheRead + input)',
-    // ── 明细台账 ──
-    sectionDetail: '明细台账',
+    // ── 明细节条目清单 ──
+    sectionDetail: '明细清单',
     sectionDetailMeta: '按 provider 分组 · {groups} 组 · {range}',
     sectionDetailMetaRangeDays: '近 {n} 天',
     sectionDetailMetaRangeAll: '全部',
     // ── 空态 ──
     emptyTitle: '还没有会话记录',
-    emptyDesc: '开始一次对话后，这里会出现你的用量台账。',
+    emptyDesc: '开始一次对话后，这里会出现你的用量清单。',
     emptyScanned: '已扫描 {count} 个会话文件',
     // ── 脚注 ──
     footnote: '统计口径：assistant 消息 usage 逐条累加，含 compaction / summary 用量；费用为 pi models.json 费率估算值，订阅制 provider 记为 0（显示为 —）。',
@@ -1204,8 +1204,8 @@ export default {
     distMissingProd: '安装包缺少移动壳产物，手机端页面不可用，请重新安装最新版本',
   },
   // ── TTS 页（TtsPage，ai-voice-tts 设计 §5.2）──
-  // 开关类控件 label 按投影 toggles 清单 id 拼 key（settings.tts.toggle.<id>）；
-  // 投影出现未登记 id 时 vue-i18n 回退显示 id 本身，不阻断渲染。
+  // 开关类控件 label 按派生视图 toggles 清单 id 拼 key（settings.tts.toggle.<id>）；
+  // 派生视图出现未登记 id 时 vue-i18n 回退显示 id 本身，不阻断渲染。
   tts: {
     providerName: {
       stepfun: 'StepFun（阶跃星辰）',

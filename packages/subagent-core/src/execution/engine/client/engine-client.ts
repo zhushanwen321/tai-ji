@@ -67,7 +67,7 @@ import type {
 // [u7a 生产补挂] 反向通道镜像 → core 侧镜像桥接：in-flight 计数与生命周期谓词读 core
 // 全局镜像（recordId 键），而引擎侧子进程上报只落 EngineClient 镜像——本桥接实现
 // spawned-children.ts 头注「数据源①：反向通道上报落本镜像」的既登记契约（W3 协议化
-// 后 ctx.onChildSpawned 不被调用，该数据面悬空致计数恒 0），见 crash-forensics §7 v7。
+// 后 ctx.onChildSpawned 不被调用，该数据范围悬空致计数恒 0），见 crash-forensics §7 v7。
 import { coreSpawnedChildrenMirror } from "../host/spawned-children.ts";
 import { notifyInFlightChanged } from "../inflight-snapshot.ts";
 
@@ -75,19 +75,19 @@ const logger = getLogger("subagents");
 
 /**
  * [D9 逃生舱] transport 强制覆盖键（定义在 transport-selection.ts，与 stream-sink
- * 的 widget 抑制判据单源；此处 re-export 保持既有导入面）。
+ * 的 widget 抑制判据单源；此处 re-export 保持既有导入路径）。
  */
 export { SUBAGENT_TRANSPORT_ENV };
 
 /**
- * 单条镜像事件 → core 镜像投影 + 在途推送（u7a 数据面桥接）：置死**或已退出** →
+ * 单条镜像事件 → core 镜像映射 + 在途推送（u7a 数据范围桥接）：置死**或已退出** →
  * markKilled，running → register（同 recordId 重 spawn 覆盖，与引擎侧 Map 同语义）。
  * 判据必须是 `state === "exited" || entry.killed` 而非只看 killed：pi 子进程自行
  * 退出/崩溃时引擎侧上报 `state:"exited", killed:false`（child.killed 只在我方 kill
  * 过才为 true），且引擎侧镜像对已退出子进程只改 state 不删项——只看 killed 会把
  * 已死子进程重新 register 为活句柄（countInFlight 虚高 → 幻影在途拖住滚动重启
  * 判据；hasLiveProcessHandle 恒真 → isResumable 失真）。exited 即死，killed 只是
- * 其子集。投影后必推送——镜像事件本身就是在途迁移点（子进程注册/移除），首轮无
+ * 其子集。映射后必推送——镜像事件本身就是在途迁移点（子进程注册/移除），首轮无
  * 任何 arm/disarm 推送，不在此推则首轮在途窗口对 D5 不可见；notify 同步
  * fire-and-forget，异常不外溢。killedAll 空表单发（无 pid）与迟到事件（条目已清）
  * 为 no-op。
@@ -150,7 +150,7 @@ export type EngineClientState =
 
 /**
  * run 作用域反向通知路由（RemoteEngine.run 注册，终态后注销）。
- * 回调允许返回 Promise（数据面 10s 应答守卫的计时对象；同步回调不受守卫影响）。
+ * 回调允许返回 Promise（数据范围 10s 应答检查的计时对象；同步回调不受检查影响）。
  * [H1 U6] 轮次相位消费口（旧第 9 反向通道）已随 chat 域相位机退役删除。
  */
 export interface RunRoute {
@@ -247,8 +247,8 @@ export class EngineClient {
       isDisposed: () => this.disposed,
     };
     this.mirror.onChange((event) => {
-      // [u7a 生产补挂] 反向通道镜像事件同步投影进 core 侧镜像 + 推送在途计数
-      //（数据面桥接，见 bridgeMirrorEventToCoreMirror 与文件头 u7a 注释）。
+      // [u7a 生产补挂] 反向通道镜像事件同步映射进 core 侧镜像 + 推送在途计数
+      //（数据范围桥接，见 bridgeMirrorEventToCoreMirror 与文件头 u7a 注释）。
       bridgeMirrorEventToCoreMirror(event, this.mirror);
     });
   }
@@ -395,7 +395,7 @@ export class EngineClient {
     return this.lastPartialHandle;
   }
 
-  /** initialize 应答（诊断面；RemoteEngine 诊断留痕用）。 */
+  /** initialize 应答（诊断范围；RemoteEngine 诊断留痕用）。 */
   getInitializeDiagnostics(): InitializeResult | undefined {
     return this.initializeDiagnostics;
   }
@@ -650,7 +650,7 @@ export class EngineClient {
   // ── 正向请求 ────────────────────────────────────────────────────────────
 
   /**
-   * 发帧①并等帧②。opts.timeoutMs = 数据面超时域（initialize 等）；不传 = 任务级
+   * 发帧①并等帧②。opts.timeoutMs = 数据范围超时域（initialize 等）；不传 = 任务级
    * 默认无超时（run，AGENTS.md 规则 19 / ADR-0047）。
    */
   request(method: string, params: unknown, opts?: { timeoutMs?: number }): Promise<unknown> {
@@ -710,9 +710,9 @@ export class EngineClient {
   }
 
   /**
-   * [subagent-model-switch §7.3] setModel 类型化调用面（cancelRun 同族）：控制面单
+   * [subagent-model-switch §7.3] setModel 类型化调用点（cancelRun 同族）：控制范围单
    * 请求，上界 SET_MODEL_REQUEST_TIMEOUT_MS（10s——≥ 引擎侧两阶段窗 2×3s + 协议
-   * 余量；控制面单请求必须秒级有界，宿主不悬挂）。错误经 error 帧 reject 为
+   * 余量；控制范围单请求必须秒级有界，宿主不悬挂）。错误经 error 帧 reject 为
    * EngineSdkError（code 原样保留——三型失败分型 + engine_run_not_active 无活进程
    * 形态，宿主编排按 §7.2 处置表分派）。
    */
@@ -726,8 +726,8 @@ export class EngineClient {
   // ── 收割 / 停机 ──────────────────────────────────────────────────────────
 
   /**
-   * 宿主收割入口（D8 markAllSpawnedChildrenDead 落点）：组杀引擎 CLI（transport
-   * close = POSIX 负 pid 组杀 / Windows taskkill /T /F + 有界收尸）+ 镜像整体置死
+   * 宿主收割入口（D8 markAllSpawnedChildrenDead 落点）：按进程组终止引擎 CLI（transport
+   * close = POSIX 负 pid 按进程组终止 / Windows taskkill /T /F + 有界收尸）+ 镜像整体置死
    * + pidfile 清理。在途请求以 engine_crashed 失败。「零残留」断言范围 = 一代子进程
    * + 组内后代（引擎自身 detached 后代不覆盖，impl-plan §7.2 R9-1 / 设计 §3.9 已
    * 接受代价）。
@@ -739,7 +739,7 @@ export class EngineClient {
   }
 
   /**
-   * 协议 dispose：dispose 帧（3s 上界）→ 组杀兜底 → 清理。幂等。
+   * 协议 dispose：dispose 帧（3s 上界）→ 按进程组终止兜底 → 清理。幂等。
    * dispose 后首个 run 的重建由新的连接状态机承担（EnginePort.dispose 契约）。
    */
   async dispose(): Promise<void> {
@@ -826,11 +826,12 @@ export class EngineClient {
   }
 
   /**
-   * 进程死亡 / 失败后的统一清理（进程面段委托 transport、协议面段留守，此处只做
+   * 进程死亡 / 失败后的统一清理（进程侧段委托 transport、协议侧段留守，此处只做
    * 顺序编排）：孤儿收割（镜像置死前，transport 幂等）→ 镜像置死（失效语义 2+3）→
    * pidfile 删 → 在途请求 engine_crashed（附 stderr 尾）→ run 路由清空 → 活引擎
-   * 组杀兜底。runtime transport 无 local 进程面（引擎归 runtime）——发 engine_close
-   * 让 runtime 杀组回收（fire-and-forget：同步终局段不阻塞在途 reject 链）。
+   * 按进程组终止兜底。runtime transport 无 local 进程句柄（引擎归 runtime）——发
+   * engine_close 让 runtime 按进程组终止回收（fire-and-forget：同步终局段不阻塞在途
+   * reject 链）。
    */
   private teardownProcess(detail: string): void {
     const local = this.localTransport;

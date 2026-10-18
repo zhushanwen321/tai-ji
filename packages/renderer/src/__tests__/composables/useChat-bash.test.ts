@@ -6,7 +6,7 @@
  * 验证：
  * - T4: sendBash('s1','git status',false) → chatApi.bash 透传（sid, command, excludeFromContext）
  * - T5: 回执不可达且合成终态已收（executingBash 为空）→ toast 抑制 + sendBash resolve true
- *       （①b timeout-slow-flow-wallclock D2/r4 极性：气泡终态是权威呈现面，不再弹「失败」toast）
+ *       （①b timeout-slow-flow-wallclock D2/r4 极性：气泡终态是权威呈现侧，不再弹「失败」toast）
  * - T5b: 回执不可达且终态未到（executingBash 非空 = env backstop 先到形态）→
  *       toastError 被调（toast 是唯一提示）+ sendBash resolve true（保守：可能已执行）
  * - T6: abortBash 透传参数给 chatApi.abortBash
@@ -27,7 +27,7 @@ const apiMock = vi.hoisted(() => {
   const holder: { handler: ((msg: ServerMessage) => void) | null } = { handler: null }
   return {
     holder,
-    // bash 回执契约（dmg-r1-2）：默认 = 已执行并收口
+    // bash 回执契约（dmg-r1-2）：默认 = 已执行并收尾
     bash: vi.fn(() => Promise.resolve({ status: 'settled' as const })),
     abortBash: vi.fn(() => Promise.resolve()),
     streamSubscribe: vi.fn((_sid: string, handler: (msg: ServerMessage) => void) => {

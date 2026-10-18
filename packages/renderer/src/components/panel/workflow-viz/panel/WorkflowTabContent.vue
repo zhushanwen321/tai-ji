@@ -60,7 +60,7 @@
       <div v-else class="flex min-h-0 flex-1 flex-col overflow-y-auto p-3">
         <p class="text-[length:var(--text-2xs)] text-neutral-dim">{{ t('panel.workflowViz.ganttUnavailable') }}</p>
         <!-- 分段统计降级形态（派生结果可见性保留——事件流失败时 attemptSegments 为空即
-             「不分段降级」口径的数据面：agentCalls/phase 色带经 getWorkflows 仍可得） -->
+             「不分段降级」口径的数据范围：agentCalls/phase 色带经 getWorkflows 仍可得） -->
         <dl class="mt-2 flex flex-col gap-1 font-mono text-[length:var(--text-3xs)] text-neutral-mid" data-testid="wf-viz-gantt-segments-summary">
           <div class="flex gap-2">
             <dt>{{ t('panel.workflowViz.ganttAttemptSegments') }}</dt>

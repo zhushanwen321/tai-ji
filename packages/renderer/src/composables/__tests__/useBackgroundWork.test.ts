@@ -19,9 +19,9 @@ import type { SubagentRecord, WorkflowRunRecord } from '@taiji/shared'
 import { useBackgroundWork } from '../features/chat/useBackgroundWork'
 import { useSubagentStore } from '@/stores/subagent'
 import { useWorkflowStore } from '@/stores/workflow'
-// R3-1④：跨包消费 runtime extractor 真实投影产物构造 fixture——手工拼 origin 的
-// SubagentRecord 会掩盖 runtime 投影白名单断链（origin 恒 undefined 时下游过滤用例
-// 照样绿，假绿）。投影白名单删 origin 时本文件的投影断言与下游判定断言共同转红。
+// R3-1④：跨包消费 runtime extractor 真实派生视图产物构造 fixture——手工拼 origin 的
+// SubagentRecord 会掩盖 runtime 派生视图白名单断链（origin 恒 undefined 时下游过滤用例
+// 照样绿，假绿）。派生视图白名单删 origin 时本文件的派生视图断言与下游判定断言共同转红。
 import { scanSubagentEntries } from '../../../../runtime/src/services/session/subagent-extractor.js'
 
 /** 构造最小合法 SubagentRecord（仅必填字段）。 */
@@ -51,7 +51,7 @@ function makeWorkflow(overrides: Partial<WorkflowRunRecord>): WorkflowRunRecord 
 }
 
 /**
- * 测试种数据：applyRecords 已从 workflow store 导出面摘除（生产零直写场景），测试经
+ * 测试种数据：applyRecords 已从 workflow store 导出清单摘除（生产零直写场景），测试经
  * 分区 ref 直写——不可变替换整 Map（与 partition.apply 等价）触发 shallowRef 响应性。
  */
 function seedRecords(
@@ -173,13 +173,13 @@ describe('useBackgroundWork', () => {
   })
 })
 
-// R3-1④（H2 阶段 3 一致性审查修复）：fixture 源 = runtime extractor 真实投影。
-// 上方 W1 用例手工拼 origin 只验证谓词本身；runtime 投影白名单断链时它们照样绿。
-// 本组用例经 scanSubagentEntries 从自描述 entry 派生——白名单删 origin → 投影断言
+// R3-1④（H2 阶段 3 一致性审查修复）：fixture 源 = runtime extractor 真实派生视图。
+// 上方 W1 用例手工拼 origin 只验证谓词本身；runtime 派生视图白名单断链时它们照样绿。
+// 本组用例经 scanSubagentEntries 从自描述 entry 派生——白名单删 origin → 派生视图断言
 // undefined → hasBackgroundWork 判定断言同步转红（红锚联动）。
-describe('useBackgroundWork × runtime extractor 真实投影产物（R3-1④）', () => {
+describe('useBackgroundWork × runtime extractor 真实派生视图产物（R3-1④）', () => {
   /** 自描述 subagent-record entry 构造（pi JSONL 持久化形态 = runtime extractor 输入）。 */
-  /** 登记 §3.3：条目面 = v2 族（注册条定身份、终态条定终局）。 */
+  /** 登记 §3.3：条目范围 = v2 族（注册条定身份、终态条定终局）。 */
   function recordEntry(
     id: string,
     extra: { origin?: string; result?: string; status?: 'running' | 'idle' } = {},
@@ -191,7 +191,7 @@ describe('useBackgroundWork × runtime extractor 真实投影产物（R3-1④）
       v: 2, kind: 'registered', id, agent: 'worker', task: 't', slug: 's',
       rootSessionId: 's-proj', depth: 0, startedAt: 1000,
     }
-    // origin 缺省 = 存量 record 语义（投影侧归一 undefined）——fixture 不代填默认值
+    // origin 缺省 = 存量 record 语义（派生视图侧归一 undefined）——fixture 不代填默认值
     if (extra.origin !== undefined) registeredData.origin = extra.origin
     const registered = wrap(registeredData, `${id}-r`)
     if (extra.status === 'idle') {
@@ -204,12 +204,12 @@ describe('useBackgroundWork × runtime extractor 真实投影产物（R3-1④）
     return [registered]
   }
 
-  it('投影透传 + 判定：extractor 产出的 workflow record 不绑架 hasBackgroundWork（投影白名单删 origin 即红）', () => {
+  it('派生视图透传 + 判定：extractor 产出的 workflow record 不绑架 hasBackgroundWork（派生视图白名单删 origin 即红）', () => {
     const records = scanSubagentEntries([
       ...recordEntry('sub-proj-wf', { origin: 'workflow' }),
       ...recordEntry('sub-proj-wf-idle', { origin: 'workflow', result: '轮终产出' }),
     ])
-    // fixture 源证明：origin 由 runtime 投影产出，非手工拼装
+    // fixture 源证明：origin 由 runtime 派生视图产出，非手工拼装
     expect(records.find((r) => r.subagentId === 'sub-proj-wf')?.origin).toBe('workflow')
 
     const sub = useSubagentStore()
@@ -218,7 +218,7 @@ describe('useBackgroundWork × runtime extractor 真实投影产物（R3-1④）
     expect(hasBackgroundWork('s-proj')).toBe(false)
   })
 
-  it('零迁移：extractor 缺省投影（存量 record，origin undefined）仍判定为后台工作', () => {
+  it('零迁移：extractor 缺省派生视图（存量 record，origin undefined）仍判定为后台工作', () => {
     const records = scanSubagentEntries([...recordEntry('sub-proj-legacy')])
     expect(records[0]?.origin).toBeUndefined()
 

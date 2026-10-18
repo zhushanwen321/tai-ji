@@ -23,7 +23,7 @@ import { getCrashJournal } from '../crash-journal.js'
 import { ProcessTableRing } from './process-table-ring.js'
 import { reportPiExitSignalForensics } from './signal-forensics.js'
 // W9（设计 §3.7 Electron 打包态）：staged 引擎根推导 + pi 子进程注入（ROOTS +
-// 打包态执行器两键）；构造期补齐 runtime 自身发现面的 L1 env（打包态无 node_modules）
+// 打包态执行器两键）；构造期补齐 runtime 自身发现逻辑的 L1 env（打包态无 node_modules）
 import {
   ensureRuntimeEngineRootsEnv,
   getEngineRootsSpawnEnv,
@@ -70,7 +70,7 @@ export class ProcessManager implements IProcessManager {
   constructor(private readonly projectRoot: string) {
     // 懒初始化：不在构造函数中执行同步 I/O，避免阻塞事件循环
     // piPath 在首次 createSession 时才解析
-    // W9：runtime 自身发现面 env 补齐（幂等；staged 引擎根存在才写）——打包态无
+    // W9：runtime 自身发现逻辑 env 补齐（幂等；staged 引擎根存在才写）——打包态无
     // node_modules（L2 空），不补齐则 runtime ①级读引擎零命中。唯一的构造期 I/O =
     // existsSync 一次 stat（engine-roots 推导），量级远低于「懒初始化」要规避的
     // pi 路径扫描，且必须早于任何引擎发现调用点。
@@ -254,16 +254,16 @@ export class ProcessManager implements IProcessManager {
 
     // Listen for unexpected exits to notify upper layer.
     // onExit 返回的 unsubscribe 刻意不持有：client 生命周期与 Map 条目一致，
-    // intentional destroy 由下方 clientToId 无条目守卫覆盖，无需显式解绑。
+    // intentional destroy 由下方 clientToId 无条目检查覆盖，无需显式解绑。
     client.onExit((code, stderr) => {
       // 反查当前 id：闭包捕获的 sessionId 在 rekey 后过期（create 路径 tempId → piSessionId），
-      // 用 has(capturedId) 守卫会在 rekey 后误判「已被清理」→ 死亡通知整条丢失（僵尸 session 根因）。
+      // 用 has(capturedId) 检查会在 rekey 后误判「已被清理」→ 死亡通知整条丢失（僵尸 session 根因）。
       // clientToId 与 processes 由 createSession/destroySession/rekey 成对维护，执行时反查天然同步。
       const currentId = this.clientToId.get(client)
       // clientToId 无条目 = 已被 destroySession 清理（intentional destroy），跳过通知
       if (currentId === undefined) return
       // D5①（session-dead-structural-fixes）：kill 路径全量日志 K8——异常退出收敛的观测点：
-      // 走到此处 = pi 进程自发退出（intentional destroy 已被上方 clientToId 无条目守卫拦截），
+      // 走到此处 = pi 进程自发退出（intentional destroy 已被上方 clientToId 无条目检查拦截），
       // 记录退出码与收敛链，供事后从 exit 143 类死亡回溯发起方。
       console.warn(`[process-manager] session ${currentId} process exited unexpectedly (code: ${code}) (kill_source=exit_converge | who: pi exited on its own (crash / external kill), not an intentional destroy | chain: exit event -> exitCallbacks -> upper onSessionExit convergence (persist stopped + occupancy reset + session.exited))`)
       // 信号取证（signal-forensics）：exit_converge = 非 intentional destroy 的意外
@@ -340,7 +340,7 @@ export class ProcessManager implements IProcessManager {
       await client.switchSession(sessionFile)
       // W2（restore-fork-attach-fix F4）：附着必断言（I1）。withEphemeralPi 附着本就是
       // 真实文件、天然通过；接线它使「附着必断言」成为无例外结构（设计文档 D4），
-      // 新附着调用点照抄即得守卫。
+      // 新附着调用点照抄即得检查。
       await assertPiSessionFile(client, sessionFile, `withEphemeralPi(${sessionFile})`)
       return await fn(client)
     } finally {
@@ -354,11 +354,11 @@ export class ProcessManager implements IProcessManager {
   async destroySession(sessionId: string): Promise<void> {
     const proc = this.processes.get(sessionId)
     if (!proc) return
-    // D1 台账（crash-forensics §3.3 D1 写入点矩阵 shutdown 行）：pi 计划内终止在杀链发起处
+    // D1 journal（crash-forensics §3.3 D1 写入点矩阵 shutdown 行）：pi 计划内终止在杀链发起处
     // 与杀链动作同点双写（reason=planned——附录 A #16 以这些 kill 发起事件的时间窗排除
     // 计划内 SIGTERM）。不能挂 exit handler：本方法已先行删 processes/clientToId，exit 回调
     // 反查无条目静默返回（抑制语义），挂错点事件永不产生（与 deleted 行同机理）。
-    // `!proc` 守卫天然幂等去重：重复调用/无条目不产生事件。destroyAll 逐 session 经本方法
+    // `!proc` 检查天然幂等去重：重复调用/无条目不产生事件。destroyAll 逐 session 经本方法
     // 到达同一挂点，无需单独双写。append 为 fire-and-forget，不阻塞杀链。
     getCrashJournal().append({ layer: 'pi', event: 'shutdown', reason: 'planned', sessionId })
     // Remove from maps first to prevent exitCallback from triggering,

@@ -6,7 +6,7 @@
  *    空是合法态）
  *  - 同 short-id 多 provider 双匹配：只标对应 provider 组的行（与 isRowSelected 同构语义）
  *  - defaultModel 空（未配置）→ 全部行无标签
- *  - ModelSelectPopover 集成：settingsStore.defaultModel → panel 数据面接线（弹层内出现标签）
+ *  - ModelSelectPopover 集成：settingsStore.defaultModel → panel 数据范围接线（弹层内出现标签）
  *
  * 每条用例至少一个用户可见 DOM 断言（TEST-STRATEGY §3 三视角纪律）。
  * 运行：cd packages/renderer && npx vitest run src/components/panel/__tests__/ModelPickerPanel.default-tag.test.ts
@@ -91,7 +91,7 @@ describe('ModelPickerPanel 行尾「默认」标签（demo .pt）', () => {
     expect(wrapper.findAll(TAG_SELECTOR).length).toBe(0)
   })
 
-  it('ModelSelectPopover 集成：settingsStore.defaultModel 驱动弹层内标签（数据面接线）', async () => {
+  it('ModelSelectPopover 集成：settingsStore.defaultModel 驱动弹层内标签（数据范围接线）', async () => {
     const settings = getSettingsStore()
     settings.models.value = [
       { id: 'gpt-4o', name: 'GPT-4o', providerId: 'openai', providerName: 'OpenAI', enabled: true },

@@ -1,5 +1,5 @@
 /**
- * check_prompt_outposts.py 检测核心单测（A2 D-A2-3）：守卫自身的判定行为必须
+ * check_prompt_outposts.py 检测核心单测（A2 D-A2-3）：检查自身的判定行为必须
  * 机器锁定——误放行会让「忘挂注入」回到人责（MF-B/MF-C 复发面），误拦会逼人
  * 加豁免瓦解白名单治理。python 脚本无模块导出可 import，经 --root 参数指向
  * tmp fixture 树子进程验证退出码（无参默认仓库根，pre-commit/CI 均无参调用）。
@@ -24,7 +24,7 @@ function writeSrc(relPath, lines) {
   writeFileSync(abs, `${lines.join('\n')}\n`)
 }
 
-/** 跑守卫（--root fixture），返回 { status, stdout }。非零退出不抛（断言用）。 */
+/** 跑检查（--root fixture），返回 { status, stdout }。非零退出不抛（断言用）。 */
 function runGuard() {
   try {
     const stdout = execFileSync('python3', [SCRIPT, '--root', fixtureRoot], { encoding: 'utf-8' })
@@ -46,7 +46,7 @@ afterEach(() => {
 describe('check_prompt_outposts.py 判定行为', () => {
   it('白名单登记形态：已注入 / 内部命令豁免全放行 → exit 0', () => {
     // fixture 用现行活指纹（deliverOne 单点出站的注入后形态）——已删除的 dispatcher
-    // 直发死条目不再回填（白名单按真实调用点登记，测试不钉死形态）
+    // 直发死条目不再回填（白名单按真实调用点登记，测试不固定形态）
     writeSrc('services/session/session-delivery-registry.ts', [
       'async function deliverOne(client, text, opts) {',
       '  const injection = await injector.inject(client, text)',

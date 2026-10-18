@@ -2,16 +2,16 @@
  * useBtwTabData 单测（btw-question M3-b：badge 数据通道 + updateFor 隔离 + 虚拟 key 清理登记）。
  *
  * 三视角（TEST-STRATEGY §3）：
- * - 使用者（黑盒 DOM）：Host 把 threads 计数 / Σ unread 投影成文本节点，每条用例断言可见文本
+ * - 使用者（黑盒 DOM）：Host 把 threads 计数 / Σ unread 映射成文本节点，每条用例断言可见文本
  *   （拉取落地 / 迟到响应不串台 / 进视口清除 / 剪枝后归零）
- * - 观察者（形态）：挂载即主动拉取（不依赖广播）；线列表与 badge 数据面按主会话分区落位
+ * - 观察者（形态）：挂载即主动拉取（不依赖广播）；线列表与 badge 数据范围按主会话分区落位
  * - 构建者（白盒）：updateFor(capturedSid) 迟到响应写旧分区（规则 8 隔离）+ 虚拟 key 登记
- *   三函数（get/clear/reconcile——M4-a 消费面先写后读）+ 出册线观察停止
+ *   三函数（get/clear/reconcile——M4-a 消费方先写后读）+ 出册线观察停止
  *
  * mock 策略（TEST-STRATEGY §5）：vi.mock('@/api') 局部替换 btw 域（spread actual 保门面
  * 其余域，btw-panel 同款）+ chat.getHistory 桩（见 mock 处注释——回放链不产生墙钟竞争）；
  * 真实 chat store（setMessages 真实分区增长驱动未读 watch）+
- * 真实 core drawer 域（视口判定与抽屉活动触发面）。i18n 走全局 setup（本文件无文案断言）。
+ * 真实 core drawer 域（视口判定与抽屉活动触发范围）。i18n 走全局 setup（本文件无文案断言）。
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/composables/panel/use-btw-tab-data.test.ts
  */
@@ -61,7 +61,7 @@ const btwMock = vi.hoisted(() => ({
 // stores/btw-replay 的真实回放链，mock transport 的 TIMING.ack 是 40ms setTimeout
 //（settle 只冲刷微任务，等不到它），迟到的空历史 hydrate 会清掉用例刚 seed 的线分区、
 // 未读 watch 的 prev 基线随之归零——重负载下定时器落点漂移，未读计数随机翻错。
-// 本文件断言面是 badge 计数不是回放，桩成同步空历史后回放链不再产生墙钟竞争。
+// 本文件断言范围是 badge 计数不是回放，桩成同步空历史后回放链不再产生墙钟竞争。
 const chatGetHistoryMock = vi.hoisted(() =>
   vi.fn(async () => ({ messages: [], truncated: false, loadedTurns: 0, totalTurnsEstimate: 0 })),
 )
@@ -73,7 +73,7 @@ vi.mock('@/api', async (importActual) => {
 const SID_A = 's-btw-data-a'
 const SID_B = 's-btw-data-b'
 
-/** 最小 Host：把 composable 暴露面投影成可见文本节点（使用者视角断言面） */
+/** 最小 Host：把 composable 暴露面映射成可见文本节点（使用者视角断言范围） */
 const Host = defineComponent({
   props: { sid: { type: String, default: null } },
   setup(props) {
@@ -107,7 +107,7 @@ async function settle(w: VueWrapper): Promise<void> {
 }
 
 /**
- * 轮询等待 Host 投影到达期望值（仅用于「到达」类断言）：投影更新依赖 Vue watcher
+ * 轮询等待 Host 派生视图到达期望值（仅用于「到达」类断言）：派生视图更新依赖 Vue watcher
  * 回调的异步调度，固定 settle 后立即断言对调度器微时序有隐性依赖——CI 并行负载下
  * 偶发不达（CI 偶发 run 36585066332），改带超时轮询去依赖。超时后先输出失败现场
  * 快照，再以 expect 收尾（保持 vitest 断言失败形态）。预算 8000ms：全量套件
@@ -136,9 +136,9 @@ async function waitForUnread(w: VueWrapper, expected: string, timeoutMs = 8000):
 }
 
 /**
- * 失败现场取证（waitForUnread 超时路径）：Host 投影三项 + 线分区消息条数 +
+ * 失败现场取证（waitForUnread 超时路径）：Host 派生视图三项 + 线分区消息条数 +
  * btw.list 最近一次 mock 返回值——下次 CI 复现时据此区分「watcher 未计数」
- * vs「分区无数据」vs「投影未更新」。
+ * vs「分区无数据」vs「派生视图未更新」。
  */
 async function logBtwFlakyDiagnosis(w: VueWrapper): Promise<void> {
   const chat = useChatStore()
@@ -182,11 +182,11 @@ describe('挂载/切会话主动拉取（broadcast 时序竞争规则：必拉�
     await settle(w)
 
     expect(btwMock.list).toHaveBeenCalledWith(SID_A)
-    expect(text(w, 'threads')).toBe('2') // 用户可见：线列表投影
+    expect(text(w, 'threads')).toBe('2') // 用户可见：线列表派生视图
     expect(text(w, 'unread')).toBe('0')
   })
 
-  it('切会话：按新 mainSid 重拉，两主会话分区互不污染', async () => {
+  it('切会话：按新 mainSid 重新拉取，两主会话分区互不污染', async () => {
     btwMock.list.mockImplementation((sid: string) =>
       Promise.resolve(sid === SID_A ? [{ vid: 'btw:ta' }] : [{ vid: 'btw:tb1' }, { vid: 'btw:tb2' }]),
     )
@@ -342,7 +342,7 @@ describe('回收提醒消费接线（D1 renderer 半边：reclaimImminent 两路
     expect(text(w, 'pending')).toBe('0') // 聚合回落（用户可见）
   })
 
-  it('stateSnapshot 回放腿（session 通道，重连/切回按订阅 sid 分发）：广播置位 true → 集合命中、聚合计数上升', async () => {
+  it('stateSnapshot 回放路径（session 通道，重连/切回按订阅 sid 分发）：广播置位 true → 集合命中、聚合计数上升', async () => {
     btwMock.list.mockResolvedValue([{ vid: 'btw:t1' }]) // 拉取时无提醒
     const w = mountHost(SID_A)
     await settle(w)
@@ -359,19 +359,19 @@ describe('回收提醒消费接线（D1 renderer 半边：reclaimImminent 两路
   })
 })
 
-describe('虚拟 key 清理登记（M3-b 登记结构；deleteSession 消费面归 M4-a）', () => {
+describe('虚拟 key 清理登记（M3-b 登记结构；deleteSession 消费方归 M4-a）', () => {
   it('拉取成功登记 mainSid → vid 映射，clearBtwVirtualKeyMapping 后出册', async () => {
     btwMock.list.mockResolvedValue([{ vid: 'btw:t1' }, { vid: 'btw:t2' }])
     const w = mountHost(SID_A)
     await settle(w)
 
-    expect(text(w, 'threads')).toBe('2') // 使用者可见面
+    expect(text(w, 'threads')).toBe('2') // 使用者可见部分
     expect(getBtwVirtualIdsByMain(SID_A)).toEqual(['btw:t1', 'btw:t2'])
     clearBtwVirtualKeyMapping(SID_A)
     expect(getBtwVirtualIdsByMain(SID_A)).toEqual([])
   })
 
-  it('出册线：重拉剪枝残留未读与登记，观察停止后不再计数', async () => {
+  it('出册线：重新拉取剪枝残留未读与登记，观察停止后不再计数', async () => {
     btwMock.list.mockResolvedValue([{ vid: 'btw:t1' }, { vid: 'btw:t2' }])
     const w = mountHost(SID_A)
     await settle(w)
@@ -381,15 +381,15 @@ describe('虚拟 key 清理登记（M3-b 登记结构；deleteSession 消费面�
     // （产品语义：初始快照内的消息不算新未读，watch 基线 = 创建时的分区长度）。CI 并行
     // 负载下 settle 的微任务冲刷可能早于 mock resolve，setMessages 落在 watch 创建前会被
     // 基线吞掉——unread 恒 0 且无重算路径（CI 两次连红取证：分区 btw:t2=1 而 host
-    // unread=0，8s 轮询不自愈）。等 threads 投影到位（与 watch 创建同拍，先写投影后建
-    // watch）再制造增长，构造性保证观察面在册。
+    // unread=0，8s 轮询不自愈）。等 threads 派生视图到位（与 watch 创建同拍，先写派生视图后建
+    // watch）再制造增长，构造性保证观察点在册。
     await waitForProjection(w, 'threads', '2')
 
     chat.setMessages('btw:t2', [msg('b1')])
     await settle(w)
     await waitForUnread(w, '1')
 
-    // 关线后重拉（抽屉活动触发面）：权威列表只剩 t1
+    // 关线后重新拉取（抽屉活动触发范围）：权威列表只剩 t1
     btwMock.list.mockResolvedValue([{ vid: 'btw:t1' }])
     openDrawerTab('btw')
     await settle(w)
@@ -404,8 +404,8 @@ describe('虚拟 key 清理登记（M3-b 登记结构；deleteSession 消费面�
   })
 })
 
-describe('线终结分区处置（M4-a 消费面：reconcile 出册同拍 dispose + 单入口直调）', () => {
-  it('关线重拉出册：线分区 + 派生 subagent 键同拍清、映射不留残留；他线/主分区不受误伤', async () => {
+describe('线终结分区处置（M4-a 消费方：reconcile 出册同拍 dispose + 单入口直调）', () => {
+  it('关线重新拉取出册：线分区 + 派生 subagent 键同拍清、映射不留残留；他线/主分区不受误伤', async () => {
     btwMock.list.mockResolvedValue([{ vid: 'btw:line-x' }])
     const w = mountHost(SID_A)
     await settle(w)
@@ -418,19 +418,19 @@ describe('线终结分区处置（M4-a 消费面：reconcile 出册同拍 dispos
     chat.setMessages('btw:line-other', [msg('keep')]) // 他主名下线
     chat.setMessages(SID_A, [msg('main')]) // 主分区
 
-    // 关线（btw.remove 同拍）→ 抽屉活动触发面重拉 → 权威列表空 → 出册同拍处置（单入口幂等）
+    // 关线（btw.remove 同拍）→ 抽屉活动触发范围重新拉取 → 权威列表空 → 出册同拍处置（单入口幂等）
     btwMock.list.mockResolvedValue([])
     openDrawerTab('btw')
     await settle(w)
 
-    expect(chat.getMessages('btw:line-x')).toHaveLength(0) // 线分区清（P-cascade 前端腿）
+    expect(chat.getMessages('btw:line-x')).toHaveLength(0) // 线分区清（P-cascade 前端路径）
     expect(chat.getMessages(subagentVirtualId('line-x', 's1'))).toHaveLength(0) // 派生键清（D9④ 清派生键）
     expect(getBtwVirtualIdsByMain(SID_A)).toEqual([]) // 映射不留空 set 残留（被删主迟到空拉取同口径）
     expect(chat.getMessages('btw:line-other')).toHaveLength(1) // 非本主名下线不误伤
     expect(chat.getMessages(SID_A)).toHaveLength(1) // 主分区不误伤
   })
 
-  it('失效腿不清键：线列表不变（闲置回收/进程亡不改 registry）→ 无出册 → 分区保留（D9④）', async () => {
+  it('失效路径不清键：线列表不变（闲置回收/进程亡不改 registry）→ 无出册 → 分区保留（D9④）', async () => {
     btwMock.list.mockResolvedValue([{ vid: 'btw:line-alive' }])
     const w = mountHost(SID_A)
     await settle(w)
@@ -438,7 +438,7 @@ describe('线终结分区处置（M4-a 消费面：reconcile 出册同拍 dispos
     chat.setMessages('btw:line-alive', [msg('keep')])
     chat.setMessages(subagentVirtualId('line-alive', 's1'), [msg('d')])
 
-    openDrawerTab('btw') // 失效（回收）只杀进程——重拉线列表仍含该线
+    openDrawerTab('btw') // 失效（回收）只杀进程——重新拉取线列表仍含该线
     await settle(w)
 
     expect(getBtwVirtualIdsByMain(SID_A)).toEqual(['btw:line-alive'])
@@ -527,7 +527,7 @@ describe('失效支与 badge 派生（事件帧失效一路：dialog FIFO 出队
     expect(isBtwPending('btw:t3')).toBe(false) // FIFO 出队后 badge 派生自动回落
   })
 
-  it('stale 守卫：requestIds 与 FIFO 无交集时零副作用（无关帧不置提示不撤载荷）', () => {
+  it('stale 检查：requestIds 与 FIFO 无交集时零副作用（无关帧不置提示不撤载荷）', () => {
     seedPending('btw:t4', 'r4')
 
     // 无关帧：无交集 → no-op

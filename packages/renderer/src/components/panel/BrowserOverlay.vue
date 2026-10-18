@@ -11,7 +11,7 @@
   useBrowserRectSync 观测目标随挂载点迁移到浮层视口（抽屉 splitter/纵轴变化与 view rect
   无关，观测链只余 ResizeObserver + window resize）。
 
-  显示收口事实源（§7.4 show 统一谓词）：useBrowserOverlayStateSync 常驻本组件（宿主恒挂），
+  显示收尾事实源（§7.4 show 统一谓词）：useBrowserOverlayStateSync 常驻本组件（宿主恒挂），
   浮层开合/内容切换先于 BrowserPane 的 show 请求上报主进程。
 
   Esc 不在壳内监听（§6.7 栈序编排器唯一属主，stack-order 直接关 core 开合态、kind 无关）；
@@ -40,8 +40,8 @@
 
 <script setup lang="ts">
 /**
- * BrowserOverlay 脚本：core overlay SSOT 投影（isBrowserOpen / browserContent）+
- * 显示收口事实源上报（useBrowserOverlayStateSync，常驻）。
+ * BrowserOverlay 脚本：core overlay SSOT 派生视图（isBrowserOpen / browserContent）+
+ * 显示收尾事实源上报（useBrowserOverlayStateSync，常驻）。
  * 关闭四通道（Esc/⌘W 走编排器、点遮罩/按钮走壳 close 事件）统一收敛到 core closeOverlay。
  */
 import { computed } from 'vue'
@@ -58,16 +58,16 @@ const { isOpen, current } = useOverlayControl()
 
 /** 浮层当前内容是 browser 才开本壳（单例换内容：workflow 内容归 WorkflowVizOverlay 壳） */
 const isBrowserOpen = computed(() => isOpen.value && current.value?.kind === 'browser')
-/** browser 载荷投影（url + 发起会话；非 browser 内容 = null → body 不挂 BrowserPane） */
+/** browser 载荷派生视图（url + 发起会话；非 browser 内容 = null → body 不挂 BrowserPane） */
 const browserContent = computed(() => {
   const cur = current.value
   return cur !== null && cur.kind === 'browser' ? cur.payload : null
 })
 
-// 显示收口事实源上报（常驻：关态/换内容同样上报）
+// 显示收尾事实源上报（常驻：关态/换内容同样上报）
 useBrowserOverlayStateSync()
 
-// shieldsView 遮蔽面全量上报（常驻：聚合开合/overlay/resize 触发面收敛后重报，
-// §5.1 规则 6② view 遮蔽联动 renderer 半边——触发面与卸载复位语义见 composable 文件头）
+// shieldsView 遮蔽视图全量上报（常驻：聚合开合/overlay/resize 触发范围收敛后重报，
+// §5.1 规则 6② view 遮蔽联动 renderer 半边——触发范围与卸载复位语义见 composable 文件头）
 useShieldsViewSync()
 </script>

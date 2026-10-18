@@ -1,13 +1,13 @@
 // MobileSessionList 组件测试（remote-use-mobile D7（移动壳 v1 功能集裁定）列表行；审计缺口补齐：整组件此前无测试）。
 //
-// 行为面（按组件实装）：runtime 组序排序（A13：客户端零重排）、时间文案（今天 HH:mm 补零 / 跨日 M/D）、
+// 行为范围（按组件实装）：runtime 组序排序（A13：客户端零重排）、时间文案（今天 HH:mm 补零 / 跨日 M/D）、
 // 状态点配色 + 状态文案、加载失败态（role=alert 错误行 + 点击重试）、空态占位、
 // 点选回调（selectSession → open-chat）、新建入口（new-task）、选中态高亮。
 //
 // app-runtime 模块级 mock：组件消费的导出（sessionStore.listLoadError / activeId、
 // sessionList、loadSessions、selectSession、chatStore）替换为测试可写 ref + vi.fn，隔离
 // core WS 依赖（测试禁触网络）。ref 在 mock 工厂内创建，测试经 import 拿到同一实例驱动
-// 场景。chatStore 是 A14 状态派生的输入源（u20）——轻量判定面 mock（DeriveStatusChat +
+// 场景。chatStore 是 A14 状态派生的输入源（u20）——轻量判定侧 mock（DeriveStatusChat +
 // isActive/isCompacting），派生行为矩阵归 core session-derivations.test.ts。
 //
 // 运行：cd packages/mobile-renderer && npx vitest run src/__tests__/mobile-session-list.spec.ts
@@ -110,7 +110,7 @@ describe('MobileSessionList 会话列表（remote-use-mobile D7 列表行）', (
   })
 
   it('排序：runtime 组序原样渲染（A13 统一裁决——客户端 lastActiveAt 重排已删除），与数据源顺序一致', () => {
-    // 数据源故意按 lastActiveAt 乱序注入：客户端不重排，行序 = 数据源（runtime 组序投影）
+    // 数据源故意按 lastActiveAt 乱序注入：客户端不重排，行序 = 数据源（runtime 组序派生视图）
     testState.list.value = [
       makeSummary({ id: 's-mid', lastActiveAt: todayAt(TODAY_HOUR, TODAY_MINUTE) }),
       makeSummary({ id: 's-old', lastActiveAt: new Date(PAST_YEAR, PAST_MONTH_INDEX, PAST_DAY).getTime() }),

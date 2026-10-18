@@ -8,7 +8,7 @@
  * - T9: draft 从 'hello' 变 '!ls' → composer-box 获得 composer-bash-mode class
  *
  * 策略：
- * - 真 pinia + 真 chatStore（isActive 派生驱动 onSend 分流守卫）
+ * - 真 pinia + 真 chatStore（isActive 派生驱动 onSend 分流检查）
  * - mock useChat（spy 化 send/sendBash/steer/abort...——composer-shell-mount 装配，
  *   断言引用 composer-mount 的 composerChatApiSpy 单例）
  * - mock ComposerInput（emit input 设 draft + emit keydown Enter 触发 onSend，getSegments 还原 text 段）
@@ -30,7 +30,7 @@ const typeAndEnter = makeTypeAndEnter(ComposerInputMock)
 
 import Composer from '@/components/panel/Composer.vue'
 
-/** 全部用例挂 s1 面板态，签名收窄为实际消费面 */
+/** 全部用例挂 s1 面板态，签名收窄为实际消费方 */
 function mountComposer() {
   return mount(Composer, { props: { sessionId: 's1' }, global: { stubs: otherStubs } })
 }

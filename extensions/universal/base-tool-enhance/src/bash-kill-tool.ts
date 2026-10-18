@@ -2,7 +2,7 @@
  * bash_kill 工具（D9，§3.5「bash_kill 终态收尾的单点归属」+ 跨进程边界段）。
  *
  * 职责边界：只负责杀进程树 + kill 前把单例表与 registry **两侧**标 killing intent
- * （查询面立即可见——kill 返回后 bash_output 即显示 killing，无「已 kill 仍 running」
+ * （查询结果立即可见——kill 返回后 bash_output 即显示 killing，无「已 kill 仍 running」
  * 倒挂窗口）。实际终态（exited, reason:"killed"）由 exit 事件边沿收尾写——
  * bash_kill 不直接写终态（单一终态归属），也不 sendMessage（kill 调用方就在当前
  * turn 内等结果，再发 steer 通知是双发噪音——按 notify.ts 的单点归属规则，kill
@@ -139,7 +139,7 @@ export function createBashKillToolDefinition() {
 			}
 
 			// 两侧标 killing intent（单例表内存标记 + registry 同步写盘）→ 再杀进程树。
-			// intent 落盘在 kill 信号之前，查询面无倒挂窗口。markKillingIntent 只查
+			// intent 落盘在 kill 信号之前，查询结果无倒挂窗口。markKillingIntent 只查
 			// 单例表——可 kill 目标此时必在单例表（registry-only 活跃条目上面已拒绝、
 			// registry 终态条目 already exited 返回），无另一侧需同步
 			const marked = markKillingIntent(fromStore.taskId, "killed");

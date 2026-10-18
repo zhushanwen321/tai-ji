@@ -59,7 +59,7 @@ describe.skipIf(!PI_DIST)(
       const catchIdx = win.indexOf('catch (err) {')
       expect(
         catchIdx,
-        'PS-71 漂移：handler 抛错不再走 catch 分支（错误吞掉或改走别的上报面？）——复核 PS-71',
+        'PS-71 漂移：handler 抛错不再走 catch 分支（错误吞掉或改走别的上报侧？）——复核 PS-71',
       ).toBeGreaterThanOrEqual(0)
       const eventIdx = win.indexOf('event: "command"')
       expect(

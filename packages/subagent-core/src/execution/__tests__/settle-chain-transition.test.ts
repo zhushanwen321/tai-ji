@@ -1,21 +1,21 @@
 // src/execution/__tests__/settle-chain-transition.test.ts
 //
-// [P1b-1] settle 链收口测试（run 显式状态机 D5 的 settle 接线批次）。
+// [P1b-1] settle 链收尾测试（run 显式状态机 D5 的 settle 接线批次）。
 //
 // 锁四面（验收条款 c：settle 链改调 transition 后直写通道删除）：
-// 1. settleWorkflowRecord 收口单点：CAS 通过 → exec.finalizeRecord 调用（closedReason
-//    透传）；CAS 拒绝（竞态抢先收口）→ 静默跳过（现状守卫语义）。
+// 1. settleWorkflowRecord 收尾单点：CAS 通过 → exec.finalizeRecord 调用（closedReason
+//    透传）；CAS 拒绝（竞态抢先收尾）→ 静默跳过（现状检查语义）。
 // 2. settleOneShotOutcome（RunOrchestration）workflow origin 分支：成功/aborted →
-//    record 终态化（idle + closedReason gc/cancelled）经收口单点。
+//    record 终态化（idle + closedReason gc/cancelled）经收尾单点。
 // 3. finalizeFailed / finalizeAborted（RecordLifecycle）workflow origin 分支：失败/
-//    取消 → 同一收口单点（静默吞失败路径的间接接入面）。
-// 4. 直写通道删除断言（机器守卫）：读两个领地源文件断言 workflow origin 直写对
+//    取消 → 同一收尾单点（静默吞失败路径的间接接入面）。
+// 4. 直写通道删除断言（机器检查）：读两个领地源文件断言 workflow origin 直写对
 //    （trySettleLegacyClosed(record + 内联 finalizeRecord 对）不再存在于
-//    run-orchestration / record-lifecycle——收口后唯一剩余点在持久化层 settle 原语。
+//    run-orchestration / record-lifecycle——收尾后唯一剩余点在持久化层 settle 原语。
 //
-// doFinalizeRecord 经 vi.mock 拦截（避免真实 manifest/archive 写面）；journal 面
-// （pump 接线段）走 vitest no-op 防线（本文件不注入目录——断言面在 record 终态，
-// journal 落账已由 run-event-dispatch / terminal-actions-run-events 两文件锁定）。
+// doFinalizeRecord 经 vi.mock 拦截（避免真实 manifest/archive 写侧）；journal 面
+// （pump 接线段）走 vitest no-op 防线（本文件不注入目录——断言范围在 record 终态，
+// journal 写入 journal 记录已由 run-event-dispatch / terminal-actions-run-events 两文件锁定）。
 
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -61,9 +61,9 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-// ── 1. settleWorkflowRecord 收口单点 ─────────────────────────
+// ── 1. settleWorkflowRecord 收尾单点 ─────────────────────────
 
-describe("settleWorkflowRecord（D7 例外族收口单点）", () => {
+describe("settleWorkflowRecord（D7 例外族收尾单点）", () => {
   it("CAS 通过 → exec.finalizeRecord 调用且 closedReason 透传", async () => {
     const record = makeWorkflowRecord("sa-sw-1");
     const finalizeRecord = vi.fn(async () => {});
@@ -76,7 +76,7 @@ describe("settleWorkflowRecord（D7 例外族收口单点）", () => {
     expect(record.closedReason).toBe("gc");
   });
 
-  it("CAS 拒绝（竞态抢先收口）→ 静默跳过不覆盖（现状守卫语义）", async () => {
+  it("CAS 拒绝（竞态抢先收尾）→ 静默跳过不覆盖（现状检查语义）", async () => {
     const record = makeWorkflowRecord("sa-sw-2");
     trySettleLegacyClosed(record, "cancelled"); // 抢先方
     const finalizeRecord = vi.fn(async () => {});
@@ -90,7 +90,7 @@ describe("settleWorkflowRecord（D7 例外族收口单点）", () => {
 
 // ── 2. settleOneShotOutcome（RunOrchestration workflow origin 分支） ──
 
-describe("settleOneShotOutcome 经收口单点（workflow origin）", () => {
+describe("settleOneShotOutcome 经收尾单点（workflow origin）", () => {
   function makeOrchestration() {
     const finalizeRecord = vi.fn(async () => {});
     const orchestration = new RunOrchestration({
@@ -136,7 +136,7 @@ describe("settleOneShotOutcome 经收口单点（workflow origin）", () => {
 
 // ── 3. finalizeFailed / finalizeAborted（RecordLifecycle workflow origin 分支） ──
 
-describe("finalizeFailed / finalizeAborted 经收口单点（workflow origin）", () => {
+describe("finalizeFailed / finalizeAborted 经收尾单点（workflow origin）", () => {
   function makeLifecycle() {
     const lifecycle = new RecordLifecycle({
       getWorktreeManager: () => ({}),
@@ -189,9 +189,9 @@ describe("finalizeFailed / finalizeAborted 经收口单点（workflow origin）"
   });
 });
 
-// ── 4. 直写通道删除断言（验收 c 的机器守卫） ─────────────────
+// ── 4. 直写通道删除断言（验收 c 的机器检查） ─────────────────
 
-describe("直写通道删除断言（grep 等价的机器守卫）", () => {
+describe("直写通道删除断言（grep 等价的机器检查）", () => {
   const here = path.dirname(fileURLToPath(import.meta.url));
 
   function readService(name: string): string {
@@ -201,7 +201,7 @@ describe("直写通道删除断言（grep 等价的机器守卫）", () => {
   it("run-orchestration.ts 无 workflow origin 直写对（trySettleLegacyClosed + finalizeRecord 内联）", () => {
     const source = readService("run-orchestration.ts");
     expect(source).not.toContain("trySettleLegacyClosed(record");
-    // settleOneShotOutcome 改调收口单点
+    // settleOneShotOutcome 改调收尾单点
     expect(source).toContain("settleWorkflowRecord(record, result, aborted ? \"cancelled\" : \"gc\"");
   });
 
@@ -212,9 +212,9 @@ describe("直写通道删除断言（grep 等价的机器守卫）", () => {
     expect(source).toContain("settleWorkflowRecord(record, cancelledResult");
   });
 
-  it("收口单点唯一性：trySettleLegacyClosed(record + finalizeRecord 委托仅存在于持久化层 settle 原语", () => {
+  it("收尾单点唯一性：trySettleLegacyClosed(record + finalizeRecord 委托仅存在于持久化层 settle 原语", () => {
     // [D1 拆边 Class C] settleWorkflowRecord 下沉 execution/persistence/execution-record.ts
-    // （记录级原语，零编排语义）——唯一剩余点在持久化层，编排层不再持有写面。
+    // （记录级原语，零编排语义）——唯一剩余点在持久化层，编排层不再持有写侧。
     const record = fs.readFileSync(path.join(here, "../persistence/execution-record.ts"), "utf8");
     expect(record).toContain("trySettleLegacyClosed(record, closedReason)");
   });

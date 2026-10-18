@@ -1,12 +1,12 @@
 // src/execution/__tests__/run-orchestration-write-lease.test.ts
 //
 // [U2b / C3] spawn 侧写权声明挂钩（D3a v8 时机①——fresh spawn 全程声明，缺口 1
-// 闭合）+ one-shot 成功分支 markRoundIdle 接线（SP-5 与 chat 轮末共享轮终语义）的
+// 封住）+ one-shot 成功分支 markRoundIdle 接线（SP-5 与 chat 轮末共享轮终语义）的
 // 单元级断言：
 //   1. one-shot pi 轮（kickOffChatRound 回填点）：run 应答 sessionFile 回填后
 //      `.alive` 存在且 pid=本进程；轮终（settleOneShotOutcome SP-5 → markRoundIdle）
 //      后 marker 跨轮保留（D3a/B5）；
-//   2. 非 pi 引擎死亡（run reject → Continuation 失败分支收口 settleRoundFailed：
+//   2. 非 pi 引擎死亡（run reject → Continuation 失败分支收尾 settleRoundFailed：
 //      idle 可恢复 + 失败通知，无监督器 adopt 接管；旧 adopt 形态回填点
 //      finalizeEngineOutcome 已删——adopt 链随 one-shot engine-run 编排退役）；
 //   3. settleOneShotOutcome 直驱：markRoundIdle 簿记（idle 翻边 / round+1 /
@@ -14,9 +14,9 @@
 //      store 簿记⑧单轨发射（恰好一次）；
 //   4. workflow 域（executeAndAwait → runAndFinalize → outcomeToAgentResult 主回填
 //      点）：sessionFile 回填后 `.alive` 存在且 pid=本进程；
-//   5. [U2b 修复轮/D2] adoptEngineDeath 归口（adoptResumableAfterEngineDeath 三写
+//   5. [U2b 修复轮/D2] adoptEngineDeath 收敛（adoptResumableAfterEngineDeath 三写
 //      error/result/stopReason 语义等价，真实 store 链）。轮始 markRoundStarted 接线
-//      的真实链用例在 conversation-continuation.test.ts 集成面（续聊派发即清
+//      的真实链用例在 conversation-continuation.test.ts 集成测试侧（续聊派发即清
 //      result 清除 + round 累加链不断）。
 //
 // 测试纪律：registerFakePiEngine 协议替身（conversation-continuation.test.ts 同源
@@ -128,7 +128,7 @@ describe("spawn 侧写权声明挂钩（D3a v8 时机①——U2b/C3）", () => 
     }
   });
 
-  it("[modeless 波1·adopt 链退役] 引擎死亡（run reject）→ Continuation 失败分支收口：record 落 idle 可恢复 + 失败通知", async () => {
+  it("[modeless 波1·adopt 链退役] 引擎死亡（run reject）→ Continuation 失败分支收尾：record 落 idle 可恢复 + 失败通知", async () => {
     const h = makeService();
     try {
       const record = createRecord("bg-engine-death", {
@@ -176,7 +176,7 @@ describe("spawn 侧写权声明挂钩（D3a v8 时机①——U2b/C3）", () => 
       // 成功应答映射（workflow 域 AgentResult.content 承载正文）
       expect(result.content).toBe("wf done");
       // [two-state-convergence U4] 轮终翻边 idle——record 经 getMutable 断言
-      //（listRunningMutable 是 running 过滤视图，不再含轮终收口 record）。
+      //（listRunningMutable 是 running 过滤视图，不再含轮终收尾 record）。
       const rec = h.store.getMutable(result.sessionId ?? "");
       expect(rec).toBeDefined();
       expect(rec!.sessionFile).toBe(sessionFile);
@@ -224,9 +224,9 @@ describe("settleOneShotOutcome SP-5 成功分支 → store.markRoundIdle 接线�
       expect(record.closedReason).toBeUndefined();
       expect(record.round).toBe(2);
       expect(record.result).toBe("round done");
-      // 簿记⑦：`.alive` 保留（旧 doFinalizeRoundToIdle 删点随归口移除——B5/D3a）
+      // 簿记⑦：`.alive` 保留（旧 doFinalizeRoundToIdle 删点随收敛移除——B5/D3a）
       expect(fs.existsSync(`${sessionFile}.alive`)).toBe(true);
-      // 簿记⑧单轨：注销发射点②已收口 store 簿记⑧（SubagentService 构造点经
+      // 簿记⑧单轨：注销发射点②已收尾 store 簿记⑧（SubagentService 构造点经
       // setPendingUnregister 注入 notifyHost.emitPendingUnregister），本用例期间
       // pi.events.emit 仅此一笔——调用方直发回归（双轨重复注销）会使计数 >1 而红
       expect(h.pi.events.emit).toHaveBeenCalledTimes(1);

@@ -94,7 +94,7 @@ evaluate, and report findings with evidence.
 | `output` | string? | 默认输出文件 |
 | `defaultReads` | string? | 执行前默认读取的文件 |
 | `defaultProgress` | bool | 是否维护 progress.md |
-| `completionGuard` | bool | 实现完成守卫（bash 类工具设 false） |
+| `completionGuard` | bool | 实现完成检查（bash 类工具设 false） |
 | `maxSubagentDepth` | number | 子级嵌套深度限制 |
 | `interactive` | bool | 交互模式标记（v1 不强制） |
 

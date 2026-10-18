@@ -6,7 +6,7 @@
  * - 结构化错误臂（领域回执 { sessionId, runId, code, message } 闭集——两臂恒带
  *   sessionId，C-comm-05）经 reply 正常返回，不走
  *   error envelope（renderer 按码分流降级形态）
- * - RPC 通道错误（service throw）→ error envelope（reportFailure 收口，sessionId 必带）
+ * - RPC 通道错误（service throw）→ error envelope（reportFailure 收尾，sessionId 必带）
  * - 端口缺省（SessionService 未组装转发，仅测试最小 mock 形态）→ *_unsupported
  *   error envelope（对齐 getPlanState / revokeMessage 防御分支口径）
  *

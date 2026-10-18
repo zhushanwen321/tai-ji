@@ -42,7 +42,7 @@ export function defaultZcodeProviderSyncPaths(): ZcodeProviderSyncPaths {
   }
 }
 
-/** 组合根实际装配的三项必填；其余为测试注入面（缺省 = 生产形态）。 */
+/** 组合根实际装配的三项必填；其余为测试注入点（缺省 = 生产形态）。 */
 export interface ZcodeProviderStartupSyncDeps { // oe-exempt:20261012:framework:接线 DI 契约,单实现常态
   readonly configStore: Pick<IConfigStore, 'readModels' | 'getEnabledModels'>
   readonly credentialResolver: Pick<

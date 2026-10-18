@@ -2,7 +2,7 @@
  * QueueBubble 组件单测 —— v6 内嵌队列气泡（投递所有权内核 u3c / D7 单源化后）。
  *
  * 组件契约（组件头注为准）：纯 props 展示——
- * - rows: QueueRow[]（调用方经 useQueueRows 从 session.delivery 帧投影过滤而来：
+ * - rows: QueueRow[]（调用方经 useQueueRows 从 session.delivery 帧派生视图过滤而来：
  *   非 direct 车道且未 delivered）
  * - hint: string（session 级占用分档 hover title）
  * - emit cancel(clientUuid)（× 撤销 → delivery.cancel）+ retry(clientUuid)（failed 行重试

@@ -4,14 +4,14 @@
  * 职责边界：本 composable 只做「事实收集 + 单点派生」——把 Panel 组件里散落的七个
  * 异构状态源（session 绑定 / 消息有无 / dead / respawn 过渡态 / trace 视图 / form overlay 在场 /
  * flow 活跃）组装为 PanelViewInput，派生收敛到 core 纯函数 derivePanelView
- * （128 组合全表守卫，V5）。
+ * （128 组合全表检查，V5）。
  * Panel.vue 只 switch(panelView.kind)，禁止再直接组合这些状态做渲染判据（D5）。
  *
  * 互斥语义归属：dead 与 form overlay 的互斥由派生优先级吞掉（dead > form，derivePanelView
  * 内部实现），收集侧 hasFormOverlay 不判 dead——重复判定会把「dead 不应答」（W6）的
  * 职责撕成两份，派生规则演化时漏改一处即回归。
  *
- * turn 运行态（streaming/compacting）不在此收集：D2 裁决它们不再驱动输入面存在性
+ * turn 运行态（streaming/compacting）不在此收集：D2 裁决它们不再驱动输入范围存在性
  * （composer 的禁用/进度模态由 Composer 内部消费 isCompacting，与存在性正交）。
  */
 import { computed } from 'vue'
@@ -25,7 +25,7 @@ import { useSessionTrace } from '@/composables/features/trace/useSessionTrace'
 import { useExtensionUI } from '@/composables/useExtensionUI'
 
 /**
- * 派生 panel 渲染视图 + 统一表单 overlay 应答消费面。
+ * 派生 panel 渲染视图 + 统一表单 overlay 应答消费方。
  *
  * currentFormRequest/respond/cancel 一并透出：overlay 的渲染数据（formQuestions /
  * legacy scheduleDraft）与应答回调同源于 useExtensionUI，Panel 不再重复订阅。
@@ -51,7 +51,7 @@ export function usePanelView(sessionId: Ref<string | null>): {
   const sessionStore = useSessionStore()
   const flow = useNewTaskFlow()
   const { partition: tracePartition } = useSessionTrace()
-  // filter 走 useExtensionUI 默认值 formFilter（统一表单 overlay 渲染面）；普通 dialog
+  // filter 走 useExtensionUI 默认值 formFilter（统一表单 overlay 渲染范围）；普通 dialog
   // 请求由硬过滤 + CompanionBand 侧排除，不经 store。
   const { currentFormRequest, respond, cancel } = useExtensionUI(sessionId)
 

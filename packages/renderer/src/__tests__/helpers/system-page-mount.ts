@@ -108,7 +108,7 @@ export function unauthedProvider(): ProviderInfo {
   return { id: 'p2', name: 'Prov Two', apiKeySet: false, status: 'not_configured', models: [{ id: 'm2', name: 'Model Two' }] }
 }
 
-/** 聚合模型 fixture（scoped 过滤后形态，仅含白名单内 m1）。注入用于守卫：
+/** 聚合模型 fixture（scoped 过滤后形态，仅含白名单内 m1）。注入用于检查：
  *  useAuthedModelGroups 改为 providers 派生后，下拉候选必须不受 store.models 内容影响。 */
 export function modelFixtures(): ModelInfo[] {
   return [
@@ -150,7 +150,7 @@ export async function mountSystemPage(): Promise<ReturnType<typeof mount>> {
 }
 
 /** 直挂单个 system Section（交互断言用例）：SystemPage 全页集成树 = 6 Section +
- *  UpdateCheckCard 等全量编译，交互断言只关单 Section 时是纯浪费。Section 依赖面 =
+ *  UpdateCheckCard 等全量编译，交互断言只关单 Section 时是纯浪费。Section 依赖范围 =
  *  settings API mock + useToast mock + useAuthedModelGroups（真实实现，数据经 seedStore
  *  注入）；props 契约与全页 mount 一致（system fixture；Section 变更经各自 API 持久化，
  *  不经 update 事件）。Section 组件同样动态 import（理由同 mountSystemPage）。 */

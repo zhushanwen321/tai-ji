@@ -1,12 +1,12 @@
 /**
- * desktop ↔ mobile 令牌镜像一致性单测（ui-signal-density D3 / §5.3 U9，v8 断言面）。
+ * desktop ↔ mobile 令牌镜像一致性单测（ui-signal-density D3 / §5.3 U9，v8 断言范围）。
  *
  * packages/mobile-renderer/src/styles/tokens.css 是 renderer style.css tokens 段的
  * 镜像副本（文件头注释自述「真值源仍是 renderer style.css……改动须同步两处」），
  * 此前同步只有头注释口头约束、无机器检查，e2e-map 的 scope 也无一条覆盖
  * packages/mobile-renderer/**——本测试把人读对账（§4.1 V4⑥）升级为机器断言。
  *
- * 断言面五组（两文件逐字相等）：
+ * 断言范围五组（两文件逐字相等）：
  *  1. :root 玄块 accent 主三值（--accent / --accent-hover / --accent-fg）
  *  2. :root 玄块 color-mix 派生式（--accent-soft / --accent-ring，两文件同为字面）
  *  3. shadcn 映射段（--primary / --ring 两行 var(--accent) 引用）

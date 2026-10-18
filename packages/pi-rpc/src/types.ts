@@ -1,6 +1,6 @@
 // src/types.ts
 //
-// pi RPC 协议的共享类型面（@zhushanwen/pi-rpc）。
+// pi RPC 协议的共享类型范围（@zhushanwen/pi-rpc）。
 //
 // 本包是主 agent（runtime rpc-client）与 subagent（pi-subagent-cli）两套 pi 进程
 // RPC 客户端的公共协议层（设计 docs/architecture/subagent-permanent-session-model.md

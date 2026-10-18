@@ -4,19 +4,19 @@
  * [归位] 迁自 renderer composables/new-task/useNewTaskFlowState.ts（263 行），语义逐条等价。
  * 模块级单例保持（C-NT-6 Q2=A：全局流程状态非 per-session，不套 useSessionScopedState）。
  * renderer 旧文件（composables/new-task/useNewTaskFlowState.ts）已随消费方全部迁移（w5 完成）删除
- * （2026-09 code-simplify R7；strangler 逐域绞杀 §11.2 收口）。
+ * （2026-09 code-simplify R7；strangler 逐域绞杀 §11.2 收尾）。
  *
  * 职责（仅状态机，深模块 §5）：
  * - NewTaskFlowState 10 态枚举 + GitInfo 派生类型。
  * - ALLOWED 转换表 + OVERLAY_STATES/ACTIVE_STATES 集合常量。
  * - 模块级单实例 refs（state/currentSession/pendingCwd/pendingModel/createInFlight/branchCreateInFlight）。
- * - transition(target)：带守卫的**公开**状态转换（非法转换 → 回 idle + 抛错，AC-3.11）。
+ * - transition(target)：带检查的**公开**状态转换（非法转换 → 回 idle + 抛错，AC-3.11）。
  * - useNewTaskFlowState()：只读状态视图（人人可取）；useNewTaskFlowController()：受控写入口
- *   controller（**仅父编排器独占**，setter 不再模块级 export，杜绝大多数场景绕过守卫的后门）。
+ *   controller（**仅父编排器独占**，setter 不再模块级 export，杜绝大多数场景绕过检查的后门）。
  * - resetNewTaskFlow()：测试隔离 / 应用初始化重置单实例。
  *
  * 不含：动作编排（startFlow/submitFirstMessage/selectBranch/selectWorkspace/openDirDialog 等
- * 真调用 + 业务守卫，留 flow/branch/dir-select）。
+ * 真调用 + 业务检查，留 flow/branch/dir-select）。
  *
  * 依赖方向：vue reactivity（ref/readonly）+ @taiji/shared（SessionSummary）。core 零跨包 import。
  */
@@ -43,12 +43,12 @@ export type NewTaskFlowState =
 
 /**
  * transitionUnchecked 唯一允许的目标态（类型层锁死，见 NewTaskFlowController）。
- * 语义：只有"回 idle"是绕过 ALLOWED 守卫的合法直置——终态重建（completed→idle）
- * 与守卫失败回 idle（throw 前清态）。其余状态变更必须走 transition()（带守卫）。
+ * 语义：只有"回 idle"是绕过 ALLOWED 检查的合法直置——终态重建（completed→idle）
+ * 与检查失败回 idle（throw 前清态）。其余状态变更必须走 transition()（带检查）。
  */
 export type TransitionUncheckedTarget = 'idle'
 
-/** 当前 session 的 git 派生（UC-7 chip 可见性 + openBranchPopover 守卫 + isBareWorkspace 派生） */
+/** 当前 session 的 git 派生（UC-7 chip 可见性 + openBranchPopover 检查 + isBareWorkspace 派生） */
 export interface GitInfo {
   branch: string
   isRepo: boolean
@@ -68,7 +68,7 @@ export const OVERLAY_STATES: ReadonlySet<NewTaskFlowState> = new Set([
 
 /**
  * 活跃态集合（landing + 全部 overlay；排除 idle/completed/cancelled）。
- * Workspace 渲染守卫用：统一延迟 create 下，flow 活跃期间 activeId 恒 null，
+ * Workspace 渲染检查用：统一延迟 create 下，flow 活跃期间 activeId 恒 null，
  * 但 UI 须保持 Landing 挂载——否则用户点 chip 进 overlay 态（dir-popover/dir-dialog…）
  * 会瞬间卸载 Landing → 跳兜底空态页，系统目录选择器视觉上"没弹"。isOverlay ⊂ isActive。
  */
@@ -83,7 +83,7 @@ export const ACTIVE_STATES: ReadonlySet<NewTaskFlowState> = new Set([
 ])
 
 /**
- * 合法转换表（§4.6 守卫表落地）。未列出的 from→to 组合 = 非法 → 抛错回 idle（AC-3.1/3.11）。
+ * 合法转换表（§4.6 检查表落地）。未列出的 from→to 组合 = 非法 → 抛错回 idle（AC-3.1/3.11）。
  * 终态：仅 completed（实例销毁）。cancelled 可重入（reenterFlow → landing）。
  */
 const ALLOWED: Record<NewTaskFlowState, NewTaskFlowState[]> = {
@@ -119,7 +119,7 @@ const pendingModel: Ref<string | null> = ref(null)
 /** submitFirstMessage in-flight 标记（双击并发只建 1 session） */
 // taste:allow-no-data-owner W24-EX-B（模块级单例 UI 瞬态，12 类未覆盖存量，登记草稿）：submitFirstMessage in-flight 标记（同上）
 const createInFlight = ref(false)
-/** submitCreateBranch in-flight 标记（AC-7.9 飞行中 disabled 防重复 + T6.6 composable 层守卫） */
+/** submitCreateBranch in-flight 标记（AC-7.9 飞行中 disabled 防重复 + T6.6 composable 层检查） */
 // taste:allow-no-data-owner W24-EX-B（模块级单例 UI 瞬态，12 类未覆盖存量，登记草稿）：submitCreateBranch in-flight 标记（同上）
 const branchCreateInFlight = ref(false)
 
@@ -137,7 +137,7 @@ export function resetNewTaskFlow(): void {
 }
 
 /**
- * 状态转换（带守卫）。非法转换 → 回 idle + 抛错（Vue 错误边界兼底，AC-3.11）。
+ * 状态转换（带检查）。非法转换 → 回 idle + 抛错（Vue 错误边界兼底，AC-3.11）。
  * 这是状态机的公开写入口：任何子 composable / 组件都可调用，ALLOWED 表保证合法性。
  * NFR④#3：此处为 logger debug 接线点（每次转换 log from→to）。
  */
@@ -169,7 +169,7 @@ export function transition(target: NewTaskFlowState): void {
  * 加进集合（OVERLAY_STATES / ALLOWED），各 openXxx 自动生效。
  *
  * 注意：target 必须是 landing 可直达的 overlay 态（ALLOWED['landing'] 含之），否则 transition 抛错。
- * 调用方若需来源守卫（如 openBranchPopover 的 git 守卫），在调 openOverlay 前自行处理。
+ * 调用方若需来源检查（如 openBranchPopover 的 git 检查），在调 openOverlay 前自行处理。
  */
 export function openOverlay(target: NewTaskFlowState): void {
   if (state.value === target) return // 幂等：已在 target，早退防 landing→target 闪烁
@@ -180,13 +180,13 @@ export function openOverlay(target: NewTaskFlowState): void {
 }
 
 /**
- * 直接置 state（绕过 ALLOWED 守卫表）。**模块私有**，不导出——仅经 useNewTaskFlowController()
- * 暴露给父编排器独占，杜绝大多数场景误用绕过守卫的后门。
+ * 直接置 state（绕过 ALLOWED 检查表）。**模块私有**，不导出——仅经 useNewTaskFlowController()
+ * 暴露给父编排器独占，杜绝大多数场景误用绕过检查的后门。
  *
  * @internal 仅供两类无法走 transition 的语义性直置：
  * - 终态重建（startFlow 中 completed→idle，ALLOWED['completed']=[] 不允许任何出口）
- * - 守卫失败回 idle（throw 前清态：openBranchPopover 非 git 目录 / openBranchModal 来源非法）
- * 其他一切状态变更必须走 transition()（带守卫）。
+ * - 检查失败回 idle（throw 前清态：openBranchPopover 非 git 目录 / openBranchModal 来源非法）
+ * 其他一切状态变更必须走 transition()（带检查）。
  */
 function transitionUnchecked(target: NewTaskFlowState): void {
   state.value = target
@@ -223,7 +223,7 @@ export interface NewTaskFlowController {
    * 绕过 ALLOWED 表直置 state。target 类型锁定为 TransitionUncheckedTarget（= 'idle'），
    * 使父编排器也无法用它跳到 landing/completed 等态——编译期堵死后门滥用。
    * 仅供两类无法走 transition 的语义性直置（见 transitionUnchecked @internal）：
-   * 终态重建（completed→idle）与守卫失败回 idle。
+   * 终态重建（completed→idle）与检查失败回 idle。
    */
   transitionUnchecked: (target: TransitionUncheckedTarget) => void
   /** 绑定/替换当前 flow 的 session（submitFirstMessage create 后绑定） */

@@ -231,7 +231,7 @@ describe('SessionDataStore Flush + Lifecycle', () => {
   it('per-write debounce flush persists within 500ms', async () => {
     vi.useFakeTimers()
     // sid 唯一化：上一用例 clearSession 的 tombstone 是模块级共享态，复用 's1' 会被
-    // B5 迟到写守卫丢弃（恰是该机制的正向证明，但与本用例目标无关）
+    // B5 迟到写检查丢弃（恰是该机制的正向证明，但与本用例目标无关）
     store.set('s1-debounce', 'k1', 'v1')
     // debounce flush at 500ms
     await vi.advanceTimersByTimeAsync(600)

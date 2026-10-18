@@ -1,24 +1,24 @@
 // src/orchestration/__tests__/run-registry.test.ts
 //
-// [Q2/D9-1 → workflow-run-resume-revision] run 注册表单测——D5 状态机投影面 +
+// [Q2/D9-1 → workflow-run-resume-revision] run 注册表单测——D5 状态机派生视图侧 +
 // 中断收编入口（[D15] 中断路）+ 已终局 run 磁盘足迹裁剪单源。
 //
 // 锁定语义：
-// a. 投影四相（[D2] interrupted 暂停态入状态机——事件流判据）：
-//    - run-settled 落账 → terminal（四值 outcome + errorCode）；
-//    - run-interrupted 落账（显式中断转移）→ interrupted（暂停态，非 terminal，
+// a. 派生视图四相（[D2] interrupted 暂停态入状态机——事件流判据）：
+//    - run-settled 写入 journal 记录 → terminal（四值 outcome + errorCode）；
+//    - run-interrupted 写入 journal 记录（显式中断转移）→ interrupted（暂停态，非 terminal，
 //      与活体无关）；事件流停止（fold 停在 running/settling + 活体集未命中 =
 //      host-died 判读）→ interrupted（快照末行 running 的僵尸在此消失）；
 //    - 活体集命中 → active（事件流正常推进）；空事件流 → missing / active。
 // b. [D9] abandon 全链移除断言：abandonElapsedInterruptedRuns 及常量/env 通道
-//    从模块导出面消失（功能裁撤验收锚——「数天后回来仍可 resume」的 run 不再
+//    从模块导出范围消失（功能裁撤验收锚——「数天后回来仍可 resume」的 run 不再
 //    被判死）；中断收编入口（adoptInterruptedRun → interruptRun）落
 //    run-interrupted 转移事件（非 run-settled 终态帧——[D2] 中断非终局）+ 中断
 //    条目（status 'interrupted'）补写回调恰一次。
-// c. mtime 退役断言：投影/收编源码零 mtime 消费（grep 断言）。
+// c. mtime 退役断言：派生视图/收编源码零 mtime 消费（grep 断言）。
 //
 // [W2/V1 → D15] 收编的记录动作走 terminal-actions 中断编排入口（模块 journal
-// 单写者域）——测试注入面 = setRunEventJournalDirForTest（与帧落账同源）；seed
+// 单写者域）——测试注入路径 = setRunEventJournalDirForTest（与帧写入 journal 记录同源）；seed
 // 侧的本地 journal 实例与模块 journal 指向同一目录（文件层一致）。
 //
 // 测试红线：mkdtemp 自建自删、journal/manifest 全在 tmp、时钟经 now 参数注入
@@ -58,7 +58,7 @@ let journal: RunEventJournal;
 
 beforeEach(() => {
   dir = fs.mkdtempSync(path.join(os.tmpdir(), "run-registry-"));
-  // [D15] 收编链（scan/manifest/帧落账）统一走模块 journal 单写者域——注入
+  // [D15] 收编链（scan/manifest/帧写入 journal 记录）统一走模块 journal 单写者域——注入
   // 目录即覆盖；afterEach 复位（连带清 liveRunStates / 终局记录注册表）。
   setRunEventJournalDirForTest(dir);
   journal = createRunEventJournal(dir);
@@ -103,20 +103,20 @@ function runInterruptedEvent(ts: number, errorCode?: RunErrorCode): WorkflowRunE
   };
 }
 
-/** 落 record 事件序列（appendFileSync 直写——投影测试不走 dispatch 链）。 */
+/** 落 record 事件序列（appendFileSync 直写——派生视图测试不走 dispatch 链）。 */
 async function seed(runId: string, events: readonly WorkflowRunEventInput[]): Promise<void> {
   for (const event of events) {
     await journal.append(runId, event);
   }
 }
 
-// ── a. 投影四相（[D2] interrupted 暂停态） ────────────────────
+// ── a. 派生视图四相（[D2] interrupted 暂停态） ────────────────────
 
-describe("投影四相（事件流判据，D9-1 → [D2] 暂停态）", () => {
+describe("派生视图四相（事件流判据，D9-1 → [D2] 暂停态）", () => {
   it("事件流停止（活体未命中 = host-died 判读）→ interrupted（非 terminal 待恢复态；僵尸 running 构造性消除）", async () => {
     await seed("wf-reg-int", [createdEvent("wf-reg-int", BASE_TS), agentStartedEvent(BASE_TS + 1)]);
 
-    // 快照末行 running 的僵尸形态（无活体持有）：投影 = interrupted
+    // 快照末行 running 的僵尸形态（无活体持有）：派生视图 = interrupted
     const projection = await projectRunRegistryState(journal, "wf-reg-int");
     expect(projection.phase).toBe("interrupted");
     expect(projection.state).toEqual({ lifecycle: "running" });
@@ -175,7 +175,7 @@ describe("投影四相（事件流判据，D9-1 → [D2] 暂停态）", () => {
     expect(projection.state.lifecycle).toBe("running");
   });
 
-  it("空事件流：活体命中 → active（run-created 落账前窗口）；未命中 → missing", async () => {
+  it("空事件流：活体命中 → active（run-created 写入 journal 记录前窗口）；未命中 → missing", async () => {
     const live = await projectRunRegistryState(journal, "wf-reg-none", {
       activeRunIds: new Set(["wf-reg-none"]),
     });
@@ -187,8 +187,8 @@ describe("投影四相（事件流判据，D9-1 → [D2] 暂停态）", () => {
     expect(missing.lastEventAt).toBeUndefined();
   });
 
-  it("纯函数入口 projectRunRegistryEvents：事件数组直投影（无 IO——判定输入只有事件流与活体集）", () => {
-    // 投影消费 scan 产物（含 seq）——helper 产 input 形态，此处补 seq 组装
+  it("纯函数入口 projectRunRegistryEvents：事件数组直接生成派生视图（无 IO——判定输入只有事件流与活体集）", () => {
+    // 派生视图消费 scan 产物（含 seq）——helper 产 input 形态，此处补 seq 组装
     const withSeq = (input: WorkflowRunEventInput, seq: number): WorkflowRunEvent => ({
       ...input,
       seq,
@@ -214,7 +214,7 @@ describe("投影四相（事件流判据，D9-1 → [D2] 暂停态）", () => {
 // ── c. mtime 启发式退役断言 ──────────────────────────────────
 
 describe("mtime 启发式退役（grep 断言）", () => {
-  it("grep 断言：注册表投影/收编源码零 mtime API 消费（判据 = 事件流 + 活体集）", () => {
+  it("grep 断言：注册表派生视图/收编源码零 mtime API 消费（判据 = 事件流 + 活体集）", () => {
     const source = fs.readFileSync(new URL("../run-registry.ts", import.meta.url), "utf8");
     // 代码级退役断言：文件 mtime/stat 读取 API 零调用（注释中的「mtime 启发式退役」
     // 描述措辞不受限——断言的是旧启发式的代码载体已删除）
@@ -225,7 +225,7 @@ describe("mtime 启发式退役（grep 断言）", () => {
 // ── b. [D9] abandon 全链移除断言 ─────────────────────────────
 
 describe("[D9] abandon 全链移除（功能裁撤验收锚）", () => {
-  it("grep 断言：abandon 函数族与 env 通道从模块导出面消失（词表成员 interrupted_abandoned 保留为历史帧解析）", () => {
+  it("grep 断言：abandon 函数族与 env 通道从模块导出范围消失（词表成员 interrupted_abandoned 保留为历史帧解析）", () => {
     const source = fs.readFileSync(new URL("../run-registry.ts", import.meta.url), "utf8");
     expect(source).not.toMatch(/export\s+(async\s+)?function\s+abandonElapsedInterruptedRuns/);
     expect(source).not.toMatch(/export\s+const\s+RUN_ABANDON_WINDOW_MS_ENV/);
@@ -243,7 +243,7 @@ describe("[D9] abandon 全链移除（功能裁撤验收锚）", () => {
 //   终局——manifest 是 run-settled 终局事件的派生缓存，[D1]）；
 // - 双重启不重复追加：再次收编命中 fold interrupted / manifest / 条面证据
 //   → skippedTerminal，record 帧数不增长；
-// - 条目面证据（hasSettledEntry）独立拦截——覆盖「record 损坏但条目完好」的
+// - 条目范围证据（hasSettledEntry）独立拦截——覆盖「record 损坏但条目完好」的
 //   双面证据组合；
 // - 宽限窗 / 活跃保护 / 坏链（fold 停在 created）/ 空 record 的分类跳过。
 
@@ -308,7 +308,7 @@ describe("中断收编入口 adoptInterruptedRun（[D15]：幂等追加 run-inte
     ]);
   });
 
-  it("条目面证据（双面证据第二条）：hasSettledEntry=true → 跳过（record 损坏但条目完好的组合）", async () => {
+  it("条目范围证据（双面证据第二条）：hasSettledEntry=true → 跳过（record 损坏但条目完好的组合）", async () => {
     await seed("wf-ad-4", [createdEvent("wf-ad-4", BASE_TS), agentStartedEvent(BASE_TS + 1)]);
     const outcome = await adoptInterruptedRun("wf-ad-4", {
       now: BASE_TS + 1000,
@@ -334,7 +334,7 @@ describe("中断收编入口 adoptInterruptedRun（[D15]：幂等追加 run-inte
     ]);
   });
 
-  it("坏链守卫：run-created 帧损坏（fold 停在 created）→ skippedBrokenChain（run-interrupted 表外转移不可达）", async () => {
+  it("坏链检查：run-created 帧损坏（fold 停在 created）→ skippedBrokenChain（run-interrupted 表外转移不可达）", async () => {
     // 直写坏首帧 + 好后续帧：scan 丢弃坏行后 fold 停在 created（无创建帧可达态）
     fs.writeFileSync(
       path.join(dir, "wf-ad-7.record.jsonl"),
@@ -374,7 +374,7 @@ describe("中断收编入口 adoptInterruptedRun（[D15]：幂等追加 run-inte
   });
 });
 
-// ── pruneTerminalRunFiles 单源（Q2 收口：jsonl-run-store 本地实现已删） ──
+// ── pruneTerminalRunFiles 单源（Q2 收尾：jsonl-run-store 本地实现已删） ──
 
 describe("pruneTerminalRunFiles（已终局资格单源：fold 终态 + 保留窗口 + journal 成对删）", () => {
   const noopDeps = { warn: () => {}, debug: () => {}, toMsg: (e: unknown) => String(e) };

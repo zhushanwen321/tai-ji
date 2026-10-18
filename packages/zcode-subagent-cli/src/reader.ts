@@ -84,7 +84,7 @@ interface ParsedPart {
   tokens?: unknown;
 }
 
-/** sqlite 驱动的最小消费面（node:sqlite DatabaseSync 结构子集，测试可注入）。 */
+/** sqlite 驱动的最小消费方（node:sqlite DatabaseSync 结构子集，测试可注入）。 */
 type SqliteDb = {
   prepare: (sql: string) => { get: (...a: unknown[]) => unknown; all: (...a: unknown[]) => unknown[] };
 };
@@ -281,7 +281,7 @@ function appendPartText(current: string, part: ParsedPart): string {
 }
 
 /**
- * 单个 part 归入当前 turn（无 turn 则开），返回归入后的累积器（step-finish 闭合后为
+ * 单个 part 归入当前 turn（无 turn 则开），返回归入后的累积器（step-finish 完成后为
  * null）。step-start 等边界标记：开 turn 交给首个内容 part（空 step-start 段不产空 turn）。
  */
 function applyPartToTurn(
@@ -329,7 +329,7 @@ function collectTurns(messages: MessageRow[], grouped: Map<string, PartRow[]>, t
       if (part === undefined) continue;
       acc = applyPartToTurn(part, acc, turns, totals);
     }
-    // 消息结束仍无 step-finish（被杀/截断）：已有内容则闭合
+    // 消息结束仍无 step-finish（被杀/截断）：已有内容则完成
     closeTurn(acc, turns, totals);
   }
   return turns;

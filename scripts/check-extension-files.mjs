@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * check-extension-files.mjs —— extension npm 发布 files 白名单守卫。
+ * check-extension-files.mjs —— extension npm 发布 files 白名单检查。
  *
  * 背景：pi-subagent-workflow@8.8.1 事故——重构新增 src/session-lifecycle.ts 被
  * src/index.ts 引用，但该包 files 白名单是逐文件枚举（全仓唯一），新文件未同步
@@ -19,7 +19,7 @@
  * - 目录条目 `src/host/`：递归包含
  * - 精确文件条目 `src/index.ts`
  * - glob 条目（如 src 递归 .ts）：minimatch 语义，globstar 可匹配零层目录
- * - 否定条目 `!src/__tests__/`：排除规则（发布面收窄），命中即不在白名单；npm 的
+ * - 否定条目 `!src/__tests__/`：排除规则（发布范围收窄），命中即不在白名单；npm 的
  *   「否定后再包含」多段顺序语义未用，按否定优先的简单子集实现
  * - 无 files 字段的包跳过（npm 默认全打包，不存在漏文件问题）
  *

@@ -1,9 +1,9 @@
 /**
  * Workflow Extension — Budget 值对象
  *
- * Token / cost 预算值对象（D-12）。纯数据 + 不变式守卫，无副作用。
+ * Token / cost 预算值对象（D-12）。纯数据 + 不变式检查，无副作用。
  *
- * maxTokens===0 视为不限制（守卫，避免首个 agent 完成误判 budget_limited）。
+ * maxTokens===0 视为不限制（检查，避免首个 agent 完成误判 budget_limited）。
  * （预算语义对齐 2026-08：soft-limit 常量（500 调用数预警）与 90% 阈值预警方法
  * 已删——全库无生产消费方，仅测试锁定。）
  *
@@ -33,8 +33,8 @@ export const OUTPUT_WEIGHT = 2;
  * Budget 值对象。
  *
  * 不变式：
- * - maxTokens > 0 守卫：maxTokens===0 或 undefined 视为不限制
- * - maxCost > 0 守卫：同上
+ * - maxTokens > 0 检查：maxTokens===0 或 undefined 视为不限制
+ * - maxCost > 0 检查：同上
  * - consume 只累加，不减；isExceeded 只读
  * - 无回调字段——所有副作用由调用方在 consume 后查询决定
  */
@@ -71,7 +71,7 @@ export class Budget {
  * 详见上方权重常量的口径说明。
  */
   consume(usage: AgentUsage): void {
-    // NaN 守卫——非有限值当 0 处理，防 usedTokens 变 NaN 导致 isExceeded() 永远 false（预算限制失效）
+    // NaN 检查——非有限值当 0 处理，防 usedTokens 变 NaN 导致 isExceeded() 永远 false（预算限制失效）
     const numOrZero = (v: number | undefined): number =>
       typeof v === "number" && Number.isFinite(v) ? v : 0;
     this.usedTokens +=
@@ -90,7 +90,7 @@ export class Budget {
   /**
  * 是否超 token / cost 预算（FR-3）。
  *
- * maxTokens===0 或 undefined 视为不限制（守卫）；
+ * maxTokens===0 或 undefined 视为不限制（检查）；
  * maxCost===0 或 undefined 视为不限制。
  * 时间预算（maxTimeMs）不由本方法判断——它是 wall-clock 约束，需参照 startedAt，
  * 由 lifecycle 层的 scheduleTimeBudget（runWorkflow 内 setTimeout）

@@ -1,11 +1,11 @@
 // src/orchestration/__tests__/stderr-tee-diagnostic-reference.test.ts
 //
-// [D5 诊断引用落账] stderrTeePath 生产链测试（2026-09-22 一致性审查 P1 修复）。
+// [D5 诊断引用写入 journal 记录] stderrTeePath 生产链测试（2026-09-22 一致性审查 P1 修复）。
 //
 // 锁四面（S2「stderr tee 文件路径在事件载荷中且文件存在」的 L1 等价用例）：
 // 1. 全链三段：引擎上报（call.result.stderrTeePath 注入——真实引擎段由
 //    pi-subagent-cli run-spawn-once.integration 覆盖）→ dispatchAgentSettled 事件
-//    载荷含路径 → 失败终局 manifest 含路径（事件流投影取值）。
+//    载荷含路径 → 失败终局 manifest 含路径（事件流派生视图取值）。
 // 2. 失败伴随纪律：成功 ask / cancelled 终局不带 stderrTeePath（成功/cancel 不写）。
 // 3. 旧 manifest 读兼容：无 stderrTeePath 字段的存量形态读回 undefined 不炸。
 // 4. journal 目录测试注入（setRunEventJournalDirForTest + mkdtemp 自建自删）；
@@ -136,7 +136,7 @@ async function flushMicrotasks(ticks = 20): Promise<void> {
 // ── 1. 全链三段（引擎上报 → 事件载荷 → manifest） ────────────
 
 describe("stderrTeePath 全链（引擎上报 → agent-settled 载荷 → 失败终局 manifest）", () => {
-  it("失败 ask → 事件载荷含 stderrTeePath 且文件存在；终局 failed → manifest 投影同路径", async () => {
+  it("失败 ask → 事件载荷含 stderrTeePath 且文件存在；终局 failed → manifest 派生视图同路径", async () => {
     const teePath = writeTeeFixture("pi-task-stderr-4242.log", "fake-pi stderr boot\n");
     const run = makeRealRun("wf-tee-1");
     const deps = makeDeps();
@@ -167,7 +167,7 @@ describe("stderrTeePath 全链（引擎上报 → agent-settled 载荷 → 失�
     });
     expect(fs.existsSync(teePath)).toBe(true);
 
-    // manifest 段：失败终局投影同路径（事件流投影取值，非第二写点）
+    // manifest 段：失败终局派生视图同路径（事件流派生视图取值，非第二写点）
     const ok = await finalizeRun(run, deps, "failed", { context: "test" });
     expect(ok).toBe(true);
     const manifest = await readRunTerminalManifest(journalDir, "wf-tee-1");

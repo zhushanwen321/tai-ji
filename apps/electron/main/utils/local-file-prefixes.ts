@@ -13,7 +13,7 @@
  *     应用全部会话的项目根（session cwd）下的 `.tmp/` 子树。派生不经 renderer
  *     （决策②否决的 session cwd 动态注册不回归）：main 自有 sessions 目录
  *     （getPiSessionsDir，`<dataDir>/agent/sessions/<encodeCwd>/`）的 encodeCwd 目录名
- *     与候选路径做正向对拍（见 isPathUnderSessionTmp）。风险面 = 用过项目集合的 .tmp/
+ *     与候选路径做正向对拍（见 isPathUnderSessionTmp）。风险 = 用过项目集合的 .tmp/
  *     可读，与 ~/Downloads 既有用户内容成员同粒度（且该 .tmp 本就是对应 session agent
  *     可全量读写的域）。仅限 `.tmp` 字面量——项目其余路径仍不可预览（已接受代价保留）
  *   - projectRoot（仅 dev + 装配器注入）：worktree 项目根。dev-instance.mjs 装配的
@@ -56,7 +56,7 @@ import type {
 
 // local-file 两条 IPC 通道的 payload 类型定义 SSOT = `@taiji/shared`
 // （packages/shared/src/ipc-payloads.ts，C-comm-22 唯一类型源）；此处 re-export 保持
-// gateway/local-file-handlers 与单测的既有消费面（本地探测结果 LocalFileProbeResult
+// gateway/local-file-handlers 与单测的既有消费方（本地探测结果 LocalFileProbeResult
 // 仍在本模块扩展）。
 export type {
   LocalFileReadReason,
@@ -92,7 +92,7 @@ export interface LocalFilePrefixOptions {
 /**
  * 构造 local-file:// 协议的允许前缀列表（每项带 trailing path.sep）。
  *
- * 打包态剔除 cwd（D2a 守卫）；dev 态保留。home 缺省回退 os.homedir()。
+ * 打包态剔除 cwd（D2a 检查）；dev 态保留。home 缺省回退 os.homedir()。
  * 可选路径参数缺省时跳过对应项（测试可用最小入参驱动）。
  * projectRoot 是 dev-only 成员，本函数对传入值无条件拼入——是否传（即打包态
  * 不出现该成员）由 main.ts 调用侧 isDev && TAIJI_DEV_PROJECT_ROOT 条件展开裁决。
@@ -150,7 +150,7 @@ export function isPathInAllowedPrefixes(filePath: string, allowedPrefixes: reado
 // 目录名集。每次准入现算（readdir 本地 fs µs 级），无缓存无时间平抑面（ADR-0122 事实
 // 驱动：磁盘目录集即事实源，读时直查）。
 
-/** 会话项目准入子树段字面量（单一收口；扩展新子目录改此处 + 同步 ADR/design 注记） */
+/** 会话项目准入子树段字面量（单一收敛；扩展新子目录改此处 + 同步 ADR/design 注记） */
 const SESSION_PROJECT_TMP_SEGMENT = '.tmp'
 
 /** 目录枚举 fs 切面（缺省 node:fs；单测注入桩） */
@@ -222,7 +222,7 @@ export function isPathUnderSessionTmp(resolvedPath: string, encodeCwdDirs: Reado
  *
  * 两条 IPC 的消费域 = 会话产物子树 `<dataDir>/artifacts/`（HtmlPreviewInline 挂载前
  * size 预检 + 源码态读取、useDetailPane 抽屉产物源码读取——全部调用链只消费产物路径）。
- * 与渲染面协议 handler 的全量白名单（computeLocalFilePrefixes）分离：通道入参含模型消息
+ * 与渲染范围协议 handler 的全量白名单（computeLocalFilePrefixes）分离：通道入参含模型消息
  * 文本承载的路径载荷（html-preview fence），全量白名单含 `<dataDir>` 整前缀（含 pi agent
  * 目录的 auth.json 等凭据文件），读通道复用全量白名单 = 渲染进程可直读数据目录内任意
  * 文件文本。cwd 外非产物路径返回 `out_of_whitelist`，由调用方回落既有通道（useDetailPane
@@ -235,7 +235,7 @@ export function computeLocalFileReadPrefixes(dataDir: string): string[] {
 
 // ── local-file servable 预检谓词（chat-html-support §6.4 D4 子决策 / §6.9 D9）──────
 // 内联预览容器 HtmlPreviewInline（经 deps probeArtifact?）挂载前经 `localFile:servable` IPC
-// 预检（v16 唯一渲染面）；协议 handler 与预检必须复用本模块的同一谓词——边缘路径（.. 穿越 /
+// 预检（v16 唯一渲染范围）；协议 handler 与预检必须复用本模块的同一谓词——边缘路径（.. 穿越 /
 // // 冗余斜杠 / %2e2e 编码遍历 / 含 % # 空格的文件名）上两份平行实现必然分叉。
 
 /** 内部探测结果：比 IPC 出参多带规范化后的绝对路径（协议 handler 的 net.fetch 需要） */
@@ -376,8 +376,8 @@ export function probeLocalFileUrlPathname(
 // `out_of_cwd`）对主要产物路径不可达——源码态需要一条与 servable 预检**同一谓词函数**的
 // 读取通道。准入判定复用 probeLocalFileServable（白名单先行短路 → 存在性 → 目录性）；
 // IPC 通道侧前缀集 = computeLocalFileReadPrefixes 的产物子树（非协议 handler 全量白名单
-// ——通道入参含模型消息文本路径载荷，文本读取面限定在实际消费域）。读出的内容只经
-// CodeBlock 文本插值渲染（禁 v-html），不构成脚本执行面扩大。
+// ——通道入参含模型消息文本路径载荷，文本读侧限定在实际消费域）。读出的内容只经
+// CodeBlock 文本插值渲染（禁 v-html），不构成脚本执行范围扩大。
 
 /** 源码态读取上限（与 runtime `file.read` 的 MAX_FILE_SIZE 同语义：1 MiB，超出截断） */
 export const MAX_LOCAL_FILE_READ_BYTES = 1_048_576
@@ -396,7 +396,7 @@ function defaultReadFile(filePath: string): Uint8Array {
  *
  * 谓词与 servable 预检 / 协议 handler 同源（probeLocalFileServable）——越界路径一律
  * `out_of_whitelist` 且不触 fs（检查顺序是安全性质，不构成存在性探测通道）。准入域由
- * 调用方传入的前缀集裁决：IPC 读通道传 computeLocalFileReadPrefixes 的产物子树（收窄面），
+ * 调用方传入的前缀集裁决：IPC 读通道传 computeLocalFileReadPrefixes 的产物子树（收窄范围），
  * 协议 handler 面如需全文读取才传 computeLocalFilePrefixes 全量白名单。
  *
  * @param rawPath 绝对路径或 `~` 形态路径（IPC 入参）

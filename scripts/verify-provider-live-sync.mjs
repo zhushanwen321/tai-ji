@@ -1,7 +1,7 @@
 /**
  * provider-live-sync 真机验收（e2e 资产 E2E-MODELS-02，L2.5 faux 轨）。
  *
- * 触发面（docs/testing/e2e-map.json）：`extensions/universal/provider-live-sync/**` +
+ * 触发范围（docs/testing/e2e-map.json）：`extensions/universal/provider-live-sync/**` +
  * 模型切换链（session-model-control / model-message-handler / composer 提示链）+
  * `packages/runtime/src/services/provider-config-helper.ts`（写侧）+ pi 版本 bump。
  * 运行：`node scripts/verify-provider-live-sync.mjs`（仓库根为 cwd，约 30s，零外网）。

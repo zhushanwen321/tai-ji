@@ -17,7 +17,7 @@
 //
 // probe 触发时机（D7 的落地口径）：路由期触发、结果缓存于引擎实例（probeCache）。
 // 内置缺省 pi 免探——pi 契约稳定且「缺省路径行为零变化」是 A1 硬约束（每次 run 前
-// 强探会引入 pi --version 子进程开销与新的失败面）；显式 engine='pi' 同样免探。协议化
+// 强探会引入 pi --version 子进程开销与新的失败情形）；显式 engine='pi' 同样免探。协议化
 // 后 cli 形态引擎的首个 run 前强制 initialize（协议握手，EngineClient 承担），与 probe
 // 分立。进程存活期间缓存不失效——版本变化（运行中 CLI 被升级）由 engine_run_failed
 // 运行中兜底，重启进程 / 重新注册后重探。
@@ -62,7 +62,7 @@ const logger = getLogger("subagents");
 // ============================================================
 
 // 补扫发现参数 slot（globalThis[Symbol.for]——防 jiti 双路径加载分裂，对齐 registry
-// slot 惯例）。写入方 = 宿主接线面（runtime 在 W8 subagent-engine-history 的
+// slot 惯例）。写入方 = 宿主接线点（runtime 在 W8 subagent-engine-history 的
 // ensureRuntimeEngineWiring 装载；pi 壳接线归后续单元——slot 未设置时本通道与裸
 // hasEngine 等价，零行为变化）。参数与 session_start 发现扫描同源（hostKind/agentDir/
 // dataDir），补扫只读 manifest 不握手（DiscoverEnginesOptions 语义）。
@@ -84,7 +84,7 @@ function getEngineDiscoveryRescanOptions(): DiscoverEnginesOptions | undefined {
  * 存在性校验（快照优先 + 一次补扫）：registry 快照命中零开销返回；未命中且宿主已
  * 接线补扫参数 → ensureEngineDiscovered 同步补扫（只读 manifest 不 spawn）后复核；
  * 宿主未接线 → 与裸 hasEngine 等价。补扫异常吞掉返回 false（发现失败 ≠ 配置错误，
- * 由 routeEngine 的 engine_not_found 恢复指引收口）。
+ * 由 routeEngine 的 engine_not_found 恢复指引收尾）。
  */
 export function hasEngineWithRescan(id: string): boolean {
   if (hasEngine(id)) return true;
@@ -116,7 +116,7 @@ export interface EngineRoutingInput {
   globalDefaultEngine?: string;
 }
 
-/** 生效层标记（守卫 a 的判据：'call' = 显式指定，probe 失败不兜底）。 */
+/** 生效层标记（检查 a 的判据：'call' = 显式指定，probe 失败不兜底）。 */
 export type EngineRoutingSource = "call" | "frontmatter" | "default";
 
 export interface EngineRouting {
@@ -165,7 +165,7 @@ export interface EngineRouteOptions {
    * 分叉 = 窗口收尾 dispose 掉探过的实例、真正服务 run 的单例反而常驻——G1 静默
    * 回归）。下方 `?? getEngine(engineId)` 兜底只服务：未注入调用方（chat 域，窗口
    * 实例挂载归 U3）与 shared-service 引擎透传（现状保形）。per-window 引擎的
-   * fail-fast 防漏改守卫（连接级成员拒答）归 u5 registry D6 改造。
+   * fail-fast 防漏改检查（连接级成员拒答）归 u5 registry D6 改造。
    */
   getEngineFn?: (engineId: string) => EnginePort;
   /** 注册表存在性检查（缺省 registry.hasEngine）。 */
@@ -339,7 +339,7 @@ export function routeEngineForHost(opts: HostRouteOptions): EngineRouteResult | 
 // - 表生命周期随 run：窗口内首次解析引擎时 get-or-create（懒建，lifecycle 不感知）；
 //   finalizeRun 五步序列末尾统一 dispose（worker-message-pump coda 内调用
 //   disposeWorkflowWindowEngineState——编排侧唯一消费点）。
-// - 取用复用面：probe 与实际 run 必须拿到同一实例（probeCache 在实例上；两通道
+// - 取用复用范围：probe 与实际 run 必须拿到同一实例（probeCache 在实例上；两通道
 //   分叉 = probe 探的是窗口实例、run 却走 registry 单例——窗口实例收尾 dispose 后
 //   registry 单例反而常驻，G1 静默回归）。消费方（workflow-dispatch 的 probe +
 //   getEngineFn 注入、run-orchestration 的 probe）经 resolveWorkflowWindowEnginePort
@@ -352,7 +352,7 @@ export function routeEngineForHost(opts: HostRouteOptions): EngineRouteResult | 
 /**
  * 单个 workflow run 窗口的引擎实例状态。两份结构同生共死：
  * - instances：U1 窗口实例表（dispose 记账与收尾释放的唯一权威，幂等 disposeAll）；
- * - ports：本窗口已创建的引擎协议本体（engineId → EnginePort，取用复用面）。
+ * - ports：本窗口已创建的引擎协议本体（engineId → EnginePort，取用复用范围）。
  * 表登记与端口写入只在 resolveWorkflowWindowEnginePort 的创建分支成对发生，不存在
  * 单边漂移写点。
  */
@@ -415,7 +415,7 @@ export function workflowWindowEngineState(runId: string): WorkflowWindowEngineSt
  * 窗口引擎实例创建通道的注入缝（进程形态判别 + 不经 registry 的实例创建）。
  *
  * 生产缺省 = **真实实现**（u5 网关真实化，ADR-0079 D6/§5 网关真实化升级目标）：
- * processModelOf 读 manifest 注册期快照（u-foundation 解析面：descriptor.manifest.
+ * processModelOf 读 manifest 注册期快照（u-foundation 解析范围：descriptor.manifest.
  * processModel，缺省 per-window）；createPort 经 descriptor portFactory 产出不经
  * registry singletons 缓存的新实例（实例登记与收尾归窗口状态，本通道零 singletons
  * 触达）。测试可注入替身网关（注入覆盖生产缺省——u2/u3 验收用例形态）。
@@ -488,7 +488,7 @@ export function resolveWorkflowWindowEnginePort(
     const instance: WindowEngineInstance = {
       engineId,
       processModel,
-      // 引擎停机面委托 EnginePort.dispose（dispose 请求 → 按进程组终止兜底，P2）。
+      // 引擎停机路径委托 EnginePort.dispose（dispose 请求 → 按进程组终止兜底，P2）。
       // dispose 缺席的引擎实例无可释放资源，disposeAll 对其 await undefined 即过。
       dispose: () => port.dispose?.(),
     };

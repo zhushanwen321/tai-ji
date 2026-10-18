@@ -1,5 +1,5 @@
 /**
- * SelectValue 组件测试：truncate 收口链 + title 反射（长选中值 hover 全名补偿）。
+ * SelectValue 组件测试：truncate 收尾链 + title 反射（长选中值 hover 全名补偿）。
  *
  * 覆盖（机制见 SelectValue.vue 注释）：
  * 1. min-w-0 truncate 落在渲染 span（flex 收缩许可 + 省略号，长值不出触发器边界）

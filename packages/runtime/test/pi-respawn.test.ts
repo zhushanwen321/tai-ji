@@ -4,7 +4,7 @@
  * [ADR-0122 退役登记] 原「5s 延迟自动恢复 + 连续失败熔断」机制（schedule 重试链 /
  * RESPAWN_DELAY_MS / RESPAWN_MAX_CONSECUTIVE_FAILURES / 熔断计数）已删除，对应用例随
  * 机制退役。现覆盖：
- * - crashExit：崩溃显式上报（fate terminal 发声）+ 守卫（isActive 防御位 / in-flight
+ * - crashExit：崩溃显式上报（fate terminal 发声）+ 检查（isActive 防御位 / in-flight
  *   恢复让位 recovered 静默）+ crashed 登记供发布判别；
  * - join（ensureRestored）：并发调用等待同一 in-flight Promise，restore 内核只跑一次；
  * - join 失败传导：原恢复失败时 join 方得到同一失败，注册表清空后可重试；
@@ -56,7 +56,7 @@ function wireFacadeContract(deps: RespawnTestDeps, orchestrator: RespawnOrchestr
 }
 
 describe('RespawnOrchestrator（崩溃上报 + 惰性恢复 join）', () => {
-  // respawn 终态命运收集（notify-once D5 信号源断言面）：onRespawnFate 是模块级订阅
+  // respawn 终态命运收集（notify-once D5 信号源断言范围）：onRespawnFate 是模块级订阅
   //（组合根单消费方），beforeEach 挂 afterEach 退订——订阅残留会跨用例串扰。
   let fates: RespawnFateEvent[] = []
   let unsubFate: (() => void) | undefined

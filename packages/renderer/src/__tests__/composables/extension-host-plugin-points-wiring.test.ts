@@ -99,7 +99,7 @@ describe('useExtensionHostBridge plugin points wiring (u4b)', () => {
     expect(contributions.getContributions({ type: 'command', pluginId: 'scheduler-manager' })).toEqual([])
   })
 
-  it('E3 执行面：provide source.executeCommand 对缺失命令返回 false（CommandRegistry emit error 出声）', () => {
+  it('E3 执行侧：provide source.executeCommand 对缺失命令返回 false（CommandRegistry emit error 出声）', () => {
     const { app, bus } = initBridge()
     const errors: string[] = []
     bus.on('error', (e) => errors.push(e.message))

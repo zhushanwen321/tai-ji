@@ -142,7 +142,7 @@ describe("日常变体 description — envelope 结构为一等公民（G4）", 
 
 describe("execute()/注册期 — 运行时防御锁定（防静默腐败）", () => {
 	it("含互换检测（'swapped' 或 'recognized keyword'）", () => {
-		// 互换检测是治静默腐败的最高优先守卫，不能被重构删掉。
+		// 互换检测是治静默腐败的最高优先检查，不能被重构删掉。
 		expect(SRC).toMatch(/swap|recognized keyword/i);
 	});
 

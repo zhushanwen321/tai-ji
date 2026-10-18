@@ -119,7 +119,7 @@ describe.skipIf(!PI_DIST || !PI_AI_DIST)('PS-42 · refresh 重读磁盘 + allowN
     expect(body).toContain('const allowNetwork = options.allowNetwork ?? true')
   })
 
-  it('ModelRegistry.refresh 直通 runtime，getError 是独立方法（两调用面）', () => {
+  it('ModelRegistry.refresh 直通 runtime，getError 是独立方法（两个调用点）', () => {
     const src = readDist(PI_DIST!, 'core/model-registry.js')
     const refresh = slice(src, 'refresh(options)', 'getError()')
     expect(refresh).toContain('return this.runtime.refresh(options)')

@@ -31,7 +31,7 @@ let stdoutDataHandler: ((chunk: string | Buffer) => void) | null = null
 let procExitHandlers: Array<(code: number | null) => void> = []
 /** 捕获的 proc 'error' handler（RT-2#6 terminate 出口验证用）。 */
 let procErrorHandlers: Array<(err: Error) => void> = []
-/** 捕获的 stdin 'error' handler（RT-2#1 源头收口验证用）。 */
+/** 捕获的 stdin 'error' handler（RT-2#1 源头处置验证用）。 */
 let stdinErrorHandlers: Array<(err: Error) => void> = []
 
 /** 捕获的 stdin 写入行（sendCommand 驱动用）。 */
@@ -72,7 +72,7 @@ const fakeProc = {
     // 真等 DEFAULT_PI_KILL_GRACE_MS(2s) SIGKILL 兕底，27 个用例 × 2.5s ≈ 68s 纯等待，
     // 是 runtime 测试 top10 慢因的头号构成。微任务而非同步 emit：kill-chain 先注册
     // exit listener 再发信号（同步亦可），微任务对「kill 后断言信号序列」的用例更宽容；
-    // 重复驱动（killAndDriveExit 手动 emitExit）由链内 settled 幂等守卫兜底。
+    // 重复驱动（killAndDriveExit 手动 emitExit）由链内 settled 幂等检查兜底。
     queueMicrotask(() => {
       if (procExitHandlers.length === 0) return
       const handlers = procExitHandlers
@@ -183,7 +183,7 @@ export function emitPiLine(obj: Record<string, unknown>): void {
   stdoutDataHandler(JSON.stringify(obj) + '\n')
 }
 
-/** 把流错误投递给 RpcClient 注册的 stdin 'error' handler（RT-2#1 源头收口验证）。
+/** 把流错误投递给 RpcClient 注册的 stdin 'error' handler（RT-2#1 源头处置验证）。
  * 流错误是异步 emit（write 同步不抛），与真实 EPIPE 触达路径一致。 */
 export function emitStdinError(err: Error): void {
   if (stdinErrorHandlers.length === 0) throw new Error('stdin error handler not registered yet')

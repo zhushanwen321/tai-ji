@@ -4,7 +4,7 @@
 //
 // 构成：ui ChatView 展示子树（复用）+ 轻量滚动容器（overflow-y + 贴底跟随）
 // + TruncatedHistoryBar 加载更早（A2：core loadMoreHistory 游标翻页消费，见 handleLoadMore）。
-// 不含 virtua/@wheel/TurnRail/fork-notice——桌面壳层编排语义不进移动壳（D10 被否①）。
+// 不含 virtua/@wheel/TurnRail/fork-notice——桌面壳层编排语义不进移动壳（D10 不采用①）。
 //
 // ChatViewDeps 四类分派（D10 全表逐字段）：
 // ① 真实现（core store/useChat + ui 渲染链下沉模块）：isActive/isHandingOff/
@@ -54,7 +54,7 @@ const deps: ChatViewDeps = {
   isExpanded: (turnKey) => expansion.isExpanded(turnKey),
   // 惰性接管态（D10：移动壳 turn 展开分区无接管态，恒 false——与 ui 组件侧原兜底等价）
   isTakeover: () => false,
-  // pendingSend 投影（core chat store 派生，UserBubble submitEdit 双发锁消费）
+  // pendingSend 派生视图（core chat store 派生，UserBubble submitEdit 双发锁消费）
   isPendingSend: (sid) => chatStore.isPendingSend(sid),
 
   // 操作回调

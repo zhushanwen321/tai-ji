@@ -46,7 +46,7 @@ export default function systemPromptTraceExtension(pi: ExtensionAPI): void {
 
 	const env: TraceEnv = {
 		readLastPromptFromFile: (filePath) => readLastPromptFromSessionFile(filePath),
-		// F1b（E4 trace 披露面）：模式回落事实由 runtime 经 spawn 出站 env 携带。
+		// F1b（E4 trace 披露部分）：模式回落事实由 runtime 经 spawn 出站 env 携带。
 		// 工厂调用时读一次（进程 env 生命期内不变）；未回落 → 空串 → undefined。
 		getPresetFallback: () => readPresetFallbackFromEnv(),
 	};

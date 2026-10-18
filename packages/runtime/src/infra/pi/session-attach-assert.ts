@@ -26,7 +26,7 @@ export interface SessionFileAssertClient {
 export interface AttachAssertSkipStats {
   /** client 无 getState 方法（RPC 面漂移信号）。 */
   noGetState: number
-  /** get_state 回报无 sessionFile 字段（状态面漂移信号）。 */
+  /** get_state 回报无 sessionFile 字段（状态侧漂移信号）。 */
   noSessionFile: number
   /** pi 回报的写目标在磁盘不存在（路径漂移信号）。 */
   fileMissing: number
@@ -70,7 +70,7 @@ function reportSkip(kind: keyof AttachAssertSkipStats, detail: string): void {
     skipErrorEmitted[kind] = true
     console.error(
       `[assertPiSessionFile] ${detail} — I1 attach 断言（数据丢失级防线）被跳过；同类跳过后续不再重复输出，` +
-      `累计计数见 attachAssertSkipStats.${kind}。若此环境并非 mock 测试，说明 pi RPC/状态面已漂移，I1 防线失效。`,
+      `累计计数见 attachAssertSkipStats.${kind}。若此环境并非 mock 测试，说明 pi RPC/状态侧已漂移，I1 防线失效。`,
     )
   }
 }
@@ -101,7 +101,7 @@ function reportSkip(kind: keyof AttachAssertSkipStats, detail: string): void {
  * @param client              刚完成 switchSession 的 pi client
  * @param expectedSessionFile 期望登记路径（必须与 switchSession 实参同一文件）
  * @param context             调用方上下文（错误信息定位用，如 'restoreSession(<id>)'）
- * @throws 取到可比对的 sessionFile 且与期望路径 resolve 归一后仍不一致（可比对性守卫见
+ * @throws 取到可比对的 sessionFile 且与期望路径 resolve 归一后仍不一致（可比对性检查见
  *         实现内三处跳过分支——真实附着场景三者皆不触达，I1 漂移兜底 = 等价测试
  *         attach-lifecycle.test.ts 的真实 mismatch 断言；跳过分支 RT-3#7 起 error 上报
  *         一次 + 累计计数，mock 测试经 setAttachAssertExemptionForTest 显式豁免）
@@ -121,9 +121,9 @@ export async function assertPiSessionFile(
   }
   const state = await getState.call(client)
   const piSessionFile = state?.sessionFile
-  // 跳过分支 2（状态面形态）：sessionFile 取不到（undefined / 非string / 空串）。真实
+  // 跳过分支 2（状态侧形态）：sessionFile 取不到（undefined / 非string / 空串）。真实
   // pi 附着后该字段必为 string（switch_session 经 SessionManager.open 必设）；取不到 =
-  // mock 形态或 pi 状态面漂移。RT-3#7：error 上报 + 计数。
+  // mock 形态或 pi 状态侧漂移。RT-3#7：error 上报 + 计数。
   if (typeof piSessionFile !== 'string' || piSessionFile === '') {
     reportSkip(
       'noSessionFile',

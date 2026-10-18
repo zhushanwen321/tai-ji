@@ -3,15 +3,15 @@
 // .alive sidecar：跨进程写权声明的生产者 + pid 探活。
 //
 // [U4a / D3 v7] 角色重定义（D3d 模块头权威表述）：
-//   - 宿主 resurrect/接管归口写：写权声明 acquire（markResurrected/acquireWriteLease）
-//     / release（[永久会话模型] 现行主出口单点 = markSettledOut（close 收口落账）；
+//   - 宿主 resurrect/接管统一写：写权声明 acquire（markResurrected/acquireWriteLease）
+//     / release（[永久会话模型] 现行主出口单点 = markSettledOut（close 终态写点）；
 //     markFinalized/markCancelled 仅剩
 //     workflow-origin D7 例外族与监督器放弃族——legacy 例外，内部删）；
 //   - 判活 = pid 单判据（findForeignLiveInstance：self-pid 排除 + isProcessAlive，
 //     软超时已退役——谱系 #12，跨轮保留 × startedAt 一次性不刷新的组合下超时会
 //     误判在持声明陈旧）。
-// 写/删动作均经 RecordStore 意图原语归口（G1：本模块不直接面向调用方，write/remove
-// 是 store 内部写面的实现件）。
+// 写/删动作均经 RecordStore 意图原语收敛（G1：本模块不直接面向调用方，write/remove
+// 是 store 内部写侧的实现件）。
 
 import * as fs from "node:fs";
 

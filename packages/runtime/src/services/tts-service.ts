@@ -5,16 +5,16 @@
  * 的顶层 catch 把 `error.code` 透传进 error envelope，renderer 按码映射 i18n toast）：
  * - speak 八步编排：读配置/Key → 清洗复核 → 组参数+缓存键 → 分句 → 逐段合成
  *   → PCM 拼接+WAV 头 → 原子写+双条件 FIFO 封顶 → 回 filePath
- * - getConfig：脱敏投影（hasApiKey + providerKeyAvailable 两布尔，永不回 Key 本体）
+ * - getConfig：脱敏派生视图（hasApiKey + providerKeyAvailable 两布尔，永不回 Key 本体）
  * - configure：runtime 复核（写路整条拒绝 invalid_payload，不落半改状态）→ 原子写 tts.json
  *   → secret 写删（quota 范式：persist 成功后才动 secrets）→ Key 联动（D4）
- * - getCapabilities：三家表单投影（数据权威在 infra/tts 表单投影，本层零厂商枚举）
+ * - getCapabilities：三家表单派生视图（数据权威在 infra/tts 表单派生视图，本层零厂商枚举）
  *
  * 分层纪律：本层只消费 TtsDriver port 与 IProviderCredentialResolver port；厂商协议知识
  * （字段换家/钳制丢弃/错误翻译）全部在 driver（infra/tts/，u2），统一层零厂商判断——
  * 唯二例外是 D4 显式裁决的两张常量映射表（TTS provider id → 模型 provider id，见下方常量）。
  * driver 实例按 (providerId, config.baseUrl) 在合成前现建（端点跟随 tts.json 配置），
- * 与 baseUrl 无关的知识（skeleton/校验/getCapabilities）走表单投影，不构造 driver。
+ * 与 baseUrl 无关的知识（skeleton/校验/getCapabilities）走表单派生视图，不构造 driver。
  *
  * 外部 HTTP 只准出现在 infra/tts/（仓库硬约束）；本文件 fs 写入点全部有归属（设计 §7.4
  * 写入点清单）：tts.json（唯一写入者 = configure，原子写）、secrets/tts-<id>-apikey.txt、
@@ -80,10 +80,10 @@ interface TtsStoreShape {
   providers: Partial<Record<TtsProviderId, TtsConfig>>
 }
 
-/** TtsProviderId 字面量全集（运行时判型用；类型面以 shared 联合为权威）。 */
+/** TtsProviderId 字面量全集（运行时判型用；类型范围以 shared 联合为权威）。 */
 const TTS_PROVIDER_IDS = ['stepfun', 'minimax', 'mimo'] as const satisfies readonly TtsProviderId[]
 
-/** getConfig 的兜底 activeProvider（全部未配置时投影仍需一个确定值；联合首成员，无行为影响）。 */
+/** getConfig 的兜底 activeProvider（全部未配置时派生视图仍需一个确定值；联合首成员，无行为影响）。 */
 const DEFAULT_ACTIVE_PROVIDER: TtsProviderId = 'stepfun'
 
 /** tts.json 文件名（落 <dataDir>/ 根，D4）。 */
@@ -143,7 +143,7 @@ function requireValidCoreFields(config: TtsConfig): void {
   if (!isPlainObject(config.vendor)) throw invalidPayload('config.vendor must be an object')
 }
 
-/** wire 校验第二段：speed 必为有限数值且在该家投影域内（speedRange null = 该家不支持）。 */
+/** wire 校验第二段：speed 必为有限数值且在该家派生视图域内（speedRange null = 该家不支持）。 */
 function requireValidSpeed(formModel: TtsFormModel, config: TtsConfig): void {
   if (config.speed === undefined) return
   if (typeof config.speed !== 'number' || !Number.isFinite(config.speed)) {
@@ -180,8 +180,8 @@ function pickValidatedFields(config: TtsConfig): TtsConfig {
   return validated
 }
 
-/** 单家驱动缺省配置骨架（D3 零厂商判断：默认值全部从该家表单投影推导，无硬编码枚举）。
- *  数据源是表单投影而非 driver 实例——骨架与 baseUrl 无关，先于 driver 现建发生。 */
+/** 单家驱动缺省配置骨架（D3 零厂商判断：默认值全部从该家表单派生视图推导，无硬编码枚举）。
+ *  数据源是表单派生视图而非 driver 实例——骨架与 baseUrl 无关，先于 driver 现建发生。 */
 function skeletonConfigOf(formModel: TtsFormModel): TtsConfig {
   const defaultBaseUrl = formModel.baseUrlOptions.find((option) => option.isDefault)
   return {
@@ -216,8 +216,8 @@ export interface TtsServiceOptions {
    */
   createDriver: (id: TtsProviderId, baseUrl: string) => TtsDriver
   /**
-   * 三家表单投影（infra/tts getTtsFormModels 产出）：skeleton 默认值 / configure 校验 /
-   * getCapabilities 投影的数据源。capabilities 内嵌于投影且与 driver 实例同源常量，
+   * 三家表单派生视图（infra/tts getTtsFormModels 产出）：skeleton 默认值 / configure 校验 /
+   * getCapabilities 派生视图的数据源。capabilities 内嵌于派生视图且与 driver 实例同源常量，
    * 这些知识均与 baseUrl 无关，故与 driver 实例解耦（不为此构造 driver）。
    */
   formModels: Record<TtsProviderId, TtsFormModel>
@@ -259,7 +259,7 @@ export class TtsService {
 
   /**
    * 合成并落盘，返回可播放的 WAV 文件路径。reply 只回 filePath——fromCache/chars/chunks
-   * 只进日志不进协议面（§7.1）。
+   * 只进日志不进协议范围（§7.1）。
    */
   async speak(text: string, sessionId?: string): Promise<{ filePath: string }> {
     // ① 读 tts.json + secrets/tts-<id>-apikey.txt（现读现用，无缓存）
@@ -302,7 +302,7 @@ export class TtsService {
 
     // ④ 分句（句边界优先，每段 ≤ capabilities.maxInputChars）+ 合成前现建 driver：
     // 端点取 config.baseUrl（speak 时跟随 tts.json 配置，§7.4 步骤 1）；缓存命中不触厂商
-    // 请求故不建。capabilities 内嵌于表单投影（三家同源常量，与 driver 实例无差）。
+    // 请求故不建。capabilities 内嵌于表单派生视图（三家同源常量，与 driver 实例无差）。
     const driver = this.createDriver(providerId, config.baseUrl)
     const chunks = splitIntoChunks(cleaned, formModel.capabilities.maxInputChars)
 
@@ -386,9 +386,9 @@ export class TtsService {
     return err
   }
 
-  // ── tts.getConfig：脱敏投影 ─────────────────────────────────────────────
+  // ── tts.getConfig：脱敏派生视图 ─────────────────────────────────────────────
 
-  /** 设置页首屏投影：每家只回 hasApiKey + providerKeyAvailable 两敏感布尔，永不回 Key 本体。 */
+  /** 设置页首屏派生视图：每家只回 hasApiKey + providerKeyAvailable 两敏感布尔，永不回 Key 本体。 */
   async getConfig(): Promise<SanitizedTtsConfig> {
     const { store, parseFailed } = this.readTtsStore()
     if (parseFailed) {
@@ -425,7 +425,7 @@ export class TtsService {
     return false
   }
 
-  /** tts.getCapabilities：三家表单投影（数据权威在 infra/tts 表单投影，本层纯转发）。 */
+  /** tts.getCapabilities：三家表单派生视图（数据权威在 infra/tts 表单派生视图，本层纯转发）。 */
   getCapabilities(): Record<TtsProviderId, TtsFormModel> {
     const forms = {} as Record<TtsProviderId, TtsFormModel>
     for (const id of TTS_PROVIDER_IDS) forms[id] = this.formModels[id]
@@ -555,7 +555,7 @@ export class TtsService {
   }
 
   /**
-   * MiMo baseUrl 预填（D4，仅该家；MiniMax 不联动）：当前 baseUrl 为空或仍等于该家表单投影
+   * MiMo baseUrl 预填（D4，仅该家；MiniMax 不联动）：当前 baseUrl 为空或仍等于该家表单派生视图
    * baseUrlOptions 中 isDefault 项 url（「未手动改过」的判定代理）时，按 keyHitId（Key 带入
    * 实际命中的 provider id）经 resolveProviderBaseUrl 两级数据源（models.json 网关值 → 内置
    * catalog 兜底）读该 id 实际生效集群写入；undefined → 只带 Key、baseUrl 留当前值不写。

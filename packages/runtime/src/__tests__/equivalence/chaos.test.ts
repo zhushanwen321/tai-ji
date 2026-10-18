@@ -43,7 +43,7 @@ const CORPUS_TIMEOUT_MS = 180_000
 /** 三混沌用例为纯计算（语料已生成），30s 上限富余 */
 const CHAOS_TEST_TIMEOUT_MS = 30_000
 
-/** message_end 帧携带的 entry（运行时守卫收窄；非 message_end 帧返回 undefined） */
+/** message_end 帧携带的 entry（运行时检查收窄；非 message_end 帧返回 undefined） */
 function entryOfMessageEndFrame(frame: ServerMessage): PiEntry | undefined {
   if (frame.type !== ('message.message_end' as string)) return undefined
   const payload = (frame as { payload?: unknown }).payload
@@ -53,7 +53,7 @@ function entryOfMessageEndFrame(frame: ServerMessage): PiEntry | undefined {
   return entry as PiEntry
 }
 
-/** assistant message entry 是否含 toolCall content block（host 判定，运行时守卫收窄；
+/** assistant message entry 是否含 toolCall content block（host 判定，运行时检查收窄；
  *  双类型对齐 reducer apply-entry.ts assistant 分支的接受集——pi wire 用 'toolCall'） */
 function hasToolUse(entry: PiEntry): boolean {
   if (entry.type !== 'message') return false
@@ -125,9 +125,9 @@ describe.skipIf(!FAUX_PI_READY)(
       const entry = entryOfMessageEndFrame(f)
       return entry === undefined ? [] : [entry]
     })
-    // 语料非空守卫：至少 user + assistant(toolCalls) + toolResult + assistant 序列 +
+    // 语料非空检查：至少 user + assistant(toolCalls) + toolResult + assistant 序列 +
     // 双通道帧在位（tool_call_end 由 interpreter 产出——translate 只出中间事件，
-    // 此守卫同时锁定语料确实经生产帧链生成）
+    // 此检查同时锁定语料确实经生产帧链生成）
     expect(endEntries.length).toBeGreaterThanOrEqual(3)
     expect(frames.some((f) => f.type === 'message.tool_call_end')).toBe(true)
 
@@ -143,7 +143,7 @@ describe.skipIf(!FAUX_PI_READY)(
       })
     authoritativeState = replayEntries(authoritativeEntries)
 
-    // 语料同构守卫（W21 同构在本语料上成立——后续混沌断言的合法前提）：
+    // 语料同构检查（W21 同构在本语料上成立——后续混沌断言的合法前提）：
     // message_end 单通道重放 == 权威全量重放（本语料无 bash RPC；未建模 entry 类型走 reducer
     // default no-op）
     expect(replayEntries(endEntries)).toEqual(authoritativeState)

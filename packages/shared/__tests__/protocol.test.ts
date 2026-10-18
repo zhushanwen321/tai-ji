@@ -250,7 +250,7 @@ describe('backgroundTask RPC 请求 payload 形状（D3）', () => {
 })
 
 describe('backgroundTask 回执/广播 payload 形状（D3）', () => {
-  it('tasks 回执：sessionId + RegistryEntry 全量投影 + corrupted 损坏标记（缺省/false=正常拍）', () => {
+  it('tasks 回执：sessionId + RegistryEntry 全量派生视图 + corrupted 损坏标记（缺省/false=正常拍）', () => {
     const reply: ServerMessageMapBase['backgroundTask.tasks'] = {
       sessionId: 'sess-1',
       tasks: [runningEntry],
@@ -364,15 +364,15 @@ describe('backgroundTask RegistryEntry 镜像形状（D9）', () => {
 // ── btw.* 3 控制帧（btw-question 设计 D6，M2-a 协议根节点）────────────────
 //
 // 三帧 = btw.create / btw.list { mainSid } / btw.remove，ack 必回；**不设 btw.send /
-// btw.close**（D6 被否项）。登记完整性断言分两层：
+// btw.close**（D6 不采用项）。登记完整性断言分两层：
 // ① 源码区段扫描（运行期，vitest 强制）——本文件位于包根 __tests__/（不在 tsconfig
-//    include 内），类型断言不被 tsc 执行，扫描断言才是机器守卫本体；
+//    include 内），类型断言不被 tsc 执行，扫描断言才是机器检查本体；
 // ② 类型级断言（同文件风格，typecheck 覆盖到时自动生效）。
 
 const PROTOCOL_TS = resolve(fileURLToPath(import.meta.url), '..', '..', 'src', 'protocol.ts')
 const PROTOCOL_SOURCE = readFileSync(PROTOCOL_TS, 'utf8')
 
-/** 提取顶层声明区段：type 联合到首个行首 export；interface 到首个行首 }（嵌套闭合均缩进，不命中） */
+/** 提取顶层声明区段：type 联合到首个行首 export；interface 到首个行首 }（嵌套结束均缩进，不命中） */
 function extractBlock(anchor: string): string {
   const anchorIdx = PROTOCOL_SOURCE.indexOf(anchor)
   if (anchorIdx === -1) throw new Error(`protocol.ts 未找到锚点 "${anchor}"——声明位置变动，请同步本测试`)
@@ -408,7 +408,7 @@ describe('btw.* 3 帧登记完整性（D6，M2-a）', () => {
     expect([...new Set(frames)].sort()).toEqual(['btw.create', 'btw.list', 'btw.remove'])
   })
 
-  it('D6 负向守卫：不设 btw.send / btw.close（发送复用 message.send、销毁复用 btw.remove）', () => {
+  it('D6 负向检查：不设 btw.send / btw.close（发送复用 message.send、销毁复用 btw.remove）', () => {
     for (const block of [clientBlock, clientMapBlock, replyMapBlock]) {
       expect(block).not.toMatch(/\'btw\.(send|close)\'/)
     }

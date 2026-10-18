@@ -28,7 +28,7 @@ import { taijiTestConfig, guardProjectSetup } from '../../test-guard/factory.ts'
  * session-manager-full-e2e / tool-call-index / usage-queue-commands-invalidation /
  * pi-semantics-skill-expansion-golden / idle-pi-reclaim-integration）均已翻轨回 main 组。
  *
- * 防线（globalSetup env 钉死 + fs-guard 切面）经 test-guard/factory 顶层注入；
+ * 防线（globalSetup env 固定 + fs-guard 切面）经 test-guard/factory 顶层注入；
  * projects 内 setupFiles **不**继承 root 级（vitest projects 语义，实测 setup 0ms 不执行），
  * 故各 project 经 guardProjectSetup 显式挂 FS_GUARD_PATH（globalSetup 无此问题，root 级
  * 对所有 project 生效）。新 project 漏挂由 scripts/check-vitest-guard.mjs 第 5 条拦截。
@@ -36,7 +36,7 @@ import { taijiTestConfig, guardProjectSetup } from '../../test-guard/factory.ts'
 const REAL_PI_TESTS = [
   // L2.5 二批（2026-09-15）后：全部「真实 pi + 真实 LLM turn」equivalence 用例已翻轨
   // faux（见上方维护契约）。数组保留为注册位——新增真实 LLM 轨文件必须登记于此
-  // （守卫 session-manager-e2e-fixture-unit.test.ts 双向 diff；scalar-state-invalidation
+  // （检查 session-manager-e2e-fixture-unit.test.ts 双向 diff；scalar-state-invalidation
   // 的真实轨 describe 已于 2026-09 测试舰队审查删除，纯 mock 文件的过期登记已清）。
   // [HISTORICAL 2026-09-26 W1 Gate A] idle-pi-reclaim-integration（纯 faux 轨）自愿
   // 登记：满并行下 pi 侧扩展冷编译与模型解析竞态（prompt 时 faux provider 未注册 →

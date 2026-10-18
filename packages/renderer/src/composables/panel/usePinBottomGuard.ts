@@ -43,7 +43,7 @@ const FOLLOW_RATE_WINDOW_MS = 1000
 /** P-no-loop 频率上限：rAF 帧率上限 60fps 下每帧至多一次 follow，恒超 60/s 即循环 */
 const FOLLOW_RATE_LIMIT = 60
 
-/** useVirtuaFollow 返回的 follow 原语 API（本守卫返回同构 API，调用面零改动） */
+/** useVirtuaFollow 返回的 follow 原语 API（本检查返回同构 API，调用范围零改动） */
 export type FollowApi = ReturnType<typeof useVirtuaFollow>
 
 export interface PinBottomGuardDeps {

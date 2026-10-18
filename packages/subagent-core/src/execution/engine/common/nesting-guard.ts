@@ -7,7 +7,7 @@
 // NestedSpawnRejectedError（SDK 形态，code/recovery 文案逐字一致）而非 core
 // EngineError——该函数在 core 非测试代码零调用方，错误类形态差异无生产影响。
 // 错误类随 shim 一并导出（本目录测试断言消费；core barrel 不转发本模块，无对外
-// 导出面影响）。
+// 导出范围影响）。
 
 export {
   assertNotNestedSpawn,

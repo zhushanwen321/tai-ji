@@ -6,7 +6,7 @@
  * - tui 模式：text 臂透传（pi 原生文本行，无 marker）
  * - undefined：清除语义（模式无关）
  *
- * 模式分派守卫单点在 protocol helpers.ts（守卫单点化），本测试只验证委托接线。
+ * 模式分派检查单点在 protocol helpers.ts（检查单点化），本测试只验证委托接线。
  *
  * 运行：cd extensions/universal/goal && npx vitest run src/__tests__/ports.test.ts
  */

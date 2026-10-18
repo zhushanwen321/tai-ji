@@ -106,7 +106,7 @@ describe('useConnection 装配点（§10.2 D-1）', () => {
     disconnect()
     mockHolder.createCalls = []
 
-    // 真实 DOM 事件 → 装配点 visibility 端口 → core 重连守卫放行 → connect
+    // 真实 DOM 事件 → 装配点 visibility 端口 → core 重连检查放行 → connect
     document.dispatchEvent(new Event('visibilitychange'))
 
     expect(mockHolder.createCalls.length).toBeGreaterThan(0)

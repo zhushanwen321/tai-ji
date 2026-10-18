@@ -1,10 +1,10 @@
 /**
- * 插件生命周期（toggle / uninstall）失败语义收口（RT-6#6）。
+ * 插件生命周期（toggle / uninstall）失败语义收尾（RT-6#6）。
  *
  * 背景：PluginService.togglePlugin / uninstallPlugin 此前对失败只 console.error，
  * 仍回 `config.plugins` 成功形状——用户开关回弹、卸载重启后复活，全程无错误/指引
  * （假成功观感，B 类吞噬）。本模块把「失败 → 领域错误」的构造与磁盘删除的 best-effort
- * 包装收口到一处，供 PluginService 门面调用：
+ * 包装收尾到一处，供 PluginService 门面调用：
  *
  * - `pluginToggleFailedError` / `pluginUninstallPartialError`：带 `.code` 的领域错误。
  *   transport server.ts 的全局 catch 透传 `.code` 成 error 信封（L4 增强），与
@@ -13,7 +13,7 @@
  *   而 transport/plugin-message-handler.ts 不在本批改动域内，无法为其加 hint 通道。
  * - `removePluginDiskFiles`：installer.uninstall 的 best-effort 包装。磁盘删除失败
  *   仍不阻断 uninstall 的内存清理（Fix-5 语义不变），但把失败原因交还调用方，
- *   由 uninstallPlugin 在收口时抛出——「卸载重启后复活」必须让用户看到失败。
+ *   由 uninstallPlugin 在收尾时抛出——「卸载重启后复活」必须让用户看到失败。
  */
 
 import type { IPluginInstaller } from '../../ports/plugin-installer.js'
@@ -66,7 +66,7 @@ export function pluginUninstallPartialError(
  *
  * 语义：installer.uninstall 抛错时记 console.error 留痕（文案与历史逐字一致，既有测试
  * 按 `stringContaining('on-disk removal')` + 归一化消息断言）并返回失败原因；调用方
- * （uninstallPlugin）继续完成内存清理，收口时再抛 pluginUninstallPartialError。
+ * （uninstallPlugin）继续完成内存清理，收尾时再抛 pluginUninstallPartialError。
  *
  * @returns 失败原因字符串；成功返回 undefined
  */

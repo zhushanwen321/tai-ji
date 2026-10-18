@@ -3,7 +3,7 @@
  *
  * 背景：W1（9dcffa736，v0.9.3 起）把前端 createSessionFlow 派生的 prompt 预览名
  * （首条 prompt 前 10 码点）误当显式名经 set_session_name RPC 持久化到 pi
- * session_info，踩死 pi-rename-session 防覆盖守卫（getSessionName() 非空即 skip）
+ * session_info，踩死 pi-rename-session 防覆盖检查（getSessionName() 非空即 skip）
  * → auto-rename 全量失效。A' 修正：仅语义性命名（options.persistLabel=true：
  * handoff 承接名 / agent-managed 显式命名）持久化；派生预览名 display-only。
  *
@@ -95,7 +95,7 @@ describe('SessionLifecycle.create label 持久化分流（A\'）', () => {
 
     await lifecycle.create(cwd, '修复登录bu…')
 
-    // 持久化零调用——pi 内存 sessionName 保持空，auto-rename 防覆盖守卫照常通过
+    // 持久化零调用——pi 内存 sessionName 保持空，auto-rename 防覆盖检查照常通过
     expect(setSessionName).not.toHaveBeenCalled()
     // display 不回归：内存 session.label 仍是预览名（侧栏当前会话显示不变）。
     // S3 迁移：断言观察点从 svc.initializeManagedSession 传参随迁为真 registerSession

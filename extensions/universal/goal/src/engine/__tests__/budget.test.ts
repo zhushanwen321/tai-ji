@@ -125,7 +125,7 @@ describe("getBudgetSeverity", () => {
 		const [r1, r2] = a <= b ? [a, b] : [b, a];
 		return RANK[getBudgetSeverity(r1)] <= RANK[getBudgetSeverity(r2)];
 	});
-	// 三分区 property 钉死阈值边界（捕捉 0.9/0.7 被改）
+	// 三分区 property 固定阈值边界（捕捉 0.9/0.7 被改）
 	it.prop([f64(0.9, 1)])("r ≥ 0.9 → danger", (r) => getBudgetSeverity(r) === "danger");
 	it.prop([f64(0.7, 0.9).filter((r) => r < 0.9)])("0.7 ≤ r < 0.9 → warn", (r) => getBudgetSeverity(r) === "warn");
 	it.prop([f64(0, 0.7).filter((r) => r < 0.7)])("r < 0.7 → ok", (r) => getBudgetSeverity(r) === "ok");

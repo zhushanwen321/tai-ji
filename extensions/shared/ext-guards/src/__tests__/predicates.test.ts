@@ -2,7 +2,7 @@
 //
 // isRecord / isEnoentError / isErrnoWithCode / isSubagentProcess / isTaijiHost /
 // isTaijiGuiHost 单测
-//（ext-simplify-17 D3/D2/D4 新导出 + isErrnoWithCode errno 守卫上收 +
+//（ext-simplify-17 D3/D2/D4 新导出 + isErrnoWithCode errno 检查上收 +
 // dmg-r1-7 宿主谓词跨包收敛）：
 //   - isRecord 排数组严版：数组必须 false（钉值，防回退到允数组宽版）
 //   - isEnoentError scheduler 严版：仅 Error 子类 + code === "ENOENT" 才 true，

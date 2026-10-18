@@ -17,7 +17,7 @@ import { extractSessionIdFromFilename } from './subagents.js'
 //   ——家族链数据源同 record 流，无第二承载位）；旧后缀锚点（.events.jsonl 形态）=
 //   历史实体（[D1] 历史数据处置：旧两件不读）→ calls=[] 仅 run 存在性兜底。
 //   历史格式条目（v1 全量快照 / workflow-state-link 指针）不识别、静默从发现链消失
-//   （不拒读、不报错）——run 侧 v1 读面已删除（ADR-0095，同 record 侧裁决：项目未
+//   （不拒读、不报错）——run 侧 v1 读侧已删除（ADR-0095，同 record 侧裁决：项目未
 //   上线无历史数据，不迁移不兼容）。
 // - readRunSnapshot：读 wf-state 文件尾向找首个可解析行，返回原始对象（unknown，格式
 //   收窄交 core 层）。唯一消费方 = tool-handler workflow 概览的快照链分支。
@@ -82,16 +82,16 @@ function sessionRefFromPath(path: string, pathToRef: Map<string, SessionRef>): S
 }
 
 // ============================================================
-// workflow-record 条目契约（v2 注册条目判别——本地字面量 + 测试守卫漂移）
+// workflow-record 条目契约（v2 注册条目判别——本地字面量 + 测试检查漂移）
 // ============================================================
 
 /**
  * `workflow-record` custom entry 的 customType 值。
  *
  * 磁盘 JSONL 协议字符串（跨侧契约）：写侧单源 = subagent-core
- * workflow-record-entry.ts 的 WORKFLOW_RECORD_CUSTOM_TYPE。reader 生产依赖面不引
+ * workflow-record-entry.ts 的 WORKFLOW_RECORD_CUSTOM_TYPE。reader 生产依赖范围不引
  * subagent-core（同 entry-anchor.ts 的协议字面量模式），两侧漂移由 workflow.test.ts
- * 的跨包断言守卫。
+ * 的跨包断言检查。
  */
 const WORKFLOW_RECORD_CUSTOM_TYPE = 'workflow-record'
 
@@ -102,7 +102,7 @@ const WORKFLOW_RECORD_ENTRY_V2 = 2
  * run record 流文件名尾段（`<runId>.record.jsonl`）。写侧 subagent-core
  * RUN_EVENTS_SUFFIX 同值（[D1] record 单源后缀）——v2 注册条目的
  * recordPath 锚点后缀判定用（新锚点直读 record 流；旧 `.events.jsonl` 锚点 =
- * 历史实体分流），本地持有 + 测试守卫漂移。
+ * 历史实体分流），本地持有 + 测试检查漂移。
  */
 export const RUN_RECORD_STREAM_SUFFIX = '.record.jsonl'
 
@@ -142,7 +142,7 @@ function collectRegisteredRecordPaths(entries: readonly Entry[]): RegisteredReco
 /**
  * [D16③] recordPath 后缀分流：`.record.jsonl` 锚点 = 新形态（record 流直读）；
  * 其余（含旧 `.events.jsonl` 锚点）= 历史实体（[D1] 历史数据处置——旧两件不读
- * 不写，历史 run 从发现链数据面退空即预期行为）。
+ * 不写，历史 run 从发现链的数据中退空即预期行为）。
  */
 function isNewRecordStreamAnchor(recordPath: string): boolean {
   return recordPath.endsWith(RUN_RECORD_STREAM_SUFFIX)
@@ -155,7 +155,7 @@ interface AgentSettledSessionFileView {
   result: { sessionFile: string }
 }
 
-/** [extractRecordStreamSessionFiles 守卫] 单帧是否为携带非空 result.sessionFile
+/** [extractRecordStreamSessionFiles 检查] 单帧是否为携带非空 result.sessionFile
  *  的 agent-settled 帧：逐字段 typeof 校验（type → taskIndex → result →
  *  sessionFile），不过关 = 宽容跳过（与 readRunSnapshot 同容忍度）。 */
 function isAgentSettledSessionFileFrame(v: unknown): v is AgentSettledSessionFileView {
@@ -194,7 +194,7 @@ export function extractRecordStreamSessionFiles(content: string): string[] {
 /**
  * 读目标 session 文件全文，从 workflow-record v2 注册条目构造 WorkflowRef[]
  * （单档发现链——v1 快照条目与 workflow-state-link 指针条目不再识别，历史 run
- * 从发现链数据面退空即预期行为，见 ADR-0095）。同一 runId 的多条目后写覆盖
+ * 从发现链的数据中退空即预期行为，见 ADR-0095）。同一 runId 的多条目后写覆盖
  * （条目顺序 = 时间顺序，取最新锚点）。
  *
  * **签名与返回值结构（WorkflowRef[]{runId,stateFile,calls:SessionRef[]}）不变**

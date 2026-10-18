@@ -6,7 +6,7 @@
 //
 // 与 pi 壳注入器（subagent-list-injector 经工厂 assemble 槽委托本函数，U11 单源）的等值口径：
 // - 清单可见性 = IF1 严格层（profile.meta !== null）——缺 name/description 的资产
-//   不进清单（注入投影「路由可见性」双轨语义，D3 定稿；宽容解析只服务执行消费面）；
+//   不进清单（注入派生视图「路由可见性」双轨语义，D3 定稿；宽容解析只服务执行消费方）；
 // - warn 口径内聚：仅「有 frontmatter 但严格校验未通过」才 warn——README 等无
 //   frontmatter 的 .md 静默跳过（每 turn 扫描不刷屏，pi m5 评审先例）；
 // - 扫描 / 遮蔽语义归 shared/resource-discovery（ADR-031），本文件零扫描逻辑。
@@ -28,7 +28,7 @@ const logger = getLogger("agents-assembly");
  * 按 frontmatter name 去重（高优先级靠后覆盖，Map 后写胜）→ name 码点序输出
  * （KV-cache 契约：顺序与 readdir 枚举序解耦，重建结果逐字节一致）。
  *
- * 抛错面（如实声明）：单文件读失败仅记日志跳过；目录不存在返回空列表；但底层
+ * 抛错路径（如实声明）：单文件读失败仅记日志跳过；目录不存在返回空列表；但底层
  * discoverResources 的不可恢复扫描错误会原样向上传播（readdir 遇权限拒绝、
  * EMFILE 竞态等——resource-discovery 自述 "Throws on unrecoverable scan errors"，
  * Promise.all 首个 reject 即整体拒绝），调用方需自行兜底。
@@ -40,7 +40,7 @@ const logger = getLogger("agents-assembly");
  *                  `~/.agents/agents`、`<workspaceRoot>/.pi/agents`、
  *                  `<workspaceRoot>/.agents/agents` 与 `TAIJI_EXTENSION_PATHS`
  *                  环境变量展开的扩展源码路径（resource-discovery buildScanTargets
- *                  固定槽位，注入 hostRoots 只是增列而非替换扫描面）
+ *                  固定槽位，注入 hostRoots 只是增列而非替换扫描范围）
  */
 export async function discoverAgents(
   workspaceRoot: string,
@@ -64,7 +64,7 @@ export async function discoverAgents(
       continue;
     }
 
-    // 宽容解析（执行消费面单点）；清单可见性按严格层 meta 判定
+    // 宽容解析（执行消费方单点）；清单可见性按严格层 meta 判定
     const profile = parseAgentProfile(content, resource.path);
     if (profile.meta !== null) {
       agentMap.set(profile.name, {

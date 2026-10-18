@@ -1,6 +1,6 @@
 /**
  * [OR-4] 终态收尾 emit/onRunDone M12 同款围栏 + [OR-6] handleWorkerMessage log case /
- * default 留痕 + [OR-8] run done 时 in-flight call 收口 cancelled 测试。
+ * default 留痕 + [OR-8] run done 时 in-flight call 收尾 cancelled 测试。
  *
  * 覆盖（crash-forensics-and-watchdog.md 附录 E（原 unbounded-wait-audit §4.1 OR-4 / §4.3 OR-6、OR-8 / §7.2 T3④⑤、T7④））：
  * - OR-4：eventBus.emit 或 onRunDone 同步抛错时，五个终态路径（return / worker error
@@ -9,9 +9,9 @@
  *   变 unhandledRejection 崩宿主
  * - OR-6 主线程半边：{type:"log"} 计入 errorLogs + deps.log debug 留痕（含上限裁剪）；
  *   未知 type warn 留痕（协议漂移防线）
- * - OR-8：脚本 return 时残留 fire-and-forget in-flight call 收口为取消终态
+ * - OR-8：脚本 return 时残留 fire-and-forget in-flight call 收尾为取消终态
  *   （call done + trace failed + Cancelled 文案 + completedAt；[H2 W3] trace.live
- *   字段已删除——节点无运行期附属对象可滞留），先收口再终态——done 聚合面不含
+ *   字段已删除——节点无运行期附属对象可滞留），先收尾再终态——done 聚合侧不含
  *   running 节点
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -39,7 +39,7 @@ import { isRunSettled, settledRecordOf } from "../terminal-actions.ts";
 
 // ── helpers ──────────────────────────────────────────────────
 
-/** 按 stepIndex 查 trace 节点（Trace 公共查询面 = toArray 线性扫）。 */
+/** 按 stepIndex 查 trace 节点（Trace 公共查询范围 = toArray 线性扫）。 */
 function findByStep(trace: Trace, stepIndex: number) {
   return trace.toArray().find((n) => n.stepIndex === stepIndex);
 }
@@ -73,7 +73,7 @@ function makeRealRun(runId: string, opts: { budgetTimeMs?: number } = {}): Workf
 }
 
 function makeDeps(opts: {
-  /** appendEntry（pending:unregister 直落权威面）同步抛错（模拟 reload 转换窗 assertActive）。 */
+  /** appendEntry（pending:unregister 直写权威存储的部分）同步抛错（模拟 reload 转换窗 assertActive）。 */
   appendThrows?: boolean;
   /** onRunDone 同步抛错（模拟 evictDoneRunsBeyondCap 等收尾异常）。 */
   onRunDoneThrows?: boolean;
@@ -141,7 +141,7 @@ afterEach(() => {
 // ── [OR-4] 终态收尾围栏 ──────────────────────────────────────
 
 
-/** [W2/V1] 六态机引导：journal 首帧（run-created）落账——finalizeRun/abortRun 等
+/** [W2/V1] 六态机引导：journal 首帧（run-created）写入 journal 记录——finalizeRun/abortRun 等
  *  活体终局入口的六态机裁决要求 created→dispatched 已在链上（生产链路由
  *  runWorkflow 正点发射承接；直测终局入口的用例经本 helper 补齐同一引导）。 */
 async function seedRunCreated(run: WorkflowRun): Promise<void> {
@@ -337,25 +337,25 @@ describe("[OR-6] log 消息消费 + 未知类型 default 留痕", () => {
   });
 });
 
-// ── [OR-8] run done 时 in-flight call 收口 cancelled ─────────
+// ── [OR-8] run done 时 in-flight call 收尾 cancelled ─────────
 
-describe("[OR-8] run done 时残留 in-flight call 收口 cancelled", () => {
-  it("fire-and-forget agent() 后 return：call 收口 done + trace failed（Cancelled 文案），聚合面无 running 节点", async () => {
+describe("[OR-8] run done 时残留 in-flight call 收尾 cancelled", () => {
+  it("fire-and-forget agent() 后 return：call 收尾 done + trace failed（Cancelled 文案），聚合侧无 running 节点", async () => {
     const run = makeRealRun("wf-or8-1");
     await seedRunCreated(run);
     const deps = makeDeps();
-    // fire-and-forget dispatch：runner 永不 settle（脚本不 await，模拟在飞子进程）
+    // fire-and-forget dispatch：runner 永不 settle（脚本不 await，模拟正在后台运行的子进程）
     deps.runner.run.mockImplementation(() => new Promise<AgentResult>(() => {}));
     await handleWorkerMessage(run, makeAgentCallMsg(1), deps, makeHandlers());
     await flushMicrotasks();
     expect(run.state.calls.get(1)?.status).toBe("running");
 
-    // 脚本 return（fire-and-forget call 仍在飞）
+    // 脚本 return（fire-and-forget call 仍在途）
     await handleWorkerMessage(run, { type: "return", result: "done early" }, deps, makeHandlers());
 
     expect(isRunSettled(run)).toBe(true);
     const call = run.state.calls.get(1);
-    // call 收口为 done + 取消文案（不删除条目——保留调用痕迹）
+    // call 收尾为 done + 取消文案（不删除条目——保留调用痕迹）
     expect(call?.status).toBe("done");
     expect(call?.result?.error).toContain("Cancelled");
     // trace 节点 failed + completedAt（快照/GUI 不再显示 running 步骤）
@@ -363,12 +363,12 @@ describe("[OR-8] run done 时残留 in-flight call 收口 cancelled", () => {
     expect(node?.status).toBe("failed");
     expect(node?.error).toContain("Cancelled");
     expect(node?.completedAt).toBeDefined();
-    // 收口后聚合面无 running 形态（call 全 done、trace 全 failed——收口先于终态）
+    // 收尾后聚合侧无 running 形态（call 全 done、trace 全 failed——收尾先于终态）
     expect(Array.from(run.state.calls.values()).map((c) => c.status)).toEqual(["done"]);
     expect(run.state.trace.toArray().map((n) => n.status)).toEqual(["failed"]);
   });
 
-  it("handleWorkerError 超限路径同样收口（failed 快照一致）", async () => {
+  it("handleWorkerError 超限路径同样收尾（failed 快照一致）", async () => {
     const run = makeRealRun("wf-or8-2");
     await seedRunCreated(run);
     const deps = makeDeps();
@@ -376,7 +376,7 @@ describe("[OR-8] run done 时残留 in-flight call 收口 cancelled", () => {
     await handleWorkerMessage(run, makeAgentCallMsg(2), deps, makeHandlers());
     await flushMicrotasks();
 
-    // 预置计数已达上限：count=4 > MAX → 无退避直接 failed（in-flight call 一并收口）
+    // 预置计数已达上限：count=4 > MAX → 无退避直接 failed（in-flight call 一并收尾）
     (run.meta as { workerErrorCount?: number }).workerErrorCount = 3;
     await handleWorkerError(run, new Error("final boom"), deps, makeHandlers());
 
@@ -402,7 +402,7 @@ describe("[OR-8] run done 时残留 in-flight call 收口 cancelled", () => {
     expect(call.result?.error).toContain("Cancelled");
   });
 
-  it("无 in-flight call 时收口为 no-op（正常完成的 call 不受影响）", async () => {
+  it("无 in-flight call 时收尾为 no-op（正常完成的 call 不受影响）", async () => {
     const run = makeRealRun("wf-or8-4");
     await seedRunCreated(run);
     const deps = makeDeps();

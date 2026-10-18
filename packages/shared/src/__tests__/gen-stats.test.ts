@@ -59,7 +59,7 @@ type _Assert_Rpc_union = AssertExtends<'session.getGenStats', ClientMessageType>
 type _Assert_Rpc_map_key = AssertHasKey<ClientMessageMap, 'session.getGenStats'>
 type _Assert_Rpc_payload_exact = AssertExact<ClientMessageMap['session.getGenStats'], { sessionId: string }>
 type _Assert_Rpc_reply_key = AssertHasKey<ReplyPayloadMap, 'session.getGenStats'>
-// reply = session.stats_update payload 同形（D4：恢复腿，无任何数据时 speed/ttft/cacheRatio 全 null + model 缺省）
+// reply = session.stats_update payload 同形（D4：恢复路径，无任何数据时 speed/ttft/cacheRatio 全 null + model 缺省）
 type _Assert_Rpc_reply_shape = AssertExtends<ReplyPayloadMap['session.getGenStats'], GenStatsFrame>
 
 // ── 类型字段与设计 §3.4 逐字一致（键集合 + 字段类型均精确断言）──
@@ -128,7 +128,7 @@ void _genStatsProtocolAssertsEnforced
 // ── 运行期测试（payload 可赋值 + null/0 语义可区分）──────────────────
 
 describe('session.stats_update 帧登记', () => {
-  it('全 null 帧（无任何数据恢复腿形态）可构造，model 缺省', () => {
+  it('全 null 帧（无任何数据恢复路径形态）可构造，model 缺省', () => {
     const msg: ServerMessage<'session.stats_update'> = {
       type: 'session.stats_update',
       id: 'rpc-1',
@@ -221,7 +221,7 @@ describe('session.getGenStats RPC 登记', () => {
     }
     expect(reply.model).toBe('xiaomi-token-plan-cn/mimo-v2.6-flash')
     expect(reply.ttft.day).toBe(1100)
-    // 无任何数据时：全 null + model 缺省（D4 恢复腿兜底形态）
+    // 无任何数据时：全 null + model 缺省（D4 恢复路径兜底形态）
     const empty: ReplyPayloadMap['session.getGenStats'] = {
       sessionId: 's1',
       speed: { current: null, day: null, d7: null, d30: null },

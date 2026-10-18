@@ -9,7 +9,7 @@
  *
  * 断言方式：静态直读 pi-coding-agent dist/modes/rpc/rpc-mode.js 的 case 分支构造形态
  * （+ pi-ai types.d.ts 的 Model 属性声明）。dist 不可达时 skip 不 fail；不进 REAL_PI_TESTS
- * 分池。pi 升级后红 = RPC 响应面改形，先复核 PS-03/PS-10 锚点。
+ * 分池。pi 升级后红 = RPC 响应侧改形，先复核 PS-03/PS-10 锚点。
  *
  * 运行：cd packages/runtime && npx vitest run src/infra/pi/__tests__/pi-semantics-rpc-surface.test.ts
  */
@@ -57,7 +57,7 @@ describe.skipIf(!CODING_AGENT_DIST)(
       ).toBe(true)
       expect(
         !/success\(id,\s*"set_thinking_level",/.test(win),
-        'PS-03 漂移：set_thinking_level 响应出现了 data 参数——语义面变化，复核 PS-03 与 runtime 回执链',
+        'PS-03 漂移：set_thinking_level 响应出现了 data 参数——语义侧变化，复核 PS-03 与 runtime 回执链',
       ).toBe(true)
     })
   },
@@ -81,7 +81,7 @@ describe.skipIf(!CODING_AGENT_DIST)(
       expect(win, 'PS-10 漂移：get_state case 分支消失——复核 PS-10 锚点').not.toBe('')
       expect(
         !/\bmodels\b/.test(win),
-        'PS-10 漂移：get_state 快照出现了 models 集合——状态面与清单面合并？复核 PS-10 与标量状态拉取链',
+        'PS-10 漂移：get_state 快照出现了 models 集合——状态侧与清单侧合并？复核 PS-10 与标量状态拉取链',
       ).toBe(true)
     })
   },

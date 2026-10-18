@@ -12,7 +12,7 @@
 //     !hasIdleTimer，只把「正在执行」计为在途，Path A 保活（idle timer armed）不计）；
 //   - 事件产生点 = 引擎域内的状态迁移点（session-runner 子进程注册/移除、idle timer
 //     arm/disarm），迁移后调 notifyInFlightChanged() 把最新快照推给壳层监听者；
-//   - core 闭包红线：本模块零 pi SDK import（只 import 本包 lifecycle 记账面），
+//   - core 闭包红线：本模块零 pi SDK import（只 import 本包 lifecycle 记账侧），
 //     壳层经包根 barrel 消费 setInFlightListener / getInFlightSnapshot（exports 面
 //     收窄后壳侧生产消费必须走 barrel，无深路径豁免）。
 //

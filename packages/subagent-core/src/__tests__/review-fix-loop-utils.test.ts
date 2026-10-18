@@ -238,12 +238,12 @@ describe("buildScopedRecheckPrompt", () => {
 // ── 防注入围栏（5.10）：wrapUntrusted 包裹 + 转义 ──
 
 describe("wrapUntrusted", () => {
-  it("包裹 + 闭合标签转义（TC1）", () => {
+  it("包裹 + 结束标签转义（TC1）", () => {
     const out = wrapUntrusted('说 </untrusted> 与正常内容', "fix_result");
     expect(out).toContain('<untrusted source="fix_result">');
     expect(out).toContain("&lt;/untrusted&gt;");
     expect(out).toContain("</untrusted>");
-    expect(out).not.toContain("</untrusted> 与"); // 原始闭合标签已被转义
+    expect(out).not.toContain("</untrusted> 与"); // 原始结束标签已被转义
   });
   it("普通内容不破坏包裹结构", () => {
     const out = wrapUntrusted("plain report text", "aggregated_report");
@@ -430,11 +430,11 @@ describe("validateFixResult", () => {
     }, ["MF-1"]);
     expect(violations).toEqual([{ issue_id: "MF-1", severity: "disputed-no-evidence" }]);
   });
-  it("disputed 未命中追踪台账 → disputed-untracked 违规；无台账降级路径仅查反证", () => {
+  it("disputed 未命中追踪条目清单 → disputed-untracked 违规；无条目清单降级路径仅查反证", () => {
     const trackedIssues = {
       "MF-1": { firstSeen: 1, severity: "major", status: "open", history: [], fixAttempts: 0 },
     };
-    // MF-9 申述未命中台账；MF-1 未修复也未申述 → 漏修违规并列出现
+    // MF-9 申述未命中条目清单；MF-1 未修复也未申述 → 漏修违规并列出现
     const violations = validateFixResult({
       fixed_count: 0,
       fixes: [],
@@ -444,7 +444,7 @@ describe("validateFixResult", () => {
       { issue_id: "MF-9", severity: "disputed-untracked" },
       { issue_id: "mf-1", severity: "must-fix-not-fixed" },
     ]);
-    // 无台账（mustFixIds null 降级路径）→ 跳过命中检查，反证合格即放行
+    // 无条目清单（mustFixIds null 降级路径）→ 跳过命中检查，反证合格即放行
     expect(validateFixResult({
       fixed_count: 0,
       fixes: [],
@@ -1169,12 +1169,12 @@ describe("findIssueKey — 归一化键空间查找", () => {
     expect(findIssueKey(issues, "MF-2")).toBeUndefined();
   });
 
-  it("空 issueId（''）→ undefined（短路守卫 !issueId）", () => {
+  it("空 issueId（''）→ undefined（短路检查 !issueId）", () => {
     const issues = { "MF-1": { severity: "major" } };
     expect(findIssueKey(issues, "")).toBeUndefined();
   });
 
-  it("非 string issueId（undefined/null/number）→ undefined（typeof 守卫）", () => {
+  it("非 string issueId（undefined/null/number）→ undefined（typeof 检查）", () => {
     const issues = { "MF-1": { severity: "major" } };
     expect(findIssueKey(issues, undefined as unknown as string)).toBeUndefined();
     expect(findIssueKey(issues, null as unknown as string)).toBeUndefined();
@@ -1198,7 +1198,7 @@ describe("findIssueKey — 归一化键空间查找", () => {
 
   it("原型链键（__proto__/toString/constructor）→ 不命中（Object.hasOwn 首查，zsw 侧同款修复上收）", () => {
     // 旧 truthy 查表（issues[issueId]）会让 Object.prototype 上的成员误命中：
-    // issues["__proto__"] 取到原型对象（truthy）→ 返回 "__proto__" 当台账键 →
+    // issues["__proto__"] 取到原型对象（truthy）→ 返回 "__proto__" 当条目清单键 →
     // 调用方读 issues["__proto__"].severity 得 undefined/函数污染 fix 对账。
     // ID 来自 LLM 产出，原型链键是真实攻击面而非理论边界。
     const issues = { "MF-1": { severity: "major" } };
@@ -1247,15 +1247,15 @@ describe("T-2 端到端：normIssueId/findIssueKey 在 validateFixResult 的真�
   });
 });
 
-// ── T-3：reconcile 新 ID severity:"unknown" 守卫分支 ──────────────────────
+// ── T-3：reconcile 新 ID severity:"unknown" 检查分支 ──────────────────────
 // validateFixResult 的 tracked severity 交叉核对：trackedIssues 中某 ID 的 severity
 // 为 "unknown"（reconcileIssues 给新发现 ID 的默认值，review-fix-loop-utils.cjs:935
-// `severity: "unknown"`）时不覆盖 fix agent 自报 severity——守卫在 cjs:347-355（仅认
+// `severity: "unknown"`）时不覆盖 fix agent 自报 severity——检查在 cjs:347-355（仅认
 // critical/major/minor/trivial 为真实等级）。现有 MF-4 测试覆盖了 major/critical/minor
-// tracked + 无此 ID，缺 "unknown" 分支。守卫目的：新发现 ID 的 severity 尚未由 reviewer
+// tracked + 无此 ID，缺 "unknown" 分支。检查目的：新发现 ID 的 severity 尚未由 reviewer
 // 结构化确认（reconcile 默认 unknown），不应凭默认值把合法 minor deferral 误升级为违规。
 
-describe("T-3: tracked severity 'unknown' 守卫（reconcile 新 ID 不覆盖自报）", () => {
+describe("T-3: tracked severity 'unknown' 检查（reconcile 新 ID 不覆盖自报）", () => {
   it("tracked severity:'unknown' + 自报 minor → 放行（unknown 不覆盖自报）", () => {
     // 场景：reconcileIssues 首轮新发现 MF-9（severity 默认 "unknown"），fix 阶段 defer
     // 它并自报 minor。交叉核对时 tracked severity="unknown" 不在等级白名单 →
@@ -1270,9 +1270,9 @@ describe("T-3: tracked severity 'unknown' 守卫（reconcile 新 ID 不覆盖自
     }, [], trackedIssues)).toEqual([]);
   });
 
-  it("对照：tracked severity:'major'（真实等级）+ 自报 minor → 仍违规（守卫只放行 unknown）", () => {
-    // 反向佐证：守卫仅对 "unknown" 放行，真实 must-fix 等级（major）仍交叉核对生效，
-    // 不会因为守卫存在而漏放 must-fix deferral。
+  it("对照：tracked severity:'major'（真实等级）+ 自报 minor → 仍违规（检查只放行 unknown）", () => {
+    // 反向佐证：检查仅对 "unknown" 放行，真实 must-fix 等级（major）仍交叉核对生效，
+    // 不会因为检查存在而漏放 must-fix deferral。
     const trackedIssues = {
       "MF-9": { firstSeen: 1, severity: "major", status: "open", history: [], fixAttempts: 0 },
     };
@@ -2183,9 +2183,9 @@ describe("A9 backfillFixRegression mode 三态（unverifiable 边缘缺口）", 
   });
 });
 
-// ── 假 clean 防护 + 身份对齐 + fixed 申报清账（2026-08-29，对照审查 7 must-fix 落地） ──
+// ── 假 clean 防护 + 身份对齐 + fixed 申报后标记登记项完成（2026-08-29，对照审查 7 must-fix 落地） ──
 
-describe("hasOpenResidue — 台账残留判定（四收工点守门）", () => {
+describe("hasOpenResidue — 条目清单残留判定（四收工点守门）", () => {
   it("空对象 / undefined / 全 closed（fixed/deferred）→ false", () => {
     expect(hasOpenResidue({})).toBe(false);
     expect(hasOpenResidue(undefined)).toBe(false);
@@ -2258,7 +2258,7 @@ describe("resolveIssueIdentity — 三级身份对齐", () => {
     const b = resolveIssueIdentity({ id: "MF-1", title: "whatever" }, { issues: { "MF-1": { status: "open" } }, dormant: [] });
     expect(b).toEqual({ key: "MF-1", mapped: false });
   });
-  it("L1 守卫：编号命中但标题不一致（编号撞车）→ 不沿用，L2 标题命中他条或 L3 避让", () => {
+  it("L1 检查：编号命中但标题不一致（编号撞车）→ 不沿用，L2 标题命中他条或 L3 避让", () => {
     // 编号撞车 + 无标题命中 + 编号被占 → L3 避让分配新号
     const out = resolveIssueIdentity(
       { id: "MF-1", title: "brand new unrelated problem" },
@@ -2331,12 +2331,12 @@ describe("applyCarryoverRegression — 「重报 → regressed」转移纯函数
   });
 });
 
-describe("translateId — 表格号→台账键翻译（台账键优先）", () => {
+describe("translateId — 表格号→条目清单键翻译（条目清单键优先）", () => {
   const idMap = { "MF-3": "MF-5", "MF-9": "MF-2" };
-  it("表格号在 map 且非台账键 → 翻译", () => {
+  it("表格号在 map 且非条目清单键 → 翻译", () => {
     expect(translateId(idMap, "MF-3", {})).toBe("MF-5");
   });
-  it("台账键优先：id 直接命中 issues → 不翻译（防同形碰撞误翻译）", () => {
+  it("条目清单键优先：id 直接命中 issues → 不翻译（防同形碰撞误翻译）", () => {
     expect(translateId(idMap, "MF-3", { "MF-3": { status: "open" } })).toBe("MF-3");
   });
   it("map miss → 回退原值（深层历史翻译丢失退化为现状行为）；空入参安全", () => {
@@ -2346,7 +2346,7 @@ describe("translateId — 表格号→台账键翻译（台账键优先）", () 
   });
 });
 
-describe("reconcileIssues fixed 申报清账（open/regressed + fixed 声明 → fixed）", () => {
+describe("reconcileIssues fixed 申报后标记登记项完成（open/regressed + fixed 声明 → fixed）", () => {
   const openIssue = (streak = 0) => ({
     firstSeen: 1, severity: "major", status: "open", openStreak: streak,
     history: [{ round: 1, status: "open" }], fixAttempts: 0,
@@ -2357,7 +2357,7 @@ describe("reconcileIssues fixed 申报清账（open/regressed + fixed 声明 →
     expect(out.issues["MF-1"].openStreak).toBe(0);
     expect(out.issues["MF-1"].history).toContainEqual({ round: 3, status: "fixed", via: "reconciliation" });
   });
-  it("regressed + fixedIds 命中 → 同样清账", () => {
+  it("regressed + fixedIds 命中 → 同样标记登记项完成", () => {
     const out = reconcileIssues(
       { "MF-2": { ...openIssue(), status: "regressed", fixAttempts: 1 } },
       { seenIds: new Set(), fixedIds: new Set(["MF-2"]), round: 2, stuckThreshold: 3 },
@@ -2379,8 +2379,8 @@ describe("reconcileIssues fixed 申报清账（open/regressed + fixed 声明 →
   });
 });
 
-describe("applyCleanRoundBackfill 扩展：reconFixed 清账 + stuck 消费", () => {
-  it("clean 轮 open 条目经 reconFixed 申报 → 清账（不再滞留 open 产假 clean 终态）", () => {
+describe("applyCleanRoundBackfill 扩展：reconFixed 标记登记项完成 + stuck 消费", () => {
+  it("clean 轮 open 条目经 reconFixed 申报 → 标记登记项完成（不再滞留 open 产假 clean 终态）", () => {
     const state = {
       issues: { "MF-3": { firstSeen: 1, severity: "major", status: "open", openStreak: 1, history: [{ round: 1, status: "open" }], fixAttempts: 0 } },
       knownRemaining: [], scores: [], fixResults: [],
@@ -2430,7 +2430,7 @@ describe("title 数据链（schema 生成侧 → normalize 透传 → issues/dor
 });
 
 describe("validateFixResult idMap — deferred 交叉核对的查表翻译", () => {
-  it("fixer 申报表格号、台账键不同（L2 改键）→ 经 idMap 翻译命中 tracked severity → 违规拦截", () => {
+  it("fixer 申报表格号、条目清单键不同（L2 改键）→ 经 idMap 翻译命中 tracked severity → 违规拦截", () => {
     const result = {
       fixed_count: 0, fixes: [],
       deferred: [{ issue_id: "MF-3", severity: "minor", reason: "cost too high for a minor fix here" }],
@@ -2444,7 +2444,7 @@ describe("validateFixResult idMap — deferred 交叉核对的查表翻译", () 
   });
 });
 
-describe("buildR2ReviewPrompt 台账未结条目注入段（假 clean 防护信息通路）", () => {
+describe("buildR2ReviewPrompt 条目清单未结条目注入段（假 clean 防护信息通路）", () => {
   const base = {
     header: "Batch 1 Round 2/10 — b1", round: 2, max: 10, roundDir: "/tmp/rd2", reportFile: "rev",
     aggPath: "/tmp/rd1/aggregated.md", fixResult: null, knownRemaining: [], dormant: [],
@@ -2495,8 +2495,8 @@ describe("translateReconSets — 对账集合 id 翻译 + 冲突互斥（MF-1/MF
     "MF-1": { firstSeen: 1, severity: "major", status: "open", openStreak: 1, history: [], fixAttempts: 0 },
     "MF-2": { firstSeen: 1, severity: "major", status: "fix-attempted", openStreak: 0, history: [], fixAttempts: 0 },
   };
-  it("表格号经 idMap 翻译到台账键（台账键优先：MF-1 直接命中不过 map）", () => {
-    const seen = new Set(["MF-9"]); // R2 表格号 → 台账键 MF-2
+  it("表格号经 idMap 翻译到条目清单键（条目清单键优先：MF-1 直接命中不过 map）", () => {
+    const seen = new Set(["MF-9"]); // R2 表格号 → 条目清单键 MF-2
     const esc = new Set(); const fixed = new Set();
     translateReconSets(seen, esc, fixed, { "MF-9": "MF-2" }, issues);
     expect([...seen]).toEqual(["MF-2"]);
@@ -2522,9 +2522,9 @@ describe("applyCleanRoundBackfill 对账翻译 + 冲突消解（MF-2 回归：cl
   });
   const mkState = (issues: Record<string, unknown>) => ({
     issues, knownRemaining: [], scores: [], fixResults: [],
-    idMap: { round: 2, map: { "MF-3": "MF-1" } }, // 上一轮聚合的表格号→台账键
+    idMap: { round: 2, map: { "MF-3": "MF-1" } }, // 上一轮聚合的表格号→条目清单键
   });
-  it("clean 轮 fixed 申报的表格号经 idMap 翻译 → 命中台账键清账", () => {
+  it("clean 轮 fixed 申报的表格号经 idMap 翻译 → 命中条目清单键后标记登记项完成", () => {
     const state = mkState({ "MF-1": openIssue(1) });
     const out = applyCleanRoundBackfill(state, {
       reconSeen: new Set(), reconEscalate: new Set(), reconFixed: new Set(["MF-3"]),
@@ -2532,13 +2532,13 @@ describe("applyCleanRoundBackfill 对账翻译 + 冲突消解（MF-2 回归：cl
     });
     expect(out.state.issues["MF-1"].status).toBe("fixed");
   });
-  it("多 reviewer 对同一 prev_id 矛盾（not-fixed vs fixed）→ seen 优先，不销账（假 clean 防护）", () => {
+  it("多 reviewer 对同一 prev_id 矛盾（not-fixed vs fixed）→ seen 优先，不关闭（假 clean 防护）", () => {
     const state = mkState({ "MF-1": openIssue(1) });
     const out = applyCleanRoundBackfill(state, {
       reconSeen: new Set(["MF-3"]), reconEscalate: new Set(), reconFixed: new Set(["MF-3"]),
       round: 3, stuckThreshold: 3,
     });
-    expect(out.state.issues["MF-1"].status).toBe("open"); // 未被乐观 fixed 申报清账
+    expect(out.state.issues["MF-1"].status).toBe("open"); // 未被乐观 fixed 申报标记登记项完成
   });
   it("escalate 声明的表格号同样翻译（clean 轮 deferred 重开不失效）", () => {
     const state = mkState({
@@ -2756,7 +2756,7 @@ describe("buildAggregatorPrompt findings/groups（分组并行链路 prompt 段�
     const p = buildAggregatorPrompt(args);
     expect(p).toContain("also merge their guidance into the single most concrete direction");
   });
-  it("显式 id 延续：延续复用台账 id + 新条目 MF-<round>-<seq> 带轮号格式（L1 命中率优化）", () => {
+  it("显式 id 延续：延续复用条目清单 id + 新条目 MF-<round>-<seq> 带轮号格式（L1 命中率优化）", () => {
     const p = buildAggregatorPrompt(args);
     expect(p).toContain("MUST reuse the tracked id verbatim");
     expect(p).toContain("MF-1-<seq>");

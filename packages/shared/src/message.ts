@@ -26,7 +26,7 @@ export type MessageRole = 'user' | 'assistant' | 'system'
  * session-manager extension 经 B-ledger 送达的 custom message，与 extension 端
  * MANAGED_SESSION_NOTIFY_CUSTOM_TYPE、core extractNotifyRecords 分支三处同值。
  */
-// 显式 Set<string>：保持既有类型面（成员常量是 as const 字面量类型，缺省推断会
+// 显式 Set<string>：保持既有类型范围（成员常量是 as const 字面量类型，缺省推断会
 // 收窄成联合字面量 Set，令消费方 .has(entry.customType: string) 编译期红）
 // 'managed-session-notify' 暂未入 extension-protocol 词表（常量在 session-manager
 // 扩展内部），单源化跟进项
@@ -41,7 +41,7 @@ export const COMPLETE_NOTIFY_CUSTOM_TYPES: Set<string> = new Set([
 // display 覆写 / renderer 定向气泡）。
 //
 // 用户经 @ subagent chip 发送的定向消息：subagent-workflow extension（/subagents message
-// 命令面）在 deliverMessage 成功后经 pi.sendMessage 落 custom_message entry——
+// 命令入口）在 deliverMessage 成功后经 pi.sendMessage 落 custom_message entry——
 // customType 即本常量，content=定向文本原文，details={subagentId, slug, direction:'user'}，
 // display:false（false 是 pi TUI 渲染语义；taiji 消费侧另行决定显隐，见
 // parseSubagentDirective 消费点）。留痕进主 agent 上下文但不 triggerTurn（留痕 ≠ 处理）。
@@ -61,11 +61,11 @@ export interface SubagentDirectiveData {
   text: string
 }
 
-// ── details 对象守卫（防御解析器族共用）────────────────────────────
+// ── details 对象检查（防御解析器族共用）────────────────────────────
 /** details 收窄为 Record：非对象形态（null / 原始类型 / 数组）→ null（防御性解析，不信任运行时形状）。 */
 function asDetailsRecord(details: unknown): Record<string, unknown> | null {
   if (!details || typeof details !== 'object' || Array.isArray(details)) return null
-  // as 安全性：上方 typeof + Array.isArray 守卫已排除全部非 Record 形态。
+  // as 安全性：上方 typeof + Array.isArray 检查已排除全部非 Record 形态。
   return details as Record<string, unknown>
 }
 
@@ -150,7 +150,7 @@ export const MSG_ID_UUID_SEGMENT = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]
  * 收养形态；与 session-delivery-registry DELIVERY_MARKER_ID_RE 的 `m-` 分支同构）。
  * 两个标记正则的身份段 = uuid 段 | 收养段——缺收养段时（2026-10-03 D3 验收 A8 归因，
  * 探针实证）外部 message.send 无 clientUuid 提交的回执标记在消费端构造性 miss：
- * runtime 侧投影正常转 delivered，前端 user-delivery ① 命中不了条目 → 观看端 live
+ * runtime 侧派生视图正常转 delivered，前端 user-delivery ① 命中不了条目 → 观看端 live
  * 无人入流（live ≠ reload）。ADR-0077 严格/宽松二分在消费端补齐宽松半边。
  */
 export const MSG_ID_ADOPTED_SEGMENT = 'm-[0-9a-z]+-[0-9a-z]+'
@@ -160,7 +160,7 @@ const MSG_ID_IDENTITY_SEGMENT = `(${MSG_ID_UUID_SEGMENT}|${MSG_ID_ADOPTED_SEGMEN
 
 /**
  * 投递身份标记正则（`<!--taiji:msg:<uuid>-->` 全文匹配 SSOT，双形态）：
- * `u-<uuid>`（renderer 气泡 id 写入面，msg-id-mapper TAG_MATCH 同构）与裸 `<uuid>`
+ * `u-<uuid>`（renderer 气泡 id 写侧，msg-id-mapper TAG_MATCH 同构）与裸 `<uuid>`
  * （内核出站标记形态，刻意不被 msg-id-mapper 剥离——出站身份必须存活进 transcript
  * 供送达回执匹配）。两形态指向同一 clientUuid，回归期（renderer 拼 u- 形态 + 内核
  * 追加裸形态）首个命中即正确值。
@@ -187,7 +187,7 @@ export const MSG_ID_TAG_BARE_RE = new RegExp(`<!--taiji:msg:${MSG_ID_IDENTITY_SE
 
 /**
  * 裸 uuid 全串锚定正则（8-4-4-4-12 hex，i 旗标）。消费方 = runtime revoke-orchestrator
- * 的 targetId 形态分派（撤回 U8 保号子形态锚）：与 pi entryId 的 8 位 hex 形态构造性
+ * 的 targetId 形态分派（撤回 U8 保留原 id 子形态锚）：与 pi entryId 的 8 位 hex 形态构造性
  * 区分（无连字符不匹配）。uuid 结构与 MSG_ID_TAG_RE 同源（MSG_ID_UUID_SEGMENT 单点），
  * 禁单侧漂移。
  */
@@ -210,11 +210,11 @@ export function markerLiteral(bareId: string): string {
  * 值语义（投递所有权内核架构下受理段实际产出）：
  * - 'command-missing'：requireCommand 前置校验未命中拒发（命令串不进模型）；
  * - 'hook-blocked'：BeforeSend hook 拦截；
- * - 'error'：传输/装配级失败收口（session-api 异常收口、plugin-rpc-setup 装配缺失等）。
+ * - 'error'：传输/装配级失败收尾（session-api 异常收尾、plugin-rpc-setup 装配缺失等）。
  *
  * busy/compacting/bash 三退役值已删：「排队取代拒绝」后投递内核对暂不可收时态只排队
  * 不回拒，运行面只产上述三值。收窄裁决（P7 定案，非 breaking）：plugin-sdk
- * private:true 不发布 npm（词表非外部发布契约面）+ 运行面只看 blocked/rejected 布尔
+ * private:true 不发布 npm（词表非外部发布契约范围）+ 运行面只看 blocked/rejected 布尔
  * （reason 是诊断/文案面，插件不得依赖精确值做行为分支）。词表收窄的传播义务：
  * 仓内消费方（含插件与测试 mock）不得比较或注入退役值——出现即属收窄未同步清扫，
  * 须一并删除。
@@ -225,7 +225,7 @@ export function markerLiteral(bareId: string): string {
 export type SendPromptReason = 'command-missing' | 'hook-blocked' | 'error'
 
 /**
- * 帧条目 preview 截断长度（投递队列展示投影）。runtime transport 与 core mock 轨共用
+ * 帧条目 preview 截断长度（投递队列展示派生视图）。runtime transport 与 core mock 轨共用
  * 同值——mock 轨/real 轨帧形态一致（否则 mock 型前端测试的基线会与真机分叉）。
  */
 export const DELIVERY_PREVIEW_MAX_CHARS = 80
@@ -373,14 +373,14 @@ export interface BgNotifyRecord {
   closedReason?: string
   /**
    * 终态三态对外语义（仅 closed 通知携带；running 轮次通知语义上无 outcome，缺省）。
-   * 写侧在 notify() 投影边界物化（closed 缺省时按 closedReason+error 派生）——消费侧
+   * 写侧在 notify() 派生边界物化（closed 缺省时按 closedReason+error 派生）——消费侧
    * 读本字段即得一等成败判定，无需自行从 closedReason 派生。
    */
   outcome?: 'completed' | 'failed' | 'cancelled'
   /** 对话轮次计数（仅 running 轮次通知有意义，非轮次通知恒定）。dedup key 按 id:round 去重。 */
   round?: number
   /**
-   * 通知身份键（写侧 notify() 投影边界物化 = 去重/回执匹配键：`id` / `id:round`，
+   * 通知身份键（写侧 notify() 派生边界物化 = 去重/回执匹配键：`id` / `id:round`，
    * 世代 epoch>0 扩为 `id:epoch:round`）。凭此可跨进程识别「同一条通知的重复注入」；
    * 只进 details 不进 LLM 文案。
    */
@@ -422,7 +422,7 @@ export function parseBgNotifyDetails(details: unknown): BgNotifyDetails | null {
 }
 
 // ── parseSingleRecord 内部 helper（按处理阶段拆分：必需字段解析 / 可选字段拷贝）──────
-// 模块私有，不进导出面。判定语义（含空串拒绝、属性写入顺序）与拆分前逐字节一致。
+// 模块私有，不进导出清单。判定语义（含空串拒绝、属性写入顺序）与拆分前逐字节一致。
 
 /** 字符串字段窄化：非 string → null（防御性解析，不信任运行时形状） */
 function asRecordString(v: unknown): string | null {
@@ -588,7 +588,7 @@ const WORKFLOW_DONE_REASON_OUTCOME: Record<WorkflowDoneReason, WorkflowResultOut
   time_limited: 'failed',
 }
 
-/** reason 词表成员判定（hasOwnProperty.call 守卫原型链键如 toString/constructor；不用
+/** reason 词表成员判定（hasOwnProperty.call 检查原型链键如 toString/constructor；不用
  *  Object.hasOwn——renderer 侧 vue-tsc 的 lib 是 ES2020，报 TS2550，同 core route-inbound 先例） */
 function asWorkflowDoneReason(v: unknown): WorkflowDoneReason | null {
   return typeof v === 'string' && Object.prototype.hasOwnProperty.call(WORKFLOW_DONE_REASON_OUTCOME, v)
@@ -646,7 +646,7 @@ export function parseWorkflowResultNotify(details: unknown): WorkflowResultNotif
  * - bash 驱动的删除/移动 → deleted（需 git 对账判定，见 ADR-0024）
  * - unmerged → git 冲突态
  *
- * 与 git.ts GitFileStatus 是两个词表、不共用：后者面向 git.status 全量投影，多
+ * 与 git.ts GitFileStatus 是两个词表、不共用：后者面向 git.status 全量派生视图，多
  * renamed/untracked 两值——file_changes 通道只消费 pi 工具语义面，不收 renamed/untracked。
  */
 export type FileChangeStatus = 'added' | 'modified' | 'deleted' | 'unmerged'
@@ -696,8 +696,8 @@ export interface Message {
   /**
    * 该消息产出的结束时刻（epoch ms）；`timestamp` 是开始时刻。
    *
-   * 只对 assistant message 有意义（唯一写入面）：
-   * - live：终态收口（message.complete / abort / error / 断连）当下写入
+   * 只对 assistant message 有意义（唯一写侧）：
+   * - live：终态收尾（message.complete / abort / error / 断连）当下写入
    * - reload：JSONL / get_entries 的 entry 时间戳（pi appendMessage 落在 message_end，
    *   即该消息产出结束；entry 时间戳不参与 reducer——由运行时历史链路回填，见
    *   runtime infra `session-entry-mapper.applyEntryEndTimes`；pi 行为锚点见
@@ -705,14 +705,14 @@ export interface Message {
    *
    * 用途 = turn 级聚合口径的时间轴右端（TurnMeta「已工作」时长/时刻区间）：没有它，
    * 单条 assistant 的 turn 会退化为 startedAt === endedAt（旧实现恒显「1s」）。
-   * 缺失（旧历史帧/未收口）时消费侧回退 `timestamp`，等价于修复前行为。
+   * 缺失（旧历史帧/未收尾）时消费侧回退 `timestamp`，等价于修复前行为。
    */
   endedAt?: number
   /**
    * 该 assistant 消息的文本流已定稿（chat-flow-text-color D1）。
    *
    * 只对 live assistant 气泡有意义：pi 回合 =「assistant 消息 → 工具 → assistant 消息 → …」
-   * 循环，live 气泡的 status 要到回合级 message.complete 才整体收口（registry.ts
+   * 循环，live 气泡的 status 要到回合级 message.complete 才整体收尾（registry.ts
    * message.complete handler），期间早己写完的中间消息一直挂着 status:'streaming'——
    * 若 UI 颜色直接跟 status，长工具回合中已定稿正文会一直灰。本字段由
    * message.message_end（assistant role）当下写入，是「该消息文本不再增长」的确定性事
@@ -738,7 +738,7 @@ export interface Message {
    * - assistant turn：message.error / send.rejected 通道写入错误文本
    * - bash 消息：markBashError abortBash 失败兜底写入错误文本
  * 前端按值区分渲染（如 BashOutputBlock 消费 'timeout' 显示「超时」而非「已取消」——
- * 'timeout' 值的原写方 bash timer 收口已随 dormant 契约删除，渲染兼容分支保留）。
+ * 'timeout' 值的原写方 bash timer 收尾已随 dormant 契约删除，渲染兼容分支保留）。
    */
   error?: string
   /** 上下文压缩摘要（W07-C，message.compactionSummary） */

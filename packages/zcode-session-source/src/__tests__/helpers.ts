@@ -97,8 +97,8 @@ export interface BuildFixtureOptions {
 }
 
 /**
- * 建消费面 fixture 库：WAL 模式 + session/message/part/schema_migration 四表 +
- * 种子行。行结构与 runtime 旧 fixture 同款（宿主 schema 0.16.5 消费面子集）。
+ * 建消费方 fixture 库：WAL 模式 + session/message/part/schema_migration 四表 +
+ * 种子行。行结构与 runtime 旧 fixture 同款（宿主 schema 0.16.5 消费方子集）。
  */
 export async function buildFixtureDb(
   dir: string,
@@ -163,7 +163,7 @@ export async function buildFixtureDb(
 /**
  * 双端落盘关闭：bun:sqlite 的 close() 不执行 checkpoint 也不删 -wal/-shm 附属
  * 文件（bun 1.3.8 探针实证；node:sqlite close 自动 checkpoint+清理）——不显式
- * checkpoint 就删附属 = 丢掉未落盘数据（W1 在 bun 腿下 db 主文件残缺的根因）。
+ * checkpoint 就删附属 = 丢掉未落盘数据（W1 在 bun 路径下 db 主文件残缺的根因）。
  * 所有「写连接关闭后库须数据完整」的 fixture 关闭点一律走本助手；W2 的写者
  * 活跃态构造（close 前不留证）不适用。
  */
@@ -186,7 +186,7 @@ export function dirSnapshot(dir: string): string[] {
 
 /**
  * 场景 1a 共用 fixture 行集契约（≥2 轮对话 + toolCall/toolResult 对 + 可检索
- * 关键词 + compaction part）——本包测试只断言行集查询面（converter 断言归 U4），
+ * 关键词 + compaction part）——本包测试只断言行集查询范围（converter 断言归 U4），
  * 行集保持与设计契约同形供后续单元复用。
  */
 export function defaultTranscriptSeeds(): {

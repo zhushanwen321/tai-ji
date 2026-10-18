@@ -3,7 +3,7 @@
  *
  * 同构壳层桥（shallowReactive 外层分区 Map + reactive 内层分区 Map）：外层 reactive 保证
  * 「分区后建」也触发重算（computed 首次求值短路的经典 stale 陷阱），内层 reactive 保证
- * set/delete/keys 迭代被追踪——与生产桥的依赖面一致。分区键（sessionId）由调用方注入，
+ * set/delete/keys 迭代被追踪——与生产桥的依赖范围一致。分区键（sessionId）由调用方注入，
  * push / invalidate 作用于该分区。
  */
 import { reactive, shallowReactive } from 'vue'

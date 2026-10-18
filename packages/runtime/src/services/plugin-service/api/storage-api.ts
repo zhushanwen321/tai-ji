@@ -10,7 +10,7 @@
  * 转发到主线程的 PluginStorage 执行。Worker 本身不直接读写文件系统。
  *
  * 此前这些 handler 内联在 plugin-rpc-setup.ts，Worker 侧代理内联在
- * plugin-bootstrap.ts（createStateStorageProxy）。P6 收口到本 api 文件，
+ * plugin-bootstrap.ts（createStateStorageProxy）。P6 收尾到本 api 文件，
  * 与其它 6 个域（session/config/session-data/ui/agent/workspace）保持一致。
  *
  * [SEC-A5 路径注入防御] pluginId 来自插件 Worker 的 RPC params（可伪造），

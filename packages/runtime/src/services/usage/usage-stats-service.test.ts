@@ -9,7 +9,7 @@
  * - compaction entry（顶层 usage）
  * - branch_summary 无 usage 不产出 NaN 行
  * - ③ compaction model 归属：details.model 权威优先，非 string/空串回退 'compaction'
- * - ④ rename-session custom entry：正常落账 / usage 存在性守卫 / model 回退 / timestamp 行级失败 / cost 缺失诚实降级
+ * - ④ rename-session custom entry：正常记录 / usage 存在性检查 / model 回退 / timestamp 行级失败 / cost 缺失诚实降级
  * - 首行 session_info 的 cwd 容错
  * - .tmp-migrate-*.jsonl 与 .meta.json 排除
  * - 空目录空结果
@@ -148,7 +148,7 @@ function renameSessionEntry(opts: {
 
 /** 构造 pi 1.0.0 usage entry（appendUsage 落盘形态：kind/provider/model/usage/note）。 */
 function piUsageEntry(opts: {
-  usage?: unknown // 刻意放宽：守卫用例喂非法形态（string/number）验证不计 row
+  usage?: unknown // 刻意放宽：检查用例喂非法形态（string/number）验证不计 row
   provider?: unknown
   model?: unknown
   kind?: string
@@ -221,7 +221,7 @@ const ZERO_COST_USAGE = {
   cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
 }
 
-/** rename-session 落账样例 usage。 */
+/** rename-session 记录样例 usage。 */
 const RENAME_USAGE = {
   input: 800,
   output: 40,
@@ -273,7 +273,7 @@ describe('UsageStatsService', () => {
   it.each([
     ['① assistant message.usage → 主桶', 'bucket-assistant', () => assistantEntry({ provider: 'kimi-coding', model: 'k3-256k' }), 'kimi-coding', 'k3-256k'],
     ['⑤ usage entry → 主桶（pi 1.0.0 非对话用量）', 'bucket-usage', () => piUsageEntry({ usage: SAMPLE_USAGE, provider: 'zai-coding-cn', model: 'glm-5.3-flash' }), 'zai-coding-cn', 'glm-5.3-flash'],
-  ])('%s：SAMPLE_USAGE 全量落账', async (_label, fileName, makeEntry, provider, model) => {
+  ])('%s：SAMPLE_USAGE 全量记录', async (_label, fileName, makeEntry, provider, model) => {
     const content = [sessionEntry('/Users/dev/project-a'), makeEntry()].join('\n')
     await writeFile(join(tmpDir, `${fileName}.jsonl`), content)
 
@@ -542,7 +542,7 @@ describe('UsageStatsService', () => {
 
   it('双键确定性：mtime 相同仅 size 变触发重扫；mtime+size 均不变走缓存', async () => {
     // 反向验证推演：若实现删掉 size 比对只看 mtime，本用例 stage2 时 mtime 相同命中缓存 →
-    // result2.rows 仍为 1 → 断言失败（用例变红），即 size 分量被本用例守卫。
+    // result2.rows 仍为 1 → 断言失败（用例变红），即 size 分量被本用例检查。
     const line2 = assistantEntry({ timestamp: '2026-08-25T11:00:00.000Z' })
     const content1 = [sessionEntry('/Users/dev/dk-det'), assistantEntry()].join('\n')
     const s1 = Buffer.byteLength(content1, 'utf8')
@@ -655,7 +655,7 @@ describe('UsageStatsService', () => {
     expect(result2.sessionCount).toBe(0)
   })
 
-  // ── usage 字段缺失守卫 ───────────────────────────────────
+  // ── usage 字段缺失检查 ───────────────────────────────────
 
   it('assistant 无 usage 不计入', async () => {
     const content = [
@@ -704,7 +704,7 @@ describe('UsageStatsService', () => {
     expect(result.rows[0].provider).toBe('kimi-coding')
   })
 
-  // ── cost.total 缺失守卫 ─────────────────────────────────
+  // ── cost.total 缺失检查 ─────────────────────────────────
 
   it('cost.total 缺失时 costUSD 按 0', async () => {
     const usageNoCost = {
@@ -772,7 +772,7 @@ describe('UsageStatsService', () => {
     expect(result.rows[0].model).toBe('kimi-coding/k3')
   })
 
-  it('③ details.model 非 string/空串/details 缺失回退 compaction（守卫降级不猜测）', async () => {
+  it('③ details.model 非 string/空串/details 缺失回退 compaction（检查降级不猜测）', async () => {
     const content = [
       sessionEntry('/Users/dev/attrib-fb'),
       compactionEntry(SAMPLE_USAGE, { model: '' }), // 空串
@@ -793,7 +793,7 @@ describe('UsageStatsService', () => {
 
   // ── ④ rename-session custom entry（taiji 自有口径，PS-29 落盘形态）────────
 
-  it('④ rename-session custom entry 正常落账（G3）', async () => {
+  it('④ rename-session custom entry 正常记录（G3）', async () => {
     const content = [
       sessionEntry('/Users/dev/rename-ledger'),
       renameSessionEntry({ data: { model: 'xiaomi-token-plan-cn/mimo-v2.6-flash', usage: RENAME_USAGE } }),
@@ -853,11 +853,11 @@ describe('UsageStatsService', () => {
 
     expect(result.rows).toHaveLength(1)
     expect(result.rows[0].provider).toBe('kimi-coding')
-    // 存在性守卫不命中 ≠ 行级失败，不计 skippedLines
+    // 存在性检查不命中 ≠ 行级失败，不计 skippedLines
     expect(result.skippedLines).toBe(0)
   })
 
-  it('④ data.model 缺失/非 string/空串回退 rename-session（守卫与 ③ 对称）', async () => {
+  it('④ data.model 缺失/非 string/空串回退 rename-session（检查与 ③ 对称）', async () => {
     const content = [
       sessionEntry('/Users/dev/rename-modelfb'),
       renameSessionEntry({ data: { usage: RENAME_USAGE } }), // model 缺失
@@ -893,8 +893,8 @@ describe('UsageStatsService', () => {
   })
 
   // ── ⑤ pi 1.0.0 usage entry（模型产生的非对话用量，appendUsage 落盘形态）────────
-  // 正常落账路径已并入上方 ①⑤ 表驱动行 2（顶层 provider/model 字段源为 ⑤ 特有断言）；
-  // 本组保留守卫与回退专项。
+  // 正常记录路径已并入上方 ①⑤ 表驱动行 2（顶层 provider/model 字段源为 ⑤ 特有断言）；
+  // 本组保留检查与回退专项。
 
   it('⑤ usage 缺失/非对象不计 row；provider/model 缺失回退 (unknown)；timestamp 非法计 skippedLines', async () => {
     const content = [

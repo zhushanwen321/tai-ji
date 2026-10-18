@@ -1,7 +1,7 @@
 /**
  * PiMcpServers — IMcpServers port 的 infra 实现（pi-mcp-management 装配波 u2b）。
  *
- * 组合两个既有 infra 原语，自身只做协议投影与信封编排，不新增第二条读写路径：
+ * 组合两个既有 infra 原语，自身只做协议派生视图与信封编排，不新增第二条读写路径：
  *   - pi-mcp-store（u1）：mcp.json 唯一读写层（D2 跨进程磁盘锁 + 锁内 RMW + D4 校验
  *     复刻 + D7 编辑写回契约）。装配本类后 taiji 内不存在第二写入口（设计 D2）——
  *     全部写操作（add/update/remove）都落在 store 的锁内 RMW 单点上。
@@ -16,7 +16,7 @@
  *     锁内对最新注册表执行（D4 不采用替换语义）。
  *   - update：按 entry 是否携带表单外键（type/timeout/toolExposure/auth/oauth 任一）
  *     分叉两种写死语义——
- *     ① 携带外键 = 代码模式解析产物（编辑弹层代码 tab / 表单 → 代码序列化，文件投影
+ *     ① 携带外键 = 代码模式解析产物（编辑弹层代码 tab / 表单 → 代码序列化，文件派生视图
  *     含外键）：走 code 路径整体作为条目值（外键与显式 type 以 entry 为准，不合并
  *     不剥离）。包装单键形态键名恒等于被编辑条目名，store 编辑态名称锁定校验恒通过；
  *     不包装的裸形态会踩 store 的病态重合歧义（单键 record 条目被误读为包装形态 →
@@ -28,7 +28,7 @@
  *     entry 形状下结构性不可区分，按 form 语义处理（底外键保留）——误保留可见可修
  *     （清单/代码模式可再编辑），误删除（丢 oauth 登录参数）静默不可恢复，宁保留。
  *   - setEnabled（u3 清单行启停专用，§3.1「写入 enabled 字段」最小语义）：不经 update——
- *     清单投影为底的条目值回写会把「清单打开至切换之间」的外部并发改动静默覆盖（丢失
+ *     清单映射为底的条目值回写会把「清单打开至切换之间」的外部并发改动静默覆盖（丢失
  *     窗口从 D2 的锁内亚秒级放大到 UI 会话级），且混填条目会被 form 路径规范化改写；
  *     专用操作直落 store setMcpServerEnabled（锁内仅翻转 enabled 键）。
  *
@@ -88,7 +88,7 @@ function corruptedEnvelopeError(reason: string, filePath: string): string {
 
 /**
  * 表单外键判别（D7 外键清单：type/timeout/toolExposure/auth/oauth——表单序列化不产
- * 这些键，携带即代码模式解析产物或含外键的文件投影回写）。
+ * 这些键，携带即代码模式解析产物或含外键的文件派生视图回写）。
  */
 const FORM_FOREIGN_KEYS = ['type', 'timeout', 'toolExposure', 'auth', 'oauth'] as const
 
@@ -125,15 +125,15 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * 文件原样值 → 协议条目值投影。非对象坏条目（读侧已标「配置必须是对象」）无法以
- * 对象类型承载，投影空对象——清单以 configError 标注为准（D8③，坏条目不阻塞其余
- * 条目管理）；对象条目照原样投影（外键/坏值原样，清单以文件为准，ADR-0097 拉为主推补充）。
+ * 文件原样值 → 协议条目值派生视图。非对象坏条目（读侧已标「配置必须是对象」）无法以
+ * 对象类型承载，派生视图空对象——清单以 configError 标注为准（D8③，坏条目不阻塞其余
+ * 条目管理）；对象条目照原样派生视图（外键/坏值原样，清单以文件为准，ADR-0097 拉为主推补充）。
  */
 function asEntryValue(config: unknown): McpServerEntryValue {
   return isRecord(config) ? (config as McpServerEntryValue) : {}
 }
 
-/** store 条目视图 → WS 协议条目投影（读侧错误标注映射 configError，合法条目缺省）。 */
+/** store 条目视图 → WS 协议条目派生视图（读侧错误标注映射 configError，合法条目缺省）。 */
 function toProtocolEntry(view: McpServerEntryView): McpServerEntry {
   return {
     name: view.name,
@@ -226,7 +226,7 @@ export class PiMcpServers implements IMcpServers {
 
   setEnabled(name: string, enabled: boolean): McpMutationResult {
     // §3.1「写入 enabled 字段」最小语义：专用操作直落 store（锁内仅翻转 enabled 键，
-    // 不带清单投影回写），reply entry = 写后落盘终态（mutationEnvelope 回读）。
+    // 不带清单派生视图回写），reply entry = 写后落盘终态（mutationEnvelope 回读）。
     return this.mutationEnvelope(name, () => {
       setMcpServerEnabled(name, enabled)
     })
@@ -248,7 +248,7 @@ export class PiMcpServers implements IMcpServers {
     if (!removeMcpServer(name)) {
       return { ok: false, error: `服务器 "${name}" 不存在：可能已被删除，请刷新清单后重试` }
     }
-    // 回读兜底（理论不可达：刚从快照确认存在且删除成功）；外部并发删除窗口下 value 空投影
+    // 回读兜底（理论不可达：刚从快照确认存在且删除成功）；外部并发删除窗口下 value 空派生视图
     return { ok: true, entry: deletedView ? toProtocolEntry(deletedView) : { name, value: {} } }
   }
 
@@ -296,7 +296,7 @@ export class PiMcpServers implements IMcpServers {
           `[pi-mcp-servers] probe ${testId}（${name}）完成: exit=${result.exitCode} servers=${result.servers.length} failed=${failed} configErrors=${result.configErrors.length}`,
         )
         // §3.1 全清单回填（「点按后显示每个服务器的连接状态与失败原因」）：CLI 一次
-        // 全量测试已得全部条目结果（D3 结构限制——单条目独立测试做不到），逐条投影逐条
+        // 全量测试已得全部条目结果（D3 结构限制——单条目独立测试做不到），逐条派生视图逐条
         // 交付，无须每行各自再触发一轮全量测试（墙钟 150 秒起）。条目名按 CLI 原名。
         for (const report of result.servers) {
           outcomes.push({ name: report.name, badge: this.probeReportBadge(report) })
@@ -334,8 +334,8 @@ export class PiMcpServers implements IMcpServers {
   }
 
   /**
-   * probe 单条报告 → D8① 徽标投影（D8「pi 实测」来源；CLI 输出的 name = mcp.json 条目
-   * 键原值，无归并改写）。§3.1 全清单回填下每条报告各投影一帧（executeProbe 逐条交付）；
+   * probe 单条报告 → D8① 徽标派生视图（D8「pi 实测」来源；CLI 输出的 name = mcp.json 条目
+   * 键原值，无归并改写）。§3.1 全清单回填下每条报告各映射一条（executeProbe 逐条交付）；
    * 触发行未命中的 ui-local timeout 回退由 executeProbe 补发。
    */
   private probeReportBadge(report: McpProbeServerReport): McpServerStatusBadge {
@@ -354,7 +354,7 @@ export class PiMcpServers implements IMcpServers {
   }
 
   /**
-   * probe 整体降级 → 徽标投影：timeout = ui-local timeout（D3「整体无本次结果」，renderer
+   * probe 整体降级 → 徽标派生视图：timeout = ui-local timeout（D3「整体无本次结果」，renderer
    * 保留上次成功结果展示）；spawn-failed / invalid-output / 异常 = failed 徽标携带降级原因
    *（用户点测试连接的最小可见反馈——「为什么连测试本身都没跑成」，详情入口展开全文）。
    * cancelled 不进此函数（executeProbe 已提前返回，不回填徽标）。
@@ -384,7 +384,7 @@ export class PiMcpServers implements IMcpServers {
     }
     const after = readMcpServers()
     const written = after.servers.find((view) => view.name === name)
-    // 回读兜底（理论不可达：写成功后条目必在）；外部并发删除的窄窗口下 value 空投影
+    // 回读兜底（理论不可达：写成功后条目必在）；外部并发删除的窄窗口下 value 空派生视图
     return { ok: true, entry: written ? toProtocolEntry(written) : { name, value: {} } }
   }
 

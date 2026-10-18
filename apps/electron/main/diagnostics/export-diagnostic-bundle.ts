@@ -1,12 +1,12 @@
 /**
  * 诊断包导出——收集清单 + zip 打包主体（crash-forensics-and-watchdog §3.3 D6，实施计划 u3a）。
  *
- * 【收集清单（D6 明文）】双台账现档（crashes/main.jsonl + crashes/runtime.jsonl）+
+ * 【收集清单（D6 明文）】双登记清单现档（crashes/main.jsonl + crashes/runtime.jsonl）+
  * 触发条件状态表（D2 评估器输出，进 summary.md）+ 各层日志尾部（runtime-* / main-* /
  * renderer-error-* / renderer-console-* / pi-* 各家族最新一份取末 256KB，非全量）+ 近 24h 水位行摘录（runtime
- * 日志 5min 明细行）+ 版本/平台/pi 版本/marker 状态 + 台账事件 detailPath 引用的深查文件
+ * 日志 5min 明细行）+ 版本/平台/pi 版本/marker 状态 + 登记清单事件 detailPath 引用的深查文件
  * （D1 schema 字段：detailDigest 摘要与 detailPath 深查是配对设计，包内不含则归因链断）。
- * zip 内置 summary.md（人读首屏：最近 10 条台账事件表格 + 触发状态表 + 各文件清单说明）。
+ * zip 内置 summary.md（人读首屏：最近 10 条登记清单事件表格 + 触发状态表 + 各文件清单说明）。
  *
  * 【隐私判定（D6）】不脱敏——路径与会话标识正是归因线索；补偿 = 导出确认对话框知情提示
  * （DIAGNOSTIC_EXPORT_PRIVACY_NOTICE，shared SSOT，渲染侧消费在 u3b）。
@@ -22,10 +22,10 @@
  *
  * 【纯度分层】收集清单计算（buildDiagnosticEntries）/ summary 渲染（buildSummaryMarkdown）/
  * 水位行摘录（extractRecentWatermarkLines）/ zip 字节构造（minimal-zip.ts buildZipArchive）
- * 与 IO 编排（exportDiagnosticBundle）分离；副作用面收敛在后者，deps 全部可注入
+ * 与 IO 编排（exportDiagnosticBundle）分离；副作用收敛在后者，deps 全部可注入
  * （main 池 vitest 直测，夹具 mkdtemp tmpdir 自建自删，禁触真实数据目录）。
  *
- * 【失败降级】清单项缺失（如首事件前台账尚未建立）= 降级跳过不抛错，进 missing 显式
+ * 【失败降级】清单项缺失（如首事件前登记清单尚未建立）= 降级跳过不抛错，进 missing 显式
  * 清单（summary.md「各文件清单说明」标注缺失原因，设计 §3.1「数据缺失显式标注而非
  * 静默空白」）；打包 IO 失败（磁盘满/权限/目录不存在）归一为具体 errno（不吞成布尔，
  * IPC 层零 rejection 面）。
@@ -62,11 +62,11 @@ const MINUTES_PER_HOUR = 60
 const HOURS_PER_DAY = 24
 /** 水位行摘录窗口（D6「近 24h 水位行摘录」）。 */
 export const WATERMARK_WINDOW_MS = HOURS_PER_DAY * MINUTES_PER_HOUR * SECONDS_PER_MINUTE * MS_PER_SECOND
-/** summary.md 首屏台账事件表格行数（D6「最近 10 条台账事件表格」）。 */
+/** summary.md 首屏登记清单事件表格行数（D6「最近 10 条登记清单事件表格」）。 */
 export const SUMMARY_RECENT_EVENT_COUNT = 10
 /** 首屏表格 detailDigest 单元格最大字符数（≤2KB digest 截断展示，防表格撑爆首屏）。 */
 const SUMMARY_DETAIL_DIGEST_MAX_CHARS = 200
-/** detailPath 深查文件收集上限（防极端台账把包撑爆；超出部分在清单中标注）。 */
+/** detailPath 深查文件收集上限（防极端登记清单把包撑爆；超出部分在清单中标注）。 */
 const MAX_DETAIL_FILES = 10
 /** 每家族取 mtime 最新的一份（尾部语义 = 当前活跃日志；历史日期文件不在「尾部」内）。 */
 const LOG_FAMILIES: ReadonlyArray<{ prefix: string; note: string }> = [
@@ -90,7 +90,7 @@ export interface DiagnosticEntry {
   sourcePath?: string
   /** 直接内容（summary.md / 水位摘录等生成条目） */
   content?: string
-  /** 来源条目的尾部截取字节数（省略 = 全量；台账现档全量 ≤10MB 由 writer 轮转保证） */
+  /** 来源条目的尾部截取字节数（省略 = 全量；登记清单现档全量 ≤10MB 由 writer 轮转保证） */
   tailBytes?: number
   /** 清单说明（summary.md「包内文件清单」段落逐条展示） */
   note: string
@@ -124,7 +124,7 @@ export interface DiagnosticCollectResult {
   exportedAt: string
 }
 
-/** buildDiagnosticEntries 注入面：dataDir 可注入（测试 mkdtemp），其余为动态推导。 */
+/** buildDiagnosticEntries 注入范围：dataDir 可注入（测试 mkdtemp），其余为动态推导。 */
 export interface CollectDiagnosticOptions {
   dataDir?: string
   /** app 版本（IPC 层注入 app.getVersion()；缺省 unknown——纯收集层不依赖 electron） */
@@ -146,12 +146,12 @@ function readTextIfExists(file: string): string | null {
   }
 }
 
-// 台账读取统一走 ./journal-io.ts（【oe-audit C5】：原本地全静默吞版本违反设计 §3.1
+// 登记清单读取统一走 ./journal-io.ts（【oe-audit C5】：原本地全静默吞版本违反设计 §3.1
 // 「读取失败 → 显式 no-data 而非静默空白」——现与 patrol 共用 ENOENT 常态空 + 失败 warn 口径）。
 
 /**
- * 从台账事件提取最近一次出现的 piVersion（runtime 事件按 D1 schema 携带）。main 进程无
- * pi 二进制的同步版本查询面（runtime 侧是 spawn `pi --version` 异步获取），台账是
+ * 从登记清单事件提取最近一次出现的 piVersion（runtime 事件按 D1 schema 携带）。main 进程无
+ * pi 二进制的同步版本查询路径（runtime 侧是 spawn `pi --version` 异步获取），登记清单是
  * main 侧唯一已落盘的权威来源；全空返回 unknown（显式非静默）。
  * 【oe-audit C5】入参从原始行改为共享 parse 产物（events，与 detailPaths/首屏表格
  * 同一次 parseJournalLines 输出）——消除家族内并行 JSONL 循环。
@@ -161,7 +161,7 @@ export function extractLatestPiVersion(events: readonly DatedEvent[]): string {
   for (const event of events) {
     const version = event.raw.piVersion
     if (typeof version !== 'string' || version === '') continue
-    // 无 ts 的事件不会出现（parseJournalLines 的 ts 守卫已滤）；tsMs 直接可用
+    // 无 ts 的事件不会出现（parseJournalLines 的 ts 检查已滤）；tsMs 直接可用
     if (latest === null || event.tsMs >= latest.tsMs) latest = { tsMs: event.tsMs, version }
   }
   return latest?.version ?? 'unknown'
@@ -262,13 +262,13 @@ export function buildDiagnosticEntries(options: CollectDiagnosticOptions = {}): 
   const entries: DiagnosticEntry[] = []
   const missing: DiagnosticMissingEntry[] = []
 
-  // ① 双台账现档（D6；轮转段不在清单——「（现档）」明文，历史窗口由评估器按留存判定）
+  // ① 双登记清单现档（D6；轮转段不在清单——「（现档）」明文，历史窗口由评估器按留存判定）
   for (const name of ['main.jsonl', 'runtime.jsonl'] as const) {
     const full = join(crashesDir, name)
     if (existsSync(full)) {
-      entries.push({ archivePath: `crashes/${name}`, sourcePath: full, note: `崩溃台账现档（${name}，main/runtime 双文件 D1）` })
+      entries.push({ archivePath: `crashes/${name}`, sourcePath: full, note: `崩溃登记清单现档（${name}，main/runtime 双文件 D1）` })
     } else {
-      missing.push({ archivePath: `crashes/${name}`, reason: '台账文件尚未建立（首事件前常态）' })
+      missing.push({ archivePath: `crashes/${name}`, reason: '登记清单文件尚未建立（首事件前常态）' })
     }
   }
   // 【oe-audit C5】读取 1 次 + parse 1 次，三消费方（detailPaths/piVersion/首屏表格）
@@ -281,7 +281,7 @@ export function buildDiagnosticEntries(options: CollectDiagnosticOptions = {}): 
   // ② 各层日志家族尾部（每家族 mtime 最新一份取末 256KB）
   collectLogFamilyTails(logsDir, entries, missing)
 
-  // ③ 近 24h 水位行摘录（从最新 runtime 日志提取；[watermark] 5min 明细行不在台账）
+  // ③ 近 24h 水位行摘录（从最新 runtime 日志提取；[watermark] 5min 明细行不在登记清单）
   const runtimeLog = pickLatestFile(logsDir, 'runtime-')
   const watermarkContent = runtimeLog === null ? null : extractRecentWatermarkLines(readTextIfExists(runtimeLog) ?? '', now).join('\n')
   if (watermarkContent !== null && watermarkContent !== '') {
@@ -294,7 +294,7 @@ export function buildDiagnosticEntries(options: CollectDiagnosticOptions = {}): 
     missing.push({ archivePath: 'watermark-recent-24h.log', reason: '最新 runtime 日志中窗口内无水位行（runtime 未运行或日志缺失）' })
   }
 
-  // ④ 台账事件 detailPath 引用的深查文件（D1 schema 配对设计；尾部同口径防全量 stderr 撑包）
+  // ④ 登记清单事件 detailPath 引用的深查文件（D1 schema 配对设计；尾部同口径防全量 stderr 撑包）
   const detailPaths = collectDetailPaths(journalEvents)
   for (const detail of detailPaths.included) {
     const full = join(dataDir, detail)
@@ -303,7 +303,7 @@ export function buildDiagnosticEntries(options: CollectDiagnosticOptions = {}): 
         archivePath: detail.split('\\').join('/'),
         sourcePath: full,
         tailBytes: DIAGNOSTIC_TAIL_BYTES,
-        note: '台账事件 detailPath 引用的崩溃取证深查文件（尾部 256KB）',
+        note: '登记清单事件 detailPath 引用的崩溃取证深查文件（尾部 256KB）',
       })
     } else {
       missing.push({ archivePath: detail, reason: 'detailPath 指向的文件不存在（可能已被保留期清理）' })
@@ -329,14 +329,14 @@ export function buildDiagnosticEntries(options: CollectDiagnosticOptions = {}): 
   entries.push({
     archivePath: 'summary.md',
     content: buildSummaryMarkdown({ entries, journalEvents, ...collectResult }),
-    note: '人读摘要（最近 10 条台账事件 + 触发状态表 + 包内清单说明 + DiagnosticReports 指引）',
+    note: '人读摘要（最近 10 条登记清单事件 + 触发状态表 + 包内清单说明 + DiagnosticReports 指引）',
   })
 
   return { entries, ...collectResult }
 }
 
 /**
- * 台账事件中 detailPath 字段抽取（去重，最新事件优先，帽 MAX_DETAIL_FILES）。
+ * 登记清单事件中 detailPath 字段抽取（去重，最新事件优先，帽 MAX_DETAIL_FILES）。
  * 只收相对路径形态（D1 schema 例：logs/pi-crash-….log）；绝对路径/越界路径不收
  * （诊断包不读 dataDir 之外的任何文件）。【oe-audit C5】入参 = 共享 parse 产物。
  */
@@ -379,9 +379,9 @@ export function buildSummaryMarkdown(
   lines.push(`- pi 版本：${environment.piVersion}`)
   lines.push(`- 平台：${environment.platform} ${environment.platformRelease} (${environment.arch})，Node ${environment.nodeVersion}`)
   lines.push(`- 运行状态：main 存活 marker ${environment.markerPresent ? '存在' : '不存在'}；runtime checkpoint ${environment.checkpointPresent ? '存在' : '不存在'}（失败现场 ${environment.checkpointFailedCount} 份）`)
-  lines.push(`- 台账解析：main ${evaluated.parsedEventCount.main} 条 / runtime ${evaluated.parsedEventCount.runtime} 条（坏行 main ${evaluated.skippedLineCount.main} / runtime ${evaluated.skippedLineCount.runtime}）`)
+  lines.push(`- 登记清单解析：main ${evaluated.parsedEventCount.main} 条 / runtime ${evaluated.parsedEventCount.runtime} 条（坏行 main ${evaluated.skippedLineCount.main} / runtime ${evaluated.skippedLineCount.runtime}）`)
   lines.push('')
-  lines.push('## 最近台账事件')
+  lines.push('## 最近登记清单事件')
   lines.push('')
   lines.push(recentEventsTable(collected.journalEvents))
   lines.push('')
@@ -411,9 +411,9 @@ export function buildSummaryMarkdown(
 }
 
 /**
- * 首屏表格：两本台账合并按 ts 降序取前 N 条。【oe-audit C5】消费共享 parse 产物
+ * 首屏表格：两本登记清单合并按 ts 降序取前 N 条。【oe-audit C5】消费共享 parse 产物
  * （journalEvents，与 detailPaths/piVersion 同一次 parseJournalLines 输出）——不再
- * 对已读过的台账文件二次 readFileSync + 逐行 parse。
+ * 对已读过的登记清单文件二次 readFileSync + 逐行 parse。
  */
 function recentEventsTable(events: readonly DatedEvent[]): string {
   const str = (v: unknown): string => (typeof v === 'string' ? v : '')
@@ -434,7 +434,7 @@ function recentEventsTable(events: readonly DatedEvent[]): string {
   const head = '| 时间 | 层 | 事件 | sessionId | 原因 | 详情摘要 |'
   const sep = '| --- | --- | --- | --- | --- | --- |'
   const body = rows.map((r) => `| ${r.ts} | ${r.layer} | ${r.event} | ${r.sessionId} | ${r.reason} | ${r.detail} |`)
-  return [head, sep, ...(body.length > 0 ? body : ['| （台账为空） | | | | | |'])].join('\n')
+  return [head, sep, ...(body.length > 0 ? body : ['| （登记清单为空） | | | | | |'])].join('\n')
 }
 
 function conditionRowLine(row: TriggerConditionRow): string {
@@ -452,7 +452,7 @@ export function normalizeFsError(err: unknown): { code: string; message: string 
   return { code: 'EUNKNOWN', message: err instanceof Error ? err.message : String(err) }
 }
 
-/** exportDiagnosticBundle 注入面：outPath 必传（D6 用户自选保存位置由 IPC 层先取得）。 */
+/** exportDiagnosticBundle 注入范围：outPath 必传（D6 用户自选保存位置由 IPC 层先取得）。 */
 export interface ExportDiagnosticBundleOptions extends CollectDiagnosticOptions {
   outPath: string
 }
@@ -466,7 +466,7 @@ export function exportDiagnosticBundle(options: ExportDiagnosticBundleOptions): 
   try {
     const collected = buildDiagnosticEntries(options)
     const zipInputs = collected.entries.map((entry) => {
-      // 生成条目直接编码内容；来源条目全量（台账现档 ≤10MB 由 writer 轮转保证）或尾部截取
+      // 生成条目直接编码内容；来源条目全量（登记清单现档 ≤10MB 由 writer 轮转保证）或尾部截取
       const data = entry.content !== undefined
         ? Buffer.from(entry.content, 'utf8')
         : entry.tailBytes === undefined

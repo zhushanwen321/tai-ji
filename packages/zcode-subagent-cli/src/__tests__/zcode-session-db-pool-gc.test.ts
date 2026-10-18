@@ -1,14 +1,14 @@
-// zcode-session-db-pool-gc.test.ts —— 池 GC 守卫（W5 迁移改写）。
+// zcode-session-db-pool-gc.test.ts —— 池 GC 检查（W5 迁移改写）。
 //
 // 原 core 版经公共 API（acquirePool / releasePoolRef / cleanupExpiredPoolRefs——后者已更名 cleanupExpiredJournals）+
 // spy fs 断言「TTL 扫描枚举 session-db/ 伪池但不删隔离库」——pool-manager 是 core
-// 模块，行为守卫留在 core 侧原文件（过渡期双轨，deviation 登记）。引擎包侧本文件
-// 钉死结构前提（设计 zcode-session-db-isolation.md D1/F11）：
+// 模块，行为检查留在 core 侧原文件（过渡期双轨，deviation 登记）。引擎包侧本文件
+// 固定结构前提（设计 zcode-session-db-isolation.md D1/F11）：
 //   ① 隔离库与池目录的分隔是**目录级**的——session-db/ 与任何 poolKey 池目录
 //      （engines/zcode/<poolKey>/，journal 落点）互不为前缀；
 //   ② journal 命名（journal-<taskId>.jsonl）与 db 文件（db.sqlite*）不同名族——
-//      removeOrphanJournals 的 journal-* 匹配面对 db 文件恒不命中。
-// 两条件任一破坏（未来改路径契约）时 core 侧行为守卫会先红——本文件提供引擎包内
+//      removeOrphanJournals 的 journal-* 匹配规则对 db 文件恒不命中。
+// 两条件任一破坏（未来改路径契约）时 core 侧行为检查会先红——本文件提供引擎包内
 // 的早期信号，不需要 core 依赖。
 
 import * as path from "node:path";
@@ -19,7 +19,7 @@ import { resolvePoolDir, SHARED_POOL_KEY } from "@zhushanwen/subagent-engine-sdk
 
 import { zcodeSessionDbPath } from "../db-path.ts";
 
-describe("池 GC 结构守卫（A9 前提：隔离库与池目录目录级分离）", () => {
+describe("池 GC 结构检查（A9 前提：隔离库与池目录目录级分离）", () => {
   it("隔离库不在任何 poolKey 池目录之内（含 'shared' 池），亦不反向包含", () => {
     const dataDir = path.join(path.sep, "data-root");
     const sessionDb = zcodeSessionDbPath(dataDir);
@@ -40,7 +40,7 @@ describe("池 GC 结构守卫（A9 前提：隔离库与池目录目录级分离
     );
   });
 
-  it("db 文件名族与 journal 名族不相交（journal-*.jsonl 匹配面对 db.sqlite* 恒不命中）", () => {
+  it("db 文件名族与 journal 名族不相交（journal-*.jsonl 匹配规则对 db.sqlite* 恒不命中）", () => {
     const sessionDb = zcodeSessionDbPath(path.join(path.sep, "data-root"));
     const dbNames = [path.basename(sessionDb), `${path.basename(sessionDb)}-wal`, `${path.basename(sessionDb)}-shm`];
     for (const name of dbNames) {

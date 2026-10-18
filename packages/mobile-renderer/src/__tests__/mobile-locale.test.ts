@@ -1,8 +1,8 @@
-// 移动壳自有 locale 双侧结构守卫（mobile 命名空间 key 双侧镜像）。
+// 移动壳自有 locale 双侧结构检查（mobile 命名空间 key 双侧镜像）。
 //
 // 背景：壳自有新增 key（tab/列表/表单等壳 chrome 文案）不在 check_i18n_locale_sync
-// 的两根扫描范围（renderer 壳 + ui locale 模块）内——本测试是该域的机器守卫，
-// 防 zh-CN/en-US 漂移（下沉域 key 由 sync 守卫 + ui locale 结构测试双层覆盖，不在此重复）。
+// 的两根扫描范围（renderer 壳 + ui locale 模块）内——本测试是该域的机器检查，
+// 防 zh-CN/en-US 漂移（下沉域 key 由 sync 检查 + ui locale 结构测试双层覆盖，不在此重复）。
 import { describe, expect, it } from 'vitest'
 import zhCN from '../locales/zh-CN'
 import enUS from '../locales/en-US'

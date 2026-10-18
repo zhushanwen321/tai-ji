@@ -2,7 +2,7 @@
  * 编排器单测族 · Ctrl+F 表面内查找 + Esc 先关查找框（find-in-surface phase 1 接线，
  * orchestrator.ts 键序判定新增的两条分支）：
  *
- * - Ctrl/Cmd+F（window keydown bubble）：isComposing 守卫 → defaultPrevented 先检 →
+ * - Ctrl/Cmd+F（window keydown bubble）：isComposing 检查 → defaultPrevented 先检 →
  *   preventDefault + useFindInSurface.openFindAtPointer()（悬停归属优先 → 回退栈序 →
  *   全无不动作）。
  * - Esc 分支内「查找框开着 → 先关查找框」层：查找框是表面上的临时覆盖层，先于容器剥层
@@ -124,7 +124,7 @@ describe('Ctrl+F 表面内查找（find-in-surface 接线）', () => {
     stop()
   })
 
-  it('IME 组合态：守卫统一前置，Ctrl+F 不动作', () => {
+  it('IME 组合态：检查统一前置，Ctrl+F 不动作', () => {
     appendSurface('overlay')
     const { stop } = startOrchestrator()
 

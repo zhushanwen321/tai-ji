@@ -1,6 +1,6 @@
 /**
  * PS-24 探针：pi /skill: 展开格式 vs taiji skill-injector 展开输出 golden diff
- * （composer-multi-skill-injection D5 守卫 / 验收场景 8）。
+ * （composer-multi-skill-injection D5 检查 / 验收场景 8）。
  *
  * 登记条目（docs/pi-semantics.json PS-24）：pi 0.84.4 的 /skill:name 展开为
  * `<skill name="<skillName>" location="<SKILL.md abs path>">\nReferences are relative to
@@ -18,7 +18,7 @@
  *    fixture 的 --approve 信任 cwd=sessionDir 后 pi 加载；全程不触碰 ~/.taiji / ~/.pi，
  *    凭证由 pi-fixture 拷入隔离 agent dir——只读源文件，不写不删真实目录）；
  * 2. 发 prompt `/skill:u6-golden-probe`，等 agent_end 后读 session JSONL 落盘文本
- *    （PS-14：assistant entry 落账才 flush，故文件出现即含本轮 user entry 展开文本），
+ *    （PS-14：assistant entry 落盘才 flush，故文件出现即含本轮 user entry 展开文本），
  *    提取 user message 文本为 golden；
  * 3. 同输入跑 taiji 侧 SkillInjector：映射源（D7 切源后为 SkillMappingSource 形态）携带
  *    真实 get_commands skill 项的 SKILL.md 路径（展开输入同源），getSessionStats 给巨大窗口
@@ -34,7 +34,7 @@
  *
  * 与探针族既有静态断言（pi-semantics-rpc-surface 等）的分工：静态族守 pi 源码形态、
  * 凭证无关；本探针是动态成员（真实展开产物对照）。faux LLM 轨（L2.5 翻轨）：turn 的
- * 唯一目的是触发 JSONL flush（PS-14 assistant 落账门），faux 一轮文本回复即可，断言
+ * 唯一目的是触发 JSONL flush（PS-14 assistant 落盘门），faux 一轮文本回复即可，断言
  * 对象（pi 落盘展开文本 golden vs taiji 注入器逐字 diff）与翻轨前一致；门控
  * FAUX_PI_READY（只判 binary，凭证无关、CI 可跑，已从 REAL_PI_TESTS 分池移出）。
  * [pi-bump 触发] /skill: 展开格式是 pi 源码行为，bump 时建议真实轨重放一次（登记由
@@ -120,7 +120,7 @@ describe.skipIf(!FAUX_PI_READY)(
       mkdirSync(skillDir, { recursive: true })
       // frontmatter 只写 description：pi loadSkillFromFile 的 name 回退父目录名（skills.js :244-245）
       writeSkillFile(skillDir, SKILL_BODY_LINES)
-      // faux 轨：一轮文本回复只为触发 JSONL flush（PS-14 assistant 落账门）；
+      // faux 轨：一轮文本回复只为触发 JSONL flush（PS-14 assistant 落盘门）；
       // 冷启动余量 15s 由 faux 通道下限兜底（jiti 冷编译 extension）
       fixture = await spawnPiFixture({ sessionDir, coldStartTimeoutMs: 15_000, fauxResponses: [{ text: 'ok' }] })
     }, 30_000)
@@ -184,12 +184,12 @@ describe.skipIf(!FAUX_PI_READY)(
         const marker = buildSkillMarker(SKILL_NAME)
         const result = await injector.inject(client, marker)
 
-        // ── 4. 映射失效定向断言（与格式漂移区分，失败信息指向修复面）──
+        // ── 4. 映射失效定向断言（与格式漂移区分，失败信息指向修复侧）──
         const missing = result.notices.find((n) => n.reason === 'skill_missing')
         expect(
           missing,
           `注入器报 skill_missing：映射源未提供 name="${SKILL_NAME}"（裸名）条目。` +
-            `修复面：skill-injector 的 registry 映射构建（buildSkillsByNameFromRegistry，key 用 SkillInfo.name 裸名）或本探针映射源构造`,
+            `修复侧：skill-injector 的 registry 映射构建（buildSkillsByNameFromRegistry，key 用 SkillInfo.name 裸名）或本探针映射源构造`,
         ).toBeUndefined()
 
         // ── 5. 终断言：整条消息形态（R4 D11「标记保留 + 末尾包裹块」）+ golden diff

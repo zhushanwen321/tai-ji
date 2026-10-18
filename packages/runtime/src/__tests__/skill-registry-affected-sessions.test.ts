@@ -42,7 +42,7 @@ function makeRegistry(sessionService: unknown): {
 }
 
 describe('SkillRegistry.getAffectedSessionIds（this 绑定锁定）', () => {
-  test('class 原型方法形态的 sessionService：project 变更按 cwd 过滤且不炸（解绑提取回归面）', async () => {
+  test('class 原型方法形态的 sessionService：project 变更按 cwd 过滤且不炸（解绑提取回归测试）', async () => {
     const { registry, seen } = makeRegistry(new ClassMethodSessionService())
 
     await registry.notifyProjectChange('/proj')

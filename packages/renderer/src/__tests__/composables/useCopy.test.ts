@@ -71,7 +71,7 @@ describe('useCopy', () => {
     await flushMicrotasks()
     expect(copied.value).toBe('k2')
     // 推进到 k1 原本应触发的时刻（t=1200，即再过 800ms）。
-    // 若 k1 timer 未被 clear：触发时 copied===k2（≠'k1'）→ 不误清（守卫成立）；
+    // 若 k1 timer 未被 clear：触发时 copied===k2（≠'k1'）→ 不误清（检查成立）；
     // 即无论是否 clear，此处 copied 都应是 k2。真正验证点在下方：k2 的 timer 在 t=1600 正确触发清除。
     vi.advanceTimersByTime(800)
     expect(copied.value).toBe('k2')

@@ -1,16 +1,16 @@
 /**
- * subagent-extractor engine 字段投影（v2 条目对：engine/engineHandle 只在终态条目上）。
+ * subagent-extractor engine 字段派生视图（v2 条目对：engine/engineHandle 只在终态条目上）。
  *
  * 背景（v1 全量快照条目兼容层已随「项目未上线、无 v1 数据」删除）：scanSubagentEntries
  * 只认 v2 条目对——每个 id = 一条 registered（身份）+ 可选一条 settled（终局）。
- * engine / engineHandle 是终态条目的字段（v2 schema 见 core record-entry.ts），投影层
- * 逐字透传（不做形状/值守卫）。缺省=pi 由读侧 extractRecordEngine 映射，投影层不填默认值。
+ * engine / engineHandle 是终态条目的字段（v2 schema 见 core record-entry.ts），派生视图层
+ * 逐字透传（不做形状/值检查）。缺省=pi 由读侧 extractRecordEngine 映射，派生视图层不填默认值。
  *
  * 锁定：
- * - 终态条目 engine/engineHandle 逐项投影（sessionRef 键不枚举整体透传）
+ * - 终态条目 engine/engineHandle 逐项映射（sessionRef 键不枚举整体透传）
  * - engineHandle 无 eventsPath → 该键缺席（可选字段）
  * - 仅注册条目（未终态）→ engine/engineHandle 均 undefined，status=running
- * - 投影产物喂读侧 extractRecordEngine：缺省/空串 → 'pi'，非空透传（读写两侧对齐）
+ * - 派生视图产物喂读侧 extractRecordEngine：缺省/空串 → 'pi'，非空透传（读写两侧对齐）
  *
  * 运行：cd packages/runtime && npx vitest run src/__tests__/subagent-extractor-engine.test.ts
  */
@@ -66,8 +66,8 @@ function settledEntry(id: string, data: Record<string, unknown> = {}): Record<st
   }
 }
 
-describe('scanSubagentEntries · engine/engineHandle 投影（v2：终态条目承载）', () => {
-  it('终态条目完整形态 → engine/engineHandle 逐项投影（sessionRef 键不枚举整体透传）', () => {
+describe('scanSubagentEntries · engine/engineHandle 派生视图（v2：终态条目承载）', () => {
+  it('终态条目完整形态 → engine/engineHandle 逐项映射（sessionRef 键不枚举整体透传）', () => {
     const records = scanSubagentEntries([
       registeredEntry('sa-1'),
       settledEntry('sa-1', {
@@ -88,7 +88,7 @@ describe('scanSubagentEntries · engine/engineHandle 投影（v2：终态条目�
     })
   })
 
-  it('终态条目 engineHandle 无 eventsPath → 投影省略该键（可选字段）', () => {
+  it('终态条目 engineHandle 无 eventsPath → 映射省略该键（可选字段）', () => {
     const records = scanSubagentEntries([
       registeredEntry('sa-2'),
       settledEntry('sa-2', {
@@ -108,7 +108,7 @@ describe('scanSubagentEntries · engine/engineHandle 投影（v2：终态条目�
     expect(records[0].engineHandle).toBeUndefined()
   })
 
-  it('终态条目无 engine 系字段 → engine/engineHandle 均 undefined（投影层不填默认值）', () => {
+  it('终态条目无 engine 系字段 → engine/engineHandle 均 undefined（派生视图层不填默认值）', () => {
     const records = scanSubagentEntries([registeredEntry('sa-4'), settledEntry('sa-4')])
     expect(records).toHaveLength(1)
     expect(records[0].status).toBe('idle')
@@ -117,13 +117,13 @@ describe('scanSubagentEntries · engine/engineHandle 投影（v2：终态条目�
   })
 })
 
-describe('投影产物 ↔ 读侧 extractRecordEngine 对齐（subagent-engine-history 兼容）', () => {
-  it('无终态条目（无 engine）投影 → 读侧缺省映射 pi', () => {
+describe('派生视图产物 ↔ 读侧 extractRecordEngine 对齐（subagent-engine-history 兼容）', () => {
+  it('无终态条目（无 engine）派生视图 → 读侧缺省映射 pi', () => {
     const [record] = scanSubagentEntries([registeredEntry('sa-20')])
     expect(extractRecordEngine(record)).toBe('pi')
   })
 
-  it('终态条目 engine 空串（投影逐字透传）→ 读侧归一 pi（缺省判定在读侧）', () => {
+  it('终态条目 engine 空串（派生视图逐字透传）→ 读侧归一 pi（缺省判定在读侧）', () => {
     const [record] = scanSubagentEntries([
       registeredEntry('sa-21'),
       settledEntry('sa-21', { engine: '' }),
@@ -132,7 +132,7 @@ describe('投影产物 ↔ 读侧 extractRecordEngine 对齐（subagent-engine-h
     expect(extractRecordEngine(record)).toBe('pi')
   })
 
-  it('非空 engine 投影 → 读侧透传（zcode 路由可达）', () => {
+  it('非空 engine 派生视图 → 读侧透传（zcode 路由可达）', () => {
     const [record] = scanSubagentEntries([
       registeredEntry('sa-22'),
       settledEntry('sa-22', { engine: 'zcode' }),

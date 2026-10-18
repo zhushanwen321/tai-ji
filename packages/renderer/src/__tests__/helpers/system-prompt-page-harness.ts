@@ -53,7 +53,7 @@ export const systemPromptConfigMock = {
   onDefaultsWithSource: vi.fn(() => () => {}),
 }
 
-/** settings 域捕获单例（SettingsModal 外层 getSystem / updateSystem 消费面） */
+/** settings 域捕获单例（SettingsModal 外层 getSystem / updateSystem 消费方） */
 const systemPromptSettingsMock = {
   getSystem: vi.fn(() => Promise.resolve({ locale: 'zh-CN', theme: 'dark', themePreset: 'cold-blue' })),
   updateSystem: vi.fn(() => Promise.resolve()),

@@ -25,7 +25,7 @@
 // 该形态本就无从收编——判定核与收编入口都以 journal 为证据源，设计 §3.1
 // 步骤 2）。status 不再读快照行（快照对 v2 run 永停 running，非事实源），改调
 // 共享判定核 findRunSettlementEvidence（journal run-settled 尾向帧 ∨ manifest
-// 终局面 + 保守矩阵，与对账 sweep 判据字节级同源）：running → "running"；
+// 终局条目 + 保守矩阵，与对账 sweep 判据字节级同源）：running → "running"；
 // terminal → 对应终态词（reason）；missing → 候选跳过不入结果——候选来自
 // journal 文件族，「journal 不存在」的 missing 仅竞态窗口（枚举中文件被删）
 // 可达，无事实可保留、跳过是唯一诚实动作。
@@ -34,7 +34,7 @@
 // readdir ENOENT = 从未落盘的正常空态；EACCES / EIO 等真 IO 故障上抛给扫描层
 // ——静默折叠成空集会让持续 IO 故障伪装成「0 个 run 的成功扫描」（与 §2.3
 // 批评的「静默跳过伪装成无 run 可回收」同病）。单 run 判定层——走判定核保守
-// 矩阵（journal/manifest 读失败按 running 保守挂账 + warn 留证），枚举层不额外
+// 矩阵（journal/manifest 读失败按 running 保守挂着不处理 + warn 留证），枚举层不额外
 // 吞错、不额外上抛。
 //
 // v1 旧形态触达（[D16⑥]，D15「触达 v1 形态实体直接跳过 + warn 留痕」）：旧
@@ -68,18 +68,18 @@ const SESSIONS_DIR_NAME = "sessions";
 const LEGACY_JOURNAL_SUFFIX = ".events.jsonl";
 
 /**
- * WorkflowRun 枚举 store 窄口（run 枚举读侧对 run 持久化域的最小依赖面，结构
+ * WorkflowRun 枚举 store 窄口（run 枚举读侧对 run 持久化域的最小依赖范围，结构
  * 类型——调用方传符合形态的枚举实现即可，不 import orchestration 具体类，
  * 保持本模块可独立编译 + 单测）。
  *
  * 返回形态（ADR-0081 终态重构）：`{ runId, stateDir, status }`
  * ——stateDir = 该 run 的 workflow-state 目录，启动扫描收编按它传 journalDir
  * 参数；status = 共享判定核的终局判读（"running" ∨ 终态词）——事实源推导，
- * 不再携带快照行投影。不含 startedAt（旧 TTL 超龄判定字段，全量收编不判超龄，
+ * 不再携带快照行派生视图。不含 startedAt（旧 TTL 超龄判定字段，全量收编不判超龄，
  * 消费方为零的字段不进接口）。
  *
- * [W2/V1] transition/save 成员删除：终局化经收编原语（journal/manifest 写面，
- * 不经两态机快照）——快照写面不再是枚举读侧的职责（判据读者已随 D6 改接换源；
+ * [W2/V1] transition/save 成员删除：终局化经收编原语（journal/manifest 写侧，
+ * 不经两态机快照）——快照写侧不再是枚举读侧的职责（判据读者已随 D6 改接换源；
  * 候选来源已随 U2 改接换 journal 文件族）。
  */
 export interface WorkflowRunEnumerationStore { // oe-exempt:20260929:framework:workflow/record 协议契约类型——ports 类型契约先行、单实现常态（dev-0.10.5 已验收代码 merge 带入）

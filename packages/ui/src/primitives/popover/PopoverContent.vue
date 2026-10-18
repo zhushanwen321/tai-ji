@@ -17,7 +17,7 @@ import { registerUiModalSurface, uiSurfaceRectOf } from '../../modal-surface-reg
  * demo 梯队 --z-popover(10) 只服务无嵌套场景的页内弹层，此处不降档防破坏嵌套消费方）。
  * 形态（2026-10-13 用户裁决 demo 方案 A，CommandPopover 首发落地、本次全族迁移）：
  * 底 --bg（composer 同源档）+ 边框 --border + 阴影 --shadow-2，浮层与 composer
- * 底/边同源、仅靠投影浮起；圆角取菜单族 --r-md(8px)（composer 域弹层卡 demo 为
+ * 底/边同源、仅靠光学投影浮起；圆角取菜单族 --r-md(8px)（composer 域弹层卡 demo 为
  * --r-lg 12px，归 M4b 域内经 class 追加）；容器 p-0 为既有契约（demo padding 4px
  * 由消费方 p-1 自控，AddMenuPopover 等已自带）。
  * [HISTORICAL] 旧默认 = --bg-elevated 浮层档 + --border-strong 边：elevated 容器比

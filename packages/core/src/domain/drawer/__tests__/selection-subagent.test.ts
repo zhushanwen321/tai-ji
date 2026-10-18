@@ -35,7 +35,7 @@ beforeEach(() => {
   _resetSubagentSelectionForTest()
 })
 
-describe('useSubagentSelection 视图 + set/clear 写入面', () => {
+describe('useSubagentSelection 视图 + set/clear 写侧', () => {
   it('setSubagentView 写 selectedSubagentId + enteredFrom；clearSubagentView 双字段归 null', () => {
     focusSession('A')
     const { selectedSubagentId, enteredFrom } = useSubagentSelection()

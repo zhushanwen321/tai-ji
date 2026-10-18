@@ -3,11 +3,11 @@
 /**
  * terminal-write-queue store 测试（Phase 5 联动 2 / 多实例 u2）。
  *
- * 验证写队列 + ptyAlive 状态管理（per-terminalId 分键）+ 关闭沿入队守卫 + 清理扇出：
+ * 验证写队列 + ptyAlive 状态管理（per-terminalId 分键）+ 关闭沿入队检查 + 清理扇出：
  * - enqueueWrite PTY 未活 → 入队（不立即 write）
  * - enqueueWrite PTY 已活 → 立即 write（命令经编号解析会话段后调 terminalApi.write）
  * - markAlive → flush 队列；markExited → ptyAlive=false
- * - 未注册实例入队被拒（关闭沿守卫，不建档）
+ * - 未注册实例入队被拒（关闭沿检查，不建档）
  * - removeInstance / removeSession（精确前缀）/ clearAll 清理 + dropToastTimers
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/terminal/terminal-write-queue.test.ts
@@ -39,7 +39,7 @@ beforeEach(() => {
   terminalApiMock.write.mockClear()
   useToast().toasts.value = []
   __resetTerminalInstanceRegistryForTest()
-  // 已建档（关注册成员资格）——入队守卫放行；测试按需再注册
+  // 已建档（关注册成员资格）——入队检查放行；测试按需再注册
   registerInstance(T1, true)
   registerInstance(T2, true)
   registerInstance(T_OTHER, true)
@@ -118,7 +118,7 @@ describe('terminal-write-queue store（多实例）', () => {
     expect(store.pendingCountOf(T1)).toBe(0)
   })
 
-  // ── 关闭沿入队守卫（注册成员资格，与存活镜像解耦）───────────────────────
+  // ── 关闭沿入队检查（注册成员资格，与存活镜像解耦）───────────────────────
 
   it('MI-1: 未注册实例入队被拒（不建档、不 write）+「输入可能丢失」提示一次', () => {
     const store = useTerminalWriteQueueStore()
@@ -131,7 +131,7 @@ describe('terminal-write-queue store（多实例）', () => {
     expect(warnings[0]!.message).toContain('终端 9')
   })
 
-  it('MI-2: 已注册未 alive → 入 pendingWrites，markAlive 后正常 flush（守卫与镜像解耦）', () => {
+  it('MI-2: 已注册未 alive → 入 pendingWrites，markAlive 后正常 flush（检查与镜像解耦）', () => {
     const store = useTerminalWriteQueueStore()
     store.enqueueWrite(T1, 'before-alive')
     expect(store.pendingCountOf(T1)).toBe(1)

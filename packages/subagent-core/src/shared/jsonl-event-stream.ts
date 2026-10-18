@@ -49,12 +49,12 @@ function isNodeErrorCode(error: unknown, code: string): boolean {
  * 先落头行（仅声明头行契约的域）。返回落盘的完整事件（含 seq）。
  *
  * 为什么同步落盘（域策略无关的共同理由）：事件流是取证证据——「事件流停止前的尾部
- * 事件是什么」是待恢复判读（注册表投影相）的唯一依据，批写缓冲随进程死亡丢掉的恰好
+ * 事件是什么」是待恢复判读（注册表派生视图相）的唯一依据，批写缓冲随进程死亡丢掉的恰好
  * 是尾部事件；实测每 run 2-20 条（2026-09-26，29 个真实 run journal），微秒级追加
  * 成本不构成吞吐压力。接口保持 Promise 形态（两域接口契约），实装内同步完成。
  *
  * scan 契约：文件不存在 = 空 journal（ENOENT 静默）；坏行跳过并计数（warn 留证）——
- * 失效模式是保守可诊断，不炸整个投影。
+ * 失效模式是保守可诊断，不炸整个派生视图。
  */
 export class JsonlEventStream<TInput extends object, TEvent extends { seq?: number }> {
   private dirEnsured = false;

@@ -4,7 +4,7 @@
 // 场景专属断言由验收脚本自行 import 本库后编写。
 //
 // 资产纪律见 docs/testing/render-sampling.md（资产清单表 SSOT + closeout 回写/删减规则）。
-// 选择器与等待信号均来自真机实测（2026-09 markdown HTML 支持验收沉淀），
+// 选择器与等待信号均来自真机实测（2026-09 markdown HTML 支持验收记录在案），
 // DOM 结构变化导致失效时按 closeout 纪律更新，禁止各场景现场重写管道。
 
 import { mkdirSync, writeFileSync } from 'node:fs'

@@ -49,7 +49,7 @@
           <!-- eslint-disable-next-line vue/no-v-html -- hardcoded constant from block-icon.ts -->
           <span class="inline-flex size-3 items-center justify-center animate-loader-spin" v-html="RUNNING_LOADER_SVG" />
         </span>
-        <!-- W5：error==='timeout'（超时收口形态）优先于 cancelled，显示「超时」与「已取消」区分。
+        <!-- W5：error==='timeout'（超时收尾形态）优先于 cancelled，显示「超时」与「已取消」区分。
              灰阶化：timeout/cancelled 改 neutral-dim（§13.2-D，非终端语义色） -->
         <span
           v-else-if="isTimeout"
@@ -110,7 +110,7 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { SquareTerminal } from '@lucide/vue'
 // 经 primitives 子模块直接导入而非 @taiji/ui 顶层 barrel：本组件被 Turn.vue 直接
-// 引用且经 features/chat barrel 再导出，顶层 barrel 自引用会闭合
+// 引用且经 features/chat barrel 再导出，顶层 barrel 自引用会封住
 // BashOutputBlock → index → features/chat → Turn → BashOutputBlock 循环依赖环
 // （Turn.vue W4·D4 turn 内 notice 编排引入，运行时解析结果与 barrel re-export 一致）
 import { Button } from '../../primitives/button'
@@ -131,7 +131,7 @@ const { abortBash } = useChatViewDeps()
 
 const bash = computed(() => props.message.bashExecution)
 const isStreaming = computed(() => props.message.status === 'streaming')
-// W5：error==='timeout'（超时收口形态值）优先于 cancelled——超时与主动取消视觉需区分。
+// W5：error==='timeout'（超时收尾形态值）优先于 cancelled——超时与主动取消视觉需区分。
 // 模板优先级：isTimeout > isCancelled > 正常 exit 标签。
 const isTimeout = computed(() => props.message.error === 'timeout')
 const isCancelled = computed(() => bash.value?.cancelled === true)

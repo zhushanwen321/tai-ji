@@ -1,7 +1,7 @@
 /**
  * subagent 判据 SSOT 模块（纯函数）。
  *
- * 职责：导出占用投影判据与托盘 subagent 行状态点规则，判定/展示判据只写这一处，
+ * 职责：导出占用派生视图判据与托盘 subagent 行状态点规则，判定/展示判据只写这一处，
  * 禁止消费方重复实现：
  * - **isRunningProjection**——占用谓词，全仓「真在跑」唯一出处（G2）：hasRunning /
  *   isStreamingSubagent（stores/subagent）均为本函数的 import wrapper（U2 判据单一化），
@@ -28,11 +28,11 @@ import type { SubagentRecord, SubagentStatus } from '@taiji/shared'
  * 第五归一（`running && resumable===true → idle`，D5）承接；stopReason 子句排除
  * W4 死亡纳管态（running + stopReason='failed'，[U5/D4] adoptEngineDeath 写点），
  * 依赖轮始清点族扩字段（markRoundStarted / revive 格翻 running 时清 stopReason）——
- * 在飞期上轮停因不可见 = 显式裁决的代价（§3.1 注释）。
+ * 在途期上轮停因不可见 = 显式裁决的代价（§3.1 注释）。
  * 全仓「真在跑」判据唯一出处：hasRunning / isStreamingSubagent（stores/subagent）
  * 均为本函数的 import wrapper（U2 判据单一化），托盘计数（useTrayCounts）与「进行中」
  * 分桶视图同源消费，不漂移。
- * [B3] 全集覆盖守卫（adversarial-review-fixes §3.3 B3；[U6] 后全集 = 两态）：shared 扩
+ * [B3] 全集覆盖检查（adversarial-review-fixes §3.3 B3；[U6] 后全集 = 两态）：shared 扩
  * SubagentStatus 枚举时，新「进行中类」值对本谓词的归属必须显式评估——本函数直读
  * status，新值默认落 false（安全方向）；但展示层（托盘 subagent 行状态点）与全集覆盖
  * 矩阵须同步评估新值的三态归属，subagent-bucket.test.ts 断言表缺键即测试红。
@@ -46,7 +46,7 @@ export function isRunningProjection(record: SubagentRecord): boolean {
 // 词表锁只能落在 status 两态维度；stopReason 组合的穷尽由下方键域全集断言
 // （state-tone-lock.test.ts）+ 组内「兜底行收尾」形态保证。
 
-/** 中断族停因（被动收口：用户取消 / 进程收编 / 宿主重启 / 父级终止）——中性暗档 */
+/** 中断族停因（被动收尾：用户取消 / 进程收编 / 宿主重启 / 父级终止）——中性暗档 */
 const INTERRUPTED_STOP_REASONS = new Set(['cancelled', 'interrupted', 'interrupted-by-restart', 'interrupted-by-parent'])
 
 interface SubagentDotRule {
@@ -59,8 +59,8 @@ interface SubagentDotRule {
  * SubagentStatus 词表扩值而本表漏配新键 = 本行编译红（vue-tsc 承载）。组内顺序即语义
  * （失败红 / 中断灰先于完成绿兜底），find 首中即停：
  * - running 组：W4 死亡纳管态（running + stopReason='failed'）红点；其余 running
- *   组合（在飞）由调用方 spinner 分流，落本函数时走 accent 兜底。
- * - idle 组：failed 红 / 中断族与 reopened 中性暗 / 其余（正常完成收口）绿兜底。
+ *   组合（在途）由调用方 spinner 分流，落本函数时走 accent 兜底。
+ * - idle 组：failed 红 / 中断族与 reopened 中性暗 / 其余（正常完成收尾）绿兜底。
  *   [W2 D8] reopened（已重开待续）原落绿点兜底——语义修正为中性暗（非成功，与
  *   中断族邻近规则同档）。
  */
@@ -82,7 +82,7 @@ export const SUBAGENT_DOT_RULES = {
  * 上方 satisfies 漏配新键先行编译红，本索引处不产生第二道检查（单点锁）。
  */
 export function subagentDotClass(record: SubagentRecord): string {
-  // 词表外 / 缺失 status 兜底中性档（D3r3 验收顺带发现：directive 派发 record 投影字段
+  // 词表外 / 缺失 status 兜底中性档（D3r3 验收顺带发现：directive 派发 record 派生视图字段
   // 缺失时本行 `.find` 抛 TypeError，托盘已结束 tab 整列表不渲染）——不假设 status 恒在词表。
   const rules = SUBAGENT_DOT_RULES[record.status]
   const hit = rules?.find((entry) => entry.match(record))

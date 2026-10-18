@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 
 /**
- * useSubagentModel 单测（subagent-model-switch §7.1 入口层，U1 验收面——renderer 半边）。
+ * useSubagentModel 单测（subagent-model-switch §7.1 入口层，U1 验收范围——renderer 半边）。
  *
  * 覆盖（mock 宿主应答回执范式 + 标签读取规则四分支 + thinking 槽取值）：
  * - **禁乐观写**：api promise 未 resolve 前显示态零写入（应答到达才写状态）；
@@ -38,7 +38,7 @@ const i18nMocks = vi.hoisted(() => ({
 }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: i18nMocks.t }) }))
 
-// ── mock：useToast（error spy——失败反馈断言面）────────────────────────────
+// ── mock：useToast（error spy——失败反馈断言范围）────────────────────────────
 const toastMocks = vi.hoisted(() => ({ error: vi.fn() }))
 vi.mock('@/composables/useToast', () => ({ useToast: () => ({ error: toastMocks.error }) }))
 
@@ -287,7 +287,7 @@ describe('useSubagentModel — 回执写状态（禁乐观写）', () => {
 
     // 面板读取键构造（WorkflowTab.runModelDisplay 同款）：agentCall.memberRecordId =
     // 详情载荷透出的成员 record id（workflow-record-projection 圈定权威成员透出），与
-    // 聚合应答 member.runId 同值域——同键命中即两端口径对齐（switched 成员写面含
+    // 聚合应答 member.runId 同值域——同键命中即两端口径对齐（switched 成员写侧含
     // overrideIntent，dmg-r3-4 同上）
     expect(memberDisplayOf('wf-1', 'rec-member-1')).toEqual({ effectiveModel: 'p/m-a', overrideIntent: 'p/target' })
     // 键域反向锁：pi session uuidv7（修复前的误用读键）与 taskIndex 数字串都读不到——

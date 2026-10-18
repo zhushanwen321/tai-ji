@@ -17,7 +17,7 @@ import { taijiTestConfig, GLOBAL_SETUP_PATH, guardProjectSetup } from '../../../
 //   （如 update-self-healer.test.ts 在 vitest 环境经 getOldBackupPath 的
 //   dirname×3(process.execPath) 推导出真实 ~/.nvm/versions/node.old 并 rmSync——guard
 //   正确拦截但该用例需 mock execPath 才能修，文件在 u5a 领地外，缺陷已上报主 agent）。
-//   存量池接入 guard 是独立单元的工作，不在本配置内打折处理；globalSetup 层（env 钉死 +
+//   存量池接入 guard 是独立单元的工作，不在本配置内打折处理；globalSetup 层（env 固定 +
 //   真实数据目录 fail-fast）对 legacy 池仍生效。
 export default taijiTestConfig({
   test: {
@@ -39,8 +39,8 @@ export default taijiTestConfig({
             'sessions/__tests__/**/*.test.ts',
             // main-run-state：真实文件 IO（run-state marker/checkpoint 写盘）+ mock 驱动
             // main.ts 真实 import 链（app.isPackaged=true 会执行打包 pin 分支改写
-            // TAIJI_AGENT_DATA_DIR）——写通路必须在 fs-guard 拦截面内
-            // （[HISTORICAL] 2026-09-23 污染事故：legacy 池无拦截面，pin 改写 env 后
+            // TAIJI_AGENT_DATA_DIR）——写通路必须在 fs-guard 拦截范围内
+            // （[HISTORICAL] 2026-09-23 污染事故：legacy 池无拦截范围，pin 改写 env 后
             // marker 落进真实 ~/.taiji）。
             'test/main-run-state.test.ts',
             // window-state：真实文件 IO（window-state.json 持久化语义——防抖写/close
@@ -56,7 +56,7 @@ export default taijiTestConfig({
       {
         test: {
           name: 'legacy',
-          // update/__tests__/ 是存量 update 模块测试（原 include 第二个 glob 的匹配面），
+          // update/__tests__/ 是存量 update 模块测试（原 include 第二个 glob 的匹配范围），
           // 与 guarded 的 logs/__tests__ 前缀精确互斥，防同文件跨池重复收集。
           // ../scripts/__tests__：dev-instance-lib 纯函数层（MF-8，C-build-08 装配器可测层），
           // 同样无 electron 运行时依赖，随 main 纯函数测试一起跑（dev-0.9.19 合并并入）。

@@ -63,7 +63,7 @@ export interface FontScales {
  * 长文阅读场景用户裁决默认小档），drawer=标准（×1）。
  *
  * 三处消费点必须都从这里取缺省值，禁止写死档位字面量：
- *   1. DEFAULT_SYSTEM.fontScales（新用户 / 无 fontScales 存量数据的落库默认）
+ *   1. DEFAULT_SYSTEM.fontScales（新用户 / 无 fontScales 存量数据的保存默认）
  *   2. applySystemToDom（ui 包，部分缺省区域的 data-fs-* 回落）
  *   3. AppearancePage 区域 Select（部分缺省区域的显示回落）
  * getSystem 是浅合并（{ ...DEFAULT_SYSTEM, ...parsed }），老数据整体覆盖 fontScales 时

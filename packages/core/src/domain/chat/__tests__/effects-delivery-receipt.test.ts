@@ -1,27 +1,27 @@
 /**
- * message_end(user) 送达回执 + session.delivery 投影单测（投递所有权内核 u3b / D2① 泛化 +
+ * message_end(user) 送达回执 + session.delivery 派生视图单测（投递所有权内核 u3b / D2① 泛化 +
  * D7 单一数据源）。
  *
  * 前身：effects-defer-confirmation.test.ts（defer 分区 FIFO 文本匹配 + provider 注入）——
- * defer 队列状态机已整体退役（设计 §3.1 删除面），确认通道升级为「内核裸标记 id 匹配投影
+ * defer 队列状态机已整体退役（设计 §3.1 删除范围），确认通道升级为「内核裸标记 id 匹配派生视图
  * 条目」（C-data-08 修订方向：id 是身份不是内容），git 可追溯。
  *
  * 覆盖：
- * - ①a 标记回执：命中投影条目 → 投影转 delivered + morph 段按序入流（捕获过才入）+
+ * - ①a 标记回执：命中派生视图条目 → 派生视图转 delivered + morph 段按序入流（捕获过才入）+
  *   inflight 占位回收 + 帧消费终止（不走 ②）
  * - 双形态匹配契约桥：裸 uuid（期望形态）/ u-<uuid> 原文都命中（跨 u1 契约错配消除面）
  * - direct 车道回执：发送端有本地同 id 气泡 → 不重复入流（防双插由 hasLocalBubble
  *   承接，D4），仅占位回收；观看端无气泡 direct 消息入流补显（V17，锚
  *   effects/__tests__/user-delivery.test.ts）
- * - 未命中下落 ②：无标记 / 标记不命中投影 → 纯计数兜底（现状链）
+ * - 未命中下落 ②：无标记 / 标记不命中派生视图 → 纯计数兜底（现状链）
  * - 幂等：已 delivered 条目二次回执不重复消费
  * - [dmg-r1-5] 多标记帧整批消费（splitComposed 放弃拆分 → 整条多标记文本一次进
- *   transcript）：全部标记逐一消费投影条目（对齐 runtime confirmByMessageEnd 全量提取）
+ *   transcript）：全部标记逐一消费派生视图条目（对齐 runtime confirmByMessageEnd 全量提取）
  *   ——morph 段逐条目入流 / 全无段帧整帧文本降级一次（同帧互斥防重复）/ 粘贴标记不命中
  *   即跳过 / 同 id 重复标记拒重
- * - [消息撤回 U8] 回执入流保号：两分支（① morph 段 / ② 外来纯文本降级）appendUser
+ * - [消息撤回 U8] 回执入流保留原 id：两分支（① morph 段 / ② 外来纯文本降级）appendUser
  *   第三参均传原 clientUuid——重建气泡沿用提交 id（live 窗口撤回定位锚）
- * - 投影生命周期：replaceDeliveryProjection 整体替换 / 空帧删键 / captureMorphSegments
+ * - 派生视图生命周期：replaceDeliveryProjection 整体替换 / 空帧删键 / captureMorphSegments
  *   一次性消费
  *
  * 运行：cd packages/core && npx vitest run src/domain/chat/__tests__/effects-delivery-receipt.test.ts
@@ -52,7 +52,7 @@ const CLIENT_UUID = `u-${UUID}`
 
 /**
  * 真实计数语义的 inflight（区别于纯 mock——命中回收断言读数值，非调用记录）。
- * incrementInflight 已随 ctx 成员收口删除（增量归 store 方法面）——测试预置计数走
+ * incrementInflight 已随 ctx 成员收敛删除（增量归 store 方法侧）——测试预置计数走
  * 本闭包的 addInflight 直写 Map，与 store.incrementInflight 增量语义等价。
  */
 function makeCtx(localMessages: Message[] = []): MessageEffectContext & { inflightOf: () => number; addInflight: (n?: number) => void } {
@@ -90,7 +90,7 @@ beforeEach(() => {
   resetDeliveryProjectionForTest()
 })
 
-describe('session.delivery 投影生命周期（D7 单一数据源）', () => {
+describe('session.delivery 派生视图生命周期（D7 单一数据源）', () => {
   it('replaceDeliveryProjection 整体替换（last-value）+ 空帧删键（不积累空形态）', () => {
     replaceDeliveryProjection(SID, [entry()])
     expect(getDeliveryProjection(SID)).toHaveLength(1)
@@ -103,7 +103,7 @@ describe('session.delivery 投影生命周期（D7 单一数据源）', () => {
 })
 
 describe('message_end(user) 送达回执（u3b / D2① 泛化，C-data-08 修订方向）', () => {
-  it('AC1: 标记命中 steer 条目 → 投影转 delivered + morph 段按序入流 + 占位回收 + 帧终止', () => {
+  it('AC1: 标记命中 steer 条目 → 派生视图转 delivered + morph 段按序入流 + 占位回收 + 帧终止', () => {
     const segs: Segment[] = [{ type: 'text', text: '排队消息' }]
     replaceDeliveryProjection(SID, [entry()])
     captureMorphSegments(SID, CLIENT_UUID, segs)
@@ -112,10 +112,10 @@ describe('message_end(user) 送达回执（u3b / D2① 泛化，C-data-08 修订
 
     dispatchMessageEvent(ctx, SID, userEndFrame(SID, '排队消息', UUID))
 
-    // 投影转 delivered（队列区随帧隐去；u3c 渲染消费）
+    // 派生视图转 delivered（队列区随帧隐去；u3c 渲染消费）
     expect(getDeliveryProjection(SID)[0]?.state).toBe('delivered')
     // morph 段按原 segments 入流（overlay-only 插入点；气泡已 morph 移除后恢复为正常气泡）
-    // [消息撤回 U8] 分支①保号：第三参传原 clientUuid——重建气泡沿用提交 id（撤回定位锚）
+    // [消息撤回 U8] 分支①保留原 id：第三参传原 clientUuid——重建气泡沿用提交 id（撤回定位锚）
     expect(ctx.appendUser).toHaveBeenCalledTimes(1)
     expect(ctx.appendUser).toHaveBeenCalledWith(SID, segs, CLIENT_UUID)
     // 占位回收：1 → 0（本帧即确认帧，② 不再重复扣）
@@ -124,7 +124,7 @@ describe('message_end(user) 送达回执（u3b / D2① 泛化，C-data-08 修订
     expect(ctx.applyEntryFrame).toHaveBeenCalledTimes(1)
   })
 
-  it('AC2: u-<uuid> 原文形态标记同样命中（跨 u1 契约错配消除面，双形态收口）', () => {
+  it('AC2: u-<uuid> 原文形态标记同样命中（跨 u1 契约错配消除面，双形态收敛）', () => {
     replaceDeliveryProjection(SID, [entry()])
     const ctx = makeCtx()
     ctx.addInflight(1)
@@ -140,7 +140,7 @@ describe('message_end(user) 送达回执（u3b / D2① 泛化，C-data-08 修订
     //（remote-use-shell-unification）后 direct 豁免由 hasLocalBubble 精确承接——观看端
     // foreign 无气泡 → 入流补显（直调侧谓词锚见 effects/__tests__/user-delivery.test.ts
     // D4-AC1/AC4），本用例改为发送端形态（本地有同 id 乐观气泡），经全 handler 链锁定
-    // 防双插 + 回执侧照常（投影转态 + 占位回收与入流判定正交）。
+    // 防双插 + 回执侧照常（派生视图转态 + 占位回收与入流判定正交）。
     replaceDeliveryProjection(SID, [entry({ lane: 'direct' })])
     const ctx = makeCtx([{ id: CLIENT_UUID, role: 'user', content: [{ type: 'text', text: 'hi' }], status: 'complete', timestamp: 0 }])
     ctx.addInflight(1)
@@ -152,7 +152,7 @@ describe('message_end(user) 送达回执（u3b / D2① 泛化，C-data-08 修订
     expect(ctx.inflightOf()).toBe(0)
   })
 
-  it('AC4: 无标记帧（外来直发形态）→ 下落 ② 纯计数兜底，投影不动', () => {
+  it('AC4: 无标记帧（外来直发形态）→ 下落 ② 纯计数兜底，派生视图不动', () => {
     replaceDeliveryProjection(SID, [entry()])
     const ctx = makeCtx()
     ctx.addInflight(1)
@@ -164,7 +164,7 @@ describe('message_end(user) 送达回执（u3b / D2① 泛化，C-data-08 修订
     expect(ctx.inflightOf()).toBe(0)
   })
 
-  it('AC5: 标记不命中投影（帧缺失/异 session 形态）→ 下落 ②，不误配', () => {
+  it('AC5: 标记不命中派生视图（帧缺失/异 session 形态）→ 下落 ②，不误配', () => {
     replaceDeliveryProjection(SID, [entry({ clientUuid: 'u-other' })])
     const ctx = makeCtx()
     ctx.addInflight(1)
@@ -248,7 +248,7 @@ const UUID_B = '6e9f8a3c-1b25-4d6e-8c47-a9f0d2b35e18'
 const CLIENT_UUID_B = `u-${UUID_B}`
 
 describe('多标记帧整批消费（dmg-r1-5：整批投递回执不再只消费尾标记）', () => {
-  it('AC8: 两条目均有 morph 段 → 全部按段各自入流 + 投影全转 delivered + inflight 批量扣减', () => {
+  it('AC8: 两条目均有 morph 段 → 全部按段各自入流 + 派生视图全转 delivered + inflight 批量扣减', () => {
     const segsA: Segment[] = [{ type: 'text', text: '排队消息 A' }]
     const segsB: Segment[] = [{ type: 'text', text: '排队消息 B' }]
     replaceDeliveryProjection(SID, [entry(), entry({ clientUuid: CLIENT_UUID_B })])
@@ -262,17 +262,17 @@ describe('多标记帧整批消费（dmg-r1-5：整批投递回执不再只消�
       { text: '排队消息 B', marker: UUID_B },
     ]))
 
-    // 其余条目不再等不到消费：两段各自按原 segments 入流（保号各传原 clientUuid）
+    // 其余条目不再等不到消费：两段各自按原 segments 入流（保留原 id 各传原 clientUuid）
     expect(ctx.appendUser).toHaveBeenCalledTimes(2)
     expect(ctx.appendUser).toHaveBeenNthCalledWith(1, SID, segsA, CLIENT_UUID)
     expect(ctx.appendUser).toHaveBeenNthCalledWith(2, SID, segsB, CLIENT_UUID_B)
-    // 投影全转 delivered（修前仅尾标记条目转态，其余滞留至 TTL/下一帧快照覆盖）
+    // 派生视图全转 delivered（修前仅尾标记条目转态，其余滞留至 TTL/下一帧快照覆盖）
     expect(getDeliveryProjection(SID).map((e) => e.state)).toEqual(['delivered', 'delivered'])
     // 批量确认扣减：命中 2 条 = 扣 2（每条乐观气泡挂 1）
     expect(ctx.inflightOf()).toBe(0)
   })
 
-  it('AC9: 全无段多标记帧（外来合批形态）→ 整帧剥标记文本降级入流一次，保号挂首个降级条目', () => {
+  it('AC9: 全无段多标记帧（外来合批形态）→ 整帧剥标记文本降级入流一次，保留原 id号挂首个降级条目', () => {
     replaceDeliveryProjection(SID, [entry(), entry({ clientUuid: CLIENT_UUID_B })])
     const ctx = makeCtx()
     ctx.addInflight(2)
@@ -295,14 +295,14 @@ describe('多标记帧整批消费（dmg-r1-5：整批投递回执不再只消�
     expect(ctx.inflightOf()).toBe(0)
   })
 
-  it('AC10: 防误配保留——多标记帧中粘贴形态标记不命中投影即跳过，命中的条目正常消费', () => {
+  it('AC10: 防误配保留——多标记帧中粘贴形态标记不命中派生视图即跳过，命中的条目正常消费', () => {
     const segsA: Segment[] = [{ type: 'text', text: '排队消息 A' }]
     replaceDeliveryProjection(SID, [entry()])
     captureMorphSegments(SID, CLIENT_UUID, segsA)
     const ctx = makeCtx()
     ctx.addInflight(1)
 
-    // 第二个标记（UUID_B）无对应投影条目 = 正文自带粘贴标记形态：跳过不误配
+    // 第二个标记（UUID_B）无对应派生视图条目 = 正文自带粘贴标记形态：跳过不误配
     dispatchMessageEvent(ctx, SID, composedEndFrame(SID, [
       { text: '排队消息 A', marker: UUID },
       { text: '粘贴的尾巴', marker: UUID_B },
@@ -331,12 +331,12 @@ describe('多标记帧整批消费（dmg-r1-5：整批投递回执不再只消�
   })
 })
 
-// ── [消息撤回 U8] 回执入流保号（两分支重建气泡沿用原 id）──────────────────────
+// ── [消息撤回 U8] 回执入流保留原 id（两分支重建气泡沿用原 id）──────────────────────
 
-describe('送达回执入流保号（消息撤回 U8：重建气泡沿用原 clientUuid）', () => {
+describe('送达回执入流保留原 id（消息撤回 U8：重建气泡沿用原 clientUuid）', () => {
   it('分支②外来纯文本降级入流：无 morph 段无本地气泡的 steer 条目 → appendUser 收到原 clientUuid', () => {
-    // 外来条目（session_manager send / 收养形态）：内核投影有条目、无本地乐观气泡、
-    // 未捕获 morph 段 → 显示责任由 ② 纯文本降级分支承接，且保号传条目 clientUuid
+    // 外来条目（session_manager send / 收养形态）：内核派生视图有条目、无本地乐观气泡、
+    // 未捕获 morph 段 → 显示责任由 ② 纯文本降级分支承接，且保留原 id 传条目 clientUuid
     replaceDeliveryProjection(SID, [entry()])
     const ctx = makeCtx()
     ctx.addInflight(1)
@@ -344,12 +344,12 @@ describe('送达回执入流保号（消息撤回 U8：重建气泡沿用原 cli
     dispatchMessageEvent(ctx, SID, userEndFrame(SID, '外来消息', UUID))
 
     expect(ctx.appendUser).toHaveBeenCalledTimes(1)
-    // 保号：第三参 = 内核条目 clientUuid（外来形态可能为裸 uuid，照保——见 store.appendUser 注释）
+    // 保留原 id：第三参 = 内核条目 clientUuid（外来形态可能为裸 uuid，照保——见 store.appendUser 注释）
     expect(ctx.appendUser).toHaveBeenCalledWith(SID, [{ type: 'text', text: '外来消息' }], CLIENT_UUID)
     expect(getDeliveryProjection(SID)[0]?.state).toBe('delivered')
   })
 
-  it('分支②外来条目为内核裸 uuid 形态：照保原 id（保号语义优先于 u- 形态约束）', () => {
+  it('分支②外来条目为内核裸 uuid 形态：照保原 id（保留原 id 语义优先于 u- 形态约束）', () => {
     const bareUuid = '5b1a6c2e-8d34-4f07-b1c5-92d7e83c4402'
     replaceDeliveryProjection(SID, [entry({ clientUuid: bareUuid })])
     const ctx = makeCtx()

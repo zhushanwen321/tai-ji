@@ -61,7 +61,7 @@
 
     <!-- 数据态 -->
     <template v-else-if="data && agg">
-      <!-- 摘要台账行 -->
+      <!-- 摘要登记清单行 -->
       <UsageLedger
         :tot="agg.tot"
         :msgs="agg.msgs"
@@ -253,7 +253,7 @@
         </GroupCard>
       </div>
 
-      <!-- 明细台账（卡体 tight；脚注 = demo 卡内 srow-desc 尾注） -->
+      <!-- 明细登记清单（卡体 tight；脚注 = demo 卡内 srow-desc 尾注） -->
       <GroupCard class="mt-[16px]" data-testid="usage-detail-section">
         <template #head>
           <div class="gc-head-text">
@@ -368,7 +368,7 @@ function toggleProvider(pid: string): void {
   if (filter.offProv.has(pid)) {
     filter.offProv.delete(pid)
   } else {
-    // 「至少保留一个」守卫：基数 = perProvFull（range 内全量 provider），拦截最后一个启用 provider 的关闭
+    // 「至少保留一个」检查：基数 = perProvFull（range 内全量 provider），拦截最后一个启用 provider 的关闭
     const enabledCount = fullProviders.value.filter((k) => !filter.offProv.has(k)).length
     if (enabledCount <= 1) return
     filter.offProv.add(pid)
@@ -384,10 +384,10 @@ function resetFilters(): void {
   filter.isolate = null
 }
 
-/* ── 复合键 -> provider 映射（toggleProvider 联动清 isolate 守卫用） ── */
+/* ── 复合键 -> provider 映射（toggleProvider 联动清 isolate 检查用） ── */
 
 // 派生源必须 = 全量 data.rows（设计 §3.3 ⑤）：computed 只依赖 data，不随 offProv/isolate 重算——
-// toggleProvider 先 offProv.add 再查表的时序下，从过滤后 perModel/perProvFull 派生会确定性丢键、守卫失效（R2 反例）
+// toggleProvider 先 offProv.add 再查表的时序下，从过滤后 perModel/perProvFull 派生会确定性丢键、检查失效（R2 反例）
 const modelProviderMap = computed(() => {
   const map: Record<string, string> = {}
   if (data.value) {
@@ -415,7 +415,7 @@ const agg = computed(() => {
   return aggregate(data.value.rows, filter)
 })
 
-/* ── range 内全量 provider 集合（图例恒显 + 守卫基数；忽略 offProv/isolate） ── */
+/* ── range 内全量 provider 集合（图例恒显 + 检查基数；忽略 offProv/isolate） ── */
 
 const fullProviders = computed<string[]>(() => {
   if (!agg.value) return []
@@ -469,14 +469,14 @@ const cacheMixData = computed(() => {
   return aggregateCacheMix(agg.value.perModel)
 })
 
-/* ── 明细台账分组 ── */
+/* ── 明细登记清单分组 ── */
 
 const detailGroups = computed(() => {
   if (!agg.value || !data.value) return []
   return aggregateDetailGroups(agg.value.perProv, agg.value.perModel, data.value.rows, filter.metric)
 })
 
-/* ── 明细台账 meta 文案 ── */
+/* ── 明细登记清单 meta 文案 ── */
 
 const detailMeta = computed(() => {
   if (!agg.value) return ''

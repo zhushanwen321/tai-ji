@@ -3,10 +3,10 @@
 // 场景 A2/A4（scriptPath 锚定恢复——设计 .tmp/tech-design/workflow-resume-scriptpath-recovery.md
 // §4 验收表）：内置模板脚本（fan-out 真文件）的 resume 真链路。
 //
-// 回归面 = a1a4 真机终判 BLOCKED 的缺陷①：修复前 resume 重建 spec.scriptPath 恒空串，
+// 回归测试 = a1a4 真机终判 BLOCKED 的缺陷①：修复前 resume 重建 spec.scriptPath 恒空串，
 // worker 加载 fan-out 即炸 Cannot find module './_shared/agent-refs.cjs'（cwd 相对解析）；
 // 修复后 run-created 帧携带 scriptPath → 锚定恢复 → 续跑成功（A2）。A4 = 旧格式帧
-//（无 scriptPath 载荷）回落现状失败形态——守卫收紧后带恢复指引的 fail-fast。
+//（无 scriptPath 载荷）回落现状失败形态——检查收紧后带恢复指引的 fail-fast。
 //
 // 夹具协议与 scenario-kit 同源：真 resumeRun + 真 WorkerHostImpl（node:worker_threads
 // 真线程跑 fan-out.js，require _shared 经 scriptPath 锚定到包内真实目录），唯一替身 =
@@ -104,7 +104,7 @@ describe("场景 A2/A4：内置模板 resume（scriptPath 锚定恢复）", () =
     await resumeScenarioRun(env, sd, RUN);
 
     const outcome = await waitForScenarioSettled(sd.runs, RUN);
-    // runSummary 投影：status = lifecycle 终局（done），reason = 结果（failed）
+    // runSummary 派生视图：status = lifecycle 终局（done），reason = 结果（failed）
     expect(outcome.status).toBe("done");
     expect(outcome.reason).toBe("failed");
     // 收紧后的失败形态：带 core_module_load_failed 前缀（修复前为无前缀的

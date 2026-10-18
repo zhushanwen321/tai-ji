@@ -48,7 +48,7 @@ describe.skipIf(!CORE_DIST)(
       ).toBe(true)
     })
 
-    it('steer 入队与清空面存在（enqueue / clear，与 drain 区分的守卫锚）', () => {
+    it('steer 入队与清空面存在（enqueue / clear，与 drain 区分的检查锚）', () => {
       expect(AGENT_SRC.includes('steeringQueue.enqueue(') || AGENT_SRC.includes('steeringQueue.enqueue(message'), 'PS-05 漂移：enqueue 形态消失——复核 PS-05').toBe(true)
       expect(AGENT_SRC.includes('steeringQueue.clear()'), 'PS-05 漂移：clear 形态消失——复核 PS-05').toBe(true)
     })

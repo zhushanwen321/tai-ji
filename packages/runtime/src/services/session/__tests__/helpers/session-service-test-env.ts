@@ -95,8 +95,8 @@ export function makeSessionServiceEnv(opts: { active?: boolean; busy?: boolean; 
     // 播种，mock client 已覆盖 getState/getCommands/getSessionStats），注册后置 busy 标记
     // （isGenerating=true → busy 预检拒绝）。busy 用例须 await busyReady 后再断言。
     busyReady = svc.initializeManagedSession(opts.sid, client as unknown as IPiEngine, '/tmp', 't').then((session) => {
-      // 经原语 'generating' 行置 busy（u3c readonly 收口；publish null 与改前直写一致零广播）——
-      // 原语同时派生 isGenerating=true + turn='generating'，布尔与投影不再只写一边
+      // 经原语 'generating' 行置 busy（u3c readonly 收尾；publish null 与改前直写一致零广播）——
+      // 原语同时派生 isGenerating=true + turn='generating'，布尔与派生视图不再只写一边
       applySessionOccupancyTransition(session, null, 'generating')
     })
   }

@@ -1,9 +1,9 @@
 /**
- * 有界失败闸门 + steer 记账——双闸门合一状态机（D2 单状态机）+ G2「失败必有界」执行体。
+ * 有界失败门禁 + steer 记账——双门禁合一状态机（D2 单状态机）+ G2「失败必有界」执行体。
  *
  * 状态归属（D2 单状态机）：软 steer（workflow-hook 的重试提醒）与硬杀（本文件的
  * 同签名失败 terminal）共用 WorkflowGate 一份状态——terminal 单字段单写，turn_end
- * 守卫链与硬杀幂等短路读同一份事实；若拆成两个状态机，terminal 双写就需要跨对象
+ * 检查链与硬杀幂等短路读同一份事实；若拆成两个状态机，terminal 双写就需要跨对象
  * 回调同步，漏接线即 steer 与硬杀失步（单状态机使失步在结构上不可能）。
  *
  * 通道选型（设计 §6.3；pi 0.84.1 实装，登记 PS-20）：
@@ -51,8 +51,8 @@
  * 一个 listener，同一 tool_execution_end 内先 steer 记账后硬杀计数——与合一前两
  * listener 的注册顺序一致）。
  *
- * 诚实边界（设计 §6.3）：闸门只终止「同签名无进展」这一种循环形态；签名不断
- * 变化的长尾低效不触发闸门，仍由 workflow 层 maxTurns 兜底。
+ * 诚实边界（设计 §6.3）：门禁只终止「同签名无进展」这一种循环形态；签名不断
+ * 变化的长尾低效不触发门禁，仍由 workflow 层 maxTurns 兜底。
  */
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -119,7 +119,7 @@ function requiredBulletPrefix(bulletPath: string, firstField: string): string {
  *   2. 日常模式 ajv（execute.ts instancePath 拼接形态，ajv locale 模板大写 "must
  *      NOT have additional properties"）——模板词组含空格与固定语序，字段名不可能
  *      携带。该形态无 "Received arguments:" 回显段，keys 分桶天然不激活
- *      （hasApError 仅作标记；闸门仅 workflow 模式装配，此形态实为防御性保留）。
+ *      （hasApError 仅作标记；门禁仅 workflow 模式装配，此形态实为防御性保留）。
  */
 const AP_LINE_SUFFIX_RE = /^(.*):\s*must not have additional properties\s*$/;
 const AP_AJV_MESSAGE_RE = /must NOT have additional properties/;
@@ -143,7 +143,7 @@ const AP_BULLET_MESSAGE = "must not have additional properties";
  *
  * 有意决策（披露）：token 集合只含字段/路径、不含错误类型——同一字段换约束试错
  * （"must be string" → "must be number"）折叠为同签名。权衡：换取「集合不变 = 无进展」
- * 的强判定；代价是弱模型对单字段多约束的试错容忍度下降（同字段反复错达阈值即闸门）。
+ * 的强判定；代价是弱模型对单字段多约束的试错容忍度下降（同字段反复错达阈值即门禁）。
  *
  * 同时报告错误行块是否含 AP 错误行（hasApError）——normalizeErrorSignature 据此
  * 门控 echo keys 并入（分桶动机见该函数注释）；并收集 AP 错误行的路径位集合
@@ -344,19 +344,19 @@ export function normalizeErrorSignature(errorText: string): string {
 }
 
 /**
- * structured-output 双闸门合一状态机（D2 单状态机；纯逻辑，可单测）。
+ * structured-output 双门禁合一状态机（D2 单状态机；纯逻辑，可单测）。
  *
  * 状态分区（一个对象、一份 terminal 事实）：
  *   - steer 侧（workflow-hook turn_end 消费）：soCallCount / soSucceededEver /
  *     hookRetryCount / lastSchemaError。
  *   - 硬杀侧：lastSignature / consecutiveFailures / lastErrorText。
  *   - 共享终态：terminal——硬杀触发后置位（不可逆，仅 reset() 可清），turn_end
- *     守卫链据此停 steer，硬杀计数据此幂等短路。
+ *     检查链据此停 steer，硬杀计数据此幂等短路。
  *
  * 转移表（loop-gate.test.ts / retry-state.test.ts 锁定）：
  *   onToolExecEnd(hasError, errorText?)（每事件一次，先记账后计数——与合一前两
  *   listener 的注册顺序一致）：
- *   - steer 记账段（不受 terminal 短路影响：terminal 后迟到的失败仍记录，闸门自身
+ *   - steer 记账段（不受 terminal 短路影响：terminal 后迟到的失败仍记录，门禁自身
  *     幂等，重复事件无害）：
  *     - (!hasError)            → soCallCount++ / soSucceededEver=true
  *     - (hasError, errorText)  → soCallCount++ / lastSchemaError=errorText ?? 通用提示
@@ -380,7 +380,7 @@ export class WorkflowGate {
 	consecutiveFailures = 0;
 	/** 最近一次失败的原始终态文本（截断后），供 terminal 日志引用。 */
 	lastErrorText: string | null = null;
-	// ── 共享终态（单字段单写：硬杀计数段置位，两闸门读同一份）──────
+	// ── 共享终态（单字段单写：硬杀计数段置位，两门禁读同一份）──────
 	terminal = false;
 
 	/**
@@ -510,7 +510,7 @@ export function runTerminalTeardown(pi: PiAPI, gate: WorkflowGate, ctx: Extensio
 	// （PS-30，runner.js createContext）——session 替换窗口触发 terminal 时无人接的
 	// 同步 throw 会经 async handler 变 rejected Promise 杀 pi 进程。stale 静默跳过
 	// 优雅退出（此时进程的存在意义已随 session 替换消失）。非 stale 错误原样上抛
-	//（守卫不吞真实 bug）。
+		//（检查不吞真实 bug）。
 	guardStaleCtx(() => {
 		ctx.abort();
 		ctx.shutdown();

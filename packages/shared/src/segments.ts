@@ -79,7 +79,7 @@ export type Segment =
  * fileContexts Map 才分开。删除 file inline 后，所有 segment 序列化收敛到本函数一处，
  * segmentsToPrompt 只是同实现的语义别名（去 trim 后二者逐字同产出，见其上方 [HISTORICAL]）。
  * 首尾空白保真——本函数不 trim，空白拦截职责归调用方（useChat send/steer/followUp 的
- * !text.trim() 守卫），不再分两份逻辑。
+ * !text.trim() 检查），不再分两份逻辑。
  */
 /**
  * 判定 seg 的序列化文本前是否补一个空格分隔（边界空格规则单点化，替代拆分前的两处 if）：
@@ -118,7 +118,7 @@ function serializeFileSegment(seg: Extract<Segment, { type: 'file' }>): string {
 
 /**
  * 各 segment type 的序列化器表（表驱动分发）。
- * key 由映射类型穷尽声明：新增 Segment 成员而漏加 key 时 tsc 编译失败（穷尽守卫）。
+ * key 由映射类型穷尽声明：新增 Segment 成员而漏加 key 时 tsc 编译失败（穷尽检查）。
  */
 const SEGMENT_SERIALIZERS: { [K in Segment['type']]: (seg: Extract<Segment, { type: K }>) => string } = {
   text: (seg) => seg.text,
@@ -156,7 +156,7 @@ const SEGMENT_SERIALIZERS: { [K in Segment['type']]: (seg: Extract<Segment, { ty
 
 /**
  * 单段序列化分发。cast 安全性：seg.type 是判别器，查表命中必然是同 type 的序列化器；
- * 表 key 由映射类型穷尽（tsc 守卫）。`| undefined` 落空分支 = 运行时脏数据（TS 类型外），
+ * 表 key 由映射类型穷尽（tsc 检查）。`| undefined` 落空分支 = 运行时脏数据（TS 类型外），
  * 与拆分前 switch 无 default 的落空行为一致——产出空文本，不抛错。
  */
 function serializeSegment(seg: Segment): string {
@@ -227,7 +227,7 @@ export function textToSegments(text: string): Segment[] {
  * [HISTORICAL] 曾内置 .trim()（「pi prompt 不需要首尾空白」）——用户输入首尾空白被
  * 静默剥除，pi 落盘文本 ≠ 提交原文（2026-08 Gate B AC-4 实测；pi 本身不 trim，剥除
  * 纯粹由本层引入）。去 trim 后提交原文 → pi 入队帧 → message_end(user) → 基线落盘
- * 全链同文本。空白拦截职责归调用方（useChat send/steer/followUp 各自 !text.trim() 守卫）。
+ * 全链同文本。空白拦截职责归调用方（useChat send/steer/followUp 各自 !text.trim() 检查）。
  */
 export function segmentsToPrompt(segments: Segment[]): string {
   return segmentsToText(segments)

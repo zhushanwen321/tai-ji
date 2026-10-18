@@ -16,7 +16,7 @@
  *
  * [HISTORICAL] isPathInAllowedPrefixes（local-file 白名单前缀判定）已下沉
  * utils/local-file-prefixes——它与 computeLocalFilePrefixes 是同一白名单域的「判定/构造」
- * 两半，且原位置造成 utils→gateway→utils 模块环；此处 re-export 保持既有消费面
+ * 两半，且原位置造成 utils→gateway→utils 模块环；此处 re-export 保持既有消费方
  * （input-validators 单测等）不改 import 路径。
  */
 import path from 'node:path'

@@ -117,7 +117,7 @@ describe('deriveTurnAggregates 生成 token 总量（只统计已上报真值，
     expect(agg.generatedTokens).toBe(122)
   })
 
-  it('单段 turn 流式中 → 0（状态行不渲染数字，收口后跳完整值）', () => {
+  it('单段 turn 流式中 → 0（状态行不渲染数字，收尾后跳完整值）', () => {
     const agg = deriveTurnAggregates(turn([assistant({ content: 'abc', status: 'streaming' })]))
     expect(agg.generatedTokens).toBe(0)
   })

@@ -1,8 +1,8 @@
 /**
  * subagent-engine-history 薄调用冒烟测试（dual-track-convergence D1）。
  *
- * 读取链本体（三级降级编排 + journal 重放 + 投影 + registry 分发）的守护测试在
- * core 侧 session-view-service.test.ts（降级链三分支 / 投影 parity / registry 分发 /
+ * 读取链本体（三级降级编排 + journal 重放 + 派生视图 + registry 分发）的守护测试在
+ * core 侧 session-view-service.test.ts（降级链三分支 / 派生视图 parity / registry 分发 /
  * message_end error 记账）。本文件只断言 runtime 薄层的路由段契约：
  * - pi record → []（A1 守护：pi 历史走调用方 JSONL 直读链）
  * - 非 pi record 缺 handle → core 编排层防御式降级③级（结构兼容 shared Message）

@@ -175,7 +175,7 @@ import { createExplicitSave } from '@/composables/features/settings/setting-fiel
 import type { TerminalConfig } from '@taiji/shared'
 
 /** 壳激活信号（SettingsModal v-show 常挂载形态独有）：false→true = 从其他分区切回本页，
- *  此时重拉配置——终端字号与外观分区共用 TerminalConfig SSOT，双向同步（demo settings
+ *  此时重新拉取配置——终端字号与外观分区共用 TerminalConfig SSOT，双向同步（demo settings
  *  spec §4）。缺省（undefined，测试/独立宿主直挂）不参与信号，行为同旧版仅 onMounted 拉取。 */
 const props = defineProps<{ isActive?: boolean }>()
 
@@ -246,7 +246,7 @@ onMounted(() => {
   void loadConfig()
 })
 
-// 分区切回（isActive false→true）重拉配置：常挂载缓存的本地编辑态对齐 SSOT（双向同步）。
+// 分区切回（isActive false→true）重新拉取配置：常挂载缓存的本地编辑态对齐 SSOT（双向同步）。
 watch(() => props.isActive, (now, prev) => {
   if (prev !== undefined && now) void loadConfig()
 })

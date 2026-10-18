@@ -2,7 +2,7 @@
  * WorkflowLivePanel 面板组件测试（workflow-visualization U5——三视角，TEST-STRATEGY §3）：
  *
  * - 构建者（白盒）：事件流数据经 mock RPC 注入 workflowStore 缓存分区；tab 模型经 expose
- *   与 DOM 事件直接驱动；store 挂载编排（活跃 run 登记 / 事件流首拉）断言 mock 调用
+ *   与 DOM 事件直接驱动；store 挂载编排（活跃 run 登记 / 事件流首次拉取）断言 mock 调用
  * - 使用者（黑盒 DOM）：每条用例至少一个用户可见断言——header 去重形态（D2 单 header
  *   终态：三槽零渲染）、trace 行状态与空值回归（D5 盘点锚）、
  *   事件流行与 ✂ 截断标注、错误二分形态（静态指引 vs 重试按钮）、phase 头卡轮次、tab 关闭回落
@@ -11,7 +11,7 @@
  * mock 策略：
  * - api/domains/session mock（getWorkflowRunEvents / getWorkflows）+ @/api 门面回指
  *   （同 workflow.test.ts 先例——store 与断言用同一 vi.fn()）
- * - vue-i18n 文件内 override（t(key, named) → `key(k=v)`，key 引用 + 参数双断言面）
+ * - vue-i18n 文件内 override（t(key, named) → `key(k=v)`，key 引用 + 参数双断言范围）
  * - MessageStream / useSubagentTabData mock（agent tab 对话流编排接线验证，渲染树 stub）
  *
  * 运行：cd packages/renderer && npx vitest run src/components/panel/workflow-viz/__tests__/workflow-live-panel.test.ts
@@ -128,7 +128,7 @@ function makeRun(overrides: Partial<WorkflowRunRecord> = {}): WorkflowRunRecord 
   }
 }
 
-/** 事件流样本（含 truncatedFields 标注行——D4 截断协议的展示面验证数据；beta = 纯脚本 phase） */
+/** 事件流样本（含 truncatedFields 标注行——D4 截断协议的展示侧验证数据；beta = 纯脚本 phase） */
 function eventsReply(): {
   runId: string
   events: Array<Record<string, unknown> & { type: string; ts: number }>
@@ -266,7 +266,7 @@ describe('WorkflowLivePanel · workflow tab 三子页（使用者黑盒 + 观察
     expect(wrapper.findAll('[data-testid="l2-tab-agent\\:3"]')).toHaveLength(0) // 无 agent tab
   })
 
-  it('事件流子页：行渲染 + ✂ truncatedFields 标注（D4 截断协议展示面，含 worker-log entryMessage 行）', async () => {
+  it('事件流子页：行渲染 + ✂ truncatedFields 标注（D4 截断协议展示侧，含 worker-log entryMessage 行）', async () => {
     const wrapper = await mountPanel()
     await wrapper.find('[data-testid="wf-viz-subpage-events"]').trigger('click')
     await flushPromises()
@@ -300,7 +300,7 @@ describe('WorkflowLivePanel · workflow tab 三子页（使用者黑盒 + 观察
     expect(err.find('[data-testid="wf-viz-events-retry"]').exists()).toBe(false) // 静态指引无重试
   })
 
-  it('事件流错误二分：通道错误 → 错误 + 重试按钮；点重试 force 重拉', async () => {
+  it('事件流错误二分：通道错误 → 错误 + 重试按钮；点重试 force 重新拉取', async () => {
     mockGetRunEvents.mockRejectedValueOnce(new Error('transport down'))
     const wrapper = await mountPanel()
     await wrapper.find('[data-testid="wf-viz-subpage-events"]').trigger('click')
@@ -313,7 +313,7 @@ describe('WorkflowLivePanel · workflow tab 三子页（使用者黑盒 + 观察
     await retryBtn.trigger('click')
     await flushPromises()
     expect(mockGetRunEvents).toHaveBeenCalledTimes(2)
-    // 重拉成功后错误态消失、事件列表出现（恢复路径闭环）
+    // 重新拉取成功后错误态消失、事件列表出现（恢复路径闭环）
     expect(wrapper.find('[data-testid="wf-viz-events-list"]').exists()).toBe(true)
   })
 
@@ -500,7 +500,7 @@ describe('WorkflowLivePanel · 多级 tab（使用者黑盒）', () => {
 // ── store 挂载编排（构建者白盒）──────────────────────────────────────────────
 
 describe('WorkflowLivePanel · store 挂载编排（构建者白盒）', () => {
-  it('挂载：活跃 run 登记 + 事件流首拉；卸载：条件释放活跃锚', async () => {
+  it('挂载：活跃 run 登记 + 事件流首次拉取；卸载：条件释放活跃锚', async () => {
     const store = useWorkflowStore()
     const wrapper = await mountPanel()
     expect(mockGetRunEvents).toHaveBeenCalledWith(SID, RUN_ID)

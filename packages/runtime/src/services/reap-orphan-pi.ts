@@ -66,7 +66,7 @@
  * 存在且非空（§11.11）；本降级只覆盖异常态（首启前 / 磁盘故障 / 人为删除）。
  *
  * 处置：SIGKILL 直杀（ADR-0122：kill 族 grace 优雅退出窗退役，含 lstart 复用复验）——原
- * SIGKILL；每条记日志，失败仅记日志 + 崩溃台账 reap-failed 事件不抛（收殓是 best-effort
+ * SIGKILL；每条记日志，失败仅记日志 + 崩溃 journal reap-failed 事件不抛（收殓是 best-effort
  * 兜底，不允许阻塞或击穿启动）。幂等：重复执行只是再扫一遍进程表。
  */
 import { execFile } from 'node:child_process'
@@ -75,7 +75,7 @@ import { getCrashJournal } from '../infra/crash-journal.js'
 import { redactArgvLine } from '../infra/pi/argv-redact.js'
 
 /**
- * reaped 台账行使用 schema 登记的扩展字段 pid/ppid（偏差 #32③：扩展字段登记 SSOT =
+ * reaped journal 行使用 schema 登记的扩展字段 pid/ppid（偏差 #32③：扩展字段登记 SSOT =
  * shared crash-journal-schema.ts CrashJournalEvent，本地不再重复声明）。设计 D1 矩阵
  * reaped 行验收要求「pid + argv/ppid 判据摘要」可机器消费——pid/ppid 走结构化字段
  * （评估器计数与归因不解析文本），argv 摘要走既有 detailDigest（≤2KB 内嵌，schema 无
@@ -98,7 +98,7 @@ export interface PsRow {
 
 /**
  * 解析 `ps -axo pid=,ppid=,command=` 输出（macOS/Linux 通用，`列名=` 抑制表头）。
- * 非数字 pid/ppid 的行（空行、异常输出）跳过——fail-open 只影响扫描覆盖面，不影响精确性。
+ * 非数字 pid/ppid 的行（空行、异常输出）跳过——fail-open 只影响扫描覆盖范围，不影响精确性。
  */
 export function parsePsOutput(stdout: string): PsRow[] {
   const rows: PsRow[] = []
@@ -150,7 +150,7 @@ function flushArgvToken(st: ArgvTokenizerState): void {
 /** 单字符状态转移：引号内累积 / 引号开闭 / 空白截断 / 普通字符累积。 */
 function consumeArgvChar(st: ArgvTokenizerState, ch: string): void {
   if (st.quote !== null) {
-    // 引号内：同款引号闭合，其余字符（含空白）原样累积
+    // 引号内：同款引号即结束，其余字符（含空白）原样累积
     if (ch === st.quote) st.quote = null
     else st.cur += ch
     return
@@ -285,7 +285,7 @@ const ARGV_SUMMARY_MAX = 200
 
 /**
  * argv 摘要：先经共享脱敏（设计 `mode-system-composer-density` §7.2
- * argv 日志脱敏 / §7.6 写入面 / 探针 P15）再做长度封顶——两处回显（本处与 rpc-client spawn
+ * argv 日志脱敏 / §7.6 写侧 / 探针 P15）再做长度封顶——两处回显（本处与 rpc-client spawn
  * 日志）必须共用同一实现，只堵一条等于没堵。脱敏保留非值 token，故 `--mode rpc` 等诊断串
  * 与 `detailDigest` 既有断言不受影响；提示词 flag 的值只记 `<N chars>`。
  */
@@ -337,9 +337,9 @@ function defaultReadProcessStartTime(pid: number): Promise<number | null> {
  * 本函数不抛（全路径 catch 或降级返回），调用方可安全 fire-and-forget。
  */
 /**
- * 逐孤儿处置 + 台账双写（crash-forensics §3.3 D1）：SIGKILL 直杀逐 pid 执行，
+ * 逐孤儿处置 + journal 双写（crash-forensics §3.3 D1）：SIGKILL 直杀逐 pid 执行，
  * reaped / reap-failed 两类事件挂处置结果处（事件名语义 = 已收殓 / 处置失败，防误记）。
- * 台账 best-effort（writer append 自吞错不向收殓链传播）。
+ * journal best-effort（writer append 自吞错不向收殓链传播）。
  */
 async function reapOrphansWithJournal(
   orphans: PsRow[],
@@ -354,7 +354,7 @@ async function reapOrphansWithJournal(
     const ok = await killOrphan(row, deps.signal, deps.readProcessStartTime)
     if (ok) {
       reaped.push(row.pid)
-      // 台账双写（crash-forensics §3.3 D1 reaped 行：杀链判据命中处置成功处，与既有
+      // journal 双写（crash-forensics §3.3 D1 reaped 行：杀链判据命中处置成功处，与既有
       // 逐 pid 处置日志同点）。挂在 ok 分支而非发现处：事件名语义 = 已收殓，处置失败
       // 进 failed 不记 reaped（防误记）。best-effort：writer append 自吞错不向收殓链传播。
       // 经中间变量传入（扩展字段过 schema 闭接口的 excess property check）。
@@ -368,7 +368,7 @@ async function reapOrphansWithJournal(
       getCrashJournal().append(journalEvent)
     } else {
       failed.push(row.pid)
-      // 台账双写（reap-failed 行，与 reaped 同 schema 同挂点阶段）：处置失败率可机器
+      // journal 双写（reap-failed 行，与 reaped 同 schema 同挂点阶段）：处置失败率可机器
       // 对账（评估器按 event 计数），失败原因进 detailDigest。best-effort 同 reaped 行。
       const journalEvent: CrashJournalEvent = {
         layer: 'pi',

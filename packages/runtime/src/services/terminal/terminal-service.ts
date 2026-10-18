@@ -84,7 +84,7 @@ function nextPushId(): string {
 
 /**
  * kill 的 SIGKILL 升级延迟（RT-8#10）。超时量级按被保护对象的粒度校准（AGENTS 架构约定
- * #19）：这里是单个 PTY 进程的回收兜底——控制面/单对象粒级，秒级即可（对齐 shell-runner
+ * #19）：这里是单个 PTY 进程的回收兜底——控制范围/单对象粒级，秒级即可（对齐 shell-runner
  * 的 ESCALATION_DELAY_MS=5s 惯例），不是任务级墙钟。SIGTERM 可被 shell trap 捕获/忽略，
  * 无升级则 ignore trap 的 shell + 其子进程成为孤儿，fd 永久残留。
  */
@@ -113,7 +113,7 @@ export class TerminalService implements ITerminalService {
 
   /**
    * spawn 双形态（设计 §3.3「网络消息」）：
-   * - 不带 terminalId = 新建：分配编号 → spawn → 返回分配的 terminalId（编号收口 runtime）
+   * - 不带 terminalId = 新建：分配编号 → spawn → 返回分配的 terminalId（编号收敛 runtime）
    * - 带 terminalId = 指定：实例存活则幂等 no-op；不存在 → unknown_terminal_id
    * 两形态都先做会话段交叉校验（不一致 → terminal_id_session_mismatch）。
    */
@@ -277,7 +277,7 @@ export class TerminalService implements ITerminalService {
   }
 
   /**
-   * 实例路由校验（顺序钉死：交叉校验先于注册表查存——若先查存，`term:<他会话>:1` 会命中
+   * 实例路由校验（顺序固定：交叉校验先于注册表查存——若先查存，`term:<他会话>:1` 会命中
    * 他会话的存活实例并被错误写入）。返回 PTY 句柄；不存在 / 会话段不一致抛扁平错误。
    */
   private requireInstanceOrThrow(sid: string, terminalId: string): pty.IPty {
@@ -329,7 +329,7 @@ export class TerminalService implements ITerminalService {
    * kill 的 SIGKILL 升级兜底（RT-8#10）：SIGTERM 后 KILL_ESCALATION_MS 仍未退出
    * （shell trap 捕获/忽略 SIGTERM、子进程不在同进程组）时强杀，防孤儿进程 + fd 残留。
    * tracked 模式（用户 kill）：onExit 清理注册表后本 timer 自然 no-op——同 terminalId 是
-   * 绝不复用的，守卫 `ptyMap.get(terminalId) !== proc` 只作防御式兜背（防实现漂移）。
+   * 绝不复用的，检查 `ptyMap.get(terminalId) !== proc` 只作防御式兜背（防实现漂移）。
    */
   private scheduleKillEscalation(
     terminalId: string,

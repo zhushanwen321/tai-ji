@@ -10,7 +10,7 @@
  *
  * 断言方式：静态形态断言（appendCompaction entry 字面量透传 + agent-session hook 分支与
  * 调用点的 details 标识符连续性）+ 行为级断言（动态 import dist/core/session-manager.js，
- * SessionManager 原型桩直调 appendCompaction，断言 details 同引用落账）。原型桩覆写
+ * SessionManager 原型桩直调 appendCompaction，断言 details 同引用落盘）。原型桩覆写
  * _appendEntry 捕获 entry，不触真实 session 文件（零 fs 写）。dist 不可达 / 动态 import
  * 失败时 skip 不 fail；不进 REAL_PI_TESTS 分池。
  *
@@ -29,7 +29,7 @@ const SKIP_REASON = PI_DIST
 if (!PI_DIST) console.warn(`[pi-semantics] skip：${SKIP_REASON}`)
 
 // dist 不可达时 skip（describe.skipIf 命中时 vitest 仍执行工厂体——读取必须在模块级
-// 三元守卫内完成，不能放 describe 体，否则收集期抛错而非 skip）
+// 三元检查内完成，不能放 describe 体，否则收集期抛错而非 skip）
 const SESSION_MANAGER_SRC = PI_DIST ? readFileSync(join(PI_DIST, 'core', 'session-manager.js'), 'utf-8') : ''
 const AGENT_SESSION_SRC = PI_DIST ? readFileSync(join(PI_DIST, 'core', 'agent-session.js'), 'utf-8') : ''
 
@@ -104,7 +104,7 @@ describe.skipIf(!sessionManager?.SessionManager)(
   () => {
     /** 原型桩宿主形状（只暴露 appendCompaction 依赖的成员；_appendEntry 被覆写为捕获器）。
      * pi 1.0.0 起 appendCompaction 前置调 buildSessionProjection()（读 fileEntries + byId 提取
-     * systemMessage 快照），桩需提供空 fileEntries 与空 Map 型 byId（空投影 → 无 systemMessage 展开）。 */
+     * systemMessage 快照），桩需提供空 fileEntries 与空 Map 型 byId（空派生视图 → 无 systemMessage 展开）。 */
     type AppendCompactionHost = {
       byId: Map<string, unknown>
       leafId: string
@@ -136,7 +136,7 @@ describe.skipIf(!sessionManager?.SessionManager)(
       return { host, captured }
     }
 
-    it('hook 返回的 details（含自定义 model 字段）同引用落账——逐字透传非克隆', () => {
+    it('hook 返回的 details（含自定义 model 字段）同引用落盘——逐字透传非克隆', () => {
       const { host, captured } = makeHost()
       const details = {
         engine: 'smart-context',

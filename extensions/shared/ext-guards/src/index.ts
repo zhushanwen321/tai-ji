@@ -1,6 +1,6 @@
 // src/index.ts
 //
-// @zhushanwen/pi-ext-guards —— pi 运行环境守卫共享库（不是 Pi extension，零依赖纯函数，
+// @zhushanwen/pi-ext-guards —— pi 运行环境检查共享库（不是 Pi extension，零依赖纯函数，
 // 无 pi SDK peerDep——供任意 @zhushanwen/pi-* 包与子代理核心消费）。
 //
 // 背景与设计依据：docs/architecture/file-lock-unification-and-reaper-sink.md §2.2 P3 / §3.2 D3。
@@ -8,7 +8,7 @@
 // handler 累积注册——session_start handler 的真实派发语义是「每 session × factory
 // 调用次数」，不是「每 session 一次」。handler 体内的跨 session 副作用操作（写非本
 // session 的文件 / 注册定时器 watcher / 扫描目录 / 进程操作）因此会被双跑（2026-09-01
-// reaper 双跑即此形态）。本包把这类「pi 运行环境隐式坑」的守卫集中一处，业务
+// reaper 双跑即此形态）。本包把这类「pi 运行环境隐式坑」的检查集中一处，业务
 // extension 引入即用，防线不再散落各包内联。
 
 /** 一次执行的结果记录：只缓存成功结果；失败（同步抛错 / Promise rejection）不缓存，下次调用可重试。 */
@@ -25,25 +25,25 @@ const executions = new Map<string, ExecutionRecord>();
 /**
  * 进程内按 key 去重地执行 fn：同一 key 至多执行一次**成功**，后续调用重放首次成功结果。
  *
- * 语义细节（设计 §3.2 D3 守卫粒度段 + §3.3 D3 守卫语义；失败语义按加固审查裁决修订
+ * 语义细节（设计 §3.2 D3 检查粒度段 + §3.3 D3 检查语义；失败语义按加固审查裁决修订
  * ——「恢复幂等，下次启动重试」承诺优先，见下方失败段）：
  *
  * - **结果缓存形态（非跳过）**：首次调用执行 fn 并缓存结果；后续同 key 调用不执行
  *   fn，返回首次的返回值——原样重放：对象返回严格同一引用（toBe 级，非重新求值）；
  *   fn 返回 Promise 时重放同一实例。
- * - **失败不缓存、可重试**：fn 同步抛错原样上抛（守卫不捕获、不包装）且**不写缓存**；
+ * - **失败不缓存、可重试**：fn 同步抛错原样上抛（检查不捕获、不包装）且**不写缓存**；
  *   fn 返回的 Promise rejection 落定后释放 key（仅释放本条失败记录，期间同 key 重试
- *   成功的新记录不受影响）——下次同 key 调用重新执行 fn。守卫不自动重试，重试节奏
- *   由调用方决定（宿主的其他触发面承接，如下一个 session_start）。代价（有意接受）：
+ *   成功的新记录不受影响）——下次同 key 调用重新执行 fn。检查不自动重试，重试节奏
+ *   由调用方决定（宿主的其他触发点承接，如下一个 session_start）。代价（有意接受）：
  *   首次失败到重试成功之间，factory 二调的双跑窗口重新打开——重试的是**失败过**的
  *   操作，成功即缓存、窗口随即关闭；对幂等的进程级维护（recoverCrashedRuns「恢复
  *   幂等，下次启动重试」、配置迁移、索引重建等）这正是期望行为。验收条款「fn 抛错
- *   不阻断后续 handler」的准确语义仍是**守卫不吞 fn 的错误**（调用方 catch 守卫调用
+ *   不阻断后续 handler」的准确语义仍是**检查不吞 fn 的错误**（调用方 catch 检查调用
  *   即可继续 handler 后续逻辑，先例：base-tool-enhance runSessionStartMaintenance
  *   的 try/catch 形态）。
  * - **粒度边界**：只包「跨 session 副作用操作」（进程级全局维护类，正确频率就是每
  *   进程至多一次）。session 级幂等操作（如 pending 对账——读当前 session 的 entries
- *   与 registry，appendEntry 幂等）必须保持每 session_start 执行，不要挂本守卫；需要
+ *   与 registry，appendEntry 幂等）必须保持每 session_start 执行，不要挂本检查；需要
  *   「每 session 一次」语义的 handler 属另一设计，本包明确不提供。
  * - **key 是进程内全局命名空间**：跨包共享一个 Map，调用方须用「包名:操作名」前缀
  *   （如 "base-tool-enhance:reap"）避免撞 key。
@@ -78,7 +78,7 @@ export function oncePerProcess<T>(key: string, fn: () => T): T {
 }
 
 /**
- * 测试专用：清空 oncePerProcess 的进程级守卫 Map。供静态 import 形态的测试重置
+ * 测试专用：清空 oncePerProcess 的进程级检查 Map。供静态 import 形态的测试重置
  * 去重状态（无 resetModules 重建模块图时的等价手段）；生产代码禁止调用。
  */
 export function _resetOncePerProcessForTest(): void {
@@ -121,7 +121,7 @@ export function isEnoentError(err: unknown): boolean {
  * `code === 期望值`）。
  *
  * 与 isEnoentError 同一收窄纪律（`"code" in err` 零断言——taste/no-unsafe-cast），
- * code 参数化：isEnoentError = code 钉死 "ENOENT" 的特化形态。非 Error 对象即使带
+ * code 参数化：isEnoentError = code 固定为 "ENOENT" 的特化形态。非 Error 对象即使带
  * 同名 code 也 false（与 isEnoentError 的严版口径一致——Node fs 抛错恒为 Error 实例）。
  */
 export function isErrnoWithCode(error: unknown, code: string): boolean {
@@ -206,7 +206,7 @@ export function isTaijiGuiHost(ctx: GuiHostContextLike): boolean {
 	return isTaijiHost() && ctx.mode === "rpc";
 }
 
-// ── stale ctx 守卫（guardStaleCtx，崩溃韧性 D1）────────────────────────
+// ── stale ctx 检查（guardStaleCtx，崩溃韧性 D1）────────────────────────
 //
 // 背景：pi 的 extension API
 // 对象（pi / ctx）在 session 替换（newSession/fork/switchSession/reload）后被 runner
@@ -215,7 +215,7 @@ export function isTaijiGuiHost(ctx: GuiHostContextLike): boolean {
 // timer tick、延迟回调）在该窗口触碰 pi/ctx = pi 进程被无人接的同步 throw 炸死（9/3 E1
 // 实锤：smart-context compact onError → sendUserMessage → assertActive → exit 1）。
 // GUI 的每次切 session/新建/重载都在制造失效窗口——这是「pi 单独用不崩、套 GUI 就崩」
-// 的核心机制差异。本守卫把 scheduler 已验证的防御范式（G1 代际前置检查 + F2 catch 文案
+// 的核心机制差异。本检查把 scheduler 已验证的防御范式（G1 代际前置检查 + F2 catch 文案
 // 分诊）泛化成共享原语，接入方不再各自内联。
 
 /**
@@ -225,7 +225,7 @@ export function isTaijiGuiHost(ctx: GuiHostContextLike): boolean {
  * runner.js `invalidate()` 默认 message + `assertActive()`
  * `throw new Error(this.staleMessage)`；
  * 探针：extensions/shared/ext-guards/src/__tests__/pi-semantics-stale-ctx-wording.test.ts），
- * 随 C-proc-08 pi 版本门禁自动重验。文案变更时守卫退化为「全部上抛」（回到现状崩溃链路，
+ * 随 C-proc-08 pi 版本门禁自动重验。文案变更时检查退化为「全部上抛」（回到现状崩溃链路，
  * 有 pi-crash log 取证，不更危险），门禁报红提示更新分诊词。
  */
 export const STALE_CTX_MARKER = "stale after session replacement";
@@ -236,10 +236,10 @@ export interface GuardStaleCtxOptions {
 	label?: string;
 	/**
 	 * 前置代际检查（G1 形态，主判）：返回 true 表示本回调所属的 session 已被替换，
-	 * 守卫完全不执行 fn、直接走 stale 降级。调用方注入，同 scheduler 的模块级代数
+	 * 检查完全不执行 fn、直接走 stale 降级。调用方注入，同 scheduler 的模块级代数
 	 * 计数器模式（session_start 递增模块级代数，旧代闭包捕获值 < 模块值即 stale）。
 	 * 缺省（不注入）恒视为非 stale——前置检查关闭，完全依赖错误文案兜底分诊
-	 * （D1 降级语义声明：无代际计数器的接入方合法形态，文案由 PS-30 门禁守卫）。
+	 * （D1 降级语义声明：无代际计数器的接入方合法形态，文案由 PS-30 门禁检查）。
 	 */
 	isCtxStale?: () => boolean;
 	/**
@@ -251,7 +251,7 @@ export interface GuardStaleCtxOptions {
 	onStale?: (error?: unknown) => void;
 }
 
-/** PromiseLike 判定（in 收窄，无 cast）：守卫据此为 async fn 的 rejection 挂同一分诊。 */
+/** PromiseLike 判定（in 收窄，无 cast）：检查据此为 async fn 的 rejection 挂同一分诊。 */
 function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
 	return (
 		typeof value === "object" &&
@@ -276,19 +276,19 @@ function defaultOnStale(label: string, error?: unknown): void {
 
 /**
  * 包裹「跨 session 生命周期存活的异步回调」：stale ctx 错误静默降级，非 stale 错误
- * 原样上抛（守卫不吞真实 bug）。消灭 E1 型崩溃源（crash-resilience D1）。
+ * 原样上抛（检查不吞真实 bug）。消灭 E1 型崩溃源（crash-resilience D1）。
  *
  * 语义三段（与 scheduler 范式逐条对应，scheduler/runtime.ts startScheduler 是迁移先例）：
  *
  * 1. **前置代际检查（G1 形态，主判）**：`opts.isCtxStale?.()` 为 true → 不执行 fn
  *    （完全不触碰捕获的 stale pi/ctx）、调 `opts.onStale?.()`（无参）、返回 undefined。
- * 2. **fn 同步执行 + 同步抛错分诊（F2 形态的同步面）**：错误文案含
+ * 2. **fn 同步执行 + 同步抛错分诊（F2 形态的同步部分）**：错误文案含
  *    `STALE_CTX_MARKER`（或抛错后 isCtxStale 翻转）→ 调 `opts.onStale?.(error)`、
- *    返回 undefined；**非 stale 类错误原样上抛**——守卫不吞真实 bug（上抛的崩溃链路
+ *    返回 undefined；**非 stale 类错误原样上抛**——检查不吞真实 bug（上抛的崩溃链路
  *    与 E1 相同，有 pi-crash log 取证 + 错误规格表走 T4 恢复链路）。
- * 3. **Promise 透传分诊（F2 形态的异步面）**：fn 返回 Promise 时守卫对 rejection
+ * 3. **Promise 透传分诊（F2 形态的异步部分）**：fn 返回 Promise 时检查对 rejection
  *    挂同一分诊——stale → resolve 为 undefined，非 stale → 原样 reject 给调用方的
- *    `.catch`。返回的是新 Promise 实例（原实例的 rejection 已被守卫接管，调用方不得
+ *    `.catch`。返回的是新 Promise 实例（原实例的 rejection 已被检查接管，调用方不得
  *    再对原实例挂 then/catch，否则非 stale 错误会走原实例 rejection）。
  *
  * 分诊谓词 = `isCtxStale?.() || message.includes(STALE_CTX_MARKER)`，与 scheduler
@@ -296,7 +296,7 @@ function defaultOnStale(label: string, error?: unknown): void {
  * 模块环境后旧闭包代数冻结、isCtxStale 恒 false 的盲区）。
  *
  * @param fn 无参回调（闭包捕获业务所需的 pi/ctx——被捕获的是注册时的引用，这正是
- *   stale 风险的来源，也是守卫存在的理由）
+ *   stale 风险的来源，也是检查存在的理由）
  * @returns fn 的返回值；stale 降级路径返回 undefined（前置检查命中时 fn 未执行、无
  *   Promise 可言，故 async 重载的返回类型是 `Promise<R | undefined> | undefined`——
  *   前置命中即 undefined）。fire-and-forget 调用方直接 `void`；需要接非 stale 错误的
@@ -336,7 +336,7 @@ export function guardStaleCtx(fn: () => unknown, opts?: GuardStaleCtxOptions): u
 		}
 	};
 
-	// 1. 前置代际检查：stale 则完全不触碰捕获的 pi/ctx（P-guard-holds 的守卫第一道）
+	// 1. 前置代际检查：stale 则完全不触碰捕获的 pi/ctx（P-guard-holds 的检查第一道）
 	if (isStale()) {
 		reportStale();
 		return undefined;

@@ -96,7 +96,7 @@ function makeRegistry(): MockFooterRegistry {
 	};
 }
 
-/** 读当前 slot（version 守卫后）。 */
+/** 读当前 slot（version 检查后）。 */
 function getRawSlot(): unknown {
 	return Reflect.get(globalThis, FOOTER_HANDSHAKE_KEY);
 }

@@ -239,7 +239,7 @@ describe('B-4b：模型写入白名单 reasoning/maxTokens/cost/headers', () => 
       // pi ModelCostSchema 四字段必填：缺字段写入会让 pi 拒载整个 models.json
       models: [{ id: 'm1', cost: { input: 1 } }],
     })).rejects.toThrow(/Invalid cost for model "m1".*"output"/)
-    // round-1 review MUST_FIX #3：sanitizeModelCost 两个 throw 守卫——
+    // round-1 review MUST_FIX #3：sanitizeModelCost 两个 throw 检查——
     // cost 非对象（传入整体非法形状）/ tiers 非数组（可选字段存在时类型错）
     await expect(svc.setProvider('my-proxy', {
       models: [{ id: 'm1', cost: 'x' as unknown as Record<string, unknown> }],

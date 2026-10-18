@@ -15,7 +15,7 @@
  * - 同节点实例按 taskIndex（trace step 序号 call.id）升序挂接
  * - 零调用点 run（nodes 空）→ 全部实例进未匹配分组
  * - 字面段按正则转义：实例名含 `+`/`(` 等正则元字符不误匹配
- * - 坏 matchPattern（传输损坏防御面）→ 该节点按零命中处理，不拖垮整表
+ * - 坏 matchPattern（传输损坏防御机制）→ 该节点按零命中处理，不拖垮整表
  *
  * 运行：cd packages/renderer && npx vitest run src/components/panel/workflow-viz/__tests__/blueprint-match.test.ts
  */
@@ -145,7 +145,7 @@ describe('blueprint-match：未匹配分组（不静默丢弃）', () => {
   })
 })
 
-describe('blueprint-match：挂接与防御面', () => {
+describe('blueprint-match：挂接与防御机制', () => {
   it('同节点实例按 taskIndex（call.id）升序挂接（轮次/维度区分靠实例名自身展示）', () => {
     const dag = { nodes: [node('n1', 'rev-${…}', '^rev-.*$', 'p')] }
     const result = matchInstancesToNodes(dag, [call(5, 'rev-e', 'p'), call(1, 'rev-a', 'p'), call(3, 'rev-c', 'p')])

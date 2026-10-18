@@ -1,7 +1,7 @@
 /**
  * stringifySchemaCached — schema JSON 序列化单测。
  *
- * 断言面（收敛后：直调 JSON.stringify + fail-loud 护栏）：
+ * 断言范围（收敛后：直调 JSON.stringify + fail-loud 护栏）：
  * - 输出与直接 JSON.stringify 逐字节一致
  * - schema 含 toJSON: () => undefined 时抛含恢复指引的错误（不静默产垃圾串）
  */

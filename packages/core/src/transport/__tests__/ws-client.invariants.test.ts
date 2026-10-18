@@ -14,7 +14,7 @@
 //   reconnecting/restarting/failed。[漂移] 原稿 4 态 connecting/open/closing/closed 是
 //   remote-use 期术语；closing 中间态不存在——主动 disconnect 先摘回调再 close，直接置
 //   disconnected。断言点：connecting → connected（onopen，token 模式经 auth.result ok 的
-//   markConnected）可达；主动 disconnect → disconnected 可达且残余回调不干扰行为（行为面
+//   markConnected）可达；主动 disconnect → disconnected 可达且残余回调不干扰行为（行为范围
 //   锁定，不锁摘回调的实现手段——摘回调与 gen 拦截等价）；非法迁移拒绝
 //   （已连接/连接中重复 connect 幂等 no-op，不重置状态不建新 WS）；onclose → disconnected →
 //   scheduleReconnect（closed 是重连起点，原稿语义保留）。
@@ -56,12 +56,12 @@
 //   后退避簿记归零（reconnectAttempts=0 + reconnectStartedAt=null），不污染新连接。
 //
 // ⑦ 探活死链检测（probeAlive，remote 形态切前台补位）：connected 态下 probeAlive() 发 ping
-//   + 限时 5s 等任意入站帧——任何入站帧（含超界/坏 JSON 帧，onmessage 首行在守卫/parse 之前
+//   + 限时 5s 等任意入站帧——任何入站帧（含超界/坏 JSON 帧，onmessage 首行在检查/parse 之前
 //   清除）都是链路活性证据；超时无帧 → console.warn + close 走既有退避重连链（不动重连簿记，
 //   非 auth 拒绝、抑制位不涉及）。调用方 = use-connection visibility 切前台分支（仅 remote
 //   形态——移动壳无 IPC supervisor 事件补位；mock/local 直接 return，桌面死链检测仍由 TCP 层
 //   + IPC 事件兜底，零回归）。计时器清理点 = 入站帧 / onclose / clearTimers（disconnect、
-//   setFailed），单定时器不变量，超时回调带 gen 守卫不误杀换代后的新连接。断言点：超时 close
+//   setFailed），单定时器不变量，超时回调带 gen 检查不误杀换代后的新连接。断言点：超时 close
 //   + 重连可达 / 任意入站帧清除不 close / 非 connected no-op / 重复调用单定时器 / 清理不跨代。
 //   特征测试：ws-client.probe-alive.test.ts + use-connection-probe-alive.test.ts。
 //
@@ -153,7 +153,7 @@ describe('ws-client 不变量 ① 连接状态机', () => {
 
     disconnect()
     expect(getState().value).toBe('disconnected')
-    // 行为面锁定（不锁「摘回调」实现手段——「保留回调 + gen 拦截」等价实现行为相同）：
+    // 行为范围锁定（不锁「摘回调」实现手段——「保留回调 + gen 拦截」等价实现行为相同）：
     // 残余 open/close 触发不改变状态；主动断开不复活重连链（不调度退避、无新 WS）。
     const f = latestFake()
     f.triggerOpen()
@@ -164,10 +164,10 @@ describe('ws-client 不变量 ① 连接状态机', () => {
     expect(fakes.length).toBe(1)
   })
 
-  // 参数化覆盖单飞守卫（connect 内「存在非 CLOSED socket 即 return」分支）的两个 readyState
+  // 参数化覆盖单飞检查（connect 内「存在非 CLOSED socket 即 return」分支）的两个 readyState
   // 输入分区：connected（OPEN）与 connecting（CONNECTING）下重复 connect 一律幂等 no-op——
   // 不建新 WS、状态不被重置。CLOSING 分区由 single-flight 文件锁定（原 single-flight
-  // 「CONNECTING 期间重复 connect」用例与本用例锁同一守卫行，已收敛至此）。
+  // 「CONNECTING 期间重复 connect」用例与本用例锁同一检查行，已收敛至此）。
   it.each([
     { partition: 'connected（OPEN）', driveOpen: true },
     { partition: 'connecting（CONNECTING）', driveOpen: false },
@@ -299,7 +299,7 @@ describe('ws-client 不变量 ③ close code 分流', () => {
     latestFake().triggerOpen()
     expect(goingAwayCount).toBe(0)
 
-    // 事件投影与真实 CloseEvent 对齐（P6 探针实测 {code:1001, reason, wasClean:true}）
+    // 合成事件与真实 CloseEvent 对齐（P6 探针实测 {code:1001, reason, wasClean:true}）
     latestFake().triggerClose({ code: 1001, reason: 'Server shutting down', wasClean: true })
     expect(goingAwayCount).toBe(1)
     // 文案信号不改重连机制：disconnected → 退避（1s）重连照走

@@ -1,5 +1,5 @@
 /**
- * [RT-4#2 / RT-4#9] EventInterpreter settling 终态兜底 + ping 生命期 + 未知 kind 守卫。
+ * [RT-4#2 / RT-4#9] EventInterpreter settling 终态兜底 + ping 生命期 + 未知 kind 检查。
  *
  * 锁定三条不变量（code-harden RT-4#2 审计修复）：
  * - SC1 settled 副作用抛错（onAgentSettled 的 bash flush publish 炸）→ occupancy 终态
@@ -116,7 +116,7 @@ describe('[RT-4#2②] ping 生命期 = turn-start → agent_settled', () => {
     warnSpy.mockRestore()
   })
 
-  it('settled 副作用抛错也停 ping（finally 收口，防 B1 永续）', async () => {
+  it('settled 副作用抛错也停 ping（finally 收尾，防 B1 永续）', async () => {
     const pingPi = vi.fn(async () => ({ ok: true }) as Record<string, unknown>)
     vi.spyOn(console, 'error').mockImplementation(() => {})
     const { interp } = makeInterpreter({
@@ -137,7 +137,7 @@ describe('[RT-4#9] 未知 kind 运行时兜底（default warn，不静默丢弃�
   it('类型外 kind（未来新增事件漏接线）落 warn', () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const { interp } = makeInterpreter({})
-    // 编译期穷尽守卫（assertTranslatedEventHandled）使生产代码不可能构造未知 kind；
+    // 编译期穷尽检查（assertTranslatedEventHandled）使生产代码不可能构造未知 kind；
     // 运行时防御 = adapter 演进期 / 反序列化边界的类型外值。cast 模拟该形态。
     const futureEvent = { kind: 'future-kind', payload: {} } as unknown as PiTranslatedEvent
     interp.interpret([futureEvent])

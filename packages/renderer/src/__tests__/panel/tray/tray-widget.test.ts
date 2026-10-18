@@ -71,7 +71,7 @@ function iconSpan(wrapper: VueWrapper): DOMWrapper<Element> {
   return wrapper.find('[data-testid="tray-widget-icon"]')
 }
 
-// ── widget 区（外壳契约复刻：ViewHostStore 响应式消费面 + 排序 + 按钮/面板组装）──
+// ── widget 区（外壳契约复刻：ViewHostStore 响应式消费方 + 排序 + 按钮/面板组装）──
 
 interface WidgetEntry {
   viewId: string
@@ -448,7 +448,7 @@ describe('TrayWidgetPanel（meta head + guiTree 正文）', () => {
     expect(nanCurrent.find('[data-testid="tray-widget-panel-label"]').text()).toBe('无进度')
     nanCurrent.unmount()
 
-    // total=Infinity：旧守卫只挡 total<=0（NaN/Infinity 比较恒 false 会漏过 → width:'NaN%'）
+    // total=Infinity：旧检查只挡 total<=0（NaN/Infinity 比较恒 false 会漏过 → width:'NaN%'）
     const infTotal = mountPanel({
       viewId: 'bad-widget',
       meta: makeMeta({ progress: { current: 3, total: Number.POSITIVE_INFINITY } }),

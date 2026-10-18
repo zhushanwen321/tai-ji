@@ -6,7 +6,7 @@
 // session-pending / settled-watchdog 等宿主编排件；协议化后引擎进程内只保留
 // 「spawn pi 子进程 + stdout pump + 事件翻译 + UI 请求发射 + 结果收集」，宿主侧
 // 记账由 core 经 `event` 通知与 host/* 反向通道完成（W8 宿主接线 / W10 conformance
-// 收口）。本文件是引擎侧的协议化形态：
+// 收尾）。本文件是引擎侧的协议化形态：
 //
 //   - 子进程 spawn 必经 SDK spawnEngineChild（detached:false / 子 stdin 自有 pipe，
 //     W10 静态断言目标）+ buildOutboundChildEnv（deny 键剥除）；
@@ -170,7 +170,7 @@ export interface SpawnRunResult extends Omit<CollectedOutcome, "sessionId"> {
   /** 会话头身份（header / get_state 握手回填；全 miss 时 undefined）。 */
   sessionId: string | undefined;
   /**
-   * [D5 诊断引用落账] 失败时子进程 stderr tee 文件绝对路径（成功缺省）。语义与
+   * [D5 诊断引用写入 journal 记录] 失败时子进程 stderr tee 文件绝对路径（成功缺省）。语义与
    * 上报判据见 AgentOutcome.stderrTeePath（SDK contract-types——本字段是其引擎侧
    * 装配源，经 pi-engine toOutcome 透传上协议）。
    */
@@ -345,7 +345,7 @@ const SCHEMA_ENFORCEMENT_EXTENSION_SEGS: readonly (readonly string[])[] = [
   ["universal", "structured-output"],
 ];
 
-/** 武装断言的判定输入（纯函数面，测试直构）。 */
+/** 武装断言的判定输入（纯函数部分，测试直构）。 */
 export interface SchemaArmingInput {
   /** 引擎能力位（协议 EngineCapabilities 词表，D3 分流唯一判据）。 */
   schemaEnforcement: EngineCapabilities["schemaEnforcement"];
@@ -367,11 +367,11 @@ export interface SchemaArmingInput {
  * 「武装」概念不适用，直接豁免。分流判据复用协议 EngineCapabilities 词表，不新造机制。
  *
  * 断言③（孙进程启动无扩展加载错误）经 P-C1 实施期核实（pi 实装版 0.84.4 dist）：
- * RPC 命令全集（rpc-types.d.ts 逐一枚举，32 条）无工具清单/扩展加载错误查询面
- * （get_commands = slash 命令、get_state = RpcSessionState，均不暴露工具/扩展面）；
+ * RPC 命令全集（rpc-types.d.ts 逐一枚举，32 条）无工具清单/扩展加载错误查询范围
+ * （get_commands = slash 命令、get_state = RpcSessionState，均不暴露工具/扩展范围）；
  * 且扩展加载失败时 pi 在非交互模式（含 rpc）启动诊断 gate 直接 `process.exit(1)`
  * （main.js：runtime diagnostics 含 "Failed to load extension" → exit 1），到不了
- * RPC 服务面。③不可作为主动查询断言，按设计预留路径退化为 ①+②；扩展加载破坏的
+ * RPC 服务侧。③不可作为主动查询断言，按设计预留路径退化为 ①+②；扩展加载破坏的
  * 秒级可见性由 pi 自身 exit(1) + 引擎既有 exitCode≠0 失败通路 + stderr tee
  * （诊断留痕）承接。
  */
@@ -428,7 +428,7 @@ function hasSchemaEnforcementExtension(spawnArgs: readonly string[]): boolean {
 /**
  * canonical model ref 前置校验：prepare 期第一道门——model 缺失 fail-fast 先于临时
  * 文件创建（writeAppendPromptFile 会落盘 append-system-prompt 临时文件，校验在后会让
- * prepare 期失败的 run 泄漏临时文件：finally 清理面在 try 内，校验抛错时 tempFile 尚无
+ * prepare 期失败的 run 泄漏临时文件：finally 清理路径在 try 内，校验抛错时 tempFile 尚无
  * 清理路径）。
  */
 function requireCanonicalModelRef(model: string | undefined): SpawnModelRef {
@@ -459,7 +459,7 @@ function attachStderrTee(child: ChildProcess): { path: string; close(): void } |
   return stderrTee;
 }
 
-/** [D3 协议版 P6] 武装回执上报（仅 schema 任务；宿主 reducer 对本事件 no-op，落账归 run 事件 journal）。 */
+/** [D3 协议版 P6] 武装回执上报（仅 schema 任务；宿主 reducer 对本事件 no-op，记录归 run 事件 journal）。 */
 function reportSchemaEnforcementArmed(params: SpawnRunParams, callbacks: SpawnRunCallbacks): void {
   if (params.schema !== undefined) {
     callbacks.onEvent({
@@ -511,10 +511,10 @@ function sendPromptWithAck(
  */
 /**
  * stderr tee（W11）：实例维度路径 + 懒打开 + 尺寸轮转（超 TAIJI_LOG_MAX_BYTES rename
- * 副本重开）+ 三判据过期清理（同前缀 + pid 已死 + mtime 过期）。失败面全部静默
- * 降级（取证面不拖垮任务主通道——调用方对无 tee 形态 resume 排空防背压）。
+ * 副本重开）+ 三判据过期清理（同前缀 + pid 已死 + mtime 过期）。失败情形全部静默
+ * 降级（取证侧不拖垮任务主通道——调用方对无 tee 形态 resume 排空防背压）。
  *
- * 返回 path（[D5 诊断引用落账] 失败时随终态应答上报宿主的取证文件指针）——路径在
+ * 返回 path（[D5 诊断引用写入 journal 记录] 失败时随终态应答上报宿主的取证文件指针）——路径在
  * tee 创建时即确定（stderrLogPathFor 纯派生），与懒打开时机无关：零字节 tee（子进程
  * 未写 stderr）也是合法诊断引用（「无 stderr 产出」本身是证据）。
  */
@@ -531,7 +531,7 @@ function createStderrTee(child: ChildProcess): { path: string; close(): void } |
   const logPath = stderrLogPathFor(dataDir, pid);
   let stream: fs.WriteStream | null = null;
   let failed = false;
-  // tee 失败统一留痕（一次性）：tee 是诊断取证面，失败不拖垮任务主通道，但
+  // tee 失败统一留痕（一次性）：tee 是诊断取证侧，失败不拖垮任务主通道，但
   // 「诊断引用可能不可用」必须出声——失败 run 上报的 stderrTeePath 将是空文件/
   // 缺 tail 的文件，宿主与人工排查需知道取证不可信。
   const warnTeeFailed = (where: string, err: unknown): void => {
@@ -668,10 +668,10 @@ function collectRunResult(
     sessionId: identity.sessionId ?? "",
     sessionFile: identity.sessionFile,
     // [F-1 信号解耦] schemaExpected 判定源 = task.schema 声明形态（schema 本体
-    // 存在与否），与 env 派生/注入值不再同源——注入链路变化不影响守卫期待。
+    // 存在与否），与 env 派生/注入值不再同源——注入链路变化不影响检查期待。
     ...(params.schema !== undefined ? { schemaExpected: true } : {}),
   });
-  // [D5 诊断引用落账] 失败时随终态应答上报 stderr tee 路径（引擎应答 failed /
+  // [D5 诊断引用写入 journal 记录] 失败时随终态应答上报 stderr tee 路径（引擎应答 failed /
   // 进程异常退出路径的共同汇聚点 = outcome.error 非空；成功不报——诊断引用只在
   // 失败语义下有意义）。tee 缺席（无 stderr / dataDir 不可解析 / pid 缺失）= 字段
   // 缺省，宿主按「无取证指针」消费。
@@ -831,10 +831,10 @@ export async function runSpawnOnce(
     );
 
     // 2b. stderr tee 落盘（W11，设计 §3.9 同款契约）：pi 任务子进程 stderr 此前
-    // 无消费面（pipe 出来即弃，写满会背压卡死子进程）——tee 到实例维度文件
+    // 无消费方（pipe 出来即弃，写满会背压卡死子进程）——tee 到实例维度文件
     // <engineDataDir>/logs/pi-task-stderr-<pid>.log（懒打开 + 尺寸轮转 + 三判据
     // 过期清理）；dataDir 不可解析（宿主未注入且无 fallback）时仅排空防背压。
-    // [D5 诊断引用落账] tee 路径捕获：失败时随终态应答上报宿主（见 collectOutcome
+    // [D5 诊断引用写入 journal 记录] tee 路径捕获：失败时随终态应答上报宿主（见 collectOutcome
     // 消费点）。
     const stderrTee = attachStderrTee(child);
 
@@ -848,7 +848,7 @@ export async function runSpawnOnce(
     // 协议版上报 = 宿主的独立信号源（监控信号不与施控同源）：宿主等待窗据此判定
     // 武装链路活性，防「断言代码自身失效/被绕过」的自证盲区。仅 schema 任务上报
     // （本包是 native 引擎，capability 分流已由断言前置；无 schema 任务无武装面，
-    // 上报零语义）。宿主 reducer 对本事件 no-op（C3 第④步），落账归 run 事件 journal。
+    // 上报零语义）。宿主 reducer 对本事件 no-op（C3 第④步），记录归 run 事件 journal。
     reportSchemaEnforcementArmed(params, callbacks);
 
     // 4. UI 请求队列（host/askUser 两阶段等待体注入）
@@ -900,12 +900,12 @@ export async function runSpawnOnce(
 
 // [subagent-model-switch §7.3] setModel 子进程通路（定位活跃子进程 → 命令写入 →
 // 读应答 → get_state 回读）落 control-responses.ts——spawn-runner 职责 = spawn 执行
-// 与 run 生命周期，模型热切控制面与其正交（该编排移入即越本文件 max-lines 上限）；
+// 与 run 生命周期，模型热切控制范围与其正交（该编排移入即越本文件 max-lines 上限）；
 // 接线原语复用不变：stdin-writer sendSetModelCommand / active-children 记账表 /
 // pump 应答分发（spawn-run-pump.ts response 分支）。
 
 // 活跃子进程记账（自本文件提取至 active-children.ts，行为等价）：
-// re-export 保持既有导入面（index.ts / pi-engine.ts / __tests__）。
+// re-export 保持既有导入范围（index.ts / pi-engine.ts / __tests__）。
 export {
   getActiveChild,
   killAllActiveChildren,

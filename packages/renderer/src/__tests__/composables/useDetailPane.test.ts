@@ -8,7 +8,7 @@
  * - modified 文件 git diff 非空 → 保持 diff 模式
  * - 无 git 改动文件 → 直接 preview（file.read）
  * - 用户手动 toggle 切回 Diff（空 patch）→ 不降级，显示空 diff 内容
- * - U6 并发守卫（per-tab stale write + 跨 tab 不互相覆盖）
+ * - U6 并发检查（per-tab stale write + 跨 tab 不互相覆盖）
  * - S4 注入语义：未开新增并激活 / 已开仅激活（tab 计数不变、不重载）/ 不设上限
  * - S4 tab 切换关闭：激活转移右邻/左邻、全关空态、关闭清选中态
  * - S4 keep-alive 多实例：切 tab 不丢滚动锚点与面板内模式态（diff/preview）
@@ -171,7 +171,7 @@ describe('useDetailPane diff 空 → 自动降级 preview', () => {
   })
 })
 
-describe('U6: useDetailPane 并发守卫（W3 / L3，per-tab 粒度）', () => {
+describe('U6: useDetailPane 并发检查（W3 / L3，per-tab 粒度）', () => {
   it('慢文件的迟到响应只落在自己的 tab 实例（跨 tab 不互相覆盖）', async () => {
     vi.useFakeTimers()
     try {
@@ -210,7 +210,7 @@ describe('U6: useDetailPane 并发守卫（W3 / L3，per-tab 粒度）', () => {
     }
   })
 
-  it('同 tab 加载被模式切换抢占 → 旧请求 stale write 丢弃（token 守卫）', async () => {
+  it('同 tab 加载被模式切换抢占 → 旧请求 stale write 丢弃（token 检查）', async () => {
     const sid = 's1'
     const path = 'race.txt'
 

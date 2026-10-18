@@ -23,7 +23,7 @@ export default {
     resubmitNoResponse: 'agent 未响应：未重新提交审批。可重试，或点击左侧的『退出』按钮退出计划模式',
     // D9③ agent 自审结论行（ready 分支截断展示 + Popover 全文）
     selfReviewLabel: 'agent 自审结论',
-    // §3.5 守卫与回看：0 评论时「提交评论修订」禁用的 tooltip 说明；评论计数可点（回看草稿）
+    // §3.5 检查与回看：0 评论时「提交评论修订」禁用的 tooltip 说明；评论计数可点（回看草稿）
     reviseEmptyDisabled: '先在文档中划选添加评论，再提交修订',
     viewDrafts: '查看评论草稿',
   },
@@ -72,7 +72,7 @@ export default {
     // E2：docs 登记的文件不存在（file.read 失败）→ 占位错误态 + agent 可重新产出提示，条目不清
     notFound: '文档不存在或已删除',
     notFoundHint: '该文件可能已被移动或删除。可让 agent 重新产出，或在对话中说明处理方式',
-    // 首拉失败（分区 loadError）在面板空态的就近呈现（C-U1）：错误原文 + 恢复指引
+    // 首次拉取失败（分区 loadError）在面板空态的就近呈现（C-U1）：错误原文 + 恢复指引
     loadErrorHint: '计划状态加载失败，请稍后重试或重开会话',
     // [RD-2#4] tab/修订切换即清正文 + loading 态（请求期间头部已新条目，残留旧正文 = 串内容误读）
     loading: '加载中…',

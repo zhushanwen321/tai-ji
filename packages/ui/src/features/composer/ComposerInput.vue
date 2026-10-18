@@ -108,7 +108,7 @@ const elRef = ref<HTMLDivElement | null>(null)
  *  placeholder 空态恒显不再依赖聚焦态） */
 const isFocused = ref(false)
 
-// contenteditable 输入机制（getText/syncEmpty/触发检测/光标滚动/选区保存恢复/IME 守卫/换行/粘贴）
+// contenteditable 输入机制（getText/syncEmpty/触发检测/光标滚动/选区保存恢复/IME 检查/换行/粘贴）
 // 逻辑在 core input/contenteditable.ts（W2 迁移，deps 注入 pasteImage）。
 // 两个 core 模块互依：contenteditable 的 onKeydown 要调 chip 模块的 handleBackspaceOnChip，
 // chip 模块的 onChanged/restoreSelection 要用 contenteditable 的 onInput/restoreSelection。
@@ -207,7 +207,7 @@ function onEditorMousedown(e: MouseEvent): void {
   }
 }
 
-// clear / setText / insertTextAtCursor 不再在组件定义：DOM 写入已收口进 core composable
+// clear / setText / insertTextAtCursor 不再在组件定义：DOM 写入已收敛进 core composable
 // （savedRange 闭包在 composable 内，组件层无法重置它；详见 contenteditable.ts 注释）。
 // 组件通过 defineExpose 透传 composable 返回的同名方法，维持对外 API 契约不变。
 
@@ -304,7 +304,7 @@ onMounted(() => {
    用 --neutral-dim（三级文字/占位，design-tokens SSOT）。
    设计意图：占位是三级最暗层，与输入正文 --fg 拉开梯度，弱化提示语。
    —— absolute 脱文档流：不占行内位，光标始终在内容区最左（开头）而非 placeholder 末尾。
-   —— 空态恒显（含聚焦，demo textarea 原生 placeholder 同形态）：R3 无缝输入面，
+   —— 空态恒显（含聚焦，demo textarea 原生 placeholder 同形态）：R3 无缝输入范围，
       聚焦后光标与 placeholder 共存，光标即焦点反馈，无聚焦边界。 */
 .composer-input.is-empty::before {
   content: attr(data-placeholder);

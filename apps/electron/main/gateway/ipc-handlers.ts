@@ -33,12 +33,12 @@ export function registerIpcHandlers(deps: IpcHandlerDeps): void {
   registerSoundHandlers()
   // local-file servable 预检 + 源码读取 IPC（chat-html-support §6.9 D9）：挂载前准入
   // 检查与源码态读取，谓词与 main.ts 的 local-file 协议 handler 同一模块；准入前缀 =
-  // 产物子树收窄面（computeLocalFileReadPrefixes），无需注入 deps
+  // 产物子树收窄范围（computeLocalFileReadPrefixes），无需注入 deps
   registerLocalFileHandlers()
   registerRendererLogHandler()
   // [D6-⑨ u7] toolResult 图片落盘（含启动清扫：孤儿扫描 + 软上限）
   registerImageCacheHandlers()
-  // [A9②] logs 保留期清理手动触发（验收调试口，无鉴权面，不进产品 UI）
+  // [A9②] logs 保留期清理手动触发（验收调试口，无鉴权，不进产品 UI）
   registerLogRetentionDebugHandler()
   // [crash-forensics D6 u3a] 诊断包导出（设置页/死态页入口，保存对话框由 main 弹出）
   registerDiagnosticsExportHandler()

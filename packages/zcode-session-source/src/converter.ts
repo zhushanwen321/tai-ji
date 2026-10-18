@@ -1,13 +1,13 @@
 /**
  * zcode → canonical session 转换器（自 runtime services/session/zcode-import/converter.ts
  * 迁入改造，session-reader-shared-core 设计 §3.3 D1 + §5 Phase 2；runtime 侧旧文件已
- * 随共享基座实施收口删除（git 可追溯），本包为其唯一现行承载）。
+ * 随共享基座实施收敛删除（git 可追溯），本包为其唯一现行承载）。
  *
  * 输入 = 单会话全量行集（message 按 sequence、part 按 (message.sequence, part.sequence)
  * 联合序，sqlite-access.getSessionTranscript）；输出 = canonical `Entry[]`（session-core
  * 严格 Entry 模型，parentId 顺序链完整）。三层映射：
- * ① 消息级投影分派——逐条消息先经 classifyMessage()（projection.ts，asar 移植体）判定
- *    六策略之一（或 unclassified），按消息投影对齐设计 §7.3 映射表落点（三类丢弃整条不产
+ * ① 消息派生视图分派——逐条消息先经 classifyMessage()（projection.ts，asar 移植体）判定
+ *    六策略之一（或 unclassified），按消息派生视图对齐设计 §7.3 映射表落点（三类丢弃整条不产
  *    entry + L1/L2 聚合降级，unclassified 丢弃 + 独立告警码）；② part 级映射——消息内部
  *    按 session-import-unified 设计 §3.4 权威映射表逐条实现：T1 header/session_info /
  *    T2 user / T3 assistant 按 step-finish 切段 / T3b 工具名映射 / T3c stopReason 映射 /
@@ -15,18 +15,18 @@
  *    D2 完整规格（三路关联判据 + 单条 compaction entry + firstKeptEntryId 三级锚悬空门 +
  *    1:N 最早联合序锚 + 孤儿二分），关联在发射前预扫描趟建立（compaction.ts）。
  *
- * 来源注记：消息投影分派 / 结构化降级（ImportDegradation 五码闭集）/ compaction D2 全规格 /
+ * 来源注记：消息派生视图分派 / 结构化降级（ImportDegradation 五码闭集）/ compaction D2 全规格 /
  * usage RT-5#1 缺省语义 / 时间戳 RT-5#8 不伪造 1970，均自 runtime zcode-import dev 演进版
  * 移植（git 可追溯）；dev 版内部的降级通道（孤儿/悬空/summary 不可用 → custom +
  * compaction_unlinked）随规格一并移植。
  *
  * 相对 dev 版的改造（canonical 契约，设计 D1「canonical 模型 = pi 形态的严格 Entry 树」）：
- * - emitEntry 不再 stringify 落 JSONL 行，改产 Entry 对象（toCanonicalEntry 收口，键序仍按
+ * - emitEntry 不再 stringify 落 JSONL 行，改产 Entry 对象（toCanonicalEntry 收敛，键序仍按
  *   `{type, id, parentId, timestamp, ...payload}` 构造——serializeSession 的字节契约
  *   责任在构造方，导入侧薄包装拼 header 行 + serializeSession 即得与旧产物逐字节
  *   兼容的 JSONL）；message 内 pi 透传字段（timestamp/provider/model/usage/stopReason、
  *   toolResult 的 details/isError、session_info 的 name）是 canonical Entry 冻结接口外
- *   的合法载荷字段——经宽形态构造 + 边界收口守卫承载，序列化原样落盘、reader 渲染链
+ *   的合法载荷字段——经宽形态构造 + 边界收敛检查承载，序列化原样落盘、reader 渲染链
  *   可直接消费，不做有损裁剪。
  * - entry id 生成收敛基座单点：normalizeZcodeRowId（8-hex 零填充，与 pi 自身
  *   randomUUID().slice(0,8) 同形态；pi 侧对 entry id 仅作 opaque map key 消费）。
@@ -35,12 +35,12 @@
  *   read.ts——converter 聚焦纯转换映射，开库→查询→转换→dispose 组合编排在彼）。
  *   header 由库内 session 行构造：id 归一化（normalizeZcodeSessionId）、timestamp 取
  *   session 创建时间、cwd 缺省留空——zcode 会话无 cwd 概念，不伪造（D1）。
- *   首行 `{type:'session', version:3, ...header}` 不由本模块产出（属序列化装配面：
+ *   首行 `{type:'session', version:3, ...header}` 不由本模块产出（属序列化装配逻辑：
  *   导入薄包装 / reader 侧各自拼装）。
  * - 时间不可解不伪造（RT-5#8）：session.timeCreated / message.time.created 不可解时
  *   timestamp 键缺省（header.timestamp / entry.timestamp / message.timestamp 均可选），
  *   降级登记一次，不以 0 产出 1970 假时间戳污染排序与按日统计。
- * - 错误面归消费侧（§1.5 契约第 4 条）：session 行不存在、归一化失败、查询/JSON
+ * - 错误范围归消费侧（§1.5 契约第 4 条）：session 行不存在、归一化失败、查询/JSON
  *   解析失败均抛普通 Error 原样上抛——reader 侧映射 zcode_* 词表、runtime 导入侧
  *   映射 import_* 词表，本包不私建错误码与恢复话术（dev 版的 convertZcodeSession
  *   db 组合 + ImportServiceError 不移植）。
@@ -72,7 +72,7 @@ import {
 } from './assistant-mapping.ts'
 import type { ProjectionPolicy } from './semantics.ts'
 
-// 公共面：resolveFirstKeptEntryId 实现在 compaction.ts，经再导出维持从本模块导入的
+// 公共范围：resolveFirstKeptEntryId 实现在 compaction.ts，经再导出维持从本模块导入的
 // 既有路径（compaction-firstkept.test 等锚点；dev 版同款先例）。
 export { resolveFirstKeptEntryId }
 
@@ -209,9 +209,9 @@ class EntryChain {
   }
 }
 
-// ── canonical Entry 边界收口（宽形态构造 → 严格模型）────────────────────────────────
+// ── canonical Entry 边界收敛（宽形态构造 → 严格模型）────────────────────────────────
 // 转换器自构造的 entry 行携带 canonical 冻结接口外的合法载荷字段（message.usage 等，
-// 见模块头注），全程以宽形态构造；唯一收口点在此——必填结构字段守卫不满足即抛
+// 见模块头注），全程以宽形态构造；唯一收敛点在此——必填结构字段检查不满足即抛
 // （converter 自产物违约 = 编程错误，fail-fast 优于让下游拿到结构坏 entry）。
 const MESSAGE_ROLES: ReadonlySet<string> = new Set(['user', 'assistant', 'toolResult'])
 
@@ -237,9 +237,9 @@ function toCanonicalEntry(raw: Record<string, unknown>): Entry {
       throw new Error(`converter 内部错误：entry message.role 非法（type=${type}，id=${id}）`)
     }
   }
-  // 上方守卫已核验必填结构字段（type/id/parentId/message.role）；接口外载荷字段
+  // 上方检查已核验必填结构字段（type/id/parentId/message.role）；接口外载荷字段
   // （message.usage 等，见模块头注）是合法产物，Record → Entry 的剩余差距仅为
-  // TS 无法从守卫推定的必填键存在性，两段断言收窄（守卫即运行时 guard）
+  // TS 无法从检查推定的必填键存在性，两段断言收窄（检查即运行时 guard）
   return raw as unknown as Entry
 }
 
@@ -256,9 +256,9 @@ function newSegment(): AssistantSegment {
   return { content: [], toolResults: [], startMs: undefined }
 }
 
-// T3c stopReason / usage 映射与共享守卫（isRecord / asFinite / asNonEmptyString）在
+// T3c stopReason / usage 映射与共享检查（isRecord / asFinite / asNonEmptyString）在
 // assistant-mapping.ts（字段映射域：mapStopReason / unsealedStopReason（取消轮 error 优先）/
-// zeroUsage（pi 读面不变量门）/ usageFromStepFinish——RT-5#1 缺省语义见其头注）。
+// zeroUsage（pi 读侧不变量门）/ usageFromStepFinish——RT-5#1 缺省语义见其头注）。
 
 /**
  * T4：tool part 的 state.output → pi toolResult 的 content/details 三形态。
@@ -324,7 +324,7 @@ export function convertZcodeTranscript(
   const degradations: ImportDegradation[] = []
   const entries: Entry[] = []
 
-  // RT-5#8：session.timeCreated 不可解（纯函数直接调用绕过 sqlite-access 行守卫时）不以 0
+  // RT-5#8：session.timeCreated 不可解（纯函数直接调用绕过 sqlite-access 行检查时）不以 0
   // 兜底——0 会产出 1970 假时间戳污染排序与按日统计。降级登记一次，header.timestamp /
   // entry.timestamp / message.timestamp 键缺省（SessionHeader/Entry 字段均可选）。
   const sessionCreatedMs = asFinite(session.timeCreated)
@@ -379,11 +379,11 @@ export function convertZcodeTranscript(
   }
 
   // T1：session_info entry（name = session.title；空 title 不带 name 字段——可选语义）。
-  // 首行 header（{type:'session', version:3, ...header}）不在此产出（序列化装配面）。
+  // 首行 header（{type:'session', version:3, ...header}）不在此产出（序列化装配逻辑）。
   emitEntry('session_info', headerTimestamp, typeof session.title === 'string' && session.title.length > 0 ? { name: session.title } : {})
 
   for (const [msgIndex, msg] of messages.entries()) {
-    // 分派以投影分类结果为准（§7.3 映射表）——role 不再是分派依据（D1：显隐与 zcode GUI
+    // 分派以派生视图分类结果为准（§7.3 映射表）——role 不再是分派依据（D1：显隐与 zcode GUI
     // 同源，合成消息/隐藏注入不再冒充用户消息；无标记未知 role 由分类器兜底链裁决落点）。
     // 分类结果已在 D2 预扫描趟计算（关联判据需要全行集策略视图），此处复用。
     const policy = policies[msgIndex]
@@ -456,7 +456,7 @@ function convertMessageByPolicy(
       break
     default: {
       const exhaustive: never = policy
-      throw new Error(`未处理的投影策略：${String(exhaustive)}`)
+      throw new Error(`未处理的派生视图策略：${String(exhaustive)}`)
     }
   }
 }
@@ -547,7 +547,7 @@ function convertUserMessage(
 
 /**
  * T3：assistant message 按 step-finish 切段为多条 pi assistant entry + 紧随的 toolResult。
- * 切分规则：每个 step-finish 闭合一条 entry（step-start/消息结束边界开段；空段不产出）。
+ * 切分规则：每个 step-finish 完成一条 entry（step-start/消息结束边界开段；空段不产出）。
  */
 function convertAssistantMessage(
   msg: ZcodeMessageInput,
@@ -562,7 +562,7 @@ function convertAssistantMessage(
   const modelId = typeof data.modelId === 'string' ? data.modelId : undefined
   let segment = newSegment()
 
-  /** 闭合当前段：产出 assistant entry（空段不产出）+ 紧随的 toolResult entries。 */
+  /** 完成当前段：产出 assistant entry（空段不产出）+ 紧随的 toolResult entries。 */
   const closeSegment = (finishReason: unknown, usage: Record<string, unknown> | undefined): void => {
     if (segment.content.length === 0) return
     // 段时间戳 = 段内首个携带 time.start 的 part ?? message.time.created（§3.4 T3 顶级补充）
@@ -578,7 +578,7 @@ function convertAssistantMessage(
         ...(modelId !== undefined && { model: modelId }),
         // 产物不变量门：usage 恒在场（缺 → 零值兜底，zeroUsage 注释）
         usage: usage ?? zeroUsage(),
-        // 段有 step-finish 收口 → 采信其 finish；未收口段（取消/失败尾段）→ 消息级
+        // 段有 step-finish 收尾 → 采信其 finish；未收尾段（取消/失败尾段）→ 消息级
         // data.error 优先，无 error 证据才 'stop' 保底（T3c 事故补强）
         stopReason: finishReason !== undefined ? mapStopReason(finishReason) : unsealedStopReason(data),
       },
@@ -593,7 +593,7 @@ function convertAssistantMessage(
 
   for (const part of msg.parts) {
     const type = part.type
-    // 段边界：step-start 开新段（前段若未收口仍有内容——异常形态防御，按尾段语义闭合）
+    // 段边界：step-start 开新段（前段若未收尾仍有内容——异常形态防御，按尾段语义完成）
     if (type === 'step-start') {
       closeSegment(undefined, undefined)
       continue
@@ -625,7 +625,7 @@ function convertAssistantMessage(
     }
     handleNonTextPart(part, msg, createdMs, createdIso, emitEntry, degradations, compactionDisposition)
   }
-  // 消息结束边界：未收口且有内容则闭合（尾段 stopReason 走 data.error 优先的
+  // 消息结束边界：未收尾且有内容则完成（尾段 stopReason 走 data.error 优先的
   // unsealedStopReason；usage 无源则零值兜底——取消/失败轮的标准落点）
   closeSegment(undefined, undefined)
 }

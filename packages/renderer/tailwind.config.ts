@@ -5,7 +5,7 @@ import sharedPreset from '@taiji/shared/tailwind-preset'
  * taiji Tailwind 配置 · v3 冷蓝暗色（ADR-0019）。
  * colors 主体 / fontFamily / borderRadius / boxShadow / .content-col plugin 经
  * @taiji/shared/tailwind-preset 共享（与 mobile-renderer 单一 SSOT，防两包漂移；
- * 等价性守卫见 preset 文件头注释）。本文件只落 renderer 专属差异：
+ * 等价性检查见 preset 文件头注释）。本文件只落 renderer 专属差异：
  *  - colors['border-hairline']（v6 §4.3 hairline 0.05 弱分隔语义色映射）
  *  - borderColor.hairline（生成 .border-hairline 工具类，见下方 [HISTORICAL] 注释）
  *  - taiji-spin 品牌 animation

@@ -62,7 +62,7 @@ function makeMocks() {
     })),
     // S3-W2：创建入口收敛点（lifecycle 三处 return 前调用）
     notifySessionCreated: vi.fn(),
-    // S2 ISP 化：结构性满足 lifecycle 窄接口（10 方法 = 实际消费面），无强转
+    // S2 ISP 化：结构性满足 lifecycle 窄接口（10 方法 = 消费方实际用到的全部），无强转
     getLaunchPresetOptions: vi.fn(async () => undefined),
     findScannedSession: vi.fn(() => undefined),
     removeSessionEntry: vi.fn(),
@@ -103,7 +103,7 @@ describe('W5: session-lifecycle create record 调用（homedir 过滤归位 serv
     fsMock.existsSync.mockReturnValue(false)
     const { lifecycle, recordFn } = makeMocks()
     await lifecycle.create('/deleted/path', 'deleted')
-    // [方案A] lifecycle 无条件 record（传降级后的 homedir），service 层的 homedir 守卫负责过滤
+    // [方案A] lifecycle 无条件 record（传降级后的 homedir），service 层的 homedir 检查负责过滤
     expect(recordFn).toHaveBeenCalledTimes(1)
     expect(recordFn).toHaveBeenCalledWith(homedir())
   })

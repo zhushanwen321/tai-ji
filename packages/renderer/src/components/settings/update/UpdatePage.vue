@@ -19,7 +19,7 @@
       </div>
     </header>
 
-    <!-- RD-4#8：读配置失败常驻提示（默认值非已存值）+ 重试；可落盘控件禁用直到重拉成功 -->
+    <!-- RD-4#8：读配置失败常驻提示（默认值非已存值）+ 重试；可落盘控件禁用直到重新拉取成功 -->
     <div
       v-if="loadError"
       data-testid="update-page-load-error"
@@ -272,7 +272,7 @@ const preDownloadBusy = preDownloadField.busy
 /** 更新来源偏好枚举（与 SelectItem value 一一对应）。 */
 const UPDATE_SOURCE_PREFS = ['auto', 'github', 'gitcode'] as const
 
-/** 运行时守卫：把 Select 的字符串 value 收敛为 UpdateSourcePref 字面量联合（无需 as 断言）。 */
+/** 运行时检查：把 Select 的字符串 value 收敛为 UpdateSourcePref 字面量联合（无需 as 断言）。 */
 function isUpdateSourcePref(value: string): value is UpdateSourcePref {
   return (UPDATE_SOURCE_PREFS as readonly string[]).includes(value)
 }
@@ -306,7 +306,7 @@ const appVersion = __APP_VERSION__
 
 // ── Lifecycle ──
 
-/** 加载/重试：全部 loader 并行执行，任一失败归并置 loadError（控件禁用直到重拉成功）。 */
+/** 加载/重试：全部 loader 并行执行，任一失败归并置 loadError（控件禁用直到重新拉取成功）。 */
 async function loadConfig(): Promise<void> {
   await group.loadAll()
 }
@@ -331,7 +331,7 @@ function onTogglePreDownload(value: boolean | string): void {
  * （update-multi-source D3：手动「检查更新」才是 force 语义）。
  */
 function onSourceChange(value: string): void {
-  // 守卫落 persist 前：清单外值禁止进入乐观写/落盘路径
+  // 检查落 persist 前：清单外值禁止进入乐观写/落盘路径
   if (!isUpdateSourcePref(value)) return
   void updateSourceField.persist(value)
 }
@@ -342,7 +342,7 @@ function onSourceChange(value: string): void {
 const PROXY_MODES = ['system', 'manual', 'disabled'] as const
 type ProxyMode = (typeof PROXY_MODES)[number]
 
-/** 运行时守卫：把 Select 的字符串 value 收敛为 ProxyMode 字面量联合（无需 as 断言）。 */
+/** 运行时检查：把 Select 的字符串 value 收敛为 ProxyMode 字面量联合（无需 as 断言）。 */
 function isProxyMode(value: string): value is ProxyMode {
   return (PROXY_MODES as readonly string[]).includes(value)
 }
@@ -350,7 +350,7 @@ function isProxyMode(value: string): value is ProxyMode {
 /**
  * 模式切换。
  * Select 的 SelectItem value 恒为字符串，但 reka-ui 事件载荷是 AcceptableValue，
- * 故在绑定处 String() 收敛为 string；这里再用 isProxyMode 守卫收敛为字面量联合。
+ * 故在绑定处 String() 收敛为 string；这里再用 isProxyMode 检查收敛为字面量联合。
  */
 function onModeChange(value: string) {
   if (!isProxyMode(value)) return

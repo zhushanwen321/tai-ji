@@ -2,9 +2,9 @@
 //
 // 链路锁定：bus 'plugin-permission-request'（companion-bridge 模块级 controller）→
 // App 内 PermissionRequestDialog 渲染 → 勾选/批准/拒绝 → transport RPC
-// （plugin.approvePermissions / plugin.denyPermissions）→ pending 收口。
+// （plugin.approvePermissions / plugin.denyPermissions）→ pending 收尾。
 //
-// 状态机本体（畸形事件守卫 / permissions 拷贝 / BM3 失败保持 / D3 expired 撤窗 /
+// 状态机本体（畸形事件检查 / permissions 拷贝 / BM3 失败保持 / D3 expired 撤窗 /
 // 新请求覆盖）单测在 packages/ui extension-host
 // __tests__/permission-request-controller.test.ts（双壳共享 factory）；错误行渲染
 // 归 PermissionRequestDialog 组件测试。本文件只钉移动壳装配（App.vue provide +
@@ -79,7 +79,7 @@ describe('移动壳权限审批链装配（remote-use-mobile D7「权限审批 �
     shellConnectionState.value = 'connecting'
   })
 
-  it('bus 事件 → 弹窗渲染（插件名 + 权限项）→ 部分批准 → transport 回传参数正确 → pending 收口关弹窗', async () => {
+  it('bus 事件 → 弹窗渲染（插件名 + 权限项）→ 部分批准 → transport 回传参数正确 → pending 收尾关弹窗', async () => {
     wrapper = mountApp()
     expect(wrapper.find('[data-testid="permission-dialog"]').exists()).toBe(false)
 
@@ -102,7 +102,7 @@ describe('移动壳权限审批链装配（remote-use-mobile D7「权限审批 �
     expect(mockApprove).toHaveBeenCalledTimes(1)
     expect(mockApprove).toHaveBeenCalledWith('p1', ['fs.read'])
     expect(mockDeny).not.toHaveBeenCalled()
-    // 回传成功 → pending=false → 弹窗关闭（状态收口）
+    // 回传成功 → pending=false → 弹窗关闭（状态收尾）
     expect(useMobilePermissionRequest().pending).toBe(false)
     expect(wrapper.find('[data-testid="permission-dialog"]').exists()).toBe(false)
   })

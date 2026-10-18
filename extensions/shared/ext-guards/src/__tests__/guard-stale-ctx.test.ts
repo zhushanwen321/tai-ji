@@ -2,17 +2,17 @@
 //
 // guardStaleCtx 单测——验收条款逐条对应（crash-resilience u1-ext-guard）：
 //   a. 前置代际检查：isCtxStale=true → fn 不执行、stale 静默降级（返回 undefined）
-//   b. 非 stale 错误原样上抛（守卫不吞真实 bug，同步 throw 与 async rejection 双面）
+//   b. 非 stale 错误原样上抛（检查不吞真实 bug，同步 throw 与 async rejection 双面）
 //   c. onStale 回调：前置命中无参调用；文案分诊命中携带错误调用；缺省走 TAIJI_AGENT_DEBUG=1 stderr
 //   d. 文案子串匹配：STALE_CTX_MARKER 命中即静默（isCtxStale=false 时文案兜底仍生效）
 //   e. async fn：stale rejection → resolve undefined；非 stale rejection → 原样 reject
-//   f. 正常路径：返回值/resolve 值原样透传（守卫不改变正常路径，A2 负面验证的单测面）
+//   f. 正常路径：返回值/resolve 值原样透传（检查不改变正常路径，A2 负面验证的单测）
 
 import { describe, expect, it, vi, afterEach } from "vitest";
 
 import { STALE_CTX_MARKER, guardStaleCtx } from "../index.ts";
 
-/** pi 实装 stale 文案的完整形态（E1 崩溃堆栈原文，探针 PS-30 守卫其稳定性）。 */
+/** pi 实装 stale 文案的完整形态（E1 崩溃堆栈原文，探针 PS-30 检查其稳定性）。 */
 const PI_STALE_ERROR = `This extension ctx is stale ${STALE_CTX_MARKER} or reload. Do not use a captured pi or command ctx after ctx.newSession().`;
 
 afterEach(() => {
@@ -56,7 +56,7 @@ describe("guardStaleCtx 前置代际检查（G1 形态）", () => {
 	});
 });
 
-describe("guardStaleCtx 同步抛错分诊（F2 形态同步面）", () => {
+describe("guardStaleCtx 同步抛错分诊（F2 形态同步部分）", () => {
 	it("非 stale 错误：原样上抛（同一错误实例，不吞不包装）", () => {
 		const boom = new Error("real bug: schema validation exploded");
 		const onStale = vi.fn();
@@ -108,7 +108,7 @@ describe("guardStaleCtx 同步抛错分诊（F2 形态同步面）", () => {
 	});
 });
 
-describe("guardStaleCtx async fn（F2 形态异步面，scheduler tick 迁移形态）", () => {
+describe("guardStaleCtx async fn（F2 形态异步侧，scheduler tick 迁移形态）", () => {
 	it("stale rejection：resolve 为 undefined（不 reject，fire-and-forget 安全）", async () => {
 		const onStale = vi.fn();
 
@@ -140,7 +140,7 @@ describe("guardStaleCtx async fn（F2 形态异步面，scheduler tick 迁移形
 });
 
 describe("guardStaleCtx onStale 缺省（默认 debug 日志）", () => {
-	it("TAIJI_AGENT_DEBUG=1：stderr 写入守卫降级行（含 label 与错误文案）", () => {
+	it("TAIJI_AGENT_DEBUG=1：stderr 写入检查降级行（含 label 与错误文案）", () => {
 		vi.stubEnv("TAIJI_AGENT_DEBUG", "1");
 		const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
 

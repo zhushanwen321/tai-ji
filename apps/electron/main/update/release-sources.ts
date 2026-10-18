@@ -7,7 +7,7 @@
  *   后的结构；checker 保持编排门面。
  * - D2：GitCode 字段差异在 normalize 层补齐（逐字段规格见 normalizeSourceRelease）。
  * - github 分支迁移自 release-checker.ts 的 doFetchGitHubLatestRelease
- *   （URL / headers / 形状守卫 / HTTP status 分流语义）；两源共用 upgradeFetch 双引擎
+ *   （URL / headers / 形状检查 / HTTP status 分流语义）；两源共用 upgradeFetch 双引擎
  *   + 代理通道参数（代理优先 + 网络失败降直连重试一次，对齐 fetchGitHubLatestRelease 编排）。
  *
  * M0 探针输入（实测，2026-09-07）：
@@ -20,7 +20,7 @@
  *
  * 错误分类（对齐 release-checker.ts 现状 catch 风格 + 适配层失败显式化）：
  * - ReleaseFetchError(kind)：'network'（网络失败/非法 JSON）/ 'rate-limited'（GitHub 403/429；
- *   GitCode 无限流响应头，不识别限流，一律按 HTTP 失败收口 null）/ 'bad-shape'（形状守卫失败）。
+ *   GitCode 无限流响应头，不识别限流，一律按 HTTP 失败收尾 null）/ 'bad-shape'（形状检查失败）。
  *   u-checker 编排按 kind 把失败归入「该源失败」进源降级。
  * - 404/其他非 2xx 返回 null（服务器已响应、重试无意义，对齐 doFetchGitHubLatestRelease 现状；
  *   by-tag 无此 tag = 发布时间窗/部分同步失败窗口，null 交由调用方判定对侧不可用）。
@@ -76,7 +76,7 @@ export type ReleaseFetchErrorKind = 'network' | 'rate-limited' | 'bad-shape'
 /**
  * Release 源 fetch 可归类错误。
  *
- * 与「404/null 收口」可区分：null = 服务器已响应且语义为「无此 release / 非 2xx」；
+ * 与「404/null 收尾」可区分：null = 服务器已响应且语义为「无此 release / 非 2xx」；
  * 本错误 = 网络失败（可换通道/换源重试）、限流（需退避）、形状坏（响应体不可信）。
  */
 export class ReleaseFetchError extends Error {
@@ -139,7 +139,7 @@ interface SourceAdapter {
   headers?: Record<string, string>
   /**
    * 是否识别限流信号：GitHub 有 60 次/h 匿名配额，403/429 → rate-limited 可归类错误；
-   * GitCode 无限流响应头（§4.1），403/429 与其他非 2xx 同收口 null。
+   * GitCode 无限流响应头（§4.1），403/429 与其他非 2xx 同收尾 null。
    */
   rateLimitAware: boolean
 }
@@ -254,8 +254,8 @@ function normalizeSourceAsset(a: unknown): SourceReleaseAsset | undefined {
 
 /**
  * 两源统一 normalize（D2 逐字段规格）：
- * - 形状守卫（两源同款）：tag_name 非 string / 资产容器非 array → bad-shape 可归类错误
- *   （不把错误推迟到下游消费点——对齐 doFetchGitHubLatestRelease 守卫意图，失败显式化）
+ * - 形状检查（两源同款）：tag_name 非 string / 资产容器非 array → bad-shape 可归类错误
+ *   （不把错误推迟到下游消费点——对齐 doFetchGitHubLatestRelease 检查意图，失败显式化）
  * - prerelease → `=== true` 收窄（防字符串编码 "false" 被 truthy 误判）
  * - draft → 非 boolean 一律 undefined（GitCode null → undefined）
  * - published_at → gitcode 恒 ''（无此字段）；github 原样
@@ -263,7 +263,7 @@ function normalizeSourceAsset(a: unknown): SourceReleaseAsset | undefined {
  * - release_status → 忽略
  * - asset size/digest → 缺失即 undefined（checker manifest fallback 填充）
  *
- * @throws ReleaseFetchError kind 'bad-shape' 形状守卫失败
+ * @throws ReleaseFetchError kind 'bad-shape' 形状检查失败
  */
 export function normalizeSourceRelease(source: UpdateSource, raw: unknown): SourceRelease {
   if (typeof raw !== 'object' || raw === null) {
@@ -324,7 +324,7 @@ export function resolveManifestDownloadUrl(
  * @returns normalize 后的 SourceRelease；非 2xx（含 404，限流除外）返回 null
  * @throws ReleaseFetchError 'rate-limited'（GitHub 403/429，两引擎同款重建——
  *         undici ok:false 与 curl exit 22 携带 httpStatusCode 两形态等价）/
- *         'bad-shape'（形状守卫）/ 'network'（网络错误、双引擎均网络失败、非法 JSON）
+ *         'bad-shape'（形状检查）/ 'network'（网络错误、双引擎均网络失败、非法 JSON）
  */
 async function doFetchSourceRelease(
   source: UpdateSource,
@@ -359,7 +359,7 @@ async function doFetchSourceRelease(
     // 可归类错误直通（限流/形状坏），不得被下方包装吞掉 kind
     if (err instanceof ReleaseFetchError) throw err
     // curl 引擎 HTTP 状态交互规则（对齐 release-checker D8 重建）：携带 httpStatusCode 的
-    // CurlFetchError = 服务器已响应——GitHub 403/429 重建限流错误；其他按非 2xx null 收口，
+    // CurlFetchError = 服务器已响应——GitHub 403/429 重建限流错误；其他按非 2xx null 收尾，
     // 均不触发外层「代理→直连」通道重试
     if (isCurlHttpStatusError(err)) {
       if (
@@ -377,7 +377,7 @@ async function doFetchSourceRelease(
       return null
     }
     // 网络错误（含不带 httpStatusCode 的 CurlFetchError——exit 7/28 等网络级失败）与
-    // 非法 JSON 均归 network 桶抛出（对齐现状「fetch failed」收口 + 非法 JSON 同桶语义）
+    // 非法 JSON 均归 network 桶抛出（对齐现状「fetch failed」收尾 + 非法 JSON 同桶语义）
     throw new ReleaseFetchError(
       'network',
       source,
@@ -454,7 +454,7 @@ function pickAsset(
 /**
  * SourceRelease → LatestReleaseInfo 组装。
  *
- * prerelease/draft 拦截在此收口（返回 null = 非 stable，不可作升级目标）：该防御
+ * prerelease/draft 拦截在此收尾（返回 null = 非 stable，不可作升级目标）：该防御
  * 等价于现状 checker 在 buildLatestReleaseInfo 前执行的防御 b——LatestReleaseInfo
  * 不承载 prerelease/draft 字段，拦截必须在信息丢失前完成。防御 c（严格 semver）
  * 与版本比较仍归 checker（version 字段可校验，信息未丢失）。

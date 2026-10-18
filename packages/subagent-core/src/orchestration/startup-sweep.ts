@@ -9,7 +9,7 @@
 // 一切周期任务——生产常态（宿主挂机）下停摆，是死机制。替代 = runtime 启动序列
 // 的一次性全量收编扫描：单实例锁确立后、先于任何 pi spawn 的时点，全量枚举 pi
 // 宿主形态 run（createPiHostRunEnumeration——[D16⑥] 枚举判据换源：候选 = record
-// 事件流文件族，status = 共享判定核 fold record 读折叠投影，不读快照行），对
+// 事件流文件族，status = 共享判定核 fold record 读取折叠派生视图，不读快照行），对
 // 判读 running 的 run 逐个收编（adoptInterruptedRun → [D15] interruptRun 中断
 // 编排入口，run-interrupted 转移帧一件直落）。
 //
@@ -19,7 +19,7 @@
 // 只可能是上一生命周期的孤儿 pi。孤儿 pi 若正常收尾，其 run-settled 帧与终态
 // manifest 已落盘：收编被三面证据幂等让位（skippedTerminal），误收编不发生；
 // 孤儿 pi 若已死/挂死，收编即正确修正。删窗后残余形态 = 收编帧抢先落在孤儿 pi
-// 尾帧之前（fold 读面保守停帧在 interrupted，读面不崩坏）——manifest 事实面
+// 尾帧之前（fold 读侧保守停帧在 interrupted，读侧不崩坏）——manifest 事实面
 // 完好、下次扫描以 manifest 为准让位，数据最终一致（已接受代价：该 run 的显示
 // 面在本进程内短暂呈 interrupted）。
 //

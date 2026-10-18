@@ -1,7 +1,7 @@
 /**
  * U9-U1：full-e2e 探针基建的纯单元校验（不 spawn pi）。
  *
- * 覆盖两点：REAL_PI_TESTS 分池注册（全量双向 diff 守卫——漏登记会在满并行下饿死，
+ * 覆盖两点：REAL_PI_TESTS 分池注册（全量双向 diff 检查——漏登记会在满并行下饿死，
  * vitest.config 维护契约）+ writeLine 的 stdin 写入形态（JSONL 行以换行结尾——rpc 协议按行解析）。
  *
  * faux LLM 轨豁免（L2.5）：只 import FAUX_PI_READY（无 REAL_PI_READY）的消费文件是纯
@@ -41,7 +41,7 @@ describe('U9-U1 full-e2e 探针基建单元校验', () => {
     // 消费侧：src/ 与 test/ 两目录中 import spawnPiFixture 的 .test.ts 全集。
     // 文本匹配不做 AST 解析；import 存在单行与多行两种书写形态，故先把全文空白归一，
     // 再做「整句结构」匹配：导入清单花括号内含目标名，且来源模块指向 pi-fixture，两者
-    // 同时成立才算消费方。不能退化为裸标识符匹配——本守卫文件也在被扫描目录内，自身
+    // 同时成立才算消费方。不能退化为裸标识符匹配——本检查文件也在被扫描目录内，自身
     // 错误消息里的同名文案会造成自匹配假红。
     const importShape = /import\s*\{[^{}]*\bspawnPiFixture\b[^{}]*\}\s*from\s*['"][^'"]*pi-fixture(\.js)?['"]/
     // 轨道判定的 import 信号（同款「整句结构」匹配，防裸标识符自匹配）：REAL_PI_READY =
@@ -64,14 +64,14 @@ describe('U9-U1 full-e2e 探针基建单元校验', () => {
 
     // 配置侧：按字符串字面量静态提取（走配置 import 会拉起 globalSetup，超出 unit 校验边界）
     const arrayStart = config.indexOf('const REAL_PI_TESTS = [')
-    expect(arrayStart, 'vitest.config.ts 找不到 REAL_PI_TESTS 数组声明——守卫提取逻辑需随配置形态更新').toBeGreaterThanOrEqual(0)
+    expect(arrayStart, 'vitest.config.ts 找不到 REAL_PI_TESTS 数组声明——检查提取逻辑需随配置形态更新').toBeGreaterThanOrEqual(0)
     const arrayText = config.slice(arrayStart, config.indexOf(']', arrayStart))
     const registered: string[] = []
     for (const match of arrayText.matchAll(/['"]([^'"]+\.test\.ts)['"]/g)) {
       if (match[1]) registered.push(match[1])
     }
     // [L2.5 二批后允许空池] 全部真实 LLM 用例已翻轨 faux，REAL_PI_TESTS 当前 0 成员是合法
-    // 终态（数组保留为「新增真实 LLM 文件必须登记」的注册位）；守卫的提取断言点 =
+    // 终态（数组保留为「新增真实 LLM 文件必须登记」的注册位）；检查的提取断言点 =
     // 数组声明可定位（上方 arrayStart），不再要求非空。
 
     // 双向 diff：漏登记（消费方未进清单，落回 main 满并行组复发饿死超时；纯 faux 轨例外，

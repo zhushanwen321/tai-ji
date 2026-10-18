@@ -32,7 +32,7 @@ function usage(partial: Partial<AgentUsage>): AgentUsage {
  *
  * 单层 `as AgentUsage`：AgentUsage 全部必填字段（非全可选结构），
  * 不触发 taste/no-unsafe-cast 的 structuralCast；此处刻意绕过类型系统
- * 以验证 consume() 的运行时 NaN 守卫。
+ * 以验证 consume() 的运行时 NaN 检查。
  */
 function poisonedUsage(
   overrides: Partial<Record<keyof AgentUsage, number | undefined>>,
@@ -102,13 +102,13 @@ describe("Budget.consume 加权公式", () => {
   });
 });
 
-// ── consume：NaN 守卫（TDD，预期主 agent 同步补源码守卫）──────
+// ── consume：NaN 检查（TDD，预期主 agent 同步补源码检查）──────
 //
-// 源码 consume() 当前无守卫：undefined/NaN/Infinity 进入加权公式会产出
+// 源码 consume() 当前无检查：undefined/NaN/Infinity 进入加权公式会产出
 // NaN/Infinity 污染 usedTokens，导致后续 isExceeded 永远命中。
-// 以下测试断言「脏字段当 0 处理」——守卫补上前会失败，属预期临时状态。
+// 以下测试断言「脏字段当 0 处理」——检查补上前会失败，属预期临时状态。
 
-describe("Budget.consume NaN 守卫（undefined/NaN/Infinity 当 0 处理）", () => {
+describe("Budget.consume NaN 检查（undefined/NaN/Infinity 当 0 处理）", () => {
   it("input=undefined → usedTokens 不变（不当 NaN）", () => {
     const b = new Budget({ maxTokens: 1000 });
     b.consume(poisonedUsage({ input: undefined }));
@@ -206,7 +206,7 @@ describe("Budget.isExceeded", () => {
     expect(b.isExceeded()).toBe(true);
   });
 
-  it("maxTokens=0 → 视为不限制（守卫，首个 agent 完成不误判）", () => {
+  it("maxTokens=0 → 视为不限制（检查，首个 agent 完成不误判）", () => {
     const b = new Budget({ maxTokens: 0 });
     b.consume(usage({ input: 999999 }));
     expect(b.isExceeded()).toBe(false);

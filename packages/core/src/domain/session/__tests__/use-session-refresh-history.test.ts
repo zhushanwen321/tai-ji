@@ -89,7 +89,7 @@ function makeFixture() {
 /**
  * 构造「已加载更早历史」的分区形态（A2 加载更早成功后）：
  * 初始 hydrate 尾窗 2 轮（truncated=true）→ loadMore 前插 1 轮更早 + 窗口状态累计
- * （真实 loadMoreHistory 的写入面 = prependHistory + setHistoryWindow，useChat.ts 游标翻页）。
+ * （真实 loadMoreHistory 的写侧 = prependHistory + setHistoryWindow，useChat.ts 游标翻页）。
  */
 function seedPartitionWithEarlierHistory(f: ReturnType<typeof makeFixture>): void {
   const earlier = msg('m-e1', 'pi-e1')

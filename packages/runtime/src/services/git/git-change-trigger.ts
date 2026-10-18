@@ -21,7 +21,7 @@
  * 「重扫 + 广播」由 deps.pushSessionList 一体承载（生产 = server.broadcastSessionList，
  * 内部即 listPersistedSessions——sessionMetaCache 命中态成本 = stat 一轮 + 门面同步内存读）。
  *
- * 🔒 三层架构：services 编排；观测器访问经结构化窄面 GitObservationPort（GitStateService
+ * 🔒 三层架构：services 编排；观测器访问经结构化窄接口 GitObservationPort（GitStateService
  * 结构满足），广播经函数注入（组合根闭包），不 import infra / transport。
  */
 import type { RepoObservation } from '../ports/git-info.js'
@@ -30,7 +30,7 @@ import type { RepoObservation } from '../ports/git-info.js'
 const BRANCH_PUSH_THROTTLE_MS = 2_000
 
 /**
- * 观测器访问窄面：读观测快照 + 按 cwd 失效（观测器条目与 statusCache 相关键）。
+ * 观测器访问窄接口：读观测快照 + 按 cwd 失效（观测器条目与 statusCache 相关键）。
  * GitStateService 结构满足（readObservation / invalidateByCwd 均 public）。
  */
 export interface GitObservationPort {
@@ -85,7 +85,7 @@ export class GitChangeTrigger {
     if (changed) this.requestPush()
   }
 
-  /** dispose：撤销未放行的窗口收尾 timer（runtime shutdown 收口）。 */
+  /** dispose：撤销未放行的窗口收尾 timer（runtime shutdown 收尾）。 */
   dispose(): void {
     if (this.trailingTimer) {
       clearTimeout(this.trailingTimer)

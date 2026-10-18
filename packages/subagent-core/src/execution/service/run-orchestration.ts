@@ -13,19 +13,19 @@
 // resolveChatEnginePort / assertIdleTimeoutMsSafe）经壳 deps 回调指回本聚合实例方法。
 //
 // [2026-09-13 design-code-sync 兑现] [G1] 段预留的备选预案（第三文件再拆 Continuation
-// 协作面）落地：本文件折算 845 破 800 零余量锁定线，拆出 chat-rounds.ts（chat 域轮次
-// 编排——Continuation 实例表 + 统一投递入口 + kickOffChatRound 轮次主干 + 轮末收口协作
+// 协作范围）落地：本文件折算 845 破 800 零余量锁定线，拆出 chat-rounds.ts（chat 域轮次
+// 编排——Continuation 实例表 + 统一投递入口 + kickOffChatRound 轮次主干 + 轮末收尾协作
 // + SP-5 升级 gate + Continuation 生命周期显式接口）。两文件零互调零 import
 //（workflow-dispatch 同款形态）：
 //   - 本聚合 → chat-rounds：executeViaEngine 的首轮派发调用点，经 deps 回调
 //     startFirstChatRound（壳装配闭包指 ChatRounds 实例方法；[modeless 波1] 四象限
-//     坍缩后唯一派发路径，kickOffChatRound 回调已删）；
+//     归并后唯一派发路径，kickOffChatRound 回调已删）；
 //   - chat-rounds → 本聚合：taskSpecWithModel / outcomeToAgentResult / settleOneShotOutcome
 //     / writeBindingForRecord / effectiveMaxConcurrentFor / resolveChatEnginePort 六项
 //     编排原语（壳装配闭包指本聚合实例方法）。
 //
 // 单一职责：run 域执行编排——execute/executeAndAwait 入口（路由 → identity → record
-// 创建 → worktree → detached 引擎 run）、引擎死亡分诊（adopt）、终态收口
+// 创建 → worktree → detached 引擎 run）、引擎死亡分诊（adopt）、终态收尾
 //（settleOneShotOutcome 含 D7 workflow origin 分支）、pool/worktree 资源装配与回收。
 //
 // [R1 打样模式——R4 落地]（模式权威定义见 session-baselines.ts 文件头）
@@ -38,7 +38,7 @@
 //   → ChatRounds，2026-09-13 接线）；聚合内部互调（executeViaEngine/
 //   settleOneShotOutcome 族等）不经壳。
 // 3. 跨聚合边收敛（r0-inventory 清单① C-4/C-5）：
-//   - C-4（壳 dispose 直调 continuations.clear）：字段所有权随 Continuation 协作面迁
+//   - C-4（壳 dispose 直调 continuations.clear）：字段所有权随 Continuation 协作范围迁
 //     chat-rounds.ts，壳经其 clearContinuations() 显式接口（R4 兑现，接线 2026-09-13）。
 //   - C-5（onRecordFinalizedCleanup 跨域汇聚点 + abortContinuationQueue 队列清空）：
 //     本体迁 chat-rounds.ts；RecordLifecycle deps 回调（R3 装配时指壳方法）改指聚合
@@ -46,7 +46,7 @@
 // 4. 只搬不改：方法体除依赖通道替换（this.X → this.deps.getY()）外逐字节保留
 //   （审计 /tmp/r4-move-audit.py）；r0-inventory 清单② A 通道直写 14 处（#12 域
 //   executeAndAwait 1 处 + #14 域 13 处——任务口径 12 处按「#14 域 adopt 三行并 1」
-//   计）原样随迁，H4 收口。
+//   计）原样随迁，H4 收尾。
 // 5. 模块常量 SSOT：PRIORITY_BACKGROUND / MS_PER_SECOND / SECONDS_PER_MINUTE 已
 //   [R6/D-R4-4] 归一常量叶子文件 service-constants.ts（原两聚合重复声明消除，
 //   改 import 消费）；STALE_CHILD_EXIT_WAIT_MS + delay（唯一消费
@@ -59,7 +59,7 @@ import type { AgentResult as WorkflowAgentResult, AgentCallOpts } from "../../or
 import { mapToWorkflowAgentResult } from "../assembly/agent-result-mapper.ts";
 import type { ConcurrencyPool } from "../assembly/concurrency-pool.ts";
 import { project, settleWorkflowRecord } from "../persistence/execution-record.ts";
-// [P1b-1] settle 链收口单点（settleOneShotOutcome workflow origin 分支的终态收口
+// [P1b-1] settle 链收尾单点（settleOneShotOutcome workflow origin 分支的终态收尾
 // 迁入）。[D1 拆边 Class C] 该单点下沉持久化层（记录级原语：CAS + 委托
 // finalizeRecord，零编排语义），上方 import 已直连 persistence。
 import { assertTaskShapeSupported } from "../engine/common/capability-gate.ts";
@@ -97,7 +97,7 @@ import { assertNestingDepthWithinLimit } from "../assembly/session-context-resol
 import { writeRecordBinding } from "../persistence/state-marker.ts";
 // [§3.1.5 binding 载荷单源] 身份域载荷与 settle 全载荷共用同一构造器
 // （identityBindingPayload；差异段由 fullBindingPayload 追加）——两处手写的人肉
-// 同步面已删（漏拷贝事故先例 H2 S3 / W0 D1）。
+// 同步拷贝已删（漏拷贝事故先例 H2 S3 / W0 D1）。
 import { identityBindingPayload } from "../persistence/record-store-terminal.ts";
 import type { WorktreeManager } from "../worktree/worktree-manager.ts";
 import type { ClosedReason, ExecutionMode } from "../domain/record-types.ts";
@@ -114,7 +114,7 @@ const logger = getLogger("subagents");
  * [R1 打样模式 1] 聚合协作 deps——**全部晚绑定闭包，构造期零求值**。
  *
  * 窄结构类型只声明聚合真实消费的通道（不整实例注入）。五类成员：
- * - 断言面（assertReady）：execute/executeAndAwait 入口就绪门
+ * - 断言范围（assertReady）：execute/executeAndAwait 入口就绪门
  *  （本体在 SessionBaselines，壳转发）。
  * - #1 留壳共享依赖 getter（getStore/getModelService/getNotifyHost/
  *   getPool/getWorktreeManager/getCwd）：
@@ -123,7 +123,7 @@ const logger = getLogger("subagents");
  *   initSession 注入的运行时可变态现读（SessionBaselines 经壳 getter 透传）。
  * - R3 聚合显式接口（resolveIdentity/resolveIdentityForEngine/createRecordForMode/
  *   buildEarlyFailedHandle/finalizeRecord/finalizeFailed/finalizeAborted）：
- *   身份解析/record 创建/意愿动作收口的跨聚合协作
+ *   身份解析/record 创建/意愿动作收尾的跨聚合协作
  *  （壳装配指 RecordAccess/RecordLifecycle 实例方法，聚合间零私有互调——G2）。
  * - ChatRounds 协作回调（startFirstChatRound/kickOffChatRound，2026-09-13 design-code-sync
  *   接线）：executeViaEngine 的 chat 域轮次派发（本体在 ChatRounds，壳装配闭包指其
@@ -141,7 +141,7 @@ export interface RunOrchestrationDeps {
   readonly getCwd: () => string;
   /** WorktreeManager（worktree 创建/清理 + FinalizeDeps）。 */
   readonly getWorktreeManager: () => WorktreeManager;
-  /** NotifyHost（pending emit + FinalizeDeps 注销面）。 */
+  /** NotifyHost（pending emit + FinalizeDeps 注销侧）。 */
   readonly getNotifyHost: () => NotifyHost;
   /** ConcurrencyPool（DefaultConcurrencyPool 共享池——execute/executeAndAwait/
    *  chat 轮次/引擎任务的并发槽）。 */
@@ -192,7 +192,7 @@ export interface RunOrchestrationDeps {
   readonly disposeWindowEngine: (windowKey: string, reason: string, context: string) => void;
   /** [ChatRounds 协作回调 / 2026-09-13 design-code-sync 接线] 首轮派发
    *  （continuationFor ensure + startFirstRound——本体在 ChatRounds；executeViaEngine
-   *  消费。[modeless 波1] 四象限（isPiRoute × chatMode）坍缩后的唯一派发路径：
+   *  消费。[modeless 波1] 四象限（isPiRoute × chatMode）归并后的唯一派发路径：
    *  opts/identity 全量透传保 schema/maxTurns 等首轮声明（Continuation 续轮按
    *  record 最小重建）；kickOffChatRound 回调随 one-shot 分支消亡删除。 */
   readonly startFirstChatRound: (
@@ -217,7 +217,7 @@ export function withWorktreeCwd(spec: AgentCallOpts): AgentCallOpts {
  * 域 #6/#7/#12/#14/#15 聚合：run 域执行编排（R4 自 SubagentService 抽取）。
  *
  * 字段所有权（r0-inventory 清单①）：#31 continuations（Continuation 实例表）已随
- * Continuation 协作面迁 chat-rounds.ts（2026-09-13 design-code-sync 接线）——该聚合
+ * Continuation 协作范围迁 chat-rounds.ts（2026-09-13 design-code-sync 接线）——该聚合
  * 唯一写者；壳 dispose 经其 clearContinuations() 显式接口触达（C-4 兑现），字段壳与
  * 本聚合零感知。
  */
@@ -348,23 +348,23 @@ export class RunOrchestration {
     // throw lets SAR.run() convert it to an AgentResult.error (not return-handle like execute()).
     let worktreeHandle: WorktreeHandle | undefined;
     if (opts.worktree === true) {
-      // [create-await 竞态守卫] 与 execute 同款（见其 worktree 分支注释）——差异仅在
+      // [create-await 竞态检查] 与 execute 同款（见其 worktree 分支注释）——差异仅在
       // 失败语义：executeAndAwait 对齐「失败 throw」，SAR.run 的 catch 会转成 AgentResult.error
       // （cancelled 呈现对齐 cancel 抢先路径）。赋值→终态检查→runAndFinalize 同一同步段。
-      // 检查结果经标志位带出 try（守卫 throw 不能落在 try 内——会被下方 catch 当作
+      // 检查结果经标志位带出 try（检查 throw 不能落在 try 内——会被下方 catch 当作
       // create 失败再走 finalizeFailed，对已 closed 的 record 语义未定义）。
       let cancelledDuringCreate = false;
       try {
         worktreeHandle = await this.deps.getWorktreeManager().create(this.deps.getCwd(), record.id);
         record.worktreeHandle = worktreeHandle;
-        // [S5 修复] 创建即置 hadWorktree：close 收口清句（markSettledOut）后 entry/binding 的
-        // worktree 投影与 Continuation 重建守卫（hadWorktree && !worktreeHandle）靠本
-        // 标志承载——缺置 = 收口后守卫第一条不满足、重建永不触发。
+        // [S5 修复] 创建即置 hadWorktree：close 收尾清句（markSettledOut）后 entry/binding 的
+        // worktree 派生视图与 Continuation 重建检查（hadWorktree && !worktreeHandle）靠本
+        // 标志承载——缺置 = 收尾后检查第一条不满足、重建永不触发。
         record.hadWorktree = true;
         // [U5 判据] cancel/dispose 抢先 = record 已离 running（markSettled settle 为
-        // idle——新语义不写 closedReason，status 单判据即收口判读；两态状态机下
-        // running 才有在飞任务）。赋值后同同步段检查：已收口则主动 cleanup（幂等，
-        // 抢先路径的收口回收覆盖）+ throw cancelled（不进轮次——避免子进程白跑）。
+        // idle——新语义不写 closedReason，status 单判据即收尾判读；两态状态机下
+        // running 才有在途任务）。赋值后同同步段检查：已收尾则主动 cleanup（幂等，
+        // 抢先路径的收尾回收覆盖）+ throw cancelled（不进轮次——避免子进程白跑）。
         if (record.status !== "running") {
           cancelledDuringCreate = true;
         }
@@ -432,10 +432,10 @@ export class RunOrchestration {
    * （id→file + rootSessionId 等身份域），record-store 扫描侧据它重建身份。
    *
    * [D3a v8 时机① / U2b] 本方法是 sessionFile 回填族（run 应答回填 ×3 站点）的
-   * 单一收口点——锚点确立即 acquireWriteLease 声明跨进程写权（fresh spawn 全程
-   * 声明，缺口 1 闭合；「宿主开始往 session 文件写即声明写权」）。acquire 失败
+   * 单一收尾点——锚点确立即 acquireWriteLease 声明跨进程写权（fresh spawn 全程
+   * 声明，缺口 1 补全；「宿主开始往 session 文件写即声明写权」）。acquire 失败
    * 原样上抛（双写风险敞口必须响亮，D3c——禁止 best-effort 吞错续跑），由各回填
-   * 站点所在的 run 收敛 catch 按 run 失败收口；绑定写维持 best-effort（记账面）。
+   * 站点所在的 run 收敛 catch 按 run 失败收尾；绑定写维持 best-effort（记账侧）。
    * sessionFile 未回填（undefined）时静默跳过（绑定无从谈起、亦无写权可声明）。
    */
   writeBindingForRecord(record: ExecutionRecord): void {
@@ -444,8 +444,8 @@ export class RunOrchestration {
     this.deps.getStore().acquireWriteLease(sessionFile, record.id);
     // 身份域载荷经单源构造器（identityBindingPayload，登记 §3.1.5）——本处不再逐字段
     // 手写：新增身份字段只改构造器一处，settle/reopen 全载荷路径自动同步。
-    // [H2 S3] 来源身份随绑定落盘：引擎子文件身份面（binding sidecar）是磁盘重建
-    // origin 的唯一现行载体，漏写则收口/重启后 workflow record 逃过 D1 投影过滤。
+    // [H2 S3] 来源身份随绑定落盘：引擎子文件身份侧（binding sidecar）是磁盘重建
+    // origin 的唯一现行载体，漏写则收尾/重启后 workflow record 逃过 D1 派生视图过滤。
     // [W0 / D1] stepIndex 同族随绑定落盘——漏写则 identityFromBinding 重建路径
     // 恢复不出步骤索引（run 视图关联键静默缺失）。
     writeRecordBinding(sessionFile, identityBindingPayload(record));
@@ -453,7 +453,7 @@ export class RunOrchestration {
 
   /**
    * chat 域统一执行入口（D2 单轨：全引擎——含 pi——经此进入 EnginePort）。路由
-   *（routeEngineForHost：三层 + pi 同步短路 + probe/守卫）已由 execute 完成——这里
+   *（routeEngineForHost：三层 + pi 同步短路 + probe/检查）已由 execute 完成——这里
    * 只剩 unsupported 预检 → identity（pi 链解析 / 非 pi 按目标引擎校验，
    * [u-h2 D2-1/D2-2]）→ record 创建+盖章 → worktree → detached 引擎 run。
    * 全部同步拒绝发生在 record 创建前（不产生孤儿 record）。
@@ -466,7 +466,7 @@ export class RunOrchestration {
   ): Promise<ExecutionHandle> {
     const engine = route.engine;
     // [D3-④ 预检 capabilities 化] 唯一实现 = common/capability-gate（capabilities
-    // 驱动，含 maxTurns 扩位）。检查点钉死：execute/executeViaEngine 同步段、record
+    // 驱动，含 maxTurns 扩位）。检查点固定为：execute/executeViaEngine 同步段、record
     // 创建前（engine.capabilities() 同步可得）——承接「全部同步拒绝发生在 record
     // 创建前、不产生孤儿 record」不变量（其后的 startFirstChatRound 派发链是
     // fire-and-forget，检查若只落在 engine.run 内则拒绝异步化为「派发成功 +
@@ -476,13 +476,13 @@ export class RunOrchestration {
     // `initialize` 发现 → engine_capability_mismatch 该 run 失败 + record 标 failed，
     // 并**清理 run 前已建的前置副作用**（worktree 经 finalizeFailed → finalizeRecord
     // Step 3b cleanupWorktreeIfBound 清理）。非 gate 位不一致（无论强弱）一律
-    // warn 留痕不阻断（诊断面归 EngineClient，设计 §3.3 能力位段）。
+    // warn 留痕不阻断（诊断范围归 EngineClient，设计 §3.3 能力位段）。
     assertTaskShapeSupported(engine.id, engine.capabilities(), opts);
 
     // 沿既有拆解方向：identity 分支构造 → resolveIdentityForRoute、record 盖章 →
-    // stampEngineOnRecordOpts（[modeless 波1] 派发分流四象限已坍缩为
-    // startFirstChatRound 单路径）。worktree 段保持内联：[create-await 竞态守卫]
-    // 的「赋值 → 收口检查 → kick-off 同一同步段」实现约束禁止在检查与 kick-off 间
+    // stampEngineOnRecordOpts（[modeless 波1] 派发分流四象限已归并为
+    // startFirstChatRound 单路径）。worktree 段保持内联：[create-await 竞态检查]
+    // 的「赋值 → 收尾检查 → kick-off 同一同步段」实现约束禁止在检查与 kick-off 间
     // 插入 await，不宣 extract。
     const { isPiRoute, engineModel, modelSource, identity } = await this.resolveIdentityForRoute(opts, preIdentity, route);
     const recordOpts: ExecuteOptions = this.stampEngineOnRecordOpts(opts, route, engineModel, modelSource, isPiRoute);
@@ -499,25 +499,25 @@ export class RunOrchestration {
     // 仅 sandbox 声明非 none 的引擎可达（现行 pi/zcode 均为 'emulated'——worktree
     // 创建/patch/回收执行者是下方 core 层 worktree-manager，引擎侧只消费 task.cwd）。
     if (typeof opts.worktree === "object") {
-      // [外部契约面登记] 对象形态 worktree（复用外部已创建的 WorktreeHandle）是
+      // [外部契约范围登记] 对象形态 worktree（复用外部已创建的 WorktreeHandle）是
       // ExecuteOptions.worktree 公共 API 契约的合法成员：本仓零调用，外仓（workflow
       // 脚本 / 独立引擎消费方）可能消费，分支本体保留。当前实现 handle 注入后**不回填**
       // record.worktreeHandle、不置 hadWorktree（与下方 true 分支不同）——外仓依赖
-      // record.worktreeHandle 投影（Continuation 隔离 / 收口清理）前须先补回填。
+      // record.worktreeHandle 派生视图（Continuation 隔离 / 收尾清理）前须先补回填。
     } else if (opts.worktree === true) {
       // worktree===true（显式要求）——创建新 worktree。与 fork 正交（worktree 文件隔离不依赖 fork 上下文继承）。
       try {
         const worktreeHandle = await this.deps.getWorktreeManager().create(this.deps.getCwd(), record.id);
         record.worktreeHandle = worktreeHandle;
-        // [S5 修复] 创建即置 hadWorktree（与 executeAndAwait 步骤 2.5 同款）：close 收口清句
-        //（markSettledOut）后 worktree 投影与 Continuation 重建守卫靠本标志承载。
+        // [S5 修复] 创建即置 hadWorktree（与 executeAndAwait 步骤 2.5 同款）：close 收尾清句
+        //（markSettledOut）后 worktree 派生视图与 Continuation 重建检查靠本标志承载。
         record.hadWorktree = true;
-        // [create-await 竞态守卫] create 的 await 窗口内 cancel/dispose 可把 record
-        // settle 成已收口态（[U5 判据] status 离 running 即已收口——cancel/dispose
-        // 抢先 settle 时读到的 worktreeHandle 可能仍是 undefined（收口回收被跳过）。
-        // 赋值后同同步段检查：已收口则主动 cleanup（幂等，抢先的 fire-and-forget
+        // [create-await 竞态检查] create 的 await 窗口内 cancel/dispose 可把 record
+        // settle 成已收尾态（[U5 判据] status 离 running 即已收尾——cancel/dispose
+        // 抢先 settle 时读到的 worktreeHandle 可能仍是 undefined（收尾回收被跳过）。
+        // 赋值后同同步段检查：已收尾则主动 cleanup（幂等，抢先的 fire-and-forget
         // 清理无害）+ early-failed 返回，不进轮次 kick-off（避免子进程白跑）。
-        // 实现约束：赋值 → 收口检查 → kick-off 必须在同一同步段，中间禁止插入 await。
+        // 实现约束：赋值 → 收尾检查 → kick-off 必须在同一同步段，中间禁止插入 await。
         if (record.status !== "running") {
           await this.deps.getWorktreeManager().cleanup(worktreeHandle);
           return this.deps.buildEarlyFailedHandle(record);
@@ -529,12 +529,12 @@ export class RunOrchestration {
       }
     }
 
-    // [modeless 波1·四象限坍缩] isPiRoute × chatMode 分派分支消亡——全 record 首轮
+    // [modeless 波1·四象限归并] isPiRoute × chatMode 分派分支消亡——全 record 首轮
     // 经 ChatRounds Continuation 编排（chat 语义：resume 键恒置、轮终 markRoundIdle
     // 留守、失败 MF-6 落 idle 可恢复）。opts/identity 全量透传保 schema/maxTurns 等
     // 首轮声明（Continuation 续轮按 record 最小重建）。worktree===true 分支已回填
     // record.worktreeHandle，Continuation 派发时经 record.worktreeHandle 读取；对象形态
-    // 注入不回填（见上方外部契约面登记）。
+    // 注入不回填（见上方外部契约范围登记）。
     void engine;
     void isPiRoute;
     this.deps.startFirstChatRound(record, recordOpts);
@@ -556,7 +556,7 @@ export class RunOrchestration {
    * 缺席 → undefined，create 帧省略 model 键，引擎自解析）。偏好层排在 frontmatter 之后
    * （作者显式声明不被全局偏好压掉——既有层序保持）；偏好补缺值经 stampEngineOnRecordOpts
    * 写入 record.opts.model 后与显式指定同形（record 消费方只关心「用了哪个模型」）。
-   * [engine-ref-translation D2] 四层产物再经引擎翻译面（EnginePort.translateModelRef）
+   * [engine-ref-translation D2] 四层产物再经引擎翻译侧（EnginePort.translateModelRef）
    * 改写为引擎原生 ref（zai-coding-cn ↔ account:bigmodel-individual-coding-plan，
    * 2026-10-14 用户裁决）；显式层翻译失败抛错、偏好层翻译后不在引擎清单则跳过——
    * 见方法内注释。
@@ -569,7 +569,7 @@ export class RunOrchestration {
     const isPiRoute = route.engineId === DEFAULT_ENGINE_ID;
     // pi 路由恒 undefined（pi 链自有三层解析，taiji 级偏好无意义——D6 不采用段）；
     // ?? 链惰性求值：前两层任一在场时不触盘（直读仅服务偏好补缺场景）。
-    // [engine-ref-translation D2] 四层产物经引擎翻译面改写为引擎原生 ref（共享 helper
+    // [engine-ref-translation D2] 四层产物经引擎翻译侧改写为引擎原生 ref（共享 helper
     // resolveEngineModelWithTranslation——与 workflow 域同语义；两层失败语义分立见模块头）。
     // [subagent-detail-model-info] 来源标注与解析同点判定：pi 路由 = task 显式 ?
     // explicit : default（frontmatter/偏好层不适用——pi 链自解析）。
@@ -632,7 +632,7 @@ export class RunOrchestration {
   /**
    * workflow 域"干活 + 收尾"（sync await；[W3] 执行叶 = 协议 engine.run——原 inproc
    * runSpawn 链随 inproc pi 引擎目录 删除消亡，journal 接线 / record 终态迁移语义保持）。
-   * 编排分段保持「装配（池槽/worktree）→ 执行 → 回收（finally）→ 错误收口 → 终态收口」。
+   * 编排分段保持「装配（池槽/worktree）→ 执行 → 回收（finally）→ 错误收尾 → 终态收尾」。
    */
   async runAndFinalize(
     record: ExecutionRecord,
@@ -702,7 +702,7 @@ export class RunOrchestration {
       // swallow（不 re-throw）：sync 调用方拿到合成 failed result，避免异常逃逸到
       // tool 层 + record 卡 running。（[H1 U6] 旧 chatMode 分支 finalizeChatSpawnFailure
       // 已随 resumeColdRound/旧 chat 载体退役——轮次不经 runAndFinalize，
-      // Continuation 轮收口归 onRoundRejected/onRunSettled。）
+      // Continuation 轮收尾归 onRoundRejected/onRunSettled。）
       return this.deps.finalizeFailed(record, err);
     } finally {
       this.releaseRoundResources(record, pooled && acquired, stream);
@@ -739,13 +739,13 @@ export class RunOrchestration {
   }
 
   /**
-   * one-shot 轮终收口（[U5 / §3.2.2 事件表 settle 行] 终态化退役；[modeless 波1]
+   * one-shot 轮终收尾（[U5 / §3.2.2 事件表 settle 行] 终态化退役；[modeless 波1]
    * 消费方只剩 workflow 域 runAndFinalize——chat 域全 record 改经 Continuation 轮终
    * 簿记）：成功/失败轮 settle（markRoundIdle——落 idle 等续聊 [two-state-convergence
    * U4/D3]，万物可续 G1）；被 abort 的轮走 cancel 语义（interrupted + 放弃轮标记）。
    * CAS 前置检查失败（cancel/dispose 抢先 settle）静默跳过。closeAfterRound 挂起标志不清——
-   * 收口落账消费在主干尾部 route 之后（顺序约束 [写死]：收口轮 settle → 轮次通知送达 →
-   * 收口落账，见 kickOffChatRound 尾部 consumePendingArchive）。
+   * 收尾落定消费在主干尾部 route 之后（顺序约束 [写死]：收尾轮 settle → 轮次通知送达 →
+   * 收尾落定，见 kickOffChatRound 尾部 consumePendingArchive）。
    */
   async settleOneShotOutcome(
     record: ExecutionRecord,
@@ -756,10 +756,10 @@ export class RunOrchestration {
     // 终态化（closed/"gc"）；aborted/失败 = closed+cancelled/gc——workflow agent 结果
     // 由脚本返回值承载、无 message 对端，留内存 idle 会绑架 hasRunning / 被误升级
     // 为对话容器 / goal defer 恒挂（设计 D7 连带理由）。自带 CAS
-    // 抢锁（承接现状「cancel/dispose 抢先 → 静默跳过」守卫语义）。
-    // [P1b-1] 直写通道删除：closed/cancelled 终态判定不再在本方法直写——收口至
+    // 抢锁（承接现状「cancel/dispose 抢先 → 静默跳过」检查语义）。
+    // [P1b-1] 直写通道删除：closed/cancelled 终态判定不再在本方法直写——收敛至
     // worker-message-pump 的 settleWorkflowRecord 单点（D7 例外族 CAS + finalize 对
-    // 的唯一剩余处）；agent-settled/run-settled 事件面由同文件状态机接线段承载。
+    // 的唯一剩余处）；agent-settled/run-settled 事件流由同文件状态机接线段承载。
     if (record.origin === "workflow") {
       await settleWorkflowRecord(record, result, aborted ? "cancelled" : "gc", {
         finalizeRecord: (r, closedReason) => this.deps.finalizeRecord(record, r, "closed", closedReason),
@@ -769,7 +769,7 @@ export class RunOrchestration {
     // CAS 前置 + 簿记之间无 await（单线程同步段原子——cancel/dispose 抢先判定可靠）。
     if (record.status !== "running") return;
     if (aborted) {
-      // [U5] cancel 语义（abort 到达本收口 = cancel/dispose 未及处理的竞态补位）：
+      // [U5] cancel 语义（abort 到达本收尾 = cancel/dispose 未及处理的竞态补位）：
       // settle interrupted + 放弃轮标记（与 cancelBackground 同构——经 store.markSettled
       // CAS，竞态抢先时静默跳过）。closeAfterRound 挂起作废（用户已 cancel）。
       record.closeAfterRound = undefined;
@@ -780,7 +780,7 @@ export class RunOrchestration {
     if (result.success) {
       // [SP-5] one-shot 成功完成 → 落 idle 等待 message 触发升级
       //（[two-state-convergence U4/D3] 翻边后 idle 即 resumable，SP-5 寻址/升级链不查 status）。
-      // [U2b] 轮终簿记①-⑪归口 store.markRoundIdle（`.alive` 跨轮保留；[W4 发射点②]
+      // [U2b] 轮终簿记①-⑪归属 store.markRoundIdle（`.alive` 跨轮保留；[W4 发射点②]
       // pending 注销已随 store 簿记⑧统一发射；⑩⑪ A-lite stopReason 展示位 +
       // `.state` 收条/binding 快照——正常轮终后宿主崩溃 revive 水合不归零）。
       this.deps.getStore().markRoundIdle(record.id, { kind: "success", content: result.text });
@@ -823,7 +823,7 @@ export class RunOrchestration {
   }
 
   /**
-   * 分层并发配额：depth 越深可用配额越少（下限 1）。fork 深度护栏在池维度的投影，
+   * 分层并发配额：depth 越深可用配额越少（下限 1）。fork 深度护栏在池维度的映射，
    * 公式约定以 concurrency-pool.ts 注释为登记处、此处为唯一代码锚点。
    */
   effectiveMaxConcurrentFor(record: ExecutionRecord): number {

@@ -1,10 +1,10 @@
 // src/execution/engine/host/spawned-children.ts
 //
-// core 侧 spawnedChildren 状态镜像（W6 建立；[W3 chat 域收口] 去除 inproc 过渡桥，
+// core 侧 spawnedChildren 状态镜像（W6 建立；[W3 chat 域收尾] 去除 inproc 过渡桥，
 // 纯镜像形态——设计 §3.8 D2 归属裁定的终态：spawnedChildren Map + 子进程收割的
-// 持有方 = 引擎进程，core 只持状态投影）。
+// 持有方 = 引擎进程，core 只持状态派生视图）。
 //
-// 本文件是 core 侧的公共消费面：
+// 本文件是 core 侧的公共消费方：
 //   - subagent-service / subprocess-agent-runner 的注册与镜像记账调用改经本模块，
 //     不深路径 import 引擎内部（R3 S-C / R1 MF-5 改线落点）；
 //   - lifecycle-predicates（hasLiveProcessHandle / isResumable）读本模块读点。
@@ -22,17 +22,17 @@ import { GLOBAL_SLOT_KEYS } from "../../../shared/global-slots.ts";
 
 // 镜像项（recordId 键 + killed 判据，与 client/mirror.ts 载荷契约同构）。
 export interface SpawnedChildMirrorEntry {
-  /** 引擎侧一次性子进程 pid（诊断面；recordId 才是镜像 key）。 */
+  /** 引擎侧一次性子进程 pid（诊断范围；recordId 才是镜像 key）。 */
   pid?: number;
   /** 必含判据（`child !== undefined && !child.killed` 同构）：true = 已被杀/已终止。 */
   killed: boolean;
-  /** 最近一次状态变更的墙钟时间戳（诊断面）。 */
+  /** 最近一次状态变更的墙钟时间戳（诊断范围）。 */
   updatedAt: number;
 }
 
 /**
  * core 侧 spawnedChildren 状态镜像（进程级单例，globalThis[Symbol.for] 持有防 jiti
- * 双路径加载分裂——registry.ts 同款惯例）。镜像只是状态投影：不发信号、不杀进程
+ * 双路径加载分裂——registry.ts 同款惯例）。镜像只是状态派生视图：不发信号、不杀进程
  * （收割 = 引擎进程组级，见文件头）。
  */
 class CoreSpawnedChildrenMirror {
@@ -65,7 +65,7 @@ class CoreSpawnedChildrenMirror {
     return this.entries.get(recordId);
   }
 
-  /** 句柄存活谓词（镜像面；判据与引擎侧 `!child.killed` 同构）。 */
+  /** 句柄存活谓词（镜像侧；判据与引擎侧 `!child.killed` 同构）。 */
   hasLiveProcessHandle(recordId: string): boolean {
     const entry = this.entries.get(recordId);
     return entry !== undefined && !entry.killed;
@@ -98,7 +98,7 @@ export function coreSpawnedChildrenMirror(): CoreSpawnedChildrenMirror {
   return coreMirrorSlot();
 }
 
-// ── 公共面 API（subagent-service / SAR 消费）─────────────────────────
+// ── 公共部分 API（subagent-service / SAR 消费）─────────────────────────
 
 /**
  * 子进程注册（宿主记账回调 RunContext.onChildSpawned 的落点）：写镜像。
@@ -110,7 +110,7 @@ export function registerSpawnedChildForRecord(recordId: string, child: ChildProc
 
 /**
  * 单 record 终止记账（镜像置死位）：实际终止在引擎进程内（协议 interact cancel /
- * close 或 run 域 cancel 帧承载）；宿主侧调用点是终止意图的记账面，宿主进程组级
+ * close 或 run 域 cancel 帧承载）；宿主侧调用点是终止意图的记账侧，宿主进程组级
  * 收割兜底 = EngineClient killAll（EnginePort.dispose / abort 杀链，见 remote-engine）。
  */
 export function killRecordChildWithEscalation(recordId: string, _source: string): void {

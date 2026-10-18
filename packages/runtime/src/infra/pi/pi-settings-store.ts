@@ -1,10 +1,10 @@
 /**
- * PiSettingsStore — settings.json 的唯一读写层（D17 收口 + P0-1 + D1a/D1b 跨进程写治理）。
+ * PiSettingsStore — settings.json 的唯一读写层（D17 收尾 + P0-1 + D1a/D1b 跨进程写治理）。
  *
  * 背景：settings.json 是 pi 的配置文件（pi 读取它，路径 <dataDir>/agent/settings.json），
  * 无法拆分成多个文件（pi 只认一个 schema/路径）。写方有两类进程：
  *   - taiji runtime（本模块的调用方：model 域经 pi-provider-store、extension 域经
- *     IExtensionSettings port、skills 投影经 pi-skill-paths）
+ *     IExtensionSettings port、skills 派生视图经 pi-skill-paths）
  *   - pi 子进程（rpc 面落盘写点仅 set_auto_retry 无条件 persist；set_model /
  *     set_thinking_level 是会话级切换不落盘——persist 是 options 条件分支且 rpc 入口
  *     不传，pi 1.0.0 rpc-mode.js case "set_model"/"set_thinking_level" 均不带 options、
@@ -54,11 +54,11 @@
  * catch 上传错误信封；启动/后台路径消费方显式 catch 呈结构化告警；修复文件后
  * 无需重启即恢复（检测每次现查）。
  *
- * disabled-packages.json 是 taiji 自己的文件（pi 不读），不在本 store 管辖（C4 单独收口）。
+ * disabled-packages.json 是 taiji 自己的文件（pi 不读），不在本 store 管辖（C4 单独收尾）。
  *
  * 🔒 三层架构：本模块属 infra（直接碰文件系统），services 经 port 访问，不直接 import 本模块
  * （例外：错误类/损坏判定的 instanceof 传导可直连——config-service 捕获 SettingsCorruptedError
- * 同构于既有先例 isModelsStoreCorrupted，属协议面传导而非读写绕过 port）。
+ * 同构于既有先例 isModelsStoreCorrupted，属协议范围传导而非读写绕过 port）。
  */
 
 import { readdirSync, readFileSync } from 'node:fs'
@@ -104,7 +104,7 @@ export interface PiSettings {
  * 字段域定义（覆盖 pi 实际写的全部字段，含 pi setModel 落盘的 defaultProvider，
  * 见 cli/commands.ts 磁盘格式注释互证）：
  *   - model     = defaultProvider / defaultModel / defaultThinkingLevel / enabledModels
- *   - skills    = skills（discovery 投影专写）
+ *   - skills    = skills（discovery 派生视图专写）
  *   - extension = packages（extension-service 域）
  *   - retry     = retry（LLM 重试配置域，pi-retry-settings 管理；域内嵌套键级
  *     merge 见 pi-retry-settings 的 D3 规则）

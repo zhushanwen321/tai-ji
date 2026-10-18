@@ -440,7 +440,7 @@ function checkBareAsyncIIFE(source: string): LintFinding[] {
 /**
  * 分析单个 IIFE 起点是否触发 finding。
  *
- * 返回 LintFinding（error 或 warning）或 undefined（IIFE 内无 agent/无闭合）。
+ * 返回 LintFinding（error 或 warning）或 undefined（IIFE 内无 agent/括号未收尾）。
  * 详见 checkBareAsyncIIFE 的 [HISTORICAL] 教训记录。
  */
 function analyzeIIFE(source: string, iifeStart: number): LintFinding | undefined {
@@ -677,8 +677,8 @@ function findParamNameFindings(
  * 仅对 parseResourceMeta 解析成功的 meta 执行（旧 const meta 格式不检查）。
  *
  * W1 参数名匹配（非形态匹配）：'note:'/'Example:'/'a=b' 等 prose 不误报（design-review
- * 探针实测形态匹配误报面）；参数名集合 = meta.parameters.properties keys + patternProperties
- * 的 word 前缀（^word\\d+$ 转义形态）。检查面 = description + when + notFor 三字段
+ * 探针实测形态匹配误报风险）；参数名集合 = meta.parameters.properties keys + patternProperties
+ * 的 word 前缀（^word\\d+$ 转义形态）。检查侧 = description + when + notFor 三字段
  * （同进 §5.1 注入段）。W2/W3 抽到 checkMetaFieldQuality（lintAgentMeta 共用）。
  */
 function checkMetaQuality(meta: { description?: string; when?: string; notFor?: string; parameters?: Record<string, unknown> }): LintFinding[] {

@@ -290,7 +290,7 @@
     },
     {
       "id": "C-data-03",
-      "summary": "投影只发生一次：派生逻辑只在 runtime（或 core 唯一实现）；renderer 零派生，stores 是视图模型容器，WS 消息 view-ready",
+      "summary": "派生只发生一次：派生逻辑只在 runtime（或 core 唯一实现）；renderer 零派生，stores 是视图模型容器，WS 消息 view-ready",
       "scope": [
         "packages/renderer/src/**",
         "packages/core/src/**",
@@ -392,7 +392,7 @@
     },
     {
       "id": "C-data-08",
-      "summary": "队列区单一数据源：队列状态帧 = `session.delivery`（内核条目投影视图：活跃态全量 + delivered 最近 50 条完整条目 + lane，cancelled 不投影；renderer 队列区唯一取数口）；`queue_update` 帧降级为内核内部回执（不直驱 UI）；队列内容权威 = runtime 投递所有权内核（全部发送方只提交，车道判定不在消费侧）；taiji 扩展禁 sendUserMessage 直接注入 pi 队列，pi 槽位滞留的外来文本由对账器收养；送达确认与判重按裸标记 id 精确匹配（禁计数 FIFO、禁文本匹配）",
+      "summary": "队列区单一数据源：队列状态帧 = `session.delivery`（内核条目派生视图：活跃态全量 + delivered 最近 50 条完整条目 + lane，cancelled 不进视图；renderer 队列区唯一取数口）；`queue_update` 帧降级为内核内部回执（不直驱 UI）；队列内容权威 = runtime 投递所有权内核（全部发送方只提交，车道判定不在消费侧）；taiji 扩展禁 sendUserMessage 直接注入 pi 队列，pi 槽位滞留的外来文本由对账器收养；送达确认与判重按裸标记 id 精确匹配（禁计数 FIFO、禁文本匹配）",
       "scope": [
         "packages/renderer/src/**",
         "packages/core/src/**",
@@ -971,7 +971,7 @@
     },
     {
       "id": "C-state-09",
-      "summary": "panel 输入面（composer/ask-user/landing）显隐只许经 derivePanelView 纯函数派生（packages/core/src/domain/session/panel-view.ts），禁止组件内直接组合 flow/chat/session 状态判显隐；landing 判据恒为 !sessionId && isFlowActive（G2 结构免疫）",
+      "summary": "panel 输入范围（composer/ask-user/landing）显隐只许经 derivePanelView 纯函数派生（packages/core/src/domain/session/panel-view.ts），禁止组件内直接组合 flow/chat/session 状态判显隐；landing 判据恒为 !sessionId && isFlowActive（G2 结构免疫）",
       "scope": [
         "packages/renderer/src/components/panel/**",
         "packages/core/src/domain/session/panel-view.ts"
@@ -1377,7 +1377,7 @@
         },
         {
           "type": "machine",
-          "hook": "install-hooks.sh §node:test grep 段（NODE_TEST_HITS 段——测试文件面拦截载体：eslint 全局 ignores 硬排除测试文件，测试文件经 pre-commit 模板 grep 拦截）"
+          "hook": "install-hooks.sh §node:test grep 段（NODE_TEST_HITS 段——测试文件侧拦截载体：eslint 全局 ignores 硬排除测试文件，测试文件经 pre-commit 模板 grep 拦截）"
         }
       ]
     },
@@ -1575,7 +1575,7 @@
     },
     {
       "id": "C-ext-15",
-      "summary": "引擎数据目录布局（<dataDir>/engines/<engineId>/<分组 key，池抽象降级后恒 'shared'>/）与 journal 路径必须经 engine/paths.ts 同源推导（SDK SHARED_POOL_KEY 单源承载），extension 写侧与 runtime 校验侧禁自拼字符串；record.engine 缺省按 pi 投影（存量 record 零迁移）",
+      "summary": "引擎数据目录布局（<dataDir>/engines/<engineId>/<分组 key，池抽象降级后恒 'shared'>/）与 journal 路径必须经 engine/paths.ts 同源推导（SDK SHARED_POOL_KEY 单源承载），extension 写侧与 runtime 校验侧禁自拼字符串；record.engine 缺省按 pi 推算（存量 record 零迁移）",
       "scope": [
         "extensions/universal/subagent-workflow/src/execution/engine/**",
         "packages/runtime/src/services/session/**"
@@ -1738,7 +1738,7 @@
     },
     {
       "id": "C-ext-19",
-      "summary": "结果语义通知必须走确认式送达（持久账本 + 幂等键，session-delivery/notify-ledger 通道），禁止新建依赖 pi 内存队列（steer/nextTurn/followUp）的 at-most-once 通道；交互式注入仅限非结果语义。scheduler 到期触发注入已改判（2026-09-14 用户裁决，权威源 scheduler-steer-direct-dispatch.md 裁决记录）：投递模型被 steer 直投 + 受理即记账重构，scheduler 触发按「提醒语义非结果语义」处置，at-least-once 降级为受理后 at-most-once 属设计已接受代价（busy 打断/abort 丢轮/无合批三代价四要素登记于该设计 §5），pi-boundary-reliability 附录 B 的 scheduler 账本化迁移待办随之逐条处理完毕（2026-09-15）。生效口径：新代码即禁、subagent-workflow 内存量经 g4-allow 行级豁免定性和迁移去向；G4（check_subagent_channels.py）扫描面 = extensions/universal/subagent-workflow/src/ 唯一——scheduler 不在扫描面、无 g4-allow 义务，仅当 scheduler 未来承载结果语义通知时才重新评估扩面",
+      "summary": "结果语义通知必须走确认式送达（extensions/shared/delivery-port 的 port.deliver——受理前投递日志落 session entry + 幂等键 + details-id 送达凭据 + session_start 差集重放，at-least-once），禁止新建依赖 pi 内存队列（steer/nextTurn/followUp）的 at-most-once 通道；交互式注入仅限非结果语义。scheduler 到期触发注入已改判（2026-09-14 用户裁决，权威源 scheduler-steer-direct-dispatch.md 裁决记录）：投递模型被 steer 直投 + 受理即记账重构，scheduler 触发按「提醒语义非结果语义」处置，at-least-once 降级为受理后 at-most-once 属设计已接受代价（busy 打断/abort 丢轮/无合批三代价四要素登记于该设计 §5），pi-boundary-reliability 附录 B 的 scheduler 账本化迁移待办随之逐条处理完毕（2026-09-15）。生效口径：新代码即禁、存量经白名单逐文件定性与 g4-allow 行级豁免；G4（check_subagent_channels.py）按方案 B 实装（port 为唯一合法 custom 注入点）：规则 1 扫描 extensions/ 全部 .ts、deliverAs 词表含 followUp、白名单 11 条逐文件定性（shared/delivery-port 等）；deliverAs 变量传参形态不在检查射程（goal/plan 等经参数传递的注入由端口迁移波次收敛）。scheduler 改判（提醒语义）保持——结果语义义务仅当其未来承载结果语义通知时重新评估",
       "scope": [
         "extensions/**",
         "packages/session-delivery/**"
@@ -1760,7 +1760,7 @@
     },
     {
       "id": "C-ext-20",
-      "summary": "zcode 引擎单一 app-server 形态（2026-09 用户拍板）：禁 CLI spawn 链回归（zcode --json 单轮与 probe 冒烟/protocol-drift 降级已删，漂移直接报错）；共享宿主 HOME 不动（禁 HOME 池化回归，spawn env 不覆写 HOME，db/plugins/MCP 继承宿主 HOME）；会话库隔离（spawn env 覆写 ZCODE_SESSION_DB_PATH 并清空别名键 ZCODE_SESSION_DB，会话落独立库 <engineDataDir>/engines/zcode/session-db/db.sqlite，不进 ZCode GUI 侧边栏、不落 engines/zcode/shared/ 池目录；poolKey 协议面已随池抽象降级整体退役，journal 固定分组 'shared'，磁盘布局不变）；handle.dbPath 与两条读取链（session-view-service ①级 + EnginePort.read）一律按 zcodeDbPathAllowlist(dataDir) 白名单集合成员判定放行（隔离库 + 宿主库存量兼容锚点），禁止还原为宿主路径单值比较",
+      "summary": "zcode 引擎单一 app-server 形态（2026-09 用户拍板）：禁 CLI spawn 链回归（zcode --json 单轮与 probe 冒烟/protocol-drift 降级已删，漂移直接报错）；共享宿主 HOME 不动（禁 HOME 池化回归，spawn env 不覆写 HOME，db/plugins/MCP 继承宿主 HOME）；会话库隔离（spawn env 覆写 ZCODE_SESSION_DB_PATH 并清空别名键 ZCODE_SESSION_DB，会话落独立库 <engineDataDir>/engines/zcode/session-db/db.sqlite，不进 ZCode GUI 侧边栏、不落 engines/zcode/shared/ 池目录；poolKey 协议范围已随池抽象降级整体退役，journal 固定分组 'shared'，磁盘布局不变）；handle.dbPath 与两条读取链（session-view-service ①级 + EnginePort.read）一律按 zcodeDbPathAllowlist(dataDir) 白名单集合成员判定放行（隔离库 + 宿主库存量兼容锚点），禁止还原为宿主路径单值比较",
       "scope": [
         "packages/zcode-subagent-cli/**",
         "packages/runtime/src/services/session/**"
@@ -1937,7 +1937,7 @@
     },
     {
       "id": "C-proc-11",
-      "summary": "npm 发布面一致性：dist 发布包 files 白名单 ↔ 构建产出双向对齐——files 条目须磁盘存在且非空（幽灵条目拦截，npm pack 对幽灵条目静默跳过）、包内顶层 dist* 产物目录须被 files 覆盖（漏声明方向反向覆盖），由 check-publish-surface.mjs 在发布门（release workflow publish 前）与 CI PR invariants 双点强制（刻意不挂 pre-commit：dist 产物被 gitignore，干净 checkout 必红）；新增产物档须同批挂 workflow 构建步骤 + files 白名单条目 + 检查覆盖（三者缺一不可）；自包含档命名约定 dist.bundle 且须内联全部运行时依赖（静态 require 探针，裸名外部说明符红）；非发布用途构建目录禁用 dist 前缀（否则反向覆盖检查误红，改名即可）；非 workspace 包机制上不经 changeset 发布线（changesets 按 workspace 发现包），防手滑 npm publish 一律 private:true",
+      "summary": "npm 发布范围一致性：dist 发布包 files 白名单 ↔ 构建产出双向对齐——files 条目须磁盘存在且非空（幽灵条目拦截，npm pack 对幽灵条目静默跳过）、包内顶层 dist* 产物目录须被 files 覆盖（漏声明方向反向覆盖），由 check-publish-surface.mjs 在发布门（release workflow publish 前）与 CI PR invariants 双点强制（刻意不挂 pre-commit：dist 产物被 gitignore，干净 checkout 必红）；新增产物档须同批挂 workflow 构建步骤 + files 白名单条目 + 检查覆盖（三者缺一不可）；自包含档命名约定 dist.bundle 且须内联全部运行时依赖（静态 require 探针，裸名外部说明符红）；非发布用途构建目录禁用 dist 前缀（否则反向覆盖检查误红，改名即可）；非 workspace 包机制上不经 changeset 发布线（changesets 按 workspace 发现包），防手滑 npm publish 一律 private:true",
       "scope": [
         "packages/**",
         ".github/workflows/release-npm.yml",
@@ -2082,7 +2082,7 @@
     },
     {
       "id": "C-proc-13",
-      "summary": "引擎协议 v1.x 续聊语义与轮次活性权威（2026-09-11 随 H1 chat 域统一进 run 域逐段改写）：①协议面——chat 域独立协议面已退役：第 9 反向通道 host/roundLifecycle 通道族与 interact 控制面方法整族删除（反向通道现为 6 条——host/poolResolved 与 host/permission 后续亦退役、正向方法 9 个，方法/通道全集有测试断言）；续聊轮统一为「新 run + resume 锚点」——RunParams.resume{recordId, resume:ResumeAnchor} 为唯一会话形态键（原 chat 键经双键过渡后随 U6 读写两端同批退役，不存在「写新读旧」窗口），pi 以 --session 续写原 session 文件承载上下文；每轮续聊一次进程冷启（spawn+重放）为已接受代价，无进程保活；manifest conversation 位保留、语义收窄为 resume 能力位（fork 门控 OR 借位照常、conversation:true 派发同步拒分支已随 modeless 波 5 派发参数删除退役——unsupported 引擎 start 从即拒放宽为放行 + message 续聊拒（chat-rounds 引擎轴），mismatch/discovery/stub 不动；SP-5 one-shot→chatMode 升级双写点——进程内热升级与跨重启 revive 冷升级——均前置该 gate，unsupported 引擎拒绝升级并指引 fork/重派）；协议演进按演进政策三条执行（ADR-0071）：增量以可选载荷向后兼容、major 当前恒 1（删除类变更走 major bump 区间平移，政策③），且新增须过新增门槛（消费方 + 降级路径 + 能力位绑定三件齐，无消费方不进协议）；A 型同形改名默认「新增新键 + 旧键 deprecated 双读 + major 清除」，B 型机制替换同批合法（对端同仓 + ADR 登记）；对端独立节奏出现时删除一律走 major——minor 协商触发条件三条见 ADR-0071，条件不到不加协商位。②轮次活性权威在 core 编排层：W4 轮次活性监督器（三态判定：该等/该唤醒/该放弃）已于 2026-09-28 整机清理（生产不可达断线死机器裁决）——轮等待链无自动守护（剩余保护 = 用户显式任务预算的既有 watchdog env 通道），对话容器治理者=用户；chatMode 续聊轮活性 = 每轮 run 应答驱动（Continuation onRunSettled → settleRoundSuccess 轮终簿记承载；无进展自动回收的两段式守护——中段无进展检测 + 收尾段 settle 交棒——已删：引擎活着但事件不达的轮不再自动回收，需人工停止或用户显式任务预算兜底，簿记原语 noteRoundSettledFromProtocol 一并退役）；轮末 = Continuation 轮终簿记 doFinalizeRoundToIdle（成功/失败两形态均保持 running-resumable，容器不被轮终态化短路；崩溃后等待用户再 message 即 resume）；注销发射点按域分明（2026-09-11 随 H2 W5 回写，原五语义平铺枚举退役）：record 域（subagent record 级注册）注销单点 = record 终态化（正常/失败/gc 均经终态化落地；workflow origin 成功经 D7 closed/gc 终态化）+ chatMode 轮末 idle（承载=Continuation 簿记）+ 对账 sweep 补发，进程退出本身永远不是注销理由；run 域（workflow run 级注册，type=workflow）= 注册/注销对 lifecycle ↔ pump，配对保留于 run 域（H2 D5：拆散会致 run 级注册永久残留——pending-notifications 未知 id 归 process 档永不 TTL 自愈）；注册对账 sweep 以 appendEntry 为权威落盘+尽力 emit（判据=终态集∪已离场/不存在；H2 后「run 已 done + record 恒 running」对账组合已由 D7 即终态化消除，判据不变）。③pending 注册表后台类型（subagent/workflow）恒 process 档——禁回翻 session 档（1h TTL 与跨 session 补注销会静默清除长任务注册=检查失明，2026-09-08 事故放大器）；读侧消费（countActiveFromEntries/subagent-workflow 后代判定/registry rebuild+工具投影/goal 检查口径）一律按 sessionId≠当前 session 过滤，新消费口必须传基准；chat 长驻消亡后 goal 拦截面对对话容器的活跃性覆盖从「整个对话期」收窄为「轮在途期」（轮间主 agent 可自由结束 session，容器可续无时限）。④goal continuation 双维度熔断——总次数正交封顶（PI_GOAL_CONTINUATION_CAP，计数只随实发递增且随 state 持久化，任何工具活动不得重置）+ 无进展退避（恢复清退避不清总数）；defer 通知按 pending 集合变化去重。⑤runtime abort 无墙钟超时（abort RPC 超时三级阶梯与 abort-liveness.ts 监督器已随 ADR-0122 整体删除）：abort await 失败 → catch → 广播终态收口（occupancy 复位 idle + stopped 终态 + error 广播）；pi 卡死时 abort RPC 悬挂不自动回收，处置归用户显式强制退出（session.forceQuit → forceQuitSession 直杀 pi）；subagent 续聊轮打断不经此面——Continuation 触发在途 run 的 abort 信号（RunContext.signal→引擎 cancel 链），进程退出即收敛、record 不终态化；【2026-09-13 永久会话模型回写】②段轮活性骨架现行有效，注销发射点与终态词汇已随新模型部分演进——record 域「终态化注销」收窄为 workflow-origin D7 例外族，非 workflow record 的注销 = 终态写点 markSettledOut 补发 + 轮次 settle 簿记（architecture/subagent-permanent-session-model.md §3.2.5/§3.2.7，原语清单见 C-data-20）；u7a in-flight 相位帧推送链三生产挂点已随 U5 重接线闭账——settleRoundSuccess（成功收尾 → armIdleKeepalive + 推 inFlight=0，失败轮不翻保活）/ dispatchRoundGuarded 同步段（派发 → executing，首轮/续轮/drain 单入口）/ disposeAllRecords 尾部单推（绝对计数）",
+      "summary": "引擎协议 v1.x 续聊语义与轮次活性权威（2026-09-11 随 H1 chat 域统一进 run 域逐段改写）：①协议范围——chat 域独立协议范围已退役：第 9 反向通道 host/roundLifecycle 通道族与 interact 控制范围方法整族删除（反向通道现为 6 条——host/poolResolved 与 host/permission 后续亦退役、正向方法 9 个，方法/通道全集有测试断言）；续聊轮统一为「新 run + resume 锚点」——RunParams.resume{recordId, resume:ResumeAnchor} 为唯一会话形态键（原 chat 键经双键过渡后随 U6 读写两端同批退役，不存在「写新读旧」窗口），pi 以 --session 续写原 session 文件承载上下文；每轮续聊一次进程冷启（spawn+重放）为已接受代价，无进程保活；manifest conversation 位保留、语义收窄为 resume 能力位（fork 门控 OR 借位照常、conversation:true 派发同步拒分支已随 modeless 波 5 派发参数删除退役——unsupported 引擎 start 从即拒放宽为放行 + message 续聊拒（chat-rounds 引擎轴），mismatch/discovery/stub 不动；SP-5 one-shot→chatMode 升级双写点——进程内热升级与跨重启 revive 冷升级——均前置该 gate，unsupported 引擎拒绝升级并指引 fork/重派）；协议演进按演进政策三条执行（ADR-0071）：增量以可选载荷向后兼容、major 当前恒 1（删除类变更走 major bump 区间平移，政策③），且新增须过新增门槛（消费方 + 降级路径 + 能力位绑定三件齐，无消费方不进协议）；A 型同形改名默认「新增新键 + 旧键 deprecated 双读 + major 清除」，B 型机制替换同批合法（对端同仓 + ADR 登记）；对端独立节奏出现时删除一律走 major——minor 协商触发条件三条见 ADR-0071，条件不到不加协商位。②轮次活性权威在 core 编排层：W4 轮次活性监督器（三态判定：该等/该唤醒/该放弃）已于 2026-09-28 整机清理（生产不可达断线死机器裁决）——轮等待链无自动守护（剩余保护 = 用户显式任务预算的既有 watchdog env 通道），对话容器治理者=用户；chatMode 续聊轮活性 = 每轮 run 应答驱动（Continuation onRunSettled → settleRoundSuccess 轮终簿记承载；无进展自动回收的两段式守护——中段无进展检测 + 收尾段 settle 交棒——已删：引擎活着但事件不达的轮不再自动回收，需人工停止或用户显式任务预算兜底，簿记原语 noteRoundSettledFromProtocol 一并退役）；轮末 = Continuation 轮终簿记 doFinalizeRoundToIdle（成功/失败两形态均保持 running-resumable，容器不被轮终态化短路；崩溃后等待用户再 message 即 resume）；注销发射点按域分明（2026-09-11 随 H2 W5 回写，原五语义平铺枚举退役）：record 域（subagent record 级注册）注销单点 = record 终态化（正常/失败/gc 均经终态化落地；workflow origin 成功经 D7 closed/gc 终态化）+ chatMode 轮末 idle（承载=Continuation 簿记）+ 对账 sweep 补发，进程退出本身永远不是注销理由；run 域（workflow run 级注册，type=workflow）= 注册/注销对 lifecycle ↔ pump，配对保留于 run 域（H2 D5：拆散会致 run 级注册永久残留——pending-notifications 未知 id 归 process 档永不 TTL 自愈）；注册对账 sweep 以 appendEntry 为权威落盘+尽力 emit（判据=终态集∪已离场/不存在；H2 后「run 已 done + record 恒 running」对账组合已由 D7 即终态化消除，判据不变）。③pending 注册表后台类型（subagent/workflow）恒 process 档——禁回翻 session 档（1h TTL 与跨 session 补注销会静默清除长任务注册=检查失明，2026-09-08 事故放大器）；读侧消费（countActiveFromEntries/subagent-workflow 后代判定/registry rebuild+工具派生视图/goal 检查口径）一律按 sessionId≠当前 session 过滤，新消费口必须传基准；chat 长驻消亡后 goal 拦截范围对对话容器的活跃性覆盖从「整个对话期」收窄为「轮在途期」（轮间主 agent 可自由结束 session，容器可续无时限）。④goal continuation 双维度熔断——总次数正交封顶（PI_GOAL_CONTINUATION_CAP，计数只随实发递增且随 state 持久化，任何工具活动不得重置）+ 无进展退避（恢复清退避不清总数）；defer 通知按 pending 集合变化去重。⑤runtime abort 无墙钟超时（abort RPC 超时三级阶梯与 abort-liveness.ts 监督器已随 ADR-0122 整体删除）：abort await 失败 → catch → 广播终态收尾（occupancy 复位 idle + stopped 终态 + error 广播）；pi 卡死时 abort RPC 悬挂不自动回收，处置归用户显式强制退出（session.forceQuit → forceQuitSession 直杀 pi）；subagent 续聊轮打断不经此面——Continuation 触发在途 run 的 abort 信号（RunContext.signal→引擎 cancel 链），进程退出即收敛、record 不终态化；【2026-09-13 永久会话模型回写】②段轮活性骨架现行有效，注销发射点与终态词汇已随新模型部分演进——record 域「终态化注销」收窄为 workflow-origin D7 例外族，非 workflow record 的注销 = 终态写点 markSettledOut 补发 + 轮次 settle 簿记（architecture/subagent-permanent-session-model.md §3.2.5/§3.2.7，原语清单见 C-data-20）；u7a in-flight 相位帧推送链三生产挂点已随 U5 重接线闭账——settleRoundSuccess（成功收尾 → armIdleKeepalive + 推 inFlight=0，失败轮不翻保活）/ dispatchRoundGuarded 同步段（派发 → executing，首轮/续轮/drain 单入口）/ disposeAllRecords 尾部单推（绝对计数）",
       "scope": [
         "packages/subagent-engine-sdk/src/protocol/**",
         "packages/pi-subagent-cli/src/**",
@@ -2108,7 +2108,7 @@
     },
     {
       "id": "C-data-19",
-      "summary": "session 忙闲状态单写原语：runtime session 域的 isGenerating/isCompacting/isBashRunning 三布尔与 occupancy 投影的唯一写入口 = event-interpreter.ts 的 applySessionOccupancyTransition（封闭转移枚举 SessionOccupancyTransition + SESSION_OCCUPANCY_TRANSITIONS 表，转移表即文档；新增转移先扩枚举再登记派生行，原语内部经 SessionOccupancyStateStore 写视图完成派生）。三布尔为派生存储——IManagedSessionView 类型层 readonly 使绕开原语的直写在编译期红（TS2540）；occupancy 合并/全等去重/session.occupancy state-topic 广播由原语原子完成，禁止第二广播出口。执行方式 = review（本条 enforcement）+ 编译期 readonly（TS2540，主防线）；辅以 CR 阶段 grep 人工复核（`\\\\.isGenerating\\\\s*=|\\\\.isCompacting\\\\s*=|\\\\.isBashRunning\\\\s*=` 于 packages/runtime/src 生产代码应零命中；测试 fixture 的运行期置位/复位一律经原语，构造期对象字面量初始化除外）——grep 复核为人工步骤，暂无自动化挂钩。C-data-04 同族范式在 occupancy 域的实例（session-dead-structural-fixes D2）",
+      "summary": "session 忙闲状态单写原语：runtime session 域的 isGenerating/isCompacting/isBashRunning 三布尔与 occupancy 派生视图的唯一写入口 = event-interpreter.ts 的 applySessionOccupancyTransition（封闭转移枚举 SessionOccupancyTransition + SESSION_OCCUPANCY_TRANSITIONS 表，转移表即文档；新增转移先扩枚举再登记派生行，原语内部经 SessionOccupancyStateStore 写视图完成派生）。三布尔为派生存储——IManagedSessionView 类型层 readonly 使绕开原语的直写在编译期红（TS2540）；occupancy 合并/全等去重/session.occupancy state-topic 广播由原语原子完成，禁止第二广播出口。执行方式 = review（本条 enforcement）+ 编译期 readonly（TS2540，主防线）；辅以 CR 阶段 grep 人工复核（`\\\\.isGenerating\\\\s*=|\\\\.isCompacting\\\\s*=|\\\\.isBashRunning\\\\s*=` 于 packages/runtime/src 生产代码应零命中；测试 fixture 的运行期置位/复位一律经原语，构造期对象字面量初始化除外）——grep 复核为人工步骤，暂无自动化挂钩。C-data-04 同族范式在 occupancy 域的实例（session-dead-structural-fixes D2）",
       "scope": [
         "packages/runtime/src/services/session/**"
       ],
@@ -2166,7 +2166,7 @@
     },
     {
       "id": "C-build-08",
-      "summary": "per-worktree dev 实例装配器唯一入口（2026-09-12）：`pnpm dev` 必须经 apps/electron/scripts/dev-instance.mjs——按 worktree 名 hash 稳定派生 Vite/CDP 端口与 TAIJI_AGENT_PORT_OFFSET（runtime 段，offset 步进 10 不重叠），数据目录隔离到 ~/.taiji-dev/instances/<worktree>/（首启从只读模板 ~/.taiji-dev.template/ 复制，模板只含配置面、运行时状态白名单排除，默认模型预置快速可用模型（具体型号随本机配置，不入库））；AI agent 真机验收必须 TAIJI_DEV_BACKGROUND=1（showInactive 不抢前台焦点）。禁止绕过装配器多开 dev（固定端口互占 + 共享数据目录互写，验收证据无法绑定 worktree——2026-09-12 H3 Gate B 归因困境成因）；Electron userData/单实例锁从 TAIJI_AGENT_DATA_DIR 派生，装配器是四点联动（vite server/electron loadURL/CDP/runtime 段）一致性的唯一保证，单点手改端口必致静默错配",
+      "summary": "per-worktree dev 实例装配器唯一入口（2026-09-12）：`pnpm dev` 必须经 apps/electron/scripts/dev-instance.mjs——按 worktree 名 hash 稳定派生 Vite/CDP 端口与 TAIJI_AGENT_PORT_OFFSET（runtime 段，offset 步进 10 不重叠），数据目录隔离到 ~/.taiji-dev/instances/<worktree>/（首启从只读模板 ~/.taiji-dev.template/ 复制，模板只含配置侧、运行时状态白名单排除，默认模型预置快速可用模型（具体型号随本机配置，不入库））；AI agent 真机验收必须 TAIJI_DEV_BACKGROUND=1（showInactive 不抢前台焦点）。禁止绕过装配器多开 dev（固定端口互占 + 共享数据目录互写，验收证据无法绑定 worktree——2026-09-12 H3 Gate B 归因困境成因）；Electron userData/单实例锁从 TAIJI_AGENT_DATA_DIR 派生，装配器是四点联动（vite server/electron loadURL/CDP/runtime 段）一致性的唯一保证，单点手改端口必致静默错配",
       "scope": [
         "apps/electron/scripts/dev-instance.mjs",
         "apps/electron/package.json",
@@ -2189,7 +2189,7 @@
     },
     {
       "id": "C-data-20",
-      "summary": "record 持久化写面唯一入口：subagent record 状态（.state 上一轮收条 / .alive 写权声明 / manifest 投影 / sessions-index 缓存 / subagent-record entry / .record-binding 锚键 sidecar）的写面全部归 RecordStore 意图原语，store 外零直写。【2026-09-13 永久会话模型原语清单刷新】状态机两态化（running|idle，closed 终态与 ClosedReason 资格角色删除）后现役原语 = markSettled（轮收尾：.state 新格式收条 status=idle + stopReason/endedAt，binding 统计快照锚分派 pi sessionFile 路径 / zcode 锚键路径）/ markReopened（锚失效同 id 带历史重开）/ markSettledOut（close 终态写点：worktreeHandle 清句 + .alive release + manifest 投影，幂等恒 true）/ markResurrected / tryEnterRunning + 轮次族 markRoundStarted / markRoundIdle / markBatchFinalized / adoptEngineDeath / register / appendEvent / acquireWriteLease（.alive acquire 三时机唯一包装）；markFinalized / markCancelled 退役（@deprecated，仅 workflow-origin D7 例外族 finalizeFailed/finalizeAborted/settleOneShotOutcome 经 finalize-record 保留调用）。检查两级：eslint no-restricted-imports（subagent-core 块，store 外禁 import writeFinalizedState/writeCancelledState/writeAliveMarker/removeAliveMarker/saveIndex——模块边界一级拦截）+ scripts/check-record-write-surface.mjs（pre-commit 按路径触发，grep 门兜底拦类方法调用与 subagent-record entry 直写）。settle/终态持久化写入点全同步（.state writeSync 先 + manifest writeSync 后，D8 v7 写序在两态下不变），实测 P99 <0.5ms（N=100 采样、数字时变，terminal-write-latency.test.ts 常驻回归；D2 阈值 10ms）。【W1 介质归位写面刷新（ADR-0094，2026-09-26）】record 运行态的事实写 = 事件文件追加（RecordJournalWriteFace，record-store-rounds.ts——record-created/bound/round-started/round-idle/settled/reopened 六类事件 + 单调 seq，唯一写者 record-events.ts）；主 session 条目面 = 每实体注册 + 终态两条 v2 小条目（register/archive/收编入口内置——register 与 archive 真终局写，reportRecordTransition 的 v1 全量快照写点退役，改落 record-bound 帧 + bound manifest 物化）；v1 快照唯一残余写点 = reportSubagentRecord（v1 实体孤儿纠偏兼容层，W4 sunset 退役）；state/manifest/.record-binding 均为 fold 物化投影（.alive 操作租约不计事实源）。检查两级不变，grep 门断言面扩为 R1-R7（R2 加宽常量形态 + 白名单扩 rounds face；R3 workflow-record 三写点宿主白名单（worker-message-pump / lifecycle / 壳 jsonl-run-store）；R4 v1 快照投影构造器白名单（record-entry 定义 + store 兼容层）；R5 workflow-record v1 快照载荷形态全域拒绝；R6 eventLog/displayItems 死字节载荷全域拒绝；R7 .events 直写白名单（record-events / run-events））",
+      "summary": "record 持久化写侧唯一入口：subagent record 状态（.state 上一轮收条 / .alive 写权声明 / manifest 派生视图 / sessions-index 缓存 / subagent-record entry / .record-binding 锚键 sidecar）的写侧全部归 RecordStore 意图原语，store 外零直写。【2026-09-13 永久会话模型原语清单刷新】状态机两态化（running|idle，closed 终态与 ClosedReason 资格角色删除）后现役原语 = markSettled（轮收尾：.state 新格式收条 status=idle + stopReason/endedAt，binding 统计快照锚分派 pi sessionFile 路径 / zcode 锚键路径）/ markReopened（锚失效同 id 带历史重开）/ markSettledOut（close 终态写点：worktreeHandle 清句 + .alive release + manifest 派生视图，幂等恒 true）/ markResurrected / tryEnterRunning + 轮次族 markRoundStarted / markRoundIdle / markBatchFinalized / adoptEngineDeath / register / appendEvent / acquireWriteLease（.alive acquire 三时机唯一包装）；markFinalized / markCancelled 退役（@deprecated，仅 workflow-origin D7 例外族 finalizeFailed/finalizeAborted/settleOneShotOutcome 经 finalize-record 保留调用）。检查两级：eslint no-restricted-imports（subagent-core 块，store 外禁 import writeFinalizedState/writeCancelledState/writeAliveMarker/removeAliveMarker/saveIndex——模块边界一级拦截）+ scripts/check-record-write-surface.mjs（pre-commit 按路径触发，grep 门兜底拦类方法调用与 subagent-record entry 直写）。settle/终态持久化写入点全同步（.state writeSync 先 + manifest writeSync 后，D8 v7 写序在两态下不变），实测 P99 <0.5ms（N=100 采样、数字时变，terminal-write-latency.test.ts 常驻回归；D2 阈值 10ms）。【W1 介质归位写侧刷新（ADR-0094，2026-09-26）】record 运行态的事实写 = 事件文件追加（RecordJournalWriteFace，record-store-rounds.ts——record-created/bound/round-started/round-idle/settled/reopened 六类事件 + 单调 seq，唯一写者 record-events.ts）；主 session 条目范围 = 每实体注册 + 终态两条 v2 小条目（register/archive/收编入口内置——register 与 archive 真终局写，reportRecordTransition 的 v1 全量快照写点退役，改落 record-bound 帧 + bound manifest 物化）；v1 快照唯一残余写点 = reportSubagentRecord（v1 实体孤儿纠偏兼容层，W4 sunset 退役）；state/manifest/.record-binding 均为 fold 物化派生视图（.alive 操作租约不计事实源）。检查两级不变，grep 门断言范围扩为 R1-R7（R2 加宽常量形态 + 白名单扩 rounds face；R3 workflow-record 三写点宿主白名单（worker-message-pump / lifecycle / 壳 jsonl-run-store）；R4 v1 快照派生视图构造器白名单（record-entry 定义 + store 兼容层）；R5 workflow-record v1 快照载荷形态全域拒绝；R6 eventLog/displayItems 死字节载荷全域拒绝；R7 .events 直写白名单（record-events / run-events））",
       "scope": [
         "packages/subagent-core/src/**",
         "extensions/**"
@@ -2254,7 +2254,7 @@
     },
     {
       "id": "C-proc-16",
-      "summary": "renderer 进程崩溃显式失败（ADR-0122 事实驱动：失败显式上报，手动重试是唯一恢复通道）：render-process-gone（clean-exit 正常退出除外）一次崩溃即加载静态错误页——无自动 reload、无熔断预算、无恢复提示条（OOM 类崩溃 reload 后大概率再崩）；崩溃详情（windowId/reason/exitCode/时间戳）经 main-logger 落 main 侧日志 + crash-journal 崩溃台账（reason 透传 Electron RenderProcessGoneDetails 枚举，评估器数 crash / 按 reason 分类）；renderer JS 错误现场经错误捕获三件套（app.config.errorHandler / window error / unhandledrejection）抑制 Vue 默认整树卸载，并经 renderer-log IPC 落 main 侧日志（每窗口每分钟限流 100 条，超限计数合并为一条汇总行，防错误风暴分钟级刷 GB）；【2026-09-12 恢复登记】原 C-proc-12 被 dev-0.9.17 合并对侧条目撞号占用（该号现为引擎协议边界），改登 C-proc-16",
+      "summary": "renderer 进程崩溃显式失败（ADR-0122 事实驱动：失败显式上报，手动重试是唯一恢复通道）：render-process-gone（clean-exit 正常退出除外）一次崩溃即加载静态错误页——无自动 reload、无熔断预算、无恢复提示条（OOM 类崩溃 reload 后大概率再崩）；崩溃详情（windowId/reason/exitCode/时间戳）经 main-logger 落 main 侧日志 + crash-journal 崩溃记录（reason 透传 Electron RenderProcessGoneDetails 枚举，评估器数 crash / 按 reason 分类）；renderer JS 错误现场经错误捕获三件套（app.config.errorHandler / window error / unhandledrejection）抑制 Vue 默认整树卸载，并经 renderer-log IPC 落 main 侧日志（每窗口每分钟限流 100 条，超限计数合并为一条汇总行，防错误风暴分钟级刷 GB）；【2026-09-12 恢复登记】原 C-proc-12 被 dev-0.9.17 合并对侧条目撞号占用（该号现为引擎协议边界），改登 C-proc-16",
       "scope": [
         "apps/electron/main/window/window-factory.ts",
         "apps/electron/main/logs/main-logger.ts",
@@ -2447,7 +2447,7 @@
     },
     {
       "id": "C-data-22",
-      "summary": "zcode 隔离会话库条目 TTL 引擎侧 sweep（永久会话模型 §3.2.6 风险登记②执行锚，2026-09-13 U6 落地）：万物可续聊后 zcode 隔离库（<engineDataDir>/engines/zcode/session-db/db.sqlite）成为单调累积写入面（每 subagent 每轮追加、reopen 再开新 sessionId 继续追加），条目 TTL 30 天（ZCODE_SESSION_TTL_MS；pi 侧 transcript 回收自 2026-10-12 起归删主会话级联〔ADR-0133〕，无独立 TTL，两域不再有「同窗」绑定），且 TTL 通道与「zcode 万物可续聊」能力同发布单元（通道未落地不得发布该能力）；通道选型 = 引擎侧 sweep（zcode-subagent-cli session-db-maintenance.ts maybeSweepExpiredZcodeSessions）而非宿主侧清库——库写者是 app-server 常驻进程、引擎包持有其生命周期，写并发语义单点（busy_timeout 兜锁窗），宿主直写 sqlite 与会话库隔离方向（zcodeDbPathAllowlist 白名单化收紧）相悖；判龄 = session.time_updated ?? time_created（非数值保守保留——删错锚的代价（锚失效降级 reopen 丢历史）高于漏删）；活跃豁免 keepSessionIds = appserverRuntime.activeSessions 快照；节流 = 进程级 24h（ZCODE_SESSION_SWEEP_INTERVAL_MS）+ 运行时建立后 defer 50ms（ZCODE_SESSION_SWEEP_DEFER_MS）让位首 run 的 create；删除序先子表后 session（sqlite 默认 foreign_keys=0、engine 声明 CASCADE 不生效，不显式删子表留孤儿行；session_task_link 双向处置、workflow_* 父键置 NULL），每库单事务收尾 wal_checkpoint(PASSIVE)；fail-soft：任何失败（db 缺失 / node:sqlite 不可用 / 锁超时 / schema 漂移抛错）warn 留痕返回 {swept:0}，不拖垮 run 主链路；条目被清 = 锚失效 → 宿主侧自动 reopen 降级（同 id 带历史重开），无需人工恢复",
+      "summary": "zcode 隔离会话库条目 TTL 引擎侧 sweep（永久会话模型 §3.2.6 风险登记②执行锚，2026-09-13 U6 落地）：万物可续聊后 zcode 隔离库（<engineDataDir>/engines/zcode/session-db/db.sqlite）成为单调累积写侧（每 subagent 每轮追加、reopen 再开新 sessionId 继续追加），条目 TTL 30 天（ZCODE_SESSION_TTL_MS；pi 侧 transcript 回收自 2026-10-12 起归删主会话级联〔ADR-0133〕，无独立 TTL，两域不再有「同窗」绑定），且 TTL 通道与「zcode 万物可续聊」能力同发布单元（通道未落地不得发布该能力）；通道选型 = 引擎侧 sweep（zcode-subagent-cli session-db-maintenance.ts maybeSweepExpiredZcodeSessions）而非宿主侧清库——库写者是 app-server 常驻进程、引擎包持有其生命周期，写并发语义单点（busy_timeout 兜锁窗），宿主直写 sqlite 与会话库隔离方向（zcodeDbPathAllowlist 白名单化收紧）相悖；判龄 = session.time_updated ?? time_created（非数值保守保留——删错锚的代价（锚失效降级 reopen 丢历史）高于漏删）；活跃豁免 keepSessionIds = appserverRuntime.activeSessions 快照；节流 = 进程级 24h（ZCODE_SESSION_SWEEP_INTERVAL_MS）+ 运行时建立后 defer 50ms（ZCODE_SESSION_SWEEP_DEFER_MS）让位首 run 的 create；删除序先子表后 session（sqlite 默认 foreign_keys=0、engine 声明 CASCADE 不生效，不显式删子表留孤儿行；session_task_link 双向处置、workflow_* 父键置 NULL），每库单事务收尾 wal_checkpoint(PASSIVE)；fail-soft：任何失败（db 缺失 / node:sqlite 不可用 / 锁超时 / schema 漂移抛错）warn 留痕返回 {swept:0}，不拖垮 run 主链路；条目被清 = 锚失效 → 宿主侧自动 reopen 降级（同 id 带历史重开），无需人工恢复",
       "scope": [
         "packages/zcode-subagent-cli/src/session-db-maintenance.ts",
         "packages/zcode-subagent-cli/src/zcode-engine.ts",
@@ -2469,7 +2469,7 @@
     },
     {
       "id": "C-build-09",
-      "summary": "pi tee 单文件有界（crash-forensics D7）：createPiStreamWriter size 轮转与主日志共用 MAX_FILE_BYTES（TAIJI_LOG_MAX_BYTES env 单旋钮，默认 50MB）——达阈值 end 旧流等待 flush → zlib gzip 归档 <file>.1.gz（单代，tmp→rename 原子覆盖，gzip/IO 失败 best-effort 保留原文件，无时间兜底（ADR-0122））→ 新流截断续写原路径，轮转窗口行入队回放防丢、openPiStreams 注册表引用随轮转更新（退出 flush 走新流）；段文件必须保持 pi- 前缀（架构 D6③ 不变量：否则旋段逃出 cleanExpiredLogs 7 天清理白名单，变成新的无清理写入面）；[推翻登记] logger.ts 旧注释裁决「不轮转：单 session 事件量可控」被 198MB 实测证伪 [HISTORICAL]；字节计数起点 = writer 创建时 0（跨重启打开时预滚未实现，reattach 重开同 date 大文件最坏约 2× 阈值才轮转——登记接受，跨重启 size 封顶属后续独立工作）；【2026-09-13 合并改号】原编号 C-build-08 与 dev-0.9.19 重排编号撞车（dev 侧同名条目语义不同且保留原 id），本条改号原样保留",
+      "summary": "pi tee 单文件有界（crash-forensics D7）：createPiStreamWriter size 轮转与主日志共用 MAX_FILE_BYTES（TAIJI_LOG_MAX_BYTES env 单旋钮，默认 50MB）——达阈值 end 旧流等待 flush → zlib gzip 归档 <file>.1.gz（单代，tmp→rename 原子覆盖，gzip/IO 失败 best-effort 保留原文件，无时间兜底（ADR-0122））→ 新流截断续写原路径，轮转窗口行入队回放防丢、openPiStreams 注册表引用随轮转更新（退出 flush 走新流）；段文件必须保持 pi- 前缀（架构 D6③ 不变量：否则旋段逃出 cleanExpiredLogs 7 天清理白名单，变成新的无清理写侧）；[推翻登记] logger.ts 旧注释裁决「不轮转：单 session 事件量可控」被 198MB 实测证伪 [HISTORICAL]；字节计数起点 = writer 创建时 0（跨重启打开时预滚未实现，reattach 重开同 date 大文件最坏约 2× 阈值才轮转——登记接受，跨重启 size 封顶属后续独立工作）；【2026-09-13 合并改号】原编号 C-build-08 与 dev-0.9.19 重排编号撞车（dev 侧同名条目语义不同且保留原 id），本条改号原样保留",
       "scope": [
         "packages/runtime/src/infra/logger.ts"
       ],
@@ -2509,7 +2509,7 @@
     },
     {
       "id": "C-build-10",
-      "summary": "thinking 档位词表跟随检查（ext-simplify-17 D5 + ext-simplify-18 D6 扩面）：scripts/check-thinking-levels.mjs 在 pre-commit 按路径触发（llm-shared resolve.ts / pi-rpc types.ts / subagent-core model-ref.ts / pnpm-lock.yaml / 脚本自身），从 pi-ai dist types.d.ts 递归展开 ModelThinkingLevel 联合成员与 llm-shared THINKING_LEVELS + pi-rpc THINKING_LEVELS + subagent-core THINKING_ORDER 三副本双向比对，不一致非零退出（pi 版本 bump 引起联合变化时红灯指向副本同步）；subagent-core THINKING_ORDER 为 T3 比对面（ext-simplify-18 D6：成员集合一致性，不判低→高顺序——顺序语义由 subagent-core 自身测试锚定）",
+      "summary": "thinking 档位词表跟随检查（ext-simplify-17 D5 + ext-simplify-18 D6 扩大范围）：scripts/check-thinking-levels.mjs 在 pre-commit 按路径触发（llm-shared resolve.ts / pi-rpc types.ts / subagent-core model-ref.ts / pnpm-lock.yaml / 脚本自身），从 pi-ai dist types.d.ts 递归展开 ModelThinkingLevel 联合成员与 llm-shared THINKING_LEVELS + pi-rpc THINKING_LEVELS + subagent-core THINKING_ORDER 三副本双向比对，不一致非零退出（pi 版本 bump 引起联合变化时红灯指向副本同步）；subagent-core THINKING_ORDER 为 T3 比对面（ext-simplify-18 D6：成员集合一致性，不判低→高顺序——顺序语义由 subagent-core 自身测试锚定）",
       "scope": [
         "extensions/shared/llm-shared/src/resolve.ts",
         "packages/pi-rpc/src/types.ts",
@@ -2754,7 +2754,7 @@
     },
     {
       "id": "C-ext-23",
-      "summary": "session 替换/恢复非破坏语义四支柱（原 skill-reload-nondestructive D11；2026-09-25 W5 skill 变更→pi reload 编排退役，pi 侧不再有 reload 触发面，四支柱转为 pi 进程崩溃恢复/session 替换路径的防御性锁定，机制与测试保留）：subagent-workflow 的 session_shutdown 处理必须按 reason 分支，替换/恢复不得触发 dispose/terminate/store 清理；registerEngineDescriptor 同稳定标识覆盖不得 dispose 已实例化单例；host-ui-endpoint 槽的 EngineClient 消费点必须现读（不得构造期固化）；session 重启后 session_start 必须走 adoption（同 sessionId 接管而非重建）且不得运行 kill-9 恢复。执行方式 = 单测锁定（运行载体 = 包内 vitest，authority 所列测试文件即四支柱锁定落点：reload 分支 / adoption 含恢复门控 / 同标识重注册幂等 / 槽现读路由；「R2 按改动范围触发」无独立机器触发器，以 CR 的 scope 匹配近似承载），改 scope 面实现必须同批维持这些测试的断言语义，不得为通过测试弱化断言",
+      "summary": "session 替换/恢复非破坏语义四支柱（原 skill-reload-nondestructive D11；2026-09-25 W5 skill 变更→pi reload 编排退役，pi 侧不再有 reload 触发范围，四支柱转为 pi 进程崩溃恢复/session 替换路径的防御性锁定，机制与测试保留）：subagent-workflow 的 session_shutdown 处理必须按 reason 分支，替换/恢复不得触发 dispose/terminate/store 清理；registerEngineDescriptor 同稳定标识覆盖不得 dispose 已实例化单例；host-ui-endpoint 槽的 EngineClient 消费点必须现读（不得构造期固化）；session 重启后 session_start 必须走 adoption（同 sessionId 接管而非重建）且不得运行 kill-9 恢复。执行方式 = 单测锁定（运行载体 = 包内 vitest，authority 所列测试文件即四支柱锁定落点：reload 分支 / adoption 含恢复门控 / 同标识重注册幂等 / 槽现读路由；「R2 按改动范围触发」无独立机器触发器，以 CR 的 scope 匹配近似承载），改 scope 面实现必须同批维持这些测试的断言语义，不得为通过测试弱化断言",
       "scope": [
         "extensions/universal/subagent-workflow/src/workflow-events.ts",
         "extensions/universal/subagent-workflow/src/session-lifecycle.ts",
@@ -2801,7 +2801,7 @@
     },
     {
       "id": "C-data-25",
-      "summary": "投递所有权单一所有者：全部发送方（composer / session_manager send / completion-backflow / plugin / landing 首发）一律经 runtime 投递所有权内核（`packages/session-delivery` 状态机 + `session-delivery-registry.ts` 适配层）提交；lane（direct/steer/queued）判定单一源 = runtime 权威 occupancy 投影（C-data-19）+ 内核队列态，renderer 与 extension 禁做投递车道判定（`resolveSendRoute` 仅为发送位 UI 预测）；条目终态以送达回执（`message_end(user)` 标记命中）为准——受理（prompt 受理 / 文本入 pi 槽位）≠ 送达，只拿受理的条目由对账器兜底；内核条目判重按裸标记 id 精确匹配、跨 runtime 重启回落 transcript 标记扫描；唯一登记豁免 = canvas 回推——失效提示语义非交互投递（runtime transport 层 WS mutate actor=user 成功腿对活跃绑定 session 直投 `client.prompt(text, undefined, 'followUp')`，通知文本只是 agent 重新 canvas_read 的触发器，画布状态权威在 events.jsonl、回推丢失不损状态），不经内核提交、at-most-once 丢失窗为设计已接受代价，丢失恢复 = 用户重试裁决 / agent 重开 enter，重新评估条件 = 通知承载离开画布即不可恢复的结果语义（详录 pi-boundary-reliability.md 附录 E canvas 回推豁免条目）",
+      "summary": "投递所有权单一所有者：全部发送方（composer / session_manager send / completion-backflow / plugin / landing 首发）一律经 runtime 投递所有权内核（`packages/session-delivery` 状态机 + `session-delivery-registry.ts` 适配层）提交；lane（direct/steer/queued）判定单一源 = runtime 权威 occupancy 派生视图（C-data-19）+ 内核队列态，renderer 与 extension 禁做投递车道判定（`resolveSendRoute` 仅为发送位 UI 预测）；条目终态以送达回执（`message_end(user)` 标记命中）为准——受理（prompt 受理 / 文本入 pi 槽位）≠ 送达，只拿受理的条目由对账器兜底；内核条目判重按裸标记 id 精确匹配、跨 runtime 重启回落 transcript 标记扫描；唯一登记豁免 = canvas 回推——失效提示语义非交互投递（runtime transport 层 WS mutate actor=user 成功腿对活跃绑定 session 直投 `client.prompt(text, undefined, 'followUp')`，通知文本只是 agent 重新 canvas_read 的触发器，画布状态权威在 events.jsonl、回推丢失不损状态），不经内核提交、at-most-once 丢失窗为设计已接受代价，丢失恢复 = 用户重试裁决 / agent 重开 enter，重新评估条件 = 通知承载离开画布即不可恢复的结果语义（详录 pi-boundary-reliability.md 附录 E canvas 回推豁免条目）",
       "scope": [
         "packages/session-delivery/src/**",
         "packages/runtime/src/**",
@@ -2851,7 +2851,7 @@
     },
     {
       "id": "C-proc-22",
-      "summary": "引擎协议判据 6——wire 可选键三分类（advisory/degradable/behavior）与行为键必配门：behavior 键（引擎静默忽略会改变任务语义）必须绑定能力位并在宿主派发前预检（先例 resume↔conversation gate、forkSource），degradable 键缺省最弱档 + 判据 5 能力位双向回指 + 预检豁免（先例 streamMode↔eventGranularity），advisory 直接 additive；判别式「旧引擎静默忽略此键，宿主会发现吗？该降级是设计内吗？」（三案例归档唯一：resume→behavior、streamMode→degradable、description→advisory）。执行方式 = review（新 wire 可选键按判别式分类并核对能力门绑定/双向回指）+ 检查锚点（测试文件路径）= packages/subagent-core/src/execution/engine/__tests__/common/capability-gate.test.ts（behavior 键派发前预检既有回归）、packages/subagent-engine-sdk/src/__tests__/contract-closure.test.ts（能力位类型面必填断言）；条文权威 = ADR-0071 与 engine-protocol.ts 头注判据 6",
+      "summary": "引擎协议判据 6——wire 可选键三分类（advisory/degradable/behavior）与行为键必配门：behavior 键（引擎静默忽略会改变任务语义）必须绑定能力位并在宿主派发前预检（先例 resume↔conversation gate、forkSource），degradable 键缺省最弱档 + 判据 5 能力位双向回指 + 预检豁免（先例 streamMode↔eventGranularity），advisory 直接 additive；判别式「旧引擎静默忽略此键，宿主会发现吗？该降级是设计内吗？」（三案例归档唯一：resume→behavior、streamMode→degradable、description→advisory）。执行方式 = review（新 wire 可选键按判别式分类并核对能力门绑定/双向回指）+ 检查锚点（测试文件路径）= packages/subagent-core/src/execution/engine/__tests__/common/capability-gate.test.ts（behavior 键派发前预检既有回归）、packages/subagent-engine-sdk/src/__tests__/contract-closure.test.ts（能力位类型范围必填断言）；条文权威 = ADR-0071 与 engine-protocol.ts 头注判据 6",
       "scope": [
         "packages/subagent-engine-sdk/src/protocol/**",
         "packages/subagent-core/src/execution/engine/**"
@@ -2893,7 +2893,7 @@
     },
     {
       "id": "C-proc-24",
-      "summary": "引擎协议未知成员宽容语义四行（运行时成文契约，与编译期词表锁互补）：①未知 event.type → 旧宿主 reducer default no-op 安全落空（词表成员带 noop-safe 论证标记）；②未知正向 method → 引擎回 error 帧 engine_method_unsupported（engine_ 前缀透传面新码，旧宿主收到不崩；引擎实装义务绑定下一引擎适配层立项随批带上 + conformance 用例，当前无消费方不实装）；③未知 host/* 反向通道 → 宿主回 {unsupported:true}（由 askUser 语境泛化到全通道），发送方引擎走自身降级路径；④未知可选键 → advisory 忽略、behavior 键必有门（判据 6），不存在无门依赖。执行方式 = review（四行与词表头注、engine-development-guide.md 引擎义务条目成文核对）+ 检查锚点（测试文件路径）= packages/subagent-core/src/execution/engine/__tests__/conformance/protocol-blackbox.test.ts（未知 method 错误码原样透传既有断言）、packages/subagent-engine-sdk/src/__tests__/protocol-schema.test.ts（事件词表/enum 枚举面）；条文权威 = ADR-0071。触发形态双登记（「新引擎适配层立项」双保险）：① select-constraints 按 scope 代码/文档 diff 命中——SDK src 全域（引擎侧应答 helper 实装面）+ protocol + conformance + engine-adaptation 六引擎映射文档（立项期与实装期两侧 diff 均加载本约束）；② 立项 tech-design 必读 engine-development-guide.md §2.1 未知 method 应答义务条目（无代码 diff 阶段的传导主通道，指南精确路径已在 scope）",
+      "summary": "引擎协议未知成员宽容语义四行（运行时成文契约，与编译期词表锁互补）：①未知 event.type → 旧宿主 reducer default no-op 安全落空（词表成员带 noop-safe 论证标记）；②未知正向 method → 引擎回 error 帧 engine_method_unsupported（engine_ 前缀透传逻辑新码，旧宿主收到不崩；引擎实装义务绑定下一引擎适配层立项随批带上 + conformance 用例，当前无消费方不实装）；③未知 host/* 反向通道 → 宿主回 {unsupported:true}（由 askUser 语境泛化到全通道），发送方引擎走自身降级路径；④未知可选键 → advisory 忽略、behavior 键必有门（判据 6），不存在无门依赖。执行方式 = review（四行与词表头注、engine-development-guide.md 引擎义务条目成文核对）+ 检查锚点（测试文件路径）= packages/subagent-core/src/execution/engine/__tests__/conformance/protocol-blackbox.test.ts（未知 method 错误码原样透传既有断言）、packages/subagent-engine-sdk/src/__tests__/protocol-schema.test.ts（事件词表/enum 枚举形态）；条文权威 = ADR-0071。触发形态双登记（「新引擎适配层立项」双保险）：① select-constraints 按 scope 代码/文档 diff 命中——SDK src 全域（引擎侧应答 helper 实装面）+ protocol + conformance + engine-adaptation 六引擎映射文档（立项期与实装期两侧 diff 均加载本约束）；② 立项 tech-design 必读 engine-development-guide.md §2.1 未知 method 应答义务条目（无代码 diff 阶段的传导主通道，指南精确路径已在 scope）",
       "scope": [
         "packages/subagent-engine-sdk/src/**",
         "packages/subagent-core/src/execution/engine/__tests__/conformance/**",
@@ -2985,7 +2985,7 @@
     },
     {
       "id": "C-proc-27",
-      "summary": "非 workspace 结构接线登记（S1，2026-09-24 源自 PR #20 review-findings 组 D 检查化）：管辖区（packages/ extensions/ resources/plugins/）内含 package.json、但不在 pnpm-workspace.yaml globs 内的包必须在 docs/structure-wiring.json 逐条登记机器管线接线点（CI typecheck 锚点 / 测试装配 script / 发布线成员 / coverage 测量面），登记锚点须在目标文件中真实存在，双向对账（磁盘有而登记无 = 未登记即红；登记有而磁盘无 = 删包残留即红）；豁免清单（测试夹具/内嵌示例）显式登记可审计。新顶层结构第一笔 commit 只做接线与登记——ed6735b47 式「一 commit 三坑」（新包落线时 CI/coverage/检查面全漏）由本检查在 commit 时拦截",
+      "summary": "非 workspace 结构接线登记（S1，2026-09-24 源自 PR #20 review-findings 组 D 检查化）：管辖区（packages/ extensions/ resources/plugins/）内含 package.json、但不在 pnpm-workspace.yaml globs 内的包必须在 docs/structure-wiring.json 逐条登记机器管线接线点（CI typecheck 锚点 / 测试装配 script / 发布线成员 / coverage 测量侧），登记锚点须在目标文件中真实存在，双向对账（磁盘有而登记无 = 未登记即红；登记有而磁盘无 = 删包残留即红）；豁免清单（测试夹具/内嵌示例）显式登记可审计。新顶层结构第一笔 commit 只做接线与登记——ed6735b47 式「一 commit 三坑」（新包落线时 CI/coverage/检查范围全漏）由本检查在 commit 时拦截",
       "scope": [
         "docs/structure-wiring.json",
         "scripts/check-structure-wiring.mjs",
@@ -3029,7 +3029,7 @@
     },
     {
       "id": "C-ext-26",
-      "summary": "注册操作终局通知必达：workflow run 成功/失败/取消一律出终局通知（C-ext-19 确认式送达在 workflow 域的细化，D7）；终局投影由 run 显式状态机统一裁决（ADR-0091）——persistTerminalProjection 单写点、errorCode/stderrTeePath 从事件流读回，禁止旁路补发第二通知面",
+      "summary": "注册操作终局通知必达：workflow run 成功/失败/取消一律出终局通知（C-ext-19 确认式送达在 workflow 域的细化，D7）；终局派生由 run 显式状态机统一裁决（ADR-0091）——persistTerminalProjection 单写点、errorCode/stderrTeePath 从事件流读回，禁止旁路补发第二通知侧",
       "scope": [
         "extensions/universal/subagent-workflow/**",
         "packages/subagent-core/src/orchestration/**"
@@ -3091,7 +3091,7 @@
     },
     {
       "id": "C-proc-28",
-      "summary": "session 文件读者普查闭合（message-revoke G2）：全部读取 pi session .jsonl 内容（extension 侧 ctx.sessionManager.getEntries() / runtime 侧 jsonl 解析原语与提取扫描函数族）的读者必须登记于 docs/architecture/session-readers-census.md 并按二分准则归类——未来状态随树（可由活跃路径确定性重建的当前状态，撤回后按活跃路径重算）/ 已发生事实照实（重建即伪造事实：run 执行、token 消耗、通知账本、名字结局）；新增派生读者时同 commit 在该清单登记归类（含归类理由与接入单元指针），未归类的新读者不得合入。可执行检查 = 重跑普查清单 §2 机器锚点命令族（E1 getEntries / E2 session-core 直读 / R1 utils-jsonl 消费 / R2 提取扫描函数族 / R3 createReadStream 流扫），任一锚点出现清单未登记的新命中即先补登记再合入",
+      "summary": "session 文件读者普查完成（message-revoke G2）：全部读取 pi session .jsonl 内容（extension 侧 ctx.sessionManager.getEntries() / runtime 侧 jsonl 解析原语与提取扫描函数族）的读者必须登记于 docs/architecture/session-readers-census.md 并按二分准则归类——未来状态随树（可由活跃路径确定性重建的当前状态，撤回后按活跃路径重算）/ 已发生事实照实（重建即伪造事实：run 执行、token 消耗、通知账本、名字结局）；新增派生读者时同 commit 在该清单登记归类（含归类理由与接入单元指针），未归类的新读者不得合入。可执行检查 = 重跑普查清单 §2 机器锚点命令族（E1 getEntries / E2 session-core 直读 / R1 utils-jsonl 消费 / R2 提取扫描函数族 / R3 createReadStream 流扫），任一锚点出现清单未登记的新命中即先补登记再合入",
       "scope": [
         "extensions/**",
         "packages/runtime/src/**",
@@ -3133,7 +3133,7 @@
     },
     {
       "id": "C-ext-28",
-      "summary": "workflow 成员续写双通道分离（域边界）：同 run 同名 agent() 调用的续写走编排层内部复用通道——executeWorkflowAgent 入口分岔（路由/预检序列内、record 创建前），name 复用池命中 → 既有成员 revive 拉起回 running + Continuation 续写轮直调（resume 锚点经 RunContext.resume 携带），登记/清空经 record 事件流承载（[D6] 绑定消解：绑定 = agent-started 载荷 memberRecordId 字段，与帧同帧落账构造性满足写入序红线；恢复 = fold 重建；收尾清空只释放内存——无 clear 事件，清空语义由终局后无后续 agent-started 帧构造性承接）；外部 message 通道对 workflow-origin record 的拒绝行为保持原样（subagent-actions-core messageHandler 域检查——成员结果由脚本返回值承载、无 message 对端）。禁止把成员续写改道 messageHandler，禁止放宽外部拒绝",
+      "summary": "workflow 成员续写双通道分离（域边界）：同 run 同名 agent() 调用的续写走编排层内部复用通道——executeWorkflowAgent 入口分岔（路由/预检序列内、record 创建前），name 复用池命中 → 既有成员 revive 拉起回 running + Continuation 续写轮直调（resume 锚点经 RunContext.resume 携带），登记/清空经 record 事件流承载（[D6] 绑定消解：绑定 = agent-started 载荷 memberRecordId 字段，与帧同帧写入 journal 记录构造性满足写入序红线；恢复 = fold 重建；收尾清空只释放内存——无 clear 事件，清空语义由终局后无后续 agent-started 帧构造性承接）；外部 message 通道对 workflow-origin record 的拒绝行为保持原样（subagent-actions-core messageHandler 域检查——成员结果由脚本返回值承载、无 message 对端）。禁止把成员续写改道 messageHandler，禁止放宽外部拒绝",
       "scope": [
         "packages/subagent-core/src/execution/service/workflow-dispatch.ts",
         "packages/subagent-core/src/execution/assembly/subagent-actions-core.ts",

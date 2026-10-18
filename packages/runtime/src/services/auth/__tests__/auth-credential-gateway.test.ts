@@ -1,5 +1,5 @@
 /**
- * A1-4 AuthService 收口测试：auth.json 凭证读/写通道 + catalog apiKey 保存全链路。
+ * A1-4 AuthService 收敛测试：auth.json 凭证读/写通道 + catalog apiKey 保存全链路。
  *
  * 测试框架：vitest（从 vitest 导入 describe/it/expect，禁 node:test）。
  * 运行命令：cd packages/runtime && npx vitest run src/services/auth/__tests__/auth-credential-gateway.test.ts

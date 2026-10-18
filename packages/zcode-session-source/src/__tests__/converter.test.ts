@@ -7,8 +7,8 @@
  * 1. 纯函数直测：内存行集（不建真库）→ 产物 entry 逐条断言（映射表即验收标准）。
  *    产物经 serializeSession（基座字节契约，P-serializer 锚）转 JSONL 行后断言，
  *    与「stringify 产物逐行断言」形态对齐，同时覆盖「键序不重排、接口外字段不丢失」
- *    的序列化兼容面。
- * 2. 重放锚：产物经最小重放器（pi applyEntry 消费语义的测试内同构投影，跨包
+ *    的序列化兼容范围。
+ * 2. 重放锚：产物经最小重放器（pi applyEntry 消费语义的测试内同构派生视图，跨包
  *    import runtime 会成环——手段自证已在 deviations 登记）断言 Entry 树 parentId
  *    链完整 + 消息序列/角色/toolCall 配对/usage 聚合——「合法 pi session」的可证伪
  *    定义；另以 parseSessionContent round-trip 作 canonical 合法性机器锚。
@@ -16,7 +16,7 @@
  *    readZcodeSession → NormalizedSession 三键形状 + 重放 + degradations 装配 +
  *    文件名不变量。
  *
- * 自 runtime dev 演进版移植的净新增组（git 可追溯）：消息投影分派 describe（六策略
+ * 自 runtime dev 演进版移植的净新增组（git 可追溯）：消息派生视图分派 describe（六策略
  * 落点 / L1-L2 归类聚合 / unclassified sample / G1 user entry 数收敛）、T3c 新语义
  * （尾段零 usage 不变量门、RT-5#1 缺省语义 ×2、RT-5#8 不伪造 1970）、cancelled/error
  * turn 事故回归 7 用例；degradations 断言全部结构化（code/kind/source/count/sample
@@ -105,7 +105,7 @@ function userMessage(
   return { id, data: { role: 'user', time: { created: createdMs }, ...dataExtra }, parts }
 }
 
-/** 新数据 semantics 形态（§4.2 值域闭集成员）——投影分派 fixture 共用。 */
+/** 新数据 semantics 形态（§4.2 值域闭集成员）——派生视图分派 fixture 共用。 */
 const REAL_USER_SEMANTICS = {
   kind: 'user_prompt',
   origin: 'real_user',
@@ -128,7 +128,7 @@ const BACKGROUND_SEMANTICS = {
 
 /** 厨房水槽行集：part 级映射全形态覆盖（切段/配对/映射/降级）。
  * 注意不得加入 timeline part：分类器 isTimelineOnlyMessage 会把整条消息判成
- * timelineOnly 丢弃（part 级 timeline 属消息级投影形态，由投影分派 describe 覆盖）。 */
+ * timelineOnly 丢弃（part 级 timeline 属消息级派生视图形态，由派生视图分派 describe 覆盖）。 */
 function kitchenSinkMessages(): ZcodeMessageInput[] {
   return [
     // m1 user：多 text part + file part（D6 丢弃计降级）
@@ -166,7 +166,7 @@ function kitchenSinkMessages(): ZcodeMessageInput[] {
         stepStart(),
         textPart('All done', 3000),
         stepFinish('stop', { total: 60, input: 40, output: 20 }, 0.2),
-        // 尾段（无 step-finish 收口）：running tool（整对丢弃）+ compaction（T5 正常孤儿 →
+        // 尾段（无 step-finish 收尾）：running tool（整对丢弃）+ compaction（T5 正常孤儿 →
         // custom）+ 未知 type（跳过+降级）——尾段 content 为空 → 不产出 assistant entry
         toolPart('call_5', 'Read', { status: 'running', input: { file_path: '/b.ts' } }),
         part({ type: 'compaction', auto: true, trigger: 'auto', preCompactTokenCount: 160000, time: { start: 4000, end: 4100 } }),
@@ -207,7 +207,7 @@ interface ParsedEntry {
 /**
  * 产物 → JSONL 行（serializeSession = 基座序列化原语，P-serializer 字节契约：
  * JSON.stringify(entry) 不重排键、不丢接口外字段——导入薄包装即用此函数落盘）。
- * converter 产物是 entry 对象，序列化步显式走基座单点，同时覆盖序列化兼容面。
+ * converter 产物是 entry 对象，序列化步显式走基座单点，同时覆盖序列化兼容范围。
  */
 function toLines(session: NormalizedSession): ParsedEntry[] {
   return serializeSession(session.entries)
@@ -216,16 +216,16 @@ function toLines(session: NormalizedSession): ParsedEntry[] {
     .map((l) => JSON.parse(l) as ParsedEntry)
 }
 
-// ── 重放锚实现：最小重放器（pi applyEntry 消费语义的测试内同构投影）───────────────────
+// ── 重放锚实现：最小重放器（pi applyEntry 消费语义的测试内同构派生视图）───────────────────
 // runtime 消费链（mapSessionEntries → convertPiHistory，replayEntries(applyEntry) 内核）
 // 位于 packages/runtime——zcode-session-source 反向 import 会成环，故在测试内按同一
-// 语义投影（deviations 已登记手段自证）。投影语义锚：
+// 语义派生视图（deviations 已登记手段自证）。派生视图语义锚：
 // - parentId 顺序链完整（pi applyEntry/_buildIndex 的形状前提：byId.set(entry.id, entry)，
 //   leafId = entry.id，无 parseInt/形态校验类消费）
 // - user/assistant 产出对话流消息；紧随的 role=toolResult entry 按 toolCallId 回填所属
 //   assistant 的 toolCall（output/status；arguments 经 input 字段回放——edit/write 小写名
 //   喂 diff 卡片提取链）
-// - usage 聚合投影 inputTokens/outputTokens；thinking 块；text parts join 成 content
+// - usage 聚合映射 inputTokens/outputTokens；thinking 块；text parts join 成 content
 // - custom entry（含 zcode-import:compaction）不产出对话流消息、不伪造 compactionSummary
 
 interface ReplayedToolCall {
@@ -259,7 +259,7 @@ function replayEntries(entries: ParsedEntry[]): { messages: ReplayedMessage[]; o
     prev = e.id
   }
 
-  // 2) 消息投影（toolResult 并入所属 assistant 的 toolCall）
+  // 2) 消息派生视图（toolResult 并入所属 assistant 的 toolCall）
   const messages: ReplayedMessage[] = []
   const orphans: ParsedEntry[] = []
   let currentAssistant: ReplayedMessage | undefined
@@ -314,7 +314,7 @@ describe('T1/T6 header、session_info 与 entry id 链', () => {
 
   it('header：归一化 id + timestamp 取 session 创建时间；cwd 缺省留空不伪造', () => {
     // 迁移适配：旧断言「首行 header version=3 + 三字段」——header 行由导入薄包装/reader
-    // 序列化装配面拼装（D1），converter 产 SessionHeader 对象；cwd 键不存在 = 缺省留空
+    // 序列化装配逻辑拼装（D1），converter 产 SessionHeader 对象；cwd 键不存在 = 缺省留空
     expect(session.header).toEqual({ id: NORMALIZED_ID, timestamp: NORMALIZED_TIMESTAMP })
     expect(session.header).not.toHaveProperty('cwd')
   })
@@ -432,7 +432,7 @@ describe('映射全表（厨房水槽行集 → 产物 entry）', () => {
     })
   })
 
-  it('T3 第二段 assistant：text-only 段收口 stopReason=stop + 第二份 usage', () => {
+  it('T3 第二段 assistant：text-only 段收尾 stopReason=stop + 第二份 usage', () => {
     const a = lines[7] as ParsedEntry & { message: { content: Array<{ type: string }>; usage: Record<string, unknown>; stopReason: string; timestamp: number } }
     expect(a.message.content).toEqual([{ type: 'text', text: 'All done' }])
     expect(a.message.stopReason).toBe('stop')
@@ -452,7 +452,7 @@ describe('映射全表（厨房水槽行集 → 产物 entry）', () => {
   })
 
   it('part 级诊断降级：file 丢弃 / running tool 整对丢弃 / 未知 part type 跳过（结构化 + 产物侧反证）', () => {
-    // 逐条 count=1 + sample 定位源消息（消息级丢弃才走 (code,kind,source) 聚合，见投影分派 describe）
+    // 逐条 count=1 + sample 定位源消息（消息级丢弃才走 (code,kind,source) 聚合，见派生视图分派 describe）
     expect(session.degradations).toHaveLength(3)
     for (const d of session.degradations) {
       expect(d.code).toBe('dropped_transient')
@@ -465,10 +465,10 @@ describe('映射全表（厨房水槽行集 → 产物 entry）', () => {
   })
 })
 
-// ── 消息级投影分派（classifyMessage → §7.3 落点映射表）──────────────────────────────
+// ── 消息派生视图分派（classifyMessage → §7.3 落点映射表）──────────────────────────────
 // 自 runtime dev 演进版移植（11 用例整组，git 可追溯）。
 
-describe('消息投影分派：六策略落点 + unclassified', () => {
+describe('消息派生视图分派：六策略落点 + unclassified', () => {
   it('realUserInput：带 semantics 新数据与无 semantics 旧数据同落 user entry（text part 逐条）', () => {
     const msgs: ZcodeMessageInput[] = [
       userMessage('m-sem', [textPart('带语义'), textPart('第二段')], { semantics: REAL_USER_SEMANTICS }),
@@ -525,7 +525,7 @@ describe('消息投影分派：六策略落点 + unclassified', () => {
     ]
     const session = convertZcodeTranscript(msgs, { ...SESSION_INPUT, title: 'T' })
     const lines = toLines(session)
-    // G1：6 条 user role 消息仅 1 条产 user entry（其余为投影丢弃类，不再冒充用户气泡）；
+    // G1：6 条 user role 消息仅 1 条产 user entry（其余为派生视图丢弃类，不再冒充用户气泡）；
     // 该条是首个 message entry（session_info 占 00000001）
     const userEntries = lines.filter((e) => e.message?.role === 'user')
     expect(userEntries).toHaveLength(1)
@@ -658,19 +658,19 @@ describe('消息投影分派：六策略落点 + unclassified', () => {
 // ── 边界细分：切段/尾段/T3c/usage 缺失/空段 ────────────────────────────────────────
 
 describe('切段与 T3c 边界', () => {
-  it('尾段未收口有内容则闭合：无 error 证据 → stop 保底 + 零 usage 兜底（不变量门）', () => {
+  it('尾段未收尾有内容则完成：无 error 证据 → stop 保底 + 零 usage 兜底（不变量门）', () => {
     const msgs = [
       assistantMessage([
         stepStart(),
         textPart('tail without finish', 2500),
-        // 无 step-finish —— 消息结束边界闭合
+        // 无 step-finish —— 消息结束边界完成
       ]),
     ]
     const lines = toLines(convertZcodeTranscript(msgs, { ...SESSION_INPUT, title: 'T' }))
     const assistant = lines[1] as ParsedEntry & { message: { stopReason: string; usage?: Record<string, unknown>; content: Array<{ type: string }>; timestamp: number } }
     expect(lines).toHaveLength(2) // session_info + assistant
     expect(assistant.message.stopReason).toBe('stop')
-    // 2026-09-21 毒消息事故后新契约：assistant 恒带 usage（pi 读面裸读，缺键即崩续聊）
+    // 2026-09-21 毒消息事故后新契约：assistant 恒带 usage（pi 读侧裸读，缺键即崩续聊）
     expect(assistant.message.usage).toMatchObject({ totalTokens: 0 })
     expect(assistant.message.timestamp).toBe(2500)
   })
@@ -740,7 +740,7 @@ describe('切段与 T3c 边界', () => {
     const session = convertZcodeTranscript(msgs, { ...SESSION_INPUT, title: 'T' })
     const lines = toLines(session)
     const a = lines[1] as ParsedEntry & { message: Record<string, unknown> }
-    // 2026-09-21 毒消息事故后新契约：不可解不等于可缺键——零值兜底（pi 读面裸读）
+    // 2026-09-21 毒消息事故后新契约：不可解不等于可缺键——零值兜底（pi 读侧裸读）
     expect(a.message.usage).toMatchObject({ totalTokens: 0 })
     // 本 fixture 唯一损失即该登记：结构化形态（code + count + sample 定位源消息）
     expect(session.degradations).toHaveLength(1)
@@ -866,7 +866,7 @@ describe('zcode 脏数据防御分支（tool part 结构异常 / text·reasoning
 
 // ── T3c 事故回归（2026-09-21 毒消息）：取消/失败轮的 stopReason 语义与 usage 不变量 ─────
 // 事故链：zcode 取消轮（data.error.turnResult=cancelled、无 step-finish part）→ 旧实现
-// 尾段 'stop' 保底且不带 usage → pi 读面对「非 aborted/error 的 assistant」裸读 usage
+// 尾段 'stop' 保底且不带 usage → pi 读侧对「非 aborted/error 的 assistant」裸读 usage
 // （stats 聚合 agent-session.js:2678 / turn 前上下文扫描 :2721）→ 导入后续聊即崩。
 // pi dist 真实加载的不变量断言在同目录 pi-reader-invariant.test.ts（PS-41 探针）。
 describe('T3c cancelled/error turn regression (poison-message incident)', () => {
@@ -906,7 +906,7 @@ describe('T3c cancelled/error turn regression (poison-message incident)', () => 
     expect(a.message.usage).toBeDefined()
   })
 
-  it('已收口段保留 finish 语义；仅未收口尾段吃 error 覆盖', () => {
+  it('已收尾段保留 finish 语义；仅未收尾段吃 error 覆盖', () => {
     const msgs = [
       assistantMessage(
         [
@@ -937,7 +937,7 @@ describe('T3c cancelled/error turn regression (poison-message incident)', () => 
     ).toBe(true)
   })
 
-  it('未知 finish 值（有收口）→ stop 保底 + 真实 usage 直通', () => {
+  it('未知 finish 值（有收尾）→ stop 保底 + 真实 usage 直通', () => {
     const msgs = [
       assistantMessage([stepStart(), textPart('x', 2100), stepFinish('mystery-finish', { input: 5, output: 5, total: 10 })]),
     ]
@@ -946,7 +946,7 @@ describe('T3c cancelled/error turn regression (poison-message incident)', () => 
     expect(a.message.usage).toMatchObject({ totalTokens: 10 })
   })
 
-  it('无 error 证据的未收口尾段 → stop 保底 + 零 usage（不变量门独立于 error 覆盖生效）', () => {
+  it('无 error 证据的未收尾段 → stop 保底 + 零 usage（不变量门独立于 error 覆盖生效）', () => {
     const msgs = [assistantMessage([textPart('半截', 2100)])]
     const [a] = assistantOf(msgs)
     expect(a.message.stopReason).toBe('stop')
@@ -995,7 +995,7 @@ describe('canonical 合法性与 applyEntry 重放锚', () => {
     expect(calls[0]?.input).toEqual({ file_path: '/a.ts', new_string: 'x' })
   })
 
-  it('usage 聚合（reducer 投影 inputTokens/outputTokens）+ thinking 块 + 文本', () => {
+  it('usage 聚合（reducer 映射 inputTokens/outputTokens）+ thinking 块 + 文本', () => {
     const first = messages[1] as ReplayedMessage
     expect(first.usage).toEqual({ inputTokens: 80, outputTokens: 20 })
     expect(first.thinking?.[0]?.content).toBe('let me think')
@@ -1030,7 +1030,7 @@ describe('normalizeZcodeSessionId（T1 header.id 归一化域）', () => {
   it('后置条件失败 fail-fast（归一化后为空 / 非法字符），错误含原始 id 与事实归因', () => {
     expect(() => normalizeZcodeSessionId('sess_')).toThrow(/归一化后为空/)
     expect(() => normalizeZcodeSessionId('sess_空格 id')).toThrow(/非法字符/)
-    // 错误面归消费侧（普通 Error，非私建错误码类）——消费方按各自词表映射
+    // 错误范围归消费侧（普通 Error，非私建错误码类）——消费方按各自词表映射
     try {
       normalizeZcodeSessionId('sess_空格 id')
       expect.unreachable()
@@ -1053,7 +1053,7 @@ describe('端到端：fixture 库 → readZcodeSession → NormalizedSession', (
     fixturesRoot = makeFixtureDir('zcode-converter-').root
   })
   afterAll(() => {
-    // fs 纪律：mkdtempSync 自建自删（flake 守卫硬性要求 maxRetries/retryDelay）
+    // fs 纪律：mkdtempSync 自建自删（flake 检查硬性要求 maxRetries/retryDelay）
     rmSync(fixturesRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
   })
 
@@ -1120,7 +1120,7 @@ describe('端到端：fixture 库 → readZcodeSession → NormalizedSession', (
     expect(messages[1]?.toolCalls?.map((t) => t.toolName)).toEqual(['edit', 'bash', 'ZcodeCustomTool', 'grep'])
   })
 
-  it('session 行在读取阶段复查不存在 → Error（错误面归消费侧映射），消息含 sessionId', async () => {
+  it('session 行在读取阶段复查不存在 → Error（错误范围归消费侧映射），消息含 sessionId', async () => {
     const dbPath = await buildKitchenSinkDb('missing', 'sess_0198e2e0-0000-0000-0000-00000000000c', 'Seed')
     await expect(readZcodeSession(dbPath, 'sess_no_such')).rejects.toThrow(/sess_no_such/)
     // 迁移适配：旧断言 toThrow(ImportServiceError)——import_* 错误码属 runtime 消费侧
@@ -1135,7 +1135,7 @@ describe('端到端：fixture 库 → readZcodeSession → NormalizedSession', (
     writer.close()
 
     // 迁移适配：旧断言经 ZcodeImportSource.write 相位（rejects '读取 zcode 会话库失败'）——
-    // 错误映射属 runtime 编排面；本包语义 = 原始 Error 原样上抛交消费侧映射
+    // 错误映射属 runtime 编排侧；本包语义 = 原始 Error 原样上抛交消费侧映射
     await expect(readZcodeSession(dbPath, 'sess_0198e2e0-0000-0000-0000-00000000000d')).rejects.toThrow(/不是合法 JSON/)
   })
 })

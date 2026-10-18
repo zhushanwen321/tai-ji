@@ -35,10 +35,9 @@
   },
   "dependencies": {
     "@zhushanwen/extension-protocol": "workspace:*",
+    "@zhushanwen/pi-delivery-port": "workspace:*",
     "@zhushanwen/pi-ext-guards": "workspace:*",
-    "@zhushanwen/pi-extension-logger": "workspace:*",
-    "@zhushanwen/pi-notify-ledger-host": "workspace:*",
-    "@zhushanwen/subagent-core": "workspace:*"
+    "@zhushanwen/pi-extension-logger": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

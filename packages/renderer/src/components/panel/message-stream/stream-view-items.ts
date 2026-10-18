@@ -148,7 +148,7 @@ function canReuseView(prev: StreamViewItem, item: SkillNoticeStreamItem, index: 
 }
 
 /**
- * streamItems → 视图模型（1:1 投影，见文件头索引一致性约束）。
+ * streamItems → 视图模型（1:1 派生视图，见文件头索引一致性约束）。
  *
  * streaming perf（逐项恒等缓存）：core commit 每 delta 帧替换 streamItems 引用，
  * 全量 map 重建会让历史 turn（引用恒稳定，几百项）每帧重付 previewText 全文正则

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * check-capability-allowlist-sync.mjs —— capability 清单 ↔ 渲染管线白名单对拍守卫。
+ * check-capability-allowlist-sync.mjs —— capability 清单 ↔ 渲染管线白名单对拍检查。
  * （设计：.tmp/tech-design/chat-html-support.md §6.1 D1 / §10 u1-prompt / §11 检查点 8 同型）
  *
  * 背景：system prompt 的 capability 段把「对话流渲染管线的 HTML 能力边界」告知 AI。这段
@@ -8,7 +8,7 @@
  * （CAPABILITY_INLINE_TAG_FAMILIES / CAPABILITY_PRESENTATION_ATTRS / CAPABILITY_FORBIDDEN），
  * 但**真实白名单**是 packages/ui/src/features/chat/markdown-sanitize.ts 的（D10 渲染链下沉迁入 ui 包）
  * ALLOWED_TAGS / ALLOWED_ATTR。两侧是跨包双份手工维护——渲染白名单改了而清单忘跟（或反之）
- * 就是 agent 被教会的能力与实际行为漂移。本守卫在提交期做**源文件字面量集合对拍**（零散文
+ * 就是 agent 被教会的能力与实际行为漂移。本检查在提交期做**源文件字面量集合对拍**（零散文
  * 解析，跨包不可 import 不是豁免理由——u-artifacts 的公式对拍同为读源文件文本形态）：
  *
  *   ① 正面标签清单 === ALLOWED_TAGS 字面量集合（双向对拍：多出 = 教会了会被剥的标签；
@@ -17,8 +17,8 @@
  *   ③ 负面清单与剥除语义一致：禁用标签均不在 ALLOWED_TAGS；禁用属性（含 data-* / on* 通配）
  *      均不在 ALLOWED_ATTR；`data-*` 通配的存在要求净化层 ALLOW_DATA_ATTR === false，
  *      `aria-*` 面要求净化层 ALLOW_ARIA_ATTR === false（两者的构造性收窄语义锚点——
- *      DOMPurify 两旗标均默认 true 且判定优先于 ALLOWED_ATTR，不关掉则通配越过声明面放行，
- *      声明清单 ≠ 有效放行面）。
+ *      DOMPurify 两旗标均默认 true 且判定优先于 ALLOWED_ATTR，不关掉则通配越过声明范围放行，
+ *      声明清单 ≠ 有效放行范围）。
  *
  * 呈报骨架（✓/✗ 行 + failed 旗标 + 对拍呈报 + 汇总出口）与 scripts 家族共享：
  * scripts/lib/guard-report.mjs。
@@ -215,10 +215,10 @@ function extractInputsOrFail() {
   const allowedTags = extractArrayConst(sanitizeText, 'ALLOWED_TAGS')
   const allowedAttrs = extractArrayConst(sanitizeText, 'ALLOWED_ATTR')
   if (allowedTags.error) {
-    fail(`渲染侧 ALLOWED_TAGS 提取失败: ${allowedTags.error}——恢复动作：核对 ${SANITIZE_SRC} 后同步本守卫提取正则`)
+    fail(`渲染侧 ALLOWED_TAGS 提取失败: ${allowedTags.error}——恢复动作：核对 ${SANITIZE_SRC} 后同步本检查提取正则`)
   }
   if (allowedAttrs.error) {
-    fail(`渲染侧 ALLOWED_ATTR 提取失败: ${allowedAttrs.error}——恢复动作：核对 ${SANITIZE_SRC} 后同步本守卫提取正则`)
+    fail(`渲染侧 ALLOWED_ATTR 提取失败: ${allowedAttrs.error}——恢复动作：核对 ${SANITIZE_SRC} 后同步本检查提取正则`)
   }
 
   // 清单侧（capability 常量）
@@ -249,7 +249,7 @@ function extractInputsOrFail() {
 
 /**
  * ①/② 共用骨架：正面清单 ↔ 渲染白名单双向对拍（多出与缺失都是漂移）。
- * 清单面文案（标签 / 属性）与恢复动作由参数给定。
+ * 清单的文案（标签 / 属性）与恢复动作由参数给定。
  */
 function comparePositiveList({ listLabel, allowedName, capValues, allowedValues, okNote, extraPart, missingPart, recovery }) {
   reportSetCompare(capValues, allowedValues, {
@@ -292,7 +292,7 @@ function compareAttrs(input) {
 /**
  * ③ 负面清单与剥除语义一致：禁用标签 / 属性均不得实际放行（含 data-* / aria-* 两个
  * 构造性收窄语义锚点——DOMPurify 两旗标默认 true 且判定优先于 ALLOWED_ATTR 白名单，
- * 不显式关掉则通配越过声明面放行，声明清单 ≠ 有效放行面）。
+ * 不显式关掉则通配越过声明范围放行，声明清单 ≠ 有效放行范围）。
  */
 function checkForbiddenSemantics({ sanitizeText, forbiddenTags, forbiddenAttrs, allowedTags, allowedAttrs }) {
   const allowedTagSet = new Set(allowedTags)
@@ -333,17 +333,17 @@ function checkForbiddenSemantics({ sanitizeText, forbiddenTags, forbiddenAttrs, 
 
   // aria-* 面的语义锚点（与 data-* 锚点同型）：净化层必须显式 ALLOW_ARIA_ATTR=false。
   // DOMPurify 的 ALLOW_ARIA_ATTR 默认 true 且 _isValidAttribute 判定优先于 ALLOWED_ATTR
-  // 白名单（3.4.11 实装核实）——不关掉则任意 aria-* 越过声明面放行，属性面「声明清单 =
-  // 有效放行面」失实，而第 ② 步（正面属性清单 === ALLOWED_ATTR）仍绿（ALLOWED_ATTR 字面量
-  // 未变）。故有效放行面按默认 true 计入 aria-*：须显式置 false 收窄为声明面，否则红灯。
+  // 白名单（3.4.11 实装核实）——不关掉则任意 aria-* 越过声明范围放行，属性维度「声明清单 =
+  // 有效放行范围」失实，而第 ② 步（正面属性清单 === ALLOWED_ATTR）仍绿（ALLOWED_ATTR 字面量
+  // 未变）。故有效放行范围按默认 true 计入 aria-*：须显式置 false 收窄为声明范围，否则红灯。
   if (/ALLOW_ARIA_ATTR\s*:\s*false/.test(stripComments(sanitizeText))) {
     const ariaDeclared = allowedAttrs.filter((a) => a.startsWith('aria-'))
-    ok(`aria-* 面以 ALLOW_ARIA_ATTR=false 收窄（有效放行面 = 声明面，含 ${ariaDeclared.length} 项 aria 白名单）`)
+    ok(`aria-* 面以 ALLOW_ARIA_ATTR=false 收窄（有效放行范围 = 声明范围，含 ${ariaDeclared.length} 项 aria 白名单）`)
   } else {
     fail(
       `${SANITIZE_SRC} 未显式 ALLOW_ARIA_ATTR: false` +
         '——恢复动作：核对净化配置（DOMPurify 默认 true 时任意 aria-* 越过 ALLOWED_ATTR 放行，' +
-        '声明清单 ≠ 有效放行面；若确需放开 aria-*，须同步 capability 属性面声明并重议本锚点）',
+        '声明清单 ≠ 有效放行范围；若确需放开 aria-*，须同步 capability 属性清单声明并重议本锚点）',
     )
   }
 }
@@ -354,8 +354,8 @@ function main() {
   compareAttrs(input)
   checkForbiddenSemantics(input)
   guardExit(
-    '✓ capability 清单对拍守卫通过（正面清单双向一致 + 负面清单与剥除语义一致）',
-    'capability 清单对拍守卫未通过，按上方 ✗ 明细修复后重跑（每条报错自带恢复动作）',
+    '✓ capability 清单对拍检查通过（正面清单双向一致 + 负面清单与剥除语义一致）',
+    'capability 清单对拍检查未通过，按上方 ✗ 明细修复后重跑（每条报错自带恢复动作）',
   )
 }
 

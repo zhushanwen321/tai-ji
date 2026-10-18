@@ -1,10 +1,10 @@
-// ws-client 入站帧守卫测试（crash-forensics-and-watchdog §3.3 D8 / u10a）。
+// ws-client 入站帧检查测试（crash-forensics-and-watchdog §3.3 D8 / u10a）。
 //
-// 覆盖（设计 A6 验收的 core 层机械核验 + D8 三点钉死）：
-// - ① 80MB 阈值守卫：超界 text 帧丢弃不崩、不断链（后续正常帧照常 dispatch）；
-//   恰好 40M code units 不触发守卫（> 判定边界，防误伤合法大帧）
+// 覆盖（设计 A6 验收的 core 层机械核验 + D8 三点固定为）：
+// - ① 80MB 阈值检查：超界 text 帧丢弃不崩、不断链（后续正常帧照常 dispatch）；
+//   恰好 40M code units 不触发检查（> 判定边界，防误伤合法大帧）
 // - ② per-session 连续计数与终止阀：同 session 连续 3 次丢帧触发终止阀（回调
-//   valveTripped=true）；第 4 帧继续上报（A6 ×4 台账计数语义）；正常帧到达中断
+//   valveTripped=true）；第 4 帧继续上报（A6 ×4 登记清单计数语义）；正常帧到达中断
 //   「连续」性；无法归因（null）不参与阀门；不同 session 计数互不干扰（不连坐）
 // - ③ 终止阀的订阅暂停与恢复：trip 后该 session 的 session.subscribe 出站被拦截
 //   （send false），其余 session 与非 subscribe 消息不受影响；retryInboundDroppedSession
@@ -65,7 +65,7 @@ function subscribeMsg(id: string, sessionId: string): ClientMessage {
 
 /**
  * 超界 text 帧（总 code units > INBOUND_FRAME_MAX_TEXT_CODE_UNITS）。prefix 落在
- * 守卫归因扫描窗口（头部 4KB）内——归因字段必须在前缀里。
+ * 检查归因扫描窗口（头部 4KB）内——归因字段必须在前缀里。
  */
 function oversizedFrame(prefix: string): string {
   const padUnits = INBOUND_FRAME_MAX_TEXT_CODE_UNITS - prefix.length
@@ -82,7 +82,7 @@ function subscribeReplyPrefix(requestId: string): string {
   return `{"id":"${requestId}","type":"session.subscribe","payload":{"snapshot":"`
 }
 
-describe('ws-client 入站守卫 ① 80MB 阈值（超界丢帧不断链）', () => {
+describe('ws-client 入站检查 ① 80MB 阈值（超界丢帧不断链）', () => {
   let dropped: InboundFrameDroppedInfo[]
   let offDrop: () => void
   let dispatchHandler: Mock<(msg: ServerMessage) => void>
@@ -115,15 +115,15 @@ describe('ws-client 入站守卫 ① 80MB 阈值（超界丢帧不断链）', ()
     expect(dropped).toHaveLength(1)
     expect(dropped[0].kind).toBe('text')
     expect(dropped[0].frameSize).toBeGreaterThan(INBOUND_FRAME_MAX_TEXT_CODE_UNITS)
-    expect(dispatchHandler).not.toHaveBeenCalled() // 守卫在 parse 前，帧未进入路由
+    expect(dispatchHandler).not.toHaveBeenCalled() // 检查在 parse 前，帧未进入路由
 
-    // 不断链：守卫命中后消息泵不死，正常帧照常 dispatch
+    // 不断链：检查命中后消息泵不死，正常帧照常 dispatch
     latestFake().triggerMessage(JSON.stringify({ type: 'message.chunk', seq: 1, payload: { sessionId: 's1' } }))
     expect(dispatchHandler).toHaveBeenCalledTimes(1)
   })
 
-  it('恰好 40M code units 不触发守卫（> 严格大于边界，不误伤合法大帧）', () => {
-    // 长度恰为上限的帧：不超界 → 走 parse 链，守卫回调零触发 = 未被守卫丢弃
+  it('恰好 40M code units 不触发检查（> 严格大于边界，不误伤合法大帧）', () => {
+    // 长度恰为上限的帧：不超界 → 走 parse 链，检查回调零触发 = 未被检查丢弃
     const boundaryFrame = '{"pad":"' + 'x'.repeat(INBOUND_FRAME_MAX_TEXT_CODE_UNITS - 10) + '"}'
     expect(boundaryFrame.length).toBe(INBOUND_FRAME_MAX_TEXT_CODE_UNITS)
     latestFake().triggerMessage(boundaryFrame)
@@ -131,7 +131,7 @@ describe('ws-client 入站守卫 ① 80MB 阈值（超界丢帧不断链）', ()
   })
 })
 
-describe('ws-client 入站守卫 ② per-session 连续计数与终止阀', () => {
+describe('ws-client 入站检查 ② per-session 连续计数与终止阀', () => {
   let dropped: InboundFrameDroppedInfo[]
   let offDrop: () => void
 
@@ -166,7 +166,7 @@ describe('ws-client 入站守卫 ② per-session 连续计数与终止阀', () =
     expect(isInboundValveTripped('s1')).toBe(true)
   })
 
-  it('trip 后第 4 帧继续上报（valveTripped=false，A6 台账 ×4 计数语义）', () => {
+  it('trip 后第 4 帧继续上报（valveTripped=false，A6 登记清单 ×4 计数语义）', () => {
     for (let i = 1; i <= 4; i++) latestFake().triggerMessage(oversizedFrame(livePushPrefix('s1')))
 
     expect(dropped).toHaveLength(4)
@@ -212,7 +212,7 @@ describe('ws-client 入站守卫 ② per-session 连续计数与终止阀', () =
   })
 })
 
-describe('ws-client 入站守卫 ③ 终止阀的订阅暂停与恢复', () => {
+describe('ws-client 入站检查 ③ 终止阀的订阅暂停与恢复', () => {
   let dropped: InboundFrameDroppedInfo[]
   let offDrop: () => void
 
@@ -291,7 +291,7 @@ describe('ws-client 入站守卫 ③ 终止阀的订阅暂停与恢复', () => {
   })
 })
 
-describe('ws-client 入站守卫 ④ in-flight 簿记重连 sweep（G2 活性治理，memory-leak-remediation §3.4）', () => {
+describe('ws-client 入站检查 ④ in-flight 簿记重连 sweep（G2 活性治理，memory-leak-remediation §3.4）', () => {
   // G2：断连使部分 subscribe reply 永不到达（重连后新 id 重订），过期簿记原实现只能等
   // 超界帧归因死路径触发 sweep。修复 = markConnected（新连接确立，含重连）时 sweep 一次。
   // fake timers 同步 mock Date（vitest 默认 toFake 含 Date），advanceTimersByTime 驱动 TTL 过期。

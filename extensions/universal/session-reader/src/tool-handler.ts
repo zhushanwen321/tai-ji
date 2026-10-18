@@ -11,7 +11,7 @@
  * 域模块拆分（max-lines 拆分轮机械提取，零行为变更，result-action.ts 先例同型）：
  *   result-action.ts（result）/ doctor.ts（doctor + SessionReadSignals）/
  *   search-across.ts（search 管线 + u12 跨会话）/ extract.ts（extract 预设）/
- *   tool-format.ts（各 action 输出文本渲染 + 错误面 message + F2 消歧与
+ *   tool-format.ts（各 action 输出文本渲染 + 错误范围 message + F2 消歧与
  *   find 零匹配包装）/ no-match.ts（F1 自检行）/ zcode-anchor-classify.ts（entry
  *   兜底归因的 entry 级纯判定）/ handler-utils.ts（pad/err/
  *   stripHash/requireStr/SESSION_ID_PREFIX_LEN/turn 索引解析低层小工具）。
@@ -102,7 +102,7 @@ import {
   extractUserMessages,
   type ExtractWhat,
 } from './extract.js'
-// 同轮拆分的渲染域模块（format* 纯函数簇，含 zcode 错误面 message 与
+// 同轮拆分的渲染域模块（format* 纯函数簇，含 zcode 错误范围 message 与
 // zcodeReadErrorMessage 错误映射）：运行时依赖方向本模块 → tool-format，
 // tool-format 对本模块仅 type import（ToolResult），无循环。
 import {
@@ -132,7 +132,7 @@ import { firstIncompleteAnchorReason } from './zcode-anchor-classify.js'
 export type { SessionReadSignals }
 
 // zcode 读链的结构化日志（「事后排查」通道：degradations 留痕 / L2-L3 恢复成功 /
-// anchor-missing 归因——§3.4 可观测性 + P2 降级隔离契约 F13，均不进 LLM 可见面）。
+// anchor-missing 归因——§3.4 可观测性 + P2 降级隔离契约 F13，均不进 LLM 可见部分）。
 // pi handle 由 index.ts 初始化时 setPiHandle 注入（appendEntry 通道）；未注入时
 // warn/error 降级文件日志，双开关缺省 no-op（纯 pi 独立用户零行为影响）。
 const logger = getLogger('session-reader')
@@ -267,7 +267,7 @@ async function resolveSessionId(
 
   // §3.4 第 0 段：sess_ 形态 id 无第一梯队直读入口（agent 从不持有 sess id，F14；
   // 且无 zcode 候选发现，D6）→ zcode_param_invalid。pi 的 session id 是 uuid（无
-  // sess_ 前缀），此检测只改变错误输入的错误面文案。
+  // sess_ 前缀），此检测只改变错误输入的错误范围文案。
   if (session.startsWith('sess_')) {
     throw err(formatZcodeParamInvalid(session))
   }
@@ -287,7 +287,7 @@ async function resolveSessionId(
  *   `resolveByRecordId`（engine 缺省/'pi' 形态，行为与今天逐字节一致）。
  * ③ pi 无命中（今天此处直接 ES2）→ entry 兜底（§3.5 第②层，仅 liveSessionDir 内，
  *   越界显式失败）：命中 → zcode 读链；未命中 → `zcode_record_not_found` + 👉
- *  （§3.4：sa-id 语境的统一错误面——F14 agent 唯一持有的 id 就是 sa-id，指引动作
+ *  （§3.4：sa-id 语境的统一错误范围——F14 agent 唯一持有的 id 就是 sa-id，指引动作
  *   覆盖除 find 指针外的全部恢复路径（find 按 §3.4 刻意不保留）。
  */
 async function resolveSaIdRoute(
@@ -299,7 +299,7 @@ async function resolveSaIdRoute(
 ): Promise<ResolveResult> {
   const zm = await readZcodeManifest(agentDir, session)
   if (zm.kind === 'anchor-missing') {
-    // 归因进结构化日志不进 LLM 可见面（§3.4）：reason 逐键归因（missing-engineHandle /
+    // 归因进结构化日志不进 LLM 可见部分（§3.4）：reason 逐键归因（missing-engineHandle /
     // missing-sessionRef / missing-sessionId / missing-dbPath，见 zcode-manifest.ts）
     logger.warn('zcode manifest anchor-missing', { saId: session, reason: zm.reason })
     throw err(formatZcodeAnchorMissing(session))
@@ -391,7 +391,7 @@ async function resolveZcodeRoute(
     const zcodeNodes = await listZcodeManifests(agentDir)
     const rootSessionId = zcodeNodes.find((n) => n.id === saId)?.rootSessionId
     // 枚举未含该 id（直读命中与枚举之间 manifest 被迁移的极端窗口）→ 退回锚 sessionId，
-    // 后续 byId 查不到走既有 not-found 错误面（不静默伪造家族）
+    // 后续 byId 查不到走既有 not-found 错误范围（不静默伪造家族）
     if (rootSessionId === undefined) {
       return { kind: 'ok', sessionId: anchor.sessionId, fileName: '' }
     }
@@ -501,8 +501,8 @@ async function resolveByFragment(
 /**
  * zcode 锚 → ParseResult（既有 turns/render 管线的统一内容入口）。
  *
- * 检查顺序三段递进（§3.4，实现与测试双锚定）：第 1 段存在性 → 第 2 段路径闸
- * （whitelist.ts）→ 第 3 段开库与查询（四级恢复阶梯 + schema 已知集闸门在
+ * 检查顺序三段递进（§3.4，实现与测试双锚定）：第 1 段存在性 → 第 2 段路径门禁
+ * （whitelist.ts）→ 第 3 段开库与查询（四级恢复阶梯 + schema 已知集门禁在
  * openZcodeSessionDb 单点）。读库发生在 ext 进程内（§3.5 关键论断），不经 taiji。
  */
 async function loadZcodeParsed(anchor: ZcodeAnchor, agentDir: string): Promise<ParseResult> {
@@ -515,7 +515,7 @@ async function loadZcodeParsed(anchor: ZcodeAnchor, agentDir: string): Promise<P
   }
   try {
     // 恢复成功不再是静默事件（§3.4 硬要求）：结构化日志（恢复方式 + db 路径），不进
-    // LLM 可见面。用 warn 而非 debug——L2/L3 是恢复降级路径，语义表 warn=内部降级与
+    // LLM 可见部分。用 warn 而非 debug——L2/L3 是恢复降级路径，语义表 warn=内部降级与
     // 失败（appendEntry 持久化）；debug 缺省 no-op 会让恢复成功重新变回静默事件。
     if (handle.via !== 'L1-direct') {
       logger.warn('zcode session db recovered via recovery ladder', {
@@ -545,7 +545,7 @@ async function loadZcodeParsed(anchor: ZcodeAnchor, agentDir: string): Promise<P
     // converter 保证），totalBytes/skippedLines 恒 0
     return { entries: normalized.entries, totalBytes: 0, skippedLines: 0, lastLinePartial: false }
   } catch (e) {
-    if (e instanceof Error && e.message.startsWith('[zcode_')) throw e // 本函数产出的错误面原样传播
+    if (e instanceof Error && e.message.startsWith('[zcode_')) throw e // 本函数产出的错误范围原样传播
     throw err(zcodeReadErrorMessage(e, agentDir))
   } finally {
     handle.dispose()
@@ -996,7 +996,7 @@ async function doExport(
 //（max-lines 拆分轮机械提取）；本段保留 F7 what 校验与 doExtract 编排（定位依赖
 // tool-handler 私有的 resolveSessionId/safeParse/segmentTurns）。纯提取，不调 LLM。
 
-/** what 类型守卫（直接比较，避开不安全断言；schema 已校验，此处防御 + 可单测绕过）。 */
+/** what 类型检查（直接比较，避开不安全断言；schema 已校验，此处防御 + 可单测绕过）。 */
 function isExtractWhat(v: unknown): v is ExtractWhat {
   return (
     v === 'user-messages' ||
@@ -1109,7 +1109,7 @@ interface SkippedRun {
  * session 会抛「session not found in family index」）——resolveSessionId 已把 session 解析到
  * 真实文件（kind==='ok' 保证文件存在，三形态：绝对路径/sa-id 均 existsSync 校验，片段匹配
  * 来自实际 fs 扫描），直接用 resolved.fileName 构造单条目 sessionIdToPath 调 resolveWorkflows
- *（与 buildFamilyFromFs 步骤 6 的 workflow 腿同源）。pathToRef 传空 Map（单条目链路无其他
+ *（与 buildFamilyFromFs 步骤 6 的 workflow 路径同源）。pathToRef 传空 Map（单条目链路无其他
  * 文件可反查），call 引用 100% 走 sessionRefFromPath 文件名最小回退（sessionId+fileName，
  * 足够 LLM 跳 outline/detail 深读）。
  *
@@ -1131,7 +1131,7 @@ async function renderSingleWorkflowRun(
 ): Promise<void> {
   // [D16③] 概览链换源：v2 档的 stateFile = record 流路径（recordPath 锚点语义
   // 重定义）——直读流经 parseRunRecordStream 概览（[D2] 三态 status；空流/读失败
-  // 投影 running，活跃 run 概览不退化为 skipped——红线）。record 后缀以外的
+	// 映射 running，活跃 run 概览不退化为 skipped——红线）。record 后缀以外的
   // stateFile（v1 快照档空串 / 旧指针档 link path）走原快照链。
   if (wf.stateFile.endsWith('.record.jsonl')) {
     await renderRunFromRecordStream(wf, ctx)
@@ -1391,7 +1391,7 @@ export async function handleSessionRead(
     case 'workflow':
       return doWorkflow(params, agentDir, signals.liveSessionDir)
     case 'result': {
-      // per-call 构造注入面（仅剩 tool-handler 文件私有 helper，纯函数经 handler-utils
+      // per-call 构造注入点（仅剩 tool-handler 文件私有 helper，纯函数经 handler-utils
       // 直接 import——ext-simplify-04 E5）：resolveSessionId 包装把信号包中的
       // liveSessionDir 闭包进解析调用（ResultActionDeps 接口签名固定 5 参，包装保持
       // 同形、末位补传），result 的片段形态与 find/outline 消费同一 roots

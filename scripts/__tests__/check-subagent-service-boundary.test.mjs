@@ -1,14 +1,14 @@
 /**
- * check-subagent-service-boundary.mjs 单测（review MF-6：守卫脚本零测试盲区）。
+ * check-subagent-service-boundary.mjs 单测（review MF-6：检查脚本零测试盲区）。
  *
- * 覆盖面：
+ * 覆盖范围：
  *   - parseImport：合法形态（named / type named / default / namespace / re-export）、
  *     噪声行（null）、as 重命名取原名
  *   - logicalImportLines：跨行 named import 合并为单逻辑行（漏检盲区锚点）
  *   - resolveServiceTarget / isShellTarget：目录注入 fixture 下的命中与放行
- *   - extractPublicSurface：fixture class 导出面抽取（private 排除 / constructor 排除 /
+ *   - extractPublicSurface：fixture class 导出清单抽取（private 排除 / constructor 排除 /
  *     大括号平衡截断）
- *   - checkSupportShellImports / checkSupportFileImports：台账放行 / 未登记命中两分支
+ *   - checkSupportShellImports / checkSupportFileImports：登记清单放行 / 未登记命中两分支
  *   - checkAggregateGetterCalls：命中（非 public 成员）与放行（public 成员）两分支
  *   - detectCycles：gray back-edge 环命中（a→b→a 路径文本）与 diamond 零误报
  *
@@ -142,9 +142,9 @@ describe('resolveServiceTarget / isShellTarget（fixture 注入）', () => {
   })
 })
 
-// ── extractPublicSurface：导出面抽取 ───────────────────────────────────
+// ── extractPublicSurface：导出清单抽取 ───────────────────────────────────
 
-describe('extractPublicSurface 导出面抽取', () => {
+describe('extractPublicSurface 导出清单抽取', () => {
   it('非 private 成员入面，private/constructor 排除', () => {
     const src = [
       'export class RecordAccess {',
@@ -182,16 +182,16 @@ describe('extractPublicSurface 导出面抽取', () => {
   })
 })
 
-// ── 支撑文件方向门：台账放行 / 未登记命中 ─────────────────────────────
+// ── 支撑文件方向门：登记清单放行 / 未登记命中 ─────────────────────────────
 
-describe('checkSupportShellImports 台账放行 / 未登记命中', () => {
+describe('checkSupportShellImports 登记清单放行 / 未登记命中', () => {
   it('SUPPORT_SHELL_EDGES 登记边（bootstrap→SubagentService 构造依赖）放行', () => {
     const { execDir, serviceDir } = makeFixtureTree()
     const parsed = parseImport('import { SubagentService } from "../subagent-service.ts";')
     expect(checkSupportShellImports('service-bootstrap.ts', parsed, { execDir, serviceDir })).toEqual([])
   })
 
-  it('台账外支撑→壳值 import 命中违规', () => {
+  it('登记清单外支撑→壳值 import 命中违规', () => {
     const { execDir, serviceDir } = makeFixtureTree()
     const parsed = parseImport('import { SubagentService } from "../subagent-service.ts";')
     const violations = checkSupportShellImports('service-constants.ts', parsed, { execDir, serviceDir })
@@ -263,7 +263,7 @@ describe('checkAggregateGetterCalls 命中与放行', () => {
   })
 })
 
-// ── detectCycles：三色 DFS 环检测（守卫「单向无环」结论唯一来源） ────────
+// ── detectCycles：三色 DFS 环检测（检查「单向无环」结论唯一来源） ────────
 
 describe('detectCycles 环检测', () => {
   it('gray back-edge（a→b→a）命中，返回环路径文本', () => {

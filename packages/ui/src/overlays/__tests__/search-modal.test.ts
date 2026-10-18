@@ -9,7 +9,7 @@
  * 交互覆盖（review batch 1 round 1 重建，蓝本：旧 renderer 套件 41519a72d^）：
  *  - 键盘导航：↑↓ 循环取模 + aria-selected 转移 + preventDefault、Enter→confirmSel、Tab/Shift+Tab 五态循环切类 + selIdx 重置
  *  - confirmSel 三分支：ok+drawerTab → onOpenDrawer + close；ok 无 drawerTab → close；ok:false → 保持打开 + onToastError
- *  - 关闭路径：Esc / 遮罩 .self / close 重置（query/selIdx/activeType 清空 + MR-7.1 孤儿查询守卫）/ 同实例 open 翻转
+ *  - 关闭路径：Esc / 遮罩 .self / close 重置（query/selIdx/activeType 清空 + MR-7.1 孤儿查询检查）/ 同实例 open 翻转
  *  - 错误路径：query reject → 不崩 + loading 清 + errorMsg transient（AC-8.5，新查询恢复）
  *  - loading 显示（>200ms 显 / <200ms 不显，AC-8.1）+ 空态两分支（startHint / noResult+tryOther，AC-7.13）
  *  - 焦点管理：open → nextTick 聚焦 input（document.activeElement）
@@ -432,7 +432,7 @@ describe('关闭路径（MF-4，AC-7.1/AC-7.14/MR-7.1）', () => {
     expect(emitted?.[emitted.length - 1]).toEqual([false])
   })
 
-  it('close 重置：query 清空 + activeType 回 null + 无孤儿查询（MR-7.1 守卫）', async () => {
+  it('close 重置：query 清空 + activeType 回 null + 无孤儿查询（MR-7.1 检查）', async () => {
     vi.useFakeTimers()
     const deps = makeDeps()
     deps.ports.isMock = true // searchMock 计数 = loadResults 调用计数
@@ -449,7 +449,7 @@ describe('关闭路径（MF-4，AC-7.1/AC-7.14/MR-7.1）', () => {
     await input.setValue('cmd')
     await vi.advanceTimersByTimeAsync(150)
     expect(searchMock.mock.calls.length).toBe(callsAfterOpen + 1)
-    // close（query='' 触发 watch(query)，孤儿守卫阻断重新调度）
+    // close（query='' 触发 watch(query)，孤儿检查阻断重新调度）
     await setOpen(wrapper, false)
     expect(wrapper.find('[data-testid="search-modal-overlay"]').exists()).toBe(false)
     await vi.advanceTimersByTimeAsync(300) // 覆盖 debounce 120ms + loading 200ms 窗口

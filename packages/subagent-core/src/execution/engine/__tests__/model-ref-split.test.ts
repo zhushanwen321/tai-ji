@@ -27,7 +27,7 @@ describe("splitEngineModelRef（契约④：无斜杠 ref 不落畸形）", () =
     });
   });
 
-  it("空串（引擎未实现校验面且无显式 model 的防御形态）：provider/id/name 全空串", () => {
+  it("空串（引擎未实现校验侧且无显式 model 的防御形态）：provider/id/name 全空串", () => {
     expect(splitEngineModelRef("")).toEqual({ provider: "", id: "", name: "" });
   });
 

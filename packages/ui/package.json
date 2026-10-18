@@ -18,6 +18,10 @@
       "types": "./src/extension-host/index.ts",
       "import": "./src/extension-host/index.ts"
     },
+    "./form-protocol": {
+      "types": "./src/form-protocol.ts",
+      "import": "./src/form-protocol.ts"
+    },
     "./features/composer": {
       "types": "./src/features/composer/index.ts",
       "import": "./src/features/composer/index.ts"

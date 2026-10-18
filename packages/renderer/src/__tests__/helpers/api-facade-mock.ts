@@ -27,7 +27,7 @@ export function apiProjectMock() {
   }
 }
 
-/** chat 域方法 mock 基线（五方法 resolve 基线；追加面见文件头注释）。 */
+/** chat 域方法 mock 基线（五方法 resolve 基线；追加逻辑见文件头注释）。 */
 export function chatApiMethodsMock() {
   const resolveFn = () => vi.fn(() => Promise.resolve())
   return {
@@ -121,7 +121,7 @@ export function apiConfigSkillsDomainMock() {
 
 /**
  * workspace / worktree 域空载基座 mock（detect not-repo + worktree.list 空数组）：new-task
- * 流程（submitFirstMessage / initApp 的 cwd 预填）前置消费面。解析函数形态刻意区别于
+ * 流程（submitFirstMessage / initApp 的 cwd 预填）前置消费方。解析函数形态刻意区别于
  * 存量逐字内联副本（mockResolvedValue 链式）——同 apiConfigDomainMock 先例，避免与未迁移
  * 副本构成逐字克隆窗。
  */
@@ -153,7 +153,7 @@ export function subscriptionStubs(keys: readonly string[]) {
  * mount 链组件 setup 期批量挂订阅，缺键即崩；消费形态同 apiProjectMock。
  *
  * on* 家族经 subscriptionStubs 键参数化生成（每键独立 vi.fn 实例）：基座 9 键覆盖
- * SettingsModal / 面板类 mount 链的公共订阅面，域特有订阅键（onModels / onExtensions /
+ * SettingsModal / 面板类 mount 链的公共订阅侧，域特有订阅键（onModels / onExtensions /
  * onAuth* 等）经 extraSubscriptionKeys 追加，不重复登记进基座键表。
  */
 export function apiConfigDomainMock(extraSubscriptionKeys: readonly string[] = []) {

@@ -1,5 +1,5 @@
 /**
- * U2d 壳层接线收口测试：launch 配置单一解析层的两端壳注入非空断言。
+ * U2d 壳层接线收尾测试：launch 配置单一解析层的两端壳注入非空断言。
  *
  * 覆盖三条接线（不接线则显式 preset 透传处于回归态 + landing 显示链退化）：
  * - submit 侧：useNewTaskFlow 壳注入 ports.launchConfig——preset store 数据基座 +
@@ -64,7 +64,7 @@ const presetApiMock = vi.hoisted(() => ({
   setDefault: vi.fn().mockResolvedValue(undefined),
 }))
 
-// '@/api' 单一 mock：session 重定向（createflow 范式）+ preset 可控 + mount 期防御面
+// '@/api' 单一 mock：session 重定向（createflow 范式）+ preset 可控 + mount 期防御机制
 //（project/model/composer，composer-model-reasoning 范式）
 vi.mock('@/api', async (importActual) => {
   const actual = await importActual<typeof import('@/api')>()
@@ -79,7 +79,7 @@ vi.mock('@/api', async (importActual) => {
   }
 })
 
-// useChat 单一 mock：send/sendBash spy（A 的 submit 主链路终点）+ mount 期防御面（B）
+// useChat 单一 mock：send/sendBash spy（A 的 submit 主链路终点）+ mount 期防御机制（B）
 const chatApiMock = {
   ...chatApiMethodsMock(),
   sendBash: vi.fn(() => Promise.resolve()),
@@ -121,7 +121,7 @@ import { usePresetStore } from '@/stores/preset'
 import Composer from '@/components/panel/Composer.vue'
 
 // [C3] preset 域调用经 SettingsTransport seam 桩注入（usePiPresets.loadPresets 的数据源探针；
-// 替换原 '@/api' 门面 preset mock 的消费面）。
+// 替换原 '@/api' 门面 preset mock 的消费方）。
 beforeEach(() => {
   provideSettingsTransport(makeSettingsTransportStub({
     listPresets: presetApiMock.list,
@@ -317,7 +317,7 @@ describe('composer-shell 注入 launchData（U2d 显示侧接线）', () => {
   })
 
   it('显式 preset 选择经 pendingPreset 通道到达 chip 显示（U4r2 接线突变断言：壳拆线则回落默认预设解析而红）', async () => {
-    // 本用例需 flow 处于 landing 态（setPendingPreset 守卫），是 B 组唯一含 await 的用例：
+    // 本用例需 flow 处于 landing 态（setPendingPreset 检查），是 B 组唯一含 await 的用例：
     // await 会让早前用例挂起的微任务把 active pinia 翻回旧实例（已实测：await startFlow
     // 后 getActivePinia() ≠ beforeEach 的 pinia，mount 即绑到旧 store 读到别用例数据）——
     // mount 前钉回本用例 pinia，保证壳层 usePresetStore() 绑定本用例 store

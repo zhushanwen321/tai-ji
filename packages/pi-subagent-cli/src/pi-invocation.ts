@@ -25,7 +25,7 @@ export interface PiInvocation {
 /** bun 虚拟文件系统前缀（非磁盘真实文件，不能直接 spawn）。 */
 const BUN_VIRTUAL_PREFIX = "/$bunfs/root/";
 
-/** 引擎 CLI 自身 bin 的 basename（自举守卫用，见 getPiInvocation）。 */
+/** 引擎 CLI 自身 bin 的 basename（自举检查用，见 getPiInvocation）。 */
 const SELF_CLI_BIN_BASENAME = "pi-subagent-cli.mjs";
 
 /**
@@ -67,7 +67,7 @@ function currentScriptExists(): boolean {
 export function getPiInvocation(userArgs: string[]): PiInvocation {
   const currentScript = process.argv[1];
   const isBunVirtualScript = currentScript?.startsWith(BUN_VIRTUAL_PREFIX);
-  // [W7] 引擎 CLI 自举守卫：本进程 argv[1] 是 pi-subagent-cli 自身 bin（真实磁盘
+  // [W7] 引擎 CLI 自举检查：本进程 argv[1] 是 pi-subagent-cli 自身 bin（真实磁盘
   // 文件，会被分支 1 误认成「pi 入口脚本」而递归 spawn 自己）。镜像语义的消费方
   // 是「pi 扩展进程内 spawn 子代理」（argv[1] = pi 入口）；引擎 CLI 进程不是 pi
   // 进程，argv[1] 指向自身时跳过分支 1，落 PATH / standalone 解析。

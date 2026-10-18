@@ -237,7 +237,7 @@ describe('A1-2 合并策略（验收 2）', () => {
 
 describe('迁移级 defaultModel 保全（round 2 review SUGGESTION，R1 must-fix #2 遗留）', () => {
   it('catalog + builtin 默认模型 + override 条目共存：pass-3 重写 dirty 条目不重置 defaultModel', async () => {
-    // 迁移入口级守卫 migrateProviderExtras → PiConfigStore.upsertProvider →
+    // 迁移入口级检查 migrateProviderExtras → PiConfigStore.upsertProvider →
     // pi-provider-store.upsertProvider 全链路（union 语义此前只在 pi-provider-store
     // 单测层覆盖——若未来迁移改走不触发 default 校验/无 union 的独立写路径，本用例红）。
     // anthropic 是 catalog provider（builtin-providers.json 含 claude-sonnet-4-6）。

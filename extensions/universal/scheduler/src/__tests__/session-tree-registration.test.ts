@@ -1,6 +1,6 @@
 // src/__tests__/session-tree-registration.test.ts
 //
-// U6c session_tree 注册面契约：注册在 extension factory 顶层（每代恰一 handler），
+// U6c session_tree 注册点契约：注册在 extension factory 顶层（每代恰一 handler），
 // 同代 session_start 复发不累积。回归背景：注册曾在 PiSchedulerBackend 构造函数内，
 // 而 pi RPC 模式下每次 session 替换 session_start 在同一代内触发两次
 // （agent-session-runtime finishSessionReplacement 内部 rebindSession + RPC handler
@@ -79,7 +79,7 @@ function taskEntry(sessionFile: string, taskId: string) {
   }
 }
 
-/** fake ctx：entries 经容器可变（模拟撤回前后 swap）；ui.setWidget 观测面。 */
+/** fake ctx：entries 经容器可变（模拟撤回前后 swap）；ui.setWidget 观测范围。 */
 function createFakeCtx(sessionFile: string, entriesBox: { entries: unknown[] }): ExtensionContext {
   return {
     cwd: '/test-tree-reg',
@@ -93,7 +93,7 @@ function createFakeCtx(sessionFile: string, entriesBox: { entries: unknown[] }):
   } as unknown as ExtensionContext
 }
 
-describe('session_tree 注册面（factory 顶层恰一，同代 session_start 复发不累积）', () => {
+describe('session_tree 注册点（factory 顶层恰一，同代 session_start 复发不累积）', () => {
   it('factory 运行恰注册 1 个 session_tree handler', () => {
     const { pi, handlers } = createAppendPi()
     schedulerExtension(pi)

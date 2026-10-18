@@ -1,10 +1,10 @@
 /**
- * useAccordionGuard 行为测试（R4 手风琴展开 + dirty 守卫状态机）。
+ * useAccordionGuard 行为测试（R4 手风琴展开 + dirty 检查状态机）。
  *
  * 背景：u06（清理点#3）把 PendingAction 三变体判别联合收敛成单 pendingTarget 赋值，
  * commit message 声称「6 行为场景等价」但全仓无测试文件——本文件把该等价性钉成可回归断言。
  *
- * 观测面（消费者视角，镜像 ProviderPage.vue 的真实绑定）：
+ * 观测范围（消费者视角，镜像 ProviderPage.vue 的真实绑定）：
  * - aria-expanded / body-<id> ← expandedId
  * - dirty-<id> 徽章 ← expandedId === id && currentBodyDirty
  * - guard-dialog ← v-model:open（guardDialogOpen）；confirm 走 @confirm="confirmDiscard"，
@@ -130,9 +130,9 @@ afterEach(() => {
   wrappers.length = 0
 })
 
-describe('useAccordionGuard（R4 展开守卫状态机）', () => {
+describe('useAccordionGuard（R4 展开检查状态机）', () => {
   describe('四态矩阵', () => {
-    it('collapse：点已展开行 + dirty → 守卫挂起且行未收起', async () => {
+    it('collapse：点已展开行 + dirty → 检查挂起且行未收起', async () => {
       const host = mountHost()
       await expandP1Dirty(host)
       expect(visible(host, 'body-p1')).toBe(true)
@@ -150,7 +150,7 @@ describe('useAccordionGuard（R4 展开守卫状态机）', () => {
       expect(visible(host, 'body-p1')).toBe(false)
     })
 
-    it('switch：点其他行 + dirty → 守卫挂起，原展开行保持未切换', async () => {
+    it('switch：点其他行 + dirty → 检查挂起，原展开行保持未切换', async () => {
       const host = mountHost()
       await expandP1Dirty(host)
 
@@ -166,7 +166,7 @@ describe('useAccordionGuard（R4 展开守卫状态机）', () => {
       expect(visible(host, 'body-p2')).toBe(true)
     })
 
-    it('add：createAndExpand + dirty → 守卫挂起，未进入新建态', async () => {
+    it('add：createAndExpand + dirty → 检查挂起，未进入新建态', async () => {
       const host = mountHost()
       await expandP1Dirty(host)
 
@@ -181,7 +181,7 @@ describe('useAccordionGuard（R4 展开守卫状态机）', () => {
       expect(visible(host, NEW_BODY)).toBe(true)
     })
 
-    it('none：无 dirty → 展开/收起/新建/切换均直达，不弹守卫', async () => {
+    it('none：无 dirty → 展开/收起/新建/切换均直达，不弹检查', async () => {
       const host = mountHost()
       expect(host.guard.guardDialogOpen.value).toBe(false)
       expect(visible(host, 'guard-dialog-absent')).toBe(true)
@@ -210,7 +210,7 @@ describe('useAccordionGuard（R4 展开守卫状态机）', () => {
       expect(visible(host, 'guard-dialog')).toBe(false)
       expect(host.guard.guardDialogOpen.value).toBe(false)
 
-      // 新建行同样可无守卫收起
+      // 新建行同样可无检查收起
       await click(host, NEW_ROW)
       expect(visible(host, NEW_BODY)).toBe(false)
       expect(host.wrapper.get(sel(NEW_ROW)).attributes('aria-expanded')).toBe('false')
@@ -218,8 +218,8 @@ describe('useAccordionGuard（R4 展开守卫状态机）', () => {
     })
   })
 
-  describe('守卫弹窗开合', () => {
-    it('guardDialogOpen 与守卫在途一一对应：三态挂起均开、无守卫均关', async () => {
+  describe('检查弹窗开合', () => {
+    it('guardDialogOpen 与检查在途一一对应：三态挂起均开、无检查均关', async () => {
       const host = mountHost()
       expect(host.guard.guardDialogOpen.value).toBe(false)
       expect(visible(host, 'guard-dialog')).toBe(false)
@@ -296,7 +296,7 @@ describe('useAccordionGuard（R4 展开守卫状态机）', () => {
       expect(host.guard.currentBodyDirty.value).toBe(false)
     })
 
-    it('无守卫在途时直接调用（非法路径）→ 提前返回，不改任何状态', async () => {
+    it('无检查在途时直接调用（非法路径）→ 提前返回，不改任何状态', async () => {
       const host = mountHost()
       await expandP1Dirty(host)
 
@@ -310,7 +310,7 @@ describe('useAccordionGuard（R4 展开守卫状态机）', () => {
     })
   })
 
-  describe('dirty 上抛对守卫判定的影响', () => {
+  describe('dirty 上抛对检查判定的影响', () => {
     it('同一动作：dirty=false 直达切换，dirty=true 被拦截', async () => {
       const host = mountHost()
 
@@ -334,7 +334,7 @@ describe('useAccordionGuard（R4 展开守卫状态机）', () => {
       await click(host, 'row-p1')
       expect(visible(host, 'guard-dialog')).toBe(true)
 
-      // 放弃守卫（取消不动 dirty）→ dirty 仍 true，再点仍拦截
+      // 放弃检查（取消不动 dirty）→ dirty 仍 true，再点仍拦截
       await click(host, 'guard-cancel')
       await click(host, 'row-p1')
       expect(visible(host, 'guard-dialog')).toBe(true)
@@ -349,7 +349,7 @@ describe('useAccordionGuard（R4 展开守卫状态机）', () => {
       expect(host.guard.currentBodyDirty.value).toBe(false)
     })
 
-    it('expandedId=null 时 dirty 不再拦截 createAndExpand（守卫前置条件=当前有展开行）', async () => {
+    it('expandedId=null 时 dirty 不再拦截 createAndExpand（检查前置条件=当前有展开行）', async () => {
       const host = mountHost()
       // 无展开行但 dirty=true（上抛残留）→ createAndExpand 直达
       await click(host, 'dirty-on')

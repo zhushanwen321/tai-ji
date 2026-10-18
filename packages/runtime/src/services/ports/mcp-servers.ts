@@ -29,7 +29,7 @@ export interface IMcpServers { // oe-exempt:20261004:framework:services 出站�
   /**
    * 读清单：现读文件（无缓存）。文件不存在 = 空清单 + corruption null（与「文件存在但
    * 无条目」同形态，§3.1）；文件损坏（非法 JSON）= servers 空数组 + corruption 有值
-   *（filePath 用户定位与修复入口，S6 fail-fast 读侧错误态）；既有坏条目照原样保留投影
+   *（filePath 用户定位与修复入口，S6 fail-fast 读侧错误态）；既有坏条目照原样保留呈现
    * 并以 configError 标注（D4，不阻塞其余条目管理）。agentDir = pi agent 目录绝对路径
    *（I3 登录引导数据源：needs-auth 条目的可复制登录命令 PI_CODING_AGENT_DIR 值）。
    */
@@ -51,7 +51,7 @@ export interface IMcpServers { // oe-exempt:20261004:framework:services 出站�
   update(name: string, entry: McpServerEntryValue): McpMutationResult
   /**
    * 启停切换专用操作（§3.1「可启停（写入 enabled 字段）」最小语义）：store 锁内仅翻转
-   * enabled 键、其余键一律不触——不带清单投影回写，外部并发改动的丢失窗口保持 D2 声明
+   * enabled 键、其余键一律不触——不带清单派生视图回写，外部并发改动的丢失窗口保持 D2 声明
    * 的锁内亚秒级。成功 ok:true，entry = 写后落盘终态条目（renderer 以服务端终态校准
    * 清单）；条目不存在 / 损坏拒入 / 坏条目（非对象）= ok:false 信封。
    */

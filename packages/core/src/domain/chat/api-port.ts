@@ -27,7 +27,7 @@ export interface ChatApiPort {
    *
    * [u5a 保留裁决] 成员**保留**，不随本单元删除：协议条目 `message.send` 是设计显式保留项
    * （runtime 侧适配器承接 plugin-service 等存量调用方，A6 测试锁），本成员是它在 chat 端口
-   * 的镜像面。core 编排侧当前零调用（grep `deps.chatApi.send` 仅注释命中——send/steer/
+   * 的镜像侧。core 编排侧当前零调用（grep `deps.chatApi.send` 仅注释命中——send/steer/
    * followUp/editAndResend 四通路均已收敛 submitDelivery），壳侧 wiring 保留以维持端口与
    * 协议条目同构；协议条目删除时本成员同批删。
    *
@@ -73,9 +73,9 @@ export interface ChatApiPort {
    */
   revokeMessage(sessionId: string, targetId: string): Promise<SessionRevokeMessageReply>
   /**
-   * 撤回在途条目（delivery.cancel RPC，D6 统一入口的在途路由腿）。撤回入口（UserBubble）对
-   * 内核投影 state 未 delivered 的消息路由到本 RPC（两段式收回：内核删除 + clear_queue 分拣），
-   * 与队列气泡 × 撤销（useQueueRows.onCancelEntry）共用同一 runtime 管道、不同 UI 消费面。
+   * 撤回在途条目（delivery.cancel RPC，D6 统一入口的在途路由路径）。撤回入口（UserBubble）对
+   * 内核派生视图 state 未 delivered 的消息路由到本 RPC（两段式收回：内核删除 + clear_queue 分拣），
+   * 与队列气泡 × 撤销（useQueueRows.onCancelEntry）共用同一 runtime 管道、不同 UI 消费方。
    */
   cancelDelivery(sessionId: string, clientUuid: string): Promise<DeliveryCancelReply>
   // [u5a 退役] `steer` / `followUp` 端口成员已删除：u3b 统一 submit 化后 core 编排侧对
@@ -101,7 +101,7 @@ export interface ChatApiPort {
    * [u6] query 可选（crash-resilience §3.3 D4 中期分页协议）：带 cursor 时为「加载更早」
    * 游标翻页（返回锚点之前的最近窗口；cursor 未命中返回空页 + truncated=false）；
    * 缺省 = 最近窗口。窗口契约字段 truncated/loadedTurns/totalTurnsEstimate 必填
-   * （[u6] legacy historyTruncated 已退役，偏差表 D7 双轨收口——mock 门面同契约）。
+   * （[u6] legacy historyTruncated 已退役，偏差表 D7 双轨收敛——mock 门面同契约）。
    */
   getHistory(sessionId: string, query?: { cursor?: string; limitTurns?: number; maxBytes?: number }): Promise<{
     messages: Message[]

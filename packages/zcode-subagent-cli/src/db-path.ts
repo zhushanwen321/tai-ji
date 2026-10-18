@@ -32,7 +32,7 @@ import {
  * 的 mtime TTL，refs 计数/deletePoolNativeState 已删，设计 D1/F11）；journal
  * 路径不变（仍 `engines/zcode/shared/journal-<taskId>.jsonl`）。
  * `cleanupExpiredJournals` 会把 `engines/<engineId>/` 下每个子目录枚举，
- * `session-db/` 中的 `db.sqlite*` 不匹配任何删除条件（GC 守卫 = 验收场景 A9）。
+ * `session-db/` 中的 `db.sqlite*` 不匹配任何删除条件（GC 检查 = 验收场景 A9）。
  *
  * @param engineDataDir 引擎数据目录（`deps.engineDataDir()`；禁硬编码，一律由入参推导）
  */
@@ -56,7 +56,7 @@ export function hostZcodeDbPath(): string {
  * 会话 db 白名单集合（①级读取的唯一放行来源，封闭集合——设计 D2/不变量 3）：
  * `[隔离库（现役）, 宿主库（仅存量兼容）]`。
  *
- * record/handle 来自 append-only JSONL（不可信面），两读取站点只做「集合成员判定」，
+ * record/handle 来自 append-only JSONL（不可信来源），两读取站点只做「集合成员判定」，
  * 只放行集合内精确绝对路径，其余拒绝①级、降 journal——防任意文件读。集合形态
  * （而非 `||` 列表）使未来第三个合法路径只需改本函数。
  *

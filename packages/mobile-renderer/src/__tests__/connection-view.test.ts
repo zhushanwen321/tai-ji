@@ -2,7 +2,7 @@
 // 直改视图 ref 驱动渲染不经转移逻辑，此处闭环三信号优先级不变量）。
 //
 // core getState 经 vi.mock 替换为本地可写 ref（ws-client 真实 state 无测试写入口，且本
-// 测试聚焦转移规则而非 ws 状态机）；断言面：
+// 测试聚焦转移规则而非 ws 状态机）；断言范围：
 //   - token-input 粘滞：进入后不被 connecting/reconnecting/failed 中间态覆盖，connected 才切出
 //   - failed 终态（非 token-input 前提下）
 //   - connected 置 hasConnectedOnce 后断连不复位（BM5 布局粘滞锚点）
@@ -76,7 +76,7 @@ describe('connection-view 转移优先级（三信号不变量）', () => {
     controller.handleAuthSuccess.mockClear()
   })
 
-  it('connected：切 connected + 置 hasConnectedOnce + 收口 submitting + 触发凭据处置', async () => {
+  it('connected：切 connected + 置 hasConnectedOnce + 收尾 submitting + 触发凭据处置', async () => {
     tokenSubmit.value = { submitting: true, error: null }
     await toCoreState('connected')
     expect(shellConnectionState.value).toBe('connected')
@@ -198,13 +198,13 @@ describe('submitRemoteToken 提交编排（TokenInputView 提交路径，含 cat
     expect(mockInitConnection).toHaveBeenCalledTimes(1)
   })
 
-  it('失败后可重试：再次提交走成功路径，submitting 置位且 error 清空（收口留给 auth 结果）', async () => {
+  it('失败后可重试：再次提交走成功路径，submitting 置位且 error 清空（收尾留给 auth 结果）', async () => {
     mockInitConnection.mockRejectedValueOnce(new Error('connect refused'))
     await submitRemoteToken('tok-retry')
     expect(tokenSubmit.value.error).toBe('failed')
 
     await submitRemoteToken('tok-retry')
-    // 编排提交成功 ≠ 提交中收口：auth 结果（connected / 拒绝）异步落地时才收口
+    // 编排提交成功 ≠ 提交中收尾：auth 结果（connected / 拒绝）异步落地时才收尾
     expect(tokenSubmit.value).toEqual({ submitting: true, error: null })
   })
 })

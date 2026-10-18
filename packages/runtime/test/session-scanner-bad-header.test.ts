@@ -1,7 +1,7 @@
 /**
  * RT-3#1（code-harden 审计批次 2 ④）：单条坏 header 不得毒死会话列表。
  *
- * 修复前链路：parseSessionHeader 条件赋值不设字段 + `as SessionHeader` 收口 →
+ * 修复前链路：parseSessionHeader 条件赋值不设字段 + `as SessionHeader` 掩盖 →
  * scanSessionMeta 产出缺 cwd/id 的 meta → 消费阶段 scannedToSummary 的
  * basename(undefined) TypeError → listAll/listPersistedSessions 整体抛出，侧栏整列
  * 消失（扫描侧 catch 拦不住，异常发生在消费阶段）。
@@ -55,7 +55,7 @@ function makeSessionStore(): ISessionStore {
   } as unknown as ISessionStore
 }
 
-/** S2 ISP 化：结构性满足 scanner 窄接口（2 方法 = 实际消费面），无强转。 */
+/** S2 ISP 化：结构性满足 scanner 窄接口（2 方法 = 消费方实际用到的全部），无强转。 */
 function makeSvc(): IScannerSessionOps {
   return {
     getActiveSummaries: vi.fn(() => []),

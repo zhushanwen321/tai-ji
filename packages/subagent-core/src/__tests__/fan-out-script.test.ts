@@ -13,7 +13,7 @@
 // 回归锚点（断言在违背契约的旧实现上会红）：
 //   - D9 agents 数量错配 fail-fast（对照 parallel 的静默 fallback 被有意排除）
 //   - D4 taskIndex 按派发序赋值（$ARGS.tasks 为权威源，成员无从错报）
-//   - D4/G2 部分失败 partial 收口；全员失败 throw（run failed）
+//   - D4/G2 部分失败 partial 收尾；全员失败 throw（run failed）
 //   - D5 通知体积保序截断（truncated 标记 + taskIndex/status 恒完整）
 //   - D4 aggregate 可选归约（末尾一个 agent()；归约失败不炸 run）
 import { execFile } from "node:child_process";
@@ -239,7 +239,7 @@ describe("fan-out.js taskIndex 派发序赋值（D4 权威源契约）", () => {
       expect(call.schema?.required).toEqual(["summary"]);
       expect(Object.keys(call.schema?.properties ?? {}).sort()).toEqual(["fullReportPath", "summary"]);
     }
-    // 静态守卫：agent() 派发块源码不得出现 taskIndex 字段声明
+    // 静态检查：agent() 派发块源码不得出现 taskIndex 字段声明
     const dispatchBlock = FANOUT_SOURCE.slice(
       FANOUT_SOURCE.indexOf("agent({"),
       FANOUT_SOURCE.indexOf("...agentFor(i)"),
@@ -248,7 +248,7 @@ describe("fan-out.js taskIndex 派发序赋值（D4 权威源契约）", () => {
   });
 });
 
-describe("fan-out.js 失败语义（D4/G2：allSettled partial 收口）", () => {
+describe("fan-out.js 失败语义（D4/G2：allSettled partial 收尾）", () => {
   it("部分成员失败 → status=partial，失败条目带 error，其余成员 ok 不被阻断", async () => {
     const r = await runProbe(
       { tasks: THREE_TASKS, agents: "/x/one.md" },
@@ -277,7 +277,7 @@ describe("fan-out.js 失败语义（D4/G2：allSettled partial 收口）", () =>
     expect(r.outcome.results[1].status).toBe("ok");
   });
 
-  it("全员失败 → throw（run failed，非 error outcome 收口）", async () => {
+  it("全员失败 → throw（run failed，非 error outcome 收尾）", async () => {
     const stderr = await runProbeExpectThrow(
       { tasks: ["t0", "t1"], agents: "/x/one.md" },
       { failIndexes: [0, 1], aggregate: "none" },
@@ -297,7 +297,7 @@ describe("fan-out.js 通知体积保序截断（D5：truncated 标记）", () =>
     // 保序：预算内靠前条目保完整 summary，预算耗尽后条目 summary 让出
     expect(r.outcome.results[0].summary).toBe("x".repeat(3000));
     expect(r.outcome.results[2].summary).toBeUndefined();
-    // 归因/恢复面恒完整：taskIndex/status/fullReportPath 每条都在
+    // 归因/恢复路径恒完整：taskIndex/status/fullReportPath 每条都在
     r.outcome.results.forEach((entry, i) => {
       expect(entry.taskIndex).toBe(i);
       expect(entry.status).toBe("ok");
@@ -331,7 +331,7 @@ describe("fan-out.js aggregate 可选归约（D4）", () => {
     expect(r.outcome.aggregate).toBeUndefined();
   });
 
-  it("归约成员失败 → 不炸 run：已收集 results 照常收口，status 降 partial，aggregate 携带 error", async () => {
+  it("归约成员失败 → 不炸 run：已收集 results 照常收尾，status 降 partial，aggregate 携带 error", async () => {
     const r = await runProbe(
       { tasks: THREE_TASKS, aggregate: true },
       { aggregate: "reject" },
@@ -347,12 +347,12 @@ describe("fan-out.js aggregate 可选归约（D4）", () => {
   });
 });
 
-describe("fan-out.js 模块形态与参数面契约", () => {
+describe("fan-out.js 模块形态与参数侧契约", () => {
   it("顶层 return 使其不可作为 ES module import（pi worker 脚本，非可导入模块）", async () => {
     await expect(import("../../workflows/fan-out.js" as string)).rejects.toThrow();
   });
 
-  it("参数面无 tasksJson（D4 被否谱系：tasks 直接数组是唯一任务集入口）", () => {
+  it("参数范围无 tasksJson（D4 不采用其余方案的理由：tasks 直接数组是唯一任务集入口）", () => {
     expect(FANOUT_SOURCE).not.toContain("tasksJson");
     expect(FANOUT_SOURCE).not.toContain("itemsJson");
   });

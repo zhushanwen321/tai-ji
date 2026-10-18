@@ -146,7 +146,7 @@ describe('resetBrowsing', () => {
 
   it('程序化 setText（isSettingText）触发的 resetBrowsing 被跳过（不重置 browsing）', () => {
     // 模拟：handleArrowUp 内部调 setText，若 setText 触发 input → resetBrowsing，会破坏 browsing
-    // useComposerHistory 内部用 isSettingText 守卫，这里验证 browsing 态不被破坏
+    // useComposerHistory 内部用 isSettingText 检查，这里验证 browsing 态不被破坏
     const { handleArrowUp, isBrowsing } = setupHistory('s1', ['msg1'])
     handleArrowUp()
     expect(isBrowsing.value).toBe(true) // browsing 保持，未被内部 setText 触发的 reset 破坏

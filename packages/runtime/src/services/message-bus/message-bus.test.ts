@@ -594,7 +594,7 @@ describe('MessageBus', () => {
     expect(result.lastSeq).toBe(6)
 
     // 长断线重连（fromSeq=1 早于 ring 最旧 seq 4）→ handler 判定 gap=true → 全量回放
-    // （snapshot 不做增量过滤，renderer 触发全量重拉）
+    // （snapshot 不做增量过滤，renderer 触发全量重新拉取）
     expect(handlerGapFrom(result, 1)).toBe(true)
 
     // fromSeq 落在 ring 覆盖范围内（如 4）→ 增量模式不误报

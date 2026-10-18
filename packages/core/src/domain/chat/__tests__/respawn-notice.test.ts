@@ -7,7 +7,7 @@
  * ③ 提示条 reconcile 保留（mergeBaselineWithLive 拣回重插修复）：truncated=true 窗口合并
  *   后提示条仍在（锚位/更早历史/幂等）、TTL 过期消退、非 respawn liveOnly 不受影响。
  *
- * 三个消费面共置一文件（同一 u8 消费链，且避免与并行单元同文件冲突）。纯内存，不触 fs。
+ * 三个消费方共置一文件（同一 u8 消费链，且避免与并行单元同文件冲突）。纯内存，不触 fs。
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { effectScope } from 'vue'

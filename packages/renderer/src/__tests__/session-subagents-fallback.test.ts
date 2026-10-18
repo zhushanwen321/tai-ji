@@ -66,7 +66,7 @@ vi.mock('@/lib/ipc', () => ({
   restartRuntime: vi.fn(async () => {}),
 }))
 
-// mock sessionApi（subagent/workflow store 内部 import；getSubagents 首拉返回空，
+// mock sessionApi（subagent/workflow store 内部 import；getSubagents 首次拉取返回空，
 // getWorkflows 用 vi.fn() 由用例内 mockResolvedValueOnce 控制返回值）
 vi.mock('@taiji/core/transport/api/domains/session', () => ({
   // RT-4#8 起 API 返结构化形状 { subagents, oversize }（store 按此解构）

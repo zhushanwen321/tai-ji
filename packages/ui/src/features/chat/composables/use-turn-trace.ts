@@ -31,7 +31,7 @@ import type { Message, ThinkingBlock, ToolCall } from '@taiji/shared'
 import { useChatViewDeps } from '../chat-view-deps'
 
 /** Block props（按单元类型二选一，v-bind 展开的类型前提；定义随单元派生逻辑内聚于本文件）。 */
-export interface BlockUnitProps { // oe-exempt:20261013:framework:类型契约先行——Turn→Block 渲染单元 props 契约层（v-bind 展开的类型前提，单构造点 unitBlockProps 为常态），消费面为 Turn.vue 模板与 Block.test.ts
+export interface BlockUnitProps { // oe-exempt:20261013:framework:类型契约先行——Turn→Block 渲染单元 props 契约层（v-bind 展开的类型前提，单构造点 unitBlockProps 为常态），消费方为 Turn.vue 模板与 Block.test.ts
   type: 'thinking' | 'tool' | 'text' | 'agentgraph' | 'run-group'
   content?: string
   tool?: ToolCall
@@ -160,7 +160,7 @@ export function useTurnTrace(turn: () => MessageTurn, isWorkingTurn: () => boole
  * 引用入键 v-memo 将永远失效（同 members 的处理）。
  * 不用整个 members 数组引用入 deps——每次重组都是新数组，v-memo 将永远失效。
  * 普通块七项 = W21 D-4 既有键清单 + textFinalized（chat-flow-text-color D1：mid-turn 气泡
- * 定稿标记落地时要触发重渲染翻白，不入键则 memo 命中旧 props、颜色滞留 streaming 灰到回合收口）
+ * 定稿标记落地时要触发重渲染翻白，不入键则 memo 命中旧 props、颜色滞留 streaming 灰到回合收尾）
  * + [actions-anchor] 锚标记：block.ref 即「身份+内容」——text 是 normalizeContent 字符串、
  * thinking/tool 是块对象引用（D-1 不可变语义下内容/status/id 变化 = 新对象替换，引用入键即
  * 覆盖 08 §3.3.1 键清单的 thinking.id / tool.id / content / tool.status）；working/streaming
@@ -210,7 +210,7 @@ export function useTurnTrace(turn: () => MessageTurn, isWorkingTurn: () => boole
       case 'thinking': {
         const t = ref as ThinkingBlock
         // N6 思考行时长：startTime/endTime 透传（实时链路 thinking_start/end 效果器填充；重载
-        // 链路两字段 undefined → Block 侧守卫不渲染时长，维持现状展示）
+        // 链路两字段 undefined → Block 侧检查不渲染时长，维持现状展示）
         return { content: t.content, thinkingId: t.id, collapsed: t.collapsed, thinkingStart: t.startTime, thinkingEnd: t.endTime }
       }
       case 'tool':
@@ -227,7 +227,7 @@ export function useTurnTrace(turn: () => MessageTurn, isWorkingTurn: () => boole
  *
  * working/streaming（chat-flow-text-color D1）：按「该消息文本是否仍在写」逐消息派生，
  * 不再直接跟 assistantStatus——pi 回合 =「assistant 消息 → 工具 → assistant 消息 → …」
- * 循环，mid-turn 气泡的 status 要到回合级 message.complete 才收口，直接跟 status 会让
+ * 循环，mid-turn 气泡的 status 要到回合级 message.complete 才收尾，直接跟 status 会让
  * 长工具回合中已写完的正文/思考块一直处于 streaming 视觉（正文灰、思考块尾窗模式）。
  * 事实源 = core message_end 写入的 textFinalized（确定性事件边沿，非时间推测）。
  */

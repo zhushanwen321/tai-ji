@@ -6,7 +6,7 @@
 
 ## 1. 列表状态派生谓词 blockingOverlay 输入：移动恒 false（U20/A14）
 
-- **差异**：core `deriveSessionStatus`（`packages/core/src/domain/session/store.ts`，SessionStatusInputs 参数化输入契约）的 `hasBlockingOverlay` 输入——桌面全量投影（extensionUI store `hasPendingBlockingOverlay`，form/planReview 键，D12 拓宽口径）→ waiting 态；移动壳无 extensionUI store（面板族 Phase 2 裁剪的既定壳形态），输入源不存在，恒缺省 false。
+- **差异**：core `deriveSessionStatus`（`packages/core/src/domain/session/store.ts`，SessionStatusInputs 参数化输入契约）的 `hasBlockingOverlay` 输入——桌面全量派生视图（extensionUI store `hasPendingBlockingOverlay`，form/planReview 键，D12 拓宽口径）→ waiting 态；移动壳无 extensionUI store（面板族 Phase 2 裁剪的既定壳形态），输入源不存在，恒缺省 false。
 - **语义损失（登记的代价面）**：移动会话列表状态点对「富交互表单/plan 审批 pending」不显 waiting——移动的表单请求呈现是页面级 MobileFormCard（呈现即用户可感知），列表状态点不承载该信号；waiting 态在移动列表仅由 toolCall running 分支达成（A14 裁决的收益面「运行中/流式中可见」不受影响）。
 - **判定**：真差异（数据源在移动壳形态下不存在，非漏接——extensionUI 请求通道的移动呈现载体是 MobileFormCard 页面而非状态点），非装配缺口，不补。
 - **退役/复审条件**：移动壳若引入 extensionUI 分区（W4/W5 通知体系立项时），该输入按桌面同式接入本谓词，本条随之删除。
@@ -34,7 +34,7 @@
 
 ## 5. 生命周期外三个 effects 回调移动壳不接（D5 去留表）
 
-- **差异**：`onMessageComplete` / `onWorkflowUpdate` / `onSubagentEntries` 三个 InboundEffects 回调——桌面全接（useMessageEffects：完成通知音/角标、workflow 状态投影、subagent entry 抽屉数据），移动壳 effects 装配不含（`packages/mobile-renderer/src/bootstrap.ts` shellEffects，注释明示「本波不接」）。
+- **差异**：`onMessageComplete` / `onWorkflowUpdate` / `onSubagentEntries` 三个 InboundEffects 回调——桌面全接（useMessageEffects：完成通知音/角标、workflow 状态派生视图、subagent entry 抽屉数据），移动壳 effects 装配不含（`packages/mobile-renderer/src/bootstrap.ts` shellEffects，注释明示「本波不接」）。
 - **差异根因**：三个回调的消费方移动 v1 均无承载——完成通知音/角标属 W4 通知体系（未立项），workflow 列表与 subagent entry 抽屉属桌面面板族（移动壳 Phase 2 裁剪形态）；无消费方时接线是空转注册。
 - **语义损失（登记的代价面）**：移动端轮次完成无提示音/角标、无 workflow 状态与 subagent entry 浏览面——消息主链与 subagent 运行状态行（onSubagents，已接）不受影响。
 - **判定**：真差异（消费方在移动壳形态下不存在，非漏接），不补。

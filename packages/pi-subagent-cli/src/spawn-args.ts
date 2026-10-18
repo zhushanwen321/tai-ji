@@ -2,12 +2,12 @@
 //
 // pi spawn 参数组装纯函数（W7 迁 pi 包，自 core engines/pi/session-runner.ts 的
 // buildSpawnArgs / applySchemaEnvToChildEnv / buildEnvBlock 提取——行为逐字等价，
-// 类型面改包内形态）。
+// 类型范围改包内形态）。
 //
 // [U1 归并] buildSpawnArgs / parseSpawnModelRef
 // 的实现本体已上移 @zhushanwen/pi-rpc spawn-args 模块（主/从两侧模板单源，设计
 // subagent-permanent-session-model §3.3.2）——本文件按「先并存后切换」完成切换：
-// re-export 保持既有导入面（index.ts / spawn-runner / __tests__ 零改动），包内
+// re-export 保持既有导入范围（index.ts / spawn-runner / __tests__ 零改动），包内
 // 不再保留同型私有实现（S7 grep 无双轨）。本地保留的是非同型面：schema env
 // 注入桥（pi-subagent-cli 特有，[D1] 输入源 = wire task.schema 的派生值）、
 // 环境信息块、SdkEvent 翻译纯函数。
@@ -29,7 +29,7 @@ import type { SdkEvent } from "./spawn-event-adapter.ts";
 
 const logger = getLogger("session-runner");
 
-// ── pi-rpc spawn-args 模块 re-export（导入面兼容） ──
+// ── pi-rpc spawn-args 模块 re-export（导入范围兼容） ──
 
 export { parseSpawnModelRef };
 export type { SpawnModelRef };
@@ -76,7 +76,7 @@ export function buildSpawnArgs(
   // builtin:codemode 基座旗标（codemode 设计 D8，上游先追加）+ 下方 --extension
   // 白名单（pi 官方语义「-ne 下显式 -e 仍生效」，与 taiji 主 pi 基座形态一致；
   // 同时是 runtime 孤儿收殓的 argv 主判别位）；② --extension 逐项拼白名单路径
-  // （pi 公开承诺的加载通道，设计 D2 被否项 b：路径列表不走 env，与出站 env
+  // （pi 公开承诺的加载通道，设计 D2 不采用项 b：路径列表不走 env，与出站 env
   // 白名单机制解耦）。
   args.push("--no-extensions");
   appendExtensionArgs(args, params.extensionPaths);

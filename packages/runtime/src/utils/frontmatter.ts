@@ -1,5 +1,5 @@
 /**
- * YAML frontmatter 解析 helpers（D1 收口）。
+ * YAML frontmatter 解析 helpers（D1 收敛）。
  *
  * 3 处（config-service.parseAgentMd / agent-scanner.parseAgentMd / skill-scanner.parseSkillMd）
  * 历史上各自重复「按 `---` 分割 frontmatter」的骨架。本模块抽出通用分割逻辑；
@@ -13,9 +13,9 @@
 export interface FrontmatterParts {
   /** frontmatter 原始文本（不含首尾 `---`）。 */
   frontmatter: string
-  /** 正文（`---` 闭合之后的部分）。 */
+  /** 正文（结束 `---` 之后的部分）。 */
   body: string
-  /** 正文起始行号（0-based，即闭合 `---` 的下一行）。无 frontmatter 时为 0。 */
+  /** 正文起始行号（0-based，即结束 `---` 的下一行）。无 frontmatter 时为 0。 */
   bodyStartLine: number
 }
 
@@ -24,8 +24,8 @@ export interface FrontmatterParts {
  *
  * 行为约定：
  * - 首行（去除空白后）必须是 `---` 才视为有 frontmatter；否则整体当正文。
- * - 第二个 `---`（任意缩进的纯 `---` 行）闭合 frontmatter。
- * - 无闭合 `---` 时，首个 `---` 之后的内容都算 frontmatter（容错，与原实现一致）。
+ * - 第二个 `---`（任意缩进的纯 `---` 行）结束 frontmatter。
+ * - 无结束 `---` 时，首个 `---` 之后的内容都算 frontmatter（容错，与原实现一致）。
  */
 export function extractFrontmatter(content: string): FrontmatterParts {
   const lines = content.split('\n')

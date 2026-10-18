@@ -18,13 +18,13 @@
  * mock 推帧走 `packages/core/src/transport/mock/index.ts` 的 `pushSession`
  * （只调 `events.dispatchSession`，session 通道），而 ViewHostStore 的消费者
  * （ExtensionHost bridge，useExtensionHostBridge）经 `onCrossSession` 订阅、由
- * route-inbound 的 crossSession 分发腿投递——mock 不进 route-inbound，故 mock 轨下
+ * route-inbound 的 crossSession 分发路径投递——mock 不进 route-inbound，故 mock 轨下
  * `extension:widgetGui` 永远到不了 ViewHostStore（同现象可用 status-bar 空态独立复核）。
  * 修复点（出 e2e 领地，登记为 blocker）= pushSession 增补 route-inbound 同款
- * crossSession 分发腿；修复前 widgetGui 消费端的端到端断言落在 **real 轨**
+ * crossSession 分发路径；修复前 widgetGui 消费端的端到端断言落在 **real 轨**
  * `e2e/tasks-drawer-real.spec.ts` R2（真 runtime + 真 WS 帧 + 真 route-inbound：断言
  * 托盘 widget icon/badge 出现 + 面板 tab-bar 双段渲染）。
- * 保留面：对话流内联 `__gui__`（tool call 记录，设计明文不退役）——下方路径 B 用例不变。
+ * 保留范围：对话流内联 `__gui__`（tool call 记录，设计明文不退役）——下方路径 B 用例不变。
  *
  * mock 轨数据流：VITE_MOCK=true → chat.send → run-send-stream 自动推送
  * tool_call_end(含 __gui__) + extension:widgetGui × 2（后者当前不可达托盘，见上）。

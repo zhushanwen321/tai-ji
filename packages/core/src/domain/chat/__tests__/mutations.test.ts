@@ -201,7 +201,7 @@ describe('prependHistory', () => {
       prependHistory(ref, 's1', [makeMessage('a'), makeMessage('b'), makeMessage('c')])
       // 行为仍是安全网去重（锚切分异常时宁可少插不可重插）
       expect(ref.value.get('s1')!.value.map((m) => m.id)).toEqual(['a', 'b', 'c'])
-      // 断言面：命中重复必须出声（锚切分异常的诊断信号）
+      // 断言范围：命中重复必须出声（锚切分异常的诊断信号）
       expect(warnSpy).toHaveBeenCalledTimes(1)
       expect(warnSpy.mock.calls[0][0]).toContain('prependHistory deduped 2')
     } finally {

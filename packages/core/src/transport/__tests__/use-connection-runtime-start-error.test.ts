@@ -11,7 +11,7 @@
  * - 拉取无记录 → 正常走端口发现 + 连接（不短路）；
  * - teardown 卸载 onRuntimeError 监听（与安装配对）。
  *
- * 真因 message 的显示（连接屏 failed 分支）与落台账（error-reporter）在壳层 App.vue，
+ * 真因 message 的显示（连接屏 failed 分支）与落登记清单（error-reporter）在壳层 App.vue，
  * 由 renderer __tests__/App-runtime-start-error.test.ts 覆盖；本文件只锁 core 状态转移。
  *
  * 构造方式：与 use-connection-clear-pending.test.ts 同款（ws-client 1 处 vi.mock +

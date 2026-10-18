@@ -5,23 +5,23 @@
  * 「renderer 只提交不判定」（D1）与 defer 队列退役整体改写：
  * - 发送：占用期（compacting）Enter / 发送按钮 → 与 idle 同路径的**统一提交**（useChat.send
  *   → 乐观气泡 + delivery.submit），lane 由 runtime 内核判定（queued/steer 由内核承接）；
- *   占用期不再有 `/`·`!` 例外拒绝分支（命令文本与 idle 态同语义，bash/slash 守卫不变）。
+ *   占用期不再有 `/`·`!` 例外拒绝分支（命令文本与 idle 态同语义，bash/slash 检查不变）。
  *   [2026-10 用户裁决] 压缩期**发送位按钮**是「终止压缩」（stop，点击 → abort 中止压缩
  *   流程，见 composer-send-button-states.test.ts）——排队提交改由 ⏎ 承担（本文件 TC11/
  *   TC18 的 Enter 路径不变：内核 queued 车道 + compaction-end flush）。
- * - 队列区：数据源 = session.delivery 帧投影（core getDeliveryProjectionRef），真 QueueBubble
+ * - 队列区：数据源 = session.delivery 帧派生视图（core getDeliveryProjectionRef），真 QueueBubble
  *   渲染 → 行可见 + 状态 chip（排队中/投递中/发送失败）
  * - × 撤销：真 QueueBubble 点击 → useQueueRows.onCancelEntry → delivery.cancel RPC；
  *   成功回草稿（cancel reply 全文 + segments → ComposerInput.setText）
  * - failed 行重试钮：点击 → delivery.resync 单条重报
  *
  * 策略（对齐 composer-bash-mode.test.ts 结构范本）：
- * - 真 pinia + 真 chatStore（occupancy 投影驱动发送位与 sessionPhase）
- * - 真 QueueBubble / 真 useQueueRows（DOM 断言面）+ mock useChat（spy 化 send/...）
- * - mock '@/api/domains/delivery'（cancel/resync RPC 断言面）+ useToast（断言 toastError）
+ * - 真 pinia + 真 chatStore（occupancy 派生视图驱动发送位与 sessionPhase）
+ * - 真 QueueBubble / 真 useQueueRows（DOM 断言范围）+ mock useChat（spy 化 send/...）
+ * - mock '@/api/domains/delivery'（cancel/resync RPC 断言范围）+ useToast（断言 toastError）
  * - mock ComposerInput（emit input 设 draft + emit keydown Enter 触发 onSend；expose
  *   setText/getSegments 供撤销回草稿断言）
- * - 帧到达模拟：直接写 core 投影 ref（帧消费链路由 core useChat handler 承担，u3b 已覆盖）
+ * - 帧到达模拟：直接写 core 派生视图 ref（帧消费链路由 core useChat handler 承担，u3b 已覆盖）
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/panel/composer-compact-queue.test.ts
  */
@@ -65,14 +65,14 @@ vi.mock('@/api/domains/delivery', () => ({ delivery: deliveryMock }))
 vi.mock('@/composables/features/new-task/useNewTaskFlow', () => composerFlowModule())
 vi.mock('@/api', () => ({
   ...composerApiModule(),
-  // flush 链路经 api.chat.send 提交（与 useChat mock 同一 vi.fn，断言面不分裂）
+  // flush 链路经 api.chat.send 提交（与 useChat mock 同一 vi.fn，断言范围不分裂）
   chat: { send: chatApiMock.send, streamSubscribe: vi.fn(() => () => {}) },
 }))
 vi.mock('@/stores/session', () => composerSessionStoreModule())
 
 // ── ComposerInput mock：emit input 设 draft + emit keydown Enter 触发 onSend ──
 // ComposerInput mock 单源 helper 基型（expose 面含 getText）；QueueBubble 不 stub：
-// 队列区 DOM 断言走真组件（单源化后行渲染是 u3c 验收面）——从 helper stubs 排除
+// 队列区 DOM 断言走真组件（单源化后行渲染是 u3c 验收范围）——从 helper stubs 排除
 const { lastInputText, ComposerInputMock } = makeComposerInputMock()
 const { QueueBubble: _queueReal, ...childStubsNoQueue } = composerChildStubs
 const otherStubs = {
@@ -84,7 +84,7 @@ import Composer from '@/components/panel/Composer.vue'
 // resetChatModuleState 来自被 mock 的 useChat 模块（vi.fn，测试隔离占位）
 import { resetChatModuleState } from '@/composables/features/chat/useChat'
 
-/** 写投递投影（模拟内核 session.delivery 帧到达后的投影状态） */
+/** 写投递派生视图（模拟内核 session.delivery 帧到达后的派生视图状态） */
 function setProjection(sid: string, entries: DeliveryFrameEntry[]): void {
   const projection = getDeliveryProjectionRef()
   const next = new Map(projection.value)
@@ -192,7 +192,7 @@ describe('Composer compact 期间发送（u3c/D1：统一提交，占用不拦�
 })
 
 describe('Composer 队列区单源渲染 + 撤销 / 重试（u3c/D7 + V9/V10）', () => {
-  it('帧投影到达 → 真 QueueBubble 渲染行（状态 chip = 排队中 / 投递中，用户可见）', async () => {
+  it('帧派生视图到达 → 真 QueueBubble 渲染行（状态 chip = 排队中 / 投递中，用户可见）', async () => {
     const wrapper = mountComposer({ sessionId: 's1' })
     expect(wrapper.find('[data-testid="queue-bubble"]').exists()).toBe(false)
 

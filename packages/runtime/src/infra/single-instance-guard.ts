@@ -1,5 +1,5 @@
 /**
- * 同数据目录单实例互斥守卫（唯一「拒绝双 runtime」判定点）。
+ * 同数据目录单实例互斥检查（唯一「拒绝双 runtime」判定点）。
  *
  * 背景 [HISTORICAL] 2026-09-22 批量 subagent exit 143 事故：独立 runtime 进程
  * （`pnpm --filter @taiji/runtime start` 形态，验收脚本「重启 runtime」场景）与安装版
@@ -34,7 +34,7 @@ import path from 'node:path'
 import { RUNTIME_INSTANCE_FILE, type RuntimeInstanceRecord } from '@taiji/shared'
 
 // 文件名与记录形状的单一权威在 shared（supervisor port-discoverer 同源消费）；此处
-// re-export 保持本模块既有导入面（测试/调用方）零改动。
+// re-export 保持本模块既有导入侧（测试/调用方）零改动。
 export { RUNTIME_INSTANCE_FILE }
 export type { RuntimeInstanceRecord }
 

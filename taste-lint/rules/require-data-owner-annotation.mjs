@@ -1,7 +1,7 @@
 /**
  * 品味规则（data-source-governance R3）：模块级缓存必须带 @data-owner 注解且条目真实
  *
- * 模块级可变缓存（new Map/Set/WeakMap、ref/shallowRef/reactive）是「数据多源」病灶的
+ * 模块级可变缓存（new Map/Set/WeakMap、ref/shallowRef/reactive）是「数据多源」问题点的
  * 高发形态（影子状态/第二写方都从这里长出来，见 data-source-governance.md §2.2）。
  * 新增必须先登记 owner 再写代码（登记表 §5 维护规约第 5 条），本规则强制该顺序可机检：
  * 声明处缺 `@data-owner <登记表条目编号>` 注释，或引用的编号不在登记表内 → 报错。
@@ -13,9 +13,9 @@
  * 范围裁定（W24 扩围）：`packages/renderer/src/**` + `packages/core/src/**` 全域（W4 首版
  * 仅 stores/，扩围随 W24 调用图收紧同批——plan W4 遗留裁决）。2026-10-04 再扩围纳入
  * `packages/mobile-renderer/src/**` + `packages/ui/src/**`（branch-review round 1 dmg-r1-2：
- * mobile-renderer 模块级缓存族零机器拦截、豁免标记无登记对应行也逃过豁免闭环——扫描面
+ * mobile-renderer 模块级缓存族零机器拦截、豁免标记无登记对应行也逃过豁免闭环——扫描范围
  * 必须随 GUI 数据消费包拓扑同步，登记表 §5 维护规约 6 承接后续新包）。runtime/ 主进程与
- * extensions/ 不在 GUI 数据层，不扫（runtime 侧声明经检查面 5 反向锁定，见登记表表头 6）。
+ * extensions/ 不在 GUI 数据层，不扫（runtime 侧声明经检查 5 反向锁定，见登记表表头 6）。
  *
  * 载体（2026-10-04，branch-review round 3 dmg-r3-1）：.ts + .vue 双载体。.vue 下仅普通
  * <script> 块内的 Program 顶层声明是模块级——vue-eslint-parser 把两个 script 块的顶层

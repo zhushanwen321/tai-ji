@@ -9,7 +9,7 @@
  * - D3 搁置（decision:'dismiss' respond 通道，取代「忽略 = 杀 turn」）：payload 形状、
  *   不经 message.abort、文案含「暂存待办」提示、草稿保留
  * - D4「已应答抑制标记」断言：压制零渲染（事件驱动解除）+ 悬挂无时间自愈 + P2-2 失效帧
- *   同置标记 + 冷拉对账真值解除（显式拉取）
+ *   同置标记 + 主动拉取对账真值解除（显式拉取）
  * - D8 degraded 可行动化：[重新提交审批] 按钮（复用消息发送通道注入固定文案）+ resumeHint
  *   分源文案（'resubmit' / 通用）+ 发送失败就近错误行
  * - D8 检测窗开窗时机（dmg-r1-2）：nudge 轮自身的 message_start 到达才开判定窗——busy
@@ -37,7 +37,7 @@ vi.mock('@taiji/core/domain/drawer', async (importOriginal) => {
   return { ...actual, openDrawerTab: openDrawerTabMock }
 })
 
-// ── mock ⓪½：chat domain（D8 重新提交的消息发送通道 + 回归守卫：搁置不经 message.abort）──
+// ── mock ⓪½：chat domain（D8 重新提交的消息发送通道 + 回归检查：搁置不经 message.abort）──
 const chatSendMock = vi.hoisted(() => vi.fn(async () => {}))
 const chatAbortMock = vi.hoisted(() => vi.fn(async () => {}))
 vi.mock('@taiji/core/transport/api/domains/chat', async (importOriginal) => {
@@ -45,16 +45,16 @@ vi.mock('@taiji/core/transport/api/domains/chat', async (importOriginal) => {
   return { ...actual, send: chatSendMock, abort: chatAbortMock }
 })
 
-// ── mock ①：command（plan-store 首拉 RPC + D4③ 冷拉 getPlanState）——spread actual 保真实 events 通道 ──
+// ── mock ①：command（plan-store 首次拉取 RPC + D4③ 主动拉取 getPlanState）——spread actual 保真实 events 通道 ──
 const commandMock = vi.hoisted(() => vi.fn())
 vi.mock('@taiji/core/transport/api', async (importActual) => {
   const actual = await importActual<typeof import('@taiji/core/transport/api')>()
   return { ...actual, command: commandMock, RPC_BACKSTOP_TIMEOUT_MS: 30_000 }
 })
 
-// ── mock ②：extension domain（useExtensionUI 的 WS/RPC 面 + D4③ 冷拉 getPendingRequests）
+// ── mock ②：extension domain（useExtensionUI 的 WS/RPC 面 + D4③ 主动拉取 getPendingRequests）
 // 公共四键单源 helpers/use-extension-ui-test-env；onUITimeout 是本文件特有注册表实现
-// （真实语义形态：per-session handler 注册/注销，检测窗用例消费），冷拉快照经
+// （真实语义形态：per-session handler 注册/注销，检测窗用例消费），主动拉取快照经
 // getPendingRequestsMock 引用按需改写返回值（默认空快照 = 事实上无挂起）──
 const uiTimeoutHandlers = new Map<string, Array<(requestId: string) => void>>()
 vi.mock('@taiji/core/transport/api/domains/extension', async () => {
@@ -164,7 +164,7 @@ describe('PlanReviewBar 分支公式（D4 单源：ready ⇔ 挂起注册表，p
     expect(wrapper.find('[data-testid="plan-review-bar"]').exists()).toBe(false)
   })
 
-  it('分支④ 无 view（首拉 null）→ 不渲染', async () => {
+  it('分支④ 无 view（首次拉取 null）→ 不渲染', async () => {
     const wrapper = await mountBar(null)
     expect(wrapper.find('[data-testid="plan-review-bar"]').exists()).toBe(false)
   })
@@ -183,7 +183,7 @@ describe('PlanReviewBar 分支公式（D4 单源：ready ⇔ 挂起注册表，p
     const dismiss = wrapper.find('[data-testid="plan-review-dismiss"]')
     expect(dismiss.text()).toContain('搁置')
     expect(dismiss.attributes('title')).toContain('暂存待办')
-    // 旧「忽略」键与危险色形态退役（D3 非破坏 + F16 守卫配重消解）
+    // 旧「忽略」键与危险色形态退役（D3 非破坏 + F16 检查配重消解）
     expect(wrapper.find('[data-testid="plan-review-ignore"]').exists()).toBe(false)
     expect(dismiss.classes().some((c) => c.includes('danger'))).toBe(false)
     // D13⑦ 0 草稿不渲染评论计数键（常态归零）
@@ -218,7 +218,7 @@ describe('PlanReviewBar 分支公式（D4 单源：ready ⇔ 挂起注册表，p
     expect(wrapper.find('[data-testid="plan-review-approve"]').exists()).toBe(true)
   })
 
-  it('分支④ dispatching 不进审批条（执行方式表单是其唯一交互面）', async () => {
+  it('分支④ dispatching 不进审批条（执行方式表单是其唯一交互入口）', async () => {
     const wrapper = await mountBar(viewOf({ state: 'dispatching' }))
     await flushAsync()
 
@@ -374,7 +374,7 @@ describe('已应答抑制标记 + degraded 组合判定（D4，[ADR-0122] 帧到
     expect(wrapper.find('[data-testid="plan-review-degraded"]').exists()).toBe(false)
   })
 
-  it('冷拉对账真值解除：已应答标记压制零渲染 → 显式冷拉（reviewing ∧ 无挂起真值）→ degraded 渲染', async () => {
+  it('主动拉取对账真值解除：已应答标记压制零渲染 → 显式主动拉取（reviewing ∧ 无挂起真值）→ degraded 渲染', async () => {
     const wrapper = await mountBar(viewOf({ state: 'reviewing' }))
     emitPlanReviewRequest('pr-1')
     await flushAsync()
@@ -383,7 +383,7 @@ describe('已应答抑制标记 + degraded 组合判定（D4，[ADR-0122] 帧到
     // 已应答抑制标记：ready 摘除后零渲染
     expect(wrapper.find('[data-testid="plan-review-bar"]').exists()).toBe(false)
 
-    // 显式双源冷拉（getPlanState + getPendingRequests，本 mock 形态 = 真值
+    // 显式双源主动拉取（getPlanState + getPendingRequests，本 mock 形态 = 真值
     // reviewing ∧ 事实上无挂起）→ 解除标记 + degraded 组合即时放行
     commandMock.mockResolvedValue({ sessionId: SID, planState: viewOf({ state: 'reviewing' }) })
     getPendingRequestsMock.mockResolvedValue([])
@@ -433,7 +433,7 @@ describe('degraded 可行动化（D8：成因分源文案 + [重新提交审批]
 
     await btn.trigger('click')
     await flushAsync()
-    // D8 写入面：复用消息发送通道（message.send）注入固定文案 user 可见消息
+    // D8 写侧：复用消息发送通道（message.send）注入固定文案 user 可见消息
     expect(chatSendMock).toHaveBeenCalledTimes(1)
     expect(chatSendMock).toHaveBeenCalledWith(SID, '请重新提交计划审批')
     // 退出入口收敛：右区无退出按钮（唯一入口 = 左区常驻退出）
@@ -538,7 +538,7 @@ describe('D8「agent 未响应」分支（turn 生命周期信号驱动，非墙
     const wrapper = await mountDegraded()
     await clickResubmit(wrapper)
 
-    // submit-review 是轮内工具调用：挂起登记先于 turn 结束到达 → 成功收口
+    // submit-review 是轮内工具调用：挂起登记先于 turn 结束到达 → 成功收尾
     emitPlanReviewRequest('pr-resub')
     await flushAsync()
     dispatchTurnEvent('message.complete')
@@ -620,7 +620,7 @@ describe('D9③ 自审结论行（ready 分支截断 + Popover 全文）', () =>
   })
 })
 
-describe('§3.5 守卫与回看', () => {
+describe('§3.5 检查与回看', () => {
   it('0 评论：「提交评论修订」禁用 + tooltip 说明；加草稿后恢复可用', async () => {
     const wrapper = await mountBar(viewOf({ state: 'reviewing' }))
     emitPlanReviewRequest('pr-1')

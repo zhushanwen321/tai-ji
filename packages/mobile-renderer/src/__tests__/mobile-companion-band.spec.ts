@@ -1,15 +1,15 @@
 // 移动壳 CompanionBand 根级常驻装配（remote-use D3 / U7）。
 //
-// 锁定三个行为面：
+// 锁定三个行为范围：
 //   装配   —— zone-companion 在 App 根级渲染树（非页签条件分支）：列表页签下容器在场
 //   呈现   —— 请求到达即当前页签直接可见可作答（S3：页签条件分支内挂载随组件卸载退订，
 //            停留列表页签期间到达的 dialog 请求曾静默丢失）
 //   假按钮 —— minimize/restore 经 OVERLAY_LIFECYCLE provide 获得真实状态机（inject 缺失时
 //            按钮在场但点击 no-op = 假行为；provide 后 transition→getState 闭环生效）
 //
-// mock 策略：请求注入经 __testing.mobileExtensionBus.emit（生产订阅面 = dialog 通道
+// mock 策略：请求注入经 __testing.mobileExtensionBus.emit（生产订阅侧 = dialog 通道
 // bus 订阅，mobile-form.spec.ts 同款先例）；不点 confirm/select 作答按钮（会走真实
-// sendExtensionUIResponse WS 回传，非本单元断言面）；minimize/restore 纯组件内状态迁移
+// sendExtensionUIResponse WS 回传，非本单元断言范围）；minimize/restore 纯组件内状态迁移
 // 不触回传。CompanionBand 每次 mount 新建 queue（useSessionScopedState 每调用独立分区），
 // mount/unmount 天然隔离；模块级 requestIdSessions 反查表 beforeEach 防御性重置。
 //

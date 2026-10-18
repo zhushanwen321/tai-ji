@@ -56,7 +56,7 @@ function getContentArray(result: unknown): unknown[] | undefined {
 	return Array.isArray(content) ? content : undefined;
 }
 
-/** 类型守卫：返回 obj[key] 当它是非空 string，否则 undefined。 */
+/** 类型检查：返回 obj[key] 当它是非空 string，否则 undefined。 */
 function getStringProperty(obj: unknown, key: string): string | undefined {
 	if (typeof obj !== "object" || obj === null) return undefined;
 	const val = (obj as Record<string, unknown>)[key];

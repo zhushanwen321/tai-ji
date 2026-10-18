@@ -1,5 +1,5 @@
 /**
- * u1 双视图投影（D9②/D5③）+ onChange 订阅 + TextPayload.images 透传（D9④）+
+ * u1 双视图派生（D9②/D5③）+ onChange 订阅 + TextPayload.images 透传（D9④）+
  * onSettled 口径时点（D9⑤：sendChecked 受理即 resolve，送达确认不阻塞 checked 返回）。
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -7,7 +7,7 @@ import { createDelivery } from '../src/delivery.js'
 import { makeMockPort, textMsg } from './helpers.js'
 import type { DeliveryEntryState } from '../src/types.js'
 
-describe('u1-view 双视图投影（D9②/D5③）', () => {
+describe('u1-view 双视图派生（D9②/D5③）', () => {
   beforeEach(() => {
     vi.useFakeTimers()
   })
@@ -15,7 +15,7 @@ describe('u1-view 双视图投影（D9②/D5③）', () => {
     vi.useRealTimers()
   })
 
-  it('全量视图：活跃条目完整字段 + 全部 tombstone；投影视图 = 活跃全量 + delivered 最近 N 条', () => {
+  it('全量视图：活跃条目完整字段 + 全部 tombstone；派生视图 = 活跃全量 + delivered 最近 N 条', () => {
     const port = makeMockPort()
     const handle = createDelivery(port)
 
@@ -41,7 +41,7 @@ describe('u1-view 双视图投影（D9②/D5③）', () => {
     })
     expect(full.tombstones.map((t) => t.id)).toEqual(['u-1', 'u-2', 'u-3'])
 
-    // 投影视图（projection）：活跃全量 + delivered 全部（3 < 默认窗口 50）
+    // 派生视图（projection）：活跃全量 + delivered 全部（3 < 默认窗口 50）
     const proj = handle.projection()
     expect(proj.entries.map((e) => e.id)).toEqual(['u-4', 'u-1', 'u-2', 'u-3'])
     expect(proj.entries.map((e) => e.state)).toEqual<DeliveryEntryState[]>([
@@ -54,7 +54,7 @@ describe('u1-view 双视图投影（D9②/D5③）', () => {
     handle.dispose()
   })
 
-  it('投影窗口恒 50：56 条 delivered 只投影最近 50 条完整条目', () => {
+  it('派生视图窗口恒 50：56 条 delivered 只保留最近 50 条完整条目', () => {
     const port = makeMockPort()
     const handle = createDelivery(port)
 
@@ -64,7 +64,7 @@ describe('u1-view 双视图投影（D9②/D5③）', () => {
     }
 
     const proj = handle.projection()
-    expect(proj.entries).toHaveLength(50) // 投影窗口恒 50（DEFAULT_DELIVERED_WINDOW）
+    expect(proj.entries).toHaveLength(50) // 派生视图窗口恒 50（DEFAULT_DELIVERED_WINDOW）
     expect(proj.entries.map((e) => e.id)).toEqual(
       Array.from({ length: 50 }, (_, i) => `u-${i + 6}`), // 最近 50 条：u-6..u-55
     )
@@ -74,7 +74,7 @@ describe('u1-view 双视图投影（D9②/D5③）', () => {
     handle.dispose()
   })
 
-  it('cancelled 不投影（D5③）；tombstone 全量视图可见', () => {
+  it('cancelled 不进派生视图（D5③）；tombstone 全量视图可见', () => {
     const port = makeMockPort({ isIdle: () => false })
     const handle = createDelivery(port)
 
@@ -83,7 +83,7 @@ describe('u1-view 双视图投影（D9②/D5③）', () => {
     handle.cancel('u-2')
 
     const proj = handle.projection()
-    expect(proj.entries.map((e) => e.id)).toEqual(['u-1']) // cancelled 不进投影
+    expect(proj.entries.map((e) => e.id)).toEqual(['u-1']) // cancelled 不进派生视图
     expect(handle.entriesFull().tombstones.map((t) => t.id)).toEqual(['u-2']) // 判重表可见
 
     handle.dispose()
@@ -101,7 +101,7 @@ describe('u1-view 双视图投影（D9②/D5③）', () => {
     handle.dispose()
   })
 
-  it('投影视图条目为完整条目（delivered 含 payload 全文，D5③「完整条目」）', () => {
+  it('派生视图条目为完整条目（delivered 含 payload 全文，D5③「完整条目」）', () => {
     const port = makeMockPort()
     const handle = createDelivery(port)
 
@@ -306,7 +306,7 @@ describe('u1-view v1 机制保持抽查（busy gate / dispose）', () => {
   })
 
   // [已不可达用例删除登记] 原「30s watchdog：settled 丢失时复核投递」随 watchdog 定时
-  // 复核腿退役（ADR-0122——busy 留守归 settled 边沿与外部触发，不建定时兜底）而不可达，
+  // 复核路径退役（ADR-0122——busy 留守归 settled 边沿与外部触发，不建定时兜底）而不可达，
   // 2026-10-05 投递域清理批次删除。
 
   it('dispose 语义保持：清条目集（含 tombstone），不触发 onSettled，checked reject', async () => {

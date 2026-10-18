@@ -1,9 +1,9 @@
 /**
- * GitInfoReader 门面单测（缓存治理批 4 U10）：门面只做「观测器缓存 → GitInfo 旧形状」投影，
+ * GitInfoReader 门面单测（缓存治理批 4 U10）：门面只做「观测器缓存 → GitInfo 旧形状」派生视图，
  * 自身零缓存零 IO。观测器策略（TTL/LRU/prune）由 repo-observer.test.ts 覆盖，walk-up 解析由
  * git-repo-resolver.test.ts 覆盖。
  *
- * observer 用手写 fake（记录调用），验证投影映射与 prune 委托。
+ * observer 用手写 fake（记录调用），验证派生视图映射与 prune 委托。
  *
  * 测试框架 vitest，运行命令：cd packages/runtime && npx vitest run src/infra/system/git-info-reader.test.ts
  */
@@ -20,8 +20,8 @@ function fakeObserver(obs: RepoObservation): IGitRepoObserver {
   }
 }
 
-describe('GitInfoReader.readGitInfo（观测器缓存 → GitInfo 投影）', () => {
-  it('repo（gitDir + branch 均在）→ 投影 {branch, isWorktree}', () => {
+describe('GitInfoReader.readGitInfo（观测器缓存 → GitInfo 映射）', () => {
+  it('repo（gitDir + branch 均在）→ 映射 {branch, isWorktree}', () => {
     const observer = fakeObserver({ branch: 'feat-x', isWorktree: true, isBare: false, gitDir: '/ws/.bare/wt', headPath: '/ws/.bare/wt/HEAD' })
     const reader = new GitInfoReader(observer)
 
@@ -40,7 +40,7 @@ describe('GitInfoReader.readGitInfo（观测器缓存 → GitInfo 投影）', ()
     expect(reader.readGitInfo('/ws')).toBeUndefined()
   })
 
-  it('bare workspace 根形态：branch 有效时正常投影（isWorktree=false）', () => {
+  it('bare workspace 根形态：branch 有效时正常映射（isWorktree=false）', () => {
     // workspace 根在更上层 repo 之内的边界：walk-up 命中 .bare，rev-parse 从 cwd 起算仍可解析
     const observer = fakeObserver({ branch: 'main', isWorktree: false, isBare: true, gitDir: '/repo/inner/.bare', headPath: '/repo/inner/.bare/HEAD' })
     const reader = new GitInfoReader(observer)

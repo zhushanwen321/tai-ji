@@ -167,7 +167,7 @@ import {
 
 const { t } = useI18n()
 
-/* ── 周几标签（i18n 收口 D6：复用热力日历 heatWeek* keys，与 HeatCalendar 同款静态 key 列表） ── */
+/* ── 周几标签（i18n 收敛 D6：复用热力日历 heatWeek* keys，与 HeatCalendar 同款静态 key 列表） ── */
 const weekdayLabels = computed(() => [
   t('settings.usage.heatWeekSun'), t('settings.usage.heatWeekMon'),
   t('settings.usage.heatWeekTue'), t('settings.usage.heatWeekWed'),

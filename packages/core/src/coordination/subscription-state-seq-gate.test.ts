@@ -5,7 +5,7 @@
  * 触发消息与回放双实体）历史上都不是 evalSeqGap 判定错误，而是「判定 + 簿记写入 +
  * 基线推进」三者配对在跨文件交互层出错——纯函数单测测不到。D1 把三者收进
  * subscription-state 后，本文件只读本模块（seqGate + setSubscriptionPorts +
- * subscribeSession + getSubscriptionState 公共面，零 vi.mock），在接口级锁死配对：
+ * subscribeSession + getSubscriptionState 公共范围，零 vi.mock），在接口级锁死配对：
  *
  * 1. feed gap 消息序列 → 断言 reconcile 意图（reconcileFromSeq = 基线）+ gap 簿记
  *    配对（gap 写入 / 重复到达 drop / 基线递进时清理已覆盖条目、保留超前条目）

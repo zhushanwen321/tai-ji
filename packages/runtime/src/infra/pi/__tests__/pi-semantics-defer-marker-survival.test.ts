@@ -50,7 +50,7 @@ const SKIP_REASON = CODING_AGENT_DIST && AGENT_CORE_DIST && REPO_ROOT
 if (SKIP_REASON) console.warn(`[pi-semantics] skip：${SKIP_REASON}`)
 
 // dist 不可达时 skip（describe.skipIf 命中时 vitest 仍执行工厂体——读取必须在模块级
-// 三元守卫内完成，不能放 describe 体，否则收集期抛错而非 skip）
+// 三元检查内完成，不能放 describe 体，否则收集期抛错而非 skip）
 const AGENT_SESSION_SRC = CODING_AGENT_DIST ? readFileSync(join(CODING_AGENT_DIST, 'core', 'agent-session.js'), 'utf-8') : ''
 const AGENT_CORE_SRC = AGENT_CORE_DIST ? readFileSync(join(AGENT_CORE_DIST, 'agent.js'), 'utf-8') : ''
 const AGENT_LOOP_SRC = AGENT_CORE_DIST ? readFileSync(join(AGENT_CORE_DIST, 'agent-loop.js'), 'utf-8') : ''
@@ -64,13 +64,13 @@ describe.skipIf(SKIP_REASON !== '')(
 
     it('pi-coding-agent prompt()：input hook 是全文唯一 transform 询问点（hasHandlers("input")/emitInput 各仅 1 处）', () => {
       // 唯一性 = steer/followUp/_queueSteer/_queueFollowUp 无 input hook 的结构性依据：
-      // transform 询问点不在任何 steer 侧函数中出现（steer 通路无改写面的静态证明）
+      // transform 询问点不在任何 steer 侧函数中出现（steer 通路无改写侧的静态证明）
       expect(agentSession.match(/hasHandlers\("input"\)/g), 'hasHandlers("input") 出现 >1 处——transform 询问面扩大，复核 PS-26 锚点').toHaveLength(1)
-      expect(agentSession.match(/\.emitInput\(/g), '.emitInput( 出现 >1 处——input 事件发射面扩大，复核 PS-26 锚点').toHaveLength(1)
+      expect(agentSession.match(/\.emitInput\(/g), '.emitInput( 出现 >1 处——input 事件发射侧扩大，复核 PS-26 锚点').toHaveLength(1)
     })
 
     it('pi-coding-agent prompt()：文本替换仅由 hook transform 结果驱动（非 transform 不改文本）', () => {
-      // pi 1.0.0：hook 拦截段从 prompt() 内联抽为独立方法 _runInputHandlers（守卫反转为早退，
+      // pi 1.0.0：hook 拦截段从 prompt() 内联抽为独立方法 _runInputHandlers（检查反转为早退，
       // handled → undefined 终止），transform 条件分支语义不变
       const hook = /async _runInputHandlers\(text, images, source, streamingBehavior\) \{\s*\n\s*if \(!this\._extensionRunner\.hasHandlers\("input"\)\) \{\s*\n\s*return \{ text, images \};\s*\n\s*\}\s*\n\s*const inputResult = await this\._extensionRunner\.emitInput\(/
         .exec(agentSession)
@@ -140,8 +140,8 @@ describe.skipIf(SKIP_REASON !== '')(
       expect(segmentDef, 'shared MSG_ID_UUID_SEGMENT 字面量提取失败——复核 packages/shared/src/message.ts').not.toBeNull()
       expect(tagMatchDef, 'extension TAG_MATCH 字面量提取失败——复核 msg-id-mapper/src/index.ts').not.toBeNull()
       // [MF-1-11] uuid 模式段手写体全仓单处：shared message.ts 只允许 MSG_ID_UUID_SEGMENT
-      // 一处（出现 2 次 = 三形态外又冒出手写体新病灶）；core/runtime 零残留（残留 =
-      // 派生器回退或新病灶）
+      // 一处（出现 2 次 = 三形态外又冒出手写体新问题点）；core/runtime 零残留（残留 =
+      // 派生器回退或新问题点）
       expect(sharedSrc.match(/\[0-9a-f\]\{8\}/g)?.length, 'shared message.ts uuid 模式段手写体超出 MSG_ID_UUID_SEGMENT 单点').toBe(1)
       expect(/\[0-9a-f\]\{8\}/.test(coreSrc), 'core apply-entry-convert 残留手写 uuid 模式段——D5-1 SSOT 回退').toBe(false)
       expect(/\[0-9a-f\]\{8\}/.test(rtSrc), 'runtime entry-tree-builder 残留手写 uuid 模式段——D5-1 SSOT 回退').toBe(false)

@@ -126,7 +126,7 @@ function modeHighlight(mode: PermissionMode): string {
  *  2. pickModelViaOverlay：TUI/RPC/headless 三模式分发。
  *  3. 写回：save(newConfig)。失败 → notify error。
  *
- * save 为普通函数参数（唯一真实变化轴：保存 + footer 重绘副作用）。
+ * save 为普通函数参数（唯一真实变化原因：保存 + footer 重绘副作用）。
  * ctx 用 ModelPickerContext 子集（mode + modelRegistry + ui.notify/custom/select）。
  */
 export async function handlePermissionModelCommand(
@@ -181,7 +181,7 @@ export async function handlePermissionModelCommand(
  *  2. ops 非空 → applyOps + saveConfig + notify。
  *  3. 空 → notify no changes。
  *
- * save 为普通函数参数（唯一真实变化轴：保存 + footer 重绘副作用，与同步路径 onSave 同款）。
+ * save 为普通函数参数（唯一真实变化原因：保存 + footer 重绘副作用，与同步路径 onSave 同款）。
  */
 export async function handlePermissionRuleCommand(
 	ctx: RuleEditorContext,

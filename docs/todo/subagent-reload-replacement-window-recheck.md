@@ -4,7 +4,7 @@
 
 ## 背景（现行机制）
 
-pi 在会话替换（newSession / fork / switchSession / reload）时把旧 runner 标记失效（pi 语义断言 PS-30，探针随 pi 版本门禁重验）；轮终收尾链的 fire-and-forget promise 抛错曾因 pi rpc 模式无未处理拒绝处理器升格为进程 exit 1。三段修复已落地：根源消窗口（SessionBaselines pi 绑定代际 + 作废句柄读面收 null）、通知/条目通道 best-effort 化（`isPiStaleCtxError` 分诊 + `bestEffortPiCall` 13 处）、轮终链断头 promise 消灭（`voidRoundFinalChain` 四处包装）。单测已锁窗口语义（session-baselines-pi-generation / best-effort-pi-call / conversation-continuation / chat-rounds-window-dispose 等测试锚点）。
+pi 在会话替换（newSession / fork / switchSession / reload）时把旧 runner 标记失效（pi 语义断言 PS-30，探针随 pi 版本门禁重验）；轮终收尾链的 fire-and-forget promise 抛错曾因 pi rpc 模式无未处理拒绝处理器升格为进程 exit 1。三段修复已落地：根源消窗口（SessionBaselines pi 绑定代际 + 作废句柄读侧收 null）、通知/条目通道 best-effort 化（`isPiStaleCtxError` 分诊 + `bestEffortPiCall` 13 处）、轮终链断头 promise 消灭（`voidRoundFinalChain` 四处包装）。单测已锁窗口语义（session-baselines-pi-generation / best-effort-pi-call / conversation-continuation / chat-rounds-window-dispose 等测试锚点）。
 
 ## 待做
 

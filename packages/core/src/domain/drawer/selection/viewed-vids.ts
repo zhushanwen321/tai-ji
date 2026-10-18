@@ -33,9 +33,9 @@ export function bindViewedVidPanels(source: ViewedPanelsSource): void {
  * [D5 btw-question M3-a] 同源扩含 btw 线：drawer 开在 btw tab 且正在查看某线时，
  * 该线 vid 同样计入豁免（查看中不驱逐；btw 分区被驱逐时的派生键同驱归 M2-c）。
  *
- * 组合链（查询源钉死 panel 枚举，R2 S1）：逐 panel → focusedSessionId → 该 sid 的
+ * 组合链（查询源固定为 panel 枚举，R2 S1）：逐 panel → focusedSessionId → 该 sid 的
  * 复合谓词（isOpen ∧ activeTab ∈ {'subagent','btw'} ∧ 选中 id——唯一拼装点 =
- * selection/predicates.ts，与 btw-replay 触发面 / useBtwTabData 视口命中同源）。
+ * selection/predicates.ts，与 btw-replay 触发范围 / useBtwTabData 视口命中同源）。
  *
  * [禁止] drawer 分区全枚举：曾开过 drawer 的 session 焦点切走后分区保留，全枚举会把
  * 全部历史 agentcall 分区永久豁免，B9 对重度用户静默失效。分区读取经 updateFor

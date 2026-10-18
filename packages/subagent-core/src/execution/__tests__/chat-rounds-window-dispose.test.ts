@@ -3,7 +3,7 @@
 // [U3 pi-workflow-run-resource-model] chat 域窗口实例接线单测（impl-plan u3 验收；
 // fake client，不拉真实进程）：
 //   1. 轮 idle 后 pi 窗口实例 dispose（finalizeRoundToIdle 收尾追加——chat 域轮终
-//      唯一编排收口，成功/失败两分支同经此处）；
+//      唯一编排汇总点，成功/失败两分支同经此处）；
 //   2. revive 后 respawn 新实例 + resume 续写（断言新实例登记 + 续写 run 请求携带
 //      resume 锚点——session 文件冷续写锚；实例层 respawn 与锚层续写并存不互斥）；
 //   3. shared-service 引擎（缺省网关判定）解析透传 registry 单例、轮 idle 不误杀
@@ -149,8 +149,8 @@ function makeRunningRecord(id: string): ExecutionRecord {
   return record;
 }
 
-/** ChatRounds 直构（stdout-wedge 单测同款；本测试触达面补齐 store/pool/通知面）。
- *  overrides = 逐成员覆盖注入面（[§1.4 (a)] 等待排序用例消费）。 */
+/** ChatRounds 直构（stdout-wedge 单测同款；本测试触达面补齐 store/pool/通知侧）。
+ *  overrides = 逐成员覆盖注入点（[§1.4 (a)] 等待排序用例消费）。 */
 function makeChatRounds(record: ExecutionRecord, overrides: Partial<ChatRoundsDeps> = {}): ChatRounds {
   const store = {
     // 轮终簿记的最小语义 mimic：翻 idle + round+1（revive 资格判定依赖 status 翻边）。
@@ -278,7 +278,7 @@ describe("chat 轮窗口实例接线（U3）", () => {
     expect(sharedPort.disposed).toBe(0);
   });
 
-  it("引擎身份域损坏守卫：record 带原生引擎锚却无 engine 字段 → 显式抛错（不按 pi 判定/派发）", () => {
+  it("引擎身份域损坏检查：record 带原生引擎锚却无 engine 字段 → 显式抛错（不按 pi 判定/派发）", () => {
     registerEngine("pi", () => new FakeWindowEnginePort("pi-registry"));
     const record = makeRunningRecord("u3-win-corrupt-engine");
     // 原生引擎锚在场（zcode 形态）但没有 engine 字段 = 写侧身份域丢失
@@ -327,7 +327,7 @@ describe("[§1.4 (a)] 轮终收尾句柄就绪等待（finalizeRoundToIdle × wa
     await Promise.resolve();
     await Promise.resolve();
     expect(waitForPiReady).toHaveBeenCalledTimes(1);
-    // 等待期间：FinalizeDeps 组装未开始（pi 读取 = 簿记写面入口，未触达）。
+    // 等待期间：FinalizeDeps 组装未开始（pi 读取 = 簿记写侧入口，未触达）。
     expect(getPi).not.toHaveBeenCalled();
 
     resolveWait!(newPi);

@@ -29,7 +29,7 @@ export type ContainerId = 'right-drawer' | 'bottom-drawer' | 'overlay'
 /** 容器注册表条目（§7.2：内容类型 + 图标标识字符串 + 标签/空态文案的 i18n key）。
  * 泛型按容器实例化：RIGHT_DRAWER_REGISTRY = <RightDrawerTab>（编译层锁终态 8 员）；
  * 底抽屉/浮层条目持全集类型（各容器条目数 1/2 由单测锚定，§7.2 声明即终态）。 */
-export interface ContainerRegistryEntry<C extends ContainerContentType = ContainerContentType> { // oe-exempt:20261003:framework:类型契约先行——容器契约层声明，D1 下游单元即为消费面
+export interface ContainerRegistryEntry<C extends ContainerContentType = ContainerContentType> { // oe-exempt:20261003:framework:类型契约先行——容器契约层声明，D1 下游单元即为消费方
   /** 内容类型（tab/内容标识；泛型参数 C 精确到容器承接的内容类型） */
   content: C
   /** §7.2 条目文本逐字锚（含内容类型前缀，如 'git（变更集）'）——与设计文档逐字对账，禁止改写 */

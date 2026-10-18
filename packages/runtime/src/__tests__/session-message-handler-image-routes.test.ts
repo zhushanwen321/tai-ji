@@ -7,8 +7,8 @@
  * - 失败 → sendError（write_image_failed / migrate_image_failed / write_segments_failed）
  *   带 msg.id + payload.sessionId（缺失 sessionId 的消息前端忽略，见 AGENTS.md 规则 7）
  *
- * 安全守卫本身（20MB 上限 / mimeType image/* / name sanitize 防目录穿越 / fromPath 白名单 /
- * segments.json 原子写）在 test/session-service.test.ts「业务持久化写安全守卫」覆盖，
+ * 安全检查本身（20MB 上限 / mimeType image/* / name sanitize 防目录穿越 / fromPath 白名单 /
+ * segments.json 原子写）在 test/session-service.test.ts「业务持久化写安全检查」覆盖，
  * 本文件只测 WS 路由分支（reply/error 分叉）。
  *
  * mock 模式参考 src/__tests__/session-message-handler-bash.test.ts（makeHandler + Captured reply/error）。

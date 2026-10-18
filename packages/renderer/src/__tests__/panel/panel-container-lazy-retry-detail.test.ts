@@ -59,7 +59,7 @@ vi.mock('@/components/panel/TerminalView.vue', () => {
 })
 
 // ── 静态重面板 + 壳层组件 vi.mock（import 期替换，砍掉 PanelContainer 整图 transform；本文件
-// 只开 detail/terminal tab，以下占位组件均无断言观测面，形态对齐 drawer-mode 测试。
+// 只开 detail/terminal tab，以下占位组件均无断言观测范围，形态对齐 drawer-mode 测试。
 // 来自 @taiji/ui/extension-host，mock 路径须与 PanelContainer 的 import 说明符一致）──
 vi.mock('@/components/panel/GitPanel.vue', () => ({
   default: { name: 'GitPanel', template: '<div data-testid="git-panel" />' },
@@ -128,7 +128,7 @@ vi.mock('@/stores/chat', () => ({
 chatMock.registerReader((sid) => reactiveMessages.get(sid) ?? [])
 
 async function mountContainer() {
-  // 动态 import 让 vi.mock 先生效；不 mock/stub DetailPane/TerminalView 的渲染面（本测试的被测对象，
+  // 动态 import 让 vi.mock 先生效；不 mock/stub DetailPane/TerminalView 的渲染范围（本测试的被测对象，
   // 两者的 vi.mock 工厂在文件头控制失败/成功）
   const PanelContainer = (await import('@/components/workspace/PanelContainer.vue')).default
   return mount(PanelContainer)

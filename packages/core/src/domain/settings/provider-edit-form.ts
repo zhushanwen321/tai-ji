@@ -8,7 +8,7 @@
  * → transport.setProvider）+ **D8 广播并发对齐的调用点**（规则纯核 = provider-edit-reconcile.ts，
  * deep watch 退化为 reconcileBroadcast 的一个调用点）。
  *
- * 接口即测试面（interface is the test surface）：行为矩阵见 provider-edit-form.test.ts
+ * 接口即测试入口（interface is the test surface）：行为矩阵见 provider-edit-form.test.ts
  * （并发对齐规则本体在 provider-edit-reconcile.test.ts 纯核矩阵）。
  */
 import { ref, reactive, computed, watch, type Ref, type ComputedRef } from 'vue'
@@ -138,7 +138,7 @@ export interface ProviderEditFormModule {
   readonly saving: Ref<boolean>
   /**
    * 动作错误（保存/测试/发现/模型 CRUD 失败时显示在底栏，非静默吞）。
-   * MF-1-7：对外是只露 message 的投影（空串 = 无错误）；写入走 setActionError（带来源
+   * MF-1-7：对外是只露 message 的派生视图（空串 = 无错误）；写入走 setActionError（带来源
    * 标签），headers 来源错误的自动清除按 source 判定——不比对展示文案，locale 切换安全。
    */
   readonly actionError: ComputedRef<string>
@@ -213,7 +213,7 @@ export function createProviderEditForm(input: ProviderEditFormInputs): ProviderE
    */
   let revealEpoch = 0
   const saving = ref(false)
-  // 动作错误内部态（MF-1-7：带来源标签）；对外只投影 message（下方 actionError computed）
+  // 动作错误内部态（MF-1-7：带来源标签）；对外只呈现 message（下方 actionError computed）
   const actionErrorState = ref<ActionErrorState | null>(null)
   const actionError = computed<string>(() => actionErrorState.value?.message ?? '')
   const snapshot = ref<FormSnapshot | null>(null)
@@ -309,7 +309,7 @@ export function createProviderEditForm(input: ProviderEditFormInputs): ProviderE
   /**
    * 保存前校验：返回错误文案，null = 通过。
    * - D15b：供应商名称必填
-   * - B-1 形态切换守卫：oauth → api_key 切换后必须提供新 key——确认弹窗承诺「退出 OAuth
+   * - B-1 形态切换检查：oauth → api_key 切换后必须提供新 key——确认弹窗承诺「退出 OAuth
    *   登录」，空 key 保存会让 auth.json OAuth 凭证残留（catalog 的覆写只发生在携带 apiKey 时）
    */
   function validateBeforeSave(): string | null {
@@ -324,11 +324,11 @@ export function createProviderEditForm(input: ProviderEditFormInputs): ProviderE
   /**
    * setProvider 载荷构造（防线①：catalog / custom 的 provider 级字段分体系）。
    * isCatalog / baseUrl 由调用方先算后传（保持原求值时点）；条件键各自按 isCatalog 与 truthy
-   * 守卫决定带不带键。
+   * 检查决定带不带键。
    */
   function buildSetProviderPayload(isCatalog: boolean, baseUrl: string): SetProviderData {
     return {
-      // 防线①：custom 空串 name 不带键（truthy 守卫，对齐 use-quick-setup-form 既有先例）；
+      // 防线①：custom 空串 name 不带键（truthy 检查，对齐 use-quick-setup-form 既有先例）；
       // catalog 的 name 是 provider 展示名（正常态非空），保持回传。
       ...(isCatalog || draft.name.trim() ? { name: draft.name } : {}),
       // 防线①：catalog 不带 type 键——协议是模型级属性，provider 级 api 对 catalog 无用户语义

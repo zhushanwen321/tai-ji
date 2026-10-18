@@ -91,10 +91,10 @@ export function runCreated(opts: {
   runId: string;
   workflowName?: string;
   scriptSource: string;
-  /** run-created 帧的 scriptPath 锚定载荷（生产写面 dispatchRunCreated 随帧落；缺省 = 旧格式帧）。 */
+  /** run-created 帧的 scriptPath 锚定载荷（生产写侧 dispatchRunCreated 随帧落；缺省 = 旧格式帧）。 */
   scriptPath?: string;
   argsSummary?: string;
-  /** run-created 帧的 args 全文（设计 §3.1 载荷表——生产写面 dispatchRunCreated 随帧落）。 */
+  /** run-created 帧的 args 全文（设计 §3.1 载荷表——生产写侧 dispatchRunCreated 随帧落）。 */
   args?: Record<string, unknown>;
   model?: string;
 }): WorkflowRunEvent {

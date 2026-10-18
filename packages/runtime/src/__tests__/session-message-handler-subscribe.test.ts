@@ -6,7 +6,7 @@
  *   snapshot 只含 stream（3 条）、stateSnapshot 含 5 个 state last-value、lastSeq=8
  *   （R-03 探针：state 类不入 ring 不产生假最旧 seq，混合 session 不误报 gap）
  * - TC2: ring 溢出（容量 3，publish 4 条 stream）→ fromSeq=1 早于最旧 seq 2 → gap=true，
- *   snapshot 不做增量过滤（全量 3 条，renderer 全量重拉）
+ *   snapshot 不做增量过滤（全量 3 条，renderer 全量重新拉取）
  * - TC3: fromSeq 落在 ring 覆盖范围内 → gap=false，snapshot 增量过滤（seq > fromSeq）
  * - TC4: messageBus 未注入 → sendError('subscribe_unsupported')
  *
@@ -121,7 +121,7 @@ describe('SessionMessageHandler —— session.subscribe gap 判定（D5-3/R-03�
     }
     // fromSeq=1 < ring 最旧 seq=2 → 溢出缺口，gap=true
     expect(reply.gap).toBe(true)
-    // 全量回放路径：snapshot 未被 fromSeq 过滤（renderer 拿全量后自行全量重拉）
+    // 全量回放路径：snapshot 未被 fromSeq 过滤（renderer 拿全量后自行全量重新拉取）
     expect(reply.snapshot.map((m) => m.seq)).toEqual([2, 3, 4])
     expect(reply.lastSeq).toBe(4)
   })

@@ -253,7 +253,7 @@ describe("subagent tool contract [MANDATORY]", () => {
   });
 
   // sync 路径已删除（T2 Wave 0）。background 的 content JSON 只含 bgResponse
-  // （status/mode/message），不含 record 派生投影——投影发生在 notifier 注入的完成消息。
+  // （status/mode/message），不含 record 派生视图——派生视图发生在 notifier 注入的完成消息。
 });
 
 // ============================================================

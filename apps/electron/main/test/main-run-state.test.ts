@@ -76,7 +76,7 @@ vi.mock('../supervisor/runtime-supervisor.js', () => ({
   },
 }))
 
-/** 台账 writer 桩：捕获 append 调用（真 writer 的落盘行为由 logs/__tests__ 覆盖）。 */
+/** 登记清单 writer 桩：捕获 append 调用（真 writer 的落盘行为由 logs/__tests__ 覆盖）。 */
 const journalMock = vi.hoisted(() => ({ events: [] as CrashJournalEvent[] }))
 vi.mock('../logs/crash-journal.js', () => ({
   initCrashJournal: vi.fn(),
@@ -87,7 +87,7 @@ vi.mock('../logs/crash-journal.js', () => ({
 // 数据目录恒等桩：electron mock 的 isPackaged=true 会让 main.ts 打包分支执行
 // resolvePackagedDataDir 并把 TAIJI_AGENT_DATA_DIR 钉回 ~/.taiji——globalSetup 钉的
 // tmp 目录被改写后，run-state 产物全部落进真实 prod 数据目录。本文件被测对象是
-// run-state marker/checkpoint 设施，数据目录钉死契约由 packaged-data-dir.test.ts
+// run-state marker/checkpoint 设施，数据目录固定契约由 packaged-data-dir.test.ts
 // （行为矩阵）与 main-dev-datadir-pin.test.ts（接线钉）守护，此处恒等透传 env 值。
 vi.mock('../utils/packaged-data-dir.js', () => ({
   resolvePackagedDataDir: (env: NodeJS.ProcessEnv) => env.TAIJI_AGENT_DATA_DIR ?? '',
@@ -121,7 +121,7 @@ const markerPath = join(runDir, 'main-running.marker')
 const checkpointPath = join(runDir, 'runtime-checkpoint.json')
 const FAILED_PREFIX = 'runtime-checkpoint-failed-'
 
-/** 本文件 import 真 main.ts 的最后一个模块实例（导出函数消费面）。 */
+/** 本文件 import 真 main.ts 的最后一个模块实例（导出函数消费方）。 */
 type MainModule = typeof import('../main.js')
 
 async function importMain(): Promise<MainModule> {
@@ -215,7 +215,7 @@ describe('marker 生命周期（D1 main 自身 crash 行）', () => {
 
     expect(existsSync(paths.markerPath)).toBe(true)
     expect(readFileSync(paths.markerPath, 'utf8').split('\n')[0]).toBe(String(process.pid))
-    expect(journalMock.events).toEqual([]) // 首启无残留：零台账行
+    expect(journalMock.events).toEqual([]) // 首启无残留：零登记清单行
   })
 
   it('正常清（will-quit）：marker 删除', async () => {
@@ -315,7 +315,7 @@ describe('checkpoint 冷启动可信度 + 残留隔离（D3）', () => {
 
 // ── 删除属主时序（before-quit 成功段 / killed 短路）─────────────────
 
-describe('checkpoint 删除属主时序（D3 删除实现语义钉死）', () => {
+describe('checkpoint 删除属主时序（D3 删除实现语义固定）', () => {
   it('成功段：stop() resolve 且 child 在场 → 删除 checkpoint', async () => {
     await importMain()
     writeFileSync(checkpointPath, '{}', 'utf8')

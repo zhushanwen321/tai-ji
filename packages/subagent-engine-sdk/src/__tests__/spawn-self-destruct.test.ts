@@ -2,7 +2,7 @@
 //
 // spawnEngineChild 形态断言（R9-4②：子进程 stdin 恒为自有 pipe，绝不继承引擎
 // stdin fd）+ armEngineSelfDestruct 判据矩阵（主判据 stdio EOF / 辅助判据未 ack
-// 计时超时 / 排除面 = 已 ack 与已终结请求）。自灭执行一律注入 killSelf fake，
+// 计时超时 / 排除情形 = 已 ack 与已终结请求）。自灭执行一律注入 killSelf fake，
 // 绝不触达缺省的 process.kill（测试红线）。
 
 import type { ChildProcess } from "node:child_process";
@@ -31,7 +31,7 @@ describe("spawnEngineChild", () => {
     spawned = null;
   });
 
-  it("形态键（detached/stdio/stdin/windowsHide）出现即抛错——不暴露硬编码契约面", () => {
+  it("形态键（detached/stdio/stdin/windowsHide）出现即抛错——不暴露硬编码契约范围", () => {
     const env = buildEngineChildEnv({}, { dataDir: "/d" });
     expect(() => spawnEngineChild({ command: "x", args: [], env, detached: true } as never))
       .toThrow(/detached/);
@@ -47,7 +47,7 @@ describe("spawnEngineChild", () => {
     // 毫秒级（node -e 载荷是完整 Node 启动，满载下墙钟成本高且无谓）。probe 从
     // 子进程侧断言 stdin 是流式 IPC 端点（-S socket 或 -p FIFO——libuv 'pipe'
     // stdio 在 macOS 走 socketpair、Linux 走 pipe2，两者都是 'pipe' 形态本体；
-    // 排除 TTY/文件），/bin/cat 回环验证数据面通路 + EOF 自然退出（与自灭主判据
+    // 排除 TTY/文件），/bin/cat 回环验证数据范围通路 + EOF 自然退出（与自灭主判据
     // 同源的 EOF 语义）。buildEngineChildEnv 是净化面（无 PATH），一律绝对路径。
     // Windows 无原生端点探测，回落 node -e 原样回显（契约由父侧 fd 断言 + 回环
     // 覆盖）。
@@ -245,7 +245,7 @@ describe("armEngineSelfDestruct", () => {
     expect(kill).toHaveBeenCalledTimes(1);
   });
 
-  it("排除面：已 ack 的 host/askUser / executeAndAwait 不计时（R9-2）", () => {
+  it("排除情形：已 ack 的 host/askUser / executeAndAwait 不计时（R9-2）", () => {
     const stdin = fakeStdin();
     const kill = vi.fn();
     const clock = armEngineSelfDestruct({ stdin, killSelf: kill, timeoutEnv: {} });
@@ -255,7 +255,7 @@ describe("armEngineSelfDestruct", () => {
     expect(kill).not.toHaveBeenCalled();
   });
 
-  it("排除面：已终结（settled）请求不计时", () => {
+  it("排除情形：已终结（settled）请求不计时", () => {
     const stdin = fakeStdin();
     const kill = vi.fn();
     const clock = armEngineSelfDestruct({ stdin, killSelf: kill, timeoutEnv: {} });
@@ -302,7 +302,7 @@ describe("armEngineSelfDestruct", () => {
     expect(kill2).toHaveBeenCalledTimes(1);
   });
 
-  it("dispose：正常 shutdown 卸载守卫（EOF 与计时均不再触发）", () => {
+  it("dispose：正常 shutdown 卸载检查（EOF 与计时均不再触发）", () => {
     const stdin = fakeStdin();
     const kill = vi.fn();
     const clock = armEngineSelfDestruct({ stdin, killSelf: kill, timeoutEnv: {} });
@@ -315,7 +315,7 @@ describe("armEngineSelfDestruct", () => {
     clock.dispose();
   });
 
-  it("自灭后 started 不再进入计时面", () => {
+  it("自灭后 started 不再进入计时侧", () => {
     const stdin = fakeStdin();
     const kill = vi.fn();
     const clock = armEngineSelfDestruct({ stdin, killSelf: kill, timeoutEnv: {} });

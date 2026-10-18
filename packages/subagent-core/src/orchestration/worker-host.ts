@@ -77,7 +77,7 @@ export class WorkerHostImpl implements WorkerHost {
 
     const handle = new WorkerHandle(worker);
 
-    // 绑定事件——WorkerHandle 内部用 isCurrent 守卫，terminate 后回调 no-op（G-025）。
+    // 绑定事件——WorkerHandle 内部用 isCurrent 检查，terminate 后回调 no-op（G-025）。
     // handlers 的 onMessage/onError/onExit 都是 async，这里 void 掉 promise（worker 事件
     // 不能 await，且 handler 内部错误由 lifecycle 统一捕获）。
     handle.onMessage((raw) => {
@@ -89,7 +89,7 @@ export class WorkerHostImpl implements WorkerHost {
     handle.onExit((code) => {
       // C.3 修复：传 handle 给 onExit，调用方用 handle.isCurrent 做竞态防护。
       // 注意：此时 handle.isCurrent 仍为 true（onExit 回调仅在 isCurrent 时触发，
-      // WorkerHandle 的内部守卫已过滤掉 terminate 后的 stale exit）。
+      // WorkerHandle 的内部检查已过滤掉 terminate 后的 stale exit）。
       void handlers.onExit(code, handle);
     });
 

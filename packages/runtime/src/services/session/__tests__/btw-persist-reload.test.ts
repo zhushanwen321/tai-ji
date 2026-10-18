@@ -92,7 +92,7 @@ describe('启动孤儿补账（D5：主会话已不存在的线目录清理；�
   })
 
   it('[BU5] 扫描降级（本轮 sessions 扫描不可信）→ 补账整轮跳过、零删除，改下次启动重试', () => {
-    // 降级表现：readdir EACCES/IO → 扫描腿显式返回空列表 → 冷主会话解析全部落空
+    // 降级表现：readdir EACCES/IO → 扫描路径显式返回空列表 → 冷主会话解析全部落空
     h.deps.resolveMainSessionFile = vi.fn(() => undefined)
     h.deps.isSessionScanDegraded = vi.fn(() => true)
     const orphanA = seedThreadDir('main-missing-d3', 'linepi-d3')

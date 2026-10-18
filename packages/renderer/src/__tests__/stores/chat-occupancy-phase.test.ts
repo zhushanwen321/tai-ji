@@ -1,11 +1,11 @@
 /**
- * chat store occupancy 投影测试（session-occupancy u5b / D1，验收①）。
+ * chat store occupancy 派生视图测试（session-occupancy u5b / D1，验收①）。
  *
  * 锁定：runtime session.occupancy state topic 帧（live 广播 + subscribeSession 的
  * stateSnapshot 回放共用 useChat.ensureStreamSubscription 的同一 handler 通路）驱动
- * chat store 的 sessionPhase 投影：
+ * chat store 的 sessionPhase 派生视图：
  * - turn 四态帧序列 → sessionPhase/isCompacting（compacting 维度派生）跟随
- * - 快照恢复（重连 resubscribeAll / 切回 session 的 stateSnapshot 回放）→ 投影收敛到帧值
+ * - 快照恢复（重连 resubscribeAll / 切回 session 的 stateSnapshot 回放）→ 派生视图收敛到帧值
  * - setCompacting 双轨通路无残留引用（grep 断言，验收⑥）
  *
  * 回放等价性说明：stateSnapshot 回放经 core routeInbound FALLBACK → dispatchSession →
@@ -70,8 +70,8 @@ function occupancyMsg(sessionId: string, turn: 'idle' | 'dispatching' | 'generat
   return { type: 'session.occupancy', payload: { sessionId, turn, compacting, bash } } as ServerMessage
 }
 
-describe('session.occupancy 帧 → sessionPhase 投影（D1）', () => {
-  it('turn 四态帧序列：dispatching → generating → settling → idle，投影逐步跟随', async () => {
+describe('session.occupancy 帧 → sessionPhase 派生视图（D1）', () => {
+  it('turn 四态帧序列：dispatching → generating → settling → idle，派生视图逐步跟随', async () => {
     const chat = useChatStore()
     await subscribe('o1')
 
@@ -82,7 +82,7 @@ describe('session.occupancy 帧 → sessionPhase 投影（D1）', () => {
     streamCbHolder.current!(occupancyMsg('o1', 'generating', false, false))
     expect(chat.sessionPhase('o1').turn).toBe('generating')
 
-    // settling（D6：收尾不是活跃 turn——投影必须能表达，分发器据此 defer）
+    // settling（D6：收尾不是活跃 turn——派生视图必须能表达，分发器据此 defer）
     streamCbHolder.current!(occupancyMsg('o1', 'settling', false, false))
     expect(chat.sessionPhase('o1').turn).toBe('settling')
 
@@ -101,7 +101,7 @@ describe('session.occupancy 帧 → sessionPhase 投影（D1）', () => {
     expect(chat.isCompacting('o2')).toBe(true)
     expect(chat.sessionPhase('o2')).toEqual({ turn: 'idle', compacting: true, bash: false })
 
-    // threshold 形态：generating + compacting 并存（D6 行 3 的投影前提）
+    // threshold 形态：generating + compacting 并存（D6 行 3 的派生视图前提）
     streamCbHolder.current!(occupancyMsg('o2', 'generating', true, false))
     expect(chat.isCompacting('o2')).toBe(true)
     expect(chat.sessionPhase('o2').turn).toBe('generating')
@@ -146,21 +146,21 @@ describe('occupancy 快照恢复（G4：重连 resubscribeAll / 切回 session�
     await subscribe('r1')
 
     // 重连/切回后 subscribe 的 stateSnapshot 回放最后一帧 occupancy{compacting:true}
-    //（last-value 快照）——handler 与 live 同通路，投影收敛到帧值。
+    //（last-value 快照）——handler 与 live 同通路，派生视图收敛到帧值。
     streamCbHolder.current!(occupancyMsg('r1', 'idle', true, false))
     expect(chat.isCompacting('r1')).toBe(true)
     expect(chat.sessionPhase('r1')).toEqual({ turn: 'idle', compacting: true, bash: false })
   })
 
-  it('重连快照回放 settle：占用中断连后回放 idle 帧 → 投影复位 + 空记录回落全 idle 缺省', async () => {
+  it('重连快照回放 settle：占用中断连后回放 idle 帧 → 派生视图复位 + 空记录回落全 idle 缺省', async () => {
     const chat = useChatStore()
     await subscribe('r2')
 
-    // 占用投影（断连前最后已知态）
+    // 占用派生视图（断连前最后已知态）
     streamCbHolder.current!(occupancyMsg('r2', 'generating', true, false))
     expect(chat.isCompacting('r2')).toBe(true)
 
-    // 重连回放：pi 已收口，stateSnapshot 的 last-value 是 idle
+    // 重连回放：pi 已收尾，stateSnapshot 的 last-value 是 idle
     streamCbHolder.current!(occupancyMsg('r2', 'idle', false, false))
     expect(chat.isCompacting('r2')).toBe(false)
     expect(chat.sessionPhase('r2')).toEqual({ turn: 'idle', compacting: false, bash: false })
@@ -170,11 +170,11 @@ describe('occupancy 快照恢复（G4：重连 resubscribeAll / 切回 session�
 describe('occupancy 帧不再触发投递（[u3c] renderer 侧投递时机职责已退役）', () => {
   /**
    * [u3c 退役] 前身「occupancy idle × defer 队列非空 → flush 触发」用例随 defer 队列整体退役
-   * （设计 §3.1 删除面）：投递时机由 runtime 内核驱动（occupancy 边沿是内核 lane 再判定触发源），
-   * renderer 不再持队列、不再触发 flush。本用例改为锁定「occupancy 帧只写投影、不产生任何提交
-   * RPC」——旧触发腿不存在，正交确认其不复活。
+   * （设计 §3.1 删除范围）：投递时机由 runtime 内核驱动（occupancy 边沿是内核 lane 再判定触发源），
+   * renderer 不再持队列、不再触发 flush。本用例改为锁定「occupancy 帧只写派生视图、不产生任何提交
+   * RPC」——旧触发路径不存在，正交确认其不复活。
    */
-  it('occupancy 帧序列（settling/idle+bash/idle）→ 零提交 RPC，投影照常跟随', async () => {
+  it('occupancy 帧序列（settling/idle+bash/idle）→ 零提交 RPC，派生视图照常跟随', async () => {
     const chat = useChatStore()
     await subscribe('f1')
     sendMock.mockClear()
@@ -188,14 +188,14 @@ describe('occupancy 帧不再触发投递（[u3c] renderer 侧投递时机职责
     // 「延迟提交」实现会假绿——flushPromises 排空后「零提交 RPC」才成立
     await flushPromises()
 
-    // 投影跟随（帧驱动）而零提交 RPC：投递时机不在 renderer
+    // 派生视图跟随（帧驱动）而零提交 RPC：投递时机不在 renderer
     expect(chat.sessionPhase('f1')).toEqual({ turn: 'idle', compacting: false, bash: false })
     expect(sendMock).not.toHaveBeenCalled()
   })
 })
 
 describe('setCompacting 双轨通路无残留（验收⑥，grep 断言）', () => {
-  it('renderer + core 生产源码零 `.setCompacting(` 调用（通路废弃，u5b 收口）', () => {
+  it('renderer + core 生产源码零 `.setCompacting(` 调用（通路废弃，u5b 收尾）', () => {
     const roots = [
       join(__dirname, '../../composables'),
       join(__dirname, '../../components'),

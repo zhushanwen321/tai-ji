@@ -46,7 +46,7 @@ export interface ActivatePlanModeOutcome {
  *   tool result content 直返（对本次 tool 调用的直接响应，agent 同轮即见——不赌 steer 排队）。
  * - flag 解析 / 模板文件读取 / 技能名归一：命令层与 tool 层各自的入参形态不同，前置已完成。
  *
- * 副作用顺序钉死：状态字段 → persistPlanState（entry 落盘）→ updatePlanWidget →
+ * 副作用顺序固定：状态字段 → persistPlanState（entry 落盘）→ updatePlanWidget →
  * setActiveTools → 构造 prompt。persist 先于工具收拢，保证「已持久 isActive 但工具未收」
  * 的半进入态不可达（崩溃窗口内重开 session 经 entry 恢复 isActive，session_start hook
  * 会补 setActiveTools）。生命周期写唯一通道 = applyPlanEvent('enter')（D1：idle|终态

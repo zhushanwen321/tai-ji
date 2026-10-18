@@ -1,5 +1,5 @@
 /**
- * BtwPanel 契约反向断言（btw-question D9⑤，UI 不可见面守卫）。
+ * BtwPanel 契约反向断言（btw-question D9⑤，UI 不可见性检查）。
  *
  * D9⑤：BTW_BEHAVIOR_CONTRACT 是 model-only 单条注入（spawn `--append-system-prompt`），
  * 明确「不进对话流渲染」。本测试从契约源文件正则提取字面量为常量 A，渲染含普通消息 /
@@ -10,7 +10,7 @@
  * - 构建者（白盒）：A 从源文件 readFileSync + 正则提取（防提取静默失败：A 非空 +
  *   含 D9⑤ 稳定关键词，兼作「A ≡ 源当前内容」的防漂移锚——提取自源本身天然逐字一致）
  * - 使用者（黑盒 DOM）：含普通消息/表单 fixture 的面板渲染文本不含契约任一句
- * - 观察者（形态）：fixture 文本本身可见（证明断言跑在非空渲染面上，防空壳漏判）
+ * - 观察者（形态）：fixture 文本本身可见（证明断言跑在非空渲染范围上，防空壳漏判）
  *
  * mock 策略：复用 btw-panel.test.ts 范式——vi.mock('@/api') 局部替换 btw 域；
  * MessageStream / Composer stub 渲染普通消息 / 表单 fixture 文本（非空 div），
@@ -139,7 +139,7 @@ describe('D9⑤ 契约提取自源（构建者白盒 + 防漂移锚）', () => {
   it('A 非空且含 D9⑤ 稳定关键词（提取未静默失败；A 即源当前内容，逐字一致成立）', () => {
     expect(A.length).toBeGreaterThan(0)
     for (const key of D9_KEYS) expect(A).toContain(key)
-    // 句切分产出多句（反向断言的输入面有效）
+    // 句切分产出多句（反向断言的输入范围有效）
     expect(contractSentences(A).length).toBeGreaterThanOrEqual(2)
   })
 })
@@ -150,7 +150,7 @@ describe('BtwPanel 契约 UI 反向断言（使用者黑盒 DOM + 观察者形�
     const wrapper = mountPanel(MAIN_A)
     await settle(wrapper)
 
-    // 观察者：fixture 面可见（防空壳——断言必须跑在非空渲染面上）
+    // 观察者：fixture 面可见（防空壳——断言必须跑在非空渲染范围上）
     const dom = wrapper.text()
     // 注意：不用 data-testid——父组件透传的 data-testid 会覆盖 stub 自有值（同 btw-panel.test.ts 落点）
     expect(wrapper.find('[data-fixture="stream"]').exists()).toBe(true)

@@ -25,12 +25,12 @@ function readSrc(relPath: string): string {
 describe("M4: [H2 W3] dispatchAgentCall 不再写 node.live", () => {
   const src = readSrc(join("src", "orchestration", "worker-message-pump.ts"));
 
-  it("整个 pump 源码无 .live 写点（旁路 record 族退役），stale guard 仍在", () => {
+  it("整个 pump 源码无 .live 写点（旁路 record 族退役），stale 检查仍在", () => {
     expect(src).not.toMatch(/\.live\s*=/);
-    // .then 的 stale guard 仍在（原顺序断言的对象消失，守卫本身保留）
+    // .then 的 stale 检查仍在（原顺序断言的对象消失，检查本身保留）
     const thenMatch = src.match(/\.then\(\(\)\s*=>\s*\{[\s\S]*?\}\)/);
     expect(thenMatch).toBeTruthy();
-    // [W2/V1] stale guard 判据换源（两态机 status recheck → isRunSettled 注册表判定）
+    // [W2/V1] stale 检查判据换源（两态机 status recheck → isRunSettled 注册表判定）
     expect(thenMatch![0]).toContain("isRunSettled(run)");
   });
 });
@@ -40,7 +40,7 @@ describe("M4: [H2 W3] dispatchAgentCall 不再写 node.live", () => {
 describe("M7: handleWorkerMessage validates msg before dereferencing", () => {
   const src = readSrc(join("src", "orchestration", "worker-message-pump.ts"));
 
-  it("handleWorkerMessage has shape guard for msg before dereferencing opts", () => {
+  it("handleWorkerMessage has shape check for msg before dereferencing opts", () => {
     // handleWorkerMessage 中 `raw as WorkerMsg` 后应有 typeof/形状校验
     // 防止畸形 IPC 消息（msg.opts undefined）导致 TypeError
     const handlerMatch = src.match(/export async function handleWorkerMessage[\s\S]*?switch/);
@@ -57,9 +57,9 @@ describe("M8: session-reconstructor guards msg.content with Array.isArray", () =
   const src = readSrc(join("src", "execution", "persistence", "session-reconstructor.ts"));
 
   it("for...of msg.content is guarded by Array.isArray", () => {
-    // 验证 for (const block of msg.content) 前有 Array.isArray 守卫
+    // 验证 for (const block of msg.content) 前有 Array.isArray 检查
     expect(src).toContain("Array.isArray");
-    // 确保守卫与 msg.content 相关
+    // 确保检查与 msg.content 相关
     const contentGuardMatch = src.match(/Array\.isArray\([^)]*content[^)]*\)/);
     expect(contentGuardMatch).toBeTruthy();
   });

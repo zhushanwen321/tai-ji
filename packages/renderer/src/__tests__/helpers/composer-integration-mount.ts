@@ -36,7 +36,7 @@ function composerIntegrationApiModule() {
   }
 }
 
-/** '@/composables/features/new-task/useNewTaskFlow' mock 工厂（集成 4 键窄面，resetNewTaskFlow 超集）。 */
+/** '@/composables/features/new-task/useNewTaskFlow' mock 工厂（集成 4 键窄接口，resetNewTaskFlow 超集）。 */
 function composerIntegrationFlowModule() {
   return {
     useNewTaskFlow: () => ({

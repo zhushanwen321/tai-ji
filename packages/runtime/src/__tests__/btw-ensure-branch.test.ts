@@ -4,12 +4,12 @@
  * 锁定语义：
  * - btw vid + 已注入 BtwService → 转 ensureProcess（自建附着编排：alive → markActivity
  *   直返 / 回收死亡 → spawn→switch→附着断言 reattach，D1⑥/V5），分支先于既有
- *   pm.getClient / restore 链（restore 腿 findScannedSession 只扫 sessions/，对 btw vid
+ *   pm.getClient / restore 链（restore 路径 findScannedSession 只扫 sessions/，对 btw vid
  *   构造性失败——V5 核实结论）；
  * - 非 btw sid + 已注入 → 分支不命中，既有链零变更；
  * - btw vid + 未注入 BtwService（存量测试构造）→ fall through 零变更；
  * - 附着失败 BtwError 原样上抛（code 保留）——message.send 路径由
- *   dispatcher.ensureActiveOrBroadcast 收口 message.error（错误文案带恢复指引）。
+ *   dispatcher.ensureActiveOrBroadcast 统一处理 message.error（错误文案带恢复指引）。
  *
  * 构造模式：session-service-ensure-active.test.ts 的 makeEnv 轻量桩（mock pm/broker/
  * adapterFactory，未被测路径的依赖给最小桩）。
@@ -96,7 +96,7 @@ describe('SessionService.ensureActive · btw 分支（B3 裁决，M2-b）', () =
     expect(getClient).toHaveBeenCalledWith(VID)
   })
 
-  it('附着失败：BtwError 原样上抛且 code 保留（message.error 收口链的输入契约）', async () => {
+  it('附着失败：BtwError 原样上抛且 code 保留（message.error 收尾链的输入契约）', async () => {
     const ensureProcess = vi.fn(async () => {
       throw new BtwError('thread_file_missing', `[btw] thread session file missing (line had never flushed): /x/${VID}`)
     })

@@ -86,7 +86,7 @@ const monthLabel = computed(() =>
   new Intl.DateTimeFormat(locale.value, { year: 'numeric', month: 'long' }).format(view.value),
 )
 
-/** 星期短名 formatter（触发框周几后缀；Intl 收口 computed，模板内联构造会因 locale ref
+/** 星期短名 formatter（触发框周几后缀；Intl 汇总 computed，模板内联构造会因 locale ref
  *  解包差异拿到非字符串 locale） */
 const weekdayFormatter = computed(() => new Intl.DateTimeFormat(locale.value, { weekday: 'short' }))
 

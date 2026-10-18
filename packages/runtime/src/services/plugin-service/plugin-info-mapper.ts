@@ -22,7 +22,7 @@ function mapStateForProtocol(state: string): PluginInfo['status'] {
  * PluginDescriptor（runtime 内部，PluginInfo 超集）→ PluginInfo（WS 协议契约）。
  *
  * 字段挑选 + status 经 mapStateForProtocol 转 lower_case + enabled 推导。
- * 这是 config.plugins 协议债的正式收口点：之前 transport 层用 `as unknown as PluginInfo[]`
+ * 这是 config.plugins 协议债的正式收尾点：之前 transport 层用 `as unknown as PluginInfo[]`
  * 强转（仅类型缝合、不改运行时序列化），现在下沉到 service 层做真实的字段裁剪。
  *
  * enabled 语义：runtime 无独立「启用」持久化（togglePlugin 直接驱动激活/停用），

@@ -188,7 +188,7 @@ const { isFullscreen } = usePlatformChrome()
 // session-trace：视图态读 store 当前分区（分区键 focusedSessionId == props.sessionId，单 panel 恒真）
 const { partition: tracePartition } = useSessionTrace()
 
-/** trace 切换接收点：仅在有 session 时落库（landing 态分段已 disabled，此处是类型面守卫冗余）。 */
+/** trace 切换接收点：仅在有 session 时写入仓库（landing 态分段已 disabled，此处是类型范围检查冗余）。 */
 function onTraceViewChange(view: TraceMainView): void {
   if (props.sessionId) setTraceView(props.sessionId, view)
 }

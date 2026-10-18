@@ -9,9 +9,9 @@ import type { ZcodeFamilyNode } from '../core/family.js'
  * zcode manifest 直读与枚举（design session-reader-shared-core §3.1 第①步 / D5 / D5-1）。
  *
  * 背景（F21）：pi 路径的 `isRecordManifest` 三必填含 `sessionFile`，而 zcode manifest
- * 落盘时该键被 JSON.stringify 丢弃（subagent-core record-store-rebuild.ts:665/725 投影
+ * 落盘时该键被 JSON.stringify 丢弃（subagent-core record-store-rebuild.ts:665/725 派生视图
  * 照写 `sessionFile: undefined`）→ `listRecordManifests` 对 zcode manifest 恒返回 []。
- * 本单元另开一条**不经过该守卫**的独立路径：
+ * 本单元另开一条**不经过该检查**的独立路径：
  * - **定点直读**（`readZcodeManifest`）：manifest 文件名由 sa-id 完全确定（写侧
  *   `path.join(recordsDir, \`${record.id}.json\`)`，manifest-store.ts:141/153），按确定性
  *   文件名 `<sa-id>.json` 在 `<agentDir>/subagents/<cwd>/records/` 下**窄 walk（命中即止，
@@ -24,7 +24,7 @@ import type { ZcodeFamilyNode } from '../core/family.js'
  * `listRecordManifests`（subagents.ts）一行不改——pi manifest 仍走原扫描路径，本单元
  * 的谓词**不走** isRecordManifest。判别规则与 runtime `transcriptAnchorOf` 同构
  * （F8：`engine === 'zcode'` 第一判据 + sessionRef 双键齐）。用 `engine` 判别而非
- * 「engineHandle 存在性」的理由见 D5 被否项 ②（pi record 提升后 engineHandle 仍持久化，
+ * 「engineHandle 存在性」的理由见 D5 不采用项 ②（pi record 提升后 engineHandle 仍持久化，
  * 存在性判别会误路由）。
  */
 
@@ -43,7 +43,7 @@ export interface ZcodeManifestRecord extends ZcodeFamilyNode {
 /**
  * anchor-missing 的缺失键归因（§3.4：缺失键名进结构化日志——engineHandle 整体缺席 /
  * 缺 sessionRef / 缺 sessionId / 缺 dbPath 归因不同：整体缺席多为旧版本产物，缺
- * sessionId 多为引擎未回调 onHandleReady，缺 dbPath 多为写入面截断）。entry 兜底侧
+ * sessionId 多为引擎未回调 onHandleReady，缺 dbPath 多为写侧截断）。entry 兜底侧
  * 的同构分类（tool-handler classifyIncompleteEntryAnchor）复用本类型单源。
  */
 export type ZcodeAnchorMissingReason =
@@ -67,7 +67,7 @@ export type ZcodeManifestLookup =
   | { kind: 'not-zcode' }
   | { kind: 'anchor-missing'; reason: ZcodeAnchorMissingReason }
 
-/** manifest 顶层 JSON 的读取视图（守卫输入） */
+/** manifest 顶层 JSON 的读取视图（检查输入） */
 type ManifestJson = Record<string, unknown>
 
 function asObject(v: unknown): ManifestJson | undefined {
@@ -125,7 +125,7 @@ function richFieldsOf(m: ManifestJson): ManifestRichFields {
   return out
 }
 
-/** stat 存在性（任意路径无安全面——D5-1 只查「文件在不在」，不开库） */
+/** stat 存在性（任意路径无安全侧——D5-1 只查「文件在不在」，不开库） */
 function fileExists(p: string): boolean {
   try {
     statSync(p)

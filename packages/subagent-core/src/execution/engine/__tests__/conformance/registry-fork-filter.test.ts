@@ -1,16 +1,16 @@
 // registry-fork-filter.test.ts —— [W6] 翻档 × fork 继承残留的读侧过滤契约 +
-// bash 跨 session 可见性显式断言（R4 一刀语义钉住）+ 偏差 #4 探针（goal 守卫口径）。
+// bash 跨 session 可见性显式断言（R4 一刀语义钉住）+ 偏差 #4 探针（goal 检查口径）。
 //
 // 设计锚点：D4（翻档三连带——读侧
 // 过滤三口；分档常量已随 ext-simplify-12 删除，三类型 process 档成为无条件代码
 // 自然状态）+ 修订记录 v5-⑤（bash 跨 session 可见性一刀钉成显式选择）+ 验收 A9②
-// + impl-plan §5 偏差 #4（W4 交接：goal 守卫消费点未传基准，W6 实测裁决是否需
+// + impl-plan §5 偏差 #4（W4 交接：goal 检查消费点未传基准，W6 实测裁决是否需
 // goal 侧两行传参）。
 //
 // 被测函数 = `extensions/universal/pending-notifications/src/state.ts` 的导出纯函数
 // （零依赖、不触 Pi 运行时——文件头注自证；经相对路径源码消费，subagent-core 无该
 // workspace 依赖声明，不加 phantom dep）。分工：
-//   - 过滤函数本体 / pending_notifications 工具投影（entries 现算）的两口径行为：
+//   - 过滤函数本体 / pending_notifications 工具派生视图（entries 现算）的两口径行为：
 //     本套件钉语义（conformance 视角）；
 //   - 过滤①②③的**接线**（goal/subagent-workflow/pending-notifications 三消费点
 //     透传 currentSessionId）：W4 包内测试已承载（pi-pending-notifications
@@ -18,9 +18,9 @@
 //   - 后代判定口（读侧过滤②）的差集口径与①共用同一函数——本套件①的断言即其
 //     语义核心；接线透传由上述 W4 测试守护。
 //
-// 探针结论（偏差 #4，实测证据 = 「goal 守卫口径」describe）：**有虚增**——fork 后
+// 探针结论（偏差 #4，实测证据 = 「goal 检查口径」describe）：**有虚增**——fork 后
 // 父 session 仍活跃的后台任务残留使无基准口径幻 defer。该结论已由 d0b9a6faf
-// （2026-09-09，fix(goal): pass currentSessionId）关闭——goal 两处守卫现传
+// （2026-09-09，fix(goal): pass currentSessionId）关闭——goal 两处检查现传
 // currentSessionId 基准，下方「无基准」形态仅作历史口径对照面保留。
 
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -91,7 +91,7 @@ describe("[W6/D4 翻档余义] 三类型跨时长无 TTL 清理（entries 差集
       registerEntry("bt-1", "bash", "sess-root"), // 真实落盘形态：无 expiresAt 键
     ];
     // 旧 session 档语义（1h TTL + 跨 session 补注销）曾把长任务/跨重启注册静默
-    // 清除 → 守卫失明（事故环 4 放大器）；三类型全 process 档后差集一律续存。
+    // 清除 → 检查失明（事故环 4 放大器）；三类型全 process 档后差集一律续存。
     expect(countActiveFromEntries(entries).ids).toEqual(["bg-1", "wf-1", "bt-1"]);
   });
 });
@@ -122,7 +122,7 @@ describe("[W6/R4 一刀] bash 跨 session 可见性显式断言（钉成显式�
       registerEntry("child-bt", "bash", "sess-child"),
     ];
     // 设计选择（R4）：按当前 session 过滤——父 session 的 bash 任务不再让子
-    // session 的 goal 守卫 defer（子 session 有自己的等待域）。
+    // session 的 goal 检查 defer（子 session 有自己的等待域）。
     const scoped = countActiveFromEntries(childEntries, { currentSessionId: "sess-child" });
     expect(scoped.ids).toEqual(["child-bt"]);
     expect(scoped.count).toBe(1); // 只数本 session 的任务
@@ -138,41 +138,41 @@ describe("[W6/R4 一刀] bash 跨 session 可见性显式断言（钉成显式�
   });
 });
 
-describe("[W6/D4 读侧过滤③] pending_notifications 工具投影（entries 现算）", () => {
-  it("跨 session 残留不进差集、不产生任何写回（跳过不补注销——落盘收口归 core sweep / bte 对账通道）", () => {
+describe("[W6/D4 读侧过滤③] pending_notifications 工具派生视图（entries 现算）", () => {
+  it("跨 session 残留不进差集、不产生任何写回（跳过不补注销——落盘收尾归 core sweep / bte 对账通道）", () => {
     const entries = [
       registerEntry("parent-bg", "subagent", "sess-parent"),
       registerEntry("own-bg", "subagent", "sess-child"),
     ];
-    // 工具投影面（count/list）不虚报继承残留（A9②：count/list 不含继承残留）——
+    // 工具派生视图（count/list）不虚报继承残留（A9②：count/list 不含继承残留）——
     // 现算后与读侧过滤①共用同一 countActiveFromEntries 扫描，「落盘了什么」与
     // 「查询到什么」构造性一致。
     const result = countActiveFromEntries(entries, { currentSessionId: "sess-child" });
     expect(result.ids).toEqual(["own-bg"]);
     // 「跳过不补注销」：残留 entry 留在 session 文件（读侧①③口各自兜住差集消费
     // 方），countActiveFromEntries 只读不写——跨 session 写达域缺口由 core 对账
-    // sweep 收口（bte 对账同理直接 appendEntry）。只读性实证：输入数组长度不变，
+    // sweep 收尾（bte 对账同理直接 appendEntry）。只读性实证：输入数组长度不变，
     // 无补发的 unregister entry。
     expect(entries).toHaveLength(2);
   });
 });
 
-describe("[W6/偏差 #4 探针] goal 守卫口径（无基准）× fork 残留——实测结论（历史口径）", () => {
+describe("[W6/偏差 #4 探针] goal 检查口径（无基准）× fork 残留——实测结论（历史口径）", () => {
   // 偏差 #4（impl-plan §5，W4 交接）：W4 读侧过滤①的 currentSessionId 为可选参数，
-  // goal 守卫消费点未传基准。本探针在 fork 场景实测该口径是否被父 session 注册
+  // goal 检查消费点未传基准。本探针在 fork 场景实测该口径是否被父 session 注册
   // 残留虚增，结论二选一回写报告：
   //   (a) 无影响（其他机制覆盖）→ 偏差 #4 关闭，goal 零改动；
   //   (b) 有虚增 → 列出确需的两行传参改动点（不改 goal——红线），留主会话裁决。
   //
   // **实测结论：(b) 有虚增。已由 d0b9a6faf（2026-09-09）关闭——goal 现传
   //   currentSessionId 基准，下方证据链与用例为无基准历史形态的对照面。**
-  //   证据链（历史口径，d0b9a6faf 前的 goal 守卫两处消费点均无基准调用）：
+  //   证据链（历史口径，d0b9a6faf 前的 goal 检查两处消费点均无基准调用）：
   //     `extensions/universal/goal/src/adapters/event-handlers/agent-end.ts:198`
   //       `const pendingOps = countActiveFromEntries(entries);`（defer 分支判据
   //        = `pendingOps.count > 0`）
   //     `extensions/universal/goal/src/adapters/event-handlers/agent-end.ts:294`
   //       `if (countActiveFromEntries(ctx.sessionManager.getEntries()).count > 0) return;`
-  //       （backoff 延迟发射前守卫）
+  //       （backoff 延迟发射前检查）
   //   下方用例 1 证明该口径在 fork 残留下 count>0 → defer 命中（幻 defer）；
   //   用例 2 证明仅当父任务 record 已终态（core sweep 补注销落盘）才归零——
   //   「父任务仍活跃」窗口内无任何机制覆盖（W4 翻档后 U4 不再中性化）。
@@ -182,11 +182,11 @@ describe("[W6/偏差 #4 探针] goal 守卫口径（无基准）× fork 残留�
   //     agent-end.ts:294 → `countActiveFromEntries(ctx.sessionManager.getEntries(), { currentSessionId: ctx.sessionManager.getSessionId() })`
   //   （getSessionId 是 extension 侧既有取 sessionId 形态——pending-notifications
   //   index.ts:216、subagent-workflow session-lifecycle.ts 同款先例；现行
-  //   agent-end.ts 守卫注释反向引用本探针作为传基准依据。）
+  //   agent-end.ts 检查注释反向引用本探针作为传基准依据。）
 
   it("用例 1：父 session 活跃 subagent 残留 → 无基准对照面（历史形态）count>0 → defer 分支命中（虚增）", () => {
     // fork 时刻快照：父 session 派了后台子代理（record 仍 running-resumable），
-    // 子 session 继承其 register 残留；goal 守卫读到的 entries = 本 session 文件
+    // 子 session 继承其 register 残留；goal 检查读到的 entries = 本 session 文件
     // 全量（含继承残留）。历史形态 = 无基准调用（d0b9a6faf 前 agent-end.ts:198
     // 逐字形态；现行已传基准，此对照面锁定「不传则虚增」的机制事实）。
     const childEntries = [
@@ -222,7 +222,7 @@ describe("[W6/偏差 #4 探针] goal 守卫口径（无基准）× fork 残留�
     });
     expect(result.reconciled).toEqual(["parent-bg"]);
 
-    // 落盘后 goal 守卫（无基准口径，历史形态）重读 entries：计数归零——sweep 是
+    // 落盘后 goal 检查（无基准口径，历史形态）重读 entries：计数归零——sweep 是
     // 无基准口径的唯一收敛通道，且只覆盖「record 可判定终态」的窗口；「父任务仍
     // 活跃」窗口（用例 1）无机制覆盖 → 虚增结论 (b) 成立。
     const entriesAfter = readFileSync(sessionFile, "utf8")

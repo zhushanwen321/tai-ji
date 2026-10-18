@@ -114,7 +114,7 @@ export class PiSessionStore implements ISessionStore {
   }
 
   normalizeSessionFileStreaming(filePath: string, transformLine: SessionJsonlLineTransform, chunkBytes?: number): void {
-    // D5⑤ 变换腿的 IO 骨架委托（infra 同层；transformLine 是 services 层注入的纯回调，
+    // D5⑤ 变换路径的 IO 骨架委托（infra 同层；transformLine 是 services 层注入的纯回调，
     // IO 全在本实现内——C-comm-03 分层通道）
     normalizeSessionFileStreamingInPlace(filePath, transformLine, chunkBytes)
   }
@@ -128,7 +128,7 @@ export class PiSessionStore implements ISessionStore {
   }
 
   // await 传播 infra trash() 的 rejection（G4/P4-1：trash 失败必须经 session-lifecycle
-  // 上抛到 server.ts 外层收口 → renderer；此前 void 签名丢弃 Promise 断头成
+  // 上抛到 server.ts 外层收尾 → renderer；此前 void 签名丢弃 Promise 断头成
   // unhandledRejection，renderer 误收删除成功 reply——timeout-audit-hygiene-batch u-h4 修复轮）
   async trash(path: string): Promise<void> {
     await trash(path)

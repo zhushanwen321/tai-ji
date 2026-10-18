@@ -1,18 +1,18 @@
 /**
- * [U4] L1 构造性等价守卫 —— 「显示 ≡ 生效」结构锁（设计 state-truth-sync-architecture
+ * [U4] L1 构造性等价检查 —— 「显示 ≡ 生效」结构锁（设计 state-truth-sync-architecture
  * §3.3 D7-L1；约束登记 C-data-17 的机器载体，参照消息流域 apply-entry-equivalence 先例）。
  *
  * ══════════════════ 结构锁声明（防未来改线回归，C-data-17）══════════════════
  *
  * 本文件锁定的不变量：landing chip 显示值 ≡ resolveLaunchConfig 输出 ≡
  * submitFirstMessage → createSessionFlow 的 create 入参，三段在输入组合矩阵下逐项相等。
- * D1 改线后三者的同源性是构造性的——本测试是这条构造性等价的机器守卫：
+ * D1 改线后三者的同源性是构造性的——本测试是这条构造性等价的机器检查：
  *
  * - 任何让 chip 侧（model-thinking launchConfigView / PresetSelectChip）脱离 resolve
  *   单源的改线（重新给显示链单独兜底、旁路解析）→ 「A ≡ B」断言红；
  * - 任何让 submit 侧（flow.submitFirstMessage）脱离 resolve 的改线（恢复旧
  *   pendingModel 透传、加独立 fallback）→ 「C ≡ B」断言红；
- * - 任何重引入 watch 写记忆 / landing auto 值机制的改动 → grep 结构守卫红。
+ * - 任何重引入 watch 写记忆 / landing auto 值机制的改动 → grep 结构检查红。
  *
  * 改线必须先改本测试并在 commit 说明理由——本文件的红即架构决策的显式登记点。
  *
@@ -34,9 +34,9 @@
  *    显式恒赢 / D4 lastUsed 失效回落）钉具体值——resolve 语义本身的逐档单测在
  *    launch-config.test.ts，此处只锚等价链上的关键分歧点。
  * 3. 窗口语义轻断言（D1/E2）：ensureReady 未完成不 create（占位值不固化）；完成后
- *    create 入参 = 加载后 resolve 输出。完整 P5② 主链路守卫（交接断言、C-W4-3 双
+ *    create 入参 = 加载后 resolve 输出。完整 P5② 主链路检查（交接断言、C-W4-3 双
  *    apply 删除断言等）在 flow.test.ts TC-5，此处仅保留结构锁自含所需的最小窗口断言。
- * 4. grep 结构守卫（D7-L1）：node:fs 读 model-thinking.ts 源文本（测试内做，不进
+ * 4. grep 结构检查（D7-L1）：node:fs 读 model-thinking.ts 源文本（测试内做，不进
  *    构建脚本）——follow watch / localAuthored 零命中、全部 watch 注册段零 record 族
  *    调用（被删「生效即记录」watch 复发即红）、onThinkingSelect 显式入口仍在记录
  *    且自动对齐路由（routeThinkingLevel）零记录（D2 authored-only 结构前提）。
@@ -607,7 +607,7 @@ describe('L1 锚点 · 发散条件具体值（§2.2/§2.3 全覆盖）', () => 
   })
 })
 
-// ── 3. 窗口语义轻断言（D1/E2；主守卫在 flow.test.ts TC-5，见文件头声明）──
+// ── 3. 窗口语义轻断言（D1/E2；主检查在 flow.test.ts TC-5，见文件头声明）──
 
 describe('L1 窗口语义（D1/E2）· ensureLaunchDataReady 门闩', () => {
   beforeEach(() => {
@@ -679,7 +679,7 @@ describe('L1 窗口语义（D1/E2）· ensureLaunchDataReady 门闩', () => {
   })
 })
 
-// ── 4. grep 结构守卫（D7-L1：测试内源码文本扫描，不进构建脚本）─────────
+// ── 4. grep 结构检查（D7-L1：测试内源码文本扫描，不进构建脚本）─────────
 
 const MODEL_THINKING_SRC = readFileSync(
   new URL('../../composer/model-thinking.ts', import.meta.url),
@@ -688,9 +688,9 @@ const MODEL_THINKING_SRC = readFileSync(
 
 /**
  * 源文本（保长度）剥注释：行/块注释替换为等长空白——索引不漂移，且注释里的
- * "record"/"watch(" 字样不参与结构判定（防注释措辞误伤结构守卫）。
+ * "record"/"watch(" 字样不参与结构判定（防注释措辞误伤结构检查）。
  * 已知边界（可接受）：字符串字面量内的 "//"（如 URL）会被误剥——本文件无此形态；
- * 守卫红时先核对源码再更新结构锁。
+ * 检查红时先核对源码再更新结构锁。
  */
 function stripComments(src: string): string {
   let out = src.replace(/\/\*[\s\S]*?\*\//g, (m) => ' '.repeat(m.length))
@@ -723,14 +723,14 @@ function extractBalanced(code: string, openIdx: number): string {
     }
     i++
   }
-  throw new Error('extractBalanced: 源码括号不平衡（结构守卫扫描器异常，先核对源码）')
+  throw new Error('extractBalanced: 源码括号不平衡（结构检查扫描器异常，先核对源码）')
 }
 
 /** 提取指定函数的完整定义段（签名定位 → 参数表 → 函数体花括号平衡段）。 */
 function functionSpan(code: string, name: string): string {
   const sigRe = new RegExp(`function\\s+${name}\\s*\\(`)
   const sig = sigRe.exec(code)
-  if (!sig) throw new Error(`grep 守卫：model-thinking.ts 缺少函数 ${name}（结构锁需先更新本测试）`)
+  if (!sig) throw new Error(`grep 检查：model-thinking.ts 缺少函数 ${name}（结构锁需先更新本测试）`)
   const params = extractBalanced(code, code.indexOf('(', sig.index))
   const bodyOpen = code.indexOf('{', sig.index + params.length - 1)
   return extractBalanced(code, bodyOpen)
@@ -746,7 +746,7 @@ function watchSpans(code: string): string[] {
   return spans
 }
 
-describe('grep 结构守卫 · 记录路径 authored-only（D2/D7-L1）', () => {
+describe('grep 结构检查 · 记录路径 authored-only（D2/D7-L1）', () => {
   // 剥注释后的源码：结构判定只看可执行代码，注释措辞不误伤
   const code = stripComments(MODEL_THINKING_SRC)
 
@@ -757,11 +757,11 @@ describe('grep 结构守卫 · 记录路径 authored-only（D2/D7-L1）', () => 
 
   it('记录路径结构性无 watch：全部 watch 注册段零 record 族调用（「生效即记录」watch 复发即红）', () => {
     const spans = watchSpans(code)
-    // 扫描器健全性：至少存在换绑清 armed 的合法 watch（若零命中说明扫描器失效=守卫空转）
+    // 扫描器健全性：至少存在换绑清 armed 的合法 watch（若零命中说明扫描器失效=检查空转）
     expect(spans.length).toBeGreaterThanOrEqual(1)
     for (const span of spans) {
       // watch 内任何 record 族调用（record / recordAuthoredThinking / recordLastUsed）
-      // 都是「非显式选择写入 KV」通道——记忆污染（D2 被否③）或 lastUsed 污染
+      // 都是「非显式选择写入 KV」通道——记忆污染（D2 不采用③）或 lastUsed 污染
       expect(span).not.toMatch(/record/)
     }
   })
@@ -779,7 +779,7 @@ describe('grep 结构守卫 · 记录路径 authored-only（D2/D7-L1）', () => 
   it('直接 record( 写点唯一在 recordAuthoredThinking 体内；自动对齐路由 routeThinkingLevel 零记录', () => {
     // record( 不匹配 recordLastUsed( / recordAuthoredThinking(（后随字符非 '('）
     const directCalls = [...code.matchAll(/(?<![A-Za-z0-9_$])record\s*\(/g)]
-    // 非空守卫：零命中 = 写点被移走/改名，结构锁需先更新
+    // 非空检查：零命中 = 写点被移走/改名，结构锁需先更新
     expect(directCalls.length).toBeGreaterThanOrEqual(1)
     const recordSpan = functionSpan(code, 'recordAuthoredThinking')
     const rel = code.indexOf(recordSpan)

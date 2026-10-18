@@ -168,10 +168,10 @@ describe('useCompletionSound', () => {
     }
   })
 
-  it('[Fix-5] readyState 守卫：HAVE_METADATA 前不赋值 currentTime，到达后重置为 0', async () => {
+  it('[Fix-5] readyState 检查：HAVE_METADATA 前不赋值 currentTime，到达后重置为 0', async () => {
     mockPlaySystemSound.mockResolvedValue({ audioData: 'dGVzdA==', mimeType: 'audio/wav' })
     const { playByName } = await loadModule()
-    // 首播：mock Audio 无 readyState（undefined < 1，对应 HAVE_NOTHING）→ 守卫跳过 currentTime 赋值
+    // 首播：mock Audio 无 readyState（undefined < 1，对应 HAVE_NOTHING）→ 检查跳过 currentTime 赋值
     //（HTML 规范：HAVE_NOTHING 时赋值 currentTime 是设置 default playback start position，语义不是回到起点）
     await playByName('Tinker')
     expect(mockAudioCtor).toHaveBeenCalledTimes(1)

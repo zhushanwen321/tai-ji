@@ -180,7 +180,7 @@ event handler（如 `tool_execution_end`）中向 LLM 注入提示词/通知消�
 
 **可靠性分级（结果语义 vs 交互注入）[MANDATORY]**：event handler 里发消息必须先分清两类语义——
 
-- **结果语义通知**（subagent 完成、scheduler 触发、未来 webhook 等终态/结果类）：**必须走确认式送达**——持久账本 + 幂等键通道（`@zhushanwen/session-delivery` 账本 / subagent-workflow 的 notify-ledger 设施，at-least-once）；**禁止**依赖 steer/nextTurn/followUp 内存队列的 at-most-once 投递（消费窗极窄，基线事故十余次完成仅送达 1 次）。约束登记 [docs/constraints.json](../constraints.json) C-ext-19，机器检查 `check_subagent_channels.py`（pre-commit + CI）。
+- **结果语义通知**（subagent 完成、scheduler 触发、未来 webhook 等终态/结果类）：**必须走确认式送达**——经 `extensions/shared/delivery-port` 的 `port.deliver`（受理前投递日志落 session entry + 幂等键 + details-id 送达凭据 + session_start 差集重放，at-least-once；文本车道经 session-delivery 内核）；**禁止**依赖 steer/nextTurn/followUp 内存队列的 at-most-once 投递（消费窗极窄，基线事故十余次完成仅送达 1 次）。约束登记 [docs/constraints.json](../constraints.json) C-ext-19，机器检查 `check_subagent_channels.py`（pre-commit + CI）。
 - **交互式注入**（非结果语义：实时 steer 用户意图、followUp 续推）：上表 deliverAs 两模式照常适用，不在禁令内——禁令对象是「结果语义的一次性通知」，不是交互式 steer。
 
 ## 模型引用解析 [MANDATORY]
@@ -195,8 +195,8 @@ event handler（如 `tool_execution_end`）中向 LLM 注入提示词/通知消�
 
 扩展域内任何「发现可执行 skill / 校验技能可用」一律走共享包 `@zhushanwen/pi-exec-skills`（`extensions/shared/exec-skills/`）：`detectExecSkills` 自研扫描直读磁盘 = **发现**（表单列出可用技能，技能热装即时可见，无 reload 滞后）；`resolveSkills` = **执行门禁**（pi 注册表 `pi.getCommands()` 过滤 `source === "skill"` 确认 pi 实际认得，注入前把关）——扫描与门禁两段消费语义闭环，**禁止各扩展自扫 skill 目录或直用 pi 注册表快照形成第二实现**。
 
-- **原因**：`pi.getCommands()` 返回 resource loader 的启动加载集（reload 才刷新的滞后快照）——发现面用它会让新装技能不可见；执行面它才是权威（快照滞后只造成「刚装技能本 turn 门禁拒绝」，重试即过）
-- **守卫**：依赖登记方向经 `check-extension-dependencies.mjs` 双向校验——包 package.json dependencies/peerDependencies 声明的 `@zhushanwen/*` / `@taiji/*` 包未登记进 extension-dependencies.json 该条目 dependsOn 即红（漏登记，含 shared 库条目存在性），dependsOn 引用的 workspace 内包无法解析同样即红（悬空引用）；pi bump 的目录/overrides 语义漂移由共享包对拍测试兜住（[docs/pi-semantics.json](../pi-semantics.json) PS-53 探针）
+- **原因**：`pi.getCommands()` 返回 resource loader 的启动加载集（reload 才刷新的滞后快照）——发现范围用它会让新装技能不可见；执行侧它才是权威（快照滞后只造成「刚装技能本 turn 门禁拒绝」，重试即过）
+- **检查**：依赖登记方向经 `check-extension-dependencies.mjs` 双向校验——包 package.json dependencies/peerDependencies 声明的 `@zhushanwen/*` / `@taiji/*` 包未登记进 extension-dependencies.json 该条目 dependsOn 即红（漏登记，含 shared 库条目存在性），dependsOn 引用的 workspace 内包无法解析同样即红（悬空引用）；pi bump 的目录/overrides 语义漂移由共享包对拍测试兜住（[docs/pi-semantics.json](../pi-semantics.json) PS-53 探针）
 - **约束登记**：[docs/constraints.json](../constraints.json) C-ext-30
 
 ## 扩展安装红线 [强制]
@@ -285,7 +285,7 @@ event handler（如 `tool_execution_end`）中向 LLM 注入提示词/通知消�
 
 #### 启动配置声明 [强制]
 
-**新增配置面必须二选一**：
+**新增配置侧必须二选一**：
 
 - **package.json `taiji.startupConfig` 声明**（推荐，装好即就绪）：声明 `{ "path": "<相对 agentDir 的路径>", "content": { ...默认内容... } }`，宿主 runtime 启动序列统一 ensure（机制实现：`packages/runtime/src/services/extension-startup-config.ts`）——应用装好打开、一个 session 都没建时配置文件即存在、可发现、可手编
 - **「不建文件 + load 侧缺失回落默认」形态**：extension 加载时文件不存在不报错，回落代码内默认值（如 subagent-workflow 改造前的形态）
@@ -320,7 +320,7 @@ event handler（如 `tool_execution_end`）中向 LLM 注入提示词/通知消�
 
 **因此 SO 单独 bump 必须同步重发 SW**：npm 7+ 默认自动安装 peerDependencies 并严格解析——SO 发了新版本而 SW 未重发时，用户环境装新 SO + 旧 SW 会因旧 SW 的 peer 声明仍锁旧精确版本而报 ERESOLVE（装不上/需 --legacy-peer-deps 强装）。两包语义上本就同进退：`PI_WORKFLOW_SCHEMA` env 隐式契约 + 256KiB 上限由跨包契约测试锁字节相等（原裁决记录 structured-output-redesign.md §7 补记 C——已删除，git 可追溯），一端演进而另一端不跟即静默断桥。
 
-**一般化规则**：凡 peerDependencies 引用兄弟 extension 包（而非 `@earendil-works/pi-*` 上游）且发布态为精确版本的，被依赖包任何 bump 都必须同 PR/同批重发依赖包；只 bump 一端时 changeset 必须显式说明另一端为何可以不跟（如确无契约面变更）。
+**一般化规则**：凡 peerDependencies 引用兄弟 extension 包（而非 `@earendil-works/pi-*` 上游）且发布态为精确版本的，被依赖包任何 bump 都必须同 PR/同批重发依赖包；只 bump 一端时 changeset 必须显式说明另一端为何可以不跟（如确无契约范围变更）。
 
 > 决策追溯：初始裁决记录 pi-ext-019（已压缩，见 [adr/archive-digest.md](./adr/archive-digest.md)；structured-output-redesign §7 补记 C 同为 git 历史可追溯）。
 

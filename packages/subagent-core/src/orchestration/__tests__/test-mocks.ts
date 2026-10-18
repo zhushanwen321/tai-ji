@@ -89,7 +89,7 @@ export function mkCtx(
       getEntries: () => [...entries],
       getTree: () => [],
       getSessionName: () => undefined,
-      // pi 1.0 新增必选成员；本包测试不消费会话投影，误用即抛错（failLoud 约定）
+      // pi 1.0 新增必选成员；本包测试不消费会话派生视图，误用即抛错（failLoud 约定）
       buildSessionProjection: () => failLoud<SessionProjection>("ctx.sessionManager.buildSessionProjection"),
     },
     modelRegistry: failLoud<ModelRegistry>("ctx.modelRegistry"),
@@ -195,7 +195,7 @@ export function mkPi(
     unregisterProvider: vi.fn(),
     registerVirtualModel: vi.fn(),
     unregisterVirtualModel: vi.fn(),
-    // pi 1.0 新增成员：settings/MCP 注册面——本包测试不消费；getSettings 的返回
+    // pi 1.0 新增成员：settings/MCP 注册范围——本包测试不消费；getSettings 的返回
     // （Settings 合并视图）无法结构构造，走 failLoud
     getSettings: () => failLoud<ReturnType<ExtensionAPI["getSettings"]>>("pi.getSettings"),
     registerMcpServer: vi.fn(),

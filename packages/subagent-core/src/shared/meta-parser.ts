@@ -17,7 +17,7 @@
  * [P-yaml] 探针已验证：eemeli/yaml 2.9.0 的 YAMLParseError.linePos = [{line,col},{line,col}]。
  *
  * exec-review 修复（major-1 + minor-2..8）：
- * - 正则闭合符（星斜杠）必须独占行首，防止 YAML 正文里中途出现的星斜杠（如 usage 块标量
+ * - 正则结束符（星斜杠）必须独占行首，防止 YAML 正文里中途出现的星斜杠（如 usage 块标量
  *   或 patternProperties 正则）截断块致 parameters 等字段静默丢失（§2.3 failure-A 同形态）。
  * - typecheckMeta 严格化：kind 专属字段不可串类（workflow 不许 examples、agent 不许 phases），
  *   description 必填，phase detail 非字符串/parameters 非对象均 reject（消除「静默丢弃非法字段」）。
@@ -41,9 +41,9 @@ import type {
 
 /**
  * workflow @pi-meta 块注释：单星块注释（非 JSDoc `/**`），内容为 YAML。
- * 闭合符（星斜杠）必须独占行首、列 0——防止 YAML 正文里中途出现的星斜杠（如 usage 块标量
+ * 结束符（星斜杠）必须独占行首、列 0——防止 YAML 正文里中途出现的星斜杠（如 usage 块标量
  * 内的 see-星斜杠-for、或 patternProperties 正则含星后接斜杠）截断块致后续字段静默丢失（major-1）。
- * 格式规范要求闭合符在列 0（v5 §7），故列 0 闭合不损失合法用例。
+ * 格式规范要求结束符在列 0（v5 §7），故结束符在列 0 不损失合法用例。
  */
 const WORKFLOW_META_RE = /\/\*\s*@pi-meta\s*\n([\s\S]*?)\n\*\//;
 
@@ -96,7 +96,7 @@ function typecheckMeta(raw: unknown, kind: ResourceKind): ResourceMeta | null {
   return typecheckAgentMeta(o, o.name, o.description, when, notFor);
 }
 
-/** minor-2 串类守卫（workflow 分支）：agent 专属字段任一出现 → reject。 */
+/** minor-2 串类检查（workflow 分支）：agent 专属字段任一出现 → reject。 */
 function hasAgentOnlyFields(o: Record<string, unknown>): boolean {
   return (
     o.examples !== undefined || o.tools !== undefined || o.model !== undefined
@@ -105,13 +105,13 @@ function hasAgentOnlyFields(o: Record<string, unknown>): boolean {
   );
 }
 
-/** minor-2 串类守卫（agent 分支）：workflow 专属字段任一出现 → reject。 */
+/** minor-2 串类检查（agent 分支）：workflow 专属字段任一出现 → reject。 */
 function hasWorkflowOnlyFields(o: Record<string, unknown>): boolean {
   return o.phases !== undefined || o.parameters !== undefined || o.usage !== undefined;
 }
 
 /**
- * phases 元素校验（string | {title:string, detail?:string}）：合法元素逐个投影，
+ * phases 元素校验（string | {title:string, detail?:string}）：合法元素逐个映射，
  * 任一非法 → null。
  * minor-4：detail 存在但非字符串 → reject（不再静默丢弃）。
  */
@@ -130,7 +130,7 @@ function typecheckPhases(rawPhases: unknown[]): WorkflowMeta["phases"] | null {
   return phases;
 }
 
-/** workflow meta 组装（校验全过后的纯投影——可选字段缺席不进键）。 */
+/** workflow meta 组装（校验全过后的纯派生视图——可选字段缺席不进键）。 */
 function buildWorkflowMeta(
   name: string,
   description: string,
@@ -152,7 +152,7 @@ function buildWorkflowMeta(
   };
 }
 
-/** workflow 分支校验（顺序 = 串类 → phases → parameters；usage 宽容投影）。 */
+/** workflow 分支校验（顺序 = 串类 → phases → parameters；usage 宽容映射）。 */
 function typecheckWorkflowMeta(
   o: Record<string, unknown>,
   name: string,
@@ -199,7 +199,7 @@ function typecheckExamples(raw: unknown): RoutingExample[] | null | undefined {
 
 /**
  * maxTurns 校验三态：undefined → 缺席；非 number 或非有限值（NaN/Infinity）→ null；
- * 合法 number 原样投影。
+ * 合法 number 原样映射。
  */
 function typecheckMaxTurns(raw: unknown): number | null | undefined {
   if (raw === undefined) return undefined;
@@ -207,7 +207,7 @@ function typecheckMaxTurns(raw: unknown): number | null | undefined {
   return raw;
 }
 
-/** agent meta 组装（校验全过后的纯投影——可选字段缺席不进键）。 */
+/** agent meta 组装（校验全过后的纯派生视图——可选字段缺席不进键）。 */
 function buildAgentMeta(
   name: string,
   description: string,
@@ -254,7 +254,7 @@ function typecheckAgentMeta(
   if (tools === null) return null;
   const model = isString(o.model) ? o.model : undefined;
   const engine = isString(o.engine) ? o.engine : undefined;
-  // D3 可选执行字段（maxTurns/disallowedTools/skills）：与 tools 同风格投影
+  // D3 可选执行字段（maxTurns/disallowedTools/skills）：与 tools 同风格映射
   // （空数组 [] 同 tools 保留键——列表字段族空列表语义一致）。严格层对非法类型
   // reject（minor-2..5 既有精神：不静默丢弃非法字段）——宽容降级是
   // parseAgentProfile（agent-registry）的职责，不在本严格层。
@@ -309,7 +309,7 @@ export function parseResourceMeta(
   }
 }
 
-/** 从 eemeli/yaml 拋错提取 linePos 起点（类型守卫，避免 unsafe cast）。[P-yaml] 实测 e.linePos = [{line,col},{line,col}]。*/
+/** 从 eemeli/yaml 拋错提取 linePos 起点（类型检查，避免 unsafe cast）。[P-yaml] 实测 e.linePos = [{line,col},{line,col}]。*/
 function getYamlLinePos(e: unknown): { line: number; col: number } | undefined {
   if (e !== null && typeof e === "object" && "linePos" in e) {
     const lp = (e as Record<string, unknown>).linePos;
@@ -349,7 +349,7 @@ export function parseResourceMetaDetailed(
 ): DetailedResult {
   const block = extractBlock(content, kind);
   if (block === undefined) {
-    return { ok: false, error: "未找到 meta 块（缺少 /* @pi-meta */ 或 frontmatter，或闭合 */ 不在行首）" };
+    return { ok: false, error: "未找到 meta 块（缺少 /* @pi-meta */ 或 frontmatter，或结束符 */ 不在行首）" };
   }
   let raw: unknown;
   try {

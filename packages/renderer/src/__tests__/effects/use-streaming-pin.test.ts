@@ -1,21 +1,21 @@
 // @vitest-environment node
 
 /**
- * useStreamingPin 单测 —— streaming turn 钉扎驱动逻辑（W3 共存防护 + PR#116 review M3 修复）。
+ * useStreamingPin 单测 —— streaming turn 固定驱动逻辑（W3 共存防护 + PR#116 review M3 修复）。
  *
  * 测的是真 bug（PR#116 review M3 指出），不是凑覆盖率：
  * - M3-1 挂载时已 streaming：watch 必须 immediate 才能保证 pinnedIndexes 在消费者副作用时机前就绪
  * - M3-2 跨 session 切换 streaming→streaming：watch 源含 sessionId 才能在派生布尔值不变时重新触发
  * - M3-3 flush:post 顺序：resetSession watch（pre flush）清状态后，本 watch（post flush）重钉生效
  *
- * [cw wave w4] 删 pinStreaming 旧路径用例：w3 切到 virtua 后钉扎统一走 pinnedIndexes，
- * 不再有 pinStreaming 回调。M3 用例改为断言 pinnedIndexes（数据源本身正确即可证明钉扎正确——
+ * [cw wave w4] 删 pinStreaming 旧路径用例：w3 切到 virtua 后固定统一走 pinnedIndexes，
+ * 不再有 pinStreaming 回调。M3 用例改为断言 pinnedIndexes（数据源本身正确即可证明固定正确——
  * 消费者只读 pinnedIndexes，watch 回调内已无副作用）。
  *
- * [pin-identity U1] 编辑钉扎入参从 editingTurnIdx（裸索引快照）迁移为 editingTurnKey
+ * [pin-identity U1] 编辑固定入参从 editingTurnIdx（裸索引快照）迁移为 editingTurnKey
  * （turnStableId 身份）：
  * W2TC4-W2TC6 系列做语义等价迁移（索引快照 → 用 turnStableId 声明身份），并新增三类用例——
- * a 身份反查命中（钉回合非位置，数组重排钉扎跟随）、b 反查 miss 不钉（fail-safe）、
+ * a 身份反查命中（钉回合非位置，数组重排固定跟随）、b 反查 miss 不钉（fail-safe）、
  * c clamp 纵深防御（旧 bug「索引残留越界」的回归证明）。
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/effects/use-streaming-pin.test.ts
@@ -224,7 +224,7 @@ describe('useStreamingPin · 回归：streaming 变化与释放', () => {
   })
 })
 
-// ── W2TC4-W2TC6: pinnedIndexes virtua 路径（多项钉扎输出，[pin-identity U1] 迁移为 turnKey 语义） ──
+// ── W2TC4-W2TC6: pinnedIndexes virtua 路径（多项固定输出，[pin-identity U1] 迁移为 turnKey 语义） ──
 
 describe('useStreamingPin · W2TC4-W2TC6: pinnedIndexes virtua 路径（editingTurnKey）', () => {
   it('W2TC5: streaming lastTurnIdx=5 + editingTurnKey 指向 idx=2 turn → pinnedIndexes=[5,2]', () => {
@@ -284,7 +284,7 @@ describe('useStreamingPin · W2TC4-W2TC6: pinnedIndexes virtua 路径（editingT
     expect(pinnedIndexes!.value).toEqual([1])
   })
 
-  it('W2TC5: editingTurnKey 动态变化 → pinnedIndexes 响应式重算且钉扎跟随身份', async () => {
+  it('W2TC5: editingTurnKey 动态变化 → pinnedIndexes 响应式重算且固定跟随身份', async () => {
     const items = [turnItem(1, 'k1', false), turnItem(2, 'k2', false), turnItem(3, 'k3', false)]
     const editingTurnKey = ref<string | null>(null)
     const { pinnedIndexes } = setup({ items, editingTurnKey })
@@ -296,7 +296,7 @@ describe('useStreamingPin · W2TC4-W2TC6: pinnedIndexes virtua 路径（editingT
     await nextTick()
     expect(pinnedIndexes!.value).toEqual([1])
 
-    // 换身份（k2→k3）：钉扎跟随身份移动到新回合（钉回合非位置——旧索引快照实现做不到）
+    // 换身份（k2→k3）：固定跟随身份移动到新回合（钉回合非位置——旧索引快照实现做不到）
     editingTurnKey.value = turnKeyOf(items[2])
     await nextTick()
     expect(pinnedIndexes!.value).toEqual([2])
@@ -310,7 +310,7 @@ describe('useStreamingPin · W2TC4-W2TC6: pinnedIndexes virtua 路径（editingT
 
 // ── [pin-identity U1] 三类新语义：a 身份反查命中 / b 反查 miss 不钉 / c clamp 纵深防御 ──
 
-describe('useStreamingPin · U1-a 身份反查命中：钉的是回合本身，数组重排钉扎跟随', () => {
+describe('useStreamingPin · U1-a 身份反查命中：钉的是回合本身，数组重排固定跟随', () => {
   it('editingTurnKey 指向中间 turn（含末尾 system item 干扰）→ pinnedIndexes 含其当前索引', () => {
     // 4 turn + 末尾 bash system item：编辑的是 idx=2 的 turn，反查命中 2 而非被 system item 干扰
     const items = [
@@ -326,7 +326,7 @@ describe('useStreamingPin · U1-a 身份反查命中：钉的是回合本身，�
     expect(pinnedIndexes!.value).toEqual([2])
   })
 
-  it('数组前插 system item 使索引整体后移 → 钉扎跟随回合移动到新索引（G3：钉回合非位置）', async () => {
+  it('数组前插 system item 使索引整体后移 → 固定跟随回合移动到新索引（G3：钉回合非位置）', async () => {
     // E-now-2 回归：旧实现持位置快照，前插项后会错钉旧位置上的另一回合
     const items = [turnItem(1, 'k1', false), turnItem(2, 'k2', false), turnItem(3, 'k3', false)]
     const editingTurnKey = ref(turnKeyOf(items[1]))
@@ -343,14 +343,14 @@ describe('useStreamingPin · U1-a 身份反查命中：钉的是回合本身，�
   })
 })
 
-describe('useStreamingPin · U1-b 反查 miss 不钉：身份不在场则无 editing 钉扎（fail-safe）', () => {
+describe('useStreamingPin · U1-b 反查 miss 不钉：身份不在场则无 editing 固定（fail-safe）', () => {
   it('editingTurnKey 为不在场的 key → 无 editing 项；streaming 项独立存在仍钉', () => {
     // 末 turn streaming；editingTurnKey 指向不存在的回合（如旧 session 的 turn）
     const items = [turnItem(1, 'k1', false), turnItem(2, 'k2', true)]
     const editingTurnKey = ref('user-ghost-not-in-items')
     const { pinnedIndexes } = setup({ items, editingTurnKey })
 
-    // miss（E2）不产生 editing 钉扎；streaming turn idx=1 是独立来源，不受影响
+    // miss（E2）不产生 editing 固定；streaming turn idx=1 是独立来源，不受影响
     expect(pinnedIndexes!.value).toEqual([1])
   })
 
@@ -383,7 +383,7 @@ describe('useStreamingPin · U1-c clamp 纵深防御：输出索引恒有界，�
   })
 
   it('命中后 items 缩短且新数组有 streaming turn → 输出只含新有界索引，无旧索引残留', async () => {
-    // 同族边界：反查 miss 后 streaming 钉扎仍正常，且输出数组里不存在任何 >= items.length 的索引
+    // 同族边界：反查 miss 后 streaming 固定仍正常，且输出数组里不存在任何 >= items.length 的索引
     const items = [turnItem(1, 'k1', false), turnItem(2, 'k2', false), turnItem(3, 'k3', false)]
     const editingTurnKey = ref(turnKeyOf(items[2]))
     const { itemsRef, pinnedIndexes } = setup({ items, editingTurnKey })

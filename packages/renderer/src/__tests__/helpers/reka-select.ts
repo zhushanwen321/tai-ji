@@ -9,7 +9,7 @@
 import { expect } from 'vitest'
 import { flushPromises } from '@vue/test-utils'
 
-/** 被 mount 出的组件包装的最小结构面（避免跨文件耦合 VueWrapper 泛型；纯数据形状用 type 别名）。 */
+/** 被 mount 出的组件包装的最小结构形状（避免跨文件耦合 VueWrapper 泛型；纯数据形状用 type 别名）。 */
 export type SelectHost = {
   find(selector: string): { element: Element }
 }

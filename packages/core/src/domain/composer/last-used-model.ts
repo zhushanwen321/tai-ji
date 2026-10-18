@@ -5,7 +5,7 @@
  * lastUsedModel 档（D2 model 链第三档，消费前经 D4 有效性校验；显式记录，跨重启成立）。
  * 写点 = onModelSelect 非 staging 分支（用户显式选模型时写入）；staging 试选不写。
  *
- * 持久化生命周期（三态预载 / 加载完成回调 / 加载窗口守卫 / deferred 补写 / 写穿串行链）
+ * 持久化生命周期（三态预载 / 加载完成回调 / 加载窗口检查 / deferred 补写 / 写穿串行链）
  * 由 foundation createKVSlot 收编（state-truth-sync §3.3 D9 KV 单键族）；本模块保留：
  * - 内存容器（ref 单值——响应式使下游 computed（model-thinking regularModelId 经 lookup）
  *   对 KV 预载完成建立依赖，冷启动 KV 值到达时 chip 自动脱离 defaultModel）
@@ -40,7 +40,7 @@ const slot = createKVSlot<string>(LAST_USED_MODEL_KEY, {
   // 形状门：合法 JSON 但非字符串（数组/对象/null）→ 按空启动（undefined）
   parseSnapshot: (parsed) => (typeof parsed === 'string' ? parsed : undefined),
   mergeSnapshot: (value) => {
-    // 加载窗口守卫：内存已有值时在途 KV 快照不得覆写——加载窗口内的 record 比快照新，
+    // 加载窗口检查：内存已有值时在途 KV 快照不得覆写——加载窗口内的 record 比快照新，
     // 覆写后 deferred 补写会把 KV 旧值落盘（双丢）
     if (cachedValue.value === undefined) {
       cachedValue.value = value

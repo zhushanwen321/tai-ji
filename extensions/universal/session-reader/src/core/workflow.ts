@@ -15,7 +15,7 @@
 
 import { isRecord } from '@zhushanwen/pi-ext-guards'
 
-// ---- 类型守卫 helpers ----
+// ---- 类型检查 helpers ----
 
 /** unknown → string 收窄（非 string → undefined）。快照可选字符串字段的统一入口。 */
 function strOr(v: unknown): string | undefined {
@@ -74,9 +74,9 @@ export interface WorkflowOverview {
   runId: string
   /** WorkflowRef.stateFile 透传 */
   stateFile: string
-  /** NEW state.status / OLD 顶层 status / record 流投影（[D2] 三态：running | interrupted | done） */
+  /** NEW state.status / OLD 顶层 status / record 流派生视图（[D2] 三态：running | interrupted | done） */
   status: string
-  /** details 格式标记（随 details.runs 透传给程序化消费方，文本渲染不读）。v2 读取面形状与 v1 一致（pi-subagent-workflow 8.x 一次性生命周期） */
+  /** details 格式标记（随 details.runs 透传给程序化消费方，文本渲染不读）。v2 读侧形状与 v1 一致（pi-subagent-workflow 8.x 一次性生命周期） */
   version: 'wf-run-v1' | 'wf-run-v2' | 'legacy'
   /** NEW spec.scriptName / spec.name / OLD name */
   script?: string
@@ -222,12 +222,12 @@ function parseLegacyRunSnapshot(
  *
  * 分支（C-parserunsnapshot-dualformat，TC-wf-snapshot-version-union）：
  * - 非对象 → null（调用方跳过，ES-wf-snapshot-unparseable）
- * - NEW (snapshot.v === 'wf-run-v1' 或 'wf-run-v2'，读取面形状一致)：state.* / meta.* / spec.*
+ * - NEW (snapshot.v === 'wf-run-v1' 或 'wf-run-v2'，读侧形状一致)：state.* / meta.* / spec.*
  * - OLD (无 v，有 callCache 数组或顶层 status)：顶层 status/budget/startedAt + callCache
  * - 既非 NEW 也非 OLD → null（未来版本（如 wf-run-v3）/ 异构内容）
  *
  * runId/stateFile 透传参数（不读 snapshot.runId，保证与 family.workflows 一致，避免 OLD 顶层
- * runId 可信度低的不一致）。零 any（全程 typeof/Array.isArray/isRecord 守卫收窄）。
+ * runId 可信度低的不一致）。零 any（全程 typeof/Array.isArray/isRecord 检查收窄）。
  */
 export function parseRunSnapshot(
   snapshot: unknown,
@@ -236,7 +236,7 @@ export function parseRunSnapshot(
 ): WorkflowOverview | null {
   if (!isRecord(snapshot)) return null
 
-  // NEW 格式（v === 'wf-run-v1' || 'wf-run-v2'，v2 读取面形状兼容 v1）
+  // NEW 格式（v === 'wf-run-v1' || 'wf-run-v2'，v2 读侧形状兼容 v1）
   const v = snapshot.v
   if (v === 'wf-run-v1' || v === 'wf-run-v2') {
     return parseNewRunSnapshot(snapshot, v, runId, stateFile)
@@ -331,7 +331,7 @@ interface RecordStreamLine {
   [key: string]: unknown
 }
 
-/** 流解析产物：run 装配面（runId 透传 + stateFile=record 流路径）。 */
+/** 流解析产物：run 装配侧（runId 透传 + stateFile=record 流路径）。 */
 interface RecordStreamFold {
   workflowName?: string
   startedAt?: number
@@ -371,7 +371,7 @@ function parseRecordStreamLine(line: string): RecordStreamLine | undefined {
  *   sessionId——家族链跳转入口）；
  * - run-interrupted：[D2] 中断转移 → status 'interrupted'（非终局）；
  * - run-resumed：[D2] 复活转移 → 清中断标记（status 回 running——lifecycle fold
- *   投影语义：run-resumed 是 interrupted → running 的转移证据，跳过会使 resume
+ *   派生视图语义：run-resumed 是 interrupted → running 的转移证据，跳过会使 resume
  *   续跑期间的概览停在 interrupted 直至终局）；
  * - run-settled：终局帧 → status 'done' + outcome（done/failed/cancelled/time_limited）；
  * - 其余（phase-started / phase-settled）：跳过（状态机转移不进概览文本——phase 分组展示
@@ -445,7 +445,7 @@ function applyAgentSettledToFold(
   })
 }
 
-/** [parseRunRecordStream 拆分] status 三态投影（[D2]）：终局帧 > 中断转移 > running（空流也 running——活跃兜底）。 */
+/** [parseRunRecordStream 拆分] status 三态派生视图（[D2]）：终局帧 > 中断转移 > running（空流也 running——活跃兜底）。 */
 function projectRecordStreamStatus(fold: RecordStreamFold): {
   status: string
   reason: string | undefined

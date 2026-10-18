@@ -34,7 +34,7 @@ export interface ResolvedRender {
 
 /** 已知 builtin type 集合（除 custom/ansi-text 的 8 个原语：7 布局 + 首个交互原语 action-bar）。
  *  新增原语时四同步：extension-protocol 类型 + 此处 + ui 组件 + v6 视觉（§7.4）。
- *  漏加此白名单 = 静默降级 ansi-text（编译期不可见），由 resolve.test.ts P5 断言守卫。 */
+ *  漏加此白名单 = 静默降级 ansi-text（编译期不可见），由 resolve.test.ts P5 断言检查。 */
 const BUILTIN_TYPES: ReadonlySet<string> = new Set([
   'card', 'stats-line', 'progress-bar', 'list-tree', 'columns', 'tab-bar', 'group', 'action-bar',
 ])

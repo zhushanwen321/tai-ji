@@ -1,9 +1,9 @@
 /**
- * SessionScanner W15 磁盘占位值守卫——扫描产出侧测试。
+ * SessionScanner W15 磁盘占位值检查——扫描产出侧测试。
  *
  * 锁定（data-source-governance W15，#2 空串覆盖事故防线）：
  * - scannedToSummary 产出的持久化条目带 source:'scan' 显式标记 + modelId:''/tokenCount:0
- *   占位值（占位语义显式化——合并侧 core mergeViewSnapshot 按 source 分流守卫）；
+ *   占位值（占位语义显式化——合并侧 core mergeViewSnapshot 按 source 分流检查）；
  * - 活跃实例条目（getActiveSummaries 透传）不标 source（缺省 = owner 权威，D1b 正常覆盖）；
  * - 回归：扫描全量后列表条目数与 sessions 目录 .jsonl 文件数一致（扫描不丢条目），
  *   活跃条目按 filePath 去重（活跃真值优先，扫描副本不进列表）。
@@ -56,7 +56,7 @@ describe('SessionScanner W15 磁盘占位值来源标记', () => {
     rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
   })
 
-  /** 窄 mock：结构性满足 scanner 窄接口（2 方法 = 实际消费面，S2 ISP 化无强转）。 */
+  /** 窄 mock：结构性满足 scanner 窄接口（2 方法 = 消费方实际用到的全部，S2 ISP 化无强转）。 */
   function makeScanner(active: SessionSummary[], activeFilePaths: Set<string>): SessionScanner {
     const svc: IScannerSessionOps = {
       getActiveSummaries: () => active,
@@ -77,7 +77,7 @@ describe('SessionScanner W15 磁盘占位值来源标记', () => {
     expect(groups).toHaveLength(1)
     const scanned = groups[0].sessions[0]
     expect(scanned.id).toBe('sess-1')
-    // 占位语义显式化：''/0 不是真值，source:'scan' 让合并侧能按来源分流守卫
+    // 占位语义显式化：''/0 不是真值，source:'scan' 让合并侧能按来源分流检查
     expect(scanned.source).toBe('scan')
     expect(scanned.modelId).toBe('')
     expect(scanned.tokenCount).toBe(0)

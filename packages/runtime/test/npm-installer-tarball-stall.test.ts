@@ -180,7 +180,7 @@ beforeAll(() => {
 afterAll(async () => {
   process.off('unhandledRejection', onUnhandled)
   process.off('uncaughtException', onUnhandled)
-  // 留一拍给潜在的延迟 rejection 落账，再统一断言为零
+  // 留一拍给潜在的延迟 rejection 落盘，再统一断言为零
   await new Promise<void>((r) => setImmediate(r))
   expect(unhandled).toEqual([])
 })

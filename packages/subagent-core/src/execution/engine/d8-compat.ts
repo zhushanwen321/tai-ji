@@ -1,13 +1,13 @@
 // src/execution/engine/d8-compat.ts
 //
-// [W8] D8 兼容公共面薄壳（设计 §3.6 D8 表 + impl-plan §2.8）：宿主零改动的机械保证。
+// [W8] D8 兼容公共部分薄壳（设计 §3.6 D8 表 + impl-plan §2.8）：宿主零改动的机械保证。
 // 三个符号的兼容形态：
 //   - registerZcodeEngine(engineDataDir) 薄壳：确保 id 'zcode' 的 cli descriptor 已
 //     注册，engineDataDir 经合成 env（TAIJI_AGENT_DATA_DIR）记入 descriptor portFactory；
 //   - createZcodeEngine(deps) → RemoteEngine('zcode')：deps → 协议客户端映射
 //     （engineDataDir → dataDir / cliPath → command / processEnv → baseEnv /
 //     sources 不跨进程——不变量 5「引擎不落盘宿主数据、自行解析凭据」）；
-//   - markAllSpawnedChildrenDead 收敛在 engine/host/spawned-children 公共面（[W3][F-7
+//   - markAllSpawnedChildrenDead 收敛在 engine/host/spawned-children 公共部分（[W3][F-7
 //     注释纠偏] 仅镜像记账——core 侧 spawnedChildren 镜像整体置死，不发进程信号；
 //     引擎进程回收 = stdin-EOF 自灭链（正常路径）+ disposeEngines() 显式触发
 //     cli 引擎 dispose（宿主 shutdown 链预留 API，现无生产接线），非「进程组收割」）。
@@ -62,7 +62,7 @@ const D8_PI_HOST_KIND = "pi";
 let warnedSourcesIgnored = false;
 
 /**
- * D8 兼容 deps 形状（zsw runner-core.js:163 实测调用面 {engineDataDir, cliPath?}）。
+ * D8 兼容 deps 形状（zsw runner-core.js:163 实测调用点 {engineDataDir, cliPath?}）。
  * 与 engines/zcode ZcodeEngineDeps 结构兼容：zsw 传入对象可直接赋值；sources /
  * probeVersion 为兼容残留字段——协议形态下不跨进程（忽略 + warn）。
  */
@@ -80,7 +80,7 @@ export interface D8CompatZcodeEngineDeps {
 }
 
 /**
- * [W11 收口] 旧 ZcodeEngineDeps 的兼容别名：barrel 原类型导出（zsw 调用面的 deps
+ * [W11 收尾] 旧 ZcodeEngineDeps 的兼容别名：barrel 原类型导出（zsw 全部调用点的 deps
  * 形状契约）与 D8CompatZcodeEngineDeps 合并——结构同源（engineDataDir/cliPath/
  * sources/probeVersion/processEnv），别名保留免 zsw 侧机械改名。
  */
@@ -93,7 +93,7 @@ interface LocatedEnginePkg {
   binPath: string;
 }
 
-/** 引擎包 manifest 的薄壳消费面（capabilities/envPrefixes/modelCatalog/modelTranslation 快照）。 */
+/** 引擎包 manifest 的薄壳消费方（capabilities/envPrefixes/modelCatalog/modelTranslation 快照）。 */
 interface ManifestInfo {
   capabilities: EngineCapabilities;
   envPrefixes: string[];
@@ -147,7 +147,7 @@ function attemptVendoredPkgDir(engineId: string): string {
  * vendored package.json 的 manifest 段原始解析（单一来源，locateVendoredEnginePkg 与
  * readEngineManifest 共用）：读取 pkgDir/package.json 并 duck-typed 三段下降
  * pkg["taiji"]["subagentEngine"]。读文件/JSON 解析失败或 manifest 段缺失/非对象
- * （含 null 与数组）→ undefined。数组拒绝上收到共用守卫对两个调用点均结局等价：
+ * （含 null 与数组）→ undefined。数组拒绝上收到共用检查对两个调用点均结局等价：
  * JSON.parse 产物为数组时不可能携带字符串键（JSON 语法限制），bin 提取路径对数组取
  * ["bin"] 恒 undefined——与拒绝分支同收敛为定位失败。pkg 一并返回供调用方做 name
  * 精确匹配与 bin 相对路径解析（单次解析，不重复读盘）。
@@ -187,7 +187,7 @@ function locateVendoredEnginePkg(engineId: string): LocatedEnginePkg | undefined
   return { pkgDir, binPath };
 }
 
-/** manifest 薄壳消费面解析（复用 W4 engine-manifest 字段级解析器——单源，不复制规则）。 */
+/** manifest 薄壳消费方解析（复用 W4 engine-manifest 字段级解析器——单源，不复制规则）。 */
 function readEngineManifest(pkgDir: string): ManifestInfo | undefined {
   const parsed = readSubagentEngineManifestRaw(pkgDir);
   if (parsed === undefined) return undefined;
@@ -272,7 +272,7 @@ function warnSourcesIgnoredOnce(deps: D8CompatZcodeEngineDeps): void {
 }
 
 /**
- * manifest 薄壳消费面解析 + 回退合成：vendored 包未定位/manifest 不可读 → capabilities
+ * manifest 薄壳消费方解析 + 回退合成：vendored 包未定位/manifest 不可读 → capabilities
  * 全保守 + envPrefixes 空（gate 同步拦生成，失败显式发生在首次协议调用）。
  */
 function resolveManifestInfo(located: LocatedEnginePkg | undefined): ManifestInfo {
@@ -286,8 +286,8 @@ function resolveManifestInfo(located: LocatedEnginePkg | undefined): ManifestInf
 }
 
 /**
- * RemoteEngine manifest 快照：capabilities 恒有；modelCatalog 三态语义（无枚举面不注入）；
- * modelTranslation 缺省不注入（构造器据此摘除 translateModelRef 成员——部署形态的翻译面
+ * RemoteEngine manifest 快照：capabilities 恒有；modelCatalog 三态语义（无枚举情形不注入）；
+ * modelTranslation 缺省不注入（构造器据此摘除 translateModelRef 成员——部署形态的翻译映射
  * 必须经本快照到达，否则该成员在 D8/zsw 路径整体静默缺席）。
  */
 function buildManifestSnapshot(manifestInfo: ManifestInfo): RemoteEngineManifestSnapshot {

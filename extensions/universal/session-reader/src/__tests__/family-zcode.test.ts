@@ -17,7 +17,7 @@ import { listZcodeManifests } from '../discovery/zcode-manifest.js'
 // 行被删 → 仍 false）即「列表视图不开库」的分工声明断言。
 //
 // 与 pi 判据不同构（D5-1 显式声明）：pi = fileStats JSONL 存在性；zcode 节点无
-// JSONL 文件，按「库可达」判。pi 侧既有 fixture 行为零变化由 family.test.ts 全绿守卫
+// JSONL 文件，按「库可达」判。pi 侧既有 fixture 行为零变化由 family.test.ts 全绿检查
 // （本文件零改动 family.test.ts——更强的零涟漪证据）。
 // ============================================================
 

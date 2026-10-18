@@ -14,7 +14,7 @@ export interface RetryState {
 }
 
 /**
- * finalizeSession 收口原因（与 system-arch §5 reason 字段对齐）。
+ * finalizeSession 收尾原因（与 system-arch §5 reason 字段对齐）。
  *
  * reason → 终态映射（finalizeSession 内部不变式）：
  *   normal       → message:complete, toolCall:end_not_received（诚实态，迟到 tool_call_end 覆盖到 completed）
@@ -24,7 +24,7 @@ export interface RetryState {
  *   disconnect   → message:error,     toolCall:end_not_received
  *   restart      → message:error,     toolCall:end_not_received
  * （原 'timeout' 成员随 pendingSend 30s 空窗 timer 退役——ADR-0122 时间平抑红线，
- * pendingSend/streaming 的收口全事件驱动，无墙钟兜底生产者。）
+ * pendingSend/streaming 的收尾全事件驱动，无墙钟兜底生产者。）
  */
 export type FinalizeReason =
   | 'normal'

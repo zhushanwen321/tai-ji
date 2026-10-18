@@ -5,31 +5,35 @@
 //
 // 本文件属壳侧（shell），不进 core 切面——对 pi SDK 与 pi 宿主协作件
 // （@earendil-works/pi-coding-agent / @zhushanwen/pi-extension-logger /
-// @zhushanwen/pi-pending-notifications / @zhushanwen/session-delivery）的运行时
-// import 收敛在此层，core 闭包（D9 守卫对象）不得出现这些包。
+// @zhushanwen/pi-pending-notifications / @zhushanwen/pi-delivery-port）的运行时
+// import 收敛在此层，core 闭包（D9 检查对象）不得出现这些包。
 //
 // 端口语义：
 //   - dataRoot / discoveryRoots 每次调用现取 getAgentDir()，禁止模块级缓存：
 //     getAgentDir 尊重 PI_CODING_AGENT_DIR 实例隔离（taiji 按 session dir
-//     隔离 pi 实例），缓存会把后续切换实例的进程钉死在首个 agentDir。
+//     隔离 pi 实例），缓存会把后续切换实例的进程固定在首个 agentDir。
 //   - discoveryRoots 的根清单/顺序/source 标签与 shared/resource-discovery.ts
 //     buildScanTargets、orchestration/skill-discovery.ts resolveSkillPath 的现推导
 //     逐项一致（user-pi / npm / npm-dev 字面即现 ResourceSource 标签）。
 //     project/workspace 根不在壳侧提供——core 消费方按 workspaceRoot 自行推导
 //     （u0-data-discovery 波次接注入消费）。C5⑥ 起 agents kind 追加第 4 根：
-//     core 包一级父目录（source "npm"）——core agents/ 资产进 pi 发现面，见
+//     core 包一级父目录（source "npm"）——core agents/ 资产进 pi 发现范围，见
 //     corePackageNpmRoot 注释。[P5 D4-2] agents/workflows 的 npm/npm-dev 两根
 //     形态感知（taiji 态指 agentDir 父目录 = 实际安装目录，独立态保留 agentDir
-//     直拼），且 core 根对 workflows kind 同样注入（staged 副本入扫描面）——
+//     直拼），且 core 根对 workflows kind 同样注入（staged 副本入扫描范围）——
 //     见 agentDirKindRoots 注释。skills/engines 的同构 npm 槽错位不在 P5 范围
-//     （D4 发现层 = agents/workflows 注入面；skills 另有「刻意不补」既有决策）。
+//     （D4 发现层 = agents/workflows 注入点；skills 另有「刻意不补」既有决策）。
 //   - countActiveFromEntries 适配：pi 侧真函数返回 CountActiveResult 对象，core
-//     端口契约是 number（core 消费面只读 .count，notify-ports.ts 契约注释）——
+//     端口契约是 number（core 消费方只读 .count，notify-ports.ts 契约注释）——
 //     foundation 单元登记给本单元的适配责任。
-//   - createDelivery 透传：@zhushanwen/session-delivery 的 createDelivery 与 core
-//     的 Delivery* 结构化类型逐字段结构兼容（DeliveryHandle 的 sendChecked/depth
-//     是结构超集成员，多不碍兼容）——结构兼容由本注入点 typecheck 守护，上游签名
-//     漂移即红（notify-ports.ts「闭包红线」段）。
+//   - getDeliveryPort 透传：@zhushanwen/pi-delivery-port 的进程级槽访问器本体直传
+//     （core 闭包红线禁 import 该包，经 NotifyDomainPorts.getDeliveryPort 端口注入
+//     访问器——notifier 消费点每次即到即读，禁缓存实例引用）。core 侧
+//     DeliveryPortHandle 转写类型与其返回结构逐字段结构兼容——结构兼容由本注入点
+//     typecheck 守护，上游签名漂移即红（notify-ports.ts「闭包红线」段）。
+//     [unified-delivery 波 2] 投递内核工厂注入（createDelivery）随扩展侧内核部署
+//     退役（老能力映射 #7：与 port 两套装配并存违背装配单一归属——port 恒装配于
+//     base-tool-enhance，缺席降级 = notifier 直发兜底）。
 
 import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -39,7 +43,7 @@ import { fileURLToPath } from "node:url";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { getLogger } from "@zhushanwen/pi-extension-logger";
 import { countActiveFromEntries } from "@zhushanwen/pi-pending-notifications";
-import { createDelivery } from "@zhushanwen/session-delivery";
+import { getDeliveryPort } from "@zhushanwen/pi-delivery-port";
 
 import type { DiscoveryRoot, HostServices } from "@zhushanwen/subagent-core";
 import type { LogLevel } from "@zhushanwen/subagent-core";
@@ -47,7 +51,7 @@ import type { NotifyDomainPorts } from "@zhushanwen/subagent-core";
 import { toErrorMessage } from "@zhushanwen/pi-ext-guards";
 
 /**
- * core 包（@zhushanwen/subagent-core）agents/ 资产进 pi 发现面的注入根（C5⑥，
+ * core 包（@zhushanwen/subagent-core）agents/ 资产进 pi 发现范围的注入根（C5⑥，
  * convergence §5.4 检查点 2）。
  *
  * 解析锚点 = `@zhushanwen/subagent-core/workflows/README.md`：`./workflows/*` 子入口
@@ -85,7 +89,7 @@ export function corePackageNpmRoot(moduleUrl: string = import.meta.url): string 
       // getLogger 惰性调用（冷路径：测试环境对 pi-extension-logger 的 module-level
       // mock 可能返回 undefined，模块级持有会在 import 期踩 undefined）
       getLogger("pi-host").debug(
-        "[pi-host] core 包经 staged scope 根注入（bundle 形态，无 node_modules 解析面）",
+        "[pi-host] core 包经 staged scope 根注入（bundle 形态，无 node_modules 解析范围）",
         { root: stagedRoot },
       );
       return stagedRoot;
@@ -114,11 +118,11 @@ export function corePackageNpmRoot(moduleUrl: string = import.meta.url): string 
 	 * extensions/skills/prompts/themes 四字段（锚 = pi-coding-agent
 	 * dist/core/pi-manifest.js:3 RESOURCE_FIELDS，pi@1.0.0 已核；同源登记见
 	 * docs/extensions/extension-conventions.md「readPiManifest」条），无 agents/workflows
-	 * 概念。已核仓内无任何包声明该字段，故扫描面内所有包都走约定目录分支，不进
+	 * 概念。已核仓内无任何包声明该字段，故扫描范围内所有包都走约定目录分支，不进
 	 * manifest 失败分支）。
  *
  * 与 dev/npm 形态的既有语义一致：npm 槽根扫的就是 scope 下全部包目录（因此本包自带
- * 的 workflows/agents 在 dev/npm 形态同样入发现面），非新增语义。
+ * 的 workflows/agents 在 dev/npm 形态同样入发现范围），非新增语义。
  *
  * 形态判据 = 父目录名以 `@` 开头：dev（模块在 `extensions/universal/...`）与 npm
  * 安装形态都先走 resolve 成功分支，本回退不可达；仅 bundle/staged 形态命中。
@@ -139,7 +143,7 @@ export function stagedScopeRootFromModuleUrl(moduleUrl: string): string | undefi
  *  顺序与 source 标签逐项对齐 resource-discovery.ts buildScanTargets 的
  *  user-pi → npm → npm-dev 段（根列表按优先级低→高排列，D2 语义边界）。
  *
- *  [P5 D4-2 扫描根修正] npm/npm-dev 两根形态感知：taiji 宿主注入态改指 taiji
+ *  [P5 D4-2 扫描从根源修复] npm/npm-dev 两根形态感知：taiji 宿主注入态改指 taiji
  *  实际安装目录（agentDir 的父目录——taiji 布局迁移后 npm/extensions 是 agentDir
  *  的 sibling，对齐 runtime pi-paths.ts getNpmDir/getExtensionsDir 的推导），独立
  *  pi 形态保留 getAgentDir() 派生的 pi 语义根（现状即正确）。 */
@@ -147,8 +151,8 @@ function agentDirKindRoots(kind: "agents" | "workflows"): DiscoveryRoot[] {
   const agentDir = getAgentDir();
   // taiji 态 npm/extensions 布局 = agentDir 的 sibling（<dataDir>/npm、
   // <dataDir>/extensions，agentDir = <dataDir>/agent）；旧 agentDir 直拼形态在
-  // taiji 态恒为不存在目录——taiji 形态下 npm 安装位与 staged 包发现面恒空的
-  // 病灶根因。已知误判面（有意接受，登记 deviations）：独立态用户以 -e 手动加载
+  // taiji 态恒为不存在目录——taiji 形态下 npm 安装位与 staged 包发现范围恒空的
+  // 问题点根因。已知误判面（有意接受，登记 deviations）：独立态用户以 -e 手动加载
   // 本扩展时 argv 同样有 --extension，npm 槽根指到不存在的 <agentDir> 父目录 →
   // 扫描静默空（损失 = 罕见场景的 npm 安装位发现；agentDir/npm 本就非 pi 官方布局）。
   const installBase = isTaijiHostInjected() ? dirname(agentDir) : agentDir;
@@ -164,7 +168,7 @@ function agentDirKindRoots(kind: "agents" | "workflows"): DiscoveryRoot[] {
   //    同标签多根依注入序扫描 + last-writer-wins，core（随本包依赖分发的新模板）
   //    遮蔽同安装位内旧版残留副本；序位仍在 user 级之上、project 级之下（红线 1）。
   //    [P5] workflows kind 的「刻意不注入」禁区拆除：原顾虑 = <available_workflows>
-  //    的 <location> 是 CA2 快照不豁免面（红线 8 豁免仅限 agent 角色路径前缀）。
+    //    的 <location> 是 CA2 快照不属豁免范围（红线 8 豁免仅限 agent 角色路径前缀）。
   //    P-C6 实施期核查裁决：CA2 锚定测试为 fixture 输入驱动（不消费运行时路径），
   //    turn 间字节稳定由工厂渲染缓存 + 码点序构造性保证——staged 绝对路径渲染
   //    <location> 不破坏快照稳定性，内置 workflow 因此可列出、路径可派发。
@@ -271,7 +275,7 @@ export function createPiHostServices(): HostServices {
 /**
  * 孙进程（subagent 任务子进程）schema 强制所需的最小扩展集（P-C5 起步裁决：
  * 仅 structured-output）。全量 staged 下发会让孙进程加载全部无关扩展——每包都
- * 可能注册工具/注入提示词，孙进程的工具面与 system prompt 行为不可控。
+ * 可能注册工具/注入提示词，孙进程的工具范围与 system prompt 行为不可控。
  *
  * 白名单组成唯一登记处（runtime 侧 getExtensionPaths 全量下发、本常量收窄，
  * 无第二份判据副本——扩白名单只改此处并同步 pi-host.test.ts 用例，以及
@@ -286,7 +290,7 @@ export function createPiHostServices(): HostServices {
  *     选型：两段连续匹配（分组目录名 + 包目录名）而非尾段单匹配 `structured-output`
  *     ——尾段会撞任意同名无关目录（如其他包内的同名子目录）；两段含本仓 extensions
  *     固定分组名 `universal`，且 --extension 值来源可控（runtime extension-service
- *     下发 / pi CLI flags），实际碰撞面可忽略。
+ *     下发 / pi CLI flags），实际碰撞风险可忽略。
  */
 const GRANDCHILD_EXTENSION_PKG_SEGMENTS: readonly (readonly string[])[] = [
   ["@zhushanwen", "pi-structured-output"],
@@ -372,7 +376,7 @@ function resolveStructuredOutputPeer(): string | undefined {
 /**
  * 从 argv 提取 `--extension` / `-e` 的全部值（等号与空格两种形式；自旧
  * mirrorMainProcessFlags 的解析规则精简迁移——该镜像机制已废弃，此处只取
- * extension 值，布尔镜像面不再透传）。
+ * extension 值，布尔镜像侧不再透传）。
  *
  * 有值 flag 表（跳过其他 flag 的值时不误吃）与 MF-7a 判定（`--extension` 后跟
  * `--` 开头 token 不吃值）逐字保留原语义——解析坑防回归见 pi-host.test.ts
@@ -393,7 +397,7 @@ const ARGV_VALUED_FLAGS = new Set<string>([
 const ARGV_FLAG_START = 2;
 
 /**
- * taiji 宿主注入态判据（P5 D4-2 扫描根修正；形态判据复用 H2 先例）：主 pi 进程
+ * taiji 宿主注入态判据（P5 D4-2 扫描从根源修复；形态判据复用 H2 先例）：主 pi 进程
  * argv 含 --extension/-e 值即 taiji spawn（runtime 恒带 staged 全量集下发的
  * --extension；独立 pi 经 settings 清单加载扩展，argv 无该 flag）。
  * 与 resolveGrandchildExtensionPaths 的白名单收窄是两个决策——此处只做形态判定
@@ -451,7 +455,7 @@ export function createPiNotifyDomainPorts(): NotifyDomainPorts {
       return countActiveFromEntries(entries, { currentSessionId: opts?.currentSessionId }).count;
     },
 
-    // 投递内核工厂直传本体（结构兼容论证见文件头）；不经包装避免多一层间接面。
-    createDelivery,
+    // 投递端口槽访问器直传本体（结构兼容论证见文件头）；不经包装避免多一层间接面。
+    getDeliveryPort,
   };
 }

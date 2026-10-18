@@ -170,7 +170,7 @@ STAGED_FILES=$(git diff --cached --name-only --diff-filter=ACMR)
 # ui/mobile 的**测试文件**：renderer 默认 tsconfig 排除测试（typecheck-test 变体只含 renderer
 # 自己的测试），ui src 虽经 renderer include 传递覆盖，但 ui 测试文件（如 UserBubble.test 的
 # EditComposerProps 契约漂移 9 错存量）无任何编译期信号，mobile 全包同理。ESLint 与 vue-tsc
-# 两段同源本变量，随之扩面。
+# 两段同源本变量，随之扩大范围。
 FRONTEND_FILES=$(echo "$STAGED_FILES" | grep -E "^packages/(renderer|ui|mobile-renderer)/src/" || true)
 EXTENSION_FILES=$(echo "$STAGED_FILES" | grep -E "^extensions/.*\.ts$" | grep -vE "__tests__|\.test\.|/workflows/|/examples/|\.d\.ts$" || true)
 
@@ -672,7 +672,7 @@ fi
 # 2h-2. P-bundle 门（session-reader-shared-core 附录 A，D2 生死门）
 #     scripts/check-pbundle.mjs：builtin staged 产物内 sqlite 驱动探测代码必须保持
 #     「运行期解析」形态——spec 被静态化（esbuild 升级 / 驱动实现回改字面量）时
-#     bundle 成功但 staged 运行期 Cannot find module，比不拆更糟。触发面 = staged
+#     bundle 成功但 staged 运行期 Cannot find module，比不拆更糟。触发范围 = staged
 #     命中 staged 产物的两个源（reader 扩展 / zcode-session-source）或门脚本本体；
 #     CI invariants 免 staged 前提 --rebuild 全量兜底（D7 通则，与 2h 同一挂载理由）。
 #     --rebuild 先重建 staged（bundle-extensions <1s，防「检查的是滞后产物」）；
@@ -791,7 +791,7 @@ else
 fi
 
 # ============================================================================
-# CSS token SSOT 一致性检查（DESIGN.md frontmatter 投影 ↔ style.css 值真值）
+# CSS token SSOT 一致性检查（DESIGN.md frontmatter 派生视图 ↔ style.css 值真值）
 # ============================================================================
 
 CSS_SSOT_CHECKER=".githooks/check_css_token_ssot.py"
@@ -811,7 +811,7 @@ if [ "$SKIP_ALL_CHECKS" != "1" ] && [ "$SKIP_CSS_TOKEN_SSOT_CHECK" != "1" ]; the
 
             if [ $EXIT_CODE -ne 0 ]; then
                 echo ""
-                echo -e "${RED}[ERROR] CSS token SSOT 检查失败：DESIGN.md 投影值与 style.css 不一致${NC}"
+                echo -e "${RED}[ERROR] CSS token SSOT 检查失败：DESIGN.md 派生视图值与 style.css 不一致${NC}"
                 echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
                 exit 1
             fi
@@ -1165,9 +1165,9 @@ fi
 #   node scripts/check-structure-wiring.mjs：管辖区（packages/ extensions/
 #   resources/plugins/）含 package.json 但不在 pnpm-workspace.yaml globs 内的包
 #   必须在 docs/structure-wiring.json 登记各管线接线点（CI typecheck / 测试装配 /
-#   发布线 / coverage 测量面），登记锚点在目标文件中真实存在——新顶层结构
+#   发布线 / coverage 测量范围），登记锚点在目标文件中真实存在——新顶层结构
 #   第一笔 commit 只做接线与登记（ed6735b47 一 commit 三坑形态不允许再发生）。
-#   触发面：pnpm-workspace.yaml / docs/structure-wiring.json / 管辖区新增 package.json。
+#   触发范围：pnpm-workspace.yaml / docs/structure-wiring.json / 管辖区新增 package.json。
 #   注：不设独立跳过开关，仅受 SKIP_ALL_CHECKS 总开关管辖。
 # ============================================================================
 
@@ -1514,7 +1514,7 @@ fi
 
 # ============================================================================
 # 路径引用漂移检查（staged 删除/移动的旧路径 → 全仓残留引用拦截）
-#   场景：文件迁移/删除后，守卫触发正则、测试 fixture、钩子脚本里内嵌的旧路径
+#   场景：文件迁移/删除后，检查触发正则、测试 fixture、钩子脚本里内嵌的旧路径
 #   不随更新 = 防线静默失效（v0.10.14 轮 markdown-sanitize.ts 迁移实例）。
 #   豁免登记处 = .githooks/check_path_ref_drift.py 的 PATH_REF_EXEMPT。
 # ============================================================================
@@ -1544,7 +1544,7 @@ I18N_CJK_CHECKER=".githooks/check_i18n_cjk.py"
 
 if [ "$SKIP_ALL_CHECKS" != "1" ] && [ "$SKIP_I18N_CJK_CHECK" != "1" ]; then
     # 仅当 staged 含 .vue 文件时检查（双根与 check_i18n_cjk.py 的 SCAN_ROOTS 对齐；
-    # mobile-renderer 根缺席曾致其下 .vue 不触发守卫）
+    # mobile-renderer 根缺席曾致其下 .vue 不触发检查）
     STAGED_VUE=$(echo "$STAGED_FILES" | grep -E "^packages/(renderer/src|mobile-renderer/src)/.*\.vue$" || true)
     if [ -n "$STAGED_VUE" ]; then
         echo -e "${BLUE}[INFO] 运行 i18n CJK 残留检测...${NC}"
@@ -1696,7 +1696,7 @@ if [ "$SKIP_ALL_CHECKS" != "1" ]; then
     # pi-sync 派生锚点检查（pi-evolution-consistency §3.2 D2，按路径触发——性能考虑，
     # 只在触碰派生锚点文件时全量跑：根 package.json / lockfile / build.yml / prepare 脚本 /
     # 快照 / gen 脚本 / shared constants / extensions 任一 package.json / 检查脚本自身）。
-    # 触发面在主 STAGED_FILES（ACMR）外并入 staged 删除列表（--diff-filter=D）：删除派生锚点
+    # 触发范围在主 STAGED_FILES（ACMR）外并入 staged 删除列表（--diff-filter=D）：删除派生锚点
     # 必须触发检查——各 S 项对锚点文件不存在自带 fail 分支（S1/S2/S3/S6），漏触发 = 删除场景
     # 静默放行。主 STAGED_FILES 保持 ACMR 不放行 D：会把已删除的 .ts/package.json 路径喂给
     # ESLint / manifest 等文件存在性检查段致 ERR，影响面大，仅检查挂载点需要 D。
@@ -1720,17 +1720,17 @@ ${STAGED_DELETED}"
     fi
 
     # thinking 档位词表检查（ext-simplify-17 §3.2 D5 机器检查补强 + ext-simplify-18 §3.4
-    # D6 扩面，按路径触发）：
+    # D6 扩大范围，按路径触发）：
     # pi-ai ModelThinkingLevel 联合 ↔ 本地词表副本（llm-shared Set / pi-rpc 数组 /
     # subagent-core THINKING_ORDER 有序数组）双向比对。
     # 钉值单测只锚副本自身字面量，pi 升级改联合成员时副本静默过期（P1-a 漏 xhigh 实证），
-    # 仅此检查红灯。触发面：pnpm-lock.yaml（pi-ai 版本变化）/ 三副本文件 / 检查脚本自身；
+    # 仅此检查红灯。触发范围：pnpm-lock.yaml（pi-ai 版本变化）/ 三副本文件 / 检查脚本自身；
     # 复用上方 pi-sync 段拼好的 PI_SYNC_TRIGGER_FILES（staged ACMR + deleted D——副本文件
-    # 被删除也必须触发，脚本对文件缺失自带 fail 分支）。与 pi-sync 触发面有意部分重叠
+    # 被删除也必须触发，脚本对文件缺失自带 fail 分支）。与 pi-sync 触发范围有意部分重叠
     # （lockfile 同为触发文件）但职责不同：pi-sync 守构建派生锚点且 S6 只比 KnownApi，
     # 本检查守两个比对面：subagent-core 的 THINKING_ORDER（宿主侧校验词表）与 shared 的
     # PI_THINKING_LEVELS（前端派生源，core/renderer 从它派生）。llm-shared / pi-rpc 的副本已删除，
-    # 触发面随之摘除。不设独立 SKIP_* 开关（R1 后惯例，
+    # 触发范围随之摘除。不设独立 SKIP_* 开关（R1 后惯例，
     # 总开关 SKIP_ALL_CHECKS 兜底）。
     if echo "$PI_SYNC_TRIGGER_FILES" | grep -qE "^scripts/check-thinking-levels\.mjs$|(^|/)pnpm-lock\.yaml$|^packages/subagent-core/src/shared/model-ref\.ts$|^packages/shared/src/pi-preset\.ts$"; then
         echo -e "${BLUE}[INFO] thinking 档位词表文件有变更，运行档位词表比对检查...${NC}"
@@ -1753,7 +1753,7 @@ ${STAGED_DELETED}"
     # ALLOWED_TAGS / ALLOWED_ATTR 源文件字面量集合对拍（零散文解析）——正面清单双向一致 +
     # 负面清单与剥除语义一致（含 data-* 通配 ↔ ALLOW_DATA_ATTR=false 锚点）。渲染白名单改了
     # 而能力文案忘跟 = agent 被教会的能力与实际渲染行为漂移，仅此检查红灯。
-    # 与 thinking 档位检查同型（读双侧源文件字面量对拍），触发面：检查脚本自身 /
+    # 与 thinking 档位检查同型（读双侧源文件字面量对拍），触发范围：检查脚本自身 /
     # system-prompt 源 / 渲染净化源（文件被删除也必须触发，脚本对文件缺失自带 fail 分支）。
     # 不设独立 SKIP_* 开关（R1 后惯例，总开关 SKIP_ALL_CHECKS 兜底）。
     if echo "$PI_SYNC_TRIGGER_FILES" | grep -qE "^scripts/check-capability-allowlist-sync\.mjs$|^extensions/taiji/system-prompt/src/index\.ts$|^packages/ui/src/features/chat/markdown-sanitize\.ts$"; then
@@ -1776,7 +1776,7 @@ ${STAGED_DELETED}"
     # SESSION_ARTIFACTS_DIR_SEGMENT + resolveSessionArtifactsDir）的**段名字面量与 sessionId
     # 校验正则字面量**对拍（读源文件文本，零散文解析；与 u1 的 capability 清单对拍同型）。
     # 任一漂移 = agent 收到的路径与实际目录不符（写偏或预览 404），仅此检查红灯。
-    # 触发面：检查脚本自身 / shared paths 源 / system-prompt 源 / runtime pi-paths 第三源
+    # 触发范围：检查脚本自身 / shared paths 源 / system-prompt 源 / runtime pi-paths 第三源
     # （sessionId 正则三方对拍的第三源；文件被删除也必须触发，脚本对文件缺失自带 fail
     # 分支）。不设独立 SKIP_* 开关（R1 后惯例，总开关 SKIP_ALL_CHECKS 兜底）。
     if echo "$PI_SYNC_TRIGGER_FILES" | grep -qE "^scripts/check-artifact-dir-formula-sync\.mjs$|^packages/shared/src/paths\.ts$|^extensions/taiji/system-prompt/src/index\.ts$|^packages/runtime/src/infra/pi/pi-paths\.ts$"; then
@@ -1801,7 +1801,7 @@ ${STAGED_DELETED}"
     # 两侧对同一相对路径解析出不同绝对路径（iframe src 与 markdown 链接点击落点不一致）。
     # 读三侧源文件文本，剥签名行后函数体逐字对拍 + 折叠语义锚点在场断言（防三份一致退化）。
     # renderer lib/path-utils.resolvePreviewPath 非本族镜像（相对路径仅前缀拼接不折叠 `..`），
-    # 不参与对拍。触发面：检查脚本自身 / 三份源文件（文件被删除也必须触发，脚本对文件缺失
+    # 不参与对拍。触发范围：检查脚本自身 / 三份源文件（文件被删除也必须触发，脚本对文件缺失
     # 自带 fail 分支）。不设独立 SKIP_* 开关（R1 后惯例，总开关 SKIP_ALL_CHECKS 兜底）。
     if echo "$PI_SYNC_TRIGGER_FILES" | grep -qE "^scripts/check-posix-resolve-mirror-sync\.mjs$|^packages/ui/src/features/chat/html-preview-path\.ts$|^packages/ui/src/features/chat/markdown-sanitize\.ts$|^packages/ui/src/features/chat/MarkdownRenderer\.vue$"; then
         echo -e "${BLUE}[INFO] POSIX resolve 镜像文件有变更，运行三份折叠实现对拍检查...${NC}"
@@ -1819,7 +1819,7 @@ ${STAGED_DELETED}"
     fi
 
     # G3：registry vs pi-ai 差分探针（触发文件：档位链路四文件任一 staged，basename 匹配。
-    # [C4] use-provider-edit 拆分后思考预设/反推归位 provider-edit-models.ts，触发面同步跟随）
+    # [C4] use-provider-edit 拆分后思考预设/反推归位 provider-edit-models.ts，触发范围同步跟随）
     if echo "$STAGED_FILES" | grep -qE "(^|/)(thinking-levels\.ts|provider-edit-models\.ts|builtin-providers\.json|model-capability\.ts)$"; then
         echo -e "${BLUE}[INFO] 档位链路文件有变更，运行 G3 差分探针...${NC}"
         if ! node scripts/diff-probe-thinking.mjs; then
@@ -1863,7 +1863,7 @@ fi
 #   （改构建面，秒级耗时也属发布门职责），挂发布管线 npm-prerelease.sh /
 #   release-npm.yml。
 #   注：不设独立 SKIP_* 开关（R1 后惯例，总开关 SKIP_ALL_CHECKS 兜底）。
-# 触发面在主 STAGED_FILES（ACMR）外并入本路径范围的 staged 删除（不带 --diff-filter
+# 触发范围在主 STAGED_FILES（ACMR）外并入本路径范围的 staged 删除（不带 --diff-filter
 # 的 pathspec 清单，天然含 D）：单独 staged 删除检查脚本也必须触发——下方 [ ! -f ]
 # 存在性检查正是删除场景的防线，ACMR 过滤 D 导致漏触发 = 删除静默放行。主
 # STAGED_FILES 保持 ACMR 的理由见上方 pi-sync 段注释（D 喂给 ESLint/manifest 等
@@ -1896,7 +1896,7 @@ SUBAGENT_CORE_CYCLE_STAGED=$(git diff --cached --name-only -- packages/subagent-
 if echo "$SUBAGENT_CORE_CYCLE_STAGED" | grep -qE "^packages/subagent-core/|^scripts/check-subagent-core-value-cycles\.mjs$"; then
     print_section "[subagent-core 包内值依赖环检查]"
     if [ ! -f "scripts/check-subagent-core-value-cycles.mjs" ]; then
-        echo -e "${RED}[ERROR] 找不到 scripts/check-subagent-core-value-cycles.mjs（C-data-26 守卫缺失）${NC}"
+        echo -e "${RED}[ERROR] 找不到 scripts/check-subagent-core-value-cycles.mjs（C-data-26 检查缺失）${NC}"
         exit 1
     fi
     if ! node scripts/check-subagent-core-value-cycles.mjs; then
@@ -1916,18 +1916,18 @@ fi
 # ============================================================================
 # 领域类型路径单源检查（D2 配套，register §2.0/§2.4）
 #   subagent-core 源码或检查脚本自身变更时触发：scripts/check-domain-type-path.mjs
-#   —— execution/domain/ 是领域类型唯一权威路径；assembly 禁 re-export、消费面禁绕道。
+#   —— execution/domain/ 是领域类型唯一权威路径；assembly 禁 re-export、消费方禁绕道。
 # ============================================================================
 
 DOMAIN_TYPE_PATH_STAGED=$(git diff --cached --name-only -- packages/subagent-core/src scripts/check-domain-type-path.mjs)
 if echo "$DOMAIN_TYPE_PATH_STAGED" | grep -qE "^packages/subagent-core/src/|^scripts/check-domain-type-path\.mjs$"; then
     print_section "[领域类型路径单源检查]"
     if [ ! -f "scripts/check-domain-type-path.mjs" ]; then
-        echo -e "${RED}[ERROR] 找不到 scripts/check-domain-type-path.mjs（D2 守卫缺失）${NC}"
+        echo -e "${RED}[ERROR] 找不到 scripts/check-domain-type-path.mjs（D2 检查缺失）${NC}"
         exit 1
     fi
     if ! node scripts/check-domain-type-path.mjs; then
-        echo -e "${RED}[ERROR] 领域类型路径出现双源（D2）——领域名只在 execution/domain/ 声明，assembly 不得 re-export，消费面不得绕道${NC}"
+        echo -e "${RED}[ERROR] 领域类型路径出现双源（D2）——领域名只在 execution/domain/ 声明，assembly 不得 re-export，消费方不得绕道${NC}"
         echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
         exit 1
     fi
@@ -1938,7 +1938,7 @@ GLOBAL_SLOT_STAGED=$(git diff --cached --name-only -- packages/subagent-core/src
 if echo "$GLOBAL_SLOT_STAGED" | grep -qE "^packages/subagent-(core|engine-sdk)/src/|^extensions/universal/subagent-workflow/src/|^scripts/check-global-slot-keys\.mjs$"; then
     print_section "[进程级全局槽键归属检查]"
     if [ ! -f "scripts/check-global-slot-keys.mjs" ]; then
-        echo -e "${RED}[ERROR] 找不到 scripts/check-global-slot-keys.mjs（C-state-20 守卫缺失）${NC}"
+        echo -e "${RED}[ERROR] 找不到 scripts/check-global-slot-keys.mjs（C-state-20 检查缺失）${NC}"
         exit 1
     fi
     if ! node scripts/check-global-slot-keys.mjs; then
@@ -1959,7 +1959,7 @@ fi
 #   合法边清单（ALLOWED_EDGES）以符号级精确登记在检查脚本内（现状两条：
 #   ResolvedIdentity type-only ×2，依据 D-R4-8；[HISTORICAL] 建立时第三条
 #   ENV_SELF_RECORD_ID 常量单向 D-R3-2 已随 R6 常量归位删除）。
-#   触发面并入本路径范围的 staged 删除（pathspec 清单天然含 D）：单独 staged 删除
+#   触发范围并入本路径范围的 staged 删除（pathspec 清单天然含 D）：单独 staged 删除
 #   检查脚本也必须触发——下方 [ ! -f ] 存在性检查正是删除场景的防线。
 #   注：不设独立 SKIP_* 开关（R1 后惯例，总开关 SKIP_ALL_CHECKS 兜底）。
 # ============================================================================
@@ -1983,47 +1983,47 @@ fi
 
 # ============================================================================
 # ============================================================================
-# record 持久化写面检查（H4/S4/D7，subagent-record-persistence-consolidation）
-#   staged 命中 record 写面载体（packages/subagent-core/src/）、extensions 扫描根
+# record 持久化写点检查（H4/S4/D7，subagent-record-persistence-consolidation）
+#   staged 命中 record 写点载体（packages/subagent-core/src/）、extensions 扫描根
 #   全域（extensions/**/src，与检查脚本扫描根对齐）或检查脚本自身时触发：
-#   [HISTORICAL] 原触发面仅 extensions/universal/subagent-workflow/src 一包，触发
+#   [HISTORICAL] 原触发范围仅 extensions/universal/subagent-workflow/src 一包，触发
 #   面外的包（如 session-reader）违规只能延迟暴露（阶段 3 一致性审查 P2）——扩为
 #   结构无关的 glob 全域匹配，新增分组/包零维护（同上方 EXTENSION_PKG_FILES
 #   两段式改造的教训：禁止与目录结构耦合的清单式写法）。
 #   scripts/check-record-write-surface.mjs —— grep 门兜底（R1 七名写函数直调 +
-#   R2 subagent-record entry 直写 + R3 workflow-record 三宿主白名单 + R4 v1 投影器
+#   R2 subagent-record entry 直写 + R3 workflow-record 三宿主白名单 + R4 v1 派生器
 #   + R5 v1 快照载荷 + R6 死字节 + R7 .events 直写，七族规则与脚本头注释/OK 输出
 #   同口径）。一级拦截 = eslint
 #   no-restricted-imports（eslint.config.mjs subagent-core 块，模块边界级）；
 #   本门拦的是 import 层拦不住的类方法调用（ManifestStore.writeManifest）与
-#   字面量写形态。触发面并入本路径范围的 staged 删除（pathspec 清单天然含 D）：
+#   字面量写形态。触发范围并入本路径范围的 staged 删除（pathspec 清单天然含 D）：
 #   单独 staged 删除检查脚本也必须触发——下方 [ ! -f ] 存在性检查正是删除场景
 #   的防线。不设独立 SKIP_* 开关（R1 后惯例，总开关 SKIP_ALL_CHECKS 兜底）。
 # ============================================================================
 
 RECORD_WRITE_SURFACE_STAGED=$(git diff --cached --name-only -- packages/subagent-core/src/ ':(glob)extensions/**/src/**' scripts/check-record-write-surface.mjs)
 if echo "$RECORD_WRITE_SURFACE_STAGED" | grep -qE "^packages/subagent-core/src/|^extensions/.*/src/|^scripts/check-record-write-surface\.mjs$"; then
-    print_section "[record 持久化写面检查]"
+    print_section "[record 持久化写点检查]"
     if [ ! -f "scripts/check-record-write-surface.mjs" ]; then
         echo -e "${RED}[ERROR] 找不到 scripts/check-record-write-surface.mjs（H4/U5 检查交付物缺失）${NC}"
         exit 1
     fi
     if ! node scripts/check-record-write-surface.mjs; then
-        echo -e "${RED}[ERROR] record 持久化写面检查未通过——store 外 record 写面直写，按上方 ✗ 明细与 Recovery 指引改调 RecordStore 意图原语${NC}"
+        echo -e "${RED}[ERROR] record 持久化写点检查未通过——store 外 record 写点直写，按上方 ✗ 明细与 Recovery 指引改调 RecordStore 意图原语${NC}"
         echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
         exit 1
     fi
-    echo -e "${GREEN}[OK] record 持久化写面检查通过${NC}"
+    echo -e "${GREEN}[OK] record 持久化写点检查通过${NC}"
 else
-    echo -e "${GREEN}[OK] 无 record 写面载体变更，跳过 record 持久化写面检查${NC}"
+    echo -e "${GREEN}[OK] 无 record 写点载体变更，跳过 record 持久化写点检查${NC}"
 fi
 
 # 文档-代码符号漂移检查（C-proc-10）
-#   触发面：映射设计文档（docs/design/）/ update 源码模块 / 检查脚本及其单测 /
+#   触发范围：映射设计文档（docs/design/）/ update 源码模块 / 检查脚本及其单测 /
 #   TEST-STRATEGY.md / docs/testing/，加任意源码文件（.ts/.tsx/.mts/.cts/.mjs/
 #   .cjs/.js/.vue，第三检查的扫描对象）与任意 .md（含 staged 删除——文档删除
 #   提交触发第三检查全仓扫描）：
-#   scripts/check-doc-symbol-drift.mjs 三检查面：
+#   scripts/check-doc-symbol-drift.mjs 三项检查：
 #   ① 符号漂移：TypeScript AST 提取源码符号表 × 设计文档反引号符号候选，
 #     文档引用已删除/改名符号即拦截（[HISTORICAL] 2026-08-31 update 路径常量
 #     函数化后 3 处旧常量引用悬空，靠对抗审查才抓出）；
@@ -2061,14 +2061,14 @@ if echo "$DOC_SYMBOL_STAGED" | grep -qE "^docs/design/|^apps/electron/main/updat
         echo -e "${GREEN}[OK] doc-symbol-drift 检查单测通过${NC}"
     fi
 else
-    echo -e "${GREEN}[OK] 无设计文档/源码注释检查面变更，跳过文档符号漂移检查${NC}"
+    echo -e "${GREEN}[OK] 无设计文档/源码注释检查范围变更，跳过文档符号漂移检查${NC}"
 fi
 
 # ============================================================================
-# 引擎开发指南契约投影检查（docs/extensions/subagents/engine-development-guide.md §12 待建检查行落地）
-#   staged 命中指南或其投影源（errors.ts / error-codes.ts / engine-manifest.ts /
+# 引擎开发指南契约映射检查（docs/extensions/subagents/engine-development-guide.md §12 待建检查行落地）
+#   staged 命中指南或其映射源（errors.ts / error-codes.ts / engine-manifest.ts /
 #   contract-types.ts）或检查脚本自身时触发：scripts/check-guide-contract-projection.mjs
-#   ——指南 §3 能力位表 / §4 两层词表 ↔ 源码词表投影一致性（引擎子进程域，2026-09-18
+#   ——指南 §3 能力位表 / §4 两层词表 ↔ 源码词表映射一致性（引擎子进程域，2026-09-18
 #   引擎开发指南立项时同步落地）。
 #   契约源码 staged 而指南未同批 staged → 软提示（AGENT SMELL：语义漂移机器不可判，
 #   靠 AGENTS.md 主题索引「更新触发」义务 + 提示兜底；误报率数据出来前不收紧为硬门）。
@@ -2077,23 +2077,23 @@ fi
 
 GUIDE_PROJECTION_STAGED=$(git diff --cached --name-only -- docs/extensions/subagents/engine-development-guide.md packages/subagent-core/src/execution/engine/common/errors.ts packages/subagent-engine-sdk/src/protocol/error-codes.ts packages/subagent-core/src/execution/engine/engine-manifest.ts packages/subagent-engine-sdk/src/protocol/contract-types.ts packages/zcode-subagent-cli/package.json packages/zcode-subagent-cli/src/zcode-engine.ts scripts/check-guide-contract-projection.mjs)
 if echo "$GUIDE_PROJECTION_STAGED" | grep -qE "^docs/extensions/subagents/engine-development-guide\.md$|^packages/subagent-core/src/execution/engine/common/errors\.ts$|^packages/subagent-engine-sdk/src/protocol/error-codes\.ts$|^packages/subagent-core/src/execution/engine/engine-manifest\.ts$|^packages/subagent-engine-sdk/src/protocol/contract-types\.ts$|^packages/zcode-subagent-cli/package\.json$|^packages/zcode-subagent-cli/src/zcode-engine\.ts$|^scripts/check-guide-contract-projection\.mjs$"; then
-    print_section "[引擎指南契约投影检查]"
+    print_section "[引擎指南契约映射检查]"
     if [ ! -f "scripts/check-guide-contract-projection.mjs" ]; then
         echo -e "${RED}[ERROR] 找不到 scripts/check-guide-contract-projection.mjs（检查脚本被删除）${NC}"
         exit 1
     fi
     if ! node scripts/check-guide-contract-projection.mjs; then
-        echo -e "${RED}[ERROR] 指南契约表与源码词表投影失同步——按上方 ✗ 明细同 commit 更新指南（更新触发义务见根 AGENTS.md 主题索引）后重试${NC}"
+        echo -e "${RED}[ERROR] 指南契约表与源码词表映射失同步——按上方 ✗ 明细同 commit 更新指南（更新触发义务见根 AGENTS.md 主题索引）后重试${NC}"
         echo -e "${RED}[原则] 无论是否本次改动引入的问题，都必须当场直接修复解决，不允许跳过。${NC}"
         exit 1
     fi
-    echo -e "${GREEN}[OK] 引擎指南契约投影一致${NC}"
+    echo -e "${GREEN}[OK] 引擎指南契约映射一致${NC}"
     if echo "$GUIDE_PROJECTION_STAGED" | grep -qE "^packages/subagent-core/src/execution/engine/common/errors\.ts$|^packages/subagent-engine-sdk/src/protocol/error-codes\.ts$|^packages/subagent-core/src/execution/engine/engine-manifest\.ts$|^packages/subagent-engine-sdk/src/protocol/contract-types\.ts$|^packages/zcode-subagent-cli/package\.json$|^packages/zcode-subagent-cli/src/zcode-engine\.ts$" \
         && ! echo "$GUIDE_PROJECTION_STAGED" | grep -q "^docs/extensions/subagents/engine-development-guide\.md$"; then
-        echo -e "${BLUE}[INFO] 引擎契约面源码已变更且指南未同批 staged——核对 docs/extensions/subagents/engine-development-guide.md 是否需同步（更新触发义务见根 AGENTS.md 主题索引行；纯实现改动可忽略本提示）${NC}"
+        echo -e "${BLUE}[INFO] 引擎契约范围源码已变更且指南未同批 staged——核对 docs/extensions/subagents/engine-development-guide.md 是否需同步（更新触发义务见根 AGENTS.md 主题索引行；纯实现改动可忽略本提示）${NC}"
     fi
 else
-    echo -e "${GREEN}[OK] 无引擎契约面/指南变更，跳过引擎指南契约投影检查${NC}"
+    echo -e "${GREEN}[OK] 无引擎契约范围/指南变更，跳过引擎指南契约映射检查${NC}"
 fi
 
 # ============================================================================
@@ -2104,7 +2104,7 @@ fi
 #   禁 findItemIndex(...scrollSize 模式（排除 __tests__ 与 *.test.ts，注释行豁免）。
 #   [顺序依赖] M1（U1 索引直取 + D6 vlistBottom 修正）把禁用模式归零后 M2 才挂接
 #   （设计 §4.4⑤ 顺序依赖声明；检查防复发而非清存量）。
-#   触发面在主 STAGED_FILES 外并入本路径范围的 staged 删除（pathspec 清单天然含 D）：
+#   触发范围在主 STAGED_FILES 外并入本路径范围的 staged 删除（pathspec 清单天然含 D）：
 #   单独 staged 删除检查脚本也必须触发，存在性检查正是删除场景防线。
 #   注：不设独立 SKIP_* 开关（R1 后惯例，总开关 SKIP_ALL_CHECKS 兜底）。
 # ============================================================================
@@ -2233,7 +2233,7 @@ fi
 #     （幽灵资产/死锚点/非法枚举拦在提交前）；
 #   ② npx vitest run scripts/__tests__/select-affected-e2e.test.mjs --silent ——
 #     select 的 diff→rules 匹配逻辑回归（命中/不命中/多 glob/删除文件/--check 语义）。
-#   触发面并入本路径范围的 staged 删除（pathspec 清单天然含 D）：单独 staged 删除
+#   触发范围并入本路径范围的 staged 删除（pathspec 清单天然含 D）：单独 staged 删除
 #   检查脚本也必须触发，下方 [ ! -f ] 存在性检查正是删除场景的防线。
 #   注：不设独立 SKIP_* 开关（R1 后惯例，总开关 SKIP_ALL_CHECKS 兜底）。
 # ============================================================================
@@ -2287,7 +2287,7 @@ fi
 #   间接），逐目标 vitest list --filesOnly 干跑断言收集非空——防「目标被 config
 #   exclude / 路径漂移 → CI 步骤空跑」回归（taste-lint 步骤曾实发 No test files
 #   found，每轮 CI 烧到该步才红）。
-#   触发面并入本路径范围的 staged 删除（pathspec 清单天然含 D）：单独 staged 删除
+#   触发范围并入本路径范围的 staged 删除（pathspec 清单天然含 D）：单独 staged 删除
 #   检查脚本也必须触发，下方 [ ! -f ] 存在性检查正是删除场景的防线。
 #   注：不设独立 SKIP_* 开关（R1 后惯例，总开关 SKIP_ALL_CHECKS 兜底）。
 # ============================================================================
@@ -2343,12 +2343,12 @@ fi
 #   两包各跑 tsc --noEmit。
 #   SDK 侧锁：D11 的 C3 事件词表双向锁 / C4 task/ctx 双写禁令锁 / C2 能力位必填锁，
 #   全部是 SDK 包内编译期断言（contract-types.ts + contract-closure.test.ts）。
-#   core 侧锁：C-proc-23 四张词表锁的镜像面——SDK SSOT ↔ core 镜像类型双向可赋值 +
+#   core 侧锁：C-proc-23 四张词表锁的镜像副本——SDK SSOT ↔ core 镜像类型双向可赋值 +
 #   engine-manifest 两表键集互等，断言在 packages/subagent-core/src/execution/engine/
 #   client/__tests__/protocol-closure.test.ts，只在 core 包 typecheck 下生效（SDK 类型
 #   改动只编译 SDK 恒绿，core 锚点不在其 include 内；缺 core 侧执行点则镜像锁为纸面）。
 #   检查路径自身变更不触发（typecheck 断言在两包内自持，由包 staged 必然连带触发）。
-#   触发面用 pathspec 清单式（与相邻段同款；天然含 staged 删除，删除不构成风险敞口）。
+#   触发范围用 pathspec 清单式（与相邻段同款；天然含 staged 删除，删除不构成风险敞口）。
 #   注：不设独立 SKIP_* 开关（R1 后惯例，总开关 SKIP_ALL_CHECKS 兜底）。
 # ============================================================================
 
@@ -2379,8 +2379,8 @@ fi
 #   scripts/check-model-references.mjs：extensions/ 内 agent 资产 frontmatter 的
 #   model 声明 vs pi 内置 provider 目录快照（builtin-providers.json）diff——provider
 #   配置漂移（pi 升级后 provider 退役/模型 id 下架）时引用漂移在提交期红，不等
-#   run 烧 token（G4）。触发面 = extensions 下 .md 资产 / 快照本体 / 检查脚本自身；
-#   快照变更入触发面是关键——pi 升级重生成快照后，存量声明即时对账。
+#   run 烧 token（G4）。触发范围 = extensions 下 .md 资产 / 快照本体 / 检查脚本自身；
+#   快照变更入触发范围是关键——pi 升级重生成快照后，存量声明即时对账。
 #   不设独立 SKIP_* 开关（R1 后惯例，总开关 SKIP_ALL_CHECKS 兜底）。
 # ============================================================================
 MODEL_REF_STAGED=$(git diff --cached --name-only -- extensions/ packages/runtime/src/generated/builtin-providers.json scripts/check-model-references.mjs)
@@ -2400,12 +2400,12 @@ fi
 # ============================================================================
 # vitest 红线：测试文件 node:test import 拦截（review-pipeline-redesign 决策 4）
 #   docs/TEST-STRATEGY.md vitest 红线（禁 node:test）的机器承接分两半：
-#   非测试文件面 = eslint.config.mjs 的 no-restricted-syntax 两块（core 域 selector 追加 +
-#   全仓独立块）；测试文件面 = 本段 grep——taste-lint/base.mjs 的全局 ignores 把
+#   非测试文件范围 = eslint.config.mjs 的 no-restricted-syntax 两块（core 域 selector 追加 +
+#   全仓独立块）；测试文件范围 = 本段 grep——taste-lint/base.mjs 的全局 ignores 把
 #   **/*.test.ts / **/*.spec.ts / **/__tests__/**/*.ts 三模式整体排除出 eslint 管线
-#   （global-ignores 硬语义，配置块无法复活），故测试文件面由 pre-commit 承载
+#   （global-ignores 硬语义，配置块无法复活），故测试文件范围由 pre-commit 承载
 #   （「不在 eslint 管线的面用 pre-commit 承载」惯例，与「tsx --test 归红线文档不进 lint」
-#   同构）。本段文件面与该 ignores 三模式对齐：*.test.* / *.spec.* 后缀 case +
+#   同构）。本段的文件范围与该 ignores 三模式对齐：*.test.* / *.spec.* 后缀 case +
 #   __tests__/ 目录 case（ignores 的目录口径限 .ts，case 对齐该面；后缀 case 比 ignores
 #   后缀模式宽出的 .tsx/.mts/... 属无害超集——违规 import 无论如何该拦）。无豁免类目。
 #   注：不设独立 SKIP_* 开关（R1 后惯例，总开关 SKIP_ALL_CHECKS 兜底）。
@@ -2462,11 +2462,11 @@ fi
 #   code-overdesign-audit 候选 6 / msg-pipeline-debloat D5-4）
 #   staged 命中两清单载体或检查脚本自身时触发：
 #   scripts/check-chat-ops-sync.mjs —— store.ts 的 ChatStoreOps Pick 字段清单
-#   （类型面 SSOT）× taste-lint/rules/no-chat-ops-in-components.mjs 的
-#   OPS_FIELDS 手写 Set（lint 拦截面）双侧机械提取做双向差集，幽灵/漏拦任一
+#   （类型侧 SSOT）× taste-lint/rules/no-chat-ops-in-components.mjs 的
+#   OPS_FIELDS 手写 Set（lint 拦截范围）双侧机械提取做双向差集，幽灵/漏拦任一
 #   非空即红——「两处同步改」人工契约机器化（曾实测漂移 13 项无任何机器信号，
-#   靠事后对抗审查才抓出）。触发面 = 两载体 + 脚本自身：对账结果只由这三
-#   文件决定，其余 staged 不影响结果。触发面并入本路径范围的 staged 删除
+#   靠事后对抗审查才抓出）。触发范围 = 两载体 + 脚本自身：对账结果只由这三
+#   文件决定，其余 staged 不影响结果。触发范围并入本路径范围的 staged 删除
 #   （pathspec 清单天然含 D）：单独 staged 删除检查脚本也必须触发，下方
 #   [ ! -f ] 存在性检查正是删除场景的防线。全量对账毫秒级，无增量模式。
 #   不设独立 SKIP_* 开关（R1 后惯例，总开关 SKIP_ALL_CHECKS 兜底）。
@@ -2498,8 +2498,8 @@ fi
 #   （revoke-orchestrator × agent-ext × scheduler-manager 插件三侧）。定义点
 #   分属互相不可 import 的包，编译期拦截不可行，多侧手抄仅靠注释纪律——本
 #   检查以 AST 提取代码字符串字面量（注释不算），任一侧漂移即红并指明需
-#   同步的各侧文件。触发面 = 登记定义文件 + 脚本自身：对账结果只由这些文件
-#   决定；触发面并入本路径范围的 staged 删除（pathspec 清单天然含 D），单独
+#   同步的各侧文件。触发范围 = 登记定义文件 + 脚本自身：对账结果只由这些文件
+#   决定；触发范围并入本路径范围的 staged 删除（pathspec 清单天然含 D），单独
 #   staged 删除检查脚本也必须触发，下方 [ ! -f ] 存在性检查正是删除场景的
 #   防线。全量对账毫秒级，无增量模式。新契约串在脚本 GROUPS 登记表登记，
 #   登记文件变更须同步本段 pathspec。不设独立 SKIP_* 开关（R1 后惯例，
@@ -2530,10 +2530,10 @@ fi
 #   staged 命中任意 .ts/.tsx/.vue 或检查脚本自身时触发：
 #   scripts/check-session-scoped-state-census.mjs —— 快照清单外出现新调用点
 #   （新文件或既有文件新增）即红，先审阅其 scope 上下文是否满足 ADR-0049
-#   分区范式，有意变更按脚本头注释更新 CENSUS_SNAPSHOT。触发面 = 与检查脚本
-#   全仓扫描面同构的结构无关 glob（快照清单横跨 core/dom-core/renderer/ui，
-#   目录清单式触发面必有洞——同 record-write-surface 段扩为 glob 全域的教训：
-#   禁止与目录结构耦合的清单式写法）。触发面天然含 staged 删除（快照内文件
+#   分区范式，有意变更按脚本头注释更新 CENSUS_SNAPSHOT。触发范围 = 与检查脚本
+#   全仓扫描范围同构的结构无关 glob（快照清单横跨 core/dom-core/renderer/ui，
+#   目录清单式触发范围必有洞——同 record-write-surface 段扩为 glob 全域的教训：
+#   禁止与目录结构耦合的清单式写法）。触发范围天然含 staged 删除（快照内文件
 #   被删 = 消失调用点，同样必须红）：单独 staged 删除检查脚本也必须触发，
 #   下方 [ ! -f ] 存在性检查正是删除场景的防线。全仓扫描 ~0.2s，无增量模式。
 #   退出码 0=合规 / 3=census 与快照不符 / 1=脚本自身异常，非零一律拦截。

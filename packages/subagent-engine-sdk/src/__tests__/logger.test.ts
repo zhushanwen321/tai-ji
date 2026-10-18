@@ -1,6 +1,6 @@
 // src/__tests__/logger.test.ts
 //
-// logger facade 缺省 console 出口（CONSOLE_SINK）行为面：warn/error 落 console
+// logger facade 缺省 console 出口（CONSOLE_SINK）行为范围：warn/error 落 console
 // 且 data 缺省时省略第二参数（node console 会把显式 undefined 格式化成
 // " undefined" 尾巴）、debug 未配置期 no-op（对齐 core NULL_HOST 语义）；
 // configureLoggerSink 后透明切换，data 参数透传 sink。

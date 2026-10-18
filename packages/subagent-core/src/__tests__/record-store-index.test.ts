@@ -29,7 +29,7 @@
 // 清理约定：真实 jsonl fixture 的 afterEach rmSync 必带 maxRetries（fire-and-forget
 // 索引写与清理的 ENOTEMPTY 竞态，见 get-record-for-action-restart.test.ts）。
 //
-// 环境守卫约定：chmod 000 零探测用例（S1TC1/2/7/13）用 chmodProbeIt——win32 的
+// 环境检查约定：chmod 000 零探测用例（S1TC1/2/7/13）用 chmodProbeIt——win32 的
 // chmod 000 仅映射 read-only、root 无视 000，断言会静默退化为恒真，须跳过。
 
 import * as fs from "node:fs";
@@ -47,7 +47,7 @@ const { loggerMock } = vi.hoisted(() => ({
 }));
 vi.mock("../core/logger.ts", () => ({ getLogger: () => loggerMock }));
 
-/** chmod 000 零探测用例的环境守卫：win32 上 chmod 000 仅映射 read-only（读仍被允许）、
+/** chmod 000 零探测用例的环境检查：win32 上 chmod 000 仅映射 read-only（读仍被允许）、
  *  root 无视 000——两种环境下「零内容读取」断言静默退化为恒真（实现退化回读也不失败），
  *  跳过防假绿。平台短路在前，getuid 仅 POSIX 存在。 */
 const chmodProbeIt = process.platform === "win32" || process.getuid?.() === 0 ? it.skip : it;
@@ -511,7 +511,7 @@ describe("RecordStore 索引接入 [perf L-1]（S1TC1-9/13）", () => {
     expect(aEntry.id).toBe(recordsA.find((r) => r.id === "sa-1")?.id);
     expect(aEntry.task).toBe("test task");
     // [R4/D6-①] 头部探测拿不到 model_change → undefined（缺席语义——旧「空串 DS4
-    // 合法」哨兵随 model 可选化退役，索引读侧守卫已放行 undefined）
+    // 合法」哨兵随 model 可选化退役，索引读侧检查已放行 undefined）
     expect(aEntry.model).toBeUndefined();
   });
 
@@ -584,7 +584,7 @@ describe("RecordStore 索引接入 [perf L-1]（S1TC1-9/13）", () => {
     await waitForIndex();
 
     // 篡改落盘索引为 R4 升级前旧写侧形态（model:"" 存量条目）：loadIndex 的
-    // hasModelFields 守卫接受 "" 合法 string，条目可进内存映像参与直查命中
+    // hasModelFields 检查接受 "" 合法 string，条目可进内存映像参与直查命中
     const loaded = loadIndex(encDir);
     const aEntry = loaded.entries.get("a.jsonl");
     if (aEntry === undefined || aEntry.negative === true) throw new Error("a.jsonl should be a positive entry");
@@ -593,7 +593,7 @@ describe("RecordStore 索引接入 [perf L-1]（S1TC1-9/13）", () => {
 
     // 冷启动新实例：jsonl 未变、戳匹配 → buildEntryFromIndex 索引直查命中（零探测）。
     // chmod 000 阻断内容读取防假绿：若实现退化回读/重探测，readIdentityHeader 失败 →
-    // sa-1 消失，下方 toBeDefined 即失败（S1TC1 同款守卫手法）
+    // sa-1 消失，下方 toBeDefined 即失败（S1TC1 同款检查手法）
     fs.chmodSync(f1, 0o000);
     try {
       const storeB = new RecordStore(sessionsDir);

@@ -6,7 +6,7 @@
  * 覆盖：入口检查、result.output/outputSchema/文件状态、bare async IIFE、
  *      多错误同时存在、注释行跳过。
  *
- * 【差异说明】源码中实际不存在「未闭合括号」/「嵌套括号深度」检查——
+ * 【差异说明】源码中实际不存在「未封口括号」/「嵌套括号深度」检查——
  * lintScript 是 API 误用 lint（非语法 lint），不做括号配对。
  * 因此原任务清单的对应条目已替换为实际存在的检查项（IIFE / outputSchema 等）。
  */
@@ -494,7 +494,7 @@ describe("MF-4 回归：非字面量实参 agent(callVar) / agent(expr()) 跳过
   });
 
   it("`agent(` 换行 `{` 的多行字面量调用保留追踪（argTail 为空分支）", () => {
-    // agent( 与 { 分离两行：argTail 为空不跳过，范围跨三行闭合——缺 description
+    // agent( 与 { 分离两行：argTail 为空不跳过，范围跨三行收尾——缺 description
     // 报 1 条且行号落在调用起点（锚定 matchAgentCallHead 的空 argTail 保留路径）
     const src = [
       `await agent(`,
@@ -702,7 +702,7 @@ describe("m4 W1-W5: meta 质量 lint", () => {
     );
     expect(errors(bad.findings).some((f) => f.message.includes("targetType"))).toBe(true);
 
-    // note:/a=b 非参数 → 不误报（评审探针实测形态匹配误报面）
+    // note:/a=b 非参数 → 不误报（评审探针实测形态匹配误报风险）
     const good = lintScript(
       wf(
         'name: w\ndescription: "note: fix agent 与 batchN 互斥，见 a=b 说明"\nphases: [a]\nparameters:\n  type: object\n  properties:\n    targetType: { type: string }\n  required: [targetType]',

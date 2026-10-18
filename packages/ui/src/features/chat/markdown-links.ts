@@ -1,7 +1,7 @@
 /**
  * MarkdownRenderer v-html 内链接/路径处理纯函数（从 MarkdownRenderer.vue 提取的镜像纯函数
  * 模块，设计 markdown-html-sanitize-render D4）：②路 data-path base64 解码、④路相对链接
- * 判定与 resolve、⑤路浮层浏览器链接判定。均无组件状态，独立模块便于镜像守卫与单测对照；
+ * 判定与 resolve、⑤路浮层浏览器链接判定。均无组件状态，独立模块便于镜像检查与单测对照；
  * 组件侧只保留依赖 props/deps 的事件路由（handleAnchorClick 等）。
  *
  * ui 包镜像纪律（ui→renderer 依赖禁令不可直接 import，两侧注释互指，改动需同批同步——
@@ -11,9 +11,9 @@
  *   html-preview-path.ts resolvePosixPath 三份逐字同款，漂移由
  *   scripts/check-posix-resolve-mirror-sync.mjs 源文本字面量对拍机检拦截）
  * - decodeB64 ↔ renderer composables/logic/markdown.ts 的 decodeBase64
- * 行为守卫：renderer 侧 mirror-guard-relative-path.test.ts / mirror-guard-base64.test.ts
+ * 行为检查：renderer 侧 mirror-guard-relative-path.test.ts / mirror-guard-base64.test.ts
  * 经 helpers/markdown-renderer-mirror.ts 源码提取本模块导出做行为对拍——改本文件语义，
- * 守卫下一次运行提取到的就是新语义。
+ * 检查下一次运行提取到的就是新语义。
  */
 
 /** data-path 解码（renderer 壳 linkify 产出 base64 编码路径，HISTORICAL：迁移时丢 decodeBase64 致点击打开错误路径） */

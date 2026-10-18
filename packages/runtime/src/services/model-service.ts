@@ -91,7 +91,7 @@ export type ConnectionTestRowErrorCode =
   | 'http_error'       // 非 2xx（error = `http_error|<status>|<响应体截断>`）
   | 'network_error'    // fetch 层失败（error = `network_error|<message>`）
 
-/** 测试连接能力面（transport 经 `SettingsHandlerContext.modelService` 的 Partial 交集调用）。 */
+/** 测试连接能力侧（transport 经 `SettingsHandlerContext.modelService` 的 Partial 交集调用）。 */
 export interface ProviderConnectionTestService {
   testProviderConnections(
     providerId: string,
@@ -365,7 +365,7 @@ export class ModelService implements IModelService, ProviderConnectionTestServic
     return { success: true, results }
   }
 
-  // ── 能力注册表服务面（U5，pi-boundary-reliability design D2）──────────
+  // ── 能力注册表服务侧（U5，pi-boundary-reliability design D2）──────────
   /** drift 事件上报出口（WS 协议消息类型属后续单元，宿主经 setCapabilityDriftSink 订阅）。 */
   private capabilityDriftSink: ((drifts: CapabilityDrift[]) => void) | undefined
 
@@ -377,7 +377,7 @@ export class ModelService implements IModelService, ProviderConnectionTestServic
   /**
    * 给 ProviderInfo.models 逐模型标注 supportedLevels（view-ready，renderer 零推导）。
    * piVersion 形参为 IModelService 契约位（缓存键时代的组分，接口签名由
-   * interfaces.ts 钉死），直调形态下不消费。
+   * interfaces.ts 固定为），直调形态下不消费。
    */
   attachSupportedLevels(providers: ProviderInfo[], _piVersion?: string): ProviderInfo[] {
     return attachSupportedLevels(providers)

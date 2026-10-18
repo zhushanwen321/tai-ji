@@ -2,7 +2,7 @@
 //
 // U9（D9 / B3 / B4）：workflow @pi-meta parameters（JSON Schema）→ 已知参数键集、
 // args 平铺检测、参数归一组装。平移自 pi-sw tool-workflow.ts:136-196（m6「schema 即
-// SSOT」——替代 21 键硬编码 KNOWN_ARG_KEYS，消除与参数定义的漂移面）。
+// SSOT」——替代 21 键硬编码 KNOWN_ARG_KEYS，消除与参数定义的漂移风险）。
 //
 // 相对 pi-sw 原实现的两处平台耦合剥离（行为等值，见实施计划偏差登记表）：
 // - TOOL_TOP_LEVEL（pi workflow tool 顶层键集，pi 侧 schema 事实）→ 参数化 reservedKeys

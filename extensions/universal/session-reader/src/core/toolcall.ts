@@ -69,7 +69,7 @@ function coerceArgs(raw: unknown): Record<string, unknown> {
 /**
  * 从 entry.message.content 的 `{type:"toolCall"}` block 提取工具调用列表。
  *
- * content 是 unknown 做类型守卫；非数组或无 toolCall block 返 []。
+ * content 是 unknown 做类型检查；非数组或无 toolCall block 返 []。
  * 仅纳入 id + name 均为 string 的 block（O2 靠 id 关联 toolResult，O1 靠 name 聚合；
  * 缺 id 的块无法关联，缺 name 无法摘要，跳过——实测 0 缺失）。
  */

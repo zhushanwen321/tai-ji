@@ -151,7 +151,7 @@ export function createBashOverrideToolDefinition() {
 		...initial,
 		// D2（禁止改名）：桌面侧六处按工具 key 'bash' 硬编码（truncate-tool-output、
 		// useToolMeta、block-icon、pi-preset BUILTIN_TOOLS 与 deniedTools、permission
-		// extractCommand）——改名后这些消费面全部失配，审批退化为逐次弹窗、渲染错位
+		// extractCommand）——改名后这些消费方全部失配，审批退化为逐次弹窗、渲染错位
 		name: initial.name, // "bash"：同名覆盖内置工具（agent-session _refreshToolRegistry 后注册者胜）
 		description: ENHANCED_BASH_DESCRIPTION,
 		parameters: enhancedBashSchema,
@@ -163,7 +163,7 @@ export function createBashOverrideToolDefinition() {
 			// 随 render 面传入，execute 签名必须对齐，否则 registerTool 赋值检查不过）
 			onUpdate: AgentToolUpdateCallback<BashToolDetails | undefined> | undefined,
 			// pi 1.0.0：ToolDefinition.execute 第 5 参 ctx 收窄为 ExtensionToolContext
-			// （ExtensionContext + tools/executeTool，嵌套工具调用面）
+			// （ExtensionContext + tools/executeTool，嵌套工具调用点）
 			ctx: ExtensionToolContext,
 		) {
 			// 配置每次 execute 读时加载（热重载契约：禁止上层缓存，同进程改配置文件
@@ -212,7 +212,7 @@ export function createBashOverrideToolDefinition() {
 			const delegate = getDelegate(ctx.cwd);
 			// 前台委托：只转发官方 schema 已识别的字段（command/timeout），background
 			// 是本包增量，官方 execute 不认识（其解构也只取这两个键，显式构造让
-			// 「本层转发面」在代码上自解释）。subagent 降级（D14）与 background 缺省
+			// 「本层转发侧」在代码上自解释）。subagent 降级（D14）与 background 缺省
 			// 都落到这条路径。
 			//
 			// 前台 timeout 注入（M4/G3）：LLM 未填 && foregroundTimeoutSeconds 配置了

@@ -9,7 +9,7 @@
  * - busy park 合批两条（各自 notifyId，marker 锚）→ settled 边沿合批投出 → 逐条
  *   confirmDelivered → onSettled 恰 2 次，各自原始消息、各自 meta（per-message 透传
  *   不串键——合批不得把首条 meta 抹到全批）。
- * - 错误重试耗尽 rejected 终态 → meta 同样随原消息到达（失败腿也要能定位债权）。
+ * - 错误重试耗尽 rejected 终态 → meta 同样随原消息到达（失败路径也要能定位债权）。
  * - 无 meta 消息 → meta undefined（additive 字段零回归：不带 meta 的存量消息形态不变）。
  *
  * 内核对 meta 零读取零加工（本套件同时是「既有行为零回归」的一部分：现有 11 个测试
@@ -77,7 +77,7 @@ describe('envelope additive meta（notifyId 穿 envelope）', () => {
     handle.dispose()
   })
 
-  it('首败即停 rejected → meta 随原消息到达回调（失败腿可定位债权，ADR-0122）', () => {
+  it('首败即停 rejected → meta 随原消息到达回调（失败路径可定位债权，ADR-0122）', () => {
     const onSettled = vi.fn()
     const port = makePort({ send: () => ({ accepted: false as const, reason: 'closed' }) })
     const handle = createDelivery(port, { onSettled })

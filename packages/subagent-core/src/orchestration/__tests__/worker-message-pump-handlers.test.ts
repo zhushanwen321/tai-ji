@@ -9,8 +9,8 @@
  * - handleWorkerError：一次即 transition done,failed + 直落 pending:unregister
  * - handleScriptError：一次即 failed / workerLogs 捕获
  * - postBudgetUpdate：postMessage budget-update（usedTokens/usedCost）
- * - stale handle 过滤（handle.isCurrent=false）+ terminal stale 守卫（isTerminal 语义）
- * - 孤儿 call 守卫（S7-second）：重跑 dispatch 替换同 callId 条目后，旧代际迟到
+ * - stale handle 过滤（handle.isCurrent=false）+ terminal stale 检查（isTerminal 语义）
+ * - 孤儿 call 检查（S7-second）：重跑 dispatch 替换同 callId 条目后，旧代际迟到
  *   completion 不投新 worker、不复活 Map/trace 条目
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -45,7 +45,7 @@ import { createRunEventJournal } from "../run-events.ts";
 
 // ── helpers ──────────────────────────────────────────────────
 
-/** 按 stepIndex 查 trace 节点（Trace 公共查询面 = toArray 线性扫）。 */
+/** 按 stepIndex 查 trace 节点（Trace 公共查询范围 = toArray 线性扫）。 */
 function findByStep(trace: Trace, stepIndex: number) {
   return trace.toArray().find((n) => n.stepIndex === stepIndex);
 }
@@ -135,7 +135,7 @@ function makeHandle(isCurrent = true): WorkerHandle {
 
 // ── [W2/V1] 六态机引导 + 终态 fixture ────────────────────────
 
-/** [W2/V1] 六态机引导：journal 首帧（run-created）落账——finalizeRun/abortRun 等
+/** [W2/V1] 六态机引导：journal 首帧（run-created）写入 journal 记录——finalizeRun/abortRun 等
  *  活体终局入口的六态机裁决要求 created→dispatched 已在链上（生产链路由
  *  runWorkflow 正点发射承接；直测终局入口的用例经本 helper 补齐同一引导）。 */
 async function seedRunCreated(run: WorkflowRun): Promise<void> {
@@ -144,7 +144,7 @@ async function seedRunCreated(run: WorkflowRun): Promise<void> {
 
 /** [D6(a) 第 1 步] 终态 fixture：终局事实 = 终局记录注册表条目（换源后
  *  isRunSettled 只认注册表——生产经 dispatch 链 note / 重建点 noteRebuiltSettlement
- *  注入；stale 守卫用例的「已终态」形态由本 helper 构造）。 */
+ *  注入；stale 检查用例的「已终态」形态由本 helper 构造）。 */
 function markRunTerminalDone(run: WorkflowRun, reason: DoneReason = "completed"): void {
   run.state.reason = reason;
   noteRebuiltSettlement(run.runId, {
@@ -218,7 +218,7 @@ describe("handleWorkerExit", () => {
     expect(deps.store.save).not.toHaveBeenCalled();
   });
 
-  it("run 已终态（done）：stale 守卫前置丢弃", async () => {
+  it("run 已终态（done）：stale 检查前置丢弃", async () => {
     const run = makeRunningRun();
     await seedRunCreated(run);
     // [D6(a)] 终态 fixture 注入注册表条目（生产经 dispatch 链 note）。
@@ -267,7 +267,7 @@ describe("handleWorkerError", () => {
     expect(deps.store.save).not.toHaveBeenCalled();
   });
 
-  it("终态（done）：stale 守卫前置丢弃", async () => {
+  it("终态（done）：stale 检查前置丢弃", async () => {
     const run = makeRunningRun();
     await seedRunCreated(run);
     // [D6(a)] 终态 fixture 注入注册表条目（生产经 dispatch 链 note）。
@@ -305,7 +305,7 @@ describe("handleScriptError", () => {
     expect(deps.workerHost.start).not.toHaveBeenCalled();
   });
 
-  it("terminal 状态：stale 守卫前置丢弃", async () => {
+  it("terminal 状态：stale 检查前置丢弃", async () => {
     const run = makeRunningRun();
     await seedRunCreated(run);
     // [D6(a)] 终态 fixture 注入注册表条目（生产经 dispatch 链 note）。
@@ -342,14 +342,14 @@ describe("postBudgetUpdate", () => {
   });
 });
 
-// ── orphan call guard（S7-second 竞态回归） ─────────────────
+// ── orphan call 检查（S7-second 竞态回归） ─────────────────
 //
 // 竞态形态：dispatch agent-call → 重跑 dispatch 替换同 callId 条目 → 旧 dispatch 的
 // promise 以失败/成功 resolve → 迟到的旧代际结果不得经 postAgentResult 投给**重跑
 // dispatch 的同 callId pending**（否则重跑中的 agent() 被旧结果劫持 resolve 为空串
 // → 脚本假成功）。[HISTORICAL] 原用例经 rebuildRuntime 的 discardInFlightCalls 构造
 // discard——该机制随重试矩阵删除（ADR-0122），本组用例改为「直接重跑 dispatch 替换」
-// 形态，守卫谓词（isOrphanedCall）的判定语义不变。
+// 形态，检查谓词（isOrphanedCall）的判定语义不变。
 //
 // 用真实 WorkflowRun/RunRuntime/Trace/Budget（而非 makeRunningRun 的简化 mock）。
 
@@ -421,13 +421,13 @@ function findAgentResultPost(
   return undefined;
 }
 
-describe("orphan call guard（非孤儿路径不误伤）", () => {
-  // [HISTORICAL] 原「rebuild discard + 重跑替换」形态的孤儿守卫用例随重试矩阵删除
+describe("orphan call 检查（非孤儿路径不误伤）", () => {
+  // [HISTORICAL] 原「rebuild discard + 重跑替换」形态的孤儿检查用例随重试矩阵删除
   // （ADR-0122）——该形态现网不可达（同 run 内同 callId 重跑 dispatch 只发生在已删的
   // rebuild 重跑场景）；谓词本体（isOrphanedCall / executeAgentCall isOrphaned 注入）
-  // 保留为接管形态的防御面，行为由 execute-agent-call.test.ts 的谓词直测覆盖。
+  // 保留为接管形态的防御路径，行为由 execute-agent-call.test.ts 的谓词直测覆盖。
 
-  it("非孤儿正常路径：成功 completion 照常投递 agent-result（守卫不误伤）", async () => {
+  it("非孤儿正常路径：成功 completion 照常投递 agent-result（检查不误伤）", async () => {
     const run = makeRealRun("wf-orphan-4");
     const deps = makeDeps();
     const postMessage = run.runtime!.worker.postMessage as ReturnType<typeof vi.fn>;

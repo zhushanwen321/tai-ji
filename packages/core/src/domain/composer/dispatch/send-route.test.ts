@@ -4,7 +4,7 @@
  * 被测对象：domain/composer/dispatch/send-route.ts —— sessionPhase → 发送位预测形态纯函数。
  * [u3b/D1] 本表已非投递决策（lane 判定收归 runtime 内核，renderer 统一 delivery.submit），
  * 保留职责 = Composer 发送位按钮形态预测；六行预测语义与内核判定同构（同读 occupancy
- * 三维投影、同 hold 优先判定序——任一 hold 维度先于活跃 turn 判，对齐 laneOf/holdReasonOf），
+ * 三维派生视图、同 hold 优先判定序——任一 hold 维度先于活跃 turn 判，对齐 laneOf/holdReasonOf），
  * 'defer' 字面随 defer 队列退役改为 'queued'（内核车道语义对齐）。
  *
  * 运行：cd packages/core && npx vitest run src/domain/composer/dispatch/send-route.test.ts

@@ -2,7 +2,7 @@
 /**
  * L2TabBar（W4 · T2）——plugin view 二级 tab 栏（v6 l2-tabbar 视觉）。
  *
- * 与 rendering-protocol/primitives/TabBar.vue 非双轨：概念域不同（本组件 = 宿主交互
+ * 与 rendering-protocol/primitives/TabBar.vue 非双轨：业务含义不同（本组件 = 宿主交互
  * 组件，消费本地 L2TabItem + v-model，close 事件上抛；TabBar = rendering-protocol
  * 协议推送原语，渲染 extension 推送的 GuiComponent），勿合并。
  *
@@ -17,7 +17,7 @@
  * （不持久化，design T2 约束）。
  *
  * badge 小圆点（background-task-sidebar-view D4④）已随「后台命令」native 视图退役
- * （composer-task-tray D10：后台命令观察面归 Composer 托盘）——本组件不再有 badge 渲染面。
+ * （composer-task-tray D10：后台命令观察面归 Composer 托盘）——本组件不再有 badge 渲染范围。
  */
 import { X } from '@lucide/vue'
 import { Button } from '../primitives/button'

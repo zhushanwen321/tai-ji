@@ -13,7 +13,7 @@
  *   force-quit-draft-recovery-dom：stores/chat + stores/session 委托工厂或仅
  *   composerChildStubs，mock 段各自内联（见下方差异化清单）
  * - composer-bar-density-wiring / composer-smoke：session mock / 子组件 stub /
- *   ComposerInput 共用面复用
+ *   ComposerInput 共用部分复用
  * - composer-history-cache：仅 composerChildStubs
  *
  * 另供两类变体工厂：makeComposerChatApiMock（useChat 的 spy 对象——断言需直接引用
@@ -26,7 +26,7 @@
  * 它（chat 组转发），本地 const 彼时 TDZ，故必须单例驻本文件）；composerChatSpyModule
  * （useChat 工厂转发单例 + resetChatModuleState 超集键）；composerApiModuleWithChat
  * （@/api 加 chat 组 = spy 转发 + streamSubscribe）；composerApiModuleWithChatAndBtw
- * （再加 getHistory 回放腿 + composerBtwApiSpy 组）。
+ * （再加 getHistory 回放路径 + composerBtwApiSpy 组）。
  *
  * W4：useNewTaskFlow 的 currentCwd 必须是真实 Vue ref（Composer 的
  * useProjectSkills(flow.currentCwd) 对它 watch，裸 { value } 对象触发 Vue warn）——
@@ -38,7 +38,7 @@
  * 差异化部分（有意不收敛，各测试文件自留）：
  * - ComposerInput mock：expose 的 spy 面不同者自留（insertFileChip / insertSessionChip /
  *   insertSlashChip+insertSkillChip / 完整 expose 面带 insertTextAtCursor）；
- *   density-wiring 与 smoke 的共用面（clear/setText/insertSlashChip/getSegments +
+ *   density-wiring 与 smoke 的共用部分（clear/setText/insertSlashChip/getSegments +
  *   input 事件捕获）收敛为 makeComposerInputMock 工厂
  * - composer-session-injection：sessionStore 需可变 active（vi.hoisted sessionState），
  *   保留本地；本 helper 只提供静态 active: undefined 版
@@ -54,7 +54,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import { textToSegments } from '@taiji/shared'
 import { triggerEnterForkMode } from '@/composables/panel/useForkModeChannel'
 
-/** '@/composables/features/chat/useChat' mock 工厂（Composer 消费面 7 键全量）。
+/** '@/composables/features/chat/useChat' mock 工厂（Composer 消费方 7 键全量）。
  *  api 对象在工厂内创建一次（vi.mock factory 每模块图只执行一次）：测试经
  *  `import { useChat }` 拿到与组件同一实例的 spy 做断言（每调用新建 = 断言空转假绿）。 */
 export function composerChatModule() {
@@ -73,7 +73,7 @@ export function composerChatModule() {
 /**
  * useChat 的 spy 对象工厂（断言需直接引用 send/steer/followUp 的文件用）：
  * 七个动作方法带 resolve 基线（Composer 内部若 await 链路不悬空）；sendBash/abortBash
- * 是 bash 路文件（send-button-states / smoke 等）的消费面，对其余文件为无害多余键。
+ * 是 bash 路文件（send-button-states / smoke 等）的消费方，对其余文件为无害多余键。
  * 持有方式：
  *   const chatApiMock = makeComposerChatApiMock()
  *   vi.mock('@/composables/features/chat/useChat', () => ({ useChat: () => chatApiMock }))
@@ -104,7 +104,7 @@ export const composerChatApiSpy = makeComposerChatApiMock()
 
 /**
  * '@/composables/features/chat/useChat' mock 工厂（spy 单例转发形态，注册走
- * composer-shell-mount.ts）：resetChatModuleState 是 queue 链路文件的消费面，
+ * composer-shell-mount.ts）：resetChatModuleState 是 queue 链路文件的消费方，
  * 对 bash / btw 文件为无害多余键（超集）。
  */
 export function composerChatSpyModule() {
@@ -127,7 +127,7 @@ function composerChatApiGroup() {
 /**
  * '@/api' mock 工厂（chat 组增量形态）：compact-queue / dispatch-route 等走真实
  * flush 链路的文件用——queue.flush 内部经 api.chat.send 提交，与 useChat mock 的
- * send 是同一 vi.fn（断言面不分裂）。
+ * send 是同一 vi.fn（断言范围不分裂）。
  */
 export function composerApiModuleWithChat() {
   return {
@@ -159,7 +159,7 @@ export async function composerApiModuleActualWithBtw(
 
 /**
  * '@/api' mock 工厂（chat + btw 组增量形态，btw-button 专用）：chat 组加 getHistory
- * 回放腿（空快照即可，drawer 选中线不走失败告警路径），btw 组为 badge 数据源。
+ * 回放路径（空快照即可，drawer 选中线不走失败告警路径），btw 组为 badge 数据源。
  */
 export function composerApiModuleWithChatAndBtw() {
   return {
@@ -173,7 +173,7 @@ export function composerApiModuleWithChatAndBtw() {
 }
 
 /**
- * '@/composables/features/new-task/useNewTaskFlow' mock 工厂（四文件消费面并集超集，
+ * '@/composables/features/new-task/useNewTaskFlow' mock 工厂（四文件消费方并集超集，
  * 多余键为无害 vi.fn / ref）。W4：currentCwd 统一真 ref 形态（见文件头注释）。
  */
 export function composerFlowModule() {
@@ -262,7 +262,7 @@ export function composerChatStoreModule() {
       isActive: () => false,
       getRetryState: () => undefined,
       isCompacting: () => false,
-      // [u6b] 发送位四态渲染即读 occupancy 投影（sendButtonState ← effectivePhase），mock 需提供
+      // [u6b] 发送位四态渲染即读 occupancy 派生视图（sendButtonState ← effectivePhase），mock 需提供
       sessionPhase: () => ({ turn: 'idle', compacting: false, bash: false }),
       getMessages: () => [],
       getOccupancy: () => ({ turn: 'idle', compacting: false, bash: false }),
@@ -280,7 +280,7 @@ export function composerSessionStoreModule() {
 const SIMPLE = defineComponent({ name: 'SimpleStub', template: '<div />' })
 
 /** Composer 兄弟子组件空 stub（四文件逐字相同；CommandPopover 需透传 slot）。
- *  ContextCapacityPopover 平铺触发器带 useContextUsage 恢复腿（getContext RPC），
+ *  ContextCapacityPopover 平铺触发器带 useContextUsage 恢复路径（getContext RPC），
  *  stub 防止 RPC 依赖泄进 Composer mount 族用例（组件行为归各自组件级测试）。 */
 export const composerChildStubs = {
   CommandPopover: defineComponent({ name: 'CommandPopover', template: '<div><slot /></div>' }),
@@ -343,7 +343,7 @@ export function makeTypeAndEnter(ComposerInputMock: Component) {
  * ComposerInput mock 工厂（density-wiring / smoke / bash-mode / compact-queue /
  * dispatch-route / btw-button 共用 expose 面）：input 事件捕获进 lastInputText 供
  * getSegments 读段；testid 锚点供冒烟断言。beforeEach 重置 lastInputText.value = ''
- * 即可复用于下一用例。lastSetText 记录 setText 收到的值（孤儿草稿恢复类用例的落值观察面）。
+ * 即可复用于下一用例。lastSetText 记录 setText 收到的值（孤儿草稿恢复类用例的落值观察点）。
  * extraEmits 供变体追加事件声明（makeFocusableComposerInputMock
  * 的 focus/blur 即经此注入）。expose 含 getText（Composer.vue 切 session 存草稿读它），
  * setup 返回 clear/setText 供 wrapper.vm 直取断言（bash/queue/dispatch 的 vm.clear 面）。

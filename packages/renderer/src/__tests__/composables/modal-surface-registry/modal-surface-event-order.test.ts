@@ -30,7 +30,7 @@ import {
   resetModalSurfaceRegistry,
 } from '@/composables/features/app/modal-surface-registry'
 
-/** 编排器模拟（§6.7 守卫两重：defaultPrevented 先检 → 聚合让位 → 层级序剥层） */
+/** 编排器模拟（§6.7 检查两重：defaultPrevented 先检 → 聚合让位 → 层级序剥层） */
 type Decision = 'skip-prevented' | 'yield' | 'act'
 const decisions: Decision[] = []
 function onOrchestratorKeydown(e: KeyboardEvent): void {
@@ -154,7 +154,7 @@ describe('B. document 先行消费方同步清态（PlanCommentPopover 形态反
     expect(decisions).toEqual(['act'])
   })
 
-  it('preventDefault（先行档契约）：编排器守卫一跳过——一次 Esc 单动作', () => {
+  it('preventDefault（先行档契约）：编排器检查一跳过——一次 Esc 单动作', () => {
     window.addEventListener('keydown', onOrchestratorKeydown)
     const consumer = mountDocConsumer(true)
 

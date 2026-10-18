@@ -6,8 +6,8 @@
 // 一个 record 一个实例（modeless：全 record）：对话容器 = record，续聊轮 = 「新 run + resume 锚点」
 //（pi --session 续写原 session 文件）。本类承载三面：
 //   - onMessage：D4 状态迁移表的 message 行（终态分流 / 在途轮打断入队 / 轮间直派）；
-//   - dispatchRound：每轮派发（stale-child 兜底 → 载荷组装守卫 → 泛化派发主干）；
-//   - onRunSettled：run 应答回调（resolve 时点 = agent_settled，D7）——终态守卫整体
+//   - dispatchRound：每轮派发（stale-child 兜底 → 载荷组装检查 → 泛化派发主干）；
+//   - onRunSettled：run 应答回调（resolve 时点 = agent_settled，D7）——终态检查整体
 //     early-return → settle 段交棒 → 成功/失败轮末分流（D7）→ drain 队列。
 //
 // 红线（单写者不变量，两级声明）的实现归属：
@@ -19,7 +19,7 @@
 //
 // 编排能力经 ContinuationHost 注入（service 闭包）——本模块可独立编译与单测；
 // 通知门（notifyGateAllowsDelivery）双闸消费：成功分支 route 前 + 失败分支独立
-// 载荷发出前（B#19 投递门照迁移），与 onRunSettled 的 status 终态面正交双闸。
+// 载荷发出前（B#19 投递门照迁移），与 onRunSettled 的 status 终态侧正交双闸。
 
 import type { AgentOutcome, ResumeAnchor } from "@zhushanwen/subagent-engine-sdk";
 
@@ -55,7 +55,7 @@ const logger = getLogger("subagents");
  * 簿记/通知失败等，成因不限）降级为 error 留痕，不得升格为未处理 promise 拒绝——
  * pi rpc 模式没有安装未处理拒绝处理器（1.0.0 复核：dist 下仅 codemode-worker 子进程
  * 注册，rpc/interactive 主进程均无），Node 默认 exit 1，
- * 后果 = 当轮 record 丢失、manifest 投影未执行（登记 §1.4 死亡通道）。
+ * 后果 = 当轮 record 丢失、manifest 派生视图未执行（登记 §1.4 死亡通道）。
  */
 function voidRoundFinalChain(promise: Promise<void>, what: string): void {
   promise.catch((err: unknown) => {
@@ -107,7 +107,7 @@ export function buildReopenSummaryPrompt(input: {
  *     选型，原地 resume 续写被 -32031 卡死不可用），新 sessionRef 经
  *     onHandleReady 回传；
  *   - pi（缺省）：recordId + sessionFile 续写原文件。
- * [池抽象降级 2026-09-13] 原 poolKey 字段已随 ResumeAnchor 协议面退役删除——
+ * [池抽象降级 2026-09-13] 原 poolKey 字段已随 ResumeAnchor 协议范围退役删除——
  * 两引擎恒 'shared'，锚点补全 handle 无需池定位。
  */
 export function resumeAnchorOf(record: ExecutionRecord): ResumeAnchor {
@@ -128,7 +128,7 @@ export function resumeAnchorOf(record: ExecutionRecord): ResumeAnchor {
 /**
  * 泛化派发主干的轮次回调面（service.kickOffChatRound 泛化参数，D6）。
  * run resolve（= agent_settled）/ run reject（prepare 期失败）/ acquire 被打断
- * （无 run 产生）三分，全部回流 Continuation 单点收口。
+ * （无 run 产生）三分，全部回流 Continuation 单点收尾。
  */
 export interface ContinuationRoundHandlers {
   /** run 应答（resolve = agent_settled，D7 定案）。 */
@@ -167,37 +167,37 @@ export interface ContinuationHost {
   dispatchChatRound(record: ExecutionRecord, input: ContinuationDispatchInput): void;
   /** 轮终簿记（doFinalizeRoundToIdle wrapper，D7 outcome 入参）。 */
   finalizeRoundOutcome(record: ExecutionRecord, outcome: RoundSettlementOutcomeAlias): Promise<void>;
-  /** 成功完成通知（toNotifyRecord 守卫映射 + notify——正文权威 = record.result）。
+  /** 成功完成通知（toNotifyRecord 检查映射 + notify——正文权威 = record.result）。
    *  [collect 退役] 原 collectCoordinator.route（async 直通/sync 批缓冲双路）收敛为
-   *  单一 async 直通面。 */
+   *  单一 async 直通路径。 */
   notifyComplete(record: ExecutionRecord): void;
-  /** 失败通知直投（独立构造载荷——不经 toNotifyRecord 守卫映射，正文不读 record.result）。 */
+  /** 失败通知直投（独立构造载荷——不经 toNotifyRecord 检查映射，正文不读 record.result）。 */
   notifyRecord(record: BgNotifyRecord): void;
   /** 红线②派发前兜底：镜像在途子进程活着 → kill 等退出（引擎存活期状态错配）。 */
   killStaleChild(recordId: string): Promise<void>;
   /** [modeless 波1] message 资格的引擎能力轴判据（conversation 位；unsupported /
    *  未注册 = false）——与 record 形态无关（万物可续，无升级概念）。 */
   engineSupportsConversation(record: ExecutionRecord): boolean;
-  /** D4 revive 格的宿主面：revive 后的 record register + 迁移上报（entry 落盘）。 */
+  /** D4 revive 格的宿主侧：revive 后的 record register + 迁移上报（entry 落盘）。 */
   reviveClosedRecord(record: ExecutionRecord): void;
   /** [U4 / §3.2.3] reopen 降级原语接线（store.markReopened）：锚失效降级路径的同 id
    *  带历史重开——round 归零 + epoch+1 + stopReason=reopened + 新锚 binding 落盘。
    *  [W1/R1 方案 A] 宿主闭包经 transcriptAnchorOf 单点分派两引擎锚（pi = sessionFile /
    *  zcode = engineHandle.sessionRef）——两引擎对 true/false 语义同构。
-   *  false = CAS 拒绝（record 非 idle——竞态收口）或 binding 持久化失败，调用方按
+   *  false = CAS 拒绝（record 非 idle——竞态收尾）或 binding 持久化失败，调用方按
    *  降级失败响亮上抛（D1a：原 zcode 静默降级分支已随闭包接线删除）。 */
   reopenRecord(record: ExecutionRecord): boolean;
   /** 轮始簿记（store.markRoundStarted：status=running + result/stopReason 清除 +
-   *  迁移上报 entry 落盘——[U2b 修复轮/D2] 归口原 dispatchRoundAsync 三行现场写；
+   *  迁移上报 entry 落盘——[U2b 修复轮/D2] 收敛原 dispatchRoundAsync 三行现场写；
    *  [U6/D4] stopReason 清点随轮始清点族扩字段）。 */
   markRoundStarted(record: ExecutionRecord): void;
   /** [U5] idle keepalive 超时的进程回收（idleTimeoutRecycle——归档是用户意愿位，
    *  超时回收不动 intent/占用位，record 保持 idle 可续聊）。 */
   closeNow(record: ExecutionRecord): Promise<void>;
   /**
-   * [U5 / §3.2.5 顺序约束] closeAfterRound 挂起标志的归档消费点（chat 域）：收口轮
+   * [U5 / §3.2.5 顺序约束] closeAfterRound 挂起标志的归档消费点（chat 域）：收尾轮
    * 通知送达（route/notify 已过 gate 并写账）之后调用——归档即 gate ①静默，提前
-   * 调用会吞掉收口轮通知。
+   * 调用会吞掉收尾轮通知。
    */
   archiveAfterClosingRound(record: ExecutionRecord): Promise<void>;
   /**
@@ -219,7 +219,7 @@ type RoundSettlementOutcomeAlias = RoundSettlementOutcome;
  * ConversationContinuation（每 record 一个实例；§3.4 全规格）。
  */
 export class ConversationContinuation {
-  /** 在途轮标识（单飞守卫；undefined = 无在途轮。派发异步窗内为占位值）。
+  /** 在途轮标识（单飞检查；undefined = 无在途轮。派发异步窗内为占位值）。
    *  形态 `${record.id}#r${roundSeq}`——轮身份分量是**派发序号**而非 roundNo：
    *  round 只随轮终簿记 +1（markRoundIdle 写点③），「被取消轮迟到应答丢弃（无
    *  簿记）→ 续聊新轮」的 roundNo 会与被取消轮相同（撞号致轮身份校验失效），
@@ -232,8 +232,8 @@ export class ConversationContinuation {
   private activeController: AbortController | undefined;
   /** FIFO 待发消息（在途轮打断窗内到达的 message；abort 收敛后 drain 聚合为一轮）。 */
   private readonly queue: string[] = [];
-  /** [U4 / §3.2.3] reopen 降级摘要（reviveOrThrow 翻边前检测锚失效时构造，派发守卫
-   *  消费后即清——单飞守卫下无并发消费）。非空 = 本轮按 reopen 降级派发。 */
+  /** [U4 / §3.2.3] reopen 降级摘要（reviveOrThrow 翻边前检测锚失效时构造，派发检查
+   *  消费后即清——单飞检查下无并发消费）。非空 = 本轮按 reopen 降级派发。 */
   private pendingReopenSummary: string | undefined;
 
   constructor(
@@ -258,8 +258,8 @@ export class ConversationContinuation {
   // ── 首轮派发（start，§3.5 终态数据流入口）──────────
 
   /**
-   * 首轮派发：不经 D4 分流与锚点守卫（新 record 无 sessionFile——run 应答回填），
-   * 无 resume（新 session）。守卫 throw 直达调用方（executeViaEngine 同步段）。
+   * 首轮派发：不经 D4 分流与锚点检查（新 record 无 sessionFile——run 应答回填），
+   * 无 resume（新 session）。检查 throw 直达调用方（executeViaEngine 同步段）。
    * [modeless 波1] firstRoundSpec（executeViaEngine 的 opts 全量声明）随派发链
    * 透传至 host.dispatchChatRound——保 schema/maxTurns 等首轮声明。
    */
@@ -274,7 +274,7 @@ export class ConversationContinuation {
    *
    * [U4 / §3.2.2 事件表] 两态分流：
    *   - idle → reviveOrThrow（万物可续：升级 gate + tryEnterRunning 翻边；锚失效
-   *     在派发守卫走 reopen 降级；archived → 隐含寻回）；
+   *     在派发检查走 reopen 降级；archived → 隐含寻回）；
    *   - running（有在途轮）→ D2 打断：abort 在途轮 signal（record 不终态化）+
    *     入队，abort 收敛后 drain；
    *   - running（轮间 idle）→ 直接派发新轮。
@@ -284,14 +284,14 @@ export class ConversationContinuation {
   onMessage(text: string): void {
     const record = this.record;
     // [u-arch merge] reactivateRecord 挂点随 dev 线意图机制清除移除——寻回语义由
-    // reviveOrThrow 构造性承接（万物可续：close 收口落账 record 的续聊照常可达）。
+    // reviveOrThrow 构造性承接（万物可续：close 收尾写入 journal 记录 record 的续聊照常可达）。
     if (record.status !== "running") {
       this.reviveOrThrow();
     }
     if (this.activeRunId !== undefined) {
       // D2 打断语义：消息即时生效，永不「忙」拒绝。占位窗（activeController 未建）
       // 到达的消息仅入队——派发完成后轮终 drain 承接。
-      // [U5] 在飞轮存在 = 用户继续对话——close 优雅收口挂起作废（closeAfterRound
+      // [U5] 在途轮存在 = 用户继续对话——close 优雅收尾挂起作废（closeAfterRound
       // 是「这轮结束后收起」的意愿，新 message 表达了相反意愿）。
       record.closeAfterRound = undefined;
       this.activeController?.abort();
@@ -305,16 +305,16 @@ export class ConversationContinuation {
 
   /**
    * abort 在途轮 + 清空队列 + **废弃轮身份**（[U5] 消费方变化：原 close 行专用——
-   * close 改优雅收口后现消费方 = cancelBackground / disposeAllRecords 的立即打断
+   * close 改优雅收尾后现消费方 = cancelBackground / disposeAllRecords 的立即打断
    * 路径）。record 的 settle/归档由调用方编排（store 意图原语），本方法只做轮级打断。
    *
    * [S1 P1 修复] 轮身份废弃是 cancel 语义的必要组成：取消轮的 run 应答要等引擎
    * 停轮收敛（pi SIGTERM → trap-flush → 退出实测可达 15s）才返回——本方法返回时
-   * 旧轮 run 仍在飞，activeRunId 若保留，(a) 用户 message revive 会误走 D2 打断
+   * 旧轮 run 仍在途，activeRunId 若保留，(a) 用户 message revive 会误走 D2 打断
    * 分支入队、被死轮拖住整段收敛窗；(b) 旧轮迟到应答回调时轮身份校验仍匹配放行
    * （见 dispatchRoundAsync handlers），失败簿记串进 revive 后的新对话（round 多跳
    * +1、双通知、stopReason=failed 覆盖新轮正文）。废弃后旧轮的一切后续回调按迟到
-   * 丢弃，message 直接派发新轮。D2 打断（onMessage 的在飞轮打断）不入此列——那是
+   * 丢弃，message 直接派发新轮。D2 打断（onMessage 的在途轮打断）不入此列——那是
    * 轮仍活跃的续聊打断，activeRunId 保留至该轮自然收敛。
    */
   abortAndClearQueue(): void {
@@ -324,8 +324,8 @@ export class ConversationContinuation {
   }
 
   /**
-   * 仅清空队列（不打断在飞轮）——[U5] close 优雅收口的排队消息处置：close 意愿
-   * 优先于排队消息（「这件事告一段落」——close 前打断入队的消息随收起作废，在飞轮
+   * 仅清空队列（不打断在途轮）——[U5] close 优雅收尾的排队消息处置：close 意愿
+   * 优先于排队消息（「这件事告一段落」——close 前打断入队的消息随收起作废，在途轮
    * 照常跑完）。与 {@link abortAndClearQueue} 的差异 = 不 abort activeController。
    */
   clearQueue(): void {
@@ -337,13 +337,13 @@ export class ConversationContinuation {
   /**
    * 轮末分流唯一入口（设计 §3.4 onRunSettled）。
    *
-   * 【终态守卫 = 整体 early-return，先于一切分支】record 已终态化（close/cancel
+   * 【终态检查 = 整体 early-return，先于一切分支】record 已终态化（close/cancel
    * 抢先）→ 直接返回：不 roundIdle（否则 close 终态化被 doFinalizeRoundToIdle 的
    * 「覆盖 closed 回滚为 running」机制回滚）、不通知、不 drain——S7 精确语义。
-   * notifyGate 门与此正交并存（门判 closedReason 编排面、守卫判 status 终态面，
+   * notifyGate 门与此正交并存（门判 closedReason 编排侧、检查判 status 终态侧，
    * 两闸判据不同源不互替）。
    *
-   * 【迟到守卫（S1 P1 修复）】status 守卫对「cancel settle → message revive 翻回
+   * 【迟到检查（S1 P1 修复）】status 检查对「cancel settle → message revive 翻回
    * running」形态失守（status 又是 running 了）；轮身份校验在回调入口层（见
    * dispatchRoundAsync isStaleRoundArrival）先行拦截迟到应答——本方法到达的应答
    * 已保证属于当前在途轮。
@@ -378,12 +378,12 @@ export class ConversationContinuation {
   // ── 派发（§3.4 dispatchRound）────────────────────────────────────
 
   /**
-   * 同步守卫段 + 占位（构造性单飞）：守卫 throw 直达调用方（tool 错误面——
-   * async 函数内的 throw 会变 rejected promise，`void` 调用丢传导，故守卫必须
+   * 同步检查段 + 占位（构造性单飞）：检查 throw 直达调用方（tool 错误范围——
+   * async 函数内的 throw 会变 rejected promise，`void` 调用丢传导，故检查必须
    * 在同步段完成）；activeRunId 同步占位，dispatchRoundAsync 的 await 窗内
-   * 重入被拒（单写者构造性保证的实现面）。
+   * 重入被拒（单写者构造性保证的实现侧）。
    *
-   * [U4 / §3.2.3 锚判据] 续轮锚守卫从「无锚即拒」切换为锚可解析性分流：
+   * [U4 / §3.2.3 锚判据] 续轮锚检查从「无锚即拒」切换为锚可解析性分流：
    *   - pendingReopenSummary 非空（reviveOrThrow 翻边前已 markReopened 的 idle-message
    *     降级）：按 reopen 降级轮派发（resume:undefined + 摘要前缀），消费后即清；
    *   - 锚字段缺失（从未开跑，entry-born）：无历史可摘要——直接按全新 session 派发
@@ -393,10 +393,10 @@ export class ConversationContinuation {
    *     U2 原语契约领地外不可放宽；round 连续保持通知去重键单调，磁盘一致性由 run
    *     应答回填 writeBindingForRecord 保证）——世代推进仅 idle-message 触发的完整
    *     reopen 承担（偏差登记：续轮降级无 epoch/round 重置）；
-   *   - zcode 锚不进预检查分流（库投影滞后系统性误判——U3 退役，理由见
+   *   - zcode 锚不进预检查分流（库派生视图滞后系统性误判——U3 退役，理由见
    *     reviveOrThrow 注）：带锚正常派发，锚活性由引擎真实 resume 结果承担；
    *   - 锚可解析：原样 resume 续写（透明续聊）。
-   *  [U5 / §3.2.5] worktree 绑定丢失守卫改为自动重建（异步——移入 dispatchRoundAsync，
+   *  [U5 / §3.2.5] worktree 绑定丢失检查改为自动重建（异步——移入 dispatchRoundAsync，
    *  三失败形态处置见其方法头；原同步 throw 拒绝语义退役）。
    */
   private dispatchRoundGuarded(
@@ -428,8 +428,8 @@ export class ConversationContinuation {
         // U2 原语契约领地外不可放宽；round 连续保持通知去重键单调，磁盘一致性由
         // run 应答回填 writeBindingForRecord 保证）——偏差登记见实现单元报告。
         //
-        // [U3] zcode 锚不进本降级：库投影预检查对 zcode 系统性误判（app-server 落库
-        // 滞后于 create 应答，分钟级窗 + 部分行永不落库——详见 reviveOrThrow 注），
+        // [U3] zcode 锚不进本降级：库派生预检查对 zcode 系统性误判（app-server 入库
+        // 滞后于 create 应答，分钟级窗 + 部分行永不入库——详见 reviveOrThrow 注），
         // 误触发会丢 resume 通道。zcode 锚活性由引擎真实 resume 结果承担（失败时
         // 引擎注入锚失效声明段），此处带锚正常派发。
         freshSession = true;
@@ -477,7 +477,7 @@ export class ConversationContinuation {
       void err;
     }
     if (record.status !== "running") {
-      // 兜底窗内 close/cancel 抢先收口 → 本轮作废（终态守卫同构语义）。
+      // 兜底窗内 close/cancel 抢先收尾 → 本轮作废（终态检查同构语义）。
       this.clearActiveRound();
       this.queue.length = 0;
       return;
@@ -495,9 +495,9 @@ export class ConversationContinuation {
     const worktreeNotice = rebuild.worktreeNotice;
 
     // [轮次轴在途门 / §4 补强] :472 的重建 await 是终态门（:460）之后唯一的挂起点：
-    // 窗口内 cancel/close 抢先收口时 record 已离 running，而轮始原语的判据不能是
+    // 窗口内 cancel/close 抢先收尾时 record 已离 running，而轮始原语的判据不能是
     // status（首轮出生即 running、reopen 后仍是 idle 也要允许轮始——store 侧无法
-    // 单靠 status 判「已有在途轮」），继续走 markRoundStarted 会把已收口的 record
+    // 单靠 status 判「已有在途轮」），继续走 markRoundStarted 会把已收尾的 record
     // 静默翻回 running：内存态与磁盘已落的 stopReason / `.state` 收条分叉。
     // 此处同步复查（本行到 markRoundStarted 之间无 await，同 tick 内不可被抢占，
     // 由结构本身保证）；处置与 :460 的终态门逐字同形。
@@ -521,7 +521,7 @@ export class ConversationContinuation {
     const roundRunId = `${record.id}#r${this.roundSeq}`;
     this.activeRunId = roundRunId;
     this.activeController = controller;
-    // 轮始簿记归口（[U2b 修复轮/D2] store.markRoundStarted：status=running 重申 +
+    // 轮始簿记收敛（[U2b 修复轮/D2] store.markRoundStarted：status=running 重申 +
     // 清上一轮 result——§5.4 isStreaming 公式要求 result undefined 才
     // 显示 streaming，不清则续轮流仍显示 waiting、spinner 无法恢复；迁移上报 entry
     // 落盘让 GUI 派生缓存失效、从 waiting 切回 spinner。U1 原语簿记为原三行现场写
@@ -531,13 +531,13 @@ export class ConversationContinuation {
     const concludeRound = (): void => {
       recordSignal.removeEventListener("abort", onRecordAbort);
     };
-    // [S1 P1 修复②] 轮身份守卫：run 应答回调（onSettled/onRejected/onAbandoned）
+    // [S1 P1 修复②] 轮身份检查：run 应答回调（onSettled/onRejected/onAbandoned）
     // 到达时若 activeRunId 已不是本轮（cancel 废弃轮身份 / revive 后新轮已占位），
     // 即为迟到应答——整体丢弃（不簿记、不通知、不 drain、不误清新轮在途标记，
     // concludeRound 的 listener 清理仍先行——旧轮资源不留挂）。典型时序：cancel 的
     // 旧轮 run 要等 pi 停轮收敛（实测可达 15s）才返回，此间用户 message 已 revive
-    // 并派发新轮，旧轮应答迟到到达时 status 守卫已失守（revive 翻回 running）——
-    // 本守卫是唯一拦断面。判据 = 全等（activeRunId 形态 `${record.id}#r${seq}`，
+    // 并派发新轮，旧轮应答迟到到达时 status 检查已失守（revive 翻回 running）——
+    // 本检查是唯一拦断面。判据 = 全等（activeRunId 形态 `${record.id}#r${seq}`，
     // seq 派发序号单调递增，同 record 内无前缀歧义、无簿记回退撞号）。
     const isStaleRoundArrival = (entry: string): boolean => {
       if (this.activeRunId === roundRunId) return false;
@@ -594,9 +594,9 @@ export class ConversationContinuation {
   }
 
   /**
-   * [U4 / §3.2.3] reopen 降级摘要前缀（binding 快照域投影，buildReopenSummaryPrompt
+   * [U4 / §3.2.3] reopen 降级摘要前缀（binding 快照域派生视图，buildReopenSummaryPrompt
    *  模板单点）。[metrics-gate cyclo 偿还 / 行为保持] dispatchRoundGuarded /
-   *  dispatchRoundAsync 两处重复的内联构造归一为单点（两处载荷与字段守卫逐字节等价
+   *  dispatchRoundAsync 两处重复的内联构造归一为单点（两处载荷与字段检查逐字节等价
    *  ——提取自原内联 buildReopenSummaryPrompt 调用，零判据变化）。
    */
   private reopenSummaryFor(record: ExecutionRecord): string {
@@ -613,7 +613,7 @@ export class ConversationContinuation {
 
   /**
    * [U5 / §3.2.5 worktree 续聊重建] dispatchRoundAsync ①' 段原样提取（[metrics-gate
-   *  cyclo 偿还 / 行为保持]：入守卫 / 三失败形态处置 / 字段回填逐字节等价）。绑定
+   *  cyclo 偿还 / 行为保持]：入检查 / 三失败形态处置 / 字段回填逐字节等价）。绑定
    *  丢失（跨重启 / 归档后 worktreeHandle 恒 undefined）→ 自动重建。原同步 throw
    *  拒绝语义退役（拒绝会阻断万物可续；放行 = spawn cwd 静默回落主 repo——重建是
    *  两害的唯一正确解）。四失败形态：
@@ -623,7 +623,7 @@ export class ConversationContinuation {
    *    degrade-reopen → 形态①（patch 丢失/分支不存在）→ 摘要注入全新 session 直派
    *                   （同 [U4] 续轮 transcript 丢失分支同构——不推进世代，
    *                   markReopened CAS 仅收 idle，偏差同族登记）；
-   *    throw        → 形态③ IO 错响亮（转失败轮末分流——onRoundRejected，工具错误面/
+   *    throw        → 形态③ IO 错响亮（转失败轮末分流——onRoundRejected，工具错误范围/
    *                   失败通知可见，不静默回落；返回 { kind: "rejected" }，调用方
    *                   本轮作废）。
    */
@@ -706,13 +706,13 @@ export class ConversationContinuation {
     // disarm 接回「正在执行」。
     this.armIdleKeepalive();
     // 成功通知：「门 → 直发」双闸（[U5] gate 三元组：①归档静默/②放弃轮标记阻断/
-    // ③收口轮豁免 = 构造性——closeAfterRound 归档挂在本通知之后，settle 时点
+    // ③收尾轮豁免 = 构造性——closeAfterRound 归档挂在本通知之后，settle 时点
     // intent 尚未翻转；正文权威 = record.result = 本轮 content）。
     if (notifyGateAllowsDelivery(record)) {
       this.host.notifyComplete(record);
-      // [U5 / §3.2.5 close 顺序约束] 收口轮通知送达后归档（closeAfterRound 挂起消费，
+      // [U5 / §3.2.5 close 顺序约束] 收尾轮通知送达后归档（closeAfterRound 挂起消费，
       // chat 域挂点）。归档后 drain：record 已 archived（intent 翻转，占用位 idle
-      // 化由后续流程承接）——drain 的 status 守卫决定排队消息去留。
+      // 化由后续流程承接）——drain 的 status 检查决定排队消息去留。
       if (record.closeAfterRound === true) {
         await this.host.archiveAfterClosingRound(record);
       }
@@ -727,7 +727,7 @@ export class ConversationContinuation {
    * 指引，可达性迁移自 [T2-③/LC-1]）+ record 轮终落 idle 可续聊（MF-6；
    * [two-state-convergence U4/D3] 翻边后 idle 即 resumable）。
    * 发前过 notifyGate 三元组门（[U5]：①归档静默——编排性关闭自动收起后迟到应答 /
-   * ②放弃轮标记命中——cancel 中断轮防双发；守卫是入口一次性判定，覆盖不了簿记
+   * ②放弃轮标记命中——cancel 中断轮防双发；检查是入口一次性判定，覆盖不了簿记
    * await 链内的中途归档窗）。
    */
   private async settleRoundFailed(reason: string): Promise<void> {
@@ -758,7 +758,7 @@ export class ConversationContinuation {
       ...(record.sessionFile !== undefined ? { sessionFile: record.sessionFile } : {}),
     };
     this.host.notifyRecord(notify);
-    // [U5 / §3.2.5 close 顺序约束] 失败收口轮通知送达后归档（closeAfterRound 挂起
+    // [U5 / §3.2.5 close 顺序约束] 失败收尾轮通知送达后归档（closeAfterRound 挂起
     // 消费——优雅 close 后轮失败，失败通知必须先送达，归档静默只作用于其后的回注）。
     if (record.closeAfterRound === true) {
       await this.host.archiveAfterClosingRound(record);
@@ -769,20 +769,20 @@ export class ConversationContinuation {
   /**
    * 队列 drain：abort 收敛（单写者前置满足）后按序派发；多条聚合为一轮输入。
    *
-   * [A2] 内部续派路径的守卫 throw 必须就地转错误面：本方法运行在 settle 后续派
+   * [A2] 内部续派路径的检查 throw 必须就地转错误范围：本方法运行在 settle 后续派
    *（settleRoundSuccess/settleRoundFailed 尾部，async 函数体内的同步调用）与
-   * onRoundAbandoned 的 fire-and-forget 链上，dispatchRoundGuarded 的同步守卫 throw
+   * onRoundAbandoned 的 fire-and-forget 链上，dispatchRoundGuarded 的同步检查 throw
    *（锚点缺失 / worktree 绑定丢失 / controller 缺失）若逃逸即成 unhandled rejection
    *（Node ≥15 默认崩宿主）且队列消息静默丢失。可达触发例：首轮在途时 message 打断
    * 入队 → 首轮崩溃（合成 outcome 无 sessionFile）→ 失败 settle → drain 以
-   * firstRound=false 走锚点守卫 → throw。转换语义：失败通知（独立载荷过 notifyGate
+   * firstRound=false 走锚点检查 → throw。转换语义：失败通知（独立载荷过 notifyGate
    * 门，与 settleRoundFailed 失败单发同构——record 轮终落 idle 可续聊，载荷
-   * closed+failed 仅是文案载体）+ 队列丢弃留痕（warn）。onMessage 同步入口的守卫
-   * throw 保留（设计 §3.1 失败路径表的工具错误面，不经本方法）。
+   * closed+failed 仅是文案载体）+ 队列丢弃留痕（warn）。onMessage 同步入口的检查
+   * throw 保留（设计 §3.1 失败路径表的工具错误范围，不经本方法）。
    */
   private drain(): void {
-    // 终态簿记冻结（close/cancel 抢先收口窗——endedAt 已设）不复活，排队消息作废
-    // （旧守卫「非 running 即清队列」的终态拦截语义保持）。
+    // 终态簿记冻结（close/cancel 抢先收尾窗——endedAt 已设）不复活，排队消息作废
+    // （旧检查「非 running 即清队列」的终态拦截语义保持）。
     if (this.record.status !== "running" && this.record.endedAt !== undefined) {
       this.queue.length = 0;
       return;
@@ -793,9 +793,9 @@ export class ConversationContinuation {
       // [two-state-convergence U4/D3a 实施期补点] 轮终翻边 idle：排队消息续派前经
       // revive 过站翻回 running（与 onMessage 同一准入——升级 gate + tryEnterRunning +
       // revive 迁移上报），不再静默丢弃。桥接期轮终保持 running 时本分支不可达；
-      // 翻边后 settle 尾部 drain 必经（dispatchRoundGuarded 的 running 守卫由此满足）。
+      // 翻边后 settle 尾部 drain 必经（dispatchRoundGuarded 的 running 检查由此满足）。
       // revive 同步拒绝（升级 gate / CAS 竞态——当前形态不可达，防御保留）走下方
-      // 既有丢弃通知面（[A2] 错误就地转面语义不变）。
+      // 既有丢弃通知侧（[A2] 错误就地转面语义不变）。
       if (this.record.status !== "running") {
         this.reviveOrThrow();
       }
@@ -808,14 +808,14 @@ export class ConversationContinuation {
       );
       if (notifyGateAllowsDelivery(this.record)) {
         // dedup 身份必须独立于同轮失败通知（settleRoundFailed 缺省 key = `id:round`）：
-        // 主可达场景「首轮崩溃 → 失败 settle（通知1 发出）→ drain 守卫 throw → 丢弃
+        // 主可达场景「首轮崩溃 → 失败 settle（通知1 发出）→ drain 检查 throw → 丢弃
         // 通知（通知2）」中两通知同轮同 key，沿用缺省 key 会被 ledger/内核按 key 永久
         // 去重吞掉（notifier dedupe 永久 + ledger 幂等）——「队列消息被丢」的显式反馈
         // 永不可达。故经 dedupKey 传 `id:round:drain-drop`：
         //   - 带 round：不同轮的 drain 丢弃是不同事件（各轮 queue 的消息不同，每次都
         //     应显式反馈），不带 round 会让本 bug 在「第二轮及以后」以同构路径复现；
         //   - 同轮重放同 key 合理：同轮 drain 丢弃是同一事件的反馈（queue 已 splice
-        //     清空，单飞守卫下同轮不会二次丢弃），at-least-once 幂等语义成立。
+        //     清空，单飞检查下同轮不会二次丢弃），at-least-once 幂等语义成立。
         const dropDedupKey = this.record.round != null
           ? `${this.record.id}:${this.record.round}:drain-drop`
           : `${this.record.id}:drain-drop`;
@@ -844,8 +844,8 @@ export class ConversationContinuation {
    * armChatIdleTimer 的挂载降级链——配置值 throw 时回落 DEFAULT，arm 失败不得打断
    * 轮末分流链：本方法运行在 fire-and-forget 的 settle 后续链上，逃逸 throw 即
    * unhandled rejection）。超时处置 = host.closeNow（接线 = idleTimeoutRecycle，
-   * [U5] 进程回收不收口——disarm + kill 保活进程，record 保持 idle 随时可续聊；
-   * 收口是用户动作，归档是用户意愿位，超时不是用户动作——表述对齐
+   * [U5] 进程回收不收尾——disarm + kill 保活进程，record 保持 idle 随时可续聊；
+   * 收尾是用户动作，归档是用户意愿位，超时不是用户动作——表述对齐
    * lifecycle-manager.ts 头注）。
    */
   private armIdleKeepalive(): void {
@@ -883,7 +883,7 @@ export class ConversationContinuation {
    * closed」硬拒分支消亡（用户 close 后 message = 隐含寻回：intent 翻回 active 的
    * 挂点归 U5 意愿动作，见下方留桩），closedReason/stopReason 只是展示位。准入 =
    * 物理三件套（锚可解析 + 异进程探针 + 归属）：探针/归属已在 getRecordForAction
-   * 冷查链执行（内存 idle record 恒本进程持有）；pi 锚可解析性在派发守卫
+   * 冷查链执行（内存 idle record 恒本进程持有）；pi 锚可解析性在派发检查
    *（dispatchRoundGuarded）分流——锚失效走 markReopened 降级而非拒绝（zcode 锚
    * 不进预检查，见下方注）。
    * [modeless 波1] 升级概念消亡（chatMode 置位格删除）；message 资格 = 引擎
@@ -895,12 +895,12 @@ export class ConversationContinuation {
     // 仅收 idle——U2 原语契约「reopen 只由 idle record 的 message 触发」）：锚在但
     // 不可解析（pi：transcript 文件被回收）→ 同 id 带历史重开——round 归零 + epoch+1
     // + stopReason=reopened + 新锚 binding（store.markReopened），摘要暂存
-    // pendingReopen 由派发守卫消费（resume:undefined + prompt 注入）。锚缺失（从未
-    // 开跑）不在此分支（无世代可推进，派发守卫按全新 session 直派）。
+    // pendingReopen 由派发检查消费（resume:undefined + prompt 注入）。锚缺失（从未
+    // 开跑）不在此分支（无世代可推进，派发检查按全新 session 直派）。
     //
-    // zcode 锚不进本降级：库投影预检查（isAnchorResolvable）对 zcode 系统性误判——
-    // app-server 对 session 元数据行的落库滞后于 session/create 应答（分钟级窗 +
-    // 部分行永不落库），滞后窗内预检查恒 false，会把完全有效的锚误降级 reopen（丢
+    // zcode 锚不进本降级：库派生预检查（isAnchorResolvable）对 zcode 系统性误判——
+    // app-server 对 session 元数据行的入库滞后于 session/create 应答（分钟级窗 +
+    // 部分行永不入库），滞后窗内预检查恒 false，会把完全有效的锚误降级 reopen（丢
     // resume 通道 + 每条消息推进世代）。锚的活性改由引擎真实 resume 结果承担（失败
     // 时引擎注入锚失效声明段，见 zcode-engine buildResumeHistoryPrefix）；pi 锚 =
     // session 文件即时落盘，预检查可靠，保持 reopen。
@@ -922,7 +922,7 @@ export class ConversationContinuation {
         // [W1/R1 D1a] pi 与 zcode 同构两分支（原 zcode 无世代推进静默降级分支随
         // 宿主闭包 transcriptAnchorOf 单点分派接线删除——分支的存在前提「闭包对
         // zcode 恒 false」已消失）。false = CAS 拒绝（竞态翻位）或 binding 持久化
-        // 失败（epoch 硬要求，markReopened 已回滚内存面）——两者 record 都保持
+        // 失败（epoch 硬要求，markReopened 已回滚内存侧）——两者 record 都保持
         // idle 可重试，响亮上抛（Recovery 指引同款：重试 message 即可，写失败详情
         // 见 markReopened warn）。
         throw new Error(
@@ -948,7 +948,7 @@ export class ConversationContinuation {
     // 旧终态遗留位清除（对齐 resurrectClosed 桥接语义——closedReason 残留会让
     // notifyGate 门误拦本轮通知：parent-new/parent-fork/cancelled 在拦截集）。
     // [U6/D4 轮始清点族扩字段] stopReason 同步清（与 markRoundStartedImpl 同族——
-    // isOccupied 终态判据 `running && stopReason === undefined` 要求在飞期停因为空，
+    // isOccupied 终态判据 `running && stopReason === undefined` 要求在途期停因为空，
     // 旧展示位「上一轮为什么停」在轮运行期间保留的行为随清点族退役）。
     // reopen 归宿：markReopened 写的 stopReason='reopened' 展示位随之退役——重开
     // 信息由 reopen 摘要注入 prompt 体感承载（buildReopenSummaryPrompt），不再依赖
@@ -956,7 +956,7 @@ export class ConversationContinuation {
     record.closedReason = undefined;
     record.endedAt = undefined;
     record.stopReason = undefined;
-    // revive 宿主面：register（跨重启重建后不在内存的形态）+ 迁移上报（entry 落盘，
+    // revive 宿主侧：register（跨重启重建后不在内存的形态）+ 迁移上报（entry 落盘，
     // live/reload 视图同步）。
     this.host.reviveClosedRecord(record);
     // [U5] 寻回挂点在 onMessage 入口（独立于 revive 格——轮间 running 的 archived

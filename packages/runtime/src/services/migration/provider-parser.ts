@@ -39,7 +39,7 @@ export interface ParsedProvider extends PiProviderConfig {
    * - plaintext：明文 key 已提取。
    * - env：$VAR / ${VAR} 占位，_envVarName 记变量名。
    * - env-bundle：api_key 带 env 包，有凭据但 Phase 1 不支持落盘，apiKey 不写。
-   * - command：!command 前缀（shell 命令取值，命令注入面）。
+   * - command：!command 前缀（shell 命令取值，命令注入点）。
    * - oauth：type==='oauth'，Phase 1 不支持。
    * - missing：无任何 key 线索，apiKey 不写。
    */

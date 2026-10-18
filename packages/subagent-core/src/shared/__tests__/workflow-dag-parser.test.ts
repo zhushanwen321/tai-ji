@@ -67,7 +67,7 @@ function expectStructurallyValid(dag: WorkflowDag): void {
 }
 
 /**
- * 构造用例共形装置：脚本 → 解析 → fail-fast 守卫 + 结构不变量校验，直接返回 dag。
+ * 构造用例共形装置：脚本 → 解析 → fail-fast 检查 + 结构不变量校验，直接返回 dag。
  * 解析失败原生抛出（测试体不再重复 if(!ok) throw 样板）；成功路径 dag 已过结构校验。
  */
 function parseValidatedDag(source: string): WorkflowDag {
@@ -79,7 +79,7 @@ function parseValidatedDag(source: string): WorkflowDag {
 
 /**
  * 拒绝形态断言三联（复合调用链/互调环/同名多候选三用例共享）：恰好 N 节点、全部落
- * 缺省分区（实现点词法收口）、调用点零投影（指定名不出现）或通配形态（全部同名）。
+ * 缺省分区（实现点词法收尾）、调用点零映射（指定名不出现）或通配形态（全部同名）。
  */
 function expectRejectedProjection(
   dag: WorkflowDag,
@@ -96,7 +96,7 @@ function expectRejectedProjection(
   }
 }
 
-/** 投影形态断言（[templateName, phase] 双锚用例共享）：节点二元组序比对。 */
+/** 派生视图形态断言（[templateName, phase] 双锚用例共享）：节点二元组序比对。 */
 function expectNodeNamePhases(dag: WorkflowDag, pairs: Array<[string, string]>): void {
   expect(dag.nodes.map((n) => [n.templateName, n.phase])).toEqual(pairs);
 }
@@ -130,7 +130,7 @@ describe("parseWorkflowDag（scriptSource → WorkflowDag，设计 §3.1-3）", 
           expect(reviewer).toBeDefined();
           expect(reviewer?.matchPattern).toMatch(/^\^reviewer-/);
           expect(reviewer?.phase).toBe("并行多维审查（4 个一批）");
-          // helper 投影锚点：askAgent 调用点的 callSpec.description 模板可寻且落对分区（pr-lifecycle 的 aggregator 经 askAgent 派发）
+          // helper 派生视图锚点：askAgent 调用点的 callSpec.description 模板可寻且落对分区（pr-lifecycle 的 aggregator 经 askAgent 派发）
           const aggregator = result.dag.nodes.find((n) => n.templateName.startsWith("aggregator-"));
           expect(aggregator?.phase).toBe("聚合去重与修复分组");
         }
@@ -416,8 +416,8 @@ describe("parseWorkflowDag（scriptSource → WorkflowDag，设计 §3.1-3）", 
         `}`,
       ].join("\n");
       const result = parseWorkflowDag(source);
-      // 守卫前：visitLoop 对 undefined 取 sourceSlice → TypeError 以原生 throw 逃出
-      // 结构化错误边界，被挂接侧误归类为可重试通道错误；守卫后 for(;;) 是合法脚本，
+      // 检查前：visitLoop 对 undefined 取 sourceSlice → TypeError 以原生 throw 逃出
+      // 结构化错误边界，被挂接侧误归类为可重试通道错误；检查后 for(;;) 是合法脚本，
       // 按「合法脚本不得误报 parse_failed」契约正常解析（标签回退固定串 "loop"）
       expect(result.ok).toBe(true);
       if (!result.ok) return;
@@ -436,7 +436,7 @@ describe("parseWorkflowDag（scriptSource → WorkflowDag，设计 §3.1-3）", 
         `  }`,
         `}`,
       ].join("\n"));
-      // ctx.loops 登记序：内层先出（外层 visitLoop 等内层闭合后才登记）
+      // ctx.loops 登记序：内层先出（外层 visitLoop 等内层收尾后才登记）
       expect(dag.loops).toHaveLength(2);
       const [inner, outer] = dag.loops;
       expect(inner.label).toBe("const item … items");
@@ -555,8 +555,8 @@ describe("parseWorkflowDag（scriptSource → WorkflowDag，设计 §3.1-3）", 
     });
   });
 
-  describe("helper 投影（恰含 1 个 agent() 调用的具名函数 → 调用点虚拟节点）", () => {
-    it("wfAgent 形态：调用点投影（模板取第一实参、phase 取词法位置），体内实现点不产节点", () => {
+  describe("helper 派生视图（恰含 1 个 agent() 调用的具名函数 → 调用点虚拟节点）", () => {
+    it("wfAgent 形态：调用点映射（模板取第一实参、phase 取词法位置），体内实现点不产节点", () => {
       const dag = parseValidatedDag([
         `function wfAgent(name, persona) {`,
         `  return {`,
@@ -616,7 +616,7 @@ describe("parseWorkflowDag（scriptSource → WorkflowDag，设计 §3.1-3）", 
       ]);
     });
 
-    it("多 agent() 调用 helper 不投影（实现点保持词法收口，调用点不产节点）", () => {
+    it("多 agent() 调用 helper 不映射（实现点保持词法收尾，调用点不产节点）", () => {
       const dag = parseValidatedDag([
         `async function two(name) {`,
         `  await agent({ prompt: "1", description: name });`,
@@ -641,7 +641,7 @@ describe("parseWorkflowDag（scriptSource → WorkflowDag，设计 §3.1-3）", 
       expect(dag.parallelGroups.length).toBe(1);
     });
 
-    it("复合调用链真形态（caller 自带 agent 调用且调用另一候选，span 更小）：命运结算拒 caller，无幻影投影", () => {
+    it("复合调用链真形态（caller 自带 agent 调用且调用另一候选，span 更小）：命运结算拒 caller，无幻影映射", () => {
       const dag = parseValidatedDag([
         `function grade(n) {`,
         `  const p = String(n);`,
@@ -652,14 +652,14 @@ describe("parseWorkflowDag（scriptSource → WorkflowDag，设计 §3.1-3）", 
         `await fast("a");`,
       ].join("\n"));
       // fast（自带 agent 调用 + 调用候选 grade，span 最小先评估）依赖 grade 录取 → 拒；
-      // grade 录取且实现点抑制。判别断言：无 fast("a") 调用点的幻影投影节点（旧代码
+      // grade 录取且实现点抑制。判别断言：无 fast("a") 调用点的幻影映射节点（旧代码
       // 在此产 ["a","评审"]；命运循环下两节点均为缺省分区通配——fast 体内自身派发点
-      // 词法收口 + 体内 grade 派发点投影）；两实现点同 (缺省分区, '*') 按不可区分
-      // 调用点合并收口为单节点
+      // 词法收尾 + 体内 grade 派发点映射）；两实现点同 (缺省分区, '*') 按不可区分
+      // 调用点合并收敛为单节点
       expectRejectedProjection(dag, 1, { absentTemplateName: "a" });
     });
 
-    it("候选互调环：命运循环停滞残留全拒（实现点词法收口，调用点零投影）", () => {
+    it("候选互调环：命运循环停滞残留全拒（实现点词法收尾，调用点零映射）", () => {
       const dag = parseValidatedDag([
         "function a(n) { const x = b(n); return agent({ prompt: x, description: n }); }",
         "function b(n) { const y = a(n); return agent({ prompt: y, description: n }); }",
@@ -667,24 +667,24 @@ describe("parseWorkflowDag（scriptSource → WorkflowDag，设计 §3.1-3）", 
         `await a("q");`,
       ].join("\n"));
       // a/b 互调（各含自身 agent 调用，均为合格候选）→ 互为未结算依赖 → 停滞 → 全拒；
-      // 实现点词法收口（phase("P") 前 → 缺省分区）；a("q") 调用点不产节点；两实现点
-      // 同 (缺省分区, '*') 按不可区分调用点合并收口为单节点
+      // 实现点词法收尾（phase("P") 前 → 缺省分区）；a("q") 调用点不产节点；两实现点
+      // 同 (缺省分区, '*') 按不可区分调用点合并收敛为单节点
       expectRejectedProjection(dag, 1, { absentTemplateName: "q" });
     });
 
-    it("同名多候选声明：全部不投影（实现点保持词法收口）", () => {
+    it("同名多候选声明：全部不映射（实现点保持词法收尾）", () => {
       const dag = parseValidatedDag([
         `function h(n) { return agent({ prompt: "p", description: n }); }`,
         `async function h(name) { return await agent({ prompt: "q", description: name }); }`,
         `phase("P");`,
         `await h("x");`,
       ].join("\n"));
-      // 两个 h 声明均不录取 → 实现点按词法收口（均在 phase("P") 之前）；h("x") 调用点
-      // 不产节点；两实现点同 (缺省分区, '*') 按不可区分调用点合并收口为单节点
+      // 两个 h 声明均不录取 → 实现点按词法收尾（均在 phase("P") 之前）；h("x") 调用点
+      // 不产节点；两实现点同 (缺省分区, '*') 按不可区分调用点合并收敛为单节点
       expectRejectedProjection(dag, 1, { everyTemplateName: "*" });
     });
 
-    it("helper 套 helper：内层投影、外层让位（外层体内对内层的调用仍投影，外层调用点不产节点）", () => {
+    it("helper 套 helper：内层映射、外层让位（外层体内对内层的调用仍映射，外层调用点不产节点）", () => {
       const dag = parseValidatedDag([
         `function inner(n) {`,
         `  return agent({ prompt: "p", description: n });`,
@@ -695,13 +695,13 @@ describe("parseWorkflowDag（scriptSource → WorkflowDag，设计 §3.1-3）", 
         `phase("P");`,
         `await outer("a");`,
       ].join("\n"));
-      // outer 子树含已录取 inner → 让位；其体内 inner(n + "-x") 投影（n 非静态段通配），phase 取声明词法位置（缺省分区）
+      // outer 子树含已录取 inner → 让位；其体内 inner(n + "-x") 映射（n 非静态段通配），phase 取声明词法位置（缺省分区）
       expect(dag.nodes.length).toBe(1);
       expect(dag.nodes[0]?.templateName).toBe("${…}-x");
       expect(dag.nodes[0]?.phase).toBe(WORKFLOW_DAG_DEFAULT_PHASE);
     });
 
-    it("parallel 实参内 helper 调用成组（成员投影）+ 解构绑定 dataflow", () => {
+    it("parallel 实参内 helper 调用成组（成员映射）+ 解构绑定 dataflow", () => {
       const dag = parseValidatedDag([
         `function mk(n) {`,
         `  return agent({ prompt: "p", description: n });`,
@@ -716,7 +716,7 @@ describe("parseWorkflowDag（scriptSource → WorkflowDag，设计 §3.1-3）", 
       expect(dag.edges.some((e) => e.kind === "dataflow")).toBe(true);
     });
 
-    it("const 箭头 helper（zcAgent 形态）投影；零参 helper 不投影（实现点词法收口）", () => {
+    it("const 箭头 helper（zcAgent 形态）映射；零参 helper 不映射（实现点词法收尾）", () => {
       const dag = parseValidatedDag([
         `const mk = async (name, persona) => {`,
         `  return await agent({ prompt: persona, description: name });`,
@@ -728,7 +728,7 @@ describe("parseWorkflowDag（scriptSource → WorkflowDag，设计 §3.1-3）", 
         `await mk("z", PERSONA);`,
         `await zero();`,
       ].join("\n"));
-      // zero 不投影：实现点在声明遍历时即按词法收口（序在前）；mk 投影在调用点（序在后）
+      // zero 不映射：实现点在声明遍历时即按词法收尾（序在前）；mk 映射在调用点（序在后）
       expectNodeNamePhases(dag, [
         ["fixed", WORKFLOW_DAG_DEFAULT_PHASE],
         ["z", "P"],
@@ -746,7 +746,7 @@ describe("parseWorkflowDag（scriptSource → WorkflowDag，设计 §3.1-3）", 
         `const a = dispatch(callA, "x");`,
         `const b = dispatch(callB, "y");`,
       ].join("\n"));
-      // 两投影均不可得名（第一实参标识符）→ 双 '*' 保留只会让全部实例歧义进未匹配
+      // 两处映射均不可得名（第一实参标识符）→ 双 '*' 保留只会让全部实例歧义进未匹配
       expect(dag.nodes.length).toBe(1);
       expect(dag.nodes[0]?.templateName).toBe("*");
       expect(dag.nodes[0]?.phase).toBe("Review");
@@ -780,7 +780,7 @@ describe("parseWorkflowDag（scriptSource → WorkflowDag，设计 §3.1-3）", 
         `const c = await agent({ prompt: "c", description: "finalize", extra: a + b });`,
       ].join("\n"));
       expect(dag.nodes.map((n) => n.templateName)).toEqual(["aggregate", "finalize"]);
-      // a、b 合并后两条 (rep→finalize) 数据流候选收口为一条
+      // a、b 合并后两条 (rep→finalize) 数据流候选收敛为一条
       const repId = dag.nodes[0]?.id;
       const forward = dag.edges.filter((e) => e.kind === "dataflow");
       expect(forward).toHaveLength(1);

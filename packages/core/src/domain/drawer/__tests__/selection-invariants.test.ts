@@ -3,7 +3,7 @@
  *
  * 对账对象 = 三消费方读的复合谓词 `isOpen ∧ activeTab ∈ {'subagent','btw'} ∧ 选中 id`：
  *   ① getViewedVids（chat LRU 驱逐豁免，selection/viewed-vids.ts）
- *   ② btw-replay 触发面（useViewedBtwVid，renderer stores/btw-replay.ts 直接 watch）
+ *   ② btw-replay 触发范围（useViewedBtwVid，renderer stores/btw-replay.ts 直接 watch）
  *   ③ useBtwTabData 视口命中（isViewingBtwVid / useBtwViewKey）
  * 三者必须同值同变（读取单一源 = selection/predicates.ts）——任何拼装漂移 = 查看中的
  * btw 线 / agentcall 分区被静默驱逐（数据丢失类回归）或回放误停。

@@ -6,10 +6,10 @@
  * 留下内容为空的「完整」新文件（runtime 热读侧拿到合法 JSON 但 token 为空）。
  *
  * fsync 的持久性效果无法在单测直接断言（模拟掉电不现实），本文件断言的是可机械
- * 验证的契约面：
+ * 验证的契约范围：
  * - 写路径确实对真实文件 fd 调用了 fsyncSync（防实现回退丢失该段）；
  * - fsyncSync 失败（掉电前兆形态）→ 写入裸抛中止，不 rename 可能半写的文件，
- *   目标文件保持旧内容（同时钉死 fsync 先于 rename 的顺序——若顺序颠倒，fsync
+ *   目标文件保持旧内容（同时固定 fsync 先于 rename 的顺序——若顺序颠倒，fsync
  *   失败抛出时目标文件已是新内容，本用例即红）；
  *
  * mock 策略：vi.mock('node:fs') 以 importOriginal 透传全部真实实现、仅用 vi.fn
@@ -71,7 +71,7 @@ describe('writeRemoteAccessConfig（rename 前 fsync 掉电半写防护）', () 
     expect(JSON.parse(readFileSync(FILE_PATH, 'utf-8')).token).toBe('a'.repeat(64))
   })
 
-  it('fsyncSync 失败（掉电前兆形态）→ 写入裸抛中止，不 rename 半写文件，目标文件保持旧内容（钉死 fsync 先于 rename）', () => {
+  it('fsyncSync 失败（掉电前兆形态）→ 写入裸抛中止，不 rename 半写文件，目标文件保持旧内容（固定 fsync 先于 rename）', () => {
     // 旧内容落盘（模拟「完整旧内容」的既有文件）
     writeFileSync(FILE_PATH, '{"enabled":false,"token":"' + 'b'.repeat(64) + '","createdAt":"2026-01-01T00:00:00.000Z"}', 'utf-8')
     // 一次性注入 fsync 失败（模拟掉电前兆：EIO 形态）

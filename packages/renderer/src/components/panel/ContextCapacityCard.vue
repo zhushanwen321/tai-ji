@@ -154,9 +154,9 @@
 <script setup lang="ts">
 /**
  * ContextCapacityCard 脚本 —— 原 ContextCapacityPopover 的浮层内容逻辑整体迁移
- * （用量读映射 / quota 展示派生 / refreshQuota 刷新腿），触发器相关（hover-enter 查询 /
+ * （用量读映射 / quota 展示派生 / refreshQuota 刷新路径），触发器相关（hover-enter 查询 /
  * 触发器文案着色）留在原 Popover——quota 查询不进本卡的原因：store 全局共享、
- * 双实例同源收敛，而查询触发语义属于「hover 指标 chip」这一交互面（聚合触发器同样挂）。
+ * 双实例同源收敛，而查询触发语义属于「hover 指标 chip」这一交互侧（聚合触发器同样挂）。
  */
 import { ref, computed, toRef, inject } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -170,7 +170,7 @@ import { formatTokens, usageBarClass } from './context-usage-display'
 import * as quotaApi from '@taiji/core/transport/api/domains/quota'
 
 const props = defineProps<{
-  /** session 分区键 + 恢复腿触发源（context-consistency D2：用量状态在 useContextUsage 分区，组件纯读） */
+  /** session 分区键 + 恢复路径触发源（context-consistency D2：用量状态在 useContextUsage 分区，组件纯读） */
   sessionId?: string
   /** 当前复合 modelId（"provider/modelId"），受控 prop，由消费方（Popover / 聚合页）下发 */
   modelId?: string
@@ -184,9 +184,9 @@ const quotaStore = useQuotaStore()
 const openSettings = inject<() => void>('openSettings', () => {})
 
 // ── 上下文用量（context-consistency D2 终态）：per-session 分区纯读 ──
-// 订阅（context.update）/ 切回恢复腿（session.getContext）/ 0 帧哨兵全在 composable 内，
+// 订阅（context.update）/ 切回恢复路径（session.getContext）/ 0 帧哨兵全在 composable 内，
 // 组件只做 status → 显示映射：ok → 真值；no-value（合法无值，如 compact 后无新 turn）与
-// unknown（首拉在途且无缓存）→ 「—」。切走再切回显示分区缓存值，不闪横线不串台。
+// unknown（首次拉取在途且无缓存）→ 「—」。切走再切回显示分区缓存值，不闪横线不串台。
 const { current: usage } = useContextUsage(toRef(props, 'sessionId'))
 
 // ── coding-plan 额度展示（逻辑抽到 useQuotaDisplay）──

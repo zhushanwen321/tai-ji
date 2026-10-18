@@ -1,7 +1,7 @@
 <!--
   展示组件 · 投递队列区（v6 §8.5 内嵌 composer-box 顶部；投递所有权内核 u3c / D7 单源化）。
 
-  **单一数据源**：队列条目 = runtime 内核 `session.delivery` 状态帧投影（core
+  **单一数据源**：队列条目 = runtime 内核 `session.delivery` 状态帧派生视图（core
   getDeliveryProjectionRef），不再读 queue_update 快照 + 本地 defer 队列双拼（D7）。
   每条未送达消息一行：状态 chip（排队中 / 投递中 / 发送失败）+ truncate 预览文本 +
   hover × 撤销（delivery.cancel，V9 queued 态 / V10 投递中收回-重投）+ failed 行重试钮

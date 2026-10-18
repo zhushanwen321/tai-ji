@@ -103,7 +103,7 @@ interface CompleteCancelledDetails {
   action: "complete-cancelled";
   /** 原始构造点原因（choice 空/cancel/timeout 折叠 'cancelled'；channel-error / non-json 等透传） */
   reason: string;
-  /** 解散源（D-B1-3 via 侧迁移：与审批 select 的 dissolvedBy 统一为同一来源直传原语值域）——'self' = 入口解散（exitPlanMode 已介入，归口 no-op）；'external' = 外部解散（review_aborted 已落盘） */
+  /** 解散源（D-B1-3 via 侧迁移：与审批 select 的 dissolvedBy 统一为同一来源直传原语值域）——'self' = 入口解散（exitPlanMode 已介入，收尾 no-op）；'external' = 外部解散（review_aborted 已落盘） */
   source: "self" | "external";
   /** 联合读侧统一字段（见 PlanDetails 尾注） */
   summary?: string;
@@ -157,9 +157,9 @@ interface ReviewErrorDetails {
     | "stale-self-review"
     /** FSM 合法性兜底（D1 边表）：事件与现态不构成合法边（如未经审批闸口就 complete） */
     | "out-of-order"
-    /** 归口①命令解散：reset 已介入、终态已落盘，归口 no-op */
+    /** 收尾①命令解散：reset 已介入、终态已落盘，收尾 no-op */
     | "cancelled"
-    /** 归口①外部解散：reviewing --review_aborted--> planning 已落盘 */
+    /** 收尾①外部解散：reviewing --review_aborted--> planning 已落盘 */
     | "review-interrupted";
 }
 
@@ -348,7 +348,7 @@ function renderPlanResult(
     }
 
     case "complete-cancelled": {
-      // D3 连带段归口判别分源渲染：入口解散（reset 已介入）vs 外部解散（批准事实保留）
+      // D3 连带段收尾判别分源渲染：入口解散（reset 已介入）vs 外部解散（批准事实保留）
       const header = details.source === "self"
         ? fg("error", "✗ Plan mode 已退出") + NL
         : fg("warning", "✗ 执行方式选择已中断") + NL;
@@ -400,7 +400,7 @@ function renderPlanResult(
 
     // 兜底：旧版本持久化 entry 的 details 形态（如已删除的 list-template）不在
     // 现版 PlanDetails 联合内——switch 落空返回 undefined 会让 pi TUI 渲染循环
-    // 对 undefined 调 .render() 直接 TypeError（pi-tui box.js render 无守卫）。
+    // 对 undefined 调 .render() 直接 TypeError（pi-tui box.js render 无检查）。
     // 历史会话重开同样要渲染旧 entry，任意历史形态都必须产出组件。
     default:
       return new Text(firstContentText(result), 0, 0);
@@ -447,7 +447,7 @@ async function askInteractively<S>(
     tui: (pendingSignal: AbortSignal) => Promise<S>;
   },
 ): Promise<{ value: S; pending: PendingSelect }> {
-  // E10 生命周期钉死：每次发挂起交互前新建 PendingSelect（禁复用已 abort 的——
+  // E10 生命周期固定：每次发挂起交互前新建 PendingSelect（禁复用已 abort 的——
   // pi 对已 abort signal 短路立即 resolve undefined）
   const pending = freshPendingSelect(planCtx.controllers, sessionId);
   cascadeTurnAbort(pending.controller, signal);
@@ -467,7 +467,7 @@ interface ActionResult {
 /**
  * enter（plan-mode-agent-enter U1）：agent 自动进入 plan 模式，无需用户确认。
  * plan 模式是只读子集（只读代码、产文档、不改源码），进入它不是危险操作，
- * 故不设确认闸门——进入事实由 GUI PlanModeBar 显形（投影链广播 isActive=true），
+ * 故不设确认门禁——进入事实由 GUI PlanModeBar 显形（派生视图链广播 isActive=true），
  * 用户随时可经 PlanModeBar 退出。进入核心复用 activatePlanMode（与 slash 命令同源）；
  * plan 模式提示词经 tool result content 直返（对本次调用的直接响应，同轮即见，
  * 不走对话流消息注入/steer 排队——slash 入口才经 sendMessage 注入）。已在 plan
@@ -528,7 +528,7 @@ function executeEnter(
  * - 单次扫描复用（C1 去重）：清单查找与内容读取共用同一次扫描产物（胜者 path
  *   直读——utf-8、失败 null）。
  * - content 全文直达模型可见通道（现状全文放 details 不进模型，选完没骨架——
- *   §2.2 第二处错位收口）；details 不再携带全文（零消费方，避免双份持久化）。
+ *   §2.2 第二处错位收敛）；details 不再携带全文（零消费方，避免双份持久化）。
  * - 错名报错带可用名字清单：模型当场从报错自愈，无需任何查询 action（D3）。
  * - --template 直传防御：模板已由用户指定并全文内嵌注入，select-template 是
  *   画蛇添足——报错不带三源清单（直传文件不在清单里，清单会误导改选内置
@@ -601,17 +601,17 @@ const EXIT_INACTIVE_MESSAGE =
  * exit 链唯一入口（D-B1-1）：/plan abort（handleAbort）与 plan 工具 abort action
  * （executeAbort）双路收敛于此，动作清单由入口统一编排（顺序是结构的一部分）：
  * ① 解散全部挂起 select（markDissolved('self') 一次打标 + controller.abort()——E10
- *   因果链：abort 触发的 select 解析是微任务，等待处归口必在本函数同步段之后运行，
- *   打标先行保证归口读到 'self'）；
- * ② 转移 + 落盘：单守卫 = transition('exit') 合法性（非活跃格全谱：终态格 + idle 删边
+ *   因果链：abort 触发的 select 解析是微任务，等待处收尾必在本函数同步段之后运行，
+ *   打标先行保证收尾读到 'self'）；
+ * ② 转移 + 落盘：单检查 = transition('exit') 合法性（非活跃格全谱：终态格 + idle 删边
  *   后均 ok:false）——ok:false 跳过状态值写入（completed 终态记录不被 exited 覆写）；
  *   坏数据格例外（isActive=true 的终态/idle 残留）：仍落一条清洗 entry——isActive=false
- *   投影复位是用户级恢复通道（免覆写与投影清洗正交可分），state 值按当前态分派
+ *   派生视图复位是用户级恢复通道（免覆写与派生视图清洗正交可分），state 值按当前态分派
  *   （终态残留取当前终态值不变、idle 残留落 'exited'，resetPlanState 既有 terminal
  *   参数直接承载）；
  * ③ widget 更新 ④ 工具集恢复（快照消费还原，单份实现；ok:false 时同样执行——幂等
  *   恢复：快照存在即还原并清槽，已消费/从未收拢则 no-op）⑤ 反馈文案。
- * 守卫极性统一「ok:false → warn + 幂等退出」：退出是用户显式意图，非活跃态下退出
+ * 检查极性统一「ok:false → warn + 幂等退出」：退出是用户显式意图，非活跃态下退出
  * 即目标态；①③④⑤照常（解散残余挂起正是消灭「卡在等待应答」形态的动作）。
  * ① 的承载 = PlanCtx.dissolveAll（D-B4-3 单 ctx 对象方法——批次 1 的内联遍历打标
  * 在本批随 ctx 载体落地改调它）。
@@ -664,7 +664,7 @@ function executeAbort(
   state: PlanState,
 ): ActionResult {
   // 单入口接管（D-B1-1）：动作清单（解散/转移落盘/widget/工具集恢复）全在 exitPlanMode
-  // 内；本函数只负责把 ExitResult 投影为 tool result 形态（纠偏文案复用 reason='inactive'
+  // 内；本函数只负责把 ExitResult 映射为 tool result 形态（纠偏文案复用 reason='inactive'
   // 出口——错误即纠偏指令，A9）
   const result = exitPlanMode(pi, planCtx, sessionId, ctx, state, "tool");
   if (!result.moved) {
@@ -680,7 +680,7 @@ function executeAbort(
  * register-doc（D10 保留独立 action）：登记单份产物文档。同 fileName 重登 =
  * version+1 原位覆盖（drawer tab 顺序不跳动）。absPath 由 extension 从 plan
  * 目录推导（产物写盘位置本身是纪律的一部分，不信任 LLM 申报的路径）。
- * isActive=false 时的守卫与 submit-review 同风格——前置条件不满足用 tool result
+ * isActive=false 时的检查与 submit-review 同风格——前置条件不满足用 tool result
  * 错误（错误即纠偏指令），不用 throw（throw 留给参数缺失类编程错误）。
  */
 function executeRegisterDoc(
@@ -702,7 +702,7 @@ function executeRegisterDoc(
   if (!fileName) {
     throw new Error("fileName is required for register-doc (e.g. plan(action='register-doc', fileName='design.md'))");
   }
-  // 穿越守卫：fileName 必须是 plan 目录内的纯文件名（absPath = join(planDir, fileName)，
+  // 路径穿越检查：fileName 必须是 plan 目录内的纯文件名（absPath = join(planDir, fileName)，
   // 放开分隔符/'..' 可把 plan 目录外任意可读文件挂进用户审阅界面——PlanDocsPanel 文档
   // tab 按 absPath 直读渲染）。参数形态错误 throw 带纠正样例（同上方缺参分支风格）。
   if (fileName.includes("/") || fileName.includes("\\") || fileName === "." || fileName === "..") {
@@ -738,9 +738,9 @@ function executeRegisterDoc(
 }
 
 /**
- * PlanReviewResponse 值域守卫与解析已接 canonical（consumers.md ①：本地守卫删除迁移）——
+ * PlanReviewResponse 值域检查与解析已接 canonical（consumers.md ①：本地检查删除迁移）——
  * `@zhushanwen/extension-protocol` 的 `parsePlanReviewResponse`（unknown-decision / malformed
- * 双分源降级）。运行时守卫 TS 穷尽性管不到，值域单一权威不得在消费侧镜像。
+ * 双分源降级）。运行时检查 TS 穷尽性管不到，值域单一权威不得在消费侧镜像。
  */
 
 /** E5/E6/取消共用错误 result 构造（content 文本即恢复动作） */
@@ -753,7 +753,7 @@ function reviewErrorResult(reason: ReviewErrorDetails["reason"], recovery: strin
 
 /**
  * submit-review（D5/E6/E8/E10/D9/D3）：
- * - E6 双守卫：isActive=false → 错误不挂 select；docs 空 → 错误提示先 register-doc。
+ * - E6 双检查：isActive=false → 错误不挂 select；docs 空 → 错误提示先 register-doc。
  * - D9① 自审硬门（无豁免）：每次 submit-review 必带非空 selfReview（含修订后重挂；E3 重挂
  *   复用既有结论但过门义务不豁免）+ 防照抄启发式（逐字节陈旧拒收，gate 判定先于一切写入、
  *   拒收不更新任何快照——拒收后重试仍触发）。
@@ -763,9 +763,9 @@ function reviewErrorResult(reason: ReviewErrorDetails["reason"], recovery: strin
  *   PLAN_REVIEW_MARKER select；其余形态（独立 pi / env 泄漏的非 rpc）返回 E8 文本软门。
  * - select 挂 signal（E10），resolve 后：echo 判定先于 parse → canonical 值域解析
  *   （unknown-decision / malformed 双分源）→ 按 decision 消费（approve/revise/dismiss）；
- *   choice===undefined 走归口①（D-B1-2：dissolvedBy 直传判别）。
+ *   choice===undefined 走收尾①（D-B1-2：dissolvedBy 直传判别）。
  */
-/** submit-review 挂起提问的形态应答（D-B4-2 原语消费面）：select = marker 通道应答；text-gate = E8 软门（不挂交互） */
+/** submit-review 挂起提问的形态应答（D-B4-2 原语消费方）：select = marker 通道应答；text-gate = E8 软门（不挂交互） */
 type SubmitReviewAskResult =
   | { kind: "select"; choice: string | undefined; payload: string }
   | { kind: "text-gate" };
@@ -780,7 +780,7 @@ async function executeSubmitReview(
   signal: AbortSignal | undefined,
   params: Record<string, unknown>,
 ): Promise<ActionResult> {
-  // E6 双守卫：状态门优先于内容门（退出后任何动作都不该发生）。
+  // E6 双检查：状态门优先于内容门（退出后任何动作都不该发生）。
   // 文本语义按 A9 真机事故收紧：旧文「Wrap up the current task directly」被 LLM
   // 误读为「已批准，开始实施」——未激活 ≠ 批准，必须显式禁止实施并指向等待用户。
   if (!state.isActive) {
@@ -797,7 +797,7 @@ async function executeSubmitReview(
   }
 
   // D9① 自审硬门（结构保证层：存在性非空必填，无豁免）：缺失/空 → tool result 错误纠偏
-  //（不 throw）——提示词是引导不是闸门（F10 教训），门语义三层边界见设计 D9
+  //（不 throw）——提示词是引导不是门禁（F10 教训），门语义三层边界见设计 D9
   const selfReview = typeof params.selfReview === "string" ? params.selfReview.trim() : "";
   if (selfReview === "") {
     return reviewErrorResult(
@@ -861,7 +861,7 @@ async function executeSubmitReview(
   // 不挂交互。软门路的 PendingSelect 登记、settle、清理由原语瞬时完成（无交互挂起窗口）
   const { value: ask, pending } = await askInteractively(ctx, planCtx, sessionId, signal, {
     gui: async (pendingSignal): Promise<SubmitReviewAskResult> => {
-      // selfReview 随 payload 投影（D9③：截断点 = payload 构造单点，透传层不截）
+      // selfReview 随 payload 映射（D9③：截断点 = payload 构造单点，透传层不截）
       const payload = JSON.stringify({ docs: state.docs, selfReview: boundedSelfReview } satisfies PlanReviewRequest);
       const choice = await ctx.ui.select(PLAN_REVIEW_MARKER, [payload], { signal: pendingSignal });
       return { kind: "select", choice, payload };
@@ -887,14 +887,14 @@ async function executeSubmitReview(
   const { choice, payload } = ask;
 
   if (choice === undefined) {
-    // 归口①（审批 select 无选择解散，两归口点之一）：解散来源直传判别（D-B1-2）——
+    // 收尾①（审批 select 无选择解散，两收尾点之一）：解散来源直传判别（D-B1-2）——
     // exitPlanMode 入口解散时 markDissolved('self') 已随闭包打标（同步先于 abort、
-    // 归口在微任务侧运行时必已置位）→ 命令解散，reset 终态已由入口落盘 → 归口 no-op
+    // 收尾在微任务侧运行时必已置位）→ 命令解散，reset 终态已由入口落盘 → 收尾 no-op
     // 不落盘；非 'self'（undefined——turn abort 级联 / TUI 手动取消不经入口不打标）→
     // 外部解散。读-转移-落盘同一同步临界段（getPlanState 现值读取，禁闭包快照跨 await
-    // 复用）；状态机守卫（transition 合法性，终态上 ok:false 不落盘）保留为结构兜底
+    // 复用）；状态机检查（transition 合法性，终态上 ok:false 不落盘）保留为结构兜底
     if (pending.dissolvedBy === "self") {
-      // 文案按判别分源（A9 教训：文案是行为触发面）
+      // 文案按判别分源（A9 教训：文案是行为触发点）
       return reviewErrorResult(
         "cancelled",
         "Plan mode has been exited and the full tool set is restored. This is NOT an approval. Do not implement any changes. Briefly tell the user you have stopped, then wait for further user instructions.",
@@ -914,7 +914,7 @@ async function executeSubmitReview(
   // echo 检测（同 uiFormInteract 先例 extension-protocol ui-form/helpers）：旧 taiji
   // 宿主不识别 PLAN_REVIEW_MARKER 时 select 降级普通单选项，用户点选回显 payload 本身。
   // 收包与发送 payload 逐字节相等 = 确定性识别该不支持组合；判定必须先于 parse
-  //（payload 是合法 JSON，parse 会成功但形状守卫必败）——否则 bad-response 分支引导
+  //（payload 是合法 JSON，parse 会成功但形状检查必败）——否则 bad-response 分支引导
   // 重挂 → 宿主同样回显 → 重复弹错循环。命中返回升级指引，不引导重挂。
   if (choice === payload) {
     logger.warn("plan: submit-review select echoed the request payload (host does not understand PLAN_REVIEW_MARKER)");
@@ -926,8 +926,8 @@ async function executeSubmitReview(
     );
   }
 
-  // canonical 值域解析（consumers.md ①：本地守卫删迁移，值域单一权威不镜像）：JSON 解析
-  // 与形状/值域守卫分离，unknown-decision 与 malformed 双分源降级（文案语义相反）
+  // canonical 值域解析（consumers.md ①：本地检查删迁移，值域单一权威不镜像）：JSON 解析
+  // 与形状/值域检查分离，unknown-decision 与 malformed 双分源降级（文案语义相反）
   let parsed: unknown;
   try {
     parsed = JSON.parse(choice);
@@ -974,9 +974,9 @@ async function executeSubmitReview(
     case "dismiss": {
       // D3 搁置（协议级 dismiss 决策，取代「忽略 = 杀 turn」）：reviewing --dismiss--> planning
       // 落盘——被搁置的审批不复活（F1/F2/F3 构造性消除）；非破坏动作（不杀 turn、不丢状态），
-      // 不需要确认 Popover（F16 守卫倒挂随之消解）。
-      // 非归口分支的交错安全：select settle → 消费 continuation 先于下一消息 handler 执行
-      //（D3 实施注释级钉死），闭包 state 此处即现值。转移先于文案：ok:false = 审批已被
+      // 不需要确认 Popover（F16 检查倒挂随之消解）。
+      // 非收尾分支的交错安全：select settle → 消费 continuation 先于下一消息 handler 执行
+      //（D3 实施注释级固定），闭包 state 此处即现值。转移先于文案：ok:false = 审批已被
       // 交错操作推进，此时仍报成功会让 agent 拿着与真实状态相反的反馈空跑一轮——
       // 不落盘，按 out-of-order 返回（与 submit-review 同款出口）
       const movedDismiss = applyPlanEvent(state, "dismiss");
@@ -1035,7 +1035,7 @@ async function executeSubmitReview(
     }
 
     default: {
-      // 判别联合穷尽性守卫：parsePlanReviewResponse 已收窄 decision 值域，此处不可达；
+      // 判别联合穷尽性检查：parsePlanReviewResponse 已收窄 decision 值域，此处不可达；
       // 编码期新增 decision 漏改 switch 会被 never 断言在编译期拦截
       const unreachable: never = response;
       throw new Error(`plan: unhandled review decision: ${JSON.stringify(unreachable)}`);
@@ -1089,12 +1089,12 @@ const LATER_MODE = "later";
 
 /**
  * 执行方式选择的 outcome（D3 连带段）——**显式 `via: 'later' | 'dissolved'` 枚举**，
- * 五构造点各自声明、归口点直读判别，**不从 result/details 反推**：choice 被压平进
+ * 五构造点各自声明、收尾点直读判别，**不从 result/details 反推**：choice 被压平进
  * details.reason 后两构造函数产出同形 reason，字面按「reason 非空」判会把 channel-error
  * （reason 非空且 ≈ 'cancelled'）误入 later 桶（A9 反向误分类）。
  * 五构造点：① LATER_MODE（用户显式「暂不执行」→ via 'later'，是明确选择不是解散）；
  * ② choice 空 / ③ uiFormInteract cancel / ④ timeout / ⑤ channel-error、non-json 等非 ok
- * 其余 reason → 均 via 'dissolved'（无选择解散，归口点执行 review_aborted 转移义务）。
+ * 其余 reason → 均 via 'dissolved'（无选择解散，收尾点执行 review_aborted 转移义务）。
  * mode 分支的 `pickedBy`（D7②）：'headless' = 无 UI 默认 execute；'no-exec-skills' =
  * 无 plan-exec 技能直通（不挂表单）；'dialog' = 表单/选择器选定。
  */
@@ -1106,12 +1106,12 @@ type CompleteChoiceOutcome =
       via: "dissolved";
       /** 构造点原始原因（②③④ 折叠 'cancelled'；⑤ 透传 form.reason） */
       reason: string;
-      /** 通道失败补充说明（构造点⑤携带，归口文案拼接） */
+      /** 通道失败补充说明（构造点⑤携带，收尾文案拼接） */
       message?: string;
       /**
        * 解散来源（D-B1-3 via 侧迁移：与审批 select 的 dissolvedBy 统一为同一来源直传
        * 原语，值域 self|external——挂起 settle 后从 PendingSelect 槽位一次性读定，
-       * 非 'self' 即外部；归口按 by 分派，不再持有挂起句柄反查）
+       * 非 'self' 即外部；收尾按 by 分派，不再持有挂起句柄反查）
        */
       by: "self" | "external";
     };
@@ -1130,7 +1130,7 @@ type CompleteChoiceOutcome =
  * UI 文案（question/header/选项 label）经 i18n；answers key = header（协议 fallback
  * 规则 key = header ?? question），header 与读取同源 t() 生成，本地化不破坏取值。
  */
-/** 双宿主形态的统一应答（D-B4-2 原语消费面）：answered = 拿到 label（空/缺省 = 无选择）；channel-failure = GUI 通道非 ok */
+/** 双宿主形态的统一应答（D-B4-2 原语消费方）：answered = 拿到 label（空/缺省 = 无选择）；channel-failure = GUI 通道非 ok */
 type ChoiceAskResult =
   | { kind: "answered"; label: string | undefined }
   | { kind: "channel-failure"; reason: string; message?: string };
@@ -1172,7 +1172,7 @@ async function resolveCompleteChoice(
         options: execOptions.map((opt) => ({ label: opt.label, description: opt.description })),
         allowOther: false,
       };
-      // 收窄传参面：只投影 helper 需要的 GuiContext 成员（pi ExtensionContext.ui.custom 的
+      // 收窄传参范围：只映射 helper 需要的 GuiContext 成员（pi ExtensionContext.ui.custom 的
       // 泛型组件工厂签名比 GuiContext 的宽松形状窄，整 ctx 直传类型不兼容）。
       // select 必须 .bind(ctx.ui)（对齐 ask-user / scheduler 同协议形态）：callMarkerRpc 先
       // 解构再裸调用，this 依赖 pi 实装 select 为箭头闭包——显式 bind 消除该隐式依赖
@@ -1245,7 +1245,7 @@ function completeResultText(
 }
 
 /**
- * complete action（D5/D3 连带段）：approve 边入 dispatching → 选档 → 归口② / exec_chosen 终局。
+ * complete action（D5/D3 连带段）：approve 边入 dispatching → 选档 → 收尾② / exec_chosen 终局。
  * 双入口共用：① submit-review 的 approve 决策消费（reviewing --approve--> dispatching）；
  * ② agent 再调 complete 重新选择执行方式（approved --approve--> dispatching，事件命名裁决
  * consumers.md §三B）。
@@ -1284,7 +1284,7 @@ async function executeComplete(
 
   const choice = await resolveCompleteChoice(ctx, planCtx, sessionId, signal);
   if (choice.kind === "cancelled") {
-    // 归口②（两归口点之二）：via 判别**先于**解散源判别（later 是显式选择，
+    // 收尾②（两收尾点之二）：via 判别**先于**解散源判别（later 是显式选择，
     // 不涉解散源判别）。读-转移-落盘同一同步临界段（禁闭包快照跨 await 复用）
     const current = getPlanState(planCtx.states, sessionId, ctx);
     if (choice.via === "later") {
@@ -1292,7 +1292,7 @@ async function executeComplete(
       // **不是解散**，不得进 review_aborted/外部解散文案桶（否则 A9 反向重演）。
       const movedLater = applyPlanEvent(current, "later");
       // ok:false（fresh-read 后已非 dispatching，如 exitPlanMode 交错已落 exited）不落盘
-      //（终态上不落盘 = 归口点双保险），走与下方 exec_chosen ok:false 同型的中性
+      //（终态上不落盘 = 收尾点双保险），走与下方 exec_chosen ok:false 同型的中性
       // state-changed 出口——此时复用 APPROVED 成功文案会与真实状态相反，误导 agent 下一步
       if (!movedLater.ok) {
         return reviewErrorResult(
@@ -1311,7 +1311,7 @@ async function executeComplete(
     }
     const detail = choice.message ? ` (${choice.message})` : "";
     if (choice.by === "self") {
-      // 入口解散（exitPlanMode 打 'self' 标，reset 终态已由入口落盘）→ 归口 no-op，不落盘
+      // 入口解散（exitPlanMode 打 'self' 标，reset 终态已由入口落盘）→ 收尾 no-op，不落盘
       //（D-B1-3：via 侧迁移后与审批 select 同源判别——outcome 携带直传来源）
       return {
         content: [{

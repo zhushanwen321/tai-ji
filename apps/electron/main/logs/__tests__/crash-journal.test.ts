@@ -27,7 +27,7 @@ function makeEvent(seq: number): CrashJournalEvent {
   return { layer: 'main', event: 'crash', sessionId: `sid-${String(seq).padStart(4, '0')}` }
 }
 
-/** 目录下全部台账段文件（主文件 + 滚动段），按「最老 → 最新」排序返回，逐行 JSON.parse。 */
+/** 目录下全部登记清单段文件（主文件 + 滚动段），按「最老 → 最新」排序返回，逐行 JSON.parse。 */
 function readSegmentsOldestFirst(dir: string): Array<{ name: string; events: Array<Record<string, unknown>> }> {
   // 段代数：滚动段 .1 是第 1 代（次新）、.2 是第 2 代（最老）——代数越大越老，
   // 「最老 → 最新」= 代数降序；主文件恒最新，排末位
@@ -183,7 +183,7 @@ describe('crash-journal writer', () => {
 
     expect(() => writer.append(makeEvent(1))).not.toThrow()
     expect(() => writer.append(makeEvent(2))).not.toThrow()
-    // 失败路径不制造任何台账文件
+    // 失败路径不制造任何登记清单文件
     expect(existsSync(join(blocker, 'main.jsonl'))).toBe(false)
   })
 

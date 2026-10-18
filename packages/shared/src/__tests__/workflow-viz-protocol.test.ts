@@ -10,7 +10,7 @@
  *    argsSummary）纯加法在盘、既有契约字段不回退；
  * ④ Gantt 分段视图模型（§3.1-2 规则①②③输出形态）+ 两条 RPC 的载体/映射登记与
  *    error envelope 边界（结构化错误 vs 通道错误两形态）。
- * 纯契约层验证，不涉及 runtime 投影编排（U3 交付后另有实装单测）。
+ * 纯契约层验证，不涉及 runtime 派生视图编排（U3 交付后另有实装单测）。
  */
 import { describe, it, expect, expectTypeOf } from 'vitest'
 import type {
@@ -45,7 +45,7 @@ import type {
   WorkflowRunPhaseFoldEntry,
   WorkflowRunRecord,
 } from '../workflow'
-// 跨包可达性守卫：index.ts 对 workflow.ts / protocol.ts 均为显式 allowlist（非 export *），
+// 跨包可达性检查：index.ts 对 workflow.ts / protocol.ts 均为显式 allowlist（非 export *），
 // 下游消费方只能经包根入口取符号——漏登记时值导入在解析期红、类型导入在 tsc 红。
 // 别名避免与直连导入同名冲突。
 import {
@@ -271,7 +271,7 @@ describe('fold 透出字段（U2 纯加法）与既有契约不回退', () => {
     }
     expect(call.attempts).toBe(2)
     expect(call.lastRetry?.backoffMs).toBe(2000)
-    // 缺省 = 旧投影无此字段
+    // 缺省 = 旧派生视图无此字段
     const legacy: WorkflowAgentCall = { id: 1, agent: 'dev-W1', status: 'done' }
     expect(legacy.attempts).toBeUndefined()
     expect(legacy.lastRetry).toBeUndefined()
@@ -293,7 +293,7 @@ describe('fold 透出字段（U2 纯加法）与既有契约不回退', () => {
     expect(record.phases).toHaveLength(2)
     expect(record.argsSummary).toBe('{"target":"main"}')
     expect(unsettledFold.settledAt).toBeUndefined()
-    // 缺省 = 旧投影无此字段
+    // 缺省 = 旧派生视图无此字段
     const legacy: WorkflowRunRecord = {
       runId: 'wf-1',
       scriptName: 'pr-lifecycle',

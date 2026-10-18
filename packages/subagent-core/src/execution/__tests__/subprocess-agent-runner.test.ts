@@ -4,18 +4,18 @@
 // SubagentService.executeWorkflowAgent（编排归 service 单点，设计
 // subagent-workflow-record-unification.md §5 W4 / §3.5 终态数据流）。
 //
-// 本文件只锁壳契约面：
+// 本文件只锁壳契约范围：
 //   1. 构造签名（deps.subagentService——session-lifecycle.ts 装配点同形）；
 //   2. run() 纯转调（opts/signal/onEvent/stream 原样透传 + parentRunId 用直调
 //      占位 SAR_UNATTACHED_PARENT_RUN_ID + 返回值原样返回，零映射零吞错）；
 //   3. mergeRunSignals re-export 可用（既有 import 路径契约）。
 //
-// [H2 W4 删除面] 旧编排内部用例（路由集成 / model 填底 /
+// [H2 W4 删除范围] 旧编排内部用例（路由集成 / model 填底 /
 // timeoutMs 合并 / onEvent-journal 桥接 / 直传保真 / no-progress 守护落点 /
 // 全链 killAll）随 SAR 编排退役删除——service 落点的行为守护由
-// workflow-agent-dispatch.test.ts（W2 承接：注册面/池顺序/守护 arm 键 record.id/
+// workflow-agent-dispatch.test.ts（W2 承接：注册范围/池顺序/守护 arm 键 record.id/
 // 双刷新源/fire 追注/stream 自构/D7/D6/adopt 豁免）与 engine/__tests__/routing.test.ts
-// （路由 helper 单点：三层优先级 + 守卫 a/b/c + strict + fallback）承接。
+// （路由 helper 单点：三层优先级 + 检查 a/b/c + strict + fallback）承接。
 
 import { describe, expect, it, vi } from "vitest";
 

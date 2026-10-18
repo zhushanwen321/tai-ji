@@ -8,7 +8,7 @@
  * 职责：
  * - 单次执行：runner.run 一次，结果（成功或失败）直接终态化
  * - [ADR-0122] 失败显式上报：不自动重试（原 3 次指数退避重试已删——自动重试
- *   属无效防御；失败经 finalizeCall failed + agent-settled(failed) 落账显式上报，
+ *   属无效防御；失败经 finalizeCall failed + agent-settled(failed) 写入 journal 记录显式上报，
  *   修复由用户重新发起 run 承接）
  * - 成功：consume usage + incrementCallCount + markDone + trace.update(completed)
  *
@@ -21,7 +21,7 @@
  * 关键设计：
  * - **usage 透传**：result.usage 直接交给 budget.consume，加权由 Budget 内部的权重常量
  *   处理（见 budget.ts）。此函数不再做 usage 形状的改写。
- * - **参数显式化**：runner 直接传入（而非 ctx.getRun(runId).pool），无 runId 查找 / pool 守卫。
+ * - **参数显式化**：runner 直接传入（而非 ctx.getRun(runId).pool），无 runId 查找 / pool 检查。
  * - **stale-state 检查**：runner.run 的 signal 传播由 AgentRunner port 承担；abort 后的
  *   结果同样经 finalizeCall 显式终态化（failed / cancelled 语义由 result.error 承载）。
  *
@@ -44,15 +44,15 @@ import type { AgentResult } from "./models/types.ts";
  * 成功：status="completed"；失败：status="failed"。
  * traceNode.stepIndex === call.id（D-10 单源，调用方保证）。
  *
- * 孤儿守卫（OB2，S7 残留）：isOrphaned 谓词为 true 时跳过 trace.update——
+ * 孤儿检查（OB2，S7 残留）：isOrphaned 谓词为 true 时跳过 trace.update——
  * 旧代际 finalize 的 update 会命中新代际同 stepIndex 节点，TUI/中间快照短暂
  * 可见错误终态。正确性论证：运行期 calls Map 写点为 dispatchAgentCall 的 set
  * （[HISTORICAL] 原另一写点 discardInFlightCalls 的 delete 随重试矩阵删除，
  * ADR-0122），实例不等 ⟺ 本 finalize 属于被替换的旧代际——与 dispatch 层
- * .then/.catch 守卫（S7-second 修复，8353f6b60）同一判定语义，本守卫只是把它
+ * .then/.catch 检查（S7-second 修复，8353f6b60）同一判定语义，本检查只是把它
  * 前移到 trace.update 之前。markDone 与 sessionId/sessionFile 同步保留（markDone
  * 在孤儿实例上无害，dispatch 层 catch 路径依赖 call.status 语义）。跳过时不记
- * 日志——本文件是纯函数层无日志通道，dispatch 层 .then 守卫的 orphan completion
+ * 日志——本文件是纯函数层无日志通道，dispatch 层 .then 检查的 orphan completion
  * dropped 日志已覆盖同一事件的可观察性。
  */
 function finalizeCall(

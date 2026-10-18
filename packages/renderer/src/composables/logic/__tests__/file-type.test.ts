@@ -4,7 +4,7 @@
  * file-type 分发回归单测（chat-html-support §6.4 D4，v16 抽屉渲染态退役）。
  *
  * 打在纯函数 interface 上：`.html`/`.htm` 恢复实施前行为 = 'code'（shiki 源码高亮——
- * 预览面收敛到消息流内联容器 HtmlPreviewInline，抽屉不再有渲染态）；`.xml` 维持 'code'。
+ * 预览区域收敛到消息流内联容器 HtmlPreviewInline，抽屉不再有渲染态）；`.xml` 维持 'code'。
  *
  * 运行：cd packages/renderer && npx vitest run src/composables/logic/__tests__/file-type.test.ts
  */

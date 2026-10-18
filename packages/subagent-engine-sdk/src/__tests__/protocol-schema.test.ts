@@ -97,7 +97,7 @@ describe("帧 schema 有效性（draft-07，ajv 编译 + 样本校验）", () =>
 });
 
 describe("不变量 5：凭据不过协议（schema 层禁止）", () => {
-  it("方法词表与通道词表零凭据键（帧字段面全量枚举检查）", () => {
+  it("方法词表与通道词表零凭据键（帧字段侧全量枚举检查）", () => {
     const surfaceNames = [...PROTOCOL_METHODS, ...REVERSE_CHANNELS].join("\n");
     for (const fragment of FORBIDDEN_CREDENTIAL_KEY_FRAGMENTS) {
       expect(surfaceNames.toLowerCase()).not.toContain(fragment);

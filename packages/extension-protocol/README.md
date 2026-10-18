@@ -9,12 +9,12 @@ pi extension 跨层契约包：类型 + helper 函数 + 共享行为原语，零
   - `ask-user/` —— 富交互（select 通道 + marker）
   - `plan/` —— plan 生命周期状态机 + 审阅回传值域契约 + 旧 entry legacy 读取（纯函数零 pi 依赖，扩展 / runtime / renderer 三层共用）
   - `scheduler/` —— scheduler 任务条目契约 + entry 重放折叠（replayFoldEntries）+ 时间格式化（纯契约与纯函数，零 pi/node 依赖）
-  - `scheduler-create/` —— scheduler 创建确认共享资产（ScheduleDraft / ScheduleFormResult 类型 + 形状与时间折叠守卫 + marker）
+  - `scheduler-create/` —— scheduler 创建确认共享资产（ScheduleDraft / ScheduleFormResult 类型 + 形状与时间折叠检查 + marker）
   - `session-manager/` —— agent-managed session 嵌套 `{action, params}` 契约（select 通道 + marker）
   - `subagent-engine/` —— 引擎可发现性（`engines.json` 状态文件 + 引擎配置视图）
   - `subagent-inflight/` —— subagent 在途聚合上报（绝对计数报告 + marker，select 通道）
   - `subagent-notify/` —— subagent-workflow 通知通道 customType 常量唯一来源（workflow 结果 / 后台通知 / subagent 指令三类）
-  - `ui-form/` —— 统一提问表单协议（ask-user / scheduler / plan 三方提问统一入口：类型 + marker + 交互 helper + 守卫）
+  - `ui-form/` —— 统一提问表单协议（ask-user / scheduler / plan 三方提问统一入口：类型 + marker + 交互 helper + 检查）
   - 完整子协议清单以 `src/index.ts` 导出为准
 - `pending-entries` —— pending 事件流差集核心（register 去重 + unregister 抵消，纯算法）
 - `background-task` —— base-tool-enhance 后台任务 `registry.json` 文件契约

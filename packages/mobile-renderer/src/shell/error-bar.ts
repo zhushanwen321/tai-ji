@@ -5,7 +5,7 @@
 // - companion-bridge 三链：onSessionError（markSessionError 流内持久反馈 + 置顶瞬态补充）/
 //   onGlobalError（直显）/ notifyNotDelivered（dialog 作答未送达内联错误行）；
 // - app-runtime core toast 通道：UseChatDeps/EnsureStreamSubDeps 的 { error, warning } 注入
-//   （core 失败面——revoke/stop/bash/compact 等 RPC 失败的翻译后文案——直入本槽；
+//   （core 失败情形——revoke/stop/bash/compact 等 RPC 失败的翻译后文案——直入本槽；
 //   error/warning 同槽，移动壳无分级 toast 组件，可见性优先）。
 // views/ErrorBar.vue 纯展示消费（依赖方向 views → shell）；挂载与 effects 注入在 bootstrap/App。
 import { ref } from 'vue'

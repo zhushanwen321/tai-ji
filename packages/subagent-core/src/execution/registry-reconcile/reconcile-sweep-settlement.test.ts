@@ -3,7 +3,7 @@
 // [W2/V4 D6] sweep 判据源改接后的补注销行为与幂等验证。
 //
 // V1 把 reconcile-sweep 的 workflow 分支判据源从两态机持久化快照（findStateByIdSync
-// 的 state.status 字段）改接 journal run-settled 帧 ∨ manifest 终局面
+// 的 state.status 字段）改接 journal run-settled 帧 ∨ manifest 终局条目
 //（findRunSettlementEvidence 判定核）——活体写点删除后 v2 run 的 state 快照
 // 永停 running，旧判据对全部 v2 run 永判 active = sweep 结构性静默失效。本文件
 // 验证改接后 sweep 对 v2 run 的补注销行为与幂等，并对 D6 判定矩阵的保守侧形态
@@ -11,7 +11,7 @@
 //
 // [U1 判定核抽取（workflow-run-store-convergence）] 第二个 describe 块 =
 // findRunSettlementEvidence 判定核直测：三态判定矩阵逐分支与 sweep 装配无关的
-// 直接断言面（枚举改接 U2 将复用该核，矩阵每分支需要不经 runReconcileSweep 的
+// 直接断言范围（枚举改接 U2 将复用该核，矩阵每分支需要不经 runReconcileSweep 的
 // 行为锁）。warn 断言经 configureCore 注入 log spy（logger facade 动态解析宿主）。
 //
 // | 改接后形态                          | sweep 判定              |
@@ -160,7 +160,7 @@ describe("[W2/V4 D6] sweep 判据源改接后的 v2 run 补注销（真实判定
     expect(readUnregisterEntries()).toHaveLength(1);
   });
 
-  it("保守侧矩阵（误注销为零）：非终态（无 settled 帧）/ 坏链（首帧损坏）/ IO 故障（EISDIR）→ 全部按活跃挂账，零补注销", async () => {
+  it("保守侧矩阵（误注销为零）：非终态（无 settled 帧）/ 坏链（首帧损坏）/ IO 故障（EISDIR）→ 全部按活跃挂着不处理，零补注销", async () => {
     // 形态 a：journal 存在但无 run-settled 帧（run 真未终局）
     writeRegisterEntry("wf-v4-live");
     const journal = createRunEventJournal(stateDirOf());
@@ -196,7 +196,7 @@ describe("[W2/V4 D6] sweep 判据源改接后的 v2 run 补注销（真实判定
     const { deps, unregisterAppends } = assembleSweep();
     const result = runReconcileSweep(deps);
 
-    // 三形态全部保守按活跃挂账：不进 reconciled、落 skippedActive
+    // 三形态全部保守按活跃挂着不处理：不进 reconciled、落 skippedActive
     expect(result.reconciled).toEqual([]);
     expect(result.skippedActive).toEqual(
       expect.arrayContaining(["wf-v4-live", "wf-v4-broken", "wf-v4-iofail"]),
@@ -215,10 +215,10 @@ describe("[W2/V4 D6] sweep 判据源改接后的 v2 run 补注销（真实判定
     expect(unregisterAppends[0]).toMatchObject({ id: "wf-v4-gone", reason: "expired" });
   });
 
-  it("manifest 终局面（journal 无帧但 manifest 在盘）→ 补注销；interrupted → 'failed' 诊断兜底折叠（reason 面不变量）", async () => {
+  it("manifest 终局条目（journal 无帧但 manifest 在盘）→ 补注销；interrupted → 'failed' 诊断兜底折叠（reason 面不变量）", async () => {
     writeRegisterEntry("wf-v4-manifest");
     fs.mkdirSync(stateDirOf(), { recursive: true });
-    // 活体物化后 journal 被裁的组合：manifest 终局面是第二证据通道
+    // 活体物化后 journal 被裁的组合：manifest 终局条目是第二证据通道
     fs.writeFileSync(
       path.join(stateDirOf(), "wf-v4-manifest.json"),
       JSON.stringify({ outcome: "interrupted", errorCode: "idle-evicted" }),
@@ -286,7 +286,7 @@ async function writeLiveJournal(runId: string): Promise<void> {
 }
 
 describe("[U1 判定核抽取] findRunSettlementEvidence 直测（矩阵逐分支）", () => {
-  // warn 断言面：configureCore 注入 log spy（内层 hooks 与外层 tmpDir 生命周期
+  // warn 断言范围：configureCore 注入 log spy（内层 hooks 与外层 tmpDir 生命周期
   // 组合——内层 afterEach 先于外层执行，resetCoreForTests 不影响外层 rmSync）。
   let logSpy: ReturnType<
     typeof vi.fn<(level: LogLevel, component: string, message: string, data?: unknown) => void>
@@ -446,7 +446,7 @@ describe("[U1 判定核抽取] findRunSettlementEvidence 直测（矩阵逐分�
     expect(findRunSettlementEvidence(stateDirOf(), "wf-core-gone")).toEqual({ kind: "missing" });
   });
 
-  it("journal 非 ENOENT 读错（EISDIR）→ running + warn 留证（宁挂账不误注销）", () => {
+  it("journal 非 ENOENT 读错（EISDIR）→ running + warn 留证（宁挂着不处理不误注销）", () => {
     fs.mkdirSync(path.join(stateDirOf(), `wf-core-iofail${RUN_EVENTS_SUFFIX}`), {
       recursive: true,
     });

@@ -48,7 +48,7 @@ describe('TokenInputView（D4/D8 恢复入口）', () => {
   })
 
   // i18n 消费断言：四处文案（标题/指引/占位/提交键）随 locale 切换渲染，
-  // 拦截硬编码中文回归（check_i18n_cjk.py 只查 CJK，en 侧漏译由本用例守卫）
+  // 拦截硬编码中文回归（check_i18n_cjk.py 只查 CJK，en 侧漏译由本用例检查）
   it('文案走 t() 双语渲染（zh-CN / en-US 随 locale 切换，无硬编码）', async () => {
     i18n.global.locale.value = 'zh-CN'
     const zh = mountView()
@@ -68,7 +68,7 @@ describe('TokenInputView（D4/D8 恢复入口）', () => {
   })
 })
 
-describe('TokenInputView 提交中/错误反馈投影（submitting/error props，App 投影 bootstrap tokenSubmit 态）', () => {
+describe('TokenInputView 提交中/错误反馈派生视图（submitting/error props，App 呈现 bootstrap tokenSubmit 态）', () => {
   beforeEach(() => {
     i18n.global.locale.value = 'zh-CN'
   })
@@ -76,7 +76,7 @@ describe('TokenInputView 提交中/错误反馈投影（submitting/error props�
   it('submitting=true：提交按钮禁用且文案切「连接中…」（已输入 token 也禁用，防重复触发）；false 时可点显「连接」', async () => {
     const submitting = mountViewWith({ submitting: true })
     const submitBtn = submitting.get('[data-testid="token-submit"]')
-    // 输入非空 token：禁用只由 submitting 驱动（空值守卫不参与本断言）
+    // 输入非空 token：禁用只由 submitting 驱动（空值检查不参与本断言）
     await submitting.find('[data-testid="token-input"]').setValue('tok-abc')
     expect(submitBtn.attributes('disabled')).toBeDefined()
     expect(submitBtn.text()).toBe('连接中…')

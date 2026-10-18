@@ -4,7 +4,8 @@
  * 设计定位：为长耗时异步操作（workflow/subagent/bash 后台任务）提供跨 extension 的
  * 活跃操作注册/查询机制。workflow/subagent/bash 运行时通过 EventBus（pi.events.emit）
  * 广播 register/unregister，本扩展监听这些事件、将状态写入 session entries（pi.appendEntry），
- * 供 LLM 通过 pending_notifications 工具主动查询当前活跃异步操作
+ * 供 LLM 通过 pending_notifications 工具主动查询当前活跃异步操作、通过 collect_results
+ * 工具批量阻塞收取结果（result-collect 设计 §3.1③）
  * （goal 不在 before_agent_start 注入等待消息——避免双信息源，pending 感知由 LLM 自行查询）。
  *
  * 文件职责：
@@ -16,7 +17,7 @@
  * ① subagent-core——notify-host.ts（register + record 终态化 unregister——finalizeRun
  *   直落后的残留发射面，观测通道 = sweep reconciled WARN）/ orchestration/lifecycle.ts
  *   （register 主链）；
- * ② base-tool-enhance——bash 投影（notify.ts register/unregister 主链 +
+ * ② base-tool-enhance——bash 派生视图（notify.ts register/unregister 主链 +
  *   process-exit-guard.ts 退出边沿尽力补 emit（pending-reconcile 对账走 appendEntry
  *   权威路径，不经 emit））；
  * ③ subagent-workflow——仅崩溃恢复时 emit pending:unregister（session-lifecycle.ts
@@ -34,10 +35,12 @@
  * - base-tool-enhance pending-reconcile.ts（session_start 对账，同款）。
  *
  * entry 契约（与 goal before-agent-start.ts 对齐，读取端按 e.data.id 算差集）：
- * - pending:register → { id, type, name, registeredAt, sessionId }
+ * - pending:register → { id, type, name, registeredAt, sessionId, kind? }
+ *   （kind 可选 = managed lifetime 债权标记，session-manager 写侧申报、本 listener
+ *   白名单透传落盘——collect_results 缺省等待集排除依据，result-collect 设计 §3.4）
  * - pending:unregister → { id, reason, status }
  *
- * 状态权威源：session entries 是唯一状态——工具投影与写侧去重/活跃判断全部对
+ * 状态权威源：session entries 是唯一状态——工具派生视图与写侧去重/活跃判断全部对
  * getEntries() 现算（appendEntry 同步入账，pi dist 实证，锚定 pi-semantics
  * PS-29 extensionAPI appendEntry 直委托 appendCustomEntry + PS-17 _appendEntry
  * 同步 push 无 debounce），无内存第二份状态；历史的内存 registry、
@@ -48,22 +51,33 @@
  */
 
 import type { ExtensionAPI, ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
-import { mapReasonToStatus as mapReasonToStatusImpl } from "@zhushanwen/extension-protocol";
+import {
+	mapReasonToStatus as mapReasonToStatusImpl,
+	scanPendingFields,
+} from "@zhushanwen/extension-protocol";
+import {
+	getDeliveryPort,
+	type CollectedEntry,
+	type CollectSnapshot,
+	type DeliveryPortHandle,
+} from "@zhushanwen/pi-delivery-port";
 import { getLogger } from "@zhushanwen/pi-extension-logger";
 import { Type } from "typebox";
 
 import {
+	computeCollectWaitKeys,
 	countActiveFromEntries,
 	hasPendingId,
 	isPendingActive,
 	normalizePendingType,
 	type PendingEntry,
+	type PendingKind,
 	type PendingStatus,
 	type PendingType,
 } from "./state.ts";
 import { renderPendingNotificationsResult } from "./render-result.ts";
 
-// 跨扩展消费 API：goal（continuation 守卫）/ subagent-workflow（agent_end 后代判定）
+// 跨扩展消费 API：goal（continuation 检查）/ subagent-workflow（agent_end 后代判定）
 // 直接 import 本包导出的 countActiveFromEntries，避免各自复制差集逻辑。导出面只保留
 // 唯一消费函数 + 其签名所需类型（entries 是唯一状态源，包内不再导出状态机 API）。
 export {
@@ -94,6 +108,52 @@ interface PendingToolDetails {
 	summary: string;
 }
 
+// ── collect_results（批量收取，result-collect 设计 §3.1③）─────────────
+
+/** 缺省超时（设计 §3.3 量级决策：任务级对象 → 小时量级。非墙钟判死——超时是等待器的
+ *  诚实返回：任务不受影响、stillOpen 列出、恢复 push、可续 collect。偏离「任务级缺省
+ *  不限时」的原因与论证登记在设计 §3.3，工具描述引导 agent 按预期时长显式传参）。 */
+const COLLECT_DEFAULT_TIMEOUT_MS = 3_600_000;
+
+/** collect_results 工具参数 schema */
+const CollectResultsParams = Type.Object({
+	ids: Type.Optional(Type.Array(Type.String())),
+	timeout_ms: Type.Optional(Type.Number()),
+});
+
+/** stillOpen 条目：未收取的等待键（note 标记特殊态，如已入 push 管线）。 */
+interface StillOpenEntry {
+	id: string;
+	note?: string;
+}
+
+/** errors 条目：未知 id（判定源 = 活跃集 ∪ 投递日志键集 ∪ 曾注册集 的补集），逐条列出不阻断已知子集。 */
+interface CollectErrorEntry {
+	id: string;
+	reason: string;
+}
+
+/** collect_results 工具的 details 形状（与返回契约同构，结构化消费方）。 */
+interface CollectToolDetails {
+	collected: CollectedEntry[];
+	stillOpen: StillOpenEntry[];
+	errors?: CollectErrorEntry[];
+}
+
+/** collect_results 工具描述（缺省口径 + lifetime 排除 + managed 全键返回形态 + timeout
+ *  缺省值引导显式传参 + 反模式（勿当活性检查用、只关心特定操作勿省略 ids）+
+ *  与 pending_notifications 分工声明，result-collect 设计 §3.1③/§3.4 工具描述更新项）。 */
+const COLLECT_RESULTS_DESCRIPTION = [
+	"Block and batch-collect results of background async operations (workflow / subagent / bash background tasks / managed session claims), instead of receiving one notification per completion.",
+	"Returns collected (entries: {id, type, outcome, content, details}), stillOpen (not collected: {id, note?}) and errors (unknown ids, listed individually without blocking the known subset).",
+	"ids: target operation ids (as returned when dispatching background tasks). Omitted = every active pending operation of the current session, EXCLUDING managed-session lifetime claims (alive-markers that only settle when the session dies — waiting on them would hang until timeout) and registrations inherited from a forked parent session.",
+	"timeout_ms: max wait in milliseconds, default 3600000 (1 hour). Pass a value matched to the expected task duration (e.g. 120000 for short tasks). On timeout the already-arrived results are returned; the rest stay in stillOpen and notify normally (push) when they complete.",
+	"A managed-session batched notification matched by any of its keys returns one entry per key of that batch (same payload shared). Collecting an already-collected id again returns its snapshot (no duplicate injection). Interruption (timeout / user abort) returns normally with the arrived subset.",
+	"Do NOT use this tool as a liveness or status check — it blocks the current turn until results arrive or timeout_ms elapses. Immediate status queries go to pending_notifications (list).",
+	"DO NOT omit ids when you only care about specific operations — the default wait set blocks on every active non-lifetime pending operation of this session at once.",
+	"Division of labor: pending_notifications (list) is the immediate status query; collect_results is the blocking wait — use it only when the next step actually needs those results.",
+].join("\n");
+
 /**
  * 模块级 EventBus 监听器 unsubscribe 函数列表。
  *
@@ -122,7 +182,7 @@ export default function pendingNotificationsExtension(pi: ExtensionAPI): void {
 	unsubscribers = [];
 
 	// ── 闭包内状态 ─────
-	// entries 是唯一状态源（无内存状态副本）：currentSessionId 是查询投影的跨 session
+	// entries 是唯一状态源（无内存状态副本）：currentSessionId 是查询派生视图的跨 session
 	// 过滤基准；sessionManager 是 listener 写侧前置判断的 entries 读取通道（EventBus
 	// 回调无 ctx 参数，经 session_start 缓存持有）。
 	let currentSessionId: string = "";
@@ -183,6 +243,9 @@ export default function pendingNotificationsExtension(pi: ExtensionAPI): void {
 			name: parsed.name,
 			registeredAt: Date.now(),
 			sessionId: currentSessionId,
+			// lifetime 债权标记落盘透传（result-collect 设计 §3.4 kind 读取链写侧落点；
+			// 无标记条目形状不变——非 managed 注册零字段增量）
+			...(parsed.kind ? { kind: parsed.kind } : {}),
 		});
 
 		debugLog("debug", "listener: pending:register appended", { id: parsed.id });
@@ -268,6 +331,219 @@ export default function pendingNotificationsExtension(pi: ExtensionAPI): void {
 			return renderPendingNotificationsResult(result, options, theme);
 		},
 	});
+
+	// ── 批量收取 tool（result-collect 设计 §3.1③）─────────────────────
+	pi.registerTool({
+		name: "collect_results",
+		label: "Collect Results",
+		description: COLLECT_RESULTS_DESCRIPTION,
+		parameters: CollectResultsParams,
+		// 任一时刻至多一个在途 collect（设计前提 P2：同批任一工具声明 sequential 即整批
+		// 串行）——多在途等待集的跨集判重预案因此不需要。
+		executionMode: "sequential",
+		execute: async (
+			_toolCallId: string,
+			params: { ids?: string[]; timeout_ms?: number },
+			signal: AbortSignal | undefined,
+			_onUpdate: unknown,
+			ctx: ExtensionContext,
+		): Promise<{ content: { type: "text"; text: string }[]; details: CollectToolDetails }> =>
+			collectResults(params, signal, ctx),
+	});
+
+	/** collect_results 执行体（工厂闭包：读 currentSessionId 缺省集过滤基准）。
+	 *
+	 * 执行序（设计 §3.1③）：等待键集计算 → collectArm（端口同步段登记 + 五态快照）→
+	 * 快照合并组装（ready ∪ unregistered-no-entry 进 collected；in-push-pipeline 进
+	 * stillOpen 附 note；waiting 留守）→ await 到达/超时/abort 三者先到 → consume +
+	 * collectRelease → 返回。AbortSignal 捕获后正常 return（禁抛错路径——pi 契约下抛错
+	 * 会把已写 collected 终局的载荷随返回丢失，收取即丢失，设计 §3.1 [abort]）。
+	 */
+	async function collectResults(
+		params: { ids?: string[]; timeout_ms?: number },
+		signal: AbortSignal | undefined,
+		ctx: ExtensionContext,
+	): Promise<{ content: { type: "text"; text: string }[]; details: CollectToolDetails }> {
+		const entries = ctx.sessionManager.getEntries();
+		const timeoutMs = params.timeout_ms ?? COLLECT_DEFAULT_TIMEOUT_MS;
+
+		// 等待键集：显式 ids 全量交端口五态判决定态（unknown 态键由快照回流进
+		// errors，MF-1-5：未知判定单点在端口——工具侧不再重扫 entries 算「活跃集 ∪
+		// 曾注册集」补集）；缺省 = computeCollectWaitKeys（活跃 − lifetime 死亡债权
+		// − 跨 session 残留，currentSessionId 空串回退同款）。
+		let waitKeys: string[];
+		if (params.ids) {
+			waitKeys = [...new Set(params.ids)];
+		} else {
+			waitKeys = computeCollectWaitKeys(entries, currentSessionId);
+		}
+
+		// 等待集为空：立即返回，不进入等待、不触端口（设计 §3.1③ 边界语义）。显式
+		// ids 全量交端口定态后空集只剩两种形态（空数组 / 缺省集空），均不产 errors。
+		if (waitKeys.length === 0) {
+			const details: CollectToolDetails = { collected: [], stillOpen: [] };
+			debugLog("debug", "collect_results: empty wait set, returning immediately");
+			return { content: [{ type: "text" as const, text: formatCollectDetails(details) }], details };
+		}
+
+		// 槽缺席降级（base-tool-enhance session_start 装配缺失的异常窗口，生产不可达常态；
+		// STANDARDS §11.1 通知类接入点降级非静默吞）：warn 留痕 + 正常返回（不抛错，
+		// 错误文本指向恢复动作 = 下次 session_start 重试装配后重试）。
+		const port = getDeliveryPort();
+		if (!port) {
+			logger.warn(
+				"[pending-notifications] collect_results: delivery port not bound — collect unavailable (base-tool-enhance session_start 装配缺失)",
+				{ waitKeys },
+			);
+			return {
+				content: [
+					{
+						type: "text" as const,
+						text: "collect_results unavailable: delivery port not bound (assembly missing). Retry after the session finishes starting (session_start rebinds the port).",
+					},
+				],
+				details: { collected: [], stillOpen: [] },
+			};
+		}
+
+		// collectArm：端口同步段登记等待集 + 五态快照（每 key 一条；unknown 态 =
+		// 端口未知判定单点回流）。
+		const snapshot = port.collectArm(waitKeys);
+		const collected: CollectedEntry[] = [];
+		const stillOpen: StillOpenEntry[] = [];
+		const waitingIds: string[] = [];
+		const unknownIds: string[] = [];
+		partitionCollectSnapshot(snapshot, { collected, stillOpen, waitingIds, unknownIds });
+		const errors: CollectErrorEntry[] = unknownIds.map((id) => ({
+			id,
+			reason: "unknown id — not an active pending operation and never registered in this session",
+		}));
+
+		// 到达等待：事件驱动（onCollectArrival）不轮询；到达/超时/abort 三者先到。
+		// 完成判据 = 全部等待键出现在已收取集合（到达即 consume 取走载荷+终局）。
+		await awaitCollectArrivals(port, waitingIds, collected, timeoutMs, signal);
+
+		// 终局序列（设计 §3.1③）：consume 取走剩余已到达挂起条目（超时/abort 路径的
+		// 部分收取），collectRelease 解散等待集并把未收挂起条目直通内核 flush（跳过
+		// 合批窗口，恢复 push）。空等待路径不会走到这里（提前返回）。
+		collected.push(...port.consume());
+		port.collectRelease();
+
+		// type/outcome 缺失回填（字段来源见 backfillCollectFields 注释）。
+		backfillCollectFields(ctx, collected);
+
+		// 未收取的等待键进 stillOpen（无 note = 单纯未完成，完成时恢复 push）。
+		const collectedIds = new Set(collected.map((c) => c.id));
+		for (const id of waitingIds) {
+			if (!collectedIds.has(id)) stillOpen.push({ id });
+		}
+
+		const details: CollectToolDetails = { collected, stillOpen };
+		if (errors.length > 0) details.errors = errors;
+		debugLog("debug", "collect_results: returning", {
+			collected: collected.length,
+			stillOpen: stillOpen.length,
+			errors: errors.length,
+		});
+		return { content: [{ type: "text" as const, text: formatCollectDetails(details) }], details };
+	}
+
+	/** 快照五态分流（§3.1③）：ready ∪ unregistered-no-entry 进 collected；in-push-pipeline
+	 * 进 stillOpen 附 note；waiting 留守；unknown 逐条回流（错误组装在调用方）。 */
+	function partitionCollectSnapshot(
+		snapshot: CollectSnapshot,
+		buckets: {
+			collected: CollectedEntry[];
+			stillOpen: StillOpenEntry[];
+			waitingIds: string[];
+			unknownIds: string[];
+		},
+	): void {
+		for (const snap of snapshot) {
+			switch (snap.state) {
+				case "ready":
+				case "unregistered-no-entry":
+					// 快照收取：ready = 日志条目已有终局的读侧快照（不写新终局）；
+					// unregistered-no-entry = 第四态无载荷有限信息形态（outcome 取注销
+					// status、note 说明来源，端口侧组装）。两态的 entry 契约在册。
+					buckets.collected.push({ id: snap.id, ...(snap.entry ?? {}) });
+					break;
+				case "in-push-pipeline":
+					// 已过分流点、在 push 管线排队待注入：不收取（收取后再注入 = 双重呈现）
+					// 不等待（等其终局 = 等待源与阻塞源互等自锁）——附 note 进 stillOpen。
+					buckets.stillOpen.push({
+						id: snap.id,
+						note: "already queued in the push pipeline — will be delivered as a normal notification after this tool returns",
+					});
+					break;
+				case "waiting":
+					buckets.waitingIds.push(snap.id);
+					break;
+				case "unknown":
+					// 未知 id（端口五态判据单点判定）：逐条列出、不阻断已知子集。
+					buckets.unknownIds.push(snap.id);
+					break;
+			}
+		}
+	}
+
+	/** 到达等待段：等待键为空立即返回；否则 consume+到达判据（全部等待键已收取）/
+	 * 超时 / abort 三者先到解除（abort 捕获后正常 return，不抛错——抛错会把已写
+	 * collected 终局的载荷随返回丢失，§3.1 [abort]）。 */
+	async function awaitCollectArrivals(
+		port: DeliveryPortHandle,
+		waitingIds: readonly string[],
+		collected: CollectedEntry[],
+		timeoutMs: number,
+		signal: AbortSignal | undefined,
+	): Promise<void> {
+		if (waitingIds.length === 0) return;
+		await new Promise<void>((resolve) => {
+			let settled = false;
+			let timer: ReturnType<typeof setTimeout> | undefined = undefined;
+			let unsubscribeArrival: () => void = () => {};
+			const onAbort = () => finish();
+			const finish = () => {
+				if (settled) return;
+				settled = true;
+				if (timer !== undefined) clearTimeout(timer);
+				signal?.removeEventListener("abort", onAbort);
+				unsubscribeArrival();
+				resolve();
+			};
+			const pullArrived = () => {
+				collected.push(...port.consume());
+				const collectedIds = new Set(collected.map((c) => c.id));
+				if (waitingIds.every((id) => collectedIds.has(id))) finish();
+			};
+			if (signal?.aborted) {
+				finish();
+				return;
+			}
+			timer = setTimeout(finish, timeoutMs);
+			signal?.addEventListener("abort", onAbort, { once: true });
+			unsubscribeArrival = port.onCollectArrival(pullArrived);
+		});
+	}
+
+	/** type/outcome 缺失回填（设计 §3.1③ 字段来源表：type 与 pending:register 的
+	 * type 对齐、outcome 与 pending:unregister 的 status 对齐；MF-1-6：端口 consume
+	 * 只返回 {id, content, details}，终态字段统一由本处单遍扫描回填）：「等待中
+	 * 同步到达」的挂起条目在端口 consume 时点，生产方的注销 entry 尚未落盘
+	 * （managed flushBatch 的 deliver 与 unregisterPending 同步段相邻、deliver 先
+	 * 行；端口 consume 由到达回调在 deliver 栈内同步触发），outcome 恒取空。await
+	 * 恢复后生产方同步栈已完成（注销 entry 已落盘），按本 session entries 现算回填；
+	 * 注销不在册的条目保持 undefined（诚实缺省，不虚构终态）。快照收取条目
+	 * （ready / unregistered-no-entry）的 type/outcome 已由端口 collectArm 填充，
+	 * 回填只补缺不覆盖。 */
+	function backfillCollectFields(ctx: ExtensionContext, collected: CollectedEntry[]): void {
+		if (!collected.some((c) => c.outcome === undefined || c.type === undefined)) return;
+		const fields = scanPendingFields(ctx.sessionManager.getEntries());
+		for (const c of collected) {
+			if (c.type === undefined) c.type = fields.registerTypes.get(c.id);
+			if (c.outcome === undefined) c.outcome = fields.unregisterStatuses.get(c.id);
+		}
+	}
 }
 
 // ── 事件解析 helper ─────────────────────────────────
@@ -276,6 +552,7 @@ interface ParsedRegister {
 	id: string;
 	type: PendingType;
 	name: string;
+	kind?: PendingKind;
 }
 
 /** 解析 pending:register 事件 data（容错缺失/类型错误字段） */
@@ -288,6 +565,9 @@ function parseRegisterEvent(data: unknown): ParsedRegister | null {
 		// bash 类型直通（归一化映射与 state.ts 读取侧共用同一函数，防两侧漂移）
 		type: normalizePendingType(d.type),
 		name: typeof d.name === "string" ? d.name : d.id,
+		// lifetime 标记白名单解析（result-collect 设计 §3.4；未知值不透传 = 缺省
+		// send 债权语义，与 normalizeRegisterEntry 读取侧白名单同口径防漂移）
+		...(d.kind === "lifetime" ? { kind: "lifetime" as const } : {}),
 	};
 }
 
@@ -334,4 +614,28 @@ export function buildPendingNotificationsSummary(details: {
 	return details.action === "count"
 		? `${details.count} pending operations`
 		: `${details.count} entries listed`;
+}
+
+/** collect_results 结果的可读文本（content 通道：载荷 content 随文本到达 agent，
+ *  details 承载结构化同构副本供程序消费）。 */
+function formatCollectDetails(details: CollectToolDetails): string {
+	const lines = [
+		`collect_results: ${details.collected.length} collected, ${details.stillOpen.length} still open${
+			details.errors ? `, ${details.errors.length} unknown id(s)` : ""
+		}`,
+	];
+	for (const c of details.collected) {
+		const typeTag = c.type ? `[${c.type}] ` : "";
+		const outcomeTag = c.outcome ? ` (${c.outcome})` : "";
+		const body = c.content ? `: ${c.content}` : "";
+		const noteTag = c.note ? ` — ${c.note}` : "";
+		lines.push(`- collected ${typeTag}${c.id}${outcomeTag}${body}${noteTag}`);
+	}
+	for (const s of details.stillOpen) {
+		lines.push(`- still open: ${s.id}${s.note ? ` (${s.note})` : ""}`);
+	}
+	for (const e of details.errors ?? []) {
+		lines.push(`- unknown id: ${e.id} — ${e.reason}`);
+	}
+	return lines.join("\n");
 }

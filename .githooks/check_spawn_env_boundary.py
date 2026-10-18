@@ -6,7 +6,7 @@ runtime 子进程 env 出站契约静态检查（约束 C-proc-09）
 调用点（spawn / execFile / execFileSync / fork / pty.spawn / new Worker /
 utilityProcess.fork），要求每个调用点的实参区窗口内出现出站契约构建器
 （buildOutboundChildEnv / composeChildEnvBase）的调用形态，否则按调用点逐一报错并
-给出修复指引；间接组装（包装函数/外部注入/类型契约）与无 env 出站面的调用点在
+给出修复指引；间接组装（包装函数/外部注入/类型契约）与无 env 出站的调用点在
 本脚本 EXEMPT_CALLSITES 内逐条注明理由豁免。
 
 设计依据与背景：docs/architecture/env-propagation-boundary.md
@@ -40,7 +40,7 @@ utilityProcess.fork），要求每个调用点的实参区窗口内出现出站�
 3. 窗口内无构建器形态的调用点查 EXEMPT_CALLSITES（file 后缀 + 行内稳定子串指纹）：
    命中则放行并计入豁免统计。用行内容子串而非行号做指纹，代码平移不会让豁免
    静默漂移到新位置；豁免失效时宁可重新报警人工复核，不允许静默放行。
-   豁免两类：无 env 出站面（只读探测 / kill / Worker 同进程线程），与间接组装
+   豁免两类：无 env 出站（只读探测 / kill / Worker 同进程线程），与间接组装
    （env 经本文件包装函数 / 跨包注入 / SDK 类型契约封住，豁免理由须指向组装点）。
 
 退出码：0=通过；2=存在违规；1=脚本自身异常。
@@ -106,7 +106,7 @@ BACKWARD_LINES = 12
 # 向前固定兜底：覆盖 env 内联在调用实参区中段的形态（实测最远 git-executor.ts
 # execFile options 的 env 在调用行后第 12 行，取 15）。
 FORWARD_LINES = 15
-# 向前括号延伸封顶：自调用括号起点按净未闭合括号数延伸实参区，防字符串/正则内的
+# 向前括号延伸封顶：自调用括号起点按净未结束括号数延伸实参区，防字符串/正则内的
 # 括号使计数失真导致窗口无界飞出。
 FORWARD_MAX_LINES = 30
 
@@ -218,7 +218,7 @@ EXEMPT_CALLSITES = [
     (
         "infra/crash-correlation.ts",
         "execFileSync(",
-        "崩溃时刻机器面 pi 快照的 ps 只读探测（crash-forensics D10）：数组参数不经 "
+        "崩溃时刻的机器检查对 pi 快照的 ps 只读探测（crash-forensics D10）：数组参数不经 "
         "shell、显式 timeout，仅读系统进程表回读 stdout，无 env 传播意图"
         "（与 reap-orphan-pi.ts ps 探测先例同构）",
     ),
@@ -251,7 +251,7 @@ EXEMPT_CALLSITES = [
         "services/session/background-task-reaper.ts",
         "spawnSync('pgrep'",
         "收殓补杀的子孙 pid 只读枚举（kill 树兜底残留清理）：数组参数不经 shell，"
-        "仅读进程表，无 env 出站面（与 reap-orphan-pi.ts 先例同构）",
+        "仅读进程表，无 env 出站（与 reap-orphan-pi.ts 先例同构）",
     ),
     (
         "services/session/background-task-reaper.ts",
@@ -324,21 +324,21 @@ EXEMPT_CALLSITES = [
         "engine/engines/pi/pi-engine.ts",
         "execFile(",
         "pi 可执行入口版本探测（`<command> --version` 只读探测、显式 timeout、"
-        "仅回读 stdout 版本串，无 env 传播意图；chat 域 inproc 保留面，W7 包内"
+        "仅回读 stdout 版本串，无 env 传播意图；chat 域 inproc 保留范围，W7 包内"
         "等价物同形态）",
     ),
     (
         "engine/engines/pi/session-runner.ts",
         'spawnSync("ps"',
         "后代 pid cmdline 只读探测（身份校验/收割判定），数组参数不经 shell、显式"
-        " timeout，仅读进程表（chat 域 inproc 保留面）",
+        " timeout，仅读进程表（chat 域 inproc 保留范围）",
     ),
     (
         "engine/engines/pi/session-runner.ts",
         'execFile(\n          "git"',
         "git rev-parse --abbrev-ref HEAD 只读探测（子进程 env block 的 branch 行数据"
         "源），cwd 限定、显式 timeout、仅回读 stdout，无 env 传播意图（chat 域 "
-        "inproc 保留面）",
+        "inproc 保留范围）",
     ),
     (
         "orchestration/worker-host.ts",

@@ -12,12 +12,12 @@
  * - D2b 导航拦截：will-navigate 拒绝非应用自身源 + setWindowOpenHandler 默认 deny
  *   （integrity-hardening §3.2；防 XSS 经整页导航/新窗口接管 electronAPI）
  * - renderer 崩溃显式失败（ADR-0122）：render-process-gone 详情
- *   经 main-logger 落盘 + 崩溃台账 + 一次崩溃即静态错误页（重试按钮导航回应用源；
+ *   经 main-logger 落盘 + 崩溃登记清单 + 一次崩溃即静态错误页（重试按钮导航回应用源；
  *   [HISTORICAL] 原 60s 滑窗 ≤3 次自动 reload 熔断已删）
  *
  * 依赖方向：window-factory → electron + input-validators + main/interfaces（type-only）
  *   + logs/main-logger（render-process-gone 详情落盘，u3）+ logs/crash-journal（renderer
- *   事件台账，crash-forensics D1）
+ *   事件登记清单，crash-forensics D1）
  *   + logs/renderer-console-handler（console-message 落盘监听，renderer-console-persist U2）
  */
 import path from 'node:path'
@@ -29,6 +29,7 @@ import { mainLogger } from '../logs/main-logger.js'
 import { crashJournal } from '../logs/crash-journal.js'
 import { handleRendererConsoleMessage, isRendererConsoleDisabled } from '../logs/renderer-console-handler.js'
 import { getDataDir } from '@taiji/shared/paths'
+import { SHORTCUT } from '@taiji/shared'
 import {
   createMainWindowStatePersistence,
   pickInitialSize,
@@ -40,7 +41,7 @@ import {
 /** Dev 模式 Vite URL（TAIJI_VITE_DEV_URL 可覆盖：多 worktree 并行 dev 时错开端口，如 1421）。
  *  注意：本常量同时是 will-navigate 导航白名单的 devOrigin（createWindow 内
  *  isAllowedAppNavigation 调用）——覆盖后导航白名单同步接受覆盖源（行为正确：应用实际
- *  从哪个端口加载就应放行哪个）；prod 下仅 loadFile，该覆盖无生效面。 */
+ *  从哪个端口加载就应放行哪个）；prod 下仅 loadFile，该覆盖无生效路径。 */
 export const VITE_DEV_URL = process.env.TAIJI_VITE_DEV_URL ?? 'http://localhost:1420'
 
 /** 等待 Vite dev server 就绪的总超时 */
@@ -52,7 +53,7 @@ export const VITE_POLL_INTERVAL_MS = 300
 // ── renderer 崩溃显式失败（ADR-0122）────
 // [HISTORICAL] 原 D2-③/u3-renderer-recovery「60s 滑窗 ≤3 次自动 reload + 熔断」已删
 // （ADR-0122：自动重试属无效防御）。render-process-gone 现为一次崩溃即加载静态错误页
-// （失败显式上报 + 用户手动重试），详情与台账照常落盘。
+// （失败显式上报 + 用户手动重试），详情与登记清单照常落盘。
 
 /**
  * 构造应用窗口 URL 的 query（windowId 必带；sessionId 按需）。
@@ -90,7 +91,7 @@ function escapeHtml(s: string): string {
  * 白名单放行），main 侧 did-navigate 监听据此记手动重试成功日志。
  */
 export function buildStaticErrorPageHtml(logsDir: string, retryUrl: string): string {
-  // script 内 URL 用 JSON 字符串字面量注入，'<' 全部转义防 </script> 提前闭合
+  // script 内 URL 用 JSON 字符串字面量注入，'<' 全部转义防 </script> 提前结束
   const retryUrlLiteral = JSON.stringify(retryUrl).replaceAll('<', '\\u003c')
   return [
     '<!doctype html>',
@@ -358,7 +359,7 @@ export async function createWindow(
   // W7 加载失败 / 渲染进程崩溃监听（webContents 创建后立即挂，覆盖 loadFile/loadURL 全过程）：
   //   - did-fail-load：loadURL/loadFile 失败（如 Vite 重启中、构建产物损坏）。打 error 日志。
   //   - render-process-gone：渲染进程崩溃（OOM / 崩溃）。详情经 main-logger 落盘
-  //     （G5：reason/exitCode/窗口标识/时间戳）+ 崩溃台账（crash-forensics D1），
+  //     （G5：reason/exitCode/窗口标识/时间戳）+ 崩溃登记清单（crash-forensics D1），
   //     一次崩溃即加载静态错误页（ADR-0122：失败显式上报，手动重试是唯一恢复通道；
   //     [HISTORICAL] 原 60s 滑窗 ≤3 次自动 reload 熔断已删）。此处不持有 windowManager
   //     引用，windows Map 的清理仍由 win 'closed' 事件（window-manager.register 已绑定）兜底。
@@ -369,7 +370,7 @@ export async function createWindow(
     )
   })
   win.webContents.on('render-process-gone', (_e, details) => {
-    // clean-exit = 正常退出路径（非崩溃，如 window.close 流程）：不写台账、不进错误页
+    // clean-exit = 正常退出路径（非崩溃，如 window.close 流程）：不写登记清单、不进错误页
     // ——否则污染评估器条件 #9（崩溃计数）且与关窗流程存在竞态窗口
     if (details?.reason === 'clean-exit') return
     // 详情落盘（u5a main-logger writer；E3 取证缺口修复：崩溃详情不再只有 dev console 一行）
@@ -380,14 +381,14 @@ export async function createWindow(
       detectedAt: new Date().toISOString(),
     })
     if (win.isDestroyed()) return
-    // 崩溃台账（crash-forensics D1 renderer 行）：reason 透传 Electron
+    // 崩溃登记清单（crash-forensics D1 renderer 行）：reason 透传 Electron
     // RenderProcessGoneDetails 枚举（'oom' 真实存在——renderer OOM 可与普通崩溃
-    // 'crashed' 在台账区分；评估器 #9 数 crash、#10 按 reason 分类）。
+    // 'crashed' 在登记清单区分；评估器 #9 数 crash、#10 按 reason 分类）。
     crashJournal.append({ layer: 'renderer', event: 'crash', reason: details?.reason ?? null })
     showStaticErrorPage(win, windowId, options?.sessionId, deps.isDev)
   })
 
-  // renderer console 落盘监听（renderer-console-persist 设计 D1/U2）：被动收集面挂
+  // renderer console 落盘监听（renderer-console-persist 设计 D1/U2）：被动收集逻辑挂
   // webContents 事件族同段。旋钮判定在挂载时一次——TAIJI_RENDERER_CONSOLE_OFF 是
   // 模块加载读一次的语义（设计 D3④：app 启动后设 env 不生效，重启粒度），不在
   // 回调内逐条判。Electron 42 事件对象上字段直接平铺（Event<Params> 交集形态），
@@ -404,10 +405,10 @@ export async function createWindow(
     })
   }
 
-  // renderer 假死台账（crash-forensics D1 renderer 行第三事件：unresponsive）。
+  // renderer 假死登记清单（crash-forensics D1 renderer 行第三事件：unresponsive）。
   // 卡死是持续状态：记行后置位标记，'responsive'（恢复）复位——同一次持续卡死不
   // 重复记行，卡死↔恢复循环每次各记一行；窗口销毁后监听器与闭包标记随 webContents
-  // 一起回收，无清理面。main 侧此前无 webContents unresponsive 处理器（C-proc-12
+  // 一起回收，无需清理。main 侧此前无 webContents unresponsive 处理器（C-proc-12
   // 只覆盖 render-process-gone 崩溃恢复链），本挂点为纯新增，不改变既有行为。
   let unresponsiveJournaled = false
   win.webContents.on('unresponsive', () => {
@@ -435,13 +436,13 @@ export async function createWindow(
     if (input.key.toLowerCase() === 'w' && (input.control || input.meta)) {
       event.preventDefault()
       if (!win.isDestroyed()) {
-        win.webContents.send('shortcut', 'close')
+        win.webContents.send(SHORTCUT, 'close')
       }
     }
     if (input.key === '`' && input.control && !input.meta && !input.alt && !input.shift) {
       event.preventDefault()
       if (!win.isDestroyed()) {
-        win.webContents.send('shortcut', 'toggle-bottom-drawer')
+        win.webContents.send(SHORTCUT, 'toggle-bottom-drawer')
       }
     }
   })

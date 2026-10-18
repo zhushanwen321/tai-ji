@@ -79,7 +79,7 @@ export interface SessionImportSource {
 
 以新增 `foo` 引擎为例，按依赖顺序：
 
-1. **探明源格式**（前置调研，产出事实清单）：会话存哪（文件/库）、单会话与消息的层级结构、消息内的内容块类型全集（正文/思考/工具调用/工具结果/压缩记录）、时间戳与用量字段。**全部实测核实（读真实数据样本），禁止推断**——zcode 的 part 类型直方图、`state` 内嵌对象形态都是这样探明的（§6 可参考速查表格式）。**消息语义层必须与 part 层同等力度探明**：`role` 只表达角色，不表达「给谁看」；源系统的可见性判据（zcode 的 `semantics`/`visibility`/`source`/`synthetic` 四字段 + 它自己的投影策略函数，见 §6.1）决定「什么算真人输入」——漏探这一层的后果是合成消息冒充用户消息（zcode 源 2026-09 实测：39 条 user 里 36 条是合成，全库合成占 67%）。**优先找源系统自己的分类函数并移植，不要自创判据**。
+1. **探明源格式**（前置调研，产出事实清单）：会话存哪（文件/库）、单会话与消息的层级结构、消息内的内容块类型全集（正文/思考/工具调用/工具结果/压缩记录）、时间戳与用量字段。**全部实测核实（读真实数据样本），禁止推断**——zcode 的 part 类型直方图、`state` 内嵌对象形态都是这样探明的（§6 可参考速查表格式）。**消息语义层必须与 part 层同等力度探明**：`role` 只表达角色，不表达「给谁看」；源系统的可见性判据（zcode 的 `semantics`/`visibility`/`source`/`synthetic` 四字段 + 它自己的消息可见性策略函数，见 §6.1）决定「什么算真人输入」——漏探这一层的后果是合成消息冒充用户消息（zcode 源 2026-09 实测：39 条 user 里 36 条是合成，全库合成占 67%）。**优先找源系统自己的分类函数并移植，不要自创判据**。
 2. **契约扩展**（`packages/shared/src/import-session.ts`）：`ImportSourceKind` 联合加 `'foo'`；若源需要新 request 字段（如 `fooPath?`）在此加；错误码**优先复用**现有清单（见 §5-I5），确需新增必须同步登记 ImportErrorCode 联合与 renderer 文案映射。
 3. **实现 source 模块**（`packages/runtime/src/services/session/import-foo/`）：
    - `normalize.ts`（若源 id 含 `_` 或其他非法字符）：归一化幂等键 + 后置条件校验（§5-I2 完整规格）。
@@ -116,7 +116,7 @@ session(id sess_<uuid>, directory, title NOT NULL, task_type, time_created/time_
 ```
 
 - `message.data`：`role`（user/assistant）+ `time{created,completed}`（ms）+ assistant 侧 `modelId/providerId/finish/tokens/cost`
-- **`message.data` 的消息语义层（投影判据，四字段）**：`semantics` / `visibility` / `source` / `synthetic`。**`role` 只是角色，不表达「给谁看」**——同一条 `role:'user'` 可能是真人输入，也可能是运行时注入的提醒/通知/引用回放。完整规格见 §6.1。
+- **`message.data` 的消息语义层（可见性判据，四字段）**：`semantics` / `visibility` / `source` / `synthetic`。**`role` 只是角色，不表达「给谁看」**——同一条 `role:'user'` 可能是真人输入，也可能是运行时注入的提醒/通知/引用回放。完整规格见 §6.1。
 - `part.data` 按 `type`：`text`/`reasoning`（→pi text/thinking）、`tool`（`{callID, tool, state:{status, input, output, error}}`——**state 是内嵌对象**；error 态 `output` 恒空、错误文本在 `state.error`）、`step-start`/`step-finish`（段边界，finish 带 per-step tokens/cost）、`compaction`、`timeline`（UI 事件，丢弃）、`file`（`zcode-artifact://` 引用，丢弃+降级）、`snapshot`/`patch`/`subagent`/`agent`/`retry`（存量 0、schema 内在，前向防御）
 - `text` part 自带 `synthetic?: boolean` 与 `ignored?: boolean`——**part 级合成标记**，与消息级 `synthetic` 是或关系（旧版 compact summary 只有 part 级标记，见 §6.1）
 - 消息语义：一条 assistant message = 完整多步执行段（多个 step 循环）；转换按 `step-finish` 边界切分为多条 pi assistant entry
@@ -124,9 +124,9 @@ session(id sess_<uuid>, directory, title NOT NULL, task_type, time_created/time_
 - 索引齐备：`message_session_sequence_idx`、`part_session_idx`、`session_task_type_idx`——按会话取数、按类型筛会话毫秒级
 - 已知坑：①`packages/zcode-subagent-cli/src/reader.ts` 的 `toolFromPart` 兼容 state 双形态——内嵌 JSON 对象为主（0.16.5+ 宿主库全量形态）、旧 JSON 字符串回归兼容、两形态均非法时降级 state=undefined（status 落 `'unknown'`）；新增源的 tool part 解析按此三段优先链处理。②zcode `finish` 有 10 种取值，pi `StopReason` 是封闭枚举——需完备映射表（保底 `stop`，渲染链零消费安全）；③zcode `cost` 是 number，pi `Usage.cost` 是对象（映射到 `cost.total`）。④`tool` part 的 `state.metadata.serialization` 带 `{truncated, originalBytes, returnedBytes, budgetStrategy, artifactPath?}`——`truncated:true` 时 `state.output` 是截断版，全文在 zcode 私有 artifact 目录（不可搬运，计保真损失降级）
 
-### 6.1 消息语义层：投影判据四字段（新增源前必读）
+### 6.1 消息语义层：可见性判据四字段（新增源前必读）
 
-**zcode 用「消息投影策略」决定每条消息给谁看**；`role` 不承载这个信息。四字段的值域全部是闭集（枚举自 ZCode 应用包 `app.asar` 的 zod schema 提取，与宿主库 0.16.5 实测一致）：
+**zcode 用「消息可见性策略」决定每条消息给谁看**；`role` 不承载这个信息。四字段的值域全部是闭集（枚举自 ZCode 应用包 `app.asar` 的 zod schema 提取，与宿主库 0.16.5 实测一致）：
 
 | 字段 | 值域 |
 |---|------|
@@ -140,7 +140,7 @@ session(id sess_<uuid>, directory, title NOT NULL, task_type, time_created/time_
 | `metadata.source`（旧字段，仍兼容） | `agent_control_message` / `background_task` / `goal-continuation` / `goal_completion_verification` / `goal_state_change` / `plugin_reference` / `queued_system_notification` / `resume_goal_state` / `resume_referenced_session_context` / `rewind` / `selection_side_chat` / `subagent` / `subagent_message` / `target_continuation` / `task_notification` / `task_status` / `todo_reminder`（17） |
 | `synthetic` | `true`（缺省视为非合成）；**消息级与 part 级并存** |
 
-**投影策略六分法**（zcode 自有函数 `getConversationMessageProjectionPolicy`，taiji 转换器应移植而非自创判据——判定顺序即语义）：
+**可见性策略六分法**（zcode 自有函数 `getConversationMessageProjectionPolicy`，taiji 转换器应移植而非自创判据——判定顺序即语义）：
 
 ```
 compact_summary 特判（kind==='compact_summary' 或 info.summary 存在）→ compactSummary
@@ -157,7 +157,7 @@ compact_summary 特判（kind==='compact_summary' 或 info.summary 存在）→ 
 
 **策略 → pi entry 落点**：`realUserInput` → `message` role=user；`visibleAssistant` → `message` role=assistant + toolResult；`compactSummary` → `compaction` entry（见 §6.2）；`providerContextOnly`/`hiddenSynthetic`/`timelineOnly` → 丢弃 + 降级计数；闭集外的 kind/source → 丢弃 + `conversion_unclassified` 独立告警（不 fail-fast、不静默按 role 兜底）。
 
-**assistant 产物的 pi 读面不变量（2026-09-21 毒消息事故后 [HISTORICAL] 强制）**：① 每条 assistant entry **恒带 usage 对象**（step-finish tokens 可解 → 真实值；缺失/不可解 → 全零兜底）——pi 0.84.4 读面无检查（pi-semantics PS-41：stats 聚合 `agent-session.js:2678` 读 `.input`、turn 前上下文扫描 `:2721` 读 `.totalTokens`），缺键即「导入后 stats 恒败 / 续聊即死」（排障见 TROUBLESHOOTING §25）；② 未收敛段（无 step-finish 完成——典型 = zcode 取消轮，消息级 `data.error.turnResult='cancelled'`）的 stopReason 由消息级 error 裁决：cancelled → `aborted`（pi 语义 = 用户中止）、其余 error 家族 → `error`——段自身的 step-finish finish 仅在收敛时采信；③ 空内容段不产 entry（step-start-only 取消消息自然消失，行为由测试钉住）。
+**assistant 产物的 pi 读侧不变量（2026-09-21 毒消息事故后 [HISTORICAL] 强制）**：① 每条 assistant entry **恒带 usage 对象**（step-finish tokens 可解 → 真实值；缺失/不可解 → 全零兜底）——pi 0.84.4 读侧无检查（pi-semantics PS-41：stats 聚合 `agent-session.js:2678` 读 `.input`、turn 前上下文扫描 `:2721` 读 `.totalTokens`），缺键即「导入后 stats 恒败 / 续聊即死」（排障见 TROUBLESHOOTING §25）；② 未收敛段（无 step-finish 完成——典型 = zcode 取消轮，消息级 `data.error.turnResult='cancelled'`）的 stopReason 由消息级 error 裁决：cancelled → `aborted`（pi 语义 = 用户中止）、其余 error 家族 → `error`——段自身的 step-finish finish 仅在收敛时采信；③ 空内容段不产 entry（step-start-only 取消消息自然消失，行为由测试钉住）。
 
 **实测分布（全库，0.16.5）**：user 消息约 3.3 万条，真人 `user_prompt` 约 1.1 万，**合成消息约 2.2 万（67%）**——`todo_reminder` 2.4 万 / `background_notification` 6.1 千 / `system_reminder` 1.9 千 / `subagent_notification` 391 / `fork_notice` 15。assistant 消息 32.3 万条（`assistant_response` 25.1 万 + 无 kind 6.7 万 + `timeline_event` 4.5 千）。
 

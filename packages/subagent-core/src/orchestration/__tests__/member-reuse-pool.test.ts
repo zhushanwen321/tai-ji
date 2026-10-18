@@ -83,7 +83,7 @@ async function seedRunCreated(runId: string): Promise<void> {
   );
 }
 
-/** seed agent-started 帧（[D6] 绑定字段的落账面——生产 = pump dispatchAgentCall 链；
+/** seed agent-started 帧（[D6] 绑定字段的写入侧——生产 = pump dispatchAgentCall 链；
  *  memberRecordId 续写帧携带、首派缺省）。 */
 async function seedAgentStarted(runId: string, taskIndex: number, agentName: string, memberRecordId?: string): Promise<void> {
   await dispatchRunTrigger(
@@ -99,7 +99,7 @@ async function seedAgentStarted(runId: string, taskIndex: number, agentName: str
   );
 }
 
-/** record 流内 agent-started 帧的绑定投影（(agentName, memberRecordId) 对；首派帧 memberRecordId undefined）。 */
+/** record 流内 agent-started 帧的绑定派生视图（(agentName, memberRecordId) 对；首派帧 memberRecordId undefined）。 */
 function startedBindings(events: readonly WorkflowRunEvent[]): Array<[string, string | undefined]> {
   return events
     .filter((e): e is Extract<WorkflowRunEvent, { type: "agent-started" }> => e.type === "agent-started")
@@ -133,7 +133,7 @@ describe("member-reuse-pool（[D6]：agent-started.memberRecordId 承载 + fold 
     rmTmp(dir);
   });
 
-  it("[D6] 绑定随 agent-started 帧落账（续写帧携带 memberRecordId、首派缺省）；fold 等价（首派建绑、重复携带不换绑）", async () => {
+  it("[D6] 绑定随 agent-started 帧写入 journal 记录（续写帧携带 memberRecordId、首派缺省）；fold 等价（首派建绑、重复携带不换绑）", async () => {
     const io = poolIo();
     await seedRunCreated("wf-fold-1");
     // 首派：绑定未登记（缓存 miss）→ agent-started 帧缺省
@@ -190,7 +190,7 @@ describe("member-reuse-pool（[D6]：agent-started.memberRecordId 承载 + fold 
     expect(foldMemberBindings(events).get("reviewer")).toBe("sa-1"); // 首派建绑——fold 不随内存换绑
     expect(loggerMock.warn).toHaveBeenCalledWith(expect.stringContaining("rebind"));
 
-    // clear 只释放内存（无 clear 事件可发），恒返回 false（诊断面形状保留）
+    // clear 只释放内存（无 clear 事件可发），恒返回 false（诊断范围形状保留）
     await expect(clearMemberReusePool("wf-never-touched", io)).resolves.toBe(false);
     await expect(clearMemberReusePool("wf-fold-4", io)).resolves.toBe(false);
     expect(peekMemberRecordId("wf-fold-4", "reviewer", io)).toBeUndefined();
@@ -244,7 +244,7 @@ describe("finalizeRun 绑定清空接线（[D6]：内存释放、零事件）", 
     } as unknown as LifecycleDeps;
   }
 
-  it("有绑定的 run：终局后 record 流零 member-pool 帧（[D6] 无 clear 事件），终局帧照常落账", async () => {
+  it("有绑定的 run：终局后 record 流零 member-pool 帧（[D6] 无 clear 事件），终局帧照常写入 journal 记录", async () => {
     const dir = makeTmpDir("member-reuse-fin-");
     setRunEventJournalDirForTest(dir);
     try {
@@ -345,7 +345,7 @@ describe("executeWorkflowAgent 成员复用分岔（决策 10：record 创建前
     const h = await harness();
     const sessionFile = path.join(h.tmpRoot, "member.jsonl");
 
-    // 第一轮：新建成员并跑完（D7 收口 = 立即终态化，record 归档出内存）
+    // 第一轮：新建成员并跑完（D7 收尾 = 立即终态化，record 归档出内存）
     const r1 = h.service.executeWorkflowAgent(baseOpts(), "run-A");
     await flush();
     const run1 = h.fake.runs[0]!;
@@ -356,7 +356,7 @@ describe("executeWorkflowAgent 成员复用分岔（决策 10：record 创建前
     await r1;
     expect(h.store.listRunning()).toHaveLength(0); // 已结束（archive 出内存）
     // [D6] 登记零事件：record 流无 member-pool 帧（绑定随 agent-started 帧承载，
-    // 本直调链无 pump agent-call 消息——内存绑定表为消费面）
+    // 本直调链无 pump agent-call 消息——内存绑定表为消费方）
     await expect(scanRunEvents("run-A")).resolves.toSatisfy(
       (events: WorkflowRunEvent[]) => events.every((e) => (e.type as string) !== "member-pool"),
     );
@@ -423,20 +423,20 @@ describe("executeWorkflowAgent 成员复用分岔（决策 10：record 创建前
     await expect(lookupMemberRecordId("run-A", "research-b", io)).resolves.toBe(recordB.id);
   });
 
-  it("同名仍在飞：第二次调用拒绝（run 内名唯一，zcode 对齐）；[D6] 登记零事件（绑定表内面核验）", async () => {
+  it("同名仍在途：第二次调用拒绝（run 内名唯一，zcode 对齐）；[D6] 登记零事件（绑定表内核验）", async () => {
     const h = await harness();
     const r1 = h.service.executeWorkflowAgent(baseOpts(), "run-A");
     await flush();
     const run1 = h.fake.runs[0]!;
 
-    // 第一轮在飞期间同名调用：绑定命中但 record running → fail-fast（防同 session 双写者）
+    // 第一轮在途期间同名调用：绑定命中但 record running → fail-fast（防同 session 双写者）
     await expect(
       h.service.executeWorkflowAgent(baseOpts({ prompt: "并发同名" }), "run-A"),
     ).rejects.toThrow(/still running/);
 
     run1.settle({ content: "done-1" });
     await r1;
-    // [D6] 零事件断言（原「register 帧每 name 一次」的机制等价面）：record 流无
+    // [D6] 零事件断言（原「register 帧每 name 一次」的机制等价路径）：record 流无
     // member-pool 帧；续聊 revive 复用同一绑定（内存表内容不变）
     const events = await scanRunEvents("run-A");
     expect(events.some((e) => (e.type as string) === "member-pool")).toBe(false);

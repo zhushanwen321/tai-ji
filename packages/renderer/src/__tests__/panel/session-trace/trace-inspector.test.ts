@@ -173,8 +173,9 @@ async function mountContainer() {
 async function readyPartition() {
   ensureTraceLoaded(SID)
   // mock 数据一个微任务即 ready，interval 缺省 50ms 白付一个轮询 tick——缩到 1ms 只改轮询
-  // 粒度，等待语义不变（下同：本文件三处 vi.waitFor 统一处理）
-  await vi.waitFor(() => expect(useSessionTrace().partition.value.status).toBe('ready'), { interval: 1 })
+  // 粒度，等待语义不变（下同：本文件三处 vi.waitFor 统一处理，timeout 显式 5s——
+// 全量并发高负载下缺省 1s 上限曾产偶发假失败，interval 轮询粒度不变）
+  await vi.waitFor(() => expect(useSessionTrace().partition.value.status).toBe('ready'), { interval: 1, timeout: 5_000 })
 }
 
 beforeEach(() => {
@@ -244,7 +245,7 @@ describe('A44 drawer inspector 联动（选中切入临时页 / 返回复原 / �
     expect(wrapper.find('[data-testid="git-panel"]').exists()).toBe(false)
 
     // RightDrawerTab 体系不变：全量 L1 tab 按钮仍在（清单与 drawer-mode 注册表契约用例
-    // 同源——helpers/drawer-tabs.ts，生产注册表运行时投影；inspector 不占 tab 位；
+    // 同源——helpers/drawer-tabs.ts，生产注册表运行时派生视图；inspector 不占 tab 位；
     // terminal 已迁底抽屉不在 L1）
     for (const tab of L1_DRAWER_TABS) {
       expect(wrapper.find(`[data-testid="drawer-tab-${tab}"]`).exists(), `drawer-tab-${tab} 应存在`).toBe(true)
@@ -445,7 +446,7 @@ describe('SESSION 行溯源跳转失败的用户反馈（onJumpParent catch+toas
       const errorToast = useToast().toasts.value.find((toast) => toast.type === 'error')
       expect(errorToast).toBeDefined()
       expect(errorToast?.message).toContain('trace 加载超时')
-    }, { interval: 1 })
+    }, { interval: 1, timeout: 5_000 })
     view.unmount()
   })
 
@@ -457,12 +458,12 @@ describe('SESSION 行溯源跳转失败的用户反馈（onJumpParent catch+toas
       const errorToast = useToast().toasts.value.find((toast) => toast.type === 'error')
       expect(errorToast).toBeDefined()
       expect(errorToast?.message).toContain('未找到源 session')
-    }, { interval: 1 })
+    }, { interval: 1, timeout: 5_000 })
     view.unmount()
   })
 })
 
-describe('safeJson 守卫 + 损坏行行号未知降级（RD-2#5 / RD-2#6）', () => {
+describe('safeJson 检查 + 损坏行行号未知降级（RD-2#5 / RD-2#6）', () => {
   /** 快照 a1 toolCall block（content[1]）的 arguments 替换为指定值（引用直传，core 不克隆） */
   function snapshotWithToolCallArguments(args: unknown): ServerMessageMap['session.traceEntries'] {
     const snap = buildSnapshot()
@@ -499,7 +500,7 @@ describe('safeJson 守卫 + 损坏行行号未知降级（RD-2#5 / RD-2#6）', (
     view.unmount()
   })
 
-  it('[RD-2#5 回归锚] 正常 arguments → JSON 键值原样展示（守卫不改变正常路径输出）', async () => {
+  it('[RD-2#5 回归锚] 正常 arguments → JSON 键值原样展示（检查不改变正常路径输出）', async () => {
     const { view, args } = await mountBlockArguments(snapshotWithToolCallArguments({ path: 'a.ts', line: 3 }))
     expect(args.text()).toContain('"path"')
     expect(args.text()).toContain('a.ts')

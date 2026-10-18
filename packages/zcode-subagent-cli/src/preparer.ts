@@ -73,7 +73,7 @@ const TAIJI_SYNC_GUIDANCE =
 // 源 config 读取（运行时 guard，禁 any）
 // ============================================================
 
-/** 个人 provider 条目的引擎侧消费面（provider_config.json providerRules 项的提取形态）。 */
+/** 个人 provider 条目的引擎侧消费方（provider_config.json providerRules 项的提取形态）。 */
 export interface ZcodeProviderEntry {
   providerName?: string;
   /** provider_config 的 config.access.apiKey（个人 provider 凭据就在本文件内）。 */
@@ -100,7 +100,7 @@ function strArray(v: unknown): string[] {
 }
 
 /**
- * 读个人 provider 源 JSON（~/.zcode/v2/provider_config.json——GUI 管理面写入、
+ * 读个人 provider 源 JSON（~/.zcode/v2/provider_config.json——GUI 管理侧写入、
  * app-server 注册表实际装载的 provider 清单）。文件缺失/损坏/非对象 → undefined
  * （消费方语义：直读形态 = 空源，凭据检查给出 engine_credential_missing 的
  * fail-fast；merge 形态 = 该侧缺席，由 merge 规则裁决）。
@@ -200,7 +200,7 @@ export function mergePersonalProviderConfig(realObj: unknown, copyObj: unknown):
   };
 }
 
-/** [readSourceConfig 拆分] providerRules 逐条归并（id 键守卫 + access/personalModelIds
+/** [readSourceConfig 拆分] providerRules 逐条归并（id 键检查 + access/personalModelIds
  * 形态窄化，非法条跳过）。 */
 function collectProviderRules(providerRules: readonly unknown[], conf: SourceConfig): void {
   for (const rule of providerRules) {
@@ -319,7 +319,7 @@ export function resolvePersonalProviderConfigPath(sources?: ZcodeSourcePaths, en
   return resolvePersonalProviderSource(sources, engineDataDir).path;
 }
 
-/** 校验链读取结果：SourceConfig + 诊断面已读源描述（merge 视图 = 双路径）。 */
+/** 校验链读取结果：SourceConfig + 诊断范围已读源描述（merge 视图 = 双路径）。 */
 interface PersonalProviderView {
   conf: SourceConfig;
   sourceDesc: string;
@@ -670,9 +670,9 @@ function translateToAccountModelRef(wanted: string, sources?: ZcodeSourcePaths):
  *
  * 解析链：显式 requested（trim 非空）> 空串（= 缺席，CLI 缺省解析）。
  *
- * [R4/G3] 消费面（条件携带后）：① run 显式路径（task.model trim 非空才调用——缺席
- * 时 runViaAppServer 不进本函数、create 不携带 model 键）；② validateModel 诊断面
- * （缺席 = 空串 → record.model 留空投影「用户未指定」）。
+ * [R4/G3] 消费方（条件携带后）：① run 显式路径（task.model trim 非空才调用——缺席
+ * 时 runViaAppServer 不进本函数、create 不携带 model 键）；② validateModel 诊断范围
+ * （缺席 = 空串 → record.model 留空映射「用户未指定」）。
  *
  * 校验对「带 apiKey 的个人 provider 注册表」做（没配凭据的 provider 写进注册表也
  * 跑不起来，resolve 期报错比运行时挂掉可诊断）。provider 存在但无 apiKey →

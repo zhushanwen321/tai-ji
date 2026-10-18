@@ -42,7 +42,7 @@ vi.mock('node:child_process', () => ({
   execFileSync: vi.fn(),
 }))
 
-/** spawnRuntimeProcess 的 child 依赖面：EventEmitter + stdout/stderr + kill。 */
+/** spawnRuntimeProcess 的 child 依赖：EventEmitter + stdout/stderr + kill。 */
 class FakeChild extends EventEmitter {
   stdout = new EventEmitter()
   stderr = new EventEmitter()

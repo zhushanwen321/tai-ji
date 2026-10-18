@@ -60,7 +60,7 @@ export const tastePlugin = {
     // 直写组件实例级 ref = 生命周期错位，error 级阻断；豁免走行内登记注释（规则 docstring）。
     'no-instance-level-session-state': noInstanceLevelSessionState,
     // chat store facet 护栏（renderer-deepening D6③/A8）：组件只碰 ChatStoreReaders 面，
-    // ops 面字段访问 error 级阻断。规则内自守卫（仅 src/components/** 的 .vue 生效）。
+    // ops 面字段访问 error 级阻断。规则内自检查（仅 src/components/** 的 .vue 生效）。
     'no-chat-ops-in-components': noChatOpsInComponents,
     // 出站 sessionId 护栏（review-findings P2-S5，关键规则 #7 静态化）：publish 第 1 参 /
     // payload 字面量 sessionId 键 + sendError details 字面量 sessionId 键，缺即 error
@@ -119,11 +119,11 @@ export const tasteRules = {
   'taste/no-non-owner-store-mutation': 'error',
 
   // ADR-0049 范式盲区护栏（context-consistency-design D5/G1）：session 事件 handler
-  // 直写组件实例级 ref（切 session 丢值/串台）。仅 .vue 生效（规则内自守卫），error 级。
+  // 直写组件实例级 ref（切 session 丢值/串台）。仅 .vue 生效（规则内自检查），error 级。
   'taste/no-instance-level-session-state': 'error',
 
   // chat store facet 护栏（renderer-deepening D6③/A8）：组件只碰 readers 面，ops 面字段
-  // 访问拦截。仅 src/components/** 的 .vue 生效（规则内自守卫，composables/stores/
+  // 访问拦截。仅 src/components/** 的 .vue 生效（规则内自检查，composables/stores/
   // effects/tests 不受限），error 级 = 阻断。
   'taste/no-chat-ops-in-components': 'error',
 

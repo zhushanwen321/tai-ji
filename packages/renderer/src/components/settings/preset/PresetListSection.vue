@@ -22,7 +22,7 @@
     >
       <!-- 预设头部：CollapsibleTrigger as-child 包 Button，构成全宽点击区。
            操作按钮组（设为默认/恢复/删除）放 Trigger 外的同级 div，避免点操作也触发展开。
-           （demo 头行只排 chevron/名称/标签/摘要单行；动作钮保留在头行 = real 交互面，见报告决策 3） -->
+           （demo 头行只排 chevron/名称/标签/摘要单行；动作钮保留在头行 = real 交互入口，见报告决策 3） -->
       <div class="flex items-center gap-2 px-[12px] py-[10px]">
         <CollapsibleTrigger as-child>
           <Button
@@ -30,7 +30,7 @@
             class="h-auto flex-1 justify-start gap-2 rounded-sm px-2 text-neutral-fg hover:bg-surface"
             :title="isExpanded(p.id) ? t('settings.preset.collapse') : t('settings.preset.expand')"
           >
-            <!-- demo：chevron 12px，闭合 -90°（指右），展开归位（指下） -->
+            <!-- demo：chevron 12px，收窄 -90°（指右），展开归位（指下） -->
             <ChevronDown
               class="size-3 shrink-0 text-neutral-dim transition-transform duration-[var(--duration-fast)] ease-[var(--ease)]"
               :class="isExpanded(p.id) ? '' : '-rotate-90'"

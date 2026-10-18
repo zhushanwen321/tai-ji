@@ -1,11 +1,11 @@
 /**
- * window-factory render-process-gone 崩溃台账接线单测（crash-forensics-and-watchdog
+ * window-factory render-process-gone 崩溃登记清单接线单测（crash-forensics-and-watchdog
  * §3.3 D1 renderer 行，实施计划 u1f）。
  *
  * 覆盖（验收：render-process-gone oom 与普通 crash reason 可区分）：
- * - 崩溃 → crash 行，reason 透传 Electron 枚举（'oom' 与 'crashed' 在台账可区分）
+ * - 崩溃 → crash 行，reason 透传 Electron 枚举（'oom' 与 'crashed' 在登记清单可区分）
  *   [ADR-0122] 原 reload/熔断(circuit-breaker) 事件随自动 reload 熔断链删除
- * - destroyed 窗口 → 无台账行（错误页链在 isDestroyed 守卫后，台账挂同守卫之后）
+ * - destroyed 窗口 → 无登记清单行（错误页链在 isDestroyed 检查后，登记清单挂同检查之后）
  * - webContents 'unresponsive' → unresponsive/renderer-unresponsive 行（D1 renderer 行
  *   第三事件）：同一次持续卡死防重复记行，responsive 恢复复位后卡死↔恢复循环各记一行
  *
@@ -113,7 +113,7 @@ const mainLoggerStubs = {
 }
 vi.mock('../logs/main-logger.js', () => ({ mainLogger: mainLoggerStubs }))
 
-// 台账断言面：捕获 append 调用（接线单测只断言「写了什么行」，不触文件系统）
+// 登记清单断言范围：捕获 append 调用（接线单测只断言「写了什么行」，不触文件系统）
 const crashJournalAppend = vi.hoisted(() => vi.fn())
 vi.mock('../logs/crash-journal.js', () => ({
   crashJournal: { append: crashJournalAppend },
@@ -142,17 +142,17 @@ async function createProdWindow(factory: FactoryModule, windowId: string): Promi
   return win
 }
 
-/** 驱动一次渲染进程崩溃（details 形态对齐 Electron RenderProcessGoneDetails 最小面）。 */
+/** 驱动一次渲染进程崩溃（details 形态对齐 Electron RenderProcessGoneDetails 最小子集）。 */
 function crash(win: FakeBrowserWindow, reason = 'oom', exitCode = -1): void {
   win.webContents.emit('render-process-gone', {}, { reason, exitCode })
 }
 
-/** 台账 append 的全部事件行（断言辅助） */
+/** 登记清单 append 的全部事件行（断言辅助） */
 function journalEvents(): Array<Record<string, unknown>> {
   return crashJournalAppend.mock.calls.map((c) => c[0] as Record<string, unknown>)
 }
 
-describe('render-process-gone 台账接线（crash-forensics D1 renderer 行）', () => {
+describe('render-process-gone 登记清单接线（crash-forensics D1 renderer 行）', () => {
   beforeEach(() => {
     vi.resetModules()
     FakeBrowserWindow.instances.length = 0
@@ -162,7 +162,7 @@ describe('render-process-gone 台账接线（crash-forensics D1 renderer 行）'
     delete process.env.TAIJI_E2E
   })
 
-  it('首崩 reason=oom → crash 行（renderer OOM 与普通崩溃在台账可区分，评估器 #9/#10 数据源）', async () => {
+  it('首崩 reason=oom → crash 行（renderer OOM 与普通崩溃在登记清单可区分，评估器 #9/#10 数据源）', async () => {
     const factory = await loadFactory()
     const win = await createProdWindow(factory, 'win-oom')
     crash(win, 'oom')
@@ -193,7 +193,7 @@ describe('render-process-gone 台账接线（crash-forensics D1 renderer 行）'
     ])
   })
 
-  it('destroyed 窗口 → 无台账行（恢复链与台账同在 isDestroyed 守卫之后）', async () => {
+  it('destroyed 窗口 → 无登记清单行（恢复链与登记清单同在 isDestroyed 检查之后）', async () => {
     const factory = await loadFactory()
     const win = await createProdWindow(factory, 'win-dead')
     win.isDestroyed.mockReturnValue(true)
@@ -202,7 +202,7 @@ describe('render-process-gone 台账接线（crash-forensics D1 renderer 行）'
   })
 })
 
-describe('webContents unresponsive 台账接线（crash-forensics D1 renderer 行第三事件）', () => {
+describe('webContents unresponsive 登记清单接线（crash-forensics D1 renderer 行第三事件）', () => {
   beforeEach(() => {
     vi.resetModules()
     FakeBrowserWindow.instances.length = 0

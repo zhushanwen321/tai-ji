@@ -49,7 +49,7 @@ import type {
 } from "../../../ui/dialog-queue.ts";
 import type { CAPABILITY_ENUMS, CONSERVATIVE_CAPABILITIES } from "../../engine-manifest.ts";
 
-// ── 引擎面契约类型（SDK SSOT ↔ core execution/engine/types.ts）──
+// ── 引擎侧契约类型（SDK SSOT ↔ core execution/engine/types.ts）──
 type _CoreSdkAgentEvent = AssertMutuallyAssignable<CoreAgentEvent, SdkAgentEvent>;
 type _CoreSdkAgentOutcome = AssertMutuallyAssignable<CoreAgentOutcome, SdkAgentOutcome>;
 type _CoreSdkEngineCapabilities = AssertMutuallyAssignable<CoreEngineCapabilities, SdkEngineCapabilities>;
@@ -64,7 +64,7 @@ type _CoreSdkUiResponse = AssertMutuallyAssignable<CoreUiResponse, SdkUiResponse
 type _CoreSdkUiRequestHandler = AssertMutuallyAssignable<CoreUiRequestHandler, SdkUiRequestHandler>;
 type _CoreSdkUiMethod = AssertMutuallyAssignable<CoreUiMethod, SdkUiMethod>;
 
-// ── AgentCallOpts：SDK 版是 core 版的引擎面子集（结构互赋——core 多出的宿主自持
+// ── AgentCallOpts：SDK 版是 core 版的引擎侧子集（结构互赋——core 多出的宿主自持
 //    可选字段不影响赋值方向；worktree 的 WorktreeHandle 结构副本经上行断言互证）──
 type _CoreSdkAgentCallOpts = AssertMutuallyAssignable<CoreAgentCallOpts, SdkAgentCallOpts>;
 
@@ -88,7 +88,7 @@ const _assertions: Array<true> = [
 //    元组承载：断言退化为 never 时对应槽的 true 赋值编译红（never 不被静默吞掉，
 //    与下方能力位键集锁同一理由）。仓内先例 = runtime workflow-run-events-reader.ts
 //    的 DagFamily 双侧锁同款形态。覆盖 = 上方七个 Core*↔Sdk* 断言的顶层键集
-//    （Ui* 四型 core 侧与 SDK 同源，无漂移面，不设锁）。
+//    （Ui* 四型 core 侧与 SDK 同源，无漂移情形，不设锁）。
 type _CoreSdkKeyPairLock = [
   AssertMutuallyAssignable<keyof CoreAgentEvent, keyof SdkAgentEvent>,
   AssertMutuallyAssignable<keyof CoreAgentOutcome, keyof SdkAgentOutcome>,
@@ -100,7 +100,7 @@ type _CoreSdkKeyPairLock = [
 ];
 const _keyPairLock: _CoreSdkKeyPairLock = [true, true, true, true, true, true, true];
 
-// ── 能力位键集锁（U5 词表锁扩展：病灶 7「漏登 core 两表 → undefined 透传 → gate
+// ── 能力位键集锁（U5 词表锁扩展：问题点 7「漏登 core 两表 → undefined 透传 → gate
 //    放行」的编译期堵截）──
 // engine-manifest.ts 两表以 `satisfies` 声明（保留字面键集），`keyof typeof` 即真实键集：
 //   A：CONSERVATIVE_CAPABILITIES（12 键，含 maxTurns:false + setModel）⟷ EngineCapabilities

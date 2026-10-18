@@ -2,7 +2,7 @@
  * RpcClient 崩溃关联取证接线测试（crash-forensics-and-watchdog §3.3 D10）。
  *
  * 锁定（writeCrashLogIfNeeded → appendCrashCorrelationEvidence）：
- * - 异常退出（code=143，SIGTERM 形态）：既有 crash log 照写 + 机器面 pi 快照 section
+ * - 异常退出（code=143，SIGTERM 形态）：既有 crash log 照写 + 机器检查侧 pi 快照 section
  *   紧随补写（append 语义第二次调用）+ 统一日志关联采样被触发并在完成后补写第三段。
  * - 主动 kill（_killing=true）：不触发任何关联取证（与 crash log 同门）。
  * - 快照采集抛错：不向上抛（best-effort），既有 crash log 不受影响。

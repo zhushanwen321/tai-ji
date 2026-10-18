@@ -8,7 +8,7 @@
  *    文件存在也不读（构造性保证，fs spy 复核）。逐成员 tokenEquals（timingSafeEqual）。
  * 3. D9：无新增 env 键——remote 通道唯一开关是构造选项 remoteTokenProvider（argv 判据
  *    的组合根装配在 index.ts，import 即 main() 不可直测，本文件锚定 ConnectionManager
- *    消费面 + readRemoteAccessToken 读侧函数）。
+ *    消费方 + readRemoteAccessToken 读侧函数）。
  * 4. E10：开态文件缺失/坏 JSON/字段不合法 → remote 集合空（fail-closed 仅 spawn token）
  *    + 响亮日志含恢复指引；enabled=false 是关态文件留存的设计内合法产出（非错误）。
  *
@@ -300,7 +300,7 @@ describe('ConnectionManager remote-access (U0.1)', () => {
       expect(parseRemoteAccessToken('["not","an","object"]')).toBeNull()
       expect(errorSpy).toHaveBeenCalledTimes(1)
       // 「字段不合法」是 bad-shape 分支特有文案（token hex 失败分支是「token 字段不符
-      // 合契约」）——区分两条失败路径，防 shape 守卫被移除后数组输入经 hex 失败路径
+      // 合契约」）——区分两条失败路径，防 shape 检查被移除后数组输入经 hex 失败路径
       // 同样 null + error 造成假绿。
       expect(String(errorSpy.mock.calls[0]?.[0])).toContain('字段不合法')
     })

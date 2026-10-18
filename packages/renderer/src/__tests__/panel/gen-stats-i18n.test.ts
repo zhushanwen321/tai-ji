@@ -13,7 +13,7 @@ import { describe, it, expect } from 'vitest'
 import zhPanel from '@taiji/ui/locale/zh-CN/panel'
 import enPanel from '@taiji/ui/locale/en-US/panel'
 
-/** 运行时守卫收缩（禁裸 as / 禁 any）：locale 段必须是可索引对象 */
+/** 运行时类型收窄（禁裸 as / 禁 any）：locale 段必须是可索引对象 */
 function asRecord(v: unknown): Record<string, unknown> {
   if (v == null || typeof v !== 'object') throw new Error('locale 段形状异常：期望对象')
   return v as Record<string, unknown>

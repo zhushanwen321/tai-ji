@@ -5,7 +5,7 @@
  * - elapsed = 整 turn 墙钟（起点 → 最后一次产出结束）；turn 进行中 now − 起点（含工具执行 /
  *   思考 / 等待），定格读 endedAt。**核心回归：单条 assistant 的 turn 不再是 1s**。
  * - generatedTokens = 本 turn 已上报的真实 usage.outputTokens 之和（不估算：缺 usage 的流式段
- *   计 0，收口后跳到完整值）。
+ *   计 0，收尾后跳到完整值）。
  * - 时间模型：vi.useFakeTimers() 接管 Date.now；advanceTimersByTime 同步推进系统时间。
  *
  * 覆盖（fake timers + document.hidden mock）：
@@ -146,7 +146,7 @@ describe('useTurnElapsed 整 turn 墙钟', () => {
     vi.advanceTimersByTime(12_000)
     expect(exposed.elapsed.value).toBe('12s')
 
-    // 收口：写入产出结束时刻（墙钟 12.4s 处）→ running false → 定格
+    // 收尾：写入产出结束时刻（墙钟 12.4s 处）→ running false → 定格
     assistants.value = [{ ...assistants.value[0], status: 'complete', endedAt: T0 + 12_400 }]
     running.value = false
     await nextTick()
@@ -167,7 +167,7 @@ describe('useTurnElapsed 整 turn 墙钟', () => {
     wrapper.unmount()
   })
 
-  it('无 usage 的段（live 流式中）计入 0 → 数字只反映已上报真值，收口后跳完整值', () => {
+  it('无 usage 的段（live 流式中）计入 0 → 数字只反映已上报真值，收尾后跳完整值', () => {
     const first = makeAssistant(T0, 'ab', { usage: { inputTokens: 10, outputTokens: 122 } })
     const streaming = makeAssistant(T0 + 1, '正在写')
     const assistants = ref<Message[]>([first, streaming])
@@ -175,7 +175,7 @@ describe('useTurnElapsed 整 turn 墙钟', () => {
     expect(exposed.generatedTokens.value).toBe(122) // 当前段未上报 → 不估算
 
     assistants.value = [first, { ...streaming, usage: { inputTokens: 3, outputTokens: 39 } }]
-    expect(exposed.generatedTokens.value).toBe(161) // 收口 → 完整值
+    expect(exposed.generatedTokens.value).toBe(161) // 收尾 → 完整值
     wrapper.unmount()
   })
 
@@ -257,7 +257,7 @@ describe('useTurnElapsed 可见性停表（Q1-7）', () => {
     wrapper.unmount()
   })
 
-  it('失焦期间 turn 收口定格：恢复可见不误重启 tick（running 已 false）', async () => {
+  it('失焦期间 turn 收尾定格：恢复可见不误重启 tick（running 已 false）', async () => {
     const running = ref(true)
     const { wrapper, exposed } = mountElapsed(() => ({ startedAt: T0, endedAt: T0 + 5_000, generatedTokens: 0 }), running)
 
@@ -296,7 +296,7 @@ describe('useTurnElapsed 可见性停表（Q1-7）', () => {
     wrapper.unmount()
   })
 
-  it('listener 生命周期与进行中态对齐：开始计时挂载、收口定格摘除、二次周期不叠加', async () => {
+  it('listener 生命周期与进行中态对齐：开始计时挂载、收尾定格摘除、二次周期不叠加', async () => {
     const addSpy = vi.spyOn(document, 'addEventListener')
     const removeSpy = vi.spyOn(document, 'removeEventListener')
     const addedCount = () => addSpy.mock.calls.filter(([t]) => t === 'visibilitychange').length

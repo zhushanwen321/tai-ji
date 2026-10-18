@@ -2,7 +2,7 @@
  * highlight-painter 单测（find-in-surface 设计留档 §3 契约）。
  *
  * happy-dom 无 CSS.highlights / Highlight → 测试注入最小 mock（Map + 记录构造参数的
- * 可构造类），painter 对 API 形状的消费面即被逐条断言。覆盖：paint/clear、activeIndex
+ * 可构造类），painter 对 API 形状的消费方即被逐条断言。覆盖：paint/clear、activeIndex
  * 无效时只画 find-hits、失效 range（startContainer 离开文档）防御跳过、API 缺席时静默。
  */
 import { afterEach, describe, expect, it } from 'vitest'

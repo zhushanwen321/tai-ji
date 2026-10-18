@@ -183,13 +183,13 @@ export function truncateToolOutputBatch(messages: Message[]): Message[] {
 }
 
 /**
- * 批量截断 + 已投影产物缓存（subagent 基线投影专用，applySubagentEntries §6.1）。
+ * 批量截断 + 已生成派生视图产物缓存（subagent 基线派生视图专用，applySubagentEntries §6.1）。
  *
- * cache 命中的消息直接复用上次投影产物——引用恒等 ⇒ 内容恒等 ⇒ 截断结果恒等
+ * cache 命中的消息直接复用上次派生视图产物——引用恒等 ⇒ 内容恒等 ⇒ 截断结果恒等
  * （ADR-0039 消息不可变替换 + 本模块纯函数，构造性成立），跳过重判定的重复 encode；
- * 未命中消息走 truncateToolOutput 并记账产物。消除 subagent 活跃期间每帧投影对分区
+ * 未命中消息走 truncateToolOutput 并记账产物。消除 subagent 活跃期间每帧生成派生视图对分区
  * 全部历史消息 toolCall 原文（reducer 累积态另有 64KB 条目级截断
- * ENTRY_TOOL_OUTPUT_MAX_BYTES，见 apply-entry-utils.ts；本函数 4KB 是渲染投影层，
+ * ENTRY_TOOL_OUTPUT_MAX_BYTES，见 apply-entry-utils.ts；本函数 4KB 是渲染派生视图层，
  * 两层级正交）的重复 encode。
  *
  * 输出形态对齐调用方既有链路 `truncateToolOutputBatch(messages.map((m) => ({ ...m })))`：
@@ -198,7 +198,7 @@ export function truncateToolOutputBatch(messages: Message[]): Message[] {
  * 首次截断结果，复用产物只是免掉重跑 encode）。cache 只记账「输入引用 → 产物」（WeakMap
  * 弱引用，消息对象随分区销毁 GC 后条目自动回收，无需清理挂点；重进分区 reducer 重建的
  * 新对象不命中，照常判定）。**注意截断产物不回写输入源**（reducer state.messages 保持
- * 全量原文权威镜像），产物只用于投影输出复用。
+ * 全量原文权威镜像），产物只用于派生视图输出复用。
  *
  * **前置条件**：messages 来自同一权威累积源且不可变替换（reducer state.messages——
  * 引用复用即内容复用）。不满足时（入参可能被 mutate / 跨源复用同引用异内容）用

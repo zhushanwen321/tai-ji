@@ -7,7 +7,7 @@ import { computed, onMounted, onUnmounted, provide, watch } from 'vue'
  * 接 props（cwd/branch/error 态）+ emit 动作（open-dir/open-branch/retry），不直接耦合状态机。
  * Panel（容器）把 emit 接到 useNewTaskFlow / useSidebar.retryHistory。
  *
- * UC-7 守卫（AC-2.2）：gitBranch 为空（非 git 目录）→ branch chip 隐藏。
+ * UC-7 检查（AC-2.2）：gitBranch 为空（非 git 目录）→ branch chip 隐藏。
  * NFR④#2 AC-2.6：historyError=true → 显重试按钮，不永久卡住。
  * 首次启动延迟 create（AC-1.7）：currentCwd 为空 → directory chip 显「选择目录」空态。
  *
@@ -78,7 +78,7 @@ const LANDING_CONTENT_MAX_W = 'min(720px, 100%)'
  *
  * 隐藏用 v-show 而非 v-if：Composer 必须全程挂载——create 失败时 sendLandingFirstMessage
  * 的 catch 调 restoreSegments 回滚草稿，写目标是本实例的 inputRef；v-if 卸载会令回滚写进
- * 已卸载实例 → 输入丢失（[form-hang-fix] 同族教训）。Landing 自身也不卸载（D4 卸载守卫
+ * 已卸载实例 → 输入丢失（[form-hang-fix] 同族教训）。Landing 自身也不卸载（D4 卸载检查
  * 会 cancelFlow 杀掉在途 create），过渡完全发生在组件内部。
  */
 const isCreating = computed(() => flow.isInflight.value)
@@ -123,12 +123,12 @@ onMounted(() => {
   }
 })
 /**
- * [D4 卸载守卫] Landing 是 landing/overlay 态的唯一承接视图，卸载即终结：
+ * [D4 卸载检查] Landing 是 landing/overlay 态的唯一承接视图，卸载即终结：
  * 封死「视图消失、状态漂留」的残留路径（flow.state 是 core 模块级单例，视图卸载后
- * 若停留 landing/overlay，无任何承接者能终结它——本守卫即 D4 的
+ * 若停留 landing/overlay，无任何承接者能终结它——本检查即 D4 的
  * 出口兜底层）。限定 isActive（landing/overlay 活跃态）才 cancel：正常首发
- * （completed）与切换（cancelled，selectSession 守卫已 cancel）路径下卸载时已非活跃，
- * 守卫 noop，不产生非法转换。
+ * （completed）与切换（cancelled，selectSession 检查已 cancel）路径下卸载时已非活跃，
+ * 检查 noop，不产生非法转换。
  *
  * [不变式] Landing 全仓唯一挂载点 = Panel.vue 的 landing 分支（多面板 split 拓扑
  * 已于 2026-07-24 删除），由 landing.test.ts 静态断言锁定。若未来重新引入多挂载点
@@ -148,7 +148,7 @@ watch(() => props.currentCwd, (newCwd) => {
  *（useNewTaskFlow 从 dirSelect.worktreeItems HEAD 项派生），无需组件层再查 worktreeItems。
  */
 const branch = computed(() => flow.gitInfo.value?.branch ?? props.gitBranch ?? null)
-/** 是否为 git 仓库目录（Git chip 可见性守卫，pendingCwd 驱动的 workspace.detect 三态）。 */
+/** 是否为 git 仓库目录（Git chip 可见性检查，pendingCwd 驱动的 workspace.detect 三态）。 */
 const isGitRepo = computed(() => flow.mode?.value !== 'not-repo')
 
 /** directory chip 文案：有 cwd 显示目录名，否则首次启动空态（AC-1.7） */

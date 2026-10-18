@@ -8,8 +8,8 @@
 //   ② run 期间 host/* 反向请求（handleReady）可达且可应答；
 //   ③ event 通知（text_delta 流 + 终态 message_end/turn_end，seq 单调）；
 //   ④ run 终态应答：outcome.content 与 handle.sessionRef（隔离库 dbPath）正确；
-//   ⑤ dispose 幂等应答 + 进程随 stdin 关闭退出（自灭守卫主判据的隐式验证）。
-// 驱动面自持（不走 core EngineClient——对端语义互证靠帧形状与 SDK 判别守卫对齐）。
+//   ⑤ dispose 幂等应答 + 进程随 stdin 关闭退出（自灭检查主判据的隐式验证）。
+// 驱动侧自持（不走 core EngineClient——对端语义互证靠帧形状与 SDK 判别检查对齐）。
 
 import { spawn, type ChildProcess } from "node:child_process";
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -100,7 +100,7 @@ interface Inbound {
   params?: { runId?: string; seq?: number; event?: { type: string; delta?: string } };
 }
 
-/** 驱动一个引擎 CLI 进程：写帧 / 读帧 / 自动应答数据面 host/* 反向请求。 */
+/** 驱动一个引擎 CLI 进程：写帧 / 读帧 / 自动应答数据范围 host/* 反向请求。 */
 class EngineProc {
   private readonly child: ChildProcess;
   private readonly frames: Inbound[] = [];
@@ -116,7 +116,7 @@ class EngineProc {
         HOME: fakeHome,
         TAIJI_ZCODE_CLI: FAKE_CLI,
         FAKE_SESSION_SCENARIO: scenarioPath,
-        // 剥可能干扰的宿主继承面（CI/本地环境差异面收敛）
+        // 剥可能干扰的宿主继承面（CI/本地环境差异点收敛）
         ZCODE_SESSION_DB_PATH: "",
         ZCODE_SESSION_DB: "",
         ...extraEnv,
@@ -157,7 +157,7 @@ class EngineProc {
     let frame: Inbound;
     if (typeof parsed.method === "string" && parsed.method.startsWith("host/")) {
       frame = { kind: "reverse", id: parsed.id as string, method: parsed.method, params: parsed.params as Inbound["params"] };
-      // 数据面自动应答（host/log 等 {ok:true}；两阶段面 {ack:true}）
+      // 数据范围自动应答（host/log 等 {ok:true}；两阶段面 {ack:true}）
       this.write({ id: parsed.id, result: { ok: true } });
     } else if (typeof parsed.method === "string") {
       frame = { kind: "notification", method: parsed.method, params: parsed.params as Inbound["params"] };
@@ -220,7 +220,7 @@ class EngineProc {
     this.child.kill("SIGKILL");
   }
 
-  /** 模拟宿主退出：关闭 stdin（自灭守卫主判据 = stdio EOF）。 */
+  /** 模拟宿主退出：关闭 stdin（自灭检查主判据 = stdio EOF）。 */
   endStdin(): void {
     this.child.stdin?.end();
   }
@@ -383,7 +383,7 @@ describe("bin e2e：interact(resume) 全链（resume 读 → create 新 session 
         },
       });
 
-      // handleReady 的新 sessionRef（create 应答后回传——锚换新的协议面证据）
+      // handleReady 的新 sessionRef（create 应答后回传——锚换新的协议范围证据）
       const handle = await engine.waitFor((f) => f.kind === "reverse" && f.method === "host/handleReady");
       const handleSid = (handle.params as { sessionRef?: Record<string, string> })?.sessionRef?.["sessionId"];
       expect(typeof handleSid).toBe("string");
@@ -498,7 +498,7 @@ describe("bin e2e：final-frame 先落定 + 权威 turn.terminal 迟到的 stder
     }
   }
 
-  it("迟到 success（常态迟到）：run 成功，stderr 无迟到终态日志（降噪根修点）", { timeout: 60_000 }, async () => {
+  it("迟到 success（常态迟到）：run 成功，stderr 无迟到终态日志（降噪从根源修复点）", { timeout: 60_000 }, async () => {
     const { engine, runResp } = await runOnce(writeLateTerminalScenario("success"));
     try {
       expect(runResp.error).toBeUndefined();
@@ -514,7 +514,7 @@ describe("bin e2e：final-frame 先落定 + 权威 turn.terminal 迟到的 stder
   it("迟到 interrupted：降 debug 且 stderr 无输出（依赖 SDK cli-entry sink 对 debug 跳过写）", { timeout: 60_000 }, async () => {
     const { engine, runResp } = await runOnce(writeLateTerminalScenario("interrupted"));
     try {
-      // interrupted 不属失败终态（isFailedTerminalStatus 口径）——run 仍成功收口
+      // interrupted 不属失败终态（isFailedTerminalStatus 口径）——run 仍成功收尾
       expect(runResp.error).toBeUndefined();
       expect(engine.stderrOutput).not.toContain("权威终态晚于落定");
       expect(engine.stderrOutput).not.toContain("[debug]"); // debug 级不落 stderr（CONSOLE_SINK 语义对齐）
@@ -524,7 +524,7 @@ describe("bin e2e：final-frame 先落定 + 权威 turn.terminal 迟到的 stder
     }
   });
 
-  it("迟到 failed：stderr 保留 warn（假成功识破防御面），文案含原样 status", { timeout: 60_000 }, async () => {
+  it("迟到 failed：stderr 保留 warn（假成功识破防御机制），文案含原样 status", { timeout: 60_000 }, async () => {
     const { engine, runResp } = await runOnce(writeLateTerminalScenario("failed"));
     try {
       // 权威 status=failed 经 lastTerminalStatus 分流为 run-failed（P-Z2 门修正）

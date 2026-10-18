@@ -6,7 +6,7 @@
 
 import type { ExtensionMode } from "../assembly/host-mode.ts";
 
-/** UI 请求可观测性状态：sessionMode（主进程运行模式，W4 守卫透传）的往返存储。 */
+/** UI 请求可观测性状态：sessionMode（主进程运行模式，W4 检查透传）的往返存储。 */
 export class UiRequestObservability {
   private sessionMode: ExtensionMode | undefined;
 

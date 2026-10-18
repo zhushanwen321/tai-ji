@@ -49,7 +49,7 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-describe('reattach spawn 形态（自建附着编排；restore 离线腿不通用——V5）', () => {
+describe('reattach spawn 形态（自建附着编排；restore 离线路径不通用——V5）', () => {
   it('进程存活 → 短路复用（不重复 spawn）', async () => {
     const { vid } = await createNoForkLine()
     const c1 = await svc.ensureProcess(vid)
@@ -58,7 +58,7 @@ describe('reattach spawn 形态（自建附着编排；restore 离线腿不通�
     expect(h.spawned).toHaveLength(1)
   })
 
-  it('重附着后续问：spawn → switch_session(线文件) → 一致性守卫 → rekey → hidden 注册', async () => {
+  it('重附着后续问：spawn → switch_session(线文件) → 一致性检查 → rekey → hidden 注册', async () => {
     const { vid, file } = await createNoForkLine('sid-r1')
     // 进程引用摘除（原「闲置回收后」形态；回收机制已随 ADR-0122 退役，重附着由
     // 进程死亡/重启场景触发）——直接置 rec.client = undefined 造重附着入口。
@@ -112,7 +112,7 @@ describe('reattach spawn 形态（自建附着编排；restore 离线腿不通�
 
 describe('关线原语（btw.remove；级联归 M4-a）', () => {
   it('closeLine：杀进程 + 注册表移除 + 文件删除限定 btw 根内', async () => {
-    // 线文件写在 btw 根内（规范布局 D2：btw/<enc>/<mainSid>/，级联删除面）
+    // 线文件写在 btw 根内（规范布局 D2：btw/<enc>/<mainSid>/，级联删除范围）
     const inside = writeSessionFile(
       getBtwThreadDir(CWD, MAIN_SID), 'inside.jsonl',
       { type: 'session', version: 3, id: 'sid-inside', timestamp: 't', cwd: CWD }, [],
@@ -128,7 +128,7 @@ describe('关线原语（btw.remove；级联归 M4-a）', () => {
     expect(await svc.closeLine(res.vid)).toBe(false) // 幂等
   })
 
-  it('closeLine 不删 btw 根外文件（防误删面）', async () => {
+  it('closeLine 不删 btw 根外文件（防误删风险）', async () => {
     const outside = writeSessionFile(join(fx, 'elsewhere'), 'out.jsonl', {
       type: 'session', version: 3, id: 'sid-out', timestamp: 't', cwd: CWD,
     }, [])
@@ -137,7 +137,7 @@ describe('关线原语（btw.remove；级联归 M4-a）', () => {
     const res = await svc.createLine({ mainSid: MAIN_SID, cwd: CWD })
 
     expect(await svc.closeLine(res.vid, { deleteSessionFile: true })).toBe(true)
-    expect(existsSync(outside)).toBe(true) // 根外文件保留（守卫拦截 rm）
+    expect(existsSync(outside)).toBe(true) // 根外文件保留（检查拦截 rm）
   })
 })
 

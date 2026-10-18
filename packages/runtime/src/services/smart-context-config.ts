@@ -1,5 +1,5 @@
 /**
- * smart-context 配置域（pi-smart-context extension 的 runtime 侧配置面）。
+ * smart-context 配置域（pi-smart-context extension 的 runtime 侧配置范围）。
  *
  * 从 worktree-config-helper.ts 抽出（P1-7 名实拆分：原文件名只对应 worktree 偏好域，
  * 本域与其落盘路径/契约对象均不同）。读改写
@@ -89,7 +89,7 @@ function smartContextDefaults(): SmartContextConfigSnapshot {
 
 /**
  * 读取 smart-context 配置快照。文件不存在/坏 JSON/字段非法 → 默认值
- * （与 extension normalizeSmartContextConfig 的回退语义一致）。不抛错（防御性设计，与 getRenameModel 一致）。
+ * （与 extension normalizeSmartContextConfig 的回退语义一致）。不抛错（容错处理，与 getRenameModel 一致）。
  */
 export function getSmartContextConfig(): SmartContextConfigSnapshot {
   try {

@@ -8,7 +8,7 @@ import {
 } from '../../index'
 
 // ── ask-user 解码契约（askUserInteract 已随统一表单协议退役——GUI 提问走 ui-form
-//    模块 uiFormInteract；本文件覆盖保留物：marker 常量 + answers 解码 helper + 守卫）──
+//    模块 uiFormInteract；本文件覆盖保留物：marker 常量 + answers 解码 helper + 检查）──
 
 describe('ASK_USER_MARKER（legacy 帧识别，随 D7 窗口末清理）', () => {
   it('U4: 常量值正确（NUL 前缀）', () => {
@@ -66,7 +66,7 @@ describe('getAskUserAnswer / getAskUserOther', () => {
   })
 })
 
-describe('isAskUserQuestion 类型守卫', () => {
+describe('isAskUserQuestion 类型检查', () => {
   it('合法 AskUserQuestion → true', () => {
     expect(isAskUserQuestion({ question: 'q?' })).toBe(true)
     expect(isAskUserQuestion({ header: 'h', question: 'q?', options: [] })).toBe(true)

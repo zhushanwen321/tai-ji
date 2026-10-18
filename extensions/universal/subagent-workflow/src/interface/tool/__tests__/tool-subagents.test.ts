@@ -4,7 +4,7 @@
 // 集合收录 D1 / 渲染不构造 __gui__ D8）。
 //
 // 三视角（docs/TEST-STRATEGY.md §3）：
-// - 构建者（白盒）：注册面 schema 形态（顶层键集/类型/必填形态）+ 转译 spec 组装。
+// - 构建者（白盒）：注册点 schema 形态（顶层键集/类型/必填形态）+ 转译 spec 组装。
 // - 使用者（黑盒）：模型看到的 tool description/guidelines 分工句；execute 的返回文案
 //   （一条通知 + 单次 status 恢复出口 + abort 指引）与错误文案（Correct 示例）。
 // - 观察者（真值源）：packages/shared/src/constants.ts 真模块（集合收录 SSOT）——
@@ -44,7 +44,7 @@ const SUBAGENT_LIST_INJECTOR_SRC = readFileSync(
   "utf-8",
 );
 
-// ── 注册面最小类型（单层 cast：目标类型全必填，非 no-unsafe-cast 命中的全可选结构断言）──
+// ── 注册点最小类型（单层 cast：目标类型全必填，非 no-unsafe-cast 命中的全可选结构断言）──
 
 interface CapturedProperty {
   type?: string;
@@ -74,7 +74,7 @@ interface ThemeStub {
   bold(text: string): string;
 }
 
-/** 注册并取回 tool 定义（fake pi 捕获单点见 capture-tool.ts；此处只留差异面）。 */
+/** 注册并取回 tool 定义（fake pi 捕获单点见 capture-tool.ts；此处只留差异点）。 */
 function captureSubagentsTool(
   reentryRef: ReentryGuardRef,
   registry: Record<string, unknown>,
@@ -225,7 +225,7 @@ describe("schema 契约：一跳扁平 + tasks 必填（D2）", () => {
   });
 
   it("不构造 details.__gui__（D8：isWorkflow 块分支恒折叠不消费，构造即死代码）", () => {
-    // 文件头注释会提到 __gui__（记录 D8 裁决），故断言构造面：无 GUI 协议依赖 +
+    // 文件头注释会提到 __gui__（记录 D8 裁决），故断言构造侧：无 GUI 协议依赖 +
     // 无描述符构造（属性赋值/工厂调用）。
     expect(TOOL_SRC).not.toContain("@zhushanwen/extension-protocol");
     expect(TOOL_SRC).not.toContain("__gui__:");
@@ -289,7 +289,7 @@ describe("handler 组装：runWorkflow('fan-out') 确定性映射（D3）", () =
     expect(spec.slug).toBe("foo-tri-review");
     expect(spec.model).toBe("zai-coding-cn/glm-5.3-flash");
     expect(spec.thinkingLevel).toBe("max");
-    // details：无 __gui__，携带 runId/stateFile（程序化消费面）
+    // details：无 __gui__，携带 runId/stateFile（程序化消费方）
     expect(Object.keys(result.details)).not.toContain("__gui__");
     expect(result.details).toMatchObject({
       runId: "wf-1700000000000-abcd",
@@ -328,7 +328,7 @@ describe("handler 组装：runWorkflow('fan-out') 确定性映射（D3）", () =
 });
 
 // ══════════════════════════════════════════════════════════════
-describe("slug 缺省生成 fan-out-<时间短码>（D8 状态面辨识）", () => {
+describe("slug 缺省生成 fan-out-<时间短码>（D8 状态侧辨识）", () => {
   it("generateBatchSlug 形态稳定且 ≤ SLUG_MAX_LENGTH(35)", () => {
     expect(generateBatchSlug(0)).toBe("fan-out-0");
     const slug = generateBatchSlug(1700000000000);
@@ -350,7 +350,7 @@ describe("slug 缺省生成 fan-out-<时间短码>（D8 状态面辨识）", () 
     expect(lastSpec().slug).toBe("tri-review");
   });
 
-  it("生成的 slug 出现在启动文案与 details（状态面/文本面可对账）", async () => {
+  it("生成的 slug 出现在启动文案与 details（状态侧/文本面可对账）", async () => {
     const result = await runSubagentsBatch({ tasks: TWO_TASKS }, makeDeps(makeRegistry()) as never, undefined);
     const generated = result.details.slug;
     expect(String(generated)).toMatch(/^fan-out-[0-9a-z]+$/);

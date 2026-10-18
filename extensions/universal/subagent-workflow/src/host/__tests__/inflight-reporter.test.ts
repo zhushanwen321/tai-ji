@@ -2,7 +2,7 @@
 //
 // 三视角：
 //   ①使用者（runtime event-adapter 视角）——帧形状：title=SUBAGENT_INFLIGHT_MARKER、
-//     options=[JSON 帧]（inFlight/sessionId/emittedAt）、控制面级 timeout 在场；
+//     options=[JSON 帧]（inFlight/sessionId/emittedAt）、控制通道级 timeout 在场；
 //   ②构建者——初始上报（attachSession 触发，无需任何 subagent 调用）；失败折叠 +
 //     置脏（无 timer 自动重试，ADR-0122）；推送在途期间多次迁移合并为单帧且携带
 //     最新绝对计数；

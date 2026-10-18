@@ -1,18 +1,18 @@
 // src/control-responses.ts
 //
-// [subagent-model-switch §7.3] setModel 子进程控制面通路（引擎进程级，run 生命周期外）：
+// [subagent-model-switch §7.3] setModel 子进程控制范围通路（引擎进程级，run 生命周期外）：
 //   ① 控制命令应答等待表（进程级「请求 id → settle」）；
 //   ② setModelOnActiveChild 转发编排（定位活跃子进程 → stdin `set_model` → 读应答 →
 //      `get_state` 回读生效值 → 原始结局上浮；错误码映射归 pi-engine）。
 //
 // 背景：子进程 stdout 的 response 帧由 per-run 的 spawn-run-pump 消费，身份回填走
-// SessionIdentityTracker 的 per-run 监听表——setModel 是 run 生命周期外的控制面操作
+// SessionIdentityTracker 的 per-run 监听表——setModel 是 run 生命周期外的控制范围操作
 // （引擎进程收到协议 setModel 请求时，目标子进程的 run 早已在 pump 内自转），需要
 // 一张**进程级**等待表承接同一些 response 帧（分发接线 = spawn-run-pump response
 // 分支的 dispatchControlResponse 调用，与 per-run 表并行，各按 id 一次性消费）。
 //
 // 落点说明：编排在本模块而非 spawn-runner.ts——spawn-runner 职责 = spawn 执行与 run
-// 生命周期，模型热切控制面与其正交（移入即越该文件 max-lines 上限）；接线原语全部
+// 生命周期，模型热切控制范围与其正交（移入即越该文件 max-lines 上限）；接线原语全部
 // 复用：stdin-writer sendSetModelCommand / sendGetStateCommand（帧组装在 pi-rpc
 // buildSetModelCommandFrame）+ active-children 活跃子进程记账表。
 //
@@ -51,7 +51,7 @@ const pending = new Map<string, (outcome: ControlResponseOutcome) => void>();
  * 收敛唯一出口 settle 幂等：response / close / error / timeout 四条入口竞争，
  * 首到生效，其余清理后丢弃（timer 反注册 + 监听摘除 + 表项删除一次完成）。
  * close 与 error 都按「子进程退出」收敛（error = spawn 失败，子进程从未运行——
- * 对控制面同样是「无活进程」语义）。
+ * 对控制范围同样是「无活进程」语义）。
  */
 function awaitControlResponse(
   child: ChildProcess,
@@ -124,7 +124,7 @@ export type SetModelForwardOutcome =
   | { kind: "credential-missing"; detail: string }
   | { kind: "readback-failed"; stage: "set-model-response" | "state-readback"; detail: string };
 
-/** 子进程存活判定（控制面各阶段检查共用）：pid 在场且 exit/signal 均未发生。 */
+/** 子进程存活判定（控制范围各阶段检查共用）：pid 在场且 exit/signal 均未发生。 */
 function isChildAlive(child: ChildProcess): boolean {
   return child.pid !== undefined && child.exitCode === null && child.signalCode === null;
 }
@@ -139,7 +139,7 @@ function errorTextOr(error: string | undefined, fallback: string): string {
  * P1-②：快照查找 `Model not found: <p>/<id>`；session.setModel checkAuth
  * `No API key for <p>/<id>`——两错误经 rpc-mode 外层 catch 以 response success:false
  * + error 文本到达）按设计 §7.5 映射；快照查找与 checkAuth 之外的残余消息 = pi
- * 内部异常，生效状态不可信——按回读失败形态收口（三型词表封闭映射：宿主处置 =
+ * 内部异常，生效状态不可信——按回读失败形态收尾（三型词表封闭映射：宿主处置 =
  * 错误应答 + 重试恢复，不虚构生效值）。checkAuth 词形是本分型的承重前提，已登记
  * docs/pi-semantics.json PS-75（pi bump 门禁重验集——pi 词形漂移时先同步本分型前缀）。
  */
@@ -216,8 +216,8 @@ function extractPiStateSnapshot(data: unknown): {
  *
  * 竞态窗口全覆盖（设计 §7.3）：命令与回读全程带存活检查——①定位时 ②命令写入
  * （投递判别式，stdin 死 = 进程死）③读应答等待 ④回读前复检 ⑤回读等待——任一
- * 时点发现退出即按「无活进程」形态收口；单阶段等待超时（SET_MODEL_STAGE_TIMEOUT_MS，
- * 秒级控制面单请求粒度，锚 CANCEL_SETTLE_GRACE_MS 量级）且进程仍存活才落回读
+ * 时点发现退出即按「无活进程」形态收尾；单阶段等待超时（SET_MODEL_STAGE_TIMEOUT_MS，
+ * 秒级控制范围单请求粒度，锚 CANCEL_SETTLE_GRACE_MS 量级）且进程仍存活才落回读
  * 失败形态——「退出」与「超时」两种结局严格互斥，不混淆。不悬挂（每阶段有界）、
  * 不部分生效（pi 侧 set_model 是原子命令，失败即未切换）。
  *
@@ -225,7 +225,7 @@ function extractPiStateSnapshot(data: unknown): {
  * §6.4——热切档位以联动值为生效事实，生效值经 get_state 回读应答宿主；用户显式
  * 档位经覆盖记账在下一轮 spawn 由解析链裁决，跨轮边界档位以解析链为准）。
  */
-/** 回读前 stdin 可写判定（stdin 缺失/已毁 = 进程死亡在控制面的投影，与存活检查互补）。 */
+/** 回读前 stdin 可写判定（stdin 缺失/已毁 = 进程死亡在控制范围的呈现，与存活检查互补）。 */
 function stdinWritable(child: ChildProcess): boolean {
   return child.stdin !== null && child.stdin !== undefined && !child.stdin.destroyed;
 }

@@ -2,12 +2,12 @@
 
 /**
  * useQuotaConfigure（QuotaConfigure module 实现）接口级单测（契约 v2，coding-plan-quota-config-ux
- * §7.1/§7.2；C1 收拢后测试面 = core QuotaConfigureModule 接口）。
+ * §7.1/§7.2；C1 收拢后测试 = core QuotaConfigureModule 接口）。
  *
  * interface is the test surface：全部用例只经 draft / view / test 三个透镜 + 3 个写动作打点，
- * 不窥内部 ref —— 契约收窄 / 内部重组不失效这些断言，正是「行为保持 refactor」的验收面。
+ * 不窥内部 ref —— 契约收窄 / 内部重组不失效这些断言，正是「行为保持 refactor」的验收范围。
  *
- * 覆盖（设计 §7.5 测试改动清单 + C1 新派生面）：
+ * 覆盖（设计 §7.5 测试改动清单 + C1 新派生逻辑）：
  * ① readiness 齐备性矩阵（D1/D13）：未选类型 → ['type']；草稿类型未命中 QUOTA_PRESETS（历史数据）
  *    也 → ['type']（不静默按 api-key 分支放行）；cookie 类缺 cookie；
  *    api-key 类按 credentialSource 分流（provider 看 providerAvailable，
@@ -17,11 +17,11 @@
  *    apiKey 仅 exclusive 且草稿非空才传且永不 ''；workspace 必填永不 ''；credentialSource / enabled 恒传
  * ④ setEnabled（D4）：只发 { providerId, enabled }，零查询调用
  * ⑤ 去掩码（D7）：syncFromProvider 后 cookie / apiKey 草稿为空
- * ⑥ 类型草稿写入（D5 细节 2）：同值短路 / 真变清凭证草稿 / 非字符串守卫
+ * ⑥ 类型草稿写入（D5 细节 2）：同值短路 / 真变清凭证草稿 / 非字符串检查
  * ⑦ loadCached：data=null + reason 时保留失败态（D6 影响面表修正）
  * ⑧ configureError 走 i18n（D9）：quotaConfigureFail / quotaSaveAndTestFail
  * ⑨ §7.1 时序约定 1：payload 必须在 await 之前捕获（configure 期间广播重置草稿也不影响已提交值）
- * ⑩ 收拢进 implementation 的派生面：失败原因归一（A2-4）/ providerWarning 分档（§7.4）/
+ * ⑩ 收拢进 implementation 的派生逻辑：失败原因归一（A2-4）/ providerWarning 分档（§7.4）/
  *    sourceHint 分档（D3）/ type.undetermined（D8）
  *
  * mock 策略：SettingsTransport seam 桩（[C3] 测试打 seam）替换 quota RPC 层（module 经 seam 消费，
@@ -40,8 +40,8 @@ import { provideSettingsTransport } from '@taiji/core'
 import { makeSettingsTransportStub } from '../helpers/settings-transport-stub'
 
 // [C3] quota RPC 经 SettingsTransport seam 桩注入（getCachedQuota/configureQuota/refreshQuota
-// 逐名映射到本 mock 集，替换原 domains/quota 模块 mock；断言面不变，仍打 quotaApi.*）。
-// fetchQuota 不在 seam 方法面（useQuotaConfigure 结构上不可达），保留仅供「零查询调用」负向断言。
+// 逐名映射到本 mock 集，替换原 domains/quota 模块 mock；断言范围不变，仍打 quotaApi.*）。
+// fetchQuota 不在 seam 方法侧（useQuotaConfigure 结构上不可达），保留仅供「零查询调用」负向断言。
 const quotaApi = vi.hoisted(() => ({
   getCached: vi.fn<(providerId: string) => Promise<QuotaSnapshot>>(),
   fetchQuota: vi.fn<(providerId: string) => Promise<QuotaSnapshot>>(),
@@ -94,7 +94,7 @@ function mountModule(
 }
 
 // ── 高频基线装配（文件内单源）────────────────────────────────────────────────
-// 三类 fetcher 的「无覆写」provider 快照 + preset 组合是十余处用例的公共装配面（差异全在
+// 三类 fetcher 的「无覆写」provider 快照 + preset 组合是十余处用例的公共装配侧（差异全在
 // 断言侧动作与期望值）；基线收敛在此，变体形态（enabled 翻转 / 已保存 workspace /
 // apiKeySet·credentialSource 覆写 / 未选类型等）仍直接走 mountModule 内联。
 
@@ -201,7 +201,7 @@ describe('readiness 齐备性矩阵（D1 / D13）', () => {
     expect(module.view.value.type.selected).toBe('legacy-unknown')
     expect(module.view.value.readiness).toEqual({ ready: false, missing: ['type'] })
 
-    // 重选一个有效预设类型 → 判定恢复常态（守卫不是「命中一次就永久卡死」）
+    // 重选一个有效预设类型 → 判定恢复常态（检查不是「命中一次就永久卡死」）
     module.selectType('kimi-coding')
     expect(module.view.value.readiness.missing).not.toContain('type')
   })
@@ -681,7 +681,7 @@ describe('类型草稿写入（D5 细节 2）', () => {
     expect(quotaApi.configure).not.toHaveBeenCalled()
   })
 
-  it('非字符串 payload 被守卫拦下（reka Select 宽联合类型；不许 String() 强转出 "undefined"）', async () => {
+  it('非字符串 payload 被检查拦下（reka Select 宽联合类型；不许 String() 强转出 "undefined"）', async () => {
     const { module } = await mountBaseline('mimo')
 
     module.draft.value.cookie = 'unsubmitted'
@@ -838,8 +838,8 @@ describe('既有回归（reason 透传 / preset 派生）', () => {
   })
 })
 
-// ── ⑩ 收拢进 implementation 的派生面（C1） ──────────────────────────────────
-describe('派生面收拢（C1：失败归一 / 警示分档 / 来源提示 / 类型分层）', () => {
+// ── ⑩ 收拢进 implementation 的派生逻辑（C1） ──────────────────────────────────
+describe('派生逻辑收拢（C1：失败归一 / 警示分档 / 来源提示 / 类型分层）', () => {
   it('失败原因归一：reason → 分档；无 reason / 未分类 reason → generic 带兜底消息', async () => {
     const reasonKind: Array<[QuotaFetchFailureReason, QuotaFailureKind]> = [
       ['unauthorized', 'unauthorized'],

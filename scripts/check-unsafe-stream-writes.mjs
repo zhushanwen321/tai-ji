@@ -34,7 +34,7 @@ import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { dirname, join, relative } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
-// 纯检测函数导出面（scripts/__tests__/check-unsafe-stream-writes.test.mjs 单测——
+// 纯检测函数导出清单（scripts/__tests__/check-unsafe-stream-writes.test.mjs 单测——
 // S14：误报会污染 allowlist 治理，检测核心须机器锁定）。仅 CLI 直跑时执行 main()
 export { scanFileLines, collectTsFiles, isCommentLine }
 

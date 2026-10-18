@@ -12,6 +12,7 @@
  * 依赖方向：shortcut-registry → electron(globalShortcut/BrowserWindow) + interfaces
  */
 import { BrowserWindow, globalShortcut } from 'electron'
+import { SHORTCUT } from '@taiji/shared'
 import type { IShortcutRegistry } from '../interfaces.js'
 
 /** 快捷键类型（对应 renderer 监听的 type 字段） */
@@ -52,7 +53,7 @@ export class ShortcutRegistry implements IShortcutRegistry {
       // 必须检查返回值，失败时 warn 提示（被占用仅在 register 时才能发现）。
       const ok = globalShortcut.register(accelerator, () => {
         if (!win.isDestroyed()) {
-          win.webContents.send('shortcut', type)
+          win.webContents.send(SHORTCUT, type)
         }
       })
       if (!ok) {

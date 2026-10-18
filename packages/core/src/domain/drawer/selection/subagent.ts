@@ -6,9 +6,9 @@
  * 状态本体按 per-session 分区（useSessionScopedState，ADR-0049），与控制态分区同键
  * （drawerSessionKey，control.ts 绑定），但物理独立——控制态只留开合 + activeTab。
  *
- * 写入面 = setSubagentView（coordination.openSubagent 编排调用）/ clearSubagentView
+ * 写侧 = setSubagentView（coordination.openSubagent 编排调用）/ clearSubagentView
  * （coordination.clearSubagentSelection 编排调用）；
- * 读取面 = useSubagentSelection（SubagentTab 消费）+ readSubagentSelectionFor
+ * 读侧 = useSubagentSelection（SubagentTab 消费）+ readSubagentSelectionFor
  * （复合谓词 selection/predicates.ts 按 sid 跨域读，getViewedVids 豁免链用）。
  */
 import { computed, reactive } from 'vue'
@@ -17,7 +17,7 @@ import { useSessionScopedState } from '../../../foundation/use-session-scoped-st
 import { drawerSessionKey } from '../control'
 
 /** subagent 选中态（per-session 分区） */
-export interface SubagentSelectionState { // oe-exempt:20261003:framework:类型契约先行——selection 分区契约，renderer 消费面即本批 D1 单元
+export interface SubagentSelectionState { // oe-exempt:20261003:framework:类型契约先行——selection 分区契约，renderer 消费方即本批 D1 单元
   /** subagent tab 当前展示的 subagent 虚拟 id（`subagent:<mainSid>:<subId>` 或 `agentcall:<acsId>`，由调用方算好传入）；null=未选中（subagent tab 显空态） */
   selectedSubagentId: string | null
   /** subagent tab 的进入来源：'chat'=从 chat subagent 块进入（无返回按钮）；'workflow'=从 workflow tab 点 agent call 进入（显←返回按钮）；null=未在 subagent tab */

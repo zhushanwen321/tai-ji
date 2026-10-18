@@ -9,15 +9,15 @@
 //
 // 锁四组面：
 //   1. record 进 store：dispatch 在途时 record 带 origin:"workflow" +
-//      parentRunId=run.runId（真实 record 经 store 治理面可见——进度源切换的
+//      parentRunId=run.runId（真实 record 经 store 治理侧可见——进度源切换的
 //      数据前提）；record 级 pending:register 照旧发射。
 //   2. worker 协议回包不变：引擎应答 → executeAgentCall finalize →
 //      postMessage({type:"agent-result", callId, result})（cached:false）；
 //      trace node 终态摘要保真（node.result 来自 executeWorkflowAgent 的
 //      AgentResult 出口，D2「node 保留 result」）。
 //   3. 成功即终态化（D7 联动回归）：settle 后 record closed/gc + record 级
-//      pending:unregister（archive 出内存，run 视图经磁盘面回查终态）。
-//   4. 注入面回退：未注入 workflowAgentDispatch（旧测试 deps）→ deps.runner.run
+//      pending:unregister（archive 出内存，run 视图经磁盘内容回查终态）。
+//   4. 注入路径回退：未注入 workflowAgentDispatch（旧测试 deps）→ deps.runner.run
 //      被调（SAR 旧编排路径，W4 归位；两路互不串扰）。
 //
 // 替身形态与测试红线对齐 W2 workflow-agent-dispatch.test.ts：TAIJI_AGENT_DATA_DIR
@@ -58,7 +58,7 @@ import { makePi, type PiMock } from "../../execution/__tests__/helpers/pi-mock.t
 
 // ── harness ──────────────────────────────────────────────────
 
-/** 按 stepIndex 查 trace 节点（Trace 公共查询面 = toArray 线性扫）。 */
+/** 按 stepIndex 查 trace 节点（Trace 公共查询范围 = toArray 线性扫）。 */
 function findByStep(trace: Trace, stepIndex: number) {
   return trace.toArray().find((n) => n.stepIndex === stepIndex);
 }
@@ -171,9 +171,9 @@ describe("pump → executeWorkflowAgent 端到端", () => {
     await flush();
 
     // 1. dispatch 在途：真实 record 在 store（origin/parentRunId——views store 订阅的数据
-    //    前提）。经 views 同款查询面（queries.collectRecordsByParentRunId）断言命中，
+    //    前提）。经 views 同款查询路径（queries.collectRecordsByParentRunId）断言命中，
     //    再经 getMutable 拿真 record 验 originFields（listRunning 是 RecordSnapshot
-    //    轻投影，无 origin 字段——勿用）。
+    //    轻量派生视图，无 origin 字段——勿用）。
     const found = h.service.queries.collectRecordsByParentRunId("wf-pump-e2e-1", 100);
     expect(found).toHaveLength(1);
     expect(found[0]!.origin).toBe("workflow");
@@ -184,7 +184,7 @@ describe("pump → executeWorkflowAgent 端到端", () => {
     expect(record.parentRunId).toBe("wf-pump-e2e-1");
     // 引擎收到 run（taskId = record.id——守护/journal 键，W2 已锁定）
     expect(h.fake.runs).toHaveLength(1);
-    // record 级 pending:register 照旧（D5：record 域发射面不动）
+    // record 级 pending:register 照旧（D5：record 域发射侧不动）
     const registered = h.pi.events.emit.mock.calls.find((c) => c[0] === "pending:register");
     expect(registered?.[1]).toMatchObject({ id: record.id, type: "subagent" });
 
@@ -213,7 +213,7 @@ describe("pump → executeWorkflowAgent 端到端", () => {
     expect(h.run.state.calls.get(1)?.status).toBe("done");
 
     // 3. D7 联动：成功即终态化（closed/gc + archive 出内存）+ record 级 unregister。
-    //    （archive 后从磁盘重建面回查终态的「run 视图不丢行」行为由 W1 record-store
+    //    （archive 后从磁盘重建侧回查终态的「run 视图不丢行」行为由 W1 record-store
     //    的 mergedRecords 测试锁定——本 harness 的 pi mock 不落盘，不在此重复。）
     expect(h.store.listRunning()).toHaveLength(0);
     const unregistered = h.pi.events.emit.mock.calls.find((c) => c[0] === "pending:unregister");
@@ -261,7 +261,7 @@ describe("pump → executeWorkflowAgent 端到端", () => {
   });
 });
 
-// ── 4：注入面回退（旧 deps 不注入 dispatch） ──────────────────
+// ── 4：注入点回退（旧 deps 不注入 dispatch） ──────────────────
 
 describe("workflowAgentDispatch 未注入回退", () => {
   it("旧 deps（仅 runner）→ deps.runner.run 被调（[H2 W4] SAR.run 已掏空为纯转调 executeWorkflowAgent，两分支执行体归一；生产恒注入 dispatch 本分支不可达，仅为旧测试 deps 形态兼容）", async () => {

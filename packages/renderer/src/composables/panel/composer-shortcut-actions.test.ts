@@ -2,7 +2,7 @@
  * composer-shortcut-actions 单测——composer-pi-shortcuts U1⑥（设计回归防线主体，验收 A1 全量下沉 L1）。
  *
  * 覆盖矩阵（与设计文档逐条对应）：
- *   §3.4 守卫矩阵全行（每行至少 1 条）：浮层 open / auto-repeat（含 ctrl+x 不忽略例外）/
+ *   §3.4 检查矩阵全行（每行至少 1 条）：浮层 open / auto-repeat（含 ctrl+x 不忽略例外）/
  *   composer 内选区（放行原生剪切 + 三个切换键与选区无关）/ staging 活跃 / landing 态 / 已建态 /
  *   档位仅 off / 模型 ≤1。IME 行不在本文件测：分发链 IME 段是单点防线（composer-keydown.test.ts
  *   钉住），本表不复判（over-engineering-audit 20260916 裁决）。
@@ -232,10 +232,10 @@ describe('useComposerShortcutActions', () => {
     })
   })
 
-  // ── 守卫矩阵 §3.4 逐行 ──────────────────────────────────────────────────────
-  describe('守卫矩阵（§3.4 全行）', () => {
-    // 行 1：命令浮层 open → 不触发（入口守卫整体跳过，不吞键）
-    it('浮层 open：shift+tab / ctrl+p 均不触发不吞键（入口 cmdOpen 守卫直接 return false）', () => {
+  // ── 检查矩阵 §3.4 逐行 ──────────────────────────────────────────────────────
+  describe('检查矩阵（§3.4 全行）', () => {
+    // 行 1：命令浮层 open → 不触发（入口检查整体跳过，不吞键）
+    it('浮层 open：shift+tab / ctrl+p 均不触发不吞键（入口 cmdOpen 检查直接 return false）', () => {
       const { deps, onThinkingSelect, onModelSelect } = makeDeps({ cmdOpen: true })
       const handler = useComposerShortcutActions(deps)
 
@@ -251,7 +251,7 @@ describe('useComposerShortcutActions', () => {
     })
 
     // 行 2（IME）：模块级不复判——分发链 IME 段是单点防线（composer-keydown.test.ts 钉住），
-    // 本表只经分发链调用（over-engineering-audit 20260916 裁决删除模块级二次守卫）
+    // 本表只经分发链调用（over-engineering-audit 20260916 裁决删除模块级二次检查）
 
     // 行 3：auto-repeat —— 三个切换键忽略；ctrl+x 不忽略（决策 8 幂等例外）
     it('auto-repeat：shift+tab 忽略（吞键不动作，防 RPC 风暴）', () => {
@@ -294,7 +294,7 @@ describe('useComposerShortcutActions', () => {
       expect(writeText).toHaveBeenCalledWith('streaming partial')
     })
 
-    // 行 4：composer 内有选区 —— ctrl+x 放行原生剪切；三个切换键正常触发（选区守卫只挂 copy 分支）
+    // 行 4：composer 内有选区 —— ctrl+x 放行原生剪切；三个切换键正常触发（选区检查只挂 copy 分支）
     it('选区行：composer 内有选区时 ctrl+x 放行原生剪切（不拦截、不触发复制动作）', () => {
       const editor = document.createElement('div')
       editor.setAttribute('contenteditable', 'true')
@@ -343,7 +343,7 @@ describe('useComposerShortcutActions', () => {
       expect(onThinkingSelect).toHaveBeenCalledTimes(1)
     })
 
-    it('选区行：composer 内有选区时 ctrl+p / ctrl+shift+p 正常触发模型双向循环（选区守卫只挂 copy 分支）', () => {
+    it('选区行：composer 内有选区时 ctrl+p / ctrl+shift+p 正常触发模型双向循环（选区检查只挂 copy 分支）', () => {
       const editor = document.createElement('div')
       editor.setAttribute('contenteditable', 'true')
       document.body.appendChild(editor)
@@ -549,7 +549,7 @@ describe('useComposerShortcutActions', () => {
       currentModelId.value = 'prov/b' // store 真值 = 意图目标 → 等值清
       await flushPromises()
 
-      // 外部把真值挪回 a（session 快照重拉等）：若意图未清，续步起点 b → 目标 c（错）
+      // 外部把真值挪回 a（session 快照重新拉取等）：若意图未清，续步起点 b → 目标 c（错）
       currentModelId.value = 'prov/a'
       await flushPromises()
       handler(makeKeyEvent('p', { ctrl: true }).e)

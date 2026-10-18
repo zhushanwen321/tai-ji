@@ -66,7 +66,7 @@ export interface MigrateImageSegmentsResult {
  *
  * 为什么导出：创建分支（本文件 createSessionFlow）与 retry/预建分支
  * （new-task-search flow.migrateRetryImages）消费同一迁移语义——双份实现曾因
- * 各自演化产生漂移面（S4-A2 收口）。单文件失败不阻断（OS 可能已清理 tmpdir），
+ * 各自演化产生漂移（S4-A2 收尾）。单文件失败不阻断（OS 可能已清理 tmpdir），
  * Promise.allSettled 收集结果，rejected console.warn 后跳过（migratedCount < total
  * 即部分失败，调用方自决 toast 提示）。migrateImage 回调在 web/mock 环境可能
  * 返回 undefined（非 reject），不进 migrated，调用方据此保留原 path。
@@ -210,7 +210,7 @@ async function createSessionRecord(
  * step 5：cwd 降级比对（runtime create 内部可能降级 homedir）。
  *
  * E7（D10）两空提示：landing 未选目录且无 defaultCwd 时 cwd 为空串，runtime create('')
- * 落 homedir——空串守卫（`reqCwd &&`）曾跳过回调致静默换目录。现放宽为「实际值 ≠ 请求值
+ * 落 homedir——空串检查（`reqCwd &&`）曾跳过回调致静默换目录。现放宽为「实际值 ≠ 请求值
  * 即回调」：两空场景也触发 onCwdFallback('', homedir)，壳侧同一 toast 通道提示用户
  * 「已切换到主目录」（reqCwd 空串与降级 toast 的区分由壳按 reqCwd 是否为空自行决定文案）。
  */

@@ -1,5 +1,5 @@
 /**
- * rename-session 配置域（pi-rename-session extension 的全部 runtime 侧配置面）。
+ * rename-session 配置域（pi-rename-session extension 的全部 runtime 侧配置范围）。
  *
  * 从 worktree-config-helper.ts 抽出（P1-7 名实拆分：原文件名只对应 worktree 偏好域，
  * 本域与其落盘路径/契约对象均不同）。本模块两部分落盘形态不同，注意区分：
@@ -13,8 +13,8 @@
  * 2. rename-session ext-config（getRenameModel / setRenameModel / getRenameMode /
  *    setRenameMode）：读改写 ${PI_CODING_AGENT_DIR}/config/rename-session-ext-config.json
  *    的 model / mode 字段（与 extension 的 llm-shared getConfigPath 路径契约对齐）。
- *    extension 事件面（turn_end / message_end / 工具 execute 守卫）读时刷新（mtime+size
- *    缓存），本侧写入后下一事件自动生效（设计 rename-session-three-modes D1：事件面
+ *    extension 事件范围（turn_end / message_end / 工具 execute 检查）读时刷新（mtime+size
+ *    缓存），本侧写入后下一事件自动生效（设计 rename-session-three-modes D1：事件范围
  *    live 求值）。只改目标字段，保留文件内其他字段（enabled/maxTitleLength/thinkingLevel
  *    及未来新增）。RMW / 锁协议走共享基建 ext-config-rmw.ts（单一实现点）。
  */
@@ -44,7 +44,7 @@ export function getAutoRenameEnabledPath(): string {
 
 /**
  * 读取 auto-rename 开关状态。标志文件存在=开，不存在/出错=关。
- * 不抛错（读异常一律当关，防御性设计）。
+ * 不抛错（读异常一律当关，容错处理）。
  */
 export function getAutoRenameEnabled(): boolean {
   try {
@@ -81,7 +81,7 @@ export function setAutoRenameEnabled(enabled: boolean): void {
  * 用 auto-rename-initialized 标记防止后续 boot 反复覆盖用户的关闭操作：
  *   - initialized 不存在 → 首次，创建 enabled flag（默认开）+ initialized 标记
  *   - initialized 存在 → 用户已设置过，不干预
- * 不抛错（与 getAutoRenameEnabled 防御性设计一致）。
+ * 不抛错（与 getAutoRenameEnabled 容错处理一致）。
  */
 export function ensureAutoRenameDefault(): void {
   try {
@@ -137,7 +137,7 @@ export function setRenameConfigLockTimingForTest(opts: SyncFileLockOptions): voi
 /**
  * 读取 rename 标题生成模型（"provider/modelId"，未设置返回空串）。
  * 文件不存在/坏 JSON/model 字段非法 → 空串（与 extension normalizeRenameConfig 的回退语义一致）。
- * 不抛错（读异常一律当未设置，防御性设计，与 getAutoRenameEnabled 一致）。
+ * 不抛错（读异常一律当未设置，容错处理，与 getAutoRenameEnabled 一致）。
  */
 export function getRenameModel(): string {
   try {
@@ -190,7 +190,7 @@ function isRenameMode(raw: unknown): raw is RenameMode {
 
 /**
  * 读取 rename 触发模式。文件不存在/坏 JSON/mode 字段缺失或非法 → first-stop
- * （与 extension normalizeRenameConfig 的回退语义一致）。不抛错（防御性设计，与 getRenameModel 一致）。
+ * （与 extension normalizeRenameConfig 的回退语义一致）。不抛错（容错处理，与 getRenameModel 一致）。
  */
 export function getRenameMode(): RenameMode {
   try {
@@ -208,8 +208,8 @@ export function getRenameMode(): RenameMode {
  * 非法值归一为 first-stop（extension 读侧 normalize 对非法值同回默认，写进去也不生效，
  * 不如归一——与 setRenameModel 对无 "/" ref 的归一纪律一致）。
  * 锁协议与 setRenameModel 共用同一把锁（同一文件，D1e）。
- * 生效时点：extension 事件面 live 读 config，写入后下一事件生效；rename_session 工具面
- * 只在 pi 进程起动时求值一次（设计 D1 求值时点边界，GUI 切换须提示「工具面对新会话生效」）。
+ * 生效时点：extension 事件范围 live 读 config，写入后下一事件生效；rename_session 工具侧
+ * 只在 pi 进程起动时求值一次（设计 D1 求值时点边界，GUI 切换须提示「工具侧对新会话生效」）。
  */
 export function setRenameMode(mode: RenameMode): void {
   const normalized = isRenameMode(mode) ? mode : DEFAULT_RENAME_MODE
@@ -286,7 +286,7 @@ export function getRenamePrompt(): RenamePromptSnapshot {
  * 设置 rename 标题提示词（读改写，合并覆盖 style + customInstruction 两字段，保留其他字段）。
  * style 非法归一 slug；instruction 非字符串归一空串、超长截断（extension 读侧同限，写侧先归一
  * 保证 reply 回读值 = 生效值）。单次 RMW 原子写（与 setRenameModel 共用同一把锁，D1e）。
- * 生效时点：extension 事件面 live 读 config，写入后下一次 rename 触发即生效，无需重启。
+ * 生效时点：extension 事件范围 live 读 config，写入后下一次 rename 触发即生效，无需重启。
  * 返回归一后生效值（renderer 保存成功后回填，与 setRenameMode 的 reply 语义一致）。
  */
 export function setRenamePrompt(style: RenameStyle, instruction: string): RenamePromptSnapshot {
@@ -311,7 +311,7 @@ function isValidRenameMaxLength(raw: unknown): raw is number {
 
 /**
  * 读取标题最大长度。文件不存在/坏 JSON/字段非法 → 50（与 extension normalize 回退语义一致）。
- * 不抛错（防御性设计，与 getRenameModel 一致）。读失败分通道（对齐 getRenamePrompt 的
+ * 不抛错（容错处理，与 getRenameModel 一致）。读失败分通道（对齐 getRenamePrompt 的
  * 缺失/损坏分通道纪律）：ENOENT = 文件从未配置，正常回退不留痕；非 ENOENT（EACCES/EISDIR
  * 等 IO 故障、坏 JSON）会掩盖用户已配置的值，先 logger.warn 留痕再回默认（返回语义不变）。
  */

@@ -1,5 +1,5 @@
 /**
- * PS-57 探针：pi RPC 模式 stdout 消息按写入顺序到达（FIFO）——notify-once 兑现链前提守卫。
+ * PS-57 探针：pi RPC 模式 stdout 消息按写入顺序到达（FIFO）——notify-once 兑现链前提检查。
  *
  * 登记条目（docs/pi-semantics.json PS-57）：全部协议消息（response / 事件 / extension_ui_request）
  * 汇经 rpc-mode 的 output 单点 writeRawStdout(serializeJsonLine(obj))，事件流经 session.subscribe
@@ -9,7 +9,7 @@
  *
  * 承重（ADR-0087）：delivery 内核 onSettled 受理回执（port.send 同栈同步触发）先于其后的
  * agent_settled 事件被 runtime 处理——armed→injected 锚定与 settled 兑现的先后关系以 stdout
- * FIFO 为前提；pi 若改为并行/分通道输出，先后关系失锚且无显式信号，故以本探针拦为红灯。
+ * FIFO 为前提；pi 若改为并行/分通道输出，先后关系定位失败且无显式信号，故以本探针拦为红灯。
  *
  * 断言方式：静态直读 node_modules 实装 dist（pi 语义断言权威源，见 AGENTS.md）。
  * dist 不可达时 skip 不 fail；凭证无关、不进 REAL_PI_TESTS 分池。
@@ -53,7 +53,7 @@ describe.skipIf(!RPC_DIST)(
       expect(
         rpcMode.includes('output(toJsonEvent(event))'),
         'PS-57 漂移：session.subscribe 回调不再经 output(toJsonEvent(event)) 写事件——事件流脱离 ' +
-          'output 单点（分通道/直写 stdout），事件与其前后的受理回执消息的顺序保证失锚。' +
+          'output 单点（分通道/直写 stdout），事件与其前后的受理回执消息的顺序保证定位失败。' +
           '恢复动作：复核事件转发路径，确认顺序语义后更新本探针',
       ).toBe(true)
     })
@@ -61,7 +61,7 @@ describe.skipIf(!RPC_DIST)(
     it('语义③：writeRawStdout 以 promise tail 链串行化（写序 = 调用序的机械保证）', () => {
       expect(
         outputGuard.includes('rawStdoutWriteTail = rawStdoutWriteTail.then('),
-        'PS-57 漂移：writeRawStdout 的 tail 链串行化形态消失——写入改为并行/无序（FIFO 前提失锚），' +
+        'PS-57 漂移：writeRawStdout 的 tail 链串行化形态消失——写入改为并行/无序（FIFO 前提定位失败），' +
           'notify-once 受理回执先于 agent_settled 处理的保证不复存在。恢复动作：复核 output-guard.js ' +
           '写入机制，若顺序保证由其他机制承担则重写本条 claim 与探针，否则升级为 pi 语义漂移处理',
       ).toBe(true)

@@ -1,5 +1,5 @@
 /**
- * MessageBus 观测面（pull-push-architecture W0 / D7「发布/订阅侧结构化日志」）。
+ * MessageBus 观测范围（pull-push-architecture W0 / D7「发布/订阅侧结构化日志」）。
  *
  * 背景（R11/6c3）：个别 session 的 planState 广播消息全程零发布（真机多日观测），
  * 发布/订阅侧零日志——「消息没到」无法与「消息没发 / 没人订 / 连接不在线」区分，
@@ -7,12 +7,12 @@
  * - 订阅生命周期（subscribe / unsubscribe / unsubscribeAll / clearSession）逐事件
  *   info：6c3 类故障排障第一问「订阅建立时 stateSnapshot 里有没有 plan 帧」从此可检索；
  * - 投递失败（publish 完成写快照但无可送达的 live 连接）对 state 类落观测：
- *   GUI 投影五族（R11 域——state 类中投影链直接承载 GUI 状态的低频族，判据同
+ *   GUI 派生视图五族（R11 域——state 类中派生视图链直接承载 GUI 状态的低频族，判据同
  *   PROJECTION_STATE_TYPES 头注；非「有快照 key 的全部类型」——occupancy/context/
  *   widget 等同样有快照 key 但属高频族，走限频）逐条 info；其余 state 类
  *   （occupancy / context / widget 等高频族）按 (sessionId, type) 滑窗限频——逐条会
- *   刷屏（后台 session 的 state 帧持续空投是设计内常态）。stream / transient 不观测：
- *   stream 空投由 ring 回放兜底（订阅时补）、transient 设计内可丢，观测它们只有噪声价值。
+ *   刷屏（后台 session 的 state 帧持续无订阅者投递——发布即丢弃、不补发——是设计内常态）。stream / transient 不观测：
+ *   stream 帧无订阅者时被丢弃、由 ring 回放补上（订阅时补），transient 设计内可丢，观测它们只有噪声价值。
  *
  * 正常路径（有 live 订阅者且送达成功）零日志——pull-push S5「无日志噪声」锚。
  * 日志经显式 logger 只落 runtime 主日志文件、不刷终端（排障入口 =
@@ -21,7 +21,7 @@
 import { logger } from '../../infra/logger.js'
 
 /**
- * GUI 状态投影五族白名单：state 类中「投影链直接承载 GUI 状态」的低频族（R11 域）。
+ * GUI 状态派生视图五族白名单：state 类中「派生视图链直接承载 GUI 状态」的低频族（R11 域）。
  * 这些类型的投递失败逐条落观测（状态迁移级频率，不构成噪声）；其余 state 类型走限频。
  */
 const PROJECTION_STATE_TYPES: ReadonlySet<string> = new Set([
@@ -32,7 +32,7 @@ const PROJECTION_STATE_TYPES: ReadonlySet<string> = new Set([
   'session.commands',
 ])
 
-/** 非投影族 state 空投的限频窗口（同一 (sessionId, type) 窗口内只落首条 + 聚合行）。 */
+/** 非派生视图族 state 帧无订阅者投递的限频窗口（同一 (sessionId, type) 窗口内只落首条 + 聚合行）。 */
 const DELIVER_DROP_WINDOW_MS = 60_000
 
 /** per (sessionId, type) 限频窗口（session 销毁时随 clearBusObserveState 清理，键集有界）。 */
@@ -76,7 +76,7 @@ export function observeDeliverDropped(sessionId: string, messageType: string, su
   window.suppressed += 1
 }
 
-/** 订阅建立观测：stateSnapshot 键集是「重连恢复面」的直接证据（6c3 排障第一问）。 */
+/** 订阅建立观测：stateSnapshot 键集是「重连恢复侧」的直接证据（6c3 排障第一问）。 */
 export function observeSubscribe(sessionId: string, info: { stateKeys: string[]; ringSize: number; lastSeq: number; subscribers: number }): void {
   logger.info('[bus-observe] subscribe', { sessionId, ...info })
 }

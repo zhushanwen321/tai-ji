@@ -6,7 +6,7 @@
     组件常驻挂载（Panel 无条件挂载本组件，isActive=false 时 template 根 v-if 不渲染
     DOM）——setup 内 useExtensionUI(planReviewFilter) 订阅与 getPendingRequests 拉取
     不随显隐销毁，isActive=false 期间 planReview 请求恒入 store（挂起审批的唯一兜底
-    消费面：C4 分流把 planReview 排除出 CompanionBand 原始 dialog，无二通道；订阅宿主
+    消费方：C4 分流把 planReview 排除出 CompanionBand 原始 dialog，无二通道；订阅宿主
     若组件级 v-if，挂起请求无人枚举 → agent 永挂）。focusedSid 注入义务（原横幅/审批
     条 setup 内 usePlanState → syncFocus）随组件迁移到本组件（承接清单②）。
     视觉 = text-xs / text-neutral-dim / 无填充背景 / border-t hairline，比内容安静。
@@ -164,7 +164,7 @@
     >
       {{ exitError }}
     </p>
-    <!-- 首拉失败（分区 loadError）：view 不被覆盖，状态带照旧值显示，错误行提示状态可能过期 -->
+    <!-- 首次拉取失败（分区 loadError）：view 不被覆盖，状态带照旧值显示，错误行提示状态可能过期 -->
     <p
       v-else-if="loadError"
       data-testid="plan-mode-bar-load-error"
@@ -185,10 +185,10 @@
  *
  * 常驻挂载订阅约束（承接清单①，M1）：本组件由 Panel 无条件挂载（禁组件级 v-if），
  * isActive=false 时仅 template 根 v-if 不渲染 DOM——setup 内 useExtensionUI(
- * planReviewFilter) 实例与 usePlanState 的 WS 订阅/首拉不随显隐销毁。isActive=false
+ * planReviewFilter) 实例与 usePlanState 的 WS 订阅/首次拉取不随显隐销毁。isActive=false
  * 期间到达的 planReview 请求仍入 extensionUIStore（PlanReviewBar 此时未创建，本实例
- * 是唯一订阅面；refCount 订阅 + store requestId dedup 使 isActive=true 后 PlanReviewBar
- * 的第二实例幂等共存，getPendingRequests 快照补拉兜住晚订阅窗口）。
+ * 是唯一订阅范围；refCount 订阅 + store requestId dedup 使 isActive=true 后 PlanReviewBar
+ * 的第二实例幂等共存，getPendingRequests 快照补充拉取兜住晚订阅窗口）。
  *
  * focusedSid 注入义务（承接清单②）：planStore.focusedSid 的注入方原为同宿主
  * （PanelContainer）的横幅/审批条，二者删除后由本组件 setup 内 usePlanState 的
@@ -200,7 +200,7 @@
  * command('session.abortPlan') → runtime ensureActive + client.prompt('/plan abort')；
  * 退出唯一入口 = 本按钮（原 degraded 右区退出按钮已删，问题 5 去重）。
  * reply 失败 = promise reject → E9 恢复指引就近呈现、状态带保持原状；成功后 isActive=false
- * 由投影链广播驱动（本组件不本地改状态）。
+ * 由派生视图链广播驱动（本组件不本地改状态）。
  */
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -222,8 +222,8 @@ const { t } = useI18n()
 
 const sessionIdRef = computed(() => props.sessionId)
 
-// focusedSid 注入 + WS 订阅 + 首拉（承接清单②；视图透出 view/stage/loadError）
-// drafts = 焦点分区评论草稿（§3.5 退出确认草稿警示 + 确认退出即清的读取面）
+// focusedSid 注入 + WS 订阅 + 首次拉取（承接清单②；视图透出 view/stage/loadError）
+// drafts = 焦点分区评论草稿（§3.5 退出确认草稿警示 + 确认退出即清的读侧）
 const { view, stage, loadError, drafts, clearDrafts } = usePlanState(sessionIdRef)
 
 // 常驻订阅（承接清单①）：isActive=false 期间 planReview 请求仍入 store 的兜底实例。
@@ -294,7 +294,7 @@ async function onExit(): Promise<void> {
   exiting.value = true
   exitError.value = null
   try {
-    // reply 契约（protocol.ts session.abortPlan）：ack void，退出结果经投影链广播推回；
+    // reply 契约（protocol.ts session.abortPlan）：ack void，退出结果经派生视图链广播推回；
     // 失败 = error envelope → promise reject（AGENTS.md 规则 5 的 renderer 实态）
     await command('session.abortPlan', { sessionId: sid }, RPC_BACKSTOP_TIMEOUT_MS)
   } catch (e) {

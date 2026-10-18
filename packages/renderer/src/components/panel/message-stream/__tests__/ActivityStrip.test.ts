@@ -9,7 +9,7 @@
  *   P-1 探针 V8 校准点）
  * - P1.5 组件黑盒·横线分隔行族（compacting 行自通栏带降级回归本族 / A4+A7）：四行同构
  *   （system-notice + content-col 保留，行内左右各一条渐隐 hairline）、待发 chip count =
- *   内核投递投影里「非 direct 且未 delivered」条目数（[u3c/D7] 单源化——原 useCompactQueue
+ *   内核投递派生视图里「非 direct 且未 delivered」条目数（[u3c/D7] 单源化——原 useCompactQueue
  *   未提交条目口径随队列退役，口径唯一定义点 = core deliveryQueueEntries（U20 下沉））、
  *   count=0 隐藏 chip、bash/waiting/thinking/settling 行同构形态
  * - P2 组件黑盒·优先级堆叠：compacting + bash 并存 → 两行且 compacting 在上；
@@ -18,7 +18,7 @@
  *   settling 与 compacting 并存 → 仅 compacting 行（同档位幂等，不重复堆叠）；
  *   turn=generating 不渲染行（streaming 本体由 TurnMeta「工作中」承担，D6 活动条列）
  * - P3 组件黑盒·全 idle 不渲染（G3：无占用 = 无活动条）
- * - P4 MessageStream 集成·迁移收口：TurnMeta 旧 dispatching 占位不再渲染 + 三点等待行接管；
+ * - P4 MessageStream 集成·迁移收尾：TurnMeta 旧 dispatching 占位不再渲染 + 三点等待行接管；
  *   executingBash 瞬时行迁入（bashStart 帧驱动）；fork notice 与活动条的文档流定位顺序
  *   （活动条在前——ForkNotice 为文档流 block，按文档序自然堆叠）
  * - P5 i18n key 完整：行文案 + 待发 chip + bash 详情等 key 在 zh/en locale 均定义
@@ -43,8 +43,8 @@ const apiMock = vi.hoisted(() => ({
   streamSubscribe: vi.fn(() => () => {}),
 }))
 
-/** 投递投影注入助手：副文案 count 口径测试直接写 core 投影 ref（帧消费链路由 core useChat 的
- *  session.delivery handler 承担，本组件只读投影——单源化后已无本地队列 mock 面）。 */
+/** 投递派生视图注入助手：副文案 count 口径测试直接写 core 派生视图 ref（帧消费链路由 core useChat 的
+ *  session.delivery handler 承担，本组件只读派生视图——单源化后已无本地队列 mock 面）。 */
 function setProjection(sid: string, entries: DeliveryFrameEntry[]): void {
   const ref = getDeliveryProjectionRef()
   const next = new Map(ref.value)
@@ -72,7 +72,7 @@ import { useChatStore } from '@/stores/chat'
 import { useForkNoticeFeed, resetForkNoticeFeed } from '@/composables/effects/useForkNoticeEffect'
 import type { SessionOccupancyState } from '@taiji/core'
 
-/** 断言侧 t：与组件同一消费面（vitest 全局 setup mock useI18n → zh-CN locale 文案）。
+/** 断言侧 t：与组件同一消费方（vitest 全局 setup mock useI18n → zh-CN locale 文案）。
  *  chip/elapsed 等带参文案按「同键同参」比对，不锁措辞——键缺失时 mock 返回裸 key，两侧仍相等。 */
 const { t } = useI18n()
 
@@ -108,7 +108,7 @@ async function mountStrip(opts: {
 beforeEach(() => {
   setActivePinia(createPinia())
   resetForkNoticeFeed()
-  // 投影是模块级 ref（跨用例共享），逐用例显式重置（新 Map = 无条目）
+  // 派生视图是模块级 ref（跨用例共享），逐用例显式重置（新 Map = 无条目）
   getDeliveryProjectionRef().value = new Map()
 })
 
@@ -214,7 +214,7 @@ describe('ActivityStrip · 四类状态各自渲染（P1）', () => {
 })
 
 describe('ActivityStrip · 横线分隔行族形态（compacting 降级回归 + D3 增强规格 / A4+A7）', () => {
-  /** 构造投影条目（lane/state 双维决定是否计入待发 chip） */
+  /** 构造派生视图条目（lane/state 双维决定是否计入待发 chip） */
   function entry(clientUuid: string, state: DeliveryFrameEntry['state'], lane: DeliveryFrameEntry['lane']): DeliveryFrameEntry {
     return { clientUuid, preview: clientUuid, state, lane }
   }
@@ -251,7 +251,7 @@ describe('ActivityStrip · 横线分隔行族形态（compacting 降级回归 + 
     wrapper.unmount()
   })
 
-  it('count 口径：只计内核投影里「非 direct 且未 delivered」条目（direct 待确认气泡与已送达不计数）', async () => {
+  it('count 口径：只计内核派生视图里「非 direct 且未 delivered」条目（direct 待确认气泡与已送达不计数）', async () => {
     setProjection(SID, [
       entry('u1', 'queued', 'queued'),
       entry('u2', 'in-flight', 'steer'),
@@ -377,7 +377,7 @@ describe('ActivityStrip · 全 idle 不渲染（P3）', () => {
   })
 })
 
-describe('ActivityStrip × MessageStream 集成 · 迁移收口（P4）', () => {
+describe('ActivityStrip × MessageStream 集成 · 迁移收尾（P4）', () => {
   /** mount MessageStream（真实 chat store 驱动 occupancy；照既有 MessageStream 集成测试的 mountStream 模式） */
   async function mountStream(sessionId: string) {
     const wrapper = mount(MessageStream, {

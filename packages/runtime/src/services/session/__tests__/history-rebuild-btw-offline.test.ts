@@ -1,16 +1,16 @@
 /**
- * SessionHistoryReader btw 线离线尾读解析腿直测（btw-question 重载链缺陷修复）。
+ * SessionHistoryReader btw 线离线尾读解析路径直测（btw-question 重载链缺陷修复）。
  *
  * 缺陷背景：重启后线进程不在场（pm.getClient(vid) null）→ 离线尾读走通用链
- * getHistoryTailFromFile → scanSessions 对 btw vid 构造性 miss（线目录在 G4 隔离面
- * `agent/btw/…`，不在 sessions/ 扫描面）→ 静默空 → 线视图空态（「持久化不改变可见性」
+ * getHistoryTailFromFile → scanSessions 对 btw vid 构造性 miss（线目录在 G4 隔离边界侧
+ * `agent/btw/…`，不在 sessions/ 扫描范围）→ 静默空 → 线视图空态（「持久化不改变可见性」
  * 裁决⑧被违背）。修复 = tailReadOffline 对 btw vid 先经 resolveBtwThreadFile（组合根接
  * BtwService 注册表）解析线文件，命中走同一 tailReadHistory 链；缺失/miss warn + 空页。
  *
  * 分层：不 mock session-history（尾读链对临时 jsonl 真跑——窗口/turn 边界/cursor 定位
  * 为被测行为的一部分）；fake 面 = pm（离线）+ sessionStore.convertHistory（entry→Message
- * 投影，转换链本体由 session-history 域自身测试覆盖）+ resolveBtwThreadFile（注册表缝）。
- * 非 btw vid 回归腿断言解析器零调用（分支收窄证明）。
+ * 派生视图，转换链本体由 session-history 域自身测试覆盖）+ resolveBtwThreadFile（注册表缝）。
+ * 非 btw vid 回归路径断言解析器零调用（分支收窄证明）。
  */
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -62,7 +62,7 @@ function fakeConvertHistory(raw: unknown[]): Message[] {
 function makeOfflineReader(resolveBtwThreadFile?: (vid: string) => string | undefined) {
   const resolve = vi.fn(resolveBtwThreadFile)
   const sessionStore = {
-    // 非 btw vid 回归腿走通用链 getHistoryTailFromFile → scanSessions（btw vid 不会走到）
+    // 非 btw vid 回归路径走通用链 getHistoryTailFromFile → scanSessions（btw vid 不会走到）
     scanSessions: vi.fn(() => [] as Array<{ id: string; filePath: string }>),
     convertHistory: vi.fn((raw: unknown[]) => fakeConvertHistory(raw)),
   } as unknown as ISessionStore
@@ -86,7 +86,7 @@ function vidFor(name: string): string {
   return btwVirtualId(name)
 }
 
-describe('btw vid 离线尾读（btw 面解析腿）', () => {
+describe('btw vid 离线尾读（btw 面解析路径）', () => {
   it('注册表命中 + 文件在场：entries 经同一尾读链回放（2 turns）', async () => {
     const { registry } = seedThreadFile('line-a', [
       messageEntry('e1', 'user', 'turn 1 q'),
@@ -148,7 +148,7 @@ describe('btw vid 离线尾读（btw 面解析腿）', () => {
     }
   })
 
-  it('cursor 游标翻页（离线 btw 线）：同一解析腿，返回锚点前最近窗口', async () => {
+  it('cursor 游标翻页（离线 btw 线）：同一解析路径，返回锚点前最近窗口', async () => {
     const { registry } = seedThreadFile('line-cursor', [
       messageEntry('e1', 'user', 'turn 1'),
       messageEntry('e2', 'assistant', 'reply 1'),
@@ -164,7 +164,7 @@ describe('btw vid 离线尾读（btw 面解析腿）', () => {
   })
 })
 
-describe('非 btw vid 回归腿（原行为不变）', () => {
+describe('非 btw vid 回归路径（原行为不变）', () => {
   it('普通 sid 离线尾读：不触碰 btw 解析器，走通用链（scanSessions miss → 静默空）', async () => {
     const { reader, resolve, sessionStore } = makeOfflineReader(() => join(dir, 'should-not-matter.jsonl'))
     const result = await reader.getHistory('plain-session-id')
@@ -173,7 +173,7 @@ describe('非 btw vid 回归腿（原行为不变）', () => {
     expect(result).toEqual({ messages: [], truncated: false, loadedTurns: 0, totalTurnsEstimate: 0 })
   })
 
-  it('subagent 三段式 vid 同样不走 btw 解析腿（分支收窄在 isBtwVirtualId）', async () => {
+  it('subagent 三段式 vid 同样不走 btw 解析路径（分支收窄在 isBtwVirtualId）', async () => {
     const { reader, resolve } = makeOfflineReader(() => join(dir, 'should-not-matter.jsonl'))
     await reader.getHistory('subagent:main-1:sub-1')
     expect(resolve).not.toHaveBeenCalled()

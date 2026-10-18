@@ -17,7 +17,7 @@
  *   设计文档 D2「已接受代价（外部并发窗口）」。
  *
  * 校验边界（D4，写死）：
- *   - 保存校验面 = §2.4 三不变量（名称字符集与全局唯一 / command、url 至少其一 /
+ *   - 保存时的校验逻辑 = §2.4 三不变量（名称字符集与全局唯一 / command、url 至少其一 /
  *     文件整体 JSON 合法）+ 两条有意收紧：command 与 url 同填拦截（pi 实装是 url
  *     优先静默忽略，taiji 拦截报互斥错）、重名添加拦截不替换（pi CLI add 是静默
  *     替换，表单语境下误覆盖不可接受）+ type 例外条款（三值闭集 "stdio"/"http"/
@@ -71,7 +71,7 @@ import { getMcpConfigPath } from './pi-paths.js'
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** 清单单条目：文件原样值 + 读侧标注。坏条目照原样保留（config 可能是任意 JSON 值）。 */
-export interface McpServerEntryView { // oe-exempt:20261004:framework:store 读侧跨层投影形状（infra→transport→renderer，坏条目原样投影契约）
+export interface McpServerEntryView { // oe-exempt:20261004:framework:store 读侧跨层派生视图形状（infra→transport→renderer，坏条目原样派生视图契约）
   name: string
   /** 文件中的原样条目值（D4：坏条目照原样保留，不阻塞其余条目管理）。 */
   config: unknown
@@ -80,7 +80,7 @@ export interface McpServerEntryView { // oe-exempt:20261004:framework:store 读�
 }
 
 /** mcp.json 快照（拉取口径，读以文件为准）。 */
-export interface McpSnapshot { // oe-exempt:20261004:framework:store 读侧跨层投影形状（mcp.json 快照拉取契约，读以文件为准）
+export interface McpSnapshot { // oe-exempt:20261004:framework:store 读侧跨层派生视图形状（mcp.json 快照拉取契约，读以文件为准）
   /** 当前生效路径（getMcpConfigPath() 或测试重定向值）。 */
   filePath: string
   /** 文件整体损坏（JSON 语法错误 / 顶层非对象 / mcpServers 非对象 / 不可读）——true 时 servers 恒空。 */
@@ -249,7 +249,7 @@ function validateTransportCombo(config: Record<string, unknown>): void {
 }
 
 /**
- * 保存校验面（写前，D4）：三不变量 + 互斥有意收紧 + type 例外条款。
+ * 保存时的校验逻辑（写前，D4）：三不变量 + 互斥有意收紧 + type 例外条款。
  * 校验输入恒为写回产物（剥离/清理之后，D4 管线顺序）——表单路径产物无 type 键，
  * type 三项校验在该路径空转。校验不过抛 McpStoreError，不落盘（fail-fast）。
  */
@@ -578,7 +578,7 @@ export function removeMcpServer(name: string): boolean {
 /**
  * 启停切换专用操作（§3.1「可启停（写入 enabled 字段）」最小语义，写死）：锁内重读磁盘
  * 最新内容后仅翻转该条目的 enabled 键，其余键一律不触——不走 update 的条目值回写路径
- *（清单投影为底的全量替换会把「清单打开至切换之间」的外部并发改动（终端 pi mcp 命令 /
+ *（清单映射为底的全量替换会把「清单打开至切换之间」的外部并发改动（终端 pi mcp 命令 /
  * 手编）静默覆盖，丢失窗口从 D2 声明的锁内亚秒级放大到 UI 会话级；混填条目亦不会被
  * form 路径规范化改写）。false 落 enabled:false 键，true 删键（缺省启用，对齐 pi 自身
  * 写路径与 buildFormConfig 语义）。不跑保存校验：本操作不改传输字段，条目合法性与

@@ -29,12 +29,12 @@ export interface RendererMemorySnapshot {
  * - 'unhandledrejection'：未接住的 Promise rejection
  *
  * 结构化标记（非三件套捕获面）[crash-forensics §3.3 D8 / u10a]：
- * - 'inbound-frame-dropped'：ws-client 入站帧大小守卫命中（超界帧丢弃）经本通道上报——
- *   main 侧 handler 识别该标记后额外写崩溃台账行（main.jsonl
+ * - 'inbound-frame-dropped'：ws-client 入站帧大小检查命中（超界帧丢弃）经本通道上报——
+ *   main 侧 handler 识别该标记后额外写崩溃条目清单行（main.jsonl
  *   `layer=renderer, event=inbound-frame-dropped`，D1 写入点矩阵），复用既有通道不新建。
  * - 'runtime-start-failed'：runtime 启动失败真因（code-harden RD-3#2：main supervisor
  *   startAndNotify 失败 → runtime-error 推送 / get-runtime-start-error 拉取兜底到达
- *   renderer，连接屏 failed 分支显示真实 message，并经本通道落台账）。
+ *   renderer，连接屏 failed 分支显示真实 message，并经本通道写入条目清单）。
  */
 export type RendererErrorSource =
   | 'vue-error-handler'
@@ -141,7 +141,7 @@ export interface DebugRunLogRetentionResult {
  * 分叉。修改文案时必须保留「本机路径」「会话标识」两个知情要素（D6 原文锚点）。
  */
 export const DIAGNOSTIC_EXPORT_PRIVACY_NOTICE =
-  '诊断包将收集应用日志与崩溃台账，其中可能包含本机路径与会话标识信息，仅用于问题排查，请勿公开分享。'
+  '诊断包将收集应用日志与崩溃条目清单，其中可能包含本机路径与会话标识信息，仅用于问题排查，请勿公开分享。'
 
 /** 诊断包导出请求 payload（renderer → main；字段全部可选，空参 invoke 合法）。 */
 export interface DiagnosticExportBundlePayload {
@@ -154,7 +154,7 @@ export interface DiagnosticExportSummary {
   /** 导出时刻（ISO 8601 UTC，main 侧权威） */
   exportedAt: string
   appVersion: string
-  /** pi 版本（从台账事件提取最近值；无记录为 'unknown'） */
+  /** pi 版本（从条目清单事件提取最近值；无记录为 'unknown'） */
   piVersion: string
   platform: string
   /** 本次评估越线的触发条件 id（D2 状态表；空数组 = 常态无越线） */
@@ -287,6 +287,35 @@ export interface ShieldsFacesPayload {
  * 为子集时 TS 结构可赋值性会使手抄词表漂移静默通过，main 侧只剩运行时 throw 兜底。
  */
 export type OverlayContentKind = 'browser' | 'workflow' | 'scheduler' | 'canvas'
+
+// ── browser:state view 状态推送（display-containers W2）──
+
+/**
+ * `browser:state` 推送载荷（main → renderer；BROWSER_STATE 通道）。
+ *
+ * main BrowserViewManager 托管状态（七字段）+ sessionId 组装的完整推送形态：
+ * preload ElectronAPI 签名 / renderer ipc 封装（BrowserPane 地址栏回填 + loading/
+ * error 态）/ main 侧组装点三方共用同一形态声明，防漂移。main 内部托管态类型 =
+ * `Omit<BrowserFrameState, 'sessionId'>`（browser-view-manager BrowserViewState 派生）。
+ */
+export interface BrowserFrameState {
+  sessionId: string
+  /** 当前 URL（did-navigate / did-navigate-in-page 更新） */
+  currentUrl: string
+  /** 是否加载中 */
+  isLoading: boolean
+  /** 最近一次加载错误（did-fail-load 记录；成功导航后清空） */
+  error: { errorCode: number; errorDescription: string; validatedURL: string } | null
+  /** render-process-gone 后非 null（进程崩溃原因；成功导航后清空）——
+   *  renderer 落「创建失败」占位族（§5.3 两类占位区分），重试 = create + show + navigate */
+  processGone: { reason: string } | null
+  /** 是否可后退（did-navigate 后同步 navigationHistory） */
+  canGoBack: boolean
+  /** 是否可前进（did-navigate 后同步 navigationHistory） */
+  canGoForward: boolean
+  /** 当前缩放因子（setZoomFactor 后回推，useBrowserZoom 基准一致） */
+  zoomFactor: number
+}
 // ── local-file 预检与源码读取（LOCAL_FILE_SERVABLE / LOCAL_FILE_READ invoke 通道）
 //    [chat-html-support §6.9 D9 / §6.4 D4 / §8.2 S3] ─────────────────────────────
 

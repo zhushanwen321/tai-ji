@@ -75,7 +75,7 @@ function tick(ms = 10): Promise<void> {
 describe('crash-journal writer（真实 IO，tmp 隔离）', () => {
   let writer: CrashJournalFileWriter
   afterEach(() => {
-    // afterEach 保证失败用例也收口（close 幂等）
+    // afterEach 保证失败用例也收尾（close 幂等）
     return writer?.close().catch(() => {})
   })
 
@@ -196,13 +196,13 @@ describe('错误/降级路径（review S-12a：写错误自愈；【oe-audit C3�
     // once 语义：继续 append（仍失败）不再刷 warn（防失败风暴）
     expect(() => mod.getCrashJournal().append(makeEvent(1))).not.toThrow()
     expect(warn).toHaveBeenCalledTimes(1)
-    // close 可 await：同步形态收口不挂起、不向调用链放大
+    // close 可 await：同步形态收尾不挂起、不向调用链放大
     await expect(mod.closeCrashJournal()).resolves.toBeUndefined()
   })
 
-  it('轮转边界同步收口：触发轮转的行直接写新档（无 pending 窗口），close 后行不丢', async () => {
+  it('轮转边界同步收尾：触发轮转的行直接写新档（无 pending 窗口），close 后行不丢', async () => {
     // 【oe-audit C3】同步形态下轮转即时生效（append 完成即落盘），原「轮转窗口内 close
-    // 等 pending 回放」机制已删；本用例保留同一断言面：轮转边界的行序与归属不因 close 时序变化
+    // 等 pending 回放」机制已删；本用例保留同一断言范围：轮转边界的行序与归属不因 close 时序变化
     const w = createCrashJournalWriter({ role: 'runtime', dataDir, maxFileBytes: 500 })
     w.append(makeEvent(0))
     w.append(makeEvent(1))

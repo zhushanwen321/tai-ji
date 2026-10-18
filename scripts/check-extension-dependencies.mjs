@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * check-extension-dependencies.mjs —— extension-dependencies.json 一致性守卫（S-7）。
+ * check-extension-dependencies.mjs —— extension-dependencies.json 一致性检查（S-7）。
  *
  * 背景：R1 MF-6 事故是 extension-dependencies.json 与磁盘上的扩展包清单漂移
  * （已删除的 pi-statusline 残留条目 + schema 无人消费）。本脚本让该文件与磁盘事实
@@ -166,7 +166,7 @@ for (const pkg of diskPackages) {
 // ── 5. 一层路径残留：活文件禁止引用 extensions/<pkg>/（分组后必须带 taiji|universal 前缀）──
 // 背景：2026-08-22 目录分组时人工适配了 14 处写死一层路径的引用（脚本/eslint/tsconfig/
 // 文档），本检测防新引用回退。包名清单从磁盘动态构建（新增包自动纳入检测范围）。
-// 检测面 = 活代码/配置/活文档；历史记录与构建产物不检测（保留当时事实，不追溯改写）：
+// 检测范围 = 活代码/配置/活文档；历史记录与构建产物不检测（保留当时事实，不追溯改写）：
 //   - resources/：staged 构建产物（bundle 时已是新路径，磁盘残留旧 staged 无意义）
 //   - CHANGELOG.md / adr/ / 包内 docs/：历史记录（当时路径是事实）
 //   - (?<!\./)：排除包内相对导入 ./extensions/<pkg>（与仓库顶层 extensions/ 无关）
@@ -184,7 +184,7 @@ for (const pkg of diskPackages) {
 //     模块，6 文件 8 处）误报为旧一层路径残留、拦下 U2 提交——根因 = 简写未含 `src/`
 //     落进匹配域；处置 = 误报后简写已改无歧义全限定形（含 `src/`），并加本豁免防模块
 //     命名空间再次被误判。真正的一层路径残留（extensions/<pkg>/ 前无 src/）仍按原样拦截，
-//     检测面不减。（本注释自身用 <pkg> 占位描述匹配形，避免自命中——同上方各条先例。）
+//     检测范围不减。（本注释自身用 <pkg> 占位描述匹配形，避免自命中——同上方各条先例。）
 //   - (?![\w-]) 终止黑名单：包名边界 = 后面不是字母数字/连字符。不用白名单枚举
 //     （[/\s"'\`,)\]]|$）——白名单漏全角标点/英文句点，中文文档全角括号包路径的
 //     高频写法会逃逸（2026-08-22 审查实证，扩大后即抓出 6 处漏网）

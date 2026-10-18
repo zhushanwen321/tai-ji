@@ -84,7 +84,7 @@ describe('normalizeSubagentStatus（[U6] 两态直出 + legacy 展示位合成�
     expect(normalizeSubagentStatus('running', {})).toEqual({ status: 'running' })
   })
 
-  it('idle → idle（两态新词直投：无任务在飞可续聊）', () => {
+  it('idle → idle（两态新词直投：无任务在途可续聊）', () => {
     expect(normalizeSubagentStatus('idle')).toEqual({ status: 'idle' })
   })
 

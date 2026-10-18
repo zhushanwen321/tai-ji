@@ -147,7 +147,7 @@ function guidanceLines(): string[] {
  * ③「正确做法」四条：标题/keyword、绝对路径 outline、更短前缀、doctor。
  * ④ 最后一行封死 shell 绕行：find/ls/rg 搜 session 目录、cat/read 原始 .jsonl 均禁止。
  *
- * 无「👉 用 recent 看全量」误导指引（recent 候选对写错的 uuid 无自纠价值，§6.7 被否项）。
+ * 无「👉 用 recent 看全量」误导指引（recent 候选对写错的 uuid 无自纠价值，§6.7 不采用项）。
  */
 export function formatNoMatch(query: string, roots: SessionRoot[]): string {
   return [

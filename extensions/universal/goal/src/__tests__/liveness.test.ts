@@ -2,7 +2,7 @@
  * engine/liveness.ts 纯函数测试 — 轮次活性熔断判定单元（chat-domain-v1x D4 / W5）
  *
  * 覆盖：env 配置解析（合法/非法/缺省）、退避等级数学（第 N 轮起 ×2、指数天花板）、
- * 进展信号边界、toolCall 块计数（duck-typed 守卫）、pending 集合变化判定。
+ * 进展信号边界、toolCall 块计数（duck-typed 检查）、pending 集合变化判定。
  * 行为级四断言（封顶/退避/恢复/defer 去重经 handleAgentEnd）见 circuit-breaker.test.ts。
  */
 import { describe, expect, it } from "vitest";

@@ -1,7 +1,7 @@
 /**
  * /todos 命令双通道反馈单测（D10①，Q1 裁决）。
  *
- * 断言面：notify 通道（清单摘要 / 空态文案 / no-UI 提示）+ widget 通道
+ * 断言范围：notify 通道（清单摘要 / 空态文案 / no-UI 提示）+ widget 通道
  * （refreshDisplay 强推）；双通道在同一次命令触发中都可达。
  */
 

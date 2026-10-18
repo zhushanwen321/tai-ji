@@ -22,7 +22,7 @@ export interface TtsConfigurePayload {
 }
 
 /**
- * 读脱敏配置投影（设置页首屏）。每家敏感信息只含 hasApiKey / providerKeyAvailable 两布尔
+ * 读脱敏配置派生视图（设置页首屏）。每家敏感信息只含 hasApiKey / providerKeyAvailable 两布尔
  * （Key 联动检测信号，D4），永不回 Key 本体。
  */
 export async function getConfig(): Promise<{ config: SanitizedTtsConfig }> {
@@ -38,7 +38,7 @@ export async function configure(payload: TtsConfigurePayload): Promise<{ config?
 }
 
 /**
- * 拉三家表单投影（设置页表单数据源；数据权威在 runtime driver，renderer 不 import 数据表）。
+ * 拉三家表单派生视图（设置页表单数据源；数据权威在 runtime driver，renderer 不 import 数据表）。
  * capabilities 拉取失败时表单区禁用 + 重试入口，不渲染半态枚举（设计 §7.5 TtsPage）。
  */
 export async function getCapabilities(): Promise<{ forms: Record<TtsProviderId, TtsFormModel> }> {

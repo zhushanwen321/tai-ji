@@ -43,7 +43,7 @@ interface ServiceInternals {
 /**
  * SSOT 已登记、RPC handler 尚未实装的方法豁免表（u2d 批次建立）。[u5b 已清空]：
  * activate 订阅族（session-api 六点扩表）与 ui 命令式点位（ui-api updateHeaderAction）
- * handler 均已落地——豁免表保留空集形态供后续批次复用（登记即债务，落地即清账）。
+ * handler 均已落地——豁免表保留空集形态供后续批次复用（登记即债务，落地即关闭）。
  */
 const PENDING_U5B_METHODS: ReadonlySet<string> = new Set<string>([])
 
@@ -101,7 +101,7 @@ describe('plugin-permission-map SSOT（AC-I6）', () => {
     const orphans = [...registeredMethods].filter(m => !ssot.has(m))
     expect(orphans, `methods registered but missing from PLUGIN_RPC_METHODS: ${orphans.join(', ')}`).toEqual([])
     // 数量级回归锚点：46（agent5 commands3 config3 hooks2 notify1 sessionData4
-    // sessions8 storage8 tools2 ui5 views2 workspace3）+ AP-4 读面 6（readEntries/
+    // sessions8 storage8 tools2 ui5 views2 workspace3）+ AP-4 读侧 6（readEntries/
     // getCommands/register+unregisterEntryInvalidation 4 + activate 族 2）+ ui 命令式
     // 点位 1（updateHeaderAction，[u5b] handler 已落地转正）= 53。
     // registeredMethods.size 同步锚点：53/53。
@@ -139,7 +139,7 @@ describe('plugin-permission-map SSOT（AC-I6）', () => {
       'plugin.sessions.list', 'plugin.sessions.get', 'plugin.sessions.getActive',
       'plugin.sessions.registerCreate', 'plugin.sessions.registerDestroy',
       'plugin.sessions.unregisterCreate', 'plugin.sessions.unregisterDestroy',
-      // AP-4 读面（U2）：数据读 + entry 失效订阅族 + 激活订阅族（[u5b] handler 均已实装）
+      // AP-4 读侧（U2）：数据读 + entry 失效订阅族 + 激活订阅族（[u5b] handler 均已实装）
       'plugin.sessions.readEntries', 'plugin.sessions.getCommands',
       'plugin.sessions.registerEntryInvalidation', 'plugin.sessions.unregisterEntryInvalidation',
       'plugin.sessions.registerActivate', 'plugin.sessions.unregisterActivate',

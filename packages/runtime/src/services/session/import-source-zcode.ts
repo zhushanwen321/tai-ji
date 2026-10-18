@@ -18,7 +18,7 @@
  * 不参与匹配）；size = part.data 真字节聚合（仅返回页 ≤limit 逐条，§3.8）；dirs 按
  * dirLabel（basename(directory)）聚合自过滤前全集（与 pi 源同构）。
  *
- * 错误映射（§3.6，source 包错误面归消费侧——§1.5 契约④，本侧用既有 import_* 词表）：
+ * 错误映射（§3.6，source 包错误范围归消费侧——§1.5 契约④，本侧用既有 import_* 词表）：
  * db 不存在/不可打开 → import_source_missing；schema 版本超出已知集（ZcodeSchemaDriftError，
  * observedVersion 带观测版本）→ import_invalid_session（message 带版本诊断）；查询失败
  * （schema 已知域内的驱动/JSON 错误）→ import_invalid_session；sessionId 不存在 / 归一化
@@ -100,13 +100,13 @@ function queryFailed(e: unknown): ImportServiceError {
   )
 }
 
-/** openDb 产物：查询面 + 幂等收尾（close + L3 快照目录清理——finally 必调 dispose）。 */
+/** openDb 产物：查询范围 + 幂等收尾（close + L3 快照目录清理——finally 必调 dispose）。 */
 interface OpenedZcodeDb {
   db: ZcodeReadonlyDb
   dispose: () => void
 }
 
-/** 打开只读连接（统一入口：存在性 → 四级恢复阶梯 → schema 已知集闸门）+ 阶梯日志。 */
+/** 打开只读连接（统一入口：存在性 → 四级恢复阶梯 → schema 已知集门禁）+ 阶梯日志。 */
 async function openDb(dbPath: string): Promise<OpenedZcodeDb> {
   const handle = await openZcodeSessionDb(dbPath).catch((e: unknown) => {
     throw openFailed(e, dbPath)
@@ -146,7 +146,7 @@ export class ZcodeImportSource implements SessionImportSource {
     const importedIds = new Set(scanPiSessions().map((s) => s.id))
     /**
      * 单行打标降级：id 归一化后置条件不满足（形态超出已验证域）时按未导入处理 + warn
-     * 留痕，不让单行坏 id 让整表不可用——列表是展示面，幂等真校验在编排层互斥区内
+     * 留痕，不让单行坏 id 让整表不可用——列表是展示侧，幂等真校验在编排层互斥区内
      * force 双检；同条件的 fail-fast 语义保留在 prepareImport 的 T1 校验（导入路径）不动。
      */
     const isAlreadyImported = (row: ZcodeSessionRow): boolean => {
@@ -244,7 +244,7 @@ export class ZcodeImportSource implements SessionImportSource {
     }
 
     // T1：归一化 id = 幂等键（后置条件不满足在此 fail-fast，不进 write 阶段）。
-    // normalizeZcodeSessionId 错误面归消费侧（§1.5 契约④）：source 包抛普通 Error
+    // normalizeZcodeSessionId 错误范围归消费侧（§1.5 契约④）：source 包抛普通 Error
     //（message 含原始 id 与恢复动作），本侧映射既有 import_invalid_session 词表。
     let normalizedId: string
     try {

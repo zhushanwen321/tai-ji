@@ -22,7 +22,7 @@
  * （1s 重投 timer + 熔断计数）——本地队列与重投 timer 已随投递所有权内核整体退役，回收对象
  * 改为内核条目（drain RPC）。
  *
- * 环境：真 composerInjectionStore 单例（断言面），mock useChat（编排接线）+ '@/api/domains/delivery'
+ * 环境：真 composerInjectionStore 单例（断言范围），mock useChat（编排接线）+ '@/api/domains/delivery'
  * （drain RPC）+ '@/api'（forceQuit RPC）+ toast（捕获提示）
  * + 侧栏外围 store（对齐 sidebar-ondeletefolder.test.ts 范式降级）。
  *

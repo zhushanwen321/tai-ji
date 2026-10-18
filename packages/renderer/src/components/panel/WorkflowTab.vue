@@ -4,7 +4,7 @@
   header（workflow 名 + abort 两段式中止）+ phase 分组 +
   agent call 行（status 圆点 + agent + slug + tokens/turns/duration + running/pending）。
   phase 分组逻辑现居本组件（同数据结构 WorkflowRunRecord.agentCalls）——原实现侧
-  侧栏工作流详情视图已随任务 tab 退役（2026-09-16），workflow 详情统一收口本 tab，
+  侧栏工作流详情视图已随任务 tab 退役（2026-09-16），workflow 详情统一收敛本 tab，
   分组/dot/format 逻辑以本文件为唯一在役出处。
 
   agent call 本质是 subagent（D4）：点 agent call 行 → openSubagent({ virtualId: agentCallVirtualId(call.sessionId),
@@ -50,7 +50,7 @@
         <!-- run 级执行模型全切（subagent-model-switch §6.1 决策一：已终局 run 的切换由
              runtime fail-fast 报「run 已终局」；入口对任意态开放，错误经 toast 承载）。
              标签 = run 级四分支合成（首个非 pending 成员的显示权威——run 级覆盖分发全成员，
-             聚合面不取单一值；标签取权威成员避免「部分成员同族替换」时显示不存在的单一值）。 -->
+             聚合范围不取单一值；标签取权威成员避免「部分成员同族替换」时显示不存在的单一值）。 -->
         <ModelSelectPopover
           :selected="runModelDisplay.label ?? ''"
           :switching="switching"
@@ -146,7 +146,7 @@
                 <span v-if="callTokenTotal(call) > 0">{{ formatTokens(callTokenTotal(call), 'tokens') }}</span>
                 <span v-if="call.turns !== undefined">· {{ call.turns }} {{ t('sidebar.workflowDetail.turnsUnit') }}</span>
               </div>
-              <!-- [W0/V6] failed 行错误摘要（record.error 投影，截断一行，title 全文）：
+              <!-- [W0/V6] failed 行错误摘要（record.error 派生视图，截断一行，title 全文）：
                    状态行转 failed 的同时错误可见（失败路径恢复指引），不再只靠红点 -->
               <div
                 v-if="call.status === 'failed' && call.error"
@@ -229,7 +229,7 @@ const switching = ref(false)
 
 /**
  * run 级模型标签显示态：显示权威成员 = 首个非 pending 成员（run 级覆盖分发全成员同值，
- * 聚合面不取单一值——标签取权威成员的面字段合成，避免「部分成员同族替换」时显示不存在的
+ * 聚合范围不取单一值——标签取权威成员的面字段合成，避免「部分成员同族替换」时显示不存在的
  * 单一值；成员回执态经 memberDisplayOf 按 (runId, memberRecordId) 键读取——键域 = 成员
  * record id，与聚合应答 member.runId 同源（详情载荷 memberRecordId 透出，单源锚）；
  * session id（pi uuidv7）与 call.id（taskIndex）都不在该键域，仅作缺省兜底）。

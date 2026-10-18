@@ -2,18 +2,18 @@
  * BtwPanel 组件测试（btw-question D7，M3-a）。
  *
  * 三视角（TEST-STRATEGY §3）：
- * - 构建者（白盒）：btw.list 按 mainSid 拉取 + loadSeq 乱序守卫回写 captured 分区；
+ * - 构建者（白盒）：btw.list 按 mainSid 拉取 + loadSeq 乱序检查回写 captured 分区；
  *   选中唯一源 = core drawer 分区 selectedBtwVid（setBtwView 写入，D5 豁免同源）
  * - 使用者（黑盒 DOM）：空态三要素 / 线 chip 渲染与点击切线 / 新建提问 → fork pill 三态 /
  *   切焦点会话线列表不串台 / 加载失败可见可重试 / 创建失败可见可恢复
  * - 观察者（形态）：首屏冒烟（drawer-btw-tab + 无头行 chip 条顶置 + 关键 testid 存在）；Composer 装配
  *   variant=panel + show-btw=false（防递归出 btw 入口，prop 声明归 M3-b，本处只写调用处）
- * - M3-c 行为面：formQuestions 请求 → 内联确认条降档 DOM（问题/选项按钮/Other/text 输入/
+ * - M3-c 行为范围：formQuestions 请求 → 内联确认条降档 DOM（问题/选项按钮/Other/text 输入/
  *   Submit 门；纯函数直测归 __tests__/composables/panel/use-btw-interaction.test.ts）
  *
  * mock 策略（TEST-STRATEGY §5）：vi.mock('@/api') 局部替换 btw 域（门面其余域走 actual）；
  * MessageStream / Composer stub 为透传 attrs 的占位 div——渲染树装配断言经 DOM 属性
- * （session-id / variant / show-btw）落使用者可见面，对话流渲染本身归 MessageStream 既有测试族。
+ * （session-id / variant / show-btw）落使用者可见部分，对话流渲染本身归 MessageStream 既有测试族。
  * i18n 由 vitest-i18n-setup 全局 mock（t 从 zh-CN 取真实文案，断言中文文案无需另行 mock）。
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/panel/btw-panel.test.ts
@@ -37,12 +37,12 @@ import type { ServerMessageMap } from '@taiji/shared'
 // btw 具名类型走 indexed-access（shared 包出口未挂具名，SSOT = shared protocol.ts）
 type BtwForkState = ServerMessageMap['btw.create']['forkState']
 
-// ── @/api 门面局部 mock：只替换 btw 域（三元消费面 = 本面板唯一数据入口）──
+// ── @/api 门面局部 mock：只替换 btw 域（三元消费方 = 本面板唯一数据入口）──
 vi.mock('@/api', (importActual) => composerApiModuleActualWithBtw(importActual))
 // 断言锚点：btw 域 spy 单例（helper 持有，播种/断言经别名）
 const apiMock = composerBtwApiMock
 
-// ── MessageStream / Composer 占位 stub（attrs 全透传 → DOM 属性断言装配面）──
+// ── MessageStream / Composer 占位 stub（attrs 全透传 → DOM 属性断言装配侧）──
 vi.mock('@/components/panel/MessageStream.vue', async () => {
   const { defineComponent: dc, h: hs } = await import('vue')
   return {
@@ -107,7 +107,7 @@ describe('BtwPanel 首屏冒烟与线列表（观察者 + 使用者）', () => {
     expect(wrapper.find('[data-testid="btw-thread-list"]').exists()).toBe(false) // 无线不渲染列表
   })
 
-  it('线列表渲染 chip + 右簇新建钮恒在可视区 + 自动选中最新线 + MessageStream/Composer 装配面（D7②）', async () => {
+  it('线列表渲染 chip + 右簇新建钮恒在可视区 + 自动选中最新线 + MessageStream/Composer 装配侧（D7②）', async () => {
     apiMock.list.mockResolvedValue([{ vid: 'btw:pi-1' }, { vid: 'btw:pi-2' }])
     const wrapper = mountPanel(MAIN_A)
     await settle(wrapper)
@@ -133,7 +133,7 @@ describe('BtwPanel 首屏冒烟与线列表（观察者 + 使用者）', () => {
 
     // 构建者：选中写入 core drawer 分区（与 getViewedVids D5 豁免同源，无第二副本）
     expect(useBtwSelection().selectedBtwVid.value).toBe('btw:pi-2')
-    // 列表加载完成后 loading 收口（空态不误显）
+    // 列表加载完成后 loading 收尾（空态不误显）
     expect(wrapper.find('[data-testid="btw-empty"]').exists()).toBe(false)
   })
 
@@ -144,7 +144,7 @@ describe('BtwPanel 首屏冒烟与线列表（观察者 + 使用者）', () => {
 
     // composer 带（含内联确认条）跟 chat 档：与主面板 composer（main-area chat scope 内）同语义。
     // 流根的 chat scope 归 MessageStream 组件本体（wire 测试 TC-w4-9c 已断真实组件）——
-    // 本套件 MessageStream 为透传 attrs 的 stub div，组件内部属性不在断言面。
+    // 本套件 MessageStream 为透传 attrs 的 stub div，组件内部属性不在断言范围。
     const band = wrapper.find('[data-testid="btw-interaction"]')
     expect(band.exists()).toBe(true)
     expect(band.attributes('data-fs-scope')).toBe('chat')
@@ -235,7 +235,7 @@ describe('BtwPanel 新建线与 fork pill 三态（D3 口径）', () => {
 })
 
 describe('BtwPanel 焦点绑定（D7②④）与失败路径', () => {
-  it('切焦点会话 → 线列表按新 mainSid 重拉不串台；切回恢复（DOM 面）', async () => {
+  it('切焦点会话 → 线列表按新 mainSid 重新拉取不串台；切回恢复（DOM 面）', async () => {
     apiMock.list.mockImplementation(async (sid: string) =>
       sid === MAIN_A ? [{ vid: 'btw:a-1' }] : [{ vid: 'btw:b-1' }],
     )
@@ -253,7 +253,7 @@ describe('BtwPanel 焦点绑定（D7②④）与失败路径', () => {
     expect(wrapper.find('[data-testid="btw-thread-chip"][data-vid="btw:a-1"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="btw-stream"]').attributes('session-id')).toBe('btw:b-1')
 
-    // 切回 A：重拉 + 恢复 A 的线（分区隔离，无 B 泄漏）
+    // 切回 A：重新拉取 + 恢复 A 的线（分区隔离，无 B 泄漏）
     boundSid.value = MAIN_A
     await wrapper.setProps({ sessionId: MAIN_A })
     await settle(wrapper)
@@ -295,7 +295,7 @@ describe('BtwPanel 焦点绑定（D7②④）与失败路径', () => {
   })
 })
 
-describe('BtwPanel 内联确认条表单降档（M3-c 行为面，useBtwInteraction 消费链）', () => {
+describe('BtwPanel 内联确认条表单降档（M3-c 行为范围，useBtwInteraction 消费链）', () => {
   it('formQuestions 请求 → 确认条渲染问题文本 + choice 选项按钮 + Other/text 单行输入', async () => {
     apiMock.list.mockResolvedValue([{ vid: 'btw:pi-1' }])
     const wrapper = mountPanel(MAIN_A)
@@ -303,7 +303,7 @@ describe('BtwPanel 内联确认条表单降档（M3-c 行为面，useBtwInteract
     // 自动选中唯一线（latest = pi-1）→ 交互区挂载到该 vid
     expect(wrapper.find('[data-testid="btw-stream"]').attributes('session-id')).toBe('btw:pi-1')
 
-    // 驱动面 = 生产 bus 订阅的等价写入（store 是 pending SSOT，addRequest 与
+    // 驱动侧 = 生产 bus 订阅的等价写入（store 是 pending SSOT，addRequest 与
     // useExtensionUI 订阅路径写入同一分区）；归一化纯函数群直测见
     // src/__tests__/composables/panel/use-btw-interaction.test.ts
     const store = useExtensionUIStore()

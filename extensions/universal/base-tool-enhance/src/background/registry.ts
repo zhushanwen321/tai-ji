@@ -8,7 +8,7 @@
  *
  * 行为原语单点（ext-simplify-13）：解析防御 / corrupt 隔离 / 原子写 / 序列化 /
  * 终态 LRU 裁剪自 @zhushanwen/extension-protocol background-task 子出口引入——此前
- * 本地实现与 runtime 侧逐字同构、靠注释对齐；本模块只保留 bte 形态薄壳：Map 投影
+ * 本地实现与 runtime 侧逐字同构、靠注释对齐；本模块只保留 bte 形态薄壳：Map 映射
  * readRegistry 与锁内 RMW 写壳。
  *
  * 写入协议：
@@ -24,7 +24,7 @@
 
 import { join } from "node:path";
 
-// 契约常量（LRU 上限）走 index 出口（background-task.ts 契约面）；行为原语走
+// 契约常量（LRU 上限）走 index 出口（background-task.ts 契约范围）；行为原语走
 // background-task 子出口（含 node 内建依赖，不进 index——renderer/core 零触达）
 import { MAX_TERMINAL_REGISTRY_ENTRIES } from "@zhushanwen/extension-protocol";
 import {
@@ -54,8 +54,8 @@ export function getRegistryPath(dataDir: string, sessionId: string): string {
 }
 
 /**
- * 读取 registry 全量条目（Map 投影薄壳）。文件不存在 / 读失败 / 解析失败均返回
- * 空表（工具面不因 registry 问题崩溃）；解析失败由 protocol 原语重命名 .corrupt
+ * 读取 registry 全量条目（Map 映射薄壳）。文件不存在 / 读失败 / 解析失败均返回
+ * 空表（工具范围不因 registry 问题崩溃）；解析失败由 protocol 原语重命名 .corrupt
  * 保留现场 + warn（§3.6）。
  */
 export function readRegistry(registryPath: string): Map<string, RegistryEntry> {

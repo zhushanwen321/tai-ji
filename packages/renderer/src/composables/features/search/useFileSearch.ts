@@ -1,7 +1,7 @@
 /**
  * useFileSearch —— composer `#` 文件候选的前端编排（直读 + debounce）。
  *
- * 职责（单一变化轴「composer 文件候选加载编排」）：
+ * 职责（单一变化原因「composer 文件候选加载编排」）：
  * - load：直调 composer.getFileCandidates（file.search），失败降级空数组
  * - debouncedLoad：debounce 包装（300ms），防浮层快速开关/输入抖动重复请求
  *
@@ -20,7 +20,7 @@ import type { FileNode } from '@taiji/shared'
 const DEBOUNCE_MS = 300
 
 export function useFileSearch() {
-  /** 在飞 debounce timer（闭包级单实例，真防抖合并连续调用） */
+  /** 在途 debounce timer（闭包级单实例，真防抖合并连续调用） */
   let pendingTimer: ReturnType<typeof setTimeout> | undefined
 
   /**

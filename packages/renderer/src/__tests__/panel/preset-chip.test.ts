@@ -8,7 +8,7 @@
  * 3. 三档退化（模式名 → 短名 → 仅图标）**各档信任标记不丢**：文本/短名档 = chip 内后缀
  *    「含替换提示词」；纯图标档 = 右上角警示色角标（`preset-chip-replace-badge`）+ tooltip。
  * 4. 只读 popover 含锁定说明（「模式在创建时确定…不能更换」）+「新建会话以使用其他模式」出口
- *    + 工具面/扩展面/提示词段数。
+ *    + 工具范围/扩展范围/提示词段数。
  *
  * 策略：pinia 真 store（setPresets/setDefaultPresetId/setLoadError）+ HoverCard 家族 stub 常开
  * （reka HoverCard 未 hover 不渲染 content；stub 常开使浮层内容可 DOM 断言，
@@ -158,7 +158,7 @@ describe('PresetChip E7 三态（设计 §7.5：与 ModeDeclarationRow 同判据
     expect(wrapper.find('[data-testid="preset-chip-fallback-popover"]').exists()).toBe(true)
     // a11y 名（纯图标档唯一可见通道之一）不得漏披露——chip 文本之外的可靠落点
     expect(chip.attributes('aria-label')).toContain('本次以全工具模式启动')
-    // 纯图标档：无 chip 文本，icon 档 title 是唯一可见通道（最脆一腿）——披露须随 iconTitle 落位
+    // 纯图标档：无 chip 文本，icon 档 title 是唯一可见通道（最脆一路径）——披露须随 iconTitle 落位
     const iconWrapper = mountChip({ presetId: 'custom:gone', fallbackTo: 'builtin:full', density: 'icon' })
     const iconChip = iconWrapper.find('[data-testid="preset-chip"]')
     expect(iconChip.attributes('title')).toContain('本次以全工具模式启动')
@@ -214,7 +214,7 @@ describe('PresetChip 三档退化 + 信任标记跨档不丢（设计 §7.4 / §
 })
 
 describe('PresetChip 只读 popover（设计 D5 第 4 点）', () => {
-  it('popover 含锁定说明 + 新建会话出口 + 工具/扩展/提示词面', () => {
+  it('popover 含锁定说明 + 新建会话出口 + 工具/扩展/提示词', () => {
     const wrapper = mountChip({ presetId: 'custom:dispatch' })
     const popover = wrapper.find('[data-testid="preset-chip-popover"]')
     expect(popover.exists()).toBe(true)
@@ -226,8 +226,8 @@ describe('PresetChip 只读 popover（设计 D5 第 4 点）', () => {
     expect(popover.text()).toMatch(/⌘N|Ctrl\+N/)
     // 模式面摘要
     expect(popover.text()).toContain('主 Agent 只做拆解与派发')
-    expect(popover.text()).toContain('工具面')
-    expect(popover.text()).toContain('扩展面')
+    expect(popover.text()).toContain('工具范围')
+    expect(popover.text()).toContain('扩展范围')
     expect(popover.text()).toContain('提示词段数')
     // 提示词两段都启用 → 段数 2
     expect(popover.text()).toContain('2 段')

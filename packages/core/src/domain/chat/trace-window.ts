@@ -381,8 +381,8 @@ function buildRunGroup(
 }
 
 /**
- * run 组块类型守卫：TraceRenderUnit 收窄用。FlatBlock 无 kind 字段（非判别属性齐全的联合），
- * `unit.kind` 直访在 TS 下非法，必须经 'kind' in 判定（ui Turn.vue 与测试共用本守卫）。
+ * run 组块类型检查：TraceRenderUnit 收窄用。FlatBlock 无 kind 字段（非判别属性齐全的联合），
+ * `unit.kind` 直访在 TS 下非法，必须经 'kind' in 判定（ui Turn.vue 与测试共用本检查）。
  */
 export function isRunGroupBlock(unit: TraceRenderUnit): unit is RunGroupBlock {
   return 'kind' in unit && unit.kind === 'run-group'

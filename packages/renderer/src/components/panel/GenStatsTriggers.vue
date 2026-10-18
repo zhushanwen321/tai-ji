@@ -20,7 +20,7 @@
     hover 出各自浮层：速度/TTFT 四行（本次/今日/7天/30天）+ 口径说明；缓存两行（本次/今日
     加权）+ bar + 口径说明。「本次」= 本会话最近一次请求样本（会话视角，runtime per-session
     槽）；今日/7天/30天 = 该模型跨会话全局聚合（模型视角；速度为加权平均，TTFT 为 p50
-    中位数——延迟重尾，均值被偶发慢请求拉飞）。数据纯读 useGenStats 分区（订阅/恢复腿/
+    中位数——延迟重尾，均值被偶发慢请求拉飞）。数据纯读 useGenStats 分区（订阅/恢复路径/
     model 校验兜底全在 composable）。
   -->
   <div class="flex items-center gap-0">
@@ -121,7 +121,7 @@ import type { CacheTier } from './gen-stats-display'
 
 /**
  * 纯读组件（D5）：per-session 分区状态在 useGenStats composable，组件只做帧 → 显示映射。
- * session 分区键 + 恢复腿触发源 = sessionId；modelId（复合 "provider/modelId"）供 composable
+ * session 分区键 + 恢复路径触发源 = sessionId；modelId（复合 "provider/modelId"）供 composable
  * 做帧 model 校验兜底（D4 前端防线），由 Composer 下发（对齐 ContextCapacityPopover 受控范式）。
  * [HISTORICAL] `variant` prop 已删（W3b）：对外 props 恒为 sessionId / modelId。
  */
@@ -132,7 +132,7 @@ const props = defineProps<{
 
 const { t } = useI18n()
 
-// 订阅（session.stats_update）/ 恢复腿（session.getGenStats）/ model 校验全在 composable 内
+// 订阅（session.stats_update）/ 恢复路径（session.getGenStats）/ model 校验全在 composable 内
 // （与两张内容卡共享同一分区实例，帧口径单份）
 const { current: frame } = useGenStats(toRef(props, 'sessionId'), toRef(props, 'modelId'))
 

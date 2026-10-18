@@ -14,7 +14,7 @@ const bundleOnly = process.env.npm_lifecycle_event === 'build:bundle'
 // （src/ 前缀替换为 dist/），package.json exports 的语义子入口按同形路径映射
 // （./execution/engine/paths -> dist/execution/engine/paths.cjs 等）。
 // [W11/H3] 引擎子入口（./engines/zcode/{reader,constants}）已随内建引擎删除。
-// 主入口 index 之外的 2 个 entry 即 exports 的两个语义子入口（D5 公共面），
+// 主入口 index 之外的 2 个 entry 即 exports 的两个语义子入口（D5 公共部分），
 // 连同主入口共 3 个 entry：
 // runtime 复用链（D8）与 zsw 复用链（D6）只允许经语义子入口消费这些模块，
 // 语义子入口因此必须各自成为 bundle 入口——否则它们只存在于主入口 bundle 内部，
@@ -34,7 +34,7 @@ const mainConfig = defineConfig({
   target: 'node20',
   // D4 关键点：zsw 宿主是 CJS（node>=20），而 @zhushanwen/extension-protocol 的
   // npm dist 仅 ESM（.mjs），node 20 下 require() 加载 ESM 不可靠——
-  // 运行时面仅常量的 protocol 必须 bundle 进产物（noExternal），
+  // 运行时侧仅常量的 protocol 必须 bundle 进产物（noExternal），
   // 不让它以外部 ESM 依赖形态出现在 CJS require 链上。
   // （一致性审查 r2 注记：[W11] 现为 3 个 entry，闭包无 protocol 运行时引用——唯一 import
   // 点 engine-discovery.ts 仅 pi 壳深路径消费，dist 实测零常量命中；noExternal 为
@@ -44,12 +44,12 @@ const mainConfig = defineConfig({
 })
 
 // ── 档 2：自包含 CJS bundle（host-surface D2） ──────────────────
-// 产物 dist.bundle/index.cjs——给无 node_modules 解析面的宿主 vendoring（zsw：
+// 产物 dist.bundle/index.cjs——给无 node_modules 解析范围的宿主 vendoring（zsw：
 // 插件目录整体复制，无依赖安装链，marketplace 副本/inline 加载双形态都要能直跑）。
 // 与档 1 的本质差异：档 1 的 dist 仍把 ajv/yaml/proper-lockfile 留作外部依赖
-// （宿主有正常 node_modules 解析面），档 2 noExternal 全部运行时依赖后单文件
+// （宿主有正常 node_modules 解析路径），档 2 noExternal 全部运行时依赖后单文件
 // 自包含——vendored 消费只认文件不认解析链。仅 cjs（zsw 是纯 CJS 宿主），
-// dts 刻意关闭：zsw 无 TS 消费面，类型由主包 dist 的 .d.cts 承载。
+// dts 刻意关闭：zsw 无 TS 消费方，类型由主包 dist 的 .d.cts 承载。
 const bundleConfig = defineConfig({
   entry: { index: 'src/index.ts' },
   outDir: 'dist.bundle',

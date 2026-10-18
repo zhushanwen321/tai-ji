@@ -24,7 +24,7 @@
  * - CompactQueueBadge / 专属 i18n key / testid 零残留（源码 grep 断言，C-proc-10）
  *
  * 策略（对齐 composer-three-states.test.ts 结构范本）：真 pinia + 真 chat store
- * （chat.setOccupancy 驱动 occupancy 投影——D6 路由同源）；mock useChat / useNewTaskFlow /
+ * （chat.setOccupancy 驱动 occupancy 派生视图——D6 路由同源）；mock useChat / useNewTaskFlow /
  * api / session store；ComposerInput mock。
  *
  * 运行：cd packages/renderer && npx vitest run src/__tests__/panel/composer-send-button-states.test.ts

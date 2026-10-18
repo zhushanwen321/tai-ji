@@ -84,7 +84,7 @@ export async function runA5() {
 			await sleep(600);
 			const lines = await pi.readSessionLines();
 			const infoCount = parseJsonlEntries(lines).filter((e) => e?.type === "session_info").length;
-			assert(infoCount === 0, `出现 ${infoCount} 条自动 session_info（超时不应落库）`);
+			assert(infoCount === 0, `出现 ${infoCount} 条自动 session_info（超时不应写入）`);
 
 			// pi 存活：超时后 RPC 命令仍正常响应
 			const st = await pi.rpc.getState();

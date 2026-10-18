@@ -157,7 +157,7 @@ describe('分支 1/2：缓存命中 → since 增量', () => {
     expect(client.getEntries).toHaveBeenCalledWith()
   })
 
-  it('增量 Entry not found：丢缓存 → 全量重拉（D6-4 自愈）', async () => {
+  it('增量 Entry not found：丢缓存 → 全量重新拉取（D6-4 自愈）', async () => {
     const { reader, client } = makeReader()
     client.getEntries.mockResolvedValueOnce({ data: { entries: [entry('e1', null)], leafId: 'e1' } })
     await reader.getHistory('s1')
@@ -302,7 +302,7 @@ describe('inflight 合并与 onSessionDisposed', () => {
 // ════════════════════════════════════════════════════════════════════
 // get_entries 返回全文件 entries + leafId；全量重建路径（rebuildFullHistoryAndCache）在
 // 调用点预过滤（port 签名不含 leafId，预过滤与 rebuildHistoryFromEntries 第三参等价——
-// 同一 computeActivePathEntries SSOT）。缓存基线 = 完整活跃路径投影。
+// 同一 computeActivePathEntries SSOT）。缓存基线 = 完整活跃路径派生视图。
 
 describe('活跃路径裁剪接入（message-revoke U6a）', () => {
   it('全量重建调用点：有分支 entries + leafId → rebuild 收到裁剪后 entries，旧分支不进缓存基线', async () => {

@@ -7,11 +7,11 @@
 //
 // 实现以 core 版为准逐字迁移：私有 JournalLine 保留全字段形态（{v,ts,taskId,
 // engineId,seq,event}——taskId/engineId 仅诊断字段，重放在 map event 前即丢弃，
-// 故 zcode 旧副本的缩略行形态与本版无行为差异）。行格式：JSONL 中立 v1；格式漂移面由 W10 golden
+// 故 zcode 旧副本的缩略行形态与本版无行为差异）。行格式：JSONL 中立 v1；格式漂移风险由 W10 golden
 // 往返测试 + core/zcode 各自 journal 直测覆盖。
 //
 // 分层：只承接读侧（replay）。JournalWriter（写入器）留 core——宿主侧职责；本模块
-// 与 journal-replay.ts（纯投影，无 fs）分离，保持投影层零文件系统依赖。
+// 与 journal-replay.ts（纯派生视图，无 fs）分离，保持派生视图层零文件系统依赖。
 
 import { readFileSync } from "node:fs";
 

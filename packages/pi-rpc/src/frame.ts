@@ -88,9 +88,9 @@ export interface PendingRegistry<TMsg = PiMessage> {
   resolveResponse(id: string, msg: TMsg): boolean
   /** 注销 pending（请求未送达的写失败路径）。 */
   cancel(id: string): void
-  /** 只读可观测面：id 是否仍 pending（诊断 / 白盒测试断言用）。 */
+  /** 只读可观测范围：id 是否仍 pending（诊断 / 白盒测试断言用）。 */
   hasPending(id: string): boolean
-  /** 只读可观测面：当前 pending 数（诊断 / 白盒测试断言用）。 */
+  /** 只读可观测范围：当前 pending 数（诊断 / 白盒测试断言用）。 */
   get pendingSize(): number
   /** 全部 reject（进程退出 / stream error 收敛）。 */
   rejectAll(error: Error): void
@@ -100,7 +100,7 @@ export interface PendingRegistry<TMsg = PiMessage> {
  * RPC pending 表：请求-响应配对。
  *
  * 无墙钟超时（ADR-0122 防御机制清查退役）：pi 对某 RPC 永不响应时 pending 悬挂，
- * 失败信号由 pi 进程 exit 事件链经 rejectAll 统一收口，不做时间窗猜测。
+ * 失败信号由 pi 进程 exit 事件链经 rejectAll 统一收尾，不做时间窗猜测。
  */
 export function createPendingRegistry<TMsg = PiMessage>(): PendingRegistry<TMsg> {
   const pending = new Map<string, PendingRegistration<TMsg>>()
@@ -152,7 +152,7 @@ export interface EarlyFrameBuffer<TMsg> {
   takeAndClose(): TMsg[]
   /** 缓冲是否已关闭（一次性；关闭后 listeners 再空集也不重新武装）。 */
   get closed(): boolean
-  /** 只读可观测面：当前缓冲帧快照（诊断 / 白盒测试断言用；不消费缓冲）。 */
+  /** 只读可观测范围：当前缓冲帧快照（诊断 / 白盒测试断言用；不消费缓冲）。 */
   get frames(): readonly TMsg[]
 }
 

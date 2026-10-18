@@ -1,18 +1,18 @@
 /**
  * remote-access U1.1：移动壳静态托管 handler（D3）+ 穿越防护（E4）+ dist 缺失处置（E5）。
  * S3 拆分后形态：静态实现与开态判定（resolveMobileStaticRoot / createMobileStaticHandler）
- * 在 mobile-static.ts，本文件锚定 ConnectionManager 消费面——注入 handler 后的 HTTP
+ * 在 mobile-static.ts，本文件锚定 ConnectionManager 消费方——注入 handler 后的 HTTP
  * 分派行为；开态判定/纯函数/裸 handler 单测在 mobile-static.test.ts。
  *
  * 语义锚点（remote-access 设计 §3.3 D3 / §3.4 E4/E5）：
  * 1. D3：handler 注入（组合根开态装配：remoteAccess 判据 → dist 探测通过）后同端口
  *    GET/HEAD 托管移动壳产物——目录请求回退 index.html、404 兜底、/health 先于静态
- *    分支行为不变；访问/拒绝日志只记剥除 query 的 pathname（remote token 不经静态面
+ *    分支行为不变；访问/拒绝日志只记剥除 query 的 pathname（remote token 不经静态托管
  *    日志落盘）；handler 未注入（关态 / E5 禁用）HTTP 行为与远程访问引入前逐字节
  *    一致（/health 之外一律 404 空 body）。
  * 2. E4：路径白名单化防目录穿越——解码（含 %2e%2e 编码变体）后 resolve 消解再前缀
  *    判定，白名单外 400 且不发起任何 fs 读取。
- * 3. E5：开态但 mobileDist 未传 / 目录不存在 / 指向普通文件 → 静态面禁用 + 响亮
+ * 3. E5：开态但 mobileDist 未传 / 目录不存在 / 指向普通文件 → 静态托管禁用 + 响亮
  *    error 日志（含 pnpm build 指引与打包配置提示），不拒启——WS auth 照常工作。
  *
  * 真实 socket 集成测试（127.0.0.1 随机端口，形态对齐 connection-manager-remote-access.test.ts）；
@@ -146,7 +146,7 @@ describe('ConnectionManager mobile static hosting (U1.1)', () => {
     })
 
     // Content-Type 映射矩阵与 octet-stream 兜底归属裸 handler 面（mobile-static.test.ts
-    // 的 it.each 与映射外扩展名用例），集成面不重复。
+    // 的 it.each 与映射外扩展名用例），集成测试侧不重复。
 
     it('子目录请求（/sub/）也回退顶层 index.html；不存在的资产路径 404 兜底', async () => {
       opened.push(await startManager(SPAWN_TOKEN, openStateOptions(distDir)))
@@ -228,7 +228,7 @@ describe('ConnectionManager mobile static hosting (U1.1)', () => {
   })
 
   // ── D3：handler 未注入 = 不挂载（行为与远程访问引入前逐字节一致）───────────────
-  // 开态守卫（mobileDist 单独出现不构成开态）已随挂载裁决上移组合根，归属
+  // 开态检查（mobileDist 单独出现不构成开态）已随挂载裁决上移组合根，归属
   // mobile-static.test.ts 的 resolveMobileStaticRoot 关态用例。
 
   describe('handler 未注入（关态 / E5 禁用）不挂载', () => {
@@ -249,9 +249,9 @@ describe('ConnectionManager mobile static hosting (U1.1)', () => {
     })
   })
 
-  // ── E5：开态 dist 缺失 → 静态面禁用 + 响亮日志 + WS 不受影响 ────────────────
-  // 变体判定差异（未传 / 目录不存在 / 指向普通文件）与文案归属纯函数面
-  // resolveMobileStaticRoot（mobile-static.test.ts 的 E5 探测用例），集成面只锚降级行为。
+  // ── E5：开态 dist 缺失 → 静态托管禁用 + 响亮日志 + WS 不受影响 ────────────────
+  // 变体判定差异（未传 / 目录不存在 / 指向普通文件）与文案归属纯函数部分
+  // resolveMobileStaticRoot（mobile-static.test.ts 的 E5 探测用例），集成测试侧只锚降级行为。
 
   describe('E5：开态但 mobileDist 缺失（集成降级行为）', () => {
     it('未传 --mobile-dist → 响亮 error 日志（计数 1）；GET / 404；WS auth 正常', async () => {
@@ -259,7 +259,7 @@ describe('ConnectionManager mobile static hosting (U1.1)', () => {
       // 开态形态但 mobileDist 缺失（组合根装配链：探测在 handler 构造前发出 E5 日志）
       opened.push(await startManager(SPAWN_TOKEN, openStateOptions()))
       expect(errorSpy).toHaveBeenCalledTimes(1)
-      // 静态面禁用，不拒启：HTTP 静态路径 404、WS auth 照常。
+      // 静态托管禁用，不拒启：HTTP 静态路径 404、WS auth 照常。
       const res = await rawRequest(opened[0].port, '/')
       expect(res.status).toBe(404)
       const ws = new WebSocket(`ws://127.0.0.1:${opened[0].port}`)
@@ -279,7 +279,7 @@ describe('ConnectionManager mobile static hosting (U1.1)', () => {
     })
   })
 
-  // ── resolveMobileStaticPath 纯函数白盒（正向解析锚定；负向矩阵归上方 E4 集成面）───
+  // ── resolveMobileStaticPath 纯函数白盒（正向解析锚定；负向矩阵归上方 E4 集成测试侧）───
 
   describe('resolveMobileStaticPath（纯函数）', () => {
     it('dist 内路径 → 绝对路径；根路径 → distRoot 本身（目录判定入口）', () => {

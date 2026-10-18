@@ -46,7 +46,7 @@ describe('atomicWrite（RT-3#9）', () => {
     }
   })
 
-  it('默认 tmp 名含 pid+序号：连续写成功且失败路径零残留（并发 tmp 名不互踩的行为面）', () => {
+  it('默认 tmp 名含 pid+序号：连续写成功且失败路径零残留（并发 tmp 名不互踩的行为范围）', () => {
     const dir = makeTmpDir('fs-utils-uniquename-')
     try {
       const target = join(dir, 'f.json')

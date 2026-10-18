@@ -1,7 +1,7 @@
 /**
  * v2 条目构造族 + v2 定界扫描 + 收编组装（纯函数族，自 record-store-terminal 拆出）。
  *
- * 变化轴 = 「v2 条目与事件载荷的构造规则」（契约演化集中于此）——终局写点
+ * 变化原因 = 「v2 条目与事件载荷的构造规则」（契约演化集中于此）——终局写点
  * （markSettled/archive/收编）的载荷构造单源。字段集契约单源 = record-entry.ts
  * （u0）；事件词表与 fold 单源 = record-events.ts（u0）。
  */
@@ -21,7 +21,7 @@ import { resolveEngineRouteId } from "../engine/common/session-view-service.ts";
 // [W1 / U2a] v2 条目构造族 + v2 定界扫描 + 收编组装（纯函数族）
 // ============================================================
 //
-// 变化轴 = 「v2 条目与事件载荷的构造规则」（契约演化集中于此）——终局写点
+// 变化原因 = 「v2 条目与事件载荷的构造规则」（契约演化集中于此）——终局写点
 // （markSettled/archive/收编）的载荷构造单源。字段集契约单源 = record-entry.ts
 // （u0）；事件词表与 fold 单源 = record-events.ts（u0）。
 
@@ -47,7 +47,7 @@ export function toRegisteredEntryData(
   };
 }
 
-/** v2 终态条目构造载荷（终局写点共用输入面——ExecutionRecord 的统计/终局域字段子集）。 */
+/** v2 终态条目构造载荷（终局写点共用输入范围——ExecutionRecord 的统计/终局域字段子集）。 */
 export interface SettledEntrySource { // oe-exempt:20261001:framework:v2 终态条目构造载荷契约——自 record-store-terminal 原样搬迁（拆文件非新抽象），读侧消费 = record-store-rounds
   id: string;
   status: string;
@@ -68,7 +68,7 @@ export interface SettledEntrySource { // oe-exempt:20261001:framework:v2 终态�
 
 /**
  * ExecutionRecord → SettledEntrySource 映射（终局写点共用：容器终局写点与
- * face 缺省分支同款消费——条目面独立于事件面工作时载荷构造单源）。
+ * face 缺省分支同款消费——条目范围独立于事件流工作时载荷构造单源）。
  */
 export function settledEntrySourceOf(record: ExecutionRecord): SettledEntrySource {
   return {
@@ -180,7 +180,7 @@ const INTERRUPTED_FAMILY_STOP_REASONS: readonly string[] = [
 
 /**
  * D4 双面证据第二条的判别（「终态条目已存在且非 interrupted」）：settled 条目
- * 在场且停因非 interrupted 族才构成跳过证据——interrupted 族条目是「条目面先行
+ * 在场且停因非 interrupted 族才构成跳过证据——interrupted 族条目是「条目范围先行
  * 写、journal 帧缺失」的不对称窗口残留（appendEvent fire-and-forget 失败 /
  * 局部损坏），不构成跳过证据，收编须放行以追加 settled 帧修复 journal；停因
  * 缺失（契约外残缺形态）保守计为真终态（宁保留不重复）。
@@ -218,7 +218,7 @@ export function buildAdoptedSettledEntry(
 
 /**
  * entry-only 孤儿纠偏产物（登记 §3.3）：主 session 有 v2 注册条目、无子 session 文件、
- * 无事件文件（spawn 窗口期死亡）时的终态条目。事件面缺席 → 统计诚实 0，停因缺省
+ * 无事件文件（spawn 窗口期死亡）时的终态条目。事件流缺席 → 统计诚实 0，停因缺省
  * interrupted-by-restart；身份域无载荷可补（注册条目已在场）。
  */
 export function buildEntryOnlyOrphanSettledEntry(
@@ -257,7 +257,7 @@ export function buildAdoptedSettledEvent(
   };
 }
 
-/** 收编产物的 manifest 投影（derivedManifestRecord 同族形态——身份域取 created 帧、引擎域取 bound 帧、终局域取收编停因）。 */
+/** 收编产物的 manifest 派生视图（derivedManifestRecord 同族形态——身份域取 created 帧、引擎域取 bound 帧、终局域取收编停因）。 */
 export function buildAdoptedManifestProjection(
   fold: RecordEventFoldState,
   id: string,
@@ -265,15 +265,15 @@ export function buildAdoptedManifestProjection(
   now: number,
 ): ManifestRecord | undefined {
   const identity = fold.identity;
-  if (identity === undefined) return undefined; // 坏链守卫在容器侧先行（skippedNoIdentity）
+  if (identity === undefined) return undefined; // 坏链检查在容器侧先行（skippedNoIdentity）
   const bound = fold.bound;
   return {
     id,
     rootSessionId: identity.rootSessionId || "",
     agentName: identity.agent,
-    status: "running", // legacy 三态投影：无 closedReason → running（executionStatus 承载两态权威词）
+    status: "running", // legacy 三态词形：无 closedReason → running（executionStatus 承载两态权威词）
     executionStatus: "idle",
-    // [W4 收敛] 收编停因上投影：sweep 判据第三级（findAdoptedStopReasonSync）经它把
+    // [W4 收敛] 收编停因上派生视图：sweep 判据第三级（findAdoptedStopReasonSync）经它把
     // 收编 record 判 terminal，注销条目 reason 落 interrupted 族（mapReasonToStatus
     // → aborted），不再误走 missing 分支的 expired。
     stopReason,
@@ -284,7 +284,7 @@ export function buildAdoptedManifestProjection(
     slug: identity.slug,
     ...(bound !== undefined ? { engine: bound.engine } : {}),
     ...(bound !== undefined ? { engineHandle: bound.engineHandle } : {}),
-    // [H2 W1 / D3 缺陷五] 来源身份与覆盖记账随收编投影下行（identity created 帧承载
+    // [H2 W1 / D3 缺陷五] 来源身份与覆盖记账随收编派生视图下行（identity created 帧承载
     // 身份、fold 承载覆盖——收编的 workflow 成员对 run 级查询保持可见）。
     ...(identity.origin === "workflow" ? { origin: "workflow" as const } : {}),
     ...(identity.parentRunId !== undefined ? { parentRunId: identity.parentRunId } : {}),
@@ -336,9 +336,9 @@ export function buildCreatedEventPayload(
 
 /**
  * 引擎域签名对比（reportRecordTransition 写点——D3 表行 2）。归一形态：pi record
- * 的 engineHandle 缺省 = 空 sessionRef 桶（落账与对比共用同一归一，避免「record
- * 缺省 undefined vs 落账归一值」的伪差异把每次过程 transition 都误判为引擎域变化，
- * 事件面随高频调用放大）。签名三元组 = sessionFile/engine/engineHandle；**epoch
+ * 的 engineHandle 缺省 = 空 sessionRef 桶（写入与对比共用同一归一，避免「record
+ * 缺省 undefined vs 写入归一值」的伪差异把每次过程 transition 都误判为引擎域变化，
+ * 事件流随高频调用放大）。签名三元组 = sessionFile/engine/engineHandle；**epoch
  * 不参与签名**——epoch 递增由 record-reopened 帧单点承载（D3 表行 6），reopen 后
  * 的 transition 再落 bound 帧会重复表达同一迁移。
  */
@@ -367,7 +367,7 @@ export function buildBoundEventPayload(
     ts: Date.now(),
     sessionFile: record.sessionFile ?? "",
     // 写侧同源裁决：损坏 record（有锚无 engine）不得被写成 engine='pi'——那是把
-    // 读数损坏固化成合法投影；正常 pi record 仍按缺省写 pi。
+    // 读数损坏固化成合法词形；正常 pi record 仍按缺省写 pi。
     engine: resolveEngineRouteId(record, record.id),
     engineHandle: record.engineHandle ?? { sessionRef: {}, poolKey: "shared" },
     epoch: record.epoch ?? 0,

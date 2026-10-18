@@ -14,14 +14,14 @@
 // 对照既有语义：
 //   - 引擎侧：`pi-subagent-cli/src/spawn-runner.ts`「signal 退出 = 异常路径」
 //     （agent_end 干净终结主动 kill 的 close 带信号但语义是成功，143 只属异常）——
-//     W2 包内测试已承载；本用例钉宿主侧（协议客户端）对信号死亡的投影语义；
+//     W2 包内测试已承载；本用例固定宿主侧（协议客户端）对信号死亡的派生视图语义；
 //   - 宿主侧 crash 域既有覆盖（W2 client 套件）：fake 引擎自行 exit（code 137 /
 //     crash 模式）走 `exit code N` 分支；本用例覆盖 **signal 分支**
 //     （[u-m3-local] exit 投影 `EngineTransportExitInfo {code:null, signal:"SIGTERM"}` → detail = `signal SIGTERM`）——外部真实
 //     信号（事故形态：宿主 infra 连带击杀）是 W2 套件未触达的形态；
 //   - engine_crashed 错误规格：stderr 内存环形缓冲尾 400 字符（STDERR_TAIL_CHARS，
 //     SDK 权威）随 message 携带——用「头标记被截断 + 尾标记保留」的窗口行为断言
-//     钉死（不 import 常量复述值）。
+//     固定（不 import 常量复述值）。
 //
 // 与监督器的链路衔接（表 3 行 1 全链）见 round-liveness-supervisor.test.ts 场景一。
 
@@ -114,9 +114,9 @@ describe("[W6/D5 前置闸] 引擎进程被 SIGTERM → run 终态 failed（禁 
       // 事故形态复现：外部直接 SIGTERM 引擎进程（宿主 infra 连带击杀等价物）。
       process.kill(pid, "SIGTERM");
 
-      // 钉死语义：run 终态 failed（engine_crashed）+ 原因含信号信息——
+      // 固定语义：run 终态 failed（engine_crashed）+ 原因含信号信息——
       // 旧 143 误分类器（inproc session-runner（已删）:2667-2677，W3 删）的反命题：
-      // 信号死亡绝不允许投影为 success/completed。
+      // 信号死亡绝不允许映射为 success/completed。
       const err = (await runPromise.catch((e: Error) => e)) as Error & {
         code?: string;
         data?: { stderrTail?: string };
@@ -136,7 +136,7 @@ describe("[W6/D5 前置闸] 引擎进程被 SIGTERM → run 终态 failed（禁 
       // 死亡后状态：exited（非 unavailable——下次 run 走重建退避链，W2 套件已测）。
       expect(client.currentState).toBe("exited");
     } finally {
-      // 幂等收口：进程已死，dispose 不悬挂（killAll/dispose 对已死进程的空操作面）。
+      // 幂等收尾：进程已死，dispose 不悬挂（killAll/dispose 对已死进程的空操作面）。
       await expect(client.dispose()).resolves.toBeUndefined();
     }
   });

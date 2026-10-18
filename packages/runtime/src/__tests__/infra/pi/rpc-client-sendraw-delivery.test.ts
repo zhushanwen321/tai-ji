@@ -138,13 +138,13 @@ describe('RpcClient sendRaw 送达契约（M1 环 2 / RT-2#8）', () => {
   })
 
   it('sendExtensionUiResponse 透传送达结果：失败 false / 成功 true 且 wire 形状正确', () => {
-    // 失败腿：写抛错 → false（extension-message-handler 环 1 据此 sendError 终结）
+    // 失败路径：写抛错 → false（extension-message-handler 环 1 据此 sendError 终结）
     fakeProc.stdin.write.mockImplementationOnce(() => {
       throw new Error('write after destroy')
     })
     expect(client.sendExtensionUiResponse('ui_3', true, 'confirm')).toBe(false)
 
-    // 成功腿：confirm → {id, confirmed:true}（null > confirm > value 判别）
+    // 成功路径：confirm → {id, confirmed:true}（null > confirm > value 判别）
     expect(client.sendExtensionUiResponse('ui_4', true, 'confirm')).toBe(true)
     const last = stdinWrites[stdinWrites.length - 1]!
     expect(JSON.parse(last)).toEqual({ type: 'extension_ui_response', id: 'ui_4', confirmed: true })

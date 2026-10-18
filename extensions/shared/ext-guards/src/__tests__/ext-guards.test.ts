@@ -86,7 +86,7 @@ describe("oncePerProcess", () => {
 		});
 
 		const first = oncePerProcess("dedupe:async-inflight", fn);
-		// 落定前第二次调用：同一 Promise 实例（在飞去重不双跑）
+		// 落定前第二次调用：同一 Promise 实例（在途去重不双跑）
 		const second = oncePerProcess("dedupe:async-inflight", fn);
 		expect(second).toBe(first);
 		// 先 attach 断言再消费，避免 unhandledRejection

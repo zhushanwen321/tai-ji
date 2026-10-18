@@ -3,8 +3,8 @@
  *
  * 职责：
  * - PendingEntry: 一个异步操作的完整描述（与 pending:register entry data 对齐）
- * - countActiveFromEntries: register − unregister 差集 = 活跃集合（goal 守卫 /
- *   subagent-workflow 后代判定 / 本包 pending_notifications 工具投影共用）
+ * - countActiveFromEntries: register − unregister 差集 = 活跃集合（goal 检查 /
+ *   subagent-workflow 后代判定 / 本包 pending_notifications 工具派生视图共用）
  * - hasPendingId / isPendingActive: 写侧落盘前置判断（register 去重 / unregister 活跃判定）
  *
  * 设计要点：
@@ -17,13 +17,26 @@
  *   结构上不可分歧
  * - 纯函数，不依赖 Pi 运行时（ExtensionAPI/appendEntry），可独立单元测试
  * - 差集刻意不校验 expiresAt（四类型（workflow/subagent/bash/session）全 process 档，长任务 >1h 仍应视为活跃，
- *   对齐 goal continuation 守卫语义）；历史 session 文件中遗留的带 expiresAt 的
+ *   对齐 goal continuation 检查语义）；历史 session 文件中遗留的带 expiresAt 的
  *   register entry 无需迁移——差集语义不读该键
  */
-import { applyPendingDiff, scanPendingEntries } from "@zhushanwen/extension-protocol";
+import {
+	applyPendingDiff,
+	scanPendingEntries,
+} from "@zhushanwen/extension-protocol";
 
 /** 异步操作类型（来源：workflow / subagent / bash 后台任务 / session 完成通知债权） */
 export type PendingType = "workflow" | "subagent" | "bash" | "session";
+
+/**
+ * managed 债权分类标记（pending:register emit 可选字段 kind，session-manager 写侧
+ * 申报，result-collect 设计 §3.4）：lifetime = 生命周期死亡债权（create_session 返回的
+ * lifetimeNotifyId，仅 session exited/deleted 时兑现、存活期恒活跃）——collect_results
+ * 缺省等待集据此排除（排除只在工具侧 computeCollectWaitKeys 做减法，countActiveFromEntries
+ * 缺省语义不动：goal/subagent-workflow 消费方仍计 lifetime 为活跃）。
+ * 无 kind 缺省 = send 债权（消息完成即兑现，缺省主场景键，不排除）。
+ */
+export type PendingKind = "lifetime";
 
 /** 异步操作终态/过渡状态。active = 仍在运行；其他都视为已结束 */
 export type PendingStatus = "active" | "completed" | "failed" | "cancelled" | "expired" | "time_limited" | "aborted";
@@ -42,6 +55,8 @@ export interface PendingEntry {
 	registeredAt: number;
 	/** 注册时的 sessionId（用于跨 session 残留过滤） */
 	sessionId: string;
+	/** managed 债权分类标记（可选；无标记 = send 债权缺省语义，见 PendingKind） */
+	kind?: PendingKind;
 }
 
 /** countActiveFromEntries 的过滤选项。 */
@@ -51,7 +66,7 @@ export interface CountActiveOptions {
 	/**
 	 * [跨 session 残留过滤] 当前 session id（过滤基准）：传入时按「register entry 的
 	 * sessionId ≠ 当前 session → 跳过」过滤——fork 继承的父级注册残留（永久留存于子
-	 * session 文件，落盘收口归 core 对账 sweep / bte 对账通道）不进差集计数，守卫不幻
+	 * session 文件，落盘收尾归 core 对账 sweep / bte 对账通道）不进差集计数，检查不幻
 	 * defer。缺省（undefined）= 不过滤（向后兼容：既有调用方零改动行为不变）。
 	 * entry 缺 sessionId 字段的旧形态条目视为本 session（归一化兜底语义与
 	 * normalizeRegisterEntry 一致），不过滤。
@@ -71,13 +86,13 @@ export interface CountActiveResult {
  * 从持久化 entries 计算活跃 pending 数（register − unregister 差集）。
  *
  * 只做「有没有活跃 pending」的只读判断，不产生任何写入；TTL 刻意不校验
- * （长任务 subagent >1h 仍应视为活跃，对齐 goal agent-end 的 continuation 守卫语义）。
+ * （长任务 subagent >1h 仍应视为活跃，对齐 goal agent-end 的 continuation 检查语义）。
  * 调用方：goal（agent_end 时判断是否发 continuation）、subagent-workflow
  * （agent_end 时判断子进程是否有活跃后代，决定是否保持进程等 steer 唤醒）、
- * 本包 pending_notifications 工具投影。
+ * 本包 pending_notifications 工具派生视图。
  *
  * 跨 session 残留过滤：持有当前 session 概念的调用方应传入 opts.currentSessionId，
- * 使 fork 继承的父级注册残留不进差集（守卫不幻 defer）。
+ * 使 fork 继承的父级注册残留不进差集（检查不幻 defer）。
  */
 export function countActiveFromEntries(
 	entries: unknown[],
@@ -93,6 +108,27 @@ export function countActiveFromEntries(
 		entries: active,
 	};
 }
+
+/**
+ * collect_results 的缺省等待键集（result-collect 设计 §3.1③）：
+ * 当前 session 全部活跃 pending 项（countActiveFromEntries 同口径，currentSessionId
+ * 过滤含空串回退）− managed lifetime 死亡债权（kind 标记，本函数工具侧减法——
+ * countActiveFromEntries 缺省语义不动，goal/subagent-workflow 消费方零变化）。
+ */
+export function computeCollectWaitKeys(entries: unknown[], currentSessionId: string): string[] {
+	const active = countActiveFromEntries(
+		entries,
+		currentSessionId ? { currentSessionId } : undefined,
+	).entries;
+	return active.filter((entry) => entry.kind !== "lifetime").map((entry) => entry.id);
+}
+
+/**
+ * collect 终局回填的字段视图单点在 protocol scanPendingFields（register 首见
+ * type + 注销 status 的 MAPPED 成员，与 delivery-port 快照基线同一映射规则，
+ * MF-2-1；回填时序背景见 index.ts collectResults 回填段）——本文件不持有
+ * 字段映射实现。
+ */
 
 /**
  * 写侧前置判断①：entries 中是否已存在该 id 的 register entry（无论注销与否）。
@@ -128,7 +164,7 @@ function filterActiveRegisters(
 		if (opts?.types && !opts.types.includes(entry.type)) continue;
 		// 跨 session 残留跳过（基准 = opts.currentSessionId）。判据读原始 data.sessionId
 		// 而非归一化值：entry 缺 sessionId 的旧形态条目（归一化兜底为 ""）视为本
-		// session——不过滤，与 normalizeRegisterEntry 的容错语义对齐（守卫漏计的危害
+		// session——不过滤，与 normalizeRegisterEntry 的容错语义对齐（检查漏计的危害
 		// 方向是幻 defer，宁放行不误杀活跃计数）。
 		if (
 			opts?.currentSessionId !== undefined &&
@@ -146,13 +182,13 @@ function filterActiveRegisters(
  * type 归一化：subagent/bash/session 原样保留，其余（含缺失/未知值）归 workflow。
  * state.ts 与 index.ts 两处归一化共用本函数，防止「写入侧直通、读取侧归并」漂移。
  *
- * [偏好显式化] 缺失/未知 type 默认归 workflow = 宁挂账不失明：未知类型照常进差集
- * （守卫不因类型畸形失明），收口通道按类型分流——workflow / 畸形条目由 core 注册
- * 对账 sweep 收口（查 WorkflowRun store：终态 ∪ state 文件不存在 → 补注销）；bash 无
+ * [偏好显式化] 缺失/未知 type 默认归 workflow = 宁挂着不处理也不失明：未知类型照常进差集
+ * （检查不因类型畸形失明），收尾通道按类型分流——workflow / 畸形条目由 core 注册
+ * 对账 sweep 收尾（查 WorkflowRun store：终态 ∪ state 文件不存在 → 补注销）；bash 无
  * record/store 可查——注册随进程退出注销，进程死亡窗口的丢失无补发通道，属显式
  * 边界（每孤儿 bash 注册至多 1 条静态虚报，熔断限损）；session（notify-once D6
  * 词表真身在此——否则写侧归一成 workflow 展示错标）由 watch 应答 unregister 与
- * extension session_start 重启收口腿（D7③）收口，reconcile-sweep 对该 raw type
+ * extension session_start 重启收尾路径（D7③）收尾，reconcile-sweep 对该 raw type
  * 显式 skip（不入 workflow run-state 判据，防误销活跃 claim）。
  */
 export function normalizePendingType(raw: unknown): PendingType {
@@ -163,10 +199,13 @@ export function normalizePendingType(raw: unknown): PendingType {
 }
 
 /** 从 entry data 归一化为 PendingEntry（补默认值，容错缺失字段）。
- *  id 的 string 合法性已由差集层（applyPendingDiff）判定，此处直接窄化。 */
+ *  id 的 string 合法性已由差集层（applyPendingDiff）判定，此处直接窄化。
+ *  kind 白名单构造透传（result-collect 设计 §3.4：现状白名单只取 id/type/name/
+ *  registeredAt/sessionId，额外字段被丢弃——不改则工具侧拿不到 kind、lifetime
+ *  排除静默失效；仅认得 "lifetime" 一个值，未知值不透传）。 */
 function normalizeRegisterEntry(data: Record<string, unknown>, currentSessionId: string): PendingEntry {
 	const registeredAt = typeof data.registeredAt === "number" ? data.registeredAt : Date.now();
-	return {
+	const entry: PendingEntry = {
 		id: data.id as string,
 		type: normalizePendingType(data.type),
 		name: typeof data.name === "string" ? data.name : (data.id as string),
@@ -174,4 +213,6 @@ function normalizeRegisterEntry(data: Record<string, unknown>, currentSessionId:
 		registeredAt,
 		sessionId: typeof data.sessionId === "string" ? data.sessionId : currentSessionId,
 	};
+	if (data.kind === "lifetime") entry.kind = "lifetime";
+	return entry;
 }

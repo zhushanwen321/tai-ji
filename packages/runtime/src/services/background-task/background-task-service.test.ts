@@ -5,7 +5,7 @@
  * 覆盖：
  * - P1 探针：并发写（循环 rename 新文件）× 并发读 1000 次 parse 成功率 100%（corrupted=0）
  * - D2 变更检测单广播源：mtime 轮询 + 事件钩子（checkForChanges 手动触发）+ 自写自检
- *   三触发面共享同一 last-seen——同变化至多广播一次；mtime 未变不重播
+ *   三触发点共享同一 last-seen——同变化至多广播一次；mtime 未变不重播
  * - D8 watched 集合：markWatched 基线不广播 / 垃圾 sid ENOENT 静默空表（不告警刷屏）
  * - D1 corrupt 语义：解析失败 → 空表 + corrupted 标记 + .corrupt 隔离，不 throw
  * - D6 kill 五分支矩阵：
@@ -15,7 +15,7 @@
  *        属主死写 orphaned；poller 竞争已终态时不覆盖；锁内判活重查拒绝死而复生
  *     ④ 身份探测不可得 → identity-unverifiable，无信号无写
  *     ⑤ 锁内写失败（①预写/②终态）→ registry-write-failed 中止语义（未发信号不杀）
- * - D6⑤ 补遗族（锁获取失败 catch ×2 + ③收尾写失败 catch ×2，全 catch 点闭合）：
+ * - D6⑤ 补遗族（锁获取失败 catch ×2 + ③收尾写失败 catch ×2，全部 catch 点均覆盖）：
  *     ⑤c ①路径锁获取失败（ELOCKED 预算耗尽）⑤d ③路径锁获取失败
  *     ⑤e ③锁内重查死收尾写失败 ⑤f finalizeDeadEntry 锁内收尾写失败
  * - D6 身份验证两档：pidStartTime 严格比对 / 缺省 startedAt 降级；mismatch = pid 复用 → ③

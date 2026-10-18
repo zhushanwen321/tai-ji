@@ -5,7 +5,7 @@
  * 测试框架：vitest（从 vitest 导入 describe/it/expect/vi，禁 node:test）。
  * 运行命令：cd packages/ui && npx vitest run src/features/settings/__tests__/coding-plan-section.test.ts
  *
- * C1 后的测试面：组件经 QUOTA_CONFIGURE_MODULE_KEY 直接持有 module 实例（无 props / 无 emits），
+ * C1 后的测试范围：组件经 QUOTA_CONFIGURE_MODULE_KEY 直接持有 module 实例（无 props / 无 emits），
  * 故用例在 module 接口上布置状态（view / draft 透镜）、在 module 接口上验收写动作
  * （selectType / setEnabled / saveAndTest / 草稿直写）——interface is the test surface。
  * 断言的用户可见形态（DOM testid / 文案 / 置灰）与重构前完全一致。
@@ -18,7 +18,7 @@
  * ⑤ D7（§6.8）去掩码：输入框只放草稿，不回填掩码；「已配置 / 必填」为独立标记
  * ⑤b §7.4 徽标取值规则：徽标与字段级提示同源（readiness.missing），磁盘原始标记不能越权点亮
  * ⑤d §7 残留 11 专属 Key 适用性：exclusiveApplicable=false → 不渲染凭证来源控件
- * ⑤c 定向复审三条探针（真实 DOM 回归守卫）
+ * ⑤c 定向复审三条探针（真实 DOM 回归检查）
  * ⑥ §5.2 路径 3/4 失败态文案 + cookie 变体（unauthorized / no-credential / no-subscription）
  * ⑦ D2（§6.3）单按钮触发 saveAndTest
  * 附带保留：B-3 used/limit 双轨窗口、「查看上次成功数据」折叠、workspace 块输入直写
@@ -545,7 +545,7 @@ describe('⑤b §7.4 徽标取值与 readiness 同源（磁盘标记不参与，
   })
 })
 
-// ══ ⑤c 定向复审探针（三条复现路径转正为回归守卫） ═════════════════════════════
+// ══ ⑤c 定向复审探针（三条复现路径转正为回归检查） ═════════════════════════════
 
 describe('⑤c 定向复审探针：三条复现路径的真实 DOM 锁定', () => {
   it('探针①：类型已变（D5 旧专属 Key 归属失效）+ 草稿空 → 字段块内无任何「已配置」语义（徽标与占位）', async () => {
@@ -870,7 +870,7 @@ describe('交互补口：写动作与草稿直写（开关 / 输入草稿 / 重�
     expect(quota.draft.value.cookie).toBe('')
   })
 
-  it('类型下拉重选 → selectType 收到选中值（非字符串守卫在 module 内）', async () => {
+  it('类型下拉重选 → selectType 收到选中值（非字符串检查在 module 内）', async () => {
     arrangeTypeUndetermined(undefined)
     quota.view.value.type.options = [
       { value: 'alpha', label: 'Alpha Plan' },

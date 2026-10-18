@@ -14,7 +14,7 @@
  *  - exported → 成功 toast 含保存路径；
  *  - 非 dead 视图不渲染该入口（dead 分支专属，不连坐 conversation/empty）。
  *
- * Mock 策略（Panel.inbound-frame-notice.test.ts 同款最小闭合集）：mock core/chat/session/
+ * Mock 策略（Panel.inbound-frame-notice.test.ts 同款最小完备集）：mock core/chat/session/
  * useNewTaskFlow/useSidebar/useToast/useExtensionUI + lib/ipc（exportDiagnosticBundle 与
  * reportRendererLog；不触 window.electronAPI——B1 IPC 门面）；Panel 与 DiagnosticsExportAction、
  * domain → lib/ipc 链路真实；ConfirmDialog stub（teleport 免处理，先例
@@ -53,7 +53,7 @@ const chatMock = vi.hoisted(() => ({
   isActive: vi.fn(() => false),
   isCompacting: vi.fn(() => false),
   isRespawnPending: vi.fn(() => false),
-  // occupancy 投影读口（缺省全 idle，对齐 store.getOccupancy 无记录缺省）
+  // occupancy 派生视图读口（缺省全 idle，对齐 store.getOccupancy 无记录缺省）
   getOccupancy: vi.fn(() => ({ turn: 'idle', compacting: false, bash: false })),
   failedHistory: new Map<string, boolean>(),
 }))

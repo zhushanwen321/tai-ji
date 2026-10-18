@@ -3,7 +3,7 @@
  *
  * 职责：扫描已加载 skill（强制目录 ∪ discovery.json.skillDirs，按 ADR §1.1 优先级
  * 合并去重）+ skill 文件读写（deprecated 向后兼容）+ skill 扫描委托。强制目录靠桥接层
- * 重定向注入 pi 原生扫描；可选目录靠 discovery→settings 投影 + argv 注入。
+ * 重定向注入 pi 原生扫描；可选目录靠 discovery→settings 派生视图 + argv 注入。
  *
  * 抽出原因：config-service.ts 超 ESLint max-lines(500)。本模块含 skill 相关方法，
  * 移到本模块后 ConfigService 仅保留单行委托，行为 / 签名 / import 路径零变化
@@ -24,7 +24,7 @@ import { getConfigDir } from '../infra/pi/pi-paths.js'
 /**
  * 扫描已加载 skill：强制目录（§1.1 层 1-2）∪ discovery.json.skillDirs（层 3）。
  * 按 ADR §1.1 优先级合并去重，填 effective（最高优先那条）+ sources（多来源 badge 链）。
- * 强制目录靠桥接层重定向注入 pi 原生扫描；可选目录靠 discovery→settings 投影 + argv 注入。
+ * 强制目录靠桥接层重定向注入 pi 原生扫描；可选目录靠 discovery→settings 派生视图 + argv 注入。
  *
  * 纯函数：configStore / projectRoot 经参数注入（原 ConfigService.loadSkills 逐字搬迁）。
  */

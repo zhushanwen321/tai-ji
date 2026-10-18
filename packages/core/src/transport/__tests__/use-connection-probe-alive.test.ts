@@ -4,7 +4,7 @@
 // WebSocket，锁定 visibility 回调的形态分流接线：
 // ① remote 形态 + connected 切前台 → probeAlive 被调（探活 ping 上 wire）；5s 无入站帧 →
 //    close → 退避重连链可达，重连后 auth 握手照常（完整链路锚 + 簿记不残留）
-// ② remote 形态 + connected 切后台（hidden）→ 不探活（守卫 1 先于探活分支）
+// ② remote 形态 + connected 切后台（hidden）→ 不探活（检查 1 先于探活分支）
 // ③ local 形态（ipc 有值）+ connected 切前台 → 不探活、不 close（桌面零回归锚——桌面死链
 //    检测由 IPC supervisor 事件兜底）
 // ④ mock 形态 + connected 切前台 → 不探活（现状保持）
@@ -137,7 +137,7 @@ describe('use-connection visibility 探活接线（remote 死链检测）', () =
     expect(JSON.parse(fakes[1].sent[0])).toEqual({ type: 'auth', payload: { token: 'tok-remote' } })
   })
 
-  it('remote 形态 connected 切后台（hidden）→ 不探活（守卫 1 先于探活分支）', async () => {
+  it('remote 形态 connected 切后台（hidden）→ 不探活（检查 1 先于探活分支）', async () => {
     await initFresh(makePorts({ remote: true }))
     const f = fakes[0]
     openAndAuth(f)

@@ -83,7 +83,7 @@ describe('forkViaCliPi：一次性 fork bootstrap 机制', () => {
     ).rejects.toMatchObject({ code: 'fork_failed', message: expect.stringContaining('spawn failed') })
   })
 
-  it('超时 → BtwError fork_failed timed out（控制面秒级有界，规则 #19）', async () => {
+  it('超时 → BtwError fork_failed timed out（控制范围秒级有界，规则 #19）', async () => {
     const script = writeFakePi('hang.js', sleepCode(30000))
 
     const t0 = Date.now()
@@ -141,7 +141,7 @@ describe('createLine 默认 fork 装配链（resolvePiCommand → forkViaCliPi �
         ${sleepCode(5000)}
       `
       h.deps.resolvePiCommand = () => writeFakePi('chain.js', chainBody)
-      // get_state 读回须与 fork header id 一致（附着一致性守卫）
+      // get_state 读回须与 fork header id 一致（附着一致性检查）
       h.state = { sessionId: 'cli', sessionFile: forkFile }
       h.deps.forkSession = undefined // 强制走默认 CLI 链
 

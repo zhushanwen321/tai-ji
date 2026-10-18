@@ -12,7 +12,7 @@
 //      与首轮一致（同文件续写）；
 //   ③ 反向帧面收缩断言：全部反向帧 ∈ run 域 8 通道白名单（[H1 U5] 轮次相位
 //      通道已退役——轮终 = run 应答本身，无相位帧）。
-// cancel 收敛的升级路径（fake timers 杀链）见 run-spawn-once 集成面；one-shot 收割
+// cancel 收敛的升级路径（fake timers 杀链）见 run-spawn-once 集成测试；one-shot 收割
 // 对照见 run-spawn-once.integration。
 
 import { spawn } from "node:child_process";
@@ -137,7 +137,7 @@ async function initialize(host: FakeHost, dataDir: string): Promise<void> {
   expect(init.error).toBeUndefined();
 }
 
-/** 收割链自动应答：等 childStateChanged exited（数据面）并回 ack，防引擎侧反向等待挂起。 */
+/** 收割链自动应答：等 childStateChanged exited（数据范围）并回 ack，防引擎侧反向等待挂起。 */
 async function awaitReaped(host: FakeHost, recordId: string): Promise<void> {
   const exited = await host.waitForReverse("host/childStateChanged");
   expect(exited.params).toMatchObject({ recordId, state: "exited" });

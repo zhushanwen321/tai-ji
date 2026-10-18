@@ -47,7 +47,7 @@ export interface ChannelErrorResult {
   hint?: string
 }
 
-/** 运行时形状守卫：{error: string}（hint 可选，不校验其类型；排数组） */
+/** 运行时形状检查：{error: string}（hint 可选，不校验其类型；排数组） */
 export function isChannelErrorResult(v: unknown): v is ChannelErrorResult {
   return (
     typeof v === 'object' &&
@@ -63,7 +63,7 @@ export function formatChannelErrorText(err: ChannelErrorResult): string {
   return err.hint ? `${err.error}\nhint: ${err.hint}` : err.error
 }
 
-/** 失败留痕单点（channel-error / non-json 两态调用）：`opts?.log` 双层可选链收口，
+/** 失败留痕单点（channel-error / non-json 两态调用）：`opts?.log` 双层可选链收敛，
  * msg + detail 由调用点产出；log 缺席时静默（日志策略归调用方，D8 真差异保留） */
 function emitRpcLog(opts: MarkerRpcOptions | undefined, msg: string, detail: object): void {
   opts?.log?.(msg, detail)

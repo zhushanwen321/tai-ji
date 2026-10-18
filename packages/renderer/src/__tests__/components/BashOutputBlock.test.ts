@@ -202,8 +202,8 @@ describe('BashOutputBlock', () => {
   // ── W5：超时态（error:'timeout'）与 cancelled 视觉区分 ──
 
   it('W5: error=timeout + cancelled=true → 显示超时文案（非已取消），优先级 timeout > cancelled', () => {
-    // 超时收口形态：status:error + cancelled:true + error:'timeout'（error 值渲染契约锁定，
-    // 与写方无关——原写方 bash timer 收口已删除，渲染兼容分支保留）
+    // 超时收尾形态：status:error + cancelled:true + error:'timeout'（error 值渲染契约锁定，
+    // 与写方无关——原写方 bash timer 收尾已删除，渲染兼容分支保留）
     const msg = makeMessage({
       status: 'error',
       error: 'timeout',

@@ -167,7 +167,7 @@ function makeCtx(sessionId: string): ExtensionContext {
   } as unknown as ExtensionContext;
 }
 
-/** 触发一轮维护轮（reset 进程级守卫 + session_start 装配）。 */
+/** 触发一轮维护轮（reset 进程级检查 + session_start 装配）。 */
 async function runMaintenanceRound(sessionId: string): Promise<void> {
   _resetOncePerProcessForTest();
   await setupSessionLifecycle(makePi(), makeCtx(sessionId), {});
@@ -251,9 +251,9 @@ describe("场景 8：终局化移除 + 对账清理（真装配维护轮 + 壳�
     expect(fs.readFileSync(path.join(stateDir, "wf-s8-noevents.record.jsonl"), "utf8")).toBe(before);
   });
 
-  it("多目录触发面：引用 session 已删的其他 slug 目录残留 run 同轮回收（本 session 锚定目录覆盖不回归）", async () => {
+  it("多目录触发点：引用 session 已删的其他 slug 目录残留 run 同轮回收（本 session 锚定目录覆盖不回归）", async () => {
     // docError5 接线（维护轮全目录枚举 reapOrphanRuns，对齐 core pi-host-run-store
-    // 枚举口径）：单目录触发面下「引用 session 全删的其他 slug 目录」残留 run 结构性
+    // 枚举口径）：单目录触发点下「引用 session 全删的其他 slug 目录」残留 run 结构性
     // 不可达——本用例构造两个目录各一个孤儿 run（宽限调零 + 老化 mtime），一轮维护
     // 后两处都被回收。
     process.env[ORPHAN_RUN_GRACE_WINDOW_MS_ENV] = "0";

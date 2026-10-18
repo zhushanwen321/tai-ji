@@ -1,7 +1,7 @@
 // pi-host-run-store 回归锁：枚举读侧目录由调用方注入的 agentDir 活源驱动，
 // 不从进程 env/cwd/sessionFile 推测（两条推导路径均曾在 W2 D3 真机链实证
 // 错位致恒空转，见被测模块头注）。
-// 覆盖面（ADR-0081 / §4.1 场景 3、5；workflow-run-store-convergence U2 枚举改接）：
+// 覆盖范围（ADR-0081 / §4.1 场景 3、5；workflow-run-store-convergence U2 枚举改接）：
 // 1. 枚举目录形态（agentDir 活源 + 全 session 目录 + 回退根）；
 // 2. 终态返回形态 { runId, stateDir, status }（stateDir = 收编链 journalDir 注入源；
 //    status = 判定核三态映射——running/终态词/missing 跳过）；
@@ -215,7 +215,7 @@ describe("createPiHostRunEnumeration status 映射（判定核三态）", () => 
 //
 // 构造「调用进程 cwd 与落盘目录不相交」：落盘目录 = mkdtemp 显式路径，vitest
 // 进程 cwd = 包目录——不注入模块锚时收编链的缺省解析在 vitest 下是 no-op
-// 防线（零写），显式 journalDir 参数必须把 scan / 帧落账 / manifest 三面全部
+// 防线（零写），显式 journalDir 参数必须把 scan / 帧写入 journal 记录 / manifest 三面全部
 // 路由到参数目录。
 
 describe("runtime 形态：journalDir 参数显式传入时收编链读写正确落位", () => {
@@ -325,7 +325,7 @@ describe("枚举读错分通道：EACCES 上抛 / ENOENT 仍空集", () => {
 //
 // 旧双源文件（.events.jsonl 旧 journal + .jsonl 旧快照）形态：不进候选
 //（候选 = .record.jsonl 文件族，构造性跳过——[D1] 历史数据不读不写不主动删）、
-// 不抛错、每目录聚合一条 warn（core logger 通道——模块无注入日志面，与判定核
+// 不抛错、每目录聚合一条 warn（core logger 通道——模块无注入日志侧，与判定核
 // 读错 warn 同通道）。历史 run 随裁决点 7 对账清理消亡，不在本枚举射程。
 
 describe("v1 旧形态目录：构造性跳过 + warn 留痕（[D16⑥]）", () => {

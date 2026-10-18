@@ -1,8 +1,8 @@
 // scheduler-create.test.ts — scheduler 创建确认共享协议资产：
-// 时间折叠往返（dateToOnceCron / onceCronToDate）/ isScheduleDraft 守卫 /
-// isScheduleFormResult 回包守卫（scheduleCreateInteract 已随统一表单协议退役，
+// 时间折叠往返（dateToOnceCron / onceCronToDate）/ isScheduleDraft 检查 /
+// isScheduleFormResult 回包检查（scheduleCreateInteract 已随统一表单协议退役，
 // 四态折叠由 ui-form 包的 uiFormInteract 测试承担——见 ../ui-form/ui-form.test.ts）。
-// 经 barrel（../../index）导入：单测同时锚定导出面。
+// 经 barrel（../../index）导入：单测同时锚定导出清单。
 
 import { describe, it, expect } from 'vitest'
 import {
@@ -117,7 +117,7 @@ describe('onceCronToDate（一次性 cron → 本地墙钟下一次发生）', (
   })
 })
 
-describe('isScheduleDraft 守卫', () => {
+describe('isScheduleDraft 检查', () => {
   const validDraft: ScheduleDraft = {
     kind: 'recurring',
     schedule: '0 9 * * *',
@@ -186,7 +186,7 @@ describe('isScheduleDraft 守卫', () => {
   })
 })
 
-describe('isScheduleFormResult 守卫', () => {
+describe('isScheduleFormResult 检查', () => {
   const validResult = {
     action: 'create',
     kind: 'recurring',

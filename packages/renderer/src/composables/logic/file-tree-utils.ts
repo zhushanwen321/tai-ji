@@ -38,8 +38,8 @@ export function findNodePath(nodes: FileNode[], path: string): boolean {
 
 /**
  * [W28/D-7.2] 过滤命中判定：节点自身 path 含关键词，或子树任一后代 path 含关键词。
- * 语义 = 旧 FileView.visibleNodes 的递归判定（移入纯函数层供投影复用）——
- * 过滤只裁顶层，命中祖先链（含中间层）在投影展开时保留。
+ * 语义 = 旧 FileView.visibleNodes 的递归判定（移入纯函数层供派生视图复用）——
+ * 过滤只裁顶层，命中祖先链（含中间层）在派生展开时保留。
  * @param node 节点
  * @param q 已 lower-case 的过滤关键词
  */

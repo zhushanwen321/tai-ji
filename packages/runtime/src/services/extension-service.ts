@@ -94,7 +94,7 @@ export interface ExtensionServiceOptions {
   resolver: IExtensionResolver
   /**
    * 扩展配置 port（settings.json packages[] + disabled-packages.json），由 index.ts 注入。
-   * 经此 port 读写 settings.json，不再直接 readFileSync/writeFileSync（D17 收口）。
+   * 经此 port 读写 settings.json，不再直接 readFileSync/writeFileSync（D17 收尾）。
    */
   extensionSettings: IExtensionSettings
   /**
@@ -262,7 +262,7 @@ export class ExtensionService {
     for (const ext of discovered) {
       const dir = ext.path
       const resolved = resolvedByPath.get(dir)!
-      const name = resolved.name // 复用 resolveExtensions 已推导的 name（含 basename fallback + typeof 守卫）
+      const name = resolved.name // 复用 resolveExtensions 已推导的 name（含 basename fallback + typeof 检查）
 
       // version/description/tools 仍需读 package.json（ResolvedExtension 未携带这些），但只在此处读一次
       const meta = readPkgMeta(dir)
@@ -414,7 +414,7 @@ export class ExtensionService {
    * 失败时抛出 ExtensionInstallError，含 code 和 hint。
    *
    * settings.json 的 RMW 经 IExtensionSettings → pi-settings-store 的异步互斥队列串行化，
-   * 杜绝并发安装的 read-modify-write 竞态（D17 收口）。
+   * 杜绝并发安装的 read-modify-write 竞态（D17 收尾）。
    */
   async installExtension(source: string): Promise<void> {
     return this.withInstallLock(async () => {

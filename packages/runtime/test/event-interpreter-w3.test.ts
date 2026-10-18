@@ -1,7 +1,7 @@
 /**
  * W3 TDD tests：EventInterpreter 新回调 onTurnUsage / onTurnFinalize（U6 + U7）。
  *
- * 背景：W3 收口第二条 pi 事件订阅（attachUsageListener），把副作用
+ * 背景：W3 收尾第二条 pi 事件订阅（attachUsageListener），把副作用
  * （isGenerating 复位 / tokenCount 写入等）迁移到中间事件链路。
  * EventInterpreter 两个可选回调：
  *   - onTurnUsage(sessionId)：pi turn_end 触发（turn 级副作用：project sidecar 兜底等；

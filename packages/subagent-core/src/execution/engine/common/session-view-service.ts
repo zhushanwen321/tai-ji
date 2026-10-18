@@ -2,19 +2,19 @@
 //
 // 非 pi 引擎 record 的 GUI 历史详情读取链单一实现（dual-track-convergence D1：
 // journal 读取链收敛）。收敛三段：①三级降级链编排（引擎原生 reader → journal 重放
-// → outcome-only）②SessionView → HistoryMessage[] 投影（原 runtime 手写版）③引擎
+// → outcome-only）②SessionView → HistoryMessage[] 派生视图（原 runtime 手写版）③引擎
 // 分发（reader registry 查表，取代引擎 id 硬编码分支——接入第三引擎 runtime 零改动）。
 //
 // 收益口径（设计 D1 / r2 审查钉正）：守护对称（生产路径从零测试手写副本切到
 // conformance C5 守护的 updateFromEvent reducer）+ engine-generic 正确性
 // （message_end 携带 error 的记账语义就位）；对现役 zcode 是内容 parity——同一
-// journal 输入，新旧链投影输出等价（zcode 现役 journal 形态 = coarse 两事件
+// journal 输入，新旧链派生视图输出等价（zcode 现役 journal 形态 = coarse 两事件
 // [message_end(usage), turn_end] 与失败态 [error(, message_end, turn_end)]，两者
-// 的新旧投影逐字段一致，见 __tests__ 的 parity 用例）。
+// 的新旧派生视图逐字段一致，见 __tests__ 的 parity 用例）。
 //
 // ②级重放的 reducer 唯一性：turns 累积走 execution-record.updateFromEvent（C5
 // conformance 守护实现，journal 重放与 live 通路共用同一 reducer）——本模块不持有
-// 第二套事件 reducer。与原 runtime 手写 reducer 的两个已知投影差异均为现役不可达
+// 第二套事件 reducer。与原 runtime 手写 reducer 的两个已知派生视图差异均为现役不可达
 // 形态（zcode journal 不产出），属「记账语义就位」的新增行为而非 parity 破坏：
 // - message_end 带 error 且其后无 turn_end 清除 → 记账进末条 assistant 的
 //   status='error' + error 字段（原手写版不记——设计 §2.2 #1 漂移维度，收敛方向
@@ -72,7 +72,7 @@ const DEFAULT_ENGINE_ID = "pi";
  * §3.3 D6 三端锚点）。core 生产代码不 import shared（双端复用约束，见上方 import
  * 注释），故本地同值常量 + 锚定注释：权威值 = packages/shared 的
  * SUBAGENT_OUTCOME_PLACEHOLDER（'(no outcome recorded)'）；同值漂移由 runtime
- * test/subagent-extractor-engine.test.ts 契约钉子用例的行为断言守护（③级投影占位
+ * test/subagent-extractor-engine.test.ts 契约钉子用例的行为断言守护（③级派生视图占位
  * content === shared 常量）——core 改文案即该用例翻红。
  */
 const OUTCOME_PLACEHOLDER_TEXT = "(no outcome recorded)";
@@ -81,7 +81,7 @@ const OUTCOME_PLACEHOLDER_TEXT = "(no outcome recorded)";
 // 引擎 id 提取（record 路由段）
 // ============================================================
 
-/** 引擎路由裁决的输入面（record 快照与 ExecutionRecord 均结构满足）。 */
+/** 引擎路由裁决的输入范围（record 快照与 ExecutionRecord 均结构满足）。 */
 export interface EngineRouteSource {
   /** record.engine（'pi' | 'zcode' | ...；缺席 = pi 缺省）。 */
   engine?: unknown;
@@ -180,7 +180,7 @@ export function extractEngineId(record: SubagentRecordSnapshot): string {
  * 返回 undefined = 本级不可达/失败（编排层降②级）；reader 内部自行留 debug 日志。
  * 双端复用约束（设计 §3.3.7）：实现必须无状态纯函数、不 import 引擎运行时件。
  *
- * [W11/H1] 本模块零静态引擎依赖：①级 reader 全部经注入面注册——生产调用方 =
+ * [W11/H1] 本模块零静态引擎依赖：①级 reader 全部经注入点注册——生产调用方 =
  * runtime 协议客户端（W8 subagent-engine-history 把「协议 read」注册为引擎原生
  * reader，引擎 id 动态、zcode sqlite 直读在引擎进程内完成）；注册表初始为空，
  * 未注册引擎直接落②级 journal。
@@ -213,7 +213,7 @@ export function registerNativeSessionReader(engineId: string, reader: NativeSess
   getReaderSlot().set(engineId, reader);
 }
 
-/** 查表（未注册引擎返回 undefined → 编排层落③级，行为面与旧「无 native reader 分支」一致）。 */
+/** 查表（未注册引擎返回 undefined → 编排层落③级，行为范围与旧「无 native reader 分支」一致）。 */
 function lookupNativeSessionReader(engineId: string): NativeSessionReader | undefined {
   return getReaderSlot().get(engineId);
 }
@@ -256,7 +256,7 @@ function readJournalTier(
   return messages;
 }
 
-/** ①②级共用的中间 turn 形状（投影到 HistoryMessage 前的聚合单元）。 */
+/** ①②级共用的中间 turn 形状（映射到 HistoryMessage 前的聚合单元）。 */
 interface HistoryTurnView {
   text: string;
   thinking: string;
@@ -265,13 +265,13 @@ interface HistoryTurnView {
 }
 
 /**
- * journal 事件流 → HistoryMessage[]（②级重放的投影半段）。
+ * journal 事件流 → HistoryMessage[]（②级重放的派生视图半段）。
  *
- * turns 累积 = updateFromEvent（C5 守护 reducer，唯一实现）。本函数只做投影决策：
- * - 有内容 turn（text/thinking/toolCalls 任一非空）→ 逐 turn 投影（per-turn
+ * turns 累积 = updateFromEvent（C5 守护 reducer，唯一实现）。本函数只做映射决策：
+ * - 有内容 turn（text/thinking/toolCalls 任一非空）→ 逐 turn 映射（per-turn
  *   usageDelta → Message.usage，与旧手写 reducer 的 message_end 挂点一致）；
  * - 无内容但事件流含独立 error 事件（或 reducer 记账的 lastError 存活）→ 物化单条
- *   assistant（旧手写 reducer 的 applyErrorEvent「错误文本落空 turn」语义的投影面；
+ *   assistant（旧手写 reducer 的 applyErrorEvent「错误文本落空 turn」语义的映射；
  *   现役 zcode 失败 journal 即此形态）；
  * - 全空 → undefined（降③级——zcode 成功 journal 的 coarse 两事件重放无内容，
  *   与旧链 sawAssistantContent=false 同落点）。
@@ -282,7 +282,7 @@ function replayEventsToHistory(
 ): HistoryMessage[] | undefined {
   if (events.length === 0) return undefined;
   // createRecord 参数取 journal-replay.ts eventsToSessionView 的同款中性占位——
-  // record 身份字段不参与投影（投影输入是外部 record 快照），只需 turns 累积容器
+  // record 身份字段不参与映射（映射输入是外部 record 快照），只需 turns 累积容器
   const replayRecord = createRecord("journal-replay", {
     agent: "journal-replay",
     model: "",
@@ -301,7 +301,7 @@ function replayEventsToHistory(
     );
     // message_end.error 的记账语义（engine-generic，现役 zcode 不可达）：存活至重放
     // 末尾的 lastError 落到末条 assistant 的 status/error 字段——守护实现的记账
-    // 随投影就位（设计 D1「未来 parser 演进或新引擎接入产出该形态时正确生效」）。
+    // 随派生视图就位（设计 D1「未来 parser 演进或新引擎接入产出该形态时正确生效」）。
     if (replayRecord.lastError !== undefined) {
       applyAccountedError(messages, replayRecord.lastError);
     }
@@ -333,7 +333,7 @@ function hasTurnContent(turn: { text: string; thinking: string; toolCalls: unkno
   return turn.text !== "" || turn.thinking !== "" || turn.toolCalls.length > 0;
 }
 
-/** Turn（reducer 内部态）→ 投影中间形状（usageDelta → usage，剥内部字段）。 */
+/** Turn（reducer 内部态）→ 映射中间形状（usageDelta → usage，剥内部字段）。 */
 function turnToHistoryTurnView(turn: Turn): HistoryTurnView {
   return {
     text: turn.text,
@@ -368,7 +368,7 @@ function applyAccountedError(messages: HistoryMessage[], lastError: string): voi
 }
 
 // ============================================================
-// 投影（HistoryTurnView[] / SessionView → HistoryMessage[]）
+// 派生视图（HistoryTurnView[] / SessionView → HistoryMessage[]）
 // ============================================================
 
 /** ①级 SessionView → HistoryMessage[]（usage 聚合挂最后一个 turn 供 GUI 展示）。 */
@@ -390,7 +390,7 @@ function sessionViewToMessages(
   return turnsToMessages(turns, record);
 }
 
-/** HistoryTurnView[] → HistoryMessage[]（①②级共用投影；user task 前置一条）。 */
+/** HistoryTurnView[] → HistoryMessage[]（①②级共用派生视图；user task 前置一条）。 */
 function turnsToMessages(
   turns: HistoryTurnView[],
   record: SubagentRecordSnapshot,
@@ -465,7 +465,7 @@ function extractTextFromContent(content: unknown[] | undefined): string | undefi
 // ============================================================
 
 /**
- * ③级：outcome-only 投影（record 现有字段就够）。①②级都不可达时兜底，
+ * ③级：outcome-only 派生视图（record 现有字段就够）。①②级都不可达时兜底，
  * 永不返回空数组（详情页至少有 task/结果）。
  */
 function outcomeOnlyMessages(record: SubagentRecordSnapshot): HistoryMessage[] {
@@ -505,11 +505,11 @@ function outcomeOnlyMessages(record: SubagentRecordSnapshot): HistoryMessage[] {
  * 直读链，A1 守护）。未注册 reader 的引擎（W11 后 = 宿主未接线协议 reader 的
  * 进程）跳过①级直落②级 journal——record 字段就够，详情页至少有摘要卡。
  *
- * 唯一抛出面 = extractEngineId 的引擎身份守卫：record 带原生引擎锚却无 engine
+ * 唯一抛出面 = extractEngineId 的引擎身份检查：record 带原生引擎锚却无 engine
  * 字段（身份域损坏）时显式抛 RecordEngineIdentityError，不降级也不投 pi 读链——
  * 静默换读取目标会跨引擎误读历史。
  *
- * @param record  record 快照（engine/engineHandle 为不可信源，内部守卫消费）
+ * @param record  record 快照（engine/engineHandle 为不可信源，内部检查消费）
  * @param dataDir taiji 数据根（journal/dbPath 白名单经 paths.ts 布局 SSOT 推导）
  * @throws RecordEngineIdentityError record 引擎身份域损坏（有原生锚、无 engine 字段）
  */
@@ -536,7 +536,7 @@ export async function readSubagentHistoryMessages(
     if (native !== undefined) {
       // ①级判空降级（设计 D3）：读成功但 turns 无实质内容（text/thinking/toolCalls
       // 全空，与②级 replayEventsToHistory 的 contentTurns 判定同语义）= 本级不可用，
-      // 降②级——「仅 task」空壳投影（窗口 B）不再从①级放行。
+      // 降②级——「仅 task」空壳派生视图（窗口 B）不再从①级放行。
       if (native.turns.some(hasTurnContent)) return sessionViewToMessages(native, record);
       logger.debug(
         `[session-view-service] tier1 native view has no substantive content ` +

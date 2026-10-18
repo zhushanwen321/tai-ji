@@ -75,7 +75,7 @@ function makeHandler(overrides: { setProvider?: ReturnType<typeof vi.fn>; delete
     switchModel: vi.fn().mockResolvedValue('p1/m1'),
     setThinkingLevel: vi.fn().mockResolvedValue(undefined),
     discoverModelsFromApi: overrides.discover ?? vi.fn().mockResolvedValue([{ id: 'm1' }]),
-    // M3a test 模式编排面（可选交集）：缺省不装配——未注入时 handler 走 test_unavailable 防御分支
+    // M3a test 模式编排侧（可选交集）：缺省不装配——未注入时 handler 走 test_unavailable 防御分支
     ...(overrides.testProviderConnections ? { testProviderConnections: overrides.testProviderConnections } : {}),
   }
   const skillRegistry = {
@@ -254,7 +254,7 @@ describe('SettingsMessageHandler', () => {
           expect(ctx.broadcastSkillCacheInvalidated).toHaveBeenCalledTimes(2)
         })
         // 失败分支先补发 global（partial=true 标注降级），finally 再发 project——
-        // 修复前 global 失效广播随通知链一起丢失，前端 global 投影陈旧无信号。
+        // 修复前 global 失效广播随通知链一起丢失，前端 global 派生视图陈旧无信号。
         const invalidations = (ctx.broadcastSkillCacheInvalidated as ReturnType<typeof vi.fn>).mock.calls as unknown as Array<[string, ...(undefined | boolean)[]]>
         expect(invalidations[0]).toEqual(['global', undefined, true])
         expect(invalidations[1]?.[0]).toBe('project')
@@ -401,7 +401,7 @@ describe('SettingsMessageHandler', () => {
       expect(replies[0].payload).toMatchObject({ success: false, error: 'test_unavailable' })
     })
 
-    it('以 ctx.modelService 为 this 调用编排面（真实实现方法体依赖 this.configService）', async () => {
+    it('以 ctx.modelService 为 this 调用编排侧（真实实现方法体依赖 this.configService）', async () => {
       let seenThis: unknown
       const testProviderConnections = vi.fn(function (this: unknown) {
         seenThis = this
@@ -451,7 +451,7 @@ describe('SettingsMessageHandler', () => {
       // 重建链：rebuildGlobal（重扫 globalCache + 重挂 watcher）+ invalidateAllProjects（清 projectCache）
       expect(ctx.skillRegistry.rebuildGlobal).toHaveBeenCalledOnce()
       expect(ctx.skillRegistry.invalidateAllProjects).toHaveBeenCalledOnce()
-      // 渲染 gate：广播失效信号（'project' scope，让前端 useProjectSkills 失效重拉）
+      // 渲染 gate：广播失效信号（'project' scope，让前端 useProjectSkills 失效重新拉取）
       expect(ctx.broadcastSkillCacheInvalidated).toHaveBeenCalledWith('project')
       // settings 弹窗链路保留：broadcastSkillDirs + broadcastSkillList（服务 settingsStore）
       expect(ctx.broadcastSkillDirs).toHaveBeenCalledOnce()
@@ -526,10 +526,10 @@ describe('SettingsMessageHandler', () => {
     })
   })
 
-  // ── Phase 3 reconcile：defaultModel 维护统一收口（P1 无双重广播 + source 统一）──
+  // ── Phase 3 reconcile：defaultModel 维护统一收敛（P1 无双重广播 + source 统一）──
   // 设计 provider-arch-hardening §3.3 D3 / §5 Phase 3：5 handler 的 config.defaults 广播
-  // 收口到 reconcileDefaultModelAfterProviderChange，消除分散编排的遗漏根因。
-  describe('Phase 3 reconcile：defaultModel 维护统一收口（P1 无双重广播）', () => {
+  // 收敛到 reconcileDefaultModelAfterProviderChange，消除分散编排的遗漏根因。
+  describe('Phase 3 reconcile：defaultModel 维护统一收敛（P1 无双重广播）', () => {
     it('setProvider 有 newDefault → 广播恰好 1 次，有 newDefault 时 ?? 短路不调 getDefaultModel', async () => {
       const { ctx, broadcasts, handler } = makeHandler({
         setProvider: vi.fn().mockReturnValue({ newDefault: { provider: 'p1', modelId: 'm1' } }),
@@ -689,7 +689,7 @@ describe('SettingsMessageHandler', () => {
       const settings = readSettings()
       expect(settings.defaultProvider).toBe('p1')
       expect(settings.defaultModel).toBe('m1')
-      // 且 reconcile 广播了 config.defaults（收口后统一入口）
+      // 且 reconcile 广播了 config.defaults（收尾后统一入口）
       expect(broadcasts.filter(b => b.type === 'config.defaults')).toHaveLength(1)
     })
   })
@@ -729,7 +729,7 @@ describe('SettingsMessageHandler', () => {
     })
 
     it('S7 空列表 → default 不变（不调 setDefaultModel、不广播 config.defaults），reply scopedModels:[]，broadcastProviderList 仍触发', async () => {
-      // 设计 §4.1 S7：清空白名单不动默认模型。实现依据 handler 的 `if (result.length > 0)` 守卫
+      // 设计 §4.1 S7：清空白名单不动默认模型。实现依据 handler 的 `if (result.length > 0)` 检查
       //（settings-message-handler.ts）——空列表两段（写 default / 广播 defaults）都跳过，
       // provider 列表广播仍触发（前端需刷新 scopedModels 视图）。
       const { ctx, replies, broadcasts, handler } = makeHandler({
@@ -738,7 +738,7 @@ describe('SettingsMessageHandler', () => {
 
       await handler.handleSettingsMessage(msg('config.setScopedModels', { models: [] }), WS)
 
-      // ① 不调 setDefaultModel（连带 getDefaultModel 也不读——守卫短路）
+      // ① 不调 setDefaultModel（连带 getDefaultModel 也不读——检查短路）
       expect(ctx.configService.setDefaultModel).not.toHaveBeenCalled()
       expect(ctx.configService.getDefaultModel).not.toHaveBeenCalled()
       // ② 不广播 config.defaults

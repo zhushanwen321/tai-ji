@@ -34,7 +34,7 @@ const terminalConfigReply = () => ({
 
 // '@/api' 门面 mock：导入静默底盘（真实门面拉起 WS 连接，node env 不可用）。project 域与
 // config 域 on* 订阅族复用 settings-modal-api-mock 的公共段；terminal config / settings
-// system 两差异面保持本文件内联。
+// system 两差异点保持本文件内联。
 vi.mock('@/api', () => ({
   project: apiProjectMock(),
   config: {
@@ -133,7 +133,7 @@ describe('useQuotaQuery', () => {
 
     await onHoverEnter()
 
-    // 旧 data 不被 null 覆写（回归守卫：BL round1 #3）
+    // 旧 data 不被 null 覆写（回归检查：BL round1 #3）
     expect(data.value).toEqual(mockRow)
     // error 写入 reason 映射文案（i18n mock 返回 key 本身）
     expect(error.value).toBe('panel.context.quotaFailUnauthorized')

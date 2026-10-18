@@ -46,7 +46,7 @@ export const ENV_SCHEMA = "PI_WORKFLOW_SCHEMA";
  * 各自保留、跨包契约测试锁字节相等（tests/cross-package-contract.test.ts）。
  * 本侧职责仅可见性：注册时超限 logger.warn（无 logger API，stderr 直出惯例）提示
  * env 通道有上限，建议拆分 schema 或精简——不拒绝注册（子进程能收到 env 说明 SW
- * 侧闸门已放行，此处拒绝只会把可诊断的降级变成无法启动）。
+ * 侧门禁已放行，此处拒绝只会把可诊断的降级变成无法启动）。
  *
  * [跨包契约] 任一端改值必须同步另一端，否则 SW 侧硬拒绝线与 SO 侧提示线漂移。
  */

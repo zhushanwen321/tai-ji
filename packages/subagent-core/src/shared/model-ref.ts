@@ -11,7 +11,7 @@
 //
 // 背景（D1 证据）：pi CLI 的 tryMatchModel 是 pattern 模糊引擎（id 匹配用 toLowerCase()），
 // registry 存在大小写孪生时 canonical 串亦被判歧义作废、落入模糊分支 localeCompare 取最大——
-// 因此「扩展侧全等放行」不能独立保证「子进程按此名执行」，孪生守卫必须内建（规则④）。
+// 因此「扩展侧全等放行」不能独立保证「子进程按此名执行」，孪生检查必须内建（规则④）。
 
 // ============================================================
 // 类型
@@ -39,8 +39,8 @@ export interface ModelRefSource {
 /**
  * thinking level 支持顺序（低→高）。spawn 侧 `:level` 后缀仅接受本白名单值。
  *
- * 本数组是宿主侧校验用的有序词表副本，为词表守卫 scripts/check-thinking-levels.mjs
- * 的 T3 比对面〔ext-simplify-18 §3.4 D6〕：守卫在提交期把 pi-ai 实装的
+ * 本数组是宿主侧校验用的有序词表副本，为词表检查 scripts/check-thinking-levels.mjs
+ * 的 T3 比对面〔ext-simplify-18 §3.4 D6〕：检查在提交期把 pi-ai 实装的
  * ModelThinkingLevel 联合与两份职责不同的词表单向比对——本数组（宿主校验用）+
  * 前端派生源 shared PI_THINKING_LEVELS（packages/shared/src/pi-preset.ts，T4）。
  * 比对语义 = 成员集合一致性，不判低→高顺序；顺序语义由本包自身测试锚定
@@ -140,7 +140,7 @@ export function isModelRef(input: string): boolean {
 }
 
 // ============================================================
-// 规则④：孪生守卫（两条路径共用）
+// 规则④：孪生检查（两条路径共用）
 // ============================================================
 
 /**
@@ -161,7 +161,7 @@ function collectCaseVariants(
 }
 
 /**
- * 规则④孪生守卫错误（D1 文案）。命中全等但 registry 自身含大小写歧义 → 拒绝放行，
+ * 规则④孪生检查错误（D1 文案）。命中全等但 registry 自身含大小写歧义 → 拒绝放行，
  * 恢复动作 = 清理重复条目后重试（输入侧不可控维度，系统不代改 registry）。
  */
 function ambiguousVariantError(ref: string, variants: string[]): Error {
@@ -182,7 +182,7 @@ function ambiguousVariantError(ref: string, variants: string[]): Error {
  *
  * ctxModel 是运行时已验证的 ModelInfo 对象（主 agent 在用），豁免 registry 存在性复查
  * 与 auth 校验——「缺省继承」是输入缺省而非变体放行；但继承产出的 canonical 串与显式
- * 入参走同一个 pi pattern 引擎，**孪生守卫同等适用**（registry 含大小写孪生时拒绝放行）。
+ * 入参走同一个 pi pattern 引擎，**孪生检查同等适用**（registry 含大小写孪生时拒绝放行）。
  *
  * @throws 孪生歧义时同步抛错（ambiguousVariantError 文案）
  */
@@ -317,7 +317,7 @@ function notFoundError(
  * ① strip 合法 thinking 后缀（THINKING_ORDER 白名单）；
  * ② provider 精确匹配（区分大小写）；
  * ③ modelId 与 registry 条目全等精确匹配（含大小写）；
- * ④ 孪生守卫——全等命中后 case-insensitive 复扫 registry，存在孪生条目即拒绝放行；
+ * ④ 孪生检查——全等命中后 case-insensitive 复扫 registry，存在孪生条目即拒绝放行；
  * ⑤ 未命中 → 同步抛错，错误含 "Did you mean" 问句候选（case variant 排首位并标注）+
  *    合法串全集（无候选时）+ 「省略 model 继承主 agent」指引。
  *

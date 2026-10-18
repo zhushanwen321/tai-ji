@@ -1,19 +1,19 @@
 // src/core/execution-record.ts
 //
-// 唯一执行状态对象 + 唯一创建/更新/完成/投影入口。
+// 唯一执行状态对象 + 唯一创建/更新/完成/派生视图入口。
 //
-// 收口设计（2026-06-22 重构）：
-//   一次执行的完整内容（text/thinking/toolCalls/usage）按 turn 收口在 record.turns[]。
+// 收拢设计（2026-06-22 重构）：
+//   一次执行的完整内容（text/thinking/toolCalls/usage）按 turn 收拢在 record.turns[]。
 //   eventLog / currentActivity / result 文本均从 turns[] 派生（getEventLog /
 //   getCurrentActivity / getFullText），不再独立存储切片或缓冲。
 //
 //   createRecord    唯一创建入口（model 允许 undefined = 用户未指定，R4/D6-①——
 //                   旧「创建时必填」不变量随模型可选化显式反转：poll 路径丢 model
-//                   的原始缺陷已由「identity 字段创建时一次确定」的收口本身消解，
+//                   的原始缺陷已由「identity 字段创建时一次确定」的收拢本身消解，
 //                   undefined 是合法缺席语义而非丢失）
 //   updateFromEvent 唯一事件更新入口（累积进 turns[]，消灭闭包旁路累积器）
 //   completeLegacyClosed 唯一 legacy 终态冻结入口（D7 例外族 / 监督器放弃，W4 sunset）
-//   project/snapshot 唯一投影入口（两路径字段一致）
+//   project/snapshot 唯一派生视图入口（两路径字段一致）
 //
 // Core 层叶子原语：仅依赖 types.ts。零 Pi / Runtime / TUI 依赖。
 
@@ -126,7 +126,7 @@ export function addUsage(prev: AgentUsage | undefined, next: AgentUsage): AgentU
 // 创建（唯一入口）
 // ============================================================
 
-/** 创建一个空 turn（text/thinking 空，无 toolCalls，未闭合）。
+/** 创建一个空 turn（text/thinking 空，无 toolCalls，未结束）。
  *  导出单源：活态创建与磁盘重建（session-reconstructor）共用，副本已删。 */
 export function emptyTurn(): Turn {
   return { text: "", thinking: "", toolCalls: [], usageDelta: undefined, closed: false };
@@ -136,9 +136,9 @@ export function emptyTurn(): Turn {
  * 唯一创建入口。identity 字段（agent/model/thinkingLevel/mode/task）一次确定不可变。
  *
  * [R4/D6-① 反转] model 允许 undefined：原「创建时必填——poll 路径 model 丢失的架构
- * 修复」不变量，其防丢失价值由「identity 创建时一次确定」收口本身承载（poll 不再
+ * 修复」不变量，其防丢失价值由「identity 创建时一次确定」收拢本身承载（poll 不再
  * 缺字段）；undefined 现是合法缺席语义 = 用户未指定模型（引擎走自身缺省解析，
- * 如 zcode 的 defaultModelSelection），record.model 留空如实投影。禁空串哨兵。
+ * 如 zcode 的 defaultModelSelection），record.model 留空如实映射。禁空串哨兵。
  */
 export function createRecord(
   id: string,
@@ -163,11 +163,11 @@ export function createRecord(
     /** [modeless 波1] chatMode 停写删除——「模式」不再是 record 状态（万物可续）。
      *  空闲超时毫秒数（idle GC 回收节奏，覆盖默认 5min）。 */
     idleTimeoutMs?: number;
-    /** 实际执行引擎 id（P4 路由留痕，D9①）。缺省 = pi 投影（存量零迁移）。 */
+    /** 实际执行引擎 id（P4 路由留痕，D9①）。缺省视为 pi（存量零迁移）。 */
     engine?: string;
     /** [A3/S3 修复] 来源身份冷复活透传——origin/parentRunId 与 engine 同属 identity
      *  域经 createRecord 重建：冷查链漏传会让 workflow 批成员复活后 origin=undefined，
-     *  绕过 messageHandler 的 one-shot 批成员守卫。tool 来源两字段恒 undefined。 */
+     *  绕过 messageHandler 的 one-shot 批成员检查。tool 来源两字段恒 undefined。 */
     origin?: RecordOrigin;
     /** origin="workflow" 时所属 workflow run 的 id（W2 写入）。 */
     parentRunId?: string;
@@ -371,8 +371,8 @@ function applyToolEnd(
 }
 
 /**
- * turn_end：闭合当前 turn，记 closedTs（真实墙钟），turnCount++，清 lastError。
- * 正常闭合清 lastError：瞬态 error 恢复后不应误判 success=false
+ * turn_end：结束当前 turn，记 closedTs（真实墙钟），turnCount++，清 lastError。
+ * 正常结束清 lastError：瞬态 error 恢复后不应误判 success=false
  * （若 turn_end 后 message_end 报 error，会在 message_end 处理器重新写回）。
  */
 function applyTurnEnd(record: ExecutionRecord): void {
@@ -399,7 +399,7 @@ function applyMessageEnd(
   if (event.usage) {
     const turn = currentTurn(record);
     turn.usageDelta = addUsage(turn.usageDelta, event.usage);
-    // totalTokens 累加四项之和（保留旧语义，投影直接读）
+    // totalTokens 累加四项之和（保留旧语义，派生视图直接读）
     record.totalTokens +=
       (event.usage.input ?? 0) + (event.usage.output ?? 0) +
       (event.usage.cacheRead ?? 0) + (event.usage.cacheWrite ?? 0);
@@ -418,12 +418,12 @@ function applyErrorEvent(
 }
 
 /**
- * 从 AgentEvent 更新 record。所有数据收口进 record.turns[]。
+ * 从 AgentEvent 更新 record。所有数据收拢进 record.turns[]。
  *   - text/thinking：流式累积进 currentTurn()（完整内容，非切片）
  *   - tool_start/end：push 进 currentTurn().toolCalls（含完整 result）
  *     tool_end 跨 turn 扫描找 running 同名 toolCall（兜底滞后事件）
- *   - turn_end：闭合当前 turn，记 closedTs（真实墙钟，供 getEventLog）；
- *     正常闭合清 lastError（瞬态 error 恢复后不应误判 success=false）
+ *   - turn_end：结束当前 turn，记 closedTs（真实墙钟，供 getEventLog）；
+ *     正常结束清 lastError（瞬态 error 恢复后不应误判 success=false）
  *   - message_end：usage 增量存进末 turn.usageDelta（直接写末 turn，不开新 turn）；
  *     totalTokens 累加
  *   - error：存 record.lastError（getEventLog 派生 error 条目用）
@@ -447,7 +447,7 @@ export function updateFromEvent(record: ExecutionRecord, event: AgentEvent): voi
     case "tool_end":
       return applyToolEnd(record, event);
 
-    // ── turn_end：闭合当前 turn ──
+    // ── turn_end：结束当前 turn ──
     case "turn_end":
       return applyTurnEnd(record);
 
@@ -468,7 +468,7 @@ export function updateFromEvent(record: ExecutionRecord, event: AgentEvent): voi
       return;
 
     // ── armed：武装确认回执（[D3 协议版 P6]，协议语义见 SDK contract-types）——
-    //    监控信号不进 record 投影，消费方 = 宿主等待门 + run 事件 journal（C3 第④步
+    //    监控信号不进 record 派生视图，消费方 = 宿主等待门 + run 事件 journal（C3 第④步
     //    双侧 reducer no-op 义务的 core 侧）
     case "armed":
       return;
@@ -498,7 +498,7 @@ export function updateFromEvent(record: ExecutionRecord, event: AgentEvent): voi
  * ts 为真实墙钟时间戳：tool 条目用 tc.startedTs，turn_end 用 turn.closedTs。
  * （旧实现派生时 ts += 1 是合成值，无法表达真实时序——现已改为存真实时间戳。）
  *
- * 纯函数：每次调用重新生成，不缓存。消费方按需调（投影时用）。
+ * 纯函数：每次调用重新生成，不缓存。消费方按需调（派生视图时用）。
  */
 export function getEventLog(record: ExecutionRecord): AgentEventLogEntry[] {
   return deriveEventLog(record.turns, record.lastError, record.startedAt);
@@ -507,7 +507,7 @@ export function getEventLog(record: ExecutionRecord): AgentEventLogEntry[] {
 /**
  * eventLog 派生本体（单源）——活态路径（getEventLog）与磁盘重建路径
  * （session-reconstructor 的 ReconstructedRecord）共用同一实现，此前两处各持
- * 副本、靠注释互指「镜像」（漂移面已删）。
+ * 副本、靠注释互指「镜像」（漂移风险已删）。
  *
  * 形参取最小结构（turns + lastError + startedAt）而非 ExecutionRecord：重建路径
  * 产出的不是 ExecutionRecord，放宽形参即可直接复用（与 getDisplayItems 同款手法）。
@@ -579,11 +579,11 @@ export function getDisplayItems(record: { turns: readonly Turn[] }): DisplayItem
 /**
  * 从 turns[] 末尾推导当前活动行（running 时）。
  *
- *   优先级：最后一个未闭合 turn 的末尾 running toolCall → thinking → text → undefined
+ *   优先级：最后一个未结束 turn 的末尾 running toolCall → thinking → text → undefined
  *
  * 仅 status==="running" 时返回；terminal 态返回 undefined。
  *
- * 注意：返回的 type 联合（"tool"|"text"|"thinking"）是手写的，未通过类型守卫从
+ * 注意：返回的 type 联合（"tool"|"text"|"thinking"）是手写的，未通过类型检查从
  * AgentEvent 派生——它映射的是累积的 turn 状态（InternalToolCall._status + turn.thinking/text），
  * 而非单个事件。若未来新增 turn 内容模式（如 reasoning_summary），须同步扩展本函数，
  * 否则会静默返回 undefined（活动行运行中途消失）。updateFromEvent 的 switch 有 never 穷尽
@@ -621,7 +621,7 @@ export function getCurrentActivity(
  * 多 turn 用空行分隔（每个 turn 是一段独立的 assistant 输出）。
  *
  * 语义对齐旧 collectResponseText：后者只取最后一条 assistant message 的 text。
- * turns[] 收口后，每条 assistant message 对应一个 turn，故 join 所有非空 turn 文本
+ * turns[] 收拢后，每条 assistant message 对应一个 turn，故 join 所有非空 turn 文本
  * 与「拼接所有 assistant message」语义一致。单 turn 场景两者完全等价。
  */
 export function getFullText(record: ExecutionRecord): string {
@@ -691,22 +691,22 @@ export function getTotalUsage(record: ExecutionRecord): AgentUsageTotal | undefi
 }
 
 // ============================================================
-// 意图原语（record 两态机内存面：CAS 收口 / 冻结 / 回边）
+// 意图原语（record 两态机内存侧：CAS 收尾 / 冻结 / 回边）
 // ============================================================
 
 /**
- * 意图原语：legacy closed 终态收口的 CAS 抢锁（settle 方向：running → idle）。
- * 仅当 `record.status === "running"` 时收口并返回 true，否则返回 false。**status
+ * 意图原语：legacy closed 终态收尾的 CAS 抢锁（settle 方向：running → idle）。
+ * 仅当 `record.status === "running"` 时收尾并返回 true，否则返回 false。**status
  * 状态机本身就是互斥锁**——check-then-set 在 JS 单线程事件循环里天然原子。
  *
  * [W2/V3 说谎签名退役] 前身函数的 target 参数被 void 丢弃（说谎签名），本原语是
- * 同一行为的诚实命名——无目标参数：收口
+ * 同一行为的诚实命名——无目标参数：收尾
  * 目标恒为 legacy closed 形态（idle + closedReason/stopReason 双写，桥接不变量
  * 「closed ⟺ idle ∧ closedReason≠undefined」的写侧半边）。
  *
  * 写侧生产者仅剩两处（types.ts ExecutionStatus 头注登记）：workflow D7 例外族
- * （settleWorkflowRecord 收口单点）与监督器放弃产出（service-binding giveUp）；
- * 读侧对偶 = isLegacyClosedSettled 单一谓词。轮收口（非终态）走 store.markSettled
+ * （settleWorkflowRecord 收尾单点）与监督器放弃产出（service-binding giveUp）；
+ * 读侧对偶 = isLegacyClosedSettled 单一谓词。轮收尾（非终态）走 store.markSettled
  * （不写 closedReason），与本原语语义分界清晰。
  *
  * @param closedReason 旧终态 L2 原因（同时镜像进 stopReason 展示位）。
@@ -725,12 +725,12 @@ export function trySettleLegacyClosed(
 
 /**
  * status 状态机的 CAS 互斥锁（wake 方向：idle → running，U2 新增）。仅当
- * `record.status === "idle"` 时翻回 running 并返回 true；running（一轮已在飞）/
+ * `record.status === "idle"` 时翻回 running 并返回 true；running（一轮已在途）/
  * 其他形态一律拒绝。与 trySettleLegacyClosed（settle 方向）共同构成两态状态机的
- * running↔idle 迁移面，非法迁移（对 running 重复 settle / 对 running 重复 wake）
+ * running↔idle 迁移侧，非法迁移（对 running 重复 settle / 对 running 重复 wake）
  * 由 CAS 前置判据拒绝。
  *
- * 用途：message 链对 idle record 的接管（U4 准入单点接线）；不清收口位——
+ * 用途：message 链对 idle record 的接管（U4 准入单点接线）；不清收尾位——
  * stopReason/closedReason 的清除归接管编排（对齐 resurrectClosed 桥接语义），
  * 本原语只做占用位翻转。
  */
@@ -741,11 +741,11 @@ export function tryEnterRunning(record: ExecutionRecord): boolean {
 }
 
 /**
- * [v8.5 D → U2 桥接] 已收口 record 的接管回边：idle → running，清除收口语义位。
+ * [v8.5 D → U2 桥接] 已收尾 record 的接管回边：idle → running，清除收尾语义位。
  *
  * 旧语义（closed → running 透明重生）随终态概念删除而迁移：磁盘重建/内存中的
- * 「已收口」形态在两态下即 idle（桥接不变量，closedReason 有值为旧终态遗留），
- * message 链接管时经本函数翻回 running。running 入态防御性 no-op：接管是已收口
+ * 「已收尾」形态在两态下即 idle（桥接不变量，closedReason 有值为旧终态遗留），
+ * message 链接管时经本函数翻回 running。running 入态防御性 no-op：接管是已收尾
  * record 的专属回边，不是万能改写器。U4 准入判据单点重写（reviveOrThrow 合并）
  * 后本函数由新接管原语承接。
  */
@@ -766,7 +766,7 @@ export function resurrectClosed(
 }
 
 /**
- * 重建专用收口：跳过 CAS 直接赋值 status。
+ * 重建专用收尾：跳过 CAS 直接赋值 status。
  *
  * 仅用于 session-reconstructor 从 session.jsonl 重建终态 record 时——
  * 重建的 record 没有 running 状态需要保护，直接赋值即可。
@@ -811,7 +811,7 @@ export function completeLegacyClosed(
 }
 
 /**
- * settleWorkflowRecord 的写入面注入（finalizeRecord 归 RecordLifecycle 显式接口，
+ * settleWorkflowRecord 的写侧注入（finalizeRecord 归 RecordLifecycle 显式接口，
  * 经调用方闭包回指）。
  */
 export interface WorkflowRecordSettleExec { // oe-exempt:20260929:framework:record settle exec contract per design D15
@@ -819,11 +819,11 @@ export interface WorkflowRecordSettleExec { // oe-exempt:20260929:framework:reco
 }
 
 /**
- * workflow origin 的 settle 收口单点：CAS 抢锁（trySettleLegacyClosed）→ 委托注入的
+ * workflow origin 的 settle 收尾单点：CAS 抢锁（trySettleLegacyClosed）→ 委托注入的
  * finalizeRecord。CAS 拒绝（cancel/dispose 抢先 settle）静默跳过——既有语义逐字保持。
  *
  * [D1 拆边 Class C] 原定义在 `orchestration/terminal-actions.ts`，2026-09-30 下沉本模块：
- * 函数体只读 record 两态状态位 + 委托注入面——不读 run 生命周期 / 转移表 / 通知面，
+ * 函数体只读 record 两态状态位 + 委托注入点——不读 run 生命周期 / 转移表 / 通知侧，
  * 是记录级持久化原语（编排语义零耦合），故归 persistence，编排侧不再被 execution
  * 反向 import。
  */
@@ -863,7 +863,7 @@ export async function settleWorkflowRecord(
  * "failed"——语义为「父进程关闭时子 agent 未完成即失败」，选定行为而非疏漏，
  * 勿当 bug 改回 cancelled 造成派生矛盾。
  *
- * 唯一写点 completeLegacyClosed 调用本函数冻结 record.outcome；通知 payload（notifier 投影
+ * 唯一写点 completeLegacyClosed 调用本函数冻结 record.outcome；通知 payload（notifier 派生视图
  * 边界）与无 outcome 字段的存量/重建 record 由 projectOutcome 兜底复用本函数。
  */
 export function deriveOutcome(
@@ -899,7 +899,7 @@ export function isLegacyClosedSettled(record: {
 }
 
 /**
- * 投影层 outcome 唯一出口：running / 轮间 idle → undefined（outcome 语义只适用
+ * 派生视图层 outcome 唯一出口：running / 轮间 idle → undefined（outcome 语义只适用
  * 旧终态遗留形态）；旧终态（isLegacyClosedSettled 命中）→ 一等 outcome
  * 字段直读优先，字段缺失（存量/磁盘重建 record——outcome 持久化不在 U3 领地内）
  * 时回退 deriveOutcome(closedReason, error) 兜底——单一权威函数，消费方零手写推导。
@@ -912,13 +912,13 @@ export function projectOutcome(record: {
   error?: string;
 }): ProjectedOutcome | undefined {
   // [W2/V3 D5] 桥接判据收敛：旧「closed」读形态 ⟺ isLegacyClosedSettled（markSettled
-  // 的轮间 idle 无 closedReason，不投影 outcome——非终态语义）。
+  // 的轮间 idle 无 closedReason，不派生 outcome——非终态语义）。
   if (!isLegacyClosedSettled(record)) return undefined;
   return record.outcome ?? deriveOutcome(record.closedReason, record.error);
 }
 
 // ============================================================
-// 投影（唯一 → Details / Snapshot / Persisted）
+// 派生视图（唯一 → Details / Snapshot / Persisted）
 // ============================================================
 
 /** elapsedSeconds 唯一计算点（共享 helper，消除三处发散）。endedAt 缺失用 Date.now()。 */
@@ -928,7 +928,7 @@ export function computeElapsedSeconds(record: { startedAt: number; endedAt?: num
 }
 
 /**
- * 投影到 SubagentToolDetails。elapsedSeconds/currentActivity/eventLog 均现算派生。
+ * 映射到 SubagentToolDetails。elapsedSeconds/currentActivity/eventLog 均现算派生。
  */
 export function project(record: ExecutionRecord): SubagentToolDetails {
   return {
@@ -954,7 +954,7 @@ export function project(record: ExecutionRecord): SubagentToolDetails {
 }
 
 /**
- * 投影到只读快照（TUI list / poll 消费）。
+ * 映射到只读快照（TUI list / poll 消费）。
  * 浅拷贝 turns[]，字段标 readonly 阻止 TUI 回写。
  */
 export function snapshot(record: ExecutionRecord): RecordSnapshot {

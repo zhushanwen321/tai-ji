@@ -2,9 +2,9 @@
   Settings · 语音菜单页（ai-voice-tts 设计 §5.2；M0）。
 
   自上而下：通用配置（启用总开关）→ 服务商下拉单选（三家独立记忆）→ 选中服务商全量
-  配置（TtsProviderForm，表单投影 TtsFormModel 驱动）→ 操作行（保存 / 保存并测试 /
+  配置（TtsProviderForm，表单派生视图 TtsFormModel 驱动）→ 操作行（保存 / 保存并测试 /
   额度说明）。数据源：打开时并行拉 tts.getConfig + tts.getCapabilities（§7.5）；capabilities
-  首载失败时表单区整体不渲染（投影枚举缺失无从渲染半态）+ 重试入口；已成功加载过投影
+  首载失败时表单区整体不渲染（派生视图枚举缺失无从渲染半态）+ 重试入口；已成功加载过派生视图
   后的重试失败保留禁用表单（已保存配置的 Key 状态点经 getConfig 始终可见）。
   「保存并测试」合成固定样句走 useTtsPlayer 的 settings-tts-test 通道（全局互斥，§7.5 要点 4）。
 -->
@@ -102,7 +102,7 @@
       </div>
     </GroupCard>
 
-    <!-- 选中服务商全量配置（表单投影驱动；capabilities 缺失时禁用；Key 展示态由页面状态机驱动） -->
+    <!-- 选中服务商全量配置（表单派生视图驱动；capabilities 缺失时禁用；Key 展示态由页面状态机驱动） -->
     <TtsProviderForm
       v-if="activeForm && activeState"
       v-model:state="activeState"
@@ -179,7 +179,7 @@ const player = useTtsPlayer()
 /** 「保存并测试」固定样句（设计 §5.2 第 5 点）。 */
 const TEST_SENTENCE = '你好，我是太极语音助手。'
 
-/** 投影/配置的遍历序（卡片展示顺序；M0 三家固定）。 */
+/** 派生视图/配置的遍历序（卡片展示顺序；M0 三家固定）。 */
 const PROVIDER_IDS: readonly TtsProviderId[] = ['stepfun', 'minimax', 'mimo']
 
 type KeyOp = 'clear' | 'bring' | null
@@ -244,7 +244,7 @@ function providerMeta(pid: TtsProviderId): { hasApiKey: boolean; providerKeyAvai
   return { hasApiKey: p?.hasApiKey === true, providerKeyAvailable: p?.providerKeyAvailable === true }
 }
 
-/** 协议形态标签（卡片第二行；投影 endpointPath + authHeader 组装，非硬编码文案）。 */
+/** 协议形态标签（卡片第二行；派生视图 endpointPath + authHeader 组装，非硬编码文案）。 */
 function protocolLabel(pid: TtsProviderId): string {
   const form = forms.value?.[pid]
   if (!form) return ''
@@ -351,7 +351,7 @@ function applyProviderConfig(pid: TtsProviderId, config: SanitizedTtsConfig): vo
   keyDisplay[pid] = config.providers[pid].hasApiKey === true ? SAVED_KEY_MASK : ''
 }
 
-/** 并行拉取配置投影与表单投影（独立数据源 allSettled，互不阻塞）。 */
+/** 并行拉取配置派生视图与表单派生视图（独立数据源 allSettled，互不阻塞）。 */
 async function reload(): Promise<void> {
   loading.value = true
   capsFailed.value = false
@@ -371,7 +371,7 @@ async function reload(): Promise<void> {
       for (const pid of PROVIDER_IDS) applyProviderConfig(pid, configRes.value.config)
     }
   } else {
-    // 配置读取失败回默认骨架（可重新保存，§5.4 末行）；表单投影正常时静默骨架 + toast
+    // 配置读取失败回默认骨架（可重新保存，§5.4 末行）；表单派生视图正常时静默骨架 + toast
     toastError(t('settings.tts.loadFailed'))
   }
   loading.value = false

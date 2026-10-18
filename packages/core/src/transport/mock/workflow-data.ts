@@ -4,7 +4,7 @@
  * drawer workflow tab）+ 跟随 session 切换 + workflow-viz overlay 边界态演员。
  *
  * 从 mock/index.ts 拆出（文件行数超 500 限制）。
- * [HISTORICAL] 2026-09-16 侧栏 Flows/Agents tab 退役后，列表渲染断言面迁至任务托盘
+ * [HISTORICAL] 2026-09-16 侧栏 Flows/Agents tab 退役后，列表渲染断言范围迁至任务托盘
  * （workflow 详情视图 2 = drawer WorkflowTab）。
  *
  * [D8] workflow-overlay-refine §3.3 演员清单（SSOT = .tmp/dev-flow/ui-redesign-combined.runlog/
@@ -137,7 +137,7 @@ export const fixtureWorkflows: WorkflowRunRecord[] = [
     usedTokens: 4000,
     totalCallCount: 1,
     agentCalls: [
-      // 在途 call 无 settled 行——run 终局后投影保持 running（stopped-time-limited 语义）
+      // 在途 call 无 settled 行——run 终局后派生视图保持 running（stopped-time-limited 语义）
       { id: 0, agent: 'migrator-W1', status: 'running', phase: 'Migrate', sessionId: 'sess-agent-mock-7', startedAt: '2026-07-11T14:00:02Z' },
     ],
     stateFilePath: '/data/wf-mock-stopped-time-limited.jsonl',
@@ -244,7 +244,7 @@ const at = (iso: string): number => Date.parse(iso)
 /** 相对偏移便捷（秒；行内 ts = 基准 + offset 秒 × 1000，避免散落四则运算）。 */
 const plus = (base: number, seconds: number): number => base + seconds * 1000
 
-/** wf-mock-001 事件行集（10 行骨架帧，无大字段截断——截断展示面由组件测试覆盖）。 */
+/** wf-mock-001 事件行集（10 行骨架帧，无大字段截断——截断展示侧由组件测试覆盖）。 */
 const wfMock001Events: WorkflowRunEventEntry[] = [
   { type: 'run-created', ts: at('2026-07-10T10:00:00Z'), seq: 1, runId: 'wf-mock-001', workflowName: 'deploy-flow', argsSummary: '{"task":"demo"}' },
   { type: 'phase-started', ts: plus(at('2026-07-10T10:00:00Z'), 1), seq: 2, phase: 'Dev' },
@@ -435,7 +435,7 @@ const wfEmptyDagDag: WorkflowDag = {
   loops: [],
 }
 
-/** wf-mock-wide-phase 蓝图（单 phase Build 7 节点并行组、无顺序边——W-2 纵向边界数据面）。 */
+/** wf-mock-wide-phase 蓝图（单 phase Build 7 节点并行组、无顺序边——W-2 纵向边界数据范围）。 */
 const wfWidePhaseDag: WorkflowDag = {
   nodes: [
     agentNode(3, 0, 'builder-W1', 'Build'),

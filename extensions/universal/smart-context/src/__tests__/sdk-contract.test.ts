@@ -31,7 +31,7 @@ describe("pi SDK 契约（compact 接管路径依赖的导出形状）", () => {
 		];
 		const ctx = buildSessionContext(entries as never);
 		expect(Array.isArray(ctx.messages)).toBe(true);
-		// compaction entry 投影为一条消息 + 保留段消息（旧摘要在前缀中，D12 same-mode 前提）
+		// compaction entry 派生为一条消息 + 保留段消息（旧摘要在前缀中，D12 same-mode 前提）
 		expect(ctx.messages.length).toBeGreaterThanOrEqual(2);
 	});
 

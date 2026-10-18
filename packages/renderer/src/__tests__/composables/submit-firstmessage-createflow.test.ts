@@ -140,7 +140,7 @@ describe('submitFirstMessage 改调 createSessionFlow（TC-5 / FU-1）', () => {
 
     // 模拟 retry：send 失败后 state 回 landing（editAndResend 流程；completed 是终态无出口，
     // 测试内经 resetNewTaskFlow 回 idle 后重新 transition，等价于应用层重新 startFlow 的重建路径），
-    // currentSession 仍绑定 → 再提交走 !currentSession 守卫的 else 分支（不 create 直接 send）。
+    // currentSession 仍绑定 → 再提交走 !currentSession 检查的 else 分支（不 create 直接 send）。
     resetNewTaskFlow()
     const controller = useNewTaskFlowController()
     controller.bindCurrentSession(summary({ id: 'ns' }))

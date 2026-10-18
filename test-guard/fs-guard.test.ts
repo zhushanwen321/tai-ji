@@ -9,7 +9,7 @@
  * - 观察者形态：拦截错误信息必须可操作（含白名单与恢复指引）
  *
  * 写句柄入口（fd/流写路径防线）：openSync 写 flags / callback open / createWriteStream /
- * promises.open 的写 flags 校验 path——写 fd 只能经此产生，闭合 writeSync/ftruncate 等
+ * promises.open 的写 flags 校验 path——写 fd 只能经此产生，封住 writeSync/ftruncate 等
  * fd 消费点（详见 test/fs-guard.ts「边界」注释）。
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -259,7 +259,7 @@ function makeEntry(name: OpenEntryName) {
   }
 }
 
-describe('isWriteOpenArg string flags（经 wrapOpenFns 行为投影）', () => {
+describe('isWriteOpenArg string flags（经 wrapOpenFns 行为派生视图）', () => {
   it("'w' → 拦；'r+' → 拦（含 + 即写）", () => {
     const { expectBlocked } = makeEntry('openSync')
     expectBlocked(PROBE, 'w')
@@ -312,13 +312,13 @@ describe('isWriteOpenArg object 形态与缺省 flags', () => {
 })
 
 /**
- * G1 防线自检（fs-guard 自己的守卫）：
+ * G1 防线自检（fs-guard 自己的检查）：
  * - 名单完备性：wrap 名单 × 真实模块键集的确定性差集断言，名单单源化后防「Node 升级
  *   移除 API 后名单残留死名」「名单漏挂/工厂装配回归」「sync/async 名单单侧分叉」
- *   （2026-09-17 拦截面缺口即后两者叠加形态：FS_ASYNC_FNS 挂了 promises 工厂、
+ *   （2026-09-17 拦截范围缺口即后两者叠加形态：FS_ASYNC_FNS 挂了 promises 工厂、
  *   node:fs 工厂漏挂 callback 版 + promises 访问器透传）。
- * - 四访问面探针：sync / callback / promises 直引 / fs.promises 访问器，四个到达真实
- *   fs 层的访问面逐一端到端验证拦截生效——单测断言「wrapper 函数 !== 原函数」只能证明
+ * - 四访问路径探针：sync / callback / promises 直引 / fs.promises 访问器，四个到达真实
+ *   fs 层的访问路径逐一端到端验证拦截生效——单测断言「wrapper 函数 !== 原函数」只能证明
  *   装配差异存在，四探针证明的才是「破坏调用确实被 BLOCKED」这一防线本体语义。
  */
 
@@ -338,15 +338,15 @@ describe('G1 防线自检——名单完备性（名单 × 真实模块键集差
     // 名单漏挂 / 工厂装配回归（wrapper 未替换原函数）→ 红
     const notWrapped = names.filter((n) => fsAll[n] === actual[n])
     expect(notWrapped, `node:fs 名单成员未被 wrapper 替换（漏挂或装配回归）: ${notWrapped.join(', ')}`).toEqual([])
-    // promises 访问器装配：浅拷贝透传原始 promises 模块正是本次拦截面缺口的形态——
+    // promises 访问器装配：浅拷贝透传原始 promises 模块正是本次拦截范围缺口的形态——
     // 装配成功后 fs.promises 与真实 promises 模块必须是不同对象，且名单函数逐一被替换
-    expect(fsAll.promises, 'fs.promises 仍是原始模块透传（访问器面未装配）').not.toBe(actualPromises)
+    expect(fsAll.promises, 'fs.promises 仍是原始模块透传（访问器路径未装配）').not.toBe(actualPromises)
     const accessorNotWrapped = [...FS_ASYNC_FNS].filter(
       (n) => (fsAll.promises as Record<string, unknown>)[n] === actualPromises[n],
     )
     expect(
       accessorNotWrapped,
-      `fs.promises 访问器面名单函数未被替换: ${accessorNotWrapped.join(', ')}`,
+      `fs.promises 访问器路径名单函数未被替换: ${accessorNotWrapped.join(', ')}`,
     ).toEqual([])
   })
 
@@ -369,7 +369,7 @@ describe('G1 防线自检——名单完备性（名单 × 真实模块键集差
   })
 })
 
-describe('G1 防线自检——四访问面端到端探针（对白名单外不存在诱饵路径的破坏调用必须全被 BLOCKED）', () => {
+describe('G1 防线自检——四访问路径端到端探针（对白名单外不存在诱饵路径的破坏调用必须全被 BLOCKED）', () => {
   it('sync 面：node:fs rmSync 被拦', () => {
     const bait = probeBaitPath()
     expect(existsSync(bait)).toBe(false)
@@ -397,7 +397,7 @@ describe('G1 防线自检——四访问面端到端探针（对白名单外不�
     expect(existsSync(bait)).toBe(false)
   })
 
-  it('fs.promises 访问器面：node:fs.promises.rm 被拦（访问器透传即本缺口回归形态）', () => {
+  it('fs.promises 访问器路径：node:fs.promises.rm 被拦（访问器透传即本缺口回归形态）', () => {
     const bait = probeBaitPath()
     expect(existsSync(bait)).toBe(false)
     expect(() => fsPromises.rm(bait)).toThrow(/fs-guard|BLOCKED/)
@@ -405,7 +405,7 @@ describe('G1 防线自检——四访问面端到端探针（对白名单外不�
   })
 })
 
-describe('repinDataDirEnv（worker 复用形态 env 钉扎漂移恢复，2026-09-22 import-service 污染事故 env 腿）', () => {
+describe('repinDataDirEnv（worker 复用形态 env 固定值漂移恢复，2026-09-22 import-service 污染事故 env 路径）', () => {
   const PIN_VALUE = join(tmpdir(), 'taiji-repin-pin-fixture')
   let savedValue: string | undefined
 
@@ -424,7 +424,7 @@ describe('repinDataDirEnv（worker 复用形态 env 钉扎漂移恢复，2026-09
     else process.env.TAIJI_AGENT_DATA_DIR = savedValue
   })
 
-  it('首执行记录当前值且不改 env（globalSetup 钉扎值的登记点，恒 no-op）', () => {
+  it('首执行记录当前值且不改 env（globalSetup 固定值的登记点，恒 no-op）', () => {
     expect(repinDataDirEnv(process.env)).toBe(false)
     expect(process.env.TAIJI_AGENT_DATA_DIR).toBe(PIN_VALUE)
   })
@@ -448,7 +448,7 @@ describe('repinDataDirEnv（worker 复用形态 env 钉扎漂移恢复，2026-09
     warnSpy.mockRestore()
   })
 
-  it('env 等于记录值 → no-op（钉扎未漂移零开销路径）', () => {
+  it('env 等于记录值 → no-op（固定值未漂移零开销路径）', () => {
     repinDataDirEnv(process.env)
     expect(repinDataDirEnv(process.env)).toBe(false)
     expect(process.env.TAIJI_AGENT_DATA_DIR).toBe(PIN_VALUE)

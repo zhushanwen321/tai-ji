@@ -4,7 +4,7 @@
 //
 // 为什么需要：CLI 形态的 zcode app-server 只从 `$HOME/.zcode/cli/config.json` 的
 // provider 字段读凭据（bundle 实测：路径硬编码，userConfigPath/modelConfig 参数仅对
-// GUI 同代码库内嵌调用方开放，env/argv/协议面无配置注入通道）；而 GUI 把凭据放
+// GUI 同代码库内嵌调用方开放，env/argv/协议范围无配置注入通道）；而 GUI 把凭据放
 // `~/.zcode/v2/config.json` 且从不写 cli/config.json——外部 spawn 的 app-server 在
 // 真实 HOME 下是「无源之水」（实测报 "Model provider ... is missing baseURL"）。
 //
@@ -18,7 +18,7 @@
 // ——上游 provider bootstrap 以 argv[1] 为入口锚，不改写则启动即退，见下方漂移
 // 面登记）。HOME 保持真实值（共享语义不变：db/plugins/MCP 全继承宿主 HOME）。
 //
-// 漂移面如实登记：
+// 漂移风险如实登记：
 // ① 配置读取路径/方式：zcode 升级若改变，失败信号 = missing baseURL / Model config
 //    is missing 明确报错（不静默坏）——与协议漂移直接报错的既有姿态同级。
 // ② argv[1] 入口锚：上游 provider bootstrap 以 argv[1] 为入口锚定位 CLI 内建
@@ -85,7 +85,7 @@ const CONFIG_PATH = path.join(os.homedir(), '.zcode', 'cli', 'config.json');
 
 // 合并形态：真实 cli config 原样（model/plugins/mcp/subagents 等 worker 继承面不变）
 // + v2 的 provider 字典注入，同 id 时 v2 条目整条优先——GUI 直传 modelConfig 时
-// v2 即权威源（进程外等价复刻）；cli config 不在 GUI 管理面、可能残留历史验证
+// v2 即权威源（进程外等价复刻）；cli config 不在 GUI 管理侧、可能残留历史验证
 // 配置（2026-08-25 事故：残留旧 key 压过新凭据致 turn 0 401），故不取 real 优先。
 // model.main 缺失时只从 v2 透传（v2 也没有则不伪造——CLI 缺省解析自会落到注册表
 // 可用模型；plan 家族 id 已不可用，不再兜底伪造）。
@@ -119,7 +119,7 @@ function injectedConfigText() {
     if (hasKey(entry)) injectable[id] = entry;
   }
   // provider_config.json 补注入（读取失败静默降级——校验源缺席时引擎侧校验同样不可
-  // 用，注入面维持 v2-only 现状；providerRules 缺失不构成凭据错误）。
+  // 用，注入点维持 v2-only 现状；providerRules 缺失不构成凭据错误）。
   try {
     const pc = JSON.parse(readOrig(PROVIDER_CONFIG_PATH, 'utf8'));
     const pcCfg = pc && typeof pc.config === 'object' && pc.config ? pc.config : {};
@@ -171,7 +171,7 @@ function injectedConfigText() {
         models: models,
       };
     }
-  } catch { /* provider_config 缺失/损坏 → 补注入面静默降级（v2 注入不受影响） */ }
+  } catch { /* provider_config 缺失/损坏 → 补注入点静默降级（v2 注入不受影响） */ }
   if (Object.keys(injectable).length === 0) return null;
   const merged = { ...real };
   merged.provider = { ...realProviders, ...injectable };
@@ -293,7 +293,7 @@ function catalogPatchText(path) {
 
 ${CLI_PATCH_SECTION}
 
-// 内建 provider 配置定位（漂移面②）：3.12.x 起配置文件挪位 + CLI 依赖宿主注入
+// 内建 provider 配置定位（漂移风险②）：3.12.x 起配置文件挪位 + CLI 依赖宿主注入
 // ZCODE_BUILTIN_PROVIDER_CONFIG_FILE 直接定位；ZCode 桌面 spawn 链自带该键，
 // 本 wrapper 链需自给。显式传入优先 → v2 runtime 目录下平台目录（精确
 // <plat>-<arch> 优先，Rust arch 变体如 darwin-aarch64 字典序跟后）× 版本目录
@@ -471,7 +471,7 @@ if (text !== null || catalogPatch !== null || cliPatchProbe !== null) {
 
   // existsSync 拦截：真实 bundle 的用户 config 读取（loadFileConfig）以 existsSync
   // 为短路门——文件不存在时返回空 config 且 readFileSync 不被调用，GUI-only
-  // 登录宿主（cli/config.json 从未被 CLI 侧写过）上注入只挂在读取面 = 不可见。
+  // 登录宿主（cli/config.json 从未被 CLI 侧写过）上注入只挂在读侧 = 不可见。
   // D3 换轨：真实 provider_config.json 的存在性 = 真实或副本任一存在即 true
   //（真实缺失 + 副本存在时 Registry 的 existsSync 门不得拦掉 merge 视图读取）
   fs.__origExistsSync = fs.existsSync;

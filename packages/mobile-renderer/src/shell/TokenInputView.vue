@@ -3,10 +3,10 @@
 //
 // 哑组件：App.vue 多视图挂载消费，提交经 submit 事件上抛；重试编排（adoptManualToken →
 // 抑制位 reset → 重走连接编排）在 bootstrap 的 submitRemoteToken，组件零 core import。
-// submitting/error 由 App 传入（bootstrap tokenSubmit 态投影）：提交中禁用防重复触发，
+// submitting/error 由 App 传入（bootstrap tokenSubmit 态派生视图）：提交中禁用防重复触发，
 // 验身失败给可见错误（红线⑤——用户必须能区分「提交中/失败/token 错误」，禁静默回弹）。
 //
-// 文案走 vue-i18n（mobile.tokenInput 命名空间，双侧 locales 对齐由 mobile-locale.test 守卫）；
+// 文案走 vue-i18n（mobile.tokenInput 命名空间，双侧 locales 对齐由 mobile-locale.test 检查）；
 // 视觉：太极纯灰 token，无 emoji；表单原语经 @taiji/ui Input/Button（原生元素由 ui 单点承载）。
 import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'

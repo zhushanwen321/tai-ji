@@ -108,7 +108,7 @@ describe("reconstructState 活跃路径裁剪（U6b）", () => {
 
 describe("环状 parentId 防御（损坏文件 / 非 pi 产出写入）", () => {
 	it("环状 parentId（a↔b，leafId 指向环内）→ 回溯终止不挂死，重建完成且不抛错", () => {
-		// 环：a.parentId=b、b.parentId=a；leafId=a → 回溯 a→b→(二次命中 a) 守卫终止
+		// 环：a.parentId=b、b.parentId=a；leafId=a → 回溯 a→b→(二次命中 a) 检查终止
 		const entries = [
 			todoEntry("a", "b", [{ id: 1, text: "cycle-a", status: "pending" }], 2),
 			todoEntry("b", "a", [{ id: 1, text: "cycle-b", status: "in_progress" }], 2),

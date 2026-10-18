@@ -6,10 +6,10 @@
  * - 日翻转才写：同日任意多样本 0 行；跨日首个样本把前一日完整窗口写出恰 1 行
  * - 重启后 coverage 起点重置：vi.resetModules + 动态 import 模拟新进程（聚合态随模块
  *   图重建清零），coverageStart = 新进程内首个样本时刻
- * - 当日尚未完结时不写（写完整窗口）：最后一个未翻转的窗口无台账行
+ * - 当日尚未完结时不写（写完整窗口）：最后一个未翻转的窗口无 journal 行
  * - coverage 起止戳随条目落盘（评估器对 coverage<50% 降权的数据前提，附录 A #4/#5）
  * - 采样入口 = formatMemoryWatermarkLine（既有 5min 水位定时器的每拍消费点，钩子挂接面）
- * - 台账未初始化时聚合不抛（no-op 单例兜底，聚合前进无行）
+ * - journal 未初始化时聚合不抛（no-op 单例兜底，聚合前进无行）
  *
  * 真实 IO（不 mock fs/writer）：写删目标 mkdtempSync 自建 tmp 自删（fs-guard 白名单）；
  * 时间经 recordWatermarkDailySample 第二参注入（不与 fake timers / 真实流 IO 交互）；
@@ -78,7 +78,7 @@ function digestOf(record: Record<string, unknown>): DailyDigest {
   return JSON.parse(record.detailDigest as string) as DailyDigest
 }
 
-/** 初始化台账并返回被测模块（同一模块图：聚合 flush 经 getCrashJournal 单例落到 dataDir）。 */
+/** 初始化 journal 并返回被测模块（同一模块图：聚合 flush 经 getCrashJournal 单例落到 dataDir）。 */
 async function setup(): Promise<{
   logger: typeof import('../logger.js')
   crashJournal: typeof import('../crash-journal.js')
@@ -128,7 +128,7 @@ describe('watermark-daily 自然日聚合（u1e）', () => {
 
   it('日翻转才写：同日多样本 0 行；跨日样本写出前一日恰 1 行；最后一个未完结窗口不写', async () => {
     const { logger, crashJournal } = await setup()
-    // day1 三个样本：无翻转 → 台账无行
+    // day1 三个样本：无翻转 → journal 无行
     logger.recordWatermarkDailySample(makeSample(100, 10), at('2026-09-10T08:00:00Z'))
     logger.recordWatermarkDailySample(makeSample(150, 15), at('2026-09-10T12:00:00Z'))
     logger.recordWatermarkDailySample(makeSample(120, 12), at('2026-09-10T23:59:00Z'))
@@ -165,7 +165,7 @@ describe('watermark-daily 自然日聚合（u1e）', () => {
     logger.recordWatermarkDailySample(makeSample(100, 10), at('2026-09-10T08:00:00Z'))
     await crashJournal.closeCrashJournal()
 
-    // 新进程（同 dataDir——台账文件续写，聚合态随模块图重建清零）
+    // 新进程（同 dataDir——journal 文件续写，聚合态随模块图重建清零）
     vi.resetModules()
     const fresh = await setup()
     fresh.logger.recordWatermarkDailySample(makeSample(500, 50), at('2026-09-10T14:00:00Z')) // 同日重启：剩余窗口从重启时刻起算
@@ -188,11 +188,11 @@ describe('watermark-daily 自然日聚合（u1e）', () => {
     const line1 = logger.formatMemoryWatermarkLine(makeSample(100, 10))
     expect(line1).toContain('[watermark] rss=0.0MB') // 格式化输出不受聚合副作用影响（100B → 0.0MB）
     logger.formatMemoryWatermarkLine(makeSample(300, 30))
-    // 未翻日：水位行照产、台账无行
+    // 未翻日：水位行照产、journal 无行
     expect(logger.formatMemoryWatermarkLine(makeSample(200, 20))).toContain('[watermark]')
     expect(readJournalRecords(dataDir)).toHaveLength(0)
 
-    // 翻日：聚合经本入口同样落台账（真实驱动链 = index.ts 定时器回调的同款调用）。
+    // 翻日：聚合经本入口同样落 journal（真实驱动链 = index.ts 定时器回调的同款调用）。
     // 翻日样本用远离当前的固定日期（前 3 样本经 formatMemoryWatermarkLine 用真实 now——
     // day 值无所谓，只要与翻转日不同必然触发 flush）。
     logger.recordWatermarkDailySample(makeSample(400, 40), at('2027-01-01T00:00:00Z'))
@@ -203,7 +203,7 @@ describe('watermark-daily 自然日聚合（u1e）', () => {
     expect(digestOf(records[0]!).samples).toBe(3)
   })
 
-  it('台账未初始化（no-op 单例）：聚合不抛、聚合态正常前进，翻日后无行', async () => {
+  it('journal 未初始化（no-op 单例）：聚合不抛、聚合态正常前进，翻日后无行', async () => {
     const logger = (await import('../logger.js'))
     expect(() => {
       logger.recordWatermarkDailySample(makeSample(100, 10), at('2026-09-10T08:00:00Z'))

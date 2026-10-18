@@ -14,7 +14,7 @@
  *   任务的 setModel 排队等前序模型 op 完成（任意两个 setModel 不并发、双记录不叠写）
  * - tick 事实查询兜正确性（原 2-tick 计数对账已按 ADR-0122 删除）：严格先于同 tick
  *   dispatch 循环；记录存在 + idle 即恢复（agent_settled 丢失时由查询收敛——拉保证
- *   正确、事件只优化延迟）；未决记录守卫（无记录时模型漂移 = 用户自主行为不动作）
+ *   正确、事件只优化延迟）；未决记录检查（无记录时模型漂移 = 用户自主行为不动作）
  * - 降级与接管副作用：setModel false 不阻塞 dispatch；sendMessage 抛错 catch 先恢复；
  *   模型语义异常只走日志（不进持久化词表）
  *
@@ -40,7 +40,7 @@ const ORIG = 'prov-a/model-1'
 const TASK_M = 'prov-b/model-2'
 const OTHER_M = 'prov-c/model-3'
 
-/** 模型控制面 mock：setModelCalls 记录调用序（切换/恢复时序断言的核心观测点） */
+/** 模型控制接口 mock：setModelCalls 记录调用序（切换/恢复时序断言的核心观测点） */
 class ModelOpsMock implements SchedulerModelOps {
   currentRef: string | undefined = ORIG
   idle = true

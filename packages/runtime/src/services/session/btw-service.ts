@@ -8,12 +8,12 @@
  *   ✅ 源状态三分支（正常 fork / 源缺失空文件 → 回落无 fork 新建 / 半截 turn 截断快照）
  *   ✅ 线进程生命周期（惰性 spawn / 闲置 30min destroy / 有待处理交互豁免计闲置 /
  *      回收前提醒挂点 onWillReclaim）
- *   ✅ reattach spawn 形态（restore/getHistory 离线腿按 `sessions/` 解析不通用——
- *      findScannedSession 只扫 sessions/，btw 线不在其扫描面，故自建附着编排：
+   *   ✅ reattach spawn 形态（restore/getHistory 离线路径按 `sessions/` 解析不通用——
+ *      findScannedSession 只扫 sessions/，btw 线不在其扫描范围，故自建附着编排：
  *      spawn → switch_session → 附着断言 → registerSession）
  *   ✅ `hidden: true` 注册（经既有 registerSession 汇聚点；不写 parentSession 血缘）
  *   ✅ 行为契约注入挂点（D9⑤：线会话建立时注入一次，载体 = spawn
- *      `--append-system-prompt` 组合；**子通道归属随 V6 核实钉固**，oracle =
+ *      `--append-system-prompt` 组合；**子通道归属随 V6 核实钉固**，最终裁决角色 =
  *      traceContractInjection 挂点 + spawn options 断言）
  *   ❌ 消息通路（message.send / message.* 复用）归 M2-b；❌ 删除级联 / 孤儿补账 /
  *      派生抑制归 M4-a；❌ 重载回放归 M2-c。
@@ -23,7 +23,7 @@
  *   ① `--fork` + `--session-dir` 双旗标组合成立：forkFrom 落点吃 sessionDir 参数，
  *      实测 fork 文件落 --session-dir 目录、全树（含分支）逐字节等价、
  *      header.parentSession = 源绝对路径（P-fork-equivalence 实证，206ms）。
- *      forkFrom 写序/守卫断言已机器登记 docs/pi-semantics.json PS-51（锚点
+ *      forkFrom 写序/检查断言已机器登记 docs/pi-semantics.json PS-51（锚点
  *      dist/core/session-manager.js forkFrom，逐 claim 行号与 verifiedWith 见该条目）。
  *   ② 单旗标与 RPC new 组合成立：`PI_CODING_AGENT_SESSION_DIR` env（main.js 与
  *      --session-dir 同优先级的等价通道）启动 → get_state/new_session 落点均在该目录
@@ -33,26 +33,26 @@
  *      exit 1「Cannot fork: source session file is empty or invalid」，不产空文件
  *      （P-fork-source 分支② 依据，回落由此在宿主侧显式编排）。
  *
- * V5（附着语义）同步核实：restore 腿 resolveRestoreTarget → findScannedSession 只扫
- * `sessions/`，btw 线目录不在其扫描面 ⇒ restoreSession/getHistory 离线腿对 btw 线不通用，
+ * V5（附着语义）同步核实：restore 路径 resolveRestoreTarget → findScannedSession 只扫
+ * `sessions/`，btw 线目录不在其扫描范围 ⇒ restoreSession/getHistory 离线路径对 btw 线不通用，
  * 必须走本文件 ensureProcess（附着编排实装）自建编排（spawn → switch_session → assertPiSessionFile）。
  * 悬空 tool-call 判「中断 turn」的失效支接线归 M3-c/M4-a（V5 残留项）。
  *
  * 关键红线呼应（AGENTS.md 关键规则）：
  *   #6 pi session 延迟写入：宿主从不创建/触碰线会话文件（fork 文件由 pi fork 链路写、
  *      回落线由 pi 首 flush 自建；本服务只读 header / 轮询目录 / 删除走显式关线）。
- *   #19 超时默认原则：fork bootstrap 属「控制面单请求」量级 → 秒级有界（10s）；
+ *   #19 超时默认原则：fork bootstrap 属「控制范围单请求」量级 → 秒级有界（10s）；
  *      线任务执行（prompt）不经本服务，无墙钟超时。
  *   #12 打包约束：fork bootstrap spawn 段已随拆分迁 btw-fork-exec.ts（约束同迁保持：
  *      只 spawn（经注入 piCommand）、不拼 ESM 模块元数据 URL 类路径——该属性在 CJS bundle
  *      下恒为 undefined，原文指回 AGENTS.md 关键规则 #12；出站 env 经 buildOutboundChildEnv）。
  *
- * sibling 模块拆分（max-lines 同目录内聚拆分，2026-09-22；导出面 / 行为 / 既有测试零变更）：
- *   · btw-error.ts —— BtwError / BtwErrorCode 词汇表（fork 腿与本体共抛，防反向依赖成环）
+ * sibling 模块拆分（max-lines 同目录内聚拆分，2026-09-22；导出清单 / 行为 / 既有测试零变更）：
+ *   · btw-error.ts —— BtwError / BtwErrorCode 词汇表（fork 路径与本体共抛，防反向依赖成环）
  *   · btw-contract-inject.ts —— D9⑤ 契约文本 + trace 类型 + append 段组合器
  *   · btw-fork-exec.ts —— session 文件 header 只读解析 + 源状态三分支判定 + fork bootstrap
  *   · btw-orphan-reconcile.ts —— 启动孤儿补账（D5 / BU5 扫描降级闸）+ isInsideBtwRoot 谓词
- *   迁出符号在下方「导出面保持」块原样 re-export，外部 import 路径零改动。
+ *   迁出符号在下方「导出清单保持」块原样 re-export，外部 import 路径零改动。
  */
 import { existsSync, readdirSync, rmSync, statSync } from 'node:fs'
 import { basename, join } from 'node:path'
@@ -70,7 +70,7 @@ import { forkViaCliPi, inspectSourceState, readSessionHeader } from './btw-fork-
 import type { BtwSessionHeader, BtwSourceState } from './btw-fork-exec.js'
 import { isInsideBtwRoot, reconcileOrphanThreadDirs as reconcileOrphanDirs } from './btw-orphan-reconcile.js'
 
-// ─ 导出面保持（sibling 拆分前由本模块导出的符号原样 re-export；消费方 import 路径零改动）──
+// ─ 导出清单保持（sibling 拆分前由本模块导出的符号原样 re-export；消费方 import 路径零改动）──
 export { BTW_BEHAVIOR_CONTRACT, BtwError, composeContractAppendPrompt, forkViaCliPi, inspectSourceState, readSessionHeader }
 export type { BtwContractInjectionTrace, BtwSessionHeader }
 export { BTW_FORK_TIMEOUT_MS, hasDanglingToolCall } from './btw-fork-exec.js'
@@ -108,7 +108,7 @@ export interface BtwLineRecord {
   vid: string
   /** 线的真实 pi 会话 id（= vid 去前缀，映射即 extract）。 */
   piSessionId: string
-  /** 归属主会话 id（关联 = 目录布局，本注册表是其内存投影）。 */
+  /** 归属主会话 id（关联 = 目录布局，本注册表是其内存派生视图）。 */
   mainSid: string
   /** 线进程 cwd（= 主会话 cwd；spawn 与 registerSession 用）。 */
   cwd: string
@@ -119,12 +119,12 @@ export interface BtwLineRecord {
   /** 线会话文件绝对路径（分支② 首 flush 前为 pi 推导路径，文件可能尚不存在——规则 #6）。 */
   sessionFilePath: string
   snapshotKind: BtwSnapshotKind
-  /** hidden:true（active 腿防线：listAll 过滤 + 不记工作区历史；重建轮同样复原）。 */
+  /** hidden:true（active 路径防线：listAll 过滤 + 不记工作区历史；重建轮同样复原）。 */
   hidden: true
   createdAt: number
   /** 有待处理交互（豁免计闲置；豁免随任一终态解除——派生通道见 deps.hasPendingUiRequests / setPendingInteraction）。 */
   pendingInteraction: boolean
-  /** 回收提醒态（协议面 = BtwThreadInfo.reclaimImminent；闲置回收退役后恒 false，wire 形状保留）。 */
+  /** 回收提醒态（协议范围 = BtwThreadInfo.reclaimImminent；闲置回收退役后恒 false，wire 形状保留）。 */
   reclaimImminent: boolean
   /** 行为契约注入轮数（= 会话建立次数：create 1 轮 + 每次 reattach +1）。 */
   contractRounds: number
@@ -154,11 +154,11 @@ export interface BtwCreateResult {
 }
 
 /**
- * 线进程 spawn options 的最小结构面（runtime-layering C-comm-02 / check_pi_type_leak：
+ * 线进程 spawn options 的最小结构侧（runtime-layering C-comm-02 / check_pi_type_leak：
  * PiXxx 类型只许 infra/pi 内部——本服务只消费以下三键，故本地定义、不 import
  * ports 面 PiXxx 类型）。组合根 buildLineSpawnOptions 返回的 ports 面完整类型
  * 结构性满足本接口（多余字段协变放行），消费出口 = deps.processes.createSession
- *（Pick<IProcessManager> 契约面），pi 侧类型翻译归 ports/infra，不泄漏进本文件。
+ *（Pick<IProcessManager> 契约范围），pi 侧类型翻译归 ports/infra，不泄漏进本文件。
  */
 export interface BtwLineSpawnOptions {
   /** 进程工作目录（= 线 cwd）。 */
@@ -206,11 +206,11 @@ export interface BtwServiceDeps {
    * 交互中转 pending 快照：respond / expired / 失效三终态的共同落点 =
    * ExtensionTimeoutManager 的 per-session pending 表（respond → removeRequest、失效 →
    * invalidatePendingForSession），组合根经 server.getPendingUiRequests 薄委托注入。
-   * 缺省缺席 = 纯推送形态（解除走结构腿/显式调用）。
+   * 缺省缺席 = 纯推送形态（解除走结构路径/显式调用）。
    */
   hasPendingUiRequests?(vid: string): boolean
   /**
-   * 本轮 sessions 扫描是否降级不可信（BU5 数据不可逆面闸）：扫描腿 readdir EACCES/IO 降级
+   * 本轮 sessions 扫描是否降级不可信（BU5 数据不可逆面闸）：扫描路径 readdir EACCES/IO 降级
    * 显式返回空列表，冷主会话解析落空**不可**当「主已删」——补账遇闸跳过整轮，改下次启动
    * 重试（宁漏删不误删：rm -rf 不可逆）。组合根接 session-file-utils 的 degraded 旗标；
    * 缺省 = 恒可信（维持原判据，存量测试缺省行为不变）。
@@ -241,7 +241,7 @@ export interface BtwLineSpawnContext {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * 快照 kind 判定（D3 三分支投影，metrics-gate 复杂度偿还分解件）：无 fork 文件 =
+ * 快照 kind 判定（D3 三分支派生，metrics-gate 复杂度偿还分解件）：无 fork 文件 =
  * no-source（分支②）；有 fork 文件时源含进行中 turn（悬空 tool-call 或调用方标注
  * mainTurnActive）= truncated（分支③），否则 forked（分支①）。纯映射零副作用。
  */
@@ -256,7 +256,7 @@ function resolveSnapshotKind(
 }
 
 /**
- * spawn 后 get_state 提取 + 完备性守卫（fail-fast）：缺 sessionId/sessionFile 即
+ * spawn 后 get_state 提取 + 完备性检查（fail-fast）：缺 sessionId/sessionFile 即
  * spawn_state_invalid（不注册半截条目）。
  */
 async function requireSpawnState(
@@ -267,7 +267,7 @@ async function requireSpawnState(
   const piSessionId = typeof state?.sessionId === 'string' ? state.sessionId : undefined
   const sessionFilePath = typeof state?.sessionFile === 'string' ? state.sessionFile : undefined
   if (!piSessionId || !sessionFilePath) {
-    // 文案避开 `spawn (` 形态：守卫 check_spawn_env_boundary 的 spawn\s*\( 模式按行
+    // 文案避开 `spawn (` 形态：检查 check_spawn_env_boundary 的 spawn\s*\( 模式按行
     // 文本匹配（不剥模板字符串），原「after spawn (fork=" 会被误判为进程创建调用点
     //（本行是错误消息 prose，非 spawn；本文件真实 spawn = forkViaCliPi 已武装构建器）。
     throw new BtwError('spawn_state_invalid', `[btw] get_state missing sessionId/sessionFile after spawn; fork=${forkFile ?? 'none'}`)
@@ -280,7 +280,7 @@ async function requireSpawnState(
 // ─────────────────────────────────────────────────────────────────────────────
 
 export class BtwService {
-  /** mainSid → 条目仅经 registry 全表索引（消费方 listLines(mainSid) 过滤；注册表即 D4 关联投影）。 */
+  /** mainSid → 条目仅经 registry 全表索引（消费方 listLines(mainSid) 过滤；注册表即 D4 关联派生视图）。 */
   private readonly registry = new Map<string, BtwLineRecord>()
 
   constructor(private readonly deps: BtwServiceDeps) {
@@ -296,7 +296,7 @@ export class BtwService {
     return this.registry.get(vid)
   }
 
-  /** 线列表枚举（btw.list{mainSid} 后端；BtwPanel 消费，不属于禁止的关联展示面——D4）。 */
+  /** 线列表枚举（btw.list{mainSid} 后端；BtwPanel 消费，不属于禁止的关联展示侧——D4）。 */
   listLines(mainSid: string): BtwLineRecord[] {
     const out: BtwLineRecord[] = []
     for (const rec of this.registry.values()) {
@@ -315,7 +315,7 @@ export class BtwService {
 
   /**
    * 启动孤儿补账——实装已抽 btw-orphan-reconcile.ts（同目录 sibling 拆分：判据 / BU5 扫描
-   * 降级闸 / 幂等语义随 doc 整段迁入，导出面与行为零变更）；本方法保留为组合根调用面
+   * 降级闸 / 幂等语义随 doc 整段迁入，导出清单与行为零变更）；本方法保留为组合根调用点
    *（一行委托）。调用序不变：先本方法、后 rebuildFromDisk。
    */
   reconcileOrphanThreadDirs(): number {
@@ -325,8 +325,8 @@ export class BtwService {
   /**
    * 启动扫描 `btw/<encodeCwd>/<mainSid>/*.jsonl` 重建注册表（裁决⑧：持久化 + 重启可复原）。
    *
-   * - hidden 复原：每条重建条目 `hidden: true`（active 腿防线随 reattach 轮
-   *   经 registerSession 复原；磁盘扫描腿由目录隔离构造性不可见——SessionScanner 只扫 sessions/）。
+   * - hidden 复原：每条重建条目 `hidden: true`（active 路径防线随 reattach 轮
+   *   经 registerSession 复原；磁盘扫描路径由目录隔离构造性不可见——SessionScanner 只扫 sessions/）。
    * - 不 spawn（惰性）：进程在 ensureProcess（续问/重开）时自建附着编排拉起。
    * - 幂等：已有活跃条目（by vid）不覆盖；无法解析的文件 warn 跳过（登记不静默，
    *   清理归 M4-a 孤儿补账）。
@@ -417,7 +417,7 @@ export class BtwService {
    * 创建 btw 线：源检查 →（分支①）pi 原生 fork 或（分支②）回落无 fork 新建 →
    * 惰性 spawn 线进程 → 附着/读回 → registerSession(hidden:true) → 注册表登记。
    *
-   * 全程零触碰主会话进程与主会话文件（P-no-abort 结构面：主 turn 不可能被本路径
+   * 全程零触碰主会话进程与主会话文件（P-no-abort 结构侧：主 turn 不可能被本路径
    * 打断——真机断言归 S7 真实进程轨）；零直写线会话文件（fork 文件由 pi 写、
    * 回落文件由 pi 首 flush 自建）。
    *
@@ -470,7 +470,7 @@ export class BtwService {
 
   /**
    * createLine 的 spawn/附着/登记编排：临时 key spawn →（fork 时）switch_session +
-   * 附着断言（I1：登记路径 ≡ pi 写路径）→ get_state 守卫 → rekey →
+   * 附着断言（I1：登记路径 ≡ pi 写路径）→ get_state 检查 → rekey →
    * registerSession(hidden:true) → 注册表登记 + 契约注入留痕 + 闲置武装。
    * 任一步失败 → 双键收尸（不留半截条目）。
    */
@@ -491,7 +491,7 @@ export class BtwService {
       }
       const { piSessionId, sessionFilePath } = await requireSpawnState(client, forkFile)
       if (forkFile && piSessionId !== readSessionHeader(forkFile).id) {
-        // 附着一致性守卫：switch 后活跃会话必须是 fork 目标（进程绑错 = 实现 bug，fail-fast）。
+        // 附着一致性检查：switch 后活跃会话必须是 fork 目标（进程绑错 = 实现 bug，fail-fast）。
         throw new BtwError('state_mismatch', `[btw] attached session id ${piSessionId} !== fork header id — refusing to register`)
       }
       const vid = btwVirtualId(piSessionId)
@@ -528,15 +528,15 @@ export class BtwService {
     }
   }
 
-  // ── reattach（自建附着编排，V5：restore/getHistory 离线腿不通用）──
+  // ── reattach（自建附着编排，V5：restore/getHistory 离线路径不通用）──
 
   /**
    * 确保线进程存活（惰性 spawn / 闲置回收后续问、drawer 重开走此口）。
    *
    * 编排 = spawn（env session-dir 线目录）→ switch_session（线文件）→ 附着断言 →
-   * get_state 一致性守卫 → rekey → registerSession(hidden:true)。不走 restoreSession
+   * get_state 一致性检查 → rekey → registerSession(hidden:true)。不走 restoreSession
    * （其 resolveRestoreTarget/findScannedSession 只扫 sessions/，btw 线目录不在其
-   * 扫描面——V5 核实结论）。
+   * 扫描范围——V5 核实结论）。
    *
    * 行为契约每轮重注入（D9⑤「含重附着轮」）。
    * 线会话文件缺失（分支② 首 flush 前即被回收/删除）→ BtwError('thread_file_missing')：
@@ -596,8 +596,8 @@ export class BtwService {
    * delete 对 btw vid 直删、主删级联 closeAllForMain 逐线转调，均落本方法）：
    * 杀进程（派生 subagent/workflow 任务随 pi 进程亡——abort 幂等由 pm.destroySession
    * 「Map 无条目静默跳过」保证）+ 注册表移除 +（可选）删线会话文件（路径限定 btw 根内，
-   * 防误删面）。未知线/并发双删返 false（调用方映射 line_not_found，幂等语义：
-   * 线已不在即视为删成）。**失效腿（闲置回收/进程亡）不走本方法**——不清注册表、
+   * 防误删风险）。未知线/并发双删返 false（调用方映射 line_not_found，幂等语义：
+   * 线已不在即视为删成）。**失效路径（闲置回收/进程亡）不走本方法**——不清注册表、
    * 不删文件、不清派生键（线可重开，D9④）。
    */
   async closeLine(vid: string, opts?: { deleteSessionFile?: boolean }): Promise<boolean> {
@@ -625,7 +625,7 @@ export class BtwService {
   }
 
   /**
-   * 主删 / deleteByCwd 级联（D4 消费面① + D9④ 线终结）：关闭主会话名下全部线并删线目录。
+   * 主删 / deleteByCwd 级联（D4 消费方① + D9④ 线终结）：关闭主会话名下全部线并删线目录。
    *
    * 三步序即并发收敛语义（D9④）：①**枚举先于注册表移除**（listLines 快照在循环前——
    * 快照后并发关线只会让后续 closeLine 幂等返 false，不漏杀不重杀）→ ②逐线转调 closeLine
@@ -673,7 +673,7 @@ export class BtwService {
 
   /**
    * 收尾口（shutdown / 测试收尾调用）。闲置扫描定时器已随 ADR-0122 退役，现为 no-op
-   * 形态保留（公共收尾调用面不破坏）。
+   * 形态保留（公共收尾调用点不破坏）。
    */
   dispose(): void {}
 

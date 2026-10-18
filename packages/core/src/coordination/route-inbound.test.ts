@@ -18,7 +18,7 @@
  * D2-c 无 sid 条目走 globalEffect（阶段 B 起直接断言 'error' 条目，探针注入已退化删除）
  * D2 阶段 B（error 单条目合并）：
  * B-1 'error' 条目两支锁定：有 sid → sessionEffect、无 sid → globalEffect，互不串扰不叠加
- * B-2 globalEffect 内 !msg.id 守卫：带 id 未命中 pending → dispatchGlobal 照常、不 toast
+ * B-2 globalEffect 内 !msg.id 检查：带 id 未命中 pending → dispatchGlobal 照常、不 toast
  * B-3 默认路径纯兜底：未命中条目无 sid → dispatchGlobal + L9 warn，零 type 特判副作用
  *
  * 全部注入驱动：vi.fn 注入 TransportPorts（pending/events/subscribe）+ InboundEffects 5 回调 spy。
@@ -420,13 +420,13 @@ describe('configureRouteInbound — ROUTE_TABLE Record 直查等价（Q1-4）', 
     }
   })
 
-  it('Q1-4c 原型成员名 type（constructor/toString）不误命中路由表（hasOwnProperty 守卫）', () => {
+  it('Q1-4c 原型成员名 type（constructor/toString）不误命中路由表（hasOwnProperty 检查）', () => {
     const ports = makePorts()
     const effects = makeEffects()
     const dispatcher = configureRouteInbound(ports, effects)
 
     // 裸 Record 下标访问会命中 Object 原型成员（truthy 但无 handle → TypeError）。
-    // hasOwn 守卫后语义与旧 .find 严格等价：视为未注册 type。
+    // hasOwn 检查后语义与旧 .find 严格等价：视为未注册 type。
     expect(() =>
       dispatcher(sessionMsg('constructor', {})),
     ).not.toThrow()
@@ -557,7 +557,7 @@ describe('configureRouteInbound — 声明式条目 schema（D2 阶段 A）', ()
     expect(effects.onSubagents).not.toHaveBeenCalled()
     expect(effects.onSessionError).not.toHaveBeenCalled()
     expect(effects.onGlobalError).not.toHaveBeenCalled()
-    // 声明形状锁定：条目是纯声明式数据（crossSession 布尔 + 跳过型守卫函数），无 handle 函数体
+    // 声明形状锁定：条目是纯声明式数据（crossSession 布尔 + 跳过型检查函数），无 handle 函数体
     expect(ROUTE_TABLE['extension:widget']).toEqual({ crossSession: true })
     expect(ROUTE_TABLE['session.subagents']).toEqual({
       payloadGuard: expect.any(Function),
@@ -565,9 +565,9 @@ describe('configureRouteInbound — 声明式条目 schema（D2 阶段 A）', ()
     })
   })
 
-  it('D2-b payloadGuard 坏形状 → 跳过 sessionEffect，dispatchSession/crossSession 分发照常（守卫只门控 effect）', () => {
-    // 探针条目经导出面注册（用后清理）：同时声明 crossSession + payloadGuard，
-    // 验证守卫失败时分发不受门控（D2「payloadGuard 不门控分发」显式条款）
+  it('D2-b payloadGuard 坏形状 → 跳过 sessionEffect，dispatchSession/crossSession 分发照常（检查只门控 effect）', () => {
+    // 探针条目经导出清单注册（用后清理）：同时声明 crossSession + payloadGuard，
+    // 验证检查失败时分发不受门控（D2「payloadGuard 不门控分发」显式条款）
     const probeType = 'test.d2.payloadGuardProbe'
     const sessionEffect = vi.fn()
     ROUTE_TABLE[probeType] = {
@@ -582,7 +582,7 @@ describe('configureRouteInbound — 声明式条目 schema（D2 阶段 A）', ()
       // 坏形状：ok !== true → guard 拒绝
       dispatcher(sessionMsg(probeType, { ok: false }))
       expect(ports.events.dispatchSession).toHaveBeenCalledTimes(1) // dispatch 照常
-      expect(ports.events.dispatchCrossSession).toHaveBeenCalledTimes(1) // crossSession 分发不被守卫门控
+      expect(ports.events.dispatchCrossSession).toHaveBeenCalledTimes(1) // crossSession 分发不被检查门控
       expect(sessionEffect).not.toHaveBeenCalled() // 只跳过 effect
       // 好形状：guard 通过 → effect 以（sid, payload, effects）调用
       dispatcher(sessionMsg(probeType, { ok: true }))
@@ -639,7 +639,7 @@ describe('configureRouteInbound — error 单条目合并（D2 阶段 B）', () 
     expect(effects.onSessionError).toHaveBeenCalledTimes(1)
   })
 
-  it('B-2 globalEffect 内 !msg.id 守卫：error 无 sid 但带 id 未命中 pending（如迟到 reply 广播形态）→ dispatchGlobal 照常、不 onGlobalError', () => {
+  it('B-2 globalEffect 内 !msg.id 检查：error 无 sid 但带 id 未命中 pending（如迟到 reply 广播形态）→ dispatchGlobal 照常、不 onGlobalError', () => {
     const ports = makePorts({
       pending: {
         resolve: vi.fn(),
@@ -654,7 +654,7 @@ describe('configureRouteInbound — error 单条目合并（D2 阶段 B）', () 
     dispatcher({ type: 'error', id: 'late-1', payload: { message: 'late' } } as unknown as ServerMessage)
     expect(ports.pending.resolveEnvelope).not.toHaveBeenCalled()
     expect(ports.events.dispatchGlobal).toHaveBeenCalledTimes(1)
-    expect(effects.onGlobalError).not.toHaveBeenCalled() // 守卫拒绝：带 id 不 toast
+    expect(effects.onGlobalError).not.toHaveBeenCalled() // 检查拒绝：带 id 不 toast
   })
 
   it('B-3 默认路径纯兜底（对 error 不再特判）：未命中条目无 sid 消息只 dispatchGlobal + L9 warn，零 effect 副作用', () => {

@@ -29,7 +29,7 @@ import * as events from '../events'
 
 /**
  * getHistory 返回结构（[u4d] u4b 双预算窗口契约；[u6] legacy historyTruncated 已退役——
- * truncated 是唯一截断标志，偏差表 D7 双轨收口）。
+ * truncated 是唯一截断标志，偏差表 D7 双轨收敛）。
  */
 export interface HistoryResult {
   messages: Message[]
@@ -80,7 +80,7 @@ export async function getHistory(sessionId: string, query?: HistoryQuery): Promi
  *
  * images 是 Cmd+V 富呈现通路的图片数据（base64，不含 data: 前缀），形状对齐
  * shared protocol message.send（protocol.ts:199 images?: Array<{data;mimeType}>）。
- * runtime rpc-client 已守卫空数组（rpc-client.ts:430 images.length>0 才组 piImages），
+ * runtime rpc-client 已检查空数组（rpc-client.ts:430 images.length>0 才组 piImages），
  * 故此处 images 为 undefined 时直接不传 images 键（保持既有 payload 形态不变）。
  *
  * options.clientUuid（session-occupancy-send-closure D2）：经 message.send RPC 参数透传，
@@ -106,7 +106,7 @@ export function send(
 // ── delivery 域（投递所有权内核 D1/D5）────────────────────────────────────────
 // renderer 统一提交/单条撤销/全量回收/断连重报的客户端封装。lane 判定在 runtime 内核
 // （D1——renderer 只提交不判定）；内核排队取代拒绝（send.rejected 全链退役，D5）。
-// 旧 message.send/steer/followUp 封装保留（退役归 u5 收口——A6 测试锁 + plugin-service
+// 旧 message.send/steer/followUp 封装保留（退役归 u5 收敛——A6 测试锁 + plugin-service
 // 存量调用方经 runtime 侧 message.send 内核适配器透明承接）。
 
 /**
@@ -162,7 +162,7 @@ export function resyncDelivery(sessionId: string, clientUuids: string[]): Promis
 
 // [MF-1-8 终态] `steer` / `followUp` 客户端封装已删除：u3b 把发送链收敛到 delivery.submit
 // （lane/intent 判定全在 runtime 内核），协议侧 message.steer / message.follow_up 条目已随
-// runtime transport 路由 + dispatcher 转发腿删除同批退役（u5a 退役条件兑现）。
+// runtime transport 路由 + dispatcher 转发路径删除同批退役（u5a 退役条件兑现）。
 
 /**
  * 压缩上下文（#6：触发 runtime session.compact）。
@@ -241,7 +241,7 @@ export function streamSubscribe(
   handler: (msg: ServerMessageUnion) => void,
 ): () => void {
   // 类型边界转换（R1 type-safety S5）：events 层存储统一宽 ServerMessage（wire 入口
-  // isServerMessage 守卫的下游），本域出口收窄为分发联合。二者是同一 wire 形状的两种 TS
+  // isServerMessage 检查的下游），本域出口收窄为分发联合。二者是同一 wire 形状的两种 TS
   // 表达（值域相同），type↔payload 配对由 runtime 构造侧按 ServerMessageMap 契约构造 +
   // shared 登记静态校验保证——消费端从此不再散点 as payload。
   return events.on(sessionId, (msg) => handler(msg as ServerMessageUnion))

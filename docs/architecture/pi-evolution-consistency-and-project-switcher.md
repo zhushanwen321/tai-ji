@@ -1,6 +1,6 @@
 # 三项优化的终态架构：pi 演进一致性与项目切换
 
-> **一句话结论**：三个问题中，问题 1（pi 升级）与问题 2（模型列表）暴露的是**同一个架构缺口的两个投影**——「pi 快速演进 vs taiji 派生视图无一致性保障」，需要两个针对性收尾（构建期版本锚点检查 + 运行期模型目录单真相），且本次升级已产生两处可实证的漏同步（CI 混装配置 + 失守的测试基线）需立即修复；问题 3（侧边栏项目切换）无架构失败模式，按已选型 3A 方案补一个排序数据模型决策即可实施。**不需要大重构。**
+> **一句话结论**：三个问题中，问题 1（pi 升级）与问题 2（模型列表）暴露的是**同一个架构缺口的两个具体表现**——「pi 快速演进 vs taiji 派生视图无一致性保障」，需要两个针对性收尾（构建期版本锚点检查 + 运行期模型目录单真相），且本次升级已产生两处可实证的漏同步（CI 混装配置 + 失守的测试基线）需立即修复；问题 3（侧边栏项目切换）无架构失败模式，按已选型 3A 方案补一个排序数据模型决策即可实施。**不需要大重构。**
 
 **层声明**：本文档是架构方向层设计——当前层 = 三问题实施后的现状与暴露的架构模式；下一层 = 各收敛方向的可实施技术方案。不设计到接口签名与代码级细节。
 
@@ -103,7 +103,7 @@ taiji = Electron 主进程 + Vue 3 渲染层 + Node.js runtime（WebSocket RPC�
 
 **失败模式 B（overlay 新 provider 鸡生蛋）**：`isCatalogProvider` 判定基于快照（`provider-catalog.ts:13-20`），`listProviders` catalog 分支对快照外 id 直接 `continue`（`provider-config-helper.ts:316-317`），刷新范围又锁定 `listProviders()` 的已知集合（`config-service.ts:162-167`）——pi.dev 若新增快照外 provider，三重门禁使其永远不可见。
 
-**缓解因素（诚实评估，避免过度设计）**：pi binary 每次 RPC session 启动都后台自刷 ③（pi `main.js:741-747`，实装核实），所以「触发面窄」（overlay 主动刷新只在 Provider 页 mount 时发起）实际影响有限——只要开过会话，新数据通常已在盘上，任何一次 `config.providers` 广播/重连即带出。真正的实质缺口是**校验视图掉队**（失败模式 A），而非触发面。
+**缓解因素（诚实评估，避免过度设计）**：pi binary 每次 RPC session 启动都后台自刷 ③（pi `main.js:741-747`，实装核实），所以「触发范围窄」（overlay 主动刷新只在 Provider 页 mount 时发起）实际影响有限——只要开过会话，新数据通常已在盘上，任何一次 `config.providers` 广播/重连即带出。真正的实质缺口是**校验视图掉队**（失败模式 A），而非触发范围。
 
 **根因**：「什么是有效模型」没有单一权威。overlay 合并逻辑写在展示视图内部（listProviders 内联），校验视图（pi-provider-store）基于另一份独立索引（快照 builtinModelsById），执行视图归 pi。三个视图对同一问题给出不同答案——G2 要求三者对齐（taiji 侧能控制前两者）。
 
@@ -127,7 +127,7 @@ taiji = Electron 主进程 + Vue 3 渲染层 + Node.js runtime（WebSocket RPC�
 | 问题 2 | 需要收尾：校验视图接入合并目录，消除「有效模型」多真相 | 方向 2（§3.2） |
 | 问题 3 | 不需要：数据模型干净，交互升级即可 | 方向 3（§3.2） |
 
-问题 1 与问题 2 的共同本质：**taiji 对 pi 的派生视图（构建期版本锚点、运行期模型目录）在 pi 演进时没有一致性保障机制**——前者是构建期投影（静态数据漂移），后者是运行期投影（动态数据分叉）。两个收敛各自独立可交付、可回滚。
+问题 1 与问题 2 的共同本质：**taiji 对 pi 的派生视图（构建期版本锚点、运行期模型目录）在 pi 演进时没有一致性保障机制**——前者是构建期派生视图（静态数据漂移），后者是运行期派生视图（动态数据分叉）。两个收敛各自独立可交付、可回滚。
 
 ---
 
@@ -225,7 +225,7 @@ taiji = Electron 主进程 + Vue 3 渲染层 + Node.js runtime（WebSocket RPC�
 
 **D2：检查形态 = 独立 check 脚本 + CI（ci.yml invariants job）+ pre-commit 双挂载（选定）**
 - **采用**：`scripts/check-pi-sync.mjs`（node，能复用 gen 脚本的 pi-ai 源码提取手法）；CI 挂 **ci.yml 的 invariants job**（与 check-pi-semantics 同 job 同模式，`ci.yml:433` 同区块——单一快失败入口；build.yml 不适用：它是 reusable workflow（`on: workflow_call`）且在 3 平台 matrix 中每平台各跑一遍）；pre-commit 只对「触碰派生锚点文件」的提交触发（性能考虑，仿 `.githooks/` 既有按路径触发模式）。挂载实体已探明：pre-commit 生成逻辑在 tracked 的 `.githooks/install-hooks.sh`（check-pi-semantics 的 G1 区块在 `:1058-1077`，照同区块模式追加）。
-- **不采用**：只挂 CI 不挂 pre-commit（本地红到 CI 才发现，反馈慢）；vitest 测试承载（混入测试套件语义不清，且 pre-commit 无法选择性触发）；**并入 check-pi-semantics**（职责正交——语义漂移 vs 派生锚点；C-proc-08 已限定其 scope，并入膨胀约束边界；且 check-pi-semantics 刻意零第三方依赖单一职责，本检查需要 yaml/git 工具面；check-* 家族并列是项目既有模式）。
+- **不采用**：只挂 CI 不挂 pre-commit（本地红到 CI 才发现，反馈慢）；vitest 测试承载（混入测试套件语义不清，且 pre-commit 无法选择性触发）；**并入 check-pi-semantics**（职责正交——语义漂移 vs 派生锚点；C-proc-08 已限定其 scope，并入膨胀约束边界；且 check-pi-semantics 刻意零第三方依赖单一职责，本检查需要 yaml/git 工具范围；check-* 家族并列是项目既有模式）。
 - **证据**：`.githooks/check_spawn_env_boundary.py` 先例（按路径触发的检查 hook）；`.githooks/install-hooks.sh:1058-1077` + `.github/workflows/ci.yml:433`（check-pi-semantics 的 pre-commit + CI 双挂载先例）。
 - **效果**：G1 的「提交/CI 阶段拦截」成立。
 
@@ -351,7 +351,7 @@ taiji = Electron 主进程 + Vue 3 渲染层 + Node.js runtime（WebSocket RPC�
 
 - 2026-08-29（初版）：三问题终态分析 + 对抗式审查（4 must-fix + 4 suggestion 全部修订）。
 - 2026-08-29（merge origin/main 后增量评估修订）：main 合入 pi-semantics 检查体系与 C-pi-12 格局反转后，经增量对抗评估修订——① §2.1 根因修正（A1 类已有四包门禁 + 两检查分工声明 + merge 实证）② §3.2 方向 2 补方案 2D（runtime 直读 pi-ai，裁决维持 2A，理由：compat 时间炸弹的构建期/运行期失败模式不对称；2D 登记为演进触发条件）③ 检查矩阵补 pi-tui 项（check-pi-semantics PI_PKGS 三包缺口补位）④ D1/D2 补与 check-pi-semantics 的互补关系与挂载先例 ⑤ §5 约束登记形态明确独立条目。方向③（ProjectSwitcher）与 D4-D9 经评估确认零影响，未改动。
-- 2026-08-29（第 1 轮全量复审修订）：1 must-fix + 10 suggestion 全部修复——CI 挂载点三处矛盾收敛为 ci.yml invariants job（唯一挂载实体，D2/D3/§5 统一）；矩阵基准分声明/实装两类（§2.1/§3.2/D1 三处措辞统一）；G1 收窄至矩阵覆盖面（A6 类文档锚点显式排除）；G2 补态 2 例外限定 + 新增 A9 态 2 验收场景；「D3 分支」撞名改「auth-only catalog 分支」；行号漂移修正（rpc-client :191、troubleshooting :296）；§5 计数改「矩阵全量」。
+- 2026-08-29（第 1 轮全量复审修订）：1 must-fix + 10 suggestion 全部修复——CI 挂载点三处矛盾收敛为 ci.yml invariants job（唯一挂载实体，D2/D3/§5 统一）；矩阵基准分声明/实装两类（§2.1/§3.2/D1 三处措辞统一）；G1 收窄至矩阵覆盖范围（A6 类文档锚点显式排除）；G2 补态 2 例外限定 + 新增 A9 态 2 验收场景；「D3 分支」撞名改「auth-only catalog 分支」；行号漂移修正（rpc-client :191、troubleshooting :296）；§5 计数改「矩阵全量」。
 - 2026-08-29（第 2 轮验证性复审修订）：2 must-fix + 6 suggestion 全部修复——§5 文件改动地图 U1 行挂载点漏网修正（ci.yml）+ U2 独立验收补 A9；A8 回溯目标 G1/G2 → G2；地图补 U3 行；A5 补键盘 reorder 复验（D8 同一入口）。两 must-fix 均为第 1 轮修复的下游漂移，方案本体零新发现。
 - 2026-08-29（实施后一致性审查同步修订）：三区对抗审查（runtime 检查 / 前端）0 must 级 unreasonable 后的文档修正——① 「新建项目出现在网格尾部」（§3.1 终态 3 / A5）与 D7 两段式矛盾，按 D7 语义统一为「自动序段首位」，D7 声明② 精化；② D9 证据行实体位置纠正（broadcast 先例在 settings-message-handler.ts 非 config-service.ts）+ 采用行显式化二次广播；③ D5 态 1 判定依据行号引用改函数名引用 + 补两通路生效范围注记；④ D3 采用行补第三断言（实施期补强）；⑤ D4 采用行补 sanitizeInvalidProviders 快照索引例外注记。
 - 2026-08-29（终局对照审查同步修订）：第三轮三区终审（代码终态 vs 文档，含上轮未覆盖的 Gate A 修复批次）4 条 doc_errors 修正——① A9 步骤补双源处理（删 pi models-store 条目，防 newer-wins 使实际态变 fresh）+ 通过标准区分双源过期（快照首模型）与三源变体（合并视图首项，#16 实测）；② D1 断言修正（四包门禁只锁实装内部一致、不读根声明；缝隙由 CI frozen-lockfile + S1/S2 兜底）；③ S5 基准措辞按实现对齐（各 pi 包满足对应包根声明，更严）；④ §3.1 终态 1 输出示例按检查实跑格式回写（S 编号/恢复动作后缀/失败路径措辞）。连带 unreasonable 8 条（1 medium：检查未登记 constraints——已补 C-build-07；7 low：S4 死分支/ACMR 删除缝隙/self-test 盲区/注释失真×3/测试锚点×2/mock 形状×2）由 u8/u9 修复批次处理。

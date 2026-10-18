@@ -8,7 +8,7 @@
  * 阈值边界 / 三类失效透传+提示（标记留正文、不进块）/ mapping_unavailable 无块 /
  * location 缺省补路径；D7 切源面（registry 映射来源 / 异常降级 / 不信任 marker 自带
  * location / cwd 接线与缺省边界 / LateBound 绑定语义）见文末 describe。
- * legacy get_commands 路径已随 D7 接线收口删除；其专属断言面（`skill:` 前缀剥离 /
+ * legacy get_commands 路径已随 D7 接线收尾删除；其专属断言范围（`skill:` 前缀剥离 /
  * sourceInfo.path 缺失 / get_commands 整体失败 / sourceInfo.baseDir 不可消费）由
  * registry 等价面承接：裸名映射（①类）/ sourcePath 缺失（④）/ registry 扫描异常（②）/
  * References 行恒 dirname(sourcePath)（expectedBlock 逐字断言）。
@@ -261,7 +261,7 @@ describe('SkillInjector.inject', () => {
       '\n\n'.length + // 正文与块间空行
       `<${SKILL_DATA_BLOCK_TAG}>\n`.length + // 块开标签行
       blockPrefix.length +
-      '\n</skill>'.length + // block 闭合
+      '\n</skill>'.length + // block 结束标记
       `\n</${SKILL_DATA_BLOCK_TAG}>`.length // 块闭标签行
     const nExact = 320 * CODE_DENSE_NON_CJK_CHARS_PER_TOKEN - fixedLen
     const bodyOf = (n: number) => 'a'.repeat(n)
@@ -367,9 +367,9 @@ describe('SkillInjector.inject', () => {
     ])
   })
 
-  it('无 frontmatter 闭合 ---：镜像 pi 行为原文保留（不剥），块内展开正文为全文 trim', async () => {
-    writeFileSync(skillAPath, '---\nname: skill-a\n没有闭合行')
-    const raw = '---\nname: skill-a\n没有闭合行'
+  it('无 frontmatter 结束 --- 行：镜像 pi 行为原文保留（不剥），块内展开正文为全文 trim', async () => {
+    writeFileSync(skillAPath, '---\nname: skill-a\n没有结束标记行')
+    const raw = '---\nname: skill-a\n没有结束标记行'
     const marker = buildSkillMarker('skill-a', skillAPath)
     const injector = new SkillInjector(globalOnlySource([registrySkill('skill-a', skillAPath)]))
     const { client } = makeClient({ stats: { contextUsage: { tokens: 1, contextWindow: 100000, percent: 1 } } })
@@ -425,7 +425,7 @@ describe('SkillInjector.inject × encodeDirectiveText（A2 定向链路）', () 
     const injector = new SkillInjector(globalOnlySource([registrySkill('skill-a', skillAPath)]))
     const { client } = makeClient({ stats: { contextUsage: { tokens: 1, contextWindow: 100000, percent: 1 } } })
     const result = await injector.inject(client, text)
-    // 注入形态与主链逐字一致（同一 injector，无第二实现面）
+    // 注入形态与主链逐字一致（同一 injector，无第二实现侧）
     const block = expectedBlock('skill-a', skillAPath, skillADir, SKILL_A_BODY)
     expect(result.text).toBe(`${text}\n\n${expectedDataBlock(block)}`)
     // encode 后单行：注入产物含真实换行（正文换行 + 块行结构），命令单行性由 encode 兜底
@@ -591,7 +591,7 @@ describe('SkillInjector.inject 注入映射切源（A1 / D7：SkillRegistry 为�
     expect(result.notices).toEqual([{ reason: 'mapping_unavailable', skills: ['skill-a'] }])
   })
 
-  it('④ LateBoundSkillSource bind 后透传真源（构造顺序环收口形态）', async () => {
+  it('④ LateBoundSkillSource bind 后透传真源（构造顺序环收尾形态）', async () => {
     const source = new LateBoundSkillSource()
     const injector = new SkillInjector(source)
     const marker = buildSkillMarker('skill-a')

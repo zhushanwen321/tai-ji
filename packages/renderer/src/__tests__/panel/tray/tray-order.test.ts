@@ -3,7 +3,7 @@
  *
  * 三视角（TEST-STRATEGY §3）：
  * - 构建者（白盒）：known-order 优先 / 未知 key 按传入数组序追加 / 不改入参 / 输入缺失 known
- *   key 不产生幽灵条目；「当前插入序」契约用真 Map 的 delete+set 序列钉死（invalidate →
+ *   key 不产生幽灵条目；「当前插入序」契约用真 Map 的 delete+set 序列定死（invalidate →
  *   重注册落尾部；D6 明确不新增 seq 字段）
  * - 使用者（黑盒）：DOM 视角——排序结果即用户看到的按钮顺序（本文件末尾的渲染栈用例）；
  *   完整交互/DOM 断言在 tray-widget.test.ts

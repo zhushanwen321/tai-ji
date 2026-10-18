@@ -1,20 +1,20 @@
 /**
  * subagent-engine-history —— runtime 的非 pi 引擎历史详情读取 + 协议客户端接线
- * （W8 宿主接线，设计 §3.6 宿主面 / impl-plan §2.8）。
+ * （W8 宿主接线，设计 §3.6 宿主侧 / impl-plan §2.8）。
  *
  * [W8 前] 本文件是「core session-view-service 三级降级链」的薄调用（①引擎原生
  * reader ②journal ③outcome-only，①级 = core 内建 zcode sqlite 直读）。
  *
  * [W8 起] runtime 成为协议客户端（D9 反转：runtime 不再 import 引擎实现直读）：
  * 三级发现（TAIJI_AGENT_ENGINE_ROOTS + node 解析 + config.json；engines.json 仅 GUI
- * 投影不作发现源）装载 cli descriptor → 按需 spawn 引擎 CLI 调协议 read（idle 复用
+ * 派生视图不作发现源）装载 cli descriptor → 按需 spawn 引擎 CLI 调协议 read（idle 复用
  * 5min，回收层 dispose 上界 3s 超时即杀）→ 失败降②级 journal（降级 warn 留痕；
- * SessionView.source 契约是 GUI 标注数据源，字段透出归 GUI 消费面）。
+ * SessionView.source 契约是 GUI 标注数据源，字段透出归 GUI 消费方）。
  *
  * 接线形态：runtime 把「协议 read」注册为引擎原生 reader（registerNativeSessionReader，
  * 覆盖 core 内建 zcode reader——仅本进程，pi 扩展宿主进程不受影响），core
- * readSubagentHistoryMessages 的三级降级链与 SessionView → HistoryMessage 投影
- * 原样复用，runtime 零投影代码。
+ * readSubagentHistoryMessages 的三级降级链与 SessionView → HistoryMessage 派生
+ * 原样复用，runtime 零派生代码。
  *
  * 实例管理（设计 §3.6「runtime 侧引擎进程的生命周期」）：
  * - 持有方 = runtime 自持 RemoteEngine 实例（descriptor.portFactory() 产物，不经
@@ -44,13 +44,13 @@ import { extractLatestModelChangeFromJsonl } from '../../infra/pi/session-model-
 import { getPiAgentDir } from '../../infra/pi/pi-paths.js'
 import { toErrorMessage } from '../../utils/errors.js'
 
-/** record 引擎路由段的缺省引擎：存量 record 无 engine 字段 → 按 pi 投影（零迁移）。 */
+/** record 引擎路由段的缺省引擎：存量 record 无 engine 字段 → 按 pi 派生（零迁移）。 */
 export const DEFAULT_SUBAGENT_ENGINE = 'pi'
 
-// ── 协议客户端管理面 ───────────────────────────────────────────
+// ── 协议客户端管理侧 ───────────────────────────────────────────
 
 // ADR-0122 退役登记（2026-10-05）：协议引擎 idle 回收（ENGINE_IDLE_REUSE_MS 5min →
-// dispose）已删——引擎实例进程级自持直至 shutdown dispose（退出钩子仍收口）。shutdown
+// dispose）已删——引擎实例进程级自持直至 shutdown dispose（退出钩子仍收尾）。shutdown
 // 聚合上界（DISPOSE_AGGREGATE_CAP_MS 3s）随杀链 grace 退役一并删除。
 
 /** 管理器条目：自持协议引擎实例。 */
@@ -215,7 +215,7 @@ export function disposeRuntimeEngineClients(): Promise<void> {
 export function extractRecordEngine(record: SubagentRecord): string {
   // 单一裁决点委派 core：engine 缺失且无原生引擎锚 → pi 缺省（存量零迁移）；
   // 缺失但带原生锚（engineHandle.sessionRef 非空）→ 抛 RecordEngineIdentityError。
-  // 本地复刻一份「缺省即 pi」会让损坏 record 在此先被判成 pi，core 侧守卫永不触达。
+  // 本地复刻一份「缺省即 pi」会让损坏 record 在此先被判成 pi，core 侧检查永不触达。
   return resolveEngineRouteId(record, record.subagentId)
 }
 
@@ -231,7 +231,7 @@ export function extractRecordEngine(record: SubagentRecord): string {
  * workspace private 的 shared 包）——TS 结构类型直接可赋值，兼容性由本函数签名的
  * 类型检查守护。
  *
- * @param record  record 快照（engine/engineHandle 为不可信源，core 链守卫消费）
+ * @param record  record 快照（engine/engineHandle 为不可信源，core 链检查消费）
  * @param dataDir taiji 数据根（getDataDir() 产物；协议 read.dataDir 与 journal/
  *                dbPath 白名单经同一份 paths.ts 布局 SSOT 推导，禁自拼）
  */
@@ -258,7 +258,7 @@ export interface SessionModelChangeEntry {
  * JSONL 尾读/解析原语与 pi entry 类型词汇（C-comm-02 持有点纪律——services 层不持
  * pi 词汇）收敛在 infra，活跃路径裁剪随既有骨架统一（分支文件下物理尾逆读会命中
  * 被撤子树的 model_change，与该 session 真实生效值漂移）；census §6 N16 登记读者
- * 归类。本函数只保留消费面契约（导出名/签名/返回形状不变，session-records 与
+ * 归类。本函数只保留消费方契约（导出名/签名/返回形状不变，session-records 与
  * 直测零改动）。
  *
  * 仅 pi 引擎成员调用（非 pi 成员无 pi session 文件，调用方以 extractRecordEngine 判定）。

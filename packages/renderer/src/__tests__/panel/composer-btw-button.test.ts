@@ -5,7 +5,7 @@
  * - 使用者（黑盒 DOM）：首屏按钮在左簇（title 文案）/ show-btw=false 与无 session 不出入口 /
  *   badge 计数 Σ（含 9+ 封顶与计数 title）/ 待处理徽点两态（pending>0 显 + 计数 title、
  *   双零不显、与计数角标同屏并列，U1）/ 进视口即清、视口内不计、离开再计 / 点击开 drawer
- *   btw tab / 切主会话 badge 归属各自主会话且切回恢复（D7③④，S10 单测面）
+ *   btw tab / 切主会话 badge 归属各自主会话且切回恢复（D7③④，S10 单测）
  * - 观察者（形态）：三档宽度（700/560/400）按钮常驻 + `+` 仍居左簇首位、发送位仍右锚
  *   （退化序登记 = 序 0 不退化，不破坏既有布局）
  * - 构建者（白盒）：COMPOSER_BTW_BUTTON_DEGRADATION_ORDER 登记值 = 0
@@ -51,7 +51,7 @@ import { __resetBtwPendingBookkeepingForTest } from '@/composables/panel/useBtwT
 import { __clearSessionCleanupRegistryForTest } from '@/composables/useSessionScopedState'
 import { dispatchGlobal } from '@taiji/core/transport/api'
 
-// ── tray 数据面替身：全无条目（三态「全无」→ 托盘不渲染，左簇位次断言无干扰）──
+// ── tray 数据范围替身：全无条目（三态「全无」→ 托盘不渲染，左簇位次断言无干扰）──
 vi.mock('@/components/panel/tray/useTrayCounts', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/components/panel/tray/useTrayCounts')>()
   const stubState = {
@@ -76,7 +76,7 @@ vi.mock('@/components/panel/tray/useTrayCounts', async (importOriginal) => {
   }
 })
 
-// ── api mock：chat 组（spy 转发 + getHistory 回放腿空快照）+ btw 域（badge 数据源）──
+// ── api mock：chat 组（spy 转发 + getHistory 回放路径空快照）+ btw 域（badge 数据源）──
 vi.mock('@/api', () => composerApiModuleWithChatAndBtw())
 
 // ── 子组件 stub（AddMenuPopover 保持真实：`+` 首位是「既有布局不破坏」断言对象）──
@@ -203,7 +203,7 @@ describe('入口渲染与 show-btw 实例开关（D7 ③入口）', () => {
     expect(bar().findAll('button')[0]?.attributes('title')).toBe('添加内容（附件 / 命令）')
   })
 
-  it('无 session：不出 btw 入口（badge 数据面需主会话；真 landing 态不受影响）', async () => {
+  it('无 session：不出 btw 入口（badge 数据范围需主会话；真 landing 态不受影响）', async () => {
     const w = mountComposer({ sessionId: null })
     await settle()
 
@@ -268,7 +268,7 @@ describe('badge 两态基础：聚合 Σ unread + 清除 = 线内容进视口（
     expect(badge().text()).toBe('1')
   })
 
-  it('badge 归属各自主会话：切走不串台、切回恢复（D7③④，S10 单测面）', async () => {
+  it('badge 归属各自主会话：切走不串台、切回恢复（D7③④，S10 单测）', async () => {
     composerBtwApiSpy.list.mockImplementation((sid: string) =>
       Promise.resolve(sid === SID ? [{ vid: 'btw:ta' }] : [{ vid: 'btw:tb' }]),
     )
@@ -374,7 +374,7 @@ describe('点击入口与退化序登记（D7 + use-composer-bar-density 序 0�
     const w = mountComposer()
     await settle()
     const btn = w.find('[data-testid="composer-btw-button"]')
-    expect(btn.exists()).toBe(true) // 使用者可见面
+    expect(btn.exists()).toBe(true) // 使用者可见部分
 
     await btn.trigger('click')
     const drawer = getDrawerControlState()
@@ -400,7 +400,7 @@ describe('点击入口与退化序登记（D7 + use-composer-bar-density 序 0�
     // ——该轴已随三步聚合实测化退役；现行轴 = data-fit（0–3 实测 fit 级，判据 = 可用宽 vs 两簇
     // 占宽）。jsdom 无真实几何（clientWidth/占宽恒 0 → 需求 0 → 恒 fit=0），故本探针须打桩几何
     // （composer-bar-density-wiring 的 dispatchFitGeometry 同法）才走退化；data-fit 0→3 全档
-    // 由 wiring 测试的纯接线面承接，此处只证全量挂载下回路真实驱动。
+    // 由 wiring 测试的纯接线点承接，此处只证全量挂载下回路真实驱动。
     const probeBar = bar().element as HTMLElement
     const probeLeft = probeBar.querySelector<HTMLElement>('[data-composer-cluster="left"]')
     const probeRight = probeBar.querySelector<HTMLElement>('[data-composer-cluster="right"]')

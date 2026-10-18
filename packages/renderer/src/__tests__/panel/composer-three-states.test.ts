@@ -31,7 +31,7 @@ import { useChatStore } from '@/stores/chat'
 // ── api mock 单源 helpers/composer-mount.ts；useChat 断言引用 composerChatApiSpy 单例 ──
 vi.mock('@/api', () => composerApiModule())
 
-// ── ComposerInput mock：defineExpose + emit（共用面工厂单源 helpers/composer-mount）──
+// ── ComposerInput mock：defineExpose + emit（共用部分工厂单源 helpers/composer-mount）──
 // 追踪 input 事件携带的文本（Composer.onSend 调 inputRef.getSegments() 取结构化 segments）。
 // 通过 emits 验证器捕获 input payload，getSegments 用 textToSegments 还原（ADR-0043）。
 const { lastInputText, ComposerInputMock } = makeComposerInputMock()

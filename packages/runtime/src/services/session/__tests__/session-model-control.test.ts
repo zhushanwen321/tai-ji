@@ -3,10 +3,10 @@
  * 模型/思考等级控制——**激活前置**（`ensureActive` 先于 Map 查询与 set RPC）、激活上界与
  * 错误分型（既有码透传 / 无码包 SESSION_ACTIVATE_FAILED /
  * `Model not found` 三型）、set RPC + get_state 回执普查（pattern 换模生效值）、三实例
- * markDirty 失效时序、session.modelId/thinkingLevel 直写双投影、trace 补拉、错误路径。
+ * markDirty 失效时序、session.modelId/thinkingLevel 直写双派生视图、trace 补充拉取、错误路径。
  *
  * 分层（G2：import 无 session-service，stub 面 = deps 方法）：client 的
- * setModel/setThinkingLevel/getState 可编程，markDirty/直写/补拉/激活经 spy 断言。
+ * setModel/setThinkingLevel/getState 可编程，markDirty/直写/补充拉取/激活经 spy 断言。
  */
 import { describe, it, expect, vi } from 'vitest'
 import type { ProviderId } from '@taiji/shared'
@@ -22,7 +22,7 @@ import {
 } from '../../../utils/errors.js'
 import { SessionModelControl, classifyActivationError, isPiModelNotFoundError } from '../session-model-control.js'
 
-/** 可变 session 视图（断言直写双投影）。 */
+/** 可变 session 视图（断言直写双派生视图）。 */
 function makeSession(): { modelId: string; thinkingLevel: string } & IManagedSessionView {
   return { modelId: 'old/provider-old', thinkingLevel: 'medium' } as unknown as IManagedSessionView & { modelId: string; thinkingLevel: string }
 }
@@ -176,7 +176,7 @@ describe('switchModel — Model not found 三型分型（U2/§3.4）', () => {
     }
   })
 
-  it('判定函数单测：前缀匹配 + 激活分型（导出面，供 PS 探针与上层复用）', () => {
+  it('判定函数单测：前缀匹配 + 激活分型（导出清单，供 PS 探针与上层复用）', () => {
     expect(isPiModelNotFoundError(new Error('Model not found: a/b'))).toBe(true)
     expect(isPiModelNotFoundError(new Error('modelX not found'))).toBe(false)
     const passthrough = Object.assign(new Error('x'), { code: SESSION_NOT_FOUND })
@@ -186,7 +186,7 @@ describe('switchModel — Model not found 三型分型（U2/§3.4）', () => {
 })
 
 describe('switchModel — 回执与失效（既有语义）', () => {
-  it('回执普查：pattern 换模时返回/直写 get_state 生效值（≠ 请求值）+ 三实例失效 + trace 补拉', async () => {
+  it('回执普查：pattern 换模时返回/直写 get_state 生效值（≠ 请求值）+ 三实例失效 + trace 补充拉取', async () => {
     const { control, session, markDirty, syncTraceEntries, client } = makeFixture()
     const result = await control.switchModel('s1', 'p1' as ProviderId, 'requested-m')
     expect(client.setModel).toHaveBeenCalledWith('p1', 'requested-m')
@@ -230,7 +230,7 @@ describe('switchModel — 回执与失效（既有语义）', () => {
 })
 
 describe('setThinkingLevel — 同激活语义（U2/D7）', () => {
-  it('钳制读回：返回 get_state 生效值并直写 session.thinkingLevel + trace 补拉', async () => {
+  it('钳制读回：返回 get_state 生效值并直写 session.thinkingLevel + trace 补充拉取', async () => {
     const { control, session, syncTraceEntries, ensureActive } = makeFixture(async () => ({ thinkingLevel: 'high' }))
     const result = await control.setThinkingLevel('s1', 'max')
     expect(ensureActive).toHaveBeenCalledWith('s1')

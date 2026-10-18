@@ -6,7 +6,7 @@
  * （../helpers/settings-transport-stub / @/__tests__/helpers/...）。
  *
  * 另供 makeSkillsReloadTransportStub：skill reload 链路（useGlobalSkills 订阅 →
- * loadGlobal(true) force 重拉）的 transport 桩——onSkillCacheInvalidated 桥到真实
+ * loadGlobal(true) force 重新拉取）的 transport 桩——onSkillCacheInvalidated 桥到真实
  * events.onGlobalType，测试侧 events.dispatchGlobal 广播端到端触达订阅回调。
  * events 模块在工厂内动态 import：消费者若 vi.mock 了该路径，helper 顶层 import 会在
  * 测试文件的 helper import 绑定初始化前触发 mock 工厂（TDZ），动态 import 规避

@@ -13,7 +13,7 @@ const containers = new Map<PrimitiveContainerType, Component>()
  *
  * 环的成因：Card/Columns/Group 静态 import PrimitiveRouter 作 inject 回退（该方向必须
  * 保持同步——独立挂载时叶子子组件需同步渲染）；Router 若再静态 import 这 3 个容器、
- * 或经动态 import() 引用（依赖分析同样计边），即闭合 3 组二文件环。故 Router 对容器
+ * 或经动态 import() 引用（依赖分析同样计边），即封住 3 组二文件环。故 Router 对容器
  * 只持本注册表查表函数，容器组件由 primitives barrel（index.ts，消费方规范入口）加载
  * 时注册。barrel 不被 Router/容器反向引用，静态依赖图无环。
  *

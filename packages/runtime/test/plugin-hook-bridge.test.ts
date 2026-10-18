@@ -178,9 +178,9 @@ describe('EventAdapter: onHookExecute callback', () => {
     expect(payload.entry.message.content).toEqual([{ type: 'text', text: 'REDACTED OUTPUT' }])
   })
 
-  // ── type-safety 守卫（interpreter handleToolCallStart / handleToolCallEnd 靶子）──
+  // ── type-safety 检查（interpreter handleToolCallStart / handleToolCallEnd 检查目标）──
   // hook 是第三方插件代码（不可信源）：畸形 transformedData 不得以谎报类型进 wire 帧 /
-  // 持久化 entry 契约（arguments/content text block）。守卫在「裸赋值透传」形态下会红。
+  // 持久化 entry 契约（arguments/content text block）。检查在「裸赋值透传」形态下会红。
 
   it('guards: onBeforeToolCall 返回非对象 transformedData → 丢弃改写保原始 input（不透传进 entry.arguments）', async () => {
     for (const bad of ['string-rewrite', 42, ['array']]) {
@@ -227,7 +227,7 @@ describe('EventAdapter: onHookExecute callback', () => {
 
     adapter.attach({
       onEvent: (listener) => {
-        // pi 契约 args 恒为对象（ADR-0037）——畸形 string 经 isPlainRecord 守卫归一 {}
+        // pi 契约 args 恒为对象（ADR-0037）——畸形 string 经 isPlainRecord 检查归一 {}
         listener(piEvent({ type: 'tool_execution_start', toolCallId: 'tc-g3', toolName: 'bash', args: 'not-an-object' }))
         return () => {}
       },
@@ -341,7 +341,7 @@ describe('PluginService: registerSendMessageHook', () => {
       // S3-W2：session 生命周期事件接线（registerSendMessageHook 内挂）
       setOnSessionCreated: vi.fn(),
       setOnSessionDestroyed: vi.fn(),
-      // u5a relay ③：激活回调注册（追加式列表）——mock 跟进接口面
+      // u5a relay ③：激活回调注册（追加式列表）——mock 跟进接口侧
       onSessionActivated: vi.fn(),
     }
 

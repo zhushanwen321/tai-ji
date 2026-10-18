@@ -54,7 +54,7 @@ interface DepsSpies {
   handoffChipIcon: object
   toastError: ReturnType<typeof vi.fn>
   isHandingOff: ReturnType<typeof vi.fn>
-  /** 源 session 是否活跃（streaming/派发中）——handoff 入口/发送守卫，默认 false */
+  /** 源 session 是否活跃（streaming/派发中）——handoff 入口/发送检查，默认 false */
   isSessionActive: ReturnType<typeof vi.fn>
   /** 跨组件触发通道 signal（每测试独立 ref，天然隔离，无需 beforeEach reset） */
   handoffEnterSignal: Ref<{ srcSessionId: string } | null>
@@ -135,7 +135,7 @@ describe('enterHandoffMode', () => {
     expect(focusSpy).toHaveBeenCalledTimes(1)
   })
 
-  it('inputRef 为 null 时不抛错（可选链守卫）', () => {
+  it('inputRef 为 null 时不抛错（可选链检查）', () => {
     const { api } = setup()
     // inputRef.value 默认 null
     expect(() => api.enterHandoffMode('src-1')).not.toThrow()
@@ -519,8 +519,8 @@ describe('asStagingAction', () => {
   })
 })
 
-// ── streaming 守卫（isSessionActive：入口拦截 + 发送兜底）─────────────────
-describe('streaming 守卫（isSessionActive）', () => {
+// ── streaming 检查（isSessionActive：入口拦截 + 发送兜底）─────────────────
+describe('streaming 检查（isSessionActive）', () => {
   it('源 session streaming 中 enterHandoffMode 拦截：toast + 不进入模式', () => {
     const { deps, api } = setup()
     deps.isSessionActive.mockReturnValue(true)

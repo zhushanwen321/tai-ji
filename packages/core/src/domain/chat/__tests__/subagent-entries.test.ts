@@ -2,11 +2,11 @@
  * applySubagentEntries 单测（E-4，subagent-realtime-channel §6.1/§6.2）。
  *
  * 覆盖 session.subagentEntriesAppended 帧的 store 级消费语义：
- * - 帧到达 → 虚拟分区出现 entry 派生消息（message entry 经 applyEntry reducer 投影）
+ * - 帧到达 → 虚拟分区出现 entry 派生消息（message entry 经 applyEntry reducer 派生视图）
  * - toolCall overlay：running toolCall 挂末位 assistant；toolResult entry 回填后基线覆盖终态；
  *   同帧 [toolResult, toolCall] 交错下终态不被倒退回 running
  * - delta 中间态被 entry 定稿覆盖（§6.2：applySubagentStreamDelta 建的 sa-* streaming
- *   实体被 assistant 定稿 entry 的基线投影取代）
+ *   实体被 assistant 定稿 entry 的基线派生视图取代）
  * - 幂等：toolResult 重复帧 no-op（reducer deliveredToolResultIds）；「帧先于 drawer 打开 →
  *   快照替换 → 后续帧」不产生重复消息
  * - disposeSession 清理 reducer 累积态（后续帧从空分区重新累积）
@@ -54,7 +54,7 @@ describe('applySubagentEntries（E-4 entry 帧消费）', () => {
     sut.dispose()
   })
 
-  it('帧到达 → 虚拟分区出现 entry 派生消息（reducer 投影，user/assistant 顺序保留）', () => {
+  it('帧到达 → 虚拟分区出现 entry 派生消息（reducer 派生视图，user/assistant 顺序保留）', () => {
     sut.store.applySubagentEntries(VIRTUAL_ID, [
       messageEntry({ role: 'user', content: [{ type: 'text', text: '任务' }], timestamp: 1000 }),
       messageEntry({ role: 'assistant', content: [{ type: 'text', text: '产出' }], timestamp: 2000 }),
@@ -84,7 +84,7 @@ describe('applySubagentEntries（E-4 entry 帧消费）', () => {
     let messages = sut.store.getMessages(VIRTUAL_ID)
     expect(messages[0]?.toolCalls?.[0]).toMatchObject({ id: 'tc-1', status: 'running' })
 
-    // 帧 3：tool_execution_end → toolResult entry 喂 reducer 回填 → 基线投影覆盖 running
+    // 帧 3：tool_execution_end → toolResult entry 喂 reducer 回填 → 基线派生视图覆盖 running
     sut.store.applySubagentEntries(VIRTUAL_ID, [
       messageEntry({
         role: 'toolResult',
@@ -98,7 +98,7 @@ describe('applySubagentEntries（E-4 entry 帧消费）', () => {
     expect(messages[0]?.toolCalls?.[0]).toMatchObject({ id: 'tc-1', status: 'completed', output: 'file body' })
   })
 
-  it('同帧 [toolResult, toolCall] 交错 → toolResult 先投影，overlay 不把终态倒退回 running', () => {
+  it('同帧 [toolResult, toolCall] 交错 → toolResult 先派生视图，overlay 不把终态倒退回 running', () => {
     sut.store.applySubagentEntries(VIRTUAL_ID, [
       messageEntry({
         role: 'assistant',
@@ -120,7 +120,7 @@ describe('applySubagentEntries（E-4 entry 帧消费）', () => {
     expect(messages[0]?.toolCalls?.[0]).toMatchObject({ status: 'completed', output: 'done' })
   })
 
-  it('delta 中间态被 entry 定稿覆盖（§6.2：sa-* streaming 实体被基线投影取代）', () => {
+  it('delta 中间态被 entry 定稿覆盖（§6.2：sa-* streaming 实体被基线派生视图取代）', () => {
     // delta 打字机：streaming 中间态（applySubagentStreamDelta 建的 sa-<uuid> 实体）
     sut.store.applySubagentStreamDelta(VIRTUAL_ID, ['Hello wor'])
     expect(sut.store.getMessages(VIRTUAL_ID)[0]).toMatchObject({ status: 'streaming', content: 'Hello wor' })
@@ -200,7 +200,7 @@ describe('applySubagentEntries（E-4 entry 帧消费）', () => {
     ])
     expect(sut.store.getMessages(VIRTUAL_ID)).toHaveLength(2)
 
-    // 后续新帧：reducer 基线全量投影替换（live 累积 ⊇ 快照期内容），无重复消息
+    // 后续新帧：reducer 基线全量派生视图替换（live 累积 ⊇ 快照期内容），无重复消息
     sut.store.applySubagentEntries(VIRTUAL_ID, [
       messageEntry({
         role: 'assistant',
@@ -214,7 +214,7 @@ describe('applySubagentEntries（E-4 entry 帧消费）', () => {
     expect((messages[0]?.content as Array<{ type: string; text: string }>)[0]?.text).toBe('任务')
   })
 
-  it('基线投影截断：超限 toolResult 截断后，后续帧再投影截断值逐字节稳定（引用短路不改输出）', () => {
+  it('基线派生视图截断：超限 toolResult 截断后，后续帧再派生视图截断值逐字节稳定（引用短路不改输出）', () => {
     const bigOutput = 'x'.repeat(10_000)
     sut.store.applySubagentEntries(VIRTUAL_ID, [
       messageEntry({
@@ -232,14 +232,14 @@ describe('applySubagentEntries（E-4 entry 帧消费）', () => {
         timestamp: 3000,
       }),
     ])
-    // reducer 回填保留全量原文，基线投影负责截断（含标记 ≤ 4KB）
+    // reducer 回填保留全量原文，基线派生视图负责截断（含标记 ≤ 4KB）
     const truncated = sut.store.getMessages(VIRTUAL_ID)[0]?.toolCalls?.[0]?.output
     expect(truncated).toBeDefined()
     expect(new TextEncoder().encode(truncated!).length).toBeLessThanOrEqual(4096)
     expect(truncated!.endsWith('\n\n[...output truncated...]')).toBe(true)
 
-    // 后续帧（新 user entry，历史消息 reducer 引用不变）触发全量投影：历史消息
-    // 截断值不二次截断、marker 不叠加、逐字节等于首次投影结果
+    // 后续帧（新 user entry，历史消息 reducer 引用不变）触发全量派生视图：历史消息
+    // 截断值不二次截断、marker 不叠加、逐字节等于首次派生视图结果
     sut.store.applySubagentEntries(VIRTUAL_ID, [
       messageEntry({ role: 'user', content: [{ type: 'text', text: '下一轮' }], timestamp: 4000 }),
     ])
@@ -248,7 +248,7 @@ describe('applySubagentEntries（E-4 entry 帧消费）', () => {
     expect(messages[0]?.toolCalls?.[0]?.output).toBe(truncated)
   })
 
-  it('重复投影幂等：无新 entry 的重复触发输出与上次逐值一致（已见引用短路语义）', () => {
+  it('重复派生视图幂等：无新 entry 的重复触发输出与上次逐值一致（已见引用短路语义）', () => {
     sut.store.applySubagentEntries(VIRTUAL_ID, [
       messageEntry({ role: 'user', content: [{ type: 'text', text: '任务' }], timestamp: 1000 }),
       messageEntry({
@@ -268,7 +268,7 @@ describe('applySubagentEntries（E-4 entry 帧消费）', () => {
     ])
     const afterEntries = sut.store.getMessages(VIRTUAL_ID)
 
-    // 空帧（无 entry 无 toolCall form）= 纯重投影：输出 deep equal，历史值不漂移
+    // 空帧（无 entry 无 toolCall form）= 纯重派生视图：输出 deep equal，历史值不漂移
     sut.store.applySubagentEntries(VIRTUAL_ID, [])
     expect(sut.store.getMessages(VIRTUAL_ID)).toEqual(afterEntries)
   })
@@ -282,7 +282,7 @@ describe('applySubagentEntries（E-4 entry 帧消费）', () => {
     sut.store.disposeSession(VIRTUAL_ID)
     expect(sut.store.getMessages(VIRTUAL_ID)).toHaveLength(0)
 
-    // 清理后新帧：reducer state 一并清空（否则投影会带出清理前的累积，分区复活旧消息）
+    // 清理后新帧：reducer state 一并清空（否则派生视图会带出清理前的累积，分区复活旧消息）
     sut.store.applySubagentEntries(VIRTUAL_ID, [
       messageEntry({ role: 'user', content: [{ type: 'text', text: '新任务' }], timestamp: 9000 }),
     ])

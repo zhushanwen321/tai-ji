@@ -1,6 +1,6 @@
 // src/shared/__tests__/resource-discovery-host-roots.test.ts
 //
-// C2-core-discovery（convergence W2）单元测试：发现链扩面四工作项的行为锁定。
+// C2-core-discovery（convergence W2）单元测试：发现链扩大范围四工作项的行为锁定。
 // 覆盖：async 链 realpath 去重（W2①）、hostRoots 同标签
 // 多根语义（W2④，Map→列表 + 硬编码槽合并原根后置）、单层扫描维持（红线 3）、
 // pi 单条目形态回归快照（回归红线：Map→列表是行为敏感改动）。

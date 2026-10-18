@@ -1,12 +1,12 @@
 /**
- * D1 台账 session 生命周期事件接线测试（crash-forensics-and-watchdog §3.3 D1，实施单元 u1d1）。
+ * D1 journal session 生命周期事件接线测试（crash-forensics-and-watchdog §3.3 D1，实施单元 u1d1）。
  *
  * 锁定（验收条款①②③）：
  * - 抑制语义：用户主动删走 destroySession 先删进程表 → exit handler 反查无条目静默返回，
  *   不经 onSessionExit 链——shutdown（杀链发起处）/ deleted（removeSessionEntry 汇聚点）
  *   两事件仍产生，crash 永不产生（挂点选择正确性的构造性证明）；
  * - 异常退出：crash 事件含 sessionId + exitCode + 非空 detailDigest（stderr 尾部摘要），
- *   且异常退收殓腿经 removeSessionEntry 产生 deleted；
+ *   且异常退收殓路径经 removeSessionEntry 产生 deleted；
  * - 计划内终止记 shutdown（reason=planned）不记 crash（#16 归因保护）。
  *
  * 组合：真 ProcessManager（mock node:child_process 的 fakeProc）+ 真 SessionService（轻量
@@ -52,7 +52,7 @@ const fakeProc = {
     }),
   },
   stdin: { write: vi.fn(() => true), once: vi.fn(), on: vi.fn() }, // on: RT-2#1 stdin 流错误源头接线
-  // 模拟真实进程：SIGTERM 后异步死亡（信号致死 → exit code null），kill() 快速收口。
+  // 模拟真实进程：SIGTERM 后异步死亡（信号致死 → exit code null），kill() 快速收尾。
   kill: vi.fn((signal?: string) => {
     if (signal === 'SIGTERM' || signal === 'SIGKILL') {
       queueMicrotask(() => {
@@ -91,8 +91,8 @@ vi.mock('@taiji/shared', async (importOriginal) => {
   return { ...actual, ENV_WHITELIST_PREFIXES: ['PATH', 'HOME', 'USER', 'LANG', 'TERM'] }
 })
 
-// RT-4#1 起销毁链 checkpoint.detach 步经 runDestroyStepIsolated 隔离（失败落 crash 台账），
-// mock 必须带 RUN_* 常量让 checkpoint store 单例可构造——否则构造期 throw 会在台账里
+// RT-4#1 起销毁链 checkpoint.detach 步经 runDestroyStepIsolated 隔离（失败写入 crash journal），
+// mock 必须带 RUN_* 常量让 checkpoint store 单例可构造——否则构造期 throw 会在 journal 里
 // 多出 destroy-chain-step-failed 行，污染本文件「抑制语义 / crash 恰一条」断言。
 vi.mock('@taiji/shared/paths', () => ({
   getDataDir: () => '/mock/home/.taiji',
@@ -138,7 +138,7 @@ function emitStderr(text: string): void {
 
 let dataDir: string
 
-/** 真台账 + 真进程管理器 + 真 SessionService 的组合环境（makeEnv 同款轻量 deps）。 */
+/** 真journal + 真进程管理器 + 真 SessionService 的组合环境（makeEnv 同款轻量 deps）。 */
 async function makeEnv() {
   initCrashJournal(dataDir)
   const pm = new ProcessManager('/mock/project-root')
@@ -165,7 +165,7 @@ async function makeEnv() {
 }
 
 /**
- * close 后读台账并逐行 parse（任何半行都会抛）。不用 existsSync 判存在——本文件把
+ * close 后读 journal 并逐行 parse（任何半行都会抛）。不用 existsSync 判存在——本文件把
  * existsSync mock 成恒 false（findPiExecutable hermetic 前提），readFileSync ENOENT
  * 容错才不被 mock 干扰。
  */
@@ -183,7 +183,7 @@ async function readJournal(): Promise<CrashJournalEvent[]> {
 
 // ── Tests ────────────────────────────────────────────────────────
 
-describe('D1 台账 session 生命周期事件接线（u1d1）', () => {
+describe('D1 journal session 生命周期事件接线（u1d1）', () => {
   afterEach(async () => {
     await closeCrashJournal().catch(() => {})
     rmSync(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
@@ -211,23 +211,23 @@ describe('D1 台账 session 生命周期事件接线（u1d1）', () => {
     expect(shutdowns).toHaveLength(1)
     expect(shutdowns[0]).toMatchObject({ layer: 'pi', event: 'shutdown', reason: 'planned', sessionId: 'sid-del' })
 
-    // deleted 来自 removeSessionEntry 汇聚点（主动删腿）
+    // deleted 来自 removeSessionEntry 汇聚点（主动删路径）
     const deleteds = events.filter((e) => e.event === 'deleted')
     expect(deleteds).toHaveLength(1)
     expect(deleteds[0]).toMatchObject({ layer: 'pi', event: 'deleted', sessionId: 'sid-del' })
 
-    // 抑制语义核心断言：exit handler 静默路径不产生 crash（挂 exit handler 事件面即错）
+    // 抑制语义核心断言：exit handler 静默路径不产生 crash（挂 exit handler 事件范围即错）
     expect(events.some((e) => e.event === 'crash')).toBe(false)
   })
 
-  it('验收② 异常退出：crash 事件含 sessionId+exitCode+非空 detailDigest（stderr 尾部摘要），deleted 收殓腿在场', async () => {
+  it('验收② 异常退出：crash 事件含 sessionId+exitCode+非空 detailDigest（stderr 尾部摘要），deleted 收殓路径在场', async () => {
     dataDir = mkdtempSync(join(tmpdir(), 'crash-journal-u1d1-crash-'))
     const { pm, svc } = await makeEnv()
 
     await pm.createSession('sid-crash', '/project')
     await svc.initializeManagedSession('sid-crash', {} as unknown as IPiEngine, '/project', 'label')
 
-    // 5s 后自动 respawn 的 restore 内核 mock（真实实现会磁盘扫描，测试只关心事件面）
+    // 5s 后自动 respawn 的 restore 内核 mock（真实实现会磁盘扫描，测试只关心事件范围）
     vi.spyOn(svc, 'restoreSession').mockResolvedValue({ id: 'sid-crash' } as never)
 
     // 崩溃现场：先有 stderr 输出，再异常退出（code 1）
@@ -246,7 +246,7 @@ describe('D1 台账 session 生命周期事件接线（u1d1）', () => {
     expect(crash.detailDigest).toBeTruthy()
     expect(crash.detailDigest).toContain('TypeError: Cannot read properties of undefined')
 
-    // 异常退收殓腿：onSessionExit 链 → removeSessionEntry 汇聚点产生 deleted
+    // 异常退收殓路径：onSessionExit 链 → removeSessionEntry 汇聚点产生 deleted
     expect(events.filter((e) => e.event === 'deleted').map((e) => e.sessionId)).toEqual(['sid-crash'])
 
     // 计划内杀链未发生：无 shutdown 行

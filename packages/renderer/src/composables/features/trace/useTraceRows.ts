@@ -12,7 +12,7 @@ import type { TraceRow } from '@taiji/core/domain/session-trace'
 import { mergeTraceLines } from './trace-lines'
 import { useSessionTrace } from './useSessionTrace'
 
-/** 当前分区（focusedSessionId）的台账行派生。未 ready 返回空数组。 */
+/** 当前分区（focusedSessionId）的登记清单行派生。未 ready 返回空数组。 */
 export function useTraceRows(): ComputedRef<TraceRow[]> {
   const { partition } = useSessionTrace()
   return computed<TraceRow[]>(() => {

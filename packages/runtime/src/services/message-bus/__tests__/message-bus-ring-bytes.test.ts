@@ -22,7 +22,7 @@ import type { BusClient } from '../types.js'
 import { MessageBus } from '../message-bus.js'
 import type { OutboundFrameGuardOptions } from '../outbound-frame-registry.js'
 
-/** 守卫静默档：阈值足够大，测试帧不触发出站守卫（warn/截断都不触发），隔离 B7 变量。 */
+/** 检查静默档：阈值足够大，测试帧不触发出站帧检查（warn/截断都不触发），隔离 B7 变量。 */
 const QUIET_OPTS: OutboundFrameGuardOptions = { warnBytes: 8 * 1024 * 1024, truncateBytes: 32 * 1024 * 1024 }
 
 /** 截断启用档（对齐 outbound-frame-guard.test.ts 的 SMALL_OPTS）：告警 1KB / 截断 4KB。 */
@@ -51,7 +51,7 @@ function makeStreamFrame(n: number, padLen: number): ServerMessage {
   } as ServerMessage
 }
 
-/** 未注册类型帧（fallback=stream）：blob 字段守卫不认识，warn 档区间内 passthrough 完整。 */
+/** 未注册类型帧（fallback=stream）：blob 字段检查不认识，warn 档区间内 passthrough 完整。 */
 function makeUnregisteredFrame(blobLen: number): ServerMessage {
   const type: string = 'message.future_unknown_type' // widen：未入表类型不在 ServerMessageType（fallback=stream 语义入口）
   return {
@@ -89,7 +89,7 @@ function frameBytes(msg: ServerMessage): number {
   return Buffer.byteLength(JSON.stringify(msg), 'utf8')
 }
 
-/** ring 当前驻留帧（按 seq 顺序，浅拷贝）——subscribe snapshot 即 ring 窗口行为面。 */
+/** ring 当前驻留帧（按 seq 顺序，浅拷贝）——subscribe snapshot 即 ring 窗口行为范围。 */
 function ringSnapshot(bus: MessageBus, sid = 's1'): ServerMessage[] {
   return bus.subscribe(sid, makeClient()).snapshot
 }
@@ -166,7 +166,7 @@ describe('B7 · 单帧超预算超调下界终止（不逐新帧不死循环）'
   it('单帧 > 预算：仅剩最新帧即停，驻留不误逐，publish 同步返回（死循环会挂死测试）', () => {
     const budget = 512
     const bus = new MessageBus(100, QUIET_OPTS, budget)
-    const big = makeStreamFrame(1, 2000) // ~2KB > 512 预算（< 守卫阈值，不截断）
+    const big = makeStreamFrame(1, 2000) // ~2KB > 512 预算（< 检查阈值，不截断）
     bus.publish('s1', big)
     const snap = ringSnapshot(bus)
     // 下界：仅剩最新帧即停——刚 push 的帧不被逐（驱逐循环 size > 1 终止）
@@ -339,7 +339,7 @@ describe('B7 · 记账不截断（单帧行为完全不变，wire≡ring 同一�
   })
 
   it('默认构造（16MB 预算）下常规小消息零行为变化：驻留/回放/seq 与既有语义一致', () => {
-    const bus = new MessageBus() // 默认 1000 帧 / 16MB 预算 / 生产守卫阈值
+    const bus = new MessageBus() // 默认 1000 帧 / 16MB 预算 / 生产检查阈值
     const ws = makeClient()
     bus.subscribe('s1', ws)
     const f1 = makeStreamFrame(1, 200)
