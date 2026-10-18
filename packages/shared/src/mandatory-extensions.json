@@ -98,5 +98,10 @@
     "name": "@zhushanwen/pi-canvas",
     "description": "Problem-solving canvas toolface: six deferred canvas_* tools bridging the agent to the runtime CanvasService via the CANVAS_MARKER channel",
     "tier": "feature"
+  },
+  {
+    "name": "@zhushanwen/pi-network-proxy",
+    "description": "LLM network proxy: rule-based per-hostname traffic splitting via an undici global dispatcher (proxied vs direct), with request counters",
+    "tier": "feature"
   }
 ]

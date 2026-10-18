@@ -559,6 +559,27 @@
           "reason": "代码层零 import——reviewer 派发的运行时载体：canvas_review(run) 经 getSubagentService() 官方访问器读 globalThis service 槽（槽内 SubagentService 由 subagent-workflow 组合根 configureCore 装配）调 executeAndAwait 派 reviewer；缺失时槽缺位，canvas_review(run) 返回结构化错误（review_dispatch_unavailable），其余五工具不受影响"
         }
       ]
+    },
+    {
+      "name": "@zhushanwen/pi-network-proxy",
+      "directory": "extensions/universal/network-proxy",
+      "dependsOn": [
+        {
+          "package": "@zhushanwen/pi-llm-shared",
+          "type": "package",
+          "reason": "代码层静态 import loadConfig/getConfigPath（src/config.ts、src/index.ts top-level import，配置读取与路径推导），缺失时模块加载即抛 Cannot find module，是强依赖"
+        },
+        {
+          "package": "@zhushanwen/pi-ext-guards",
+          "type": "package",
+          "reason": "代码层静态 import toErrorMessage（src/stats.ts、src/index.ts top-level import），缺失时模块加载即抛 Cannot find module，是强依赖"
+        },
+        {
+          "package": "@zhushanwen/pi-extension-logger",
+          "type": "package",
+          "reason": "代码层静态 import getLogger/setPiHandle（src/stats.ts、src/index.ts top-level import），缺失时模块加载即抛 Cannot find module，是强依赖"
+        }
+      ]
     }
   ]
 }
