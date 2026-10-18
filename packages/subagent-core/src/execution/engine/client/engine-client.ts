@@ -6,14 +6,14 @@
 // stdout 行解析后的帧路由（非 NDJSON 丢弃留痕）+ stderr 常驻排空（仅内存环缓冲尾
 // 400 字符）。
 //
-// [M3] 进程面所有权已迁入 transport（设计 relay-spawn-transport §3.3 D5、
-// u-m3-local）：spawn 引擎 CLI / stdio 接线 / pidfile / 进程组收割归 LocalEngineTransport
-// （transport/local.ts），本类经 EngineTransport 契约消费；协议面（握手/请求关联/
+// [M3] 进程面所有权已迁入 transport（设计 relay-spawn-transport §3.3 D5）：
+// spawn 引擎 CLI / stdio 接线 / pidfile / 进程组收割归 LocalEngineTransport
+// （transport/local.ts），control socket 通道归 RuntimeEngineTransport
+// （transport/runtime.ts），本类经 EngineTransport 契约消费；协议面（握手/请求关联/
 // 反向路由/崩溃重建）留守。transport 选择谓词（单源 = SDK isControlEnvActive）：
-// TAIJI_SUBAGENT_CONTROL_SOCKET 非空 → runtime transport（u-m3-rt-transport 接线，
-// 落地前对激活态显式 engine_transport_unavailable——不静默 local）；空串/缺失 →
-// local。pidfile/reaper 仅 local 模式注册（impl-plan 验收③）：进程面收割段按
-// localTransport 实例有无编排。
+// TAIJI_SUBAGENT_CONTROL_SOCKET 非空 → runtime transport（连接失败/hello 被拒 → 对应
+// transport 错误码，不静默 local）；空串/缺失 → local。pidfile/reaper 仅 local 模式注册
+// （impl-plan 验收③）：进程面收割段按 localTransport 实例有无编排。
 //
 // 引擎自灭 core 侧配套：spawn 不覆写引擎 stdin（stdio[0] = 'pipe' 独占管道，core
 // 是唯一写端）——引擎侧 stdio EOF 主判据（SDK armEngineSelfDestruct）的前提（职责
@@ -25,7 +25,6 @@ import {
   CANCEL_SETTLE_GRACE_MS,
   ENGINE_PROTOCOL_VERSION,
   ENGINE_TRANSPORT_ERROR_CODES,
-  ENGINE_TRANSPORT_ERROR_RECOVERY,
   EngineSdkError,
   HANDSHAKE_TIMEOUT_MS,
   getLogger,
@@ -52,6 +51,7 @@ import {
   type EngineClientOptions,
 } from "./client-options.ts";
 import { LocalEngineTransport } from "./transport/local.ts";
+import { RuntimeEngineTransport } from "./transport/runtime.ts";
 import type {
   EngineTransport,
   EngineTransportExitInfo,
@@ -223,20 +223,23 @@ export class EngineClient {
   }
 
   /**
-   * transport 选择（D5 谓词骨架，单源 = SDK isControlEnvActive）：control env 非空
-   * → runtime transport——u-m3-rt-transport 接线，落地前显式 engine_transport_unavailable
-   * 失败（不静默回退 local，D5）；空串/缺失 → local transport。每代引擎连接一份
-   * transport 实例（open/close 生命周期 = 单通道）。protected = 测试 seam
-   *（transport 错误码 preserve 白名单单测注入假 transport）。
+   * transport 选择（D5 谓词，单源 = SDK isControlEnvActive）：control env 非空 →
+   * RuntimeEngineTransport（control socket 通道；connect/hello 失败 →
+   * engine_transport_unavailable，不静默回退 local）；空串/缺失 → LocalEngineTransport
+   * （standalone）。每代引擎连接一份 transport 实例（open/close 生命周期 = 单通道）。
+   * protected = 测试 seam（错误码 preserve 白名单单测注入假 transport）。
    */
   protected resolveTransport(): EngineTransport {
     if (isControlEnvActive(this.opts.baseEnv ?? process.env)) {
-      throw new EngineSdkError(
-        "engine_transport_unavailable",
-        `engine "${this.engineId}" is hosted (TAIJI_SUBAGENT_CONTROL_SOCKET active) but the runtime transport is not wired yet`,
-        ENGINE_TRANSPORT_ERROR_RECOVERY.engine_transport_unavailable,
-      );
+      logger.debug(`[engine-client:${this.engineId}] transport selected: runtime control channel`);
+      return new RuntimeEngineTransport({
+        engineId: this.opts.engineId,
+        hostKind: this.opts.hostKind,
+        baseEnv: this.opts.baseEnv,
+        onStderr: (chunk) => this.appendStderrTail(chunk),
+      });
     }
+    logger.debug(`[engine-client:${this.engineId}] transport selected: local (no control env)`);
     return new LocalEngineTransport({
       engineId: this.opts.engineId,
       dataDir: this.opts.dataDir,
@@ -316,6 +319,9 @@ export class EngineClient {
       this.transport = transport;
       transport.onFrame((line) => this.handleLine(line));
       transport.onExit((info) => this.onTransportExit(info));
+      // [M3] 传输面错误订阅（runtime 实现提供）：连接死亡 / 通道级 error 帧以具体码
+      // 收口在途请求（D5/D8，不包装 engine_crashed）。local 实现缺席。
+      transport.onTransportError?.((err) => this.onTransportError(err));
       // 启动期清扫（每实例一次；仅 local transport——runtime 模式无 pidfile/reaper，
       // 验收③）：宿主崩溃残留的同 id 引擎孤儿 + 陈旧 pidfile。
       if (!this.pidfileSwept) {
@@ -572,7 +578,9 @@ export class EngineClient {
    */
   async dispose(): Promise<void> {
     if (this.state === "disposed") return;
-    if (this.state === "ready" && (this.localTransport?.isProcessAlive() ?? false)) {
+    // local：进程存活才发 dispose 帧（死进程由 killAll 收割）；runtime：无 local 进程
+    // 句柄，通道存活由 request/writeFrame 回执表达（缺省继续，失败经 catch 兜底）。
+    if (this.state === "ready" && (this.localTransport?.isProcessAlive() ?? true)) {
       try {
         await this.request("dispose", {}, { timeoutMs: DISPOSE_GRACE_MS });
       } catch (err) {
@@ -591,9 +599,11 @@ export class EngineClient {
   /**
    * 引擎通道终局（transport exit 投影消费）：日志分级 + 协议面终局清理 + 状态回落。
    * 进程面终局（孤儿收割/pidfile 删/句柄清理）已由 transport 内部在派发前完成。
+   * reason 是 runtime engine_closed 帧的归因值（local 缺席）——进诊断 detail。
    */
   private onTransportExit(info: EngineTransportExitInfo): void {
-    const detail = info.signal !== null ? `signal ${info.signal}` : `exit code ${info.code}`;
+    const reason = info.reason !== undefined ? `, reason ${info.reason}` : "";
+    const detail = info.signal !== null ? `signal ${info.signal}${reason}` : `exit code ${info.code}${reason}`;
     // intentionalKill 消费点：主动杀（killAll/dispose）后的 exit 是预期收敛（debug）；
     // 非主动杀 = 意外崩溃（warn 出声，供排障区分「引擎自己挂了」与「宿主收割」）。
     if (this.intentionalKill) {
@@ -606,10 +616,35 @@ export class EngineClient {
   }
 
   /**
+   * 传输面错误（D5/D8：control 连接死亡 / 通道级 error 帧）：以具体码 reject 全部
+   * in-flight 请求（不包装 engine_crashed）。连接死亡保持 unavailable（不重试）；
+   * 通道级错误随后续 engine_closed 回落 exited（下次 run 可重建，与引擎崩溃同语义）。
+   * 顺序契约：先于该通道 engine_closed 的 onExit 清理——pending 已空，迟到的
+   * onExit 不会覆盖具体错误码。
+   */
+  private onTransportError(err: EngineSdkError): void {
+    if (this.disposed) return;
+    logger.warn(`[engine-client:${this.engineId}] transport error: ${err.message}`);
+    for (const [, pending] of this.pending) {
+      if (pending.timer !== undefined) clearTimeout(pending.timer);
+      pending.reject(err);
+    }
+    this.pending.clear();
+    this.runRoutes.clear();
+    this.lastPartialHandle = undefined;
+    this.mirror.killAll();
+    if (this.state !== "unavailable") this.markUnavailable(err);
+    // 通道/连接已裁决终局：让 transport 收敛（连接死亡时通道已清 → 立即 resolve；
+    // 通道级 error 时加入 engine_close 宽限/engine_closed 回收链）——fire-and-forget。
+    void this.transport?.close(`transport error: ${err.code}`);
+  }
+
+  /**
    * 进程死亡 / 失败后的统一清理（进程面段委托 transport、协议面段留守，此处只做
    * 顺序编排）：孤儿收割（镜像置死前，transport 幂等）→ 镜像置死（失效语义 2+3）→
    * pidfile 删 → 在途请求 engine_crashed（附 stderr 尾）→ run 路由清空 → 活引擎
-   * 组杀兜底。
+   * 组杀兜底。runtime transport 无 local 进程面（引擎归 runtime）——发 engine_close
+   * 让 runtime 杀组回收（fire-and-forget：同步终局段不阻塞在途 reject 链）。
    */
   private teardownProcess(detail: string): void {
     const local = this.localTransport;
@@ -625,6 +660,9 @@ export class EngineClient {
     this.runRoutes.clear();
     this.lastPartialHandle = undefined;
     local?.killLeakedChild(detail);
+    if (local === undefined) {
+      void this.transport?.close(detail);
+    }
     if (this.state !== "unavailable" && this.state !== "disposed") {
       this.state = "exited";
     }

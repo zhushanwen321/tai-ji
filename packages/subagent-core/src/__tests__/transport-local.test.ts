@@ -246,9 +246,9 @@ describe("EngineClient transport 谓词与错误码 preserve（验收②③）",
     });
   }
 
-  it("control env 激活 → engine_transport_unavailable（runtime transport 未接线；不静默 local）+ 零 spawn 零 pidfile（验收③）", async () => {
+  it("control env 激活 → engine_transport_unavailable（runtime transport 真实 connect 失败面；不静默 local）+ 零 spawn 零 pidfile（验收③）", async () => {
     const client = makeClient({
-      baseEnv: { TAIJI_SUBAGENT_CONTROL_SOCKET: "/tmp/does-not-exist.sock" },
+      baseEnv: { TAIJI_SUBAGENT_CONTROL_SOCKET: join(tmpdir(), `u-m3-rt-missing-${process.pid}.sock`) },
     });
     await expect(client.ensureConnected()).rejects.toSatisfy(
       (err: Error & { code?: string; recovery?: string }) => {
