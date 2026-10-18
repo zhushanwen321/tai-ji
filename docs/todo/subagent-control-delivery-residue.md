@@ -25,3 +25,11 @@
 ## 4 已知遗留命名（非缺陷）
 
 - `record.engineHandle.relayChildren` 字段与 crash-forensics 中标注为「当前不生效」的存量描述保留（引擎池抽象退役遗留），未在 relay-spawn-transport 范围内清理。
+
+## 5 D5 复审遗留的 info 级卫生项
+
+- `outbound-queue.ts` 的 `hasPendingFrames` 当前无调用方（可删或补消费）。
+- `pid-file.ts` 的 `.pid.tmp-*` 残片不在 sweep 扫描面（只扫 `*.pid`）；崩溃窗口可能留下 tmp 文件。
+- `outbound-queue` 的 destroyed 判定未覆盖半关闭态；溢出标记后不再复判上限（行为已显式失败，仅记录）。
+- `sweep` 的 owner 判活只有 `isPidAlive`，`instanceId` 恒等于 runtimePid（一致性校验在正常数据上不触发）；pid 复用误判「owner 活着」时仍会跳过收割——候选：boot id 或连接探活。
+- Windows 引擎意外退出时 child pid 集合来自 host/childSpawned 反向帧；只按 `isAlive` 选目标，无 start-time 二次校验（Windows 不可得，设计已接受「宁不杀勿误杀」的降级）。

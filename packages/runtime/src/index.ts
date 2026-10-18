@@ -386,7 +386,7 @@ function exitOnListenFailure(err: unknown, port: number): never {
   process.exit(1)
 }
 
-/** M3：subagent control server 初始化（listen 后、后台初始化前；listen 失败
+/** M3：subagent control server 初始化（server.start() 之前（先初始化再 listen）；listen 失败
  *  fatal——「以为 runtime 在管、实际 local spawn」的静默分裂比启动失败更危险，D9）。
  *  engineNodeEnv 由组合根注入（getEngineRootsSpawnEnv 产物；infra 不 import services）。
  *  publish = raw mirror 帧出口（§3.4.4：镜像字节 → SubagentTee → WS 帧）。 */

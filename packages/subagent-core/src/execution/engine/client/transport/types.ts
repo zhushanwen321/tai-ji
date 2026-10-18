@@ -18,7 +18,7 @@
 //   pi 协议。
 // - initialize 握手保持在上层：EngineClient 的请求 id 关联、反向通道路由、超时、
 //   initialize、崩溃重建策略不变；engineConfig 经上层 initialize 发送，transport 不携带。
-// - 选择逻辑（单源 = SDK isControlEnvActive）：TAIJI_SUBAGENT_CONTROL_SOCKET 非空 →
+// - 选择逻辑（单源谓词 = transport-selection.ts（内部消费 SDK isControlEnvActive + D9 逃生舱））：TAIJI_SUBAGENT_CONTROL_SOCKET 非空 →
 //   runtime transport（连接失败/hello 被拒 → engine_transport_unavailable /
 //   engine_protocol_mismatch，不静默 local）；空串/缺失 → local transport。谓词落点 =
 //   EngineClient（两分支均已接线：local = ./local.ts，runtime = ./runtime.ts）。
