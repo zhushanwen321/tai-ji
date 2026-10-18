@@ -166,7 +166,7 @@ async function createBoundCanvas(h: Harness, requestId = 'req-create-setup'): Pr
 // ── ① marker 往返翻译（含畸形 payload 结构化错误应答）──────────────
 
 describe('marker 往返翻译（CANVAS_MARKER select 通道）', () => {
-  it('create 全链：marker request → 真实 handler 创建画布 + 登记绑定 + 应答回 select 通道', async () => {
+  it('create 全链：marker request → 真实 handler 创建画布 + owner 即回推对象（归属即路径）+ 应答回 select 通道', async () => {
     const h = makeHarness()
     trackDir(h.dataDir)
 
@@ -186,7 +186,7 @@ describe('marker 往返翻译（CANVAS_MARKER select 通道）', () => {
     expect(h.canvasService.getBoundSessions(body.canvasId)).toEqual(['sid-agent'])
   })
 
-  it('enter 打开形态：读全量 CanvasState + 幂等登记绑定', async () => {
+  it('enter 打开形态：读全量 CanvasState + owner 即回推对象（enter 只读不登记）', async () => {
     const h = makeHarness()
     trackDir(h.dataDir)
     const canvasId = await createBoundCanvas(h)

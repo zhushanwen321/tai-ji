@@ -3,6 +3,10 @@ import { tmpdir } from 'node:os'
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { buildExecutionTree, formatExecutionTreeText, type ExecutionTreeNode } from '../core/execution-tree.js'
+import {
+  resolveStoreSubagentSessionsDir,
+  resolveStoreSubagentRecordsDir,
+} from '../discovery/roots.js'
 
 /**
  * M3b U7 buildExecutionTree 单测（design m3b 6 testCases）。
@@ -55,7 +59,7 @@ async function writeMainSession(dir: string, slug: string, id: string): Promise<
  */
 async function writeSubagentSession(
   dir: string,
-  slug: string,
+  rootSessionId: string,
   realId: string,
   identity: {
     rootSessionId: string
@@ -66,7 +70,7 @@ async function writeSubagentSession(
   },
   fileName: string = `${realId}.jsonl`,
 ): Promise<string> {
-  const sessionDir = join(dir, 'subagents', slug, 'sessions')
+  const sessionDir = resolveStoreSubagentSessionsDir(dir, rootSessionId)
   await mkdir(sessionDir, { recursive: true })
   const path = join(sessionDir, fileName)
   const data: Record<string, unknown> = {
@@ -80,7 +84,7 @@ async function writeSubagentSession(
   }
   if (identity.parentRecordId !== undefined) data.parentRecordId = identity.parentRecordId
   const lines = [
-    JSON.stringify({ type: 'session', id: realId, cwd: `/proj/${slug}` }),
+    JSON.stringify({ type: 'session', id: realId, cwd: `/proj/${rootSessionId}` }),
     JSON.stringify({
       type: 'message',
       id: 'm1',
@@ -96,7 +100,7 @@ async function writeSubagentSession(
 /** 写 records manifest。fields 含必填 + 可选 parentRecordId（数据源 ①）。 */
 async function writeRecordManifest(
   dir: string,
-  slug: string,
+  rootSessionId: string,
   id: string,
   fields: {
     rootSessionId: string
@@ -109,7 +113,7 @@ async function writeRecordManifest(
     parentRecordId?: string
   },
 ): Promise<void> {
-  const recordsDir = join(dir, 'subagents', slug, 'records')
+  const recordsDir = resolveStoreSubagentRecordsDir(dir, rootSessionId)
   await mkdir(recordsDir, { recursive: true })
   await writeFile(join(recordsDir, `${id}.json`), JSON.stringify({ id, ...fields }))
 }
@@ -174,24 +178,26 @@ function findNode(
 // ============================================================
 
 describe('buildExecutionTree - fixture', () => {
-  let dir: string
+  let dataDir: string
+  let dir: string // agentDir = <dataDir>/agent（生产拓扑复刻）
 
   beforeEach(async () => {
-    dir = await makeAgentDir()
+    dataDir = await makeAgentDir()
+    dir = join(dataDir, 'agent')
   })
   afterEach(async () => {
-    await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    await rm(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
   })
 
   it('TC-m3b-nested-tree：main→subagent A→{workflow-call B, subagent C} 相互嵌套（parentRecordId 精确链）', async () => {
     await writeMainSession(dir, '--main-cwd--', MAIN)
     // subagent A（顶层，parentRecordId=undefined），sessionFile 含 workflow-state-link → call session B
-    const saA = await writeSubagentSession(dir, '--main-cwd--', A_REAL, {
+    const saA = await writeSubagentSession(dir, MAIN, A_REAL, {
       rootSessionId: MAIN,
       slug: 'sub-a',
     })
     const recAId = 'sa-record-A'
-    await writeRecordManifest(dir, '--main-cwd--', recAId, {
+    await writeRecordManifest(dir, MAIN, recAId, {
       rootSessionId: MAIN,
       agentName: 'explorer',
       sessionFile: saA,
@@ -199,11 +205,11 @@ describe('buildExecutionTree - fixture', () => {
       parentRecordId: undefined,
     })
     // subagent C（A 的后代，parentRecordId=recAId，精确链）
-    const saC = await writeSubagentSession(dir, '--main-cwd--', C_REAL, {
+    const saC = await writeSubagentSession(dir, MAIN, C_REAL, {
       rootSessionId: MAIN,
       slug: 'sub-c',
     })
-    await writeRecordManifest(dir, '--main-cwd--', 'sa-record-C', {
+    await writeRecordManifest(dir, MAIN, 'sa-record-C', {
       rootSessionId: MAIN,
       agentName: 'worker',
       sessionFile: saC,
@@ -212,14 +218,11 @@ describe('buildExecutionTree - fixture', () => {
     })
     // workflow-call B：A 的 sessionFile 的 v2 注册条目 → record 流 → calls[].sessionFile = SB
     const sbB = join(
-      dir,
-      'subagents',
-      '--main-cwd--',
-      'sessions',
+      resolveStoreSubagentSessionsDir(dir, MAIN),
       `2026-08-07T16-49-48-393Z_${B_REAL}.jsonl`,
     )
     // B call session 文件需存在（resolveWorkflows 读 call sessionFile；这里只需路径，不读内容建树）
-    await mkdir(join(dir, 'subagents', '--main-cwd--', 'sessions'), { recursive: true })
+    await mkdir(resolveStoreSubagentSessionsDir(dir, MAIN), { recursive: true })
     await writeFile(sbB, JSON.stringify({ type: 'session', id: B_REAL, cwd: '/proj/wf' }) + '\n')
     await writeWfV2Run(dir, '--main-cwd--', saA, A_REAL, RUN_A, [sbB])
 
@@ -252,29 +255,29 @@ describe('buildExecutionTree - fixture', () => {
   it('TC-m3b-flat-fallback：旧机制全无 parentRecordId → 全挂 main（扁平）+ flat-fallback', async () => {
     await writeMainSession(dir, '--main-cwd--', MAIN)
     // 3 个顶层 subagent，全无 parentRecordId（旧机制）
-    const saA = await writeSubagentSession(dir, '--main-cwd--', A_REAL, {
+    const saA = await writeSubagentSession(dir, MAIN, A_REAL, {
       rootSessionId: MAIN,
       slug: 'a',
     })
-    await writeRecordManifest(dir, '--main-cwd--', 'sa-A', {
+    await writeRecordManifest(dir, MAIN, 'sa-A', {
       rootSessionId: MAIN,
       agentName: 'explorer',
       sessionFile: saA,
     })
-    const saB = await writeSubagentSession(dir, '--main-cwd--', B_REAL, {
+    const saB = await writeSubagentSession(dir, MAIN, B_REAL, {
       rootSessionId: MAIN,
       slug: 'b',
     })
-    await writeRecordManifest(dir, '--main-cwd--', 'sa-B', {
+    await writeRecordManifest(dir, MAIN, 'sa-B', {
       rootSessionId: MAIN,
       agentName: 'explorer',
       sessionFile: saB,
     })
-    const saC = await writeSubagentSession(dir, '--main-cwd--', C_REAL, {
+    const saC = await writeSubagentSession(dir, MAIN, C_REAL, {
       rootSessionId: MAIN,
       slug: 'c',
     })
-    await writeRecordManifest(dir, '--main-cwd--', 'sa-C', {
+    await writeRecordManifest(dir, MAIN, 'sa-C', {
       rootSessionId: MAIN,
       agentName: 'explorer',
       sessionFile: saC,
@@ -294,21 +297,21 @@ describe('buildExecutionTree - fixture', () => {
   it('TC-m3b-cycle-detection：workflow 指针环 A→B→A，visited Set 防环 + truncated', async () => {
     await writeMainSession(dir, '--main-cwd--', MAIN)
     // A（顶层），A 的 workflow call → SB
-    const saA = await writeSubagentSession(dir, '--main-cwd--', A_REAL, {
+    const saA = await writeSubagentSession(dir, MAIN, A_REAL, {
       rootSessionId: MAIN,
       slug: 'a',
     })
-    await writeRecordManifest(dir, '--main-cwd--', 'sa-A', {
+    await writeRecordManifest(dir, MAIN, 'sa-A', {
       rootSessionId: MAIN,
       agentName: 'explorer',
       sessionFile: saA,
     })
     // B（顶层），B 的 workflow call → SA（指回 A，成环）
-    const saB = await writeSubagentSession(dir, '--main-cwd--', B_REAL, {
+    const saB = await writeSubagentSession(dir, MAIN, B_REAL, {
       rootSessionId: MAIN,
       slug: 'b',
     })
-    await writeRecordManifest(dir, '--main-cwd--', 'sa-B', {
+    await writeRecordManifest(dir, MAIN, 'sa-B', {
       rootSessionId: MAIN,
       agentName: 'explorer',
       sessionFile: saB,
@@ -346,44 +349,44 @@ describe('buildExecutionTree - fixture', () => {
   it('TC-m3b-source-priority：parentRecordId 三级数据源 manifest>identity>flat（DM4）', async () => {
     await writeMainSession(dir, '--main-cwd--', MAIN)
     // X：顶层 subagent（挂 main）
-    const saX = await writeSubagentSession(dir, '--main-cwd--', A_REAL, {
+    const saX = await writeSubagentSession(dir, MAIN, A_REAL, {
       rootSessionId: MAIN,
       slug: 'x',
     })
-    await writeRecordManifest(dir, '--main-cwd--', 'sa-X', {
+    await writeRecordManifest(dir, MAIN, 'sa-X', {
       rootSessionId: MAIN,
       agentName: 'explorer',
       sessionFile: saX,
     })
     // Y：manifest.parentRecordId=sa-X（数据源 ①，精确挂 X）
-    const saY = await writeSubagentSession(dir, '--main-cwd--', B_REAL, {
+    const saY = await writeSubagentSession(dir, MAIN, B_REAL, {
       rootSessionId: MAIN,
       slug: 'y',
     })
-    await writeRecordManifest(dir, '--main-cwd--', 'sa-Y', {
+    await writeRecordManifest(dir, MAIN, 'sa-Y', {
       rootSessionId: MAIN,
       agentName: 'worker',
       sessionFile: saY,
       parentRecordId: 'sa-X',
     })
     // Z：manifest 无 parentRecordId，但 identity.data.parentRecordId=sa-X（数据源 ②，精确挂 X）
-    const saZ = await writeSubagentSession(dir, '--main-cwd--', C_REAL, {
+    const saZ = await writeSubagentSession(dir, MAIN, C_REAL, {
       rootSessionId: MAIN,
       slug: 'z',
       parentRecordId: 'sa-X', // 写入 identity.data.parentRecordId
     })
-    await writeRecordManifest(dir, '--main-cwd--', 'sa-Z', {
+    await writeRecordManifest(dir, MAIN, 'sa-Z', {
       rootSessionId: MAIN,
       agentName: 'worker',
       sessionFile: saZ,
       // manifest 无 parentRecordId → 走 ② identity
     })
     // W：manifest + identity 都无 parentRecordId（数据源 ③，flat 挂 main）
-    const saW = await writeSubagentSession(dir, '--main-cwd--', '000000000005', {
+    const saW = await writeSubagentSession(dir, MAIN, '000000000005', {
       rootSessionId: MAIN,
       slug: 'w',
     })
-    await writeRecordManifest(dir, '--main-cwd--', 'sa-W', {
+    await writeRecordManifest(dir, MAIN, 'sa-W', {
       rootSessionId: MAIN,
       agentName: 'worker',
       sessionFile: saW,
@@ -417,12 +420,12 @@ describe('buildExecutionTree - fixture', () => {
   it('TC-m3b-mf1-dedup：call session 有 manifest（parentRecordId 链 + wf 指针双命中）只出现一次（MF-1）', async () => {
     await writeMainSession(dir, '--main-cwd--', MAIN)
     // A（顶层，parentRecordId=undefined），sessionFile 含 workflow-state-link → call session B
-    const saA = await writeSubagentSession(dir, '--main-cwd--', A_REAL, {
+    const saA = await writeSubagentSession(dir, MAIN, A_REAL, {
       rootSessionId: MAIN,
       slug: 'sub-a',
     })
     const recAId = 'sa-record-A'
-    await writeRecordManifest(dir, '--main-cwd--', recAId, {
+    await writeRecordManifest(dir, MAIN, recAId, {
       rootSessionId: MAIN,
       agentName: 'explorer',
       sessionFile: saA,
@@ -431,16 +434,13 @@ describe('buildExecutionTree - fixture', () => {
     })
     // B：A 的 subagent 后代（parentRecordId=recA）+ A 的 workflow call 目标（双命中，MF-1 场景）
     const sbB = join(
-      dir,
-      'subagents',
-      '--main-cwd--',
-      'sessions',
+      resolveStoreSubagentSessionsDir(dir, MAIN),
       `2026-08-07T16-49-48-393Z_${B_REAL}.jsonl`,
     )
-    await mkdir(join(dir, 'subagents', '--main-cwd--', 'sessions'), { recursive: true })
+    await mkdir(resolveStoreSubagentSessionsDir(dir, MAIN), { recursive: true })
     await writeFile(sbB, JSON.stringify({ type: 'session', id: B_REAL, cwd: '/proj/wf' }) + '\n')
     const recBId = 'sa-record-B'
-    await writeRecordManifest(dir, '--main-cwd--', recBId, {
+    await writeRecordManifest(dir, MAIN, recBId, {
       rootSessionId: MAIN,
       agentName: 'worker',
       sessionFile: sbB,
@@ -448,11 +448,11 @@ describe('buildExecutionTree - fixture', () => {
       parentRecordId: recAId,
     })
     // D：B 的 subagent 后代（验证 call session 内派生的嵌套 sub-subagent 仍正确挂到 B 下）
-    const saD = await writeSubagentSession(dir, '--main-cwd--', D_REAL, {
+    const saD = await writeSubagentSession(dir, MAIN, D_REAL, {
       rootSessionId: MAIN,
       slug: 'sub-d',
     })
-    await writeRecordManifest(dir, '--main-cwd--', 'sa-record-D', {
+    await writeRecordManifest(dir, MAIN, 'sa-record-D', {
       rootSessionId: MAIN,
       agentName: 'worker',
       sessionFile: saD,
@@ -490,23 +490,23 @@ describe('buildExecutionTree - fixture', () => {
   it('TC-m3b-mf2-subtree：buildExecutionTree(subagentId) 切该 subagent 子树（MF-2，§5.5）', async () => {
     await writeMainSession(dir, '--main-cwd--', MAIN)
     // A（顶层）+ X（顶层，A 的兄弟，不应进 A 的子树）
-    const saA = await writeSubagentSession(dir, '--main-cwd--', A_REAL, {
+    const saA = await writeSubagentSession(dir, MAIN, A_REAL, {
       rootSessionId: MAIN,
       slug: 'sub-a',
     })
     const recAId = 'sa-record-A'
-    await writeRecordManifest(dir, '--main-cwd--', recAId, {
+    await writeRecordManifest(dir, MAIN, recAId, {
       rootSessionId: MAIN,
       agentName: 'explorer',
       sessionFile: saA,
       status: 'completed',
       parentRecordId: undefined,
     })
-    const saX = await writeSubagentSession(dir, '--main-cwd--', X_REAL, {
+    const saX = await writeSubagentSession(dir, MAIN, X_REAL, {
       rootSessionId: MAIN,
       slug: 'sub-x',
     })
-    await writeRecordManifest(dir, '--main-cwd--', 'sa-record-X', {
+    await writeRecordManifest(dir, MAIN, 'sa-record-X', {
       rootSessionId: MAIN,
       agentName: 'explorer',
       sessionFile: saX,
@@ -514,23 +514,23 @@ describe('buildExecutionTree - fixture', () => {
       parentRecordId: undefined,
     })
     // B（A 的后代），C（B 的后代）
-    const saB = await writeSubagentSession(dir, '--main-cwd--', B_REAL, {
+    const saB = await writeSubagentSession(dir, MAIN, B_REAL, {
       rootSessionId: MAIN,
       slug: 'sub-b',
     })
     const recBId = 'sa-record-B'
-    await writeRecordManifest(dir, '--main-cwd--', recBId, {
+    await writeRecordManifest(dir, MAIN, recBId, {
       rootSessionId: MAIN,
       agentName: 'worker',
       sessionFile: saB,
       status: 'completed',
       parentRecordId: recAId,
     })
-    const saC = await writeSubagentSession(dir, '--main-cwd--', C_REAL, {
+    const saC = await writeSubagentSession(dir, MAIN, C_REAL, {
       rootSessionId: MAIN,
       slug: 'sub-c',
     })
-    await writeRecordManifest(dir, '--main-cwd--', 'sa-record-C', {
+    await writeRecordManifest(dir, MAIN, 'sa-record-C', {
       rootSessionId: MAIN,
       agentName: 'worker',
       sessionFile: saC,
@@ -565,13 +565,10 @@ describe('buildExecutionTree - fixture', () => {
     const mainPath = await writeMainSession(dir, '--main-cwd--', MAIN)
     // main 的 v2 注册条目 → record 流 → call session B
     const sbB = join(
-      dir,
-      'subagents',
-      '--main-cwd--',
-      'sessions',
+      resolveStoreSubagentSessionsDir(dir, MAIN),
       `2026-08-07T16-49-48-393Z_${B_REAL}.jsonl`,
     )
-    await mkdir(join(dir, 'subagents', '--main-cwd--', 'sessions'), { recursive: true })
+    await mkdir(resolveStoreSubagentSessionsDir(dir, MAIN), { recursive: true })
     await writeFile(sbB, JSON.stringify({ type: 'session', id: B_REAL, cwd: '/proj/wf' }) + '\n')
     await writeWfV2Run(dir, '--main-cwd--', mainPath, MAIN, RUN_A, [sbB])
 
@@ -612,11 +609,11 @@ describe('buildExecutionTree - fixture', () => {
     const recIdOf = (n: number): string => `sa-chain-${String(n).padStart(2, '0')}`
     let prevRecId: string | undefined
     for (let i = 1; i <= CHAIN_RECORDS; i++) {
-      const saPath = await writeSubagentSession(dir, '--main-cwd--', sidOf(i), {
+      const saPath = await writeSubagentSession(dir, MAIN, sidOf(i), {
         rootSessionId: MAIN,
         slug: `chain-${i}`,
       })
-      await writeRecordManifest(dir, '--main-cwd--', recIdOf(i), {
+      await writeRecordManifest(dir, MAIN, recIdOf(i), {
         rootSessionId: MAIN,
         agentName: 'explorer',
         sessionFile: saPath,
@@ -644,11 +641,11 @@ describe('buildExecutionTree - fixture', () => {
   it('TC-m3b-bfs-spread：旧机制嵌套形态 rootSessionId=父 session id，BFS 扩散收集不丢 record（MF-5）', async () => {
     await writeMainSession(dir, '--main-cwd--', MAIN)
     // A：顶层（rootSessionId=MAIN，无 parentRecordId——旧机制）
-    const saA = await writeSubagentSession(dir, '--main-cwd--', A_REAL, {
+    const saA = await writeSubagentSession(dir, MAIN, A_REAL, {
       rootSessionId: MAIN,
       slug: 'a',
     })
-    await writeRecordManifest(dir, '--main-cwd--', 'sa-A', {
+    await writeRecordManifest(dir, MAIN, 'sa-A', {
       rootSessionId: MAIN,
       agentName: 'explorer',
       sessionFile: saA,
@@ -658,7 +655,7 @@ describe('buildExecutionTree - fixture', () => {
       rootSessionId: A_REAL,
       slug: 'b',
     })
-    await writeRecordManifest(dir, '--main-cwd--', 'sa-B', {
+    await writeRecordManifest(dir, MAIN, 'sa-B', {
       rootSessionId: A_REAL,
       agentName: 'explorer',
       sessionFile: saB,
@@ -686,13 +683,15 @@ describe('buildExecutionTree - fixture', () => {
 // ============================================================
 
 describe('buildExecutionTree - 真实形态数据守卫（合成）', () => {
-  let dir: string
+  let dataDir: string
+  let dir: string // agentDir = <dataDir>/agent（生产拓扑复刻）
 
   beforeEach(async () => {
-    dir = await makeAgentDir()
+    dataDir = await makeAgentDir()
+    dir = join(dataDir, 'agent')
   })
   afterEach(async () => {
-    await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    await rm(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
   })
 
   it('TC-m3b-real-data-guard：真实形态布局（时间戳文件名/新旧机制混合/孤儿 manifest/坏 manifest/外来家族）解析不抛错，树非空且结构自洽', async () => {
@@ -712,12 +711,12 @@ describe('buildExecutionTree - 真实形态数据守卫（合成）', () => {
     // A：顶层 subagent（identity 尾行走数据源 ② 读路径，无 parentRecordId → 顶层挂 main）
     const saA = await writeSubagentSession(
       dir,
-      CWD,
+      MAIN,
       A_REAL,
       { rootSessionId: MAIN, slug: 'guard-a' },
       prefixed(A_REAL),
     )
-    await writeRecordManifest(dir, CWD, 'rec-ga', {
+    await writeRecordManifest(dir, MAIN, 'rec-ga', {
       rootSessionId: MAIN,
       agentName: 'explorer',
       sessionFile: saA,
@@ -727,12 +726,12 @@ describe('buildExecutionTree - 真实形态数据守卫（合成）', () => {
     // B：A 的嵌套后代（manifest.parentRecordId 精确链，新机制）
     const saB = await writeSubagentSession(
       dir,
-      CWD,
+      MAIN,
       B_REAL,
       { rootSessionId: MAIN, slug: 'guard-b' },
       prefixed(B_REAL),
     )
-    await writeRecordManifest(dir, CWD, 'rec-gb', {
+    await writeRecordManifest(dir, MAIN, 'rec-gb', {
       rootSessionId: MAIN,
       agentName: 'worker',
       sessionFile: saB,
@@ -743,12 +742,12 @@ describe('buildExecutionTree - 真实形态数据守卫（合成）', () => {
     // C：旧机制顶层 subagent（manifest/identity 均无 parentRecordId → flat 挂 main）
     const saC = await writeSubagentSession(
       dir,
-      CWD,
+      MAIN,
       C_REAL,
       { rootSessionId: MAIN, slug: 'guard-c' },
       prefixed(C_REAL),
     )
-    await writeRecordManifest(dir, CWD, 'rec-gc', {
+    await writeRecordManifest(dir, MAIN, 'rec-gc', {
       rootSessionId: MAIN,
       agentName: 'explorer',
       sessionFile: saC,
@@ -756,24 +755,24 @@ describe('buildExecutionTree - 真实形态数据守卫（合成）', () => {
       status: 'completed',
     })
     // D：孤儿 manifest（sessionFile 指向已被 GC 的不存在文件——manifest 残留形态）
-    await writeRecordManifest(dir, CWD, 'rec-gd', {
+    await writeRecordManifest(dir, MAIN, 'rec-gd', {
       rootSessionId: MAIN,
       agentName: 'worker',
-      sessionFile: join(dir, 'subagents', CWD, 'sessions', prefixed(D_REAL)),
+      sessionFile: join(resolveStoreSubagentSessionsDir(dir, MAIN), prefixed(D_REAL)),
       status: 'completed',
     })
     // 坏 manifest（JSON 损坏，listRecordManifests 容错跳过不中断）
-    await mkdir(join(dir, 'subagents', CWD, 'records'), { recursive: true })
-    await writeFile(join(dir, 'subagents', CWD, 'records', 'broken.json'), '{oops')
+    await mkdir(resolveStoreSubagentRecordsDir(dir, MAIN), { recursive: true })
+    await writeFile(join(resolveStoreSubagentRecordsDir(dir, MAIN), 'broken.json'), '{oops')
     // 外来家族 X：同 agentDir 内其他 main（OTHER_MAIN）的 subagent，不应泄漏进 MAIN 的树
     const saX = await writeSubagentSession(
       dir,
-      CWD,
+      OTHER_MAIN,
       X_REAL,
       { rootSessionId: OTHER_MAIN, slug: 'foreign-x' },
       prefixed(X_REAL),
     )
-    await writeRecordManifest(dir, CWD, 'rec-gx', {
+    await writeRecordManifest(dir, MAIN, 'rec-gx', {
       rootSessionId: OTHER_MAIN,
       agentName: 'explorer',
       sessionFile: saX,
@@ -795,7 +794,7 @@ describe('buildExecutionTree - 真实形态数据守卫（合成）', () => {
     // 独有覆盖面，合成化后保留）
     const nodeD = findNode(tree.root, 'subagent', D_REAL)
     expect(nodeD).toBeDefined()
-    expect(nodeD!.sessionFile).toBe(join(dir, 'subagents', CWD, 'sessions', prefixed(D_REAL)))
+    expect(nodeD!.sessionFile).toBe(join(resolveStoreSubagentSessionsDir(dir, MAIN), prefixed(D_REAL)))
     // 树结构自洽（ExecutionTreeNode 契约，与具体数据形态无关）：DFS 实际节点数 ===
     // totalNodes；子节点 depth = 父 depth + 1；全树 rootSessionId 共享同一顶层 main
     let count = 0

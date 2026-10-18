@@ -21,6 +21,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ManifestStore } from "../persistence/manifest-store.ts";
 import { getSubagentRecordsDir, getSubagentSessionDir } from "../assembly/path-encoding.ts";
+
+/** [session-store-layout-inversion] 目录分区键 fixture（过 shared assertPiSessionId 合法性）。 */
+const PARTITION_SID = "sid-legacy-compat";
 import { RecordStore } from "../persistence/record-store.ts";
 import { writeRecordBinding } from "../persistence/state-marker.ts";
 import type { ExecutionRecord } from "../domain/record-model.ts";
@@ -107,8 +110,8 @@ describe("[U8/S8] 旧格式磁盘组只读兼容——恒 idle + stopReason 桥�
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "core-legacy-compat-"));
-    sessionsDir = getSubagentSessionDir(tmpDir, tmpDir);
-    manifestDir = getSubagentRecordsDir(tmpDir, tmpDir);
+    sessionsDir = getSubagentSessionDir(PARTITION_SID, tmpDir);
+    manifestDir = getSubagentRecordsDir(PARTITION_SID, tmpDir);
     fs.mkdirSync(sessionsDir, { recursive: true });
     fs.mkdirSync(manifestDir, { recursive: true });
   });
@@ -161,8 +164,8 @@ describe("[U8] manifest 双写映射 + 双写回读 + engine 域下行", () => {
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "core-manifest-mapping-"));
-    sessionsDir = getSubagentSessionDir(tmpDir, tmpDir);
-    manifestDir = getSubagentRecordsDir(tmpDir, tmpDir);
+    sessionsDir = getSubagentSessionDir(PARTITION_SID, tmpDir);
+    manifestDir = getSubagentRecordsDir(PARTITION_SID, tmpDir);
     fs.mkdirSync(sessionsDir, { recursive: true });
     fs.mkdirSync(manifestDir, { recursive: true });
   });

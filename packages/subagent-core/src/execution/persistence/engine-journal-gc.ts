@@ -32,7 +32,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 
-import { getSessionStoreDir } from "@taiji/shared/paths";
+import { getSessionStoreDir, isPiSessionId } from "@taiji/shared/paths";
 
 import { getEngineDataDir } from "../engine/common/data-dir.ts";
 import { cleanupExpiredJournals } from "../engine/common/pool-manager.ts";
@@ -73,7 +73,7 @@ export function cleanupExpiredEngineJournals(dataDir?: string): void {
  * getSubagentSessionDir 的 `<root>/<rootSessionId>/subagents/sessions/`，
  * session-store-layout-inversion D2/D3 换根——.patch 属 subagent 文件族随会话树走；
  * 引擎 journal 段不迁移，见文件头豁免登记）。一级目录名须是合法 sessionId 形态
- * （isPiSessionIdShape 同域正则——非会话目录跳过，防手放目录被误扫）。逐文件逐目录
+ * （isPiSessionId 同域判定——非会话目录跳过，防手放目录被误扫）。逐文件逐目录
  * best-effort（单文件失败静默——文件可能已被删除；存储树根不存在 = 从未有过
  * 会话，合法空态）。不递归 walk、不触碰非 .patch 文件——级联领地（.jsonl /
  * sidecar / manifest / .events）的回收权威在 runtime session-content-cascade。
@@ -87,7 +87,7 @@ function cleanupOrphanWorktreePatches(storeRoot: string, ttlMs: number): void {
     return;
   }
   for (const ent of sessionDirs) {
-    if (!ent.isDirectory() || !isPiSessionIdShape(ent.name)) continue;
+    if (!ent.isDirectory() || !isPiSessionId(ent.name)) continue;
     const sessionsDir = path.join(storeRoot, ent.name, "subagents", "sessions");
     let names: string[];
     try {
@@ -106,16 +106,6 @@ function cleanupOrphanWorktreePatches(storeRoot: string, ttlMs: number): void {
       }
     }
   }
-}
-
-/**
- * 一级目录名的 sessionId 形态判定（与 shared paths assertPiSessionId 同域正则：
- * 首尾字母数字，中间允许 [A-Za-z0-9._-]）。shared 侧正则为模块私有不可 import——
- * 字面量一致性由既有三方对拍机检（check-artifact-dir-formula-sync.mjs 的
- * shared ↔ runtime 正则断言）与本文件同式字面量共同守护。
- */
-function isPiSessionIdShape(name: string): boolean {
-  return /^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/.test(name);
 }
 
 /**

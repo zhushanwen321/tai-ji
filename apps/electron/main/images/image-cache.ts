@@ -10,9 +10,9 @@
  * - LRU 驱逐（renderer 内存分区）永不调用本模块的删除 API——驱逐只释放内存，重进
  *   hydrate 重新编排时 hash 命中或从 base64 重建，磁盘层无感知；
  * - 三条文件系统级清理通道（判据全部在文件系统层，不依赖跨进程内存态）：
- *   ① session 删除级联（deleteSessionImageCache；runtime 侧因包边界无法跨包 import，
- *      按同语义内联接线 session-lifecycle.ts purgeSessionSidecars——其注释指认本文件为
- *      SSOT；本导出为 main 侧形态保留 + 测试锚定）；
+ *   ① session 删除：域 3 随 session 存储树整树软删（session-content-cascade
+ *      trashSessionTree），本模块无删除级联调用（runtime 侧删除级联接线已随整树软删
+ *      退役）；deleteSessionImageCache 为 main 侧保留形态、仅测试锚定；
  *   ② 启动孤儿扫描（scanOrphanImageCaches：遍历 session 存储树一级目录反解 sid，本域
  *      cache 子目录 mtime 超 30 天且 sessionId 在 pi sessions 目录无对应 session 文件 →
  *      判死删该域子目录——只删 image-cache/ 域目录，不触树内其他域；非合法 sessionId
@@ -170,7 +170,10 @@ export function writeImagesNewestFirst(
   return { results, quotaFull }
 }
 
-/** session 删除级联：删该 session 的 cache 子目录（best-effort，不存在 = 幂等 no-op）。 */
+/**
+ * main 侧删除 API（保留形态，仅测试锚定）：删该 session 的 cache 子目录（幂等，
+ * 不存在 = no-op）。生产删除链该段已退役——域 3 随整树软删（见文件头清理通道①）。
+ */
 export function deleteSessionImageCache(sessionId: string, dirs: ImageCacheDirs = {}): void {
   rmSync(getImageCacheDir(sessionId, dirs.dataDir), { recursive: true, force: true })
 }
@@ -387,7 +390,8 @@ export function runImageCacheStartupSweep(dirs: ImageCacheDirs = {}): void {
 }
 
 /**
- * 从 session 文件路径派生 sessionId（runtime 删除链接线用）。
+ * 从 session 文件路径派生 sessionId（main 侧保留形态，仅测试锚定——原 runtime
+ * 删除链接线随整树软删退役；测试经它锁定派生形态）。
  *
  * 真实文件名形态 `<ISO时间戳>_<uuid>.jsonl`（sidecar `<同前缀>.jsonl.<suffix>`），
  * sessionId = 末段 `_` 后的 uuid 段（=== 首行 header id，即 renderer 写 cache 目录所用

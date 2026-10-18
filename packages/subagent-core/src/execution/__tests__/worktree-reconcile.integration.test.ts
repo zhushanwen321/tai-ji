@@ -18,7 +18,7 @@ import * as path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { encodeCwd } from "@taiji/shared/paths";
+import { encodeCwd, getSessionSubagentSessionsDir } from "@taiji/shared/paths";
 import { WorktreeRegistry } from "../worktree/worktree-registry.ts";
 import { WorktreeManager } from "../worktree/worktree-manager.ts";
 
@@ -47,6 +47,10 @@ describe("WorktreeManager.scan 物理面对账（D5b）", { timeout: 30_000 }, (
 		outerDir = fs.mkdtempSync(path.join(ORIG_TMPDIR, "wt-reconcile-it-"));
 		// 物理面扫描根重定向：os.tmpdir() 跟随 TMPDIR env（darwin/linux 均如此）
 		process.env.TMPDIR = outerDir;
+		// [session-store-layout-inversion] 对账活信号根 = session 存储树
+		// getSessionStoreDir()（env dataDir）——重定向进 outerDir 内，构造
+		// WorktreeManager 前置（reconciler 构造期解析 storeRoot）
+		process.env.TAIJI_AGENT_DATA_DIR = path.join(outerDir, "engine-data");
 		baseDir = outerDir;
 
 		agentDir = path.join(baseDir, "agent");
@@ -66,6 +70,7 @@ describe("WorktreeManager.scan 物理面对账（D5b）", { timeout: 30_000 }, (
 
 	afterEach(() => {
 		process.env.TMPDIR = ORIG_TMPDIR;
+		delete process.env.TAIJI_AGENT_DATA_DIR;
 		fs.rmSync(outerDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
 	});
 
@@ -76,9 +81,10 @@ describe("WorktreeManager.scan 物理面对账（D5b）", { timeout: 30_000 }, (
 		return checkout;
 	}
 
-	/** 在 <agentDir>/subagents/<enc>/sessions/ 下写一个 .alive marker。 */
+	/** 在 <storeRoot>/<sid>/subagents/sessions/ 下写一个 .alive marker
+	 *  （[session-store-layout-inversion] 活信号随 subagent 文族落 session 存储树）。 */
 	function writeAliveMarker(sessionId: string, pid: number): void {
-		const sessions = path.join(agentDir, "subagents", enc, "sessions");
+		const sessions = getSessionSubagentSessionsDir(sessionId);
 		fs.mkdirSync(sessions, { recursive: true });
 		fs.writeFileSync(
 			path.join(sessions, `${sessionId}.jsonl.alive`),

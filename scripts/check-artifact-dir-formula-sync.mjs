@@ -53,6 +53,15 @@
  * 内联正则 ↔ shared PI_SESSION_ID_PATTERN。任一漂移 = 导出 md 落到树外错误位置（随会话删除
  * 不回收、布局规约破坏）。
  *
+ * 【第七组断言（域 9）】session-reader discovery 存储树公式：`extensions/universal/
+ * session-reader/src/discovery/roots.ts` 自述「extension 不 import shared，常量同字面
+ * 镜像」的读侧存储树推导（subagent 根 / records manifest 扫描根）。对拍三字面量 ↔ shared：
+ * 树根段常量 SESSION_STORE_DIR_SEGMENT ↔ shared 同名常量；subagent 域段常量
+ * SUBAGENTS_DIRNAME ↔ shared `getSessionSubagentsDir` 的 join 段；分区名校验正则
+ * PI_SESSION_ID_PATTERN ↔ shared 同名常量。任一漂移 = session-reader 读侧与写侧
+ * （subagent-core 经 shared 函数族落盘）错位——subagent 会话/记录发现为空（agent 面
+ * family/find/result 静默丢数据）。
+ *
  * 形态照搬 scripts/check-capability-allowlist-sync.mjs（读源文件文本、零散文解析、
  * 提取失败一律 fail、`--self-test` 纯函数自检）。
  *
@@ -124,6 +133,20 @@ export const SHARED_VIEW_FN = 'getSessionViewPath'
 export const SR_TOOL_HANDLER_SRC = SESSION_READER_TOOL_HANDLER_SRC
 /** 镜像侧导出函数块锚点（落盘段所在函数）。 */
 export const SR_VIEW_FN_ANCHOR = 'async function doExport('
+
+// ── 第七组对拍（域 9）符号 ──────────────────────────────────────────
+/** shared 侧 subagent 域函数（域段对拍权威）。 */
+export const SHARED_SUBAGENTS_FN = 'getSessionSubagentsDir'
+/** 镜像侧源文件（session-reader discovery roots）。 */
+export const SR_DISCOVERY_ROOTS_SRC = join(
+  ROOT, 'extensions', 'universal', 'session-reader', 'src', 'discovery', 'roots.ts',
+)
+/** 镜像侧树根段常量名（与 shared 同名）。 */
+export const SR_DISCOVERY_STORE_SEGMENT_CONST = 'SESSION_STORE_DIR_SEGMENT'
+/** 镜像侧 subagent 域段常量名。 */
+export const SR_DISCOVERY_SUBAGENTS_CONST = 'SUBAGENTS_DIRNAME'
+/** 镜像侧分区名校验正则常量名（与 shared 同名）。 */
+export const SR_DISCOVERY_PATTERN_CONST = 'PI_SESSION_ID_PATTERN'
 
 /** 函数体截取锚点（含 `export function` 前缀，避免匹配到调用点）。 */
 const SHARED_ANCHOR = `export function ${SHARED_FN}`
@@ -403,12 +426,44 @@ function other() {}`
   assert(extractViewSessionIdRegex('if (!/^x$/.test(sessionId))').error !== undefined, '镜像正则 .test 目标不符报 error')
 }
 
+/** 第七组（域 9）纯函数自检：session-reader discovery 常量镜像三字面量对拍提取。 */
+function selfTestSessionReaderDiscovery(assert) {
+  const sharedText = `export const SESSION_STORE_DIR_SEGMENT = 'ext-sessions'
+
+const PI_SESSION_ID_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/
+
+export function getSessionSubagentsDir(sessionId: string, dataDir?: string): string {
+  assertPiSessionId(sessionId)
+  return join(getSessionStoreDir(dataDir), sessionId, 'subagents')
+}`
+
+  // 镜像侧形态（roots.ts 常量声明：树根段 / subagent 域段 / 分区名正则）
+  const rootsText = `const SESSIONS_DIRNAME = 'sessions'
+const SUBAGENTS_DIRNAME = 'subagents'
+
+const SESSION_STORE_DIR_SEGMENT = 'ext-sessions'
+
+const PI_SESSION_ID_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/`
+
+  const sharedSubagentsBlock = extractFunctionBlock(sharedText, `export function ${SHARED_SUBAGENTS_FN}`)
+  assert(extractJoinSegment(sharedSubagentsBlock.text).value === 'subagents', 'shared subagent 域段提取')
+  assert(extractConstLiteral(rootsText, SR_DISCOVERY_STORE_SEGMENT_CONST).value === 'ext-sessions', '镜像 discovery 树根段常量提取')
+  assert(extractConstLiteral(rootsText, SR_DISCOVERY_SUBAGENTS_CONST).value === 'subagents', '镜像 discovery subagent 域段常量提取')
+  assert(
+    extractConstRegex(rootsText, SR_DISCOVERY_PATTERN_CONST).value ===
+      extractConstRegex(sharedText, SHARED_PATTERN_CONST).value,
+    '域 9 两侧 sessionId 正则一致（样例）',
+  )
+  assert(extractConstLiteral(rootsText, 'MISSING_CONST').error !== undefined, '镜像 discovery 常量缺失报 error')
+}
+
 function selfTestCases(assert) {
   selfTestFormulaPairing(assert)
   selfTestTreePairing(assert)
   selfTestExtractionErrors(assert)
   selfTestBaseToolEnhanceRegistry(assert)
   selfTestSessionReaderView(assert)
+  selfTestSessionReaderDiscovery(assert)
 }
 
 if (process.argv.includes('--self-test')) runSelfTest('artifact-dir-formula-sync', selfTestCases)
@@ -684,13 +739,66 @@ function compareSessionReaderView(sharedText, handlerText, sharedStoreSegment, s
   }
 }
 
+/**
+ * ⑦ session-reader discovery 存储树公式对拍（域 9）：roots.ts 树根段 / subagent 域段 /
+ * 分区名校验正则三字面量与 shared 逐字一致——session-reader 读侧与写侧（subagent-core
+ * 经 shared 函数族落盘）两侧各有一份推导，漂移即 subagent 会话/记录发现为空。
+ */
+function compareSessionReaderDiscovery(sharedText, rootsText, sharedStoreSegment, sharedRegex) {
+  const sharedSubagentsBlock = extractFunctionBlock(sharedText, `export function ${SHARED_SUBAGENTS_FN}`)
+  if (sharedSubagentsBlock.error) fail(`shared ${SHARED_SUBAGENTS_FN} 提取失败: ${sharedSubagentsBlock.error}`)
+  exitIfFailed('域 9 discovery 公式对拍：函数块提取失败，按上方 ✗ 修复后重跑')
+
+  const extracted = {
+    srStoreSegment: extractConstLiteral(rootsText, SR_DISCOVERY_STORE_SEGMENT_CONST),
+    srSubagentsSegment: extractConstLiteral(rootsText, SR_DISCOVERY_SUBAGENTS_CONST),
+    sharedSubagentsSegment: extractJoinSegment(sharedSubagentsBlock.text),
+    srRegex: extractConstRegex(rootsText, SR_DISCOVERY_PATTERN_CONST),
+  }
+  for (const [label, r] of [
+    [`镜像树根段常量 ${SR_DISCOVERY_STORE_SEGMENT_CONST}`, extracted.srStoreSegment],
+    [`镜像域段常量 ${SR_DISCOVERY_SUBAGENTS_CONST}`, extracted.srSubagentsSegment],
+    [`shared ${SHARED_SUBAGENTS_FN} join 域段`, extracted.sharedSubagentsSegment],
+    [`镜像分区名校验正则 ${SR_DISCOVERY_PATTERN_CONST}`, extracted.srRegex],
+  ]) {
+    if (r.error) fail(`${label} 提取失败: ${r.error}`)
+  }
+  exitIfFailed('域 9 discovery 公式对拍：字面量提取失败，按上方 ✗ 修复后重跑')
+
+  if (extracted.srStoreSegment.value === sharedStoreSegment) {
+    ok(`域 9 存储树根段一致（'${extracted.srStoreSegment.value}'，shared ↔ session-reader discovery 镜像）`)
+  } else {
+    fail(
+      `域 9 存储树根段漂移: shared='${sharedStoreSegment}' vs 镜像='${extracted.srStoreSegment.value}'` +
+        `——恢复动作：人工核对 ${SHARED_PATHS_SRC} 的 ${STORE_SEGMENT_CONST} 与 ${SR_DISCOVERY_ROOTS_SRC} 的 ${SR_DISCOVERY_STORE_SEGMENT_CONST}`,
+    )
+  }
+  if (extracted.srSubagentsSegment.value === extracted.sharedSubagentsSegment.value) {
+    ok(`域 9 subagent 域段一致（'${extracted.srSubagentsSegment.value}'，shared ${SHARED_SUBAGENTS_FN} ↔ 镜像常量）`)
+  } else {
+    fail(
+      `域 9 subagent 域段漂移: shared='${extracted.sharedSubagentsSegment.value}' vs 镜像='${extracted.srSubagentsSegment.value}'` +
+        `——恢复动作：人工核对 ${SHARED_PATHS_SRC} 的 ${SHARED_SUBAGENTS_FN} 与 ${SR_DISCOVERY_ROOTS_SRC} 的 ${SR_DISCOVERY_SUBAGENTS_CONST}`,
+    )
+  }
+  if (extracted.srRegex.value === sharedRegex) {
+    ok(`域 9 sessionId 校验正则一致（${extracted.srRegex.value}）`)
+  } else {
+    fail(
+      `域 9 sessionId 校验正则漂移: shared=${sharedRegex} vs 镜像=${extracted.srRegex.value}` +
+        `——恢复动作：人工核对 ${SHARED_PATHS_SRC} 的 ${SHARED_PATTERN_CONST} 与 ${SR_DISCOVERY_ROOTS_SRC} 的 ${SR_DISCOVERY_PATTERN_CONST}`,
+    )
+  }
+}
+
 function main() {
-  const [sharedText, mirrorText, runtimeText, registryText, handlerText] = readSourcesOrFail([
+  const [sharedText, mirrorText, runtimeText, registryText, handlerText, rootsText] = readSourcesOrFail([
     [SHARED_PATHS_SRC, 'shared paths 源文件'],
     [SYSTEM_PROMPT_SRC, 'system-prompt 源文件'],
     [RUNTIME_PI_PATHS_SRC, 'runtime pi-paths 源文件'],
     [BTE_REGISTRY_SRC, 'base-tool-enhance registry 源文件'],
     [SR_TOOL_HANDLER_SRC, 'session-reader tool-handler 源文件'],
+    [SR_DISCOVERY_ROOTS_SRC, 'session-reader discovery roots 源文件'],
   ])
 
   const { sharedBlock, mirrorBlock } = extractFormulaBlocksOrFail(sharedText, mirrorText)
@@ -703,9 +811,10 @@ function main() {
   compareTreeSegments(sharedText, runtimeText, lits.sharedStoreSegment.value)
   compareBaseToolEnhanceRegistry(sharedText, registryText, lits.sharedStoreSegment.value, lits.sharedRegex.value)
   compareSessionReaderView(sharedText, handlerText, lits.sharedStoreSegment.value, lits.sharedRegex.value)
+  compareSessionReaderDiscovery(sharedText, rootsText, lits.sharedStoreSegment.value, lits.sharedRegex.value)
 
   guardExit(
-    '✓ 产物目录公式对拍通过（域段 + 存储树根段 + sessionId 校验正则三方 + pi 会话树段 + 域 5 registry 镜像 + 域 6 session-view 镜像逐字一致）',
+    '✓ 产物目录公式对拍通过（域段 + 存储树根段 + sessionId 校验正则三方 + pi 会话树段 + 域 5 registry 镜像 + 域 6 session-view 镜像 + 域 9 discovery 镜像逐字一致）',
     '产物目录公式对拍未通过，按上方 ✗ 明细修复后重跑（每条报错自带恢复动作）',
   )
 }

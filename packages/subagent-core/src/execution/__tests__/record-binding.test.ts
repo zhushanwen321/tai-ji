@@ -69,6 +69,13 @@ const IDENTITY_ENV_KEYS = [
 
 const STARTED_AT = 1_700_000_000_000;
 
+/**
+ * [session-store-layout-inversion] 目录分区键 fixture（新布局
+ * `<root>/<rootSid>/subagents/`；取值 = service describes 的 initSession sid，
+ * 纯 store describe 经显式 getter 注入目录、sid 只须过 shared 合法性校验）。
+ */
+const PARTITION_SID = "root-session";
+
 /** engine-CLI 化子 session 文件 fixture：{session, message} 条目族，无身份 entry。 */
 function writePlainChildSession(sessionsDir: string): string {
   const file = path.join(sessionsDir, "20260910T000000-000_sa-bind-1.jsonl");
@@ -210,8 +217,8 @@ describe("[UF-1] record-store 据事件流折叠重建（跨重启空内存场�
 
   beforeEach(() => {
     agentDir = fs.mkdtempSync(path.join(os.tmpdir(), "record-binding-store-"));
-    sessionsDir = getSubagentSessionDir(agentDir, agentDir);
-    recordsDir = getSubagentRecordsDir(agentDir, agentDir);
+    sessionsDir = getSubagentSessionDir(PARTITION_SID, agentDir);
+    recordsDir = getSubagentRecordsDir(PARTITION_SID, agentDir);
     fs.mkdirSync(sessionsDir, { recursive: true });
   });
 
@@ -422,8 +429,8 @@ describe("[H2 S3] record-store 据事件流重建 origin（D1 投影过滤端到
 
   beforeEach(() => {
     agentDir = fs.mkdtempSync(path.join(os.tmpdir(), "record-binding-origin-store-"));
-    sessionsDir = getSubagentSessionDir(agentDir, agentDir);
-    recordsDir = getSubagentRecordsDir(agentDir, agentDir);
+    sessionsDir = getSubagentSessionDir(PARTITION_SID, agentDir);
+    recordsDir = getSubagentRecordsDir(PARTITION_SID, agentDir);
     fs.mkdirSync(sessionsDir, { recursive: true });
   });
 
@@ -548,8 +555,11 @@ describe("[W0 / D1] binding 载荷 stepIndex（生产构造点）与折叠重建
   beforeEach(() => {
     for (const k of IDENTITY_ENV_KEYS) delete process.env[k];
     agentDir = fs.mkdtempSync(path.join(os.tmpdir(), "record-binding-stepidx-"));
-    sessionsDir = getSubagentSessionDir(agentDir, agentDir);
-    recordsDir = getSubagentRecordsDir(agentDir, agentDir);
+    // 生产 store 目录经 getSubagentSessionDir(resolveStoreRootSessionId())（env dataDir
+    // 兜底）解析——stubEnv 把写删目标收进本 mkdtemp 目录（自建自删红线）。
+    vi.stubEnv("TAIJI_AGENT_DATA_DIR", agentDir);
+    sessionsDir = getSubagentSessionDir(PARTITION_SID, agentDir);
+    recordsDir = getSubagentRecordsDir(PARTITION_SID, agentDir);
     fs.mkdirSync(sessionsDir, { recursive: true });
     clearEngines();
     registerFakePiEngine();
@@ -564,6 +574,7 @@ describe("[W0 / D1] binding 载荷 stepIndex（生产构造点）与折叠重建
     _resetLifecycleState();
     _resetCoreSpawnedChildrenMirrorForTest();
     fs.rmSync(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+    vi.unstubAllEnvs();
     for (const k of IDENTITY_ENV_KEYS) delete process.env[k];
   });
 
@@ -704,7 +715,10 @@ describe("[UF-1] SubagentService 集成：回填点绑定落盘 + 跨重启 mess
   beforeEach(() => {
     for (const k of IDENTITY_ENV_KEYS) delete process.env[k];
     agentDir = fs.mkdtempSync(path.join(os.tmpdir(), "record-binding-svc-"));
-    sessionsDir = getSubagentSessionDir(agentDir, agentDir);
+    // 生产 store 目录经 getSubagentSessionDir(resolveStoreRootSessionId())（env dataDir
+    // 兜底）解析——stubEnv 把写删目标收进本 mkdtemp 目录（自建自删红线）。
+    vi.stubEnv("TAIJI_AGENT_DATA_DIR", agentDir);
+    sessionsDir = getSubagentSessionDir(PARTITION_SID, agentDir);
     fs.mkdirSync(sessionsDir, { recursive: true });
     clearEngines();
     fake = registerFakePiEngine();
@@ -725,6 +739,7 @@ describe("[UF-1] SubagentService 集成：回填点绑定落盘 + 跨重启 mess
       readOnlyDir = undefined;
     }
     fs.rmSync(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+    vi.unstubAllEnvs();
     for (const k of IDENTITY_ENV_KEYS) delete process.env[k];
   });
 
@@ -786,7 +801,7 @@ describe("[UF-1] SubagentService 集成：回填点绑定落盘 + 跨重启 mess
     const file = writePlainChildSession(sessionsDir);
     // 身份源 = 事件流（[身份换源第二步]）：created 身份域 + bound 反查键（在途形态，
     // 与重启前「等待续聊」语义一致）。
-    seedTerminalRecord(getSubagentRecordsDir(agentDir, agentDir), {
+    seedTerminalRecord(getSubagentRecordsDir(PARTITION_SID, agentDir), {
       id: "sa-bind-1",
       startedAt: STARTED_AT,
       rootSessionId: "root-session",
@@ -813,7 +828,7 @@ describe("[UF-1] SubagentService 集成：回填点绑定落盘 + 跨重启 mess
   it("④ [U4 万物可续] 折叠终态（settled 收条）→ getRecordForAction 重建放行（终态单向语义随终态概念消亡）", async () => {
     const file = writePlainChildSession(sessionsDir);
     writeBindingFixture(file);
-    seedTerminalRecord(getSubagentRecordsDir(agentDir, agentDir), {
+    seedTerminalRecord(getSubagentRecordsDir(PARTITION_SID, agentDir), {
       id: "sa-bind-1",
       startedAt: STARTED_AT,
       rootSessionId: "root-session",

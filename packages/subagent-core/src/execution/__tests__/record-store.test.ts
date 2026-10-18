@@ -265,12 +265,14 @@ describe("RecordStore", () => {
       expect(found?.status).toBe("running"); // 内存 running 覆盖磁盘 idle（SP-2）
     });
 
-    it("[MF-3/S-20] 跨进程组合：子进程（worktree）写入 enc(ROOT) 的深层 record 被 ROOT store 重建，同 rootSessionId 全树可见、他树被排除", () => {
-      // MF-3 修复后：worktree 子进程把其子 record 的 session 文件写到统一 enc(ROOT cwd) 段，
-      // ROOT 进程的 store 扫同一目录重建（旧实现子进程写到 enc(checkout) 段，此处为空）。
-      const rootCwd = "/Users/x/root-proj";
-      const sessionsDir = getSubagentSessionDir(tmpDir, rootCwd);
-      const recordsDir = getSubagentRecordsDir(tmpDir, rootCwd);
+    it("[MF-3/S-20] 跨进程组合：子进程（worktree）写入 rootSessionId 树的深层 record 被 ROOT store 重建，同 rootSessionId 全树可见、他树被排除", () => {
+      // [session-store-layout-inversion] 分区键 = rootSessionId（旧 enc(cwd) 分区退役）：
+      // worktree 子进程把其子 record 的 session 文件写到同一 rootSessionId 树
+      // （`<root>/<rootSid>/subagents/sessions/`），ROOT 进程的 store 扫同一目录重建；
+      // 他树（不同 rootSessionId）record 靠 rootSessionFilter 排除（隔离不破坏）。
+      const rootSid = "root-main";
+      const sessionsDir = getSubagentSessionDir(rootSid, tmpDir);
+      const recordsDir = getSubagentRecordsDir(rootSid, tmpDir);
 
       // 父 record A（ROOT 自己 spawn，parentRecordId 缺省=顶层）+ 孙 record C（B 子进程写入，
       // 同 rootSessionId、parentRecordId=A、depth=2）+ 他树 record X（rootSessionId 不同）

@@ -1,9 +1,9 @@
 /**
- * 删会话级联删除产物目录单测（chat-html-support §6.7 D7 回收① / §8.2 S8⑥）。
+ * 删会话产物目录随整树回收单测（chat-html-support §6.7 D7 回收① / §8.2 S8⑥）。
  *
- * 锁定：`SessionLifecycle.delete`（scanned 分支 → `purgeSessionSidecars`）除既有
- * `cache/images` 级联外，同落点、同一幂等形态（`rmSync(recursive, force)`）删除
- * `<dataDir>/artifacts/<sessionId>`；重复删除幂等不抛。
+ * 锁定：`SessionLifecycle.delete`（scanned 分支）删除后，产物目录
+ * `<root>/<sessionId>/artifacts/`（session 存储树域 2，shared `getSessionArtifactsDir`
+ * 公式推导）随整树软删（trashSessionTree）不再存在于数据目录；重复删除幂等不抛。
  *
  * 形态对齐 `src/__tests__/session-file-utils-sidecar.test.ts` 的 delete 驱动 harness
  * （trash mock，真实驱动生命周期删链）。产物目录经 shared 公式推导落在 globalSetup
@@ -44,6 +44,11 @@ function makeLifecycle(sid: string, filePath: string, cwd: string): SessionLifec
   } as unknown as ILifecycleSessionOps
   const sessionStore = {
     trash: vi.fn(async () => {}),
+    // 整树软删 port（D5）：mock 以 rmSync 模拟「目录移入废纸篓」的盘上终态——本测试锚定
+    // 「删会话后产物目录不在盘上」；trash 落点语义（废纸篓可恢复）归 infra trash 通道自身覆盖。
+    trashDirectory: vi.fn(async (dirPath: string) => {
+      rmSync(dirPath, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    }),
     invalidateMetaCache: vi.fn(),
     invalidateScanCache: vi.fn(),
     refreshAll: vi.fn(),
@@ -93,15 +98,15 @@ async function withCascadeFixture(
   }
 }
 
-describe('SessionLifecycle.delete —— 产物目录级联删除（D7 回收①）', () => {
-  it('删会话 → `<dataDir>/artifacts/<sessionId>/` 消失（递归删子树）', async () => {
+describe('SessionLifecycle.delete —— 产物目录随整树回收', () => {
+  it('删会话 → 存储树内 `<root>/<sid>/artifacts/` 消失（随整树软删）', async () => {
     await withCascadeFixture(true, async ({ sid, artifactDir, lifecycle }) => {
       await lifecycle.delete(sid)
       expect(existsSync(artifactDir)).toBe(false)
     })
   })
 
-  it('重复删除幂等：产物目录已不存在时 delete 不抛（force 幂等形态）', async () => {
+  it('重复删除幂等：产物目录已不存在时 delete 不抛', async () => {
     await withCascadeFixture(false, async ({ sid, artifactDir, lifecycle }) => {
       await lifecycle.delete(sid) // 首次：目录本就不存在（幂等 no-op）
       await lifecycle.delete(sid) // 再次：仍不抛

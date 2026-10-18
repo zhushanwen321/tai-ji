@@ -49,9 +49,11 @@ import { makePi, type PiMock } from "./helpers/pi-mock.ts";
 
 
 /** [W1/D3] 读 record 事件文件全部事件行（journal 落点 = getSubagentRecordsDir——
- *  观察面独立于被测 store；usage-feed 集成块消费）。 */
-function scanRecordEventsFor(agentDir: string, id: string): Array<Record<string, unknown>> {
-  const recordsDir = getSubagentRecordsDir(agentDir, agentDir);
+ *  观察面独立于被测 store；usage-feed 集成块消费）。
+ *  [session-store-layout-inversion] 观察点与生产写侧同源：分区键 = initSession sid，
+ *  dataDir = 被测 env 注入值（= 生产 store 目录解析的同一取值）。 */
+function scanRecordEventsFor(dataDir: string | undefined, id: string): Array<Record<string, unknown>> {
+  const recordsDir = getSubagentRecordsDir("root-session", dataDir);
   try {
     const content = fs.readFileSync(path.join(recordsDir, `${id}.events`), "utf8");
     return content
@@ -1517,7 +1519,7 @@ describe("集成：live usage 喂入（H2 Gate B）——chat 轮 / pi one-shot 
     await vi.waitFor(() => expect(record.round).toBe(2));
     expect(record.totalTokens).toBe(190);
     await vi.waitFor(() => {
-      const idleEvents = scanRecordEventsFor(agentDir, record.id).filter(
+      const idleEvents = scanRecordEventsFor(process.env["TAIJI_AGENT_DATA_DIR"], record.id).filter(
         (e) => e.type === "record-round-idle",
       );
       expect(idleEvents.at(-1)).toMatchObject({ stopReason: "completed", totalTokens: 190 });
@@ -1542,7 +1544,7 @@ describe("集成：live usage 喂入（H2 Gate B）——chat 轮 / pi one-shot 
     // idle record close = 立即收口落账（同步完成）。[W1/D3] close 收口（markSettledOut
     // ——release + manifest 投影）不在 D3 事件表（record 未终局，message 可续）：
     // 统计终值的持久化锚 = 第二轮 round-idle 帧（200/2），close 本身零新增事件行。
-    const eventsAfterClose = scanRecordEventsFor(agentDir, record.id);
+    const eventsAfterClose = scanRecordEventsFor(process.env["TAIJI_AGENT_DATA_DIR"], record.id);
     expect(eventsAfterClose.filter((e) => e.type === "record-round-idle").at(-1)).toMatchObject({
       stopReason: "completed",
       totalTokens: 200,
@@ -1595,7 +1597,7 @@ describe("集成：live usage 喂入（H2 Gate B）——chat 轮 / pi one-shot 
     await vi.waitFor(() => expect(record!.status).toBe("idle"));
     await vi.waitFor(() => {
       expect(
-        scanRecordEventsFor(agentDir, record!.id).filter((e) => e.type === "record-round-idle").at(-1),
+        scanRecordEventsFor(process.env["TAIJI_AGENT_DATA_DIR"], record!.id).filter((e) => e.type === "record-round-idle").at(-1),
       ).toMatchObject({ stopReason: "completed", totalTokens: 42 });
     });
   });

@@ -35,7 +35,7 @@ export type {
  * servable 预检通道的 electronAPI 方法面（IPC 通道名 `localFile:servable`，
  * chat-html-support §6.9 D9）：内联预览容器 HtmlPreviewInline（经 deps `probeArtifact?`）
  * 挂载前预检（v16 唯一渲染面，ADR-0119）。准入前缀 = 会话产物子树
- * `<dataDir>/artifacts/**`（读/预检通道收窄面，非协议 handler 全量白名单）。
+ * `<dataDir>/ext-sessions/<sid>/artifacts/**`（读/预检通道收窄面，非协议 handler 全量白名单）。
  */
 export interface LocalFileServableChannel {
   /**
@@ -52,7 +52,7 @@ export interface LocalFileServableChannel {
  * 源码内容读取通道的 electronAPI 方法面（IPC 通道名 `localFile:read`）。
  *
  * 消费方 = 内联容器源码态（deps `readArtifact`）与 DetailPane 变更集/文件树产物源码读取
- * （useDetailPane `loadPreviewContent`）：产物目录 `<dataDir>/artifacts/<sessionId>` 在
+ * （useDetailPane `loadPreviewContent`）：产物目录 `<dataDir>/ext-sessions/<sessionId>/artifacts/` 在
  * session cwd 外（§6.7 D7），runtime `file.read` 的 cwd 守门不可达，故源码内容走本条与
  * servable 同源（同一谓词模块）的读取通道；准入前缀同为产物子树（收窄面）。
  */

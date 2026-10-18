@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { tmpdir } from 'node:os'
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync, existsSync, readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, dirname } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { Check } from 'typebox/value'
 
@@ -175,7 +175,9 @@ function writeZcodeManifest(
   saId: string,
   opts: { sessionRef?: Record<string, string>; omitEngineHandle?: boolean; engine?: string | true } = {},
 ): void {
-  const recordsDir = join(agentDir, 'subagents', 'proj-slug', 'records')
+  // [session-store-layout-inversion D6/单新根] records 读侧 = 存储树分区固定位置
+  // <root>/<rootSid>/subagents/records/（旧根 <agentDir>/subagents 不再读写）。
+  const recordsDir = join(dirname(agentDir), 'ext-sessions', ROOT_SESSION, 'subagents', 'records')
   mkdirSync(recordsDir, { recursive: true })
   const m: Record<string, unknown> = {
     id: saId,
@@ -260,7 +262,7 @@ function writeRootSessionFile(): void {
 
 /** pi manifest + pi subagent session 文件（pi 穿插断言用；engine 缺省 = pi 存量形态）。 */
 function writePiFixture(): void {
-  const subDir = join(agentDir, 'subagents', 'pi-slug', 'sessions')
+  const subDir = join(dirname(agentDir), 'ext-sessions', ROOT_SESSION, 'subagents', 'sessions')
   mkdirSync(subDir, { recursive: true })
   const piSession = join(subDir, '019e6c96-pi-sub-agent-00000000004a4.jsonl')
   writeFileSync(
@@ -272,7 +274,7 @@ function writePiFixture(): void {
     ].join('\n') + '\n',
     'utf8',
   )
-  const recordsDir = join(agentDir, 'subagents', 'pi-slug', 'records')
+  const recordsDir = join(dirname(agentDir), 'ext-sessions', ROOT_SESSION, 'subagents', 'records')
   mkdirSync(recordsDir, { recursive: true })
   writeFileSync(
     join(recordsDir, 'sa-pi-1.json'),

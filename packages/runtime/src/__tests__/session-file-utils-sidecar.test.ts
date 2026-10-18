@@ -387,6 +387,9 @@ describe('M4: purge 清单含 .model.json', () => {
       } as unknown as ILifecycleSessionOps
       const sessionStore = {
         trash: vi.fn(async () => {}),
+        // D5 整树软删通道（ISessionStore.trashDirectory）：本文件断言面 = sidecar 清理
+        // 家族，树删 no-op 即可（落盘效果由 cascade 测试族真跑覆盖）。
+        trashDirectory: vi.fn(async () => {}),
         invalidateMetaCache: vi.fn(),
         invalidateScanCache: vi.fn(),
         refreshAll: vi.fn(),

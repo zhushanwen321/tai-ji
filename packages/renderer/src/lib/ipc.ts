@@ -606,7 +606,7 @@ export function localFileServable(absPath: string): Promise<LocalFileServableRes
 /**
  * 读白名单内文件内容（DetailPane 「源码」态）。
  *
- * 产物目录 `<dataDir>/artifacts/<sessionId>` 在 session cwd 外（设计 §6.7 D7），runtime
+ * 产物目录 `<dataDir>/ext-sessions/<sessionId>/artifacts/` 在 session cwd 外（设计 §6.7 D7），runtime
  * `file.read` 的 cwd 守门不可达——源码内容经本条与 servable 预检同一白名单谓词的主进程
  * 通道读取。无 IPC（web/mock / 旧 preload 未暴露该通道）→ reject：调用方（源码态）
  * 回落既有 `file.read` cwd 通道（不静默空白）。

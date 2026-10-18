@@ -190,9 +190,9 @@ describe('computeLocalFilePrefixes: 输出契约与缺省行为', () => {
 })
 
 describe('readLocalFileContent: 源码态白名单读取通道（chat-html-support §8.2 S3）', () => {
-  // 产物目录是主场景：<dataDir>/artifacts/<sessionId>/ 在 session cwd 外、在白名单内
+  // 产物目录是主场景：<dataDir>/ext-sessions/<sessionId>/artifacts/ 在 session cwd 外、在白名单内
   const PREFIXES = packagedPrefixes()
-  const ARTIFACT = path.join(DATA_DIR, 'artifacts', 's1', 'report.html')
+  const ARTIFACT = path.join(DATA_DIR, 'ext-sessions', 's1', 'artifacts', 'report.html')
 
   it('白名单内文件 → ok + 内容 + truncated=false', () => {
     const reads: string[] = []

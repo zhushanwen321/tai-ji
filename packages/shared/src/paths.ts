@@ -215,15 +215,6 @@ export const SESSION_STORE_DIR_SEGMENT = 'ext-sessions'
 const PI_SESSION_ID_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/
 
 /**
- * sessionId 入参同域校验（session 存储树全部推导函数的路径穿越防线）。
- *
- * 目录名即 sessionId，非法 id（含 `/` `\` `..` 空格冒号等）会在 join 后逃逸出
- * `<root>/<sessionId>/` 分区写到任意位置——统一在此 throw（fail-fast），各推导函数
- * 不再各自内联正则。
- *
- * @throws Error 当 sessionId 为空串、含路径分隔符/冒号或首尾非字母数字
- */
-/**
  * pi 会话 id 同域校验（布尔判定，不 throw）。
  *
  * 与 assertPiSessionId 共用同一正则（本文件是跨进程唯一权威实现）：main 进程树内
@@ -235,6 +226,15 @@ export function isPiSessionId(sessionId: string): boolean {
   return PI_SESSION_ID_PATTERN.test(sessionId)
 }
 
+/**
+ * sessionId 入参同域校验（session 存储树全部推导函数的路径穿越防线）。
+ *
+ * 目录名即 sessionId，非法 id（含 `/` `\` `..` 空格冒号等）会在 join 后逃逸出
+ * `<root>/<sessionId>/` 分区写到任意位置——统一在此 throw（fail-fast），各推导函数
+ * 不再各自内联正则。
+ *
+ * @throws Error 当 sessionId 为空串、含路径分隔符/冒号或首尾非字母数字
+ */
 function assertPiSessionId(sessionId: string): void {
   if (!isPiSessionId(sessionId)) {
     throw new Error(`invalid sessionId (path traversal blocked): ${sessionId}`)

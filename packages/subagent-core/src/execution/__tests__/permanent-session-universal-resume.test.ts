@@ -120,8 +120,12 @@ describe("[U4 / §3.2.3] 万物可续矩阵：closedReason × message + 唯一�
   beforeEach(() => {
     for (const k of IDENTITY_ENV_KEYS) delete process.env[k];
     agentDir = fs.mkdtempSync(path.join(os.tmpdir(), "ps-universal-"));
-    sessionsDir = getSubagentSessionDir(agentDir, agentDir);
-    recordsDir = getSubagentRecordsDir(agentDir, agentDir);
+    // [session-store-layout-inversion] 生产 store 目录经
+    // getSubagentSessionDir(resolveStoreRootSessionId())（env dataDir 兜底）解析——
+    // stubEnv 把写删目标收进本 mkdtemp 目录（自建自删红线）；分区键 = initSession sid。
+    vi.stubEnv("TAIJI_AGENT_DATA_DIR", agentDir);
+    sessionsDir = getSubagentSessionDir("root-session-cur", agentDir);
+    recordsDir = getSubagentRecordsDir("root-session-cur", agentDir);
     fs.mkdirSync(sessionsDir, { recursive: true });
 
     const modelService = new ModelConfigService({ agentDir, cwd: agentDir });
@@ -148,6 +152,7 @@ describe("[U4 / §3.2.3] 万物可续矩阵：closedReason × message + 唯一�
     clearEngines();
     await new Promise((r) => setTimeout(r, 0));
     fs.rmSync(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+    vi.unstubAllEnvs();
     for (const k of IDENTITY_ENV_KEYS) delete process.env[k];
   });
 

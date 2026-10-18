@@ -80,6 +80,9 @@ function makeEnv() {
     invalidateScanCache: vi.fn(),
     persistPresetBinding: vi.fn(),
     persistProjectBinding: vi.fn(),
+    // D5 整树软删通道（ISessionStore.trashDirectory）：本文件断言面 = sidecar 四后缀
+    // unlink 家族，树删 no-op 即可（落盘效果由 cascade 测试族真跑覆盖）。
+    trashDirectory: vi.fn(async () => {}),
   } as unknown as ISessionStore
   const workspaceService = { record: vi.fn() } as unknown as WorkspaceService
   const registerDeps: ISessionRegisterDeps = {

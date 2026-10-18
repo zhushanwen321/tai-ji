@@ -615,9 +615,13 @@ export class SessionEventProjection {
     this.coldReadDomain('run')
   }
 
-  /** 事件源是否已接线（任一目录非 undefined）——降级投影升级腿的判定面。 */
+  /** 事件源是否已完整接线（两域目录均非 undefined）——降级投影升级腿的判定面。
+   *  [session-store-layout-inversion 回归修复] recordsDir 换根后不依赖 meta（无条件
+   *  注入），降级投影唯一缺席域 = runJournalDir（meta 缺席窗口）；原「任一目录非
+   *  undefined」判据在此形态下恒真 → 升级腿恒早退，run 域 fold 通道终身死亡（即
+   *  降级闩死修复要防的形态）。判据收紧为两域齐备，缺席域由升级腿补接线。 */
   hasEventSources(): boolean {
-    return this.recordsDir !== undefined || this.runJournalDir !== undefined
+    return this.recordsDir !== undefined && this.runJournalDir !== undefined
   }
 
   /**

@@ -4,6 +4,10 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { handleSessionRead, type SessionReadParams } from '../tool-handler.js'
 import { extractFinalAssistantText } from '../result-action.js'
+import {
+  resolveStoreSubagentSessionsDir,
+  resolveStoreSubagentRecordsDir,
+} from '../discovery/roots.js'
 
 /**
  * U6 result action 测试（design subagent-sync-collect §3.1.3 + impl-plan U6）。
@@ -22,9 +26,11 @@ import { extractFinalAssistantText } from '../result-action.js'
  * 一致的前置，A4 取回门）。
  */
 
-// ---- fixture 工具（合成 subagent session，同 tool-handler.test.ts makeFixtureSubagent 结构）----
+// ---- fixture 工具（合成 subagent session，同 tool-handler.test.ts makeFixtureSubagent 结构；
+// [session-store-layout-inversion] 新布局存储树，分区键 = manifest.rootSessionId 常量）----
 
-const SLUG = '--demo-cwd--'
+/** 存储树分区 sid fixture（合法 pi sid 形态；与 makeSubagent 内 manifest.rootSessionId 同值）。 */
+const FIX_ROOT_SID = '0aaaaaaa-bbbb-7ccc-dddd-0000000000r1'
 
 interface SubagentFixture {
   saId: string
@@ -45,9 +51,10 @@ function assistantEntry(id: string, content: unknown): unknown {
 }
 
 async function makeSubagent(dir: string, f: SubagentFixture): Promise<string> {
-  const sessionFile = join(dir, 'subagents', SLUG, 'sessions', `${f.realId}.jsonl`)
+  const sessionsDir = resolveStoreSubagentSessionsDir(dir, FIX_ROOT_SID)
+  const sessionFile = join(sessionsDir, `${f.realId}.jsonl`)
   if (f.sessionFileExists !== false) {
-    await mkdir(join(dir, 'subagents', SLUG, 'sessions'), { recursive: true })
+    await mkdir(sessionsDir, { recursive: true })
     const header = JSON.stringify({ type: 'session', id: f.realId, cwd: '/demo' })
     const task = JSON.stringify({
       type: 'message',
@@ -58,13 +65,13 @@ async function makeSubagent(dir: string, f: SubagentFixture): Promise<string> {
     const lines = [header, task, ...(f.entries ?? []).map((e) => JSON.stringify(e))]
     await writeFile(sessionFile, lines.join('\n') + '\n')
   }
-  const recordsDir = join(dir, 'subagents', SLUG, 'records')
+  const recordsDir = resolveStoreSubagentRecordsDir(dir, FIX_ROOT_SID)
   await mkdir(recordsDir, { recursive: true })
   await writeFile(
     join(recordsDir, `${f.saId}.json`),
     JSON.stringify({
       id: f.saId,
-      rootSessionId: 'root-session-1',
+      rootSessionId: FIX_ROOT_SID,
       agentName: 'explorer',
       sessionFile,
     }),
@@ -120,13 +127,15 @@ describe('extractFinalAssistantText（同源语义白盒）', () => {
 // ---- result action 黑盒（fixture：sa-id manifest 反查主路径） ----
 
 describe('result action（U6）', () => {
-  let dir: string
+  let dataDir: string
+  let dir: string // agentDir = <dataDir>/agent（生产拓扑复刻）
 
   beforeEach(async () => {
-    dir = await mkdtemp(join(tmpdir(), 'session-reader-result-'))
+    dataDir = await mkdtemp(join(tmpdir(), 'session-reader-result-'))
+    dir = join(dataDir, 'agent')
   })
   afterEach(async () => {
-    await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    await rm(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
   })
 
   it('1. 单 id：返回纯正文（无包装），details 带元数据（sessionId=header 真实 id）', async () => {
@@ -250,7 +259,7 @@ describe('result action（U6）', () => {
     )
     expect(cut.content[0]?.text).toBe(
       'abcde\n\n[truncated 5 of 10 chars — full text: read ' +
-        `${join(dir, 'subagents', SLUG, 'sessions', `${realId}.jsonl`)}` +
+        `${join(resolveStoreSubagentSessionsDir(dir, FIX_ROOT_SID), `${realId}.jsonl`)}` +
         ', or session_read { action:"detail", session:"sa-lim" }]',
     )
     const exact = await handleSessionRead(

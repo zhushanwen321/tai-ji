@@ -57,8 +57,11 @@ describe("[collect 退役] v2 条目 / 存量 manifest 读侧容忍——旧 ses
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "core-batch-finalized-"));
-    sessionsDir = getSubagentSessionDir(tmpDir, tmpDir);
-    manifestDir = getSubagentRecordsDir(tmpDir, tmpDir);
+    // 生产 store 目录经 getSubagentSessionDir(resolveStoreRootSessionId())（env dataDir
+    // 兜底）解析——stubEnv 把写删目标收进本 mkdtemp 目录（自建自删红线）。
+    vi.stubEnv("TAIJI_AGENT_DATA_DIR", tmpDir);
+    sessionsDir = getSubagentSessionDir(ROOT_SESSION, tmpDir);
+    manifestDir = getSubagentRecordsDir(ROOT_SESSION, tmpDir);
     fs.mkdirSync(sessionsDir, { recursive: true });
     fs.mkdirSync(manifestDir, { recursive: true });
     mainFile = path.join(tmpDir, "main-session.jsonl");
@@ -66,6 +69,7 @@ describe("[collect 退役] v2 条目 / 存量 manifest 读侧容忍——旧 ses
   });
 
   afterEach(() => {
+    vi.unstubAllEnvs();
     fs.rmSync(tmpDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
 

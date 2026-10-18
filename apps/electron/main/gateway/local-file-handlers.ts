@@ -126,7 +126,7 @@ export function registerLocalFileHandlers(): void {
 
   // localFile:read：内联容器源码态与 DetailPane 变更集/文件树产物源码读取（useDetailPane
   // loadPreviewContent；chat-html-support §8.2 S3「切换『源码』看到 shiki 高亮」）。产物目录
-  // `<dataDir>/artifacts/<sessionId>` 在 session cwd 外（§6.7 D7），runtime file.read 的
+  // `<dataDir>/ext-sessions/<sessionId>/artifacts/` 在 session cwd 外（§6.7 D7），runtime file.read 的
   // cwd 守门对主要产物路径不可达——与 servable 预检同谓词函数（probeLocalFileServable），
   // 准入前缀集 = 产物子树 + 会话项目 `.tmp/` 子树（读通道收窄，与协议 handler 全量白名单
   // 分面）；读取失败不抛错，回结构化原因。

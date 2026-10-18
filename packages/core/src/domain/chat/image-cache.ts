@@ -2,7 +2,8 @@
  * toolResult 图片落盘编排（crash-resilience §3.3 D6-⑨ / u7-memory-governance，core 侧）。
  *
  * 职责切分：落盘**执行方**是 main 进程（fs 只存在于 main；目录
- * `<dataDir>/cache/images/<sessionId>/<sha256>.<ext>`、幂等去重、64MB size 帽、三条
+ * `<dataDir>/ext-sessions/<sessionId>/image-cache/<sha256>.<ext>`（session 存储树
+ * 域 3）、幂等去重、64MB size 帽、三条
  * 清理通道都在 apps/electron/main/images/image-cache.ts）——本模块是 renderer 侧的
  * **编排与记账层**：
  * - hydrate 批量编排：hydrate 时收集消息序（旧→新）全部 base64 图，**反转为新→旧**

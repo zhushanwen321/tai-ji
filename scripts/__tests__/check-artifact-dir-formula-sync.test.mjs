@@ -167,6 +167,7 @@ const sharedPathsSrc = ({
   treeSegments = DEFAULT_TREE_SEGMENTS,
   bgTasksSegment = 'background-tasks',
   viewFileSegment = 'session-view.md',
+  subagentsSegment = 'subagents',
 } = {}) =>
   [
     `export const ${STORE_SEGMENT_CONST} = '${storeSegment}'`,
@@ -194,6 +195,16 @@ const sharedPathsSrc = ({
           `export function ${SHARED_VIEW_FN}(sessionId: string, dataDir?: string): string {`,
           `  assertPiSessionId(sessionId)`,
           `  return join(getSessionStoreDir(dataDir), sessionId, '${viewFileSegment}')`,
+          `}`,
+          ``,
+        ]
+      : []),
+    // 第七组（域 9）对拍权威函数：subagentsSegment = null 注入「函数缺席」形态
+    ...(subagentsSegment
+      ? [
+          `export function getSessionSubagentsDir(sessionId: string, dataDir?: string): string {`,
+          `  assertPiSessionId(sessionId)`,
+          `  return join(getSessionStoreDir(dataDir), sessionId, '${subagentsSegment}')`,
           `}`,
           ``,
         ]
@@ -283,13 +294,30 @@ const sessionReaderViewSrc = ({ treeSegment = 'ext-sessions', fileSegment = 'ses
     ``,
   ].join('\n')
 
+// 第七组（域 9）fixture：session-reader discovery roots 常量镜像形态（树根段 / subagent
+// 域段 / 分区名正则；drift 注入任一字面量观察守卫红）
+const sessionReaderDiscoveryRootsSrc = ({
+  storeSegment = 'ext-sessions',
+  subagentsSegment = 'subagents',
+  regex = DEFAULT_REGEX,
+} = {}) =>
+  [
+    `const SESSIONS_DIRNAME = 'sessions'`,
+    `const SUBAGENTS_DIRNAME = '${subagentsSegment}'`,
+    ``,
+    `const ${STORE_SEGMENT_CONST} = '${storeSegment}'`,
+    ``,
+    `const ${SHARED_PATTERN_CONST} = ${regex}`,
+    ``,
+  ].join('\n')
+
 /**
  * tmp mirror 工厂：目录布局对齐守卫 ROOT 相对路径（packages/shared/src、extensions/taiji/
  * system-prompt/src、packages/runtime/src/infra/pi、extensions/universal/base-tool-enhance/
  * src/background、extensions/universal/session-reader/src）。overrides 覆盖任一侧公式
  * （漂移注入点），missing 指定不落盘的文件。root/落盘/清理/守卫副本装置见 guard-mirror.mjs。
  */
-function makeMirror({ shared = {}, mirror = {}, runtime = {}, bte = {}, sr = {}, missing = [] } = {}) {
+function makeMirror({ shared = {}, mirror = {}, runtime = {}, bte = {}, sr = {}, srRoots = {}, missing = [] } = {}) {
   return makeGuardMirror({
     prefix: 'artifact-formula-fx-',
     files: {
@@ -298,6 +326,7 @@ function makeMirror({ shared = {}, mirror = {}, runtime = {}, bte = {}, sr = {},
       'packages/runtime/src/infra/pi/pi-paths.ts': runtimePiPathsSrc(runtime),
       'extensions/universal/base-tool-enhance/src/background/registry.ts': bteRegistrySrc(bte),
       'extensions/universal/session-reader/src/tool-handler.ts': sessionReaderViewSrc(sr),
+      'extensions/universal/session-reader/src/discovery/roots.ts': sessionReaderDiscoveryRootsSrc(srRoots),
     },
     missing,
     script: SCRIPT,
@@ -325,6 +354,34 @@ describe('CLI 集成（守卫脚本 × tmp mirror）', () => {
       expect(r.stdout).toContain(`域 6 存储树根段一致（'ext-sessions'，shared ↔ session-reader 镜像）`)
       expect(r.stdout).toContain(`域 6 导出文件段一致（'session-view.md'，shared ${SHARED_VIEW_FN} ↔ 镜像字面量）`)
       expect(r.stdout).toContain(`域 6 sessionId 校验正则一致（${DEFAULT_REGEX}）`)
+      // 第七组（域 9）：session-reader discovery 镜像三字面量对拍
+      expect(r.stdout).toContain(`域 9 存储树根段一致（'ext-sessions'，shared ↔ session-reader discovery 镜像）`)
+      expect(r.stdout).toContain(`域 9 subagent 域段一致（'subagents'，shared getSessionSubagentsDir ↔ 镜像常量）`)
+      expect(r.stdout).toContain(`域 9 sessionId 校验正则一致（${DEFAULT_REGEX}）`)
+    } finally {
+      fx.cleanup()
+    }
+  })
+
+  it('漂移红（域 9 discovery 镜像 subagent 域段与 shared getSessionSubagentsDir 不一致）→ exit 1，报双侧值', () => {
+    const fx = makeMirror({ srRoots: { subagentsSegment: 'sub-agent' } })
+    try {
+      const r = fx.run()
+      expect(r.status).toBe(1)
+      expect(r.stderr).toContain(`域 9 subagent 域段漂移: shared='subagents' vs 镜像='sub-agent'`)
+      expect(r.stderr).toContain('恢复动作')
+    } finally {
+      fx.cleanup()
+    }
+  })
+
+  it('漂移红（域 9 discovery 镜像分区名正则与 shared 不一致）→ exit 1，报双侧值', () => {
+    const fx = makeMirror({ srRoots: { regex: '/^[A-Za-z0-9_-]+$/' } })
+    try {
+      const r = fx.run()
+      expect(r.status).toBe(1)
+      expect(r.stderr).toContain(`域 9 sessionId 校验正则漂移: shared=${DEFAULT_REGEX} vs 镜像=/^[A-Za-z0-9_-]+$/`)
+      expect(r.stderr).toContain('恢复动作')
     } finally {
       fx.cleanup()
     }
@@ -477,6 +534,17 @@ describe('CLI 集成（守卫脚本 × tmp mirror）', () => {
       const r = fx.run()
       expect(r.status).toBe(1)
       expect(r.stderr).toContain('session-reader tool-handler 源文件 缺失')
+    } finally {
+      fx.cleanup()
+    }
+  })
+
+  it('域 9 镜像源文件缺失 → exit 1，报 session-reader discovery roots 缺失路径', () => {
+    const fx = makeMirror({ missing: ['extensions/universal/session-reader/src/discovery/roots.ts'] })
+    try {
+      const r = fx.run()
+      expect(r.status).toBe(1)
+      expect(r.stderr).toContain('session-reader discovery roots 源文件 缺失')
     } finally {
       fx.cleanup()
     }

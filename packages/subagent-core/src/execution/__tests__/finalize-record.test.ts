@@ -377,20 +377,26 @@ describe("doFinalizeRecord — manifest status 透传 (M3 4 态)", () => {
   // cleanup 删除；仅 patch.written=true（diff 非空且写盘成功）才回填 record.patchFile，
   // 避免悬空路径让 `git apply` 打不存在的文件。
   describe("collectPatchIfWorktree wiring（worktreeHandle 置位 + patch.written 回填）", () => {
-    // agentDir 是真实写目标：finalize-record Step 0 对 sessionsDir 做 mkdirSync(recursive)，
-    // 会在 agentDir 下创建整棵 subagents/<enc>/sessions 树。必须 mkdtemp 自建 + afterEach
-    // 清理（测试红线），禁止硬编码真实 /tmp 路径。mainCwd / handle.path 仅作编码键与
-    // startsWith 断言，源码不落盘，保持字面量即可。
+    // agentDir 是真实写目标（dataDir）：[session-store-layout-inversion] 生产
+    // collectWorktreePatch 经 getSubagentSessionDir(record.rootSessionId)（无 dataDir
+    // 参，env getDataDir 兜底）落 `<root>/<rootSid>/subagents/sessions/` 树并
+    // mkdirSync(recursive)。测试经 vi.stubEnv 把 TAIJI_AGENT_DATA_DIR 注入本 mkdtemp
+    // 目录，写删目标保持自建自删（测试红线），禁止硬编码真实 /tmp 路径。handle.path
+    // 仅作 startsWith 断言，源码不落盘，保持字面量即可。
     let agentDir: string;
 
     beforeEach(() => {
       agentDir = fs.mkdtempSync(path.join(os.tmpdir(), "collect-patch-agent-"));
+      vi.stubEnv("TAIJI_AGENT_DATA_DIR", agentDir);
     });
 
     afterEach(() => {
+      vi.unstubAllEnvs();
       fs.rmSync(agentDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
     });
 
+    /** 分区键 fixture（合法 pi sid 形态，过 shared assertPiSessionId）。 */
+    const ROOT_SID = "sid-collect-patch-main";
     const mainCwd = "/tmp/collect-patch-main-repo";
     const branch = "subagent-b1";
     const handle: WorktreeHandle = {
@@ -419,9 +425,9 @@ describe("doFinalizeRecord — manifest status 透传 (M3 4 态)", () => {
         failed: false,
         written: true,
       }));
-      const sessionsDir = getSubagentSessionDir(agentDir, mainCwd);
+      const sessionsDir = getSubagentSessionDir(ROOT_SID);
       const expectedPatchFile = path.join(sessionsDir, `${branch}.patch`);
-      const record = makeMinimalRecord({ id: "rec-patch", worktreeHandle: handle });
+      const record = makeMinimalRecord({ id: "rec-patch", rootSessionId: ROOT_SID, worktreeHandle: handle });
 
       await doFinalizeRecord(deps, record, makeMinimalResult(), "closed", "gc");
 

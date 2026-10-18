@@ -18,8 +18,8 @@
  *   sessionsDir 时走真实层级，pi/sessions 旧布局诱饵不得误活——见「缺省 sessionsDir
  *   推导」describe 的负向诱饵用例）
  * - 全局软上限：超帽只清孤儿判死目录（活 session 目录豁免），mtime 老→新
- * - session 删除级联：目录删除幂等 + 端到端（U3：`<ts>_<uuid>.jsonl` 文件名 → 派生
- *   uuid → cache 目录消失）
+ * - main 侧删除 API 锚定：目录删除幂等 + 端到端派生（U3：`<ts>_<uuid>.jsonl` 文件名 →
+ *   派生 uuid → cache 目录消失；runtime 删除链该段已退役——域 3 随整树软删）
  * - 路径穿越防护：非法 sessionId 向上抛（IPC 壳层兜底降级，不落盘）
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -68,7 +68,7 @@ const ENCODED_CWD = '--Users-demo-project'
 
 let root: string
 let sessionsDir: string
-/** 软上限用例的独立 dataDir（与前序用例的 cache 目录隔离——软上限扫描全域 cache/images）。 */
+/** 软上限用例的独立 dataDir（与前序用例的 cache 目录隔离——软上限扫描存储树各 sid 分区的 image-cache 域）。 */
 let capRoot: string
 let capSessionsDir: string
 
@@ -341,7 +341,7 @@ describe('全局软上限 512MB（只清孤儿判死目录，mtime 老→新）'
   })
 })
 
-describe('session 删除级联（通道①）', () => {
+describe('main 侧删除 API 锚定（runtime 删除链该段已退役，域 3 随整树软删）', () => {
   it('删目录；不存在时幂等 no-op', () => {
     mkdirSync(cacheDirOf('s-cascade'), { recursive: true })
     writeFileSync(join(cacheDirOf('s-cascade'), 'd.png'), 'x')
@@ -351,7 +351,7 @@ describe('session 删除级联（通道①）', () => {
   })
 
   it('端到端（U3）：构造 <ts>_<uuid>.jsonl 文件名 → 派生 uuid → 删除后 cache 目录消失', () => {
-    // runtime 删除链同构编排：session 文件（生产同构名）→ sessionIdFromSessionFilePath
+    // main 侧删除 API 编排：session 文件（生产同构名）→ sessionIdFromSessionFilePath
     // 派生 → deleteSessionImageCache 命中 renderer 写入的 cache 目录（目录名 = 纯 uuid）
     const filePath = join(sessionsDir, ENCODED_CWD, ALIVE_FILE)
     mkdirSync(dirname(filePath), { recursive: true })

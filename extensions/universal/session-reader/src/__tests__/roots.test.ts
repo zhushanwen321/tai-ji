@@ -4,6 +4,8 @@ import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
 import { join, dirname } from 'node:path'
 import {
   resolveSessionRoots,
+  resolveSessionStoreRoot,
+  resolveStoreSubagentSessionsDir,
   normalizeLiveSessionDir,
   type SessionRoot,
   type SessionRootSignals,
@@ -37,6 +39,9 @@ async function writeJsonl(path: string, content = '{"type":"session","id":"x"}\n
 
 /** 真实形态的 cwd 编码目录名（encodeCwd：`--` 开头 `--` 结尾） */
 const SLUG = '--Users-foo--'
+
+/** taiji 用例的存储树分区 sid fixture（合法 pi sid 形态）。 */
+const TAIJI_SID = '0aaaaaaa-bbbb-7ccc-dddd-0000000000t1'
 
 describe('main 根过滤（原 listMainSessions 等价式，A3 退役后保覆盖）', () => {
   let dir: string
@@ -124,24 +129,26 @@ describe('main 根过滤（原 listMainSessions 等价式，A3 退役后保覆�
   })
 })
 
-describe('subagent 根选择（原 listSubagentSessions 等价式，A3 退役后保覆盖）', () => {
-  let dir: string
+describe('subagent 根选择（原 listSubagentSessions 等价式，A3 退役后保覆盖；[session-store-layout-inversion] 单新根）', () => {
+  let dataDir: string
+  let dir: string // agentDir = <dataDir>/agent（生产拓扑复刻）
 
   beforeEach(async () => {
-    dir = await mkdtemp(join(tmpdir(), 'roots-sub-test-'))
+    dataDir = await mkdtemp(join(tmpdir(), 'roots-sub-test-'))
+    dir = join(dataDir, 'agent')
   })
   afterEach(async () => {
-    await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
+    await rm(dataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 })
   })
 
-  it('扫描 subagents/<slug>/sessions/*.jsonl，排除 .finalized', async () => {
-    const slug = '--Users-foo--'
-    await mkdir(join(dir, 'subagents', slug, 'sessions'), { recursive: true })
-    await writeFile(join(dir, 'subagents', slug, 'sessions', 'c.jsonl'), '{"type":"session"}\n')
-    await writeFile(
-      join(dir, 'subagents', slug, 'sessions', 'c.jsonl.finalized'),
-      '{"type":"session"}\n',
-    )
+  /** 存储树分区 sid fixture（合法 pi sid 形态）。 */
+  const SID_P = '0aaaaaaa-bbbb-7ccc-dddd-0000000000p1'
+
+  it('扫描存储树 <root>/<sid>/subagents/sessions/*.jsonl，排除 .finalized', async () => {
+    const sessionsDir = resolveStoreSubagentSessionsDir(dir, SID_P)
+    await mkdir(sessionsDir, { recursive: true })
+    await writeFile(join(sessionsDir, 'c.jsonl'), '{"type":"session"}\n')
+    await writeFile(join(sessionsDir, 'c.jsonl.finalized'), '{"type":"session"}\n')
 
     const result = await subagentSessionFiles(dir)
     expect(result).toHaveLength(1)
@@ -149,20 +156,46 @@ describe('subagent 根选择（原 listSubagentSessions 等价式，A3 退役后
     expect(result[0].path.endsWith('.finalized')).toBe(false)
   })
 
-  it('records/ 子目录（.json manifest）不被误收', async () => {
-    const slug = '--Users-foo--'
-    await mkdir(join(dir, 'subagents', slug, 'records'), { recursive: true })
-    await mkdir(join(dir, 'subagents', slug, 'sessions'), { recursive: true })
-    await writeFile(join(dir, 'subagents', slug, 'records', 'manifest.json'), '{}\n')
-    await writeFile(join(dir, 'subagents', slug, 'sessions', 'sub.jsonl'), '{"type":"session"}\n')
+  it('records/ 子目录（.json manifest）不被误收（同分区固定位置只探 sessions/）', async () => {
+    const { resolveStoreSubagentRecordsDir } = await import('../discovery/roots.js')
+    await mkdir(resolveStoreSubagentRecordsDir(dir, SID_P), { recursive: true })
+    const sessionsDir = resolveStoreSubagentSessionsDir(dir, SID_P)
+    await mkdir(sessionsDir, { recursive: true })
+    await writeFile(join(resolveStoreSubagentRecordsDir(dir, SID_P), 'manifest.json'), '{}\n')
+    await writeFile(join(sessionsDir, 'sub.jsonl'), '{"type":"session"}\n')
 
     const result = await subagentSessionFiles(dir)
     expect(result).toHaveLength(1)
     expect(result[0].path.endsWith('sub.jsonl')).toBe(true)
   })
 
-  it('无 subagents 目录返回 []，不抛错', async () => {
+  it('非会话分区目录（isPiSessionId 不过）剪枝跳过，不进 subagent 根候选', async () => {
+    // 非法分区名（前导 - 违反首字符规则；btw 虚拟 id 冒号形态同拒）
+    for (const bogus of ['-bogus', 'btw:0aaa']) {
+      const bogusDir = join(resolveSessionStoreRoot(dir), bogus, 'subagents', 'sessions')
+      await mkdir(bogusDir, { recursive: true })
+      await writeFile(join(bogusDir, 'x.jsonl'), '{"type":"session"}\n')
+    }
+    const okDir = resolveStoreSubagentSessionsDir(dir, SID_P)
+    await mkdir(okDir, { recursive: true })
+    await writeFile(join(okDir, 'ok.jsonl'), '{"type":"session"}\n')
+
+    const result = await subagentSessionFiles(dir)
+    expect(result).toHaveLength(1)
+    expect(result[0]!.path.endsWith('ok.jsonl')).toBe(true)
+  })
+
+  it('无存储树目录返回 []，不抛错', async () => {
     await expect(subagentSessionFiles(dir)).resolves.toEqual([])
+  })
+
+  it('D6 单新根锚定：旧布局 <agentDir>/subagents 造会话文件不被扫描（存量不可见）', async () => {
+    // 旧布局存量原位保留（D6 裁决：不迁移、不再读写）
+    const legacyDir = join(dir, 'subagents', '--legacy-cwd--', 'sessions')
+    await mkdir(legacyDir, { recursive: true })
+    await writeFile(join(legacyDir, 'legacy.jsonl'), '{"type":"session"}\n')
+
+    expect(await subagentSessionFiles(dir)).toEqual([])
   })
 })
 
@@ -222,7 +255,8 @@ const HOST_CASES: HostCase[] = [
       const agentDir = join(dataDir, 'agent')
       await writeJsonl(join(agentDir, 'sessions', SLUG, 'x.jsonl'))
       await writeJsonl(join(dataDir, 'sessions', 'old.jsonl')) // 旧旧布局迁移残留（§6.13 U1 行）
-      await writeJsonl(join(agentDir, 'subagents', SLUG, 'sessions', 's.jsonl'))
+      // [session-store-layout-inversion] subagent 会话在新布局存储树（生产同源推导落盘）
+      await writeJsonl(join(resolveStoreSubagentSessionsDir(agentDir, TAIJI_SID), 's.jsonl'))
       return { agentDir, signals: { agentDir, liveSessionDir: join(agentDir, 'sessions') } }
     },
     verify({ agentDir, tmp }, roots) {
@@ -273,11 +307,12 @@ describe('resolveSessionRoots', () => {
       const { agentDir, signals } = await build(tmp)
       const roots = await resolveSessionRoots(signals)
 
-      // ④ subagent 根恒在（常量推导，不来自任何信号，§6.1 信号 5）
+      // ④ subagent 根恒在（常量推导，不来自任何信号，§6.1 信号 5）；
+      // [session-store-layout-inversion] 根 = session 存储树（dirname(agentDir)/ext-sessions）
       const sub = roots.find((r) => r.kind === 'subagent')
       expect(sub).toBeDefined()
       expect(sub!.source).toBe('subagent')
-      expect(sub!.path).toBe(join(agentDir, 'subagents'))
+      expect(sub!.path).toBe(resolveSessionStoreRoot(agentDir))
 
       // ⑤ 已扫描根 fileCount/scanMs 恒填充且与 files 一致；被去重根不产生扫描统计
       for (const r of roots) {
@@ -389,8 +424,11 @@ describe('resolveSessionRoots options（u8：subagents 模式）', () => {
     const agentDir = join(tmp, 'agent')
     await mkdir(join(agentDir, 'sessions', SLUG), { recursive: true })
     await writeFile(join(agentDir, 'sessions', SLUG, 'a.jsonl'), '{"type":"session"}\n')
-    await mkdir(join(agentDir, 'subagents', SLUG, 'sessions'), { recursive: true })
-    await writeFile(join(agentDir, 'subagents', SLUG, 'sessions', 's.jsonl'), '{"type":"session"}\n')
+    await mkdir(resolveStoreSubagentSessionsDir(agentDir, '0aaaaaaa-bbbb-7ccc-dddd-0000000000o1'), { recursive: true })
+    await writeFile(
+      join(resolveStoreSubagentSessionsDir(agentDir, '0aaaaaaa-bbbb-7ccc-dddd-0000000000o1'), 's.jsonl'),
+      '{"type":"session"}\n',
+    )
     return { tmp, agentDir }
   }
 

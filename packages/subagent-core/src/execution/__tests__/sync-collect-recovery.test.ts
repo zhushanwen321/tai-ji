@@ -317,10 +317,10 @@ describe("[collect 退役] 存量 entry 读侧守卫 + entry-born orphan 收编�
     // derivedManifestRecord 投影手写（批时代 barrier 的磁盘遗留形态）。
     const pmFull = memberRecord({ id: "sa-pm", sessionFile: childFile, status: "idle", stopReason: "completed", result: "p-manifest full result" });
     seedRecord(pmFull);
-    const manifestFile = path.join(getSubagentRecordsDir(agentDir, agentDir), "sa-pm.json");
+    const manifestFile = path.join(getSubagentRecordsDir(ROOT_SESSION, agentDir), "sa-pm.json");
     // records/ 目录在 v1 写点（reportSubagentRecord）删除后不再由种子隐式创建——
     // manifest 是手写磁盘遗留形态，目录显式自建。
-    fs.mkdirSync(getSubagentRecordsDir(agentDir, agentDir), { recursive: true });
+    fs.mkdirSync(getSubagentRecordsDir(ROOT_SESSION, agentDir), { recursive: true });
     fs.writeFileSync(
       manifestFile,
       JSON.stringify(derivedManifestRecord(pmFull), null, 2),

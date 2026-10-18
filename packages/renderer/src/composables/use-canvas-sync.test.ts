@@ -4,7 +4,7 @@
  * 分流 + 仅归属会话唤起）。
  *
  * 覆盖：
- * - 首拉：首个消费者订阅即 canvas.list 一次（本会话清单）。
+ * - 首拉：消费面挂载即 canvas.list 一次（本会话清单）。
  * - 唤起正向：CanvasCreated + 归属会话匹配 + 未打标 + 无其他 overlay → 桥 openCanvas 被调
  *   （载荷带归属 sessionId）+ 数据/清单照常拉取（refreshFor 写「消息所属会话」分区）。
  * - 会话判定：非归属会话的 CanvasCreated 不唤起本实例（A 建画布不抢 B 的前台）。
@@ -99,7 +99,7 @@ describe('useCanvasSync（自动唤起边界 + per-session 分流）', () => {
     })
   })
 
-  it('首拉：首个消费者订阅即 canvas.list 一次（本会话清单，payload 带归属 sessionId）', async () => {
+  it('首拉：消费面挂载即 canvas.list 一次（本会话清单，payload 带归属 sessionId）', async () => {
     const scope = effectScope()
     scope.run(() => useCanvasSync(ref(SID)))
     await flushPromises()

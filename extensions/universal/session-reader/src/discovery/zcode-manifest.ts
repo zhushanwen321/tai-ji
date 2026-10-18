@@ -2,6 +2,7 @@ import { readFile, readdir } from 'node:fs/promises'
 import { statSync } from 'node:fs'
 import { join } from 'node:path'
 
+import { resolveSessionStoreRoot, listSessionStorePartitions } from './roots.js'
 import type { ZcodeAnchor } from './entry-anchor.js'
 import type { ZcodeFamilyNode } from '../core/family.js'
 
@@ -161,7 +162,13 @@ function toZcodeManifestRecord(m: ManifestJson): ZcodeManifestRecord | undefined
   }
 }
 
-/** `<agentDir>/subagents` 布局常量（与写侧 path-encoding/manifest-store 布局对齐） */
+/**
+ * [session-store-layout-inversion D6/单新根] zcode manifest 读侧 = session 存储树分区
+ * 固定位置 `<root>/<rootSessionId>/subagents/records/`（根推导与分区枚举复用 roots.ts
+ * 的 resolveSessionStoreRoot / listSessionStorePartitions——同包单源防漂移）。旧布局
+ * `<agentDir>/subagents/<cwdSlug>/records/` 不再读写（D6 存量不迁移不读取——旧 zcode
+ * record 从 agent 面消失是 D6 取舍清单明示项）。
+ */
 const SUBAGENTS_DIR = 'subagents'
 const RECORDS_DIR = 'records'
 
@@ -196,22 +203,16 @@ export async function readZcodeManifest(
   agentDir: string,
   saId: string,
 ): Promise<ZcodeManifestLookup> {
-  const root = join(agentDir, SUBAGENTS_DIR)
-  let slugs: DirentLike[]
-  try {
-    slugs = await readdir(root, { withFileTypes: true })
-  } catch {
-    return { kind: 'not-zcode' } // subagents 根不存在/不可读 → 无 manifest
-  }
-  for (const e of slugs) {
-    if (!e.isDirectory()) continue
-    const file = join(root, e.name, RECORDS_DIR, `${saId}.json`)
+  const root = resolveSessionStoreRoot(agentDir)
+  const partitions = await listSessionStorePartitions(root)
+  for (const part of partitions) {
+    const file = join(root, part, SUBAGENTS_DIR, RECORDS_DIR, `${saId}.json`)
     let raw: string
     try {
       // 命中即止：只读这一个文件（文件名由 sa-id 确定），坏内容同样终止（见 parseManifestLookup）
       raw = await readFile(file, 'utf8')
     } catch {
-      continue // 该 cwd 目录下无此 manifest → 下一候选目录
+      continue // 该分区无此 manifest → 下一候选分区
     }
     return parseManifestLookup(raw)
   }
@@ -236,17 +237,11 @@ interface DirentLike {
  * family 是列表视图，单节点不可达不炸整屏（D5-1 GC 语义）。
  */
 export async function listZcodeManifests(agentDir: string): Promise<ZcodeManifestRecord[]> {
-  const root = join(agentDir, SUBAGENTS_DIR)
+  const root = resolveSessionStoreRoot(agentDir)
   const out: ZcodeManifestRecord[] = []
-  let slugs: DirentLike[]
-  try {
-    slugs = await readdir(root, { withFileTypes: true })
-  } catch {
-    return out // 根不存在/不可读 → 空（无 zcode 节点，不报错）
-  }
+  const slugs = await listSessionStorePartitions(root)
   for (const slug of slugs) {
-    if (!slug.isDirectory()) continue
-    const recordsDir = join(root, slug.name, RECORDS_DIR)
+    const recordsDir = join(root, slug, SUBAGENTS_DIR, RECORDS_DIR)
     let files: DirentLike[]
     try {
       files = await readdir(recordsDir, { withFileTypes: true })

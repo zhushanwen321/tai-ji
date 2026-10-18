@@ -33,6 +33,9 @@ import { RECORD_BINDING_SIDECAR_EXT } from "../persistence/state-marker.ts";
 
 const STARTED_AT = 1_700_000_000_000;
 const RECORD_ID = "sa-fold-1";
+/** 目录分区键 fixture（新布局 `<root>/<rootSid>/subagents/`；store 经 getter 注入
+ *  显式目录，sid 只须过 shared assertPiSessionId 合法性）。 */
+const PARTITION_SID = "sid-identity-fold";
 
 /** engine-CLI 化子 session 文件 fixture：{session, message} 条目族，**无身份 entry**。 */
 function writeIdentityLessChildSession(sessionsDir: string): string {
@@ -155,8 +158,8 @@ describe("[身份换源] 无 identity entry 子文件的身份域 = 事件流折
 
   beforeEach(() => {
     agentDir = fs.mkdtempSync(path.join(os.tmpdir(), "record-identity-fold-"));
-    sessionsDir = getSubagentSessionDir(agentDir, agentDir);
-    recordsDir = getSubagentRecordsDir(agentDir, agentDir);
+    sessionsDir = getSubagentSessionDir(PARTITION_SID, agentDir);
+    recordsDir = getSubagentRecordsDir(PARTITION_SID, agentDir);
     fs.mkdirSync(sessionsDir, { recursive: true });
     fs.mkdirSync(recordsDir, { recursive: true });
   });

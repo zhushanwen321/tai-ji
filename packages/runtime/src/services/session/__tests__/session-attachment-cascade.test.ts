@@ -22,6 +22,7 @@ import { join } from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { getAttachmentsDir, getSessionStoreDir } from '@taiji/shared/paths'
 import { SessionLifecycle } from '../session-lifecycle.js'
+import { trashDirectory } from '../../../infra/system/trash.js'
 import type { ILifecycleSessionOps, ISessionRegisterDeps } from '../session-internal.js'
 import type { IProcessManager } from '../../ports/pi-engine.js'
 import type { IConfigStore } from '../../ports/config.js'
@@ -61,6 +62,10 @@ function makeLifecycle(sid: string, filePath: string, cwd: string): SessionLifec
   } as unknown as ILifecycleSessionOps
   const sessionStore = {
     trash: vi.fn(async () => {}),
+    // D5 整树软删经 ISessionStore.trashDirectory 端口（组合根注入 infra trashDirectory）：
+    // mock 同源委托真实 infra 函数——platform 钉 linux 走 rmSync 分支，保住「真实 fs
+    // 落盘效果」断言意图（no-op mock 会让树留在原地、断言必红）。
+    trashDirectory: (dirPath: string) => trashDirectory(dirPath),
     invalidateMetaCache: vi.fn(),
     invalidateScanCache: vi.fn(),
     refreshAll: vi.fn(),

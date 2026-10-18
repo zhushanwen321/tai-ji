@@ -127,7 +127,8 @@ export function useDetailPane(sessionId: Ref<string | null>) {
 
   /**
    * preview 模式内容读取（两通道，「白名单先行」沿袭 chat-html-support §6.9 D9 源码读取语义）。
-   * cwd 内路径 → 既有 file.read cwd 守门通道；cwd 外路径（产物目录 <dataDir>/artifacts/<sessionId>
+   * cwd 内路径 → 既有 file.read cwd 守门通道；cwd 外路径（产物目录
+   * <dataDir>/ext-sessions/<sessionId>/artifacts/
    * 等——变更集卡/文件树可点开产物文件，runtime file.read 的 cwd 守门不可达）→ localFile:read
    * 白名单通道（与 servable 预检同一白名单谓词，main 侧单一实现）。只有 out_of_whitelist 才回落
    * cwd 通道；not_found / is_dir / read_failed 是真实失败，带原因直接进错误态（不静默吞掉）。

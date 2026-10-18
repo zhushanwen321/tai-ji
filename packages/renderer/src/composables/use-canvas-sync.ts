@@ -9,8 +9,8 @@
  * （D4 裁决：只唤起归属会话前台——A 会话建画布不再抢 B 会话的屏）。
  *
  * 四条链路：
- * 1. 首拉：首个消费者订阅即 `canvas.list` 一次（本实例会话的清单；「renderer 启动时拉
- *    一次」的落点——订阅时点 = 首个画布消费面挂载）。
+ * 1. 首拉：每个消费面挂载即 `canvas.list` 一次（本实例会话的清单；幂等 RPC，多消费
+ *    面各拉一次无害——「renderer 启动时拉一次」的落点 = 首个画布消费面挂载）。
  * 2. canvas.updated 消费（onGlobalType 全局单条）按 evType / 会话分流（广播 = 失效提示，
  *    拉为主 ADR-0097）：
  *    - 全类型：refreshCanvasFor(payload.sessionId, canvasId) 重拉该会话画布与清单；
@@ -162,7 +162,8 @@ export function useCanvasSync(sidRef: Ref<string | null | undefined>): CanvasSto
     }
   })
   const store = useCanvasStore(sidRef)
-  // 首个消费者订阅即拉一次清单（链路 1；未连接时 reject 被吞，重连后由下次失效/重挂收敛）
+  // 每个消费面挂载即拉一次本会话清单（链路 1；幂等，rev 守卫收敛倒拨——未连接时
+  // reject 被吞，重连后由下次失效/重挂收敛）
   void store.listCanvases()
   return store
 }
