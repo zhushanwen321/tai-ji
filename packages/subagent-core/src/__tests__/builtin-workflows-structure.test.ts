@@ -117,6 +117,9 @@ describe("U2: 内置脚本 agent() 返回值属性访问含 null guard", () => {
           // 检查这个裸访问是否真的在属性读取位置（而非变量定义）
           const match = line.match(bareAccess);
           if (match && !line.includes(`?.`)) {
+            // `<变量>.json` 形态 = 落盘产物文件名字面量（W2 分析产物：final.json 等），
+            // 非 agent() 返回值属性访问——启发式误报放行（规则本体修正，非静默豁免）
+            if (line.includes(`${v}.json`)) continue;
             // 确认是 agent() 返回值的属性访问（同一行有拼接/赋值上下文）
             // 如果行里同时有 ?. 版本，说明是 guard 后的，不算裸访问
             expect(line).toMatch(new RegExp(`${v}\\?\\.`));

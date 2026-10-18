@@ -170,6 +170,14 @@ const {
   REVIEWER_BATCH,
   planReviewerOrder,
   parseDiffStats,
+  countLedgerCritical,
+  buildRoundReconciliation,
+  buildAggregatedDoc,
+  buildProblemsDoc,
+  buildRunManifest,
+  rotateRunJson,
+  buildFinalDoc,
+  computeFixAttemptsMax,
 } = require(require("path").dirname(workerData.scriptPath) + "/review-fix-loop-utils.cjs");
 
 // 结构化失败终判恢复指引：结构化返回是必须满足的前提（fail-fast，无降级通道），
@@ -327,6 +335,22 @@ const reviewerSchema = {
       },
       description: "Reconciliation table (structured): return [] on R1 (no previous round); on R2+ every previous issue_id must have a status entry",
     },
+    // W2 §5.4：reviewer 原始发现申报（problems.json 序列化数据源）——可选项（缺失归一
+    // 为 []，不 fail）。ref = 报告内该问题行的锚点（分析侧按它回查 reviewer md 报告
+    // 原文）；level 沿用本族 severity 词表 critical|major|minor。
+    problems: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          ref: { type: "string", description: "Report anchor for this issue (the issue id/marker used in your report), used to trace back to the report text" },
+          level: { type: "string", enum: ["critical", "major", "minor"], description: "Same severity as the report row" },
+          title: { type: "string", description: "One-line issue title" },
+        },
+        required: ["ref", "level", "title"],
+      },
+      description: "Per-issue list mirroring your report's findings rows; return [] when nothing was found",
+    },
   },
   // T9 前缀稳定化（tier-1 6.9）：required 恒含 reconciliation——schema JSON 逐字嵌入
   // appendSystemPrompt，R1↔R2+ 分叉会造成 system 段字节差异（消息级缓存前缀失效）。
@@ -370,6 +394,22 @@ const aggregatorSchema = {
               guidance: { type: "string", description: "One-line fix direction for the fixer (code wins on conflict)" },
               adjudication: { type: "string", enum: ["evidence", "unverified", "downgraded"], description: "Evidence verdict; downgraded/unverified entries stay in this array but are filtered out of the fix queue" },
               note: { type: "string", description: "Adjudication reason (required when adjudication is unverified/downgraded)" },
+              // W2 §5.3：来源申报（聚合分析链：合并率/延续率的数据源）——[] = 本轮新发现，
+              // 非空 = 上轮延续或多 reviewer 合并，元素 {round, ref}（round = 来源轮次，
+              // ref = 原问题 id 或来源 reviewer 报告锚点，与 zcode 镜像同构）。可选项
+              //（缺失不 fail，归一/序列化边界补缺省 []）。
+              sourceRefs: {
+                type: "array",
+                items: {
+                  type: "object",
+                  properties: {
+                    round: { type: "number", description: "Source round the entry continues from (fresh findings use [])" },
+                    ref: { type: "string", description: "Original issue id (cross-round carryover) or the source reviewer's report anchor (multi-reviewer merge)" },
+                  },
+                  required: ["ref"],
+                },
+                description: "Upstream issue refs this entry was derived from; [] or omitted = fresh finding this round",
+              },
             },
           },
         ],
@@ -485,6 +525,32 @@ if (RUN_ROOT_DEGRADED) {
 const STATE_FILE = RUN_ROOT + "/state.json";
 
 log("Run directory: " + RUN_ROOT);
+
+// ── W2 分析产物落盘（skill-data-redesign 设计 §5.1-§5.4）────────────
+// 分析数据是辅助面：写失败 WARN 不终止修复循环（降级 ≠ 吞错，日志照记）；主契约
+// （state.json / return）的写入不在此列，照旧直写。
+function writeAnalysisJson(filePath, value) {
+  try {
+    fs.writeFileSync(filePath, JSON.stringify(value, null, 2), "utf-8");
+  } catch (e) {
+    log("WARN: failed to write analysis artifact " + filePath + " — " + (e && e.message ? e.message : String(e)));
+  }
+}
+
+// run.json（§5.1）git 元数据一次性采集：非 git 目录 / 命令失败 → 空串降级（run 照常，
+// 分析侧按空值过滤）。projectRoot 取 git toplevel（失败回退 cwd）；worktreePath 记
+// 实际工作目录（R4：同项目多 worktree 并行撞名时按它区分 run）。
+function gitQuery(args) {
+  try {
+    return require("child_process").execFileSync("git", args, { encoding: "utf-8", timeout: 10_000 }).trim();
+  } catch {
+    return "";
+  }
+}
+const RUN_WORKTREE_PATH = process.cwd();
+const RUN_PROJECT_ROOT = gitQuery(["rev-parse", "--show-toplevel"]) || RUN_WORKTREE_PATH;
+const RUN_BRANCH = gitQuery(["rev-parse", "--abbrev-ref", "HEAD"]);
+const RUN_HEAD_COMMIT = gitQuery(["rev-parse", "HEAD"]);
 
 // ── Startup fail-fast: validate agent ref paths exist (ADR-0003 D6) ─
 // 启动期校验所有 batchN/fixAgent 路径存在，不存在立即报错（带 location 恢复指引），
@@ -895,6 +961,9 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
     log("Review: " + active.map((d) => d.name).join(", ") + " (" + active.length + " agent(s), " + REVIEWER_BATCH + " per batch)...");
     const calls = active.map((def) => buildReviewCall(def, round, maxRounds, batchIndex, roundDir, scopedClean.has(def.name)));
     const phaseTimings = { review: null, aggregate: null, fix: null };
+    // W2 §5.1 mustFixTrajectory 数据源：本轮 critical 计数（聚合成功后更新；未聚合轮
+    // 保持 null = 未知非 0，与 batchRounds 的 mustFix: null 同一诚实口径）
+    let roundCritical = null;
     const reviewT0 = Date.now();
     // 轮级结果容器声明前置：fail-fast catch（结构化终判）在消费循环之前执行，
     // 引用 agentRoundResults 不能落在声明之后（TDZ → 脚本错误 → 重试矩阵）。
@@ -919,7 +988,7 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
         // 未进入），aggregate/fix 相位 null 是如实采集（未到达）。同 chunk 已成功的调用
         // 结果随收敛丢弃（在跑的跑完丢弃是 fail-fast 已接受取舍）。
         phaseTimings.review = [reviewT0, Date.now()];
-        batchRounds.push({ round, mustFix: null, suggestion: null, agents: agentRoundResults, modifiedFiles: [], phaseTimings });
+        batchRounds.push({ round, mustFix: null, suggestion: null, agents: agentRoundResults, modifiedFiles: [], phaseTimings, critical: roundCritical });
         state.batches.push({ index: batchIndex, name: BATCH_NAMES[batchIndex - 1], rounds: batchRounds });
         saveState(state);
         terminated = "review-failure";
@@ -1019,7 +1088,7 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
         // 或旧引擎信封丢失形态（value 为多轮拼接文本）。结构化终止（MF-3），raw 完整
         // dump 便于定位。W8：当前轮条目落 batchRounds（phase 时长保留在时间线）；
         // F3：聚合未发生，mustFix/suggestion 未知非 0（null，消费侧 ?? "-" 兜底）。
-        batchRounds.push({ round, mustFix: null, suggestion: null, agents: agentRoundResults, modifiedFiles: [], phaseTimings });
+        batchRounds.push({ round, mustFix: null, suggestion: null, agents: agentRoundResults, modifiedFiles: [], phaseTimings, critical: roundCritical });
         state.batches.push({ index: batchIndex, name: BATCH_NAMES[batchIndex - 1], rounds: batchRounds });
         saveState(state);
         terminated = "review-failure";
@@ -1031,10 +1100,22 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
 
     if (terminated === "review-failure") break; // 已结构化终止，退出 round 循环（MF-3）
 
+    // W2 §5.4：reviewer 原始发现结构化统一——各轮从结构化返回的 problems 申报序列化
+    // 落盘（外层 {round, problems}、元素 {ref, level, title}，与 tech-review-loop 既有
+    // 形同构；level 词表随族 = critical|major|minor）。申报可选项，缺失 → []（产出量
+    // 0 也是合法分析数据）；多 reviewer 扁平合并，全部 clean 轮照写。
+    writeAnalysisJson(
+      roundDir + "/problems.json",
+      buildProblemsDoc(round, reviewResults.flatMap((r) => (Array.isArray(r.problems) ? r.problems : []))),
+    );
+
     // 全等级终止：任何等级（含 suggestion）未清零都不算 clean——否则建议级问题会在
     // must-fix 清零的出口被静默漏修（与「must-fix 只是终止条件、不是修复范围」的语义对齐）
     if (reviewResults.every((r) => r.must_fix === 0 && (r.suggestion ?? 0) === 0)) {
       log("Batch " + batchIndex + " round " + round + ": all agents clean.");
+      // all-clean 轮无聚合：must-fix 全 0 蕴涵 critical 为 0（critical ⊆ must-fix）——
+      // 本轮 critical 计数在此定死，后续 batchRounds.push 统一取 roundCritical
+      roundCritical = 0;
       // rfl clean 轮黑洞修复（tier-1 6.6 v5，T7）：all-clean 现状在聚合/reconcile 前
       // break——末轮 fix 的对账与回归回填永不发生，eval 数据在最 canonical 的成功
       // 路径上失真。break 前用本轮已解析的 reconciliation 数据做确定性回填（不调
@@ -1049,7 +1130,7 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
         log("Clean-round backfill applied (reconcile + regression backfill for the previous fix).");
       }
       if (cleanStuck.stuck) {
-        batchRounds.push({ round, mustFix: 0, suggestion: reviewResults.reduce((a, r) => a + (r.suggestion ?? 0), 0), agents: agentRoundResults, modifiedFiles: [], phaseTimings });
+        batchRounds.push({ round, mustFix: 0, suggestion: reviewResults.reduce((a, r) => a + (r.suggestion ?? 0), 0), agents: agentRoundResults, modifiedFiles: [], phaseTimings, critical: roundCritical });
         state.batches.push({ index: batchIndex, name: BATCH_NAMES[batchIndex - 1], rounds: batchRounds });
         saveState(state);
         terminated = "stuck";
@@ -1068,12 +1149,12 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
           .filter(([, i]) => i.status === "open" || i.status === "regressed")
           .map(([id]) => id).join(", ");
         log("All agents reported clean but ledger has unresolved issue(s): " + residueIds + " — continuing to reconcile.");
-        batchRounds.push({ round, mustFix: 0, suggestion: reviewResults.reduce((a, r) => a + (r.suggestion ?? 0), 0), agents: agentRoundResults, modifiedFiles: [], phaseTimings });
+        batchRounds.push({ round, mustFix: 0, suggestion: reviewResults.reduce((a, r) => a + (r.suggestion ?? 0), 0), agents: agentRoundResults, modifiedFiles: [], phaseTimings, critical: roundCritical });
         saveState(state);
         cleanNames.clear();
         continue;
       }
-      batchRounds.push({ round, mustFix: 0, suggestion: reviewResults.reduce((a, r) => a + (r.suggestion ?? 0), 0), agents: agentRoundResults, modifiedFiles: [], phaseTimings });
+      batchRounds.push({ round, mustFix: 0, suggestion: reviewResults.reduce((a, r) => a + (r.suggestion ?? 0), 0), agents: agentRoundResults, modifiedFiles: [], phaseTimings, critical: roundCritical });
       saveState(state);
       batchClean = true;
       break;
@@ -1149,7 +1230,7 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
       // W8：aggregator-failure 轮的当前轮条目落 batchRounds——review/aggregate 相位
       // 时长已实测（fix 相位 null 如实采集）；F3：聚合失败，mustFix/suggestion 未知
       // 非 0（null，消费侧 ?? "-" 兜底，不误读为 clean 轮）。
-      batchRounds.push({ round, mustFix: null, suggestion: null, agents: agentRoundResults, modifiedFiles: [], phaseTimings });
+      batchRounds.push({ round, mustFix: null, suggestion: null, agents: agentRoundResults, modifiedFiles: [], phaseTimings, critical: roundCritical });
       state.batches.push({ index: batchIndex, name: BATCH_NAMES[batchIndex - 1], rounds: batchRounds });
       saveState(state);
       terminated = "aggregator-failure";
@@ -1162,6 +1243,10 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
     const mustFix = agg.must_fix;
     const suggestion = agg.suggestion ?? 0;
     log("Aggregated: " + mustFix + " must-fix + " + suggestion + " suggestion(s).");
+    // W2 §5.3：聚合产物结构化落盘——从聚合 agent 的既有结构化返回确定性序列化
+    //（非 agent 手写第二产物；issues 含 sourceRefs 申报（缺省 []，元素 {round, ref}），
+    // verdict 沿用 adjudication 词表；aggregated.md 保留人读，两者同源不做互校）。
+    writeAnalysisJson(roundDir + "/aggregated.json", buildAggregatedDoc(agg, { round, batch: batchIndex }));
     // 最近一次聚合报告路径：all-clean 轮不聚合（round-1
     // 目录无 aggregated.md），残留 continue 后下轮对账段需回溯到最近存在的报告。
     state.lastAggPath = (typeof agg.report_file === "string" && agg.report_file.trim()) || (roundDir + "/aggregated.md");
@@ -1372,10 +1457,14 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
       prevMustFix = s.prevMustFix;
       stuck = { stuck: s.stuck };
     }
+    // W2 §5.1 mustFixTrajectory 本轮数据点（对齐 zcode 镜像口径）：聚合 + reconcile 后
+    // 的清单活跃视图——open/regressed 的 critical 条数。走到此处 = 本轮聚合成功；
+    // 失败终态轮保持 null（轨迹侧剔除，不推未知值）
+    roundCritical = countLedgerCritical(state.issues);
     if (stuck.stuck) {
       const stuckIds = (stuck.stuckIds || []).join(", ");
       log("Stuck: issue(s) not converging for " + stuckThreshold + " rounds: " + stuckIds + ". Stopping.");
-      batchRounds.push({ round, mustFix, suggestion, agents: agentRoundResults, modifiedFiles: [], phaseTimings });
+      batchRounds.push({ round, mustFix, suggestion, agents: agentRoundResults, modifiedFiles: [], phaseTimings, critical: roundCritical });
       state.batches.push({ index: batchIndex, name: BATCH_NAMES[batchIndex - 1], rounds: batchRounds });
       saveState(state);
       terminated = "stuck";
@@ -1397,7 +1486,7 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
           return r.issue_id + " [" + (hist || "no history") + "]";
         }).join("; ");
         log("Needs redesign: " + ids + " not converging after " + maxFixAttempts + " fix attempts. Stopping.");
-        batchRounds.push({ round, mustFix, suggestion, agents: agentRoundResults, modifiedFiles: [], phaseTimings });
+        batchRounds.push({ round, mustFix, suggestion, agents: agentRoundResults, modifiedFiles: [], phaseTimings, critical: roundCritical });
         state.batches.push({ index: batchIndex, name: BATCH_NAMES[batchIndex - 1], rounds: batchRounds });
         saveState(state);
         terminated = "needs-redesign";
@@ -1433,7 +1522,7 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
           .filter(([, i]) => i.status !== "fixed" && i.status !== "deferred")
           .map(([id]) => id);
         log("Converged: new findings <= " + convergeNewIssues + " for " + convergeRounds + " rounds. Batch " + batchIndex + " done, proceeding to next batch.");
-        batchRounds.push({ round, mustFix, suggestion, agents: agentRoundResults, modifiedFiles: [], phaseTimings });
+        batchRounds.push({ round, mustFix, suggestion, agents: agentRoundResults, modifiedFiles: [], phaseTimings, critical: roundCritical });
         saveState(state);
         terminated = "converged";
         finalMessage = "Batch " + batchIndex + " round " + round + ": 新发现率收敛（连续 " + convergeRounds
@@ -1463,7 +1552,7 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
           .filter(([, i]) => i.status === "open" || i.status === "regressed")
           .map(([id]) => id).join(", ");
         log("All downgraded this round but ledger has unresolved issue(s): " + residueIds + " — skipping fix stage, continuing to reconcile.");
-        batchRounds.push({ round, mustFix: 0, suggestion: reviewResults.reduce((a, r) => a + (r.suggestion ?? 0), 0), agents: agentRoundResults, modifiedFiles: [], phaseTimings });
+        batchRounds.push({ round, mustFix: 0, suggestion: reviewResults.reduce((a, r) => a + (r.suggestion ?? 0), 0), agents: agentRoundResults, modifiedFiles: [], phaseTimings, critical: roundCritical });
         saveState(state);
         continue;
       }
@@ -1488,7 +1577,7 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
       for (const a of agentRoundResults) {
         if (agg.must_fix_ids && a.must_fix > 0) recordAgentClean(state, a.name, batchIndex);
       }
-      batchRounds.push({ round, mustFix: 0, suggestion: reviewResults.reduce((a, r) => a + (r.suggestion ?? 0), 0), agents: agentRoundResults, modifiedFiles: [], phaseTimings });
+      batchRounds.push({ round, mustFix: 0, suggestion: reviewResults.reduce((a, r) => a + (r.suggestion ?? 0), 0), agents: agentRoundResults, modifiedFiles: [], phaseTimings, critical: roundCritical });
       saveState(state);
       batchClean = true;
       break;
@@ -1604,7 +1693,7 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
         // 不再按 F-1 前缀分诊降级（弱格式降级通道已整体拆除）。改动在工作区的组
         //（已跑完/在跑的组）如实提示接管动作。
         phaseTimings.fix = [fixT0, Date.now()];
-        batchRounds.push({ round, mustFix, suggestion, agents: agentRoundResults, modifiedFiles: [], phaseTimings });
+        batchRounds.push({ round, mustFix, suggestion, agents: agentRoundResults, modifiedFiles: [], phaseTimings, critical: roundCritical });
         state.batches.push({ index: batchIndex, name: BATCH_NAMES[batchIndex - 1], rounds: batchRounds });
         saveState(state);
         terminated = "fix-failure";
@@ -1634,7 +1723,7 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
         // value 解析失败 → 终判（弱格式降级续跑已拆除——「改动以下轮重审为权威」的
         // 续跑形态不再存在，结构化返回失败即终止，由上游修环境后重跑）。
         log("Fix agent result invalid (" + groupCalls[gi].description + "), stopping.");
-        batchRounds.push({ round, mustFix, suggestion, agents: agentRoundResults, modifiedFiles: [], phaseTimings });
+        batchRounds.push({ round, mustFix, suggestion, agents: agentRoundResults, modifiedFiles: [], phaseTimings, critical: roundCritical });
         state.batches.push({ index: batchIndex, name: BATCH_NAMES[batchIndex - 1], rounds: batchRounds });
         saveState(state);
         terminated = "fix-failure";
@@ -1679,7 +1768,7 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
               : "deferred 含非 minor 条目（must-fix 不得 defer）— " + v.issue_id + "(" + v.severity + ")"
       );
       log("ES3 violation: " + JSON.stringify(es3Violations));
-      batchRounds.push({ round, mustFix, suggestion, agents: agentRoundResults, modifiedFiles: [], phaseTimings });
+      batchRounds.push({ round, mustFix, suggestion, agents: agentRoundResults, modifiedFiles: [], phaseTimings, critical: roundCritical });
       state.batches.push({ index: batchIndex, name: BATCH_NAMES[batchIndex - 1], rounds: batchRounds });
       saveState(state);
       terminated = "fix-failure";
@@ -1755,7 +1844,7 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
             const stderrText2 = e2 && e2.stderr ? String(e2.stderr).trim() : "";
             const errMsg2 = (e2 && e2.message ? e2.message : String(e2)) + (stderrText2 ? " | stderr: " + stderrText2 : "");
             log("Unified git add/commit failed after env fix: " + errMsg2);
-            batchRounds.push({ round, mustFix, suggestion, agents: agentRoundResults, modifiedFiles: [], phaseTimings });
+            batchRounds.push({ round, mustFix, suggestion, agents: agentRoundResults, modifiedFiles: [], phaseTimings, critical: roundCritical });
             state.batches.push({ index: batchIndex, name: BATCH_NAMES[batchIndex - 1], rounds: batchRounds });
             saveState(state);
             terminated = "fix-failure";
@@ -1844,6 +1933,15 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
       round, // round 供对账段标注轮号（S-3）
     });
 
+    // W2 §5.2：每轮 fix 后逐问题对账落盘（result.json）——disposition 词表
+    // fixed|not-fixed|disputed|regressed，由 fix 完成后的清单态映射（全量快照，
+    // 与 zcode 镜像同构）；issueId = 清单键（跨轮稳定身份）。
+    // 写盘点在清单状态写入（fix-attempted/deferred/disputed）全部完成后。
+    writeAnalysisJson(
+      roundDir + "/result.json",
+      buildRoundReconciliation(fixResult, state.issues, fixIdMap),
+    );
+
     // `?? mustFix` 回退：normalizeFixResult 保证 fixed_count 为 number（fail-fast 后
     // 不存在降级轮 fixed_count 缺失形态），回退仅防御归一化边缘。
     const fixedCount = fixResult.fixed_count ?? mustFix;
@@ -1862,7 +1960,7 @@ for (let batchIndex = 1; batchIndex <= BATCHES.length; batchIndex++) {
         modifiedFiles = out ? out.split("\n") : [];
       } catch { /* empty */ }
     }
-    batchRounds.push({ round, mustFix, suggestion, agents: agentRoundResults, modifiedFiles, phaseTimings });
+    batchRounds.push({ round, mustFix, suggestion, agents: agentRoundResults, modifiedFiles, phaseTimings, critical: roundCritical });
     // M4: 批内即时字段——下轮 scoped 分支（recheckAfterFix=true）从
     // state.lastModifiedFiles 读本批 fix 的真实改动文件（git 实测兜底）
     state.lastModifiedFiles = modifiedFiles;
@@ -1930,7 +2028,7 @@ if ((terminated === "clean" || terminated === "converged") && disputedOutstandin
     + disputedOutstanding.map((d) => d.id).join(", ");
 }
 
-return {
+const result = {
   batches: BATCHES.length,
   totalFixed,
   terminated,
@@ -1953,3 +2051,53 @@ return {
       ? (terminated === "needs-human" ? "[NEEDS-HUMAN] " : "") + finalMessage + " " + totalFixed + " issue(s) fixed total. State: " + STATE_FILE
       : "[UNRESOLVED] " + finalMessage + ". State: " + STATE_FILE,
 };
+
+// ── W2 终态落盘（§5.1 run.json + §5.2 final.json）：单一终态写盘点，所有终止路径
+//（clean/converged/needs-human/stuck/needs-redesign/max-rounds/*-failure）在此汇合。
+// mustFixTrajectory = 逐轮 critical 活跃计数序列（batchRounds.critical 扁平化，剔除
+// 未聚合轮的 null——失败终态轮无聚合数据不推，数字序列与 zcode 镜像同构）。
+const mustFixTrajectory = state.batches.flatMap((b) =>
+  ((b && Array.isArray(b.rounds)) ? b.rounds : [])
+    .map((r) => (r && typeof r === "object" && typeof r.critical === "number") ? r.critical : null)
+    .filter((v) => v !== null),
+);
+const totalRounds = state.batches.reduce((a, b) => a + ((b && Array.isArray(b.rounds)) ? b.rounds.length : 0), 0);
+try {
+  // 轮转归档前置（§5.1 防覆盖）：同 runId 重放（startedAt 相同）直接覆写；不同
+  // startedAt 的旧 run.json 先归档为 run-<旧startedAt 冒号换连字符>.json——该族同
+  // topic 重跑覆盖 round 产物是既有语义，run 级分析终态不随之冲掉。
+  const runJsonPath = RUN_ROOT + "/run.json";
+  const runRotation = rotateRunJson({
+    runJsonPath,
+    startedAt: state.meta.startedAt,
+    read: (p) => fs.readFileSync(p, "utf-8"),
+    rename: (src, dst) => fs.renameSync(src, dst),
+  });
+  if (runRotation.archived) log("Archived previous run.json -> " + runRotation.archivePath);
+  writeAnalysisJson(runJsonPath, buildRunManifest({
+    projectRoot: RUN_PROJECT_ROOT,
+    worktreePath: RUN_WORKTREE_PATH,
+    branch: RUN_BRANCH,
+    baseCommit: lockedBase.hash || "",
+    headCommit: RUN_HEAD_COMMIT,
+    // attempt 恒 1——本循环族无 attempt 机制（同 HEAD 重跑覆盖写 round 产物属既有
+    // 预期语义），run.json 防覆盖由上方轮转归档承担（与 zcode 镜像同口径）
+    attempt: 1,
+    model: MODEL || null,
+    startedAt: state.meta.startedAt,
+    endedAt: new Date().toISOString(),
+    terminated,
+    rounds: totalRounds,
+    mustFixTrajectory,
+  }));
+  // final.json（§5.2）：return 契约全集直写 + 计算字段二分（fixAttemptsMax /
+  // mustFixTrajectory）——return 有的盘上必须有，字段集由 buildFinalDoc 锁定。
+  writeAnalysisJson(RUN_ROOT + "/final.json", buildFinalDoc(result, {
+    issues: state.issues,
+    mustFixTrajectory,
+  }));
+} catch (e) {
+  log("WARN: failed to write run.json/final.json — " + (e && e.message ? e.message : String(e)));
+}
+
+return result;

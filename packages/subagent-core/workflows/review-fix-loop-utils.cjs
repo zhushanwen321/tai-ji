@@ -134,6 +134,10 @@ function buildReviewProtocolStatic({ reviewPrompt, reviewInstruction }) {
     "must_fix, suggestion, and reconciliation. reconciliation is an array —",
     "return [] when there is no previous round to reconcile; on later rounds",
     "every previous issue_id must have a status entry.",
+    "Also include problems: one {ref, level, title} entry per issue in your",
+    "report — ref is the report anchor (the issue id/marker your report uses for",
+    "that row), level is critical|major|minor (same as the row's severity),",
+    "title is the one-line issue title. Return [] when you found nothing.",
     "",
     ROUND_CONTEXT_MARKER,
   ].join("\n");
@@ -585,6 +589,11 @@ function buildAggregatorPrompt({ header, round, max, roundDir, reviewResults, pr
     "  filters them out of the fix queue; must_fix COUNTS ONLY adjudication=evidence entries.",
     "  When adjudication is unverified/downgraded, \"note\" MUST carry the adjudication reason",
     "  (one line, same as the table note).",
+    "- sourceRefs (per-entry, optional): upstream issue refs this entry was derived",
+    "  from, as {round, ref} objects — round = the source round, ref = the previous-round",
+    "  tracked id it continues (cross-round carryover) and/or the reviewer report anchor it",
+    "  merges (multi-reviewer dedup). [] (= fresh finding this round) or omitting the field",
+    "  entirely both mean new; the aggregated.json analysis artifact carries it.",
     "- files: file paths cited by the issue (for regression attribution).",
     "- evidence: the cited evidence (files/lines/test results) as stated by the reviewer.",
     "- guidance: one-line fix direction for the fixer — extract it verbatim from the sub-review",
@@ -1114,7 +1123,28 @@ function normalizeReviewResult(raw) {
     must_fix: parsed.must_fix,
     suggestion: parsed.suggestion ?? 0,
     reconciliation,
+    // W2 §5.4：reviewer 原始发现申报（problems.json 数据源）——可选项，缺失/畸形条目
+    // 过滤后缺省 []（申报缺失不 fail；产出量 0 也是合法分析数据）
+    problems: normalizeReviewerProblems(parsed.problems),
   };
+}
+
+/** reviewer problems 申报归一（W2 §5.4）：逐条 {ref, level, title}——ref 非空白
+ *  （报告内锚点，分析侧按它回查 reviewer md 报告原文）、level 用本族 severity 词表
+ *  critical|major|minor（畸形 level 条目整条剔除，不回退——错档数据比缺数据危害高）、
+ *  title 容缺省空串。与 tech-review-loop 的 sanitizeProblems 同构（词表不同源：
+ *  那边是 must-fix|suggestion 两级，本族三级）。 */
+function normalizeReviewerProblems(raw) {
+  if (!Array.isArray(raw)) return [];
+  const out = [];
+  for (const p of raw) {
+    if (!(p && typeof p === "object")) continue;
+    const ref = typeof p.ref === "string" ? p.ref.trim() : "";
+    if (!ref) continue;
+    if (p.level !== "critical" && p.level !== "major" && p.level !== "minor") continue;
+    out.push({ ref, level: p.level, title: typeof p.title === "string" ? p.title.trim() : "" });
+  }
+  return out;
 }
 
 /** 聚合结果归一化：must_fix 别名（totalMustFix/mustFix）+ report_file 别名，无 must_fix 数 → null。
@@ -1167,6 +1197,11 @@ function normalizeMustFixEntry(x) {
   if (ADJUDICATION_VALUES.includes(x.adjudication)) {
     entry.adjudication = x.adjudication;
   }
+  // sourceRefs（W2 §5.3 聚合分析链）：来源申报（[] = 本轮新发现；非空 = 上轮延续或
+  // 多 reviewer 合并），元素 {round, ref} 与 zcode 镜像同构——畸形条目剔除（ref 空白），
+  // 缺省不落键（序列化边界 buildAggregatedDoc 补 []，申报缺失不 fail）。
+  const sourceRefs = normalizeSourceRefs(x.sourceRefs);
+  if (sourceRefs.length > 0) entry.sourceRefs = sourceRefs;
   return entry;
 }
 
@@ -1910,6 +1945,208 @@ function planUnifiedCommit(fixes, counters, exists) {
   };
 }
 
+// ── W2 分析产物落盘（skill-data-redesign 设计 §5.1-§5.4）──────────────
+// 五类产物的确定性序列化（run.json / final.json / round-N/result.json /
+// round-N/aggregated.json / round-N/problems.json）：全部从既有结构化状态派生，
+// 不新增 agent 产出义务（problems 申报除外——reviewer schema 可选项，见
+// normalizeReviewerProblems）；不从 md 反向解析（该循环明文拒绝的形态）。
+
+/** 逐轮 critical 活跃计数（§5.1 mustFixTrajectory 数据源，review-fix-loop 族口径，
+ *  与 zcode 镜像同源）：问题清单中 status ∈ {open, regressed} 且 severity=critical
+ *  的条数（清单活跃视图，severity 词表 critical/major/minor）。清单缺/空/条目畸形
+ *  → 0；条目 id 不在活跃集（已降级）不计。 */
+function countLedgerCritical(issues) {
+  let n = 0;
+  for (const entry of Object.values(issues || {})) {
+    if (entry && typeof entry === "object"
+      && (entry.status === "open" || entry.status === "regressed")
+      && entry.severity === "critical") n++;
+  }
+  return n;
+}
+
+/** result.json 逐问题对账条目（§5.2）：disposition 词表 fixed|not-fixed|disputed|regressed，
+ *  由 fix 完成后的问题清单态映射（与 zcode 镜像同构）：fixed/fix-attempted→fixed
+ *  （fix-attempted = 本轮 fixer 声称已修，下轮对账验证——与 zcode 侧 fixer 申报即
+ *  fixed 的落盘语义一致）、regressed→regressed、disputed→disputed、
+ *  open/deferred/未知形态→not-fixed（deferred 是有意退出修复队列的未修复条目）。
+ *  scope = 问题清单全集（逐轮全量状态快照，跨轮 join 按 issueId=清单键稳定身份）。
+ *  evidence：disputed 取清单 disputeEvidence，fixed/deferred 取本轮 fix 申报
+ *  （self_check‖description / deferredReason，pi 侧增强——经 idMap 翻译按清单键回查），
+ *  无证据不落键（schema 的 evidence? 可选语义）。 */
+function buildRoundReconciliation(fixResult, issues, idMap) {
+  const fx = fixResult && typeof fixResult === "object" ? fixResult : {};
+  const ledger = issues && typeof issues === "object" ? issues : {};
+  const evByKey = new Map();
+  const collectEv = (list, extract) => {
+    for (const item of Array.isArray(list) ? list : []) {
+      if (!(item && typeof item === "object" && typeof item.issue_id === "string" && item.issue_id)) continue;
+      const key = findIssueKey(ledger, translateId(idMap || {}, item.issue_id, ledger)) || item.issue_id;
+      if (!evByKey.has(key)) evByKey.set(key, extract(item));
+    }
+  };
+  collectEv(fx.fixes, (f) =>
+    (typeof f.self_check === "string" && f.self_check ? f.self_check : undefined)
+    ?? (typeof f.description === "string" && f.description ? f.description : undefined));
+  collectEv(fx.deferred, (d) => (typeof d.reason === "string" && d.reason ? d.reason : undefined));
+  collectEv(fx.disputed, (d) => (typeof d.evidence === "string" && d.evidence ? d.evidence : undefined));
+  const entries = [];
+  for (const [id, entry] of Object.entries(ledger)) {
+    if (!(entry && typeof entry === "object")) continue;
+    let disposition;
+    if (entry.status === "fixed" || entry.status === "fix-attempted") disposition = "fixed";
+    else if (entry.status === "regressed") disposition = "regressed";
+    else if (entry.status === "disputed") disposition = "disputed";
+    else disposition = "not-fixed";
+    const evidence = (entry.status === "disputed" && typeof entry.disputeEvidence === "string" && entry.disputeEvidence)
+      ? entry.disputeEvidence
+      : evByKey.get(id);
+    entries.push(evidence === undefined ? { issueId: id, disposition } : { issueId: id, disposition, evidence });
+  }
+  return entries;
+}
+
+/** aggregated.json（§5.3）：从聚合 agent 的既有结构化返回（normalizeAggregatorResult
+ *  产物）确定性序列化——非 agent 手写第二产物；aggregated.md 保留人读，两者同源于
+ *  一次结构化返回，不做互校。issues 每条补 sourceRefs（缺省 []，申报缺失不 fail，
+ *  元素 {round, ref} 与 zcode 镜像同构）；verdict 沿用既有词表 adjudication:
+ *  evidence|unverified|downgraded（未裁决不落键，不新造值）。round/batch/report_file
+ *  是跨轮 join 与回查 md 原文的上下文键（§6 分析口径）。 */
+function buildAggregatedDoc(agg, { round, batch } = {}) {
+  const a = agg && typeof agg === "object" ? agg : {};
+  const entries = Array.isArray(a.must_fix_ids) ? a.must_fix_ids : [];
+  const doc = {
+    round: typeof round === "number" ? round : null,
+    batch: typeof batch === "number" ? batch : null,
+    ...(typeof a.report_file === "string" && a.report_file ? { report_file: a.report_file } : {}),
+    must_fix: typeof a.must_fix === "number" ? a.must_fix : 0,
+    suggestion: typeof a.suggestion === "number" ? a.suggestion : 0,
+    issues: entries
+      .filter((e) => e && typeof e === "object" && typeof e.id === "string")
+      .map((e) => ({
+        id: e.id,
+        severity: e.severity || "major",
+        ...(typeof e.title === "string" ? { title: e.title } : {}),
+        ...(Array.isArray(e.files) ? { files: e.files } : {}),
+        ...(typeof e.evidence === "string" ? { evidence: e.evidence } : {}),
+        ...(typeof e.guidance === "string" ? { guidance: e.guidance } : {}),
+        ...(typeof e.note === "string" ? { note: e.note } : {}),
+        ...(ADJUDICATION_VALUES.includes(e.adjudication) ? { adjudication: e.adjudication } : {}),
+        sourceRefs: normalizeSourceRefs(e.sourceRefs),
+      })),
+    groups: Array.isArray(a.groups) ? a.groups : [],
+    fixes_caution: Array.isArray(a.fixes_caution) ? a.fixes_caution : [],
+  };
+  if (Array.isArray(a.scores)) doc.scores = a.scores;
+  return doc;
+}
+
+/** sourceRefs 元素归一（与 zcode 镜像同构的 {round, ref} 形态）：非对象/ref 空白条目
+ *  剔除；round 非数丢键。缺省恒 []（申报缺失不 fail）。 */
+function normalizeSourceRefs(raw) {
+  if (!Array.isArray(raw)) return [];
+  const out = [];
+  for (const s of raw) {
+    if (!(s && typeof s === "object")) continue;
+    if (typeof s.ref !== "string" || !s.ref.trim()) continue;
+    out.push({ ...(typeof s.round === "number" ? { round: s.round } : {}), ref: s.ref.trim() });
+  }
+  return out;
+}
+
+/** problems.json（§5.4）：外层 {round, problems}、元素 {ref, level, title}——与
+ *  tech-review-loop 既有形真同构（level 词表随族：本族 critical|major|minor）。
+ *  problems = normalizeReviewerProblems 产物（多 reviewer 扁平合并，脚本侧序列化
+ *  零新计算）。 */
+function buildProblemsDoc(round, problems) {
+  return {
+    round: typeof round === "number" ? round : null,
+    problems: Array.isArray(problems) ? problems : [],
+  };
+}
+
+/** run.json（§5.1 统一 run manifest，pi 内置版装配单点）：字段集与设计 schema 逐字
+ *  对齐——workflow/segment 固定本循环身份、host="pi"；model 取不到 → null（分析侧
+ *  按模型分层的字段，缺席必须显式可见）；git 字段不可用（非 git 目录）→ 空串；
+ *  mustFixTrajectory = 逐轮 critical 计数序列（本族口径，未聚合轮 null）。 */
+function buildRunManifest(ctx) {
+  const c = ctx && typeof ctx === "object" ? ctx : {};
+  return {
+    workflow: "review-fix-loop",
+    segment: "review-fix-loop",
+    host: "pi",
+    projectRoot: typeof c.projectRoot === "string" ? c.projectRoot : "",
+    worktreePath: typeof c.worktreePath === "string" ? c.worktreePath : "",
+    branch: typeof c.branch === "string" ? c.branch : "",
+    baseCommit: typeof c.baseCommit === "string" ? c.baseCommit : "",
+    headCommit: typeof c.headCommit === "string" ? c.headCommit : "",
+    attempt: typeof c.attempt === "number" ? c.attempt : 1,
+    model: typeof c.model === "string" && c.model ? c.model : null,
+    startedAt: typeof c.startedAt === "string" ? c.startedAt : "",
+    endedAt: typeof c.endedAt === "string" ? c.endedAt : "",
+    terminated: typeof c.terminated === "string" ? c.terminated : "",
+    rounds: typeof c.rounds === "number" ? c.rounds : 0,
+    mustFixTrajectory: Array.isArray(c.mustFixTrajectory) ? c.mustFixTrajectory : [],
+  };
+}
+
+/** startedAt 轮转归档（§5.1 防覆盖，R4 裁决落地）：review-fix-loop 族同 topic 重跑
+ *  覆盖写 round 产物是既有预期语义，但 run 级分析终态文件的防覆盖由本函数承担——
+ *  已存在 run.json 且 startedAt 不同 → 先 rename 为 run-<旧startedAt 冒号换连字符>.json
+ *  再写新（同 HEAD 重跑不再冲掉上一轮分析数据）；startedAt 相同（resume/journal 重放）
+ *  → 不归档，允许直接覆写。旧文件缺失 → 无操作；旧文件 JSON 损坏 → 按「不同」归档
+ *  （旧数据留档、不阻塞新写，归档名戳记 unknown）。io 参数注入（read/rename），
+ *  测试用内存实现或真实 fs。
+ * @returns {archived: boolean, archivePath?: string}
+ */
+function rotateRunJson({ runJsonPath, startedAt, read, rename }) {
+  let raw = null;
+  try {
+    raw = read(runJsonPath);
+  } catch {
+    raw = null;
+  }
+  if (typeof raw !== "string" || raw === "") return { archived: false };
+  let prev = null;
+  try {
+    prev = JSON.parse(raw);
+  } catch {
+    prev = null;
+  }
+  if (prev && typeof prev === "object" && prev.startedAt === startedAt) return { archived: false };
+  const prevStamp = prev && typeof prev.startedAt === "string" && prev.startedAt
+    ? prev.startedAt.replace(/:/g, "-")
+    : "unknown";
+  const archivePath = path.join(path.dirname(String(runJsonPath)), "run-" + prevStamp + ".json");
+  rename(runJsonPath, archivePath);
+  return { archived: true, archivePath };
+}
+
+/** final.json（§5.2）：直写 return 契约全集（spread——return 有的盘上必须有）+ 计算
+ *  字段二分：fixAttemptsMax = max(逐条 issue 的 fixAttempts)（issue 级内存字段的终态
+ *  聚合，由 extras.issues 现算）、mustFixTrajectory = §5.1 逐轮 critical 计数序列。 */
+function buildFinalDoc(result, extras) {
+  const e = extras && typeof extras === "object" ? extras : {};
+  return {
+    ...result,
+    fixAttemptsMax: computeFixAttemptsMax(e.issues),
+    mustFixTrajectory: Array.isArray(e.mustFixTrajectory) ? e.mustFixTrajectory : [],
+  };
+}
+
+/** fixAttemptsMax（§5.2 计算字段）：逐条 issue 的 fixAttempts 最大值；清单空/缺/条目
+ *  畸形 → 0（无修复尝试的如实基线，非 null——max 语义下空集的自然单位元）。 */
+function computeFixAttemptsMax(issues) {
+  let max = 0;
+  for (const entry of Object.values(issues || {})) {
+    const n = entry && typeof entry === "object" && typeof entry.fixAttempts === "number"
+      ? entry.fixAttempts
+      : 0;
+    if (n > max) max = n;
+  }
+  return max;
+}
+
 // ── 批内调度（2026-09-20 实测 5 轮排名驱动，对齐 zcode 原生版同构实现）──────
 // REVIEWER_BATCH 切批下慢者同批可省 review 墙钟（实测 ~18%），但精确排名每轮漂移、
 // 只有分组稳定（5 轮实测：慢组恒前 4、快组恒后段）。调度形态 = 慢批固定 3 + 动态 1 /
@@ -2095,4 +2332,14 @@ module.exports = {
   planReviewerOrder,
   parseDiffStats,
   countDiffPackages,
+  // W2 分析产物落盘（skill-data-redesign 设计 §5.1-§5.4）
+  countLedgerCritical,
+  buildRoundReconciliation,
+  buildAggregatedDoc,
+  normalizeReviewerProblems,
+  buildProblemsDoc,
+  buildRunManifest,
+  rotateRunJson,
+  buildFinalDoc,
+  computeFixAttemptsMax,
 };

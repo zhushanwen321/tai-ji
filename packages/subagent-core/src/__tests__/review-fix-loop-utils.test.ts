@@ -9,7 +9,7 @@
 // computeDegradedCommitSet）已随 fail-fast 改造整体拆除，对应用例一并退役。
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync } from "fs";
+import { existsSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import {
@@ -72,6 +72,15 @@ import {
   planReviewerOrder,
   parseDiffStats,
   countDiffPackages,
+  countLedgerCritical,
+  buildRoundReconciliation,
+  buildAggregatedDoc,
+  normalizeReviewerProblems,
+  buildProblemsDoc,
+  buildRunManifest,
+  rotateRunJson,
+  buildFinalDoc,
+  computeFixAttemptsMax,
 } from "../../workflows/review-fix-loop-utils.cjs";
 
 /** 测试用 fail：与 workflow 内 fail() 同语义（抛错终止） */
@@ -1876,6 +1885,10 @@ describe("D2 三模板静态段逐字节相同（动态段起点标记之前）"
       "must_fix, suggestion, and reconciliation. reconciliation is an array —",
       "return [] when there is no previous round to reconcile; on later rounds",
       "every previous issue_id must have a status entry.",
+      "Also include problems: one {ref, level, title} entry per issue in your",
+      "report — ref is the report anchor (the issue id/marker your report uses for",
+      "that row), level is critical|major|minor (same as the row's severity),",
+      "title is the one-line issue title. Return [] when you found nothing.",
       "",
       "",
     ].join("\n"));
@@ -2954,3 +2967,279 @@ describe("planReviewerOrder（固定 3 + 动态 1 双批调度）", () => {
   });
 });
 
+
+// ── W2 分析产物落盘（skill-data-redesign 设计 §5.1-§5.4） ──────────────────────
+
+describe("normalizeReviewerProblems（reviewer problems 申报归一，§5.4）", () => {
+  it("合法条目透传：ref/title trim、level 沿用本族三级词表", () => {
+    expect(normalizeReviewerProblems([
+      { ref: " MF-1 ", level: "critical", title: " NPE on null session " },
+      { ref: "P-2", level: "minor", title: "" },
+    ])).toEqual([
+      { ref: "MF-1", level: "critical", title: "NPE on null session" },
+      { ref: "P-2", level: "minor", title: "" },
+    ]);
+  });
+  it("畸形条目整条剔除：缺 ref / 空白 ref / level 出词表 / 非对象（错档数据比缺数据危害高，不回退）", () => {
+    expect(normalizeReviewerProblems([
+      { level: "major", title: "no ref" },
+      { ref: "  ", level: "major", title: "blank ref" },
+      { ref: "P-1", level: "blocker", title: "bad level" },
+      { ref: "P-2", level: 42, title: "level not string" },
+      "MF-3",
+      null,
+    ])).toEqual([]);
+  });
+  it("非数组输入 → []（申报缺失不 fail）", () => {
+    expect(normalizeReviewerProblems(undefined)).toEqual([]);
+    expect(normalizeReviewerProblems("problems")).toEqual([]);
+    expect(normalizeReviewerProblems({ ref: "P-1" })).toEqual([]);
+  });
+});
+
+describe("normalizeReviewResult problems 透传（§5.4 数据源）", () => {
+  it("申报透传（经 normalizeReviewerProblems 过滤）；缺失 → []（产出量 0 也是合法数据）", () => {
+    const declared = normalizeReviewResult({
+      report_file: "/tmp/r.md", must_fix: 1, suggestion: 0,
+      problems: [{ ref: "R1-1", level: "critical", title: "a" }, { bad: true }],
+    });
+    expect(declared!.problems).toEqual([{ ref: "R1-1", level: "critical", title: "a" }]);
+    const missing = normalizeReviewResult({ report_file: "/tmp/r.md", must_fix: 0, suggestion: 0 });
+    expect(missing!.problems).toEqual([]);
+  });
+});
+
+describe("normalizeAggregatorResult sourceRefs 透传（§5.3 来源申报）", () => {
+  it("申报透传：{round, ref} 元素（ref trim、round 非数丢键）、畸形条目剔除；缺省/非数组不落键（序列化边界补 []，不 fail）", () => {
+    const r = normalizeAggregatorResult({
+      report_file: "/tmp/agg.md", must_fix: 3, suggestion: 0,
+      must_fix_ids: [
+        { id: "MF-1", severity: "critical", sourceRefs: [{ round: 1, ref: " MF-0-1 " }, { ref: "review-a#3" }, { round: "x", ref: "" }, "MF-0-9", null] },
+        { id: "MF-2", severity: "major", sourceRefs: "not-an-array" },
+        { id: "MF-3", severity: "major" },
+      ],
+    });
+    expect(r!.must_fix_ids![0]).toEqual({
+      id: "MF-1", severity: "critical",
+      sourceRefs: [{ round: 1, ref: "MF-0-1" }, { ref: "review-a#3" }],
+    });
+    expect("sourceRefs" in r!.must_fix_ids![1]).toBe(false);
+    expect("sourceRefs" in r!.must_fix_ids![2]).toBe(false);
+  });
+});
+
+describe("countLedgerCritical（逐轮 critical 活跃计数，§5.1 mustFixTrajectory 口径，与 zcode 镜像同源）", () => {
+  it("清单活跃视图：open/regressed 的 critical 计数；fixed/deferred/disputed 不计", () => {
+    expect(countLedgerCritical({
+      A: { status: "open", severity: "critical" },
+      B: { status: "regressed", severity: "critical" },
+      C: { status: "fix-attempted", severity: "critical" },
+      D: { status: "fixed", severity: "critical" },
+      E: { status: "deferred", severity: "critical" },
+      F: { status: "disputed", severity: "critical" },
+      G: { status: "open", severity: "major" },
+      H: { status: "regressed", severity: "minor" },
+    })).toBe(2);
+  });
+  it("清单缺/空/条目畸形 → 0（无清单即无活跃 critical）", () => {
+    expect(countLedgerCritical(undefined)).toBe(0);
+    expect(countLedgerCritical({})).toBe(0);
+    expect(countLedgerCritical({ A: null, B: "x", C: { status: "open" } })).toBe(0);
+  });
+});
+
+describe("buildRoundReconciliation（每轮 fix 后逐问题对账，§5.2，与 zcode 镜像同构的全清单映射）", () => {
+  const issues = {
+    "MF-1-1": { status: "fix-attempted", title: "t1" },
+    "MF-1-2": { status: "open" },
+    "S-1": { status: "deferred", deferredReason: "high cost" },
+    "MF-0-9": { status: "regressed" },
+    "MF-0-8": { status: "disputed", disputeEvidence: "counter-proof" },
+    "MF-0-7": { status: "fixed" },
+  };
+  it("清单态映射：fixed/fix-attempted→fixed、regressed→regressed、disputed→disputed、open/deferred→not-fixed", () => {
+    const out = buildRoundReconciliation(
+      { deferred: [{ issue_id: "S-1", reason: "high cost" }] },
+      issues,
+      {},
+    );
+    expect(out).toEqual([
+      { issueId: "MF-1-1", disposition: "fixed" },
+      { issueId: "MF-1-2", disposition: "not-fixed" },
+      { issueId: "S-1", disposition: "not-fixed", evidence: "high cost" },
+      { issueId: "MF-0-9", disposition: "regressed" },
+      { issueId: "MF-0-8", disposition: "disputed", evidence: "counter-proof" },
+      { issueId: "MF-0-7", disposition: "fixed" },
+    ]);
+  });
+  it("evidence 增强：disputed 优先清单反证；fixed 从本轮 fixes 申报回查（idMap 翻译后按清单键）self_check 优先 description", () => {
+    const fixResult = {
+      fixes: [{ issue_id: "T-9", self_check: "grep x | 0", description: "d1" }],
+      deferred: [],
+      disputed: [{ issue_id: "T-8", evidence: "declared-counter" }],
+    };
+    const out = buildRoundReconciliation(fixResult, issues, { "T-9": "MF-1-1", "T-8": "MF-0-8" });
+    const byId = new Map(out.map((e) => [e.issueId, e]));
+    expect(byId.get("MF-1-1")).toEqual({ issueId: "MF-1-1", disposition: "fixed", evidence: "grep x | 0" });
+    expect(byId.get("MF-0-8")).toEqual({ issueId: "MF-0-8", disposition: "disputed", evidence: "counter-proof" });
+    // 翻译 miss 的申报 id 不产生幽灵条目（清单权威，与 zcode 镜像一致）
+    const miss = buildRoundReconciliation({ fixes: [{ issue_id: "GHOST", description: "d" }] }, issues, {});
+    expect(miss.find((e) => e.issueId === "GHOST")).toBeUndefined();
+  });
+  it("self_check 缺失回退 description；清单态权威（open 即使被申报 fixed 也落 not-fixed）不落 evidence 键；畸形条目跳过", () => {
+    const narrow = { "MF-1-1": { status: "fix-attempted" }, "MF-1-2": { status: "open" }, BAD: null };
+    const out = buildRoundReconciliation(
+      { fixes: [{ issue_id: "MF-1-1", description: "d1" }, { issue_id: "MF-1-2" }, { description: "no id" }] },
+      narrow,
+      {},
+    );
+    expect(out).toEqual([
+      { issueId: "MF-1-1", disposition: "fixed", evidence: "d1" },
+      { issueId: "MF-1-2", disposition: "not-fixed" },
+    ]);
+  });
+  it("空输入 → []（不抛错）", () => {
+    expect(buildRoundReconciliation(null, undefined, null)).toEqual([]);
+    expect(buildRoundReconciliation({}, {}, {})).toEqual([]);
+  });
+});
+
+describe("buildAggregatedDoc（聚合结构化返回确定性序列化，§5.3）", () => {
+  it("issues 逐条序列化：sourceRefs 缺省 []（申报缺失不 fail，元素 {round, ref}）、adjudication 词表透传、未裁决不落键", () => {
+    const doc = buildAggregatedDoc(
+      {
+        report_file: "/d/aggregated.md",
+        must_fix: 2, suggestion: 1,
+        must_fix_ids: [
+          { id: "MF-1", severity: "critical", title: "t", files: ["a.ts"], evidence: "e", guidance: "g", adjudication: "evidence", sourceRefs: [{ round: 1, ref: "MF-0-1" }] },
+          { id: "MF-2", severity: "major", adjudication: "downgraded", note: "weak" },
+        ],
+        groups: [{ id: "G1", issueIds: ["MF-1"], files: ["a.ts"], note: "n" }],
+        fixes_caution: ["careful"],
+        scores: [{ round: 1, targetKind: "reviewer", targetName: "x", dimensions: {}, total: 8 }],
+      },
+      { round: 2, batch: 1 },
+    );
+    expect(doc.round).toBe(2);
+    expect(doc.batch).toBe(1);
+    expect(doc.report_file).toBe("/d/aggregated.md");
+    expect(doc.issues[0]).toEqual({
+      id: "MF-1", severity: "critical", title: "t", files: ["a.ts"], evidence: "e", guidance: "g",
+      adjudication: "evidence", sourceRefs: [{ round: 1, ref: "MF-0-1" }],
+    });
+    expect(doc.issues[1]).toEqual({ id: "MF-2", severity: "major", adjudication: "downgraded", note: "weak", sourceRefs: [] });
+    expect(doc.groups).toEqual([{ id: "G1", issueIds: ["MF-1"], files: ["a.ts"], note: "n" }]);
+    expect(doc.fixes_caution).toEqual(["careful"]);
+    expect(doc.scores).toHaveLength(1);
+  });
+  it("上下文缺省/畸形输入安全：round/batch null、agg null → 空壳文档（不抛错）", () => {
+    const doc = buildAggregatedDoc(null, {});
+    expect(doc).toEqual({ round: null, batch: null, must_fix: 0, suggestion: 0, issues: [], groups: [], fixes_caution: [] });
+  });
+});
+
+describe("buildProblemsDoc（problems.json 外层形态，§5.4）", () => {
+  it("外层 {round, problems}；problems 非数组 → []", () => {
+    expect(buildProblemsDoc(3, [{ ref: "P-1", level: "major", title: "t" }]))
+      .toEqual({ round: 3, problems: [{ ref: "P-1", level: "major", title: "t" }] });
+    expect(buildProblemsDoc(undefined, null)).toEqual({ round: null, problems: [] });
+  });
+});
+
+describe("buildRunManifest（run.json 统一 manifest 装配，§5.1）", () => {
+  it("字段集逐字对齐设计 schema（多字段少字段都红）", () => {
+    const m = buildRunManifest({
+      projectRoot: "/repo", worktreePath: "/repo/wt", branch: "feat-x",
+      baseCommit: "b1", headCommit: "h1", attempt: 1, model: "m/x",
+      startedAt: "2026-10-18T10:00:00.000Z", endedAt: "2026-10-18T11:00:00.000Z",
+      terminated: "clean", rounds: 3, mustFixTrajectory: [2, 1, 0],
+    });
+    expect(Object.keys(m).sort()).toEqual([
+      "attempt", "baseCommit", "branch", "endedAt", "headCommit", "host", "model",
+      "mustFixTrajectory", "projectRoot", "rounds", "segment", "startedAt", "terminated",
+      "workflow", "worktreePath",
+    ]);
+    expect(m.workflow).toBe("review-fix-loop");
+    expect(m.segment).toBe("review-fix-loop");
+    expect(m.host).toBe("pi");
+    expect(m.model).toBe("m/x");
+    expect(m.mustFixTrajectory).toEqual([2, 1, 0]);
+  });
+  it("model 取不到 → null（显式缺席可见）；git 字段缺失 → 空串；trajectory 非数组 → []", () => {
+    const m = buildRunManifest({ startedAt: "s", endedAt: "e", terminated: "clean" });
+    expect(m.model).toBeNull();
+    expect(m.projectRoot).toBe("");
+    expect(m.worktreePath).toBe("");
+    expect(m.branch).toBe("");
+    expect(m.baseCommit).toBe("");
+    expect(m.headCommit).toBe("");
+    expect(m.rounds).toBe(0);
+    expect(m.mustFixTrajectory).toEqual([]);
+    expect(buildRunManifest(null).workflow).toBe("review-fix-loop");
+  });
+});
+
+describe("rotateRunJson（startedAt 轮转归档，§5.1 防覆盖）", () => {
+  let dir = "";
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "rfl-rotate-"));
+  });
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
+  });
+  const io = () => ({
+    read: (p: string) => readFileSync(p, "utf-8"),
+    rename: (src: string, dst: string) => renameSync(src, dst),
+  });
+
+  it("无旧 run.json → 不归档（首次写）", () => {
+    const p = join(dir, "run.json");
+    expect(rotateRunJson({ runJsonPath: p, startedAt: "s2", ...io() })).toEqual({ archived: false });
+  });
+  it("startedAt 相同（resume/journal 重放）→ 不归档，允许直接覆写", () => {
+    const p = join(dir, "run.json");
+    writeFileSync(p, JSON.stringify({ startedAt: "s1", terminated: "clean" }), "utf-8");
+    expect(rotateRunJson({ runJsonPath: p, startedAt: "s1", ...io() })).toEqual({ archived: false });
+    expect(existsSync(p)).toBe(true);
+  });
+  it("startedAt 不同 → 先归档 run-<旧startedAt 冒号换连字符>.json，原路径腾空", () => {
+    const p = join(dir, "run.json");
+    writeFileSync(p, JSON.stringify({ startedAt: "2026-10-18T09:00:00.000Z", terminated: "stuck" }), "utf-8");
+    const r = rotateRunJson({ runJsonPath: p, startedAt: "2026-10-18T10:00:00.000Z", ...io() });
+    expect(r.archived).toBe(true);
+    expect(r.archivePath).toBe(join(dir, "run-2026-10-18T09-00-00.000Z.json"));
+    expect(existsSync(p)).toBe(false);
+    expect(JSON.parse(readFileSync(r.archivePath!, "utf-8")).terminated).toBe("stuck");
+  });
+  it("旧文件 JSON 损坏 → 按「不同」归档（戳记 unknown，旧数据留档不阻塞新写）", () => {
+    const p = join(dir, "run.json");
+    writeFileSync(p, "{corrupt", "utf-8");
+    const r = rotateRunJson({ runJsonPath: p, startedAt: "s2", ...io() });
+    expect(r.archived).toBe(true);
+    expect(r.archivePath).toBe(join(dir, "run-unknown.json"));
+    expect(readFileSync(r.archivePath!, "utf-8")).toBe("{corrupt");
+  });
+});
+
+describe("computeFixAttemptsMax + buildFinalDoc（final.json 计算字段，§5.2）", () => {
+  it("fixAttemptsMax = 逐条 issue 的 fixAttempts 最大值；空/缺/畸形 → 0", () => {
+    expect(computeFixAttemptsMax({ a: { fixAttempts: 2 }, b: { fixAttempts: 1 } })).toBe(2);
+    expect(computeFixAttemptsMax({ a: { fixAttempts: 0 } })).toBe(0);
+    expect(computeFixAttemptsMax({})).toBe(0);
+    expect(computeFixAttemptsMax(undefined)).toBe(0);
+    expect(computeFixAttemptsMax({ a: null, b: { fixAttempts: "3" } })).toBe(0);
+  });
+  it("final doc = return 契约全集直写（spread）+ fixAttemptsMax + mustFixTrajectory（字段二分锁定）", () => {
+    const result = { batches: 1, totalFixed: 3, terminated: "clean", targetType: "git-diff", target: "main", runDir: "/r", remaining: [], disputed: [], message: "ok" };
+    const doc = buildFinalDoc(result, { issues: { a: { fixAttempts: 2 } }, mustFixTrajectory: [2, 0] });
+    // return 有的盘上必须有：全集字段逐一在盘
+    for (const k of Object.keys(result)) expect(k in doc).toBe(true);
+    expect(doc.terminated).toBe("clean");
+    expect(doc.fixAttemptsMax).toBe(2);
+    expect(doc.mustFixTrajectory).toEqual([2, 0]);
+    // 计算字段缺省：trajectory 非数组 → []（不静默造序列）
+    const bare = buildFinalDoc(result, { issues: {} });
+    expect(bare.fixAttemptsMax).toBe(0);
+    expect(bare.mustFixTrajectory).toEqual([]);
+  });
+});
