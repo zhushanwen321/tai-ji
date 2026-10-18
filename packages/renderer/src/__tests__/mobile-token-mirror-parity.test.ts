@@ -73,6 +73,6 @@ describe('mobile tokens.css ↔ renderer style.css 令牌镜像逐字一致（D3
     expect(decl(mobileRoot, '--neutral-fg-2', 'mobile')).toBe(
       decl(desktopRoot, '--neutral-fg-2', 'desktop'),
     )
-    expect(decl(desktopRoot, '--neutral-fg-2', 'desktop')).toContain('#d9d9d9')
+    expect(decl(desktopRoot, '--neutral-fg-2', 'desktop')).toContain('#d2d2d2')
   })
 })

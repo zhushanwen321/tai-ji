@@ -1121,7 +1121,7 @@ const ok = await ctx.ui.showConfirm("发布", "确认发布 v1.2.0？", { timeou
 
 - `opts.timeout`（毫秒）= 从调用到拿到结果的**最长全程等待，含串行排队时间**（前面还有
   其他插件的弹窗未关闭时，排队也在计时）。缺省/非法回落默认 30min；无 opt-out（「等人工」
-  不允许无界等待——串行队列 head-of-line 阻塞）。`notify` / `updateStatusBarItem` 纯展示
+  不允许无界等待——串行队列 head-of-line 阻塞）。`notify` 纯展示
   类无等待语义，不设 `opts`。
 - **到期 = 取消非替答**：弹窗在前端被撤回（`plugin:uiRequestExpired` 广播），调用
   reject `Error`（`code: 'UI_TIMEOUT'`）——超时是独立可 catch 的错误类别，与「用户点取消」

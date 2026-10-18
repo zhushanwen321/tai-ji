@@ -2,10 +2,10 @@
 name: taiji
 description: AI Agent 桌面工作台 · 太极纯灰（v6）设计系统
 colors:
-  bg: "#1e1e1e"
-  surface: "#101010"
-  fg: "#ececec"
-  muted: "#8a8a8a"
+  bg: "#242428"
+  surface: "#18181b"
+  fg: "#e6e6e6"
+  muted: "#949494"
   border: "rgba(255, 255, 255, 0.07)"
   accent: "#7fb89c"
   success: "#78a87e"
@@ -113,7 +113,7 @@ v6 重构的三个缘由：
 |---|------|---------|
 | 1 | **层级代替边框** | 静态容器只用一个表面色，不叠加 border；靠 bg 层级浮起分隔。border 仅保留给浮起可交互容器（popover/dialog/composer）和 focus 态 |
 | 2 | **圆角档位提升** | `--radius-sm` 6px（全局默认档）；卡片/浮层/composer 12px（demo 卡片形态统一 lg 档，无 10px 档）；徽章/pill 999px 胶囊 |
-| 3 | **正文提亮** | 正文位置统一用 `--neutral-fg`（暗色下 ≈16:1）；工具行/次要落 `--neutral-mid`（~5.4:1，过 AA 大字线）；时间与元信息落 `--neutral-dim`（~2.8:1，低显著度装饰性文字的显式取舍）；仅极弱/装饰位置保留 faint |
+| 3 | **正文提亮** | 正文位置统一用 `--neutral-fg`（暗色下 ≈14.2–14.9:1，2026-10-17 六主题 v2 微降入舒适带）；工具行/次要落 `--neutral-mid`（~5.8:1，过 AA 大字线）；时间与元信息落 `--neutral-dim`（卡面 ~3.5:1 / 侧栏 ~3.0:1，低显著度装饰性文字的显式取舍）；仅极弱/装饰位置保留 faint |
 | 4 | **内容收窄** | assistant 居中 720px（整 turn 居中，UserBubble 列内右浮）；设置内容列同 720px 左对齐；Composer 非 landing 对齐同列。例外：对话卡内内容列宽由 PanelContainer 派生（卡宽 2/3，720px 下限后撑满——feat-chat-flow-width，2026-10-14 修订；720 为窄卡下限与全局 token 口径） |
 | 5 | **彩色降噪** | 保留 git 语义色（M/A/D 降为极小圆点或单字）+ accent + 真 failure 的 danger，其余降灰阶。从色块/pill 降级为极小圆点或单字 badge |
 
@@ -228,37 +228,37 @@ demo 阶段功能做到「可见 + 可交互 + 数据 mock」即够。不接 run
 ### 4.1 背景层级（五层职能分层：读的地方沉下去，操作的地方浮上来）
 
 ```css
---bg-stage:     #0a0a0c;   /* 窗口壳：标题栏底、卡片之间的缝（全场最深）*/
---bg:           #1e1e1e;   /* 框架层：侧栏/composer/settings 内容区（同层同色）*/
+--bg-stage:     #111114;   /* 窗口壳：标题栏底、卡片之间的缝（全场最深；黛蓝 #0e0f15 / 暖墨 #100e0c 各自落定）*/
+--bg:           #242428;   /* 框架层：侧栏/composer/settings 内容区（同层同色）*/
 --bg-sunken:    var(--bg); /* 框架层沉底同值跟随（语义 = 与宿主 --bg 同值）*/
---bg-input:     #161618;   /* 内容层内次级：代码块/文件 chip 底/实例 tab 非激活底*/
---surface:      #101010;   /* 内容层：对话流/右抽屉/底抽屉阅读区（沉底，各卡自持 border + shadow）*/
---bg-card:      #262626;   /* 操作域浮起容器：设置分组卡片等（亮于 --bg 一档）*/
---bg-elevated:  #2b2b2e;   /* 浮层档（2026-10-13 用户裁决 demo 方案 A 后：popover/hover 卡族已迁 composer 同源档 bg-bg + border，本档现存消费方 = segmented active 凹陷槽浮起 / dialog / 内联浮面；用户气泡 --bubble-bg 随本层派生，暗族同值；亮族独立 #fefefe）*/
---surface-2:    #27272a;   /* 次级表面（header 浮起分层 / SegmentedTab 内项 active）*/
---surface-hover:#262629;   /* hover 态 */
+--bg-input:     #1d1d20;   /* 内容层内次级：代码块/文件 chip 底/实例 tab 非激活底*/
+--surface:      #18181b;   /* 内容层：对话流/右抽屉/底抽屉阅读区（沉底，各卡自持 border + shadow；2026-10-17 六主题 v2：阶梯整体脱离近纯黑区）*/
+--bg-card:      #2d2d30;   /* 操作域浮起容器：设置分组卡片等（亮于 --bg 一档）*/
+--bg-elevated:  #323236;   /* 浮层档（2026-10-13 用户裁决 demo 方案 A 后：popover/hover 卡族已迁 composer 同源档 bg-bg + border，本档现存消费方 = segmented active 凹陷槽浮起 / dialog / 内联浮面；用户气泡 --bubble-bg 随本层派生，暗族同值；亮族独立 #fefefe）*/
+--surface-2:    #2e2e32;   /* 次级表面（header 浮起分层 / SegmentedTab 内项 active）*/
+--surface-hover:#2d2d31;   /* hover 态 */
 ```
 
-**五层阶梯**（玄值由深到浅：`#0a0a0c → #101010 → #161618 → #1e1e1e → #2b2b2e`，越浮越亮）：
-- **窗口壳**：`--bg-stage` `#0a0a0c`（ShellView .stage 引用）。**亮色（皓族）**：`--bg-stage` `#dbd9d4`（TAIJI_PAPER 未定义独立 stage，复用宣纸族最深暖灰；style.css `[data-theme=light]` 覆盖，避免泄漏暗色 #0a0a0c 形成黑框）
-- **内容层（沉底）**：`--surface` `#101010`（对话流 / 右抽屉 / 底抽屉三张阅读卡同色共享）；`--bg-input` `#161618` 为其内次级（代码块/文件 chip）
-- **框架层（浮起）**：`--bg` `#1e1e1e`（aside / composer / settings 内容区同层同色）；操作域浮起容器 `--bg-card` `#262626` 亮于本层一档
-- **浮层**：`--bg-elevated` `#2b2b2e`（hover 详情卡 / popover；用户气泡 `--bubble-bg` 随本层派生——demo 暗族三主题 bubble 逐块等于 elevated、无独立档，亮族独立 `#fefefe`）；**2026-10-13 用户裁决 demo 方案 A 后该族已全迁 composer 同源档**（`--bg` + `--border` + shadow-2，elevated 比行高亮 surface-hover 亮会致 hover 行反向变暗，见 §5.12；本档现存消费方 = segmented active 凹陷槽浮起 / dialog / 内联浮面）；overlay 遮罩半透明黑（`bg-black/80`）全场最暗，遮罩上面板靠 border + shadow 分离
-- 黛蓝/暖墨暗色 entry 按玄五层骨架 + 各自色相偏移推导（黛蓝 B>R、暖墨 R>B，通道差与各自旧 entry 一致）；亮色族三主题（皓/青墨/朱印）bg 阶梯沿用宣纸镜像（surface 最亮、框架层深一档），青墨/朱印不覆写
-- **亮色（皓族）设置卡双层底**：`--bg-card` `#fcfbf9`（分组卡底，近白纸、亮于页底 `#edebe8`）、`--surface-2` `#efede9`（分组卡头，= demo 亮族 `--card-head`；style.css `[data-theme=light]`）——「卡浮于底」层级在亮色族与暗色族同构（卡底亮于页底，卡头 = 页底色调档）
+**五层阶梯**（玄值由深到浅：`#111114 → #18181b → #1d1d20 → #242428 → #323236`，越浮越亮；2026-10-17 六主题 v2 暗族整梯上移脱离近纯黑区，黛蓝/暖墨按各自色相同步推导——stage 各自分落 #0e0f15/#100e0c 不再共享）：
+- **窗口壳**：`--bg-stage` `#111114`（ShellView .stage 引用；黛蓝 preset `#0e0f15` / 暖墨 preset `#100e0c` 各自落定，缝隙不再与他主题色相打架）。**亮色（皓族）**：`--bg-stage` `#dee3da`（TAIJI_PAPER 未定义独立 stage，取带青玉相浅色、与 accent `#43765d` 同族色相——分离感靠色相差而非压暗舞台，2026-10-17 用户裁决借 OpenDesign 舞台层策略；style.css `[data-theme=light]` 覆盖，避免泄漏暗色 #111114 形成黑框）
+- **内容层（沉底）**：`--surface` `#18181b`（对话流 / 右抽屉 / 底抽屉三张阅读卡同色共享）；`--bg-input` `#1d1d20` 为其内次级（代码块/文件 chip，亮于 surface 一小档保阶梯单调）
+- **框架层（浮起）**：`--bg` `#242428`（aside / composer / settings 内容区同层同色）；操作域浮起容器 `--bg-card` `#2d2d30` 亮于本层一档
+- **浮层**：`--bg-elevated` `#323236`（hover 详情卡 / popover；用户气泡 `--bubble-bg` 随本层派生——demo 暗族三主题 bubble 逐块等于 elevated、无独立档，亮族独立 `#fefefe`）；**2026-10-13 用户裁决 demo 方案 A 后该族已全迁 composer 同源档**（`--bg` + `--border` + shadow-2，elevated 比行高亮 surface-hover 亮会致 hover 行反向变暗，见 §5.12；本档现存消费方 = segmented active 凹陷槽浮起 / dialog / 内联浮面）；overlay 遮罩半透明黑（`bg-black/80`）全场最暗，遮罩上面板靠 border + shadow 分离
+- 黛蓝/暖墨暗色 entry 按玄五层骨架 + 各自色相偏移推导（黛蓝 B>R、暖墨 R>B）；亮色族三主题（皓/青墨/朱印）bg 阶梯沿用宣纸镜像（surface 最亮、框架层深一档），青墨/朱印不覆写
+- **亮色（皓族）设置卡双层底**：`--bg-card` `#fcfbf9`（分组卡底，近白纸、亮于页底 `#eef1ea`）、`--surface-2` `#efede9`（分组卡头，= demo 亮族 `--card-head`；style.css `[data-theme=light]`）——「卡浮于底」层级在亮色族与暗色族同构（卡底亮于页底，卡头 = 页底色调档）
 
-### 4.2 文字 neutral 谱系（纯中性四档，暗色族三主题统一）
+### 4.2 文字 neutral 谱系（六档，暗色族带主题色相）
 
-四档全部纯中性去蓝偏（ui-optimize 决策2）：正文/侧栏主文字/composer 可操作文字同落 fg 档（≈16:1），工具行/次要 mid 档，时间与元信息 dim 档，极弱/装饰 faint 档；图标档随 mid 档校准。暗色族三主题（玄/黛蓝/暖墨）文字档统一为同一组值；亮色族三主题文字档维持宣纸墨色不变（无蓝偏问题）。
+六档（2026-10-17 六主题 v2：fg 微降入舒适带、mid/dim/faint/ico 联动提亮）：正文/侧栏主文字/composer 可操作文字同落 fg 档（暗色 ≈14.2–14.9:1），工具行/次要 mid 档，时间与元信息 dim 档（卡面 ~3.5:1 / 侧栏 ~3.0:1），极弱/装饰 faint 档；图标档随 mid 档校准。暗色族三主题文字档各自带主题色相（玄纯中性 / 黛蓝蓝相 / 暖墨暖相）；亮色族三主题文字档维持宣纸墨色不变（无蓝偏问题）。
 
 ```css
---neutral-fg:    #ececec;  /* 主前景 + 正文 */
---neutral-fg-2:  #d9d9d9;  /* 次级正文（demo --fg-2：正文与工具行之间的强调文字档） */
---neutral-mid:   #8a8a8a;  /* 工具行/次要（~5.4:1，过 AA 大字线）*/
---neutral-dim:   #5c5c5c;  /* 时间与元信息（~2.8:1，低显著度装饰性文字的显式取舍）*/
---neutral-faint: #45454a;  /* 极弱/装饰 */
---neutral-ico:   #8a8a8a;  /* 图标默认色（随 mid 档校准） */
---neutral-ico-hover: #ececec;
+--neutral-fg:    #e6e6e6;  /* 主前景 + 正文 */
+--neutral-fg-2:  #d2d2d2;  /* 次级正文（demo --fg-2：正文与工具行之间的强调文字档） */
+--neutral-mid:   #949494;  /* 工具行/次要（~5.8:1，过 AA 大字线）*/
+--neutral-dim:   #6e6e6e;  /* 时间与元信息（~3.5:1 卡面 / ~3.0:1 侧栏，低显著度装饰性文字的显式取舍）*/
+--neutral-faint: #525257;  /* 极弱/装饰 */
+--neutral-ico:   #949494;  /* 图标默认色（随 mid 档校准） */
+--neutral-ico-hover: #e6e6e6;
 
 /* 对话流专属名称色（2026-10-06 对话流视觉裁决）：workflow / subagent 的具体名称——
    暖驼微暖低饱和，不随主色态变化；亮色主题覆盖 #8c6231（对比 5.2:1），preset 不覆盖 */
@@ -317,9 +317,9 @@ demo 阶段功能做到「可见 + 可交互 + 数据 mock」即够。不接 run
 
 | 主题 | 族 | `--code-c` | 对比 |
 |---|---|---|---|
-| 玄 | 暗 | `#cf9d78` | 13.13:1 |
-| 黛蓝 | 暗 | `#c99e80` | 13.12:1 |
-| 暖墨 | 暗 | `#d4a684` | 13.06:1 |
+| 玄 | 暗 | `#cf9d78` | 11.39:1 |
+| 黛蓝 | 暗 | `#c99e80` | 11.92:1 |
+| 暖墨 | 暗 | `#d4a684` | 11.80:1 |
 | 皓 | 亮 | `#96622f` | 10.65:1 |
 | 青墨 | 亮 | `#92663a` | 10.62:1 |
 | 朱印 | 亮 | `#9a6b40` | 10.50:1 |
@@ -404,7 +404,7 @@ demo 阶段功能做到「可见 + 可交互 + 数据 mock」即够。不接 run
 |---|---|---|
 | 玄（暗·默认） | `:root` | 全部默认值，无独立块 |
 | 皓（亮·默认） | `[data-theme="light"]` | 54 = bg 阶梯 8 + bubble 1 + neutral 8（含 name、fg-2）+ border 3 + accent 3 + link-c/code-c 2 + md-code 1（7% 重声明）+ 状态 6（含 danger-fg 白字覆盖）+ 阴影 3 + chart 族 19（--bg-sunken 与 accent-soft/accent-ring/*-soft 派生公式继承 ：root 不重声明） |
-| 黛蓝 / 暖墨 | `:root[data-theme-preset="dailan"/"nuanmo"]` | 38 = bg 阶梯 7 + neutral 7（含 fg-2）+ accent 3 + link-c/code-c 2 + chart 族 19（不覆盖 border/状态色；--bg-sunken/--md-code 继承派生公式不重声明） |
+| 黛蓝 / 暖墨 | `:root[data-theme-preset="dailan"/"nuanmo"]` | 39 = bg 阶梯 8（含 --bg-stage 各自落定）+ neutral 7（含 fg-2）+ accent 3 + link-c/code-c 2 + chart 族 19（不覆盖 border/状态色；--bg-sunken/--md-code 继承派生公式不重声明） |
 | 青墨 | `[data-theme="light"][data-theme-preset="qingmo"]` | 24 = accent 3 + link-c/code-c 2 + chart 族 19（宣纸底不换、只换颜料） |
 | 朱印 | `[data-theme="light"][data-theme-preset="zhuyin"]` | 25 = accent 3 + link-c/code-c 2 + danger 1（玫红错开）+ chart 族 19（其余状态色与 light 族默认同值不重声明；--danger-fg 继承 light 块白字覆盖不重声明） |
 
@@ -653,7 +653,6 @@ demo 用 `@keyframes shimmer`（1.4s ease-in-out infinite，linear-gradient 扫�
   - **landing 页布局**（LandingView）：`flex items-center justify-center` 垂直水平居中；问候语 h1（22px font-650 neutral-fg，按时段「上午好呀/下午好呀/晚上好呀，有什么想让我帮忙的吗」）+ landing Composer（max-w 720px）
   - **inline chip 四色**（无底无边 + `font-weight 600` + 前缀 icon 13px + × 删除按钮 hover 染 danger-soft）：`file`=success 绿 / `image`=reasoning 紫 / `slash`=reasoning 紫 / `@`=accent 蓝；四色 chip 都有 × 删除按钮
   - **composer-bar 组成（左→右）**：左簇 = `+`添加 → 任务托盘（下行）/ extension toolbar 挂载点（`composer.toolbar`，无贡献时零 DOM）→ spacer；右簇 = 指标位（fit 0 = 平铺直挂触发器 TTFT/速度/缓存+容量（demo `.mtr-exp` 同款）；L1 起收为指标聚合按钮 `ComposerMetricsAggregate`，单 Gauge 图标，**hover** 弹容量+TTFT+速度+缓存四卡聚合页） / 模型(click popover, 分组+搜索+选中 check) / 思考强度(click popover, 6 档圆点) / send-slot(30×30 accent 圆角矩形 radius 8px + 倾斜箭头)；bar-btn h28 icon 14px；popover 锚点范式见 §5.12
-  - **composer 顶缘容量细条（ComposerCapacityBar，ui-optimize 决策 6 / N7）**：composer-box 顶部 2px 全宽横条（rounded-t-lg 随容器圆角，`absolute inset-x-0 top-0`），常态 `bg-accent-soft`（accent 半透明）、>80% `bg-warn`、>95% `bg-danger`（分档纯函数 `capacityBarClass`，阈值刻意后移于浮层卡内 bar 的 70/90——细条只做「余量将尽」预警）；只显色阶不显数字（数字唯一入口 = 指标聚合按钮 hover 聚合页），aria-label 双语提示当前百分比；无百分比可分档（unknown / no-value / contextWindow 未知）不渲染
   - **composer-bar 密度策略（三簇 + 三步聚合 + 锚点保护，退化次序 = 指标 → 左簇 → 模型）**：容器 `flex-nowrap` **永不换行**（发送位右锚不漂移）；`+` / btw 与发送按钮 = **序 0 锚点：任何宽度不退化、不被裁剪**。fit 级退化由 `ResizeObserver` 实测「左右两簇占宽之和 vs 可用宽」逐级触发（[HISTORICAL] 原 640/520 三档固定阈值 tier 轴已退役——固定阈值判不出内容放不放得下，曾导致「放得下也截模型名」）：序 1 指标收**单图标**聚合按钮（**hover** 弹指标聚合页；fit 0 保持平铺直挂触发器，demo `.mtr-exp` 同款——右簇信息展示先让位）→ 序 2 左簇（托盘 + 插件 toolbar）收**单图标**聚合按钮（click 弹全图标列表，角标仅运行数数字，禁多 icon 重叠——左簇功能动作后让位）→ 序 3 模型+思考收单图标聚合按钮（**click** 弹模型列表+思考档位，**hover 行内即切换**）。**模型名只有两态**：完整展示（恒不截断——[HISTORICAL] 原 88px/56px 容器截断态已删）/ 聚合按钮；底栏**无 `»` 省略号入口**（[HISTORICAL] 原溢出菜单已退役：插件 toolbar 并入左簇聚合、指标并入指标聚合）。顶格仍放不下 → **锚点保护**：左簇与指标让位隐藏，只留模型聚合按钮 + 两侧锚点（[HISTORICAL] 原 `justify-end` 左裁 `+` 行为已封死）。纯状态机 `packages/renderer/src/components/panel/composer-density.ts`（fit 级 0–3 → 形态）+ 接线件 `packages/renderer/src/components/panel/tray/use-composer-bar-density.ts`（测量回路）。图标语义硬约束（修订）：聚合入口 = 单图标按钮，**省略号入口不复存在**（原「聚合 = 层叠图标 / 溢出 = 省略号，两者不共用」随溢出语义一并退役）
   - **composer-bar 任务托盘（ComposerTray）**：`+`添加 之后、spacer 之前的左簇常驻托盘（`v-if="sessionId"`，landing 态隐藏；锚点保护态经 `v-show="!density.anchorProtected"` 样式折叠隐藏——组件恒挂载，保 `update:has-items` emitter 与 `useTrayCounts` 唯一数据面，保护态往返不重订阅/重首拉）。条目 = built-in 四件（后台命令 / 子代理 / 工作流 / 子会话，固定序恒在最左）+ 协议 widget 区（todo / goal known-order 优先，其余按 ViewHostStore 当前插入序；icon / badge / 状态色由 `WidgetMeta` 驱动）。三态：该类有进行中 → accent 计数 + 呼吸点；仅历史 → dim 常驻（无计数）；全无记录 → 不渲染（归零不虚噪）。第 4 件「子会话」= `parentAgentSessionId === 当前 sessionId` 的条目，pin 态行内「打开 / 停止（两段确认）」，行点击跳该子会话——调度模式的观察入口。fit L2（实测左簇放不下，指标聚合后仍放不下）时整托盘 + 插件 toolbar 聚合为**单图标**聚合按钮（角标仅运行数数字，禁多 icon 重叠），面板内分段展示；托盘全无条目且插件零贡献时不渲染（无死入口）。交互：hover icon 160ms 开面板、指针离开 icon+面板整体 240ms 收（移入面板不收起），点击 icon = pin（再点 / Esc / 点面板外解除），同一时刻至多一个面板；面板锚定 icon 上方 400px 宽、max-h 60vh 内滚动，行内操作仅 pin 态渲染，行点击开 drawer 对应 tab 详情（session 行为跳转子会话）。设计文档已删除（git 可追溯；终态以本节与 CONTEXT.md「任务托盘」词条为准）
   - **contenteditable + slash 触发**：光标位置检测 `/` 或 `#`（行首或空格后）触发 CommandPopover；选中插入 chip + 移除触发文本；IME 输入法组合期拦截见 §5.12
@@ -696,7 +695,7 @@ demo 用 `@keyframes shimmer`（1.4s ease-in-out infinite，linear-gradient 扫�
 - **形态 B**：icon 一级 + 各 tab 自治二级（L1 列表由容器注册表驱动，8 条）
   - git/doc：无二级 tab
   - detail：文件详情/diff，面板内顶部多文件实例 tab 条（命中未开 = 新增并激活、已开 = 仅激活、不设打开上限；keep-alive 多实例语义——切换不丢滚动位置与 diff/preview 模式）
-  - subagent：嵌套只读对话流（无 composer）
+  - subagent：嵌套只读对话流（无 composer）；详情页顶部实例 tab 条（打开序排列，× 关闭，激活者关闭时激活右邻/左邻；**恒渲染**——单 tab/空态不隐藏，布局稳定不跳变，2026-10-17 裁决；多 subagent 详情并行保留）
   - bashTask：后台命令详情（无二级 tab）
   - plan：计划文档阅读器（面板内文档切换条 = 组件内部导航）
   - btw：旁路线列表 + 当前线对话（组件内部导航，可开多条线）
@@ -708,10 +707,10 @@ demo 用 `@keyframes shimmer`（1.4s ease-in-out infinite，linear-gradient 扫�
 
 ### 6.4 Bottom Drawer（底抽屉）
 
-- **位置**（三卡化）：独立内容卡（`--surface` + border + `--radius-card` 12px 圆角 + shadow-1），split 行（对话流卡 + 右抽屉卡）之下、StatusBar 之上，横跨主区全宽；与上方卡列间距 = a = 4px（三轮裁决：与横缝及窗口边距统一）、与 StatusBar 间 4px；composer 在其上沿保持可见、随开合上移。与右抽屉可同时开（一挤宽度、一挤高度互不冲突；右抽屉开着时底抽屉全宽、右抽屉变矮）
+- **位置**（三卡化）：独立内容卡（`--surface` + border + `--radius-card` 12px 圆角 + shadow-1），split 行（对话流卡 + 右抽屉卡）之下，横跨主区全宽；与上方卡列间距 = a = 4px（三轮裁决：与横缝及窗口边距统一）；composer 在其上沿保持可见、随开合上移。与右抽屉可同时开（一挤宽度、一挤高度互不冲突；右抽屉开着时底抽屉全宽、右抽屉变矮）
 - **高度**：默认 35%；上沿拖拽手柄命中区跨进卡上方缝（4px，视觉线贴卡顶边 1px，hover `border-strong` / drag `accent`）；拖拽 clamp 15%–70%，高度为全局布局值单键持久化（`taiji:bottom-drawer-height`）；窗口过矮时显示期钳制保证对话流 + composer 最小可视区域，不写回持久值
 - **内容**：terminal 唯一内容（不预设 tab 枚举）；终端面板头部一行 = **实例切换条**（tab 条 + 右簇）——多实例：条目切换（tab 范式见 §5.3.1）/ 「+」新建（新建即自动激活并聚焦新实例输入区，2026-10-04 产品裁决）/ tab 内**常驻**关闭叉（最后实例灰置禁用）/ 空态占位（文案如「终端 1」按序号命名）/ 右簇**收起按钮**（收起整个终端区，收起语义非销毁，实例保留、重开走对账恢复，焦点回 composer）；原第二行工具栏（清屏/终止）随 head 一行化移除，清屏功能退役；空态时 xterm 黑块容器不渲染；spawn 失败走 inline 错误条 + 重试，chunk 装载失败走 AsyncErrorFallback
-- **开关**：`` ⌃` ``（before-input-event 窗口级拦截，不经 globalShortcut——失焦无动作）+ **PanelHeader 顶栏终端按钮**（三卡化 2026-10-04 迁入：原 StatusBar 底栏 trailing 落点退役，鼠标路径入口与右抽屉开关同区、居其左；StatusBar 回落「有状态项才显示」纯显隐）；开合态按会话分区、不持久化；终端聚焦时 Esc 归终端输入，关抽屉走 `` ⌃` `` / 顶栏按钮 / 终端头部收起按钮
+- **开关**：`` ⌃` ``（before-input-event 窗口级拦截，不经 globalShortcut——失焦无动作）+ **PanelHeader 顶栏终端按钮**（鼠标路径入口与右抽屉开关同区、居其左）；开合态按会话分区、不持久化；终端聚焦时 Esc 归终端输入，关抽屉走 `` ⌃` `` / 顶栏按钮 / 终端头部收起按钮
 
 ### 6.5 Overlay（内容浮层）
 
@@ -764,7 +763,7 @@ demo 用 `@keyframes shimmer`（1.4s ease-in-out infinite，linear-gradient 扫�
 
 | 维度 | 挂载点 | 级别 | 当前状态 |
 |---|---|---|---|
-| **A 结构容器** | A1 侧栏 Plugins tab（第 3 枚） / A2 drawer tab(proposed) / A3 工具条按钮 / A4 底栏状态 | L1 | A1/A2/A3 panels 声明未消费；A4 pi 已实现（extension:status），plugin 未接入 |
+| **A 结构容器** | A1 侧栏 Plugins tab（第 3 枚） / A2 drawer tab(proposed) / A3 工具条按钮 | L1 | A1/A2/A3 panels 声明未消费；A4 底栏状态已随 StatusBar 整体退役（ADR-0141） |
 | **B 对话流+companion** | B1 tool result / B2 消息卡 / B3 companion(统一出口：dialog) | L2/L1 | **已实现**（5 闭环；提问表单走 FormOverlay 覆盖 composer，不进 band） |
 | **D 命令配置** | D1 slash / D2 settings 区段 | L1 | D1 已实现（双轨待统一） |
 | **E 独立 view** | E1 独立 view 路由 | L3 | 未实现（仅 built-in） |

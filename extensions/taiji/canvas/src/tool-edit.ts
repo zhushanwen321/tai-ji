@@ -17,11 +17,13 @@
  * 幂等重试一致性判定也比对它）。
  */
 import { StringEnum } from "@earendil-works/pi-ai";
-import type { ExtensionAPI, ExtensionToolContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionToolContext, Theme } from "@earendil-works/pi-coding-agent";
 import { Type, type Static } from "typebox";
 import type { CanvasMarkerRequest } from "@zhushanwen/extension-protocol";
 import { isCanvasMarkerRequest } from "@zhushanwen/extension-protocol";
 
+import { renderCanvasToolResult } from "./render.js";
+import { canvasEditSummary } from "./summary.js";
 import { callCanvas } from "./marker-channel.js";
 import { hostGateError, isTaijiGuiHost } from "./host.js";
 
@@ -185,6 +187,9 @@ export function registerCanvasEditTool(
     description: cfg.description,
     promptSnippet: cfg.promptSnippet,
     parameters: cfg.parameters,
+    renderResult(result: unknown, options: { expanded: boolean }, theme: Theme) {
+      return renderCanvasToolResult(result, options, theme);
+    },
     async execute(
       _toolCallId: string,
       params: Static<typeof CanvasEditParams>,
@@ -205,7 +210,10 @@ export function registerCanvasEditTool(
       }
       const markerRequest: CanvasMarkerRequest = request;
       const reply = await callCanvas(ctx, markerRequest.action, markerRequest.params);
-      return { content: [{ type: "text" as const, text: JSON.stringify(reply) }], details: undefined };
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify(reply) }],
+        details: { summary: canvasEditSummary(params) },
+      };
     },
   });
 }

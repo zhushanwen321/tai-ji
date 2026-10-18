@@ -28,6 +28,7 @@ interface ExecuteResult {
 		action: string;
 		todos: Array<{ id: number; text: string; status: string }>;
 		nextId: number;
+		summary: string;
 	};
 }
 
@@ -181,6 +182,9 @@ describe("executeTodoAction — tool result 无 __gui__（全模式）", () => {
 		expect(result.details.action).toBe("add");
 		expect(result.details.todos).toHaveLength(1);
 		expect(result.content[0].text).toContain("Added");
+		// execute 组装线：details.summary 恒写入（tool.ts:235 buildTodoSummary；
+		// TUI 折叠渲染与 taiji GUI ToolRow 读链同源文本，组装行丢失时此处红）
+		expect(result.details.summary).toBe("Added 1 todo (#1)");
 	});
 
 	it.each(MODES)("%s + list → details 无 __gui__ 字段，文本内容可读", async (mode) => {
@@ -196,6 +200,8 @@ describe("executeTodoAction — tool result 无 __gui__（全模式）", () => {
 		);
 		expect("__gui__" in result.details).toBe(false);
 		expect(result.content[0].text).toContain("#1");
+		// execute 组装线：list 摘要 = 逐 status 计数（与 summary.test.ts 纯函数口径一致）
+		expect(result.details.summary).toBe("1 todos: 0 completed, 0 in_progress, 1 pending");
 	});
 
 	it("rpc + update → details 无 __gui__ 字段，状态变更仍生效", async () => {

@@ -137,7 +137,6 @@ export interface PluginContributes {
   menus?: PluginContributesMenu
   commands?: PluginContributesCommand[]
   configuration?: PluginContributesConfiguration
-  statusBarItems?: PluginContributesStatusBarItem[]
   headerActions?: PluginContributesHeaderAction[]
 }
 
@@ -149,7 +148,7 @@ export interface PluginContributesView {
   id: string
   title: string
   view?: string
-  /** 挂载点名：'sidebar.tab' | 'panel.header' | 'composer.toolbar' | 'drawer.tab' | 'statusbar' 等，开放字符串（壳注册制） */
+  /** 挂载点名：'sidebar.tab' | 'panel.header' | 'composer.toolbar' | 'drawer.tab' 等，开放字符串（壳注册制） */
   placement: string
   viewType?: 'gui' | 'webview' | 'tree'
   activationEvent?: string
@@ -202,20 +201,6 @@ export interface PluginConfigurationProperty {
   description?: string
   enum?: unknown[]
   enumDescriptions?: string[]
-}
-
-/**
- * @proposed — schema v2 status bar 贡献（旧三字段原样保留保证向后兼容，
- * 扩展字段全 optional）。
- */
-export interface PluginContributesStatusBarItem {
-  id: string
-  text: string
-  priority: number
-  alignment?: 'left' | 'right'
-  scope?: 'per-session' | 'global'
-  commandId?: string
-  tooltip?: string
 }
 
 /**
@@ -396,7 +381,7 @@ export interface HookResult {
  * - @experimental — 已显式降级的 API（events 插件间事件总线：未实现，调用即抛
  *   NOT_IMPLEMENTED；已移出稳定面）
  * - @proposed — 演进中 API（Phase2AgentAPI 扩展面 tools/hooks/config/sessionData/
- *   ui/agent/workspace、ToolRegistration、HookEntry、StatusBarItemOptions 等）
+ *   ui/agent/workspace、ToolRegistration、HookEntry 等）
  * - @internal — runtime 内部塑形对象（WorkerHandle、PluginContext、Bridge* 等；
  *   BridgeSyncPayload 定义源在 @zhushanwen/extension-protocol，IPluginServiceDeps
  *   为 runtime 专属内部类型——两者均不在本 SDK 面）
@@ -461,8 +446,8 @@ export interface PluginModule {
 // ── AgentAPI 类型（Phase 1 最小集）───────────────────────────────
 //
 // TODO(keystone): Phase1AgentAPI / Phase2AgentAPI / SessionInfo 是「漏的拱顶石」——
-// Phase2AgentAPI 跨域引用 ToolRegistration、HookInterceptor、PiEventCallback、
-// StatusBarItemOptions，SessionInfo 又被 api/session-api 等消费。把它移到独立文件
+// Phase2AgentAPI 跨域引用 ToolRegistration、HookInterceptor、PiEventCallback，
+// SessionInfo 又被 api/session-api 等消费。把它移到独立文件
 // 只会搬运耦合、制造 import 纠缠，故本轮 P3 拆分刻意将其保留在此处。
 // 待 tool/hook 域各自稳定、API 表面收敛后再独立。
 
@@ -688,17 +673,6 @@ export interface ToolEntry {
 // ── Phase 2: Hook 注册表条目 ──────────────────────────────────────────
 
 /**
- * @proposed — status bar item 选项（Phase 2 扩展面）。
- */
-export interface StatusBarItemOptions {
-  tooltip?: string
-  commandId?: string
-  priority?: number
-  scope?: 'per-session' | 'global'
-  sessionId?: string
-}
-
-/**
  * @proposed — UI dialog 超时选项（ctx.ui.showConfirm/showSelect/showInput 末位 opts，
  * timeout-plugin-service D2）。
  *
@@ -757,13 +731,12 @@ export interface Phase2AgentAPI extends Phase1AgentAPI {
     /**
      * 弹窗类三方法（dialog）带末位 `opts`（UiDialogOptions.timeout，全程含排队，
      * 缺省 30min）；到期取消非替答：reject `UI_TIMEOUT` + 前端撤窗，可重发。
-     * notify/updateStatusBarItem 纯展示类无等待语义，不设 opts。
+     * notify 纯展示类无等待语义，不设 opts。
      */
     showSelect(title: string, options: string[], opts?: UiDialogOptions): Promise<string | undefined>
     showConfirm(title: string, message: string, opts?: UiDialogOptions): Promise<boolean>
     showInput(title: string, defaultValue?: string, opts?: UiDialogOptions): Promise<string | undefined>
     notify(level: 'info' | 'warn' | 'error', message: string): Promise<void>
-    updateStatusBarItem(id: string, text: string, options?: StatusBarItemOptions): Promise<void>
     /**
      * [AP-1/u5b] headerAction 可变字段更新：sessionId 必填（徽标是 per-session 语义）；
      * badge ≤4 字符由宿主截断，badge/tooltip 超 4KB 拒绝（INVALID_BADGE / INVALID_TOOLTIP）。

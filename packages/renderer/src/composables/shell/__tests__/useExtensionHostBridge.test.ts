@@ -26,7 +26,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { computed, nextTick } from 'vue'
 import { InternalEventBus, MessageBusBridge, providePlatform, registerMountPoints, scanContributions, type ContributionRegistry, ActivationManager, CommandRegistry, type ContributionRecord, type HeaderActionEntry } from '@taiji/core'
-import { dispatchCrossSession, dispatchGlobal } from '@taiji/core/transport/api'
+import { dispatchCrossSession } from '@taiji/core/transport/api'
 import {
   getExtensionBus,
   initExtensionHostBridge,
@@ -42,10 +42,8 @@ import {
   DIALOG_REQUEST_SOURCE_KEY,
   UI_RESPONSE_TRANSPORT_KEY,
   VIEW_HOST_SOURCE_KEY,
-  STATUS_BAR_SOURCE_KEY,
   VIEWS_SOURCE_KEY,
   type ViewHostSource,
-  type StatusBarSource,
   type PluginViewsSource,
 } from '@taiji/ui/extension-host'
 import { connect, disconnect } from '@taiji/core/transport/ws-client'
@@ -122,7 +120,6 @@ describe('MF-2 响应式桥（分区后建时序 + global scope）', () => {
   /** 装配真实 bridge 链（events → source → bus → store → provide），返回注入的数据源。 */
   function initBridgeSources(): {
     viewHostSource: ViewHostSource
-    statusBarSource: StatusBarSource
     viewsSource: PluginViewsSource
     contributions: ContributionRegistry
   } {
@@ -138,9 +135,8 @@ describe('MF-2 响应式桥（分区后建时序 + global scope）', () => {
     if (!handles) throw new Error('initExtensionHostBridge 未写入 __testing.lastInitHandles')
     void simulateBootstrapRegistration()
     const viewHostSource = provided.find((p) => p.key === VIEW_HOST_SOURCE_KEY)?.value as ViewHostSource
-    const statusBarSource = provided.find((p) => p.key === STATUS_BAR_SOURCE_KEY)?.value as StatusBarSource
     const viewsSource = provided.find((p) => p.key === VIEWS_SOURCE_KEY)?.value as PluginViewsSource
-    return { viewHostSource, statusBarSource, viewsSource, contributions: handles.contributions }
+    return { viewHostSource, viewsSource, contributions: handles.contributions }
   }
 
   it('case B: 分区后建时序——computed 首次求值无分区，首个 viewUpdate 到达后重算命中', async () => {
@@ -163,23 +159,6 @@ describe('MF-2 响应式桥（分区后建时序 + global scope）', () => {
     })
     await nextTick()
     expect(view.value).toMatchObject({ viewId: 'sidebar.tab', pluginId: 'p1' })
-  })
-
-  it('global scope: statusBarUpdate 广播 → getItems("global") computed 重算（不再 stale）', async () => {
-    const { statusBarSource } = initBridgeSources()
-    // 模拟 StatusBar.vue 的 visibleItems computed：global 项读路径
-    const items = computed(() => statusBarSource.getItems('global'))
-    expect(items.value).toHaveLength(0)
-
-    dispatchGlobal({
-      type: 'plugin:statusBarUpdate',
-      payload: {
-        items: [{ id: 'g1', pluginId: 'statusline', text: '3 tasks', alignment: 'left', priority: 100, scope: 'global' }],
-      },
-    })
-    await nextTick()
-    // R1 前：controller 私有 raw 数组 replaceAllWith 原地 mutate 不经 proxy → 永不更新
-    expect(items.value.map((i) => i.id)).toEqual(['g1'])
   })
 
   it('TC7 (M17): extension:widgetGui 帧 → provide 的 getViewIds 纯透传 ViewHostStore 枚举', async () => {
@@ -312,7 +291,7 @@ describe('MF-1 挂载点上报时序（mountPoints.sync 连接就绪后发送）
     expect(transportSendSpy).toHaveBeenCalledTimes(1)
     expect(transportSendSpy).toHaveBeenCalledWith({
       type: 'plugin.mountPoints.sync',
-      payload: { mountPoints: ['sidebar.tab', 'panel.header', 'composer.toolbar', 'statusbar'] },
+      payload: { mountPoints: ['sidebar.tab', 'panel.header', 'composer.toolbar'] },
     })
   })
 
@@ -332,7 +311,7 @@ describe('MF-1 挂载点上报时序（mountPoints.sync 连接就绪后发送）
     expect(transportSendSpy).toHaveBeenCalledTimes(2)
     expect(transportSendSpy).toHaveBeenLastCalledWith({
       type: 'plugin.mountPoints.sync',
-      payload: { mountPoints: ['sidebar.tab', 'panel.header', 'composer.toolbar', 'statusbar'] },
+      payload: { mountPoints: ['sidebar.tab', 'panel.header', 'composer.toolbar'] },
     })
   })
 
@@ -362,7 +341,7 @@ describe('MF-1 挂载点上报时序（mountPoints.sync 连接就绪后发送）
     expect(transportSendSpy).toHaveBeenCalledTimes(3)
     expect(transportSendSpy).toHaveBeenLastCalledWith({
       type: 'plugin.mountPoints.sync',
-      payload: { mountPoints: ['sidebar.tab', 'panel.header', 'composer.toolbar', 'statusbar'] },
+      payload: { mountPoints: ['sidebar.tab', 'panel.header', 'composer.toolbar'] },
     })
   })
 })

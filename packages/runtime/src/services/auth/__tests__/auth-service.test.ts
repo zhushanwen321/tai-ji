@@ -123,6 +123,48 @@ describe('AuthService.login', () => {
     expect(deps.clearApiKey).not.toHaveBeenCalled()
   })
 
+  it('onAuthenticated：flow 成功写盘 + auth.success 后恰调用一次（凭据域变更事件，MF-2）', async () => {
+    const deps = makeDeps()
+    const svc = new AuthService(deps)
+    vi.mocked(runOAuthLogin).mockImplementation(async () => oauthCred())
+    const onAuthenticated = vi.fn()
+
+    svc.login('xai', onAuthenticated)
+    await vi.waitFor(() => expect(onAuthenticated).toHaveBeenCalledTimes(1))
+    // 回调时点 = 凭据已落盘 + 成功事件已广播（消费方按 auth.json 现状重跑）
+    expect(deps.authStorage.set).toHaveBeenCalled()
+    expect(deps.events.some((e) => e.type === 'auth.success')).toBe(true)
+    expect(deps.events[deps.events.length - 1]?.type).toBe('auth.success')
+  })
+
+  it('onAuthenticated：flow 失败 / 用户取消 → 不调用', async () => {
+    const failedDeps = makeDeps()
+    const failed = new AuthService(failedDeps)
+    vi.mocked(runOAuthLogin).mockRejectedValue(new Error('OAuth device code expired'))
+    const onAuthenticated = vi.fn()
+
+    failed.login('xai', onAuthenticated)
+    await vi.waitFor(() => {
+      expect(failedDeps.events.some((e) => e.type === 'auth.error')).toBe(true)
+    })
+    expect(onAuthenticated).not.toHaveBeenCalled()
+  })
+
+  it('onAuthenticated 抛错不污染 flow 终态（不广播 auth.error，凭据已落盘）', async () => {
+    const deps = makeDeps()
+    const svc = new AuthService(deps)
+    vi.mocked(runOAuthLogin).mockImplementation(async () => oauthCred())
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    svc.login('xai', () => { throw new Error('consumer boom') })
+    await vi.waitFor(() => {
+      expect(deps.events.some((e) => e.type === 'auth.success')).toBe(true)
+    })
+    expect(deps.events.some((e) => e.type === 'auth.error')).toBe(false)
+    expect(warn).toHaveBeenCalledWith('[auth-service] onAuthenticated callback failed for xai:', expect.any(Error))
+    warn.mockRestore()
+  })
+
   it('token 永不出现在事件 payload（成功/错误都不含 access/refresh）', async () => {
     const deps = makeDeps()
     const svc = new AuthService(deps)

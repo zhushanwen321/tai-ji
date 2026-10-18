@@ -29,10 +29,16 @@ function tmpPathOf(filePath: string, uniqueSuffix?: string): string {
   return `${filePath}.tmp_${uniqueSuffix ?? nextTmpSuffix()}`
 }
 
-export function atomicWrite(filePath: string, data: string, uniqueSuffix?: string): void {
+/**
+ * @param uniqueSuffix 可选的 tmp 文件名区分符（语义同下方 atomicWriteAsync）。
+ * @param mode 可选文件权限（如带明文凭据的落盘方传 0o600）。仅在 tmp 新建时经
+ *   writeFileSync 生效，rename 后即目标文件权限；缺省不传 = 沿用既有默认
+ *   （0o666 & umask），既有调用方零行为变化。
+ */
+export function atomicWrite(filePath: string, data: string, uniqueSuffix?: string, mode?: number): void {
   const tmpPath = tmpPathOf(filePath, uniqueSuffix)
   try {
-    writeFileSync(tmpPath, data, 'utf-8')
+    writeFileSync(tmpPath, data, mode === undefined ? 'utf-8' : { encoding: 'utf-8', mode })
     renameSync(tmpPath, filePath)
   } catch (e) {
     try { unlinkSync(tmpPath) } catch { void 0 /* 清理失败不掩盖原错误 */ }

@@ -42,6 +42,7 @@ import type {
 } from "../types.ts";
 import type { EngineModelSelectorInput, EnginePort, EngineRunResult, RunContext } from "../port.ts";
 import type { EngineClient, RunRoute } from "./engine-client.ts";
+import { matchCatalogEntry, translateByTable } from "./manifest-lookup.ts";
 
 /** manifest 注册期快照（发现器/注册表读取，构造时注入——同步成员唯一源）。 */
 export interface RemoteEngineManifestSnapshot {
@@ -55,6 +56,13 @@ export interface RemoteEngineManifestSnapshot {
    * 省略走 buildCoreAlignedHint（无枚举面）——填充会让该区分不可达。
    */
   modelCatalog?: { dynamic: boolean; models: ModelCatalogEntry[] } | null;
+  /**
+   * manifest `modelTranslation`（[engine-ref-translation D5] 2026-10-16）：静态跨引擎
+   * 翻译表声明（pi 词汇 provider 段 → 本引擎原生 provider 段）。缺省 undefined =
+   * 无翻译面——构造器据此摘除 translateModelRef 成员（消费方按缺席语义降级 +
+   * 生效回执 warn）。声明表与 in-process 引擎类代码表由对账锁步单测绑定。
+   */
+  modelTranslation?: Record<string, string>;
   /**
    * manifest `taiji.subagentEngine.processModel`（U0 / 设计 §3.3 决策 3）：宿主实例
    * 管理分流判据（per-window → 窗口作用域实例；shared-service → registry 单例）。
@@ -80,17 +88,6 @@ export interface RemoteEngineOptions {
    * 小窗用（量级断言由常量锚定用例持有）；生产链路不传。
    */
   cancelSettleGraceMs?: number;
-}
-
-/** manifest 目录条目命中：id / canonicalRef / 任一 alias 与 ref 全等。 */
-function matchCatalogEntry(
-  entries: ModelCatalogEntry[],
-  ref: string,
-): ModelCatalogEntry | undefined {
-  return entries.find(
-    (entry) =>
-      entry.id === ref || entry.canonicalRef === ref || entry.aliases?.includes(ref) === true,
-  );
 }
 
 const logger = getLogger("remote-engine");
@@ -273,6 +270,25 @@ export class RemoteEngine implements EnginePort {
       // 抛给用户（capabilities 注释的消费点登记）。
       (this as { setModel?: unknown }).setModel = undefined;
     }
+    if (opts.manifest.modelTranslation === undefined) {
+      // [engine-ref-translation D5] translateModelRef 成员同款形态映射：manifest 无
+      // modelTranslation 声明 → 成员**不实现**——消费方
+      // （resolveEngineModelWithTranslation）以 `route.engine.translateModelRef !==
+      // undefined` 探测：缺席 = 翻译恒等透传 + 生效回执 warn（部署形态翻译面缺席
+      // 不再静默——2026-10-16 修复：staged 引擎经 cli descriptor 装载时，此前
+      // RemoteEngine 未实装本成员且无任何信号，偏好层死值直穿引擎侧炸
+      // model_not_available，修复语义在部署形态整体失效）。
+      (this as { translateModelRef?: unknown }).translateModelRef = undefined;
+    }
+  }
+
+  /**
+   * [engine-ref-translation D5] 翻译面（manifest 声明表查表改写，同步无协议）。
+   * 查表语义（含自有属性判定）在 client/manifest-lookup.ts 单点实装；声明表
+   * 缺席时本成员已在构造器摘除（见构造器注释）。
+   */
+  translateModelRef(modelRef: string): string {
+    return translateByTable(this.opts.manifest.modelTranslation as Record<string, string>, modelRef);
   }
 
   /** 直读 manifest 注册期快照（无缓存——每次调用同值，快照不可变）。 */

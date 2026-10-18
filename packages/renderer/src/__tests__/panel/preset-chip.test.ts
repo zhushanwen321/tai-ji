@@ -327,7 +327,6 @@ const composerStubs = {
   ComposerTray: true,
   ViewHost: true,
   ContextCapacityPopover: true,
-  ComposerCapacityBar: true,
   ModelSelectPopover: true,
   ThinkingLevelPopover: true,
   ContextChipsBar: true,

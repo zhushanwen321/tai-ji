@@ -1,4 +1,4 @@
-import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent'
+import type { ExtensionAPI, ExtensionContext, Theme } from '@earendil-works/pi-coding-agent'
 import type { GuiContext } from '@zhushanwen/extension-protocol'
 import { toErrorMessage } from '@zhushanwen/pi-ext-guards'
 import { getLogger } from '@zhushanwen/pi-extension-logger'
@@ -10,9 +10,12 @@ import { formatSchedule } from './format.js'
 import { readUiLocale, t } from './i18n.js'
 import { importLegacyStore } from './importer.js'
 import { abortPendingScheduleForms } from './interaction.js'
+import { renderScheduleToolResult } from './render-result.js'
 import { SchedulerRuntime, type SchedulerModelOps } from './runtime.js'
 import { SchedulerService } from './service.js'
 import {
+  buildScheduleControlSummary,
+  buildScheduleSummary,
   controlGuidelines,
   handleSchedule,
   handleScheduleControl,
@@ -21,6 +24,7 @@ import {
   scheduleGuidelines,
   ScheduleParams,
   type ScheduleParamsT,
+  withScheduleSummary,
 } from './tool.js'
 import { computeTasksFingerprint, setSchedulerWidget } from './widget.js'
 import type { ScheduledTask } from './types.js'
@@ -274,10 +278,16 @@ export default function schedulerExtension(pi: ExtensionAPI): void {
       _ctx: ExtensionContext,
     ) {
       try {
-        return await handleSchedule(getService(), params, signal)
+        const result = await handleSchedule(getService(), params, signal)
+        // 收起态一行摘要：details 追加 summary（现有字段保留），GUI 收起态与 TUI 折叠态共用
+        return withScheduleSummary(result, buildScheduleSummary(params, result))
       } catch (err) {
         throw new Error(`Error: ${toErrorMessage(err)}`)
       }
+    },
+
+    renderResult(result: unknown, options: { expanded: boolean }, theme: Theme) {
+      return renderScheduleToolResult(result, options, theme)
     },
   })
 
@@ -298,10 +308,16 @@ export default function schedulerExtension(pi: ExtensionAPI): void {
       _ctx: ExtensionContext,
     ) {
       try {
-        return await handleScheduleControl(getService(), params)
+        const result = await handleScheduleControl(getService(), params)
+        // 收起态一行摘要：同 schedule
+        return withScheduleSummary(result, buildScheduleControlSummary(params, result))
       } catch (err) {
         throw new Error(`Error: ${toErrorMessage(err)}`)
       }
+    },
+
+    renderResult(result: unknown, options: { expanded: boolean }, theme: Theme) {
+      return renderScheduleToolResult(result, options, theme)
     },
   })
 

@@ -2436,6 +2436,25 @@
       "owner": "packages/subagent-core",
       "authority": "docs/adr/decisions.md",
       "note": "R2 态：守卫改本体或扩面时实跑三命令全绿（rfl-parity 对真实两侧 exit 0 + 门③双向零漂移 + 门③自测）；问题清单层语义差异（title 权威 / title 可选性 / 复活模型）以守卫脚本头部 D1-D4 登记清单为准"
+    },
+    {
+      "id": "E2E-BOUNDARY-01",
+      "summary": "AC7 extension-host 边界静态检查脚本（pre-commit 消费端 import 边界检查，无独立 e2e 资产；改动 = 消费端模块 TARGETS 清单维护）",
+      "scope": [
+        "scripts/verify-extension-host-boundaries.mjs"
+      ],
+      "layer": "L3",
+      "assets": [
+        {
+          "kind": "script",
+          "ref": "scripts/verify-extension-host-boundaries.mjs"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": true,
+      "owner": "pre-commit（AC7 extension-host 边界检查）",
+      "authority": "scripts/verify-extension-host-boundaries.mjs",
+      "run": "node scripts/verify-extension-host-boundaries.mjs"
     }
   ]
 }

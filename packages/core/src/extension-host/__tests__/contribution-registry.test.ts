@@ -24,7 +24,7 @@ function setup() {
 describe('ContributionRegistry.routeAll（AC9/ERR1）', () => {
   it('TC-1a: 未注册挂载点 → unregistered-mount-point 事件 + available=false', () => {
     const { emit, registry, mounts } = setup()
-    mounts.register('statusbar') // 只注册 statusbar
+    mounts.register('panel.header') // 只注册 panel.header
     registry.registerContribution({
       pluginId: 'p1',
       contributionId: 'v1',
@@ -49,14 +49,14 @@ describe('ContributionRegistry.routeAll（AC9/ERR1）', () => {
 
   it('TC-1b: 已注册挂载点 → available=true 且不 emit unregistered', () => {
     const { emit, registry, mounts } = setup()
-    mounts.register('statusbar')
+    mounts.register('sidebar.tab')
     registry.registerContribution({
       pluginId: 'p1',
-      contributionId: 'sb1',
-      type: 'statusBarItem',
-      placement: 'statusbar', // 已注册
+      contributionId: 'v1',
+      type: 'view',
+      placement: 'sidebar.tab', // 已注册
       available: false,
-      statusBarItem: { text: 'x', alignment: 'right', priority: 0, scope: 'global' },
+      view: { viewType: 'gui', title: 'My View', initialVisibility: 'hidden' },
     })
     registry.routeAll(mounts)
     expect(registry.getContributions({ pluginId: 'p1' })[0].available).toBe(true)
@@ -77,23 +77,16 @@ describe('ContributionRegistry.routeAll（AC9/ERR1）', () => {
 })
 
 describe('ContributionRegistry.registerBuiltin（DM5）', () => {
-  it('TC-5a: registerBuiltin 注册 statusline statusBarItem + tasks slashCommand 骨架', () => {
+  it('TC-5a: registerBuiltin 注册 tasks slashCommand 骨架', () => {
     const { registry, mounts } = setup()
-    mounts.register('statusbar')
     mounts.register('slash')
     registry.registerBuiltin()
     const all = registry.getContributions()
-    const statusline = all.find((c) => c.pluginId === 'statusline')
-    expect(statusline).toBeDefined()
-    expect(statusline?.type).toBe('statusBarItem')
-    expect(statusline?.contributionId).toBe('statusline') // id 在 contributionId（DM1 字段归位）
-    expect(statusline?.statusBarItem).toMatchObject({ text: '', priority: 0 })
-    // 同 pluginId 下 view 与 slashCommand 共存（TC4），slashCommand 断言先按 type 过滤
     const tasks = all.filter((c) => c.pluginId === 'tasks')
     const taskSlash = tasks.filter((c) => c.type === 'slashCommand')
     expect(taskSlash.map((t) => t.slashCommand?.name)).toEqual(['goal', 'todo'])
     registry.routeAll(mounts)
-    expect(statusline?.available).toBe(true)
+    expect(taskSlash.every((t) => t.available)).toBe(true)
   })
 
   it('TC-5b: builtin 插件骨架与 manifest 声明一致', () => {
@@ -101,21 +94,20 @@ describe('ContributionRegistry.registerBuiltin（DM5）', () => {
     // scheduler-manager 为 headerAction 徽标入口 + overlay 定时任务 tab 内容树供给插件；
     // scheduler 保留 /schedule slash 声明（ADR-0050：landing 态 pi 真源为空、声明即显示，
     // 执行由 pi extension 承担——与 manager 的 GUI 管理面职责不重叠）
-    expect(builtinContributions.map((b) => b.pluginId)).toEqual(['statusline', 'tasks', 'scheduler-manager', 'scheduler'])
-    expect(builtinContributions[0].contributes.statusBarItems).toHaveLength(1)
-    expect(builtinContributions[1].contributes.slashCommands).toHaveLength(2)
-    expect(builtinContributions[3].contributes.slashCommands).toHaveLength(1) // 发现面单条 schedule（pi 侧 scheduler/schedule 同 handler，按用户裁决单条展示）
+    expect(builtinContributions.map((b) => b.pluginId)).toEqual(['tasks', 'scheduler-manager', 'scheduler'])
+    expect(builtinContributions[0].contributes.slashCommands).toHaveLength(2)
+    expect(builtinContributions[2].contributes.slashCommands).toHaveLength(1) // 发现面单条 schedule（pi 侧 scheduler/schedule 同 handler，按用户裁决单条展示）
     // tasks 不声明 views——todo/goal 经 extension widget 推送由 Composer 托盘 widget 区承接，
     // 不进 sidebar（D5）；该视图退役后 builtin 整体零 view 声明
-    expect(builtinContributions[1].contributes.views).toBeUndefined()
+    expect(builtinContributions[0].contributes.views).toBeUndefined()
     expect(builtinContributions.every((b) => b.contributes.views === undefined)).toBe(true)
     // scheduler-manager 声明形状：headerActions 1（activation 直开声明，
     // 无 commandId）+ commands 3（overlay 树内 action-bar 写操作 toggle/run/delete——缺
     // 声明则写操作在 CommandRegistry 无注册通路成死链，id 与插件 api.commands.register 逐字一致）。
     // 声明类型面无 modals 键（无法再产出该类声明）。
-    expect(builtinContributions[2].contributes.headerActions).toHaveLength(1)
-    expect(builtinContributions[2].contributes.commands).toHaveLength(3)
-    expect(builtinContributions[2].contributes.commands?.map((c) => c.command)).toEqual([
+    expect(builtinContributions[1].contributes.headerActions).toHaveLength(1)
+    expect(builtinContributions[1].contributes.commands).toHaveLength(3)
+    expect(builtinContributions[1].contributes.commands?.map((c) => c.command)).toEqual([
       'scheduler-manager.toggle',
       'scheduler-manager.run',
       'scheduler-manager.delete',
@@ -132,7 +124,6 @@ describe('ContributionRegistry.loadExternal（IF4/ERR5）', () => {
         views: [{ id: 'w1', title: 'W1', placement: 'sidebar.tab' }],
         menus: { 'composer.toolbar': [{ command: 'ext1.cmd1', group: 'nav' }] },
         commands: [{ command: 'ext1.cmd1', title: 'Cmd 1' }],
-        statusBarItems: [{ id: 'sb1', text: 'S', priority: 1, alignment: 'left' }],
         slashCommands: [{ name: 'hello', description: 'hi' }],
         configuration: { properties: { a: { type: 'string' } } },
       },
@@ -140,17 +131,16 @@ describe('ContributionRegistry.loadExternal（IF4/ERR5）', () => {
     registry.loadExternal([d])
     const all = registry.getContributions({ pluginId: 'ext1' })
     expect(all.map((c) => c.type).sort()).toEqual([
-      'command', 'configuration', 'menu', 'slashCommand', 'statusBarItem', 'view',
+      'command', 'configuration', 'menu', 'slashCommand', 'view',
     ])
     expect(all.find((c) => c.type === 'view')?.placement).toBe('sidebar.tab')
     expect(all.find((c) => c.type === 'menu')?.placement).toBe('composer.toolbar')
     expect(all.find((c) => c.type === 'command')?.placement).toBe('commands')
-    expect(all.find((c) => c.type === 'statusBarItem')?.placement).toBe('statusbar')
     expect(all.find((c) => c.type === 'slashCommand')?.placement).toBe('slash')
     expect(all.find((c) => c.type === 'configuration')?.placement).toBe('settings')
   })
 
-  it('TC-5h: 跨 type 输出顺序固定（view→menu→command→statusBarItem→slashCommand→configuration）', () => {
+  it('TC-5h: 跨 type 输出顺序固定（view→menu→command→slashCommand→configuration）', () => {
     // contributes 字段按逆序声明，验证解析顺序由 parseContributes 的段 concat 顺序决定，
     // 与 descriptor 字段声明顺序无关（注册顺序契约：同 placement 下先注册先排位）
     const { registry } = setup()
@@ -159,14 +149,13 @@ describe('ContributionRegistry.loadExternal（IF4/ERR5）', () => {
       contributes: {
         configuration: { properties: { a: { type: 'string' } } },
         slashCommands: [{ name: 's1', description: '' }],
-        statusBarItems: [{ id: 'sb1', text: '', priority: 0 }],
         commands: [{ command: 'c1', title: '' }],
         menus: { 'composer.toolbar': [{ command: 'm1' }] },
         views: [{ id: 'v1', title: '', placement: 'sidebar.tab' }],
       },
     }])
     expect(registry.getContributions({ pluginId: 'ord1' }).map((c) => c.type)).toEqual([
-      'view', 'menu', 'command', 'statusBarItem', 'slashCommand', 'configuration',
+      'view', 'menu', 'command', 'slashCommand', 'configuration',
     ])
   })
 
@@ -277,9 +266,8 @@ describe('ContributionRegistry.getContributions（IF4）', () => {
     const { registry } = setup()
     registry.registerBuiltin()
     expect(registry.getContributions({ type: 'slashCommand' }).map((c) => c.slashCommand?.name)).toEqual(['goal', 'todo', 'schedule'])
-    expect(registry.getContributions({ pluginId: 'statusline' })).toHaveLength(1)
-    // 1 statusline + 2 tasks slashCommands + scheduler-manager 4 条（1 headerAction + 3 commands）+ scheduler 1 条 slashCommand
-    expect(registry.getContributions()).toHaveLength(8)
+    // 2 tasks slashCommands + scheduler-manager 4 条（1 headerAction + 3 commands）+ scheduler 1 条 slashCommand
+    expect(registry.getContributions()).toHaveLength(7)
   })
 })
 
@@ -341,7 +329,7 @@ describe('ContributionRegistry 新点位路由（AP-1/AP-2）', () => {
 
   it('AP-1d: builtin scheduler-manager 声明带 activation=scheduler-overlay 且经 registerBuiltin 透传', () => {
     // builtin 字面量声明侧（modal 链退役：声明无 commandId，点击走 overlay 分派）
-    const builtinHa = builtinContributions[2].contributes.headerActions?.[0]
+    const builtinHa = builtinContributions[1].contributes.headerActions?.[0]
     expect(builtinHa?.activation).toBe('scheduler-overlay')
     expect(builtinHa?.commandId).toBeUndefined()
     // registerBuiltin 解析后 record 侧同键（renderer 声明镜像消费的就是 record）

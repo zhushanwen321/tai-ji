@@ -90,7 +90,6 @@ export const PLUGIN_RPC_METHODS = [
   'plugin.ui.showConfirm',
   'plugin.ui.showInput',
   'plugin.ui.notify',
-  'plugin.ui.updateStatusBarItem',
   'plugin.ui.uiRequestExpired',
   'plugin.ui.updateHeaderAction',
   // views 域（api/views-api.ts，2 个）

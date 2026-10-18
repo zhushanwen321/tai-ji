@@ -296,9 +296,6 @@ subagent 是 single-shot 子进程，控制只支持 cancel（现扩展 message/
 ### ADR-0067 subagent「已收起」第三状态全链路清除（2026-09-16 用户裁决）
 subagent 对用户的可见状态只有两桶：进行中 / 已结束（判据 = `isRunningProjection` 及其取反）——「已收起」（archived）不以第三状态呈现，全链路清除不残留：renderer 三桶视图与「已收起」过滤器删除；shared/runtime 投影链的 Intent 类型与 ExecutionRecord.intent / SubagentRecord.intent 字段删除；subagent-core markArchived 原语删除，close 的资源收尾职责由 `markSettledOut` 承接（close 终态写点：幂等、worktreeHandle 清句、`.alive` release、manifest 投影，不写任何意愿字段）；markReactivated 删除（message 续聊无翻位发生，万物可续判据不变）；通知 gate ①（archived 静默检查）删除，close 注销 reason 词 `archived` → `completed`。机制权威 [docs/architecture/subagent-permanent-session-model.md](../architecture/subagent-permanent-session-model.md)（§3.2.5/§3.2.7 已按删除后现状改写）。登记 C-data-20、C-proc-13。
 
-### ADR-0015 statusline plugin 封装
-plugin 中转渲染 statusline（`plugin:statusBarUpdate` 通道），plugin 不直写 UI。
-
 ### ADR-0013 / ADR-0014（digest）sessionData 本地文件持久化（0013 部分有效）
 plugin 的 per-session KV API 保留；底层为本地文件持久化（`plugin-service/session-data-store.ts`，atomic write + 启动恢复 + debounce flush），不依赖 pi.appendEntry。
 
@@ -453,6 +450,7 @@ GitHub issue #24（Windows 10 窗口外壳四问题）复核结论：用户抱�
 
 
 - **ADR-0008** navigate-tree 桥接命令——命令已删，桥接形态被 marker 通道取代。
+- **ADR-0015** statusline plugin 封装（`plugin:statusBarUpdate` 通道）——随 StatusBar 底栏整体退役（ADR-0141），通道、registry 与 builtin statusline 插件已删。
 - **ADR-0019 / ADR-0022** 冷蓝暗色视觉方向——被 ADR-0066 太极纯灰推翻。
 - **ADR-0023** Overview 入口 = sidebar 按钮 + ⌘⇧O——v6 D14 nav 重构移除入口按钮，⌘⇧O 未绑；go-overview 仅经 SearchModal 可达。
 - **ADR-0045** 自研虚拟滚动不引入库——决策反转：MessageStream 已切 virtua/vue `<Virtualizer>`（cw wave w3）。
@@ -700,7 +698,7 @@ WorkflowTab 步骤列表的数据源绑定从「workflow-record 全量快照（6
 
 ### ADR-0132 引擎 provider 来源统一：启动时单向同步 pi→zcode（数据目录内副本 + merge 实时视图装载）+ 外部配置零写入（2026-10-12 设计落地，engine-provider-unification）
 
-**决策**：runtime 组合根启动段（`packages/runtime/src/index.ts` 的 `runZcodeProviderStartupSync` 接线点，`sanitizeInvalidProviders` 之后）把 pi 侧 provider 配置单向同步为 zcode 校验源可读的副本——三读取源（models.json / auth.json / catalog 合并视图），其中凭据获取全部经既有凭据 resolver 单通道（机检红线 C-proc-14，`scripts/check-provider-credential-reads.mjs`），映射产物落 `<dataDir>/engines/zcode/pi-synced-provider-config.json`，形态 = 纯 pi 侧产物：providerRules 仅含 pi 映射条目与 zai 关联条目、providerOrder 仅含 pi 追加序，不透传真实文件内容（真实内容合并由读取时 merge 承载）。装载通道 = 两处同规则实装、对账单测锁步：wrapper fs 拦截（`appserver-launcher.ts` `mergeProviderConfig` 分支）与引擎校验链（`preparer.ts` `mergePersonalProviderConfig`）都读同一 merge(真实 `~/.zcode/v2/provider_config.json` 实时内容, 同步副本) 合并视图——真实条目优先、providerOrder = 真实现值序 + 副本独有 id 追加去重保序、每次读取重算无缓存；副本路径经既有 `ZCODE_ENG_PROVIDER_CONFIG` 锚点传递（语义收窄为 taiji 同步副本路径；`zcode-engine.ts` 赋值链与 preparer default 解析走同一 `resolvePersonalProviderConfigPath`），副本缺失/不可读时短路回落真实文件（零行为变化）。**红线：taiji 全程零写入 `~/.zcode/` 任何文件**。家族边界：zcode builtin:/account: 家族不经内容同步；zhipu/zai 系官方 provider（zai-coding-cn/zai）走 token 关联特例——两前置同时成立（ZCode 桌面端 plan 已设置且特有 token 已生成 + taiji 已配 zai 系 provider）时副本生成个人关联条目 id=`zai-coding-plan`（anthropic 网关，baseUrl/模型清单读 zcode 内建目录 coding-plan 条目，apiKey = zcode 侧特有 token 只读引用，pi 原始 key 不参与），任一前置缺失不生成条目 + warn 指引。映射保守纪律（宁缺毋错）：凭据不可得 / 无 zcode 对应协议 / per-model 协议或 baseUrl 差异 / 同名让位（判定源 = 真实 provider_config providerRules、providerOrder、v2 config 字典带 key、cli config 字典按键存在，四源并集任一命中即让位）的条目一律跳过 + warn。失败语义 = 降级不阻断：读取失败保留上次副本产物 + warn、启动不中断；pi 映射条目归零时删除副本、全链回落真实文件。同设计包配置域半边：settings per-engine 默认模型进 `<dataDir>/agent/subagents/config.json` 的 `engineDefaults` 键（新 RPC `session.setSubagentEngineDefaultModel`，写入校验 ref ∈ 引擎模型清单），派发模型解析扩四层：task 显式 > agent frontmatter > engineDefaults > 引擎缺省（pi 路由恒不插层）。
+**决策**：runtime 组合根启动段（`packages/runtime/src/index.ts` 的 `runZcodeProviderStartupSync` 接线点，`sanitizeInvalidProviders` 之后）把 pi 侧 provider 配置单向同步为 zcode 校验源可读的副本——三读取源（models.json / auth.json / catalog 合并视图），其中凭据获取全部经既有凭据 resolver 单通道（机检红线 C-proc-14，`scripts/check-provider-credential-reads.mjs`），映射产物落 `<dataDir>/engines/zcode/pi-synced-provider-config.json`，形态 = 纯 pi 侧产物：providerRules 仅含 pi 映射条目与 zai 关联条目、providerOrder 仅含 pi 追加序，不透传真实文件内容（真实内容合并由读取时 merge 承载）。装载通道 = 两处同规则实装、对账单测锁步：wrapper fs 拦截（`appserver-launcher.ts` `mergeProviderConfig` 分支）与引擎校验链（`preparer.ts` `mergePersonalProviderConfig`）都读同一 merge(真实 `~/.zcode/v2/provider_config.json` 实时内容, 同步副本) 合并视图——真实条目优先、providerOrder = 真实现值序 + 副本独有 id 追加去重保序、每次读取重算无缓存；副本路径经既有 `ZCODE_ENG_PROVIDER_CONFIG` 锚点传递（语义收窄为 taiji 同步副本路径；`zcode-engine.ts` 赋值链与 preparer default 解析走同一 `resolvePersonalProviderConfigPath`），副本缺失/不可读时短路回落真实文件（零行为变化）。**红线：taiji 全程零写入 `~/.zcode/` 任何文件**（窄例外见 ADR-0143：standalone 账号元数据两条非秘密键）。家族边界：zcode builtin:/account: 家族不经内容同步；zhipu/zai 系官方 provider（zai-coding-cn/zai）走 token 关联特例——两前置同时成立（ZCode 桌面端 plan 已设置且特有 token 已生成 + taiji 已配 zai 系 provider）时副本生成个人关联条目 id=`zai-coding-plan`（anthropic 网关，baseUrl/模型清单读 zcode 内建目录 coding-plan 条目，apiKey = zcode 侧特有 token 只读引用，pi 原始 key 不参与），任一前置缺失不生成条目 + warn 指引。映射保守纪律（宁缺毋错）：凭据不可得 / 无 zcode 对应协议 / per-model 协议或 baseUrl 差异 / 同名让位（判定源 = 真实 provider_config providerRules、providerOrder、v2 config 字典带 key、cli config 字典按键存在，四源并集任一命中即让位）的条目一律跳过 + warn。失败语义 = 降级不阻断：读取失败保留上次副本产物 + warn、启动不中断；pi 映射条目归零时删除副本、全链回落真实文件。同设计包配置域半边：settings per-engine 默认模型进 `<dataDir>/agent/subagents/config.json` 的 `engineDefaults` 键（新 RPC `session.setSubagentEngineDefaultModel`，写入校验 ref ∈ 引擎模型清单），派发模型解析扩四层：task 显式 > agent frontmatter > engineDefaults > 引擎缺省（pi 路由恒不插层）。
 
 **依据**：pi 与 zcode 的 provider 配置体系完全隔离，zcode 引擎校验源只认 `~/.zcode/v2/provider_config.json`——用户在 taiji 配好的 provider 对 zcode 引擎不可见（显式模型派发 `model_not_available`，而配置明明已配好，错误对用户不可理解）。直写真实文件不采用（taiji 与 ZCode GUI 互为多写方互踩、回滚语义缺失）；独立 env 双源不采用（两处合并逻辑漂移面）；「wrapper 补注入合成条目 → Registry 装载」通道被 A0 探针证伪（zcode 0.16.9 Registry 个人 provider 供数直读真实 provider_config.json，补注入 cli config 的条目不被装载），据此改走 fs 拦截 merge 实时视图——校验链与 Registry 装载链读到同一视图，副本存在期间 ZCode 端配置变更对两消费方实时生效，副本缺失时全链回落现状行为。
 
@@ -759,3 +757,73 @@ WorkflowTab 步骤列表的数据源绑定从「workflow-record 全量快照（6
 **为什么**：form 通道曾是三通道家族唯一未下沉成员，核心双壳各一份靠镜像注释手工维持对齐（companion-bridge 11 处 + useExtensionUI 8 处「同构/镜像」注释），已发生第一处真实漂移（移动壳断连不清挂起 form，桌面壳清——用户可见后果为断连期僵尸 form 假成功提交）。dialog/permission 先行下沉的先例证明 factory 形态可行；第四通道再出镜像即是回归。
 
 **边界**：呈现形态差异（桌面 tab / 移动堆叠、band 样式）留壳侧，不下沉；下沉对象是通道的**行为算法**，不是 UI。
+
+### ADR-0141 StatusBar 底栏整体退役（2026-10-17 用户裁决）
+
+**决定**：main-panel 局部底栏 StatusBar（`packages/ui/src/extension-host/StatusBar.vue`，26px 状态条）及其全部数据链删除——渲染层（组件 / status-bar-source 契约 / StatusBarController / PanelContainer 挂载）、core 数据链（bridge 的 `plugin:statusBarUpdate` / `plugin:statusSetUpdate` / `extension:status` 三解析器 + InternalEvent 三 kind + statusBarItem 贡献类型与 statusbar 挂载点）、runtime 转发链（event-adapter setStatus 翻译、interpreter status-set/status-broadcast、`server.handleStatusSetUpdate`、`plugin.ui.updateStatusBarItem` RPC、StatusBarRegistry、builtin statusline 插件）、shared 协议类型与 plugin-sdk 声明同批删除。pi 扩展的 `ctx.ui.setStatus` 调用保留（pi CLI 独立运行状态栏仍有意义；taiji 内 event-adapter 静默 noop，与 setTitle 同类已知落点）。
+
+**为什么**：状态项的两个真实消费场景已被其他表面承接——pi 扩展状态（goal/todo 进度）由 Composer 任务托盘 widget 区与对话流内联呈现，插件交互入口由 headerAction 顶栏按钮区承接；底栏只剩低价值展示位。ADR-0015 的「plugin 不直写 UI、经 registry 中转」间接层随之失去服务对象。
+
+**边界**：`plugin.*` WS 方法命名空间与 `message.status` 事件链（pi passthrough）不动；ContributionRegistry 其余贡献类型与挂载点不受影响。
+
+### ADR-0142 翻译目标通道修正 + 部署形态翻译面（manifest modelTranslation）+ 生效回执（2026-10-16 用户裁决，engine-ref-translation D5；修订 ADR-0137 的等价对映射目标）
+
+**决策**（三段，同一事故链的修复）：
+
+1. **映射目标（2026-10-16 二次修订，证据驱动）**：`zai-coding-cn/*` 的 zcode 对应通道维持/回到 **`account:bigmodel-individual-coding-plan`**。同日首版曾改向 `account:zai-individual-coding-plan`（基于家族命名的推断）；随后凭据链实证推翻该推断——本机 `coding-plan-cache.json` 显示 bigmodel 家族 available、zai 家族 unavailable；`credentials.json` 只有 `oauth:bigmodel:*` 与两条 bigmodel plan api-key；GUI 成功日志 providerId = `account:bigmodel-individual-coding-plan`；pi 侧 `zai-coding-cn` 的 baseUrl 即 `open.bigmodel.cn/api/coding/paas/v4`（bigmodel 通道，名字带 zai）。ADR-0137 其余裁决（派发期翻译、两层失败语义、退役清单、清单面扩展）全部维持。
+2. **部署形态翻译面（RemoteEngine 补成员）**：ADR-0137 的翻译面只在 in-process 引擎类实装，staged 引擎 cli 形态（`TAIJI_AGENT_ENGINE_ROOTS` 发现 → RemoteEngine 代理）的 `translateModelRef` 缺席且无任何信号——2026-10-16 双会话实测：engineDefaults 偏好死值直穿引擎侧炸 `model_not_available`（16 个 subagent 批次全灭）、record 盖章未翻译 ref，修复语义在部署形态整体静默失效。修复 = 引擎 manifest 新增可选段 **`modelTranslation`**（静态翻译表声明，SSOT = `package.json taiji.subagentEngine.modelTranslation`），发现期快照携带（与 capabilities/modelCatalog 同模式：静态声明读快照不握手），RemoteEngine 构造器按声明装配/摘除 `translateModelRef` 成员（纯查表改写 provider 段、模型段原样保留；大小写归一与目录校验由引擎侧幂等再翻译承担——代理侧无内建目录，不复制该职责）。与 validateModel/setModel 同款形态映射：声明缺席 = 成员摘除，消费方 `typeof` 探测缺席语义。in-process 引擎类代码表与 manifest 声明表由对账锁步单测绑定（`preparer.test.ts` modelTranslation 锁步用例）。
+3. **生效回执**：派发层翻译编排（`resolveEngineModelWithTranslation`）发现 `translateModelRef` 缺席时按 engineId 进程级一次告警（`has no model translation face`）——缺席语义（恒等透传）不变，但必须可观测。
+
+**边界（显式不修）**：远程形态 `listModels()` 读 manifest 静态快照（zcode 声明 `dynamic:true, models:[]` → null = 无枚举面）——偏好层清单成员校验在远程形态仍为「放行」，偏好死值的拦截依赖「写入时校验（u7，翻译感知扩展后）+ 引擎侧首败显式报错 + 指引重选」，ADR-0137 偏好层降级语义仅在「有枚举面的引擎/形态」达成；engineDefaults 存量失效自动清理不做（D5 减法裁决维持），后续项登记 `docs/todo/engine-remote-membership-face.md`。
+
+**依据**：2026-10-16 用户裁决原文「全部修复。默认引擎应该用 zai-coding-cn/glm-5.3-flash（期望应该是自动翻译到 account:zai-individual-coding-plan/glm-5.3-flash）」（原始裁决命名的目标通道为同日中间态，决策 1 已按凭据链实证修正为 `account:bigmodel-individual-coding-plan`）；事故取证 = 双 pi 会话（01a14400 workflow 批次 16 失败 + 01a14414 派发测试 3/4 失败）+ 本机 bundle 指纹（运行版 v0.11.5 已含 ADR-0137 实装但 RemoteEngine 无 translateModelRef、staged manifest 无翻译声明）。
+
+**登记**：实装 = `packages/zcode-subagent-cli/src/preparer.ts`（映射目标）+ `package.json`（modelTranslation 声明）/ `packages/subagent-core/src/execution/engine/engine-manifest.ts`（parseModelTranslation）+ `engine-inspect-package.ts`（快照组装）+ `client/remote-engine.ts`（成员装配/摘除）+ `client/manifest-lookup.ts`（查表实现）+ `model-ref-translation.ts`（生效回执）；engine-development-guide manifest 契约段同批补 modelTranslation 条目。
+
+**镜像架构补充（2026-10-16 同日用户裁决）**：透传翻译的数据前提是「zcode engine 的 provider 配置副本 = taiji provider 的逐字镜像」。落地三点：① 同步枚举面并入 auth.json 型 catalog provider（候选集 = models.json 条目 ∪ 凭据两源 id 并集 `listCredentialBackedProviderIds`；此前只读 models.json，xiaomi/kimi/minimax 等 catalog 型 provider 永不进镜像——StepFun 能透传而 xiaomi 被挡的事故根因）；② write-through：settings 域 provider 变更成功后经 `providersMutatedSync` 钩子重跑镜像同步（与启动同步同源同实现，失败只 warn 不阻断配置写入），启动同步保留作对账兜底；③ 零写死原则：全链唯一 provider id 写死点 = 翻译表那对等价对（代码表 + manifest 声明 + 同步 skip 集合三处同源），其余任何 provider 禁止落入代码（运行时翻译、配置镜像均为数据驱动的泛化路径）。同批修复：同步模块注释/skip 文案的目标通道以本 ADR 决策 1 为准——同日按 zai-individual 中间态改写 bigmodel 引用的动作已随决策 1 回退，相关注释/文案最终对齐 `account:bigmodel-individual-coding-plan`。触发面补充：④ 凭据域登录/退出同样经 `providersMutatedSync` 重跑镜像（与 settings 域共用触发面）；⑤ 串行化契约 = 组合根 `createZcodeProviderMirrorSync` 串行队列、latest-wins 重跑（触发不丢、不并发写同一副本）。
+
+
+### ADR-0143 zcode 账号族凭据链实证 + app-server standalone 模式补丁（2026-10-16 用户裁决驱动排查）
+
+**凭据链实证**（源码 = ZCode.app 3.15.3 `glm/zcode.cjs`；GUI = `app.asar`）：
+
+1. **生成/存储**：OAuth 登录（GUI 或 CLI `login [zai|bigmodel]`）→ `~/.zcode/v2/credentials.json`（值 `enc:v1:` 加密）：`oauth:<family>:access_token` / `oauth:<family>:user_info` / `oauth:active_provider` / `zcodejwttoken`；plan api-key 键名模板（源码 `Q8e`）＝ `account-provider:coding-plan:<providerId>:account:<identity>:api-key`。plan 可用性缓存 `coding-plan-cache.json`（本机：bigmodel available、zai unavailable）。
+2. **使用分两模式**（源码 `xCt` = startProcessProviderRegistryRuntime）：
+   - **host 模式**（默认；`t.standalone` 未传）：account 态由宿主配置构造（`zcodeBuiltinProviders` 路径**硬编码 `entitled:!1`**），且**不注入本地 providerRuntimeHeaders 端口** → 模型请求前须向宿主发 `interaction/requestProviderRuntimeHeaders`，应答过 `yQt`（discriminatedUnion）解析。GUI 宿主（`zcode-agent-service`）日志「收到…已应用」即此路径成功形态。
+   - **standalone 模式**（`{standalone:{}}`）：自建本地账号源（`readStandaloneAccountProviderConfigSnapshot`：读 credentials.json，**entitled 由「凭据存在性」计算**，无硬编码）+ 注入本地 `providerRuntimeHeadersPort`（`createStandaloneProviderRuntimeHeadersPort`）→ 账号族全链本地完成、零宿主依赖。
+3. **headersApplied 根因（修正 ADR-0142 边界段的推测）**：taiji 引擎 spawn `node zcode.cjs app-server --cwd <dir>`（协议路径 `zcodeProtocolAgent`）恒以 **host 模式**创建 provider registry（源码 `create:r(()=>xCt(z),"create")` 不传 standalone）→ 需要宿主任应答；taiji 链上无宿主实现该协议（宿主日志零踪迹、失败路径日志亦未出现）→ 回来/兜底帧非合法形状 → zod `invalid_union headersApplied`。**不是 ZCode 自身 bug、不是凭据缺失**，是「headless spawn 落在 host-only 模式」。
+4. **taiji 补丁（本 ADR 实装）**：launcher 内存补丁层新增第二处改写——锚定稳定串 `startProcessProviderRegistryRuntime:()=>`（取 minified 函数名）＋调用点 `create:r(()=>` → 注入 `,{standalone:{}}`；形态漂移 → 原文透出 + stderr warn。安装门日志增 `standalone-account=armed|off`。真机验证：`standalone-account=armed` 生效、翻译/盖章正确（`account:bigmodel-individual-coding-plan/glm-5.3-flash`）。
+5. **当前阻塞（下一步裁决项）**：standalone 快照 `readStandaloneAccountProviderConfigSnapshot` 要求 `account-provider:<id>:identity`（缺则**该 provider 直接丢弃**；源码 `if(!I) return []`）与 `account-provider:<id>:auth-source`——本机 credentials.json **无这两条**（GUI OAuth 只写 host 态键）。写这两条的唯一手段是 ZCode 自己的流程：CLI `login [zai|bigmodel]`（浏览器 OAuth，写 standalone 态）或 SDK 导出 `configureCodingPlanApiKey`（api-key 形态：identity = `key-<sha256(key).slice(0,24)>`、auth-source = manual）。GUI 不调用后者（app.asar 0 命中）。**三选项待用户裁决**：A) 用户跑一次 CLI 登录写 standalone 态（零新 hack，推荐）；B) taiji 在 CLI 进程内自举调用 `configureCodingPlanApiKey`（零用户操作，但需把凭据传入 app-server 进程）；C) 回退 ADR-0132 式关联条目（api-key 个人 provider，完全绕开账号体系，10-14 已验证；逆转零 key 注入裁决）。
+
+**终态（2026-10-16 真机端到端验证通过）**：补丁层三处改写（① entitled 翻转 ② standalone 选项注入 ③ **认证头端口注入**——协议路径 app 创建 `createZCodeApp:r(` 未传 `providerRuntimeHeadersPort`，app 因此回落 host 请求端口；②只修 registry 侧，③把 registry runtime 对象上的本地端口注入该 app 创建选项）+ 凭据库两条**元数据键**（`account-provider:<planProviderId>:identity` / `:auth-source`，明文即可——凭据库读路径以 `enc:v1:` 前缀判定加密，明文值直接可用；二者非秘密，秘密仍是 ZCode 自有 `oauth:bigmodel:access_token`）。真机结果：`zai-coding-cn/glm-5.3-flash` → 翻译 `account:bigmodel-individual-coding-plan/glm-5.3-flash` → **round completed（输出 "ok"）**，**零凭据注入**（taiji 不传任何 token/apikey，账号凭据全程 ZCode 自有）。安装门日志：`standalone-account=armed, header-port=armed`。
+
+**元数据键幂等供给（2026-10-16 实施并真机验证；用户当日授权 hack 方式）**：launcher wrapper 在 spawn 前置步 `ensureAccountMetadata()`（调用点 = 安装门确认 standalone 与 header-port 两锚均已武装之后；未武装版本不写共享凭据库——这些键只被 standalone 账号源消费且账号链还要求认证头走本地端口）——从内建目录取 plan provider 清单（`access.type==='zhipu-account'`，数据驱动无 id 写死；过滤面宽于 3.15.3 standalone 快照判据但只多写非秘密键，跨版本 mode 值域演化下刻意不收窄），对每个 plan 每次 spawn 重算派生值：identity 从当前 host 态键名 `account-provider:coding-plan:<pid>:account:<identity>:api-key` 派生；auth-source 依 `oauth:<family>:access_token` 存在性取 `oauth`（否则 manual）。落库语义 = **缺时追加 + 孤儿值矫正**（2026-10 review MF-1-1）：既有非空值仍不无差别覆写（ZCode 登录/GUI 写入是权威），仅当它已无凭据支撑时才改写——`auth-source==='oauth'` 而对应家族 token 已撤销 → 换成当前派生值；identity 无对应 api-key 且当前可派生（oauth 同时存在时 identity 不参与凭据查找，不在此列）→ 换成当前身份；修正逐条写 stderr（`account metadata reconciled`），否则账号切换/凭据轮换后旧值永久门控该 provider 且无自愈路径。写路径 = tmp+rename 原子写（保留既有文件 mode），失败只 warn 不阻断 spawn（非秘密键，真凭据始终是 ZCode 自有项）。并发边界：写路径为与 GUI 共享凭据库的无锁 read-modify-write 全量写回，与 GUI token 刷新并发存在毫秒级丢更新窗口——后果自愈（GUI 侧重试刷新 / 本侧缺键下次 spawn 幂等补齐），事实驱动原则下不加锁、不做时间补偿，登记为已知边界。真机验证：手工删除四条键后直接派发——launcher 日志 `account metadata provisioned: …`（自动补齐 individual + team 两家族）且 `stop=completed`；省略 model 的偏好路径（engineDefaults=zai-coding-cn/glm-5.3-flash）同样 completed。测试：`appserver-launcher.test.ts`（供给 + 幂等不重写 + 存在性守卫 + 撤销/轮换矫正契约回归 + 补丁产物自读等用例；计数不登记，避免随套件增长漂移）。
+
+**多版本适配（2026-10-16 用户要求）**：本机仅一个 CLI bundle（`ZCode.app/Contents/Resources/glm/zcode.cjs`，3.15.3；`~/.zcode/v2/runtime/**` 的「多版本」只是 catalog 快照、无代码）。适配策略 = 锚点抗漂移 + 自检 + 变体回归：① 授权门锚 = 属性名（`zcodeBuiltinProviders.entries()` / `zhipu-account` / `entitled:!1`）窗口法；② 注册源锚首选**函数定义默认参数法**（导出映射 `startProcessProviderRegistryRuntime:()=>` 取 minified 名 → 定位**唯一且位于导出映射之前**的 `function <名>(e,t={})` → 改 `={standalone:{}}`；结构校验 = 恰好两个顶层参数、第二个以 `={}` 收尾、函数体窗口含 `standalone`/`credentialStore` 令牌，第二处同名定义/定义在导出映射之后/参数形态不符 → 放弃本锚，宁可 not armed 不改错位置；调用方省略第二参即 standalone、显式传 `{}` 的 skipUserConfig 路径不受影响），失败回退调用点注入 `create:r(()=>`（括号配平跳过字面量/模板/注释）；③ 端口注入锚 = `createZCodeApp:r(`（唯一）+ `.runtime.registryService` 动态取变量名 + `},"createZCodeApp")` 收口。三处独立判定、各自 stderr warn（形态漂移不静默），应用态由 `patchedCliSource` 发布的 `__cliPatchStatus` 标志驱动（产物子串判定在真实 bundle 上恒真——3.15.3 已含 8 处 `providerRuntimeHeadersPort:`），端口锚单独命中同样交付（认证头注入为条件 spread——上游 `kEt` 的 `n.providerRuntimeHeadersPort ?? mai(e,t)` 宿主端口在本地端口缺席时不被 shadow）。**版本自检程序**：每次 spawn 首行安装门日志即兼容矩阵——`cli-config-inject / catalog-entitled / provider-merge / cli-source-bypass / standalone-account / header-port` 六项须全 on/armed；任一项 off 即该版本锚点漂移，按对应 warn 修锚点后重跑真机派发验证。变体回归测试：`appserver-launcher.test.ts`（minified 名变化 + 无调用点 + 变量名不同的模拟版本形态用例；计数不登记，避免随套件增长漂移）。
+
+**ADR-0132 红线修订（2026-10-16 用户授权）**：本 ADR 的元数据供给写入修订 ADR-0132 的「taiji 全程零写入 `~/.zcode/` 任何文件」——仅允许写入两条**非秘密**元数据键（`account-provider:<pid>:identity` / `:auth-source`）；凭据仍全程 ZCode 自有、taiji 零 token/apiKey 注入、其余 `~/.zcode/` 文件仍零写入；该写入为用户 2026-10-16 授权的 hack 形态（ADR-0132 的 provider 配置零写入与副本落 taiji 数据目录语义不变）。
+
+**登记**：实装 = `packages/zcode-subagent-cli/src/appserver-launcher.ts`（安装门 + wrapper 落盘）/ `appserver-launcher-patches.ts`（三处改写 + 元数据供给）/ `packages/zcode-subagent-cli/src/preparer.ts` + `package.json`（目标家族 bigmodel-individual）/ 测试 `appserver-launcher.test.ts`（含补丁产物自读回归）+ `preparer.test.ts`；`docs/todo/engine-remote-membership-face.md` 附录的「ZCode 自身 bug」结论按本条修正。
+### ADR-0144 provider API Key 明文回显 = 用户手势触发的单点只读 carve-out + 远程客户端可达性裁决（2026-10-18 交付裁决，fix-provider-save round 1 MF-1-4）
+
+**决策**：`config.revealProviderApiKey`（WS 请求；reply `config.providerApiKeyRevealed`）是 renderer 可达的唯一 provider 明文凭据通道，形态按五条红线收口：
+
+1. **api_key only**：只读 auth.json 中 `type === 'api_key'` 的条目与 models.json `providers[id].apiKey`；auth.json 的 OAuth 条目**结构性不可回显**——resolver 的 readRawApiKey 对 oauth 返回 notRevealable 且**停止向低优先源回落**（OAuth token 永不出协议，与 `config.hasOAuth` 同红线；回落显示 models.json 的历史残留值会误导用户）。
+2. **单点读取**：唯一读点 = `ProviderCredentialResolver.resolveProviderApiKeyRaw`（port 契约 `IProviderCredentialResolver`），源优先级由 resolver 的 sources 数组单点声明（C-proc-14 机器检查 `scripts/check-provider-credential-reads.mjs`）；handler 只做「调用 + reply 解包」，禁自建第二套解析链。
+3. **手势触发 + 无广播**：renderer 唯一调用点 = 设置页编辑体眼睛按钮的显式点击（草稿非空时是纯显隐切换，不发 RPC）；reply 只回请求方，不随 provider 列表或任何广播下发（密钥不常驻前端）。
+4. **非持久化**：回显值只进编辑草稿（内存），renderer 不落盘、不进持久 store；保存不回写（回显值不构成 apiKey 变更）。
+5. **原值语义**：`$ENV` / `!cmd` 配置串按原值回显（不展开、不执行）——回显语义 = 用户所存值，直接保存不会把引用改成明文。
+
+**远程客户端裁决（显式接受可达性）**：WS 鉴权 = {spawn token} ∪ {remote token} 的集合成员校验，`connection-manager` 不记录单条连接由哪个通道认证；开启远程访问（LAN 监听）时，任一持有 remote token 的已配对客户端均可调用本 RPC 取回明文 Key。**裁决 = 接受，不在本轮改鉴权模型**：
+
+- remote token 的既有定级即「LAN 完全控制凭据」（[registry](../architecture/data-source-registry.md) #52）：持有者可驱动同一 agent、经权限审批弹窗执行宿主侧能力（含读 `<piAgentDir>/auth.json`）并读取全部会话内容。明文回显通道**不新增能力类别**，只缩短一条路径；
+- 通道级收窄（spawn-token-only）需 connection-manager 记录每连接认证通道 + 新增通道准入表 + 测试，收益是「已完全控制的凭据再少一条读取捷径」，与引入的鉴权簿记/回归面不成比例；
+- 远程访问默认关（ADR-0120：argv flag 不传即关态、纯回环监听），开态是用户显式动作；LAN `ws://` 明文传输是 ADR-0120 的既有登记取舍（remote token 本身同样明文过该链路），不在本通道单独收口。
+
+**重审触发**：引入「受限远程客户端」（非完全控制级 token / 通道级 capability）时本条必须重审——届时应改为 spawn-token-only 或独立 capability 门控，并同批补 auth-channel 簿记与测试。
+
+**残余风险（不掩饰）**：ADR-0118 §3c 曾以「renderer 被注入后可直读凭据文件」为由把 localFile 读通道收窄到会话产物子树；本通道是同一威胁模型下的**有意有界例外**——renderer XSS 仍可调用本 RPC 取回明文 Key。边界依据：单 provider、只读、无写入/删除能力、OAuth 不可达、无广播、非持久化，暴露面限于「攻击者已能执行 renderer 任意脚本」的既有完全沦陷场景；对应收益 = 用户无需离开设置页即可确认/复制已存 Key（原先须手翻 auth.json）。纵深防线沿用既有 CSP + markdown 分通道净化，不在本通道内新增。**carve-out 不外溢**：本裁决仅适用 provider api_key；其他凭据家族（TTS Key 等）维持「不回传出站」原红线（入站 configure 由用户显式粘贴承载，registry #49）。
+
+**已接受的显示态残留**：外部轮换 api_key 而 `apiKeySet` 保持 true、`authMethod` 不变时，广播只携带布尔（`ProviderInfo` 无凭据指纹），编辑体无法察觉回显基线已过期——继续把旧值当作「所存值」展示；保存永不回写（`resolveApiKeyChange()` 对回显基线返回 undefined），恢复动作 = 关闭重开编辑体（重新回显按需读盘）。结构性消除需给 `ProviderInfo` 增凭据指纹（如 `apiKeyVersion` / `credentialUpdatedAt`）并在指纹变化时作废回显，禁止用时间推测代替。
+
+**登记**：数据源 = [data-source-registry.md](../architecture/data-source-registry.md) #65（provider 凭据与明文回显读通道）；约束 = 复用 C-proc-14（单点读取机器检查）与 C-data-01（单写 owner），**未新增约束族**；行为红线由 `packages/runtime/src/services/auth/__tests__/provider-credential-resolver.test.ts`「回显原值」组（oauth 不回落 / `$ENV` 原值 / custom 源）与 `packages/runtime/src/transport/settings-message-handler-reveal-apikey.test.ts`（reply 形状 + 单 reply）锁定。

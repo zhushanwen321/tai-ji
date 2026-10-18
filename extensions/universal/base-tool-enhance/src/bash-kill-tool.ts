@@ -16,7 +16,7 @@
  * 宁不杀勿误杀，§3.6 收殓侧同原则）。
  */
 
-import type { AgentToolResult, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { AgentToolResult, ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { getProcessStartTimeSec, isPidAlive, killProcessTree } from "@zhushanwen/extension-protocol/background-task";
 import { Type } from "typebox";
@@ -27,6 +27,7 @@ import { getLogger } from "@zhushanwen/pi-extension-logger";
 import { getRegistryPath, readRegistry, taskToRegistryEntry, writeRegistryEntry } from "./background/registry.ts";
 import { getAllTasks, markKillingIntent } from "./background/task-store.ts";
 import { isActiveState, isTerminalState, type RegistryEntry } from "./background/types.ts";
+import { buildBashKillSummary, renderBashToolResult } from "./render-result.ts";
 
 const bashKillSchema = Type.Object({
 	task_id: Type.String({ description: "Task id returned by the background bash tool." }),
@@ -42,12 +43,17 @@ const JSON_INDENT = 2;
 
 const logger = getLogger("base-tool-enhance");
 
-function textResult(text: string): AgentToolResult<unknown> {
-	return { content: [{ type: "text", text }], details: undefined };
+/** 文本 + 收起态摘要（原 details 为 undefined → 统一 { summary }）。 */
+function textResultWithSummary(text: string, summary: string): AgentToolResult<unknown> {
+	return { content: [{ type: "text", text }], details: { summary } };
 }
 
-function killedFalse(reason: string, hint?: string): AgentToolResult<unknown> {
-	return textResult(JSON.stringify({ killed: false, reason, ...(hint !== undefined ? { hint } : {}) }, null, JSON_INDENT));
+function killedFalse(taskId: string, reason: string, hint?: string): AgentToolResult<unknown> {
+	const text = JSON.stringify({ killed: false, reason, ...(hint !== undefined ? { hint } : {}) }, null, JSON_INDENT);
+	return textResultWithSummary(
+		text,
+		buildBashKillSummary({ task_id: taskId }, { content: [{ type: "text", text }] }),
+	);
 }
 
 export function createBashKillToolDefinition() {
@@ -74,10 +80,11 @@ export function createBashKillToolDefinition() {
 					args.task_id,
 				);
 				if (entry === undefined) {
-					return killedFalse("no such task", "use bash_output to list");
+					return killedFalse(args.task_id, "no such task", "use bash_output to list");
 				}
 				if (isTerminalState(entry.state)) {
 					return killedFalse(
+						args.task_id,
 						`already exited${entry.exitCode !== undefined && entry.exitCode !== null ? ` (code ${entry.exitCode})` : ""}`,
 					);
 				}
@@ -87,6 +94,7 @@ export function createBashKillToolDefinition() {
 				// 纯 CLI 独立安装无 runtime 收殓兜底，孤儿自然退出或手动杀——E11 已
 				// 接受边界，hint 按形态分流，不写死 runtime 承诺）
 				return killedFalse(
+					args.task_id,
 					"cross-process running task owned by another pi process",
 					"the task is managed by the pi process that started it (bash_kill from that session); " +
 						"if that process is gone, the orphan keeps running until it exits on its own; " +
@@ -96,6 +104,7 @@ export function createBashKillToolDefinition() {
 			}
 			if (isTerminalState(fromStore.state)) {
 				return killedFalse(
+					args.task_id,
 					`already exited${fromStore.exitCode !== undefined && fromStore.exitCode !== null ? ` (code ${fromStore.exitCode})` : ""}`,
 				);
 			}
@@ -107,12 +116,13 @@ export function createBashKillToolDefinition() {
 			//  - 无字段（spawn 时 ps 不可用平台）→ 放行：登记原进程在 spawn 时刻存活，
 			//    复用窗口毫秒级；registry 终态条目不会走到这里（上面 already exited）
 			if (!isPidAlive(fromStore.pid)) {
-				return killedFalse("already exited (process no longer alive; final state will be written on task exit)");
+				return killedFalse(args.task_id, "already exited (process no longer alive; final state will be written on task exit)");
 			}
 			if (fromStore.pidStartTime !== undefined) {
 				const actualStartSec = getProcessStartTimeSec(fromStore.pid);
 				if (actualStartSec === undefined) {
 					return killedFalse(
+						args.task_id,
 						"cannot verify process start time; refusing to kill (better safe than sorry)",
 						`pid ${fromStore.pid} is alive but its start time is unreadable, so pid reuse cannot be ruled out; ` +
 							"poll bash_output for the final state, or kill the process group manually if certain",
@@ -120,6 +130,7 @@ export function createBashKillToolDefinition() {
 				}
 				if (actualStartSec !== fromStore.pidStartTime) {
 					return killedFalse(
+						args.task_id,
 						`pid reuse suspected: recorded start time ${fromStore.pidStartTime} but actual ${actualStartSec}; refusing to kill`,
 						`pid ${fromStore.pid} likely belongs to an unrelated recycled process now; ` +
 							"if you are certain, kill the process group manually (kill -- -<pgid>)",
@@ -143,18 +154,25 @@ export function createBashKillToolDefinition() {
 				}),
 			);
 			// 终态由 exit 事件边沿收尾（exit-collector，事件驱动；无轮询器）
-			return textResult(
-				JSON.stringify(
-					{
-						killed: true,
-						reason: isActiveState(fromStore.state)
-							? "kill signal sent; poll bash_output for the final state"
-							: "kill signal re-sent; poll bash_output for the final state",
-					},
-					null,
-					JSON_INDENT,
-				),
+			const text = JSON.stringify(
+				{
+					killed: true,
+					reason: isActiveState(fromStore.state)
+						? "kill signal sent; poll bash_output for the final state"
+						: "kill signal re-sent; poll bash_output for the final state",
+				},
+				null,
+				JSON_INDENT,
 			);
+			// 收起态一行摘要：details 由 undefined 改为 { summary }，GUI 收起态与 TUI 折叠态共用
+			return textResultWithSummary(
+				text,
+				buildBashKillSummary(args, { content: [{ type: "text", text }] }),
+			);
+		},
+
+		renderResult(result: unknown, options: { expanded: boolean }, theme: Theme) {
+			return renderBashToolResult(result, options, theme);
 		},
 	};
 }

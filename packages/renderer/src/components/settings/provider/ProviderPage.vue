@@ -40,8 +40,10 @@
     </header>
 
     <!-- Scoped Model 配置区（模型白名单 + 有序列表）。容器 = GroupCard（demo .gcard 卡底
-         --bg-card #262626 / r-card / overflow-hidden，与下方供应商列表卡同原语）。白名单标题/
-         描述/添加钮由 ScopedModelSection 自带头承载（i18n 文案与 demo gc-title/gc-sub 一致）；
+         --bg-card #2d2d30 / r-card / overflow: clip，与下方供应商列表卡同原语）。注意 clip 是
+         ProviderEditBody sticky save-bar 生效的前提（hidden 会建立滚动容器，使 sticky 参照
+         卡片自身而失效），改 GroupCard overflow 前先读 ProviderEditBody save-bar 注释。白名单
+         标题/描述/添加钮由 ScopedModelSection 自带头承载（i18n 文案与 demo gc-title/gc-sub 一致）；
          其卡头形态差异（--card-head 底 / padding 10-16）= w1 交接项 1 归 ui 包波次，本层不动。
          注：ScopedModelSection 根上的 bg-bg-card 与本层 GroupCard 卡底同变量（--bg-card）同色，
          无叠底冲突。 -->
@@ -188,7 +190,7 @@
       <div v-if="expandedId === p.id" class="mt-[4px] border-t border-hairline pt-[12px]" data-testid="provider-expand-body">
         <ProviderEditBody
           :provider="p.id === NEW_ID ? null : p"
-          :oauth-present="hasOauthPresence(p.id)"
+          :oauth-present="oauthPresenceStatus(p.id)"
           :oauth-supported="isOauthSupported(p.id)"
           @dirty-change="onBodyDirtyChange"
           @saved="onEditSaved"
@@ -459,7 +461,7 @@ const oauth = useProviderOAuth({
 })
 const {
   isOauthSupported,
-  hasOauthPresence,
+  oauthPresenceStatus,
   quickSetupOauthAuthorized,
   oauthDialogInfo,
   onEditOauthLogin,

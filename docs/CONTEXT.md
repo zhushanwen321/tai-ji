@@ -208,7 +208,7 @@ pi 引擎单次工具调用的记录。是数据模型的最小单位（bash、r
 上下文窗口管理动作。当 session 的 token 使用量接近上限时，压缩历史消息以腾出空间。压缩后 session 继续，不新建。是 session 级操作，非破坏性的。
 
 ### Context Window
-session 的 token 预算。由底层模型决定上限（如 200K tokens），composer 指标聚合按钮的 hover 聚合页展示用量（容量卡 `ContextCapacityCard`，session 通道订阅 `context.update`；composer 顶缘另有 2px 容量细条给三段色阶预警）。Compaction 的触发条件就是 Context Window 接近满。
+session 的 token 预算。由底层模型决定上限（如 200K tokens），composer 指标聚合按钮的 hover 聚合页展示用量（容量卡 `ContextCapacityCard`，session 通道订阅 `context.update`）。Compaction 的触发条件就是 Context Window 接近满。
 
 ### Session Context
 session 的语义内容——对话历史、项目知识（AGENTS.md 等）、skill/agent 注入的提示词。是 agent 能感知到的全部信息。Session Context 的 token 占用量受 Context Window 上限约束。
@@ -372,7 +372,7 @@ Panel 联动的浮层抽屉。一个 header + 多 tab 容器，tab 承载不同�
 
 ### Bottom Drawer（底抽屉）
 
-split 行（对话区 + 右抽屉）之下、StatusBar 之上的全宽横向容器，横宽内容的家。唯一内容 = terminal（终端；终端面板内**多实例**——实例切换条可新建/切换/关闭，实例编号形如 `term:<会话id>:<序号>`，会话内序号单调递增且不复用。多实例是**终端面板内部维度**，容器仍不预设 tab 枚举——第二种横向内容出现时才加维度）。开关双入口：`` ⌃` ``（before-input-event 窗口级）+ PanelHeader 顶栏终端按钮（三卡化 2026-10-04 起；原 StatusBar 底栏落点退役），终端面板头部另有收起按钮（收起语义非销毁，实例保留）；默认高 35%、拖上沿可调（clamp 15%–70%）。开合态按会话分区不持久化，高度为全局布局值单键持久化。域模块 = `packages/core/src/domain/bottom-drawer/`，内容归属同读容器注册表。
+split 行（对话区 + 右抽屉）之下的全宽横向容器，横宽内容的家。唯一内容 = terminal（终端；终端面板内**多实例**——实例切换条可新建/切换/关闭，实例编号形如 `term:<会话id>:<序号>`，会话内序号单调递增且不复用。多实例是**终端面板内部维度**，容器仍不预设 tab 枚举——第二种横向内容出现时才加维度）。开关双入口：`` ⌃` ``（before-input-event 窗口级）+ PanelHeader 顶栏终端按钮，终端面板头部另有收起按钮（收起语义非销毁，实例保留）；默认高 35%、拖上沿可调（clamp 15%–70%）。开合态按会话分区不持久化，高度为全局布局值单键持久化。域模块 = `packages/core/src/domain/bottom-drawer/`，内容归属同读容器注册表。
 
 ### 终端实例（Terminal Instance）
 
@@ -617,7 +617,7 @@ taiji 自己的插件系统，由 PluginService 统一管理（`packages/runtime
 Plugin 的 per-session KV 存储 API（`api.sessionData`）。由 runtime 侧 `SessionDataStore` 承载（`packages/runtime/src/services/plugin-service/session-data-store.ts`）：内存 write-back 缓存（500ms debounce flush）+ 退出前 `flushAll` 落盘，持久化在 `<dataDir>/session-data/` 下按 sessionId 分区，单 session 容量上限 10MB。与 PluginStorage（global/workspace scope，`<dataDir>/plugins/<pluginId>/` 下的 `globalState.json` / `workspace-<cwdHash>.json`）不同。
 
 ### Built-in Plugin
-随 taiji 打包分发的插件（`source: 'built-in'`，现役实例：`resources/plugins/statusline`）。打包产物落 app resources 的 `plugins/` 目录（electron-builder `to: resources/plugins`），运行时经 `--builtin-plugins-dir` 注入扫描目录（`plugin-registry.ts`，防 cwd 探测被冒充）。自动 trusted（`resolveTrustLevel`：built-in → trusted）、免权限审批（`plugin-permission.ts`）、不参与热重载 watch（`plugin-activator.ts`）。
+随 taiji 打包分发的插件（`source: 'built-in'`，现役实例：`resources/plugins/scheduler-manager`）。打包产物落 app resources 的 `plugins/` 目录（electron-builder `to: resources/plugins`），运行时经 `--builtin-plugins-dir` 注入扫描目录（`plugin-registry.ts`，防 cwd 探测被冒充）。自动 trusted（`resolveTrustLevel`：built-in → trusted）、免权限审批（`plugin-permission.ts`）、不参与热重载 watch（`plugin-activator.ts`）。
 
 ### Plugin Source
 插件的来源分类（`packages/runtime/src/services/plugin-service/plugin-types/descriptor-types.ts` 的 `PluginSource`）：`built-in`（随 app 打包）、`external`（用户安装），仅此两值。
@@ -631,13 +631,8 @@ pi extension 包与 subagent engine 包的 package.json 顶层命名空间键（
 ### 插件清单键 `taijiPlugin`（plugin-sdk 契约）
 taiji Plugin 的 package.json 清单键（`packages/plugin-sdk` 类型契约）：`"taijiPlugin": { manifestVersion, main, activationEvents, trustLevel, source, permissions, engines? }`，其中 `engines: { 'taiji': <版本> }` 声明兼容的宿主。字段细则见 [built-in-plugin-guide.md](plugins/built-in-plugin-guide.md)。**近形防混淆**：与上一条「宿主元数据键 `"taiji"`」是两个不同契约层面——裸 `"taiji"` 键（extension/engine 包宿主元数据）≠ `taijiPlugin` 键（Plugin 系统插件清单）；脚手架入口 `packages/create-taiji-plugin`。
 
-### Statusline
-taiji 的运行时状态可视化。现行形态 = 单组件 `StatusBar`（`packages/ui/src/extension-host/StatusBar.vue`）：main-panel 局部底栏，per panel leaf 挂载（`packages/renderer/src/components/workspace/PanelContainer.vue`），聚合 per-session + global 两个 scope 的状态项，按 alignment(left/right) + priority 排序，项前置状态点（ok/warn/danger/neutral/accent 五色），空项自隐藏。数据来源两条通道：pi extension 的 `setStatus()` → runtime `extension:status` WS 帧（内置 statusline 插件负责桥接，`resources/plugins/statusline`）；taiji plugin 的 `updateStatusBarItem()` → `StatusBarRegistry` → `plugin:statusBarUpdate` 广播（ADR-0015）。
-
-> **术语演进（2026-09 核对）**：旧「三区域」模型（Input Toolbar / Session Strip / Global Statusbar）已不成立——窗口底部的独立全局状态栏不存在，global scope 状态项并入 per-panel StatusBar 聚合；原 Input Toolbar 的职责由 composer 内置工具条承载（见下），plugin 另可经 `composer.toolbar` 挂载点贡献视图（ViewHost，`view-id="composer.toolbar"`）。
-
 ### Composer 工具条
-composer（Panel zone ④）内底部的展示型工具带（`packages/renderer/src/components/panel/Composer.vue`）：指标聚合按钮（`ComposerMetricsAggregate`，hover 弹聚合页——容量（`ContextCapacityCard`，`context.update` 通道）+ 速度 t/s + 缓存命中率 + TTFT 首字延迟（首字延迟 = 请求发出 → 首个输出 token 到达，p50 聚合））、模型切换（`ModelSelectPopover`）、思考档位（`ThinkingLevelPopover`）、发送位四态（send/stop/queue/spinner）；composer 顶缘另有 2px 容量细条（`ComposerCapacityBar`，三段色阶预警）。renderer 内置组件，非 statusline 数据面。
+composer（Panel zone ④）内底部的展示型工具带（`packages/renderer/src/components/panel/Composer.vue`）：指标聚合按钮（`ComposerMetricsAggregate`，hover 弹聚合页——容量（`ContextCapacityCard`，`context.update` 通道）+ 速度 t/s + 缓存命中率 + TTFT 首字延迟（首字延迟 = 请求发出 → 首个输出 token 到达，p50 聚合））、模型切换（`ModelSelectPopover`）、思考档位（`ThinkingLevelPopover`）、发送位四态（send/stop/queue/spinner）。renderer 内置组件。
 
 > **命中率归因降噪（2026-09-19）**：缓存命中率 `current` 是「本会话最近一次 LLM 请求」的单样本口径，任何一次 total miss 都会显示 0%。已知成因的 0%（会话首请求 `cold-start` / 空闲超 5min provider TTL `idle-expiry` / compaction 后前缀重建 `context-rewrite`）改为渲染成因文案（`cacheRatio.currentMiss`，中性色 + 浮层说明行），未知成因的 0%（如服务端淘汰）**保留原值三档色**——降噪只覆盖预期内 miss，不吞真信号；provider 从未上报 cache 字段时命中率为「无数据」（null，显示「—」）而非 0%。
 

@@ -85,7 +85,7 @@ describe('PluginHost', { timeout: 30_000 }, () => {
     expect(host.getWorkerHandle('s-2')).toBeUndefined()
   })
 
-  // ── 回归：预期终止不误报崩溃（退出 toast「插件 statusline 崩溃」事故）──
+  // ── 回归：预期终止不误报崩溃（退出 toast 误报插件崩溃的事故形态）──
   // 运行中的 Worker 被 terminate() 时 exit code=1（Node 语义），若不先置
   // handle.status='terminated'，exit handler 会误判崩溃 → 假 toast + 无意义 rebuild
   it('terminateWorker does not report crash for expected termination (exit code 1)', async () => {

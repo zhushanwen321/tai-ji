@@ -41,7 +41,7 @@ const plugins: PluginInfo[] = [
 /** getContributions 查表：p1 返回可用+不可用，p2 全可用 */
 const contributionMap: Record<string, ContributionInfo[]> = {
   p1: [
-    { id: 'c1', type: 'status-bar', available: false },
+    { id: 'c1', type: 'command', available: false },
     { id: 'c2', type: 'views', available: true },
   ],
   p2: [{ id: 'c3', type: 'commands', available: true }],
@@ -106,7 +106,7 @@ describe('PluginSettingsPage', () => {
     // 可用项渲染（views / commands 类型名出现）
     expect(text).toContain('views')
     expect(text).toContain('commands')
-    // 只有 c1 一条不可用（p1 的 status-bar），其他项无置灰 class
+    // 只有 c1 一条不可用（p1 的 c1 贡献），其他项无置灰 class
     const unavailableEls = wrapper.findAll('[data-testid="contribution-unavailable"]')
     expect(unavailableEls).toHaveLength(1)
     const viewItem = wrapper

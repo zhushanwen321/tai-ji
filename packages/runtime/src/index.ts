@@ -79,7 +79,7 @@ import { getProviderConfig, clearProviderApiKey, initProviderCredentialResolver,
 // engine-provider-unification u2：pi→zcode provider 启动同步接线（路径拼装 + D7 降级
 // 包装收敛在该模块——组合根 import 即执行 main()，降级分支抽独立模块才可单测，
 // run-extras-migration 同族先例）。
-import { runZcodeProviderStartupSync } from './services/zcode-provider-sync-wiring.js'
+import { createZcodeProviderMirrorSync, runZcodeProviderStartupSync } from './services/zcode-provider-sync-wiring.js'
 import { getExtensionsDir, getNpmDir, getTmpDir, getProviderExtrasPath, getPiAgentDir } from './infra/pi/pi-paths.js'
 import { getPiGlobalAgentDir, syncBundledResources } from './infra/pi/pi-maintenance.js'
 import { runCodemodeStartupMigration } from './infra/pi/pi-codemode-settings.js'
@@ -879,9 +879,6 @@ async function main(): Promise<void> {
       onCanvasRequest: (requestId, sessionId, action, params) => {
         server.handleCanvasRequest(requestId, sessionId, action, params)
       },
-      onStatusSetUpdate: (payload) => {
-        server.handleStatusSetUpdate(payload)
-      },
       onContextUpdate: (sid, ctxData) => {
         // session 级状态单一 owner：context 事件（turn-usage / turn-end / compaction）经
         // SessionService.applyContextUpdate 只做 usage 实例失效（W10 五写点收编；W12 起
@@ -1490,6 +1487,15 @@ async function main(): Promise<void> {
     worktree: worktreeService,
     terminal: terminalService,
     quota: quotaService,
+    // zcode 镜像同步 write-through（ADR-0142 镜像架构）：settings 域 provider 变更成功后
+    // 与启动同步同源同实现地重跑镜像（同一判定链，副本天然对账；失败只 warn 不阻断配置写入）。
+    // 三依赖装配收口在 createZcodeProviderMirrorSync（与启动同步单点组装，防手抄漂移）；
+    // trigger='mutation' 使日志措辞按来源分流（不冒用启动同步文案）。
+    zcodeProviderMirrorSync: createZcodeProviderMirrorSync({
+      configStore,
+      credentialResolver: providerCredentialResolver,
+      isModelsCorrupted: isModelsStoreCorrupted,
+    }),
     // ai-voice-tts：tts 四 RPC 路由（TtsMessageHandler 装配 + buildRoutes 展开 handles）。
     tts: ttsService,
     handoff: handoffService,

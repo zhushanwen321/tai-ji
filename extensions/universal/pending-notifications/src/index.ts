@@ -47,7 +47,7 @@
  * workflow 侧通过 deps.eventBus 注入 pi.events（同一总线）。
  */
 
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
 import { mapReasonToStatus as mapReasonToStatusImpl } from "@zhushanwen/extension-protocol";
 import { getLogger } from "@zhushanwen/pi-extension-logger";
 import { Type } from "typebox";
@@ -61,6 +61,7 @@ import {
 	type PendingStatus,
 	type PendingType,
 } from "./state.ts";
+import { renderPendingNotificationsResult } from "./render-result.ts";
 
 // 跨扩展消费 API：goal（continuation 守卫）/ subagent-workflow（agent_end 后代判定）
 // 直接 import 本包导出的 countActiveFromEntries，避免各自复制差集逻辑。导出面只保留
@@ -84,11 +85,13 @@ const PendingNotificationsParams = Type.Object({
 });
 
 /** pending_notifications 工具的 details 形状。两个分支共用同一结构（items 缺省时 undefined），
- *  让 registerTool 泛型对 TDetails 推断一致，避免 union 细节冲突。 */
+ *  让 registerTool 泛型对 TDetails 推断一致，避免 union 细节冲突。summary 是收起态一行摘要
+ *  （GUI 收起态与 TUI 折叠态共用，buildPendingNotificationsSummary 产出）。 */
 interface PendingToolDetails {
 	action: string;
 	count: number;
 	items?: PendingEntry[];
+	summary: string;
 }
 
 /**
@@ -241,15 +244,28 @@ export default function pendingNotificationsExtension(pi: ExtensionAPI): void {
 			if (params.action === "count") {
 				return {
 					content: [{ type: "text" as const, text: `${active.length} pending operation(s)` }],
-					details: { action: "count", count: active.length },
+					details: {
+						action: "count",
+						count: active.length,
+						summary: buildPendingNotificationsSummary({ action: "count", count: active.length }),
+					},
 				};
 			}
 
 			// action === "list"
 			return {
 				content: [{ type: "text" as const, text: formatList(active) }],
-				details: { action: "list", count: active.length, items: active },
+				details: {
+					action: "list",
+					count: active.length,
+					items: active,
+					summary: buildPendingNotificationsSummary({ action: "list", count: active.length }),
+				},
 			};
+		},
+
+		renderResult(result: unknown, options: { expanded: boolean }, theme: Theme) {
+			return renderPendingNotificationsResult(result, options, theme);
 		},
 	});
 }
@@ -306,4 +322,16 @@ function formatList(active: PendingEntry[]): string {
 	if (active.length === 0) return "No pending operations";
 	const lines = active.map((op) => `- [${op.type}] ${op.name} (id=${op.id})`);
 	return `${active.length} pending operation(s):\n${lines.join("\n")}`;
+}
+
+/** 收起态一行摘要：count → "N pending operations"；list → "N entries listed"；零值统一
+ *  "No pending operations"（与 content 文案的零值口径一致）。 */
+export function buildPendingNotificationsSummary(details: {
+	action: string;
+	count: number;
+}): string {
+	if (details.count === 0) return "No pending operations";
+	return details.action === "count"
+		? `${details.count} pending operations`
+		: `${details.count} entries listed`;
 }

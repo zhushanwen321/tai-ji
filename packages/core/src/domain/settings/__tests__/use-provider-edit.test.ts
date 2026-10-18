@@ -6,13 +6,14 @@
  * 各组行为矩阵在 provider-edit-{form,discover,models,reconcile}.test.ts（replace, don't layer：
  * 原 981 行逐成员浅层用例已按 module 归位，伪 watch 时序用例由 reconcile 纯核矩阵替代）。
  */
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import type { Ref } from 'vue'
 import { ref, nextTick } from 'vue'
 import type { ProviderInfo } from '@taiji/shared'
 import { providePlatform, __resetPlatformForTesting } from '../../../platform/port'
 import {
   provideSettingsTransport,
+  getSettingsTransport,
 } from '../transport'
 import { makeFakeTransport } from './helpers/fake-transport'
 import {
@@ -120,6 +121,100 @@ describe('D8 广播数据源接线（settingsStore.providers → form module 的
     getSettingsStore().providers.value = [makeProvider({ name: 'P1-broadcast' })]
     await nextTick()
     expect(edit.form.draft.name).toBe('') // 保持空
+  })
+})
+
+describe('同 id 刷新（广播替换列表元素）不重置编辑态（MF-1-1）', () => {
+  it('回显后同 id 新对象进 prop → 回显值/明文开关保留，其余字段仍经 reconcile 重拍且不虚报 dirty', async () => {
+    const providerRef = ref<ProviderInfo | null>(makeProvider({ apiKeySet: true }))
+    const edit = mount(providerRef)
+    await nextTick()
+    ;(getSettingsTransport().revealProviderApiKey as ReturnType<typeof vi.fn>)
+      .mockResolvedValue({ available: true, apiKey: 'sk-stored', source: 'auth.json' })
+    await edit.form.revealApiKey()
+    expect(edit.form.draft.apiKey).toBe('sk-stored')
+    expect(edit.form.showKey.value).toBe(true)
+
+    // 广播：store 整体替换 providers + v-for 元素新引用作为 provider prop（同一 provider id）
+    const refreshed = makeProvider({ name: 'P1-broadcast' })
+    getSettingsStore().providers.value = [refreshed]
+    providerRef.value = refreshed
+    await nextTick()
+
+    // 同 id 刷新不是「切换 provider」：回显态不得被抹掉
+    expect(edit.form.draft.apiKey).toBe('sk-stored')
+    expect(edit.form.showKey.value).toBe(true)
+    // 同 id 刷新仍由 form 的 watch(providers) + applyReconcile 承接（模型清单/字段重拍）
+    expect(edit.form.draft.name).toBe('P1-broadcast')
+    expect(edit.models.localModels.value).toHaveLength(1)
+    // 回显值不是草稿 → 重拍后也不出现「未保存」
+    expect(edit.form.isDirty.value).toBe(false)
+  })
+
+  it('id 变化 → 仍全量重置（回显值/草稿/明文开关清空，不跨 provider 复用）', async () => {
+    const providerRef = ref<ProviderInfo | null>(makeProvider({ apiKeySet: true }))
+    const edit = mount(providerRef)
+    await nextTick()
+    ;(getSettingsTransport().revealProviderApiKey as ReturnType<typeof vi.fn>)
+      .mockResolvedValue({ available: true, apiKey: 'sk-p1', source: 'auth.json' })
+    await edit.form.revealApiKey()
+    expect(edit.form.draft.apiKey).toBe('sk-p1')
+
+    const other = makeProvider({ id: 'p2' as ProviderInfo['id'], name: 'P2' })
+    getSettingsStore().providers.value = [other]
+    providerRef.value = other
+    await nextTick()
+
+    expect(edit.form.draft.name).toBe('P2')
+    expect(edit.form.draft.apiKey).toBe('')
+    expect(edit.form.showKey.value).toBe(false)
+  })
+
+  it('同 id 刷新不抹掉用户已输入的 apiKey 草稿（dirty → reconcile 保留用户改动）', async () => {
+    const providerRef = ref<ProviderInfo | null>(makeProvider())
+    const edit = mount(providerRef)
+    await nextTick()
+    edit.form.draft.apiKey = 'sk-typed'
+    expect(edit.form.isDirty.value).toBe(true)
+
+    const refreshed = makeProvider({ name: 'P1-broadcast' })
+    getSettingsStore().providers.value = [refreshed]
+    providerRef.value = refreshed
+    await nextTick()
+
+    expect(edit.form.draft.apiKey).toBe('sk-typed')
+    // dirty → reconcile 分支③不动其余字段（用户改动优先）
+    expect(edit.form.draft.name).toBe('P1')
+  })
+})
+
+describe('discover 凭据取值复用「真实未保存草稿」判据（MF-1-1）', () => {
+  it('回显值（= 所存值）不作为 payload apiKey 发出（$ENV 引用仍由 runtime resolver 展开）', async () => {
+    const providerRef = ref<ProviderInfo | null>(makeProvider({ apiKeySet: true }))
+    const edit = mount(providerRef)
+    await nextTick()
+    ;(getSettingsTransport().revealProviderApiKey as ReturnType<typeof vi.fn>)
+      .mockResolvedValue({ available: true, apiKey: '$OPENAI_API_KEY', source: 'models.json' })
+    await edit.form.revealApiKey()
+    expect(edit.form.draft.apiKey).toBe('$OPENAI_API_KEY')
+
+    await edit.discover.autoDiscover()
+
+    // 回显值不是待保存草稿：discover 不带 apiKey 键，让 runtime resolver 展开 $ENV
+    const req = vi.mocked(getSettingsTransport().discoverModels).mock.calls[0]![0]
+    expect(req.apiKey).toBeUndefined()
+  })
+
+  it('用户真实输入的草稿仍作为 payload apiKey 发出（回显判据不退化手工输入路径）', async () => {
+    const providerRef = ref<ProviderInfo | null>(makeProvider({ apiKeySet: true }))
+    const edit = mount(providerRef)
+    await nextTick()
+
+    edit.form.draft.apiKey = 'sk-typed'
+    await edit.discover.autoDiscover()
+
+    const req = vi.mocked(getSettingsTransport().discoverModels).mock.calls[0]![0]
+    expect(req.apiKey).toBe('sk-typed')
   })
 })
 

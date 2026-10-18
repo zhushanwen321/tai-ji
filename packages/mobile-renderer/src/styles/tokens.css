@@ -41,7 +41,7 @@
 
   /* ── 文字（neutral 谱系，上抬，dim 对比度 ~4.4:1）────────── */
   --neutral-fg: #dedee2;        /* 主前景 */
-  --neutral-fg-2: #d9d9d9;      /* 次级正文（demo --fg-2：正文与工具行之间的强调文字档） */
+  --neutral-fg-2: #d2d2d2;      /* 次级正文（demo --fg-2：正文与工具行之间的强调文字档） */
   --neutral-mid: #96969c;       /* 正文（过 AA） */
   --neutral-dim: #74747a;       /* 次要（提亮一档） */
   --neutral-faint: #46464c;     /* 极弱/装饰 */
@@ -183,8 +183,8 @@
 
 
 [data-theme="light"] {
-  --bg: #edebe8;
-  --bg-sunken: #edebe8;
+  --bg: #eef1ea;                /* 与桌面皓 bg 同步（青玉相舞台，2026-10-17 对话流颜色提案） */
+  --bg-sunken: #eef1ea;
   --surface: #f7f6f3;
   --surface-hover: #dbd9d4;
   --surface-2: #e3e1dc;

@@ -28,7 +28,7 @@ export function closeBottomDrawer(): void {
 }
 
 /**
- * 切换底抽屉开合（`` ⌃` `` / StatusBar 终端按钮的统一落点，§5.1 规则 4）。
+ * 切换底抽屉开合（`` ⌃` `` / PanelHeader 终端开关按钮的统一落点，§5.1 规则 4）。
  * 浮层开着时照常切换（被遮罩盖住但状态变化——§5.1 规则 3 语义，编排层不拦截）。
  */
 export function toggleBottomDrawer(): void {

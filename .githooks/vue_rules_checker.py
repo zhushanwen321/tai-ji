@@ -84,7 +84,17 @@ SPLIT_JUSTIFIED_SCAN_LINES = 30
 # [2026-10 trace 块动效] RunningBlockIcon.vue（每类活动专属运行动效）：纯动效组件——
 # scoped CSS 全部为动画本体（keyframes + offset-path path() + conic/mask 几何），
 # Tailwind 无法表达 scoped-keyframe 引用与 offset-path 路径的组合；Block.vue .text-sweep 同族先例。
-STYLE_SCOPED_WHITELIST: list[str] = ['shell/MainPanel.vue', 'sidebar/UpdateButton.vue', 'settings/SettingsModal.vue', 'collapsible/CollapsibleContent.vue', 'sidebar/Sidebar.vue', 'features/chat/Block.vue', 'features/chat/RunningBlockIcon.vue']
+# [2026-10 trace 块壳化 W1] ThinkingRow.vue：承接 Block.vue thinking 分支的 .text-sweep 扫光与
+# block-expand 展开过渡（scoped 样式只作用于本组件模板元素，Row 拆分后与壳内副本各持一份同款
+# 规则）；block-expand 选择器组走 Vue Transition 类 escape hatch，此处放行的是 .text-sweep。
+# [2026-10 trace 块壳化 W2] ToolRow.vue：承接 Block.vue tool 分支的 .text-sweep 扫光（运行中
+# 尾行视口/摘要）与 .tool-file-chip hover 滚动（.fchip-roll keyframes + 后代选择器，MF-1-24），
+# 与 ThinkingRow 同族论证；block-expand 展开过渡走 Vue Transition 类 escape hatch 不占名额。
+# [2026-10 trace 块壳化 W3] RunGroupBlock.vue：承接 run-group 分支的 .rg-badge 徽标入场
+# （keyframes + 后代选择器，demo workbench.css rg-badge-pop 同参）与 block-expand 展开过渡
+# （Vue Transition 类 escape hatch 不占名额），论证同 ToolRow 同族。Block.vue 同批移出本表——
+# 五类型全转发后壳内无任何 scoped 样式（豁免跟随消费点）。
+STYLE_SCOPED_WHITELIST: list[str] = ['shell/MainPanel.vue', 'sidebar/UpdateButton.vue', 'settings/SettingsModal.vue', 'collapsible/CollapsibleContent.vue', 'sidebar/Sidebar.vue', 'features/chat/RunningBlockIcon.vue', 'features/chat/ThinkingRow.vue', 'features/chat/ToolRow.vue', 'features/chat/RunGroupBlock.vue']
 
 # CSS 选择器检测正则
 RE_STYLE_SELECTOR = re.compile(r'^[.\w\-]+[\s,]*\{')

@@ -51,6 +51,14 @@ export interface EngineManifestSnapshot {
    * 语义不可达。
    */
   modelCatalog?: { dynamic: boolean; models: ModelCatalogEntry[] } | null;
+  /**
+   * manifest `modelTranslation`（[engine-ref-translation D5]）：静态跨引擎翻译表声明
+   * （pi 词汇 provider 段 → 本引擎原生 provider 段）。缺省 undefined = 无翻译面。
+   * 进注册期快照 = 两件事同时成立：cli 形态 port（RemoteEngine）构造时据此装配
+   * translateModelRef；descriptor 稳定标识比较可见本字段——翻译表单改（bin/
+   * capabilities 不变）也必须触发 dispose 换新实例。
+   */
+  modelTranslation?: Record<string, string>;
   /** manifest `displayName`（可选，缺省 = id；D4 缺省引擎回落序的排序键）。 */
   displayName?: string;
   /**
@@ -341,7 +349,8 @@ function stableDescriptorKey(value: unknown): string {
  *   - command + args（spawn 面：bin 路径与启动参数）
  *   - capabilities（能力位——引擎包升级改能力面时标识必须变化，触发 dispose 换新
  *     实例，否则与「真换引擎」场景自相矛盾）
- *   - manifest 余项（modelCatalog + displayName + processModel——manifest 派生版本面）
+ *   - manifest 余项（modelCatalog + modelTranslation + displayName + processModel——manifest
+ *     派生版本面）
  *   - packageVersion（package.json version——包版本面：升级即使 bin/capabilities
  *     碰巧全同也要换新实例，防旧单例跑旧代码）
  * portFactory 闭包不参与比较：每次 discovery 重跑都是新函数实例，但等价标识下其

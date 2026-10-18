@@ -4,12 +4,10 @@
 # 机制：esbuild 把每个插件的 index.ts 编译为同目录 index.js（type-only import 剥离，
 # 无 runtime 依赖，自包含）。
 #
-# 根因（2026-08-16 诊断）：built-in statusline 插件自加入以来从未激活成功——
-# plugin-registry 曾把 pluginPath 存为目录，plugin-bootstrap 直接 import(pluginPath)
-# 触发 ESM ERR_UNSUPPORTED_DIR_IMPORT；且 resources/plugins/statusline/ 只有 index.ts
-# 源码，index.js 在 git 全历史从未存在，manifest main 字段无消费方。registry 侧已修
-# （pluginPath 解析为入口文件），本脚本补齐构建期编译：源 index.ts 是 SSOT，产物
-# index.js 构建期生成（.gitignore 忽略），不进 git。
+# 根因：built-in 插件目录只有 index.ts 源码，运行时 import 目录路径会触发
+# ESM ERR_UNSUPPORTED_DIR_IMPORT。registry 侧已修（pluginPath 解析为入口文件），
+# 本脚本补齐构建期编译：源 index.ts 是 SSOT，产物 index.js 构建期生成
+#（.gitignore 忽略），不进 git。
 #
 # 运行形态覆盖：
 #  - 本地 dist 运行（cwd=repo 根）：registry 扫描 <repo>/resources/plugins → 编译产物

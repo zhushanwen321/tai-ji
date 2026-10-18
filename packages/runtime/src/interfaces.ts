@@ -74,7 +74,7 @@ export type { IPiEngine, IProcessManager } from './services/ports/pi-engine.js'
  * the Service layer to the `ws` module.
  *
  * wave:perf-w09（02 文档 D1-2 / ADR-0055 7d）：`broadcast` 退化为**纯全局通道**——
- * 只服务 payload 无 sessionId 的全局消息（config.*、app.info、plugin:statusBar*、
+ * 只服务 payload 无 sessionId 的全局消息（config.*、app.info、plugin:crashed、
  * session.forkNotice、session.handoffComplete/handoffAborted 等，见 02 文档 D5-1 排除清单）。
  * session 级 push 型消息（payload 带 sessionId）一律走 `IMessageBus.publish`
  * （services/message-bus，seq/ring/snapshot + 只推订阅该 sid 的连接），双写已收口。
@@ -705,8 +705,13 @@ export interface IExtensionService {
  * 实现：services/auth/auth-service.ts（路径 B 自实现：device/callback flow 拿 token 写 auth.json）。
  */
 export interface IAuthService {
-  /** 启动 OAuth login（异步执行）。无 oauthConfig / 已有进行中 flow → started:false + error。 */
-  login(providerId: string): { started: boolean; error?: string }
+  /**
+   * 启动 OAuth login（异步执行）。无 oauthConfig / 已有进行中 flow → started:false + error。
+   * onAuthenticated（可选）：flow 成功把凭据写入 auth.json（并广播 auth.success）后回调——
+   * 凭据域变更的联动消费方（如 zcode provider 镜像同步）经此事件驱动重跑，禁止时间轮询
+   * （事实驱动，ADR-0122）。
+   */
+  login(providerId: string, onAuthenticated?: () => void): { started: boolean; error?: string }
   /** 中止进行中 flow。幂等：无 flow 返回 cancelled:false。 */
   cancel(providerId: string): { cancelled: boolean }
   /** 读 auth.json：该 provider 是否有 oauth 凭据。 */
@@ -821,7 +826,7 @@ export interface IPluginService {
   getToolSchemas?(): import('./services/plugin-service/plugin-types.js').ToolRegistration[]
   /**
    * pi 侧事件向插件钩子的投递（pi1-disposition-chat-flow D7②）：泛型 'onPiEvent' 键派发，
-   * 载荷平铺形状（{ event, ...payload }）。statusSetUpdate 挂点迁移后的唯一投递入口。
+   * 载荷平铺形状（{ event, ...payload }）。
    */
   notifyPiEvent?(eventName: string, payload: Record<string, unknown>, sessionId: string): void
 }

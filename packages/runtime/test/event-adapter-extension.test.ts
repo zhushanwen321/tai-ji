@@ -189,7 +189,7 @@ describe('EventAdapter: extension event translation', () => {
   // ── extension_ui_request (fire-and-forget methods) ─────────────────────
 
   describe('extension_ui_request (fire-and-forget methods)', () => {
-    it('bridges setStatus to extension.status WS event', async () => {
+    it('ignores setStatus (status bar retired, silent noop, no WS frame)', async () => {
       adapter.attach({
         onEvent: (listener) => {
           listener(piEvent({
@@ -204,11 +204,7 @@ describe('EventAdapter: extension event translation', () => {
       })
       await flushAsync()
 
-      expect(sent).toHaveLength(1)
-      expect(sent[0].type).toBe('extension:status')
-      const statusPayload = sent[0].payload as { statusKey: string; text: string }
-      expect(statusPayload.statusKey).toBe('status-key')
-      expect(statusPayload.text).toBe('some status')
+      expect(sent).toHaveLength(0)
     })
 
     it('bridges setWidget to extension.widget WS event', async () => {

@@ -84,7 +84,6 @@ export function createMockAgentAPI(): Phase2AgentAPI {
       showConfirm: () => Promise.resolve(false),
       showInput: () => Promise.resolve(undefined),
       notify: noopVoid,
-      updateStatusBarItem: noopVoid,
       updateHeaderAction: () => Promise.resolve({ updated: true }),
     },
     agent: {

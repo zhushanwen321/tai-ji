@@ -47,16 +47,21 @@
 //
 // 源码以内嵌字符串形态进 dist bundle（vendored 面只拷 dist/，独立 .cjs 资产会被
 // vendor 脚本漏掉——字符串常量无此问题），运行时幂等落盘 engineDataDir。
+// （2026-10 review：CLI 源码补丁段与账号元数据段两个字符串区块拆至
+// appserver-launcher-patches.ts 载体模块原样内插——行数守卫拆分 + 同批 review 行为
+// 修正随段迁移（存在性守卫/括号配平/窗口收紧/语法自检），变更点见段内就地注释。）
 
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { toErrorMessage } from "./error-message.ts";
+import { ACCOUNT_METADATA_SECTION, CLI_PATCH_SECTION } from "./appserver-launcher-patches.ts";
 
 /** wrapper 落盘文件名（engineDataDir/engines/zcode/ 下）。 */
 export const ZCODE_APPSERVER_LAUNCHER_NAME = "appserver-launcher.cjs";
 
 /**
  * wrapper 源码（CJS；内容即版本——修改须同步本常量，落盘端按内容幂等覆盖）。
+ * CLI 补丁段与元数据段两区块自 appserver-launcher-patches.ts 内插（见该文件头注）。
  * env 契约：ZCODE_ENG_CLI_PATH（zcode.cjs 绝对路径，必填）、
  * ZCODE_ENG_V2_CONFIG（v2 config 路径，缺省 ~/.zcode/v2/config.json）、
  * ZCODE_ENG_PROVIDER_CONFIG（taiji 同步副本路径——D3 换轨后语义收窄：补注入段
@@ -286,40 +291,7 @@ function catalogPatchText(path) {
   return result;
 }
 
-// [2026-10-13 account 直通②] CLI bundle 源码内存补丁：外部 spawn 的账号条目构建
-// 硬编码 entitled:!1（YXe），数据面注入（目录 entitled 字段）被其无视——按用户裁决
-// 改 zcode 源码绕过：拦截 CLI bundle 源码读取，内存替换该字面量为 !0（ZCode.app
-// 磁盘文件零触碰；锚串含 ]]:[] 尾缀唯一命中 YXe 构造，另一处同名条件逻辑不受影响）。
-// 锚不命中（上游混淆形态变化）→ 原文透出：仅 account 家族继续被拒，个人 provider
-// 不受影响。
-const __cliPatchCache = new Map();
-function patchedCliSource(path) {
-  if (__cliPatchCache.has(path)) return __cliPatchCache.get(path);
-  let result = null;
-  try {
-    const readOrig = fs.__origReadFileSync || fs.readFileSync;
-    const src = readOrig(path, 'utf8');
-    // 版本鲁棒锚（2026-10-13 修订）：minified 标识符（Uk/I3 等）随 zcode 重新打包
-    // 漂移，属性名（zcodeBuiltinProviders / zhipu-account / entitled）是数据/契约
-    // 真名不被混淆——以属性名定位 + 600 字符窗口内把账号条目构建的 entitled:!1
-    // 翻转为 !0。窗口零命中 = 上游形态漂移 → 原文透出 + stderr warn（漂移可见，
-    // 进 app-server stderr 日志），个人 provider 不受影响。
-    const anchorIdx = src.indexOf('zcodeBuiltinProviders.entries()');
-    if (anchorIdx >= 0) {
-      const window = src.slice(anchorIdx, Math.min(src.length, anchorIdx + 600));
-      if (window.indexOf('zhipu-account') >= 0 && window.indexOf('entitled:!1') >= 0) {
-        result = src.slice(0, anchorIdx)
-          + window.split('entitled:!1').join('entitled:!0')
-          + src.slice(anchorIdx + 600);
-      }
-    }
-    if (result === null) {
-      process.stderr.write('[zcode-launcher] account bypass: CLI bundle anchor not found (zcode upstream shape drifted?) - account family stays gated, personal providers unaffected\\n');
-    }
-  } catch { result = null; }
-  __cliPatchCache.set(path, result);
-  return result;
-}
+${CLI_PATCH_SECTION}
 
 // 内建 provider 配置定位（漂移面②）：3.12.x 起配置文件挪位 + CLI 依赖宿主注入
 // ZCODE_BUILTIN_PROVIDER_CONFIG_FILE 直接定位；ZCode 桌面 spawn 链自带该键，
@@ -393,15 +365,32 @@ if (!process.env.ZCODE_BUILTIN_PROVIDER_CONFIG_FILE) {
   }
 }
 
+${ACCOUNT_METADATA_SECTION}
+
 // 安装门：任一 patch 源可用即安装拦截层；决策两态都出声（装了哪些 patch / 为何
 // 跳过）——补丁层的失效形态是静默的（account 直通失效 = plan 家族报「不存在
 // Model」而无任何日志），跳过同样必须留痕。
 const text = injectedConfigText();
 const catalogPatch = CATALOG_PATH !== null ? catalogPatchText(CATALOG_PATH) : null;
-if (text !== null || catalogPatch !== null) {
+const cliPatchProbe = CLI_PATH ? patchedCliSource(CLI_PATH) : null;
+// 三处改写的应用态由 patchedCliSource 发布（__cliPatchStatus）——曾以产物子串判定：
+// header-port 在未打补丁的 3.15.3 bundle 上恒真（8 处既有同名属性）→ 门对锚点
+// 漂移零检测力；standalone 同理由标志驱动（三处判定各自具名）。cli-source-bypass
+// 的括号后缀把三锚逐一列出（2026-10 review·S-2）：entitled 标志曾发布但无消费方，
+// 该锚单独漂移时六项矩阵会全部 armed——逐锚可见才能定位漂移（六项口径不变）。
+const cliPatchStatus = CLI_PATH ? __cliPatchStatus.get(CLI_PATH) : null;
+const anchorFlags = cliPatchStatus
+  ? '(entitled=' + (cliPatchStatus.entitled ? 'on' : 'off')
+    + ',standalone=' + (cliPatchStatus.standalone ? 'on' : 'off')
+    + ',port=' + (cliPatchStatus.headerPort ? 'on' : 'off') + ')'
+  : '';
+if (text !== null || catalogPatch !== null || cliPatchProbe !== null) {
   process.stderr.write('[zcode-launcher] 补丁层已安装: cli-config-inject=' + (text !== null ? 'on' : 'off')
     + ', catalog-entitled=' + (catalogPatch !== null ? 'on' : 'off')
-    + ', provider-merge=' + (PI_SYNCED_PATH ? 'armed' : 'off') + ', cli-source-bypass=armed\\n');
+    + ', provider-merge=' + (PI_SYNCED_PATH ? 'armed' : 'off')
+    + ', cli-source-bypass=' + (cliPatchProbe !== null ? 'armed' : 'off') + anchorFlags
+    + ', standalone-account=' + (cliPatchStatus && cliPatchStatus.standalone ? 'armed' : 'off')
+    + ', header-port=' + (cliPatchStatus && cliPatchStatus.headerPort ? 'armed' : 'off') + '\\n');
   // encoding 归一（Node 别名面）：'utf8'/'utf-8'/大小写变体统一按 string 返回——
   // 真实 bundle 的 config 读取恰用 'utf-8' 形态，仅匹配 'utf8' 会错回 Buffer
   // （当下游不只 JSON.parse 而做字符串运算时即 TypeError）
@@ -415,6 +404,11 @@ if (text !== null || catalogPatch !== null) {
     return Buffer.from(value);
   };
   fs.__origReadFileSync = fs.readFileSync;
+  // standalone 账号元数据键供给（ADR-0143）：仅当 standalone 与 header-port 两锚
+  // 均已武装时执行（2026-10 review·S-3）——只武装 standalone 时认证头仍回落宿主
+  // 请求端口（无宿主任应答 = 账号链仍不可用），此时写用户共享 credentials.json
+  // 无运行时收益、只增风险；此处读源仍是原生 fs（readFileSync 拦截尚未安装）。
+  if (cliPatchStatus && cliPatchStatus.standalone && cliPatchStatus.headerPort) ensureAccountMetadata();
   fs.readFileSync = function (p, ...rest) {
     if (typeof p === 'string' && p === CONFIG_PATH) {
       const cur = injectedConfigText();

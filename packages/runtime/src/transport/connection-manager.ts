@@ -284,6 +284,8 @@ export class ConnectionManager {
    * 走 tokenEquals（timingSafeEqual）——单值扩集合不退化抗时序属性，禁 includes/Set.has。
    * remote 通道每次握手热读（provider 调用点唯一在此，保证轮换文件即生效）；关态
    * provider 未装配时短路返回（不调用、零文件 IO）。
+   * **不记录单条连接由哪个通道认证**：认证后即同一准入面（无通道级 capability）——
+   * 明文凭据通道（config.revealProviderApiKey）的远程可达性裁决与重审触发见 ADR-0144。
    */
   private isAcceptedToken(token: string): boolean {
     if (this.authToken !== null && tokenEquals(token, this.authToken)) return true

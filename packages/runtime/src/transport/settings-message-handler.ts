@@ -7,7 +7,7 @@
  * 同款 class + handle() switch 形态，未命中返回 false）。路由表每条委托到所属域子
  * handler 的 handle()——查表命中即域归属成立。域文件清单：
  *   - config-preferences-message-handler.ts      workspace 偏好组（worktree/streaming idle/基分支，链式先行）
- *   - provider-message-handler.ts                provider CRUD/目录刷新/环境检查/导入迁移/源检测
+ *   - provider-message-handler.ts                provider CRUD/目录刷新/环境检查/导入迁移/源检测/凭据回显
  *   - oauth-message-handler.ts                   provider OAuth 凭据
  *   - resources-message-handler.ts               skill/agent/extension 资源发现与目录
  *   - model-message-handler.ts                   模型列表/切换/默认值/scoped/thinking 档位/发现
@@ -58,6 +58,13 @@ export interface SettingsHandlerContext extends MessageHandlerContext {
    * 构造必需（M2fg 收口）：组合根装配注入（M2c），models.json 直查回退已删除。
    */
   providerCredentialResolver: IProviderCredentialResolver
+  /**
+   * provider 配置变更后的 zcode 镜像同步（write-through，ADR-0142 镜像架构裁决）：
+   * settings 域成功的 provider 变更（set/delete/toggle/removeByKind/applyImport）后由
+   * provider-message-handler 调用。缺省 undefined = 不镜像（存量测试装配形态）。
+   * 实现内部自捕获错误只 warn（镜像同步是可用性增强，失败不阻断配置写入应答）。
+   */
+  providersMutatedSync?: () => Promise<void>
   /**
    * 测试连接 HTTP 适配器（D-21 端口化：接口 SSOT 在 services/ports，infra 实现
    * ModelConnectionTester 由组合根构造注入——transport 不再 value import infra）。
@@ -146,6 +153,7 @@ export class SettingsMessageHandler {
     'config.toggleProviderEnabled': (msg, ws) => this.providerHandler.handle(msg, ws),
     'config.removeProviderByKind': (msg, ws) => this.providerHandler.handle(msg, ws),
     'config.checkEnvVars': (msg, ws) => this.providerHandler.handle(msg, ws),
+    'config.revealProviderApiKey': (msg, ws) => this.providerHandler.handle(msg, ws),
     'config.detectSources': (msg, ws) => this.providerHandler.handle(msg, ws),
     'config.listBuiltinProviders': (msg, ws) => this.providerHandler.handle(msg, ws),
     'config.previewImportProviders': (msg, ws) => this.providerHandler.handle(msg, ws),

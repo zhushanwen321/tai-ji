@@ -19,7 +19,7 @@ import type {
   QuotaAuthKind,
   QuotaFetchFailureReason,
 } from '@taiji/shared'
-import { QUOTA_PRESETS, normalizeQuotaWorkspaceUrl, resolveQuotaCredentialSource, supportsExclusiveCredential } from '@taiji/shared'
+import { QUOTA_PRESETS, normalizeCookieHeader, normalizeQuotaWorkspaceUrl, resolveQuotaCredentialSource, supportsExclusiveCredential } from '@taiji/shared'
 import type {
   QuotaConfigureInputs,
   QuotaConfigureModule,
@@ -40,17 +40,18 @@ import { useQuotaStore } from '@/stores/quota'
  * Workspace 草稿的保存前归一化（模块级辅助）。
  * - 空 → required 报错（不发 RPC）。D13：空不再解释为「清除」，UI 侧由 readiness 置灰
  *   拦住这条路，这里只是对称的防御（直接调用 saveAndTest 时也不会产出空串）
- * - 非空 → shared 归一化校验（完整 URL / 裸 wrk_ id → 规范额度页 URL）
+ * - 非空 → shared 归一化校验（按 fetcher 分流：完整 URL / 裸 id → 规范额度查询 URL）
  * - 非法输入 → invalid 报错（不发 RPC）；errorKey 由调用方经 i18n 渲染
  */
 function normalizeWorkspaceDraft(
   raw: string,
+  fetcherId: string | undefined,
 ): { ok: true; payload: string } | { ok: false; errorKey: string } {
   const trimmed = raw.trim()
   if (!trimmed) {
     return { ok: false, errorKey: 'settings.providerEdit.quotaWorkspaceRequired' }
   }
-  const normalized = normalizeQuotaWorkspaceUrl(trimmed)
+  const normalized = normalizeQuotaWorkspaceUrl(trimmed, fetcherId)
   if (!normalized.ok) {
     return { ok: false, errorKey: 'settings.providerEdit.quotaWorkspaceInvalid' }
   }
@@ -148,6 +149,9 @@ const FAILURE_KINDS: Record<QuotaFetchFailureReason, QuotaFailureKind> = {
   parse: 'parse',
   not_configured: 'not-configured',
   'no-credential': 'no-credential',
+  // 2026-10-18：cookie 归一化为空（粘贴内容无 name=value 对）与「服务端拒绝」分流——
+  // 前者恢复动作是「换复制路径重贴」而非「重新登录」，不得复用 unauthorized 文案。
+  'cookie-invalid-format': 'cookie-invalid-format',
   'credential-unavailable': 'generic',
   'credential-unsupported': 'generic',
 }
@@ -452,6 +456,29 @@ export function useQuotaConfigure(inputs: QuotaConfigureInputs): QuotaConfigureM
   }
 
   /**
+   * 保存前本地校验（不发 RPC）：cookie 粘贴格式 / workspace 归一化。
+   * 返回 { errorKey } = 拦住（调用方转 i18n 文案）；{ workspace } = 通过并带回 payload
+   * （undefined = 该 fetcher 不需要 workspace）。从 saveAndTest 抽出：校验分支与参数构造
+   * 分开后各自职责单一，saveAndTest 的圈复杂度回到门限内（metrics-gate ≤15）。
+   */
+  function resolvePreSaveInputs(
+    cookieDraft: string,
+  ): { errorKey: string } | { workspace: string | undefined } {
+    // cookie 粘贴格式前置校验（2026-10-18，用户手动复制路径）：归一化后为空（不含任何
+    // name=value 对，典型 = 从 DevTools Application → Cookies 表格复制的制表符文本）
+    // 当场拦下并给精确指引——不发 RPC，不落入 runtime 侧「凭证可能已失效」的误报。
+    // 归一化实现 SSOT 在 shared（与 runtime fetcher 同一函数，两端判据不得各写一份）。
+    if (isCookieAuth.value && cookieDraft && normalizeCookieHeader(cookieDraft) === '') {
+      return { errorKey: 'settings.providerEdit.quotaCookieFormatInvalid' }
+    }
+    // Workspace：明文回显字段，传归一化后的草稿（D13：永不传 ''）；空 / 非法输入本地拦截。
+    // 归一化分流按当前草稿 fetcher（与 runtime 侧同源：同 input 同 fetcher 同规则）
+    if (!needsWorkspace.value) return { workspace: undefined }
+    const normalized = normalizeWorkspaceDraft(draft.value.workspace, fetcherIdDraft.value ?? activePreset.value?.fetcher)
+    return normalized.ok ? { workspace: normalized.payload } : { errorKey: normalized.errorKey }
+  }
+
+  /**
    * 保存并测试（D2）：先把草稿落盘（quota.configure），成功后再触发查询（quota.refresh）。
    * 参数构造严格按 §7.2 细节 4 的构造表；credentialSource 恒由 payload 显式值落盘，**写侧禁用**
    * resolveQuotaCredentialSource 推断——该函数是**显式值优先**（`quota?.credentialSource ?? …`），
@@ -478,16 +505,12 @@ export function useQuotaConfigure(inputs: QuotaConfigureInputs): QuotaConfigureM
 
     configureError.value = ''
 
-    // Workspace：明文回显字段，传归一化后的草稿（D13：永不传 ''）；空 / 非法输入本地拦截
-    let workspacePayload: string | undefined
-    if (needsWorkspace.value) {
-      const normalized = normalizeWorkspaceDraft(draft.value.workspace)
-      if (!normalized.ok) {
-        configureError.value = t(normalized.errorKey)
-        return
-      }
-      workspacePayload = normalized.payload
+    const preSave = resolvePreSaveInputs(cookieDraft)
+    if ('errorKey' in preSave) {
+      configureError.value = t(preSave.errorKey)
+      return
     }
+    const workspacePayload = preSave.workspace
 
     const payload: QuotaConfigurePayload = {
       providerId: p.id,

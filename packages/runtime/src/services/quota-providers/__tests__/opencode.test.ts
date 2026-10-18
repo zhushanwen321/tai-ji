@@ -74,9 +74,16 @@ describe('opencodeFetcher · workspace 配置注入（D1-1/D1-3）', () => {
 })
 
 describe('opencodeFetcher · 既有语义回归', () => {
-  it('无凭证 → unauthorized（不依赖 workspace 判定顺序，凭证检查在前）', async () => {
+  it('空凭证 / 无 k=v 对 → cookie-invalid-format（不依赖 workspace 判定顺序，凭证检查在前；不发 HTTP）', async () => {
+    const fetchMock = setupFetch(() => {
+      throw new Error('must not fetch on invalid cookie format')
+    })
     const out = await opencodeFetcher.fetchQuota('', 'cookie', { workspaceUrl: WORKSPACE_URL })
-    expect(out).toEqual({ ok: false, reason: 'unauthorized' })
+    expect(out).toEqual({ ok: false, reason: 'cookie-invalid-format' })
+    // 典型错误粘贴：DevTools Application → Cookies 表格（制表符分隔，无任何 = ）
+    expect(await opencodeFetcher.fetchQuota('auth\toc_123\nsession\txyz', 'cookie', { workspaceUrl: WORKSPACE_URL }))
+      .toEqual({ ok: false, reason: 'cookie-invalid-format' })
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 
   it('302 → unauthorized（cookie 过期，V1-4 可区分失败）', async () => {

@@ -67,7 +67,7 @@
 |------|---------|------|-----------|
 | **请求/响应**（单一确定响应） | 一次返回 | `session.create`、`config.getProviders`、`model.switch` | `await api.session.create()` |
 | **触发即流**（push 事件序列） | 无返回，订阅流 | `message.send`→`message_start/text_delta*/complete` | `api.chat.send()` + 事件订阅 |
-| **纯 push**（服务端发起） | 只订阅 | `context.update`、`plugin:statusBarUpdate` | `api.events.on(...)` |
+| **纯 push**（服务端发起） | 只订阅 | `context.update`、`config.plugins` | `api.events.on(...)` |
 
 ### 决策：混合 API Client——命令(Promise) + 事件(可订阅)
 

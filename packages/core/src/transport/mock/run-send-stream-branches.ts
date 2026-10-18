@@ -185,16 +185,6 @@ export async function emitReadBranch(
       },
     },
   });
-  pushSession(sessionId, {
-    type: "extension:status",
-    id: nextId("ws"),
-    payload: {
-      sessionId,
-      statusKey: "mock-status",
-      text: "Mock: Running",
-      textRaw: "\x1b[32m● Mock: Running\x1b[0m",
-    },
-  });
 }
 
 /** todo 分支：todo tool_call start/end（details.todos + __gui__ list-tree，不走 widget 通道） */

@@ -28,9 +28,19 @@
  */
 export type UnsupportedCredentialForm = 'command' | 'unresolved-env'
 
-/** resolveProviderCredential 的成功形态（明文 key + 命中源）。 */
+/**
+ * 凭据形态（凭据域事实判别，消费方据此决定「能否当静态 key 下发外部通道」）：
+ * - 'api_key'：auth.json 的 api_key 条目 / models.json 的 apiKey——静态密钥，可复制给
+ *   外部通道（如 zcode provider 副本）。
+ * - 'oauth'：auth.json 的 oauth 条目——短时 access token（由 pi 侧自动 refresh），
+ *   **禁止**当静态 api-key 复制给外部服务：token 过期即 401，且副本明文残留 token
+ *   （退出登录后仍留在副本里）。消费方须按此判别做「不支持该形态」分流（MF-2）。
+ */
+export type ProviderCredentialKind = 'api_key' | 'oauth'
+
+/** resolveProviderCredential 的成功形态（明文 key + 命中源 + 凭据形态判别）。 */
 export type ResolvedProviderCredential =
-  | { key: string; source: 'auth.json' | 'models.json' }
+  | { key: string; source: 'auth.json' | 'models.json'; kind: ProviderCredentialKind }
   | { unsupported: UnsupportedCredentialForm }
 
 export interface IProviderCredentialResolver {
@@ -52,8 +62,26 @@ export interface IProviderCredentialResolver {
    * - 命中高优先源但形态不支持（command / unresolved-env）→ 返回 { unsupported } 判别
    *   结构，**不降级**读低优先源（显式配置错误被低优先源静默掩盖比报错更糟）。
    * - 全源未命中 → undefined（无凭据）。
+   * - kind 恒填：auth.json 的 oauth 条目 → 'oauth'（短时 token，不可当静态 key 下发），
+   *   其余（auth.json api_key / models.json apiKey）→ 'api_key'。
    */
   resolveProviderCredential(providerId: string): Promise<ResolvedProviderCredential | undefined>
+
+  /**
+   * 回显用 api_key **原值**读取（设置页眼睛按钮，协议 config.revealProviderApiKey）。
+   *
+   * 与 resolveProviderCredential 的差异（有意收窄，不是第二套解析链——源优先级仍由
+   * 实现层的 sources 数组单点声明）：
+   * - **只返回 api_key 形态**：auth.json 的 oauth 凭据一律判定不可回显并**停止向低优先源
+   *   回落**（resolveProviderCredential 会返回 oauth 的 access，消费方不可把它用于回显——
+   *   OAuth token 永不出协议；回落显示低优先源的历史残留值会误导用户）；
+   * - **原值不展开**：`$ENV_VAR` / `!command` 等配置串原样返回（回显语义 = 「用户所存值」，
+   *   展开会显示 env 的实际 secret、command 也无法在不执行 shell 的前提下求值）；
+   * - 全源未命中 → undefined。
+   */
+  resolveProviderApiKeyRaw(
+    providerId: string,
+  ): Promise<{ apiKey: string; source: 'auth.json' | 'models.json' } | undefined>
 
   /**
    * 解析 provider 实际生效的 baseUrl（同步；两级数据源，对齐 pi 实际生效解析序

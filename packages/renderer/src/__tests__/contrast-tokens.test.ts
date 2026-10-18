@@ -20,7 +20,7 @@
  * 断言面，由本文件解析混合：底 = premultiplied alpha 的 sRGB 逐通道合成（与浏览器
  * 半透明背景合成公式一致）；字 = OKLab 三分量 lerp（color-mix(in oklch) 的浏览器
  * 混合空间，Björn Ottosson 线性空间矩阵），转 linear sRGB 算亮度。
- * 对比锚定（R4 公式重验）：暗色族 ≈13.1:1 / 皓 10.65 / 青墨 10.62 / 朱印 10.50，
+ * 对比锚定（R4 公式重验，2026-10-17 六主题 v2 后）：暗色族 ≈11.4–11.9:1 / 皓 10.65 / 青墨 10.62 / 朱印 10.50，
  * 六主题全部过统一 ≥4:1 线；旧「朱印 code-c 本色字 3.92:1」的 3.9 豁免随 R4 公式
  * 落地失效，后随 2026-10-10 裁决统一提升至 WCAG AA 4.5:1（见 CODE_CONTRAST_MIN）。
  */
@@ -174,6 +174,14 @@ describe('对比度令牌阈值（ui-optimize §4 场景 1③，宿主 = 对话�
     }
   })
 
+  it('元信息档 --neutral-dim 于侧栏 --bg 上对比 ≥ 2.8:1（暗色族三主题；2026-10-17 六主题 v2 把此前未被断言覆盖的侧边栏暗坑纳入守护）', () => {
+    for (const theme of THEMES.filter((t) => t.family === 'dark')) {
+      const t = tokensByTheme.get(theme.id)!
+      const ratio = contrastRatio(t['--neutral-dim'], t['--bg'])
+      expect(ratio, `${theme.label} ${t['--neutral-dim']} on ${t['--bg']} = ${ratio.toFixed(2)}:1`).toBeGreaterThanOrEqual(2.8)
+    }
+  })
+
   it('亮色族 --neutral-dim 维持现行值（决策 2 锚定；实测 ≈2.57 不适用暗色 2.8 阈值）', () => {
     for (const theme of THEMES.filter((t) => t.family === 'light')) {
       const t = tokensByTheme.get(theme.id)!
@@ -186,7 +194,7 @@ describe('行内 code 对比（场景 2③，六主题；demo R4 弱化终态 = 
   const MD_CODE_MIX_RE = /^color-mix\(in oklch,\s*var\(--code-c\)\s*([\d.]+)%,\s*transparent\)$/
   const CODE_FG_MIX_RE = /^color-mix\(in oklch,\s*var\(--neutral-fg\)\s*([\d.]+)%,\s*var\(--code-c\)\)$/
 
-  /** 六主题统一 ≥4:1 线（R4 公式重验：暗族 ≈13.1 / 皓 10.65 / 青墨 10.62 / 朱印 10.50）。
+  /** 六主题统一 ≥4:1 线（R4 公式重验，2026-10-17 六主题 v2 后：暗族 ≈11.4–11.9 / 皓 10.65 / 青墨 10.62 / 朱印 10.50）。
    * 旧「朱印 3.9 豁免」锚定的是旧公式（字色 = code-c 本色）下朱印 3.92:1——公式改 R4 后
    * 该前提失效，豁免废除（2026-10-10 裁决，本线提升至 WCAG AA 4.5）。 */
   // 2026-10-10 用户裁决：行内代码按实际可读性标准（WCAG AA 4.5:1 正文线）统一断言，

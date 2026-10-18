@@ -85,6 +85,7 @@ export type QuotaFailureKind =
   | 'parse'
   | 'not-configured'
   | 'no-credential'
+  | 'cookie-invalid-format'
   | 'generic'
 
 /** 归一后的失败态 */

@@ -17,7 +17,7 @@
  * queue 内部按 source 路由（pi → sendPiResponse 带 method 透传，plugin → sendPluginResponse）。
  *
  * 无请求时根元素 v-if 自隐藏（不占位）；inject 缺失（source/transport 任一未 provide）时
- * 静默空态不崩（design-review R3，先例 StatusBar/ViewHost）。
+ * 静默空态不崩（design-review R3，先例 ViewHost）。
  */
 import { computed, inject, onUnmounted, ref, watch } from 'vue'
 import { createDialogRequestQueue } from './dialog-request-queue'

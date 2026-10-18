@@ -11,6 +11,8 @@ export interface RegisteredTool { // oe-exempt:20261015:framework:画布域类�
   exposure?: string;
   parameters: unknown;
   execute: (...args: unknown[]) => Promise<unknown>;
+  /** TUI 结果渲染 handler（renderCanvasToolResult，六工具同函数引用）。 */
+  renderResult?: (result: unknown, options: { expanded: boolean }, theme: unknown) => unknown;
 }
 
 /** before_agent_start handler 的事件/ctx 最小形态（index.ts 只消费 systemPrompt 与 ctx.mode）。 */

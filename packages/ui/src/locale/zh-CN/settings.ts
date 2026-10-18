@@ -398,6 +398,7 @@ export default {
     apiKeyPlaceholderEmpty: 'sk-...',
     showKey: '显示密钥',
     hideKey: '隐藏密钥',
+    readStoredKey: '读取并显示已保存的密钥',
     clearKey: '清除密钥',
     apiKeyNoteKeep: '留空保存则保持不变',
     apiKeyNoteClear: '；点垃圾桶清除已配置的 key',
@@ -520,6 +521,9 @@ export default {
     quotaFetchFailUnauthorized: '额度查询失败：凭证可能过期。与该供应商发起一次对话触发凭证刷新后，点击「保存并测试」重试',
     // §5.2 路径 3 cookie 变体：「发起一次对话刷新」对 cookie 用户是不存在的动作
     quotaFetchFailUnauthorizedCookie: '额度查询失败：凭证可能已失效。请从浏览器重新复制该平台的 Cookie 粘贴后重试',
+    // 2026-10-18：Cookie 粘贴格式无效（归一化后无 name=value 对，典型 = Application → Cookies
+    // 表格复制）——与「凭证失效」分流，恢复动作指向正确的复制路径而非重新登录。
+    quotaFetchFailCookieInvalidFormat: '额度查询失败：Cookie 格式无效——未解析出任何 name=value 对。请在 DevTools → Network 中选中任一请求，复制请求头里的 Cookie 整串（形如 name=value; name2=value2）后重试',
     quotaFetchFailNetwork: '额度查询失败：网络异常或服务不可用，请检查网络连接后重试',
     quotaFetchFailNoSubscription: '额度查询失败：未检测到有效订阅，请确认账号已开通对应 Coding Plan 套餐',
     // S5：cookie 类 provider 的 no-subscription 业务码不可区分「无订阅 vs Cookie 失效」（fetcher 层论证不可行），两可提示
@@ -543,7 +547,10 @@ export default {
     // D1 字段级标记：独立于输入草稿（D7 去掩码后输入框为空不代表未配置）
     quotaRequiredBadge: '必填',
     quotaConfiguredBadge: '已配置',
-    quotaCookiePlaceholder: '在此粘贴 cookie 字符串',
+    quotaCookiePlaceholder: '在此粘贴 cookie 字符串（形如 name=value; name2=value2）',
+    // 2026-10-18：保存前格式校验失败文案（useQuotaConfigure.saveAndTest）——不发 RPC，
+    // 指引正确复制路径（DevTools → Network → 请求头 Cookie，不是 Application → Cookies 表格）。
+    quotaCookieFormatInvalid: 'Cookie 格式无效：未解析出任何 name=value 对。请在 DevTools → Network 中选中任一请求，复制请求头里的 Cookie 整串（形如 name=value; name2=value2）后重试',
     quotaUpdateCookie: '更新 Cookie',
     // 三窗口标签 + 时间格式化（CodingPlanSection 内联额度预览）
     quotaWindow5h: '5h',

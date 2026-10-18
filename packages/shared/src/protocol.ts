@@ -282,6 +282,11 @@ export type ClientMessageType =
   | 'config.hasOAuth'
   // OAuth 退出登录（B-1 场景 C）：移除 auth.json 中该 provider 的凭证（有进行中 flow 先中止）。reply config.oauthLogoutReply。
   | 'config.oauthLogout'
+  // 2026-10-18：按需回显 provider 已存 API Key（眼睛按钮）。只对 api_key 凭据生效——
+  // **OAuth token 永不出协议**（本 RPC 是用户显式点击触发的凭据回显，不随列表/广播下发）。
+  // 明文凭据 carve-out（含远程客户端可达性裁决）登记见 ADR-0144。
+  // reply config.providerApiKeyRevealed。
+  | 'config.revealProviderApiKey'
   // wave4：provider 启用切换（写 enabledModels 白名单，reply config.providerUpdated）。替代旧 setProvider({enabled})。
   | 'config.toggleProviderEnabled'
   // wave4：按体系移除 provider（catalog 清凭据/custom 删条目，reply config.providerUpdated）。
@@ -1023,6 +1028,8 @@ export interface ClientMessageMap {
   'config.hasOAuth': { providerId: string }
   /** config.oauthLogout：移除 auth.json 中该 provider 的凭证（退出登录，幂等）。reply config.oauthLogoutReply。 */
   'config.oauthLogout': { providerId: string }
+  /** config.revealProviderApiKey：回显已存 API Key（眼睛按钮；只限 api_key 形态，OAuth token 不走本通道）。明文 carve-out 登记见 ADR-0144。reply config.providerApiKeyRevealed。 */
+  'config.revealProviderApiKey': { providerId: string }
   // ── scoped model ──
   'config.setScopedModels': { models: string[] }
   // ── backgroundTask 域（docs/architecture/background-task-sidebar-view.md §3.3 D3，u-proto）──
@@ -1275,8 +1282,7 @@ export type ServerMessageType =
   | 'app.info'
   | 'config.plugins' | 'plugin:crashed' | 'plugin:notification'
   | 'plugin:statusChange' | 'plugin:permissionRequest'
-  | 'plugin:statusBarUpdate' | 'plugin:messageDecoration' | 'plugin:config'
-  | 'plugin:statusSetUpdate'
+  | 'plugin:messageDecoration' | 'plugin:config'
   | 'plugin:uiRequest'
   // plugin:uiRequestExpired：plugin dialog 到期取消下行（timeout-plugin-service D2，
   // runtime UiRequestQueue cancelRequest / 防泄漏兜底生产）。广播无条件发出（含排队中
@@ -1298,7 +1304,7 @@ export type ServerMessageType =
   //（AP-1）。必带 sessionId——渲染端按 (sessionId, headerActionId) 写对应会话分区；
   // 经 broker 全局广播直发（同上不入 ring）。
   | 'plugin:headerActionUpdate'
-  | 'extension:widget' | 'extension:widgetGui' | 'extension:status' | 'extension:notify'
+  | 'extension:widget' | 'extension:widgetGui' | 'extension:notify'
   | 'extension:setEditorText'
   | 'extension:requestsInvalidated'
   | 'message.compactionSummary' | 'message.branchSummary'
@@ -1365,11 +1371,13 @@ export type ServerMessageType =
   | 'config.hasOAuthReply'
   // OAuth 退出登录 reply（B-1 场景 C：ok 布尔 + 错误原因）。
   | 'config.oauthLogoutReply'
+  // 2026-10-18：provider 已存 API Key 回显 reply（available=false = 无可回显凭据；source 标注凭据源）。
+  | 'config.providerApiKeyRevealed'
   // 环境变量检测 reply（I3）。
   | 'config.envVarsChecked'
   // backgroundTask 域（docs/architecture/background-task-sidebar-view.md §3.3 D3，u-proto）：3 个 RPC 回执
   // + session 级变更广播。backgroundTask:updated 用冒号 camelCase（Server→Client 推送命名规则，
-  // 对齐 plugin:statusBarUpdate / extension:widgetGui），payload 单对象必带 sessionId（架构规则 7），
+  // 对齐 extension:widgetGui），payload 单对象必带 sessionId（架构规则 7），
   // 经 IMessageBus.publish(sessionId, msg) session 级定向推。
   | 'backgroundTask.tasks' | 'backgroundTask.outputResult' | 'backgroundTask.killResult'
   | 'backgroundTask:updated'
@@ -2243,11 +2251,10 @@ export interface ServerMessageMapBase {
   // willRetry=true 仅落 runtime 日志（前端不渲染中间失败，避免闪烁）。
   // reason: 人类可读失败原因（含 cwd 死路径附着的 MissingSessionCwdError 场景，P-restore-skip 分支二）。
   'session.restoreFailed': { sessionId: string; attempts: number; willRetry: boolean; reason: string }
-  // 扩展 UI 推送通道（EventAdapter 翻译 pi setWidget/setStatus，runtime 固定形状生产）
+  // 扩展 UI 推送通道（EventAdapter 翻译 pi setWidget，runtime 固定形状生产）
   'extension:widget': { sessionId: string; widgetKey: string; lines: string[] }
   // 结构化 widget（GuiComponent 经 NUL marker 编码透传，event-adapter 检测 marker 解码）
   'extension:widgetGui': { sessionId: string; widgetKey: string; gui: unknown }
-  'extension:status': { sessionId: string; statusKey: string; text: string; textRaw?: string }
   // extension notify（pi fire-and-forget 通知，前端渲染为 toast）
   'extension:notify': { sessionId: string; message: string; level: 'info' | 'warn' | 'error' }
   // 挂起 UI 请求失效广播（P2-2 失效链）：abort turn / 退出 plan / 回收等非 respond 路径
@@ -2860,6 +2867,8 @@ export interface ServerMessageMapBase {
   'config.hasOAuthReply': { hasOAuth: boolean }
   /** config.oauthLogout reply（成功/失败布尔 + 错误原因；token 永不出现在协议中）。 */
   'config.oauthLogoutReply': { ok: boolean; error?: string }
+  /** config.revealProviderApiKey reply：已存 API Key 明文（available=false = 无凭据；OAuth token 不走本通道）。登记见 ADR-0144。 */
+  'config.providerApiKeyRevealed': { available: boolean; apiKey?: string; source?: 'auth.json' | 'models.json' }
   /** config.checkEnvVars reply：只含布尔（安全红线：env 值不进前端）。 */
   'config.envVarsChecked': { results: Record<string, boolean> }
   // config.discoveredModels：discoverModels reply（settings-message-handler.ts:178/180）。
@@ -2975,7 +2984,7 @@ export interface ServerMessageMapBase {
   // backgroundTask.kill 的 reply（D6 分支矩阵回执；reason 语义见 BackgroundTaskKillReason）。
   'backgroundTask.killResult': { sessionId: string; taskId: string; killed: boolean; reason: BackgroundTaskKillReason }
   // backgroundTask:updated：registry 变更的 session 级广播（Server→Client 冒号 camelCase，
-  // 对齐 plugin:statusBarUpdate 命名规则；经 IMessageBus.publish(sessionId, msg) 定向推）。
+  // 命名规则同族；经 IMessageBus.publish(sessionId, msg) 定向推）。
   // 广播只做增量刷新、不做唯一真相——renderer 切换/激活 session 后仍须主动 list 拉取
   //（架构约定「runtime broadcast 时序竞争」C6：拉取兜底是唯一真相入口）。
   // corrupted 语义与 backgroundTask.tasks 同源（损坏空表标记，S7）；缺省/false = 正常拍。
@@ -3163,6 +3172,7 @@ export interface ReplyPayloadMap {
   'config.oauthCancel': ServerMessageMap['config.oauthCancelReply']
   'config.hasOAuth': ServerMessageMap['config.hasOAuthReply']
   'config.oauthLogout': ServerMessageMap['config.oauthLogoutReply']
+  'config.revealProviderApiKey': ServerMessageMap['config.providerApiKeyRevealed']
   'config.checkEnvVars': ServerMessageMap['config.envVarsChecked']
   'config.scanSessionSkills': ServerMessageMap['config.sessionSkills']
   'config.getGlobalSkills': ServerMessageMap['config.globalSkills']
@@ -3475,7 +3485,7 @@ export interface ReplyPayloadMap {
  * 此前 6 种碎片化形状（extension.installError / file.read:error / ...）已统一：
  * `extension.installError` 和 `file.read:error` type 已删除（客户端 0 消费者时合并）。
  *
- * 领域 DTO（ExtensionInfo / GitStatusResult / PluginInfo / StatusBarItem …）已下沉到
+ * 领域 DTO（ExtensionInfo / GitStatusResult / PluginInfo …）已下沉到
  * extension.ts / git.ts / plugin.ts，本文件顶部 import 引用，ServerMessageMapBase 照常引用。
  */
 

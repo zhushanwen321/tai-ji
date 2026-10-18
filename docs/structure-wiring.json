@@ -7,13 +7,6 @@
       "testScript": "test:resources-plugins",
       "publish": false,
       "coverage": true
-    },
-    "resources/plugins/statusline": {
-      "reason": "builtin taiji plugin（同上；无测试装配——纯展示插件，typecheck 由 resources/plugins 统一 tsconfig 的 */index.ts 通配覆盖）",
-      "typecheckAnchor": "TypeCheck - builtin plugins (resources)",
-      "testScript": null,
-      "publish": false,
-      "coverage": false
     }
   },
   "exempt": {

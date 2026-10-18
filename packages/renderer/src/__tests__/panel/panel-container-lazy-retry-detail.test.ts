@@ -59,7 +59,7 @@ vi.mock('@/components/panel/TerminalView.vue', () => {
 })
 
 // ── 静态重面板 + 壳层组件 vi.mock（import 期替换，砍掉 PanelContainer 整图 transform；本文件
-// 只开 detail/terminal tab，以下占位组件均无断言观测面，形态对齐 drawer-mode 测试。StatusBar
+// 只开 detail/terminal tab，以下占位组件均无断言观测面，形态对齐 drawer-mode 测试。
 // 来自 @taiji/ui/extension-host，mock 路径须与 PanelContainer 的 import 说明符一致）──
 vi.mock('@/components/panel/GitPanel.vue', () => ({
   default: { name: 'GitPanel', template: '<div data-testid="git-panel" />' },
@@ -99,7 +99,6 @@ vi.mock('@/components/panel/WorkflowTab.vue', () => ({
   default: { name: 'WorkflowTab', template: '<div />' },
 }))
 vi.mock('@taiji/ui/extension-host', () => ({
-  StatusBar: { name: 'StatusBar', template: '<div />' },
 }))
 
 vi.mock('@/composables/features/file-tree/useGitStatus', () => ({

@@ -40,6 +40,7 @@ import {
   provideSettingsTransport,
   provideSettingsStore,
   createSettingsStore,
+  getSettingsStore,
   __resetPlatformForTesting,
   type SettingsTransport,
   type DiscoverModelsResponse,
@@ -70,6 +71,20 @@ const OAUTH_P: ProviderInfo = {
     { id: 'kimi-k2-thinking', name: 'Kimi K2 Thinking', source: 'builtin' },
     { id: 'my-kimi-alias', name: 'My Kimi Alias', source: 'override' },
   ],
+}
+
+/**
+ * 旧数据 OAuth provider（MF-1-2 回归）：auth.json 已有 oauth 凭据、models.json 无 apiKey
+ * ⇒ runtime 聚合出 apiKeySet=true / authMethod=undefined（无显式标注可推断）。
+ */
+const LEGACY_OAUTH_P: ProviderInfo = {
+  id: 'kimi-coding-legacy' as ProviderId,
+  name: 'Kimi Coding (legacy)',
+  api: 'openai-completions',
+  apiKeySet: true,
+  status: 'connected',
+  kind: 'catalog',
+  models: [{ id: 'kimi-k2', name: 'Kimi K2', source: 'builtin' }],
 }
 
 /** api_key 型 catalog provider（凭证区维持 API Key 输入；builtin×1 + override×1） */
@@ -157,8 +172,9 @@ const CATALOG_GATEWAY_P: ProviderInfo = {
 const quotaFactoryStub = vi.fn(() => makeQuotaModuleStub({ state: 'ready' }))
 
 const toastInfoSpy = vi.fn()
+const toastErrorSpy = vi.fn()
 const toastStub: SettingsToast = {
-  error: vi.fn(),
+  error: toastErrorSpy,
   info: toastInfoSpy,
   warning: vi.fn(),
 }
@@ -168,12 +184,15 @@ const toastStub: SettingsToast = {
 const setProviderSpy = vi.fn(async (_id: string, _data: SetProviderData) => ({}))
 /** 显式标注返回类型：M4 场景 ⑨ 需按用例注入 results / error（类型推断会把返回值收窄成 models: never[]） */
 const discoverModelsSpy = vi.fn(async (): Promise<DiscoverModelsResponse> => ({ success: true, models: [] }))
+/** 2026-10-18 回显：眼睛按钮拉取已存 API Key（默认无可回显凭据，用例按需 mockResolvedValue） */
+const revealApiKeySpy = vi.fn(async (_providerId: string): Promise<{ available: boolean; apiKey?: string; source?: 'auth.json' | 'models.json' }> => ({ available: false }))
 
 /** [C3] 共享 seam 桩工厂（@taiji/core/testing，全方法面中性默认）+ 本文件两个 spy。 */
 function makeTransport(): SettingsTransport {
   return makeSettingsTransportStub({
     setProvider: setProviderSpy,
     discoverModels: discoverModelsSpy,
+    revealProviderApiKey: revealApiKeySpy,
   })
 }
 
@@ -190,8 +209,11 @@ beforeEach(() => {
   provideSettingsTransport(makeTransport())
   setProviderSpy.mockClear()
   discoverModelsSpy.mockClear()
+  revealApiKeySpy.mockClear()
+  revealApiKeySpy.mockResolvedValue({ available: false })
   quotaFactoryStub.mockClear()
   toastInfoSpy.mockClear()
+  toastErrorSpy.mockClear()
 })
 
 afterEach(() => {
@@ -526,6 +548,9 @@ describe('编排链路：dirty 上抛与测试连接', () => {
     expect(emitted).toBeTruthy()
     expect(emitted![0]).toEqual([false])
 
+    // A 方案（spec §4.3）：未改动无保存条；改动后出现
+    expect(wrapper.find('[data-testid="provider-save-bar"]').exists()).toBe(false)
+
     await wrapper.find('[data-testid="provider-edit-name"]').setValue('Renamed Provider')
     await flushPromises()
 
@@ -551,6 +576,178 @@ describe('编排链路：dirty 上抛与测试连接', () => {
     expect(discoverModelsSpy).toHaveBeenCalledTimes(1)
     // 成功态用户可见（t(key, {count}) mock 会 append 命名参数值）
     expect(wrapper.text()).toContain('settings.providerEdit.testOk')
+  })
+})
+
+// ══ 已存 API Key 回显（2026-10-18，眼睛按钮）═════════════════════════
+
+describe('已存 API Key 回显（眼睛按钮）', () => {
+  it('草稿为空 + 已存 key → 点击眼睛拉取回显：填入输入框、type=text、不出现未保存徽章', async () => {
+    revealApiKeySpy.mockResolvedValue({ available: true, apiKey: 'sk-stored-secret', source: 'auth.json' })
+    wrapper = mountBody(APIKEY_P)
+    await flushPromises()
+
+    const input = wrapper.find('[data-testid="provider-edit-apikey"]')
+    expect((input.element as HTMLInputElement).value).toBe('')
+    expect((input.element as HTMLInputElement).type).toBe('password')
+    // SG-11：草稿为空时点击会先发回显 RPC，aria-label 必须表明是「读取已保存密钥」
+    expect(wrapper.find('[data-testid="provider-reveal-apikey"]').attributes('aria-label')).toBe('settings.providerEdit.readStoredKey')
+
+    await wrapper.find('[data-testid="provider-reveal-apikey"]').trigger('click')
+    await flushPromises()
+
+    expect(revealApiKeySpy).toHaveBeenCalledWith('zai-coding-cn')
+    expect((input.element as HTMLInputElement).value).toBe('sk-stored-secret')
+    expect((input.element as HTMLInputElement).type).toBe('text')
+    // 回显后按钮回归纯显隐语义（hideKey）
+    expect(wrapper.find('[data-testid="provider-reveal-apikey"]').attributes('aria-label')).toBe('settings.providerEdit.hideKey')
+    // 回显不是改动：不出现保存条（A 方案：dirty 才出现），更不可「一打开就未保存」
+    expect(wrapper.find('[data-testid="provider-save-bar"]').exists()).toBe(false)
+  })
+
+  it('回显后点清除 → 明文开关关闭（清除哨兵不以明文展示，SG-4）', async () => {
+    revealApiKeySpy.mockResolvedValue({ available: true, apiKey: 'sk-stored-secret', source: 'auth.json' })
+    wrapper = mountBody(APIKEY_P)
+    await flushPromises()
+    await wrapper.find('[data-testid="provider-reveal-apikey"]').trigger('click')
+    await flushPromises()
+    expect((wrapper.find('[data-testid="provider-edit-apikey"]').element as HTMLInputElement).type).toBe('text')
+
+    const clearBtn = wrapper.findAll('button').find((b) => b.attributes('aria-label') === 'settings.providerEdit.clearKey')
+    expect(clearBtn).toBeTruthy()
+    await clearBtn!.trigger('click')
+    await flushPromises()
+
+    // 清除动作把草稿置为哨兵；明文开关必须同批关闭（否则哨兵字面量以 text 形态展示）
+    expect((wrapper.find('[data-testid="provider-edit-apikey"]').element as HTMLInputElement).type).toBe('password')
+  })
+
+  it('无已存 key（apiKeySet=false）且草稿为空 → 不渲染眼睛按钮（消除「点了没反应」）', async () => {
+    wrapper = mountBody(CUSTOM_P)
+    await flushPromises()
+    expect(wrapper.find('[data-testid="provider-reveal-apikey"]').exists()).toBe(false)
+  })
+
+  it('回显后再编辑 → 进入 dirty（未保存徽章 + 保存可用）', async () => {
+    revealApiKeySpy.mockResolvedValue({ available: true, apiKey: 'sk-stored-secret', source: 'auth.json' })
+    wrapper = mountBody(APIKEY_P)
+    await flushPromises()
+    await wrapper.find('[data-testid="provider-reveal-apikey"]').trigger('click')
+    await flushPromises()
+
+    await wrapper.find('[data-testid="provider-edit-apikey"]').setValue('sk-edited')
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="provider-save-bar"]').text()).toContain('settings.provider.unsavedBadge')
+    expect(wrapper.find('[data-testid="provider-save-btn"]').attributes('disabled')).toBeUndefined()
+  })
+
+  it('回显失败（available:false）→ 输入框不变、不明文显示 + toast 可见反馈（C-proc-21）', async () => {
+    revealApiKeySpy.mockResolvedValue({ available: false })
+    wrapper = mountBody(APIKEY_P)
+    await flushPromises()
+
+    await wrapper.find('[data-testid="provider-reveal-apikey"]').trigger('click')
+    await flushPromises()
+
+    const input = wrapper.find('[data-testid="provider-edit-apikey"]')
+    expect((input.element as HTMLInputElement).value).toBe('')
+    expect((input.element as HTMLInputElement).type).toBe('password')
+    // 保存条 dirty 才渲染 → 失败文案必须走 toast，否则用户看到的是「点了没反应」
+    expect(toastErrorSpy).toHaveBeenCalledWith('composable.revealApiKeyUnavailable')
+  })
+
+  it('草稿已输入 → 眼睛只切换显隐，不发 RPC', async () => {
+    wrapper = mountBody(APIKEY_P)
+    await flushPromises()
+
+    await wrapper.find('[data-testid="provider-edit-apikey"]').setValue('sk-typed')
+    await wrapper.find('[data-testid="provider-reveal-apikey"]').trigger('click')
+    await flushPromises()
+
+    expect(revealApiKeySpy).not.toHaveBeenCalled()
+    expect((wrapper.find('[data-testid="provider-edit-apikey"]').element as HTMLInputElement).type).toBe('text')
+  })
+
+  it('回显失败不写进 actionError：之后一次无关编辑的保存条不带出滞后的回显失败文案（SG-1）', async () => {
+    revealApiKeySpy.mockResolvedValue({ available: false })
+    wrapper = mountBody(APIKEY_P)
+    await flushPromises()
+
+    await wrapper.find('[data-testid="provider-reveal-apikey"]').trigger('click')
+    await flushPromises()
+    expect(toastErrorSpy).toHaveBeenCalledWith('composable.revealApiKeyUnavailable')
+
+    // 回显失败时表单不 dirty（无保存条）；随后一次无关编辑 → 保存条出现
+    await wrapper.find('[data-testid="provider-edit-name"]').setValue('Z.AI renamed')
+    await flushPromises()
+    const bar = wrapper.find('[data-testid="provider-save-bar"]')
+    expect(bar.exists()).toBe(true)
+    expect(bar.text()).not.toContain('composable.revealApiKeyUnavailable')
+  })
+
+  it('同 id 广播刷新（store 列表元素替换 / 配额保存并测试）→ 回显值保留 + 其余字段重拍 + 不出现未保存徽章（MF-1-1/MF-1-2）', async () => {
+    revealApiKeySpy.mockResolvedValue({ available: true, apiKey: 'sk-stored-secret', source: 'auth.json' })
+    wrapper = mountBody(APIKEY_P)
+    await flushPromises()
+    await wrapper.find('[data-testid="provider-reveal-apikey"]').trigger('click')
+    await flushPromises()
+    expect((wrapper.find('[data-testid="provider-edit-apikey"]').element as HTMLInputElement).value).toBe('sk-stored-secret')
+
+    // 广播整体替换 store.providers（同 id 新对象）→ ProviderPage v-for 把新元素作为 provider prop
+    const refreshed: ProviderInfo = { ...APIKEY_P, name: 'Z.AI Coding CN Refreshed' }
+    getSettingsStore().providers.value = [refreshed]
+    await wrapper.setProps({ provider: refreshed })
+    await flushPromises()
+
+    const input = wrapper.find('[data-testid="provider-edit-apikey"]')
+    // 回显态不因同 id 刷新被抹掉（不重置为 ''/password）
+    expect((input.element as HTMLInputElement).value).toBe('sk-stored-secret')
+    expect((input.element as HTMLInputElement).type).toBe('text')
+    // 同 id 刷新仍经 reconcile 重拍其余字段
+    expect((wrapper.find('[data-testid="provider-edit-name"]').element as HTMLInputElement).value).toBe('Z.AI Coding CN Refreshed')
+    // 回显不构成 dirty：重拍后保存条不出现
+    expect(wrapper.find('[data-testid="provider-save-bar"]').exists()).toBe(false)
+  })
+
+  it('OAuth 型 provider「改用 API Key」未保存（prop 仍是 oauth）→ 不渲染眼睛按钮（回显必然失败，SG-7）', async () => {
+    wrapper = mountBody(OAUTH_P, { oauthPresent: true })
+    await flushPromises()
+
+    await wrapper.find('[data-testid="auth-switch-to-apikey"]').trigger('click')
+    await flushPromises()
+    clickBody('[data-testid="auth-switch-confirm-btn"]')
+    await flushPromises()
+
+    // apiKey 输入已出现（本地形态切到 api_key），但 props 仍标 oauth → 无可回显的 api_key 凭据
+    expect(wrapper.find('[data-testid="provider-edit-apikey"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="provider-reveal-apikey"]').exists()).toBe(false)
+  })
+
+  it('旧数据 OAuth provider（authMethod 缺省 + apiKeySet=true）→ oauthPresent 兜底，不渲染眼睛按钮（MF-1-2）', async () => {
+    wrapper = mountBody(LEGACY_OAUTH_P, { oauthPresent: true })
+    await flushPromises()
+
+    // 无 authMethod 标注 ⇒ 凭证区按 api_key 形态渲染；但 auth.json 只有 oauth 凭据，无 api_key 可回显
+    expect(wrapper.find('[data-testid="provider-edit-apikey"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="provider-reveal-apikey"]').exists()).toBe(false)
+  })
+
+  it('presence 未查询（undefined = 异步刷新中/查询失败）→ 不渲染眼睛按钮（三态：未知 ≠ 无 OAuth 凭据，MF-1-2）', async () => {
+    wrapper = mountBody(LEGACY_OAUTH_P, { oauthPresent: undefined })
+    await flushPromises()
+
+    // 遗留行照旧按 api_key 形态渲染（authMethod 缺省），但 presence 未知时不提供必然失败的回显入口
+    expect(wrapper.find('[data-testid="provider-edit-apikey"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="provider-reveal-apikey"]').exists()).toBe(false)
+  })
+
+  it('presence 已查询且无 OAuth 凭据（false）→ 遗留行仍可回显（眼睛按钮渲染；false ≠ 未知）', async () => {
+    wrapper = mountBody(LEGACY_OAUTH_P, { oauthPresent: false })
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="provider-edit-apikey"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="provider-reveal-apikey"]').exists()).toBe(true)
   })
 })
 
@@ -791,6 +988,7 @@ describe('M4 catalog 展示：类型只读派生 + 端点（自定义网关）',
     wrapper = mountBody(CATALOG_GATEWAY_P)
     await flushPromises()
     expect((wrapper.find(ENDPOINT).element as HTMLInputElement).value).toBe(CATALOG_GATEWAY_URL)
+    // A 方案：未改动无保存条（无虚假 dirty = 保存条不出现）
     expect(wrapper.find('[data-testid="provider-save-bar"]').exists()).toBe(false)
 
     await wrapper.setProps({ provider: CATALOG_MIXED_P })
@@ -801,6 +999,57 @@ describe('M4 catalog 展示：类型只读派生 + 端点（自定义网关）',
     expect(wrapper.find(ENDPOINT_HINT).text()).toBe('settings.providerEdit.endpointBuiltinMixed')
     expect(wrapper.find('[data-testid="provider-save-bar"]').exists()).toBe(false)
     expect(wrapper.emitted('dirtyChange')!.at(-1)).toEqual([false])
+  })
+
+  it('同 id 刷新（广播整体替换列表元素）不抹掉用户输入的端点：输入框保留 + 保存 payload = 用户输入（MF-1-3）', async () => {
+    wrapper = mountBody(CATALOG_GATEWAY_P)
+    await flushPromises()
+
+    await wrapper.find(ENDPOINT).setValue('https://typed.example/gw')
+    await flushPromises()
+
+    // ProviderPage 直接把数组元素作 :provider；setProviders 整体替换数组 → 同 id 新对象
+    const refreshed: ProviderInfo = { ...CATALOG_GATEWAY_P, name: 'OpenCode Go (refreshed)' }
+    getSettingsStore().providers.value = [refreshed]
+    await wrapper.setProps({ provider: refreshed })
+    await flushPromises()
+
+    // 显示值 = 用户输入（不得回退回已存网关）
+    expect((wrapper.find(ENDPOINT).element as HTMLInputElement).value).toBe('https://typed.example/gw')
+
+    await wrapper.find('[data-testid="provider-save-btn"]').trigger('click')
+    await flushPromises()
+
+    // 保存值 = 显示值（syncBeforeSave 不得把回退的草稿写进 payload）
+    expect(savePayload().baseUrl).toBe('https://typed.example/gw')
+  })
+
+  it('同 id 刷新 + 用户只改其它字段 → 外部网关变更仍重拍端点框，保存写新网关（不因 dirty 弃刷新）', async () => {
+    wrapper = mountBody(CATALOG_GATEWAY_P)
+    await flushPromises()
+
+    // 只改名称（form dirty，但端点无用户输入）
+    await wrapper.find('[data-testid="provider-edit-name"]').setValue('OpenCode Go (renamed)')
+    await flushPromises()
+
+    const NEW_GATEWAY = 'https://gw2.corp.example/opencode'
+    const refreshed: ProviderInfo = {
+      ...CATALOG_GATEWAY_P,
+      name: 'OpenCode Go (renamed)',
+      baseUrl: NEW_GATEWAY,
+    }
+    getSettingsStore().providers.value = [refreshed]
+    await wrapper.setProps({ provider: refreshed })
+    await flushPromises()
+
+    // 外部网关变更重拍输入框（端点无待保存输入 → 刷新事实优先）
+    expect((wrapper.find(ENDPOINT).element as HTMLInputElement).value).toBe(NEW_GATEWAY)
+
+    await wrapper.find('[data-testid="provider-save-btn"]').trigger('click')
+    await flushPromises()
+
+    // 不把旧网关写回（否则会静默覆盖外部变更）
+    expect(savePayload().baseUrl).toBe(NEW_GATEWAY)
   })
 })
 

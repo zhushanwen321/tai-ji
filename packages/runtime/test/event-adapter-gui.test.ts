@@ -198,57 +198,6 @@ describe('event-adapter: handleToolExecutionUpdate details 提取', () => {
   })
 })
 
-describe('event-adapter: setStatus textRaw (保留 ANSI 颜色信息)', () => {
-  // 审计项 B：协议 spec §8.1 要求 setStatus 不再 stripAnsi（保留颜色信息），或提供 textRaw 字段。
-  // 此处验证 text（stripAnsi 后纯文本，向后兼容）+ textRaw（原始 ANSI 文本）同时产出。
-  it('statusText 含 ANSI → status-broadcast payload 含 text(stripAnsi) + textRaw(原始 ANSI)', () => {
-    const event = {
-      type: 'extension_ui_request',
-      method: 'setStatus',
-      statusKey: 'task-progress',
-      statusText: '\x1b[32mRunning\x1b[0m 3/5',
-    } as PiEvent
-
-    const results = translate(event, 'sess-1')
-
-    // status-set 中间事件：保留 text + textRaw
-    const statusSet = results.find(r => r.kind === 'status-set') as
-      PiTranslatedEvent & { kind: 'status-set'; text: string; textRaw?: string } | undefined
-    expect(statusSet).toBeDefined()
-    expect(statusSet!.key).toBe('task-progress')
-    expect(statusSet!.text).toBe('Running 3/5')
-    expect(statusSet!.textRaw).toBe('\x1b[32mRunning\x1b[0m 3/5')
-
-    // status-broadcast WS 帧：payload 含 text + textRaw
-    const broadcast = results.find(r => r.kind === 'status-broadcast') as
-      { kind: 'status-broadcast'; message: { type: string; payload: Record<string, unknown> } } | undefined
-    expect(broadcast).toBeDefined()
-    expect(broadcast!.message.type).toBe('extension:status')
-    const payload = broadcast!.message.payload as { statusKey: string; text: string; textRaw?: string }
-    expect(payload.statusKey).toBe('task-progress')
-    expect(payload.text).toBe('Running 3/5')
-    expect(payload.textRaw).toBe('\x1b[32mRunning\x1b[0m 3/5')
-  })
-
-  it('statusText 无 ANSI → textRaw 仍携带原文（前端可自行决定是否使用）', () => {
-    const event = {
-      type: 'extension_ui_request',
-      method: 'setStatus',
-      statusKey: 'plain',
-      statusText: 'plain text status',
-    } as PiEvent
-
-    const results = translate(event, 'sess-1')
-
-    const broadcast = results.find(r => r.kind === 'status-broadcast') as
-      { kind: 'status-broadcast'; message: { type: string; payload: Record<string, unknown> } } | undefined
-    expect(broadcast).toBeDefined()
-    const payload = broadcast!.message.payload as { text: string; textRaw?: string }
-    expect(payload.text).toBe('plain text status')
-    expect(payload.textRaw).toBe('plain text status')
-  })
-})
-
 describe('event-adapter: handleToolExecutionEnd outputRaw', () => {
   it('result.content 含 ANSI → outputRaw 保留原始 ANSI', () => {
     const result = {

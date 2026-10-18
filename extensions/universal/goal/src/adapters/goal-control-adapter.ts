@@ -33,6 +33,7 @@
 
 import type { ExtensionAPI, ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
+import { firstContentText } from "@zhushanwen/extension-protocol";
 import { getLogger } from "@zhushanwen/pi-extension-logger";
 import { type Static, Type } from "typebox";
 
@@ -140,6 +141,35 @@ export interface GoalControlDetails {
 	goalId: string;
 	status: GoalStatus;
 	slug?: string;
+	/** 收起态一行摘要（buildGoalControlSummary 产出；handler 返回后由 execute 统一补齐，
+	 *  历史 entry 无此字段——GUI 收起态与 TUI 折叠态共用）。 */
+	summary?: string;
+}
+
+/** 收起态摘要中 reason 的保留长度（超长截断加省略号）。 */
+const BLOCKED_REASON_SUMMARY_CHARS = 40;
+
+/** 收起态一行摘要：create → slug；complete → goalId（complete 的 details 无 slug）；
+ *  report_blocked → reason 首段（超长加省略号）。 */
+export function buildGoalControlSummary(
+	params: GoalControlParamsT,
+	details: GoalControlDetails,
+): string {
+	switch (details.action) {
+		case "create":
+			return details.slug ? `Goal created: ${details.slug}` : "Goal created";
+		case "complete":
+			return `Goal completed: ${details.goalId}`;
+		case "report_blocked": {
+			const reason = params.reason?.trim() ?? "";
+			if (reason === "") return "Blocked";
+			return reason.length > BLOCKED_REASON_SUMMARY_CHARS
+				? `Blocked: ${reason.slice(0, BLOCKED_REASON_SUMMARY_CHARS)}…`
+				: `Blocked: ${reason}`;
+		}
+		default:
+			return "Done";
+	}
 }
 
 // ── 业务 handler（契约对齐 §3，可测：fake ports）──────
@@ -385,6 +415,8 @@ export function registerGoalControlTool(pi: ExtensionAPI, session: GoalSession):
 			} else {
 				details = handleReportBlocked(params, session, ports);
 			}
+			// 收起态一行摘要：details 追加 summary（现有字段保留），GUI 收起态与 TUI 折叠态共用
+			details = { ...details, summary: buildGoalControlSummary(params, details) };
 
 			// 扁平化后 params.objective/reason 为 string|undefined（schema 不再按 action 收窄）；
 			// handler 已对必填字段做存在性校验，此处用 ?. 兜底，未定义时空串
@@ -423,20 +455,47 @@ export function registerGoalControlTool(pi: ExtensionAPI, session: GoalSession):
 			return new Text(theme.fg("toolTitle", theme.bold("goal_control ")) + actionLabel, 0, 0);
 		},
 
-		renderResult(result: unknown, _options: { expanded: boolean }, theme: Theme): Text {
+		renderResult(result: unknown, options: { expanded: boolean }, theme: Theme): Text {
 			const d = hasGoalDetails(result) ? result.details : undefined;
-			if (!d) return new Text(theme.fg("dim", "goal_control"), 0, 0);
-			const statusColor =
-				d.status === "active"
-					? "accent"
-					: d.status === "complete"
-						? "success"
-						: d.status === "blocked"
-							? "error"
-							: "muted";
-			const label = d.action === "create" ? "Created" : d.action === "complete" ? "Completed" : "Blocked";
-			const slugSuffix = d.slug ? theme.fg("dim", ` ${d.slug}`) : "";
-			return new Text(theme.fg(statusColor, `◆ Goal ${label}`) + slugSuffix, 0, 0);
+			// 展开态 = content 纯文本（多行详情）；content 缺失时回退折叠形态
+			if (options.expanded) {
+				const content = getContentText(result);
+				if (content !== "") return new Text(content, 0, 0);
+			}
+			// 折叠态 = details.summary 一行（dim）；旧 entry 无 summary 时保留原 ◆ 状态行
+			if (d?.summary !== undefined) {
+				return new Text(theme.fg("dim", d.summary), 0, 0);
+			}
+			return renderLegacyGoalResult(d, theme);
 		},
 	});
+}
+
+/** unknown 值按字段名安全取值（index-signature 收窄，替代全可选结构断言）。 */
+function fieldValue(v: unknown, key: string): unknown {
+	if (typeof v !== "object" || v === null) return undefined;
+	return (v as Record<string, unknown>)[key];
+}
+
+/** content[0] 的 text 纯文本（content 缺失或非 text 类型时兜底空串）。 */
+function getContentText(result: unknown): string {
+	const content = fieldValue(result, "content");
+	if (!Array.isArray(content)) return "";
+	return firstContentText({ content });
+}
+
+/** 旧形态回退（details 无 summary 的历史 entry）：原 ◆ 状态行，视觉零变化。 */
+function renderLegacyGoalResult(d: GoalControlDetails | undefined, theme: Theme): Text {
+	if (!d) return new Text(theme.fg("dim", "goal_control"), 0, 0);
+	const statusColor =
+		d.status === "active"
+			? "accent"
+			: d.status === "complete"
+				? "success"
+				: d.status === "blocked"
+					? "error"
+					: "muted";
+	const label = d.action === "create" ? "Created" : d.action === "complete" ? "Completed" : "Blocked";
+	const slugSuffix = d.slug ? theme.fg("dim", ` ${d.slug}`) : "";
+	return new Text(theme.fg(statusColor, `◆ Goal ${label}`) + slugSuffix, 0, 0);
 }

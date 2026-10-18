@@ -21,6 +21,7 @@ function makeCtx(resolved: Promise<ResolvedProviderCredential | undefined>) {
     hasProviderCredential: () => false,
     listCredentialBackedProviderIds: () => new Set<string>(),
     resolveProviderCredential: () => resolved,
+    resolveProviderApiKeyRaw: async () => undefined,
     resolveProviderBaseUrl: () => undefined,
   }
   const ctx = {
@@ -94,7 +95,7 @@ describe('RT-7#4：unsupported 凭据形态在发请求前拦截（禁止下发 
   })
 
   it('对照：resolver 返回明文 key → discover 正常发请求（拦截不误伤正常路径）', async () => {
-    const { ctx, discoverFromApi, reply } = makeCtx(Promise.resolve({ key: 'sk-ok', source: 'auth.json' }))
+    const { ctx, discoverFromApi, reply } = makeCtx(Promise.resolve({ key: 'sk-ok', source: 'auth.json', kind: 'api_key' }))
     const handler = new ModelMessageHandler(ctx)
 
     expect(handler.handle(discoverMsg('discover'), ws)).toBe(true)

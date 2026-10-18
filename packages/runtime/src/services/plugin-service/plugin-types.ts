@@ -17,7 +17,7 @@ import type { ISessionService, IConfigService } from '../../interfaces.js'
 //   PluginRpcErrorCodes、Disposable、SessionInfo、PluginStateStorage
 // - @experimental — events 插件间事件总线（未实现，调用即抛 NOT_IMPLEMENTED）
 // - @proposed — Phase2AgentAPI 扩展面 tools/hooks/config/sessionData/ui/agent/
-//   workspace、ToolRegistration、HookEntry、StatusBarItemOptions 等
+//   workspace、ToolRegistration、HookEntry 等
 // - @internal — runtime 内部塑形对象（WorkerHandle、PluginContext、Bridge* 等）
 
 // ── 主域类型：SSOT 在 plugin-sdk ────────────────────────────────────
@@ -39,7 +39,6 @@ export type {
   ToolExecuteHandler,
   ToolRegistration,
   ToolEntry,
-  StatusBarItemOptions,
   UiDialogOptions,
   HookEntry,
   Phase2AgentAPI,

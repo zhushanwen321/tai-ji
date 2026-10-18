@@ -102,6 +102,56 @@ describe("renderTodoResult", () => {
 	});
 });
 
+// ── 折叠态一行摘要（details.summary 约定，见 extension-conventions.md）──
+
+describe("renderTodoResult 折叠态 summary", () => {
+	it("折叠 + 突变动作 details.summary → 单行摘要（✓ 前缀），无全量列表行", () => {
+		const result = {
+			content: [{ type: "text", text: "Added 4 todos (#1-#4)" }],
+			details: { action: "add", todos, nextId: 5, summary: "Added 4 todos (#1-#4)" },
+		};
+		const out = renderedText(result);
+		expect(out).toContain("✓ Added 4 todos (#1-#4)");
+		expect(out).not.toContain("#1 Write docs"); // 折叠态不再输出全量列表
+	});
+
+	it("折叠 + list details.summary → muted 单行摘要", () => {
+		const result = {
+			content: [{ type: "text", text: "ignored" }],
+			details: {
+				action: "list",
+				todos,
+				nextId: 5,
+				summary: "4 todos: 1 completed, 1 in_progress, 2 pending",
+			},
+		};
+		const out = renderedText(result);
+		expect(out).toContain("4 todos: 1 completed, 1 in_progress, 2 pending");
+		expect(out).not.toContain("#2 Ship it");
+	});
+
+	it("折叠 + details 无 summary（历史 entry）→ 落回原全量渲染（读写向后兼容）", () => {
+		const result = {
+			content: [{ type: "text", text: "Done thing" }],
+			details: { action: "add", todos, nextId: 5 },
+		};
+		const out = renderedText(result);
+		expect(out).toContain("✓ Done thing");
+		expect(out).toContain("2 todos:");
+		expect(out).toContain("#1 Write docs");
+	});
+
+	it("展开 → 维持原全量渲染（summary 不参与展开态）", () => {
+		const result = {
+			content: [{ type: "text", text: "Done thing" }],
+			details: { action: "add", todos, nextId: 5, summary: "Added 4 todos (#1-#4)" },
+		};
+		const out = renderedText(result, true);
+		expect(out).toContain("✓ Done thing");
+		expect(out).toContain("#1 Write docs");
+	});
+});
+
 // ── renderDualColumn 列宽行为锁定 ──────────────────────
 // 锁定 D14 替换前的列宽补齐/截断可见输出（ext-simplify 裁决零行为变化）：
 // 截断形态是「前缀 + 6 个点」（内层省略号 + 外层省略号的旧组合）——这是锁定旧行为，不是认可该形态。

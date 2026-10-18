@@ -139,7 +139,8 @@ describe('block-rendering 回归护栏（§8.3）', () => {
     // U2 起 text 块行尾含时刻槽（text-time-slot），textContent 含时刻文本——断言「正文无丢失」用 toContain
     expect(a1TextEl.textContent).toContain('我先读文件')
     // 相对顺序不变：a1 text 在 tool 前
-    // （顶层单元取子选择器：running 工具的 run 组是展开的，成员行嵌套 .trace-blk 会被后代选择器数进来）
+    // （顶层单元取子选择器：W3 起成员行直递 ToolRow 无壳根，本就不带 .trace-blk；
+    //   子选择器保证「块数 = 顶层单元数」口径与组内成员行无关）
     const blocksT2 = wrapper.findAll('.trace > .trace-blk')
     expect(blocksT2.length).toBe(2)
     expect(blocksT2[0].find('.md-stub').exists()).toBe(true)

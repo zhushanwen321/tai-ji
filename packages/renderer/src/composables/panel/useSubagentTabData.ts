@@ -14,8 +14,10 @@
  *   + 客户端 outcome-only 兜底投影（U4 A8，判定先行）
  *   + 空历史时 task 用户气泡种入（drawer-blank u2：outcome 先行、seed 复用分区空守卫随后，
  *   判定顺序即优先级）
- * - agentcall 两段式：快照只读，仅拉历史（D4：不接实时流式）+ 登记虚拟 key 到主
- *   session 清理映射（[MUST_FIX 1]，防 deleteSession 泄漏）
+ * - agentcall 两段式：快照只读，仅拉历史（D4：不接实时流式；现余 drawer workflow tab
+ *   入口）+ 登记虚拟 key 到主 session 清理映射（[MUST_FIX 1]，防 deleteSession 泄漏）
+ * - 三段式管线的消费方除 drawer 外还有 workflow-viz agent tab（经独立 streamScope
+ *   接入，组件卸载自停）——同一套拉历史 + 订阅 + 兜底编排，零新链
  */
 import { ref, type ComputedRef } from 'vue'
 import { useChatStore } from '@/stores/chat'
@@ -48,6 +50,12 @@ export interface SubagentTabDataDeps {
    * 若走焦点 session 会打错分区且清理映射登记错位。
    */
   agentcallMainSid?: () => string | undefined
+  /**
+   * 流式订阅 scope token（可选；缺省 STREAM_SCOPE = drawer 单例语义）。多消费方并存
+   * 时必须各持独立 token——workflow-viz agent tab 与 drawer 可能同时挂载（overlay 盖在
+   * 面板之上，drawer 不卸载），共用 token 会互相停掉对方的订阅。
+   */
+  streamScope?: string
 }
 
 /**
@@ -89,6 +97,9 @@ export function useSubagentTabData(deps: SubagentTabDataDeps) {
   const panelStore = usePanelStore()
   const subagentStore = useSubagentStore()
   const workflowStore = useWorkflowStore()
+
+  // 订阅 scope token：缺省 drawer 单例；多消费方（wf-viz agent tab）传独立 token
+  const streamScope = deps.streamScope ?? STREAM_SCOPE
 
   const loadError = ref<string | null>(null)
 
@@ -160,7 +171,7 @@ export function useSubagentTabData(deps: SubagentTabDataDeps) {
     // 接入拉取（触发点①在订阅建立后执行，时序上已处于 fetchAndInject entry 基线恢复之后）
     // 三入口接 chat store ops 面；失步拉取的执行器（subagentStreamPull）在 chat store 装配点注入。
     subagentStore.subscribeStream(
-      STREAM_SCOPE,
+      streamScope,
       mainSessionId,
       subId,
       vid,
@@ -190,9 +201,9 @@ export function useSubagentTabData(deps: SubagentTabDataDeps) {
     workflowStore.registerAgentCall(mainSessionId, vid)
   }
 
-  /** 停止当前 drawer scope 的 stream 订阅（切换 subagent / 组件卸载时调） */
+  /** 停止当前 scope 的 stream 订阅（切换 subagent / 组件卸载时调） */
   function stopSubagentStream(): void {
-    subagentStore.stopStream(STREAM_SCOPE)
+    subagentStore.stopStream(streamScope)
   }
 
   return { loadError, loadSubagentData, stopSubagentStream, recordEngine }

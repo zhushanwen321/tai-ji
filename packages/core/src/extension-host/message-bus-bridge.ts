@@ -7,8 +7,7 @@
  * unsubscribe（防 listener 翻倍，项目规则#2）。
  *
  * 映射表（IF3）：
- *   11 个 plugin 系：statusBarUpdate→plugin-status-bar-update；statusSetUpdate→
- *     plugin-status-set-update；permissionRequest→plugin-permission-request；crashed→
+ *   9 个 plugin 系：permissionRequest→plugin-permission-request；crashed→
  *     plugin-crashed；notification→plugin-notification；config→plugin-config-changed；
  *     messageDecoration→plugin-message-decoration；statusChange→plugin-status-change；
  *     uiRequest→ui-request；viewUpdate→extension-widget；
@@ -17,15 +16,10 @@
  *   1 个 permission 终局帧（remote-use-mobile S5-V3）：permissionRequestResolved→
  *     plugin-permission-request-resolved（消费端 = permission-request-controller 撤窗，
  *     payload 缺 requestId 置空串、消费端回退按 pluginId 匹配）
- *   5 个 extension 系：widget/widgetGui→extension-widget；status→extension-status；
+ *   4 个 extension 系：widget/widgetGui→extension-widget；
  *     notify→extension-notify；ui_request→ui-request（与 plugin:uiRequest 归一）
  *
  * payload 窄化契约（clarify Q1，runtime 实际生产形状逐一核实）：
- * - statusBarUpdate payload = { items: StatusBarItem[] }（runtime StatusBarItem 含
- *   scope/sessionId 无 alignment）→ StatusBarEntry[]：保留 scope/sessionId（IF8 分流），
- *   alignment 取 payload.alignment，无则默认 'left'
- * - statusSetUpdate payload = { sessionId, key, text, textRaw? }（bridge-handler 形状）
- *   → StatusSetEntry：id←key、text←text、pluginId←''（wire 无 pluginId）
  * - permissionRequest payload = { pluginId, permissions: string[], requestId }（activator
  *   形状，requestId 每次审批新生成）→ PermissionRequest：permissions 原样透传整个数组、
  *   requestId←payload 真值优先（前端按它精确撤窗），缺失（旧版广播）回退合成 perm_${pluginId}
@@ -38,18 +32,16 @@
  *   → status←newStatus（∈ PluginStatus 才收）
  * - uiRequest payload = { requestId, pluginId, method, ...params } → DialogRequest：
  *   kind←method（select/confirm/input）
- * - extension 系五消息 wire 无 pluginId → 统一置 ''；widget viewId←widgetKey、
- *   guiTree←lines（widget）或 [gui]（widgetGui，gui:null 保留清除语义）；status
- *   status←text、detail←textRaw；notify message/level 保留
+ * - extension 系消息 wire 无 pluginId → 统一置 ''；widget viewId←widgetKey、
+ *   guiTree←lines（widget）或 [gui]（widgetGui，gui:null 保留清除语义）；
+ *   notify message/level 保留
  * - extension.ui_request method 可超界（editor）→ kind 兜底 'input' + 原始 method 经
  *   DialogRequest 索引签名保留（request.method 不丢信息，s4 适配层可恢复）
  *
  * ERR2（C2 契约）：未知 type → error（'unknown message type: <type>'）；payload 解析
  * 失败 → error（'<type> payload parse failed: ...'）。两条路径都不静默吞。
- * 例外（CT-D5 毒化隔离）：statusBarUpdate 的 items 内单条坏值跳过该条保留其余
- * （全坏才整包 error）——坏条目来自单个插件，不连坐其余插件的条目。
  */
-import type { InternalEvent, StatusBarEntry } from './types'
+import type { InternalEvent } from './types'
 import type { InternalEventBus } from './internal-event-bus'
 import type { PluginMessageSource, IncomingPluginMessage } from './plugin-message-source'
 
@@ -79,68 +71,6 @@ function resolveSessionId(msg: IncomingPluginMessage, payload: Record<string, un
 const PLUGIN_STATUS_VALUES = new Set(['discovered', 'loaded', 'active', 'inactive', 'crashed'])
 
 // ── plugin:* 窄化守卫（返回 InternalEvent | null，null=解析失败；数量以 PLUGIN_HANDLERS 为准）──
-
-/**
- * statusbar 更新解析（CT-D5 毒化隔离，导出供单元测试）。
- *
- * 单条坏 item（id/pluginId/text 非 string、priority 非 number）跳过该条保留
- * 其余——恶意/缺陷插件投递的坏条目不连坐整包，其余插件的条目正常上屏。
- * 全部条目均坏（原始 items 非空但零条存活）→ 返回 null（整包 error）：
- * 「清空」的合法 wire 形态是 items: []，全坏与清空不可混淆，仍按毒化上报。
- */
-export function parseStatusBarUpdate(msg: IncomingPluginMessage): InternalEvent | null {
-  const payload = asRecord(msg.payload)
-  if (!payload) return null
-  const rawItems = payload.items
-  if (!Array.isArray(rawItems)) return null
-  const items: StatusBarEntry[] = []
-  for (const raw of rawItems) {
-    const item = parseStatusBarItem(raw)
-    if (item) items.push(item)
-  }
-  if (items.length === 0 && rawItems.length > 0) return null
-  return { kind: 'plugin-status-bar-update', sessionId: resolveSessionId(msg, payload), items }
-}
-
-/**
- * 单条 statusbar item 窄化（parseStatusBarUpdate 的逐条 helper，CT-D5）。
- * 非 object、必填字段（id/pluginId/text）缺失或 priority 非 number → null（调用方跳过该条）；
- * alignment 缺省/非法回退 'left'，scope 非法置 undefined，tooltip/commandId/sessionId 可选透传。
- */
-function parseStatusBarItem(raw: unknown): StatusBarEntry | null {
-  const item = asRecord(raw)
-  if (!item) return null
-  const id = asString(item.id)
-  const pluginId = asString(item.pluginId)
-  const text = asString(item.text)
-  const priority = typeof item.priority === 'number' ? item.priority : undefined
-  if (id === null || pluginId === null || text === null || priority === undefined) return null
-  const alignment = item.alignment === 'left' || item.alignment === 'right' ? item.alignment : 'left'
-  return {
-    id,
-    pluginId,
-    text,
-    tooltip: asOptionalString(item.tooltip),
-    alignment,
-    priority,
-    commandId: asOptionalString(item.commandId),
-    scope: item.scope === 'per-session' || item.scope === 'global' ? item.scope : undefined,
-    sessionId: asOptionalString(item.sessionId),
-  }
-}
-
-function parseStatusSetUpdate(msg: IncomingPluginMessage): InternalEvent | null {
-  const payload = asRecord(msg.payload)
-  if (!payload) return null
-  const key = asString(payload.key)
-  const text = asString(payload.text)
-  if (key === null || text === null) return null
-  return {
-    kind: 'plugin-status-set-update',
-    sessionId: resolveSessionId(msg, payload),
-    status: [{ id: key, pluginId: '', text }],
-  }
-}
 
 function parsePermissionRequest(msg: IncomingPluginMessage): InternalEvent | null {
   const payload = asRecord(msg.payload)
@@ -313,7 +243,7 @@ export function parseHeaderActionUpdate(msg: IncomingPluginMessage): InternalEve
   }
 }
 
-// ── 5 个 extension:* 窄化守卫（pluginId 一律 ''，wire 无该字段）──────
+// ── extension:* 窄化守卫（pluginId 一律 ''，wire 无该字段）──────────
 
 function parseExtensionWidget(msg: IncomingPluginMessage): InternalEvent | null {
   const payload = asRecord(msg.payload)
@@ -336,18 +266,6 @@ function parseExtensionWidget(msg: IncomingPluginMessage): InternalEvent | null 
     kind: 'extension-widget',
     sessionId: resolveSessionId(msg, payload),
     widget: { viewId: widgetKey, pluginId: '', guiTree: [payload.gui], meta: payload.meta },
-  }
-}
-
-function parseExtensionStatus(msg: IncomingPluginMessage): InternalEvent | null {
-  const payload = asRecord(msg.payload)
-  if (!payload) return null
-  const text = asString(payload.text)
-  if (text === null) return null
-  return {
-    kind: 'extension-status',
-    sessionId: resolveSessionId(msg, payload),
-    status: { pluginId: '', status: text, detail: asOptionalString(payload.textRaw) },
   }
 }
 
@@ -402,8 +320,6 @@ function parseExtensionUiRequest(msg: IncomingPluginMessage): InternalEvent | nu
 // ── MessageBusBridge ───────────────────────────────────────────────
 
 const PLUGIN_HANDLERS: Record<string, (msg: IncomingPluginMessage) => InternalEvent | null> = {
-  'plugin:statusBarUpdate': parseStatusBarUpdate,
-  'plugin:statusSetUpdate': parseStatusSetUpdate,
   'plugin:permissionRequest': parsePermissionRequest,
   'plugin:permissionRequestResolved': parsePermissionRequestResolved,
   'plugin:crashed': parseCrashed,
@@ -419,7 +335,6 @@ const PLUGIN_HANDLERS: Record<string, (msg: IncomingPluginMessage) => InternalEv
 const EXTENSION_HANDLERS: Record<string, (msg: IncomingPluginMessage) => InternalEvent | null> = {
   'extension:widget': parseExtensionWidget,
   'extension:widgetGui': parseExtensionWidget,
-  'extension:status': parseExtensionStatus,
   'extension:notify': parseExtensionNotify,
   'extension:requestsInvalidated': parseExtensionRequestsInvalidated,
   'extension.dialog': parseExtensionUiRequest,

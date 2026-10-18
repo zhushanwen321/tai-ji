@@ -28,7 +28,7 @@
  * 兼容层——C1）：测试同样直连 core（bindDrawerSessionId + openDrawerTab + _resetDrawerForTest）。
  * 静态依赖隔离：重面板（GitPanel/CommandDocPanel/BackgroundTaskDetailPanel/PlanDocsPanel/
  * BtwPanel）与壳层组件（Panel/PanelHeader/ToastContainer/TraceInspector/SubagentTab/
- * WorkflowTab/StatusBar）vi.mock 占位组件（import 期替换——global.stubs 只在渲染期替换，
+ * WorkflowTab）vi.mock 占位组件（import 期替换——global.stubs 只在渲染期替换，
  * import 期仍加载原模块触发 PanelContainer 整棵依赖图 transform，四个 PanelContainer 测试
  * 文件的用例时间合计被该 transform 主导；壳层组件零 DOM 断言，占位只保挂载点）。懒加载
  * DetailPane/TerminalView（PanelContainer 动态 import，不在静态图内）保留渲染期 stub。
@@ -88,8 +88,7 @@ vi.mock('@/components/panel/BtwPanel.vue', () => ({
 
 // ── 壳层组件 vi.mock（import 期替换，同上砍整图 transform；七个组件在本文件零 DOM 断言，
 // 占位空壳保挂载点即可。Panel 例外：保 testid="panel" + data-panel-id，壳行为用例断言主
-// panel 挂载数量。StatusBar 来自 @taiji/ui/extension-host，mock 路径须与 PanelContainer 的
-// import 说明符一致。DrawerPanel 不 mock——真实渲染承接全部 drawer 断言与 header-extra slot）──
+// panel 挂载数量。DrawerPanel 不 mock——真实渲染承接全部 drawer 断言与 header-extra slot）──
 vi.mock('@/components/panel/Panel.vue', () => ({
   default: {
     name: 'Panel',
@@ -112,10 +111,6 @@ vi.mock('@/components/panel/SubagentTab.vue', () => ({
 vi.mock('@/components/panel/WorkflowTab.vue', () => ({
   default: { name: 'WorkflowTab', template: '<div />' },
 }))
-vi.mock('@taiji/ui/extension-host', () => ({
-  StatusBar: { name: 'StatusBar', template: '<div />' },
-}))
-
 // ── mock chatStore：unread badge（AC-13）可控消息数 ──
 // PanelContainer 用 chatStore.getMessages(sessionId).length 感知 agent 新消息。
 // vitest 的 vi.mock 工厂无法引用非 hoisted 顶层 import（reactive），故用 hoisted 容器做转发：
@@ -215,7 +210,7 @@ describe('drawer-tab 注册表契约（L1 全量收敛点，display-containers �
     for (const key of L1_DRAWER_TABS) {
       expect(wrapper.find(`[data-testid="drawer-tab-${key}"]`).exists(), `drawer-tab-${key} 应存在`).toBe(true)
     }
-    // terminal 迁出 L1（用户可见：右抽屉不再有终端图标——入口改底抽屉 ⌃` / StatusBar 按钮）；
+    // terminal 迁出 L1（用户可见：右抽屉不再有终端图标——入口改底抽屉 ⌃` / 顶栏终端开关按钮）；
     // browser 迁出 L1（用户可见：右抽屉不再有浏览器图标——能力在浮层复活，点 localhost 链接进入）
     expect(L1_DRAWER_TABS).toHaveLength(8)
     expect(wrapper.find('[data-testid="drawer-tab-terminal"]').exists()).toBe(false)

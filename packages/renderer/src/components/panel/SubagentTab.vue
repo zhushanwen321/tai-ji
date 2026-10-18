@@ -20,10 +20,10 @@
   <div class="flex h-full min-h-0 flex-col" data-testid="drawer-subagent-tab">
     <!-- 二级 tab 条（subagent-detail-tabs 2026-10-15）：多 subagent 详情并行保留——
          打开序排列，激活者高亮；× 关闭（激活者关闭时激活右邻/左邻，store 编排）。
-         视觉范式 = DetailPane 实例 tab 条同款（display-containers §6.3）；单 tab 时
-         不渲染（省垂直空间，与单选历史形态无差异）。 -->
+         视觉范式 = DetailPane 实例 tab 条同款（display-containers §6.3）。
+         恒渲染（2026-10-17 用户裁决）：单 tab/空态不隐藏——tab 区域位置稳定，
+         开第一个 tab / 关最后一个 tab 不产生布局跳变。 -->
     <div
-      v-if="openTabs.length > 1"
       class="flex shrink-0 items-center gap-0.5 overflow-x-auto border-b border-hairline px-1 py-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       data-testid="drawer-subagent-tab-strip"
       role="tablist"

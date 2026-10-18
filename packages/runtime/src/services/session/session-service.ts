@@ -1484,7 +1484,7 @@ export class SessionService implements ISessionService, ILifecycleSessionOps, ID
   /**
    * backgroundTask:updated 广播组装（background-task-sidebar D3，u-runtime-rpc①）：
    * onTasksChanged（mtime 轮询 / 自写自检触发）时重读该 session registry 全量 → messageBus
-   * session 级 publish（Server→Client 冒号 camelCase，对齐 plugin:statusBarUpdate 命名规则；
+   * session 级 publish（Server→Client 冒号 camelCase，对齐 backgroundTask:updated 命名规则；
    * stream 类入 ring，晚订阅 renderer 由 snapshot 重放兜底）。bus 未注入时 no-op（nullable
    * 注入语义与域内其余 publish 点一致）。entry 形状为 extension-protocol 契约，shared 侧
    * 逐字段镜像（u-proto D9，结构兼容直赋）。

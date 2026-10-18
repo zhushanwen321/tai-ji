@@ -4,11 +4,13 @@
 
 已实施，登记关闭（2026-10-12 经设计包 `.tmp/tech-design/engine-provider-unification.md` 实施落地：provider 启动同步链 + 引擎校验源副本锚点 + per-engine 默认模型全链——配置键 sanitize / 派发插层 / RPC / settings 页——已提交，git 可追溯）。2026-10-11 用户裁决方向：provider 来源统一——zcode 与 pi 的 provider 大部分一致，差异仅在 zcode 自有 built-in provider（zhipu/zai 系账号认证体系，用户在 ZCode 端提前配置好即可）；做法 = 将 taiji 侧 pi provider（含 zhipu/zai 相关）映射一份给 zcode 引擎消费，每次 taiji 启动时同步。本登记「现状核实」「方案」两节为该设计包的前置输入，登记随设计包交付关闭，保留作溯源。
 
+后续修订（2026-10-16，ADR-0143）：本节「不写 `~/.zcode/` 任何文件」的绝对表述已被 ADR-0143 的窄例外取代——standalone 账号链仅写入两条**非秘密**账号元数据键（`account-provider:<pid>:identity` / `:auth-source`），provider 配置仍零写入、其余 `~/.zcode/` 文件仍零写入。
+
 ## 要做什么
 
 两件事，同一配置域：
 
-1. **provider 来源统一（pi → zcode 同步映射）**：taiji 启动时把 pi 侧 provider 配置映射为 zcode 引擎可消费的个人 provider 清单，落 taiji 数据目录（**不写 `~/.zcode/` 任何文件**）；zcode 引擎的模型校验链与凭据注入链消费该清单。效果：用户在 taiji 配一次 provider，pi 主会话与 zcode 引擎都能用。
+1. **provider 来源统一（pi → zcode 同步映射）**：taiji 启动时把 pi 侧 provider 配置映射为 zcode 引擎可消费的个人 provider 清单，落 taiji 数据目录（**不写 `~/.zcode/` 任何文件**；例外见 ADR-0143：仅两条账号元数据键）；zcode 引擎的模型校验链与凭据注入链消费该清单。效果：用户在 taiji 配一次 provider，pi 主会话与 zcode 引擎都能用。
 2. **settings 页 per-engine 默认模型**：与「默认引擎」单选归并到同一配置域（`<dataDir>/agent/subagents/config.json`）；消费链优先级：task 显式指定 > agent frontmatter 声明 > settings 用户偏好 > 引擎缺省。
 
 ## 现状核实（2026-10-11，文件:行号）

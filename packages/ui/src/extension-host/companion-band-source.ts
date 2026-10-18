@@ -3,7 +3,7 @@
  *
  * CompanionBand 内部消费 W1 交付的 createDialogRequestQueue(transport, sessionIdRef, source)
  * 三参数工厂，本文件定义其 transport / source 的 provide/inject 键（对齐 W3/W4 先例：
- * status-bar-source.ts / view-host-source.ts 的注入模式）。
+ * view-host-source.ts 的注入模式）。
  *
  * 壳（P5）provide 真实实现：
  *  - DialogRequestSource：把 S2 MessageBusBridge 的 InternalEventBus.on('ui-request')
@@ -49,7 +49,7 @@ export const OVERLAY_LIFECYCLE_KEY: InjectionKey<OverlayLifecycleSource> = Symbo
  * 壳侧模块级持句柄、exited 时经其出口调 resetFor（dialog 通道具名重置）。
  *
  * 桌面壳不 provide（桌面 exited 清理走壳侧 store 单点，无 resetFor 需求）→ inject 缺失
- * 静默跳过，对齐 StatusBar/ViewHost 静默空态先例；ui 不得依赖壳，登记通道必须
+ * 静默跳过，对齐 ViewHost 静默空态先例；ui 不得依赖壳，登记通道必须
  * provide/inject 形态。
  */
 export type DialogQueueHandleRegistrar = (queue: DialogRequestQueue) => void

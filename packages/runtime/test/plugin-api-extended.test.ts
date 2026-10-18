@@ -6,7 +6,7 @@
  * - session-api：plugin.sessions.list / get / getActive / sendMessage
  * - config-api：plugin.config.get / getAll / set
  * - session-data-api：plugin.sessionData.get / set / delete / keys
- * - ui-api：plugin.ui.showSelect / showConfirm / showInput / notify / updateStatusBarItem
+ * - ui-api：plugin.ui.showSelect / showConfirm / showInput / notify
  * - agent-api：plugin.agent.setModel / getModel / getThinkingLevel / setThinkingLevel / getActiveTools
  * - workspace-api：plugin.workspace.rootPath / name / findFiles
  */
@@ -461,7 +461,6 @@ describe('UI API — registerUiRpcHandlers', () => {
       notify: async (_pluginId: string, level: string, message: string) => {
         lastNotify = { level, message }
       },
-      updateStatusBarItem: async () => {},
     }
 
     registerUiRpcHandlers(rpc, deps)
@@ -503,15 +502,6 @@ describe('UI API — registerUiRpcHandlers', () => {
     })
     assert.strictEqual(lastNotify?.level, 'info')
     assert.strictEqual(lastNotify?.message, 'test message')
-  })
-
-  it('plugin.ui.updateStatusBarItem → succeeds', async () => {
-    await rpc.dispatch('w1', {
-      jsonrpc: '2.0', id: 5, method: 'plugin.ui.updateStatusBarItem',
-      params: { pluginId: 'p', id: 'status1', text: 'ready' },
-    })
-    const resp = extractLastResponse(port)
-    assert.ok('result' in resp, 'updateStatusBarItem should succeed')
   })
 })
 

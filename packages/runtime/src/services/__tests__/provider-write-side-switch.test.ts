@@ -26,6 +26,7 @@ const stubResolver: IProviderCredentialResolver = {
   hasProviderCredential: () => false,
   listCredentialBackedProviderIds: () => new Set<string>(),
   resolveProviderCredential: async () => undefined,
+  resolveProviderApiKeyRaw: async () => undefined,
   resolveProviderBaseUrl: () => undefined,
 }
 

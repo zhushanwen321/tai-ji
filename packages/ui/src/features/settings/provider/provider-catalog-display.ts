@@ -117,10 +117,30 @@ export function useCatalogDisplay(
    * 端点输入草稿：初值 = 用户网关或 ''（留空 = 内置端点）。与 form.baseUrl 的初值
    * （runtime 派生值）刻意不同——派生值不是用户网关，不回填、不改写 form（改写会凭空造出
    * dirty）；只有用户真实输入才同步进 form.baseUrl（save 读它）。
+   *
+   * MF-1-3：草稿回填必须区分「同 id 刷新」与「切换到另一个 provider」。同 id 刷新通常是
+   * 广播/刷新整体替换了列表元素（ProviderPage v-for 直接把数组元素作 :provider），此时
+   * form（含 baseUrl）按 D8 保留用户输入，而草稿若无条件回填会把输入框回退到已存网关；
+   * 随后 syncBeforeSave 把回退值写回 form.baseUrl → 保存落盘的是旧网关（显示值 ≠ 保存值）。
    */
   const endpointDraft = ref('')
+  /**
+   * 上次回填的种子值（与草稿比较 = 是否有真实未保存输入）。用**值谓词**而非 sticky
+   * boolean（S-2）：用户输入后又改回种子值时不算 dirty，同 id 刷新带外部网关变更仍能重拍；
+   * 不能用 form.isDirty 代替——只改 name/apiKey 等其它字段时外部网关变更仍应重拍。
+   */
+  let seededEndpointValue = ''
+  /** 上次回填草稿对应的 provider id（undefined = 尚未回填） */
+  let seededProviderId: ProviderInfo['id'] | undefined
   watch([provider, isCatalog], () => {
-    endpointDraft.value = isCatalog.value ? (gatewayUrl.value ?? '') : ''
+    const nextId = provider.value?.id
+    const nextSeed = isCatalog.value ? (gatewayUrl.value ?? '') : ''
+    // 同 id 刷新 + 草稿偏离种子（真实未保存输入）→ 保留用户草稿（不抹掉输入，也不让后续
+    // save 写旧值）；草稿已回到种子值 = 无未保存输入，允许重拍。
+    if (nextId === seededProviderId && endpointDraft.value !== seededEndpointValue) return
+    seededProviderId = nextId
+    seededEndpointValue = nextSeed
+    endpointDraft.value = nextSeed
   }, { immediate: true })
 
   /**

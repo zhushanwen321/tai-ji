@@ -287,8 +287,6 @@ export default {
   context: {
     // Metrics aggregate entry (W3a single-icon button; resident at all fit levels since ui-optimize decision 6; hover opens the capacity/TTFT/speed/cache four-card aggregate page) title
     metricsAggregateTitle: 'Metrics',
-    // Top-edge capacity hairline bar (ui-optimize decision 6 / N7) accessibility hint (aria-label; the bar shows tier color only, no numbers)
-    capacityBarHint: 'Context usage {percent}%',
     capacity: 'Context capacity',
     used: 'Used',
     total: 'Total',
@@ -311,6 +309,9 @@ export default {
     quotaFailParse: 'failed to parse quota response',
     quotaFailNotConfigured: 'no Workspace configured — set it in Settings and retry',
     quotaFailNoCredential: 'no usable credential found — check the quota query configuration in Settings',
+    // 2026-10-18: cookie paste format invalid (no name=value pairs) — distinct from an expired session;
+    // the fix is re-copying from the right place, not signing in again.
+    quotaFailCookieInvalidFormat: 'invalid Cookie format (no name=value pairs found) — open DevTools → Network, pick a request and copy its Cookie header value',
     // RT-7#7: credential file read failed (IO/lock error, not "no credential") — check files, don't re-enter keys
     quotaFailCredentialUnavailable: 'failed to read credential file — check disk and file permissions, then retry',
     // RT-7#4: unsupported credential form (! command prefix / undefined env reference)
@@ -478,7 +479,6 @@ export default {
     retry: 'Retry',
     // dmg-r1-4: kill RPC channel-class failure (non unknown_terminal_id) — PTY still running, user-visible feedback
     closeFailed: 'Failed to close terminal {message}; the instance is still running',
-    // Cardification 2026-10-04: toggle button moved to PanelHeader (old StatusBar slot retired)
     toggle: 'Toggle terminal',
     // terminal-multi-instance §3.1: instance switch bar (TerminalInstanceBar, single-row head)
     instanceName: 'Terminal {seq}',

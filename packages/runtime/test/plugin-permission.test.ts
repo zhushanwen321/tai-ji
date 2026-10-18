@@ -69,7 +69,7 @@ describe('PermissionChecker（通道身份鉴权）', () => {
   describe('trusted 通道', () => {
     it('trusted 身份 check() 全放行（worker 级语义，消息体自报 id 不参与）', () => {
       const registry = createMockRegistry([
-        makeDescriptor({ pluginId: 'statusline', trustLevel: 'trusted', source: 'built-in' }),
+        makeDescriptor({ pluginId: 'scheduler-manager', trustLevel: 'trusted', source: 'built-in' }),
       ])
       const checker = new PluginPermissionChecker(registry, new PermissionStorage(tmpDir))
 

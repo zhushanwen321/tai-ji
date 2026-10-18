@@ -53,7 +53,7 @@ import { detectExecSkills } from "@zhushanwen/pi-exec-skills";
 import { handlePlanComplete } from "../execution-notice.js";
 import { createPlanCtx, DEFAULT_PLAN_STATE } from "../state.js";
 import { listTemplates } from "../templates.js";
-import { PLAN_ACTIONS, registerPlanTool, validateAction } from "../tool.js";
+import { buildPlanSummary, PLAN_ACTIONS, registerPlanTool, validateAction } from "../tool.js";
 import { updatePlanWidget } from "../widget.js";
 
 /** Build a fake pi + ctx and capture the execute callback from registerTool. */
@@ -175,8 +175,12 @@ describe("registerPlanTool", () => {
       const winnerContent = winner ? fs.readFileSync(winner.path, "utf-8") : null;
       expect(winnerContent).not.toBeNull();
       expect(text).toContain(`<template>\n${winnerContent}\n</template>`);
-      // details 收窄：仅 action + templateName，全文不再双份持久化
-      expect(res.details).toEqual({ action: "select-template", templateName: "feature-plan" });
+      // details 收窄：仅 action + templateName + summary，全文不再双份持久化
+      expect(res.details).toEqual({
+        action: "select-template",
+        templateName: "feature-plan",
+        summary: "Plan template selected: feature-plan",
+      });
     });
 
     it("resolves from the merged view: project-level .agents/plans template is selectable (D7 合并视图)", async () => {
@@ -190,7 +194,11 @@ describe("registerPlanTool", () => {
         ctx.cwd = projectRoot;
         const res = await exec({ action: "select-template", templateName: "v2b-project-only" });
         expect(res.content[0].text).toContain("# project-owned skeleton");
-        expect(res.details).toEqual({ action: "select-template", templateName: "v2b-project-only" });
+        expect(res.details).toEqual({
+          action: "select-template",
+          templateName: "v2b-project-only",
+          summary: "Plan template selected: v2b-project-only",
+        });
       } finally {
         fs.rmSync(projectRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
       }
@@ -274,6 +282,86 @@ describe("registerPlanTool", () => {
 
       expect(component).toBeInstanceOf(Text);
       expect(component.render(400).join("\n")).toContain(text);
+    });
+  });
+
+  // --- 收起态一行摘要（details.summary 约定，见 extension-conventions.md）---
+  describe("details.summary（buildPlanSummary + renderResult 折叠分支）", () => {
+    const renderTheme = {
+      fg: (_token: string, text: string) => text,
+    } as unknown as Theme;
+
+    function renderFn(pi: { registerTool: unknown }): (
+      result: { content: Array<{ type: string; text?: string }>; details?: unknown },
+      options: { expanded: boolean },
+      theme: Theme,
+    ) => { render: (width: number) => string[] } {
+      const tool = (pi.registerTool as ReturnType<typeof vi.fn>).mock.calls[0][0] as {
+        renderResult: (
+          result: { content: Array<{ type: string; text?: string }>; details?: unknown },
+          options: { expanded: boolean },
+          theme: Theme,
+        ) => { render: (width: number) => string[] };
+      };
+      return tool.renderResult;
+    }
+
+    it("buildPlanSummary 六主路径 action 逐一推导（enter requirement 折行折叠 + 40 字截断）", () => {
+      const requirement = "Build a user\nmanagement module\twith JWT auth and role-based access control everywhere";
+      // 折行/Tab 折叠为单空格后取首 40 字 + 省略号（码点安全截断）
+      expect(buildPlanSummary({}, { action: "enter", requirement, skills: [] })).toBe(
+        `Plan entered: ${"Build a user management module with JWT "}…`,
+      );
+      expect(buildPlanSummary({}, { action: "select-template", templateName: "feature-plan" })).toBe(
+        "Plan template selected: feature-plan",
+      );
+      expect(buildPlanSummary({}, { action: "register-doc", fileName: "design.md", version: 1 })).toBe(
+        "Plan doc registered: design.md",
+      );
+      expect(buildPlanSummary({}, { action: "submit-review", channel: "text", docsCount: 1 })).toBe(
+        "Plan submitted for review",
+      );
+      // gui 通道 details 只在「用户要求修订」消费点产出——措辞不误导成等待审阅
+      expect(buildPlanSummary({}, { action: "submit-review", channel: "gui", docsCount: 1 })).toBe(
+        "Plan review: user requested changes",
+      );
+      expect(
+        buildPlanSummary({}, { action: "complete", planFilePath: "p.md", execMode: "execute" }),
+      ).toBe("Plan completed");
+      expect(buildPlanSummary({}, { action: "abort" })).toBe("Plan aborted");
+    });
+
+    it("buildPlanSummary 边缘/失败出口（review-error 等）→ 空串（不携带 summary）", () => {
+      expect(buildPlanSummary({}, { action: "review-error", reason: "inactive" })).toBe("");
+      expect(buildPlanSummary({}, { action: "complete-cancelled", reason: "cancelled", source: "self" })).toBe("");
+      expect(buildPlanSummary({}, { action: "complete-later", choice: "Not now" })).toBe("");
+      expect(buildPlanSummary({}, { action: "review-dismissed", docsCount: 1 })).toBe("");
+    });
+
+    it("折叠 + details.summary → 单行摘要（不渲染展开态 header/body）", () => {
+      const { pi } = setup();
+      const render = renderFn(pi);
+      const component = render(
+        { content: [{ type: "text", text: "ignored" }], details: { action: "abort", summary: "Plan aborted" } },
+        { expanded: false },
+        renderTheme,
+      );
+      const text = component.render(400).join("\n");
+      expect(text).toContain("Plan aborted");
+      expect(text).not.toContain("Plan mode 已退出");
+    });
+
+    it("展开 → 维持原全量渲染（summary 不参与展开态）", () => {
+      const { pi } = setup();
+      const render = renderFn(pi);
+      const component = render(
+        { content: [{ type: "text", text: "ignored" }], details: { action: "abort", summary: "Plan aborted" } },
+        { expanded: true },
+        renderTheme,
+      );
+      const text = component.render(400).join("\n");
+      expect(text).toContain("Plan mode 已退出");
+      expect(text).not.toContain("Plan aborted");
     });
   });
 

@@ -2,8 +2,9 @@
  * provider-edit-form —— Provider 编辑「表单草稿 + dirty/快照」module（[C4] 拆分自
  * use-provider-edit.ts）。
  *
- * 承载：凭据/名称/端点表单草稿（form，含 D7 headers/authHeader + B-1 authMethod）+ headers
- * 行编辑 CRUD + isDirty 快照对比（D13）+ save 持久化（D15b 校验 → 防线① catalog/custom 分体系
+ * 承载：凭据/名称/端点表单草稿（form，含 D7 headers/authHeader + B-1 authMethod）+ 凭据回显
+ * （眼睛按钮按需 RPC，回显值不构成 dirty/不回写）+ headers 行编辑 CRUD + isDirty 快照对比（D13）
+ * + save 持久化（D15b 校验 → 防线① catalog/custom 分体系
  * → transport.setProvider）+ **D8 广播并发对齐的调用点**（规则纯核 = provider-edit-reconcile.ts，
  * deep watch 退化为 reconcileBroadcast 的一个调用点）。
  *
@@ -74,6 +75,9 @@ export function headerRowsFromHeaders(headers: Record<string, string>): Array<{ 
  * - headers：headers 行编辑重复 key
  * - discover：test / discover 探活失败（use-provider-edit 装配时经写通道注入落标签）
  * - models：模型清单 CRUD 校验错（ProviderEditBody onAddModel 捕获填入）
+ *
+ * 不含回显失败（SG-1）：保存条仅在 dirty 时渲染，把回显失败写进 actionError 会让用户
+ * 之后一次无关编辑就看到滞后的「读取已保存的 API Key 失败」——回显失败由调用方 toast 承载。
  */
 export type ActionErrorSource = 'save' | 'headers' | 'discover' | 'models'
 
@@ -114,6 +118,22 @@ export interface ProviderEditFormModule {
   readonly headerRows: Ref<Array<{ key: string; value: string }>>
   /** apiKey 明文显示开关 */
   readonly showKey: Ref<boolean>
+  /** 正在拉取已存 API Key（眼睛按钮禁用态；2026-10-18 回显） */
+  readonly revealingApiKey: Ref<boolean>
+  /**
+   * 回显已存 API Key（眼睛按钮，按需 RPC——只对 api_key 凭据生效，OAuth token 不走本通道）：
+   * 拉取成功填入草稿并置 showKey；草稿已非空（用户已输入）时为空操作。
+   * 回显值不构成 dirty、保存时不回写（回显 = 所存值，回写会改变凭据来源语义）。
+   * 失败（无可回显凭据 / RPC 错误）返回 ok:false + 可直接展示的文案——保存条仅在 dirty
+   * 时渲染，回显失败必须由调用方给可见反馈（C-proc-21，禁静默无动作）；**不写入 actionError**
+   * （SG-1：避免之后的无关编辑把滞后的回显失败文案带进保存条）。
+   */
+  revealApiKey(): Promise<{ ok: true } | { ok: false; error: string }>
+  /**
+   * 配额区 carry-in 槽位用「真实未保存草稿」：回显值（= 所存值）不算待保存，返回 ''。
+   * 供 useQuotaConfigure 的 providerCredentialPendingSave 判定（防回显触发「已填未保存」误报）。
+   */
+  readonly apiKeyPendingDraft: ComputedRef<string>
   /** 保存中（save-bar 按钮禁用） */
   readonly saving: Ref<boolean>
   /**
@@ -183,6 +203,15 @@ export function createProviderEditForm(input: ProviderEditFormInputs): ProviderE
   })
   const headerRows = ref<Array<{ key: string; value: string }>>([])
   const showKey = ref(false)
+  /** 回显的已存 apiKey（null = 未回显）。与草稿同值时不构成 dirty、保存不回写（2026-10-18） */
+  const revealedApiKey = ref<string | null>(null)
+  const revealingApiKey = ref(false)
+  /**
+   * 回显世代号（SS-1/SS-2）：每次发起回显 +1；回显基线被作废（provider 切换 / 凭据被替换 /
+   * 清除广播）时也 +1。迟到响应按世代校验丢弃，`finally` 也不得清掉后发请求的在途标志。
+   * 非响应式（只作请求归属判定，不参与渲染）。
+   */
+  let revealEpoch = 0
   const saving = ref(false)
   // 动作错误内部态（MF-1-7：带来源标签）；对外只投影 message（下方 actionError computed）
   const actionErrorState = ref<ActionErrorState | null>(null)
@@ -206,12 +235,21 @@ export function createProviderEditForm(input: ProviderEditFormInputs): ProviderE
     draft.authMethod = patch.authMethod
   }
 
+  /**
+   * 是否存在「真实未保存的 apiKey 草稿」（MF-1-2）：非空且不等于回显值——回显值 = 所存值，
+   * 不构成变更。dirty 判定 / 快照捕获 / save 回写三处共用同一判据（曾因两套谓词不一致：
+   * 广播重拍后回显态被快照记成「用户已改」，保存条虚假出现）。
+   */
+  function hasPendingApiKeyDraft(): boolean {
+    return draft.apiKey !== '' && draft.apiKey !== revealedApiKey.value
+  }
+
   function captureSnapshot(): void {
     snapshot.value = {
       name: draft.name,
       api: draft.api,
       baseUrl: draft.baseUrl,
-      apiKeyChanged: draft.apiKey !== '',
+      apiKeyChanged: hasPendingApiKeyDraft(),
       modelsJson: JSON.stringify(models.localModels.value),
       authHeader: draft.authHeader,
       headersJson: JSON.stringify(draft.headers),
@@ -225,9 +263,9 @@ export function createProviderEditForm(input: ProviderEditFormInputs): ProviderE
     if (draft.name !== s.name) return true
     if (draft.api !== s.api) return true
     if (draft.baseUrl !== s.baseUrl) return true
-    // apiKey：用户输入了值 或 点了清除（哨兵）都算变更
-    const apiKeyChangedNow = draft.apiKey !== ''
-    if (apiKeyChangedNow !== s.apiKeyChanged) return true
+    // apiKey：用户输入了值 或 点了清除（哨兵）都算变更；**等于回显值 = 未改动**
+    //（2026-10-18 回显：回显只是把已存值展示出来，不得因此进入 dirty）。判据与快照同源。
+    if (hasPendingApiKeyDraft() !== s.apiKeyChanged) return true
     // models 整体对比（增删 + 内部字段改都触发 dirty）
     if (JSON.stringify(models.localModels.value) !== s.modelsJson) return true
     // W3 D7：authHeader / headers 变更即 dirty
@@ -241,9 +279,26 @@ export function createProviderEditForm(input: ProviderEditFormInputs): ProviderE
   function applyProvider(p: ProviderInfo | null): void {
     // edit 模式：用现有 provider 数据填充表单；新增模式：重置为初始空状态。
     // apiKey 恒重置为 ''（=「不变」）：明文/env 引用/哨兵都是草稿态，随 provider 切换清空。
+    // 回显态（revealedApiKey）同批清空——回显值属于「当前 provider 的已存值」，不得跨 provider 复用。
     applyPatch(formPatchFromProvider(p))
     draft.apiKey = ''
+    // 回显基线 + 在途回显请求同批作废（SS-2）：新 provider 的眼睛按钮不被旧请求 disabled，
+    // 旧请求的迟到响应也拿不到写入资格（世代号已推进）。
+    dropRevealed()
     headerRows.value = headerRowsFromHeaders(draft.headers)
+  }
+
+  /**
+   * 作废回显态（SS-1/SS-3）：推进世代号丢弃在途响应；只有草稿仍是回显值时才清空草稿
+   * （用户已改的草稿保留——回显值 = 所存值，凭据被替换后它不再有效，不能在切回 api_key 形态
+   * 时被当成用户草稿以明文展示）。
+   */
+  function dropRevealed(): void {
+    revealEpoch += 1
+    revealingApiKey.value = false
+    if (revealedApiKey.value !== null && draft.apiKey === revealedApiKey.value) draft.apiKey = ''
+    revealedApiKey.value = null
+    showKey.value = false
   }
 
   function resetTransient(): void {
@@ -260,7 +315,7 @@ export function createProviderEditForm(input: ProviderEditFormInputs): ProviderE
   function validateBeforeSave(): string | null {
     if (!draft.name.trim()) return t('composable.providerNameRequired')
     if (snapshot.value?.authMethod === 'oauth' && draft.authMethod === 'api_key'
-      && resolveApiKeyForSave(draft.apiKey) === undefined) {
+      && resolveApiKeyChange() === undefined) {
       return t('composable.oauthSwitchNeedsKey')
     }
     return null
@@ -283,8 +338,10 @@ export function createProviderEditForm(input: ProviderEditFormInputs): ProviderE
       // 网关——「undefined = 不变」是既有 merge 协议，清空输入框必须走显式空串带键，否则网关
       // 回退通道不可达）；custom 空串不带键（runtime 对 custom 空串同样是「不变」）。
       ...(isCatalog || baseUrl ? { baseUrl } : {}),
-      // D18：apiKey 空=不变（undefined）；哨兵=清空（''）；非空=原值
-      apiKey: resolveApiKeyForSave(draft.apiKey),
+      // D18：apiKey 空=不变（undefined）；哨兵=清空（''）；非空=原值。
+      // 2026-10-18 回显：草稿 === 回显值（未改动）时不发键——回显只是展示，直接回写会
+      // 改变凭据来源语义（如 catalog 的 auth.json → 被误当作新 key 重写）。
+      apiKey: resolveApiKeyChange(),
       // B-1：凭证形态回传（undefined = 不变；runtime 写 providers.json authMethod 标注）
       authMethod: draft.authMethod,
       // W3 D7：headers（空对象时不传，避免覆盖 runtime 既有值）+ authHeader 回写。
@@ -316,7 +373,7 @@ export function createProviderEditForm(input: ProviderEditFormInputs): ProviderE
     try {
       const res = await getSettingsTransport().setProvider(providerId, buildSetProviderPayload(isCatalog, baseUrl))
       // 哨兵→''、空→undefined 均为 falsy：只有本次真正写入非空 key（明文或 $ENV 引用）才 true
-      return { ok: true, wroteApiKey: Boolean(resolveApiKeyForSave(draft.apiKey)), quotaAutoEnabled: res?.quotaAutoEnabled }
+      return { ok: true, wroteApiKey: Boolean(resolveApiKeyChange()), quotaAutoEnabled: res?.quotaAutoEnabled }
     } catch (e) {
       setActionError('save', toErrorMessage(e))
       return { ok: false, wroteApiKey: false }
@@ -327,7 +384,62 @@ export function createProviderEditForm(input: ProviderEditFormInputs): ProviderE
 
   function clearApiKey(): void {
     draft.apiKey = API_KEY_CLEAR_SENTINEL
+    // 哨兵不得以明文形态展示（SG-4）：回显后 showKey 为 true 时点清除会把 '__CLEAR__'
+    // 直接渲染成 text，落回密码态遮罩。
+    showKey.value = false
   }
+
+  /**
+   * 本次保存实际要写的 apiKey（D18 + 2026-10-18 回显）：
+   * - 草稿 === 回显值（未改动）→ undefined（不发键：回显只是展示，不得被当作新值回写）
+   * - 空 → undefined（不变）；哨兵 → ''（清空）；非空 → 原值
+   */
+  function resolveApiKeyChange(): string | undefined {
+    if (!hasPendingApiKeyDraft()) return undefined
+    return resolveApiKeyForSave(draft.apiKey)
+  }
+
+  /**
+   * 回显已存 API Key（2026-10-18，眼睛按钮按需拉取；草稿已非空时为空操作——用户输入优先）。
+   * 只对 api_key 凭据生效：runtime 端 OAuth token 永不出协议（见协议 config.revealProviderApiKey）。
+   * 回显值写入草稿 + 置 showKey（明文可见），但不进入 dirty、save 不回写（见 resolveApiKeyChange）。
+   */
+  async function revealApiKey(): Promise<{ ok: true } | { ok: false; error: string }> {
+    const p = providerRef.value
+    if (!p || draft.apiKey !== '' || revealingApiKey.value) return { ok: true }
+    const requestedId = p.id
+    const epoch = ++revealEpoch
+    revealingApiKey.value = true
+    try {
+      const res = await getSettingsTransport().revealProviderApiKey(p.id)
+      // 迟到响应归属校验（MF-1-3 / SS-1）：await 期间可能已切到别的 provider、用户开始输入，
+      // 或回显基线已作废（apiKeySet=false 广播清空 / 再次回显）——此时写入会把已失效的旧明文
+      // 写回草稿（并成为非 dirty 基线）。
+      if (epoch !== revealEpoch) return { ok: true }
+      if (providerRef.value?.id !== requestedId || draft.apiKey !== '') return { ok: true }
+      // 凭据已被删除（MF-1-1）：即使世代号尚未推进，也不得把已不存在的明文写回草稿。
+      // 只挡 api_key 被移除的情形；$ENV / !cmd 引用的 apiKeySet 仍为 true，不受影响。
+      if (providerRef.value?.apiKeySet === false) return { ok: true }
+      if (res.available && res.apiKey) {
+        draft.apiKey = res.apiKey
+        revealedApiKey.value = res.apiKey
+        showKey.value = true
+        return { ok: true }
+      }
+      return { ok: false, error: t('composable.revealApiKeyUnavailable') }
+    } catch (e) {
+      if (epoch !== revealEpoch) return { ok: true }
+      return { ok: false, error: toErrorMessage(e) }
+    } finally {
+      // SS-2：只有当前世代能归零在途标志——旧请求收尾不得解除新请求的 disabled 态
+      if (epoch === revealEpoch) revealingApiKey.value = false
+    }
+  }
+
+  /** 真实未保存草稿（回显值排除）——配额区 pendingSave 判定槽位（见接口 JSDoc） */
+  const apiKeyPendingDraft = computed<string>(() => (
+    draft.apiKey === revealedApiKey.value ? '' : draft.apiKey
+  ))
 
   function syncHeadersFromRows(): void {
     const { headers, hasDuplicate } = buildHeadersFromRows(headerRows.value)
@@ -358,16 +470,31 @@ export function createProviderEditForm(input: ProviderEditFormInputs): ProviderE
    */
   function applyReconcile(fresh: ProviderInfo): void {
     const decision = reconcileBroadcast(fresh, draft, isDirty.value, snapshot.value)
-    if (decision.action === 'ignore') return
+    // 生效凭据不再是 api_key（广播清除凭据 / 换成 OAuth，SS-3）：回显态同批作废——OAuth token
+    // 不走回显通道，继续留着旧 api_key 明文会在用户切回 api_key 形态时以 text 形态展示已被替换的值。
+    // 该判定必须早于 ignore 分支的提前返回（MF-1-1）：dirty 表单同样可能在外部清空/替换凭据，
+    // 否则已删除的明文继续可见，在途回显也不会被作废（迟到响应写回已失效的明文）。
+    const credentialReplaced = !fresh.apiKeySet || fresh.authMethod === 'oauth'
+    if (decision.action === 'ignore') {
+      // dirty 分支只作废回显态，其他字段一律不动（用户改动优先）；dropRevealed 仅在草稿
+      // 仍是回显值时才清空，真实用户输入保留。
+      if (credentialReplaced) dropRevealed()
+      return
+    }
     if (decision.action === 'align-auth-method') {
       draft.authMethod = decision.authMethod
       // 手改快照：单独重拍快照的 authMethod 位（保持其余快照位不动，isDirty 语义不被扰动）
       if (snapshot.value) snapshot.value.authMethod = decision.authMethod
+      if (credentialReplaced) dropRevealed()
       return
     }
     applyPatch(decision.form)
     headerRows.value = headerRowsFromHeaders(draft.headers)
     models.localModels.value = decision.models
+    // 广播携带 apiKeySet=false（凭据已被移除/清空）或 authMethod=oauth（凭据已被 OAuth 替换）
+    // → 回显态三件套同批清空（MF-1-2 / SS-3）：只清 revealed 会让仍显示的明文被重新判成用户
+    // 草稿（dirty + 保存时回写）。dropRevealed 仅在草稿仍是回显值时才清空，不丢真实用户输入。
+    if (credentialReplaced) dropRevealed()
     // 刷新后重新捕获快照（新基线，避免下次广播触发不必要的「dirty」）
     captureSnapshot()
   }
@@ -390,6 +517,9 @@ export function createProviderEditForm(input: ProviderEditFormInputs): ProviderE
     draft,
     headerRows,
     showKey,
+    revealingApiKey,
+    revealApiKey,
+    apiKeyPendingDraft,
     saving,
     actionError,
     setActionError,

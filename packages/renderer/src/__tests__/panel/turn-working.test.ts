@@ -86,9 +86,9 @@ function mountTurnWithRealBlock(props: { turn: MessageTurn; sessionId?: string; 
   })
 }
 
-/** trace 顶层单元（.trace-blk）取样单源：「块数」口径一律指顶层单元数——组展开时后代
- *  选择器会把成员行（嵌套 .trace-blk）数进来，故用子选择器取顶层。 */
-function traceTopBlocks(wrapper: { findAll: (sel: string) => ReturnType<typeof wrapper.findAll> }) {
+/** trace 顶层单元（.trace-blk）取样单源：「块数」口径一律指顶层单元数——W3 起 run 组成员行
+ *  直递 ToolRow 无壳根（成员行锚点 = block-tool-<id> testid），子选择器保证口径恒指顶层。 */
+const traceTopBlocks = (wrapper: { findAll: (s: string) => unknown[] }) => {
   return wrapper.findAll('.trace > .trace-blk')
 }
 
@@ -457,7 +457,7 @@ describe('Turn · trace 块按 contentBlocks 真实时序渲染', () => {
     expect(blocks[0].find('.trace-run-group').exists()).toBe(true)
     // 第二个块是 thinking
     expect(blocks[1].find('.trace-think').exists()).toBe(true)
-    // [actions-anchor] 无 text 块 → 无锚块 → 操作栏不渲染（lastAssistant 非 null 也不再足够）
+    // [actions-anchor] 末单元是 run 组块（text→tool，锚要求末单元是 text）→ 无锚块 → 操作栏不渲染
     expect(wrapper.find('.turn-summary').exists()).toBe(false)
   })
 
@@ -469,8 +469,8 @@ describe('Turn · trace 块按 contentBlocks 真实时序渲染', () => {
         assistants: [textFirstAssistant()],
       }),
     })
-    // 操作栏存在（lastAssistant 非 null；去内容化后不再承载文字）
-    expect(wrapper.find('.turn-summary').exists()).toBe(true)
+    // [actions-anchor] 正文后跟工具块 → 末单元是 run 组块 → 无锚块，操作栏不渲染
+    expect(wrapper.find('.turn-summary').exists()).toBe(false)
     // [block-rendering M0] streaming 光标迁移到 Turn 尾部 streaming-tail；
     // 末位可见 block 是 running tool（textFirstAssistant: text→tool running）→ 隐藏（工具自带 loader）
     expect(wrapper.find('.streaming-tail').exists()).toBe(false)
@@ -501,7 +501,8 @@ describe('Turn · trace 块按 contentBlocks 真实时序渲染', () => {
         assistants: [textFirstAssistant({ toolCalls: [completedTool] })],
       }),
     })
-    expect(wrapper.find('.turn-summary').exists()).toBe(true)
+    // [actions-anchor] 正文后跟工具块 → 末单元是 run 组块 → 无锚块，操作栏不渲染
+    expect(wrapper.find('.turn-summary').exists()).toBe(false)
     expect(wrapper.find('.streaming-tail').exists()).toBe(true)
 
     // 切到 complete 态
@@ -512,7 +513,8 @@ describe('Turn · trace 块按 contentBlocks 真实时序渲染', () => {
         assistants: [textFirstAssistant({ status: 'complete', toolCalls: [completedTool] })],
       }),
     })
-    // 操作栏仍存在（text 位置未变，这正是消除跳变的核心）
+    // 完成态默认折叠：trace 只渲染末位 text（工具块不可见）→ 末单元是 text → 锚块合法存在
+    // （占位行下方无后续块，不构成块间空洞）
     expect(wrapper.find('.turn-summary').exists()).toBe(true)
     // 光标消失（isStreaming=false）
     expect(wrapper.find('.streaming-tail').exists()).toBe(false)

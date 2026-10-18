@@ -16,10 +16,10 @@ describe('MountPointRegistry', () => {
 
   it('TC-2b: 重复 register 同名覆盖（幂等，不抛错）', () => {
     const reg = new MountPointRegistry()
-    reg.register('statusbar', { id: 'host-1' })
-    expect(() => reg.register('statusbar', { id: 'host-2' })).not.toThrow()
-    expect(reg.has('statusbar')).toBe(true)
-    expect(reg.list().filter((n) => n === 'statusbar')).toHaveLength(1) // 不翻倍
+    reg.register('drawer.tab', { id: 'host-1' })
+    expect(() => reg.register('drawer.tab', { id: 'host-2' })).not.toThrow()
+    expect(reg.has('drawer.tab')).toBe(true)
+    expect(reg.list().filter((n) => n === 'drawer.tab')).toHaveLength(1) // 不翻倍
   })
 
   it('TC-2c: unregister 后 has=false 且 list() 消失', () => {
@@ -39,8 +39,8 @@ describe('MountPointRegistry', () => {
     const reg = new MountPointRegistry()
     expect(reg.list()).toEqual([])
     reg.register('sidebar.tab')
-    reg.register('statusbar')
+    reg.register('drawer.tab')
     reg.register('slash')
-    expect(reg.list().sort()).toEqual(['sidebar.tab', 'slash', 'statusbar'])
+    expect(reg.list().sort()).toEqual(['drawer.tab', 'sidebar.tab', 'slash'])
   })
 })

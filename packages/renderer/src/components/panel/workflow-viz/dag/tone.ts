@@ -46,6 +46,8 @@ export function dotTone(status: WorkflowVizDagNodeStatus, stopTone?: WorkflowViz
  * 节点完整 tone（六态着色 + 停止叠加，映射语义与色值同 WorkflowVizDagNode 既有
  * 实现逐一保持）：同一时刻只发射一组状态类（Tailwind 发射序不保证同名工具类的
  * class 顺序胜负——见 Gantt 迁移同款裁决）；running / retrying 叠脉冲。
+ * 每态都带 rect 描边——节点卡片 fill 与 phase 分区背景同为 surface，缺描边的卡片
+ * 与背景融为一体（节点隐形）；pending 实线中性、skipped 虚线淡化，形态可区分。
  */
 export function nodeTone(status: WorkflowVizDagNodeStatus, stopTone?: WorkflowVizDagStopTone): { rect: string; dot: string } {
   const dot = dotTone(status, stopTone)
@@ -62,7 +64,8 @@ export function nodeTone(status: WorkflowVizDagNodeStatus, stopTone?: WorkflowVi
       return { rect: `stroke-[var(--warn)] [stroke-width:1.6] ${PULSE_CLASS}`, dot: `${dot} ${PULSE_CLASS}` }
     case 'skipped':
       return { rect: 'stroke-[var(--neutral-dim)] [stroke-dasharray:4_3] fill-[var(--surface-hover)]', dot }
+    case 'pending':
     default:
-      return { rect: '', dot }
+      return { rect: 'stroke-[var(--neutral-dim)]', dot }
   }
 }

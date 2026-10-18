@@ -279,8 +279,6 @@ export default {
   context: {
     // 指标聚合入口（W3a 单图标聚合按钮；ui-optimize 决策 6 起对所有 fit 级常驻，hover 出容量+TTFT+速度+缓存四卡聚合页）title
     metricsAggregateTitle: '指标',
-    // 顶缘容量细条（ui-optimize 决策 6 / N7）可访问性提示（aria-label；细条只给色阶不显数字）
-    capacityBarHint: '上下文用量 {percent}%',
     capacity: '上下文容量',
     used: '已用',
     total: '总量',
@@ -303,6 +301,9 @@ export default {
     quotaFailParse: '额度响应解析失败',
     quotaFailNotConfigured: '未配置 Workspace，请在设置中填写后重试',
     quotaFailNoCredential: '未找到可用凭证，请到设置页检查额度查询配置',
+    // 2026-10-18：Cookie 粘贴格式无效（无 name=value 对）——与「会话失效」分流：
+    // 恢复动作是换复制路径重贴，不是重新登录。
+    quotaFailCookieInvalidFormat: 'Cookie 格式无效（未解析出 name=value）——请在 DevTools → Network 选中任一请求，复制请求头里的 Cookie 整串',
     // RT-7#7：凭据文件读取失败（读盘/锁异常，非「没有凭证」）——指引用户查文件而非重填
     quotaFailCredentialUnavailable: '凭据文件读取失败，请检查磁盘与文件权限后重试',
     // RT-7#4：凭据形态不支持（! command 前缀 / 环境变量未定义）
@@ -465,7 +466,6 @@ export default {
     retry: '重试',
     // dmg-r1-4：kill RPC 通道类失败（非 unknown_terminal_id）——PTY 仍在运行，用户可见反馈
     closeFailed: '终端 {message} 关闭失败，实例仍在运行',
-    // 三卡化 2026-10-04：开关按钮挂 PanelHeader 顶栏（原 StatusBar 底栏落点退役）
     toggle: '开关终端',
     // terminal-multi-instance §3.1：实例切换条（TerminalInstanceBar，head 一行形态）
     instanceName: '终端 {seq}',

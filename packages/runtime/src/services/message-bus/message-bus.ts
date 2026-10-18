@@ -109,7 +109,7 @@ export type TopicKind = 'state' | 'stream' | 'transient'
  *
  * 收录范围 = session 级 push 型消息全集（含 W07/W08 将接 bus 的 6 类，本表按文档全集一次填齐）。
  * 不收录：RPC reply 型（*.result、session.subscribe/history/renamed 等走 reply 通道，无 seq/ring 语义）
- * 与全局消息（config.*、app.info、plugin:statusBar* 等 payload 无 sessionId，走 broker.broadcast）。
+ * 与全局消息（config.*、app.info、plugin:crashed 等 payload 无 sessionId，走 broker.broadcast）。
  *
  * **未入表类型的 fallback = 'stream'（R-07 裁决）**：与改造前语义一致（所有 publish 都入 ring），
  * 是唯一不产生行为回归的默认——fallback 到 transient 会静默丢消息（不可回放），fallback 到
@@ -200,7 +200,6 @@ export const TOPIC_TABLE: Readonly<Record<string, TopicKind>> = {
   'terminal.writeFailed': 'stream',
   'plugin:uiRequest': 'stream',
   'extension.ui_request': 'stream',
-  'extension:status': 'stream',
   'extension:notify': 'stream',
   // extension:* 全族（event-adapter.ts setEditorText → session 级 push 型，W06-M1 补录）
   'extension:setEditorText': 'stream',
@@ -384,7 +383,7 @@ function stateTypeKey(message: ServerMessage): string | null {
  * - IMessageBus.publish(sessionId, msg)：**定向**通道——seq/ring/snapshot + 只推订阅该 sid 的连接。
  *   所有 session 级 push 型消息（payload 带 sessionId）的唯一出口。
  * - IMessageBroker.broadcast(msg)：**全局**通道——盲推所有连接，只服务无 sessionId 的全局消息
- *   （config.*、app.info、plugin:statusBar* 等，见 02 文档 D5-1 排除清单）。
+ *   （config.*、app.info、plugin:crashed 等，见 02 文档 D5-1 排除清单）。
  *
  * 消费方（SessionService / MessageDispatcher / PluginService / handlers）依赖本接口而非
  * MessageBus 具体类，与 IMessageBroker 的注入模式对齐。

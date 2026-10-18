@@ -116,10 +116,14 @@
             data-testid="provider-edit-apikey"
           />
           <Button
+            v-if="form.apiKey !== '' || apiKeyRevealable"
             variant="ghost"
             class="size-8 shrink-0 rounded-sm p-0 text-neutral-dim hover:bg-surface-hover hover:text-neutral-fg"
-            :aria-label="showKey ? t('settings.providerEdit.hideKey') : t('settings.providerEdit.showKey')"
-            @click="showKey = !showKey"
+            :aria-label="form.apiKey === '' ? t('settings.providerEdit.readStoredKey') : (showKey ? t('settings.providerEdit.hideKey') : t('settings.providerEdit.showKey'))"
+            data-testid="provider-reveal-apikey"
+            :disabled="revealingApiKey"
+            :aria-busy="revealingApiKey"
+            @click="onToggleKey"
           >
             <EyeOff v-if="showKey" class="size-4" />
             <Eye v-else class="size-4" />
@@ -289,7 +293,9 @@
       </DialogContent>
     </Dialog>
 
-    <!-- sticky save-bar：dirty 时出现（spec §4.3）。负 margin 撑满 expand-body padding。 -->
+    <!-- sticky save-bar：dirty 时出现（spec §4.3）。px-5 与展开体同水平 padding（无负 margin）。
+         吸底生效的前提 = GroupCard overflow: clip（见 GroupCard.vue：hidden 会建立滚动容器，
+         使 sticky 参照卡片自身而失效，保存条会落在展开体末尾、常在视口外）。 -->
     <div
       v-if="isDirty"
       data-testid="provider-save-bar"
@@ -343,7 +349,11 @@ import { useSettingsToast as useToast } from '../injection-keys'
 
 const props = defineProps<{
   provider: ProviderInfo | null
-  /** auth.json 已有该 provider 的 OAuth 凭据（父组件 useProviderOAuth.oauthPresent，展开时刷新） */
+  /**
+   * auth.json 已有该 provider 的 OAuth 凭据。**三态（MF-1-2）**：undefined = 尚未查询/查询失败
+   * （未知），true = 有 OAuth 凭据，false = 已查询且无 OAuth 凭据（父组件 useProviderOAuth
+   * 展开时刷新，按 oauthPresenceStatus 取显式三态）。
+   */
   oauthPresent?: boolean
   /** 该 provider 支持 OAuth 登录（父组件按 builtinProviders 模板 oauthSupported 判定） */
   oauthSupported?: boolean
@@ -362,7 +372,7 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
-const { info: toastInfo } = useToast()
+const { info: toastInfo, error: toastError } = useToast()
 
 // wave4 C4 边界修订（B-2）：catalog provider 的 builtin 条目只读，override 条目开放增删
 // （追加自定义模型是 pi 原生支持的合法操作，见模板区注释）。kind 缺失当作 custom（向后兼容）。
@@ -389,6 +399,9 @@ const {
   draft: form,
   headerRows,
   showKey,
+  revealingApiKey,
+  revealApiKey,
+  apiKeyPendingDraft,
   saving,
   actionError,
   setActionError,
@@ -414,7 +427,7 @@ const quota = quotaFactory?.({
   provider: toRef(props, 'provider'),
   preset: matchedPreset,
   providerOauthPresent: computed(() => props.oauthPresent === true),
-  providerApiKeyDraft: toRef(form, 'apiKey'),
+  providerApiKeyDraft: apiKeyPendingDraft,
 })
 if (quota) provide(QUOTA_CONFIGURE_MODULE_KEY, quota)
 
@@ -427,6 +440,24 @@ const { apiText: catalogApiText, endpointDraft, endpointHint, onEndpointInput, s
 
 /** oauth 形态 → OAuth 状态区；api_key / env_var / ambient → 现有 API Key 输入（现状不动） */
 const isOauthForm = computed(() => form.authMethod === 'oauth')
+
+/**
+ * 可回显的已存 apiKey（SG-7）：apiKeySet 为真且不是 OAuth 形态，且 presence **显式为 false**
+ * （已查询确认 auth.json 无 OAuth 凭据）。
+ * runtime 回显通道对 auth.json 的 OAuth 凭据固定 notRevealable（OAuth token 永不出协议面），
+ * 此时渲染眼睛只会得到必然失败的 available:false 提示；「改用 API Key」尚未保存时 props 仍是
+ * oauth，同样没有可回显的 api_key 凭据。**旧数据无 authMethod 标注**时（auth.json 已有 oauth
+ * 凭据、models.json 无 apiKey ⇒ authMethod=undefined 而 apiKeySet=true）靠 presence 兜底
+ * 判为不可回显。
+ * MF-1-2：presence 未知（undefined = 尚未查询/查询失败）一律不渲染眼睛——异步刷新期间与
+ * 查询失败分支都不得出现「点了必失败」的可点按钮；不能把「未查询」当作「无凭据」。
+ * 用户已输入的草稿仍可点眼睛做显隐（v-if 另一分支）。
+ */
+const apiKeyRevealable = computed(() => (
+  props.provider?.apiKeySet === true
+  && props.provider?.authMethod !== 'oauth'
+  && props.oauthPresent === false
+))
 
 /** 形态切换目标（非 null = 确认弹窗打开） */
 const pendingAuthSwitch = ref<'api_key' | 'oauth' | null>(null)
@@ -481,6 +512,20 @@ provide(MODEL_LIST_DEPS_KEY, {
 
 // dirty 上抛父组件（展开切换守卫）。immediate 让父组件初始即知当前 dirty 态
 watch(isDirty, (v) => emit('dirtyChange', v), { immediate: true })
+
+/**
+ * 眼睛按钮（2026-10-18）：草稿非空 = 纯显隐切换；草稿为空（= 已存 key 未回显）→ 按需拉取回显
+ * （只写入草稿 + 明文显示，不置 dirty、保存不回写——见 provider-edit-form.revealApiKey）。
+ * 回显失败走 toast：保存条仅在 dirty 时渲染，不能把失败文案押在它身上（C-proc-21 可见反馈）。
+ */
+async function onToggleKey(): Promise<void> {
+  if (form.apiKey !== '') {
+    showKey.value = !showKey.value
+    return
+  }
+  const result = await revealApiKey()
+  if (!result.ok) toastError(result.error)
+}
 
 /** 添加模型：捕获 addModel 校验错填到 actionError（save-bar 显示；来源标签 models，MF-1-7） */
 function onAddModel(): void {

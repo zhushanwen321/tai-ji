@@ -1,13 +1,13 @@
 /**
  * Provider 凭据解析唯一通道（D3 收口）——接口见 services/ports/provider-credential-resolver.ts。
  *
- * 源优先级单点声明（三形态共享，见本文件 ProviderCredentialResolver 构造器里的 sources 数组，
+ * 源优先级单点声明（四种读取形态共享，见本文件 ProviderCredentialResolver 构造器里的 sources 数组，
  * 数组顺序即优先级）：
  *   1. auth.json（经 AuthService / AuthStorage 通道，catalog 凭据所在）
  *   2. models.json providers[id].apiKey（custom 凭据所在）
  *
  * 构造无 IO：全部读取懒发生（hasProviderCredential / listCredentialBackedProviderIds /
- * resolveProviderCredential / resolveProviderBaseUrl 被调用时才读盘）——这是组合根装配时序的前提：
+ * resolveProviderCredential / resolveProviderApiKeyRaw / resolveProviderBaseUrl 被调用时才读盘）——这是组合根装配时序的前提：
  * init 注入先于任何 findValidDefaultModel 调用时，装配期触发读取不会有「文件尚未就绪」的时序风险。
  *
  * $ENV_VAR / command 配置值形态（探针 P-cred，设计 §3.6）：
@@ -22,7 +22,7 @@
  *   Bearer 是以畸形凭据打外部 API）。命中即不降级低优先源（显式配置错误不掩盖）。
  */
 import type { IConfigStore } from '../ports/config.js'
-import type { IProviderCredentialResolver, ResolvedProviderCredential, UnsupportedCredentialForm } from '../ports/provider-credential-resolver.js'
+import type { IProviderCredentialResolver, ProviderCredentialKind, ResolvedProviderCredential, UnsupportedCredentialForm } from '../ports/provider-credential-resolver.js'
 import type { AuthService } from './auth-service.js'
 import type { AuthStorage, Credential } from './auth-storage.js'
 import builtinData from '../../generated/builtin-providers.json'
@@ -31,8 +31,8 @@ import builtinData from '../../generated/builtin-providers.json'
 type CredentialSourceId = 'auth.json' | 'models.json'
 
 /**
- * 单个凭据源的三种读取形态。
- * 三形态集中在同一对象上，使「源优先级」只需在 sources 数组里声明一次顺序。
+ * 单个凭据源的四种读取形态。
+ * 四种读取形态集中在同一对象上，使「源优先级」只需在 sources 数组里声明一次顺序。
  */
 interface CredentialSource {
   readonly id: CredentialSourceId
@@ -41,11 +41,17 @@ interface CredentialSource {
   /** 同步批量列出该源的 providerId（实现须单次读盘）。 */
   listIdsSync(): Set<string>
   /**
-   * 异步取生效凭据：{ key } = 明文；{ unsupported } = 条目存在但形态不支持
+   * 异步取生效凭据：{ key, kind } = 明文 + 形态判别；{ unsupported } = 条目存在但形态不支持
    * （对象判别——UnsupportedCredentialForm 若用裸字符串字面量会是 string 子类型，
    * typeof 判别失效，'command' 会被当明文 key 透传）；undefined = 未命中。
    */
-  readKey(providerId: string): Promise<{ key: string } | { unsupported: UnsupportedCredentialForm } | undefined>
+  readKey(providerId: string): Promise<{ key: string; kind: ProviderCredentialKind } | { unsupported: UnsupportedCredentialForm } | undefined>
+  /**
+   * 回显用 api_key 原值（不展开模板、不返回 oauth 的 access）。
+   * undefined = 该源无条目；{ notRevealable } = 该源有凭据但形态不可回显（oauth），
+   * 消费方据此**停止向低优先源回落**（见 resolver 类注释）。
+   */
+  readRawApiKey(providerId: string): Promise<{ key: string } | { notRevealable: true } | undefined>
 }
 
 /**
@@ -139,14 +145,20 @@ function resolveCredentialValue(config: string, env?: Record<string, string>): s
   return resolved === undefined ? { unsupported: 'unresolved-env' } : resolved
 }
 
-/** auth.json 条目 → 生效明文（api_key 走配置值解析；oauth 取 access，pi 对 oauth 不做配置值解析）。 */
-function readAuthCredentialKey(credential: Credential): { key: string } | { unsupported: UnsupportedCredentialForm } | undefined {
+/**
+ * auth.json 条目 → 生效明文 + 凭据形态（api_key 走配置值解析；oauth 取 access，pi 对 oauth
+ * 不做配置值解析）。kind 是凭据域事实：oauth 的 access 是短时 token，消费方（如 zcode provider
+ * 同步）必须据此拒绝把 token 当静态 api-key 复制到外部通道。
+ */
+function readAuthCredentialKey(credential: Credential): { key: string; kind: ProviderCredentialKind } | { unsupported: UnsupportedCredentialForm } | undefined {
   if (credential.type === 'api_key') {
     if (typeof credential.key !== 'string' || credential.key === '') return undefined
     return toReadKeyOutcome(resolveCredentialValue(credential.key, credential.env))
   }
   const access = credential.access
-  return typeof access === 'string' && access !== '' ? { key: access } : undefined
+  // 非 api_key 条目（oauth；auth.json 被外部改写时也可能是未知 type）一律按 'oauth' 处置：
+  // 保守方向 = 宁可 skip 也不把未知形态的 access 当静态 key 下发外部通道（fail-closed）。
+  return typeof access === 'string' && access !== '' ? { key: access, kind: 'oauth' } : undefined
 }
 
 /** models.json apiKey 是否是可用的非空串（'' 是 schema 违规值，等同无凭据）。 */
@@ -189,14 +201,23 @@ function createAuthJsonSource(deps: ProviderCredentialResolverDeps): CredentialS
       const credential = await deps.authService.getCredential(providerId)
       return credential ? readAuthCredentialKey(credential) : undefined
     },
+    readRawApiKey: async (providerId) => {
+      const credential = await deps.authService.getCredential(providerId)
+      if (!credential) return undefined
+      // oauth 条目 = 高优先源存在但不可回显：返回判别结构阻止向低优先源回落（models.json
+      // 的 apiKey 可能是历史残留，回显它会让用户把非生效值当成自己的 key）。
+      if (credential.type !== 'api_key') return { notRevealable: true as const }
+      return typeof credential.key === 'string' && credential.key !== '' ? { key: credential.key } : undefined
+    },
   }
 }
 
-/** 明文串 → readKey 出参形态（{ key } 包装；unsupported 透传）。 */
+/** 明文串 → readKey 出参形态（{ key, kind } 包装；unsupported 透传）。models.json 的 apiKey
+ * 恒为静态密钥（kind='api_key'——oauth token 只可能来自 auth.json）。 */
 function toReadKeyOutcome(
   value: string | { unsupported: UnsupportedCredentialForm },
-): { key: string } | { unsupported: UnsupportedCredentialForm } {
-  return typeof value === 'string' ? { key: value } : value
+): { key: string; kind: ProviderCredentialKind } | { unsupported: UnsupportedCredentialForm } {
+  return typeof value === 'string' ? { key: value, kind: 'api_key' } : value
 }
 
 function createModelsJsonSource(deps: ProviderCredentialResolverDeps): CredentialSource {
@@ -216,12 +237,16 @@ function createModelsJsonSource(deps: ProviderCredentialResolverDeps): Credentia
       const apiKey = deps.configStore.getProviderConfig(providerId)?.apiKey
       return isUsableApiKey(apiKey) ? toReadKeyOutcome(resolveCredentialValue(apiKey)) : undefined
     },
+    readRawApiKey: async (providerId) => {
+      const apiKey = deps.configStore.getProviderConfig(providerId)?.apiKey
+      return isUsableApiKey(apiKey) ? { key: apiKey } : undefined
+    },
   }
 }
 
 export class ProviderCredentialResolver implements IProviderCredentialResolver {
   /**
-   * 源优先级单点声明：数组顺序即解析优先级，async 明文 / sync 布尔 / 批量三形态共用本数组。
+   * 源优先级单点声明：数组顺序即解析优先级，async 明文 / sync 布尔 / 批量 / 回显原值四种读取形态共用本数组。
    * 禁止在别处再写一遍链（这是读路径收口的全部意义）。
    */
   private readonly sources: readonly CredentialSource[]
@@ -257,7 +282,25 @@ export class ProviderCredentialResolver implements IProviderCredentialResolver {
       // 用户以为生效的凭据与实际使用的凭据背离（D 类「显示 A、实际用 B」）。报错让
       // 用户修配置比静默换源诚实。
       if ('unsupported' in outcome) return outcome
-      return { key: outcome.key, source: source.id }
+      return { key: outcome.key, source: source.id, kind: outcome.kind }
+    }
+    return undefined
+  }
+
+  /**
+   * 回显用 api_key 原值（2026-10-18，设置页眼睛按钮）：只取 api_key 形态、不展开配置值。
+   * 源优先级与 resolveProviderCredential 共用 sources 数组（单点声明，不另写一遍链）；
+   * auth.json 的 oauth 条目被 readRawApiKey 结构性跳过（token 永不出协议）。
+   */
+  async resolveProviderApiKeyRaw(
+    providerId: string,
+  ): Promise<{ apiKey: string; source: 'auth.json' | 'models.json' } | undefined> {
+    for (const source of this.sources) {
+      const outcome = await source.readRawApiKey(providerId)
+      if (outcome === undefined) continue
+      // 高优先源是 oauth 形态：不可回显且**不回落**（回落会显示低优先源的历史残留值）
+      if ('notRevealable' in outcome) return undefined
+      return { apiKey: outcome.key, source: source.id }
     }
     return undefined
   }

@@ -12,7 +12,7 @@
  * 前发起的）；registry 侧只读当前 sessionId 目录。他进程任务查不到（回发起 session）。
  */
 
-import type { AgentToolResult, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { AgentToolResult, ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { readOutputTail } from "@zhushanwen/extension-protocol/background-task";
 import { Type } from "typebox";
@@ -22,6 +22,7 @@ import { TAIL_MAX_BYTES, TAIL_MAX_LINES } from "./background/output-tail.ts";
 import { getRegistryPath, readRegistry } from "./background/registry.ts";
 import { getAllTasks } from "./background/task-store.ts";
 import { isTerminalState, type BackgroundTask, type RegistryEntry } from "./background/types.ts";
+import { buildBashOutputSummary, renderBashToolResult } from "./render-result.ts";
 
 const bashOutputSchema = Type.Object({
 	task_id: Type.Optional(Type.String({ description: "Task id returned by the background bash tool. Omit to list all background tasks." })),
@@ -52,8 +53,9 @@ function toListRow(source: BackgroundTask | RegistryEntry) {
 	};
 }
 
-function textResult(text: string): AgentToolResult<unknown> {
-	return { content: [{ type: "text", text }], details: undefined };
+/** 文本 + 收起态摘要（原 details 为 undefined → 统一 { summary }）。 */
+function textResultWithSummary(text: string, summary: string): AgentToolResult<unknown> {
+	return { content: [{ type: "text", text }], details: { summary } };
 }
 
 /**
@@ -128,7 +130,11 @@ export function createBashOutputToolDefinition() {
 			const sessionId = ctx.sessionManager.getSessionId();
 			const registry = readRegistry(getRegistryPath(getAgentDir(), sessionId));
 
-			if (args.task_id === undefined) return textResult(listTasksText(registry));
+			if (args.task_id === undefined) {
+				const text = listTasksText(registry);
+				// 收起态一行摘要：details 由 undefined 改为 { summary }，GUI 收起态与 TUI 折叠态共用
+				return textResultWithSummary(text, buildBashOutputSummary(args, { content: [{ type: "text", text }] }));
+			}
 
 			const task = findTask(args.task_id, registry);
 			if (task === undefined) {
@@ -136,7 +142,12 @@ export function createBashOutputToolDefinition() {
 					`No such task: ${args.task_id}. Use bash_output without task_id to list known background tasks.`,
 				);
 			}
-			return textResult(taskDetailText(task));
+			const text = taskDetailText(task);
+			return textResultWithSummary(text, buildBashOutputSummary(args, { content: [{ type: "text", text }] }));
+		},
+
+		renderResult(result: unknown, options: { expanded: boolean }, theme: Theme) {
+			return renderBashToolResult(result, options, theme);
 		},
 	};
 }

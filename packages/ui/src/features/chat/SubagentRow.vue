@@ -1,3 +1,8 @@
+<!--
+  展示组件 · 子代理行（trace 块 subagent 类型行组件；壳分派链：Block 壳 → ToolRow 三分 → 本组件）。
+  壳根类名契约（.trace-blk）与 data-testid（block-tool-<id>）留在 Block 壳，本组件根 =
+  原 subagent 分支根 div（.trace-subagent + data-testid="subagent-block"），无新 DOM 层。
+-->
 <template>
   <!--
     subagent 块（@zhushanwen/pi-subagent-workflow，重写 fork）—— collapsed only（spec §10 / design D2）。
@@ -9,7 +14,7 @@
   -->
   <div class="trace-subagent" data-testid="subagent-block">
     <div
-      class="flex min-w-0 cursor-pointer select-none items-baseline gap-2 text-[length:var(--text-base)] [font-weight:var(--fw-mid)] text-neutral-dim transition-opacity hover:opacity-80"
+      class="flex min-w-0 cursor-pointer select-none items-baseline gap-2 [font-weight:var(--fw-mid)] text-neutral-dim transition-opacity hover:opacity-80"
       @click="openSubagentDrawer"
     >
       <!-- running 态 loader（呼吸弧 + accent），其余走 users ICON；failed 图标常驻染 danger
@@ -27,12 +32,12 @@
       <!-- agent 名染对话流专属名称色 --name（2026-10-06 裁决）；[MF-1-31]（demo
            TurnList.vue:91 `sa-name mono`）：mono 字族 + tabular-nums（demo .mono 类 =
            font-mono + tabular-nums，workbench.css:8），色 --name / fw-mid（行头继承）/
-           14px 行级档继承不变——此前注释「去 mono」与 demo 源码不符，订正；
+           行字号随 trace 容器定档（Turn.vue .trace 的 text-md = 15px，行主体统一档）；
            slug / model 括注降行层级灰 mono（demo 无对应物，real 保留并登记） -->
       <span class="shrink-0 whitespace-nowrap font-mono text-[color:var(--name)]">{{ subagentAgent }}</span>
       <template v-if="subagentSlug">
         <span class="text-neutral-faint">·</span>
-        <span class="shrink-0 whitespace-nowrap font-mono text-[length:var(--text-sm)] text-neutral-mid">{{ subagentSlug }}</span>
+        <span class="shrink-0 whitespace-nowrap font-mono text-neutral-mid">{{ subagentSlug }}</span>
       </template>
       <template v-if="subagentModel">
         <span class="text-neutral-dim font-mono text-[length:var(--text-xs)]">&nbsp;(</span>

@@ -137,18 +137,15 @@ describe('createUiApi（Worker 侧单一计时权威）', () => {
     }), DEFAULT_UI_REQUEST_TIMEOUT_MS)
   })
 
-  it('notify / updateStatusBarItem 纯展示类不传第三参（维持 client 默认 30s）', () => {
+  it('notify 纯展示类不传第三参（维持 client 默认 30s）', () => {
     const { client, api } = createWorkerApi()
     const requestSpy = vi.spyOn(client, 'request')
 
     void api.notify('info', 'hello')
-    void api.updateStatusBarItem('sb1', 'text')
 
-    expect(requestSpy).toHaveBeenNthCalledWith(1, 'plugin.ui.notify', expect.objectContaining({ pluginId: 'p1' }))
-    expect(requestSpy).toHaveBeenNthCalledWith(2, 'plugin.ui.updateStatusBarItem', expect.anything())
+    expect(requestSpy).toHaveBeenCalledWith('plugin.ui.notify', expect.objectContaining({ pluginId: 'p1' }))
     // 第三参缺省（client 默认 30s），且 params 无 requestId/timeoutMs（不参与语义计时）
     expect((requestSpy.mock.calls[0] as unknown[]).length).toBe(2)
-    expect((requestSpy.mock.calls[1] as unknown[]).length).toBe(2)
   })
 
   it('到期转译：RPC_TIMEOUT → UI_TIMEOUT reject + warn + uiRequestExpired notify', async () => {

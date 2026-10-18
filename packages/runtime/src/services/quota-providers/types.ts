@@ -35,25 +35,6 @@ export function statusToReason(status: number): QuotaFetchFailureReason {
   return 'network'
 }
 
-/**
- * 归一化用户粘贴 cookie 的分隔空白伪影（`k = v ;  k2 = v2` → `k=v; k2=v2`）。
- * 只做空白修剪：键值对内值的引号原样保留（`k="v"` 是浏览器线上传输形态，动了反而破坏鉴权）。
- * 归一化后为空（无任何 k=v 对）返回空串，调用方按 unauthorized 处理。
- */
-export function normalizeCookieHeader(raw: string): string {
-  return raw
-    .split(';')
-    .map((pair) => {
-      const eq = pair.indexOf('=')
-      if (eq < 0) return ''
-      const name = pair.slice(0, eq).trim()
-      const value = pair.slice(eq + 1).trim()
-      return name ? `${name}=${value}` : ''
-    })
-    .filter((pair) => pair !== '')
-    .join('; ')
-}
-
 /** shape guard 公共前置：v 是非 null 对象（各平台 guard 首行统一用）。 */
 export function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null

@@ -2,7 +2,7 @@
  * PanelContainer 底抽屉纵轴布局集成测试（display-containers u-w1-layout：§6.2/§7.3/§5.1）。
  *
  * 被测行为：
- * - S1 形态：底抽屉插在 split 行（对话区+右抽屉）之下、StatusBar 之上，横跨全宽（不在
+ * - S1 形态：底抽屉插在 split 行（对话区+右抽屉）之下，横跨全宽（不在
  *   drawer-area 内）；terminal 搬家后在此挂载（defineAsyncComponent + 内部自动重试接线
  *   〔D6：原 LAZY_RETRY_KEY 占位重试链已删〕，chunk 失败路径归 lazy-retry 测试族）
  * - S2 双容器同开：右抽屉 + 底抽屉同时可见；高度默认 35%；拖上沿调高度（写侧 clamp 15–70 +
@@ -10,7 +10,7 @@
  * - S10 默认 git：首开右抽屉呈现 git tab（terminal 迁出后默认 activeTab 'terminal'→'git'）
  *
  * 三视角：构建者白盒（拖拽数学/写侧 clamp/KV 写穿）、使用者黑盒（开合/双开/拖拽后刷新保持/
- * 矮窗不遮对话流）、观察者形态（DOM 顺序：split 行之下、StatusBar 之上）。
+ * 矮窗不遮对话流）、观察者形态（DOM 顺序：split 行之下）。
  *
  * mock 策略：TerminalView/DetailPane 懒加载 mock 为轻量占位（本文件测布局与高度，chunk 失败
  * 路径归 panel-container-lazy-retry*.test.ts）；壳层依赖 mock 对齐 panel-container-drawer-mode。
@@ -97,10 +97,6 @@ vi.mock('@/components/panel/SubagentTab.vue', () => ({
 }))
 vi.mock('@/components/panel/WorkflowTab.vue', () => ({
   default: { name: 'WorkflowTab', template: '<div />' },
-}))
-// StatusBar mock 带 testid（布局顺序断言面：底抽屉在 status-bar 之前）
-vi.mock('@taiji/ui/extension-host', () => ({
-  StatusBar: { name: 'StatusBar', template: '<div data-testid="status-bar" />' },
 }))
 vi.mock('@/composables/features/file-tree/useGitStatus', () => ({
   GIT_STATUS_KEY: Symbol('git-status'),
@@ -199,8 +195,8 @@ afterEach(() => {
 })
 enableAutoUnmount(afterEach)
 
-describe('底抽屉纵轴布局（S1/S2 形态：split 行之下、StatusBar 之上、全宽）', () => {
-  it('开底抽屉 → terminal 挂载于 split 行之下、StatusBar 之上，且不在 drawer-area 内（全宽）', async () => {
+describe('底抽屉纵轴布局（S1/S2 形态：split 行之下、全宽）', () => {
+  it('开底抽屉 → terminal 挂载于 split 行之下，且不在 drawer-area 内（全宽）', async () => {
     const panel = usePanelStore()
     panel.loadSession(ROOT_PANEL_ID, 'sess-bd')
     const wrapper = await mountContainer()
@@ -212,10 +208,9 @@ describe('底抽屉纵轴布局（S1/S2 形态：split 行之下、StatusBar 之
     expect(terminal.exists()).toBe(true)
     expect(terminal.attributes('data-session-id')).toBe('sess-bd')
 
-    // 纵轴顺序（观察者形态）：split 行 → 底抽屉 → StatusBar
+    // 纵轴顺序（观察者形态）：split 行 → 底抽屉
     const html = wrapper.html()
     expect(html.indexOf('data-testid="split-area"')).toBeLessThan(html.indexOf('data-testid="bottom-drawer"'))
-    expect(html.indexOf('data-testid="bottom-drawer"')).toBeLessThan(html.indexOf('data-testid="status-bar"'))
 
     // 全宽：底抽屉是纵轴池的直接子项（与 split 行同级），不在 drawer-area 里
     const pool = wrapper.find('[data-testid="vertical-pool"]')

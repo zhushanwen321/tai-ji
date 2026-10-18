@@ -5,9 +5,11 @@
  * runtime 以 not_converged 拒绝（错误码 + 恢复动作文案经 marker-channel throw 透出）。
  */
 import { StringEnum } from "@earendil-works/pi-ai";
-import type { ExtensionAPI, ExtensionToolContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionToolContext, Theme } from "@earendil-works/pi-coding-agent";
 import { Type, type Static } from "typebox";
 
+import { renderCanvasToolResult } from "./render.js";
+import { canvasExportSummary } from "./summary.js";
 import { callCanvas } from "./marker-channel.js";
 import { hostGateError, isTaijiGuiHost } from "./host.js";
 
@@ -55,6 +57,9 @@ export function registerCanvasExportTool(
     description: cfg.description,
     promptSnippet: cfg.promptSnippet,
     parameters: cfg.parameters,
+    renderResult(result: unknown, options: { expanded: boolean }, theme: Theme) {
+      return renderCanvasToolResult(result, options, theme);
+    },
     async execute(
       _toolCallId: string,
       params: Static<typeof CanvasExportParams>,
@@ -66,7 +71,10 @@ export function registerCanvasExportTool(
       const request = exportRequestOf(params);
       if ("error" in request) throw request.error;
       const reply = await callCanvas(ctx, "export", request.params);
-      return { content: [{ type: "text" as const, text: JSON.stringify(reply) }], details: undefined };
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify(reply) }],
+        details: { summary: canvasExportSummary(params) },
+      };
     },
   });
 }

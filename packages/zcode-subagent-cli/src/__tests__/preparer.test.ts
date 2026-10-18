@@ -11,6 +11,7 @@ import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  PI_TO_ZCODE_PROVIDER_MAP,
   ZcodePrepareError,
   defaultPersonalProviderConfigPath,
   listZcodeModels,
@@ -583,6 +584,17 @@ describe("resolveZcodeModelRef account 家族直通", () => {
     );
   });
 
+  it("模型段小写再入（幂等产物）→ 大小写不敏感命中并归一到目录原生拼写（2026-10-16 真机回归守卫）", () => {
+    // RemoteEngine 代理侧查表产物 = 目录 provider 段 + 请求方模型段原样（小写）——
+    // 引擎侧 account 直通若精确匹配则再入即炸（真机事故：未知模型 "glm-5.3-flash"）。
+    const catalogPath = writeAccountCatalog("account-idempotent-casing-catalog.json", [
+      { providerId: ACCOUNT_PROVIDER, config: { builtinModelIds: ["GLM-5.3-Flash", "GLM-5.3"] } },
+    ]);
+    expect(resolveZcodeModelRef(`${ACCOUNT_PROVIDER}/glm-5.3-flash`, accountSources(catalogPath))).toBe(
+      `${ACCOUNT_PROVIDER}/GLM-5.3-Flash`,
+    );
+  });
+
   it("builtinModelIds 缺席 → personalModelIds 兜底判清单", () => {
     const catalogPath = writeAccountCatalog("account-personal-ids-catalog.json", [
       { providerId: ACCOUNT_PROVIDER, config: { personalModelIds: ["M2-Plan"] } },
@@ -676,8 +688,8 @@ describe("resolveZcodeModelRef account 家族直通", () => {
   });
 });
 
-// ── 派发期模型 ref 翻译（engine-ref-translation D1，2026-10-14 用户裁决）：
-// zai-coding-cn ↔ account:bigmodel-individual-coding-plan 等价对，其余 1:1 原样。
+// ── 派发期模型 ref 翻译（engine-ref-translation D1，2026-10-14 用户裁决；2026-10-16
+// 二次修订目标家族）：zai-coding-cn ↔ account:bigmodel-individual-coding-plan 等价对，其余 1:1 原样。
 describe("translatePiModelRefToZcode", () => {
   const TARGET = "account:bigmodel-individual-coding-plan";
 
@@ -749,6 +761,32 @@ describe("translatePiModelRefToZcode", () => {
   it("目标清单为空数组 → 请求拼写直传（不设限，交注册表实况裁决）", () => {
     const catalog = catalogWith([]);
     expect(translatePiModelRefToZcode("zai-coding-cn/glm-5.3", { builtinCatalogPath: catalog })).toBe(`${TARGET}/glm-5.3`);
+  });
+
+  it("modelTranslation 对账锁步：manifest 声明表与翻译实现逐键语义一致（2026-10-16 部署形态修复守卫）", async () => {
+    // SSOT = package.json taiji.subagentEngine.modelTranslation（RemoteEngine 代理形态
+    // 的翻译面供数源）；本用例验证实现行为与声明逐键一致——声明漂移/实现漂移任一
+    // 方发生即红（2026-10-16 事故：声明缺失致部署形态翻译面整体静默失效）。
+    const { readFileSync } = await import("node:fs");
+    const { fileURLToPath } = await import("node:url");
+    const pkgPath = fileURLToPath(new URL("../../package.json", import.meta.url));
+    const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as {
+      taiji?: { subagentEngine?: { modelTranslation?: Record<string, string> } };
+    };
+    const declared = pkg.taiji?.subagentEngine?.modelTranslation;
+    expect(declared).toBeDefined();
+    const entries = Object.entries(declared ?? {});
+    expect(entries.length).toBeGreaterThan(0);
+    // 反向锁步：实现表键集合必须与声明键集合双向相等（实现多键 = 代理形态漏供数，
+    // 声明多键 = in-process 形态漏翻译——ADR-0142 部署形态分叉两类都要红）。
+    expect(Object.keys(PI_TO_ZCODE_PROVIDER_MAP).sort()).toEqual(Object.keys(declared ?? {}).sort());
+    // 实现侧行为对账：声明表目录空清单形态下（不设限放行），翻译产物 = 声明目标/原模型段
+    const catalog = catalogWith([]);
+    for (const [piProvider, zcodeProvider] of entries) {
+      expect(
+        translatePiModelRefToZcode(`${piProvider}/some-model`, { builtinCatalogPath: catalog }),
+      ).toBe(`${zcodeProvider}/some-model`);
+    }
   });
 });
 

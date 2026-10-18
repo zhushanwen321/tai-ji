@@ -15,6 +15,7 @@ import {
   parseCapabilities,
   parseEnvPrefixes,
   parseModelCatalog,
+  parseModelTranslation,
   parseProcessModel,
   resolveManifestBin,
 } from "./engine-manifest.ts";
@@ -218,6 +219,12 @@ function buildManifestCliDescriptor(params: {
     },
     manifest: {
       ...(modelCatalog !== undefined ? { modelCatalog } : {}),
+      // [engine-ref-translation D5] 翻译表也进 descriptor.manifest：稳定标识比较
+      // （isStableEquivalentDescriptor）读 manifest 余项——翻译表单改必须使
+      // descriptor 不等价（换新单例），否则旧实例继续跑旧翻译表。
+      ...(manifestSnapshot.modelTranslation !== undefined
+        ? { modelTranslation: manifestSnapshot.modelTranslation }
+        : {}),
       ...(displayName !== undefined ? { displayName } : {}),
       // 进程形态声明同源进 descriptor（读位 = engineProcessModelOfDescriptor → 宿主
       // 实例管理分流：per-window → getEngine 只读代理/窗口实例；shared-service →
@@ -263,6 +270,11 @@ export function inspectEnginePackage(
   //    实现差异与 buildEmptyModelsHint 触发面都会失真）──
   const modelCatalog = parseModelCatalog(id, m["modelCatalog"]);
 
+  // ── modelTranslation（可选；缺省 = undefined = 无翻译面——RemoteEngine 构造器
+  //    据此摘除 translateModelRef 成员；声明表是部署形态翻译面的供数源（RemoteEngine
+  //    快照消费，宿主侧写校验接入时同源读取））──
+  const modelTranslation = parseModelTranslation(id, m["modelTranslation"]);
+
   const displayName = parseOptionalDisplayFields(m, id);
 
   // ── processModel（可选；缺省 = 'per-window'；非法值 warn 回落——§3.3 决策 3）──
@@ -278,6 +290,9 @@ export function inspectEnginePackage(
   const manifestSnapshot: RemoteEngineManifestSnapshot = {
     capabilities: caps,
     ...(modelCatalog !== undefined ? { modelCatalog } : {}),
+    // [engine-ref-translation D5] 翻译表进注册期快照（远程形态 translateModelRef 的
+    // 同步供数源——与 capabilities/modelCatalog 同模式：静态声明读快照，不握手）。
+    ...(modelTranslation !== undefined ? { modelTranslation } : {}),
     // [u5 pi-workflow-run-resource-model] 进程形态声明进注册期快照（registry descriptor
     // 携带 → 网关 processModelOf / getEngine D6 分流的读取源；缺省 undefined =
     // 解析缺省 'per-window'）。

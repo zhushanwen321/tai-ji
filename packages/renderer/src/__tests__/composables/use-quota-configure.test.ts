@@ -768,6 +768,28 @@ describe('configureError i18n（D9）', () => {
     expect(module.view.value.configureError).toBe('T:settings.providerEdit.quotaWorkspaceInvalid')
   })
 
+  it('cookie 无 name=value 对（DevTools 表格粘贴形态）→ 本地拦下：专属文案且不发任何 RPC（2026-10-18）', async () => {
+    const { module } = await mountBaseline('mimo')
+
+    // 制表符/换行分隔，无任何 '=' —— 归一化后为空（与 runtime fetcher 同一函数判据）
+    module.draft.value.cookie = 'auth\toc_fake123\nsession\txyz789'
+    await module.saveAndTest()
+
+    expect(quotaApi.configure).not.toHaveBeenCalled()
+    expect(quotaApi.refreshQuota).not.toHaveBeenCalled()
+    expect(module.view.value.configureError).toBe('T:settings.providerEdit.quotaCookieFormatInvalid')
+  })
+
+  it('cookie 合法（name=value; name=value）→ 通过校验正常发 configure', async () => {
+    const { module } = await mountBaseline('mimo')
+
+    module.draft.value.cookie = 'auth=abc; session=xyz'
+    await module.saveAndTest()
+
+    expect(quotaApi.configure).toHaveBeenCalledTimes(1)
+    expect(lastConfigurePayload().cookie).toBe('auth=abc; session=xyz')
+  })
+
   it('失败文案经注入 t 渲染（i18n 出口来自入参注入，与 provider-edit deps.t 同范式）', async () => {
     vi.mocked(quotaApi.configure).mockResolvedValue({ ok: false, error: '' })
     const { module, t } = await mountBaseline('kimi-coding')

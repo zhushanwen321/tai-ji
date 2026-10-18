@@ -100,7 +100,7 @@ extraResources:
       - "!**/*.map"
       - "!*/*/README.md"
       - "!*/*/ARCHITECTURE.md"
-  # built-in taiji plugins（resources/plugins/<name>，如 statusline）。
+  # built-in taiji plugins（resources/plugins/<name>，如 scheduler-manager）。
   # prepare-builtin-plugins.sh 预编译 index.ts → index.js（与源同目录）；plugin-registry
   # 打包后扫描 <cwd>/resources/plugins（cwd=Resources），故 to 保持 resources/plugins 嵌套。
   # 运行时只消费各插件 package.json（manifest）+ manifest main 指向的 index.js

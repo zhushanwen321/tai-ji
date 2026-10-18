@@ -1,7 +1,9 @@
 import { Static, Type } from 'typebox'
 
+import { formatSchedule } from './format.js'
 import { parseSchedule } from './parsing.js'
 import type { SchedulerService, ServiceResult } from './service.js'
+import type { ScheduleSpec, TaskKind } from './types.js'
 
 // ── schedule tool ──
 
@@ -148,5 +150,75 @@ function toToolResult(result: ServiceResult): {
   return {
     content: [{ type: 'text' as const, text: result.message }],
     details: result.data ?? {},
+  }
+}
+
+// ── 收起态一行摘要（GUI details.summary + TUI 折叠态共用）──
+// summary 是展示面：details 形态漂移（历史 entry）时容错降级，不抛错。
+
+interface ToolResultLike { // oe-exempt:20261017:framework:details 数据形状窄 view（单实现消费，非抽象接口）
+  content: { type: 'text'; text: string }[]
+  details: unknown
+}
+
+function asRecord(v: unknown): Record<string, unknown> {
+  return typeof v === 'object' && v !== null ? (v as Record<string, unknown>) : {}
+}
+
+function strOf(v: unknown): string | undefined {
+  return typeof v === 'string' ? v : undefined
+}
+
+/** ScheduleSpec 运行时窄化（details.task.schedule 经 JSON 往返后仍需 shape 校验）。 */
+function asScheduleSpec(v: unknown): ScheduleSpec | undefined {
+  const spec = asRecord(v)
+  if (spec.mode !== 'interval' && spec.mode !== 'cron') return undefined
+  return spec as ScheduleSpec
+}
+
+/** 给 tool result 的 details 追加 summary（现有字段保留；非对象 details 防御替换）。 */
+export function withScheduleSummary<T extends ToolResultLike>(
+  result: T,
+  summary: string,
+): T {
+  const details = result.details
+  if (details === null || typeof details !== 'object' || Array.isArray(details)) {
+    return { ...result, details: { summary } }
+  }
+  return { ...result, details: { ...details, summary } }
+}
+
+/** schedule（创建）摘要：`Scheduled "<name>" · <schedule>`；取消态与数据缺失时按形态降级。 */
+export function buildScheduleSummary(params: ScheduleParamsT, result: ToolResultLike): string {
+  const details = asRecord(result.details)
+  if (details.cancelled === true) return 'Cancelled'
+  const task = asRecord(details.task)
+  const name = strOf(task.name)
+  if (name === undefined) return 'Scheduled'
+  const spec = asScheduleSpec(task.schedule)
+  const kind = task.kind === 'once' || task.kind === 'recurring' ? (task.kind as TaskKind) : undefined
+  const scheduleText = spec !== undefined ? formatSchedule(spec, kind, 'en-US') : params.schedule
+  return `Scheduled "${name}" · ${scheduleText}`
+}
+
+/** schedule_control 摘要：按 action 分支（toggle 按 enabled 目标态分 Paused/Resumed）。 */
+export function buildScheduleControlSummary(
+  params: ScheduleControlParamsT,
+  result: ToolResultLike,
+): string {
+  const details = asRecord(result.details)
+  switch (params.action) {
+    case 'list':
+      return `Listed ${Array.isArray(details.tasks) ? details.tasks.length : 0} tasks`
+    case 'toggle':
+      if (params.enabled === false) return `Paused task ${params.id ?? ''}`
+      if (params.enabled === true) return `Resumed task ${params.id ?? ''}`
+      return `Toggled task ${params.id ?? ''}`
+    case 'delete':
+      return `Deleted task ${params.id ?? ''}`
+    case 'run':
+      return `Ran task ${params.id ?? ''} now`
+    default:
+      return 'Done'
   }
 }

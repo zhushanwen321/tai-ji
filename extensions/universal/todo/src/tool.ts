@@ -16,6 +16,7 @@ import { type Static, Type } from "typebox";
 
 import {
 	addTodos,
+	buildTodoSummary,
 	formatTodoList,
 	isBlankUpdateText,
 	isValidTodoStatus,
@@ -230,6 +231,8 @@ function executeTodoAction(
 		action: params.action as TodoDetails["action"],
 		todos: [...state.todos],
 		nextId: state.nextId,
+		// 收起态一行摘要（TUI 折叠渲染 + taiji GUI ToolRow 读链同源；buildTodoSummary 纯函数单源）
+		summary: buildTodoSummary(params, state.todos),
 	};
 	// 状态展示不再进 tool result（GUI 渲染字段已移除）：GUI 走 refreshDisplay 的
 	// setWidgetDual 推送（GUI 臂 = guiSetWidget/marker 通道，低层原语不单独调用；渲染终点 =

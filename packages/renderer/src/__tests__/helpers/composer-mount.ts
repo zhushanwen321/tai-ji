@@ -48,7 +48,7 @@
 import { ref } from 'vue'
 import { beforeEach, expect, vi } from 'vitest'
 import { defineComponent } from 'vue'
-import type { Component, Ref } from 'vue'
+import type { Component, ComponentObjectPropsOptions, Ref } from 'vue'
 import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { textToSegments } from '@taiji/shared'
@@ -280,14 +280,13 @@ export function composerSessionStoreModule() {
 const SIMPLE = defineComponent({ name: 'SimpleStub', template: '<div />' })
 
 /** Composer 兄弟子组件空 stub（四文件逐字相同；CommandPopover 需透传 slot）。
- *  ComposerCapacityBar 细条与 ContextCapacityPopover 平铺触发器都带 useContextUsage 恢复腿
- *  （getContext RPC），stub 防止 RPC 依赖泄进 Composer mount 族用例（组件行为归各自组件级测试）。 */
+ *  ContextCapacityPopover 平铺触发器带 useContextUsage 恢复腿（getContext RPC），
+ *  stub 防止 RPC 依赖泄进 Composer mount 族用例（组件行为归各自组件级测试）。 */
 export const composerChildStubs = {
   CommandPopover: defineComponent({ name: 'CommandPopover', template: '<div><slot /></div>' }),
   AddMenuPopover: SIMPLE,
   ContextChipsBar: SIMPLE,
   ContextCapacityPopover: SIMPLE,
-  ComposerCapacityBar: SIMPLE,
   ModelSelectPopover: SIMPLE,
   ThinkingLevelPopover: SIMPLE,
   RetryIndicator: SIMPLE,
@@ -351,7 +350,7 @@ export function makeTypeAndEnter(ComposerInputMock: Component) {
  */
 function buildComposerInputMock(
   extraEmits: Record<string, null> = {},
-  opts: { props?: Record<string, unknown>; extendExpose?: (lastInputText: Ref<string>) => Record<string, unknown> } = {},
+  opts: { props?: ComponentObjectPropsOptions; extendExpose?: (lastInputText: Ref<string>) => Record<string, unknown> } = {},
 ) {
   const lastInputText = ref('')
   const lastSetText = ref<string | null>(null)

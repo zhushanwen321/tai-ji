@@ -125,6 +125,7 @@ function makeResolver(
     hasProviderCredential: (id) => id in outcomes,
     listCredentialBackedProviderIds: () => new Set<string>(Object.keys(outcomes)),
     resolveProviderCredential: async (id) => outcomes[id],
+    resolveProviderApiKeyRaw: async () => undefined,
     resolveProviderBaseUrl: (id) => baseUrls[id],
   }
 }
@@ -434,7 +435,7 @@ describe('providerKeyAvailable 判定（D4 联动检测通道）', () => {
     const deps = makeServiceDeps()
     deps.resolver = makeResolver({
       // minimax 首映射 id 缺席、次映射 id（minimax-cn）命中
-      'minimax-cn': { key: 'sk-mm', source: 'auth.json' },
+      'minimax-cn': { key: 'sk-mm', source: 'auth.json', kind: 'api_key' },
       // mimo 首映射 id 命中 unsupported 形态
       xiaomi: { unsupported: 'command' },
     })
@@ -594,7 +595,7 @@ describe('configure 写路校验（整条拒绝，不落半改状态）', () => 
 describe('configure Key 联动（D4）', () => {
   it("apiKeys 'from-provider'：经 resolver 读明文写 secrets", async () => {
     const deps = makeServiceDeps()
-    deps.resolver = makeResolver({ minimax: { key: 'sk-provider-1', source: 'auth.json' } })
+    deps.resolver = makeResolver({ minimax: { key: 'sk-provider-1', source: 'auth.json', kind: 'api_key' } })
     const svc = makeService(deps)
     const result = await svc.configure({
       providerId: 'minimax',
@@ -628,7 +629,7 @@ describe('configure Key 联动（D4）', () => {
     const deps = makeServiceDeps()
     // 凭据在 xiaomi-token-plan-cn（生产形态）→ 带入命中该 id → 预填其集群地址
     deps.resolver = makeResolver(
-      { 'xiaomi-token-plan-cn': { key: 'sk-1', source: 'auth.json' } },
+      { 'xiaomi-token-plan-cn': { key: 'sk-1', source: 'auth.json', kind: 'api_key' } },
       { 'xiaomi-token-plan-cn': 'https://token-plan-cn.xiaomimimo.com/v1' },
     )
     const svc = makeService(deps)
@@ -646,7 +647,7 @@ describe('configure Key 联动（D4）', () => {
     // 真实 catalog 形态复现：xiaomi（无集群绑定语义）恒有默认集群 catalog 值，凭据实际在
     // xiaomi-token-plan-cn 下——带入与预填必须命中同一 id，选 token plan 集群
     deps.resolver = makeResolver(
-      { 'xiaomi-token-plan-cn': { key: 'sk-plan', source: 'auth.json' } },
+      { 'xiaomi-token-plan-cn': { key: 'sk-plan', source: 'auth.json', kind: 'api_key' } },
       {
         xiaomi: 'https://api.xiaomimimo.com/v1',
         'xiaomi-token-plan-cn': 'https://token-plan-cn.xiaomimimo.com/v1',
@@ -660,7 +661,7 @@ describe('configure Key 联动（D4）', () => {
   it('MiniMax 不联动 baseUrl（默认值保留）', async () => {
     const deps = makeServiceDeps()
     deps.resolver = makeResolver(
-      { minimax: { key: 'sk-1', source: 'auth.json' } },
+      { minimax: { key: 'sk-1', source: 'auth.json', kind: 'api_key' } },
       { minimax: 'https://api.minimax.io/anthropic' },
     )
     const svc = makeService(deps)

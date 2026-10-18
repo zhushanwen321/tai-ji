@@ -5,10 +5,10 @@
  * 包含：tool、hook、storage、notify、session、config、sessionData、ui、agent、workspace。
  */
 
-import type { StatusBarItem, ProviderId } from '@taiji/shared'
+import type { ProviderId } from '@taiji/shared'
 import type { PluginRpcServer } from './plugin-rpc-server.js'
 import type { PluginStorage } from './plugin-storage.js'
-import type { StatusBarItemOptions, IPluginServiceDeps } from './plugin-types.js'
+import type { IPluginServiceDeps } from './plugin-types.js'
 import type { SessionDataStore } from './session-data-store.js'
 import { registerToolRpcHandlers } from './tool-api.js'
 import { registerHookRpcHandlers } from './hook-api.js'
@@ -32,7 +32,6 @@ import type { ToolEntry } from './plugin-types.js'
 const MAX_FIND_FILES_RESULTS = 1000
 /** MAX_FIND_FILES_RESULTS 导出供测试断言上限语义（T10：SUT 改上限时测试同步红）。 */
 export { MAX_FIND_FILES_RESULTS }
-const DEFAULT_STATUS_BAR_PRIORITY = 100
 const MIN_MODEL_PARTS = 2
 
 /**
@@ -76,9 +75,7 @@ export interface RpcSetupContext {
   storage: PluginStorage
   toolRegistry: Map<string, ToolEntry>
   hookRegistry: Map<string, import('./plugin-types.js').HookEntry[]>
-  statusBarItems: Map<string, StatusBarItem>
   deps: IPluginServiceDeps
-  broadcastStatusBarItems: () => void
   handleUiRequest: (method: string, params: Record<string, unknown>, pluginId: string) => Promise<unknown>
   /**
    * UI 请求到期取消（timeout-plugin-service D2）：Worker 侧语义 timer 到期后经
@@ -123,7 +120,7 @@ interface PluginServiceLike {
 }
 
 export function registerAllRpcMethods(ctx: RpcSetupContext): void {
-  const { rpcServer, storage, toolRegistry, hookRegistry, statusBarItems, deps } = ctx
+  const { rpcServer, storage, toolRegistry, hookRegistry, deps } = ctx
 
   // S3-W4：每插件 notify 令牌桶——plugin.notify 与 plugin.ui.notify 两入口共享
   // 同一实例（同一插件的配额跨入口合并计费），默认 20 条/s（shared SSOT）。
@@ -258,26 +255,6 @@ export function registerAllRpcMethods(ctx: RpcSetupContext): void {
       if (!broadcastPluginNotification(deps.broadcastFn, pluginId, level, message)) {
         console.warn('[plugin-rpc-setup] ui-api notify dropped: no broadcastFn configured')
       }
-    },
-    updateStatusBarItem: async (pluginId: string, id: string, text: string, options?: StatusBarItemOptions) => {
-      const itemKey = `${pluginId}:${id}`
-      // Empty text = remove item
-      if (text === '') {
-        statusBarItems.delete(itemKey)
-      } else {
-        const item: StatusBarItem = {
-          id,
-          pluginId,
-          text,
-          tooltip: options?.tooltip,
-          commandId: options?.commandId,
-          priority: options?.priority ?? DEFAULT_STATUS_BAR_PRIORITY,
-          scope: options?.scope ?? 'global',
-          sessionId: options?.sessionId,
-        }
-        statusBarItems.set(itemKey, item)
-      }
-      ctx.broadcastStatusBarItems()
     },
   })
 

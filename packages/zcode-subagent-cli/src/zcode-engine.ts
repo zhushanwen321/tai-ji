@@ -879,7 +879,7 @@ export class ZcodeEngine implements EnginePort {
   /**
    * [engine-ref-translation D1] 派发期模型 ref 翻译（EnginePort 可选成员实装）：
    * pi 词汇 ref → zcode 原生 ref（zai-coding-cn/* → account:bigmodel-individual-*
-   * 大小写归一，2026-10-14 用户裁决），其余透传。编排层在 record stamp 前调用——
+   * 大小写归一，2026-10-16 用户裁决（证据驱动修正目标家族）），其余透传。编排层在 record stamp 前调用——
    * record/上报面呈现实际发给引擎的 ref；翻译失败抛错 = 显式失败（不静默回落）。
    * 幂等：翻译产物（account:/个人 id）再入恒等，引擎内 resolveZcodeModelRef 的
    * 同名翻译分支零冲突。

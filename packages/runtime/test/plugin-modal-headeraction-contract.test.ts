@@ -78,7 +78,6 @@ function minimalUiHandlers() {
     showConfirm: vi.fn(),
     showInput: vi.fn(),
     notify: vi.fn(),
-    updateStatusBarItem: vi.fn(),
   }
 }
 
@@ -368,7 +367,7 @@ describe('B-F2：广播出线未接线/广播被丢弃时不假成功（ui-api h
 describe('B-F2/B-F4：真实 PluginService 装配链（registerRpcMethods；deps 缺 broadcastFn 与 sessionService）', () => {
   /**
    * 生产装配全链（registerRpcMethods → registerAllRpcMethods → wireRuntimeUiExits），
-   * deps 刻意缺 broadcastFn / sessionService——装配缺陷的等价构造（statusline 全链
+   * deps 刻意缺 broadcastFn / sessionService——装配缺陷的等价构造（插件全链
    * 测试 harness 的缺省面变体）。configDir 落 tmp（fs-guard 白名单域）。
    */
   function buildBareWiredRpc(): { rpc: PluginRpcServer; port: ReturnType<typeof createMockPort> } {

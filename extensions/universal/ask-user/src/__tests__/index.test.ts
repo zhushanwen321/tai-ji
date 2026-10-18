@@ -9,7 +9,7 @@ import { mockTui, stubTheme } from "./fixtures";
 // ── Types for the registered tool ───────────────────────
 type TestMode = "tui" | "rpc" | "json" | "print";
 
-interface RegisteredTool {
+interface RegisteredTool { // oe-exempt:20261017:test:测试 harness 契约——断言面引用其字段类型，非抽象接口
 	name: string;
 	label: string;
 	parameters: unknown;
@@ -506,6 +506,76 @@ describe("renderCall / renderResult (FR-9)", () => {
 		// 选中的 Postgres 用 ●，未选的 SQLite 用 ○
 		expect(text).toContain("●");
 		expect(text).toContain("○");
+	});
+
+	// ── 折叠态一行摘要（details.summary 约定，见 extension-conventions.md）──
+
+	it("I-21: renderResult collapsed + details.summary → 单行摘要，不渲染答案 Box", () => {
+		const tool = getTool();
+		const node = tool.renderResult(
+			{
+				details: {
+					questions: [{ question: "Which database?", options: [{ label: "Postgres" }] }],
+					answers: { "Which database?": { selected: ["Postgres"], other: null } },
+					cancelled: false,
+					summary: "Asked 1 question: Which database?",
+				},
+			},
+			{ expanded: false },
+			stubTheme,
+		) as unknown as { render(width: number): string[] };
+		const text = renderText(node);
+		expect(text).toContain("Asked 1 question: Which database?");
+		// 折叠态不渲染答案 Box（答案列表只在展开态）
+		expect(text).not.toContain("Postgres");
+	});
+
+	it("I-21b: renderResult collapsed + details 无 summary（历史 entry）→ 落回原 Box 渲染", () => {
+		const tool = getTool();
+		const node = tool.renderResult(
+			{
+				details: {
+					questions: [{ question: "Q", header: "H", options: [{ label: "A" }] }],
+					answers: { Q: { selected: ["A"], other: null } },
+					cancelled: false,
+				},
+			},
+			{ expanded: false },
+			stubTheme,
+		) as unknown as { render(width: number): string[] };
+		const text = renderText(node);
+		expect(text).toContain("✓");
+		expect(text).toContain("H:");
+	});
+
+	it("I-12b: execute 正常返回 → details 携带收起态 summary（单问无 header 用 question）", async () => {
+		const tool = getTool();
+		const fakeResult = {
+			questions: [{ question: "Which DB?", options: [{ label: "Postgres" }] }],
+			answers: { "Which DB?": { selected: ["Postgres"], other: null } },
+			cancelled: false,
+		};
+		const result = await tool.execute(
+			"id",
+			validSingle,
+			undefined,
+			undefined,
+			makeCtx({ customResult: fakeResult }),
+		);
+		expect(result.details.summary).toBe("Asked 1 question: Which DB?");
+	});
+
+	it("I-14b: execute cancelled → details 同样携带 summary（「问过了」是事实）", async () => {
+		const tool = getTool();
+		const result = await tool.execute(
+			"id",
+			validSingle,
+			undefined,
+			undefined,
+			makeCtx({ customResult: null }),
+		);
+		expect(result.details.cancelled).toBe(true);
+		expect(result.details.summary).toBe("Asked 1 question: Which DB?");
 	});
 });
 

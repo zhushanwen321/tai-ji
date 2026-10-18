@@ -212,3 +212,56 @@ describe('pi-scheduler SDK contract', () => {
     expect(cleanup).toHaveBeenCalledTimes(2)
   })
 })
+
+// ── execute 组装 details.summary（withScheduleSummary 包装线回归防线）──
+// 纯函数（buildScheduleSummary / buildScheduleControlSummary）已被 summary.test.ts 直测；
+// 本组护的是 index.ts execute 内的两处组装线（schedule → withScheduleSummary(result,
+// buildScheduleSummary(...))；schedule_control → buildScheduleControlSummary 同款）——
+// 组装行丢失时 details.summary 缺失，GUI 收起态与 TUI 折叠态双双退化为原始 JSON，此处红。
+
+/** execute 返回的 details 形状（组装线断言面：summary 恒为 string）。 */
+interface SummaryDetails {
+  summary: unknown
+}
+
+describe('execute 组装 details.summary（withScheduleSummary 包装线）', () => {
+  /** 装配 → 触发 session_start，返回捕获的两 tool 与事件表。调用方 finally 里 fire session_shutdown 停 tick timer。 */
+  async function setupWithSession(): Promise<{
+    tools: CapturedTool[]
+    events: Map<string, (...args: unknown[]) => void>
+    fakeCtx: ExtensionContext
+  }> {
+    const { pi, tools, events } = createMockPi()
+    schedulerExtension(pi)
+    const fakeCtx = createFakeCtx()
+    await events.get('session_start')!({ type: 'session_start', reason: 'startup' }, fakeCtx)
+    return { tools, events, fakeCtx }
+  }
+
+  it('schedule 创建 → details.summary = Scheduled "<name>" · every 5m（index.ts schedule 包装线）', async () => {
+    const { tools, events, fakeCtx } = await setupWithSession()
+    try {
+      const tool = tools.find(t => t.name === 'schedule')!
+      const result = await tool.execute('call-sum-1', { prompt: 'check build', schedule: '5m' }, undefined, undefined, fakeCtx)
+      // 期望文案锚点：summary.test.ts 直测口径（interval 规格化 every 5m + en-US）
+      expect((result.details as SummaryDetails).summary).toBe('Scheduled "check build" · every 5m')
+    } finally {
+      await events.get('session_shutdown')?.()
+    }
+  })
+
+  it('schedule_control list → details.summary = Listed N tasks（index.ts schedule_control 包装线）', async () => {
+    const { tools, events, fakeCtx } = await setupWithSession()
+    try {
+      // 先建 1 个任务，list 计数才有非零区分度
+      const scheduleTool = tools.find(t => t.name === 'schedule')!
+      await scheduleTool.execute('call-sum-2', { prompt: 'standup', schedule: '5m' }, undefined, undefined, fakeCtx)
+
+      const controlTool = tools.find(t => t.name === 'schedule_control')!
+      const result = await controlTool.execute('call-sum-3', { action: 'list' }, undefined, undefined, fakeCtx)
+      expect((result.details as SummaryDetails).summary).toBe('Listed 1 tasks')
+    } finally {
+      await events.get('session_shutdown')?.()
+    }
+  })
+})

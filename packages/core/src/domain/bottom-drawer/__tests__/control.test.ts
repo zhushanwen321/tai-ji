@@ -86,7 +86,7 @@ describe('协调函数（§7.1 openBottomDrawer / closeBottomDrawer / toggleBott
     expect(isOpen.value).toBe(false)
   })
 
-  it('toggle：关→开、开→关（⌃` 与 StatusBar 终端按钮的统一落点语义）', () => {
+  it('toggle：关→开、开→关（⌃` 与顶栏终端按钮的统一落点语义）', () => {
     focusSession('A')
     const { isOpen } = useBottomDrawerControl()
     toggleBottomDrawer()

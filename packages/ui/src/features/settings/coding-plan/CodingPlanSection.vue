@@ -403,6 +403,9 @@ const failMessage = computed(() => {
       : t('settings.providerEdit.quotaFetchFailNoSubscription')
   }
   if (failure.kind === 'parse') return t('settings.providerEdit.quotaFetchFailParse')
+  // cookie-invalid-format（2026-10-18）：粘贴内容归一化为空（无 name=value 对）——与
+  // 「凭证已失效」分流，指引正确的复制路径（DevTools → Network 请求头），不误报重新登录。
+  if (failure.kind === 'cookie-invalid-format') return t('settings.providerEdit.quotaFetchFailCookieInvalidFormat')
   // not-configured（D1-3，timeout-audit-hygiene-batch）：必填 workspace 缺失——指引去配置，
   // 而非检查凭证（病根在配置缺失，凭证指引会把用户带偏）
   if (failure.kind === 'not-configured') return t('settings.providerEdit.quotaFetchFailNotConfigured')

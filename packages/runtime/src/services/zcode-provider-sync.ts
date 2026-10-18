@@ -6,9 +6,9 @@
  * pi 映射条目、providerOrder 仅含 pi 追加序；真实条目的合并在读取时由 wrapper fs
  * 拦截 merge 完成，本模块只负责生成侧）。
  *
- * [engine-ref-translation]（2026-10-14 用户裁决）：pi 的 zai-coding-cn（智谱 GLM
- * coding plan 通道）不再映射条目进 zcode——它与 zcode 的
- * account:bigmodel-individual-coding-plan 是同一通道的两个名字，等价由派发期翻译
+ * [engine-ref-translation]（2026-10-14 用户裁决；2026-10-16 ADR-0142 修订映射目标）：
+ * pi 的 zai-coding-cn（智谱 GLM coding plan 通道）不再映射条目进 zcode——它与 zcode
+ * 的 account:bigmodel-individual-coding-plan 是同一通道的两个名字，等价由派发期翻译
  * 承载（zcode-subagent-cli preparer translatePiModelRefToZcode，经
  * EnginePort.translateModelRef 接线）；GLM plan 凭据完全归 zcode 账号体系，零 key
  * 注入。其余 provider 1:1 完全原样映射（id/模型清单直传）。ADR-0132 的 zai 关联
@@ -23,11 +23,14 @@
  *
  * 凭据读取红线（C-proc-14）：pi 侧凭据只经 ProviderCredentialResolver 单通道，
  * 禁止自建解析链（守卫 scripts/check-provider-credential-reads.mjs）。
+ * 凭据形态红线（MF-2）：只有静态 api-key（resolver `kind === 'api_key'`）可映射为副本条目；
+ * auth.json 的 oauth 条目（短时 access token，pi 侧自动 refresh）一律 skip=oauth-credential
+ * ——复制到 zcode 只会 401，且在副本里残留明文 token（退出登录后仍在）。
  * 跨包红线：runtime 不 import zcode-subagent-cli——zcode-builtin.json 定位逻辑与
  * preparer.ts locateZcodeBuiltinCatalog 同源复制（本文件 locateZcodeBuiltinCatalogSync，
  * 语义对齐 preparer.ts:246-294；漂移防线 = u2b 侧对账）。
  */
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import type { ProviderConfigView, ModelsConfigView } from '../infra/pi/pi-provider-store.js'
@@ -84,6 +87,7 @@ export interface ProviderSyncSkip { // oe-exempt:20261012:framework:映射链形
   readonly rule:
     | 'no-credential' // ① 凭据不可得
     | 'unsupported-credential' // ① 凭据形态不支持（command / unresolved-env）
+    | 'oauth-credential' // ① 凭据形态为 oauth（短时 access token，不可当静态 api-key 复制）
     | 'provider-disabled' // ② provider 级禁用（enabled:false 或白名单禁用）
     | 'no-base-url' // ③ baseUrl 三链全空
     | 'no-supported-api' // ④ 生效协议无 zcode 对应
@@ -115,12 +119,19 @@ const ZCODE_API_TYPE_MAP: Readonly<Record<string, string>> = {
 
 /**
  * pi GLM plan 通道（翻译通道，不进通用映射）：zai-coding-cn 与 zcode 的
- * account:bigmodel-individual-coding-plan 是同一通道的两个名字，等价由派发期翻译
+ * account:bigmodel-individual-coding-plan 是同一通道的两个名字（ADR-0142 修订映射目标），
+ * 等价由派发期翻译
  * 承载（zcode-subagent-cli preparer translatePiModelRefToZcode）；在 zcode 造同义
  * 条目、注入 pi 侧 key 均属退役形态（ADR-0132 zai 关联条目 + 2026-10-13 key 来源
  * 修订，均已删除）。pi 侧 `zai`（国际 API-key provider）按 1:1 通用映射直传。
+ * 零写死原则：本集合是全链唯一的 provider id 写死点之外仅有的例外登记（与
+ * preparer PI_TO_ZCODE_PROVIDER_MAP 对应），其余任何 provider 禁止出现在代码中。
+ * 机器防线（ADR-0142「代码表 + manifest 声明 + 同步 skip 集合三处同源」第三腿）：
+ * 本集合与 zcode 包 manifest modelTranslation 声明键集合的锁步由对账单测绑定
+ * （__tests__ 按数据文件路径读包 manifest——runtime 禁 import 引擎包；代码表↔manifest
+ * 腿已由 preparer.test.ts 锁步用例承载）。
  */
-const TRANSLATION_CHANNEL_PROVIDER_IDS = ['zai-coding-cn'] as const
+export const TRANSLATION_CHANNEL_PROVIDER_IDS = ['zai-coding-cn'] as const
 
 // ── 依赖注入面 ─────────────────────────────────────────────────
 
@@ -135,10 +146,13 @@ export interface ZcodeProviderSyncPaths { // oe-exempt:20261012:framework:映射
 
 export interface ZcodeProviderSyncDeps { // oe-exempt:20261012:framework:映射链形态/ports 契约,单实现常态(类型契约先行)
   readonly configStore: Pick<IConfigStore, 'readModels' | 'getEnabledModels'>
-  /** pi 凭据唯一通道（C-proc-14）：明文解析（async）+ provider 级 baseUrl 两级解析。 */
+  /** pi 凭据唯一通道（C-proc-14）：明文解析（async）+ provider 级 baseUrl 两级解析 +
+   *  凭据两源（auth.json/models.json）id 并集枚举（同步候选集的第二源供数——catalog 型
+   *  provider 的 key 在 auth.json、models 在 catalog 快照，models.json 无条目；缺此源
+   *  则这类 provider 永不进同步候选，透传翻译对它们失效〔2026-10-16 真机事故根因〕）。 */
   readonly credentialResolver: Pick<
     IProviderCredentialResolver,
-    'resolveProviderCredential' | 'resolveProviderBaseUrl'
+    'resolveProviderCredential' | 'resolveProviderBaseUrl' | 'listCredentialBackedProviderIds'
   >
   readonly paths: ZcodeProviderSyncPaths
   /** models.json 损坏降级态判定（D7①：真抛错或损坏态 → 中止保留产物）。 */
@@ -295,7 +309,7 @@ function mapSingleProviderToZcodeRule(
       skip: {
         providerId: id,
         rule: 'translation-channel',
-        detail: 'pi GLM plan 通道不映射条目——与 zcode account:bigmodel-individual-coding-plan 的等价由派发期翻译承载（2026-10-14 用户裁决）',
+        detail: 'pi GLM plan 通道不映射条目——与 zcode account:bigmodel-individual-coding-plan 的等价由派发期翻译承载（ADR-0142）',
       },
     }
   }
@@ -307,6 +321,12 @@ function mapSingleProviderToZcodeRule(
   }
   if ('unsupported' in cred) {
     return { skip: { providerId: id, rule: 'unsupported-credential', detail: `凭据形态不支持（${cred.unsupported}），不做 api-key 映射，请修正 pi 侧凭据配置` } }
+  }
+  // ① 凭据形态为 oauth → 不映射。oauth access 是短时 token（pi 侧自动 refresh），zcode
+  // 无法用它做静态 api-key 鉴权：复制过去只会得到 401，且副本里残留明文 token（退出登录
+  // 后仍留在副本）。凭据域事实来自 resolver 的 kind 判别，不做 provider id 分支（零写死）。
+  if (cred.kind === 'oauth') {
+    return { skip: { providerId: id, rule: 'oauth-credential', detail: '凭据类型为 oauth（短时 access token，非静态 api-key），不做 api-key 映射——zcode 侧请使用其自有账号/订阅登录' } }
   }
 
   // ② provider 级禁用（models.json enabled:false 遗留形态 + enabledModels 白名单派生）→ 整条跳过
@@ -494,6 +514,15 @@ const SEMVER_SEGMENTS = 3
 const COPY_JSON_INDENT = 2
 
 /**
+ * 副本文件权限 = 0600（MF-1-3）：副本含明文 provider apiKey（`access.apiKey`），
+ * 禁 group/other 读——对齐同族凭据文件（auth.json / tts-*-apikey.txt / remote-access.json）。
+ */
+const SYNCED_COPY_MODE = 0o600
+
+/** 权限位掩码：stat.mode 高位含文件类型，只比较低 9 位权限位。 */
+const PERMISSION_BITS = 0o777
+
+/**
  * 内建 provider 目录定位：ZCODE_BUILTIN_PROVIDER_CONFIG_FILE env > `~/.zcode/v2/runtime/provider`
  * 平台目录 × semver 最大 × endpoint-* 扫描（语义同源复制自 zcode-subagent-cli preparer.ts
  * locateZcodeBuiltinCatalog:246-294——runtime 不 import 该包；漂移由 u2b 对账锁步）。
@@ -670,7 +699,8 @@ function removeStaleCopyOrOutcome(
   return { status: 'skipped-empty', copyPath: deps.paths.syncedCopyPath, ruleCount: 0, skips: payload.skips }
 }
 
-/** 落盘步：幂等 = 同字节跳写 + tmp+rename 原子替换（任何失败经 abort 保留上次产物）。 */
+/** 落盘步：幂等 = 同字节跳写 + tmp+rename 原子替换（任何失败经 abort 保留上次产物）；
+ * 权限 = 0600（副本含明文 apiKey，同字节跳写路径对存量低权限副本做 chmod 自愈）。 */
 function writeSyncedCopy(
   deps: ZcodeProviderSyncDeps,
   payload: SyncedCopyPayload,
@@ -690,9 +720,14 @@ function writeSyncedCopy(
     // 首次落盘时可能不存在（engines/zcode/），此处补建
     mkdirSync(dirname(deps.paths.syncedCopyPath), { recursive: true })
     if (existsSync(deps.paths.syncedCopyPath) && readFileSync(deps.paths.syncedCopyPath, 'utf-8') === text) {
+      // 权限自愈：本策略落地前写出的副本是 umask 默认（实测 0644，明文 apiKey 世界可读），
+      // 同字节跳写不会重写文件、atomicWrite 的 mode 也只在新建 tmp 时生效——故在此显式对齐。
+      if ((statSync(deps.paths.syncedCopyPath).mode & PERMISSION_BITS) !== SYNCED_COPY_MODE) {
+        chmodSync(deps.paths.syncedCopyPath, SYNCED_COPY_MODE)
+      }
       return { status: 'written', copyPath: deps.paths.syncedCopyPath, ruleCount: payload.rules.length, skips: payload.skips }
     }
-    atomicWrite(deps.paths.syncedCopyPath, text)
+    atomicWrite(deps.paths.syncedCopyPath, text, undefined, SYNCED_COPY_MODE)
   } catch (err) {
     return abort(`副本落盘失败：${err instanceof Error ? err.message : String(err)}`)
   }
@@ -722,11 +757,29 @@ export async function syncZcodeProviders(deps: ZcodeProviderSyncDeps): Promise<Z
 
   checkV2ConfigForSync(deps, warn)
 
-  const credentials = await resolveCredentialsForSync(deps, models.providers)
+  // 候选集 = models.json 条目 ∪ 凭据两源 id 并集（auth.json 型 catalog provider：
+  // key 在 auth.json、models/baseUrl 在 catalog 快照，models.json 无条目）。合成最小
+  // 视图（空 cfg：enabled 缺省 true、models 空 → catalog 供数、baseUrl 走 resolver
+  // 两级回退）。零写死原则：并集是数据驱动，无任何 provider id 分支。
+  // 注：并集含 oauth 型 auth.json 条目 → 映射链按 resolver 的 kind 判别 skip=oauth-credential
+  // （候选入集只为登记「为何不同步」，短时 token 永不落盘——MF-2）。
+  const credentialBackedIds = deps.credentialResolver.listCredentialBackedProviderIds()
+  const providers: Record<string, ProviderConfigView> = { ...models.providers }
+  for (const id of credentialBackedIds) {
+    // own-property 判定（不用 `in`）：auth.json 里名为 toString/constructor 的 provider id
+    // 会命中 Object.prototype 继承键而被误判「已在 models.json」→ 该 provider 永不进候选（SUG-3）。
+    // 赋值经 defineProperty 而非 `providers[id] = {}`：id='__proto__' 时后者会触发
+    // Object.prototype 的 setter（只改原型、不建自有属性）→ 该 provider 从枚举中消失（SUG-17）。
+    if (!Object.hasOwn(providers, id)) {
+      Object.defineProperty(providers, id, { value: {}, enumerable: true, configurable: true, writable: true })
+    }
+  }
+
+  const credentials = await resolveCredentialsForSync(deps, providers)
 
   const enabledModels = deps.configStore.getEnabledModels()
   const mapping = mapPiProvidersToZcodeRules({
-    providers: models.providers,
+    providers,
     credentials,
     providerBaseUrlOf: id => deps.credentialResolver.resolveProviderBaseUrl(id),
     catalogModelsOf: id => catalogViewToModelSources(deps.getMergedCatalogModels(id)),

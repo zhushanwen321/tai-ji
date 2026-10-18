@@ -18,10 +18,12 @@
  * 两变体的描述文本均被 prompt-quality.test.ts 文本断言锁定。
  */
 
+import type { Theme } from "@earendil-works/pi-coding-agent";
 import { isRecord } from "@zhushanwen/pi-ext-guards";
 import { Type } from "typebox";
 
 import { executeStructuredOutput, isObjectRootSchema } from "./execute.js";
+import { renderStructuredOutputResult } from "./render-result.js";
 import {
 	assertJsonSchemaRoot,
 	echo,
@@ -163,6 +165,12 @@ export function createWorkflowToolDefinition(envSchema: string) {
 			// 「根是否 object」对称完成（与注册期包装判定同一函数 isObjectRootSchema）。
 			return executeStructuredOutput({ data: params, authoritativeSchema: schema });
 		},
+
+		// 摘要不进 details：details 是模型的结构化产出本体（workflow 引擎 extractParsedOutput
+		// 原样消费），折叠态摘要 = render-result 的固定文案。
+		renderResult(result: unknown, options: { expanded: boolean }, theme: Theme) {
+			return renderStructuredOutputResult(result, options, theme);
+		},
 	};
 }
 
@@ -239,6 +247,11 @@ export function createDailyToolDefinition() {
 					? { ...params, authoritativeSchema }
 					: params,
 			);
+		},
+
+		// 摘要不进 details：同 workflow 变体（details = 数据本体，parsedOutput 契约）
+		renderResult(result: unknown, options: { expanded: boolean }, theme: Theme) {
+			return renderStructuredOutputResult(result, options, theme);
 		},
 	};
 }

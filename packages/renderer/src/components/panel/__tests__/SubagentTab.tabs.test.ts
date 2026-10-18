@@ -4,7 +4,7 @@
  * SubagentTab 二级 tab 编排测试（subagent-detail-tabs 2026-10-15）。
  *
  * 断言用户可见行为（三视角·使用者黑盒）：
- * - 单 tab：tab 条不渲染（与单选历史形态无视觉差异）；
+ * - tab 条恒渲染（2026-10-17 用户裁决）：单 tab/空态不隐藏，布局稳定不跳变；
  * - 多 tab：选中态入口依次开 tab（保留不互相替换），tab 条渲染、激活者高亮；
  * - tab 点击 = 切激活 + 同步 core 选中态（openSubagent 通道，sidebar 高亮/LRU 豁免
  *   谓词同源一致）；
@@ -109,7 +109,7 @@ vi.mock('vue-i18n', () => ({
 import SubagentTab from '../SubagentTab.vue'
 import { useSubagentStore } from '@/stores/subagent'
 
-/** store 通道关闭（单 tab 无 UI 入口的最后一步；测试内调用——需 active pinia）。 */
+/** store 通道关闭（不经编排层——验证空态渲染路径；测试内调用——需 active pinia）。 */
 function closeViaStore(sessionId: string, vid: string): void {
   useSubagentStore().closeDrawerTab(sessionId, vid)
 }
@@ -140,9 +140,15 @@ beforeEach(() => {
 })
 
 describe('SubagentTab 二级 tab 编排（subagent-detail-tabs）', () => {
-  it('单 tab：tab 条不渲染（与单选历史形态无差异），详情正常渲染', async () => {
+  it('单 tab：tab 条恒渲染（单条目即激活者，仍带 × 关闭入口），详情正常渲染', async () => {
     const wrapper = mountTab()
     await select('subagent:main-1:sa-1')
+    const strip = wrapper.find('[data-testid="drawer-subagent-tab-strip"]')
+    expect(strip.exists()).toBe(true)
+    const tabs = wrapper.findAll('[data-testid="drawer-subagent-tab-item"]')
+    expect(tabs).toHaveLength(1)
+    expect(tabs[0]!.attributes('data-active')).toBe('true')
+    expect(tabs[0]!.find('[data-testid="drawer-subagent-tab-close"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="message-stream-stub"]').exists()).toBe(true)
   })
 
@@ -187,7 +193,7 @@ describe('SubagentTab 二级 tab 编排（subagent-detail-tabs）', () => {
     expect(tabs).toHaveLength(2)
     expect(tabs[1]!.attributes('data-active')).toBe('true')
     expect(drawerState.selectedSubagentId.value).toBe('subagent:main-1:sa-3')
-    // 关闭非激活者（sa-1）→ 剩 sa-3 单 tab（条隐藏，无 UI 入口）
+    // 关闭非激活者（sa-1）→ 剩 sa-3 单 tab（条恒渲染，单条目仍可 × 关闭）
     await tabs[0]!.find('[data-testid="drawer-subagent-tab-close"]').trigger('click')
     await nextTick()
     await nextTick()
@@ -201,7 +207,7 @@ describe('SubagentTab 二级 tab 编排（subagent-detail-tabs）', () => {
   })
 
   it('关空清选中态（MF-3）：最后一个 tab 关闭后 core 选中态同步清空，重选同一 vid 重开 tab', async () => {
-    // 单 tab 无 UI 关闭入口（tab 条 >1 才渲染）——经编排 composable 直驱同一 close 通道。
+    // 经编排 composable 直驱 close 通道（与 tab 条 × 按钮同一通道）。
     const stopStream = vi.fn()
     const { useSubagentDrawerTabs } = await import('@/composables/panel/useSubagentDrawerTabs')
     const tabsApi = useSubagentDrawerTabs({

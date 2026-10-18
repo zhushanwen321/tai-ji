@@ -6,7 +6,7 @@
  * - D1 中央分发表：handler 的 handles 清单 + Map spread → O(N→M) 路由映射（亮点，勿动）。
  * - setServices：四阶段编排（assignServices → createBroker → assembleHandlers → buildRoutes），
  *   装配全部 message handler 并注入各 handler 的 context（messaging + 领域依赖）。
- * - extension timeout / statusSetUpdate 投递的对外委托入口（event-adapter 经 index.ts 调用）。
+ * - extension timeout 的对外委托入口（event-adapter 经 index.ts 调用）。
  *
  * 业务逻辑在 services，经 handler 调用；本类不含领域计算，只做路由与编排。
  */
@@ -87,6 +87,13 @@ import { warnOnce } from '../utils/warn-once.js'
  */
 export interface RuntimeServerOptionalServices {
   extension?: IExtensionService
+  /** provider 变更后的 zcode 镜像同步（write-through，ADR-0142 镜像架构）：settings 域
+   *  provider 变更成功后由 provider-message-handler 调用；组合根经
+   *  createZcodeProviderMirrorSync 接 runZcodeProviderStartupSync（与启动同步同源同实现
+   *  ——同一判定链，镜像天然对账）。缺省 undefined = 不镜像。
+   *  命名说明（有意不统一）：本键是装配面服务名，按引擎镜像职责命名（zcode 专属）；
+   *  handler ctx 侧同义字段为 providersMutatedSync，按触发语义命名（不绑引擎实现）。 */
+  zcodeProviderMirrorSync?: () => Promise<void>
   plugin?: IPluginService
   git?: GitService
   file?: FileService
@@ -185,6 +192,7 @@ export class RuntimeServer implements IMessageBroker {
   private handoffService?: HandoffService
   /** W4：skillRegistry（可选，landing 全局/项目 skill 缓存源） */
   private skillRegistry?: SkillRegistry
+  private zcodeProviderMirrorSync?: () => Promise<void>
   /** 导入 pi 会话服务（import-session U2）：可选，setServices 注入后经 sessionHandler ctx 触达。 */
   private importService?: ImportService
   /** 生成指标服务（composer-gen-stats u3）：可选，setServices 注入后经 sessionHandler ctx 触达。 */
@@ -295,7 +303,8 @@ export class RuntimeServer implements IMessageBroker {
   private assignServices(session: ISessionService, config: IConfigService, model: IModelService, optional: RuntimeServerOptionalServices): void {
     // genStats（composer-gen-stats D4）：恢复腿 RPC 路由依赖（sessionHandler ctx 读
     // this.genStatsService）；其余可选服务由 assembleOptionalHandlers 按域自行解构。
-    const { extension, plugin, git, file, skillRegistry, handoff, importService, genStats } = optional
+    const { extension, plugin, git, file, skillRegistry, handoff, importService, genStats, zcodeProviderMirrorSync } = optional
+    this.zcodeProviderMirrorSync = zcodeProviderMirrorSync
     this.gitService = git
     this.fileService = file
     this.handoffService = handoff
@@ -409,6 +418,9 @@ export class RuntimeServer implements IMessageBroker {
       nextPushId: () => this.broker.nextPushId(),
       broadcast: (msg) => this.broker.broadcast(msg),
       broadcastProviderList: () => this.broker.broadcastProviderList(),
+      providersMutatedSync: this.zcodeProviderMirrorSync
+        ? () => this.zcodeProviderMirrorSync!()
+        : undefined,
       broadcastSkillList: () => this.broker.broadcastSkillList(),
       broadcastSkillCacheInvalidated: (scope: SkillCacheScope, cwd?: string, partial?: boolean) => this.broker.broadcastSkillCacheInvalidated(scope, cwd, partial),
       broadcastAgentList: () => this.broker.broadcastAgentList(),
@@ -790,18 +802,6 @@ export class RuntimeServer implements IMessageBroker {
    */
   getPendingUiRequests(sessionId: string): PendingUIRequest[] {
     return this.extensionTimeoutMgr.getPendingRequests(sessionId)
-  }
-
-  /**
-   * statusSetUpdate 投递挂点（pi1-disposition-chat-flow D7② 挂点迁移 + 断链修复）：
-   * pi setStatus stdout 事件（event-adapter status-set → interpreter 路由）直达 pluginService
-   * 的插件事件投递方法——原 BridgeHandler.handleStatusSetUpdate 中转随 bridge 退役删除。
-   * 断链修复落点 = 分发侧：新投递点按泛型 'onPiEvent' 键派发（与 hook-api 注册面泛型键
-   * 形状对齐，事件名在载荷 event 字段），修复「注册键 'onPiEvent' vs 分发键原始事件名」
-   * 的既有错位（audit §4.2）。
-   */
-  handleStatusSetUpdate(payload: { sessionId: string; key: string; text: string; textRaw?: string }): void {
-    this.pluginService?.notifyPiEvent?.('plugin:statusSetUpdate', payload, payload.sessionId)
   }
 
   /**

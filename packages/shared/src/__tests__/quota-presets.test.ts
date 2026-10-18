@@ -2,8 +2,8 @@ import { describe, it, expect } from 'vitest'
 import { matchQuotaPreset, QUOTA_PRESETS } from '../quota-presets'
 
 describe('QUOTA_PRESETS', () => {
-  it('有 5 个预设', () => {
-    expect(QUOTA_PRESETS).toHaveLength(5)
+  it('有 6 个预设', () => {
+    expect(QUOTA_PRESETS).toHaveLength(6)
   })
 
   it('每个预设都有必需字段', () => {
@@ -50,6 +50,23 @@ describe('matchQuotaPreset', () => {
   it('name 匹配 opencode', () => {
     const result = matchQuotaPreset({ name: 'opencode' })
     expect(result?.fetcher).toBe('opencode-go')
+  })
+
+  it('baseUrl 匹配 opendesign（open-design.ai 域）', () => {
+    const result = matchQuotaPreset({ baseUrl: 'https://amr-link.open-design.ai/v1' })
+    expect(result?.fetcher).toBe('opendesign')
+  })
+
+  it('name 匹配 opendesign（不区分大小写）', () => {
+    const result = matchQuotaPreset({ name: 'OpenDesign' })
+    expect(result?.fetcher).toBe('opendesign')
+  })
+
+  it('opendesign preset 声明 cookie 认证 + requiresWorkspace（资源维度）', () => {
+    const preset = QUOTA_PRESETS.find((p) => p.fetcher === 'opendesign')
+    expect(preset).toBeDefined()
+    expect(preset?.auth).toEqual(['cookie'])
+    expect(preset?.requiresWorkspace).toBe(true)
   })
 
   it('无匹配返回 undefined', () => {

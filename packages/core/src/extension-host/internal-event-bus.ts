@@ -2,7 +2,7 @@
  * internal-event-bus.ts —— InternalEventBus（IF2/TC4）。
  *
  * core 内建轻量同步 typed emitter：MessageBusBridge 是 plugin 系与 extension 系消息的唯一 emitter，
- * 消费端（StatusBarController/ViewHostStore/OverlayLifecycle 等）on 订阅，emit 后 handler 同步立即执行。
+ * 消费端（ViewHostStore/OverlayLifecycle 等）on 订阅，emit 后 handler 同步立即执行。
  *
  * 契约（IF2）：
  * - typed：消费端 on(kind, handler) 编译期类型安全（无 any 断言）

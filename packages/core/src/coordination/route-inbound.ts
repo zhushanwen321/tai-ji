@@ -265,7 +265,7 @@ function dispatchGlobalRouted(
  * handle 函数」的表达力缺陷由此消除）。
  *
  * type 分隔符与 runtime wire 实际格式一致（shared/protocol.ts ServerMessageType）：
- * extension:widget/widgetGui/status/notify 用冒号；extension.dialog 用**点号**
+ * extension:widget/widgetGui/notify 用冒号；extension.dialog 用**点号**
  * （pi1-disposition-chat-flow D6 起 dialog 族取代原 extension.ui_request，runtime
  * event-adapter 实发 'extension.dialog'，与 protocol.ts + MessageBusBridge
  * EXTENSION_HANDLERS 同源）。
@@ -360,10 +360,9 @@ export const ROUTE_TABLE: Record<string, RouteTableEntry> = {
     },
   },
 
-  // ── crossSession-only 骨架条目（原 CROSS_SESSION_TYPES 白名单 8 type，ADR-0060 决策1）──
+  // ── crossSession-only 骨架条目（原 CROSS_SESSION_TYPES 白名单，ADR-0060 决策1）──
   'extension:widget': { crossSession: true },
   'extension:widgetGui': { crossSession: true },
-  'extension:status': { crossSession: true },
   'extension:notify': { crossSession: true },
   'extension.dialog': { crossSession: true }, // 点号：runtime wire 实际格式（见 ROUTE_TABLE 注释）
   // P2-2 失效链（D-recheck2-1）：非 respond 终结（abort turn / 退出 plan / 回收 / session

@@ -92,7 +92,6 @@ describe('plugin-sdk freeze 运行时侧（AC12 后半：runtime api 对象冻�
         showConfirm: async () => false,
         showInput: async () => undefined,
         notify: async () => undefined,
-        updateStatusBarItem: async () => undefined,
         updateHeaderAction: async () => ({ updated: true }),
       },
       agent: {

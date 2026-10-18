@@ -11,8 +11,32 @@ describe('gen-builtin-providers', () => {
   // models: Object.values(TYPESAFE_CLASSIFIER_MODELS) 拍平为空数组），modelCount === 0 是实装事实。
   const ZERO_MODEL_PROVIDERS = new Set(['typesafe'])
 
-  it('t1: 生成 42 个内置 provider（pi-ai 1.0.0 catalog）', () => {
-    expect(providers).toHaveLength(42)
+  // pi-ai 1.0.0 catalog 42 个 + taiji 附加段（gen 脚本 TAIJI_EXTRA_PROVIDERS，当前仅 opendesign）
+  const CATALOG_PROVIDER_COUNT = 42
+  const EXTRA_PROVIDER_IDS = ['opendesign']
+
+  it('t1: 生成 43 个内置 provider（pi-ai 1.0.0 catalog 42 + taiji 附加段）', () => {
+    expect(providers).toHaveLength(CATALOG_PROVIDER_COUNT + EXTRA_PROVIDER_IDS.length)
+  })
+
+  it('t1b: taiji 附加段 provider 在册且不在 pi-ai catalog（id 唯一性由 t6 覆盖）', () => {
+    for (const id of EXTRA_PROVIDER_IDS) {
+      const p = providers.find((e) => e.id === id)
+      expect(p, `taiji 附加 provider ${id} 应在生成输出中`).toBeDefined()
+      expect(p.models.length, `${id} 模板模型应非空`).toBeGreaterThan(0)
+      // 附加段与 pi catalog 的分界：不在 pi-ai 原始 catalog 里（镜像表孤儿检查不适用）
+      expect(p.authMode).toBe('api_key')
+    }
+    const opendesign = providers.find((e) => e.id === 'opendesign')
+    // thinking 声明只登记真机核实的模型（deepseek-v4.1-flash 实测）：未核实模型必须是非思考形态
+    const verified = opendesign.models.find((m) => m.id === 'deepseek-v4.1-flash')
+    expect(verified.reasoning).toBe(true)
+    expect(verified.compat.thinkingFormat).toBe('deepseek')
+    const unverified = opendesign.models.filter((m) => m.id !== 'deepseek-v4.1-flash')
+    for (const m of unverified) {
+      expect(m.reasoning, `${m.id} 未核实 thinking 前必须 reasoning:false`).toBe(false)
+      expect(m.compat, `${m.id} 未核实 thinking 前必须 compat:null`).toBeNull()
+    }
   })
 
   it('t2: openai envVars 含 OPENAI_API_KEY 且 authMode===both（1.0.0 起新增 oauth）', () => {
@@ -60,8 +84,8 @@ describe('gen-builtin-providers', () => {
   it('t7: 非 ambient provider 中 models 非空（排除 google-vertex/amazon-bedrock，typesafe 豁免）', () => {
     const ambient = new Set(['google-vertex', 'amazon-bedrock'])
     const nonAmbient = providers.filter((p) => !ambient.has(p.id))
-    // 42 - 2 ambient = 40 个，除实装空目录的 typesafe 外每个 modelCount > 0
-    expect(nonAmbient).toHaveLength(40)
+    // 42 - 2 ambient + 1 taiji 附加（opendesign）= 41 个，除实装空目录的 typesafe 外每个 modelCount > 0
+    expect(nonAmbient).toHaveLength(CATALOG_PROVIDER_COUNT - ambient.size + EXTRA_PROVIDER_IDS.length)
     for (const p of nonAmbient) {
       if (ZERO_MODEL_PROVIDERS.has(p.id)) {
         expect(p.modelCount, `${p.id} modelCount 应为 0（实装空目录）`).toBe(0)

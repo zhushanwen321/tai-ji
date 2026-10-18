@@ -36,7 +36,7 @@
 ┌─ Runtime 进程 ─────────────────────────────┐
 │  PluginService                             │
 │    ├── Trusted Worker Thread（共享）        │
-│    │     ├── statusline (内置)              │
+│    │     ├── scheduler-manager (内置)       │
 │    │     ├── todo (内置)                    │
 │    │     └── ... (其他内置插件)              │
 │    └── Sandbox fork 子进程（外部插件独占）   │
@@ -204,27 +204,9 @@ export async function activate(context: PluginContext): Promise<void> {
 
 用于与前端 UI 交互。
 
-#### updateStatusBarItem
+#### updateHeaderAction
 
-在应用底部状态栏添加或更新状态项。
-
-```typescript
-api.ui.updateStatusBarItem(
-  id: string,           // 状态项唯一 ID
-  text: string,         // 显示文本
-  options?: StatusBarItemOptions
-): Promise<void>
-```
-
-**StatusBarItemOptions 参数：**
-
-| 参数 | 类型 | 说明 |
-|------|------|------|
-| `tooltip` | `string?` | 鼠标悬停时显示的提示文字 |
-| `commandId` | `string?` | 点击时触发的命令 ID |
-| `priority` | `number?` | 排序优先级，数字越小越靠前 |
-| `scope` | `'per-session' \| 'global'?` | 作用域：`per-session` 绑定特定 session，`global` 全局显示 |
-| `sessionId` | `string?` | 当 `scope: 'per-session'` 时，关联的 session ID |
+更新 headerAction 点位的可变字段（badge/tooltip/disabled/hidden，sessionId 必填）。
 
 #### showMessage / notify
 
@@ -268,7 +250,6 @@ api.hooks.onPiEvent(
 |--------|---------|
 | `session_start` | Session 开始 |
 | `session_end` | Session 结束 |
-| `plugin:statusSetUpdate` | pi extension 设置状态（statusline 场景） |
 | `agent_start` | Agent 开始生成 |
 | `agent_end` | Agent 完成生成 |
 
@@ -388,132 +369,10 @@ api.config.set(key: string, value: unknown): Promise<void>
 
 ---
 
-## 4. 案例走读：Statusline Plugin
+## 4. 案例走读
 
-以 `resources/plugins/statusline/` 为完整案例，讲解一个内置插件的实现。
+完整可运行的内置插件案例见 `resources/plugins/scheduler-manager/`（headerAction 入口 + overlay 树内容供给 + 命令通路，trusted 权限面收敛为 `sessions.readState` 单权限）。
 
-### 4.1 功能说明
-
-Statusline 插件监听 pi extension 通过 `plugin:statusSetUpdate` 事件发送的状态更新，将状态数据映射到 taiji 的状态栏系统。例如，pi 的 goal/todo/workflow 状态会实时显示在 taiji 底部状态栏中。
-
-### 4.2 Manifest 解析
-
-```json
-{
-  "name": "statusline",
-  "version": "0.1.0",
-  "displayName": "Statusline",
-  "description": "Bridges pi extension setStatus events to taiji status bar system",
-  "taijiPlugin": {
-    "manifestVersion": 1,
-    "main": "index.js",
-    "activationEvents": ["onStartupFinished"],    // ① 启动后自动激活
-    "trustLevel": "trusted",
-    "source": "built-in",
-    "permissions": ["hooks.onPiEvent"]             // ② 只需监听 pi 事件权限
-  }
-}
-```
-
-**要点：**
-- ① `onStartupFinished`：应用启动后立即激活，确保在 pi 事件到来之前就已就绪
-- ② `permissions: ["hooks.onPiEvent"]`：只声明最小权限——监听 pi 事件
-
-### 4.3 数据映射设计
-
-插件使用 `Record<string, StatusKeyMetadata>` 查找表，将 pi 的 status key 映射到状态栏所需的元数据：
-
-```typescript
-interface StatusKeyMetadata {
-  priority: number                    // 排序优先级（数字越小越靠前）
-  tooltip?: string                    // 悬停提示
-  scope: 'per-session' | 'global'     // 作用域
-}
-
-const KEY_METADATA_MAP: Record<string, StatusKeyMetadata> = {
-  goal:     { priority: 10, tooltip: 'Goal task progress', scope: 'per-session' },
-  todo:     { priority: 20, tooltip: 'Todo list progress', scope: 'per-session' },
-  workflow: { priority: 15, tooltip: 'Workflow status',    scope: 'per-session' },
-  preset:   { priority: 30, tooltip: 'Active preset',      scope: 'global' },
-  ssh:      { priority: 40, tooltip: 'SSH connection',     scope: 'global' },
-  model:    { priority: 50, tooltip: 'Current model',      scope: 'global' },
-}
-
-// 未知 key 的默认元数据
-const DEFAULT_METADATA: StatusKeyMetadata = {
-  priority: 100,
-  tooltip: undefined,
-  scope: 'global',
-}
-```
-
-### 4.4 事件处理与状态更新
-
-完整的 activate 函数：
-
-```typescript
-export async function activate(context: PluginContext): Promise<void> {
-  const { api } = context
-
-  // ① 监听 pi 事件
-  const disposable = await api.hooks.onPiEvent(
-    'plugin:statusSetUpdate',
-    async (_eventName: string, data: unknown) => {
-      // ② 类型断言：桥接事件的数据结构
-      const bridgeData = data as BridgeEventData
-      const { sessionId, key, text } = bridgeData.data
-
-      // ③ 空 text 表示清除该状态项 — 跳过
-      if (text === '') return
-
-      // ④ 从查找表获取元数据（未知 key 使用默认值）
-      const meta = KEY_METADATA_MAP[key] ?? DEFAULT_METADATA
-
-      // ⑤ 更新状态栏
-      await api.ui.updateStatusBarItem(
-        `pi-${key}`,        // ID 带前缀，避免与其他插件冲突
-        text,
-        {
-          tooltip: meta.tooltip,
-          priority: meta.priority,
-          scope: meta.scope,
-          // per-session 项需传入 sessionId
-          sessionId: meta.scope === 'per-session' ? sessionId : undefined,
-        },
-      )
-    },
-  )
-
-  // ⑥ 推入 subscriptions，停用时自动清理
-  context.subscriptions.push(disposable)
-}
-```
-
-**逐步解析：**
-
-| 步骤 | 说明 |
-|------|------|
-| ① | 通过 `api.hooks.onPiEvent` 监听 `plugin:statusSetUpdate` 事件。pi extension 调用 `setStatus()` 时会触发此事件 |
-| ② | 桥接事件的数据结构是 `BridgeEventData`，包含 `eventName`、`data`（含 `sessionId`/`key`/`text`）和 `sessionId` |
-| ③ | pi 用空字符串 `""` 表示清除某个状态。此时直接 `return`，不调用 `updateStatusBarItem` |
-| ④ | 从预定义的查找表中获取优先级、tooltip、作用域等元数据。未知 key 走 `DEFAULT_METADATA` |
-| ⑤ | 调用 `updateStatusBarItem` 更新状态栏。ID 使用 `pi-` 前缀避免与其他插件冲突 |
-| ⑥ | 将返回的 `Disposable` 推入 `context.subscriptions`，插件停用时自动解除监听 |
-
-### 4.5 事件数据流
-
-```
-pi extension 调用 ctx.ui.setStatus(key, text)
-  │
-  ├─ Sidecar 桥接层转发为 plugin:statusSetUpdate 事件
-  │
-  ├─ Statusline 插件的 onPiEvent handler 收到事件
-  │    └─ 解析 key、text、sessionId
-  │    └─ 查找 KEY_METADATA_MAP 获取元数据
-  │
-  └─ 调用 api.ui.updateStatusBarItem()
-       └─ RPC → Sidecar → WS → 前端 StatusBar 组件更新
-```
 
 ---
 
@@ -544,29 +403,7 @@ const meta = KEY_METADATA_MAP[key] ?? DEFAULT_METADATA
 
 查找表可读性高、易扩展、O(1) 查找，且数据与逻辑分离。
 
-### 5.2 空 text 表示清除状态
-
-状态栏的约定：`text === ''` 代表清除该状态项。不要发送空字符串给 `updateStatusBarItem`：
-
-```typescript
-if (text === '') return  // 直接跳过，不调用 updateStatusBarItem
-```
-
-如果需要显式清除某个状态项，应设计独立的 `removeStatusBarItem` 逻辑或使用特殊标记值。
-
-### 5.3 ID 前缀避免冲突
-
-所有状态栏 item 的 ID 应带插件专属前缀，防止与其他插件冲突：
-
-```typescript
-// ✅ 使用 'pi-' 前缀
-await api.ui.updateStatusBarItem(`pi-${key}`, text, options)
-
-// ❌ 裸 key，可能与 todo 插件的 'goal' 冲突
-await api.ui.updateStatusBarItem(key, text, options)
-```
-
-### 5.4 始终将 Disposable 推入 subscriptions
+### 5.2 始终将 Disposable 推入 subscriptions
 
 所有注册操作（hooks、tools、事件监听等）返回的 `Disposable` 都应推入 `context.subscriptions`，确保插件停用时资源被正确清理：
 
@@ -580,7 +417,7 @@ const disposable = await api.hooks.onPiEvent('session_start', handler)
 // 忘记 push...
 ```
 
-### 5.5 错误处理
+### 5.3 错误处理
 
 插件的 `activate` 函数和所有回调应妥善处理错误，避免未捕获异常导致 Worker 崩溃：
 
@@ -589,14 +426,13 @@ export async function activate(context: PluginContext): Promise<void> {
   const { api } = context
 
   const disposable = await api.hooks.onPiEvent(
-    'plugin:statusSetUpdate',
+    'session_start',
     async (_eventName: string, data: unknown) => {
       try {
-        const bridgeData = data as BridgeEventData
         // ... 业务逻辑
       } catch (err) {
         // 降级处理：记录日志，不中断其他事件处理
-        console.error(`[statusline] Error handling event:`, err)
+        console.error(`[my-plugin] Error handling event:`, err)
       }
     },
   )
@@ -605,7 +441,7 @@ export async function activate(context: PluginContext): Promise<void> {
 }
 ```
 
-### 5.6 类型安全
+### 5.4 类型安全
 
 利用 TypeScript 的类型系统，定义事件 payload 的接口，避免 `as` 断言散落各处：
 
@@ -627,7 +463,7 @@ interface BridgeEventData {
 const bridgeData = data as BridgeEventData
 ```
 
-### 5.7 权限最小化
+### 5.5 权限最小化
 
 即使是内置 trusted 插件，也建议在 `permissions` 中声明实际需要的权限。这不仅是一种文档化手段，也为将来权限收紧时提供兼容性：
 
@@ -637,7 +473,7 @@ const bridgeData = data as BridgeEventData
 }
 ```
 
-### 5.8 模块化组织
+### 5.6 模块化组织
 
 当插件逻辑较复杂时，将代码拆分到 `src/` 目录下，保持 `index.ts` 作为精简的入口：
 
@@ -702,7 +538,6 @@ interface PluginStateStorage {
 
 | 模块 | 方法 | 返回 |
 |------|------|------|
-| `api.ui` | `updateStatusBarItem(id, text, options?)` | `Promise<void>` |
 | `api.ui` | `showSelect(title, options)` | `Promise<string \| undefined>` |
 | `api.ui` | `showConfirm(title, message)` | `Promise<boolean>` |
 | `api.ui` | `showInput(title, defaultValue?)` | `Promise<string \| undefined>` |

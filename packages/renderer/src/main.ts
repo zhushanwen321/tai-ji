@@ -55,7 +55,7 @@ const app = createApp(App)
 // → electronAPI.reportRendererLog → main 落盘 renderer-error-<date>.log（E3 教训：崩溃前零日志）。
 // 必须在 mount 前安装（覆盖启动期错误）；自身零抛错，见 boot/error-reporter.ts。
 installRendererErrorReporting(app)
-// ExtensionHost bridge 装配（audit §12.1）：WS plugin:* 消息 → bus → ViewHostStore/StatusBarController →
+// ExtensionHost bridge 装配（audit §12.1）：WS plugin:* 消息 → bus → ViewHostStore →
 // app.provide 注入 ui 组件数据源。须在 mount 前（provide 全局生效）。
 initExtensionHostBridge(app)
 // permissionRequest 闭环（audit §12.1）：订阅 bus plugin-permission-request → 驱动 Dialog →

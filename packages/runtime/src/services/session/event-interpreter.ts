@@ -7,7 +7,7 @@
  *      （W18 采集异步化：diffChain 串行链 + turnGen 代际 + turnFinalizing 压制，03 D3-3）
  *   3. context 事件失效（sessionService.applyContextUpdate——W12 起只做 usage 实例失效，
  *      context.update 广播由快照应用后的挂钩发布）
- *   4. status/extension-ui 路由到 server（注册超时）
+ *   4. extension-ui 路由到 server（注册超时）
  *   5. subagent/workflow record 失效信号（W18 D4：entry_appended 主信号 + bg-notify/
  *      workflow-result/tool-call-end 兜底信号 → onRecordEntriesInvalidated——事件直写
  *      退役，数据写路径唯一 = journal 投影重算（sessionService 派生缓存是投影快照镜像））
@@ -36,7 +36,7 @@
  * [R-09] turn-start 不再采 baseline——diffSnapshots 输出只依赖 current（死参数已删）。
  *
  * 依赖经构造注入：send（WS 帧）、fileChangeDiff（port，git 纯函数经组合根注入）、
- * 各业务回调（executeHooks / contextUpdate / thinkingLevel / status/extension-ui 路由）。
+ * 各业务回调（executeHooks / contextUpdate / thinkingLevel / extension-ui 路由）。
  */
 import type { ServerMessage, ServerMessageType } from '@taiji/shared'
 import type { FileChange } from '@taiji/shared'
@@ -401,8 +401,6 @@ export interface EventInterpreterOptions {
    * 组合根注入 server.handleCanvasRequest。
    */
   onCanvasRequest?: (requestId: string, sessionId: string, action: CanvasMarkerAction | '__malformed__', params: Record<string, unknown>) => void
-  /** extension setStatus（路由到 statusline builtin 插件，status-bar-registry 广播）。组合根注入 server.handleStatusSetUpdate。 */
-  onStatusSetUpdate?: (payload: { sessionId: string; key: string; text: string; textRaw?: string }) => void
   /**
    * pi 卡死 abort 回调（ADR-0047 ping 探测机制）。
    *
@@ -530,8 +528,6 @@ const HANDLED_EVENT_KINDS: Record<PiTranslatedEvent['kind'], true> = {
   'turn-usage': true,
   'llm-request-start': true,
   'llm-first-output': true,
-  'status-set': true,
-  'status-broadcast': true,
   'extension-ui': true,
   'session-manager-ui': true,
   'canvas-ui': true,
@@ -626,7 +622,7 @@ export class EventInterpreter {
   /**
    * 消费一批翻译事件，逐个编排。
    *
-   * 同步执行（不 await 单个 handle）：message/status/turn-* 等纯转发/回写事件同步送出，
+   * 同步执行（不 await 单个 handle）：message/turn-* 等纯转发/回写事件同步送出，
    * 使 WS 帧在事件循环同一微任务内可见（前端/测试无需等 flush）。
    * 仅 tool-call-start/end 的 hook 改写是异步的 —— 由各自 handler 内部 await hook 后再 send，
    * 不阻塞本循环（同一 pi-event 不会同时产出 tool-call 与其他需保序的事件）。
@@ -717,7 +713,7 @@ export class EventInterpreter {
    * - 本函数：结构编排 case（tool-call 异步 handler / compaction 终态）+ 余量分流；
    * - handleConversationEvent：对话内容流帧（message / subagent-stream / record 失效）；
    * - handleTurnLifecycleEvent：turn 生命周期（turn-start/end/usage + settled + trace）；
-   * - handleRoutingEvent：server 路由回调（status/extension/session-manager）；
+   * - handleRoutingEvent：server 路由回调（extension/session-manager）；
    * - handleMetaEvent：元数据与观测 hook 回调（thinking/renamed/hook）。
    * 五段合计覆盖与原单一 switch 的 case 集合逐一对应，命中语义与分发顺序不变。
    */
@@ -941,12 +937,6 @@ export class EventInterpreter {
   /** server 路由回调事件的编排（原 handle 同名 case 逐字迁移）。命中返回 true。 */
   private handleRoutingEvent(ev: PiTranslatedEvent): boolean {
     switch (ev.kind) {
-      case 'status-set':
-        this.opts.onStatusSetUpdate?.({ sessionId: this.sessionId, key: ev.key, text: ev.text, textRaw: ev.textRaw })
-        return true
-      case 'status-broadcast':
-        this.opts.send(ev.message)
-        return true
       case 'session-manager-ui':
         // fire-and-forget（不 await），由 SessionManagerHandler 异步处理并回写 response，
         // 不走前端 UI 超时流程。

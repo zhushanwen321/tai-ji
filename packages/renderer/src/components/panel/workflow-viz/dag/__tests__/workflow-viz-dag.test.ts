@@ -70,6 +70,19 @@ describe('WorkflowVizDag 画布（黑盒 DOM）', () => {
     expect(wrapper.find('[data-testid="wfvz-dag-edge-e-loop"]').exists()).toBe(true)
   })
 
+  it('边带方向箭头：marker 定义存在，每条边 path 挂 marker-end（流向 = 目标锚点）', () => {
+    const wrapper = mountDag()
+    const marker = wrapper.find('[data-testid="wfvz-dag-arrow-def"]')
+    expect(marker.exists()).toBe(true)
+    // context-stroke 继承各边 kind 描边色（箭头颜色随边色，不另设 4 份 marker）
+    expect(marker.find('path').attributes('fill')).toBe('context-stroke')
+    for (const id of ['e-seq', 'e-cond', 'e-loop']) {
+      expect(wrapper.find(`[data-testid="wfvz-dag-edge-${id}"]`).attributes('marker-end')).toBe(
+        'url(#wfvz-dag-arrow)',
+      )
+    }
+  })
+
   it('六态点亮：nodeStates 映射到节点 data-state（观察者形态）', () => {
     const nodeStates: Record<string, WorkflowVizDagNodeStatus> = {
       'n-gate': 'done',
@@ -86,6 +99,12 @@ describe('WorkflowVizDag 画布（黑盒 DOM）', () => {
     const wrapper = mountDag(sampleDag(), { nodeStates: { 'n-gate': 'done' } })
     expect(wrapper.find('[data-testid="wfvz-dag-node-n-gate"]').attributes('data-state')).toBe('done')
     expect(wrapper.find('[data-testid="wfvz-dag-node-n-biz"]').attributes('data-state')).toBe('pending')
+  })
+
+  it('pending 节点卡片有中性描边（卡片 fill 与分区背景同为 surface，缺描边即隐形）', () => {
+    const wrapper = mountDag(sampleDag(), { nodeStates: { 'n-gate': 'done' } })
+    const rect = wrapper.find('[data-testid="wfvz-dag-node-n-biz"] rect')
+    expect(rect.classes()).toContain('stroke-[var(--neutral-dim)]')
   })
 
   it('当前 phase 分区高亮：activePhase 命中分区 data-active（观察者形态）', () => {

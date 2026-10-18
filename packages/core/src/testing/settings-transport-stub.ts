@@ -88,6 +88,7 @@ export function makeSettingsTransportStub(overrides: SettingsTransportStubOverri
     discoverModels: vi.fn(async () => ({ success: true, models: [] })),
     hasOAuth: vi.fn(async () => false),
     checkEnvVars: vi.fn(async () => ({})),
+    revealProviderApiKey: vi.fn(async () => ({ available: false })),
     getSystemPrompt: vi.fn(async () => ({
       config: { version: 1, replace: { enabled: false, prompt: '' }, append: { enabled: false, prompt: '' } },
       corrupted: false,
