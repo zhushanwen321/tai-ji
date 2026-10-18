@@ -84,8 +84,8 @@ export async function trash(filePath: string): Promise<void> {
  *
  * D5（session-store-layout-inversion）：session 删除的整树软删通道——`<root>/<sid>/`
  * 整棵树单点入废纸篓，误删可从废纸篓恢复整树。mac 走 moveToTrashOnMac 与文件级
- * 完全同构（trash CLI 原生支持目录；osascript 回落同一脚本，Finder delete 作用于
- * item，目录同为 item）。非 mac：无废纸篓，按设计 D5 定档降级 rmSync recursive
+ * 完全同构（trash CLI 原生支持目录；osascript 回落同一脚本——目录形态为推断未核实，
+ * 见文件头通道注）。非 mac：无废纸篓，按设计 D5 定档降级 rmSync recursive
  * 硬删——失败原生报错上抛不吞（含 code/path，ENOENT 等），与既有单文件通道同语义。
  */
 export async function trashDirectory(dirPath: string): Promise<void> {
