@@ -10,10 +10,11 @@
  *   per-action × actor 权限矩阵按此建制（matrix.ts）。
  * - CANVAS_MARKER_ACTIONS（16 + 'enter'）：marker 通道（extension select 挂起）
  *   的 action 域。'enter' 是 canvas_enter 工具「打开已有画布」形态的通道动作：
- *   读全量 + 登记绑定（sessionId ↔ canvasId），非画布 mutation——不产事件、
+ *   读全量（归属校验在 readState，非 owner → forbidden）；回推对象 = 归属会话
+ *   本身（owner 持久在落盘路径），无登记动作、不产事件——非画布 mutation、
  *   不在权限矩阵内（marker 通道调用方恒为 agent 工具）。创建形态走 'create'
- *   （marker 通道的 create 只可能来自 canvas_enter 工具，runtime 在该通道
- *   create 成功时一并登记绑定；GUI 托盘新建走 WS RPC 通道、不登记绑定）。
+ *   （marker 通道的 create 只可能来自 canvas_enter 工具；GUI 托盘新建走 WS RPC
+ *   通道，两通道行为无分叉）。
  */
 
 /**

@@ -241,7 +241,7 @@ export type CanvasMutateRequest = {
 
 export type CanvasMarkerAction = (typeof CANVAS_MARKER_ACTIONS)[number]
 
-/** enter（canvas_enter 打开形态）：读全量 + 登记绑定；非画布 mutation、不产事件。 */
+/** enter（canvas_enter 打开形态）：读全量（归属校验在 readState，非 owner → forbidden）；非画布 mutation、不产事件、无登记动作。 */
 export interface CanvasEnterParams { // oe-exempt:20261015:framework:画布域类型契约（数据形状/端口/测试 harness，非抽象接口单实现）
   canvasId: string
 }

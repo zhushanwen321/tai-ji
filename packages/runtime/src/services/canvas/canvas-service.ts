@@ -94,8 +94,8 @@ export interface CanvasSnapshotFile { // oe-exempt:20261015:framework:画布域�
   state: CanvasState
 }
 
-/** mutate 服务层结果：协议 reply + canvasId（create 成功时必有——marker 通道 create 登记
- * 绑定的寻址通道；序列化到 WS reply 时由调用方携带协议类型 CanvasMutateReply，本字段
+/** mutate 服务层结果：协议 reply + canvasId（create 成功时必有——新画布 id 回执，调用方
+ * 凭此对画布寻址；序列化到 WS reply 时由调用方携带协议类型 CanvasMutateReply，本字段
  * 是服务层附加通道，不进 wire 契约）。 */
 export type CanvasMutateResult = CanvasMutateReply & { canvasId?: string }
 
@@ -234,9 +234,10 @@ export class CanvasService {
     if (!CANVAS_ID_PATTERN.test(canvasId)) {
       return { ok: false, error: canvasError('invalid_params', `canvasId「${canvasId}」格式非法（合法形态 cvs-<id>）：使用 canvas_list / canvas.list 返回的 canvasId`) }
     }
-    // 归属校验先行于存在性（跨会话探测画布 id 只得 forbidden……且未知 id 一律
-    // canvas_not_found：画布集合 = loadAll 启动扫描建立的索引，运行期无懒加载——
-    // 新布局下单画布定位必须经 owner 路径分区，索引 miss = 不在树内）。
+    // 判定次序 = 存在性（owners 索引）先行、归属校验后行：未知 id 对任何会话一律
+    // canvas_not_found（跨会话探测不泄漏存在性），已知 id 非 owner 才 forbidden。
+    // 画布集合 = loadAll 启动扫描建立的索引，运行期无懒加载——新布局下单画布定位
+    // 必须经 owner 路径分区，索引 miss = 不在树内。
     if (!this.owners.has(canvasId)) {
       return { ok: false, error: canvasError('canvas_not_found', `画布「${canvasId}」不存在`) }
     }
