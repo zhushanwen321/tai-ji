@@ -1,9 +1,9 @@
 {
-  "generatedAt": "2026-10-03T14:26:51.222Z",
+  "generatedAt": "2026-10-18T10:22:19.060Z",
   "piAiVersion": "1.0.0",
   "catalogGeneratedAt": 1790881031882,
-  "providerCount": 42,
-  "totalModels": 1532,
+  "providerCount": 43,
+  "totalModels": 1544,
   "providers": [
     {
       "id": "amazon-bedrock",
@@ -43038,6 +43038,223 @@
             "supportsStrictMode": true,
             "zaiToolStream": true
           }
+        }
+      ],
+      "logoUrl": ""
+    },
+    {
+      "id": "opendesign",
+      "name": "OpenDesign",
+      "api": "openai-completions",
+      "baseUrl": "https://amr-link.open-design.ai/v1",
+      "authMode": "api_key",
+      "envVars": [
+        "OPENDESIGN_API_KEY"
+      ],
+      "oauthSupported": false,
+      "modelCount": 12,
+      "models": [
+        {
+          "id": "claude-haiku-5.5",
+          "name": "claude-haiku-5.5",
+          "api": "openai-completions",
+          "baseUrl": "https://amr-link.open-design.ai/v1",
+          "reasoning": false,
+          "input": [
+            "text",
+            "image"
+          ],
+          "cost": null,
+          "contextWindow": 1000000,
+          "maxTokens": 32000,
+          "thinkingLevelMap": null,
+          "compat": null
+        },
+        {
+          "id": "deepseek-v4-flash",
+          "name": "deepseek-v4-flash",
+          "api": "openai-completions",
+          "baseUrl": "https://amr-link.open-design.ai/v1",
+          "reasoning": false,
+          "input": [
+            "text"
+          ],
+          "cost": null,
+          "contextWindow": 1048000,
+          "maxTokens": 32000,
+          "thinkingLevelMap": null,
+          "compat": null
+        },
+        {
+          "id": "deepseek-v4-flash-vision-exp",
+          "name": "deepseek-v4-flash-vision-exp",
+          "api": "openai-completions",
+          "baseUrl": "https://amr-link.open-design.ai/v1",
+          "reasoning": false,
+          "input": [
+            "text",
+            "image"
+          ],
+          "cost": null,
+          "contextWindow": 1048000,
+          "maxTokens": 32000,
+          "thinkingLevelMap": null,
+          "compat": null
+        },
+        {
+          "id": "deepseek-v4-pro",
+          "name": "deepseek-v4-pro",
+          "api": "openai-completions",
+          "baseUrl": "https://amr-link.open-design.ai/v1",
+          "reasoning": false,
+          "input": [
+            "text"
+          ],
+          "cost": null,
+          "contextWindow": 1048000,
+          "maxTokens": 32000,
+          "thinkingLevelMap": null,
+          "compat": null
+        },
+        {
+          "id": "deepseek-v4.1-flash",
+          "name": "deepseek-v4.1-flash",
+          "api": "openai-completions",
+          "baseUrl": "https://amr-link.open-design.ai/v1",
+          "reasoning": true,
+          "input": [
+            "text",
+            "image"
+          ],
+          "cost": null,
+          "contextWindow": 1048000,
+          "maxTokens": 32000,
+          "thinkingLevelMap": {
+            "off": "off",
+            "minimal": null,
+            "low": null,
+            "medium": null,
+            "high": "high",
+            "xhigh": null,
+            "max": null
+          },
+          "compat": {
+            "thinkingFormat": "deepseek",
+            "supportsDeveloperRole": false,
+            "supportsReasoningEffort": true,
+            "requiresReasoningContentOnAssistantMessages": true
+          }
+        },
+        {
+          "id": "glm-5.3-flash",
+          "name": "glm-5.3-flash",
+          "api": "openai-completions",
+          "baseUrl": "https://amr-link.open-design.ai/v1",
+          "reasoning": false,
+          "input": [
+            "text",
+            "image"
+          ],
+          "cost": null,
+          "contextWindow": 1048000,
+          "maxTokens": 32000,
+          "thinkingLevelMap": null,
+          "compat": null
+        },
+        {
+          "id": "glm-5.3-flashx",
+          "name": "glm-5.3-flashx",
+          "api": "openai-completions",
+          "baseUrl": "https://amr-link.open-design.ai/v1",
+          "reasoning": false,
+          "input": [
+            "text",
+            "image"
+          ],
+          "cost": null,
+          "contextWindow": 1000000,
+          "maxTokens": 32000,
+          "thinkingLevelMap": null,
+          "compat": null
+        },
+        {
+          "id": "gpt-6-luna",
+          "name": "gpt-6-luna",
+          "api": "openai-completions",
+          "baseUrl": "https://amr-link.open-design.ai/v1",
+          "reasoning": false,
+          "input": [
+            "text",
+            "image"
+          ],
+          "cost": null,
+          "contextWindow": 1050000,
+          "maxTokens": 32000,
+          "thinkingLevelMap": null,
+          "compat": null
+        },
+        {
+          "id": "hy4-preview",
+          "name": "hy4-preview",
+          "api": "openai-completions",
+          "baseUrl": "https://amr-link.open-design.ai/v1",
+          "reasoning": false,
+          "input": [
+            "text"
+          ],
+          "cost": null,
+          "contextWindow": 1048000,
+          "maxTokens": 32000,
+          "thinkingLevelMap": null,
+          "compat": null
+        },
+        {
+          "id": "kimi-k2.7-code",
+          "name": "kimi-k2.7-code",
+          "api": "openai-completions",
+          "baseUrl": "https://amr-link.open-design.ai/v1",
+          "reasoning": false,
+          "input": [
+            "text",
+            "image"
+          ],
+          "cost": null,
+          "contextWindow": 262000,
+          "maxTokens": 32000,
+          "thinkingLevelMap": null,
+          "compat": null
+        },
+        {
+          "id": "mimo-v2.6-flash",
+          "name": "mimo-v2.6-flash",
+          "api": "openai-completions",
+          "baseUrl": "https://amr-link.open-design.ai/v1",
+          "reasoning": false,
+          "input": [
+            "text",
+            "image"
+          ],
+          "cost": null,
+          "contextWindow": 1048000,
+          "maxTokens": 32000,
+          "thinkingLevelMap": null,
+          "compat": null
+        },
+        {
+          "id": "mimo-v2.6-pro",
+          "name": "mimo-v2.6-pro",
+          "api": "openai-completions",
+          "baseUrl": "https://amr-link.open-design.ai/v1",
+          "reasoning": false,
+          "input": [
+            "text",
+            "image"
+          ],
+          "cost": null,
+          "contextWindow": 1048000,
+          "maxTokens": 32000,
+          "thinkingLevelMap": null,
+          "compat": null
         }
       ],
       "logoUrl": ""

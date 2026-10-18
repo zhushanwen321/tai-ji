@@ -441,7 +441,10 @@ export class QuotaService {
   } | { ok: false; error: string } {
     let normalizedWorkspace: string | null | undefined
     if (payload.workspace !== undefined) {
-      const wsResult = this.normalizeWorkspaceInput(payload.providerId, payload.workspace)
+      // 归一化分流按目标 fetcher：payload 显式值优先（同次提交 fetcher+workspace），
+      // 缺省回落既存配置（只更新 workspace 的部分提交按既存类型校验）
+      const targetFetcher = payload.fetcher ?? this.readQuotaFallback(payload.providerId)?.fetcher
+      const wsResult = this.normalizeWorkspaceInput(payload.providerId, payload.workspace, targetFetcher)
       if ('error' in wsResult) return { ok: false, error: wsResult.error }
       normalizedWorkspace = wsResult.value
     }
@@ -480,16 +483,20 @@ export class QuotaService {
 
   /**
    * configure 阶段 helper 之四：workspace 输入归一化（D1-1/P1-1）。
-   * 空字符串 = 清除（value:null，恢复未配置态，查询报 not_configured）；裸 wrk_ id
+   * 空字符串 = 清除（value:null，恢复未配置态，查询报 not_configured）；裸 id
    * 归一化为规范 URL 存储（P1-1）；非法输入返回 error 文案（调用方 fail-fast）。
+   * 归一化规则按目标 fetcher 分流（normalizeQuotaWorkspaceUrl）：opencode 与
+   * opendesign 的 workspace 形态/域白名单不同。fetcher 取 payload 显式值，缺省
+   * 读既存配置（configure 只传 workspace 不传 fetcher 的部分更新也按既存类型校验）。
    */
   private normalizeWorkspaceInput(
     providerId: string,
     workspace: string,
+    fetcherId?: string,
   ): { value: string | null } | { error: string } {
     const trimmed = workspace.trim()
     if (!trimmed) return { value: null }
-    const normalized = normalizeQuotaWorkspaceUrl(trimmed)
+    const normalized = normalizeQuotaWorkspaceUrl(trimmed, fetcherId)
     if (!normalized.ok) {
       logger.warn('[quota] invalid workspace input', { providerId, error: normalized.error })
       return { error: normalized.error }

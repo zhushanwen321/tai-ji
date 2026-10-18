@@ -100,6 +100,86 @@ const PROVIDER_ENV_VARS = {
 // 但它是 oauth-only（走 OAuth 流程），不是云凭证，authMode 应为 'oauth'。
 const AMBIENT_PROVIDERS = new Set(['google-vertex', 'amazon-bedrock'])
 
+// ============ taiji 附加内置 provider（pi-ai 上游 catalog 之外的 taiji 自维护段）============
+//
+// pi-ai 不收录的 provider 在此登记，生成时追加进快照 providers 尾部，使其获得与
+// pi catalog provider 同轨的内置形态（设置页模板 / isCatalogProvider / apiKey 写 auth.json）。
+// 约束：
+// - 必须追加在 generateBuiltinProviders() 返回值内（而非 main() 拼接）——check-pi-sync S4
+//   用该函数做内存重生成比对，两处拼接会让快照恒判过期。
+// - 不进 PROVIDER_ENV_VARS 镜像表（双向守卫只针对 pi-ai catalog 的 findEnvKeys，附加段
+//   条目会被判孤儿）；envVars 直接写在本段，checkEnvVars 运行时读 process.env 无需登记。
+// - 模型条目保持 11 键恒定（与 summarizeModel 同形）。thinking 声明只登记经真机核实的
+//   模型：deepseek 系 compat 实测（taiji prod deepseek-v4.1-flash 实测，同族沿用），
+//   其余模型未核实 thinking 传递格式，按非思考模型入榜（reasoning:false），核实后再补——
+//   猜错 thinkingFormat 会让请求报错，宁缺勿错。
+// - input 只映射 text/image（pi ModelDefinitionSchema 枚举仅此二者，file/audio/video 丢弃）。
+
+const OPENDESIGN_BASE_URL = 'https://amr-link.open-design.ai/v1'
+
+// deepseek 系 thinking 声明（2026-10-18 taiji prod deepseek-v4.1-flash 实测，同族模型沿用）
+const OPENDESIGN_DEEPSEEK_COMPAT = {
+  thinkingFormat: 'deepseek',
+  supportsDeveloperRole: false,
+  supportsReasoningEffort: true,
+  requiresReasoningContentOnAssistantMessages: true,
+}
+const OPENDESIGN_DEEPSEEK_TLM = { off: 'off', minimal: null, low: null, medium: null, high: 'high', xhigh: null, max: null }
+
+function opendesignModel({ id, input, contextWindow, reasoning = false, thinkingLevelMap = null, compat = null }) {
+  return {
+    id,
+    name: id,
+    api: 'openai-completions',
+    baseUrl: OPENDESIGN_BASE_URL,
+    reasoning,
+    input,
+    cost: null,
+    contextWindow,
+    maxTokens: 32000,
+    thinkingLevelMap,
+    compat,
+  }
+}
+
+// 模型清单 2026-10-18 从 GET /v1/models 实测（12 个，全 enabled）。
+const OPENDESIGN_MODELS = [
+  opendesignModel({ id: 'claude-haiku-5.5', input: ['text', 'image'], contextWindow: 1000000 }),
+  opendesignModel({ id: 'deepseek-v4-flash', input: ['text'], contextWindow: 1048000 }),
+  opendesignModel({ id: 'deepseek-v4-flash-vision-exp', input: ['text', 'image'], contextWindow: 1048000 }),
+  opendesignModel({ id: 'deepseek-v4-pro', input: ['text'], contextWindow: 1048000 }),
+  opendesignModel({
+    id: 'deepseek-v4.1-flash',
+    input: ['text', 'image'],
+    contextWindow: 1048000,
+    reasoning: true,
+    thinkingLevelMap: OPENDESIGN_DEEPSEEK_TLM,
+    compat: OPENDESIGN_DEEPSEEK_COMPAT,
+  }),
+  opendesignModel({ id: 'glm-5.3-flash', input: ['text', 'image'], contextWindow: 1048000 }),
+  opendesignModel({ id: 'glm-5.3-flashx', input: ['text', 'image'], contextWindow: 1000000 }),
+  opendesignModel({ id: 'gpt-6-luna', input: ['text', 'image'], contextWindow: 1050000 }),
+  opendesignModel({ id: 'hy4-preview', input: ['text'], contextWindow: 1048000 }),
+  opendesignModel({ id: 'kimi-k2.7-code', input: ['text', 'image'], contextWindow: 262000 }),
+  opendesignModel({ id: 'mimo-v2.6-flash', input: ['text', 'image'], contextWindow: 1048000 }),
+  opendesignModel({ id: 'mimo-v2.6-pro', input: ['text', 'image'], contextWindow: 1048000 }),
+]
+
+const TAIJI_EXTRA_PROVIDERS = [
+  {
+    id: 'opendesign',
+    name: 'OpenDesign',
+    api: 'openai-completions',
+    baseUrl: OPENDESIGN_BASE_URL,
+    authMode: 'api_key',
+    envVars: ['OPENDESIGN_API_KEY'],
+    oauthSupported: false,
+    modelCount: OPENDESIGN_MODELS.length,
+    models: OPENDESIGN_MODELS,
+    logoUrl: '',
+  },
+]
+
 // ============ OAuth config 提取（dist/auth/oauth/<id>.js 源码字符串） ============
 //
 // pi-ai 的 provider 元数据（catalog）只含 auth.oauth.name，clientId/flow/endpoints/scopes/callbackPort
@@ -353,7 +433,7 @@ export function generateBuiltinProviders() {
   // 建立 id -> provider 映射供按需取对象字段
   const providerMap = new Map(builtinProviders().map((p) => [p.id, p]))
 
-  return catalogIds.map((id) => {
+  const catalogProviders = catalogIds.map((id) => {
     const provider = providerMap.get(id)
     if (!provider) {
       throw new Error(
@@ -393,6 +473,9 @@ export function generateBuiltinProviders() {
       logoUrl: '',
     }
   })
+
+  // taiji 附加段尾接（见 TAIJI_EXTRA_PROVIDERS 段注释：必须在返回值内，保 S4 重生成一致）
+  return [...catalogProviders, ...TAIJI_EXTRA_PROVIDERS]
 }
 
 /**

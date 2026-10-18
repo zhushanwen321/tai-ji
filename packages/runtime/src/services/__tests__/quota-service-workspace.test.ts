@@ -134,6 +134,37 @@ describe('QuotaService.configure · workspace 三态（D1-1/P1-1）', () => {
     expect(readQuotaRaw()?.workspace).toBe('https://opencode.ai/workspace/wrk_keep77/go')
     expect(readQuotaRaw()?.enabled).toBe(false)
   })
+
+  it('fetcher=opendesign 时裸 workspace id 按 opendesign 规则归一化（分流）', async () => {
+    const svc = makeService()
+    const result = await svc.configure({
+      providerId: 'p1',
+      enabled: true,
+      fetcher: 'opendesign',
+      workspace: 'userownws01',
+    })
+    expect(result).toEqual({ ok: true })
+    expect(readQuotaRaw()?.workspace).toBe(
+      'https://amr-api.open-design.ai/api/v1/workspaces/userownws01/billing/coding-plan-usage',
+    )
+  })
+
+  it('同 input 在无 fetcher 上下文时按缺省 opencode 规则拒绝（分流不改缺省行为）', async () => {
+    const svc = makeService()
+    const result = await svc.configure({ providerId: 'p1', enabled: true, workspace: 'userownws01' })
+    expect(result.ok).toBe(false)
+    expect(readQuotaRaw()?.workspace).toBeUndefined()
+  })
+
+  it('payload 不传 fetcher 时按既存配置的 fetcher 分流（部分更新）', async () => {
+    const svc = makeService()
+    await svc.configure({ providerId: 'p1', enabled: true, fetcher: 'opendesign' })
+    const result = await svc.configure({ providerId: 'p1', enabled: true, workspace: 'secondws02' })
+    expect(result).toEqual({ ok: true })
+    expect(readQuotaRaw()?.workspace).toBe(
+      'https://amr-api.open-design.ai/api/v1/workspaces/secondws02/billing/coding-plan-usage',
+    )
+  })
 })
 
 describe('QuotaService.configure · cookie 入站归一化（SG-10，wire 不信任）', () => {

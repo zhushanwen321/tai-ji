@@ -103,8 +103,9 @@ export type QuotaFetchOutcome =
  */
 export interface QuotaFetcherConfig {
   /**
-   * 资源维度 fetcher（opencode）的 workspace 归一化地址（经 normalizeQuotaWorkspaceUrl
-   * 产出的规范 URL）。缺失 = 未配置，资源维度 fetcher 返回 not_configured（不发请求）。
+   * 资源维度 fetcher（opencode / opendesign）的 workspace 归一化地址（经
+   * normalizeQuotaWorkspaceUrl 产出的规范 URL）。缺失 = 未配置，资源维度 fetcher
+   * 返回 not_configured（不发请求）。
    */
   workspaceUrl?: string
 }
@@ -124,7 +125,7 @@ export interface ProviderQuotaFetcher {
    * @param credential 由 QuotaService 注入：api-key/oauth 类传 key/token 字符串，cookie 类传 cookie 字符串。
    * @param kind 凭证形态（= 命中的 auth 数组元素），fetcher 可区分凭证语义
    *   （如个别平台 oauth 与 api key 请求头不同）。
-   * @param config per-provider 只读配置（D1-2，可选）：资源维度 fetcher（opencode）从中取
+   * @param config per-provider 只读配置（D1-2，可选）：资源维度 fetcher（opencode / opendesign）从中取
    *   workspaceUrl；账号维度 fetcher 忽略。
    * @returns QuotaFetchOutcome。失败不 throw，reason 可区分。
    */
@@ -181,7 +182,10 @@ export interface QuotaConfigurePayload {
   workspace?: string
 }
 
-// ── opencode workspace URL 归一化（P1-1，timeout-audit-hygiene-batch D1-1）──
+// ── workspace 输入归一化（P1-1，timeout-audit-hygiene-batch D1-1）──
+//
+// 归一化规则按 fetcher 分流（资源维度 fetcher 各家的 workspace 形态与额度 URL 不同）：
+// opencode（缺省，向后兼容）与 opendesign 两族。
 
 /** opencode 额度页规范前缀：`<BASE>/workspace/<wrk_id>/go`。 */
 const OPENCODE_BASE = 'https://opencode.ai'
@@ -194,30 +198,44 @@ const WORKSPACE_ID_RE = /^wrk_[A-Za-z0-9]+$/
 /** URL pathname 中的 workspace 段提取（/workspace/wrk_xxx/... 或以 wrk_xxx 结尾）。 */
 const WORKSPACE_PATH_RE = /\/workspace\/(wrk_[A-Za-z0-9]+)(?:\/|$)/
 
+/** OpenDesign 额度 API 基址：`<BASE>/api/v1/workspaces/<workspaceId>/billing/coding-plan-usage`。 */
+const OPENDESIGN_API_BASE = 'https://amr-api.open-design.ai'
+/** OpenDesign workspace id 形态：纯小写字母数字（2026-10-18 实测 24 字符，边界放宽到 6-64 容错）。 */
+const OPENDESIGN_WORKSPACE_ID_RE = /^[a-z0-9]{6,64}$/
+/** OpenDesign URL pathname 中的 workspace 段提取（/api/v1/workspaces/<id>/...）。 */
+const OPENDESIGN_WORKSPACE_PATH_RE = /\/api\/v1\/workspaces\/([a-z0-9]{6,64})(?:\/|$)/
+
 /** workspace 地址归一化结果：ok=true 带规范 URL；ok=false 带面向用户的报错文案。 */
 export type QuotaWorkspaceNormalizeResult =
   | { ok: true; url: string }
   | { ok: false; error: string }
 
 /**
- * opencode workspace 输入归一化（P1-1）：完整 URL 与裸 `wrk_` id 两种输入均可解析为
- * 规范额度页 URL `<OPENCODE_BASE>/workspace/<id>/go`。
+ * workspace 输入归一化（P1-1）：完整 URL 与裸 id 两种输入均可解析为该 fetcher 的规范
+ * 额度查询 URL。规则按 fetcherId 分流；缺省/未知 fetcher 走 opencode 规则（历史调用方
+ * 兼容——最早只支持 opencode，其余 fetcher 均为账号维度无 workspace）。
  *
- * 归一化产物是规范 URL 而非裸 id（D1-2 config 字段名 workspaceUrl 名副其实）：
- * URL 中的尾路径差异（/go、/usage 等）统一收敛为 /go 额度页。
+ * 归一化产物是规范 URL 而非裸 id（D1-2 config 字段名 workspaceUrl 名副其实）。
  *
- * hostname 必须是 opencode.ai（fetchQuota 携带用户 cookie 请求该 URL——放行任意域
- * 等于把 cookie 泄露给第三方域，域名校验是安全必要而非格式洁癖）。
+ * hostname 白名单是安全必要而非格式洁癖：fetchQuota 携带用户 cookie 请求归一化产物——
+ * 放行任意域等于把 cookie 泄露给第三方域。
  *
- * @param input 用户输入（完整 URL 或裸 wrk_ id；空串/空白由调用方按「清除/未填」语义处理，
+ * @param input 用户输入（完整 URL 或裸 id；空串/空白由调用方按「清除/未填」语义处理，
  *   本函数对空输入返回 error）
+ * @param fetcherId 目标 fetcher（匹配 QuotaPreset.fetcher；缺省按 opencode 规则）
  */
-export function normalizeQuotaWorkspaceUrl(input: string): QuotaWorkspaceNormalizeResult {
+export function normalizeQuotaWorkspaceUrl(input: string, fetcherId?: string): QuotaWorkspaceNormalizeResult {
   const trimmed = input.trim()
   if (!trimmed) {
     return { ok: false, error: 'workspace url is empty' }
   }
+  return fetcherId === 'opendesign'
+    ? normalizeOpendesignWorkspace(trimmed)
+    : normalizeOpencodeWorkspace(trimmed)
+}
 
+/** opencode workspace 归一化：裸 `wrk_` id / 完整 opencode.ai URL → 规范额度页 URL。 */
+function normalizeOpencodeWorkspace(trimmed: string): QuotaWorkspaceNormalizeResult {
   // 形态 1：裸 wrk_ id → 直接拼规范 URL
   if (WORKSPACE_ID_RE.test(trimmed)) {
     return { ok: true, url: `${OPENCODE_BASE}/workspace/${trimmed}/go` }
@@ -250,4 +268,44 @@ export function normalizeQuotaWorkspaceUrl(input: string): QuotaWorkspaceNormali
   }
 
   return { ok: true, url: `${OPENCODE_BASE}/workspace/${id}/go` }
+}
+
+/** OpenDesign workspace 归一化：裸 workspace id / 完整 amr-api URL → 规范额度查询 URL。 */
+function normalizeOpendesignWorkspace(trimmed: string): QuotaWorkspaceNormalizeResult {
+  // 形态 1：裸 workspace id → 直接拼规范 URL
+  if (OPENDESIGN_WORKSPACE_ID_RE.test(trimmed)) {
+    return { ok: true, url: opendesignUsageUrl(trimmed) }
+  }
+
+  // 形态 2：完整 URL → 校验域 + 提取 workspace id + 重构规范 URL
+  let parsed: URL
+  try {
+    parsed = new URL(trimmed)
+  } catch {
+    return {
+      ok: false,
+      error: `invalid workspace: not a URL or workspace id. Expected a bare workspace id or like ${OPENDESIGN_API_BASE}/api/v1/workspaces/<id>/billing/coding-plan-usage`,
+    }
+  }
+
+  if (parsed.hostname !== 'amr-api.open-design.ai') {
+    return {
+      ok: false,
+      error: `invalid workspace url: expected host amr-api.open-design.ai, got "${parsed.hostname}" (your cookie is only sent to amr-api.open-design.ai)`,
+    }
+  }
+
+  const id = parsed.pathname.match(OPENDESIGN_WORKSPACE_PATH_RE)?.[1]
+  if (!id) {
+    return {
+      ok: false,
+      error: `invalid workspace url: no workspace id found in path "${parsed.pathname}". Expected like ${OPENDESIGN_API_BASE}/api/v1/workspaces/<id>/billing/coding-plan-usage`,
+    }
+  }
+
+  return { ok: true, url: opendesignUsageUrl(id) }
+}
+
+function opendesignUsageUrl(id: string): string {
+  return `${OPENDESIGN_API_BASE}/api/v1/workspaces/${id}/billing/coding-plan-usage`
 }
