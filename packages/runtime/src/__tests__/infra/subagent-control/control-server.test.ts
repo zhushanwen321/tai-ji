@@ -263,8 +263,10 @@ describe('subagent-control server（真 socket 环回 + fixture 引擎）', () =
     const agent = new TestAgent(server.listeningSocketPath)
     await agent.opened
     agent.hello()
-    const { channelId, pid } = expectOpened(await agent.open(launchSpec({ args: ['--hang'] }), 1))
-    // 单帧 70KB > 64KB 队列上限：首帧即触发前置检查（不写内核、不丢帧、显式失败）
+    const { channelId, pid } = expectOpened(await agent.open(launchSpec({ args: ['--no-read-stdin'] }), 1))
+    // 70KB 首帧：write 返回 false 但已被 Node 受理 → 只登记 drain 等待、不入队（R3-N1）；
+    // 第二帧在背压期真正入队，70KB > 64KB 队列上限 → 显式失败（不丢帧、不静默）。
+    agent.sendFrame(channelId, `x${'y'.repeat(70 * 1024)}`)
     agent.sendFrame(channelId, `x${'y'.repeat(70 * 1024)}`)
     await agent.waitForFrame(
       (f) => f.kind === SUBAGENT_CONTROL_FRAME_KINDS.error && f.code === 'engine_backpressure_overflow',
@@ -330,8 +332,13 @@ describe('subagent-control server（真 socket 环回 + fixture 引擎）', () =
     const b = expectOpened(await agent.open(launchSpec({ engineId: 'fake-engine-b', args: ['--no-read-stdin'] }), 'agg-b'))
 
     const frame = 'x'.repeat(70 * 1024)
-    agent.sendFrame(a.channelId, frame) // 通道 A 入队（per-channel 未越界）
-    agent.sendFrame(b.channelId, frame) // A+B 聚合 140KB > 100KB → 仅 B 被判溢出
+    // 每通道首帧 write=false 但已被 Node 受理（不入队）；第二帧才真正入队 —— 聚合
+    // 上限判据只看入队帧（R3-N1 + R2-B-U-3 口径）：A 70KB 入队后 B 的 70KB 使
+    // 聚合 140KB > 100KB → 仅 B 被判溢出。
+    agent.sendFrame(a.channelId, frame) // A 首帧：drain 等待，不入队
+    agent.sendFrame(b.channelId, frame) // B 首帧：同上
+    agent.sendFrame(a.channelId, frame) // A 第二帧：入队（70KB < 100KB 聚合）
+    agent.sendFrame(b.channelId, frame) // B 第二帧：A+B 聚合 140KB > 100KB → 仅 B 被判溢出
 
     const error = await agent.waitForFrame(
       (f) => f.kind === SUBAGENT_CONTROL_FRAME_KINDS.error && f.code === 'engine_backpressure_overflow',
@@ -358,11 +365,11 @@ describe('subagent-control server（真 socket 环回 + fixture 引擎）', () =
   })
 
   it('down 聚合上限只在入队时判定：慢通道积压到上限，健康通道小帧仍写入且不被杀', { timeout: 30_000 }, async () => {
-    // 回归 R2-B-U-3：上限判定曾在 stdin.write 之前执行，健康写（返回 true、不进
-    // pendingDown）也会被其它通道的积压压死。这里慢通道把连接级聚合推到恰好上限
+    // 回归 R2-B-U-3 + R3-N1：上限判定只在真正入队时执行；`stdin.write` 返回 false
+    // 的帧已被 Node 受理、不入队（drain 时不重写）。慢通道把连接级聚合推到恰好上限
     //（等于上限不算越界），健康通道的小帧写入返回 true → 不得触发聚合溢出。
-    // 慢通道首帧取 1MB（远大于任何平台管道缓冲）确保 write 必然返回 false 而入队，
-    // 不依赖具体管道容量；随后再用 4KB 帧把聚合顶到恰好上限。
+    // 慢通道首帧取 1MB（远大于任何平台管道缓冲）确保 write 必然返回 false、进入
+    // drain 等待而不入队；随后两帧（1MB + 4KB）真正入队把聚合顶到恰好上限。
     const limit = 1024 * 1024 + 4096
     const { server } = await setupServer({
       channelQueueMaxBytes: 8 * 1024 * 1024,
@@ -379,8 +386,9 @@ describe('subagent-control server（真 socket 环回 + fixture 引擎）', () =
       await agent.open(launchSpec({ engineId: 'fake-engine-healthy', args: [] }), 'healthy'),
     )
 
-    // 慢通道：1MB 帧入队（write 必返回 false），再用 4KB 帧把聚合顶到恰好上限
-    //（入队判据为 > limit；等于上限不算越界）
+    // 慢通道：1MB 首帧 write=false（已被 Node 受理、不入队）；再用 1MB 帧入队、
+    // 4KB 帧把聚合顶到恰好上限（入队判据为 > limit；等于上限不算越界）
+    agent.sendFrame(slow.channelId, 'x'.repeat(1024 * 1024 - 1))
     agent.sendFrame(slow.channelId, 'x'.repeat(1024 * 1024 - 1))
     agent.sendFrame(slow.channelId, 'x'.repeat(4096 - 1))
     // 同一连接上的下一帧：健康通道（读 stdin）小帧——写返回 true，不入队
@@ -396,6 +404,47 @@ describe('subagent-control server（真 socket 环回 + fixture 引擎）', () =
     expect(server.getChannelForTest(slow.channelId)?.state).toBe('open')
     expect(agent.errorFrames().some((f) => f.channelId === healthy.channelId)).toBe(false)
     expect(agent.errorFrames().some((f) => f.channelId === slow.channelId)).toBe(false)
+    agent.destroy()
+  })
+
+  it('背压 down 方向每帧恰好投递一次：慢读者恢复后不重写已受理帧（R3-N1）', { timeout: 30_000 }, async () => {
+    // 回归 R3-N1：write 返回 false 只表示内核缓冲已满（数据已被受理），旧实现把它
+    // 同时入队，drain 时重写 → 背压下的 run/cancel/dispose 帧双投。这里让引擎前
+    // 600ms 不读 stdin（管道写满 → 进入背压），随后恢复读取并逐帧回 response；
+    // 断言 120 个 id 全部且仅出现一次、顺序保持（FIFO）、无 error 帧。
+    const { server } = await setupServer({ closeGraceMs: 1_000 })
+    const agent = new TestAgent(server.listeningSocketPath)
+    await agent.opened
+    agent.hello()
+    const { channelId } = expectOpened(
+      await agent.open(launchSpec({ engineId: 'fake-engine-paused', args: ['--stdin-pause-ms', '600'] }), 1),
+    )
+
+    const total = 120
+    const ids = Array.from({ length: total }, (_, i) => `bp-${String(i)}`)
+    for (const id of ids) {
+      agent.sendFrame(channelId, JSON.stringify({ id, payload: 'p'.repeat(4096) }))
+    }
+
+    const responseIds = (): string[] => agent.engineFrameLines().flatMap((line) => {
+      try {
+        const parsed = JSON.parse(line) as Record<string, unknown>
+        return parsed.type === 'response' && typeof parsed.id === 'string' && parsed.id.startsWith('bp-')
+          ? [parsed.id]
+          : []
+      } catch {
+        return []
+      }
+    })
+
+    await waitFor(() => new Set(responseIds()).size === total, 'all backpressured frames echoed')
+    // 观察窗：重复投递的 response 紧随同一次 drain 到达；给重写帧留出到达余量。
+    await new Promise((r) => setTimeout(r, 300))
+    const received = responseIds()
+    expect(received).toHaveLength(total)
+    expect(new Set(received).size).toBe(total)
+    expect(received).toEqual(ids)
+    expect(agent.errorFrames()).toEqual([])
     agent.destroy()
   })
 

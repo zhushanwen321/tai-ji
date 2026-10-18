@@ -18,6 +18,8 @@
  *   兜底链（POSIX 负 pid 组杀覆盖已死组长）的收割对象；
  * - `--hang`：忽略 stdin 内容永不退出（engine_close 有界等待超时 → killed_by_control）；
  * - `--no-read-stdin`：不消费 stdin（管道写满 → 背压 → down 队列累积，聚合上限用例）；
+ * - `--stdin-pause-ms <n>`：先不消费 stdin（管道写满 → 背压），n ms 后恢复读取
+ *   （慢读者恢复 → drain → down 队列冲刷；每帧恰好投递一次的回归用例）；
  * - `--stderr <text>`：启动即写一行 stderr（engine_closed.stderrTail 采集验证）；
  * - `--emit <json>`：启动即向 stdout 写一行（unsolicited 引擎帧下发验证）。
  *
@@ -59,7 +61,9 @@ if (has('--spawn-child')) {
 let buf = ''
 // --no-read-stdin：不消费 stdin（管道写满后 server 侧 down 队列开始累积——连接级
 // 聚合上限用例的确定性入口；进程仍常驻，由 engine_close/组杀收尾）。
-if (!has('--no-read-stdin')) {
+// --stdin-pause-ms：延迟 n ms 再挂 data 监听（此前 stdin 保持 paused → 管道写满、
+// server 侧进入背压；到点恢复读取触发 drain 冲刷队列，供「恰好投递一次」用例）。
+function startReadingStdin() {
   process.stdin.setEncoding('utf8')
   process.stdin.on('data', (c) => {
     buf += c
@@ -76,6 +80,11 @@ if (!has('--no-read-stdin')) {
     // 保持与真实引擎同语义：stdin EOF 不自动退出（EOF 自灭是 SDK armEngineSelfDestruct
     // 的职责，宿主测试用显式 exit/kill 驱动终局）
   })
+}
+const stdinPauseMs = Number(argOf('--stdin-pause-ms') ?? '0')
+if (!has('--no-read-stdin')) {
+  if (stdinPauseMs > 0) setTimeout(startReadingStdin, stdinPauseMs)
+  else startReadingStdin()
 } else {
   // 不消费 stdin 时进程需自持活跃（否则 Node 无活动句柄即正常退出）
   setInterval(() => {}, 1000)

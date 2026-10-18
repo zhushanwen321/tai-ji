@@ -1,8 +1,9 @@
 // src/execution/engine/client/transport/control-client.ts
 //
 // [M3] RuntimeControlClient：extension 侧 control socket 客户端（设计 relay-spawn-transport
-// §3.3 D5/D8、§3.4.3；u-m3-rt-transport）。进程级共享：一个宿主 pi 进程一条连接
-// （module registry 按 socket 路径复用 + 引用计数），每通道一个 channelId；嵌套 task pi
+// §3.3 D5/D8、§3.4.3；u-m3-rt-transport）。进程级共享表按 **(socket 路径, root session id)**
+// 复用 + 引用计数（每根一条连接；同一宿主进程可因不同根/探针 temp 根持有多条连接）。
+// 每通道一个 channelId；嵌套 task pi
 // 是独立进程 → 自建连接（同一 socket）。职责 = 帧信封搬运 / hello/engine_open 握手与 id
 // 关联 / engine_closed → 通道终局回调 / 出站背压队列（control-write-queue.ts）/ 连接死亡
 // fan-out（engine_transport_lost，D5：通道终局 vs 连接死亡两分）；常量/类型/错误映射在

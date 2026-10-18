@@ -153,8 +153,15 @@ type ConnState = {
 type ChannelCtx = {
   rec: EngineChannelRecord
   conn: ConnState
+  /**
+   * down 方向**真正入队**的帧（背压期到达、尚未写 stdin 的帧）。已交给 Node 内部缓冲
+   * 的帧（`stdin.write` 返回 false 的那一帧仍已被受理）不入队——否则 drain 时会重写，
+   * 同一帧投递两次（R3-N1）。
+   */
   pendingDown: Array<{ line: string; bytes: number }>
   pendingDownBytes: number
+  /** 本通道已登记 drain 等待（write 背压或队列非空）；同一背压期只挂一个 once 监听。 */
+  downAwaitingDrain: boolean
   pendingUpFrames: number
   pendingUpBytes: number
   stderrTail: string
@@ -677,6 +684,7 @@ export class SubagentControlServer {
       conn,
       pendingDown: [],
       pendingDownBytes: 0,
+      downAwaitingDrain: false,
       pendingUpFrames: 0,
       pendingUpBytes: 0,
       stderrTail: '',
@@ -792,8 +800,12 @@ export class SubagentControlServer {
       return
     }
     const bytes = byteLengthOf(line) + 1
-    // 先尝试写：只有返回 false（需入队，即真正产生驻留）时才判上限。健康通道的写入
-    // （返回 true）不贡献 downQueueBytes，不能因其它通道的积压被连接级聚合上限误杀。
+    // 背压中（已登记 drain 等待或队列非空）：只入队、不写——保持 FIFO，且绝不重写
+    // 已交给 Node 缓冲的帧（R3-N1：write 返回 false 时数据仍已被受理，drain 前会写出）。
+    if (ctx.downAwaitingDrain || ctx.pendingDown.length > 0) {
+      this.enqueueDown(ctx, stdin, line, bytes)
+      return
+    }
     let ok = false
     try {
       ok = stdin.write(`${line}\n`)
@@ -802,30 +814,43 @@ export class SubagentControlServer {
       console.debug(`[subagent-control] stdin write threw channelId=${ctx.rec.channelId}:`, toErrorMessage(e))
       return
     }
-    if (!ok) {
-      // 入队前上限检查（溢出 → error + 杀组 + engine_closed，D8 不丢帧不静默）：
-      // per-channel 上限 + 每连接 down 方向聚合上限（各通道 pendingDownBytes 之和）
-      // 两级同判——聚合越界只关本通道（其它通道不受影响），不升连整条连接。
-      const channelOverflow = ctx.pendingDownBytes + bytes > this.channelQueueMaxBytes
-        || ctx.pendingDown.length + 1 > this.channelQueueMaxFrames
-      const connectionOverflow = ctx.conn.downQueueBytes + bytes > this.connectionQueueMaxBytes
-      if (channelOverflow || connectionOverflow) {
-        const detail = connectionOverflow
-          ? `engine stdin queue overflow (connection aggregate ${String(ctx.conn.downQueueBytes + bytes)} bytes)`
-          : `engine stdin queue overflow (${String(ctx.pendingDownBytes + bytes)} bytes / ${String(ctx.pendingDown.length + 1)} frames queued)`
-        this.writeErrorAndKill(ctx, CONTROL_FRAME_ERROR_CODES.backpressureOverflow, detail, 'engine_backpressure_overflow')
-        return
-      }
-      ctx.pendingDown.push({ line, bytes })
-      ctx.pendingDownBytes += bytes
-      ctx.conn.downQueueBytes += bytes
-      stdin.once('drain', () => {
-        this.flushPendingDown(ctx)
-      })
+    // write 返回 false 只表示内核缓冲已满：本帧已被 Node 受理并在 drain 前写出，因此
+    // 只登记 drain 等待、**不入队重写**（否则同一帧投递两次）。上限判定只在真正入队
+    // 时执行——健康写（返回 true）不贡献 downQueueBytes，不会因其它通道积压被聚合
+    // 上限误杀（R2-B-U-3）。
+    if (!ok) this.armDownDrain(ctx, stdin)
+  }
+
+  /** 背压期入队：判 per-channel + 连接聚合双上限（溢出 → error + 杀组，D8 不丢帧不静默）。 */
+  private enqueueDown(ctx: ChannelCtx, stdin: NonNullable<ChildProcess['stdin']>, line: string, bytes: number): void {
+    const channelOverflow = ctx.pendingDownBytes + bytes > this.channelQueueMaxBytes
+      || ctx.pendingDown.length + 1 > this.channelQueueMaxFrames
+    // 连接级聚合 = 各通道真正入队的 pendingDownBytes 之和（已交给 Node 缓冲的帧不在其中）。
+    const connectionOverflow = ctx.conn.downQueueBytes + bytes > this.connectionQueueMaxBytes
+    if (channelOverflow || connectionOverflow) {
+      const detail = connectionOverflow
+        ? `engine stdin queue overflow (connection aggregate ${String(ctx.conn.downQueueBytes + bytes)} bytes)`
+        : `engine stdin queue overflow (${String(ctx.pendingDownBytes + bytes)} bytes / ${String(ctx.pendingDown.length + 1)} frames queued)`
+      this.writeErrorAndKill(ctx, CONTROL_FRAME_ERROR_CODES.backpressureOverflow, detail, 'engine_backpressure_overflow')
+      return
     }
+    ctx.pendingDown.push({ line, bytes })
+    ctx.pendingDownBytes += bytes
+    ctx.conn.downQueueBytes += bytes
+    this.armDownDrain(ctx, stdin)
+  }
+
+  /** 登记 drain 等待（同一背压期只挂一个 once 监听，避免 >10 帧触发监听器告警）。 */
+  private armDownDrain(ctx: ChannelCtx, stdin: NonNullable<ChildProcess['stdin']>): void {
+    if (ctx.downAwaitingDrain) return
+    ctx.downAwaitingDrain = true
+    stdin.once('drain', () => {
+      this.flushPendingDown(ctx)
+    })
   }
 
   private flushPendingDown(ctx: ChannelCtx): void {
+    ctx.downAwaitingDrain = false
     const stdin = ctx.rec.child?.stdin
     if (stdin === undefined || stdin === null || stdin.destroyed) return
     while (ctx.pendingDown.length > 0) {
@@ -836,13 +861,12 @@ export class SubagentControlServer {
       } catch {
         return // 引擎已死，exit 链路接管
       }
+      // 已交给 Node（即便返回 false 也已被受理）→ 出队，绝不保留重写
       ctx.pendingDown.shift()
       ctx.pendingDownBytes -= next.bytes
       ctx.conn.downQueueBytes = Math.max(0, ctx.conn.downQueueBytes - next.bytes)
       if (!ok) {
-        stdin.once('drain', () => {
-          this.flushPendingDown(ctx)
-        })
+        this.armDownDrain(ctx, stdin)
         return
       }
     }
@@ -1104,6 +1128,7 @@ export class SubagentControlServer {
     ctx.conn.downQueueBytes = Math.max(0, ctx.conn.downQueueBytes - ctx.pendingDownBytes)
     ctx.pendingDown = []
     ctx.pendingDownBytes = 0
+    ctx.downAwaitingDrain = false
     // 递归树杀（D4：父通道关闭/被杀 → 递归杀子通道引擎组；登记面 = recordId→parentRecordId）
     for (const childId of this.registry.findDescendantIds(rec.channelId)) {
       const childCtx = this.ctxs.get(childId)

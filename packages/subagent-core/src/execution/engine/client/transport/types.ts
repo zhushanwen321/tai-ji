@@ -99,8 +99,8 @@ export interface EngineTransport { // oe-exempt:20261018:framework:extension↔e
   readonly rootSessionId?: string;
   /**
    * 打开引擎通道。local = spawn 引擎 CLI 进程（stdio 接线，不等待 initialize）；
-   * runtime = hello（进程级共享连接时复用）+ engine_open，收到 engine_opened 才 resolve
-   * ——resolve 前 writeFrame 不得调用。
+   * runtime = hello（同 (socket, rootSessionId) 共享连接时复用）+ engine_open，收到
+   * engine_opened 才 resolve ——resolve 前 writeFrame 不得调用。
    */
   open(spec: EngineLaunchSpec): Promise<EngineTransportOpenResult>;
   /**

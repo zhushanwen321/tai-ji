@@ -189,9 +189,10 @@ export function parseControlInboundFrame(line: string): ControlInboundFrame | nu
 // 失败透传 SDK EngineSdkError.code 如 engine_not_found）。消费方（core control-shared
 // 的 mapControlError）逐 code 收敛：engine_ 前缀码原样透传
 //（engine_open_timeout / engine_frame_too_large / engine_backpressure_overflow）；
-// 非 engine_ 前缀按语义分流——channel_limit → engine_backpressure_overflow、
-// invalid_launch / spawn_failed → engine_crashed、session / duplicate →
-// engine_transport_unavailable、unknown_channel（非 close 竞态）→ engine_transport_lost，
+// 非 engine_ 前缀按语义分流——channel_limit → engine_backpressure_overflow（detail
+// 显式标注「通道数上限，非字节背压」）、invalid_launch / spawn_failed → engine_crashed、
+// session / duplicate → engine_transport_unavailable、unknown_channel → **原 code 透传**
+//（通道终局，不是连接丢失——D10 的 engine_transport_lost 只表示 control 连接中途丢失），
 // 词表未覆盖的其它非 engine_ code 才落 engine_transport_unavailable。
 // 词表扩充时须同步核对消费侧映射。
 
