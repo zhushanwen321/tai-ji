@@ -78,6 +78,8 @@ interface FakeRuntime {
   /** 收到的全部 down 帧解码后的字节块。 */
   downChunks: Buffer[];
   downTotal: () => number;
+  /** 收到的全部 goodbye 预告帧（宿主信号终止时的 teardown 预告）。 */
+  goodbyeFrames: RelayFrame[];
   send: (frame: Record<string, unknown>) => boolean;
   destroyConn: () => void;
   close: () => Promise<void>;
@@ -102,6 +104,7 @@ function startFakeRuntime(
   });
   let connRef: net.Socket | null = null;
   const downChunks: Buffer[] = [];
+  const goodbyeFrames: RelayFrame[] = [];
   const server = net.createServer((conn) => {
     connRef = conn;
     let lineBuf = "";
@@ -115,6 +118,10 @@ function startFakeRuntime(
         if (!line.trim()) continue;
         const frame = parseFrame(line);
         if (!frame) continue;
+        if (frame.kind === "goodbye") {
+          goodbyeFrames.push(frame);
+          continue;
+        }
         if (frame.kind === "handshake") {
           // 仅首个 handshake 帧响应 + settle（单连接单握手是协议形态）
           if (handshakeState.frame === null) {
@@ -138,6 +145,7 @@ function startFakeRuntime(
     },
     downChunks,
     downTotal: () => downChunks.reduce((sum, c) => sum + c.length, 0),
+    goodbyeFrames,
     send: (frame) => {
       if (!connRef || connRef.destroyed) throw new Error("fake runtime: no live connection");
       return connRef.write(JSON.stringify(frame) + "\n");
@@ -239,6 +247,9 @@ async function pollUntil(predicate: () => boolean, timeoutMs: number, what: stri
     await new Promise((r) => setTimeout(r, 25));
   }
 }
+
+/** 固定时长等待（真实子进程集成测试无 fake timers 可用——计时在子进程内）。 */
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** 分块发送大 up 帧（64KB/帧 + socket drain 等待，驱动代理侧 socket→stdout 背压路径）。 */
 async function sendLargeUp(rt: FakeRuntime, data: Buffer): Promise<void> {
@@ -461,4 +472,234 @@ describe("relay agent CLI (relay.mjs)", () => {
     expect(res.code).toBe(0);
     expect(res.stdout).toEqual(payload);
   });
+});
+
+// ════════════════════════════════════════════════════════════════════
+// M1 显式状态机（设计 §3.4.1 D1）：connecting → handshaking → awaiting_accept →
+// pumping → closing。五态均有用例：connecting（既有 unreachable/close 用例 + 本组
+// accept 超时入口）、awaiting_accept（超时/早到帧缓冲/SIGTERM）、pumping（既有泵用例 +
+// 迟到停表）、closing（迟到帧忽略/SIGTERM 幂等）。
+// ════════════════════════════════════════════════════════════════════
+
+describe("relay agent M1 state machine (relay.mjs)", () => {
+  it(
+    "awaiting_accept 超时：runtime 永不 accept → 退出码 15 + stderr 含 socket 路径与恢复指引（S5）",
+    { timeout: 10_000 },
+    async () => {
+      const socketPath = makeSocketPath();
+      // respond 为 no-op：握手收到但永不 accept
+      const rt = await startFakeRuntime(socketPath, () => {});
+      const child = spawnRelay({
+        socketPath,
+        sessionId: "s",
+        recordId: "r",
+        extraEnv: { TAIJI_RELAY_ACCEPT_TIMEOUT_MS: "400" },
+      });
+      await rt.handshakePromise;
+      const res = await waitForExit(child);
+      expect(res.code).toBe(RELAY_EXIT_CODES.ACCEPT_TIMEOUT);
+      expect(res.stderr).toContain("accept timeout");
+      // 设计 §3.5：stderr 须含 socket 路径（runtime 日志提示）与恢复指引
+      expect(res.stderr).toContain(socketPath);
+      expect(res.stderr).toContain("重启 taiji");
+    },
+  );
+
+  it(
+    "accept 先到停表：延迟 accept 越过窗口后仍存活且泵可用，不误报 15",
+    { timeout: 15_000 },
+    async () => {
+      const socketPath = makeSocketPath();
+      const rt = await startFakeRuntime(socketPath, (_hs, r) => {
+        // 250ms 后才 accept（< 800ms 窗口）——accept 到达即停表
+        setTimeout(() => {
+          try {
+            r.send({ v: RELAY_PROTOCOL_VERSION, kind: "accept" });
+          } catch {}
+        }, 250);
+      });
+      const child = spawnRelay({
+        socketPath,
+        sessionId: "s",
+        recordId: "r",
+        extraEnv: { TAIJI_RELAY_ACCEPT_TIMEOUT_MS: "800" },
+      });
+      await rt.handshakePromise;
+      // 等过 800ms 窗口：accept 已先到，不得触发超时退出
+      await sleep(1_200);
+      expect(child.child.exitCode).toBeNull();
+      // 泵已启动：down 数据正常转发
+      const marker = Buffer.from("pump-after-late-accept\n");
+      child.child.stdin.write(marker);
+      await pollUntil(() => rt.downTotal() === marker.length, 5_000, "down bytes after late accept");
+      rt.send({ kind: "exit", code: 0 });
+      const res = await waitForExit(child);
+      expect(res.code).toBe(0);
+    },
+  );
+
+  it(
+    "closing 后迟到帧忽略：超时退出码保持 15，迟到的 accept/up 帧不转移不落 stdout",
+    { timeout: 10_000 },
+    async () => {
+      const socketPath = makeSocketPath();
+      const rt = await startFakeRuntime(socketPath, () => {});
+      const child = spawnRelay({
+        socketPath,
+        sessionId: "s",
+        recordId: "r",
+        extraEnv: { TAIJI_RELAY_ACCEPT_TIMEOUT_MS: "300" },
+      });
+      await rt.handshakePromise;
+      // 超时（300ms）之后才发 accept + up 帧：closing 终态必须全部忽略
+      setTimeout(() => {
+        const frames = [
+          { v: RELAY_PROTOCOL_VERSION, kind: "accept" },
+          { v: RELAY_PROTOCOL_VERSION, kind: "data", dir: "up", b64: Buffer.from("late").toString("base64") },
+        ];
+        for (const frame of frames) {
+          try {
+            rt.send(frame);
+          } catch {}
+        }
+      }, 800);
+      const res = await waitForExit(child);
+      expect(res.code).toBe(RELAY_EXIT_CODES.ACCEPT_TIMEOUT);
+      // 迟到 up 帧不得落 stdout（closing 后 writeUp 幂等无操作；若进程已退更不会有输出）
+      expect(res.stdout.length).toBe(0);
+    },
+  );
+
+  it(
+    "awaiting_accept 期到达的 down data 帧缓冲不判死（原实现报 unexpected exit 12），pumping 后正常转发",
+    { timeout: 10_000 },
+    async () => {
+      const socketPath = makeSocketPath();
+      const rt = await startFakeRuntime(socketPath, (_hs, r) => {
+        // accept 之前先推一帧 down data（协议早到帧）
+        r.send({
+          v: RELAY_PROTOCOL_VERSION,
+          kind: "data",
+          dir: "down",
+          b64: Buffer.from("early-down\n").toString("base64"),
+        });
+        r.send({ v: RELAY_PROTOCOL_VERSION, kind: "accept" });
+      });
+      const child = spawnRelay({ socketPath, sessionId: "s", recordId: "r" });
+      await rt.handshakePromise;
+      // 泵正常工作：stdin 下行字节可达（早到帧不得阻断状态机进入 pumping）
+      const stdinBytes = Buffer.from("pumped-after-early-down\n");
+      child.child.stdin.write(stdinBytes);
+      await pollUntil(() => rt.downTotal() === stdinBytes.length, 5_000, "down bytes");
+      expect(Buffer.concat(rt.downChunks)).toEqual(stdinBytes);
+      rt.send({ kind: "exit", code: 0 });
+      const res = await waitForExit(child);
+      expect(res.code).toBe(0);
+      expect(res.stderr).not.toContain("unexpected frame before accept");
+    },
+  );
+
+  it(
+    "awaiting_accept 期到达的 up data 帧缓冲，pumping 后转发到 stdout（accept 前预写不丢·帧形态）",
+    { timeout: 10_000 },
+    async () => {
+      const socketPath = makeSocketPath();
+      const earlyUp = Buffer.concat([Buffer.from("early-up 流式字节\n", "utf8"), crypto.randomBytes(32)]);
+      const rt = await startFakeRuntime(socketPath, (_hs, r) => {
+        r.send({ v: RELAY_PROTOCOL_VERSION, kind: "data", dir: "up", b64: earlyUp.toString("base64") });
+        r.send({ v: RELAY_PROTOCOL_VERSION, kind: "accept" });
+      });
+      const child = spawnRelay({ socketPath, sessionId: "s", recordId: "r" });
+      await rt.handshakePromise;
+      rt.send({ kind: "exit", code: 0 });
+      const res = await waitForExit(child);
+      expect(res.code).toBe(0);
+      expect(res.stdout).toEqual(earlyUp);
+    },
+  );
+
+  it(
+    "P-1b 事故回归：300KB handshake + 延迟 accept + accept 前预写 68KB stdin → down 字节完整等于上游（S2）",
+    { timeout: 60_000 },
+    async () => {
+      const socketPath = makeSocketPath();
+      const rt = await startFakeRuntime(socketPath, (_hs, r) => {
+        // 模拟 runtime 读大 handshake 后延迟回 accept（600ms < 8s 窗口）
+        setTimeout(() => {
+          try {
+            r.send({ v: RELAY_PROTOCOL_VERSION, kind: "accept" });
+          } catch {}
+        }, 600);
+      });
+      // 300KB env：handshake 超出 socket 写缓冲 → accept 前 drain 必然触发（事故形态）
+      const filler = "x".repeat(300 * 1024);
+      const child = spawnRelay({
+        socketPath,
+        sessionId: "s",
+        recordId: "r",
+        extraEnv: { TAIJI_PROBE_TASK: filler, TAIJI_RELAY_ACCEPT_TIMEOUT_MS: "8000" },
+      });
+      // accept 前预写 68,639 字节（事故实测的 down 字节数）：spawn 后立即写入，
+      // 此时 accept 尚未到达、stdin 无监听器——预写字节必须滞留管道待 pumping 读出
+      const payload = crypto.randomBytes(68_639);
+      child.child.stdin.write(payload);
+      await rt.handshakePromise;
+      await pollUntil(() => rt.downTotal() === payload.length, 30_000, "pre-accepted down bytes");
+      expect(rt.downTotal()).toBe(68_639);
+      expect(Buffer.concat(rt.downChunks)).toEqual(payload);
+      rt.send({ kind: "exit", code: 0 });
+      const res = await waitForExit(child);
+      expect(res.code).toBe(0);
+    },
+  );
+
+  it(
+    "SIGTERM in awaiting_accept → closing：退出码 143 且不发 goodbye（未 accept 无预告）",
+    { timeout: 10_000 },
+    async () => {
+      const socketPath = makeSocketPath();
+      const rt = await startFakeRuntime(socketPath, () => {}); // 永不 accept
+      const child = spawnRelay({ socketPath, sessionId: "s", recordId: "r" });
+      await rt.handshakePromise;
+      child.child.kill("SIGTERM");
+      const res = await waitForExit(child);
+      expect(res.code).toBe(143);
+      expect(res.signal).toBeNull();
+      expect(rt.goodbyeFrames.length).toBe(0);
+    },
+  );
+
+  it(
+    "SIGTERM in pumping → closing 幂等：goodbye 预告帧恰好一帧 + 退出码 143",
+    { timeout: 15_000 },
+    async () => {
+      const socketPath = makeSocketPath();
+      const rt = await startFakeRuntime(socketPath); // 默认立即 accept → pumping
+      const child = spawnRelay({ socketPath, sessionId: "s", recordId: "r" });
+      await rt.handshakePromise;
+      // 确认已进 pumping（down 数据可达）再发信号——避免与 accept 处理竞态
+      const marker = Buffer.from("warm\n");
+      child.child.stdin.write(marker);
+      await pollUntil(() => rt.downTotal() === marker.length, 5_000, "pumping marker");
+      child.child.kill("SIGTERM");
+      const res = await waitForExit(child);
+      expect(res.code).toBe(143);
+      expect(rt.goodbyeFrames.length).toBe(1);
+      expect(rt.goodbyeFrames[0]?.v).toBe(RELAY_PROTOCOL_VERSION);
+    },
+  );
+
+  it(
+    "socket close during awaiting_accept → 生命线断退出码 12（连接期 close/error 分派按状态）",
+    { timeout: 10_000 },
+    async () => {
+      const socketPath = makeSocketPath();
+      const rt = await startFakeRuntime(socketPath, () => {}); // 永不 accept
+      const child = spawnRelay({ socketPath, sessionId: "s", recordId: "r" });
+      await rt.handshakePromise;
+      rt.destroyConn();
+      const res = await waitForExit(child);
+      expect(res.code).toBe(RELAY_EXIT_CODES.SOCKET_CLOSED);
+    },
+  );
 });

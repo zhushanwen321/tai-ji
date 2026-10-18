@@ -62,12 +62,14 @@ describe("relay 变体 C-镜像：relay.mjs 内嵌常量与 relay-env.ts SSOT �
     expect(source).toMatch(new RegExp(`RELAY_PROTOCOL_VERSION\\s*=\\s*${RELAY_PROTOCOL_VERSION}\\b`));
   });
 
-  it("镜像退出码 RELAY_EXIT_CODES 四值与 SSOT 一致", () => {
+  it("镜像退出码 RELAY_EXIT_CODES 五值与 SSOT 一致", () => {
     const pairs: Array<[keyof typeof RELAY_EXIT_CODES, number]> = [
       ["VERSION_MISMATCH", RELAY_EXIT_CODES.VERSION_MISMATCH],
       ["SOCKET_UNREACHABLE", RELAY_EXIT_CODES.SOCKET_UNREACHABLE],
       ["SOCKET_CLOSED", RELAY_EXIT_CODES.SOCKET_CLOSED],
       ["MISSING_IDENTITY", RELAY_EXIT_CODES.MISSING_IDENTITY],
+      // [M1] accept 超时码（u-foundation SDK 侧 +15；此处锁代理侧镜像同值）
+      ["ACCEPT_TIMEOUT", RELAY_EXIT_CODES.ACCEPT_TIMEOUT],
     ];
     for (const [key, value] of pairs) {
       expect(source).toMatch(new RegExp(`${key}:\\s*${value}\\b`));

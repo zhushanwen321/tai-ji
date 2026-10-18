@@ -2438,6 +2438,26 @@
       "note": "R2 态：守卫改本体或扩面时实跑三命令全绿（rfl-parity 对真实两侧 exit 0 + 门③双向零漂移 + 门③自测）；问题清单层语义差异（title 权威 / title 可选性 / 复活模型）以守卫脚本头部 D1-D4 登记清单为准"
     },
     {
+      "id": "E2E-PIPE-15",
+      "summary": "verify-staged-extensions：打包 staged 资产完整性检查脚本轨（bundle 清单 + staged 扩展/引擎存在性 + relay 资产存在性/非空/协议版本校验，缺失即 fail-fast）",
+      "scope": [
+        "scripts/verify-staged-extensions.mjs"
+      ],
+      "layer": "L1",
+      "assets": [
+        {
+          "kind": "script",
+          "ref": "scripts/verify-staged-extensions.mjs"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "node scripts/verify-staged-extensions.mjs",
+      "owner": "scripts/",
+      "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
+      "note": "R2 态：真实运行形态 = apps/electron build:pre 与 scripts/postbuild-validate.sh 自动调用（打包前置门）；改动本脚本须本地跑通——无 staged 产物时报错属预期失败形态，先跑 node scripts/bundle-extensions.mjs 再验（relay-spawn-transport u-m1-relay 补登 2026-10-18：checkRelayAsset 新增）"
+    },
+    {
       "id": "E2E-BOUNDARY-01",
       "summary": "AC7 extension-host 边界静态检查脚本（pre-commit 消费端 import 边界检查，无独立 e2e 资产；改动 = 消费端模块 TARGETS 清单维护）",
       "scope": [
