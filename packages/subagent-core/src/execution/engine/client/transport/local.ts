@@ -31,7 +31,6 @@ import {
   getLogger,
   hostKindOf,
   resolveEngineNodeLaunch,
-  type EngineRelayEnv,
 } from "@zhushanwen/subagent-engine-sdk";
 
 import {
@@ -81,7 +80,6 @@ export interface LocalEngineTransportOptions { // oe-exempt:20261018:framework:s
   // ── buildEngineChildEnv 的 L0/L2 余项（EngineClientOptions 透传）──
   readonly engineNode?: string;
   readonly electronRunAsNode?: boolean;
-  readonly relay?: EngineRelayEnv;
   readonly identityEnv?: Record<string, string | undefined>;
   readonly processEnv?: Record<string, string | undefined>;
   /** pidfile 三条件清扫 cmdline 身份谓词（EngineClient 已解析缺省词形）。 */
@@ -171,7 +169,6 @@ export class LocalEngineTransport implements EngineTransport {
       dataDir: this.opts.dataDir,
       engineNode: this.opts.engineNode ?? launch.command,
       electronRunAsNode: this.opts.electronRunAsNode ?? launch.electronRunAsNode,
-      relay: this.opts.relay,
       identityEnv: this.opts.identityEnv,
       envPrefixes: spec.envPrefixes,
       processEnv: this.opts.processEnv,

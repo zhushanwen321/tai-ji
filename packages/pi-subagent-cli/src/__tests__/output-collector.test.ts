@@ -11,7 +11,6 @@ import {
   collectOutcome,
   describeMissingParsedOutput,
   describePromptAckFailure,
-  describeRelayExitCode,
   DETERMINISTIC_SCHEMA_FAILURE_PREFIX,
   extractParsedOutput,
   isDeterministicSchemaFailureMsg,
@@ -474,7 +473,7 @@ describe("collectOutcome — D5-③ failureKind 产出", () => {
 });
 
 // ============================================================
-// [M2 D3/D10] 送达失败分诊 + relay 退出码映射
+// [M2 D3/D10] 送达失败分诊
 // ============================================================
 
 describe("M2: 送达错误码分诊（确定性码前缀置前，防 stale 词表误诊）", () => {
@@ -495,7 +494,7 @@ describe("M2: 送达错误码分诊（确定性码前缀置前，防 stale 词�
 
   it("engine_spawn_handshake_timeout → unknown（重启后重跑）", () => {
     const msg =
-      "engine_spawn_handshake_timeout: relay proxy timed out waiting for the runtime accept (relay exit code 15). Recovery: restart taiji.";
+      "engine_spawn_handshake_timeout: engine spawn handshake did not complete in time. Recovery: restart taiji.";
     expect(classifyFailureKind(msg)).toBe("unknown");
   });
 
@@ -538,42 +537,5 @@ describe("M2: describePromptAckFailure（tracker 结算 → outcome.error 文案
 
   it("acked 不经此函数（正常 outcome，防御性抛错）", () => {
     expect(() => describePromptAckFailure({ kind: "acked", disposition: "started" })).toThrow(/acked/);
-  });
-});
-
-describe("M2: relay 退出码映射（不再呈现裸「子进程退出 N」）", () => {
-  it("退出码 15（ACCEPT_TIMEOUT）→ engine_spawn_handshake_timeout + 恢复指引", () => {
-    const text = describeRelayExitCode(15);
-    expect(text).toBeDefined();
-    expect(text).toMatch(/^engine_spawn_handshake_timeout:/);
-    expect(text).toContain("relay exit code 15");
-    expect(text).toContain("Recovery:");
-  });
-
-  it("退出码 10/11/12/13 → 具名失败文案 + 恢复指引（不占用 engine_ 码，语义各归其位）", () => {
-    expect(describeRelayExitCode(10)).toContain("version mismatch");
-    expect(describeRelayExitCode(11)).toContain("socket unreachable");
-    expect(describeRelayExitCode(12)).toContain("closed mid-flight");
-    expect(describeRelayExitCode(13)).toContain("identity env missing");
-    for (const code of [10, 11, 12, 13]) {
-      expect(describeRelayExitCode(code)).toContain("Recovery:");
-      expect(describeRelayExitCode(code)).toContain(`relay exit code ${code}`);
-    }
-  });
-
-  it("非 relay 专属退出码 → undefined（走既有退出码文案）", () => {
-    expect(describeRelayExitCode(0)).toBeUndefined();
-    expect(describeRelayExitCode(1)).toBeUndefined();
-    expect(describeRelayExitCode(3)).toBeUndefined();
-    expect(describeRelayExitCode(137)).toBeUndefined();
-  });
-
-  it("buildExitErrorText：relay 激活时映射优先；非激活走既有文案；child error 快照分支保持", () => {
-    expect(buildExitErrorText(15, true, undefined)).toMatch(/^engine_spawn_handshake_timeout:/);
-    expect(buildExitErrorText(15, false, undefined)).toBe("pi child exited with code 15");
-    expect(buildExitErrorText(3, true, undefined)).toBe("pi child exited with code 3");
-    expect(buildExitErrorText(127, false, "spawn ENOENT")).toBe("pi child error: spawn ENOENT (exit code 127)");
-    // relay 激活但退出码非 relay 词表 → 既有文案不丢
-    expect(buildExitErrorText(137, true, undefined)).toBe("pi child exited with code 137");
   });
 });

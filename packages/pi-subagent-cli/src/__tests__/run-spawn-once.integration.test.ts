@@ -12,7 +12,7 @@
 //   - abort signal → SIGTERM → 128+signal 折算退出码；
 //   - [M2 ⑦] prepare 期已 abort（signal 预置位）→ 不 spawn（marker/镜像/登记三重
 //     证明）+ 取消终态（宿主 cancel 措辞透传，与中途 abort 143 同形载荷）；
-//   - spawn 失败（relay node 不存在路径，真实 ENOENT）→ 失败终态 + 可诊断 error（F4）；
+//   - spawn 失败（不存在的执行器路径，真实 ENOENT）→ 失败终态 + 可诊断 error（F4）；
 //   - [D1] schema 派生注入：params.schema → 孙进程 env PI_WORKFLOW_SCHEMA
 //     逐字节等值（JSON.stringify 本体）+ 无 schema 声明不注入；
 //   - [F-1] schemaExpected 判定源 = task.schema 声明形态（无 structured-output
@@ -629,7 +629,7 @@ describe("runSpawnOnce 集成（fake pi 子进程）", () => {
       setTimeout(() => controller.abort(), 150);
       const result = await runP;
       expect(result.success).toBe(false);
-      // POSIX 信号退出折算 = 128 + signo（SIGTERM=15 → 143），与 runtime relay 侧退出码口径一致
+      // POSIX 信号退出折算 = 128 + signo（SIGTERM=15 → 143）
       expect(result.error).toBe("pi child exited with code 143");
       expect(result.failureKind).toBe("unknown");
       expect(result.turns).toBe(0);
@@ -638,15 +638,16 @@ describe("runSpawnOnce 集成（fake pi 子进程）", () => {
     }
   }, 15_000);
 
-  it("spawn 失败（relay node 指向不存在路径，真实 ENOENT）→ 失败终态 + 可诊断 error，不伪成功（F4）", async () => {
+  it("spawn 失败（execPath 指向不存在路径，真实 ENOENT）→ 失败终态 + 可诊断 error，不伪成功（F4）", async () => {
     const h = await makeHarness("success");
-    // relay 三键激活 → getPiInvocation 分支 0：command = RELAY_NODE（真实不存在的
-    // 绝对路径）。不经任何 mock——Node spawn 的 'error' 事件（ENOENT）+ 迟到
-    // close(code=-2) 全真实时序，锁「从未启动的子进程不得判成功」。
+    // 执行器不存在（真实绝对路径）：argv[1] 指向不存在脚本 + execPath 非通用运行时
+    // → getPiInvocation 分支 2：command = execPath。不经任何 mock——Node spawn 的
+    // 'error' 事件（ENOENT）+ 迟到 close(code=-2) 全真实时序，锁「从未启动的子进程
+    // 不得判成功」。
     const ghostNode = join(h.rootDir, "nonexistent-node-bin");
-    process.env.TAIJI_SUBAGENT_RELAY_SOCKET = join(h.rootDir, "relay.sock");
-    process.env.TAIJI_SUBAGENT_RELAY_NODE = ghostNode;
-    process.env.TAIJI_SUBAGENT_RELAY_SCRIPT = join(h.rootDir, "relay.mjs");
+    const originalExecPath = process.execPath;
+    process.argv[1] = join(h.rootDir, "nonexistent-pi-entry.mjs");
+    Object.defineProperty(process, "execPath", { value: ghostNode, configurable: true });
     try {
       const result = await runSpawnOnce(baseParams(h), callbacksOf(h));
 
@@ -661,9 +662,7 @@ describe("runSpawnOnce 集成（fake pi 子进程）", () => {
       // 子进程从未运行：无 pid 可上报（reportChildSpawned 的 pid 缺失守卫）
       expect(h.childSpawned).toHaveLength(0);
     } finally {
-      delete process.env.TAIJI_SUBAGENT_RELAY_SOCKET;
-      delete process.env.TAIJI_SUBAGENT_RELAY_NODE;
-      delete process.env.TAIJI_SUBAGENT_RELAY_SCRIPT;
+      Object.defineProperty(process, "execPath", { value: originalExecPath, configurable: true });
       restoreHarness(h);
     }
   }, 15_000);

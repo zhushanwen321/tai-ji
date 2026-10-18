@@ -1,9 +1,8 @@
 // src/control-env.ts
 //
 // [M3] subagent control 通道 env 名 SSOT（设计 relay-spawn-transport §3.3 D4/D5、
-// §3.4.3）。与 relay-env.ts 同族的跨进程契约单源：runtime（注入主 pi 与引擎）、
-// extension（transport 选择谓词）、嵌套 extension（同一 socket 建独立连接）从这里
-// 消费键名，禁各处手写字符串。
+// §3.4.3）。跨进程契约单源：runtime（注入主 pi 与引擎）、extension（transport
+// 选择谓词）、嵌套 extension（同一 socket 建独立连接）从这里消费键名，禁各处手写字符串。
 //
 // env 语义（D4 env × spawn 点矩阵）：
 // - SOCKET 非空 = 托管态（runtime control server 已注入）→ RuntimeEngineTransport；
@@ -13,10 +12,9 @@
 //   嵌套 task pi 经引擎出站 env 继承同值（共享同一根）。
 //
 // 键族归属（防 deny 方向错位）：control 两键是引擎与 runtime 之间的 L0 基础设施键
-// （SDK env.ts ENGINE_ENV_L0_INFRA_KEYS 登记，relay 三键同族位置）——**不进**
-// ENGINE_ENV_DENY_LIST（引擎/嵌套 extension 是合法读者），**不进** shared 出站 deny
-// （task pi 也要携带，嵌套子代理走同一 socket）。M3 删除 relay 后本键族替代
-// RELAY_ENV_SOCKET 在激活判定面的位置（relay 三键随 u-m3-delete 退役）。
+// （SDK env.ts ENGINE_ENV_L0_INFRA_KEYS 登记）——**不进** ENGINE_ENV_DENY_LIST
+// （引擎/嵌套 extension 是合法读者），**不进** shared 出站 deny（task pi 也要携带，
+// 嵌套子代理走同一 socket）。
 
 /** control socket 路径（runtime 监听 `<dataDir>/run/subagent-<pid>.sock`；Windows 为 named pipe）。 */
 export const CONTROL_ENV_SOCKET = "TAIJI_SUBAGENT_CONTROL_SOCKET";

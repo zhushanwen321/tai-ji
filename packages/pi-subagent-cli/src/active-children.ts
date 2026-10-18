@@ -37,8 +37,7 @@ export function getActiveChild(recordId: string): ChildProcess | undefined {
  * 全量收割（dispose）：SIGKILL 直杀（pi-rpc killPiProcess 单源）；返回收割数。
  *
  * 杀决策落盘（2026-09-24 事故取证补口）：dispose 全量收割会连坐杀掉**正在运行**的
- * record 子进程（relay 形态下 = relay.mjs 代理 → runtime kill-on-disconnect 连坐真
- * pi child）——该决策此前零日志，主 pi 侧先杀代理的断连形态第一现场不可考。收割
+ * record 子进程（pi 子进程直杀）——该决策此前零日志，第一现场不可考。收割
  * 必记 warn：record 清单 + 各自进程态（在跑被杀 / 已退出仅销账）。
  */
 export function killAllActiveChildren(): number {

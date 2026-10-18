@@ -123,7 +123,7 @@ export interface SubagentStreamChunk {
 }
 
 /**
- * session.getSubagentStreamState reply 快照（shared 协议投影别名）：RelayTee 既有内存
+ * session.getSubagentStreamState reply 快照（shared 协议投影别名）：SubagentTee 既有内存
  * 状态的只读视图。found=false = 该 record 当前无进行中流（未开始或已定稿）。
  */
 export type SubagentStreamStateSnapshot = ServerMessageMap['session.getSubagentStreamState']

@@ -146,7 +146,7 @@ export interface RunOrchestrationDeps {
   /** ConcurrencyPool（DefaultConcurrencyPool 共享池——execute/executeAndAwait/
    *  chat 轮次/引擎任务的并发槽）。 */
   readonly getPool: () => ConcurrencyPool;
-  /** 根 session id（relay 归属键 SESSION_ID 权威源；runCtx 注入）。 */
+  /** 根 session id（engine_open 归属键权威源；runCtx 注入）。 */
   readonly getSessionRootId: () => string | null;
   /** 嵌套身份基线（BC-12 嵌套护栏深度检查）。 */
   readonly getExecNesting: () => ExecutionNestingContext;
@@ -677,7 +677,7 @@ export class RunOrchestration {
         ctxModel: identity.resolved.model,
         onEvent: journal.onEvent,
         ...(stream !== undefined ? { stream } : {}),
-        // [F6] 根 session id 注入（relay 归属键 SESSION_ID 权威源；null/空串不上 wire）
+        // [F6] 根 session id 注入（engine_open 归属键权威源；null/空串不上 wire）
         ...(this.sessionRootId !== null && this.sessionRootId !== ""
           ? { sessionRootId: this.sessionRootId }
           : {}),

@@ -23,8 +23,9 @@
  *   因此消费本 helper 的 spec 必须在 launchRealApp 前设 process.env.TAIJI_AGENT_DEBUG='1'。
  * - preserved 计数语义：runs = workflow run 聚合根数；records = Σ run.state.calls.size
  *   （每 call 对应一条 subagent record）；stores = sessionState 条目数（workflow-events.ts:477-487）。
- * - run 存活反证串：`[relay] connection lost, killing child (kill-on-disconnect)` 与
- *   `[relay] child exited recordId=... code=143`（infra/relay/relay-registry.ts:465/459）。
+ * - run 存活反证串：`[subagent-control] kill decision action=terminate_channel channelId=...
+ *   reason=...` 与 `[subagent-control] engine closed channelId=... code=... signal=...
+ *   reason=...`（infra/subagent-control/control-server.ts）。
  * - workflow-record 权威 entry：主 session JSONL `{"customType":"workflow-record","data":
  *   {v:2,kind}}`（W1 record/journal 媒体重定位起现行格式，schema SSOT =
  *   subagent-core orchestration/workflow-record-entry.ts）：kind=registered（起跑，无
@@ -36,8 +37,7 @@
  * - 托盘：`[data-testid="tray-builtin-button"][data-kind="workflow"]` +
  *   `[data-testid="tray-builtin-count"]`（ComposerTray.vue:81/106-110；data-state running|idle）。
  * - 引擎 CLI 进程 marker：`pi-subagent-cli.mjs`（faux 轨 seedFauxDataDir 的 subagents/config.json
- *   command/args，launch-app-real.ts:185-193）；relay 代理 marker `relay.mjs`（内嵌镜像脚本文件名，
- *   subagent-core/src/execution/relay-env.ts:12）；真实 pi 子进程 marker：bundled pi 二进制
+ *   command/args，launch-app-real.ts:185-193）；真实 pi 子进程 marker：bundled pi 二进制
  *   `resources/pi/`（findPiExecutable 缺省）。
  * - 项目 skill 目录 `<cwd>/.pi/skills` 进扫描集与 watch 集：services/skill-dirs.ts:39/95
  *   （A1 扫描集对账）；skill name = 目录名（scanners/skill-scanner.ts loadSkillFromDir）。
@@ -178,7 +178,7 @@ export function readExtensionLogs(dataDir: string): string {
 
 /** 轮询节奏常量（日志/文件轮询间隔） */
 const LOG_POLL_INTERVAL_MS = 500
-/** 引擎执行树死亡级联（stdin EOF → relay 断连 → kill-on-disconnect）的宽限上界 */
+/** 引擎执行树死亡级联（stdin EOF → control 断连 → kill-on-disconnect）的宽限上界 */
 const ENGINE_TREE_GONE_TIMEOUT_MS = 15_000
 /** 引擎执行树归零核对间隔 */
 const TREE_POLL_INTERVAL_MS = 1000
@@ -382,19 +382,19 @@ function psEntries(): PsEntry[] {
   })
 }
 
-/** 引擎执行树 marker（含子进程；孤儿子集都是这三族，见文件头 marker 说明） */
-const ENGINE_TREE_MARKERS = ['pi-subagent-cli.mjs', 'relay.mjs', 'resources/pi/'] as const
+/** 引擎执行树 marker（含子进程；孤儿子集都是这两族，见文件头 marker 说明） */
+const ENGINE_TREE_MARKERS = ['pi-subagent-cli.mjs', 'resources/pi/'] as const
 
 function pidsMatching(markers: readonly string[]): number[] {
-  // 排除宿主同跑实例：marker 是通用串（relay.mjs / resources/pi/ / pi-subagent-cli.mjs），
+  // 排除宿主同跑实例：marker 是通用串（resources/pi/ / pi-subagent-cli.mjs），
   // 同机其他 taiji 实例的引擎执行树进程同样命中，全局 ps 扫描凭 marker 无法区分。
   // 判属锚点 = binary/cli 载体路径（REPO_ROOT）：被测实例全部引擎进程都从本 worktree
-  // 的 resources 加载（electron dist spawn 的 pi binary / relay / cli 全在本仓下），
+  // 的 resources 加载（electron dist spawn 的 pi binary / cli 全在本仓下），
   // argv 必含 REPO_ROOT；兄弟 worktree dev 实例与打包版 TaiJi.app 的载体路径都在别处。
   // 不能凭 session-dir / 数据目录特征判属——数据目录走 env 不走 argv，两类外来实例
-  // 都实测出现过 argv 无 --session-dir 且无 ~/.taiji 提法的形态（打包版 relay 曾因此
-  // 误计入 baseline，2026-09-19 复验实证；兄弟 dev 的 rpc pi 曾因此落入「不含 ~/.taiji
-  // 兜底」误报孤儿，2026-09-19 终态确认实证，活态污染 3→6→8 个）；--append-system-prompt
+  // 都实测出现过 argv 无 --session-dir 且无 ~/.taiji 提法的形态（兄弟 dev 的 rpc pi
+  // 曾因此落入「不含 ~/.taiji 兜底」误报孤儿，2026-09-19 终态确认实证，活态污染
+  // 3→6→8 个）；--append-system-prompt
   // 等参数值也可能恰好落在本机 tmp 根下，任意 tmp 提法匹配同样不可靠。
   return psEntries()
     .filter((e) => markers.some((mk) => e.command.includes(mk)))
@@ -413,7 +413,7 @@ export function engineTreePids(): number[] {
   return pidsMatching(ENGINE_TREE_MARKERS)
 }
 
-/** 轮询引擎执行树 pid 归零（相对基线；宽限给 stdin EOF → relay 断连 → kill 级联留时） */
+/** 轮询引擎执行树 pid 归零（相对基线；宽限给 stdin EOF → control 断连 → kill 级联留时） */
 export async function waitForEngineTreeGone(baselinePids: number[], timeoutMs = ENGINE_TREE_GONE_TIMEOUT_MS): Promise<number[]> {
   const deadline = Date.now() + timeoutMs
   let remaining = engineTreePids().filter((pid) => baselinePids.includes(pid))

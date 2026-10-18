@@ -153,7 +153,7 @@ export interface ChatRoundsDeps {
   /** pi 句柄（worktree 冲突 appendEntry + FinalizeDeps manifest 写失败 appendEntry；
    *  initSession 晚绑定）。 */
   readonly getPi: () => PiLike | null;
-  /** 根 session id（relay 归属键 SESSION_ID 权威源；runCtx 注入）。 */
+  /** 根 session id（engine_open 归属键权威源；runCtx 注入）。 */
   readonly getSessionRootId: () => string | null;
   /** UI streaming sink（createBackgroundStream 的 widget 通道）。 */
   readonly getStreamSink: () => StreamSink | null;
@@ -308,7 +308,7 @@ export class ChatRounds {
     /** Continuation 轮回调面（[modeless 波1] 必填——见方法头注释）。 */
     continuation: ContinuationRoundHandlers,
   ): void {
-    // 创建 streaming 生命周期对象。策略（含 widget 退役步骤 2：GUI + relay 激活时停发
+    // 创建 streaming 生命周期对象。策略（含 widget 退役步骤 2：GUI + control 激活时停发
     // 私货、TUI/未激活原样创建、sink 未注入降级 undefined）集中在 createBackgroundStream。
     const stream = createBackgroundStream(record.id, this.deps.getStreamSink(), this.deps.getUiObservability().getMode(), process.env);
 
@@ -485,7 +485,7 @@ export class ChatRounds {
         ...(engine.id !== DEFAULT_ENGINE_ID
           ? { onHandleReady: backfillRoundHandle }
           : {}),
-        // [F6] 根 session id 注入（relay 归属键 SESSION_ID 权威源；null/空串不上 wire）。
+        // [F6] 根 session id 注入（engine_open 归属键权威源；null/空串不上 wire）。
         // 本方法是 pi 引擎 background 轮次派发的主路径（含一次性任务——modeless
         // 下同走会话形态 resume 键），漏注 = pi child exit 13。
         ...(this.sessionRootId !== null && this.sessionRootId !== ""

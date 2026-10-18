@@ -3,7 +3,7 @@
  * CLI（真进程组：fixture → 假 pi 子进程）。覆盖 hello/engine_open/frame 双向/
  * engine_closed/engine_close/断连组杀/超时/背压/帧超限/pid 文件形状。
  *
- * 形态对齐 relay-registry.test.ts：dataDir 注入 mkdtemp、上限与时间窗注入小值、
+ * 形态：dataDir 注入 mkdtemp、上限与时间窗注入小值、
  * POSIX 组杀断言 skipIf(win32)。
  */
 import { describe, it, expect, afterEach } from 'vitest'

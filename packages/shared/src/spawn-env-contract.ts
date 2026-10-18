@@ -23,7 +23,7 @@ export const SPAWN_ENV_OUTBOUND_DENY_LIST: readonly string[] = [
    * 进程自身生命周期标志（「我是怎么被拉起来的」），生产消费者全部位于 runtime 进程
    * 自身（isPackaged() 判定六处），pi 子树零消费。泄漏危害有探针 P1 实锤：
    * `TAIJI_AGENT_PACKAGED=1 bash scripts/validate-runtime-bundle.sh` → exit 1，
-   * `[6/6] [runtime] fatal: relay server init failed: Bundled pi binary not found`
+   * `[6/6] [runtime] fatal: subagent control server init failed: Bundled pi binary not found`
    * ——隔离 runtime 继承污染标志后 boot 即按打包态 findPackagedPi 解析不存在的捆绑
    * 二进制，直接挡死产品内的 git commit（设计文档 §1.2 受害链全文）。
    */
@@ -64,7 +64,7 @@ export const SPAWN_ENV_OUTBOUND_DENY_LIST: readonly string[] = [
 // 红线 R1/R3：纯函数，绝不读写 process.env 本体——一切输入经参数注入（runtime 自身
 // 有六处 isPackaged() 消费点读本进程 env，污染本体即全局事故；CJS bundle 约束下也无
 // 任何 import.meta/静态路径依赖）。不 mutate 入参对象，返回全新对象（「spread 副本上
-// 删」范式的函数化，参照 relay-registry buildChildEnv）。
+// 删」范式的函数化，参照 runtime 既有 buildChildEnv 先例）。
 //
 // prefix 匹配语义与各进程既有 buildSafeEnv 一致：仅 key.startsWith(prefix)。
 // [S4] 该判定已覆盖 key === prefix 的精确匹配场景（s.startsWith(s) === true）。
@@ -135,7 +135,7 @@ export function buildOutboundChildEnv(opts: BuildOutboundChildEnvOptions): Recor
 
 /** forward 参考清单的单条目形态：只作文档性登记，不参与任何运行时过滤。 */
 export interface SpawnEnvForwardEntry {
-  /** 变量名（relay 三件套类多变量以基名 + 通配说明登记） */
+  /** 变量名（多变量族以基名 + 通配说明登记） */
   name: string
   /** 进入 pi 子树的途径（哪个边界注入，或依赖入站白名单继承） */
   injectionPath: string
@@ -144,7 +144,7 @@ export interface SpawnEnvForwardEntry {
 }
 
 /**
- * forward 参考清单（B 组五项 + U0 核实增补一项）：合法跨界功能契约变量的证据档案。
+ * forward 参考清单（B 组四项 + U0 核实增补一项）：合法跨界功能契约变量的证据档案。
  *
  * 【参考文档性质导出】本清单不参与过滤——runtime→pi 的实际放行仍由入站白名单前缀
  * 匹配决定（白名单含裸前缀，凡消费锚点成立的变量天然在列）；本清单的价值是把
@@ -181,15 +181,6 @@ export const SPAWN_ENV_FORWARD_REFERENCE: readonly SpawnEnvForwardEntry[] = [
     ],
   },
   {
-    name: 'TAIJI_SUBAGENT_RELAY_SOCKET/_NODE/_SCRIPT',
-    injectionPath:
-      'B3 经 getRelaySpawnEnv() 显式注入（infra/pi/process-manager.ts:123；常量定义 extensions/universal/subagent-workflow/src/execution/relay-env.ts:13-15，构建于 runtime infra/relay/relay-env.ts，未激活返回空对象「全有或全无」降级）；'
-      + '嵌套 spawn 方向由 relay-registry buildChildEnv 剥五键防旧值误导（relay-registry.ts:178）',
-    piConsumerAnchors: [
-      'subagent-workflow relay 代理链三基础设施（session-runner.ts isRelayActive 判定齐备后经代理转交 spawn）',
-    ],
-  },
-  {
     name: 'TAIJI_ZCODE_CLI',
     injectionPath: 'B3 白名单放行（裸 TAIJI_ 前缀）',
     // [W11] 锚点回写（W12 拖尾子项①）：core 内建 engines/zcode 已删，生产消费点
@@ -207,8 +198,8 @@ export const SPAWN_ENV_FORWARD_REFERENCE: readonly SpawnEnvForwardEntry[] = [
     // （主 pi 进程内 extension 直接读自身 process.env 取全局缺省 idle timeout）；
     // 其余命中均为注释/工具描述文本（lifecycle-manager.ts:46/:102/:109、types.ts:392/:589、
     // subagent-tool.ts:280）与测试（resource-policy.test.ts）。
-    // 「设置进嵌套 frame.env」通路不存在：嵌套注入仅写 RELAY_ENV_SESSION_ID/_RECORD_ID
-    // 两键（session-runner.ts:987-988），故通道唯一 = B3 入站白名单继承。
+    // 「设置进嵌套 frame.env」通路不存在：嵌套注入只写身份 env（session-runner
+    // 的 identity-env 通道），故通道唯一 = B3 入站白名单继承。
     name: 'TAIJI_SUBAGENT_IDLE_TIMEOUT_MS',
     injectionPath: 'B3 白名单放行（裸 TAIJI_ 前缀）；extension 无 frame.env 自注入通路（U0① 核实）',
     piConsumerAnchors: [

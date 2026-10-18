@@ -290,33 +290,6 @@ function checkPermissionWasm(failed) {
 	}
 }
 
-// relay 代理 CLI 校验（M1，设计 §3.4.1 构建期校验）：RELAY_ENV_SCRIPT 指向的 staged
-// 资产存在/非空/含协议版本常量。激活判定（isRelayActive）只看 env 非空，staged 资产
-// 缺失时 spawn ENOENT 表现为「子进程起不来」的难排查失败，在此 fail-fast 拦截。
-// M3 删除 relay 资产时同步删除本检查（bundle-extensions.mjs 的 relay 拷贝同理）。
-function checkRelayAsset(failed) {
-	const pkgDir = join(STAGED, "pi-subagent-workflow");
-	const relayScript = join(pkgDir, "relay", "relay.mjs");
-	if (!existsSync(relayScript)) {
-		failed.push({
-			pkg: "pi-subagent-workflow",
-			reason: "缺 relay/relay.mjs（E-1 代理 CLI 未 staged——RELAY_ENV_SCRIPT 指向的文件不存在，spawn 必 ENOENT）",
-		});
-		return;
-	}
-	const content = readFileSync(relayScript, "utf8");
-	if (content.trim().length === 0) {
-		failed.push({ pkg: "pi-subagent-workflow", reason: "relay/relay.mjs 为空文件（staged 资产损坏）" });
-		return;
-	}
-	if (!/RELAY_PROTOCOL_VERSION\s*=\s*1\b/.test(content)) {
-		failed.push({
-			pkg: "pi-subagent-workflow",
-			reason: "relay/relay.mjs 缺协议版本常量 RELAY_PROTOCOL_VERSION = 1（疑似拷贝了错误文件）",
-		});
-	}
-}
-
 function printPackageOutcomes(verified, skipped) {
 	if (verified.length > 0) {
 		console.log(`✓ import 通过 (${verified.length}):`);
@@ -355,7 +328,6 @@ async function main() {
 
 	const { verified, skipped, failed } = await verifyAllPackages(pkgDirs);
 	checkPermissionWasm(failed);
-	checkRelayAsset(failed);
 
 	// 输出结果
 	printPackageOutcomes(verified, skipped);

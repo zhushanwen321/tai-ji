@@ -5,7 +5,7 @@
  *
  * 安全立场（设计 §3.7）：**显式注入绝对路径，不 cwd 探测**（防用户 repo 预置同名
  * 目录冒充）——本模块是 runtime（宿主）侧的唯一推导点，推导完成后以 env 值传递，
- * 引擎根只读 manifest 不执行用户 repo 内同名目录。staged 位置双形态与 relay-paths.ts
+ * 引擎根只读 manifest 不执行用户 repo 内同名目录。staged 位置双形态与 staged 路径推导
  * 的既有先例同款：打包 = <cwd>/engines（runtime sidecar 的 cwd = Resources，由
  * runtime-manager 设定）；dev = <projectRoot>/resources/engines。
  *

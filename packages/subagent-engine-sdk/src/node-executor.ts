@@ -4,14 +4,13 @@
 //
 // 为什么在 SDK：core/引擎包都不可 import runtime（runtime 包只存在于 taiji 宿主
 // 链），而矩阵的三宿主（pi 扩展 / runtime sidecar / standalone）两侧都要消费同一套
-// 解析规则——探针逻辑在 SDK 侧复刻 runtime 先例
-// packages/runtime/src/infra/relay/relay-env.ts:47-90（行为保持一致：同超时、同
-// --eval process.exit(0) 探针体、同 PATH/HOME 最小 env、同 Electron RUN_AS_NODE 条件）。
+// 解析规则——探针行为约束（同超时、同 --eval process.exit(0) 探针体、同 PATH/HOME
+// 最小 env、同 Electron RUN_AS_NODE 条件）。
 //
 // 矩阵（规格逐行对应）：
 //   ① pi 扩展宿主（打包）：process.execPath 是 Bun standalone binary，再拉就是又起
-//      一个 pi——必须用注入执行器 TAIJI_AGENT_ENGINE_NODE（与 relay 的
-//      TAIJI_SUBAGENT_RELAY_NODE 不复用，单一名字）；执行器为 Electron 二进制时同时带
+//      一个 pi——必须用注入执行器 TAIJI_AGENT_ENGINE_NODE（单一名字）；执行器为
+//      Electron 二进制时同时带
 //      ELECTRON_RUN_AS_NODE=1；首次使用前跑探针，失败 → engine_not_found + 指引。
 //   ② runtime sidecar：process.execPath + ELECTRON_RUN_AS_NODE=1（sidecar 本身由主进程
 //      以该形态 spawn，其 execPath 即宿主 Electron / dev node）。
@@ -26,14 +25,14 @@ import { spawn } from "node:child_process";
 
 import { EngineSdkError } from "./protocol/error-codes.ts";
 
-/** L0 注入的引擎执行器路径 env（与 relay 的 TAIJI_SUBAGENT_RELAY_NODE 不复用）。 */
+/** L0 注入的引擎执行器路径 env。 */
 export const ENGINE_NODE_ENV = "TAIJI_AGENT_ENGINE_NODE";
 
-/** 探针超时（与 relay-env.ts 先例一致：spawn 执行器跑 --eval "process.exit(0)" 的上限）。 */
+/** 探针超时（spawn 执行器跑 --eval "process.exit(0)" 的上限）。 */
 const PROBE_TIMEOUT_MS = 5_000;
 
 /**
- * 探针：验证执行器能以纯 node 语义执行 JS（先例 = runtime relay-env.ts:47-90）。
+ * 探针：验证执行器能以纯 node 语义执行 JS。
  *
  * 为什么需要：打包态 pi 宿主的候选执行器可能是 Electron 二进制——直接当 node 用会
  * 拉起 GUI，必须同 env 注入 ELECTRON_RUN_AS_NODE=1 才是纯 node 模式；探针被证伪则
@@ -93,7 +92,7 @@ function probeCached(execPath: string, isElectron: boolean): Promise<boolean> {
   return p;
 }
 
-/** 测试钩子：清探针缓存（生产无调用方；与 relay-env resetRelayNodeProbeCache 同款）。 */
+/** 测试钩子：清探针缓存（生产无调用方）。 */
 export function resetEngineNodeProbeCache(): void {
   probeCache.clear();
 }

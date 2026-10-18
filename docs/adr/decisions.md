@@ -664,6 +664,8 @@ WorkflowTab 步骤列表的数据源绑定从「workflow-record 全量快照（6
 
 **登记**：设计文档 `.tmp/tech-design/subagent-stream-chunk-design.md`（过程产物，不入库）；实施跨 shared / runtime / core / renderer 四包 + 本登记，清单见设计文档 §5。
 
+**【2026-10-18 现状更正（ADR-0144）】**：relay 通道已整体退役——本条产出端 = 引擎 fd3 raw mirror（`SubagentMirrorHub`）+ `SubagentTee`（`packages/runtime/src/infra/subagent-control/subagent-tee.ts`）；`session.getSubagentStreamState` 数据源 = runtime control server 的 tee，响应增 `degraded:boolean`（镜像 seq 空洞时 live 视图降级，reload 不受影响）。「增量推送 + 按需拉取」语义与触发源不变。
+
 ### ADR-0129 subagent 执行模型切换：用户覆盖语义与跨端命令通道（2026-10-06 用户裁决「按 A 做」）
 **决策**：
 - **用户覆盖赢**：`setModel` 在模型解析链第 0 层加用户覆盖记账，优先级高于 agent frontmatter 与脚本/调用参数显式指定的模型。
@@ -804,3 +806,17 @@ WorkflowTab 步骤列表的数据源绑定从「workflow-record 全量快照（6
 **ADR-0132 红线修订（2026-10-16 用户授权）**：本 ADR 的元数据供给写入修订 ADR-0132 的「taiji 全程零写入 `~/.zcode/` 任何文件」——仅允许写入两条**非秘密**元数据键（`account-provider:<pid>:identity` / `:auth-source`）；凭据仍全程 ZCode 自有、taiji 零 token/apiKey 注入、其余 `~/.zcode/` 文件仍零写入；该写入为用户 2026-10-16 授权的 hack 形态（ADR-0132 的 provider 配置零写入与副本落 taiji 数据目录语义不变）。
 
 **登记**：实装 = `packages/zcode-subagent-cli/src/appserver-launcher.ts`（安装门 + wrapper 落盘）/ `appserver-launcher-patches.ts`（三处改写 + 元数据供给）/ `packages/zcode-subagent-cli/src/preparer.ts` + `package.json`（目标家族 bigmodel-individual）/ 测试 `appserver-launcher.test.ts`（含补丁产物自读回归）+ `preparer.test.ts`；`docs/todo/engine-remote-membership-face.md` 附录的「ZCode 自身 bug」结论按本条修正。
+
+### ADR-0144 引擎 spawn 权收归 runtime + EngineTransport 双实现 + prompt response 唯一送达回执（2026-10-18 设计落地，relay-spawn-transport）
+
+**决策**：
+
+1. **进程拓扑**：托管态（runtime 存活）下引擎进程 spawn 权收归 runtime（subagent control server）；extension 只做控制客户端（`RuntimeEngineTransport`）。standalone（无 control env）继续 local spawn（`LocalEngineTransport`）。选择谓词单源 = SDK `isControlEnvActive`（`TAIJI_SUBAGENT_CONTROL_SOCKET` 非空 → runtime；空串/缺失 → local）；托管态连接失败显式报 `engine_transport_unavailable`，不静默回落 local。
+2. **传输契约**：`EngineTransport`（open/writeFrame/onFrame/onExit/close）定义在 extension ↔ engine 接缝，local 与 runtime 两实现共用；engine-protocol 语义（握手 / 请求-应答关联 / 反向路由 / 崩溃重建）留在 `EngineClient`。回执不放进 transport（transport 不理解 pi 协议），留在引擎的 run 生命周期。
+3. **送达回执语义**：`prompt` response 是唯一成功回执；stdout 活性只用于零输出判定（prompt 写入后 30s 完全零输出 → `engine_prompt_not_delivered`）；pi 显式拒绝 → `engine_prompt_rejected`；stdin 不可用/EPIPE → 立即失败。**不加重试**（prompt 可能已产生副作用）。
+4. **实时流**：引擎以 fd3 raw mirror 保留 GUI live 流（runtime 注入 `TAIJI_ENGINE_RAW_MIRROR`；引擎 tap `child.stdout` 原始字节）；runtime 侧 `SubagentMirrorHub` + `SubagentTee` 翻译，seq 空洞 → `degraded:true`（停止发布 live 帧，reload 从 pi session/JSONL 恢复）；tee 是权威数据的派生视图，不是第二权威。
+5. **relay 退役**：relay 代理脚本与其协议探针/常量/接线整体删除——`packages/runtime/src/infra/relay/**`、SDK `relay-env.ts`/`relay-frames.ts`、core `./relay-env` 子入口、extension 的 relay 测试、bundle/verify 的 relay 资产拷贝与校验。
+
+**依据**：事故根因 = relay 的 `drain` 早于 `accept`（stdin 无监听即 resume，大 prompt 静默丢失且无回执）+ 两个进程所有权；用户裁决的修复方向 M1（显式状态机 + 任务文本截断）→ M2（回执与零输出判定）→ M3（spawn 权收归 runtime，relay 删除）。设计文档 `.tmp/tech-design/relay-spawn-transport.md`（过程产物，不入库）。
+
+**登记**：实装 = `packages/runtime/src/infra/subagent-control/**`（control server / channel / mirror / tee / sweep）、`packages/subagent-core/src/execution/engine/client/transport/**`、`packages/pi-subagent-cli/src/{prompt-ack,raw-mirror}.ts`、SDK `protocol/control-protocol.ts` + `control-env.ts`；约束 C-proc-09 scope / C-proc-18 计数源 / C-proc-25 kill 链 / C-ext-27 子入口已同批更新；文档 = `architecture/subagent-engine-protocolization.md`、`architecture/env-propagation-boundary.md`、`TROUBLESHOOTING.md` #6-#9、`extensions/subagents/engine-development-guide.md`。

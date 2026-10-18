@@ -1,8 +1,8 @@
 /**
- * relay live ≡ reload 等价性断言。
+ * subagent live ≡ reload 等价性断言。
  *
  * 不变量：同一 subagent 任务的 drawer 对话流，两条供数腿喂同一个 core reducer 产出全等 state——
- * - live 腿：真实 RelayTee（infra/relay/relay-tee.ts，生产 tee 翻译层）消费合成 child stdout
+ * - live 腿：真实 SubagentTee（infra/subagent-control/subagent-tee.ts，生产 tee 翻译层）消费合成 child stdout
  *   字节流（pi RPC 事件 JSONL），产出的 session.subagentEntriesAppended entry 帧序列
  *   （PiToolCallEntryForm overlay 形态按 applySubagentEntries 同规则剔除，不进 reducer）
  *   → replayEntries；
@@ -19,7 +19,7 @@
  * id），此处不写 id 使两腿 deriveBaseId 走同一 `e<N>` 派生；消息体 timestamp 两腿同源，
  * toolResult 回填不落时间戳字段，无其他归一点。
  *
- * 运行：cd packages/runtime && npx vitest run src/__tests__/equivalence/relay-live-reload.test.ts
+ * 运行：cd packages/runtime && npx vitest run src/__tests__/equivalence/subagent-live-reload.test.ts
  */
 import { describe, it, expect, afterEach, vi } from 'vitest'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
@@ -27,15 +27,15 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { ServerMessage, PiToolCallEntryForm } from '@taiji/shared'
 import { subagentVirtualId } from '@taiji/shared'
-import { RelayTee } from '../../infra/relay/relay-tee.js'
+import { SubagentTee } from '../../infra/subagent-control/subagent-tee.js'
 import { SubagentMirrorHub } from '../../infra/subagent-control/mirror.js'
 import { getHistoryFromFilePath } from '../../services/session-history.js'
 import { PiSessionStore } from '../../infra/pi/session-store.js'
 import { replayEntries } from '../../../../core/src/domain/chat/apply-entry.js'
 import type { PiEntry } from '../../../../core/src/domain/chat/apply-entry.js'
 
-const MAIN_SID = 's-eq-relay-main'
-const RECORD_ID = 'rec-eq-relay-1'
+const MAIN_SID = 's-eq-subagent-main'
+const RECORD_ID = 'rec-eq-subagent-1'
 const VIRTUAL_ID = subagentVirtualId(MAIN_SID, RECORD_ID)
 
 // ── 同一 subagent 任务的逻辑会话（两腿 fixture 的唯一事实源）──────────────────
@@ -47,13 +47,13 @@ const CONVERSATION = {
     user: { text: '分析这个仓库的入口文件', timestamp: 1000 },
     assistantWithTool: {
       text: '先读取入口文件',
-      toolCall: { id: 'tc-eq-relay-1', name: 'read', arguments: { path: '/repo/src/main.ts' } },
+      toolCall: { id: 'tc-eq-subagent-1', name: 'read', arguments: { path: '/repo/src/main.ts' } },
       usage: { input: 120, output: 30 },
       stopReason: 'toolUse',
       timestamp: 1100,
     },
     toolResult: {
-      toolCallId: 'tc-eq-relay-1',
+      toolCallId: 'tc-eq-subagent-1',
       toolName: 'read',
       text: 'export function main() { bootstrap() }',
       isError: false,
@@ -181,7 +181,7 @@ function toChildStdoutLines(): string[] {
   ]
 }
 
-describe('equivalence: relay live ≡ reload（tee entry 帧 × getSubagentHistory 直读链，免真实 LLM）', () => {
+describe('equivalence: subagent live ≡ reload（tee entry 帧 × getSubagentHistory 直读链，免真实 LLM）', () => {
   let dir: string | null = null
 
   afterEach(async () => {
@@ -192,9 +192,9 @@ describe('equivalence: relay live ≡ reload（tee entry 帧 × getSubagentHisto
   })
 
   it('tee entry 帧序列 replayEntries 产出 == JSONL 直读链产出（messages deep equal + reducer 确定性）', async () => {
-    // ── live 腿：真实 RelayTee 消费合成 stdout → 收集两种 WS 帧 ──
+    // ── live 腿：真实 SubagentTee 消费合成 stdout → 收集两种 WS 帧 ──
     const frames: Array<{ sessionId: string; msg: ServerMessage }> = []
-    const tee = new RelayTee({
+    const tee = new SubagentTee({
       mainSessionId: MAIN_SID,
       recordId: RECORD_ID,
       publish: (sessionId, msg) => frames.push({ sessionId, msg }),
@@ -217,7 +217,7 @@ describe('equivalence: relay live ≡ reload（tee entry 帧 × getSubagentHisto
       (e): e is PiToolCallEntryForm => (e as { type?: string }).type === 'toolCall',
     )
     expect(overlayForms).toHaveLength(1)
-    expect(overlayForms[0]?.toolCallId).toBe('tc-eq-relay-1')
+    expect(overlayForms[0]?.toolCallId).toBe('tc-eq-subagent-1')
 
     // 帧归属契约（关键规则 7 / §4.3）：entry 帧路由 key = 主 sid，payload.sessionId 也是主 sid
     for (const f of entryFrames) {
@@ -269,7 +269,7 @@ describe('equivalence: relay live ≡ reload（tee entry 帧 × getSubagentHisto
     const liveState = replayEntries(liveEntries)
 
     // ── reload 腿：getSubagentHistory pi 直读链尾段（JSONL fixtures 驱动）──
-    dir = await mkdtemp(join(tmpdir(), 'relay-equiv-'))
+    dir = await mkdtemp(join(tmpdir(), 'subagent-equiv-'))
     const filePath = join(dir, 'subagent-session.jsonl')
     await writeFile(filePath, toSessionJsonlLines().join('\n') + '\n', 'utf-8')
     const { messages: reloadMessages } = await getHistoryFromFilePath(filePath, new PiSessionStore())
@@ -285,7 +285,7 @@ describe('equivalence: relay live ≡ reload（tee entry 帧 × getSubagentHisto
     expect(reloadMessages.map((m) => m.role)).toEqual(['user', 'assistant', 'assistant', 'user', 'assistant'])
     const withTool = reloadMessages[1]
     expect(withTool?.toolCalls?.[0]).toMatchObject({
-      id: 'tc-eq-relay-1',
+      id: 'tc-eq-subagent-1',
       status: 'completed',
       output: 'export function main() { bootstrap() }',
     })
@@ -303,16 +303,16 @@ describe('equivalence: relay live ≡ reload（tee entry 帧 × getSubagentHisto
 
     // 直通腿：真实 Tee 直接喂行（镜像开通前的既有通路）
     const direct: Array<{ sessionId: string; msg: ServerMessage }> = []
-    const directTee = new RelayTee({
+    const directTee = new SubagentTee({
       mainSessionId: MAIN_SID,
       recordId: RECORD_ID,
-      publish: (sid, msg) => direct.push({ sid, msg }),
+      publish: (sid, msg) => direct.push({ sessionId: sid, msg }),
     })
     directTee.feed(Buffer.from(lines.map((l) => l + '\n').join(''), 'utf-8'))
 
     // 镜像腿：引擎 writer 同款编码（逐行 {v,recordId,seq,b64}）→ hub 解码（含任意 chunk 切分）
     const mirrored: Array<{ sessionId: string; msg: ServerMessage }> = []
-    const hub = new SubagentMirrorHub({ publish: (sid, msg) => mirrored.push({ sid, msg }) })
+    const hub = new SubagentMirrorHub({ publish: (sid, msg) => mirrored.push({ sessionId: sid, msg }) })
     hub.openChannel('ch-eq', MAIN_SID)
     let seq = 0
     const wire = lines
@@ -363,7 +363,7 @@ describe('equivalence: relay live ≡ reload（tee entry 帧 × getSubagentHisto
     // 消费端失步检测与水位回放逻辑在 core/renderer 单元验证（§4.3）；本文件锚定其数据源
     // ——产生端只在 feed 刻度间推进状态，拉取（RPC 半）同步读到的快照必须自洽：
     // found=true + msgSeq=1 + lastDeltaSeq 水位 + lines 全文 split 形态
-    const tee = new RelayTee({
+    const tee = new SubagentTee({
       mainSessionId: MAIN_SID,
       recordId: RECORD_ID,
       publish: () => {},

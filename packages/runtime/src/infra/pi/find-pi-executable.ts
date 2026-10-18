@@ -1,7 +1,7 @@
 /**
- * pi 可执行文件定位（从 process-manager.ts 抽出为共享函数，E 方案 relay-registry 复用）。
+ * pi 可执行文件定位（从 process-manager.ts 抽出为共享函数，引擎 spawn 复用）。
  *
- * 两个消费方：ProcessManager（主 pi 会话，原调用点行为零变化）与 relay 注册表
+ * 两个消费方：ProcessManager（主 pi 会话，原调用点行为零变化）与引擎 spawn 链
  * （受托 spawn 真实 pi 子进程——与 pi-invocation 同款决策链的 runtime 侧落点，设计
  * §4.2）。搜索顺序与日志前缀保持抽取前原样。
  */

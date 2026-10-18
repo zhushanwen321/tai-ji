@@ -12,12 +12,10 @@ import { SETTINGS_CORRUPTED, errorWithCode, toErrorMessage } from '../../utils/e
 import { isPackaged } from '../../utils/runtime-env.js'
 import { buildOutboundChildEnv } from '../spawn-env.js'
 // E-2（subagent-realtime-channel §4.2/§4.4）：findPiExecutable 抽出为共享函数
-// （relay-registry 受托 spawn 真实 pi 复用同一决策链），原调用点行为零变化。
+// （引擎受托 spawn 真实 pi 复用同一决策链），原调用点行为零变化。
 import { findPiExecutable } from './find-pi-executable.js'
-import { getRelaySpawnEnv } from '../relay/relay-env.js'
 // M3（relay-spawn-transport §3.3 D4）：control env 注入（socket + root session 初值）
-// ——server 未激活时返回空对象（降级语义与 relay 同款，extension 侧
-// isControlEnvActive 判缺失回落 local transport）。
+// ——server 未激活时返回空对象（extension 侧 isControlEnvActive 判缺失回落 local transport）。
 import { getControlSpawnEnv } from '../subagent-control/control-server.js'
 import { getCrashJournal } from '../crash-journal.js'
 // 信号取证（signal-forensics）：受管 pi 意外退出（exit_converge）时的发送方归因。
@@ -211,11 +209,6 @@ export class ProcessManager implements IProcessManager {
     // 进程 env 没有该变量（shared getDataDir 缺省时不写 env），透传链断——故此处
     // 用 getConfigDir()（读同一 env + 同一缺省）显式补齐。放 spread 首位，
     // options?.env 仍可覆盖。
-    // E-2 relay env（subagent-realtime-channel §2.2）：注入 SOCKET/NODE/SCRIPT 三个
-    // 基础设施 env，extension 侧 isRelayActive 判定齐备后经代理转交 spawn。降级语义：
-    // relay server 未激活 / staged 脚本缺失 / 执行器探针失败 → 空对象（spread 无副作用，
-    // 行为与现状逐字节一致）；首次调用含探针 spawn（之后 Promise 缓存，无重复开销）。
-    const relayEnv = await getRelaySpawnEnv(this.projectRoot)
     // M3 control env（设计 §3.3 D4 env × spawn 点矩阵 main pi 行）：SOCKET（transport
     // 选择键）+ ROOT_SESSION_ID 初值（create 路径为 temp id，连接归属权威 = 第一个
     // engine_open 帧，本键无权威消费方——矩阵完备性注入，见 getControlSpawnEnv 注释）。
@@ -228,12 +221,11 @@ export class ProcessManager implements IProcessManager {
     // B3 出站注入组（docs/architecture/env-propagation-boundary.md §5-U3）：本对象经
     // RpcClientOptions.env 传入，由 rpc-client start() 的 buildOutboundChildEnv 作为
     // extras 在过滤基座之上整体覆盖；下方 spread 键序即覆盖优先级
-    // （DATA_DIR < PATH 补齐 < relay 三件套 < 调用方 options.env），与组装迁入构建器前
+    // （DATA_DIR < PATH 补齐 < control 两键 < 调用方 options.env），与组装迁入构建器前
     // 逐键一致。PI_CODING_AGENT_DIR 由 rpc-client 在构建器输出之上追加（同迁移前）。
     const injectionEnv: Record<string, string> = {
       TAIJI_AGENT_DATA_DIR: getConfigDir(),
       ...pathEnv,
-      ...relayEnv,
       ...controlEnv,
       ...engineRootsEnv,
     }

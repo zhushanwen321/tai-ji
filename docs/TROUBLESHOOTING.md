@@ -118,40 +118,45 @@ lsof -i :1420 -P | grep node
 # 确认 1420 端口属于当前 worktree，且进程 cwd 指向当前 worktree 的 renderer 目录
 ```
 
-### 6. subagent 没走 relay 通道：先查首启执行器探针
+### 6. subagent 没走 runtime control 通道：查 control env 与传输选择
 
-relay 激活前的执行器探针（spawn 执行器跑 `--eval "process.exit(0)"`）**失败会被缓存到 runtime 重启为止**，之后每次 spawn 主 pi 都直接回落直连、不再重试——「subagent 为什么没走 relay」第一件事查首启日志：
+托管态下 runtime 持有引擎进程 spawn 权：runtime 向主 pi 进程注入 `TAIJI_SUBAGENT_CONTROL_SOCKET`（control socket 路径）与 `TAIJI_SUBAGENT_CONTROL_ROOT_SESSION_ID`，extension 侧 `EngineClient` 以 `isControlEnvActive`（socket 非空）为唯一谓词选择 `RuntimeEngineTransport`；env 缺失/空串（standalone、旧 runtime、control server 未监听）回落 local transport（`TAIJI_AGENT_DEBUG=1` 时可见 debug 日志 `transport selected: local (no control env)`）。
 
 ```bash
-grep "node executor probe failed" ~/.taiji/logs/runtime-*.log   # dev 用 ~/.taiji-dev
+# 1. control server 是否监听（runtime 首启日志）
+grep "subagent-control" ~/.taiji/logs/runtime-*.log                    # dev 用 ~/.taiji-dev
+# 2. 主 pi 子树是否带 control 两键（subagent bash 工具内）
+printenv | grep TAIJI_SUBAGENT_CONTROL
+# 3. extension 侧传输选择（需 TAIJI_AGENT_DEBUG=1）
+grep "transport selected" ~/.taiji/agent/logs/subagents-*.log
 ```
 
-另有 staged 代理脚本缺失、socket server 未监听两个静默不激活的常态路径，均只表现为回落直连。机制细节见 relay 模块（`packages/runtime/src/` relay 相关源码注释，待后续批次补注释）。
+托管态 transport 失败是显式错误（不静默回落 local）：`engine_transport_unavailable`（connect/hello 失败——runtime 未运行或正在重启）、`engine_transport_lost`（连接中途丢失——runtime 崩溃/重启）、`engine_open_timeout`（runtime 侧 engine_open/spawn 停滞）、`engine_frame_too_large` / `engine_backpressure_overflow`（帧上限/背压溢出）——恢复 = 重启 taiji 后重跑（连接不原地重试）。引擎执行器解析失败呈现 `engine_not_found`（`resolveEngineNodeLaunch` 路径不可解析或执行器探针失败，恢复指引随错误文案）；executor 探针结果按进程缓存，失败后需重启相关进程才会重探。raw mirror 丢弃/seq 空洞 → `degraded:true`：live 视图停止更新但不影响 run，reload 查看历史即可。机制细节见 `infra/subagent-control/` 源码注释与 [architecture/subagent-engine-protocolization.md](architecture/subagent-engine-protocolization.md)。
 
 ### 7. bash 工具里启动 Electron 二进制被静默降级纯 node 模式（ELECTRON_RUN_AS_NODE=1）
 
-打包模式下 relay 激活时给主 pi 进程 env 注入 `ELECTRON_RUN_AS_NODE=1`（代理 CLI 复用 Electron 二进制当纯 node 跑所必需），并经握手帧透传给 relay 子进程及后代——subagent 的 bash 工具里启动任何 Electron 二进制（如 `npx electron .`）会被静默切到纯 node 模式：无窗口、无报错。定位：bash 工具里 `env | grep ELECTRON`。这是 relay 通道的刻意设计，终端服务不受影响（TerminalService 独立构造 env 已剥离）。**playwright e2e 形态（fail-fast 非静默）[2026-09-22]**：经 subagent bash 跑 `npx playwright test --project=electron*` 时，launch-app fixture 的 `{...process.env}` 把该变量透传给 Playwright 拉起的 Electron → 纯 node 化不认 `--remote-debugging-port=0` → 全部用例 `electron.launch: Process failed to launch!` + `bad option` + exit 9（对照：直接跑 `--version` 打出 `v24.15.0` 而非 `Electron x.y.z` 即此病）。对策 = e2e 运行命令前缀 `env -u ELECTRON_RUN_AS_NODE`（CI 无此变量时 no-op）；pnpm dev 正规链（dev-instance `buildDevEnv` LEAK_ENV_KEYS）已内置剥离不受影响。机制细节见 relay 模块（源码注释待后续批次补齐）。
+打包模式下 runtime sidecar 由 main 以 `ELECTRON_RUN_AS_NODE=1` 启动（Electron 二进制当纯 node 跑 sidecar 的必需条件），该变量经白名单透传进入 pi 子树；runtime spawn 引擎遇到 Electron 执行器时同样注入（SDK node-executor 的宿主矩阵①/②）——subagent 的 bash 工具里启动任何 Electron 二进制（如 `npx electron .`）会被静默切到纯 node 模式：无窗口、无报错。定位：bash 工具里 `env | grep ELECTRON`。终端服务不受影响（TerminalService 独立构造 env 已剥离）。**playwright e2e 形态（fail-fast 非静默）[2026-09-22]**：经 subagent bash 跑 `npx playwright test --project=electron*` 时，launch-app fixture 的 `{...process.env}` 把该变量透传给 Playwright 拉起的 Electron → 纯 node 化不认 `--remote-debugging-port=0` → 全部用例 `electron.launch: Process failed to launch!` + `bad option` + exit 9（对照：直接跑 `--version` 打出 `v24.15.0` 而非 `Electron x.y.z` 即此病）。对策 = e2e 运行命令前缀 `env -u ELECTRON_RUN_AS_NODE`（CI 无此变量时 no-op）；pnpm dev 正规链（dev-instance `buildDevEnv` LEAK_ENV_KEYS）已内置剥离不受影响。机制细节见 `packages/subagent-engine-sdk/src/node-executor.ts` 的宿主矩阵注释与 `apps/electron/main/supervisor/process-control.ts` 的 sidecar env 注释。
 
 **同根因的第二个症状面（2026-09-19 实测）：playwright electron 轨在 agent bash 里全灭**——`npx playwright test --project=electron` 报 `electron.launch: Process failed to launch!` + `Electron: bad option: --remote-debugging-port=0`（`--version` 回显 `v24.x` 而非 `v42.3.3` = 已被降级为裸 node，node 的 CLI 不认该开关）；与代码无关，**跑 e2e 前先 `env -u ELECTRON_RUN_AS_NODE`**（例：`env -u ELECTRON_RUN_AS_NODE npx playwright test --project=electron-smoke`）。别误判为 Electron 二进制损坏或构建失败。解除该变量后 mock 轨与 real 轨均可跑通（2026-09-20 实测：electron 轨 64/64 全绿，real 轨为凭证无关的 faux LLM 装配，无需真实 provider）。
 
 **配套陷阱：mock/real 两轨共用同一份 renderer 产物，须分批构建**——两条轨都读 `apps/electron/renderer/dist`，构建期由 `VITE_MOCK` define 决定走哪条 transport 链，而 e2e globalSetup 只查产物存在、不查构建形态。故跑完 real 轨（`VITE_E2E=true pnpm run build:e2e`）后必须重建 mock bundle（`VITE_E2E=true VITE_MOCK=true pnpm run build:e2e`）再跑 mock 轨，否则 mock spec 全部以 30s 超时呈现。两个方向的形态错配均已由 pre-flight fail-fast 拦住并给出重建命令：`launch-app-real.ts` 的 `assertRealRendererBundle`（mock 产物在场）+ `launch-app.ts` 的 `assertMockRendererBundle`（real 产物在场，判据 = mock fixture 标记串 `Promise 代码评审`，两 fixture 共享导出）。
 
-### 8. runtime 启动即退出："fatal: relay server init failed"
+### 8. runtime 启动即退出："fatal: subagent control server init failed"
 
-relay socket server 在 runtime listen 后同步初始化，失败即 fatal + exit 1（fail-fast：覆盖/复用 socket 会劫持他人注册表，宁可不起）。常见原因：`<dataDir>/run` 不可写、残留 socket 文件被活实例持有：
+subagent control server 在 runtime listen 后同步初始化，失败即 fatal + exit 1（fail-fast：覆盖/复用 socket 会劫持他人注册表，宁可不起）。常见原因：`<dataDir>/run` 不可写、残留 socket 文件被活实例持有：
 
 ```bash
 ls -la ~/.taiji/run/          # dev 用 ~/.taiji-dev
-lsof | grep relay-.*\.sock
+lsof | grep subagent-.*\.sock
 ```
 
-**listen EINVAL（2026-09-18 B5b 实测）**：socket 路径 `<dataDir>/run/relay-<pid>.sock` 受 macOS unix domain socket 104 字节路径上限约束——dataDir 路径过长（深层临时目录 / 长目录名，实测 106 字节中招）时 bind EINVAL，runtime 起不来且日志仅此一行。短 dataDir（如 `/tmp/<短前缀>`，全路径含 socket 文件名 ≤100 字节）无此问题。e2e spec 的 mkdtemp 前缀必须短（skill-reload-askuser 系列前缀曾因此从中招形态改短）。
+**listen EINVAL（2026-09-18 B5b 实测）**：socket 路径 `<dataDir>/run/subagent-<pid>.sock` 受 macOS unix domain socket 104 字节路径上限约束——dataDir 路径过长（深层临时目录 / 长目录名，实测 106 字节中招）时 bind EINVAL，runtime 起不来且日志仅此一行。短 dataDir（如 `/tmp/<短前缀>`，全路径含 socket 文件名 ≤100 字节）无此问题。e2e spec 的 mkdtemp 前缀必须短（skill-reload-askuser 系列前缀曾因此从中招形态改短）。
 
-机制细节见 relay 模块（源码注释待后续批次补齐）。
+机制细节见 `infra/subagent-control/control-server.ts` / `paths.ts` 源码注释（路径长度门禁 `assertSocketPathLength` 在 listen 前 fail-fast）。
 
 ### 9. agent 会话内执行 validate-runtime-bundle 失败："Bundled pi binary not found"
 
-**症状**：agent 会话内跑 `bash scripts/validate-runtime-bundle.sh` 报 `[runtime] fatal: relay server init failed: Bundled pi binary not found`；或其它依赖「打包态判定」的行为异常（如 `isPackaged()` 返回错误结果）。
+**症状**：agent 会话内跑 `bash scripts/validate-runtime-bundle.sh` 报 `[runtime] fatal: subagent control server init failed: Bundled pi binary not found`；或其它依赖「打包态判定」的行为异常（如 `isPackaged()` 返回错误结果）。
 
 **根因**：agent 会话 env 泄漏了 `TAIJI_AGENT_PACKAGED=1`（打包标记只在 main→runtime 注入链上有意义），会话内再起的 runtime 子进程误判打包态、按打包路径解析捆绑二进制。
 
@@ -329,7 +334,7 @@ VITE_E2E=true VITE_MOCK=true pnpm run build:e2e
 
 **现象**：runtime 进程启动秒退（exit 1），日志含上述 fatal 与 `live at: 127.0.0.1:<port> (source: ...)` 定位行。
 
-**判定**：同数据目录已有活 runtime 实例（单实例检查，约束 C-proc-25）。检查读 `<dataDir>/runtime-instance.json`（runtime 自登记）与 `<dataDir>/runtime.port`（supervisor 通道）候选端口做 TCP 探活，任一可达即拒绝；端口不可达但 instance.json 登记 pid 存活（启动窗口内的预登记实例，probe 通过即登记、早于 listen）同样拒绝——双 runtime 共享数据目录会导致第二实例 reattach 抢管他人 session、退出时 destroyAll + relay kill-on-disconnect 屠杀全部主 pi 与 subagent，拒绝是正确防御。
+**判定**：同数据目录已有活 runtime 实例（单实例检查，约束 C-proc-25）。检查读 `<dataDir>/runtime-instance.json`（runtime 自登记）与 `<dataDir>/runtime.port`（supervisor 通道）候选端口做 TCP 探活，任一可达即拒绝；端口不可达但 instance.json 登记 pid 存活（启动窗口内的预登记实例，probe 通过即登记、早于 listen）同样拒绝——双 runtime 共享数据目录会导致第二实例 reattach 抢管他人 session、退出时 destroyAll + control 通道 kill-on-disconnect 屠杀全部主 pi 与 subagent，拒绝是正确防御。
 
 **排障**：定位行带 `reachable: true`（端口可达）时按 `lsof -i :<port>` 确认持有者——app 正常重启的竞态窗口等旧实例退出后重试即自愈；定位行带 `reachable: false`（pid 存活但未 listen）时先等并发的另一实例完成启动再重试，`ps -p <pid>` 确认其身份；要并行跑第二实例（dev / e2e / 验收脚本）必须给独立 `TAIJI_AGENT_DATA_DIR`（mkdtemp 或 `~/.taiji-dev/instances/<worktree>`），禁止继承 prod 数据目录 env 起 runtime；仅当持有 pid / 端口确认是无关进程（pid 复用占位）时可删 `runtime-instance.json` 后重试。app 正常链路（Electron supervisor）stop 时等旧 runtime 完全退出才 spawn 新实例，不应触发本报错——频繁出现说明有绕过 supervisor 的独立 runtime 在同目录运行。
 
@@ -435,7 +440,7 @@ bare repo + worktree 结构下，`.bare/hooks/pre-commit` 是全部 worktree 共
 
 ### 归因排障默认优先序：读日志 → 代码定界 → 对照实验（2026-09-12 基线实验教训）
 
-症状跨多个候选改动窗口需归因时，**默认按固定优先序推进，禁止跳级上对照实验**：① **读日志**（relay 镜像日志 / `<dataDir>/logs/` / pi 会话 jsonl / 引擎 stdout——现有日志常已含断点位置）；② **代码定界**（`git log`/`git blame` 圈嫌疑窗口，2 分钟级成本，能直接否决错误线索）；③ **对照实验**仅当①②穷尽、且两个候选的修复路径真实分叉时启动。两条核心教训：归因标签与修复动作解耦时实验无价值（最终都要修最新代码）；实验判据本身未经校验时，实验连归因都给不了。
+症状跨多个候选改动窗口需归因时，**默认按固定优先序推进，禁止跳级上对照实验**：① **读日志**（subagent 镜像日志 / `<dataDir>/logs/` / pi 会话 jsonl / 引擎 stdout——现有日志常已含断点位置）；② **代码定界**（`git log`/`git blame` 圈嫌疑窗口，2 分钟级成本，能直接否决错误线索）；③ **对照实验**仅当①②穷尽、且两个候选的修复路径真实分叉时启动。两条核心教训：归因标签与修复动作解耦时实验无价值（最终都要修最新代码）；实验判据本身未经校验时，实验连归因都给不了。
 
 ### 周期轮询/兜底定时器的合法性判定（2026-08-28）
 

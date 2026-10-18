@@ -36,18 +36,13 @@ const BASE_OPTS = {
   rawMirror: true,
 }
 
-/** relay 三键仍在 u-foundation 冻结 L0 清单（u-m3-delete 才退役）——本单元的必需键集 = L0 清单 − relay 三键。 */
-const RELAY_THREE_KEYS = [
-  'TAIJI_SUBAGENT_RELAY_SOCKET',
-  'TAIJI_SUBAGENT_RELAY_NODE',
-  'TAIJI_SUBAGENT_RELAY_SCRIPT',
-]
-const REQUIRED_L0_KEYS = ENGINE_ENV_L0_INFRA_KEYS.filter((k) => !RELAY_THREE_KEYS.includes(k))
+/** L0 清单必需键集（runtime 宿主注入面必须全量在场）。 */
+const REQUIRED_L0_KEYS = ENGINE_ENV_L0_INFRA_KEYS
 
 describe('buildEngineLaunchEnv 键集合（锚定 u-foundation 冻结清单）', () => {
   const env = buildEngineLaunchEnv(BASE_OPTS)
 
-  it('u-foundation L0 基础设施键（− relay 三键）全部在场', () => {
+  it('L0 基础设施键全部在场', () => {
     for (const key of REQUIRED_L0_KEYS) {
       expect(env[key], `L0 key ${key} must be present`).toBeTruthy()
     }

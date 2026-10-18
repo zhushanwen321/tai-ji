@@ -378,8 +378,8 @@ describe("subagent runtime handler — 错误文案含纠正正例", () => {
   it("startHandler throw 含 Correct 纠正正例（平铺形态）", () => {
     // [D6②] startHandler 内核（含 Correct 文案）已下沉 core subagent-actions-core，
     // 断言目标跟随文案权威源。锚点用 ./workflows/* 子入口（exports 映射包根真实目录，
-    // 随源码走不依赖 dist 构建——relay-env 锚在 require 条件下落 dist/，CI 不构建
-    // workspace 包时 resolve 直接 MODULE_NOT_FOUND）。
+    // 随源码走不依赖 dist 构建——require 条件下 workspace 包 dist 未构建时
+    // resolve 直接 MODULE_NOT_FOUND）。
     const coreRoot = join(
       dirname(
         createRequire(import.meta.url).resolve("@zhushanwen/subagent-core/workflows/README.md"),

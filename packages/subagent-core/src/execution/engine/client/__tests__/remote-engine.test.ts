@@ -277,7 +277,7 @@ describe("RemoteEngine run 帧映射", () => {
   });
 
   it("ctx.sessionRootId → wire ctx.sessionRootId 逐字保真；缺省不传 → wire 无该键（F6 additive）", async () => {
-    // 正向：根 session id 上 wire（pi 引擎 relay 归属键 SESSION_ID 的权威来源）
+    // 正向：根 session id 上 wire（pi 引擎 engine_open 归属键的权威来源）
     const withRoot = makeEngine();
     const { ctx: ctxRoot, events: eventsRoot } = makeCtx({ sessionRootId: "root-sess-f6" });
     await withRoot.engine.run({ prompt: "p" }, ctxRoot);

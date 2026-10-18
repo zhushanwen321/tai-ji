@@ -12,7 +12,7 @@
 // 传 shared 版（C-proc-09 唯一构建点的过滤/deny 语义不变）。
 //
 // pi-subagent-cli 侧不消费本函数（其子进程 env 走 SDK buildOutboundChildEnv + 引擎
-// 自 wire task.schema 就地派生注入的 PI_WORKFLOW_SCHEMA + relay 活跃时的归属键重写，
+// 自 wire task.schema 就地派生注入的 PI_WORKFLOW_SCHEMA + deny 终态后的身份 env 写回，
 // 无 pi agent 目录隔离需求——PI_CODING_AGENT_DIR 全局一份，无隔离池；现行登记
 // constraints.json C-ext-15）。
 

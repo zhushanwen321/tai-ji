@@ -1,5 +1,5 @@
 /**
- * relay-tee 单测（E-2，验收 1 的 tee 部分）。
+ * subagent-tee 单测（E-2 验收 1 的 tee 部分；含 M3 degraded 状态）。
  *
  * 覆盖：entry 化产出（message_end / toolCall 两形态 + 锚点补齐）、stream_chunk 增量契约
  * （B2：delta 原样转发 + msgSeq/deltaSeq 双序号 + 虚拟分区归属 + 定稿清除帧 additive
@@ -7,7 +7,7 @@
  * 连坐）、连续 50 失败放弃、大 payload tool result 全量透传。
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { RelayTee, TEE_MAX_CONSECUTIVE_FAILURES } from '../../../infra/relay/relay-tee.js'
+import { SubagentTee, TEE_MAX_CONSECUTIVE_FAILURES } from '../../../infra/subagent-control/subagent-tee.js'
 import type { ServerMessage } from '@taiji/shared'
 import { subagentVirtualId, isSubagentVirtualId, extractMainSessionId } from '@taiji/shared'
 
@@ -20,12 +20,12 @@ function createTee() {
   const publish = vi.fn((sid: string, msg: ServerMessage) => {
     published.push({ sid, msg })
   })
-  const tee = new RelayTee({ mainSessionId: 'main-1', recordId: 'rec-1', publish })
+  const tee = new SubagentTee({ mainSessionId: 'main-1', recordId: 'rec-1', publish })
   return { tee, publish, published }
 }
 
 /** 便捷：把若干 JSON 行拼成 Buffer 喂入。 */
-function feedLines(tee: RelayTee, lines: unknown[]): void {
+function feedLines(tee: SubagentTee, lines: unknown[]): void {
   const chunk = lines.map((l) => JSON.stringify(l)).join('\n') + '\n'
   tee.feed(Buffer.from(chunk, 'utf-8'))
 }
@@ -50,7 +50,7 @@ function chunkFrames(published: Array<{ sid: string; msg: ServerMessage }>) {
     .map((p) => p.msg.payload as { sessionId: string; recordId: string; msgSeq: number; deltaSeq: number; delta: string })
 }
 
-describe('RelayTee entry 化产出', () => {
+describe('SubagentTee entry 化产出', () => {
   it('message_end → session.subagentEntriesAppended（bus key = 主 sid，payload 归属主 sid + recordId）', () => {
     const { tee, published } = createTee()
     feedLines(tee, [
@@ -107,7 +107,7 @@ describe('RelayTee entry 化产出', () => {
   })
 })
 
-describe('RelayTee stream_chunk 增量契约（B2 subagent-stream-chunk §4.2）', () => {
+describe('SubagentTee stream_chunk 增量契约（B2 subagent-stream-chunk §4.2）', () => {
   it('text_delta → stream_chunk：delta 原样转发 + 双序号（msgSeq 从 1 起、deltaSeq per-message 从 0）+ 虚拟分区归属', () => {
     const { tee, published } = createTee()
     feedLines(tee, [
@@ -195,7 +195,7 @@ describe('RelayTee stream_chunk 增量契约（B2 subagent-stream-chunk §4.2）
   })
 })
 
-describe('RelayTee 状态查询入口 getStreamState（B2 §4.2，session.getSubagentStreamState 数据源）', () => {
+describe('SubagentTee 状态查询入口 getStreamState（B2 §4.2，session.getSubagentStreamState 数据源）', () => {
   it('未开始 / 已定稿 / dispose 后：found=false，其余字段恒 0/0/[]', () => {
     const { tee } = createTee()
     // 未开始
@@ -238,7 +238,7 @@ describe('RelayTee 状态查询入口 getStreamState（B2 §4.2，session.getSub
   })
 })
 
-describe('RelayTee 隔离与放弃', () => {
+describe('SubagentTee 隔离与放弃', () => {
   beforeEach(() => {
     vi.spyOn(console, 'warn').mockImplementation(() => {})
   })
@@ -294,7 +294,7 @@ describe('RelayTee 隔离与放弃', () => {
   })
 })
 
-describe('RelayTee toolResult entry 全量透传（不在此层截断）', () => {
+describe('SubagentTee toolResult entry 全量透传（不在此层截断）', () => {
   // [subagent 投影丢失修复] 本层曾有 >256KB 整体替换截断——image 块/输出文本/details
   // 全丢且 reload 才恢复，与主会话 tool_call_end 帧（无此层截断）形成通道水位劈叉。
   // 量级防护单点 = 下游出站守卫（outbound-frame-registry 已注册
@@ -376,8 +376,8 @@ describe('[B1 / btw-question D9③] 生产半边：btw 线归属的键中段翻�
     const published: Array<{ sid: string; msg: ServerMessage }> = []
     const publish = vi.fn((sid: string, msg: ServerMessage) => { published.push({ sid, msg }) })
     const vid = 'btw:line-rt-b1'
-    expect(() => new RelayTee({ mainSessionId: vid, recordId: 'rec-b1', publish })).not.toThrow()
-    const tee = new RelayTee({ mainSessionId: vid, recordId: 'rec-b1', publish })
+    expect(() => new SubagentTee({ mainSessionId: vid, recordId: 'rec-b1', publish })).not.toThrow()
+    const tee = new SubagentTee({ mainSessionId: vid, recordId: 'rec-b1', publish })
     feedLines(tee, [
       { type: 'message_start' },
       { type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta: 'hi' } },

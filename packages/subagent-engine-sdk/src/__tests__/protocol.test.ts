@@ -1,7 +1,7 @@
 // src/__tests__/protocol.test.ts
 //
 // 协议面 v1 契约断言（W1 验收：impl-plan §2.1 规格逐项 + A6 协议层部分）。
-// A6 完整真机验收（能力协商/relay/旋钮）归 W2+ 真机场景；本文件锁定协议层可自动
+// A6 完整真机验收（能力协商/旋钮）归 W2+ 真机场景；本文件锁定协议层可自动
 // 判定的子集：版本协商区间、错误码表、方法/通道全集、超时二分、量级常量、帧判别。
 
 import { describe, expect, it } from "vitest";
@@ -292,7 +292,7 @@ describe("帧判别守卫（四帧型互斥判别，W2 行解析器消费）", (
   });
 });
 
-describe("run.params.ctx 增量字段（F6 sessionRootId：relay 归属键 SESSION_ID 权威源）", () => {
+describe("run.params.ctx 增量字段（F6 sessionRootId：engine_open 归属键权威源）", () => {
   const v1Ctx: RunContextParams = { cwd: "/tmp" };
 
   it("带 sessionRootId 的 run ctx 可构造（RunParams 形态承载）", () => {

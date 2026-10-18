@@ -33,12 +33,14 @@ export type { SubagentControlClosedReason }
 // ── 上限与时间窗（§3.3 D8；测试经 server options 注入小值，缺省为设计值）──────
 
 /** control 信封单帧上限（engine_frame.line 是其中的字符串载荷）。 */
+// eslint-disable-next-line no-magic-numbers -- 设计标定值（32MB，D8）
 export const CONTROL_MAX_FRAME_BYTES = 32 * 1024 * 1024
 /** 每 channel 单方向待写队列字节上限。 */
 export const CHANNEL_QUEUE_MAX_BYTES = CONTROL_MAX_FRAME_BYTES
 /** 每 channel 单方向待写队列帧数上限。 */
 export const CHANNEL_QUEUE_MAX_FRAMES = 4096
 /** 每连接每方向全部 channel 待写字节总和上限（聚合上界，R1 影响面审 #4）。 */
+// eslint-disable-next-line no-magic-numbers -- 设计标定值（256MB，D8）
 export const CONNECTION_QUEUE_MAX_BYTES = 256 * 1024 * 1024
 /** 每连接 channel 数上限（超出回 engine_open_failed channel_limit）。 */
 export const MAX_CHANNELS_PER_CONNECTION = 256

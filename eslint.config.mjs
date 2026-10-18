@@ -154,6 +154,15 @@ export default [
       'max-lines': ['warn', { max: 520, skipBlankLines: true, skipComments: true }],
     },
   },
+  // [M3 relay-spawn-transport u-m3-control] subagent control server：control 帧路由 /
+  // 通道台账 / 引擎 spawn 与按组收割 / fd3 raw mirror 接线的单点聚合文件（职责内聚，
+  // 再拆属独立重构任务）。970 行 > 500 软上限，提额保留软上限告警（先例同型）。
+  {
+    files: ['packages/runtime/src/infra/subagent-control/control-server.ts'],
+    rules: {
+      'max-lines': ['warn', { max: 1000, skipBlankLines: true, skipComments: true }],
+    },
+  },
   // [HISTORICAL·2026-09 idle-pi-reclamation] 空闲 pi 进程回收功能接入（reaper 装配 +
   // 生命周期挂钩）：runtime index.ts 是进程组装 barrel，main 基线 501 行即超，本次 +41。
   // 拆分归独立重构单元（设计文档已删除，git 历史可追溯），
@@ -920,18 +929,6 @@ export default [
     files: ['packages/runtime/src/infra/pi/session-file-utils.ts'],
     rules: {
       'max-lines': ['warn', { max: 520, skipBlankLines: true, skipComments: true }],
-    },
-  },
-
-  // relay-registry.ts 是 relay 子进程注册表的唯一聚合点（握手/spawn/双向泵/断连杀/
-  // pid 文件 + 重启残留扫描兜底）。2026-09-24 孤儿活跃度分级收割入列后统计行越过
-  // 500：orphan 处置与 sweep 同属注册表生命周期职责，拆分归独立重构任务——按
-  // 「微超即提额，保留软上限告警」先例（pi-provider-store 520 / preset-service 520
-  // 同型）提额而非 off，超限即再暴露。
-  {
-    files: ['packages/runtime/src/infra/relay/relay-registry.ts'],
-    rules: {
-      'max-lines': ['warn', { max: 550, skipBlankLines: true, skipComments: true }],
     },
   },
 

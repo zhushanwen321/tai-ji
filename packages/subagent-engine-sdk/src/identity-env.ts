@@ -5,7 +5,7 @@
 // 用途：子代理 pi 进程靠这组键判定「自己是子进程」并读取自己的身份。三处消费者：
 //   - **写入方** = 引擎在 spawn 子 pi 进程时按 per-run 值写回（pi 引擎
 //     `spawn-runner.ts` 的 `applyIdentityEnvToChildEnv`，写在 `buildOutboundChildEnv`
-//     的 deny 剥除**之后**——deny 名单当前不含这些键，但按 relay 键先例统一在终态写回，
+//     的 deny 剥除**之后**——deny 名单当前不含这些键，但按「deny 终态后显式写回」先例处理，
 //     防将来 deny 扩展时静默失效）；
 //   - **core 读者** = `execution/service/record-access.ts`（子进程跳过孤儿恢复扫描）、
 //     `execution/service/session-baselines.ts`（ROOT_SESSION_ID / DEPTH / ROOT_CWD /

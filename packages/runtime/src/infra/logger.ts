@@ -132,7 +132,7 @@ const openPiStreams = new Set<PiStreamState>()
 
 /**
  * G2 活性无界治理（ADR-0069；原文档已删除 git 可追溯）：流确认 close 后从
- * openPiStreams 摘除。每个 pi spawn（主 session / withEphemeralPi / relay subagent /
+ * openPiStreams 摘除。每个 pi spawn（主 session / withEphemeralPi / 引擎 subagent /
  * crash log）各注册一条，原实现唯一清理点是 runtime 退出的 closeLogger——长跑进程内
  * Set 随工作流强度无界增长（~0.5-2KB/条，两组审计独立发现）。摘除条件三合一（全满足才删）：
  * - ended：写入已终止（write 第一道守卫），不再有新数据进流；
@@ -492,7 +492,7 @@ export interface PiSessionLog {
   /**
    * 写入 pi stdout 原始内容（不格式化——保留协议原貌供事后分析）。
    * string = 行级写入（readline 消费方契约，缺尾换行补齐）；Uint8Array = 原始字节镜像
-   * （relay up 方向 chunk，流自带换行边界，逐字节保真、不补 \n——chunk 可能切断多字节
+   * （引擎 fd3 镜像 chunk，流自带换行边界，逐字节保真、不补 \n——chunk 可能切断多字节
    * 字符，按 Buffer 写避免按 chunk 解码的 UTF-8 截断）。
    */
   write(line: string | Uint8Array): void
@@ -527,27 +527,6 @@ export function createPiSessionLog(sessionId: string): PiSessionLog {
   // 文件名：pi-<date>-<sessionId>.jsonl（date 防跨天 session 冲突）
   const safeSid = sessionId.replace(/[^a-zA-Z0-9-]/g, '').slice(0, SESSION_ID_MAX_LENGTH)
   return createPiStreamWriter(join(logsDir, `pi-${date}-${safeSid}.jsonl`))
-}
-
-/**
- * 为一个 relay 托管的 subagent 子进程创建 stdout 原始字节镜像写入器（E 方案，
- * relay-registry 的 up 方向落盘；架构约定「pi stdout tee 落盘 = pi 卡死时唯一证据」
- * 对 relay 子进程的同款覆盖）。
- *
- * 文件名 `pi-relay-<date>-<recordId>.jsonl`（pi- 前缀对齐既有命名，cleanExpiredLogs
- * 的保留期清理同样覆盖；date 前缀防跨天冲突）。size 轮转与 createPiSessionLog 同款
- * （D7 复刻点③ `pi-relay-*` 同款：共享 createPiStreamWriter 的 per-writer 轮转，旋段
- * `pi-relay-*.jsonl.1.gz` 仍以 pi- 开头，白名单不变量保持）。recordId 来自握手帧（extension
- * 注入），按文件名安全字符集清洗。logger 未初始化时返回 no-op 写入器（与
- * createPiSessionLog 同契约，单元测试无副作用）。
- */
-export function createPiRelayLog(recordId: string): PiSessionLog {
-  if (!logsDir || !currentLevel) {
-    return { write: () => {}, end: () => {} }
-  }
-  const date = new Date().toISOString().slice(0, ISO_DATE_LENGTH)
-  const safeRecordId = recordId.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, SESSION_ID_MAX_LENGTH)
-  return createPiStreamWriter(join(logsDir, `pi-relay-${date}-${safeRecordId}.jsonl`))
 }
 
 /**
@@ -818,7 +797,7 @@ export function writePluginCrashLog(workerId: string, content: string): void {
 }
 
 /**
- * pi 原始流写入器的共享实现（createPiSessionLog / createPiRelayLog / writePiCrashLog 共用）：
+ * pi 原始流写入器的共享实现（createPiSessionLog / createPiSubagentLog / writePiCrashLog 共用）：
  * WriteStream 缓冲写 + 惰性打开 + destroyed 自愈重建 + **size 轮转**（达 MAX_FILE_BYTES → gzip
  * 归档 .1.gz 单代 → 重开新流写原路径 → 回放窗口内的行）。条目注册进 openPiStreams 由
  * closeLogger 统一等待退出 flush。失败语义 best-effort：同步异常静默吞、异步流错误由
@@ -888,7 +867,7 @@ function createPiStreamWriter(file: string): PiSessionLog {
 
 /**
  * write 的行形态归一：string 补齐尾换行（readline 消费方契约），Uint8Array 原样透传
- *（relay up 方向 chunk 逐字节保真，不补 \n——按 chunk 解码会截断多字节字符）。
+ *（引擎 fd3 镜像 chunk 逐字节保真，不补 \n——按 chunk 解码会截断多字节字符）。
  */
 function toPiLineData(line: string | Uint8Array): string | Uint8Array {
   return typeof line === 'string' ? (line.endsWith('\n') ? line : line + '\n') : line

@@ -49,9 +49,6 @@ vi.mock('../src/infra/pi/rpc-client.js', async (importOriginal) => {
 vi.mock('../src/infra/pi/find-pi-executable.js', () => ({
   findPiExecutable: vi.fn(() => '/fake/path/pi'),
 }))
-vi.mock('../src/infra/relay/relay-env.js', () => ({
-  getRelaySpawnEnv: vi.fn(async () => ({})),
-}))
 
 // ── session-lifecycle 部分的模块级 mock（sessions 目录指向 tmp，不碰真实数据目录）──
 

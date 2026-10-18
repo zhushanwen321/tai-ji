@@ -18,7 +18,7 @@
  * warn 不 throw 的静默失效），<available-plans> 清单为空、agent 被引导自行组织章节，
  * 内置模板能力整体丢失。
  *
- * 分发链与 relay/workflows 同理：bundle staged（bundle-extensions.mjs）→
+ * 分发链与 workflows 同理：bundle staged（bundle-extensions.mjs）→
  * electron-builder extraResources 整目录携带，无需改 yml。
  */
 export const PACKAGE_ASSET_DIRS = {

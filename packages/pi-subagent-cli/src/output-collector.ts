@@ -15,7 +15,6 @@ import type {
 } from "@zhushanwen/subagent-engine-sdk";
 import {
   ENGINE_SPAWN_DELIVERY_ERROR_RECOVERY,
-  RELAY_EXIT_CODES,
 } from "@zhushanwen/subagent-engine-sdk";
 import type { ReplayRecordView } from "@zhushanwen/subagent-engine-sdk";
 
@@ -77,7 +76,7 @@ export function isEngineSpawnDeliveryErrorMsg(msg: string | undefined): boolean 
  * 送达错误码在前 > stale > schema_deterministic）。
  *
  * 送达错误码分支置前且返回 "unknown" 的理由：
- *   - **确定性优先**：码前缀由引擎结构化事实产出（tracker 结算 / relay 退出码），
+ *   - **确定性优先**：码前缀由引擎结构化事实产出（tracker 结算），
  *     不是自由文本启发；若落到 stale 词表（rejected 的 pi error 文本可能含
  *     "aborted" 等词）会被误诊为 stale_context（重试只会再失败）——而送达失败的
  *     recovery 恰恰是「re-run the task」（engine_prompt_rejected 的 pi error 也
@@ -98,7 +97,7 @@ export function classifyFailureKind(
 }
 
 // ============================================================
-// [M2 D3/D10] prompt 送达失败与 relay 退出码的终态文案（产出侧单点）
+// [M2 D3/D10] prompt 送达失败的终态文案（产出侧单点）
 // ============================================================
 
 /**
@@ -129,63 +128,13 @@ export function describePromptAckFailure(failure: PromptAckResult): string {
 }
 
 /**
- * relay 代理退出码 → 引擎侧错误文案（[M1/S5] relay 退出码不再呈现为裸
- * 「子进程退出 N」；映射表 = 设计 §3.4.1 失败路径表 + D10：15 专项映射
- * engine_spawn_handshake_timeout，10/11/12/13 按失败路径表给具名文案 + 恢复
- * 指引，不占用 engine_ 码——它们不是「送达窗口」语义）。词表单源 = SDK
- * RELAY_EXIT_CODES；非映射码返回 undefined（走既有退出码文案）。
- */
-export function describeRelayExitCode(exitCode: number): string | undefined {
-  const c = RELAY_EXIT_CODES;
-  if (exitCode === c.ACCEPT_TIMEOUT) {
-    return (
-      `engine_spawn_handshake_timeout: relay proxy timed out waiting for the runtime accept ` +
-      `(relay exit code ${c.ACCEPT_TIMEOUT}). ` +
-      `Recovery: ${ENGINE_SPAWN_DELIVERY_ERROR_RECOVERY.engine_spawn_handshake_timeout}`
-    );
-  }
-  if (exitCode === c.VERSION_MISMATCH) {
-    return (
-      `engine relay handshake rejected: protocol version mismatch (relay exit code ${c.VERSION_MISMATCH}; ` +
-      `the staged relay asset and the runtime are from different builds). ` +
-      `Recovery: upgrade or reinstall taiji (staged assets ship with the runtime), then re-run the task.`
-    );
-  }
-  if (exitCode === c.SOCKET_UNREACHABLE) {
-    return (
-      `engine relay socket unreachable (relay exit code ${c.SOCKET_UNREACHABLE}). ` +
-      `Recovery: restart taiji (the runtime is not running or has been restarted), then re-run the task.`
-    );
-  }
-  if (exitCode === c.SOCKET_CLOSED) {
-    return (
-      `engine relay socket closed mid-flight (relay exit code ${c.SOCKET_CLOSED}). ` +
-      `Recovery: restart taiji and re-run the task.`
-    );
-  }
-  if (exitCode === c.MISSING_IDENTITY) {
-    return (
-      `engine relay identity env missing (relay exit code ${c.MISSING_IDENTITY}). ` +
-      `Recovery: check the subagent extension's relay attribution env injection, then re-run the task.`
-    );
-  }
-  return undefined;
-}
-
-/**
- * 退出码 → 失败 error 文案（collectRunResult 消费的单一装配点）：relay 激活时
- * 子进程是 relay.mjs，其专属退出码映射优先；否则既有「child error / 退出码」
- * 文案不变（真实 pi 自身也可能退出 10-15，不经 relay 映射——语义归属不同）。
+ * 退出码 → 失败 error 文案（collectRunResult 消费的单一装配点）：无结构化失败
+ * 快照时走「child error / 退出码」文案。
  */
 export function buildExitErrorText(
   exitCode: number,
-  relayActive: boolean,
   childErrorMessage: string | undefined,
 ): string {
-  if (relayActive) {
-    const relayText = describeRelayExitCode(exitCode);
-    if (relayText !== undefined) return relayText;
-  }
   return childErrorMessage !== undefined
     ? `pi child error: ${childErrorMessage} (exit code ${exitCode})`
     : `pi child exited with code ${exitCode}`;

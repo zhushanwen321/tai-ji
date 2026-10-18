@@ -220,7 +220,7 @@ describe("close finalizer sessionFile 兜底接线（LC-4 + 仍缺响亮 warn）
     h.fireClose(null, "SIGTERM");
     const exitCode = await h.exitPromise;
 
-    // SIGTERM=15 → 128+15=143（batch A：bare 128 误导 crash triage，与 runtime relay 侧口径对齐）
+    // SIGTERM=15 → 128+15=143（batch A：bare 128 误导 crash triage）
     expect(exitCode).toBe(143);
     expect(h.identity.sessionFile).toBeUndefined();
     expect(sessionFileWarnings()).toHaveLength(1); // 仍缺 → warn 照发（口径与 128+signo 并存）

@@ -551,7 +551,7 @@ describe("D1 session_shutdown reason=reload：破坏性动作全跳过，adoptio
 
     await handlers.get("session_shutdown")!({ type: "session_shutdown", reason: "reload" }, ctx);
 
-    // a：SubagentService 不 dispose（dispose 会经 abort 链杀引擎/relay/子进程）
+    // a：SubagentService 不 dispose（dispose 会经 abort 链杀引擎/子进程）
     expect(serviceDisposeSpy).not.toHaveBeenCalled();
     // c：workflow 域内存不终态化
     expect(mockTerminateRunningRuns).not.toHaveBeenCalled();
@@ -857,10 +857,10 @@ describe("runSettledEffects：三步固定顺序", () => {
     const run = makeRun({ runId: "wf-boom", status: "done", completedAt: new Date(10_000).toISOString() });
     seedRunsWithCapOverflow(h, run);
     const runsSizeBefore = h.runs.size;
-    h.failSend(new Error("relay send boom"));
+    h.failSend(new Error("send boom"));
 
     // 管线不吞错：上抛交由调用方 finalizeRun 的 onRunDone 独立 try 围栏（OR-4/B-4）
-    expect(() => runSettledEffects(h.env, run)).toThrowError("relay send boom");
+    expect(() => runSettledEffects(h.env, run)).toThrowError("send boom");
 
     // step1 到达且失败
     expect(h.seq).toEqual(["1:notifyDone(sendMessage)"]);

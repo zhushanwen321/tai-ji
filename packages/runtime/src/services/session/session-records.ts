@@ -59,7 +59,7 @@ import { SUBAGENTS_ENGINES_FILENAME, PLAN_STATE_CUSTOM_TYPE } from '@zhushanwen/
 import { getDataDir } from '@taiji/shared/paths'
 // zcode 同步副本段常量单源（SDK zcode-db-paths.ts）——与引擎读侧（zcode-subagent-cli
 // preparer 解析链）同源 import；SDK 是跨包契约根，不违 C-ext-13 的「runtime 不 import
-// 引擎包」红线（relay-registry.ts 同款先例）
+// 引擎包」红线（control-server.ts 同款先例）
 import { ZCODE_PI_SYNCED_PROVIDER_CONFIG_SEGMENTS } from '@zhushanwen/subagent-engine-sdk'
 import type { IProcessManager, IPiEngine } from '../ports/pi-engine.js'
 import { getHistoryFromFilePath, type HistoryFileReadResult } from '../session-history.js'

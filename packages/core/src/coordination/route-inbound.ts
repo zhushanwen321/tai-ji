@@ -121,7 +121,7 @@ export interface InboundEffects {
   onMessageComplete?(sessionId: string, payload: { sessionId?: string; stopReason?: string; willRetry?: boolean }): void
   onSubagents?(sessionId: string, subagents: SubagentRecord[]): void
   /**
-   * [E-4] subagent entry 帧兜底消费（session.subagentEntriesAppended，relay tee 产出）。
+   * [E-4] subagent entry 帧兜底消费（session.subagentEntriesAppended，SubagentTee 产出）。
    *
    * 与 onSubagents 同定位：在所有 session（含非活跃）生效——帧先于 drawer 打开到达时
    * 也要写虚拟分区（§6.1 分区惰性创建），不能依赖 per-focus 订阅。renderer 实现经

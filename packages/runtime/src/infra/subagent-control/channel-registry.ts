@@ -86,7 +86,7 @@ export class ControlChannelRegistry {
     if (self === undefined || self.recordId === null) return []
     const out: string[] = []
     const visited = new Set<string>([channelId])
-    let frontier: string[] = [self.recordId]
+    const frontier: string[] = [self.recordId]
     while (frontier.length > 0) {
       const parentRecordId = frontier.shift() as string
       for (const record of this.channels.values()) {

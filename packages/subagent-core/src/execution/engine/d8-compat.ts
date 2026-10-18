@@ -30,9 +30,6 @@ import { fileURLToPath } from "node:url";
 
 import { EngineClient } from "./client/engine-client.ts";
 import { RemoteEngine, type RemoteEngineManifestSnapshot } from "./client/remote-engine.ts";
-import {
-  readRelayForwardEnv,
-} from "@zhushanwen/subagent-engine-sdk";
 import { getEngineDataDir } from "./common/data-dir.ts";
 import {
   CONSERVATIVE_CAPABILITIES,
@@ -303,7 +300,7 @@ function buildManifestSnapshot(manifestInfo: ManifestInfo): RemoteEngineManifest
   };
 }
 
-/** 协议客户端装配（H12 relay 透传 + manifestDiagnostics 诊断快照）。 */
+/** 协议客户端装配（manifestDiagnostics 诊断快照）。 */
 function buildZcodeEngineClient(
   id: string,
   command: string,
@@ -319,10 +316,6 @@ function buildZcodeEngineClient(
     dataDir,
     baseEnv,
     envPrefixes: manifestInfo.envPrefixes,
-    // H12 relay 透传（zsw 宿主链路）：宿主 env 的 relay 连接三键原样提取走 L0 注入；
-    // 身份键 SESSION_ID/RECORD_ID 由 buildEngineChildEnv L1 deny 剥除（引擎按
-    // run.params.ctx 重写，不靠 env 继承）。relay 未激活 → undefined → 不注入。
-    ...(readRelayForwardEnv(baseEnv) !== undefined ? { relay: readRelayForwardEnv(baseEnv) } : {}),
     manifestDiagnostics: {
       capabilities: manifestInfo.capabilities,
       models:

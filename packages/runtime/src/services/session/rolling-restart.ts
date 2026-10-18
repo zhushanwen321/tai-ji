@@ -14,9 +14,9 @@
  *      已证事实，null = 计数未知）。Path A 保活天然被镜像谓词排除：上报口径即
  *      `hasLiveProcessHandle && !hasIdleTimer`（extension 侧 getInFlightSnapshot 双谓词），
  *      settled 后等待续聊的进程不计数 → 不推迟。
- *   ② relay-registry 在途子进程（kill-on-disconnect 同一注册表，size 即在途数）——经
- *      relayInFlight 注入槽消费，生产接线在组合根 index.ts（services 层不直连有状态
- *      IO infra）；未注入 = 该维不贡献（0）。
+ *   ② control server 在途引擎通道（spawn 权收归 runtime，在册通道数即在途引擎数）——经
+ *      engineChannelsInFlight 注入槽消费，生产接线在组合根 index.ts（services 层不直连
+ *      有状态 IO infra）；未注入 = 该维不贡献（0）。
  * - 推迟有界可升级（D5 ②）：命中 → deferred 相位，每拍重判；上限
  *   TAIJI_ROLLING_RESTART_DEFER_LIMIT_MS（默认 30min）到点强制执行 reason=defer-limit；
  *   双维硬升级 = heap ≥ TAIJI_RUNTIME_WATCHDOG_FORCE_PCT（默认 92%）或 memPressure 越限
@@ -125,9 +125,6 @@ export const SHUTDOWN_STEP_SEQUENCE = [
   'dispose-git-head-watcher',
   'dispose-claim-ledger',
   'dispose-terminal-ptys',
-  'deinit-relay-server',
-  // M3（u-m3-control）：control server 关停打点（全通道组杀 + 删 socket；u-m3-delete
-  // 抬走 relay 半边时本行保留）。
   'deinit-control-server',
   'server-stop',
   'dispose-terminal-pties',
@@ -193,11 +190,11 @@ export interface RollingRestartOptions {
   /** 活跃 session 清单（判定遍历域；缺省空表——组合根注入 sessionService.getActiveSessionIds）。 */
   listSessionIds?: () => string[]
   /**
-   * relay 在途子进程数（D5 判定源 ②：kill-on-disconnect 同一注册表的 size）。生产由
-   * 组合根接线（index.ts 持有 registry 句柄）；**未注入 = 0 = 谓词该维不贡献**（services
+   * 在途引擎通道数（D5 判定源 ②：control server 在册通道数）。生产由组合根接线
+   * （index.ts 持有 control server 句柄）；**未注入 = 0 = 谓词该维不贡献**（services
    * 层禁止 value import 有状态 IO infra，check_services_infra_import 守卫）。
    */
-  relayInFlight?: () => number
+  engineChannelsInFlight?: () => number
   /** heap 用量百分比（0-100；缺省即时查 process.memoryUsage / v8 heap_size_limit）。 */
   heapPercent?: () => number
   /** 系统内存高压判定（D5 双维硬升级第二维；缺省 mem-pressure 即时查询 + isMemPressureHigh）。 */
@@ -253,7 +250,7 @@ export function startRollingRestart(options: RollingRestartOptions = {}): Rollin
   const armed = options.armed ?? false
   const mirror = options.mirror ?? inflightMirror
   const listSessionIds = options.listSessionIds ?? (() => [])
-  const relayInFlight = options.relayInFlight ?? (() => 0)
+  const engineChannelsInFlight = options.engineChannelsInFlight ?? (() => 0)
   const heapPercent = options.heapPercent ?? defaultHeapPercent
   const memPressureHigh = options.memPressureHigh ?? defaultMemPressureHigh
   const onExecute = options.onExecute
@@ -295,7 +292,7 @@ export function startRollingRestart(options: RollingRestartOptions = {}): Rollin
       const entry = mirror.query(sid)
       if (entry && entry.inFlight > 0) total += entry.inFlight
     }
-    total += relayInFlight()
+    total += engineChannelsInFlight()
     // errs 收敛（u7b 配方）：任一 session 计数未知 → 整体计数未知（null），errs-safe
     // 方向 = 推迟有 30min 上限封顶，不因未知计数而漏推迟。
     return {

@@ -52,14 +52,14 @@
 // ============================================================
 
 /**
- * 引擎进程侧 spawn/送达窗口错误码（M1 relay 窗口 + M2 送达回执，设计 D10「engine 侧」）。
+ * 引擎进程侧 spawn/送达窗口错误码（M1/M2 送达回执，设计 D10「engine 侧」）。
  * 消费方 = pi-subagent-cli（u-m2-engine-ack 接线）：
  * - prompt_not_delivered：prompt 写入后零 stdout（零输出判定）/ stdin 不可用 / EPIPE——
  *   任务从未被真实 pi 受理，静默丢失的显式失败形态；
  * - prompt_rejected：pi 对 prompt 命令回 success:false（已送达但被拒绝）——带 pi 的
  *   error 文本，与 not_delivered 分型防误诊（D3 不采用合并条目）；
- * - spawn_handshake_timeout：relay accept 超时（退出码 15，RELAY_EXIT_CODES.
- *   ACCEPT_TIMEOUT）——runtime 卡在 spawn/handshake 的显式失败。
+ * - spawn_handshake_timeout：引擎 spawn 握手窗口超时——runtime/引擎停在
+ *   spawn/handshake 的显式失败（control 侧同类失败码 = engine_open_timeout）。
  */
 export const ENGINE_SPAWN_DELIVERY_ERROR_CODES = [
   "engine_prompt_not_delivered",
@@ -97,7 +97,7 @@ export type EngineTransportErrorCode = (typeof ENGINE_TRANSPORT_ERROR_CODES)[num
 
 /**
  * 引擎侧 spawn/送达错误码的 recovery 文案（键完整性由类型 Record + 测试锁定）。
- * detail 由消费方拼装（诊断五元组 / pi error 文本 / relay 退出码），文案只给恢复动作。
+ * detail 由消费方拼装（诊断五元组 / pi error 文本），文案只给恢复动作。
  */
 export const ENGINE_SPAWN_DELIVERY_ERROR_RECOVERY: Record<
   EngineSpawnDeliveryErrorCode,
@@ -110,7 +110,7 @@ export const ENGINE_SPAWN_DELIVERY_ERROR_RECOVERY: Record<
     "The child pi explicitly rejected the prompt command (success:false). Check the pi-side reason carried in the error detail " +
     "(busy/queue/extension takeover states are reported by pi itself), then re-run.",
   engine_spawn_handshake_timeout:
-    "The relay proxy timed out waiting for the runtime accept (exit code 15). Check the runtime log for a spawn/handshake stall, " +
+    "The engine spawn handshake did not complete in time. Check the runtime log for a spawn/handshake stall, " +
     "then restart taiji and re-run the task.",
 };
 

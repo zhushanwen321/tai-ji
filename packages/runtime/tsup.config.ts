@@ -35,9 +35,8 @@ export default defineConfig({
   // @taiji/shared：workspace 包（纯 TS 类型 + 工具函数），必须打包进 bundle，
   // 否则打包后 require('@taiji/shared') 找不到（runtime 子进程无 node_modules）
   // @zhushanwen/subagent-core：只消费双端复用的无状态模块（D8 复用链切换，原
-  // pi-subagent-workflow 深路径改走语义子入口）：engines/zcode/reader + constants +
-  // engine/paths + relay-env（E-2 relay env 名/协议版本常量 SSOT，纯常量+纯函数，
-  // 设计 §3.3.1 例外条款），运行时闭包 = node:fs + 纯常量；import 链其余均为
+  // pi-subagent-workflow 深路径改走语义子入口）：engine/paths + engine-discovery-scan
+  // （纯常量+纯函数，设计 §3.3.1 例外条款），运行时闭包 = node:fs + 纯常量；import 链其余均为
   // type-only（bundle 后消失）。禁止扩大消费面到 launcher/preparer/parser/EnginePort
   // （依赖方向纪律）。require 条件解析到该包 dist CJS——core dist 未 build 时打包失败
   // 属预期（build 前置）

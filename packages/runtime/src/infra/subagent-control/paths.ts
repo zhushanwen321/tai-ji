@@ -28,7 +28,7 @@ export function getControlEnginesDir(dataDir: string = getDataDir()): string {
 
 /**
  * control socket 监听路径：per-runtime-instance 唯一（路径含 pid——多 app 实例共存互不
- * 串扰，崩溃残留可识别归属；与 relay socket 同款命名策略，前缀 subagent- 区分族）。
+ * 串扰，崩溃残留可识别归属；前缀 subagent- 区分族）。
  * win32 用 named pipe（node:net 同 API 形态传 pipe 名，无文件系统残留，故启动探活跳过）。
  */
 export function getControlSocketPath(dataDir: string = getDataDir()): string {
@@ -41,7 +41,7 @@ export function getControlSocketPath(dataDir: string = getDataDir()): string {
 /**
  * socket 路径长度门禁（D4）：macOS unix domain socket 路径上限 104 字节，dataDir 过深
  * 时 listen 静默失败/报 ENAMETOOLONG 类错——fail-fast 并给「缩短 dataDir」恢复指引
- * （与 relay 同约束；win32 named pipe 是内核对象名，不受此限）。
+ * （win32 named pipe 是内核对象名，不受此限）。
  */
 export const UNIX_SOCKET_PATH_MAX_BYTES = 104
 

@@ -32,7 +32,6 @@ export default defineConfig({
     spawn: 'src/spawn.ts',
     'node-executor': 'src/node-executor.ts',
     'logs/stderr-rotation': 'src/logs/stderr-rotation.ts',
-    'relay-env': 'src/relay-env.ts',
     'error-message': 'src/error-message.ts',
     'best-effort': 'src/best-effort.ts',
     'journal-io': 'src/journal-io.ts',

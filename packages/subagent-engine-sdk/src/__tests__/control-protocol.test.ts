@@ -45,7 +45,7 @@ describe("帧 kind 词表（§3.4.3 帧表 10 成员）", () => {
     expect(isSubagentControlFrameKind("hello")).toBe(true);
     expect(isSubagentControlFrameKind("engine_frame")).toBe(true);
     expect(isSubagentControlFrameKind("engine_closed")).toBe(true);
-    expect(isSubagentControlFrameKind("handshake")).toBe(false); // relay 帧词表不得混入
+    expect(isSubagentControlFrameKind("handshake")).toBe(false); // 非 control 帧词表不得混入
     expect(isSubagentControlFrameKind("engine_boom")).toBe(false);
     expect(isSubagentControlFrameKind(1)).toBe(false);
     expect(isSubagentControlFrameKind(undefined)).toBe(false);

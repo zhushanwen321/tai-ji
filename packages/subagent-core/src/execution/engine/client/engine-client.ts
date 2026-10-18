@@ -247,7 +247,6 @@ export class EngineClient {
       baseEnv: this.opts.baseEnv,
       engineNode: this.opts.engineNode,
       electronRunAsNode: this.opts.electronRunAsNode,
-      relay: this.opts.relay,
       identityEnv: this.opts.identityEnv,
       processEnv: this.opts.processEnv,
       engineCmdlineMatcher:

@@ -149,7 +149,7 @@ interface WorkflowNotifyDetails { // oe-exempt:20260929:framework:workflow/recor
  * workflow 到达 done 终态时发送完成通知。
  *
  * [u9 账本化] 结果语义通知接 core NotifyLedger 四步生命周期（C-ext-19：持久账本 +
- * notifyId 幂等，替代裸 steer fire-once——relay 瞬断不再丢通知）：
+ * notifyId 幂等，替代裸 steer fire-once——连接瞬断不再丢通知）：
  *   ① 写账：ledger.record(`wf-done:<runId>`) 落盘（幂等键去重，同 run 跨重启
  *      不双投递）→ ② courier 边沿投递（settled 边沿 + isIdle 二次复查 + 120s
  *      看门狗，送达 customType 保持 "workflow-result"）→ ③ 回执销账 → ④ 断连/

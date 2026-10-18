@@ -2,7 +2,7 @@
 // （第五轮审查 Worth 项：customType 双侧裸字面、零跨侧锚定，commit 21578c74f 手工
 // 同步在案——收 extension-protocol 单源后的防回潮锁）。
 //
-// 锁两面（参照 contract.relay.test.ts 的镜像锁形态——值无法经 import 对齐的写点
+// 锁两面（参照既有镜像锁形态——值无法经 import 对齐的写点
 // （历史 JSONL entry、消费方字面量）用「值锚定 + 源码形态断言」钉住）：
 //   1. 值锚定：三个 customType 的值是跨侧公开契约（已落盘 session JSONL 的历史 entry
 //      + shared/runtime/core 消费方逐字节依赖）——改值 = 跨侧破坏性变更，必须先红

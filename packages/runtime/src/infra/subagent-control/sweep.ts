@@ -2,12 +2,12 @@
  * subagent-control 跨代残留清理（M3，设计 relay-spawn-transport §3.3 D7「启动残留
  * socket 清理 + 孤儿引擎收割」）。
  *
- * 与 relay sweep 的语义分野（D7 刻意收窄）：
+ * 跨代清理的语义边界（D7 刻意收窄）：
  * - socket：扫 `subagent-*.sock` 全族（不是只探当前 pid 路径）；connect 探活，死文件
  *   unlink、活文件 warn（另一活实例在听，不动它）。
- * - 引擎 pid 文件：owner runtime 活着 → 跳过（它在管）；owner 死 → **立即收割**（不再
- *   沿用 relay 的 mirror mtime 活跃度分级——runtime 死后 mirror 不再更新，判据恒过期；
- *   D7 明确退役该分级）。pid 复用防护保留（「宁不杀勿误杀」）：进程 start time 晚于
+ * - 引擎 pid 文件：owner runtime 活着 → 跳过（它在管）；owner 死 → **立即收割**（不采
+ *   用 mirror mtime 活跃度分级——runtime 死后 mirror 不再更新，判据恒过期；D7 明确
+ *   退役该分级）。pid 复用防护保留（「宁不杀勿误杀」）：进程 start time 晚于
  *   spawn 登记 = pid 已被无关进程复用，只删记录不杀。
  * - 不引入周期性巡检：启动 sweep + 事件驱动（连接关闭/exit）足够（ADR-0122）。
  */
@@ -20,7 +20,7 @@ import {
   getProcessStartTimeSec,
   pidStartMatchesRegistered,
 } from '../../utils/protocol-background-task.js'
-import { getControlEnginesDir, getControlRunDir, getControlSocketPath } from './paths.js'
+import { getControlEnginesDir, getControlRunDir } from './paths.js'
 
 /** socket 探活窗口（控制面单请求秒级量级；超时按死文件处置）。 */
 const SOCKET_PROBE_TIMEOUT_MS = 1_000
@@ -50,6 +50,7 @@ export async function sweepStaleControlSockets(dataDir: string, skipPath: string
       if (existsSync(socketPath)) unlinkSync(socketPath)
       console.log(`[subagent-control] removed stale control socket ${socketPath}`)
     } catch (e) {
+      // best-effort 降级：单项清理失败不阻塞启动（残留文件下次启动再扫）
       console.warn(`[subagent-control] failed to remove stale socket ${socketPath}:`, e)
     }
   }
@@ -133,6 +134,7 @@ function removeQuietly(pidFile: string): void {
   try {
     if (existsSync(pidFile)) unlinkSync(pidFile)
   } catch (e) {
+    // best-effort 降级：pid 文件删除失败不升级（记录残留不影响判活语义）
     console.warn(`[subagent-control] pid file remove failed ${pidFile}:`, e)
   }
 }

@@ -24,7 +24,7 @@
  *   buildEngineChildEnv L0 注入同一 TAIJI_AGENT_DATA_DIR）；
  * - idle 5min 无 read 调用 → dispose（回收层有界兜底，AGENTS.md 规则 19；定时器
  *   owner = 本管理器）；进程退出钩子 = disposeRuntimeEngineClients（runtime index.ts
- *   shutdown() 内与 deinitRelayServer 并行，3s 聚合上界）。
+ *   shutdown() 内与 deinitControlServer 并行，3s 聚合上界）。
  *
  * pi 的历史读取不经过本文件：session-records.getSubagentHistory 的 pi 分支保持现有
  * JSONL 直读链（getHistoryFromFilePath），A1 守护。

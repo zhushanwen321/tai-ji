@@ -218,7 +218,7 @@ function handleSubagents(sessionId: string, subagents: SubagentRecord[]): void {
 }
 
 /**
- * 处理 session.subagentEntriesAppended 事件（E-4，relay tee 产出的 entry 帧兜底）。
+ * 处理 session.subagentEntriesAppended 事件（E-4，SubagentTee 产出的 entry 帧兜底）。
  *
  * 帧先于 drawer 打开到达时也写分区（分区惰性创建，§6.1）——消费不依赖 drawer 生命周期，
  * virtualId 经 shared 工厂构造（INVAR-1.1），写入 chatStore 虚拟分区（store 不互 import：

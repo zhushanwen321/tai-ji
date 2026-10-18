@@ -14,9 +14,7 @@
 //     reducer 累积（ReplayRecordView——core updateFromEvent 的 SDK 下沉副本）；
 //   - extension_ui_request 经 ui-request-queue FIFO → host/askUser 反向请求
 //     （ack 两阶段，R9-2 语义；handler 缺失时本地去重告警 + cancelled）；
-//   - childSpawned / childStateChanged 上报（core 镜像数据源）；
-//   - relay 归属键按 W8/H12 重写：SOCKET/NODE/SCRIPT 原样转发，SESSION_ID/
-//     RECORD_ID 从 run ctx 重写（不靠 env 继承——spawn env 的 deny 清单已剥）。
+//   - childSpawned / childStateChanged 上报（core 镜像数据源）。
 //
 // 保留在 core 的面（deviations 登记）：record 状态回写与续聊轮派发
 // （ConversationContinuation）在 core 侧。轮次执行与 agent_settled 轮终已由
@@ -76,7 +74,6 @@ import { cleanupTempPrompt, writePromptToTempFile } from "./temp-prompt.ts";
 import { WRAP_UP_HINT } from "./turn-limiter.ts";
 import { applySchemaEnvToChildEnv } from "./spawn-args.ts";
 import { createUiRequestQueue } from "./ui-request-queue.ts";
-import { isRelayActive, RELAY_ENV_RECORD_ID, RELAY_ENV_SESSION_ID } from "@zhushanwen/subagent-engine-sdk";
 import {
   cleanupSiblingStderrLogs,
   rotateStderrLogIfNeeded,
@@ -111,7 +108,7 @@ export interface SpawnRunCallbacks {
 
 /** runSpawnOnce 的入参（协议 RunParams 的引擎侧还原形态）。 */
 export interface SpawnRunParams {
-  /** record 锚（= run.params.runId；镜像键 / relay RECORD_ID 重写源）。 */
+  /** record 锚（= run.params.runId）。 */
   recordId: string;
   /** 完整 task 文本（含 schema 指令——协议 task.prompt）。 */
   task: string;
@@ -137,7 +134,7 @@ export interface SpawnRunParams {
   graceTurns?: number;
   /** 中断信号（协议 cancel → server 层 AbortController）。 */
   signal?: AbortSignal;
-  /** 根 session id（relay SESSION_ID 重写源，协议 ctx 还原）。 */
+  /** 根 session id（协议 ctx 还原；嵌套引擎 engine_open 归属键）。 */
   sessionRootId?: string;
   /** 追加 system prompt 片段（agent body 之外的调用方片段）。 */
   appendSystemPrompt?: string[];
@@ -182,7 +179,7 @@ export interface SpawnRunResult extends Omit<CollectedOutcome, "sessionId"> {
 /**
  * [§2.7 身份 env 接通] 把本次 run 的子代理身份写入子进程 env（**必须在
  * `buildOutboundChildEnv` 的 deny 剥除之后调用**——当前 deny 名单不含 PI_SUBAGENT_*，
- * 但按 relay 归属键先例统一在终态写回，防将来 deny 扩展时这些键被静默剥掉）。
+ * 但按「deny 终态之后显式写回」先例统一处理，防将来 deny 扩展时这些键被静默剥掉）。
  *
  * 值的来源分层（引擎只写它确实知道的；其余不写，读者各自回落）：
  *   - selfRecordId / agent / task：本次 run 参数（recordId / agentName / task 文本）；
@@ -284,7 +281,7 @@ export function applyIdentityEnvToChildEnv(
   if (worktree) childEnv[SUBAGENT_IDENTITY_ENV.worktree] = "true";
 }
 
-/** 子进程 env 组装（deny 剥除 + PI_WORKFLOW_SCHEMA 派生注入 + relay 归属键重写）。 */
+/** 子进程 env 组装（deny 剥除 + PI_WORKFLOW_SCHEMA 派生注入 + 身份 env 写回）。 */
 function buildChildEnv(params: SpawnRunParams): Record<string, string> {
   const extras: Record<string, string | undefined> = {};
   // [D1 schema 传输归位] env 值派生点：schema 本体的唯一 env 消费点就在此处，
@@ -302,18 +299,6 @@ function buildChildEnv(params: SpawnRunParams): Record<string, string> {
   const parentEnv: NodeJS.ProcessEnv = { ...process.env };
   delete parentEnv[SCHEMA_ENV_VAR];
   const childEnv = buildOutboundChildEnv({ parentEnv, extras });
-  // relay 归属键重写（W8/H12）：SESSION_ID/RECORD_ID 在 ENGINE_ENV_DENY_LIST，
-  // buildOutboundChildEnv 的 deny 在 extras 之后执行——经 extras 注入会被剥掉
-  // （旧实现的 RECORD_ID 重写因此从未送达 relay.mjs，归属键缺失 → 退出码 13）。
-  // 必须在 deny 终态之后按 run ctx 显式写回（不靠 env 继承）。SESSION_ID 权威源
-  // = 协议 ctx.sessionRootId（F6 已收敛：core SubagentService 注入的根 session id
-  // 经 wire → server 还原 → SpawnRunParams 一线透传至此）；env 回落
-  // PI_SUBAGENT_ROOT_SESSION_ID 保留给 standalone / 裸 CLI 形态（无宿主 run ctx）。
-  if (isRelayActive(process.env)) {
-    const rootId = params.sessionRootId ?? process.env["PI_SUBAGENT_ROOT_SESSION_ID"];
-    if (rootId !== undefined && rootId !== "") childEnv[RELAY_ENV_SESSION_ID] = rootId;
-    childEnv[RELAY_ENV_RECORD_ID] = params.recordId;
-  }
   // [§2.7] 身份 env 写回（deny 终态之后——见函数头分层说明）
   applyIdentityEnvToChildEnv(childEnv, params, process.env);
   return childEnv;
@@ -575,14 +560,13 @@ function collectRunResult(
   // [M2 D3] 送达失败分支优先：tracker 已结算（timeout/lost → engine_prompt_not_delivered；
   // rejected → engine_prompt_rejected），退出码只是杀链后果（SIGKILL → 137），
   // 终态呈现映射后的错误码文案而非裸「子进程退出 137」（设计 S7/S7b 反向断言）。
-  // 退出码文案的 relay 映射见 buildExitErrorText（relay 激活时子进程是 relay.mjs）。
   const ackFailure = runEnd.promptAckFailure;
   const success = exitCode === 0 && ackFailure === undefined;
   const error = success
     ? undefined
     : ackFailure !== undefined
       ? describePromptAckFailure(ackFailure)
-      : buildExitErrorText(exitCode, isRelayActive(process.env), runEnd.childErrorMessage);
+      : buildExitErrorText(exitCode, runEnd.childErrorMessage);
   if (ackFailure !== undefined) {
     // 送达失败路径同时发 error 事件（设计 §3.4.2：让 journal 有记录；既有退出码
     // 失败不加发，行为面不变）。

@@ -21,7 +21,7 @@
 //      catch（已删）/ finalizeEngineOutcome exitCode===null（已删））对 workflow record 落空即终态化。
 //   7. [H2 W3 must-fix] stream 缺省自构：runWorkflowEngineTask 在 stream 实参缺省时
 //      经 createBackgroundStream 自构（kickOffChatRound 同款策略）——三形态（TUI
-//      widget 接通 / GUI+relay 停发私货 / sink 未注入降级 no-op）+ 内构对象的守护
+//      widget 接通 / GUI+control 停发私货 / sink 未注入降级 no-op）+ 内构对象的守护
 //
 // 替身形态：pi EnginePort = registerFakePiEngine（协议 seam 替身）；受限引擎
 // （strict-engine）本地构造（预检命中用）；pi = mock（appendEntry 捕获 subagent-record
@@ -319,10 +319,9 @@ describe("executeWorkflowAgent 池顺序", () => {
 
 describe("executeWorkflowAgent stream 自构（设计 D2「service 派发路径既有通道承载」）", () => {
   afterEach(() => {
-    // relay 三键注入的清理（防泄漏到同文件其他用例）
-    delete process.env["TAIJI_SUBAGENT_RELAY_SOCKET"];
-    delete process.env["TAIJI_SUBAGENT_RELAY_NODE"];
-    delete process.env["TAIJI_SUBAGENT_RELAY_SCRIPT"];
+    // control env 注入的清理（防泄漏到同文件其他用例）
+    delete process.env["TAIJI_SUBAGENT_CONTROL_SOCKET"];
+    delete process.env["TAIJI_SUBAGENT_CONTROL_ROOT_SESSION_ID"];
   });
 
   it("TUI 形态：内构 stream 接通 widget——emitDelta 流式可见 + settle 后 dispose 清除", async () => {
@@ -347,10 +346,9 @@ describe("executeWorkflowAgent stream 自构（设计 D2「service 派发路径�
     expect(sink.setWidget).toHaveBeenLastCalledWith(widgetKey, undefined);
   });
 
-  it("GUI + relay 激活：停发私货（createBackgroundStream H1 策略）——sink 零调用", async () => {
-    process.env["TAIJI_SUBAGENT_RELAY_SOCKET"] = "/tmp/relay.sock";
-    process.env["TAIJI_SUBAGENT_RELAY_NODE"] = "node-1";
-    process.env["TAIJI_SUBAGENT_RELAY_SCRIPT"] = "/tmp/relay.mjs";
+  it("GUI + control 激活（托管态）：停发私货（createBackgroundStream H1 策略）——sink 零调用", async () => {
+    process.env["TAIJI_SUBAGENT_CONTROL_SOCKET"] = "/tmp/subagent-control.sock";
+    process.env["TAIJI_SUBAGENT_CONTROL_ROOT_SESSION_ID"] = "root-1";
     const sink = { setWidget: vi.fn() };
     const { service, fake } = makeHarness({ streamSink: sink, mode: "rpc" });
     const pending = service.executeWorkflowAgent(baseOpts(), "run-stream-gui");

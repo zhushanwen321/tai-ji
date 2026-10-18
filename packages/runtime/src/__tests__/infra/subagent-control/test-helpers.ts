@@ -11,7 +11,7 @@ import { SubagentControlServer, type ControlServerOptions } from '../../../infra
 
 export const FAKE_ENGINE_CLI = resolve(process.cwd(), 'src/__tests__/fixtures/fake-engine-cli.mjs')
 
-/** 轮询等待条件成立（跨进程时序；30s 预算对齐 relay 集成测试的 CI 调度噪声口径）。 */
+/** 轮询等待条件成立（跨进程时序；30s 预算对齐跨进程集成测试的 CI 调度噪声口径）。 */
 export async function waitFor(cond: () => boolean, what = 'condition', timeoutMs = 30_000): Promise<void> {
   const start = Date.now()
   while (!cond()) {

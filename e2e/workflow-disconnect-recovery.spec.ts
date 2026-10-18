@@ -179,7 +179,7 @@ test('A2: WS 断开期间 run 完成 → 重连后 stateSnapshot 回放/冷拉�
   // mkdtemp 之前，skip 不留临时目录）
   const bundleSkip = mockBundleSkipReason()
   test.skip(bundleSkip !== null, bundleSkip ?? '')
-  // 前缀须短：<dataDir>/run/relay-<pid>.sock 受 macOS UDS 路径 104B 上限约束（S1b 同款教训）
+  // 前缀须短：<dataDir>/run/subagent-<pid>.sock 受 macOS UDS 路径 104B 上限约束（S1b 同款教训）
   const projectDir = makeTempDir('taiji-wf-disc-proj-')
   const dataDir = makeTempDir('taiji-wf-disc-data-')
   let listenWs2: import('ws').default | null = null

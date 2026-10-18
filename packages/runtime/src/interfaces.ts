@@ -234,7 +234,7 @@ export interface ISessionService {
    * 运行中 subagent 流状态只读快照（B2 subagent-stream-chunk §4.1，session.getSubagentStreamState
    * RPC 后端）。found=false = 该 record 当前无进行中流（未开始 / 已定稿 / 无在管 tee），
    * 此时 msgSeq/lastDeltaSeq 恒 0、lines 恒空数组——协议合法回执，非错误（无独立错误码
-   * 词表）。同步内存读（RelayTee 三元组单次读出，构造性一致无锁）。
+   * 词表）。同步内存读（SubagentTee 三元组单次读出，构造性一致无锁）。
    */
   getSubagentStreamState(sessionId: string, recordId: string): ServerMessageMap['session.getSubagentStreamState']
   /**

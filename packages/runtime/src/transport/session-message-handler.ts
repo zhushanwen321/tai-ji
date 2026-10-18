@@ -635,7 +635,7 @@ export class SessionMessageHandler {
 
   private async handleSessionGetSubagentStreamState(msg: Extract<ClientMessage, { type: 'session.getSubagentStreamState' }>, ws: WsType): Promise<void> {
     // B2 subagent-stream-chunk §4.1：运行中 subagent 流状态拉取（renderer 失步/接入恢复
-    // 数据源）。同步内存读（RelayTee 三元组单次读出，构造性一致无锁）；无进行中流 =
+    // 数据源）。同步内存读（SubagentTee 三元组单次读出，构造性一致无锁）；无进行中流 =
     // found:false 合法回执（协议无独立错误码词表），透传不加工。
     const { sessionId, recordId } = msg.payload
     return this.ctx.reply(ws, msg.id, 'session.getSubagentStreamState', this.ctx.sessionService.getSubagentStreamState(sessionId, recordId))

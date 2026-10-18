@@ -6,7 +6,7 @@
  * engine_open（runtime 侧 spawn 真实引擎 CLI，POSIX detached 进程组 + kill 链）→
  * engine_frame 双向转发（引擎帧是不透明字符串载荷，本层不理解引擎协议语义）→
  * engine_close / exit → engine_closed + 组杀；连接断 → 该连接全部引擎组杀
- * （kill-on-disconnect 语义与 relay 同源）。
+ * （kill-on-disconnect：通道生命线即引擎生命线）。
  *
  * 模块级单例——组合根（index.ts）唯一装配点，process-manager（control env 注入侧）经
  * isControlServerActive / getActiveControlSocketPath 联动（server 未激活则 env 不注入，
@@ -163,13 +163,13 @@ type ChannelCtx = {
   cleanedUp: boolean
 }
 
-/** spawn 同步失败呈现为引擎非零退出（127 = command not found 惯例，relay 同码）。 */
+/** spawn 同步失败呈现为引擎非零退出（127 = command not found 惯例）。 */
 const SPAWN_FAILURE_EXIT_CODE = 127
 
 /**
  * 连接静默关闭（best-effort）：半关闭/destroyed 流上 `socket.end()` 会同步抛
  * EPIPE/ERR_STREAM_DESTROYED——在事件回调里逃逸即 uncaughtException → 整机 shutdown
- * （2026-09-04 事故形态）。参照 infra/relay/relay-registry.ts endConn 先例。
+ * （2026-09-04 事故形态）。参照既有 socket 服务端 endConn 先例。
  */
 function endConnQuietly(conn: ConnState): void {
   try {
@@ -253,7 +253,7 @@ export class SubagentControlServer {
   /**
    * [M3 D6] 流状态查询（session.getSubagentStreamState 的 control 侧数据源）：按
    * `(rootSessionId, recordId)` 索引读 mirror tee 快照；未登记/跨 session → undefined
-   * （组合根按 relay 回退/缺省 found:false 处理）。
+   * （组合根按缺省 found:false 处理）。
    */
   getStreamStateByRecord(sessionId: string, recordId: string): SubagentTeeStreamState | undefined {
     return this.mirror.getStreamStateByRecord(sessionId, recordId)
@@ -264,8 +264,7 @@ export class SubagentControlServer {
   /**
    * 初始化：目录创建（run/ 0700）→ 跨代 socket 清理 → listen → socket 文件 0600 →
    * 孤儿引擎收割（fire-and-forget）。listen 失败/实例冲突抛错，由组合根决定进程命运
-   * （fail-fast，与 relay server 同语义——「以为 runtime 在管、实际 local spawn」的
-   * 静默分裂比启动失败更危险）。
+   * （fail-fast——「以为 runtime 在管、实际 local spawn」的静默分裂比启动失败更危险）。
    */
   async init(): Promise<void> {
     if (this.server !== null) throw new Error('[subagent-control] server already initialized')
@@ -297,8 +296,10 @@ export class SubagentControlServer {
     // socket 文件权限即认证边界（D4：不引入 token）；win32 named pipe 用默认 ACL，不适用
     if (this.isUnixSocket) {
       try {
+        // eslint-disable-next-line no-magic-numbers -- socket 权限 0600（fchmod 语义，D4）
         chmodSync(this.socketPath, 0o600)
       } catch (e) {
+        // best-effort 降级：chmod 失败只降级告警（socket 仍可用；权限面由目录 0700 兜底）
         console.warn('[subagent-control] socket chmod 0600 failed:', e)
       }
     }
@@ -333,6 +334,7 @@ export class SubagentControlServer {
       try {
         if (existsSync(this.socketPath)) unlinkSync(this.socketPath)
       } catch (e) {
+        // best-effort 降级：残留 socket 文件由下次启动 sweep 清理，不阻断关停
         console.warn(`[subagent-control] failed to remove socket file ${this.socketPath}:`, e)
       }
     }
@@ -365,7 +367,7 @@ export class SubagentControlServer {
     this.conns.set(conn.id, conn)
 
     // 连接级 error 兜底（对端 RST → ECONNRESET）：socket 'error' 无 listener 直接 throw
-    // 成 uncaughtException（relay 2026-09-04 事故同族）。destroy 后由 close 走 fan-out。
+    // 成 uncaughtException（2026-09-04 事故同族）。destroy 后由 close 走 fan-out。
     socket.on('error', (err) => {
       console.warn(`[subagent-control] connection error, destroying ${conn.id}:`, err.message)
       socket.destroy()
@@ -429,7 +431,7 @@ export class SubagentControlServer {
     }
     const frame = parseControlInboundFrame(line)
     if (frame === null) {
-      // hello 后畸形帧：丢弃（连接保持——与 relay 数据阶段同语义；超长/背压才有
+      // hello 后畸形帧：丢弃（连接保持——数据阶段同语义；超长/背压才有
       // 归因通道，见 handleOversize / writeErrorAndKill）
       console.warn(`[subagent-control] malformed frame dropped on ${conn.id} len=${line.length}`)
       return
@@ -922,7 +924,7 @@ export class SubagentControlServer {
     }
 
     child.once('error', (err: Error) => {
-      // spawn 异步失败（ENOENT 族）：表现为引擎非零退出（127，与 relay SPAWN_FAILURE 同码）
+      // spawn 异步失败（ENOENT 族）：表现为引擎非零退出（127，command not found 惯例）
       console.error(`[subagent-control] engine process error channelId=${channelId}:`, err)
       ctx.exitSeen = true
       this.finalizeClosed(ctx, SPAWN_FAILURE_EXIT_CODE, null, SUBAGENT_CONTROL_CLOSED_REASONS.engineExit)
@@ -1082,6 +1084,7 @@ export class SubagentControlServer {
       try {
         if (existsSync(rec.pidFile)) unlinkSync(rec.pidFile)
       } catch (e) {
+        // best-effort 降级：pid 文件残留由启动 sweep 的 owner 判活清理，不阻断通道释放
         console.warn(`[subagent-control] pid file cleanup failed ${rec.pidFile}:`, e)
       }
     }
@@ -1107,6 +1110,7 @@ export class SubagentControlServer {
     try {
       conn.socket.write(line)
     } catch (e) {
+      // best-effort 降级：对端半关闭/destroyed 流的同步写失败只留痕，通道死亡由 close 事件收尾
       console.debug('[subagent-control] frame write failed (connection dead):', toErrorMessage(e))
     }
   }
@@ -1149,7 +1153,7 @@ function safeFindPi(projectRoot: string): string {
   }
 }
 
-// ── 模块级单例（组合根唯一装配点；与 relay-server 同布局，u-m3-delete 抬走接线块）──
+// ── 模块级单例（组合根唯一装配点）──
 
 type ControlServerState = {
   server: SubagentControlServer
@@ -1176,7 +1180,7 @@ export function getActiveControlServer(): SubagentControlServer | undefined {
 /**
  * 计算注入主 pi 进程的 control env（D4 env × spawn 点矩阵的 main pi 行）。
  *
- * 降级语义与 relay 同款：server 未激活 → 空对象（spread 无副作用，extension 侧
+ * 降级语义：server 未激活 → 空对象（spread 无副作用，extension 侧
  * isControlEnvActive 判缺失回落 local transport）。ROOT_SESSION_ID 是初值语义
  * （create 路径的 sessionId 参数可能为 temp id，pi 就绪后 rekey）——连接归属的权威
  * = 第一个 engine_open 帧（D5），本键无权威消费方，按设计矩阵完备性注入。

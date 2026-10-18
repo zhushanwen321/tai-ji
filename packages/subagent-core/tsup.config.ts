@@ -12,7 +12,7 @@ const bundleOnly = process.env.npm_lifecycle_event === 'build:bundle'
 // ── 档 1：双形态常规构建 ────────────────────────────────────────
 // entry 用对象形态保形输出：dist/<key>.js|cjs|d.ts|d.cts 与 src/ 目录结构一一对应
 // （src/ 前缀替换为 dist/），package.json exports 的语义子入口按同形路径映射
-// （./execution/relay-env -> dist/execution/relay-env.cjs 等）。
+// （./execution/engine/paths -> dist/execution/engine/paths.cjs 等）。
 // [W11/H3] 引擎子入口（./engines/zcode/{reader,constants}）已随内建引擎删除。
 // 主入口 index 之外的三个 entry 恰好是 exports 的三个语义子入口（D5 公共面）：
 // runtime 复用链（D8）与 zsw 复用链（D6）只允许经语义子入口消费这些模块，
@@ -21,7 +21,6 @@ const bundleOnly = process.env.npm_lifecycle_event === 'build:bundle'
 const mainConfig = defineConfig({
   entry: {
     index: 'src/index.ts',
-    'execution/relay-env': 'src/execution/relay-env.ts',
     'execution/engine/paths': 'src/execution/engine/paths.ts',
     // [W4] 引擎发现器语义子入口（runtime 冷启动回退链深路径消费：
     // session-records.ts → @zhushanwen/subagent-core/engine/engine-discovery-scan）

@@ -181,7 +181,7 @@ export class SubagentMirrorHub {
 
   /**
    * RPC 路由：流状态查询（session.getSubagentStreamState 的 control 侧数据源）。
-   * 跨 session 查询（key 不匹配）返回 undefined——组合根按 relay 回退/缺省形态处理。
+   * 跨 session 查询（key 不匹配）返回 undefined——组合根按缺省形态处理。
    */
   getStreamStateByRecord(sessionId: string, recordId: string): SubagentTeeStreamState | undefined {
     return this.records.get(mirrorKey(sessionId, recordId))?.tee.getStreamState()

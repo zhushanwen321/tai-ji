@@ -68,7 +68,7 @@
 | # | 目标 | 使用者视角 |
 |---|------|-----------|
 | G1 | 长驻进程 + 零冷启动 | zsw 用户跑 map-reduce 多任务，第 2 个起 subagent 启动耗时从 ~1.5s 降为 ~0 |
-| G2 | 实时事件流（coarse→stream） | 引擎以 stream 粒度实时流出事件：zsw workflow 终端 live 输出实时刷新；taiji 侧 journal 增量落盘且**运行中**的 record entry 即携带 ①②级读取钥匙（sessionRef/poolKey/journalPath，W4 回填机制——①级命中依赖 sessionRef），subagent 详情页中途打开可见当时进度快照、重开与 live 一致。GUI live 逐字推送（`subagent.stream_delta` WS 帧）依赖 relay 通道建设（subagent-realtime-channel.md 已论证 launcher 层模式可复制——该文档已删除，git 可追溯，机制记录在案在 relay/relay.mjs 与 pi-invocation.ts 注释），**不属本设计**——chat 域 engine 任务的 onEvent 现只接 journal 落盘，无 GUI 广播通道（subagent-service.ts runEngineTask） |
+| G2 | 实时事件流（coarse→stream） | 引擎以 stream 粒度实时流出事件：zsw workflow 终端 live 输出实时刷新；taiji 侧 journal 增量落盘且**运行中**的 record entry 即携带 ①②级读取钥匙（sessionRef/poolKey/journalPath，W4 回填机制——①级命中依赖 sessionRef），subagent 详情页中途打开可见当时进度快照、重开与 live 一致。GUI live 逐字推送（`subagent.stream_delta` WS 帧）现由引擎 fd3 raw mirror + runtime `SubagentTee` 承载（M3 relay-spawn-transport，ADR-0144；subagent-realtime-channel.md 已删除，git 可追溯），**不属本设计**——chat 域 engine 任务的 onEvent 现只接 journal 落盘，无 GUI 广播通道（subagent-service.ts runEngineTask） |
 | G3 | per-session model | 同一常驻进程上，任务 A 与任务 B 各用不同模型，互不干扰 |
 | G4 | 宿主零改动 | pi 壳与 zsw 壳不改一行代码、不发 breaking 版本即获得上述收益 |
 | G5 | 漂移防御内化 | zcode 平台升级导致协议漂移时，core probe/golden/conformance 承接，宿主无感或按 capabilities 声明自适应 |

@@ -276,10 +276,6 @@ export const ENGINE_ENV_DENY_LIST: readonly string[] = [
   'TAIJI_RUNTIME_TOKEN',
   // 凭证键：引擎凭据不跨进程（设计不变量 5），泄漏面与 WS 令牌同级
   'TAIJI_AGENT_API_KEY',
-  // 父身份键（relay tee 帧归属）：防父身份误归属——引擎按 run.params.ctx 重写，
-  // 误继承会把孙帧归到父 record
-  'TAIJI_SUBAGENT_RELAY_SESSION_ID',
-  'TAIJI_SUBAGENT_RELAY_RECORD_ID',
   // 「进程生命周期标志不出站」同族（env 名 SSOT = 下方 PRESET_FALLBACK_ENV_KEYS，
   // 此处按字面量镜像：guard 只提取引号条目，且本常量声明先于该对象）。模式回落事实是
   // runtime 直接 spawn 的那个 pi 的「本进程本次运行」事实；引擎一跳（主 pi → 引擎 CLI
@@ -297,7 +293,7 @@ export const ENGINE_ENV_DENY_LIST: readonly string[] = [
  * - ROOTS（L1 引擎发现根，path.delimiter 分隔绝对路径列表）：写入 =
  *   packages/runtime/src/services/session/engine-roots.ts（本 SSOT import 消费）；
  *   读取 = core engine-discovery-roots.ts（parseEngineRootsEnv，W4 字面量）。
- * - NODE（引擎 node 执行器，与 relay 的 TAIJI_SUBAGENT_RELAY_NODE 不复用）：写入 =
+ * - NODE（引擎 node 执行器）：写入 =
  *   runtime engine-roots.ts（打包态注入 pi 子进程）；读取 = SDK
  *   src/node-executor.ts（字面量镜像——SDK 不得 import shared，F9 同上方 W12 块）。
  */

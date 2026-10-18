@@ -41,11 +41,10 @@ describe('SPAWN_ENV_OUTBOUND_DENY_LIST 出站剥除清单', () => {
 describe('SPAWN_ENV_FORWARD_REFERENCE 参考清单（文档性质，不参与过滤）', () => {
   const names = SPAWN_ENV_FORWARD_REFERENCE.map(entry => entry.name)
 
-  it('含 B 组五项', () => {
+  it('含 B 组四项', () => {
     expect(names).toContain('PI_CODING_AGENT_DIR')
     expect(names).toContain('TAIJI_AGENT_DEBUG')
     expect(names).toContain('TAIJI_GLOBAL_AGENTS_DIR')
-    expect(names).toContain('TAIJI_SUBAGENT_RELAY_SOCKET/_NODE/_SCRIPT')
     expect(names).toContain('TAIJI_ZCODE_CLI')
   })
 

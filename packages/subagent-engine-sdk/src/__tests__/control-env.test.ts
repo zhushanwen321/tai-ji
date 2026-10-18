@@ -19,7 +19,7 @@ describe("control env 键名 SSOT（设计 D4 env × spawn 点矩阵）", () => 
     expect(CONTROL_ENV_ROOT_SESSION_ID).toBe("TAIJI_SUBAGENT_CONTROL_ROOT_SESSION_ID");
   });
 
-  it("键族归属：L0 基础设施键在册（relay 三键同族位）；刻意不进 ENGINE_ENV_DENY_LIST（引擎/嵌套 extension 是合法读者）", () => {
+  it("键族归属：L0 基础设施键在册；刻意不进 ENGINE_ENV_DENY_LIST（引擎/嵌套 extension 是合法读者）", () => {
     expect(ENGINE_ENV_L0_INFRA_KEYS).toContain(CONTROL_ENV_SOCKET);
     expect(ENGINE_ENV_L0_INFRA_KEYS).toContain(CONTROL_ENV_ROOT_SESSION_ID);
     expect(ENGINE_ENV_DENY_LIST).not.toContain(CONTROL_ENV_SOCKET);

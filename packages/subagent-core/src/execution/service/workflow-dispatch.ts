@@ -175,7 +175,7 @@ export interface WorkflowDispatchDeps {
   readonly getStreamSink: () => StreamSink | null;
   /** UI observability（stream 通道形态判据 getMode；SessionBaselines 现读）。 */
   readonly getUiObservability: () => UiRequestObservability;
-  /** 根 session id（relay 归属键 SESSION_ID 权威源；SessionBaselines 现读）。 */
+  /** 根 session id（engine_open 归属键权威源；SessionBaselines 现读）。 */
   readonly getSessionRootId: () => string | null;
   /** [RunOrchestration 协作回调] 池槽获取（失败路径含 S1 cancelled 终态收口）。 */
   readonly acquirePoolOrFinalize: (
@@ -709,7 +709,7 @@ export class WorkflowDispatch {
     // 由 service 派发路径既有通道承载」的实体落点：W3 切换后 pump 不再构造
     // SubagentStream（旁路 record 族退役），workflow agent 的 text_delta widget 通道
     // 在 service 侧收口，与 kickOffChatRound 的 createBackgroundStream 完全同款
-    //（含 H1 widget 退役策略：GUI+relay 激活停发私货 / TUI·未激活原样创建 / sink
+    //（含 H1 widget 退役策略：GUI+control 激活停发私货 / TUI·未激活原样创建 / sink
     // 未注入降级 undefined——照单继承 chat 域现行策略，非行为变化）。显式传 stream
     // 时用传入值（测试注入面保留）。创建先于池 acquire（kickOffChatRound 同序：
     // acquire 失败早退时 stream 尚未 onDelta，无 widget/timer 副作用可泄漏）。

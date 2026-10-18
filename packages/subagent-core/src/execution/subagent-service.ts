@@ -550,7 +550,7 @@ export class SubagentService {
 
   /**
    * [F6] 当前根 session id 的只读访问——引擎接线方（SAR 等）构造 RunContext 注入
-   * `ctx.sessionRootId`（pi 引擎 relay 归属键 SESSION_ID 权威源）。initSession 后有值
+   * `ctx.sessionRootId`（pi 引擎 engine_open 归属键权威源）。initSession 后有值
    * （根进程 = 本 session id；嵌套 = env 贯穿的真 ROOT）。[D3+] 壳终态保留面。
    */
   getSessionRootId(): string | null {

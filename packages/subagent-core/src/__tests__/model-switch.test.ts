@@ -345,7 +345,7 @@ describe("model-switch — 分型处置表（§7.2 七行）", () => {
     const h = makeHarness({
       registry: makeRegistry([makeModel({ id: "glm-5.3-flash" })]),
       capabilitiesSetModel: "native",
-      engineSetModel: () => Promise.reject(new Error("child exited during relay")),
+      engineSetModel: () => Promise.reject(new Error("child exited during run")),
       isEngineNotActive: () => true,
     });
     live.value = true;

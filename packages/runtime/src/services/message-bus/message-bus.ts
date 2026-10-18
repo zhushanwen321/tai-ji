@@ -129,7 +129,7 @@ export const TOPIC_TABLE: Readonly<Record<string, TopicKind>> = {
   // state 类但未映射 typeKey 的消息会走「不写快照」分支（stateTypeKey 返回 null），
   // PlanModeBar/产物面板在重连后将拿不到恢复帧（投影链六件套之一，缺则静默失效）。
   'session.planState': 'state',
-  // E 方案（subagent-realtime-channel §4.3）：relay tee 产出的 subagent entry 增量帧。
+  // E 方案（subagent-realtime-channel §4.3）：SubagentTee 产出的 subagent entry 增量帧。
   // state 类但刻意不进 STATE_TYPE_KEY_MAP——增量 entry 流不是 last-value 语义（快照
   // 覆盖会丢中间 entry），也不入 ring（subagent 长任务高频帧会冲刷主对话流的可回放
   // ring，制造主流 gap）。对账路径 = reducer 按 entry id 幂等 + 重开时 fetchAndInject
@@ -215,7 +215,7 @@ export const TOPIC_TABLE: Readonly<Record<string, TopicKind>> = {
   'subagent.stream_delta': 'transient',
   // B2 subagent-stream-chunk §4.1：R 路径增量内容 chunk（delta 原样转发 + msgSeq/deltaSeq
   // 双序号）。transient 直传订阅者（不分配 seq、不入 ring、不写快照，断连即丢）——收敛
-  // 不靠 ring 回放，走失步/接入拉取（session.getSubagentStreamState，读 RelayTee 既有
+  // 不靠 ring 回放，走失步/接入拉取（session.getSubagentStreamState，读 SubagentTee 既有
   // 内存状态）+ 清除消息/entry 终态权威。
   'subagent.stream_chunk': 'transient',
   'terminal.data': 'transient',

@@ -2,8 +2,8 @@
  * @zhushanwen/subagent-core — 公共 API barrel（D5 定稿 + post-convergence B-2 扩面）
  *
  * 公共 API 面 = 本文件导出 + package.json exports 的语义子入口
- * （./engine/paths、./engine/engine-discovery-scan、./relay-env——[W11/H3] 引擎
- * 子入口 ./engines/zcode/* 已随内建引擎删除）+ ./workflows/* 资产子入口。exports 面即 semver 契约（D5）：收窄不放宽——
+ * （./engine/paths、./engine/engine-discovery-scan）+ ./workflows/* 资产子入口。
+ * exports 面即 semver 契约（D5）：收窄不放宽——
  * 新增导出走 minor，本文件刻意不使用 `export *`，逐名列出以使 diff 可审。
  * 内部实现细节（error-recovery / execute-agent-call / worker-script-builder 等
  * engine 编排件）不经 barrel 导出；host-surface 扩面（zsw 回接 U0，2026-08-30）

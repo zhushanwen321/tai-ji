@@ -645,7 +645,7 @@ function buildRunParams(task: AgentCallOpts, ctx: RunContext, runId: string): Wi
       model: task.model,
       ctxModel: ctxModelRef,
       streamMode: ctx.stream !== undefined ? ("stream" as const) : undefined,
-      // [F6] 根 session id（relay 归属键 SESSION_ID 权威源）——undefined 不上 wire
+      // [F6] 根 session id（engine_open 归属键权威源）——undefined 不上 wire
       //（additive 语义，与顶层 chat 参数同写法）。
       ...(ctx.sessionRootId !== undefined ? { sessionRootId: ctx.sessionRootId } : {}),
       // [Option C 协议化] 权威 subagent session 目录（Gate B S6）：宿主注入值优先，

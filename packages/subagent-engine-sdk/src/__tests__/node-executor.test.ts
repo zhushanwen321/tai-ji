@@ -1,7 +1,7 @@
 // src/__tests__/node-executor.test.ts
 //
 // W9 启动解析（宿主 × 平台二维矩阵）+ probeNodeExecutor 复刻的正反例
-// （impl-plan §2.9；先例 = packages/runtime/src/infra/relay/relay-env.ts:47-90，
+// （impl-plan §2.9；探针行为约束：
 // 行为保持一致）。
 
 import { afterEach, describe, expect, it } from "vitest";
@@ -20,7 +20,7 @@ afterEach(() => {
   resetEngineNodeProbeCache();
 });
 
-describe("probeNodeExecutor（relay-env 先例行为复刻）", () => {
+describe("probeNodeExecutor（探针行为契约）", () => {
   it("真 node 执行器探针通过（正例）", async () => {
     expect(await probeNodeExecutor(REAL_NODE, false)).toBe(true);
   });

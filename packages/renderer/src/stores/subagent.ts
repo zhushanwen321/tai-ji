@@ -417,7 +417,7 @@ export const useSubagentStore = defineStore('subagent', () => {
    *   幂等只读查询，found:false 分支安全无副作用）；非 running 不拉（done/idle 无进行中流，
    *   拉取是稳态冗余 RPC）。chunkOps 缺省不接线。
    *
-   * 双键订阅（E-4 差异适配）：tee 产出帧 payload.sessionId 是**虚拟分区 id**（relay-tee），
+   * 双键订阅（E-4 差异适配）：tee 产出帧 payload.sessionId 是**虚拟分区 id**（subagent-tee），
    * routeInbound 按 payload.sessionId 路由 → dispatchSession(virtualId)；旧 widget 通道
    * payload.sessionId 是主 sid。两个 key 挂同一 handler，每条消息只命中一键。
    *

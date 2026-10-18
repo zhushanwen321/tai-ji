@@ -84,7 +84,7 @@ export interface RunContext {
    */
   stream?: AgentStreamSink;
   /**
-   * [F6] 根 session id（SubagentService.sessionRootId 注入）——pi 引擎 relay 归属键
+   * [F6] 根 session id（SubagentService.sessionRootId 注入）——pi 引擎 engine_open 归属键
    * SESSION_ID 的权威来源（经 wire ctx.sessionRootId → server 还原 → SpawnRunParams
    * → buildChildEnv）。刻意走 per-run ctx 而非 EngineClient 的进程级 env：客户端按
    * 引擎缓存为惰性单例，进程级 env 在 pi fork 换 sessionId 后会陈旧；per-run ctx 恒

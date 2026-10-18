@@ -8,9 +8,9 @@
  * 照常发布）。本脚本在发布前强制走一遍 npm 消费者视角的最小回路：
  *
  *   1. build：cd packages/subagent-core && pnpm run build（tsup ESM+CJS 双 dist）
- *   2. require：node require CJS dist——主入口 + 三条语义子入口
- *      （engine/paths、engine/engine-discovery-scan、relay-env；[W11/H3] 引擎
- *      子入口已随内建引擎删除），
+ *   2. require：node require CJS dist——主入口 + 两条语义子入口
+ *      （engine/paths、engine/engine-discovery-scan；[W11/H3] 引擎子入口已随
+ *      内建引擎删除），
  *      经 package.json exports 的 require 条件解析（Node self-reference），
  *      等价验证 npm 消费者的加载路径与 exports→dist 映射，而非直接拼文件路径；
  *      随后同一 CJS 上下文跑 dist 行为断言——主入口（routeEngine mock 注入断言
@@ -70,7 +70,6 @@ const CJS_ENTRY_SPECS = [
   CORE_PKG_NAME,
   `${CORE_PKG_NAME}/engine/paths`,
   `${CORE_PKG_NAME}/engine/engine-discovery-scan`,
-  `${CORE_PKG_NAME}/relay-env`,
 ]
 
 function run(cmd, args, opts = {}) {

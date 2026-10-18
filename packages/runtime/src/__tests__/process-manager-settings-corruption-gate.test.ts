@@ -17,7 +17,7 @@
  *
  * Mock 策略：与 process-manager-pi-path-reset.test.ts 同构（mock child_process/fs 周边，
  * 真实 RpcClient 跑在 fakeProc 上）；child_process.spawn 为 vi.fn 以断言「pi 进程未 spawn」；
- * relay-env mock 掉（其首次调用含探针 spawn，会污染 spawn 计数）；settings 路径经
+ * control env 注入为同步无 spawn（server 未激活返回空对象，不污染 spawn 计数）；settings 路径经
  * setSettingsPath 重定向到 tmp（pi-settings-store 既有测试惯例）。
  *
  * 运行：cd packages/runtime && npx vitest run src/__tests__/process-manager-settings-corruption-gate.test.ts
@@ -111,9 +111,6 @@ vi.mock('../infra/logger.js', () => ({
   // 无落点不采样，exit 主链的 Map 清理/回调通知不受取证影响
   isPiCrashLogEnabled: () => false,
 }))
-
-// relay 探针 spawn 排除：getRelaySpawnEnv 首次调用含探针 spawn，会污染 spawnMock 计数。
-vi.mock('../infra/relay/relay-env.js', () => ({ getRelaySpawnEnv: async () => ({}) }))
 
 vi.mock('../infra/pi/find-pi-executable.js', () => ({ findPiExecutable: () => '/fake-tools/pi' }))
 

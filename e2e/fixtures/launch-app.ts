@@ -93,7 +93,7 @@ export async function launchApp(opts: { dataDir?: string } = {}): Promise<{
   const tmpDataDir = opts.dataDir ?? fs.mkdtempSync(path.join(os.tmpdir(), 'taiji-e2e-'))
 
   // 子进程 env：继承 process.env 后剥离 ELECTRON_RUN_AS_NODE。
-  // 该变量（relay 打包模式注入，agent bash / Electron 宿主内可见）会让 electron 二进制
+  // 该变量（打包模式注入，agent bash / Electron 宿主内可见）会让 electron 二进制
   // 退化成纯 node 模式，不认 --remote-debugging-port → 全部用例 electron.launch
   // `Process failed to launch!` + `Electron: bad option: --remote-debugging-port=0`。
   // 构造性免疫该已知坑（排障记录见 docs/TROUBLESHOOTING.md「electron 轨在 agent bash 里全灭」条目）。

@@ -41,8 +41,6 @@ describe("buildEngineChildEnv 三层契约", () => {
         TAIJI_AGENT_PACKAGED: "1",
         taiji_runtime_token: "tok",
         TAIJI_AGENT_API_KEY: "k",
-        TAIJI_SUBAGENT_RELAY_SESSION_ID: "parent",
-        TAIJI_SUBAGENT_RELAY_RECORD_ID: "r",
       },
       { dataDir: "/d" },
     );
@@ -53,21 +51,17 @@ describe("buildEngineChildEnv 三层契约", () => {
     expect(env.taiji_runtime_token).toBeUndefined();
   });
 
-  it("L0：基础设施键注入（dataDir/engineNode/ELECTRON_RUN_AS_NODE/SUBAGENT/relay/identity）", () => {
+  it("L0：基础设施键注入（dataDir/engineNode/ELECTRON_RUN_AS_NODE/SUBAGENT/identity）", () => {
     const env = buildEngineChildEnv({}, {
       dataDir: "/data-root",
       engineNode: "/exec/node",
       electronRunAsNode: true,
-      relay: { socket: "/s", node: "/n", script: "/sc" },
       identityEnv: { PI_SUBAGENT_ROOT_SESSION_ID: "sid", PI_SUBAGENT_DEPTH: undefined },
     });
     expect(env.TAIJI_AGENT_DATA_DIR).toBe("/data-root");
     expect(env.TAIJI_AGENT_ENGINE_NODE).toBe("/exec/node");
     expect(env.ELECTRON_RUN_AS_NODE).toBe("1");
     expect(env.TAIJI_AGENT_SUBAGENT).toBe("1");
-    expect(env.TAIJI_SUBAGENT_RELAY_SOCKET).toBe("/s");
-    expect(env.TAIJI_SUBAGENT_RELAY_NODE).toBe("/n");
-    expect(env.TAIJI_SUBAGENT_RELAY_SCRIPT).toBe("/sc");
     expect(env.PI_SUBAGENT_ROOT_SESSION_ID).toBe("sid");
     expect(env.PI_SUBAGENT_DEPTH).toBeUndefined();
   });
@@ -149,11 +143,9 @@ describe("buildEngineChildEnv 三层契约", () => {
     expect(overlap).toEqual([]);
   });
 
-  it("[M3] L0 清单登记 control 两键（relay 三键同族位，M3 删除 relay 后同批收缩）；deny 面不含 control 两键（引擎/嵌套 extension 是合法读者）", () => {
+  it("[M3] L0 清单登记 control 两键；deny 面不含 control 两键（引擎/嵌套 extension 是合法读者）", () => {
     expect(ENGINE_ENV_L0_INFRA_KEYS).toContain("TAIJI_SUBAGENT_CONTROL_SOCKET");
     expect(ENGINE_ENV_L0_INFRA_KEYS).toContain("TAIJI_SUBAGENT_CONTROL_ROOT_SESSION_ID");
-    // M3 删除 relay 前 relay 三键仍在册（双注册过渡；u-m3-delete 同批收缩）
-    expect(ENGINE_ENV_L0_INFRA_KEYS).toContain("TAIJI_SUBAGENT_RELAY_SOCKET");
     expect(ENGINE_ENV_DENY_LIST).not.toContain("TAIJI_SUBAGENT_CONTROL_SOCKET");
     expect(ENGINE_ENV_DENY_LIST).not.toContain("TAIJI_SUBAGENT_CONTROL_ROOT_SESSION_ID");
   });
@@ -168,7 +160,6 @@ describe("buildOutboundChildEnv（SDK 版出站卫生）", () => {
         TAIJI_AGENT_PACKAGED: "1",
         TAIJI_RUNTIME_TOKEN: "tok",
         TAIJI_AGENT_API_KEY: "k",
-        TAIJI_SUBAGENT_RELAY_SESSION_ID: "s",
       },
     });
     expect(env.PATH).toBe("/usr/bin");
@@ -176,7 +167,6 @@ describe("buildOutboundChildEnv（SDK 版出站卫生）", () => {
     expect(env.TAIJI_AGENT_PACKAGED).toBeUndefined();
     expect(env.TAIJI_RUNTIME_TOKEN).toBeUndefined();
     expect(env.TAIJI_AGENT_API_KEY).toBeUndefined();
-    expect(env.TAIJI_SUBAGENT_RELAY_SESSION_ID).toBeUndefined();
   });
 
   it("extras 注入 / undefined 删除语义", () => {
