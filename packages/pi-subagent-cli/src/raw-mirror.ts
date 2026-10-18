@@ -22,6 +22,7 @@
 //     session 文件 + journal）。
 
 import * as fs from "node:fs";
+import type { Writable } from "node:stream";
 
 import { getLogger } from "@zhushanwen/subagent-engine-sdk";
 
@@ -71,8 +72,12 @@ export type RawMirrorSink = {
   write(frame: string): boolean;
   /** 背压排空回调注册（缺省不注册 = 队列只增不减，达上限即丢弃）。 */
   onDrain?: (handler: () => void) => void;
+  /** onDrain 反注册（writer.dispose 必达——共享 sink 的 per-run 回调不得跨 run 滞留）。 */
+  offDrain?: (handler: () => void) => void;
   /** 写错误回调注册（一次性；失败后全部帧走丢弃计数）。 */
   onError?: (handler: (err: unknown) => void) => void;
+  /** onError 反注册（writer.dispose 必达，理由同 {@link offDrain}）。 */
+  offError?: (handler: (err: unknown) => void) => void;
 };
 
 /** fd3 raw mirror 写入器（per run）。 */
@@ -134,12 +139,17 @@ export function createRawMirrorWriter(opts: RawMirrorWriterOptions): RawMirrorWr
     );
   };
 
-  opts.sink.onDrain?.(() => {
+  // [C-U4] 回调句柄持名，dispose 时按名反注册：共享 sink 是进程级单例，per-run 回调
+  // 若只注册不注销，长驻引擎的 drain 监听器与 errorHandlers 会随 run 数无界增长
+  // （第 11 个 run 起触发 Node MaxListenersExceededWarning）。
+  const onDrain = (): void => {
     queuedBytes = 0;
-  });
-  opts.sink.onError?.((err) => {
+  };
+  const onError = (err: unknown): void => {
     fail("fd3 write error", err);
-  });
+  };
+  opts.sink.onDrain?.(onDrain);
+  opts.sink.onError?.(onError);
 
   // 待拼缓冲中找到第一个 \n 的绝对偏移（-1 = 尚无完整行）。
   const findNewline = (): number => {
@@ -224,8 +234,13 @@ export function createRawMirrorWriter(opts: RawMirrorWriterOptions): RawMirrorWr
       }
     },
     dispose(): void {
+      if (disposed) return;
       disposed = true;
       pending.length = 0;
+      // 本 run 的计数归零 + 从共享 sink 摘除回调（幂等；fd3 属引擎进程不 close）。
+      queuedBytes = 0;
+      opts.sink.offDrain?.(onDrain);
+      opts.sink.offError?.(onError);
     },
     get stats(): RawMirrorStats {
       return { ...stats };
@@ -234,16 +249,79 @@ export function createRawMirrorWriter(opts: RawMirrorWriterOptions): RawMirrorWr
 }
 
 /**
- * 进程级共享 fd3 sink（单 WriteStream = 跨 run 写序串行化）：一个引擎进程可并发服务多个
- * run（server 的 activeRuns 为 Map），各 run 各自 tap 自己的 pi 子进程 stdout。若每个
- * per-run 写入器各持一个 fd3 WriteStream，大帧（>PIPE_BUF）在管道上的 `write(2)` 会跨流
- * 字节交错、劈坏帧界；共享单流后所有帧经同一 Writable 队列按序整体写入，交错只发生在帧
- * 边界（帧自带 recordId/seq，读取侧按 record 归属）。fd3 属引擎进程、跨 run 复用——
- * autoClose:false、从不由本流 close，进程退出统一回收。
+ * 共享 sink 的测试可观测面：per-run 回调注册表大小（dispose 后必须归零）。
+ * 流级监听器恒为 2（drain/error 各一，进程级单例），不随 run 数增长。
  */
-let sharedFd3Sink: RawMirrorSink | null = null;
+export type SharedFd3Sink = RawMirrorSink & {
+  readonly handlerCounts: { drain: number; error: number };
+};
+
+/**
+ * 构造进程级共享 fd3 sink（单 WriteStream = 跨 run 写序串行化；导出供测试注入
+ * Writable 桩——生产路径的 fd3 句柄不可在测试进程里真实创建）。
+ *
+ * 一个引擎进程可并发服务多个 run（server 的 activeRuns 为 Map），各 run 各自 tap
+ * 自己的 pi 子进程 stdout。若每个 per-run 写入器各持一个 fd3 WriteStream，大帧
+ * （>PIPE_BUF）在管道上的 `write(2)` 会跨流字节交错、劈坏帧界；共享单流后所有帧经
+ * 同一 Writable 队列按序整体写入，交错只发生在帧边界（帧自带 recordId/seq，读取侧按
+ * record 归属）。fd3 属引擎进程、跨 run 复用——autoClose:false、从不由本流 close，
+ * 进程退出统一回收。
+ *
+ * [C-U4] per-run 回调收进注册表，流上只挂**一个** drain 与一个 error 监听器：
+ * 长驻引擎服务任意数量 run（含并发）都不会触发 MaxListeners 警告；writer.dispose
+ * 经 offDrain/offError 摘除自身条目，注册表大小 = 活跃 run 数。
+ */
+export function createSharedFd3Sink(
+  stream: Writable,
+  opts: { onPersistentError?: (err: unknown) => void } = {},
+): SharedFd3Sink {
+  const drainHandlers = new Set<() => void>();
+  const errorHandlers = new Set<(err: unknown) => void>();
+  stream.on("drain", () => {
+    // 快照迭代：handler 内部不会改注册表（只清自己的队列），防未来实现边迭代边删。
+    for (const handler of [...drainHandlers]) handler();
+  });
+  stream.on("error", (err: unknown) => {
+    // persistent 错误（EBADF 等）：后续 run 直接跳过镜像（单次告警由各 writer 的
+    // fail 防重逻辑承担）。
+    opts.onPersistentError?.(err);
+    for (const handler of [...errorHandlers]) handler(err);
+  });
+  return {
+    write: (frame) => stream.write(frame),
+    onDrain: (handler) => {
+      drainHandlers.add(handler);
+    },
+    offDrain: (handler) => {
+      drainHandlers.delete(handler);
+    },
+    onError: (handler) => {
+      errorHandlers.add(handler);
+    },
+    offError: (handler) => {
+      errorHandlers.delete(handler);
+    },
+    get handlerCounts() {
+      return { drain: drainHandlers.size, error: errorHandlers.size };
+    },
+  };
+}
+
+let sharedFd3Sink: SharedFd3Sink | null = null;
 /** persistent error 后新 run 不再重建 sink（fd3 已坏，避免每个 run 重复尝试与告警）。 */
 let fd3Unavailable = false;
+/** fd3 不可用的进程级一次性告警（首 run 响亮 warn，后续 run 仅 debug 留痕）。 */
+let fd3UnavailableWarned = false;
+
+/** 不可用告警一次化：后续 run 只 debug（设计 §3.4.4「warn 一次」）。 */
+function warnFd3UnavailableOnce(warn: (message: string) => void, message: string): void {
+  if (fd3UnavailableWarned) {
+    logger.debug(message);
+    return;
+  }
+  fd3UnavailableWarned = true;
+  warn(message);
+}
 
 function getSharedFd3Sink(warn: (message: string) => void): RawMirrorSink | null {
   if (sharedFd3Sink !== null) return sharedFd3Sink;
@@ -253,25 +331,17 @@ function getSharedFd3Sink(warn: (message: string) => void): RawMirrorSink | null
     stream = fs.createWriteStream("", { fd: RAW_MIRROR_FD, autoClose: false });
   } catch (err) {
     fd3Unavailable = true;
-    warn(`[raw-mirror] fd${RAW_MIRROR_FD} unavailable, mirror channel disabled: ${describeError(err)}`);
+    warnFd3UnavailableOnce(
+      warn,
+      `[raw-mirror] fd${RAW_MIRROR_FD} unavailable, mirror channel disabled: ${describeError(err)}`,
+    );
     return null;
   }
-  const errorHandlers: Array<(err: unknown) => void> = [];
-  stream.on("error", (err) => {
-    // persistent 错误（EBADF 等）：后续 run 直接跳过镜像（单次告警由各 writer 的
-    // fail 防重逻辑承担）。
-    fd3Unavailable = true;
-    for (const handler of errorHandlers) handler(err);
+  sharedFd3Sink = createSharedFd3Sink(stream, {
+    onPersistentError: () => {
+      fd3Unavailable = true;
+    },
   });
-  sharedFd3Sink = {
-    write: (frame) => stream.write(frame),
-    onDrain: (handler) => {
-      stream.on("drain", handler);
-    },
-    onError: (handler) => {
-      errorHandlers.push(handler);
-    },
-  };
   return sharedFd3Sink;
 }
 
@@ -288,7 +358,11 @@ export function createFd3RawMirrorWriter(opts: {
   if (!isRawMirrorActive(opts.env)) return undefined;
   const warn = opts.warn ?? defaultWarn;
   if (fd3Unavailable) {
-    warn(`[raw-mirror] fd${RAW_MIRROR_FD} is unavailable, mirror channel disabled for recordId=${opts.recordId}`);
+    // [C-U4] 每 run 重复响亮告警与设计「warn 一次」相悖：只首个 run warn，其余 debug。
+    warnFd3UnavailableOnce(
+      warn,
+      `[raw-mirror] fd${RAW_MIRROR_FD} is unavailable, mirror channel disabled for recordId=${opts.recordId}`,
+    );
     return undefined;
   }
   const sink = getSharedFd3Sink(warn);

@@ -52,7 +52,7 @@ import {
   type CollectedOutcome,
 } from "./output-collector.ts";
 import { createPromptAckTracker, resolvePromptAckTimeoutMs, type PromptAckTracker } from "./prompt-ack.ts";
-import { createFd3RawMirrorWriter, type RawMirrorWriter } from "./raw-mirror.ts";
+import { createFd3RawMirrorWriter, RAW_MIRROR_ENV_VAR, type RawMirrorWriter } from "./raw-mirror.ts";
 import { toErrorMessage } from "./error-message.ts";
 import {
   buildEnvBlock,
@@ -281,8 +281,15 @@ export function applyIdentityEnvToChildEnv(
   if (worktree) childEnv[SUBAGENT_IDENTITY_ENV.worktree] = "true";
 }
 
-/** 子进程 env 组装（deny 剥除 + PI_WORKFLOW_SCHEMA 派生注入 + 身份 env 写回）。 */
-function buildChildEnv(params: SpawnRunParams): Record<string, string> {
+/** 子进程 env 组装（deny 剥除 + PI_WORKFLOW_SCHEMA 派生注入 + 身份 env 写回）。
+ *
+ * `parentEnv` 缺省 = 进程自身 env（生产路径）；显式传入供 P-15 env 矩阵形状测试
+ * 做纯函数断言（不触碰 process.env，避免测试误建 fd3 镜像写入器）。
+ */
+export function buildChildEnv(
+  params: SpawnRunParams,
+  parentEnv: NodeJS.ProcessEnv = process.env,
+): Record<string, string> {
   const extras: Record<string, string | undefined> = {};
   // [D1 schema 传输归位] env 值派生点：schema 本体的唯一 env 消费点就在此处，
   // 按数据流最短路径就地派生（JSON.stringify 本体），注入实现沿用
@@ -296,11 +303,17 @@ function buildChildEnv(params: SpawnRunParams): Record<string, string> {
   // 绝不携带幽灵 schema env（structured-output 扩展会按幽灵 schema 校验无 schema
   // 任务）。实测泄漏源：workflow 驱动的宿主会话内跑测时，父 env 携带本 run 自己的
   // schema（run-spawn-once 集成测试「无 schema run 不注入」用例红）。
-  const parentEnv: NodeJS.ProcessEnv = { ...process.env };
-  delete parentEnv[SCHEMA_ENV_VAR];
-  const childEnv = buildOutboundChildEnv({ parentEnv, extras });
+  const baseEnv: NodeJS.ProcessEnv = { ...parentEnv };
+  delete baseEnv[SCHEMA_ENV_VAR];
+  const childEnv = buildOutboundChildEnv({ parentEnv: baseEnv, extras });
+  // [P-15 / A-U-1 / C-U2] fd3 raw mirror 宣告只给引擎进程（设计 D4 env 矩阵 task pi
+  // 行 ❌）。引擎→task pi 的 spawn 走 SDK buildOutboundChildEnv（deny =
+  // ENGINE_ENV_DENY_LIST，刻意不含本键——引擎自身要读 fd 3），shared 的出站 deny
+  // 清单没有 task pi 路径消费者，故必须在此显式剥除；否则 task pi（顶层与嵌套）
+  // 继承该键，local/嵌套回退场景的 raw-mirror 代码被误武装。
+  delete childEnv[RAW_MIRROR_ENV_VAR];
   // [§2.7] 身份 env 写回（deny 终态之后——见函数头分层说明）
-  applyIdentityEnvToChildEnv(childEnv, params, process.env);
+  applyIdentityEnvToChildEnv(childEnv, params, parentEnv);
   return childEnv;
 }
 

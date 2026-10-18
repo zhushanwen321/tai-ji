@@ -5,6 +5,7 @@
 //   - 行切分在字节层（跨 chunk 的 UTF-8 多字节字符不被劈坏；b64 解码 ≡ 原始行字节）；
 //   - env 未宣告 → 工厂不创建（零 fd3 触点）；
 //   - 写失败/队列超限 → 丢弃计数 + warn 一次，不抛出不阻塞；
+//   - 进程级共享 sink：per-run 回调随 dispose 摘除（连续 15 个 run 监听器数不增长）；
 //   - 写入点与主 stdout 解析同一数据源（wireChildStdoutPump 的原始 Buffer tap：
 //     mirror 行序列 ≡ 行解析链事件序列，同一读取顺序）。
 //
@@ -16,13 +17,14 @@ import { EventEmitter } from "node:events";
 import * as fs from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { PassThrough } from "node:stream";
+import { PassThrough, Writable } from "node:stream";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
   createFd3RawMirrorWriter,
   createRawMirrorWriter,
+  createSharedFd3Sink,
   isRawMirrorActive,
   RAW_MIRROR_ENV_VAR,
   RAW_MIRROR_MAX_QUEUE_BYTES,
@@ -209,6 +211,88 @@ describe("raw mirror env 宣告闸（无宣告零 fd3 触点）", () => {
 
   it("缺省队列上限为设计值 1MB（常量守卫）", () => {
     expect(RAW_MIRROR_MAX_QUEUE_BYTES).toBe(1024 * 1024);
+  });
+});
+
+// ── 进程级共享 sink：per-run 回调不跨 run 滞留（C-U4） ──────────────────────
+
+describe("进程级共享 sink（C-U4：长驻引擎不累积监听器）", () => {
+  it("连续 15 个 run（create → dispose 循环）：listenerCount 恒为 1/1，注册表每轮归零", () => {
+    const stream = new PassThrough();
+    const sink = createSharedFd3Sink(stream);
+    for (let i = 0; i < 15; i += 1) {
+      const writer = createRawMirrorWriter({ recordId: `rec-seq-${i}`, sink });
+      expect(sink.handlerCounts).toEqual({ drain: 1, error: 1 });
+      expect(stream.listenerCount("drain")).toBe(1);
+      expect(stream.listenerCount("error")).toBe(1);
+      writer.dispose();
+      expect(sink.handlerCounts).toEqual({ drain: 0, error: 0 });
+    }
+    // 修复前每 run 直接 stream.on('drain'/'error') 且不反注册 → 第 11 个 run 触发
+    // MaxListenersExceededWarning；现在进程级监听器恒为 1（不随 run 数增长）。
+    expect(stream.listenerCount("drain")).toBe(1);
+    expect(stream.listenerCount("error")).toBe(1);
+  });
+
+  it("15 个 run 同时在册：流级 drain/error 监听器仍为 1/1，回调注册表 = 活跃 run 数", () => {
+    const stream = new PassThrough();
+    const sink = createSharedFd3Sink(stream);
+    const writers: RawMirrorWriter[] = [];
+    for (let i = 0; i < 15; i += 1) {
+      writers.push(createRawMirrorWriter({ recordId: `rec-shared-${i}`, sink }));
+    }
+    // 15 个活跃 run 只挂 2 个流监听器（修复前每 run 一个 drain 监听器 → 第 11 个触发
+    // MaxListenersExceededWarning）；per-run 回调收进注册表。
+    expect(stream.listenerCount("drain")).toBe(1);
+    expect(stream.listenerCount("error")).toBe(1);
+    expect(sink.handlerCounts).toEqual({ drain: 15, error: 15 });
+
+    for (const writer of writers) writer.dispose();
+    expect(sink.handlerCounts).toEqual({ drain: 0, error: 0 });
+    // 监听器数不随 run 数/生命周期增长（进程级单例恒为 1）
+    expect(stream.listenerCount("drain")).toBe(1);
+    expect(stream.listenerCount("error")).toBe(1);
+  });
+
+  it("dispose 幂等：重复调用不重复摘除（注册表仍归零）", () => {
+    const stream = new PassThrough();
+    const sink = createSharedFd3Sink(stream);
+    const writer = createRawMirrorWriter({ recordId: "rec-idem", sink });
+    expect(sink.handlerCounts).toEqual({ drain: 1, error: 1 });
+    writer.dispose();
+    writer.dispose();
+    expect(sink.handlerCounts).toEqual({ drain: 0, error: 0 });
+  });
+
+  it("共享 drain 事件仍逐 run 排空写队列（单监听器分发给注册表）", () => {
+    // 背压桩：highWaterMark=1 使每次 write 返回 false（帧计入队列），drain 由测试手动触发。
+    const stream = new Writable({
+      highWaterMark: 1,
+      write(_chunk, _encoding, callback) {
+        callback();
+      },
+    });
+    const sink = createSharedFd3Sink(stream);
+    const oneFrameBytes = Buffer.byteLength(
+      `${JSON.stringify({ v: 1, recordId: "rec-shared-drain", seq: 0, b64: Buffer.from("aaaaaaaa").toString("base64") })}\n`,
+      "utf8",
+    );
+    const a = createRawMirrorWriter({ recordId: "rec-a", sink, maxQueueBytes: oneFrameBytes * 2 + 10 });
+    const b = createRawMirrorWriter({ recordId: "rec-b", sink, maxQueueBytes: oneFrameBytes * 2 + 10 });
+    // 两 run 各写两帧 → 队列各占满（第三帧将被丢）
+    a.tap(Buffer.from("aaaaaaaa\nbbbbbbbb\n", "utf8"));
+    b.tap(Buffer.from("cccccccc\ndddddddd\n", "utf8"));
+    expect(a.stats.written).toBe(2);
+    expect(b.stats.written).toBe(2);
+    expect(sink.handlerCounts).toEqual({ drain: 2, error: 2 });
+    // 单次 drain 事件触发注册表全部 handler → 两 run 队列同时归零
+    stream.emit("drain");
+    a.tap(Buffer.from("eeeeeeee\n", "utf8"));
+    b.tap(Buffer.from("ffffffff\n", "utf8"));
+    expect(a.stats.dropped).toBe(0);
+    expect(b.stats.dropped).toBe(0);
+    a.dispose();
+    b.dispose();
   });
 });
 

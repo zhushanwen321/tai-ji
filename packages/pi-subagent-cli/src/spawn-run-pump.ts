@@ -261,10 +261,11 @@ function createLineConsumer(deps: StdoutPumpDeps): (line: string) => void {
         enqueueUi(parsed.id, parsed.request);
         promptAck?.onChannelActivity();
         return;
-      case "extension_ui_request":
-        enqueueUi(parsed.id, parsed.request);
-        return;
       case "invalid":
+        // [C-U1] invalid 行同样是通道活性证据（与上方字节计数口径一致：任意
+        // stdout 字节都证明 pi 活着）——必须取消 post-prompt 零输出计时器，否则
+        // 「只吐非 JSON / 缺 type 行」的健康 pi 会在 30s 窗口被误杀。
+        promptAck?.onChannelActivity();
         logger.debug(
           `[session-runner] invalid stdout line from ${recordId} (ignored): ${parsed.raw.slice(0, INVALID_LINE_LOG_CHARS)}`,
           { error: parsed.error },
