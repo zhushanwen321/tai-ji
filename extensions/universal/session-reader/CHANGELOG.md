@@ -1,5 +1,11 @@
 # @zhushanwen/pi-session-reader
 
+## 0.11.0
+
+### Minor Changes
+
+- 796f01b29: session_read 各 action 结果 details 新增 summary 收起态一行摘要（按 action 分派推导），并新增 TUI 折叠态渲染。
+
 ## 0.10.4
 
 ### Patch Changes

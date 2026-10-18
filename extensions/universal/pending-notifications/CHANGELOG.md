@@ -1,5 +1,11 @@
 # @zhushanwen/pi-pending-notifications
 
+## 0.9.0
+
+### Minor Changes
+
+- 796f01b29: pending_notifications 结果 details 新增 summary 收起态一行摘要，并新增 TUI 折叠态渲染。
+
 ## 0.8.6
 
 ### Patch Changes

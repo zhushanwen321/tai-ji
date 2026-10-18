@@ -1,5 +1,11 @@
 # @zhushanwen/pi-session-manager
 
+## 0.4.0
+
+### Minor Changes
+
+- 796f01b29: 六个 session 管理工具结果 details 新增 summary 收起态一行摘要（经 toSummary 统一组装），并新增 TUI 折叠态渲染。
+
 ## 0.3.4
 
 ### Patch Changes
