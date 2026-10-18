@@ -3,7 +3,7 @@
     "name": "taiji e2e 资产登记表（SSOT）",
     "description": "全部 e2e 资产与其触发面的机器可读登记：「改了哪个域 → 跑哪些 e2e」的对账依据。summary 仅导航；资产内容与执行口径的权威源是 authority 指向的文档与 asset 本体。收录以磁盘实际为准（脚本/目录改名或增删时同 commit 更新本表）。",
     "fields": {
-      "id": "E2E-<域>-<两位序号>，域取现有测试域：ELECTRON（electron-smoke P0 子集）/ VISUAL（像素 diff）/ MOCK（行为轨 mock 全量）/ REAL（真实 app 启动轨）/ EQUIV（等价性双轨）/ MODELS（models.json sanitize 真机轨）/ RENAME（rename-session e2e）/ SCHED（scheduler 真实环境实测）/ BATCH（subagents 批量编排真机链）/ SKILLRELOAD（skill-reload 演化轨残留：断连恢复等真实 app 轨，原 reload 非破坏轨已随编排退役删除）/ BTW（btw 旁路提问双进程并发不变量真实进程轨） / ZCODE（zcode 引擎会话库域）/ PROP（集成线传播检查）/ MODELREF（extensions 资产模型引用漂移检查）/ RECORD（record 持久化写面唯一入口检查）/ THIRDHOST（subagent-core 第三宿主 barrel 契约探针）/ PIPE（工程门与检查脚本轨：review-pipeline 质量门脚本、pre-commit 检查检测单测、思考档位差分探针、select-affected-e2e 对账脚本、npm 发布面一致性检查）/ RESUME（workflow run 断点续跑场景族：resume/record 链路确定性场景 + 真机门段拆分）/ SESSMGR（session-manager 域 cw 剧本族：mock 探针轨 + 真 pi 全链路真机冒烟轨） / REMOTE（远程访问域：手机浏览器 LAN 直连真机/仿真验收） / TERMINAL（终端多实例真实 app 轨：切换条多实例 / 实例级生命周期 / 编号不复用 / 世代重置与对账） / MCP（MCP 服务器管理域真机子集）",
+      "id": "E2E-<域>-<两位序号>，域取现有测试域：ELECTRON（electron-smoke P0 子集）/ VISUAL（像素 diff）/ MOCK（行为轨 mock 全量）/ REAL（真实 app 启动轨）/ EQUIV（等价性双轨）/ MODELS（models.json sanitize 真机轨）/ RENAME（rename-session e2e）/ SCHED（scheduler 真实环境实测）/ BATCH（subagents 批量编排真机链）/ SKILLRELOAD（skill-reload 演化轨残留：断连恢复等真实 app 轨，原 reload 非破坏轨已随编排退役删除）/ BTW（btw 旁路提问双进程并发不变量真实进程轨） / ZCODE（zcode 引擎会话库域）/ PROP（集成线传播检查）/ MODELREF（extensions 资产模型引用漂移检查）/ RECORD（record 持久化写面唯一入口检查）/ THIRDHOST（subagent-core 第三宿主 barrel 契约探针）/ PIPE（工程门与检查脚本轨：review-pipeline 质量门脚本、pre-commit 检查检测单测、思考档位差分探针、select-affected-e2e 对账脚本、npm 发布面一致性检查）/ RESUME（workflow run 断点续跑场景族：resume/record 链路确定性场景 + 真机门段拆分）/ SESSMGR（session-manager 域 cw 剧本族：mock 探针轨 + 真 pi 全链路真机冒烟轨） / REMOTE（远程访问域：手机浏览器 LAN 直连真机/仿真验收） / TERMINAL（终端多实例真实 app 轨：切换条多实例 / 实例级生命周期 / 编号不复用 / 世代重置与对账） / MCP（MCP 服务器管理域真机子集） / NETPROXY（LLM 网络代理分流域：mock 代理/SOCKS5 工具自测 + 分流前提漂移探针 + extension 三连）",
       "summary": "一句话摘要（仅导航）",
       "scope": "代码 glob 数组（触发面）。只支持两种形态：<prefix>/** 前缀通配与精确路径（与 scripts/select-constraints.mjs 同款零依赖匹配语义：prefix/** → startsWith，精确路径 → 全等）",
       "layer": "L1 = 零 token mock/smoke（CI 固定环节）| L2 = 真实进程非真实 LLM（真实 app/pi 进程、mock 构建或 mock 数据）| L2.5 = faux（真实进程 + faux LLM 演员，凭证无关零 token）| L3 = 真实 LLM",
@@ -2436,6 +2436,60 @@
       "owner": "packages/subagent-core",
       "authority": "docs/adr/decisions.md",
       "note": "R2 态：守卫改本体或扩面时实跑三命令全绿（rfl-parity 对真实两侧 exit 0 + 门③双向零漂移 + 门③自测）；问题清单层语义差异（title 权威 / title 可选性 / 复活模型）以守卫脚本头部 D1-D4 登记清单为准"
+    },
+    {
+      "id": "E2E-NETPROXY-01",
+      "summary": "LLM 网络代理域：mock 代理 / 最小 SOCKS5 服务自测（CONNECT 记录 + 隧道桥接 + gzip/SSE mock 端点 + RFC 1928/1929 认证）+ 分流前提漂移探针 + network-proxy extension 测试三连",
+      "scope": [
+        "extensions/universal/network-proxy/**",
+        "scripts/network-proxy-mocks/**",
+        "scripts/network-proxy-drift-probe.mjs"
+      ],
+      "layer": "L2",
+      "assets": [
+        {
+          "kind": "harness",
+          "ref": "scripts/network-proxy-mocks/mock-endpoint.mjs"
+        },
+        {
+          "kind": "harness",
+          "ref": "scripts/network-proxy-mocks/mock-proxy.mjs"
+        },
+        {
+          "kind": "harness",
+          "ref": "scripts/network-proxy-mocks/socks5-server.mjs"
+        },
+        {
+          "kind": "probe",
+          "ref": "scripts/network-proxy-drift-probe.mjs"
+        }
+      ],
+      "trigger": "on-diff",
+      "serial": false,
+      "run": "node scripts/network-proxy-mocks/mock-proxy.mjs --selftest && node scripts/network-proxy-mocks/socks5-server.mjs --selftest && node scripts/network-proxy-drift-probe.mjs && pnpm extensions:typecheck && pnpm extensions:lint && pnpm extensions:test",
+      "owner": "extensions/universal/network-proxy",
+      "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
+      "note": "来源设计 llm-network-proxy §4/§5（设计档案在 .tmp 不入库，authority 回退 TEST-STRATEGY 三态锚点，E2E-MODELREF-01 同款先例）。mock 工具 = 验收场景 1/3/9 的工具形态（CONNECT 记录 + 一律桥接 mock LLM 端点 + block-upstream + SOCKS5 RFC 1928 握手/RFC 1929 认证），自测子命令内置全链路断言（零 npm 依赖 + 零真实 LLM 调用）；漂移探针 = 场景 7 的 Node 级断言（外部 undici setGlobalDispatcher ↔ Node 内置 fetch 槽共享，前提 P2）。run 的 extensions 三连覆盖 extensions/universal/network-proxy/** 触发面——该目录代码由 u-extension 单元落地，落地前目录不存在属预期（scope glob 只做触发圈定，无磁盘校验）；工具脚本与探针的触发面 = scope 精确路径与 scripts/network-proxy-mocks/** 目录 glob。"
+    },
+    {
+      "id": "E2E-NETPROXY-02",
+      "summary": "分流前提漂移探针在 pi bump 后必须重验（外部 undici setGlobalDispatcher 写入的槽与 Node 内置 fetch 读取的槽一致——设计前提 P2 防线，验收场景 7）",
+      "scope": [
+        "scripts/network-proxy-drift-probe.mjs"
+      ],
+      "layer": "L2",
+      "assets": [
+        {
+          "kind": "probe",
+          "ref": "scripts/network-proxy-drift-probe.mjs"
+        }
+      ],
+      "trigger": "on-pi-bump",
+      "serial": false,
+      "run": "node scripts/network-proxy-drift-probe.mjs",
+      "owner": "extensions/universal/network-proxy",
+      "authority": "docs/TEST-STRATEGY.md#e2e-资产归宿纪律三态-r1r2r3",
+      "note": "与 E2E-NETPROXY-01 拆分登记同一 asset 的 on-pi-bump 触发面（trigger 单值纪律，见 _meta.fields.trigger；E2E-EQUIV-02/03/04 先例）。pi 升级后 FAIL 的处置路径登记于 docs/TROUBLESHOOTING.md「LLM 网络代理分流失效排查」。"
     }
   ]
 }

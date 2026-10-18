@@ -393,6 +393,23 @@ node scripts/check-pi-resources-links.mjs --fix   # 外部 symlink → 真实复
 
 **观测**：`TAIJI_WAIT_DEBUG=1` 打印该文件每次 waitFor 的成功耗时。
 
+### 31. LLM 网络代理分流失效：配了代理规则的服务商仍直连失败（pi 升级后高发）
+
+**症状**：settings「网络代理」页已启用并配置规则，但命中规则的服务商请求仍不走代理（或代理软件侧无新 CONNECT 隧道）；典型触发时点 = pi 版本升级后（分流依赖两个 pi/Node 未承诺前提：上游 SDK 默认 fetch 运行时读 `globalThis.fetch`；外部 undici 包 `setGlobalDispatcher` 写入的槽与 Node 内置 fetch 读取的槽一致——任一被升级打破即静默失效）。
+
+**判定**（按顺序，先机器后人工）：
+
+```bash
+node scripts/network-proxy-drift-probe.mjs   # 分流前提探针：PASS/FAIL 结论行 + 原因
+```
+
+- 探针 **PASS**（mock 代理记录到 CONNECT 且 mock 回复可解）= 分流机制层完好，问题在配置/代理软件侧 → 走 settings「网络代理」页「测试连接」两段归因：第一段「代理不可达（连接被拒绝/超时）」= 代理服务器没起或地址/端口错（恢复指引：启动代理软件，或关闭网络代理开关恢复直连）；第二段「代理可达但经代理出站失败」= 代理出口到目标服务商不通（恢复指引：检查代理出口网络或核对规则）。
+- 探针 **FAIL** = 机制层前提被 pi/Node 升级打破（子进程回复为空 / mock 代理记录为空，记录为空特指请求绕过代理直连——槽共享失效）→ 按升级处置评估修复（extension bundle 内 undici 升至与 pi 内嵌同 major，或改复用宿主 undici 实例）；用户侧暂回退 = 关闭网络代理开关恢复直连（P2 一键禁用即恢复）。
+- socks5 协议形态构造失败（undici `Socks5ProxyAgent` 实验性 API 变化）：extension 记 error、不安装分流器、全部直连——查 extension 日志（`<agentDir>/logs/`，dev 为 `~/.taiji-dev/<实例>/agent/logs/`）中的错误文案（含恢复动作），核对协议字段与代理端口（socks5 端口误填 http 服务会以「经代理出站失败」呈现）。
+- 配置文件问题（手改坏 JSON / 字段非法）：extension 校验失败同样不安装分流器全直连，配置 SSOT = `<piAgentDir>/config/network-proxy-ext-config.json`；改正配置自下一轮对话（turn）起生效。
+
+**机制背景**：分流器安装 / 匹配语义 / 未命中委托的现行决策登记见 [docs/adr/decisions.md](adr/decisions.md) ADR-0141~0144；验收工具（mock 代理 / SOCKS5 / 探针）用法见 `scripts/network-proxy-mocks/` 各脚本头注。
+
 ## 环境变量速查
 
 | 变量 | 用途 | 生产默认值 | 开发默认值 |
